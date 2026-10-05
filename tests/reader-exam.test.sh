@@ -4,7 +4,7 @@
 # THE EXAM ITSELF IS NOT RUN HERE. A sitting dispatches live readers (README.md in
 # tests/reader-exam/), and no hermetic suite can. What this suite owns is what a machine can
 # hold the exam to: the checks files the readers were examined on are the ones that ship, and
-# the latest sitting had readers behind it who met every sample. Seven sections:
+# the latest sitting had readers behind it who met every sample. Six sections:
 #
 #   §PIN      `exam_pin` on planted sittings: the latest sitting, by file order, has the
 #             three `sha256` lines equal to the files' digests, a `result` line for every
@@ -15,8 +15,6 @@
 #             no `met` line whose reached result its sample's key does not admit; a `##` line
 #             that is not a sitting header is red wherever it is. Otherwise the verdict is red and names why. A
 #             checks file edited after its sitting turns it red.
-#   §OWED     until the first sitting, `sittings.md` carries the owed line; that line alone
-#             passes, neither it nor a sitting is red, and both together are red.
 #   §KEY      `exam_key` on planted keys: three lines for `clean`, four for every other
 #             sample, the fourth a `names:` line, whose alternatives are separated by ` | `.
 #   §SCORE    `exam_score` (tests/reader-exam/score.sh, README step 5) on the real keys: a
@@ -33,8 +31,8 @@
 #             written there, and against a materialize.sh without it.
 #   §SHIPPED  the shipped `sittings.md` against the shipped checks files.
 #
-# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN and
-# §OWED run the suite's own `exam_pin` — the same function §SHIPPED runs on the real files —
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN runs
+# the suite's own `exam_pin` — the same function §SHIPPED runs on the real files —
 # over planted `sittings.md` files and a planted root holding three checks files of made-up
 # text and two sample directories. SYNTHESIZED: the checks text and the hashes written into
 # the planted sittings, which are taken by the same digest function the verdict uses, or
@@ -78,7 +76,6 @@ for f in "${REPO}/payload/context/checks-evidence.md" "${REPO}/payload/context/c
          "${REPO}/payload/context/checks-structure.md"; do
   EXAM_CHECKS="${EXAM_CHECKS:+$EXAM_CHECKS }${f#"$REPO"/}"
 done
-EXAM_OWED_LINE="first-sitting: owed by wave-27 T22"
 
 # exam_samples <root> — the sample names under <root>, one per line.
 exam_samples() {
@@ -102,24 +99,17 @@ exam_dealt_role() {
 #                          the one dealt its own question, no two lines for one sample and question
 #                          that disagree, every `result` line reads `met`, and each reached
 #                          result is one its sample's key admits (exam_meets, score.sh)
-#   owed                   no sitting and the owed line (RE-AUTHORED BY T22: this arm goes
-#                          when the first sitting is recorded)
 #   red <reason>           anything else
 # A sitting is a section headed `## <YYYY-MM-DD>…`; the latest is the last in the file, by
 # file order and not by date. Any other line opening with `##` is red wherever it is.
 exam_pin() {
-  local file="$1" root="$2" sittings owed latest f lines want have s samples bad results line kqs q r dealt
+  local file="$1" root="$2" sittings latest f lines want have s samples bad results line kqs q r dealt
   [ -r "$file" ] || { echo "red: $file cannot be read"; return 1; }
   # A block under a malformed header would fold into the sitting above it, or count as none.
   bad="$(grep -nE '^##' "$file" | grep -vE '^[0-9]+:## [0-9]{4}-[0-9]{2}-[0-9]{2}( |$)' | head -n 1)"
   [ -z "$bad" ] || { echo "red: line ${bad%%:*}, '${bad#*:}', is not a sitting header: a block under it belongs to no sitting"; return 1; }
   sittings="$(grep -cE '^## [0-9]{4}-[0-9]{2}-[0-9]{2}' "$file")"
-  owed="$(grep -cxF -- "$EXAM_OWED_LINE" "$file")"
-  if [ "$sittings" -eq 0 ]; then
-    [ "$owed" -gt 0 ] && { echo "owed"; return 0; }
-    echo "red: no sitting is recorded and no line says the first is owed"; return 1
-  fi
-  [ "$owed" -eq 0 ] || { echo "red: a sitting is recorded and the owed line still says none is"; return 1; }
+  [ "$sittings" -gt 0 ] || { echo "red: no sitting is recorded"; return 1; }
   latest="$(awk '/^## [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ { buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$file")"
   for f in $EXAM_CHECKS; do
     lines="$(printf '%s' "$latest" | awk -v f="$f" '$1 == "sha256" && $2 == f { print $3 }')"
@@ -457,24 +447,6 @@ expect_eq "P17: a dealt role on a question that is not its own is red and names 
 pin_call "$TMP/second-reviewer.md" "$ROOT"
 expect_eq "P17: a second line from the dealt role on its own question is pinned" "pinned" "$PIN_OUT"
 
-section "§OWED — before the first sitting"
-
-printf '%s\n' "$EXAM_OWED_LINE" > "$TMP/owed.md"
-pin_call "$TMP/owed.md" "$ROOT"
-expect_eq "O1: the owed line and no sitting is owed" "owed" "$PIN_OUT"
-expect_status "O1: rc 0" 0 "$PIN_RC"
-
-: > "$TMP/neither.md"
-pin_call "$TMP/neither.md" "$ROOT"
-expect_eq "O2: neither the owed line nor a sitting is red" \
-  "red: no sitting is recorded and no line says the first is owed" "$PIN_OUT"
-expect_status "O2: rc 1" 1 "$PIN_RC"
-
-{ printf '%s\n\n' "$EXAM_OWED_LINE"; cat "$TMP/right.md"; } > "$TMP/both.md"
-pin_call "$TMP/both.md" "$ROOT"
-expect_eq "O3: a sitting beside the owed line is red" \
-  "red: a sitting is recorded and the owed line still says none is" "$PIN_OUT"
-
 section "§KEY — an answer key names its defect"
 
 K="$TMP/keys"
@@ -506,24 +478,46 @@ record() { local f="$1" q="$2"; shift 2; printf '%s\n' "reviewed: aaa..bbb" "que
 R="$TMP/records"
 mkdir -p "$R"
 # score_act <score.sh> — what sourcing it does to a caller, as one line: `functions: <names>`
-# when it defines functions and moves nothing else (working directory, shell options,
-# variables) and prints nothing; otherwise the line names what moved, or says it ended the
-# shell. The act is read from the caller's side, in a shell of its own, so a file that exits
-# or changes directory is caught by what the caller sees afterwards, not by what it prints.
+# when it defines functions and moves nothing else and prints nothing; otherwise the line names
+# the first thing that moved, in this order: the working directory, the `$-` flags, the variable
+# names, a variable's value or attributes (`declare -p`), the `set -o` and `shopt` options, the
+# umask, the traps, the aliases; or it says the file ended the shell. The act is read from the
+# caller's side, in a shell of its own, from a snapshot taken before sourcing and one after, so a
+# file that exits or changes directory is caught by what the caller sees afterwards, not by what
+# it prints. The probe's own variables and the shell's moving ones (`_`, `BASH*`, `SHELLOPTS`,
+# `LINENO`, `RANDOM`, the clocks…) are left out of both snapshots.
 score_act() {
-  local out
+  local out snapdir
+  snapdir="$(mktemp -d "$TMP/act.XXXXXX")"
   out="$(cd "$TMP" && bash -c '
-    f0= v0= o0= p0= w= f1= v1= o1= p1=
-    f0="$(declare -F | sort)"; v0="$(compgen -v | sort)"; o0="$-"; p0="$PWD"
+    d="$2" w=
+    skip="_|BASH[A-Z_]*|SHELLOPTS|FUNCNAME|PIPESTATUS|LINENO|RANDOM|SRANDOM|SECONDS|EPOCHSECONDS|EPOCHREALTIME|d|w|skip|k"
+    snap() {
+      declare -F | sort > "$d/$1.functions"
+      compgen -v | grep -vxE "$skip" | sort > "$d/$1.names"
+      declare -p | grep -vE "^declare -[^ ]* ($skip)=" > "$d/$1.variables"
+      { set -o; shopt; } > "$d/$1.options"
+      umask > "$d/$1.umask"; trap -p > "$d/$1.traps"; alias > "$d/$1.aliases"
+      printf "%s\n" "$-" > "$d/$1.flags"; pwd > "$d/$1.pwd"
+    }
+    snap before
     w="$(. "$1" 2>&1)"
     [ -z "$w" ] || { echo "printed: $w"; exit 0; }
     . "$1"
-    f1="$(declare -F | sort)"; v1="$(compgen -v | sort)"; o1="$-"; p1="$PWD"
-    [ "$p0" = "$p1" ] || { echo "moved the working directory to $p1"; exit 0; }
-    [ "$o0" = "$o1" ] || { echo "changed the shell options from $o0 to $o1"; exit 0; }
-    [ "$v0" = "$v1" ] || { echo "defined variables: $(comm -13 <(echo "$v0") <(echo "$v1") | paste -sd" " -)"; exit 0; }
-    echo "functions: $(comm -13 <(echo "$f0") <(echo "$f1") | sed "s/^declare -f //" | paste -sd" " -)"
-  ' _ "$1" 2>&1)"
+    snap after
+    cmp -s "$d/before.pwd" "$d/after.pwd" || { echo "moved the working directory to $(cat "$d/after.pwd")"; exit 0; }
+    cmp -s "$d/before.flags" "$d/after.flags" || { echo "changed the shell options from $(cat "$d/before.flags") to $(cat "$d/after.flags")"; exit 0; }
+    cmp -s "$d/before.names" "$d/after.names" || { echo "defined variables: $(comm -13 "$d/before.names" "$d/after.names" | paste -sd" " -)"; exit 0; }
+    for k in variables options umask traps aliases; do
+      cmp -s "$d/before.$k" "$d/after.$k" && continue
+      case "$k" in
+        options) echo "changed the caller'"'"'s options: $(diff "$d/before.$k" "$d/after.$k" | sed -n "s/^> //p" | awk "NR == 1 { print \$1 }")" ;;
+        *) echo "changed the caller'"'"'s $k: $(diff "$d/before.$k" "$d/after.$k" | sed -n "s/^> //p" | head -n 1)" ;;
+      esac
+      exit 0
+    done
+    echo "functions: $(comm -13 "$d/before.functions" "$d/after.functions" | sed "s/^declare -f //" | paste -sd" " -)"
+  ' _ "$1" "$snapdir" 2>&1)"
   printf '%s\n' "${out:-ended the shell}"
 }
 expect_eq "SC0: sourcing score.sh defines its three functions and does nothing else" \
@@ -545,6 +539,13 @@ exit 0|ended the shell
 cd /|moved the working directory to /
 set -e|changed the shell options from
 EXAM_PROBE=1|defined variables: EXAM_PROBE
+IFS=,|changed the caller's variables: declare -- IFS=","
+set -o pipefail|changed the caller's options: pipefail
+shopt -s nullglob|changed the caller's options: nullglob
+umask 077|changed the caller's umask: 0077
+trap : EXIT|changed the caller's traps: trap -- ':' EXIT
+alias x=y|changed the caller's aliases: alias x='y'
+export HOME=/x|changed the caller's variables: declare -x HOME="/x"
 ACTS
 DC="$EXAM/samples/dup-counter/expect.txt"
 DC_NAMES="$(sed -n 's/^names: //p' "$DC")"
@@ -789,10 +790,6 @@ for f in $EXAM_CHECKS; do
   expect_regex "SH0: the digest reads $f" '^[0-9a-f]{64}$' "$(_detect_sha256 "$REPO/$f")"
 done
 pin_call "$EXAM/sittings.md" "$REPO"
-if [ "$PIN_OUT" = "owed" ]; then
-  ok "RE-AUTHORED BY T22: the first sitting is owed by wave-27 T22 (sittings.md carries the owed line and no sitting)"
-else
-  expect_eq "SH1: the latest sitting read the checks files that ship" "pinned" "$PIN_OUT"
-fi
+expect_eq "SH1: the latest sitting read the checks files that ship" "pinned" "$PIN_OUT"
 
 finish
