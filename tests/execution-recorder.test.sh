@@ -3054,76 +3054,377 @@ expect_eq "SJ-d5 a start that carries a name takes the row of that name" "D2" \
 expect_eq "SJ-d6 …with its id" "aD2-0000000000sjd2" "$(sj_field "$(grep 'status=identified' "$SJD_ROSTER")" agent_id)"
 
 # ============================================================
-section "Section 19: §CHECKS — a reader's checks are pushed at start, after survival.md (wave-27 T15; REQ-5 AC-5.1, D5)"
+section "Section 19: §CHECKS — one string per file: a reader's checks ride their own registrations (wave-27 T15, T30; REQ-5 AC-5.1, D5)"
 # ============================================================
 #
 # The dispatch wall records a reader brief's `Questions:` as `questions=<q>[,<q>]` on the launch
-# row. At agent start the recorder pushes `survival.md` and then `context/checks-<q>.md` for each
-# question on the JOINED row, in the order evidence, adversarial, structure, in the one
-# additionalContext. A writer's row carries no `questions=`, and its delivery is survival.md byte
-# for byte, as Section 15 pins. A checks file the row names and the disk lacks does not stop the
-# start: what exists is delivered and the missing name is logged in the recorder's own voice.
+# row. At agent start the harness runs every SubagentStart registration of hooks/hooks.json: the
+# terms registration pushes `survival.md`, and one registration per question (the question its
+# argument) pushes `bionic checks: <q>` and `context/checks-<q>.md` when the row carries that
+# question, and nothing otherwise. ONE STRING PER FILE (T30, review pass 24's blocker): the harness
+# hands a hook's additionalContext to the model whole only up to 10,000 characters, measured per
+# hook, so a single string holding the terms and the checks reached a reader as a path and a preview.
+# Only the terms registration joins and writes the roster; a question registration reads it.
 #
 # FIXTURE FIDELITY: every row is the dispatch wall's launch shape, built through the production
 # writer (`sj_intended` → `roster_row`), `status=intended`, `agent_id=` empty, `questions=` as the
-# wall writes it. The want is the shipped files' own bytes, concatenated in the delivery order.
+# wall writes it. The registrations are READ FROM hooks/hooks.json, never retyped: each command's
+# `${CLAUDE_PLUGIN_ROOT}` is resolved to a plugin root and the command is run as its own words.
+# The wants are the shipped files' own bytes.
 #
-# fails-when: a reader starts with survival.md alone; a file it was not dealt rides along; the
-# order follows the row instead of the table; a writer's delivery changes; a missing file stops
-# the delivery or goes unsaid.
+# fails-when: a reader starts without its checks; a file it was not dealt rides along; a writer's
+# delivery changes; a missing file stops the start or goes unsaid; a question registration writes
+# the roster; a start that cannot be placed loses checks its candidates agree on, or is handed a
+# set they disagree on; a resumed copy is pushed less than the first start.
 CK_CTX="$(dirname "$HERE")/payload/context"
 for _ck_q in evidence adversarial structure; do
   expect_nonempty "CK0 the shipped checks-${_ck_q}.md is non-empty (a non-vacuous byte pin)" \
     "$(cat "$CK_CTX/checks-${_ck_q}.md" 2>/dev/null)"
 done
-ck_ctx() { printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null; }
+ck_want() {  # <context dir> <question> — the string a question registration pushes
+  printf 'bionic checks: %s\n' "$2"; cat "$1/checks-$2.md" 2>/dev/null
+}
+
+# THE REGISTRATIONS, read from the manifest the harness executes.
+PC_HOOKS_JSON="$HERE/hooks.json"
+PC_REPO_ROOT="$(dirname "$HERE")"
+pc_cmds() { jq -r '.hooks.SubagentStart[]?.hooks[]?.command' "$PC_HOOKS_JSON" 2>/dev/null; }
+pc_key() {  # <command> -> its question argument, or `terms` for the registration that takes none
+  local w; read -r -a w <<< "$1"
+  if [ "${#w[@]}" -gt 1 ]; then printf '%s' "${w[${#w[@]}-1]}"; else printf 'terms'; fi
+}
+PC_OUT=""; PC_ERR=""; PC_ST=0
+pc_run() {  # <plugin root> <command> <payload> -> PC_OUT PC_ERR PC_ST
+  local w _sid
+  read -r -a w <<< "${2//\$\{CLAUDE_PLUGIN_ROOT\}/$1}"
+  _sid=$(printf '%s' "$3" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  PC_OUT=$(printf '%s' "$3" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "${w[@]}" 2>"$SANDBOX/.pcerr"); PC_ST=$?
+  PC_ERR=$(cat "$SANDBOX/.pcerr")
+  return 0
+}
+pc_start() {  # <plugin root> <payload> [key...] — one start: every registration (or the keys named), in manifest order
+  local root="$1" payload="$2" cmd k
+  shift 2
+  for k in terms evidence adversarial structure; do
+    printf -v "PC_OUT_$k" '%s' ""; printf -v "PC_ERR_$k" '%s' ""; printf -v "PC_ST_$k" '%s' "-"
+  done
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    k=$(pc_key "$cmd")
+    if [ "$#" -gt 0 ]; then case " $* " in *" $k "*) : ;; *) continue ;; esac; fi
+    case "$k" in terms|evidence|adversarial|structure) : ;; *) continue ;; esac
+    pc_run "$root" "$cmd" "$payload"
+    printf -v "PC_OUT_$k" '%s' "$PC_OUT"; printf -v "PC_ERR_$k" '%s' "$PC_ERR"; printf -v "PC_ST_$k" '%s' "$PC_ST"
+  done <<< "$(pc_cmds)"
+}
+pc_ctx() { local v="PC_OUT_$1"; printf '%s' "${!v}" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null; }
+pc_lines() { local v="PC_OUT_$1"; printf '%s\n' "${!v}" | grep -c .; }
+# Characters as the harness counts them: UTF-16 code units, read off the JSON itself (unlossy).
+pc_len() {
+  local v="PC_OUT_$1"
+  printf '%s' "${!v}" | jq '.hookSpecificOutput.additionalContext | [explode[] | if . > 65535 then 2 else 1 end] | add // 0' 2>/dev/null
+}
+pc_cmd_for() { local c; while IFS= read -r c; do [ "$(pc_key "$c")" = "$1" ] && { printf '%s' "$c"; return 0; }; done <<< "$(pc_cmds)"; return 0; }
+
+PC_CMDS=$(pc_cmds)
+expect_nonempty "CK0 the manifest's SubagentStart commands are read (the extractor works)" "$PC_CMDS"
+for _k in terms evidence adversarial structure; do
+  expect_eq "CK0 hooks/hooks.json registers the ${_k} push on SubagentStart exactly once" "1" \
+    "$(while IFS= read -r _c; do [ -n "$_c" ] && pc_key "$_c" && echo; done <<< "$PC_CMDS" | grep -cx "$_k")"
+done
+_ck_unres=""
+while IFS= read -r _c; do
+  [ -n "$_c" ] || continue
+  read -r -a _w <<< "${_c//\$\{CLAUDE_PLUGIN_ROOT\}/$PC_REPO_ROOT}"
+  [ -f "${_w[0]}" ] || _ck_unres="$_ck_unres ${_w[0]}"
+done <<< "$PC_CMDS"
+expect_empty "CK0 …and every one resolves to a hook file under the plugin root (unresolved:${_ck_unres})" "$_ck_unres"
 
 # ---- CK-a: an auditor dealt evidence, a plain dispatch joined by type ----
 IFS='|' read -r CKA_REPO CKA_TR CKA_SUB CKA_CFG <<< "$(make_world checksaud yes)"
+CKA_ROSTER="$CKA_REPO/.bionic/tmp/roster-${SID_A}.state"
 sj_intended "$CKA_REPO" T24 toolu_01CKA bionic:auditor suites_allowed=none questions=evidence
-run_rec "$(mk_subagent_start "$SID_A" "$CKA_TR" "$CKA_REPO" bionic:auditor "a0000000000ckaud")"
-expect_eq "CK-a1 an auditor's start prints one line" "1" "$(printf '%s\n' "$REC_OUT" | grep -c .)"
-expect_eq "CK-a2 …survival.md, then checks-evidence.md, and nothing else" \
-  "$(cat "$CK_CTX/survival.md" "$CK_CTX/checks-evidence.md")" "$(ck_ctx)"
-expect_contains "CK-a3 …and the joined row records the delivery" "|terms-delivered=20" \
-  "$(grep 'status=identified' "$CKA_REPO/.bionic/tmp/roster-${SID_A}.state")"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKA_TR" "$CKA_REPO" bionic:auditor "a0000000000ckaud")"
+expect_eq "CK-a1 the terms registration prints one line" "1" "$(pc_lines terms)"
+expect_eq "CK-a2 …survival.md alone, byte for byte" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-a3 the evidence registration prints one line" "1" "$(pc_lines evidence)"
+expect_eq "CK-a4 …its naming line, then checks-evidence.md" "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
+expect_empty "CK-a5 the adversarial registration prints nothing for an auditor" "$PC_OUT_adversarial"
+expect_empty "CK-a6 …nor the structure registration" "$PC_OUT_structure"
+expect_eq "CK-a7 …and all four exit 0" "0 0 0 0" "$PC_ST_terms $PC_ST_evidence $PC_ST_adversarial $PC_ST_structure"
+expect_contains "CK-a8 the joined row records the delivery" "|terms-delivered=20" \
+  "$(grep 'status=identified' "$CKA_ROSTER")"
+expect_eq "CK-a9 four hooks on one start append ONE identified row" "1" "$(grep -c 'status=identified' "$CKA_ROSTER")"
 
 # ---- CK-b: a critic dealt adversarial and structure, a teammate joined by name ----
 IFS='|' read -r CKB_REPO CKB_TR CKB_SUB CKB_CFG <<< "$(make_world checkscrit yes)"
 sj_intended "$CKB_REPO" w-crit toolu_01CKB bionic:critic suites_allowed=none questions=adversarial,structure
-run_rec "$(mk_subagent_start "$SID_A" "$CKB_TR" "$CKB_REPO" w-crit "a0000000000ckcrt")"
-expect_eq "CK-b1 a critic teammate is pushed the two files, in the table's order" \
-  "$(cat "$CK_CTX/survival.md" "$CK_CTX/checks-adversarial.md" "$CK_CTX/checks-structure.md")" "$(ck_ctx)"
-expect_eq "CK-b2 …in one line" "1" "$(printf '%s\n' "$REC_OUT" | grep -c .)"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKB_TR" "$CKB_REPO" w-crit "a0000000000ckcrt")"
+expect_eq "CK-b1 a critic teammate's terms are survival.md alone" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-b2 …its adversarial registration pushes checks-adversarial.md" \
+  "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
+expect_eq "CK-b3 …its structure registration pushes checks-structure.md" \
+  "$(ck_want "$CK_CTX" structure)" "$(pc_ctx structure)"
+expect_empty "CK-b4 …and its evidence registration prints nothing" "$PC_OUT_evidence"
 
 # ---- CK-c: a writer's row carries no questions=, and its delivery is unchanged ----
 IFS='|' read -r CKC_REPO CKC_TR CKC_SUB CKC_CFG <<< "$(make_world checkswriter yes)"
 sj_intended "$CKC_REPO" T5 toolu_01CKC bionic:implementor suites_allowed=widget.test.sh
-run_rec "$(mk_subagent_start "$SID_A" "$CKC_TR" "$CKC_REPO" bionic:implementor "a0000000000ckwrt")"
-expect_eq "CK-c1 a writer's delivery is survival.md byte for byte" "$S15_WANT" "$(ck_ctx)"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKC_TR" "$CKC_REPO" bionic:implementor "a0000000000ckwrt")"
+expect_eq "CK-c1 a writer's delivery is survival.md byte for byte" "$S15_WANT" "$(pc_ctx terms)"
 expect_eq "CK-c2 …and it was joined (the positive on the roster)" "T5" \
   "$(sj_field "$(grep 'status=identified' "$CKC_REPO/.bionic/tmp/roster-${SID_A}.state")" name)"
+expect_eq "CK-c3 …and no question registration prints anything for it" "||" \
+  "$PC_OUT_evidence|$PC_OUT_adversarial|$PC_OUT_structure"
 
 # ---- CK-d: a checks file the row names and the disk lacks ----
 # A COPY OF THE PLUGIN'S SHAPE: the hook beside `scripts/lib`, so the loader settles on the copy's
 # library and `context/` is the copy's, where one file is withheld.
+ck_plugin() {  # <dir> — a plugin-shaped copy of the hook, its library and the shipped context
+  mkdir -p "$1/hooks" "$1/scripts" "$1/context"
+  cp "$REC" "$1/hooks/execution-recorder.sh"
+  cp -R "$(dirname "$HERE")/payload/scripts/lib" "$1/scripts/lib"
+  cp "$CK_CTX/survival.md" "$CK_CTX/checks-evidence.md" "$CK_CTX/checks-adversarial.md" \
+    "$CK_CTX/checks-structure.md" "$1/context/"
+}
 CKD_PLUG="$SANDBOX/ck-plugin"
-mkdir -p "$CKD_PLUG/hooks" "$CKD_PLUG/scripts" "$CKD_PLUG/context"
-cp "$REC" "$CKD_PLUG/hooks/execution-recorder.sh"
-cp -R "$(dirname "$HERE")/payload/scripts/lib" "$CKD_PLUG/scripts/lib"
-cp "$CK_CTX/survival.md" "$CK_CTX/checks-structure.md" "$CKD_PLUG/context/"
+ck_plugin "$CKD_PLUG"
+rm -f "$CKD_PLUG/context/checks-adversarial.md"
 IFS='|' read -r CKD_REPO CKD_TR CKD_SUB CKD_CFG <<< "$(make_world checksmissing yes)"
 sj_intended "$CKD_REPO" w-crit2 toolu_01CKD bionic:critic suites_allowed=none questions=adversarial,structure
-CKD_REC_SAVED="$REC"; REC="$CKD_PLUG/hooks/execution-recorder.sh"
-run_rec "$(mk_subagent_start "$SID_A" "$CKD_TR" "$CKD_REPO" w-crit2 "a0000000000ckmis")"
-REC="$CKD_REC_SAVED"
-expect_eq "CK-d1 a missing checks file stops nothing: the start exits 0" "0" "$REC_ST"
-expect_eq "CK-d2 …what exists is delivered, in order" \
-  "$(cat "$CK_CTX/survival.md" "$CK_CTX/checks-structure.md")" "$(ck_ctx)"
-expect_contains "CK-d3 …and the missing name is logged in the recorder's voice" \
-  "execution-recorder: checks file not found" "$REC_ERR"
-expect_contains "CK-d4 …naming the file" "checks-adversarial.md" "$REC_ERR"
-expect_eq "CK-d5 …the row is still identified" "w-crit2" \
+pc_start "$CKD_PLUG" "$(mk_subagent_start "$SID_A" "$CKD_TR" "$CKD_REPO" w-crit2 "a0000000000ckmis")"
+expect_eq "CK-d1 a missing checks file stops nothing: its registration exits 0" "0" "$PC_ST_adversarial"
+expect_empty "CK-d2 …and prints nothing" "$PC_OUT_adversarial"
+expect_eq "CK-d3 …while the file that exists is delivered by its own registration" \
+  "$(ck_want "$CK_CTX" structure)" "$(pc_ctx structure)"
+expect_contains "CK-d4 …and the missing name is logged in the recorder's voice" \
+  "execution-recorder: checks file not found" "$PC_ERR_adversarial"
+expect_contains "CK-d5 …naming the file" "checks-adversarial.md" "$PC_ERR_adversarial"
+expect_eq "CK-d6 …the row is still identified" "w-crit2" \
   "$(sj_field "$(grep 'status=identified' "$CKD_REPO/.bionic/tmp/roster-${SID_A}.state")" name)"
+
+# ---- CK-e: a start that cannot be placed, every candidate carrying the same set ----
+# Two id-less critic launches, a nameless plain start: the type join cannot choose (SJ-d), and
+# both rows carry `questions=adversarial,structure`, so that set is delivered.
+IFS='|' read -r CKE_REPO CKE_TR CKE_SUB CKE_CFG <<< "$(make_world checkssame yes)"
+CKE_ROSTER="$CKE_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$CKE_REPO" E1 toolu_01CKE1 bionic:critic suites_allowed=none questions=adversarial,structure
+sj_intended "$CKE_REPO" E2 toolu_01CKE2 bionic:critic suites_allowed=none questions=adversarial,structure
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKE_TR" "$CKE_REPO" bionic:critic "a0000000000ckesm")"
+expect_eq "CK-e1 the start is placed on no row" "0" "$(grep -c 'status=identified' "$CKE_ROSTER")"
+expect_eq "CK-e2 …yet the set both candidates carry is delivered: adversarial" \
+  "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
+expect_eq "CK-e3 …and structure" "$(ck_want "$CK_CTX" structure)" "$(pc_ctx structure)"
+expect_empty "CK-e4 …and nothing the candidates do not carry" "$PC_OUT_evidence"
+expect_eq "CK-e5 …with the terms beside them" "$S15_WANT" "$(pc_ctx terms)"
+
+# ---- CK-f: a start that cannot be placed, the candidates carrying different sets ----
+IFS='|' read -r CKF_REPO CKF_TR CKF_SUB CKF_CFG <<< "$(make_world checksdiffer yes)"
+CKF_ROSTER="$CKF_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$CKF_REPO" F1 toolu_01CKF1 bionic:critic suites_allowed=none questions=adversarial
+sj_intended "$CKF_REPO" F2 toolu_01CKF2 bionic:critic suites_allowed=none questions=adversarial,structure
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKF_TR" "$CKF_REPO" bionic:critic "a0000000000ckfdf")"
+expect_eq "CK-f1 differing candidates: the terms are still delivered (the positive)" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-f2 …and no checks file is: adversarial, structure and evidence print nothing" "||" \
+  "$PC_OUT_evidence|$PC_OUT_adversarial|$PC_OUT_structure"
+expect_eq "CK-f3 …each registration exits 0" "0 0 0" "$PC_ST_evidence $PC_ST_adversarial $PC_ST_structure"
+expect_contains "CK-f4 …and the log line says so, naming the first candidate" "F1" "$PC_ERR_adversarial"
+expect_contains "CK-f5 …and the second" "F2" "$PC_ERR_adversarial"
+expect_contains "CK-f6 …in the recorder's voice, naming the agent" "a0000000000ckfdf" "$PC_ERR_adversarial"
+expect_eq "CK-f7 …and no question registration wrote to the roster" "2" "$(grep -c '^roster-state' "$CKF_ROSTER")"
+
+# ---- CK-g: a resumed copy is pushed the same checks files as the first start ----
+# A plain dispatch (the start carries the TYPE), so the terms registration owes the terms on the
+# type alone and its duplicate-start exit still delivers them.
+IFS='|' read -r CKG_REPO CKG_TR CKG_SUB CKG_CFG <<< "$(make_world checksresume yes)"
+CKG_ROSTER="$CKG_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$CKG_REPO" w-crit3 toolu_01CKG bionic:critic suites_allowed=none questions=adversarial,structure
+CKG_PAY="$(mk_subagent_start "$SID_A" "$CKG_TR" "$CKG_REPO" bionic:critic "a0000000000ckgrs")"
+pc_start "$PC_REPO_ROOT" "$CKG_PAY"
+CKG_FIRST="$(pc_ctx adversarial)|$(pc_ctx structure)|$PC_OUT_evidence"
+pc_start "$PC_REPO_ROOT" "$CKG_PAY"
+expect_contains "CK-g1 the second start is journalled a duplicate start (the copy is a copy)" \
+  "status=duplicate-start" "$(cat "$CKG_ROSTER")"
+expect_eq "CK-g2 …and it is pushed the same checks files as the first" "$CKG_FIRST" \
+  "$(pc_ctx adversarial)|$(pc_ctx structure)|$PC_OUT_evidence"
+expect_eq "CK-g3 …which are the dealt ones (not vacuous)" \
+  "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
+expect_eq "CK-g4 …and the terms with them" "$S15_WANT" "$(pc_ctx terms)"
+
+# ============================================================
+section "Section 20: §PUSH-CAP — every string the start pushes fits what the harness hands over (wave-27 T30; review pass 24)"
+# ============================================================
+#
+# The harness passes a hook's additionalContext to the model whole only up to 10,000 characters,
+# each hook's string measured on its own; past it the model gets a path and a 2,000-character
+# preview and is not asked to read the file (Claude Code hooks reference). The recorder counts
+# every string against BIONIC_START_PUSH_MAX before it prints, and in place of one that would be
+# over it pushes one line naming the file to read, and logs the overflow.
+#
+# THE ROW THAT WOULD HAVE CAUGHT THE DEFECT: every role, rigor and scale `facts_owed` deals a
+# reading to, the reader's row as the dispatch wall writes it, the REAL hook driven once per
+# registration as hooks/hooks.json registers it, against the shipped context and against a copy
+# whose three checks files sit exactly at their 4,500-byte cap. It replaces CK-b1's former
+# expectation of one 12,679-character string.
+#
+# FIXTURE FIDELITY: the dealing is the production `facts_owed` (payload/scripts/lib/proof.sh),
+# sourced; rows go through `sj_intended` → `roster_row`. Characters are counted off the JSON the
+# hook printed, in UTF-16 code units (what the harness's string length measures).
+#
+# fails-when: any dealt reader receives a string at or over the harness cap; a string over
+# the recorder's cap is printed rather than replaced; the replacement is not the one line.
+PC_MAX=$(sed -n 's/^ *BIONIC_START_PUSH_MAX=\([0-9][0-9]*\).*/\1/p' "$REC" | head -1)
+expect_eq "PC0 the recorder holds its strings to BIONIC_START_PUSH_MAX=9500" "9500" "$PC_MAX"
+PC_MAX="${PC_MAX:-0}"
+
+PC_DEAL_AWK='$1 == "review" && $4 == "piece" {
+  if (!($3 in q)) o[++n] = $3
+  q[$3] = q[$3] (q[$3] == "" ? "" : ",") $2
+}
+END { for (i = 1; i <= n; i++) print r "|" s "|" o[i] "|" q[o[i]] }'
+PC_DEALS=$(bash -c '. "$1/payload/scripts/lib/proof.sh" || exit 1
+  for r in tested peer-reviewed audited; do for s in task wave epic; do
+    facts_owed "$r" "$s" | awk -F"\t" -v r="$r" -v s="$s" "$2"
+  done; done' _ "$PC_REPO_ROOT" "$PC_DEAL_AWK")
+expect_nonempty "PC0 facts_owed deals readings (the deal list is not empty)" "$PC_DEALS"
+for _r in tested peer-reviewed audited; do
+  expect_contains "PC0 …at ${_r}" "${_r}|" "$PC_DEALS"
+done
+
+# pc_every_deal <plugin root> <context dir> <label> — drives every deal; sets PC_BAD, PC_N, PC_TABLE.
+pc_every_deal() {
+  local root="$1" ctx="$2" label="$3" line r s role qs n=0 k len want world
+  PC_BAD=""; PC_N=0; PC_TABLE=""
+  while IFS='|' read -r r s role qs; do
+    [ -n "$role" ] || continue
+    n=$((n + 1))
+    world="pc${label}${n}"
+    IFS='|' read -r PCW_REPO PCW_TR PCW_SUB PCW_CFG <<< "$(make_world "$world" yes)"
+    sj_intended "$PCW_REPO" "pc-$n" "toolu_01PC$n" "$role" suites_allowed=none "questions=$qs"
+    pc_start "$root" "$(mk_subagent_start "$SID_A" "$PCW_TR" "$PCW_REPO" "$role" "a00000000pc${label}$n")"
+    line="$r $s $role:"
+    for k in terms evidence adversarial structure; do
+      if [ "$k" = terms ] || case ",$qs," in *",$k,"*) true ;; *) false ;; esac; then
+        [ "$(pc_lines "$k")" = 1 ] || { PC_BAD="$PC_BAD [$r/$s/$role $k: $(pc_lines "$k") lines]"; continue; }
+        len=$(pc_len "$k")
+        PC_N=$((PC_N + 1))
+        line="$line $k=$len"
+        if [ -z "$len" ] || [ "$len" -gt "$PC_MAX" ] || [ "$len" -ge 10000 ]; then
+          PC_BAD="$PC_BAD [$r/$s/$role $k: ${len:-?} chars]"
+        fi
+        if [ "$k" = terms ]; then want="$(cat "$ctx/survival.md")"; else want="$(ck_want "$ctx" "$k")"; fi
+        [ "$(pc_ctx "$k")" = "$want" ] || PC_BAD="$PC_BAD [$r/$s/$role $k: not its file]"
+      else
+        local v="PC_OUT_$k"
+        [ -z "${!v}" ] || PC_BAD="$PC_BAD [$r/$s/$role $k: printed for an undealt question]"
+      fi
+    done
+    PC_TABLE="$PC_TABLE
+    $line"
+  done <<< "$PC_DEALS"
+}
+
+pc_every_deal "$PC_REPO_ROOT" "$CK_CTX" s
+expect_ne "PC-a0 every deal was driven and its strings counted (not vacuous)" "0" "$PC_N"
+expect_empty "PC-a1 shipped context: every dealt string is one line, its own file, at most ${PC_MAX} and under 10,000 characters" "$PC_BAD"
+printf '  shipped context, characters per string:%s\n' "$PC_TABLE"
+
+# THE 4,500-BYTE FIXTURE: the cap D5 sets on a checks file, every checks file exactly at it.
+PC4_PLUG="$SANDBOX/pc-4500"
+ck_plugin "$PC4_PLUG"
+for _q in evidence adversarial structure; do
+  _sz=$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')
+  [ "$_sz" -lt 4500 ] && head -c "$((4500 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
+  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,500 bytes" "4500" \
+    "$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')"
+done
+pc_every_deal "$PC4_PLUG" "$PC4_PLUG/context" f
+expect_ne "PC-b1 every deal was driven against the fixture (not vacuous)" "0" "$PC_N"
+expect_empty "PC-b2 4,500-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
+printf '  4,500-byte checks files, characters per string:%s\n' "$PC_TABLE"
+
+# OVER THE CAP: a checks file grown to 9,600 characters, a tested critic (all three questions).
+PO_PLUG="$SANDBOX/pc-over"
+ck_plugin "$PO_PLUG"
+awk 'BEGIN { for (i = 0; i < 96; i++) { for (j = 0; j < 99; j++) printf "y"; printf "\n" } }' \
+  > "$PO_PLUG/context/checks-structure.md"
+expect_eq "PC-c0 the grown checks-structure.md is 9,600 characters" "9600" \
+  "$(jq -Rs 'length' < "$PO_PLUG/context/checks-structure.md")"
+IFS='|' read -r PO_REPO PO_TR PO_SUB PO_CFG <<< "$(make_world pcover yes)"
+sj_intended "$PO_REPO" po-crit toolu_01PO bionic:critic suites_allowed=none questions=evidence,adversarial,structure
+pc_start "$PO_PLUG" "$(mk_subagent_start "$SID_A" "$PO_TR" "$PO_REPO" bionic:critic "a0000000000pcovr")"
+expect_eq "PC-c1 the over-cap string is replaced by the one line naming its file" \
+  "Read this file before anything else: $PO_PLUG/context/checks-structure.md" "$(pc_ctx structure)"
+expect_eq "PC-c2 …printed as one line" "1" "$(pc_lines structure)"
+expect_eq "PC-c3 …and the start goes on: that registration exits 0" "0" "$PC_ST_structure"
+expect_eq "PC-c4 …and logs exactly one line" "1" "$(printf '%s\n' "$PC_ERR_structure" | grep -c 'execution-recorder:')"
+expect_contains "PC-c5 …naming the file it withheld" "checks-structure.md" "$PC_ERR_structure"
+expect_eq "PC-c6 the other strings are unchanged: the terms" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "PC-c7 …evidence" "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
+expect_eq "PC-c8 …adversarial" "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
+expect_eq "PC-c9 …and none of them logs anything" "0" \
+  "$(printf '%s\n%s\n%s\n' "$PC_ERR_terms" "$PC_ERR_evidence" "$PC_ERR_adversarial" | grep -c 'execution-recorder:')"
+
+# THE TERMS OVER THE CAP: the same rule for the terms string.
+PT_PLUG="$SANDBOX/pc-terms-over"
+ck_plugin "$PT_PLUG"
+awk 'BEGIN { for (i = 0; i < 96; i++) { for (j = 0; j < 99; j++) printf "z"; printf "\n" } }' \
+  > "$PT_PLUG/context/survival.md"
+IFS='|' read -r PT_REPO PT_TR PT_SUB PT_CFG <<< "$(make_world pctermsover yes)"
+sj_intended "$PT_REPO" pt-impl toolu_01PT bionic:implementor suites_allowed=widget.test.sh
+pc_start "$PT_PLUG" "$(mk_subagent_start "$SID_A" "$PT_TR" "$PT_REPO" bionic:implementor "a0000000000pctov")"
+expect_eq "PC-d1 an over-cap terms string is replaced by the one line naming survival.md" \
+  "Read this file before anything else: $PT_PLUG/context/survival.md" "$(pc_ctx terms)"
+expect_eq "PC-d2 …and logged once" "1" "$(printf '%s\n' "$PC_ERR_terms" | grep -c 'execution-recorder:')"
+expect_eq "PC-d3 …and the start is still joined" "pt-impl" \
+  "$(sj_field "$(grep 'status=identified' "$PT_REPO/.bionic/tmp/roster-${SID_A}.state")" name)"
+
+# CHARACTERS, NOT BYTES: 4,000 em dashes are 12,000 bytes and 4,000 characters, under the cap.
+PM_PLUG="$SANDBOX/pc-multibyte"
+ck_plugin "$PM_PLUG"
+awk 'BEGIN { for (i = 0; i < 40; i++) { for (j = 0; j < 100; j++) printf "\342\200\224"; printf "\n" } }' \
+  > "$PM_PLUG/context/checks-structure.md"
+expect_ne "PC-e0 the multi-byte file is over the cap in bytes" "0" \
+  "$([ "$(wc -c < "$PM_PLUG/context/checks-structure.md" | tr -d ' ')" -gt 9500 ] && echo 1 || echo 0)"
+IFS='|' read -r PM_REPO PM_TR PM_SUB PM_CFG <<< "$(make_world pcmulti yes)"
+sj_intended "$PM_REPO" pm-rev toolu_01PM bionic:reviewer suites_allowed=none questions=structure
+pc_start "$PM_PLUG" "$(mk_subagent_start "$SID_A" "$PM_TR" "$PM_REPO" bionic:reviewer "a0000000000pcmlt")"
+expect_eq "PC-e1 a multi-byte file under the cap in characters is pushed whole" \
+  "$(ck_want "$PM_PLUG/context" structure)" "$(pc_ctx structure)"
+expect_empty "PC-e2 …and nothing is logged for it" "$PC_ERR_structure"
+
+# A QUESTION REGISTRATION RUN FIRST, AND ALONE: it finds the row by the terms registration's own
+# join, read-only, and the terms registration then joins exactly as it would have.
+IFS='|' read -r PF_REPO PF_TR PF_SUB PF_CFG <<< "$(make_world pcfirst yes)"
+PF_ROSTER="$PF_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$PF_REPO" pf-aud toolu_01PF bionic:auditor suites_allowed=none questions=evidence
+PF_PAY="$(mk_subagent_start "$SID_A" "$PF_TR" "$PF_REPO" bionic:auditor "a0000000000pcfst")"
+PF_BEFORE=$(cat "$PF_ROSTER")
+pc_start "$PC_REPO_ROOT" "$PF_PAY" evidence
+expect_eq "PC-f1 the evidence registration, run before the terms one, pushes the evidence checks" \
+  "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
+expect_eq "PC-f2 …and writes nothing to the roster" "$PF_BEFORE" "$(cat "$PF_ROSTER")"
+expect_empty "PC-f3 …and the terms registration did not run in this pass" "$PC_OUT_terms"
+pc_start "$PC_REPO_ROOT" "$PF_PAY" terms
+expect_eq "PC-f4 the terms registration after it joins the row once" "1" "$(grep -c 'status=identified' "$PF_ROSTER")"
+pc_start "$PC_REPO_ROOT" "$PF_PAY" evidence
+expect_eq "PC-f5 …and the evidence registration after the join gives the same answer" \
+  "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
+
+# AN ARGUMENT THAT IS NOT A QUESTION: nothing printed, nothing written, exit 0.
+IFS='|' read -r PN_REPO PN_TR PN_SUB PN_CFG <<< "$(make_world pcnotq yes)"
+PN_ROSTER="$PN_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$PN_REPO" pn-crit toolu_01PN bionic:critic suites_allowed=none questions=evidence,adversarial,structure
+PN_PAY="$(mk_subagent_start "$SID_A" "$PN_TR" "$PN_REPO" bionic:critic "a0000000000pcnot")"
+PN_BEFORE=$(cat "$PN_ROSTER")
+PN_TERMS_CMD="$(pc_cmd_for terms)"
+expect_nonempty "PC-g0 the terms registration's command is read from the manifest" "$PN_TERMS_CMD"
+pc_run "$PC_REPO_ROOT" "$PN_TERMS_CMD style" "$PN_PAY"
+expect_empty "PC-g1 a registration given 'style' prints nothing" "$PC_OUT"
+expect_eq "PC-g2 …exits 0" "0" "$PC_ST"
+expect_eq "PC-g3 …and writes nothing" "$PN_BEFORE" "$(cat "$PN_ROSTER")"
+pc_start "$PC_REPO_ROOT" "$PN_PAY" evidence
+expect_eq "PC-g4 …while the evidence registration on the same row pushes (the positive)" \
+  "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
 
 finish
