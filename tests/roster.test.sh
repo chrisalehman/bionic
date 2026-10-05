@@ -514,4 +514,20 @@ for R12_F in "${R12_FILES[@]}"; do
   expect_eq "R12c $(basename "$R12_F") cites roster_row_for_id or ADR-039 at least once" "cites" "$R12_C"
 done
 
+# ---------------------------------------------------------------------------------------
+section "R13 — a reader's questions are a row key (wave-27 T15; REQ-5 AC-5.1, D5)"
+# The dispatch wall records a reader brief's `Questions:` line as `questions=<q>[,<q>]`, and the
+# recorder pushes the checks files it names at agent start. PRESENT-IF-PASSED like `done=`: a row
+# that names none is the plain row, byte for byte. It TRAILS `plan=`, which is where the rows that
+# proof-add reads were synthesized before this key had a writer.
+R13_Q="$(lib roster_row "${R5_BASE[@]}" "questions=adversarial,structure")"
+expect_eq "R13a questions= is written when passed, after plan=" \
+  "${R5_PLAIN}|questions=adversarial,structure" "$R13_Q"
+expect_eq "R13b …read back by key as written" "adversarial,structure" "$(field_of_row "$R13_Q" questions)"
+expect_absent "R13c a row that names none carries none" "questions=" "$R5_PLAIN"
+expect_contains "R13c …while the same plain row does carry plan= (the positive on that extractor)" \
+  "|plan=none" "$R5_PLAIN"
+lib roster_row "${R5_BASE[@]}" "question=evidence" >/dev/null
+expect_status "R13d a near-miss key is still refused" "2" "$?"
+
 finish

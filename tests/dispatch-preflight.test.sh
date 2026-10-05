@@ -4869,6 +4869,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w27n-audit.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: image-id.spec.ts" "w27n-aud-spec" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_eq "27n an auditor brief naming a dropped token is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "27n …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
@@ -4971,6 +4972,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w27p3b-audit.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
 Re-executes: `pytest tests/unit`' "w27p-aud-waiver" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" \
   "bionic:auditor")"
@@ -4984,6 +4986,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w27p3c-audit.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:' \
   "w27p-aud-bare" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_eq "27p3c …and the same line without runs still meets the AUDITOR arm" "deny" "$GATE_VERDICT"
@@ -5825,6 +5828,20 @@ k2_write_plan() {  # <repo> <current> <approved-by line, or "">
 
 K2_APPROVED_LINE='approved-by: dana 2026-09-07T19:05Z "Ok, amazing! Approved."'
 
+# k2_questions <role> <rigor> -> a newline and the `Questions:` line that rigor deals the role (the
+# Interfaces table, wave-27 T15), or nothing for a role the line does not apply to. A reader brief
+# without its dealt line is refused by the dispatch wall (§Q), whatever this section is testing.
+k2_questions() {
+  case "$2:$1" in
+    audited:bionic:auditor|peer-reviewed:bionic:auditor) printf '\nQuestions: evidence' ;;
+    audited:bionic:critic)       printf '\nQuestions: adversarial' ;;
+    audited:bionic:reviewer)     printf '\nQuestions: structure' ;;
+    peer-reviewed:bionic:critic) printf '\nQuestions: adversarial, structure' ;;
+    tested:bionic:critic)        printf '\nQuestions: evidence, adversarial, structure' ;;
+  esac
+  return 0
+}
+
 # --- 30a/30b: the two writer roles are refused while the line is absent ---
 for _role in bionic:implementor bionic:senior-implementor; do
   _tag="30a"; [ "$_role" = "bionic:senior-implementor" ] && _tag="30b"
@@ -5915,7 +5932,7 @@ for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic b
   REPO=$(make_repo "r30e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_plan "$REPO" 4 ""
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30e" "claude-sonnet-5" \
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" audited)" "w30e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
   expect_status "30e a ${_role} dispatch against the SAME unapproved plan passes" "0" "$GATE_ST"
 done
@@ -6012,11 +6029,14 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w31d" "claude-sonne
 expect_eq "31d an empty approved-by: value is not an approval, at task scale" "deny" "$GATE_VERDICT"
 
 # --- 31e: the reading roles pass through the same refused task-scale plan ---
-for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer; do
+# THE AUDITOR AND THE REVIEWER ARE NOT HERE (wave-27 T15): this plan is `rigor: tested`, which deals
+# both of them no question, so the dispatch wall refuses them on their Questions: line (§Q Q5, Q8n)
+# whatever the approval says. The critic carries all three.
+for _role in bionic:researcher bionic:test-runner bionic:critic; do
   REPO=$(make_repo "r31e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_task_plan "$REPO" T1 ""
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w31e" "claude-sonnet-5" \
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)" "w31e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
   expect_status "31e a ${_role} dispatch against the SAME unapproved task-scale plan passes" "0" "$GATE_ST"
 done
@@ -6084,7 +6104,7 @@ for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic b
   REPO=$(make_repo "rrc2-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_plan "$REPO" 2 ""
-  _rc_brief="$BRIEF_FULL"
+  _rc_brief="$BRIEF_FULL$(k2_questions "$_role" audited)"
   # S33: an auditor brief may not waive Suites:, and BRIEF_FULL declares one — no change.
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_rc_brief" "wrc2" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
@@ -7685,11 +7705,13 @@ section "S33: an auditor brief may not waive Suites: (REQ-4 AC-4.3/AC-4.4, D6)"
 S33_WAIVED_BRIEF='Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w33-audit.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: none'
 
 S33_DECLARED_BRIEF='Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w33-audit2.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: tests/widget.test.sh, tests/gadget.test.sh'
 
 # ---- AC-4.3: bionic:auditor + Suites: none is refused, fix names the suites ----
@@ -7801,6 +7823,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w16-audit.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: none
 Re-executes: ${RL_JEST}" "w16-auditor" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_status "16la an auditor brief declaring a marked run and waiving suites is ADMITTED" \
@@ -7836,6 +7859,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w16-audit.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: tests/widget.test.sh" "w16-aud-suites" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_status "16lb1 an auditor naming a suite list is ADMITTED" "0" "$GATE_ST"
 
@@ -7846,6 +7870,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w16-audit.md
 Expected duration: ~30 minutes.
+Questions: evidence
 Suites: none
 Re-executes: ${RL_PYTEST}" "w16-aud-runs" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_status "16lb2 an auditor waiving suites but declaring runs is ADMITTED" "0" "$GATE_ST"
@@ -8166,6 +8191,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-cap-aud.md
 Expected duration: ~20 minutes.
+Questions: evidence
 Re-executes: ${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "w16-cap-aud" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:auditor)"
 expect_eq "16le-aud an auditor brief with four runs is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "16le-aud …naming the fourth (dropped) run" "npm test" "$GATE_VERR"
@@ -8211,6 +8237,7 @@ s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-txt-aud.md
 Expected duration: ~20 minutes.
+Questions: evidence
 Files: payload/scripts/lib/widget.sh
 Re-executes: ${RL_BT}pytest \$T${RL_BT}" "w16-txt-aud" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:auditor)"
 expect_eq "16le-txt an auditor's variable run is refused" "deny" "$GATE_VERDICT"
@@ -8378,6 +8405,217 @@ case "bionic: dispatch refused — call ListAgents, then dispatch" in
 esac
 expect_eq "…and the sweep's own predicate still catches that string when it is present" \
   "caught" "$DP_NLA_PROBE"
+
+# ============================================================================
+section "§Q — a reader's brief names its questions, held to the dealing (wave-27 T15; REQ-5 AC-5.1, REQ-1 AC-1.3, D5)"
+# ============================================================================
+#
+# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor`, `bionic:critic` and `bionic:reviewer`
+# carry a `Questions: <q>[, <q>]` line; the wall refuses a reader brief without one, refuses a set
+# that is not exactly what `facts_owed <rigor> <scale>` (lib/proof.sh) deals that role at the bound
+# plan's rigor, refuses a word outside the three questions, and records the set on the row as
+# `questions=` in the order evidence, adversarial, structure. With no bound plan the line is still
+# required and the dealing is not checked. Every other role is untouched.
+#
+# THE TWO EVIDENCE RULES FOLLOW THE QUESTION (review pass 15, F4). The three-run cap and the
+# refusal of a brief that names no suite and no run used to key on the auditor; `tested` deals
+# `evidence` to the critic, which escaped both. And the cap counts only runs the classifier calls
+# a suite run: a housekeeping command beside three runs is recorded and does not count.
+#
+# FIXTURES: make_repo's plan is `rigor: audited`, `scale: wave`, approved and bound; `q_rigor`
+# rewrites its rigor line. The briefs are SYNTHESIZED and write their own `Questions:` line.
+#
+# fails-when: a reader brief with no line, a wrong set or an unknown word is admitted; an admitted
+# reader's row lacks `questions=` or holds it unordered; a writer's brief meets the label at all; a
+# critic holding `evidence` escapes the cap or the no-suite refusal; a housekeeping run counts.
+q_rigor() {  # <repo> <rigor> — the bound plan's frontmatter rigor, rewritten in place
+  local p="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  awk -v r="$2" '/^rigor:/ && !done { print "rigor: " r; done = 1; next } { print }' "$p" > "$p.tmp" \
+    && mv "$p.tmp" "$p"
+}
+q_brief() {  # <tag> [<questions line>] — a reader brief with one declared suite
+  printf 'Your task: read the wave-99 change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh' "$1"
+  [ -n "${2:-}" ] && printf '\n%s' "$2"
+  return 0
+}
+q_row() { roster_nth_row "$(roster_path "$1" "$SID_A")" 1; }
+q_gate() {  # <repo> <tag> <role> <brief>
+  run_gate "$(mk_agent_payload "$SID_A" "$1" "$4" "wq-$2" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "$3")"
+}
+
+REPO=$(make_repo rq0 yes)
+q_rigor "$REPO" tested
+expect_eq "Q0 precondition: q_rigor rewrites the bound plan's rigor line" "rigor: tested" \
+  "$(grep '^rigor:' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
+
+# ---- the worked answers on an audited plan ----
+REPO=$(make_repo rq1 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q1 bionic:auditor "$(q_brief q1 'Questions: evidence')"
+expect_eq "Q1 audited: an auditor with Questions: evidence is admitted" "allow" "$GATE_VERDICT"
+expect_eq "Q1 …and its row carries questions=evidence" "evidence" "$(roster_field "$(q_row "$REPO")" questions)"
+
+REPO=$(make_repo rq2 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q2 bionic:auditor "$(q_brief q2 'Questions: evidence, structure')"
+expect_eq "Q2 audited: an auditor with Questions: evidence, structure is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q2 …the line names the rigor, the role and the set it deals" \
+  "audited deals bionic:auditor: evidence" "$GATE_ERR"
+expect_contains "Q2 …the detail names the set the brief gave" "evidence, structure" "$GATE_VERR"
+expect_contains "Q2 …and the line to write" "    Questions: evidence" "$GATE_VERR"
+
+REPO=$(make_repo rq3 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q3 bionic:auditor "$(q_brief q3)"
+expect_eq "Q3 audited: an auditor brief with no Questions: line is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q3 …the line names the role and the missing label" \
+  "bionic:auditor names no Questions: line" "$GATE_ERR"
+expect_contains "Q3 …the detail names the line to add, the dealt set filled in" \
+  "    Questions: evidence" "$GATE_VERR"
+
+# ---- a set: order and spacing do not matter; the row is written in the table's order ----
+REPO=$(make_repo rq4 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" peer-reviewed
+q_gate "$REPO" q4 bionic:critic "$(q_brief q4 'Questions: structure, adversarial')"
+expect_eq "Q4 peer-reviewed: a critic with Questions: structure, adversarial is admitted" "allow" "$GATE_VERDICT"
+expect_eq "Q4 …its row carries questions=adversarial,structure" "adversarial,structure" \
+  "$(roster_field "$(q_row "$REPO")" questions)"
+REPO=$(make_repo rq4b yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" peer-reviewed
+q_gate "$REPO" q4b bionic:critic "$(q_brief q4b 'Questions:adversarial,structure')"
+expect_eq "Q4b …and so is the same set written with no spaces" "adversarial,structure" \
+  "$(roster_field "$(q_row "$REPO")" questions)"
+
+# ---- tested deals the auditor nothing ----
+REPO=$(make_repo rq5 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" tested
+q_gate "$REPO" q5 bionic:auditor "$(q_brief q5 'Questions: evidence')"
+expect_eq "Q5 tested: an auditor with Questions: evidence is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q5 …the line says that rigor deals the auditor nothing" \
+  "tested deals bionic:auditor: nothing" "$GATE_ERR"
+expect_contains "Q5 …and the detail names the role that holds the question" \
+  "evidence is dealt to bionic:critic" "$GATE_VERR"
+
+# ---- a word outside the three questions ----
+REPO=$(make_repo rq6 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q6 bionic:auditor "$(q_brief q6 'Questions: evidence, style')"
+expect_eq "Q6 a word outside the three questions is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q6 …naming it" "unknown question: style" "$GATE_ERR"
+
+# ---- no bound plan: the label is required, the dealing is not checked ----
+q_unbound() {  # <name> -> a repo whose session is engaged and bound to no plan
+  local repo; repo=$(make_repo "$1" yes)
+  rm -f "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  unbound_marker "$repo" "$SID_A" empty
+  write_attestation "$repo" "$SID_A"
+  printf '%s' "$repo"
+}
+REPO=$(q_unbound rq7)
+q_gate "$REPO" q7 bionic:auditor "$(q_brief q7 'Questions: structure')"
+expect_eq "Q7 no bound plan: a reader brief with a well-formed line is admitted" "allow" "$GATE_VERDICT"
+expect_eq "Q7 …and its set recorded, with no dealing to hold it to" "structure" \
+  "$(roster_field "$(q_row "$REPO")" questions)"
+REPO=$(q_unbound rq7b)
+q_gate "$REPO" q7b bionic:auditor "$(q_brief q7b)"
+expect_eq "Q7b no bound plan: a reader brief without the line is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q7b …naming the missing label" "bionic:auditor names no Questions: line" "$GATE_ERR"
+
+# ---- the three legal deals, from the Interfaces table; a role dealt nothing is refused ----
+for _q_deal in "tested bionic:critic evidence,adversarial,structure" \
+               "peer-reviewed bionic:auditor evidence" "peer-reviewed bionic:critic adversarial,structure" \
+               "audited bionic:auditor evidence" "audited bionic:critic adversarial" \
+               "audited bionic:reviewer structure"; do
+  set -- $_q_deal
+  REPO=$(make_repo "rq8-$1-${2#bionic:}" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$1"
+  q_gate "$REPO" "q8-$1-${2#bionic:}" "$2" "$(q_brief q8 "Questions: ${3//,/, }")"
+  expect_eq "Q8 $1 deals $2 $3: admitted" "allow" "$GATE_VERDICT"
+  expect_eq "Q8 …recorded as dealt" "$3" "$(roster_field "$(q_row "$REPO")" questions)"
+done
+for _q_none in "tested bionic:reviewer structure" "peer-reviewed bionic:reviewer structure"; do
+  set -- $_q_none
+  REPO=$(make_repo "rq8n-$1" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$1"
+  q_gate "$REPO" "q8n-$1" "$2" "$(q_brief q8n "Questions: $3")"
+  expect_eq "Q8n $1 deals $2 nothing: refused" "deny" "$GATE_VERDICT"
+  expect_contains "Q8n …saying so" "$1 deals $2: nothing" "$GATE_ERR"
+done
+set --
+
+# ---- every other role is untouched ----
+REPO=$(make_repo rq9 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q9 bionic:implementor "$(q_brief q9 'Questions: evidence, bogus')"
+expect_eq "Q9 a writer brief carrying a Questions: line is not judged by it" "allow" "$GATE_VERDICT"
+expect_eq "Q9 …its row is written (the positive on this extractor)" "wq-q9" "$(roster_field "$(q_row "$REPO")" name)"
+expect_absent "Q9 …and carries no questions=" "questions=" "$(q_row "$REPO")"
+REPO=$(make_repo rq9b yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q9b bionic:test-runner "$(q_brief q9b)"
+expect_eq "Q9b a test-runner brief needs no Questions: line" "allow" "$GATE_VERDICT"
+
+# ---- F4: the evidence rules follow the question, whichever reader holds it ----
+Q_FOUR="Re-executes: ${RL_JEST}
+Re-executes: ${RL_PYTEST}
+Re-executes: ${RL_GO}
+Re-executes: ${RL_NPM}"
+REPO=$(make_repo rq10 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" tested
+q_gate "$REPO" q10 bionic:critic "Your task: read the wave-99 change.
+Expected artifact: .bionic/docs/record/wq-q10.md
+Expected duration: ~30 minutes.
+Questions: evidence, adversarial, structure
+${Q_FOUR}"
+expect_eq "Q10 tested: a critic holding evidence with four suite runs is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q10 …on the cap of three, as an auditor's is" "exceeds the 3-run cap" "$GATE_ERR"
+
+REPO=$(make_repo rq11 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" tested
+q_gate "$REPO" q11 bionic:critic "Your task: read the wave-99 change.
+Expected artifact: .bionic/docs/record/wq-q11.md
+Expected duration: ~30 minutes.
+Questions: evidence, adversarial, structure
+Suites: none"
+expect_eq "Q11 tested: the same critic waiving every suite with no run is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q11 …as an auditor's is: it names no suites" "names no suites" "$GATE_ERR"
+
+REPO=$(make_repo rq12 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q12 bionic:critic "Your task: read the wave-99 change.
+Expected artifact: .bionic/docs/record/wq-q12.md
+Expected duration: ~30 minutes.
+Questions: adversarial
+Suites: none"
+expect_eq "Q12 audited: a critic with Questions: adversarial and Suites: none is admitted" "allow" "$GATE_VERDICT"
+
+# ---- the cap counts suite runs; a housekeeping command is recorded and does not count ----
+REPO=$(make_repo rq13 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q13 bionic:auditor "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/wq-q13.md
+Expected duration: ~30 minutes.
+Questions: evidence
+Re-executes: ${RL_JEST}
+Re-executes: ${RL_PYTEST}
+Re-executes: ${RL_GO}
+Re-executes: ${RL_BT}rm -rf dist/cache${RL_BT}"
+expect_eq "Q13 three suite runs and one rm -rf dist/cache are admitted" "allow" "$GATE_VERDICT"
+expect_eq "Q13 …with all four recorded, in order" \
+  "${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_BT}rm -rf dist/cache${RL_BT}" \
+  "$(roster_field "$(q_row "$REPO")" re_executes)"
+REPO=$(make_repo rq14 yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" q14 bionic:auditor "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/wq-q14.md
+Expected duration: ~30 minutes.
+Questions: evidence
+${Q_FOUR}"
+expect_eq "Q14 four suite runs are refused, as today" "deny" "$GATE_VERDICT"
+expect_contains "Q14 …on the 3-run cap" "exceeds the 3-run cap" "$GATE_ERR"
+
+# THE AMEND DOOR READS THE SAME COUNT: `session-poker.sh amend --reexec+` lifts the span
+# `poker_brief_span` builds — one `Re-executes:` line of marked runs — with the row's role, through
+# the same two library calls driven here.
+Q_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh"
+q_lib_verdict() {  # <role> <span> -> one `finding: <fact>` per sink call, then rc=
+  bash -c '. "$1" || exit 9
+    sink() { [ "$1" = finding ] && printf "finding: %s\n" "$2"; return 0; }
+    rc=0; brief_validate_fields "$(lift_contract_fields "$3" "$2")" "$2" "$4" sink || rc=$?
+    printf "rc=%s\n" "$rc"' _ "$Q_LIB" "$1" "$2" "$SANDBOX" 2>&1
+}
+Q_SPAN="Suites: none
+Re-executes: ${RL_BT}go test ./a${RL_BT} ${RL_BT}go test ./b${RL_BT} ${RL_BT}go test ./c${RL_BT} ${RL_BT}rm -rf dist/cache${RL_BT}"
+Q15=$(q_lib_verdict bionic:auditor "$Q_SPAN")
+expect_contains "Q15 the amend span: three suite runs and a cleanup pass the auditor's cap" "rc=0" "$Q15"
+expect_absent "Q15 …with no finding" "finding:" "$Q15"
+Q15B=$(q_lib_verdict bionic:auditor "$Q_SPAN ${RL_BT}cargo test${RL_BT}")
+expect_contains "Q15b …and a fourth suite run is refused there as at dispatch" \
+  "finding: Re-executes: line exceeds the 3-run cap" "$Q15B"
 
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
@@ -9348,7 +9586,8 @@ expect_contains "GATES5b …naming the approval it waits for" "approval:release"
 # THE DEFECT, from a real run: `Files: CONTEXT.md, a/b.ts` recorded only `a/b.ts`, because the
 # grammar read an entry as a path only when it carried a `/`. The writer then edited the file
 # its brief named and its stop was refused for it. One reader in brief.sh now reads every entry:
-# a path carries a `/`, or an extension, or names a file that exists at the project root.
+# a path carries a `/`, or an extension (wave-27 T42 dropped the third arm, "names a file that
+# exists at the project root": no wall lists the root).
 REPO=$(make_repo rfilesroot yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
@@ -9360,18 +9599,32 @@ ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_contains "FILES-ROOT precondition: the dispatch wrote its row" "|name=w-filesroot|" "$ROW"
 expect_eq "FILES-ROOT AC-12.1 files= holds the root file and the nested one, as written" \
   "CONTEXT.md,a/b.ts" "$(roster_field "$ROW" files)"
-# A bare name with no extension is a path when the file exists at the root: make_repo has none
-# called Widgetfile, so this fixture plants one. FILES-DROP below is the same name, unplanted.
+# A BARE NAME IS REFUSED EVEN WHEN A FILE OF THAT NAME IS AT THE ROOT (wave-27 T42, A-orch-46):
+# T29's third arm admitted it by listing the root, the fetch the hook-authoring freeze forbids.
+# This fixture plants a Makefile, so the old arm would have admitted it; `./Makefile` is the
+# spelling, and it needs no listing. Worked answer: `Files: Makefile, src/a.c` refuses, first
+# line naming `Makefile` and `./Makefile`; `Files: ./Makefile, src/a.c` records both.
 REPO=$(make_repo rfilesroot2 yes)
 write_attestation "$REPO" "$SID_A"
-echo x > "$REPO/Widgetfile"
+echo x > "$REPO/Makefile"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
 Expected artifact: .bionic/docs/record/wfr2.md
-Files: Widgetfile, a/b.ts
+Files: Makefile, src/a.c
 Suites: tests/one.test.sh' "w-filesroot2")"
-expect_eq "FILES-ROOT2 a bare name that exists at the root is admitted" "allow" "$GATE_VERDICT"
+expect_eq "FILES-ROOT2 a bare name refuses though a file of that name is at the root" "deny" "$GATE_VERDICT"
+FR2_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-ROOT2 precondition: the refusal line is read" "bionic: dispatch refused" "$FR2_LINE"
+expect_contains "FILES-ROOT2 …its first line names the word and the spelling ./Makefile" \
+  "Files: names Makefile, not a path" "$FR2_LINE"
+expect_contains "FILES-ROOT2 …and the accepted spelling" "./Makefile" "$FR2_LINE"
+expect_eq "FILES-ROOT2 …and no row was written" "" "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfr2.md
+Files: ./Makefile, src/a.c
+Suites: tests/one.test.sh' "w-filesroot2")"
+expect_eq "FILES-ROOT3 ./Makefile is admitted" "allow" "$GATE_VERDICT"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_eq "FILES-ROOT2 …and stored as written" "Widgetfile,a/b.ts" "$(roster_field "$ROW" files)"
+expect_eq "FILES-ROOT3 …and both are stored as written" "./Makefile,src/a.c" "$(roster_field "$ROW" files)"
 
 # --- FILES-DROP: an entry the reader does not read as a path refuses (REQ-12 AC-12.2, D21) ---
 REPO=$(make_repo rfilesdrop yes)
@@ -9395,7 +9648,9 @@ Suites: tests/one.test.sh' "w-filesdrop")"
 expect_eq "FILES-DROP2 the spelling it names is admitted" "allow" "$GATE_VERDICT"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_eq "FILES-DROP2 …and recorded" "./Widgetfile,a/b.ts" "$(roster_field "$ROW" files)"
-# An unfilled slot is guidance, not an entry: the scaffold line pasted as shipped refuses nothing.
+# A ONE-TOKEN SLOT IS GUIDANCE, NOT AN ENTRY: `<paths>` is skipped. This row does NOT test the
+# scaffold line as shipped (wave-27 T42, review pass 11 F2): the shipped slot holds white space,
+# and FILES-LIST below reads that line out of dispatch.md and shows it refused once, as prose.
 REPO=$(make_repo rfilesslot yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
@@ -9405,5 +9660,179 @@ Suites: tests/one.test.sh' "w-filesslot")"
 expect_eq "FILES-DROP3 an unfilled <slot> on a Files: line is not an entry, and admits" "allow" "$GATE_VERDICT"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_eq "FILES-DROP3 …and the row holds the real path alone" "a/b.ts" "$(roster_field "$ROW" files)"
+
+
+# --- FILES-LIST: a Files: span is a comma-separated list of paths (wave-27 T42; REQ-12, D21 as
+# amended by A-orch-46; review pass 11 F1, F3, F6) ---
+# The span is split on commas (and line ends, for a list one item per line); a trailing ` # …`
+# comment is stripped, as on `Subprocess claim:`; a leading `- `, `* ` or `1. ` and surrounding
+# backticks come off an item; `none` alone is no files. An item holding white space is prose,
+# refused once with no spelling advice. An item is a path when it carries a `/`, or an extension
+# (a final dot, then a letter-led run of letters and digits, on a stem holding a letter). Any
+# other word is refused naming `./<word>`; an item ending in `.` or holding no letter or digit
+# is refused with no advice, since no spelling of it is read as a path.
+#
+# fl_read <brief text> -> `files=<lifted>`, one `finding: <fact> | <fix>` per refusal, `rc=`.
+# Every brief carries a Suites: line, so no finding here is the impact command's.
+fl_read() {
+  bash -c '
+    . "$1" || exit 9
+    sink() { [ "$1" = finding ] && printf "finding: %s | %s\n" "$2" "$3"; return 0; }
+    l=$(lift_contract_fields "$2" implementor)
+    printf "files=%s\n" "$(brief_field "$l" files)"
+    rc=0; brief_validate_fields "$l" implementor "$3" sink || rc=$?
+    printf "rc=%s\n" "$rc"
+  ' _ "$BRIEF_LIB" "$1
+Suites: tests/one.test.sh" "$BRIEF_NOCONF" 2>&1
+}
+fl_findings() { printf '%s\n' "$1" | /usr/bin/grep -c '^finding: '; }
+
+# THE SCAFFOLD LINE, read out of the shipped dispatch.md, never retyped.
+FL_SCAFFOLD="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
+expect_contains "FILES-LIST meta: the shipped scaffold's Files: line was read, comment and all" \
+  "  # writers" "$FL_SCAFFOLD"
+FL_SLOT="$(printf '%s' "$FL_SCAFFOLD" | sed -e 's/^Files: //' -e 's/  #.*$//')"
+expect_contains "FILES-LIST meta: …and its slot is one item holding white space" "<every path" "$FL_SLOT"
+
+# Pasted as shipped: the slot is one item holding white space, prose, refused ONCE, naming the
+# item, with no ./ advice, and nothing recorded. A-T29.3 claimed this refused nothing.
+FL=$(fl_read "$FL_SCAFFOLD")
+expect_contains "FILES-LIST1 the scaffold line as shipped is refused" "rc=1" "$FL"
+expect_eq "FILES-LIST1 …once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST1 …naming the slot item whole" "finding: Files: ${FL_SLOT} is not a path" "$FL"
+expect_absent "FILES-LIST1 …with no ./ advice" "./" "$(printf '%s\n' "$FL" | grep '^finding: ')"
+expect_contains "FILES-LIST1 …and nothing recorded" "files=
+" "$FL
+"
+# Filled as a real brief fills it, comment kept byte for byte: exactly the two paths, no finding.
+FL_FILLED="$(printf '%s' "$FL_SCAFFOLD" | sed 's|<every path the task may create or edit>|src/a.c, tests/a.test.sh|')"
+expect_contains "FILES-LIST2 meta: the filled line keeps the shipped comment" "tests/a.test.sh  # writers" "$FL_FILLED"
+FL=$(fl_read "$FL_FILLED")
+expect_contains "FILES-LIST2 the filled scaffold line records exactly its two paths" "files=src/a.c,tests/a.test.sh
+" "$FL
+"
+expect_contains "FILES-LIST2 …and admits (rc=0)" "rc=0" "$FL"
+expect_eq "FILES-LIST2 …with no finding" "0" "$(fl_findings "$FL")"
+
+FL=$(fl_read "Files: CONTEXT.md, a/b.ts")
+expect_contains "FILES-LIST3 CONTEXT.md and a/b.ts are both recorded (T29's defect stays fixed)" "files=CONTEXT.md,a/b.ts" "$FL"
+expect_contains "FILES-LIST3 …rc=0" "rc=0" "$FL"
+FL=$(fl_read "Files: Makefile, src/a.c")
+expect_contains "FILES-LIST4 Makefile refuses" "rc=1" "$FL"
+expect_eq "FILES-LIST4 …once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST4 …naming it and ./Makefile" "finding: Files: names Makefile, not a path | spell it ./Makefile" "$FL"
+FL=$(fl_read "Files: ./Makefile, src/a.c")
+expect_contains "FILES-LIST5 ./Makefile records both" "files=./Makefile,src/a.c" "$FL"
+expect_contains "FILES-LIST5 …rc=0" "rc=0" "$FL"
+
+FL=$(fl_read "Files: none")
+expect_contains "FILES-LIST6 Files: none admits (rc=0)" "rc=0" "$FL"
+expect_eq "FILES-LIST6 …with no finding" "0" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST6 …and records nothing" "files=
+" "$FL
+"
+
+FL=$(fl_read "Files: src/a.c (new), and b.md")
+expect_eq "FILES-LIST7 a prose item refuses once per item: two" "2" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST7 …naming src/a.c (new)" "finding: Files: src/a.c (new) is not a path" "$FL"
+expect_contains "FILES-LIST7 …and and b.md" "finding: Files: and b.md is not a path" "$FL"
+expect_absent "FILES-LIST7 …with no ./ advice" "./" "$(printf '%s\n' "$FL" | grep '^finding: ')"
+FL=$(fl_read "Files: see e.g. the docs")
+expect_eq "FILES-LIST8 'see e.g. the docs' refuses once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST8 …naming the item whole" "finding: Files: see e.g. the docs is not a path" "$FL"
+expect_contains "FILES-LIST8 …and recording nothing" "files=
+" "$FL
+"
+FL=$(fl_read "Files: hooks/a.sh, fixed in v1.2 and 1.11.0")
+expect_eq "FILES-LIST9 v1.2 and 1.11.0 inside prose: the item refuses once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST9 …and only the path is recorded" "files=hooks/a.sh
+" "$FL
+"
+for FL_W in v1.2 1.11.0 Fig.3; do
+  FL=$(fl_read "Files: hooks/a.sh, $FL_W")
+  expect_contains "FILES-LIST10 $FL_W alone is not a path: refused" "finding: Files: names $FL_W, not a path" "$FL"
+  expect_contains "FILES-LIST10 …$FL_W is not recorded" "files=hooks/a.sh
+" "$FL
+"
+done
+for FL_W in e.g. README. —; do
+  FL=$(fl_read "Files: hooks/a.sh, $FL_W")
+  expect_contains "FILES-LIST11 '$FL_W' (ends in . or holds no letter or digit) is refused" \
+    "finding: Files: $FL_W is not a path" "$FL"
+  expect_absent "FILES-LIST11 …with no ./ advice" "./" "$(printf '%s\n' "$FL" | grep '^finding: ')"
+  expect_contains "FILES-LIST11 …and is not recorded" "files=hooks/a.sh
+" "$FL
+"
+done
+
+FL=$(fl_read "Files:
+1. hooks/a.sh
+2. tests/b.test.sh")
+expect_contains "FILES-LIST12 a numbered list records its paths" "files=hooks/a.sh,tests/b.test.sh" "$FL"
+expect_contains "FILES-LIST12 …rc=0" "rc=0" "$FL"
+FL=$(fl_read "Files:
+- hooks/a.sh
+* tests/b.test.sh")
+expect_contains "FILES-LIST13 a bulleted list records its paths" "files=hooks/a.sh,tests/b.test.sh" "$FL"
+expect_contains "FILES-LIST13 …rc=0" "rc=0" "$FL"
+FL=$(fl_read "Files: ${BT}hooks/a.sh${BT}, ${BT}tests/b.test.sh${BT}")
+expect_contains "FILES-LIST14 backticked items record without their backticks" "files=hooks/a.sh,tests/b.test.sh
+" "$FL
+"
+FL=$(fl_read "Files: ${BT}hooks/a.sh${BT}, ${BT}Makefile${BT}")
+expect_contains "FILES-LIST14 …and a backticked bare word is named bare" \
+  "finding: Files: names Makefile, not a path | spell it ./Makefile" "$FL"
+
+# THE VERDICT (F6): `brief_files_entry` answers 0 only when the reader recorded the entry itself,
+# 1 with the `./` spelling when that is recorded, and 2 when no spelling is.
+fe() { bash -c '. "$1" || exit 9; brief_files_entry "$2"; echo " rc=$?"' _ "$BRIEF_LIB" "$1" 2>&1; }
+expect_eq "FILES-ENTRY a path answers 0, as written" "a/b.c rc=0" "$(fe a/b.c)"
+expect_eq "FILES-ENTRY a bare word answers 1, as ./<word>" "./Makefile rc=1" "$(fe Makefile)"
+expect_eq "FILES-ENTRY a dotfile answers 1, as ./<name>" "./.gitignore rc=1" "$(fe .gitignore)"
+expect_eq "FILES-ENTRY a name ending in . answers 2" "README. rc=2" "$(fe README.)"
+expect_eq "FILES-ENTRY a name with no letter or digit answers 2" "* rc=2" "$(fe '*')"
+expect_eq "FILES-ENTRY a name holding white space answers 2" "my notes.md rc=2" "$(fe 'my notes.md')"
+expect_eq "FILES-ENTRY a name holding a comma answers 2" "a,b.md rc=2" "$(fe 'a,b.md')"
+
+# Through the hook: the scaffold line as shipped refuses once, naming the item, and writes no row.
+REPO=$(make_repo rfileslist yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/wfl.md
+$FL_SCAFFOLD
+Suites: tests/one.test.sh" "w-fileslist")"
+expect_eq "FILES-LIST15 the hook refuses the scaffold line as shipped" "deny" "$GATE_VERDICT"
+FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-LIST15 …its first line naming the slot item" "Files: ${FL_SLOT} is not a path" "$FL_LINE"
+expect_absent "FILES-LIST15 …with no ./ advice" "./" "$FL_LINE"
+expect_eq "FILES-LIST15 …and no row was written" "" "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/wfl.md
+$FL_FILLED
+Suites: tests/one.test.sh" "w-fileslist")"
+expect_eq "FILES-LIST16 the hook admits the filled scaffold line" "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "FILES-LIST16 …and records exactly its two paths" "src/a.c,tests/a.test.sh" "$(roster_field "$ROW" files)"
+# A LONG WORD AND A LONG PROSE ITEM still draw a refusal line: refuse.sh holds a fix to six words
+# and 40 columns and a line to 100, and an item named in full past that made the wall refuse its
+# own call and exit 2 with no refusal line at all.
+REPO=$(make_repo rfileslong yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfl2.md
+Files: docker-compose-override, src/a.c
+Suites: tests/one.test.sh' "w-fileslong")"
+expect_eq "FILES-LIST17 a bare word of 23 characters is refused by a deny" "deny" "$GATE_VERDICT"
+FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-LIST17 …whose first line names it, cut" "Files: names docker-compose-…, not a path" "$FL_LINE"
+expect_contains "FILES-LIST17 …and tells the prefix" "spell it with a leading ./" "$FL_LINE"
+expect_contains "FILES-LIST17 …and whose detail spells it whole" "Files: ./docker-compose-override" "$GATE_REASON"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfl2.md
+Files: src/a.c, this list covers every file the task may create or edit
+Suites: tests/one.test.sh' "w-fileslong")"
+expect_eq "FILES-LIST18 a prose item of 55 characters is refused by a deny" "deny" "$GATE_VERDICT"
+FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-LIST18 …whose first line names it, cut" "Files: this list covers every file the task may … is not a path (drop it)" "$FL_LINE"
 
 finish

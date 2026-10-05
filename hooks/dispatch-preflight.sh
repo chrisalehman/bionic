@@ -1647,10 +1647,9 @@ agent is gone, frees the name — a landing marker alone does not."
 fi
 
 # THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap, which
-# `brief_validate_fields` reads off the same role below. THE ROOT FILES GO IN TOO (wave-27 T29;
-# REQ-12, D21): the one Files: reader reads a bare name as a path when a file of that name is at
-# the project root, and this hook is what hands it that fact.
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT" "$(brief_root_files "$BIONIC_ROOT")")
+# `brief_validate_fields` reads off the same role below. Nothing else goes in: the Files: reader
+# reads an item by its own text, and this hook lists no directory for it (wave-27 T42, A-orch-46).
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
 
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
@@ -2118,6 +2117,119 @@ Then retry the dispatch."
   fi
 fi
 
+# ======================================== A READER'S QUESTIONS (wave-27 T15; REQ-5, REQ-1, D5)
+#
+# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor`, `bionic:critic` and
+# `bionic:reviewer` answer the reading questions `evidence`, `adversarial` and `structure`, and
+# the plan's rigor deals each question to one of them (`facts_owed`, lib/proof.sh). A reader's
+# brief names its own on a `Questions: <q>[, <q>]` line, which `lift_contract_fields` reads as a
+# set. This arm refuses a reader brief with no such line, a word outside the three, and a set
+# that is not exactly what the bound plan's rigor deals that role — so the role a question was
+# dealt to is the role that reads it, and a rigor that deals a role nothing dispatches it for
+# nothing. The admitted set goes on the row as `questions=`, and execution-recorder.sh pushes
+# that set's checks files at agent start.
+#
+# A PREDICATE OVER WHAT IT IS HANDED (the freeze, .claude/rules/hook-authoring.md). Rigor and
+# scale are the bound plan's frontmatter, from the plan this hook already reads; `facts_owed` is a
+# pure function of the two. No git, no roster. With no bound plan the line is still required and
+# the dealing is not checked; a bound plan whose rigor or scale deals nothing says `not checked`.
+#
+# EVERY OTHER ROLE IS UNTOUCHED: the line is not required, and if present it is neither judged
+# nor recorded, so nothing is pushed to that agent.
+DP_QUESTIONS=""
+case "$DP_SUBAGENT" in
+  bionic:auditor|bionic:critic|bionic:reviewer)
+    _q_set="$(brief_field "$LIFTED" questions)"
+    _q_bad="$(brief_field "$LIFTED" questions_bad)"
+    _q_rigor=""; _q_scale=""; _q_owed=""; _q_dealt=""; _q_dealable=""
+    if [ -n "$PLAN" ]; then
+      if ! declare -F facts_owed >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
+        # shellcheck source=/dev/null
+        . "$BIONIC_LIB/proof.sh"
+      fi
+      _q_rigor="$(plan_frontmatter_get "$PLAN" rigor)"
+      _q_scale="$(plan_frontmatter_get "$PLAN" scale)"
+      if declare -F facts_owed >/dev/null 2>&1 && _q_owed="$(facts_owed "$_q_rigor" "$_q_scale")"; then
+        _q_dealable=1
+        _q_dealt="$(printf '%s\n' "$_q_owed" | awk -F'\t' -v r="$DP_SUBAGENT" \
+          '$1 == "review" && $3 == r && $4 == "piece" { printf "%s%s", (n++ ? "," : ""), $2 }')"
+      else
+        dp_not_checked "the Questions: dealing" "a plan rigor and scale that facts_owed deals"
+      fi
+    fi
+    # The holder of each question, one line apiece, for the refusal details.
+    _q_holders=""
+    for _q_q in evidence adversarial structure; do
+      _q_h="$(printf '%s\n' "$_q_owed" | awk -F'\t' -v q="$_q_q" \
+        '$1 == "review" && $2 == q && $4 == "piece" { print $3; exit }')"
+      [ -n "$_q_h" ] && _q_holders="${_q_holders}    ${_q_q} is dealt to ${_q_h}
+"
+    done
+    _q_fixline="Questions: <q>[, <q>]"
+    [ -n "$_q_dealt" ] && _q_fixline="Questions: ${_q_dealt//,/, }"
+    if [ -n "$_q_bad" ]; then
+      dp_finding "unknown question: $(bionic_trunc "${_q_bad%% *}" 16)" "use evidence/adversarial/structure" \
+        "The Questions: line names a word that is not a reading question:
+    ${_q_bad}
+
+A reader answers one or more of three questions: evidence, adversarial and structure. Its
+checks are pushed to it at start by name, so a word outside the three is a question no
+reader is held to.
+
+Fix: name only the three questions, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    fi
+    if [ -n "$_q_dealable" ] && [ -z "$_q_dealt" ]; then
+      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: nothing" "dispatch its holder" \
+        "The plan's rigor deals this reader no question, so there is nothing to dispatch it for:
+    Role:  ${DP_SUBAGENT}
+    Given: ${_q_set:-(no Questions: line)}
+    Dealt: nothing at rigor ${_q_rigor}, scale ${_q_scale}
+
+Each question is read by the one role the rigor deals it to:
+${_q_holders}
+Fix: dispatch the role that holds the question, with its own Questions: line.
+
+Then retry the dispatch."
+    elif [ -z "$_q_set" ] && [ -z "$_q_bad" ]; then
+      _q_why="With no bound plan the dealing is not checked: name the questions this reader answers,
+from evidence, adversarial and structure."
+      [ -n "$PLAN" ] && _q_why="The bound plan's rigor (${_q_rigor:-none}) and scale (${_q_scale:-none}) deal nothing, so the
+dealing is not checked: name the questions this reader answers, from evidence,
+adversarial and structure."
+      [ -n "$_q_dealt" ] && _q_why="The plan's rigor (${_q_rigor}) deals this role the set below, and its checks are pushed
+to it at start from that line."
+      dp_finding "${DP_SUBAGENT} names no Questions: line" "add the Questions: line" \
+        "A reader is dispatched for its questions, and this brief names none:
+    Role: ${DP_SUBAGENT}
+
+${_q_why}
+
+Fix: add this line to the brief, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
+      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: ${_q_dealt}" "use that set" \
+        "The Questions: line names a set the plan's rigor does not deal this reader:
+    Role:  ${DP_SUBAGENT}
+    Given: ${_q_set//,/, }
+    Dealt: ${_q_dealt//,/, } (rigor ${_q_rigor}, scale ${_q_scale})
+
+Each question is read by the one role the rigor deals it to:
+${_q_holders}
+Fix: write the dealt set, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    else
+      DP_QUESTIONS="$_q_set"
+    fi
+    ;;
+esac
+
 # ============================== THE CONTRACT GRAMMAR'S CHECKS (wave-20 T6; REQ-4, D4, Δ10)
 #
 # ONE GRAMMAR, THREE DOORS. The arms that judge Files:, Suites: and Re-executes: — a literal
@@ -2513,7 +2625,8 @@ ROW=$(roster_row \
   "re_executes=${C_RE_EXECUTES}" \
   ${C_DONE:+"done=${C_DONE}"} \
   "tool_use_id=${TOOL_USE_ID}" \
-  "plan=${ROSTER_PLAN}") || ROW=""
+  "plan=${ROSTER_PLAN}" \
+  ${DP_QUESTIONS:+"questions=${DP_QUESTIONS}"}) || ROW=""
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then

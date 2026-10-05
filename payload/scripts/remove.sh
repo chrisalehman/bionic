@@ -492,6 +492,14 @@ _rm_file_has_line() {  # <file> <line>
   return 1
 }
 
+# A whole start OR end line: what every marker item's pending test asks, so a
+# file whose markers do not pair up still reaches its item and is reported
+# there (A-T40.10), and a marker quoted in a comment is not one (wave-27 T46,
+# review pass 14 F3: the two retired blocks asked a substring).
+_rm_file_has_marker() {  # <file> <start> <end>
+  _rm_file_has_line "$1" "$2" || _rm_file_has_line "$1" "$3"
+}
+
 _rm_file_has_line_matching() {  # <file> <ere>
   local file="$1" ere="$2" line
   [ -f "$file" ] || return 1
@@ -661,8 +669,20 @@ _rm_strip_walk() {  # <file> <start> <end> <keep> — the lines that stay, to st
   return 0
 }
 
+# The copy of markers.sh `markers_regular` (wave-27 T46): rc 4, and what the
+# path is, when it is not a regular file, a link to one, or nothing at all.
+_rm_regular() {  # <file>
+  if [ -L "$1" ] && [ ! -e "$1" ]; then printf 'a link that points nowhere\n'; return 4; fi
+  if [ ! -e "$1" ] || [ -f "$1" ]; then return 0; fi
+  if [ -d "$1" ] && [ -L "$1" ]; then printf 'a link to a directory\n'
+  elif [ -d "$1" ]; then printf 'a directory\n'
+  else printf 'not a regular file\n'; fi
+  return 4
+}
+
 _rm_strip_marker_block() {  # <file> <start-line> <end-line> [keep]
   local file="$1" start="$2" end="$3" keep="${4:-}" target
+  _rm_regular "$file" >/dev/null || return 4
   target="$(bionic_link_target "$file")"
   local tmp="${target}.bionic.tmp"
   [ -r "$file" ] || return 1
@@ -674,12 +694,13 @@ _rm_strip_marker_block() {  # <file> <start-line> <end-line> [keep]
   return 0
 }
 
-# Why a marker strip refused, as the second half of a leftover line. The file is
+# Why a marker strip refused, as the first half of a leftover line. The file is
 # as it was in every case.
 _rm_strip_why() {  # <rc> <file>
   case "${1:-}" in
     2) echo "bionic's markers in ${2} do not pair up, so bionic cannot tell which lines are its own — fix them by hand" ;;
     3) echo "${2} is read-only, and bionic leaves a file you made read-only alone" ;;
+    4) echo "${2} is $(_rm_regular "$2"), and bionic writes only to a regular file" ;;
     *) echo "could not rewrite ${2}" ;;
   esac
 }
@@ -874,20 +895,19 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
   case "$id" in
     legacy-alias)
       [ -f "$RC_FILE" ] || return 1
-      _rm_file_has_literal "$RC_FILE" "$RM_ALIAS_START" && return 0
+      _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" && return 0
       _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE" && return 0
       return 1 ;;
     environment)
       keys="$(_rm_env_keys_present)" || keys=""
       [ -n "$keys" ] && return 0
-      _rm_file_has_literal "$RC_FILE" "$RM_ENV_START" && return 0
+      _rm_file_has_marker "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" && return 0
       _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE" && return 0
       return 1 ;;
     claude-proxy)
-      _rm_file_has_line "$RC_FILE" "$RM_RC_START" || _rm_file_has_line "$RC_FILE" "$RM_RC_END" ;;
+      _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END" ;;
     working-principles)
-      _rm_file_has_line "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" || \
-        _rm_file_has_line "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_END" ;;
+      _rm_file_has_marker "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" ;;
     legacy-hooks)
       [ -f "$RM_SETTINGS" ] || return 1
       _rm_have jq || return 1
@@ -1087,7 +1107,7 @@ _rm_item_legacy_alias() {
   _rm_wants legacy-alias || return 0
   rc_variant=none
   if [ -f "$RC_FILE" ]; then
-    if _rm_file_has_literal "$RC_FILE" "$RM_ALIAS_START"; then
+    if _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
       rc_variant=marked
     elif _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
       rc_variant=legacy
@@ -1100,13 +1120,24 @@ _rm_item_legacy_alias() {
       _rm_clean "legacy alias block in ${RC_FILE}"
       ;;
     marked)
+      # The walk's own refusal, before the question (wave-27 T46, review pass 14
+      # F3): a block whose edges cannot be found is reported where it is.
+      if ! _rm_marker_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" >/dev/null; then
+        echo "  ${RC_FILE}: the legacy alias block's markers do not pair up:"
+        _rm_say_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"
+        _rm_leftover "$(_rm_strip_why 2 "$RC_FILE") — nothing was changed"
+        echo ""
+        return 0
+      fi
       echo "  ${RC_FILE} carries the bionic marker block; bionic would delete the block and everything between its markers."
       if _rm_consent "Remove the marker block from ${RC_FILE}?"; then
-        if _rm_strip_marker_block "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
+        _rm_strip_marker_block "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; rm_alias_rc=$?
+        if [ "$rm_alias_rc" = "0" ]; then
           _rm_removed "legacy alias block in ${RC_FILE}"
         else
           rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
-          _rm_leftover "could not rewrite ${RC_FILE} — the alias block is still there"
+          [ "$rm_alias_rc" = "2" ] && _rm_say_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"
+          _rm_leftover "$(_rm_strip_why "$rm_alias_rc" "$RC_FILE") — the alias block is still there"
         fi
       else
         _rm_skipped "$?" legacy-alias "legacy alias block in ${RC_FILE}"
@@ -1194,17 +1225,25 @@ _rm_item_environment() {
 
   local keys block=no bare=no question="" jq_missing=no consent_rc=0
   if ! keys="$(_rm_env_keys_present)"; then jq_missing=yes; keys=""; fi
-  _rm_file_has_literal "$RC_FILE" "$RM_ENV_START" && block=yes
+  _rm_file_has_marker "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" && block=yes
+  # A block whose markers do not pair up is reported, and left out of the
+  # question (wave-27 T46, review pass 14 F3).
+  if [ "$block" = "yes" ] && ! _rm_marker_faults "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" >/dev/null; then
+    echo "  ${RC_FILE}: the retired environment block's markers do not pair up:"
+    _rm_say_faults "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"
+    _rm_leftover "$(_rm_strip_why 2 "$RC_FILE") — nothing in it was changed"
+    block=malformed
+  fi
   if [ "$block" = "no" ] && _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then bare=yes; fi
 
-  if [ "$jq_missing" = "yes" ] && [ "$block" = "no" ] && [ "$bare" = "no" ]; then
+  if [ "$jq_missing" = "yes" ] && [ "$block" != "yes" ] && [ "$bare" = "no" ]; then
     _rm_leftover "cannot read ${RM_SETTINGS} without jq — bionic's environment settings were left as they are"
     echo ""
     return 0
   fi
 
-  if [ -z "$keys" ] && [ "$block" = "no" ] && [ "$bare" = "no" ]; then
-    _rm_clean "bionic's environment settings"
+  if [ -z "$keys" ] && [ "$block" != "yes" ] && [ "$bare" = "no" ]; then
+    [ "$block" = "malformed" ] || _rm_clean "bionic's environment settings"
     echo ""
     return 0
   fi
@@ -1243,11 +1282,13 @@ _rm_item_environment() {
   [ -n "$failed" ] && _rm_leftover "could not rewrite ${RM_SETTINGS} — ${failed} is still there"
 
   if [ "$block" = "yes" ]; then
-    if _rm_strip_marker_block "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"; then
+    _rm_strip_marker_block "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"; rm_env_rc=$?
+    if [ "$rm_env_rc" = "0" ]; then
       _rm_removed "retired environment block in ${RC_FILE}"
     else
       rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
-      _rm_leftover "could not rewrite ${RC_FILE} — the environment block is still there"
+      [ "$rm_env_rc" = "2" ] && _rm_say_faults "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"
+      _rm_leftover "$(_rm_strip_why "$rm_env_rc" "$RC_FILE") — the environment block is still there"
     fi
   elif [ "$bare" = "yes" ]; then
     if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
@@ -1292,6 +1333,7 @@ _rm_item_claude_proxy() {
   _rm_wants claude-proxy || return 0
   echo "bionic's claude() shell function:"
 
+  if _rm_say_not_a_file "$RC_FILE"; then echo ""; return 0; fi
   if ! _rm_item_pending claude-proxy; then
     _rm_clean "bionic's claude() shell function in ${RC_FILE}"
     echo ""
@@ -1669,9 +1711,18 @@ _rm_item_permission_mode() {
 #               for a yes typed at THAT question, under `--all` too, as setup's
 #               replacement does.
 #   present   — the block goes. The FILE goes too only when nothing else is in
-#               it — and then the question says so: it holds no text of the
-#               user's. An edited block's emptied file stays, a file with no
+#               it — and then the item's line says so before it acts, as a
+#               question, or under `--all` (which is the consent, and adds no
+#               question) as what will happen; the result line says the file
+#               was deleted (wave-27 T46, review pass 14 F1). It holds no text of
+#               the user's. An edited block's emptied file stays, a file with no
 #               block is never touched, and a symlinked file never goes.
+#   not a file — a directory, a dangling link, anything but a regular file or a
+#               link to one: refused, said, nothing made inside it (T46, F6).
+#
+# THE YES IS FOR THE BLOCK THAT WAS SHOWN (T46, F5). The block is read again
+# after the answer; when it is not the block the question showed, nothing is
+# written.
 #
 # TWO DOORS. Payload mode calls the owner, env.sh (`principles_*`). Standalone
 # has no shipped text to compare against, so it cannot tell present from edited:
@@ -1691,6 +1742,7 @@ _rm_item_working_principles() {
   _rm_wants working-principles || return 0
   echo "bionic's working principles:"
 
+  if _rm_say_not_a_file "$RM_PRINCIPLES_FILE"; then echo ""; return 0; fi
   if ! _rm_item_pending working-principles; then
     _rm_clean "bionic's working principles in ${RM_PRINCIPLES_FILE}"
     echo ""
@@ -1704,7 +1756,8 @@ _rm_item_working_principles() {
     echo ""
     return 0
   fi
-  local target state=unknown deletes=no line
+  local target state=unknown deletes=no line shown verb=would
+  [ "$RM_ALL" = "1" ] && verb=will
   target="$(bionic_link_target "$RM_PRINCIPLES_FILE")"
   if [ -e "$target" ] && [ ! -w "$target" ]; then
     _rm_leftover "$(_rm_strip_why 3 "$RM_PRINCIPLES_FILE") — bionic's working principles are still there"
@@ -1716,14 +1769,15 @@ _rm_item_working_principles() {
     principles_unset_deletes && deletes=yes
   fi
 
+  shown="$(_rm_block_now "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END")"
   case "$state" in
     present)
       if [ "$deletes" = "yes" ]; then
         echo "  ${RM_PRINCIPLES_FILE} holds bionic's working principles and nothing else."
-        echo "  bionic would delete the block and delete the file, which holds nothing else."
+        echo "  bionic ${verb} delete the block and the file ${RM_PRINCIPLES_FILE}, which holds nothing else."
         _rm_consent "Remove bionic's working principles and delete the file ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$?
       else
-        echo "  ${RM_PRINCIPLES_FILE} carries bionic's working principles; bionic would delete that block and leave the rest of the file as it is."
+        echo "  ${RM_PRINCIPLES_FILE} carries bionic's working principles; bionic ${verb} delete that block and leave the rest of the file as it is."
         _rm_consent "Remove bionic's working principles from ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$?
       fi ;;
     edited)
@@ -1743,11 +1797,19 @@ _rm_item_working_principles() {
     echo ""
     return 0
   fi
+  # THE YES WAS GIVEN TO THE BLOCK ON SCREEN (wave-27 T46, review pass 14 F5). A
+  # block edited while the question waited was never shown, so it is not
+  # stripped: nothing is written, and the next run shows it as it is.
+  if [ "$(_rm_block_now "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END")" != "$shown" ]; then
+    _rm_leftover "${RM_PRINCIPLES_FILE} changed since it was shown — nothing was written; run remove again to see it as it is now"
+    echo ""
+    return 0
+  fi
 
   _rm_principles_unset; rm_wp_unset_rc=$?
   if [ "$rm_wp_unset_rc" = "0" ]; then
     if [ "$deletes" = "yes" ] && [ ! -e "$RM_PRINCIPLES_FILE" ]; then
-      _rm_removed "bionic's working principles, and ${RM_PRINCIPLES_FILE}, which held nothing else"
+      _rm_removed "deleted ${RM_PRINCIPLES_FILE} — it held bionic's working principles and nothing else"
     else
       _rm_removed "bionic's working principles in ${RM_PRINCIPLES_FILE}"
     fi
@@ -1757,6 +1819,28 @@ _rm_item_working_principles() {
     _rm_leftover "$(_rm_strip_why "$rm_wp_unset_rc" "$RM_PRINCIPLES_FILE") — bionic's working principles are still there"
   fi
   echo ""
+}
+
+# The block as it is on disk now, markers and every byte between them, for the
+# comparison before and after a question. The trailing `.` keeps a change that
+# is only trailing blank lines from vanishing into the command substitution.
+_rm_block_now() {  # <file> <start> <end>
+  local line inside=0
+  [ -f "$1" ] || { printf 'no file.'; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$line" = "$2" ] && inside=1
+    [ "$inside" = "1" ] && printf '%s\n' "$line"
+    [ "$line" = "$3" ] && inside=0
+  done < "$1"
+  printf '.'
+}
+
+# A path that is no file (`_rm_regular`): said where the item is, and rc 0 so
+# the item stops there. rc 1, nothing printed, for a regular file or no file.
+_rm_say_not_a_file() {  # <file>
+  _rm_regular "$1" >/dev/null && return 1
+  _rm_leftover "$(_rm_strip_why 4 "$1") — nothing was changed"
+  return 0
 }
 
 # The lines inside a well-formed block, indented — what the standalone door shows
