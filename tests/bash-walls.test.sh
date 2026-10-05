@@ -2319,6 +2319,23 @@ $(eg6_reading "$H_EG6" structure pass)" "- Step 6: review at record/w27/review.m
 expect_status "EG6g the predicate is a prefix condition: at current: 7 the same lack is refused" 2 "$ST"
 expect_contains "EG6g2 …naming adversarial" "- adversarial: no reading, and no waiver" "$ERR"
 
+# A LETTERED STEP IS ITS STEP (wave-27 T31; review pass 25 F1). The gate admits `current: <N>[ab]`,
+# and the readings bind from 6 whatever the letter: each lettered value at or past 6 is refused as
+# its step is, and 5 and 5b, below 6, owe nothing new.
+for eg6c in 6a 6b 7a 8a 8b; do
+  eg6_gate "$(eg6_plan "$eg6c" wave "" "- Step 6: review record/w27/review.md
+- Step ${eg6c}: done record/generic-evidence.md")"
+  expect_status "EG6l-${eg6c} F1 at current: ${eg6c} with no reading, the commit is refused as at its step" 2 "$ST"
+  expect_contains "EG6l-${eg6c}b …naming the question it lacks" "- adversarial: no reading, and no waiver" "$ERR"
+done
+for eg6c in 5 5b; do
+  eg6_gate "$(eg6_plan "$eg6c" wave "" | awk -v h="$H_EG6" '/^- Step 5: floor green/ {
+    print "- Step 5:"; print "  cmd: bash tests/run.sh"; print "  pass: 10"; print "  total: 10"
+    print "  output: record/generic-evidence.md"; print "  head: " h; print "  auditor: record/generic-evidence.md"
+    if (c ~ /[ab]$/) print "- Step " c ": done record/generic-evidence.md"; next } { print }' c="$eg6c")"
+  expect_status "EG6m-${eg6c} F1 at current: ${eg6c}, below Step 6, with no reading at all: admitted (nothing new binds)" 0 "$ST"
+done
+
 # THE WALL AND THE JUDGE READ ONE TEXT ONE WAY (the agreement row). The same section through the
 # real gate and through lib/proof.sh `facts_state` at the head every line names: the questions the
 # gate names are exactly the questions whose piece line the judge does not hold. evidence holds;
