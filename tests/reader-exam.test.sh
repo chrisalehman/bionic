@@ -5,7 +5,7 @@
 # tests/reader-exam/), and no hermetic suite can. What this suite owns is what a machine can
 # hold the exam to: the checks files the readers were examined on are the ones that ship, and
 # the latest sitting had readers behind it who met every sample, and the recipe a sitter follows
-# is in the tree. Seven sections:
+# is in the tree. Eight sections:
 #
 #   §PIN      `exam_pin` on planted sittings: the latest sitting, by file order, has the
 #             three `sha256` lines equal to the files' digests, a `result` line for every
@@ -38,6 +38,12 @@
 #             and not a function of the same name, no widening flag); gen-prompt.sh on made-up
 #             briefs; neither helper nor any prompt it writes names a sample or the exam. No
 #             session is started.
+#   §HELPERS  (T64) run-session.sh against a fake CLI on a throwaway PATH: a claude that is a
+#             relative path (an entry `.`, an empty one, a named relative one) or a file inside
+#             <dest>, reached through a link or not, is refused and never runs; a <dest> that is
+#             this checkout or inside it is refused by both helpers, and a copy outside any
+#             checkout does not refuse; a fifth argument is refused, and the same row is red on a
+#             doctored copy that passes it on; README steps 2 and 3 say each.
 #   §SHIPPED  the shipped `sittings.md` against the shipped checks files.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN runs
@@ -943,6 +949,161 @@ for h in "$RUN" "$GEN"; do
   expect_nonempty "R8: ${h##*/} is read" "$(head -n 1 "$h")"
   expect_empty "R8: ${h##*/} holds none of them either" "$(grep -inE "$NAMED_RE" "$h")"
 done
+
+section "§HELPERS — whose claude runs, where a session or a build may sit, no fifth argument (T64)"
+
+# SYNTHESIZED here: a fake CLI on a throwaway PATH (a tagged script, and the §RECIPE one), a
+# caller directory and a built project that each hold a file named claude. Nothing starts a
+# session. The PATH always ends in /usr/bin:/bin, so the helpers' own tools resolve.
+CK="$TMP/t64"
+mkdir -p "$CK/caller" "$CK/dest/bin" "$CK/abs" "$CK/copied"
+tagfake() { printf '#!/bin/bash\necho "%s" >> "$TAG_LOG"\n' "$1" > "$2"; chmod +x "$2"; }
+tagfake caller "$CK/caller/claude"
+tagfake dest "$CK/dest/claude"
+tagfake destbin "$CK/dest/bin/claude"
+# hs <cwd> <PATH> <helper args...> — one helper run from <cwd>, the fakes' logs under $CK.
+hs() {
+  local cwd="$1" pth="$2"; shift 2
+  ( cd "$cwd" && env PATH="$pth" TAG_LOG="$CK/tags" FAKE_LOG="$CK/fake.log" /bin/bash "$@" 2>&1 )
+}
+hs_reset() { rm -f "$CK/tags" "$CK/fake.log" "$CK/out.json" "$CK/out.json.time" "$CK/out.json.err"; }
+OKPATH="$RV/bin:/usr/bin:/bin"
+
+# B1: the CLI is an absolute path outside <dest>.
+hs_reset
+out="$(hs "$CK/caller" ".:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H1: PATH holding . with a claude in the caller's directory is refused" 2 "$rc"
+expect_contains "H1: …naming the PATH entry that gave a relative answer" "PATH entry '.' gives claude a relative path" "$out"
+expect_false "H1: …and neither the caller's claude nor the project's ran" test -e "$CK/tags"
+expect_false "H1: …and nothing is written" test -e "$CK/out.json.time"
+hs_reset
+out="$(hs "$CK/caller" ":/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H2: PATH holding an empty entry is refused" 2 "$rc"
+expect_contains "H2: …naming it" "an empty PATH entry gives claude a relative path" "$out"
+expect_false "H2: …and nothing ran" test -e "$CK/tags"
+hs_reset
+out="$(hs "$CK/caller" "/usr/bin:/bin:" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H2: a trailing empty entry is refused too" 2 "$rc"
+expect_false "H2: …and nothing ran" test -e "$CK/tags"
+hs_reset
+out="$(hs "$CK/caller" "rel:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H2: a relative entry that holds no claude gives no answer, and no claude is found" 2 "$rc"
+mkdir -p "$CK/caller/rel"; tagfake rel "$CK/caller/rel/claude"
+out="$(hs "$CK/caller" "rel:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H2: a named relative entry that holds a claude is refused" 2 "$rc"
+expect_contains "H2: …naming it" "PATH entry 'rel' gives claude a relative path" "$out"
+expect_false "H2: …and it never ran" test -e "$CK/tags"
+hs_reset
+out="$(hs "$CK/caller" "$RV/bin:.:/usr/bin:/bin:" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H3: an absolute claude first runs, whatever relative entries follow it" 0 "$rc"
+expect_false "H3: …and the caller's claude never ran" test -e "$CK/tags"
+expect_eq "H3: …with the project as its working directory" "cwd: $(cd "$CK/dest" && pwd -P)" "$(sed -n '3p' "$CK/fake.log")"
+hs_reset
+out="$(hs "$CK" "$CK/dest/bin:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H4: an absolute claude inside <dest> is refused" 2 "$rc"
+expect_contains "H4: …naming it" "$CK/dest/bin/claude" "$out"
+expect_false "H4: …and it never ran" test -e "$CK/tags"
+ln -s "$CK/dest" "$CK/destlink"
+hs_reset
+out="$(hs "$CK" "$CK/dest/bin:/usr/bin:/bin" "$RUN" "$CK/destlink" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H4: <dest> reached through a link is the same place" 2 "$rc"
+hs_reset
+out="$(hs "$CK" "$CK/destlink/bin:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H4: …and so is a PATH entry reached through a link" 2 "$rc"
+expect_false "H4: …neither ran" test -e "$CK/tags"
+ln -s "$CK/dest/bin/claude" "$CK/abs/claude"
+hs_reset
+out="$(hs "$CK" "$CK/abs:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H4: a claude outside <dest> that is a link to one inside it is refused" 2 "$rc"
+expect_false "H4: …and it never ran" test -e "$CK/tags"
+
+# S1: neither helper starts anything inside the checkout that holds the answers.
+SITS="never sits inside the checkout that holds the answers"
+REPO_PHYS="$(cd "$REPO" && pwd -P)"
+expect_eq "H5: the helpers' own checkout is the one this suite reads" "$REPO_PHYS" \
+  "$(cd "$(git -C "$EXAM" rev-parse --show-toplevel)" && pwd -P)"
+ln -s "$REPO/tests/reader-exam" "$CK/into-checkout"
+for spec in "dot:$REPO:." "absolute:$REPO:$REPO" "inside:$REPO:$REPO/tests" "link:$CK:$CK/into-checkout"; do
+  IFS=: read -r nm cwd d <<<"$spec"
+  hs_reset
+  out="$(hs "$cwd" "$OKPATH" "$RUN" "$d" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+  expect_status "H6: run-session.sh refuses a <dest> that is the checkout, in it, or a link into it ($nm)" 2 "$rc"
+  expect_contains "H6: …saying why ($nm)" "run-session.sh: refused — a session $SITS" "$out"
+  expect_false "H6: …and the fake never ran ($nm)" test -e "$CK/fake.log"
+  expect_false "H6: …and nothing is written ($nm)" test -e "$CK/out.json.time"
+done
+hs_reset
+out="$(hs "$CK" "$OKPATH" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H6: a <dest> outside it is accepted, beside the refusals" 0 "$rc"
+
+# A helper copied out of its checkout cannot know where it is, so it does not refuse on that
+# ground and says nothing of it. The copy is proved to sit outside any checkout first.
+cp "$RUN" "$CK/copied/run-session.sh"; cp "$EXAM/materialize.sh" "$CK/copied/materialize.sh"
+expect_false "H7: the copied helpers sit in no git checkout" git -C "$CK/copied" rev-parse --show-toplevel
+hs_reset
+out="$(hs "$CK" "$OKPATH" "$CK/copied/run-session.sh" "$REPO" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H7: a copied run-session.sh does not refuse a <dest> inside the checkout" 0 "$rc"
+expect_absent "H7: …and says nothing of a checkout" "checkout" "$out"
+expect_true "H7: …and the fake ran" test -e "$CK/fake.log"
+# …and the row is live: a copy that refuses when it cannot find a checkout is refused here.
+anchor "$RUN" 'if [ -n "$top" ]; then' 1
+sed 's/if \[ -n "\$top" \]; then/if true; then/' "$RUN" > "$CK/copied/refuse-blind.sh"
+expect_eq "H7: the doctored copy refuses without a checkout to refuse for" "1" "$(grep -c 'if true; then' "$CK/copied/refuse-blind.sh")"
+hs_reset
+out="$(hs "$CK" "$OKPATH" "$CK/copied/refuse-blind.sh" "$REPO" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
+expect_status "H7: …so on it the same row is red: it exits 2" 2 "$rc"
+expect_contains "H7: …with the refusal" "never sits inside the checkout" "$out"
+out="$(bash "$CK/copied/materialize.sh" "$DS" "$TMP/copied-built/s1" 2> "$CK/copied.err")"; rc=$?
+expect_status "H7: a copied materialize.sh builds" 0 "$rc"
+expect_empty "H7: …and says nothing" "$(cat "$CK/copied.err")"
+
+for spec in "dot:$REPO:." "absolute:$REPO:$REPO"; do
+  IFS=: read -r nm cwd d <<<"$spec"
+  out="$(cd "$cwd" && bash "$EXAM/materialize.sh" "$DS" "$d" 2>&1)"; rc=$?
+  expect_status "H8: materialize.sh refuses the checkout itself ($nm)" 2 "$rc"
+  expect_contains "H8: …saying why ($nm)" "materialize: refused — a build $SITS" "$out"
+done
+INSIDE="$REPO/.t64-inside"
+out="$(bash "$EXAM/materialize.sh" "$DS" "$INSIDE/s1" 2>&1)"; rc=$?
+expect_status "H8: materialize.sh refuses a new path inside the checkout" 2 "$rc"
+expect_contains "H8: …saying why" "materialize: refused — a build $SITS" "$out"
+expect_false "H8: …and builds nothing" test -e "$INSIDE"
+rm -rf "$INSIDE"
+ln -s "$REPO/tests" "$CK/tests-link"
+out="$(bash "$EXAM/materialize.sh" "$DS" "$CK/tests-link/.t64-sym/s1" 2>&1)"; rc=$?
+expect_status "H8: …and one reached through a link outside it" 2 "$rc"
+expect_contains "H8: …saying why" "materialize: refused — a build $SITS" "$out"
+expect_false "H8: …and builds nothing" test -e "$REPO/tests/.t64-sym"
+rm -rf "$REPO/tests/.t64-sym"
+out="$(bash "$EXAM/materialize.sh" "$DS" "$TMP/x/dup-counter-again" 2>&1)"; rc=$?
+expect_status "H8: its refusal of a destination that names the sample stands" 2 "$rc"
+expect_contains "H8: …with its own words" "names the sample dup-counter" "$out"
+
+# S2: a fifth argument is refused and nothing runs. The argument is a permissions flag, held as
+# data; the doctored copy appends the rest of the arguments to the CLI's and relaxes the count,
+# and is the proof that the row goes red on a passthrough.
+FIFTH="--dangerously-skip-permissions"
+fifth() { # <script> — "refused" when it exits 2 and the fake never ran, "ran" when the fake did
+  hs_reset
+  out="$(hs "$CK" "$OKPATH" "$1" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json" "$FIFTH")"; rc=$?
+  if [ "$rc" = 2 ] && [ ! -e "$CK/fake.log" ]; then echo refused; elif [ -e "$CK/fake.log" ]; then echo ran; else echo "rc=$rc"; fi
+}
+expect_eq "H9: a fifth argument is refused and the fake never runs" "refused" "$(fifth "$RUN")"
+expect_false "H9: …and nothing is written" test -e "$CK/out.json.time"
+anchor "$RUN" '"$#" -eq 4' 1
+anchor "$RUN" '--output-format json "$(cat "$prompt")"' 1
+sed -e 's/"\$#" -eq 4/"$#" -ge 4/' -e 's/--output-format json "\$(cat "\$prompt")"/--output-format json "$(cat "$prompt")" "${@:5}"/' "$RUN" > "$CK/pass.sh"
+expect_eq "H9: the doctored copy relaxes the count and passes the rest on" "2" "$(grep -cE '"\$#" -ge 4|\$\{@:5\}' "$CK/pass.sh")"
+expect_eq "H9: …and on it the same row is red: the fake ran" "ran" "$(fifth "$CK/pass.sh")"
+expect_contains "H9: …with the flag among its arguments" "[$FIFTH]" "$(cat "$CK/fake.log")"
+
+# The README says each refusal where a sitter meets the helper.
+STEP2="$(awk '/^2\. \*\*Materialize each sample/ { f = 1 } /^3\. \*\*Open an engaged session/ { f = 0 } f' "$EXAM/README.md")"
+expect_contains "H10: step 2 says materialize.sh refuses a destination that is this checkout or inside it" "is this checkout or lies inside it" "$STEP2"
+STEP3_FLAT="$(printf '%s' "$STEP3" | tr '\n' ' ' | tr -s ' ')"
+expect_contains "H10: step 3 says run-session.sh refuses one too" "inside this checkout" "$STEP3_FLAT"
+expect_contains "H10: …and a claude that is a relative path or a file inside <dest>" "relative path" "$STEP3_FLAT"
+expect_contains "H10: …and a fifth argument" "fifth argument" "$STEP3_FLAT"
 
 section "§SHIPPED — the shipped sittings against the shipped checks files"
 
