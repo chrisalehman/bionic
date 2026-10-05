@@ -1169,7 +1169,7 @@ _WT_PROOFS_TAKING_STALE="${_WT_PROOFS_TAKING_STALE:-2}"
 _wt_proofs_taking() {  # <taking dir> <taker pid> <lock path> -> 0 held, 1 not (a dead holder's freed)
   local h p n=0 mt
   if mkdir "$1" 2>/dev/null; then
-    : > "$1/h.$2" 2>/dev/null || return 1
+    { : > "$1/h.$2"; } 2>/dev/null || return 1
     for h in "$1"/h.*; do [ -e "$h" ] && n=$((n + 1)); done
     [ "$n" -eq 1 ] && return 0
     rm -f "$1/h.$2" 2>/dev/null
