@@ -685,8 +685,11 @@ expect_eq "NOT-A-FILE: remove changes nothing inside it" "$DIR_LS" "$(ls -A "$DI
 DIR_RS="$(remove_run "$SB_DIR" y "$TMP/standalone/remove.sh")"
 expect_contains "NOT-A-FILE: the standalone door says the same" "${DIR_PATH} is a directory" "$DIR_RS"
 expect_eq "NOT-A-FILE: …and changes nothing inside it" "$DIR_LS" "$(ls -A "$DIR_PATH")"
-ROW_DIR="$(report_row "$(doctor_run "$SB_DIR")" "$DOCTOR_ROW_LABEL")"
+DOC_DIR="$(doctor_run "$SB_DIR")"
+ROW_DIR="$(report_row "$DOC_DIR" "$DOCTOR_ROW_LABEL")"
 expect_nonempty "NOT-A-FILE: doctor renders a row" "$ROW_DIR"
+expect_contains "NOT-A-FILE: doctor's fix line keeps the fault whole on the page" \
+  "~/.claude/CLAUDE.md is a directory, not a file → fix it by hand" "$DOC_DIR"
 expect_contains "NOT-A-FILE: doctor's row is a fault" "✗" "$ROW_DIR"
 expect_contains "NOT-A-FILE: doctor's row says it is not a file" "not a file" "$ROW_DIR"
 expect_absent "NOT-A-FILE: doctor suggests no setup run that would write" "/bionic:setup" "$ROW_DIR"
