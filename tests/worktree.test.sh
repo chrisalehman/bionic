@@ -2613,4 +2613,135 @@ expect_match "(p9) why=head names the stamp file and the head it looked for" \
   "spawn-worktree: REFUSED reason=stale-proof why=head stamp_head=0000000000000000000000000000000000000000 head=${LP9_H} stamps=$(stamp_file "$LP9") — *" \
   "$(worktree_land "$LP9" wave/fixture)"
 
+section "§LAND-RED: a row that declared its red at dispatch lands with exactly that suite red (wave-27 T31; REQ-14 AC-14.1; D23)"
+#
+# A brief may declare `Lands-red: <suite> until <token>` with `Red-evidence: <path>`; the dispatch
+# wall records both on the launch row (`lands_red=`, `red_evidence=`). In `land`'s stale-proof rule a
+# red newest run at the head is then accepted for EXACTLY that suite, when the evidence file exists
+# and holds a line `head: <the tree's head>` and every other suite stamped at the head is green. The
+# LANDED line carries `landed-red=<suite>` after `removed=` and before `proofs=`, and the landing
+# record copies the red stamp line like any other.
+#
+# FIXTURE FIDELITY. Every land goes through `worktree_land_for_session`, the path both real callers
+# take, on a plan bound as bind_plan binds one. The tree's owner is written by the production writer
+# of the workspace record (`worktree_record_workspace`), its roster rows by the production writer of
+# the row (`roster_row`, through roster_row_fixture), and its stamps in the shim's shape (lp_stamp).
+LR="$(new_repo "$TMP/land-red")"
+LR_SID="land-red-session-01"
+LR_PLAN="$LR/.bionic/docs/plans/epic-x/wave-lr.plan.md"
+LR_EV="$LR/.bionic/docs/record/wave-lr/T9-red.md"
+mkdir -p "${LR_PLAN%/*}" "$LR/.bionic/tmp" "${LR_EV%/*}"
+printf -- '---\nworking-branch: wave/fixture\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n| id | step | kind | task | worktree | status |\n|---|---|---|---|---|---|\n| T9 | 4 | build | nine | .worktrees/27-T9 | active |\n' > "$LR_PLAN"
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LR_PLAN" > "$LR/.bionic/tmp/engaged-${LR_SID}.state"
+LR_ROSTER="$LR/.bionic/tmp/roster-${LR_SID}.state"
+lr_tree() {  # <branch> <dir> <agent name> -> a tree a commit ahead, its owner recorded, its record link
+  local d="$LR/.worktrees/$2"
+  git -C "$LR" worktree add --quiet -b "$1" "$d" HEAD >/dev/null 2>&1
+  echo "$RANDOM$RANDOM" >> "$d/$2.txt"; git -C "$d" add -A >/dev/null 2>&1; git -C "$d" commit --quiet -m "$1 work"
+  ln -s "$LR/.bionic" "$d/.bionic"
+  worktree_record_workspace "$LR" "$LR_SID" "$3" "$(cd "$d" && pwd -P)" "$1" "$(git -C "$LR" rev-parse HEAD)" >/dev/null
+  printf '%s' "$(cd "$d" && pwd -P)"
+}
+lr_launch() {  # <agent name> [<extra key=value>...] — the dispatch wall's launch row
+  local n="$1"; shift
+  roster_row_fixture status=intended "session=${LR_SID}" "name=$n" agent_id= subagent_type=bionic:implementor \
+    "suites_allowed=widget.test.sh other.test.sh" "$@" >> "$LR_ROSTER"
+}
+lr_stamp() {  # <tree> <rc> <suite> — one stamp line at the tree's head, the shim's shape
+  printf 'stamp/v1|head=%s|dirty=0|rc=%s|at=2026-10-05T01:02:03Z|suites=%s|cmd=bash tests/%s\n' \
+    "$(git -C "$1" rev-parse HEAD)" "$2" "$3" "$3" >> "$(stamp_file "$1")"
+}
+LR_DECL=("lands_red=widget.test.sh until approval:release" "red_evidence=.bionic/docs/record/wave-lr/T9-red.md")
+
+# (r1) THE WORKED ANSWER: widget red, other green, evidence naming the head -> LANDED, landed-red=.
+LR1="$(lr_tree wt/27-T9 27-T9 w27-T9)"; LR1_H="$(git -C "$LR1" rev-parse HEAD)"
+lr_launch w27-T9 "${LR_DECL[@]}"
+lr_stamp "$LR1" 1 widget.test.sh; lr_stamp "$LR1" 0 other.test.sh
+printf '# why T9 is red\nhead: %s\nthe owner step is outside the run\n' "$LR1_H" > "$LR_EV"
+expect_eq "(r1) fixture: the workspace record answers the tree for its agent" "$LR1" "$(workspace_for_name "$LR" "$LR_SID" w27-T9)"
+OUTLR1="$(worktree_land_for_session "$LR1" "$LR" "$LR_SID")"; RCLR1=$?
+LR1_M="$(git -C "$LR" rev-parse refs/heads/wave/fixture)"
+LR1_AT="$(printf '%s' "$OUTLR1" | sed -n 's/.* landed-red-at=\([^ ]*\) .*/\1/p')"
+expect_match "(r1a) the LANDED line's landed-red-at= is UTC, YYYY-MM-DDTHH:MM:SSZ" "$LP_ISO" "$LR1_AT"
+expect_eq "(r1b) AC-14.1 the declared red lands: the LANDED line carries landed-red= and landed-red-at= after removed= and before proofs=" \
+  "spawn-worktree: LANDED branch=wt/27-T9 onto=wave/fixture checkout=${LR} merge=${LR1_M} removed=${LR1} landed-red=widget.test.sh landed-red-at=${LR1_AT} proofs=${LR}/.bionic/docs/record/wave-lr/landing-proofs.log" "$OUTLR1"
+expect_contains "(r1b2) …the same instant the landing record's header carries in at=" \
+  "landed: row=T9 branch=wt/27-T9 head=${LR1_H} merge=${LR1_M} at=${LR1_AT}" "$(cat "$LR/.bionic/docs/record/wave-lr/landing-proofs.log" 2>/dev/null)"
+expect_eq "(r1c) …exit 0" "0" "$RCLR1"
+expect_contains "(r1d) …and the landing record copies the red stamp line like any other" \
+  "|rc=1|at=2026-10-05T01:02:03Z|suites=widget.test.sh|" "$(cat "$LR/.bionic/docs/record/wave-lr/landing-proofs.log" 2>/dev/null)"
+
+section "§LAND-RED-NO: an undeclared red, a second red, or a declaration not carried from dispatch is refused (wave-27 T31; REQ-14 AC-14.2; D23)"
+#
+# The same fixture. A second suite red at the head is refused as an undeclared red is today
+# (`stale-proof why=red`); evidence that is missing or names another head is refused, naming the file
+# and the head it wanted; a row whose launch line carries no declaration is refused as today, and so
+# is one whose keys reached the roster on a later row (by amend, which cannot write them, or by hand):
+# the dispatch wall is the keys' one writer, and land reads the launch line alone.
+lr_refused() {  # <label> <tree> <want, a glob> — the land refuses, the target does not move, the tree stays
+  local before out rc; before="$(refs_of "$LR")"
+  out="$(worktree_land_for_session "$2" "$LR" "$LR_SID")"; rc=$?
+  expect_match "$1" "$3" "$out"
+  expect_eq "$1 — …exit 2, no ref moved, the tree stands" "2 yes yes" \
+    "$rc $([ "$(refs_of "$LR")" = "$before" ] && echo yes || echo no) $([ -d "$2" ] && echo yes || echo no)"
+}
+# (n1) a SECOND suite red at the head.
+LN1="$(lr_tree wt/27-N1 27-N1 w27-N1)"; LN1_H="$(git -C "$LN1" rev-parse HEAD)"
+lr_launch w27-N1 "${LR_DECL[@]}"
+lr_stamp "$LN1" 1 widget.test.sh; lr_stamp "$LN1" 1 other.test.sh
+printf 'head: %s\n' "$LN1_H" > "$LR_EV"
+lr_refused "(n1) AC-14.2 a second suite also red is refused as an undeclared red, naming it" "$LN1" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=other.test.sh head=${LN1_H} — *"
+# (n2) the evidence file missing.
+LN2="$(lr_tree wt/27-N2 27-N2 w27-N2)"; LN2_H="$(git -C "$LN2" rev-parse HEAD)"
+lr_launch w27-N2 "${LR_DECL[@]}"
+lr_stamp "$LN2" 1 widget.test.sh; lr_stamp "$LN2" 0 other.test.sh
+rm -f "$LR_EV"
+lr_refused "(n2) the evidence file missing is refused, naming the file and the head it wanted" "$LN2" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red-evidence suite=widget.test.sh head=${LN2_H} evidence=${LR_EV} — *missing*"
+# (n3) the evidence naming another commit.
+printf 'head: %s\n' "$LR1_H" > "$LR_EV"
+lr_refused "(n3) evidence whose head: names another commit is refused, naming the file, the head it wanted and the one it found" "$LN2" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red-evidence suite=widget.test.sh head=${LN2_H} evidence=${LR_EV} found=${LR1_H} — *"
+printf 'head: %s\n' "$LN2_H" > "$LR_EV"
+expect_match "(n3b) control: the same tree with the evidence naming its head lands" \
+  "spawn-worktree: LANDED branch=wt/27-N2 * landed-red=widget.test.sh landed-red-at=* proofs=*" "$(worktree_land_for_session "$LN2" "$LR" "$LR_SID")"
+# (n4) the same tree shape with NO declaration on its launch row.
+LN4="$(lr_tree wt/27-N4 27-N4 w27-N4)"; LN4_H="$(git -C "$LN4" rev-parse HEAD)"
+lr_launch w27-N4
+lr_stamp "$LN4" 1 widget.test.sh; lr_stamp "$LN4" 0 other.test.sh
+printf 'head: %s\n' "$LN4_H" > "$LR_EV"
+lr_refused "(n4) AC-14.2 no declaration on the launch row: refused as today" "$LN4" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=widget.test.sh head=${LN4_H} — *"
+# (n5) the keys on a row written after the launch: an amended copy, then a later started row.
+lr_launch w27-N4 "amended=2026-10-05T00:00:00Z widen" "${LR_DECL[@]}"
+roster_row_fixture status=identified "session=${LR_SID}" name=w27-N4 agent_id=a-n4 "${LR_DECL[@]}" >> "$LR_ROSTER"
+lr_refused "(n5) AC-14.2 a declaration that reached the roster after the launch line is not honoured" "$LN4" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=widget.test.sh head=${LN4_H} — *"
+expect_contains "(n5b) fixture: the roster does carry the keys, on the later rows" \
+  "|name=w27-N4|" "$(grep -F 'lands_red=widget.test.sh' "$LR_ROSTER")"
+
+section "§LAND-JUDGED: no landing after the run was judged for integration (wave-27 T31; review pass 25 F3)"
+#
+# `current 8` judges the working head; a landing after it would move the working branch past the
+# head that was judged, with nothing judging it again. So `land` refuses while the bound plan's
+# `current:` is 8 or later, its letter dropped: `reason=past-judgment why=current-<value>`, nothing
+# merged, nothing removed. At `current: 7` it lands; with no bound plan it lands as today.
+# FIXTURE FIDELITY: §LAND-RED's repository and bound plan, its `current:` line rewritten in place.
+lj_current() { sed "s/^current: .*/current: $1/" "$LR_PLAN" > "$LR_PLAN.tmp" && mv "$LR_PLAN.tmp" "$LR_PLAN"; }
+LJ1="$(lr_tree wt/27-J1 27-J1 w27-J1)"; lr_launch w27-J1; lr_stamp "$LJ1" 0 widget.test.sh
+for lj in 8 8a 8b; do
+  lj_current "$lj"
+  lr_refused "(j-$lj) F3 at current: $lj a ready tree is refused past-judgment" "$LJ1" \
+    "spawn-worktree: REFUSED reason=past-judgment why=current-${lj} * — *judged for integration*"
+done
+lj_current 7
+expect_match "(j-7) …at current: 7 the same tree lands" \
+  "spawn-worktree: LANDED branch=wt/27-J1 onto=wave/fixture *" "$(worktree_land_for_session "$LJ1" "$LR" "$LR_SID")"
+lj_current 8
+LJ2="$(lr_tree wt/27-J2 27-J2 w27-J2)"; lr_stamp "$LJ2" 0 widget.test.sh
+expect_match "(j-none) …and a land with no bound plan lands as today, whatever a plan on disk says" \
+  "spawn-worktree: LANDED branch=wt/27-J2 onto=wave/fixture * proofs=none" "$(worktree_land "$LJ2" wave/fixture)"
+lj_current 4
+
 finish

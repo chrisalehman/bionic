@@ -10,5 +10,7 @@ Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watc
 Files: <every path the task may create or edit>  # writers; a read-only brief omits this and keeps Suites: none
 Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
 Re-executes: `<cmd>`
+Lands-red: <suite> until <ext:slug | approval:name>  # optional
+Red-evidence: <path under record/>  # with Lands-red:
 Deliverable-waiver: <reason>  # only for a report returned by message
 ```

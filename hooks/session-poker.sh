@@ -6102,7 +6102,7 @@ RC_TAGS
         RC_P="$(git --literal-pathspecs -C "$RC_CO" ls-files --full-name --error-unmatch -- "$RC_W" 2>/dev/null)" || continue
         case "$RC_P" in ''|*"
 "*) continue ;; esac
-        [ -z "$(git --literal-pathspecs -C "$RC_CO" diff --name-only "$RC_BASE" "$RC_HEAD" -- "$RC_P" 2>/dev/null)" ] \
+        git --literal-pathspecs -C "$RC_CO" diff --quiet "$RC_BASE" "$RC_HEAD" -- "$RC_P" >/dev/null 2>&1 \
           || printf 'check-changed: %s\n' "$RC_P"
       done | awk '!seen[$0]++')"
     RC_OUT="$(cd "$RC_CO" 2>/dev/null || exit 1
