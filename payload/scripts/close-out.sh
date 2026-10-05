@@ -453,15 +453,16 @@ tmp_count() {
 # stdout, or nothing at all when the entry is not session-keyed (an ephemera file, or
 # anything shaped outside `PATROL_STATE_CLASSES`). One definition, walking the SAME
 # class list `patrol_session_state_files` builds its own paths from, so a class added
-# there is recognised here without a second list to keep in step.
+# there is recognised here without a second list to keep in step. The owner is the name
+# after `<class>-` up to its first dot, lib/patrol.sh's rule for every class (wave-27 T68): a
+# session id holds no dot, so a per-start `start-clock-<sid>.<agent id>.state` is <sid>'s.
 _co_tmp_owner() {
   local base="$1" class owner
   for class in $PATROL_STATE_CLASSES; do
     case "$base" in
       "$class"-*.state|"$class"-*.state"$PATROL_STATE_ARMED_SUFFIX")
         owner="${base#"$class"-}"
-        owner="${owner%"$PATROL_STATE_ARMED_SUFFIX"}"
-        owner="${owner%.state}"
+        owner="${owner%%.*}"
         [ -n "$owner" ] && printf '%s\n' "$owner"
         return 0
         ;;
