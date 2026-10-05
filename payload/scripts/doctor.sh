@@ -2633,12 +2633,36 @@ fi
 # no step removes it, so it is named once, by number and never by its text, as the
 # user's to edit — not a fault, and not routed to setup.
 if [ "$LEGACY_ALIAS_STATE" != "not-a-file" ]; then
-  _legacy_alias_theirs="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"; _legacy_alias_theirs="${_legacy_alias_theirs#* theirs=}"
+  _legacy_alias_scan="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"
+  _legacy_alias_theirs="${_legacy_alias_scan#* theirs=}"
+  _legacy_alias_bound="${_legacy_alias_scan#* bound=}"; _legacy_alias_bound="${_legacy_alias_bound%% *}"
+  _legacy_alias_why="${_legacy_alias_scan#* why=}"; _legacy_alias_why="${_legacy_alias_why%% *}"
+  _legacy_alias_ours="${_legacy_alias_scan#ours=}"; _legacy_alias_ours="${_legacy_alias_ours%% *}"
   # The label carries the finding and the cell the place: both fit their columns
   # whole, where one sentence in the cell lost the file name to the cut.
   [ -n "$_legacy_alias_theirs" ] && \
     _doctor_env_row "$DOCTOR_NIL" "retired alias, not in a form bionic wrote" \
       "$(bionic_line_numbers_words "$_legacy_alias_theirs") of $(_doctor_tilde "$(_detect_shell_rc)")" " → edit it by hand"
+  # Bionic's own line where removing it would change the user's code, or where the
+  # rc's shell could not say (wave-27 T66, review pass 40 B1): no step removes it,
+  # so it is the user's to edit — not a fault, and not routed to setup.
+  if [ -n "$_legacy_alias_bound" ]; then
+    case "$_legacy_alias_why" in
+      ok)       _legacy_alias_label="retired alias, bionic's, in your own code"; _legacy_alias_tail=" → edit it by hand" ;;
+      no-shell) _legacy_alias_label="retired alias, bionic cannot check it"
+                _legacy_alias_tail=" → $(bionic_rc_shell "$(_detect_shell_rc)") is not installed: edit it by hand" ;;
+      no-parse) _legacy_alias_label="retired alias, bionic cannot check it"; _legacy_alias_tail=" → the file does not parse: edit it by hand" ;;
+      *)        _legacy_alias_label="retired alias, bionic cannot check it"; _legacy_alias_tail=" → edit it by hand" ;;
+    esac
+    _doctor_env_row "$DOCTOR_NIL" "$_legacy_alias_label" \
+      "$(bionic_line_numbers_words "$_legacy_alias_bound") of $(_doctor_tilde "$(_detect_shell_rc)")" "$_legacy_alias_tail"
+  fi
+  # A read-only rc: the row says so and sends no one to a setup step that would
+  # only refuse (wave-27 T66, review pass 40 S5).
+  if { [ "$LEGACY_ALIAS_STATE" = "yes" ] || [ -n "$_legacy_alias_ours" ]; } && ! markers_writable "$(_detect_shell_rc)"; then
+    _doctor_env_row "$DOCTOR_NIL" "$(bionic_check_label legacy-alias)" \
+      "read-only: $(_doctor_tilde "$(_detect_shell_rc)")" " → make it writable to let bionic remove it"
+  fi
 fi
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
   _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-hooks)" \
