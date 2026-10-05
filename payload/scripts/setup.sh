@@ -425,13 +425,10 @@ _setup_item_verb() {  # <name>
     legacy-permission-block) say "remove bionic's retired permission block from $(_dep_settings_file)" ;;
     permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
     working-principles)
-      # AN EDITED BLOCK IS NOT ANSWERED BY THIS PAGE. Its replacement is asked
-      # again, live, after the difference is shown (step 13), so the page says so.
-      if [ "$(principles_state)" = "edited" ]; then
-        say "show how your edited working principles in $(principles_file) differ from bionic's text, and ask again before replacing them"
-      else
-        say "add bionic's working principles to $(principles_file), between markers"
-      fi ;;
+      # ONLY AN ABSENT BLOCK REACHES THIS PAGE (an edited one is the user's and
+      # is not pending), and its text is not on the page: step 13 prints it and
+      # asks again, live, before writing — so the page says so.
+      say "show bionic's working principles and ask again before adding them to $(principles_file)" ;;
     *)                  return 1 ;;
   esac
   return 0
@@ -1206,14 +1203,22 @@ setup_claude_proxy() {
   consent "   Add it to ${rc}?"; _setup_consent_rc=$?
   if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${rc} is unchanged."; action "add bionic's claude() shell function to ${rc} — $(_setup_answer_yes claude-proxy)"; return 0; fi  # consent gate: rc item
 
+  # The writer's exit code is its reason (lib/markers.sh): a refused rc is left
+  # exactly as it was, and the line says which refusal it was.
   for item_name in $missing; do
-    if rc_set "$item_name"; then
-      wrote=$((wrote + 1))
-    else
-      item "$SETUP_BAD" "claude() function" "could not write ${rc}"
-      action "add bionic's claude() shell function to ${rc} (bionic could not write the file)"
-      return 0
-    fi
+    rc_set "$item_name"; _setup_rc_set_rc=$?
+    case "$_setup_rc_set_rc" in
+      0) wrote=$((wrote + 1)); continue ;;
+      2) item "$SETUP_BAD" "claude() function" "markers do not pair up — nothing written"
+         say "     in ${rc}:"
+         markers_check "$rc" "$RC_START" "$RC_END" | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
+         action "fix bionic's markers in ${rc} by hand" ;;
+      3) item "$SETUP_NIL" "claude() function" "read-only — not written"
+         action "make ${rc} writable to add bionic's claude() shell function — bionic does not write a read-only file" ;;
+      *) item "$SETUP_BAD" "claude() function" "could not write ${rc} — it is as it was"
+         action "add bionic's claude() shell function to ${rc} (bionic could not write the file)" ;;
+    esac
+    return 0
   done
   # Same gap step 5 reports: an rc is read when a shell STARTS, so the function
   # is in the next terminal and not in the one running this.
@@ -1669,46 +1674,86 @@ _setup_default_mode() {
 # THE USER'S OWN INSTRUCTION FILE, WRITTEN ONLY ON A YES (wave-27 D16). A short
 # set of working principles, offered for `<claude home>/CLAUDE.md` and written
 # between bionic's markers; nothing outside them is touched, and a file that is
-# not there is created only on that yes. The text, the file and the three states
+# not there is created only on that yes. The text, the file and the four states
 # are env.sh's (`principles_*`); this step owns the questions.
 #
-# AN EDITED BLOCK GETS A SECOND, LIVE QUESTION. The writer rebuilds the block
-# whole, so replacing a block the user changed would throw their change away.
-# The difference is printed first, and the replacement waits for a yes typed at
-# THAT question — under `--all` too, where the page's one yes was given before
-# the difference was on screen, so the page's flag is lifted for this one read.
+# THE WHOLE TEXT IS ON SCREEN BEFORE THE QUESTION (wave-27 T40, review pass 9
+# finding 6). It goes into every session the user starts, and one of its rules
+# lets an agent act without asking, so the path, the full text and that rule by
+# name are printed first. Under `--all` the page's one yes was given before the
+# text was on screen, so the page's flag is lifted for this one read.
+#
+# AN EDITED BLOCK IS THE USER'S (T40, finding 5). A whole pass says so in one
+# line and moves on; the difference, and the question that could replace it,
+# come only when the item is asked for by name (`--only working-principles`).
+# MALFORMED MARKERS AND A READ-ONLY FILE ARE REFUSED (T40, findings 2 and 8):
+# what was found is printed, and nothing is asked or written.
 
 setup_working_principles() {
   _setup_wants working-principles || return 0
   say ""
   say "13. Working principles"
-  local file state
+  local file state rc
   file="$(principles_file)"
   state="$(principles_state)"
 
   [ "$state" != "present" ] || { item "$SETUP_OK" "working principles" "already in ${file} — nothing to do"; return 0; }  # idempotence guard: principles item
 
+  if [ "$state" = "malformed" ]; then
+    item "$SETUP_BAD" "working principles" "markers do not pair up — nothing written"
+    say "     in ${file}:"
+    principles_where | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
+    action "fix bionic's working-principles markers in ${file} by hand — bionic writes nothing to a block it cannot find the edges of"
+    return 0
+  fi
+  if ! markers_writable "$file"; then
+    item "$SETUP_NIL" "working principles" "read-only — not written"
+    say "     ${file} is read-only, and bionic leaves a file you made read-only alone."
+    action "make ${file} writable to add bionic's working principles — bionic does not write a read-only file"
+    return 0
+  fi
+
   if [ "$state" = "edited" ]; then
-    say "   ${file} carries bionic's working principles, edited. What replacing them would change:"
+    if [ -z "$SETUP_ONLY" ]; then
+      item "$SETUP_NIL" "working principles" "differ from bionic's text — kept as they are"
+      say "     in ${file}; to see the difference: ${SETUP_SELF_CMD} --only working-principles"
+      return 0
+    fi
+    say "   ${file} carries bionic's working principles, changed. What replacing them would change:"
     principles_diff | while IFS= read -r _setup_diff_line || [ -n "$_setup_diff_line" ]; do
       say "     ${_setup_diff_line}"
     done
-    SETUP_ALL=0 RM_ALL=0 consent "   Replace your edited block with bionic's text?"; _setup_consent_rc=$?
-    if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "your edit in ${file} is kept."; return 0; fi  # consent gate: principles edit
+    SETUP_ALL=0 RM_ALL=0 consent "   Replace your changed block with bionic's text?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "your block in ${file} is kept."; return 0; fi  # consent gate: principles edit
   else
-    say "   bionic's working principles are not in ${file}:"
-    say "   — seven short rules for how a session works: prove it before calling it done,"
-    say "     offload long work, lead with what the reader needs to decide."
-    consent "   Add them to ${file}, between bionic's markers?"; _setup_consent_rc=$?
+    say "   bionic's working principles are not in ${file}. This is the text bionic would add,"
+    say "   between its markers:"
+    say ""
+    # Folded to the page's width (AC-15): the text's paragraphs are one line each.
+    principles_text | fold -s -w 94 | while IFS= read -r _setup_text_line || [ -n "$_setup_text_line" ]; do
+      say "     ${_setup_text_line}"
+    done
+    say ""
+    say "   — seven short rules for how a session works. One of them, \"Decide what is yours\", lets"
+    say "     an agent make a call it can revert without asking you first."
+    if [ ! -e "$file" ]; then
+      say "   ${file} does not exist yet: bionic would create it, and the note"
+      say "   $(principles_created_file) so remove knows it may delete the file again."
+    fi
+    SETUP_ALL=0 RM_ALL=0 consent "   Add them to ${file}, between bionic's markers?"; _setup_consent_rc=$?
     if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${file} is unchanged."; action "add bionic's working principles to ${file} — $(_setup_answer_yes working-principles)"; return 0; fi  # consent gate: principles item
   fi
 
-  if principles_set; then
-    item "$SETUP_OK" "working principles" "written to ${file} — new sessions read them"
-  else
-    item "$SETUP_BAD" "working principles" "could not write ${file}"
-    action "add bionic's working principles to ${file} (bionic could not write the file)"
-  fi
+  principles_set; rc=$?
+  case "$rc" in
+    0) item "$SETUP_OK" "working principles" "written to ${file} — new sessions read them" ;;
+    2) item "$SETUP_BAD" "working principles" "markers do not pair up — nothing written"
+       action "fix bionic's working-principles markers in ${file} by hand" ;;
+    3) item "$SETUP_NIL" "working principles" "read-only — not written"
+       action "make ${file} writable to add bionic's working principles — bionic does not write a read-only file" ;;
+    *) item "$SETUP_BAD" "working principles" "could not write ${file} — it is as it was"
+       action "add bionic's working principles to ${file} (bionic could not write the file)" ;;
+  esac
   return 0
 }
 

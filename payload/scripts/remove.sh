@@ -216,6 +216,9 @@ RM_RC_END='# ─── bionic:rc:end ───'
 # PRINCIPLES_START / PRINCIPLES_END.
 RM_PRINCIPLES_START='<!-- bionic:principles:start -->'
 RM_PRINCIPLES_END='<!-- bionic:principles:end -->'
+# from env.sh (PRINCIPLES_CREATED_SUFFIX): the note setup leaves beside a CLAUDE.md
+# it CREATED, without which no door deletes the file. Pinned the same way.
+RM_PRINCIPLES_CREATED_SUFFIX='.bionic-created'
 RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
 # The retired env block's markers. NOT a copy of a live constant — setup.sh
 # stopped writing this block at W7 (the names live in settings.json now), so
@@ -480,6 +483,18 @@ _rm_file_has_literal() {  # <file> <string>
   case "$text" in *"$needle"*) return 0 ;; *) return 1 ;; esac
 }
 
+# A WHOLE LINE, the way the strip below matches its markers (wave-27 T40, review
+# pass 9 note 7): a marker quoted inside a line of prose is not one, and an item
+# that asked about it would change nothing and report "removed".
+_rm_file_has_line() {  # <file> <line>
+  local file="$1" want="$2" line
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$line" = "$want" ] && return 0
+  done < "$file"
+  return 1
+}
+
 _rm_file_has_line_matching() {  # <file> <ere>
   local file="$1" ere="$2" line
   [ -f "$file" ] || return 1
@@ -591,28 +606,94 @@ _rm_filter_out_lines() {  # <file> <ere>
 # discarded when the next line turns out to be the start marker.
 #
 # `keep` as a fourth argument holds that blank line instead: a block written with
-# no separator above it (the working principles, lib/markers.sh's `markers_set`)
-# took nothing, so the strip gives nothing back but the block.
-_rm_strip_marker_block() {  # <file> <start-line> <end-line> [keep]
-  local file="$1" start="$2" end="$3" keep="${4:-}" target
-  target="$(bionic_link_target "$file")"
-  local tmp="${target}.bionic.tmp"
-  local line skip=0 pending=0
-  _rm_stage_tmp "$tmp" || return 1
+# no separator above it (the working principles and the live rc block, both
+# lib/markers.sh's `markers_set`) took nothing, so the strip gives nothing back
+# but the block.
+#
+# THE SAME GUARANTEES AS lib/markers.sh, BECAUSE IT IS THE SAME WALK (wave-27
+# T40). This is the standalone door's copy of `_markers_rewrite` and of its
+# refusals, with the same exit codes: 0 stripped; 1 a write failed; 2 the
+# markers do not pair up (`_rm_marker_faults` says where); 3 the file is
+# read-only. On every non-zero the file is byte-identical to what it was, the
+# staged copy is gone, and nothing was renamed. tests/principles-item.test.sh
+# §CUT-SHORT and §MALFORMED drive both doors over the same files.
+_rm_marker_faults() {  # <file> <start> <end> — the copy of markers.sh `markers_check`
+  local file="$1" start="$2" end="$3" line n=0 open=0 first=0 bad=0
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ "$line" = "$start" ]; then
+      if [ "$open" != "0" ]; then
+        printf 'line %s: a second start marker inside the block opened at line %s\n' "$n" "$open"; bad=1; continue
+      fi
+      if [ "$first" != "0" ]; then
+        printf 'line %s: a second block (the first starts at line %s)\n' "$n" "$first"; bad=1
+      else
+        first="$n"
+      fi
+      open="$n"
+    elif [ "$line" = "$end" ]; then
+      if [ "$open" = "0" ]; then
+        printf 'line %s: an end marker with no start marker before it\n' "$n"; bad=1; continue
+      fi
+      open=0
+    fi
+  done < "$file"
+  if [ "$open" != "0" ]; then
+    printf 'line %s: a start marker with no end marker after it\n' "$open"; bad=1
+  fi
+  [ "$bad" = "0" ] || return 2
+  return 0
+}
+
+_rm_strip_walk() {  # <file> <start> <end> <keep> — the lines that stay, to stdout; rc 1 on a failed write
+  local file="$1" start="$2" end="$3" keep="$4" line skip=0 pending=0
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$line" = "$start" ]; then
       skip=1
-      if [ "$pending" = "1" ] && [ "$keep" = "keep" ]; then printf '\n' >> "$tmp"; fi
+      if [ "$pending" = "1" ] && [ "$keep" = "keep" ]; then printf '\n' || return 1; fi
       pending=0; continue
     fi
     if [ "$line" = "$end" ];   then skip=0; continue; fi
     [ "$skip" = "1" ] && continue
-    if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
+    if [ "$pending" = "1" ]; then printf '\n' || return 1; pending=0; fi
     if [ -z "$line" ]; then pending=1; continue; fi
-    printf '%s\n' "$line" >> "$tmp"
+    printf '%s\n' "$line" || return 1
   done < "$file"
-  [ "$pending" = "1" ] && printf '\n' >> "$tmp"
-  _rm_publish_tmp "$tmp" "$target"
+  if [ "$pending" = "1" ]; then printf '\n' || return 1; fi
+  return 0
+}
+
+_rm_strip_marker_block() {  # <file> <start-line> <end-line> [keep]
+  local file="$1" start="$2" end="$3" keep="${4:-}" target
+  target="$(bionic_link_target "$file")"
+  local tmp="${target}.bionic.tmp"
+  [ -r "$file" ] || return 1
+  if [ -e "$target" ] && [ ! -w "$target" ]; then return 3; fi
+  _rm_marker_faults "$file" "$start" "$end" >/dev/null || return 2
+  _rm_stage_tmp "$tmp" || return 1
+  _rm_strip_walk "$file" "$start" "$end" "$keep" >> "$tmp" || { rm -f "$tmp"; return 1; }
+  _rm_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# Why a marker strip refused, as the second half of a leftover line. The file is
+# as it was in every case.
+_rm_strip_why() {  # <rc> <file>
+  case "${1:-}" in
+    2) echo "bionic's markers in ${2} do not pair up, so bionic cannot tell which lines are its own — fix them by hand" ;;
+    3) echo "${2} is read-only, and bionic leaves a file you made read-only alone" ;;
+    *) echo "could not rewrite ${2}" ;;
+  esac
+}
+
+# The marker faults as indented lines under an item, for either door.
+_rm_say_faults() {  # <file> <start> <end>
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] && echo "    ${f}"
+  done < <(_rm_marker_faults "$1" "$2" "$3")
+  return 0
 }
 
 _rm_indent() {  # <text> — four spaces on every line, no sed
@@ -806,9 +887,10 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE" && return 0
       return 1 ;;
     claude-proxy)
-      _rm_file_has_literal "$RC_FILE" "$RM_RC_START" ;;
+      _rm_file_has_line "$RC_FILE" "$RM_RC_START" || _rm_file_has_line "$RC_FILE" "$RM_RC_END" ;;
     working-principles)
-      _rm_file_has_literal "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" ;;
+      _rm_file_has_line "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" || \
+        _rm_file_has_line "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_END" ;;
     legacy-hooks)
       [ -f "$RM_SETTINGS" ] || return 1
       _rm_have jq || return 1
@@ -1198,19 +1280,22 @@ _rm_item_environment() {
 # marker pair goes to this script's own block strip. tests/rc-item.test.sh drives
 # both and compares the bytes.
 
+# `keep` (wave-27 T40, review pass 9 note 9): this block is written by
+# lib/markers.sh's `markers_set` with no separator line above it, so a blank line
+# the user had there is theirs, and the payload door already keeps it.
 _rm_rc_unset() {  # <item>
   if [ "$RM_MODE" = "payload" ] && declare -F rc_unset >/dev/null 2>&1; then
     rc_unset "$1"
     return $?
   fi
-  _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"
+  _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END" keep
 }
 
 _rm_item_claude_proxy() {
   _rm_wants claude-proxy || return 0
   echo "bionic's claude() shell function:"
 
-  if ! _rm_file_has_literal "$RC_FILE" "$RM_RC_START"; then
+  if ! _rm_item_pending claude-proxy; then
     _rm_clean "bionic's claude() shell function in ${RC_FILE}"
     echo ""
     return 0
@@ -1224,11 +1309,13 @@ _rm_item_claude_proxy() {
     return 0
   fi
 
-  if _rm_rc_unset claude-proxy; then
+  _rm_rc_unset claude-proxy; rm_rc_unset_rc=$?
+  if [ "$rm_rc_unset_rc" = "0" ]; then
     _rm_removed "bionic's claude() shell function in ${RC_FILE}"
   else
     rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
-    _rm_leftover "could not rewrite ${RC_FILE} — bionic's claude() block is still there"
+    [ "$rm_rc_unset_rc" = "2" ] && _rm_say_faults "$RC_FILE" "$RM_RC_START" "$RM_RC_END"
+    _rm_leftover "$(_rm_strip_why "$rm_rc_unset_rc" "$RC_FILE") — bionic's claude() block is still there"
   fi
   echo ""
 }
@@ -1575,26 +1662,35 @@ _rm_item_permission_mode() {
 #
 # THE USER'S OWN FILE, AND ONLY BIONIC'S BLOCK COMES OUT OF IT (wave-27 D16).
 # Setup wrote the block between its markers on a yes; this takes the block out
-# by those markers and leaves every other byte as it was. A CLAUDE.md the strip
-# leaves EMPTY held nothing but bionic's block — setup created it — so it goes
-# too, and the machine is back to having no such file. A symlinked file is never
-# deleted: its target belongs to whatever manages the link.
+# by those markers and leaves every other byte as it was.
 #
-# TWO DOORS, ONE RESULT, as for the rc item. Payload mode calls the owner,
-# env.sh's `principles_unset`; standalone strips with the copied markers and the
-# same empty-file rule. The standalone strip KEEPS the blank line above the block
-# (`keep` below), because setup writes no separator line before this block and a
-# user's file that ends in a blank line must come back ending in one.
+# WHAT IS SHOWN, AND WHAT GOES (wave-27 T40, review pass 9 findings 2, 3, 4, 8).
+#   malformed — the markers do not pair up: what was found and where, nothing
+#               asked, nothing written.
+#   read-only — refused with the reason, nothing written.
+#   edited    — the difference from bionic's text is printed and the strip waits
+#               for a yes typed at THAT question, under `--all` too, as setup's
+#               replacement does.
+#   present   — the block goes. The FILE goes too only when setup created it (its
+#               note is there), the block is unedited, and nothing else is in the
+#               file — and then the question says so. Any other file stays,
+#               emptied or not. A symlinked file never goes.
+#
+# TWO DOORS. Payload mode calls the owner, env.sh (`principles_*`). Standalone
+# has no shipped text to compare against, so it cannot tell present from edited:
+# it prints the block's own lines and asks the live question, strips with the
+# copied markers (`keep`: setup writes no separator line before this block), and
+# never deletes the file. The two doors agree byte for byte on what stays.
+
+_rm_principles_created() { echo "${RM_PRINCIPLES_FILE}${RM_PRINCIPLES_CREATED_SUFFIX}"; }
 
 _rm_principles_unset() {
   if [ "$RM_MODE" = "payload" ] && declare -F principles_unset >/dev/null 2>&1; then
     principles_unset
     return $?
   fi
-  _rm_strip_marker_block "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" keep || return 1
-  if [ -f "$RM_PRINCIPLES_FILE" ] && [ ! -L "$RM_PRINCIPLES_FILE" ] && [ ! -s "$RM_PRINCIPLES_FILE" ]; then
-    rm -f "$RM_PRINCIPLES_FILE"
-  fi
+  _rm_strip_marker_block "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" keep || return $?
+  rm -f "$(_rm_principles_created)"
   return 0
 }
 
@@ -1602,27 +1698,84 @@ _rm_item_working_principles() {
   _rm_wants working-principles || return 0
   echo "bionic's working principles:"
 
-  if ! _rm_file_has_literal "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START"; then
+  if ! _rm_item_pending working-principles; then
     _rm_clean "bionic's working principles in ${RM_PRINCIPLES_FILE}"
     echo ""
     return 0
   fi
 
-  echo "  ${RM_PRINCIPLES_FILE} carries bionic's working principles; bionic would delete that block and leave the rest of the file as it is."
-  _rm_consent "Remove bionic's working principles from ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$?
+  if ! _rm_marker_faults "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" >/dev/null; then
+    echo "  ${RM_PRINCIPLES_FILE}: bionic's working-principles markers do not pair up:"
+    _rm_say_faults "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END"
+    _rm_leftover "$(_rm_strip_why 2 "$RM_PRINCIPLES_FILE") — nothing was changed"
+    echo ""
+    return 0
+  fi
+  local target state=unknown deletes=no line
+  target="$(bionic_link_target "$RM_PRINCIPLES_FILE")"
+  if [ -e "$target" ] && [ ! -w "$target" ]; then
+    _rm_leftover "$(_rm_strip_why 3 "$RM_PRINCIPLES_FILE") — bionic's working principles are still there"
+    echo ""
+    return 0
+  fi
+  if [ "$RM_MODE" = "payload" ] && declare -F principles_state >/dev/null 2>&1; then
+    state="$(principles_state)"
+    principles_unset_deletes && deletes=yes
+  fi
+
+  case "$state" in
+    present)
+      if [ "$deletes" = "yes" ]; then
+        echo "  ${RM_PRINCIPLES_FILE} holds bionic's working principles and nothing else; setup created it."
+        echo "  bionic would delete the block and delete the file, which holds nothing else."
+        _rm_consent "Remove bionic's working principles and delete the file ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$?
+      else
+        echo "  ${RM_PRINCIPLES_FILE} carries bionic's working principles; bionic would delete that block and leave the rest of the file as it is."
+        _rm_consent "Remove bionic's working principles from ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$?
+      fi ;;
+    edited)
+      echo "  ${RM_PRINCIPLES_FILE} carries bionic's working principles, changed from bionic's text:"
+      while IFS= read -r line || [ -n "$line" ]; do echo "    ${line}"; done < <(principles_diff)
+      echo "  Removing the block takes those changed lines with it; the rest of the file stays as it is."
+      RM_ALL=0 SETUP_ALL=0 _rm_consent "Remove the changed block from ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$? ;;
+    *)
+      echo "  ${RM_PRINCIPLES_FILE} carries a block between bionic's working-principles markers. Without the"
+      echo "  plugin's files bionic cannot compare it with its own text, so these are the lines that would go:"
+      _rm_say_block "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END"
+      echo "  The rest of the file stays as it is, and so does the file, even if nothing else is in it."
+      RM_ALL=0 SETUP_ALL=0 _rm_consent "Remove that block from ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$? ;;
+  esac
   if [ "$rm_wp_consent_rc" -ne 0 ]; then
     _rm_skipped "$rm_wp_consent_rc" working-principles "bionic's working principles in ${RM_PRINCIPLES_FILE}"
     echo ""
     return 0
   fi
 
-  if _rm_principles_unset; then
-    _rm_removed "bionic's working principles in ${RM_PRINCIPLES_FILE}"
+  _rm_principles_unset; rm_wp_unset_rc=$?
+  if [ "$rm_wp_unset_rc" = "0" ]; then
+    if [ "$deletes" = "yes" ] && [ ! -e "$RM_PRINCIPLES_FILE" ]; then
+      _rm_removed "bionic's working principles, and ${RM_PRINCIPLES_FILE}, which held nothing else"
+    else
+      _rm_removed "bionic's working principles in ${RM_PRINCIPLES_FILE}"
+    fi
   else
     rm -f "$(bionic_link_target "$RM_PRINCIPLES_FILE").bionic.tmp"
-    _rm_leftover "could not rewrite ${RM_PRINCIPLES_FILE} — bionic's working principles are still there"
+    [ "$rm_wp_unset_rc" = "2" ] && _rm_say_faults "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END"
+    _rm_leftover "$(_rm_strip_why "$rm_wp_unset_rc" "$RM_PRINCIPLES_FILE") — bionic's working principles are still there"
   fi
   echo ""
+}
+
+# The lines inside a well-formed block, indented — what the standalone door shows
+# in place of a difference it has no text to compute.
+_rm_say_block() {  # <file> <start> <end>
+  local line inside=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$2" ]; then inside=1; continue; fi
+    if [ "$line" = "$3" ]; then inside=0; continue; fi
+    [ "$inside" = "1" ] && echo "    ${line}"
+  done < "$1"
+  return 0
 }
 
 # ─── Item: the tools bionic installed ────────────────────────────────────────
