@@ -3003,6 +3003,82 @@ expect_eq "LIVEQ.F3c a bare row is matched by its Files under a reader as before
   "$(lq_rows_ids "$LQR/lq-f3b.md" --question evidence --reader w-other record/w/r7.md)"
 
 # ============================================================
+section "MOVED — wave-27 T43: a read after a fix is told which rows landed inside its range (REQ-1 AC-1.5, REQ-2 AC-2.3; D10; A-orch-48, A-orch-71)"
+# ============================================================
+#
+# Once a question has its `scope=whole` reading, a later read of that question covers only the
+# fixes that landed past it. The library names them from the plan and the run's landing record
+# (`landing-proofs.log`, the header lines `land` writes; T44), never from git:
+#   - `units_landings <plan> <record>`: each row's landing, the `merge=` of the last header carrying
+#     its row; a landed or done build row with none is owed one.
+#   - `units_rows_in_range <plan> <a>..<b> <record>`: given on stdin the merges the caller's git put
+#     inside the range, the rows that landed there, with the matrix criteria of what they serve.
+#   - `units_whole_read <plan> <row id>`: whether every question the read row carries has a whole
+#     reading.
+# FIXTURE FIDELITY: SYNTHESIZED plans and records. The record's header line is the Interfaces
+# table's shape, with `stamp/v1|` lines under each header as `land` writes them. The heads are fixed
+# hex, because membership is the caller's answer and no git is asked here.
+MV_W=1111111111111111111111111111111111111111
+MV_X=2222222222222222222222222222222222222222
+MV_Y=3333333333333333333333333333333333333333
+MV_P=4444444444444444444444444444444444444444
+mv_plan() {  # <file> <state lines> <rows...> -> a reads table and a matrix of five criteria
+  local f="$1" st="$2"; shift 2
+  lv_plan "$f" "$st" "$@"
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n' >> "$f"
+  printf '| AC-%s | T2 | pending | record/w/x.md | |\n' 1.1 2.1 2.2 4.1 5.1 12.1 >> "$f"
+}
+mv_head() {  # <row> <merge> -> a landing record's header line and a stamp line under it
+  printf 'landed: row=%s branch=wt/27-%s head=%s merge=%s at=2026-10-05T04:00:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-05T03:59:00Z|suites=units.test.sh\n' \
+    "$1" "$1" "$2" "$2" "$2"
+}
+MV_T1="| T1 | 4 | build | landed before the whole read | implementor | — | 30 | REQ-1 | lib/a.sh |  | landed |"
+MV_T7="| T7 | 4 | build | a fix | implementor | — | 30 | REQ-2 | lib/b.sh |  | landed |"
+MV_T8="| T8 | 4 | build | another fix | implementor | — | 30 | REQ-4, REQ-5 | lib/c.sh |  | landed |"
+MV_T3="$(lq_row T3 'the reviewer' 'approval:plan, live:head:structure')"
+MV_WHOLE="$(printf 'proved: kind=review head=%s at=2026-10-04T10:01:00Z evidence=record/w/st-whole.md question=structure reader=w-rev result=pass scope=whole' "$MV_W")"
+mv_plan "$SANDBOX/mv.md" "$MV_WHOLE" "$MV_T1" "$MV_T7" "$MV_T8" "$MV_T3"
+{ mv_head T1 "$MV_P"; mv_head T7 "$MV_X"; mv_head T8 "$MV_Y"; } > "$SANDBOX/mv-landings.log"
+mv_in() {  # <merges, one per line> <plan> <record> -> units_rows_in_range's answer on W..Y
+  call units_rows_in_range "$2" "${MV_W}..${MV_Y}" "$3" <<< "$1"
+}
+expect_eq "MOVED.0 precondition: the fixture plan is a valid plan" "" "$(call units_validate "$SANDBOX/mv.md")"
+expect_eq "MOVED.1 units_landings names each row's merge, owed for a landed build row, table order" \
+  "T1${TAB}${MV_P}${TAB}owed|T7${TAB}${MV_X}${TAB}owed|T8${TAB}${MV_Y}${TAB}owed" \
+  "$(call units_landings "$SANDBOX/mv.md" "$SANDBOX/mv-landings.log" | tr '\n' '|' | sed 's/|$//')"
+# Two fixes in one range: both merges inside W..Y, each row named with its matrix criteria.
+expect_eq "MOVED.2 two fixes in one range: T7 and T8, each with the criteria of what it serves" \
+  "T7${TAB}REQ-2${TAB}AC-2.1, AC-2.2|T8${TAB}REQ-4, REQ-5${TAB}AC-4.1, AC-5.1" \
+  "$(mv_in "$MV_X
+$MV_Y" "$SANDBOX/mv.md" "$SANDBOX/mv-landings.log" | tr '\n' '|' | sed 's/|$//')"
+# One fix after the whole read: only T7's merge is inside; T1, landed before W, is never named.
+expect_eq "MOVED.3 one fix after the whole read: T7 alone; T1, landed before the range, is not named" \
+  "T7${TAB}REQ-2${TAB}AC-2.1, AC-2.2" "$(mv_in "$MV_X" "$SANDBOX/mv.md" "$SANDBOX/mv-landings.log")"
+# A docs-only tail: no landing merge inside the range. Nothing, exit 0, beside MOVED.3's positive.
+expect_eq "MOVED.4 a docs-only tail: no merge inside the range prints nothing and exits 0" "|0" \
+  "$(mv_in "" "$SANDBOX/mv.md" "$SANDBOX/mv-landings.log"; printf '|%s' "$CALL_RC")"
+expect_eq "MOVED.4b …and a range that is not <a>..<b> is a caller fault, exit 2" "2" \
+  "$(printf '%s' "$MV_X" | call_rc units_rows_in_range "$SANDBOX/mv.md" "$MV_W" "$SANDBOX/mv-landings.log")"
+# No whole fact yet: units_whole_read says no; with the whole reading it says yes.
+mv_plan "$SANDBOX/mv-nowhole.md" "$(lq_read structure "$MV_W" 01)" "$MV_T1" "$MV_T7" "$MV_T8" "$MV_T3"
+expect_eq "MOVED.5 no whole fact for the row's question: units_whole_read fails; with one it holds" "1|0" \
+  "$(call_rc units_whole_read "$SANDBOX/mv-nowhole.md" T3)|$(call_rc units_whole_read "$SANDBOX/mv.md" T3)"
+mv_plan "$SANDBOX/mv-two.md" "$MV_WHOLE" "$MV_T1" "$(lq_row T3 'the critic' 'approval:plan, live:head:adversarial+structure')"
+expect_eq "MOVED.5b …a row carrying two questions needs a whole reading of each; a bare row has none" "1|1" \
+  "$(call_rc units_whole_read "$SANDBOX/mv-two.md" T3)|$(lv_plan "$SANDBOX/mv-bare.md" "$MV_WHOLE" "$MV_T1" "$LV_REVIEW"; call_rc units_whole_read "$SANDBOX/mv-bare.md" T3)"
+# The record's edges: a re-landing (the last header counts), row=— and an id the table lacks
+# (skipped), a landed build row with no header (owed, no merge), a review row's landing (not owed).
+{ mv_head T7 "$MV_P"; mv_head T7 "$MV_X"; mv_head — "$MV_Y"; mv_head T99 "$MV_Y"; mv_head T3 "$MV_Y"; } > "$SANDBOX/mv-edges.log"
+expect_eq "MOVED.6 the last header of a row counts; row=— and an unknown id name no row; a build row with none is owed; a review row's is not" \
+  "T1${TAB}-${TAB}owed|T7${TAB}${MV_X}${TAB}owed|T8${TAB}-${TAB}owed|T3${TAB}${MV_Y}${TAB}-" \
+  "$(call units_landings "$SANDBOX/mv.md" "$SANDBOX/mv-edges.log" | tr '\n' '|' | sed 's/|$//')"
+expect_eq "MOVED.6b …the re-landed T7 is named by its last merge, not its first" "T7|" \
+  "$(mv_in "$MV_X" "$SANDBOX/mv.md" "$SANDBOX/mv-edges.log" | cut -f1)|$(mv_in "$MV_P" "$SANDBOX/mv.md" "$SANDBOX/mv-edges.log" | cut -f1)"
+expect_eq "MOVED.6c no record file at all: every landed build row is owed one, none has a merge" \
+  "T1${TAB}-${TAB}owed|T7${TAB}-${TAB}owed|T8${TAB}-${TAB}owed" \
+  "$(call units_landings "$SANDBOX/mv.md" "$SANDBOX/no-such-landings.log" | tr '\n' '|' | sed 's/|$//')"
+
+# ============================================================
 section "HOLD — wave-26 T13: a doc row waits for its reads, not its step, in a table that declares reads (REQ-6, AC-6.1, AC-6.2; D3)"
 # ============================================================
 #

@@ -7218,11 +7218,49 @@ EOF
             # THE RANGE IS THE ROW'S (wave-27 T10; D4): a read row's starts at the oldest last
             # reading among its own questions, so two rows offered at once can print two ranges;
             # a bare `live:head` row's is the one range 1.11.0 printed.
+            # WHAT MOVED INSIDE IT (wave-27 T43; D10; A-orch-48, A-orch-71): once every question
+            # the row reads has its whole reading, a `MOVED` line names each plan row whose landing
+            # lies inside the range, with the matrix criteria it serves, so a read after a fix
+            # reads those rows and no others. A landing is the merge the run's landing record
+            # (`landing-proofs.log`, written by land) gives the row (`units_landings`); this
+            # tick, which already reads git, says which of those merges lie inside a..b (a an
+            # ancestor of the merge and not it, the merge an ancestor of b) and hands them to
+            # `units_rows_in_range` on stdin. A landed build row the record does not name, or
+            # names with a merge that is no commit, is unknown: one `MOVED unknown` line stands
+            # in place of every other, and the read is the whole range.
             while IFS="$(printf '\t')" read -r LR_ID _; do
               [ -n "$LR_ID" ] || continue
               case "$SCHED_OFFERED " in *" $LR_ID "*) ;; *) continue ;; esac
               SCHED_RANGE="$(units_live_range "$SCHED_PLAN" "$LR_ID" 2>/dev/null)"
               [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
+              [ -n "$SCHED_RANGE" ] && units_whole_read "$SCHED_PLAN" "$LR_ID" || continue
+              LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$SCHED_PLAN" .plan.md)/landing-proofs.log"
+              LR_A="${SCHED_RANGE%%..*}"; LR_B="${SCHED_RANGE#*..}"; LR_IN=""; LR_UNK=""
+              while IFS="$(printf '\t')" read -r LM_ID LM_MERGE LM_OWED; do
+                [ -n "$LM_ID" ] || continue
+                if [ "$LM_MERGE" = - ] || ! git -C "$REPO_REAL" cat-file -e "$LM_MERGE^{commit}" 2>/dev/null; then
+                  [ "$LM_OWED" = owed ] && LR_UNK="${LR_UNK:+$LR_UNK }$LM_ID"
+                  continue
+                fi
+                [ "$(git -C "$REPO_REAL" rev-parse -q --verify "$LM_MERGE^{commit}" 2>/dev/null)" != "$(git -C "$REPO_REAL" rev-parse -q --verify "$LR_A^{commit}" 2>/dev/null)" ] \
+                  && git -C "$REPO_REAL" merge-base --is-ancestor "$LR_A" "$LM_MERGE" 2>/dev/null \
+                  && git -C "$REPO_REAL" merge-base --is-ancestor "$LM_MERGE" "$LR_B" 2>/dev/null \
+                  && LR_IN="${LR_IN}${LM_MERGE}
+"
+              done <<EOF_LM
+$(units_landings "$SCHED_PLAN" "$LR_REC" 2>/dev/null)
+EOF_LM
+              if [ -n "$LR_UNK" ]; then
+                say "MOVED unknown — $LR_UNK carry no landing record"
+                continue
+              fi
+              LR_MOVED="$(printf '%s' "$LR_IN" | units_rows_in_range "$SCHED_PLAN" "$SCHED_RANGE" "$LR_REC" 2>/dev/null)"
+              [ -n "$LR_MOVED" ] || { say "MOVED none"; continue; }
+              while IFS="$(printf '\t')" read -r LM_ID _ LM_CRIT; do
+                [ -n "$LM_ID" ] && say "MOVED $LM_ID — ${LM_CRIT:-no criterion in the matrix}"
+              done <<EOF_MV
+$LR_MOVED
+EOF_MV
             done <<EOF
 $(units_live_rows "$SCHED_PLAN" 2>/dev/null)
 EOF

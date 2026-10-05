@@ -10505,6 +10505,87 @@ expect_eq "59f6 F2 the tick's range starts at the older commit, A, whatever the 
 POKE_BOUND="$S59_BOUND_WAS"
 
 # ============================================================
+section "Section 60 §MOVED: beside a read after a fix the tick names the rows landed in its range (wave-27 T43; REQ-1 AC-1.5, REQ-2 AC-2.3; D10; A-orch-48, A-orch-71)"
+# ============================================================
+#
+# The structure question already has its `scope=whole` reading, at W = A. T7 (serves REQ-2) and T8
+# (serves REQ-4, REQ-5) are fixes that landed after it. The read row T3 reads structure and is offered
+# A..C. Beside its RANGE line the tick prints one `MOVED` line per row whose landing merge lies inside
+# the range, with the matrix criteria the row serves. A landing is the `merge=` of the row's last
+# header in the run's landing record, `<docs-root>/record/<plan name>/landing-proofs.log`, which `land`
+# writes (T44). The tick tests membership with git, which it already reads. A landed build row with no
+# header (or a merge that is no commit) makes it print `MOVED unknown`, and then the read is the whole
+# range. With no whole reading yet the tick prints no `MOVED` line at all.
+# FIXTURE FIDELITY: §59's repository shape (s59_world). The landing record is PLANTED in the
+# Interfaces table's header shape, with a stamp line under each header, because T44 is not built yet.
+S60_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S60_T1="| T1 | 4 | build | landed before the whole read | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
+S60_T7="| T7 | 4 | build | a fix | implementor | — | 30 | REQ-2 | b.sh | — | — | landed |  |"
+S60_T8="| T8 | 4 | build | another fix | implementor | — | 30 | REQ-4, REQ-5 | c.sh | — | — | landed |  |"
+s60_whole() {  # <head> <scope> -> a structure reading's proof line
+  printf 'proved: kind=review head=%s at=2026-10-04T10:01:00Z evidence=record/wave-01-fixture/st-whole.md question=structure reader=w-rev result=pass scope=%s' "$1" "$2"
+}
+s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape plus a matrix
+  s59_world "$1" "$(s60_whole "$2" "$3")" "$S60_T1" "$S60_T7" "$S60_T8" "$(s59w_q T3 structure)" "$S59W_T5"
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n' >> "$P59W"
+  printf '| AC-%s | T2 | pending | record/wave-01-fixture/x.md | |\n' 1.1 2.1 2.2 4.1 5.1 >> "$P59W"
+  ( cd "$R59W" && git add -f "$P59W" && git commit -qm matrix ) >/dev/null 2>&1
+  S60_INIT="$(git -C "$R59W" rev-parse "$S59W_A~1" 2>/dev/null)"
+  S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/landing-proofs.log"; mkdir -p "${S60_REC%/*}"; : > "$S60_REC"
+}
+s60_land() {  # <row> <merge> -> one header line and a stamp line appended to the landing record
+  printf 'landed: row=%s branch=wt/01-%s head=%s merge=%s at=2026-10-05T04:00:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-05T03:59:00Z|suites=a.test.sh\n' \
+    "$1" "$1" "$2" "$2" "$2" >> "$S60_REC"
+}
+s60_tick() { rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; poke_pressure "$R59W" 8192 1.0 tick; }
+s60_moved() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: MOVED ' | tr '\n' '|' | sed 's/|$//'; }
+S60_RANGE_TAIL="— the review reads what landed past the last review proof, and no more"
+
+# Two fixes in one range: T7 at B, T8 at C, past the whole reading at A; T1 landed before it.
+s60_world s60-two @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+s60_tick
+expect_eq "60a precondition: the read row is offered from the whole reading at A" \
+  "poker: RANGE T3 ${S59W_A}..${S59W_C} $S60_RANGE_TAIL" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')"
+expect_eq "60a2 two fixes in one range: a MOVED line for T7 and one for T8, each naming its criteria; T1 is not named" \
+  "poker: MOVED T7 — AC-2.1, AC-2.2|poker: MOVED T8 — AC-4.1, AC-5.1" "$(s60_moved)"
+# One fix after the whole read: T8's landing sits before the range, so T7 alone is named.
+s60_world s60-one @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S60_INIT"
+s60_tick
+expect_eq "60b one fix after the whole read: T7 alone; a row landed before the range is not named" \
+  "poker: MOVED T7 — AC-2.1, AC-2.2" "$(s60_moved)"
+# A docs-only tail: the whole reading at C, every row landed by C, and one commit past C no row landed.
+s60_world s60-tail @C whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "a docs-only tail" >/dev/null 2>&1
+S60_D="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+s60_tick
+expect_eq "60c a docs-only tail: RANGE C..D, and MOVED none" \
+  "poker: RANGE T3 ${S59W_C}..${S60_D} $S60_RANGE_TAIL|poker: MOVED none" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s60_moved)"
+# No whole fact yet: the structure reading at A is a piece read. The range prints, and no MOVED line.
+s60_world s60-nowhole @A piece
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+s60_tick
+expect_eq "60d no whole fact for the question: the RANGE line prints and no MOVED line of any kind" \
+  "poker: RANGE T3 ${S59W_A}..${S59W_C} $S60_RANGE_TAIL|" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s60_moved)"
+# The cautious rule: a landed build row with no header, or with a merge that is no commit, makes the
+# one line MOVED unknown in place of every MOVED line; T7, which has its record, is not named.
+s60_world s60-unknown @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"
+s60_tick
+expect_eq "60e a landed build row with no landing record: one MOVED unknown line, in place of T7's" \
+  "poker: MOVED unknown — T8 carry no landing record" "$(s60_moved)"
+s60_world s60-nocommit @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+s60_tick
+expect_eq "60f a merge that is no commit here is no landing record: MOVED unknown names T8" \
+  "poker: MOVED unknown — T8 carry no landing record" "$(s60_moved)"
+POKE_BOUND="$S60_BOUND_WAS"
+
+# ============================================================
 section "Section 63 §BASE §HEAD §FLOOR-HEAD §WHOLE-TIME §EDGES: the judge holds where a chain starts and which head it was asked about (wave-27 T45; review pass 13 F1 to F4, F6, F10; REQ-1 AC-1.2, REQ-2 AC-2.3 AC-2.4; D2, D10)"
 # ============================================================
 #
