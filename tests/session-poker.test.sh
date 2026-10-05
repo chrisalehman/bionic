@@ -9518,9 +9518,21 @@ s56_rec() {
 # THE ROSTERS: this session's, and a predecessor's the verb must scan too.
 S56_OSID="5f5f5f5f-0000-4000-8000-000000000055"
 new_roster "$R56"; roster_header > "$(roster_of "$R56" "$S56_OSID")"
+# A row dealt questions carries every record this section registers in its files= (wave-27 T41:
+# the record must be the reader's own), so each case here meets the rule it was written for.
+S56_FILES=""
+for s56n in ev1 no-reviewed no-question no-result no-scope fine partial other-q ev-fail adv-late adv1 \
+    ev-narrow ev2 adv2 st-all st-no-single st-maybe st-bare st-crit; do
+  S56_FILES="${S56_FILES:+$S56_FILES,}.bionic/docs/record/wave-01-fixture/$s56n.md"
+done
 s56_row() {  # <roster> <name> <type> [<questions>] -> one row appended; no questions key when none
-  local r; r="$(roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3")"
-  if [ $# -ge 4 ]; then printf '%s|questions=%s\n' "$r" "$4"; else printf '%s\n' "$r"; fi >> "$1"
+  local r
+  if [ $# -ge 4 ]; then
+    r="$(roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3" files="$S56_FILES")"
+    printf '%s|questions=%s\n' "$r" "$4"
+  else
+    roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3"
+  fi >> "$1"
 }
 S56_RS="$(roster_of "$R56")"; S56_RO="$(roster_of "$R56" "$S56_OSID")"
 # The plan's active T2 row names `implementor` as its agent, and with a roster present the commit
@@ -9717,11 +9729,234 @@ POKER="$S56_POKER_REAL"
 # one that leaves single-job out.
 S56_SHIPPED="${BIONIC_HOOKS_DIR}/../payload/context/checks-structure.md"
 s56_read() { bash -c '. "$1" && proof_reading "$2" structure "$3"' _ "$S46_LIB" "$1" "$S56_SHIPPED" 2>/dev/null; }
-expect_eq "56g11 the shipped checks file accepts a record answering the seven ids" "pass whole" "$(s56_read "$S56_REC/st-all.md")"
+expect_eq "56g11 the shipped checks file accepts a record answering the seven ids" "pass whole ${S56_B:0:10}" "$(s56_read "$S56_REC/st-all.md")"
 expect_contains "56g12 …and refuses one that leaves single-job unanswered" "leaves single-job unanswered" \
   "$(s56_read "$S56_REC/st-no-single.md")"
 expect_eq "56h no projection copy is left beside the plan" "" \
   "$(find "$R56/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 POKE_BOUND="$S56_BOUND_WAS"
+
+# ============================================================
+section "Section 58 §READING: a reading is one pass, by the reader dealt it, saying what its record says (wave-27 T41; review pass 10 F1 to F6, F8; REQ-2 AC-2.1, REQ-1 AC-1.4, REQ-4 AC-4.3; D1, D7)"
+# ============================================================
+#
+# `proof-add review <record> --question <q> --reader <name>` reads ONE pass of the record: the
+# lines from its first `reviewed:` line to the next one, nothing outside them (F1). Each value
+# is matched whole against its set, so `pass|whole` never fills a missing scope (F2). The reader
+# name is matched byte for byte, its characters `[A-Za-z0-9_-]`, never through awk's escape
+# decoding (F3). The record must be the reader row's `deliverable=` or one of its `files=`, on a
+# row past `intended` (F4). `scope: whole` starts at the plan's base or before it (F5). A
+# structure `result: pass` stands beside no FLAG or FAIL check, a `flag` beside no FAIL (F6).
+# A roster value reaches the terminal cleaned (F8). A floor, a task and a plain review proof are
+# written exactly as before.
+#
+# FIXTURE FIDELITY. The roster rows are the production writer's (`roster_row_fixture`) carrying
+# `deliverable=` and `files=` as dispatch writes them (a repository-relative path, a comma-joined
+# list; one deliverable absolute, as section 21's are), each lineage an `intended` row and then a
+# later one, as dispatch-preflight and execution-recorder write them. The `questions=` key is
+# appended by hand: SYNTHESIZED until row T15 writes it. The checks file is planted in a copy of
+# the hook tree (section 56's `s56_tree`). The plan's base is C1, the branch's first commit, so a
+# read from the root commit B starts at an ancestor of the base.
+S58_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R58="$(make_repo s58-reading)"
+mkdir -p "$R58/tests"; for s58s in a b c; do printf '#!/bin/bash\n' > "$R58/tests/$s58s.test.sh"; done
+( cd "$R58" && git add tests && git commit -qm init ) >/dev/null 2>&1
+S58_B="$(git -C "$R58" rev-parse HEAD)"
+git -C "$R58" worktree add -q -b wave/01-fixture "$R58/.worktrees/01-fixture" "$S58_B" >/dev/null 2>&1
+for s58c in 1 2 3 4; do git -C "$R58/.worktrees/01-fixture" commit -q --allow-empty -m "C$s58c" >/dev/null 2>&1; done
+S58_C1="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~3)"; S58_C2="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~2)"
+S58_C3="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~1)"; S58_C4="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD)"
+P58="$(s42_plan "$R58" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${S58_C1:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P58" > "$P58.tmp" && mv "$P58.tmp" "$P58"
+( cd "$R58" && git add -f "$P58" && git commit -qm wb ) >/dev/null 2>&1
+S58_REC="$R58/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S58_REC"
+S58_REL=".bionic/docs/record/wave-01-fixture"
+s58_rec() {  # <file> <line>... -> a record, one line per argument, then the reader's prose
+  local f="$S58_REC/$1"; shift
+  { printf '# reading\n\n'; printf '%s\n' "$@"; printf '\nwhat the reader found\n'; } > "$f"
+}
+s58_files() { local o="" n; for n in "$@"; do o="${o:+$o,}$S58_REL/$n"; done; printf '%s' "$o"; }
+new_roster "$R58"; S58_RS="$(roster_of "$R58")"
+s58_row() {  # <name> <type> <status> <questions> <deliverable> <files> -> one row appended
+  printf '%s|questions=%s\n' "$(roster_row_fixture session="$SID" name="$1" agent_id="a-$1" subagent_type="$2" \
+    status="$3" deliverable="$5" files="$6")" "$4" >> "$S58_RS"
+}
+roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$S58_RS"
+S58_REV_FILES="$(s58_files stack.md rc-pass-flag.md rc-pass-fail.md rc-flag-fail.md rc-flag-flag.md rc-fail-fail.md rc-pass-na.md)"
+S58_CRIT_FILES="$(s58_files stack-ok.md w-tail.md w-base.md w-anc.md w-piece-tail.md)"
+S58_AUD_FILES="$(s58_files above.md v-pipe.md v-two.md v-scope.md aud-files.md)"
+for s58st in intended confirmed; do
+  s58_row r-rev bionic:reviewer "$s58st" structure "$S58_REC/rev.md" "$S58_REV_FILES"
+  s58_row r-crit bionic:critic "$s58st" adversarial "$S58_REL/crit.md" "$S58_CRIT_FILES"
+  s58_row r-aud bionic:auditor "$s58st" evidence "$S58_REL/aud.md" "$S58_AUD_FILES"
+done
+s58_row r-int bionic:auditor intended evidence "$S58_REL/int.md" ""
+s58_row r-tint "$(printf 'bionic:impl\033[31mementor')" confirmed evidence "$S58_REL/tint.md" ""
+S58_ALL="$(s56_checks none)"
+s56_tree "$TMPROOT/s58-tree" "$S56_CHECKS"
+S58_POKER_REAL="$POKER"; S58_POKER_TREE="$TMPROOT/s58-tree/hooks/session-poker.sh"
+expect_regex "58a0 precondition: C1 to C4 are 40-hex commits on the working branch" '^[0-9a-f]{40}$' "$S58_C1"
+expect_eq "58a0b precondition: the root commit B is C1's parent, so B is an ancestor of the base" "$S58_B" \
+  "$(git -C "$R58/.worktrees/01-fixture" rev-parse "$S58_C1~1")"
+expect_eq "58a0c precondition: the confirmed r-aud row carries its files= list, read by key" "$S58_AUD_FILES" \
+  "$(/usr/bin/grep -F '|status=confirmed|' "$S58_RS" | /usr/bin/grep -F '|name=r-aud|' | tr '|' '\n' | sed -n 's/^files=//p')"
+expect_eq "58a0d precondition: …and its deliverable=" "$S58_REL/aud.md" \
+  "$(/usr/bin/grep -F '|status=confirmed|' "$S58_RS" | /usr/bin/grep -F '|name=r-aud|' | tr '|' '\n' | sed -n 's/^deliverable=//p')"
+s34_gate "$R58"
+expect_eq "58a0e precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+
+# ---------- §ONE-PASS (F1): only the first pass is read ----------
+# The reviewer's reproduction: the newest pass on top wrote no result, no scope and one FAIL
+# check; the older pass below it wrote result: pass, scope: piece and seven PASS checks.
+s58_rec stack.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "check: reuse FAIL dup" "" \
+  "reviewed: ${S58_C1}..${S58_C2}" "question: structure" "result: pass" "scope: piece" "$S58_ALL"
+s58_rec above.md "result: pass" "scope: piece" "" "reviewed: ${S58_C1}..${S58_C2}" "question: evidence"
+s58_rec stack-ok.md "reviewed: ${S58_C1}..${S58_C3}" "question: adversarial" "result: fail" "scope: piece" "" \
+  "reviewed: ${S58_C1}..${S58_C2}" "question: adversarial" "result: pass" "scope: whole"
+s42_snap "$R58" "$P58"
+POKER="$S58_POKER_TREE"
+poke "$R58" proof-add review record/wave-01-fixture/stack.md --question structure --reader r-rev
+s42_unchanged "58a F1 a top pass with no result: is not given the older pass's result" 1 "$P58"
+expect_contains "58a2 …naming the line its own pass lacks" "no result: line" "$OUT"
+POKER="$S58_POKER_REAL"
+poke "$R58" proof-add review record/wave-01-fixture/above.md --question evidence --reader r-aud
+s42_unchanged "58a3 F1 a result: and scope: above the first reviewed: line are outside the pass" 1 "$P58"
+expect_contains "58a4 …naming the line" "no result: line" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/stack-ok.md --question adversarial --reader r-crit
+expect_eq "58a5 control: a complete top pass over an older one registers (exit 0)" "0" "$RC"
+expect_contains "58a6 …with the top pass's head, result and scope, never the older pass's" \
+  "proved: kind=review head=${S58_C3} " "$(s46_proved "$P58" | tail -1)"
+expect_contains "58a7 …result=fail scope=piece" "reader=r-crit result=fail scope=piece" "$(s46_proved "$P58" | tail -1)"
+
+# ---------- §WHOLE-VALUE (F2): a value is its set's word, whole ----------
+s58_rec v-pipe.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass|whole"
+s58_rec v-two.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass flag" "scope: piece"
+s58_rec v-scope.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass" "scope: piece whole"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/v-pipe.md --question evidence --reader r-aud
+s42_unchanged "58b F2 result: pass|whole with no scope: line" 1 "$P58"
+expect_contains "58b2 …the value is refused against its set, never split into the missing scope" \
+  "which is not one of pass, flag or fail" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/v-two.md --question evidence --reader r-aud
+s42_unchanged "58b3 F2 result: pass flag, two of the set's words" 1 "$P58"
+expect_contains "58b4 …naming the set" "which is not one of pass, flag or fail" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/v-scope.md --question evidence --reader r-aud
+s42_unchanged "58b5 F2 scope: piece whole" 1 "$P58"
+expect_contains "58b6 …naming the set" "which is not one of piece or whole" "$OUT"
+
+# ---------- §READER-NAME (F3): byte for byte, [A-Za-z0-9_-] ----------
+s58_rec aud.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass" "scope: piece"
+poke "$R58" proof-add review record/wave-01-fixture/aud.md --question evidence --reader 'r\055aud'
+s42_unchanged "58c F3 an escaped name that awk would decode to r-aud" 1 "$P58"
+expect_contains "58c2 …naming the characters a reader name may carry" "A-Z, a-z, 0-9, _ and -" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/aud.md --question evidence --reader 'r.aud'
+s42_unchanged "58c3 a name with a character outside the set" 1 "$P58"
+expect_contains "58c4 …naming the characters" "A-Z, a-z, 0-9, _ and -" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/aud.md --question evidence --reader r-aud
+expect_eq "58c5 control: the row's own name registers its deliverable (exit 0)" "0" "$RC"
+expect_contains "58c6 …and reader= is the row's name" "question=evidence reader=r-aud result=pass scope=piece" \
+  "$(s46_proved "$P58" | tail -1)"
+
+# ---------- §READER-RECORD (F4): the reader's own record, from a row past intended ----------
+s58_rec stranger.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass" "scope: piece"
+s58_rec aud-files.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: flag" "scope: piece"
+s58_rec int.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass" "scope: piece"
+s58_rec tint.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass" "scope: piece"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/stranger.md --question evidence --reader r-aud
+s42_unchanged "58d F4 a record that is neither the reader's deliverable nor one of its files" 1 "$P58"
+expect_contains "58d2 …naming the record" "record/wave-01-fixture/stranger.md" "$OUT"
+expect_contains "58d3 …and the rule" "deliverable" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/int.md --question evidence --reader r-int
+s42_unchanged "58d4 F4 a reader whose only row is still intended, its deliverable named" 1 "$P58"
+expect_contains "58d5 …naming the status" "intended" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/aud-files.md --question evidence --reader r-aud
+expect_eq "58d6 control: a record among the row's files= registers (exit 0)" "0" "$RC"
+expect_contains "58d7 …as that reader's reading" "evidence=record/wave-01-fixture/aud-files.md question=evidence reader=r-aud result=flag" \
+  "$(s46_proved "$P58" | tail -1)"
+
+# ---------- §ROSTER-CLEAN (F8): a roster value reaches the terminal cleaned ----------
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/tint.md --question evidence --reader r-tint
+s42_unchanged "58e F8 a reader name a writer row carries, its subagent_type holding an escape" 1 "$P58"
+expect_contains "58e2 …refused as a writer" "which is not a reader role" "$OUT"
+expect_absent "58e3 …and the escape character never reaches the terminal" "$(printf '\033')" "$OUT"
+
+# ---------- §WHOLE-READ (F5): scope: whole starts at the plan's base or before it ----------
+# adversarial was read to C3 by stack-ok.md above, so C3..C4 continues its chain.
+s58_rec w-tail.md "reviewed: ${S58_C3}..${S58_C4}" "question: adversarial" "result: pass" "scope: whole"
+s58_rec w-piece-tail.md "reviewed: ${S58_C3}..${S58_C4}" "question: adversarial" "result: pass" "scope: piece"
+s58_rec w-base.md "reviewed: ${S58_C1:0:10}..${S58_C4}" "question: adversarial" "result: pass" "scope: whole"
+s58_rec w-anc.md "reviewed: ${S58_B}..${S58_C4}" "question: adversarial" "result: flag" "scope: whole"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/w-tail.md --question adversarial --reader r-crit
+s42_unchanged "58f F5 scope: whole over a tail range C3..C4" 1 "$P58"
+expect_contains "58f2 …naming the plan's base" "base ${S58_C1:0:12}" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/w-piece-tail.md --question adversarial --reader r-crit
+expect_eq "58f3 control: the same tail as scope: piece registers (exit 0)" "0" "$RC"
+poke "$R58" proof-add review record/wave-01-fixture/w-base.md --question adversarial --reader r-crit
+expect_eq "58f4 control: scope: whole from the base registers (exit 0)" "0" "$RC"
+expect_contains "58f5 …as a whole reading" "evidence=record/wave-01-fixture/w-base.md question=adversarial reader=r-crit result=pass scope=whole" \
+  "$(s46_proved "$P58" | tail -1)"
+poke "$R58" proof-add review record/wave-01-fixture/w-anc.md --question adversarial --reader r-crit
+expect_eq "58f6 control: scope: whole from an ancestor of the base registers (exit 0)" "0" "$RC"
+
+# ---------- §RESULT-CHECKS (F6): a structure result the checks bear out ----------
+s58_rec rc-pass-flag.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: pass" "scope: piece" \
+  "$(s56_checks reuse 'check: reuse FLAG a second copy')"
+s58_rec rc-pass-fail.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: pass" "scope: piece" \
+  "$(s56_checks one-site 'check: one-site FAIL two sites')"
+s58_rec rc-flag-fail.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: flag" "scope: piece" \
+  "$(s56_checks one-site 'check: one-site FAIL two sites')"
+s58_rec rc-flag-flag.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: flag" "scope: piece" \
+  "$(s56_checks reuse 'check: reuse FLAG a second copy')"
+s58_rec rc-fail-fail.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: fail" "scope: piece" \
+  "$(s56_checks one-site 'check: one-site FAIL two sites')"
+s58_rec rc-pass-na.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: pass" "scope: piece" \
+  "$(s56_checks substitution 'check: substitution n/a no subtypes')"
+s42_snap "$R58" "$P58"
+POKER="$S58_POKER_TREE"
+poke "$R58" proof-add review record/wave-01-fixture/rc-pass-flag.md --question structure --reader r-rev
+s42_unchanged "58g F6 result: pass beside a FLAG check" 1 "$P58"
+expect_contains "58g2 …naming the check" "check: reuse FLAG" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/rc-pass-fail.md --question structure --reader r-rev
+s42_unchanged "58g3 F6 result: pass beside a FAIL check" 1 "$P58"
+expect_contains "58g4 …naming the check" "check: one-site FAIL" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/rc-flag-fail.md --question structure --reader r-rev
+s42_unchanged "58g5 F6 result: flag beside a FAIL check" 1 "$P58"
+expect_contains "58g6 …naming the check" "check: one-site FAIL" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/rc-flag-flag.md --question structure --reader r-rev
+expect_eq "58g7 control: result: flag beside a FLAG check registers (exit 0)" "0" "$RC"
+poke "$R58" proof-add review record/wave-01-fixture/rc-fail-fail.md --question structure --reader r-rev
+expect_eq "58g8 control: result: fail beside a FAIL check registers (exit 0)" "0" "$RC"
+poke "$R58" proof-add review record/wave-01-fixture/rc-pass-na.md --question structure --reader r-rev
+expect_eq "58g9 control: result: pass beside PASS and n/a registers (exit 0)" "0" "$RC"
+expect_contains "58g10 …from the absolute deliverable's reader, as a pass" \
+  "evidence=record/wave-01-fixture/rc-pass-na.md question=structure reader=r-rev result=pass scope=piece" \
+  "$(s46_proved "$P58" | tail -1)"
+POKER="$S58_POKER_REAL"
+
+# ---------- controls: a floor, a task and a plain review proof are written as before ----------
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$S58_C4" > "$S58_REC/floor.txt"
+printf '# review\n\nreviewed: %s..%s\n' "$S58_C1" "$S58_C4" > "$S58_REC/plain.md"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add floor record/wave-01-fixture/floor.txt
+expect_eq "58h control: a floor proof registers (exit 0)" "0" "$RC"
+expect_regex "58h2 …in its four-field shape" \
+  "^proved: kind=floor head=${S58_C4} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor.txt$" \
+  "$(s46_proved "$P58" | tail -1)"
+poke "$R58" proof-add task record/wave-01-fixture/floor.txt
+expect_eq "58h3 control: a task proof registers (exit 0)" "0" "$RC"
+expect_regex "58h4 …in its four-field shape" \
+  "^proved: kind=task head=${S58_C4} at=[^ ]+ evidence=record/wave-01-fixture/floor.txt$" "$(s46_proved "$P58" | tail -1)"
+poke "$R58" proof-add review record/wave-01-fixture/plain.md
+expect_eq "58h5 control: a review proof with no flags registers (exit 0)" "0" "$RC"
+expect_regex "58h6 …in 1.11.0's four-field shape, its record in no reader's row" \
+  "^proved: kind=review head=${S58_C4} at=[^ ]+ evidence=record/wave-01-fixture/plain.md$" "$(s46_proved "$P58" | tail -1)"
+expect_eq "58i no projection copy is left beside the plan" "" \
+  "$(find "$R58/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+POKE_BOUND="$S58_BOUND_WAS"
 
 finish
