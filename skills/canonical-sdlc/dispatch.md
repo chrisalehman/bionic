@@ -5,7 +5,7 @@
 
 The orchestrator stays free: it keeps Steps 0–3, task decomposition, and every approval-shaped decision, and offloads research, execution, verification, and review. Subagents return summaries, never payloads. Dispatch is the orchestrator's authority alone: a dispatched agent never dispatches — it asks the orchestrator — and the wall says so when a subagent tries.
 
-Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and mechanical work; `implementor` for `standard` tasks; `senior-implementor` for `complex` tasks and root-cause debugging; `auditor`, `critic` and `reviewer` for the readings the rigor deals (`steps/6.md`). Each role file carries its own invariant duties and model default — the dispatch prompt carries the seven things the role file cannot know: current step, the triple, scope constraint, expected artifact, exit condition, an expected duration, and — when that duration is 15 minutes or longer — a progress-artifact path the task appends to as it works. A phase-gated brief (below) adds the deliverable-phase/bookkeeping split and the gate's position to that list.
+Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and mechanical work; `implementor` for `standard` tasks; `senior-implementor` for `complex` tasks and root-cause debugging; `auditor`, `critic` and `reviewer` for the readings the rigor deals (`steps/6.md`). A reader's brief lists one record per question it is dealt on `Files:`, `Expected artifact:` naming one. Each role file carries its own invariant duties and model default — the dispatch prompt carries the seven things the role file cannot know: current step, the triple, scope constraint, expected artifact, exit condition, an expected duration, and — when that duration is 15 minutes or longer — a progress-artifact path the task appends to as it works. A phase-gated brief (below) adds the deliverable-phase/bookkeeping split and the gate's position to that list.
 
 **The brief declares its deliverable under a canonical label — the wall never guesses one from prose.** `Expected artifact:` (or `Deliverable:`) names the one durable path the dispatch must produce. The label's span must yield exactly one path: zero refuses naming what to add; more than one refuses naming every candidate. References and inputs go outside that span — their own line, under `Read first:` or `Scope constraint:`, or after a blank line — never folded into the deliverable sentence. Nothing durable to produce declares `Deliverable-waiver: <reason>` instead, recorded on the roster; a read-only dispatch still lands a clean row. A missing or ambiguous deliverable refuses at dispatch with the fix named. **A suite-class brief also names an `Evidence log:` line** — its own line: a label's span ends at the next labelled line or blank line.
 
@@ -108,8 +108,8 @@ Progress artifact: <path>  (tasks of 15 min or more)
 Cadence: <N> min  (tasks of 15 min or more)
 Done marker: <path>  # optional
 Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional
-Files: <every path the task may create or edit>  # writers; a read-only brief omits this and keeps Suites: none
-Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
+Files: <every path the task may create or edit>  # a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it
+Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names its runs, at most 3, never none
 Re-executes: `<cmd>`
 Questions: <q>[, <q>]  # reader roles only
 Lands-red: <suite> until <ext:slug | approval:name>  # optional

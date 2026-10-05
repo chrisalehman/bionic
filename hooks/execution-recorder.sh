@@ -861,9 +861,33 @@ if [ -n "$IS_START" ]; then
     done < "$ROSTER_FILE"
     [ -z "$_nj_row" ] || printf '%s\n' "$_nj_row"
   }
+  # ---- BEGIN a stale launch is no candidate (wave-27 T38; review pass 8 F3, F4) ----
+  # A LAUNCH THAT NEVER SPAWNED stays `intended` with no id for the rest of the session, and under
+  # T5's filter (session, type, unclaimed) it made every later start of its type two candidates,
+  # so none of them was placed, and with one live launch beside it the start could be written onto
+  # the stale row. A launch is a candidate only when a start can still be its agent's:
+  #   - THIS PLAN'S: its `plan=` is the plan this session is bound to now, as the dispatch wall
+  #     stamps it (`session_plan`, `none` when unbound; an empty `plan=` reads `none` too);
+  #   - NOT ACKED: no ack of its name later than its launch, read off the sweeper's ledger by the
+  #     roster's own discharge rule (`_roster_discharged`, `_roster_occupied_at`), per launch;
+  #   - IN THE WINDOW: launched at most START_JOIN_WINDOW_S seconds ago. A start follows its
+  #     launch row by the dispatch wall's own hook (15 s at most, hooks/hooks.json), a permission
+  #     prompt a person may answer, and the spawn. A launch older than that, or one whose stamp
+  #     cannot be read, is not a start this event can be.
+  START_JOIN_WINDOW_S=300
   type_join_candidates() {  # <subagent type> -> the candidate count, then each candidate's row
+    local _tj_plan _tj_now _tj_from _tj_ledger="$STATE_DIR/sweeper-${BIONIC_SID}.state"
     roster_sh_load
-    awk -v sid="$BIONIC_SID" -v ty="$1" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
+    _tj_plan=$(sanitize "$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" 400)
+    [ -n "$_tj_plan" ] || _tj_plan="none"
+    _tj_now=$(date -u +%s)
+    _tj_from=$(date -u -r "$((_tj_now - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -d "@$((_tj_now - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+    { [ -f "$_tj_ledger" ] && [ ! -L "$_tj_ledger" ] && [ -r "$_tj_ledger" ]; } || _tj_ledger=""
+    TJ_LEDGER="$_tj_ledger" \
+    awk -v sid="$BIONIC_SID" -v ty="$1" -v plan="$_tj_plan" -v from="$_tj_from" \
+        -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
+      BEGIN { _roster_acks(ENVIRON["TJ_LEDGER"], ACK) }
       index($0, pre) == 1 {
         if (_roster_kv($0, "session") != sid) next
         u = _roster_kv($0, "tool_use_id"); if (u == "") next
@@ -879,12 +903,39 @@ if [ -n "$IS_START" ]; then
           st = _roster_kv(last[u], "status")
           if (st != "intended" && st != "confirmed") continue
           if (_roster_kv(last[u], "subagent_type") != ty) continue
+          p = _roster_kv(last[u], "plan"); if (p == "") p = "none"
+          if (p != plan) continue
+          nm = _roster_kv(last[u], "name"); if (nm == "") nm = "(unnamed)"
+          at = _roster_occupied_at(last[u])
+          if ((nm in ACK) && _roster_discharged(at, ACK[nm])) continue
+          if (!_roster_stamp_ok(at) || !_roster_stamp_ok(from) || at "" < from "") continue
           pick[++c] = last[u]
         }
         print c
         for (i = 1; i <= c; i++) print pick[i]
       }' "$ROSTER_FILE" 2>/dev/null
   }
+  # A READER STARTED WITHOUT ITS CHECKS IS WRITTEN DOWN (wave-27 T38; review pass 31 F2,
+  # A-orch-88). When a start cannot be placed and its candidates carry DIFFERENT `questions=`, no
+  # question registration pushes a checks file (above), and its stderr line reaches no reader.
+  # The terms registration, the one writer, appends one line to the session's roster: the time,
+  # the role, the candidates' roster names. `session-poker.sh tick` prints it once, so the
+  # orchestrator stops that reader and dispatches it again. A question registration writes nothing.
+  unchecked_start_record() {  # <the candidate rows, one per line>
+    local _us_l _us_sets _us_names=""
+    _us_sets=$(while IFS= read -r _us_l; do [ -n "$_us_l" ] && printf '%s\n' "$(line_field "$_us_l" questions)"; done <<< "$1" | sort -u)
+    [ "$(printf '%s\n' "$_us_sets" | grep -c '')" -gt 1 ] || return 0
+    while IFS= read -r _us_l; do
+      [ -n "$_us_l" ] || continue
+      _us_l=$(line_field "$_us_l" name); [ -n "$_us_l" ] || _us_l="(unnamed)"
+      _us_names="${_us_names:+$_us_names,}${_us_l//,/ }"
+    done <<< "$1"
+    printf 'start-unchecked/v1|event=start|at=%s|session=%s|agent_id=%s|role=%s|candidates=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BIONIC_SID" "$START_ID" "$START_TYPE" "$_us_names" \
+      >> "$ROSTER_FILE" 2>/dev/null
+    return 0
+  }
+  # ---- END a stale launch is no candidate ----
 
   # A QUESTION REGISTRATION: read the agent's row, push one checks file or nothing, write nothing.
   # THE ROW, in this order, which is why it agrees with the terms registration whichever ran first:
@@ -1199,11 +1250,14 @@ if [ -n "$IS_START" ]; then
   # ONLY A BIONIC ROLE, AND ONLY ONE CANDIDATE. A candidate is a launch (keyed by `tool_use_id`)
   # of this session and this type that no row has yet given an id or a `teammate_id=`: a
   # teammate is joined by the name join above, and a launch that already has an id belongs to
-  # an agent that already started. Two candidates are two launches this event cannot tell apart
+  # an agent that already started, and it must still be one a start can follow (this plan's, not
+  # acked, launched inside the window: T38, in `type_join_candidates`). Two candidates are two
+  # launches this event cannot tell apart
   # — the name the start carries is the only tie-break, and the name join above already spent
   # it — so both are left to ARM 2's tool_use_id join and one line says so. A third-party type
-  # is left out because nothing in bionic budgets it, and `general-purpose` is the one type a
-  # teammate could also be named (the A-D1 residual above).
+  # is left out because `general-purpose` is the one type a teammate could also be named (the
+  # A-D1 residual above); the budget arm names that reason when it refuses such an agent's suite,
+  # with the `amend` line that records a set for it by its id (T38).
   if [ -z "$ROW" ] && [ -z "${RESTART_AFTER_ACK:-}" ]; then
     case "$START_TYPE" in
       bionic:*)
@@ -1214,7 +1268,8 @@ if [ -n "$IS_START" ]; then
         case "${TYPE_PICK%%$'\n'*}" in
           1) ROW="${TYPE_PICK#*$'\n'}" ;;
           0|'') : ;;
-          *) echo "execution-recorder: ${TYPE_PICK%%$'\n'*} launches of $START_TYPE on this session roster have no id and the start names none of them; agent $START_ID is left to the return of its launch call" >&2 ;;
+          *) echo "execution-recorder: ${TYPE_PICK%%$'\n'*} launches of $START_TYPE on this session roster have no id and the start names none of them; agent $START_ID is left to the return of its launch call" >&2
+             unchecked_start_record "${TYPE_PICK#*$'\n'}" ;;
         esac
         ;;
     esac
