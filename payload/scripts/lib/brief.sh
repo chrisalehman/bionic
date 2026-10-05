@@ -198,8 +198,8 @@ QUOTE_CHARS="\`\"$(printf '\047')"
 # `cmd_class`) calls a suite run, so a test runner the classifier does not know, such as
 # `python -m pytest`, was recorded and counted nothing: six of them passed an auditor's cap of three.
 # Every declared command counts except one that only clears or stages files, so the cleanup of a
-# stale build directory is recorded and counts nothing: no `;`, `&&`, `|`, backquote or `$(` in
-# it, and its first WORD one of `DP_HOUSEKEEPING_WORDS`. The list lives here, once; `rm` is
+# stale build directory is recorded and counts nothing: no `;`, `&`, `|`, backquote, `$(`, `<(`,
+# `>(` or line break in it (T57), and its first WORD one of `DP_HOUSEKEEPING_WORDS`. The list lives here, once; `rm` is
 # matched as a whole word, so `rmx` and `./rm` count as runs. `lift_contract_fields` applies the
 # cap after its awk pass, so every door that lifts a contract — a dispatch, `amend`, `task-add` —
 # counts the same way, and the refusal texts read these same functions, so the number a refusal
@@ -207,9 +207,14 @@ QUOTE_CHARS="\`\"$(printf '\047')"
 DP_AUDITOR_RUNS_MAX=3
 DP_SUITES_MAX=200
 DP_HOUSEKEEPING_WORDS="rm rmdir mkdir touch cp mv"
+# ANY `&` MAKES A RUN (wave-27 T57; review pass 35 B1). The list above named `&&` and left a lone
+# `&` out, so `rm -rf dist & pytest` ran pytest and counted nothing: an evidence reader declared
+# four runs and was admitted. The rule is the character, not what follows it, so a trailing
+# `rm -rf dist &` is a run too; and `<(`, `>(` and a line break end housekeeping as `$(` does.
+# This one predicate is the construction the dispatch wall and the `amend` door both read.
 dp_run_counts() {  # <one declared run, unmarked> -> 0 when it counts against the cap, 1 when it is housekeeping
   local run="${1-}" first w
-  case "$run" in *';'*|*'&&'*|*'|'*|*'`'*|*'$('*) return 0 ;; esac
+  case "$run" in *';'*|*'&'*|*'|'*|*'`'*|*'$('*|*'<('*|*'>('*|*$'\n'*) return 0 ;; esac
   run="${run#"${run%%[![:space:]]*}"}"
   first="${run%%[[:space:]]*}"
   for w in $DP_HOUSEKEEPING_WORDS; do
@@ -233,6 +238,11 @@ dp_reads_evidence() {  # <subagent_type> [<questions, comma-joined>] -> 0 when t
     bionic:critic|critic|bionic:reviewer|reviewer)
       case ",${2-}," in *,evidence,*) return 0 ;; esac ;;
   esac
+  return 1
+}
+# dp_is_reader <subagent_type> -> 0 for the three reader roles, prefixed or bare (wave-27 T57).
+dp_is_reader() {
+  case "${1-}" in bionic:auditor|auditor|bionic:critic|critic|bionic:reviewer|reviewer) return 0 ;; esac
   return 1
 }
 dp_runs_cap() {  # <subagent_type> [<questions>] -> how many suite runs that brief's Re-executes: may declare
@@ -1327,7 +1337,11 @@ brief_field() {
   case "$2" in
     questions)        sanitize "$v" 40 ;;
     questions_bad)    sanitize "$v" 300 ;;
-    questions_dup)    sanitize "$v" 40 ;;
+    # Cut at a whole number (wave-27 T57; review pass 35 N2): a cut at 40 characters could land
+    # inside one and print a line that does not exist. The count is the raw field's, read apart.
+    questions_dup)    v="$(sanitize "$v" 300)"
+                      while [ "${#v}" -gt 40 ] && [ "${v% *}" != "$v" ]; do v="${v% *}"; done
+                      printf '%s' "$v" ;;
     lands_red|red_evidence) sanitize "$v" 300 ;;
     files)            sanitize "$v" 900 files ;;
     suites)           sanitize "$v" 900 suites_allowed ;;
@@ -1505,7 +1519,7 @@ brief_body_advisories() {
 brief_validate_fields() {
   local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
-  local files_unread files_bad entry fact fix questions reader
+  local files_unread files_bad entry fact fix questions no_instrument=""
   local cap capw detail suites_comment impact_cmd found=0
   local _impact_out _impact_tmp _impact_pid _impact_overran _impact_rc _old_ifs
   files=$(brief_field "$lifted" files)
@@ -1519,6 +1533,14 @@ brief_validate_fields() {
   files_unread=$(brief_field "$lifted" files_unread)
   files_bad=$(brief_field "$lifted" files_bad)
   questions=$(brief_field "$lifted" questions)
+  # A READER'S Files: ASKS FOR NO DERIVATION (wave-27 T57; review pass 38 B1, A-orch-105). A
+  # reader's Files: line lists its records, and a reader edits no tracked file, so nothing is
+  # derived from it and "no impact command is configured" is never its answer: with no Suites:
+  # line it is read as `Suites: none`, and the evidence rules below judge the runs it declares.
+  # A Suites: line whose tokens were refused, dropped or all comment is not "no Suites: line".
+  if dp_is_reader "$role" && [ -n "$files" ] && [ -z "$suites$suites_bad$suites_dropped$suites_commented" ]; then
+    suites="none"
+  fi
   # THE ROLE AND ITS QUESTIONS DECIDE THE RUN CAP (wave-20 T4; wave-27 T15, F4), and the refusal
   # texts print the number the lift applied, from the same function.
   cap=$(dp_runs_cap "$role" "$questions")
@@ -1631,7 +1653,42 @@ Then retry the dispatch."
   # by the writer-side budget arm 40 minutes later as undeclared, for a fact the author was
   # never told at dispatch. `RUNS_MAX` (3) is unchanged; a brief within the cap never reaches
   # this arm.
-  if [ -n "$runs_dropped" ]; then
+  #
+  # FOR A READER OF THE EVIDENCE QUESTION THE THREE IS A TOTAL (wave-27 T57; review pass 35 N4).
+  # Its checks file says "Re-execute at least one evidence command per tier used (cap 3 total)",
+  # and a suite named under Suites: is re-executed as surely as a marked run, so the two count
+  # together: four suites, or three suites and one run, is over. The suites are the Suites: line's
+  # own (`$suites`, before any derivation); the runs are the kept and the dropped ones, counted
+  # by `dp_counted_runs` off the lift's whole line, so housekeeping stays free and the total is
+  # true however many were dropped. One finding names the total and the cap; the over-cap arm
+  # below keeps every other brief's words.
+  local ev_total=0 ev_suites=() ev_dropped=""
+  if dp_reads_evidence "$role" "$questions"; then
+    case "$suites" in ''|none) : ;; *) read -r -a ev_suites <<< "$suites" ;; esac
+    ev_dropped="$(printf '%s\n' "$lifted" | sed -n 's/^re_executes_dropped=//p' | head -1)"
+    ev_total=$(( ${#ev_suites[@]} + $(dp_counted_runs "$re_executes") + $(dp_counted_runs "$ev_dropped") ))
+  fi
+  if [ "$ev_total" -gt "$cap" ]; then
+    detail="The Suites: and Re-executes: lines name ${ev_total} runs in total (${#ev_suites[@]} suites, $(( ev_total - ${#ev_suites[@]} )) runs), more than the ${cap}-run cap admits for
+this brief (${role:-unnamed}${questions:+, Questions: ${questions}})."
+    [ -n "$runs_dropped" ] && detail="${detail}
+The Re-executes: lines name more runs than the ${cap}-run cap admits on their own, and these
+were dropped:
+    ${runs_dropped}"
+    detail="${detail}
+
+The cap of three is the evidence question's, from payload/context/checks-evidence.md
+(\"cap 3 total\"), and binds whichever reader holds that question. Each suite named under
+Suites: and each run under Re-executes: is one re-execution of it; file housekeeping
+(${DP_HOUSEKEEPING_WORDS}) counts nothing unless it holds a shell operator.
+
+Fix: name at most three in all, across Suites: and Re-executes: —
+    Suites: tests/one.test.sh, tests/two.test.sh
+    Re-executes: \`pytest tests/unit\`
+
+Then retry the dispatch."
+    found=1; "$sink" finding "the total of ${ev_total} runs exceeds the ${cap}-run cap" "declare three at most" "$detail"
+  elif [ -n "$runs_dropped" ]; then
     detail="The Re-executes: lines name more runs than the ${cap}-run cap admits for
 this brief (${role:-unnamed}${questions:+, Questions: ${questions}}), and this one was dropped:
     ${runs_dropped}
@@ -1784,6 +1841,7 @@ its command the same way — a name that is still a variable when a hook sees it
 be neither derived from nor checked against anything.
 
 Then retry the dispatch."
+    no_instrument=1
     found=1; "$sink" finding "this brief declares no Files: and no Suites:" "declare Files: or Suites:" "$detail"
   fi
 
@@ -1817,12 +1875,18 @@ Then retry the dispatch."
       # spelling that could not answer. `Suites: none` beside a non-empty `Re-executes:` is an
       # auditor that waived the shell-suite budget and declared what it will actually re-run,
       # which is the whole of what this arm exists to require.
-      reader="an auditor"
-      case "$role" in bionic:auditor|auditor) : ;; *) reader="a ${role#bionic:} reading evidence" ;; esac
       # A RUN THAT ONLY CLEARS OR STAGES FILES IS NO RUN (wave-27 T49, review pass 24): `rm -rf dist`
       # beside `Suites: none` gave the reader nothing to re-execute and was admitted as one.
-      if [ "$suites" = "none" ] && [ "$(dp_counted_runs "$re_executes")" -eq 0 ]; then
-        found=1; "$sink" finding "${reader} names no suites" "name the suites to re-execute" \
+      #
+      # WITH OR WITHOUT A Suites: LINE (wave-27 T57; review pass 35 N7). The arm read only the
+      # `none` waiver, so an auditor with no Suites: line and only `rm -rf dist` under
+      # Re-executes: was admitted. A reader dealt evidence that names no suite and no counted run
+      # declares nothing to re-execute, and is told so in its own words. A brief that declared no
+      # instrument at all, or whose suite or run was refused, is already refused above for that,
+      # so this arm stays quiet there: one finding for one fault.
+      if { [ -z "$suites" ] || [ "$suites" = "none" ]; } && [ "$(dp_counted_runs "$re_executes")" -eq 0 ] \
+         && [ -z "$no_instrument" ] && [ -z "$runs_bad$suites_bad$suites_dropped" ]; then
+        found=1; "$sink" finding "the ${role#bionic:} declares nothing to re-execute" "name one suite or run" \
           "Role: ${role}${questions:+ (Questions: ${questions})}
 
 A verdict on the evidence question is a re-run of the evidence, not a read of it — a

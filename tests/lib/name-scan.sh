@@ -10,16 +10,20 @@ set +x +v
 # knows (a space, a tab, a carriage return, a Unicode space) is stripped at both ends, and a
 # line empty after that is skipped (counted, not an entry). Entries are fixed strings, matched
 # case-insensitively: both sides are decoded as UTF-8 (a malformed byte becomes U+FFFD) and Unicode case-folded, whatever the
-# caller's locale. The one exception is an entry's own white space (A-orch-91, A-orch-106):
-# between two of its words the text may hold EITHER horizontal white space on one line (spaces,
-# tabs, the Unicode spaces) OR exactly ONE line break with, on each side of it, any mix of
-# horizontal white space, at most 24 symbols (a character that is neither a letter, a digit nor
-# white space: quotes, a backslash, `+`, `#`, `/`, `*`, `>`, `-`, `;`, brackets and the rest)
-# and at most three markup tags. So a name of two words is found where prose, a comment, a
-# commit body, a string continued on the next line, a quoted patch line or markup wraps between
-# them. White space is never optional (the words run together are another entry), a blank line
-# between the words is no wrap, and symbols between two words on ONE line are no match. The
-# scan runs in the checkout it is started from.
+# caller's locale. The one exception is an entry's own white space (A-orch-91, A-orch-106,
+# A-orch-115): between two of its words lies a GAP, and a gap matches when it is EITHER
+# horizontal white space on one line (spaces, tabs, the Unicode spaces) OR a side, exactly ONE
+# line break (LF, CR LF, CR, VT, FF, NEL, LS or PS), a side. A side is any mix of horizontal
+# white space, at most 24 symbols (a character that is neither a letter, a digit nor white space:
+# quotes, a backslash, `+`, `#`, `/`, `*`, `>`, `-`, `;`, brackets and the rest) and at most
+# three markup tags (`<`, at most 200 characters with no `<`, `>` or line break, `>`), read ANY
+# way that fits: a `<` may be a symbol or open a tag. The gap is exactly what lies between the
+# two words, so a word's own symbols (`(word`, `c++`) belong to the word and never count against
+# a side. So a name of two words is found where prose, a comment, a commit body, a string
+# continued on the next line, a quoted patch line or markup wraps between them. White space is
+# never optional (the words run together are another entry), a blank line between the words is
+# no wrap, and symbols between two words on ONE line are no match. The scan runs in the
+# checkout it is started from.
 #
 # WHAT IT READS is what a push of <base>..<head> would publish, never the working files:
 #   - every blob in the tree at the head, as bytes (a binary file, a file marked `-diff` or
@@ -40,23 +44,28 @@ set +x +v
 # ONE PASS. Everything above is read once, by one matcher (MATCHER, a program for the perl the
 # PATH names, which the power check proves able: macOS awk ends a string at a NUL byte and stops
 # on a malformed UTF-8 one, and BSD grep misses a folded match after a NUL). A record is tested
-# against every entry at once; only a record that holds one is searched entry by entry to name
-# it, in the same folded text, for the same pattern.
+# against every entry at once, by a pattern that admits every gap the rule admits and a few it
+# does not; only a record that passes is searched entry by entry, in the same folded text, and
+# there each place is held to the rule exactly before it is a hit. tests/name-scan.test.sh
+# holds the scan to a reference matcher written from the rule alone, over 5,000 generated cases.
 #
 # WHAT IS STILL MISSED: text not in UTF-8, in file contents as in messages (a UTF-16 file, a
 # Latin-1 non-ASCII name, a commit with another `encoding`), compressed or otherwise encoded
 # text, an NFD form of an NFC entry, `mergetag` and `gpgsig` headers, notes and branch names,
 # and a name broken deliberately (inside a word, by a zero-width character). At a wrap: a blank
-# line (a paragraph, a git subject and its body), a hyphen breaking a word, more than 24
-# symbols or more than three tags on one side of the break, a letter or a digit there (`rem`, a
-# JSON `\n` escape, `&nbsp;`), and symbols with no line break (`mxv9, plover` on one line).
+# line or any two breaks (a paragraph, a git subject and its body, LF then CR), a hyphen
+# breaking a word, a side that no reading fits into 24 symbols and three tags, a tag of more
+# than 200 characters or one that spans a line break, a letter or a digit outside a tag (`rem`,
+# a JSON `\n` escape, `&nbsp;`), and symbols with no line break (`mxv9, plover` on one line).
 #
 # A CLEAN RESULT MUST HAVE POWER. Before the real scan, the same function runs over a
 # throwaway repository built with git's plumbing, which holds every entry at every site the
 # scan reads: a text blob (in upper case), a binary blob, a symlink target and a path name at
-# the head, and three text blobs holding each entry wrapped, one per branch of the construction
+# the head, and five text blobs holding each entry wrapped, one per branch of the construction
 # (each run of white space inside it a tab, CR LF and blanks; symbols around a line break; a
-# tag on each side of one); a path and a blob (in lower case) that exist only
+# tag on each side of one; a break then a `<` that is a symbol, a `>` later on the line; four
+# tags of symbols alone, read as three tags and three symbols); a path and a blob (in lower
+# case) that exist only
 # inside the range; a commit message; an author name, an author email, a committer name and a
 # committer email; a tag name and a tag message. An entry not found at any of them refuses the
 # run (exit 2). An entry git cannot hold at a site is not planted there: one with a byte no ref
@@ -80,7 +89,8 @@ set +x +v
 # them, every git trace variable is unset as a second line of defence, and so are the perl
 # variables that would load a debugger or a module into the matcher. The throwaway
 # lives in a temp directory removed on exit; HUP, INT and TERM end the run once the command then
-# running has finished, so no child writes into the tree after it is removed. Exit 0 clean (an empty list prints `entries=0`),
+# running has finished, so no child writes into the tree after it is removed, and the removal
+# ignores the three, so a signal to the whole process group cannot stop it half done. Exit 0 clean (an empty list prints `entries=0`),
 # 1 a hit, 2 a refusal.
 #
 # bash 3.2 (ADR-001) and the perl macOS ships. Not part of the shipped plugin.
@@ -121,48 +131,102 @@ sub slurp {
 sub fold { fc(Encode::decode("UTF-8", $_[0])) }
 my ($listf, $pathsf, $logf, $tagsf, $want) = @ARGV;
 my @kv = split /\0/, slurp($listf, "the list");
-# an entry is its words, each literal; between two of them, EITHER horizontal white space on one
-# line, OR exactly one line break with, on each side of it, any mix of horizontal white space, at
-# most 24 symbols (a character that is neither a letter, a digit nor white space) and at most
-# three tags (`<`, at most 200 characters with no `<`, `>` or line break, `>`). The batch pattern
-# and the attribution pattern are both built from this one construction. It cannot backtrack
-# without bound: every white-space run is possessive, the tag body is possessive and counted, the
-# walk of the cap never gives anything back, the side before the break is atomic, and the side after
-# it can give back at most its 24 symbols (a word may begin with one). It is written ONCE, as the
-# named group `ws` every gap calls: written into each gap, 500 entries made a pattern of 580 KB
-# that the engine could no longer search by its first words (13 s on 2 MB of text, against 0.01).
+# an entry is its words, each literal. Between two of them lies a GAP, matched by THE RULE (plan
+# T65): EITHER horizontal white space on one line, OR a side, exactly one line break (anything \R
+# takes as one: LF, CR LF, CR, VT, FF, NEL, LS, PS), a side. A side is items: horizontal white
+# space (free), at most 24 symbols (a character that is neither a letter, a digit nor white space)
+# and at most three tags (`<`, at most 200 characters with no `<`, `>` or line break, `>`), read
+# ANY way that fits: a `<` may be a symbol or open a tag. The gap is exactly the text between the
+# two words as matched, so the symbols of a word belong to it and never count against a side.
+#
+# side_ok <side>: does some reading fit? Each `<` that opens a tag (its next `>` comes first, within
+# 200 characters, on its line) is that tag or two or more symbols; a tag holding a letter or a digit
+# can only be a tag; of the rest, those with the most symbols are read as tags while the side has
+# tags to spare, and every other character must be white space or a symbol.
+sub side_ok {
+  my ($s) = @_;
+  my ($syms, $need, @w) = (0, 0);
+  pos($s) = 0;
+  while (pos($s) < length $s) {
+    next if $s =~ /\G\h+/gc;
+    if ($s =~ /\G(<[^<>\v]{0,200}>)/gc) {
+      my $t = $1;
+      if ($t =~ /[\p{L}\p{Nd}]/) { $need++ } else { push @w, scalar(() = $t =~ /[^\p{L}\p{Nd}\s]/g) }
+      next;
+    }
+    next if $s =~ /\G[^\p{L}\p{Nd}\s]/gc && ++$syms;
+    return 0;
+  }
+  return 0 if $need > 3;
+  @w = sort { $b <=> $a } @w;
+  splice(@w, 0, 3 - $need);
+  $syms += $_ for @w;
+  return $syms <= 24;
+}
+# gap_ok <gap> (a copy: $^N is reset by the first match in here)
+sub gap_ok {
+  my ($g) = @_;
+  return 1 if $g !~ /\v/;
+  my ($l, $r) = $g =~ /^(\V*)\R(\V*)\z/ or return 0;
+  return side_ok($l) && side_ok($r);
+}
+# $gap finds where a gap can END, never more than the bounds of the rule allow: read with every tag
+# it can hold, a side is at most 27 items (a tag read as symbols is two or more of them), so the
+# side before the break is walked once, tag first, and kept; the side after it may end after any
+# of its first 27 items, or inside a tag it opens (`mxv9` break `<plover x>`: that `<` is a
+# symbol). It is a superset of the rule; side_ok then decides, once the next word has matched.
 my $tag = qr{<[^<>\v]{0,200}+>};
-my $sym = qr{(?!$tag)[^\p{L}\p{Nd}\s]};
-my $cap = qr{(?=\h*+(?:$tag\h*+){0,3}+(?:$sym\h*+(?:$tag\h*+){0,3}+){0,24}+(?!$sym))};
-my $run = qr{\h*+(?:$sym\h*+){0,24}};
-my $side = qr{$cap$run(?:$tag$run){0,3}};
-my $def = qr{(?(DEFINE)(?<ws>\h++|(?>$side)\R$side))};
-my $ws = "(?&ws)";
-my (@num, @fp);
+my $sym = qr{[^\p{L}\p{Nd}\s]};
+my $item = qr{(?:$tag|$sym)};
+my $inside = qr{(?:<(?:\h++|[^\p{L}\p{Nd}\s<>]){0,47}?)?};
+my $before = qr{(?:\h*+$item){0,27}+\h*+};
+my $after = qr{(?:\h*+(?>$item)){0,27}?\h*+$inside};
+my $wrap = qr{$before\R$after};
+my $gap = qr{(?:\h++|$wrap)};
+# three patterns per entry. @fs, the superset, finds where a match may start, from the same
+# string as the batch pattern; @fl, white space on one line only, is exact and runs no code; @fe
+# is exact, checking each gap after its next word. The batch pattern is the superset of every
+# entry at once, written with $gap ONCE as the named
+# group `ws`: written into each gap, 500 entries made a pattern of 580 KB that the engine could no
+# longer search by its first words (13 s on 2 MB of text, against 0.01). Only an anchored pattern
+# runs the check: a code block in a pattern that also searches costs at every place it tries.
+my (@num, @fp, @fs, @fl, @fe);
 while (@kv) {
   push @num, shift @kv;
-  push @fp, join $ws, map { quotemeta } split /\s+/, fold(shift @kv);
+  my @w = split /\s+/, fold(shift @kv);
+  push @fp, join "(?&ws)", map { quotemeta } @w;
+  my ($l, $e) = (qr/\Q$w[0]\E/) x 2;
+  for my $x (@w[1 .. $#w]) {
+    $l = qr/$l\h++\Q$x\E/;
+    $e = qr/$e($gap)\Q$x\E(?(?{ gap_ok($^N) })|(*FAIL))/;
+  }
+  push @fs, qr/\G(.*?)(?=$fp[-1])(?(DEFINE)(?<ws>$gap))/s; push @fl, qr/\G($l)/; push @fe, qr/\G($e)/;
 }
 my $any = join "|", @fp;
-$any = qr/(?:$any)$def/;
-my @fe = map { qr/$_$def/ } @fp;
+$any = qr/(?:$any)(?(DEFINE)(?<ws>$gap))/;
 my ($hits, %seen) = (0);
 sub hit { return if $seen{"$_[0] $_[1]"}++; print "HIT entry=$_[0] at $_[1]\n"; $hits++ }
 # look <bytes> <where> <lines>: all entries at once first; the entry and line only after a find.
-# A line is counted on from the previous match, over the text between the two and the match
-# itself, never from an offset: an offset into decoded text is found by walking from its start,
+# Each place the superset finds is tried by the exact patterns, anchored; a place they refuse is
+# stepped over by one character. A line is counted on from the previous place, over the text
+# between, never from an offset: an offset into decoded text is found by walking from its start,
 # which made many matches in one blob cost their square.
 sub look {
   my ($t, $where, $lines) = (fold($_[0]), $_[1], $_[2]);
   return unless $t =~ $any;
   for my $i (0 .. $#fe) {
-    if (!$lines) { hit($num[$i], $where) if $t =~ $fe[$i]; next }
     my $line = 1;
     pos($t) = undef;
-    while ($t =~ /\G(.*?)($fe[$i])/gs) {
+    while ($t =~ /$fs[$i]/gc) {
       $line += ($1 =~ tr/\n//);
-      hit($num[$i], "$where line $line");
-      $line += ($2 =~ tr/\n//);
+      if ($t =~ /$fl[$i]/gc || $t =~ /$fe[$i]/gc) {
+        hit($num[$i], $lines ? "$where line $line" : $where);
+        last unless $lines;
+        $line += ($1 =~ tr/\n//);
+      } else {
+        $t =~ /\G(.)/gcs;
+        $line++ if $1 eq "\n";
+      }
     }
   }
 }
@@ -309,21 +373,22 @@ ref_ok() {
 # ident_ok <entry> — can a name or an email hold it? (git refuses `<` and `>` there)
 ident_ok() { case "$1" in *[\<\>]*) return 1 ;; esac; return 0; }
 
-# wrapped_entries <title> <break> — <title> and each entry on its own line, every run of blanks
-# inside it made <break>: a scan that lost the branch of the construction <break> needs would
-# miss it (the builtin printf; no entry is a word of any command)
+# wrapped_entries <title> <break> [<after>] — <title> and each entry on its own line, every run of
+# blanks inside it made <break> and <after> after it: a scan that lost the branch of the
+# construction <break> needs would miss it (the builtin printf; no entry is a word of any command)
 wrapped_entries() {
   local i=0 e sp=' ' br="$2"
   printf '%s\n' "$1"
   while [ "$i" -lt "${#ENTRIES[@]}" ]; do
     e="${ENTRIES[$i]//$'\t'/$sp}"
     while :; do case "$e" in *"$sp$sp"*) e="${e//$sp$sp/$sp}" ;; *) break ;; esac; done
-    printf '%s\n' "${e//$sp/$br}"; i=$((i + 1))
+    printf '%s%s\n' "${e//$sp/$br}" "${3:-}"; i=$((i + 1))
   done
 }
 
 prove_power() {
-  local w="$1" i e n tab empty b_text b_wrap b_wsym b_wtag b_bin b_link b_gone tree0 tree1 c0 c1 c2 c3 c4 c5
+  local w="$1" i e n tab empty b_text b_wrap b_wsym b_wtag b_wang b_wsta b_bin b_link b_gone tree0 tree1 c0 c1 c2 c3 c4 c5
+  local t26='<------------------------>'
   local tg people msg miss rc
   PW="$w/power.git"
   mkdir -p "$w" && git init -q --bare --template= "$PW" >/dev/null 2>&1 \
@@ -336,6 +401,10 @@ prove_power() {
   b_wrap="$(wrapped_entries 'power wrap' $'\t\r\n  ' | pg hash-object -w --stdin)" &&
   b_wsym="$(wrapped_entries 'power wrap symbols' $' " \\\n +# "' | pg hash-object -w --stdin)" &&
   b_wtag="$(wrapped_entries 'power wrap tags' $'</t>\n<t x="1">' | pg hash-object -w --stdin)" &&
+  # a `<` after the break that is a symbol, though a `>` closes a tag from it later on the line
+  b_wang="$(wrapped_entries 'power wrap angle' $'\n<' ' z>' | pg hash-object -w --stdin)" &&
+  # four tags of symbols alone before the break: the three with the most symbols are the tags
+  b_wsta="$(wrapped_entries 'power wrap symbol tags' "<->$t26$t26$t26"$'\n' | pg hash-object -w --stdin)" &&
   b_bin="$( { printf 'power\0binary\0'; printf '%s\0' "${ENTRIES[@]}"; } | pg hash-object -w --stdin)" &&
   b_link="$(printf '../%s\n' "${ENTRIES[@]}" | pg hash-object -w --stdin)" &&
   b_gone="$( { printf 'power gone\n'; printf '%s\n' "${ENTRIES[@]}" | tr '[:upper:]' '[:lower:]'; } \
@@ -345,6 +414,8 @@ prove_power() {
     printf '100644 %s\t%s\0' "$b_wrap" power/wrap.txt
     printf '100644 %s\t%s\0' "$b_wsym" power/wrap-symbols.txt
     printf '100644 %s\t%s\0' "$b_wtag" power/wrap-tags.txt
+    printf '100644 %s\t%s\0' "$b_wang" power/wrap-angle.txt
+    printf '100644 %s\t%s\0' "$b_wsta" power/wrap-symbol-tags.txt
     printf '100644 %s\t%s\0' "$b_bin" power/data.bin
     printf '120000 %s\t%s\0' "$b_link" power/link
     i=0
@@ -397,6 +468,8 @@ prove_power() {
     printf 'entry=%s at blob %.12s\twrapped text\n' "$n" "$b_wrap"
     printf 'entry=%s at blob %.12s\tsymbol-wrapped text\n' "$n" "$b_wsym"
     printf 'entry=%s at blob %.12s\ttag-wrapped text\n' "$n" "$b_wtag"
+    printf 'entry=%s at blob %.12s\tangle-wrapped text\n' "$n" "$b_wang"
+    printf 'entry=%s at blob %.12s\tsymbol-tag-wrapped text\n' "$n" "$b_wsta"
     printf 'entry=%s at blob %.12s\tbinary blob\n' "$n" "$b_bin"
     printf 'entry=%s at blob %.12s\tsymlink target\n' "$n" "$b_link"
     printf 'entry=%s at path #\tpath name\n' "$n"
@@ -485,11 +558,14 @@ fi
 # a signal never ends the run while a child can still write into the temp tree: an exit straight
 # from the signal let the EXIT trap remove the tree while a `git hash-object -w` inside a command
 # substitution was still running, and git made the object's directories again (T61: 5 runs in 50
-# left one). The traps only record the signal; the run ends at a checkpoint.
+# left one). The traps only record the signal; the run ends at a checkpoint. A signal sent to the
+# whole process group (a Ctrl-C, a hangup) reaches every child too: the removal and `mktemp` run
+# with the three ignored, which a child inherits, so neither is killed with the tree half made or
+# half removed (T65: one run in fifty left a tree, and its paths name the entries).
 TMP_SCAN=""
-trap '[ -z "$TMP_SCAN" ] || rm -rf "$TMP_SCAN"' EXIT
+trap 'trap "" HUP INT TERM; [ -z "$TMP_SCAN" ] || rm -rf "$TMP_SCAN"' EXIT
 trap 'stop=129' HUP; trap 'stop=130' INT; trap 'stop=143' TERM
-TMP_SCAN="$(mktemp -d "${TMPDIR:-/tmp}/name-scan.XXXXXX")" || refuse "cannot make a temp directory"
+TMP_SCAN="$(trap '' HUP INT TERM; mktemp -d "${TMPDIR:-/tmp}/name-scan.XXXXXX")" || refuse "cannot make a temp directory"
 checkpoint
 
 prove_power "$TMP_SCAN/power"
