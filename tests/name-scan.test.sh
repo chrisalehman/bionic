@@ -18,6 +18,8 @@
 #           (T32 finding 2).
 #   §LIST   a list line is stripped of edge blanks, a CR and a BOM before use (T32 finding 3).
 #   §TRACE  an inherited GIT_TRACE* file never receives an entry (T32 finding 4).
+#   §BASH32 the whole scan under /bin/bash (3.2) prints the lines the PATH bash prints.
+#   §ARGV   no entry is a word of any command line, and git config tracing records none.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): every
 # repository is a real `git init` under a mktemp directory, with real commits, real
@@ -369,6 +371,91 @@ expect_status "TRACE: the run still finds the hit" 1 "$RC"
 expect_regex "TRACE: and prints it (positive on the same run)" '^HIT entry=1 at file b\.txt:1$' "$(hits)"
 TRACED="$(cat "$TMP"/trace/t[1-6] 2>/dev/null | grep -c -i -F -- "$E1" || true)"
 expect_eq "TRACE: no trace file the run was pointed at holds the entry" "0" "$TRACED"
+
+section "§BASH32 — the whole scan under /bin/bash, the plugin's interpreter (T32 round 2)"
+
+# the suite itself runs under whatever `bash` is first on PATH; the scan is run under /bin/bash
+# (3.2 on macOS) and its lines must be the same ones
+B1="zq-b32text-2290"; B2="zq-b32dir-4417"; B3="zq-b32msg-6021"; B4="zq-b32tag-1180"
+R="$TMP/b32"; fx_repo "$R"
+git -C "$R" tag -a v1.9.0 -m "previous"
+mkdir -p "$R/$B2"; printf 'plain\n' > "$R/$B2/f.txt"; printf 'see %s.\nmore\n' "$B1" > "$R/notes.txt"
+fx_commit "$R" "release $B3"
+git -C "$R" tag -a v2.0.0 -m "release $B4"
+printf '\357\273\277%s \r\n%s\r\n%s \t\n%s\n' "$B1" "$B2" "$B3" "$B4" > "$TMP/lists/b32"
+SHA="$(git -C "$R" rev-parse HEAD | cut -c1-12)"
+WANT="$(git -C "$R" ls-tree -r --name-only HEAD | grep -n -i -F -- "$B2" | cut -d: -f1)"
+expect_nonempty "BASH32: the fixture's directory path sits at a position in tree order (extractor non-empty)" "$WANT"
+scan "$R" "$TMP/lists/b32"
+OUT_DEFAULT="$OUT"
+expect_status "BASH32: under the PATH bash the fixture is a hit run (control)" 1 "$RC"
+if [ -x /bin/bash ]; then
+  OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD /bin/bash "$SCAN" "$TMP/lists/b32" 2>&1)"; RC=$?
+  expect_status "BASH32: /bin/bash — the run exits 1" 1 "$RC"
+  expect_eq "BASH32: /bin/bash — a content hit, through a BOM, CR LF and trailing-blank line" "HIT entry=1 at file notes.txt:1" "$(hits | sed -n 1p)"
+  expect_contains "BASH32: /bin/bash — a path hit" "HIT entry=2 at path #$WANT" "$(hits)"
+  expect_contains "BASH32: /bin/bash — a message hit at a tagged head (range is v1.9.0..head)" "HIT entry=3 at message $SHA" "$(hits)"
+  expect_contains "BASH32: /bin/bash — a tag-message hit" "HIT entry=4 at tag-message" "$(hits)"
+  expect_contains "BASH32: /bin/bash — four entries read" "entries=4 hits=4" "$OUT"
+  expect_eq "BASH32: /bin/bash prints exactly what the PATH bash prints (the whole output)" "$OUT_DEFAULT" "$OUT"
+else
+  echo "SKIP: /bin/bash is absent on this machine; the BASH32 rows did not run"
+fi
+
+section "§ARGV — no list entry is a word of any command line the scan runs (T32 round 2)"
+
+A1="zq-argv-content-3318"; A2="Quillargvpath-7742"; A3="zq-argv-msg-5509"
+R="$TMP/argv1"; fx_repo "$R"
+mkdir -p "$R/docs"; printf 'plain\n' > "$R/docs/$(printf '%s' "$A2" | tr 'A-Z' 'a-z').md"
+printf 'x\nsee %s\n' "$A1" > "$R/c.txt"
+fx_commit "$R" "release $A3"
+git -C "$R" tag -a v0.2 -m "release $A3"
+L="$(fx_list argv1 "$A1" "$A2" "$A3")"
+# argv_shim <dir> <log> <tool>... — each tool logs its whole argv, one word a line, then execs the real one
+argv_shim() {
+  local d="$1" log="$2" n real; shift 2
+  mkdir -p "$d"
+  for n in "$@"; do
+    real="$(type -P "$n")" || continue
+    printf '#!/bin/bash\nprintf "%%s\\n" "%s" "$@" >> "%s"\nexec "%s" "$@"\n' "$n" "$log" "$real" > "$d/$n"
+    chmod +x "$d/$n"
+  done
+}
+ALOG="$TMP/argv.log"; : > "$ALOG"
+argv_shim "$TMP/argv-shim" "$ALOG" git grep awk sed tr cut dirname mktemp rm cat head tail wc sort uniq touch env
+# control: the shim records a pattern given the way the old scan gave it
+PATH="$TMP/argv-shim:$PATH" git -C "$R" grep -n -F -e "$A1" HEAD >/dev/null 2>&1
+expect_true "ARGV: control — the shim log records an entry passed as a word" grep -q -F -- "$A1" "$ALOG"
+: > "$ALOG"
+scan "$R" "$L"
+BASE_OUT="$OUT"
+expect_status "ARGV: without the shims the run is a hit run" 1 "$RC"
+expect_contains "ARGV: content hit" "HIT entry=1 at file c.txt:2" "$BASE_OUT"
+expect_regex "ARGV: path hit" 'HIT entry=2 at path #[0-9]+' "$BASE_OUT"
+expect_contains "ARGV: message hit" "HIT entry=3 at message" "$BASE_OUT"
+expect_contains "ARGV: tag-message hit" "HIT entry=3 at tag-message" "$BASE_OUT"
+scan "$R" "$L" PATH="$TMP/argv-shim:$PATH"
+expect_eq "ARGV: through the logging shims the output is unchanged" "$BASE_OUT" "$OUT"
+expect_contains "ARGV: the shims saw the scan's git calls (positive on the same log)" "ls-tree" "$(cat "$ALOG")"
+expect_contains "ARGV: and its awk calls" "awk" "$(cat "$ALOG")"
+for e in "$A1" "$A2" "$A3"; do
+  expect_eq "ARGV: the argv log holds no trace of the entry on its list line $(printf '%s\n' "$A1" "$A2" "$A3" | grep -n -F -x -- "$e" | cut -d: -f1)" "0" "$(grep -c -i -F -- "$e" "$ALOG")"
+done
+
+# git CONFIG can trace too: trace2.eventTarget records every git argv. Git honours that key only
+# from protected config (system, global), so the fixture is a global config file (measured: the
+# same key through GIT_CONFIG_COUNT/KEY/VALUE writes nothing).
+CT="$TMP/trace/cfg"; rm -f "$CT"
+printf '[trace2]\n\teventTarget = %s\n' "$CT" > "$TMP/trace/gitconfig"
+GIT_CONFIG_GLOBAL="$TMP/trace/gitconfig" git -C "$R" grep -n -F -e "$A1" HEAD >/dev/null 2>&1
+expect_true "ARGV: control — a global-config trace target records an entry passed as a word" grep -q -F -- "$A1" "$CT"
+rm -f "$CT"
+scan "$R" "$L" GIT_CONFIG_GLOBAL="$TMP/trace/gitconfig"
+expect_eq "ARGV: with a config trace target the output is unchanged" "$BASE_OUT" "$OUT"
+expect_true "ARGV: the scan's own git calls were traced (positive on the same file)" grep -q -F '"event":"start"' "$CT"
+for e in "$A1" "$A2" "$A3"; do
+  expect_eq "ARGV: the config trace file holds no trace of entry '${e:0:6}…'" "0" "$(grep -c -i -F -- "$e" "$CT")"
+done
 
 section "§QUIET — no entry is printed or recorded"
 
