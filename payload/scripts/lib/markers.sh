@@ -19,6 +19,7 @@
 #   markers_regular  <file>                         rc 4, and what it is, when it is not text bionic can read
 #   markers_regular_cell <what>                     the status cell for markers_regular's answer
 #   markers_drop_lines <file> <predicate> <n>,<n>   those whole lines gone, every other byte kept
+#   bionic_rc_lines <file> <predicate> <ere>        which of <predicate>'s lines may go, which stay
 #
 # THE WRITERS' EXIT CODES ARE THE REASON (wave-27 T40, review pass 9 findings 1,
 # 2 and 8; T46). 0 written; 1 a write failed; 2 the markers do not pair up; 3 the
@@ -54,6 +55,12 @@ _markers_self_dir() {
 if ! declare -F bionic_link_target >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$(cd "$(_markers_self_dir)" && pwd -P)/deps.sh"
+fi
+# `bionic_rc_shell` is shell.sh's — which shell reads an rc — for the parse checks
+# below (wave-27 T66). The same soft source.
+if ! declare -F bionic_rc_shell >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_markers_self_dir)" && pwd -P)/shell.sh"
 fi
 
 _markers_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
@@ -294,14 +301,159 @@ bionic_drop_lines_walk() {  # <file> <predicate> <n>,<n> — the lines that stay
   return 0
 }
 
-# The writer: 0 removed; 1 a write failed; 2 the lines are not the ones named;
-# 3 read-only; 4 not a regular text file. On every non-zero the file is as it was.
+# THE LINE GOES ONLY AS A COMMAND OF ITS OWN (wave-27 T66, review pass 40 B1, the
+# blocker). Whole-line equality says nothing about WHERE a line sits: bionic's exact
+# line as the only command of the user's `if` left a bash rc that no longer parsed,
+# and inside a here-document it changed the user's data. bionic only ever appended
+# its line at the end of the file, so a line anywhere else was put there by the user.
+# A line <predicate> accepts is offered (`ours`) only when the rc's own shell
+# (shell.sh `bionic_rc_shell`) says, with `-n` on copies staged in a fresh temporary
+# directory, that
+#   (a) nothing before continues onto it: the last line of code before it (blank
+#       and comment lines skipped) does not end in a backslash, `&&`, `||`, `|` or
+#       `|&` (A-orch-119 (2));
+#   (b) it is a command and not data: with the line replaced by a line holding only
+#       `)` the rc no longer parses (inside a here-document or a string that spans
+#       lines `)` is text, the copy still parses, and the line is the user's data);
+#   (c) the rc parsed before, and still parses without it (and without every line
+#       already accepted before it, so two lines that empty one body cannot pass).
+# Anything else is `bound`: bionic's line, left byte for byte and named by number
+# for the user's hand. `why` is `ok` when the shell was asked; `no-shell` when the
+# rc's shell is not on the PATH and `no-parse` when the rc did not parse to begin
+# with — every candidate is bound then, because nothing could be checked. Nothing of
+# the rc is ever run or sourced: the shell gets `-n` and a staged copy only.
+# A MARKED BLOCK IS ONE UNIT, AND OBEYS THE SAME RULE AS ONE (A-orch-119 (3)):
+# `bionic_rc_block_alone` asks (a), (b) and (c) of the block's lines together —
+# its start marker replaced by `)` and the rest left out for (b), all of them left
+# out for (c). remove.sh carries these functions under the same names, pinned by
+# tests/rc-item.test.sh §T66.
+# Lines from a <start> marker to its <end> are a marked block's, decided as one unit
+# (`markers_block_alone`), and are not read as bare lines.
+bionic_rc_candidates() {  # <file> <predicate> <ere> [<start> <end>] — `cand=<n>,<n> theirs=<n>,<n>`
+  local LC_ALL=C file="$1" pred="$2" ere="$3" start="${4:-}" end="${5:-}" line n=0 cand="" theirs="" inside=0
+  if [ -f "$file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      n=$((n + 1))
+      if [ -n "$start" ]; then
+        if [ "$line" = "$start" ]; then inside=1; continue; fi
+        if [ "$line" = "$end" ]; then inside=0; continue; fi
+        [ "$inside" = "1" ] && continue
+      fi
+      if "$pred" "$line"; then cand="${cand}${cand:+,}${n}"
+      elif [ -n "$ere" ] && [[ "$line" =~ $ere ]]; then theirs="${theirs}${theirs:+,}${n}"; fi
+    done < "$file"
+  fi
+  printf 'cand=%s theirs=%s\n' "$cand" "$theirs"
+}
+
+bionic_rc_lines() {  # <file> <predicate> <ere> [<start> <end>] — `ours=<n>,<n> bound=<n>,<n> why=<w> theirs=<n>,<n>`
+  local scan cand
+  scan="$(bionic_rc_candidates "$1" "$2" "$3" "${4:-}" "${5:-}")"
+  cand="${scan#cand=}"; cand="${cand%% *}"
+  printf '%s theirs=%s\n' "$(bionic_rc_alone "$1" "$cand")" "${scan#* theirs=}"
+}
+
+bionic_rc_alone() {  # <file> <n>,<n> — `ours=<n>,<n> bound=<n>,<n> why=<ok|no-shell|no-parse|no-stage>`
+  local file="$1" cand="$2" bin dir n ours="" bound="" cont
+  if [ -z "$cand" ]; then printf 'ours= bound= why=ok\n'; return 0; fi
+  bin="$(command -v "$(bionic_rc_shell "$file")" 2>/dev/null)" || bin=""
+  if [ -z "$bin" ]; then printf 'ours= bound=%s why=no-shell\n' "$cand"; return 0; fi
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/bionic-rc.XXXXXX" 2>/dev/null)" || dir=""
+  if [ -z "$dir" ]; then printf 'ours= bound=%s why=no-stage\n' "$cand"; return 0; fi
+  if ! bionic_rc_try "$bin" "$file" "$dir/rc" "" ""; then
+    rm -rf "$dir"; printf 'ours= bound=%s why=no-parse\n' "$cand"; return 0
+  fi
+  cont="$(bionic_rc_continued "$file" "$cand")"
+  for n in ${cand//,/ }; do
+    case ",${cont}," in *",${n},"*) bound="${bound}${bound:+,}${n}"; continue ;; esac
+    if bionic_rc_try "$bin" "$file" "$dir/rc" "" "$n" \
+       || ! bionic_rc_try "$bin" "$file" "$dir/rc" "${ours}${ours:+,}${n}" ""; then
+      bound="${bound}${bound:+,}${n}"
+    else
+      ours="${ours}${ours:+,}${n}"
+    fi
+  done
+  rm -rf "$dir"
+  printf 'ours=%s bound=%s why=ok\n' "$ours" "$bound"
+}
+
+# Which of the lines <n>,<n> something before continues onto: the last line of code
+# above it (blank lines and comment lines skipped) ends in a backslash, `&&`, `||`,
+# `|` or `|&`, its trailing blanks and CR aside.
+bionic_rc_continued() {  # <file> <n>,<n> — those of them that are continued, <n>,<n>
+  LC_ALL=C awk -v want=",$2," '
+    index(want, "," NR ",") {
+      t = code; sub(/[ \t\r]+$/, "", t)
+      if (t ~ /(\\|&&|[|]|[|]&)$/) out = out (out == "" ? "" : ",") NR
+    }
+    { s = $0; sub(/^[ \t]+/, "", s); sub(/\r$/, "", s)
+      if (s != "" && substr(s, 1, 1) != "#") code = $0 }
+    END { print out }' "$1"
+}
+
+bionic_rc_block_alone() {  # <file> <first> <last> — `alone=<yes|no> why=<ok|no-shell|no-parse|no-stage>`
+  local file="$1" first="$2" last="$3" bin dir n rest="" alone=no
+  bin="$(command -v "$(bionic_rc_shell "$file")" 2>/dev/null)" || bin=""
+  if [ -z "$bin" ]; then printf 'alone=no why=no-shell\n'; return 0; fi
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/bionic-rc.XXXXXX" 2>/dev/null)" || dir=""
+  if [ -z "$dir" ]; then printf 'alone=no why=no-stage\n'; return 0; fi
+  if ! bionic_rc_try "$bin" "$file" "$dir/rc" "" ""; then
+    rm -rf "$dir"; printf 'alone=no why=no-parse\n'; return 0
+  fi
+  n=$((first + 1))
+  while [ "$n" -le "$last" ]; do rest="${rest}${rest:+,}${n}"; n=$((n + 1)); done
+  if [ -z "$(bionic_rc_continued "$file" "$first")" ] \
+     && ! bionic_rc_try "$bin" "$file" "$dir/rc" "$rest" "$first" \
+     && bionic_rc_try "$bin" "$file" "$dir/rc" "${first}${rest:+,}${rest}" ""; then
+    alone=yes
+  fi
+  rm -rf "$dir"
+  printf 'alone=%s why=ok\n' "$alone"
+}
+
+# The block between <start> and <end> (the first pair; a caller has already refused
+# markers that do not pair up) and `bionic_rc_block_alone`'s answer for it: the one
+# function the retired alias block and the retired env block are both decided by
+# (A-orch-119 (3)). `alone=<yes|no> why=<…> first=<n> last=<n>`. remove.sh's
+# `_rm_block_alone` is this body, pinned by tests/rc-item.test.sh §T66.
+markers_block_alone() {  # <file> <start> <end>
+  local line n=0 first="" last=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ -z "$first" ] && [ "$line" = "$2" ]; then first="$n"
+    elif [ -n "$first" ] && [ -z "$last" ] && [ "$line" = "$3" ]; then last="$n"; fi
+  done < "$1"
+  if [ -z "$first" ] || [ -z "$last" ]; then printf 'alone=no why=ok first= last=\n'; return 0; fi
+  printf '%s first=%s last=%s\n' "$(bionic_rc_block_alone "$1" "$first" "$last")" "$first" "$last"
+}
+
+# One staged copy of <file> — the lines <drop> names left out, line <probe> replaced
+# by `)` — and whether <shell> parses it with `-n`. Never the user's file, never run.
+bionic_rc_try() {  # <shell> <file> <staged> <drop n,n> <probe n> — rc 0 when the copy parses
+  LC_ALL=C awk -v drop=",$4," -v probe="$5" '
+    index(drop, "," NR ",") { next }
+    NR == probe { print ")"; next }
+    { print }' "$2" > "$3" 2>/dev/null || return 2
+  case "${1##*/}" in
+    zsh) BASH_ENV= ENV= "$1" -f -n "$3" ;;
+    *)   BASH_ENV= ENV= "$1" -n "$3" ;;
+  esac >/dev/null 2>&1 </dev/null
+}
+
+# The writer: 0 removed; 1 a write failed; 2 the lines are not the ones named (the
+# file changed since the question, or a line is no longer one that may go); 3
+# read-only; 4 not a regular text file. On every non-zero the file is as it was.
+# The decision above is taken again on the file as it is now, and must name exactly
+# the lines asked about. remove.sh's `_rm_drop_lines` is this body with its own
+# helpers' names, pinned by tests/rc-item.test.sh §T66.
 markers_drop_lines() {  # <file> <predicate> <n>,<n>
-  local file="$1" target tmp rc
+  local file="$1" target tmp rc scan
   markers_regular "$file" >/dev/null || return 4
   [ -f "$file" ] || return 2
-  markers_writable "$file" || return 3
   target="$(bionic_link_target "$file")"
+  if [ -e "$target" ] && [ ! -w "$target" ]; then return 3; fi
+  scan="$(bionic_rc_lines "$file" "$2" "")"; scan="${scan#ours=}"
+  [ "${scan%% *}" = "$3" ] || return 2
   tmp="${target}.bionic.tmp"
   _markers_stage_tmp "$tmp" || return 1
   bionic_drop_lines_walk "$file" "$2" "$3" >> "$tmp"; rc=$?

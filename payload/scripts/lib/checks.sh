@@ -364,11 +364,18 @@ bionic_check_legacy_alias() {  # <row id>
   line="$(detect_zshrc_legacy_block)"
   # A block whose markers do not pair up, or an rc bionic cannot read as text, is
   # no step setup can take (wave-27 T51): doctor names the fault and a hand fix,
-  # and the page does not offer a removal that would only refuse.
+  # and the page does not offer a removal that would only refuse. Nor is a
+  # read-only rc (wave-27 T66, review pass 40 S5): doctor says it is read-only.
   case "${line#*present=}" in
-    yes) return 0 ;;
+    yes) markers_writable "$(_detect_shell_rc)" || return 1
+         # A block that stays as one unit (wave-27 T66, A-orch-119 (3)) is none.
+         case "$(markers_block_alone "$(_detect_shell_rc)" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")" in
+           alone=yes*) return 0 ;;
+         esac
+         return 1 ;;
     malformed|not-a-file) return 1 ;;
   esac
+  markers_writable "$(_detect_shell_rc)" || return 1
   line="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"; line="${line#ours=}"
   [ -n "${line%% *}" ]
 }
