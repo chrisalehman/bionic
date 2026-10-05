@@ -1178,12 +1178,21 @@ section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floo
 # A new file lands past the proof: the wall demands nothing, while the tick says why the row
 # waits. The differential records a floor proof at the new head: the same wall refuses the turn,
 # naming T3.
+# THE INTEGRATE ROW'S proof:review IS THE JUDGE'S (wave-27 T14; T43, A-orch-82). It is met only
+# when lib/proof.sh `facts_state` answers covered. The tick writes that answer into its digest
+# (`facts_state=`), and the wall hands it to the same ready set. So the plan declares a rigor and
+# a scale the dealing knows (`tested`, `wave`: the floor, and the critic's three piece reads and
+# two whole reads) and a real base-sha:. The readings are written at the new head by the same
+# writer pair. With one reading missing (FL1b), neither the tick nor the wall offers integrate.
 fl_git() { git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid "${@:2}"; }
-fl_prove() {  # <project> <kind> -> a proof line at the checkout's head, by proof_line + proof_add_line
+fl_prove() {  # <project> <kind> [<question> <reader> <result> <scope>] -> a proof line at the checkout's head, by proof_line + proof_add_line
   local p="$1/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md" out
   out="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh" >/dev/null 2>&1
-          proof_add_line "$p" "$(proof_line "$2" "$(fl_git "$1" rev-parse HEAD)" 2026-10-04T12:00:00Z "record/fl/$2.txt")")" \
+          proof_add_line "$p" "$(proof_line "$2" "$(fl_git "$1" rev-parse HEAD)" 2026-10-04T12:00:00Z "record/fl/$2${3:+-$3-${6:-}}.txt" "${@:3}")")" \
     && printf '%s\n' "$out" > "$p"
+}
+fl_read() {  # <project> <question> <scope> -> a passing reading by the critic at the checkout's head
+  fl_prove "$1" review "$2" w-crit pass "$3"
 }
 fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
   local d
@@ -1191,7 +1200,7 @@ fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   fl_git "$d" init -q 2>/dev/null; fl_git "$d" checkout -q -b wave/99-fl 2>/dev/null
   printf '.bionic/\n' > "$d/.gitignore"; fl_git "$d" add .gitignore; fl_git "$d" commit -qm base
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\nrigor: tested\nscale: wave\nbase-sha: %s\n' "$(fl_git "$d" rev-parse HEAD)"
     printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 8\nworking-branch: wave/99-fl\n'
     printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 8: in progress\n\n'
@@ -1222,13 +1231,32 @@ s7_fire "$FL_D" "$FL_TX"
 expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
 fl_prove "$FL_D" floor
+fl_read "$FL_D" adversarial piece; fl_read "$FL_D" structure piece
+fl_read "$FL_D" adversarial whole; fl_read "$FL_D" structure whole
 rm -f "$FL_D/.bionic/tmp/tick-digest-$SID.state"
-expect_contains "FL2 precondition: with a floor proof at the head the tick offers integrate" "poker: FILL T3" "$(fo_tick "$FL_D")"
-sd_turn "$FL_TX" u-fl-2
+FL_OUT="$(fo_tick "$FL_D")"
+expect_contains "FL1b precondition: a floor proof at the head and the evidence reading missing: integrate waits on the judge" \
+  "poker: WAIT T3 — proof:review: the facts the run owes do not hold (facts_state): review evidence" "$FL_OUT"
+expect_eq "FL1b0 precondition: the tick wrote what it judged into its digest" "yes" \
+  "$(/usr/bin/grep -q '^facts_state=review evidence' "$FL_D/.bionic/tmp/tick-digest-$SID.state" && echo yes || echo no)"
+s7_transcript "$FL_TX" "$FL_OUT"
 s7_fire "$FL_D" "$FL_TX"
-expect_contains "FL2: the differential — the same wall refuses the turn that left the merge undispatched" \
+expect_absent "FL1b: with a reading missing the tick does not offer T3 and the wall does not demand it: they agree" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+fl_read "$FL_D" evidence piece
+rm -f "$FL_D/.bionic/tmp/tick-digest-$SID.state"
+FL_OUT="$(fo_tick "$FL_D")"
+expect_contains "FL2 precondition: with a floor proof at the head and every owed reading held, the tick offers integrate" "poker: FILL T3" "$FL_OUT"
+s7_transcript "$FL_TX" "$FL_OUT"
+s7_fire "$FL_D" "$FL_TX"
+expect_contains "FL2: the differential — on the tick's turn the same wall refuses the turn that left the merge undispatched" \
   "Fillable gap at turn end" "$(reason_of)"
 expect_contains "FL2b: …naming T3" "T3" "$(reason_of)"
+# Off a tick's turn the wall has no digest of this turn, hands no facts state, and integrate waits.
+sd_turn "$FL_TX" u-fl-2c
+s7_fire "$FL_D" "$FL_TX"
+expect_absent "FL2c: …on a turn that is not the tick's, the wall hands no facts state and demands no integrate" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 
