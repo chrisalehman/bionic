@@ -9186,13 +9186,32 @@ s52_plan() {  # <repo> <T6 status> -> the plan path
     "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   printf '%s' "$f"
 }
-R52="$(make_repo s52-open-build)"; new_roster "$R52"; s52_plan "$R52" active >/dev/null
+# THE READINGS THE RUN OWES, HELD AT THE HEAD (wave-27 T14; D3). From T14 integrate's proof:review
+# is met only when lib/proof.sh `facts_state` holds the plan at the working head, which the tick
+# asks once and hands in. These sections are about the build and the floor, so the plan is handed
+# what a run at Step 8 has: every reading `facts_owed` deals its rigor and scale, `result=pass`, at
+# <head>, written by the product's pair (`proof_line` placed by `proof_add_line`).
+owed_readings() {  # <plan> <head> -> the readings appended to the plan
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" \
+      | while IFS="	" read -r k q role scope; do
+          [ "$k" = review ] || continue
+          proof_add_line "$2" "$(proof_line review "$3" 2026-10-04T12:00:00Z "record/$q-$scope.md" "$q" w-read pass "$scope")" > "$2.or" \
+            && mv "$2.or" "$2"
+        done' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$1" "$2"
+}
+R52="$(make_repo s52-open-build)"; new_roster "$R52"; S52_P="$(s52_plan "$R52" active)"
+owed_readings "$S52_P" "$(git -C "$R52" rev-parse HEAD)"
+expect_eq "52a0 precondition: the plan holds a reading of each question at the head (facts_state's review lines covered)" "0" \
+  "$(bash -c '. "$1/proof.sh" && facts_state "$2" "$3"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$S52_P" "$(git -C "$R52" rev-parse HEAD)" 2>/dev/null \
+     | awk -F'\t' '$1 == "review" && $NF != "covered"' | wc -l | tr -d ' ')"
 add_row "$R52" name=w-T6 deliverable=T6.md duration="1 hour" launched_at="$(iso_ago 10)"
 poke_pressure "$R52" 8192 1.0 tick
 expect_nonempty "52a precondition: the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
 expect_contains "52a2 K2-F5 integrate waits on head, and its WAIT line names the late build" \
   "poker: WAIT T3 — reads head, written by T6 (active)" "$OUT"
-R52L="$(make_repo s52-landed)"; new_roster "$R52L"; s52_plan "$R52L" landed >/dev/null
+R52L="$(make_repo s52-landed)"; new_roster "$R52L"; S52_PL="$(s52_plan "$R52L" landed)"
+owed_readings "$S52_PL" "$(git -C "$R52L" rev-parse HEAD)"
 poke_pressure "$R52L" 8192 1.0 tick
 expect_contains "52b the build landed, both proofs in: the merge is offered" "poker: FILL T3" "$OUT"
 
@@ -9341,8 +9360,11 @@ s54_floor() { s54_full "$1"; poke "$R54" proof-add floor "record/wave-01-fixture
 # s54_tick -> the tick at current: 8 (proof-add runs at current: 4, where the fixture plan's gate
 # admits it; the tick reads current: 8, where integrate is no longer held for its step). The
 # digest is cleared first, so each tick prints its whole reading rather than "unchanged" (as 48).
+# FROM wave-27 T14 the review half is held at each tick's head (`owed_readings`, §52): this
+# section is about the floor, so a reading of each question is taken on whatever landed.
 s54_tick() {
   rm -f "$(digest_of "$R54")"
+  owed_readings "$P54" "$(git -C "$S54_WT" rev-parse HEAD)"
   sed 's/^current: 4$/current: 8/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
   poke_pressure "$R54" 8192 1.0 tick
   sed 's/^current: 8$/current: 4/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"

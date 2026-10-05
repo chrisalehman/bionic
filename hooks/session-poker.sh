@@ -1585,14 +1585,22 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
 # it is handed the head: `covered`, or the owed lines that do not hold, `; `-joined. It is asked
 # only when the plan carries an open integrate row (no other read turns on it), and once per tick
 # (`rung_report` reads the budget a second time). Unset, the integrate row waits, saying so.
+# THE FLOOR IS ASKED FIRST, FROM THE TICK'S OWN MEMO (`_units_floor_state`, the one proof_state run
+# the schedule spends anyway): while it does not hold, integrate waits on proof:floor whatever the
+# readings say, so the judge, which would run proof_state again, is not asked.
 sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
-  local wb head out rc
+  local wb head out rc fst
   [ "${SCHED_FACTS_PLAN:-}" = "${SCHED_PLAN:-}" ] && [ -n "${SCHED_FACTS_PLAN:-}" ] && return 0
   SCHED_FACTS_PLAN="${SCHED_PLAN:-}"
   UNITS_FACTS_STATE=""
   [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
   units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' '$3 == "integrate" && ($10 == "pending" || $10 == "active") { f = 1 } END { exit !f }' \
     || return 0
+  fst="$(_units_floor_state "$SCHED_PLAN" 2>/dev/null)"
+  case "$fst" in
+    covered*|bounded*) : ;;
+    *) UNITS_FACTS_STATE="floor uncovered: the floor proof does not hold at the working head (${fst#*	})"; return 0 ;;
+  esac
   if ! declare -F facts_state >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
   fi
