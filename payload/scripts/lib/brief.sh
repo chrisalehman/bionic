@@ -1114,6 +1114,11 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       # THE QUESTIONS OF A READER (wave-27 T15; REQ-5, D5), pinned to line start: the line is
       # `Questions: <q>[, <q>]` on a line of its own, and the refusals quote it back.
       addlabel("questions",          "questions", "", 1)
+      # A DECLARED DEBT (wave-27 T31; REQ-14, D23), pinned to line start like the questions:
+      # `Lands-red: <suite> until <token>` and `Red-evidence: <path under record/>`, each on a
+      # line of its own. The longer label first, as the table runs.
+      addlabel("red-evidence",       "red_evidence", "", 1)
+      addlabel("lands-red",          "lands_red", "", 1)
       addlabel("suites",             "suites", "", 1)
       addlabel("files",              "files",  "", 1)
       addlabel("scope",              "-")
@@ -1259,6 +1264,27 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
         if (v != "") print "questions=" v
         if (qbad != "") print "questions_bad=" qbad
       }
+      # THE DECLARED DEBT (wave-27 T31; REQ-14, D23): the rest of the line each label opens, blanks
+      # folded; `Red-evidence:` is its first word. The dispatch wall judges the shape; the lift only
+      # reads, and an unfilled scaffold slot declares nothing. A trailing ` # ...` comment comes off
+      # the line, as on Questions: and Files:, so the scaffold line filled with its comment kept, or
+      # left with only its comment, declares only what precedes the comment.
+      h = firsthit("lands_red")
+      if (h > 0) {
+        v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
+        gsub(/[ \t\r]+/, " ", v); sub(/^ /, "", v); sub(/ $/, "", v)
+        if (v != "" && !istemplate(v)) print "lands_red=" v
+      }
+      h = firsthit("red_evidence")
+      if (h > 0) {
+        v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
+        if (istemplate(v)) v = ""
+        split(v, RW, /[ \t\r]+/); v = ""
+        for (i = 1; i in RW; i++) if (RW[i] != "") { v = trimtok(RW[i]); break }
+        if (v != "" && !istemplate(v)) print "red_evidence=" v
+      }
       # THE RUNS THE BRIEF DECLARES, MARKS AND ALL (REQ-1 AC-1.1/AC-1.6). List-valued and
       # self-delimiting: the value is the author-marked runs, space-joined, so the roster row
       # carries the same spelling the author wrote and the writer-side budget arm can compare
@@ -1293,6 +1319,7 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
 #   questions, questions_bad     a reader's questions, comma-joined in the table's order, and
 #                                the words outside the three (wave-27 T15); questions_dup, the
 #                                line numbers of a Questions: label given more than once (T49)
+#   lands_red, red_evidence      a declared debt's two lines (wave-27 T31), cut at 300
 #   anything else                the raw value
 brief_field() {
   local v
@@ -1301,6 +1328,7 @@ brief_field() {
     questions)        sanitize "$v" 40 ;;
     questions_bad)    sanitize "$v" 300 ;;
     questions_dup)    sanitize "$v" 40 ;;
+    lands_red|red_evidence) sanitize "$v" 300 ;;
     files)            sanitize "$v" 900 files ;;
     suites)           sanitize "$v" 900 suites_allowed ;;
     re_executes)      sanitize "$v" 900 re_executes ;;
