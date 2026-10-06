@@ -524,52 +524,61 @@ EOF
 # checkout's real `.bionic`, every file of which its own `.gitignore` (`*`) ignores, with a link to
 # itself, and the plan, the roster, the record and the engagement marker were gone. `create` now
 # excludes the link; this is the second layer, for a link committed anyway (`git add -f`, a tree
-# made before the exclude, a project that cleared the line). A range whose difference names
-# `.bionic` or a path under it is refused before anything merges. The one exception is a target
-# that already tracks something at `.bionic`, an older project's own content (the `create`
-# header's "unless the branch already tracks something at that path"): there the path is not
-# bionic's, and it lands as before. `:(literal)` keeps the pathspec to exactly that path and its
-# children.
-# THE KIND COMES FIRST (wave-27 T84; review pass 68). The exception exempts CONTENT UNDER a `.bionic`
-# directory the target tracks, never a change of `.bionic`'s own kind: a tree that removed the
-# tracked content and committed the link landed under it, with the same loss. So a range that
-# makes `.bionic` a link or a file where the target has a directory or nothing is refused first,
-# whatever the target tracks, naming the first commit that changed the kind. A range that removes
-# `.bionic` entirely, or makes a tracked link a directory, puts neither where a directory was.
-_wt_bionic_kind() {  # <root> <rev> -> what <rev> tracks at `.bionic`: dir | link | file | other | nothing
-  case "$(git -C "$1" ls-tree "$2" -- .bionic 2>/dev/null | awk 'NR == 1 { print $1 }')" in
+# made before the exclude, a project that cleared the line). A range that ADDS `.bionic` or a path
+# under it is refused before anything merges. A target that already tracks content there (an older
+# project's own, the `create` header's "unless the branch already tracks something at that path")
+# keeps it: a range may change or delete a path the target tracks, since a tracked path is never one
+# of bionic's ignored files. `:(literal)` keeps the pathspec to exactly that path and its children.
+# PER PATH, AND THE KIND FIRST (wave-27 T84; review pass 68, A-orch-227). T79 exempted every range
+# into a target that tracked something at `.bionic`, so a tree that removed the tracked content and
+# committed the link landed with the same loss, and one that added a file under the tracked
+# directory overwrote the project's untracked file at that path (git overwrites ignored files
+# freely). Now `.bionic`'s own kind never changes, whatever the target tracks: a range whose head
+# has a directory, link or file at `.bionic` where the target has another kind is refused first,
+# naming `.bionic` and the first commit that changed the kind. Then an add under `.bionic/` is
+# refused, naming the first added path and the commit that added it; a target with nothing at
+# `.bionic` gets a directory only through such adds, so that one change of kind is theirs to name.
+# A range that deletes every tracked path, leaving nothing at `.bionic`, lands.
+_wt_bionic_kind() {  # <root> <rev> [path] -> what <rev> tracks at <path> (`.bionic`): dir | link | file | other | nothing
+  case "$(git -C "$1" ls-tree "$2" -- "${3:-.bionic}" 2>/dev/null | awk 'NR == 1 { print $1 }')" in
     040000) echo dir ;; 120000) echo link ;; 100644|100755) echo file ;; '') echo nothing ;; *) echo other ;;
   esac
 }
 _wt_bionic_kind_changed() {  # <root> <onto head> <tree head> -> the first commit that changed the kind | nothing
-  local root="$1" c
-  case "$(_wt_bionic_kind "$root" "$2"):$(_wt_bionic_kind "$root" "$3")" in
-    dir:link|dir:file|nothing:link|nothing:file) : ;;
-    *) return 1 ;;
-  esac
+  local root="$1" was now c
+  was="$(_wt_bionic_kind "$root" "$2")"; now="$(_wt_bionic_kind "$root" "$3")"
+  [ "$was" != "$now" ] && [ "$now" != nothing ] && [ "${was}:${now}" != nothing:dir ] || return 1
   for c in $(git -C "$root" log --reverse --format=%H "${2}..${3}" -- ':(literal).bionic' 2>/dev/null); do
     [ "$(_wt_bionic_kind "$root" "${c}^")" = "$(_wt_bionic_kind "$root" "$c")" ] || { printf '%s' "$c"; return 0; }
   done
   printf '%s' "$3"
 }
+_wt_bionic_added_by() {  # <root> <onto head> <tree head> <path> -> the first commit of the range that added it | nothing
+  local root="$1" c
+  for c in $(git -C "$root" log --reverse --format=%H "${2}..${3}" -- ":(literal)${4}" 2>/dev/null); do
+    [ "$(_wt_bionic_kind "$root" "${c}^" "$4")" = nothing ] && [ "$(_wt_bionic_kind "$root" "$c" "$4")" != nothing ] \
+      && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
 _wt_bionic_committed() {  # <root> <onto head> <tree head> -> "<commit> <first path>" | nothing
   local root="$1" onto_head="$2" head="$3" path commit
   commit="$(_wt_bionic_kind_changed "$root" "$onto_head" "$head")" && { printf '%s .bionic' "$commit"; return 0; }
-  git -C "$root" cat-file -e "${onto_head}:.bionic" 2>/dev/null && return 1
-  path="$(git -C "$root" -c core.quotePath=false diff --no-renames --name-only "$onto_head" "$head" \
-    -- ':(literal).bionic' 2>/dev/null | sed -n 1p)"
+  path="$(git -C "$root" -c core.quotePath=false diff --no-renames --diff-filter=A --name-only "$onto_head" "$head" \
+    -- ':(literal).bionic' 2>/dev/null | sed -n '/^\.bionic\//{p;q;}')"
   [ -n "$path" ] || return 1
-  commit="$(git -C "$root" log --reverse --format=%H "${onto_head}..${head}" -- ':(literal).bionic' 2>/dev/null \
-    | sed -n 1p)"
+  commit="$(_wt_bionic_added_by "$root" "$onto_head" "$head" "$path")"
   printf '%s %s' "${commit:-$head}" "$path"
 }
 
 # The refusal is land's own contract line, like every sibling (wave-27 T79, A-orch-205): one
-# `REFUSED reason=bionic-committed` line on stdout naming the first path the range holds, the
-# commit that added it (12 hex) and the remedy, which `spawn-worktree.sh land` and the
-# standdown's report read as they read every other land refusal.
+# `REFUSED reason=bionic-committed` line on stdout naming the path (`.bionic` for a change of kind,
+# else the first added path), the commit that made it (12 hex) and the remedy, which
+# `spawn-worktree.sh land` and the standdown's report read as they read every other land refusal.
+# The remedy's commit moves the head past the tree's stamps, so it says to run the suites before
+# landing again, as not-current's does (A-orch-227 P2-1).
 _wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit> <path>
-  _wt_refuse "bionic-committed path=${5} commit=${4:0:12} branch=${2} onto=${3} fix='git -C ${1} rm -r --cached .bionic, commit, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
+  _wt_refuse "bionic-committed path=${5} commit=${4:0:12} branch=${2} onto=${3} fix='git -C ${1} rm -r --cached .bionic, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
 }
 
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>

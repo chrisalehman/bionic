@@ -3492,7 +3492,7 @@ expect_true "(fixture) the checksum reader reads the directory" test -n "$LB_SUM
 OUTLB="$(worktree_land "$LBT" wave/fixture)"; RCLB=$?
 LB_LINE="$(lb_first "$OUTLB")"
 expect_match "(b1) a range that commits .bionic is refused on land's contract line: the path, the commit that added it, the remedy" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LBC:0:12} branch=wt/linked onto=wave/fixture fix='git -C ${LBT} rm -r --cached .bionic, commit, land again' — *" "$LB_LINE"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LBC:0:12} branch=wt/linked onto=wave/fixture fix='git -C ${LBT} rm -r --cached .bionic, commit, run the suites, land again' — *" "$LB_LINE"
 expect_eq   "(b1) …exit 2" "2" "$RCLB"
 expect_eq   "(b1) …one line, as its siblings print" "1" "$(printf '%s\n' "$OUTLB" | awk 'END { print NR }')"
 expect_contains "(b1) …saying nothing is merged and the tree and its stamps are kept" \
@@ -3559,11 +3559,13 @@ expect_true  "(b5) …whose .bionic is still a directory" test -f "$LE/.bionic/d
 # THE KIND OF .bionic (wave-27 T84; review pass 68 on T79). The exception exempts CONTENT UNDER a
 # `.bionic` directory the target tracks; it never exempts a change of `.bionic`'s own kind. A
 # tree that `git rm -r .bionic`s the tracked content and commits a link there LANDED under the
-# exception, and the main checkout's `.bionic` became a link to itself. The kind test runs first:
-# a range that makes `.bionic` a link or a file where the target has a directory or nothing is
-# refused, naming the first commit that changed the kind; only then does a tracked directory
-# exempt the changes beneath it. A range that removes `.bionic` entirely, or turns a tracked link
-# into a directory, lands: neither puts a link or a file where the directory was.
+# exception, and the main checkout's `.bionic` became a link to itself. And a range that ADDED a
+# file under the tracked directory overwrote the project's untracked file at that path, git being
+# free to overwrite ignored files (A-orch-227). So the rule is per path: a range may change or
+# delete paths at or under `.bionic` that the target tracks; it may add nothing there; and
+# `.bionic`'s own kind never changes. The kind test runs first and names `.bionic` and the first
+# commit that changed the kind; an add names the first added path and the commit that added it.
+# A range that deletes every tracked path (nothing left at `.bionic`) lands.
 #
 # FIXTURE FIDELITY. lk_repo is lb_repo whose target also tracks `.bionic/keep.md` and
 # `.bionic/also.md` (an older project's own content), the plan, record and marker still untracked
@@ -3608,7 +3610,7 @@ expect_true "(b6-pre) the project's .bionic holds its tracked file" test -f "$LK
 LK_SUMS="$(lb_sums "$LK")"; LK_REFS="$(refs_of "$LK")"; LK_STAMPS="$(cat "$(stamp_file "$LKT")")"
 OUTLK="$(worktree_land "$LKT" wave/fixture)"; RCLK=$?
 expect_match "(b6) a target tracking .bionic as a directory refuses a range that makes it a link, naming the commit that changed its kind" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LKT_C:0:12} branch=wt/kind-link onto=wave/fixture fix='git -C ${LKT} rm -r --cached .bionic, commit, land again' — *" "$(lb_first "$OUTLK")"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LKT_C:0:12} branch=wt/kind-link onto=wave/fixture fix='git -C ${LKT} rm -r --cached .bionic, commit, run the suites, land again' — *" "$(lb_first "$OUTLK")"
 expect_eq    "(b6) …exit 2" "2" "$RCLK"
 expect_true  "(b6) the project's .bionic is still a directory" test -d "$LK/.bionic"
 expect_false "(b6) …and not a link" test -L "$LK/.bionic"
@@ -3642,10 +3644,12 @@ expect_eq    "(b8) …the change is in the target checkout" "changed on the bran
 expect_eq    "(b8) …which still tracks .bionic as a directory" "040000" "$(lk_kind "$LC" wave/fixture)"
 expect_true  "(b8) …and holds its plan" test -f "$LC/.bionic/docs/plans/w.plan.md"
 LCM="$(new_tree "$LC" wt/kind-more)"; echo "more" > "$LCM/.bionic/more.md"
-lk_commit "$LCM" "a file added under the tracked .bionic" .bionic/more.md
-expect_match "(b8b) a range that adds a file under it lands" \
-  "spawn-worktree: LANDED branch=wt/kind-more onto=wave/fixture *" "$(worktree_land "$LCM" wave/fixture)"
-expect_eq    "(b8b) …the file is in the target checkout" "more" "$(cat "$LC/.bionic/more.md")"
+lk_commit "$LCM" "a file added under the tracked .bionic" .bionic/more.md; LCM_C="$(git -C "$LCM" rev-parse HEAD)"
+LC_SUMS="$(lb_sums "$LC")"
+expect_match "(b8b) a range that ADDS a file under the tracked directory is refused, naming that path (A-orch-227)" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/more.md commit=${LCM_C:0:12} branch=wt/kind-more onto=wave/fixture *" \
+  "$(lb_first "$(worktree_land "$LCM" wave/fixture)")"
+expect_eq    "(b8b) …the project's .bionic files byte for byte" "$LC_SUMS" "$(lb_sums "$LC")"
 LCK="$(new_tree "$LC" wt/kind-rm-keep)"; git -C "$LCK" rm --quiet .bionic/keep.md
 lk_commit "$LCK" "keep.md removed, the directory left"
 expect_match "(b8c) a range that removes one file and leaves the directory lands" \
@@ -3687,10 +3691,44 @@ LLD="$(new_tree "$LL" wt/kind-link-dir)"; git -C "$LLD" rm --quiet .bionic
 mkdir -p "$LLD/.bionic"; echo "a directory now" > "$LLD/.bionic/dir.md"
 lk_commit "$LLD" "the link replaced by a directory" .bionic/dir.md
 expect_eq    "(b10b-pre) the tree's branch a directory at .bionic" "040000" "$(lk_kind "$LLD" HEAD)"
-expect_match "(b10b) a range that replaces the target's link with a directory lands" \
-  "spawn-worktree: LANDED branch=wt/kind-link-dir onto=wave/fixture *" "$(worktree_land "$LLD" wave/fixture)"
-expect_eq    "(b10b) …the directory is in the target checkout" "a directory now" "$(cat "$LL/.bionic/dir.md")"
-expect_true  "(b10b) …and the directory the link reached keeps its plan" test -f "$LL/.bionic-state/docs/plans/w.plan.md"
+LLD_C="$(git -C "$LLD" rev-parse HEAD)"; LL_REFS="$(refs_of "$LL")"
+expect_match "(b10b) a range that replaces the target's link with a directory is refused: the kind changed (A-orch-227)" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LLD_C:0:12} branch=wt/kind-link-dir onto=wave/fixture *" \
+  "$(lb_first "$(worktree_land "$LLD" wave/fixture)")"
+expect_eq    "(b10b) …no ref moved" "$LL_REFS" "$(refs_of "$LL")"
+expect_true  "(b10b) …the target's .bionic is still its link" test -L "$LL/.bionic"
+expect_true  "(b10b) …and the directory the link reaches keeps its plan" test -f "$LL/.bionic-state/docs/plans/w.plan.md"
+
+# (b14) THE E5 SHAPE (A-orch-227): the target tracks keep.md; a range ADDS a file at the path where
+# the main checkout holds the project's untracked plan. Merged, git would overwrite the plan.
+LA="$(lk_repo "$TMP/land-kind-add")"
+LAT="$(new_tree "$LA" wt/kind-add)"; mkdir -p "$LAT/.bionic/docs/plans"; echo "the branch's plan" > "$LAT/.bionic/docs/plans/w.plan.md"
+lk_commit "$LAT" "a file added where the project keeps its plan" .bionic/docs/plans/w.plan.md; LAT_C="$(git -C "$LAT" rev-parse HEAD)"
+expect_eq    "(b14-pre) the main checkout holds an untracked plan at that path" "plan" "$(cat "$LA/.bionic/docs/plans/w.plan.md")"
+LA_SUMS="$(lb_sums "$LA")"; LA_REFS="$(refs_of "$LA")"
+OUTLA="$(worktree_land "$LAT" wave/fixture)"; RCLA=$?
+expect_match "(b14) a range that adds a file over the project's untracked plan is refused, naming the added path" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/docs/plans/w.plan.md commit=${LAT_C:0:12} branch=wt/kind-add onto=wave/fixture *" "$(lb_first "$OUTLA")"
+expect_eq    "(b14) …exit 2" "2" "$RCLA"
+expect_eq    "(b14) …the untracked plan byte for byte, and every file beside it" "$LA_SUMS" "$(lb_sums "$LA")"
+expect_eq    "(b14) …no ref moved" "$LA_REFS" "$(refs_of "$LA")"
+expect_true  "(b14) …the tree is kept" test -d "$LAT"
+# …and in the same target a change to the tracked keep.md lands (the deletion arm is b8c's).
+LAK="$(new_tree "$LA" wt/kind-add-change)"; echo "changed" > "$LAK/.bionic/keep.md"
+lk_commit "$LAK" "a change to the tracked keep.md" .bionic/keep.md
+expect_match "(b14b) …while a change to a path it tracks lands" \
+  "spawn-worktree: LANDED branch=wt/kind-add-change onto=wave/fixture *" "$(worktree_land "$LAK" wave/fixture)"
+expect_eq    "(b14b) …and the untracked plan is untouched" "plan" "$(cat "$LA/.bionic/docs/plans/w.plan.md")"
+
+# (b15) A TARGET THAT STOPPED TRACKING .bionic after the tree branched (A-orch-227 P2-2, a known
+# limit): the tree's tracked files are adds against the target, no commit of the range made them,
+# and the line names the tree's head.
+LP="$(lk_repo "$TMP/land-kind-stopped")"
+LPT="$(new_tree "$LP" wt/kind-stopped)"; green_stamp "$LPT"; LPT_H="$(git -C "$LPT" rev-parse HEAD)"
+git -C "$LP" rm -r --quiet --cached .bionic/keep.md .bionic/also.md && git -C "$LP" commit --quiet -m "the target stops tracking .bionic"
+expect_match "(b15) a tree branched before its target stopped tracking .bionic is refused, naming the tree's head" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/also.md commit=${LPT_H:0:12} branch=wt/kind-stopped onto=wave/fixture *" \
+  "$(lb_first "$(worktree_land "$LPT" wave/fixture)")"
 
 # (b11) THE STAND-DOWN PATH reaches the same verdicts: b6's range refused, b8's landed.
 LS="$(lk_repo "$TMP/land-kind-standdown")"; LS_SID="land-kind-session-01"
