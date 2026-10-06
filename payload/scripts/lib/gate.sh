@@ -33,7 +33,10 @@
 #                  ${BIONIC_GATE_POLL:-2} seconds and gives up before --within runs out;
 #                  without --within it waits until admitted.
 #   gate_end <id> <rc>       the run is over: writes ended= and rc=, and learns its cost
-#   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> clears=<minutes>
+#   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
+#   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
+#                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
+#   gate_asked <who>         rc 0 when that who has a request in the store, ever
 #   gate_share               the machine's share, 1 to 100 (absent or unreadable: 80)
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
 #
@@ -66,6 +69,15 @@
 #             A run nothing else polls is sampled only at its end, so a caller that holds a
 #             long run calls `gate_state` now and then while it runs (it prints one line and
 #             changes nothing but the peaks and the idle reading).
+#   room      (wave-28 T13; D14, the owner's "Option 2") another writer may start only while
+#             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
+#             admitted, unfinished requests and <owed> times the largest processor promise on
+#             record, are at most share × cores ÷ 100; `_res_used_pct` is at most the share;
+#             and nothing waits. <owed> is the caller's count of writers not yet showing: live
+#             writers that have not asked the gate yet, plus the rows it has already offered on
+#             this reading, so two asks on one reading give room once. With no cost on record a
+#             writer not yet showing takes all the room. A reading that cannot be read (-1 or
+#             empty) gives no room unless nothing is admitted, waiting or owed.
 #   time      only `_res_now`, never SECONDS or date: a planted clock moves every wait.
 #   belief    BIONIC_GATE_ADMIT=<id> is believed only while that request is admitted,
 #             unfinished, and held by this process or one of its ancestors. BIONIC_SLOT_HELD
@@ -470,40 +482,92 @@ gate_end() {
 }
 
 gate_state() {
-  local reading share used clears now w k p _kind _asked
+  local reading share used room load promised
   _gate_store || return 2
   _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
   reading="$(_gate_reading)"
   _gate_scan "$reading"
   _gate_idle "$reading"
-  share="$(gate_share)"
-  now="$(_res_now)"
-  # The waiting requests' promises, so the clearing time counts what is still to come.
-  w=''
-  while read -r _kind _asked p k; do
-    [ -n "$p" ] || continue
-    w="${w}$(_gate_promise "$k")
-"
-  done <<EOF
-$_G_QUEUE
-EOF
   _gate_unlock
-  read -r used clears <<EOF
-$(printf '%s---\n%s' "$_G_PROM" "$w" | awk -F: -v r="$reading" -v idle="$_G_IDLE" \
-      -v unf="$_G_UNF" -v share="$share" -v now="$now" '
-    $0 == "---" { waiting = 1; next }
-    NF >= 3 && !waiting { sm += $1; left = $4 + $3 - now; if (left < 0) left = 0; mt += $1 * left }
-    NF >= 3 && waiting  { mt += $1 * $3 }
+  share="$(gate_share)"
+  used="$(printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v idle="$_G_IDLE" -v unf="$_G_UNF" '
+    NF >= 3 { sm += $1 }
     END {
       u = r; if (unf > 0 || r < 0) { if (idle + sm > u) u = idle + sm }
       if (r < 0 && unf == 0) u = -1
-      room = share - idle; if (room < 1) room = 1
-      c = mt / room / 60; ci = int(c); if (c > ci) ci++
-      printf "%d %d\n", u, ci
-    }')
-EOF
-  printf 'share=%s used=%s admitted=%s waiting=%s landing-waiting=%s clears=%s\n' \
-    "$share" "$used" "$_G_UNF" "$_G_WAIT" "$_G_LWAIT" "$clears"
+      printf "%d", u
+    }')"
+  # The loads and the promised cores, as gate_room reads them with nothing owed.
+  room="$(_gate_room_line "$reading" 0)"
+  load="${room#* load=}"; load="${load%% *}"
+  promised="${room#* promised=}"; promised="${promised%% *}"
+  printf 'share=%s used=%s admitted=%s waiting=%s landing-waiting=%s load=%s promised=%s\n' \
+    "$share" "$used" "$_G_UNF" "$_G_WAIT" "$_G_LWAIT" "$load" "$promised"
+}
+
+# _gate_room_line <reading> <owed> — after a scan: the room line, rc 0 when there is room.
+# The loads print as read (-1 when empty); `promised` is the admitted runs' processor
+# promises plus <owed> times the largest on record, or every core when nothing is on record
+# and a writer is owed.
+_gate_room_line() {
+  local b1 b5 most
+  b1="$(_res_busy_cores 2>/dev/null)"; b5="$(_res_busy_cores_5m 2>/dev/null)"
+  most="$(cat "$_GD"/cost/* 2>/dev/null | awk -F: 'NF >= 3 && (!n++ || $2 + 0 > m) { m = $2 + 0 }
+    END { if (n) printf "%g", m }')"
+  printf '%s' "$_G_PROM" | awk -F: -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" \
+      -v most="$most" -v share="$(gate_share)" -v cores="$(_res_cores)" -v unf="$_G_UNF" \
+      -v wait="$_G_WAIT" '
+    function known(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
+    NF >= 3 { pc += $2 }
+    END {
+      lim = share * cores / 100
+      if (most == "" && owed > 0) { prom = cores; all = 1 }
+      else prom = pc + owed * most
+      quiet = (unf == 0 && wait == 0 && owed == 0)
+      room = 1
+      if (!known(b1) || !known(b5) || r < 0) { if (!quiet) room = 0 }
+      if (known(b1)) { if (b1 + prom > lim) room = 0 }
+      if (known(b5)) { if (b5 + prom > lim) room = 0 }
+      if (r >= 0 && r > share) room = 0
+      if (all) room = 0
+      if (wait > 0) room = 0
+      printf "room=%s load=%s/%s cores=%d promised=%g waiting=%d\n", (room ? "yes" : "no"), b1, b5, cores, prom, wait
+      exit !room
+    }'
+}
+
+# gate_room [--owed <n>] — may another writer start now? One line, and rc 0 for yes. It takes
+# the lock for its scan, so it is a sampler too: like gate_state it raises the peaks and keeps
+# the idle reading current, and changes nothing else.
+gate_room() {
+  local owed=0 reading
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --owed) owed="${2:-}"; shift 2 2>/dev/null || shift ;;
+      *) echo "gate: usage: gate_room [--owed <n>]" >&2; return 2 ;;
+    esac
+  done
+  case "$owed" in ''|*[!0-9]*) echo "gate: --owed takes a whole number, not '$owed'" >&2; return 2 ;; esac
+  _gate_store || return 2
+  _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
+  reading="$(_gate_reading)"
+  _gate_scan "$reading"
+  _gate_idle "$reading"
+  _gate_unlock
+  _gate_room_line "$reading" "$((10#$owed))"
+}
+
+# gate_asked <who> — rc 0 when the store holds a request by that who, in any state: a writer
+# that has asked once is showing in the load or in a promise, and is owed no longer.
+gate_asked() {
+  local f
+  [ -n "${1:-}" ] || return 1
+  _GD="$(gate_dir)"
+  for f in "$_GD"/requests/*; do
+    case "${f##*/}" in ''|*[!0-9]*) continue ;; esac
+    grep -qxF "who=$1" "$f" 2>/dev/null && return 0
+  done
+  return 1
 }
 
 # gate_list — one line per request, lowest id first:
