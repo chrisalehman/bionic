@@ -13,8 +13,8 @@ Versioning follows semver from 1.9.0 on:
 ## 1.12.0 — 2026-10-05
 
 **Upgrade before you run `/bionic:setup` or `/bionic:remove` again.** In 1.11.0, setup and
-remove can delete lines of your shell rc that are not bionic's, in five ways. 1.12.0 fixes all
-five, and 1.11.x gets no patch. From 1.12.0 no door removes a line of your rc that stands outside
+remove can delete lines of your shell rc that are not bionic's, in six ways. 1.12.0 fixes all
+six, and 1.11.x gets no patch. From 1.12.0 no door removes a line of your rc that stands outside
 a pair of bionic's markers; a marked block is removed as one unit only when its body is byte for
 byte one bionic wrote. Bionic's `claude()` block now opens with
 `unalias claude 2>/dev/null || true`. An alias named `claude` above the block, bionic's own
@@ -266,6 +266,8 @@ Known limits, carried to the next release:
 - Until bionic keeps a record of what it installed (a later release), remove lists every declared
   tool present, whether or not bionic installed it, and still offers the native plugins bionic's
   own catalog installed.
+- When SHELL is neither zsh nor bash, the plugin's remove asks about bionic's claude() block and
+  then cannot rewrite the rc, while the standalone remove removes it; no line is lost either way.
 - The verbs only the main session may run are guarded by a reader of the command's text, so a
   path to the hook held in a shell variable steps round that guard.
 - The landing record is not for a network filesystem: its one-write append assumes a local disk.
