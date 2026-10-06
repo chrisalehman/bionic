@@ -12315,13 +12315,12 @@ room_stop() {  # <repo> -> how many writer rows the stop wall owes, 0 when it re
   if [ -z "$ids" ]; then printf '0'; return 0; fi
   printf '%s' "$(printf '%s\n' $ids | grep -c '^R[0-9]')"
 }
-room_tick() {  # <repo> -> how many rows the tick's FILL names, 0 for none
-  local out
-  out=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+room_tick() {  # <repo> — sets ROOM_TICK_OUT (the tick's channel) and ROOM_TK (rows its FILL names)
+  local ids
+  ROOM_TICK_OUT=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
            "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) )
-  ROOM_TICK_OUT="$out"
-  out=$(printf '%s\n' "$out" | sed -n 's/^poker: FILL //p' | head -1)
-  printf '%s' "$(printf '%s\n' $out | grep -c '^R[0-9]')"
+  ids=$(printf '%s\n' "$ROOM_TICK_OUT" | awk 'index($0, "poker: FILL ") == 1 && index($0, "poker: FILL —") != 1 { print substr($0, 13); exit }')
+  ROOM_TK=$(printf '%s\n' $ids | grep -c '^R[0-9]')
 }
 ROOM_GATE="$SANDBOX/room-gate"
 ROOM_GATE_SAVED="$BIONIC_GATE_DIR"
@@ -12334,7 +12333,7 @@ for _rm in quiet:1.0:1.0:6 loaded:4.0:4.0:3 5m:1.0:7.0:0; do
   cgc_row "$_rm_r/.bionic/tmp/roster-$SID_A.state" room-tickrow 2026-09-01T00:00:00Z toolu_01ROOMTICK
   cgc_ack "$_rm_r/.bionic/tmp/sweeper-$SID_A.state" 2026-09-01T01:00:00Z room-tickrow
   export BIONIC_PROBE_BUSY_CORES="$_rm_b1" BIONIC_PROBE_BUSY_CORES_5M="$_rm_b5"
-  _rm_tk=$(room_tick "$_rm_r")
+  room_tick "$_rm_r"; _rm_tk="$ROOM_TK"
   _rm_st=$(room_stop "$_rm_r")
   expect_eq "ROOM ${_rm_case}: the tick offers ${_rm_want} row(s)" "$_rm_want" "$_rm_tk"
   expect_eq "ROOM ${_rm_case}: the stop wall owes the same ${_rm_want}" "$_rm_want" "$_rm_st"
