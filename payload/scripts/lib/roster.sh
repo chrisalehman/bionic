@@ -82,6 +82,12 @@
 # them. The dispatch wall is their one writer (`amend` refuses to add them), so a row carries them
 # only from its launch. Present-if-passed, and they TRAIL `questions=`.
 #
+# WHAT A READER WAS PUSHED (wave-28 T16; REQ-8, D20). `pushed=<name>[,<name>]` names the context
+# files `hooks/execution-recorder.sh`'s question registrations push at start, by file name
+# without `.md` (`checks-adversarial,severity`); the recorder writes it on the row it identifies.
+# A reading from a reader whose row carries `severity` there owes the finding lines. Present-if-
+# passed and LAST: a row 1.12.0 wrote has none, and reads by every key it does carry.
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
@@ -263,9 +269,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
-  local held="" done_marker="" questions="" lands_red="" red_evidence=""
+  local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed=""
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
-  local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0
+  local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0 has_pushed=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -314,6 +320,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       questions)     questions="$val";    has_questions=1 ;;
       lands_red)     lands_red="$val";    has_lands_red=1 ;;
       red_evidence)  red_evidence="$val"; has_red_evidence=1 ;;
+      pushed)        pushed="$val";       has_pushed=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -342,6 +349,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_questions" -eq 1 ]; then out="$out|questions=$questions"; fi
   if [ "$has_lands_red" -eq 1 ]; then out="$out|lands_red=$lands_red"; fi
   if [ "$has_red_evidence" -eq 1 ]; then out="$out|red_evidence=$red_evidence"; fi
+  if [ "$has_pushed" -eq 1 ]; then out="$out|pushed=$pushed"; fi
   printf '%s\n' "$out"
   return 0
 }

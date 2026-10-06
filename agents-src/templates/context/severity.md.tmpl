@@ -1,0 +1,18 @@
+> bionic severity scale — pushed at start to the reader dealt `adversarial` or `structure`, beside its checks. It binds.
+
+<!-- GENERATED-HEADER -->
+
+<!-- INJECT: severity -->
+
+## The finding lines
+
+Your record carries these lines too, flush left:
+
+```
+findings: <n>
+finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>
+shown: <n> <command>
+unsure: <n> <what is not known>
+```
+
+`findings:` counts the `finding:` lines, one per finding, and is `findings: 0` when there are none; `-` stands in for a finding with no file and line. A finding the table sends to fix has a `shown:` line, naming the command that shows it, or an `unsure:` line; `<n>` is the number of its `finding:` line. Write no priority: the table gives it. `result` is `fail` when the table sends a finding to fix, `flag` when there are findings and none to fix, otherwise `pass`.
