@@ -620,7 +620,7 @@ _wt_bionic_kind_changed() {
 }
 # `--ignore-submodules=none` (wave-28 T39, D31; wave-27 critic P3-1): `diff.ignoreSubmodules=all`, set in
 # any config the user holds, took a gitlink out of the answer, and a submodule link under `.bionic/`
-# landed; the answer is git's own, whatever the configuration.
+# landed; the answer is git's own, whatever `diff.ignoreSubmodules` says.
 _wt_bionic_adds() {  # <root> <onto head> <tree head> -> every path the range adds, NUL-separated, as git stores it
   git -C "$1" diff --ignore-submodules=none --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null
 }
@@ -715,7 +715,8 @@ _wt_shquote() {
 # The path and the remedy are in the range's spelling (wave-27 T86): the whole entry out is the
 # folded root entry the range added, as the range spelled it; a name git C-quotes is printed quoted.
 # PASTED AS PRINTED (wave-28 T39, D31; review pass 74's P2-1): every path and name the fix prints is
-# quoted for the shell (`_wt_shquote`), and the per-path pathspec of a name holding a glob character
+# quoted for the shell (`_wt_shquote`), save the whole entry, which folds to `.bionic` and so is all
+# safe bytes and printed bare; and the per-path pathspec of a name holding a glob character
 # is `:(literal)`, so git un-tracks that path alone, never a tracked file the pattern also matches.
 # EVERY PRINTED FIX LANDS WHEN FOLLOWED (A-orch-244; pass 71's P2-1): the whole entry, out of the
 # index, stays in the tree; where no ignore rule covers it and it is not the record link land passes
