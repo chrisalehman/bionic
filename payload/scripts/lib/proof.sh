@@ -159,6 +159,19 @@ PROOF_READING
   # THE RESULT IS DERIVED FROM THE FINDINGS (wave-28 T15; D19, AC-8.4), when the reader was pushed the scale.
   if [ "$sev" = 1 ]; then
     got="$(_proof_findings_span "$rec" "$span")" || { printf '%s' "$got"; return 1; }
+    # A STRUCTURE READING'S TWO DERIVATIONS AGREE (wave-28 T15; A-orch-34). F6 above holds the result
+    # to the worst check, the table to the findings; a check answers FAIL only for a finding the table
+    # sends to fix, so a FAIL check beside no finding to fix, or a finding to fix beside no FAIL check,
+    # is refused in one line naming both. `worst` still holds the worst check here.
+    if [ "$q" = structure ]; then
+      ids="$(printf '%s\n' "$got" | awk -F'\t' '$5 == "fix" { print "finding " $1 " (" $2 " " $3 ")"; exit }')"
+      case "$worst" in
+        *' FAIL') [ -n "$ids" ] \
+          || { printf 'the structure reading %s gives check: %s beside no finding to fix; a FAIL check stands beside a finding the table sends to fix and a finding to fix beside a FAIL check, so rate the finding or answer the check to agree' "$rec" "$worst"; return 1; } ;;
+        *) [ -z "$ids" ] \
+          || { printf 'the structure reading %s gives %s to fix beside no FAIL check; a FAIL check stands beside a finding the table sends to fix and a finding to fix beside a FAIL check, so rate the finding or answer the check to agree' "$rec" "$ids"; return 1; } ;;
+      esac
+    fi
     worst="$(proof_findings_result "$got")"
     [ "$rr" = "$worst" ] \
       || { printf 'the reading %s says result: %s, but its findings give %s (a finding to fix gives fail, any other finding flag, none pass); write result: %s' "$rec" "$rr" "$worst" "$worst"; return 1; }
