@@ -872,10 +872,14 @@ expect_eq "(s2) …the head's run remembered for that head: one run there, not t
 expect_regex "(s2) …one standing event for that head, its failing lines and the head's log" \
   "^line/v1\\|ev=standing\\|head=${HS}\\|suite=a.test.sh\\|lines=1\\|log=${LSH}\\|at=[0-9T:-]+Z$" "$(ll_ev "$RS" standing)"
 git -C "$RS/.worktrees/T1" rm -q extra-fail && git -C "$RS/.worktrees/T1" commit -qm "T1: the added line taken out"
+# A plain commit on the branch makes a head no run has read (T2's published candidate was itself run,
+# so as the head it is already remembered).
+printf 'note\n' > "$RS/NOTE.txt"; git -C "$RS" add NOTE.txt; git -C "$RS" commit -qm "a plain commit on the branch"
+HS3="$(ll_head "$RS")"
 ll_verb "$RS" T1
 expect_eq "(s3) the same row without its line, on a new head: published (exit 0)" "0" "$LL_RC"
-expect_eq "(s3) …the new head runs the suite once more: T1's run at T2's commit, a second standing event" "1 2" \
-  "$(ll_ev "$RS" verdict | grep -c "|row=T1|commit=${KS2}|") $(ll_ev "$RS" standing | awk 'END { print NR }')"
+expect_eq "(s3) …the new head runs the suite once more: one run at it, a second standing event naming it" "1 2 1" \
+  "$(ll_ev "$RS" verdict | grep -c "|commit=${HS3}|") $(ll_ev "$RS" standing | awk 'END { print NR }') $(ll_ev "$RS" standing | grep -c "|head=${HS3}|")"
 # MUTANT: the comparison inverted. T1's added line is taken for the branch's, and T1 publishes.
 RSM="$(ll_standing_world)"
 LL_MUTANT='s/-eq 0 \]/-ne 0 ]/' LL_MUTANT_FN=_line_red_owner ll_drive "$RSM" T1 "$WORLD_ROOT/sm.out"

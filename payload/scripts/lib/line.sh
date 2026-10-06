@@ -950,7 +950,7 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
     kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }
     sleep "$LINE_POLL"; gate_state >/dev/null 2>&1
   done
-  wait "$p"; rc=$?
+  wait "$p" 2>/dev/null; rc=$?   # a suite ended by a signal is a `none` verdict, not a line on the carrier's output
   gate_end "$id" "$rc" >/dev/null 2>&1
   printf 'rc=%s\n' "$rc" >> "$5"
 }
