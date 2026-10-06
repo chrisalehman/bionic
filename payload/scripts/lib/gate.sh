@@ -315,6 +315,10 @@ _gate_idle() {  # <reading> — under the lock, after a scan: the idle file, kep
   _G_IDLE="$v"
 }
 
+# THE READING WITHIN THE SHARE, one clause for its two readers (the collision note in the
+# plan's ### T13): the admission test's idle-gate arm (T47) and gate_room's memory test call it.
+_GATE_FITS_AWK='function fits(r, share) { return r >= 0 && r <= share }'
+
 # gate_usage <reading> — after a scan: memory in use as the gate counts it (D11), the one owner
 # of that arithmetic (spec §3; read-structure-p6 #2). The reading itself while nothing admitted
 # is unfinished; the larger of the reading and idle plus the admitted memory promises while
@@ -346,11 +350,11 @@ _gate_decide() {
     [ "$reading" -ge 0 ] || return 1
   fi
   printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" \
-      -v cores="$(_res_cores)" -v busy="$(_res_busy_cores)" -v unf="$_G_UNF" -v p="$p" '
+      -v cores="$(_res_cores)" -v busy="$(_res_busy_cores)" -v unf="$_G_UNF" -v p="$p" "$_GATE_FITS_AWK"'
     NF >= 2 { sc += $2 }
     END {
       split(p, n, ":")
-      if (r >= 0 && !(unf == 0 && r <= share)) {   # memory; an idle gate: the reading alone
+      if (r >= 0 && !(unf == 0 && fits(r, share))) {   # memory; an idle gate: the reading alone
         if (u + n[1] > share) exit 1
       }
       b = busy + 0; if (sc > b) b = sc         # processor, the soft limit
@@ -554,7 +558,7 @@ _gate_room_line() {
     END { if (n) printf "%g", m }')"
   printf '%s' "$_G_PROM" | awk -F: -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" \
       -v most="$most" -v share="$(gate_share)" -v cores="$(_res_cores)" -v unf="$_G_UNF" \
-      -v wait="$_G_WAIT" '
+      -v wait="$_G_WAIT" "$_GATE_FITS_AWK"'
     function known(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
     NF >= 3 { pc += $2 }
     END {
@@ -566,7 +570,7 @@ _gate_room_line() {
       if (!known(b1) || !known(b5) || r < 0) { if (!quiet) room = 0 }
       if (known(b1)) { if (b1 + prom > lim) room = 0 }
       if (known(b5)) { if (b5 + prom > lim) room = 0 }
-      if (r >= 0 && r > share) room = 0
+      if (r >= 0 && !fits(r, share)) room = 0
       if (all) room = 0
       if (wait > 0) room = 0
       printf "room=%s load=%s/%s cores=%d promised=%g waiting=%d\n", (room ? "yes" : "no"), b1, b5, cores, prom, wait

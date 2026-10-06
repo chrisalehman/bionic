@@ -808,8 +808,8 @@ for rd in 80:0 81:75 85:75; do
     "$(ask_fg ir work big 0)"
 done
 MI="$(mutant alone)"
-anchor "$MI" 'if (r >= 0 && !(unf == 0 && r <= share)) {' 1
-sed -i.bak 's/if (r >= 0 \&\& !(unf == 0 \&\& r <= share)) {/if (r >= 0) {/' "$MI"
+anchor "$MI" 'if (r >= 0 && !(unf == 0 && fits(r, share))) {' 1
+sed -i.bak 's/if (r >= 0 \&\& !(unf == 0 \&\& fits(r, share))) {/if (r >= 0) {/' "$MI"
 alone_rows "$MI" alone-mut
 expect_eq "I.8 the mutant (no idle clause) still admits the 3% ask" "0" "$AL_SMALL"
 expect_eq "I.9 the mutant refuses big alone on an idle gate — the idle clause is the rule" "75" "$AL_BIG"
