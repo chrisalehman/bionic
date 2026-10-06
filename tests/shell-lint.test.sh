@@ -62,8 +62,244 @@ trap 'rm -rf "$TMP"' EXIT
 # ── the lexer ────────────────────────────────────────────────────────────────
 LINT_AWK="$TMP/lint.awk"
 cat > "$LINT_AWK" <<'LINT_AWK_EOF'
-# the lexer is not written yet: it reads nothing and names nothing
-{ }
+# A shell lexer for the three shapes bash 3.2 reads differently from a modern bash.
+# Prints, per file it reads:
+#   H<TAB><file>:<line><TAB><shape><TAB><what>   one row per hazard
+#   D<TAB><file><TAB><name>                     one row per function a load defines
+#   U<TAB><file><TAB><state>                    the file ended with a frame still open
+# Frames: top, cs ($( ) and <( )), sub (( )), bt (` `), dq, sq, dsq ($' '), par (${ }),
+# ar ($(( )) and (( ))), hd (an unquoted heredoc body). A case lives in the
+# command frame that opened it: subj, pat, patx (inside a pattern), body.
+function push(k,   p) {
+  p = d; d++; K[d] = k; AT[d] = 1; BR[d] = 0; AD[d] = 0
+  Z[d] = (k == "cs") ? 1 : ((k == "bt") ? 0 : Z[p])
+  HB_[d] = (k == "hd") ? 1 : HB_[p]
+  Q[d] = (k == "dq" || k == "hd") ? 1 : ((k == "top" || k == "cs" || k == "sub" || k == "bt") ? 0 : Q[p])
+}
+function pop() {
+  while (cn > 0 && CF[cn] >= d) cn--
+  if (d > 1) d--
+}
+function cmdish(k) { return k == "top" || k == "cs" || k == "sub" || k == "bt" }
+function isb(c) {
+  return c == "" || c == " " || c == "\t" || c == ";" || c == "&" || c == "|" \
+    || c == "(" || c == ")" || c == "<" || c == ">"
+}
+function hit(shape, what,   key) {
+  key = FILENAME SUBSEP FNR SUBSEP shape
+  if (key in SEEN) return
+  SEEN[key] = 1
+  printf "H\t%s:%d\t%s\t%s\n", FILENAME, FNR, shape, what
+}
+function owns() { return cn > 0 && CF[cn] == d }
+function dollar(s, i,   c2) {
+  c2 = substr(s, i + 1, 1)
+  if (c2 == "(") {
+    if (substr(s, i + 2, 1) == "(") { push("ar"); return i + 2 }
+    push("cs"); ws = 1; return i + 1
+  }
+  if (c2 == "{") { push("par"); return i + 1 }
+  if (c2 == "'" && !Q[d]) { push("dsq"); return i + 1 }
+  if (c2 != "" && index("#?$!@*-0123456789", c2)) return i + 1
+  return i
+}
+function pattern(s, i,   n, c, j) {
+  n = length(s)
+  for (; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (PQS == "'") { if (c == "'") PQS = ""; continue }
+    if (PQS == "\"") { if (c == "\\") i++; else if (c == "\"") PQS = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (c == "'" || c == "\"") { PQS = c; continue }
+    if (c == "$" && substr(s, i + 1, 1) == "{") {
+      j = index(substr(s, i), "}"); if (j == 0) return n; i += j - 1; continue
+    }
+    if (c == ")") { CS[cn] = "body"; AT[d] = 1; ws = 1; return i }
+  }
+  return n
+}
+function heredoc(s, i,   j, n, c, w, q, e, strip) {
+  j = i + 2; n = length(s); strip = 0; w = ""; q = 0
+  if (substr(s, j, 1) == "-") { strip = 1; j++ }
+  while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+  for (; j <= n; j++) {
+    c = substr(s, j, 1)
+    if (c == "'" || c == "\"") {
+      q = 1; e = index(substr(s, j + 1), c)
+      if (e == 0) { w = w substr(s, j + 1); j = n + 1; break }
+      w = w substr(s, j + 1, e - 1); j += e; continue
+    }
+    if (c == "\\") { q = 1; w = w substr(s, j + 1, 1); j++; continue }
+    if (isb(c)) break
+    w = w c
+  }
+  if (!hdon && w != "") { np++; HD[np] = w; HQ[np] = q; HS[np] = strip; HZ[np] = Z[d] }
+  return j - 1
+}
+function scan(s,   i, n, c, k, w, m, nb, nm) {
+  n = length(s); ws = 1
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1); k = K[d]
+    if (k == "sq") {
+      m = index(substr(s, i), "'"); if (m == 0) return
+      i += m - 1; pop(); ws = 0; continue
+    }
+    if (k == "dsq") { if (c == "\\") i++; else if (c == "'") { pop(); ws = 0 } continue }
+    if (k == "dq" || k == "hd") {
+      if (c == "\\") { i++; continue }
+      if (c == "\"" && k == "dq") { pop(); ws = 0; continue }
+      if (c == "`") { push("bt"); ws = 1; continue }
+      if (c == "$") i = dollar(s, i)
+      continue
+    }
+    if (k == "par") {
+      if (c == "\\") { i++; continue }
+      if (c == "}") { pop(); ws = 0; continue }
+      if (c == "$") { i = dollar(s, i); continue }
+      if (c == "\"") { push("dq"); continue }
+      if (c == "'" && !Q[d]) { push("sq"); continue }
+      if (c == "`") push("bt")
+      continue
+    }
+    if (k == "ar") {
+      if (c == "(") { AD[d]++; continue }
+      if (c == ")") {
+        if (AD[d] > 0) AD[d]--
+        else { if (substr(s, i + 1, 1) == ")") i++; pop(); ws = 0 }
+        continue
+      }
+      if (c == "$") i = dollar(s, i)
+      continue
+    }
+    # a command frame: top, cs, sub, bt
+    if (owns() && CS[cn] == "patx") { i = pattern(s, i); continue }
+    if (c == " " || c == "\t") { ws = 1; continue }
+    if (ws && c == "#") return
+    if (owns() && CS[cn] == "pat") {
+      if (substr(s, i, 4) == "esac" && isb(substr(s, i + 4, 1))) {
+        cn--; AT[d] = 0; i += 3; ws = 0; continue
+      }
+      CS[cn] = "patx"
+      if (c == "(") continue
+      if (Z[d]) {
+        if (HB_[d]) hit("HEREDOC-CASE", "a case arm with no opening paren inside $( ) in an unquoted heredoc body")
+        else hit("CASE", "a case arm with no opening paren inside $( )")
+      }
+      i = pattern(s, i); continue
+    }
+    if (ws) {
+      w = substr(s, i)
+      m = match(w, /^[a-z]+/) ? substr(w, 1, RLENGTH) : ""
+      nb = (m != "") && isb(substr(s, i + length(m), 1))
+      if (owns() && CS[cn] == "subj") {
+        if (nb && m == "in" && CSW[cn]) { CS[cn] = "pat"; i += 1; ws = 0; continue }
+        CSW[cn] = 1
+      } else if (AT[d] && nb) {
+        if (m == "case") { cn++; CF[cn] = d; CS[cn] = "subj"; CSW[cn] = 0; AT[d] = 0; i += 3; ws = 0; continue }
+        if (m == "esac" && owns()) { cn--; AT[d] = 0; i += 3; ws = 0; continue }
+        if (m ~ /^(if|then|else|elif|do|while|until|time)$/) { i += length(m) - 1; ws = 0; continue }
+        if (m == "function") {
+          nm = substr(s, i + 8); sub(/^[ \t]+/, "", nm); sub(/[^A-Za-z0-9_:.-].*$/, "", nm)
+          if (d == 1 && BR[1] == 0 && !hdon && nm != "") printf "D\t%s\t%s\n", FILENAME, nm
+          i += 7; ws = 0; continue
+        }
+      }
+      if (AT[d]) {
+        if (c == "{" && isb(substr(s, i + 1, 1))) { BR[d]++; continue }
+        if (c == "}" && isb(substr(s, i + 1, 1))) { BR[d]--; AT[d] = 0; ws = 0; continue }
+        if (c == "!" && isb(substr(s, i + 1, 1))) continue
+        if (d == 1 && BR[1] == 0 && !hdon && match(w, /^[A-Za-z_][A-Za-z0-9_:.-]*[ \t]*\(\)/)) {
+          nm = w; sub(/[ \t]*\(.*$/, "", nm); printf "D\t%s\t%s\n", FILENAME, nm
+        }
+        if (!match(w, /^[A-Za-z_][A-Za-z0-9_]*\+?=/)) AT[d] = 0
+      }
+    }
+    if (c == "\\") { i++; ws = 0; continue }
+    if (c == "'") { push("sq"); ws = 0; continue }
+    if (c == "\"") { push("dq"); ws = 0; continue }
+    if (c == "`") { if (k == "bt") { pop(); ws = 0 } else { push("bt"); ws = 1 } continue }
+    if (c == "$") { i = dollar(s, i); if (K[d] != "cs") ws = 0; continue }
+    if (c == "(") {
+      if (substr(s, i + 1, 1) == ")") { i++; AT[d] = 1; ws = 1; continue }
+      if (AT[d] && substr(s, i + 1, 1) == "(") { i++; push("ar"); continue }
+      push("sub"); ws = 1; continue
+    }
+    if (c == ")") { if (k == "cs" || k == "sub") pop(); ws = (k == "sub"); continue }
+    if (c == "<") {
+      if (substr(s, i, 3) == "<<<") { i += 2; ws = 1; continue }
+      if (substr(s, i, 2) == "<<") { i = heredoc(s, i); ws = 1; continue }
+      if (substr(s, i + 1, 1) == "(") { i++; push("cs") }
+      ws = 1; continue
+    }
+    if (c == ">") { if (substr(s, i + 1, 1) == "(") { i++; push("cs") } ws = 1; continue }
+    if (c == ";") {
+      if (owns() && CS[cn] == "body" && (substr(s, i + 1, 1) == ";" || substr(s, i + 1, 1) == "&")) {
+        CS[cn] = "pat"; i++; if (substr(s, i + 1, 1) == "&") i++
+        ws = 1; continue
+      }
+      AT[d] = 1; ws = 1; continue
+    }
+    if (c == "&" || c == "|") { AT[d] = 1; ws = 1; continue }
+    ws = 0
+  }
+}
+# The raw text of a heredoc body inside $( ), read the way bash 3.2 reads it: it knows
+# quotes and parentheses and nothing of heredocs, so a lone ) closes the substitution.
+function rawparen(s,   i, n, c) {
+  n = length(s)
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (RQ != "") {
+      if (c == "\\" && RQ != "'") { i++; continue }
+      if (c == RQ) RQ = ""
+      continue
+    }
+    if (c == "\\") { i++; continue }
+    if (c == "'" || c == "\"" || c == "`") { RQ = c; continue }
+    if (c == "(") RDEP++
+    else if (c == ")") {
+      if (RDEP > 0) RDEP--
+      else if (!RHIT) { RHIT = 1; hit("HEREDOC-PAREN", "a lone ) in a heredoc body inside $( ) ends the substitution early") }
+    }
+  }
+}
+function startbody() {
+  HBASE = d
+  if (!HQ[hc]) push("hd")
+  RQ = ""; RDEP = 0; RHIT = 0
+}
+# A file that ends with a frame, a case or a heredoc still open is one the lexer lost its
+# place in, and every row it printed after that point is suspect: it says so.
+function closefile(f,   st, x) {
+  if (f == "" || (d == 1 && cn == 0 && !hdon && np == 0)) return
+  st = ""; for (x = 1; x <= d; x++) st = st K[x] (x < d ? "/" : "")
+  printf "U\t%s\t%s cases=%d heredoc=%s\n", f, st, cn, (hdon ? HD[hc] : "-")
+}
+FNR == 1 {
+  closefile(PREVF); PREVF = FILENAME; PQS = ""
+  d = 1; K[1] = "top"; AT[1] = 1; BR[1] = 0; Z[1] = 0; HB_[1] = 0; Q[1] = 0
+  cn = 0; np = 0; hdon = 0; hc = 0
+}
+{
+  line = $0
+  if (hdon) {
+    t = line
+    if (HS[hc]) sub(/^\t+/, "", t)
+    if (t == HD[hc]) {
+      while (d > HBASE) pop()
+      hc++
+      if (hc > np) { hdon = 0; np = 0 } else startbody()
+      next
+    }
+    if (HZ[hc]) rawparen(line)
+    if (!HQ[hc]) { scan(line); if (cmdish(K[d])) AT[d] = 1 }
+    next
+  }
+  scan(line)
+  if (cmdish(K[d]) && line !~ /\\$/) AT[d] = 1
+  if (np > 0 && cmdish(K[d])) { hdon = 1; hc = 1; startbody() }
+}
+END { closefile(PREVF) }
 LINT_AWK_EOF
 
 # lint_raw <file>... -> the lexer's rows (H, D, U), each file named as it was given
