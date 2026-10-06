@@ -3740,7 +3740,7 @@ LP="$(lk_repo "$TMP/land-kind-stopped")"
 LPT="$(new_tree "$LP" wt/kind-stopped)"; green_stamp "$LPT"; LPT_H="$(git -C "$LPT" rev-parse HEAD)"
 git -C "$LP" rm -r --quiet --cached .bionic/keep.md .bionic/also.md && git -C "$LP" commit --quiet -m "the target stops tracking .bionic"
 expect_match "(b15) a tree branched before its target stopped tracking .bionic is refused, naming the tree's head" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/also.md commit=${LPT_H:0:12} branch=wt/kind-stopped onto=wave/fixture fix='git -C ${LPT} rm -r --cached .bionic, commit, run the suites, land again' — *" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/also.md commit=${LPT_H:0:12} branch=wt/kind-stopped onto=wave/fixture fix='git -C ${LPT} merge wave/fixture, run the suites, land again' — *" \
   "$(lb_first "$(worktree_land "$LPT" wave/fixture)")"
 
 # (b11) THE STAND-DOWN PATH reaches the same verdicts: b6's range refused, b8's landed.
@@ -3783,5 +3783,309 @@ expect_match "(b13) with the kind test cut out, a link in place of the tracked d
   "spawn-worktree: * merge*=*" \
   "$( _wt_bionic_kind_changed() { return 1; }; worktree_land "$LMT" wave/fixture 2>/dev/null | sed -n 1p )"
 expect_true  "(b13) …and the project's .bionic is a link: the loss b6 refuses" test -L "$LM/.bionic"
+
+# THE GUARD READS GIT, NEVER QUOTED TEXT (wave-27 T86; review pass 71). The guard read one spelling
+# (`:(literal).bionic`, `ls-tree -- .bionic`) and filtered `--name-only` lines with a pattern. On a
+# case-insensitive disk a tree that committed create's link as `.BIONIC` landed and the project's
+# `.bionic` became a link to itself; and a name git C-quotes (`"`, `\`, a control character) never
+# matched the pattern, so a range adding only such a name under `.bionic` overwrote the project's
+# untracked file there. Now every name is read from git's NUL-separated streams, and a root entry
+# IS `.bionic` when its name case-folds to `.bionic`, on every disk: `.BIONIC`, `.Bionic` and
+# `.bionic` are one path to the guard. `path=` carries the range's spelling, C-quoted as git
+# prints it when the name holds `"`, `\` or a control character, so the line stays one line.
+#
+# FIXTURE FIDELITY. The spellings are made the way pass 71 made them: create's link renamed and
+# added with -f, and an index entry under a second spelling written by `update-index` (`git add` on
+# a case-insensitive disk folds a new path into the directory's existing spelling). Each file is
+# written at the range's spelling, so the tree is clean on either kind of disk. The refusals hold
+# on every disk, since the fold is the guard's own; what the old code did to the project (the loss)
+# is this disk's, and the red log says which disk that was.
+#
+# ANTI-VACUITY. A target tracking `.BIONIC/keep.md` lands a change to it (c6a) beside the refusal of
+# an add under the other spelling (c6b); the git oracle prints the quoted names (c7-pre) before any
+# row reads them; the two mutants (c11, c12) land the ranges their rows refuse.
+cs_stage() {  # <tree> <path, in the range's spelling> <content> — writes it there and indexes exactly that name
+  local t="$1" p="$2" b
+  case "$p" in */*) mkdir -p "$t/${p%/*}" ;; esac
+  printf '%s\n' "$3" > "$t/$p"
+  b="$(git -C "$t" hash-object -w -- "$t/$p")" && git -C "$t" update-index --add --cacheinfo "100644,${b},${p}"
+  git -C "$t" update-index -q --refresh >/dev/null 2>&1; :
+}
+cs_link_as() {  # <repo> <branch> <spelling> [rm] -> a tree committing create's link under <spelling>; rm: the tracked .bionic removed first
+  local r="$1" t; t="$(new_tree "$r" "$2")"; [ -n "$t" ] || return 1
+  if [ "${4:-}" = rm ]; then git -C "$t" rm -r --quiet .bionic && rm -rf "$t/.bionic"; fi
+  ln -s "${r}/.bionic" "$t/.bionic-moving" && mv "$t/.bionic-moving" "$t/$3"
+  git -C "$t" add -f -- "$3" && git -C "$t" commit --quiet -m "$2 the link, as $3"
+  green_stamp "$t"; printf '%s' "$t"
+}
+cs_roots() { git -C "$1" ls-tree --name-only "$2" | grep -i '^\.bionic$' | tr '\n' ' '; }  # <repo> <rev> -> its root entries folding to .bionic
+cs_fix() { printf "fix='git -C %s %s, commit, run the suites, land again' — " "$1" "$2"; }  # <tree> <remedy> -> the line's fix field
+
+# (c1) NOTHING TRACKED AT .bionic; THE LINK COMMITTED AS .BIONIC (pass 71's G2a: the W2 loss through a second spelling).
+CA="$(lb_repo "$TMP/land-case-link")"
+CAT="$(cs_link_as "$CA" wt/case-link .BIONIC)"; CAT_C="$(git -C "$CAT" rev-parse HEAD)"
+expect_eq   "(c1-pre) the tree's head holds the link at .BIONIC and nothing at .bionic" ".BIONIC " "$(cs_roots "$CAT" HEAD)"
+expect_eq   "(c1-pre) …a link" "120000" "$(git -C "$CAT" ls-tree HEAD .BIONIC | awk '{ print $1 }')"
+CA_SUMS="$(lb_sums "$CA")"; CA_REFS="$(refs_of "$CA")"; CA_STAMPS="$(cat "$(stamp_file "$CAT")")"
+OUTCA="$(worktree_land "$CAT" wave/fixture)"; RCCA=$?
+expect_match "(c1) a range that commits the link as .BIONIC is refused, naming the range's spelling" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CAT_C:0:12} branch=wt/case-link onto=wave/fixture $(cs_fix "$CAT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" "$(lb_first "$OUTCA")"
+expect_eq    "(c1) …exit 2" "2" "$RCCA"
+expect_true  "(c1) the project's .bionic is still a directory" test -d "$CA/.bionic"
+expect_false "(c1) …and not a link" test -L "$CA/.bionic"
+expect_eq    "(c1) …its files byte for byte" "$CA_SUMS" "$(lb_sums "$CA")"
+expect_eq    "(c1) no ref moved" "$CA_REFS" "$(refs_of "$CA")"
+expect_true  "(c1) the tree is kept" test -d "$CAT"
+expect_eq    "(c1) …and its stamps" "$CA_STAMPS" "$(cat "$(stamp_file "$CAT")")"
+
+# (c2) .bionic/keep.md TRACKED; THE RANGE REMOVES IT AND COMMITS THE LINK AS .BIONIC: a change of kind.
+CK="$(lk_repo "$TMP/land-case-kind")"
+CKT="$(cs_link_as "$CK" wt/case-kind .BIONIC rm)"; CKT_C="$(git -C "$CKT" rev-parse HEAD)"
+expect_eq   "(c2-pre) the tree's head holds the link at .BIONIC alone" ".BIONIC " "$(cs_roots "$CKT" HEAD)"
+CK_SUMS="$(lb_sums "$CK")"; CK_REFS="$(refs_of "$CK")"; CK_STAMPS="$(cat "$(stamp_file "$CKT")")"
+OUTCK="$(worktree_land "$CKT" wave/fixture)"; RCCK=$?
+expect_match "(c2) a range that makes the tracked directory a link at .BIONIC is refused as a change of kind" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CKT_C:0:12} branch=wt/case-kind onto=wave/fixture $(cs_fix "$CKT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" "$(lb_first "$OUTCK")"
+expect_eq    "(c2) …exit 2" "2" "$RCCK"
+expect_false "(c2) the project's .bionic is not a link" test -L "$CK/.bionic"
+expect_eq    "(c2) …its files byte for byte" "$CK_SUMS" "$(lb_sums "$CK")"
+expect_eq    "(c2) no ref moved" "$CK_REFS" "$(refs_of "$CK")"
+expect_true  "(c2) the tree is kept" test -d "$CKT"
+expect_eq    "(c2) …and its stamps" "$CK_STAMPS" "$(cat "$(stamp_file "$CKT")")"
+
+# (c3) A REGULAR FILE AT .Bionic, nothing tracked.
+CF="$(lb_repo "$TMP/land-case-file")"
+CFT="$(new_tree "$CF" wt/case-file)"; echo "a file" > "$CFT/.Bionic"
+lk_commit "$CFT" "a regular file at .Bionic" .Bionic; CFT_C="$(git -C "$CFT" rev-parse HEAD)"
+expect_eq   "(c3-pre) the tree's head holds a file at .Bionic" "100644" "$(git -C "$CFT" ls-tree HEAD .Bionic | awk '{ print $1 }')"
+CF_SUMS="$(lb_sums "$CF")"; CF_REFS="$(refs_of "$CF")"
+OUTCF="$(worktree_land "$CFT" wave/fixture)"; RCCF=$?
+expect_match "(c3) a range that puts a regular file at .Bionic is refused, naming .Bionic" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.Bionic commit=${CFT_C:0:12} branch=wt/case-file onto=wave/fixture $(cs_fix "$CFT" "rm -r --cached .Bionic, move .Bionic out of the tree")*" "$(lb_first "$OUTCF")"
+expect_eq    "(c3) …exit 2" "2" "$RCCF"
+expect_eq    "(c3) …the project's .bionic files byte for byte" "$CF_SUMS" "$(lb_sums "$CF")"
+expect_eq    "(c3) …no ref moved" "$CF_REFS" "$(refs_of "$CF")"
+expect_true  "(c3) …the tree is kept" test -d "$CFT"
+
+# (c4) A DIRECTORY WITH FILES AT .Bionic, nothing tracked: the first added path, the whole entry out.
+CD="$(lb_repo "$TMP/land-case-dir")"
+CDT="$(new_tree "$CD" wt/case-dir)"; mkdir -p "$CDT/.Bionic/docs"; echo "the writer's" > "$CDT/.Bionic/docs/x.md"
+lk_commit "$CDT" "a directory at .Bionic" .Bionic/docs/x.md; CDT_C="$(git -C "$CDT" rev-parse HEAD)"
+expect_eq   "(c4-pre) the tree's head holds a directory at .Bionic" "040000" "$(git -C "$CDT" ls-tree HEAD .Bionic | awk '{ print $1 }')"
+CD_SUMS="$(lb_sums "$CD")"; CD_REFS="$(refs_of "$CD")"
+OUTCD="$(worktree_land "$CDT" wave/fixture)"; RCCD=$?
+expect_match "(c4) a range that adds a directory at .Bionic is refused, naming its first path and the entry's remedy" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.Bionic/docs/x.md commit=${CDT_C:0:12} branch=wt/case-dir onto=wave/fixture $(cs_fix "$CDT" "rm -r --cached .Bionic, move .Bionic out of the tree")*" "$(lb_first "$OUTCD")"
+expect_eq    "(c4) …exit 2" "2" "$RCCD"
+expect_eq    "(c4) …the project's .bionic files byte for byte" "$CD_SUMS" "$(lb_sums "$CD")"
+expect_eq    "(c4) …no ref moved" "$CD_REFS" "$(refs_of "$CD")"
+expect_true  "(c4) …the tree is kept" test -d "$CDT"
+
+# (c5) .bionic/keep.md TRACKED; THE RANGE ADDS .BIONIC/x.md (pass 71's G2b) over the project's untracked x.md.
+CU="$(lk_repo "$TMP/land-case-add")"; echo "the project's own" > "$CU/.bionic/x.md"
+CUT="$(new_tree "$CU" wt/case-add)"; cs_stage "$CUT" .BIONIC/x.md "the writer's"
+lk_commit "$CUT" "x.md added as .BIONIC/x.md"; CUT_C="$(git -C "$CUT" rev-parse HEAD)"
+expect_eq   "(c5-pre) the tree's head holds both spellings at the root" ".BIONIC .bionic " "$(cs_roots "$CUT" HEAD)"
+expect_eq   "(c5-pre) …and the tree is clean" "" "$(git -C "$CUT" status --porcelain)"
+CU_SUMS="$(lb_sums "$CU")"; CU_REFS="$(refs_of "$CU")"
+OUTCU="$(worktree_land "$CUT" wave/fixture)"; RCCU=$?
+expect_match "(c5) a range that adds .BIONIC/x.md under the tracked .bionic is refused, naming the added path" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC/x.md commit=${CUT_C:0:12} branch=wt/case-add onto=wave/fixture $(cs_fix "$CUT" "rm --cached .BIONIC/x.md, move .BIONIC/x.md out of the tree")*" "$(lb_first "$OUTCU")"
+expect_eq    "(c5) …exit 2" "2" "$RCCU"
+expect_eq    "(c5) …the project's untracked x.md byte for byte, and every file beside it" "$CU_SUMS" "$(lb_sums "$CU")"
+expect_eq    "(c5) …no ref moved" "$CU_REFS" "$(refs_of "$CU")"
+expect_true  "(c5) …the tree is kept" test -d "$CUT"
+
+# (c6) A TARGET TRACKING .BIONIC/keep.md (made on a case-sensitive disk, or by hand) tracks .bionic's directory.
+CV="$(lb_repo "$TMP/land-case-upper")"; cs_stage "$CV" .BIONIC/keep.md "keep"
+git -C "$CV" commit --quiet -m "the target tracks .BIONIC/keep.md"
+expect_eq   "(c6-pre) the target tracks .BIONIC as a directory, and nothing spelled .bionic" ".BIONIC " "$(cs_roots "$CV" wave/fixture)"
+CVC="$(new_tree "$CV" wt/case-upper-change)"; echo "changed on the branch" > "$CVC/.BIONIC/keep.md"
+lk_commit "$CVC" "a change to the tracked .BIONIC/keep.md" .BIONIC/keep.md
+expect_match "(c6a) a range that changes the tracked .BIONIC/keep.md lands" \
+  "spawn-worktree: LANDED branch=wt/case-upper-change onto=wave/fixture *" "$(lb_first "$(worktree_land "$CVC" wave/fixture)")"
+expect_eq    "(c6a) …the change is in the target checkout" "changed on the branch" "$(cat "$CV/.BIONIC/keep.md")"
+expect_true  "(c6a) …whose .bionic still holds its plan" test -f "$CV/.bionic/docs/plans/w.plan.md"
+CVA="$(new_tree "$CV" wt/case-upper-add)"; cs_stage "$CVA" .bionic/new.md "the writer's"
+lk_commit "$CVA" "new.md added as .bionic/new.md"; CVA_C="$(git -C "$CVA" rev-parse HEAD)"
+expect_eq   "(c6b-pre) the tree's head holds both spellings at the root" ".BIONIC .bionic " "$(cs_roots "$CVA" HEAD)"
+CV_SUMS="$(lb_sums "$CV")"; CV_REFS="$(refs_of "$CV")"
+expect_match "(c6b) …and refuses a range that adds .bionic/new.md: an add under the folded path, the path alone out" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/new.md commit=${CVA_C:0:12} branch=wt/case-upper-add onto=wave/fixture $(cs_fix "$CVA" "rm --cached .bionic/new.md, move .bionic/new.md out of the tree")*" \
+  "$(lb_first "$(worktree_land "$CVA" wave/fixture)")"
+expect_eq    "(c6b) …the project's .bionic files byte for byte" "$CV_SUMS" "$(lb_sums "$CV")"
+expect_eq    "(c6b) …no ref moved" "$CV_REFS" "$(refs_of "$CV")"
+
+# (c13) A FILE AT .BIONIC BESIDE THE TARGET'S TRACKED LINK at .bionic: not a directory, so not an add
+# under the entry; refused as a change of kind, in its spelling. The entry is written to the index
+# alone (no disk holds both spellings at once on a case-insensitive disk) and marked unchanged, so
+# the tree reads clean.
+CB="$(ll_repo "$TMP/land-case-beside")"
+CBT="$(new_tree "$CB" wt/case-beside)"
+CB_B="$(printf 'a file\n' | git -C "$CBT" hash-object -w --stdin)"
+git -C "$CBT" update-index --add --cacheinfo "100644,${CB_B},.BIONIC" && git -C "$CBT" update-index --assume-unchanged .BIONIC
+git -C "$CBT" commit --quiet -m "a file at .BIONIC beside the link"; green_stamp "$CBT"; CBT_C="$(git -C "$CBT" rev-parse HEAD)"
+expect_eq   "(c13-pre) the tree's head holds both spellings at the root" ".BIONIC .bionic " "$(cs_roots "$CBT" HEAD)"
+expect_eq   "(c13-pre) …and the tree reads clean" "" "$(git -C "$CBT" status --porcelain)"
+CB_REFS="$(refs_of "$CB")"
+expect_match "(c13) a file at .BIONIC beside the tracked link is refused as a change of kind, in its spelling" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CBT_C:0:12} branch=wt/case-beside onto=wave/fixture $(cs_fix "$CBT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" \
+  "$(lb_first "$(worktree_land "$CBT" wave/fixture)")"
+expect_eq    "(c13) …no ref moved" "$CB_REFS" "$(refs_of "$CB")"
+expect_true  "(c13) …the target's .bionic is still its link" test -L "$CB/.bionic"
+
+# (c7) NAMES GIT C-QUOTES, added under the tracked .bionic, each over the project's untracked file
+# of that name (pass 71's G1b). The quoted form is git's own (c7-pre, the oracle).
+CQ_N1='.bionic/"quoted".md'; CQ_N2='.bionic/back\slash.md'; CQ_N3=$'.bionic/tab\tname.md'
+CQ_Q1='".bionic/\"quoted\".md"'; CQ_Q2='".bionic/back\\slash.md"'; CQ_Q3='".bionic/tab\tname.md"'
+cq_own() { local f; for f in "$CQ_N1" "$CQ_N2" "$CQ_N3"; do echo "the project's own" > "$1/$f"; done; }  # <repo>
+cq_tree() {  # <repo> <branch> <name>... -> a tree whose one commit adds each name under .bionic
+  local r="$1" b="$2" t f; shift 2; t="$(new_tree "$r" "$b")"; [ -n "$t" ] || return 1
+  mkdir -p "$t/.bionic"; for f in "$@"; do echo "the writer's" > "$t/$f"; done
+  git -C "$t" add -f -- "$@" && git -C "$t" commit --quiet -m "$b quoted names"
+  green_stamp "$t"; printf '%s' "$t"
+}
+CQ="$(lk_repo "$TMP/land-quoted")"; cq_own "$CQ"
+CQT="$(cq_tree "$CQ" wt/quoted "$CQ_N1" "$CQ_N2" "$CQ_N3")"; CQT_C="$(git -C "$CQT" rev-parse HEAD)"
+expect_eq   "(c7-pre) git prints the three added names C-quoted, so" "${CQ_Q1}|${CQ_Q2}|${CQ_Q3}|" \
+  "$(git -C "$CQ" -c core.quotePath=true diff --name-only --diff-filter=A wave/fixture wt/quoted -- .bionic | tr '\n' '|')"
+CQ_SUMS="$(lb_sums "$CQ")"; CQ_REFS="$(refs_of "$CQ")"
+expect_true "(c7-pre) the project holds its own file at each of the three paths" \
+  test -f "$CQ/$CQ_N1" -a -f "$CQ/$CQ_N2" -a -f "$CQ/$CQ_N3"
+OUTCQ="$(worktree_land "$CQT" wave/fixture)"; RCCQ=$?
+expect_match "(c7) a range adding three names git quotes under the tracked .bionic is refused" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=*" "$(lb_first "$OUTCQ")"
+expect_contains "(c7) …naming the first added path as git quotes it, and the same spelling in the remedy" \
+  "path=${CQ_Q1} commit=${CQT_C:0:12} branch=wt/quoted onto=wave/fixture $(cs_fix "$CQT" "rm --cached ${CQ_Q1}, move ${CQ_Q1} out of the tree")" "$OUTCQ"
+expect_eq    "(c7) …exit 2" "2" "$RCCQ"
+expect_eq    "(c7) …on one line" "1" "$(printf '%s\n' "$OUTCQ" | awk 'END { print NR }')"
+expect_eq    "(c7) …the project's three untracked files byte for byte, and every file beside them" "$CQ_SUMS" "$(lb_sums "$CQ")"
+expect_eq    "(c7) …no ref moved" "$CQ_REFS" "$(refs_of "$CQ")"
+expect_true  "(c7) …the tree is kept" test -d "$CQT"
+CQ2="$(lk_repo "$TMP/land-quoted-back")"; cq_own "$CQ2"
+CQB="$(cq_tree "$CQ2" wt/quoted-back "$CQ_N2")"; CQB_C="$(git -C "$CQB" rev-parse HEAD)"; CQ2_SUMS="$(lb_sums "$CQ2")"
+expect_contains "(c7b) a range adding only the backslash name is refused, naming it as git quotes it" \
+  "REFUSED reason=bionic-committed path=${CQ_Q2} commit=${CQB_C:0:12} branch=wt/quoted-back " "$(worktree_land "$CQB" wave/fixture)"
+expect_eq    "(c7b) …the project's .bionic files byte for byte" "$CQ2_SUMS" "$(lb_sums "$CQ2")"
+CQ3="$(lk_repo "$TMP/land-quoted-tab")"; cq_own "$CQ3"
+CQC="$(cq_tree "$CQ3" wt/quoted-tab "$CQ_N3")"; CQC_C="$(git -C "$CQC" rev-parse HEAD)"; CQ3_SUMS="$(lb_sums "$CQ3")"
+OUTCQC="$(worktree_land "$CQC" wave/fixture)"
+expect_contains "(c7c) a range adding only the name holding a tab is refused, naming it as git quotes it" \
+  "REFUSED reason=bionic-committed path=${CQ_Q3} commit=${CQC_C:0:12} branch=wt/quoted-tab " "$OUTCQC"
+expect_eq    "(c7c) …on one line" "1" "$(printf '%s\n' "$OUTCQC" | awk 'END { print NR }')"
+expect_eq    "(c7c) …the project's .bionic files byte for byte" "$CQ3_SUMS" "$(lb_sums "$CQ3")"
+
+# (c8) THE SAME ADDS IN A PROJECT TRACKING NOTHING AT .bionic (pass 71's G1a; the rule before T84).
+CN="$(lb_repo "$TMP/land-quoted-none")"; cq_own "$CN"
+CNT="$(cq_tree "$CN" wt/quoted-none "$CQ_N1" "$CQ_N2" "$CQ_N3")"; CNT_C="$(git -C "$CNT" rev-parse HEAD)"
+CN_SUMS="$(lb_sums "$CN")"; CN_REFS="$(refs_of "$CN")"
+OUTCN="$(worktree_land "$CNT" wave/fixture)"; RCCN=$?
+expect_contains "(c8) a project tracking nothing at .bionic refuses the same adds, the whole entry out" \
+  "REFUSED reason=bionic-committed path=${CQ_Q1} commit=${CNT_C:0:12} branch=wt/quoted-none onto=wave/fixture $(cs_fix "$CNT" "rm -r --cached .bionic, move .bionic out of the tree")" "$OUTCN"
+expect_eq    "(c8) …exit 2" "2" "$RCCN"
+expect_eq    "(c8) …the project's untracked files byte for byte" "$CN_SUMS" "$(lb_sums "$CN")"
+expect_eq    "(c8) …no ref moved" "$CN_REFS" "$(refs_of "$CN")"
+
+# (c9, c10) THE STAND-DOWN PATH reaches the same verdicts: c1's link as .BIONIC, c7's quoted add.
+CS="$(lk_repo "$TMP/land-case-standdown")"; CS_SID="land-case-session-01"
+bind_plan "$CS" "$CS_SID" wave/fixture >/dev/null
+CST="$(cs_link_as "$CS" wt/case-sd-link .BIONIC rm)"; CST_C="$(git -C "$CST" rev-parse HEAD)"
+CS_SUMS="$(lb_sums "$CS")"; CS_REFS="$(refs_of "$CS")"
+OUTCS="$(worktree_land_for_session "$CST" "$CS" "$CS_SID")"; RCCS=$?
+expect_match "(c9) the stand-down path refuses the link committed as .BIONIC on the same line" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CST_C:0:12} branch=wt/case-sd-link onto=wave/fixture *" "$(lb_first "$OUTCS")"
+expect_eq    "(c9) …exit 2" "2" "$RCCS"
+expect_false "(c9) …the project's .bionic is not a link" test -L "$CS/.bionic"
+expect_eq    "(c9) …its files byte for byte" "$CS_SUMS" "$(lb_sums "$CS")"
+expect_eq    "(c9) …no ref moved" "$CS_REFS" "$(refs_of "$CS")"
+CR="$(lk_repo "$TMP/land-quoted-standdown")"; CR_SID="land-quoted-session-01"
+bind_plan "$CR" "$CR_SID" wave/fixture >/dev/null; cq_own "$CR"
+CSQ="$(cq_tree "$CR" wt/case-sd-quoted "$CQ_N1")"; CSQ_C="$(git -C "$CSQ" rev-parse HEAD)"
+CR_SUMS="$(lb_sums "$CR")"; CR_REFS="$(refs_of "$CR")"
+OUTCSQ="$(worktree_land_for_session "$CSQ" "$CR" "$CR_SID")"; RCCSQ=$?
+expect_contains "(c10) …and the quoted add, naming it as git quotes it" \
+  "REFUSED reason=bionic-committed path=${CQ_Q1} commit=${CSQ_C:0:12} branch=wt/case-sd-quoted onto=wave/fixture " "$OUTCSQ"
+expect_eq    "(c10) …exit 2" "2" "$RCCSQ"
+expect_eq    "(c10) …the project's untracked files byte for byte" "$CR_SUMS" "$(lb_sums "$CR")"
+expect_eq    "(c10) …no ref moved" "$CR_REFS" "$(refs_of "$CR")"
+
+# (c14) THE TARGET'S TRACKED LINK RENAMED TO .BIONIC: link to link, the kind kept, the spelling not; an
+# add at the folded entry (A-orch-243), refused in the range's spelling.
+CL="$(ll_repo "$TMP/land-case-rename")"
+CLT="$(new_tree "$CL" wt/case-rename)"; mv "$CLT/.bionic" "$CLT/.bionic-moving" && mv "$CLT/.bionic-moving" "$CLT/.BIONIC"
+git -C "$CLT" rm --cached --quiet .bionic && lk_commit "$CLT" "the tracked link renamed to .BIONIC" .BIONIC; CLT_C="$(git -C "$CLT" rev-parse HEAD)"
+expect_eq   "(c14-pre) the tree's head holds the link at .BIONIC alone" ".BIONIC " "$(cs_roots "$CLT" HEAD)"
+expect_eq   "(c14-pre) …a link, as the target's" "120000 120000" "$(git -C "$CLT" ls-tree HEAD .BIONIC | awk '{ print $1 }') $(lk_kind "$CL" wave/fixture)"
+CL_REFS="$(refs_of "$CL")"
+expect_match "(c14) a range that renames the target's tracked link to .BIONIC is refused, in its spelling" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CLT_C:0:12} branch=wt/case-rename onto=wave/fixture $(cs_fix "$CLT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" \
+  "$(lb_first "$(worktree_land "$CLT" wave/fixture)")"
+expect_eq    "(c14) …no ref moved" "$CL_REFS" "$(refs_of "$CL")"
+expect_true  "(c14) …the target's .bionic is still its link" test -L "$CL/.bionic"
+
+# (r1-r3) EVERY PRINTED FIX LANDS WHEN FOLLOWED LITERALLY (wave-27 T86; A-orch-244, pass 71's P2-1).
+# The whole-path remedy left the entry in the tree, untracked; where nothing ignores it (no exclude
+# line, not the record link land passes over) the next land was refused dirty-tree. The fix now also
+# says to move the entry out of the tree. Each row follows the line it was given, word for word:
+# the git command it names, the move it names (into $TMP, kept), a commit, the suites, land again.
+lb_follow() {  # <tree> <refusal line> -> 0 once the line's fix is followed as printed, nothing added
+  local t="$1" fix cmd mv=""
+  fix="$(printf '%s\n' "$2" | sed -n "s/.* fix='git -C [^ ]* \([^']*\), run the suites, land again' .*/\1/p")"
+  case "$fix" in
+    "merge "*) git -C "$t" $fix >/dev/null 2>&1 || return 1; green_stamp "$t"; return 0 ;;  # SC2086: the fix's own words
+    *", commit") fix="${fix%, commit}" ;;
+    *) return 1 ;;
+  esac
+  cmd="${fix%%, move *}"
+  case "$fix" in *", move "*" out of the tree") mv="${fix#*, move }"; mv="${mv% out of the tree}" ;; esac
+  # shellcheck disable=SC2086  # the fix's own words, as a writer would type them
+  git -C "$t" $cmd --quiet || return 1
+  if [ -n "$mv" ]; then mv "$t/$mv" "$TMP/followed-${t##*/}" || return 1; fi
+  git -C "$t" commit --quiet -m "the printed fix, followed"; green_stamp "$t"
+}
+# (r1) THE KIND CHANGED TO A REGULAR FILE where the target tracks a directory (pass 71's A2).
+RF="$(lk_repo "$TMP/land-follow-file")"; RFT="$(lk_replace "$RF" wt/follow-file file)"
+RF_LINE="$(lb_first "$(worktree_land "$RFT" wave/fixture)")"
+expect_contains "(r1-pre) the range is refused, naming .bionic" "REFUSED reason=bionic-committed path=.bionic " "$RF_LINE"
+expect_true  "(r1) its printed fix can be followed as printed" lb_follow "$RFT" "$RF_LINE"
+expect_match "(r1) …and the tree then lands" "spawn-worktree: LANDED branch=wt/follow-file onto=wave/fixture *" \
+  "$(lb_first "$(worktree_land "$RFT" wave/fixture)")"
+expect_false "(r1) …the project's .bionic is not a file or a link" test -L "$RF/.bionic"
+expect_eq    "(r1) …and holds its plan and record" "plan|record" "$(cat "$RF/.bionic/docs/plans/w.plan.md")|$(cat "$RF/.bionic/docs/record/r.md")"
+expect_eq    "(r1) …and the writer's file is kept where the fix moved it" "a file" "$(cat "$TMP/followed-follow-file")"
+# (r2) THE KNOWN LIMIT: the target stopped tracking .bionic after the tree branched (b15's shape; pass 71's F3).
+# Its fix is the merge of the target (A-orch-256): taking the paths out of the tree's index too would
+# have both sides delete them, which land refuses not-current.
+RL="$(lk_repo "$TMP/land-follow-stopped")"; RLT="$(new_tree "$RL" wt/follow-stopped)"; green_stamp "$RLT"
+git -C "$RL" rm -r --quiet --cached .bionic/keep.md .bionic/also.md && git -C "$RL" commit --quiet -m "the target stops tracking .bionic"
+RL_LINE="$(lb_first "$(worktree_land "$RLT" wave/fixture)")"
+expect_contains "(r2-pre) the tree is refused, naming a path the target no longer tracks, and the merge" \
+  "REFUSED reason=bionic-committed path=.bionic/also.md commit=$(git -C "$RLT" rev-parse --short=12 HEAD) branch=wt/follow-stopped onto=wave/fixture fix='git -C ${RLT} merge wave/fixture, run the suites, land again' — " "$RL_LINE"
+expect_true  "(r2) its printed fix can be followed as printed" lb_follow "$RLT" "$RL_LINE"
+expect_match "(r2) …and the tree then lands" "spawn-worktree: LANDED branch=wt/follow-stopped onto=wave/fixture *" \
+  "$(lb_first "$(worktree_land "$RLT" wave/fixture)")"
+expect_eq    "(r2) …the project's own keep.md, also.md and plan are untouched" "keep|also|plan" \
+  "$(cat "$RL/.bionic/keep.md")|$(cat "$RL/.bionic/also.md")|$(cat "$RL/.bionic/docs/plans/w.plan.md")"
+# (r3) THE LINK COMMITTED AS .BIONIC, nothing tracked (c1's shape).
+RC="$(lb_repo "$TMP/land-follow-case")"; RCT="$(cs_link_as "$RC" wt/follow-case .BIONIC)"
+RC_LINE="$(lb_first "$(worktree_land "$RCT" wave/fixture)")"
+expect_contains "(r3-pre) the range is refused, naming .BIONIC" "REFUSED reason=bionic-committed path=.BIONIC " "$RC_LINE"
+expect_true  "(r3) its printed fix can be followed as printed" lb_follow "$RCT" "$RC_LINE"
+expect_match "(r3) …and the tree then lands" "spawn-worktree: LANDED branch=wt/follow-case onto=wave/fixture *" \
+  "$(lb_first "$(worktree_land "$RCT" wave/fixture)")"
+expect_true  "(r3) …the project's .bionic is a directory, not a link" test -d "$RC/.bionic" -a ! -L "$RC/.bionic"
+expect_eq    "(r3) …holding its plan and record" "plan|record" "$(cat "$RC/.bionic/docs/plans/w.plan.md")|$(cat "$RC/.bionic/docs/record/r.md")"
+
+# (c11, c12) THE MUTANTS. The fold cut out (a root entry is `.bionic` only byte for byte): c1's range
+# is merged. The NUL stream cut out (the adds read as git's text lines): c7's quoted add is merged.
+expect_true  "(c11-pre) the library defines the fold and the add stream" declare -F _wt_bionic_named _wt_bionic_adds
+CM="$(lb_repo "$TMP/land-case-mutant")"; CMT="$(cs_link_as "$CM" wt/case-mutant .BIONIC)"
+expect_match "(c11) with the fold cut out, the link committed as .BIONIC is merged" "spawn-worktree: * merge*=*" \
+  "$( _wt_bionic_named() { [ "$1" = .bionic ]; }; worktree_land "$CMT" wave/fixture 2>/dev/null | sed -n 1p )"
+CZ="$(lk_repo "$TMP/land-quoted-mutant")"; cq_own "$CZ"; CZT="$(cq_tree "$CZ" wt/quoted-mutant "$CQ_N1")"
+expect_match "(c12) with the NUL stream cut out, the quoted add is merged" "spawn-worktree: * merge*=*" \
+  "$( _wt_bionic_adds() { git -C "$1" diff --no-renames --diff-filter=A --name-only "$2" "$3" | tr '\n' '\0'; }
+      worktree_land "$CZT" wave/fixture 2>/dev/null | sed -n 1p )"
+expect_eq    "(c12) …and the project's untracked file is overwritten: the loss c7 refuses" "the writer's" "$(cat "$CZ/$CQ_N1")"
 
 finish
