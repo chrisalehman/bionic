@@ -12762,4 +12762,331 @@ done
 s61_reset
 POKE_BOUND="$S70_BOUND_WAS"
 
+# ============================================================
+section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"
+# ============================================================
+#
+# When the reader's roster row carries `severity` in `pushed=` (the context files the recorder
+# pushed at start), `proof-add review <record> --question <q> --reader <name>` requires the
+# record's `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>`
+# lines, and for each finding the table sends to fix a `<path>:<line>` with a `shown: <n> <command>`
+# line or an `unsure: <n> <what>` line. The result is derived (a finding to fix gives fail, any
+# other finding flag, none pass) and a `result:` that differs is refused, as is a written
+# `priority:` the table does not give. Registration writes `deferred:` for each finding the table
+# defers and `check:` for each unsure one inside `## SDLC State`, after the proof line. A reader
+# with no `severity` push registers as 1.12.0 did.
+#
+# FIXTURE FIDELITY. §56's shape: a plan bound to this session, its working branch checked out in a
+# linked worktree, real commits, and roster rows from the production writer (`roster_row_fixture`)
+# with `questions=` and `pushed=` appended by hand. `pushed=` is the Interfaces table's key, which
+# row T16 teaches the recorder to write; the verb reads it off the line by key, as it reads
+# `questions=` (A-orch-9).
+SEV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+SEV_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+RSEV="$(make_repo sev-fact)"; ( cd "$RSEV" && git commit -q --allow-empty -m init )
+git -C "$RSEV" config user.name "Dana Fixture"
+SEV_B="$(git -C "$RSEV" rev-parse HEAD)"
+PSEV="$(s42_plan "$RSEV" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${SEV_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"
+s42_builds_landed "$PSEV"
+( cd "$RSEV" && git add -f "$PSEV" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RSEV/.worktrees/01-fixture" "$SEV_B" ) >/dev/null 2>&1
+SEV_WT="$RSEV/.worktrees/01-fixture"
+SEV_C1="$(s57_commit "$SEV_WT" lib/a.sh C1)"
+SEV_DIR="$RSEV/.bionic/docs/record/wave-01-fixture"; mkdir -p "$SEV_DIR"
+SEV_RECS="r-ok r-nosev r-noreach r-s5 r-maybe r-count r-none r-twice r-where r-pri-bad r-pri-ok
+t-S1-on t-S1-off t-S2-on t-S2-off t-S3-on t-S3-off t-S4-on t-S4-off
+d-fix-flag d-defer-fail d-none-flag d-none-pass sh-dash sh-noshown sh-unsure sh-defer-unsure c-fix c-later"
+SEV_OLDRECS="o-fail o-findings o-nopush"
+sev_files() { local o="" n; for n in $1; do o="${o:+$o,}.bionic/docs/record/wave-01-fixture/$n.md"; done; printf '%s' "$o"; }
+SEV_RS="$(roster_of "$RSEV")"; new_roster "$RSEV"
+roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$SEV_RS"
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=sev-crit agent_id=a-sev-crit subagent_type=bionic:critic files="$(sev_files "$SEV_RECS")")" >> "$SEV_RS"
+printf '%s|questions=adversarial\n' \
+  "$(roster_row_fixture session="$SID" name=old-crit agent_id=a-old-crit subagent_type=bionic:critic files="$(sev_files "o-fail o-findings")")" >> "$SEV_RS"
+printf '%s|questions=adversarial|pushed=checks-adversarial\n' \
+  "$(roster_row_fixture session="$SID" name=nosev-crit agent_id=a-nosev-crit subagent_type=bionic:critic files="$(sev_files "o-nopush")")" >> "$SEV_RS"
+# sev_rec <file> <result> [<line>...] -> an adversarial piece reading over base..C1 with these lines
+sev_rec() {
+  local f="$SEV_DIR/$1.md" r="$2" l; shift 2
+  { printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: %s\nscope: piece\n' "${SEV_B:0:10}" "$SEV_C1" "$r"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf '\nwhat the reader found\n'; } > "$f"
+}
+sev_add() {  # <file> [<reader>] -> registers it through the verb
+  poke "$RSEV" proof-add review "record/wave-01-fixture/$1.md" --question adversarial --reader "${2:-sev-crit}"
+}
+sev_last() { s46_proved "$PSEV" | tail -1; }
+sev_lines() { /usr/bin/grep -E '^(deferred|check): ' "$PSEV"; }  # the plan's finding lines
+expect_regex "SEV-0 precondition: the working branch's head is C1, a 40-hex commit" '^[0-9a-f]{40}$' "$SEV_C1"
+expect_eq "SEV-0b precondition: the reader's row carries the pushed key, read by key" "checks-adversarial,severity" \
+  "$(/usr/bin/grep -F '|name=sev-crit|' "$SEV_RS" | tr '|' '\n' | sed -n 's/^pushed=//p')"
+s34_gate "$RSEV"
+expect_eq "SEV-0c precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+
+# ---------- the push is read off the row by key, as questions= is (unit rows) ----------
+sev_pushed() {  # <pushed value> -> proof_pushed_severity's rc
+  bash -c '. "$1"; proof_pushed_severity "$2"; echo "$?"' _ "$SEV_LIB" "$1" 2>/dev/null
+}
+expect_eq "SEV-push1 a list naming severity: pushed" "0" "$(sev_pushed checks-adversarial,severity)"
+expect_eq "SEV-push1b …the three-entry list the recorder writes for a reader of both code questions: pushed" "0" \
+  "$(sev_pushed checks-adversarial,checks-structure,severity)"
+expect_eq "SEV-push2 …a list without severity (an evidence reader's): not pushed" "1" "$(sev_pushed checks-evidence)"
+expect_eq "SEV-push3 …no key on the row (1.12.0's): not pushed" "1" "$(sev_pushed '')"
+expect_eq "SEV-push5 …a name that only contains the word is not it" "1" "$(sev_pushed severity-old)"
+
+# ---------- an amended, extended or held reader row keeps pushed= (row_copy_args; A-orch-9) ----------
+# The copy hands the key to `roster_row`, which writes it once row T16 teaches it the key; on a
+# tree without T16 the copy leaves it out rather than fail the verb, and these rows are red there.
+RSEVA="$(make_repo sev-amend)"; new_roster "$RSEVA"
+s30_row "$RSEVA" subagent_type=bionic:critic suites_allowed=none questions=adversarial
+awk -v k='|pushed=checks-adversarial,severity' '{ l[NR] = $0 } END { for (i = 1; i <= NR; i++) print l[i] (i == NR ? k : "") }' \
+  "$(roster_of "$RSEVA")" > "$TMPROOT/sev-amend-roster" && cat "$TMPROOT/sev-amend-roster" > "$(roster_of "$RSEVA")"
+expect_eq "SEV-copy0 precondition: the reader's row carries pushed=, read by key" "checks-adversarial,severity" \
+  "$(s30_field "$(s30_last "$RSEVA")" pushed)"
+poke "$RSEVA" amend w1 --files+ lib/z.sh --reason 'one more file'
+expect_eq "SEV-copy the amended reader row carries pushed= from the row it copied (exit 0)" "0|checks-adversarial,severity" \
+  "$RC|$(s30_field "$(s30_last "$RSEVA")" pushed)"
+expect_eq "SEV-copy2 …beside its questions= (the copy the AMEND-Q rows pin)" "adversarial" "$(s30_field "$(s30_last "$RSEVA")" questions)"
+poke "$RSEVA" extend w1 'more to read'
+expect_eq "SEV-copy3 extend's row carries pushed= too (exit 0)" "0|checks-adversarial,severity" \
+  "$RC|$(s30_field "$(s30_last "$RSEVA")" pushed)"
+
+# ---------- the table: one definition, eight cells (unit rows on the library) ----------
+sev_pri() { bash -c '. "$1"; proof_priority "$2" "$3"; echo " rc=$?"' _ "$SEV_LIB" "$1" "$2" 2>/dev/null; }
+SEV_CELLS="S1:on:fix S1:off:fix S2:on:fix S2:off:defer S3:on:defer S3:off:note S4:on:note S4:off:note"
+for c in $SEV_CELLS; do
+  IFS=: read -r s r p <<EOF
+$c
+EOF
+  expect_eq "SEV-pri $s $r gives $p" "$p rc=0" "$(sev_pri "$s" "$r")"
+done
+expect_eq "SEV-pri-x a severity outside the set has no cell (exit 1)" " rc=1" "$(sev_pri S5 on)"
+expect_eq "SEV-pri-y …nor a reach outside the set" " rc=1" "$(sev_pri S2 maybe)"
+
+# ---------- §FACT-rate (AC-8.1): a severity and a reach from the two sets, and the count ----------
+sev_rec r-ok flag "findings: 1" "finding: 1 S3 off lib/a.sh:3 a message misnames the flag"
+s42_snap "$RSEV" "$PSEV"; sev_add r-ok
+expect_eq "SEV-rate0 §FACT-rate a pushed reader's record with one rated finding registers (exit 0)" "0" "$RC"
+expect_regex "SEV-rate0b …its proof line carries the result the finding derives" "evidence=record/wave-01-fixture/r-ok.md question=adversarial reader=sev-crit result=flag scope=piece$" "$(sev_last)"
+sev_rec r-nosev flag "findings: 1" "finding: 1 off lib/a.sh:3 no severity"
+sev_rec r-noreach flag "findings: 1" "finding: 1 S3 lib/a.sh:3 no reach"
+sev_rec r-s5 flag "findings: 1" "finding: 1 S5 off lib/a.sh:3 a fifth severity"
+sev_rec r-maybe flag "findings: 1" "finding: 1 S3 maybe lib/a.sh:3 a third reach"
+sev_rec r-count flag "findings: 2" "finding: 1 S3 off lib/a.sh:3 one of two"
+sev_rec r-none fail
+sev_rec r-twice flag "findings: 2" "finding: 1 S3 off lib/a.sh:3 one" "finding: 1 S4 off - again"
+sev_rec r-where flag "findings: 1" "finding: 1 S3 off lib/a.sh a path with no line"
+# Each case is <file>@<what it lacks>@<what the refusal says>.
+for c in "r-nosev@no severity@rates finding 1 'off'" "r-noreach@no reach@the reach 'lib/a.sh:3'" \
+         "r-s5@a severity outside S1 to S4@rates finding 1 'S5'" "r-maybe@a reach outside on and off@the reach 'maybe'" \
+         "r-count@a count that differs from its lines@says findings: 2 but holds 1 finding: lines" \
+         "r-none@no findings: line at all@carries no findings: <n> line" "r-twice@a finding numbered twice@gives finding 1 twice" \
+         "r-where@a location that is neither path:line nor -@names 'lib/a.sh' where finding 1 takes"; do
+  f="${c%%@*}"; rest="${c#*@}"; why="${rest%%@*}"; want="${rest#*@}"
+  s42_snap "$RSEV" "$PSEV"; sev_add "$f"
+  s42_unchanged "SEV-rate §FACT-rate AC-8.1 a pushed reader's record with $why ($f)" 1 "$PSEV"
+  expect_contains "SEV-rate …$f says why" "$want" "$OUT"
+done
+
+# ---------- §FACT-table (AC-8.3): each of the eight cells registers with its one outcome ----------
+for c in $SEV_CELLS; do
+  IFS=: read -r s r p <<EOF
+$c
+EOF
+  case "$p" in
+    fix)   sev_rec "t-$s-$r" fail "findings: 1" "finding: 1 $s $r lib/a.sh:7 the $s $r cell" "shown: 1 bash lib/a.sh --cell" ; want=fail ;;
+    *)     sev_rec "t-$s-$r" flag "findings: 1" "finding: 1 $s $r - the $s $r cell" ; want=flag ;;
+  esac
+  sev_add "t-$s-$r"
+  expect_eq "SEV-table §FACT-table AC-8.3 $s $r registers (exit 0)" "0" "$RC"
+  expect_regex "SEV-table …$s $r: the proof line says result=$want" "evidence=record/wave-01-fixture/t-$s-$r.md .* result=$want scope=piece$" "$(sev_last)"
+  sevd="$(/usr/bin/grep -c "^deferred: record/wave-01-fixture/t-$s-$r.md#1 " "$PSEV")"
+  case "$p" in
+    defer) expect_eq "SEV-table …$s $r: one deferred: line, read back whole" \
+             "deferred: record/wave-01-fixture/t-$s-$r.md#1 $s $r \"the $s $r cell\"" \
+             "$(/usr/bin/grep "^deferred: record/wave-01-fixture/t-$s-$r.md#1 " "$PSEV")" ;;
+    *)     expect_eq "SEV-table …$s $r ($p): no deferred: line (beside the S2 off and S3 on rows that write one)" "0" "$sevd" ;;
+  esac
+  expect_eq "SEV-table …$s $r: no check: line, for nothing is unsure" "0" "$(/usr/bin/grep -c "^check: record/wave-01-fixture/t-$s-$r.md#" "$PSEV")"
+done
+expect_eq "SEV-table2 …the deferred: lines sit inside ## SDLC State, after their proof lines" "2" \
+  "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ n++ } END { print n + 0 }' "$PSEV")"
+sev_rec r-pri-bad flag "findings: 1" "finding: 1 S2 off - written as fix" "priority: 1 fix"
+s42_snap "$RSEV" "$PSEV"; sev_add r-pri-bad
+s42_unchanged "SEV-table3 §FACT-table AC-8.3 a record that writes a priority the table does not give (S2 off as fix)" 1 "$PSEV"
+expect_contains "SEV-table3b …naming the table's" "writes priority fix for finding 1, but the table gives S2 off defer" "$OUT"
+sev_rec r-pri-ok flag "findings: 1" "finding: 1 S2 off - written as the table writes it" "priority: 1 defer"
+sev_add r-pri-ok
+expect_eq "SEV-table4 …and one that writes the table's own priority registers (exit 0)" "0" "$RC"
+
+# ---------- §FACT-derive (AC-8.4): the verdict follows from the priorities ----------
+sev_rec d-fix-flag flag "findings: 1" "finding: 1 S1 on lib/a.sh:2 data lost" "shown: 1 bash lib/a.sh --lose"
+sev_rec d-defer-fail fail "findings: 1" "finding: 1 S2 off - a side path broken"
+sev_rec d-none-flag flag "findings: 0"
+for c in "d-fix-flag@a finding to fix beside result: flag@its findings give fail" \
+         "d-defer-fail@no finding to fix beside result: fail@its findings give flag" \
+         "d-none-flag@no finding at all beside result: flag@its findings give pass"; do
+  f="${c%%@*}"; rest="${c#*@}"; why="${rest%%@*}"; want="${rest#*@}"
+  s42_snap "$RSEV" "$PSEV"; sev_add "$f"
+  s42_unchanged "SEV-derive §FACT-derive AC-8.4 $why ($f)" 1 "$PSEV"
+  expect_contains "SEV-derive …$f names the derived result" "$want" "$OUT"
+done
+sev_rec d-none-pass pass "findings: 0"
+sev_add d-none-pass
+expect_eq "SEV-derive2 …findings: 0 beside result: pass registers (exit 0)" "0" "$RC"
+expect_regex "SEV-derive3 …and the derived result is the one on the proof line" "evidence=record/wave-01-fixture/d-none-pass.md .* result=pass scope=piece$" "$(sev_last)"
+
+# ---------- the mutation arms: one cell flipped, and the result refusal taken out ----------
+# Each mutant is a COPY of the library in a directory of its own; each is shown to run (a positive
+# read through it) before its difference is read.
+sev_read() {  # <lib> <record> -> proof_reading's answer and exit, the scale pushed
+  bash -c '. "$1"; proof_reading "$2" adversarial "" 1; echo " rc=$?"' _ "$1" "$2" 2>/dev/null
+}
+SEV_MUT="$(mktemp -d "$TMPROOT/sev-mut.XXXXXX")"
+sed 's/S2:off=defer/S2:off=fix/' "$SEV_LIB" > "$SEV_MUT/cell.sh"
+sed 's/\[ "\$rr" = "\$worst" \]/true/' "$SEV_LIB" > "$SEV_MUT/result.sh"
+expect_eq "SEV-mut0 the cell mutant differs from the library in one line" "1" "$(diff "$SEV_LIB" "$SEV_MUT/cell.sh" | /usr/bin/grep -c '^>')"
+expect_eq "SEV-mut0b the result mutant differs in one line" "1" "$(diff "$SEV_LIB" "$SEV_MUT/result.sh" | /usr/bin/grep -c '^>')"
+expect_regex "SEV-mut1 the library reads the S2 off record as flag" "^flag piece [0-9a-f]+ rc=0$" "$(sev_read "$SEV_LIB" "$SEV_DIR/t-S2-off.md")"
+expect_regex "SEV-mut1b the cell mutant runs: it reads the S3 on record as flag too" "^flag piece [0-9a-f]+ rc=0$" "$(sev_read "$SEV_MUT/cell.sh" "$SEV_DIR/t-S3-on.md")"
+expect_contains "SEV-mut1c …and with S2 off flipped to fix, the S2 off record is refused as a fix shown nowhere, so §FACT-table goes red on the flip" \
+  "sends finding 1 (S2 off) to fix" "$(sev_read "$SEV_MUT/cell.sh" "$SEV_DIR/t-S2-off.md")"
+expect_contains "SEV-mut2 the library refuses a finding to fix beside result: flag" "its findings give fail" "$(sev_read "$SEV_LIB" "$SEV_DIR/d-fix-flag.md")"
+expect_regex "SEV-mut2b the result mutant runs, and admits that record as flag: §FACT-derive goes red without the refusal" \
+  "^flag piece [0-9a-f]+ rc=0$" "$(sev_read "$SEV_MUT/result.sh" "$SEV_DIR/d-fix-flag.md")"
+
+# ---------- a structure reading's two derivations agree (A-orch-34) ----------
+# F6 holds a structure result to its worst check; the table holds it to the findings. A FAIL check
+# beside no finding to fix, or a finding to fix beside no FAIL check, is refused in one line naming
+# both. Read through the library against the SHIPPED checks file, the one `proof-add` resolves.
+SEV_CK="${BIONIC_HOOKS_DIR}/../payload/context/checks-structure.md"
+SEV_IDS="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s); print s }' "$SEV_CK" 2>/dev/null)"
+expect_nonempty "SEV-st0 precondition: the shipped structure checks file names its check ids" "$SEV_IDS"
+sev_st() {  # <file> <result> <answer for the first id> <line>... -> a structure reading, every other check PASS
+  local f="$SEV_DIR/$1.md" r="$2" a="$3" i n=0 l; shift 3
+  { printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: %s\nscope: piece\n' "${SEV_B:0:10}" "$SEV_C1" "$r"
+    for i in $SEV_IDS; do n=$((n + 1)); if [ "$n" = 1 ]; then printf 'check: %s %s the reason\n' "$i" "$a"; else printf 'check: %s PASS nothing\n' "$i"; fi; done
+    for l in "$@"; do printf '%s\n' "$l"; done; } > "$f"
+}
+sev_stread() { bash -c '. "$1"; proof_reading "$2" structure "$3" 1; echo " rc=$?"' _ "$SEV_LIB" "$SEV_DIR/$1.md" "$SEV_CK" 2>/dev/null; }
+SEV_ID1="$(printf '%s\n' "$SEV_IDS" | head -1)"
+sev_st st-agree fail FAIL "findings: 1" "finding: 1 S2 on lib/a.sh:5 the core path is wrong" "shown: 1 bash lib/a.sh"
+expect_regex "SEV-st1 a FAIL check beside a finding to fix agrees: the reading reads as fail" "^fail piece [0-9a-f]+ rc=0$" "$(sev_stread st-agree)"
+sev_st st-failcheck fail FAIL "findings: 1" "finding: 1 S3 on - only a side path"
+SEV_OUT="$(sev_stread st-failcheck)"
+expect_contains "SEV-st2 a FAIL check beside no finding to fix is refused, naming the check" \
+  "gives check: $SEV_ID1 FAIL beside no finding to fix" "$SEV_OUT"
+expect_eq "SEV-st2b …in one line" "1" "$(printf '%s\n' "$SEV_OUT" | wc -l | tr -d ' ')"
+sev_st st-fixflag fail FLAG "findings: 1" "finding: 1 S1 off lib/a.sh:6 data lost" "shown: 1 bash lib/a.sh --lose"
+expect_contains "SEV-st3 a finding to fix beside no FAIL check is refused, naming the finding" \
+  "gives finding 1 (S1 off) to fix beside no FAIL check" "$(sev_stread st-fixflag)"
+sev_st st-flagagree flag FLAG "findings: 1" "finding: 1 S3 on - only a side path"
+expect_regex "SEV-st4 control: a FLAG check beside a deferral reads as flag" "^flag piece [0-9a-f]+ rc=0$" "$(sev_stread st-flagagree)"
+
+# ---------- §FACT-shown (AC-8.6, the record half): a fix is shown, or owes a check ----------
+sev_rec sh-dash fail "findings: 1" "finding: 1 S2 on - no place named" "shown: 1 bash lib/a.sh"
+sev_rec sh-noshown fail "findings: 1" "finding: 1 S2 on lib/a.sh:4 no command"
+for f in sh-dash sh-noshown; do
+  s42_snap "$RSEV" "$PSEV"; sev_add "$f"
+  s42_unchanged "SEV-shown §FACT-shown AC-8.6 a finding to fix with neither a file, line and command nor an unsure: line ($f)" 1 "$PSEV"
+  expect_contains "SEV-shown …$f says what to write" "sends finding 1 (S2 on) to fix, but shows it nowhere" "$OUT"
+done
+sev_rec sh-unsure fail "findings: 1" "finding: 1 S1 off - cannot run it here" "unsure: 1 the race needs two machines"
+sev_add sh-unsure
+expect_eq "SEV-shown2 …a finding to fix carrying an unsure: line registers (exit 0)" "0" "$RC"
+expect_eq "SEV-shown3 …and writes its check: line" 'check: record/wave-01-fixture/sh-unsure.md#1 S1 off "cannot run it here"' \
+  "$(/usr/bin/grep '^check: record/wave-01-fixture/sh-unsure.md#' "$PSEV")"
+expect_contains "SEV-shown3b …which the success output names" 'proof-add — check: record/wave-01-fixture/sh-unsure.md#1 S1 off' "$OUT"
+sev_rec sh-defer-unsure flag "findings: 2" 'finding: 1 S3 on - a "quoted" word wrong' "unsure: 1 which platforms" "finding: 2 S4 on - a typo"
+sev_add sh-defer-unsure
+expect_eq "SEV-shown4 an unsure finding the table defers writes both lines, the deferral first; a note writes none" \
+  "deferred: record/wave-01-fixture/sh-defer-unsure.md#1 S3 on \"a 'quoted' word wrong\"|check: record/wave-01-fixture/sh-defer-unsure.md#1 S3 on \"a 'quoted' word wrong\"" \
+  "$(/usr/bin/grep -E '^(deferred|check): record/wave-01-fixture/sh-defer-unsure.md#' "$PSEV" | paste -sd'|' -)"
+expect_eq "SEV-shown5 …and the two lines follow the proof line they belong to (proof_add_line)" \
+  "check: record/wave-01-fixture/sh-defer-unsure.md#1" \
+  "$(awk '/^proved: .*sh-defer-unsure/ { getline; getline; print $1 " " $2 }' "$PSEV")"
+
+# ---------- the priority a record never states: library, release-check and the tick ----------
+SEV_OWED="$(bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null)"
+expect_contains "SEV-owed proof_findings_owed prints a deferral with the table's priority" \
+  'record/wave-01-fixture/t-S2-off.md#1 S2 off defer "the S2 off cell"' "$SEV_OWED"
+expect_contains "SEV-owed2 …and an unsure S1 with fix" 'record/wave-01-fixture/sh-unsure.md#1 S1 off fix "cannot run it here"' "$SEV_OWED"
+expect_eq "SEV-owed3 …each finding once, though it has a deferred: and a check: line" "1" \
+  "$(printf '%s\n' "$SEV_OWED" | /usr/bin/grep -c 'sh-defer-unsure.md#1 ')"
+
+# ---------- §FACT-old (AC-8.8): a reader not pushed the scale registers as 1.12.0 did ----------
+sev_rec o-fail fail
+sev_add o-fail old-crit
+expect_eq "SEV-old §FACT-old AC-8.8 a record with a result and no findings, from a reader with no pushed= key, registers (exit 0)" "0" "$RC"
+expect_regex "SEV-old2 …with its result as written" "evidence=record/wave-01-fixture/o-fail.md question=adversarial reader=old-crit result=fail scope=piece$" "$(sev_last)"
+expect_regex "SEV-old2b …placed after the last reading's finding lines, not between a proof and its own" "^proved: .*evidence=record/wave-01-fixture/o-fail.md " \
+  "$(awk '/^check: record\/wave-01-fixture\/sh-defer-unsure.md#1 / { getline; print; exit }' "$PSEV")"
+SEV_N="$(sev_lines | wc -l | tr -d ' ')"
+sev_rec o-findings fail "findings: 1" "finding: 1 S4 off - finding lines the old reading ignores"
+sev_add o-findings old-crit
+expect_eq "SEV-old3 …finding lines in such a record are ignored: it registers (exit 0)" "0" "$RC"
+expect_regex "SEV-old4 …with result: fail as written, though S4 off alone would derive flag" "o-findings.md .* result=fail scope=piece$" "$(sev_last)"
+expect_eq "SEV-old5 …and writes no plan line (the count stands at $SEV_N, beside the lines SEV-table wrote)" "$SEV_N" "$(sev_lines | wc -l | tr -d ' ')"
+sev_rec o-nopush fail
+sev_add o-nopush nosev-crit
+expect_eq "SEV-old6 a reader whose pushed= names other files, not severity, registers the old form too (exit 0)" "0" "$RC"
+
+# ---------- release-check prints the derived priority ----------
+printf '#!/bin/bash\necho "scan: entries=0 hits=0"\nexit 0\n' > "$TMPROOT/sev-check.sh"
+cp "$RSEV/.bionic/config.yaml" "$TMPROOT/sev-config" 2>/dev/null || : > "$TMPROOT/sev-config"
+printf 'release-check: bash %s\n' "$TMPROOT/sev-check.sh" >> "$RSEV/.bionic/config.yaml"
+poke "$RSEV" release-check
+expect_eq "SEV-rc release-check over a plan with rated findings exits 0" "0" "$RC"
+expect_contains "SEV-rc2 …and prints each owed finding with the table's priority" \
+  'release-check — finding record/wave-01-fixture/t-S3-on.md#1 S3 on defer "the S3 on cell"' "$OUT"
+cp "$TMPROOT/sev-config" "$RSEV/.bionic/config.yaml"
+
+# ---------- the tick prints the derived priority ----------
+RSEVT="$(make_repo sev-tick)"; new_roster "$RSEVT"
+PSEVT="$(s47_plan "$RSEVT" 2 \
+  "| T1 | 4 | build | ready | implementor | — | 30 | REQ-x | payload/x.sh | pending | |")"
+awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#2 S2 off \"a side path\""; print "check: record/w/rev.md#3 S1 on \"unsure of it\""; d = 1 }' \
+  "$PSEVT" > "$PSEVT.tmp" && mv "$PSEVT.tmp" "$PSEVT"
+poke_pressure "$RSEVT" 8192 1.0 tick
+expect_contains "SEV-tick the tick fills the ready row (the path it prints FINDING on)" "poker: FILL T1" "$OUT"
+expect_contains "SEV-tick2 …and prints a deferred finding with its priority" 'poker: FINDING record/w/rev.md#2 S2 off defer "a side path"' "$OUT"
+expect_contains "SEV-tick3 …and a finding that owes a check with its own" 'poker: FINDING record/w/rev.md#3 S1 on fix "unsure of it"' "$OUT"
+
+# ---------- §CUR8-sev (AC-8.5): the step into integration follows the derived verdict ----------
+# The plan moves to current: 7 and every other fact it owes is planted at C1 by the production
+# placer (§61's way); the adversarial piece fact is then a reading registered through the verb, so
+# what the judge reads is the result the findings derived.
+sev_put() { bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$SEV_LIB" "$PSEV" "$1" > "$PSEV.new" && mv "$PSEV.new" "$PSEV"; }
+sev_fact() {  # <kind> <question> <scope>
+  sev_put "$(bash -c '. "$1" && proof_line "$2" "$3" 2026-10-06T12:00:00Z "$4" "$5" w-read pass "$6"' \
+    _ "$SEV_LIB" "$1" "$SEV_C1" "record/wave-01-fixture/planted-$2-$3.md" "$2" "$3")"
+}
+sev_cur() { sed "s/^current: .*/current: $1/" "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"; }
+sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-06T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
+sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
+sev_rec c-fix fail "findings: 2" "finding: 1 S2 on lib/a.sh:9 the core path gives a wrong answer" "shown: 1 bash lib/a.sh --core" \
+  "finding: 2 S4 off - a comment misstates it"
+sev_add c-fix
+expect_eq "SEV-cur0 a reading with a finding to fix registers, result=fail derived (exit 0)" "0|fail" \
+  "$RC|$(sev_last | sed -n 's/.* result=\([a-z]*\) .*/\1/p')"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "SEV-cur §CUR8-sev AC-8.5 the newest adversarial fact holds a finding to fix: current 8" 1 "$PSEV"
+expect_contains "SEV-cur2 …naming that reading failing" \
+  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/c-fix.md')" "$OUT"
+sev_cur 4
+sev_rec c-later flag "findings: 2" "finding: 1 S2 off - a side path still wrong" "finding: 2 S4 off - a comment misstates it"
+sev_add c-later
+expect_eq "SEV-cur3 a later pass over the fix, holding only a deferral and a note, registers as flag (exit 0)" "0|flag" \
+  "$RC|$(sev_last | sed -n 's/.* result=\([a-z]*\) .*/\1/p')"
+sev_cur 7
+poke "$RSEV" current 8
+expect_eq "SEV-cur4 §CUR8-sev …and current 8 is admitted on it: deferrals and notes do not hold the step" "0|8" \
+  "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+POKE_BOUND="$SEV_BOUND_WAS"
+
 finish
