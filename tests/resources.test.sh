@@ -1185,12 +1185,17 @@ expect_regex "M.25 …and with no pin, to the real clock" '^[0-9]{10,}$' \
 
 section "N — the model world: machine, clock, cost, repository, suites, verb log (wave-28 D23)"
 
-WORLD_LIB="$REPO_ROOT/tests/lib/world.sh"
-if [ -r "$WORLD_LIB" ] && . "$WORLD_LIB"; then
-  ok "N.0 tests/lib/world.sh sources"
-else
-  no "N.0 tests/lib/world.sh sources" "missing or failed at $WORLD_LIB"
+# Sourced in the canonical `. "$(dirname "$0")/lib/…"` form on a line of its own: that is the
+# shape tests/lib/impact.sh reads as a `source` edge, and so follows into what world.sh
+# itself sources (resources.sh, bound-marker.sh, roster-row.sh) — the world's registration
+# with the file-to-suite map is this line.
+WORLD_LIB="$REPO_ROOT/tests/lib/world.sh"; N_SRC=1
+if [ -r "$WORLD_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$(dirname "$0")/lib/world.sh"
+  N_SRC=$?
 fi
+expect_eq "N.0 tests/lib/world.sh sources" 0 "$N_SRC"
 
 # world_machine plants all four readers, and the older readers agree with them.
 N_M="$( world_machine 4 4096 50 1.5 2>&1
