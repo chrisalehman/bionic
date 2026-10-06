@@ -1652,15 +1652,23 @@ _wt_declared_debt() {  # <root> <sid> <tree>
   [ -n "$name" ] || return 1
   [ "$(workspace_for_name "$root" "$sid" "$name" 2>/dev/null)" = "$tree" ] || return 1
   roster="${root%/}/.bionic/tmp/roster-${sid}.state"
-  [ -f "$roster" ] && [ ! -L "$roster" ] || return 1
-  row="$(awk -v n="$name" '
+  row="$(_wt_launch_row "$roster" name "$name")" || return 1
+  [ -n "$(_wt_field "$row" lands_red)" ] || return 1
+  printf '%s\t%s' "$(_wt_field "$row" lands_red)" "$(_wt_field "$row" red_evidence)"
+}
+# THE LAUNCH LINE, by one key (factored out of `_wt_declared_debt` at wave-28 T4, whose `ready` reads
+# `lands_on=` and the debt off it too): the last `status=intended` roster row whose <key>= is <value>
+# that no poker verb wrote. A row carrying `amended=`, `extended=`, `held=` or `adopted_from=` is a copy.
+_wt_launch_row() {  # <roster> <key> <value> -> the line; 1 when none
+  local roster="${1:-}" row
+  [ -n "$3" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 1
+  row="$(awk -v k="|${2}=${3}|" '
     index($0, "roster-state/") != 1 { next }
-    index($0, "|name=" n "|") && index($0, "|status=intended|") \
+    index($0 "|", k) && index($0, "|status=intended|") \
       && !index($0, "|amended=") && !index($0, "|extended=") && !index($0, "|held=") && !index($0, "|adopted_from=") { last = $0 }
     END { if (last != "") print last }' "$roster" 2>/dev/null)"
   [ -n "$row" ] || return 1
-  [ -n "$(_wt_field "$row" lands_red)" ] || return 1
-  printf '%s\t%s' "$(_wt_field "$row" lands_red)" "$(_wt_field "$row" red_evidence)"
+  printf '%s\n' "$row"
 }
 
 # ---------------------------------------------------------------------------
