@@ -1267,7 +1267,7 @@ expect_eq "N.21 …and that cleanliness was read off real checkouts" "3" \
         git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 && n=$((n+1)); done; echo $n )"
 
 # world_suite: four endings, each run for real.
-N_SD="$TMPROOT/world-suites"; mkdir -p "$N_SD"
+N_SD="${WORLD_ROOT:-/nonexistent}/world-suites"; mkdir -p "$N_SD"
 n_suite() {  # <name> <ending> -> "<rc>|<output>"
   local p out rc
   p="$( cd "$N_SD" && world_suite "$1" "$2" 2>/dev/null )"
@@ -1301,5 +1301,82 @@ expect_true "N.35 a child that sourced the world built a repository" test -n "$N
 expect_true "N.36 …and it is gone once that child exited" test ! -e "${N_EXIT:-/nonexistent}/.git"
 N_KEEP="$( bash -c 'trap "echo suite-trap-ran" EXIT; . "$1"' _ "$WORLD_LIB" 2>/dev/null )"
 expect_eq "N.37 sourcing the world keeps the suite's own EXIT trap" "suite-trap-ran" "$N_KEEP"
+
+# T45 (review pass 1 of T1, findings 1, 2, 3 and 5): the world writes no suite outside itself,
+# its clock never shows the real time mid-tick, and its trap neither turns red green nor
+# leaks the world on the chained branch every real suite takes.
+
+# world_suite refuses unless the current directory, resolved, lies inside WORLD_ROOT.
+N_OUT="$TMPROOT/outside-the-world"; mkdir -p "$N_OUT"
+ln -s "$N_OUT" "${WORLD_ROOT:-/nonexistent}/link-out" 2>/dev/null
+n_where() {  # <dir> <name> -> "<rc>|<file|dir|none>|<stderr lines>|<stderr>|<stdout>"
+  local out rc made=none err="$TMPROOT/n_where.err"
+  out="$( cd "$1" && world_suite "$2" green 2>"$err" )"; rc=$?
+  [ -d "$1/tests" ] && made=dir
+  [ -f "$1/tests/$2.test.sh" ] && made=file
+  printf '%s|%s|%s|%s|%s' "$rc" "$made" "$(wc -l < "$err" | tr -d ' ')" "$(cat "$err")" "$out"
+}
+N_W_OUT="$(n_where "$N_OUT" x)"
+expect_eq "N.38 world_suite from a directory outside the world: rc 2, no tests/ made there" \
+  "2|none" "$(printf '%s' "$N_W_OUT" | cut -d'|' -f1-2)"
+expect_regex "N.39 …refused in one line that says why" '^1\|world_suite: .*outside' \
+  "$(printf '%s' "$N_W_OUT" | cut -d'|' -f3-4)"
+expect_eq "N.40 the same call inside world_repo's root: rc 0, the path printed, the file there" \
+  "0|file|0||${N_ROOT:-no root}/tests/x.test.sh" "$(n_where "${N_ROOT:-/nonexistent}" x)"
+expect_eq "N.41 a link inside the world that resolves outside it is refused (pwd -P)" \
+  "2|none" "$(n_where "${WORLD_ROOT:-/nonexistent}/link-out" y | cut -d'|' -f1-2)"
+
+# The clock file is replaced by a rename, never truncated in place: a new inode each write.
+n_inode() { ls -i "$1" 2>/dev/null | awk '{ print $1 }'; }
+n_renamed() {  # <inode before> <inode after> -> renamed | same-file | no-inode
+  if [ -z "$1" ] || [ -z "$2" ]; then echo no-inode
+  elif [ "$1" != "$2" ]; then echo renamed
+  else echo same-file; fi
+}
+expect_eq "N.42 world_tick replaces the clock file by a rename, and the clock moved" "7005|renamed" \
+  "$( world_clock 7000 >/dev/null 2>&1; a="$(n_inode "$BIONIC_NOW_FILE")"
+      world_tick 5 >/dev/null 2>&1; b="$(n_inode "$BIONIC_NOW_FILE")"
+      printf '%s|%s' "$(_res_now)" "$(n_renamed "$a" "$b")" )"
+expect_eq "N.43 world_clock over a planted clock replaces it by a rename too" "8000|renamed" \
+  "$( world_clock 7000 >/dev/null 2>&1; a="$(n_inode "$BIONIC_NOW_FILE")"
+      world_clock 8000 >/dev/null 2>&1; b="$(n_inode "$BIONIC_NOW_FILE")"
+      printf '%s|%s' "$(_res_now)" "$(n_renamed "$a" "$b")" )"
+expect_eq "N.44 …and leaves no temporary file beside it" "clock" \
+  "$(ls -A "${WORLD_ROOT:-/nonexistent}" 2>/dev/null | grep clock | tr '\n' ' ' | sed 's/ $//')"
+# The worked answer: a reader looping _res_now while 1000 ticks run reads only planted epochs.
+N_RACE="$( world_clock 1000 >/dev/null 2>&1 || exit 1
+  stop="$WORLD_ROOT/race.stop"; seen="$WORLD_ROOT/race.seen"; rm -f "$stop"
+  ( while [ ! -e "$stop" ]; do _res_now; echo; done > "$seen" ) &
+  i=0; while [ "$i" -lt 1000 ]; do world_tick 1 >/dev/null 2>&1; i=$((i + 1)); done
+  : > "$stop"; wait
+  awk '$1 < 1000 || $1 > 2000 { bad++ } END { printf "%d|%d", NR, bad + 0 }' "$seen" )"
+expect_true "N.45 a reader ran beside 1000 ticks and read the clock at least 100 times" \
+  test "${N_RACE%%|*}" -ge 100
+expect_eq "N.46 …and every value it read was a planted epoch, never the real clock" \
+  "0" "${N_RACE#*|}"
+
+# The chained trap hands the suite's own trap the status the shell began to exit with.
+expect_eq "N.47 a suite whose own trap ends 'exit \$rc' still exits red after a red run" \
+  "saw=1|1" \
+  "$( out="$(bash -c 'trap "rc=\$?; echo saw=\$rc; exit \$rc" EXIT; . "$1"; false; exit 1' \
+        _ "$WORLD_LIB" 2>/dev/null)"; printf '%s|%s' "$out" "$?" )"
+expect_eq "N.48 …and green after a green run" "saw=0|0" \
+  "$( out="$(bash -c 'trap "rc=\$?; echo saw=\$rc; exit \$rc" EXIT; . "$1"; exit 0' \
+        _ "$WORLD_LIB" 2>/dev/null)"; printf '%s|%s' "$out" "$?" )"
+expect_eq "N.49 with no earlier trap the exit status is unchanged (exit 3, a last false, exit 0)" \
+  "3 1 0" \
+  "$( bash -c '. "$1"; exit 3' _ "$WORLD_LIB" 2>/dev/null; a=$?
+      bash -c '. "$1"; false' _ "$WORLD_LIB" 2>/dev/null; b=$?
+      bash -c '. "$1"; exit 0' _ "$WORLD_LIB" 2>/dev/null; c=$?
+      printf '%s %s %s' "$a" "$b" "$c" )"
+
+# Cleanup on the CHAINED branch: a suite with its own EXIT trap before sourcing the world.
+N_CH="$( bash -c 'trap "echo suite-trap-ran" EXIT; . "$1"; r="$(world_repo)"
+                  [ -d "$r/.git" ] && printf "%s\n" "$WORLD_ROOT"' _ "$WORLD_LIB" 2>/dev/null )"
+N_CH_DIR="$(printf '%s\n' "$N_CH" | sed -n 1p)"
+expect_regex "N.50 the chained branch: the world built a repository and the suite's trap ran" \
+  '/world\.[^/|]+\|suite-trap-ran$' "${N_CH_DIR}|$(printf '%s\n' "$N_CH" | sed -n 2p)"
+expect_eq "N.51 …and the world's directory is gone once that suite exited" "gone" \
+  "$( [ -n "$N_CH_DIR" ] && [ ! -e "$N_CH_DIR" ] && echo gone || echo "present or unknown" )"
 
 finish

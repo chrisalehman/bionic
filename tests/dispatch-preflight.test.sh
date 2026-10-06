@@ -458,16 +458,38 @@ roster_rows()  { grep -v '^#' "$1" 2>/dev/null | grep -c . ; }
 roster_nth_row() { grep -v '^#' "$1" 2>/dev/null | sed -n "${2}p"; }   # <file> <n>
 roster_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
 
+# ONE STAGED SEED, COPIED (wave-28 T20). Every fixture repository starts as the same four steps
+# — init, two config lines, README.md staged — and this file builds a few hundred of them, so
+# the four are run once here into $MAKE_REPO_SEED and each make_repo copies the result. The
+# commit stays per repository, so each one's HEAD is made when its fixture is, as before. A
+# name already holding a repository, or a seed that was not made, takes the four steps itself.
+MAKE_REPO_SEED="$SANDBOX/.make-repo-seed"
+make_repo_seed() {
+  mkdir -p "$MAKE_REPO_SEED" \
+    && git -C "$MAKE_REPO_SEED" init -q 2>/dev/null \
+    && git -C "$MAKE_REPO_SEED" config user.email t@example.com \
+    && git -C "$MAKE_REPO_SEED" config user.name "T" \
+    && echo seed > "$MAKE_REPO_SEED/README.md" \
+    && git -C "$MAKE_REPO_SEED" add README.md \
+    || rm -rf "$MAKE_REPO_SEED"
+}
+make_repo_seed
+
 # make_repo <name> <active-wave:yes|no> -> echoes the repo path
 make_repo() {
   local name="$1" wave="$2"
   local repo="$SANDBOX/$name/repo"
   mkdir -p "$repo"
-  git -C "$repo" init -q 2>/dev/null
-  git -C "$repo" config user.email t@example.com
-  git -C "$repo" config user.name "T"
-  echo seed > "$repo/README.md"
-  git -C "$repo" add README.md
+  if [ ! -e "$repo/.git" ] && [ -f "$MAKE_REPO_SEED/.git/index" ] \
+     && cp -R "$MAKE_REPO_SEED/." "$repo/" 2>/dev/null; then
+    :
+  else
+    git -C "$repo" init -q 2>/dev/null
+    git -C "$repo" config user.email t@example.com
+    git -C "$repo" config user.name "T"
+    echo seed > "$repo/README.md"
+    git -C "$repo" add README.md
+  fi
   git -C "$repo" commit -qm seed 2>/dev/null
   if [ "$wave" = "yes" ]; then
     # A live wave has a live Patrol: it is armed at engagement, before the first dispatch

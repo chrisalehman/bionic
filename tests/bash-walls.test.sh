@@ -2071,6 +2071,16 @@ am_refused "19v2: bash session-poker.sh waive" "bash $AM_POKER waive adversarial
 # §ARM-A (release-check) — wave-27 T16, D12, A-orch-44: the verb writes the release's check fact,
 # so an agent that could run it could record the release check of its own head.
 am_refused "19v3: bash session-poker.sh release-check" "bash $AM_POKER release-check"
+# §ARM-A (land --by-hand) — wave-28 T3, REQ-5 AC-5.2, D9: the hand landing publishes a row past the
+# line, so only the main thread may call it. The arm gains a second script name, not a second arm.
+AM_SW="/opt/plugin/scripts/spawn-worktree.sh"
+am_refused "19w: bash spawn-worktree.sh land --by-hand" "bash $AM_SW land .worktrees/x --by-hand --reason 'why'"
+am_refused "19w1: behind cd … &&, the flag after the reason" "cd $R_AM && bash $AM_SW land .worktrees/x --reason r --by-hand"
+run_hook "$(mk_payload "$R_AM" "bash $AM_SW land .worktrees/x --by-hand --reason 'why'" "$AM_ID" omit Bash w20-sub)"
+expect_contains "19w2: …the detail names the script and the verb" "spawn-worktree.sh land --by-hand" "$ERR"
+am_admitted "19w3: land --by-hand from the main thread" "bash $AM_SW land .worktrees/x --by-hand --reason 'why'" ""
+am_admitted "19w4: a subagent's spawn-worktree.sh remove passes this arm" "bash $AM_SW remove .worktrees/x"
+am_admitted "19w5: a subagent's quoted mention of the hand landing is not a call" "echo 'spawn-worktree.sh land x --by-hand'"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
