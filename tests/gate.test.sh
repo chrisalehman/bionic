@@ -877,7 +877,12 @@ book_bg na --agent na --max-wait 3 --suites k.test.sh -- "$(hold_cmd na)"
 wait_for 20 asked_by na
 na_id="$(req_of na)"
 na_h1="$(field "$na_id" holder)"
-resumed_by_shim() { [ -n "$(field "$1" holder)" ] && [ "$(field "$1" holder)" != "$na_h1" ]; }
+# Resumed: the request names a new, live holder (a 75 clears the holder since T47, so a cleared
+# holder is not yet the second shim).
+resumed_by_shim() {
+  local h; h="$(field "$1" holder)"
+  case "$h" in [0-9]*:*) [ "$h" != "$na_h1" ] && kill -0 "${h%%:*}" 2>/dev/null ;; *) return 1 ;; esac
+}
 sleep 0.3
 expect_false "B.8 at 1000 of a 3-second wait the shim is still waiting" has na.brc
 world_tick 3
