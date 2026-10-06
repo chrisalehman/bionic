@@ -14283,10 +14283,13 @@ RV_SID="7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d"
 rv_level() {  # <word> -> `<level> rc=<n>`, rigor_level's answer
   bash -c '. "$1/run.sh" >/dev/null 2>&1; out="$(rigor_level "$2")"; printf "%s rc=%s" "$out" "$?"' _ "$RV_LIB" "$1" 2>/dev/null
 }
-# A wave plan at the word, multi_agent, with none of the version-14 keys: `plan_bring_forward`
-# fires on it at the highest level and admits it below. A plan with no `## Tasks` section: the
+# A wave plan at the word, multi_agent, at current 4 with a pre-14 `## Tasks` table and none of the
+# version-14 keys: `plan_bring_forward` fires on it at the highest level and admits it below. A plan with no `## Tasks` section: the
 # dispatch ledger refuses it at the highest level and passes it below.
-rv_bf_plan() { printf -- '---\nrigor: %s\nscale: wave\nmulti_agent: true\n---\n\n# Plan\n' "$1"; }
+rv_bf_plan() {
+  printf -- '---\nrigor: %s\nscale: wave\nmulti_agent: true\n---\n\n## SDLC State\ncurrent: 4\n\n## Tasks\n\n' "$1"
+  printf -- '| id | task | status |\n|---|---|---|\n| T1 | a | pending |\n'
+}
 printf -- '---\nrigor: high\n---\n\n## SDLC State\ncurrent: 3\n' > "$RV_D/no-tasks.plan.md"
 # THE GATE'S HELPERS ARE DEFINED INSIDE ITS BODY (`_eg_body`), so sourcing walls.sh defines none of
 # them: each is lifted out by its own definition, flush-left from `name() {` to its `}`, and a row
