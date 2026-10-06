@@ -5798,6 +5798,9 @@ w27r_fix_gaps() {
 W27R_E="$(w27r_entry "${REPO}/CHANGELOG.md")"
 expect_nonempty "W27-R1 precondition: CHANGELOG.md carries a 1.12.0 entry" "$W27R_E"
 expect_eq "W27-R1: …and it is the newest entry" "1.12.0" "$(changelog_head_version "${REPO}/CHANGELOG.md")"
+W27R_HEAD="$(/usr/bin/grep -m1 '^## 1\.12\.0 ' "${REPO}/CHANGELOG.md")"
+expect_nonempty "W27-R1d precondition: the 1.12.0 heading line reads" "$W27R_HEAD"
+expect_eq "W27-R1d: the 1.12.0 entry is dated the day it is cut" "## 1.12.0 — 2026-10-06" "$W27R_HEAD"
 expect_contains "W27-R2: the entry says it is a minor release" "This is a minor release" "$W27R_E"
 expect_contains "W27-R2b: …and that the contract version stays 14" '`canonical_sdlc_version` stays 14' "$W27R_E"
 expect_regex "W27-R3: the entry opens with the upgrade note on setup and remove" \
