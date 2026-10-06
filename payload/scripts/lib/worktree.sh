@@ -539,36 +539,120 @@ EOF
 # refused, naming the first added path and the commit that added it; a target with nothing at
 # `.bionic` gets a directory only through such adds, so that one change of kind is theirs to name.
 # A range that deletes every tracked path, leaving nothing at `.bionic`, lands.
-_wt_bionic_kind() {  # <root> <rev> [path] -> what <rev> tracks at <path> (`.bionic`): dir | link | file | other | nothing
-  case "$(git -C "$1" ls-tree "$2" -- "${3:-.bionic}" 2>/dev/null | awk 'NR == 1 { print $1 }')" in
-    040000) echo dir ;; 120000) echo link ;; 100644|100755) echo file ;; '') echo nothing ;; *) echo other ;;
-  esac
+# BY ITS BYTES, IN ANY CASE (wave-27 T86; review pass 71, A-orch-242). T84 read one spelling
+# (`:(literal).bionic`, `ls-tree -- .bionic`) and filtered `--name-only` lines with a pattern: on a
+# case-insensitive disk a link committed as `.BIONIC` landed and the project's `.bionic` became a
+# link to itself, and a name git C-quotes (`"`, `\`, a control character) never matched, so its add
+# overwrote the project's untracked file. Now every name comes from git's NUL-separated streams
+# (`ls-tree -z`, `diff --name-only -z`), split on NUL, and a root entry IS `.bionic` when its name
+# case-folds to `.bionic` (ASCII, as `[:upper:]` to `[:lower:]` in the C locale), on every disk:
+# `.BIONIC`, `.Bionic` and `.bionic` are one path here, as they are to a case-insensitive disk. The
+# kind test, the add test and the tracked-content exception all read the folded entry. A range that
+# keeps the target's entry, its kind and spelling, and adds a directory under another spelling beside
+# it changes no kind: the adds under it are named; a link or a file beside it is a change of kind,
+# named in its spelling. The commit that made a change is found by asking git for each commit's
+# tree, never by a pathspec.
+_wt_bionic_named() {  # <root entry name> -> 0 when it case-folds to `.bionic`
+  case "$1" in .[Bb][Ii][Oo][Nn][Ii][Cc]) return 0 ;; esac
+  return 1
 }
-_wt_bionic_kind_changed() {  # <root> <onto head> <tree head> -> the first commit that changed the kind | nothing
-  local root="$1" was now c
+# <root> <rev> [spelling] -> "<kind> <spelling>" for the one root entry of <rev> folding to `.bionic`
+# (dir | link | file | other), "other <first>" for two such entries, or "nothing"; with a
+# spelling, for the entry spelled exactly so.
+_wt_bionic_kind() {
+  local rec name kind="" n=0
+  while IFS= read -r -d '' rec; do
+    name="${rec#*$'\t'}"
+    if [ -n "${3:-}" ]; then [ "$name" = "$3" ] || continue; else _wt_bionic_named "$name" || continue; fi
+    n=$((n + 1))
+    if [ "$n" -gt 1 ]; then kind="other ${kind#* }"; continue; fi
+    case "${rec%% *}" in 040000) kind=dir ;; 120000) kind=link ;; 100644|100755) kind=file ;; *) kind=other ;; esac
+    kind="${kind} ${name}"
+  done < <(git -C "$1" ls-tree -z "$2" 2>/dev/null)
+  printf '%s' "${kind:-nothing}"
+}
+_wt_bionic_beside() {  # <root> <rev> <spelling> -> the first other root entry folding to `.bionic` that is no directory
+  local rec name
+  while IFS= read -r -d '' rec; do
+    name="${rec#*$'\t'}"
+    [ "$name" != "$3" ] && _wt_bionic_named "$name" && [ "${rec%% *}" != 040000 ] && { printf '%s' "$name"; return 0; }
+  done < <(git -C "$1" ls-tree -z "$2" 2>/dev/null)
+  return 1
+}
+# <kind> <kind> -> 0 when the second is another kind at `.bionic`, or a link or a file under another
+# spelling: no path under a link or a file shows a renamed one to the add test.
+_wt_bionic_differs() {
+  [ "${1%% *}" != "${2%% *}" ] && return 0
+  case "${2%% *}" in link|file) [ "$1" != "$2" ] ;; *) return 1 ;; esac
+}
+# <root> <onto head> <tree head> -> "<commit> <spelling>": the first commit that changed the kind,
+# and the entry that changed it in the range's spelling | nothing
+_wt_bionic_kind_changed() {
+  local root="$1" was now at c
   was="$(_wt_bionic_kind "$root" "$2")"; now="$(_wt_bionic_kind "$root" "$3")"
-  [ "$was" != "$now" ] && [ "$now" != nothing ] && [ "${was}:${now}" != nothing:dir ] || return 1
-  for c in $(git -C "$root" log --reverse --format=%H "${2}..${3}" -- ':(literal).bionic' 2>/dev/null); do
-    [ "$(_wt_bionic_kind "$root" "${c}^")" = "$(_wt_bionic_kind "$root" "$c")" ] || { printf '%s' "$c"; return 0; }
+  _wt_bionic_differs "$was" "$now" && [ "$now" != nothing ] && [ "${was%% *}:${now%% *}" != nothing:dir ] || return 1
+  at="${now#* }"
+  case "$was" in
+    nothing|other*) : ;;
+    *) if [ "$(_wt_bionic_kind "$root" "$3" "${was#* }")" = "$was" ]; then
+         at="$(_wt_bionic_beside "$root" "$3" "${was#* }")" || return 1
+       fi ;;
+  esac
+  for c in $(git -C "$root" rev-list --reverse "${2}..${3}" 2>/dev/null); do
+    _wt_bionic_differs "$(_wt_bionic_kind "$root" "${c}^")" "$(_wt_bionic_kind "$root" "$c")" \
+      && { printf '%s %s' "$c" "$at"; return 0; }
   done
-  printf '%s' "$3"
+  printf '%s %s' "$3" "$at"
+}
+_wt_bionic_adds() {  # <root> <onto head> <tree head> -> every path the range adds, NUL-separated, as git stores it
+  git -C "$1" diff --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null
+}
+_wt_bionic_first_add() {  # <root> <onto head> <tree head> -> the first path added under a root entry folding to `.bionic`, then `/`
+  local p
+  while IFS= read -r -d '' p; do
+    case "$p" in */*) _wt_bionic_named "${p%%/*}" && { printf '%s/' "$p"; return 0; } ;; esac
+  done < <(_wt_bionic_adds "$1" "$2" "$3")
+  return 1
 }
 _wt_bionic_added_by() {  # <root> <onto head> <tree head> <path> -> the first commit of the range that added it | nothing
   local root="$1" c
-  for c in $(git -C "$root" log --reverse --format=%H "${2}..${3}" -- ":(literal)${4}" 2>/dev/null); do
-    [ "$(_wt_bionic_kind "$root" "${c}^" "$4")" = nothing ] && [ "$(_wt_bionic_kind "$root" "$c" "$4")" != nothing ] \
+  for c in $(git -C "$root" rev-list --reverse "${2}..${3}" 2>/dev/null); do
+    git -C "$root" cat-file -e "${c}:${4}" 2>/dev/null && ! git -C "$root" cat-file -e "${c}^:${4}" 2>/dev/null \
       && { printf '%s' "$c"; return 0; }
   done
   return 1
 }
-_wt_bionic_committed() {  # <root> <onto head> <tree head> -> "<commit> <first path>" | nothing
+# <root> <onto head> <tree head> -> "<commit> <path>/": `.bionic`'s entry in the range's spelling for a
+# change of kind, else the first added path. The `/` no name ends with keeps a name's own trailing
+# newline through `$(...)`; the caller takes it off. An add no commit of the range made is a path the
+# target dropped after the tree branched: its commit is `dropped:<tree head>` (A-orch-256).
+_wt_bionic_committed() {
   local root="$1" onto_head="$2" head="$3" path commit
-  commit="$(_wt_bionic_kind_changed "$root" "$onto_head" "$head")" && { printf '%s .bionic' "$commit"; return 0; }
-  path="$(git -C "$root" -c core.quotePath=false diff --no-renames --diff-filter=A --name-only "$onto_head" "$head" \
-    -- ':(literal).bionic' 2>/dev/null | sed -n '/^\.bionic\//{p;q;}')"
-  [ -n "$path" ] || return 1
-  commit="$(_wt_bionic_added_by "$root" "$onto_head" "$head" "$path")"
-  printf '%s %s' "${commit:-$head}" "$path"
+  commit="$(_wt_bionic_kind_changed "$root" "$onto_head" "$head")" && { printf '%s/' "$commit"; return 0; }
+  path="$(_wt_bionic_first_add "$root" "$onto_head" "$head")" || return 1
+  path="${path%/}"
+  commit="$(_wt_bionic_added_by "$root" "$onto_head" "$head" "$path")" || commit="dropped:${head}"
+  printf '%s %s/' "$commit" "$path"
+}
+# <name> -> the name as `git -c core.quotePath=true` prints it when it holds `"`, `\` or a control
+# character (in double quotes, C escapes, every other byte outside printable ASCII in octal), so a
+# refusal naming it stays one line; any other name as it is.
+_wt_cquote() {
+  local LC_ALL=C s="$1" out='"' c i v
+  case "$s" in *[\"\\]*|*[[:cntrl:]]*) : ;; *) printf '%s' "$s"; return 0 ;; esac
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      \"|\\) out="${out}\\${c}" ;;
+      $'\a') out="${out}\\a" ;; $'\b') out="${out}\\b" ;; $'\t') out="${out}\\t" ;; $'\n') out="${out}\\n" ;;
+      $'\v') out="${out}\\v" ;; $'\f') out="${out}\\f" ;; $'\r') out="${out}\\r" ;;
+      *)
+        printf -v v '%d' "'$c"; [ "$v" -ge 0 ] || v=$((v + 256))
+        if [ "$v" -lt 32 ] || [ "$v" -ge 127 ]; then printf -v c '\\%03o' "$v"; fi
+        out="${out}${c}" ;;
+    esac
+  done
+  printf '%s"' "$out"
 }
 
 # The refusal is land's own contract line, like every sibling (wave-27 T79, A-orch-205): one
@@ -583,10 +667,27 @@ _wt_bionic_committed() {  # <root> <onto head> <tree head> -> "<commit> <first p
 # directory, takes the whole path out. The added file is then untracked in the tree, which land
 # counts as dirty, so the line says to move it out of the tree: nothing of the writer's is lost
 # (A-orch-238).
-_wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit> <path> <target's kind at .bionic>
-  local rm="rm -r --cached .bionic"
-  if [ "$5" != .bionic ] && [ "$6" = dir ]; then rm="rm --cached ${5}, move ${5} out of the tree"; fi
-  _wt_refuse "bionic-committed path=${5} commit=${4:0:12} branch=${2} onto=${3} fix='git -C ${1} ${rm}, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
+# The path and the remedy are in the range's spelling (wave-27 T86): the whole entry out is the
+# folded root entry the range added, as the range spelled it; a name git C-quotes is printed quoted.
+# EVERY PRINTED FIX LANDS WHEN FOLLOWED (A-orch-244; pass 71's P2-1): the whole entry, out of the
+# index, stays in the tree; where no ignore rule covers it and it is not the record link land passes
+# over (`_wt_piece_dirt`), the next land read it as dirty, so the fix also moves it out of the tree.
+_wt_bionic_left_dirty() {  # <tree abs> <entry> -> 0 when the entry, untracked, would read as dirt to land
+  git -C "$1" check-ignore -q --no-index -- "$2" 2>/dev/null && return 1
+  [ "$2" = .bionic ] && [ -L "${1}/.bionic" ] && return 1
+  return 0
+}
+# A PATH THE TARGET DROPPED (A-orch-256): taking it out of the tree's index too makes both sides
+# delete it, which land refuses not-current; merging the target into the tree carries the target's
+# own untracking, after which the range adds nothing there. That shape's fix is the merge.
+_wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit | dropped:<head>> <path> <target's kind at .bionic>
+  local entry="${5%%/*}" commit="${4#dropped:}" path fix
+  path="$(_wt_cquote "$5")"; fix="rm -r --cached ${entry}"
+  if [ "$commit" != "$4" ]; then fix="merge ${3}"
+  elif [ "$5" != "$entry" ] && [ "${6%% *}" = dir ]; then fix="rm --cached ${path}, move ${path} out of the tree, commit"
+  elif _wt_bionic_left_dirty "$1" "$entry"; then fix="${fix}, move ${entry} out of the tree, commit"
+  else fix="${fix}, commit"; fi
+  _wt_refuse "bionic-committed path=${path} commit=${commit:0:12} branch=${2} onto=${3} fix='git -C ${1} ${fix}, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
 }
 
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
@@ -791,6 +892,7 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # THE RECORD LINK NEVER LANDS (wave-27 T79): a range that commits `.bionic` is refused here,
   # before any merge, the tree and its stamps kept (see _wt_bionic_committed).
   why="$(_wt_bionic_committed "$root" "$onto_head" "$head")" && {
+    why="${why%/}"
     _wt_refuse_bionic "$wt_abs" "$branch" "$onto" "${why%% *}" "${why#* }" "$(_wt_bionic_kind "$root" "$onto_head")"
     return 2
   }

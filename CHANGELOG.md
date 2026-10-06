@@ -213,8 +213,8 @@ Newly refused:
   debt cannot be written (`reason=debt-unwritten`). The full-suite runner is never honoured as a
   declared red.
 - `spawn-worktree.sh land`, and the stand-down's landing, for a range that adds `.bionic` or any
-  path under it, or changes what kind of thing `.bionic` is; a change to, or deletion of, a path
-  the target already tracks there lands; nothing merges:
+  path under it, or changes what kind of thing `.bionic` is, `.bionic` in any spelling of case; a
+  change to, or deletion of, a path the target already tracks there lands; nothing merges:
   `spawn-worktree: REFUSED reason=bionic-committed path=<path> commit=<commit> branch=<branch> onto=<onto> fix='git -C <tree> rm -r --cached .bionic, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept`.
   For a path added under a `.bionic` directory the target tracks, the fix takes that path alone out
   of the index and keeps the file: `fix='git -C <tree> rm --cached <path>, move <path> out of the
@@ -284,8 +284,8 @@ Known limits, carried to the next release:
 - Two landings started into one checkout at the same moment can leave that checkout dirty or both
   be refused; nothing is lost. Land one tree at a time. The repair is `git -C <checkout> reset
   --hard` (or removing the one untracked file), then land again. This is older than this release.
-- A tree branched before its target stopped tracking `.bionic` is refused until it removes
-  `.bionic` itself.
+- A tree branched before its target stopped tracking `.bionic` is refused until it merges the
+  target, as the refusal's fix says.
 - Session start's sweep of dead sessions slows when many of them each left start files behind
   (the sweep matches those files per session); a later release indexes them once.
 - The dispatch wall can count as a reader's record a path the fact verb then refuses: a path at
