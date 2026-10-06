@@ -84,6 +84,9 @@ What you will notice:
   `landed: row=… branch=… head=… merge=… at=…` header and the stamp lines it judged to
   `record/<plan>/landing-proofs.log`, in one write, before it removes the tree. No path of `land`
   removes or truncates that record.
+- **A tree's record link stays out of your commits.** `spawn-worktree.sh create` adds `/.bionic`
+  to the repository's `.git/info/exclude`, never to your `.gitignore`, so `git add -A` in a tree
+  no longer stages the `.bionic` link it plants.
 - **Setup offers working principles.** `/bionic:setup` offers a short, general set of working
   principles as one item, shows you the file and the whole text, and on your yes writes it between
   `bionic:principles` markers into your global `CLAUDE.md`. Doctor reports the block as present,
@@ -204,6 +207,9 @@ Newly refused:
   (`reason=record-unwritable why=proofs-unwritable`, before the merge), and when a declared red's
   debt cannot be written (`reason=debt-unwritten`). The full-suite runner is never honoured as a
   declared red.
+- `spawn-worktree.sh land`, and the stand-down's landing, for a range that commits `.bionic` or a
+  path under it, unless the target already tracks `.bionic`; nothing merges:
+  `spawn-worktree: REFUSED reason=bionic-committed path=<path> commit=<commit> branch=<branch> onto=<onto> fix='git -C <tree> rm -r --cached .bionic, commit, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept`.
 - `session-poker.sh release-check` on a checkout with uncommitted changes, with no start for the
   release range or an empty one, and from a dispatched agent; `session-poker.sh proof-add check`
   (only `release-check` writes a check fact). A failing check prints its output and its log path.
