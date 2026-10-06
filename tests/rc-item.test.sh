@@ -2516,7 +2516,9 @@ T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"; t78_plant "$T78_RC" u-bet
 T78_PATH_WAS="$T66_PATH"; T66_PATH="$TMP/t78bin:/usr/bin:/bin"
 T78_OUT="$(printf 'y\n' | t66_env "$T78_SB" bash "$REMOVE_SH" --all 2>&1)"
 T66_PATH="$T78_PATH_WAS"
-expect_contains "T78 remove --all, no page: nothing else to remove" "nothing to remove" "$T78_OUT"
+# A run that named the block never calls the machine clean (review pass 67 P2-1).
+expect_contains "T78 remove --all, no page: nothing else to remove" "nothing for bionic to remove" "$T78_OUT"
+expect_absent "T78 remove --all, no page: …and the machine is not called clean" "already clean" "$T78_OUT"
 expect_contains "T78 remove --all, no page: …and the changed block is named" "$(t78_named .zshrc u-between)" "$T78_OUT"
 expect_same_bytes "T78 remove --all, no page: …the rc byte for byte as it was" "$TMP/t78-before" "$T78_RC"
 
