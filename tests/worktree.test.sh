@@ -3938,6 +3938,7 @@ expect_true  "(c13) …the target's .bionic is still its link" test -L "$CB/.bio
 # of that name (pass 71's G1b). The quoted form is git's own (c7-pre, the oracle).
 CQ_N1='.bionic/"quoted".md'; CQ_N2='.bionic/back\slash.md'; CQ_N3=$'.bionic/tab\tname.md'
 CQ_Q1='".bionic/\"quoted\".md"'; CQ_Q2='".bionic/back\\slash.md"'; CQ_Q3='".bionic/tab\tname.md"'
+CQ_S1="'.bionic/\"quoted\".md'"  # the first name quoted for the shell, as the remedy prints it (wave-28 T39)
 cq_own() { local f; for f in "$CQ_N1" "$CQ_N2" "$CQ_N3"; do echo "the project's own" > "$1/$f"; done; }  # <repo>
 cq_tree() {  # <repo> <branch> <name>... -> a tree whose one commit adds each name under .bionic
   local r="$1" b="$2" t f; shift 2; t="$(new_tree "$r" "$b")"; [ -n "$t" ] || return 1
@@ -3955,8 +3956,8 @@ expect_true "(c7-pre) the project holds its own file at each of the three paths"
 OUTCQ="$(worktree_land "$CQT" wave/fixture)"; RCCQ=$?
 expect_match "(c7) a range adding three names git quotes under the tracked .bionic is refused" \
   "spawn-worktree: REFUSED reason=bionic-committed path=*" "$(lb_first "$OUTCQ")"
-expect_contains "(c7) …naming the first added path as git quotes it, and the same spelling in the remedy" \
-  "path=${CQ_Q1} commit=${CQT_C:0:12} branch=wt/quoted onto=wave/fixture $(cs_fix "$CQT" "rm --cached ${CQ_Q1}, move ${CQ_Q1} out of the tree")" "$OUTCQ"
+expect_contains "(c7) …naming the first added path as git quotes it, and in the remedy quoted for the shell (T39)" \
+  "path=${CQ_Q1} commit=${CQT_C:0:12} branch=wt/quoted onto=wave/fixture $(cs_fix "$CQT" "rm --cached ${CQ_S1}, move ${CQ_S1} out of the tree")" "$OUTCQ"
 expect_eq    "(c7) …exit 2" "2" "$RCCQ"
 expect_eq    "(c7) …on one line" "1" "$(printf '%s\n' "$OUTCQ" | awk 'END { print NR }')"
 expect_eq    "(c7) …the project's three untracked files byte for byte, and every file beside them" "$CQ_SUMS" "$(lb_sums "$CQ")"
@@ -4029,17 +4030,30 @@ expect_true  "(c14) …the target's .bionic is still its link" test -L "$CL/.bio
 # says to move the entry out of the tree. Each row follows the line it was given, word for word:
 # the git command it names, the move it names (into $TMP, kept), a commit, the suites, land again.
 lb_follow() {  # <tree> <refusal line> -> 0 once the line's fix is followed as printed, nothing added
-  local t="$1" fix cmd mv=""
-  fix="$(printf '%s\n' "$2" | sed -n "s/.* fix='git -C [^ ]* \([^']*\), run the suites, land again' .*/\1/p")"
-  case "$fix" in
-    "merge "*) git -C "$t" $fix >/dev/null 2>&1 || return 1; green_stamp "$t"; return 0 ;;  # SC2086: the fix's own words
-    *", commit") fix="${fix%, commit}" ;;
+  # As a shell would (wave-28 T39, D31): the fix's text is read into words by the shell itself, so a
+  # path printed quoted for it reaches git and mv as one name. The first clause, up to the word that
+  # ends in a comma, is the git command, run as printed (its own `git -C <tree>`); a `move <path> out
+  # of the tree` clause moves that path (into $TMP, kept); a closing `commit` commits.
+  local t="$1" fix w cmd=() mv="" clause=cmd
+  fix="${2#*" fix='"}"; fix="${fix%%", run the suites, land again' — "*}"
+  [ "$fix" != "$2" ] || return 1
+  eval "set -- $fix" || return 1
+  for w in "$@"; do
+    case "$clause" in
+      cmd) case "$w" in *,) cmd+=("${w%,}"); clause=next ;; *) cmd+=("$w") ;; esac ;;
+      next) case "$w" in move) clause=move ;; commit) clause=commit ;; *) return 1 ;; esac ;;
+      move) mv="$w"; clause=out ;;
+      out) case "$w" in tree,) clause=next ;; out|of|the) : ;; *) return 1 ;; esac ;;
+      *) return 1 ;;
+    esac
+  done
+  [ "${cmd[0]:-}" = git ] || return 1
+  "${cmd[@]}" >/dev/null 2>&1 || return 1
+  case "$clause" in
+    cmd) [ "${cmd[3]:-}" = merge ] || return 1; green_stamp "$t"; return 0 ;;
+    commit) : ;;
     *) return 1 ;;
   esac
-  cmd="${fix%%, move *}"
-  case "$fix" in *", move "*" out of the tree") mv="${fix#*, move }"; mv="${mv% out of the tree}" ;; esac
-  # shellcheck disable=SC2086  # the fix's own words, as a writer would type them
-  git -C "$t" $cmd --quiet || return 1
   if [ -n "$mv" ]; then mv "$t/$mv" "$TMP/followed-${t##*/}" || return 1; fi
   git -C "$t" commit --quiet -m "the printed fix, followed"; green_stamp "$t"
 }
@@ -4075,6 +4089,84 @@ expect_match "(r3) …and the tree then lands" "spawn-worktree: LANDED branch=wt
   "$(lb_first "$(worktree_land "$RCT" wave/fixture)")"
 expect_true  "(r3) …the project's .bionic is a directory, not a link" test -d "$RC/.bionic" -a ! -L "$RC/.bionic"
 expect_eq    "(r3) …holding its plan and record" "plan|record" "$(cat "$RC/.bionic/docs/plans/w.plan.md")|$(cat "$RC/.bionic/docs/record/r.md")"
+
+# (s1) A SUBMODULE LINK UNDER THE TRACKED .bionic, UNDER A CONFIG THAT HIDES SUBMODULES (wave-28 T39, D31,
+# AC-14.2; wave-27 critic P3-1). `diff.ignoreSubmodules=all`, which a user may set in any config, took
+# a gitlink out of `git diff`'s answer, so the add test saw nothing and the range landed a gitlink at
+# `.bionic/docs` over the project's untracked plan directory. The guard's difference call now carries
+# `--ignore-submodules=none`: its answer is git's own, whatever the configuration. The link names a
+# commit of another repository, absent here, as a real submodule's does.
+SM="$(lk_repo "$TMP/land-submodule")"; git -C "$SM" config diff.ignoreSubmodules all
+SMT="$(new_tree "$SM" wt/submodule)"; mkdir -p "$SMT/.bionic/docs"
+git -C "$SMT" update-index --add --cacheinfo "160000,1234567890123456789012345678901234567890,.bionic/docs"
+lk_commit "$SMT" "a submodule link at .bionic/docs"; SMT_C="$(git -C "$SMT" rev-parse HEAD)"
+expect_eq   "(s1-pre) the tree's head holds a gitlink at .bionic/docs" "160000" "$(git -C "$SMT" ls-tree HEAD .bionic/docs | awk '{ print $1 }')"
+expect_eq   "(s1-pre) …which the fixture's config hides from git diff" "" \
+  "$(git -C "$SM" diff --no-renames --diff-filter=A --name-only wave/fixture wt/submodule -- .bionic)"
+expect_eq   "(s1-pre) …and the tree reads clean" "" "$(git -C "$SMT" status --porcelain)"
+SM_SUMS="$(lb_sums "$SM")"; SM_REFS="$(refs_of "$SM")"
+OUTSM="$(worktree_land "$SMT" wave/fixture)"; RCSM=$?
+expect_contains "(s1) a submodule link added under the tracked .bionic is refused under diff.ignoreSubmodules=all, naming it" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/docs commit=${SMT_C:0:12} branch=wt/submodule onto=wave/fixture " "$(lb_first "$OUTSM")"
+expect_eq    "(s1) …exit 2" "2" "$RCSM"
+expect_eq    "(s1) …the project's .bionic files byte for byte" "$SM_SUMS" "$(lb_sums "$SM")"
+expect_eq    "(s1) …no ref moved" "$SM_REFS" "$(refs_of "$SM")"
+expect_true  "(s1) …the project's plan directory is still a directory" test -f "$SM/.bionic/docs/plans/w.plan.md"
+
+# (q1-q5) THE PRINTED FIX IS QUOTED FOR THE SHELL (wave-28 T39, D31, AC-14.3; review pass 74's P2-1). The
+# per-path remedy printed the name bare or C-quoted, so a space split it, a tab or a line break reached
+# git as a backslash and a letter, and a glob character un-tracked the target's own file beside it.
+# Each row adds one such name under the tracked .bionic, over the project's own untracked file there,
+# follows the printed fix as a shell reads it (lb_follow), and lands: the name alone left the index.
+# `.bionic/k*.md` is a glob that matches the target's tracked keep.md, so the row sees a fix that
+# reaches another path.
+lq_row() {  # <label> <tree base> <name> <expected remedy> — one row, the name over the project's own file
+  local id="$1" r t c line
+  r="$(lk_repo "$TMP/land-shq-$2")"; echo "the project's own" > "$r/$3"
+  t="$(cq_tree "$r" "wt/shq-$2" "$3")"; c="$(git -C "$t" rev-parse HEAD)"
+  line="$(lb_first "$(worktree_land "$t" wave/fixture)")"
+  expect_contains "($id) a range adding $2 under the tracked .bionic is refused, its remedy quoted for the shell" \
+    "REFUSED reason=bionic-committed path=$(_wt_cquote "$3") commit=${c:0:12} branch=wt/shq-$2 onto=wave/fixture $(cs_fix "$t" "$4")" "$line"
+  expect_eq    "($id) …on one line" "1" "$(printf '%s\n' "$line" | awk 'END { print NR }')"
+  expect_true  "($id) …its printed fix can be followed as printed" lb_follow "$t" "$line"
+  expect_match "($id) …and the tree then lands" "spawn-worktree: LANDED branch=wt/shq-$2 onto=wave/fixture *" \
+    "$(lb_first "$(worktree_land "$t" wave/fixture)")"
+  expect_eq    "($id) …the fix acted on that path alone: the landed branch tracks keep.md and also.md, and not the name" \
+    ".bionic/also.md|.bionic/keep.md|" "$(git -C "$r" ls-tree -r --name-only "wt/shq-$2" -- .bionic | LC_ALL=C sort | tr '\n' '|')"
+  expect_eq    "($id) …and so does the target, once landed" \
+    ".bionic/also.md|.bionic/keep.md|" "$(git -C "$r" ls-files -- .bionic | LC_ALL=C sort | tr '\n' '|')"
+  expect_eq    "($id) …and the project's own file at the name is untouched" "the project's own" "$(cat "$r/$3")"
+  expect_eq    "($id) …and the writer's file is kept where the fix moved it" "the writer's" "$(cat "$TMP/followed-shq-$2")"
+}
+lq_row q1 space ".bionic/my notes.md" "rm --cached '.bionic/my notes.md', move '.bionic/my notes.md' out of the tree"
+lq_row q2 tab $'.bionic/a\tb.md' "rm --cached \$'.bionic/a\\tb.md', move \$'.bionic/a\\tb.md' out of the tree"
+lq_row q3 newline $'.bionic/new\nline.md' "rm --cached \$'.bionic/new\\nline.md', move \$'.bionic/new\\nline.md' out of the tree"
+lq_row q4 glob '.bionic/k*.md' "rm --cached ':(literal).bionic/k*.md', move '.bionic/k*.md' out of the tree"
+lq_row q5 quote ".bionic/it's.md" "rm --cached \$'.bionic/it\\'s.md', move \$'.bionic/it\\'s.md' out of the tree"
+
+# (q6) THE TREE'S OWN PATH is a path the fix prints too: a project under a directory holding a space.
+QT="$(lk_repo "$TMP/land shq root")"; QTT="$(lk_replace "$QT" wt/shq-root file)"
+QT_LINE="$(lb_first "$(worktree_land "$QTT" wave/fixture)")"
+expect_contains "(q6) a tree whose path holds a space is named in the fix quoted for the shell" \
+  "fix='git -C '${QTT}' rm -r --cached .bionic, move .bionic out of the tree, commit, run the suites, land again' — " "$QT_LINE"
+expect_true  "(q6) …its printed fix can be followed as printed" lb_follow "$QTT" "$QT_LINE"
+expect_match "(q6) …and the tree then lands" "spawn-worktree: LANDED branch=wt/shq-root onto=wave/fixture *" \
+  "$(lb_first "$(worktree_land "$QTT" wave/fixture)")"
+
+# (q7, s2) THE MUTANTS. The quoting cut out (the name printed bare): q1's fix splits the name and cannot
+# be followed. The flag cut out of the difference call: s1's submodule link is merged.
+expect_true  "(q7-pre) the library defines the shell quoting" declare -F _wt_shquote
+QM="$(lk_repo "$TMP/land-shq-mutant")"; QMT="$(cq_tree "$QM" wt/shq-mutant ".bionic/my notes.md")"
+QM_LINE="$( _wt_shquote() { printf '%s' "$1"; }; worktree_land "$QMT" wave/fixture 2>/dev/null | sed -n 1p )"
+expect_contains "(q7-pre) …the mutant still refuses, printing the name bare" "rm --cached .bionic/my notes.md, " "$QM_LINE"
+expect_false "(q7) with the quoting cut out, the printed fix cannot be followed" lb_follow "$QMT" "$QM_LINE"
+SN="$(lk_repo "$TMP/land-submodule-mutant")"; git -C "$SN" config diff.ignoreSubmodules all
+SNT="$(new_tree "$SN" wt/submodule-mutant)"; mkdir -p "$SNT/.bionic/docs"
+git -C "$SNT" update-index --add --cacheinfo "160000,1234567890123456789012345678901234567890,.bionic/docs"
+lk_commit "$SNT" "a submodule link at .bionic/docs"
+expect_match "(s2) with the flag cut out of the difference call, the submodule link is merged" "spawn-worktree: * merge*=*" \
+  "$( _wt_bionic_adds() { git -C "$1" diff --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null; }
+      worktree_land "$SNT" wave/fixture 2>/dev/null | sed -n 1p )"
 
 # (c11, c12) THE MUTANTS. The fold cut out (a root entry is `.bionic` only byte for byte): c1's range
 # is merged. The NUL stream cut out (the adds read as git's text lines): c7's quoted add is merged.
