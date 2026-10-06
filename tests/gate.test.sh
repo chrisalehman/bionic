@@ -402,7 +402,7 @@ expect_eq "F.1 the writer asked first, the landing later; the landing is admitte
 expect_contains "F.2 gate_state counted both waiting, one a landing" "waiting=2 landing-waiting=1" "$FIRST_STATE"
 expect_contains "F.3 gate_state counted the one admitted" "admitted=1" "$FIRST_STATE"
 expect_regex "F.4 gate_state prints its one line" \
-  '^share=80 used=[0-9-]+ admitted=1 waiting=2 landing-waiting=1 clears=[0-9]+$' "$FIRST_STATE"
+  '^share=80 used=[0-9-]+ admitted=1 waiting=2 landing-waiting=1 load=[0-9.-]+/[0-9.-]+ promised=[0-9.]+$' "$FIRST_STATE"
 MF="$(mutant first)"
 anchor "$MF" 'else r = ($1 == "landing" ? 1 : 2)' 1
 sed -i.bak 's/else r = (\$1 == "landing" ? 1 : 2)/else r = 2/' "$MF"
@@ -608,6 +608,11 @@ expect_eq "R.3 …and the same machine with its five-minute load at 1.0 gives ro
 expect_eq "R.4 a one-minute load over the share gives no room either" \
   "room=no load=7.0/1.0 cores=8 promised=0 waiting=0 rc=1" \
   "$(BIONIC_PROBE_BUSY_CORES=7.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 room)"
+M5="$(mutant room-5m)"
+anchor "$M5" 'if (known(b5)) { if (b5 + prom > lim) room = 0 }' 1
+sed -i.bak 's/if (known(b5)) { if (b5 + prom > lim) room = 0 }/if (0) room = 0/' "$M5"
+expect_eq "R.4a the mutant that ignores the five-minute load runs and gives room — the reading is the rule" \
+  "room=yes load=1.0/7.0 cores=8 promised=0 waiting=0 rc=0" "$(GATE_LIB="$M5" room)"
 fresh room-wait
 world_machine 8 8192 30 1.0
 world_cost k 5 0.5 30
