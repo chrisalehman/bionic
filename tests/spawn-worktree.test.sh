@@ -578,16 +578,25 @@ LPLAN="$LR/.bionic/docs/plans/epic-x/wave-x.plan.md"
 printf -- '---\nworking-branch: wave/20-demo\n---\n# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$LPLAN"
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LPLAN" > "$LR/.bionic/tmp/engaged-${LSID}.state"
 
+# A BARE `land` (wave-28 T3, D9): the line lands a row with `ready`, and a person lands one with
+# `--by-hand --reason`; the bare verb names both, exits non-zero and moves nothing.
+LREFSB="$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
+LBARE="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE" 2>&1 )"; LBARE_RC=$?
+expect_eq "a bare land prints the line naming ready and --by-hand, exactly" \
+  "land: the line lands a row with \"ready\"; a person lands one with \"land <tree> --by-hand --reason '<why>'\"" "$LBARE"
+expect_ne "…and exits non-zero" "0" "$LBARE_RC"
+expect_eq "…and no ref moved" "$LREFSB" "$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
+
 # Refused first: no session id means no binding, so no target — and nothing moves.
 LREFS0="$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
-LNOSID="$( cd "$LR" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" land "$LTREE" 2>/dev/null )"; LNOSID_RC=$?
+LNOSID="$( cd "$LR" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" land "$LTREE" --by-hand --reason r 2>/dev/null )"; LNOSID_RC=$?
 expect_match "land with no session id is refused, naming why" \
   "spawn-worktree: REFUSED reason=no-session*" "$LNOSID"
 expect_eq "that refusal exits 2" "2" "$LNOSID_RC"
 expect_eq "no ref moved" "$LREFS0" "$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
 expect_true "the tree survives" test -d "$LTREE"
 
-LOUT="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE" 2>/dev/null )"; LRC=$?
+LOUT="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE" --by-hand --reason r 2>/dev/null )"; LRC=$?
 expect_match "land from the bound session names the working branch and its checkout" \
   "spawn-worktree: LANDED branch=wt/20-T1 onto=wave/20-demo checkout=${LWAVE} merge=* removed=${LTREE} proofs=${LR}/.bionic/docs/record/wave-x/landing-proofs.log" "$LOUT"
 expect_eq   "it exits 0" "0" "$LRC"
@@ -650,21 +659,22 @@ export BIONIC_CLAUDE_HOME="$LD1"
 expect_true "a stand-in runner started (the floor: absolute script in the wave checkout)" \
   ld1_start "$LWAVE" "$LWAVE/tests/run.sh"
 LREFS2="$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
-LOUT2="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE2" 2>/dev/null )"; LRC2=$?
-expect_match "(T8c: was \"the verb's own busy suite does not refuse its own land\") the verb's own session's floor in the wave checkout refuses its own land" \
-  "spawn-worktree: REFUSED reason=suite-running*script=${LWAVE}/tests/run.sh*" "$LOUT2"
+LOUT2="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE2" --by-hand --reason r 2>/dev/null )"; LRC2=$?
+expect_match "(T8c: was \"the verb's own busy suite does not refuse its own land\") the verb's own session's floor in the wave checkout holds its own landing (wave-28 T3: HELD)" \
+  "*HELD wt/20-T2 — pid=*script=${LWAVE}/tests/run.sh*" "$LOUT2"
 expect_eq   "that refusal exits 2" "2" "$LRC2"
 expect_eq   "no ref moved" "$LREFS2" "$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
 expect_true "the tree survives" test -d "$LTREE2"
 ld1_stop
-LOUT2B="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE2" 2>/dev/null )"; LRC2B=$?
+LOUT2B="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE2" --by-hand --reason r 2>/dev/null )"; LRC2B=$?
 expect_match "the same land goes through once the floor has finished (the arm discriminates)" \
   "spawn-worktree: LANDED branch=wt/20-T2 onto=wave/20-demo *" "$LOUT2B"
 expect_eq   "it exits 0" "0" "$LRC2B"
 
-# A suite in this root refuses from any session: the busy file now names a different
-# session, and the runner's script lives outside every repository. Only its working
-# directory, the main checkout, places it.
+# A suite in the main checkout, which is not where the working branch is checked out, holds
+# nothing (wave-28 T3, D6: the publish is held by a run in the checkout that holds the branch,
+# and the main checkout here holds the human's feature branch). Until 1.12.0 a runner anywhere
+# under the root refused the land.
 LTREE3_OUT="$(spawn_out "$LR" create "$(sha_of "$LR" wave/20-demo)" wt/20-T3)"
 LTREE3="$(printf '%s\n' "$LTREE3_OUT" | tr ' ' '\n' | sed -n 's/^path=//p')"
 echo work3 > "$LTREE3/t3.txt"
@@ -674,11 +684,16 @@ printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"peer"}\n' 
   "$$" "verb-peer-session" "$LR" > "$LD1/sessions/$$.json"
 LRREAL="$(cd "$LR" && pwd -P)"
 expect_true "a stand-in runner started (cwd the main checkout)" ld1_start "$LR" "$LD1ELSE/tests/run.sh"
-LOUT3="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE3" 2>/dev/null )"; LRC3=$?
-expect_match "(T8c: was \"a different session's busy suite in this project still refuses\") a suite in this root refuses, from any session" \
-  "spawn-worktree: REFUSED reason=suite-running*cwd=${LRREAL} *" "$LOUT3"
-expect_eq   "that refusal exits 2" "2" "$LRC3"
+LOUT3="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE3" --by-hand --reason r 2>/dev/null )"; LRC3=$?
+expect_match "(wave-28 T3: was \"a suite in this root refuses, from any session\") a suite in the main checkout, where the branch is not, holds nothing: it lands" \
+  "spawn-worktree: LANDED branch=wt/20-T3 onto=wave/20-demo *" "$LOUT3"
+expect_eq   "it exits 0" "0" "$LRC3"
 ld1_stop
+LTREE3_OUT="$(spawn_out "$LR" create "$(sha_of "$LR" wave/20-demo)" wt/20-T4)"
+LTREE3="$(printf '%s\n' "$LTREE3_OUT" | tr ' ' '\n' | sed -n 's/^path=//p')"
+echo work4 > "$LTREE3/t4.txt"
+git -C "$LTREE3" add t4.txt
+git -C "$LTREE3" commit --quiet -m "T4 work"
 
 # T12 F3: the only runner is in ANOTHER repository, the lander's own session busy at the
 # root. The pre-T8b predicate refused this, naming the lander's own session. It lands.
@@ -686,9 +701,9 @@ printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"self"}\n' 
   "$$" "$LSID" "$LR" > "$LD1/sessions/$$.json"
 expect_true "a stand-in runner started (relative, in another repository)" \
   ld1_start "$LD1OTHER" "tests/run.sh"
-LOUT4="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE3" 2>/dev/null )"; LRC4=$?
+LOUT4="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE3" --by-hand --reason r 2>/dev/null )"; LRC4=$?
 expect_match "a runner in another repository does not refuse the verb's land (T12 F3)" \
-  "spawn-worktree: LANDED branch=wt/20-T3 onto=wave/20-demo *" "$LOUT4"
+  "spawn-worktree: LANDED branch=wt/20-T4 onto=wave/20-demo *" "$LOUT4"
 expect_eq   "it exits 0" "0" "$LRC4"
 ld1_stop
 unset BIONIC_CLAUDE_HOME
