@@ -45,6 +45,7 @@
 # USAGE
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
+#     bash card.sh rigor <word>                         (the Step 0 card's rigor line)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -77,6 +78,10 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/roots.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/fill.sh"
+# THE ONE READING OF A RIGOR WORD (wave-28 T44; REQ-16 AC-16.2, D35). A card prints a level by
+# its new word with its label and meaning, `rigor_print`, whichever vocabulary the plan carries.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/run.sh"
 
 # THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The
 # `## Tasks` ledger has two shapes — the wave's eleven columns and the task run's six,
@@ -1703,6 +1708,7 @@ _card_step3() {  # <citation path> <artifact path as given>
   _card_branches
   printf '\n'
   CARD_ROWS=( ${WCARD_TROW[@]+"${WCARD_TROW[@]}"} )
+  [ "$CARD_SCALE" != "task" ] || _card_rigor_cells
   _card_render_batch task
   printf '\n'
   if [ "$CARD_SCALE" = "task" ]; then
@@ -1714,12 +1720,35 @@ _card_step3() {  # <citation path> <artifact path as given>
   else
     _card_chain_block "$2"
   fi
-  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s · auditor %s\n' \
-    "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "${WCARD_RIGOR:-not declared}"
+  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s · %s\n' \
+    "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "$(_card_rigor_line "$WCARD_RIGOR")"
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
   printf '\nDo you approve this plan? Reply "approved" to approve it.\n'
   printf 'show evals <req> · show task <n> · explain <decision>\n'
+}
+
+# ── THE REVIEW RIGOR, PRINTED (wave-28 T44; AC-16.2) ─────────────────────────
+#
+# A level prints as `review rigor: <level> (<n> independent reader[s])` and never by an old word.
+# A plan that declares no rigor, or a word that is no level, says so in place of the level; a
+# task-scale row's rigor cell prints the level's word alone (the column is headed `rigor`, and the
+# meaning is the Verification line's), and a cell that names no level prints as it is written.
+_card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification block's rigor phrase
+  [ -n "${1:-}" ] || { printf 'review rigor: not declared'; return 0; }
+  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (low, medium or high)" "$1"
+}
+_card_rigor_cells() {  # rewrites CARD_ROWS' third cell (a task row's rigor) to its level
+  local i row id rest cell tail lvl
+  for i in ${CARD_ROWS[@]+"${!CARD_ROWS[@]}"}; do
+    row="${CARD_ROWS[$i]}"
+    id="${row%%"$CARD_TAB"*}"; rest="${row#*"$CARD_TAB"}"
+    [ "$rest" != "$row" ] || continue
+    tail="${rest#*"$CARD_TAB"}"; [ "$tail" != "$rest" ] || continue
+    cell="${tail%%"$CARD_TAB"*}"
+    lvl="$(rigor_level "$cell")" || continue
+    CARD_ROWS[$i]="${id}${CARD_TAB}${rest%%"$CARD_TAB"*}${CARD_TAB}${lvl}${tail#"$cell"}"
+  done
 }
 
 # ── ONE BATCH, RENDERED ──────────────────────────────────────────────────────
@@ -1757,6 +1786,11 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
 [ "$#" -ge 1 ] || _card_usage "no row kind"
 
 case "$1" in
+  rigor)
+    [ "$#" -eq 2 ] || _card_usage "rigor takes exactly one word (got $(( $# - 1 )))"
+    rigor_print "$2" && exit 0
+    printf "card.sh: '%s' is no review rigor — use low, medium or high\n" "$2" >&2
+    exit 1 ;;
   step1|step2|step3)
     if [ "$1" = step2 ]; then
       [ "$#" -ge 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"

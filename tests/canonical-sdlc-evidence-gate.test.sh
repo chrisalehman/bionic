@@ -5408,7 +5408,8 @@ fi
 # RAISES itself to peer-reviewed is judged at peer-reviewed.
 s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED' peer-reviewed tested
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "at rigor 'peer-reviewed'" <<<"$HOOK_VSTDERR"; then
+# The refusal names the level by its new word since wave-28 T44 (AC-16.2): peer-reviewed is medium.
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "at review rigor medium" <<<"$HOOK_VSTDERR"; then
   ok "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6"
 else
   no "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6" \

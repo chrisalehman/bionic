@@ -14320,7 +14320,9 @@ rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
     esac' _ "$RV_LIB" "$1" "$2" "$3" "$RV_D/no-tasks.plan.md" "$RV_D/bf-$2.plan.md" 2>/dev/null
 }
 rv_rank() {  # <word> -> the plan-write hook's own `rigor_rank` of the word
-  bash -c '. "$1/run.sh" >/dev/null 2>&1; eval "$(awk "/^rigor_rank\\(\\) *\\{/,/^}/" "$2")"; rigor_rank "$3"' \
+  bash -c '. "$1/run.sh" >/dev/null 2>&1
+    eval "$(awk '"'"'index($0, "rigor_rank() {") == 1 { f = 1 } f { print } f && /^}$/ { exit }'"'"' "$2")"
+    rigor_rank "$3"' \
     _ "$RV_LIB" "$RV_HOOK" "$1" 2>/dev/null
 }
 # The hook's closed set, on the hook itself: a spec whose frontmatter carries the word is either
