@@ -2775,18 +2775,28 @@ if [ "$rm_all" = "1" ]; then
   rm_page=0; _rm_print_plan < /dev/null && rm_page=1
   # A read-only rc keeps the alias off the page, and the page says why (wave-27
   # T66, review pass 40 S5).
+  rm_named=0
   if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_read_only "$RC_FILE"; then
     echo "  $(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
+    rm_named=1
   fi
   # A claude() block that is not all bionic's is off the page, and named after its
   # items, page or no page (wave-27 T78).
-  _rm_rc_block_left
+  _rm_rc_block_left && rm_named=1
   if [ "$rm_page" = "0" ] && ! _rm_tools_named_present < /dev/null; then
     # No item runs, so the lines the alias and environment items would name are
     # named here (wave-27 T55, T66).
     if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null; then
-      _rm_legacy_alias_not_ours "$RC_FILE"
-      _rm_env_left "$RC_FILE"
+      rm_said="$(_rm_legacy_alias_not_ours "$RC_FILE"; _rm_env_left "$RC_FILE")"
+      [ -n "$rm_said" ] && { printf '%s\n' "$rm_said"; rm_named=1; }
+    fi
+    # A RUN THAT NAMED SOMETHING NEVER SAYS "CLEAN" (wave-27, review pass 67 P2-1):
+    # a changed or malformed claude() block, a retired line or a read-only rc named
+    # above is still on this machine.
+    if [ "$rm_named" = "1" ]; then
+      echo "  nothing for bionic to remove — what is named above is yours to edit by hand."
+      echo ""
+      exit 0
     fi
     echo "  nothing to remove — this machine is already clean."
     echo ""

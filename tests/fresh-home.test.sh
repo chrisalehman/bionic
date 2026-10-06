@@ -2605,6 +2605,32 @@ for _ in $(seq 1 80); do printf 'n\n'; done | run_payload "$REMOVE_SH" > "$G16_N
 expect_contains "16: a declined native row is given its 'answer yes' route (the route extractor reads)" \
   "answer yes to tool:impeccable" "$(cat "$G16_NATIVE_N")"
 
+# ── a run that named something never calls the machine clean (review pass 67 P2-1) ──
+# A changed claude() block alone, the tools alone (the "nothing on the page" rows
+# above), and both; the twin is a machine with nothing on it, which IS clean.
+fresh_home; mkdir -p "${HOME_FIX}/.claude"
+G16_CLEAN="$(printf 'y\n' | run_payload "$REMOVE_SH" --all 2>&1)"
+expect_contains "16 named: a machine with nothing on it is called clean (the phrase extractor reads)" \
+  "nothing to remove — this machine is already clean." "$G16_CLEAN"
+fresh_home; mkdir -p "${HOME_FIX}/.claude"; cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+G16_BLK="$(printf 'y\n' | run_payload "$REMOVE_SH" --all 2>&1)"
+expect_contains "16 named, a changed claude() block alone: it is named by its lines" "$T78_NAMED" "$G16_BLK"
+expect_contains "16 named, a changed claude() block alone: …the run says bionic has nothing to remove" \
+  "nothing for bionic to remove" "$G16_BLK"
+expect_absent "16 named, a changed claude() block alone: …and never calls the machine clean" \
+  "already clean" "$G16_BLK"
+expect_true "16 named, a changed claude() block alone: …and the rc is byte for byte as it was" \
+  cmp -s "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+g16_plant; cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+G16_BOTH="$TMP/g16-both.txt"
+printf 'y\n' | run_payload "$REMOVE_SH" --all > "$G16_BOTH" 2>&1
+expect_contains "16 named, block and tools: the block is named by its lines" "$T78_NAMED" "$(cat "$G16_BOTH")"
+expect_eq "16 named, block and tools: …ccstatusline is named with its by-hand command" \
+  "yes" "$(g16_pair "$G16_BOTH" ccstatusline "$(g16_plan ccstatusline)")"
+expect_absent "16 named, block and tools: …and the run never calls the machine clean" \
+  "this machine is already clean" "$(cat "$G16_BOTH")"
+expect_eq "16 named, block and tools: …and nothing was called" "" "$(g16_acts)"
+
 # ── standalone: unchanged ──
 g16_plant
 mkdir -p "$TMP/g16-standalone"; cp "$REMOVE_SH" "$TMP/g16-standalone/remove.sh"

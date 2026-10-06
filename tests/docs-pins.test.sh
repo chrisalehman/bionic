@@ -5831,5 +5831,11 @@ expect_contains "W27-R7c precondition: the known-limits part reads (it holds the
 expect_contains "W27-R7c: a known limit says every declared tool present is listed until the record exists" \
   "Until bionic keeps a record of what it installed (a later release), remove lists every declared tool present, whether or not bionic installed it, and still offers the native plugins bionic's own catalog installed." \
   "$W27R_LIMITS"
+expect_contains "W27-R7d: a known limit says what a SHELL that is neither zsh nor bash does to the claude() block" \
+  "When SHELL is neither zsh nor bash, the plugin's remove asks about bionic's claude() block and then cannot rewrite the rc, while the standalone remove removes it; no line is lost either way." \
+  "$W27R_LIMITS"
+W27R_JOINED="$(printf '%s' "$W27R_E" | tr '\n' ' ' | tr -s ' ')"
+expect_contains "W27-R7e: the upgrade note counts six ways in 1.11.0, and fixes all six" \
+  "not bionic's, in six ways. 1.12.0 fixes all six, and 1.11.x gets no patch." "$W27R_JOINED"
 
 finish
