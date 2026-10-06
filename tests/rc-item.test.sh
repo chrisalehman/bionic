@@ -1004,7 +1004,12 @@ t51_item_lines() {  # <output> <item header> — the item's lines, header to the
     printf '%s\n' "$line"
   done <<< "$1"
 }
-SB_T51D="$(new_sandbox)"; rm -f "$SB_T51D/.zshrc"; mkdir "$SB_T51D/.zshrc"
+# A PAGE ITEM OF ITS OWN (wave-27 T82). Each `--all` sandbox here carries the pre-plugin
+# skill copy `legacy-skill-copy` offers, so the page prints and the items run under its
+# consent as these rows mean them. The page used to be filled by the claude stub, whose exit 0
+# made every MCP tool row read present; tool rows are never on the page now.
+t51_page_item() { mkdir -p "$1/.claude/skills/canonical-sdlc"; printf -- '---\nname: canonical-sdlc\n---\n' > "$1/.claude/skills/canonical-sdlc/SKILL.md"; }
+SB_T51D="$(new_sandbox)"; rm -f "$SB_T51D/.zshrc"; mkdir "$SB_T51D/.zshrc"; t51_page_item "$SB_T51D"
 T51D_ALL="$(printf 'y\n' | t51_env "$SB_T51D" bash "$REMOVE_SH" --all 2>&1)"
 for T51_HDR in "legacy shell alias block:" "bionic's environment settings:"; do
   T51D_ITEM="$(t51_item_lines "$T51D_ALL" "$T51_HDR")"
@@ -1013,7 +1018,7 @@ for T51_HDR in "legacy shell alias block:" "bionic's environment settings:"; do
   expect_absent "T51 rc a directory, remove --all: '${T51_HDR}' does not call it already clean" "already clean" "$T51D_ITEM"
 done
 # The twin: a regular rc with neither block is already clean, on the same extractor.
-SB_T51DT="$(new_sandbox)"
+SB_T51DT="$(new_sandbox)"; t51_page_item "$SB_T51DT"
 T51DT_ITEM="$(t51_item_lines "$(printf 'y\n' | t51_env "$SB_T51DT" bash "$REMOVE_SH" --all 2>&1)" "legacy shell alias block:")"
 expect_contains "T51 rc a regular file, remove --all: the retired-alias item is already clean (the twin)" "already clean" "$T51DT_ITEM"
 
@@ -2076,7 +2081,7 @@ expect_same_bytes "T75 S2 wrong shell: zsh, the rc's own shell, decides, and bio
 # S4 — a read-only rc holding the env block: remove --all's page does not offer it.
 T66_SHELL=/bin/bash
 T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
-printf '%s\n' 'export A=1' "$ENVB_START" "$T66_TODO" "$ENVB_END" > "$T75_RC"; chmod 444 "$T75_RC"
+printf '%s\n' 'export A=1' "$ENVB_START" "$T66_TODO" "$ENVB_END" > "$T75_RC"; chmod 444 "$T75_RC"; t51_page_item "$T75_SB"
 T75_OUT="$(t66_door "$T75_SB" rm-all n)"
 expect_contains "T75 S4: remove --all printed its page" "Do all of the above?" "$T75_OUT"
 expect_absent "T75 S4: …and a read-only rc's env block is not on it" "delete bionic's environment settings" "$T75_OUT"
