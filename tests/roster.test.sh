@@ -575,8 +575,12 @@ R15_F="$R7_DIR/r15/roster-s1.state"
 R15_NEW="$(lib roster_row status=identified session=s1 name=w28-crit agent_id=a15-new launched_at=2026-10-06T10:00:00Z \
   subagent_type=bionic:critic deliverable=record/c.md tool_use_id=toolu_c plan=none \
   questions=adversarial pushed=checks-adversarial,severity)"
-# Written by hand as 1.12.0's writer wrote it: no `pushed=` existed.
-R15_OLD='roster-state/v1|status=identified|session=s1|name=w27-rev|agent_id=a15-old|launched_at=2026-10-05T10:00:00Z|subagent_type=bionic:reviewer|model=|deliverable=record/r.md|source=|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_r|plan=none|questions=structure'
+# A 1.12.0 row: the same writer with no `pushed=` passed, which is byte for byte what 1.12.0's
+# writer wrote (R13a, R14a: a present-if-passed key leaves the rest of the row unmoved).
+R15_OLD="$(lib roster_row status=identified session=s1 name=w27-rev agent_id=a15-old launched_at=2026-10-05T10:00:00Z \
+  subagent_type=bionic:reviewer deliverable=record/r.md tool_use_id=toolu_r plan=none questions=structure)"
+expect_absent "R15f0 precondition: the 1.12.0 row carries no pushed=" "pushed=" "$R15_OLD"
+expect_contains "R15f0 …beside the questions= it does carry" "|questions=structure" "$R15_OLD"
 printf '%s\n' "$R15_NEW" "$R15_OLD" > "$R15_F"
 R15_GOT="$(lib roster_row_for_id "$R15_F" a15-new)"
 expect_eq "R15e a 1.13.0 row is read by id" "$R15_NEW" "$R15_GOT"

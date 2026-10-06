@@ -5853,4 +5853,123 @@ W27R_JOINED="$(printf '%s' "$W27R_E" | tr '\n' ' ' | tr -s ' ')"
 expect_contains "W27-R7e: the upgrade note counts six ways in 1.11.0, and fixes all six" \
   "not bionic's, in six ways. 1.12.0 fixes all six, and 1.11.x gets no patch." "$W27R_JOINED"
 
+
+# ── §W28-S (wave-28 T16; REQ-8 AC-8.2, D20) ──
+#
+# WHAT THIS OWNS. The severity scale has one owner, `agents-src/blocks/severity.md`, rendered to
+# `payload/context/severity.md` and pushed beside both code questions' checks
+# (tests/execution-recorder.test.sh §CHECKS-S). Pinned here: the block is the spec's "The severity
+# scale" word for word (the spec is not shipped, so its text is typed below, copied once from
+# `.bionic/docs/specs/epic-23-bionic-tech-debt/wave-28-finished-work-lands.spec.md` and diffed
+# against it, record/wave-28-finished-work-lands/T16-scale.md); the rendered span is the block; the
+# file fits its 2,600-byte cap; no other shipped file defines a level; the two code checks files
+# each point to it once and carry no rating word of their own; the structure checks carry the
+# scale's rule on age, not "old code never fails"; and the finding lines read the same in the
+# scale's record form and in steps/6.md's. Each absence sits beside a positive on the same
+# extractor, and a doctored copy proves each arm goes red. HERMETIC: committed finals by path.
+W28S_BLOCK="${BLOCK_DIR}/severity.md"
+W28S_FILE="${REPO}/payload/context/severity.md"
+W28S_CAP=2600
+W28S_POINTER='Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.'
+W28S_AGE='Age does not lower a rating. Say "older than the reviewed range" beside it.'
+W28S_SPEC=""
+IFS= read -r -d '' W28S_SPEC <<'W28S_EOF' || true
+Severity says how bad a finding is if a user meets it. Reach says whether a user who follows
+what the run ships meets it. Rate both; the table gives the consequence.
+
+| Severity | What it is |
+|---|---|
+| S1 Critical | Harm that cannot be undone: a file or data lost or changed without the user's act, a secret exposed, an act taken without permission. Also what the run ships being unusable with no workaround |
+| S2 Major | Core function broken or giving a wrong result, with no reasonable workaround |
+| S3 Minor | Something is wrong, and a simple workaround exists or only a non-core function is affected |
+| S4 Trivial | No functional effect: cosmetic, wording, a comment that misstates the code, a gap in test tooling |
+
+| | reach `on` | reach `off` |
+|---|---|---|
+| S1 | fix in the wave | fix in the wave |
+| S2 | fix in the wave | defer |
+| S3 | defer | note |
+| S4 | note | note |
+
+- Rate by the tables, not by how hard the finding was to find.
+- A finding to fix names the file and line at the reviewed head and the command that shows it.
+- When you cannot run a finding, or cannot choose between two ratings, write the higher rating
+  and an `unsure:` line saying what is not known. It owes a check; it is never rated down.
+- Age does not lower a rating. Say "older than the reviewed range" beside it.
+- A brief never re-rates, and no agent moves a finding across the line. If a brief and these
+  tables disagree, the tables decide.
+W28S_EOF
+W28S_SPEC="${W28S_SPEC%$'\n'}"
+# w28s_levels_in <file> -> the lines that define a severity level (a level id and its name).
+w28s_levels_in() { /usr/bin/grep -E 'S[1-4] (Critical|Major|Minor|Trivial)' "$1" 2>/dev/null; }
+# w28s_rating_words <text on stdin> -> each rating word in it, one per line: a level, a level's
+# name, what blocks, a consequence of the table, or a rule that sets `result`.
+w28s_rating_words() {
+  local t; t="$(cat)"
+  printf '%s\n' "$t" | /usr/bin/grep -owE 'S[1-4]|Critical|Major|Minor|Trivial|blocks?|blocker|defer'
+  printf '%s\n' "$t" | /usr/bin/grep -oF -e 'fix in the wave' -e '`result` is'
+  return 0
+}
+# w28s_finding_form <file> -> the four finding-line forms the file gives, in order: the fenced
+# lines of the scale's form, or the backquoted spans of steps/6.md's record paragraph.
+w28s_finding_form() {
+  /usr/bin/grep -oE '(findings|finding|shown|unsure): <n>[^`]*' "$1" 2>/dev/null | awk '!seen[$0]++'
+}
+
+expect_true "W28-S0: payload/context/severity.md is rendered and non-empty" test -s "$W28S_FILE"
+expect_eq "W28-S1: AC-8.2 — the scale's block is the spec's \"The severity scale\", word for word" \
+  "$W28S_SPEC" "$(cat "$W28S_BLOCK" 2>/dev/null)"
+W28S_DOC1="$TMP/w28s-reworded.md"
+sed 's/the tables decide/the brief decides/' "$W28S_BLOCK" > "$W28S_DOC1" 2>/dev/null
+expect_contains "W28-S1m precondition: the doctored copy keeps the rest of the scale" "S1 Critical" "$(cat "$W28S_DOC1")"
+expect_ne "W28-S1m: a scale with one rule reworded is caught" "$W28S_SPEC" "$(cat "$W28S_DOC1")"
+same_everywhere "W28-S2" "the scale is one text in the block and the rendered file" "$W28S_BLOCK" SEVERITY "$W28S_FILE"
+W28S_BYTES="$(wc -c < "$W28S_FILE" 2>/dev/null | tr -cd '0-9')"
+expect_true "W28-S3: …and fits the ${W28S_CAP}-byte cap (${W28S_BYTES:-missing} B)" test "${W28S_BYTES:-99999}" -le "$W28S_CAP"
+expect_nonempty "W28-S4: AC-8.2 — it says a brief never re-rates" "$(w26_hits 'A brief never re-rates' "$W28S_FILE")"
+
+# Only severity.md defines a level: every shipped text the readers or the orchestrator read.
+W28S_SHIPPED="$(find -L "${REPO}/payload/context" "${REPO}/agents" "${SKILL_DIR}" -name '*.md' -type f 2>/dev/null | sort)"
+expect_nonempty "W28-S5 precondition: the level extractor finds the levels in severity.md" "$(w28s_levels_in "$W28S_FILE")"
+W28S_DEFINERS=""
+while IFS= read -r _f; do
+  [ -n "$_f" ] || continue
+  [ -n "$(w28s_levels_in "$_f")" ] && W28S_DEFINERS="${W28S_DEFINERS} ${_f#"$REPO"/}"
+done <<< "$W28S_SHIPPED"
+expect_eq "W28-S5: AC-8.2 — no shipped file but severity.md defines a level" " payload/context/severity.md" "$W28S_DEFINERS"
+W28S_DOC5="$(w26_doctor "${REPO}/payload/context/checks-structure.md" '- S2 Major is anything that blocks the merge.')"
+expect_nonempty "W28-S5m: a checks file that defines a level is caught" "$(w28s_levels_in "$W28S_DOC5")"
+
+# The two code checks files: one pointer each, and no rating word in their own text.
+expect_nonempty "W28-S6 precondition: the rating-word extractor finds the scale's own words" \
+  "$(marker_span "$W28S_FILE" SEVERITY | w28s_rating_words)"
+for _q in adversarial structure; do
+  _f="${REPO}/payload/context/checks-${_q}.md"
+  _upper="$(printf 'checks-%s' "$_q" | tr '[:lower:]' '[:upper:]')"
+  expect_eq "W28-S6: AC-8.2 — checks-${_q}.md points to the scale exactly once" "1" \
+    "$(_flatten "$_f" | /usr/bin/grep -oF -- "$W28S_POINTER" | /usr/bin/grep -c .)"
+  expect_nonempty "W28-S7 precondition: checks-${_q}.md's own span reads" "$(marker_span "$_f" "$_upper")"
+  expect_eq "W28-S7: …and uses no rating word of its own" "" "$(marker_span "$_f" "$_upper" | w28s_rating_words)"
+done
+W28S_DOC7="$(w26_doctor "${REPO}/payload/context/checks-adversarial.md" '`result` is `fail` for an issue that blocks the merge.')"
+expect_nonempty "W28-S7m: a checks file that says what blocks is caught" "$(cat "$W28S_DOC7" | w28s_rating_words)"
+expect_nonempty "W28-S8: the structure checks carry the scale's rule on age" \
+  "$(w26_hits "$W28S_AGE" "${REPO}/payload/context/checks-structure.md")"
+expect_nonempty "W28-S8 …the same words the scale gives" "$(w26_hits "$W28S_AGE" "$W28S_FILE")"
+expect_eq "W28-S8b: …and no longer say old code never fails a check" "" \
+  "$(w26_hits 'never fails a check' "${REPO}/payload/context/checks-structure.md")"
+
+# The finding lines: the scale's record form and steps/6.md's give the same four forms, in order.
+W28S_FORM="$(w28s_finding_form "$W28S_FILE")"
+expect_eq "W28-S9: the scale gives the four finding-line forms of the interface" \
+  "$(printf '%s\n' 'findings: <n>' 'finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>' 'shown: <n> <command>' 'unsure: <n> <what is not known>')" \
+  "$W28S_FORM"
+expect_eq "W28-S9b: steps/6.md's record form gives the same four" "$W28S_FORM" "$(w28s_finding_form "$STEP6_MD")"
+expect_nonempty "W28-S9c: …and says when they are owed: the reader's row carries severity in pushed=" \
+  "$(w26_hits 'carries `severity` in `pushed=`' "$STEP6_MD")"
+W28S_DOC9="$TMP/w28s-step6.md"
+sed 's/<what is not known>/<what is unknown>/' "$STEP6_MD" > "$W28S_DOC9" 2>/dev/null
+expect_nonempty "W28-S9m precondition: the doctored steps/6.md still gives finding lines" "$(w28s_finding_form "$W28S_DOC9")"
+expect_ne "W28-S9m: a steps/6.md whose unsure: form drifts is caught" "$W28S_FORM" "$(w28s_finding_form "$W28S_DOC9")"
+
 finish
