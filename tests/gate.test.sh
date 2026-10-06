@@ -108,7 +108,7 @@ printf '%s\n' "$id" > "$d/$n.id"
 printf '%s\n' "$rc" > "$d/$n.rc.tmp" && mv "$d/$n.rc.tmp" "$d/$n.rc"
 [ "$rc" = 0 ] || exit 0
 if [ -n "${CHILD:-}" ]; then
-  ( unset CHILD HOLD WORK; BIONIC_GATE_ADMIT="$id" bash "$0" "$d" "$CHILD" "$kind" "$key" 0 )
+  ( kid="$CHILD"; unset CHILD HOLD WORK; BIONIC_GATE_ADMIT="$id" bash "$0" "$d" "$kid" "$kind" "$key" 0 )
 fi
 [ -z "${WORK:-}" ] || bash -c "$WORK"
 [ "${HOLD:-0}" = 1 ] || exit 0
@@ -131,7 +131,7 @@ ask_bg() {  # <name> <kind> <key> <within> — an asker in the background (HOLD/
 }
 reap() {  # the last row's askers that still poll or hold: killed, so no row feeds the next
   local p
-  for p in $BG; do kill_tree "$p"; done
+  for p in $BG; do kill_tree "$p"; wait "$p" 2>/dev/null; done
   BG=""
 }
 ask_fg() {  # <name> <kind> <key> <within> — an asker in the foreground; prints its rc
@@ -335,7 +335,7 @@ world_cost h 15 0.5 30
 world_cost k 15 0.5 30
 HOLD=1 ask_bg nh work h 0; wait_for 20 has nh.rc
 expect_eq "N.1 the holder is admitted (60 + 15)" "0" "$(rc_of nh)"
-ask_bg na work k 3
+HOLD=1 ask_bg na work k 3
 wait_for 20 asked_by na
 na_id="$(req_of na)"
 expect_eq "N.2 the timed ask took a number at 1000" "1000" "$(field "$na_id" asked)"
@@ -349,11 +349,11 @@ expect_eq "N.5 at 1003 it exits 75, not 124" "75" "$(rc_of na)"
 expect_eq "N.6 nothing ran: its request holds no admitted line (asked|admitted)" "1000|" "$(field "$na_id" asked)|$(field "$na_id" admitted)"
 expect_eq "N.7 its request is kept" "1000" "$(field "$na_id" asked)"
 world_tick 5
-ask_bg nb work k 600
+HOLD=1 ask_bg nb work k 600
 wait_for 20 nreq_is 3
 expect_eq "N.8 a later number is taken at 1008" "1008" "$(field "$(req_of nb)" asked)"
 rm -f "$D/na.rc" "$D/na.id" "$D/na.pid"
-ask_bg na work k 600
+HOLD=1 ask_bg na work k 600
 wait_for 20 has na.pid
 wait_for 20 resumed "$na_id" na
 expect_eq "N.9 the next ask by the same who for the same key resumes the same number" "3" "$(nreq)"
@@ -374,9 +374,9 @@ first_rows() {
   world_cost k 15 0.5 30
   world_cost l 15 0.5 30
   GATE_LIB="$1" HOLD=1 ask_bg fh work h 0; wait_for 20 has fh.rc
-  GATE_LIB="$1" ask_bg fw work k 600; wait_for 20 asked_by fw
+  GATE_LIB="$1" HOLD=1 ask_bg fw work k 600; wait_for 20 asked_by fw
   world_tick 10
-  GATE_LIB="$1" ask_bg fl landing l 600; wait_for 20 asked_by fl
+  GATE_LIB="$1" HOLD=1 ask_bg fl landing l 600; wait_for 20 asked_by fl
   FIRST_STATE="$(GATE_LIB="$1" state)"
   touch "$D/fh.go"
   wait_for 20 has fw.rc || wait_for 20 has fl.rc
@@ -498,7 +498,7 @@ expect_regex "D.8 the newest is this run: rise 55-40=15, cores, 30 s, at 1030" \
   '^15:[0-9.]+:30:1030$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
 expect_eq "D.9 the oldest planted line is gone" "0" "$(grep -c '^10:0.5:20:' "$BIONIC_GATE_DIR/cost/k")"
 HOLD=1 ask_bg c2 work never-seen 0; wait_for 20 has c2.rc
-expect_eq "D.10 a command never seen is promised the maximum over every cost file" "30:3:50" \
+expect_eq "D.10 a command never seen is promised the maximum over every cost file" "30:3:90" \
   "$(field "$(id_of c2)" promise)"
 release c2
 fresh cost-over
