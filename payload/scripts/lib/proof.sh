@@ -677,8 +677,12 @@ facts_owed() {
   # THE WORD IS READ AS ITS LEVEL (wave-28 T44; REQ-16, D35, A-orch-7). The dealing stays keyed by
   # the words it was written in; the plan's word and each key are both read through lib/run.sh
   # `rigor_level`, so `high` is dealt what `audited` is, and a word that is no level deals nothing.
+  # A copy of this file read where run.sh is not beside it (a suite's doctored copy) reads the word
+  # as written, which is what every caller got before the levels existed.
   declare -F rigor_level >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/run.sh" >/dev/null 2>&1
-  if lvl="$(rigor_level "${1:-}" 2>/dev/null)"; then
+  if ! declare -F rigor_level >/dev/null 2>&1; then
+    r="${1:-}"
+  elif lvl="$(rigor_level "${1:-}" 2>/dev/null)"; then
     for k in $PROOF_DEALING; do [ "$(rigor_level "${k%%=*}" 2>/dev/null)" = "$lvl" ] && r="${k%%=*}"; done
   fi
   owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v s="${2:-}" '
