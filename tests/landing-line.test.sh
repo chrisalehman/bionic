@@ -393,6 +393,7 @@ ll_t3_world() {  # -> a world whose plan has a row T3, its tree cut at wave/x wi
   printf '%s' "$r"
 }
 RG4="$(ll_t3_world)"; PG4="$(ll_plan "$RG4")"
+ll_ready "$RG4" T1 "$(ll_carrier)" >/dev/null   # a record to read: the count reads none without one
 expect_eq "(g4-pre) T3's tree is at the accepted head" "$(ll_head "$RG4")" "$(git -C "$RG4/.worktrees/T3" rev-parse HEAD)"
 line_state "$PG4" >/dev/null
 expect_eq "(g4) a row tree with no commit of its own is not counted landed by git" "" "$(ll_ev "$RG4" published)"
@@ -401,7 +402,7 @@ git -C "$RG4" merge -q --no-ff -m "a person merges T3" wt/T3
 line_state "$PG4" >/dev/null
 expect_regex "(g4) …and its real plain merge is, once it has one" \
   "^line/v1\\|ev=published\\|row=T3\\|commit=$(ll_head "$RG4")\\|kind=git\\|" "$(ll_ev "$RG4" published)"
-RG5="$(ll_t3_world)"
+RG5="$(ll_t3_world)"; ll_ready "$RG5" T1 "$(ll_carrier)" >/dev/null
 ( eval "$(declare -f _line_count_git | sed '/_line_cut_at/d')"; line_state "$(ll_plan "$RG5")" >/dev/null )
 expect_contains "(g5m) MUTANT the cut check removed: the tree with no commit is counted landed (the row can fail)" \
   "|row=T3|" "$(ll_ev "$RG5" published)"
