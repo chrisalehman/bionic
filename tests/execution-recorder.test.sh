@@ -3184,14 +3184,14 @@ pc_run() {  # <plugin root> <command> <payload> -> PC_OUT PC_ERR PC_ST
 pc_start() {  # <plugin root> <payload> [key...] — one start: every registration (or the keys named), in manifest order
   local root="$1" payload="$2" cmd k
   shift 2
-  for k in terms evidence adversarial structure; do
+  for k in terms evidence adversarial structure severity; do
     printf -v "PC_OUT_$k" '%s' ""; printf -v "PC_ERR_$k" '%s' ""; printf -v "PC_ST_$k" '%s' "-"
   done
   while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
     k=$(pc_key "$cmd")
     if [ "$#" -gt 0 ]; then case " $* " in *" $k "*) : ;; *) continue ;; esac; fi
-    case "$k" in terms|evidence|adversarial|structure) : ;; *) continue ;; esac
+    case "$k" in terms|evidence|adversarial|structure|severity) : ;; *) continue ;; esac
     pc_run "$root" "$cmd" "$payload"
     printf -v "PC_OUT_$k" '%s' "$PC_OUT"; printf -v "PC_ERR_$k" '%s' "$PC_ERR"; printf -v "PC_ST_$k" '%s' "$PC_ST"
   done <<< "$(pc_cmds)"
@@ -3264,7 +3264,7 @@ ck_plugin() {  # <dir> — a plugin-shaped copy of the hook, its library and the
   cp "$REC" "$1/hooks/execution-recorder.sh"
   cp -R "$(dirname "$HERE")/payload/scripts/lib" "$1/scripts/lib"
   cp "$CK_CTX/survival.md" "$CK_CTX/checks-evidence.md" "$CK_CTX/checks-adversarial.md" \
-    "$CK_CTX/checks-structure.md" "$1/context/"
+    "$CK_CTX/checks-structure.md" "$CK_CTX/severity.md" "$1/context/"
 }
 CKD_PLUG="$SANDBOX/ck-plugin"
 ck_plugin "$CKD_PLUG"
@@ -4033,5 +4033,93 @@ run_rec "$(mk_subagent_start "$SID_A" "$GRH2_TR" "$GRH2_REPO" "$WN_IMP" a0000000
 expect_eq "GR-h4 a placed start is joined (the positive)" "placed:a0000000grhpl" "$(sj_e_joined "$GRH2_REPO")"
 expect_eq "GR-h5 …and leaves no clock file behind" "0" \
   "$(find "$GRH2_REPO/.bionic/tmp" -maxdepth 1 -name 'start-clock-*' | grep -c .)"
+
+
+# ============================================================
+section "Section 24: §CHECKS-S — the severity scale rides beside both code questions, at every rigor (wave-28 T16; REQ-8 AC-8.2, D20)"
+# ============================================================
+#
+# `context/severity.md` is pushed by a registration of its own (argument `severity`) to a reader
+# whose row carries `adversarial` or `structure`: once, however many of the two it holds, and to
+# no other agent. The terms registration writes what the question registrations push on the row
+# it identifies, `pushed=<name>[,<name>]` by file name without `.md`, so `proof-add review` can
+# tell a reader that was handed the scale from one dispatched under 1.12.0.
+#
+# FIXTURE FIDELITY: each row is the dispatch wall's launch shape (`sj_intended` → `roster_row`),
+# joined by name as a teammate is; the registrations are read from hooks/hooks.json; the deal at
+# each rigor is SKILL.md's rigor table: tested, the critic holds all three; peer-reviewed, the
+# auditor `evidence` and the critic the two code questions; audited, one reader per question.
+# The wants are the shipped files' own bytes.
+#
+# fails-when: a code reader starts without the scale; the evidence reader or a writer is pushed
+# it; a reader holding both code questions is pushed it twice; `pushed=` names a file the start
+# did not push, or is missing from a reader's row.
+cks_sev_want() { printf 'bionic severity scale\n'; cat "$CK_CTX/severity.md" 2>/dev/null; }
+expect_nonempty "CKS0 the shipped severity.md is non-empty (a non-vacuous byte pin)" \
+  "$(cat "$CK_CTX/severity.md" 2>/dev/null)"
+expect_eq "CKS0b hooks/hooks.json registers the severity push on SubagentStart exactly once" "1" \
+  "$(while IFS= read -r _c; do [ -n "$_c" ] && pc_key "$_c" && echo; done <<< "$PC_CMDS" | grep -cx severity)"
+CKS_ROW=""
+cks_reader() {  # <plugin root> <world> <name> <role> <questions> <agent id> — one start; sets CKS_ROW, its identified row
+  local _repo _tr
+  IFS='|' read -r _repo _tr _ _ <<< "$(make_world "$2" yes)"
+  sj_intended "$_repo" "$3" "toolu_01$6" "bionic:$4" suites_allowed=none ${5:+"questions=$5"}
+  pc_start "$1" "$(mk_subagent_start "$SID_A" "$_tr" "$_repo" "$3" "$6")"
+  CKS_ROW=$(grep 'status=identified' "$_repo/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+}
+
+# ---- tested: one critic holds all three ----
+cks_reader "$PC_REPO_ROOT" cksone w-one critic evidence,adversarial,structure a00000000cksone1
+expect_eq "CKS-t1 tested: the critic holding all three is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-t2 …as one string" "1" "$(pc_lines severity)"
+expect_eq "CKS-t3 …beside its three checks files" "$(ck_want "$CK_CTX" structure)" "$(pc_ctx structure)"
+expect_eq "CKS-t4 …and its row says what was pushed, in the deal's order" \
+  "checks-evidence,checks-adversarial,checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- peer-reviewed: the auditor holds evidence, the critic the two code questions ----
+cks_reader "$PC_REPO_ROOT" ckspraud w-aud auditor evidence a00000000cksaud2
+expect_eq "CKS-p1 peer-reviewed: the auditor is pushed its checks (the positive)" \
+  "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
+expect_empty "CKS-p2 …and not the scale" "$PC_OUT_severity"
+expect_eq "CKS-p3 …its severity registration exits 0" "0" "$PC_ST_severity"
+expect_eq "CKS-p4 …and its row names its checks alone" "checks-evidence" "$(sj_field "$CKS_ROW" pushed)"
+cks_reader "$PC_REPO_ROOT" cksprcrit2 w-crit critic adversarial,structure a00000000ckscrt3
+expect_eq "CKS-p5 …the critic holding both code questions is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-p6 …once" "1" "$(pc_lines severity)"
+expect_eq "CKS-p7 …and its row says so" "checks-adversarial,checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- audited: one reader per question ----
+cks_reader "$PC_REPO_ROOT" cksaucrit w-crit critic adversarial a00000000ckscrt4
+expect_eq "CKS-a1 audited: the critic holding adversarial is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-a2 …and its row says so" "checks-adversarial,severity" "$(sj_field "$CKS_ROW" pushed)"
+cks_reader "$PC_REPO_ROOT" cksaurev w-rev reviewer structure a00000000cksrev4
+expect_eq "CKS-a3 …the reviewer holding structure is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-a4 …and its row says so" "checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- a writer: no questions, no scale, no key ----
+cks_reader "$PC_REPO_ROOT" ckswriter w-imp implementor "" a00000000ckswrt5
+expect_eq "CKS-w1 a writer is joined (the positive on its row)" "w-imp" "$(sj_field "$CKS_ROW" name)"
+expect_empty "CKS-w2 …is pushed no scale" "$PC_OUT_severity"
+expect_absent "CKS-w3 …and its row carries no pushed=" "|pushed=" "$CKS_ROW"
+
+# ---- the file missing from the plugin: nothing pushed, and the row does not claim it ----
+CKS_PLUG="$SANDBOX/cks-plugin"
+ck_plugin "$CKS_PLUG"
+expect_true "CKS-m0 precondition: the plugin copy carries the scale before it is withheld" test -s "$CKS_PLUG/context/severity.md"
+rm -f "$CKS_PLUG/context/severity.md"
+cks_reader "$CKS_PLUG" cksmissing w-crit critic adversarial a00000000cksmis6
+expect_eq "CKS-m1 a missing scale stops nothing: its registration exits 0" "0" "$PC_ST_severity"
+expect_empty "CKS-m2 …and prints nothing" "$PC_OUT_severity"
+expect_contains "CKS-m3 …and the missing file is logged, by name" "severity.md" "$PC_ERR_severity"
+expect_eq "CKS-m4 …and the row names only what was pushed" "checks-adversarial" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- a start that cannot be placed, its candidates agreeing ----
+IFS='|' read -r CKSE_REPO CKSE_TR _ _ <<< "$(make_world cksunplaced yes)"
+sj_intended "$CKSE_REPO" E1 toolu_01CKSE1 bionic:critic suites_allowed=none questions=structure
+sj_intended "$CKSE_REPO" E2 toolu_01CKSE2 bionic:critic suites_allowed=none questions=structure
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKSE_TR" "$CKSE_REPO" bionic:critic a00000000cksunp7)"
+expect_eq "CKS-u1 an unplaced start whose candidates agree on structure is pushed the scale" \
+  "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-u2 …and placed on no row" "0" "$(grep -c 'status=identified' "$CKSE_REPO/.bionic/tmp/roster-${SID_A}.state")"
 
 finish

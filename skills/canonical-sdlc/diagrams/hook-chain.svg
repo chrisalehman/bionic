@@ -120,12 +120,13 @@
   <text class="hook-entry" data-event="SubagentStart" data-matcher="" data-guard="" data-hook="execution-recorder.sh" data-arg="evidence" x="300" y="644" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> SubagentStart <tspan fill="#8b949e">· arg</tspan> evidence</text>
   <text class="hook-entry" data-event="SubagentStart" data-matcher="" data-guard="" data-hook="execution-recorder.sh" data-arg="adversarial" x="300" y="658" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> SubagentStart <tspan fill="#8b949e">· arg</tspan> adversarial</text>
   <text class="hook-entry" data-event="SubagentStart" data-matcher="" data-guard="" data-hook="execution-recorder.sh" data-arg="structure" x="300" y="672" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> SubagentStart <tspan fill="#8b949e">· arg</tspan> structure</text>
+  <text class="hook-entry" data-event="SubagentStart" data-matcher="" data-guard="" data-hook="execution-recorder.sh" data-arg="severity" x="300" y="686" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> SubagentStart <tspan fill="#8b949e">· arg</tspan> severity</text>
   <rect x="566" y="605" width="126" height="20" rx="4" fill="#f0f4ff" stroke="#3538cd" stroke-width="1.2"/>
   <text x="629" y="619" font-size="10" font-weight="600" fill="#3538cd" text-anchor="middle">RECORD</text>
   <text x="706" y="614" font-size="10.5" fill="#3a424c">PRESSURE (Bash): the machine is sampled. ROSTER (Agent): a dispatch that actually spawned completes its <tspan font-style="italic">intended</tspan></text>
   <text x="706" y="630" font-size="10.5" fill="#3a424c">row, status <tspan font-style="italic">confirmed</tspan>, and sets its plan row active. IDENTIFICATION (SubagentStart): the agent's own id joins the</text>
   <text x="706" y="646" font-size="10.5" fill="#3a424c">roster BY THAT ID, and the dispatch terms and the checks files for its Questions: are delivered to it at start.</text>
-  <text x="706" y="662" font-size="10.5" fill="#3a424c">The bare entry pushes the terms; each entry with a question as argument pushes that one checks file, one string each.</text>
+  <text x="706" y="662" font-size="10.5" fill="#3a424c">The bare entry pushes the terms; each entry with a question as argument pushes that one checks file, and the severity entry the scale beside either code question, one string each.</text>
 
   <!-- 7 · stop.sh -->
   <rect x="40" y="694" width="1320" height="46" fill="#fafbfc"/>

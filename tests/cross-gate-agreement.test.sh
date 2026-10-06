@@ -3088,6 +3088,7 @@ SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh evidence|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh adversarial|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh structure|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh severity|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|10
 PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
@@ -13959,6 +13960,47 @@ expect_eq "FACT mutation: …and still reads the evidence question's head (it ru
   "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review evidence)"
 expect_ne "FACT mutation: …which answers the adversarial question with another line's head, so the agreement row goes red" \
   "$PRF_E" "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review adversarial)"
+
+# §FACT-SEV (wave-28 T15; REQ-8 AC-8.3, D19, D20). THE PRIORITY TABLE HAS ONE DEFINITION, AND THE
+# SCALE'S TEXT SAYS THE SAME. `PROOF_PRIORITY` in lib/proof.sh is the table every rating reads:
+# `proof_priority` reads it cell by cell, and the findings parser (`proof_findings`) is handed it
+# whole. Pinned here: the parser's priority column is `proof_priority`'s answer for each of the eight
+# cells; the scale file the readers are pushed (`payload/context/severity.md`, row T16's) states the
+# same eight cells in its table (a table row is a line opening with `|`: the scale's finding-line
+# form also holds `|S2|`); and no other shipped file spells the table. A doctored copy of the
+# scale with one cell flipped splits from the library.
+FSEV_D="$PRF_D/sev"; mkdir -p "$FSEV_D"
+FSEV_CELLS="S1:on S1:off S2:on S2:off S3:on S3:off S4:on S4:off"
+fsev_lib() { . "$PRF_LIB/proof.sh" && proof_priority "$1" "$2"; }
+fsev_parsed() {  # <S> <reach> -> the findings parser's priority column for a one-finding record
+  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 1\nfinding: 1 %s %s - a cell\nunsure: 1 placeholder\n' "$1" "$2" > "$FSEV_D/rec.md"
+  ( . "$PRF_LIB/proof.sh" && proof_findings "$FSEV_D/rec.md" ) | awk -F'\t' '{ print $5 }'
+}
+fsev_scale() {  # <scale file> <S> <reach> -> the cell the scale's table states, as fix, defer or note
+  awk -v s="$2" -v r="$3" -F'|' '
+    /^\|/ && $2 ~ /^[ \t]*S[1-4][ \t]*$/ { k = $2; gsub(/[ \t]/, "", k); if (k != s) next
+      c = (r == "on" ? $3 : $4); gsub(/^[ \t]+|[ \t]+$/, "", c)
+      if (c ~ /^fix/) print "fix"; else print c; exit }' "$1"
+}
+FSEV_SCALE="$BIONIC_HOOKS_DIR/../payload/context/severity.md"
+expect_eq "FACT-SEV precondition: the scale file's table has a row for each of S1 to S4" "4" \
+  "$(awk -F'|' '/^\|/ && $2 ~ /^[ \t]*S[1-4][ \t]*$/' "$FSEV_SCALE" 2>/dev/null | wc -l | tr -d ' ')"
+for c in $FSEV_CELLS; do
+  s="${c%%:*}"; r="${c#*:}"; want="$(fsev_lib "$s" "$r")"
+  expect_regex "FACT-SEV $s $r: proof_priority answers one of fix, defer, note" '^(fix|defer|note)$' "$want"
+  expect_eq "FACT-SEV $s $r: the findings parser rates it as proof_priority does" "$want" "$(fsev_parsed "$s" "$r")"
+  expect_eq "FACT-SEV $s $r: the scale the readers are pushed states the same cell" "$want" "$(fsev_scale "$FSEV_SCALE" "$s" "$r")"
+done
+FSEV_TABLE='S1:on=fix S1:off=fix S2:on=fix'
+expect_eq "FACT-SEV one definition: lib/proof.sh spells the table" "1" \
+  "$(/usr/bin/grep -c "$FSEV_TABLE" "$PRF_LIB/proof.sh")"
+expect_eq "FACT-SEV …and no other shipped hook or library does" "" \
+  "$(/usr/bin/grep -rlF "S2:off=" "$BIONIC_HOOKS_DIR" "$PRF_LIB" 2>/dev/null | /usr/bin/grep -v '/proof\.sh$')"
+# THE DOCTORED SCALE: S2 off flipped from defer to a fix splits from the library.
+awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^[ \t]*S2[ \t]*$/ { $4 = " fix in the wave " } { print }' "$FSEV_SCALE" > "$FSEV_D/severity.mut.md" 2>/dev/null
+expect_eq "FACT-SEV mutation: the doctored scale still reads (S1 on is fix)" "fix" "$(fsev_scale "$FSEV_D/severity.mut.md" S1 on)"
+expect_ne "FACT-SEV mutation: …and its S2 off is no longer the library's, so the agreement row goes red" \
+  "$(fsev_lib S2 off)" "$(fsev_scale "$FSEV_D/severity.mut.md" S2 off)"
 
 # ============================================================
 section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"
