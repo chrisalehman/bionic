@@ -286,9 +286,13 @@ RP5="$(ll_pair_world)"; mkdir -p "$WORLD_ROOT/pause-p5"
 export LL_MUTANT='/_line_lock_take /d'
 ll_p4 "$RP5" "$WORLD_ROOT/pause-p5" "$WORLD_ROOT/p5"
 unset LL_MUTANT
-expect_eq "(p5m) MUTANT lock skipped: both publishers exit 0 (the row can fail)" "0 0" \
-  "$(cat "$WORLD_ROOT/p5-a.out.rc") $(cat "$WORLD_ROOT/p5-b.out.rc")"
-expect_eq "(p5m) …and both append a published event" "2" "$(ll_ev "$RP5" published | grep -c 'row=T1|')"
+# Both mutant publishers are released by the one `T1.go` at the same instant, so their fast-forwards
+# race on the checkout's index lock and either may be refused (wave-28 T4 met `2 0` under load). What
+# the lock decides is whether the second is told to rebuild; that is what the mutant row reads.
+expect_ne "(p5m) MUTANT lock skipped: the second publisher of the row is not told to rebuild (the row can fail)" "3" \
+  "$(cat "$WORLD_ROOT/p5-b.out.rc" 2>/dev/null)"
+expect_eq "(p5m) …both mutant publishers ran to their end, at least one publishing" "yes yes yes" \
+  "$([ -s "$WORLD_ROOT/p5-a.out.rc" ] && echo yes) $([ -s "$WORLD_ROOT/p5-b.out.rc" ] && echo yes) $([ "$(ll_ev "$RP5" published | grep -c 'row=T1|')" -ge 1 ] && echo yes)"
 
 # THE HAND LANDING AS THE SECOND: it enters the line behind T1, builds on T1's candidate, waits
 # for the lock, and publishes after it under the same lock.
