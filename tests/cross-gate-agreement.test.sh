@@ -3079,6 +3079,7 @@ SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh evidence|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh adversarial|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh structure|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh severity|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|10
 PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10

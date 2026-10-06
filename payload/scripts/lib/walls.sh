@@ -5490,10 +5490,15 @@ return 0
 # is not text any reader of the command can resolve. This arm guards a writer against
 # granting itself a wider budget by habit, not an adversary; the same residual stands for
 # every argv reader here.
-_WALL_POKER_VERB=""
+#
+# A SECOND NAME, THE SAME ARM (wave-28 T3; REQ-5 AC-5.2, D9). `spawn-worktree.sh land … --by-hand`,
+# the --by-hand flag anywhere among land's words, is the person's landing: it publishes a row past
+# the line and writes its plan row, so it is the orchestrator's as the plan verbs are. It sets
+# `_WALL_POKER_VERB` to `land`; `_WALL_POKER_SHOWN` is the call as the detail names it.
+_WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""
 _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKER_VERB) · 1 not
   local _line _oldifs _hadf _w _i _script _next
-  _WALL_POKER_VERB=""
+  _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _git_argv_skip "$_line"
@@ -5520,12 +5525,21 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         [ $# -gt 0 ] && _script="$1" ;;
       *) _script="$1" ;;
     esac
-    [ "${_script##*/}" = "session-poker.sh" ] || continue
-    shift
-    _next="${1:-}"
-    case "$_next" in
-      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check|decline|budget)
-        _WALL_POKER_VERB="$_next"; return 0 ;;
+    case "${_script##*/}" in
+      session-poker.sh)
+        shift
+        _next="${1:-}"
+        case "$_next" in
+          amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check|decline|budget)
+            _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
+        esac ;;
+      spawn-worktree.sh)
+        shift
+        [ "${1:-}" = land ] || continue
+        for _next in "$@"; do
+          [ "$_next" = --by-hand ] || continue
+          _WALL_POKER_VERB=land; _WALL_POKER_SHOWN="spawn-worktree.sh land --by-hand"; return 0
+        done ;;
     esac
   done <<< "$(git_argv_expand "$1")"
   return 1
@@ -6038,13 +6052,14 @@ the tree as it is and send the report; the orchestrator lands the work."
   #
   # THE SCREEN is the literal name with quotes and backslashes removed, as `_wall_mentions_git`
   # screens git; a hit runs the argv reader (`_wall_poker_contract_verb`, above), which decides.
+  # `spawn-worktree` is its second name (wave-28 T3): `land --by-hand` is the person's landing.
   _wall_screen "$COMMAND"
   case "$_WALL_STRIPPED" in
-    *session-poker*)
+    *session-poker*|*spawn-worktree*)
       if _wall_poker_contract_verb "$COMMAND"; then
         fold_block exit2 "$_WALL_POKER_VERB" \
           "a subagent may not change a contract or the plan" "ask orchestrator" \
-          "\`session-poker.sh $_WALL_POKER_VERB\` changes a roster contract or the bound plan, and
+          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the bound plan, and
 only the orchestrator does that: a dispatched agent that could would widen its own budget or
 schedule its own work. Send the orchestrator what you need — the files, suites or runs to
 add and why, or the row to add — and it runs the verb."
