@@ -31,6 +31,13 @@
 #                      unknown request line ignored. Mutations: no peak raised mid-run; four
 #                      lines kept
 #   §MACHINES  AC-7.3  the admission rows run under three planted machines and decide alike
+#   §WRAP      AC-2.6, AC-2.13 (T12) the wrapper, booked.sh, asks the gate: the command's own code
+#                      on a run; 75 and nothing run when the wait runs out, under --max-wait or
+#                      --kill-after; its next call resumes the number and runs first; a nested
+#                      shim is believed; a typed admission and BIONIC_SLOT_HELD=1 ask anyway; 2
+#                      on usage; a stamp on every end but usage; the runner takes no number; a
+#                      run is sampled while it runs. Mutations: the wrapper believing a typed
+#                      admission without asking; the wrapper exiting 0 on a timeout
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
@@ -591,5 +598,219 @@ for m in "2 2048" "8 16384" "64 262144"; do
   hard_rows "$1" "$2"
   expect_eq "M.2 the hard rows on a $1-core $2 MB machine: 75 0" "75 0" "$HRD"
 done
+
+
+# ── §WRAP ────────────────────────────────────────────────────────────────────
+# THE WRAPPER ASKS THE GATE (T12; AC-2.6, AC-2.13, D10). payload/scripts/booked.sh, the shim
+# the Bash wall wraps every suite in, asks `gate_ask work <key> --within <the call's limit>`,
+# runs the command with BIONIC_GATE_ADMIT exported, ends the request with the command's code,
+# and exits 75 with a line naming the command to run again when the gate did not admit it in
+# time. Every end stamps. Each booked call here runs in a world repository (its stamp lands in
+# that repository's git dir) through booker.sh, a real child that records the shim's rc.
+BOOKED="$REPO_ROOT/payload/scripts/booked.sh"
+export BOOKED_SH="$BOOKED"
+cat > "$WORLD_ROOT/booker.sh" <<'BOOKER'
+d="$1"; n="$2"; shift 2
+cd "${WR:?}" || exit 1
+bash "${BOOKED_SH:?}" "$@" >"$d/$n.out" 2>"$d/$n.err"; rc=$?
+printf '%s\n' "$rc" > "$d/$n.brc.tmp" && mv "$d/$n.brc.tmp" "$d/$n.brc"
+BOOKER
+book_fg() {  # <name> <booked args...> — the shim in the foreground; prints its rc
+  bash "$WORLD_ROOT/booker.sh" "$D" "$@"
+  cat "$D/$1.brc" 2>/dev/null || echo none
+}
+book_bg() {  # <name> <booked args...> — the shim in the background
+  bash "$WORLD_ROOT/booker.sh" "$D" "$@" >/dev/null 2>&1 &
+  BG="$BG $!"
+}
+brc() { cat "$D/$1.brc" 2>/dev/null || echo none; }
+stamp_last() { tail -n 1 "$(git -C "$WR" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null; }
+hold_cmd() {  # <name> — a command that marks itself started and holds until <name>.go
+  printf 'touch %q; i=0; while [ ! -f %q ] && [ $i -lt 600 ]; do i=$((i+1)); sleep 0.05; done' \
+    "$D/$1.ran" "$D/$1.go"
+}
+WR="$(world_repo)"; export WR
+# A shim from before T12 booked a place in BIONIC_SLOTS_DIR, by default under the real home: a
+# red run of these rows against such a shim must reach only the world.
+export BIONIC_SLOTS_DIR="$WORLD_ROOT/slots" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=5
+section "§WRAP — the wrapper asks the gate; a wait ends 75 and keeps its number (T12; AC-2.6, AC-2.13)"
+expect_true "B.0 the world repository the shim stamps exists" test -d "$WR/.git"
+
+# A run: the command's own code, the request ended with it, the admission handed down, a stamp.
+fresh wrap-run
+world_machine 8 8192 40 1.0
+world_cost k.test.sh 10 0.5 30
+expect_eq "B.1 an admitted command runs, and the shim exits with the command's own code" "3" \
+  "$(book_fg w1 --agent w1 --max-wait 30 --suites k.test.sh -- "printf '%s' \"\$BIONIC_GATE_ADMIT\" > '$D/w1.admit'; exit 3")"
+w1_id="$(req_of w1)"
+expect_eq "B.2 it asked as work, keyed by its suite's file name, and ended with rc 3" \
+  "work k.test.sh 3" "$(field "$w1_id" kind) $(field "$w1_id" key) $(field "$w1_id" rc)"
+expect_eq "B.3 who carries the agent name the wall passed (--agent)" \
+  "$WORLD_SID:w1" "$(field "$w1_id" who)"
+expect_eq "B.4 the command saw BIONIC_GATE_ADMIT naming its own request" "${w1_id:-none}" \
+  "$(cat "$D/w1.admit" 2>/dev/null)"
+expect_match "B.5 the stamp records rc 3 and the suite" "stamp/v1|head=*|rc=3|*|suites=k.test.sh|*" \
+  "$(stamp_last)"
+expect_eq "B.6 a command with no single suite is keyed by its first 60 characters" \
+  "0 echo one two" "$(book_fg w2 --agent w2 --max-wait 30 -- 'echo one two') $(field "$(req_of w2)" key)"
+
+# A wait that runs out: 75, nothing ran, the number kept, the line naming the command, a stamp.
+fresh wrap-number
+world_machine 8 8192 60 1.0
+world_cost h 15 0.5 30
+world_cost k.test.sh 15 0.5 30
+HOLD=1 ask_bg nh work h 0; wait_for 20 has nh.rc
+expect_eq "B.7 the holder is admitted (60 + 15)" "0" "$(rc_of nh)"
+book_bg na --agent na --max-wait 3 --suites k.test.sh -- "$(hold_cmd na)"
+wait_for 20 asked_by na
+na_id="$(req_of na)"
+na_h1="$(field "$na_id" holder)"
+resumed_by_shim() { [ -n "$(field "$1" holder)" ] && [ "$(field "$1" holder)" != "$na_h1" ]; }
+sleep 0.3
+expect_false "B.8 at 1000 of a 3-second wait the shim is still waiting" has na.brc
+world_tick 3
+wait_for 20 has na.brc
+expect_eq "B.9 at 1003 the shim exits 75, not 124 or 69" "75" "$(brc na)"
+expect_eq "B.10 nothing ran: the request was taken at 1000 and holds no admitted line" "1000|" \
+  "$(field "$na_id" asked)|$(field "$na_id" admitted)"
+expect_false "B.11 …and the command never started" has na.ran
+expect_contains "B.12 its line says to run the command again" "run again" "$(cat "$D/na.err" 2>/dev/null)"
+expect_contains "B.13 …naming the command" "$D/na.go" "$(cat "$D/na.err" 2>/dev/null)"
+expect_match "B.14 the shim stamped the 75 with its suite" "stamp/v1|head=*|rc=75|*|suites=k.test.sh|*" \
+  "$(stamp_last)"
+book_bg nk --agent nk --kill-after 2 --suites k.test.sh -- "$(hold_cmd nk)"
+wait_for 20 asked_by nk
+world_tick 2
+wait_for 20 has nk.brc
+expect_eq "B.15 under --kill-after the wait ends 75 too, never 124" "75" "$(brc nk)"
+expect_false "B.16 …and its command never started" has nk.ran
+world_tick 5
+book_bg nb --agent nb --max-wait 600 --suites k.test.sh -- "$(hold_cmd nb)"
+wait_for 20 asked_by nb
+expect_eq "B.17 a later number is taken at 1010" "1010" "$(field "$(req_of nb)" asked)"
+rm -f "$D/na.brc"
+book_bg na --agent na --max-wait 600 --suites k.test.sh -- "$(hold_cmd na)"
+wait_for 20 resumed_by_shim "$na_id"
+expect_eq "B.18 the shim's next call resumes the same number: no new request" "4" "$(nreq)"
+release nh
+wait_for 20 has na.ran
+expect_true "B.19 when room appears the resumed number's command runs" has na.ran
+sleep 0.3
+expect_false "B.20 …before the later number's" has nb.ran
+expect_eq "B.21 …admitted under the number first taken" "1000" "$(field "$na_id" asked)"
+touch "$D/na.go"; wait_for 20 has na.brc
+wait_for 20 has nb.ran
+expect_true "B.22 once it ends, the later number runs" has nb.ran
+touch "$D/nb.go"; wait_for 20 has nb.brc
+expect_eq "B.23 both ended 0" "0 0" "$(brc na) $(brc nb)"
+
+# Nesting: a shim inside an admitted command is believed, takes no number, and runs.
+fresh wrap-nest
+world_machine 8 8192 40 1.0
+world_cost k.test.sh 10 0.5 30
+expect_eq "B.24 a shim nested in an admitted command runs (both exit 0)" "0" \
+  "$(book_fg np --agent np --max-wait 30 --suites k.test.sh -- \
+      "bash '$BOOKED' --agent kid --max-wait 30 --suites j.test.sh -- 'touch $D/kid.ran'")"
+expect_true "B.25 …its command ran" has kid.ran
+expect_eq "B.26 …and it took no number of its own" "1" "$(nreq)"
+expect_eq "B.27 the parent's request was ended once, by the parent" "0" "$(field "$(req_of np)" rc)"
+
+# A typed admission from no ancestor, and BIONIC_SLOT_HELD=1, ask anyway.
+stranger_rows() {  # <booked> <prefix> — sets ST_RC and ST_RAN for a stranger with no room
+  fresh "wrap-stranger-$2"
+  world_machine 8 8192 60 1.0
+  world_cost h 15 0.5 30
+  world_cost k.test.sh 15 0.5 30
+  HOLD=1 ask_bg sh work h 0; wait_for 20 has sh.rc
+  BIONIC_GATE_ADMIT="$(id_of sh)" BOOKED_SH="$1" \
+    book_bg st --agent st --max-wait 1 --suites k.test.sh -- "touch '$D/st.ran'"
+  wait_for 20 asked_by st || wait_for 5 has st.brc
+  world_tick 1
+  wait_for 20 has st.brc
+  ST_RC="$(brc st)"; ST_RAN=no; has st.ran && ST_RAN=yes
+}
+stranger_rows "$BOOKED" real
+expect_eq "B.28 a stranger typing the holder's admission asks anyway, and with no room ends 75" "75" "$ST_RC"
+expect_eq "B.29 …its command never ran" "no" "$ST_RAN"
+fresh wrap-held
+world_machine 8 8192 60 1.0
+world_cost h 15 0.5 30
+world_cost k.test.sh 15 0.5 30
+HOLD=1 ask_bg hh work h 0; wait_for 20 has hh.rc
+BIONIC_SLOT_HELD=1 book_bg sl --agent sl --max-wait 1 --suites k.test.sh -- "touch '$D/sl.ran'"
+wait_for 20 asked_by sl
+world_tick 1
+wait_for 20 has sl.brc
+expect_eq "B.30 BIONIC_SLOT_HELD=1 skips nothing: the shim asked, and with no room ends 75" "75" "$(brc sl)"
+expect_false "B.31 …its command never ran" has sl.ran
+MW_DIR="$MUT/wrap-believe"; mkdir -p "$MW_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$MW_DIR/scripts"
+anchor "$MW_DIR/scripts/booked.sh" '  booked_ask work' 1
+sed -i.bak 's/^  booked_ask work$/  [ -n "${BIONIC_GATE_ADMIT:-}" ] || booked_ask work/' "$MW_DIR/scripts/booked.sh"
+stranger_rows "$MW_DIR/scripts/booked.sh" mut
+expect_eq "B.32 the mutant (believes a typed admission without asking) still ends: rc 0" "0" "$ST_RC"
+expect_eq "B.33 …and runs the stranger's command: asking is the rule" "yes" "$ST_RAN"
+
+# The wrapper exiting 0 on a gate timeout would read as a green run: the mutation arm.
+MZ_DIR="$MUT/wrap-zero"; mkdir -p "$MZ_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$MZ_DIR/scripts"
+anchor "$MZ_DIR/scripts/booked.sh" 'exit "$BOOKED_WAITED_RC"' 1
+sed -i.bak 's/exit "\$BOOKED_WAITED_RC"/exit 0/' "$MZ_DIR/scripts/booked.sh"
+fresh wrap-zero
+world_machine 8 8192 60 1.0
+world_cost h 15 0.5 30
+world_cost k.test.sh 15 0.5 30
+HOLD=1 ask_bg zh work h 0; wait_for 20 has zh.rc
+BOOKED_SH="$MZ_DIR/scripts/booked.sh" book_bg zz --agent zz --max-wait 1 --suites k.test.sh -- "touch '$D/zz.ran'"
+wait_for 20 asked_by zz
+world_tick 1
+wait_for 20 has zz.brc
+expect_false "B.34 the mutant (exits 0 on a timeout) still ran nothing" has zz.ran
+expect_eq "B.35 …and exits 0, a wait read as a pass — B.9's 75 is the rule" "0" "$(brc zz)"
+
+# Usage ends 2, asks nothing, stamps nothing.
+fresh wrap-usage
+world_machine 8 8192 40 1.0
+WU_BEFORE="$(stamp_last)"
+expect_eq "B.36 no -- is usage: rc 2" "2" "$(book_fg wu --agent wu --max-wait 30)"
+expect_eq "B.37 …no request was taken" "0" "$(nreq)"
+expect_eq "B.38 …and no stamp was written" "$WU_BEFORE" "$(stamp_last)"
+expect_eq "B.39 an empty --agent is usage too" "2" "$(book_fg wv --agent '' --max-wait 30 -- 'true')"
+
+# The runner holds nothing: its suites ask for themselves (tests/runner-roster.test.sh §ASK).
+fresh wrap-runner
+world_machine 8 8192 40 1.0
+expect_eq "B.40 the runner (--suites run.sh) is run, not admitted" "0" \
+  "$(book_fg rn --agent rn --max-wait 30 --suites run.sh -- 'exit 0')"
+expect_eq "B.41 …it took no number: the runner holds nothing" "0" "$(nreq)"
+expect_match "B.42 …and it still stamped" "stamp/v1|head=*|rc=0|*|suites=run.sh|*" "$(stamp_last)"
+
+# A run nothing else polls is sampled by the wrapper while it runs (T2's sampling note). The
+# memory reading is read live here, not from a pin: a stub `memory_pressure` (darwin) and a
+# planted meminfo (linux) the row rewrites mid-run.
+fresh wrap-sample
+world_machine 8 8192 40 1.0
+world_cost k.test.sh 10 0.5 30
+mkdir -p "$D/stub" "$D/proc"
+printf '#!/bin/sh\nu=$(cat "%s")\necho "System-wide memory free percentage: $((100 - u))%%"\n' "$D/used" \
+  > "$D/stub/memory_pressure"
+chmod +x "$D/stub/memory_pressure"
+live_used() {  # <pct> — the live reading the stub and the planted meminfo give
+  printf '%s\n' "$1" > "$D/used"
+  printf 'MemTotal: 1000000 kB\nMemAvailable: %s kB\n' "$(( (100 - $1) * 10000 ))" > "$D/proc/meminfo"
+}
+live_used 40
+( unset BIONIC_PROBE_USED_PCT BIONIC_PROBE_FREE_PCT
+  PATH="$D/stub:$PATH" BIONIC_PROBE_PROC="$D/proc" \
+    book_bg pk --agent pk --max-wait 30 --suites k.test.sh -- "$(hold_cmd pk)"
+  wait ) &
+BG="$BG $!"
+wait_for 20 has pk.ran
+pk_id="$(req_of pk)"
+live_used 70; sleep 1
+live_used 40
+touch "$D/pk.go"; wait_for 20 has pk.brc
+expect_eq "B.43 the run ended 0" "0" "$(brc pk)"
+expect_eq "B.44 a reading of 70 taken mid-run by the wrapper is the request's peak" "70" "$(field "$pk_id" peak)"
+expect_regex "B.45 …so its cost is the rise 70-40=30, though the end read 40" '^30:' \
+  "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k.test.sh" 2>/dev/null)"
 
 finish

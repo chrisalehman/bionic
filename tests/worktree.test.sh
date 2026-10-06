@@ -675,6 +675,91 @@ expect_match "a runner path that resolves to no file does not refuse" \
 stop_runner
 rmdir "$S/empty/tests" "$S/empty"
 
+section "§LAND-BUSY-GATE: the busy check reads the gate's requests (wave-28 T12; D10)"
+#
+# A RUN THE GATE ADMITTED IS A RUN (T12). Every suite now asks the gate, the runner's included,
+# each for itself, and the request records the tree it runs in (`tree=`, git's toplevel where
+# it asked). So the land refuses while an admitted, unfinished request whose holder is alive
+# names the project's main checkout or the land's target checkout as its tree. A request in a
+# writer's own tree does not refuse (a writer's suite would otherwise refuse every land of the
+# wave, the reason D1 once counted only the runner); a waiting request has run nothing; an
+# ended or killed one runs nothing. The store is this suite's own.
+export BIONIC_GATE_DIR="$TMP/gate"
+GB="$(new_repo "$TMP/busy-gate")"
+GB_HOLD=""
+gb_holder() {  # -> GB_HOLD, a live process that is not this shell's child (no zombie)
+  GB_HOLD="$( ( sleep 60 >/dev/null 2>&1 & printf '%s' "$!" ) )"
+}
+gb_plant() {  # <id> <tree> <holder pid> [admitted|waiting|ended] — one request file
+  local st
+  st="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$3" 2>/dev/null | awk '{ $1 = $1; print }')"
+  mkdir -p "$BIONIC_GATE_DIR/requests"
+  { printf 'key=x.test.sh\nkind=work\nwho=fixture:w\ntree=%s\nasked=1000\nholder=%s:%s\n' "$2" "$3" "$st"
+    case "${4:-admitted}" in
+      admitted) printf 'admitted=1001\npromise=1:0.5:10\n' ;;
+      ended) printf 'admitted=1001\npromise=1:0.5:10\nended=1002\nrc=0\n' ;;
+    esac
+  } > "$BIONIC_GATE_DIR/requests/$1"
+}
+gb_clear() { rm -rf "$BIONIC_GATE_DIR"; [ -z "$GB_HOLD" ] || kill "$GB_HOLD" 2>/dev/null; GB_HOLD=""; }
+trap 'gb_clear; stop_runner; stop_mention; rm -rf "$TMP"' EXIT
+
+GBT1="$(new_tree "$GB" gate-root)"
+gb_holder; gb_plant 7 "$GB" "$GB_HOLD"
+GBREFS0="$(refs_of "$GB")"
+OUTG1="$(worktree_land "$GBT1" wave/fixture)"; RCG1=$?
+expect_match "an admitted run in the main checkout refuses the land" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$OUTG1"
+expect_match "…naming the request, its key and its tree" "*request=7 key=x.test.sh tree=${GB} *" "$OUTG1"
+expect_match "…and its holder" "*holder=${GB_HOLD}*" "$OUTG1"
+expect_eq    "the refusal exits 2" "2" "$RCG1"
+expect_eq    "no ref moved" "$GBREFS0" "$(refs_of "$GB")"
+gb_plant 7 "$GB" "$GB_HOLD" waiting
+expect_match "a request that is only waiting has run nothing: the land goes through" \
+  "spawn-worktree: LANDED branch=gate-root *" "$(worktree_land "$GBT1" wave/fixture)"
+gb_clear
+
+GBT2="$(new_tree "$GB" gate-ended)"
+gb_holder; gb_plant 8 "$GB" "$GB_HOLD" ended
+expect_match "an ended request does not refuse" \
+  "spawn-worktree: LANDED branch=gate-ended *" "$(worktree_land "$GBT2" wave/fixture)"
+gb_clear
+
+GBT3="$(new_tree "$GB" gate-dead)"
+gb_holder; gb_plant 9 "$GB" "$GB_HOLD"; kill "$GB_HOLD" 2>/dev/null
+i=0; while kill -0 "$GB_HOLD" 2>/dev/null && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+GB_HOLD=""
+expect_match "an admitted request whose holder is dead (killed) does not refuse" \
+  "spawn-worktree: LANDED branch=gate-dead *" "$(worktree_land "$GBT3" wave/fixture)"
+gb_clear
+
+GBT4="$(new_tree "$GB" gate-writer)"
+GBW="$(new_tree "$GB" gate-writers-own)"
+gb_holder; gb_plant 10 "$GBW" "$GB_HOLD"
+expect_match "a run in a writer's own tree does not refuse another tree's land" \
+  "spawn-worktree: LANDED branch=gate-writer *" "$(worktree_land "$GBT4" wave/fixture)"
+gb_clear
+
+GBO="$(new_repo "$TMP/busy-gate-other")"
+GBT5="$(new_tree "$GB" gate-other)"
+gb_holder; gb_plant 11 "$GBO" "$GB_HOLD"
+expect_match "a run in another repository does not refuse" \
+  "spawn-worktree: LANDED branch=gate-other *" "$(worktree_land "$GBT5" wave/fixture)"
+gb_clear
+
+GBWAVE="$TMP/busy-gate-outside-wave"
+git -C "$GB" worktree add --quiet -b wave/gout "$GBWAVE" wave/fixture >/dev/null 2>&1
+GBWAVE="$(cd "$GBWAVE" && pwd -P)"
+GBT6="$(new_tree "$GB" gate-into-outside)"
+gb_holder; gb_plant 12 "$GBWAVE" "$GB_HOLD"
+OUTG6="$(worktree_land "$GBT6" wave/gout)"; RCG6=$?
+expect_match "an admitted run in the TARGET checkout, outside the root, refuses" \
+  "spawn-worktree: REFUSED reason=suite-running request=12 *tree=${GBWAVE} *" "$OUTG6"
+expect_eq    "that refusal exits 2" "2" "$RCG6"
+gb_clear
+expect_match "the same land goes through once that run is gone" \
+  "spawn-worktree: LANDED branch=gate-into-outside onto=wave/gout *" "$(worktree_land "$GBT6" wave/gout)"
+
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
 G="$(new_repo "$TMP/land-legacy")"

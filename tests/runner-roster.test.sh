@@ -886,6 +886,94 @@ expect_eq "10.4 a tree that is no repository names no head" "head=none dirty=non
   "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
 
 # ============================================================
+section "§ASK each suite of a run asks the gate for itself; the runner holds nothing (T12; AC-2.12 runner half, D13)"
+# ============================================================
+#
+# THE CLAIM. Before wave-28 a run started through the Bash tool held ONE booking for the whole
+# run and handed it to every worker, so up to eight suites ran on one place. Now the runner
+# asks nothing for itself: each `--one` worker asks `gate_ask work <suite file name>` for its
+# own suite, runs it with BIONIC_GATE_ADMIT naming that request, and ends it with the suite's
+# code; a solo suite asks `whole`; --serial asks per suite too. The store is this section's own
+# (BIONIC_GATE_DIR under the suite's mktemp root) and the memory reading is pinned low, so no
+# drive reads or writes the machine's real gate.
+TA="$TMPROOT/ask"; RA_GATE="$TMPROOT/ask-gate"
+rr_tree "$TA"
+ra_stub() {  # <name> <solo yes|no> — a green suite that records the admission it ran under
+  { printf '#!/bin/bash\n'
+    [ "$2" = yes ] && printf '# runner: solo\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf 'printf "%%s\\n" "${BIONIC_GATE_ADMIT:-none}" > "$RR_MARKS/%s.admit"\n' "$1"
+    printf 'section "%s"\n' "$1"
+    printf 'expect_eq "%s ran" "x" "x"\n' "$1"
+    printf 'finish\n'
+  } > "$TA/tests/$1.test.sh"
+}
+for _ra in ask-a ask-b ask-c; do ra_stub "$_ra" no; done
+ra_stub aaa-ask-solo yes
+RR_GATE_ENV=(-u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET -u BIONIC_SLOT_HELD
+  -u BIONIC_SLOT_PLACE -u BIONIC_SLOT_QUIET -u BIONIC_LOAD_NOW_FILE BIONIC_GATE_POLL=0.1
+  BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192
+  "BIONIC_SLOTS_DIR=$TMPROOT/ask-slots" BIONIC_SLOTS_MAX_WAIT=20)
+ra_drive() {  # [mode] — the scratch runner on this section's own store; RR_OUT, RR_RC
+  RR_OUT="$( cd "$TA" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/ask-ring" \
+    BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 \
+    BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+    env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RA_GATE" bash tests/run.sh ${1:+"$1"} 2>&1 )"
+  RR_RC=$?
+}
+ra_reqs() {  # one line per request in the store: <key> <kind> <rc>, sorted
+  local f
+  for f in "$RA_GATE"/requests/[0-9]*; do
+    [ -f "$f" ] || continue
+    printf '%s %s %s\n' "$(sed -n 's/^key=//p' "$f" | tail -n 1)" "$(sed -n 's/^kind=//p' "$f" | tail -n 1)" \
+      "$(sed -n 's/^rc=//p' "$f" | tail -n 1)"
+  done | sort
+}
+ra_id_of() {  # <key> — the id of the request with that key
+  grep -l "^key=$1\$" "$RA_GATE"/requests/[0-9]* 2>/dev/null | head -n 1 | sed 's#.*/##'
+}
+rm -rf "$RA_GATE"; rm -f "$RR_MARKS"/*.admit
+ra_drive
+expect_eq "ASK.1 the run is green" "0" "$RR_RC"
+expect_eq "ASK.2 one request per suite, keyed by the suite's file name, each ended with its code" \
+  "aaa-ask-solo.test.sh whole 0
+ask-a.test.sh work 0
+ask-b.test.sh work 0
+ask-c.test.sh work 0" "$(ra_reqs)"
+expect_absent "ASK.3 …and none keyed by the runner: the runner holds nothing" "run.sh" "$(ra_reqs)"
+expect_eq "ASK.4 the three batch suites were held by three different workers" "3" \
+  "$(for _ra in ask-a ask-b ask-c; do sed -n 's/^holder=\([0-9]*\):.*/\1/p' "$RA_GATE/requests/$(ra_id_of "$_ra.test.sh")" 2>/dev/null | tail -n 1; done | sort -u | grep -c .)"
+expect_eq "ASK.5 each suite ran under its own request (ask-a)" "$(ra_id_of ask-a.test.sh)" \
+  "$(cat "$RR_MARKS/ask-a.admit" 2>/dev/null)"
+expect_eq "ASK.6 …(the solo suite, under its whole request)" "$(ra_id_of aaa-ask-solo.test.sh)" \
+  "$(cat "$RR_MARKS/aaa-ask-solo.admit" 2>/dev/null)"
+rm -rf "$RA_GATE"; rm -f "$RR_MARKS"/*.admit
+ra_drive --serial
+expect_eq "ASK.7 --serial is green" "0" "$RR_RC"
+expect_eq "ASK.8 --serial asks per suite too, each as work, each ended" \
+  "aaa-ask-solo.test.sh work 0
+ask-a.test.sh work 0
+ask-b.test.sh work 0
+ask-c.test.sh work 0" "$(ra_reqs)"
+expect_eq "ASK.9 …and each suite ran under its own request (ask-b)" "$(ra_id_of ask-b.test.sh)" \
+  "$(cat "$RR_MARKS/ask-b.admit" 2>/dev/null)"
+# Through the shim, as the wall runs it: the shim takes no number for the runner.
+rm -rf "$RA_GATE"; rm -f "$RR_MARKS"/*.admit
+RR_OUT="$( cd "$TA" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/ask-ring" \
+  BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 \
+  BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+  env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RA_GATE" \
+  bash "$REPO/payload/scripts/booked.sh" --agent ask --max-wait 60 --suites run.sh -- 'bash tests/run.sh' 2>&1 )"
+RR_RC=$?
+expect_eq "ASK.10 a run wrapped in the shim is green" "0" "$RR_RC"
+expect_eq "ASK.11 …the shim took no number, and each suite asked for itself" \
+  "aaa-ask-solo.test.sh whole 0
+ask-a.test.sh work 0
+ask-b.test.sh work 0
+ask-c.test.sh work 0" "$(ra_reqs)"
+
+# ============================================================
 section "§11 NESTED — a solo suite takes the whole machine; a nested run never waits on its parent (wave-26 T8, AC-6.4)"
 # ============================================================
 #
