@@ -65,7 +65,9 @@ _world_cleanup() {
 }
 
 # Chain onto the suite's EXIT trap. `trap -p` is read through a file, not `$( )`, so the
-# answer is this shell's own trap on every bash this runs under.
+# answer is this shell's own trap on every bash this runs under. The chained trap saves `$?`
+# before the cleanup and restores it before the suite's trap, so a suite trap that ends
+# `exit $rc` reads the status the shell began to exit with, not the cleanup's 0.
 _world_chain_trap() {
   local f="$WORLD_ROOT/.trap" prev=''
   trap -p EXIT > "$f" 2>/dev/null
@@ -76,7 +78,7 @@ _world_chain_trap() {
   rm -f "$f"
   if [ -n "$prev" ]; then
     # shellcheck disable=SC2064  # the previous trap is expanded now, on purpose
-    trap "_world_cleanup; $prev" EXIT
+    trap "_world_rc=\$?; _world_cleanup; (exit \$_world_rc); $prev" EXIT
   else
     trap _world_cleanup EXIT
   fi
@@ -116,11 +118,22 @@ world_machine() {
   export BIONIC_PROBE_LOAD_1M="$busy" BIONIC_PROBE_SWAP_PCT=0
 }
 
+# _world_put_clock <file> <epoch> — replaces the clock file by renaming a finished temporary
+# file from the same directory onto it. A write in place truncates first, and `_res_now`
+# reads an empty file as "no epoch" and falls through to the real clock; a rename leaves a
+# reader the old epoch or the new one, never neither.
+_world_put_clock() {
+  local f="$1" dir=. tmp
+  case "$f" in */*) dir="${f%/*}" ;; esac
+  tmp="$(mktemp "$dir/.clock.XXXXXX")" || return 1
+  printf '%s\n' "$2" > "$tmp" && mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+}
+
 # world_clock <epoch> — writes the clock file and points BIONIC_NOW_FILE at it. Every
 # process started after this reads the same file, so `world_tick` moves them all.
 world_clock() {
   _res_is_uint "${1:-}" || { _world_refuse world_clock "epoch must be a whole number, got '${1:-}'"; return 2; }
-  printf '%s\n' "$1" > "$WORLD_ROOT/clock"
+  _world_put_clock "$WORLD_ROOT/clock" "$1" || return 1
   export BIONIC_NOW_FILE="$WORLD_ROOT/clock"
 }
 
@@ -131,7 +144,7 @@ world_tick() {
   _res_is_uint "${1:-}" || { _world_refuse world_tick "seconds must be a whole number, got '${1:-}'"; return 2; }
   now="$(awk 'NR == 1 { print $1; exit }' "${BIONIC_NOW_FILE:-/nonexistent}" 2>/dev/null)"
   _res_is_uint "$now" || { _world_refuse world_tick "no clock is planted — call world_clock first"; return 2; }
-  printf '%s\n' "$(( now + $1 ))" > "$BIONIC_NOW_FILE"
+  _world_put_clock "$BIONIC_NOW_FILE" "$(( now + $1 ))"
 }
 
 # world_cost <key> <mem_pct> <cores> <seconds> — appends `<mem>:<cores>:<seconds>:<epoch>` to
@@ -152,6 +165,9 @@ world_cost() {
 
 # world_suite <name> <green|red|none|kill> — writes `tests/<name>.test.sh` under the CURRENT
 # directory (a fixture checkout or a row tree; `cd` there first) and prints its absolute path.
+# Refused with rc 2 unless that directory, resolved, lies inside WORLD_ROOT, resolved: a suite
+# starts at the real checkout's root, so a missing or failed `cd` would otherwise overwrite a
+# real suite.
 # The suite prints `PASS:` lines and the framework's verdict line, `<file>: <p>/<t> passed,
 # <f> failed  sections=1 setup=0`, without sourcing tests/lib/assert.sh:
 #   green  one PASS, the verdict line, rc 0
@@ -159,6 +175,12 @@ world_cost() {
 #   none   one PASS, then exit 0 BEFORE the verdict line
 #   kill   one PASS, then `kill -9` on itself (rc 137)
 world_suite() (
+  here="$(pwd -P)"; root="$(cd "${WORLD_ROOT:-/nonexistent}" 2>/dev/null && pwd -P)"
+  case "$here/" in
+    "${root:-/nonexistent}"/*) ;;
+    *) _world_refuse world_suite "the current directory lies outside WORLD_ROOT; cd into the world first"
+       exit 2 ;;
+  esac
   name="${1:-}"; name="${name%.test.sh}"; ending="${2:-}"
   case "$name" in
     ''|*/*) _world_refuse world_suite "name must be a bare suite name, got '${1:-}'"; exit 2 ;;
