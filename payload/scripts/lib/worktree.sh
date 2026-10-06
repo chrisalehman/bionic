@@ -576,9 +576,17 @@ _wt_bionic_committed() {  # <root> <onto head> <tree head> -> "<commit> <first p
 # else the first added path), the commit that made it (12 hex) and the remedy, which
 # `spawn-worktree.sh land` and the standdown's report read as they read every other land refusal.
 # The remedy's commit moves the head past the tree's stamps, so it says to run the suites before
-# landing again, as not-current's does (A-orch-227 P2-1).
-_wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit> <path>
-  _wt_refuse "bionic-committed path=${5} commit=${4:0:12} branch=${2} onto=${3} fix='git -C ${1} rm -r --cached .bionic, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
+# landing again, as not-current's does (A-orch-227 P2-1). The remedy is per path (A-orch-231): a
+# path added under a directory the target tracks is taken out of the index alone, since
+# `rm -r --cached .bionic` would also un-track the project's own files there and the merge would
+# then delete them from the main checkout; `.bionic` itself, or an add where the target tracks no
+# directory, takes the whole path out. The added file is then untracked in the tree, which land
+# counts as dirty, so the line says to move it out of the tree: nothing of the writer's is lost
+# (A-orch-238).
+_wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit> <path> <target's kind at .bionic>
+  local rm="rm -r --cached .bionic"
+  if [ "$5" != .bionic ] && [ "$6" = dir ]; then rm="rm --cached ${5}, move ${5} out of the tree"; fi
+  _wt_refuse "bionic-committed path=${5} commit=${4:0:12} branch=${2} onto=${3} fix='git -C ${1} ${rm}, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
 }
 
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
@@ -783,7 +791,8 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # THE RECORD LINK NEVER LANDS (wave-27 T79): a range that commits `.bionic` is refused here,
   # before any merge, the tree and its stamps kept (see _wt_bionic_committed).
   why="$(_wt_bionic_committed "$root" "$onto_head" "$head")" && {
-    _wt_refuse_bionic "$wt_abs" "$branch" "$onto" "${why%% *}" "${why#* }"; return 2
+    _wt_refuse_bionic "$wt_abs" "$branch" "$onto" "${why%% *}" "${why#* }" "$(_wt_bionic_kind "$root" "$onto_head")"
+    return 2
   }
 
   # THE RUNNER IS NEVER A DECLARED RED (wave-27 T67; review pass 46 B4): a declaration is honoured

@@ -3647,7 +3647,7 @@ LCM="$(new_tree "$LC" wt/kind-more)"; echo "more" > "$LCM/.bionic/more.md"
 lk_commit "$LCM" "a file added under the tracked .bionic" .bionic/more.md; LCM_C="$(git -C "$LCM" rev-parse HEAD)"
 LC_SUMS="$(lb_sums "$LC")"
 expect_match "(b8b) a range that ADDS a file under the tracked directory is refused, naming that path (A-orch-227)" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/more.md commit=${LCM_C:0:12} branch=wt/kind-more onto=wave/fixture *" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/more.md commit=${LCM_C:0:12} branch=wt/kind-more onto=wave/fixture fix='git -C ${LCM} rm --cached .bionic/more.md, move .bionic/more.md out of the tree, commit, run the suites, land again' — *" \
   "$(lb_first "$(worktree_land "$LCM" wave/fixture)")"
 expect_eq    "(b8b) …the project's .bionic files byte for byte" "$LC_SUMS" "$(lb_sums "$LC")"
 LCK="$(new_tree "$LC" wt/kind-rm-keep)"; git -C "$LCK" rm --quiet .bionic/keep.md
@@ -3708,11 +3708,24 @@ expect_eq    "(b14-pre) the main checkout holds an untracked plan at that path" 
 LA_SUMS="$(lb_sums "$LA")"; LA_REFS="$(refs_of "$LA")"
 OUTLA="$(worktree_land "$LAT" wave/fixture)"; RCLA=$?
 expect_match "(b14) a range that adds a file over the project's untracked plan is refused, naming the added path" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/docs/plans/w.plan.md commit=${LAT_C:0:12} branch=wt/kind-add onto=wave/fixture *" "$(lb_first "$OUTLA")"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/docs/plans/w.plan.md commit=${LAT_C:0:12} branch=wt/kind-add onto=wave/fixture fix='git -C ${LAT} rm --cached .bionic/docs/plans/w.plan.md, move .bionic/docs/plans/w.plan.md out of the tree, commit, run the suites, land again' — *" "$(lb_first "$OUTLA")"
 expect_eq    "(b14) …exit 2" "2" "$RCLA"
 expect_eq    "(b14) …the untracked plan byte for byte, and every file beside it" "$LA_SUMS" "$(lb_sums "$LA")"
 expect_eq    "(b14) …no ref moved" "$LA_REFS" "$(refs_of "$LA")"
 expect_true  "(b14) …the tree is kept" test -d "$LAT"
+# THE REMEDY THE LINE NAMES, followed (A-orch-231, A-orch-238): the added path alone out of the index,
+# the file moved out of the tree (kept, not lost), a commit, the suites run (a green stamp), land again.
+# The project's keep.md stays tracked and its plan untouched.
+git -C "$LAT" rm --cached --quiet .bionic/docs/plans/w.plan.md
+mv "$LAT/.bionic/docs/plans/w.plan.md" "$TMP/kind-add-moved.md"
+git -C "$LAT" commit --quiet -m "the added plan out of the index"
+green_stamp "$LAT"
+expect_match "(b14r) following the line's own remedy, the tree lands" \
+  "spawn-worktree: LANDED branch=wt/kind-add onto=wave/fixture *" "$(lb_first "$(worktree_land "$LAT" wave/fixture)")"
+expect_eq    "(b14r) …keep.md is still tracked by the target" "100644" "$(git -C "$LA" ls-tree wave/fixture .bionic/keep.md | awk '{ print $1 }')"
+expect_eq    "(b14r) …and intact in the checkout" "keep" "$(cat "$LA/.bionic/keep.md")"
+expect_eq    "(b14r) …and the project's plan untouched" "plan" "$(cat "$LA/.bionic/docs/plans/w.plan.md")"
+expect_eq    "(b14r) …and the writer's file kept where it was moved" "the branch's plan" "$(cat "$TMP/kind-add-moved.md")"
 # …and in the same target a change to the tracked keep.md lands (the deletion arm is b8c's).
 LAK="$(new_tree "$LA" wt/kind-add-change)"; echo "changed" > "$LAK/.bionic/keep.md"
 lk_commit "$LAK" "a change to the tracked keep.md" .bionic/keep.md
@@ -3727,7 +3740,7 @@ LP="$(lk_repo "$TMP/land-kind-stopped")"
 LPT="$(new_tree "$LP" wt/kind-stopped)"; green_stamp "$LPT"; LPT_H="$(git -C "$LPT" rev-parse HEAD)"
 git -C "$LP" rm -r --quiet --cached .bionic/keep.md .bionic/also.md && git -C "$LP" commit --quiet -m "the target stops tracking .bionic"
 expect_match "(b15) a tree branched before its target stopped tracking .bionic is refused, naming the tree's head" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/also.md commit=${LPT_H:0:12} branch=wt/kind-stopped onto=wave/fixture *" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/also.md commit=${LPT_H:0:12} branch=wt/kind-stopped onto=wave/fixture fix='git -C ${LPT} rm -r --cached .bionic, commit, run the suites, land again' — *" \
   "$(lb_first "$(worktree_land "$LPT" wave/fixture)")"
 
 # (b11) THE STAND-DOWN PATH reaches the same verdicts: b6's range refused, b8's landed.
