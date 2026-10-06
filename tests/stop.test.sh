@@ -1321,8 +1321,8 @@ expect_contains "FO1c: …naming the ready row" "T7" "$(reason_of)"
 # FO2: the same fixture with a WRITER open — no slot is free, so neither the tick nor the wall
 # asks for a fill. The control that FO1 cannot pass on a wall that refuses every turn.
 FO_DW="$(fo_fixture implementor)"
-expect_contains "FO2a: with a writer open the tick reports the budget full" \
-  "the budget is full" "$(fo_tick "$FO_DW")"
+expect_contains "FO2a: with a writer open the tick reports the cap reached" \
+  "the cap writers=1 is reached" "$(fo_tick "$FO_DW")"
 sd_turn "$FO_TX" u-fo-2
 s7_fire "$FO_DW" "$FO_TX"
 expect_absent "FO2b: …and the stop wall asks for no fill" "Fillable gap" "$(reason_of)$STOP_ERR"
