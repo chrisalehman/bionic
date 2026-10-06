@@ -5825,7 +5825,7 @@ expect_contains "W27-R7 precondition: the notice part reads (it holds the rigor 
 expect_contains "W27-R7: under what you will notice, remove no longer uninstalls any tool" \
   "**Remove no longer uninstalls any tool.**" "$W27R_NOTICE"
 expect_contains "W27-R7b: …it names each one with the command to remove it by hand, and says why" \
-  "with the command to remove it by hand, and leaves it in place, on every door and under \`--all\`: bionic keeps no record yet of what it installed, and it removes nothing it cannot prove is its own" \
+  "with the command to remove it by hand, and leaves it in place, from the plugin, per item and under \`--all\`: bionic keeps no record yet of what it installed, and it removes nothing it cannot prove is its own" \
   "$W27R_NOTICE"
 expect_contains "W27-R7c precondition: the known-limits part reads (it holds the rc limit)" "No door removes a line of your rc" "$W27R_LIMITS"
 expect_contains "W27-R7c: a known limit says every declared tool present is listed until the record exists" \
@@ -5833,6 +5833,18 @@ expect_contains "W27-R7c: a known limit says every declared tool present is list
   "$W27R_LIMITS"
 expect_contains "W27-R7d: a known limit says what a SHELL that is neither zsh nor bash does to the claude() block" \
   "When SHELL is neither zsh nor bash, the plugin's remove asks about bionic's claude() block and then cannot rewrite the rc, while the standalone remove removes it; no line is lost either way." \
+  "$W27R_LIMITS"
+expect_contains "W27-R7f: a known limit says the standalone remove and a declined --all name no tool, and where the list is" \
+  "The standalone remove (the script run alone, with no \`lib/\` beside it) cannot read the tool table: its \`--all\` calls a machine with tools on it \"already clean\", and an \`--all\` you decline names no tool. Run \`/bionic:remove\` from the plugin and answer per item to see the by-hand list." \
+  "$W27R_LIMITS"
+expect_contains "W27-R7g: a known limit says a read-only rc holding the env block is booked skipped by --all with nothing asked" \
+  "A read-only rc that holds bionic's retired environment block, with a declared tool present, makes \`--all\` count \"1 skipped by you\" for a question nobody could answer; nothing is lost, and the block is yours to delete by hand." \
+  "$W27R_LIMITS"
+expect_contains "W27-R7h: a known limit says a lone excalidraw lock hash reads already clean while it stays, and names the rm line" \
+  "A lone \`excalidraw-venv.lock.sha256\` with no venv beside it, which is what deleting the venv by hand leaves, reads \"(not installed) — already clean\" while the file stays; delete it with \`rm ~/.local/share/bionic/excalidraw-venv.lock.sha256\` (under \`\$XDG_DATA_HOME\` if you set it)." \
+  "$W27R_LIMITS"
+expect_contains "W27-R7i: the alias sentence says a block whose first line is still bionic's is not the case" \
+  "every shell start keeps printing the error until you do, unless the block's first line is still bionic's \`unalias\` line." \
   "$W27R_LIMITS"
 W27R_JOINED="$(printf '%s' "$W27R_E" | tr '\n' ' ' | tr -s ' ')"
 expect_contains "W27-R7e: the upgrade note counts six ways in 1.11.0, and fixes all six" \
