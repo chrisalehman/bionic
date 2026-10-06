@@ -284,8 +284,8 @@ Known limits, carried to the next release:
 - Two landings started into one checkout at the same moment can leave that checkout dirty or both
   be refused; nothing is lost. Land one tree at a time. The repair is `git -C <checkout> reset
   --hard` (or removing the one untracked file), then land again. This is older than this release.
-- A tree branched before its target stopped tracking `.bionic` is refused until it removes
-  `.bionic` itself.
+- A tree branched before its target stopped tracking `.bionic` is refused until it merges the
+  target, as the refusal's fix says.
 - Session start's sweep of dead sessions slows when many of them each left start files behind
   (the sweep matches those files per session); a later release indexes them once.
 - The dispatch wall can count as a reader's record a path the fact verb then refuses: a path at
