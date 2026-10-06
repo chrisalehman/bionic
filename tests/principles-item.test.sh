@@ -825,8 +825,12 @@ for T51_SH in $T51_BASHES; do
   N_SA="$(printf 'y\n' | t51_run "$T51_SH" "$SB_N" "$TMP/standalone/remove.sh" --only "$ITEM")"
   expect_same_bytes "NUL (${T51_TAG}): the standalone door leaves it byte-identical" "$TMP/n-before" "$N_F"
   expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_SA"
-  # remove --all
+  # remove --all, over a page of its own: the pre-plugin skill copy `legacy-skill-copy`
+  # offers (wave-27 T82 — tool rows, which the claude stub used to make present, are
+  # never on the page now).
+  mkdir -p "$SB_N/.claude/skills/canonical-sdlc"; printf -- '---\nname: canonical-sdlc\n---\n' > "$SB_N/.claude/skills/canonical-sdlc/SKILL.md"
   N_ALL="$(printf 'y\n' | t51_run "$T51_SH" "$SB_N" "$REMOVE_SH" --all)"
+  expect_contains "NUL (${T51_TAG}): the --all page printed (the rows below are not vacuous)" "Do all of the above?" "$N_ALL"
   expect_eq "NUL (${T51_TAG}): remove --all keeps the file" "yes" "$(path_exists "$N_F")"
   expect_same_bytes "NUL (${T51_TAG}): …byte-identical" "$TMP/n-before" "$N_F"
   expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_ALL"
