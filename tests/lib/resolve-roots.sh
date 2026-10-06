@@ -78,12 +78,12 @@ fi
 #
 # THE RUNNER IS THE ONE EXEMPTION, recognised by its own name — the same
 # convention, for the same reason, as the derivation's exemption in
-# tests/lib/assert.sh. `tests/run.sh` is not a suite: it BUILDS the pin (a
-# directory with one `bash` in it, first on PATH) and hands it to its children,
-# so every suite it launches is already `/bin/bash` and needs nothing from here.
-# The runner itself keeps whatever interpreter the caller typed, and must — it
-# sources this seam in a subshell AFTER printing the environment stamp, so
-# re-executing it there would re-run the whole roster inside that subshell.
+# tests/lib/assert.sh. `tests/run.sh` is not a suite: it builds the pin for its
+# whole run, with this file's `bionic_interpreter_pin` below and its own temp
+# root, and hands it to its children, so every suite it launches finds the pin
+# already first on PATH. The runner itself keeps whatever interpreter the
+# caller typed, and must — it sources this seam part-way through its own run,
+# so re-executing it there would start the run again from the top.
 # Before Step 6 the exported marker happened to cover this; now that the marker
 # no longer decides, the exemption has to be said out loud.
 #
@@ -91,16 +91,58 @@ fi
 # there is nothing to re-execute, and guessing would exec the shell's own name. `/bin/bash`
 # must exist and be executable — on a host where it does not, the shebang every payload
 # script carries is unrunnable and this seam is not the place that discovers it.
-if [ "${BASH:-}" != "/bin/bash" ] \
-   && [ "${0##*/}" != "run.sh" ] \
+#
+# ── THE INTERPRETER PIN: ONE FUNCTION, OWNED HERE (wave-27 T81; ADR-001) ─────
+#
+# The re-exec above gives the SUITE /bin/bash. It used to give nothing to what the suite starts:
+# a suite typed at a prompt ran under 3.2 while every `bash "$HOOK"` it spawned took PATH's
+# 5.3, and tests/run.sh, which put `bash -> /bin/bash` first on PATH for its whole run, never
+# showed that world. A 5.x-only `case` arm in a shipped hook was green at every hand-run for
+# weeks and red only in the full run. Two pins were two worlds, so there is one, here, and
+# tests/run.sh calls it for its run instead of carrying its own.
+#
+# bionic_interpreter_pin <root> builds <root>/pin holding one entry, `bash -> /bin/bash`, puts
+# it first on PATH and exports PATH and the record marker. The REST of PATH is the caller's
+# own, so `jq`, `git` and `claude` resolve exactly where they did. It returns non-zero and
+# changes nothing when it cannot build that directory or the directory is not this user's.
+# The runner's root is its run's temp root. A hand-run suite has none yet when it sources this
+# file, so its root is one directory per user under the temp directory, made once and reused,
+# never removed: it holds a symlink and nothing else, and removing it while another suite's
+# children resolve `bash` through it would be the race. An entry already there is never
+# replaced, for the same reason.
+bionic_interpreter_pin() {
+  local root="${1:-}" dir
+  [ -n "$root" ] || return 1
+  dir="$root/pin"
+  mkdir -p "$dir" 2>/dev/null && [ -O "$root" ] && [ -O "$dir" ] || return 1
+  [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
+  [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] || return 1
+  PATH="$dir:$PATH"
+  export PATH
+  BIONIC_TEST_INTERPRETER_PINNED=1
+  export BIONIC_TEST_INTERPRETER_PINNED
+}
+
+# THE HAND-RUN PATH. The seam calls the function right after its re-exec — in the /bin/bash copy,
+# or in a suite started under /bin/bash in the first place — unless the first PATH entry is
+# already a pin (a suite tests/run.sh launched, or one this seam already pinned). The test is
+# the directory, not the marker, for the reason the re-exec's test is the interpreter (K-4).
+if [ "${0##*/}" != "run.sh" ] \
    && [ -x "/bin/bash" ] \
    && [ -f "$0" ] && [ -r "$0" ]; then
-  if [ "$(/bin/bash -c 'printf %s "$BASH"' 2>/dev/null)" = "/bin/bash" ]; then
-    BIONIC_TEST_INTERPRETER_PINNED=1
-    export BIONIC_TEST_INTERPRETER_PINNED
-    exec /bin/bash "$0" "$@"
-  else
-    echo "resolve-roots.sh: /bin/bash does not report itself as /bin/bash — not re-executing, so this run is under ${BASH:-an unknown shell} and the pin is OFF" >&2
+  if [ "${BASH:-}" != "/bin/bash" ]; then
+    if [ "$(/bin/bash -c 'printf %s "$BASH"' 2>/dev/null)" = "/bin/bash" ]; then
+      BIONIC_TEST_INTERPRETER_PINNED=1
+      export BIONIC_TEST_INTERPRETER_PINNED
+      exec /bin/bash "$0" "$@"
+    else
+      echo "resolve-roots.sh: /bin/bash does not report itself as /bin/bash — not re-executing, so this run is under ${BASH:-an unknown shell} and the pin is OFF" >&2
+    fi
+  elif [ "$(readlink "${PATH%%:*}/bash" 2>/dev/null)" != "/bin/bash" ]; then
+    _bionic_pin_root="${TMPDIR:-/tmp}"
+    bionic_interpreter_pin "${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}" \
+      || echo "resolve-roots.sh: cannot build the interpreter pin under ${_bionic_pin_root%/} — this suite is /bin/bash but what it starts takes PATH's bash" >&2
+    unset _bionic_pin_root
   fi
 fi
 

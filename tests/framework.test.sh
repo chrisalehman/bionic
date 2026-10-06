@@ -1513,6 +1513,44 @@ expect_contains "16: --serial refuses it in the same words" \
   "adoption wall: tests/w-unadopted.test.sh never calls finish" "$W_SERIAL_OUT"
 
 # ============================================================
+section "16b: the wall at source time — a suite run ALONE is refused as the runner refuses it (T81)"
+# ============================================================
+#
+# The wall once lived in the runner alone, so a suite typed at a prompt was never asked: a
+# private `ok()` was green at every hand-run and refused only in the full run. The framework now
+# asks the same question of the suite that sources it, before its first row, in the runner's
+# own line. Driven on the SAME planted suites, in the SAME scratch tree, the runner refused
+# above — so "the runner's line" is read off the runner's own output, not retyped here.
+W_ALONE_MARKS="$SB/wall-alone-marks"
+mkdir -p "$W_ALONE_MARKS"
+w_alone() {  # w_alone <suite-basename> -> sets WA_OUT / WA_RC
+  WA_OUT="$( cd "$W_TREE" && S10_MARKS="$W_ALONE_MARKS" bash "tests/$1" 2>&1 )"
+  WA_RC=$?
+}
+for WA_SUITE in w-ok w-unadopted; do
+  WA_LINE="$(printf '%s\n' "$W_OUT" | grep -F "adoption wall: tests/${WA_SUITE}.test.sh " | head -1)"
+  expect_nonempty "16b: the runner's refusal line for ${WA_SUITE} was read (the extractor works)" "$WA_LINE"
+  w_alone "${WA_SUITE}.test.sh"
+  expect_eq "16b: ${WA_SUITE} run alone exits non-zero" "1" "$WA_RC"
+  expect_eq "16b: …with the runner's line, verbatim" "yes" \
+    "$(printf '%s\n' "$WA_OUT" | grep -qxF -- "$WA_LINE" && echo yes || echo no)"
+  expect_eq "16b: …before its first row (its marker was never written)" "no" \
+    "$([ -f "$W_ALONE_MARKS/${WA_SUITE}.ran" ] && echo yes || echo no)"
+done
+# PAIRED POSITIVE, same tree, same driver: a suite the runner launched runs alone too.
+w_alone w-local.test.sh
+expect_eq "16b: a suite the wall admits runs alone (exit 0)" "0" "$WA_RC"
+expect_eq "16b: …and wrote its marker, so an absent marker above is a refusal" "yes" \
+  "$([ -f "$W_ALONE_MARKS/w-local.ran" ] && echo yes || echo no)"
+expect_absent "16b: …and no adoption line was printed for it" "adoption wall:" "$WA_OUT"
+# ONE CHECK, TWO CALLERS: the line is written in one place, the framework, and the runner
+# prints what the framework hands it.
+expect_eq "16b: the framework writes the refusal line (the extractor finds it there)" "1" \
+  "$(grep -cF "'adoption wall: " "$FRAMEWORK")"
+expect_eq "16b: …and the runner writes none of its own" "0" \
+  "$(grep -cF "'adoption wall: " "$REPO/tests/run.sh")"
+
+# ============================================================
 setup_section "plant the advisory scratch suites (T24)"
 # ============================================================
 #
