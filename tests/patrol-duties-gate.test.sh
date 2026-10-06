@@ -2170,7 +2170,7 @@ d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 s
 } > "$d/.bionic/tmp/roster-$SID.state"
 QT_CFG="$(mktemp -d)"
 QT_OUT="$(qt_tick "$d" "$QT_CFG")"
-expect_contains "C3 precondition: the budget is full, so nothing fills" "the budget is full" "$QT_OUT"
+expect_contains "C3 precondition: the cap is reached, so nothing fills" "is reached by" "$QT_OUT"
 expect_contains "C3: F3 a tick with every slot busy names the ready row it cannot take, and why" \
   "poker: WAIT T2 — ready; no writer slot free" "$QT_OUT"
 expect_absent "C3a: …and never says nothing is ready" "poker: WAITING" "$QT_OUT"
