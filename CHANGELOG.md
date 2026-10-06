@@ -140,6 +140,11 @@ What you will notice:
   written, and the evidence gate no longer writes files to stage its refusal.
 - **The doctrine is rewritten inside its byte caps.** It states the three questions and the rigor
   table once, and says what each reader's walls accept.
+- **Remove no longer uninstalls any tool.** `/bionic:remove` names each declared tool it finds,
+  with the command to remove it by hand, and leaves it in place, on every door and under `--all`:
+  bionic keeps no record yet of what it installed, and it removes nothing it cannot prove is its
+  own. The summary lists those tools under `left for you to remove by hand:`. A plugin bionic's
+  own catalog installed is still offered, and removed on your yes.
 
 Newly refused:
 
@@ -241,6 +246,9 @@ Known limits, carried to the next release:
   function: the start-up error stays, as it did with the old body.
 - An rc whose every line ends in CRLF is read as holding no block, and setup appends a second one;
   convert the file to LF line ends first. This is older than this release.
+- Until bionic keeps a record of what it installed (a later release), remove lists every declared
+  tool present, whether or not bionic installed it, and still offers the native plugins bionic's
+  own catalog installed.
 - The verbs only the main session may run are guarded by a reader of the command's text, so a
   path to the hook held in a shell variable steps round that guard.
 - The landing record is not for a network filesystem: its one-write append assumes a local disk.

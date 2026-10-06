@@ -1327,28 +1327,36 @@ CCS_GONE=no; [ -e "$CCS_CONFIG" ] || CCS_GONE=yes
 NB_GONE=no;  [ -e "$NB_SKILL" ]   || NB_GONE=yes
 VENV_GONE=no; [ -e "$VENV_DIR" ] || VENV_GONE=yes
 
-expect_eq "remove: the ccstatusline layout was installed and is now gone [ccstatusline-config-missing]" \
-  "yes yes" "${CCS_WAS_THERE} ${CCS_GONE}"
-expect_eq "remove: the notebooklm skill was installed and is now gone [notebooklm-skill-missing]" \
-  "yes yes" "${NB_WAS_THERE} ${NB_GONE}"
-expect_eq "remove: the excalidraw-renderer venv was installed and is now gone from the stable path [venv-path]" \
-  "yes yes" "${VENV_WAS_THERE} ${VENV_GONE}"
+# THE TOOLS STAY, NAMED (wave-27 T82). Nothing on the machine records which tools
+# bionic installed, so remove takes none of them off: each one setup installed is
+# still there afterwards, and the summary names it for the user to remove by hand.
+# Each row is still a conjunction — it was there after setup, AND it is there now.
+expect_eq "remove: the ccstatusline layout was installed and is still there [ccstatusline-config-missing]" \
+  "yes no" "${CCS_WAS_THERE} ${CCS_GONE}"
+expect_eq "remove: the notebooklm skill was installed and is still there [notebooklm-skill-missing]" \
+  "yes no" "${NB_WAS_THERE} ${NB_GONE}"
+expect_eq "remove: the excalidraw-renderer venv was installed and is still at the stable path [venv-path]" \
+  "yes no" "${VENV_WAS_THERE} ${VENV_GONE}"
 
 # EACH OF THESE IS A CONJUNCTION, never a bare absence. "Was it there" was read
-# before the teardown through the same extractor that reads "is it gone" after
+# before the teardown through the same extractor that reads "is it there" after
 # it, so a run in which setup had quietly written nothing fails the first half
 # instead of sailing through the second.
-expect_eq "remove: settings.json carried a statusLine command and no longer does" \
-  "yes no" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
+expect_eq "remove: settings.json carried a statusLine command and still does (a tool row, named)" \
+  "yes yes" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
 expect_eq "remove: settings.json carried bionic's environment names and no longer does" \
   "yes no" "${ENV_NAMES_WAS} $(yn "$(settings_env_names "$SETTINGS")")"
 
-# THE GLOBAL PACKAGE COMES OFF TOO (Fix step 3, AC-3). Clearing `.statusLine` and the
-# config dir used to be the whole removal; now ccstatusline is a real global npm
-# install, and leaving it on disk after `/bionic:remove` is exactly the "clean
-# machine" promise that removal exists to keep.
-expect_match "remove: the ccstatusline uninstall reached npm" \
-  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+# No package manager is asked to take anything off; the positive on the same log
+# is setup's install, which put the package there.
+expect_match "remove: the log holds setup's ccstatusline install" \
+  '*npm install -g ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "remove: …and no uninstall reached npm" \
+  '*npm uninstall*' "$(cat "$CALLS")"
+REMOVE_TOOLS_TEXT="$(cat "$REMOVE_OUT")"
+expect_contains "remove: the summary has its by-hand heading" "  left for you to remove by hand:" "$REMOVE_TOOLS_TEXT"
+expect_match "remove: …and names ccstatusline under it" \
+  '*left for you to remove by hand:*• ccstatusline*' "$REMOVE_TOOLS_TEXT"
 
 # DELETED AT THE REVIVE (epic-18 wave-03): a row asserting that no
 # `bionic-profile-` permission rule survived the teardown. Group 3 asserts setup
@@ -1528,10 +1536,14 @@ g7_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is c
 }
 expect_eq "7: no ccstatusline row calls a machine carrying bionic's statusline state clean" \
   "" "$(g7_clean_rows "$G7_OUT")"
-expect_eq "7: the statusLine bionic wrote is gone from settings.json" \
-  "" "$(jqf '.statusLine.command // ""')"
-expect_true "7: …and the config directory bionic copied in is gone" \
-  test ! -d "${HOME_FIX}/.config/ccstatusline"
+# Named, never acted on (wave-27 T82): the row is reported for the user to remove
+# by hand, and both halves stay where they are.
+expect_contains "7: …it names the row for the user to remove by hand" \
+  "ccstatusline: present — bionic has no record that it installed it, so it is left in place." "$(cat "$G7_OUT")"
+expect_eq "7: the statusLine is still in settings.json" \
+  "npx ccstatusline@latest" "$(jqf '.statusLine.command // ""')"
+expect_true "7: …and so is the config directory" \
+  test -d "${HOME_FIX}/.config/ccstatusline"
 # AC-7's rule, on this item too: what was not bionic's is still where the user left it.
 expect_eq "7: …and the rest of the user's settings.json is untouched" \
   "opus" "$(jqf '.model // ""')"
@@ -1640,6 +1652,10 @@ expect_match "8: a second pass over the same machine reads already clean" \
 # review-d's matrix rows 6 and 7 — the "new harm" rows, run beside Group 7's
 # existing positive twin so this is a measurement against the same extractor,
 # not a new one.
+#
+# SINCE wave-27 (T82) remove clears none of the three: the row is named with the
+# command to remove it by hand and left. The rows below now hold that the union
+# still REPORTS the row, and that the user's key and everything else survives.
 # ---------------------------------------------------------------------------
 
 section "Group 9: remove clears .statusLine only when it names ccstatusline"
@@ -1670,12 +1686,12 @@ g9_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is c
   grep 'ccstatusline' "$1" 2>/dev/null | grep 'already clean' 2>/dev/null
   return 0
 }
-expect_eq "9a: the row is still offered — the config directory is bionic's, so the union still fires" \
+expect_eq "9a: the row is still reported — the config directory alone makes it present" \
   "" "$(g9_clean_rows "$G9A_OUT")"
-expect_eq "9a: the user's own .statusLine SURVIVES a consented teardown" \
+expect_eq "9a: the user's own .statusLine SURVIVES the teardown" \
   "my-renderer" "$(jqf '.statusLine.command // ""')"
-expect_true "9a: …and the config directory bionic copied in is still gone" \
-  test ! -d "${HOME_FIX}/.config/ccstatusline"
+expect_true "9a: …and the config directory is left in place too (named, never removed)" \
+  test -d "${HOME_FIX}/.config/ccstatusline"
 expect_eq "9a: …and the rest of the user's settings.json is untouched" \
   "opus" "$(jqf '.model // ""')"
 
@@ -1700,12 +1716,15 @@ expect_eq "9b precondition: the fixture's statusLine names the user's own render
 G9B_OUT="$TMP/remove-statusline-user-owned-pkg.txt"
 printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G9B_OUT" 2>&1
 
-expect_eq "9b: the row is still offered — the installed package is bionic's, so the union still fires" \
+expect_eq "9b: the row is still reported — the installed package alone makes it present" \
   "" "$(g9_clean_rows "$G9B_OUT")"
-expect_eq "9b: the user's own .statusLine SURVIVES a consented teardown" \
+expect_eq "9b: the user's own .statusLine SURVIVES the teardown" \
   "my-renderer" "$(jqf '.statusLine.command // ""')"
-expect_match "9b: …and the package bionic installed is uninstalled" \
-  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+# The presence probe's own `npm list` is the positive on this log; no uninstall follows it.
+expect_match "9b: the teardown asked npm whether the package is there" \
+  '*npm list*ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "9b: …and never asked npm to uninstall it" \
+  '*npm uninstall*' "$(cat "$CALLS")"
 expect_eq "9b: …and the rest of the user's settings.json is untouched" \
   "opus" "$(jqf '.model // ""')"
 
@@ -1800,6 +1819,10 @@ expect_true "10 remove: the machine owner's file survives a glob-matching decoy 
 # terminal, and reports the row `skipped by you` to a user who answered yes.
 # The fix makes both the index and the value optional so a malformed key is
 # read as "no match" instead of raised as an error.
+#
+# SINCE wave-27 (T82) remove runs no clear at all on this row; what stays measured
+# is that a malformed key survives, no raw jq error reaches the user, and the row
+# is counted neither removed nor skipped.
 # ---------------------------------------------------------------------------
 
 section "Group 11: the jq predicate is total over .statusLine's type"
@@ -1823,14 +1846,14 @@ printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G11_OUT"
 
 expect_eq "11: a malformed .statusLine value survives (not bionic's shape to touch)" \
   "my-renderer" "$(jqf '.statusLine')"
-expect_true "11: …and the config directory bionic copied in is still gone" \
-  test ! -d "${HOME_FIX}/.config/ccstatusline"
-expect_match "11: …and the package bionic installed is uninstalled" \
-  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+expect_true "11: …and the config directory is left in place (named, never removed)" \
+  test -d "${HOME_FIX}/.config/ccstatusline"
+expect_eq "11: …and the package is still installed (the npm recorder's state is as planted)" \
+  "ccstatusline" "$(cat "${STATE}/npm-global")"
 expect_no_match "11: …and no raw jq error reaches the output" \
   '*jq:*' "$(cat "$G11_OUT")"
-expect_match "11: …and the run reports it removed, not skipped by you" \
-  '*1 removed*0 already clean*0 skipped by you*' "$(cat "$G11_OUT")"
+expect_match "11: …and the run reports it neither removed nor skipped by you" \
+  '*0 removed*0 already clean*0 skipped by you*' "$(cat "$G11_OUT")"
 
 # The other two `.statusLine.command` readers (health probe, teardown-state
 # union) already fail safe on this same malformed input — each swallows jq's
@@ -2251,5 +2274,268 @@ G15C="$TMP/g15-install.txt"
 printf 'y\ny\ny\n' | run_payload "$SETUP_SH" --only tool:impeccable > "$G15C" 2>&1
 expect_match "15C: …and setup installs it through the CLI, as it always did" \
   '*plugin install impeccable@bionic*' "$(cat "$CALLS")"
+
+# ---------------------------------------------------------------------------
+# Group 16 — remove names every tool it cannot prove it installed, and acts on
+# none of them (wave-27 T82).
+#
+# PRESENCE IS NOT PROVENANCE. The tools item used to hand every `remove-on-consent`
+# row it found PRESENT to `remove_dep`, which printed a plan, asked, and on a yes
+# ran it: a package the user installed themselves came off exactly like one bionic
+# installed. Nothing on a machine records which tools bionic put there, so every
+# such row is now named, with the command that removes it by hand, and left —
+# on every door and under `--all`. The one record the machine does keep is the
+# native plugin registry's `<name>@bionic` id, and that row is still removed.
+#
+# The fixture carries one present row of each `remove-on-consent` kind except the
+# pnpm store (whose line is unchanged): statusline, npm-global, uv-tool,
+# uv-project, playwright-browser, mcp-server, github-skill — plus the native
+# `impeccable@bionic`. Every package manager on PATH is a recorder in $BIN, so a
+# call is visible in the log and reaches nothing real.
+# ---------------------------------------------------------------------------
+
+section "Group 16: remove names each declared tool it finds and removes none of them"
+
+# The rows the fixture makes present, in the table's order (the order the item
+# walks), each with its by-hand plan.
+G16_NAMES="excalidraw-renderer @playwright/cli playwright-chromium ccstatusline notebooklm context7 humanizer"
+G16_PW_CACHE="${HOME_FIX}/.cache/ms-playwright"
+
+# A path as a door prints it: the fixture home written `~/`.
+g16_home() { local tl='~/'; printf '%s' "${1//"$HOME_FIX"\//$tl}"; }
+
+g16_plan() {  # <name> -> the command the by-hand line must carry
+  case "$1" in
+    excalidraw-renderer) printf 'rm -rf %s %s' "$(g16_home "$VENV_DIR")" "$(g16_home "${VENV_DIR}.lock.sha256")" ;;
+    @playwright/cli)     printf 'npm uninstall -g @playwright/cli' ;;
+    playwright-chromium) printf 'rm -rf %s' "$(g16_home "$G16_PW_CACHE")" ;;
+    ccstatusline)
+      printf 'npm uninstall -g ccstatusline, clear .statusLine from %s only if it still names ccstatusline, and remove %s' \
+        "$(g16_home "$SETTINGS")" "$(g16_home "${HOME_FIX}/.config/ccstatusline")" ;;
+    notebooklm)          printf 'uv tool uninstall notebooklm-py && rm -rf %s' "$(g16_home "${HOME_FIX}/.claude/skills/notebooklm")" ;;
+    context7)            printf 'claude mcp remove context7 -s user' ;;
+    humanizer)           printf 'rm -rf %s' "$(g16_home "${HOME_FIX}/.claude/skills/humanizer")" ;;
+  esac
+}
+
+g16_plant() {  # [native] — one present row of each kind; `native` adds impeccable@bionic
+  fresh_home
+  mkdir -p "${HOME_FIX}/.claude/skills/humanizer" "${HOME_FIX}/.claude/skills/notebooklm" \
+           "${HOME_FIX}/.config/ccstatusline" "${G16_PW_CACHE}/chromium-1187" "${VENV_DIR}/bin"
+  printf '%s\n' '{"model":"opus","statusLine":{"type":"command","command":"ccstatusline"}}' > "$SETTINGS"
+  cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+  printf 'ccstatusline\n@playwright/cli\n' > "${STATE}/npm-global"
+  printf 'context7\n' > "${STATE}/mcp"
+  : > "${G16_PW_CACHE}/chromium-1187/INSTALLATION_COMPLETE"
+  printf '#!/bin/bash\nexit 0\n' > "${VENV_DIR}/bin/python"; chmod +x "${VENV_DIR}/bin/python"
+  printf -- '---\nname: humanizer\n---\n' > "${HOME_FIX}/.claude/skills/humanizer/SKILL.md"
+  printf -- '---\nname: notebooklm\n---\n' > "${HOME_FIX}/.claude/skills/notebooklm/SKILL.md"
+  printf '#!/bin/bash\necho "notebooklm $*" >> "$BIONIC_TEST_CALLS"\nexit 0\n' > "${BIN}/notebooklm"
+  chmod +x "${BIN}/notebooklm"
+  if [ "${1:-}" = "native" ]; then
+    mkdir -p "${HOME_FIX}/.claude/plugins"
+    printf '%s\n' '{"version":2,"plugins":{"impeccable@bionic":[{"scope":"user","installPath":"/x","version":"4.1.1"}]}}' \
+      > "${HOME_FIX}/.claude/plugins/installed_plugins.json"
+    printf 'impeccable@bionic true\n' > "${STATE}/plugins"
+  fi
+  : > "$CALLS"
+}
+
+# Every file and directory the tool rows stand on, with each file's bytes, plus
+# the recorders' own state for the npm globals and the MCP servers. `g16_snap` is
+# its digest, so a red row prints one line rather than the whole listing.
+g16_snap_raw() {
+  local p
+  for p in "$SETTINGS" "${HOME_FIX}/.config" "${HOME_FIX}/.cache" "${HOME_FIX}/.local" \
+           "${HOME_FIX}/.claude/skills" "${STATE}/npm-global" "${STATE}/mcp"; do
+    [ -e "$p" ] || { echo "absent ${p}"; continue; }
+    find "$p" -print | LC_ALL=C sort
+    find "$p" -type f -exec shasum {} + | LC_ALL=C sort
+  done
+}
+g16_snap() { g16_snap_raw | shasum | awk '{ print $1 }'; }
+
+# The removal calls in the recorders' log: every way a package manager, the MCP
+# list or a pip/brew could have been asked to take something off.
+g16_acts() {
+  grep -E '^(npm uninstall|npm remove|npm rm|uv tool uninstall|uv pip uninstall|pip3? uninstall|brew uninstall|pnpm (remove|rm|store prune)|claude mcp remove)' \
+    "$CALLS" 2>/dev/null
+  return 0
+}
+
+# yes when the item's two lines for <name> stand together, the second right under the first.
+g16_pair() {  # <file> <name> <plan>
+  local want1="  ${2}: present — bionic has no record that it installed it, so it is left in place."
+  local want2="    remove it by hand with: ${3}" line prev=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$prev" = "$want1" ] && [ "$line" = "$want2" ] && { printf yes; return 0; }
+    prev="$line"
+  done < "$1"
+  printf no
+}
+
+# How many lines ask to remove <name>.
+g16_asks() {  # <file> <name>
+  grep -cF "Remove ${2} now?" "$1" 2>/dev/null
+  return 0
+}
+
+# The names under the summary's by-hand heading, space-joined, in order.
+g16_byhand() {  # <file>
+  local line on=0 out=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "  left for you to remove by hand:" ]; then on=1; continue; fi
+    [ "$on" = "1" ] || continue
+    [ -n "$line" ] || break
+    out="${out:+${out} }${line#    • }"
+  done < "$1"
+  printf '%s' "$out"
+}
+
+g16_door_rows() {  # <label> <output file> <snapshot before>
+  local label="$1" out="$2" before="$3" n
+  for n in $G16_NAMES; do
+    expect_eq "16 ${label}: ${n} is named, with the command to remove it by hand" \
+      "yes" "$(g16_pair "$out" "$n" "$(g16_plan "$n")")"
+    expect_eq "16 ${label}: …and nothing asks to remove ${n}" "0" "$(g16_asks "$out" "$n")"
+    expect_absent "16 ${label}: …and no 'answer yes' route is printed for ${n}" "answer yes to tool:${n}" "$(cat "$out")"
+  done
+  expect_eq "16 ${label}: no package manager, MCP remove, pip or brew was asked to remove anything" "" "$(g16_acts)"
+  expect_eq "16 ${label}: every file and directory the tool rows stand on is byte for byte as it was" \
+    "$before" "$(g16_snap)"
+}
+
+# The extractors, proven on real output before any row leans on them.
+g16_plant native
+G16_BEFORE="$(g16_snap)"
+expect_ne "16 precondition: the snapshot digest reads (it is not empty)" "" "$G16_BEFORE"
+expect_contains "16 precondition: …and the listing under it holds the planted ccstatusline layout" \
+  ".config/ccstatusline/settings.json" "$(g16_snap_raw)"
+for n in $G16_NAMES; do
+  expect_eq "16 precondition: ${n} reads as present to the teardown" "yes" \
+    "$(env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
+         BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
+         bash -c '. "$1"; dep_teardown_state "$2"' _ "${LIB_DIR}/deps.sh" "$n" 2>/dev/null)"
+done
+: > "$CALLS"
+
+# ── the interactive door, every question answered yes ──
+G16_INT="$TMP/g16-interactive.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" > "$G16_INT" 2>&1
+G16_INT_RC=$?
+expect_eq "16 interactive: remove exits 0, as a run with these rows declined or absent does" "0" "$G16_INT_RC"
+g16_door_rows "interactive" "$G16_INT" "$G16_BEFORE"
+expect_eq "16 interactive: the one row the machine records as bionic's is still asked about (the question extractor reads)" \
+  "1" "$(g16_asks "$G16_INT" impeccable)"
+expect_match "16 interactive: …and still removed through the CLI's plugin uninstall" \
+  '*claude plugin uninstall impeccable@bionic --yes*' "$(cat "$CALLS")"
+expect_eq "16 interactive: the summary names every row left for the user to remove by hand" \
+  "$G16_NAMES" "$(g16_byhand "$G16_INT")"
+
+# ── --only tool:<name>, each row on its own ──
+for n in $G16_NAMES; do
+  g16_plant
+  G16_ONLY="$TMP/g16-only.txt"
+  printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only "tool:${n}" > "$G16_ONLY" 2>&1
+  expect_eq "16 --only tool:${n}: remove exits 0" "0" "$?"
+  expect_eq "16 --only tool:${n}: the row is named, with the command to remove it by hand" \
+    "yes" "$(g16_pair "$G16_ONLY" "$n" "$(g16_plan "$n")")"
+  expect_eq "16 --only tool:${n}: …nothing asks to remove it" "0" "$(g16_asks "$G16_ONLY" "$n")"
+  expect_eq "16 --only tool:${n}: …nothing was called" "" "$(g16_acts)"
+  expect_eq "16 --only tool:${n}: …and the fixture is byte for byte as it was" "$G16_BEFORE" "$(g16_snap)"
+done
+
+# ── --all, the page answered yes ──
+g16_plant native
+G16_ALL="$TMP/g16-all.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_ALL" 2>&1
+expect_eq "16 --all: remove exits 0" "0" "$?"
+G16_ALL_TEXT="$(cat "$G16_ALL")"
+G16_PAGE="${G16_ALL_TEXT%%Do all of the above?*}"
+expect_ne "16 --all: the page is on the output, ahead of its question" "$G16_ALL_TEXT" "$G16_PAGE"
+expect_contains "16 --all: the native row bionic's catalog installed is on the page" "• remove impeccable" "$G16_PAGE"
+for n in $G16_NAMES; do
+  expect_absent "16 --all: ${n} is not on the page" "• remove ${n}" "$G16_PAGE"
+done
+g16_door_rows "--all" "$G16_ALL" "$G16_BEFORE"
+expect_match "16 --all: the native row is still removed through the CLI's plugin uninstall on the page's yes" \
+  '*claude plugin uninstall impeccable@bionic --yes*' "$(cat "$CALLS")"
+expect_eq "16 --all: the summary names every row left for the user to remove by hand" \
+  "$G16_NAMES" "$(g16_byhand "$G16_ALL")"
+
+# ── --all on a machine where the by-hand rows are all there is ──
+# The page is empty, and the run must still name what it leaves rather than call
+# the machine clean.
+g16_plant
+G16_ALL0="$TMP/g16-all-none-on-page.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_ALL0" 2>&1
+expect_eq "16 --all, nothing on the page: remove exits 0" "0" "$?"
+expect_eq "16 --all, nothing on the page: ccstatusline is still named, with its by-hand command" \
+  "yes" "$(g16_pair "$G16_ALL0" ccstatusline "$(g16_plan ccstatusline)")"
+expect_absent "16 --all, nothing on the page: …and the run does not call the machine clean" \
+  "this machine is already clean" "$(cat "$G16_ALL0")"
+expect_eq "16 --all, nothing on the page: …and nothing was called" "" "$(g16_acts)"
+expect_eq "16 --all, nothing on the page: …and the fixture is byte for byte as it was" "$G16_BEFORE" "$(g16_snap)"
+
+# ── remove_dep called directly, with the page's consent already in force ──
+g16_direct() {  # <name> — remove_dep under RM_ALL=1, yes on stdin; prints its output and rc=<n>
+  printf 'y\ny\n' | env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
+    BIONIC_TEST_BIN="$BIN" BIONIC_TEST_SHIMSRC="$SHIMSRC" BIONIC_TEST_PKG_MAP="$PKG_MAP" \
+    BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
+    bash -c '. "$1"; RM_ALL=1; remove_dep "$2"; echo "rc=$?"' _ "${LIB_DIR}/deps.sh" "$1" 2>&1
+}
+g16_plant
+G16_DIRECT="$TMP/g16-direct.txt"
+for n in $G16_NAMES; do
+  g16_direct "$n" > "$G16_DIRECT"
+  expect_contains "16 remove_dep ${n}: returns 2, left in place by policy" "rc=2" "$(cat "$G16_DIRECT")"
+  expect_eq "16 remove_dep ${n}: …prints the two lines" "yes" "$(g16_pair "$G16_DIRECT" "$n" "$(g16_plan "$n")")"
+done
+expect_eq "16 remove_dep: no row called anything, consent in force or not" "" "$(g16_acts)"
+expect_eq "16 remove_dep: …and the fixture is byte for byte as it was" "$G16_BEFORE" "$(g16_snap)"
+
+# ── the mutant: the act restored on top of the named row ──
+# A doctored copy whose remove_dep, after naming a row, asks and runs the plan
+# it named. The same extractors read it, so the rows above are a measurement: a
+# remove that acts turns them red.
+G16_MUT="$TMP/payload-g16-mutant"
+rm -rf "$G16_MUT"; cp -R "$PAYLOAD" "$G16_MUT"
+cat >> "$G16_MUT/scripts/lib/deps.sh" <<'MUT'
+eval "_g16_named_$(declare -f remove_dep)"
+remove_dep() {
+  local rc
+  _g16_named_remove_dep "$@"; rc=$?
+  { [ "$rc" = 2 ] && [ "$(dep_field "$1" removal_behavior)" = remove-on-consent ]; } || return "$rc"
+  _dep_consent "Remove ${1} now?" || return 1
+  eval "$(_dep_remove_plan "$1")"
+}
+MUT
+expect_true "16 mutant: the doctored library still parses" bash -n "$G16_MUT/scripts/lib/deps.sh"
+g16_plant
+G16_MUT_OUT="$TMP/g16-mutant.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G16_MUT" run_payload "$G16_MUT/scripts/remove.sh" --only tool:@playwright/cli \
+  > "$G16_MUT_OUT" 2>&1
+expect_eq "16 mutant: the mutant run reached the item (its question is on the output)" \
+  "1" "$(g16_asks "$G16_MUT_OUT" @playwright/cli)"
+expect_ne "16 mutant: …and the act-call extractor sees its uninstall" "" "$(g16_acts)"
+expect_ne "16 mutant: …and the snapshot sees the machine change" "$G16_BEFORE" "$(g16_snap)"
+
+# ── a declined native row still gets its route, so the absence above is a measurement ──
+# The whole run, every question answered no: the summary's Skipped list carries the route.
+g16_plant native
+G16_NATIVE_N="$TMP/g16-native-declined.txt"
+for _ in $(seq 1 80); do printf 'n\n'; done | run_payload "$REMOVE_SH" > "$G16_NATIVE_N" 2>&1
+expect_contains "16: a declined native row is given its 'answer yes' route (the route extractor reads)" \
+  "answer yes to tool:impeccable" "$(cat "$G16_NATIVE_N")"
+
+# ── standalone: unchanged ──
+g16_plant
+mkdir -p "$TMP/g16-standalone"; cp "$REMOVE_SH" "$TMP/g16-standalone/remove.sh"
+G16_SA="$TMP/g16-standalone.txt"
+printf 'n\n' | run_payload "$TMP/g16-standalone/remove.sh" > "$G16_SA" 2>&1
+expect_contains "16 standalone: the tools item says the table ships with the payload" \
+  "the dependency table ships with the payload — not available standalone." "$(cat "$G16_SA")"
+expect_eq "16 standalone: …and nothing was called" "" "$(g16_acts)"
+rm -f "${BIN}/notebooklm"
 
 finish

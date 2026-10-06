@@ -5814,5 +5814,22 @@ expect_no_regex "W27-R6: the entry names no run row, ruling id, review pass or g
   '(^|[^A-Za-z0-9])(T[0-9]{1,2}|P[0-3])([^A-Za-z0-9]|$)|A-orch|review pass' "$W27R_E"
 expect_regex "W27-R6m: …and the same pattern finds a row id planted in the entry" \
   '(^|[^A-Za-z0-9])(T[0-9]{1,2}|P[0-3])([^A-Za-z0-9]|$)|A-orch|review pass' "$W27R_E (T19)"
+# w27r_part <entry text> <heading> -> the lines under one flush-left `Heading:` of the entry.
+# Its lines are joined and runs of spaces squeezed, so a pin reads a sentence across its wrap.
+w27r_part() {
+  printf '%s\n' "$1" | awk -v h="$2" '$0 == h { p = 1; next } p && /^[A-Z][^ ]*[^:]*:$/ { exit } p' | tr '\n' ' ' | tr -s ' '
+}
+W27R_NOTICE="$(w27r_part "$W27R_E" 'What you will notice:')"
+W27R_LIMITS="$(w27r_part "$W27R_E" 'Known limits, carried to the next release:')"
+expect_contains "W27-R7 precondition: the notice part reads (it holds the rigor bullet)" "Rigor is the number of readers" "$W27R_NOTICE"
+expect_contains "W27-R7: under what you will notice, remove no longer uninstalls any tool" \
+  "**Remove no longer uninstalls any tool.**" "$W27R_NOTICE"
+expect_contains "W27-R7b: …it names each one with the command to remove it by hand, and says why" \
+  "with the command to remove it by hand, and leaves it in place, on every door and under \`--all\`: bionic keeps no record yet of what it installed, and it removes nothing it cannot prove is its own" \
+  "$W27R_NOTICE"
+expect_contains "W27-R7c precondition: the known-limits part reads (it holds the rc limit)" "No door removes a line of your rc" "$W27R_LIMITS"
+expect_contains "W27-R7c: a known limit says every declared tool present is listed until the record exists" \
+  "Until bionic keeps a record of what it installed (a later release), remove lists every declared tool present, whether or not bionic installed it, and still offers the native plugins bionic's own catalog installed." \
+  "$W27R_LIMITS"
 
 finish
