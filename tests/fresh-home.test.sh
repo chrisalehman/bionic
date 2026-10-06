@@ -2432,6 +2432,33 @@ expect_match "16 interactive: …and still removed through the CLI's plugin unin
 expect_eq "16 interactive: the summary names every row left for the user to remove by hand" \
   "$G16_NAMES" "$(g16_byhand "$G16_INT")"
 
+# ── the by-hand command runs as typed ──
+# Each `~/` word of every by-hand line, handed to /bin/bash 3.2 and to zsh with the
+# fixture's HOME, expands to the path the plan was composed with. The fixture home
+# lives under the temp root, not /Users, so nothing here leans on a familiar prefix.
+g16_tilde_check() {  # <file> <shell> -> "<checked> <mismatches>"
+  local line w got n=0 bad=0
+  while IFS= read -r line; do
+    case "$line" in *"remove it by hand with: "*) ;; *) continue ;; esac
+    for w in ${line#*remove it by hand with: }; do
+      case "$w" in '~/'*) ;; *) continue ;; esac
+      n=$((n + 1))
+      got="$(env -i HOME="$HOME_FIX" "$2" -c "printf '%s' $w" 2>/dev/null)"
+      [ "$got" = "${HOME_FIX}/${w#\~/}" ] || bad=$((bad + 1))
+    done
+  done < "$1"
+  printf '%s %s' "$n" "$bad"
+}
+expect_no_match "16 by hand: the fixture home is not under /Users" '/Users/*' "$HOME_FIX"
+expect_eq "16 by hand: every ~/ word of the seven lines expands to its path under /bin/bash (7 words, 0 wrong)" \
+  "7 0" "$(g16_tilde_check "$G16_INT" /bin/bash)"
+expect_eq "16 by hand: …and under zsh" "7 0" "$(g16_tilde_check "$G16_INT" "$(command -v zsh)")"
+# A path that holds the home's spelling but does not start with it is printed as it is.
+expect_eq "16 by hand: only a word that starts with the home is written ~/" \
+  "rm -rf /elsewhere${HOME_FIX}/x ~/y" \
+  "$(env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '. "$1"; _dep_home_form "$2"' _ "${LIB_DIR}/deps.sh" \
+       "rm -rf /elsewhere${HOME_FIX}/x ${HOME_FIX}/y")"
+
 # ── --only tool:<name>, each row on its own ──
 for n in $G16_NAMES; do
   g16_plant

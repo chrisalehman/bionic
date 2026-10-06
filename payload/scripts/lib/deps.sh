@@ -1919,12 +1919,16 @@ _dep_remove_plan() {  # <name> -> the plan, one line
   esac
 }
 
-# A line for the terminal with each path under the user's home written `~/…`:
-# the command still runs as typed, since every such path starts a word.
+# A line for the terminal with each path that STARTS with the user's home written
+# `~/…`: a word that begins `$HOME/` (the line's first, or after a space). The
+# command still runs as typed in zsh and bash, since the tilde starts the word; a
+# path that only contains the home's spelling further in is printed as it is.
 _dep_home_form() {  # <text>
-  local tl='~/'
+  local tl=' ~/' out
   case "${HOME:-}" in ""|/) printf '%s' "$1"; return 0 ;; esac
-  printf '%s' "${1//"$HOME"\//$tl}"
+  out=" ${1}"
+  out="${out// "$HOME"\//$tl}"
+  printf '%s' "${out# }"
 }
 
 # THE ONE ENTRY POINT FOR "what happens to this dependency", and its answer is
