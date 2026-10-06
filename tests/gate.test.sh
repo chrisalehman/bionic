@@ -222,7 +222,7 @@ world_machine 8 8192 85 1.0
 world_cost k 5 0.5 30
 expect_eq "H.1 used 85 under a share of 80, nothing admitted: not admitted (rc 75)" "75" "$(ask_fg h1 work k 0)"
 expect_eq "H.2 its request was taken (asked=1000)" "1000" "$(field "$(req_of h1)" asked)"
-expect_eq "H.3 and holds no admitted line" "" "$(field "$(req_of h1)" admitted)"
+expect_eq "H.3 and holds no admitted line (asked|admitted)" "1000|" "$(field "$(req_of h1)" asked)|$(field "$(req_of h1)" admitted)"
 fresh hard2
 world_machine 8 8192 30 16
 world_cost k 5 2 30
@@ -299,9 +299,9 @@ admissions 32 65536; large="$ADM"
 hard_rows 4 4096; hsmall="$HRD"
 hard_rows 32 65536; hlarge="$HRD"
 expect_eq "C.1 a 4-core 4 GB machine decides 0 75 0 75" "0 75 0 75" "$small"
-expect_eq "C.2 a 32-core 64 GB machine at the same percentages decides alike" "$small" "$large"
+expect_eq "C.2 a 32-core 64 GB machine at the same percentages decides alike" "0 75 0 75" "$large"
 expect_eq "C.3 the memory rule on the small machine: 75, then 0 on a busy processor" "75 0" "$hsmall"
-expect_eq "C.4 and alike on the large one" "$hsmall" "$hlarge"
+expect_eq "C.4 and alike on the large one" "75 0" "$hlarge"
 
 # ── §TWO ─────────────────────────────────────────────────────────────────────
 section "§TWO — several commands never start on one reading (AC-2.4)"
@@ -314,7 +314,6 @@ wait_for 20 has t1.rc; wait_for 20 has t2.rc
 expect_eq "T.1 both asks were taken" "2" "$(nreq)"
 expect_eq "T.2 exactly one of two asks at one instant is admitted" "0 75" \
   "$(printf '%s\n%s\n' "$(rc_of t1)" "$(rc_of t2)" | sort -n | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "T.3 the reading did not move between them (still 60)" "60" "$BIONIC_PROBE_USED_PCT"
 touch "$D/t1.go" "$D/t2.go"
 wait_for 20 has t1.endrc || wait_for 20 has t2.endrc
 fresh two-lock
@@ -324,7 +323,7 @@ mkdir -p "$BIONIC_GATE_DIR/lock"
 sh -c 'exit 0' & deadpid=$!; wait "$deadpid"
 printf 'Thu Jan 1 00:00:00 1970\n' > "$BIONIC_GATE_DIR/lock/since"
 printf '%s\n' "$deadpid" > "$BIONIC_GATE_DIR/lock/pid"
-expect_true "T.4 a planted lock's holder is dead" dead "$deadpid"
+dead "$deadpid" || no "T.4 the planted lock's holder is dead" "pid $deadpid lives"
 expect_eq "T.5 a lock left by a dead holder is taken over: the ask is decided (rc 0)" "0" "$(ask_fg l1 work k 0)"
 expect_false "T.6 and the lock is given back" test -d "$BIONIC_GATE_DIR/lock"
 
@@ -347,7 +346,7 @@ expect_false "N.4 at 1002 it is still waiting" has na.rc
 world_tick 1
 wait_for 20 has na.rc
 expect_eq "N.5 at 1003 it exits 75, not 124" "75" "$(rc_of na)"
-expect_eq "N.6 nothing ran: its request holds no admitted line" "" "$(field "$na_id" admitted)"
+expect_eq "N.6 nothing ran: its request holds no admitted line (asked|admitted)" "1000|" "$(field "$na_id" asked)|$(field "$na_id" admitted)"
 expect_eq "N.7 its request is kept" "1000" "$(field "$na_id" asked)"
 world_tick 5
 ask_bg nb work k 600
@@ -361,9 +360,9 @@ expect_eq "N.9 the next ask by the same who for the same key resumes the same nu
 release nh
 wait_for 20 has na.rc
 expect_eq "N.10 when room appears the resumed number is admitted" "0" "$(rc_of na)"
-expect_eq "N.11 it is the number first taken" "$na_id" "$(id_of na)"
+expect_eq "N.11 it is the number first taken" "${na_id:-none}" "$(id_of na)"
 expect_false "N.12 the later number is still waiting" has nb.rc
-expect_eq "N.13 and holds no admitted line" "" "$(field "$(req_of nb)" admitted)"
+expect_eq "N.13 and holds no admitted line (asked|admitted)" "1008|" "$(field "$(req_of nb)" asked)|$(field "$(req_of nb)" admitted)"
 
 # ── §FIRST ───────────────────────────────────────────────────────────────────
 # first_rows <gate lib> <prefix> — a writer waits, a landing arrives, room appears; sets FIRST
@@ -390,10 +389,10 @@ first_rows() {
 section "§FIRST — a landing's run goes first (AC-2.7)"
 first_rows "$GATE" real
 expect_eq "F.1 the writer asked first, the landing later; the landing is admitted first" "l" "$FIRST"
-expect_contains "F.2 gate_state counted both waiting, one a landing" "$FIRST_STATE" "waiting=2 landing-waiting=1"
-expect_contains "F.3 gate_state counted the one admitted" "$FIRST_STATE" "admitted=1"
-expect_regex "F.4 gate_state prints its one line" "$FIRST_STATE" \
-  '^share=80 used=[0-9-]+ admitted=1 waiting=2 landing-waiting=1 clears=[0-9]+$'
+expect_contains "F.2 gate_state counted both waiting, one a landing" "waiting=2 landing-waiting=1" "$FIRST_STATE"
+expect_contains "F.3 gate_state counted the one admitted" "admitted=1" "$FIRST_STATE"
+expect_regex "F.4 gate_state prints its one line" \
+  '^share=80 used=[0-9-]+ admitted=1 waiting=2 landing-waiting=1 clears=[0-9]+$' "$FIRST_STATE"
 MF="$(mutant first)"
 anchor "$MF" 'else r = ($1 == "landing" ? 1 : 2)' 1
 sed -i.bak 's/else r = (\$1 == "landing" ? 1 : 2)/else r = 2/' "$MF"
@@ -443,15 +442,15 @@ world_cost k 15 0.5 30
 HOLD=1 ask_bg wh work h 0; wait_for 20 has wh.rc
 HOLD=1 ask_bg ww work k 600; wait_for 20 asked_by ww
 ww_id="$(req_of ww)"
-expect_contains "W.1 while it waits, gate_state counts it" "$(state)" "waiting=1"
+expect_contains "W.1 while it waits, gate_state counts it" "waiting=1" "$(state)"
 world_tick 60
 release wh
 wait_for 20 has ww.rc
 expect_eq "W.2 it is admitted once room appears" "0" "$(rc_of ww)"
 expect_eq "W.3 its asked time is 1000" "1000" "$(field "$ww_id" asked)"
 expect_eq "W.4 its admitted time is 1060" "1060" "$(field "$ww_id" admitted)"
-expect_contains "W.5 gate_list shows both times, a wait of 60 s" "$(glist)" \
-  "$ww_id admitted kind=work asked=1000 admitted=1060"
+expect_contains "W.5 gate_list shows both times, a wait of 60 s" \
+  "${ww_id:-none} admitted kind=work asked=1000 admitted=1060" "$(glist)"
 release ww
 
 # ── §KILLED ──────────────────────────────────────────────────────────────────
@@ -465,13 +464,13 @@ expect_eq "K.1 the child is admitted" "0" "$(rc_of kk)"
 expect_eq "K.2 while it runs, a second ask finds no room (rc 75)" "75" "$(ask_fg k2 work k 0)"
 kill -KILL "$kk_pid"
 wait_for 20 dead "$kk_pid"
-expect_true "K.3 the child is dead" dead "$kk_pid"
+dead "$kk_pid" || no "K.3 the killed child is dead" "pid $kk_pid lives"
 L1="$(glist)"; L2="$(glist)"
 expect_eq "K.4 gate_list counts one killed request" "1" "$(printf '%s\n' "$L1" | grep -c ' killed ')"
-expect_contains "K.5 it is the child's" "$L1" "$kk_id killed kind=work"
+expect_contains "K.5 it is the child's" "${kk_id:-none} killed kind=work" "$L1"
 expect_eq "K.6 a second reading counts it once again, not twice" "1" "$(printf '%s\n' "$L2" | grep -c ' killed ')"
-expect_eq "K.7 it was never ended" "" "$(field "$kk_id" ended)"
-expect_contains "K.8 gate_state no longer counts it admitted" "$(state)" "admitted=0"
+expect_eq "K.7 it was admitted and never ended (admitted|ended)" "1000|" "$(field "$kk_id" admitted)|$(field "$kk_id" ended)"
+expect_contains "K.8 gate_state no longer counts it admitted" "admitted=0 " "$(state)"
 expect_eq "K.9 its promise is released: the same ask is now admitted" "0" "$(ask_fg k3 work k 0)"
 
 # ── §COST ────────────────────────────────────────────────────────────────────
@@ -486,16 +485,17 @@ HOLD=1 ask_bg c1 work k 0; wait_for 20 has c1.rc
 c1_id="$(id_of c1)"
 expect_eq "D.1 the promise is the per-field maximum of the key's lines" "10:1.5:90" "$(field "$c1_id" promise)"
 expect_contains "D.2 a reading taken during the run raises its peak (gate_state at 55)" \
-  "$(BIONIC_PROBE_USED_PCT=55 state)" "admitted=1"
+  "admitted=1 " "$(BIONIC_PROBE_USED_PCT=55 state)"
 expect_eq "D.3 the peak is kept on the request" "55" "$(field "$c1_id" peak)"
 world_tick 30
 release c1
 expect_eq "D.4 gate_end exits 0" "0" "$(cat "$D/c1.endrc")"
 expect_eq "D.5 it writes ended at 1030" "1030" "$(field "$c1_id" ended)"
 expect_eq "D.6 and the rc" "0" "$(field "$c1_id" rc)"
-expect_eq "D.7 cost/k keeps three lines" "3" "$(wc -l < "$BIONIC_GATE_DIR/cost/k" | tr -d ' ')"
+expect_eq "D.7 cost/k keeps three lines: the oldest planted is now the second" "3 4:1.5:50:1000" \
+  "$(wc -l < "$BIONIC_GATE_DIR/cost/k" | tr -d ' ') $(head -n 1 "$BIONIC_GATE_DIR/cost/k")"
 expect_regex "D.8 the newest is this run: rise 55-40=15, cores, 30 s, at 1030" \
-  "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")" '^15:[0-9.]+:30:1030$'
+  '^15:[0-9.]+:30:1030$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
 expect_eq "D.9 the oldest planted line is gone" "0" "$(grep -c '^10:0.5:20:' "$BIONIC_GATE_DIR/cost/k")"
 HOLD=1 ask_bg c2 work never-seen 0; wait_for 20 has c2.rc
 expect_eq "D.10 a command never seen is promised the maximum over every cost file" "30:3:50" \
@@ -512,7 +512,7 @@ BIONIC_PROBE_USED_PCT=70 state >/dev/null
 world_tick 10
 release o1; release o2
 expect_regex "D.12 an overlapped run carries the previous memory value (9), not the rise" \
-  "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")" '^9:[0-9.]+:10:1010$'
+  '^9:[0-9.]+:10:1010$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
 fresh cost-cpu
 world_machine 8 8192 40 1.0
 world_cost k 1 0.5 20
@@ -521,7 +521,7 @@ wait_for 20 has u1.rc
 world_tick 1
 release u1
 expect_regex "D.13 the processor field is the children's time from \`times\`, over 0" \
-  "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k" | cut -d: -f2)" '^0*[0-9]*\.[0-9]*[1-9][0-9]*$'
+  '^[0-9]*\.[0-9]*[1-9][0-9]*:1:' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k" | cut -d: -f2-)"
 expect_eq "D.14 gate_end of a request that does not exist exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_end 999 0 2>/dev/null; echo $? )"
 expect_eq "D.15 gate_ask with an unknown kind exits 2" "2" \
