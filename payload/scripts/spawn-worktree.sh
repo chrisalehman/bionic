@@ -90,7 +90,7 @@
 # Usage:
 #   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
 #   spawn-worktree.sh remove <worktree-path>
-#   spawn-worktree.sh land   <worktree-path>
+#   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
 
 set -uo pipefail
 
@@ -135,7 +135,7 @@ usage() {
 Usage:
   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
   spawn-worktree.sh remove <worktree-path>
-  spawn-worktree.sh land   <worktree-path>
+  spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
 
 create  makes the branch AND the worktree at exactly <base-sha>, verifies
         both, plants <worktree>/.bionic -> <main-root>/.bionic (D7; unless the
@@ -154,27 +154,20 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
 remove  removes the worktree and KEEPS the branch, deleting the
         <worktree>/.bionic link first (the one create planted, or a legacy
         one an older bionic left).
-land    ends the lease in one act: merges the tree's branch --no-ff into the
-        session's bound plan's working-branch, in the checkout that holds
-        it, removes the tree, prunes. Keeps the branch. Reads the session
-        from CLAUDE_CODE_SESSION_ID. Refuses — naming why — with no session
-        or no bound plan, when the plan names no branch or a branch no one
-        checkout holds, on a dirty tree, on nothing to land, or while a
-        suite is running. The landing rule refuses not-current (work
-        landed since touches a file the tree changed), stale-proof (some
-        suite run at the tree's head was last red or dirty, or no run is at
-        the head, naming the suite), and, after the
-        merge and undoing it, onto-moved (the branch moved after the last
-        check), branch-moved (the tree's branch gained a commit) and
-        onto-switched (the checkout was on another branch when it merged;
-        the merge is undone there). A land undoes only a merge it made
-        itself: when git merge made none, or none the land can prove its
-        own, it refuses merge-unproven, and a merge made on a detached HEAD
-        is refused onto-detached; neither undoes anything, and each line
-        says where the checkout stood. An undo that could not finish says
-        undo=failed and the step to take by hand, which never moves another
-        branch; a commit made in the checkout during the undo is named as
-        arrived=<sha>, since it may carry the task's changes unjudged.
+land    a person's landing (the line lands a row with ready). With
+        --by-hand --reason '<why>' it enters the row in the landing line,
+        merges the tree's branch --no-ff onto what is ahead of it in a
+        landing tree the tool owns, runs nothing, and fast-forwards the
+        session's bound plan's working-branch to it under the line's one
+        publish lock; then removes the tree, prunes, keeps the branch. The
+        record's published line and the row's - T<n>: line carry the git
+        user, the time and the reason. Reads the session from
+        CLAUDE_CODE_SESSION_ID. Refuses, naming why, with no reason, no
+        session or no bound plan, on a dirty or detached tree, on nothing
+        to land, on a range that commits .bionic, and on a conflict; holds
+        (HELD) while a run is live in the checkout that holds the branch,
+        and stops (MOVED) when a real checkout moved. A bare land prints
+        the two ways and exits 2.
 USAGE
 }
 
@@ -429,10 +422,27 @@ cmd_remove() {
 
 # THE SESSION IS THE TARGET'S SOURCE (wave-20 T8, D1): `session_id` (lib/session.sh)
 # reads CLAUDE_CODE_SESSION_ID, the root is the main checkout the tree belongs to — or the
-# cwd's, when the path names no directory and the land will refuse it anyway — and
-# `worktree_land_for_session` reads the working branch off that session's bound plan.
+# cwd's, when the path names no directory and the land will refuse it anyway — and the
+# working branch is read off that session's bound plan.
+# THE LINE LANDS A ROW; A PERSON LANDS ONE BY HAND (wave-28 T3, D9; REQ-5). `ready` is the
+# writer's landing. `land <tree> --by-hand --reason '<why>'` is the person's: the same publish,
+# under the same lock (lib/line.sh `line_land_by_hand`), recorded with who, when and why. Only the
+# main thread may run it: the Bash wall's arm that keeps subagents off the plan verbs names it.
+# A bare `land` refuses with the line that names both, before anything is read.
 cmd_land() {
-  local target="${1:-}" lib_session sid root
+  local target="" by_hand=0 why="" lib_session sid root
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --by-hand) by_hand=1; shift ;;
+      --reason) why="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+      --reason=*) why="${1#--reason=}"; shift ;;
+      *) [ -n "$target" ] || target="$1"; shift ;;
+    esac
+  done
+  if [ "$by_hand" != 1 ]; then
+    printf '%s\n' "land: the line lands a row with \"ready\"; a person lands one with \"land <tree> --by-hand --reason '<why>'\""
+    exit 2
+  fi
   if [ ! -f "$LIB_WORKTREE" ]; then
     contract "REFUSED reason=library-missing path=${LIB_WORKTREE}"
     exit 2
@@ -442,9 +452,11 @@ cmd_land() {
   lib_session="${LIB_WORKTREE%/*}/session.sh"
   # shellcheck source=/dev/null
   . "$lib_session" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${lib_session}"; exit 2; }
+  # shellcheck source=/dev/null
+  . "${LIB_WORKTREE%/*}/line.sh" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${LIB_WORKTREE%/*}/line.sh"; exit 2; }
   sid="$(session_id 2>/dev/null)" || sid=""
   root="$(worktree_root "${target:-.}" 2>/dev/null)" || root="$(worktree_root 2>/dev/null)" || root=""
-  WORKTREE_CONTRACT_PROG="$PROG" worktree_land_for_session "$target" "$root" "$sid"
+  WORKTREE_CONTRACT_PROG="$PROG" line_land_by_hand "$target" "$root" "$sid" "$why"
   exit $?
 }
 

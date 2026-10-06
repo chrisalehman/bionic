@@ -118,22 +118,119 @@ _wt_drop_legacy_link() {  # <worktree abs> -> 0 if one was deleted
 # request records the tree it runs in (`tree=`, git's toplevel where it asked, or the shim's
 # --stamp-dir). So the land refuses while a request that is ADMITTED, NOT ENDED and whose holder
 # is ALIVE (lib/slots.sh's rule, `_slots_live`) names the project's main checkout or the land's
-# TARGET checkout as its tree. The merge happens in the target, and the main checkout is where
-# a person's own run sits. Until T12 this read the process table for a `tests/run.sh` under
-# the root, because nothing else knew where a suite ran (wave-20 T8c); the request knows.
+# TARGET checkout as its tree. A request in a writer's own tree does not refuse: counting a
+# writer's suite in its own tree would refuse every land of a wave while any writer tests (the
+# reason the walk below counts only the runner). The store is the gate's (`gate_dir` in
+# lib/gate.sh, spelled here so this library does not load the gate's verbs); a store that is
+# absent or cannot be read gives no opinion.
 #
-# A WRITER'S OWN TREE DOES NOT COUNT. The root holds every tree under `.worktrees/`, and
-# counting a writer's suite in its own tree would refuse every land of a wave while any writer
-# tests (the reason D1 once counted only the runner). A run in the target checkout counts
-# wherever that checkout lives (`spawn-worktree.sh create` may place it outside the root).
+# AND, AS BEFORE THE GATE, A RUNNER PROCESS (wave-20 T8c; review R2-1, R2-8; critic C2-1): a run
+# that never asked (a runner on a tree without the gate library, an older bionic) is still
+# found by its process.
 #
-# NO SESSION PLAYS ANY PART, as since T8c: who runs the suite is not read, only where.
+# A FACT ABOUT PROCESSES AND DIRECTORIES. The walk refuses while a `tests/run.sh` process has
+# its SCRIPT PATH or its WORKING DIRECTORY inside the project root (every linked worktree under
+# it included) or inside the land's target checkout. Nothing else is read.
 #
-# UNREADABLE, NO OPINION. A store that is absent or cannot be read, a request file that cannot
-# be read, or a liveness rule that cannot be loaded refuses nothing: D1 guards a merge under a
-# suite, not an unreadable store, and refusing on it would make the verb unusable where trees
-# most need giving back. The store is the gate's (`gate_dir` in lib/gate.sh, spelled here so
-# this library does not load the gate's verbs).
+# NO SESSION PLAYS ANY PART. Until T8b the predicate was a conjunction: a busy session
+# file in this project AND a `tests/run.sh` anywhere on the machine. The process half never
+# said where the suite ran, so a land in one repository was refused by another project's
+# floor (T12 F3), and the session running the land was always busy and in-project. T8b then
+# excluded the lander's own session, but in-process teammates and Agent-tool subagents have
+# no session file of their own: the only busy file in the project is the orchestrator's, so
+# the exclusion switched D1 off for the orchestrator's own dispatched floor, its main case.
+# Where the suite runs is the whole question, and the process answers it.
+#
+# ONLY THE RUNNER. A lone `*.test.sh` does not count. That is T8's design: the runner is the
+# floor and the integration run, and the root scope covers every tree under `.worktrees/`,
+# so counting a writer's own suite in its own tree would refuse every land in the wave
+# while any writer tests.
+#
+# UNREADABLE, NO OPINION. A process whose working directory cannot be read is judged by its
+# script path alone, and a relative script path with no working directory places nothing.
+# That is the stance this predicate has always taken on a machine it cannot read (it used to
+# be a missing jq): D1 guards a merge under a suite, not an unreadable process table, and
+# refusing on it would make the verb unusable where trees most need giving back.
+
+# The pids whose command line names `tests/run.sh`, one per line. `pgrep -f` matches the
+# full command line and, on macOS, leaves out its own ancestors, so a land that a runner
+# itself drives never sees that runner. `ps` covers a machine without pgrep.
+_wt_suite_pids() {
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f -- 'tests/run\.sh' 2>/dev/null
+    return 0
+  fi
+  ps -eo pid=,command= 2>/dev/null | awk '/tests\/run\.sh/ { print $1 }'
+}
+
+# `<pid> <cwd>` per pid whose working directory can be read, the path physical. Linux has
+# /proc/<pid>/cwd. macOS has no /proc and BSD `ps` has no cwd column, so it takes ONE `lsof`
+# call for all the pids, about 12 ms on this machine. An empty pid list never reaches lsof,
+# because `lsof -p ""` lists every process.
+_wt_proc_cwds() {  # <pid>...
+  local pid list="" d
+  [ "$#" -gt 0 ] || return 0
+  if [ -e /proc/self/cwd ]; then
+    for pid in "$@"; do
+      d="$(readlink "/proc/${pid}/cwd" 2>/dev/null)" && [ -n "$d" ] && printf '%s %s\n' "$pid" "$d"
+    done
+    return 0
+  fi
+  command -v lsof >/dev/null 2>&1 || return 0
+  for pid in "$@"; do list="${list:+${list},}${pid}"; done
+  lsof -a -d cwd -Fn -p "$list" 2>/dev/null \
+    | awk '/^p/ { p = substr($0, 2) } /^n/ && p != "" { print p " " substr($0, 2); p = "" }'
+}
+
+# Is <path> this project? The main checkout itself, or anything under it, which takes in
+# every linked worktree under its `.worktrees` — where a writer running a suite actually
+# sits. A second directory, when given, counts too: the land's TARGET checkout (T8, D1),
+# which `spawn-worktree.sh create` can place outside the root with an absolute parent. The
+# merge happens there, so a suite running there is the one the constraint names. <path> is
+# a process's working directory or its script's path.
+_wt_cwd_in_project() {  # <path> <main-root> [target-checkout]
+  local cwd="${1:-}" root="${2:-}" co="${3:-}"
+  [ -n "$cwd" ] && [ -n "$root" ] || return 1
+  [ "$cwd" = "$root" ] && return 0
+  case "$cwd/" in "$root"/*) return 0 ;; esac
+  if [ -n "$co" ]; then
+    [ "$cwd" = "$co" ] && return 0
+    case "$cwd/" in "$co"/*) return 0 ;; esac
+  fi
+  return 1
+}
+
+# THE RUNNER'S OWN SCRIPT, from its command line as `ps` prints it, one word per argument.
+# A process IS the runner only when it runs the script: argv[0] ends in `tests/run.sh`, or
+# argv[0] is an interpreter and its first word past the options does. A `-c` (or `-s`)
+# among those options means the words that follow are a command string or positional
+# arguments, never a script, so a shell whose command text merely MENTIONS the runner — the
+# harness wraps every Bash call in `zsh -c '…'`, wait loops and progress notes included — is
+# not one (T31). Prints the script word and returns 0, or returns 1.
+#
+# The options are walked as bash reads them (review 7 F7): a `-` or `+` cluster is one word,
+# and EACH `o` or `O` in it takes the next word as its argument, so `-euo pipefail` and
+# `-oo pipefail errexit` skip theirs. A `c` or `s` anywhere in a cluster, `+c` included, makes
+# it a command string or stdin. `-` and `--` end the options; of the long ones only
+# `--rcfile` and `--init-file` take an argument. zsh reads these forms the same way.
+_wt_runner_script() {  # <argv word>...
+  local takes
+  case "${1:-}" in *tests/run.sh) printf '%s' "$1"; return 0 ;; esac
+  [ "$#" -gt 1 ] || return 1
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -|--) shift; break ;;
+      --rcfile|--init-file) shift 2 || return 1 ;;
+      --*) shift ;;
+      [-+]*[cs]*) return 1 ;;
+      [-+]*) takes="${1//[!oO]/}"; shift $((1 + ${#takes})) || return 1 ;;
+      *) break ;;
+    esac
+  done
+  case "${1:-}" in *tests/run.sh) printf '%s' "$1"; return 0 ;; esac
+  return 1
+}
 
 _wt_liveness() {  # rc 0 once lib/slots.sh's liveness rule is loaded
   declare -F _slots_live >/dev/null 2>&1 && return 0
@@ -145,9 +242,11 @@ _wt_liveness() {  # rc 0 once lib/slots.sh's liveness rule is loaded
   declare -F _slots_live >/dev/null 2>&1
 }
 
-# The D1 predicate. Prints `request=<id> key=<key> tree=<tree> holder=<pid>` for the first
-# request that satisfies it, in the store's listing order, and returns 0; returns 1 when none does.
-_wt_busy_suite() {  # <main-root> [target-checkout] -> request=... key=... tree=... holder=...
+# _wt_busy_request <main-root> [target-checkout] — the gate's half of D1. Prints
+# `request=<id> key=<key> tree=<tree> holder=<pid>` for the first admitted, unended request with a
+# live holder whose tree is the main checkout or the target checkout, in the store's listing
+# order, and returns 0; returns 1 when none is.
+_wt_busy_request() {
   local root="${1:-}" co="${2:-}" store f id l key tree holder adm ended
   [ -n "$root" ] || return 1
   _wt_liveness || return 1
@@ -171,6 +270,60 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> request=... key=... tree=
     _slots_live "${holder%%:*}" "${holder#*:}" || continue
     printf 'request=%s key=%s tree=%s holder=%s' "$id" "$key" "$tree" "${holder%%:*}"
     return 0
+  done
+  return 1
+}
+
+# The D1 predicate: the gate's requests first (_wt_busy_request, whose line it prints), then the
+# runner walk. The walk prints `pid=<pid> cwd=<cwd> script=<path>` for the first runner that
+# satisfies it and returns 0; returns 1 when none does. A working directory that could not
+# be read prints `unreadable`. The script is `_wt_runner_script`'s word, taken against the
+# working directory when it is relative, with its directory made physical, so a symlinked
+# spelling (`/tmp` for `/private/tmp`) still compares. A candidate whose script cannot be
+# resolved to a file is not a runner: no opinion, as for an unreadable process.
+# A THIRD ARGUMENT (wave-28 T3, D6): directories, one per line, whose runners do not count though they
+# lie inside the first two. The line asks about the checkout that holds the branch, and the row trees
+# and landing trees nested in it are other checkouts: a runner whose working directory, or whose
+# script when its directory is unreadable, lies in one of them is left out.
+_wt_busy_suite() {  # <main-root> [target-checkout] [nested dirs left out] -> request=... | pid=... cwd=... script=...
+  local root="${1:-}" co="${2:-}" out="${3:-}" pids cwds pid cmd cwd script dir x skip
+  local -a words
+  [ -n "$root" ] || return 1
+  _wt_busy_request "$root" "$co" && return 0
+  pids="$(_wt_suite_pids)"
+  [ -n "$pids" ] || return 1
+  # shellcheck disable=SC2086  # one pid per word, digits only
+  cwds="$(_wt_proc_cwds $pids)"
+  for pid in $pids; do
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null)"
+    # Re-read, not trusted from the listing: the process may have exited, or its pid been
+    # reused, since pgrep answered.
+    case "$cmd" in *tests/run.sh*) : ;; *) continue ;; esac
+    cwd="$(printf '%s\n' "$cwds" | awk -v p="$pid" '$1 == p { sub(/^[^ ]* /, ""); print; exit }')"
+    read -r -a words <<< "$cmd"
+    script="$(_wt_runner_script "${words[@]}")" || continue
+    case "$script" in
+      /*) : ;;
+      *) [ -n "$cwd" ] || continue; script="${cwd}/${script}" ;;
+    esac
+    dir="$(cd "${script%/*}" 2>/dev/null && pwd -P)" || continue
+    script="${dir}/${script##*/}"
+    [ -f "$script" ] || continue
+    if _wt_cwd_in_project "$script" "$root" "$co" || _wt_cwd_in_project "$cwd" "$root" "$co"; then
+      skip=0
+      while IFS= read -r x; do
+        [ -n "$x" ] || continue
+        if [ -n "$cwd" ]; then _wt_cwd_in_project "$cwd" "$x" && skip=1
+        else _wt_cwd_in_project "$script" "$x" && skip=1; fi
+        [ "$skip" = 1 ] && break
+      done <<NESTED
+$out
+NESTED
+      [ "$skip" = 1 ] && continue
+      printf 'pid=%s cwd=%s script=%s' "$pid" "${cwd:-unreadable}" "$script"
+      return 0
+    fi
   done
   return 1
 }
@@ -525,7 +678,7 @@ _wt_bionic_kind_changed() {
 }
 # `--ignore-submodules=none` (wave-28 T39, D31; wave-27 critic P3-1): `diff.ignoreSubmodules=all`, set in
 # any config the user holds, took a gitlink out of the answer, and a submodule link under `.bionic/`
-# landed; the answer is git's own, whatever the configuration.
+# landed; the answer is git's own, whatever `diff.ignoreSubmodules` says.
 _wt_bionic_adds() {  # <root> <onto head> <tree head> -> every path the range adds, NUL-separated, as git stores it
   git -C "$1" diff --ignore-submodules=none --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null
 }
@@ -536,10 +689,13 @@ _wt_bionic_first_add() {  # <root> <onto head> <tree head> -> the first path add
   done < <(_wt_bionic_adds "$1" "$2" "$3")
   return 1
 }
+# THE ENTRY, NOT THE OBJECT (wave-28 T3, ruling A-orch-14): a submodule link names a commit of another
+# repository, absent here, so `cat-file -e <c>:<path>` was false for it; the guard then named the head
+# as a path the target dropped and printed `merge <onto>`, which left the refusal standing.
 _wt_bionic_added_by() {  # <root> <onto head> <tree head> <path> -> the first commit of the range that added it | nothing
   local root="$1" c
   for c in $(git -C "$root" rev-list --reverse "${2}..${3}" 2>/dev/null); do
-    git -C "$root" cat-file -e "${c}:${4}" 2>/dev/null && ! git -C "$root" cat-file -e "${c}^:${4}" 2>/dev/null \
+    git -C "$root" rev-parse --verify -q "${c}:${4}" >/dev/null 2>&1 && ! git -C "$root" rev-parse --verify -q "${c}^:${4}" >/dev/null 2>&1 \
       && { printf '%s' "$c"; return 0; }
   done
   return 1
@@ -606,8 +762,8 @@ _wt_shquote() {
 # `REFUSED reason=bionic-committed` line on stdout naming the path (`.bionic` for a change of kind,
 # else the first added path), the commit that made it (12 hex) and the remedy, which
 # `spawn-worktree.sh land` and the standdown's report read as they read every other land refusal.
-# The remedy's commit moves the head past the tree's stamps, so it says to run the suites before
-# landing again, as not-current's does (A-orch-227 P2-1). The remedy is per path (A-orch-231): a
+# The remedy ends "say ready again": the line proves the next head itself and reads no stamp
+# (wave-28 T3, D31; it said "run the suites, land again" until 1.12.0). The remedy is per path (A-orch-231): a
 # path added under a directory the target tracks is taken out of the index alone, since
 # `rm -r --cached .bionic` would also un-track the project's own files there and the merge would
 # then delete them from the main checkout; `.bionic` itself, or an add where the target tracks no
@@ -617,7 +773,8 @@ _wt_shquote() {
 # The path and the remedy are in the range's spelling (wave-27 T86): the whole entry out is the
 # folded root entry the range added, as the range spelled it; a name git C-quotes is printed quoted.
 # PASTED AS PRINTED (wave-28 T39, D31; review pass 74's P2-1): every path and name the fix prints is
-# quoted for the shell (`_wt_shquote`), and the per-path pathspec of a name holding a glob character
+# quoted for the shell (`_wt_shquote`), save the whole entry, which folds to `.bionic` and so is all
+# safe bytes and printed bare; and the per-path pathspec of a name holding a glob character
 # is `:(literal)`, so git un-tracks that path alone, never a tracked file the pattern also matches.
 # EVERY PRINTED FIX LANDS WHEN FOLLOWED (A-orch-244; pass 71's P2-1): the whole entry, out of the
 # index, stays in the tree; where no ignore rule covers it and it is not the record link land passes
@@ -639,7 +796,7 @@ _wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit | dropped:<head>> <p
     fix="rm --cached $(_wt_shquote "$spec"), move $(_wt_shquote "$5") out of the tree, commit"
   elif _wt_bionic_left_dirty "$1" "$entry"; then fix="${fix}, move ${entry} out of the tree, commit"
   else fix="${fix}, commit"; fi
-  _wt_refuse "bionic-committed path=${path} commit=${commit:0:12} branch=${2} onto=${3} fix='git -C $(_wt_shquote "$1") ${fix}, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
+  _wt_refuse "bionic-committed path=${path} commit=${commit:0:12} branch=${2} onto=${3} fix='git -C $(_wt_shquote "$1") ${fix}, say ready again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree is kept"
 }
 
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
@@ -759,14 +916,14 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
   fi
 }
 
-worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
-  local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
-  local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
-  local pre pre_ref was said held now_ref check_cmd check_out check_was left nl='
-'
-  local plan="${3:-}" judged proofs proofs_row
-  local lands_red="${4:-}" red_ev="${5:-}" landed_red="" ev_heads judged_cur landed_at="" red_said debt_id=""
-
+# THE TREE'S OWN CHECKS, in land's order (wave-28 T3 factored them out of `worktree_land`, which
+# the hand landing shares): a linked tree inside the farm, a branch to land onto that exists and is not
+# protected, a plan not past judgment, the tree on a branch, clean, and ahead. With <need checkout> 1 the
+# branch must be held by one checkout (land merges there); with 0 a branch no checkout holds is the
+# line's `update-ref` case. Sets _WT_ABS, _WT_ROOT, _WT_BRANCH and _WT_CO ("" when none holds it).
+_wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, or 2 having refused
+  local target="${1:-}" onto="${2:-}" plan="${3:-}" wt_abs root co rc judged_cur branch dirt ahead
+  _WT_ABS=""; _WT_ROOT=""; _WT_BRANCH=""; _WT_CO=""
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
   # the main checkout's is a directory. That is the guard against being handed
@@ -794,14 +951,14 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   co="$(worktree_checkout_of "$root" "$onto")"; rc=$?
   case $rc in
     0) : ;;
-    1) _wt_refuse "onto-not-checked-out branch=${onto} root=${root}"; return 2 ;;
+    1) [ "${4:-1}" = 0 ] || { _wt_refuse "onto-not-checked-out branch=${onto} root=${root}"; return 2; }; co="" ;;
     2) _wt_refuse "onto-ambiguous branch=${onto} checkouts=${co// /,}"; return 2 ;;
     *) _wt_refuse "onto-checkout-unresolvable branch=${onto} checkout=${co}"; return 2 ;;
   esac
   _wt_branch_protected "$onto"
   case $? in
-    0) _wt_refuse "protected-branch branch=${onto} checkout=${co}"; return 2 ;;
-    2) _wt_refuse "protected-branch-unknowable branch=${onto} checkout=${co}"; return 2 ;;
+    0) _wt_refuse "protected-branch branch=${onto} checkout=${co:-<none>}"; return 2 ;;
+    2) _wt_refuse "protected-branch-unknowable branch=${onto} checkout=${co:-<none>}"; return 2 ;;
   esac
 
   # THE RUN HAS BEEN JUDGED FOR INTEGRATION (wave-27 T31; review pass 25 F3). `current 8` admits
@@ -832,6 +989,73 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   if [ "$ahead" -eq 0 ]; then
     _wt_refuse "nothing-to-land branch=${branch} onto=${onto}"; return 2
   fi
+  _WT_ABS="$wt_abs"; _WT_ROOT="$root"; _WT_BRANCH="$branch"; _WT_CO="$co"
+  return 0
+}
+
+# THE PROJECT'S DECLARED CHECK, AS ONE FUNCTION (wave-28 T3; recheck Q3): factored out of
+# `worktree_land`, which calls it as before, and called by `line_publish`, read from the accepted head.
+# <run dir> is the checkout that holds the branch, or a landing tree pointed at the accepted head when
+# none does; <writer tree> is the piece whose cleanliness the check must also leave as it found it.
+# 0 when no check is declared or it passed and left nothing; 2 having refused.
+_wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <onto> -> 0 | 2
+  local root="$1" co="$2" onto_head="$3" head="$4" wt_abs="$5" branch="$6" onto="$7"
+  local check_cmd check_was check_out rc left said moved fix
+  check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
+  if [ -n "$check_cmd" ]; then
+    check_was="$(git -C "$co" rev-parse --verify --quiet HEAD 2>/dev/null)"
+    check_out="$(cd "$co" 2>/dev/null || exit 1
+      set -f
+      export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="$wt_abs"
+      # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
+      exec $check_cmd </dev/null 2>&1)"; rc=$?
+    # WHAT THE CHECK LEFT (wave-27 T50, T58; review passes 27 S2, 34 N5). The command runs in the shared
+    # target, beside the piece. After it, and before the merge, the target's HEAD is the commit it was
+    # before the check, the target is clean in what git tracks (the test above, taken again), and the
+    # piece's checkout is as clean as it was (the dirty-tree test above, taken again). A check that
+    # committed on the target would have its commit merged onto unjudged; one that dirtied the piece
+    # would leave the merge standing and the tree unremovable. Either refuses this landing
+    # `reason=check-dirtied`, saying which, with nothing merged; a check that fails AND left something
+    # is refused for the failure, which names what it left. `land` restores nothing: the user sees
+    # what the check did.
+    left="$(_wt_check_left "$co" "$check_was" "$wt_abs")"
+    if [ "$rc" -ne 0 ]; then
+      [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
+      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
+    fi
+    if [ -n "$left" ]; then
+      # WHO MOVED THE HEAD (wave-27 T63; review pass 43 S1). A head that moved while the check ran was
+      # moved by the check or by another landing into the same branch, and the tool cannot tell which:
+      # the line says that, and does not tell the user to put back what may be a landed merge.
+      said=""; moved=""; fix=""
+      case " $left" in *" head_was="*)
+        moved="${left#*head_was=}"; moved="${moved%% *}"; said="${left#*head_now=}"; said="${said%% *}"
+        moved="the target checkout's HEAD moved from ${moved} to ${said} while the project's declared release-check (${check_cmd}) ran, by the check or by another landing into ${onto} (git -C ${co} reflog -2)"
+        said=""
+        fix="if the move is another landing's merge, land again; if it is the check's own commit, take it off the target, make the check change nothing, land again" ;;
+      esac
+      case " $left" in *" paths="*) said="left tracked files changed in the target checkout (git -C ${co} status)" ;; esac
+      case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
+      if [ -n "$said" ]; then
+        said="the project's declared release-check (${check_cmd}) ${said}"
+        fix="put back what it changed, make the check change nothing, land again${fix:+ (for the HEAD: ${fix})}"
+      fi
+      _wt_refuse "check-dirtied why=release-check checkout=${co} ${left} branch=${branch} — ${moved}${moved:+${said:+; }}${said}, and nothing is merged; ${fix}"; return 2
+    fi
+  fi
+  return 0
+}
+
+worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
+  local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
+  local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
+  local pre pre_ref was said held now_ref check_cmd check_out check_was left nl='
+'
+  local plan="${3:-}" judged proofs proofs_row
+  local lands_red="${4:-}" red_ev="${5:-}" landed_red="" ev_heads judged_cur landed_at="" red_said debt_id=""
+
+  _wt_land_checks "$target" "$onto" "$plan" 1 || return 2
+  wt_abs="$_WT_ABS"; root="$_WT_ROOT"; branch="$_WT_BRANCH"; co="$_WT_CO"
 
   # NOT CURRENT: what landed since the tree branched must be in it wherever it
   # touches a file the tree also changed, so no file the merge combines is untested.
@@ -903,48 +1127,7 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # head, its words split on blanks with globbing off, as
   # `impact-command:` is run (proof.sh `_proof_map`). A non-zero exit refuses the landing and
   # shows the command's output on stderr. With no key nothing runs and nothing prints.
-  check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
-  if [ -n "$check_cmd" ]; then
-    check_was="$(git -C "$co" rev-parse --verify --quiet HEAD 2>/dev/null)"
-    check_out="$(cd "$co" 2>/dev/null || exit 1
-      set -f
-      export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="$wt_abs"
-      # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
-      exec $check_cmd </dev/null 2>&1)"; rc=$?
-    # WHAT THE CHECK LEFT (wave-27 T50, T58; review passes 27 S2, 34 N5). The command runs in the shared
-    # target, beside the piece. After it, and before the merge, the target's HEAD is the commit it was
-    # before the check, the target is clean in what git tracks (the test above, taken again), and the
-    # piece's checkout is as clean as it was (the dirty-tree test above, taken again). A check that
-    # committed on the target would have its commit merged onto unjudged; one that dirtied the piece
-    # would leave the merge standing and the tree unremovable. Either refuses this landing
-    # `reason=check-dirtied`, saying which, with nothing merged; a check that fails AND left something
-    # is refused for the failure, which names what it left. `land` restores nothing: the user sees
-    # what the check did.
-    left="$(_wt_check_left "$co" "$check_was" "$wt_abs")"
-    if [ "$rc" -ne 0 ]; then
-      [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
-      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
-    fi
-    if [ -n "$left" ]; then
-      # WHO MOVED THE HEAD (wave-27 T63; review pass 43 S1). A head that moved while the check ran was
-      # moved by the check or by another landing into the same branch, and the tool cannot tell which:
-      # the line says that, and does not tell the user to put back what may be a landed merge.
-      said=""; moved=""; fix=""
-      case " $left" in *" head_was="*)
-        moved="${left#*head_was=}"; moved="${moved%% *}"; said="${left#*head_now=}"; said="${said%% *}"
-        moved="the target checkout's HEAD moved from ${moved} to ${said} while the project's declared release-check (${check_cmd}) ran, by the check or by another landing into ${onto} (git -C ${co} reflog -2)"
-        said=""
-        fix="if the move is another landing's merge, land again; if it is the check's own commit, take it off the target, make the check change nothing, land again" ;;
-      esac
-      case " $left" in *" paths="*) said="left tracked files changed in the target checkout (git -C ${co} status)" ;; esac
-      case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
-      if [ -n "$said" ]; then
-        said="the project's declared release-check (${check_cmd}) ${said}"
-        fix="put back what it changed, make the check change nothing, land again${fix:+ (for the HEAD: ${fix})}"
-      fi
-      _wt_refuse "check-dirtied why=release-check checkout=${co} ${left} branch=${branch} — ${moved}${moved:+${said:+; }}${said}, and nothing is merged; ${fix}"; return 2
-    fi
-  fi
+  _wt_release_check "$root" "$co" "$onto_head" "$head" "$wt_abs" "$branch" "$onto" || return 2
 
   # THE LANDING RECORD IS PROVED WRITABLE BEFORE THE MERGE (wave-27 T44; D15). With a bound plan,
   # the run's `landing-proofs.log` is proved writable here, and created by nothing but the append
@@ -1137,14 +1320,17 @@ _wt_proofs_path() {  # <root> <plan> -> the record's path
 # The id of the first `## Tasks` row, in table order, whose `worktree` cell names <tree>; a
 # relative cell is read from <root>. Nothing when none does, or when lib/units.sh, the table's
 # one reader, cannot be loaded (it is loaded lazily, as run.sh is below).
+_wt_units_load() {  # -> 0 once lib/units.sh's table readers are loaded
+  local lib
+  declare -F units_rows >/dev/null 2>&1 && return 0
+  lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/units.sh"
+  # shellcheck source=/dev/null
+  [ -r "$lib" ] && . "$lib" 2>/dev/null
+  declare -F units_rows >/dev/null 2>&1
+}
 _wt_proofs_row() {  # <root> <plan> <tree abs> -> <row id> | nothing
-  local rec cell lib id
-  if ! declare -F units_rows >/dev/null 2>&1; then
-    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/units.sh"
-    # shellcheck source=/dev/null
-    [ -r "$lib" ] && . "$lib" 2>/dev/null
-    declare -F units_rows >/dev/null 2>&1 || return 1
-  fi
+  local rec cell id
+  _wt_units_load || return 1
   while IFS= read -r rec; do
     cell="$(units_field "$rec" worktree)"
     while :; do   # a leading `./` and any trailing slashes are not part of the name (wave-27 T50, N4)
@@ -1351,6 +1537,84 @@ worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSE
     lands_red="${decl%%	*}"; red_ev="${decl#*	}"
   fi
   worktree_land "$target" "$onto" "$plan" "$lands_red" "$red_ev"
+}
+
+# ---------------------------------------------------------------------------
+# LANDING TREES (wave-28 T3; spec D1, S14, S15). The line builds and proves a candidate in a tree the
+# tool owns: a detached checkout at `<root>/.bionic/tmp/landing/<n>`, outside `.worktrees/`, so the
+# tree conventions, the dispatch wall and close-out never count one. A tree is held while
+# `<tree>.held` names a live `<pid>:<start>` (the pid and start-time rule of lib/slots.sh); a hold
+# whose holder is not alive is free, and is cleared only under the directory's reap lock, so two
+# takers never both clear it. Taking a free tree is one exclusive create of its hold. Trees are
+# reused between landings and re-pointed, never removed per landing; no agent writes in one.
+_wt_landing_dir() { printf '%s/.bionic/tmp/landing' "${1%/}"; }   # <root>
+_wt_slots_load() {  # -> 0 once lib/slots.sh's liveness rule (`_slots_alive`, `_slots_since`) is loaded
+  declare -F _slots_since >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/slots.sh" 2>/dev/null
+  declare -F _slots_since >/dev/null 2>&1
+}
+_wt_hold_alive() {  # <hold file> -> 0 while its `<pid>:<start>` lives
+  local h="" p now
+  { read -r h < "$1"; } 2>/dev/null
+  p="${h%%:*}"
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  _wt_slots_load || return 0
+  _slots_alive "$p" || return 1
+  now="$(_slots_since "$p")"
+  [ -z "$now" ] || [ "${h#*:}" = "$now" ]
+}
+landing_tree_take() {  # <root> -> a free landing tree's path, now held by this shell's process
+  local root="${1:-}" dir n=1 t me tries=0
+  [ -d "$root" ] || return 1
+  dir="$(_wt_landing_dir "$root")"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  _wt_slots_load || return 1
+  me="$$:$(_slots_since "$$")"
+  while :; do
+    t="${dir}/${n}"
+    if ( set -C; printf '%s\n' "$me" > "${t}.held" ) 2>/dev/null; then break; fi
+    if ! _wt_hold_alive "${t}.held"; then
+      if mkdir "${dir}/.reap" 2>/dev/null; then
+        _wt_hold_alive "${t}.held" || rm -f "${t}.held"
+        rmdir "${dir}/.reap" 2>/dev/null
+        continue
+      fi
+      # A reaper killed inside its microseconds leaves `.reap`: cleared once it is a minute old.
+      [ -z "$(find "${dir}/.reap" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "${dir}/.reap" 2>/dev/null
+      tries=$((tries + 1)); [ "$tries" -lt 200 ] || return 1
+      sleep 0.05; continue
+    fi
+    n=$((n + 1))
+  done
+  if [ ! -e "${t}/.git" ]; then
+    rm -rf "$t" 2>/dev/null; git -C "$root" worktree prune >/dev/null 2>&1
+    git -C "$root" worktree add --quiet --detach "$t" >/dev/null 2>&1 || { rm -f "${t}.held"; return 1; }
+  fi
+  printf '%s' "$t"
+}
+landing_tree_point() {  # <tree> <commit> -> 0 once the tree is detached at <commit>, clean
+  local t="${1:-}" c="${2:-}"
+  [ -n "$t" ] && [ -n "$c" ] && [ -e "${t}/.git" ] || return 1
+  git -C "$t" merge --abort >/dev/null 2>&1
+  git -C "$t" reset -q --hard >/dev/null 2>&1
+  git -C "$t" clean -qfd >/dev/null 2>&1
+  git -C "$t" checkout -q --detach "$c" >/dev/null 2>&1
+}
+landing_tree_free() { rm -f "${1:-/nonexistent}.held"; }   # <tree> — the hold removed
+
+# THE HAND LANDING'S LAST ACT (wave-28 T3, D9): as land ended its lease, the writer's tree goes once
+# its row is published: the record link dropped, `git worktree remove`, prune; and land's LANDED line.
+_wt_hand_remove() {  # <tree abs> <root> <branch> <onto> <checkout> <published> <record>
+  local wt="$1" root="$2" link_to
+  link_to="$(readlink "${wt}/.bionic" 2>/dev/null)"
+  _wt_drop_legacy_link "$wt" || :
+  if ! git -C "$root" worktree remove "$wt" >/dev/null 2>&1; then
+    [ -n "$link_to" ] && [ ! -e "${wt}/.bionic" ] && ln -s "$link_to" "${wt}/.bionic" 2>/dev/null
+    _wt_refuse "worktree-remove-refused path=${wt} merged=${6}"; return 2
+  fi
+  git -C "$root" worktree prune >/dev/null 2>&1
+  _wt_say "LANDED branch=${3} onto=${4} checkout=${5} merge=${6} removed=${wt} proofs=${7}"
 }
 
 # _wt_plan_current <plan> -> the plan's raw `current:` value, read by lib/fill.sh's one reader of
