@@ -15,7 +15,8 @@
 #                    key=<command key>  kind=<landing|work|whole>  who=<session id>:<agent>
 #                    tree=<abs path>  asked=<epoch>  holder=<pid>:<start>
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>,
-#                  and once ended, ended=<epoch> rc=<n>. While admitted and unfinished it also
+#                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed).
+#                  A request returned 75 holds holder=-, nobody's. While admitted and unfinished it also
 #                  carries peak=<pct>, the highest memory reading any locked gate read saw
 #                  during the run (the plan's ruling A-orch-12). A line the gate does not know
 #                  is ignored, so a later bionic may add one.
@@ -27,8 +28,9 @@
 # THE VERBS.
 #
 #   gate_ask <kind> <key> [--within <seconds>]   rc 0, the request id on stdout: admitted.
-#                  rc 75: the time ran out; the request is kept and holds its turn, nothing
-#                  ran, and the next ask by the same who for the same key resumes it. rc 2: a
+#                  rc 75: the time ran out; the request is kept with its turn, nothing ran, and
+#                  its holder is cleared (holder=-), so it is nobody's and passed over until the
+#                  next ask by the same who for the same key resumes it. rc 2: a
 #                  usage error or a store that cannot be written. It polls every
 #                  ${BIONIC_GATE_POLL:-2} seconds and gives up before --within runs out;
 #                  without --within it waits until admitted.
@@ -47,13 +49,17 @@
 # THE RULES, each taken under lock/:
 #
 #   alive     a request's holder is alive by the pid-and-start rule of lib/slots.sh
-#             (`_slots_holds`, called, not copied). Admitted, dead and never ended is killed.
+#             (`_slots_holds`, called, not copied). Admitted, dead and never ended is killed:
+#             the next locked act that reads it writes it ended=<now> rc=137, after which it
+#             overlaps nothing.
 #   order     among waiting requests whose holder is alive: kind=whole only when nothing
 #             admitted is unfinished, then landing before work, then the lowest asked, ties by
 #             id. Only the head of that order is admitted; nothing passes it.
 #   memory    the larger of _res_used_pct and (idle + the memory promises of admitted,
-#             unfinished requests), plus the newcomer's, at most the share. It is the hard
-#             limit: it holds even when nothing is admitted.
+#             unfinished requests), plus the newcomer's, at most the share — or nothing
+#             admitted is unfinished and _res_used_pct itself is at most the share. The reading
+#             is the hard limit: over the share it admits nothing; a promise alone never
+#             refuses an idle gate.
 #   processor the larger of _res_busy_cores and the admitted processor promises, plus the
 #             newcomer's, at most share × cores ÷ 100 — or nothing admitted is unfinished.
 #             An empty or unreadable busy reading counts as 0: the promises alone decide.
@@ -64,7 +70,8 @@
 #   cost      at gate_end: seconds from admitted to ended; cores, the children's processor time
 #             from the shell's own `times` over those seconds; memory, the rise from idle to
 #             the run's peak, kept only when no other admission overlapped the run, otherwise
-#             the previous memory value is carried.
+#             the previous memory value is carried. A request killed before this run was
+#             admitted overlaps nothing.
 #   sampling  the peak is raised only by a locked read: a waiter's poll, gate_state, gate_end.
 #             A run nothing else polls is sampled only at its end, so a caller that holds a
 #             long run calls `gate_state` now and then while it runs (it prints one line and
@@ -206,8 +213,23 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
   done < "$1"
 }
 
-_gate_alive() {  # the request last read has a live holder
+_gate_alive() {  # the request last read has a live holder (holder=- is nobody)
+  case "$_R_holder" in ''|-) return 1 ;; esac
   _gate_holds "${_R_holder%%:*}" "${_R_holder#*:}"
+}
+
+# _gate_reap <file> — under the lock, after _gate_read: the request was admitted, has no ended
+# line and its holder is dead, so it was killed. Written ended=<now> rc=137, it overlaps nothing
+# admitted after now.
+_gate_reap() {
+  _R_ended="$(_res_now)" _R_rc=137
+  printf 'ended=%s\nrc=137\n' "$_R_ended" >> "$1"
+}
+
+_gate_holder() {  # <id> <holder> — under the lock: rewrites the request's holder line
+  local f="$_GD/requests/$1"
+  { grep -v '^holder=' "$f"; printf 'holder=%s\n' "$2"; } > "$_GD/requests/.$1.tmp" \
+    && mv "$_GD/requests/.$1.tmp" "$f"
 }
 
 _gate_cost_file() {  # <key> -> its cost file
@@ -234,7 +256,8 @@ _gate_promise() {
 #   _G_PROM     their "<mem>:<cores>:<seconds>:<admitted>" lines
 #   _G_WAIT     waiting (holder alive, not admitted)   _G_LWAIT  of them, landings
 #   _G_QUEUE    their "<kind> <asked> <id> <key>" lines
-# and raises the peak of every admitted, unfinished request to the reading <pct> it is given.
+# raises the peak of every admitted, unfinished request to the reading <pct> it is given, and
+# writes the end of every admitted request whose holder is dead (_gate_reap).
 _gate_scan() {
   local f id reading="${1:--1}"
   _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE=''
@@ -243,7 +266,10 @@ _gate_scan() {
     case "$id" in ''|*[!0-9]*) continue ;; esac
     _gate_read "$f" || continue
     [ -z "$_R_ended" ] || continue
-    _gate_alive || continue
+    if ! _gate_alive; then
+      [ -z "$_R_admitted" ] || _gate_reap "$f"
+      continue
+    fi
     if [ -n "$_R_admitted" ]; then
       _G_UNF=$((_G_UNF + 1))
       [ "$_R_kind" != whole ] || _G_WHOLE=1
@@ -324,7 +350,7 @@ _gate_decide() {
     NF >= 2 { sc += $2 }
     END {
       split(p, n, ":")
-      if (r >= 0) {                            # memory, the hard limit
+      if (r >= 0 && !(unf == 0 && r <= share)) {   # memory; an idle gate: the reading alone
         if (u + n[1] > share) exit 1
       }
       b = busy + 0; if (sc > b) b = sc         # processor, the soft limit
@@ -338,8 +364,9 @@ _gate_decide() {
 }
 
 # _gate_enter <kind> <key> <who> — under the lock: sets _GATE_ID to the request this ask
-# holds. One by the same who for the same key with no admitted line is resumed, its holder
-# rewritten; otherwise a new one takes the next number.
+# holds. One by the same who for the same key with no admitted line and no live holder is
+# resumed, its holder rewritten; otherwise a new one takes the next number, so a live waiter's
+# number is never taken over.
 _gate_enter() {
   local f id max=0 holder tree now
   holder="$$:$(_slots_since "$$")"
@@ -350,14 +377,12 @@ _gate_enter() {
     [ "$id" -le "$max" ] || max="$id"
     _gate_read "$f" || continue
     if [ -z "$_GATE_ID" ] && [ -z "$_R_admitted" ] && [ -z "$_R_ended" ] \
-        && [ "$_R_who" = "$3" ] && [ "$_R_key" = "$2" ]; then
+        && [ "$_R_who" = "$3" ] && [ "$_R_key" = "$2" ] && ! _gate_alive; then
       _GATE_ID="$id"
     fi
   done
   if [ -n "$_GATE_ID" ]; then
-    f="$_GD/requests/$_GATE_ID"
-    { grep -v '^holder=' "$f"; printf 'holder=%s\n' "$holder"; } > "$_GD/requests/.$_GATE_ID.tmp" \
-      && mv "$_GD/requests/.$_GATE_ID.tmp" "$f"
+    _gate_holder "$_GATE_ID" "$holder"
     return 0
   fi
   _GATE_ID=$((max + 1))
@@ -427,6 +452,8 @@ gate_ask() {
     now="$(_res_now)"
     if [ -n "$within" ] && awk -v n="$now" -v p="$poll" -v d="$((start + within))" \
         'BEGIN { exit !(n + p > d) }'; then
+      # Nobody polls it now: its holder is cleared, or a caller that lives on keeps the head.
+      [ -z "$id" ] || { _gate_lock; _gate_holder "$id" -; _gate_unlock; }
       echo "gate: request ${id:-?} not admitted within ${within}s; it keeps its turn, ask again" >&2
       return 75
     fi
@@ -463,12 +490,15 @@ gate_end() {
   cores="$(awk -v c="$cpu" -v s="$secs" 'BEGIN { if (s < 1) s = 1; printf "%.2f", c / s }')"
 
   # Did any other admission overlap this run? Another run overlaps when it was admitted by
-  # now and had not ended by this one's admission; one never ended (still running, or killed
-  # at a moment nobody saw) is taken as still running. Admitted the same second is overlap.
+  # now and had not ended by this one's admission. One never ended counts while its holder
+  # lives; one whose holder is dead is written ended now (_gate_reap), so a run killed during
+  # this one overlaps it and one killed before it was admitted does not (every admission
+  # scans first, which wrote that one's end). Admitted the same second is overlap.
   for o in "$_GD"/requests/*; do
     case "${o##*/}" in ''|*[!0-9]*|"$id") continue ;; esac
     _gate_read "$o" || continue
     [ -n "$_R_admitted" ] || continue
+    [ -n "$_R_ended" ] || _gate_alive || _gate_reap "$o"
     if [ "$_R_admitted" -eq "$my_adm" ] \
         || { [ "$_R_admitted" -le "$now" ] && { [ -z "$_R_ended" ] || [ "$_R_ended" -gt "$my_adm" ]; }; }; then
       over=1; break
@@ -580,8 +610,9 @@ gate_asked() {
 
 # gate_list — one line per request, lowest id first:
 #   <id> <waiting|admitted|ended|killed|gone> kind=<k> asked=<e> admitted=<e|-> ended=<e|-> rc=<n|-> key=<key>
-# killed: admitted, never ended, holder dead. gone: never admitted, holder dead (its number is
-# kept for the next ask by the same who for the same key).
+# killed: admitted and either ended with rc 137 (the gate's _gate_reap, or a run killed by
+# signal 9) or never ended with its holder dead. gone: never admitted, no live holder (its
+# number is kept for the next ask by the same who for the same key).
 gate_list() {
   local f id st
   _gate_store || return 2
@@ -590,7 +621,8 @@ gate_list() {
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
     _gate_read "$f" || continue
-    if [ -n "$_R_ended" ]; then st=ended
+    if [ -n "$_R_ended" ]; then
+      if [ "$_R_rc" = 137 ]; then st=killed; else st=ended; fi
     elif _gate_alive; then
       if [ -n "$_R_admitted" ]; then st=admitted; else st=waiting; fi
     elif [ -n "$_R_admitted" ]; then st=killed

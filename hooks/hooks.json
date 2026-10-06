@@ -96,6 +96,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh structure",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh severity",
+            "timeout": 10
           }
         ]
       }

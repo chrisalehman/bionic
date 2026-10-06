@@ -66,7 +66,9 @@ cat > "$LINT_AWK" <<'LINT_AWK_EOF'
 # Prints, per file it reads:
 #   H<TAB><file>:<line><TAB><shape><TAB><what>   one row per hazard
 #   D<TAB><file><TAB><name>                     one row per function a load defines
-#   U<TAB><file><TAB><state>                    the file ended with a frame still open
+#   U<TAB><file><TAB><state>                    the file ended with a frame still open, or
+#                                               its brace depth went below zero or ended
+#                                               above it
 # Frames: top, cs ($( ) and <( )), sub (( )), bt (` `), dq, sq, dsq ($' '), par (${ }),
 # ar ($(( )) and (( ))), hd (an unquoted heredoc body). A case lives in the
 # command frame that opened it: subj, pat, patx (inside a pattern), body.
@@ -85,6 +87,9 @@ function isb(c) {
   return c == "" || c == " " || c == "\t" || c == ";" || c == "&" || c == "|" \
     || c == "(" || c == ")" || c == "<" || c == ">"
 }
+# the end of a reserved word: a blank or metacharacter, or the backquote that closes the
+# backquoted text it sits in (`… esac` + backquote)
+function kend(c) { return isb(c) || (c == "`" && K[d] == "bt") }
 function hit(shape, what,   key) {
   key = FILENAME SUBSEP FNR SUBSEP shape
   if (key in SEEN) return
@@ -176,7 +181,7 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
     if (c == " " || c == "\t") { ws = 1; continue }
     if (ws && c == "#") return
     if (owns() && CS[cn] == "pat") {
-      if (substr(s, i, 4) == "esac" && isb(substr(s, i + 4, 1))) {
+      if (substr(s, i, 4) == "esac" && kend(substr(s, i + 4, 1))) {
         cn--; AT[d] = 0; i += 3; ws = 0; continue
       }
       CS[cn] = "patx"
@@ -190,7 +195,7 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
     if (ws) {
       w = substr(s, i)
       m = match(w, /^[a-z]+/) ? substr(w, 1, RLENGTH) : ""
-      nb = (m != "") && isb(substr(s, i + length(m), 1))
+      nb = (m != "") && kend(substr(s, i + length(m), 1))
       if (owns() && CS[cn] == "subj") {
         if (nb && m == "in" && CSW[cn]) { CS[cn] = "pat"; i += 1; ws = 0; continue }
         CSW[cn] = 1
@@ -201,12 +206,17 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
         if (m == "function") {
           nm = substr(s, i + 8); sub(/^[ \t]+/, "", nm); sub(/[^A-Za-z0-9_:.-].*$/, "", nm)
           if (d == 1 && BR[1] == 0 && !hdon && nm != "") printf "D\t%s\t%s\n", FILENAME, nm
-          i += 7; ws = 0; continue
+          # the name is no command word: step over it and stay in command position, so the
+          # `{` of `function name {` counts as the one of `name() {` does
+          match(substr(s, i + 8), /^[ \t]*[A-Za-z0-9_:.-]*/); i += 7 + RLENGTH; ws = 0; continue
         }
       }
       if (AT[d]) {
         if (c == "{" && isb(substr(s, i + 1, 1))) { BR[d]++; continue }
-        if (c == "}" && isb(substr(s, i + 1, 1))) { BR[d]--; AT[d] = 0; ws = 0; continue }
+        if (c == "}" && kend(substr(s, i + 1, 1))) {
+          if (--BR[d] < 0 && !BNEG) BNEG = FNR
+          AT[d] = 0; ws = 0; continue
+        }
         if (c == "!" && isb(substr(s, i + 1, 1))) continue
         if (d == 1 && BR[1] == 0 && !hdon && match(w, /^[A-Za-z_][A-Za-z0-9_:.-]*[ \t]*\(\)/)) {
           nm = w; sub(/[ \t]*\(.*$/, "", nm); printf "D\t%s\t%s\n", FILENAME, nm
@@ -244,7 +254,9 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
   }
 }
 # The raw text of a heredoc body inside $( ), read the way bash 3.2 reads it: it knows
-# quotes and parentheses and nothing of heredocs, so a lone ) closes the substitution.
+# quotes, parentheses and comments and nothing of heredocs, so a lone ) closes the
+# substitution. A comment opens at a `#` that starts the line or follows a blank, and to
+# the line's end no paren and no quote counts (measured under 3.2.57, wave-28 T46).
 function rawparen(s,   i, n, c) {
   n = length(s)
   for (i = 1; i <= n; i++) {
@@ -255,6 +267,7 @@ function rawparen(s,   i, n, c) {
       continue
     }
     if (c == "\\") { i++; continue }
+    if (c == "#" && (i == 1 || substr(s, i - 1, 1) == " " || substr(s, i - 1, 1) == "\t")) return
     if (c == "'" || c == "\"" || c == "`") { RQ = c; continue }
     if (c == "(") RDEP++
     else if (c == ")") {
@@ -268,15 +281,17 @@ function startbody() {
   if (!HQ[hc]) push("hd")
   RQ = ""; RDEP = 0; RHIT = 0
 }
-# A file that ends with a frame, a case or a heredoc still open is one the lexer lost its
-# place in, and every row it printed after that point is suspect: it says so.
+# A file that ends with a frame, a case or a heredoc still open, or whose brace depth went
+# below zero or ends above it, is one the lexer lost its place in (a form it does not
+# know), and every row it printed after that point is suspect: it says so.
 function closefile(f,   st, x) {
-  if (f == "" || (d == 1 && cn == 0 && !hdon && np == 0)) return
+  if (f == "" || (d == 1 && cn == 0 && !hdon && np == 0 && BR[1] == 0 && !BNEG)) return
   st = ""; for (x = 1; x <= d; x++) st = st K[x] (x < d ? "/" : "")
-  printf "U\t%s\t%s cases=%d heredoc=%s\n", f, st, cn, (hdon ? HD[hc] : "-")
+  printf "U\t%s\t%s cases=%d heredoc=%s braces=%d%s\n", f, st, cn, (hdon ? HD[hc] : "-"), \
+    BR[1], (BNEG ? " below-zero-at=" BNEG : "")
 }
 FNR == 1 {
-  closefile(PREVF); PREVF = FILENAME; PQS = ""
+  closefile(PREVF); PREVF = FILENAME; PQS = ""; BNEG = 0
   d = 1; K[1] = "top"; AT[1] = 1; BR[1] = 0; Z[1] = 0; HB_[1] = 0; Q[1] = 0
   cn = 0; np = 0; hdon = 0; hc = 0
 }
@@ -357,6 +372,50 @@ x="@DOL@(printf '%s' "a"
 EOF
 expect_contains "…while a planted file left open is named with the frames it ended in" \
   "$TMP/unclosed.sh	top/dq/cs" "$(lint_raw "$TMP/unclosed.sh")"
+
+# A lost brace depth is a lost place too (wave-28 T46). A form the lexer does not know leaves
+# its count of `{` and `}` wrong, and from there it owes §LOAD no function, so a library
+# 3.2 leaves half loaded would pass. Two valid forms it does not know, one each way: an
+# arithmetic `for` with a brace body (depth below zero at its `}`), and a `}` straight after
+# `fi` (depth above zero at the end). Each is named; the control beside them, an `esac`
+# directly before the backquote that closes it, is a valid file the lexer reads whole.
+plant "$TMP/brace-below.sh" <<'EOF'
+#!/bin/bash
+for ((i = 0; i < 1; i++)) { :; }  # MARK-below
+early_fn() { :; }
+[ "@DOL@{BASH_VERSINFO[0]}" -ge 4 ] || return 0
+late_fn() { :; }
+EOF
+plant "$TMP/brace-above.sh" <<'EOF'
+#!/bin/bash
+early_fn() { if :; then :; fi }
+[ "@DOL@{BASH_VERSINFO[0]}" -ge 4 ] || return 0
+late_fn() { :; }
+EOF
+plant "$TMP/esac-bt.sh" <<'EOF'
+#!/bin/bash
+X="@DOL@(echo `case "@DOL@1" in a) echo A ;; *) echo B ;; esac`)"
+printf 'X=[%s]\n' "@DOL@X"
+EOF
+expect_eq "the two lost-brace files and the esac control parse under /bin/bash -n" "0 0 0" \
+  "$(/bin/bash -n "$TMP/brace-below.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/brace-above.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/esac-bt.sh" 2>/dev/null; printf '%s' $?)"
+expect_eq "…each lost-brace file, loaded under /bin/bash, defines early_fn and not late_fn" \
+  "early_fn | early_fn |" \
+  "$(for f in brace-below brace-above; do (cd "$TMP" && env -i PATH=/usr/bin:/bin /bin/bash -c \
+       '. "$1" >/dev/null 2>&1; declare -F' _ "$TMP/$f.sh") | LC_ALL=C awk '{ printf "%s ", $3 }'
+     printf '| '; done | sed 's/ $//')"
+expect_eq "…and the control runs under /bin/bash and answers" "X=[A]" \
+  "$(/bin/bash "$TMP/esac-bt.sh" a 2>&1)"
+BRACE_RAW="$(cd "$TMP" && lint_raw brace-below.sh brace-above.sh esac-bt.sh)"
+expect_contains "the lexer names a file whose brace depth goes below zero, with the line" \
+  "below-zero-at=$(mark_line "$TMP/brace-below.sh" MARK-below)" \
+  "$(printf '%s\n' "$BRACE_RAW" | LC_ALL=C awk -F'\t' '$1 == "U" && $2 == "brace-below.sh"')"
+expect_contains "…and a file whose brace depth ends above zero" "braces=1" \
+  "$(printf '%s\n' "$BRACE_RAW" | LC_ALL=C awk -F'\t' '$1 == "U" && $2 == "brace-above.sh"')"
+expect_absent "…while the esac control, read in the same call, is not named" "esac-bt.sh" \
+  "$BRACE_RAW"
 
 # ============================================================
 section "PARSE — every shell file in the tree parses under the SYSTEM interpreter"
@@ -507,6 +566,30 @@ expect_eq "…and a function defined inside another is not owed at load" \
   "clean_fn helper " \
   "$(lint_raw "$TMP/lib-clean.sh" | LC_ALL=C awk -F'\t' '$1 == "D" { printf "%s ", $3 }')"
 
+# The keyword forms (wave-28 T46): `function name {` and `function name() {` open a body as
+# `name() {` does. A lexer that skips the keyword form's `{` reads its `}` as below zero and
+# owes nothing after it, so the early return above went green behind a keyword definition.
+cat > "$TMP/lib-kw.sh" <<'EOF'
+#!/bin/bash
+function kw_first { :; }
+function kw_second() { :; }
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || return 0
+function kw_third { :; }
+kw_fourth() { :; }
+EOF
+expect_eq "the keyword-form library parses under /bin/bash -n" "0" \
+  "$(/bin/bash -n "$TMP/lib-kw.sh" >/dev/null 2>&1; echo $?)"
+expect_eq "…and loaded under /bin/bash it defines only the two before its early return" \
+  "kw_first kw_second " \
+  "$( (cd "$LOAD_HOME" && env -i PATH=/usr/bin:/bin /bin/bash -c \
+     '. "$1" >/dev/null 2>&1; declare -F' _ "$TMP/lib-kw.sh") | LC_ALL=C awk '{ printf "%s ", $3 }')"
+expect_eq "the lexer owes every function the keyword-form library defines at load" \
+  "kw_first kw_second kw_third kw_fourth " \
+  "$(lint_raw "$TMP/lib-kw.sh" | LC_ALL=C awk -F'\t' '$1 == "D" { printf "%s ", $3 }')"
+expect_contains "…so the load sweep names the two the early return left undefined" \
+  "FAIL $TMP/lib-kw.sh: not defined after loading: kw_fourth kw_third" \
+  "$(lint_load "$TMP/lib-kw.sh" "$TMP/lib-clean.sh")"
+
 # ============================================================
 section "CASE — no case arm without its opening paren inside \$( )"
 # ============================================================
@@ -576,6 +659,34 @@ expect_contains "…and the same arm in an unquoted \$( )" \
 expect_contains "…and the one-line shape" \
   "case-inline.sh:$(mark_line "$TMP/case-inline.sh" MARK-inline): CASE" "$CASE_HITS"
 expect_absent "…while no control, read in the same call, is named" "case-ok.sh" "$CASE_HITS"
+
+# The keyword form inside "$( )" (wave-28 T46): the arm after `function g { case … in` is in a
+# body the lexer must see open. The control is the same function with paren-led arms.
+plant "$TMP/case-fn.sh" <<'EOF'
+#!/bin/bash
+X="@DOL@(function g { case "@DOL@1" in
+    a) echo A ;;  # MARK-fn
+  esac; }; g a)"
+printf 'X=[%s]\n' "@DOL@X"
+EOF
+plant "$TMP/case-fn-ok.sh" <<'EOF'
+#!/bin/bash
+X="@DOL@(function g { case "@DOL@1" in
+    (a) echo A ;;
+  esac; }; g a)"
+printf 'X=[%s]\n' "@DOL@X"
+EOF
+expect_eq "the keyword-form arm and its control parse under /bin/bash -n" "0 0" \
+  "$(/bin/bash -n "$TMP/case-fn.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/case-fn-ok.sh" 2>/dev/null; printf '%s' $?)"
+expect_contains "…the arm fails when it runs under /bin/bash" "syntax error" \
+  "$(/bin/bash "$TMP/case-fn.sh" 2>&1)"
+expect_eq "…while the control answers" "X=[A]" "$(/bin/bash "$TMP/case-fn-ok.sh" 2>&1)"
+CASE_FN_HITS="$(cd "$TMP" && lint_hits case-fn.sh case-fn-ok.sh)"
+expect_contains "the lint names the arm after \`function g {\` by file and line" \
+  "case-fn.sh:$(mark_line "$TMP/case-fn.sh" MARK-fn): CASE" "$CASE_FN_HITS"
+expect_absent "…while the control, read in the same call, is not named" "case-fn-ok.sh" \
+  "$CASE_FN_HITS"
 
 # MOVED HERE from tests/cross-gate-agreement.test.sh §BP (wave-28 T37): the one-line grep, over
 # §PARSE's roster, which reaches tests/ where the lexer does not. A one-line `case` inside a
@@ -676,5 +787,89 @@ expect_contains "…and its one-line form" \
 expect_contains "…and shape (ii) by file and line" \
   "hd-paren.sh:$(mark_line "$TMP/hd-paren.sh" MARK-hdp): HEREDOC-PAREN" "$HD_HITS"
 expect_absent "…while neither control, read in the same call, is named" "hd-ok.sh" "$HD_HITS"
+
+# The comment 3.2's reader honours (wave-28 T46). A `#` at a word start (the line's start, or
+# after a blank) comments out the rest of its line: no paren after it counts. So a `(` there
+# hides nothing and a `)` there closes nothing: the first body below leaks, the second prints
+# whole. (Measured under 3.2.57: a mid-word `#`, or one after `;`, `|`, `(`, is no comment.)
+plant "$TMP/hd-hash.sh" <<'EOF'
+#!/bin/bash
+x="@DOL@(cat <<'EOT'
+# open ( here
+close ) there MARK-hho
+EOT
+)"
+printf '[%s]\n' "@DOL@x"
+EOF
+plant "$TMP/hd-hash-ok.sh" <<'EOF'
+#!/bin/bash
+x="@DOL@(cat <<'EOT'
+# note ) here MARK-hhn
+EOT
+)"
+printf '[%s]\n' "@DOL@x"
+EOF
+expect_eq "the two commented bodies parse under /bin/bash -n" "0 0" \
+  "$(/bin/bash -n "$TMP/hd-hash.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/hd-hash-ok.sh" 2>/dev/null; printf '%s' $?)"
+expect_contains "…a ( after the # hides nothing: the ) on the next line leaks the heredoc" "EOT" \
+  "$(/bin/bash "$TMP/hd-hash.sh" 2>/dev/null)"
+expect_eq "…while a ) after the # closes nothing: the body prints whole" \
+  "[# note ) here MARK-hhn]" "$(/bin/bash "$TMP/hd-hash-ok.sh" 2>/dev/null)"
+HD_HASH_HITS="$(cd "$TMP" && lint_hits hd-hash.sh hd-hash-ok.sh)"
+expect_contains "the lint names the ) that leaks, by file and line" \
+  "hd-hash.sh:$(mark_line "$TMP/hd-hash.sh" MARK-hho): HEREDOC-PAREN" "$HD_HASH_HITS"
+expect_absent "…and not the ) behind the #, read in the same call" "hd-hash-ok.sh" "$HD_HASH_HITS"
+
+# What 3.2 does when the body RUNS (the plan's T46 ruling, A-orch-23): after the comment's `#`
+# no quote pairs either, so a lone quote there leaves the next line's `)` lone; and a `#` is a
+# comment only at a line's start or after a blank, as each boundary below was measured.
+# hd_plant <file> <body> -> a script that captures a quoted heredoc holding <body> in "$( )"
+# and prints what it captured
+hd_plant() {
+  printf '#!/bin/bash\nx="$(cat <<'"'"'EOT'"'"'\n%s\nEOT\n)"\nprintf '"'"'[%%s]\\n'"'"' "$x"\n' \
+    "$2" > "$1"
+}
+HD_B_DIR="$TMP/hd-bound"
+mkdir -p "$HD_B_DIR"
+HD_B_CASES=""
+hd_case() {  # <name> <leaks|whole> <body>
+  hd_plant "$HD_B_DIR/$1.sh" "$3"; HD_B_CASES="$HD_B_CASES $1:$2"
+}
+hd_case comment-squote leaks "# it's
+x ) y
+' z"
+hd_case comment-dquote leaks '# say "hi
+x ) y
+" z'
+hd_case semicolon leaks 'a;# ) y'
+hd_case pipe leaks 'a|# ) y'
+hd_case open-paren leaks 'a(# ) y ) z'
+hd_case close-paren leaks '(a)# ) y'
+hd_case equals leaks 'a=# ) y'
+hd_case brace leaks 'a{# ) y'
+hd_case backquote leaks '`a`# ) y'
+hd_case squote leaks "'a'# ) y"
+hd_case dquote leaks '"a"# ) y'
+hd_case space whole 'see #1 ) here'
+hd_case tab whole "$(printf '\t# x ) y')"
+expect_eq "every planted boundary body parses under /bin/bash -n" "13 of 13" \
+  "$(n=0; ok=0; for c in $HD_B_CASES; do n=$((n + 1))
+       /bin/bash -n "$HD_B_DIR/${c%%:*}.sh" >/dev/null 2>&1 && ok=$((ok + 1)); done
+     echo "$ok of $n")"
+HD_B_HITS="$(cd "$HD_B_DIR" && lint_hits ./*.sh)"
+for c in $HD_B_CASES; do
+  f="$HD_B_DIR/${c%%:*}.sh"
+  if [ "${c#*:}" = leaks ]; then
+    expect_contains "${c%%:*}: run under /bin/bash, the ) leaks the heredoc" "EOT" \
+      "$(/bin/bash "$f" 2>/dev/null)"
+    expect_contains "${c%%:*}: …and the lint names it by file and line" \
+      "${c%%:*}.sh:$(mark_line "$f" ' ) '): HEREDOC-PAREN" "$HD_B_HITS"
+  else
+    expect_eq "${c%%:*}: run under /bin/bash, the body prints whole" \
+      "[$(sed -n 3p "$f")]" "$(/bin/bash "$f" 2>/dev/null)"
+    expect_absent "${c%%:*}: …and the lint, in the same call, does not name it" "/${c%%:*}.sh:" "$HD_B_HITS"
+  fi
+done
 
 finish

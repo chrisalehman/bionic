@@ -215,10 +215,10 @@ Newly refused:
 - `spawn-worktree.sh land`, and the stand-down's landing, for a range that adds `.bionic` or any
   path under it, or changes what kind of thing `.bionic` is, `.bionic` in any spelling of case; a
   change to, or deletion of, a path the target already tracks there lands; nothing merges:
-  `spawn-worktree: REFUSED reason=bionic-committed path=<path> commit=<commit> branch=<branch> onto=<onto> fix='git -C <tree> rm -r --cached .bionic, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept`.
+  `spawn-worktree: REFUSED reason=bionic-committed path=<path> commit=<commit> branch=<branch> onto=<onto> fix='git -C <tree> rm -r --cached .bionic, commit, say ready again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree is kept`.
   For a path added under a `.bionic` directory the target tracks, the fix takes that path alone out
   of the index and keeps the file: `fix='git -C <tree> rm --cached <path>, move <path> out of the
-  tree, commit, run the suites, land again'`.
+  tree, commit, say ready again'`.
 - `session-poker.sh release-check` on a checkout with uncommitted changes, with no start for the
   release range or an empty one, and from a dispatched agent; `session-poker.sh proof-add check`
   (only `release-check` writes a check fact). A failing check prints its output and its log path.

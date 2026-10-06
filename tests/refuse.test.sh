@@ -1178,4 +1178,57 @@ done
 expect_eq "INV the tracked inventory exists and every site has a fix line or a reason" "" \
   "$(inv_check "$INV_FILE")"
 
+# THE WAVE ADDS NO WALL (wave-28 T3; REQ-5 AC-5.4, D9). The landing line is a verb's work, never a
+# wall's: no shipped hook gains an arm that enforces the queue. Read as a CEILING on the four wall
+# files' refusal sites: 1.12.0 held 122 (walls.sh 60, stop.sh 13, dispatch-preflight.sh 40,
+# stop-guard.sh 9, by `inv_sites` over `git show v1.12.0:<file>`), and the wave's one new non-verb
+# line is REQ-10's door, whose bullet names it. The hand landing joins ARM A's existing site (its
+# first line unchanged), so it adds none. And `hooks/hooks.json` registers no new blocking hook: every
+# registration on an event that can refuse is one 1.12.0 shipped.
+INV_W28_BASE=122
+inv_w28_sites() {  # <root> -> the four wall files' refusal sites, counted
+  local r="$1" f n=0 c
+  for f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+    c="$(inv_sites "$r/$f" | awk 'NF { c++ } END { print c + 0 }')"; n=$((n + c))
+  done
+  printf '%s' "$n"
+}
+inv_w28_excess() {  # <root> <inventory> -> a line when the sites pass 1.12.0's but for the door's one
+  local n door
+  n="$(inv_w28_sites "$1")"
+  door="$(grep -c "REQ-10's door" "$2" 2>/dev/null)"; [ "${door:-0}" -le 1 ] || door=1
+  [ "$n" -le $((INV_W28_BASE + ${door:-0})) ] || printf 'sites=%s over 1.12.0 %s plus the door %s\n' "$n" "$INV_W28_BASE" "${door:-0}"
+}
+INV_W28_N="$(inv_w28_sites "$REPO_ROOT")"
+expect_true "INV-W28a precondition: the four wall files' sites are read (${INV_W28_N})" test "$INV_W28_N" -gt 0
+expect_eq "INV-W28a no wall file gains a refusal site beyond 1.12.0's, but REQ-10's door" "" \
+  "$(inv_w28_excess "$REPO_ROOT" "$INV_FILE")"
+INV_W28_SYN="$(mktemp -d)"
+for _f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+  mkdir -p "$INV_W28_SYN/${_f%/*}"; cp "$REPO_ROOT/$_f" "$INV_W28_SYN/$_f"
+done
+printf '%s\n' '  fold_block exit2 queue "a row must wait its turn in the line" "say ready" "planted"' \
+  '  fold_block exit2 queue "a second planted arm" "say ready" "planted"' >> "$INV_W28_SYN/payload/scripts/lib/walls.sh"
+expect_contains "INV-W28b a planted queue arm past the ceiling is reported, so the check can fail" "sites=" \
+  "$(inv_w28_excess "$INV_W28_SYN" "$INV_FILE")"
+rm -rf "$INV_W28_SYN"
+# The events a hook can refuse on, and every registration 1.12.0 shipped on them.
+INV_W28_HOOKS='PermissionRequest - ${CLAUDE_PLUGIN_ROOT}/hooks/permission-answer.sh
+PreToolUse Agent ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh
+PreToolUse Bash ${CLAUDE_PLUGIN_ROOT}/hooks/bash-walls.sh
+PreToolUse Skill ${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh
+PreToolUse TaskStop ${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh
+PreToolUse Write|Edit ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
+Stop - ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh
+SubagentStop - ${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh
+UserPromptExpansion - ${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh'
+inv_w28_blocking() {  # <hooks.json> -> each registration on an event that can refuse, sorted
+  jq -r '.hooks | to_entries[] | select(.key | test("^(PreToolUse|PermissionRequest|Stop|SubagentStop|UserPromptSubmit|UserPromptExpansion)$"))
+    | .key as $e | .value[] | (.matcher // "-") as $m | .hooks[] | "\($e) \($m) \(.command)"' "$1" 2>/dev/null | LC_ALL=C sort
+}
+INV_W28_REG="$(inv_w28_blocking "$REPO_ROOT/hooks/hooks.json")"
+expect_contains "INV-W28c precondition: the blocking registrations are read" "PreToolUse Bash" "$INV_W28_REG"
+expect_eq "INV-W28c hooks.json registers no blocking hook 1.12.0 did not" "" \
+  "$(comm -23 <(printf '%s\n' "$INV_W28_REG") <(printf '%s\n' "$INV_W28_HOOKS" | LC_ALL=C sort))"
+
 finish

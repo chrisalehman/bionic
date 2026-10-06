@@ -835,7 +835,9 @@ if [ -n "$IS_START" ]; then
   # row existing: the `agent_type` test here is first and unchanged.
   #
   # A READER'S CHECKS ARE PUSHED AT START (wave-27 T15; REQ-5, D5): `context/checks-<q>.md` for
-  # each question on the reader's roster row (`questions=`, written by the dispatch wall).
+  # each question on the reader's roster row (`questions=`, written by the dispatch wall), and
+  # `context/severity.md`, the scale every finding is rated by, beside either code question
+  # (wave-28 T16; REQ-8, D20), by a registration of its own so a reader holding both gets it once.
   #
   # ---- BEGIN one string per file (wave-27 T30; review pass 24's blocker, A-orch-77) ----
   # THE HARNESS HANDS A HOOK'S additionalContext TO THE MODEL WHOLE ONLY UP TO 10,000 CHARACTERS,
@@ -845,11 +847,13 @@ if [ -n "$IS_START" ]; then
   # went over: those readers started without their checks and with part of the terms. So the push
   # is split, one string per file, one registration per string (hooks/hooks.json):
   #   - the bare registration pushes survival.md, and it alone joins, writes `agent_id`,
-  #     `terms-delivered` and the duplicate-start row, so four hooks on one start are one start;
+  #     `terms-delivered` and the duplicate-start row, so five hooks on one start are one start;
   #   - one registration per question (`$START_QUESTION`, its argument) pushes `bionic checks: <q>`
-  #     and that question's file when the agent's row carries the question, and nothing otherwise.
-  #     It reads the roster and writes nothing. The four may run at once and in any order, and no
-  #     string depends on another having arrived: each checks string names itself on line one.
+  #     and that question's file when the agent's row carries the question, and nothing otherwise;
+  #     the `severity` registration pushes `bionic severity scale` and severity.md the same way,
+  #     when the row carries a code question (`start_pushed`, below, is the one answer).
+  #     It reads the roster and writes nothing. The five may run at once and in any order, and no
+  #     string depends on another having arrived: each string names itself on line one.
   # THE CAP. Every string is counted here, in UTF-16 code units (what the harness's string length
   # counts; a multi-byte character is one, never its bytes), and one over BIONIC_START_PUSH_MAX is
   # NOT printed: in its place goes one line naming the file to read, and stderr says so. The agent
@@ -873,13 +877,31 @@ if [ -n "$IS_START" ]; then
       *) printf '%s\n' "$_ps_json" ;;
     esac
   }
-  deliver_checks() {  # <question>
-    local _dc_f="$START_CONTEXT_DIR/checks-$1.md"
+  deliver_context() {  # <name> <its naming line> <what it is, for the log>
+    local _dc_f="$START_CONTEXT_DIR/$1.md"
     if [ ! -r "$_dc_f" ]; then
-      echo "execution-recorder: checks file not found at $_dc_f — nothing pushed for $1" >&2
+      echo "execution-recorder: $3 not found at $_dc_f — nothing pushed for $1" >&2
       return 0
     fi
-    { printf 'bionic checks: %s\n' "$1"; cat "$_dc_f"; } | push_string "$_dc_f"
+    { printf '%s\n' "$2"; cat "$_dc_f"; } | push_string "$_dc_f"
+  }
+  # WHAT A START PUSHES, ONE ANSWER (wave-28 T16; REQ-8, D20). For a question set, the context files
+  # its registrations push, by file name without `.md`, in the deal's order: `checks-<q>` for each
+  # question the set holds, then `severity` when it holds a code question. A registration pushes
+  # its file only when this names it; the terms registration writes it on the row it identifies as
+  # `pushed=`, asking `on-disk` so a file the plugin lacks (logged by its registration, pushed by
+  # none) is not named. `proof-add review` reads `severity` there to know the reader had the scale.
+  start_pushed() {  # <questions, comma-joined> [on-disk] -> the names, comma-joined; nothing for none
+    local _sp_n _sp_out=""
+    for _sp_n in checks-evidence checks-adversarial checks-structure severity; do
+      case "$_sp_n" in
+        severity) case ",$1," in *,adversarial,*|*,structure,*) : ;; *) continue ;; esac ;;
+        *)        case ",$1," in *",${_sp_n#checks-},"*) : ;; *) continue ;; esac ;;
+      esac
+      [ "${2-}" != on-disk ] || [ -r "$START_CONTEXT_DIR/$_sp_n.md" ] || continue
+      _sp_out="${_sp_out:+$_sp_out,}$_sp_n"
+    done
+    printf '%s' "$_sp_out"
   }
   # THE JOINS, ONE COPY EACH, asked by the terms registration (which writes what they find) and by
   # a question registration (which only reads it), so the two cannot place one start on two rows.
@@ -1101,7 +1123,7 @@ if [ -n "$IS_START" ]; then
   }
   # ---- END a stale launch is no candidate ----
 
-  # A QUESTION REGISTRATION: read the agent's row, push one checks file or nothing, write nothing.
+  # A QUESTION REGISTRATION: read the agent's row, push its one file or nothing, write nothing.
   # THE ROW, in this order, which is why it agrees with the terms registration whichever ran first:
   #   1. the last row of this session carrying this agent's id, whatever its status. After the
   #      terms registration has joined, that is its `identified` row, a copy of the joined row with
@@ -1114,7 +1136,12 @@ if [ -n "$IS_START" ]; then
   # candidate carries the same `questions=` that set is pushed; when they differ nothing is, and a
   # registration whose question one of them carries says so, naming the candidates.
   if [ -n "$START_QUESTION" ]; then
-    case "$START_QUESTION" in evidence|adversarial|structure) : ;; *) exit 0 ;; esac
+    case "$START_QUESTION" in
+      evidence|adversarial|structure)
+        START_NAME="checks-$START_QUESTION"; START_LINE="bionic checks: $START_QUESTION"; START_WHAT="checks file" ;;
+      severity) START_NAME=severity; START_LINE="bionic severity scale"; START_WHAT="severity scale" ;;
+      *) exit 0 ;;
+    esac
     [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ] || exit 0
     START_ID=$(sanitize "$START_ID" 200)
     START_TYPE=$(sanitize "$START_TYPE" 200)
@@ -1141,17 +1168,18 @@ if [ -n "$IS_START" ]; then
             if [ "$(printf '%s\n' "$Q_SETS" | grep -c '')" = 1 ]; then
               Q_SET="$Q_SETS"
             else
-              case ",$(printf '%s' "$Q_SETS" | tr '\n' ','),"  in
-                *",$START_QUESTION,"*)
+              Q_ANY=$(while IFS= read -r _q_l; do start_pushed "$_q_l"; printf ','; done <<< "$Q_SETS")
+              case ",$Q_ANY," in
+                *",$START_NAME,"*)
                   Q_NAMES=$(while IFS= read -r _q_l; do printf ' %s=%s' "$(line_field "$_q_l" name)" "$(line_field "$_q_l" questions)"; done <<< "$Q_CANDS")
-                  echo "execution-recorder: agent $START_ID cannot be placed on one of the $Q_N launches of $START_TYPE, and they carry different questions= (name=questions:$Q_NAMES) — checks-$START_QUESTION.md not pushed" >&2 ;;
+                  echo "execution-recorder: agent $START_ID cannot be placed on one of the $Q_N launches of $START_TYPE, and they carry different questions= (name=questions:$Q_NAMES) — $START_NAME.md not pushed" >&2 ;;
               esac
             fi
           fi
           ;;
       esac
     fi
-    case ",$Q_SET," in *",$START_QUESTION,"*) deliver_checks "$START_QUESTION" ;; esac
+    case ",$(start_pushed "$Q_SET")," in *",$START_NAME,"*) deliver_context "$START_NAME" "$START_LINE" "$START_WHAT" ;; esac
     exit 0
   fi
   # ---- END one string per file ----
@@ -1517,8 +1545,11 @@ if [ -n "$IS_START" ]; then
   # `restarted_at` follows the same substitute-or-append rule, and only on a restart: the
   # joined row is an intended/confirmed row, which no writer stamps with one, so on every
   # other identification the row is byte-identical to before T20b.
-  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" -v td="$TERMS_AT" '
-    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0; tseen = 0 }
+  # `pushed=` (wave-28 T16) follows it too: what this start's question registrations push for the
+  # row's `questions=`, from the one answer they ask (`start_pushed`); a row with none gets none.
+  PUSHED=$(start_pushed "$(line_field "$ROW" questions)" on-disk)
+  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" -v td="$TERMS_AT" -v pu="$PUSHED" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0; tseen = 0; pseen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=identified"
@@ -1526,11 +1557,13 @@ if [ -n "$IS_START" ]; then
       if (f ~ /^agent_id=/) { f = "agent_id=" id; seen = 1 }
       if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
       if (ra != "" && f ~ /^restarted_at=/) { f = "restarted_at=" ra; rseen = 1 }
+      if (pu != "" && f ~ /^pushed=/) { f = "pushed=" pu; pseen = 1 }
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
     END { if (!seen) printf "|agent_id=%s", id
           if (ra != "" && !rseen) printf "|restarted_at=%s", ra
-          if (td != "" && !tseen) printf "|terms-delivered=%s", td }')
+          if (td != "" && !tseen) printf "|terms-delivered=%s", td
+          if (pu != "" && !pseen) printf "|pushed=%s", pu }')
   printf '%s\n' "$IDENTIFIED" >> "$ROSTER_FILE" 2>/dev/null
   # Placed, so its clock file has done its work (T68): the start's question registrations read
   # the row above by its id.
