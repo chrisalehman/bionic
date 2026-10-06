@@ -1229,8 +1229,9 @@ expect_eq "N.8 a key holding a slash is refused with rc 2" 2 \
 N_ROOT="$(world_repo 2>/dev/null)"
 expect_true "N.9 world_repo prints a directory that exists" test -d "${N_ROOT:-/nonexistent}"
 expect_status "N.10 the root's parent lies outside every checkout" 128 \
-  "$( git -C "$(dirname "${N_ROOT:-/nonexistent}")" rev-parse --show-toplevel >/dev/null 2>&1; echo $? )"
-expect_eq "N.11 git's own toplevel is the printed root" "$N_ROOT" \
+  "$( [ -n "$N_ROOT" ] || exit 99
+      git -C "$(dirname "$N_ROOT")" rev-parse --show-toplevel >/dev/null 2>&1; echo $? )"
+expect_eq "N.11 git's own toplevel is the printed root" "${N_ROOT:-no root printed}" \
   "$(git -C "${N_ROOT:-/nonexistent}" rev-parse --show-toplevel 2>/dev/null)"
 expect_eq "N.12 the checkout holds the working branch wave/x" "wave/x" \
   "$(git -C "${N_ROOT:-/nonexistent}" branch --show-current 2>/dev/null)"
@@ -1243,7 +1244,7 @@ expect_eq "N.15 the session's engaged marker binds that plan" "plan=$N_PLAN" \
   "$(grep '^plan=' "${N_ROOT:-/nonexistent}/.bionic/tmp/engaged-${WORLD_SID:-none}.state" 2>/dev/null)"
 N_ROSTER="${N_ROOT:-/nonexistent}/.bionic/tmp/roster-${WORLD_SID:-none}.state"
 expect_eq "N.16 the roster holds one row per row tree, named wx-T1 and wx-T2" "wx-T1 wx-T2" \
-  "$(tr ' ' '\n' < "$N_ROSTER" 2>/dev/null | sed -n 's/^name=//p' | tr '\n' ' ' | sed 's/ $//')"
+  "$(tr '|' '\n' < "$N_ROSTER" 2>/dev/null | sed -n 's/^name=//p' | tr '\n' ' ' | sed 's/ $//')"
 for t in T1 T2; do
   N_T="${N_ROOT:-/nonexistent}/.worktrees/$t"
   expect_eq "N.17-$t the row tree $t is on branch wt/$t" "wt/$t" \
