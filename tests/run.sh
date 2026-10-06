@@ -94,7 +94,7 @@
 # framework at all (one that sources it nowhere, or never calls `finish`). The
 # rule, its two exemptions (an indented or subshell-scoped redefinition, and a
 # definition inside a heredoc body) and the scanner all live in the framework;
-# see `_tf_adoption_refusal` there and THE ADOPTION WALL below.
+# see `_tf_adoption_wall` there and THE ADOPTION WALL below.
 #
 # WHY A SIGNAL DEATH IS NOT A FAILED ASSERTION. That same kill was reported as a
 # plain ✗ FAIL, which reads as "this suite's assertions failed" and sends the
@@ -411,20 +411,22 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # never "the PATH shim": v1 wave 0 deletes an unrelated piece by that name, and two
 # mechanisms sharing one name is how a reader ends up in the wrong file.
 #
-# THE MARKER travels with it. tests/lib/resolve-roots.sh — the seam every suite sources —
-# re-executes a HAND-run suite under `/bin/bash` so a suite typed at a prompt lands on the
-# same interpreter this pin would have given it; the marker tells it that a suite launched
-# from here is already pinned and must not re-exec.
+# ONE PIN, ONE OWNER (wave-27 T81). The function that builds it is the seam's —
+# tests/lib/resolve-roots.sh, which every suite sources — and the seam calls the same function
+# for a suite typed at a prompt, so a hand-run suite and everything it starts get the world
+# this run gives them. This file keeps no pin code of its own: a second copy is how the two
+# worlds came to differ. No seam, or a seam that cannot build the pin, and nothing is run.
 if [ ! -x /bin/bash ]; then
   echo "tests/run.sh: /bin/bash is not executable — the interpreter every payload script's shebang names is unrunnable on this host" >&2
   exit 2
 fi
-PIN="$TMP/pin"
-mkdir -p "$PIN"
-ln -sf /bin/bash "$PIN/bash"
-PATH="$PIN:$PATH"
-export PATH
-export BIONIC_TEST_INTERPRETER_PINNED=1
+# shellcheck source=/dev/null
+if ! . "$REPO/tests/lib/resolve-roots.sh" || ! declare -F bionic_interpreter_pin >/dev/null 2>&1 \
+   || ! bionic_interpreter_pin "$TMP"; then
+  echo "tests/run.sh: no interpreter pin — tests/lib/resolve-roots.sh did not build it. Nothing was run." >&2
+  exit 2
+fi
+PIN="${PATH%%:*}"
 
 # ── THE ENVIRONMENT STAMP (S2, spec AC-3) ────────────────────────────────────
 # A run's verdict is a claim about an environment, so the run says which one: the OS, the
@@ -452,9 +454,8 @@ else
   echo "head=none dirty=none"
 fi
 
-( . tests/lib/resolve-roots.sh
-  printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
-    "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR" )
+printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
+  "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR"
 
 QUEUE="$TMP/queue"; : >"$QUEUE"
 export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
@@ -490,10 +491,12 @@ SOLO="$TMP/solo"; : >"$SOLO"
 # its own terms, which is the lie this wave exists to close.
 #
 # THE RULE AND ITS TWO EXEMPTIONS LIVE IN THE FRAMEWORK, beside the names they
-# protect and the scanner that reads them (`_tf_adoption_refusal`, which reuses
-# `_tf_scan` — the runner does not carry a second scanner that would skip
-# heredocs differently). This file's part is to ask, once per roster line,
-# before the suite is launched.
+# protect and the scanner that reads them (`_tf_adoption_wall`, over
+# `_tf_adoption_refusal`, which reuses `_tf_scan` — the runner does not carry a
+# second scanner that would skip heredocs differently, nor a second spelling of
+# the line). This file's part is to ask, once per roster line, before the suite
+# is launched. The framework asks the same function of a suite run alone, at
+# load (wave-27 T81), so the two refusals are one line.
 #
 # NO FRAMEWORK, NO WALL — SAID OUT LOUD. The rule is "a name the framework in
 # THIS tree owns", so a tree with no framework owns no names and can refuse
@@ -507,7 +510,7 @@ if [ -r "$TF_LIB" ]; then
   . "$TF_LIB"
 else
   echo "tests/run.sh: no framework at tests/lib/assert.sh — the adoption wall is inert for this run" >&2
-  _tf_adoption_refusal() { :; }
+  _tf_adoption_wall() { :; }
 fi
 
 # _wall_suite <cmd...> -> the file a roster line runs, or nothing. The last
@@ -617,9 +620,9 @@ run() {  # run <label> <cmd...>   — gating
   local _suite _refusal
   _suite="$(_wall_suite "$@")"
   if [ -n "$_suite" ]; then
-    _refusal="$(_tf_adoption_refusal "$_suite")"
+    _refusal="$(_tf_adoption_wall "$_suite")"
     if [ -n "$_refusal" ]; then
-      printf 'adoption wall: %s\n' "$_refusal" >"$TMP/${label}.refused"
+      printf '%s\n' "$_refusal" >"$TMP/${label}.refused"
       if [ "$SERIAL" -eq 1 ]; then
         _label "$label"
         _verdict "$label" "" "$TMP/${label}.out"
