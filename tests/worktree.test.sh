@@ -4102,7 +4102,7 @@ git -C "$SMT" update-index --add --cacheinfo "160000,123456789012345678901234567
 lk_commit "$SMT" "a submodule link at .bionic/docs"; SMT_C="$(git -C "$SMT" rev-parse HEAD)"
 expect_eq   "(s1-pre) the tree's head holds a gitlink at .bionic/docs" "160000" "$(git -C "$SMT" ls-tree HEAD .bionic/docs | awk '{ print $1 }')"
 expect_eq   "(s1-pre) …which the fixture's config hides from git diff" "" \
-  "$(git -C "$SM" diff --no-renames --diff-filter=A --name-only wave/fixture wt/submodule)"
+  "$(git -C "$SM" diff --no-renames --diff-filter=A --name-only wave/fixture wt/submodule -- .bionic)"
 expect_eq   "(s1-pre) …and the tree reads clean" "" "$(git -C "$SMT" status --porcelain)"
 SM_SUMS="$(lb_sums "$SM")"; SM_REFS="$(refs_of "$SM")"
 OUTSM="$(worktree_land "$SMT" wave/fixture)"; RCSM=$?
@@ -4131,7 +4131,9 @@ lq_row() {  # <label> <tree base> <name> <expected remedy> — one row, the name
   expect_true  "($id) …its printed fix can be followed as printed" lb_follow "$t" "$line"
   expect_match "($id) …and the tree then lands" "spawn-worktree: LANDED branch=wt/shq-$2 onto=wave/fixture *" \
     "$(lb_first "$(worktree_land "$t" wave/fixture)")"
-  expect_eq    "($id) …the fix acted on that path alone: the target still tracks keep.md and also.md" \
+  expect_eq    "($id) …the fix acted on that path alone: the tree's head still tracks keep.md and also.md" \
+    ".bionic/also.md|.bionic/keep.md|" "$(git -C "$t" ls-tree -r --name-only HEAD -- .bionic | LC_ALL=C sort | tr '\n' '|')"
+  expect_eq    "($id) …and so does the target, once landed" \
     ".bionic/also.md|.bionic/keep.md|" "$(git -C "$r" ls-files -- .bionic | LC_ALL=C sort | tr '\n' '|')"
   expect_eq    "($id) …and the project's own file at the name is untouched" "the project's own" "$(cat "$r/$3")"
   expect_eq    "($id) …and the writer's file is kept where the fix moved it" "the writer's" "$(cat "$TMP/followed-shq-$2")"
