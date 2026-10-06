@@ -161,7 +161,7 @@ SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 # instead of the reinstall route this guard exists to print. patrol.sh is here
 # for the same reason one level down: checks.sh soft-sources it for the
 # dead-session detector, so it is part of what a complete payload means.
-for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh width.sh checks.sh patrol.sh; do
+for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh markers.sh width.sh checks.sh patrol.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -181,6 +181,12 @@ done
 # roster they all walk (`ENV_KEYS`) is spelled exactly once, there.
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/env.sh"
+# markers.sh, which env.sh already soft-sourced: the marker-block walk the rc item
+# and the working-principles item write through. Named here as well so the
+# file-to-suite map (tests/lib/impact.sh, one hop from a script) sees this script
+# read it; the library's own guard makes the second source a no-op.
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/markers.sh"
 # checks.sh, THE TABLE OF CHECKS. Every id this script offers, every predicate
 # that decides whether an item is outstanding, and the party that repairs it come
 # from there — and doctor reads the same rows. Until 1.5.1 the roster and the
@@ -238,16 +244,12 @@ SETUP_PLUGIN_ID="$(dep_plugin_id)"
 # two literals outright — a copy here would be a marker nothing writes, kept in
 # step with nothing.
 
-# The retired alias block's markers, verbatim from claude-bootstrap.sh —
-# box-drawing dashes included, because they are what makes the block
-# addressable. `BIONIC_LEGACY_ALIAS_PATTERN` is the pre-marker spelling the installer
-# itself still migrates (claude-bootstrap.sh's do_install_shell_alias), and it
-# is a separate case because a machine that stopped bootstrapping before markers
-# existed has the alias with no markers around it at all.
-SETUP_ALIAS_START='# ─── bionic:start ───'
-SETUP_ALIAS_END='# ─── bionic:end ───'
-# The spelling itself now lives in lib/checks.sh as BIONIC_LEGACY_ALIAS_PATTERN,
-# because the predicate that reads it does; this file uses that one name.
+# The retired alias block's markers are detect.sh's `BIONIC_ALIAS_START` and
+# `BIONIC_ALIAS_END` (wave-27 T51): the detector that reads the block's state and
+# this step that strips it name one pair. The pre-marker spelling is a separate
+# case because a machine that stopped bootstrapping before markers existed has the
+# alias with no markers around it at all; the lines bionic wrote that way are
+# listed once, in detect.sh (`bionic_legacy_alias_ours`, wave-27 T55).
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
 #
@@ -404,7 +406,10 @@ _setup_item_verb() {  # <name>
       fi ;;
     environment)        say "write bionic's environment settings to $(_dep_settings_file)" ;;
     claude-proxy)       say "add bionic's claude() shell function to $(rc_file 2>/dev/null || echo 'the shell rc')" ;;
-    legacy-alias)       say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
+    legacy-alias)
+      # Only the block is ever offered: a bare line is named, never taken out
+      # (wave-27 T75, A-orch-162).
+      say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
     legacy-hooks)       say "remove the retired hook entries from $(_dep_settings_file)" ;;
     legacy-skill-copy)  say "remove the pre-plugin skill copy at $(_setup_legacy_skill_dir)" ;;
     legacy-hook-files)
@@ -418,6 +423,11 @@ _setup_item_verb() {  # <name>
       say "remove ${_setup_verb_count} installed agent role file(s) that no longer match the payload, from $(_setup_agent_copies_dir)" ;;
     legacy-permission-block) say "remove bionic's retired permission block from $(_dep_settings_file)" ;;
     permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
+    working-principles)
+      # ONLY AN ABSENT BLOCK REACHES THIS PAGE (an edited one is the user's and
+      # is not pending), and its text is not on the page: step 13 prints it and
+      # asks again, live, before writing — so the page says so.
+      say "show bionic's working principles and ask again before adding them to $(principles_file)" ;;
     *)                  return 1 ;;
   esac
   return 0
@@ -541,8 +551,10 @@ _setup_say_declined() {  # <rc> <tail sentence, already worded for "declined —
 # not — step 4 writes to the same file, and a setup that can delete a user's
 # shell rc is a setup nobody should run.
 
-# THE MODE TRAVELS WITH THE CONTENT (critic F2). Both rc rewriters in this script
-# stage the new file beside the old one and `mv` it into place, and `mv` replaces
+# THE MODE TRAVELS WITH THE CONTENT (critic F2). The rc rewriter in this script
+# (the unmarked alias line's; the marked block goes through markers.sh's
+# `markers_strip`, which keeps the same order) stages the new file beside the old
+# one and `mv`s it into place, and `mv` replaces
 # the inode: without this, a shell rc the user deliberately kept at 0600 comes
 # back at whatever the umask says, because setup answered one question about a
 # retired alias block. That is the same defect `_dep_settings_write_jq` guards for
@@ -609,25 +621,6 @@ _setup_publish_tmp() {  # <tmp> <file>
   mode="$(_setup_file_mode "$file")"
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file"
-}
-
-_setup_rc_strip_block() {  # <file> <start-marker> <end-marker>
-  local file="${1:-}" start="${2:-}" end="${3:-}" tmp target
-  [ -f "$file" ] || return 0
-  grep -qF "$start" "$file" 2>/dev/null || return 0
-  target="$(bionic_link_target "$file")"
-  tmp="${target}.bionic.tmp"
-  if _setup_stage_tmp "$tmp" \
-     && awk -v start="$start" -v end="$end" '
-        $0 == start { skip=1; next }
-        $0 == end   { skip=0; next }
-        !skip { print }
-      ' "$file" > "$tmp" \
-     && _setup_publish_tmp "$tmp" "$target"; then
-    return 0
-  fi
-  rm -f "$tmp"
-  return 1
 }
 
 # ─── Step 1 — the native plugin install (tier 2 ⊃ tier 1) ────────────────────
@@ -1155,15 +1148,20 @@ _setup_env_why() {  # <key>
 # writes nothing at all — not an empty block, not a commented line.
 #
 # THE ROSTER AND THE WRITE ARE ENV.SH'S. This step loops `RC_ITEMS`, asks
-# `rc_default` for the line and `rc_get` whether it is already there, and writes
+# `rc_default` for the line and `rc_state` what the block holds, and writes
 # through `rc_set`. A second item added to that roster arrives here with no edit,
 # and nothing in this file matches the rc itself.
+#
+# A BLOCK THE USER CHANGED IS NEVER ASKED ABOUT (wave-27 T77, review pass 64). Its
+# lines are named by number, never printed, bionic's own lines are printed for the
+# user's hand, and nothing is written, on `--only`, on `--all` and on the page that
+# says nothing is left to do.
 
 setup_claude_proxy() {
   _setup_wants claude-proxy || return 0
   say ""
   say "6. Shell function"
-  local rc item_name missing="" wrote=0
+  local rc item_name missing="" changed="" wrote=0
 
   # A shell bionic has no rc name for is reported, never guessed at: writing a
   # bash function into a fish rc would break the shell it was meant to help.
@@ -1172,39 +1170,109 @@ setup_claude_proxy() {
     return 0
   fi
 
+  # THE RC'S STATE IS markers.sh's, READ BEFORE ANYTHING IS ASKED (wave-27 T46,
+  # review pass 14 F2): a path that is no file, or markers that do not pair up,
+  # are refused here with the same lines the writer's refusal prints, rather
+  # than offered and then refused after the yes.
+  if ! markers_regular "$rc" >/dev/null; then _setup_say_not_a_file "claude() function" "$rc"; return 0; fi
+  if ! markers_check "$rc" "$RC_START" "$RC_END" >/dev/null; then _setup_rc_say_malformed "$rc"; return 0; fi
+
   for item_name in $RC_ITEMS; do
     rc_default "$item_name" >/dev/null 2>&1 || continue
-    rc_get "$item_name" && continue
+    case "$(rc_state "$item_name")" in
+      written) continue ;;
+      changed) _setup_rc_say_changed "$rc" "$item_name"; changed=1; continue ;;
+    esac
     missing="${missing}${missing:+ }${item_name}"
   done
 
   # ONE LINE, ON PURPOSE — the same discipline step 5's gates carry, and for the
   # same reason: tests prove a gate load-bearing by DELETING its line from a copy
   # of this file, and a gate spread over an if/fi pair cannot be deleted that way
-  # without turning the copy into a parse error.
-  [ -n "$missing" ] || { item "$SETUP_OK" "claude() function" "already in ${rc} — nothing to do"; return 0; }  # idempotence guard: rc item
+  # without turning the copy into a parse error. A changed block has said its own line.
+  [ -n "$missing" ] || { [ -n "$changed" ] || item "$SETUP_OK" "claude() function" "already in ${rc} — nothing to do"; return 0; }  # idempotence guard: rc item
 
   say "   ${rc} does not carry bionic's claude() shell function:"
   for item_name in $missing; do
-    say "   $(rc_default "$item_name")"
+    while IFS= read -r _setup_rc_line; do say "   ${_setup_rc_line}"; done <<< "$(rc_default "$item_name")"
     say "   — $(_setup_rc_why "$item_name")"
   done
   consent "   Add it to ${rc}?"; _setup_consent_rc=$?
   if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${rc} is unchanged."; action "add bionic's claude() shell function to ${rc} — $(_setup_answer_yes claude-proxy)"; return 0; fi  # consent gate: rc item
 
+  # The writer's exit code is its reason (lib/markers.sh): a refused rc is left
+  # exactly as it was, and the line says which refusal it was.
   for item_name in $missing; do
-    if rc_set "$item_name"; then
-      wrote=$((wrote + 1))
-    else
-      item "$SETUP_BAD" "claude() function" "could not write ${rc}"
-      action "add bionic's claude() shell function to ${rc} (bionic could not write the file)"
-      return 0
-    fi
+    rc_set "$item_name"; _setup_rc_set_rc=$?
+    case "$_setup_rc_set_rc" in
+      0) wrote=$((wrote + 1)); continue ;;
+      2) _setup_rc_say_malformed "$rc" ;;
+      3) item "$SETUP_NIL" "claude() function" "read-only — not written"
+         action "make ${rc} writable to add bionic's claude() shell function — bionic does not write a read-only file" ;;
+      4) _setup_say_not_a_file "claude() function" "$rc" ;;
+      5) _setup_rc_say_changed "$rc" "$item_name" ;;
+      *) item "$SETUP_BAD" "claude() function" "could not write ${rc} — it is as it was"
+         action "add bionic's claude() shell function to ${rc} (bionic could not write the file)" ;;
+    esac
+    return 0
   done
   # Same gap step 5 reports: an rc is read when a shell STARTS, so the function
   # is in the next terminal and not in the one running this.
   item "$SETUP_OK" "claude() function" "added to ${rc} — takes effect in a new shell"
   return 0
+}
+
+# A block the user changed since bionic wrote it (env.sh `rc_state`, wave-27 T77): named
+# by its lines, left as it is, and bionic's own lines printed for the user's hand. The
+# summary line is bounded like a row, so the line numbers and the instruction survive
+# the longest path.
+_setup_rc_say_changed() {  # <rc> <item>
+  local range words line a
+  range="$(rc_block_range)"
+  words="lines ${range% *} to ${range#* }"
+  item "$SETUP_NIL" "claude() function" "bionic's block, left: ${words} of ${1}"
+  say "     it changed since bionic wrote it, so bionic leaves it as it is; bionic's lines are:"
+  while IFS= read -r line; do say "     ${line}"; done <<< "$(rc_default "$2")"
+  a="$(bionic_line "   - " "edit ${words} of ${1}" " by hand — bionic's block, changed since bionic wrote it")"
+  action "${a#   - }"
+}
+
+# Every rc item whose block the user changed, said as the step says it: what the page
+# that finds nothing left to do still names (wave-27 T77). rc 1 when there is none.
+_setup_rc_changed_left() {
+  local rc item_name said=1
+  rc="$(rc_file 2>/dev/null)" || return 1
+  for item_name in $RC_ITEMS; do
+    [ "$(rc_state "$item_name" 2>/dev/null)" = "changed" ] || continue
+    _setup_rc_say_changed "$rc" "$item_name"; said=0
+  done
+  return "$said"
+}
+
+# The rc's markers do not pair up: what markers_check found and where, and the
+# hand fix. One spelling for the refusal before the question and the writer's
+# rc 2 after it, for the live claude() block and the retired alias block alike
+# (wave-27 T51): the item label and the marker pair are the caller's.
+_setup_rc_say_malformed() {  # <rc> [<item label> <start> <end>]
+  local label="${2:-claude() function}" start="${3:-$RC_START}" end="${4:-$RC_END}"
+  item "$SETUP_BAD" "$label" "markers do not pair up — nothing written"
+  say "     in ${1}:"
+  markers_check "$1" "$start" "$end" | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
+  action "fix bionic's markers in ${1} by hand"
+}
+
+# A target bionic cannot read as text (markers.sh `markers_regular`, wave-27 T46,
+# T51): a directory, a dangling link (and where it points), a file holding a NUL
+# byte, an unreadable file. The item fails, the path and what it is go on a line
+# of their own beneath it (the cell is truncated, A-T40.11), and the other items
+# still run. Two items can name the same rc; its hand fix is listed once.
+_setup_say_not_a_file() {  # <item label> <path>
+  local what fix
+  what="$(markers_regular "$2")"
+  item "$SETUP_BAD" "$1" "$(markers_regular_cell "$what") — nothing written"
+  say "     ${2} is ${what:-not a regular file}; bionic reads and writes only a regular text file it can read."
+  fix="${2} is yours to change by hand — bionic writes nothing inside it or beside it"
+  case "$SETUP_ACTIONS" in *"$fix"*) ;; *) action "$fix" ;; esac
 }
 
 # What each rc item is for, in the words the user reads. Beside the step for
@@ -1231,9 +1299,36 @@ setup_legacy_alias() {
   _setup_wants legacy-alias || return 0
   say ""
   say "7. Legacy shell alias"
-  local rc line present tmp rc_target
+  local rc line present
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
+
+  # THE ONE READER AND THE ONE WALK (wave-27 T51, review pass 21 F1, the blocker).
+  # This step had its own awk walk, which skipped from a start marker until an end
+  # marker: a start with no end deleted every line after it, and "✓ removed" was
+  # printed over the loss. The state is detect.sh's, read by markers.sh's
+  # `markers_check`; a fault is refused here, before anything is asked, with the
+  # line it is on; and the strip is markers.sh's `markers_strip`, whose refusals
+  # leave the rc byte-identical and are printed as what they are.
+  case "$present" in
+    not-a-file) _setup_say_not_a_file "legacy alias block" "$rc"; return 0 ;;
+    malformed)  _setup_rc_say_malformed "$rc" "legacy alias block" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"; return 0 ;;
+  esac
+
+  # A READ-ONLY RC IS NOT ASKED ABOUT (wave-27 T66, review pass 40 S5): no answer
+  # could take the block or the line out, so the step says so in the marked step's
+  # words, names what stays, and asks nothing; the --all page leaves it off.
+  if _setup_legacy_alias_read_only "$rc"; then
+    _setup_legacy_alias_left "$rc"
+    return 0
+  fi
+
+  # THE BLOCK IS ONE UNIT (wave-27 T66, A-orch-119 (3)): a block that, taken out,
+  # would leave the user's own code changed is named and not asked about.
+  if [ "$present" = "yes" ] && ! _setup_legacy_alias_block_alone "$rc"; then
+    _setup_legacy_alias_left "$rc"
+    return 0
+  fi
 
   if [ "$present" = "yes" ]; then
     say "   ${rc} carries the retired bionic alias block — auto mode is the safer equivalent now."
@@ -1243,44 +1338,91 @@ setup_legacy_alias() {
       action "remove the legacy bionic alias block from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
-    _setup_rc_strip_block "$rc" "$SETUP_ALIAS_START" "$SETUP_ALIAS_END"
-    if grep -qF "$SETUP_ALIAS_START" "$rc" 2>/dev/null; then
-      item "$SETUP_BAD" "legacy alias block" "could not be removed"
-      action "remove the legacy bionic alias block from ${rc} by hand"
+    # Decided again on the file as it is now: an rc changed under the question so
+    # that the block no longer stands alone is not written.
+    if markers_check "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" >/dev/null && ! _setup_legacy_alias_block_alone "$rc"; then
+      _setup_strip_rc=5
     else
-      item "$SETUP_OK" "legacy alias block" "removed"
+      markers_strip "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"; _setup_strip_rc=$?
     fi
+    case "$_setup_strip_rc" in
+      0) item "$SETUP_OK" "legacy alias block" "removed" ;;
+      5) item "$SETUP_BAD" "legacy alias block" "changed while setup ran, so nothing was written: ${rc}"
+         action "${rc} changed while setup ran; remove the retired alias block — $(_setup_answer_yes legacy-alias)" ;;
+      2) _setup_rc_say_malformed "$rc" "legacy alias block" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" ;;
+      3) item "$SETUP_NIL" "legacy alias block" "read-only — not changed"
+         action "make ${rc} writable to remove the retired alias block — bionic does not write a read-only file" ;;
+      4) _setup_say_not_a_file "legacy alias block" "$rc" ;;
+      *) item "$SETUP_BAD" "legacy alias block" "could not write ${rc} — it is as it was"
+         action "remove the legacy bionic alias block from ${rc} by hand (bionic could not write the file)" ;;
+    esac
+    # Bionic's bare lines beside the block stay, named (wave-27 T75).
+    _setup_legacy_alias_left "$rc"
     return 0
   fi
 
-  if [ -f "$rc" ] && grep -qE "$BIONIC_LEGACY_ALIAS_PATTERN" "$rc" 2>/dev/null; then
-    say "   ${rc} carries the legacy UNMARKED alias — the spelling that predates the marker block."
-    consent "   Remove the legacy alias line from ${rc}?"; _setup_consent_rc=$?
-    if [ "$_setup_consent_rc" -ne 0 ]; then
-      _setup_say_declined "$_setup_consent_rc" "the alias stays."
-      action "remove the legacy 'alias claude=...--dangerously-skip-permissions' line from ${rc} — $(_setup_answer_yes legacy-alias)"
-      return 0
-    fi
-    rc_target="$(bionic_link_target "$rc")"
-    tmp="${rc_target}.bionic.tmp"
-    # Same discipline as _setup_rc_strip_block above, and for the same file — the
-    # same two helpers too, so there is one staging order in this script rather
-    # than a second one that has to be kept in step by hand, and one place that
-    # decides a symlinked rc is rewritten rather than detached.
-    if _setup_stage_tmp "$tmp" \
-       && grep -vE "$BIONIC_LEGACY_ALIAS_PATTERN" "$rc" > "$tmp" \
-       && _setup_publish_tmp "$tmp" "$rc_target"; then
-      item "$SETUP_OK" "legacy alias" "removed (the unmarked spelling)"
-    else
-      rm -f "$tmp"
-      item "$SETUP_BAD" "legacy alias" "could not rewrite ${rc}"
-      action "remove the legacy 'alias claude=...--dangerously-skip-permissions' line from ${rc} by hand"
-    fi
-    return 0
-  fi
-
+  # A BARE LINE IS NEVER TAKEN OUT (wave-27 T75, A-orch-162): bionic's own retired
+  # line outside a marker pair is named by number for the user's hand, and so is a
+  # line that only mentions the alias; the step is not called done while either is
+  # there.
+  _setup_legacy_alias_left "$rc" && return 0
   item "$SETUP_NIL" "legacy alias block" "none in ${rc} — nothing to remove"
   return 0
+}
+
+# The alias block is there and the rc is read-only (wave-27 T66, review pass 40
+# S5; a bare line is never taken out, T75): rc 0. The page leaves the step off and the step asks nothing.
+_setup_legacy_alias_read_only() {  # <rc>
+  local line
+  [ -f "$1" ] || return 1
+  markers_writable "$1" && return 1
+  line="$(detect_zshrc_legacy_block)"
+  [ "${line#*present=}" = "yes" ]
+}
+
+# The retired alias block stands as commands of their own, as one unit (markers.sh
+# `markers_block_alone`, the one function remove's marked branch asks too).
+_setup_legacy_alias_block_alone() {  # <rc>
+  case "$(markers_block_alone "$1" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")" in alone=yes*) return 0 ;; esac
+  return 1
+}
+
+# What the step leaves in the rc, each named once by number in the file as it is
+# now and never by its text: a read-only rc's block (the marked step's words); a
+# block bionic would leave (T66) or the user changed (T75, B3); bionic's own bare
+# line, which no door takes out (T75, A-orch-162); and a line that mentions the
+# retired alias and is not one bionic wrote (T55). rc 1 when there is none.
+_setup_legacy_alias_left() {  # <rc>
+  local scan bound why theirs words said=1 alone
+  if _setup_legacy_alias_read_only "$1"; then
+    item "$SETUP_NIL" "legacy alias block" "read-only — not changed"
+    action "make ${1} writable to remove the retired alias block — bionic does not write a read-only file"
+    said=0
+  elif [ "$(detect_zshrc_legacy_block)" = "env:zshrc-legacy present=yes" ] && ! _setup_legacy_alias_block_alone "$1"; then
+    alone="$(markers_block_alone "$1" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")"
+    why="${alone#* why=}"; why="${why%% *}"
+    words="${alone#* first=}"; words="lines ${words%% *} to ${alone##* last=}"
+    item "$SETUP_NIL" "legacy alias block" "bionic's block, left: ${words} of ${1}"
+    action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic's block, $(bionic_rc_left_reason "$why" "$1")"
+    said=0
+  fi
+  scan="$(bionic_legacy_alias_lines "$1")"
+  bound="${scan#* bound=}"; bound="${bound%% *}"
+  why="${scan#* why=}"; why="${why%% *}"
+  theirs="${scan#* theirs=}"
+  if [ -n "$bound" ]; then
+    words="$(bionic_line_numbers_words "$bound")"
+    item "$SETUP_NIL" "legacy alias" "bionic's line, left: ${words} of ${1}"
+    action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic's line, $(bionic_rc_left_reason "$why" "$1")"
+    said=0
+  fi
+  if [ -n "$theirs" ]; then
+    words="$(bionic_line_numbers_words "$theirs")"
+    item "$SETUP_NIL" "legacy alias" "not in a form bionic wrote: ${words} of ${1} — left as it is"
+    action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic takes out only what stands between its markers"
+    said=0
+  fi
+  return "$said"
 }
 
 # ─── Step 8 — legacy-channel managed-hook entries ────────────────────────────
@@ -1650,6 +1792,96 @@ _setup_default_mode() {
   return 0
 }
 
+# ─── Step 13 — the working principles ────────────────────────────────────────
+#
+# THE USER'S OWN INSTRUCTION FILE, WRITTEN ONLY ON A YES (wave-27 D16). A short
+# set of working principles, offered for `<claude home>/CLAUDE.md` and written
+# between bionic's markers; nothing outside them is touched, and a file that is
+# not there is created only on that yes. The text, the file and the four states
+# are env.sh's (`principles_*`); this step owns the questions.
+#
+# THE WHOLE TEXT IS ON SCREEN BEFORE THE QUESTION (wave-27 T40, review pass 9
+# finding 6). It goes into every session the user starts, and one of its rules
+# lets an agent act without asking, so the path, the full text and that rule by
+# name are printed first. Under `--all` the page's one yes was given before the
+# text was on screen, so the page's flag is lifted for this one read.
+#
+# AN EDITED BLOCK IS THE USER'S (T40, finding 5). A whole pass says so in one
+# line and moves on; the difference, and the question that could replace it,
+# come only when the item is asked for by name (`--only working-principles`).
+# MALFORMED MARKERS AND A READ-ONLY FILE ARE REFUSED (T40, findings 2 and 8):
+# what was found is printed, and nothing is asked or written.
+
+setup_working_principles() {
+  _setup_wants working-principles || return 0
+  say ""
+  say "13. Working principles"
+  local file state rc
+  file="$(principles_file)"
+  state="$(principles_state)"
+
+  [ "$state" != "present" ] || { item "$SETUP_OK" "working principles" "already in ${file} — nothing to do"; return 0; }  # idempotence guard: principles item
+
+  if [ "$state" = "not-a-file" ]; then
+    _setup_say_not_a_file "working principles" "$file"
+    return 0
+  fi
+  if [ "$state" = "malformed" ]; then
+    item "$SETUP_BAD" "working principles" "markers do not pair up — nothing written"
+    say "     in ${file}:"
+    principles_where | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
+    action "fix bionic's working-principles markers in ${file} by hand — bionic writes nothing to a block it cannot find the edges of"
+    return 0
+  fi
+  if ! markers_writable "$file"; then
+    item "$SETUP_NIL" "working principles" "read-only — not written"
+    say "     ${file} is read-only, and bionic leaves a file you made read-only alone."
+    action "make ${file} writable to add bionic's working principles — bionic does not write a read-only file"
+    return 0
+  fi
+
+  if [ "$state" = "edited" ]; then
+    if [ -z "$SETUP_ONLY" ]; then
+      item "$SETUP_NIL" "working principles" "differ from bionic's text — kept as they are"
+      say "     in ${file}; to see the difference: ${SETUP_SELF_CMD} --only working-principles"
+      return 0
+    fi
+    say "   ${file} carries bionic's working principles, changed. What replacing them would change:"
+    principles_diff | while IFS= read -r _setup_diff_line || [ -n "$_setup_diff_line" ]; do
+      say "     ${_setup_diff_line}"
+    done
+    SETUP_ALL=0 RM_ALL=0 consent "   Replace your changed block with bionic's text?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "your block in ${file} is kept."; return 0; fi  # consent gate: principles edit
+  else
+    say "   bionic's working principles are not in ${file}."
+    say "   This is the text bionic would add, between its markers:"
+    say ""
+    # Folded to the page's width (AC-15): the text's paragraphs are one line each.
+    principles_text | fold -s -w 94 | while IFS= read -r _setup_text_line || [ -n "$_setup_text_line" ]; do
+      say "     ${_setup_text_line}"
+    done
+    say ""
+    say "   — seven short rules for how a session works. One of them, \"Decide what is yours\", lets"
+    say "     an agent make a call it can revert without asking you first."
+    [ -e "$file" ] || say "   ${file} does not exist yet: bionic would create it."
+    SETUP_ALL=0 RM_ALL=0 consent "   Add them to ${file}, between bionic's markers?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${file} is unchanged."; action "add bionic's working principles to ${file} — $(_setup_answer_yes working-principles)"; return 0; fi  # consent gate: principles item
+  fi
+
+  principles_set; rc=$?
+  case "$rc" in
+    0) item "$SETUP_OK" "working principles" "written to ${file} — new sessions read them" ;;
+    2) item "$SETUP_BAD" "working principles" "markers do not pair up — nothing written"
+       action "fix bionic's working-principles markers in ${file} by hand" ;;
+    3) item "$SETUP_NIL" "working principles" "read-only — not written"
+       action "make ${file} writable to add bionic's working principles — bionic does not write a read-only file" ;;
+    4) _setup_say_not_a_file "working principles" "$file" ;;
+    *) item "$SETUP_BAD" "working principles" "could not write ${file} — it is as it was"
+       action "add bionic's working principles to ${file} (bionic could not write the file)" ;;
+  esac
+  return 0
+}
+
 # ─── The summary ─────────────────────────────────────────────────────────────
 
 setup_summary() {
@@ -1756,8 +1988,19 @@ if [ "$setup_all" = "1" ]; then
   # reads its inherited stdin eats the one `y` this run is about to ask for.
   # Nothing here needs stdin, so nothing here gets it.
   if ! _setup_print_plan < /dev/null; then
+    # No step runs, so what step 6 and step 7 would name is named here (wave-27 T55,
+    # T66, T77).
+    _setup_left=1
+    _setup_rc_changed_left && _setup_left=0
+    _setup_legacy_alias_left "$(_detect_shell_rc)" && _setup_left=0
+    if [ "$_setup_left" = "0" ]; then setup_summary; exit 0; fi
     say "   nothing left to do — this machine is set up."
     exit 0
+  fi
+  # A read-only rc keeps the retired alias off the page; the page says why
+  # (wave-27 T66, review pass 40 S5).
+  if _setup_legacy_alias_read_only "$(_detect_shell_rc)"; then
+    say "   $(_detect_shell_rc) is read-only, so bionic leaves the retired alias in it — make it writable to remove it"
   fi
   consent "Do all of the above?"; setup_all_rc=$?
   case "$setup_all_rc" in
@@ -1783,6 +2026,7 @@ setup_legacy_skill_copy
 setup_legacy_hook_files
 setup_legacy_agent_copies
 setup_permission_mode
+setup_working_principles
 setup_summary
 
 exit 0

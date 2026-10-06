@@ -349,8 +349,29 @@ expect_true "canonical-sdlc steps/0.md: model_plan derivation names the rendered
 # and is stated ONCE rather than six times; what this assertion re-points to is the fact the
 # AC actually cares about — that all six dispatched-role tiers are still named, one per line,
 # in the card's Models section (record/wave-01-plugin-only/design-ledger.md §D1).
-expect_eq "canonical-sdlc steps/0.md: the Step-0 card's Models section names all 6 dispatched roles (K1 — source is the one-line prose above, not a per-line citation)" \
-  "6" "$(sed -n '/^  Models$/,/^$/p' "$CANONICAL_SKILL_STEP0" | grep -cE '^    (implementor|senior-implementor|researcher|auditor|critic|test-runner)([[:space:]]|$)')"
+#
+# RE-POINTED (wave-27 T11, D6): was a count of six role lines, which a seventh role turned red
+# for no defect. A relation now, naming no count (.claude/rules/test-harness.md): every role
+# render.sh renders has its rendered file and its line in the card's Models section.
+# models_missing <roles> <step0 file> -> each role with no line of its own in the Models block.
+models_missing() {
+  local role block
+  block="$(sed -n '/^  Models$/,/^$/p' "$2")"
+  for role in $1; do
+    printf '%s\n' "$block" | grep -qE "^    ${role}([[:space:]]|\$)" || printf '%s\n' "$role"
+  done
+  return 0
+}
+JIT_ROLES="$(sed -n 's/^ROLES="\(.*\)"$/\1/p' "${REPO}/agents-src/render.sh")"
+expect_nonempty "canonical-sdlc steps/0.md: render.sh declares its ROLES (the relation below reads a set)" "$JIT_ROLES"
+for role in $JIT_ROLES; do
+  expect_true "canonical-sdlc: role \`${role}\` has its rendered file agents/${role}.md" \
+    test -f "${REPO}/agents/${role}.md"
+done
+expect_eq "canonical-sdlc steps/0.md: every role render.sh renders has its line in the card's Models section" \
+  "" "$(models_missing "$JIT_ROLES" "$CANONICAL_SKILL_STEP0")"
+expect_eq "canonical-sdlc steps/0.md: a planted role with no Models line is named (the relation discriminates)" \
+  "planted" "$(models_missing "planted" "$CANONICAL_SKILL_STEP0")"
 
 section "Group 13: README roster table agrees with agents/*.md frontmatter (epic-19 F9)"
 #
@@ -364,11 +385,14 @@ section "Group 13: README roster table agrees with agents/*.md frontmatter (epic
 README="${REPO}/README.md"
 AGENTS_DIR="${REPO}/agents"
 
-for role in researcher test-runner implementor senior-implementor auditor critic; do
+for role in $JIT_ROLES; do
   role_file="${AGENTS_DIR}/${role}.md"
   model_raw="$(awk -F': *' '/^model:/ { print $2; exit }' "$role_file")"
   model_title="$(printf '%s' "$model_raw" | awk '{ print toupper(substr($0,1,1)) substr($0,2) }')"
   readme_row="$(grep "| \`${role}\` " "$README")"
+  # Both reads non-empty first: an empty model makes the glob below `**`, which matches anything.
+  expect_nonempty "README roster table: agents/${role}.md declares a model" "$model_raw"
+  expect_nonempty "README roster table: \`${role}\` has a row" "$readme_row"
   expect_match "README roster table: \`${role}\` row names its agents/${role}.md model" \
     "*${model_title}*" "$readme_row"
 done

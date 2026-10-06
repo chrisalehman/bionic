@@ -1827,9 +1827,9 @@ F4_BEFORE=$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$F4_ROSTER" 2>/dev/null || echo 0)
 # event that used to rewrite the file. The live agent's row is the OLDEST in it,
 # which is exactly the position eviction-by-recency takes first.
 mk_agent_payload "$SID_A" "$IREPO" \
-  | jq '.tool_input.name = "w99-other" | .tool_use_id = "toolu_OTHERDISPATCH"' \
+  | jq '.tool_input.name = "w99-other" | .tool_use_id = "toolu_OTHER_DISPATCH"' \
   | bash "$PARTY_DP" >/dev/null 2>&1
-mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHERDISPATCH" "w99-other" \
+mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHER_DISPATCH" "w99-other" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 expect_contains "the other dispatch's completion is journalled" \
   "agent_id=a26bd30bf8616411b" "$(grep 'status=confirmed|.*name=w99-other|' "$F4_ROSTER" 2>/dev/null)"
@@ -3076,6 +3076,9 @@ PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill
 PostToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Bash|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh evidence|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh adversarial|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh structure|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|10
 PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
@@ -5852,6 +5855,11 @@ s_eg_read() {  # <repo> [sid] -> "<plan path>|<current>", or "none"
   [ "$st" -eq 0 ] && { echo none; return; }
   plan=$(printf '%s\n' "$out" | sed -n 's/^Plan: //p' | head -1)
   cur=$(printf '%s\n' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)
+  # FROM STEP 6 THE GATE ASKS FOR READINGS, NOT A STEP LINE (wave-27 T14; D3), so a plan there
+  # meets another arm first; the step is the one its detail head names, "canonical-sdlc step N —",
+  # or the reading refusal's "is at current: N,".
+  [ -n "$cur" ] || cur=$(printf '%s\n' "$out" | sed -n -e 's/^canonical-sdlc step \([0-9][0-9ab]*\) — .*/\1/p' \
+    -e 's/^canonical-sdlc .* is at current: \([^,]*\), and from Step 6 .*/\1/p' | head -1)
   if [ -z "$plan" ] || [ -z "$cur" ]; then echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)"; return; fi
   printf '%s|%s\n' "$plan" "$cur"
 }
@@ -7824,8 +7832,8 @@ RG_RING="$SANDBOX/rg/pressure.ring"
 mkdir -p "$SANDBOX/rg"
 # CLEAR and CRITICAL as the sensors see them: 80 % free is above every band threshold;
 # 8 % free is below BAND_FREE_CRITICAL_PCT (12) and above BAND_FREE_EMERGENCY_PCT (5).
-RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
-RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
+RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
+RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
 
 # ONE CLEAR READING, WRITTEN BY THE REAL WRITER — not a hand-built ring file. The line's
 # shape is `pressure_sample`'s to own, and a fixture that wrote it by hand would keep passing
@@ -8335,7 +8343,7 @@ mkdir -p "$DS_DIR"
 # nothing about the command; planting both is the pre-1.4.4 shape, where the ONLY thing
 # wrong is the recorded command. That is the state doctor's `statusLine command` row fires
 # on, so it is the state this scan has to see it in.
-ds_plant() {  # <home> <hooks:yes|no> <agents:yes|no> [alias:yes|no, default no]
+ds_plant() {  # <home> <hooks:yes|no> <agents:yes|no> [alias:changed|no, default no]
   local h="$1" want_hooks="$2" want_agents="$3" want_alias="${4:-no}" f n=0
   rm -rf "$h"; mkdir -p "$h/.claude"
   # AND ONE ENVIRONMENT NAME WRITTEN TO THE WRONG VALUE (Step-6 review B-1). The
@@ -8396,19 +8404,21 @@ DSREG
     DS_PLANTED_HOOKS="$n"
     printf '#!/bin/bash\n# the machine owner wrote this one\n' > "$h/.claude/hooks/not-bionics.sh"
   fi
-  # THE PRE-MARKER ALIAS, OFF BY DEFAULT (Step-6 recheck part 4, R-2). This is the
-  # one leftover whose two rules had genuinely drifted:
-  # `bionic_check_legacy_alias` fires on the marked `# ─── bionic:start ───`
-  # block OR on a bare `alias claude=…--dangerously-skip-permissions` line, which
-  # is the spelling bionic wrote before it wrapped its edits in markers; doctor's
-  # own test read the marker and nothing else. Planted here is the SECOND state
-  # only — the raw alias, no marker — which is the machine where the two answers
-  # differ. BOTH rc names are written because `shell_rc_file` picks between
-  # `$HOME/.zshrc` and `$HOME/.bashrc` off `$SHELL`, and the suite must not read
-  # the runner's shell. Default `no`, so every fixture planted before this arm
-  # existed is byte-identical to what it was.
-  if [ "$want_alias" = "yes" ]; then
-    printf '%s\n' 'alias claude="claude --dangerously-skip-permissions"' > "$h/.zshrc"
+  # THE RETIRED ALIAS BLOCK, ITS BODY CHANGED, OFF BY DEFAULT (Step-6 recheck part 4,
+  # R-2; the state moved at wave-27 T75, A-orch-173). The one leftover whose two rules
+  # can still differ: `bionic_check_legacy_alias` fires only on bionic's own whole
+  # block, the body bionic wrote between its markers and free to go, while the raw fact
+  # `detect_zshrc_legacy_block` reads the markers and nothing else. Planted here is a
+  # marked block whose body the user changed: present to the raw fact, nothing to do to
+  # the table. (The state this arm first planted, the bare pre-marker line, is gone:
+  # under the markers rule no door takes a bare line out, and rc-item §T75 pins that it
+  # is named, never offered.) BOTH rc names are written because `shell_rc_file` picks
+  # between `$HOME/.zshrc` and `$HOME/.bashrc` off `$SHELL`, and the suite must not read
+  # the runner's shell. Default `no`, so every fixture planted before this arm existed
+  # is byte-identical to what it was.
+  if [ "$want_alias" = "changed" ]; then
+    printf '%s\n' '# ─── bionic:start ───' "alias claude='claude --dangerously-skip-permissions'" 'export MINE=1' \
+      '# ─── bionic:end ───' > "$h/.zshrc"
     cp "$h/.zshrc" "$h/.bashrc"
   fi
   # AND THE PROJECT THIS MACHINE IS ASKED ABOUT, CARRYING BOTH AUTO-MEMORY FACTS
@@ -8691,8 +8701,12 @@ expect_contains "DS.1 …and it counts the payload-named files, not the whole di
   "$DS_PLANTED_HOOKS in ~/.claude/hooks" "$DS_REPORT"
 expect_true "DS.1 …over a non-empty plant (the count is not zero over zero)" \
   test "${DS_PLANTED_HOOKS:-0}" -ge 10
-expect_contains "DS.1 …and all six role files as drifted" \
-  "6/6 differ" "$DS_REPORT"
+# RE-POINTED (wave-27 T11): was a literal "6/6", which a seventh role turned red for no defect.
+# The fixture plants one stale copy per payload role file, so the expected figure is that plant.
+DS_ROLE_N="$(for ds_f in "$DS_PAYLOAD"/agents/*.md; do [ -f "$ds_f" ] && echo x; done | grep -c x)"
+expect_true "DS.1 …over a non-empty role plant" test "${DS_ROLE_N:-0}" -ge 1
+expect_contains "DS.1 …and every planted role file as drifted" \
+  "${DS_ROLE_N}/${DS_ROLE_N} differ" "$DS_REPORT"
 
 # ── DS.2a THE FIRST WAY: every row that fires renders, with its hint ─────────
 #
@@ -8807,8 +8821,8 @@ DS_CLEAN_EARLY="$DS_DIR/clean-early"
 ds_plant "$DS_CLEAN_EARLY" no no
 DS_PENDING_ITEMS="$(ds_pending_items "$DS_HOME")"
 
-# THE WALK ITSELF, NAMED — because DS.12 below runs the very same comparison over
-# a doctored doctor and has to come out non-empty. Every item setup would offer,
+# THE WALK ITSELF, NAMED — DS.12 below runs its reverse (`ds_loud_items`) over a
+# doctored doctor and has to come out non-empty. Every item setup would offer,
 # whose table rows carry a label, must have one of those labels on the hinted
 # lines of doctor's page; what comes back is the items that went unsaid, and the
 # count of items the walk actually reached is left in `DS_STATE_SEEN` so a caller
@@ -9301,23 +9315,24 @@ expect_eq "DS.11 …while the shipped doctor leaves the same walk empty" \
 # Four of those five pairs agreed on every state a fixture can reach; the fifth
 # did not, and that is what this arm plants.
 #
-# THE STATE. `bionic_check_legacy_alias` fires on the marked block OR on the bare
-# pre-marker `alias claude=…--dangerously-skip-permissions` line. doctor's own
-# test read `detect_zshrc_legacy_block`, which knows only the marker. A machine
-# carrying the bare line is therefore one setup offers to clean and doctor said
-# nothing about — the 2026-09-05 field defect in its own shape, on a different
-# row. `ds_plant`'s fourth argument writes exactly that machine and nothing else.
+# THE STATE (wave-27 T75, A-orch-173). `bionic_check_legacy_alias` fires only on bionic's
+# whole block, free to go; `detect_zshrc_legacy_block` knows only the markers. A machine
+# carrying a marked block whose body the user changed is one the table says has nothing to
+# do and the raw fact calls present: a doctor that re-derived the row from the raw fact
+# would send the user to a setup step that removes nothing, the field defect's other
+# direction. `ds_plant`'s fourth argument `changed` writes exactly that machine and
+# nothing else.
 #
 # WHY ITS OWN HOME. Adding an rc file to the shared fixture would change what
 # `claude-proxy` answers there too (an rc that exists with no bionic block is a
 # different state from no rc at all), so the drift is planted where it is the only
 # thing that moved.
-DS_ALIAS_HOME="$DS_DIR/alias-premarker"
-ds_plant "$DS_ALIAS_HOME" no no yes
-expect_true "DS.12 the fixture carries the pre-marker alias line (the rows below are not vacuous)" \
-  grep -q 'alias claude=' "$DS_ALIAS_HOME/.zshrc"
-expect_false "DS.12 …and no marked bionic block, which is what makes the two rules disagree" \
+DS_ALIAS_HOME="$DS_DIR/alias-changed"
+ds_plant "$DS_ALIAS_HOME" no no changed
+expect_true "DS.12 the fixture carries bionic's alias markers (the rows below are not vacuous)" \
   grep -q 'bionic:start' "$DS_ALIAS_HOME/.zshrc"
+expect_true "DS.12 …around a body the user changed, which is what makes the two rules disagree" \
+  grep -q '^export MINE=1$' "$DS_ALIAS_HOME/.zshrc"
 
 DS_ALIAS_TABLE="$(ds_rows "$DS_ALIAS_HOME")"
 DS_ALIAS_PENDING="$(ds_pending_items "$DS_ALIAS_HOME")"
@@ -9330,10 +9345,14 @@ DS_ALIAS_LABEL="$(while IFS= read -r ds_r; do
     ds_field "$ds_r" 2
   done <<<"$DS_ALIAS_TABLE")"
 expect_true "DS.12 the table names a label for the row under test" test -n "$DS_ALIAS_LABEL"
-expect_true "DS.12 setup offers the removal on this machine" \
+expect_false "DS.12 setup offers no removal on this machine" \
   ds_listed_in "$DS_ALIAS_PENDING" legacy-alias
-expect_true "DS.12 …and setup's own narrowed run agrees it has something to do" \
-  ds_pending "$DS_ALIAS_HOME" legacy-alias
+# setup's own narrowed run names the changed block for the user's hand (so it does not
+# say "nothing left to do") and asks nothing: no removal is on offer.
+DS_ALIAS_ONLY="$(ds_setup "$DS_ALIAS_HOME" --only legacy-alias)"
+expect_contains "DS.12 …and setup's own narrowed run names the block for the user's hand" \
+  "changed since bionic wrote it" "$DS_ALIAS_ONLY"
+expect_absent "DS.12 …and asks nothing" "[y/N]" "$DS_ALIAS_ONLY"
 
 ds_alias_labels() {  # <report> -> the labels on that page's hinted lines
   local rep="$1" routes hinted
@@ -9342,15 +9361,42 @@ ds_alias_labels() {  # <report> -> the labels on that page's hinted lines
   while IFS= read -r l; do [ -n "$l" ] && ds_label_of "$l" && echo; done <<<"$hinted"
 }
 
+# THE REVERSE WALK: every item whose label doctor routes to setup must be one setup
+# would offer on the same machine. `<items routed>|<items routed that setup would not
+# offer>`, the count first for the same reason `ds_silent_items` gives it.
+ds_loud_items() {  # <pending items> <page labels> <table>
+  local pending="$1" labels="$2" table="$3" loud="" item labs hit r seen=0
+  while IFS= read -r item; do
+    [ -n "$item" ] || continue
+    labs="$(while IFS= read -r r; do
+        [ -n "$r" ] || continue
+        [ "$(ds_field "$r" 5)" = "$item" ] || continue
+        ds_field "$r" 2 && echo
+      done <<<"$table" | grep -v '^$')"
+    [ -n "$labs" ] || continue
+    hit=""
+    while IFS= read -r ds_l; do
+      [ -n "$ds_l" ] || continue
+      case "$labels" in *"$ds_l"*) hit=1; break ;; esac
+    done <<<"$labs"
+    [ -n "$hit" ] || continue
+    seen=$((seen + 1))
+    ds_listed_in "$pending" "$item" || loud="${loud}${loud:+, }${item}"
+  done <<<"$(while IFS= read -r r; do [ -n "$r" ] && ds_field "$r" 5 && echo; done <<<"$table" | grep -v '^$' | sort -u)"
+  printf '%s|%s' "$seen" "$loud"
+}
+
 DS_ALIAS_REPORT="$(ds_doctor "$DS_ALIAS_HOME")"
 DS_ALIAS_LABELS="$(ds_alias_labels "$DS_ALIAS_REPORT")"
-expect_contains "DS.12 the shipped doctor renders the row, because it asks the table" \
+expect_absent "DS.12 the shipped doctor routes no one to setup for it, because it asks the table" \
   "$DS_ALIAS_LABEL" "$DS_ALIAS_LABELS"
-DS_ALIAS_2C="$(ds_silent_items "$DS_ALIAS_PENDING" "$DS_ALIAS_LABELS" "$DS_ALIAS_TABLE")"
-expect_true "DS.12 …and the same-state walk reaches this machine's items at all" \
-  test "${DS_ALIAS_2C%%|*}" -ge 2
-expect_absent "DS.12 …so DS.2c's walk says nothing about it on the shipped doctor" \
-  "legacy-alias" "${DS_ALIAS_2C#*|}"
+expect_contains "DS.12 …and names the changed block for the user's hand instead" \
+  "changed since written" "$DS_ALIAS_REPORT"
+DS_ALIAS_LOUD="$(ds_loud_items "$DS_ALIAS_PENDING" "$DS_ALIAS_LABELS" "$DS_ALIAS_TABLE")"
+expect_true "DS.12 …and the reverse walk reaches this page's routed items at all" \
+  test "${DS_ALIAS_LOUD%%|*}" -ge 1
+expect_absent "DS.12 …so it names nothing setup would not offer, on the shipped doctor" \
+  "legacy-alias" "${DS_ALIAS_LOUD#*|}"
 
 # THE MUTANT: one line, doctor's own pre-1.5.1 rule put back where the table's
 # answer now goes. Everything else on the page is the shipped renderer.
@@ -9370,10 +9416,10 @@ expect_eq "DS.12 …and by exactly the one rule that replaced it" \
 DS_MUT_REPORT12="$( PARTY_DOCTOR="$DS_MUT_DOC12"; ds_doctor "$DS_ALIAS_HOME" )"
 expect_contains "DS.12 the doctored doctor still renders a page (the rows below are not vacuous)" \
   "ENVIRONMENT" "$DS_MUT_REPORT12"
-expect_absent "DS.12 …and its own rule cannot see the pre-marker line, so the row is gone" \
-  "$DS_ALIAS_LABEL" "$DS_MUT_REPORT12"
-expect_contains "DS.12 …so DS.2c's walk goes RED on it, by item name" \
-  "legacy-alias" "$(DS_M="$(ds_silent_items "$DS_ALIAS_PENDING" "$(ds_alias_labels "$DS_MUT_REPORT12")" "$DS_ALIAS_TABLE")"; printf '%s' "${DS_M#*|}")"
+expect_contains "DS.12 …and its own rule reads the markers alone, so the row routes to setup" \
+  "$DS_ALIAS_LABEL" "$(ds_alias_labels "$DS_MUT_REPORT12")"
+expect_contains "DS.12 …so the reverse walk goes RED on it, by item name" \
+  "legacy-alias" "$(DS_M="$(ds_loud_items "$DS_ALIAS_PENDING" "$(ds_alias_labels "$DS_MUT_REPORT12")" "$DS_ALIAS_TABLE")"; printf '%s' "${DS_M#*|}")"
 
 
 # ============================================================
@@ -11505,7 +11551,11 @@ SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
 # The column padding before the comment was cut to two spaces at wave-24 T9 (A-T9.9), the
 # bytes paying for the scaffold's Done marker: line; the words are unchanged.
-SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:'
+# RE-POINTED (wave-27 T53, review pass 28 B3): the comment now tells the reader dealt `evidence`
+# to name its runs, since a `Suites: none` evidence reader is refused at dispatch.
+# RE-POINTED (wave-27 T60, review pass 38 B1): `Suites: none` beside a `Re-executes:` that names
+# a run is right for that reader, so the comment counts its runs across both labels.
+SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names 1 to 3 runs across both labels'
 
 sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
   awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
@@ -11527,15 +11577,20 @@ done
 expect_eq "SV both author surfaces (SKILL.md, dispatch.md) carry the shared scaffold's new Suites: line" \
   "2 " "$SV_COUNT $SV_DISAGREE"
 
+# RE-POINTED (wave-27 T11): was `"6 "`, a count a seventh role turned red. A relation now:
+# every role file read carries the reader view, over a set that is not empty.
 SV_ROLES=0
+SV_READER=0
 SV_NOREADER=""
 for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
   [ -f "$_sv_f" ] || continue
   SV_ROLES=$((SV_ROLES + 1))
-  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f" || SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"
+  if /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f"; then SV_READER=$((SV_READER + 1))
+  else SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"; fi
 done
-expect_eq "SV …and all six role files carry the reader view of the scaffold" \
-  "6 " "$SV_ROLES $SV_NOREADER"
+expect_true "SV …the role files were read (the relation below is not vacuous)" test "$SV_ROLES" -ge 1
+expect_eq "SV …and every role file carries the reader view of the scaffold" \
+  "$SV_ROLES " "$SV_READER $SV_NOREADER"
 
 # THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
 # block updated in the source but only some templates re-rendered) would leave some copies
@@ -11552,8 +11607,8 @@ expect_eq "SV …and neither author surface still carries the retired 'on its ow
 # with the shared constant — proving the equality pin above is load-bearing rather than
 # comparing an empty string to itself.
 SV_MUT="$SANDBOX/skill-stale-scaffold.md"
-anchor -E "$SV_SKILL" 'other runners: Re-executes:$' 1
-sed 's/other runners: Re-executes:$/other runners: Re-executes:, on its own paragraph/' \
+anchor -E "$SV_SKILL" '1 to 3 runs across both labels$' 1
+sed 's/1 to 3 runs across both labels$/1 to 3 runs across both labels, on its own paragraph/' \
   "$SV_SKILL" > "$SV_MUT" 2>/dev/null
 SV_MUT_LINE="$(sv_suites_line "$SV_MUT")"
 expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer matches the shared line" \
@@ -11669,7 +11724,7 @@ printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"
 # other suites, so an unpinned sample reads the runner's real load and a later median lands
 # in the warning band, halving the width for a reason that is not the fixture (§RG's pins).
 CGC_ENV=(BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_NOW_EPOCH=1700000000
-         BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1)
+         BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192)
 cgc_ring() { printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"; }
 
 cgc_ack() {  # <ledger> <at> <name> — the sweeper ledger's ack line, in its writer's shape
@@ -12438,7 +12493,7 @@ CGSD_CFG="$SANDBOX/cgsd-config"; mkdir -p "$CGSD_CFG/projects/-cgsd"
 cgc_ring
 CGSD_TICK=$( cd "$CGSD_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CGSD_CFG" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_POKER" tick 2>&1 )
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGSD_POKER" tick 2>&1 )
 CGSD_PRINTED=$(printf '%s\n' "$CGSD_TICK" | sed -n 's/^poker: STANDDOWN \([A-Za-z0-9_.-]*\) .*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
 expect_eq "CG-standdown precondition: the real tick stood down exactly the two listed MET rows" \
   "sd-a sd-b " "$CGSD_PRINTED"
@@ -12457,7 +12512,7 @@ CGSD_TR="$CGSD_R/cgsd-transcript.jsonl"
 cgc_ring
 CGSD_OUT=$(s4_stop_payload "$CGSD_R" "$SID_A" "$CGSD_TR" \
   | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
-      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_STOP" 2>/dev/null)
+      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGSD_STOP" 2>/dev/null)
 CGSD_REASON=$(printf '%s' "$CGSD_OUT" | jq -r '.reason // ""' 2>/dev/null)
 CGSD_WALL=""
 for _cgsd_n in sd-a sd-b sd-gone sd-open; do
@@ -12503,7 +12558,7 @@ HD_CFG="$SANDBOX/hd-config"; mkdir -p "$HD_CFG/projects/-hd"
 } > "$HD_CFG/projects/-hd/$SID_A.jsonl"
 hd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$HD_CFG" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 "$@"; }
 HD_HOLD=$( cd "$HD_R" && hd_env bash "$CGSD_POKER" hold sd-a "kept for a second pass" 2>&1 ); HD_HOLD_RC=$?
 expect_eq "HD precondition: the hold verb took sd-a (rc 0)" "0" "$HD_HOLD_RC"
 cgc_ring
@@ -12561,7 +12616,7 @@ s4_bind "$OCC_R" "$SID_A" "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md"
 s4_attest "$OCC_R" "$SID_A"
 occ_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 "$@"; }
 OCC_PF=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" | occ_env bash "$PARTY_DP" 2>&1 )
 OCC_PF_N=$(printf '%s\n' "$OCC_PF" | sed -n 's/.*writers: budget=1 open=\([0-9][0-9]*\) with-this-dispatch=.*/\1/p' | head -1)
 cgc_ring
@@ -12635,7 +12690,7 @@ cgt_stop() {  # <stop_hook_active true|false>
   jq -nc --arg c "$CGT_R" --arg s "$SID_A" --arg t "$CGT_TR" --argjson a "$1" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a}' \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
-        BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGT_STOP" 2>/dev/null
+        BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGT_STOP" 2>/dev/null
 }
 jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$CGT_TR"
 cgt_agent toolu_01CGTA1 W-R1
@@ -13744,6 +13799,32 @@ SD_RM=$(sd_world mut R1,R2)
 SD_MUT_TICK=$(sd_tick "$SD_RM" "$SD_MUT/hooks/session-poker.sh")
 expect_eq "SD5 mutation: the tick that never asks the reader fills both rows (it ran)" "R1 R2 " "$SD_MUT_TICK"
 expect_ne "SD5b …and the agreement pin goes red on it" "$(sd_wall "$SD_RM")" "$SD_MUT_TICK"
+# THE VERB'S TWIN ROWS (wave-27 T34; REQ-15 AC-15.1; D24). The same worlds with the decline recorded
+# by `session-poker.sh decline` and no ledger line written by hand: the verb writes the line the
+# reply form's turn leaves, so the tick and the wall read it by the one rule and owe the same rows.
+sd_world_verb() {  # <label> <ids to decline, comma-joined> -> repo
+  local r
+  r=$(new_repo "sdv-$1")
+  roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
+  cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+  s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
+  s4_attest "$r" "$SID_A"
+  ( cd "$r" && sd_env bash "$CGSD_POKER" decline "$2" 'R1 waits on the base merge' ) > "$r/sd-decline.out" 2>&1
+  jq -nc '{type:"user",uuid:"u-sd-1",isSidechain:false,timestamp:"2026-10-03T09:05:00Z",message:{role:"user",content:"carry on"}}' \
+    > "$r/sd-turn.jsonl"
+  printf '%s' "$r"
+}
+SDV_R=$(sd_world_verb some R1)
+expect_contains "SDV precondition: the verb recorded the decline" "decline — " "$(cat "$SDV_R/sd-decline.out")"
+SDV_TICK=$(sd_tick "$SDV_R" "$CGSD_POKER")
+expect_contains "SDV0 the tick prints the verb's decline as standing, in the reply form's words" \
+  "— R1 waits on the base merge" "$(/usr/bin/grep '^poker: fill-declined standing since ' "$SDV_R/sd-tick.out")"
+expect_eq "SDV1 the tick fills the row the verb did not name" "R2 " "$SDV_TICK"
+expect_eq "SDV2 …and the stop wall refuses the silent turn for exactly that row" "$SDV_TICK" "$(sd_wall "$SDV_R")"
+SDV_RA=$(sd_world_verb all R1,R2)
+expect_eq "SDV3 a verb decline naming both: the tick fills nothing" "" "$(sd_tick "$SDV_RA" "$CGSD_POKER")"
+expect_eq "SDV4 …and the stop wall owes nothing either" "" "$(sd_wall "$SDV_RA")"
 
 # ============================================================
 section "RPL — the hold's reply count and the sweeper's reply reader are one envelope grammar (wave-24 T27; Step-6 review U2; D3)"
@@ -13826,7 +13907,7 @@ expect_ne "MEMROOT mutation: …and on the brace spelling the agreement pin goes
   "$(mr_bw "$PARTY_EG" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')" \
   "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')"
 
-section "PRF — the proof line: one writer, every reader gives its kind, head and time back (wave-26 T56; final review S3 row 4)"
+section "FACT — the proof line: one writer, every reader gives its kind, head and time back, and a reading its question (wave-26 T56 as §PRF; widened by wave-27 T2, REQ-2 AC-2.5)"
 # THE ROW THE OWNERSHIP TABLE NAMED AND NOBODY WROTE. A proof line is written by one writer,
 # proof.sh `proof_line` placed by `proof_add_line` (what `session-poker.sh proof-add` runs), and
 # read by four readers: `proof_last` / `proof_last_line` (proof.sh), the readiness program's
@@ -13836,8 +13917,9 @@ section "PRF — the proof line: one writer, every reader gives its kind, head a
 # functions, so they are run here as the files carry them: each is cut out of its file by its
 # own text (the needle below, anchored once in each), never by a line number.
 #
-# The fixture is written ONLY through the writer, then doctored around: two review proofs, then
-# a floor proof with the NEWEST time, so a reader blind to the kind answers the floor's time; a
+# The fixture is written ONLY through the writer, then doctored around: three review proofs (a
+# 1.11.0 line, then two readings, each carrying question, reader, result and scope), then a floor
+# proof with the NEWEST time, so a reader blind to the kind answers the floor's time; a
 # fenced proof line and one under another heading, each newer still, so a reader blind to the
 # fence or the section answers theirs. Every reader must answer the last review line the writer
 # wrote: kind review, its head, its time.
@@ -13851,6 +13933,7 @@ PRF_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 PRF_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 PRF_C=cccccccccccccccccccccccccccccccccccccccc
 PRF_LIVE=dddddddddddddddddddddddddddddddddddddddd
+PRF_E=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 # prf_cut <file> — the single-quoted awk program whose text holds PRF_NEEDLE: from the `awk '`
 # that opens it to the `' "$` that closes it. Nothing when either end is missing.
 prf_cut() {
@@ -13890,23 +13973,24 @@ prf_at() {
   # shellcheck source=/dev/null
   . "$PRF_LIB/proof.sh" || exit 1
   for _l in "$(proof_line review "$PRF_A" 2026-10-04T10:00:00Z record/w/r1.md)" \
-            "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md)" \
+            "$(proof_line review "$PRF_E" 2026-10-04T10:30:00Z record/w/adv.md adversarial w-crit flag whole)" \
+            "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md evidence w-aud pass piece)" \
             "$(proof_line floor "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
     proof_add_line "$PRF_PLAN" "$_l" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN" || exit 1
   done
 )
-expect_eq "PRF fixture: the writer placed three proof lines inside ## SDLC State" "3" \
+expect_eq "PRF fixture: the writer placed four proof lines inside ## SDLC State" "4" \
   "$(awk '/^## /{s=($0 ~ /SDLC State/)} s && /^proved: /' "$PRF_PLAN" | grep -c .)"
 # The decoys, each newer than every real line: a fenced proof inside the section, and one under
 # another heading. No reader may answer either.
-awk '{ print } /^current: 4$/ { print "```"; print "proved: kind=review head=" h " at=2026-10-04T13:00:00Z evidence=record/w/fenced.md"; print "```" }' \
+awk '{ print } /^current: 4$/ { print "```"; print "proved: kind=review head=" h " at=2026-10-04T13:00:00Z evidence=record/w/fenced.md question=adversarial reader=w-crit result=pass scope=piece"; print "```" }' \
   h="$PRF_C" "$PRF_PLAN" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN"
-printf '\n## Notes\n\nproved: kind=review head=%s at=2026-10-04T14:00:00Z evidence=record/w/elsewhere.md\n' "$PRF_C" >> "$PRF_PLAN"
+printf '\n## Notes\n\nproved: kind=review head=%s at=2026-10-04T14:00:00Z evidence=record/w/elsewhere.md question=adversarial reader=w-crit result=pass scope=piece\n' "$PRF_C" >> "$PRF_PLAN"
 expect_eq "PRF fixture: the two decoys are in (one fenced, one under ## Notes)" "2" \
   "$(grep -c 'evidence=record/w/\(fenced\|elsewhere\)\.md' "$PRF_PLAN")"
 PRF_LINE="$(. "$PRF_LIB/proof.sh" && proof_last_line "$PRF_PLAN" review)"
-expect_eq "PRF proof_last_line: the last review line, as the writer wrote it" \
-  "proved: kind=review head=$PRF_B at=2026-10-04T11:00:00Z evidence=record/w/r2.md" "$PRF_LINE"
+expect_eq "PRF proof_last_line: the last review line, as the writer wrote it, its reading fields last" \
+  "proved: kind=review head=$PRF_B at=2026-10-04T11:00:00Z evidence=record/w/r2.md question=evidence reader=w-aud result=pass scope=piece" "$PRF_LINE"
 expect_eq "PRF proof_last (review): its head" "$PRF_B" \
   "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review)"
 expect_eq "PRF proof_last (floor): the floor line is a different kind, with its own head" "$PRF_C" \
@@ -13935,6 +14019,158 @@ expect_nonempty "PRF mutation: …and still yields a reader that runs" "$(prf_at
 expect_ne "PRF mutation: …which answers another line's time, so the agreement row goes red" \
   "$PRF_AT" "$(prf_at "$PRF_MUT")"
 PRF_NEEDLE="$PRF_NEEDLE_SAVED"
+
+# §FACT (wave-27 T2; REQ-2 AC-2.5 verb half, D1). THE READING FIELDS RIDE THE SAME LINE. The
+# writer above put an adversarial reading (head E) before the evidence reading (head B), so a
+# reader keyed by kind alone answers B for every question. The one reading of a line,
+# `proof_fields`, gives the four fields back as the writer wrote them; `proof_last` and
+# `proof_last_line` keyed by a question answer that question's last line and nothing for a
+# question never read; the decoys (fenced, under ## Notes, both adversarial and newer) stay unread.
+expect_eq "FACT proof_fields: the evidence line's kind, head and four reading fields" \
+  "review $PRF_B evidence w-aud pass piece" \
+  "$(awk "$(. "$PRF_LIB/proof.sh" && proof_awk)"'
+    proof_fields($0) && PROOF_HEAD == h { print PROOF_KIND, PROOF_HEAD, PROOF_QUESTION, PROOF_READER, PROOF_RESULT, PROOF_SCOPE }' \
+    h="$PRF_B" "$PRF_PLAN")"
+expect_eq "FACT proof_fields: …and a 1.11.0 line reads with its reading fields empty" "review|$PRF_A||||" \
+  "$(awk "$(. "$PRF_LIB/proof.sh" && proof_awk)"'
+    proof_fields($0) && PROOF_HEAD == h { print PROOF_KIND "|" PROOF_HEAD "|" PROOF_QUESTION "|" PROOF_READER "|" PROOF_RESULT "|" PROOF_SCOPE }' \
+    h="$PRF_A" "$PRF_PLAN")"
+expect_eq "FACT proof_last (review evidence): that question's head" "$PRF_B" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review evidence)"
+expect_eq "FACT proof_last (review adversarial): its own head, not the newer evidence line's, nor a decoy's" "$PRF_E" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review adversarial)"
+expect_eq "FACT proof_last_line (review adversarial): the line as the writer wrote it" \
+  "proved: kind=review head=$PRF_E at=2026-10-04T10:30:00Z evidence=record/w/adv.md question=adversarial reader=w-crit result=flag scope=whole" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last_line "$PRF_PLAN" review adversarial)"
+expect_eq "FACT proof_last (review structure): a question never read answers nothing" "" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review structure)"
+# THE DOCTORED SITE. A copy of proof.sh whose last-proof reader has lost its question test (a
+# reader keyed by kind alone, 1.11.0's) must answer the evidence head for the adversarial question.
+FACT_NEEDLE='PROOF_KIND == k && (q == "" || PROOF_QUESTION == q)'
+FACT_MUT_TEXT='PROOF_KIND == k'
+FACT_MUT="$PRF_D/proof.sh.mut"
+anchor "$PRF_LIB/proof.sh" "$FACT_NEEDLE" 1
+FACT_N="$FACT_NEEDLE" FACT_R="$FACT_MUT_TEXT" awk '
+  BEGIN { n = ENVIRON["FACT_N"]; r = ENVIRON["FACT_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$PRF_LIB/proof.sh" > "$FACT_MUT"
+expect_eq "FACT mutation: the doctored copy lost exactly the question test" "0" \
+  "$(grep -cF -- "$FACT_NEEDLE" "$FACT_MUT")"
+expect_eq "FACT mutation: …and still reads the evidence question's head (it runs)" "$PRF_B" \
+  "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review evidence)"
+expect_ne "FACT mutation: …which answers the adversarial question with another line's head, so the agreement row goes red" \
+  "$PRF_E" "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review adversarial)"
+
+# ============================================================
+section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"
+# ============================================================
+# ONE FUNCTION SAYS WHAT A RUN OWES. proof.sh `facts_owed <rigor> <scale>` prints the floor and one
+# `review<TAB><question><TAB><role><TAB><scope>` line per owed reading; the judge (`facts_state`)
+# and, from row T15, the dispatch wall both read it, so the dealing has one site. Pinned here: at
+# each rigor and scale each question is dealt to exactly one role; the table is the Interfaces
+# table's (`tested` the critic holds all three; `peer-reviewed` the auditor evidence and the critic
+# the other two; `audited` the auditor, the critic and the reviewer, one each); every dealt role is
+# one of PROOF_READER_ROLES, the set the fact verb admits a reader under, and every such role is
+# dealt somewhere; at wave scale each code question owes a whole read by the same role. The
+# rendered rigor table's half of AC-1.2 is row T17's (the doctrine rewrite). A doctored copy whose
+# `audited` dealing hands structure to the critic must split from the table.
+DEAL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
+deal() {  # <rigor> <scale> [<proof.sh>] -> facts_owed's lines
+  bash -c '. "$1" && facts_owed "$2" "$3"' _ "${3:-$DEAL_LIB}" "$1" "$2" 2>/dev/null
+}
+deal_roles() {  # <rigor> <scale> [<proof.sh>] -> `<question>=<role>` per piece read, in table order
+  deal "$@" | awk -F'\t' '$1 == "review" && $4 == "piece" { printf "%s%s=%s", (n++ ? " " : ""), $2, $3 }'
+}
+DEAL_QS="$(bash -c '. "$1" && printf "%s" "$PROOF_QUESTIONS"' _ "$DEAL_LIB")"
+DEAL_ROLES="$(bash -c '. "$1" && printf "%s" "$PROOF_READER_ROLES"' _ "$DEAL_LIB")"
+expect_eq "DEAL precondition: the questions are the Interfaces table's three" "evidence adversarial structure" "$DEAL_QS"
+for deal_r in tested peer-reviewed audited; do
+  for deal_s in task wave; do
+    for deal_q in $DEAL_QS; do
+      expect_eq "DEAL $deal_r $deal_s: $deal_q is dealt to exactly one role" "1" \
+        "$(deal "$deal_r" "$deal_s" | awk -F'\t' -v q="$deal_q" '$1 == "review" && $2 == q && $4 == "piece"' | awk 'END { print NR }')"
+    done
+    expect_eq "DEAL $deal_r $deal_s: the floor is owed, once" "1" "$(deal "$deal_r" "$deal_s" | /usr/bin/grep -cx floor)"
+    expect_eq "DEAL $deal_r $deal_s: every dealt role is a reader role the fact verb admits" "" \
+      "$(deal "$deal_r" "$deal_s" | ROLES="$DEAL_ROLES" awk -F'\t' '$1 == "review" && index(" " ENVIRON["ROLES"] " ", " " $3 " ") == 0 { print $3 }')"
+  done
+done
+expect_eq "DEAL tested: the critic holds all three" \
+  "evidence=bionic:critic adversarial=bionic:critic structure=bionic:critic" "$(deal_roles tested task)"
+expect_eq "DEAL peer-reviewed: the auditor evidence, the critic adversarial and structure" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles peer-reviewed task)"
+expect_eq "DEAL audited: the auditor evidence, the critic adversarial, the reviewer structure" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task)"
+for deal_r in tested peer-reviewed audited; do
+  expect_eq "DEAL $deal_r: the dealing does not change with scale" "$(deal_roles "$deal_r" task)" "$(deal_roles "$deal_r" wave)"
+  expect_eq "DEAL $deal_r wave: each code question owes one whole read, by its piece reader; evidence none" \
+    "$(deal_roles "$deal_r" wave | tr ' ' '\n' | /usr/bin/grep -v '^evidence=' | tr '\n' ' ' | sed 's/ $//')" \
+    "$(deal "$deal_r" wave | awk -F'\t' '$1 == "review" && $4 == "whole" { printf "%s%s=%s", (n++ ? " " : ""), $2, $3 }')"
+  expect_eq "DEAL $deal_r task: no whole read is owed" "0" "$(deal "$deal_r" task | /usr/bin/grep -c 'whole$')"
+done
+expect_eq "DEAL every reader role is dealt a question at some rigor" "$DEAL_ROLES" \
+  "$(for deal_r in tested peer-reviewed audited; do deal "$deal_r" task; done | awk -F'\t' '$1 == "review" { print $3 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+# THE READER ROLES ARE READ-ONLY ROLES (wave-27 T45; review pass 13 F8). PROOF_READER_ROLES is the
+# set the fact verb admits a reader under; roster.sh's ROLE_READONLY_SET is the set the walls run
+# as readers. A reader role outside it would be dealt a question and walled as a writer, so every
+# member of the first is a member of the second. A doctored roster.sh without bionic:reviewer splits.
+DEAL_ROSTER="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
+deal_outside() {  # <roster.sh> -> each reader role its ROLE_READONLY_SET lacks, one per line
+  RO="$(bash -c '. "$1" >/dev/null 2>&1; printf "%s" "$ROLE_READONLY_SET"' _ "$1")" ROLES="$DEAL_ROLES" awk 'BEGIN {
+    n = split(ENVIRON["ROLES"], r, " "); for (i = 1; i <= n; i++) if (index(" " ENVIRON["RO"] " ", " " r[i] " ") == 0) print r[i] }'
+}
+expect_ne "DEAL roles precondition: roster.sh's read-only set is read" "" \
+  "$(bash -c '. "$1" >/dev/null 2>&1; printf "%s" "$ROLE_READONLY_SET"' _ "$DEAL_ROSTER")"
+expect_eq "DEAL every reader role (PROOF_READER_ROLES) is inside roster.sh's read-only set" "" "$(deal_outside "$DEAL_ROSTER")"
+DEAL_RO_MUT="$SANDBOX/fx/deal-roster.sh.mut"; mkdir -p "$SANDBOX/fx"
+anchor "$DEAL_ROSTER" 'bionic:critic bionic:reviewer Explore' 1
+sed 's/bionic:critic bionic:reviewer Explore/bionic:critic Explore/' "$DEAL_ROSTER" > "$DEAL_RO_MUT"
+expect_eq "DEAL roles mutation: a roster.sh whose read-only set lacks bionic:reviewer splits from the reader roles" \
+  "bionic:reviewer" "$(deal_outside "$DEAL_RO_MUT")"
+expect_eq "DEAL a rigor outside the three deals nothing" "" "$(deal standard task)"
+expect_ne "DEAL …and says so by its exit" "0" "$(bash -c '. "$1" && facts_owed standard task >/dev/null 2>&1; echo $?' _ "$DEAL_LIB")"
+# THE DOCTORED SITE: a copy whose audited dealing gives structure to the critic.
+DEAL_NEEDLE='audited=bionic:auditor,bionic:critic,bionic:reviewer'
+DEAL_MUT="$SANDBOX/fx/deal-proof.sh.mut"; mkdir -p "$SANDBOX/fx"
+anchor "$DEAL_LIB" "$DEAL_NEEDLE" 1
+DEAL_N="$DEAL_NEEDLE" awk '
+  BEGIN { n = ENVIRON["DEAL_N"]; r = "audited=bionic:auditor,bionic:critic,bionic:critic" }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$DEAL_LIB" > "$DEAL_MUT"
+expect_eq "DEAL mutation: the doctored copy still deals one role per question (it runs)" "3" \
+  "$(deal audited task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
+expect_ne "DEAL mutation: …and splits from the table, so the audited row goes red" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task "$DEAL_MUT")"
+
+# THE RENDERED TABLE IS THE DEALING (wave-27 T17; AC-1.2 rendered half, A-T9.17). SKILL.md's rigor
+# table names, per rigor, who holds which question, in the Interfaces table's words: `<role> holds
+# all three`, or `<role> \`<q>\`[ and \`<q>\`]` joined by `, `. Each row must read back as exactly
+# what `facts_owed` deals that rigor, so the table and the code cannot drift. A doctored copy whose
+# audited row hands structure to the critic must split from the dealing.
+DEAL_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
+deal_table() {  # <rigor> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
+  QS="$DEAL_QS" awk -F'|' -v r="$1" '
+    $2 ~ "^ *`" r "` *$" {
+      nq = split(ENVIRON["QS"], qs, " "); nseg = split($4, seg, ", ")
+      for (i = 1; i <= nseg; i++) {
+        s = seg[i]; sub(/^ +/, "", s); role = s; sub(/ .*/, "", role)
+        if (s ~ /holds all three/) { for (j = 1; j <= nq; j++) held[qs[j]] = role; continue }
+        while (match(s, /`[a-z]+`/)) { held[substr(s, RSTART + 1, RLENGTH - 2)] = role; s = substr(s, RSTART + RLENGTH) }
+      }
+      for (j = 1; j <= nq; j++) if (held[qs[j]] != "") printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
+      exit
+    }' "${2:-$DEAL_SKILL}" 2>/dev/null
+}
+for deal_r in tested peer-reviewed audited; do
+  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_r row the reader parses" \
+    "$(deal_table "$deal_r")"
+  expect_eq "DEAL table $deal_r: the rendered row equals what facts_owed deals" \
+    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_r")"
+done
+DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
+anchor "$DEAL_SKILL" 'reviewer `structure`' 1
+sed 's/reviewer `structure`/critic `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
+expect_nonempty "DEAL table mutation: the doctored audited row still parses" "$(deal_table audited "$DEAL_SKILL_MUT")"
+expect_ne "DEAL table mutation: …and splits from the dealing, so the row goes red" \
+  "$(deal_roles audited task)" "$(deal_table audited "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"

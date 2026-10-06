@@ -226,7 +226,7 @@ DOCTOR_REPO_ROOT="$(cd "${DOCTOR_LIB}/../../.." && pwd -P)"
 # same trace, one frame deeper — and they are part of what a complete payload
 # means for this script too.
 for _doctor_lib in detect.sh env.sh patrol.sh width.sh loader.sh root.sh run.sh \
-                   resources.sh checks.sh deps.sh shell.sh worktree.sh; do
+                   resources.sh checks.sh deps.sh shell.sh worktree.sh markers.sh; do
   if [ ! -f "${DOCTOR_LIB}/${_doctor_lib}" ]; then
     echo "doctor.sh: cannot find ${DOCTOR_LIB}/${_doctor_lib} — the payload looks incomplete." >&2
     echo "           reinstall with: claude plugin install bionic@bionic" >&2
@@ -243,6 +243,11 @@ done
 # called from here, the same way this file never calls install_dep.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/env.sh"
+# markers.sh, which env.sh already soft-sourced — `markers_get` is how the
+# principles row compares the user's block to the shipped text. Named here so the
+# file-to-suite map sees doctor read it.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/markers.sh"
 # patrol.sh, which owns the ONE fact on this page that has no file behind it. The
 # CLI keeps its cron table in memory and writes none of it down, so "is the
 # Patrol armed, once, and firing" is reconstructed from a session file and a
@@ -710,6 +715,8 @@ AGENT_CAUSE="${AGENT_FACT##*cause=}"
 
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 RC_PROXY_FACT="$(detect_rc_claude_proxy)";   RC_PROXY_STATE="${RC_PROXY_FACT##*present=}"
+PRINCIPLES_FACT="$(detect_working_principles)"; PRINCIPLES_STATE="${PRINCIPLES_FACT##*state=}"
+LEGACY_ALIAS_FACT="$(detect_zshrc_legacy_block)"; LEGACY_ALIAS_STATE="${LEGACY_ALIAS_FACT##*present=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
 SKILL_COPY_FACT="$(detect_legacy_skill_copy)"
 SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
@@ -2133,6 +2140,26 @@ fi
 # declined the offer. Ruling A-T6-2 — upheld by the Step-6 recheck for this site,
 # and overturned for the other five, which the block above now decides once each.
 [ "$RC_PROXY_STATE" = "stale" ] && fix "the claude() shell proxy is an older line → run $(bionic_check_hint claude-proxy)"
+# Malformed working-principles markers are a fault no setup step repairs: setup,
+# remove and this row all refuse to guess which lines are bionic's. The ✗ below
+# stands for this line (wave-27 T40, review pass 9 finding 2).
+[ "$PRINCIPLES_STATE" = "malformed" ] && \
+  fix "bionic's working-principles markers in $(_doctor_tilde "$(principles_file)") do not pair up → fix them by hand"
+# The rc's markers, and either path being no file, are the same kind of fault
+# (wave-27 T46, review pass 14 F2 and F6): every writer refuses them, so the fix
+# line names a hand fix and never a setup run.
+[ "$RC_PROXY_STATE" = "malformed" ] && \
+  fix "bionic's claude() markers do not pair up in $(_doctor_tilde "$(rc_file)") → fix them by hand"
+# What the path is says what is wrong with it — a directory, a link to nothing,
+# not text, unreadable — so the line says it once (wave-27 T51, review pass 21 F7).
+[ "$RC_PROXY_STATE" = "not-a-file" ] && \
+  fix "$(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)") → fix it by hand"
+[ "$PRINCIPLES_STATE" = "not-a-file" ] && \
+  fix "$(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)") → fix it by hand"
+# The retired alias block's markers, read by the same reader (wave-27 T51, review
+# pass 21 F1): a block setup would refuse is a hand fix, never a setup run.
+[ "$LEGACY_ALIAS_STATE" = "malformed" ] && \
+  fix "the retired alias block's markers do not pair up in $(_doctor_tilde "$(_detect_shell_rc)") → fix them by hand"
 
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && fix "the legacy .zshrc alias block is still there → run $(bionic_check_hint legacy-alias)"
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
@@ -2536,7 +2563,7 @@ done
 # `claude()` function that puts the bypass mode in reach of the command a person
 # types — and someone who was asked and said no has a correctly configured
 # machine, not a broken one. So absent is `–` with the route to say yes, never
-# `✗` with a repair. Presence is env.sh's `rc_get` (through detect.sh), so a
+# `✗` with a repair. Presence is env.sh's `rc_state` (through detect.sh), so a
 # claude() function a user wrote for themselves — outside bionic's markers — is
 # neither claimed here nor removable by /bionic:remove.
 #
@@ -2545,6 +2572,11 @@ done
 # person is owed the truth and a command, not a green tick: the ✗ here is
 # matched by the fix line gathered above, which is the invariant those symbols
 # are worth anything under.
+#
+# AND `changed` IS THE USER'S (wave-27 T77): the block holds something bionic never
+# wrote there, so it is named by its lines, to edit by hand: `–`, no fix line and no
+# route, because setup never rewrites it. Its lines and its instruction survive the
+# longest path; the path is what the cut takes.
 _rc_proxy_label="$(bionic_check_label claude-proxy)"
 _rc_proxy_hint="$(bionic_check_hint claude-proxy)"
 if [ "$RC_PROXY_STATE" = "yes" ]; then
@@ -2553,9 +2585,39 @@ if [ "$RC_PROXY_STATE" = "yes" ]; then
 elif [ "$RC_PROXY_STATE" = "stale" ]; then
   _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "stale" \
     "in $(_detect_shell_rc)" " — ${_rc_proxy_hint} rewrites it"
+elif [ "$RC_PROXY_STATE" = "changed" ]; then
+  _rc_proxy_range="$(rc_block_range)"
+  _doctor_env3 "$DOCTOR_NIL" "$_rc_proxy_label" "changed" \
+    "lines ${_rc_proxy_range% *} to ${_rc_proxy_range#* } of $(_doctor_tilde "$(rc_file)")" " — edit it by hand"
+elif [ "$RC_PROXY_STATE" = "malformed" ]; then
+  _rc_proxy_where="$(markers_check "$(rc_file)" "$RC_START" "$RC_END")"
+  _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "malformed" "${_rc_proxy_where%%$'\n'*}"
+elif [ "$RC_PROXY_STATE" = "not-a-file" ]; then
+  _rc_proxy_what="$(markers_regular "$(rc_file)")"
+  _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "$(markers_regular_cell "$_rc_proxy_what")" "$(_doctor_tilde "$(rc_file)") is ${_rc_proxy_what}"
 else
   _doctor_env3 "$DOCTOR_NIL" "$_rc_proxy_label" "—" "not set — ${_rc_proxy_hint} offers it"
 fi
+# THE WORKING PRINCIPLES, AN OFFER LIKE THE ROW ABOVE, IN FOUR STATES (wave-27
+# D16, T40). Absent is an offer nobody took: `–` with the route. Edited is a
+# STATE, not a finding — the block differs from bionic's text and is kept as it
+# is; it is not called "your edit", because an older shipped text reads the same
+# way until a release changes the text. Malformed is the one fault: the markers
+# do not pair up, nothing can read or write the block, and the fix line gathered
+# above stands for the `✗`. The state is env.sh's `principles_state`, through
+# detect.sh.
+_principles_label="$(bionic_check_label working-principles)"
+_principles_hint="$(bionic_check_hint working-principles)"
+case "$PRINCIPLES_STATE" in
+  present)   _doctor_env3 "$DOCTOR_OK"  "$_principles_label" "on"     "in $(_doctor_tilde "$(principles_file)")" ;;
+  edited)    _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "differs from bionic's text — kept as it is" ;;
+  malformed) _principles_where="$(principles_where)"
+             _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "malformed" "${_principles_where%%$'\n'*}" ;;
+  not-a-file) _principles_what="$(markers_regular "$(principles_file)")"
+              _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "$(markers_regular_cell "$_principles_what")" \
+               "$(_doctor_tilde "$(principles_file)") is ${_principles_what}" ;;
+  *)         _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "—"      "not set — ${_principles_hint} offers it" ;;
+esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
 # that never ran it, or has been cleaned once, all six answer no. Silence is the
@@ -2569,6 +2631,68 @@ fi
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && \
   _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-alias)" \
     "present → $(bionic_check_hint legacy-alias)"
+# A retired block whose markers do not pair up is not one setup removes: the
+# fault and its line, and the fix line gathered above (wave-27 T51, F1). An rc
+# that is no file is the claude() row's to say, once.
+if [ "$LEGACY_ALIAS_STATE" = "malformed" ]; then
+  _legacy_alias_where="$(markers_check "$(_detect_shell_rc)" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")"
+  _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-alias)" "malformed — ${_legacy_alias_where%%$'\n'*}"
+fi
+# A line that mentions the retired alias and is not one bionic wrote (wave-27 T55):
+# no step removes it, so it is named once, by number and never by its text, as the
+# user's to edit — not a fault, and not routed to setup.
+if [ "$LEGACY_ALIAS_STATE" != "not-a-file" ]; then
+  _legacy_alias_scan="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"
+  _legacy_alias_theirs="${_legacy_alias_scan#* theirs=}"
+  _legacy_alias_bound="${_legacy_alias_scan#* bound=}"; _legacy_alias_bound="${_legacy_alias_bound%% *}"
+  _legacy_alias_why="${_legacy_alias_scan#* why=}"; _legacy_alias_why="${_legacy_alias_why%% *}"
+  # The label carries the finding and the cell the place: both fit their columns
+  # whole, where one sentence in the cell lost the file name to the cut.
+  [ -n "$_legacy_alias_theirs" ] && \
+    _doctor_env_row "$DOCTOR_NIL" "retired alias, not in a form bionic wrote" \
+      "$(bionic_line_numbers_words "$_legacy_alias_theirs") of $(_doctor_tilde "$(_detect_shell_rc)")" " → edit it by hand"
+  # Bionic's own line where removing it would change the user's code, or where the
+  # rc's shell could not say (wave-27 T66, review pass 40 B1): no step removes it,
+  # so it is the user's to edit — not a fault, and not routed to setup.
+  if [ -n "$_legacy_alias_bound" ]; then
+    case "$_legacy_alias_why" in
+      # A bare line of bionic's is never taken out (wave-27 T75, A-orch-162).
+      hand)     _legacy_alias_label="retired alias, bionic's old line"; _legacy_alias_tail=" → delete it by hand" ;;
+      ok)       _legacy_alias_label="retired alias, bionic's, in your own code"; _legacy_alias_tail=" → edit it by hand" ;;
+      # The reason is the label, so the place keeps its column whole (A-T55.9).
+      no-shell) _legacy_alias_label="retired alias, $(bionic_rc_shell "$(_detect_shell_rc)") is not installed"; _legacy_alias_tail=" → edit it by hand" ;;
+      no-parse) _legacy_alias_label="retired alias, the rc does not parse"; _legacy_alias_tail=" → edit it by hand" ;;
+      *)        _legacy_alias_label="retired alias, bionic cannot check it"; _legacy_alias_tail=" → edit it by hand" ;;
+    esac
+    _doctor_env_row "$DOCTOR_NIL" "$_legacy_alias_label" \
+      "$(bionic_line_numbers_words "$_legacy_alias_bound") of $(_doctor_tilde "$(_detect_shell_rc)")" "$_legacy_alias_tail"
+  fi
+  # The retired alias block where taking it out, as one unit, would change the
+  # user's own code (wave-27 T66, A-orch-119 (3)): the user's to edit, not routed.
+  if [ "$LEGACY_ALIAS_STATE" = "yes" ]; then
+    _legacy_alias_block="$(markers_block_alone "$(_detect_shell_rc)" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")"
+    case "$_legacy_alias_block" in
+      alone=yes*) ;;
+      *) _legacy_alias_why="${_legacy_alias_block#* why=}"; _legacy_alias_why="${_legacy_alias_why%% *}"
+         _legacy_alias_first="${_legacy_alias_block#* first=}"; _legacy_alias_first="${_legacy_alias_first%% *}"
+         case "$_legacy_alias_why" in
+           ok) _legacy_alias_label="retired alias, bionic's, in your own code"; _legacy_alias_tail=" → edit it by hand" ;;
+           changed) _legacy_alias_label="retired alias block, changed since written"; _legacy_alias_tail=" → edit it by hand" ;;
+           no-shell) _legacy_alias_label="retired alias, $(bionic_rc_shell "$(_detect_shell_rc)") is not installed"; _legacy_alias_tail=" → edit it by hand" ;;
+           no-parse) _legacy_alias_label="retired alias, the rc does not parse"; _legacy_alias_tail=" → edit it by hand" ;;
+           *)  _legacy_alias_label="retired alias, bionic cannot check it"; _legacy_alias_tail=" → edit it by hand" ;;
+         esac
+         _doctor_env_row "$DOCTOR_NIL" "$_legacy_alias_label" \
+           "lines ${_legacy_alias_first} to ${_legacy_alias_block##* last=} of $(_doctor_tilde "$(_detect_shell_rc)")" "$_legacy_alias_tail" ;;
+    esac
+  fi
+  # A read-only rc: the row says so and sends no one to a setup step that would
+  # only refuse (wave-27 T66, review pass 40 S5).
+  if [ "$LEGACY_ALIAS_STATE" = "yes" ] && ! markers_writable "$(_detect_shell_rc)"; then
+    _doctor_env_row "$DOCTOR_NIL" "$(bionic_check_label legacy-alias)" \
+      "read-only: $(_doctor_tilde "$(_detect_shell_rc)")" " → make it writable to let bionic remove it"
+  fi
+fi
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
   _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-hooks)" \
     "${LEGACY_HOOK_COUNT} in settings.json → $(bionic_check_hint legacy-hooks)"

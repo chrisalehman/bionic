@@ -24,14 +24,13 @@
 # asserted too, but as a SECOND question ("does the report agree with the
 # machine"), never as the first.
 #
-# AND ONE ASSERTION IS NEGATIVE, DELIBERATELY BESIDE THE POSITIVE ONES (AC-7).
-# `~/.claude/CLAUDE.md` is the user's own file: bionic gave up managing memory on
-# 2026-08-20 and delegates it entirely to the harness. Nothing the plugin does may
-# create it. An absence proves nothing on its own — an empty $HOME is full of
-# absences, and a suite whose setup silently did nothing would pass such a check
-# perfectly. It earns its keep only because it sits in the SAME run as the
-# positive manifest above it: the run that proves setup wrote seven things is the
-# run that proves it did not write this eighth.
+# `~/.claude/CLAUDE.md` IS THE USER'S OWN FILE, AND SINCE wave-27 (D16) SETUP OFFERS
+# ONE THING FOR IT: bionic's working principles, between markers, written only on
+# a yes. Before that, AC-7 held that nothing the plugin does may create the file
+# (bionic gave up managing memory on 2026-08-20). The all-yes run now does create
+# it, so the manifest asserts it holds EXACTLY bionic's block and nothing else, and
+# Group 5 asserts remove takes it back to no file at all. The negative that
+# survives is `$HOME/CLAUDE.md`, a file no item names, beside the positive.
 #
 # HERMETIC, AND WHAT THAT COSTS. `$HOME` is a fixture directory and PATH is
 # REPLACED (not prefixed) by a bin dir this suite builds, so a real brew, npm, uv
@@ -602,6 +601,7 @@ run_payload() {  # <script> [args...] — stdin carries the answers
     BIONIC_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     CLAUDE_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
+    BIONIC_PNPM_STORE="${FH_PNPM_STORE:-}" \
     BIONIC_DOCTOR_PROBE_SECONDS=15 \
     bash "$script" "$@" 2>&1
 }
@@ -760,6 +760,12 @@ RC_START_LIT="$(env_sh_var RC_START)"
 RC_END_LIT="$(env_sh_var RC_END)"
 RC_PROXY_LINE="$(env_sh rc_default claude-proxy)"
 
+# The working-principles item's markers and text, likewise read from the payload:
+# the block setup writes is the block the shipped file carries (wave-27 D16).
+PRINCIPLES_START_LIT="$(env_sh_var PRINCIPLES_START)"
+PRINCIPLES_END_LIT="$(env_sh_var PRINCIPLES_END)"
+PRINCIPLES_SHIPPED="${PAYLOAD}/context/working-principles.md"
+
 # The lines BETWEEN bionic's markers, in order. Not "does the file contain the
 # proxy line": a proxy line outside the markers is a line bionic does not own.
 rc_block_lines() {  # <file>
@@ -860,7 +866,7 @@ expect_eq "the planted shell rc is the only thing in the fixture HOME" \
 # later row could tell from the truth.
 expect_ne "env.sh names a start marker" "" "$RC_START_LIT"
 expect_ne "env.sh names an end marker"  "" "$RC_END_LIT"
-expect_ne "env.sh names a line for the claude-proxy item" "" "$RC_PROXY_LINE"
+expect_ne "env.sh names a body for the claude-proxy item" "" "$RC_PROXY_LINE"
 
 # The verdict glyphs doctor's rows are read by, likewise: read out of doctor.sh,
 # proven present, and proven to be different characters — an `env_row_state` whose
@@ -985,14 +991,26 @@ expect_eq "manifest: setup wrote NO permission rules of its own" "" \
 # Absence proves nothing on its own; it proves something HERE because the same
 # run just proved setup wrote the six things above it.
 # The same extractor, in the same run, on the same fixture machine, says `yes` to
-# a file setup did write — which is the only thing that makes the two `no`s below
-# it mean anything at all.
+# a file setup did write — which is the only thing that makes the `no` below it
+# mean anything at all.
 expect_eq "the path extractor says yes to a file setup did write" "yes" \
   "$(path_exists "$SETTINGS")"
-expect_eq "manifest: ~/.claude/CLAUDE.md was NOT created — the plugin never touches it (AC-7)" \
-  "no" "$(path_exists "$GLOBAL_MEMORY")"
-expect_eq "manifest: no CLAUDE.md was written at the top of \$HOME either (AC-7)" \
+expect_eq "manifest: no CLAUDE.md was written at the top of \$HOME (AC-7)" \
   "no" "$(path_exists "${HOME_FIX}/CLAUDE.md")"
+
+# ── the working principles: ~/.claude/CLAUDE.md holds bionic's block and only it ──
+#
+# The expected bytes are built from the SHIPPED file through env.sh's own reader,
+# proven non-empty first, so an empty text could not make an empty file pass.
+expect_ne "env.sh names the principles start marker" "" "$PRINCIPLES_START_LIT"
+env_sh markers_get "$PRINCIPLES_SHIPPED" "$PRINCIPLES_START_LIT" "$PRINCIPLES_END_LIT" > "$TMP/principles-body"
+expect_true "the shipped principles text reads back non-empty" test -s "$TMP/principles-body"
+{ printf '%s\n' "$PRINCIPLES_START_LIT"; cat "$TMP/principles-body"; printf '%s\n' "$PRINCIPLES_END_LIT"; } \
+  > "$TMP/principles-expected.md"
+expect_eq "manifest: setup created ~/.claude/CLAUDE.md on the all-yes run" "yes" \
+  "$(path_exists "$GLOBAL_MEMORY")"
+expect_true "manifest: ~/.claude/CLAUDE.md is exactly bionic's marked principles block" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
 
 # DELETED AT THE REVIVE (epic-18 wave-03): a third AC-7 row that grepped setup's
 # PRINTED OUTPUT for the string `CLAUDE.md`. It pinned wording rather than
@@ -1007,14 +1025,21 @@ expect_eq "manifest: no CLAUDE.md was written at the top of \$HOME either (AC-7)
 expect_eq "manifest: the rc carried no bionic block before setup" "" "$RC_BLOCK_BEFORE"
 expect_ne "manifest: the rc carries a bionic block after setup" "" \
   "$(rc_block_lines "$RC_FILE_FIX")"
-expect_eq "manifest: the block holds exactly env.sh's claude-proxy line" \
+expect_eq "manifest: the block holds exactly env.sh's claude-proxy body" \
   "$RC_PROXY_LINE" "$(rc_block_lines "$RC_FILE_FIX")"
 expect_eq "manifest: no start marker was in the rc before setup" "0" "$RC_STARTS_BEFORE"
 RC_STARTS_AFTER_SETUP="$(count_lines_equal "$RC_FILE_FIX" "$RC_START_LIT")"
 expect_eq "manifest: the start marker appears exactly once after setup" "1" \
   "$RC_STARTS_AFTER_SETUP"
-expect_eq "manifest: the proxy line appears exactly once in the whole rc" "1" \
-  "$(count_lines_equal "$RC_FILE_FIX" "$RC_PROXY_LINE")"
+# Each line of the body, once: a second copy of bionic's body anywhere in the rc is
+# caught line by line (the body is two lines since wave-27 T75, A-orch-185).
+RC_BODY_ONCE=yes; RC_BODY_N=0
+while IFS= read -r rc_body_line; do
+  RC_BODY_N=$((RC_BODY_N + 1))
+  [ "$(count_lines_equal "$RC_FILE_FIX" "$rc_body_line")" = "1" ] || RC_BODY_ONCE="no: $rc_body_line"
+done <<< "$RC_PROXY_LINE"
+expect_true "manifest: the body's lines were read (the row below is not vacuous)" test "$RC_BODY_N" -ge 1
+expect_eq "manifest: each line of the body appears exactly once in the whole rc" "yes" "$RC_BODY_ONCE"
 
 # The user's own lines. First as a walk — both sides through the same extractor,
 # and the extractor proven to return the planted file's lines rather than nothing
@@ -1215,6 +1240,95 @@ expect_true "4c setup --all: leaves the migrated layout alone instead of re-copy
 expect_no_match "4c setup --all: does not offer to install ccstatusline again" \
   '*install ccstatusline*' "$(cat "$SETUP_OUT_C")"
 
+# ---------------------------------------------------------------------------
+# Group 4d — an edited principles block is the user's (wave-27 D16, AC-9.4; T40).
+#
+# An edited block is a state, not something left to do: `--all` neither lists it
+# nor shows its difference, even fed nothing but yes, and the edit survives it.
+# The difference and the question that could replace the block come only when
+# the item is asked for by name — and there a no keeps it and a yes replaces it.
+# Same machine as Group 5, which then removes a present block.
+# ---------------------------------------------------------------------------
+
+section "Group 4d: --all leaves an edited principles block alone; --only asks before replacing it"
+
+{ printf '%s\n' "$PRINCIPLES_START_LIT"; cat "$TMP/principles-body"; printf '%s\n' '- my own rule'
+  printf '%s\n' "$PRINCIPLES_END_LIT"; } > "$GLOBAL_MEMORY"
+cp "$GLOBAL_MEMORY" "$TMP/principles-edited.md"
+expect_false "4d precondition: the edited block is not the shipped one" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
+SETUP_OUT_D="$TMP/setup-edited-all.txt"
+printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT_D" 2>&1
+expect_true "4d: setup --all fed only yes keeps the edit, byte for byte" \
+  cmp -s "$TMP/principles-edited.md" "$GLOBAL_MEMORY"
+expect_no_match "4d: …and shows no difference for it" '*my own rule*' "$(cat "$SETUP_OUT_D")"
+SETUP_OUT_DN="$TMP/setup-edited-only-no.txt"
+printf 'n\n' | run_payload "$SETUP_SH" --only working-principles > "$SETUP_OUT_DN" 2>&1
+expect_match "4d: asked for by name, setup prints the difference, the user's line included" \
+  '*my own rule*' "$(cat "$SETUP_OUT_DN")"
+expect_true "4d: a no at that question keeps the edit, byte for byte" \
+  cmp -s "$TMP/principles-edited.md" "$GLOBAL_MEMORY"
+printf 'y\n' | run_payload "$SETUP_SH" --only working-principles > "$TMP/setup-edited-yes.txt" 2>&1
+expect_true "4d: a yes at the same question replaces the block with the shipped text" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
+
+# ---------------------------------------------------------------------------
+# Group 4e — a claude() block the user changed is theirs (wave-27 T77, review pass 64).
+#
+# On the machine setup built, a block holding bionic's earlier line and a line of the
+# user's is not on `--all`'s page, even fed nothing but yes; the step names it by its
+# lines, with bionic's lines for the user's hand, and no byte of the rc changes. The
+# rc is put back for Group 5.
+# ---------------------------------------------------------------------------
+
+section "Group 4e: --all leaves a changed claude() block alone and names it"
+
+cp "$RC_FILE_FIX" "$TMP/rc-before-4e"
+T77_FN="${RC_PROXY_LINE#*$'\n'}"
+T77_N="$(rc_nonblock_lines "$RC_FILE_FIX" | wc -l | tr -d ' ')"
+{ rc_nonblock_lines "$RC_FILE_FIX"
+  printf '%s\n' "$RC_START_LIT" "$T77_FN" 'export V9=9' "$RC_END_LIT"; } > "$TMP/rc-changed-4e"
+cp "$TMP/rc-changed-4e" "$RC_FILE_FIX"
+expect_ne "4e precondition: the earlier line is not the whole body" "$RC_PROXY_LINE" "$T77_FN"
+SETUP_OUT_E="$TMP/setup-changed-all.txt"
+printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT_E" 2>&1
+expect_contains "4e: the changed block is named by its lines" \
+  "lines $((T77_N + 1)) to $((T77_N + 4)) of" "$(cat "$SETUP_OUT_E")"
+expect_contains "4e: …with bionic's lines for the user's hand" "     ${T77_FN}" "$(cat "$SETUP_OUT_E")"
+expect_contains "4e: the page was printed (the row below is not vacuous)" "Do all of the above?" "$(cat "$SETUP_OUT_E")"
+expect_absent "4e: …and does not offer the claude() function" "add bionic's claude() shell function" "$(cat "$SETUP_OUT_E")"
+expect_absent "4e: …and the user's line is never printed" "V9=9" "$(cat "$SETUP_OUT_E")"
+expect_true "4e: the rc is byte for byte as it was" cmp -s "$TMP/rc-changed-4e" "$RC_FILE_FIX"
+cp "$TMP/rc-before-4e" "$RC_FILE_FIX"
+
+# ---------------------------------------------------------------------------
+# Group 4f — remove leaves a changed claude() block too (wave-27 T78).
+#
+# The same machine, its block holding bionic's two lines with a line of the user's
+# between them. `remove --all`'s page, printed with every other item setup left, does
+# not offer the block and names it by its lines after its items; the page is declined
+# here, so Group 5 still finds the machine whole. Group 5b drives the yes.
+# ---------------------------------------------------------------------------
+
+section "Group 4f: remove --all keeps a changed claude() block off its page and names it"
+
+T78_UNALIAS="${RC_PROXY_LINE%%$'\n'*}"
+T78_N="$(rc_nonblock_lines "$RC_FILE_FIX" | wc -l | tr -d ' ')"
+{ rc_nonblock_lines "$RC_FILE_FIX"
+  printf '%s\n' "$RC_START_LIT" "$T78_UNALIAS" 'export V9=9' "$T77_FN" "$RC_END_LIT"; } > "$TMP/rc-changed-4f"
+cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+expect_ne "4f precondition: the block's first line is not its second" "$T78_UNALIAS" "$T77_FN"
+T78_NAMED="lines $((T78_N + 1)) to $((T78_N + 5)) of ~/.zshrc are bionic's claude() block, changed since bionic wrote it:"
+REMOVE_OUT_F="$(printf 'n\n' | run_payload "$REMOVE_SH" --all 2>&1)"
+REMOVE_PAGE_F="${REMOVE_OUT_F%%Do all of the above?*}"
+expect_ne "4f: the page is on the output, ahead of its question" "$REMOVE_OUT_F" "$REMOVE_PAGE_F"
+expect_contains "4f: …with setup's other items on it" "remove bionic's working principles" "$REMOVE_PAGE_F"
+expect_absent "4f: …and not the claude() function" "remove bionic's claude() shell function" "$REMOVE_PAGE_F"
+expect_contains "4f: the block is named by its lines after the page's items" "$T78_NAMED" "${REMOVE_PAGE_F##*  • }"
+expect_absent "4f: …and the user's line is never printed" "V9=9" "$REMOVE_OUT_F"
+expect_true "4f: the rc is byte for byte as it was" cmp -s "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+cp "$TMP/rc-before-4e" "$RC_FILE_FIX"
+
 
 # ---------------------------------------------------------------------------
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
@@ -1229,6 +1343,7 @@ CCS_WAS_THERE=no; [ -f "$CCS_CONFIG" ] && CCS_WAS_THERE=yes
 NB_WAS_THERE=no;  [ -f "$NB_SKILL" ]   && NB_WAS_THERE=yes
 VENV_WAS_THERE=no; [ -x "${VENV_DIR}/bin/python" ] && VENV_WAS_THERE=yes
 RC_BLOCK_WAS="$(yn "$(rc_block_lines "$RC_FILE_FIX")")"
+MEMORY_WAS="$(path_exists "$GLOBAL_MEMORY")"
 SL_WAS="$(yn "$(jqf '.statusLine.command // ""')")"
 ENV_NAMES_WAS="$(yn "$(settings_env_names "$SETTINGS")")"
 
@@ -1241,28 +1356,36 @@ CCS_GONE=no; [ -e "$CCS_CONFIG" ] || CCS_GONE=yes
 NB_GONE=no;  [ -e "$NB_SKILL" ]   || NB_GONE=yes
 VENV_GONE=no; [ -e "$VENV_DIR" ] || VENV_GONE=yes
 
-expect_eq "remove: the ccstatusline layout was installed and is now gone [ccstatusline-config-missing]" \
-  "yes yes" "${CCS_WAS_THERE} ${CCS_GONE}"
-expect_eq "remove: the notebooklm skill was installed and is now gone [notebooklm-skill-missing]" \
-  "yes yes" "${NB_WAS_THERE} ${NB_GONE}"
-expect_eq "remove: the excalidraw-renderer venv was installed and is now gone from the stable path [venv-path]" \
-  "yes yes" "${VENV_WAS_THERE} ${VENV_GONE}"
+# THE TOOLS STAY, NAMED (wave-27 T82). Nothing on the machine records which tools
+# bionic installed, so remove takes none of them off: each one setup installed is
+# still there afterwards, and the summary names it for the user to remove by hand.
+# Each row is still a conjunction — it was there after setup, AND it is there now.
+expect_eq "remove: the ccstatusline layout was installed and is still there [ccstatusline-config-missing]" \
+  "yes no" "${CCS_WAS_THERE} ${CCS_GONE}"
+expect_eq "remove: the notebooklm skill was installed and is still there [notebooklm-skill-missing]" \
+  "yes no" "${NB_WAS_THERE} ${NB_GONE}"
+expect_eq "remove: the excalidraw-renderer venv was installed and is still at the stable path [venv-path]" \
+  "yes no" "${VENV_WAS_THERE} ${VENV_GONE}"
 
 # EACH OF THESE IS A CONJUNCTION, never a bare absence. "Was it there" was read
-# before the teardown through the same extractor that reads "is it gone" after
+# before the teardown through the same extractor that reads "is it there" after
 # it, so a run in which setup had quietly written nothing fails the first half
 # instead of sailing through the second.
-expect_eq "remove: settings.json carried a statusLine command and no longer does" \
-  "yes no" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
+expect_eq "remove: settings.json carried a statusLine command and still does (a tool row, named)" \
+  "yes yes" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
 expect_eq "remove: settings.json carried bionic's environment names and no longer does" \
   "yes no" "${ENV_NAMES_WAS} $(yn "$(settings_env_names "$SETTINGS")")"
 
-# THE GLOBAL PACKAGE COMES OFF TOO (Fix step 3, AC-3). Clearing `.statusLine` and the
-# config dir used to be the whole removal; now ccstatusline is a real global npm
-# install, and leaving it on disk after `/bionic:remove` is exactly the "clean
-# machine" promise that removal exists to keep.
-expect_match "remove: the ccstatusline uninstall reached npm" \
-  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+# No package manager is asked to take anything off; the positive on the same log
+# is setup's install, which put the package there.
+expect_match "remove: the log holds setup's ccstatusline install" \
+  '*npm install -g ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "remove: …and no uninstall reached npm" \
+  '*npm uninstall*' "$(cat "$CALLS")"
+REMOVE_TOOLS_TEXT="$(cat "$REMOVE_OUT")"
+expect_contains "remove: the summary has its by-hand heading" "  left for you to remove by hand:" "$REMOVE_TOOLS_TEXT"
+expect_match "remove: …and names ccstatusline under it" \
+  '*left for you to remove by hand:*• ccstatusline*' "$REMOVE_TOOLS_TEXT"
 
 # DELETED AT THE REVIVE (epic-18 wave-03): a row asserting that no
 # `bionic-profile-` permission rule survived the teardown. Group 3 asserts setup
@@ -1300,10 +1423,41 @@ expect_eq "doctor: the claude() shell proxy row follows the block back off the d
 # AC-7 again, from the other direction: a teardown that deleted a file the plugin
 # never wrote would be the 2026-08-20 mistake repeated. The positive twin is the
 # line above it, on the same extractor — a file that IS still there afterwards.
+# The CLAUDE.md row below is the other case: a file setup CREATED to hold only
+# bionic's block, which remove takes back to no file (wave-27 D16).
 expect_eq "remove: the user's own shell rc survives the teardown" "yes" \
   "$(path_exists "$RC_FILE_FIX")"
-expect_eq "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (AC-7)" \
-  "no" "$(path_exists "$GLOBAL_MEMORY")"
+expect_eq "remove: ~/.claude/CLAUDE.md held only bionic's block, and is gone again with it" \
+  "yes no" "${MEMORY_WAS} $(path_exists "$GLOBAL_MEMORY")"
+# `--all` is the consent and adds no question, so the item's own lines carry the
+# deletion (wave-27 T46, review pass 14 F1): said before the act, and after it.
+REMOVE_TEXT="$(cat "$REMOVE_OUT")"
+expect_contains "remove --all: before it acts, the principles item says the block and the file will be deleted" \
+  "will delete the block and the file ${GLOBAL_MEMORY}" "$REMOVE_TEXT"
+expect_contains "remove --all: …and its result line says the file was deleted" \
+  "✓ deleted ${GLOBAL_MEMORY}" "$REMOVE_TEXT"
+# The page that takes the consent says it too (wave-27 T51, review pass 21 F6):
+# the line is read from the page alone, everything before its question.
+REMOVE_PAGE="${REMOVE_TEXT%%Do all of the above?*}"
+expect_ne "remove --all: the page is on the output, ahead of its question" "$REMOVE_TEXT" "$REMOVE_PAGE"
+expect_contains "remove --all: the page line for the principles says the file will be deleted" \
+  "remove bionic's working principles and delete the file ${GLOBAL_MEMORY}" "$REMOVE_PAGE"
+
+# ---------------------------------------------------------------------------
+# Group 5b — the yes, on the torn-down machine (wave-27 T78). A changed claude() block
+# planted after the teardown is named and never offered by `remove --all` fed nothing
+# but yes, and no byte of the rc changes.
+# ---------------------------------------------------------------------------
+
+section "Group 5b: remove --all fed yes leaves a changed claude() block byte for byte"
+
+cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+REMOVE_OUT_5B="$(printf '%s' "$YES" | run_payload "$REMOVE_SH" --all 2>&1)"
+expect_contains "5b: the changed block is named by its lines" "$T78_NAMED" "$REMOVE_OUT_5B"
+expect_absent "5b: …never offered" "remove bionic's claude() shell function" "$REMOVE_OUT_5B"
+expect_absent "5b: …the user's line never printed" "V9=9" "$REMOVE_OUT_5B"
+expect_true "5b: the rc is byte for byte as it was" cmp -s "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+cp "$TMP/rc-planted.zshrc" "$RC_FILE_FIX"
 
 
 # ---------------------------------------------------------------------------
@@ -1427,10 +1581,14 @@ g7_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is c
 }
 expect_eq "7: no ccstatusline row calls a machine carrying bionic's statusline state clean" \
   "" "$(g7_clean_rows "$G7_OUT")"
-expect_eq "7: the statusLine bionic wrote is gone from settings.json" \
-  "" "$(jqf '.statusLine.command // ""')"
-expect_true "7: …and the config directory bionic copied in is gone" \
-  test ! -d "${HOME_FIX}/.config/ccstatusline"
+# Named, never acted on (wave-27 T82): the row is reported for the user to remove
+# by hand, and both halves stay where they are.
+expect_contains "7: …it names the row for the user to remove by hand" \
+  "ccstatusline: present — bionic has no record that it installed it, so it is left in place." "$(cat "$G7_OUT")"
+expect_eq "7: the statusLine is still in settings.json" \
+  "npx ccstatusline@latest" "$(jqf '.statusLine.command // ""')"
+expect_true "7: …and so is the config directory" \
+  test -d "${HOME_FIX}/.config/ccstatusline"
 # AC-7's rule, on this item too: what was not bionic's is still where the user left it.
 expect_eq "7: …and the rest of the user's settings.json is untouched" \
   "opus" "$(jqf '.model // ""')"
@@ -1539,6 +1697,10 @@ expect_match "8: a second pass over the same machine reads already clean" \
 # review-d's matrix rows 6 and 7 — the "new harm" rows, run beside Group 7's
 # existing positive twin so this is a measurement against the same extractor,
 # not a new one.
+#
+# SINCE wave-27 (T82) remove clears none of the three: the row is named with the
+# command to remove it by hand and left. The rows below now hold that the union
+# still REPORTS the row, and that the user's key and everything else survives.
 # ---------------------------------------------------------------------------
 
 section "Group 9: remove clears .statusLine only when it names ccstatusline"
@@ -1569,12 +1731,12 @@ g9_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is c
   grep 'ccstatusline' "$1" 2>/dev/null | grep 'already clean' 2>/dev/null
   return 0
 }
-expect_eq "9a: the row is still offered — the config directory is bionic's, so the union still fires" \
+expect_eq "9a: the row is still reported — the config directory alone makes it present" \
   "" "$(g9_clean_rows "$G9A_OUT")"
-expect_eq "9a: the user's own .statusLine SURVIVES a consented teardown" \
+expect_eq "9a: the user's own .statusLine SURVIVES the teardown" \
   "my-renderer" "$(jqf '.statusLine.command // ""')"
-expect_true "9a: …and the config directory bionic copied in is still gone" \
-  test ! -d "${HOME_FIX}/.config/ccstatusline"
+expect_true "9a: …and the config directory is left in place too (named, never removed)" \
+  test -d "${HOME_FIX}/.config/ccstatusline"
 expect_eq "9a: …and the rest of the user's settings.json is untouched" \
   "opus" "$(jqf '.model // ""')"
 
@@ -1599,12 +1761,15 @@ expect_eq "9b precondition: the fixture's statusLine names the user's own render
 G9B_OUT="$TMP/remove-statusline-user-owned-pkg.txt"
 printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G9B_OUT" 2>&1
 
-expect_eq "9b: the row is still offered — the installed package is bionic's, so the union still fires" \
+expect_eq "9b: the row is still reported — the installed package alone makes it present" \
   "" "$(g9_clean_rows "$G9B_OUT")"
-expect_eq "9b: the user's own .statusLine SURVIVES a consented teardown" \
+expect_eq "9b: the user's own .statusLine SURVIVES the teardown" \
   "my-renderer" "$(jqf '.statusLine.command // ""')"
-expect_match "9b: …and the package bionic installed is uninstalled" \
-  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+# The presence probe's own `npm list` is the positive on this log; no uninstall follows it.
+expect_match "9b: the teardown asked npm whether the package is there" \
+  '*npm list*ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "9b: …and never asked npm to uninstall it" \
+  '*npm uninstall*' "$(cat "$CALLS")"
 expect_eq "9b: …and the rest of the user's settings.json is untouched" \
   "opus" "$(jqf '.model // ""')"
 
@@ -1699,6 +1864,10 @@ expect_true "10 remove: the machine owner's file survives a glob-matching decoy 
 # terminal, and reports the row `skipped by you` to a user who answered yes.
 # The fix makes both the index and the value optional so a malformed key is
 # read as "no match" instead of raised as an error.
+#
+# SINCE wave-27 (T82) remove runs no clear at all on this row; what stays measured
+# is that a malformed key survives, no raw jq error reaches the user, and the row
+# is counted neither removed nor skipped.
 # ---------------------------------------------------------------------------
 
 section "Group 11: the jq predicate is total over .statusLine's type"
@@ -1722,14 +1891,14 @@ printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G11_OUT"
 
 expect_eq "11: a malformed .statusLine value survives (not bionic's shape to touch)" \
   "my-renderer" "$(jqf '.statusLine')"
-expect_true "11: …and the config directory bionic copied in is still gone" \
-  test ! -d "${HOME_FIX}/.config/ccstatusline"
-expect_match "11: …and the package bionic installed is uninstalled" \
-  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+expect_true "11: …and the config directory is left in place (named, never removed)" \
+  test -d "${HOME_FIX}/.config/ccstatusline"
+expect_eq "11: …and the package is still installed (the npm recorder's state is as planted)" \
+  "ccstatusline" "$(cat "${STATE}/npm-global")"
 expect_no_match "11: …and no raw jq error reaches the output" \
   '*jq:*' "$(cat "$G11_OUT")"
-expect_match "11: …and the run reports it removed, not skipped by you" \
-  '*1 removed*0 already clean*0 skipped by you*' "$(cat "$G11_OUT")"
+expect_match "11: …and the run reports it neither removed nor skipped by you" \
+  '*0 removed*0 already clean*0 skipped by you*' "$(cat "$G11_OUT")"
 
 # The other two `.statusLine.command` readers (health probe, teardown-state
 # union) already fail safe on this same malformed input — each swallows jq's
@@ -2150,5 +2319,643 @@ G15C="$TMP/g15-install.txt"
 printf 'y\ny\ny\n' | run_payload "$SETUP_SH" --only tool:impeccable > "$G15C" 2>&1
 expect_match "15C: …and setup installs it through the CLI, as it always did" \
   '*plugin install impeccable@bionic*' "$(cat "$CALLS")"
+
+# ---------------------------------------------------------------------------
+# Group 16 — remove names every tool it cannot prove it installed, and acts on
+# none of them (wave-27 T82).
+#
+# PRESENCE IS NOT PROVENANCE. The tools item used to hand every `remove-on-consent`
+# row it found PRESENT to `remove_dep`, which printed a plan, asked, and on a yes
+# ran it: a package the user installed themselves came off exactly like one bionic
+# installed. Nothing on a machine records which tools bionic put there, so every
+# such row is now named, with the command that removes it by hand, and left —
+# on every door and under `--all`. The one record the machine does keep is the
+# native plugin registry's `<name>@bionic` id, and that row is still removed.
+#
+# The fixture carries one present row of each `remove-on-consent` kind:
+# statusline, npm-global, uv-tool, uv-project, playwright-browser, pnpm-store,
+# mcp-server, github-skill — plus the native `impeccable@bionic`. Every package
+# manager on PATH is a recorder in $BIN, so a call is visible in the log and
+# reaches nothing real. The pnpm store (T85) is an index.db at the path the
+# doors are told through `BIONIC_PNPM_STORE`, so the probe never runs pnpm.
+# ---------------------------------------------------------------------------
+
+section "Group 16: remove names each declared tool it finds and removes none of them"
+
+# The rows the fixture makes present, in the table's order (the order the item
+# walks), each with its by-hand plan.
+G16_NAMES="excalidraw-renderer @playwright/cli playwright-chromium motion ccstatusline notebooklm context7 humanizer"
+G16_PW_CACHE="${HOME_FIX}/.cache/ms-playwright"
+G16_PNPM_STORE="${HOME_FIX}/.local/share/pnpm/store/v10"
+FH_PNPM_STORE="$G16_PNPM_STORE"
+
+# A path as a door prints it: the fixture home written `~/`.
+g16_home() { local tl='~/'; printf '%s' "${1//"$HOME_FIX"\//$tl}"; }
+
+g16_plan() {  # <name> -> the command the by-hand line must carry
+  case "$1" in
+    excalidraw-renderer) printf 'rm -rf %s %s' "$(g16_home "$VENV_DIR")" "$(g16_home "${VENV_DIR}.lock.sha256")" ;;
+    @playwright/cli)     printf 'npm uninstall -g @playwright/cli' ;;
+    # T88: the cache is shared, so the line names Playwright's own uninstall, never the cache.
+    playwright-chromium)
+      printf 'npx --yes playwright@latest uninstall — its cache is shared with your other projects, so nothing here removes it whole' ;;
+    motion)
+      printf 'pnpm store prune — the store is shared with your other projects, so this removes only the packages none of them references' ;;
+    ccstatusline)
+      printf 'npm uninstall -g ccstatusline, clear .statusLine from %s only if it still names ccstatusline, and remove %s' \
+        "$(g16_home "$SETTINGS")" "$(g16_home "${HOME_FIX}/.config/ccstatusline")" ;;
+    notebooklm)          printf 'uv tool uninstall notebooklm-py && rm -rf %s' "$(g16_home "${HOME_FIX}/.claude/skills/notebooklm")" ;;
+    context7)            printf 'claude mcp remove context7 -s user' ;;
+    humanizer)           printf 'rm -rf %s' "$(g16_home "${HOME_FIX}/.claude/skills/humanizer")" ;;
+  esac
+}
+
+g16_plant() {  # [native] — one present row of each kind; `native` adds impeccable@bionic
+  fresh_home
+  mkdir -p "${HOME_FIX}/.claude/skills/humanizer" "${HOME_FIX}/.claude/skills/notebooklm" \
+           "${HOME_FIX}/.config/ccstatusline" "${G16_PW_CACHE}/chromium-1187" "${VENV_DIR}/bin" \
+           "$G16_PNPM_STORE"
+  printf 'some binary-ish preamble\nmotion@12.23.12\nmore\n' > "${G16_PNPM_STORE}/index.db"
+  printf '%s\n' '{"model":"opus","statusLine":{"type":"command","command":"ccstatusline"}}' > "$SETTINGS"
+  cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+  printf 'ccstatusline\n@playwright/cli\n' > "${STATE}/npm-global"
+  printf 'context7\n' > "${STATE}/mcp"
+  : > "${G16_PW_CACHE}/chromium-1187/INSTALLATION_COMPLETE"
+  printf '#!/bin/bash\nexit 0\n' > "${VENV_DIR}/bin/python"; chmod +x "${VENV_DIR}/bin/python"
+  printf -- '---\nname: humanizer\n---\n' > "${HOME_FIX}/.claude/skills/humanizer/SKILL.md"
+  printf -- '---\nname: notebooklm\n---\n' > "${HOME_FIX}/.claude/skills/notebooklm/SKILL.md"
+  printf '#!/bin/bash\necho "notebooklm $*" >> "$BIONIC_TEST_CALLS"\nexit 0\n' > "${BIN}/notebooklm"
+  chmod +x "${BIN}/notebooklm"
+  if [ "${1:-}" = "native" ]; then
+    mkdir -p "${HOME_FIX}/.claude/plugins"
+    printf '%s\n' '{"version":2,"plugins":{"impeccable@bionic":[{"scope":"user","installPath":"/x","version":"4.1.1"}]}}' \
+      > "${HOME_FIX}/.claude/plugins/installed_plugins.json"
+    printf 'impeccable@bionic true\n' > "${STATE}/plugins"
+  fi
+  : > "$CALLS"
+}
+
+# Every file and directory the tool rows stand on, with each file's bytes, plus
+# the recorders' own state for the npm globals and the MCP servers. `g16_snap` is
+# its digest, so a red row prints one line rather than the whole listing.
+g16_snap_raw() {
+  local p
+  for p in "$SETTINGS" "${HOME_FIX}/.config" "${HOME_FIX}/.cache" "${HOME_FIX}/.local" \
+           "${HOME_FIX}/.claude/skills" "${STATE}/npm-global" "${STATE}/mcp"; do
+    [ -e "$p" ] || { echo "absent ${p}"; continue; }
+    find "$p" -print | LC_ALL=C sort
+    find "$p" -type f -exec shasum {} + | LC_ALL=C sort
+  done
+}
+g16_snap() { g16_snap_raw | shasum | awk '{ print $1 }'; }
+
+# The removal calls in the recorders' log: every way a package manager, the MCP
+# list or a pip/brew could have been asked to take something off.
+g16_acts() {
+  grep -E '^(npm uninstall|npm remove|npm rm|uv tool uninstall|uv pip uninstall|pip3? uninstall|brew uninstall|pnpm (remove|rm|store prune)|claude mcp remove)' \
+    "$CALLS" 2>/dev/null
+  return 0
+}
+
+# yes when the item's two lines for <name> stand together, the second right under the first.
+g16_pair() {  # <file> <name> <plan>
+  local want1="  ${2}: present — bionic has no record that it installed it, so it is left in place."
+  local want2="    remove it by hand with: ${3}" line prev=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$prev" = "$want1" ] && [ "$line" = "$want2" ] && { printf yes; return 0; }
+    prev="$line"
+  done < "$1"
+  printf no
+}
+
+# How many lines ask to remove <name>.
+g16_asks() {  # <file> <name>
+  grep -cF "Remove ${2} now?" "$1" 2>/dev/null
+  return 0
+}
+
+# The names under the summary's by-hand heading, space-joined, in order.
+g16_byhand() {  # <file>
+  local line on=0 out=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "  left for you to remove by hand:" ]; then on=1; continue; fi
+    [ "$on" = "1" ] || continue
+    [ -n "$line" ] || break
+    out="${out:+${out} }${line#    • }"
+  done < "$1"
+  printf '%s' "$out"
+}
+
+g16_door_rows() {  # <label> <output file> <snapshot before>
+  local label="$1" out="$2" before="$3" n
+  for n in $G16_NAMES; do
+    expect_eq "16 ${label}: ${n} is named, with the command to remove it by hand" \
+      "yes" "$(g16_pair "$out" "$n" "$(g16_plan "$n")")"
+    expect_eq "16 ${label}: …and nothing asks to remove ${n}" "0" "$(g16_asks "$out" "$n")"
+    expect_absent "16 ${label}: …and no 'answer yes' route is printed for ${n}" "answer yes to tool:${n}" "$(cat "$out")"
+  done
+  expect_eq "16 ${label}: no package manager, MCP remove, pip or brew was asked to remove anything" "" "$(g16_acts)"
+  expect_eq "16 ${label}: every file and directory the tool rows stand on is byte for byte as it was" \
+    "$before" "$(g16_snap)"
+}
+
+# The extractors, proven on real output before any row leans on them.
+g16_plant native
+G16_BEFORE="$(g16_snap)"
+expect_ne "16 precondition: the snapshot digest reads (it is not empty)" "" "$G16_BEFORE"
+expect_contains "16 precondition: …and the listing under it holds the planted ccstatusline layout" \
+  ".config/ccstatusline/settings.json" "$(g16_snap_raw)"
+for n in $G16_NAMES; do
+  expect_eq "16 precondition: ${n} reads as present to the teardown" "yes" \
+    "$(env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
+         BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
+         BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
+         bash -c '. "$1"; dep_teardown_state "$2"' _ "${LIB_DIR}/deps.sh" "$n" 2>/dev/null)"
+done
+: > "$CALLS"
+
+# ── the interactive door, every question answered yes ──
+G16_INT="$TMP/g16-interactive.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" > "$G16_INT" 2>&1
+G16_INT_RC=$?
+expect_eq "16 interactive: remove exits 0, as a run with these rows declined or absent does" "0" "$G16_INT_RC"
+g16_door_rows "interactive" "$G16_INT" "$G16_BEFORE"
+expect_eq "16 interactive: the one row the machine records as bionic's is still asked about (the question extractor reads)" \
+  "1" "$(g16_asks "$G16_INT" impeccable)"
+expect_match "16 interactive: …and still removed through the CLI's plugin uninstall" \
+  '*claude plugin uninstall impeccable@bionic --yes*' "$(cat "$CALLS")"
+expect_eq "16 interactive: the summary names every row left for the user to remove by hand" \
+  "$G16_NAMES" "$(g16_byhand "$G16_INT")"
+
+# ── the by-hand command runs as typed ──
+# Each `~/` word of every by-hand line, handed to /bin/bash 3.2 and to zsh with the
+# fixture's HOME, expands to the path the plan was composed with. The fixture home
+# lives under the temp root, not /Users, so nothing here leans on a familiar prefix.
+g16_tilde_check() {  # <file> <shell> -> "<checked> <mismatches>"
+  local line w got n=0 bad=0
+  while IFS= read -r line; do
+    case "$line" in *"remove it by hand with: "*) ;; *) continue ;; esac
+    for w in ${line#*remove it by hand with: }; do
+      case "$w" in '~/'*) ;; *) continue ;; esac
+      n=$((n + 1))
+      got="$(env -i HOME="$HOME_FIX" "$2" -c "printf '%s' $w" 2>/dev/null)"
+      [ "$got" = "${HOME_FIX}/${w#\~/}" ] || bad=$((bad + 1))
+    done
+  done < "$1"
+  printf '%s %s' "$n" "$bad"
+}
+expect_no_match "16 by hand: the fixture home is not under /Users" '/Users/*' "$HOME_FIX"
+# Six words: the playwright line names no path since T88.
+expect_eq "16 by hand: every ~/ word of the by-hand lines expands to its path under /bin/bash (6 words, 0 wrong)" \
+  "6 0" "$(g16_tilde_check "$G16_INT" /bin/bash)"
+expect_eq "16 by hand: …and under zsh" "6 0" "$(g16_tilde_check "$G16_INT" "$(command -v zsh)")"
+# A path that holds the home's spelling but does not start with it is printed as it is.
+expect_eq "16 by hand: only a word that starts with the home is written ~/" \
+  "rm -rf /elsewhere${HOME_FIX}/x ~/y" \
+  "$(env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '. "$1"; _dep_home_form "$2"' _ "${LIB_DIR}/deps.sh" \
+       "rm -rf /elsewhere${HOME_FIX}/x ${HOME_FIX}/y")"
+
+# ── --only tool:<name>, each row on its own ──
+for n in $G16_NAMES; do
+  g16_plant
+  G16_ONLY="$TMP/g16-only.txt"
+  printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only "tool:${n}" > "$G16_ONLY" 2>&1
+  expect_eq "16 --only tool:${n}: remove exits 0" "0" "$?"
+  expect_eq "16 --only tool:${n}: the row is named, with the command to remove it by hand" \
+    "yes" "$(g16_pair "$G16_ONLY" "$n" "$(g16_plan "$n")")"
+  expect_eq "16 --only tool:${n}: …nothing asks to remove it" "0" "$(g16_asks "$G16_ONLY" "$n")"
+  expect_eq "16 --only tool:${n}: …nothing was called" "" "$(g16_acts)"
+  expect_eq "16 --only tool:${n}: …and the fixture is byte for byte as it was" "$G16_BEFORE" "$(g16_snap)"
+done
+
+# ── --all, the page answered yes ──
+g16_plant native
+G16_ALL="$TMP/g16-all.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_ALL" 2>&1
+expect_eq "16 --all: remove exits 0" "0" "$?"
+G16_ALL_TEXT="$(cat "$G16_ALL")"
+G16_PAGE="${G16_ALL_TEXT%%Do all of the above?*}"
+expect_ne "16 --all: the page is on the output, ahead of its question" "$G16_ALL_TEXT" "$G16_PAGE"
+expect_eq "16 --all: one question is put, the page's (the question counter reads)" \
+  "1" "$(grep -c '\[y/N\]' "$G16_ALL")"
+expect_contains "16 --all: the native row bionic's catalog installed is on the page" "• remove impeccable" "$G16_PAGE"
+for n in $G16_NAMES; do
+  expect_absent "16 --all: ${n} is not on the page" "• remove ${n}" "$G16_PAGE"
+done
+g16_door_rows "--all" "$G16_ALL" "$G16_BEFORE"
+expect_match "16 --all: the native row is still removed through the CLI's plugin uninstall on the page's yes" \
+  '*claude plugin uninstall impeccable@bionic --yes*' "$(cat "$CALLS")"
+expect_eq "16 --all: the summary names every row left for the user to remove by hand" \
+  "$G16_NAMES" "$(g16_byhand "$G16_ALL")"
+
+# ── --all on a machine where the by-hand rows are all there is ──
+# The page is empty, and the run must still name what it leaves rather than call
+# the machine clean.
+g16_plant
+G16_ALL0="$TMP/g16-all-none-on-page.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_ALL0" 2>&1
+expect_eq "16 --all, nothing on the page: remove exits 0" "0" "$?"
+expect_eq "16 --all, nothing on the page: ccstatusline is still named, with its by-hand command" \
+  "yes" "$(g16_pair "$G16_ALL0" ccstatusline "$(g16_plan ccstatusline)")"
+expect_absent "16 --all, nothing on the page: …and the run does not call the machine clean" \
+  "this machine is already clean" "$(cat "$G16_ALL0")"
+expect_eq "16 --all, nothing on the page: …and its summary names every row left for the user" \
+  "$G16_NAMES" "$(g16_byhand "$G16_ALL0")"
+expect_eq "16 --all, nothing on the page: …and no question was put to anyone" \
+  "0" "$(grep -c '\[y/N\]' "$G16_ALL0")"
+expect_eq "16 --all, nothing on the page: …and nothing was called" "" "$(g16_acts)"
+expect_eq "16 --all, nothing on the page: …and the fixture is byte for byte as it was" "$G16_BEFORE" "$(g16_snap)"
+
+# ── remove_dep called directly, with the page's consent already in force ──
+g16_direct() {  # <name> — remove_dep under RM_ALL=1, yes on stdin; prints its output and rc=<n>
+  printf 'y\ny\n' | env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
+    BIONIC_TEST_BIN="$BIN" BIONIC_TEST_SHIMSRC="$SHIMSRC" BIONIC_TEST_PKG_MAP="$PKG_MAP" \
+    BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
+    BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
+    bash -c '. "$1"; RM_ALL=1; remove_dep "$2"; echo "rc=$?"' _ "${LIB_DIR}/deps.sh" "$1" 2>&1
+}
+g16_plant
+G16_DIRECT="$TMP/g16-direct.txt"
+for n in $G16_NAMES; do
+  g16_direct "$n" > "$G16_DIRECT"
+  expect_contains "16 remove_dep ${n}: returns 2, left in place by policy" "rc=2" "$(cat "$G16_DIRECT")"
+  expect_eq "16 remove_dep ${n}: …prints the two lines" "yes" "$(g16_pair "$G16_DIRECT" "$n" "$(g16_plan "$n")")"
+done
+expect_eq "16 remove_dep: no row called anything, consent in force or not" "" "$(g16_acts)"
+expect_eq "16 remove_dep: …and the fixture is byte for byte as it was" "$G16_BEFORE" "$(g16_snap)"
+
+# ── the mutant: the act restored on top of the named row ──
+# A doctored copy whose remove_dep, after naming a row, asks and runs the plan
+# it named. The same extractors read it, so the rows above are a measurement: a
+# remove that acts turns them red.
+G16_MUT="$TMP/payload-g16-mutant"
+rm -rf "$G16_MUT"; cp -R "$PAYLOAD" "$G16_MUT"
+cat >> "$G16_MUT/scripts/lib/deps.sh" <<'MUT'
+eval "_g16_named_$(declare -f remove_dep)"
+remove_dep() {
+  local rc
+  _g16_named_remove_dep "$@"; rc=$?
+  { [ "$rc" = 2 ] && [ "$(dep_field "$1" removal_behavior)" = remove-on-consent ]; } || return "$rc"
+  _dep_consent "Remove ${1} now?" || return 1
+  eval "$(_dep_remove_plan "$1")"
+}
+MUT
+expect_true "16 mutant: the doctored library still parses" bash -n "$G16_MUT/scripts/lib/deps.sh"
+g16_plant
+G16_MUT_OUT="$TMP/g16-mutant.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G16_MUT" run_payload "$G16_MUT/scripts/remove.sh" --only tool:@playwright/cli \
+  > "$G16_MUT_OUT" 2>&1
+expect_eq "16 mutant: the mutant run reached the item (its question is on the output)" \
+  "1" "$(g16_asks "$G16_MUT_OUT" @playwright/cli)"
+expect_ne "16 mutant: …and the act-call extractor sees its uninstall" "" "$(g16_acts)"
+expect_ne "16 mutant: …and the snapshot sees the machine change" "$G16_BEFORE" "$(g16_snap)"
+
+# ── a declined native row still gets its route, so the absence above is a measurement ──
+# The whole run, every question answered no: the summary's Skipped list carries the route.
+g16_plant native
+G16_NATIVE_N="$TMP/g16-native-declined.txt"
+for _ in $(seq 1 80); do printf 'n\n'; done | run_payload "$REMOVE_SH" > "$G16_NATIVE_N" 2>&1
+expect_contains "16: a declined native row is given its 'answer yes' route (the route extractor reads)" \
+  "answer yes to tool:impeccable" "$(cat "$G16_NATIVE_N")"
+
+# ── a run that named something never calls the machine clean (review pass 67 P2-1) ──
+# A changed claude() block alone, the tools alone (the "nothing on the page" rows
+# above), and both; the twin is a machine with nothing on it, which IS clean.
+fresh_home; mkdir -p "${HOME_FIX}/.claude"
+G16_CLEAN="$(printf 'y\n' | run_payload "$REMOVE_SH" --all 2>&1)"
+expect_contains "16 named: a machine with nothing on it is called clean (the phrase extractor reads)" \
+  "nothing to remove — this machine is already clean." "$G16_CLEAN"
+fresh_home; mkdir -p "${HOME_FIX}/.claude"; cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+G16_BLK="$(printf 'y\n' | run_payload "$REMOVE_SH" --all 2>&1)"
+expect_contains "16 named, a changed claude() block alone: it is named by its lines" "$T78_NAMED" "$G16_BLK"
+expect_contains "16 named, a changed claude() block alone: …the run says bionic has nothing to remove" \
+  "nothing for bionic to remove" "$G16_BLK"
+expect_absent "16 named, a changed claude() block alone: …and never calls the machine clean" \
+  "already clean" "$G16_BLK"
+expect_true "16 named, a changed claude() block alone: …and the rc is byte for byte as it was" \
+  cmp -s "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+g16_plant; cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+G16_BOTH="$TMP/g16-both.txt"
+printf 'y\n' | run_payload "$REMOVE_SH" --all > "$G16_BOTH" 2>&1
+expect_contains "16 named, block and tools: the block is named by its lines" "$T78_NAMED" "$(cat "$G16_BOTH")"
+expect_eq "16 named, block and tools: …ccstatusline is named with its by-hand command" \
+  "yes" "$(g16_pair "$G16_BOTH" ccstatusline "$(g16_plan ccstatusline)")"
+expect_absent "16 named, block and tools: …and the run never calls the machine clean" \
+  "this machine is already clean" "$(cat "$G16_BOTH")"
+expect_eq "16 named, block and tools: …and nothing was called" "" "$(g16_acts)"
+
+# ── T85: the pnpm store and the excalidraw venv, each alone on the machine ──
+# The two kinds T82 held still (review pass 70): `motion` was counted removed
+# while nothing was, and a venv stale against uv.lock read "not knowable" to the
+# item and "already clean" to the `--all` page. Each fixture carries that one row
+# and nothing else, so a row the item failed to name leaves nothing else to speak.
+g16_alone() {  # motion | venv-fresh | venv-stale | venv-none
+  fresh_home
+  # The recorders' empty state, as their first probe would leave it.
+  : > "${STATE}/npm-global"; : > "${STATE}/mcp"
+  case "$1" in
+    motion)
+      mkdir -p "$G16_PNPM_STORE"
+      printf 'some binary-ish preamble\nmotion@12.23.12\nmore\n' > "${G16_PNPM_STORE}/index.db" ;;
+    venv-fresh|venv-stale)
+      mkdir -p "${VENV_DIR}/bin"
+      printf '#!/bin/bash\nexit 0\n' > "${VENV_DIR}/bin/python"; chmod +x "${VENV_DIR}/bin/python"
+      if [ "$1" = venv-fresh ]; then
+        shasum -a 256 "${PAYLOAD}/skills/excalidraw-diagram/references/uv.lock" | awk '{ print $1 }' \
+          > "$VENV_LOCK_HASH"
+      else
+        printf '%s\n' "a-lock-this-venv-was-not-synced-against" > "$VENV_LOCK_HASH"
+      fi ;;
+  esac
+  : > "$CALLS"
+}
+g16_lib() {  # <function> <name> — a deps.sh answer on the fixture machine
+  env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
+    BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
+    BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
+    bash -c '. "$1"; "$2" "$3"' _ "${LIB_DIR}/deps.sh" "$1" "$2" 2>/dev/null
+}
+# The summary's removed and already-clean counts, "<removed> <clean>".
+g16_tally() {  # <file>
+  grep -F ' removed · ' "$1" | tail -1 | awk '{ print $1, $4 }'
+}
+# Every call the pnpm recorder logged.
+g16_pnpm_calls() { grep '^pnpm ' "$CALLS" 2>/dev/null; return 0; }
+
+g16_alone motion
+G16_T85_BEFORE="$(g16_snap)"
+expect_eq "16 motion alone: the pnpm store's index reads motion as present to the teardown" \
+  "yes" "$(g16_lib dep_teardown_state motion)"
+G16_M_ONLY="$TMP/g16-motion-only.txt"
+printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:motion > "$G16_M_ONLY" 2>&1
+expect_eq "16 motion --only: motion is named, with the store's by-hand command" \
+  "yes" "$(g16_pair "$G16_M_ONLY" motion "$(g16_plan motion)")"
+expect_eq "16 motion --only: …nothing asks to remove it" "0" "$(g16_asks "$G16_M_ONLY" motion)"
+expect_eq "16 motion --only: …the summary counts it neither removed nor clean (the tally reads 0 0)" \
+  "0 0" "$(g16_tally "$G16_M_ONLY")"
+expect_eq "16 motion --only: …and the summary names it to remove by hand" "motion" "$(g16_byhand "$G16_M_ONLY")"
+expect_eq "16 motion --only: …pnpm was never called" "" "$(g16_pnpm_calls)"
+g16_alone motion
+G16_M_ALL="$TMP/g16-motion-all.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_M_ALL" 2>&1
+expect_eq "16 motion --all: motion is named, with the store's by-hand command" \
+  "yes" "$(g16_pair "$G16_M_ALL" motion "$(g16_plan motion)")"
+expect_absent "16 motion --all: …motion is not on the page" "• remove motion" "$(cat "$G16_M_ALL")"
+expect_eq "16 motion --all: …no question was put to anyone" "0" "$(grep -c '\[y/N\]' "$G16_M_ALL")"
+expect_eq "16 motion --all: …the summary says 0 removed" "0" "$(g16_tally "$G16_M_ALL" | awk '{ print $1 }')"
+expect_eq "16 motion --all: …and names motion to remove by hand" "motion" "$(g16_byhand "$G16_M_ALL")"
+expect_absent "16 motion --all: …and never calls the machine clean" "this machine is already clean" "$(cat "$G16_M_ALL")"
+# The whole run probes the keep-shared `pnpm` row's version; motion asks pnpm nothing.
+expect_eq "16 motion --all: …pnpm was asked nothing but the pnpm row's version" "" \
+  "$(g16_pnpm_calls | grep -vx 'pnpm --version')"
+expect_eq "16 motion --all: …nothing was asked to remove anything" "" "$(g16_acts)"
+expect_eq "16 motion --all: …and the store is byte for byte as it was" "$G16_T85_BEFORE" "$(g16_snap)"
+env -i PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" pnpm store path >/dev/null 2>&1
+expect_ne "16 motion: the pnpm call extractor, version probes set aside, reads a call the recorder logged" "" \
+  "$(g16_pnpm_calls | grep -vx 'pnpm --version')"
+
+for g16_v in venv-fresh venv-stale; do
+  g16_alone "$g16_v"
+  G16_V_BEFORE="$(g16_snap)"
+  case "$g16_v" in venv-fresh) g16_want='present=yes*' ;; *) g16_want='present=stale*' ;; esac
+  expect_match "16 ${g16_v}: doctor's and setup's probe still reads it ${g16_want%%\**}" \
+    "$g16_want" "$(g16_lib check_dep excalidraw-renderer)"
+  expect_eq "16 ${g16_v}: the teardown reads the venv on disk as present" \
+    "yes" "$(g16_lib dep_teardown_state excalidraw-renderer)"
+  G16_V_ONLY="$TMP/g16-${g16_v}-only.txt"
+  printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:excalidraw-renderer > "$G16_V_ONLY" 2>&1
+  expect_eq "16 ${g16_v} --only: the venv is named, with its rm -rf plan" \
+    "yes" "$(g16_pair "$G16_V_ONLY" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+  expect_absent "16 ${g16_v} --only: …never 'not knowable'" "not knowable" "$(cat "$G16_V_ONLY")"
+  expect_eq "16 ${g16_v} --only: …counted neither removed nor clean (the tally reads 0 0)" \
+    "0 0" "$(g16_tally "$G16_V_ONLY")"
+  expect_eq "16 ${g16_v} --only: …and named to remove by hand" "excalidraw-renderer" "$(g16_byhand "$G16_V_ONLY")"
+  g16_alone "$g16_v"
+  G16_V_ALL="$TMP/g16-${g16_v}-all.txt"
+  printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_V_ALL" 2>&1
+  expect_eq "16 ${g16_v} --all: the venv is named, with its rm -rf plan" \
+    "yes" "$(g16_pair "$G16_V_ALL" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+  expect_absent "16 ${g16_v} --all: …never 'already clean'" "this machine is already clean" "$(cat "$G16_V_ALL")"
+  expect_eq "16 ${g16_v} --all: …named to remove by hand" "excalidraw-renderer" "$(g16_byhand "$G16_V_ALL")"
+  expect_eq "16 ${g16_v} --all: …nothing was called" "" "$(g16_acts)"
+  expect_eq "16 ${g16_v} --all: …and the venv is byte for byte as it was" "$G16_V_BEFORE" "$(g16_snap)"
+done
+
+g16_alone venv-none
+expect_eq "16 no venv: the teardown reads it absent" "no" "$(g16_lib dep_teardown_state excalidraw-renderer)"
+G16_V_NONE="$TMP/g16-venv-none-only.txt"
+printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:excalidraw-renderer > "$G16_V_NONE" 2>&1
+expect_contains "16 no venv --only: the row reports not installed" \
+  "excalidraw-renderer (not installed) — already clean" "$(cat "$G16_V_NONE")"
+expect_eq "16 no venv --only: …and is not named" \
+  "no" "$(g16_pair "$G16_V_NONE" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+
+# ── T85's mutants: the old `return 0` and the old `unknown`, each in a doctored copy ──
+G16_M1="$TMP/payload-g16-t85-return0"
+rm -rf "$G16_M1"; cp -R "$PAYLOAD" "$G16_M1"
+cat >> "$G16_M1/scripts/lib/deps.sh" <<'MUT'
+eval "_g16_t85_$(declare -f remove_dep)"
+remove_dep() {
+  if [ "$(dep_field "$1" install_fn_or_check)" = pnpm-store ]; then
+    echo "$(_dep_indent)${1}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
+    return 0
+  fi
+  _g16_t85_remove_dep "$@"
+}
+MUT
+expect_true "16 mutant return 0: the doctored library still parses" bash -n "$G16_M1/scripts/lib/deps.sh"
+g16_alone motion
+G16_M1_OUT="$TMP/g16-t85-return0.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G16_M1" run_payload "$G16_M1/scripts/remove.sh" --only tool:motion > "$G16_M1_OUT" 2>&1
+expect_contains "16 mutant return 0: the mutant run reached the pnpm-store line" "lives in the shared pnpm store" \
+  "$(cat "$G16_M1_OUT")"
+expect_eq "16 mutant return 0: …and the tally extractor sees it counted removed" "1 0" "$(g16_tally "$G16_M1_OUT")"
+
+G16_M2="$TMP/payload-g16-t85-unknown"
+rm -rf "$G16_M2"; cp -R "$PAYLOAD" "$G16_M2"
+cat >> "$G16_M2/scripts/lib/deps.sh" <<'MUT'
+dep_teardown_state() {
+  local name="${1:-}" raw
+  if [ "$(dep_field "$name" install_fn_or_check)" = "statusline" ]; then
+    if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
+    return 0
+  fi
+  raw="$(check_dep "$name")" || return 1
+  raw="${raw#present=}"
+  echo "${raw%%|*}"
+}
+MUT
+expect_true "16 mutant unknown: the doctored library still parses" bash -n "$G16_M2/scripts/lib/deps.sh"
+g16_alone venv-stale
+G16_M2_OUT="$TMP/g16-t85-unknown.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G16_M2" run_payload "$G16_M2/scripts/remove.sh" --only tool:excalidraw-renderer \
+  > "$G16_M2_OUT" 2>&1
+expect_contains "16 mutant unknown: the mutant run reached the tools item and called the venv not knowable" \
+  "excalidraw-renderer: presence is not knowable" "$(cat "$G16_M2_OUT")"
+expect_eq "16 mutant unknown: …and the pair extractor sees it unnamed" \
+  "no" "$(g16_pair "$G16_M2_OUT" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+
+# ── T88: the playwright browser, alone on the machine ──
+# `ms-playwright` is one cache every project's Playwright shares, so the by-hand
+# line names Playwright's own uninstall (the browsers of the version it runs) and
+# says the cache is shared; no door prints `rm -rf` over it. Nothing here can
+# answer yes: `--only` reads /dev/null and the `--all` page reads `n`.
+g16_pw_alone() {
+  fresh_home
+  : > "${STATE}/npm-global"; : > "${STATE}/mcp"
+  mkdir -p "${G16_PW_CACHE}/chromium-1187"
+  : > "${G16_PW_CACHE}/chromium-1187/INSTALLATION_COMPLETE"
+  : > "$CALLS"
+}
+# The line printed right under <name>'s "present" line, its lead-in taken off.
+g16_byhand_line() {  # <file> <name>
+  local want1="  ${2}: present — bionic has no record that it installed it, so it is left in place." line prev=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$prev" = "$want1" ] && { printf '%s' "${line#    remove it by hand with: }"; return 0; }
+    prev="$line"
+  done < "$1"
+  return 0
+}
+g16_npx_calls() { grep '^npx ' "$CALLS" 2>/dev/null; return 0; }
+
+expect_eq "16 playwright: the stub npx is the npx every door reaches" "${BIN}/npx" \
+  "$(env -i PATH="$BIN" bash -c 'command -v npx')"
+g16_pw_alone
+G16_PW_BEFORE="$(g16_snap)"
+expect_eq "16 playwright alone: the teardown reads the browser cache as present" \
+  "yes" "$(g16_lib dep_teardown_state playwright-chromium)"
+G16_PW_ONLY="$TMP/g16-pw-only.txt"
+run_payload "$REMOVE_SH" --only tool:playwright-chromium < /dev/null > "$G16_PW_ONLY" 2>&1
+expect_eq "16 playwright --only: remove exits 0" "0" "$?"
+expect_eq "16 playwright --only: the two lines, the by-hand one byte for byte" \
+  "yes" "$(g16_pair "$G16_PW_ONLY" playwright-chromium "$(g16_plan playwright-chromium)")"
+G16_PW_LINE="$(g16_byhand_line "$G16_PW_ONLY" playwright-chromium)"
+expect_contains "16 playwright --only: the by-hand line names Playwright's own uninstall" \
+  "npx --yes playwright@latest uninstall" "$G16_PW_LINE"
+expect_contains "16 playwright --only: …and says the cache is shared" "cache is shared" "$G16_PW_LINE"
+expect_absent "16 playwright --only: …and never prints rm -rf" "rm -rf" "$G16_PW_LINE"
+expect_absent "16 playwright --only: …nor the cache's name" "ms-playwright" "$G16_PW_LINE"
+expect_absent "16 playwright --only: …and holds no quote a pasted line would leave open" "'" "$G16_PW_LINE"
+expect_absent "16 playwright --only: no line of the door removes the cache whole" \
+  "rm -rf $(g16_home "$G16_PW_CACHE")" "$(cat "$G16_PW_ONLY")"
+expect_eq "16 playwright --only: …nothing asks to remove it" "0" "$(g16_asks "$G16_PW_ONLY" playwright-chromium)"
+expect_eq "16 playwright --only: …counted neither removed nor clean (the tally reads 0 0)" \
+  "0 0" "$(g16_tally "$G16_PW_ONLY")"
+expect_eq "16 playwright --only: …named to remove by hand" "playwright-chromium" "$(g16_byhand "$G16_PW_ONLY")"
+expect_eq "16 playwright --only: …npx was never called" "" "$(g16_npx_calls)"
+expect_eq "16 playwright --only: …and the cache is byte for byte as it was" "$G16_PW_BEFORE" "$(g16_snap)"
+
+g16_pw_alone
+G16_PW_ALL="$TMP/g16-pw-all.txt"
+printf 'n\n' | run_payload "$REMOVE_SH" --all > "$G16_PW_ALL" 2>&1
+expect_eq "16 playwright --all: remove exits 0" "0" "$?"
+expect_eq "16 playwright --all: the two lines, the by-hand one byte for byte" \
+  "yes" "$(g16_pair "$G16_PW_ALL" playwright-chromium "$(g16_plan playwright-chromium)")"
+expect_absent "16 playwright --all: …it is not on the page" "• remove playwright-chromium" "$(cat "$G16_PW_ALL")"
+expect_absent "16 playwright --all: …no line of the door removes the cache whole" \
+  "rm -rf $(g16_home "$G16_PW_CACHE")" "$(cat "$G16_PW_ALL")"
+expect_eq "16 playwright --all: …named to remove by hand" "playwright-chromium" "$(g16_byhand "$G16_PW_ALL")"
+expect_eq "16 playwright --all: …npx was never called" "" "$(g16_npx_calls)"
+expect_eq "16 playwright --all: …nothing was asked to remove anything" "" "$(g16_acts)"
+expect_eq "16 playwright --all: …and the cache is byte for byte as it was" "$G16_PW_BEFORE" "$(g16_snap)"
+env -i PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_PLAYWRIGHT_CACHE="$TMP/g16-pw-probe" npx --version >/dev/null 2>&1
+expect_ne "16 playwright: the npx call extractor reads a call the recorder logged" "" "$(g16_npx_calls)"
+
+# One line, no wider than the pnpm line it is modelled on (both from the interactive run).
+G16_PW_INT="$(g16_byhand_line "$G16_INT" playwright-chromium)"
+G16_PNPM_INT="$(g16_byhand_line "$G16_INT" motion)"
+expect_ne "16 playwright width: the interactive run printed the pnpm line (the width extractor reads)" "" "$G16_PNPM_INT"
+expect_true "16 playwright width: the playwright line is no wider than the pnpm line" \
+  test "${#G16_PW_INT}" -gt 0 -a "${#G16_PW_INT}" -le "${#G16_PNPM_INT}"
+
+# ── T88's mutant: the old arm, `rm -rf` over the whole cache, in a doctored copy ──
+G16_M3="$TMP/payload-g16-t88-rmrf"
+rm -rf "$G16_M3"; cp -R "$PAYLOAD" "$G16_M3"
+cat >> "$G16_M3/scripts/lib/deps.sh" <<'MUT'
+eval "_g16_t88_$(declare -f _dep_remove_plan)"
+_dep_remove_plan() {
+  if [ "$(dep_field "$1" install_fn_or_check)" = playwright-browser ]; then
+    echo "rm -rf $(_dep_playwright_cache)"; return 0
+  fi
+  _g16_t88__dep_remove_plan "$@"
+}
+MUT
+expect_true "16 mutant rm -rf: the doctored library still parses" bash -n "$G16_M3/scripts/lib/deps.sh"
+g16_pw_alone
+G16_M3_OUT="$TMP/g16-t88-rmrf.txt"
+FH_PAYLOAD="$G16_M3" run_payload "$G16_M3/scripts/remove.sh" --only tool:playwright-chromium < /dev/null \
+  > "$G16_M3_OUT" 2>&1
+expect_eq "16 mutant rm -rf: the mutant run named the row with the old line" \
+  "yes" "$(g16_pair "$G16_M3_OUT" playwright-chromium "rm -rf $(g16_home "$G16_PW_CACHE")")"
+expect_eq "16 mutant rm -rf: …and the byte-for-byte row reads it red" \
+  "no" "$(g16_pair "$G16_M3_OUT" playwright-chromium "$(g16_plan playwright-chromium)")"
+
+# ── T88: a store entry is read where it begins, never as the tail of a longer name ──
+# The v11 index holds `name@version` strings; `framer-motion@…` is not motion, and
+# `undici-types@…` is not types. A scoped name matches by its whole `@scope/name`.
+g16_store() {  # <entry>... — a fresh home whose pnpm store index holds exactly these entries
+  fresh_home
+  : > "${STATE}/npm-global"; : > "${STATE}/mcp"
+  mkdir -p "$G16_PNPM_STORE"
+  { printf 'some binary-ish preamble\n'; printf '%s\n' "$@"; printf 'more\n'; } > "${G16_PNPM_STORE}/index.db"
+  : > "$CALLS"
+}
+g16_store framer-motion@12.0.0
+expect_eq "16 store framer-motion only: motion reads absent" "no|unknown" "$(g16_lib _dep_check_pnpm_store motion)"
+expect_eq "16 store framer-motion only: …the teardown reads it absent" "no" "$(g16_lib dep_teardown_state motion)"
+G16_FR_DOC="$TMP/g16-framer-doctor.txt"
+run_payload "$DOCTOR_SH" < /dev/null > "$G16_FR_DOC" 2>&1
+expect_eq "16 store framer-motion only: …doctor reads motion not installed" "no" "$(dep_present "$G16_FR_DOC" motion)"
+G16_FR_ONLY="$TMP/g16-framer-only.txt"
+run_payload "$REMOVE_SH" --only tool:motion < /dev/null > "$G16_FR_ONLY" 2>&1
+expect_contains "16 store framer-motion only: …remove reports motion not installed" \
+  "motion (not installed) — already clean" "$(cat "$G16_FR_ONLY")"
+expect_eq "16 store framer-motion only: …and does not name it" \
+  "no" "$(g16_pair "$G16_FR_ONLY" motion "$(g16_plan motion)")"
+g16_store motion@12.42.2
+expect_eq "16 store motion: motion reads present, its version read" "yes|12.42.2" "$(g16_lib _dep_check_pnpm_store motion)"
+G16_MO_DOC="$TMP/g16-motion-doctor.txt"
+run_payload "$DOCTOR_SH" < /dev/null > "$G16_MO_DOC" 2>&1
+expect_eq "16 store motion: …doctor reads it installed (the row extractor reads)" "yes" "$(dep_present "$G16_MO_DOC" motion)"
+g16_store framer-motion@13.0.0 motion@12.42.2
+expect_eq "16 store both: motion reads present with its own version, not framer-motion's" \
+  "yes|12.42.2" "$(g16_lib _dep_check_pnpm_store motion)"
+g16_store undici-types@7.18.2
+expect_eq "16 store undici-types only: types reads absent" "no|unknown" "$(g16_lib _dep_check_pnpm_store types)"
+g16_store @scope/pkg@1.2.3
+expect_eq "16 store scoped: a scoped name reads present by its whole name" \
+  "yes|1.2.3" "$(g16_lib _dep_check_pnpm_store @scope/pkg)"
+expect_eq "16 store scoped: …and its bare name does not" "no|unknown" "$(g16_lib _dep_check_pnpm_store pkg)"
+g16_store lodashxget@4.4.2
+expect_eq "16 store dotted: a dot in the name is a dot, not any byte" \
+  "no|unknown" "$(g16_lib _dep_check_pnpm_store lodash.get)"
+g16_store lodash.get@4.4.2
+expect_eq "16 store dotted: …and the dotted name itself reads present" \
+  "yes|4.4.2" "$(g16_lib _dep_check_pnpm_store lodash.get)"
+
+# ── T88's mutant: the anchor taken off the match, in a doctored copy ──
+G16_M4="$TMP/payload-g16-t88-unanchored"
+rm -rf "$G16_M4"; cp -R "$PAYLOAD" "$G16_M4"
+G16_ANCHOR='(^|[^A-Za-z0-9@/_.-])'
+G16_M4_SRC="$(cat "$G16_M4/scripts/lib/deps.sh")"
+expect_contains "16 mutant unanchored: the library carries the anchor the mutant removes" "$G16_ANCHOR" "$G16_M4_SRC"
+printf '%s\n' "${G16_M4_SRC//"$G16_ANCHOR"/}" > "$G16_M4/scripts/lib/deps.sh"
+expect_absent "16 mutant unanchored: …and the doctored copy no longer does" "$G16_ANCHOR" \
+  "$(cat "$G16_M4/scripts/lib/deps.sh")"
+expect_true "16 mutant unanchored: the doctored library still parses" bash -n "$G16_M4/scripts/lib/deps.sh"
+g16_store framer-motion@12.0.0
+expect_eq "16 mutant unanchored: the framer-motion row reads motion present again" "yes|12.0.0" \
+  "$(env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
+       bash -c '. "$1"; _dep_check_pnpm_store motion' _ "$G16_M4/scripts/lib/deps.sh" 2>/dev/null)"
+
+# ── standalone: unchanged ──
+g16_plant
+mkdir -p "$TMP/g16-standalone"; cp "$REMOVE_SH" "$TMP/g16-standalone/remove.sh"
+G16_SA="$TMP/g16-standalone.txt"
+printf 'n\n' | run_payload "$TMP/g16-standalone/remove.sh" > "$G16_SA" 2>&1
+expect_contains "16 standalone: the tools item says the table ships with the payload" \
+  "the dependency table ships with the payload — not available standalone." "$(cat "$G16_SA")"
+expect_eq "16 standalone: …and nothing was called" "" "$(g16_acts)"
+rm -f "${BIN}/notebooklm"
 
 finish

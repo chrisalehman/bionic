@@ -830,6 +830,34 @@ am_probe >/dev/null
 AM_RO_AFTER="$(cd "$TMP" && ls -laR "am-ro-root" "am-ro-home" 2>/dev/null; cat "$AM_ROOT/.claude/settings.json")"
 expect_eq "the probe wrote nothing under the root or the home" "$AM_RO_BEFORE" "$AM_RO_AFTER"
 
+section "Group 6f: detect_rc_claude_proxy — a block the user changed is its own state (wave-27 T77)"
+#
+# The fact is env.sh `rc_state`'s answer: bionic's current lines with the user's own
+# beside them read `yes` and are left; a block bionic wrote earlier, or an empty one,
+# reads `stale`; anything else reads `changed`. Each rc is a file of the suite's own,
+# read with the system tools on the PATH (`markers_regular` needs `cmp`).
+RS='# ─── bionic:rc:start ───'; RE='# ─── bionic:rc:end ───'
+RC_UN='unalias claude 2>/dev/null || true'
+RC_FN='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+rc_probe() {  # <name> <block line…> — the fact for an rc holding that block
+  local f="$TMP/rc-$1"; shift
+  { printf '%s\n' 'export V1=1' "$RS"; [ $# -gt 0 ] && printf '%s\n' "$@"; printf '%s\n' "$RE" 'export V2=2'; } > "$f"
+  R_PATH=/usr/bin:/bin probe_run SHELL=/bin/zsh BIONIC_SHELL_RC="$f" -- detect_rc_claude_proxy
+}
+expect_eq "rc proxy: bionic's two lines are yes" "env:rc-claude-proxy present=yes" "$(rc_probe cur "$RC_UN" "$RC_FN")"
+expect_eq "rc proxy: …with a user's line between them, still yes" "env:rc-claude-proxy present=yes" \
+  "$(rc_probe between "$RC_UN" 'export V9=9' "$RC_FN")"
+expect_eq "rc proxy: the earlier one-line body is stale" "env:rc-claude-proxy present=stale" "$(rc_probe old "$RC_FN")"
+expect_eq "rc proxy: an empty block is stale" "env:rc-claude-proxy present=stale" "$(rc_probe empty)"
+expect_eq "rc proxy: the earlier body with a user's line is changed" "env:rc-claude-proxy present=changed" \
+  "$(rc_probe old-u "$RC_FN" 'export V9=9')"
+expect_eq "rc proxy: bionic's lines swapped are changed" "env:rc-claude-proxy present=changed" \
+  "$(rc_probe swapped "$RC_FN" "$RC_UN")"
+RC_RO_BEFORE="$(shasum -a 256 "$TMP/rc-old-u")"
+expect_eq "rc proxy: the changed rc read again is still changed" "env:rc-claude-proxy present=changed" \
+  "$(R_PATH=/usr/bin:/bin probe_run SHELL=/bin/zsh BIONIC_SHELL_RC="$TMP/rc-old-u" -- detect_rc_claude_proxy)"
+expect_eq "rc proxy: the probe changed no byte of the rc it read" "$RC_RO_BEFORE" "$(shasum -a 256 "$TMP/rc-old-u")"
+
 section "Group 7: read-only is a contract, not an intention"
 #
 # Same wall the rest of detect.sh lives under: fingerprint the inputs, run

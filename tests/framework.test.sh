@@ -204,6 +204,32 @@ expect_empty "expect_empty fails on a non-empty value" "something"
 finish
 PLANT_NEGATIVES
 
+# THE ROW GUARD (wave-27 T80). A suite that cannot trust a row's fixture names a guard in
+# TF_ROW_GUARD; while the guard prints a reason, ok() records the row as a named fail carrying
+# it, so an expect_* row that would have passed on a fixture never made fails by its own name.
+# Unset, naming no function, or silent, ok() is what it always was. The planted suite runs a
+# silent guard, a speaking guard under ok and under expect_eq, a guard that names no function,
+# and the unset twin with the same LOST value set.
+cat > "$SB/tests/p-guard.test.sh" <<'PLANT_GUARD'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+lost_guard() { [ -z "${LOST:-}" ] || printf 'fixture lost: %s' "$LOST"; }
+
+section "a row guard"
+TF_ROW_GUARD=lost_guard
+ok "a row while nothing is lost"
+LOST=repo1
+ok "a row while repo1 is lost"
+expect_eq "an expect_eq row while repo1 is lost" same same
+TF_ROW_GUARD=no_such_function
+ok "a row under a guard that names no function"
+unset TF_ROW_GUARD
+ok "a row with repo1 lost and no guard"
+
+finish
+PLANT_GUARD
+
 # The generic family (S1b): one planted suite whose ONLY assertions are the
 # eleven canonical helpers in their PASSING form, and one whose only assertions
 # are the same eleven in their FAILING form. Together they prove each helper
@@ -503,6 +529,23 @@ expect_eq "6: the counters exist and start at zero without the suite defining th
 expect_eq "6: …and the framework's ok() is what moves them" \
   "p-counters.test.sh: 1/1 passed, 0 failed  sections=1 setup=0" \
   "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-counters\.test\.sh: .*\)$/\1/p')"
+
+plant_run p-guard.test.sh
+expect_eq "6g: a guard that prints a reason turns ok() into a named fail" \
+  "yes" "$(contains "$P_OUT" "FAIL: a row while repo1 is lost
+      fixture lost: repo1")"
+expect_eq "6g: …and an expect_* row under it fails by its own name" \
+  "yes" "$(contains "$P_OUT" "FAIL: an expect_eq row while repo1 is lost
+      fixture lost: repo1")"
+expect_eq "6g: a silent guard leaves the row a pass" \
+  "yes" "$(contains "$P_OUT" "PASS: a row while nothing is lost")"
+expect_eq "6g: a guard naming no function leaves the row a pass" \
+  "yes" "$(contains "$P_OUT" "PASS: a row under a guard that names no function")"
+expect_eq "6g: the unset twin, with the same LOST value set, leaves the row a pass" \
+  "yes" "$(contains "$P_OUT" "PASS: a row with repo1 lost and no guard")"
+expect_eq "6g: …and the tally counts the two guarded rows as failures, the three others as passes" \
+  "p-guard.test.sh: 3/5 passed, 2 failed  sections=1 setup=0" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-guard\.test\.sh: .*\)$/\1/p')"
 
 # ============================================================
 section "6b: the head docblock describes the tree it heads (review-c C-1/C-2)"
@@ -1468,6 +1511,44 @@ expect_eq "16: …and the verdict reads REFUSED" "yes" \
   "$(contains "$W_OUT" "- w-unadopted.test.sh (refused by the adoption wall, never run)")"
 expect_contains "16: --serial refuses it in the same words" \
   "adoption wall: tests/w-unadopted.test.sh never calls finish" "$W_SERIAL_OUT"
+
+# ============================================================
+section "16b: the wall at source time — a suite run ALONE is refused as the runner refuses it (T81)"
+# ============================================================
+#
+# The wall once lived in the runner alone, so a suite typed at a prompt was never asked: a
+# private `ok()` was green at every hand-run and refused only in the full run. The framework now
+# asks the same question of the suite that sources it, before its first row, in the runner's
+# own line. Driven on the SAME planted suites, in the SAME scratch tree, the runner refused
+# above — so "the runner's line" is read off the runner's own output, not retyped here.
+W_ALONE_MARKS="$SB/wall-alone-marks"
+mkdir -p "$W_ALONE_MARKS"
+w_alone() {  # w_alone <suite-basename> -> sets WA_OUT / WA_RC
+  WA_OUT="$( cd "$W_TREE" && S10_MARKS="$W_ALONE_MARKS" bash "tests/$1" 2>&1 )"
+  WA_RC=$?
+}
+for WA_SUITE in w-ok w-unadopted; do
+  WA_LINE="$(printf '%s\n' "$W_OUT" | grep -F "adoption wall: tests/${WA_SUITE}.test.sh " | head -1)"
+  expect_nonempty "16b: the runner's refusal line for ${WA_SUITE} was read (the extractor works)" "$WA_LINE"
+  w_alone "${WA_SUITE}.test.sh"
+  expect_eq "16b: ${WA_SUITE} run alone exits non-zero" "1" "$WA_RC"
+  expect_eq "16b: …with the runner's line, verbatim" "yes" \
+    "$(printf '%s\n' "$WA_OUT" | grep -qxF -- "$WA_LINE" && echo yes || echo no)"
+  expect_eq "16b: …before its first row (its marker was never written)" "no" \
+    "$([ -f "$W_ALONE_MARKS/${WA_SUITE}.ran" ] && echo yes || echo no)"
+done
+# PAIRED POSITIVE, same tree, same driver: a suite the runner launched runs alone too.
+w_alone w-local.test.sh
+expect_eq "16b: a suite the wall admits runs alone (exit 0)" "0" "$WA_RC"
+expect_eq "16b: …and wrote its marker, so an absent marker above is a refusal" "yes" \
+  "$([ -f "$W_ALONE_MARKS/w-local.ran" ] && echo yes || echo no)"
+expect_absent "16b: …and no adoption line was printed for it" "adoption wall:" "$WA_OUT"
+# ONE CHECK, TWO CALLERS: the line is written in one place, the framework, and the runner
+# prints what the framework hands it.
+expect_eq "16b: the framework writes the refusal line (the extractor finds it there)" "1" \
+  "$(grep -cF "'adoption wall: " "$FRAMEWORK")"
+expect_eq "16b: …and the runner writes none of its own" "0" \
+  "$(grep -cF "'adoption wall: " "$REPO/tests/run.sh")"
 
 # ============================================================
 setup_section "plant the advisory scratch suites (T24)"

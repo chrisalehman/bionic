@@ -467,7 +467,7 @@ dp_not_checked() {  # <arm> <what it needs>
 }
 
 # ==================================================== THE COMBINED PREFLIGHT
-# (epic-16 wave-02, R5/AC-4; Synthesis field report §3.)
+# (epic-16 wave-02, R5/AC-4; a field report §3.)
 #
 # WHAT THIS REPLACED. Every branch above used to end in `deny`, and the fix it
 # named was a command the operator ran by hand: refused, run the probe, retry,
@@ -508,7 +508,7 @@ if ! attested; then
   fi
 
   # Run it AT THE PINNED ROOT and with THIS dispatch's session key, rather than
-  # letting it inherit the shell. Both are the Synthesis field case read directly:
+  # letting it inherit the shell. Both are the field case read directly:
   # the attestation that had to be redone was taken against a root derived from the
   # working directory, and an attestation keyed to anything but the session whose
   # dispatch this is would be one this gate then refuses to read.
@@ -1647,7 +1647,8 @@ agent is gone, frees the name — a landing marker alone does not."
 fi
 
 # THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap, which
-# `brief_validate_fields` reads off the same role below.
+# `brief_validate_fields` reads off the same role below. Nothing else goes in: the Files: reader
+# reads an item by its own text, and this hook lists no directory for it (wave-27 T42, A-orch-46).
 LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
 
 field_of() {  # <kind>
@@ -2116,6 +2117,252 @@ Then retry the dispatch."
   fi
 fi
 
+# ======================================== A READER'S QUESTIONS (wave-27 T15; REQ-5, REQ-1, D5)
+#
+# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor`, `bionic:critic` and
+# `bionic:reviewer` answer the reading questions `evidence`, `adversarial` and `structure`, and
+# the plan's rigor deals each question to one of them (`facts_owed`, lib/proof.sh). A reader's
+# brief names its own on a `Questions: <q>[, <q>]` line, which `lift_contract_fields` reads as a
+# set. This arm refuses a reader brief with no such line, a word outside the three, and a set
+# that is not exactly what the bound plan's rigor deals that role — so the role a question was
+# dealt to is the role that reads it, and a rigor that deals a role nothing dispatches it for
+# nothing. The admitted set goes on the row as `questions=`, and execution-recorder.sh pushes
+# that set's checks files at agent start.
+#
+# A PREDICATE OVER WHAT IT IS HANDED (the freeze, .claude/rules/hook-authoring.md). Rigor and
+# scale are the bound plan's frontmatter, from the plan this hook already reads; `facts_owed` is a
+# pure function of the two. No git, no roster. With no bound plan the line is still required and
+# the dealing is not checked; a bound plan whose rigor or scale deals nothing says `not checked`.
+#
+# EVERY OTHER ROLE IS UNTOUCHED: the line is not required, and if present it is neither judged
+# nor recorded, so nothing is pushed to that agent.
+DP_QUESTIONS=""
+case "$DP_SUBAGENT" in
+  bionic:auditor|bionic:critic|bionic:reviewer)
+    _q_set="$(brief_field "$LIFTED" questions)"
+    _q_bad="$(brief_field "$LIFTED" questions_bad)"
+    _q_dup="$(brief_field "$LIFTED" questions_dup)"
+    _q_rigor=""; _q_scale=""; _q_owed=""; _q_dealt=""; _q_dealable=""; _q_admitted=""
+    if [ -n "$PLAN" ]; then
+      if ! declare -F facts_owed >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
+        # shellcheck source=/dev/null
+        . "$BIONIC_LIB/proof.sh"
+      fi
+      _q_rigor="$(plan_frontmatter_get "$PLAN" rigor)"
+      _q_scale="$(plan_frontmatter_get "$PLAN" scale)"
+      if declare -F facts_owed >/dev/null 2>&1 && _q_owed="$(facts_owed "$_q_rigor" "$_q_scale")"; then
+        _q_dealable=1
+        _q_dealt="$(printf '%s\n' "$_q_owed" | awk -F'\t' -v r="$DP_SUBAGENT" \
+          '$1 == "review" && $3 == r && $4 == "piece" { printf "%s%s", (n++ ? "," : ""), $2 }')"
+      else
+        dp_not_checked "the Questions: dealing" "a plan rigor and scale that facts_owed deals"
+      fi
+    fi
+    # The holder of each question, one line apiece, for the refusal details.
+    _q_holders=""
+    for _q_q in evidence adversarial structure; do
+      _q_h="$(printf '%s\n' "$_q_owed" | awk -F'\t' -v q="$_q_q" \
+        '$1 == "review" && $2 == q && $4 == "piece" { print $3; exit }')"
+      [ -n "$_q_h" ] && _q_holders="${_q_holders}    ${_q_q} is dealt to ${_q_h}
+"
+    done
+    _q_fixline="Questions: <q>[, <q>]"
+    [ -n "$_q_dealt" ] && _q_fixline="Questions: ${_q_dealt//,/, }"
+    # THE LABEL IS GIVEN ONCE (wave-27 T49; review pass 24). Two lines, even with the same set,
+    # are refused naming both, since the second would otherwise be dropped in silence.
+    if [ -n "$_q_dup" ]; then
+      # THE TRUE COUNT (wave-27 T57; review pass 35 N2): the field is cut at a whole number, so
+      # the count is the raw line's, and a list cut short says how many more it left out.
+      read -r -a _q_arr <<< "$_q_dup"
+      read -r -a _q_all <<< "$(printf '%s\n' "$LIFTED" | sed -n 's/^questions_dup=//p' | head -1)"
+      _q_n=${#_q_all[@]}; _q_k=${#_q_arr[@]}; _q_nums=""
+      [ "$_q_n" -ge "$_q_k" ] || _q_n=$_q_k
+      for _q_i in "${!_q_arr[@]}"; do
+        if [ "$_q_i" -eq 0 ]; then _q_nums="${_q_arr[0]}"
+        elif [ "$_q_k" -eq "$_q_n" ] && [ "$_q_i" -eq $((_q_k - 1)) ]; then _q_nums="${_q_nums} and ${_q_arr[$_q_i]}"
+        else _q_nums="${_q_nums}, ${_q_arr[$_q_i]}"; fi
+      done
+      [ "$_q_k" -lt "$_q_n" ] && _q_nums="${_q_nums} and $((_q_n - _q_k)) more"
+      dp_finding "${DP_SUBAGENT} has ${_q_n} Questions: lines" "keep one Questions: line" \
+        "The brief carries the Questions: label more than once, on lines ${_q_nums}:
+    Role: ${DP_SUBAGENT}
+
+A reader's questions are one set, read off one line. A second line is not merged into the
+first and not ignored, so the brief is refused rather than guessed at. A line inside a
+fenced block is an example, and does not count.
+
+Fix: keep one line, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    fi
+    if [ -n "$_q_bad" ]; then
+      dp_finding "unknown question: $(bionic_trunc "${_q_bad%% *}" 16)" "use evidence/adversarial/structure" \
+        "The Questions: line names a word that is not a reading question:
+    ${_q_bad}
+
+A reader answers one or more of three questions: evidence, adversarial and structure. Its
+checks are pushed to it at start by name, so a word outside the three is a question no
+reader is held to.
+
+Fix: name only the three questions, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    fi
+    if [ -n "$_q_dealable" ] && [ -z "$_q_dealt" ]; then
+      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: nothing" "dispatch its holder" \
+        "The plan's rigor deals this reader no question, so there is nothing to dispatch it for:
+    Role:  ${DP_SUBAGENT}
+    Given: ${_q_set:-(no Questions: line)}
+    Dealt: nothing at rigor ${_q_rigor}, scale ${_q_scale}
+
+Each question is read by the one role the rigor deals it to:
+${_q_holders}
+Fix: dispatch the role that holds the question, with its own Questions: line.
+
+Then retry the dispatch."
+    elif [ -z "$_q_set" ] && [ -z "$_q_bad" ]; then
+      _q_why="With no bound plan the dealing is not checked: name the questions this reader answers,
+from evidence, adversarial and structure."
+      [ -n "$PLAN" ] && _q_why="The bound plan's rigor (${_q_rigor:-none}) and scale (${_q_scale:-none}) deal nothing, so the
+dealing is not checked: name the questions this reader answers, from evidence,
+adversarial and structure."
+      [ -n "$_q_dealt" ] && _q_why="The plan's rigor (${_q_rigor}) deals this role the set below, and its checks are pushed
+to it at start from that line."
+      dp_finding "${DP_SUBAGENT} names no Questions: line" "add the Questions: line" \
+        "A reader is dispatched for its questions, and this brief names none:
+    Role: ${DP_SUBAGENT}
+
+${_q_why}
+
+Fix: add this line to the brief, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
+      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: ${_q_dealt}" "use that set" \
+        "The Questions: line names a set the plan's rigor does not deal this reader:
+    Role:  ${DP_SUBAGENT}
+    Given: ${_q_set//,/, }
+    Dealt: ${_q_dealt//,/, } (rigor ${_q_rigor}, scale ${_q_scale})
+
+Each question is read by the one role the rigor deals it to:
+${_q_holders}
+Fix: write the dealt set, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    else
+      DP_QUESTIONS="$_q_set"; _q_admitted=1
+    fi
+    # A READER NAMES A RECORD FOR EACH QUESTION IT IS DEALT (wave-27 T49, A-orch-83; review pass 28
+    # B1). It writes one record per question, and `proof-add review` takes a record only if it is
+    # the reader's own roster row `deliverable=` or one of its `files=`. A critic dealt two
+    # questions with one Expected artifact: and no Files: was admitted here and then could not
+    # register its second reading. So the DISTINCT paths of the artifact and the Files: line
+    # (a quoted path as its stripped form, a leading ./ aside) must number at least the questions.
+    # The count needs no dealing, so it holds with no bound plan too. It is judged once the set
+    # itself is admitted, so a brief with a wrong set is told that first and not twice. The row is
+    # unchanged.
+    #
+    # A RECORD IS A PATH UNDER THE RECORD ROOT (wave-27 T57; review pass 35 N1). Counting distinct
+    # strings admitted a brief whose second "record" was a scratch file, a directory, a path
+    # outside the tree or the artifact spelled again (`x/../a.md`, `//`), each of which the fact
+    # verb refuses. So a path counts only when it sits under `<docs-root>/record/` (lib/roots.sh
+    # `docs_root`, the one the fact verb resolves, loaded through run.sh) after `.`, `..` and
+    # doubled slashes are resolved, a relative path read from the project root; it
+    # does not end in `/`; and it is compared in that resolved form. Any other path may stay on
+    # Files: (a scratch file) and is not a record.
+    #
+    # AN ABSOLUTE PATH IS PLACED AS THE FACT VERB PLACES IT (A-orch-101). `proof-add review` reads a
+    # record's directory with a logical `cd` and then `pwd -P`, so `..` is folded in the text before
+    # the physical read, and the reader exam's `/var/…/s1/.bionic/docs/record/…` is its project's
+    # `/private/var/…` record. Here a path's longest existing directory is read the same way and
+    # the rest stays text, and the record root the same way, so the wall and the verb give one
+    # answer for one path: a symlinked directory that lands outside the root is no record, and a
+    # record directory the reader has not made yet still is. ONE RULE FOR EVERY PATH (the A-T57.11
+    # ruling): a relative path is anchored at the project root first and then placed the same way,
+    # so a link under record/ that leads out of it is no record whichever way the path is spelt.
+    #
+    # LINEAR IN THE PATH (wave-27 T72; review pass 49 S2). The walk goes forward from `/` and stops
+    # at the first segment that is not a directory, since no longer prefix can be one, so a missing
+    # segment costs nothing: walking back from the end cost a test and a copy per missing segment,
+    # and twenty paths of 2,500 took a reader's dispatch to 17 s, past this hook's 15 s
+    # registration. A directory the wall cannot enter places nothing, and the path is no record.
+    _dp_rec_place() {  # <path> -> the path anchored at the root, its longest existing directory physical
+      local p="$1" d="" rest seg phys
+      case "$p" in /*) : ;; *) p="$BIONIC_ROOT/$p" ;; esac
+      rest="${p#/}"
+      while :; do
+        case "$rest" in */*) seg="${rest%%/*}" ;; *) break ;; esac
+        [ -d "$d/$seg" ] || break
+        d="$d/$seg"; rest="${rest#*/}"
+      done
+      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" || return 1
+      printf '%s\n' "${phys%/}/$rest"
+    }
+    # A RECORD IS A REGULAR FILE, OR A PATH NOT THERE YET (wave-27 T72; review pass 49 S1). The verb
+    # takes only a regular file that is not a link, so a path that exists at dispatch as a
+    # directory named without its slash, a symlink, a FIFO or a device is no record, and neither is
+    # a path over 1,024 bytes, measured as bytes. A path that does not exist yet still is one.
+    _dp_rec_candidate() {  # <path> -> its placing when it may be a record, nothing when it is not
+      local p="$1" a LC_ALL=C
+      [ "${#p}" -le 1024 ] || return 0
+      case "$p" in /*) a="$p" ;; *) a="$BIONIC_ROOT/$p" ;; esac
+      [ -L "$a" ] && return 0
+      [ -e "$a" ] && [ ! -f "$a" ] && return 0
+      _dp_rec_place "$p"
+    }
+    if [ -n "${_q_admitted:-}" ]; then
+      _q_nq="$(printf '%s' "$_q_set" | awk -F, '{ print NF }')"
+      _q_rroot="$BIONIC_ROOT/.bionic/docs/record"
+      if declare -F docs_root >/dev/null 2>&1; then
+        _q_dr="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_q_dr" ] && _q_rroot="$_q_dr/record"
+      fi
+      _q_nr="$(printf '%s\n%s\n' "$(brief_field "$LIFTED" deliverable)" "$(brief_field "$LIFTED" files | tr ',' '\n')" \
+        | while IFS= read -r _q_p; do [ -n "$_q_p" ] && _dp_rec_candidate "$_q_p"; done \
+        | awk -v root="$BIONIC_ROOT" -v rr="$(_dp_rec_place "$_q_rroot")" '
+          function resolve(p,   n, i, seg, out, k, dir) {
+            if (p !~ /^\//) p = root "/" p
+            dir = (p ~ /\/(\.\.?)?$/)
+            n = split(p, seg, "/"); k = 0
+            for (i = 1; i <= n; i++) {
+              if (seg[i] == "" || seg[i] == ".") continue
+              if (seg[i] == "..") { if (k > 0) k--; continue }
+              out[++k] = seg[i]
+            }
+            p = ""; for (i = 1; i <= k; i++) p = p "/" out[i]
+            return (p == "" ? "/" : p) (dir ? "/" : "")
+          }
+          BEGIN { if (rr != "") rr = resolve(rr) }
+          $0 == "" || rr == "" { next }
+          { r = resolve($0) }
+          r ~ /\/$/ || index(r, rr "/") != 1 { next }
+          !seen[r]++ { n++ }
+          END { print n + 0 }')"
+      if [ "$_q_nr" -lt "$_q_nq" ]; then
+        _q_pl="s"; [ "$_q_nr" -eq 1 ] && _q_pl=""
+        _q_ql="s"; [ "$_q_nq" -eq 1 ] && _q_ql=""
+        dp_finding "dealt ${_q_nq} question${_q_ql}, names ${_q_nr} record${_q_pl}" "one Files: record per question" \
+          "A reader writes one record per question it is dealt, and this brief names fewer records:
+    Role:      ${DP_SUBAGENT}
+    Questions: ${_q_set//,/, }
+    Records:   ${_q_nr} (each path under ${_q_rroot#"$BIONIC_ROOT"/}/, the Expected artifact: and the Files: line, counted once)
+
+The fact verb (proof-add review) takes a record only from the reader's own roster row: its
+deliverable= or one of its files=. A record the brief never named is one the reader cannot
+register, and amend cannot add it once the reader has closed.
+
+Fix: list one record per question under Files:, the Expected artifact: among them —
+    Files: path/one.md, path/two.md
+
+Then retry the dispatch."
+      fi
+    fi
+    ;;
+esac
+
 # ============================== THE CONTRACT GRAMMAR'S CHECKS (wave-20 T6; REQ-4, D4, Δ10)
 #
 # ONE GRAMMAR, THREE DOORS. The arms that judge Files:, Suites: and Re-executes: — a literal
@@ -2146,6 +2393,211 @@ SUITES_SOURCE="$BRIEF_SUITES_SOURCE"
 if [ "$DP_BRIEF_RC" -eq 2 ]; then
   dp_not_checked "full-run" "a suite set"
   dp_refuse_findings
+fi
+
+# ============================================== A DECLARED DEBT (wave-27 T31; REQ-14, D23)
+#
+# A ROW MAY LAND RED BY DESIGN, ON ONE SUITE, UNTIL ONE NAMED BLOCKER CLEARS. A brief declares it
+# on two lines of their own, `Lands-red: <suite> until <ext:slug | approval:name>` and
+# `Red-evidence: <path under record/>`, and this arm is the declaration's ONE WRITER: it records
+# both on the row as `lands_red=` and `red_evidence=`, `amend` refuses to add either, and `land`
+# honours a red last run of exactly that suite only on a row that carries them (lib/worktree.sh).
+# It refuses a declaration with no evidence line, a suite outside the set this row may run (the
+# set the contract checks above derived, so it sits below them), and a token of any other shape.
+# A PREDICATE OVER WHAT IT IS HANDED: the lift, the suite set and the bound plan's `## Tasks` (read
+# by units.sh, as the approval and floor walls above read it); no git, no roster.
+#
+# AND (wave-27 T67; review pass 46 B4, S1, S4, N1, N2, N3): one declaration per brief; one suite
+# FILE, `<name>.test.sh`, never the full-suite runner however it is spelled; an `approval:<name>`
+# token only when a row of the bound plan reads it (the names `approve` accepts) and no integrate row
+# waits on it, for a debt must clear before integration; and evidence that is a file under the run's
+# record root, placed as the fact verb places a record.
+DP_LANDS_RED=""; DP_RED_EVIDENCE=""
+_lr_line="$(brief_field "$LIFTED" lands_red)"
+if [ -n "$_lr_line" ]; then
+  _lr_ev="$(brief_field "$LIFTED" red_evidence)"
+  read -r _lr_suite _lr_until _lr_tok _lr_more <<DP_LR
+$_lr_line
+DP_LR
+  _lr_suite="${_lr_suite##*/}"; _lr_ap=""
+  _lr_n="$(brief_field "$LIFTED" lands_red_n)"
+  if [ -n "$_lr_n" ]; then
+    dp_finding "the brief has ${_lr_n} Lands-red: lines" "keep one Lands-red: line" \
+      "A row lands red on ONE suite until ONE blocker clears, and this brief declares ${_lr_n}:
+    First: Lands-red: ${_lr_line}
+
+Only one line could be honoured, and which one would be a guess, so none is.
+
+Fix: keep one Lands-red: line; plan a second red as a row of its own.
+
+Then retry the dispatch."
+  fi
+  _lr_runner=""
+  for _lr_w in $_lr_line; do
+    [ "$_lr_w" = until ] && break
+    [ "${_lr_w##*/}" = run.sh ] && _lr_runner=1
+  done
+  if [ -n "$_lr_runner" ]; then
+    dp_finding "Lands-red: names the full-suite runner" "name one <name>.test.sh" \
+      "The Lands-red: line names run.sh, and the full-suite runner is never a declared red:
+    Given: Lands-red: ${_lr_line}
+
+Its run speaks for every suite at once, so one declaration would land the whole floor red.
+A row may land red on one suite file only.
+
+Fix: name the one suite that is red by design —
+    Lands-red: <name>.test.sh until <token>
+
+Then retry the dispatch."
+  elif case "$_lr_suite" in ?*.test.sh) false ;; *) true ;; esac; then
+    dp_finding "Lands-red: names no <name>.test.sh" "name one <name>.test.sh" \
+      "The Lands-red: line names no suite file:
+    Given: Lands-red: ${_lr_line}
+
+A row may land red on one suite FILE, <name>.test.sh, and nothing else.
+
+Fix: write the line as —
+    Lands-red: <name>.test.sh until <token>
+
+Then retry the dispatch."
+  fi
+  _lr_tok_ok=""
+  if [ "$_lr_until" = until ] && [ -n "$_lr_tok" ] && [ -z "$_lr_more" ]; then
+    _lr_ext_re="$(_units_ext_re)"; _lr_ap_re='^approval:[A-Za-z0-9][A-Za-z0-9._-]*$'
+    if [[ "$_lr_tok" =~ $_lr_ext_re ]] || [[ "$_lr_tok" =~ $_lr_ap_re ]]; then
+      _lr_tok_ok=1
+    fi
+  fi
+  # AN APPROVAL A DEBT CAN WAIT FOR (wave-27 T67; review pass 46 S4, N1). `approve` records only a
+  # name an open row reads (units.sh `units_approval_names`), so a name no row reads can never clear;
+  # and an approval an integrate row reads comes after the judgment the debt must clear before.
+  case "$_lr_tok_ok:$_lr_tok" in
+    1:approval:?*)
+      _lr_ap="${_lr_tok#approval:}"
+      _lr_names="$( { [ -n "$PLAN" ] && units_approval_names "$PLAN"; } 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+      _lr_integ="$( { [ -n "$PLAN" ] && units_rows "$PLAN"; } 2>/dev/null | awk -F'\t' -v n="$_lr_ap" '
+        $3 == "integrate" { m = split($13, a, ","); for (k = 1; k <= m; k++) { t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t); if (t == "approval:" n) { print $1; exit } } }')"
+      if [ -n "$_lr_integ" ]; then
+        _lr_tok_ok=""
+        dp_finding "approval:$(bionic_trunc "$_lr_ap" 18) is read at integration" "pick an earlier token" \
+          "The Lands-red: line waits on an approval the integrate row reads:
+    Given:     Lands-red: ${_lr_line}
+    Integrate: ${_lr_integ} reads approval:${_lr_ap}
+
+A declared debt must be cleared before integration is admitted, and this approval
+comes after the step a debt must clear before: the debt could be covered only after the
+judgment it must precede.
+
+Fix: wait on an approval a row before integration reads, or on an ext:<slug> token.
+
+Then retry the dispatch."
+      elif case " $_lr_names " in *" $_lr_ap "*) false ;; *) true ;; esac; then
+        _lr_tok_ok=""
+        dp_finding "approval:$(bionic_trunc "$_lr_ap" 25) is read by no row" "name one a row reads" \
+          "The Lands-red: line waits on an approval no row of the bound plan reads:
+    Given:     Lands-red: ${_lr_line}
+    Rows read: ${_lr_names:-(no named approval)}
+
+session-poker.sh approve records only a name a row reads, so this one could never be recorded
+and the debt could never clear.
+
+Fix: name one of the approvals the rows read, or add a row that reads this one.
+
+Then retry the dispatch."
+      fi ;;
+  esac
+  # A line naming the runner is told that, once: its suite and token are not judged besides.
+  if [ -z "$_lr_tok_ok" ] && [ -z "${_lr_ap:-}" ] && [ -z "$_lr_runner" ]; then
+    dp_finding "Lands-red: names no blocker token" "use ext:<slug> or approval:<name>" \
+      "The Lands-red: line does not read <suite> until <token>, its token one of two forms:
+    Given: Lands-red: ${_lr_line}
+
+A declared red lands until ONE named blocker clears, and the judge can only tell when a
+token of these two forms has cleared:
+    ext:<slug>        an external blocker, as the ## Tasks reads cells write it
+    approval:<name>   the user's act, written by session-poker.sh approve <name>
+
+Fix: write the line as —
+    Lands-red: ${_lr_suite:-<suite>} until approval:<name>
+
+Then retry the dispatch."
+  fi
+  if [ -z "$_lr_ev" ]; then
+    dp_finding "Lands-red: with no Red-evidence: line" "add the Red-evidence: line" \
+      "The brief declares a suite that lands red, and names no evidence of why:
+    Given: Lands-red: ${_lr_line}
+
+A red is honoured at land only beside an evidence file under record/ that names the head it
+was red at (a line head: <40-hex>), so the row can say why it is red by design.
+
+Fix: add this line to the brief, on a line of its own —
+    Red-evidence: <path under record/>
+
+Then retry the dispatch."
+  fi
+  _lr_in=""
+  case "$_lr_suite" in ''|*[[:space:]]*) : ;; *) case " $SUITES_ALLOWED " in *" $_lr_suite "*) _lr_in=1 ;; esac ;; esac
+  if [ -z "$_lr_in" ] && [ -z "$_lr_runner" ]; then
+    # The name rides in the fact, cut to what the 100-column line leaves it (wave-27 T67; review pass
+    # 46 S1): `bionic: dispatch refused — `, the fixed words and ` (<fix>)` take 85.
+    dp_finding "Lands-red: $(bionic_trunc "${_lr_suite:-<none>}" 15) is outside Suites:" "name a suite the row runs" \
+      "A row may land red only on a suite it runs, and this one's suite set does not hold it:
+    Given:  Lands-red: ${_lr_line}
+    Suites: ${SUITES_ALLOWED:-(none)}
+
+Fix: name one of the row's own suites on the Lands-red: line, or add the suite to the brief's
+Suites: or Files: line so the row runs it.
+
+Then retry the dispatch."
+  fi
+  # THE EVIDENCE IS A FILE UNDER THE RUN'S RECORD ROOT (wave-27 T67; review pass 46 N3), placed as
+  # the fact verb places a record: a `record/…` path from the docs root, any other relative path from
+  # the project root, an absolute one as given; the longest existing directory read physically, the
+  # rest in the text with `.` and `..` resolved; the record root read the same way.
+  _lr_ev_ok=""
+  if [ -n "$_lr_ev" ]; then
+    _lr_docs="$BIONIC_ROOT/.bionic/docs"
+    if declare -F docs_root >/dev/null 2>&1; then
+      _lr_d="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_lr_d" ] && _lr_docs="$_lr_d"
+    fi
+    _lr_place() {  # <absolute path> -> its longest existing directory physical, the rest resolved in the text
+      local p="$1" d rest phys
+      d="${p%/*}"; rest="${p##*/}"
+      while [ -n "$d" ] && [ ! -d "$d" ]; do rest="${d##*/}/$rest"; d="${d%/*}"; done
+      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" && p="${phys%/}/$rest"
+      printf '%s\n' "$p" | awk '{ n = split($0, s, "/"); k = 0
+        for (i = 1; i <= n; i++) { if (s[i] == "" || s[i] == ".") continue; if (s[i] == "..") { if (k > 0) k--; continue } o[++k] = s[i] }
+        p = ""; for (i = 1; i <= k; i++) p = p "/" o[i]; print (p == "" ? "/" : p) }'
+    }
+    case "$_lr_ev" in
+      /*) _lr_abs="$_lr_ev" ;;
+      record/*) _lr_abs="$_lr_docs/$_lr_ev" ;;
+      *) _lr_abs="$BIONIC_ROOT/${_lr_ev#./}" ;;
+    esac
+    _lr_rr="$(_lr_place "$_lr_docs/record/x")"; _lr_rr="${_lr_rr%/x}"
+    case "$_lr_ev" in */) _lr_at="" ;; *) _lr_at="$(_lr_place "$_lr_abs")" ;; esac
+    case "$_lr_at" in "$_lr_rr"/?*) _lr_ev_ok=1 ;; esac
+    if [ -z "$_lr_ev_ok" ]; then
+      dp_finding "Red-evidence: is not under record/" "put the file under record/" \
+        "The Red-evidence: path is not a file under the run's record root:
+    Given:   Red-evidence: ${_lr_ev}
+    Read as: ${_lr_at:-(a directory)}
+    Root:    ${_lr_rr}/
+
+The evidence is the run's record of why the row is red at its head, so it lives where the run's
+records live, read as the fact verb reads one: a record/... path from the docs root, any other
+relative path from the project root, an absolute one as given.
+
+Fix: write the evidence under record/ and name it there —
+    Red-evidence: record/<wave>/<row>-red.md
+
+Then retry the dispatch."
+    fi
+  fi
+  if [ -n "$_lr_tok_ok" ] && [ -n "$_lr_ev" ] && [ -n "$_lr_ev_ok" ] && [ -n "$_lr_in" ] && [ -z "$_lr_n" ] \
+     && [ -z "$_lr_runner" ] && case "$_lr_suite" in ?*.test.sh) true ;; *) false ;; esac; then
+    DP_LANDS_RED="$_lr_suite until $_lr_tok"; DP_RED_EVIDENCE="$_lr_ev"
+  fi
 fi
 
 # ===================================================== THE FULL-RUN WALL (wave-26 REQ-3, D6)
@@ -2511,7 +2963,10 @@ ROW=$(roster_row \
   "re_executes=${C_RE_EXECUTES}" \
   ${C_DONE:+"done=${C_DONE}"} \
   "tool_use_id=${TOOL_USE_ID}" \
-  "plan=${ROSTER_PLAN}") || ROW=""
+  "plan=${ROSTER_PLAN}" \
+  ${DP_QUESTIONS:+"questions=${DP_QUESTIONS}"} \
+  ${DP_LANDS_RED:+"lands_red=${DP_LANDS_RED}"} \
+  ${DP_RED_EVIDENCE:+"red_evidence=${DP_RED_EVIDENCE}"}) || ROW=""
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then

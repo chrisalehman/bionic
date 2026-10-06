@@ -357,7 +357,9 @@ _lg_row_for_tree() {  # <plan> <tree basename> -> assigns _LG_ROW_ID, _LG_ROW_BA
 
 # Is a path the diff touched inside the declared set? Exact match, or under a declared
 # DIRECTORY — "a declared directory covers its files" (S18 brief) — checked without caring
-# whether the author spelled the directory with a trailing slash.
+# whether the author spelled the directory with a trailing slash, or a root file with the
+# leading `./` the Files: reader asks for when a bare name is not otherwise a path (wave-27
+# T29; REQ-12, D21): `./Widgetfile` declares the diff path `Widgetfile`.
 _lg_path_declared() {  # <diff path> <comma-joined declared files>
   local p="$1" list="$2" old_ifs entry
   old_ifs="$IFS"; IFS=','; set -f
@@ -366,6 +368,7 @@ _lg_path_declared() {  # <diff path> <comma-joined declared files>
   set +f; IFS="$old_ifs"
   for entry in "$@"; do
     entry="${entry%/}"
+    entry="${entry#./}"
     [ -n "$entry" ] || continue
     [ "$p" = "$entry" ] && return 0
     case "$p" in "$entry"/*) return 0 ;; esac
@@ -1298,12 +1301,24 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
         # THE AMEND ARGUMENTS ARE BUILT PER PATH, NEVER SPLIT BACK OUT OF `LG_OUTSIDE`
         # (wave-24 T13, D10): that list is space-joined for reading, so a path holding a
         # space would come back as two. Each path is one quoted `--files+` word here.
+        #
+        # EACH IN THE SPELLING amend ACCEPTS (wave-27 T29, T42; REQ-12 AC-12.3, D21). A path at
+        # the root carries no `/`, and the amend this line printed for one was refused by amend
+        # itself. `brief_files_entry` is the Files: reader amend reads with, so a bare name it
+        # would not record comes out as `./<name>`; it lists no directory. Without lib/brief.sh
+        # the path is printed as the diff spells it, as before.
         LG_FIX_FILES=""
         while IFS= read -r LG_DF; do
           [ -n "$LG_DF" ] || continue
           _lg_path_declared "$LG_DF" "$CFILES" && continue
           LG_OUTSIDE="${LG_OUTSIDE}${LG_OUTSIDE:+ }${LG_DF}"
-          LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_DF")"
+          LG_SPELT="$LG_DF"
+          declare -F brief_files_entry >/dev/null 2>&1 \
+            || . "$_STOP_LIB_DIR/brief.sh" >/dev/null 2>&1
+          if declare -F brief_files_entry >/dev/null 2>&1; then
+            LG_SPELT="$(brief_files_entry "$LG_DF")"
+          fi
+          LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_SPELT")"
         done <<LGDIFF
 $(git -C "$LG_WT" diff --name-only "${LG_BASE}..HEAD" 2>/dev/null)
 LGDIFF
@@ -1771,9 +1786,10 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 # refuses.
 #
 # AND ONLY WHEN THE TICK SAID SOMETHING (wave-24 T8; D5, AC-4.13). A tick that printed
-# `unchanged`, or decided QUIET with no open row, left nothing for the ledger to catch up on,
-# and a refusal there asked the model for a chore with nothing behind it. The tick writes that
-# fact as `duty=none` beside its digest, and `stop_turn_facts` hands it here as `_ST_TICK_DUTY`.
+# `unchanged` left nothing for the ledger to catch up on, nor did a QUIET one whose plan did not
+# move (a QUIET tick owes the reconcile when the plan moved into Step 4 or its table grew, wave-27
+# T13), and a refusal there asked the model for a chore with nothing behind it. The tick writes
+# that fact as `duty=none` beside its digest, and `stop_turn_facts` hands it here as `_ST_TICK_DUTY`.
 VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" -v duty="$_ST_TICK_DUTY" '
   $1 == "USER" {
     t = $2; sub(/^[ \t]+/, "", t)
@@ -1858,8 +1874,12 @@ elif [ "$FILL_SRC" = "GAP" ]; then
   # THE INVARIANT'S OWN WORDING, and the only one left: what is true of every refused turn is
   # the state — the ledger is live, these rows are ready, slots are free after this turn's
   # launches — whether or not a tick fired in it.
-  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} writer slot(s) are free after this turn's launches (a verify or review row takes none), and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row (the launch recorder sets it active; the wall reads the plan and the roster, never the Agent call's words), or write \"fill-declined: <reason>\" at the start of a line of your own reply, then stop again — this gate blocks once."
-  [ -n "$_ST_STANDING" ] && FILL_REASON="${FILL_REASON} The fill-declined from an earlier turn still stands for the rows it answered; these were not among them."
+  # THE DECLINE IS A VERB (wave-27 T34; REQ-15, D24): the refusal hands the one command that records
+  # it on disk, its rows comma-joined and its reason the poker's quoted placeholder, and asks for no
+  # line in the reply, which the user would read on every turn. A reply line is still read.
+  _fd_poker="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
+  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} writer slot(s) are free after this turn's launches (a verify or review row takes none), and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row (the launch recorder sets it active; the wall reads the plan and the roster, never the Agent call's words), or record why they wait: bash ${_fd_poker} decline ${FILL_MISSING// /,} 'why they wait' — it stands for those rows until a row it did not name is ready. Then stop again — this gate blocks once."
+  [ -n "$_ST_STANDING" ] && FILL_REASON="${FILL_REASON} The decline recorded earlier still stands for the rows it answered; these were not among them."
   # THE HEADLINE COUNTS AND NAMES (wave-20 T11b; Step-6 review R4). "dispatched none" was false
   # beside a ledger line that named the turn's launches. It now says how many of the plan's
   # ready rows the turn launched and names the ones it did not — never a row it launched. The
@@ -2055,7 +2075,7 @@ if [ -n "$STANDDOWN_MISSING" ]; then
   for _sd_hold in $STANDDOWN_MISSING; do
     STANDDOWN_HOLDS="${STANDDOWN_HOLDS}${STANDDOWN_HOLDS:+; }bash ${_sd_poker} hold ${_sd_hold} 'why it stays up'"
   done
-  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\": it is kept as that hold. Then stop again — this gate blocks once."
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Then stop again — this gate blocks once."
 else
   STANDDOWN_REASON=""
 fi
@@ -2123,7 +2143,19 @@ fi
 case "$VERDICT" in
   tasklist)
     FACT='no task-list refresh since this tick'; FIX='refresh it, then stop again'
-    REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed) — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.' ;;
+    REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed) — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.'
+    # THE PLAN MOVED (wave-27 T37; review pass 8 F2): the tick's own cause, from its digest, and
+    # the rebuild steps/3.md asks for, where the sentence above would name a change that is not it.
+    # THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1): a TaskList call or a
+    # plan-ledger write discharges the duty, and the rebuild alone (TaskUpdate, TaskCreate) does
+    # not, so TaskList comes first and the detail keeps the plan-ledger write, the fallback where
+    # the task tools are absent.
+    case "$_ST_RECONCILE" in
+      step4) FIX='TaskList, rebuild it, then stop again'
+             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the plan moved from approval into Step 4 (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete every pending entry and recreate them. Do it, then stop again — this gate blocks once.' ;;
+      grew)  FIX='TaskList, rebuild it, then stop again'
+             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the ## Tasks table grew (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete the pending entries after the new row and recreate them. Do it, then stop again — this gate blocks once.' ;;
+    esac ;;
   *)
     return "$_adv" ;;
 esac
@@ -2175,6 +2207,8 @@ return 2
 #   _ST_NO_BUDGET   1 when a live ledger has no readable writers= and a row is ready
 #   _ST_TICK_DUTY   on a tick turn, `none` when the tick's digest file says `duty=none`, else
 #                   `owed` — the task-list duty's one input from the tick (wave-24 T8, D5)
+#   _ST_RECONCILE   on a tick turn with a fresh digest, its `reconcile=` (`step4` or `grew`): the
+#                   plan moved, and the refusal says so (wave-27 T37); empty otherwise
 # Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
 # otherwise — and the caller then has nothing to judge and nothing to record.
 #
@@ -2233,7 +2267,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
-  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""
+  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
+  _ST_RECONCILE=""
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at rvat led standing gap rcount rgap slot
 
@@ -2344,7 +2379,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
 
   # THE TICK'S DUTY LINE (wave-24 T8; D5, AC-4.13). The tick writes `duty=none` beside its
-  # digest when it printed `unchanged`, or decided QUIET with no open row
+  # digest when it printed `unchanged`, or owed no reconcile
   # (hooks/session-poker.sh `tick_conclude`). Only that line excuses a tick turn from the
   # task-list refresh. No file, a symlink, or any other value leaves the duty owed, which is
   # what every tick turn owed before the tick could say it was quiet. The path and the reader
@@ -2365,6 +2400,15 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
         _ST_TICK_DUTY=none
       fi
     fi
+    # WHY THE RECONCILE IS OWED (wave-27 T37; review pass 8 F2), from the same fresh digest: the
+    # tick writes `reconcile=step4|grew` when the plan moved, and the refusal gives that cause.
+    if [ "$duty" = owed ] && [ -n "$at" ] \
+       && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
+      case "$(tick_digest_field "$digest" reconcile)" in
+        step4) _ST_RECONCILE=step4 ;;
+        grew)  _ST_RECONCILE=grew ;;
+      esac
+    fi
     # THE HEAD THE TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), from the same fresh
     # digest: the wall reads no git, so on a tick's turn it hands the tick's head to the ready set
     # below, and a follow-up review the tick offered is a review the wall owes. Off a tick turn,
@@ -2380,9 +2424,19 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # A TIE HANDS IN NO HEAD (wave-26 T54; review 17 N4): a proof in the tick's own second cannot
     # be ordered against it, and the soft side is a review that waits one tick, not one owed for
     # nothing.
+    # PER QUESTION, THE READY SET JUDGES; THIS RULE STAYS GLOBAL (wave-27 T10; D4). The head goes
+    # into units.sh, which keys each read row's last proof by its own questions, so the wall owes
+    # what the tick offered row by row. Which head goes in is still decided against the newest
+    # review proof of ANY question, a reading included: a reading newer than the digest withholds
+    # the head from every row, never owes one, and costs one tick's wait.
+    # THE FACTS STATE THE TICK JUDGED (wave-27 T43; A-orch-82): the integrate row's `proof:review`
+    # is met only by the judge's `covered` (T14), and the wall runs no judge, so it hands in the
+    # digest's `facts_state=` under the same two tests as the head: a digest of this turn, and no
+    # review proof newer than it. Otherwise it hands nothing, and integrate waits, as off a tick.
     if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
-      if [ -n "$_ST_LIVE_HEAD" ] && [ -n "$_ST_PLAN" ]; then
+      _ST_FACTS="$(tick_digest_field "$digest" facts_state)"
+      if { [ -n "$_ST_LIVE_HEAD" ] || [ -n "$_ST_FACTS" ]; } && [ -n "$_ST_PLAN" ]; then
         rvat="$(awk '
           /^[ \t]*```/ { f = !f; next }
           f { next }
@@ -2390,7 +2444,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
           insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
             a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a }
           END { print m }' "$_ST_PLAN" 2>/dev/null)"
-        [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ] && _ST_LIVE_HEAD=""
+        [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ] && { _ST_LIVE_HEAD=""; _ST_FACTS=""; }
       fi
     fi
   fi
@@ -2470,7 +2524,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # wall owes it the same way: the writers are trimmed to the free slots, the read-only rows are
   # counted and named in full. A row that waits for a read is not in this set at all, so it is
   # never demanded.
-  ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
+  ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" UNITS_FACTS_STATE="$_ST_FACTS" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
   count=0; gap=0; rcount=0; rgap=0; _ST_READY=""; _ST_NAMED=""
   while IFS=$'\t' read -r rest slot; do
     [ -n "$rest" ] || continue

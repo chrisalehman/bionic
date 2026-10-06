@@ -462,7 +462,7 @@ section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-
 # nowhere — and nothing between them would have said so.
 #
 # THE FILL LINE IS THE REAL TICK'S, not a literal. tests/patrol-duties-gate.test.sh drives
-# every arm of the wall against synthesised text, which is right for a suite about the wall
+# every arm of the wall against synthesized text, which is right for a suite about the wall
 # and cannot see a tick that stopped printing the line. So this section RUNS the poker into a
 # fixture wave and feeds the wall exactly what came back — the whole channel, notes, rung
 # report, decision line and all.
@@ -630,6 +630,46 @@ fire "$D"
 expect_absent "8d: AC-4.1 after the amend the same diff is inside Files: — no landing refusal" \
   "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
 expect_status "8e: …and the stop is admitted" "0" "$STOP_RC"
+
+# 8f (wave-27 T49; review pass 19 should-fix 1): a Files: path written in quotes is recorded without
+# them, so the stop wall counts the file INSIDE the contract. The row's files= is built by the real
+# reader (lib/brief.sh) from `Files: "lib/a.sh"`; the control carries the value the reader used to
+# record, quotes and all, and refuses the same diff.
+s8f_fixture() {  # <files= value> -> a project whose delivered tree touched only lib/a.sh
+  local d wt
+  d=$(mkfix)
+  git -C "$d" init -q 2>/dev/null
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"
+  git -C "$d" add .gitignore base.txt; git -C "$d" commit -qm base
+  wt="$d/.worktrees/s8f-writer"
+  git -C "$d" worktree add -q "$wt" -b wt/s8f-writer >/dev/null 2>&1
+  git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
+  mkdir -p "$wt/lib"; echo one > "$wt/lib/a.sh"
+  git -C "$wt" add -A; git -C "$wt" commit -qm work
+  {
+    roster_header
+    roster_row_fixture status=identified session="$SID" name=s8f-writer agent_id="$AID" \
+      deliverable=.bionic/docs/record/s8f.md launched_at=2026-09-01T00:00:00Z \
+      subagent_type=bionic:implementor files="$1" suites_allowed=none suites_source=declared \
+      tool_use_id=toolu_S8F
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  mkdir -p "$d/.bionic/docs/record"; echo done > "$d/.bionic/docs/record/s8f.md"
+  printf '%s' "$d"
+}
+S8F_FILES=$(bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "$2" bionic:implementor)" files' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 'Files: "lib/a.sh"')
+expect_eq "8f precondition: the reader records Files: \"lib/a.sh\" as lib/a.sh" "lib/a.sh" "$S8F_FILES"
+D=$(s8f_fixture '"lib/a.sh"')
+fire "$D"
+expect_status "8f0: the control — the quoted value the reader used to record refuses the diff" "2" "$STOP_RC"
+expect_contains "8f0: …naming lib/a.sh" "lib/a.sh" "$STOP_ERR$(reason_of)"
+D=$(s8f_fixture "$S8F_FILES")
+fire "$D"
+expect_absent "8f: the stop wall counts lib/a.sh inside a contract declared as \"lib/a.sh\"" \
+  "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
+expect_status "8f: …and the stop is admitted" "0" "$STOP_RC"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "9: the fill refusal's headline counts the turn's launches and names only the rows left out (wave-20 T11b; review R4)"
@@ -1050,6 +1090,163 @@ expect_eq "D5: …and adds no second held row" "$((DC_ROWS + 1))" "$(grep -c '|n
 rm -rf "$DC_CFG"
 
 # ─────────────────────────────────────────────────────────────────────────────
+section "DECLINE-VERB: a decline is recorded by a verb, and the wall reads it there (wave-27 T34; REQ-15 AC-15.1, AC-15.5; D24)"
+
+# THE DEFECT (design ledger Δ9). The fill wall read its answer out of the reply, so the
+# orchestrator answered it with a `fill-declined:` line the user read on every turn, for hours,
+# and that said nothing to a person. `session-poker.sh decline <id>[,<id>] '<reason>'` records
+# the decline on disk: one line in the run's fill ledger, the line the reply form's turn leaves
+# there, so `fill_standing_decline` reads both forms by one rule. The turn that recorded it
+# carries no decline in its text and ends; a row it did not name is still owed; the rows it
+# named stay answered.
+DV_POKER="$(dirname "$HOOK")/session-poker.sh"
+dv_fixture() {  # -> project dir; T7 and T9 pending and ready, T10 active, writers=8, current: 4
+  local d p
+  d="$(sd_fixture)"
+  p="$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+  printf '| T9 | 4 | build | a second row behind the merge | implementor | — | 15m | REQ-x | c.sh | pending | — |\n' >> "$p"
+  printf '| T10 | 4 | build | a row already running | implementor | — | 15m | REQ-x | d.sh | active | 24-T10 |\n' >> "$p"
+  printf '%s' "$d"
+}
+dv_poke() {  # <project> <verb args...> -> sets DV_OUT, DV_RC
+  local d="$1"; shift
+  DV_OUT=$( cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+    bash "$DV_POKER" "$@" 2>&1 ); DV_RC=$?
+}
+dv_lines() { sd_led "$1" | /usr/bin/grep -c '^fill-ledger/v1|' || true; }
+require_helpers dv_fixture dv_poke dv_lines
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+
+DV_D="$(dv_fixture)"
+DV_P="$DV_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+dv_poke "$DV_D" decline T7,T9 'the machine is saturated'
+expect_eq "DV0 precondition: the verb records the decline (exit 0)" "0" "$DV_RC"
+DV_LINE="$(sd_led "$DV_D" | tail -1)"
+expect_eq "DV1 AC-15.5 the run's fill ledger gains the decline's line, naming its ids" "T7,T9" "$(sd_field "$DV_LINE" named)"
+expect_eq "DV1b …its reason" "the machine is saturated" "$(sd_field "$DV_LINE" declined)"
+expect_regex "DV1c …and its time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(sd_field "$DV_LINE" at)"
+expect_eq "DV1d …for this session" "$SID" "$(sd_field "$DV_LINE" session)"
+sd_turn "$SD_TX" u-dv-1
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV2 AC-15.1 the turn ends with no decline line in its reply, and the wall does not refuse it" "" "$(sd_decision)"
+expect_contains "DV2b …and that turn's ledger line carries the recorded reason" \
+  "the machine is saturated" "$(sd_field "$(sd_led "$DV_D" | tail -1)" declined)"
+sd_turn "$SD_TX" u-dv-2
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV2c …and it stands on the next turn too" "" "$(sd_decision)"
+printf '| T11 | 4 | build | a row the decline never named | implementor | — | 15m | REQ-x | e.sh | pending | — |\n' >> "$DV_P"
+sd_turn "$SD_TX" u-dv-3
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV3 a row the decline did not name is ready: the silent turn is refused" "block" "$(sd_decision)"
+DV_HEAD="$(printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "DV3b …naming T11" "not launched: T11" "$DV_HEAD"
+expect_absent "DV3c …and not T7 or T9, which the decline named" "T7" "$DV_HEAD"
+expect_absent "DV3d …nor T9" "T9" "$DV_HEAD"
+expect_contains "DV3e the refusal names the verb, with the rows it owes" "session-poker.sh decline T11 '" "$(reason_of)"
+expect_absent "DV3f …and asks for no decline line in the reply" 'write "fill-declined:' "$(reason_of)"
+# THE REFUSALS. Each names what it refused, and writes nothing.
+DV_N="$(dv_lines "$DV_D")"
+expect_ne "DV4 precondition: the ledger has lines to count" "0" "$DV_N"
+dv_poke "$DV_D" decline T8 'no such row'
+expect_eq "DV4b an id that is no plan row is refused (exit 1)" "1" "$DV_RC"
+expect_contains "DV4c …saying which" "T8" "$DV_OUT"
+dv_poke "$DV_D" decline T10 'it is running'
+expect_eq "DV4d a plan row that is not ready is refused (exit 1)" "1" "$DV_RC"
+expect_contains "DV4e …saying which" "T10" "$DV_OUT"
+dv_poke "$DV_D" decline T11 '   '
+expect_eq "DV4f an empty reason is refused (exit 2)" "2" "$DV_RC"
+dv_poke "$DV_D" decline 'the machine is saturated'
+expect_eq "DV4g no ids is refused: there is no decline-everything form (exit 2)" "2" "$DV_RC"
+dv_poke "$DV_D" decline ',' 'the machine is saturated'
+expect_eq "DV4h ids that are only separators are refused (exit 2)" "2" "$DV_RC"
+expect_eq "DV4i …and no refusal wrote a ledger line" "$DV_N" "$(dv_lines "$DV_D")"
+# A SECOND DECLINE KEEPS THE FIRST'S ROWS. Declining T11 by itself leaves T7 and T9 answered.
+dv_poke "$DV_D" decline T11 'T11 waits for the same merge'
+expect_eq "DV5 precondition: the second decline is recorded (exit 0)" "0" "$DV_RC"
+expect_eq "DV5b …and it is one more line" "$((DV_N + 1))" "$(dv_lines "$DV_D")"
+sd_turn "$SD_TX" u-dv-4
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV5c the rows the first decline named stay answered beside the second's" "" "$(sd_decision)"
+# THE TWO FORMS GIVE ONE ANSWER. One world declines T7 and T9 in its reply, the other by the
+# verb; a row neither named becomes ready in both; the wall owes the same rows in each.
+dv_owed() {  # <project> -> the first refusal line's not-launched rows
+  printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' | sed -n 's/.*not launched:\(.*\) (.*/\1/p'
+}
+DV_TA="$(dv_fixture)"; DV_TB="$(dv_fixture)"
+sd_turn "$SD_TX" u-dvt-1 "fill-declined: the machine is saturated"
+s7_fire "$DV_TA" "$SD_TX"
+expect_eq "DV6 precondition: the reply form's turn ends" "" "$(sd_decision)"
+dv_poke "$DV_TB" decline T7,T9 'the machine is saturated'
+for _dv_t in "$DV_TA" "$DV_TB"; do
+  printf '| T11 | 4 | build | a row neither form named | implementor | — | 15m | REQ-x | e.sh | pending | — |\n' \
+    >> "$_dv_t/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+done
+sd_turn "$SD_TX" u-dvt-2
+s7_fire "$DV_TA" "$SD_TX"; DV_OWED_A="$(dv_owed)"
+s7_fire "$DV_TB" "$SD_TX"; DV_OWED_B="$(dv_owed)"
+expect_eq "DV6b precondition: the reply form owes T11" " T11" "$DV_OWED_A"
+expect_eq "DV6c the verb form owes the same rows as the reply form" "$DV_OWED_A" "$DV_OWED_B"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "DECLINE-TEXT: a run in flight that still writes the old line is not refused for it (wave-27 T34; REQ-15 AC-15.3; D24)"
+
+# The reply form is still read, row for row as §SD and §DECLINE pin it: a turn whose reply holds
+# `fill-declined: <reason>` and ran no verb ends, and its reason stands; a `standdown-declined:`
+# line is still kept as a hold (§DECLINE D4).
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+DT_D="$(dv_fixture)"
+sd_turn "$SD_TX" u-dt-1 "fill-declined: T7 and T9 wait on the T6 merge"
+s7_fire "$DT_D" "$SD_TX"
+expect_eq "DT1 AC-15.3 a reply carrying the old line, and no verb, is admitted" "" "$(sd_decision)"
+expect_eq "DT1b …its line records the reason against the rows it saw" \
+  "T7 and T9 wait on the T6 merge" "$(sd_field "$(sd_led "$DT_D" | tail -1)" declined)"
+sd_turn "$SD_TX" u-dt-2
+s7_fire "$DT_D" "$SD_TX"
+expect_eq "DT2 …and it stands on the next turn, as before" "" "$(sd_decision)"
+DT_D2="$(dv_fixture)"
+sd_turn "$SD_TX" u-dt-3
+s7_fire "$DT_D2" "$SD_TX"
+expect_eq "DT3 control: the same fixture with neither form is refused" "block" "$(sd_decision)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "BUDGET-USER: a user's writer cap is a fact in the header the wall already reads (wave-27 T34; REQ-15 AC-15.4; D24)"
+
+# `session-poker.sh budget writers=<n> '<reply>'` rewrites the header's `writers=` with
+# `source=user` and adds `budget-override:` (tests/session-poker.test.sh §BUDGET-USER drives the
+# verb). The wall reads the header it always read: with the user's cap reached it asks for
+# nothing, and no decline is recorded or written. The control is the probe's header over the same
+# roster, which owes the ready row.
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+bu_fixture() {  # <budget line> -> project dir; three writers open, T7 ready
+  local d p
+  d="$(sd_fixture)"
+  p="$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+  BU_B="$1" awk '/^parallel-budget:/ { print ENVIRON["BU_B"]; next } { print }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  for _bu_n in 1 2 3; do
+    roster_row_fixture status=intended session="$SID" name="BU-$_bu_n" agent_id="aBU0000000000000$_bu_n" \
+      deliverable= subagent_type=implementor >> "$d/.bionic/tmp/roster-$SID.state"
+  done
+  printf '%s' "$d"
+}
+require_helpers bu_fixture
+BU_C="$(bu_fixture 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe')"
+sd_turn "$SD_TX" u-bu-1
+s7_fire "$BU_C" "$SD_TX"
+expect_eq "BU1 control: the probe's eight writers with three open owe the ready row" "block" "$(sd_decision)"
+BU_D="$(bu_fixture "$(printf 'parallel-budget: writers=3 suites=2 worktrees=8 test_jobs=8 source=user\nbudget-override: Dana Fixture 2026-10-04 derived=8 chosen=3')")"
+expect_contains "BU2 precondition: the header carries the user's cap" "writers=3 suites=2 worktrees=8 test_jobs=8 source=user" \
+  "$(cat "$BU_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md")"
+s7_fire "$BU_D" "$SD_TX"
+expect_eq "BU2b AC-15.4 the user's cap of three reached: the wall asks for nothing" "" "$(sd_decision)"
+BU_LINE="$(sd_led "$BU_D" | tail -1)"
+expect_eq "BU2c …the turn's ledger line reads the cap" "3" "$(sd_field "$BU_LINE" ceiling)"
+expect_eq "BU2d …and records no decline" "" "$(sd_field "$BU_LINE" declined)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
 section "FO: the stop wall's occupancy is the tick's — a read-only row holds no writer slot (wave-24 T13, D11)"
 
 # THE THIRD READER ON THE OLD NUMBER (A-T10.3, A-orch-32). The dispatch wall and the tick count
@@ -1150,8 +1347,23 @@ s7_fire "$FW_D" "$FW_TX"
 expect_contains "FW1: AC-6.7 a ready read-only row left undispatched refuses the turn end" \
   "Fillable gap at turn end" "$(reason_of)"
 expect_contains "FW1b: …naming it" "T5" "$(reason_of)"
-expect_absent "FW1c: …and never the row that waits on an unlanded read" "T6" "$(reason_of)"
-expect_absent "FW1d: …nor the writer the closed gap holds back" "T1" "$(reason_of)"
+# THE ROW LIST, NOT THE TEXT (wave-27 T67; A-orch-140): the refusal prints the hook's absolute
+# path, which may hold any id (this row's own tree is 27-T67), so a must-not reads the ids the
+# printed decline names, as a word, the shape tests/patrol-duties-gate.test.sh uses.
+fw_rows() {  # -> the ids the refusal's printed decline names, space-joined
+  reason_of | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
+    | sed 's/.* decline //' | tr ',' ' '
+}
+fw_rows_unnamed() {  # <label> <id the refusal's row list must not hold>
+  local rows; rows="$(fw_rows)"
+  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
+  case " $rows " in *" $2 "*) no "$1" "the row list <$rows> names <$2>"; return ;; esac
+  ok "$1"
+}
+require_helpers fw_rows fw_rows_unnamed
+expect_eq "FW1c0 precondition: the refusal's row list is read, and it is T5" "T5" "$(fw_rows)"
+fw_rows_unnamed "FW1c: …and never the row that waits on an unlanded read" "T6"
+fw_rows_unnamed "FW1d: …nor the writer the closed gap holds back" "T1"
 expect_contains "FW1e: the refusal asks for the dispatch" "Dispatch each named row" "$(reason_of)"
 expect_absent "FW1f: …and no longer for a hand edit of the row: the launch recorder ledgers it" \
   "ledger it active" "$(reason_of)"
@@ -1178,12 +1390,21 @@ section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floo
 # A new file lands past the proof: the wall demands nothing, while the tick says why the row
 # waits. The differential records a floor proof at the new head: the same wall refuses the turn,
 # naming T3.
+# THE INTEGRATE ROW'S proof:review IS THE JUDGE'S (wave-27 T14; T43, A-orch-82). It is met only
+# when lib/proof.sh `facts_state` answers covered. The tick writes that answer into its digest
+# (`facts_state=`), and the wall hands it to the same ready set. So the plan declares a rigor and
+# a scale the dealing knows (`tested`, `wave`: the floor, and the critic's three piece reads and
+# two whole reads) and a real base-sha:. The readings are written at the new head by the same
+# writer pair. With one reading missing (FL1b), neither the tick nor the wall offers integrate.
 fl_git() { git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid "${@:2}"; }
-fl_prove() {  # <project> <kind> -> a proof line at the checkout's head, by proof_line + proof_add_line
+fl_prove() {  # <project> <kind> [<question> <reader> <result> <scope>] -> a proof line at the checkout's head, by proof_line + proof_add_line
   local p="$1/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md" out
   out="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh" >/dev/null 2>&1
-          proof_add_line "$p" "$(proof_line "$2" "$(fl_git "$1" rev-parse HEAD)" 2026-10-04T12:00:00Z "record/fl/$2.txt")")" \
+          proof_add_line "$p" "$(proof_line "$2" "$(fl_git "$1" rev-parse HEAD)" 2026-10-04T12:00:00Z "record/fl/$2${3:+-$3-${6:-}}.txt" "${@:3}")")" \
     && printf '%s\n' "$out" > "$p"
+}
+fl_read() {  # <project> <question> <scope> -> a passing reading by the critic at the checkout's head
+  fl_prove "$1" review "$2" w-crit pass "$3"
 }
 fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
   local d
@@ -1191,7 +1412,7 @@ fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   fl_git "$d" init -q 2>/dev/null; fl_git "$d" checkout -q -b wave/99-fl 2>/dev/null
   printf '.bionic/\n' > "$d/.gitignore"; fl_git "$d" add .gitignore; fl_git "$d" commit -qm base
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\nrigor: tested\nscale: wave\nbase-sha: %s\n' "$(fl_git "$d" rev-parse HEAD)"
     printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 8\nworking-branch: wave/99-fl\n'
     printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 8: in progress\n\n'
@@ -1222,13 +1443,32 @@ s7_fire "$FL_D" "$FL_TX"
 expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
 fl_prove "$FL_D" floor
+fl_read "$FL_D" adversarial piece; fl_read "$FL_D" structure piece
+fl_read "$FL_D" adversarial whole; fl_read "$FL_D" structure whole
 rm -f "$FL_D/.bionic/tmp/tick-digest-$SID.state"
-expect_contains "FL2 precondition: with a floor proof at the head the tick offers integrate" "poker: FILL T3" "$(fo_tick "$FL_D")"
-sd_turn "$FL_TX" u-fl-2
+FL_OUT="$(fo_tick "$FL_D")"
+expect_contains "FL1b precondition: a floor proof at the head and the evidence reading missing: integrate waits on the judge" \
+  "poker: WAIT T3 — proof:review: the facts the run owes do not hold (facts_state): review evidence" "$FL_OUT"
+expect_eq "FL1b0 precondition: the tick wrote what it judged into its digest" "yes" \
+  "$(/usr/bin/grep -q '^facts_state=review evidence' "$FL_D/.bionic/tmp/tick-digest-$SID.state" && echo yes || echo no)"
+s7_transcript "$FL_TX" "$FL_OUT"
 s7_fire "$FL_D" "$FL_TX"
-expect_contains "FL2: the differential — the same wall refuses the turn that left the merge undispatched" \
+expect_absent "FL1b: with a reading missing the tick does not offer T3 and the wall does not demand it: they agree" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+fl_read "$FL_D" evidence piece
+rm -f "$FL_D/.bionic/tmp/tick-digest-$SID.state"
+FL_OUT="$(fo_tick "$FL_D")"
+expect_contains "FL2 precondition: with a floor proof at the head and every owed reading held, the tick offers integrate" "poker: FILL T3" "$FL_OUT"
+s7_transcript "$FL_TX" "$FL_OUT"
+s7_fire "$FL_D" "$FL_TX"
+expect_contains "FL2: the differential — on the tick's turn the same wall refuses the turn that left the merge undispatched" \
   "Fillable gap at turn end" "$(reason_of)"
 expect_contains "FL2b: …naming T3" "T3" "$(reason_of)"
+# Off a tick's turn the wall has no digest of this turn, hands no facts state, and integrate waits.
+sd_turn "$FL_TX" u-fl-2c
+s7_fire "$FL_D" "$FL_TX"
+expect_absent "FL2c: …on a turn that is not the tick's, the wall hands no facts state and demands no integrate" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 
@@ -1500,5 +1740,162 @@ expect_contains "LH5 precondition: the proof at C carries the digest's own secon
 s7_fire "$LH_D" "$LH_TX"
 expect_absent "LH5: §N4 a proof in the digest's own second leaves its head out: no review of nothing" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
+
+# LH-Q (wave-27 T10; D4): THE WALL OWES EACH READ ROW BY ITS OWN QUESTIONS. Two read rows, T2
+# `live:head:evidence` and T3 `live:head:adversarial`, each question last read at A. The wall
+# hands the tick's head to the same ready set the tick asks, and that set keys the last proof by
+# question, so the wall owes what the tick offered: at B both rows, at A neither; and once the
+# evidence reading has moved to B (before the tick), at B only the adversarial row. The rule for
+# WHICH head goes in is unchanged and global: a reading of any question newer than the digest
+# leaves the head out (LH4), the soft side, one tick's wait. SYNTHESIZED, as LH.
+lhq_fixture() {  # -> project dir; T1 landed, T2 and T3 read rows, both questions read at LH_A
+  local d p
+  d="$(lh_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  awk -v a="$LH_A" '
+    /^proved: kind=review / {
+      print "proved: kind=review head=" a " at=2026-10-04T00:00:00Z evidence=record/ev.md question=evidence reader=w-aud result=pass scope=piece"
+      print "proved: kind=review head=" a " at=2026-10-04T00:01:00Z evidence=record/adv.md question=adversarial reader=w-crit result=pass scope=piece"
+      next }
+    /^\| T2 \| 6 \| review / {
+      print "| T2 | 6 | review | the evidence read | auditor | — | 15m | REQ-x | — | approval:plan, live:head:evidence | pending |"
+      print "| T3 | 6 | review | the adversarial read | critic | — | 15m | REQ-x | — | approval:plan, live:head:adversarial | pending |"
+      next }
+    { print }' "$p" > "$p.new" && mv "$p.new" "$p"
+  printf '%s' "$d"
+}
+lhq_owed() {  # -> the ids the wall's reason names as ready to dispatch, space-joined
+  reason_of | sed -n 's/.*these rows are ready to dispatch — \(.*\) — and this turn neither.*/\1/p' | tr -c 'A-Za-z0-9\n' ' ' \
+    | tr ' ' '\n' | /usr/bin/grep -E '^T[0-9]+$' | sort | tr '\n' ' ' | sed 's/ $//'
+}
+require_helpers lhq_fixture lhq_owed
+LHQ_D="$(lhq_fixture)"
+LHQ_P="$LHQ_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+expect_eq "LH-Q0 precondition: two readings, one per question, and two read rows" "2 2" \
+  "$(grep -c '^proved: kind=review .* question=' "$LHQ_P") $(grep -c 'live:head:' "$LHQ_P")"
+s7_transcript "$LH_TX" "poker: FILL T2 T3"
+lh_digest "$LHQ_D" "$LH_B"
+s7_fire "$LHQ_D" "$LH_TX"
+expect_eq "LH-Q1: with the tick's head past both readings, the wall owes both read rows" "T2 T3" "$(lhq_owed)"
+lh_digest "$LHQ_D" "$LH_A"
+s7_fire "$LHQ_D" "$LH_TX"
+expect_absent "LH-Q2: at the readings' own head neither row is owed" "Fillable gap" "$(reason_of)$STOP_ERR"
+sed -i.bak "s/^\(proved: kind=review head=\)$LH_A\( at=2026-10-04T00:00:00Z evidence=record\/ev.md question=evidence\)/\1$LH_B\2/" "$LHQ_P"
+expect_contains "LH-Q3 precondition: the evidence reading is now at B, the adversarial one still at A" \
+  "head=$LH_B at=2026-10-04T00:00:00Z evidence=record/ev.md question=evidence" "$(grep '^proved: kind=review' "$LHQ_P")"
+s7_transcript "$LH_TX" "poker: FILL T3"
+lh_digest "$LHQ_D" "$LH_B"
+s7_fire "$LHQ_D" "$LH_TX"
+expect_eq "LH-Q3: at B the wall owes the adversarial row alone; the evidence row read B already" "T3" "$(lhq_owed)"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "FILES-REMEDY: the amend the landing refusal prints is one amend accepts, run as printed (wave-27 T29; REQ-12 AC-12.3, D21)"
+
+# THE DEFECT, from a real run: a writer committed a file at the repository root, the landing
+# refused the stop, and the remedy it printed — `amend <name> --files+ 'CONTEXT.md'` — was
+# itself refused by amend, which read a Files: entry as a path only when it carried a `/`.
+# The remedy is now spelled by the one reader in brief.sh that amend reads with: a root file
+# with an extension as written, and a bare name as `./<name>`. The fixture touches one of each,
+# and the printed line is run exactly as printed. The bare name, Widgetfile, is in the main
+# checkout's base commit too (wave-27 T42): T29's reader admitted a bare name by listing the
+# project root, and with the file there it printed `--files+ 'Widgetfile'`; no wall lists the
+# root now, so the spelling is `./Widgetfile` whatever the root holds.
+fr_fixture() {  # -> a git project whose writer tree committed two root files outside Files:
+  local d wt
+  d=$(mkfix)
+  git -C "$d" init -q 2>/dev/null
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"; echo base > "$d/Widgetfile"
+  git -C "$d" add .gitignore base.txt Widgetfile; git -C "$d" commit -qm base
+  wt="$d/.worktrees/fr-writer"
+  git -C "$d" worktree add -q "$wt" -b wt/fr-writer >/dev/null 2>&1
+  git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
+  mkdir -p "$wt/declared"
+  echo one > "$wt/declared/one.sh"; echo ctx > "$wt/CONTEXT.md"; echo w > "$wt/Widgetfile"
+  git -C "$wt" add -A; git -C "$wt" commit -qm work
+  {
+    roster_header
+    roster_row_fixture status=identified session="$SID" name=fr-writer agent_id="$AID" \
+      deliverable=.bionic/docs/record/fr.md launched_at=2026-09-01T00:00:00Z \
+      subagent_type=bionic:implementor files=declared/ suites_allowed=none suites_source=declared \
+      tool_use_id=toolu_FR
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  mkdir -p "$d/.bionic/docs/record"; echo done > "$d/.bionic/docs/record/fr.md"
+  printf '%s' "$d"
+}
+D=$(fr_fixture)
+fire "$D"
+expect_status "FR1 the control — root files outside Files: refuse the stop" "2" "$STOP_RC"
+FR_FIXLINE="$(printf '%s\n' "$STOP_ERR$(reason_of)" | /usr/bin/grep -m1 'session-poker.sh.* amend ' | sed 's/^[[:space:]]*//')"
+expect_contains "FR1 precondition: the refusal prints its amend line" "amend 'fr-writer'" "$FR_FIXLINE"
+expect_contains "FR2 the line spells the root file with an extension as written" "--files+ 'CONTEXT.md'" "$FR_FIXLINE"
+expect_contains "FR3 …and the extensionless root file, present at the root, as ./<name>" "--files+ './Widgetfile'" "$FR_FIXLINE"
+# A fresh fixture for the amend and the second stop, as section 8 does: the first stop has
+# already judged its row, so a second stop over the same fixture never reaches the landing check.
+D=$(fr_fixture)
+FR_OUT=$( cd "$D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$FR_FIXLINE" 2>&1 ); FR_RC=$?
+expect_eq "FR4 AC-12.3 the printed amend, run as printed, succeeds" "0" "$FR_RC"
+expect_contains "FR4 …saying it amended" "amended" "$FR_OUT"
+fire "$D"
+expect_absent "FR5 …and the same diff now lands: no landing refusal" "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
+expect_status "FR5 …and the stop is admitted" "0" "$STOP_RC"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "RW: the reconcile refusal says the plan moved when that is why it is owed (wave-27 T37; review pass 8 F2)"
+
+# The tick writes `reconcile=step4` or `reconcile=grew` beside `duty=owed` when the reconcile is
+# owed because the plan moved (tests/session-poker.test.sh §RECON-WHY). A tick turn with no
+# task-list refresh is refused as before; the refusal now gives that cause and names the rebuild,
+# and with no cause in the digest, or a digest older than the turn's tick, it is today's words.
+# The fixture is LH's at the proof's own head, so no fill is owed, and its transcript is s7's
+# tick turn with the TaskList call taken out. SYNTHESIZED, as LH.
+rw_digest() {  # <project> <reconcile cause or ""> [at]
+  { printf 'patrol-digest/v1\nprompt_version=5\ndigest=1-1\nsince=2026-10-04T00:00:00Z\ndecision=QUIET\nduty=owed\nat=%s\nhead=%s\n' \
+      "${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$LH_A"
+    [ -z "$2" ] || printf 'reconcile=%s\n' "$2"
+  } > "$1/.bionic/tmp/tick-digest-$SID.state"
+}
+require_helpers rw_digest
+RW_D="$(lh_fixture)"
+RW_TX="$(mktemp)"
+s7_transcript "$RW_TX" "poker: RECONCILE"
+/usr/bin/grep -v '"name":"TaskList"' "$RW_TX" > "$RW_TX.n" && mv "$RW_TX.n" "$RW_TX"
+expect_eq "RW0 precondition: the turn holds no TaskList call" "0" "$(/usr/bin/grep -c '"TaskList"' "$RW_TX" | tr -d ' ')"
+rw_digest "$RW_D" ""
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW1 control: with no cause the refusal is today's" \
+  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
+rw_digest "$RW_D" step4
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW2 the plan moved into Step 4: the refusal says so" "the plan moved from approval into Step 4" "$(reason_of)"
+expect_contains "RW2b …and names the rebuild" "rebuild the task list in execution order: delete every pending entry and recreate them" "$(reason_of)"
+expect_absent "RW2c …and not the status-changed cause" "when a ## Tasks status or the ready set changed" "$(reason_of)"
+rw_digest "$RW_D" grew
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW3 the table grew: the refusal says so" "the ## Tasks table grew" "$(reason_of)"
+expect_contains "RW3b …and names the rebuild" "delete the pending entries after the new row and recreate them" "$(reason_of)"
+rw_digest "$RW_D" step4 2026-09-18T00:00:00Z
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW4 a digest older than the turn's tick gives no cause: the refusal is today's" \
+  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
+
+# THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1). The wall's predicate is a
+# TaskList call or a write naming the plan; the delete-and-recreate it asked for (TaskUpdate,
+# TaskCreate) is never counted, so the fix read `rebuild it` and dropped the one act that
+# discharges it. Now the fix names TaskList first and the detail keeps "or a plan-ledger write",
+# the fallback where the task tools are absent. The first line keeps to 100 columns.
+# fails-when: a plan-moved refusal's fix leaves out TaskList, or its detail the plan-ledger write.
+rw_first() { reason_of | head -1; }
+require_helpers rw_first
+for rw_cause in step4 grew; do
+  rw_digest "$RW_D" "$rw_cause"
+  s7_fire "$RW_D" "$RW_TX"
+  expect_contains "RW5 ($rw_cause) the first line's fix names TaskList first" \
+    "no task-list refresh since this tick (TaskList, rebuild it, then stop again)" "$(rw_first)"
+  expect_contains "RW5b ($rw_cause) …the detail keeps the plan-ledger write" "or a plan-ledger write" "$(reason_of)"
+  expect_true "RW5c ($rw_cause) …and the first line keeps to 100 columns" \
+    test "$(rw_first | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
+done
 
 finish

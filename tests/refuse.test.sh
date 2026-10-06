@@ -92,10 +92,24 @@ WALL_EOF
 # verbose row would silently arm every row after it; `VAR=1 bash ...` is scoped to
 # the child and nothing leaks. Every drive passes the value explicitly, empty by
 # default, which also masks an inherited BIONIC_WALL_VERBOSE from the environment.
+#
+# THE STRICT SETTING IS PASSED THE SAME WAY (T47). `DRV_STRICT` is the value `drive_v` hands
+# the child as BIONIC_REFUSE_STRICT: `1` by default, because sections 1-6 assert the library
+# as the suites see it, strict, where an over-wide line refuses the call. §T47 sets it to
+# empty (a hook as a user runs it) or `UNSET` (the variable absent) around ONE drive and
+# restores it, and the child never inherits the runner's value either way.
+DRV_STRICT=1
+DRV_LC=""
 DRV_RC=0; DRV_OUT=""; DRV_ERR=""; DRV_ERR_LINES=0; DRV_ERR_1=""
 drive_v() {
   local v="$1" lib="$2"; shift 2
-  BIONIC_WALL_VERBOSE="$v" bash "$WALL" "$lib" "$@" >"$SANDBOX/.out" 2>"$SANDBOX/.err"
+  if [ "$DRV_STRICT" = "UNSET" ]; then
+    env -u BIONIC_REFUSE_STRICT ${DRV_LC:+LC_ALL="$DRV_LC"} BIONIC_WALL_VERBOSE="$v" \
+      bash "$WALL" "$lib" "$@" >"$SANDBOX/.out" 2>"$SANDBOX/.err"
+  else
+    env BIONIC_REFUSE_STRICT="$DRV_STRICT" ${DRV_LC:+LC_ALL="$DRV_LC"} BIONIC_WALL_VERBOSE="$v" \
+      bash "$WALL" "$lib" "$@" >"$SANDBOX/.out" 2>"$SANDBOX/.err"
+  fi
   DRV_RC=$?
   DRV_OUT="$(cat "$SANDBOX/.out")"
   DRV_ERR="$(cat "$SANDBOX/.err")"
@@ -707,6 +721,355 @@ expect_contains "6z with the knob set the thirtieth line prints too — the knob
   "D30 a violation line" "$DRV_ERR"
 expect_absent "6z2 …and no count line, because nothing was held back" "+18 more" "$DRV_ERR"
 expect_eq "6z3 …so the whole thirty-two lines are on the stream" "32" "$DRV_ERR_LINES"
+
+section "§T47 — a refusal never loses its own line to a long value (wave-27 T47, A-orch-59)"
+# Before T47 an over-wide line refused ITS OWN CALL, so a wall that put a user's value into its
+# fact (a file name, a verb, a brief word) printed `refuse-call refused — the user line is N
+# columns` in place of the rule that fired (T16's `release-check` at 103 columns; T42's `Files:`
+# word of 17 characters). The library now cuts the FACT to fit, with its own `bionic_trunc`, and
+# gives the whole fact as the first line of the detail. The fix is never cut; the other
+# self-refusals are unchanged; and under BIONIC_REFUSE_STRICT=1, which every suite runs with,
+# an over-wide STATIC line still refuses the call as it always did, so an author's too-long
+# literal is found at test time.
+#
+# fails-when: an over-wide fact still refuses the call strict-off; the cut line leaves the
+# caller's verb, channel or exit; the whole fact is not the detail's first line; the cap drops
+# the fact instead of the last detail line; the cut splits a multi-byte character under either
+# locale; a long fix is cut instead of refused; any other self-refusal moves; the strict setting
+# stops refusing, or is set by anything under hooks/ or payload/, or is off for a suite.
+
+# A line is `bionic: run-arm refused — ` (26 cols) + fact + ` (add it to Suites:)` (20 cols), so
+# a fact has 54 columns before the line is 100. T47_FIT is 54; T47_ONE is 55, one column over.
+T47_FIT="$(printf 'f%.0s' $(seq 1 54))"
+T47_ONE="$(printf 'o%.0s' $(seq 1 55))"
+t47_drive() {  # <strict: 1 | "" | UNSET> <locale or ""> <refuse args…>
+  DRV_STRICT="$1"; DRV_LC="$2"; shift 2
+  drive "$LIB" "$@"
+  DRV_STRICT=1; DRV_LC=""
+}
+t47_line_cols() { bash -c '. "$1"; bionic_cols "$2"' _ "$LIB_DIR/width.sh" "$1"; }
+
+# --- (a) a fact that fits is printed byte for byte, strict or not ---
+t47_drive "" "" exit2 "$FX_VERB" "$T47_FIT" "$FX_FIX" "$FX_DETAIL"
+expect_eq "T47-a1 a fact that fits is printed whole, strict off" \
+  "bionic: run-arm refused — $T47_FIT (add it to Suites:)" "$DRV_ERR_1"
+expect_eq "T47-a2 …at exactly 100 columns" "100" "$(t47_line_cols "$DRV_ERR_1")"
+expect_eq "T47-a3 …with the caller's detail untouched behind it (verdict, blank, three lines)" "5" "$DRV_ERR_LINES"
+expect_contains "T47-a4 …and its first detail line is the caller's own, not the fact" \
+  "The wall reads the plan brief" "$(sed -n '3p' "$SANDBOX/.err")"
+
+# --- (b) one column over: cut by the library's truncation, on the caller's verb, channel, exit ---
+for _m in exit2 deny block; do
+  t47_drive "" "" "$_m" "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+  expect_eq "T47-b1 $_m: a fact one column over is cut (ellipsis inside the width), on the caller's verb" \
+    "bionic: run-arm refused — $(printf 'o%.0s' $(seq 1 53))… (add it to Suites:)" "$DRV_ERR_1"
+  expect_eq "T47-b2 $_m: …the line is 100 columns" "100" "$(t47_line_cols "$DRV_ERR_1")"
+  expect_regex "T47-b3 $_m: …and it is still in the criterion's shape" "$USER_LINE_RE" "$DRV_ERR_1"
+done
+t47_drive "" "" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+expect_status "T47-b4 exit2: the cut refusal exits 2, the caller's own status" "2" "$DRV_RC"
+expect_eq "T47-b5 exit2: the detail's FIRST line is the whole uncut fact" "$T47_ONE" "$(sed -n '3p' "$SANDBOX/.err")"
+expect_contains "T47-b6 exit2: …the caller's own detail follows it" \
+  "The wall reads the plan brief" "$(sed -n '4p' "$SANDBOX/.err")"
+expect_eq "T47-b7 exit2: …verdict, blank, the fact, the caller's three lines" "6" "$DRV_ERR_LINES"
+t47_drive "" "" deny "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+expect_status "T47-b8 deny: the cut refusal exits 0, the caller's own status" "0" "$DRV_RC"
+expect_eq "T47-b9 deny: …the user stream is the one cut line, as for any deny" "1" "$DRV_ERR_LINES"
+expect_contains "T47-b10 deny: …and the model's reason carries the whole fact as the detail's first line" \
+  "\\n\\n$T47_ONE\\n" "$DRV_OUT"
+t47_drive "" "" block "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+expect_status "T47-b11 block: the cut refusal exits 0, the caller's own status" "0" "$DRV_RC"
+expect_contains "T47-b12 block: …and the model's reason carries the whole fact" "\\n\\n$T47_ONE\\n" "$DRV_OUT"
+t47_drive "" "" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" ""
+expect_eq "T47-b13 a cut refusal with NO caller detail still gives the whole fact: verdict, blank, fact" "3" "$DRV_ERR_LINES"
+expect_eq "T47-b14 …and the fact is its third line" "$T47_ONE" "$(sed -n '3p' "$SANDBOX/.err")"
+
+# --- (c) the detail's cap: the fact is first, and the LAST caller line is the one dropped ---
+FX_D12B="$(awk 'BEGIN { for (i = 1; i <= 12; i++) printf "L%02d\n", i }')"
+t47_drive "" "" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_D12B"
+expect_eq "T47-c1 twelve caller lines + the fact is one over the cap: the fact is still the first detail line" \
+  "$T47_ONE" "$(sed -n '3p' "$SANDBOX/.err")"
+expect_eq "T47-c2 …the caller's eleventh line is the last printed" "L11" "$(sed -n '14p' "$SANDBOX/.err")"
+expect_absent "T47-c3 …the caller's twelfth, LAST line is the one dropped" "L12" "$DRV_ERR"
+expect_eq "T47-c4 …and the count line names it" "+1 more" "$(sed -n '15p' "$SANDBOX/.err")"
+t47_drive "" "" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$(printf 'M%02d\n' $(seq 1 11))"
+expect_eq "T47-c5 eleven caller lines + the fact is exactly the cap: all of them print, no count line" \
+  "M11" "$(sed -n '14p' "$SANDBOX/.err")"
+expect_absent "T47-c6 …and nothing is held back" "more" "$DRV_ERR"
+
+# --- (d) a long fact with a multi-byte character at the cut, under UTF-8 and under LC_ALL=C ---
+# THE CUT IS bionic_trunc's, which pins LC_ALL=C and drops a whole character by walking off its
+# continuation bytes, so the printed line holds no partial character under either locale
+# (A-T47.3). Both offsets are driven: the character straddling the cut (52 narrow columns then
+# `é`, two bytes) and one ending exactly at it (51 then `é`).
+T47_UTF8="$(locale -a 2>/dev/null | grep -i 'utf-\{0,1\}8' | head -1)"
+expect_nonempty "T47-d0 a UTF-8 locale is installed to drive the UTF-8 half" "$T47_UTF8"
+T47_NARROW51="$(printf 'x%.0s' $(seq 1 51))"
+T47_NARROW52="$(printf 'x%.0s' $(seq 1 52))"
+T47_TAIL="$(printf 'é日%.0s' $(seq 1 100))"
+# THE DECODER CAN FAIL: a line cut in the middle of a character is rejected by the same check.
+expect_false "T47-d0b the decoder check rejects a half character (so d4 can fail)" \
+  bash -c 'printf "a\303\n" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1'
+for _lc in "$T47_UTF8" C; do
+  for _pre in "$T47_NARROW51" "$T47_NARROW52"; do
+    _fact="${_pre}${T47_TAIL}"
+    t47_drive "" "$_lc" exit2 "$FX_VERB" "$_fact" "$FX_FIX" "$FX_DETAIL"
+    expect_status "T47-d1 [$_lc, ${#_pre} narrow] a ~350-column fact is refused on its own verb" "2" "$DRV_RC"
+    expect_regex "T47-d2 [$_lc, ${#_pre} narrow] …cut to a line in the criterion's shape" "$USER_LINE_RE" "$DRV_ERR_1"
+    expect_false "T47-d3 [$_lc, ${#_pre} narrow] …not the library refusing its own call" \
+      grep -q 'refuse-call' "$SANDBOX/.err"
+    expect_true "T47-d4 [$_lc, ${#_pre} narrow] …the printed line's bytes decode as UTF-8 (no partial character)" \
+      bash -c 'printf "%s\n" "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1' _ "$DRV_ERR_1"
+    expect_contains "T47-d5 [$_lc, ${#_pre} narrow] …the cut ends in the ellipsis" "… (add it to Suites:)" "$DRV_ERR_1"
+    expect_eq "T47-d6 [$_lc, ${#_pre} narrow] …and the whole fact is the detail's first line, byte for byte" \
+      "$_fact" "$(sed -n '3p' "$SANDBOX/.err")"
+    expect_true "T47-d7 [$_lc, ${#_pre} narrow] …the line fits 100 columns by the library's own count" \
+      bash -c '. "$1"; [ "$(bionic_cols "$2")" -le 100 ]' _ "$LIB_DIR/width.sh" "$DRV_ERR_1"
+  done
+done
+
+# --- (e) the fix is never cut ---
+t47_drive "" "" exit2 "$FX_VERB" "$T47_ONE" "add it to the Suites budget line" "$FX_DETAIL"
+expect_status "T47-e1 a seven-word fix with an over-wide fact is refused, strict off" "2" "$DRV_RC"
+expect_contains "T47-e2 …as a refusal of the call, naming the words" "the fix field has 7 words, max 6" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$FX_FACT_SHORT" "add it to the Suites budget line" "$FX_DETAIL"
+expect_contains "T47-e3 …and the same with a fact that fits" "the fix field has 7 words, max 6" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$T47_ONE" "$(printf 'z%.0s' $(seq 1 41))" "$FX_DETAIL"
+expect_contains "T47-e4 a 41-column fix is refused, strict off, over-wide fact or not" \
+  "the fix field is 41 columns, max 40" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$FX_FACT_SHORT" "$(printf 'z%.0s' $(seq 1 41))" "$FX_DETAIL"
+expect_contains "T47-e5 …and with a fact that fits" "the fix field is 41 columns, max 40" "$DRV_ERR_1"
+
+# --- (f) every other self-refusal is unchanged, strict off ---
+t47_drive "" "" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX"
+expect_contains "T47-f1 a wrong argument count" "refuse takes 5 arguments and got 4" "$DRV_ERR_1"
+t47_drive "" "" nosuchmode "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
+expect_contains "T47-f2 an unknown mode" "is not a refusal channel" "$DRV_ERR_1"
+t47_drive "" "" exit2 "Run Arm" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
+expect_contains "T47-f3 a verb outside [a-z-]+" "is not lower-case letters and hyphens" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "" "$FX_FIX" "$FX_DETAIL"
+expect_contains "T47-f4 an empty fact" "the fact field is empty" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$FX_FACT" "" "$FX_DETAIL"
+expect_contains "T47-f5 an empty fix" "the fix field is empty" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$(printf 'two\nlines')" "$FX_FIX" "$FX_DETAIL"
+expect_contains "T47-f6 a newline in the fact" "the fact field carries a newline" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$FX_FACT" "$(printf 'two\nlines')" "$FX_DETAIL"
+expect_contains "T47-f7 a newline in the fix" "the fix field carries a newline" "$DRV_ERR_1"
+# A verb so long that no fact budget is left is the caller's value, which the library cannot
+# cut, so the call is refused as today (A-T47.4).
+T47_LONGVERB="$(printf 'v%.0s' $(seq 1 80))"
+t47_drive "" "" exit2 "$T47_LONGVERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
+expect_status "T47-f8 a verb that leaves no room for any fact is still refused" "2" "$DRV_RC"
+expect_contains "T47-f9 …as a refusal of the call" "bionic: refuse-call refused — the user line is" "$DRV_ERR_1"
+# …while a verb that leaves exactly one column cuts the fact to the ellipsis alone and the
+# detail holds the whole of it.
+t47_drive "" "" exit2 "$(printf 'v%.0s' $(seq 1 60))" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
+expect_contains "T47-f10 a verb with one column to spare cuts the fact to the ellipsis" \
+  " refused — … (add it to Suites:)" "$DRV_ERR_1"
+expect_eq "T47-f11 …and the whole fact is the detail's first line" "$FX_FACT" "$(sed -n '3p' "$SANDBOX/.err")"
+
+# --- (g) the strict setting: an over-wide line refuses the call exactly as before ---
+t47_drive 1 "" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+expect_eq "T47-g1 strict on: a fact one column over refuses the call, same text as before T47" \
+  "bionic: refuse-call refused — the user line is 101 columns, max 100 (shorten the fact)" "$DRV_ERR_1"
+expect_status "T47-g2 …same exit (2)" "2" "$DRV_RC"
+expect_eq "T47-g3 …and one line, no detail" "1" "$DRV_ERR_LINES"
+for _m in deny block; do
+  t47_drive 1 "" "$_m" "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+  expect_status "T47-g4 strict on, $_m: the call is refused with exit 2, as for any malformed call" "2" "$DRV_RC"
+  expect_contains "T47-g5 strict on, $_m: …the same text" "the user line is 101 columns, max 100" "$DRV_ERR_1"
+done
+t47_drive 1 "" exit2 "$FX_VERB" "$T47_FIT" "$FX_FIX" "$FX_DETAIL"
+expect_regex "T47-g6 strict on: a line that fits is still a refusal on its own verb" "$USER_LINE_RE" "$DRV_ERR_1"
+for _s in "" 0 yes UNSET; do
+  t47_drive "$_s" "" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+  expect_regex "T47-g7 BIONIC_REFUSE_STRICT='$_s' is off: the cut refusal is printed" "$USER_LINE_RE" "$DRV_ERR_1"
+  expect_absent "T47-g8 …and the call is not refused" "refuse-call" "$DRV_ERR_1"
+done
+
+# --- (h) WHERE THE SETTING IS SET: on for every suite, off in a hook's environment ---
+# ONE variable, READ in refuse.sh and in no other file under hooks/ or payload/, and SET only by
+# the seam every suite sources. Found by `grep -L resolve-roots.sh tests/*.test.sh` (no suite
+# lacks it) and by tests/run.sh sourcing it for its own environment.
+SEAM="$REPO_ROOT/tests/lib/resolve-roots.sh"
+expect_eq "T47-h1 a fresh shell that sources the shared seam has the strict setting on" "1" \
+  "$(env -i PATH="$PATH" HOME="$SANDBOX" bash -c '. "$1" >/dev/null 2>&1; printf "%s" "${BIONIC_REFUSE_STRICT:-}"' _ "$SEAM")"
+expect_eq "T47-h2 …and so does THIS suite, run alone or by tests/run.sh" "1" "${BIONIC_REFUSE_STRICT:-}"
+T47_USERS="$(/usr/bin/grep -rl 'BIONIC_REFUSE_STRICT' "$REPO_ROOT/hooks/" "$REPO_ROOT/payload/" 2>/dev/null | sed "s|^$REPO_ROOT/||")"
+expect_eq "T47-h3 refuse.sh is the ONE file under hooks/ and payload/ that names the setting" \
+  "payload/scripts/lib/refuse.sh" "$T47_USERS"
+T47_SETS="$(/usr/bin/grep -rn 'BIONIC_REFUSE_STRICT' "$REPO_ROOT/hooks/" "$REPO_ROOT/payload/" 2>/dev/null \
+  | /usr/bin/grep -v ':[0-9]*:[[:space:]]*#' | /usr/bin/grep -v '\${BIONIC_REFUSE_STRICT:-}')"
+expect_eq "T47-h4 …and outside its comments it only READS it, never assigns or exports it" "" "$T47_SETS"
+expect_regex "T47-h5 …and the one read is there (the extractor returns something)" 'BIONIC_REFUSE_STRICT:-' \
+  "$(/usr/bin/grep -n 'BIONIC_REFUSE_STRICT' "$LIB" | /usr/bin/grep -v ':[0-9]*:[[:space:]]*#')"
+t47_drive UNSET "" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+expect_regex "T47-h6 a wall run with no such variable in its environment (a hook as a user runs it) cuts, it does not self-refuse" \
+  "$USER_LINE_RE" "$DRV_ERR_1"
+
+# --- (i) THE MUTANTS. The strict guard and the detail's first line each have one. ---
+mutant m-strict 's/BIONIC_REFUSE_STRICT:-/BIONIC_STRICT_THE_MUTANT_IGNORES:-/' 'BIONIC_REFUSE_STRICT:-'
+M_STRICT="$MUT_PATH"
+expect_true "T47-i0 the strict mutant parses" bash -n "$M_STRICT"
+DRV_STRICT=1; drive "$M_STRICT" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
+expect_regex "T47-i1 MUTANT with the setting ignored, an over-wide line is cut even under strict (the strict rows discriminate)" \
+  "$USER_LINE_RE" "$DRV_ERR_1"
+mutant m-firstline 's/^( *)detail="\$fact_whole.*/\1:/' 'detail="$fact_whole'
+M_FIRST="$MUT_PATH"
+expect_true "T47-i2 the first-line mutant parses" bash -n "$M_FIRST"
+DRV_STRICT=""; drive "$M_FIRST" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
+expect_regex "T47-i3 MUTANT without the fact in the detail the line is still cut (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_absent "T47-i4 MUTANT …but the whole fact is nowhere on the wire (the first-line rows discriminate)" "$T47_ONE" "$DRV_ERR"
+
+section "§T50 — the cut costs the line's width, not the value's length (wave-27 T50; review pass 29)"
+# `bionic_trunc` drops one character at a time and re-measures the whole string each time, so
+# cutting a 20,000-character fact took 43 seconds against a hook's timeout of 10. `refuse` now
+# shortens the fact by BYTES, to at most four times the room it has, walking back to a whole
+# character, before the cut; the whole fact is still the detail's first line. Four bytes is the
+# most one character takes, so every character the cut keeps is still there: the printed line is
+# what the unbounded cut would print.
+#
+# fails-when: a 20,000-character fact takes 5 seconds or more; the printed line differs from the
+# unbounded cut's; the whole fact is not the detail's first line; the byte cut ends inside a
+# character, under either locale or either shell; a fact that fits is changed; the strict setting
+# no longer refuses an over-wide line, quickly.
+T50_ROOM=54   # 100 columns less `bionic: run-arm refused — ` (26) and ` (add it to Suites:)` (20)
+t50_bytes() { head -c "$1" /dev/zero | tr '\0' 'o'; }
+T50_LONG="$(t50_bytes 20000)"
+T50_PREFIX="$(t50_bytes 2000)"
+expect_eq "T50-a0 fixture: the long fact is 20,000 characters" "20000" "${#T50_LONG}"
+
+# --- (a) THE TIME, measured by the row; 5 seconds is generous, the bound was 43 seconds ---
+T50_T0=$SECONDS
+t47_drive "" "" exit2 "$FX_VERB" "$T50_LONG" "$FX_FIX" "$FX_DETAIL"
+T50_DT=$((SECONDS - T50_T0))
+expect_status "T50-a1 a 20,000-character fact is refused on its own verb, strict off" "2" "$DRV_RC"
+expect_regex "T50-a2 …cut to a line in the criterion's shape" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_true "T50-a3 …in under 5 seconds (took ${T50_DT}s)" test "$T50_DT" -lt 5
+expect_eq "T50-a4 …and the detail's first line is the whole 20,000 characters, uncut" \
+  "$T50_LONG" "$(sed -n '3p' "$SANDBOX/.err")"
+
+# --- (b) THE SAME FIRST LINE AS THE UNBOUNDED CUT, on a fact where that cut is still fast ---
+T50_UNB="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T50_PREFIX" "$T50_ROOM")"
+expect_eq "T50-b0 fixture: the unbounded cut is 54 columns, ellipsis last (the reference is not empty)" \
+  "54" "$(t47_line_cols "$T50_UNB")"
+t47_drive "" "" exit2 "$FX_VERB" "$T50_PREFIX" "$FX_FIX" "$FX_DETAIL"
+expect_eq "T50-b1 a 2,000-character fact prints byte for byte what the unbounded cut prints" \
+  "bionic: run-arm refused — $T50_UNB (add it to Suites:)" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$T47_FIT" "$FX_FIX" "$FX_DETAIL"
+expect_eq "T50-b2 a fact that fits is untouched" "bionic: run-arm refused — $T47_FIT (add it to Suites:)" "$DRV_ERR_1"
+
+# --- (c) THE BYTE CUT NEVER ENDS INSIDE A CHARACTER: _refuse_bytecut, driven directly ---
+# The fact is narrow characters, then `é` (2 bytes), `日` (3) and `😀` (4) in turn; every byte limit
+# from 40 to 47 puts the cut at a different offset in them, so some limit lands inside a
+# character of each width. The child prints one verdict per limit: the result is a prefix of the
+# fact, at most the limit in bytes and less than four bytes short of it, and decodes as UTF-8.
+T50_MB="$(printf 'x%.0s' $(seq 1 38))é日😀é日😀é日😀é日😀"
+cat > "$SANDBOX/t50-bytecut.sh" <<'T50_EOF'
+. "$1" || exit 9
+fact="$2"
+for n in 40 41 42 43 44 45 46 47; do
+  r="$(_refuse_bytecut "$fact" "$n")"
+  b="$(printf '%s' "$r" | LC_ALL=C wc -c | tr -d ' ')"
+  verdict=OK
+  [ "$b" -le "$n" ] && [ "$b" -gt $((n - 4)) ] || verdict="BAD(bytes=$b)"
+  case "$fact" in "$r"*) ;; *) verdict="BAD(not a prefix)" ;; esac
+  printf '%s' "$r" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || verdict="BAD(not UTF-8)"
+  echo "n=$n $verdict"
+done
+T50_EOF
+expect_true "T50-c0 fixture: the multi-byte fact decodes (the check can pass)" \
+  bash -c 'printf "%s" "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1' _ "$T50_MB"
+expect_false "T50-c0b …and a half character does not (the check can fail)" \
+  bash -c 'printf "a\360\237" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1'
+for _sh in /bin/bash bash; do
+  for _lc in "$T47_UTF8" C; do
+    T50_OUT="$(env LC_ALL="$_lc" "$_sh" "$SANDBOX/t50-bytecut.sh" "$LIB" "$T50_MB" 2>&1)"
+    expect_eq "T50-c1 [$_sh, $_lc] eight limits answered (the child ran)" "8" \
+      "$(printf '%s\n' "$T50_OUT" | grep -c '^n=[0-9]* OK$')"
+    expect_absent "T50-c2 [$_sh, $_lc] …and none is short, long, off the prefix or inside a character" "BAD" "$T50_OUT"
+  done
+done
+
+# --- (d) THE MULTI-BYTE FACT THROUGH THE WHOLE REFUSAL, both locales: fast, whole, decodable ---
+T50_MBLONG="$(printf 'é日%.0s' $(seq 1 4000))"
+for _lc in "$T47_UTF8" C; do
+  T50_T0=$SECONDS
+  t47_drive "" "$_lc" exit2 "$FX_VERB" "$T50_MBLONG" "$FX_FIX" "$FX_DETAIL"
+  T50_DT=$((SECONDS - T50_T0))
+  expect_regex "T50-d1 [$_lc] an 8,000-character multi-byte fact is cut to a line in the criterion's shape" "$USER_LINE_RE" "$DRV_ERR_1"
+  expect_true "T50-d2 [$_lc] …in under 5 seconds (took ${T50_DT}s)" test "$T50_DT" -lt 5
+  expect_true "T50-d3 [$_lc] …the printed line decodes as UTF-8" \
+    bash -c 'printf "%s\n" "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1' _ "$DRV_ERR_1"
+  expect_eq "T50-d4 [$_lc] …and the whole fact is the detail's first line" "$T50_MBLONG" "$(sed -n '3p' "$SANDBOX/.err")"
+done
+
+# --- (e) THE STRICT SETTING: nothing changes, and the refusal is quick ---
+T50_T0=$SECONDS
+t47_drive 1 "" exit2 "$FX_VERB" "$T50_LONG" "$FX_FIX" "$FX_DETAIL"
+T50_DT=$((SECONDS - T50_T0))
+expect_eq "T50-e1 strict on: a 20,000-character fact refuses the call, the same text as before" \
+  "bionic: refuse-call refused — the user line is 20046 columns, max 100 (shorten the fact)" "$DRV_ERR_1"
+expect_status "T50-e2 …same exit (2)" "2" "$DRV_RC"
+expect_true "T50-e3 …in under 5 seconds (took ${T50_DT}s)" test "$T50_DT" -lt 5
+
+section "§T58 — the same first line on multi-byte facts, and a pre-cut that leaves nothing (wave-27 T58; review pass 34 S3, N1)"
+# The b rows above use a run of `o`, one byte a column, so a pre-cut of three times the room, or of
+# one byte past it, still hands the cut every character it keeps: those rows cannot fail on the
+# multiplier. A run of `—` (three bytes, one column) or of `é` (two bytes) can: the pre-cut must
+# leave more columns than the room, or the fact fits, prints whole and loses its ellipsis. And a
+# fact the walk-back empties (continuation bytes with no lead byte) prints the ellipsis where the
+# fact stood, never nothing; the whole fact is still the detail's first line.
+#
+# fails-when: a 2,000-character fact of `—` or of `é` prints a first line other than the unbounded
+# cut's; a copy with the multiplier three, or `room + 1`, prints the same line as the shipped
+# library (the rows could not fail); a run of continuation bytes prints an empty fact.
+T58_ELL='…'
+for _glyph in '—' 'é'; do
+  T58_FACT="$(printf "${_glyph}%.0s" $(seq 1 2000))"
+  T58_UNB="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_FACT" "$T50_ROOM")"
+  expect_eq "T58-b0 [$_glyph] fixture: the unbounded cut is a cut (shorter than the fact), ellipsis last" "yes|yes" \
+    "$([ "${#T58_UNB}" -lt "${#T58_FACT}" ] && echo yes)|$([ "${T58_UNB%"$T58_ELL"}" != "$T58_UNB" ] && echo yes)"
+  t47_drive "" "" exit2 "$FX_VERB" "$T58_FACT" "$FX_FIX" "$FX_DETAIL"
+  expect_eq "T58-b1 [$_glyph] a 2,000-character fact prints byte for byte what the unbounded cut prints" \
+    "bionic: run-arm refused — $T58_UNB (add it to Suites:)" "$DRV_ERR_1"
+done
+
+# THE TWO DOCTORED MULTIPLIERS: each copy still refuses with a line in the criterion's shape, and
+# its line for the `—` fact is not the unbounded cut's, so T58-b1 [—] goes red on it; `room + 1`
+# also turns T58-b1 [é] red.
+T58_EM="$(printf '—%.0s' $(seq 1 2000))"; T58_E2="$(printf 'é%.0s' $(seq 1 2000))"
+T58_UNB_EM="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_EM" "$T50_ROOM")"
+T58_UNB_E2="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_E2" "$T50_ROOM")"
+mutant m-times3 's/\$\(\(room \* 4\)\)/$((room * 3))/' '$((room * 4))'
+M_TIMES3="$MUT_PATH"
+mutant m-plus1 's/\$\(\(room \* 4\)\)/$((room + 1))/' '$((room * 4))'
+M_PLUS1="$MUT_PATH"
+expect_true "T58-m0 the two mutants parse, and each holds its multiplier" \
+  bash -c 'bash -n "$1" && bash -n "$2" && grep -qF "\$((room * 3))" "$1" && grep -qF "\$((room + 1))" "$2"' _ "$M_TIMES3" "$M_PLUS1"
+DRV_STRICT=""; drive "$M_TIMES3" exit2 "$FX_VERB" "$T58_EM" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
+expect_regex "T58-m1 MUTANT ×3 the line is still a refusal line (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_ne "T58-m2 MUTANT ×3 …but its — line is not the unbounded cut's (T58-b1 [—] discriminates)" \
+  "bionic: run-arm refused — $T58_UNB_EM (add it to Suites:)" "$DRV_ERR_1"
+DRV_STRICT=""; drive "$M_PLUS1" exit2 "$FX_VERB" "$T58_EM" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
+expect_regex "T58-m3 MUTANT +1 the line is still a refusal line (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_ne "T58-m4 MUTANT +1 …but its — line is not the unbounded cut's (T58-b1 [—] discriminates)" \
+  "bionic: run-arm refused — $T58_UNB_EM (add it to Suites:)" "$DRV_ERR_1"
+DRV_STRICT=""; drive "$M_PLUS1" exit2 "$FX_VERB" "$T58_E2" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
+expect_regex "T58-m5 MUTANT +1 the é line is a refusal line too" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_ne "T58-m6 MUTANT +1 …and not the unbounded cut's (T58-b1 [é] discriminates)" \
+  "bionic: run-arm refused — $T58_UNB_E2 (add it to Suites:)" "$DRV_ERR_1"
+
+# THE EMPTIED FACT: 400 continuation bytes, no lead byte, both locales.
+T58_CONT="$(printf '\200%.0s' $(seq 1 400))"
+expect_eq "T58-n0 fixture: the fact is 400 bytes, every one a continuation byte" "400|0" \
+  "$(printf '%s' "$T58_CONT" | LC_ALL=C wc -c | tr -d ' ')|$(printf '%s' "$T58_CONT" | LC_ALL=C tr -d '\200' | LC_ALL=C wc -c | tr -d ' ')"
+for _lc in C "$T47_UTF8"; do
+  t47_drive "" "$_lc" exit2 "$FX_VERB" "$T58_CONT" "$FX_FIX" "$FX_DETAIL"
+  expect_eq "T58-n1 [$_lc] a fact the pre-cut empties prints the ellipsis where the fact stood" \
+    "bionic: run-arm refused — … (add it to Suites:)" "$DRV_ERR_1"
+  expect_eq "T58-n2 [$_lc] …and the whole fact is still the detail's first line" "$T58_CONT" "$(sed -n '3p' "$SANDBOX/.err")"
+done
 
 section "§ROOT — the fix line's pieces live beside the renderer (wave-24 T13, D10)"
 # Moved from lib/walls.sh so the landing refusal in lib/stop.sh prints the same root and the

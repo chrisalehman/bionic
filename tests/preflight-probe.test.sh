@@ -671,7 +671,7 @@ expect_file_no_regex "the probe source never execs or backgrounds session-sweepe
 section "S11 — the project root is PINNED, never taken from the shell (epic-16 w2 S5, AC-4/R5)"
 # ============================================================
 #
-# THE FIELD CASE, from the Synthesis report §3: an attestation was taken, and then had to
+# THE FIELD CASE, from a field report §3: an attestation was taken, and then had to
 # be taken AGAIN, because the root it described came from wherever the shell happened to
 # be standing. `git rev-parse --show-toplevel` answers with the WORKTREE root, and the
 # dispatch wall reconstructs the attestation's filename from ITS root — so inside a

@@ -10,7 +10,7 @@ The citation travels with the criterion into the plan's matrix AC block, where t
 
 1. **Domain model** — the entities this change introduces or moves, each with its invariants.
 2. **Component boundaries and interfaces** — which module owns what, and what crosses between them.
-3. **Ownership table** — `concept → owning module (SSoT) → rendering surfaces → agreement test`, one row per concept rendered at more than one surface.
+3. **Ownership table** — `concept → owning module (SSoT) → reuses → rendering surfaces → agreement test`, one row per concept rendered at more than one surface; `reuses` names the existing site reused, or `none fits: <why>`.
 4. **Rejected alternatives** — what was considered, and why each lost.
 5. **Assumptions** — what the design takes as true and would break if false.
 
@@ -35,13 +35,13 @@ implements the eval first, red on the named failure, then the code.
 The evidence gate reads the rendered column: from `current: 4` on, an AC block with no
 `fails-when:` refuses the commit, naming the row.
 
-**The Design Interview — mandatory.** Step 2 is semi-interactive, and this is what that interactivity is for. It runs as an interview: a frame, then a walk, one turn at a time. Two shapes are refuted by dogfood — **batch presentation**, the design delivered whole as a wall of text with an ambiguous call to action, and **question-without-frame**, a fork posed before its terms exist.
+**The Design Interview — mandatory.** Step 2 is semi-interactive, and this is what that interactivity is for. It runs as an interview: a frame, then a walk, one turn at a time. Never present the design whole as a wall of text, and never pose a fork before its terms exist.
 
 **Open with the frame**, before any question. Step 1 approved the problem and its context; the frame does not ask again. It opens on your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; **Requirements served**, citing the requirements this design answers — the provenance chain's first link, upstream of every decision's own citation; **Mechanisms inherited**, one line per substrate or mechanism the design builds on, each marked `kept` or `questioned` — a `questioned` line becomes a strategic fork; a decision map naming each choice ahead **strategic** or **tactical**, where placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule** and is never defaulted; the capture plan, naming where the design ledger accretes; and the artifact form derived from the form menu. Which views the change touches and which you considered and excluded belong here too, one clause each (the view menu lives in `operational-rules.md`). **Question 1 approves the frame** — the design's direction and its decision map; nothing is walked until it holds.
 
 **Then walk the map, one decision per turn.** A strategic choice gets a question stating the tension and your own lean; a tactical choice you may default, but every default is **surfaced at approval**, never silent. The design ledger accretes visibly — each answer folds in as a named delta the turn it lands, so the user reads a design being built rather than a transcript. Load-bearing assumptions are posed as **questions to the user**, not as statements they must think to challenge.
 
-**Close on the card.** Write the spec — decisions, rejected alternatives with the reason each lost, assumptions — then present the Step-2 card below, rendered from it; its approval is the one approval of the design. Proceed only on the user's engagement, or on the user's explicit waiver of the interview, recorded verbatim in the design's assumptions; `design-interview: false` at Step 0 is that waiver's **standing Step-0 form** — recorded as `false <user> <date>`, and the verbatim assumptions line is still owed, quoting the Step-0 reply. Silence is not engagement, and **an agent never waives it** — there is no agent-side waiver.
+**Close on the card.** Write the spec — decisions, rejected alternatives with the reason each lost, assumptions — then present the Step-2 card below, rendered from it; its approval is the one approval of the design. Proceed only on the user's engagement, or on the user's explicit waiver of the interview, recorded verbatim in the design's assumptions. Silence is not engagement, and **an agent never waives it** — there is no agent-side waiver.
 
 The wall below is a write-time structural gate that grants approval to nothing. **No hook can see a conversation** — exactly as with Step 1's Q&A, the mandate is the whole enforcement. It does fix the authoring order: the spec lands after the walk in one complete Write — a requirements-only first draft of a wave-or-epic spec blocks on the write that would create the file.
 
@@ -57,7 +57,7 @@ The wall below is a write-time structural gate that grants approval to nothing. 
 
 Presence and resolution are the whole check; the five parts are never inspected and their quality never graded. An empty `## Design` clears the wall and fails at the card, the one approval that can tell.
 
-**Scale.** `task` gets a design paragraph per non-trivial task, written in the session plan — a prose obligation the reviewer reads, with **no wall at task scale at all**. `wave` gets a page or two. Nothing gets forty.
+**Scale.** `task` gets a design paragraph per non-trivial task, written in the session plan — a prose obligation Step 6's readers hold, with **no wall at task scale at all**. `wave` gets a page or two. Nothing gets forty.
 
 **The card, rendered in full.** The Goal, the spec's `### Approach` and `### Worth your eye`
 (each call with its risk), one row per decision, and the Eval design as ONE ROW PER REQUIREMENT

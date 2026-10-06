@@ -35,9 +35,11 @@
 # physically lands wherever cwd says, and C2 left that write orphaned inside
 # the worktree. So `create` plants `<worktree>/.bionic -> <main-root>/.bionic`
 # again: the writer-side reason C2's retirement note did not have. The link
-# never enters the index (`.gitignore:43` ignores `.bionic` in either shape),
-# so it changes nothing about how a HOOK resolves a path — only about where a
-# plain write physically goes. `remove` and `land` still delete it on the way
+# never enters the index: this repository's `.gitignore:43` ignores `.bionic` in
+# either shape, and in any other project `create` writes `/.bionic` to the
+# repository's local info/exclude (wave-27 T79), while `land` refuses a range
+# that commits it anyway. So it changes nothing about how a HOOK resolves a
+# path — only about where a plain write physically goes. `remove` and `land` still delete it on the way
 # out, exactly as they deleted a legacy link before; `worktree_legacy_links` in
 # payload/scripts/lib/worktree.sh now lists only a link that resolves
 # somewhere OTHER than the main root's `.bionic` — the correctly-pointing kind
@@ -142,7 +144,9 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
         parent resolves against the main root, never against pwd. A parent
         inside the checkout that git does not already ignore is added, once,
         to the repository's local info/exclude (never .gitignore), so the
-        checkout does not read as dirty; remove and land leave that line. With
+        checkout does not read as dirty; remove and land leave that line.
+        A planted link adds /.bionic there too, so git add -A in a tree
+        never stages it. With
         --for <name>, also appends one workspace/v1 line for that agent to
         <main-root>/.bionic/tmp/workspaces-<session>.state (session from
         CLAUDE_CODE_SESSION_ID); refused, before anything is made, with no
@@ -222,11 +226,19 @@ abort_created() {
 # outside the checkout, and nothing for a parent that IS the checkout root (`/` would ignore
 # everything). `remove` and `land` leave the line: the next tree needs it.
 #
+# THE RECORD LINK STAYS OUT OF EVERY INDEX (wave-27 T79, the walk's W2). A project whose own
+# ignore rules never name `.bionic` let a writer's `git add -A` commit the link planted below;
+# `land` merged it into the main checkout, and git replaced the real `.bionic` directory there
+# with a link to itself. So a create that planted the link also writes `/.bionic` to the same
+# local exclude file, once, whatever the project's .gitignore already says. A create that
+# planted nothing (the branch tracks its own `.bionic`) writes no such line: the path is the
+# branch's content there. `remove` and `land` leave it, as they leave the parent's.
+#
 # Best-effort by design: the tree is already verified and recorded, so a failure to write the
 # file is one stderr line saying how to fix it by hand, never a failed create. The attestation
 # line on stdout is untouched either way.
-exclude_tree_parent() {  # <main-root> <parent-abs> <tree-abs>
-  local root="$1" parent="$2" tree="$3" rel line common exfile
+tree_parent_line() {  # <main-root> <parent-abs> <tree-abs> -> the parent's anchored line, or nothing
+  local root="$1" parent="$2" tree="$3" rel
   case "${parent}/" in "${root}/"*) ;; *) return 0 ;; esac
   rel="${parent#"${root}"}"; rel="${rel#/}"
   [ -n "$rel" ] || return 0
@@ -235,18 +247,31 @@ exclude_tree_parent() {  # <main-root> <parent-abs> <tree-abs>
   git -C "$root" check-ignore -q -- "${tree#"${root}"/}" 2>/dev/null && return 0
   # Glob metacharacters and spaces in the directory name are escaped, so the line means the
   # directory and nothing wider.
-  line="/$(printf '%s' "$rel" | sed -e 's/[][\*?]/\\&/g' -e 's/ /\\ /g')/"
+  printf '/%s/' "$(printf '%s' "$rel" | sed -e 's/[][\*?]/\\&/g' -e 's/ /\\ /g')"
+}
+
+exclude_lines() {  # <main-root> <line or empty>... — appends each line the exclude file lacks
+  local root="$1" line common exfile want="" said=""
+  shift
   common="$(cd "$root" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
   [ -n "$common" ] || common="$(cd "$root" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)"
   case "$common" in /*) ;; ?*) common="${root}/${common}" ;; esac
   exfile="${common}/info/exclude"
+  for line in "$@"; do
+    [ -n "$line" ] || continue
+    [ -f "$exfile" ] && grep -qxF -- "$line" "$exfile" 2>/dev/null && continue
+    want="${want}${line}
+"
+    said="${said:+${said} and }${line}"
+  done
+  [ -n "$want" ] || return 0
   if [ -n "$common" ] && mkdir -p "${common}/info" 2>/dev/null \
      && { [ ! -s "$exfile" ] || [ -z "$(tail -c1 "$exfile")" ] || printf '\n' 2>/dev/null >> "$exfile"; } 2>/dev/null \
-     && printf '%s\n' "$line" 2>/dev/null >> "$exfile"; then
+     && printf '%s' "$want" 2>/dev/null >> "$exfile"; then
     return 0
   fi
   printf '%s: warning: could not write %s; the main checkout will read as dirty while a tree is open. Ignore %s by hand in .gitignore or .git/info/exclude.\n' \
-    "$PROG" "${exfile}" "$line" >&2
+    "$PROG" "${exfile}" "$said" >&2
   return 0
 }
 
@@ -361,8 +386,8 @@ cmd_create() {
   fi
 
   # After the tree is verified and recorded, so an aborted create leaves no exclude line behind;
-  # never fails the create (see exclude_tree_parent).
-  exclude_tree_parent "$main_root" "$parent_abs" "$wt"
+  # never fails the create (see exclude_lines). The link's line only when the link was planted.
+  exclude_lines "$main_root" "$(tree_parent_line "$main_root" "$parent_abs" "$wt")" "${alias_field:+/.bionic}"
 
   contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}${alias_field}"
 }

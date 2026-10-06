@@ -387,7 +387,7 @@ rt_disallowed() {
                 fm && /^disallowedTools:/ { sub(/^disallowedTools:[ \t]*/, ""); print }' "$1" \
     | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | /usr/bin/grep -v '^$'
 }
-for _rt_role in researcher test-runner auditor critic; do
+for _rt_role in researcher test-runner auditor critic reviewer; do
   _rt_f="$REPO/agents/${_rt_role}.md"
   _rt_d=$(rt_disallowed "$_rt_f")
   expect_true "10a: agents/${_rt_role}.md disallows Agent" \
@@ -422,12 +422,20 @@ section "Section 11: the scaffold's Files: comment and its optional claim line r
 # claim line.
 for _sc_f in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; do
   _sc_body=$(cat "$REPO/$_sc_f" 2>/dev/null)
-  expect_true "11a: $_sc_f says a read-only brief keeps Suites: none" \
-    bash -c 'case "$1" in *"# writers; a read-only brief omits this and keeps Suites: none"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+  # RE-POINTED (wave-27 T53, review pass 28 B1): a reader lists its records on Files: (the fact
+  # verb takes a record only from the reader's own row), so the comment no longer has a
+  # read-only brief omit the line; only a researcher or test-runner does.
+  expect_true "11a: $_sc_f has a reader list its records on Files: and a researcher or test-runner omit it" \
+    bash -c 'case "$1" in *"# a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+  expect_true "11a2: …and no longer says a read-only brief omits it" \
+    bash -c 'case "$1" in *"a read-only brief omits this"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
   expect_true "11b: …and no longer says to omit the line" \
     bash -c 'case "$1" in *"omit for a read-only brief"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
   expect_true "11c: …and carries the optional Subprocess claim: line" \
     bash -c 'case "$1" in *"Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+  # wave-27 T17 (D5): a reader's brief names its questions; the line is the Interfaces table's.
+  expect_true "11d: …and carries the readers' Questions: line" \
+    bash -c 'case "$1" in *"Questions: <q>[, <q>]  # reader roles only"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
 done
 
 section "Section 12: every role file carries the dispatch-rules block (wave-24 T6, D8, AC-6.2)"
@@ -439,7 +447,7 @@ _dr_src="$REPO/agents-src/blocks/dispatch-rules.md"
 expect_true "12a: the block source exists" test -f "$_dr_src"
 expect_true "12b: …and is at most 600 bytes" \
   bash -c '[ "$(wc -c < "$1")" -gt 0 ] && [ "$(wc -c < "$1")" -le 600 ]' _ "$_dr_src"
-for _dr_role in auditor critic implementor researcher senior-implementor test-runner; do
+for _dr_role in auditor critic implementor researcher reviewer senior-implementor test-runner; do
   _dr_body=$(cat "$REPO/agents/$_dr_role.md" 2>/dev/null)
   expect_true "12c: agents/$_dr_role.md carries the DISPATCH-RULES markers" \
     bash -c 'case "$1" in *"<!-- DISPATCH-RULES-BEGIN -->"*"<!-- DISPATCH-RULES-END -->"*) exit 0 ;; esac; exit 1' _ "$_dr_body"

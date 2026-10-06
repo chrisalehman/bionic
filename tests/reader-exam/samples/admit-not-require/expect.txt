@@ -1,0 +1,4 @@
+question: evidence
+result: fail
+token: REFUTED
+names: land.sh

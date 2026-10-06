@@ -129,6 +129,33 @@
 # one; exit 2 rather than exit 1, because the wall the caller was building must
 # still hold while its text is being fixed.
 #
+# A LINE THAT IS WIDE ONLY BECAUSE OF A VALUE KEEPS ITS RULE (wave-27 T47, A-orch-59). A wall
+# that puts a user's value into its fact (a file name, a verb, a word from a brief) can pass the
+# line width through no fault of its own, and refusing THAT call replaced the rule the wall was
+# enforcing with `refuse-call refused — the user line is N columns`. Twice in one wave a wall
+# met a long value and lost its refusal. So an over-wide line has its fact cut to fit with
+# width.sh's `bionic_trunc` (the ellipsis counted inside the width, a character never split under
+# either locale), printed under the caller's own verb, channel and exit, and the WHOLE fact is
+# the first line of the detail, ahead of the caller's own, so the detail's line cap drops the
+# caller's last line and never the fact. The fix is never cut, and nor is the verb: a fix over
+# its budget, or a verb that leaves no column for any fact, is refused as before.
+#
+# THE CUT'S COST IS THE LINE'S, NOT THE VALUE'S (wave-27 T50, A-orch-84). `bionic_trunc` re-measures
+# the whole string for every character it drops, so cutting a 20,000-character fact took 43
+# seconds against a hook's timeout of 10. The fact is first shortened by bytes to four times the
+# room it has (`_refuse_bytecut`, to a whole character; four bytes is the most one character
+# takes), so the printed line is the one the unbounded cut prints. The detail still gets the
+# whole fact.
+#
+# THE AUTHOR'S GUARD IS ONE ENVIRONMENT VARIABLE, BIONIC_REFUSE_STRICT. Cutting is right for a
+# value an author could not know and wrong for a literal the author typed too long: that is a
+# defect to find, not to paper over. Set to `1`, the variable makes an over-wide line refuse the
+# call exactly as before T47 (same text, same exit). tests/lib/resolve-roots.sh, which every
+# suite sources, sets it, so a suite run alone and a suite run by tests/run.sh both have it on;
+# nothing under hooks/ or payload/ sets it, so a hook a real session runs never has it and cuts. It is read here
+# and nowhere else, and it only ever decides between two ways of still refusing, never
+# whether the wall blocks.
+#
 # BASH 3.2. No associative arrays, no `${var^^}`, no `mapfile`. The JSON is escaped
 # by parameter expansion, not by `jq`: `jq` is a dependency this machine can lose
 # (the loader block runs it with stderr closed for exactly that reason), and a wall
@@ -294,6 +321,32 @@ _refuse_selfrefuse() {
   exit 2
 }
 
+# _refuse_bytecut <string> <bytes> — the string cut to at most <bytes> bytes, and to a whole
+# character: a cut that lands inside one drops that character, lead byte and all. This is the
+# cheap first cut that keeps `bionic_trunc`, which re-measures the whole string for every
+# character it drops, off a value of any length (wave-27 T50): the caller hands it four times
+# the room it has, and four bytes is the most one character takes. The locale is this
+# function's own, as in `bionic_trunc` (width.sh): bytes under either caller locale.
+_refuse_bytecut() {
+  local s="${1:-}" n="${2:-0}" next last
+  local LC_ALL=C
+  [ "${#s}" -gt "$n" ] || { printf '%s' "$s"; return 0; }
+  next="${s:n:1}"
+  s="${s:0:n}"
+  case "$next" in
+    [$'\200'-$'\277'])   # the byte after the cut continues a character: it is not whole
+      while [ -n "$s" ]; do
+        last="${s:${#s}-1}"
+        s="${s%?}"
+        case "$last" in
+          [$'\200'-$'\277']) ;;
+          *) break ;;
+        esac
+      done ;;
+  esac
+  printf '%s' "$s"
+}
+
 # refuse <mode> <verb> <fact> <fix> <detail> — the whole interface. Exits.
 refuse() {
   if [ "$#" -ne 5 ]; then
@@ -338,16 +391,45 @@ refuse() {
   fi
 
   # (e) THE LINE BUDGET. width.sh's 100, counted in columns, because the em dash is
-  # three bytes and one column and a byte count would pass a line that wraps.
+  # three bytes and one column and a byte count would pass a line that wraps. A line over it
+  # has its FACT cut to fit (wave-27 T47) unless BIONIC_REFUSE_STRICT is `1`, in which case
+  # the call is refused as it always was. Only the fact is cut: the verb and the fix are the
+  # caller's and the library's, and a line too wide to hold even one column of fact after
+  # them is refused as before.
   local line="bionic: $verb refused — $fact ($fix)"
-  local line_cols
+  local line_cols fact_whole="" nl=$'\n' room
   line_cols="$(bionic_cols "$line")"
   if [ "$line_cols" -gt "$BIONIC_LINE_WIDTH" ]; then
-    _refuse_selfrefuse "the user line is $line_cols columns, max $BIONIC_LINE_WIDTH" "shorten the fact"
+    if [ "${BIONIC_REFUSE_STRICT:-}" = "1" ]; then
+      _refuse_selfrefuse "the user line is $line_cols columns, max $BIONIC_LINE_WIDTH" "shorten the fact"
+    fi
+    # `bionic: <verb> refused — ` before the fact, ` (<fix>)` after it. `bionic_trunc` reads a
+    # budget of 0 or less as "unbounded", so the floor is checked here, not left to it.
+    room=$(( BIONIC_LINE_WIDTH - $(bionic_cols "bionic: $verb refused — ") - 3 - fix_cols ))
+    if [ "$room" -lt 1 ]; then
+      _refuse_selfrefuse "the user line is $line_cols columns, max $BIONIC_LINE_WIDTH" "shorten the fact"
+    fi
+    fact_whole="$fact"
+    fact="$(bionic_trunc "$(_refuse_bytecut "$fact" $((room * 4)))" "$room")"
+    # A fact the pre-cut's walk-back empties (continuation bytes with no lead byte, wave-27 T58) was
+    # still cut: the line shows the ellipsis where it stood, never an empty fact.
+    [ -n "$fact" ] || fact="…"
+    line="bionic: $verb refused — $fact ($fix)"
+    line_cols="$(bionic_cols "$line")"
+    if [ "$line_cols" -gt "$BIONIC_LINE_WIDTH" ]; then
+      _refuse_selfrefuse "the user line is $line_cols columns, max $BIONIC_LINE_WIDTH" "shorten the fact"
+    fi
   fi
 
   # (f) THE TWO PRODUCTS. `user_out` is what the user stream carries; `model_out` is
   # what the model reads. They differ by `detail` and by nothing else.
+  #
+  # A CUT FACT IS GIVEN WHOLE AS THE FIRST LINE OF THE DETAIL (wave-27 T47). It goes in front
+  # of the caller's detail, so the detail cap below drops the caller's LAST line and never the
+  # fact the line was cut from.
+  if [ -n "$fact_whole" ]; then
+    detail="$fact_whole${detail:+$nl$detail}"
+  fi
   local user_out="$line" model_out="$line"
   if [ -n "$detail" ]; then
     model_out="$line
