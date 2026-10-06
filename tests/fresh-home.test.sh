@@ -1300,6 +1300,34 @@ expect_absent "4e: …and the user's line is never printed" "V9=9" "$(cat "$SETU
 expect_true "4e: the rc is byte for byte as it was" cmp -s "$TMP/rc-changed-4e" "$RC_FILE_FIX"
 cp "$TMP/rc-before-4e" "$RC_FILE_FIX"
 
+# ---------------------------------------------------------------------------
+# Group 4f — remove leaves a changed claude() block too (wave-27 T78).
+#
+# The same machine, its block holding bionic's two lines with a line of the user's
+# between them. `remove --all`'s page, printed with every other item setup left, does
+# not offer the block and names it by its lines after its items; the page is declined
+# here, so Group 5 still finds the machine whole. Group 5b drives the yes.
+# ---------------------------------------------------------------------------
+
+section "Group 4f: remove --all keeps a changed claude() block off its page and names it"
+
+T78_UNALIAS="${RC_PROXY_LINE%%$'\n'*}"
+T78_N="$(rc_nonblock_lines "$RC_FILE_FIX" | wc -l | tr -d ' ')"
+{ rc_nonblock_lines "$RC_FILE_FIX"
+  printf '%s\n' "$RC_START_LIT" "$T78_UNALIAS" 'export V9=9' "$T77_FN" "$RC_END_LIT"; } > "$TMP/rc-changed-4f"
+cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+expect_ne "4f precondition: the block's first line is not its second" "$T78_UNALIAS" "$T77_FN"
+T78_NAMED="lines $((T78_N + 1)) to $((T78_N + 5)) of ~/.zshrc are bionic's claude() block, changed since bionic wrote it:"
+REMOVE_OUT_F="$(printf 'n\n' | run_payload "$REMOVE_SH" --all 2>&1)"
+REMOVE_PAGE_F="${REMOVE_OUT_F%%Do all of the above?*}"
+expect_ne "4f: the page is on the output, ahead of its question" "$REMOVE_OUT_F" "$REMOVE_PAGE_F"
+expect_contains "4f: …with setup's other items on it" "remove bionic's working principles" "$REMOVE_PAGE_F"
+expect_absent "4f: …and not the claude() function" "remove bionic's claude() shell function" "$REMOVE_PAGE_F"
+expect_contains "4f: the block is named by its lines after the page's items" "$T78_NAMED" "${REMOVE_PAGE_F##*  • }"
+expect_absent "4f: …and the user's line is never printed" "V9=9" "$REMOVE_OUT_F"
+expect_true "4f: the rc is byte for byte as it was" cmp -s "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+cp "$TMP/rc-before-4e" "$RC_FILE_FIX"
+
 
 # ---------------------------------------------------------------------------
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
@@ -1405,6 +1433,22 @@ REMOVE_PAGE="${REMOVE_TEXT%%Do all of the above?*}"
 expect_ne "remove --all: the page is on the output, ahead of its question" "$REMOVE_TEXT" "$REMOVE_PAGE"
 expect_contains "remove --all: the page line for the principles says the file will be deleted" \
   "remove bionic's working principles and delete the file ${GLOBAL_MEMORY}" "$REMOVE_PAGE"
+
+# ---------------------------------------------------------------------------
+# Group 5b — the yes, on the torn-down machine (wave-27 T78). A changed claude() block
+# planted after the teardown is named and never offered by `remove --all` fed nothing
+# but yes, and no byte of the rc changes.
+# ---------------------------------------------------------------------------
+
+section "Group 5b: remove --all fed yes leaves a changed claude() block byte for byte"
+
+cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+REMOVE_OUT_5B="$(printf '%s' "$YES" | run_payload "$REMOVE_SH" --all 2>&1)"
+expect_contains "5b: the changed block is named by its lines" "$T78_NAMED" "$REMOVE_OUT_5B"
+expect_absent "5b: …never offered" "remove bionic's claude() shell function" "$REMOVE_OUT_5B"
+expect_absent "5b: …the user's line never printed" "V9=9" "$REMOVE_OUT_5B"
+expect_true "5b: the rc is byte for byte as it was" cmp -s "$TMP/rc-changed-4f" "$RC_FILE_FIX"
+cp "$TMP/rc-planted.zshrc" "$RC_FILE_FIX"
 
 
 # ---------------------------------------------------------------------------
