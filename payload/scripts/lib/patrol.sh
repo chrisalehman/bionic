@@ -236,13 +236,32 @@ patrol_state_session_ids() {  # <root> -> one session id per line
   printf '%s' "$ids" | sort -u
 }
 
+# EVERY PER-START FILE HERE, ONE GLOB PER CLASS (T83): `<class>|<path>` per line, class by
+# class in PATROL_STATE_CLASSES order and each class's glob in its own order, regular files
+# only. A caller that asks `patrol_session_state_files` about many sessions passes this as
+# its third argument, so the directory is read once per class and not once per class per
+# session: the per-session glob read the whole of .bionic/tmp ten times for every session,
+# and a 400-dead-session sweep cost 15.4 s where 1.11.0 cost 6.1 s.
+patrol_per_start_files() {  # <root> -> one <class>|<path> line per per-start file
+  local d c f; d="$(tmp_root "${1:-}")"
+  [ -d "$d" ] || return 0
+  for c in $PATROL_STATE_CLASSES; do
+    for f in "$d/$c"-*.*.state; do
+      [ -f "$f" ] && [ ! -L "$f" ] || continue
+      printf '%s|%s\n' "$c" "$f"
+    done
+  done
+}
+
 # ONE SESSION'S FILES, BY EXACT PATH. The ids come off the filenames above, so
 # building each candidate path back by concatenation means a strange id can only
 # ever address the file it was read from — there is no pattern here for it to
 # widen. The one glob is a per-start file's (T68), taken only for an id of a
 # session id's own shape, so it widens to nothing but that session's names.
-patrol_session_state_files() {  # <root> <session id> -> one path per line
-  local d sid="${2:-}" c f; d="$(tmp_root "${1:-}")"
+# With a third argument (patrol_per_start_files' list) the per-start files are picked
+# from it instead: the same files, in the same order, with no read of the directory.
+patrol_session_state_files() {  # <root> <session id> [<per-start list>] -> one path per line
+  local d sid="${2:-}" c f l; d="$(tmp_root "${1:-}")"
   [ -n "$sid" ] || return 0
   for c in $PATROL_STATE_CLASSES; do
     for f in "$d/$c-$sid.state" "$d/$c-$sid.state$PATROL_STATE_ARMED_SUFFIX"; do
@@ -253,6 +272,16 @@ patrol_session_state_files() {  # <root> <session id> -> one path per line
   # THE PER-START FILES (T68): `<class>-<sid>.<key>.state`, the one glob here, so the id must be
   # a session id's shape before it joins a pattern; regular files only, never a link.
   case "$sid" in *[!A-Za-z0-9_-]*) return 0 ;; esac
+  if [ $# -ge 3 ]; then
+    [ -n "$3" ] || return 0
+    while IFS= read -r l; do
+      c="${l%%|*}"
+      case "$l" in "$c|$d/$c-$sid".*.state) printf '%s\n' "${l#*|}" ;; esac
+    done <<EOF
+$3
+EOF
+    return 0
+  fi
   for c in $PATROL_STATE_CLASSES; do
     for f in "$d/$c-$sid".*.state; do
       [ -f "$f" ] && [ ! -L "$f" ] || continue
