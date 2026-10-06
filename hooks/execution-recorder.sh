@@ -148,9 +148,8 @@ elif [ "$TOOL_NAME" = "Bash" ]; then
   # A BASH CALL HAS NOTHING TO READ ANY MORE (REQ-2). This branch used to pull the tool's
   # whole stdout through jq and grep it for the observation's machine line, on EVERY Bash
   # call in the session, so that the line could become a record a later stop spent. The stop
-  # gate takes its own look now and the record is deleted; what a Bash payload is still here
-  # for is the pressure sample below, which is a fact about the call having happened. No
-  # read, no grep, and the arm exits immediately after the sample.
+  # gate takes its own look now and the record is deleted, and the pressure sample that
+  # outlived it went with the rung (wave-28 T13). No read, no grep, and the arm exits.
   : 
   # THE RESIDUAL, stated rather than claimed away: stdout is not a trusted
   # channel — a command that PRINTS a well-formed machine line produces a record
@@ -351,21 +350,11 @@ bionic_context 2>/dev/null || exit 0
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
 [ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
-# ---------- THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15, R4) ----------
+# ---------- NO PRESSURE SAMPLE (wave-28 T13; D14) ----------
 #
-# One sample per engaged Bash call, appended to the ring resources.sh owns. The
-# consumers sample (D3 amendment): plugin hooks were not observed firing inside
-# subagents, so this arm cannot be the ONLY sampler — but it IS reliable for the
-# orchestrator's own calls, which is what this gives the ring: frequent readings
-# between the sparser ones tests/run.sh and the Patrol tick take. Bash-only —
-# ARM 2 (a dispatch confirming) and ARM 3 (an agent starting) are not "time
-# passed at the machine", and sampling on those too would count a dispatch
-# twice against the calls that produced it. FAILURE-TOLERANT like every write in
-# this file: a lost sample costs `pressure_level`'s median one input, never a
-# hook failure, so its result is discarded and its failure swallowed.
-if [ "$TOOL_NAME" = "Bash" ]; then
-  pressure_sample >/dev/null 2>&1 || :
-fi
+# Each engaged Bash call used to append one reading to the pressure ring for `pressure_level`'s
+# median. No width is read off the ring any more: the gate (lib/gate.sh) reads the machine at
+# the moment it decides, so the sample went with the rung it fed.
 
 # ---------- THE EARLY EXIT, NOW UNCONDITIONAL FOR BASH (Step-6 review P-2; REQ-2) ----------
 #
@@ -1566,7 +1555,6 @@ fi
 # payload/scripts/lib/observe.sh, so there is nothing left for this script to record: one
 # writer of a state nobody reads is a state that should not exist.
 #
-# WHAT STAYS ON THIS CHANNEL. The pressure sample above, which is a fact about a Bash call
-# having happened rather than about what it printed. A Bash payload reaches this line with
-# its sample already taken and nothing to do.
+# WHAT STAYS ON THIS CHANNEL. Nothing for a Bash payload: it reaches this line with nothing
+# to do.
 exit 0

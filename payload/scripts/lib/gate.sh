@@ -289,6 +289,21 @@ _gate_idle() {  # <reading> — under the lock, after a scan: the idle file, kep
   _G_IDLE="$v"
 }
 
+# gate_usage <reading> — after a scan: memory in use as the gate counts it (D11), the one owner
+# of that arithmetic (spec §3; read-structure-p6 #2). The reading itself while nothing admitted
+# is unfinished; the larger of the reading and idle plus the admitted memory promises while
+# something is; idle plus the promises when the reading is unknown; -1 when it is unknown and
+# nothing is admitted.
+gate_usage() {
+  printf '%s' "$_G_PROM" | awk -F: -v r="${1:--1}" -v idle="${_G_IDLE:-0}" -v unf="${_G_UNF:-0}" '
+    NF >= 3 { sm += $1 }
+    END {
+      u = r; if (unf > 0 || r < 0) { if (idle + sm > u) u = idle + sm }
+      if (r < 0 && unf == 0) u = -1
+      printf "%d", u
+    }'
+}
+
 # _gate_decide <id> — under the lock: rc 0 when this call admitted <id>.
 _gate_decide() {
   local f="$_GD/requests/$1" reading p alone=0 now
@@ -304,13 +319,12 @@ _gate_decide() {
     [ "$alone" -eq 0 ] || return 1
     [ "$reading" -ge 0 ] || return 1
   fi
-  printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v idle="$_G_IDLE" -v share="$(gate_share)" \
+  printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" \
       -v cores="$(_res_cores)" -v busy="$(_res_busy_cores)" -v unf="$_G_UNF" -v p="$p" '
-    NF >= 2 { sm += $1; sc += $2 }
+    NF >= 2 { sc += $2 }
     END {
       split(p, n, ":")
       if (r >= 0) {                            # memory, the hard limit
-        u = r; if (idle + sm > u) u = idle + sm
         if (u + n[1] > share) exit 1
       }
       b = busy + 0; if (sc > b) b = sc         # processor, the soft limit
@@ -490,13 +504,7 @@ gate_state() {
   _gate_idle "$reading"
   _gate_unlock
   share="$(gate_share)"
-  used="$(printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v idle="$_G_IDLE" -v unf="$_G_UNF" '
-    NF >= 3 { sm += $1 }
-    END {
-      u = r; if (unf > 0 || r < 0) { if (idle + sm > u) u = idle + sm }
-      if (r < 0 && unf == 0) u = -1
-      printf "%d", u
-    }')"
+  used="$(gate_usage "$reading")"
   # The loads and the promised cores, as gate_room reads them with nothing owed.
   room="$(_gate_room_line "$reading" 0)"
   load="${room#* load=}"; load="${load%% *}"
