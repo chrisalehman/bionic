@@ -736,8 +736,10 @@ expect_contains "9a: the turn that launched one of two ready rows is refused for
 expect_contains "9b: T11b the headline states the counts — launched 1 of 2" "launched 1 of 2" "$(s9_headline)"
 expect_contains "9c: …and names the row that was not launched" "not launched: T14" "$(s9_headline)"
 expect_contains "9d: …as the reason does" "T14" "$(reason_of)"
+# The hook's own path is taken out of the reason first: the decline command the refusal prints
+# names it, and a checkout whose path holds the row id (a worktree for row T13) would match there.
 expect_absent "9e: T11b the row this turn launched is never named as missed, pending or not" \
-  "T13" "$(s9_headline)$(reason_of)"
+  "T13" "$(s9_headline)$(reason_of | sed -E 's#[^ ]*session-poker\.sh##g')"
 S9_LED="$S9_D/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
 expect_contains "9f: …and the ledger's ready set is still the plan's, both rows" "|ready=T13,T14|" "$(cat "$S9_LED" 2>/dev/null)"
 expect_contains "9g: …with one row missed, not two" "|missed=1" "$(cat "$S9_LED" 2>/dev/null)"
