@@ -2767,6 +2767,12 @@ row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
   for k in files suites_allowed suites_source teammate_id adopted_from questions; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
+  # `pushed=` too (wave-28 T15; A-orch-9): what a reader was pushed at start decides how its record
+  # is read (lib/proof.sh `proof_pushed_severity`), so an amended, held or extended reader row keeps
+  # it. Only where `roster_row` knows the key (wave-28 T16), so a copy never fails on it.
+  if row_has_key "$row" pushed && roster_row pushed=x >/dev/null 2>&1; then
+    ROW_COPY_ARGS+=("pushed=$(line_field "$row" pushed)")
+  fi
   if [ "${3-}" != drop-done ] && row_has_key "$row" done; then
     ROW_COPY_ARGS+=("done=$(line_field "$row" done)")
   fi
@@ -6209,8 +6215,8 @@ EOF
     if [ -n "$PF_QUESTION" ]; then
       # THE READER WAS PUSHED THE SEVERITY SCALE (wave-28 T15; D19, AC-8.1, AC-8.8): the `pushed=` of
       # the last row naming this reader, dealt this question and past `intended`, on any roster of the
-      # project. When it names `severity` (lib/proof.sh `proof_pushed_severity`, which reads the key
-      # through `roster_row`) the record must carry its findings and its result is the one they
+      # project, read by key as `questions=` is. When it names `severity` (lib/proof.sh
+      # `proof_pushed_severity`) the record must carry its findings and its result is the one they
       # derive; otherwise it is read as 1.12.0 read it. The row checks themselves follow below.
       PF_PUSHED=""
       for _pf_rf in "$PV_REPO/.bionic/tmp"/roster-*.state; do
