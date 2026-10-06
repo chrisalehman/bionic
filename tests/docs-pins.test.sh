@@ -5854,6 +5854,18 @@ expect_contains "W27-R7i: the alias sentence says a block whose first line is st
 W27R_JOINED="$(printf '%s' "$W27R_E" | tr '\n' ' ' | tr -s ' ')"
 expect_contains "W27-R7e: the upgrade note counts six ways in 1.11.0, and fixes all six" \
   "not bionic's, in six ways. 1.12.0 fixes all six, and 1.11.x gets no patch." "$W27R_JOINED"
+# W27-R8 (wave-28 T3, D31): the entry quotes the `.bionic` guard's line, and the fix it quotes is the
+# one the code at this head prints. The line's tail moved when the landing line replaced `land`: the fix
+# ends "say ready again" and says nothing of stamps, since the hand landing and `ready` read none.
+W27R_GUARD_TAIL="say ready again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree is kept"
+expect_contains "W27-R8 precondition: the entry quotes the guard's refusal line" "reason=bionic-committed path=<path>" "$W27R_JOINED"
+expect_contains "W27-R8: …ending in the tail the code prints" \
+  "fix='git -C <tree> rm -r --cached .bionic, commit, ${W27R_GUARD_TAIL}\`" "$W27R_JOINED"
+expect_true "W27-R8b: …and the code prints that tail" \
+  /usr/bin/grep -qF -- ", ${W27R_GUARD_TAIL}\"" "${REPO}/payload/scripts/lib/worktree.sh"
+expect_contains "W27-R8c: the per-path fix the entry quotes ends the same way" \
+  "move <path> out of the tree, commit, say ready again'\`" "$W27R_JOINED"
+expect_no_regex "W27-R8d: …and the entry no longer quotes the old tail" "run the suites, land again" "$W27R_JOINED"
 
 
 # ── §W28-S (wave-28 T16; REQ-8 AC-8.2, D20) ──
