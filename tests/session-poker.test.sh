@@ -12798,7 +12798,7 @@ expect_eq "SEV-0c precondition: the fixture plan is admitted by the real commit 
 
 # ---------- the push is read through roster_row (unit rows; no T16 needed) ----------
 sev_pushed() {  # <roster_row rc> <pushed value> -> proof_pushed_severity's rc with roster_row shadowed
-  bash -c '. "$1"; roster_row() { return "$2"; }; proof_pushed_severity "$3"; echo "$?"' _ "$SEV_LIB" "$1" "$2" 2>/dev/null
+  bash -c '. "$1"; SEV_RR="$2"; roster_row() { return "$SEV_RR"; }; proof_pushed_severity "$3"; echo "$?"' _ "$SEV_LIB" "$1" "$2" 2>/dev/null
 }
 expect_eq "SEV-push1 a roster_row that knows pushed=, and a list naming severity: pushed" "0" "$(sev_pushed 0 checks-adversarial,severity)"
 expect_eq "SEV-push2 …a list without severity: not pushed" "1" "$(sev_pushed 0 checks-adversarial)"
@@ -12904,8 +12904,8 @@ expect_eq "SEV-mut0 the cell mutant differs from the library in one line" "1" "$
 expect_eq "SEV-mut0b the result mutant differs in one line" "1" "$(diff "$SEV_LIB" "$SEV_MUT/result.sh" | /usr/bin/grep -c '^>')"
 expect_regex "SEV-mut1 the library reads the S2 off record as flag" "^flag piece [0-9a-f]+ rc=0$" "$(sev_read "$SEV_LIB" "$SEV_DIR/t-S2-off.md")"
 expect_regex "SEV-mut1b the cell mutant runs: it reads the S3 on record as flag too" "^flag piece [0-9a-f]+ rc=0$" "$(sev_read "$SEV_MUT/cell.sh" "$SEV_DIR/t-S3-on.md")"
-expect_contains "SEV-mut1c …and with S2 off flipped to fix, the S2 off record is refused, so §FACT-table goes red on the flip" \
-  "its findings give fail" "$(sev_read "$SEV_MUT/cell.sh" "$SEV_DIR/t-S2-off.md")"
+expect_contains "SEV-mut1c …and with S2 off flipped to fix, the S2 off record is refused as a fix shown nowhere, so §FACT-table goes red on the flip" \
+  "sends finding 1 (S2 off) to fix" "$(sev_read "$SEV_MUT/cell.sh" "$SEV_DIR/t-S2-off.md")"
 expect_contains "SEV-mut2 the library refuses a finding to fix beside result: flag" "its findings give fail" "$(sev_read "$SEV_LIB" "$SEV_DIR/d-fix-flag.md")"
 expect_regex "SEV-mut2b the result mutant runs, and admits that record as flag: §FACT-derive goes red without the refusal" \
   "^flag piece [0-9a-f]+ rc=0$" "$(sev_read "$SEV_MUT/result.sh" "$SEV_DIR/d-fix-flag.md")"
