@@ -2522,12 +2522,17 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # a person's cap obeyed. The tick and this wall size their fill by the one function, so on one
   # reading they name the same rows. A gate that gives no row when a row waits and no cap holds
   # it is the HOLD the ledger records: a machine fact the plan cannot hold.
-  want="$(printf '%s\n' "$ready" | while IFS=$'\t' read -r rest slot; do
-      [ "$slot" = w ] || continue
-      fill_row_launched "$rest" "$_ST_LAUNCHED" && continue
-      case " $_ST_STANDING_IDS " in *" $rest "*) continue ;; esac
-      echo x
-    done | awk 'END { print NR + 0 }')"
+  # Counted in this shell, never inside `$( )`: bash 3.2 reads a `case` pattern's `)` there as
+  # the substitution's end.
+  want=0
+  while IFS=$'\t' read -r rest slot; do
+    [ "$slot" = w ] || continue
+    fill_row_launched "$rest" "$_ST_LAUNCHED" && continue
+    case " $_ST_STANDING_IDS " in *" $rest "*) continue ;; esac
+    want=$((want + 1))
+  done <<ST_WANT
+$ready
+ST_WANT
   cap="$(fill_cap "$_ST_PLAN")"
   owed="$(printf '%s\n' "$open_names" | fill_gate_owed "$FILL_ROSTER" "$BIONIC_SID")"
   _ST_WIDTH="$(fill_gate_width "$_ST_OPEN" "$owed" "$want" "$cap")"
