@@ -6,8 +6,11 @@
 # order it comes back off in. One item at a time, each one announced before it is
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
 # the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
-# settings, the retired permission block, the tools it installed, the plugin
-# data directory — and then the native plugin uninstall as the finisher.
+# settings, the retired permission block, the plugin data directory — and then
+# the native plugin uninstall as the finisher. The tools setup offers are NAMED,
+# never removed: nothing on a machine records which of them bionic installed, so
+# each one present is listed with the command to remove it by hand (the tools
+# item below says why).
 #
 # THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
 # consent does not unlock them:
@@ -344,6 +347,10 @@ RM_SKIPPED_LIST=""
 RM_NOT_CHECKED=0
 RM_NOT_CHECKED_LIST=""
 RM_LEFTOVERS=""
+# The tool rows named and left for the user (the tools item): neither removed,
+# clean nor skipped, so counted in none of those and in nothing that decides the
+# exit status or the finisher.
+RM_BYHAND_LIST=""
 
 _rm_removed() { RM_REMOVED=$((RM_REMOVED + 1)); echo "  ✓ ${1}"; }
 _rm_clean()   { RM_CLEAN=$((RM_CLEAN + 1));     echo "  ✓ ${1} — already clean"; }
@@ -384,6 +391,12 @@ _rm_not_checked() {  # <what was not checked> <why, in the user's terms>
   return 0
 }
 _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${1}"; }
+_rm_print_byhand() {
+  [ -n "$RM_BYHAND_LIST" ] || return 0
+  echo "  left for you to remove by hand:"
+  printf '%s' "$RM_BYHAND_LIST"
+  echo ""
+}
 
 # ─── Consent ─────────────────────────────────────────────────────────────────
 #
@@ -1199,16 +1212,9 @@ _rm_item_verb() {  # <id>
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
-    tool:*)
-      case "${1#tool:}" in
-        # review-d D-1: the ONLY tool row whose removal touches a settings.json key the
-        # user could have repointed at their own value, so it is the only one whose
-        # bullet says the clear is conditional — every other row's uninstall is
-        # unconditional once this page is consented to.
-        ccstatusline)
-          echo "remove ccstatusline (uninstalls the package; clears .statusLine only if it still names ccstatusline)" ;;
-        *) echo "remove ${1#tool:}" ;;
-      esac ;;
+    # Only a native plugin the registry records as bionic's reaches the page; every
+    # other tool row is named by the tools item and never offered (wave-27).
+    tool:*)                echo "remove ${1#tool:}" ;;
     *)                     return 1 ;;
   esac
   return 0
@@ -1300,7 +1306,10 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       # would" is whether this machine carries anything bionic wrote. deps.sh's
       # `dep_teardown_state` is the same probe for every row where those coincide,
       # and the honest one for the status line, where they no longer do.
+      # NAMED, NEVER ASKED (wave-27). A row `remove_dep` only names has no question,
+      # so it is never on the page and the page's yes reaches none of them.
       [ "$RM_MODE" = "payload" ] || return 1
+      dep_named_only "${id#tool:}" && return 1
       present="$(dep_teardown_state "${id#tool:}")"
       [ "$present" = "yes" ] || return 1
       behavior="$(dep_field "${id#tool:}" removal_behavior)"
@@ -2364,13 +2373,37 @@ _rm_say_block() {  # <file> <start> <end>
 #
 # `remove_dep` is the SSoT for what happens to a dependency: a shared binary is
 # kept with consent already given, a plugin bionic declares is left to the
-# finisher below, a plugin nothing declares gets its own consented uninstall, and
-# only `remove-on-consent` rows reach a package-manager command. Presence is
-# asked first so a machine is not interrogated about packages it never had.
+# finisher below, a plugin nothing declares gets its own consented uninstall when
+# the registry records it as bionic's, and every `remove-on-consent` row is NAMED.
+# Presence is asked first so a machine is not interrogated about packages it
+# never had.
+#
+# NAMED, NEVER REMOVED (wave-27). This item used to remove a `remove-on-consent`
+# row because it was PRESENT, and presence says nothing about who installed it: a
+# package the user installed themselves came off exactly like one bionic put
+# there. Bionic removes only what it can prove is its own — the markers are that
+# proof in the shell rc, the registry's `<name>@bionic` id for a native plugin —
+# and for these rows nothing on the machine records it. So each one present is
+# printed with the command that removes it by hand, nothing is asked and nothing
+# runs, on every door and under `--all`; the summary lists them under their own
+# heading. A record of what bionic installed is what would let this item act
+# again.
 #
 # The dep names are read on fd 3 deliberately: a `while read < <(...)` loop would
 # take the loop's stdin from the process substitution, and remove_dep's consent
 # prompt would then read a dependency name as the user's answer.
+
+# Whether the tools item would name a row on this machine — the empty `--all`
+# page asks it, since a named row is never on the page. Read-only.
+_rm_tools_named_present() {
+  local n
+  [ "$RM_MODE" = "payload" ] || return 1
+  while IFS= read -r n <&3; do
+    [ -n "$n" ] || continue
+    dep_named_only "$n" && [ "$(dep_teardown_state "$n")" = "yes" ] && return 0
+  done 3<<< "$( { dep_names_class basic; dep_names_class when-needed; dep_names_class extra; } )"
+  return 1
+}
 
 _rm_item_tools() {
   # A class of items, not one: each row in the table is its own name, so the
@@ -2402,6 +2435,8 @@ _rm_item_tools() {
           # same-named plugin from another catalog that bionic never installed. It
           # is counted with the rows that were already clean, because reporting an
           # untouched plugin as removed and reporting it as declined are both false.
+          # A row `remove_dep` only names answers 2 as well, and goes on the by-hand
+          # list instead: it is on the machine, so it is not clean either.
           remove_dep "$dep_name"; dep_rc=$?
           case "$dep_rc" in
             0)
@@ -2412,7 +2447,11 @@ _rm_item_tools() {
               fi
               ;;
             2)
-              RM_CLEAN=$((RM_CLEAN + 1))
+              if dep_named_only "$dep_name"; then
+                RM_BYHAND_LIST="${RM_BYHAND_LIST}    • ${dep_name}"$'\n'
+              else
+                RM_CLEAN=$((RM_CLEAN + 1))
+              fi
               ;;
             *)
               RM_SKIPPED=$((RM_SKIPPED + 1))
@@ -2736,30 +2775,51 @@ if [ "$rm_all" = "1" ]; then
   rm_page=0; _rm_print_plan < /dev/null && rm_page=1
   # A read-only rc keeps the alias off the page, and the page says why (wave-27
   # T66, review pass 40 S5).
+  rm_named=0
   if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_read_only "$RC_FILE"; then
     echo "  $(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
+    rm_named=1
   fi
   # A claude() block that is not all bionic's is off the page, and named after its
   # items, page or no page (wave-27 T78).
-  _rm_rc_block_left
-  if [ "$rm_page" = "0" ]; then
+  _rm_rc_block_left && rm_named=1
+  if [ "$rm_page" = "0" ] && ! _rm_tools_named_present < /dev/null; then
     # No item runs, so the lines the alias and environment items would name are
     # named here (wave-27 T55, T66).
     if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null; then
-      _rm_legacy_alias_not_ours "$RC_FILE"
-      _rm_env_left "$RC_FILE"
+      rm_said="$(_rm_legacy_alias_not_ours "$RC_FILE"; _rm_env_left "$RC_FILE")"
+      [ -n "$rm_said" ] && { printf '%s\n' "$rm_said"; rm_named=1; }
+    fi
+    # A RUN THAT NAMED SOMETHING NEVER SAYS "CLEAN" (wave-27, review pass 67 P2-1):
+    # a changed or malformed claude() block, a retired line or a read-only rc named
+    # above is still on this machine.
+    if [ "$rm_named" = "1" ]; then
+      echo "  nothing for bionic to remove — what is named above is yours to edit by hand."
+      echo ""
+      exit 0
     fi
     echo "  nothing to remove — this machine is already clean."
     echo ""
     exit 0
   fi
-  _rm_consent "Do all of the above?"; rm_all_rc=$?
-  if [ "$rm_all_rc" -ne 0 ]; then
-    echo "  nothing changed."
+  if [ "$rm_page" = "0" ]; then
+    # NOTHING TO CONSENT TO, AND STILL SOMETHING TO NAME (wave-27). A named tool row
+    # is never on the page, so an empty page does not make a clean machine. Every
+    # item runs as the per-item pass does with nobody there to answer: the answer
+    # channel is closed, so each item says what it found and none can act, and the
+    # tools item names its rows for the summary.
+    echo "  nothing for bionic to remove — each item below says what it found."
     echo ""
-    exit 0
+    exec < /dev/null
+  else
+    _rm_consent "Do all of the above?"; rm_all_rc=$?
+    if [ "$rm_all_rc" -ne 0 ]; then
+      echo "  nothing changed."
+      echo ""
+      exit 0
+    fi
+    RM_ALL=1
   fi
-  RM_ALL=1
 fi
 
 _rm_item_legacy_alias
@@ -2794,6 +2854,7 @@ if [ -n "$RM_ONLY" ]; then
   printf '  %d removed · %d already clean · %d skipped by you\n' \
     "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
   echo ""
+  _rm_print_byhand
   if [ -n "$RM_LEFTOVERS" ]; then
     echo "  Leftovers (bionic could not finish these)"
     printf '%s' "$RM_LEFTOVERS"
@@ -2817,6 +2878,8 @@ if [ -n "$RM_SKIPPED_LIST" ]; then
   printf '%s' "$RM_SKIPPED_LIST"
   echo ""
 fi
+
+_rm_print_byhand
 
 if [ -n "$RM_NOT_CHECKED_LIST" ]; then
   echo "  Not checked (bionic couldn't verify — still on this machine)"
