@@ -66,7 +66,9 @@ cat > "$LINT_AWK" <<'LINT_AWK_EOF'
 # Prints, per file it reads:
 #   H<TAB><file>:<line><TAB><shape><TAB><what>   one row per hazard
 #   D<TAB><file><TAB><name>                     one row per function a load defines
-#   U<TAB><file><TAB><state>                    the file ended with a frame still open
+#   U<TAB><file><TAB><state>                    the file ended with a frame still open, or
+#                                               its brace depth went below zero or ended
+#                                               above it
 # Frames: top, cs ($( ) and <( )), sub (( )), bt (` `), dq, sq, dsq ($' '), par (${ }),
 # ar ($(( )) and (( ))), hd (an unquoted heredoc body). A case lives in the
 # command frame that opened it: subj, pat, patx (inside a pattern), body.
@@ -85,6 +87,9 @@ function isb(c) {
   return c == "" || c == " " || c == "\t" || c == ";" || c == "&" || c == "|" \
     || c == "(" || c == ")" || c == "<" || c == ">"
 }
+# the end of a reserved word: a blank or metacharacter, or the backquote that closes the
+# backquoted text it sits in (`… esac` + backquote)
+function kend(c) { return isb(c) || (c == "`" && K[d] == "bt") }
 function hit(shape, what,   key) {
   key = FILENAME SUBSEP FNR SUBSEP shape
   if (key in SEEN) return
@@ -176,7 +181,7 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
     if (c == " " || c == "\t") { ws = 1; continue }
     if (ws && c == "#") return
     if (owns() && CS[cn] == "pat") {
-      if (substr(s, i, 4) == "esac" && isb(substr(s, i + 4, 1))) {
+      if (substr(s, i, 4) == "esac" && kend(substr(s, i + 4, 1))) {
         cn--; AT[d] = 0; i += 3; ws = 0; continue
       }
       CS[cn] = "patx"
@@ -190,7 +195,7 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
     if (ws) {
       w = substr(s, i)
       m = match(w, /^[a-z]+/) ? substr(w, 1, RLENGTH) : ""
-      nb = (m != "") && isb(substr(s, i + length(m), 1))
+      nb = (m != "") && kend(substr(s, i + length(m), 1))
       if (owns() && CS[cn] == "subj") {
         if (nb && m == "in" && CSW[cn]) { CS[cn] = "pat"; i += 1; ws = 0; continue }
         CSW[cn] = 1
@@ -201,12 +206,17 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
         if (m == "function") {
           nm = substr(s, i + 8); sub(/^[ \t]+/, "", nm); sub(/[^A-Za-z0-9_:.-].*$/, "", nm)
           if (d == 1 && BR[1] == 0 && !hdon && nm != "") printf "D\t%s\t%s\n", FILENAME, nm
-          i += 7; ws = 0; continue
+          # the name is no command word: step over it and stay in command position, so the
+          # `{` of `function name {` counts as the one of `name() {` does
+          match(substr(s, i + 8), /^[ \t]*[A-Za-z0-9_:.-]*/); i += 7 + RLENGTH; ws = 0; continue
         }
       }
       if (AT[d]) {
         if (c == "{" && isb(substr(s, i + 1, 1))) { BR[d]++; continue }
-        if (c == "}" && isb(substr(s, i + 1, 1))) { BR[d]--; AT[d] = 0; ws = 0; continue }
+        if (c == "}" && kend(substr(s, i + 1, 1))) {
+          if (--BR[d] < 0 && !BNEG) BNEG = FNR
+          AT[d] = 0; ws = 0; continue
+        }
         if (c == "!" && isb(substr(s, i + 1, 1))) continue
         if (d == 1 && BR[1] == 0 && !hdon && match(w, /^[A-Za-z_][A-Za-z0-9_:.-]*[ \t]*\(\)/)) {
           nm = w; sub(/[ \t]*\(.*$/, "", nm); printf "D\t%s\t%s\n", FILENAME, nm
@@ -244,7 +254,9 @@ function scan(s,   i, n, c, k, w, m, nb, nm) {
   }
 }
 # The raw text of a heredoc body inside $( ), read the way bash 3.2 reads it: it knows
-# quotes and parentheses and nothing of heredocs, so a lone ) closes the substitution.
+# quotes, parentheses and comments and nothing of heredocs, so a lone ) closes the
+# substitution. A comment opens at a `#` that starts the line or follows a blank, and to
+# the line's end no paren and no quote counts (measured under 3.2.57, wave-28 T46).
 function rawparen(s,   i, n, c) {
   n = length(s)
   for (i = 1; i <= n; i++) {
@@ -255,6 +267,7 @@ function rawparen(s,   i, n, c) {
       continue
     }
     if (c == "\\") { i++; continue }
+    if (c == "#" && (i == 1 || substr(s, i - 1, 1) == " " || substr(s, i - 1, 1) == "\t")) return
     if (c == "'" || c == "\"" || c == "`") { RQ = c; continue }
     if (c == "(") RDEP++
     else if (c == ")") {
@@ -268,15 +281,17 @@ function startbody() {
   if (!HQ[hc]) push("hd")
   RQ = ""; RDEP = 0; RHIT = 0
 }
-# A file that ends with a frame, a case or a heredoc still open is one the lexer lost its
-# place in, and every row it printed after that point is suspect: it says so.
+# A file that ends with a frame, a case or a heredoc still open, or whose brace depth went
+# below zero or ends above it, is one the lexer lost its place in (a form it does not
+# know), and every row it printed after that point is suspect: it says so.
 function closefile(f,   st, x) {
-  if (f == "" || (d == 1 && cn == 0 && !hdon && np == 0)) return
+  if (f == "" || (d == 1 && cn == 0 && !hdon && np == 0 && BR[1] == 0 && !BNEG)) return
   st = ""; for (x = 1; x <= d; x++) st = st K[x] (x < d ? "/" : "")
-  printf "U\t%s\t%s cases=%d heredoc=%s\n", f, st, cn, (hdon ? HD[hc] : "-")
+  printf "U\t%s\t%s cases=%d heredoc=%s braces=%d%s\n", f, st, cn, (hdon ? HD[hc] : "-"), \
+    BR[1], (BNEG ? " below-zero-at=" BNEG : "")
 }
 FNR == 1 {
-  closefile(PREVF); PREVF = FILENAME; PQS = ""
+  closefile(PREVF); PREVF = FILENAME; PQS = ""; BNEG = 0
   d = 1; K[1] = "top"; AT[1] = 1; BR[1] = 0; Z[1] = 0; HB_[1] = 0; Q[1] = 0
   cn = 0; np = 0; hdon = 0; hc = 0
 }
