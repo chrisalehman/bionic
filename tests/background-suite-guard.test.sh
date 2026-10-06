@@ -1142,6 +1142,10 @@ expect_eq "W1a an armed agent's on-budget suite is allowed" "0" "$ST"
 expect_eq "W1b …and comes back as the shim around the original, under the harness's shell" \
   "bash $SHIM --shell $WSH $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
 expect_empty "W1c …with nothing said on stderr" "$ERR"
+# THE GATE'S WHO (wave-28 T12; T2's A-T2.6). A shell does not know which agent it runs for, so
+# the wall, which reads the agent's roster row, hands the shim `--agent <roster name>`; the shim
+# exports it as BIONIC_GATE_AGENT, and the gate's request reads `who=<session>:<name>`.
+expect_contains "W1e an armed agent's wrap names the agent by its roster name" "--agent w-wrap " "$WRAP"
 expect_eq "W1d …and every other field of tool_input rides through" "86400000" \
   "$(printf '%s' "$WRAP_INPUT" | jq -r '.timeout')"
 
@@ -1162,17 +1166,27 @@ rm -f "$RU/.bionic/tmp/roster-$SID.state"
 run_hook "$(mk_payload "$RU" 'bash tests/t.test.sh' "$ACTOR")" "$GUARD"
 expect_eq "W3 an unarmed agent's suite is wrapped" \
   "bash $SHIM --shell $WSH $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+expect_contains "W3b …naming the agent by its id, since no roster row names it" "--agent $ACTOR " "$WRAP"
+run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh' "")" "$GUARD"
+expect_nonempty "W3c the main thread's suite is wrapped (the reader works here)" "$WRAP"
+expect_absent "W3c …and names no agent: the gate's who is main" "--agent" "$WRAP"
 
 # LEFT ALONE, each beside W1's positive on the same repo and the same reader.
-for sp in 'BIONIC_SLOT_HELD=1 bash tests/t.test.sh' \
-          'cd . && BIONIC_SLOT_HELD=1 bash tests/t.test.sh 2>&1 | tee /tmp/w.log' \
-          "bash $SHIM -- 'bash tests/t.test.sh'" \
+for sp in "bash $SHIM -- 'bash tests/t.test.sh'" \
           "bash $SHIM --shell $WSH -- 'bash tests/t.test.sh'" \
           'ls -la'; do
   guarded "$RW" "$sp"
   expect_eq "W4a [$sp] is allowed" "0" "$ST"
   expect_empty "W4a …and left alone: no wrap" "$WRAP"
   expect_empty "W4a …and nothing else on either stream" "$OUT$ERR"
+done
+# BIONIC_SLOT_HELD=1 IS NO OPT-OUT ANY MORE (wave-28 T12; D13): a suite segment carrying it in its
+# own prefix is wrapped like any other, so it asks the gate.
+for sp in 'BIONIC_SLOT_HELD=1 bash tests/t.test.sh' \
+          'cd . && BIONIC_SLOT_HELD=1 bash tests/t.test.sh 2>&1 | tee /tmp/w.log'; do
+  guarded "$RW" "$sp"
+  expect_eq "W4f [$sp] is allowed" "0" "$ST"
+  expect_contains "W4f …and wrapped in the shim: the prefix skips nothing" "booked.sh" "$WRAP"
 done
 guarded "$RW" 'bash tests/gamma.test.sh'
 expect_eq "W4b an off-budget suite is refused" "2" "$ST"
