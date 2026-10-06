@@ -443,6 +443,25 @@ rc_get() {  # <item>
   [ "$(rc_state "${1:-}" 2>/dev/null)" = "written" ]
 }
 
+# MAY THE BLOCK GO WHOLE (wave-27 T78). Remove takes the block out only when nothing of
+# the user's can be between the markers: its body is byte for byte the current body, an
+# earlier one, or nothing — `rc_state`'s stale, or its written with no other line. A
+# written block that also holds a line of the user's, and every changed block, stay.
+# remove.sh asks this in payload mode; its standalone door decides by its copy of the
+# two body lists (`rc_default`, `rc_earlier`).
+rc_removable() {  # <item> — rc 0 when the block's body is one bionic wrote, or nothing
+  local item="${1:-}" want file got
+  case "$(rc_state "$item" 2>/dev/null)" in
+    stale)   return 0 ;;
+    written) ;;
+    *)       return 1 ;;
+  esac
+  want="$(rc_default "$item")" || return 1
+  file="$(rc_file)" || return 1
+  got="$(markers_get "$file" "$RC_START" "$RC_END"; printf 'rc=%s' "$?")"
+  [ "$got" = "${want}"$'\n'"rc=0" ]
+}
+
 # ─── The rc writer ───────────────────────────────────────────────────────────
 #
 # THE WALK IS lib/markers.sh's. `_rc_rewrite` and its staging pair lived here
@@ -504,10 +523,19 @@ rc_set() {  # <item>
 # footprint that reads as a bionic setting whose value nobody can find — the
 # same defect the retired env block left behind, and the reason remove strips
 # markers rather than filtering the line between them.
+#
+# AND IT GOES ONLY WHEN IT IS ALL BIONIC'S (wave-27 T78): a block holding a line bionic
+# never wrote (`rc_removable`) is refused with rc 5, `rc_set`'s reason for the same
+# block, and the rc is byte for byte as it was, so no caller can lose a line by calling
+# it. No block, markers that do not pair up and an rc that is no text file are
+# `markers_strip`'s to answer, as before.
 rc_unset() {  # <item>
   local item="${1:-}" file
   rc_default "$item" >/dev/null || return 1
   file="$(rc_file)" || return 1
+  case "$(rc_state "$item" 2>/dev/null)" in
+    written|changed) rc_removable "$item" || return 5 ;;  # guard: a changed claude() block is never stripped
+  esac
   markers_strip "$file" "$RC_START" "$RC_END"
 }
 

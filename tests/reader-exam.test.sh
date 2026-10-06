@@ -529,7 +529,9 @@ mkdir -p "$R"
 # caller's side, in a shell of its own, from a snapshot taken before sourcing and one after, so a
 # file that exits or changes directory is caught by what the caller sees afterwards, not by what
 # it prints. The probe's own variables and the shell's moving ones (`_`, `BASH*`, `SHELLOPTS`,
-# `LINENO`, `RANDOM`, the clocks…) are left out of both snapshots.
+# `LINENO`, `RANDOM`, the clocks…) are left out of both snapshots. Each variable is read by its own
+# `declare -p <name>`: a bare `declare -p` under bash 3.2 prints `name=value` with no attributes,
+# so the skip list never matched there and the probe read `BASH_LINENO` as the file's act (T80).
 score_act() {
   local out snapdir
   snapdir="$(mktemp -d "$TMP/act.XXXXXX")"
@@ -539,7 +541,7 @@ score_act() {
     snap() {
       declare -F | sort > "$d/$1.functions"
       compgen -v | grep -vxE "$skip" | sort > "$d/$1.names"
-      declare -p | grep -vE "^declare -[^ ]* ($skip)=" > "$d/$1.variables"
+      compgen -v | grep -vxE "$skip" | sort | while read -r k; do declare -p "$k"; done > "$d/$1.variables"
       { set -o; shopt; } > "$d/$1.options"
       umask > "$d/$1.umask"; trap -p > "$d/$1.traps"; alias > "$d/$1.aliases"
       printf "%s\n" "$-" > "$d/$1.flags"; pwd > "$d/$1.pwd"

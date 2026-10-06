@@ -6,8 +6,11 @@
 # order it comes back off in. One item at a time, each one announced before it is
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
 # the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
-# settings, the retired permission block, the tools it installed, the plugin
-# data directory — and then the native plugin uninstall as the finisher.
+# settings, the retired permission block, the plugin data directory — and then
+# the native plugin uninstall as the finisher. The tools setup offers are NAMED,
+# never removed: nothing on a machine records which of them bionic installed, so
+# each one present is listed with the command to remove it by hand (the tools
+# item below says why).
 #
 # THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
 # consent does not unlock them:
@@ -214,6 +217,29 @@ BIONIC_ALIAS_END="$RM_ALIAS_END"
 # env.sh's RC_START / RC_END. Verbatim, box-drawing dashes included.
 RM_RC_START='# ─── bionic:rc:start ───'
 RM_RC_END='# ─── bionic:rc:end ───'
+# from env.sh: every body bionic wrote between that pair, the current one and the
+# earlier ones (wave-27 T78). The standalone door takes the block out only when it
+# holds one of them, or nothing (`_rm_rc_block`). Under env.sh's names, so in payload
+# mode the library's definitions, sourced below, replace these; tests/rc-item.test.sh
+# §T78 pins both line for line.
+rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
+  case "${1:-}" in
+    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    *)            return 1 ;;
+  esac
+  return 0
+}
+
+rc_earlier() {  # <item> <n> — prints the nth earlier body, rc 1 when there is none
+  case "${1:-}:${2:-}" in
+    # 48b37383 (2026-08-22) until 40be1c30: the flag that started the session in bypass.
+    claude-proxy:1) printf '%s\n' 'claude() { command claude --dangerously-skip-permissions "$@"; }' ;;
+    # 40be1c30 (2026-08-27) until 484afee2 (wave-27 T75), which put `unalias` above it.
+    claude-proxy:2) printf '%s\n' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
 # from env.sh: the working-principles item's markers — the block setup writes
 # into the user's own CLAUDE.md. Copies, for the same reason as the pair above;
 # tests/principles-item.test.sh §REMOVE pins them byte-equal to env.sh's
@@ -321,6 +347,10 @@ RM_SKIPPED_LIST=""
 RM_NOT_CHECKED=0
 RM_NOT_CHECKED_LIST=""
 RM_LEFTOVERS=""
+# The tool rows named and left for the user (the tools item): neither removed,
+# clean nor skipped, so counted in none of those and in nothing that decides the
+# exit status or the finisher.
+RM_BYHAND_LIST=""
 
 _rm_removed() { RM_REMOVED=$((RM_REMOVED + 1)); echo "  ✓ ${1}"; }
 _rm_clean()   { RM_CLEAN=$((RM_CLEAN + 1));     echo "  ✓ ${1} — already clean"; }
@@ -361,6 +391,12 @@ _rm_not_checked() {  # <what was not checked> <why, in the user's terms>
   return 0
 }
 _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${1}"; }
+_rm_print_byhand() {
+  [ -n "$RM_BYHAND_LIST" ] || return 0
+  echo "  left for you to remove by hand:"
+  printf '%s' "$RM_BYHAND_LIST"
+  echo ""
+}
 
 # ─── Consent ─────────────────────────────────────────────────────────────────
 #
@@ -1176,16 +1212,9 @@ _rm_item_verb() {  # <id>
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
-    tool:*)
-      case "${1#tool:}" in
-        # review-d D-1: the ONLY tool row whose removal touches a settings.json key the
-        # user could have repointed at their own value, so it is the only one whose
-        # bullet says the clear is conditional — every other row's uninstall is
-        # unconditional once this page is consented to.
-        ccstatusline)
-          echo "remove ccstatusline (uninstalls the package; clears .statusLine only if it still names ccstatusline)" ;;
-        *) echo "remove ${1#tool:}" ;;
-      esac ;;
+    # Only a native plugin the registry records as bionic's reaches the page; every
+    # other tool row is named by the tools item and never offered (wave-27).
+    tool:*)                echo "remove ${1#tool:}" ;;
     *)                     return 1 ;;
   esac
   return 0
@@ -1232,7 +1261,11 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       return 1 ;;
     claude-proxy)
       _rm_regular "$RC_FILE" >/dev/null || return 1
-      _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END" ;;
+      _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END" || return 1
+      # Only a block that is all bionic's is asked about; a changed or malformed one is
+      # named after the page instead (wave-27 T78).
+      case "$(_rm_rc_block)" in ours*) return 0 ;; esac
+      return 1 ;;
     working-principles)
       _rm_regular "$RM_PRINCIPLES_FILE" >/dev/null || return 1
       _rm_file_has_marker "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" ;;
@@ -1273,7 +1306,10 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       # would" is whether this machine carries anything bionic wrote. deps.sh's
       # `dep_teardown_state` is the same probe for every row where those coincide,
       # and the honest one for the status line, where they no longer do.
+      # NAMED, NEVER ASKED (wave-27). A row `remove_dep` only names has no question,
+      # so it is never on the page and the page's yes reaches none of them.
       [ "$RM_MODE" = "payload" ] || return 1
+      dep_named_only "${id#tool:}" && return 1
       present="$(dep_teardown_state "${id#tool:}")"
       [ "$present" = "yes" ] || return 1
       behavior="$(dep_field "${id#tool:}" removal_behavior)"
@@ -1689,14 +1725,93 @@ _rm_item_environment() {
 # marker pair goes to this script's own block strip. tests/rc-item.test.sh drives
 # both and compares the bytes.
 
+# A BLOCK GOES WHOLE ONLY WHEN IT IS ALL BIONIC'S (wave-27 T78; the rule setup has for
+# the same block, T77). Its body is byte for byte the current body, an earlier one, or
+# nothing: `ours`, removed on a yes. Anything else between the markers is `changed`: a
+# line of the user's, a line edited, the lines swapped. It is never asked about, never
+# on `--all`'s page and never stripped, and it is named by its line range for the
+# user's hand. Markers that do not pair up, two blocks among them, are `malformed`:
+# named by their faults, never asked about either. `<state> <first> <last>`, the range
+# empty when there is no block. Payload mode asks env.sh (`rc_state`, `rc_removable`,
+# `rc_block_range`); the standalone door walks the rc itself, and compares it against
+# its copy of the two body lists.
+_rm_rc_block() {
+  local state="" range line n=0 first="" last="" body="" want k=1
+  if [ "$RM_MODE" = "payload" ] && declare -F rc_removable >/dev/null 2>&1; then
+    state="$(rc_state claude-proxy 2>/dev/null)"
+    case "$state" in
+      written|stale|changed)
+        if rc_removable claude-proxy; then state=ours; else state=changed; fi
+        range="$(rc_block_range)"; printf '%s %s\n' "$state" "${range:- }"; return 0 ;;
+      no|malformed|not-a-file) printf '%s  \n' "$state"; return 0 ;;
+    esac
+  fi
+  _rm_regular "$RC_FILE" >/dev/null || { printf 'not-a-file  \n'; return 0; }
+  if [ ! -f "$RC_FILE" ] || ! _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
+    printf 'no  \n'; return 0
+  fi
+  _rm_marker_faults "$RC_FILE" "$RM_RC_START" "$RM_RC_END" >/dev/null || { printf 'malformed  \n'; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ -z "$first" ] && [ "$line" = "$RM_RC_START" ]; then first="$n"
+    elif [ -n "$first" ] && [ -z "$last" ] && [ "$line" = "$RM_RC_END" ]; then last="$n"
+    elif [ -n "$first" ] && [ -z "$last" ]; then body="${body}${line}"$'\n'; fi
+  done < "$RC_FILE"
+  state=changed
+  if [ -z "$body" ]; then state=ours
+  elif want="$(rc_default claude-proxy)" && [ "$body" = "${want}"$'\n' ]; then state=ours
+  else
+    while want="$(rc_earlier claude-proxy "$k")"; do
+      if [ "$body" = "${want}"$'\n' ]; then state=ours; break; fi
+      k=$((k + 1))
+    done
+  fi
+  printf '%s %s %s\n' "$state" "$first" "$last"
+}
+
+# The rc as a reader knows it: `~/` for a path under HOME, so a line naming it keeps
+# inside 100 columns (doctor.sh `_doctor_tilde`'s shape).
+_rm_tilde() {  # <path>
+  case "$1" in
+    "${HOME}"/*) printf '~%s' "${1#"${HOME}"}" ;;
+    *)           printf '%s' "$1" ;;
+  esac
+}
+
+# bionic's claude() block when this run leaves it, named for the user's hand: a changed
+# block by its line range, in the words a changed retired block is named with
+# (`_rm_block_left`), never by its text; markers that do not pair up by their faults.
+# rc 1 when there is nothing to name.
+_rm_rc_block_left() {
+  local answer state first last
+  answer="$(_rm_rc_block)"
+  state="${answer%% *}"; first="${answer#* }"; last="${first#* }"; first="${first%% *}"
+  case "$state" in
+    changed)
+      echo "  lines ${first} to ${last} of $(_rm_tilde "$RC_FILE") are bionic's claude() block, $(bionic_rc_left_reason changed "$RC_FILE"):"
+      echo "    it is left as it is — edit it by hand"
+      return 0 ;;
+    malformed)
+      echo "  ${RC_FILE}: bionic's claude() block's markers do not pair up:"
+      _rm_say_faults "$RC_FILE" "$RM_RC_START" "$RM_RC_END"
+      return 0 ;;
+  esac
+  return 1
+}
+
 # `keep` (wave-27 T40, review pass 9 note 9): this block is written by
 # lib/markers.sh's `markers_set` with no separator line above it, so a blank line
 # the user had there is theirs, and the payload door already keeps it.
+#
+# THE STRIP REFUSES A CHANGED BLOCK ITSELF (wave-27 T78), on both doors, with rc 5 and
+# the rc byte for byte as it was, so no caller can lose a line by calling it: env.sh's
+# `rc_unset` holds the payload door's guard, the line below the standalone door's.
 _rm_rc_unset() {  # <item>
   if [ "$RM_MODE" = "payload" ] && declare -F rc_unset >/dev/null 2>&1; then
     rc_unset "$1"
     return $?
   fi
+  case "$(_rm_rc_block)" in changed*) return 5 ;; esac  # guard: a changed claude() block is never stripped
   _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END" keep
 }
 
@@ -1705,13 +1820,26 @@ _rm_item_claude_proxy() {
   echo "bionic's claude() shell function:"
 
   if _rm_say_not_a_file "$RC_FILE"; then echo ""; return 0; fi
+  # A changed block is named and not asked about, and a malformed one says where its
+  # markers fail, before any question (wave-27 T78): no answer could take either out.
+  case "$(_rm_rc_block)" in
+    changed*)
+      _rm_rc_block_left
+      echo ""
+      return 0 ;;
+    malformed*)
+      _rm_rc_block_left
+      _rm_leftover "$(_rm_strip_why 2 "$RC_FILE") — nothing was changed"
+      echo ""
+      return 0 ;;
+  esac
   if ! _rm_item_pending claude-proxy; then
     _rm_clean "bionic's claude() shell function in ${RC_FILE}"
     echo ""
     return 0
   fi
 
-  echo "  ${RC_FILE} carries bionic's claude() block; bionic would delete the block and everything between its markers."
+  echo "  bionic's claude() block in $(_rm_tilde "$RC_FILE") holds only bionic's lines; bionic would delete it."
   _rm_consent "Remove bionic's claude() shell function from ${RC_FILE}?"; rm_rc_consent_rc=$?
   if [ "$rm_rc_consent_rc" -ne 0 ]; then
     _rm_skipped "$rm_rc_consent_rc" claude-proxy "bionic's claude() shell function in ${RC_FILE}"
@@ -1722,6 +1850,8 @@ _rm_item_claude_proxy() {
   _rm_rc_unset claude-proxy; rm_rc_unset_rc=$?
   if [ "$rm_rc_unset_rc" = "0" ]; then
     _rm_removed "bionic's claude() shell function in ${RC_FILE}"
+  elif [ "$rm_rc_unset_rc" = "5" ]; then
+    _rm_leftover "changed while remove ran, so nothing was written: ${RC_FILE} is as you left it, and bionic's claude() block is still there"
   else
     # Nothing to clean: a failed strip removes the copy it staged itself, and a file of
     # that name this run did not stage is the user's (wave-27 T75, review pass 54 S5).
@@ -2243,13 +2373,37 @@ _rm_say_block() {  # <file> <start> <end>
 #
 # `remove_dep` is the SSoT for what happens to a dependency: a shared binary is
 # kept with consent already given, a plugin bionic declares is left to the
-# finisher below, a plugin nothing declares gets its own consented uninstall, and
-# only `remove-on-consent` rows reach a package-manager command. Presence is
-# asked first so a machine is not interrogated about packages it never had.
+# finisher below, a plugin nothing declares gets its own consented uninstall when
+# the registry records it as bionic's, and every `remove-on-consent` row is NAMED.
+# Presence is asked first so a machine is not interrogated about packages it
+# never had.
+#
+# NAMED, NEVER REMOVED (wave-27). This item used to remove a `remove-on-consent`
+# row because it was PRESENT, and presence says nothing about who installed it: a
+# package the user installed themselves came off exactly like one bionic put
+# there. Bionic removes only what it can prove is its own — the markers are that
+# proof in the shell rc, the registry's `<name>@bionic` id for a native plugin —
+# and for these rows nothing on the machine records it. So each one present is
+# printed with the command that removes it by hand, nothing is asked and nothing
+# runs, on every door and under `--all`; the summary lists them under their own
+# heading. A record of what bionic installed is what would let this item act
+# again.
 #
 # The dep names are read on fd 3 deliberately: a `while read < <(...)` loop would
 # take the loop's stdin from the process substitution, and remove_dep's consent
 # prompt would then read a dependency name as the user's answer.
+
+# Whether the tools item would name a row on this machine — the empty `--all`
+# page asks it, since a named row is never on the page. Read-only.
+_rm_tools_named_present() {
+  local n
+  [ "$RM_MODE" = "payload" ] || return 1
+  while IFS= read -r n <&3; do
+    [ -n "$n" ] || continue
+    dep_named_only "$n" && [ "$(dep_teardown_state "$n")" = "yes" ] && return 0
+  done 3<<< "$( { dep_names_class basic; dep_names_class when-needed; dep_names_class extra; } )"
+  return 1
+}
 
 _rm_item_tools() {
   # A class of items, not one: each row in the table is its own name, so the
@@ -2281,6 +2435,8 @@ _rm_item_tools() {
           # same-named plugin from another catalog that bionic never installed. It
           # is counted with the rows that were already clean, because reporting an
           # untouched plugin as removed and reporting it as declined are both false.
+          # A row `remove_dep` only names answers 2 as well, and goes on the by-hand
+          # list instead: it is on the machine, so it is not clean either.
           remove_dep "$dep_name"; dep_rc=$?
           case "$dep_rc" in
             0)
@@ -2291,7 +2447,11 @@ _rm_item_tools() {
               fi
               ;;
             2)
-              RM_CLEAN=$((RM_CLEAN + 1))
+              if dep_named_only "$dep_name"; then
+                RM_BYHAND_LIST="${RM_BYHAND_LIST}    • ${dep_name}"$'\n'
+              else
+                RM_CLEAN=$((RM_CLEAN + 1))
+              fi
               ;;
             *)
               RM_SKIPPED=$((RM_SKIPPED + 1))
@@ -2615,27 +2775,51 @@ if [ "$rm_all" = "1" ]; then
   rm_page=0; _rm_print_plan < /dev/null && rm_page=1
   # A read-only rc keeps the alias off the page, and the page says why (wave-27
   # T66, review pass 40 S5).
+  rm_named=0
   if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_read_only "$RC_FILE"; then
     echo "  $(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
+    rm_named=1
   fi
-  if [ "$rm_page" = "0" ]; then
+  # A claude() block that is not all bionic's is off the page, and named after its
+  # items, page or no page (wave-27 T78).
+  _rm_rc_block_left && rm_named=1
+  if [ "$rm_page" = "0" ] && ! _rm_tools_named_present < /dev/null; then
     # No item runs, so the lines the alias and environment items would name are
     # named here (wave-27 T55, T66).
     if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null; then
-      _rm_legacy_alias_not_ours "$RC_FILE"
-      _rm_env_left "$RC_FILE"
+      rm_said="$(_rm_legacy_alias_not_ours "$RC_FILE"; _rm_env_left "$RC_FILE")"
+      [ -n "$rm_said" ] && { printf '%s\n' "$rm_said"; rm_named=1; }
+    fi
+    # A RUN THAT NAMED SOMETHING NEVER SAYS "CLEAN" (wave-27, review pass 67 P2-1):
+    # a changed or malformed claude() block, a retired line or a read-only rc named
+    # above is still on this machine.
+    if [ "$rm_named" = "1" ]; then
+      echo "  nothing for bionic to remove — what is named above is yours to edit by hand."
+      echo ""
+      exit 0
     fi
     echo "  nothing to remove — this machine is already clean."
     echo ""
     exit 0
   fi
-  _rm_consent "Do all of the above?"; rm_all_rc=$?
-  if [ "$rm_all_rc" -ne 0 ]; then
-    echo "  nothing changed."
+  if [ "$rm_page" = "0" ]; then
+    # NOTHING TO CONSENT TO, AND STILL SOMETHING TO NAME (wave-27). A named tool row
+    # is never on the page, so an empty page does not make a clean machine. Every
+    # item runs as the per-item pass does with nobody there to answer: the answer
+    # channel is closed, so each item says what it found and none can act, and the
+    # tools item names its rows for the summary.
+    echo "  nothing for bionic to remove — each item below says what it found."
     echo ""
-    exit 0
+    exec < /dev/null
+  else
+    _rm_consent "Do all of the above?"; rm_all_rc=$?
+    if [ "$rm_all_rc" -ne 0 ]; then
+      echo "  nothing changed."
+      echo ""
+      exit 0
+    fi
+    RM_ALL=1
   fi
-  RM_ALL=1
 fi
 
 _rm_item_legacy_alias
@@ -2670,6 +2854,7 @@ if [ -n "$RM_ONLY" ]; then
   printf '  %d removed · %d already clean · %d skipped by you\n' \
     "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
   echo ""
+  _rm_print_byhand
   if [ -n "$RM_LEFTOVERS" ]; then
     echo "  Leftovers (bionic could not finish these)"
     printf '%s' "$RM_LEFTOVERS"
@@ -2693,6 +2878,8 @@ if [ -n "$RM_SKIPPED_LIST" ]; then
   printf '%s' "$RM_SKIPPED_LIST"
   echo ""
 fi
+
+_rm_print_byhand
 
 if [ -n "$RM_NOT_CHECKED_LIST" ]; then
   echo "  Not checked (bionic couldn't verify — still on this machine)"

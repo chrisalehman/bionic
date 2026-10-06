@@ -13,8 +13,8 @@ Versioning follows semver from 1.9.0 on:
 ## 1.12.0 — 2026-10-05
 
 **Upgrade before you run `/bionic:setup` or `/bionic:remove` again.** In 1.11.0, setup and
-remove can delete lines of your shell rc that are not bionic's, in four ways. 1.12.0 fixes all
-four, and 1.11.x gets no patch. From 1.12.0 no door removes a line of your rc that stands outside
+remove can delete lines of your shell rc that are not bionic's, in six ways. 1.12.0 fixes all
+six, and 1.11.x gets no patch. From 1.12.0 no door removes a line of your rc that stands outside
 a pair of bionic's markers; a marked block is removed as one unit only when its body is byte for
 byte one bionic wrote. Bionic's `claude()` block now opens with
 `unalias claude 2>/dev/null || true`. An alias named `claude` above the block, bionic's own
@@ -84,6 +84,9 @@ What you will notice:
   `landed: row=… branch=… head=… merge=… at=…` header and the stamp lines it judged to
   `record/<plan>/landing-proofs.log`, in one write, before it removes the tree. No path of `land`
   removes or truncates that record.
+- **A tree's record link stays out of your commits.** `spawn-worktree.sh create` adds `/.bionic`
+  to the repository's `.git/info/exclude`, never to your `.gitignore`, so `git add -A` in a tree
+  no longer stages the `.bionic` link it plants.
 - **Setup offers working principles.** `/bionic:setup` offers a short, general set of working
   principles as one item, shows you the file and the whole text, and on your yes writes it between
   `bionic:principles` markers into your global `CLAUDE.md`. Doctor reports the block as present,
@@ -95,8 +98,9 @@ What you will notice:
   outside its markers, for you to delete. A retired block is removed wherever it stands, unless the
   rc would not parse without it, as checked by the rc's own shell on a private copy; nothing in the
   rc is run. A block whose body you changed is left whole and named "changed since bionic wrote
-  it". A file that holds a NUL byte, cannot be read, or is a dangling link is named and never
-  written. A CR LF rc keeps its CRs, and an rc with no final newline gets none.
+  it", the `claude()` block included, by every door. A file that holds a NUL byte, cannot be
+  read, or is a dangling link is named and never written. A CR LF rc keeps its CRs, and an rc with
+  no final newline gets none.
 - **The `claude()` block** in your rc now opens with `unalias claude 2>/dev/null || true`, as the
   upgrade note says. An alias of your own named `claude`, defined above bionic's block, stops having
   effect while the block is there. An alias defined below the block still wins. A block holding
@@ -108,7 +112,13 @@ What you will notice:
   two lines for you to copy, and its summary says
   `edit lines A to B of <rc> by hand — bionic's block, changed since bionic wrote it`. Doctor shows
   a neutral row with no route to setup:
-  `– claude() shell proxy  changed  lines A to B of <rc> — edit it by hand`.
+  `– claude() shell proxy  changed  lines A to B of <rc> — edit it by hand`. Remove, on both
+  doors, under `--only` and under `--all`, leaves a changed block too: it asks nothing, keeps the
+  block off `--all`'s page and names it, after the page's items under `--all`,
+  `lines A to B of <rc> are bionic's claude() block, changed since bionic wrote it:` with
+  `it is left as it is — edit it by hand` on the next line. It takes the block out only when its
+  body is byte for byte one bionic wrote, or empty, and says before it asks that the block holds
+  only bionic's lines.
 - **Each dispatched agent has a scratch directory of its own,**
   `.bionic/tmp/scratch/<session>/<name>/`, named at start. Its start push is one string per file,
   each held under 9,500 characters so the harness never cuts it to a preview.
@@ -140,6 +150,11 @@ What you will notice:
   written, and the evidence gate no longer writes files to stage its refusal.
 - **The doctrine is rewritten inside its byte caps.** It states the three questions and the rigor
   table once, and says what each reader's walls accept.
+- **Remove no longer uninstalls any tool.** `/bionic:remove` names each declared tool it finds,
+  with the command to remove it by hand, and leaves it in place, on every door and under `--all`:
+  bionic keeps no record yet of what it installed, and it removes nothing it cannot prove is its
+  own. The summary lists those tools under `left for you to remove by hand:`. A plugin bionic's
+  own catalog installed is still offered, and removed on your yes.
 
 Newly refused:
 
@@ -197,6 +212,13 @@ Newly refused:
   (`reason=record-unwritable why=proofs-unwritable`, before the merge), and when a declared red's
   debt cannot be written (`reason=debt-unwritten`). The full-suite runner is never honoured as a
   declared red.
+- `spawn-worktree.sh land`, and the stand-down's landing, for a range that adds `.bionic` or any
+  path under it, or changes what kind of thing `.bionic` is; a change to, or deletion of, a path
+  the target already tracks there lands; nothing merges:
+  `spawn-worktree: REFUSED reason=bionic-committed path=<path> commit=<commit> branch=<branch> onto=<onto> fix='git -C <tree> rm -r --cached .bionic, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept`.
+  For a path added under a `.bionic` directory the target tracks, the fix takes that path alone out
+  of the index and keeps the file: `fix='git -C <tree> rm --cached <path>, move <path> out of the
+  tree, commit, run the suites, land again'`.
 - `session-poker.sh release-check` on a checkout with uncommitted changes, with no start for the
   release range or an empty one, and from a dispatched agent; `session-poker.sh proof-add check`
   (only `release-check` writes a check fact). A failing check prints its output and its log path.
@@ -239,8 +261,17 @@ Known limits, carried to the next release:
 - The `claude()` block's first line does not help where the block has been moved inside your own
   `if` or function, where `unalias` is itself aliased, or under bash where `claude` is a readonly
   function: the start-up error stays, as it did with the old body.
+- A `claude()` block you changed is removed by no door: it is yours to edit by hand. While an
+  alias named `claude` stands above it, every shell start keeps printing the error until you do.
+- Nothing judges a `git merge` you type by hand into the integration branch. The documented
+  merge comes after `current 8` has asked the judge, and close-out asks it again after any merge.
 - An rc whose every line ends in CRLF is read as holding no block, and setup appends a second one;
   convert the file to LF line ends first. This is older than this release.
+- Until bionic keeps a record of what it installed (a later release), remove lists every declared
+  tool present, whether or not bionic installed it, and still offers the native plugins bionic's
+  own catalog installed.
+- When SHELL is neither zsh nor bash, the plugin's remove asks about bionic's claude() block and
+  then cannot rewrite the rc, while the standalone remove removes it; no line is lost either way.
 - The verbs only the main session may run are guarded by a reader of the command's text, so a
   path to the hook held in a shell variable steps round that guard.
 - The landing record is not for a network filesystem: its one-write append assumes a local disk.
@@ -253,6 +284,10 @@ Known limits, carried to the next release:
 - Two landings started into one checkout at the same moment can leave that checkout dirty or both
   be refused; nothing is lost. Land one tree at a time. The repair is `git -C <checkout> reset
   --hard` (or removing the one untracked file), then land again. This is older than this release.
+- A tree branched before its target stopped tracking `.bionic` is refused until it removes
+  `.bionic` itself.
+- Session start's sweep of dead sessions slows when many of them each left start files behind
+  (the sweep matches those files per session); a later release indexes them once.
 - The dispatch wall can count as a reader's record a path the fact verb then refuses: a path at
   the system's length limit, one that holds a space, or one that opens with two slashes. The verb's
   refusal names it.

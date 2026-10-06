@@ -993,4 +993,61 @@ expect_false "7j.9 nothing failed — no sweep-failure marker" \
 expect_true "7j.10 …and the unkeyed ephemera no id addresses are untouched" \
   test -f "$R7J/.bionic/tmp/context-spend.state"
 
+section "8. a dead session costs the same however much else .bionic/tmp holds (wave-27 T83)"
+# =============================================================================
+#
+# THE DEFECT (T83, bisected to 272ace16, T68). `patrol_session_state_files` took one glob per
+# class for the per-start files, PER SESSION, and every glob reads the whole directory: the
+# sweep's cost per dead session grew with the directory, so four hundred dead sessions cost
+# 15.4 s where 1.11.0 cost 6.1 s (the hook's own locale, en_US.UTF-8, in which bash's glob
+# matching is several times dearer than in C), against hooks.json's 10-second CLI timeout.
+#
+# A RATIO, SO LOAD CANCELS, AS session-start's 16.8b. The same sixty dead sessions are swept
+# twice, moments apart: once in a bare .bionic/tmp, once beside ten thousand unkeyed files no
+# sweep touches. A per-session read costs the same either way; a per-session scan of the
+# directory costs ~5.7x as much in the padded one (measured at the defect; 1.08-1.18 at
+# 1.11.0 and with the fix), so two is a bound with room on both sides. The locale is set
+# because it is what the CLI hands the hook here; in C the same defect reads far less.
+#
+# FIXTURE FIDELITY. The padding is SYNTHESIZED: unkeyed names that match no class, standing in
+# for the other sessions' files a real .bionic/tmp holds (eight hundred at the field's
+# four-hundred-session pile-up), so the only thing that differs between the drives is the
+# directory's size, never the work the sweep has to do.
+S8_NOW() { python3 -c 'import time; print(time.time())' 2>/dev/null; }
+s8_plant() {  # <repo> <pad>
+  local r="$1" i=0 sid
+  while [ "$i" -lt 60 ]; do
+    sid="$(printf 'dead-%04d-aaaa-bbbb-cccccccccccc' "$i")"
+    plant_session "$r" "$sid" roster patrol
+    i=$(( i + 1 ))
+  done
+  touch -t 202601010000 "$r/.bionic/tmp/"*.state "$r/.bionic/tmp/"*.armed
+  i=0
+  while [ "$i" -lt "$2" ]; do
+    : > "$r/.bionic/tmp/unkeyed-$(printf '%05d' "$i").log"
+    i=$(( i + 1 ))
+  done
+}
+s8_sweep() {  # <repo> -> the seconds in $S8_T, the verb's output in $S8_OUT (no subshell)
+  local r="$1" t0 t1
+  t0="$(S8_NOW)"
+  S8_OUT="$( cd "$r" && LC_ALL=en_US.UTF-8 BIONIC_CLAUDE_HOME="$TMPROOT/home-r8" \
+             CLAUDE_CODE_SESSION_ID="$SID_SELF" bash "$POKER" sweep --window 2>&1 )"
+  t1="$(S8_NOW)"
+  S8_T="$(python3 -c "print(f'{${t1:-0} - ${t0:-0}:.3f}')" 2>/dev/null || echo 0)"
+}
+mkdir -p "$TMPROOT/home-r8/sessions"
+R8A="$(ss_make_project r8a 1s)"; s8_plant "$R8A" 0
+R8B="$(ss_make_project r8b 1s)"; s8_plant "$R8B" 10000
+s8_sweep "$R8A"; S8_BARE="$S8_T"; S8_OUT_A="$S8_OUT"
+s8_sweep "$R8B"; S8_PAD="$S8_T"; S8_OUT_B="$S8_OUT"
+expect_matches "8.0 the bare sweep swept all sixty dead sessions" \
+  'swept 180 file\(s\) across 60 dead session\(s\)' "$S8_OUT_A"
+expect_matches "8.0a …and so did the padded one, the same work" \
+  'swept 180 file\(s\) across 60 dead session\(s\)' "$S8_OUT_B"
+expect_eq "8.0b …which left the ten thousand unkeyed files alone" "10000" \
+  "$(ls "$R8B/.bionic/tmp/" | grep -c '^unkeyed-')"
+expect_true "8.1 a dead session's cost does not grow with the directory: padded under twice bare (${S8_PAD}s / ${S8_BARE}s)" \
+  python3 -c "import sys; sys.exit(0 if ${S8_BARE:-0} > 0 and ${S8_PAD:-999} < 2 * ${S8_BARE:-0} else 1)"
+
 finish
