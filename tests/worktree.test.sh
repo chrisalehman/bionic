@@ -3480,7 +3480,6 @@ lb_tree() {  # <repo> <branch> -> a tree a commit ahead, then a second commit ad
   green_stamp "$t"; printf '%s' "$t"
 }
 lb_first() { printf '%s\n' "$1" | sed -n 1p; }
-lb_cols() { ( . "${REPO}/payload/scripts/lib/width.sh" && bionic_cols "$1" ); }
 
 LB="$(lb_repo "$TMP/land-bionic")"
 LBT="$(lb_tree "$LB" wt/linked)"
@@ -3492,13 +3491,12 @@ LB_SUMS="$(lb_sums "$LB")"; LB_REFS="$(refs_of "$LB")"; LB_STAMPS="$(cat "$(stam
 expect_true "(fixture) the checksum reader reads the directory" test -n "$LB_SUMS"
 OUTLB="$(worktree_land "$LBT" wave/fixture)"; RCLB=$?
 LB_LINE="$(lb_first "$OUTLB")"
-expect_eq   "(b1) a range that commits .bionic is refused: the path, the commit that added it, the remedy" \
-  "bionic: land refused — .bionic is committed in ${LBC:0:12} (git rm -r --cached .bionic)" "$LB_LINE"
+expect_match "(b1) a range that commits .bionic is refused on land's contract line: the path, the commit that added it, the remedy" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LBC:0:12} branch=wt/linked onto=wave/fixture fix='git -C ${LBT} rm -r --cached .bionic, commit, land again' — *" "$LB_LINE"
 expect_eq   "(b1) …exit 2" "2" "$RCLB"
-expect_eq   "(b1w) …its first line is under 100 columns" "yes" "$([ "$(lb_cols "$LB_LINE")" -lt 100 ] && echo yes)"
-expect_contains "(b1d) …the detail says nothing merged and how to land again" \
-  "Nothing is merged; the tree and its stamps are kept." "$OUTLB"
-expect_contains "(b1d) …and names the tree to run the remedy in" "git -C ${LBT} rm -r --cached .bionic" "$OUTLB"
+expect_eq   "(b1) …one line, as its siblings print" "1" "$(printf '%s\n' "$OUTLB" | awk 'END { print NR }')"
+expect_contains "(b1) …saying nothing is merged and the tree and its stamps are kept" \
+  "nothing is merged, the tree and its stamps are kept" "$LB_LINE"
 expect_true  "(b1) the project's .bionic is still a directory" test -d "$LB/.bionic"
 expect_false "(b1) …and not a link" test -L "$LB/.bionic"
 expect_eq    "(b1) …its files byte for byte" "$LB_SUMS" "$(lb_sums "$LB")"
@@ -3506,19 +3504,16 @@ expect_eq    "(b1) no ref moved" "$LB_REFS" "$(refs_of "$LB")"
 expect_true  "(b1) the tree is kept" test -d "$LBT"
 expect_eq    "(b1) …and its stamps" "$LB_STAMPS" "$(cat "$(stamp_file "$LBT")")"
 
-# THE LONGEST PATH: a file deep under .bionic, committed. The line names the top-level entry,
-# whatever the path, so its width does not move; the detail carries the path.
+# A DEEP PATH: a file far under .bionic, committed. The line names that path; the remedy
+# is the same.
 LBD="$(new_tree "$LB" wt/deep)"
 LBD_P=".bionic/docs/record/$(printf 'very-long-directory-name-%s/' 1 2 3 4 5 6)$(printf 'x%.0s' $(seq 1 120)).md"
 mkdir -p "$LBD/${LBD_P%/*}"; echo deep > "$LBD/$LBD_P"
 git -C "$LBD" add -f "$LBD_P" && git -C "$LBD" commit --quiet -m "deep path"; green_stamp "$LBD"
 LBD_C="$(git -C "$LBD" rev-parse HEAD)"
 OUTLBD="$(worktree_land "$LBD" wave/fixture)"
-expect_eq   "(b2) a deep path under .bionic is refused on the same line" \
-  "bionic: land refused — .bionic is committed in ${LBD_C:0:12} (git rm -r --cached .bionic)" "$(lb_first "$OUTLBD")"
-expect_eq   "(b2w) …still under 100 columns with a ${#LBD_P}-character path" "yes" \
-  "$([ "$(lb_cols "$(lb_first "$OUTLBD")")" -lt 100 ] && echo yes)"
-expect_contains "(b2d) …and the detail names the path" "path=${LBD_P}" "$OUTLBD"
+expect_match "(b2) a deep path under .bionic is refused, naming that path and its commit" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=${LBD_P} commit=${LBD_C:0:12} branch=wt/deep *" "$(lb_first "$OUTLBD")"
 expect_eq    "(b2) …the project's .bionic files byte for byte" "$LB_SUMS" "$(lb_sums "$LB")"
 
 # THE REMEDY, TAKEN: the link out of the index, committed; the same tree lands and the directory stands.
@@ -3535,8 +3530,8 @@ bind_plan "$LB" "$LBS_SID" wave/fixture >/dev/null
 LBS="$(lb_tree "$LB" wt/standdown)"; LBS_C="$(git -C "$LBS" rev-parse HEAD)"
 LBS_SUMS="$(lb_sums "$LB")"; LBS_REFS="$(refs_of "$LB")"
 OUTLBS="$(worktree_land_for_session "$LBS" "$LB" "$LBS_SID")"; RCLBS=$?
-expect_eq   "(b4) the stand-down path refuses the same range on the same line" \
-  "bionic: land refused — .bionic is committed in ${LBS_C:0:12} (git rm -r --cached .bionic)" "$(lb_first "$OUTLBS")"
+expect_match "(b4) the stand-down path refuses the same range on the same line" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LBS_C:0:12} branch=wt/standdown onto=wave/fixture *" "$(lb_first "$OUTLBS")"
 expect_eq   "(b4) …exit 2" "2" "$RCLBS"
 expect_eq   "(b4) …no ref moved" "$LBS_REFS" "$(refs_of "$LB")"
 expect_eq   "(b4) …the project's .bionic files byte for byte" "$LBS_SUMS" "$(lb_sums "$LB")"
