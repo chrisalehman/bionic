@@ -188,31 +188,73 @@ section "§2 hand-run parity: a suite invoked by hand re-execs once under /bin/b
 # RUNNING INTERPRETER, not a marker: after `exec /bin/bash "$0"`, `$BASH` is `/bin/bash`, so
 # the re-exec happens exactly once and can never loop (critic K-4, Step 6).
 
-HAND="$TMPROOT/hand.test.sh"
-{ printf '#!/bin/bash\n'
-  printf 'echo start >> "$HAND_COUNT"\n'
-  printf '. "%s/tests/lib/resolve-roots.sh"\n' "$REPO"
-  printf 'echo "BASH_VERSION=$BASH_VERSION" > "$HAND_OUT"\n'
-  printf 'echo "argv=$*" >> "$HAND_OUT"\n'
-  printf 'echo "roots=$BIONIC_HOOKS_DIR" >> "$HAND_OUT"\n'
-} > "$HAND"
-chmod +x "$HAND"
+# THE CHILDREN, NOT ONLY THE SUITE (wave-27 T81). The seam once re-executed the suite and
+# pinned nothing for what it starts, so a hand-run suite was 3.2 while every `bash "$HOOK"`
+# it ran took PATH's 5.3 — the world tests/run.sh never gives a suite. The probe therefore
+# also records what a child `bash -c` and a child `bash <a hook copy>` report, and the PATH
+# its children are handed. The hook copy is a real hook with one line put after its shebang
+# that prints the interpreter and exits.
+HOOK_COPY="$TMPROOT/hook-copy.sh"
+{ head -1 "$BIONIC_HOOKS_DIR/session-poker.sh"
+  printf 'printf "%%s\\n" "$BASH_VERSION"; exit 0\n'
+  tail -n +2 "$BIONIC_HOOKS_DIR/session-poker.sh"
+} > "$HOOK_COPY"
 
-hand_run() {  # hand_run <interpreter> [marker] — leaves HAND_VER / HAND_STARTS / HAND_ARGV
+mk_hand() {  # mk_hand <seam> <file> — a hand-run suite that sources <seam>
+  { printf '#!/bin/bash\n'
+    printf 'echo start >> "$HAND_COUNT"\n'
+    printf '. "%s"\n' "$1"
+    cat <<'HAND_EOF'
+echo "BASH_VERSION=$BASH_VERSION" > "$HAND_OUT"
+echo "argv=$*" >> "$HAND_OUT"
+echo "roots=$BIONIC_HOOKS_DIR" >> "$HAND_OUT"
+echo "child=$(bash -c 'echo "$BASH_VERSION"' 2>/dev/null)" >> "$HAND_OUT"
+echo "hook=$(bash "$HAND_HOOK" 2>/dev/null)" >> "$HAND_OUT"
+echo "first_target=$(readlink "${PATH%%:*}/bash" 2>/dev/null || echo NONE)" >> "$HAND_OUT"
+echo "rest=${PATH#*:}" >> "$HAND_OUT"
+echo "git=$(command -v git 2>/dev/null || echo MISSING)" >> "$HAND_OUT"
+echo "jq=$(command -v jq 2>/dev/null || echo MISSING)" >> "$HAND_OUT"
+HAND_EOF
+  } > "$2"
+  chmod +x "$2"
+}
+HAND="$TMPROOT/hand.test.sh"
+mk_hand "$REPO/tests/lib/resolve-roots.sh" "$HAND"
+
+# The PATH a hand-run is given: the foreign interpreter first, then this suite's own.
+HAND_GIVEN_PATH="$ALT_DIR:$PATH"
+
+hand_run() {  # hand_run <interpreter> [marker] [suite] — leaves HAND_VER / HAND_STARTS / HAND_ARGV / HAND_CHILD …
   : > "$TMPROOT/hand.count"; : > "$TMPROOT/hand.out"
   ( if [ -n "${2:-}" ]; then
       BIONIC_TEST_INTERPRETER_PINNED="$2"; export BIONIC_TEST_INTERPRETER_PINNED
     else
       unset BIONIC_TEST_INTERPRETER_PINNED
     fi
-    PATH="$ALT_DIR:$PATH" \
-    HAND_COUNT="$TMPROOT/hand.count" HAND_OUT="$TMPROOT/hand.out" \
-    "$1" "$HAND" one two ) >/dev/null 2>&1
+    PATH="$HAND_GIVEN_PATH" \
+    HAND_COUNT="$TMPROOT/hand.count" HAND_OUT="$TMPROOT/hand.out" HAND_HOOK="$HOOK_COPY" \
+    "$1" "${3:-$HAND}" one two ) >/dev/null 2>&1
   HAND_VER="$(sed -n 's/^BASH_VERSION=//p' "$TMPROOT/hand.out")"
   HAND_ARGV="$(sed -n 's/^argv=//p' "$TMPROOT/hand.out")"
   HAND_ROOTS="$(sed -n 's/^roots=//p' "$TMPROOT/hand.out")"
+  HAND_CHILD="$(sed -n 's/^child=//p' "$TMPROOT/hand.out")"
+  HAND_HOOKVER="$(sed -n 's/^hook=//p' "$TMPROOT/hand.out")"
+  HAND_FIRST_TARGET="$(sed -n 's/^first_target=//p' "$TMPROOT/hand.out")"
+  HAND_REST="$(sed -n 's/^rest=//p' "$TMPROOT/hand.out")"
+  HAND_GIT="$(sed -n 's/^git=//p' "$TMPROOT/hand.out")"
+  HAND_JQ="$(sed -n 's/^jq=//p' "$TMPROOT/hand.out")"
   HAND_STARTS="$(wc -l < "$TMPROOT/hand.count" | tr -d ' ')"
 }
+
+# The hook copy is a real reader of its interpreter, proved under each before any row uses it.
+expect_eq "2.0 the hook copy reports the interpreter it is run with (/bin/bash)" \
+  "$SYS_VER" "$("$SYS_BASH" "$HOOK_COPY" 2>/dev/null)"
+if [ -n "$ALT_BASH" ]; then
+  expect_eq "2.0b …and the other one under the other interpreter" \
+    "$ALT_VER" "$("$ALT_BASH" "$HOOK_COPY" 2>/dev/null)"
+else
+  skip "2.0b the hook copy under the other interpreter" "this host has only one bash"
+fi
 
 if [ -n "$ALT_BASH" ]; then
   hand_run "$ALT_BASH"
@@ -244,6 +286,39 @@ fi
 hand_run "$SYS_BASH"
 expect_eq "2.5 a hand-run suite ALREADY under /bin/bash does not re-exec" "1" "$HAND_STARTS"
 expect_eq "2.6 …and reports the system version" "$SYS_VER" "$HAND_VER"
+echo ""
+
+section "§2b hand-run parity reaches the children: the suite and all it starts get /bin/bash (T81)"
+#
+# The world tests/run.sh gives a suite is the pin first on PATH for the suite AND every process
+# it starts. A suite typed at a prompt now gets the same world from the same function, which the
+# seam calls on the hand-run path. Both ways a suite starts by hand are driven: under the other
+# interpreter (the seam re-executes it) and already under /bin/bash (no re-exec; this second
+# shape is the one that hid a 5.x-only `case` arm for weeks — the suite was 3.2 and every hook it
+# spawned was not).
+HAND_EXP_GIT="$(PATH="$HAND_GIVEN_PATH" command -v git 2>/dev/null || echo MISSING)"
+HAND_EXP_JQ="$(PATH="$HAND_GIVEN_PATH" command -v jq 2>/dev/null || echo MISSING)"
+for HAND_IN in "$ALT_BASH" "$SYS_BASH"; do
+  [ -n "$HAND_IN" ] || continue
+  HAND_SHAPE="started under /bin/bash"; [ "$HAND_IN" = "$SYS_BASH" ] || HAND_SHAPE="re-executed"
+  hand_run "$HAND_IN"
+  expect_eq "2.7 ($HAND_SHAPE) the suite itself reports the system version" "$SYS_VER" "$HAND_VER"
+  if [ -n "$ALT_BASH" ]; then
+    expect_eq "2.8 ($HAND_SHAPE) a child \`bash -c\` reports the system version" "$SYS_VER" "$HAND_CHILD"
+    expect_eq "2.9 ($HAND_SHAPE) a child \`bash <a hook copy>\` reports the system version" \
+      "$SYS_VER" "$HAND_HOOKVER"
+  else
+    skip "2.8–2.9 ($HAND_SHAPE) a child under a foreign interpreter first on PATH" "this host has only one bash"
+  fi
+  expect_eq "2.10 ($HAND_SHAPE) the first PATH entry the children get is the pin: bash -> /bin/bash" \
+    "$SYS_BASH" "$HAND_FIRST_TARGET"
+  expect_eq "2.11 ($HAND_SHAPE) …and the rest of PATH is the PATH the suite was given, unchanged" \
+    "$HAND_GIVEN_PATH" "$HAND_REST"
+  expect_eq "2.12 ($HAND_SHAPE) git resolves where it did" "$HAND_EXP_GIT" "$HAND_GIT"
+  expect_eq "2.13 ($HAND_SHAPE) jq resolves where it did" "$HAND_EXP_JQ" "$HAND_JQ"
+done
+# NOT VACUOUS: git is on this host, so 2.12 compared two real paths.
+expect_ne "2.14 git was found at all on the PATH the hand-run was given" "MISSING" "$HAND_EXP_GIT"
 echo ""
 
 section "§3 the planted 3.2 incompatibilities: the pin catches what it exists to catch (AC-10)"
@@ -380,6 +455,40 @@ expect_contains "5.3 …naming the suite and why" "- noisy.test.sh" "$DRV_OUT"
 expect_contains "5.4 …in words that send the reader to the missing command" "command not found" "$DRV_OUT"
 expect_regex "5.5 a suite that only QUOTES the phrase stays green" \
   '^  quoting\.test\.sh +✓ PASS' "$DRV_OUT"
+echo ""
+
+section "§6 one pin, one owner: the runner and the seam pin through the same function (T81)"
+#
+# Two copies of the pin are two worlds: the runner's own pin code once gave a suite and its
+# children /bin/bash while the seam, for a hand-run, gave the suite alone. The seam now owns
+# the one function and the runner calls it. Proved both ways: the runner carries no pin code of
+# its own, and a mutant of the seam's function — its PATH line removed, nothing else — takes
+# the pin away from a suite the RUNNER launches and from the children of a suite run by HAND.
+RUN_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/run.sh")"
+SEAM_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/lib/resolve-roots.sh")"
+expect_eq "6.1 the seam builds the pin (the extractor finds it there)" "1" "$SEAM_LN"
+expect_eq "6.2 …and the runner builds none of its own" "0" "$RUN_LN"
+
+MUT_TREE="$TMPROOT/mut-tree"
+mk_tree "$MUT_TREE"
+cp "$PROBE_TREE/tests/probe.test.sh" "$MUT_TREE/tests/probe.test.sh"
+MUT_SEAM="$MUT_TREE/tests/lib/resolve-roots.sh"
+anchor -E "$MUT_SEAM" '^  PATH="\$dir:\$PATH"$' 1
+grep -vE '^  PATH="\$dir:\$PATH"$' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
+expect_eq "6.3 the mutant seam still parses" "0" "$(bash -n "$MUT_SEAM" >/dev/null 2>&1; echo $?)"
+if [ -n "$ALT_BASH" ]; then
+  : > "$TMPROOT/probe.out"
+  drive "$MUT_TREE" "--serial"
+  expect_eq "6.4 the mutant tree's runner still ran its probe (not vacuous)" "0" "$DRV_RC"
+  expect_eq "6.5 the mutant takes the pin from a suite the RUNNER launches" "$ALT_VER" \
+    "$(sed -n 's/^BASH_VERSION=//p' "$TMPROOT/probe.out")"
+  mk_hand "$MUT_SEAM" "$TMPROOT/hand-mut.test.sh"
+  hand_run "$SYS_BASH" "" "$TMPROOT/hand-mut.test.sh"
+  expect_eq "6.6 …and from the children of a suite run by HAND" "$ALT_VER" "$HAND_CHILD"
+  expect_eq "6.7 …while the mutant hand-run itself still ran (not vacuous)" "$SYS_VER" "$HAND_VER"
+else
+  skip "6.4–6.7 the seam mutant breaks the runner and the hand-run alike" "this host has only one bash"
+fi
 echo ""
 
 echo "interpreter-pin: ${SKIPPED} skipped (see SKIP: rows above)"
