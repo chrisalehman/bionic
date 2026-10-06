@@ -13971,7 +13971,8 @@ expect_ne "FACT mutation: …which answers the adversarial question with another
 # `proof_priority` reads it cell by cell, and the findings parser (`proof_findings`) is handed it
 # whole. Pinned here: the parser's priority column is `proof_priority`'s answer for each of the eight
 # cells; the scale file the readers are pushed (`payload/context/severity.md`, row T16's) states the
-# same eight cells in its table; and no other shipped file spells the table. A doctored copy of the
+# same eight cells in its table (a table row is a line opening with `|`: the scale's finding-line
+# form also holds `|S2|`); and no other shipped file spells the table. A doctored copy of the
 # scale with one cell flipped splits from the library.
 FSEV_D="$PRF_D/sev"; mkdir -p "$FSEV_D"
 FSEV_CELLS="S1:on S1:off S2:on S2:off S3:on S3:off S4:on S4:off"
@@ -13982,13 +13983,13 @@ fsev_parsed() {  # <S> <reach> -> the findings parser's priority column for a on
 }
 fsev_scale() {  # <scale file> <S> <reach> -> the cell the scale's table states, as fix, defer or note
   awk -v s="$2" -v r="$3" -F'|' '
-    $2 ~ /^[ \t]*S[1-4][ \t]*$/ { k = $2; gsub(/[ \t]/, "", k); if (k != s) next
+    /^\|/ && $2 ~ /^[ \t]*S[1-4][ \t]*$/ { k = $2; gsub(/[ \t]/, "", k); if (k != s) next
       c = (r == "on" ? $3 : $4); gsub(/^[ \t]+|[ \t]+$/, "", c)
       if (c ~ /^fix/) print "fix"; else print c; exit }' "$1"
 }
 FSEV_SCALE="$BIONIC_HOOKS_DIR/../payload/context/severity.md"
 expect_eq "FACT-SEV precondition: the scale file's table has a row for each of S1 to S4" "4" \
-  "$(awk -F'|' '$2 ~ /^[ \t]*S[1-4][ \t]*$/' "$FSEV_SCALE" 2>/dev/null | wc -l | tr -d ' ')"
+  "$(awk -F'|' '/^\|/ && $2 ~ /^[ \t]*S[1-4][ \t]*$/' "$FSEV_SCALE" 2>/dev/null | wc -l | tr -d ' ')"
 for c in $FSEV_CELLS; do
   s="${c%%:*}"; r="${c#*:}"; want="$(fsev_lib "$s" "$r")"
   expect_regex "FACT-SEV $s $r: proof_priority answers one of fix, defer, note" '^(fix|defer|note)$' "$want"
