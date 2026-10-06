@@ -2500,10 +2500,17 @@ for T78_SH in zsh bash; do
     esac
   done
 done
-# With nothing else to remove there is no page: the changed block is still named.
+# With nothing else to remove there is no page: the changed block is still named. The
+# suite's `claude` stub answers every `mcp get` present, so this run has one of its own that
+# registers nothing, and a PATH with no tool bionic installs.
 T66_SHELL=/bin/zsh
+mkdir -p "$TMP/t78bin"
+printf '%s\n' '#!/bin/bash' 'case "$*" in "plugin list --json") echo "[]" ;; "mcp get"*) exit 1 ;; esac' 'exit 0' > "$TMP/t78bin/claude"
+chmod +x "$TMP/t78bin/claude"
 T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"; t78_plant "$T78_RC" u-between; cp "$T78_RC" "$TMP/t78-before"
-T78_OUT="$(t66_door "$T78_SB" rm-all y)"
+T78_PATH_WAS="$T66_PATH"; T66_PATH="$TMP/t78bin:/usr/bin:/bin"
+T78_OUT="$(printf 'y\n' | t66_env "$T78_SB" bash "$REMOVE_SH" --all 2>&1)"
+T66_PATH="$T78_PATH_WAS"
 expect_contains "T78 remove --all, no page: nothing else to remove" "nothing to remove" "$T78_OUT"
 expect_contains "T78 remove --all, no page: …and the changed block is named" "$(t78_named .zshrc u-between)" "$T78_OUT"
 expect_same_bytes "T78 remove --all, no page: …the rc byte for byte as it was" "$TMP/t78-before" "$T78_RC"
