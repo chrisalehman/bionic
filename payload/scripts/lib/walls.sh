@@ -2669,7 +2669,7 @@ validate_task_ledger() {
       _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want low, medium or high).
 Plan: $PLAN
 Fix: set the '${id}' row's rigor cell to one of low, medium or high before committing."
-      refuse exit2 commit "that task's rigor value is not valid" "use tested, peer-reviewed or audited" "$_eg_detail"
+      refuse exit2 commit "that task's rigor value is not valid" "use low, medium or high" "$_eg_detail"
     fi
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
