@@ -592,7 +592,7 @@ expect_eq "D.15 gate_ask with an unknown kind exits 2" "2" \
 # 8-core machine under a share of 80, so the processor limit is 6.4 cores. `room` runs the
 # verb in a child and appends its rc to the one line it prints.
 section "§ROOM — width follows the machine's load (AC-2.5)"
-room() { ( . "$GATE_LIB" 2>/dev/null; gate_room "$@" 2>&1; printf ' rc=%s' "$?" ); }
+room() { ( . "$GATE_LIB" 2>/dev/null; o="$(gate_room "$@" 2>&1)"; r=$?; printf '%s rc=%s' "$o" "$r" ); }
 fresh room-quiet
 world_machine 8 8192 30 1.0
 world_cost k 5 1.5 30
