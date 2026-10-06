@@ -1720,7 +1720,9 @@ _card_step3() {  # <citation path> <artifact path as given>
   else
     _card_chain_block "$2"
   fi
-  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s · %s\n' \
+  # THE RIGOR HAS A LINE OF ITS OWN: its label and meaning do not fit beside a configured floor
+  # inside the line budget, and the level is what the approval reads at a glance.
+  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s\n    %s\n' \
     "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "$(_card_rigor_line "$WCARD_RIGOR")"
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
