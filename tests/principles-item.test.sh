@@ -998,7 +998,8 @@ expect_absent "FIFO: …and does not say it twice" "not a regular file, not a fi
 # the same command, that `npm` resolves to the stub before running anything. The
 # stubs log their argv and exit 0; `npm` keeps a list of what it "installed" so
 # its `list` answers presence, `npx … install chromium` writes the browser marker
-# the probe reads, and `REC_FAIL=<tool>` makes that one stub exit 1. No `--all`
+# the probe reads, and `REC_FAIL=<tool>` makes that one stub exit 1 (`<tool> <sub>`,
+# that one subcommand of it). No `--all`
 # drive here is answered anything but `n`.
 # ===========================================================================
 
@@ -1008,7 +1009,7 @@ cat > "$REC_STUBS/_stub" <<'STUB'
 #!/bin/bash
 t="${0##*/}"
 echo "$t $*" >> "$REC_LOG"
-case ",${REC_FAIL:-}," in *",${t},"*) exit 1 ;; esac
+case ",${REC_FAIL:-}," in *",${t},"*|*",${t} ${1:-},"*) exit 1 ;; esac
 mkdir -p "$REC_STATE"
 case "$t" in
   npm)
@@ -1198,8 +1199,9 @@ expect_eq "RECORD-REMOVE no: …and the line stays" "1" "$(rec_count "$REC_R2" "
 
 # Recorded, answered yes, the removal failing: the line stays.
 REC_R3="$(rec_installed_home)"
-REC_R3_OUT="$(REC_FAIL=npm rec_remove "$REC_R3" "tool:${REC_TOOL}" y)"
+REC_R3_OUT="$(REC_FAIL="npm uninstall" rec_remove "$REC_R3" "tool:${REC_TOOL}" y)"
 expect_contains "RECORD-REMOVE failed: the removal was tried" "npm uninstall -g ${REC_TOOL}" "$(rec_calls "$REC_R3")"
+expect_contains "RECORD-REMOVE failed: …the run says it failed" "the removal failed — ${REC_TOOL}" "$REC_R3_OUT"
 expect_eq "RECORD-REMOVE failed: …and the line stays" "1" "$(rec_count "$REC_R3" "$REC_TOOL")"
 
 # Present, with a record that names something else: named, never acted on.
