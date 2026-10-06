@@ -8079,110 +8079,15 @@ expect_eq "…and the default ring holds none of them: the pin was honoured by e
 expect_contains "…and that default ring is itself inside the sandbox, never the machine's" \
   "$SANDBOX" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring"
 # ============================================================
-section "BP — every shell file in the tree parses under the SYSTEM interpreter"
+section "BP — no hook or wall library pipes a variable into a quitting grep"
 # ============================================================
 #
-# WHY THIS SECTION EXISTS. `tests/cross-gate-agreement.test.sh` shipped a `case` inside a
-# `$( … )` at task S19. Its own shebang says `#!/bin/bash`, which on macOS is bash 3.2,
-# and 3.2's parser cannot read that construct — so the file that holds every one-owner
-# agreement row this wave added was unparseable by the interpreter it names. It ran green
-# for days because this machine's PATH resolves `bash` to a Homebrew 5.x build, and the
-# runner invokes `bash tests/…`, never `/bin/bash tests/…` (Step-6 review C-2). Nothing in
-# the tree checked parseability under the system interpreter; this does.
+# WHAT MOVED (wave-28 T37). This section held three sweeps. The `/bin/bash -n` parse sweep
+# with its mutant, and the one-line `$(case` grep with its quoted plant, are now
+# tests/shell-lint.test.sh §PARSE and §CASE, rows unchanged, beside the lexer that sees what
+# both miss. What stays is the one shape no lexer of 3.2's grammar can see.
 #
-# IT IS A PARSE CHECK, NOT A RUN. `-n` reads and parses and executes nothing, so this
-# sweep touches no state, spawns no hook and cannot depend on any fixture — it is the
-# cheapest possible whole-tree assertion and the only one in this file that reads the
-# shipped tree rather than a sandbox copy.
-#
-# THE ROSTER (critic K-6). Four directories cover almost everything, but two shipped
-# scripts sit outside all four: `agents-src/render.sh` (not incidental — it writes the
-# version half of AC-26 into `payload/commands/help.md`) and the root `wsl-setup.sh`.
-# Both are named directly rather than adding their parents wholesale, so a stray future
-# `*.sh` dropped elsewhere at the repo root still falls outside the sweep on purpose —
-# widen this list again if that ever needs to change.
-BP_SH="$(cd "$BIONIC_SCRIPTS_DIR" && find hooks payload/scripts payload/hooks tests \
-  agents-src/render.sh wsl-setup.sh -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)"
-expect_eq "the sweep found shell files to check" "yes" \
-  "$([ -n "$BP_SH" ] && echo yes || echo no)"
-
-bp_sweep() {  # <root> <newline-separated relative paths> -> one `FAIL <path>: <msg>` per
-              # file that does not parse
-  local root="$1" list="$2" f
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    /bin/bash -n "$root/$f" 2>&1 | sed "s|^|FAIL $f: |"
-  done <<EOF
-$list
-EOF
-  return 0
-}
-
-BP_OUT="$(bp_sweep "$BIONIC_SCRIPTS_DIR" "$BP_SH")"
-expect_eq "every *.sh under hooks, payload/scripts, payload/hooks and tests parses under /bin/bash" \
-  "" "$BP_OUT"
-expect_eq "…and the system interpreter this asserts against is the one the shebangs name" \
-  "yes" "$([ -x /bin/bash ] && echo yes || echo no)"
-
-# THE MUTATION ARM. A sweep that cannot go red is a sweep that proves nothing. Plant the
-# exact construct C-2 found — a `case` inside a command substitution — in a COPY of a real
-# file under the sandbox, and require the sweep to name that file.
-BP_MUT="$SANDBOX/bp-mutant"
-mkdir -p "$BP_MUT/tests"
-cat > "$BP_MUT/tests/bp-planted.test.sh" <<'BPEOF'
-#!/bin/bash
-# A copy carrying the bash-3.2 defect C-2 found, for the mutation arm of §BP.
-planted() {
-  local n="$1"
-  body=$(
-    for x in $n; do
-      case "$x" in
-        *:*) echo "${x%%:*}" ;;
-        *)   echo "$x" ;;
-      esac
-    done
-  )
-  printf '%s\n' "$body"
-}
-BPEOF
-BP_MUT_OUT="$(/bin/bash -n "$BP_MUT/tests/bp-planted.test.sh" 2>&1)"
-expect_eq "the mutation arm: the planted construct does NOT parse under /bin/bash" "yes" \
-  "$([ -n "$BP_MUT_OUT" ] && echo yes || echo no)"
-expect_contains "…and the failure names the case pattern that closes it" ";;" "$BP_MUT_OUT"
-BP_SWEPT="$(bp_sweep "$BP_MUT" "tests/bp-planted.test.sh")"
-expect_contains "…and the sweep reports it as a FAIL row naming the file" \
-  "FAIL tests/bp-planted.test.sh" "$BP_SWEPT"
-
-# THE OTHER SHAPE, WHICH `-n` CANNOT SEE. A ONE-LINE `case` inside a command substitution
-# PARSES under 3.2 and then evaluates to the tail of its own source text — two rows of §S2
-# in this very file read `expected 'no', got ' echo yes ;; *) echo no ;; esac)'` under
-# /bin/bash while `-n` said the file was fine. So the sweep above is necessary and not
-# sufficient, and this row covers the gap by forbidding the idiom outright.
-# The pattern is written in bracket classes so that this file's own source does not match
-# the rule it enforces.
-BP_RE='[$][(]case '
-BP_INLINE="$(cd "$BIONIC_SCRIPTS_DIR" && LC_ALL=C grep -nE "$BP_RE" \
-  $(printf '%s\n' "$BP_SH" | tr '\n' ' ') 2>/dev/null)"
-expect_eq "no file opens a \`case\` inside a command substitution on one line" "" "$BP_INLINE"
-
-# The mutation arm, and it is the QUOTED shape on purpose: unquoted, 3.2 refuses to parse
-# and `-n` catches it; inside double quotes it parses clean and then truncates the
-# substitution at the first `)` at RUN time, leaking the rest as literal text. That is the
-# shape `-n` cannot see, and the one this grep exists for.
-# A PLANT, not a mutant: printf writes it whole, so no shipped text sits under it for an
-# `anchor` to hold, and §S19.4's cross-gate site pattern rightly does not count it.
-BP_INLINE_PLANT="$SANDBOX/bp-inline.sh"
-BP_DOL='$'
-printf '#!/bin/bash\nx="%s(case "%s1" in *a*) echo yes ;; *) echo no ;; esac)"\nprintf "%%s" "%sx"\n' \
-  "$BP_DOL" "$BP_DOL" "$BP_DOL" > "$BP_INLINE_PLANT"
-expect_eq "the mutation arm: the quoted one-line shape PARSES, so -n cannot catch it" "0" \
-  "$(/bin/bash -n "$BP_INLINE_PLANT" >/dev/null 2>&1; echo $?)"
-expect_contains "…and at run time it leaks its own source text instead of answering" \
-  "esac)" "$(/bin/bash "$BP_INLINE_PLANT" abc 2>/dev/null)"
-expect_eq "…but the grep catches it" "yes" \
-  "$([ -n "$(LC_ALL=C grep -nE "$BP_RE" "$BP_INLINE_PLANT")" ] && echo yes || echo no)"
-
-# THE THIRD SHAPE, WHICH NEITHER `-n` NOR A RUN CAN SEE UNTIL THE DATA GROWS (wave-14 T37).
+# THE SHAPE NEITHER `-n` NOR A RUN CAN SEE UNTIL THE DATA GROWS (wave-14 T37).
 # `echo "$VAR" | grep -q PAT` parses, and answers correctly, for as long as $VAR fits in the
 # 64 KB pipe buffer. Past that the producer is still writing when `grep -q` exits at its
 # FIRST match; it takes SIGPIPE and exits 141, and under `set -o pipefail` — which
@@ -8196,10 +8101,10 @@ expect_eq "…but the grep catches it" "yes" \
 # The fix is a here-string, which has no second process to lose, so the rule is: no wall
 # library and no hook reads a variable through a pipe into a quitting `grep`. Tests are NOT
 # swept — a fixture builder is not a wall, and several here legitimately pipe.
-# Like $BP_RE above, the pattern is written in bracket classes so this file's own source
-# does not match the rule it enforces.
+# The pattern is written in bracket classes so this file's own source does not match the
+# rule it enforces.
 # A literal `$` the printf builders below plant into fixture files without this file's own
-# expansion reaching it — same device $BP_DOL uses for §BP's inline-case mutant.
+# expansion reaching it.
 BP_Q_DOL='$'
 BP_Q_RE='(echo|printf)[^|]*"[$][{A-Za-z_][^|]*[|][[:space:]]*(/usr/bin/)?grep[[:space:]]+-[A-Za-z]*q'
 BP_Q_FILES="$(cd "$BIONIC_SCRIPTS_DIR" && find hooks payload/scripts/lib -name '*.sh' -type f \
@@ -8238,7 +8143,7 @@ expect_eq "…while a CODE line carrying the idiom is still caught, comment or n
 
 # THE MUTATION ARM, in two halves. The first proves the grep discriminates; the second
 # proves the defect it stands for is REAL under pipefail, so the row is not a style pin.
-# A plant written whole by printf, like $BP_INLINE_PLANT above: nothing shipped to anchor.
+# A plant written whole by printf: nothing shipped to anchor.
 BP_Q_PLANT="$SANDBOX/bp-quitting-grep.sh"
 printf '#!/bin/bash\nset -uo pipefail\nBIG="%s1"\nif ! echo "%sBIG" | grep -qE "^needle" ; then\n  echo REFUSED\nelse\n  echo ALLOWED\nfi\n' \
   "$BP_Q_DOL" "$BP_Q_DOL" > "$BP_Q_PLANT"
