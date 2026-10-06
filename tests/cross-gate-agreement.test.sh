@@ -14288,12 +14288,20 @@ rv_level() {  # <word> -> `<level> rc=<n>`, rigor_level's answer
 # dispatch ledger refuses it at the highest level and passes it below.
 rv_bf_plan() { printf -- '---\nrigor: %s\nscale: wave\nmulti_agent: true\n---\n\n# Plan\n' "$1"; }
 printf -- '---\nrigor: high\n---\n\n## SDLC State\ncurrent: 3\n' > "$RV_D/no-tasks.plan.md"
+# THE GATE'S HELPERS ARE DEFINED INSIDE ITS BODY (`_eg_body`), so sourcing walls.sh defines none of
+# them: each is lifted out by its own definition, flush-left from `name() {` to its `}`, and a row
+# below holds every one of them defined, so no answer here is a missing function's silence.
+RV_FNS="effective_row_rigor rigor_ord matrix_auditor_required ledger_shape_fail validate_requirements_pointer step1_evidence_block evidence_line_field extract_continuation resolve_requirements_path validate_dispatch_ledger"
+export RV_FNS
 rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
   rv_bf_plan "$2" > "$RV_D/bf-$2.plan.md"
   bash -c '
     . "$1/refuse.sh" >/dev/null 2>&1; . "$1/fold.sh" >/dev/null 2>&1
     . "$1/run.sh" >/dev/null 2>&1;    . "$1/units.sh" >/dev/null 2>&1
     . "$2" >/dev/null 2>&1
+    for fn in $RV_FNS; do
+      eval "$(awk -v n="$fn" '"'"'$0 ~ "^" n "\\(\\) *\\{" { f = 1 } f { print } f && /^}$/ { exit }'"'"' "$2")"
+    done
     refuse() { echo refused; exit 2; }; log_finding() { echo logged; }
     RIGOR="$3"; SCALE=wave; MULTI_AGENT=true; CURRENT=3; SECTION=""; PLAN="$5"
     case "$4" in
@@ -14305,6 +14313,7 @@ rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
       pointer)  validate_requirements_pointer; echo passed ;;
       dispatch) validate_dispatch_ledger; echo passed ;;
       forward)  if plan_bring_forward "$6" >/dev/null 2>&1; then echo admitted; else echo fired; fi ;;
+      defined)  for fn in $RV_FNS plan_bring_forward; do declare -F "$fn" >/dev/null || echo "missing $fn"; done; echo defined ;;
     esac' _ "$RV_LIB" "$1" "$2" "$3" "$RV_D/no-tasks.plan.md" "$RV_D/bf-$2.plan.md" 2>/dev/null
 }
 rv_rank() {  # <word> -> the plan-write hook's own `rigor_rank` of the word
@@ -14325,6 +14334,8 @@ rv_closed() {  # <word> -> `refused` when the hook refuses the word as a rigor, 
   case "$err" in *"that rigor is not one of the three"*) echo refused ;; *) echo admitted ;; esac
 }
 RV_WALLS="$RV_LIB/walls.sh"
+expect_eq "RIGOR precondition: every wall site this section asks is defined from walls.sh" "defined" \
+  "$(rv_site "$RV_WALLS" high defined)"
 for rv_pair in tested:low:0:relaxed:logged:passed:admitted \
                peer-reviewed:medium:1:owed:logged:passed:admitted \
                audited:high:2:owed:refused:refused:fired; do
