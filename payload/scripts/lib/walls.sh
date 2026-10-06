@@ -940,7 +940,11 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
                     { sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
 
   case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
-  [ "$(_bf_fm_get "$plan_text" rigor)" = "audited" ] || return 0
+  # THE HIGHEST LEVEL, in either vocabulary (lib/run.sh `rigor_level`; wave-28 T44). This
+  # function is also sourced on its own (the plan-write hook, a suite), so the one definition
+  # is loaded from beside this file when the caller has not loaded it.
+  declare -F rigor_level >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/run.sh" >/dev/null 2>&1
+  [ "$(rigor_level "$(_bf_fm_get "$plan_text" rigor)")" = "high" ] || return 0
   [ "$(_bf_fm_get "$plan_text" multi_agent)" = "true" ] || return 0
 
   # (a) THE PRE-14 TABLE. `units_validate` is the one reader of `## Tasks` and already
@@ -2183,40 +2187,36 @@ BIONIC_FINDING_CHANNEL="evidence-gate"
 BIONIC_FINDING_SUBJECT="$PLAN"
 bionic_finding_root() { audit_root; }
 
-# Normalize a task row's rigor cell to its effective rigor lane. Whole-value
-# `case` equality against the rigor enum (bash-3.2 safe — no associative arrays,
-# same idiom as is_r7_key below): a cell already naming a lane passes through; a
-# non-empty cell outside the enum is INVALID; an empty cell inherits the
-# plan-level RIGOR when that itself names a lane, else defaults to `tested` (the
-# floor — see plan Assumption A3). Defined ahead of validate_task_ledger (which
+# Normalize a task row's rigor cell to its effective rigor LEVEL — `low`, `medium` or `high`,
+# lib/run.sh `rigor_level`'s answer, so a cell in either vocabulary resolves to the same level
+# (wave-28 T44; REQ-16, D35): a cell naming a level, in the old word or the new, resolves to it; a
+# non-empty cell outside both is INVALID; an empty cell inherits the plan-level RIGOR's level
+# when that names one, else defaults to `low` (the floor — see plan Assumption A3). Defined ahead of validate_task_ledger (which
 # runs at the `current: T<n>` branch, before is_r7_key is defined below) so the
 # validator can call it — same placement rationale as is_placeholder_value.
 effective_row_rigor() {  # $1 = row's rigor cell
   local cell
   cell=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-  case "$cell" in
-    tested|peer-reviewed|audited) echo "$cell"; return ;;
-    "") : ;;
-    *) echo "INVALID"; return ;;
-  esac
-  case "$RIGOR" in
-    tested|peer-reviewed|audited) echo "$RIGOR" ;;
-    *) echo "tested" ;;
-  esac
+  if [ -n "$cell" ]; then
+    rigor_level "$cell" || echo "INVALID"
+    return
+  fi
+  rigor_level "$RIGOR" || echo "low"
 }
 
-# Total order over the rigor enum, for the per-row FLOOR check (task 4/8).
-# tested < peer-reviewed < audited. An empty/unknown value maps to 0 (the tested
-# floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
+# Total order over the rigor levels, for the per-row FLOOR check (task 4/8).
+# low < medium < high, on `rigor_level`'s answer, so either vocabulary ranks alike. An
+# empty/unknown value maps to 0 (the low floor) so an unset frontmatter rigor never
+# manufactures a phantom downgrade.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-# Mirrors the governing-skill hook's ord map at its rigor check (kept in sync by
-# hand, not imported — the two hooks share no source). bash-3.2 safe whole-value
-# `case`, same idiom as effective_row_rigor above.
-rigor_ord() {  # $1 = a rigor lane name (or empty)
-  case "$1" in
-    peer-reviewed) echo 1 ;;
-    audited)       echo 2 ;;
-    *)             echo 0 ;;  # tested, empty, or unknown → the floor
+# The governing-skill hook ranks the same levels (`rigor_rank`); both read the word through
+# the one definition (wave-28 T44), and tests/cross-gate-agreement.test.sh §RIGOR holds the
+# two ranks equal on all six words.
+rigor_ord() {  # $1 = a rigor word, in either vocabulary (or empty)
+  case "$(rigor_level "$1")" in
+    medium) echo 1 ;;
+    high)   echo 2 ;;
+    *)      echo 0 ;;  # low, empty, or unknown → the floor
   esac
 }
 
@@ -2246,9 +2246,9 @@ rigor_ord() {  # $1 = a rigor lane name (or empty)
 # demand there — the matrix carries no per-row rigor cell to raise.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_auditor_required() {
-  case "$RIGOR" in
-    tested) return 1 ;;
-    *)      return 0 ;;  # peer-reviewed, audited, and anything unrecognized
+  case "$(rigor_level "$RIGOR")" in
+    low) return 1 ;;
+    *)   return 0 ;;  # medium, high, and anything unrecognized
   esac
 }
 
@@ -2321,9 +2321,9 @@ _eg_verdicts_owed() {
 apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
   local id="$1" status="$2" eff="$3" ev="$4"
   case "$eff" in
-    peer-reviewed|audited)
+    medium|high)
       if ! is_proof_shaped "$ev"; then
-        _eg_detail="canonical-sdlc task ${id} evidence must show a command + counts, not prose, at rigor '${eff}' ('${ev}').
+        _eg_detail="canonical-sdlc task ${id} evidence must show a command + counts, not prose, at review rigor ${eff} ('${ev}').
 Plan: $PLAN
 Fix: replace the '- ${id}:' evidence with the actual command invocation and result counts (e.g. 'bash test.sh 12/12 green')."
         refuse exit2 commit "that task's evidence is prose" "record the command and counts" "$_eg_detail"
@@ -2424,7 +2424,7 @@ Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <n
   _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
   [ -z "$_eg_debts" ] || lines="${lines}
 ${_eg_debts}"
-  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at rigor '${2}' needs a reading whose newest is not result=fail, or a newer waiver:
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a reading whose newest is not result=fail, or a newer waiver:
 ${lines}
 Plan: $PLAN
 Fix: register each reading with 'session-poker.sh proof-add review <record> --question <q> --reader <name>', or record the waiver the user gives with 'session-poker.sh waive <q> <reply>'."
@@ -2459,9 +2459,9 @@ enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
   if grep -Ewq 'waiver' <<< "$ev"; then
     return 0  # recorded downgrade — proceed at the lower cell lane
   fi
-  _eg_detail="canonical-sdlc task ${id} lowers rigor from '${RIGOR}' to '${eff}', below the plan's floor.
+  _eg_detail="canonical-sdlc task ${id} lowers rigor from $(rigor_level "$RIGOR") to ${eff}, below the plan's floor.
 Plan: $PLAN
-Fix: raise the cell to at least '${RIGOR}', or record a downgrade: add 'waiver: <user> <date> <reason>' to the '- ${id}:' evidence line (Waiver Protocol)."
+Fix: raise the cell to at least $(rigor_level "$RIGOR"), or record a downgrade: add 'waiver: <user> <date> <reason>' to the '- ${id}:' evidence line (Waiver Protocol)."
   refuse exit2 commit "that task lowers rigor below the floor" "raise the rigor, or waive it" "$_eg_detail"
 }
 
@@ -2480,10 +2480,10 @@ ledger_shape_fail() {  # <fact> <fix> <observation>
   # into a hard block. The policy sentence the frame used to print as its Fix is about
   # audited rigor, not about repairing the row, so under D-1 it becomes `detail` and the
   # caller supplies a real repair (F-P7).
-  if [ "$RIGOR" = audited ]; then
+  if [ "$(rigor_level "$RIGOR")" = high ]; then
     refuse exit2 commit "$1" "$2" "canonical-sdlc task-ledger: $3
 Plan: $PLAN
-Audited rigor makes the ledger-shape checks blocking; a non-audited plan would log this as a finding instead."
+High review rigor makes the ledger-shape checks blocking; a plan below high would log this as a finding instead."
   fi
   log_finding task-ledger "$3"
 }
@@ -2666,9 +2666,9 @@ validate_task_ledger() {
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     eff=$(effective_row_rigor "$rigor_cell")
     if [ "$eff" = "INVALID" ]; then
-      _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited).
+      _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want low, medium or high).
 Plan: $PLAN
-Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing."
+Fix: set the '${id}' row's rigor cell to one of low, medium or high before committing."
       refuse exit2 commit "that task's rigor value is not valid" "use tested, peer-reviewed or audited" "$_eg_detail"
     fi
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
@@ -3736,7 +3736,7 @@ resolve_requirements_path() {  # $1 = raw requirements: value
 validate_requirements_pointer() {
   local current_num b1 raw abs
   case "$SCALE" in wave|epic) : ;; *) return 0 ;; esac
-  [ "$RIGOR" = "audited" ] || return 0
+  [ "$(rigor_level "$RIGOR")" = high ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
@@ -4885,7 +4885,7 @@ validate_intent_evidence() {
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   [ "$SCALE" = "wave" ] || return 0
-  [ "$RIGOR" = "audited" ] || return 0
+  [ "$(rigor_level "$RIGOR")" = high ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
   local tasks rows id ev violations findings _eg_ph
