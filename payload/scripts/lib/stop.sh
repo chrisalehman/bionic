@@ -2517,18 +2517,18 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" UNITS_FACTS_STATE="$_ST_FACTS" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
 
   # THE WIDTH, ASKED AS THE TICK ASKS IT (wave-28 T13; D14, AC-2.8): the ready writer rows this
-  # turn did not launch and no standing decline answered, offered one `gate_room` at a time
-  # (`fill_gate_width`), the open writers not yet showing counted as owed (`fill_gate_owed`), and
-  # a person's cap obeyed. The tick and this wall size their fill by the one function, so on one
-  # reading they name the same rows. A gate that gives no row when a row waits and no cap holds
-  # it is the HOLD the ledger records: a machine fact the plan cannot hold.
-  # Counted in this shell, never inside `$( )`: bash 3.2 reads a `case` pattern's `)` there as
-  # the substitution's end.
+  # turn did not launch, offered one `gate_room` at a time (`fill_gate_width`), the open writers
+  # not yet showing counted as owed (`fill_gate_owed`), and a person's cap obeyed. The tick and
+  # this wall size their fill by the one function, so on one reading they name the same rows: the
+  # rows a standing decline answered stay in the count, as they stay in `missed` (the ledger
+  # charges their idle time to the decline), and the loop below names only the others, up to the
+  # free slots. A gate that gives no row when a row waits and no cap holds it is the HOLD the
+  # ledger records: a machine fact the plan cannot hold. Counted in this shell, never inside
+  # `$( )`: bash 3.2 reads a `case` pattern's `)` there as the substitution's end.
   want=0
   while IFS=$'\t' read -r rest slot; do
     [ "$slot" = w ] || continue
     fill_row_launched "$rest" "$_ST_LAUNCHED" && continue
-    case " $_ST_STANDING_IDS " in *" $rest "*) continue ;; esac
     want=$((want + 1))
   done <<ST_WANT
 $ready
