@@ -502,12 +502,30 @@ Step 3: .bionic/docs/plans/this.md
 ## Other section" > /dev/null
 expect_allow "valid pointer-step evidence — allow" "$h3" 'git commit -m "step 3 done"'
 
+# A lettered step binds the arms of its number (T67, review pass 46 N10), so 8b past Verify
+# owes the matrix Step 8 owes, and the walk arm reads its discharged row; the fixture carries a
+# discharged matrix and the Step-0 `walk: exempt` (T80).
 h3b=$(make_home)
-write_plan "$h3b" "$FM
+write_plan "$h3b" "${FM%---}walk: exempt
+---
 ## SDLC State
 current: 8b
 approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 8b: critic report attached in docs/review.md" > /dev/null
+Step 8b: critic report attached in docs/review.md
+
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
+  tier-run: bash test.sh — unit
+  readback: 40/40 asserted" > /dev/null
 expect_allow "valid step 8b evidence — allow" "$h3b" 'git commit -m "critic done"'
 
 h3c=$(make_home)
