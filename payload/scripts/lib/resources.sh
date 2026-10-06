@@ -218,7 +218,7 @@ _res_free_mb() {  # currently reclaimable memory, in MB
         /^MemAvailable:/ { avail = $2 }
         /^MemFree:/      { free  = $2 }
         /^Cached:/       { if (cached == "") cached = $2 }
-        END { printf "%d", (avail != "" ? avail : free + cached) / 1024 }' /proc/meminfo 2>/dev/null
+        END { printf "%d", (avail != "" ? avail : free + cached) / 1024 }' "${BIONIC_PROBE_PROC:-/proc}/meminfo" 2>/dev/null
       ;;
     *) printf '0' ;;
   esac
@@ -231,7 +231,7 @@ _res_load_1m() {  # one-minute load average
   fi
   case "$(uname -s 2>/dev/null)" in
     Darwin) sysctl -n vm.loadavg 2>/dev/null | awk '{ print $2 }' ;;
-    Linux)  awk '{ print $1 }' /proc/loadavg 2>/dev/null ;;
+    Linux)  awk '{ print $1 }' "${BIONIC_PROBE_PROC:-/proc}/loadavg" 2>/dev/null ;;
     *)      printf '0' ;;
   esac
 }
@@ -283,7 +283,7 @@ _res_free_pct() {  # system-wide free memory as a percentage, or -1 if unreadabl
         END {
           if (total == "" || total + 0 == 0 || avail == "") exit 1
           printf "%d", (avail * 100) / total
-        }' /proc/meminfo 2>/dev/null)" || v=''
+        }' "${BIONIC_PROBE_PROC:-/proc}/meminfo" 2>/dev/null)" || v=''
       ;;
   esac
   _res_is_uint "$v" || v=-1
@@ -332,7 +332,7 @@ _res_swap_pct() {  # swap in use as a percentage of swap configured, or -1 if un
           if (total == "" || free == "") exit 1
           if (total + 0 == 0) { printf "0"; exit 0 }
           printf "%d", ((total - free) * 100) / total
-        }' /proc/meminfo 2>/dev/null)" || v=''
+        }' "${BIONIC_PROBE_PROC:-/proc}/meminfo" 2>/dev/null)" || v=''
       ;;
   esac
   _res_is_uint "$v" || v=-1
@@ -348,6 +348,10 @@ _res_is_pct() {  # a percentage reading: a non-negative integer, or the -1 "unre
 }
 
 _res_cores() {  # this machine's core count, floored at 1 — pressure_sample's default
+  if [ -n "${BIONIC_PROBE_CORES:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_CORES}"
+    return 0
+  fi
   local c=''
   case "$(uname -s 2>/dev/null)" in
     Darwin) c="$(sysctl -n hw.ncpu 2>/dev/null)" ;;
@@ -357,12 +361,89 @@ _res_cores() {  # this machine's core count, floored at 1 — pressure_sample's 
   printf '%s' "$c"
 }
 
-_res_now() {  # the epoch second this call is happening at
+# _res_now — the epoch second this call is happening at.
+#
+# A MOVABLE CLOCK (wave-28 D23). BIONIC_NOW_FILE names a file whose first line is the epoch,
+# READ AGAIN ON EVERY CALL, so a test moves time under a command that is already running
+# (tests/lib/world.sh `world_tick`). It outranks BIONIC_NOW_EPOCH, as BIONIC_LOAD_NOW_FILE
+# outranks BIONIC_PROBE_LOAD_1M: the file is the more specific plant. A file that holds no
+# epoch falls through to the pin and then to the real clock, never to an empty answer.
+_res_now() {
+  local t=''
+  if [ -n "${BIONIC_NOW_FILE:-}" ]; then
+    t="$(awk 'NR == 1 { print $1; exit }' "${BIONIC_NOW_FILE}" 2>/dev/null)"
+    if _res_is_uint "$t"; then
+      printf '%s' "$t"
+      return 0
+    fi
+  fi
   if [ -n "${BIONIC_NOW_EPOCH:-}" ]; then
     printf '%s' "${BIONIC_NOW_EPOCH}"
     return 0
   fi
   date +%s 2>/dev/null
+}
+
+# _res_used_pct / _res_busy_cores / _res_total_mb — the gate's readings (wave-28 D11, D23).
+#
+# SHARES, NOT SIZES. The gate decides in percentages of this machine — memory used against
+# the share, busy cores against share × cores — so the same asks decide alike on a 4-core
+# 4 GB machine and a 32-core 64 GB one (AC-2.3). `_res_total_mb` and `_res_cores` say how big
+# the machine is; nothing the gate admits on reads a fixed megabyte or per-core figure.
+#
+# EVERY ONE HONOURS A PIN, so a suite plants a whole machine (tests/lib/world.sh
+# `world_machine`) and never waits for this one to be in a given state. BIONIC_PROBE_PROC
+# moves every `/proc` read in this file to a directory a suite writes, so the Linux branch is
+# proved on any host.
+
+# _res_used_pct — memory used, 0 to 100; -1 when it cannot be read (the -1 rule above).
+# It is the free percentage read the other way, through `_res_free_pct`: one sensor, so a
+# suite that pins BIONIC_PROBE_FREE_PCT has planted the same machine for both readers.
+_res_used_pct() {
+  if [ -n "${BIONIC_PROBE_USED_PCT:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_USED_PCT}"
+    return 0
+  fi
+  local f
+  f="$(_res_free_pct)"
+  if _res_is_uint "$f" && [ "$f" -le 100 ]; then
+    printf '%s' "$(( 100 - f ))"
+  else
+    printf '%s' "-1"
+  fi
+}
+
+# _res_busy_cores — how many cores are busy now, a decimal: the one-minute load average
+# (`_res_load_1m`, so BIONIC_PROBE_LOAD_1M pins it too when the busy pin is absent). The load
+# counts runnable work, which is the processor reading a shell can take without sampling
+# twice; the gate treats the processor as the soft term, so a lagging reading costs a wait,
+# never a kill.
+_res_busy_cores() {
+  if [ -n "${BIONIC_PROBE_BUSY_CORES:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_BUSY_CORES}"
+    return 0
+  fi
+  _res_load_1m
+}
+
+# _res_total_mb — physical memory in MB (2^20 bytes); -1 when it cannot be read.
+_res_total_mb() {
+  if [ -n "${BIONIC_PROBE_TOTAL_MB:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_TOTAL_MB}"
+    return 0
+  fi
+  local v=''
+  case "$(uname -s 2>/dev/null)" in
+    Darwin)
+      v="$(sysctl -n hw.memsize 2>/dev/null)"
+      _res_is_uint "$v" && v=$(( v / 1048576 ))
+      ;;
+    Linux)
+      v="$(awk '/^MemTotal:/ { printf "%d", $2 / 1024 }' "${BIONIC_PROBE_PROC:-/proc}/meminfo" 2>/dev/null)"
+      ;;
+  esac
+  if ! _res_is_uint "$v" || [ "$v" -lt 1 ]; then v=-1; fi
+  printf '%s' "$v"
 }
 
 # resources_probe — the five machine facts, one line, `key=value` space-separated.
@@ -399,7 +480,7 @@ resources_probe() {
       cores="$(nproc 2>/dev/null)"
       # MemTotal is in kB; round to the nearest GiB rather than flooring, so a 16 GB machine
       # reporting 15.6 GiB of usable RAM does not budget as a 15 GB one.
-      mem_gb="$(awk '/^MemTotal:/ { printf "%d", ($2 + 524288) / 1048576 }' /proc/meminfo 2>/dev/null)"
+      mem_gb="$(awk '/^MemTotal:/ { printf "%d", ($2 + 524288) / 1048576 }' "${BIONIC_PROBE_PROC:-/proc}/meminfo" 2>/dev/null)"
       disk_free_gb="$(df -BG -P . 2>/dev/null | tail -1 | awk '{ v = $4; sub(/G$/, "", v); print v }')"
       ;;
     *)
