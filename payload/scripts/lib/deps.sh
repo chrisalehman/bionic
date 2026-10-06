@@ -838,14 +838,19 @@ _dep_check_mcp_server() {
 # `<name>@<version>`; a package is present when its name is in that index, and
 # the newest recorded version rides along. `unknown` only when pnpm itself, or
 # the store, cannot be found — that is a cause doctor can name, not a shrug.
+# The name is matched only where it BEGINS an entry, at a string's start or after
+# a byte no package name holds, so `framer-motion@…` is never motion; it is matched
+# literally, its regex characters escaped, so a scoped `@scope/name` is its whole self.
 _dep_check_pnpm_store() {
-  local name="$1" store idx ver
+  local name="$1" store idx ver ere
   _dep_have pnpm || { echo "unknown|unknown"; return 0; }
   store="${BIONIC_PNPM_STORE:-$(pnpm store path 2>/dev/null)}"
   idx="${store}/index.db"
   [ -n "$store" ] && [ -f "$idx" ] || { echo "unknown|unknown"; return 0; }
-  ver="$(/usr/bin/strings "$idx" 2>/dev/null | /usr/bin/grep -o "${name}@[0-9][0-9A-Za-z.+-]*" \
-         | sed "s/^${name}@//" | sort -V | tail -1)"
+  ere="$(printf '%s' "$name" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
+  ver="$(/usr/bin/strings "$idx" 2>/dev/null \
+         | LC_ALL=C /usr/bin/grep -oE "(^|[^A-Za-z0-9@/_.-])${ere}@[0-9][0-9A-Za-z.+-]*" \
+         | sed 's/.*@//' | sort -V | tail -1)"
   if [ -n "$ver" ]; then echo "yes|${ver}"; else echo "no|unknown"; fi
 }
 
@@ -1889,7 +1894,9 @@ _dep_native_registry_state() {  # <name> -> ours|other|absent|unknown
 # The command that would remove a `remove-on-consent` row, as one line for a
 # person to read and run. Composed, never executed: `remove_dep` prints it as
 # the by-hand command and runs nothing. The whole directory an install created
-# is named, and nothing above it, so the line removes no more than the row.
+# is named, and nothing above it, so the line removes no more than the row. The
+# two rows that live in a cache other projects share (`playwright-browser`,
+# `pnpm-store`) name the tool's own command instead, and their arms below say so.
 _dep_remove_plan() {  # <name> -> the plan, one line
   local name="$1" target
   target="$(_dep_locator_target "$(dep_field "$name" source_url)")"
@@ -1905,7 +1912,11 @@ _dep_remove_plan() {  # <name> -> the plan, one line
       fi ;;
     mcp-server)         echo "claude mcp remove ${name} -s user" ;;
     github-skill)       echo "rm -rf $(_dep_skills_dir)/${name}" ;;
-    playwright-browser) echo "rm -rf $(_dep_playwright_cache)" ;;
+    # `ms-playwright` holds every project's Playwright browsers, so the line never
+    # names the cache: Playwright's uninstall takes the browsers of the version it
+    # runs and leaves other versions' builds, and the line says why that is all.
+    playwright-browser)
+      echo "npx --yes playwright@latest uninstall — its cache is shared with your other projects, so nothing here removes it whole" ;;
     # The venv `uv sync` built at the stable path and the lock-hash file beside it;
     # the skill's own files leave with the plugin.
     uv-project)         echo "rm -rf $(_dep_excalidraw_venv_dir) $(_dep_excalidraw_lock_hash_file)" ;;
