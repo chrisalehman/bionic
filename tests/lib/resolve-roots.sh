@@ -103,20 +103,47 @@ fi
 #
 # bionic_interpreter_pin <root> builds <root>/pin holding one entry, `bash -> /bin/bash`, puts
 # it first on PATH and exports PATH and the record marker. The REST of PATH is the caller's
-# own, so `jq`, `git` and `claude` resolve exactly where they did. It returns non-zero and
-# changes nothing when it cannot build that directory or the directory is not this user's.
-# The runner's root is its run's temp root. A hand-run suite has none yet when it sources this
-# file, so its root is one directory per user under the temp directory, made once and reused,
-# never removed: it holds a symlink and nothing else, and removing it while another suite's
-# children resolve `bash` through it would be the race. An entry already there is never
-# replaced, for the same reason.
+# own, so `jq`, `git` and `claude` resolve exactly where they did. The runner's root is its
+# run's temp root. A hand-run suite has none yet when it sources this file, so its root is one
+# directory per user under the temp directory, made once and reused, never removed: it holds a
+# symlink and nothing else, and removing it while another suite's children resolve `bash`
+# through it would be the race. An entry already there is never replaced, for the same reason.
+#
+# THE PATH ITSELF IS JUDGED, NEVER WHAT A LINK POINTS AT (wave-27 T87; review pass 75). That
+# per-user root is a predictable name, and under a shared /tmp anyone can plant it first. `-O`
+# and `-d` follow a link, so a link planted there to any directory this user owns once passed,
+# PATH carried the link's path, and the planter could repoint it mid-run to put their own `bash`
+# under every child. So each of the root and <root>/pin is refused when it IS a symlink (tested
+# first, right after the one mkdir, which never creates through a link), is not a directory, is
+# not this user's, or is writable by group or others. A root made here is mode 0700. A refusal
+# returns non-zero, pins nothing, leaves PATH alone and prints this seam's line once, naming the
+# check; the caller adds nothing to it.
+_bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
+  if [ ! -d "$1" ]; then echo "$1 is not a directory"
+  elif [ ! -O "$1" ]; then echo "$1 is not owned by this user"
+  else
+    case "$(ls -ld "$1" 2>/dev/null)" in
+      ?????w*|????????w*) echo "$1 is writable by group or others" ;;
+    esac
+  fi
+}
 bionic_interpreter_pin() {
-  local root="${1:-}" dir
-  [ -n "$root" ] || return 1
+  local root="${1:-}" dir why=""
+  [ -n "$root" ] || why="no root was given"
   dir="$root/pin"
-  mkdir -p "$dir" 2>/dev/null && [ -O "$root" ] && [ -O "$dir" ] || return 1
-  [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
-  [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] || return 1
+  [ -n "$why" ] || [ -e "$root" ] || [ -L "$root" ] || mkdir -m 0700 "$root" 2>/dev/null
+  [ ! -L "$root" ] || why="$root is a symlink"
+  [ -n "$why" ] || why="$(_bionic_pin_judge "$root")"
+  [ -n "$why" ] || [ -e "$dir" ] || [ -L "$dir" ] || mkdir -m 0700 "$dir" 2>/dev/null
+  [ -n "$why" ] || [ ! -L "$dir" ] || why="$dir is a symlink"
+  [ -n "$why" ] || why="$(_bionic_pin_judge "$dir")"
+  [ -n "$why" ] || [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
+  [ -n "$why" ] || [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] \
+    || why="$dir/bash is not a link to /bin/bash"
+  if [ -n "$why" ]; then
+    echo "resolve-roots.sh: cannot build the interpreter pin under $root — $why, so nothing is pinned" >&2
+    return 1
+  fi
   PATH="$dir:$PATH"
   export PATH
   BIONIC_TEST_INTERPRETER_PINNED=1
@@ -140,8 +167,7 @@ if [ "${0##*/}" != "run.sh" ] \
     fi
   elif [ "$(readlink "${PATH%%:*}/bash" 2>/dev/null)" != "/bin/bash" ]; then
     _bionic_pin_root="${TMPDIR:-/tmp}"
-    bionic_interpreter_pin "${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}" \
-      || echo "resolve-roots.sh: cannot build the interpreter pin under ${_bionic_pin_root%/} — this suite is /bin/bash but what it starts takes PATH's bash" >&2
+    bionic_interpreter_pin "${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}" || :
     unset _bionic_pin_root
   fi
 fi

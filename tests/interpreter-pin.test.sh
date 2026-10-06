@@ -491,5 +491,128 @@ else
 fi
 echo ""
 
+section "§7 the pin's root is judged by the path itself, never by what a link points at (T87)"
+#
+# A hand-run's root is one predictable directory per user under the temp directory. The owner test
+# `-O` follows a link, so a link planted at that path to any directory this user owns once passed,
+# PATH carried the link's path, and repointing the link mid-run made a child `bash` run another
+# script (review pass 75, drive e1b). Each state below is planted in a directory of this suite's
+# own and handed to the function by path — never the real per-user root. A refusal returns
+# non-zero, pins nothing, leaves PATH as it was and prints the seam's line naming the check, once.
+T87_DIR="$TMPROOT/t87"
+mkdir -p "$T87_DIR"
+PIN_GIVEN="$HAND_GIVEN_PATH"
+
+# pin_call <seam> <root> — call the seam's function in a fresh /bin/bash, leaving PIN_RC, PIN_PATH
+# (PATH after the call) and PIN_ERR (the function's own stderr).
+pin_call() {
+  local out
+  out="$(PATH="$PIN_GIVEN" /bin/bash -c '. "$1" >/dev/null 2>&1 || exit 9
+    bionic_interpreter_pin "$2" 2>"$3"; echo "rc=$?"; echo "path=$PATH"' \
+    pin-call "$1" "$2" "$TMPROOT/pin.err" 2>/dev/null)"
+  PIN_RC="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  PIN_PATH="$(printf '%s\n' "$out" | sed -n 's/^path=//p')"
+  PIN_ERR="$(cat "$TMPROOT/pin.err" 2>/dev/null)"
+}
+# pin_plant <state> <base> — plant one state under <base>; prints the root to hand the function.
+pin_plant() {
+  local base="$2"
+  rm -rf "$base"; mkdir -p "$base/owned"; chmod 0700 "$base/owned"
+  case "$1" in
+    fresh)      ;;
+    reuse)      mkdir -m 0700 "$base/root" "$base/root/pin"; ln -s /bin/bash "$base/root/pin/bash" ;;
+    link-root)  ln -s "$base/owned" "$base/root" ;;
+    link-pin)   mkdir -m 0700 "$base/root"; ln -s "$base/owned" "$base/root/pin" ;;
+    mode-0777)  mkdir "$base/root"; chmod 0777 "$base/root" ;;
+    mode-0770)  mkdir "$base/root"; chmod 0770 "$base/root" ;;
+    file-root)  : > "$base/root" ;;
+    bash-other) mkdir -m 0700 "$base/root" "$base/root/pin"; ln -s /bin/sh "$base/root/pin/bash" ;;
+    runner)     printf '%s' "$(mktemp -d "$base/run.XXXXXX")"; return 0 ;;
+  esac
+  printf '%s' "$base/root"
+}
+there() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo absent; fi; }
+inode() { ls -di "$1" 2>/dev/null | awk '{print $1}'; }
+SEAM="$REPO/tests/lib/resolve-roots.sh"
+
+# THE ACCEPTED STATES. Positives first, so every negative below has its extractor proven here.
+R="$(pin_plant fresh "$T87_DIR/fresh")"
+pin_call "$SEAM" "$R"
+expect_eq "7.1 nothing at the root path: the function builds the pin and returns 0" "0" "$PIN_RC"
+expect_eq "7.2 …PATH's first entry is <root>/pin and the rest of PATH is unchanged" \
+  "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+expect_match "7.3 …the root it created is mode 0700" 'drwx------*' "$(ls -ld "$R" 2>/dev/null)"
+expect_eq "7.4 …and pin/bash is a link to exactly /bin/bash" "/bin/bash" "$(readlink "$R/pin/bash")"
+expect_eq "7.5 …with nothing printed" "" "$PIN_ERR"
+expect_eq "7.5b …and the presence extractor the refusals read finds the pin it built" "present" "$(there "$R/pin")"
+
+R="$(pin_plant reuse "$T87_DIR/reuse")"
+T87_ROOT_INO="$(inode "$R")"; T87_LINK_INO="$(inode "$R/pin/bash")"
+expect_nonempty "7.6 the inode extractor reads the planted link" "$T87_LINK_INO"
+pin_call "$SEAM" "$R"
+expect_eq "7.7 a plain 0700 root holding pin/bash -> /bin/bash is reused: returns 0" "0" "$PIN_RC"
+expect_eq "7.8 …PATH's first entry is <root>/pin" "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+expect_eq "7.9 …the root is the same directory" "$T87_ROOT_INO" "$(inode "$R")"
+expect_eq "7.10 …and the bash link is untouched, never replaced" "$T87_LINK_INO" "$(inode "$R/pin/bash")"
+
+R="$(pin_plant runner "$T87_DIR/runner")"
+pin_call "$SEAM" "$R"
+expect_eq "7.11 tests/run.sh's kind of root (its run's mktemp -d) passes every check" "0" "$PIN_RC"
+expect_eq "7.12 …and the runner's pin is what it was: <root>/pin first" "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+
+# THE REFUSED STATES. Each: non-zero, PATH as given, nothing built, the seam's line once, naming
+# the check that failed.
+t87_refused() {  # t87_refused <n> <state> <what the line names> [a path that must stay absent]
+  pin_call "$SEAM" "$R"
+  expect_ne "$1a $2: refused (non-zero)" "0" "$PIN_RC"
+  expect_eq "$1b $2: …PATH is the PATH the call was given" "$PIN_GIVEN" "$PIN_PATH"
+  [ -z "${4:-}" ] || expect_eq "$1c $2: …nothing was built (${4##*/t87/})" "absent" "$(there "$4")"
+  expect_contains "$1d $2: …the seam's own line" \
+    "resolve-roots.sh: cannot build the interpreter pin under $R" "$PIN_ERR"
+  expect_contains "$1e $2: …naming the check that failed" "$3" "$PIN_ERR"
+  expect_eq "$1f $2: …printed once" "1" "$(printf '%s\n' "$PIN_ERR" | grep -c 'cannot build the interpreter pin')"
+}
+R="$(pin_plant link-root "$T87_DIR/link-root")"
+t87_refused 7.13 "a symlink at the root path, to a directory this user owns" \
+  "$R is a symlink" "$T87_DIR/link-root/owned/pin"
+R="$(pin_plant link-pin "$T87_DIR/link-pin")"
+t87_refused 7.14 "a plain root with a symlink at <root>/pin" \
+  "$R/pin is a symlink" "$T87_DIR/link-pin/owned/bash"
+R="$(pin_plant mode-0777 "$T87_DIR/mode-0777")"
+t87_refused 7.15 "a plain root writable by others (0777)" \
+  "$R is writable by group or others" "$R/pin"
+R="$(pin_plant mode-0770 "$T87_DIR/mode-0770")"
+t87_refused 7.16 "a plain root writable by its group (0770)" \
+  "$R is writable by group or others" "$R/pin"
+R="$(pin_plant file-root "$T87_DIR/file-root")"
+t87_refused 7.17 "a file at the root path" "$R is not a directory"
+R="$(pin_plant bash-other "$T87_DIR/bash-other")"
+t87_refused 7.18 "pin/bash a link to something other than /bin/bash" \
+  "$R/pin/bash is not a link to /bin/bash"
+expect_eq "7.18g …and the foreign link is left as it was, not replaced" "/bin/sh" "$(readlink "$R/pin/bash")"
+# A root owned by another user cannot be made in a suite run without privileges (chown needs
+# root), so the owner arm is not driven here; the mode arm (7.15, 7.16) is the test of that rule.
+skip "7.19 a root owned by another user" "unprivileged: chown to another uid needs root; the mode arm 7.15-7.16 stands in"
+
+# THE MUTANT: the root's -L test removed from a copy of the seam, nothing else. It must turn the
+# symlink-root state and that state alone from refused to accepted — the other checks do not
+# lean on it, and it is what stands between a planted link and PATH.
+T87_MUT="$TMPROOT/t87-mutant-seam.sh"
+anchor -E "$SEAM" '^  \[ ! -L "\$root" \] \|\| why=' 1
+grep -vE '^  \[ ! -L "\$root" \] \|\| why=' "$SEAM" > "$T87_MUT"
+expect_eq "7.20 the mutant seam still parses" "0" "$(bash -n "$T87_MUT" >/dev/null 2>&1; echo $?)"
+T87_FLIPS=""
+for T87_STATE in fresh reuse runner link-root link-pin mode-0777 mode-0770 file-root bash-other; do
+  R="$(pin_plant "$T87_STATE" "$T87_DIR/real-$T87_STATE")"; pin_call "$SEAM" "$R"; T87_REAL="$PIN_RC"
+  R="$(pin_plant "$T87_STATE" "$T87_DIR/mut-$T87_STATE")"; pin_call "$T87_MUT" "$R"
+  [ "$T87_REAL" = "$PIN_RC" ] || T87_FLIPS="$T87_FLIPS $T87_STATE"
+  [ "$T87_STATE" != link-root ] || T87_MUT_PATH="$PIN_PATH" T87_MUT_R="$R"
+done
+expect_eq "7.21 the mutant turns the symlink-root state, and that state alone, from refused to accepted" \
+  " link-root" "$T87_FLIPS"
+expect_eq "7.22 …and under the mutant PATH carries the link's path (the defect it guards)" \
+  "$T87_MUT_R/pin:$PIN_GIVEN" "$T87_MUT_PATH"
+echo ""
+
 echo "interpreter-pin: ${SKIPPED} skipped (see SKIP: rows above)"
 finish
