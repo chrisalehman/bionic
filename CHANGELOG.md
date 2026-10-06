@@ -202,7 +202,7 @@ Newly refused:
   declared red.
 - `spawn-worktree.sh land`, and the stand-down's landing, for a range that commits `.bionic` or a
   path under it, unless the target already tracks `.bionic`; nothing merges:
-  `bionic: land refused — .bionic is committed in <commit> (git rm -r --cached .bionic)`.
+  `reason=bionic-committed path=<path> commit=<commit> … fix='git -C <tree> rm -r --cached .bionic, commit, land again'`.
 - `session-poker.sh release-check` on a checkout with uncommitted changes, with no start for the
   release range or an empty one, and from a dispatched agent; `session-poker.sh proof-add check`
   (only `release-check` writes a check fact). A failing check prints its output and its log path.

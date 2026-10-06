@@ -541,29 +541,12 @@ _wt_bionic_committed() {  # <root> <onto head> <tree head> -> "<commit> <first p
   printf '%s %s' "${commit:-$head}" "$path"
 }
 
-# The refusal goes through the refusal library (lib/refuse.sh), loaded in a subshell whose exit is
-# the refusal's own and whose stderr is this function's stdout: every land refusal is on stdout,
-# where `spawn-worktree.sh land` and the standdown's report read it, and `refuse` exits, which
-# the standdown's loop must not. Its first line names the top-level path whatever path the
-# range holds, so its width does not move; the path itself is in the detail.
+# The refusal is land's own contract line, like every sibling (wave-27 T79, A-orch-205): one
+# `REFUSED reason=bionic-committed` line on stdout naming the first path the range holds, the
+# commit that added it (12 hex) and the remedy, which `spawn-worktree.sh land` and the
+# standdown's report read as they read every other land refusal.
 _wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit> <path>
-  local lib out
-  lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/refuse.sh"
-  out="$( {
-    # shellcheck source=/dev/null
-    . "$lib" 2>/dev/null || exit 3
-    refuse exit2 land ".bionic is committed in ${4:0:12}" "git rm -r --cached .bionic" \
-"path=${5} commit=${4} branch=${2} onto=${3}
-Nothing is merged; the tree and its stamps are kept. Merged, a committed .bionic replaces the
-project's .bionic directory, and the plan, the record and the marker in it are gone.
-Take it out of the index: git -C ${1} rm -r --cached .bionic, commit, land again."
-  } 2>&1 )"
-  if [ $? -eq 3 ] || [ -z "$out" ]; then
-    _wt_refuse "bionic-committed commit=${4} path=${5} — git -C ${1} rm -r --cached .bionic, commit, land again"
-    return 2
-  fi
-  printf '%s\n' "$out"
-  return 2
+  _wt_refuse "bionic-committed path=${5} commit=${4:0:12} branch=${2} onto=${3} fix='git -C ${1} rm -r --cached .bionic, commit, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
 }
 
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
