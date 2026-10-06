@@ -151,10 +151,10 @@ What you will notice:
 - **The doctrine is rewritten inside its byte caps.** It states the three questions and the rigor
   table once, and says what each reader's walls accept.
 - **Remove no longer uninstalls any tool.** `/bionic:remove` names each declared tool it finds,
-  with the command to remove it by hand, and leaves it in place, on every door and under `--all`:
-  bionic keeps no record yet of what it installed, and it removes nothing it cannot prove is its
-  own. The summary lists those tools under `left for you to remove by hand:`. A plugin bionic's
-  own catalog installed is still offered, and removed on your yes.
+  with the command to remove it by hand, and leaves it in place, from the plugin, per item and under
+  `--all`: bionic keeps no record yet of what it installed, and it removes nothing it cannot prove
+  is its own. The summary lists those tools under `left for you to remove by hand:`. A plugin
+  bionic's own catalog installed is still offered, and removed on your yes.
 
 Newly refused:
 
@@ -262,7 +262,8 @@ Known limits, carried to the next release:
   `if` or function, where `unalias` is itself aliased, or under bash where `claude` is a readonly
   function: the start-up error stays, as it did with the old body.
 - A `claude()` block you changed is removed by no door: it is yours to edit by hand. While an
-  alias named `claude` stands above it, every shell start keeps printing the error until you do.
+  alias named `claude` stands above it, every shell start keeps printing the error until you do,
+  unless the block's first line is still bionic's `unalias` line.
 - Nothing judges a `git merge` you type by hand into the integration branch. The documented
   merge comes after `current 8` has asked the judge, and close-out asks it again after any merge.
 - An rc whose every line ends in CRLF is read as holding no block, and setup appends a second one;
@@ -270,6 +271,15 @@ Known limits, carried to the next release:
 - Until bionic keeps a record of what it installed (a later release), remove lists every declared
   tool present, whether or not bionic installed it, and still offers the native plugins bionic's
   own catalog installed.
+- The standalone remove (the script run alone, with no `lib/` beside it) cannot read the tool
+  table: its `--all` calls a machine with tools on it "already clean", and an `--all` you decline
+  names no tool. Run `/bionic:remove` from the plugin and answer per item to see the by-hand list.
+- A read-only rc that holds bionic's retired environment block, with a declared tool present, makes
+  `--all` count "1 skipped by you" for a question nobody could answer; nothing is lost, and the
+  block is yours to delete by hand.
+- A lone `excalidraw-venv.lock.sha256` with no venv beside it, which is what deleting the venv by
+  hand leaves, reads "(not installed) — already clean" while the file stays; delete it with
+  `rm ~/.local/share/bionic/excalidraw-venv.lock.sha256` (under `$XDG_DATA_HOME` if you set it).
 - When SHELL is neither zsh nor bash, the plugin's remove asks about bionic's claude() block and
   then cannot rewrite the rc, while the standalone remove removes it; no line is lost either way.
 - The verbs only the main session may run are guarded by a reader of the command's text, so a
