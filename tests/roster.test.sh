@@ -548,4 +548,48 @@ expect_absent "R14d2 …nor red_evidence=" "red_evidence=" "$R5_PLAIN"
 lib roster_row "${R5_BASE[@]}" "lands-red=widget.test.sh until approval:release" >/dev/null
 expect_status "R14e the label's own spelling is not a key" "2" "$?"
 
+# ---------------------------------------------------------------------------------------
+section "R15 — what a reader was pushed at start is a row key (wave-28 T16; REQ-8 AC-8.2, D20)"
+# `hooks/execution-recorder.sh` writes `pushed=<name>[,<name>]` on the row it identifies: the
+# context files its question registrations push, by file name without `.md`. A record from a
+# reader whose row carries `severity` there owes the finding lines. PRESENT-IF-PASSED and LAST:
+# a row 1.12.0 wrote has none, and it still reads by every key it does carry.
+R15_R="$(lib roster_row "${R5_BASE[@]}" "questions=adversarial" "pushed=checks-adversarial,severity")"
+expect_eq "R15a pushed= is written when passed, after questions=" \
+  "${R5_PLAIN}|questions=adversarial|pushed=checks-adversarial,severity" "$R15_R"
+expect_eq "R15b …read back by key as written" "checks-adversarial,severity" "$(field_of_row "$R15_R" pushed)"
+R15_D="$(lib roster_row "${R5_BASE[@]}" "questions=evidence" "lands_red=widget.test.sh until approval:release" \
+  "red_evidence=.bionic/docs/record/wave-01-fixture/T9-red.md" "pushed=checks-evidence")"
+expect_eq "R15c …and after lands_red= and red_evidence=, the keys before it unmoved" \
+  "${R14_R}|pushed=checks-evidence" "$R15_D"
+# THE COPY SHAPE. `row_copy_args` and `adopt_write_row` hand a row's own keys back to this
+# writer; a row carrying `pushed=` must survive that, not be refused as an unknown key.
+R15_ARGS=()
+while IFS= read -r R15_SEG; do R15_ARGS+=("$R15_SEG"); done < <(printf '%s\n' "$R15_R" | tr '|' '\n' | tail -n +2)
+R15_COPY="$(lib roster_row "${R15_ARGS[@]}")"; R15_RC=$?
+expect_eq "R15d a row carrying pushed=, fed back key by key, is accepted" "0" "$R15_RC"
+expect_eq "R15d2 …and reproduces byte for byte" "$R15_R" "$R15_COPY"
+# A 1.13.0 row and a 1.12.0 row side by side, each read by id as the walls and the verbs read one.
+mkdir -p "$R7_DIR/r15"
+R15_F="$R7_DIR/r15/roster-s1.state"
+R15_NEW="$(lib roster_row status=identified session=s1 name=w28-crit agent_id=a15-new launched_at=2026-10-06T10:00:00Z \
+  subagent_type=bionic:critic deliverable=record/c.md tool_use_id=toolu_c plan=none \
+  questions=adversarial pushed=checks-adversarial,severity)"
+# A 1.12.0 row: the same writer with no `pushed=` passed, which is byte for byte what 1.12.0's
+# writer wrote (R13a, R14a: a present-if-passed key leaves the rest of the row unmoved).
+R15_OLD="$(lib roster_row status=identified session=s1 name=w27-rev agent_id=a15-old launched_at=2026-10-05T10:00:00Z \
+  subagent_type=bionic:reviewer deliverable=record/r.md tool_use_id=toolu_r plan=none questions=structure)"
+expect_absent "R15f0 precondition: the 1.12.0 row carries no pushed=" "pushed=" "$R15_OLD"
+expect_contains "R15f0 …beside the questions= it does carry" "|questions=structure" "$R15_OLD"
+printf '%s\n' "$R15_NEW" "$R15_OLD" > "$R15_F"
+R15_GOT="$(lib roster_row_for_id "$R15_F" a15-new)"
+expect_eq "R15e a 1.13.0 row is read by id" "$R15_NEW" "$R15_GOT"
+expect_eq "R15e2 …and its pushed= reads by key" "checks-adversarial,severity" "$(field_of_row "$R15_GOT" pushed)"
+R15_GOT="$(lib roster_row_for_id "$R15_F" a15-old)"
+expect_eq "R15f a 1.12.0 row with no pushed= is read by id" "$R15_OLD" "$R15_GOT"
+expect_eq "R15f2 …its questions= reads by key (the positive on that extractor)" "structure" "$(field_of_row "$R15_GOT" questions)"
+expect_eq "R15f3 …and its pushed= reads empty: absent, the 1.12.0 state" "" "$(field_of_row "$R15_GOT" pushed)"
+lib roster_row "${R5_BASE[@]}" "push=severity" >/dev/null
+expect_status "R15g a near-miss key is still refused" "2" "$?"
+
 finish

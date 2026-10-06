@@ -2496,6 +2496,31 @@ echo "THIRD PARTY — tools and plugins bionic depends on"
 _doctor_third_row " " "name" "version" "source" "state"
 printf '%s' "$THIRD_ROWS"
 
+# ─── The install record (wave-28 T40, D29) ───────────────────────────────────
+#
+# WHAT `remove` MAY ACT ON, AND NOTHING ELSE. `install_dep` writes a line for each
+# tool it installs; `remove` offers to take a tool off only when this record names
+# it, and names every other tool it finds with the command to remove it by hand.
+# So the page shows the record itself: one row per name, read from its newest
+# line. A name bionic's table no longer holds is printed `unknown`, because no
+# door acts on it — the table is what says how to remove a thing.
+echo ""
+echo "INSTALL RECORD — what bionic installed; remove acts only on these"
+INSTALL_RECORD_ROWS="$(dep_record_rows)"
+if [ -z "$INSTALL_RECORD_ROWS" ]; then
+  echo "  none recorded"
+else
+  while IFS=$'\t' read -r _rec_name _rec_kind _rec_at _rec_ver; do
+    [ -n "$_rec_name" ] || continue
+    if dep_row "$_rec_name" >/dev/null 2>&1; then
+      printf '  %s %-19s %s  bionic %s\n' "$(_doctor_cell "$_rec_name" 21)" "$_rec_kind" "$_rec_at" "$_rec_ver"
+    else
+      printf '  %s unknown — bionic'\''s table no longer holds it; remove never acts on it\n' \
+        "$(_doctor_cell "$_rec_name" 21)"
+    fi
+  done <<< "$INSTALL_RECORD_ROWS"
+fi
+
 # ─── Table 3 — the environment this machine runs bionic in ───────────────────
 #
 # TWO FACTS PER NAME, AND NEITHER ANSWERS THE OTHER. `env_get` reads the CLI's
