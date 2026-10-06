@@ -821,4 +821,55 @@ expect_contains "the lint names the ) that leaks, by file and line" \
   "hd-hash.sh:$(mark_line "$TMP/hd-hash.sh" MARK-hho): HEREDOC-PAREN" "$HD_HASH_HITS"
 expect_absent "…and not the ) behind the #, read in the same call" "hd-hash-ok.sh" "$HD_HASH_HITS"
 
+# What 3.2 does when the body RUNS (the plan's T46 ruling, A-orch-23): after the comment's `#`
+# no quote pairs either, so a lone quote there leaves the next line's `)` lone; and a `#` is a
+# comment only at a line's start or after a blank, as each boundary below was measured.
+# hd_plant <file> <body> -> a script that captures a quoted heredoc holding <body> in "$( )"
+# and prints what it captured
+hd_plant() {
+  printf '#!/bin/bash\nx="$(cat <<'"'"'EOT'"'"'\n%s\nEOT\n)"\nprintf '"'"'[%%s]\\n'"'"' "$x"\n' \
+    "$2" > "$1"
+}
+HD_B_DIR="$TMP/hd-bound"
+mkdir -p "$HD_B_DIR"
+HD_B_CASES=""
+hd_case() {  # <name> <leaks|whole> <body>
+  hd_plant "$HD_B_DIR/$1.sh" "$3"; HD_B_CASES="$HD_B_CASES $1:$2"
+}
+hd_case comment-squote leaks "# it's
+x ) y
+' z"
+hd_case comment-dquote leaks '# say "hi
+x ) y
+" z'
+hd_case semicolon leaks 'a;# ) y'
+hd_case pipe leaks 'a|# ) y'
+hd_case open-paren whole 'a(# ) y'
+hd_case close-paren leaks '(a)# ) y'
+hd_case equals leaks 'a=# ) y'
+hd_case brace leaks 'a{# ) y'
+hd_case backquote leaks '`a`# ) y'
+hd_case squote leaks "'a'# ) y"
+hd_case dquote leaks '"a"# ) y'
+hd_case space whole 'see #1 ) here'
+hd_case tab whole "$(printf '\t# x ) y')"
+expect_eq "every planted boundary body parses under /bin/bash -n" "13 of 13" \
+  "$(n=0; ok=0; for c in $HD_B_CASES; do n=$((n + 1))
+       /bin/bash -n "$HD_B_DIR/${c%%:*}.sh" >/dev/null 2>&1 && ok=$((ok + 1)); done
+     echo "$ok of $n")"
+HD_B_HITS="$(cd "$HD_B_DIR" && lint_hits ./*.sh)"
+for c in $HD_B_CASES; do
+  f="$HD_B_DIR/${c%%:*}.sh"
+  if [ "${c#*:}" = leaks ]; then
+    expect_contains "${c%%:*}: run under /bin/bash, the ) leaks the heredoc" "EOT" \
+      "$(/bin/bash "$f" 2>/dev/null)"
+    expect_contains "…and the lint names it by file and line" \
+      "${c%%:*}.sh:$(mark_line "$f" ' ) '): HEREDOC-PAREN" "$HD_B_HITS"
+  else
+    expect_eq "${c%%:*}: run under /bin/bash, the body prints whole" \
+      "[$(sed -n 3p "$f")]" "$(/bin/bash "$f" 2>/dev/null)"
+    expect_absent "…and the lint, in the same call, does not name it" "/${c%%:*}.sh:" "$HD_B_HITS"
+  fi
+done
+
 finish
