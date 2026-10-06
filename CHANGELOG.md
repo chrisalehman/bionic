@@ -211,6 +211,9 @@ Newly refused:
   path under it, or changes what kind of thing `.bionic` is; a change to, or deletion of, a path
   the target already tracks there lands; nothing merges:
   `spawn-worktree: REFUSED reason=bionic-committed path=<path> commit=<commit> branch=<branch> onto=<onto> fix='git -C <tree> rm -r --cached .bionic, commit, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept`.
+  For a path added under a `.bionic` directory the target tracks, the fix takes that path alone out
+  of the index and keeps the file: `fix='git -C <tree> rm --cached <path>, move <path> out of the
+  tree, commit, run the suites, land again'`.
 - `session-poker.sh release-check` on a checkout with uncommitted changes, with no start for the
   release range or an empty one, and from a dispatched agent; `session-poker.sh proof-add check`
   (only `release-check` writes a check fact). A failing check prints its output and its log path.
@@ -273,6 +276,8 @@ Known limits, carried to the next release:
   --hard` (or removing the one untracked file), then land again. This is older than this release.
 - A tree branched before its target stopped tracking `.bionic` is refused until it removes
   `.bionic` itself.
+- Session start's sweep of dead sessions slows when many of them each left start files behind
+  (the sweep matches those files per session); a later release indexes them once.
 - The dispatch wall can count as a reader's record a path the fact verb then refuses: a path at
   the system's length limit, one that holds a space, or one that opens with two slashes. The verb's
   refusal names it.
