@@ -86,7 +86,8 @@
 # nothing replaced the check.
 #
 # CONSENT. `install_dep` and `remove_dep` are the only mutating entry points,
-# and neither mutates before an explicit answer on stdin. No assume-yes knob
+# and neither mutates before an explicit answer on stdin. `remove_dep` mutates
+# only a native plugin the registry records as bionic's; every other row it names. No assume-yes knob
 # exists: "consent per event, never silent, never unattended" is the ratified
 # rule, and an env var that switches it off would be the hole in it.
 #
@@ -1885,29 +1886,63 @@ _dep_native_registry_state() {  # <name> -> ours|other|absent|unknown
   case "$out" in ours|other|absent) echo "$out" ;; *) echo unknown ;; esac
 }
 
-_dep_remove_argv() {  # <name> — one token per line
-  local name="$1" mech target
-  mech="$(dep_field "$name" install_fn_or_check)"
+# The command that would remove a `remove-on-consent` row, as one line for a
+# person to read and run. Composed, never executed: `remove_dep` prints it as
+# the by-hand command and runs nothing. The whole directory an install created
+# is named, and nothing above it, so the line removes no more than the row.
+_dep_remove_plan() {  # <name> -> the plan, one line
+  local name="$1" target
   target="$(_dep_locator_target "$(dep_field "$name" source_url)")"
-  case "$mech" in
-    npm-global) printf '%s\n' npm uninstall -g "$target" ;;
-    uv-tool)    printf '%s\n' uv tool uninstall "$target" ;;
-    mcp-server) printf '%s\n' claude mcp remove "$name" -s user ;;
-    # The whole directory the install created, and nothing above it. Named in
-    # the plan the user consents to, exactly as `playwright-browser`'s cache
-    # removal is — a recursive delete the user cannot see the path of is not a
-    # consented delete.
-    github-skill) printf '%s\n' rm -rf "$(_dep_skills_dir)/${name}" ;;
-    *)          return 1 ;;
+  case "$(dep_field "$name" install_fn_or_check)" in
+    npm-global)         echo "npm uninstall -g ${target}" ;;
+    uv-tool)
+      # notebooklm's skill dir is the second half of its install, named beside the
+      # uv-tool uninstall exactly as the install arm writes both.
+      if [ "$name" = "notebooklm" ]; then
+        echo "uv tool uninstall ${target} && rm -rf $(_dep_claude_home)/skills/notebooklm"
+      else
+        echo "uv tool uninstall ${target}"
+      fi ;;
+    mcp-server)         echo "claude mcp remove ${name} -s user" ;;
+    github-skill)       echo "rm -rf $(_dep_skills_dir)/${name}" ;;
+    playwright-browser) echo "rm -rf $(_dep_playwright_cache)" ;;
+    # The venv `uv sync` built at the stable path and the lock-hash file beside it;
+    # the skill's own files leave with the plugin.
+    uv-project)         echo "rm -rf $(_dep_excalidraw_venv_dir) $(_dep_excalidraw_lock_hash_file)" ;;
+    # The store is content-addressed and shared: no command takes one package out
+    # without evicting what other projects hard-link from, so the line names the
+    # prune, which removes only what nothing references, and says why.
+    pnpm-store)
+      echo "pnpm store prune — the store is shared with your other projects, so this removes only the packages none of them references" ;;
+    # The `.statusLine` clear is conditional: a key the user repointed at their own
+    # renderer is theirs.
+    statusline)
+      echo "npm uninstall -g ${target}, clear .statusLine from $(_dep_settings_file) only if it still names ccstatusline, and remove $(_dep_ccstatusline_config_dir)" ;;
+    *)
+      echo "deps.sh: no removal plan for ${name}" >&2
+      return 1 ;;
   esac
+}
+
+# A line for the terminal with each path that STARTS with the user's home written
+# `~/…`: a word that begins `$HOME/` (the line's first, or after a space). The
+# command still runs as typed in zsh and bash, since the tilde starts the word; a
+# path that only contains the home's spelling further in is printed as it is.
+_dep_home_form() {  # <text>
+  local tl=' ~/' out
+  case "${HOME:-}" in ""|/) printf '%s' "$1"; return 0 ;; esac
+  out=" ${1}"
+  out="${out// "$HOME"\//$tl}"
+  printf '%s' "${out# }"
 }
 
 # THE ONE ENTRY POINT FOR "what happens to this dependency", and its answer is
 # an exit code with three meanings, not two:
 #
 #   0  this row's policy was carried out — removed, or kept with the user told why
-#   2  left in place by policy, nothing asked and nothing declined (critic F-4:
-#      a same-named plugin from a catalog bionic never installed from)
+#   2  left in place by policy, nothing asked and nothing declined: a same-named
+#      plugin from a catalog bionic never installed from (critic F-4), or a
+#      `remove-on-consent` row, named with the command to remove it by hand
 #   1  not done — declined, or a mechanism that failed or could not be read
 #
 # The caller counts 0 and 2 as settled and 1 as outstanding; remove.sh's summary
@@ -1942,20 +1977,38 @@ _dep_statusline_leftovers() {  # <name> -> 0 when this machine carries statuslin
   return 1
 }
 
+# AND THEY CAME APART ON THE VENV (wave-27 T85). A venv built against an older
+# `uv.lock` is `stale` to the report — setup re-syncs it — but it is on the disk
+# all the same, and the teardown read `stale` as "not knowable" and walked past
+# it. So the teardown asks the venv directory alone: here or not, whatever the
+# lock says, and `unknown` only when no home locates it. `check_dep` keeps
+# `stale` for doctor and setup.
 dep_teardown_state() {  # <name> -> yes | no | unknown
   local name="${1:-}" raw
-  if [ "$(dep_field "$name" install_fn_or_check)" = "statusline" ]; then
-    if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
-    return 0
-  fi
+  case "$(dep_field "$name" install_fn_or_check)" in
+    statusline)
+      if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
+      return 0 ;;
+    uv-project)
+      if [ -z "${XDG_DATA_HOME:-${HOME:-}}" ]; then echo "unknown"
+      elif [ -d "$(_dep_excalidraw_venv_dir)" ]; then echo "yes"
+      else echo "no"; fi
+      return 0 ;;
+  esac
   raw="$(check_dep "$name")" || return 1
   raw="${raw#present=}"
   echo "${raw%%|*}"
 }
 
+# 0 when `remove_dep` names this row and leaves it: every `remove-on-consent` row.
+# remove.sh asks it too, so the `--all` page, the tools item and the summary agree
+# with `remove_dep` about which rows are named.
+dep_named_only() {  # <name>
+  [ "$(dep_field "${1:-}" removal_behavior)" = "remove-on-consent" ]
+}
+
 remove_dep() {  # <name>
-  local name="${1:-}" behavior plan line rc
-  local -a argv=()
+  local name="${1:-}" behavior plan
   behavior="$(dep_field "$name" removal_behavior)" || return 1
 
   case "$behavior" in
@@ -2012,106 +2065,19 @@ remove_dep() {  # <name>
       ;;
   esac
 
-  case "$(dep_field "$name" install_fn_or_check)" in
-    playwright-browser)
-      plan="rm -rf $(_dep_playwright_cache)"
-      ;;
-    # THE VENV AND ITS HASH FILE, AND NOTHING ELSE. The skill's own files ship inside
-    # the plugin, so they leave when the plugin does; what a teardown has to account
-    # for here is the stable-path venv `uv sync` built (VENV task, AC-17 — it is no
-    # longer inside the plugin's own tree, so no plugin uninstall knows about it
-    # either) and the lock-hash file written beside it.
-    uv-project)
-      plan="rm -rf $(_dep_excalidraw_venv_dir) $(_dep_excalidraw_lock_hash_file)"
-      ;;
-    pnpm-store)
-      echo "$(_dep_indent)${name}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
-      return 0
-      ;;
-    statusline)
-      # Fix step 3 (bug-ccstatusline-npx-per-render.md): the install arm now
-      # runs a real `npm install -g`, so the removal plan says so too — a
-      # settings.json clear alone would leave the global package on disk.
-      # review-e E-2: this is the sentence printed at the moment of consent,
-      # on BOTH the `--all` and `--only tool:ccstatusline` doors — `--only`
-      # never shows the page bullet `_rm_item_verb` builds, so this is the
-      # only place that door's user reads what the clear will do. It has to
-      # say the same conditional thing that bullet does (review-d D-1):
-      # `.statusLine` is cleared only if it still names ccstatusline.
-      plan="npm uninstall -g $(_dep_locator_target "$(dep_field "$name" source_url)"), clear .statusLine from $(_dep_settings_file) only if it still names ccstatusline, and remove $(_dep_ccstatusline_config_dir)"
-      ;;
-    *)
-      while IFS= read -r line; do argv+=("$line"); done < <(_dep_remove_argv "$name") || true
-      [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no removal mechanism for ${name}" >&2; return 1; }
-      plan="${argv[*]}"
-      # AC-5: notebooklm's skill dir, named in the plan alongside the uv-tool
-      # uninstall — one consent covers both halves, same as the install arm.
-      [ "$name" = "notebooklm" ] && plan="${plan} && rm -rf $(_dep_claude_home)/skills/notebooklm"
-      ;;
-  esac
-
-  echo "$(_dep_indent)${name}: bionic would run: ${plan}"
-  _dep_consent "$(_dep_indent)Remove ${name} now?"
-  case $? in
-    0) ;;
-    2) _dep_not_asked_left "$name"; return 2 ;;
-    *) echo "$(_dep_indent)declined — ${name} left in place."; return 1 ;;
-  esac
-
-  if [ "${#argv[@]}" -gt 0 ]; then
-    "${argv[@]}"
-    rc=$?
-    [ "$name" = "notebooklm" ] && rm -rf "$(_dep_claude_home)/skills/notebooklm"
-    return "$rc"
-  else
-    case "$(dep_field "$name" install_fn_or_check)" in
-      playwright-browser) rm -rf "$(_dep_playwright_cache)" ;;
-      uv-project)
-        rm -rf "$(_dep_excalidraw_venv_dir)" "$(_dep_excalidraw_lock_hash_file)"
-        ;;
-      statusline)
-        # BOTH HALVES (AC-3). The settings-clear used to `return 0` the
-        # instant settings.json was absent, which skipped the config purge
-        # below it entirely whenever the two halves came apart — exactly the
-        # shape a machine with the config directory but no `.statusLine` key
-        # is in. The two removals are independent now: an absent settings
-        # file is nothing to clear, not a reason to stop.
-        local settings dir pkg
-        # THE GLOBAL PACKAGE, THIRD (epic-21 Fix step 3). Best-effort: npm
-        # missing or the uninstall failing is not a reason to abandon the two
-        # removals below it — a package that never installed cleanly is not
-        # made worse by a settings.json this still clears.
-        pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
-        _dep_have npm && npm uninstall -g "$pkg" >/dev/null 2>&1
-        # THE NAME, NOT THE UNION (review-d D-1). `dep_teardown_state` asks
-        # whether ANY of three facts is true — the command names ccstatusline,
-        # OR the config directory exists, OR the package is installed —
-        # because the directory and the package are bionic's to remove even
-        # once the command has moved on. That union is licence to run this
-        # whole arm; it is not licence for what THIS clear does. A `.statusLine`
-        # pointing at the user's own renderer is not bionic's, and must survive
-        # this teardown even when it is reached because of the OTHER two
-        # facts — so the delete is conditional on the one fact that makes it
-        # bionic's, exactly like `_dep_statusline_leftovers`'s own command arm.
-        settings="$(_dep_settings_file)"
-        if [ -f "$settings" ]; then
-          _dep_have jq || return 1
-          _dep_settings_write_jq "$settings" \
-            'if ((.statusLine?.command? // "") | tostring | test("ccstatusline")) then del(.statusLine) else . end' \
-            || return 1
-        fi
-        # THE SAME NEVER-LIST remove.sh's `_rm_purge_dir` enforces, its own
-        # copy rather than a call across files — this library must stay
-        # sourceable with no remove.sh in the process (tests/plugin-lib.test.sh
-        # used to drive remove_dep directly to prove that; it was deleted at
-        # 8582861, epic-18 wave-03, and nothing replaced the drive), the same
-        # reason `bionic_link_target` is duplicated rather than shared.
-        dir="$(_dep_ccstatusline_config_dir)"
-        case "$dir" in
-          */.bionic|*/.bionic/*|""|/|"$HOME") ;;
-          *) rm -rf "$dir" ;;
-        esac
-        ;;
-    esac
-  fi
+  # NAMED, NEVER ACTED ON (wave-27). Every row left here is `remove-on-consent`,
+  # and presence is the only thing this function can know about it: a global
+  # package, a venv, a browser cache, a pnpm store entry, an MCP server, a config
+  # or skill directory look the same whether bionic put them there or the user did, and removing on
+  # presence took a user's own package off exactly as it took bionic's. Bionic removes only what it can
+  # prove is its own — the rc markers are that proof for the shell rc, the
+  # registry's `<name>@bionic` id for a native plugin above — and for these rows
+  # no proof exists yet. So the plan is composed exactly as the removal would have
+  # run it, printed as the command to run by hand, and nothing is asked or run.
+  # The code that ran it is gone, not switched off: a record of what bionic
+  # installed is what would bring it back.
+  plan="$(_dep_remove_plan "$name")" || return 1
+  echo "$(_dep_indent)${name}: present — bionic has no record that it installed it, so it is left in place."
+  echo "$(_dep_indent)  remove it by hand with: $(_dep_home_form "$plan")"
+  return 2
 }
