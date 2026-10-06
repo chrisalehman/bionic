@@ -12521,7 +12521,8 @@ OCC_PF_N=$(printf '%s\n' "$OCC_PF" | sed -n 's/.*writers: budget=1 open=\([0-9][
 cgc_ring
 OCC_TICK=$( cd "$OCC_R" && occ_env bash "$CGSD_POKER" tick 2>&1 )
 OCC_TICK_N=$(printf '%s\n' "$OCC_TICK" | sed -n -e 's/.* occupied=\([0-9][0-9]*\) gap=.*/\1/p' \
-  -e 's/.* and \([0-9][0-9]*\) unacked roster row(s).*/\1/p' | head -1)
+  -e 's/.* and \([0-9][0-9]*\) unacked roster row(s).*/\1/p' \
+  -e 's/.* reached by \([0-9][0-9]*\) unacked roster row(s).*/\1/p' | head -1)
 expect_eq "OCC1 preflight refuses a writer, counting ONE open writer" "1" "$OCC_PF_N"
 expect_eq "OCC2 the tick's occupancy is ONE" "1" "$OCC_TICK_N"
 expect_eq "OCC3 …and the two readers' numbers are equal" "$OCC_PF_N" "$OCC_TICK_N"
@@ -12835,17 +12836,17 @@ section "CG-ledger — ONE ledger reader: the gate's refusal ids ARE the tick's 
 # printed its LEDGER lines only inside the FILL branch, while the gate reads the ledger in every
 # state — so under HOLD, or on the first tick before any roster exists, a plan the gate refused
 # ticked clean. `cgl_case` runs the whole agreement once per state: FILL (a healthy machine and
-# a roster), HOLD (free memory below the hold floor) and NO ROSTER (armed, nothing dispatched:
+# a roster), NO ROOM (a five-minute load over the share; was HOLD) and NO ROSTER (armed, nothing dispatched:
 # the first tick of every run). With no roster both readers take the no-roster rule, so T3's
 # agent-named active row is an `evidence` finding there rather than a `launch` one, and the
 # gate folds the two evidence rows into one refusal.
-# cgl_case <label> <free_mb> <roster: yes|no> <want kinds> <want refusals>
+# cgl_case <label> <five-minute load> <roster: yes|no> <want kinds> <want refusals>
 cgl_case() {
-  local lbl="$1" free="$2" roster="$3" want_kinds="$4" want_n="$5"
+  local lbl="$1" load5="$2" roster="$3" want_kinds="$4" want_n="$5"
   CGL_R=$(new_repo "cgl${lbl}")
   CGL_P="$CGL_R/.bionic/docs/plans/epic-99/cgl.plan.md"
   CGL_RO="$CGL_R/.bionic/tmp/roster-$SID_A.state"
-  CGL_FREE="$free"
+  CGL_LOAD5="$load5"
   mkdir -p "$(dirname "$CGL_P")"
   cat > "$CGL_P" <<CGLEOF
 ---
@@ -12898,7 +12899,7 @@ CGLEOF
   [ "$roster" = yes ] || ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGC_POKER" arm >/dev/null 2>&1 )
   CGL_TICK="$(cgl_tick)"
   case "$lbl" in
-    -hold) expect_contains "CG-ledger${lbl} precondition: the tick is under HOLD" "poker: HOLD free_mb=${free}" "$CGL_TICK" ;;
+    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=0 admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
     -noroster) expect_contains "CG-ledger${lbl} precondition: the tick is the armed first tick, QUIET" \
                  "poker: QUIET — armed, nothing dispatched yet on this session" "$CGL_TICK" ;;
   esac
@@ -12942,7 +12943,7 @@ cgl_tick() {
   cgc_ring
   ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" \
       BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
-      BIONIC_PROBE_FREE_MB="${CGL_FREE:-8192}" \
+      BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_BUSY_CORES_5M="${CGL_LOAD5:-1.0}" \
       bash "$CGC_POKER" tick 2>&1 )
 }
 # The gate's whole channel goes to CGL_OUT and its status to CGL_RC, in this shell: a
@@ -12952,9 +12953,9 @@ cgl_gate() {
     | env -u CLAUDE_PROJECT_DIR HOME="$CGL_R" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_EG" 2>&1)
   CGL_RC=$?
 }
-cgl_case ""          8192 yes "evidence launch status " 3
-cgl_case "-hold"     512  yes "evidence launch status " 3
-cgl_case "-noroster" 8192 no  "evidence status " 2
+cgl_case ""          1.0 yes "evidence launch status " 3
+cgl_case "-hold"     7.0 yes "evidence launch status " 3
+cgl_case "-noroster" 1.0 no  "evidence status " 2
 
 
 # ============================================================
