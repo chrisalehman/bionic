@@ -328,10 +328,10 @@ poke_bind() {  # <repo> -> binds an empty engaged marker to the root's open run,
   [ -n "$p" ] && bound_marker "$1" "$SID" "$p"
   return 0
 }
-poke() {  # <repo> <args...> -> sets OUT, RC
+poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (default: PATH's bash)
   local repo="$1"; shift
   case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
-  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
+  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" "${POKE_BASH:-bash}" "$POKER" "$@" ) \
     > "$TMPROOT/poke.out" 2>&1 &
   local p=$! i=0
   while kill -0 "$p" 2>/dev/null && [ "$i" -lt $(( POKE_BOUND * 10 )) ]; do
@@ -10840,6 +10840,13 @@ expect_contains "61g2 …naming the check line absent" "$(printf 'check\tabsent'
 poke "$R61" release-check
 expect_eq "61g3 release-check runs the declared command and records the pass (exit 0)" "0" "$RC"
 expect_eq "61g4 …a kind=check fact at the working head" "1" "$(/usr/bin/grep -c "^proved: kind=check head=${S61_C2} " "$P61")"
+# The same verb under /bin/bash, the interpreter its shebang names and the one tests/run.sh pins
+# (T80). T31's `case` arm inside the check's own-files `$( )` had no opening paren, which bash 3.2
+# cannot parse, so the verb died there under /bin/bash while every hand run used PATH's bash 5.
+POKE_BASH=/bin/bash poke "$R61" release-check
+expect_eq "61g3b …and under /bin/bash it runs the declared command and records the pass too (exit 0)" "0" "$RC"
+expect_contains "61g3c …its success line names the check at the working head" "kind=check head=${S61_C2}" "$OUT"
+expect_absent "61g3d …and the shell reported no syntax error" "syntax error" "$OUT"
 poke "$R61" current 8
 expect_eq "61g5 AC-6.1 …and current 8 is then admitted (exit 0)" "0" "$RC"
 expect_eq "61g6 …the plan reads current: 8" "8" "$(s61_cur)"
