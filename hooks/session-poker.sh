@@ -6537,11 +6537,13 @@ RC_TAGS
       exit 1
     fi
     # THE CHECK'S OWN FILES (T31; review pass 22 B1). Each word of the command that names one tracked
-    # file, read literally (no glob, no shell parsing), and that the range changes.
+    # file, read literally (no glob, no shell parsing), and that the range changes. The case arm
+    # opens with `(`: bash 3.2, the shebang's interpreter, reads an unopened arm's `)` inside a
+    # `$( )` as the substitution's end (T80).
     RC_CHG="$(set -f
       for RC_W in $RC_CMD; do
         RC_P="$(git --literal-pathspecs -C "$RC_CO" ls-files --full-name --error-unmatch -- "$RC_W" 2>/dev/null)" || continue
-        case "$RC_P" in ''|*"
+        case "$RC_P" in (''|*"
 "*) continue ;; esac
         git --literal-pathspecs -C "$RC_CO" diff --quiet "$RC_BASE" "$RC_HEAD" -- "$RC_P" >/dev/null 2>&1 \
           || printf 'check-changed: %s\n' "$RC_P"

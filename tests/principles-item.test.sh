@@ -408,11 +408,18 @@ section "§CUT-SHORT: a write that fails partway changes nothing (wave-27 T40)"
 # `ulimit -f` in the child, with SIGXFSZ ignored so the write FAILS rather than
 # killing the process: the shape a full disk takes. The user's file is larger
 # than the limit, so the staged copy is cut short partway through it.
+#
+# The limit binds every write the child makes, the interpreter's own included:
+# /bin/bash 3.2 (the shebang's, and tests/run.sh's pin) stages each here-document
+# and here-string in a temp file, and setup reads its checks table (about 4 KB)
+# through one. Under 2 KB setup died there, before the write this row is about,
+# and said there was nothing to set up (T80). So setup's row runs at 32 KB, well
+# above the interpreter's own files, against a user's file near 90 KB.
 
-plant_big() {  # <file> — 300 lines of the user's own, about 4 KB
+plant_big() {  # <file> [lines] — the user's own lines, 300 (about 9 KB) unless told
   local i
   mkdir -p "${1%/*}"
-  for i in $(seq 1 300); do printf 'user line %s of my own notes\n' "$i"; done > "$1"
+  for i in $(seq 1 "${2:-300}"); do printf 'user line %s of my own notes\n' "$i"; done > "$1"
 }
 
 SB_W="$(new_bare_home)"; plant_big "$SB_W/.claude/CLAUDE.md"
@@ -435,8 +442,8 @@ remove_run "$SB_W" y >/dev/null 2>&1
 expect_eq "CUT-SHORT: the same remove with room to write does strip the block (the twin)" "0" \
   "$(count_lines_equal "$SB_W/.claude/CLAUDE.md" "$START_LIT")"
 
-SB_WS="$(new_bare_home)"; plant_big "$SB_WS/.claude/CLAUDE.md"; cp "$SB_WS/.claude/CLAUDE.md" "$TMP/ws-before.md"
-WS_OUT="$(trap '' XFSZ; ulimit -f 2; setup_run "$SB_WS" $'y\n')"
+SB_WS="$(new_bare_home)"; plant_big "$SB_WS/.claude/CLAUDE.md" 3000; cp "$SB_WS/.claude/CLAUDE.md" "$TMP/ws-before.md"
+WS_OUT="$(trap '' XFSZ; ulimit -f 32; setup_run "$SB_WS" $'y\n')"
 expect_same_bytes "CUT-SHORT: a setup write cut short leaves the file byte-identical" "$TMP/ws-before.md" "$SB_WS/.claude/CLAUDE.md"
 expect_contains "CUT-SHORT: …and setup says it could not write it" "could not write" "$WS_OUT"
 

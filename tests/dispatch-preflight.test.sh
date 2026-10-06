@@ -539,8 +539,9 @@ PLAN
 #     built from an empty value and every write the fixture goes on to make lands in the sandbox;
 #   - the drive: run_gate refuses to run the wall on a payload whose cwd is under .lost, empty
 #     (unless the row sets GATE_CWD_FREE=1) or outside the sandbox, and names the fixture;
-#   - the rows: while a fixture is lost, `ok` fails each row by its own name, so no row passes
-#     on a wall that never ran. The next drive on a made fixture clears it.
+#   - the rows: while a fixture is lost, `ok` fails each row by its own name (the framework's row
+#     guard, below), so no row passes on a wall that never ran. The next drive on a made fixture
+#     clears it.
 FIXTURE_LOST=""; FIXTURE_LOST_N=0
 SANDBOX_P="$(cd "$SANDBOX" && pwd -P)"
 FIXTURE_TAKE=""; FIXTURE_TAKE_LEVEL=""; FIXTURE_TAKE_CMD=""
@@ -570,14 +571,12 @@ fixture_drive_ok() {  # <payload cwd> -> 0 when the wall may run on it; else FIX
   esac
   [ -z "$FIXTURE_LOST" ]
 }
-eval "_fixture_ok_unguarded() $(declare -f ok | sed 1d)"
-ok() {
-  if [ -n "$FIXTURE_LOST" ]; then
-    no "$1" "fixture lost: ${FIXTURE_LOST} made no repository, so this row tested nothing"
-    return 0
-  fi
-  _fixture_ok_unguarded "$@"
+# The rows' part is the framework's row guard (tests/lib/assert.sh, THE ROW GUARD; T80): ok()
+# asks this function first and records a named fail while it prints a reason.
+fixture_row_guard() {
+  [ -z "$FIXTURE_LOST" ] || printf 'fixture lost: %s made no repository, so this row tested nothing' "$FIXTURE_LOST"
 }
+TF_ROW_GUARD=fixture_row_guard
 
 # write_attestation <repo> <session_id> [extra kv lines...]
 #

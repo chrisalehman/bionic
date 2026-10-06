@@ -10,7 +10,8 @@
 #
 #   section <name>        opens a section that MUST assert something
 #   setup_section <name>  opens a section exempt from that rule (fixture building)
-#   ok <msg>              record a pass
+#   ok <msg>              record a pass (or a named fail, while TF_ROW_GUARD's
+#                         function prints a reason: THE ROW GUARD, beside ok() below)
 #   no <msg> [detail]     record a fail
 #   advise <msg> <reading> <cmd>...  record an ADVISORY row: it prints the
 #                         reading and the reference it is read against, and it
@@ -336,7 +337,21 @@ setup_section() {
 }
 
 # ── assertions ───────────────────────────────────────────────────────────────
+# THE ROW GUARD (wave-27 T80). A suite whose rows can stand on a fixture that was never made
+# names a guard function in TF_ROW_GUARD, called with the row's label. While the guard prints a
+# reason, every row this file would record as a pass — ok and each expect_* through it — is
+# recorded as a fail by its own name, carrying the reason, so no row passes having tested
+# nothing. Unset, naming no function, or silent, ok() is what it always was. It is the one way a
+# suite changes what a pass means: a suite that wraps ok() itself is a shadow the wall refuses.
 ok() {
+  if [ -n "${TF_ROW_GUARD:-}" ] && declare -F "$TF_ROW_GUARD" >/dev/null 2>&1; then
+    local _tf_why
+    _tf_why="$("$TF_ROW_GUARD" "$1")"
+    if [ -n "$_tf_why" ]; then
+      no "$1" "$_tf_why"
+      return 0
+    fi
+  fi
   TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1))
   _TF_SECTION_ROWS=$((_TF_SECTION_ROWS + 1))
   echo "PASS: $1"
