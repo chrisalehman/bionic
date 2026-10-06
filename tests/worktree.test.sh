@@ -4131,8 +4131,8 @@ lq_row() {  # <label> <tree base> <name> <expected remedy> — one row, the name
   expect_true  "($id) …its printed fix can be followed as printed" lb_follow "$t" "$line"
   expect_match "($id) …and the tree then lands" "spawn-worktree: LANDED branch=wt/shq-$2 onto=wave/fixture *" \
     "$(lb_first "$(worktree_land "$t" wave/fixture)")"
-  expect_eq    "($id) …the fix acted on that path alone: the tree's head still tracks keep.md and also.md" \
-    ".bionic/also.md|.bionic/keep.md|" "$(git -C "$t" ls-tree -r --name-only HEAD -- .bionic | LC_ALL=C sort | tr '\n' '|')"
+  expect_eq    "($id) …the fix acted on that path alone: the landed branch tracks keep.md and also.md, and not the name" \
+    ".bionic/also.md|.bionic/keep.md|" "$(git -C "$r" ls-tree -r --name-only "wt/shq-$2" -- .bionic | LC_ALL=C sort | tr '\n' '|')"
   expect_eq    "($id) …and so does the target, once landed" \
     ".bionic/also.md|.bionic/keep.md|" "$(git -C "$r" ls-files -- .bionic | LC_ALL=C sort | tr '\n' '|')"
   expect_eq    "($id) …and the project's own file at the name is untouched" "the project's own" "$(cat "$r/$3")"
