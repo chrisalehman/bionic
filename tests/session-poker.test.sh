@@ -12747,9 +12747,8 @@ section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §
 # FIXTURE FIDELITY. §56's shape: a plan bound to this session, its working branch checked out in a
 # linked worktree, real commits, and roster rows from the production writer (`roster_row_fixture`)
 # with `questions=` and `pushed=` appended by hand. `pushed=` is the Interfaces table's key, which
-# row T16 teaches the recorder to write and `roster_row` to read; until `roster_row` knows the key
-# a pushed row reads as not pushed (`proof_pushed_severity`), so these rows are red on a tree
-# without T16's change.
+# row T16 teaches the recorder to write; the verb reads it off the line by key, as it reads
+# `questions=` (A-orch-9).
 SEV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 SEV_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 RSEV="$(make_repo sev-fact)"; ( cd "$RSEV" && git commit -q --allow-empty -m init )
@@ -12796,15 +12795,33 @@ expect_eq "SEV-0b precondition: the reader's row carries the pushed key, read by
 s34_gate "$RSEV"
 expect_eq "SEV-0c precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
 
-# ---------- the push is read through roster_row (unit rows; no T16 needed) ----------
-sev_pushed() {  # <roster_row rc> <pushed value> -> proof_pushed_severity's rc with roster_row shadowed
-  bash -c '. "$1"; SEV_RR="$2"; roster_row() { return "$SEV_RR"; }; proof_pushed_severity "$3"; echo "$?"' _ "$SEV_LIB" "$1" "$2" 2>/dev/null
+# ---------- the push is read off the row by key, as questions= is (unit rows) ----------
+sev_pushed() {  # <pushed value> -> proof_pushed_severity's rc
+  bash -c '. "$1"; proof_pushed_severity "$2"; echo "$?"' _ "$SEV_LIB" "$1" 2>/dev/null
 }
-expect_eq "SEV-push1 a roster_row that knows pushed=, and a list naming severity: pushed" "0" "$(sev_pushed 0 checks-adversarial,severity)"
-expect_eq "SEV-push2 …a list without severity: not pushed" "1" "$(sev_pushed 0 checks-adversarial)"
-expect_eq "SEV-push3 …no key on the row: not pushed" "1" "$(sev_pushed 0 '')"
-expect_eq "SEV-push4 a roster_row that refuses pushed= as unknown (rc 2, 1.12.0's): not pushed, whatever the row says" "1" "$(sev_pushed 2 severity)"
-expect_eq "SEV-push5 …a name that only contains the word is not it" "1" "$(sev_pushed 0 severity-old)"
+expect_eq "SEV-push1 a list naming severity: pushed" "0" "$(sev_pushed checks-adversarial,severity)"
+expect_eq "SEV-push1b …the three-entry list the recorder writes for a reader of both code questions: pushed" "0" \
+  "$(sev_pushed checks-adversarial,checks-structure,severity)"
+expect_eq "SEV-push2 …a list without severity (an evidence reader's): not pushed" "1" "$(sev_pushed checks-evidence)"
+expect_eq "SEV-push3 …no key on the row (1.12.0's): not pushed" "1" "$(sev_pushed '')"
+expect_eq "SEV-push5 …a name that only contains the word is not it" "1" "$(sev_pushed severity-old)"
+
+# ---------- an amended, extended or held reader row keeps pushed= (row_copy_args; A-orch-9) ----------
+# The copy hands the key to `roster_row`, which writes it once row T16 teaches it the key; on a
+# tree without T16 the copy leaves it out rather than fail the verb, and these rows are red there.
+RSEVA="$(make_repo sev-amend)"; new_roster "$RSEVA"
+s30_row "$RSEVA" subagent_type=bionic:critic suites_allowed=none questions=adversarial
+awk -v k='|pushed=checks-adversarial,severity' '{ l[NR] = $0 } END { for (i = 1; i <= NR; i++) print l[i] (i == NR ? k : "") }' \
+  "$(roster_of "$RSEVA")" > "$TMPROOT/sev-amend-roster" && cat "$TMPROOT/sev-amend-roster" > "$(roster_of "$RSEVA")"
+expect_eq "SEV-copy0 precondition: the reader's row carries pushed=, read by key" "checks-adversarial,severity" \
+  "$(s30_field "$(s30_last "$RSEVA")" pushed)"
+poke "$RSEVA" amend w1 --files+ lib/z.sh --reason 'one more file'
+expect_eq "SEV-copy the amended reader row carries pushed= from the row it copied (exit 0)" "0|checks-adversarial,severity" \
+  "$RC|$(s30_field "$(s30_last "$RSEVA")" pushed)"
+expect_eq "SEV-copy2 …beside its questions= (the copy the AMEND-Q rows pin)" "adversarial" "$(s30_field "$(s30_last "$RSEVA")" questions)"
+poke "$RSEVA" extend w1 'more to read'
+expect_eq "SEV-copy3 extend's row carries pushed= too (exit 0)" "0|checks-adversarial,severity" \
+  "$RC|$(s30_field "$(s30_last "$RSEVA")" pushed)"
 
 # ---------- the table: one definition, eight cells (unit rows on the library) ----------
 sev_pri() { bash -c '. "$1"; proof_priority "$2" "$3"; echo " rc=$?"' _ "$SEV_LIB" "$1" "$2" 2>/dev/null; }

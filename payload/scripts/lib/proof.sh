@@ -190,11 +190,10 @@ proof_word_in() {
 # (`proof_findings_owed`).
 
 # proof_pushed_severity <pushed> -> 0 when the roster row's `pushed=` value (the context files the
-# recorder pushed at start, comma-joined) names `severity`. The key is read through `roster_row`,
-# its one definition (lib/roster.sh): while `roster_row` does not know `pushed` (rc 2), no row
-# carries it, so the reader was not pushed the scale and its record is read as 1.12.0 read it.
+# recorder pushed at start, comma-joined, read off the line by key as `questions=` is) names
+# `severity` as a whole entry. A row with no key (one 1.12.0 wrote, or a reader with no question)
+# was not pushed the scale, and its record is read as 1.12.0 read it.
 proof_pushed_severity() {
-  declare -F roster_row >/dev/null 2>&1 && roster_row pushed=x >/dev/null 2>&1 || return 1
   case ",${1:-}," in *,severity,*) return 0 ;; *) return 1 ;; esac
 }
 
