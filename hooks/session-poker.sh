@@ -4777,6 +4777,10 @@ EOF
     # disk (never a second `rm`).
     SWEEP_OUT=""
     SWEEP_BULK=""
+    # THE PER-START FILES, READ ONCE FOR THE WHOLE WALK (T83): handed to every
+    # `patrol_session_state_files` call below, which then picks a session's own from this
+    # list instead of globbing the directory once per class per session.
+    SWEEP_PER_START="$(patrol_per_start_files "$REPO_REAL")"
     while IFS= read -r SWEEP_SID; do
       [ -n "$SWEEP_SID" ] || continue
       SWEEP_SCANNED=$((SWEEP_SCANNED + 1))
@@ -4799,7 +4803,7 @@ $SWEEP_SID
       esac
 
       SWEEP_DEAD=$((SWEEP_DEAD + 1))
-      SWEEP_SESSION_FILES="$(patrol_session_state_files "$REPO_REAL" "$SWEEP_SID")"
+      SWEEP_SESSION_FILES="$(patrol_session_state_files "$REPO_REAL" "$SWEEP_SID" "$SWEEP_PER_START")"
 
       # THIS SESSION'S OWN NEWEST FILE, and nobody else's — the whole of the "per-session,
       # not all-or-nothing" fix, and gated on `--window` so a plain `sweep` never pays for
