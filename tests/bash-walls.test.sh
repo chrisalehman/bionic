@@ -754,13 +754,15 @@ expect_eq "STAGE-e4: …and the stage it found is still there, untouched" "PLANT
 # (f) A GATE KILLED MID-STAGE, then a refusing gate at the same pid. On its first call the
 # `cat` shim SIGKILLs the shell running the gate (`$KILL_PID`, that subshell's own pid; the
 # diagnosis's E5): in 1.11.0 that call was the gate's first `$(cat <stage>/1)`, with the
-# stage on disk.
+# stage on disk. The subshell's pid is read as the PPID of a `sh` it execs into a command
+# substitution: `$BASHPID` is bash 4's, and under /bin/bash 3.2 it is empty, so the shim
+# killed nothing and this control was red under tests/run.sh's pin (T80).
 ST_KSHIM="$SANDBOX/killshim"; mkdir -p "$ST_KSHIM"
 printf '%s\n' '#!/bin/bash' \
   'if [ -n "${KILL_FLAG:-}" ] && [ ! -e "$KILL_FLAG" ]; then : > "$KILL_FLAG"; kill -9 "$KILL_PID"; sleep 1; fi' \
   'exec /bin/cat "$@"' > "$ST_KSHIM/cat"
 chmod +x "$ST_KSHIM/cat"
-st_drive kill "{ ( export KILL_PID=\$BASHPID; PATH=\"$ST_KSHIM:\$PATH\" KILL_FLAG=\"\$TMPDIR/../killflag\" bionic_fold PreToolUse wall_evidence_gate ); echo \"\$?\" > \"\$TMPDIR/../killed\"; } >/dev/null 2>&1" \
+st_drive kill "{ ( KILL_PID=\$(exec sh -c 'echo \$PPID'); export KILL_PID; PATH=\"$ST_KSHIM:\$PATH\" KILL_FLAG=\"\$TMPDIR/../killflag\" bionic_fold PreToolUse wall_evidence_gate ); echo \"\$?\" > \"\$TMPDIR/../killed\"; } >/dev/null 2>&1" \
   "$ST_REFUSING"
 expect_eq "STAGE-k1: control — the first gate really was killed (KILL, 137)" "137" \
   "$(cat "$ST_DIR/killed" 2>/dev/null)"
