@@ -5282,8 +5282,10 @@ w27t33_kinds() {
 }
 
 # (1) every structure check fails only code the change adds or edits.
-expect_nonempty "W27-T33-1: checks-structure.md says old code the change did not write never fails a check" \
-  "$(w26_hits 'Old code the change did not write never fails a check' "$W27_STRUCT")"
+# RE-POINTED (wave-28 T16; D20): "old code never fails a check" yielded to the scale's rule on age,
+# which §W28-S pins in both files; what stays here is that each check's case names changed code.
+expect_nonempty "W27-T33-1: checks-structure.md carries the scale's rule on age in its place" \
+  "$(w26_hits 'Age does not lower a rating.' "$W27_STRUCT")"
 for _id in $W27_IDS; do
   _case="$(w27t33_fails "$W27_STRUCT" "$_id")"
   expect_nonempty "W27-T33-1 precondition: the \`${_id}\` line has a failing case" "$_case"
