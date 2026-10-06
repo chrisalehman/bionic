@@ -2400,15 +2400,227 @@ for T77_S in u-between old2 old-u-below edited; do
   esac
 done
 
-# REMOVE, unchanged: a changed block goes whole on a yes, after the warning that
-# everything between the markers goes, through both doors.
-for T77_D in rm-payload rm-standalone; do
-  T77_SB="$(new_sandbox)"; T77_RC="$(t66_rc "$T77_SB")"; t77_plant "$T77_RC" old-u-below
-  T77_OUT="$(t66_door "$T77_SB" "$T77_D" y claude-proxy)"
-  printf '%s\n' 'export V1=1' 'export V2=2' > "$TMP/t77-want"
-  expect_contains "T77 remove (${T77_D}, changed): warns that everything between the markers goes" "everything between its markers" "$T77_OUT"
-  expect_same_bytes "T77 remove (${T77_D}, changed): …and takes the block whole" "$TMP/t77-want" "$T77_RC"
+# REMOVE is T78's, below: T77 drove it unchanged (a changed block went whole), and that
+# answer is the one T78 retires.
+T66_SHELL=/bin/bash
+
+# ---------------------------------------------------------------------------
+section "wave-27 T78: remove never deletes a line the user added inside bionic's claude() block"
+# ---------------------------------------------------------------------------
+#
+# Remove stripped the live block whole on both doors whatever stood between its markers,
+# and under `--all` the page never named the user's line it took. The rule is T77's for
+# setup, applied to remove: the block goes only when its body is byte for byte the current
+# body, an earlier one (`rc_earlier`), or nothing. Anything else is named by its line
+# range, never asked about, never on the page, never stripped, on both doors and under
+# both shells; two marker pairs are malformed, named by their faults and never asked
+# about. The shapes are T77's (`t77_body`): `export V1=1`, the block from line 2,
+# `export V2=2`.
+T78_OURS="cur old2 old1 empty"
+T78_CHANGED="u-above u-between u-below old-u-below old-u-above edited swapped"
+t78_plant() {  # <file> <shape> — T77's shapes, and `two`: two marker pairs
+  if [ "$2" = two ]; then
+    printf '%s\n' 'export V1=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" 'export V2=2' \
+      "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" > "$1"
+  else t77_plant "$1" "$2"; fi
+}
+t78_named() {  # <rc name> <shape> — the first line a changed block is named with
+  printf "  lines 2 to %s of ~/%s are bionic's claude() block, changed since bionic wrote it:" "$(t77_last "$2")" "$1"
+}
+T78_HAND="    it is left as it is — edit it by hand"
+T78_WARN="holds only bionic's lines; bionic would delete it."
+printf '%s\n' 'export V1=1' 'export V2=2' > "$TMP/t78-stripped"
+# The page under `--all`: everything before its question. Its items end at the last
+# bullet; what follows them is the text from that bullet on.
+t78_page() { printf '%s' "${1%%Do all of the above?*}"; }
+t78_after_items() { local p; p="$(t78_page "$1")"; printf '%s' "${p##*  • }"; }
+
+# THE FIXTURES ARE WHAT THEY SAY: the extractor reads each shape's block back non-empty.
+expect_eq "T78 fixture: the u-above block holds three lines, the user's first" \
+  "${T77_U}|${PROXY_UNALIAS}|${PROXY_LINE}|" "$(t78_plant "$TMP/t78-fx" u-above; rc_block_lines "$TMP/t78-fx" | tr '\n' '|')"
+expect_eq "T78 fixture: two marker pairs hold four lines between them" "4" \
+  "$(t78_plant "$TMP/t78-fx" two; rc_block_lines "$TMP/t78-fx" | wc -l | tr -d ' ')"
+
+# --only, BOTH DOORS, BOTH SHELLS, EVERY SHAPE, answered yes.
+for T78_SH in zsh bash; do
+  T66_SHELL="/bin/$T78_SH"
+  for T78_D in rm-payload rm-standalone; do
+    for T78_S in $T78_OURS $T78_CHANGED two; do
+      T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"
+      t78_plant "$T78_RC" "$T78_S"; cp "$T78_RC" "$TMP/t78-before"
+      T78_OUT="$(t66_door "$T78_SB" "$T78_D" y claude-proxy)"
+      T78_L="T78 remove --only (${T78_D}, ${T78_SH}, ${T78_S})"
+      case " $T78_OURS " in
+        *" $T78_S "*)
+          expect_contains "${T78_L}: the warning says the block holds only bionic's lines" "$T78_WARN" "$T78_OUT"
+          expect_contains "${T78_L}: …asks" "[y/N]" "$T78_OUT"
+          expect_contains "${T78_L}: …reports it removed" "1 removed" "$T78_OUT"
+          expect_same_bytes "${T78_L}: …and the yes takes the block whole, the user's lines byte for byte" "$TMP/t78-stripped" "$T78_RC" ;;
+        *)
+          expect_absent "${T78_L}: nothing asked" "[y/N]" "$T78_OUT"
+          expect_same_bytes "${T78_L}: …the rc byte for byte as it was" "$TMP/t78-before" "$T78_RC"
+          expect_contains "${T78_L}: …not reported removed, nor clean" "0 removed · 0 already clean" "$T78_OUT"
+          expect_absent "${T78_L}: …no user's line printed" "V9=9" "$T78_OUT"
+          expect_absent "${T78_L}: …nor the user's edit" "--verbose" "$T78_OUT"
+          if [ "$T78_S" = two ]; then
+            expect_contains "${T78_L}: …named by its faults" "line 7: a second block (the first starts at line 2)" "$T78_OUT"
+            expect_contains "${T78_L}: …which say the markers do not pair up" "do not pair up" "$T78_OUT"
+          else
+            expect_contains "${T78_L}: …named by its line range" "$(t78_named ".${T78_SH}rc" "$T78_S")" "$T78_OUT"
+            expect_contains "${T78_L}: …to edit by hand" "$T78_HAND" "$T78_OUT"
+          fi ;;
+      esac
+    done
+  done
 done
+
+# --all, BOTH SHELLS. Plugin data stands in the home so the page is printed whatever the
+# block is; the page's yes is the only answer.
+for T78_SH in zsh bash; do
+  T66_SHELL="/bin/$T78_SH"
+  for T78_S in cur old2 empty u-between old-u-below swapped edited two; do
+    T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"; mkdir -p "$T78_SB/.claude/plugins/data/bionic-t78"
+    t78_plant "$T78_RC" "$T78_S"; cp "$T78_RC" "$TMP/t78-before"
+    T78_OUT="$(t66_door "$T78_SB" rm-all y)"
+    T78_L="T78 remove --all (${T78_SH}, ${T78_S})"
+    expect_contains "${T78_L}: the page was printed with an item on it" "delete bionic's plugin data" "$(t78_page "$T78_OUT")"
+    case "$T78_S" in
+      cur|old2|empty)
+        expect_contains "${T78_L}: the page offers the block" "remove bionic's claude() shell function" "$(t78_page "$T78_OUT")"
+        expect_same_bytes "${T78_L}: …and the page's yes takes it whole" "$TMP/t78-stripped" "$T78_RC" ;;
+      two)
+        expect_absent "${T78_L}: the page does not offer the block" "remove bionic's claude() shell function" "$(t78_page "$T78_OUT")"
+        expect_contains "${T78_L}: …names its faults after the page's items" "a second block" "$(t78_after_items "$T78_OUT")"
+        expect_same_bytes "${T78_L}: …and the rc is byte for byte as it was" "$TMP/t78-before" "$T78_RC" ;;
+      *)
+        expect_absent "${T78_L}: the page does not offer the block" "remove bionic's claude() shell function" "$(t78_page "$T78_OUT")"
+        expect_contains "${T78_L}: …names it by its lines after the page's items" "$(t78_named ".${T78_SH}rc" "$T78_S")" "$(t78_after_items "$T78_OUT")"
+        expect_absent "${T78_L}: …no user's line printed" "V9=9" "$T78_OUT"
+        expect_same_bytes "${T78_L}: …and the rc is byte for byte as it was" "$TMP/t78-before" "$T78_RC" ;;
+    esac
+  done
+done
+# With nothing else to remove there is no page: the changed block is still named. The
+# suite's `claude` stub answers every `mcp get` present, so this run has one of its own that
+# registers nothing, and a PATH with no tool bionic installs.
+T66_SHELL=/bin/zsh
+mkdir -p "$TMP/t78bin"
+printf '%s\n' '#!/bin/bash' 'case "$*" in "plugin list --json") echo "[]" ;; "mcp get"*) exit 1 ;; esac' 'exit 0' > "$TMP/t78bin/claude"
+chmod +x "$TMP/t78bin/claude"
+T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"; t78_plant "$T78_RC" u-between; cp "$T78_RC" "$TMP/t78-before"
+T78_PATH_WAS="$T66_PATH"; T66_PATH="$TMP/t78bin:/usr/bin:/bin"
+T78_OUT="$(printf 'y\n' | t66_env "$T78_SB" bash "$REMOVE_SH" --all 2>&1)"
+T66_PATH="$T78_PATH_WAS"
+expect_contains "T78 remove --all, no page: nothing else to remove" "nothing to remove" "$T78_OUT"
+expect_contains "T78 remove --all, no page: …and the changed block is named" "$(t78_named .zshrc u-between)" "$T78_OUT"
+expect_same_bytes "T78 remove --all, no page: …the rc byte for byte as it was" "$TMP/t78-before" "$T78_RC"
+
+# THE RETIRED ENVIRONMENT BLOCK WITH A USER'S LINE between its markers is left the same
+# way (A-orch-201 (2)): every door, `--all` included, both shells. Green on the head it was
+# cut from: its body test (`_rm_block_alone`) already leaves it, and a mutant that reads
+# every block as alone loses the user's line on every door (the record's drive). The twin,
+# bionic's line alone between the markers, goes on the page's yes.
+for T78_SH in zsh bash; do
+  T66_SHELL="/bin/$T78_SH"
+  for T78_D in rm-payload rm-standalone rm-all; do
+    for T78_S in user ours; do
+      T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"; mkdir -p "$T78_SB/.claude/plugins/data/bionic-t78"
+      case "$T78_S" in
+        user) printf '%s\n' 'export V1=1' "$ENVB_START" "$T66_TODO" "$T77_U" "$ENVB_END" 'export V2=2' > "$T78_RC" ;;
+        ours) printf '%s\n' 'export V1=1' "$ENVB_START" "$T66_TODO" "$ENVB_END" 'export V2=2' > "$T78_RC" ;;
+      esac
+      cp "$T78_RC" "$TMP/t78-before"
+      T78_OUT="$(t66_door "$T78_SB" "$T78_D" y environment)"
+      T78_L="T78 retired env block (${T78_D}, ${T78_SH}, ${T78_S})"
+      if [ "$T78_S" = ours ]; then
+        expect_same_bytes "${T78_L}: bionic's line alone goes with its block (the twin)" "$TMP/t78-stripped" "$T78_RC"
+        [ "$T78_D" = rm-all ] && expect_contains "${T78_L}: …offered on the page" "delete bionic's environment settings" "$(t78_page "$T78_OUT")"
+      else
+        expect_contains "${T78_L}: named by its lines" \
+          "lines 2 to 5 of ${T78_RC} are bionic's retired environment block, changed since bionic wrote it" "$T78_OUT"
+        expect_absent "${T78_L}: …the user's line never printed" "V9=9" "$T78_OUT"
+        expect_same_bytes "${T78_L}: …and the rc byte for byte as it was" "$TMP/t78-before" "$T78_RC"
+        [ "$T78_D" = rm-all ] && expect_absent "${T78_L}: …and not on the page" "delete bionic's environment settings" "$(t78_page "$T78_OUT")"
+      fi
+    done
+  done
+done
+
+# THE STRIP REFUSES ITSELF, both modes. env.sh's `rc_unset`, and remove.sh's own
+# `_rm_rc_unset` called directly from its definitions (the script cut where its items are
+# run, sourced with no arguments), standalone and with the payload's libraries beside it.
+mkdir -p "$TMP/t78sa" "$TMP/t78pl"
+sed '/^_rm_item_legacy_alias$/,$d' "$REMOVE_SH" > "$TMP/t78sa/remove-defs.sh"
+cp "$TMP/t78sa/remove-defs.sh" "$TMP/t78pl/remove-defs.sh"; cp -R "$(dirname "$ENV_SH")" "$TMP/t78pl/lib"
+t78_rm_unset() {  # <sandbox> <defs file> — `mode=<mode> rc=<n>`
+  HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:/usr/bin:/bin" BIONIC_CLAUDE_HOME="$1/.claude" \
+    bash -c 'f="$1"; set --; . "$f" >/dev/null 2>&1; _rm_rc_unset claude-proxy >/dev/null 2>&1; echo "mode=$RM_MODE rc=$?"' _ "$2" 2>&1
+}
+for T78_S in u-between old-u-below edited swapped; do
+  T78_SB="$(new_sandbox)"; t78_plant "$T78_SB/.zshrc" "$T78_S"; cp "$T78_SB/.zshrc" "$TMP/t78-before"
+  env_run "$T78_SB" /bin/zsh -- rc_unset claude-proxy >/dev/null 2>&1; T78_RCS=$?
+  expect_eq "T78 rc_unset (${T78_S}): refused with its own reason" "5" "$T78_RCS"
+  expect_same_bytes "T78 rc_unset (${T78_S}): …the rc byte for byte as it was" "$TMP/t78-before" "$T78_SB/.zshrc"
+  for T78_M in sa pl; do
+    T78_OUT="$(t78_rm_unset "$T78_SB" "$TMP/t78${T78_M}/remove-defs.sh")"
+    case "$T78_M" in sa) T78_MODE=standalone ;; *) T78_MODE=payload ;; esac
+    expect_eq "T78 _rm_rc_unset (${T78_MODE}, ${T78_S}): refused with its own reason" "mode=${T78_MODE} rc=5" "$T78_OUT"
+    expect_same_bytes "T78 _rm_rc_unset (${T78_MODE}, ${T78_S}): …the rc byte for byte as it was" "$TMP/t78-before" "$T78_SB/.zshrc"
+  done
+done
+# The twins: a block that is all bionic's is stripped by each of the three calls.
+for T78_M in env sa pl; do
+  T78_SB="$(new_sandbox)"; t78_plant "$T78_SB/.zshrc" old1
+  case "$T78_M" in
+    env) env_run "$T78_SB" /bin/zsh -- rc_unset claude-proxy >/dev/null 2>&1; T78_OUT="rc=$?"; T78_WANT="rc=0" ;;
+    sa)  T78_OUT="$(t78_rm_unset "$T78_SB" "$TMP/t78sa/remove-defs.sh")"; T78_WANT="mode=standalone rc=0" ;;
+    pl)  T78_OUT="$(t78_rm_unset "$T78_SB" "$TMP/t78pl/remove-defs.sh")"; T78_WANT="mode=payload rc=0" ;;
+  esac
+  expect_eq "T78 strip (${T78_M}, old1): an earlier body bionic wrote is stripped (the twin)" "$T78_WANT" "$T78_OUT"
+  expect_same_bytes "T78 strip (${T78_M}, old1): …to the user's lines byte for byte" "$TMP/t78-stripped" "$T78_SB/.zshrc"
+done
+
+# THE MUTANTS. Each guard line deleted from a copy: the copy runs (it strips a block that
+# is all bionic's) and then strips a changed block, losing the user's line.
+T78_GUARD='guard: a changed claude() block is never stripped'
+expect_eq "T78 mutant: the standalone guard is in remove.sh, once" "1" "$(grep -c "$T78_GUARD" "$TMP/t78sa/remove-defs.sh")"
+expect_eq "T78 mutant: the payload guard is in env.sh, once" "1" "$(grep -c "$T78_GUARD" "$TMP/t78pl/lib/env.sh")"
+mkdir -p "$TMP/t78msa" "$TMP/t78mpl"
+grep -v "$T78_GUARD" "$TMP/t78sa/remove-defs.sh" > "$TMP/t78msa/remove-defs.sh"
+cp "$TMP/t78pl/remove-defs.sh" "$TMP/t78mpl/remove-defs.sh"; cp -R "$TMP/t78pl/lib" "$TMP/t78mpl/lib"
+grep -v "$T78_GUARD" "$TMP/t78pl/lib/env.sh" > "$TMP/t78mpl/lib/env.sh"
+for T78_M in msa mpl; do
+  case "$T78_M" in msa) T78_MODE=standalone ;; *) T78_MODE=payload ;; esac
+  T78_SB="$(new_sandbox)"; t78_plant "$T78_SB/.zshrc" old2
+  expect_eq "T78 mutant (${T78_MODE}): the guardless copy runs (it strips an earlier body)" "mode=${T78_MODE} rc=0" \
+    "$(t78_rm_unset "$T78_SB" "$TMP/t78${T78_M}/remove-defs.sh")"
+  T78_SB="$(new_sandbox)"; t78_plant "$T78_SB/.zshrc" old-u-below; cp "$T78_SB/.zshrc" "$TMP/t78-before"
+  t78_rm_unset "$T78_SB" "$TMP/t78${T78_M}/remove-defs.sh" >/dev/null
+  expect_diff_bytes "T78 mutant (${T78_MODE}): …and without its guard the strip takes a changed block" "$TMP/t78-before" "$T78_SB/.zshrc"
+  expect_eq "T78 mutant (${T78_MODE}): …losing the user's line" "0" "$(count_lines_equal "$T78_SB/.zshrc" "$T77_U")"
+done
+
+# THE COPY. The standalone door decides by remove.sh's copy of the two body lists; each is
+# env.sh's, line for line.
+for T78_FN in rc_default rc_earlier; do
+  T78_A="$(fn_text "$ENV_SH" "$T78_FN")"
+  expect_nonempty "T78 copies: ${T78_FN} reads out of env.sh" "$T78_A"
+  expect_eq "T78 copies: remove.sh's ${T78_FN} is env.sh's, line for line" "$T78_A" "$(fn_text "$REMOVE_SH" "$T78_FN")"
+done
+
+# THE DOOR LINES FIT 100 COLUMNS, at the longest rc name and a four-digit line range.
+T66_SHELL=/bin/bash
+T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"
+{ for _i in $(seq 1 1200); do printf 'export MY_VAR_%s=mine\n' "$_i"; done
+  printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$T77_U" "$PROXY_LINE" "$RC_END_LIT"; } > "$T78_RC"
+T78_OUT="$(t66_door "$T78_SB" rm-payload y claude-proxy)"
+T78_LINE="$(report_row "$T78_OUT" "lines 1201 to 1205 of ~/.bashrc")"
+expect_nonempty "T78 width: the changed line at lines 1201 to 1205 of ~/.bashrc was printed" "$T78_LINE"
+expect_true "T78 width: …and fits 100 columns (${#T78_LINE})" test "${#T78_LINE}" -le 100
+T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"; t78_plant "$T78_RC" cur
+T78_LINE="$(report_row "$(t66_door "$T78_SB" rm-payload n claude-proxy)" "$T78_WARN")"
+expect_nonempty "T78 width: the warning before the question was printed" "$T78_LINE"
+expect_true "T78 width: …and fits 100 columns (${#T78_LINE})" test "${#T78_LINE}" -le 100
 T66_SHELL=/bin/bash
 
 finish

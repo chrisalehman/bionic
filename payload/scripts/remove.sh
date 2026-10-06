@@ -214,6 +214,29 @@ BIONIC_ALIAS_END="$RM_ALIAS_END"
 # env.sh's RC_START / RC_END. Verbatim, box-drawing dashes included.
 RM_RC_START='# ─── bionic:rc:start ───'
 RM_RC_END='# ─── bionic:rc:end ───'
+# from env.sh: every body bionic wrote between that pair, the current one and the
+# earlier ones (wave-27 T78). The standalone door takes the block out only when it
+# holds one of them, or nothing (`_rm_rc_block`). Under env.sh's names, so in payload
+# mode the library's definitions, sourced below, replace these; tests/rc-item.test.sh
+# §T78 pins both line for line.
+rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
+  case "${1:-}" in
+    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    *)            return 1 ;;
+  esac
+  return 0
+}
+
+rc_earlier() {  # <item> <n> — prints the nth earlier body, rc 1 when there is none
+  case "${1:-}:${2:-}" in
+    # 48b37383 (2026-08-22) until 40be1c30: the flag that started the session in bypass.
+    claude-proxy:1) printf '%s\n' 'claude() { command claude --dangerously-skip-permissions "$@"; }' ;;
+    # 40be1c30 (2026-08-27) until 484afee2 (wave-27 T75), which put `unalias` above it.
+    claude-proxy:2) printf '%s\n' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
 # from env.sh: the working-principles item's markers — the block setup writes
 # into the user's own CLAUDE.md. Copies, for the same reason as the pair above;
 # tests/principles-item.test.sh §REMOVE pins them byte-equal to env.sh's
@@ -1232,7 +1255,11 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       return 1 ;;
     claude-proxy)
       _rm_regular "$RC_FILE" >/dev/null || return 1
-      _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END" ;;
+      _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END" || return 1
+      # Only a block that is all bionic's is asked about; a changed or malformed one is
+      # named after the page instead (wave-27 T78).
+      case "$(_rm_rc_block)" in ours*) return 0 ;; esac
+      return 1 ;;
     working-principles)
       _rm_regular "$RM_PRINCIPLES_FILE" >/dev/null || return 1
       _rm_file_has_marker "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" ;;
@@ -1689,14 +1716,93 @@ _rm_item_environment() {
 # marker pair goes to this script's own block strip. tests/rc-item.test.sh drives
 # both and compares the bytes.
 
+# A BLOCK GOES WHOLE ONLY WHEN IT IS ALL BIONIC'S (wave-27 T78; the rule setup has for
+# the same block, T77). Its body is byte for byte the current body, an earlier one, or
+# nothing: `ours`, removed on a yes. Anything else between the markers is `changed`: a
+# line of the user's, a line edited, the lines swapped. It is never asked about, never
+# on `--all`'s page and never stripped, and it is named by its line range for the
+# user's hand. Markers that do not pair up, two blocks among them, are `malformed`:
+# named by their faults, never asked about either. `<state> <first> <last>`, the range
+# empty when there is no block. Payload mode asks env.sh (`rc_state`, `rc_removable`,
+# `rc_block_range`); the standalone door walks the rc itself, and compares it against
+# its copy of the two body lists.
+_rm_rc_block() {
+  local state="" range line n=0 first="" last="" body="" want k=1
+  if [ "$RM_MODE" = "payload" ] && declare -F rc_removable >/dev/null 2>&1; then
+    state="$(rc_state claude-proxy 2>/dev/null)"
+    case "$state" in
+      written|stale|changed)
+        if rc_removable claude-proxy; then state=ours; else state=changed; fi
+        range="$(rc_block_range)"; printf '%s %s\n' "$state" "${range:- }"; return 0 ;;
+      no|malformed|not-a-file) printf '%s  \n' "$state"; return 0 ;;
+    esac
+  fi
+  _rm_regular "$RC_FILE" >/dev/null || { printf 'not-a-file  \n'; return 0; }
+  if [ ! -f "$RC_FILE" ] || ! _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
+    printf 'no  \n'; return 0
+  fi
+  _rm_marker_faults "$RC_FILE" "$RM_RC_START" "$RM_RC_END" >/dev/null || { printf 'malformed  \n'; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ -z "$first" ] && [ "$line" = "$RM_RC_START" ]; then first="$n"
+    elif [ -n "$first" ] && [ -z "$last" ] && [ "$line" = "$RM_RC_END" ]; then last="$n"
+    elif [ -n "$first" ] && [ -z "$last" ]; then body="${body}${line}"$'\n'; fi
+  done < "$RC_FILE"
+  state=changed
+  if [ -z "$body" ]; then state=ours
+  elif want="$(rc_default claude-proxy)" && [ "$body" = "${want}"$'\n' ]; then state=ours
+  else
+    while want="$(rc_earlier claude-proxy "$k")"; do
+      if [ "$body" = "${want}"$'\n' ]; then state=ours; break; fi
+      k=$((k + 1))
+    done
+  fi
+  printf '%s %s %s\n' "$state" "$first" "$last"
+}
+
+# The rc as a reader knows it: `~/` for a path under HOME, so a line naming it keeps
+# inside 100 columns (doctor.sh `_doctor_tilde`'s shape).
+_rm_tilde() {  # <path>
+  case "$1" in
+    "${HOME}"/*) printf '~%s' "${1#"${HOME}"}" ;;
+    *)           printf '%s' "$1" ;;
+  esac
+}
+
+# bionic's claude() block when this run leaves it, named for the user's hand: a changed
+# block by its line range, in the words a changed retired block is named with
+# (`_rm_block_left`), never by its text; markers that do not pair up by their faults.
+# rc 1 when there is nothing to name.
+_rm_rc_block_left() {
+  local answer state first last
+  answer="$(_rm_rc_block)"
+  state="${answer%% *}"; first="${answer#* }"; last="${first#* }"; first="${first%% *}"
+  case "$state" in
+    changed)
+      echo "  lines ${first} to ${last} of $(_rm_tilde "$RC_FILE") are bionic's claude() block, $(bionic_rc_left_reason changed "$RC_FILE"):"
+      echo "    it is left as it is — edit it by hand"
+      return 0 ;;
+    malformed)
+      echo "  ${RC_FILE}: bionic's claude() block's markers do not pair up:"
+      _rm_say_faults "$RC_FILE" "$RM_RC_START" "$RM_RC_END"
+      return 0 ;;
+  esac
+  return 1
+}
+
 # `keep` (wave-27 T40, review pass 9 note 9): this block is written by
 # lib/markers.sh's `markers_set` with no separator line above it, so a blank line
 # the user had there is theirs, and the payload door already keeps it.
+#
+# THE STRIP REFUSES A CHANGED BLOCK ITSELF (wave-27 T78), on both doors, with rc 5 and
+# the rc byte for byte as it was, so no caller can lose a line by calling it: env.sh's
+# `rc_unset` holds the payload door's guard, the line below the standalone door's.
 _rm_rc_unset() {  # <item>
   if [ "$RM_MODE" = "payload" ] && declare -F rc_unset >/dev/null 2>&1; then
     rc_unset "$1"
     return $?
   fi
+  case "$(_rm_rc_block)" in changed*) return 5 ;; esac  # guard: a changed claude() block is never stripped
   _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END" keep
 }
 
@@ -1705,13 +1811,26 @@ _rm_item_claude_proxy() {
   echo "bionic's claude() shell function:"
 
   if _rm_say_not_a_file "$RC_FILE"; then echo ""; return 0; fi
+  # A changed block is named and not asked about, and a malformed one says where its
+  # markers fail, before any question (wave-27 T78): no answer could take either out.
+  case "$(_rm_rc_block)" in
+    changed*)
+      _rm_rc_block_left
+      echo ""
+      return 0 ;;
+    malformed*)
+      _rm_rc_block_left
+      _rm_leftover "$(_rm_strip_why 2 "$RC_FILE") — nothing was changed"
+      echo ""
+      return 0 ;;
+  esac
   if ! _rm_item_pending claude-proxy; then
     _rm_clean "bionic's claude() shell function in ${RC_FILE}"
     echo ""
     return 0
   fi
 
-  echo "  ${RC_FILE} carries bionic's claude() block; bionic would delete the block and everything between its markers."
+  echo "  bionic's claude() block in $(_rm_tilde "$RC_FILE") holds only bionic's lines; bionic would delete it."
   _rm_consent "Remove bionic's claude() shell function from ${RC_FILE}?"; rm_rc_consent_rc=$?
   if [ "$rm_rc_consent_rc" -ne 0 ]; then
     _rm_skipped "$rm_rc_consent_rc" claude-proxy "bionic's claude() shell function in ${RC_FILE}"
@@ -1722,6 +1841,8 @@ _rm_item_claude_proxy() {
   _rm_rc_unset claude-proxy; rm_rc_unset_rc=$?
   if [ "$rm_rc_unset_rc" = "0" ]; then
     _rm_removed "bionic's claude() shell function in ${RC_FILE}"
+  elif [ "$rm_rc_unset_rc" = "5" ]; then
+    _rm_leftover "changed while remove ran, so nothing was written: ${RC_FILE} is as you left it, and bionic's claude() block is still there"
   else
     # Nothing to clean: a failed strip removes the copy it staged itself, and a file of
     # that name this run did not stage is the user's (wave-27 T75, review pass 54 S5).
@@ -2618,6 +2739,9 @@ if [ "$rm_all" = "1" ]; then
   if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_read_only "$RC_FILE"; then
     echo "  $(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
   fi
+  # A claude() block that is not all bionic's is off the page, and named after its
+  # items, page or no page (wave-27 T78).
+  _rm_rc_block_left
   if [ "$rm_page" = "0" ]; then
     # No item runs, so the lines the alias and environment items would name are
     # named here (wave-27 T55, T66).
