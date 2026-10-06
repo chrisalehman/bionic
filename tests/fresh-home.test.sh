@@ -1063,6 +1063,27 @@ expect_true "manifest: the rc is the planted file plus bionic's block, byte for 
 expect_eq "manifest: the rc still parses as a shell script after setup wrote to it" \
   "ok" "$(zsh_syntax_rc "$RC_FILE_FIX")"
 
+# ── the install record (wave-28 T40, D29) ──
+# Every tool setup installed through `install_dep` has its line, written after the
+# install's command exited 0; a native plugin, which the CLI's own registry proves,
+# has none.
+FH_RECORD="${HOME_FIX}/.claude/bionic/installed"
+fh_record_kind() {  # <name> -> the kind on <name>'s newest record line, or nothing
+  local n k rest out=""
+  [ -f "$FH_RECORD" ] || return 0
+  while IFS=$'\t' read -r n k rest; do [ "$n" = "$1" ] && out="$k"; done < "$FH_RECORD"
+  printf '%s' "$out"
+}
+expect_true "manifest: setup wrote the install record" test -s "$FH_RECORD"
+expect_eq "manifest: the record names ccstatusline, as kind statusline" "statusline" "$(fh_record_kind ccstatusline)"
+expect_eq "manifest: …notebooklm, as kind uv-tool" "uv-tool" "$(fh_record_kind notebooklm)"
+expect_eq "manifest: …the excalidraw renderer, as kind uv-project" "uv-project" "$(fh_record_kind excalidraw-renderer)"
+expect_eq "manifest: …the Playwright browser, as kind playwright-browser" "playwright-browser" \
+  "$(fh_record_kind playwright-chromium)"
+expect_match "manifest: the native document-skills was installed through the CLI" \
+  '*plugin install document-skills@*' "$(cat "$CALLS")"
+expect_eq "manifest: …and has no record line" "" "$(fh_record_kind document-skills)"
+
 # ---------------------------------------------------------------------------
 # Group 4 — doctor agrees with the machine (AC-10a, AC-10c).
 # ---------------------------------------------------------------------------
@@ -1356,36 +1377,44 @@ CCS_GONE=no; [ -e "$CCS_CONFIG" ] || CCS_GONE=yes
 NB_GONE=no;  [ -e "$NB_SKILL" ]   || NB_GONE=yes
 VENV_GONE=no; [ -e "$VENV_DIR" ] || VENV_GONE=yes
 
-# THE TOOLS STAY, NAMED (wave-27 T82). Nothing on the machine records which tools
-# bionic installed, so remove takes none of them off: each one setup installed is
-# still there afterwards, and the summary names it for the user to remove by hand.
-# Each row is still a conjunction — it was there after setup, AND it is there now.
-expect_eq "remove: the ccstatusline layout was installed and is still there [ccstatusline-config-missing]" \
-  "yes no" "${CCS_WAS_THERE} ${CCS_GONE}"
-expect_eq "remove: the notebooklm skill was installed and is still there [notebooklm-skill-missing]" \
-  "yes no" "${NB_WAS_THERE} ${NB_GONE}"
-expect_eq "remove: the excalidraw-renderer venv was installed and is still at the stable path [venv-path]" \
-  "yes no" "${VENV_WAS_THERE} ${VENV_GONE}"
+# THE RECORDED TOOLS COME BACK OFF (wave-28 T40). Setup installed each of these
+# through `install_dep`, which recorded it (Group 3), so the teardown's yes takes it
+# off through the package-manager fakes. A tool with no record line is still named
+# and never acted on — Group 7 and Group 16 pin that case, with no install behind
+# them. Each row is still a conjunction — it was there after setup, AND it is gone now.
+expect_eq "remove: the ccstatusline layout was installed and is gone again [ccstatusline-config-missing]" \
+  "yes yes" "${CCS_WAS_THERE} ${CCS_GONE}"
+expect_eq "remove: the notebooklm skill was installed and is gone again [notebooklm-skill-missing]" \
+  "yes yes" "${NB_WAS_THERE} ${NB_GONE}"
+expect_eq "remove: the excalidraw-renderer venv was installed at the stable path and is gone again [venv-path]" \
+  "yes yes" "${VENV_WAS_THERE} ${VENV_GONE}"
 
 # EACH OF THESE IS A CONJUNCTION, never a bare absence. "Was it there" was read
 # before the teardown through the same extractor that reads "is it there" after
 # it, so a run in which setup had quietly written nothing fails the first half
 # instead of sailing through the second.
-expect_eq "remove: settings.json carried a statusLine command and still does (a tool row, named)" \
-  "yes yes" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
+expect_eq "remove: settings.json carried a statusLine command and no longer does (a recorded tool row)" \
+  "yes no" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
 expect_eq "remove: settings.json carried bionic's environment names and no longer does" \
   "yes no" "${ENV_NAMES_WAS} $(yn "$(settings_env_names "$SETTINGS")")"
 
-# No package manager is asked to take anything off; the positive on the same log
-# is setup's install, which put the package there.
+# The uninstall reached npm, beside setup's install on the same log.
 expect_match "remove: the log holds setup's ccstatusline install" \
   '*npm install -g ccstatusline*' "$(cat "$CALLS")"
-expect_no_match "remove: …and no uninstall reached npm" \
-  '*npm uninstall*' "$(cat "$CALLS")"
+expect_match "remove: …and remove's uninstall of it reached npm" \
+  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+expect_eq "remove: …and the record no longer names ccstatusline" "" "$(fh_record_kind ccstatusline)"
+# The recorded shared cache is named and kept: bionic installed the browser, and
+# the cache it lives in is every project's.
 REMOVE_TOOLS_TEXT="$(cat "$REMOVE_OUT")"
 expect_contains "remove: the summary has its by-hand heading" "  left for you to remove by hand:" "$REMOVE_TOOLS_TEXT"
-expect_match "remove: …and names ccstatusline under it" \
+expect_match "remove: …and names the recorded Playwright browser under it" \
+  '*left for you to remove by hand:*• playwright-chromium*' "$REMOVE_TOOLS_TEXT"
+expect_no_match "remove: …and not ccstatusline, which came off" \
   '*left for you to remove by hand:*• ccstatusline*' "$REMOVE_TOOLS_TEXT"
+expect_eq "remove: …the browser's record line stays" "playwright-browser" "$(fh_record_kind playwright-chromium)"
+expect_true "remove: …and so does the browser cache" \
+  test -f "${HOME_FIX}/.cache/ms-playwright/chromium-1187/INSTALLATION_COMPLETE"
 
 # DELETED AT THE REVIVE (epic-18 wave-03): a row asserting that no
 # `bionic-profile-` permission rule survived the teardown. Group 3 asserts setup
