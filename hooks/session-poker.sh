@@ -7778,9 +7778,9 @@ EOF
         # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
         # duty computes at the end of every turn, so the rows this tick ORDERS and the
         # rows that turn's end REFUSES to leave undispatched are one answer rather than
-        # two. It takes the width and the occupancy this arm measured: the rung, and the
-        # roster's unacked rows after this tick's own acks. The wall measures both the
-        # same way (the rung from `pressure_level`, the occupancy by the same predicate:
+        # two. It takes the width and the occupancy this arm measured: the gate's width, and
+        # the roster's unacked rows after this tick's own acks. The wall measures both the
+        # same way (the width from `fill_gate_width`, the occupancy by the same predicate:
         # wave-19 audit V-2, T2d), so what it names is what this prints.
         SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
         SCHED_IDS=""; SCHED_N=0; SCHED_OFFERED=""
