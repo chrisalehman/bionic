@@ -5986,4 +5986,32 @@ sed 's/<what is not known>/<what is unknown>/' "$STEP6_MD" > "$W28S_DOC9" 2>/dev
 expect_nonempty "W28-S9m precondition: the doctored steps/6.md still gives finding lines" "$(w28s_finding_form "$W28S_DOC9")"
 expect_ne "W28-S9m: a steps/6.md whose unsure: form drifts is caught" "$W28S_FORM" "$(w28s_finding_form "$W28S_DOC9")"
 
+# ── §W28-C (wave-28 T48; REQ-8, D19, D20) ──
+#
+# WHAT THIS OWNS. A check's answer and the scale's table give one result. proof.sh's F6 rule
+# refuses `result: flag` beside a FAIL check and `pass` beside a FLAG, so the checks files say
+# when a check is FAIL: only for a finding the table sends to fix. Pinned here: the sentence is in
+# both rendered code checks files, once in each block, and the structure checks no longer say a
+# check fails whenever its case holds. Each absence sits beside a positive on the same extractor,
+# and a doctored copy proves each arm goes red. HERMETIC: committed finals by path.
+W28C_SENTENCE='A check answers FAIL only when its failing case holds for a finding the table in `severity.md` sends to fix, FLAG when it holds for a finding that table defers or notes, or on a doubt you write as a finding, and PASS otherwise.'
+W28C_OLD='FAIL (its failing case holds; name the file and line)'
+# w28c_count <file> -> how many times the file's flattened text carries the sentence.
+w28c_count() { _flatten "$1" | /usr/bin/grep -oF -- "$W28C_SENTENCE" | /usr/bin/grep -c .; }
+for _q in adversarial structure; do
+  expect_nonempty "W28-C1: checks-${_q}.md says when a check is FAIL, by the table" \
+    "$(w26_hits "$W28C_SENTENCE" "${REPO}/payload/context/checks-${_q}.md")"
+  expect_eq "W28-C2: …and its block says it once" "1" "$(w28c_count "${BLOCK_DIR}/checks-${_q}.md")"
+done
+W28C_DOC2="$(w26_doctor "${BLOCK_DIR}/checks-structure.md" "$W28C_SENTENCE")"
+expect_eq "W28-C2m: a block that says it twice is caught" "2" "$(w28c_count "$W28C_DOC2")"
+W28C_DOC1="$TMP/w28c-cut.md"
+/usr/bin/grep -vF -- 'A check answers FAIL only' "${REPO}/payload/context/checks-adversarial.md" > "$W28C_DOC1" 2>/dev/null
+expect_contains "W28-C1m precondition: the cut copy keeps the rest of the file" "## The record" "$(cat "$W28C_DOC1")"
+expect_eq "W28-C1m: a checks file without the sentence is caught" "" "$(w26_hits "$W28C_SENTENCE" "$W28C_DOC1")"
+expect_eq "W28-C3: the structure checks no longer say FAIL whenever the case holds" "" \
+  "$(w26_hits "$W28C_OLD" "${REPO}/payload/context/checks-structure.md")"
+W28C_DOC3="$(w26_doctor "${REPO}/payload/context/checks-structure.md" "$W28C_OLD")"
+expect_nonempty "W28-C3m: a structure file that says it again is caught" "$(w26_hits "$W28C_OLD" "$W28C_DOC3")"
+
 finish
