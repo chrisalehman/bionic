@@ -1913,6 +1913,28 @@ TICK_WAIT
   say "CHAIN ${ids//,/→} (${mins} min)"
 }
 
+# THE PRIORITY A RECORD NEVER STATES (wave-28 T15; D19, AC-8.3). A rated reading writes the plan's
+# `deferred:` and `check:` lines at registration; the tick prints each such finding once, with the
+# priority the table gives its rating (lib/proof.sh `proof_findings_owed`, which `release-check`
+# prints too):
+#
+#   poker: FINDING <record>#<n> <S> <reach> <fix|defer|note> "<title>"
+#
+# Silent on a plan that carries none. Called beside the WAIT lines, on the scheduler's one parse.
+tick_finding_report() {  # -> says one FINDING line per finding the plan defers or owes a check for
+  local line
+  [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
+  /usr/bin/grep -qE '^(deferred|check):[[:space:]]' "$SCHED_PLAN" 2>/dev/null || return 0
+  declare -F proof_findings_owed >/dev/null 2>&1 \
+    || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null; }
+  declare -F proof_findings_owed >/dev/null 2>&1 || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] && say "FINDING $(clean "$line")"
+  done <<TICK_FINDINGS
+$(proof_findings_owed "$SCHED_PLAN" 2>/dev/null)
+TICK_FINDINGS
+}
+
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
 # once for everything it asks (`units_memoised`, payload/scripts/lib/units.sh); a tick with no
 # readable plan runs it bare, since there is no table to hold.
@@ -2745,6 +2767,12 @@ row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
   for k in files suites_allowed suites_source teammate_id adopted_from questions; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
+  # `pushed=` too (wave-28 T15; A-orch-9): what a reader was pushed at start decides how its record
+  # is read (lib/proof.sh `proof_pushed_severity`), so an amended, held or extended reader row keeps
+  # it. Only where `roster_row` knows the key (wave-28 T16), so a copy never fails on it.
+  if row_has_key "$row" pushed && roster_row pushed=x >/dev/null 2>&1; then
+    ROW_COPY_ARGS+=("pushed=$(line_field "$row" pushed)")
+  fi
   if [ "${3-}" != drop-done ] && row_has_key "$row" done; then
     ROW_COPY_ARGS+=("done=$(line_field "$row" done)")
   fi
@@ -6183,9 +6211,27 @@ EOF
     # resolves survival.md (lib/proof.sh `proof_reading`). A reading record holds exactly one pass and
     # a second is refused (T45), each value whole, and a structure result is one its checks bear out
     # (T41; review pass 10 F1, F2, F6); the start of its range comes back too, for the whole-read check below.
-    PF_RESULT=""; PF_SCOPE=""; PF_FROM=""; PF_ROLE=""
+    PF_RESULT=""; PF_SCOPE=""; PF_FROM=""; PF_ROLE=""; PF_SEV=""
     if [ -n "$PF_QUESTION" ]; then
-      if ! PF_RS="$(proof_reading "$PF_REAL" "$PF_QUESTION" "$BIONIC_LIB/../../context/checks-structure.md")"; then
+      # THE READER WAS PUSHED THE SEVERITY SCALE (wave-28 T15; D19, AC-8.1, AC-8.8): the `pushed=` of
+      # the last row naming this reader, dealt this question and past `intended`, on any roster of the
+      # project, read by key as `questions=` is. When it names `severity` (lib/proof.sh
+      # `proof_pushed_severity`) the record must carry its findings and its result is the one they
+      # derive; otherwise it is read as 1.12.0 read it. The row checks themselves follow below.
+      PF_PUSHED=""
+      for _pf_rf in "$PV_REPO/.bionic/tmp"/roster-*.state; do
+        [ -f "$_pf_rf" ] && [ ! -L "$_pf_rf" ] || continue
+        _pf_p="$(PF_WANT="$PF_READER" PF_Q="$PF_QUESTION" awk "$_ROSTER_OPEN_AWK"'
+          index($0, "roster-state/") == 1 && (_roster_kv($0, "name") "") == (ENVIRON["PF_WANT"] "") {
+            s = _roster_kv($0, "status"); if (s == "" || s == "intended") next
+            m = split(_roster_kv($0, "questions"), qs, ","); d = 0
+            for (i = 1; i <= m; i++) if (qs[i] == ENVIRON["PF_Q"]) d = 1
+            if (d) { p = _roster_kv($0, "pushed"); f = 1 } }
+          END { if (f) print "=" p }' "$_pf_rf" 2>/dev/null)"
+        [ -z "$_pf_p" ] || PF_PUSHED="${_pf_p#=}"
+      done
+      proof_pushed_severity "$PF_PUSHED" && PF_SEV=1
+      if ! PF_RS="$(proof_reading "$PF_REAL" "$PF_QUESTION" "$BIONIC_LIB/../../context/checks-structure.md" "$PF_SEV")"; then
         die "REFUSED — $(clean "$PF_RS"). The plan is unchanged."
         exit 1
       fi
@@ -6354,6 +6400,13 @@ PF_OTHER_LIST
       fi
     fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
+    # A RATED READING WRITES ITS PLAN LINES (wave-28 T15; D19, D21, D33): one `deferred:` line per
+    # finding the table defers and one `check:` line per unsure finding, right after its proof line,
+    # in the same write (lib/proof.sh `proof_finding_lines`).
+    PF_PLANL=""
+    [ "$PF_SEV" = 1 ] && PF_PLANL="$(proof_finding_lines "$PF_REL" "$(proof_findings "$PF_REAL")")"
+    [ -z "$PF_PLANL" ] || PF_LINE="$PF_LINE
+$PF_PLANL"
     if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
       exit 1
@@ -6412,6 +6465,7 @@ PF_OTHER_LIST
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l"; done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that reading."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
@@ -6603,6 +6657,9 @@ RC_TAGS
     fi
     plan_verb_swap release-check "the check proof at $RC_AT" writer
     say "release-check — kind=check head=$RC_AT base=$RC_BASE ($RC_FROM) evidence=$RC_REL: written to $PV_PLAN; dry-committed first.$RC_SAID"
+    # THE PRIORITY A RECORD NEVER STATES (wave-28 T15; D19): each finding the plan defers or owes a
+    # check for, with the table's priority (lib/proof.sh `proof_findings_owed`, the tick's own line).
+    proof_findings_owed "$PV_PLAN" 2>/dev/null | while IFS= read -r _rc_f; do say "release-check — finding $(clean "$_rc_f")"; done
     exit 0
     ;;
 
@@ -8031,6 +8088,7 @@ EOF
           fi
         fi
         tick_wait_report
+        tick_finding_report
       fi
     fi
 
