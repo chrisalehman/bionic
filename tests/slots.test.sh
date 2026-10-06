@@ -401,6 +401,28 @@ expect_eq "L2.5 the place count, the take loop and the wait are gone from the li
 expect_nonempty "L2.6 …while the liveness rule stays (L2.5 reads the same file)" \
   "$(grep -E '^_slots_live\(\)' "$SLOTS")"
 
+# L3. The take-over lib/line.sh's publish lock uses (`_slots_take_one`, B3 and B3b before T12): a
+# claim whose holder is dead, or one left with no holder and older than the orphan line, is
+# reclaimed once; a live holder's, or a fresh claim still being written, is not.
+newrow l3
+l3_take() {  # <dir> — _slots_take_one on <dir> for this shell; prints rc and the pid it holds
+  bash -c '. "$1"; _slots_take_one "$2" "$3" "$$" l3; echo "$? $(cat "$3/pid" 2>/dev/null)"' _ "$SLOTS" "$ROW" "$1"
+}
+L3_DEAD="$(dead_pid)"
+mkdir -p "$ROW/dead"; printf '%s\n' "$L3_DEAD" > "$ROW/dead/pid"
+L3_OUT="$(l3_take "$ROW/dead")"
+expect_regex "L3.1 a claim whose holder is dead is reclaimed (rc 0) for the new holder" '^0 [0-9]+$' "$L3_OUT"
+expect_ne "L3.2 …which now names the taker, not the dead holder" "0 $L3_DEAD" "$L3_OUT"
+sleep 60 & L3_LIVE=$!; BG="$BG $L3_LIVE"
+mkdir -p "$ROW/live"; printf '%s\n' "$L3_LIVE" > "$ROW/live/pid"
+expect_regex "L3.3 a live holder's claim is not taken (rc 1)" '^1 ' "$(l3_take "$ROW/live")"
+expect_eq "L3.4 …and it still names that holder" "$L3_LIVE" "$(cat "$ROW/live/pid")"
+mkdir -p "$ROW/fresh"
+expect_regex "L3.5 a fresh claim with no holder yet is a take in progress, left alone (rc 1)" '^1' "$(l3_take "$ROW/fresh")"
+touch -t 202001010000 "$ROW/fresh"
+expect_regex "L3.6 …the same claim aged past the orphan line is reclaimed (rc 0)" '^0 [0-9]+$' "$(l3_take "$ROW/fresh")"
+kill "$L3_LIVE" 2>/dev/null; wait "$L3_LIVE" 2>/dev/null
+
 # ═══════════════════════════════════════════════════════════════════ §QUIET
 section "QUIET — the whole machine: ask, hold, settle, re-read, void"
 
