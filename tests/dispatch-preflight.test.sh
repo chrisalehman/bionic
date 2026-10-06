@@ -11000,8 +11000,11 @@ section "§RIGOR — the dealing reads a plan in either vocabulary alike, and pr
 # `rigor_level`: a plan written `high` deals each reader what one written `audited` does, and a
 # refusal names the level as `rigor_print` prints it, never by the old word. §Q's fixtures and
 # helpers, the plan's rigor line set to each word of a pair.
-rv_gate() {  # <old|new tag> <rigor> <role> <questions line or empty> -> GATE_* for that dispatch
-  REPO=$(make_repo "rv-$1-$2-${3#bionic:}" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$2"
+RV_N=0
+rv_gate() {  # <tag> <rigor> <role> <questions line or empty> -> GATE_* for that dispatch
+  # The repository is named by a counter, never by the rigor word, so no path in a refusal carries it.
+  RV_N=$((RV_N + 1))
+  REPO=$(make_repo "rv-$1-$RV_N" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$2"
   q_gate "$REPO" "rv-$1" "$3" "$(q_brief "rv-$1" "$4")"
 }
 for rv_case in "tested|low|bionic:auditor|Questions: evidence|deny" \
