@@ -844,7 +844,7 @@ x ) y
 " z'
 hd_case semicolon leaks 'a;# ) y'
 hd_case pipe leaks 'a|# ) y'
-hd_case open-paren whole 'a(# ) y'
+hd_case open-paren leaks 'a(# ) y ) z'
 hd_case close-paren leaks '(a)# ) y'
 hd_case equals leaks 'a=# ) y'
 hd_case brace leaks 'a{# ) y'
