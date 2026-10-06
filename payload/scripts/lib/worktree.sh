@@ -604,8 +604,11 @@ _wt_bionic_kind_changed() {
   done
   printf '%s %s' "$3" "$at"
 }
+# `--ignore-submodules=none` (wave-28 T39, D31; wave-27 critic P3-1): `diff.ignoreSubmodules=all`, set in
+# any config the user holds, took a gitlink out of the answer, and a submodule link under `.bionic/`
+# landed; the answer is git's own, whatever the configuration.
 _wt_bionic_adds() {  # <root> <onto head> <tree head> -> every path the range adds, NUL-separated, as git stores it
-  git -C "$1" diff --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null
+  git -C "$1" diff --ignore-submodules=none --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null
 }
 _wt_bionic_first_add() {  # <root> <onto head> <tree head> -> the first path added under a root entry folding to `.bionic`, then `/`
   local p
@@ -654,6 +657,31 @@ _wt_cquote() {
   done
   printf '%s"' "$out"
 }
+# <word> -> the word as a shell reads it back to the same bytes, on one line (wave-28 T39, D31; review
+# pass 74's P2-1): as it is when every byte is a letter, a digit or one of `_./@+:-`; in single quotes
+# otherwise; as `$'…'` with C escapes when it holds `'` or a control character, so a tab or a line
+# break never splits the refusal's line.
+_wt_shquote() {
+  local LC_ALL=C s="$1" out="\$'" c i v
+  case "$s" in
+    '') printf "''"; return 0 ;;
+    *[!A-Za-z0-9_./@+:-]*) : ;;
+    *) printf '%s' "$s"; return 0 ;;
+  esac
+  case "$s" in *\'*|*[[:cntrl:]]*) : ;; *) printf "'%s'" "$s"; return 0 ;; esac
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      \'|\\) out="${out}\\${c}" ;;
+      $'\t') out="${out}\\t" ;; $'\n') out="${out}\\n" ;; $'\r') out="${out}\\r" ;;
+      *)
+        printf -v v '%d' "'$c"; [ "$v" -ge 0 ] || v=$((v + 256))
+        if [ "$v" -lt 32 ] || [ "$v" -eq 127 ]; then printf -v c '\\%03o' "$v"; fi
+        out="${out}${c}" ;;
+    esac
+  done
+  printf "%s'" "$out"
+}
 
 # The refusal is land's own contract line, like every sibling (wave-27 T79, A-orch-205): one
 # `REFUSED reason=bionic-committed` line on stdout naming the path (`.bionic` for a change of kind,
@@ -669,6 +697,9 @@ _wt_cquote() {
 # (A-orch-238).
 # The path and the remedy are in the range's spelling (wave-27 T86): the whole entry out is the
 # folded root entry the range added, as the range spelled it; a name git C-quotes is printed quoted.
+# PASTED AS PRINTED (wave-28 T39, D31; review pass 74's P2-1): every path and name the fix prints is
+# quoted for the shell (`_wt_shquote`), and the per-path pathspec of a name holding a glob character
+# is `:(literal)`, so git un-tracks that path alone, never a tracked file the pattern also matches.
 # EVERY PRINTED FIX LANDS WHEN FOLLOWED (A-orch-244; pass 71's P2-1): the whole entry, out of the
 # index, stays in the tree; where no ignore rule covers it and it is not the record link land passes
 # over (`_wt_piece_dirt`), the next land read it as dirty, so the fix also moves it out of the tree.
@@ -681,13 +712,15 @@ _wt_bionic_left_dirty() {  # <tree abs> <entry> -> 0 when the entry, untracked, 
 # delete it, which land refuses not-current; merging the target into the tree carries the target's
 # own untracking, after which the range adds nothing there. That shape's fix is the merge.
 _wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit | dropped:<head>> <path> <target's kind at .bionic>
-  local entry="${5%%/*}" commit="${4#dropped:}" path fix
+  local entry="${5%%/*}" commit="${4#dropped:}" path fix spec="$5"
   path="$(_wt_cquote "$5")"; fix="rm -r --cached ${entry}"
-  if [ "$commit" != "$4" ]; then fix="merge ${3}"
-  elif [ "$5" != "$entry" ] && [ "${6%% *}" = dir ]; then fix="rm --cached ${path}, move ${path} out of the tree, commit"
+  case "$5" in *[][*?\\]*) spec=":(literal)$5" ;; esac
+  if [ "$commit" != "$4" ]; then fix="merge $(_wt_shquote "$3")"
+  elif [ "$5" != "$entry" ] && [ "${6%% *}" = dir ]; then
+    fix="rm --cached $(_wt_shquote "$spec"), move $(_wt_shquote "$5") out of the tree, commit"
   elif _wt_bionic_left_dirty "$1" "$entry"; then fix="${fix}, move ${entry} out of the tree, commit"
   else fix="${fix}, commit"; fi
-  _wt_refuse "bionic-committed path=${path} commit=${commit:0:12} branch=${2} onto=${3} fix='git -C ${1} ${fix}, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
+  _wt_refuse "bionic-committed path=${path} commit=${commit:0:12} branch=${2} onto=${3} fix='git -C $(_wt_shquote "$1") ${fix}, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
 }
 
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
