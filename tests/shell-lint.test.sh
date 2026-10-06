@@ -358,6 +358,50 @@ EOF
 expect_contains "…while a planted file left open is named with the frames it ended in" \
   "$TMP/unclosed.sh	top/dq/cs" "$(lint_raw "$TMP/unclosed.sh")"
 
+# A lost brace depth is a lost place too (wave-28 T46). A form the lexer does not know leaves
+# its count of `{` and `}` wrong, and from there it owes §LOAD no function, so a library
+# 3.2 leaves half loaded would pass. Two valid forms it does not know, one each way: an
+# arithmetic `for` with a brace body (depth below zero at its `}`), and a `}` straight after
+# `fi` (depth above zero at the end). Each is named; the control beside them, an `esac`
+# directly before the backquote that closes it, is a valid file the lexer reads whole.
+plant "$TMP/brace-below.sh" <<'EOF'
+#!/bin/bash
+for ((i = 0; i < 1; i++)) { :; }  # MARK-below
+early_fn() { :; }
+[ "@DOL@{BASH_VERSINFO[0]}" -ge 4 ] || return 0
+late_fn() { :; }
+EOF
+plant "$TMP/brace-above.sh" <<'EOF'
+#!/bin/bash
+early_fn() { if :; then :; fi }
+[ "@DOL@{BASH_VERSINFO[0]}" -ge 4 ] || return 0
+late_fn() { :; }
+EOF
+plant "$TMP/esac-bt.sh" <<'EOF'
+#!/bin/bash
+X="@DOL@(echo `case "@DOL@1" in a) echo A ;; *) echo B ;; esac`)"
+printf 'X=[%s]\n' "@DOL@X"
+EOF
+expect_eq "the two lost-brace files and the esac control parse under /bin/bash -n" "0 0 0" \
+  "$(/bin/bash -n "$TMP/brace-below.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/brace-above.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/esac-bt.sh" 2>/dev/null; printf '%s' $?)"
+expect_eq "…each lost-brace file, loaded under /bin/bash, defines early_fn and not late_fn" \
+  "early_fn | early_fn |" \
+  "$(for f in brace-below brace-above; do (cd "$TMP" && env -i PATH=/usr/bin:/bin /bin/bash -c \
+       '. "$1" >/dev/null 2>&1; declare -F' _ "$TMP/$f.sh") | LC_ALL=C awk '{ printf "%s ", $3 }'
+     printf '| '; done | sed 's/ $//')"
+expect_eq "…and the control runs under /bin/bash and answers" "X=[A]" \
+  "$(/bin/bash "$TMP/esac-bt.sh" a 2>&1)"
+BRACE_RAW="$(cd "$TMP" && lint_raw brace-below.sh brace-above.sh esac-bt.sh)"
+expect_contains "the lexer names a file whose brace depth goes below zero, with the line" \
+  "below-zero-at=$(mark_line "$TMP/brace-below.sh" MARK-below)" \
+  "$(printf '%s\n' "$BRACE_RAW" | LC_ALL=C awk -F'\t' '$1 == "U" && $2 == "brace-below.sh"')"
+expect_contains "…and a file whose brace depth ends above zero" "braces=1" \
+  "$(printf '%s\n' "$BRACE_RAW" | LC_ALL=C awk -F'\t' '$1 == "U" && $2 == "brace-above.sh"')"
+expect_absent "…while the esac control, read in the same call, is not named" "esac-bt.sh" \
+  "$BRACE_RAW"
+
 # ============================================================
 section "PARSE — every shell file in the tree parses under the SYSTEM interpreter"
 # ============================================================
@@ -507,6 +551,30 @@ expect_eq "…and a function defined inside another is not owed at load" \
   "clean_fn helper " \
   "$(lint_raw "$TMP/lib-clean.sh" | LC_ALL=C awk -F'\t' '$1 == "D" { printf "%s ", $3 }')"
 
+# The keyword forms (wave-28 T46): `function name {` and `function name() {` open a body as
+# `name() {` does. A lexer that skips the keyword form's `{` reads its `}` as below zero and
+# owes nothing after it, so the early return above went green behind a keyword definition.
+cat > "$TMP/lib-kw.sh" <<'EOF'
+#!/bin/bash
+function kw_first { :; }
+function kw_second() { :; }
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || return 0
+function kw_third { :; }
+kw_fourth() { :; }
+EOF
+expect_eq "the keyword-form library parses under /bin/bash -n" "0" \
+  "$(/bin/bash -n "$TMP/lib-kw.sh" >/dev/null 2>&1; echo $?)"
+expect_eq "…and loaded under /bin/bash it defines only the two before its early return" \
+  "kw_first kw_second " \
+  "$( (cd "$LOAD_HOME" && env -i PATH=/usr/bin:/bin /bin/bash -c \
+     '. "$1" >/dev/null 2>&1; declare -F' _ "$TMP/lib-kw.sh") | LC_ALL=C awk '{ printf "%s ", $3 }')"
+expect_eq "the lexer owes every function the keyword-form library defines at load" \
+  "kw_first kw_second kw_third kw_fourth " \
+  "$(lint_raw "$TMP/lib-kw.sh" | LC_ALL=C awk -F'\t' '$1 == "D" { printf "%s ", $3 }')"
+expect_contains "…so the load sweep names the two the early return left undefined" \
+  "FAIL $TMP/lib-kw.sh: not defined after loading: kw_fourth kw_third" \
+  "$(lint_load "$TMP/lib-kw.sh" "$TMP/lib-clean.sh")"
+
 # ============================================================
 section "CASE — no case arm without its opening paren inside \$( )"
 # ============================================================
@@ -576,6 +644,34 @@ expect_contains "…and the same arm in an unquoted \$( )" \
 expect_contains "…and the one-line shape" \
   "case-inline.sh:$(mark_line "$TMP/case-inline.sh" MARK-inline): CASE" "$CASE_HITS"
 expect_absent "…while no control, read in the same call, is named" "case-ok.sh" "$CASE_HITS"
+
+# The keyword form inside "$( )" (wave-28 T46): the arm after `function g { case … in` is in a
+# body the lexer must see open. The control is the same function with paren-led arms.
+plant "$TMP/case-fn.sh" <<'EOF'
+#!/bin/bash
+X="@DOL@(function g { case "@DOL@1" in
+    a) echo A ;;  # MARK-fn
+  esac; }; g a)"
+printf 'X=[%s]\n' "@DOL@X"
+EOF
+plant "$TMP/case-fn-ok.sh" <<'EOF'
+#!/bin/bash
+X="@DOL@(function g { case "@DOL@1" in
+    (a) echo A ;;
+  esac; }; g a)"
+printf 'X=[%s]\n' "@DOL@X"
+EOF
+expect_eq "the keyword-form arm and its control parse under /bin/bash -n" "0 0" \
+  "$(/bin/bash -n "$TMP/case-fn.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/case-fn-ok.sh" 2>/dev/null; printf '%s' $?)"
+expect_contains "…the arm fails when it runs under /bin/bash" "syntax error" \
+  "$(/bin/bash "$TMP/case-fn.sh" 2>&1)"
+expect_eq "…while the control answers" "X=[A]" "$(/bin/bash "$TMP/case-fn-ok.sh" 2>&1)"
+CASE_FN_HITS="$(cd "$TMP" && lint_hits case-fn.sh case-fn-ok.sh)"
+expect_contains "the lint names the arm after \`function g {\` by file and line" \
+  "case-fn.sh:$(mark_line "$TMP/case-fn.sh" MARK-fn): CASE" "$CASE_FN_HITS"
+expect_absent "…while the control, read in the same call, is not named" "case-fn-ok.sh" \
+  "$CASE_FN_HITS"
 
 # MOVED HERE from tests/cross-gate-agreement.test.sh §BP (wave-28 T37): the one-line grep, over
 # §PARSE's roster, which reaches tests/ where the lexer does not. A one-line `case` inside a
@@ -676,5 +772,38 @@ expect_contains "…and its one-line form" \
 expect_contains "…and shape (ii) by file and line" \
   "hd-paren.sh:$(mark_line "$TMP/hd-paren.sh" MARK-hdp): HEREDOC-PAREN" "$HD_HITS"
 expect_absent "…while neither control, read in the same call, is named" "hd-ok.sh" "$HD_HITS"
+
+# The comment 3.2's reader honours (wave-28 T46). A `#` at a word start (the line's start, or
+# after a blank) comments out the rest of its line: no paren after it counts. So a `(` there
+# hides nothing and a `)` there closes nothing: the first body below leaks, the second prints
+# whole. (Measured under 3.2.57: a mid-word `#`, or one after `;`, `|`, `(`, is no comment.)
+plant "$TMP/hd-hash.sh" <<'EOF'
+#!/bin/bash
+x="@DOL@(cat <<'EOT'
+# open ( here
+close ) there MARK-hho
+EOT
+)"
+printf '[%s]\n' "@DOL@x"
+EOF
+plant "$TMP/hd-hash-ok.sh" <<'EOF'
+#!/bin/bash
+x="@DOL@(cat <<'EOT'
+# note ) here MARK-hhn
+EOT
+)"
+printf '[%s]\n' "@DOL@x"
+EOF
+expect_eq "the two commented bodies parse under /bin/bash -n" "0 0" \
+  "$(/bin/bash -n "$TMP/hd-hash.sh" 2>/dev/null; printf '%s ' $?
+     /bin/bash -n "$TMP/hd-hash-ok.sh" 2>/dev/null; printf '%s' $?)"
+expect_contains "…a ( after the # hides nothing: the ) on the next line leaks the heredoc" "EOT" \
+  "$(/bin/bash "$TMP/hd-hash.sh" 2>/dev/null)"
+expect_eq "…while a ) after the # closes nothing: the body prints whole" \
+  "[# note ) here MARK-hhn]" "$(/bin/bash "$TMP/hd-hash-ok.sh" 2>/dev/null)"
+HD_HASH_HITS="$(cd "$TMP" && lint_hits hd-hash.sh hd-hash-ok.sh)"
+expect_contains "the lint names the ) that leaks, by file and line" \
+  "hd-hash.sh:$(mark_line "$TMP/hd-hash.sh" MARK-hho): HEREDOC-PAREN" "$HD_HASH_HITS"
+expect_absent "…and not the ) behind the #, read in the same call" "hd-hash-ok.sh" "$HD_HASH_HITS"
 
 finish
