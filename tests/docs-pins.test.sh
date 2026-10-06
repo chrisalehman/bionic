@@ -5864,14 +5864,14 @@ expect_contains "W27-R7e: the upgrade note counts six ways in 1.11.0, and fixes 
 # scale" word for word (the spec is not shipped, so its text is typed below, copied once from
 # `.bionic/docs/specs/epic-23-bionic-tech-debt/wave-28-finished-work-lands.spec.md` and diffed
 # against it, record/wave-28-finished-work-lands/T16-scale.md); the rendered span is the block; the
-# file fits its 2,600-byte cap; no other shipped file defines a level; the two code checks files
-# each point to it once and carry no rating word of their own; the structure checks carry the
+# file fits its 2,700-byte cap (Chris's ruling, 2026-10-06: the scale plus the finding lines'
+# form); no other shipped file defines a level; the two code checks files each point to it once and carry no rating word of their own; the structure checks carry the
 # scale's rule on age, not "old code never fails"; and the finding lines read the same in the
 # scale's record form and in steps/6.md's. Each absence sits beside a positive on the same
 # extractor, and a doctored copy proves each arm goes red. HERMETIC: committed finals by path.
 W28S_BLOCK="${BLOCK_DIR}/severity.md"
 W28S_FILE="${REPO}/payload/context/severity.md"
-W28S_CAP=2600
+W28S_CAP=2700
 W28S_POINTER='Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.'
 W28S_AGE='Age does not lower a rating. Say "older than the reviewed range" beside it.'
 W28S_SPEC=""
