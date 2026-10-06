@@ -70,15 +70,28 @@
 # copied by `hold` and `amend`, whose row is the same contract, and dropped by `extend`, whose
 # re-opened row is new work (`row_copy_args` in hooks/session-poker.sh, `drop-done`).
 #
+# A READER'S QUESTIONS (wave-27 T15; REQ-5, D5). `questions=<q>[,<q>]` is the dispatch wall's
+# record of a reader brief's `Questions:` line, in the order evidence, adversarial, structure;
+# `hooks/execution-recorder.sh` pushes the checks file of each at agent start, and `proof-add
+# review` reads it to hold a reading to the question its reader was dealt. Present-if-passed, and
+# it TRAILS `plan=`: a row that names none is byte-identical to the rows before it.
+#
+# A DECLARED DEBT (wave-27 T31; REQ-14, D23). `lands_red=<suite> until <token>` and
+# `red_evidence=<path under record/>` are the dispatch wall's record of a brief's `Lands-red:` and
+# `Red-evidence:` lines; `land` honours a red last run of exactly that suite on a row that carries
+# them. The dispatch wall is their one writer (`amend` refuses to add them), so a row carries them
+# only from its launch. Present-if-passed, and they TRAIL `questions=`.
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
 # declared, the suite basenames it may run, whether that set was DERIVED from the tree by the
 # configured impact command or DECLARED by the brief, and — for a repository whose tests are
 # not shell suites at all — the author-marked commands the brief declared it will re-run,
-# marks kept, space-joined, capped per role since T4 (wave-20, REQ-7) — three for an
-# auditor, DP_SUITES_MAX for every other role (hooks/dispatch-preflight.sh lifts them from the
-# brief text under `Re-executes:`). `re_executes=` is the LAST of the four and TRAILS them,
+# marks kept, space-joined, capped per brief since T4 (wave-20, REQ-7) — three suite runs for
+# a reader of the evidence question, DP_SUITES_MAX for every other (dp_runs_cap in lib/brief.sh;
+# hooks/dispatch-preflight.sh lifts them from the brief text under `Re-executes:`).
+# `re_executes=` is the LAST of the four and TRAILS them,
 # so a row written before the field existed reproduces byte for byte through this writer. They are present-if-passed rather than always-emitted so that the captured
 # rows in `tests/fixtures/roster-row.captured` — real rows written before this task
 # existed — still reproduce byte for byte through this writer. A row from before the wall
@@ -107,7 +120,7 @@ ROSTER_SCHEMA_VERSION="v1"
 # type it had never heard of — `fork`, `general-purpose`, `claude`, a consumer's own agent —
 # was admitted as if it were a reader (triage-B D2a). Here the unknown answers "writer".
 #
-# THE MEMBERS: the four bionic roles whose role files disallow Write and Edit, plugin-qualified
+# THE MEMBERS: the bionic roles whose role files disallow Write and Edit, plugin-qualified
 # as the harness sends them, plus the harness's two no-write types `Explore` and `Plan`, bare
 # as the harness sends them. A bare `researcher` is NOT a member: a consumer's own agent of
 # that name may carry Write, and ARM C has always read the plugin-qualified spelling only.
@@ -115,7 +128,7 @@ ROSTER_SCHEMA_VERSION="v1"
 #
 # A CONSTANT, NOT A READ OF agents/*.md: ARM C runs on every Bash call in an agent context,
 # and a file read there would be paid by every command (research D3-7).
-ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan"
+ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer Explore Plan"
 
 # A WHOLE-WORD MATCH WITHOUT WORD SPLITTING: the callers include walls.sh, which moves IFS
 # around its argv readers, so a `for r in $SET` loop here would answer by whatever IFS it
@@ -250,9 +263,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
-  local held="" done_marker=""
+  local held="" done_marker="" questions="" lands_red="" red_evidence=""
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
-  local has_held=0 has_done=0
+  local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -298,6 +311,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       extended)      extended="$val";     has_extended=1 ;;
       held)          held="$val";         has_held=1 ;;
       done)          done_marker="$val";  has_done=1 ;;
+      questions)     questions="$val";    has_questions=1 ;;
+      lands_red)     lands_red="$val";    has_lands_red=1 ;;
+      red_evidence)  red_evidence="$val"; has_red_evidence=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -323,6 +339,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_held" -eq 1 ]; then     out="$out|held=$held"; fi
   if [ "$has_done" -eq 1 ]; then     out="$out|done=$done_marker"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
+  if [ "$has_questions" -eq 1 ]; then out="$out|questions=$questions"; fi
+  if [ "$has_lands_red" -eq 1 ]; then out="$out|lands_red=$lands_red"; fi
+  if [ "$has_red_evidence" -eq 1 ]; then out="$out|red_evidence=$red_evidence"; fi
   printf '%s\n' "$out"
   return 0
 }

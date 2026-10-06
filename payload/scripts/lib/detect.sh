@@ -20,8 +20,8 @@
 #   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
-#   env:rc-claude-proxy present=<yes|no|stale>
-#   env:zshrc-legacy present=<yes|no>
+#   env:rc-claude-proxy present=<yes|no|stale|changed|malformed|not-a-file>
+#   env:zshrc-legacy present=<yes|no|malformed|not-a-file>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   env:auto-memory override=<file|none|unknown> dir=<path|none> files=<n>
@@ -80,8 +80,8 @@ if ! declare -F check_dep >/dev/null 2>&1; then
   . "$(cd "$(_detect_self_dir)" && pwd -P)/deps.sh"
 fi
 
-# env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_get`, `rc_file` and
-# `rc_default`. Those own the question "is bionic's proxy line inside bionic's
+# env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_state`, `rc_get`, `rc_file`
+# and `rc_default`. Those own the question "is bionic's proxy line inside bionic's
 # markers", and `detect_rc_claude_proxy` below now asks THEM rather than
 # answering it a second way (epic-19 W1 Step-6 DUPLICATION FAIL: the two
 # predicates disagreed on every machine carrying an older proxy line). env.sh's
@@ -311,15 +311,17 @@ detect_dep() {  # <name>
 
 # ─── Environment class ───────────────────────────────────────────────────────
 
-# The flag current CLI builds need for the native task tools. A commented-out
-# line does not count: it is the state a user lands in after commenting the
-# export out, and reporting it as present would make setup skip the very
-# repair that is wanted.
+# The flag current CLI builds need for the native task tools, as bionic wrote it:
+# between its env markers (wave-27 T66, A-orch-119 (3)). Half-uninstalled counts it
+# as bionic's footprint, so it is what remove takes out and nothing else: a line of
+# the same text outside the markers, a commented copy or another value is the user's.
 detect_env_todo_tools() {
-  local rc present=no
+  local rc present=no line
   rc="$(_detect_shell_rc)"
-  if [ -f "$rc" ] && grep -qE '^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1' "$rc" 2>/dev/null; then
-    present=yes
+  if [ -f "$rc" ] && markers_regular "$rc" >/dev/null; then
+    while IFS= read -r line; do
+      bionic_todo_export_ours "$line" && present=yes
+    done < <(markers_get "$rc" "$BIONIC_ENV_START" "$BIONIC_ENV_END" 2>/dev/null)
   fi
   echo "env:todo-tools present=${present}"
   return 0
@@ -329,12 +331,13 @@ detect_env_todo_tools() {
 # `claude()` proxy setup writes, inside its own marker pair:
 #
 #     # ─── bionic:rc:start ───
+#     unalias claude 2>/dev/null || true
 #     claude() { command claude --allow-dangerously-skip-permissions "$@"; }
 #     # ─── bionic:rc:end ───
 #
-# ONE OWNER FOR THE PREDICATE, AND IT IS env.sh's. `rc_get` — what setup already
-# consumes to decide whether the item is done — asks whether `rc_default`'s line
-# is INSIDE bionic's markers, and this function asks `rc_get`. It used to grep
+# ONE OWNER FOR THE PREDICATE, AND IT IS env.sh's. `rc_state` — what setup and
+# `rc_set` already consume to decide whether the item is done — reads the block
+# against `rc_default`'s body, and this function prints its answer. It used to grep
 # the START MARKER on its own, which agreed with setup only for as long as the
 # line between the markers never changed; task 4/1 changed it
 # (`--dangerously-skip-permissions` → `--allow-dangerously-skip-permissions`)
@@ -343,36 +346,51 @@ detect_env_todo_tools() {
 # the Step-6 review's DUPLICATION FAIL, closed by deleting the second owner
 # rather than by adding a test that watches them drift.
 #
-# THREE STATES, BECAUSE THERE ARE THREE MACHINES.
+# FOUR STATES, BECAUSE THERE ARE FOUR MACHINES (env.sh `rc_state` says which).
 #
-#   yes    — the markers hold exactly the line this payload writes.
-#   stale  — the markers are there and hold something else: an older payload's
-#            text, or a hand edit between them. This person CONSENTED; what they
-#            carry is bionic's own block gone out of date, which setup rewrites
-#            and doctor must not paint green.
-#   no     — no markers at all. Never asked, or asked and declined — a correctly
-#            configured machine either way.
+#   yes     — bionic's lines are in force: the current body, alone or with the
+#             user's own lines among them (`written`).
+#   stale   — the markers hold nothing, or an earlier body bionic wrote. This person
+#             CONSENTED; what they carry is bionic's own block gone out of date,
+#             which setup rewrites and doctor must not paint green.
+#   changed — the markers hold anything else: the user changed the block since
+#             bionic wrote it (wave-27 T77). Theirs to edit; setup never rewrites
+#             it, and doctor names it by its lines without calling it a fault.
+#   no      — no markers at all. Never asked, or asked and declined — a correctly
+#             configured machine either way.
 #
-# The `no`/`stale` split is why the marker test survives at all: it is no longer
-# the predicate, it is what tells a stale block from an absent one. A `claude()`
-# function a user wrote for themselves sits outside the markers and is none of
-# these — not claimed here, not removed by /bionic:remove.
+# AND TWO FAULTS NO SETUP STEP REPAIRS (wave-27 T46, review pass 14 F2), read
+# before any of the above so none can be mistaken for them:
+#
+#   malformed  — the markers do not pair up (markers.sh `markers_check`, the one
+#                reader). Setup refuses such a file, so calling it `stale` sent
+#                the reader to a command certain to refuse, and an end marker
+#                alone read `no`.
+#   not-a-file — the rc path is a directory or a dangling link
+#                (markers.sh `markers_regular`); every writer refuses it.
+#
+# A `claude()` function a user wrote for themselves sits outside the markers and
+# is none of these — not claimed here, not removed by /bionic:remove.
 detect_rc_claude_proxy() {
-  local rc present=no
-  if rc_get claude-proxy 2>/dev/null; then
-    present=yes
-  else
-    # The file `rc_get` just looked in, so the two halves of this answer cannot
-    # come to be about two different files. Unresolvable (a shell bionic writes
-    # no rc for) leaves it empty and the answer `no`, which is the truth: there
-    # is no file that could hold bionic's block.
-    rc="$(rc_file 2>/dev/null)" || rc=""
-    if [ -n "$rc" ] && [ -n "${RC_START:-}" ] && [ -f "$rc" ] && \
-       grep -qF "$RC_START" "$rc" 2>/dev/null; then
-      present=stale
-    fi
-  fi
+  local present
+  # Unresolvable (a shell bionic writes no rc for) answers nothing, and that is
+  # `no`, the truth: there is no file that could hold the block.
+  present="$(rc_state claude-proxy 2>/dev/null)" || present=no
+  case "$present" in written) present=yes ;; "") present=no ;; esac
   echo "env:rc-claude-proxy present=${present}"
+  return 0
+}
+
+# The working principles in the user's own CLAUDE.md (wave-27 D16). ONE OWNER FOR
+# THE PREDICATE, for the reason just above: env.sh's `principles_state` compares
+# the block to the shipped text, and setup, doctor and this line all ask it.
+#
+#   present   — the block is the shipped text, byte for byte
+#   edited    — a block is there and differs; the user's edit is theirs to keep
+#   absent    — no block: never asked, or asked and declined
+#   malformed — the markers do not pair up; nothing reads or writes the block
+detect_working_principles() {
+  echo "env:working-principles state=$(principles_state)"
   return 0
 }
 
@@ -385,14 +403,163 @@ detect_rc_claude_proxy() {
 # Auto mode is the default now and the safer equivalent, so the block is
 # retired footprint that setup removes. The markers are matched verbatim,
 # box-drawing dashes included — they are what makes the block addressable.
+# remove.sh's standalone door carries its own copy of the pair (`RM_ALIAS_*`),
+# pinned equal to these by tests/rc-item.test.sh.
+BIONIC_ALIAS_START='# ─── bionic:start ───'
+BIONIC_ALIAS_END='# ─── bionic:end ───'
+
+# THE BLOCK'S STATE IS markers.sh's, THE ONE READER (wave-27 T51, review pass 21
+# F1 and F2). This was a substring `grep` for the start marker: a marker quoted in
+# a comment read as a block, and a start with no end read as a block setup's own
+# walk then deleted to the end of the file. Now whole lines only, and the same two
+# faults the live rc block has, read first so neither is mistaken for a block:
+#
+#   yes        — one well-formed block; setup removes it with `markers_strip`
+#   no         — no marker line at all (a quoted marker is no marker)
+#   malformed  — the markers do not pair up (`markers_check`); setup refuses,
+#                doctor names the line and a hand fix
+#   not-a-file — the rc is not a text file bionic can read (`markers_regular`)
 detect_zshrc_legacy_block() {
   local rc present=no
   rc="$(_detect_shell_rc)"
-  if [ -f "$rc" ] && grep -qF '# ─── bionic:start ───' "$rc" 2>/dev/null; then
+  if [ -n "$rc" ] && ! markers_regular "$rc" >/dev/null; then
+    present=not-a-file
+  elif [ -n "$rc" ] && ! markers_check "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" >/dev/null; then
+    present=malformed
+  elif [ -n "$rc" ] && markers_get "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" >/dev/null; then
     present=yes
   fi
   echo "env:zshrc-legacy present=${present}"
   return 0
+}
+
+# THE LINES BIONIC ITSELF WROTE BARE, AND THE ONE PLACE THEY ARE LISTED (wave-27
+# T55, review pass 32 F1, the blocker). Before the markers, claude-bootstrap.sh
+# appended the alias with nothing around it, and the step that takes it back out
+# deleted every line `alias claude=.*dangerously-skip-permissions` matched — a
+# user's comment, a second command sharing the line, the user's own alias inside an
+# `if`. A line is bionic's only when the WHOLE line, blanks at either end and one
+# trailing CR aside, is one of the spellings below, each found in this repository's
+# history with the commit that wrote it. remove.sh carries this function, the scan
+# and the number words under the same names, pinned line for line by
+# tests/rc-item.test.sh §T55 and §T66.
+#
+# LINEAR IN THE LINE, UNDER EVERY LOCALE (wave-27 T66, review pass 40 N1). Bash's
+# suffix and prefix trims are quadratic in a line's length under a UTF-8 locale (a
+# 200,000-character line took 8 s here), so every list below decides in the C
+# locale, `local` to the call, and a line that cannot hold the spelling is turned
+# away before that. Bytes are bytes: the answer is the same under any locale.
+bionic_rc_line_bare() {  # <line> — sets BIONIC_RC_BARE: blanks at either end and one trailing CR dropped
+  local LC_ALL=C l="$1"
+  l="${l#"${l%%[![:blank:]]*}"}"
+  l="${l%"${l##*[![:blank:]]}"}"
+  l="${l%$'\r'}"
+  l="${l%"${l##*[![:blank:]]}"}"
+  BIONIC_RC_BARE="$l"
+}
+
+bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
+  case "$1" in *"--dangerously-skip-permissions'"*) ;; *) return 1 ;; esac
+  local LC_ALL=C l p hi=$'\200'-$'\377'
+  bionic_rc_line_bare "$1"; l="$BIONIC_RC_BARE"
+  case "$l" in
+    # claude-bootstrap.sh 6e953055 (2026-03-22), bare, `printf '\n%s\n' "$ALIAS_LINE"`,
+    # until e012f966 (2026-03-28) wrote the same line inside the markers.
+    "alias claude='claude --dangerously-skip-permissions'") return 0 ;;
+    # claude-bootstrap.sh e178aecc (2026-03-14) until 6e953055, the same append with
+    # `CLAUDE_BIN="$(command -v claude)"` as <P>: that machine's path to claude, or
+    # empty where none was on PATH. One template (A-orch-93, amended by A-orch-117):
+    # P empty, or absolute with `claude` as its last component, every character a
+    # letter, a digit or one of `/ . _ - + @ % , : = ~`. A byte above 0x7f counts as
+    # a letter (no shell metacharacter is one); a pipe, `&`, `<`, `>`, a parenthesis,
+    # white space, a quote, `$`, a backquote or `;` is not a path bionic wrote.
+    "alias claude='"*" --dangerously-skip-permissions'")
+      p="${l#"alias claude='"}"; p="${p%" --dangerously-skip-permissions'"}"
+      [ -z "$p" ] && return 0
+      case "$p" in /claude|/*/claude) ;; *) return 1 ;; esac
+      case "$p" in *[!A-Za-z0-9/._+@%,:=~${hi}-]*) return 1 ;; esac
+      return 0 ;;
+  esac
+  return 1
+}
+
+# Any line that MENTIONS the retired alias, bionic's or not: what the step names
+# by number and leaves for the user's hand when `bionic_legacy_alias_ours` says no.
+BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
+
+# THE ENVIRONMENT LINE BIONIC WROTE, AND ONLY BETWEEN ITS MARKERS (wave-27 T66,
+# review pass 40 B2; A-orch-119 (3)). remove's environment item took out every line
+# its filter matched from the start: a user's `…=1; export TOKEN=…`, a different
+# variable with the same prefix, a commented copy. One spelling was ever written,
+# never varying by machine (`git log --all -S CLAUDE_CODE_ENABLE_TODO_TOOLS`):
+# setup.sh 3e00ec84 (2026-08-17) until ba36f32c (2026-08-21) appended it between the
+# retired env markers below, and nowhere else. So bionic wrote no bare line: this
+# predicate says whether a line is that text (blanks at either end and one trailing
+# CR aside), and a line of that text OUTSIDE the markers is the user's, named by
+# number and left; the block between the markers is what remove takes, as a unit.
+# remove.sh carries the markers (`RM_ENV_*`), pinned equal to these.
+BIONIC_ENV_START='# ─── bionic:env:start ───'
+BIONIC_ENV_END='# ─── bionic:env:end ───'
+
+# WHAT BIONIC WROTE BETWEEN ITS RETIRED MARKERS, the one place it is listed (wave-27
+# T75, review pass 54 B3): one line each, never varying by machine — the fixed alias
+# line between the alias markers (e178aecc, 6e953055, e012f966) and the export between
+# the env markers (above). A block that holds anything else between its markers was
+# changed since bionic wrote it and is the user's to edit (markers.sh
+# `markers_block_alone`). remove.sh carries this function, pinned.
+bionic_block_body() {  # <start marker> — the body bionic wrote after it, empty for any other
+  case "$1" in
+    "$BIONIC_ALIAS_START") printf '%s\n' "alias claude='claude --dangerously-skip-permissions'" ;;
+    "$BIONIC_ENV_START")   printf '%s\n' "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" ;;
+  esac
+}
+
+bionic_todo_export_ours() {  # <line> — rc 0 when it is the text bionic wrote
+  case "$1" in *CLAUDE_CODE_ENABLE_TODO_TOOLS*) ;; *) return 1 ;; esac
+  local LC_ALL=C
+  bionic_rc_line_bare "$1"
+  [ "$BIONIC_RC_BARE" = "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" ]
+}
+
+# Any line that mentions the export, bionic's or not: named by number and left.
+BIONIC_TODO_EXPORT_PATTERN='export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS'
+
+# Which lines of <file> are bionic's and may go, which are bionic's and stay, and
+# which only mention it: `ours=<n>,<n> bound=<n>,<n> why=<…> theirs=<n>`, line
+# numbers, never a line's text (an rc line can hold a secret); the lines of the
+# retired alias block are the block's, not bare lines. `bound` is bionic's
+# line where taking it out would change the user's own code, and `why` says how
+# that was decided (markers.sh `bionic_rc_lines`). A file that is not there answers
+# all of them empty.
+bionic_legacy_alias_lines() {  # <file>
+  bionic_rc_lines "$1" bionic_legacy_alias_ours "$BIONIC_LEGACY_ALIAS_PATTERN" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"
+}
+
+# A file with no env markers: `cand=<n>,<n>` the lines of bionic's text, outside the
+# markers and so the user's, and `theirs=<n>,<n>` the other lines that mention it.
+bionic_todo_export_lines() {  # <file>
+  bionic_rc_candidates "$1" bionic_todo_export_ours "$BIONIC_TODO_EXPORT_PATTERN"
+}
+
+# Why bionic's own line stays, in the words every door uses after the line number
+# (wave-27 T66). <why> is `bionic_rc_lines`' answer.
+bionic_rc_left_reason() {  # <why> <rc>
+  case "$1" in
+    ok)       printf "where removing it would change your own code\n" ;;
+    no-shell) printf "left: %s, the shell that reads that file, is not installed, so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    no-parse) printf "left: the file does not parse as it is (%s -n), so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    hand)     printf "outside bionic's markers, and bionic takes out only what stands between them\n" ;;
+    changed)  printf "changed since bionic wrote it\n" ;;
+    *)        printf "left: bionic could not stage a copy to check\n" ;;
+  esac
+}
+
+# `3` → `line 3`; `3,7` → `lines 3, 7`.
+bionic_line_numbers_words() {  # <n>,<n>…
+  case "$1" in
+    *,*) printf 'lines %s\n' "${1//,/, }" ;;
+    *)   printf 'line %s\n' "$1" ;;
+  esac
 }
 
 # Managed-hook entries in USER settings.json that still point at the
@@ -1958,7 +2125,8 @@ detect_half_uninstalled() {
   esac
 
   if [ "$registered" = "no" ]; then
-    line="$(detect_zshrc_legacy_block)";   [ "$line" = "env:zshrc-legacy present=yes" ] && footprint=yes
+    line="$(detect_zshrc_legacy_block)"
+    case "$line" in *present=yes|*present=malformed) footprint=yes ;; esac
     line="$(detect_env_todo_tools)";       [ "$line" = "env:todo-tools present=yes" ] && footprint=yes
     line="$(detect_legacy_channel_hooks)"
     case "$line" in *"count=0"|*"count=unknown") ;; *) footprint=yes ;; esac

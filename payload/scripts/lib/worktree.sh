@@ -378,7 +378,9 @@ EOF
 # by the booking shim to `<the tree's git dir>/bionic-stamps`, one line per suite-class command.
 # Prints the reason and the fix and returns 0 when the tree's runs are not proof for <head>.
 # Returns 1 when they are — and when there is no stamp file, which means no suite-class command
-# ever ran in the tree.
+# ever ran in the tree. On 1 it prints, byte for byte from this one read, the stamp lines at <head>
+# it judged (none without a file): the land keeps those, and not a second read of a file a suite
+# may append to in between (wave-27 T44).
 #
 # THE RULE: for EVERY suite stamped at <head>, the NEWEST stamp of that suite is green proof (rc 0
 # on a clean tree). The doctrine runs a brief's suites one call each, so one head collects one line
@@ -390,24 +392,29 @@ EOF
 #     from any suite. A red or dirty one at <head> refuses, and NO later run at <head> clears it:
 #     the fix is a commit, then the suites again. A green one asks nothing.
 #   - Lines on another head are history. A file with lines and none at <head> is `why=head`, naming
-#     the newest line's head.
+#     the newest line's head, the head looked for and the stamp file read (A-orch-55).
 #   - The NEWEST line must be readable, as before: an empty file, or a last line that is no stamp,
 #     is `why=unreadable`. An unreadable line before it is no run's record (the shim writes none)
 #     and is skipped.
 # Failures are named in the order the suites first appear at <head>, dirty before red.
+#   - A DECLARED RED (wave-27 T31; D23): with a <declared suite>, a red (not dirty) newest stamp of
+#     exactly that suite is not a failure; the proof then prints `landed-red=<suite>` as its first
+#     line, ahead of the judged lines, and `land` holds the declaration's evidence to <head>. A
+#     second red suite is refused as any red is.
 #
 # `cmd=` is the last field and free text, so each line's read STOPS there (review 2 F2): what
 # follows is the command, whatever it contains, and a `|rc=0` in it never speaks for the run.
 # Before `cmd=`, each of head, dirty and rc appears exactly once and suites at most once; a line
 # giving one twice is no line the shim writes. ONE awk over the file, whatever its length.
-_wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
-  local wt="${1:-}" head="${2:-}" gd file verdict what n s
+_wt_stale_proof() {  # <worktree abs> <head> [<declared suite>] -> why=... | the judged lines
+  local wt="${1:-}" head="${2:-}" okred="${3:-}" gd file verdict what n s judged lr nl='
+'
   local again="re-run the tree's suites at its head, land again"
   gd="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)"
   [ -n "$gd" ] || { printf 'why=unreadable stamps=%s/<no git dir> — %s' "$wt" "$again"; return 0; }
   file="${gd}/bionic-stamps"
   [ -e "$file" ] || [ -L "$file" ] || return 1
-  verdict="$(awk -v want="$head" '
+  verdict="$(awk -v want="$head" -v okred="$okred" '
     { last_ok = 0 }
     substr($0, 1, 9) != "stamp/v1|" { next }
     {
@@ -424,6 +431,7 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
       last_ok = 1; last_head = h
       if (h != want) next
       at_head++
+      judged = judged $0 "\n"
       proof = (d == "0" && r == "0")
       if (s == "") s = "?"
       m = split(s, names, ",")
@@ -442,10 +450,12 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
         if (!(x in state)) continue
         split(state[x], v, " ")
         if (v[1] != "0") { print "dirty " v[1] " " x; exit }
-        if (v[2] != "0") { print "red " v[2] " " x; exit }
+        if (v[2] != "0") { if (okred != "" && x == okred) { lr = x; continue } print "red " v[2] " " x; exit }
       }
-      print "proof"
+      printf "proof%s\n%s", (lr != "" ? " " lr : ""), judged
     }' "$file" 2>/dev/null)"
+  judged=""
+  case "$verdict" in *"$nl"*) judged="${verdict#*"$nl"}"; verdict="${verdict%%"$nl"*}" ;; esac
   what="${verdict%% *}"; n="${verdict#* }"; s="${n#* }"; n="${n%% *}"
   local fix_dirty="commit or clean the tree, $again" fix_red="make the suites green, $again"
   if [ "$s" = "?" ]; then
@@ -453,8 +463,11 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
     fix_red="$fix_dirty"
   fi
   case "$what" in
-    proof) return 1 ;;
-    head)  printf 'why=head stamp_head=%s head=%s — %s' "$n" "$head" "$again" ;;
+    proof)
+      lr=""; case "$verdict" in "proof "?*) lr="${verdict#proof }" ;; esac
+      [ -z "$lr" ] || printf 'landed-red=%s\n' "$lr"
+      [ -z "$judged" ] || printf '%s\n' "$judged"; return 1 ;;
+    head)  printf 'why=head stamp_head=%s head=%s stamps=%s — %s' "$n" "$head" "$file" "$again" ;;
     dirty) printf 'why=dirty dirty=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_dirty" ;;
     red)   printf 'why=red rc=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_red" ;;
     *)     printf 'why=unreadable stamps=%s — %s' "$file" "$again" ;;
@@ -503,6 +516,178 @@ EOF
   [ "$n" -gt 0 ] || return 1
   if [ "$n" -gt 5 ]; then hits="${hits},+$((n - 5))-more"; fi
   printf 'files=%s' "$hits"
+}
+
+# THE RECORD LINK NEVER LANDS (wave-27 T79, the walk's W2). `create` plants `<tree>/.bionic` as a
+# link to the project's one `.bionic` directory. In a project whose ignore rules never named it, a
+# writer's `git add -A` committed the link, and the land merged it: git replaced the main
+# checkout's real `.bionic`, every file of which its own `.gitignore` (`*`) ignores, with a link to
+# itself, and the plan, the roster, the record and the engagement marker were gone. `create` now
+# excludes the link; this is the second layer, for a link committed anyway (`git add -f`, a tree
+# made before the exclude, a project that cleared the line). A range that ADDS `.bionic` or a path
+# under it is refused before anything merges. A target that already tracks content there (an older
+# project's own, the `create` header's "unless the branch already tracks something at that path")
+# keeps it: a range may change or delete a path the target tracks, since a tracked path is never one
+# of bionic's ignored files. `:(literal)` keeps the pathspec to exactly that path and its children.
+# PER PATH, AND THE KIND FIRST (wave-27 T84; review pass 68, A-orch-227). T79 exempted every range
+# into a target that tracked something at `.bionic`, so a tree that removed the tracked content and
+# committed the link landed with the same loss, and one that added a file under the tracked
+# directory overwrote the project's untracked file at that path (git overwrites ignored files
+# freely). Now `.bionic`'s own kind never changes, whatever the target tracks: a range whose head
+# has a directory, link or file at `.bionic` where the target has another kind is refused first,
+# naming `.bionic` and the first commit that changed the kind. Then an add under `.bionic/` is
+# refused, naming the first added path and the commit that added it; a target with nothing at
+# `.bionic` gets a directory only through such adds, so that one change of kind is theirs to name.
+# A range that deletes every tracked path, leaving nothing at `.bionic`, lands.
+# BY ITS BYTES, IN ANY CASE (wave-27 T86; review pass 71, A-orch-242). T84 read one spelling
+# (`:(literal).bionic`, `ls-tree -- .bionic`) and filtered `--name-only` lines with a pattern: on a
+# case-insensitive disk a link committed as `.BIONIC` landed and the project's `.bionic` became a
+# link to itself, and a name git C-quotes (`"`, `\`, a control character) never matched, so its add
+# overwrote the project's untracked file. Now every name comes from git's NUL-separated streams
+# (`ls-tree -z`, `diff --name-only -z`), split on NUL, and a root entry IS `.bionic` when its name
+# case-folds to `.bionic` (ASCII, as `[:upper:]` to `[:lower:]` in the C locale), on every disk:
+# `.BIONIC`, `.Bionic` and `.bionic` are one path here, as they are to a case-insensitive disk. The
+# kind test, the add test and the tracked-content exception all read the folded entry. A range that
+# keeps the target's entry, its kind and spelling, and adds a directory under another spelling beside
+# it changes no kind: the adds under it are named; a link or a file beside it is a change of kind,
+# named in its spelling. The commit that made a change is found by asking git for each commit's
+# tree, never by a pathspec.
+_wt_bionic_named() {  # <root entry name> -> 0 when it case-folds to `.bionic`
+  case "$1" in .[Bb][Ii][Oo][Nn][Ii][Cc]) return 0 ;; esac
+  return 1
+}
+# <root> <rev> [spelling] -> "<kind> <spelling>" for the one root entry of <rev> folding to `.bionic`
+# (dir | link | file | other), "other <first>" for two such entries, or "nothing"; with a
+# spelling, for the entry spelled exactly so.
+_wt_bionic_kind() {
+  local rec name kind="" n=0
+  while IFS= read -r -d '' rec; do
+    name="${rec#*$'\t'}"
+    if [ -n "${3:-}" ]; then [ "$name" = "$3" ] || continue; else _wt_bionic_named "$name" || continue; fi
+    n=$((n + 1))
+    if [ "$n" -gt 1 ]; then kind="other ${kind#* }"; continue; fi
+    case "${rec%% *}" in 040000) kind=dir ;; 120000) kind=link ;; 100644|100755) kind=file ;; *) kind=other ;; esac
+    kind="${kind} ${name}"
+  done < <(git -C "$1" ls-tree -z "$2" 2>/dev/null)
+  printf '%s' "${kind:-nothing}"
+}
+_wt_bionic_beside() {  # <root> <rev> <spelling> -> the first other root entry folding to `.bionic` that is no directory
+  local rec name
+  while IFS= read -r -d '' rec; do
+    name="${rec#*$'\t'}"
+    [ "$name" != "$3" ] && _wt_bionic_named "$name" && [ "${rec%% *}" != 040000 ] && { printf '%s' "$name"; return 0; }
+  done < <(git -C "$1" ls-tree -z "$2" 2>/dev/null)
+  return 1
+}
+# <kind> <kind> -> 0 when the second is another kind at `.bionic`, or a link or a file under another
+# spelling: no path under a link or a file shows a renamed one to the add test.
+_wt_bionic_differs() {
+  [ "${1%% *}" != "${2%% *}" ] && return 0
+  case "${2%% *}" in link|file) [ "$1" != "$2" ] ;; *) return 1 ;; esac
+}
+# <root> <onto head> <tree head> -> "<commit> <spelling>": the first commit that changed the kind,
+# and the entry that changed it in the range's spelling | nothing
+_wt_bionic_kind_changed() {
+  local root="$1" was now at c
+  was="$(_wt_bionic_kind "$root" "$2")"; now="$(_wt_bionic_kind "$root" "$3")"
+  _wt_bionic_differs "$was" "$now" && [ "$now" != nothing ] && [ "${was%% *}:${now%% *}" != nothing:dir ] || return 1
+  at="${now#* }"
+  case "$was" in
+    nothing|other*) : ;;
+    *) if [ "$(_wt_bionic_kind "$root" "$3" "${was#* }")" = "$was" ]; then
+         at="$(_wt_bionic_beside "$root" "$3" "${was#* }")" || return 1
+       fi ;;
+  esac
+  for c in $(git -C "$root" rev-list --reverse "${2}..${3}" 2>/dev/null); do
+    _wt_bionic_differs "$(_wt_bionic_kind "$root" "${c}^")" "$(_wt_bionic_kind "$root" "$c")" \
+      && { printf '%s %s' "$c" "$at"; return 0; }
+  done
+  printf '%s %s' "$3" "$at"
+}
+_wt_bionic_adds() {  # <root> <onto head> <tree head> -> every path the range adds, NUL-separated, as git stores it
+  git -C "$1" diff --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null
+}
+_wt_bionic_first_add() {  # <root> <onto head> <tree head> -> the first path added under a root entry folding to `.bionic`, then `/`
+  local p
+  while IFS= read -r -d '' p; do
+    case "$p" in */*) _wt_bionic_named "${p%%/*}" && { printf '%s/' "$p"; return 0; } ;; esac
+  done < <(_wt_bionic_adds "$1" "$2" "$3")
+  return 1
+}
+_wt_bionic_added_by() {  # <root> <onto head> <tree head> <path> -> the first commit of the range that added it | nothing
+  local root="$1" c
+  for c in $(git -C "$root" rev-list --reverse "${2}..${3}" 2>/dev/null); do
+    git -C "$root" cat-file -e "${c}:${4}" 2>/dev/null && ! git -C "$root" cat-file -e "${c}^:${4}" 2>/dev/null \
+      && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+# <root> <onto head> <tree head> -> "<commit> <path>/": `.bionic`'s entry in the range's spelling for a
+# change of kind, else the first added path. The `/` no name ends with keeps a name's own trailing
+# newline through `$(...)`; the caller takes it off. An add no commit of the range made is a path the
+# target dropped after the tree branched: its commit is `dropped:<tree head>` (A-orch-256).
+_wt_bionic_committed() {
+  local root="$1" onto_head="$2" head="$3" path commit
+  commit="$(_wt_bionic_kind_changed "$root" "$onto_head" "$head")" && { printf '%s/' "$commit"; return 0; }
+  path="$(_wt_bionic_first_add "$root" "$onto_head" "$head")" || return 1
+  path="${path%/}"
+  commit="$(_wt_bionic_added_by "$root" "$onto_head" "$head" "$path")" || commit="dropped:${head}"
+  printf '%s %s/' "$commit" "$path"
+}
+# <name> -> the name as `git -c core.quotePath=true` prints it when it holds `"`, `\` or a control
+# character (in double quotes, C escapes, every other byte outside printable ASCII in octal), so a
+# refusal naming it stays one line; any other name as it is.
+_wt_cquote() {
+  local LC_ALL=C s="$1" out='"' c i v
+  case "$s" in *[\"\\]*|*[[:cntrl:]]*) : ;; *) printf '%s' "$s"; return 0 ;; esac
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      \"|\\) out="${out}\\${c}" ;;
+      $'\a') out="${out}\\a" ;; $'\b') out="${out}\\b" ;; $'\t') out="${out}\\t" ;; $'\n') out="${out}\\n" ;;
+      $'\v') out="${out}\\v" ;; $'\f') out="${out}\\f" ;; $'\r') out="${out}\\r" ;;
+      *)
+        printf -v v '%d' "'$c"; [ "$v" -ge 0 ] || v=$((v + 256))
+        if [ "$v" -lt 32 ] || [ "$v" -ge 127 ]; then printf -v c '\\%03o' "$v"; fi
+        out="${out}${c}" ;;
+    esac
+  done
+  printf '%s"' "$out"
+}
+
+# The refusal is land's own contract line, like every sibling (wave-27 T79, A-orch-205): one
+# `REFUSED reason=bionic-committed` line on stdout naming the path (`.bionic` for a change of kind,
+# else the first added path), the commit that made it (12 hex) and the remedy, which
+# `spawn-worktree.sh land` and the standdown's report read as they read every other land refusal.
+# The remedy's commit moves the head past the tree's stamps, so it says to run the suites before
+# landing again, as not-current's does (A-orch-227 P2-1). The remedy is per path (A-orch-231): a
+# path added under a directory the target tracks is taken out of the index alone, since
+# `rm -r --cached .bionic` would also un-track the project's own files there and the merge would
+# then delete them from the main checkout; `.bionic` itself, or an add where the target tracks no
+# directory, takes the whole path out. The added file is then untracked in the tree, which land
+# counts as dirty, so the line says to move it out of the tree: nothing of the writer's is lost
+# (A-orch-238).
+# The path and the remedy are in the range's spelling (wave-27 T86): the whole entry out is the
+# folded root entry the range added, as the range spelled it; a name git C-quotes is printed quoted.
+# EVERY PRINTED FIX LANDS WHEN FOLLOWED (A-orch-244; pass 71's P2-1): the whole entry, out of the
+# index, stays in the tree; where no ignore rule covers it and it is not the record link land passes
+# over (`_wt_piece_dirt`), the next land read it as dirty, so the fix also moves it out of the tree.
+_wt_bionic_left_dirty() {  # <tree abs> <entry> -> 0 when the entry, untracked, would read as dirt to land
+  git -C "$1" check-ignore -q --no-index -- "$2" 2>/dev/null && return 1
+  [ "$2" = .bionic ] && [ -L "${1}/.bionic" ] && return 1
+  return 0
+}
+# A PATH THE TARGET DROPPED (A-orch-256): taking it out of the tree's index too makes both sides
+# delete it, which land refuses not-current; merging the target into the tree carries the target's
+# own untracking, after which the range adds nothing there. That shape's fix is the merge.
+_wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit | dropped:<head>> <path> <target's kind at .bionic>
+  local entry="${5%%/*}" commit="${4#dropped:}" path fix
+  path="$(_wt_cquote "$5")"; fix="rm -r --cached ${entry}"
+  if [ "$commit" != "$4" ]; then fix="merge ${3}"
+  elif [ "$5" != "$entry" ] && [ "${6%% *}" = dir ]; then fix="rm --cached ${path}, move ${path} out of the tree, commit"
+  elif _wt_bionic_left_dirty "$1" "$entry"; then fix="${fix}, move ${entry} out of the tree, commit"
+  else fix="${fix}, commit"; fi
+  _wt_refuse "bionic-committed path=${path} commit=${commit:0:12} branch=${2} onto=${3} fix='git -C ${1} ${fix}, run the suites, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept"
 }
 
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
@@ -622,11 +807,13 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
   fi
 }
 
-worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
+worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
   local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
-  local pre pre_ref was said held now_ref nl='
+  local pre pre_ref was said held now_ref check_cmd check_out check_was left nl='
 '
+  local plan="${3:-}" judged proofs proofs_row
+  local lands_red="${4:-}" red_ev="${5:-}" landed_red="" ev_heads judged_cur landed_at="" red_said debt_id=""
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -665,14 +852,25 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     2) _wt_refuse "protected-branch-unknowable branch=${onto} checkout=${co}"; return 2 ;;
   esac
 
+  # THE RUN HAS BEEN JUDGED FOR INTEGRATION (wave-27 T31; review pass 25 F3). `current 8` admits
+  # integration on the judge at the working head; a landing after it would move the working branch
+  # past the head that was judged, and nothing would judge it again. So with a bound plan at
+  # `current: 8` or later (its letter dropped) nothing lands: the step is set back first, which the
+  # `current` verb allows (`current 7`, dry-committed at 7 like any move).
+  if [ -n "$plan" ]; then
+    judged_cur="$(_wt_plan_current "$plan")"
+    case "${judged_cur%[ab]}" in
+      8|9) _wt_refuse "past-judgment why=current-${judged_cur} plan=${plan} — the run has been judged for integration at current: ${judged_cur}, and a landing would move the working branch past the head that was judged; set the step back (session-poker.sh current 7), land again"; return 2 ;;
+    esac
+  fi
+
   branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)"
   [ -n "$branch" ] && [ "$branch" != "HEAD" ] || { _wt_refuse "worktree-head-unreadable path=${wt_abs}"; return 2; }
 
   # The record link is not work. In a project that ignores `.bionic` only in its
   # directory shape, or not at all, git reads the link as `?? .bionic`; that one
   # entry is passed here and the link itself is dropped just before the removal.
-  dirt="$(git -C "$wt_abs" status --porcelain 2>/dev/null)"
-  [ -L "${wt_abs}/.bionic" ] && dirt="$(printf '%s\n' "$dirt" | grep -vxF '?? .bionic')"
+  dirt="$(_wt_piece_dirt "$wt_abs")"
   if [ -n "$dirt" ]; then
     _wt_refuse "dirty-tree path=${wt_abs} branch=${branch}"; return 2
   fi
@@ -691,9 +889,46 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
   }
 
-  why="$(_wt_stale_proof "$wt_abs" "$head")" && {
+  # THE RECORD LINK NEVER LANDS (wave-27 T79): a range that commits `.bionic` is refused here,
+  # before any merge, the tree and its stamps kept (see _wt_bionic_committed).
+  why="$(_wt_bionic_committed "$root" "$onto_head" "$head")" && {
+    why="${why%/}"
+    _wt_refuse_bionic "$wt_abs" "$branch" "$onto" "${why%% *}" "${why#* }" "$(_wt_bionic_kind "$root" "$onto_head")"
+    return 2
+  }
+
+  # THE RUNNER IS NEVER A DECLARED RED (wave-27 T67; review pass 46 B4): a declaration is honoured
+  # only for one suite FILE, `<name>.test.sh`; a red stamp of `run.sh`, which speaks for every suite,
+  # is refused as any red is, whatever a launch row says.
+  case "${lands_red%% until *}" in ?*.test.sh) : ;; *) lands_red="" ;; esac
+  why="$(_wt_stale_proof "$wt_abs" "$head" "${lands_red%% until *}")" && {
     _wt_refuse "stale-proof ${why}"; return 2
   }
+  judged="$why"
+
+  # A DECLARED RED (wave-27 T31; REQ-14, D23). The row's launch line carried `lands_red=<suite>
+  # until <token>` and `red_evidence=<path>` (worktree_land_for_session reads them), and the proof
+  # above accepted a red newest run of exactly that suite with every other suite green. It lands
+  # only beside its evidence: the file exists and holds a line `head: <the tree's head>`, so the
+  # red it explains is this head's. A relative path is read from the project root, a `record/…`
+  # one from the docs root, as proof-add reads one.
+  case "$judged" in
+    landed-red=*)
+      landed_red="${judged%%"$nl"*}"; landed_red="${landed_red#landed-red=}"
+      case "$judged" in *"$nl"*) judged="${judged#*"$nl"}" ;; *) judged="" ;; esac
+      case "$red_ev" in
+        /*) : ;;
+        record/*) red_ev="$(docs_root "$root")/${red_ev}" ;;
+        *) red_ev="${root}/${red_ev#./}" ;;
+      esac
+      if [ ! -f "$red_ev" ]; then
+        _wt_refuse "stale-proof why=red-evidence suite=${landed_red} head=${head} evidence=${red_ev} — the declared red of ${landed_red} lands only beside its evidence, and that file is missing; write it with a line head: ${head}, land again"; return 2
+      fi
+      ev_heads="$(awk '/^head:[ \t]*[0-9a-f]+[ \t]*$/ { sub(/^head:[ \t]*/, ""); sub(/[ \t]*$/, ""); print }' "$red_ev" 2>/dev/null)"
+      if case "${nl}${ev_heads}${nl}" in *"${nl}${head}${nl}"*) false ;; *) true ;; esac; then
+        _wt_refuse "stale-proof why=red-evidence suite=${landed_red} head=${head} evidence=${red_ev} found=$(printf '%s' "${ev_heads:-none}" | tr '\n' ',') — the declared red of ${landed_red} lands only beside evidence naming this head, and ${red_ev} names none that is; write head: ${head} in it, land again"; return 2
+      fi ;;
+  esac
 
   # THE TARGET CHECKOUT IS CLEAN IN WHAT GIT TRACKS. A merge into a checkout
   # holding staged or modified tracked files mixes somebody's unfinished work
@@ -706,6 +941,73 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   busy="$(_wt_busy_suite "$root" "$co")" && {
     _wt_refuse "suite-running ${busy}"; return 2
   }
+
+  # THE PROJECT'S DECLARED CHECK (wave-27 T16; D12). When `.bionic/config.yaml` names
+  # `release-check: <command>`, the command runs over this landing's range before anything is
+  # touched: in the TARGET checkout as it stands before the merge, never the task's tree (review
+  # pass 22 B1; A-orch-75), so a command naming its script relatively runs the target's copy and a
+  # piece cannot rewrite the check that judges it; the task's commits are read from the shared
+  # object store. BIONIC_CHECK_BASE is the working branch's head and BIONIC_CHECK_HEAD the task's
+  # head, its words split on blanks with globbing off, as
+  # `impact-command:` is run (proof.sh `_proof_map`). A non-zero exit refuses the landing and
+  # shows the command's output on stderr. With no key nothing runs and nothing prints.
+  check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
+  if [ -n "$check_cmd" ]; then
+    check_was="$(git -C "$co" rev-parse --verify --quiet HEAD 2>/dev/null)"
+    check_out="$(cd "$co" 2>/dev/null || exit 1
+      set -f
+      export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="$wt_abs"
+      # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
+      exec $check_cmd </dev/null 2>&1)"; rc=$?
+    # WHAT THE CHECK LEFT (wave-27 T50, T58; review passes 27 S2, 34 N5). The command runs in the shared
+    # target, beside the piece. After it, and before the merge, the target's HEAD is the commit it was
+    # before the check, the target is clean in what git tracks (the test above, taken again), and the
+    # piece's checkout is as clean as it was (the dirty-tree test above, taken again). A check that
+    # committed on the target would have its commit merged onto unjudged; one that dirtied the piece
+    # would leave the merge standing and the tree unremovable. Either refuses this landing
+    # `reason=check-dirtied`, saying which, with nothing merged; a check that fails AND left something
+    # is refused for the failure, which names what it left. `land` restores nothing: the user sees
+    # what the check did.
+    left="$(_wt_check_left "$co" "$check_was" "$wt_abs")"
+    if [ "$rc" -ne 0 ]; then
+      [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
+      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
+    fi
+    if [ -n "$left" ]; then
+      # WHO MOVED THE HEAD (wave-27 T63; review pass 43 S1). A head that moved while the check ran was
+      # moved by the check or by another landing into the same branch, and the tool cannot tell which:
+      # the line says that, and does not tell the user to put back what may be a landed merge.
+      said=""; moved=""; fix=""
+      case " $left" in *" head_was="*)
+        moved="${left#*head_was=}"; moved="${moved%% *}"; said="${left#*head_now=}"; said="${said%% *}"
+        moved="the target checkout's HEAD moved from ${moved} to ${said} while the project's declared release-check (${check_cmd}) ran, by the check or by another landing into ${onto} (git -C ${co} reflog -2)"
+        said=""
+        fix="if the move is another landing's merge, land again; if it is the check's own commit, take it off the target, make the check change nothing, land again" ;;
+      esac
+      case " $left" in *" paths="*) said="left tracked files changed in the target checkout (git -C ${co} status)" ;; esac
+      case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
+      if [ -n "$said" ]; then
+        said="the project's declared release-check (${check_cmd}) ${said}"
+        fix="put back what it changed, make the check change nothing, land again${fix:+ (for the HEAD: ${fix})}"
+      fi
+      _wt_refuse "check-dirtied why=release-check checkout=${co} ${left} branch=${branch} — ${moved}${moved:+${said:+; }}${said}, and nothing is merged; ${fix}"; return 2
+    fi
+  fi
+
+  # THE LANDING RECORD IS PROVED WRITABLE BEFORE THE MERGE (wave-27 T44; D15). With a bound plan,
+  # the run's `landing-proofs.log` is proved writable here, and created by nothing but the append
+  # (wave-27 T69); a record that cannot be written is refused with nothing changed: a path that is a
+  # symlink, a FIFO, a device or a directory is refused unopened (wave-27 T50, N1 N2;
+  # `_wt_proofs_prove`). The row is the plan's `## Tasks` row
+  # whose `worktree` cell names this tree. Both are written once the merge is made
+  # (_wt_proofs_append, below).
+  proofs="none"; proofs_row=""
+  if [ -n "$plan" ]; then
+    proofs="$(_wt_proofs_path "$root" "$plan")" && _wt_proofs_prove "$proofs" || {
+      _wt_refuse "record-unwritable why=proofs-unwritable path=${proofs:-<none>} branch=${branch} — the landing record cannot be written, so nothing is merged; make it writable, land again"; return 2
+    }
+    proofs_row="$(_wt_proofs_row "$root" "$plan" "$wt_abs")"
+  fi
 
   # THE HEAD IS READ AGAIN JUST BEFORE THE MERGE (review 2 F7). Another land onto
   # <onto> may have gone through since the read above; if the head moved, the
@@ -732,6 +1034,24 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   esac
   [ -n "$was" ] || { _wt_refuse "onto-checkout-unreadable checkout=${co} branch=${onto}"; return 2; }
 
+  # THE DEBT IS WRITTEN BEFORE THE MERGE (wave-27 T67; review pass 46 B3; A-orch-120). A declared red
+  # is owed because `land` wrote it: one `debt:` line appended to the landing record, holding
+  # the landing's row, branch, head, suite, token and time, the `landed-red-at=` the LANDED line
+  # prints. A line that cannot be written, or a landing with no bound plan and so no record, is
+  # refused here with nothing merged: a declared red never lands without its debt written. A merge
+  # that then fails, or is undone, is followed by a `void:` line naming the debt's id (below).
+  debt_id=""
+  if [ -n "$landed_red" ]; then
+    landed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [ "$proofs" = none ]; then
+      _wt_refuse "debt-unwritten why=no-bound-plan suite=${landed_red} branch=${branch} — a declared red lands only with its debt written to the run's landing record, and this landing has no bound plan, so nothing is merged; land from the session bound to the run"; return 2
+    fi
+    debt_id="$$.${RANDOM}${RANDOM}"
+    if ! _wt_debt_write "$proofs" "$debt_id" "$proofs_row" "$branch" "$head" "$landed_red" "${lands_red#* until }" "$landed_at"; then
+      _wt_refuse "debt-unwritten why=proofs-unwritable suite=${landed_red} path=${proofs} branch=${branch} — the declared red's debt cannot be written to the landing record (${_WT_PROOFS_SAW:-the append failed}), so nothing is merged; make it writable, land again"; return 2
+    fi
+  fi
+
   # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
   # and the merge commit is what the ledger row points at. The head merged is
   # the one judged above, not whatever the branch holds by now. `git merge` says
@@ -739,6 +1059,9 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   # commit, and none is looked for.
   if ! said="$(LC_ALL=C git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$head" 2>/dev/null)"; then
     git -C "$co" merge --abort >/dev/null 2>&1
+    if [ -n "$debt_id" ] && ! _wt_debt_void "$proofs" "$debt_id" "$branch" merge-failed; then
+      _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co} debt=unvoided path=${proofs} — the merge failed after the debt for ${landed_red} was written and not voided (its void's append answered proofs=unwritten: ${_WT_PROOFS_SAW:-the append failed}), so the run owes it: a green run of ${landed_red} after now covers it like any other; land again once the merge can be made"; return 2
+    fi
     _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
   merge_sha=""
@@ -801,6 +1124,12 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     arrived="$(_wt_undo_merge "$co" "$undo_on" "$merge_sha" "$parent" "$head")"; rc=$?
     case $rc in
       0)
+        # The merge is undone, so the red never reached <onto>: its debt is voided, and a void that
+        # cannot be written leaves it standing (it over-owes), which the line says.
+        if [ -n "$debt_id" ] && ! _wt_debt_void "$proofs" "$debt_id" "$branch" merge-undone; then
+          moved="${moved} debt=unvoided"
+          fix="${fix} (the debt for ${landed_red} was written and not voided: a green run of it after now covers it)"
+        fi
         if [ "$undo_on" != "$onto" ]; then
           _wt_refuse "${moved} merge=${merge_sha} — the merge is undone on ${undo_on} and the tree kept; ${fix}"; return 2
         fi
@@ -809,6 +1138,18 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
         _wt_refuse "${moved} merge=${merge_sha} undo=failed arrived=${arrived} — $(_wt_undo_arrival_fix "$co" "$undo_on" "$merge_sha" "$parent" "$arrived" "$rc"), then ${fix}"; return 2 ;;
     esac
     _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$undo_on" "$merge_sha" "$parent"), then ${fix}"; return 2
+  fi
+
+  # THE LANDING KEEPS THE PROOF IT READ (wave-27 T44; D15): the header and the stamp lines judged
+  # at <head>, appended before the tree and its stamps go. The merge is not undone if the append
+  # fails; the tree is kept instead, so its stamp file still holds the proof.
+  # ONE INSTANT FOR THE LANDING (wave-27 T31; A-orch-85): the record's `at=` and, for a declared
+  # red, the `landed-red-at=` its debt line carries (wave-27 T67: taken when the debt was written).
+  landed_at="${landed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  red_said=""; [ -z "$landed_red" ] || red_said=" landed-red=${landed_red} landed-red-at=${landed_at}"
+  if [ "$proofs" != none ] && ! _wt_proofs_append "$proofs" "$proofs_row" "$branch" "$head" "$merge_sha" "$judged" "$landed_at"; then
+    _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} kept=${wt_abs}${red_said} proofs=unwritten — ${proofs} could not be appended after the merge (${_WT_PROOFS_SAW:-the append failed}), so the tree and its stamp file are kept; append the landing to it by hand, then remove the tree"
+    return 0
   fi
 
   # No --force here either. If git refuses now, the merge has landed and the
@@ -823,8 +1164,206 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
 
-  _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} removed=${wt_abs}"
+  _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} removed=${wt_abs}${red_said} proofs=${proofs}"
   return 0
+}
+
+# THE LANDING RECORD (wave-27 T44; D15; the Interfaces row "landing record").
+# `<docs-root>/record/<the bound plan's name less .plan.md>/landing-proofs.log`, appended, never
+# rewritten: one header line per landing, `landed: row=<id|—> branch=<b> head=<40-hex>
+# merge=<40-hex> at=<ISO-UTC>`, then the stamp lines `_wt_stale_proof` judged at <head>, as the
+# stamp file holds them. A row's landing is the `merge=` of the last header carrying its `row=`
+# (the tick reads it, T43). The path is derived as fill_ledger_path (lib/patrol.sh) derives its
+# own, in the project's docs tree, never in the tree being removed.
+_wt_proofs_path() {  # <root> <plan> -> the record's path
+  local slug="${2##*/}"
+  slug="${slug%.plan.md}"
+  [ -n "$slug" ] || return 1
+  printf '%s/record/%s/landing-proofs.log' "$(docs_root "$1")" "$slug"
+}
+
+# The id of the first `## Tasks` row, in table order, whose `worktree` cell names <tree>; a
+# relative cell is read from <root>. Nothing when none does, or when lib/units.sh, the table's
+# one reader, cannot be loaded (it is loaded lazily, as run.sh is below).
+_wt_proofs_row() {  # <root> <plan> <tree abs> -> <row id> | nothing
+  local rec cell lib id
+  if ! declare -F units_rows >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/units.sh"
+    # shellcheck source=/dev/null
+    [ -r "$lib" ] && . "$lib" 2>/dev/null
+    declare -F units_rows >/dev/null 2>&1 || return 1
+  fi
+  while IFS= read -r rec; do
+    cell="$(units_field "$rec" worktree)"
+    while :; do   # a leading `./` and any trailing slashes are not part of the name (wave-27 T50, N4)
+      case "$cell" in ./*) cell="${cell#./}" ;; */) cell="${cell%/}" ;; *) break ;; esac
+    done
+    case "$cell" in ''|-|—) continue ;; /*) : ;; *) cell="${1}/${cell}" ;; esac
+    if [ "$cell" = "$3" ]; then
+      # An id holding white space would break the header's `key=value` grammar: no row (`—`).
+      id="$(units_field "$rec" id)"
+      case "$id" in *[[:space:]]*) return 1 ;; esac
+      printf '%s\n' "$id"; return 0
+    fi
+  done <<EOF
+$(units_rows "$2" 2>/dev/null)
+EOF
+  return 1
+}
+
+# THE RECORD PATH IS A REGULAR FILE OR ABSENT, AND IS PROVED WRITABLE (wave-27 T44, T50; review pass
+# 27 N1, N2). A symlink (a link to `/dev/null` silently loses the record; a link to a file outside the
+# docs tree appends there), a FIFO (opening one for append blocks the landing for good), a device or a
+# directory at the path is refused before anything is opened. A record that is there must be one this
+# process may write.
+#
+# THE PROOF CREATES NOTHING AT THE RECORD'S PATH (wave-27 T69; review pass 48). The directory is made
+# if it is missing, and is proved writable by a file of the proof's own (`_wt_proofs_private`) made and
+# removed again there. The record itself is tested and never opened, so a landing refused after the
+# proof has nothing to clean up, and no path of `land` removes or truncates the record.
+_wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
+  local mine
+  [ ! -L "$1" ] || return 1
+  if [ -e "$1" ]; then [ -f "$1" ] && [ -w "$1" ] || return 1; fi
+  mkdir -p "${1%/*}" 2>/dev/null || return 1
+  mine="$(_wt_proofs_private "$1")" || return 1
+  rm -f "$mine"
+}
+
+# A private file beside the record, made by `mktemp` (exclusive, so never another's):
+# `.<record's name>.<this process's pid>.<random>`. One a killed append left is never read again.
+_wt_proofs_private() {  # <record path> -> the new file's path
+  local me
+  me="$(exec sh -c 'echo "$PPID"')"   # this process's own pid, which `$$` is not inside a subshell
+  mktemp "${1%/*}/.${1##*/}.${me}.XXXXXX" 2>/dev/null
+}
+
+# THE APPEND IS ONE WRITE (wave-27 T69; review pass 48; A-orch-124, A-orch-132). The record had a
+# lock, and four rows on it (T50, T58, T63) each closed one race and exposed the next: a lock made of a
+# directory has states a killed process leaves behind, and every rule for clearing them is itself a
+# race. The record needs none. The block (the header and the judged lines under it) is written whole
+# to a private file, and `dd` with one block size copies it to the record in one read and ONE
+# write(2), on a descriptor the shell opened for append. A local filesystem puts each such write at the
+# end of the file whole, so two landings' blocks never interleave and neither is lost, with no
+# cooperation between writers. A network filesystem gives no such guarantee, and is not supported.
+#   - the record's type is tested before it is read and again immediately before the append: anything
+#     but a regular file or absent is not opened (a FIFO swapped in would block the open for good);
+#   - a block over one mebibyte, dd's one block, is not written;
+#   - the append is good when dd says so: exit 0 and, under `LC_ALL=C`, exactly one record out and
+#     the line `<the block's size> bytes …` (BSD's and GNU's dd both open it so). And the record
+#     must be at least as long as before plus the block, true under any interleaving of appends.
+#   - a record that does not end in a line break (a write a full disk cut short, never truncated
+#     away) gets one in front of the block, so the block's header is a line of its own
+#     (`_wt_proofs_cut`).
+# Each failure is the `proofs=unwritten` case, and `_WT_PROOFS_SAW` says what was seen. A process
+# killed mid-append leaves the record without its block or with it whole, and at most its private
+# file beside it.
+_WT_PROOFS_SAW=""
+
+# THE RECORD ENDS IN A CUT LINE, and stays so (wave-27 T69; A-orch-132). A reader can see another
+# landing's append half done (measured here: 4 of 1,169 reads of the last byte during appends), so a
+# last byte that is not a line break is looked at again a twentieth of a second later: only a record
+# whose size has not moved and whose last byte is still not a line break is cut. A size that moved is
+# another append, and is looked at again, five times at most.
+_wt_proofs_cut() {  # <record path> -> 0 cut, 1 not
+  local n=0 a b
+  while [ "$n" -lt 5 ]; do
+    [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 1
+    a="$(wc -c < "$1" 2>/dev/null)"; sleep 0.05; b="$(wc -c < "$1" 2>/dev/null)"
+    [ "$a" = "$b" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] && return 0
+    n=$((n + 1))
+  done
+  return 1
+}
+
+_wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<at>]
+  local block
+  block="landed: row=${2:-—} branch=${3} head=${4} merge=${5} at=${7:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  [ -z "${6:-}" ] || block="${block}
+${6}"
+  _wt_proofs_write "$1" "$block"
+}
+
+# The one write itself, for a landing's block and for the debt's lines alike (wave-27 T67): <text>
+# appended whole, as the rules above say, with `_WT_PROOFS_SAW` set on every failure.
+_wt_proofs_write() {  # <file> <text> -> 0 appended, 1 not (the proofs=unwritten case)
+  local block="$2" priv size before after said rc lead="" nl='
+'
+  _WT_PROOFS_SAW=""
+  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
+  ! _wt_proofs_cut "$1" || lead="$nl"
+  priv="$(_wt_proofs_private "$1")" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
+  { printf '%s%s\n' "$lead" "$block" > "$priv"; } 2>/dev/null || { rm -f "$priv"; _WT_PROOFS_SAW="the private file could not be written"; return 1; }
+  size="$(wc -c < "$priv" 2>/dev/null)"; size="${size//[!0-9]/}"
+  before=0; [ ! -e "$1" ] || { before="$(wc -c < "$1" 2>/dev/null)"; before="${before//[!0-9]/}"; }
+  if [ -z "$size" ] || [ -z "$before" ]; then rm -f "$priv"; _WT_PROOFS_SAW="the block or the record could not be measured"; return 1; fi
+  if [ "$size" -gt 1048576 ]; then rm -f "$priv"; _WT_PROOFS_SAW="the block is ${size} bytes, over the one write of 1048576"; return 1; fi
+  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then rm -f "$priv"; _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
+  said="$(LC_ALL=C dd if="$priv" bs=1048576 2>&1 >> "$1")"; rc=$?
+  after="$(wc -c < "$1" 2>/dev/null)"; after="${after//[!0-9]/}"
+  rm -f "$priv"
+  [ "$rc" -eq 0 ] || { _WT_PROOFS_SAW="dd exit ${rc}: ${said//${nl}/; }"; return 1; }
+  case "$said" in
+    *"${nl}0+1 records out${nl}${size} bytes"*|*"${nl}1+0 records out${nl}${size} bytes"*)
+      [ "${after:-0}" -ge $((before + size)) ] && return 0
+      _WT_PROOFS_SAW="the record is ${after:-0} bytes after the append, short of ${before} plus the block's ${size} bytes"; return 1 ;;
+  esac
+  _WT_PROOFS_SAW="dd: ${said//${nl}/; }"
+  return 1
+}
+
+# THE DEBT'S ONE WRITER (wave-27 T67; review pass 46 B3; A-orch-120). A declared red is owed because
+# `land` wrote it here, never because a line was copied into the plan: the judge (lib/proof.sh
+# `proof_debts`) reads these lines and nothing else.
+#   debt: id=<id> row=<row|—> branch=<b> head=<40-hex> suite=<suite> token=<token> at=<ISO-UTC>
+#   void: id=<id> branch=<b> at=<ISO-UTC> why=<merge-failed|merge-undone>
+# Each is one whole line, appended by the one write a landing's block is appended by
+# (`_wt_proofs_write`), with no lock: a line that cannot be written is the append answering
+# `proofs=unwritten`. A debt is written before the merge; a void names the debt of a landing whose
+# merge failed or was undone.
+_wt_debt_write() {  # <record> <id> <row> <branch> <head> <suite> <token> <at> -> 0 written, 1 not
+  _wt_proofs_put "$1" "debt: id=${2} row=${3:-—} branch=${4} head=${5} suite=${6} token=${7} at=${8}"
+}
+_wt_debt_void() {  # <record> <id> <branch> <why> -> 0 written, 1 not
+  _wt_proofs_put "$1" "void: id=${2} branch=${3} at=$(date -u +%Y-%m-%dT%H:%M:%SZ) why=${4}"
+}
+_wt_proofs_put() {  # <record> <line> -> 0 appended, 1 not (proofs=unwritten)
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  _wt_proofs_write "$1" "$2"
+}
+
+# A piece's checkout as `land`'s dirty-tree test reads it: every porcelain line, untracked files
+# included, less the record link's `?? .bionic`, which is not work.
+_wt_piece_dirt() {  # <tree abs> -> porcelain lines | nothing
+  local d
+  d="$(git -C "$1" status --porcelain 2>/dev/null)"
+  [ -L "${1}/.bionic" ] && d="$(printf '%s\n' "$d" | grep -vxF '?? .bionic')"
+  printf '%s' "$d"
+}
+
+# What the declared check left that it found otherwise (wave-27 T58; review pass 34 N5), as the
+# refusal's fields: `head_was=<short> head_now=<short>` when the target's HEAD moved, `paths=<…>`
+# for tracked files changed in the target, `piece_paths=<…>` for the piece's checkout made dirty.
+# Nothing when it left all three as it found them.
+_wt_check_left() {  # <target checkout> <its HEAD before the check> <tree abs> -> fields | nothing
+  local now out="" d
+  now="$(git -C "$1" rev-parse --verify --quiet HEAD 2>/dev/null)"
+  if [ "$now" != "$2" ]; then
+    out="head_was=$(git -C "$1" rev-parse --short "$2" 2>/dev/null || printf '%s' "${2:-<none>}")"
+    out="${out} head_now=$(git -C "$1" rev-parse --short "$now" 2>/dev/null || printf '%s' "${now:-<none>}")"
+  fi
+  d="$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)"
+  [ -z "$d" ] || out="${out:+${out} }paths=$(_wt_dirty_paths "$d")"
+  d="$(_wt_piece_dirt "$3")"
+  [ -z "$d" ] || out="${out:+${out} }piece_paths=$(_wt_dirty_paths "$d")"
+  printf '%s' "$out"
+}
+
+# The paths of a `git status --porcelain` listing, comma-joined, the first five and a count of the
+# rest: what a refusal names.
+_wt_dirty_paths() {  # <porcelain lines>
+  printf '%s\n' "$1" | awk 'NF { n++; if (n <= 5) out = out (n > 1 ? "," : "") substr($0, 4) }
+    END { printf "%s", out; if (n > 5) printf ",+%d more", n - 5 }'
 }
 
 # THE ONE PATH FROM A SESSION TO A LAND (wave-20 T8, REQ-1, D1). `spawn-worktree.sh
@@ -841,7 +1380,7 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
 # to change, and a caller that already sourced it pays nothing. A run.sh that
 # cannot be loaded is a refusal, never a land onto a guessed branch.
 worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSED
-  local target="${1:-}" root="${2:-}" sid="${3:-}" lib onto
+  local target="${1:-}" root="${2:-}" sid="${3:-}" lib onto plan decl
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
   if ! declare -f session_working_branch >/dev/null 2>&1; then
     lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
@@ -851,7 +1390,61 @@ worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSE
       || { _wt_refuse "run-library-unloadable path=${lib}"; return 2; }
   fi
   onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
-  worktree_land "$target" "$onto"
+  # The plan that branch was read from: the marker's `plan=`, the one session_working_branch's
+  # verdict answered with (wave-27 T44). The landing record is written under its name.
+  plan="$(session_plan "$root" "$sid")" || plan=""
+  # THE DECLARED DEBT THE ROW CARRIED FROM ITS LAUNCH (wave-27 T31; D23), or nothing.
+  local lands_red="" red_ev=""
+  if decl="$(_wt_declared_debt "$root" "$sid" "$target")"; then
+    lands_red="${decl%%	*}"; red_ev="${decl#*	}"
+  fi
+  worktree_land "$target" "$onto" "$plan" "$lands_red" "$red_ev"
+}
+
+# _wt_plan_current <plan> -> the plan's raw `current:` value, read by lib/fill.sh's one reader of
+# it (loaded lazily, as units.sh is for the landing record), its memo dropped first.
+_wt_plan_current() {
+  local lib
+  if ! declare -F _fill_current_field >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/fill.sh"
+    # shellcheck source=/dev/null
+    [ -r "$lib" ] && . "$lib" 2>/dev/null
+    declare -F _fill_current_field >/dev/null 2>&1 || return 1
+  fi
+  fill_current_forget
+  _fill_current_field "$1"
+}
+
+# _wt_declared_debt <root> <sid> <tree> -> `<lands_red><TAB><red_evidence>` from the LAUNCH line of
+# the agent the tree was made for, rc 1 with nothing when there is none (wave-27 T31; REQ-14, D23).
+# The agent is the name the workspace record holds for the tree (`spawn-worktree.sh create --for`),
+# and only when `workspace_for_name` answers that tree for it. Its launch line is the last
+# `status=intended` row of that name on the session's roster that no poker verb wrote: a row
+# carrying `amended=`, `extended=`, `held=` or `adopted_from=` is a copy, never a launch. The
+# dispatch wall is the one writer of the two keys on a launch line, so a key that reached the
+# roster on any later row, by amend or by hand, is never read.
+_wt_declared_debt() {  # <root> <sid> <tree>
+  local root="${1:-}" sid="${2:-}" tree file name row roster
+  tree="$(_wt_abs "${3:-}")" || return 1
+  file="$(_wt_workspaces_file "$root" "$sid")" || return 1
+  [ -f "$file" ] && _wt_workspaces_unlinked "$root" "$file" || return 1
+  name="$(awk -F'|' -v p="$tree" '
+    $1 == "workspace/v1" { n = ""; q = ""
+      for (i = 2; i <= NF; i++) { if ($i ~ /^name=/) n = substr($i, 6); else if ($i ~ /^path=/) q = substr($i, 6) }
+      if (q == p && n != "") last = n }
+    END { if (last != "") print last }' "$file" 2>/dev/null)"
+  [ -n "$name" ] || return 1
+  [ "$(workspace_for_name "$root" "$sid" "$name" 2>/dev/null)" = "$tree" ] || return 1
+  roster="${root%/}/.bionic/tmp/roster-${sid}.state"
+  [ -f "$roster" ] && [ ! -L "$roster" ] || return 1
+  row="$(awk -v n="$name" '
+    index($0, "roster-state/") != 1 { next }
+    index($0, "|name=" n "|") && index($0, "|status=intended|") \
+      && !index($0, "|amended=") && !index($0, "|extended=") && !index($0, "|held=") && !index($0, "|adopted_from=") { last = $0 }
+    END { if (last != "") print last }' "$roster" 2>/dev/null)"
+  [ -n "$row" ] || return 1
+  [ -n "$(_wt_field "$row" lands_red)" ] || return 1
+  printf '%s\t%s' "$(_wt_field "$row" lands_red)" "$(_wt_field "$row" red_evidence)"
 }
 
 # ---------------------------------------------------------------------------

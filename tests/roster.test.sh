@@ -514,4 +514,38 @@ for R12_F in "${R12_FILES[@]}"; do
   expect_eq "R12c $(basename "$R12_F") cites roster_row_for_id or ADR-039 at least once" "cites" "$R12_C"
 done
 
+# ---------------------------------------------------------------------------------------
+section "R13 — a reader's questions are a row key (wave-27 T15; REQ-5 AC-5.1, D5)"
+# The dispatch wall records a reader brief's `Questions:` line as `questions=<q>[,<q>]`, and the
+# recorder pushes the checks files it names at agent start. PRESENT-IF-PASSED like `done=`: a row
+# that names none is the plain row, byte for byte. It TRAILS `plan=`, which is where the rows that
+# proof-add reads were synthesized before this key had a writer.
+R13_Q="$(lib roster_row "${R5_BASE[@]}" "questions=adversarial,structure")"
+expect_eq "R13a questions= is written when passed, after plan=" \
+  "${R5_PLAIN}|questions=adversarial,structure" "$R13_Q"
+expect_eq "R13b …read back by key as written" "adversarial,structure" "$(field_of_row "$R13_Q" questions)"
+expect_absent "R13c a row that names none carries none" "questions=" "$R5_PLAIN"
+expect_contains "R13c …while the same plain row does carry plan= (the positive on that extractor)" \
+  "|plan=none" "$R5_PLAIN"
+lib roster_row "${R5_BASE[@]}" "question=evidence" >/dev/null
+expect_status "R13d a near-miss key is still refused" "2" "$?"
+
+# ---------------------------------------------------------------------------------------
+section "R14 — a declared debt is two row keys (wave-27 T31; REQ-14 AC-14.1, AC-14.2, D23)"
+# The dispatch wall records a brief's `Lands-red: <suite> until <token>` and `Red-evidence: <path>`
+# as `lands_red=` and `red_evidence=`, and `land` honours exactly what the row carried at dispatch.
+# PRESENT-IF-PASSED, trailing `questions=`: a row that names neither is the plain row, byte for byte.
+R14_R="$(lib roster_row "${R5_BASE[@]}" "questions=evidence" "lands_red=widget.test.sh until approval:release" \
+  "red_evidence=.bionic/docs/record/wave-01-fixture/T9-red.md")"
+expect_eq "R14a lands_red= and red_evidence= are written when passed, after questions=" \
+  "${R5_PLAIN}|questions=evidence|lands_red=widget.test.sh until approval:release|red_evidence=.bionic/docs/record/wave-01-fixture/T9-red.md" "$R14_R"
+expect_eq "R14b …lands_red read back by key, its blanks kept" "widget.test.sh until approval:release" \
+  "$(field_of_row "$R14_R" lands_red)"
+expect_eq "R14c …red_evidence read back by key" ".bionic/docs/record/wave-01-fixture/T9-red.md" \
+  "$(field_of_row "$R14_R" red_evidence)"
+expect_absent "R14d a row that names neither carries neither" "lands_red=" "$R5_PLAIN"
+expect_absent "R14d2 …nor red_evidence=" "red_evidence=" "$R5_PLAIN"
+lib roster_row "${R5_BASE[@]}" "lands-red=widget.test.sh until approval:release" >/dev/null
+expect_status "R14e the label's own spelling is not a key" "2" "$?"
+
 finish

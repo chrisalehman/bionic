@@ -760,7 +760,7 @@ section "Section 11: two projects on one machine — doctor answers about ONE"
 
 # THE DEFECT THIS SECTION OWNS (T3 finding 1, AC-35 drive, 2026-09-03). Doctor
 # was driven cold in a session whose cwd was a probe project and printed a PATROL
-# section naming `b1a850c1` (cwd this checkout) and `6c4fe341` (cwd a synthesis
+# section naming `b1a850c1` (cwd this checkout) and `6c4fe341` (cwd another project's
 # repo) — two sessions belonging to two OTHER projects — while the `active run`
 # row three lines below it resolved the probe project's own plan. Both facts came
 # off the same page, so the page contradicted itself about which machine it was

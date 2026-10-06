@@ -764,29 +764,28 @@ return 0
 # loader runs the merge removes. The body may not hand shell state to a later wall, and
 # it never did: what it leaves behind is the audit file it wrote, which is a file.
 #
-# THE STAGING IS FIVE FILES AND NOT ONE, because `detail` carries newlines and blank
-# lines by design and any single-file encoding would need an escape this can do without.
-# `$( cat )` strips trailing newlines, which is what `bionic_fold` does to `detail`
-# anyway, and `mode`, `verb`, `fact` and `fix` cannot contain a newline — `refuse`
-# refuses its own caller for that.
+# THE REFUSAL COMES BACK ON THE SUBSHELL'S OWN STDOUT, AND NO FILE IS MADE (wave-27 T71).
+# The subshell is a `$( … )`, so its stdout is a pipe to the gate and nothing else: the shim
+# writes one record there, `\036` and then the five fields with `\037` between them, and
+# exits 2. `detail` carries newlines and blank lines by design; neither separator is text,
+# and a field that holds one anyway has it shown as `?`, so no field moves into the next.
+# Every field loses its trailing line breaks, as `$(cat <stage>/N)` took them off when the
+# fields were files: the substitution takes them off `detail`, the parent off the other four.
 #
-# THE DIRECTORY IS CREATED HERE, EXCLUSIVELY, AND ONLY ON THE REFUSAL PATH (security F-1,
-# performance A-1). `mkdir -p` accepted whatever was already at the name — a symlink planted
-# by anyone who could guess `$$` and one `$RANDOM` draw was followed and its target
-# truncated, and a regular file planted there was read back on the NEXT Bash call as a
-# refusal this gate never made. Plain `mkdir` is atomic and fails when anything already
-# holds the name, so a squatter gets a refusal whose words degrade to the malformed-refusal
-# arm below — fail-closed, never a truncation and never attacker-authored prose. `-m 700`
-# means nothing can be planted inside it afterwards either.
+# WHY NOT A DIRECTORY, AS UNTIL 1.11.0. The gate staged the five fields as files in
+# `$TMPDIR/bionic-gate-$$`, created exclusively (security F-1: `mkdir -p` had followed a
+# planted symlink and read back a planted refusal). But the name was the pid's alone, and
+# a hook killed between the `mkdir` and the `rm -rf` left it behind. Pids come round in
+# tens of seconds on a busy machine, so the next refusing hook at that pid found the name
+# taken and printed the malformed line in place of its reason (diagnosis EG6l). A pipe
+# needs no name, so there is nothing for a dead process to leave, nothing at any name to
+# trip on, and nothing to clean up on any exit path. A KILL at any act leaves nothing.
 #
-# AND IT RUNS NOWHERE ELSE. A Bash call this gate does not refuse never reaches this
-# function, so it creates nothing, and the caller's cleanup has nothing to remove — which is
-# the fork the old unconditional `rm -rf` paid on every Bash tool call in every engaged
-# session.
+# THE QUIET PATH IS UNCHANGED: one fork, the subshell, as `( … )` was; no file, no `rm`.
 #
-# RC IS THE SIGNAL, because a subshell cannot hand a variable back. 0 means the five files
-# are there and the caller may read them; 1 means they are not and the caller must not.
-# [WALL: tests/bash-walls.test.sh §11]
+# WHAT THE BODY ITSELF WRITES TO STDOUT, which it does not today, still reaches the hook's
+# stdout, refusal or not; only its trailing newlines are normalized to one.
+# [WALL: tests/bash-walls.test.sh §11, §STAGE]
 # ─── evidence_line_field — a key read ANYWHERE on a line, not only at its start ───────
 #
 # WHY IT IS NOT `grep -E '^[[:space:]]*<key>:'` (wave-16 REQ-3, AC-3.3; seed B B11). A
@@ -1031,278 +1030,17 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   return 1
 }
 
-# The plan is read off disk when the CALL starts (PLAN is resolved at :245
-# before any of the command runs). So a single Bash call that edits the plan
-# and THEN commits is judged against the pre-edit plan: the fix the agent just
-# wrote is invisible to every arm below, and the refusal reads as though it had
-# never been made. The observed reflex on that refusal is to re-run the same
-# combined call, which fails identically forever. When the refused command's
-# text names the plan, say so. Matched against the absolute path and against
-# the path relative to the project root — the two spellings an agent writes.
-# A commit MESSAGE that merely quotes the path also matches; the line is
-# advice appended to an already-refused call, so a false positive costs a
-# sentence and a false negative costs the loop this exists to break.
-plan_write_note() {
-  local rel="$PLAN"
-  [ -n "$PLAN" ] || return 0
-  case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
-  case "$COMMAND" in
-    *"$PLAN"*|*"$rel"*)
-      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
-  esac
-}
+# ── THE JURISDICTION HELPERS, AT FILE SCOPE (wave-27 T80) ──────────────────────
 #
-# FILE SCOPE, DELIBERATELY (T12). The arms live inside `_eg_body`, whose nested function
-# definitions exist only once execution has reached them; the dispatch-ledger arm refuses
-# BEFORE this definition's old position was reached, so it found no function and printed
-# no note. The `refuse` shim in `wall_evidence_gate` calls it, so it is defined above that.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+# The eight helpers below are the evidence gate's own: from the command text, the payload and
+# git, they answer which repository a commit lands in. They were nested in `_eg_body`, so they
+# existed only inside the gate's subshell, and hooks/bash-walls.sh's debt collector, which runs
+# before the fold, resolved this run's plan and read its landing record for a commit that lands
+# in another repository (wave-19 AC-9.2). Defined here, when this file is sourced, they serve
+# both: `eg_commit_outside_root`, after them, is the one predicate the gate's jurisdiction arm
+# and the collector ask, so the two cannot disagree. Moved verbatim; the arm's own reasoning
+# stays at the arm, under JURISDICTION in `_eg_body`.
 
-_eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail> -> 0 staged · 1 not
-  local d="${1:-}" i=1 a
-  shift
-  [ -n "$d" ] || return 1
-  mkdir -m 700 "$d" 2>/dev/null || return 1
-  for a in "$@"; do
-    printf '%s' "$a" > "$d/$i" 2>/dev/null || return 1
-    i=$((i + 1))
-  done
-  return 0
-}
-
-wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
-  # Not a Bash tool call or an empty command — nothing to gate.
-  [ -n "$COMMAND" ] || return 0
-
-  local _eg_stage _eg_rc
-  # NO FORK TO NAME IT. The name is a string this process already knows; what makes it safe
-  # is that `_eg_stage_refusal` CREATES it exclusively, and only when there is a refusal to
-  # stage. `$RANDOM` bought nothing once creation is exclusive, and it cost one guessable
-  # name per pid while it was there.
-  _eg_stage="${TMPDIR:-/tmp}/bionic-gate-$$"
-  (
-    # THE SHIM, and the only line of this wall that is not the hook's own. It has
-    # `refuse`'s signature and `refuse`'s abort, and it renders nothing: the parent
-    # makes the one `refuse` call through `bionic_fold`, so the channel rule holds
-    # (cross-gate §Refuse: no hook prints a refusal directly).
-    #
-    # TWO ABORT CODES, because the staging can fail and the parent has to be able to tell.
-    # 2 is "the five files are written, read them"; 3 is "this was a refusal and its words
-    # are gone", which the malformed-refusal arm below turns into a refusal that still holds.
-    #
-    # THE ONE SITE FOR THE EDIT-THEN-COMMIT NOTE (wave-21 T12, AC-9.1). `$PLAN` and `$COMMAND`
-    # exist only in THIS subshell — the parent's `refuse` call never sees the plan — so the
-    # note is computed here, once, and staged as the FIRST line of `detail`, where the
-    # twelve-line fold in refuse.sh can only cut the tail. Every `refuse exit2 commit` arm
-    # of the gate goes through this shim, so none of them is edited. A wrong argument count
-    # is passed through untouched for the renderer to refuse as malformed.
-    refuse() {
-      if [ "$#" -eq 5 ] && [ "$2" = "commit" ]; then
-        local _eg_note
-        _eg_note="$(plan_write_note 2>/dev/null)"
-        if [ -n "$_eg_note" ]; then
-          if [ -n "$5" ]; then set -- "$1" "$2" "$3" "$4" "$_eg_note
-$5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
-        fi
-      fi
-      _eg_stage_refusal "$_eg_stage" "$@" && exit 2; exit 3
-    }
-    _eg_body
-  )
-  _eg_rc=$?
-
-  if [ "$_eg_rc" -eq 2 ] && [ -f "$_eg_stage/1" ]; then
-    fold_block "$(cat "$_eg_stage/1" 2>/dev/null)" "$(cat "$_eg_stage/2" 2>/dev/null)" \
-               "$(cat "$_eg_stage/3" 2>/dev/null)" "$(cat "$_eg_stage/4" 2>/dev/null)" \
-               "$(cat "$_eg_stage/5" 2>/dev/null)"
-    rm -rf "$_eg_stage" 2>/dev/null
-    return 2
-  fi
-  # GUARDED, so the path that staged nothing forks nothing (performance A-1).
-  [ -d "$_eg_stage" ] && rm -rf "$_eg_stage" 2>/dev/null
-
-  # A NON-ZERO EXIT WITH NOTHING STAGED has two causes and one answer. Either `refuse`
-  # refused its own caller — a malformed refusal, whose complaint is already on stderr in
-  # the library's own format — or the staging itself could not be made (exit 3: the name
-  # was already taken, or the temp directory is unwritable). `_refuse_selfrefuse` exits 2 "because the wall the caller was building
-  # must still hold", and it holds here: the commit is refused, and the refusal says
-  # which failure this is rather than inheriting an empty object.
-  if [ "$_eg_rc" -ne 0 ]; then
-    fold_block exit2 commit "the evidence gate's own refusal is malformed" "run /bionic:doctor" \
-      "The gate refused this commit and the refusal it built was rejected by the one
-renderer; the library's complaint is on the stream above this line. The commit is
-still refused — a wall whose words are broken is not a wall that waves things past."
-    return 2
-  fi
-  return 0
-}
-
-# ── the hook's body, carried whole ───────────────────────────────────────────
-#
-# EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
-# LINE TO ITS LAST `exit 0`, with ONE deletion: the `audit_path` copy, which is at file
-# scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
-# note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
-# and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
-_eg_body() {
-
-# Is any segment of the command a `git commit`? The library answers by argv
-# position: git must be argv[0] (after leading VAR=value assignments and git's
-# own global options) and `commit` the subcommand. That is what makes
-# `git -C <dir> commit`, `git -c user.name=x commit` and
-# `git --no-pager commit` commits — all three were invisible to the string
-# match this replaced — while `echo "we will git commit later"` and a heredoc
-# body naming a commit stay silent.
-# [WALL: tests/git-argv.test.sh]
-IS_COMMIT=0
-# THE SAME SCREEN wall_protect_main takes (REQ-10, T11) — `git_argv_has_sub` runs
-# `git_argv_expand`, a second awk pass over the same command line, and a command
-# with no readable `git` token in it has no commit for the parser to find.
-if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
-  IS_COMMIT=1
-fi
-
-if [ "$IS_COMMIT" -eq 0 ]; then
-  exit 0
-fi
-
-# Locate the newest plan file across THIS PROJECT's plan directories:
-#   - <docs-root>/plans/      (bionic canonical-sdlc convention)
-#   - <docs-root>/incidents/  (incident-response runs)
-#
-# Picks the newest .md across those that exist. If none exist, this isn't a
-# canonical-sdlc session — let the commit through (see ABSENT vs MISPLACED
-# below).
-#
-# NOT searched, deliberately: `~/.claude/plans/` and
-# `<project>/docs/superpowers/plans/`. Both were in the search set until
-# 2026-07-28; bionic gates bionic's plans, full stop (user ruling). The global
-# directory is the harness's own, project-AGNOSTIC one — Claude Code's plan mode
-# drops unrelated notes there routinely, and selection takes the newest .md
-# across the whole set. One such note therefore won selection, carried no
-# `## SDLC State`, and this hook exited 0: every commit in that project ran
-# ungated. The superpowers directory was the same pre-`.bionic/docs` vestige
-# (the root `docs/` tree was deleted 2026-07-16); nothing writes canonical plans
-# to either.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-#
-# THE CONTEXT, RESOLVED AGAIN HERE, AND THAT IS THE POINT (REQ-1f, lib/context.sh).
-# The POSITION below the commit arm is this gate's own and it was a cost argument when
-# this body was its own process: a non-commit Bash command must not pay for a root walk.
-# THE CARRIER NO LONGER HONOURS THAT. hooks/bash-walls.sh calls `bionic_context` for
-# every Bash tool call in an engaged session, before any wall is entered, so the walk is
-# already paid by the time this line is reached and the deferral buys nothing.
-#
-# THE CALL STAYS ANYWAY, for a reason that outranks the walk it repeats: this body is
-# carried into the library VERBATIM from the hook it replaced, and the differential T23
-# rests on is a differential against that text. Deleting a line the subshell would have
-# inherited from its parent is a behaviour-preserving edit that nothing here proves is
-# behaviour-preserving. The values cannot disagree — same payload, same environment, and
-# `bionic_context` is a pure function of both — so the duplicate costs one root walk on
-# commit commands and nothing else. Consolidating it belongs with the verbatim-carry
-# guarantee it would break, not beside it. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
-# `loader_fail_closed` needed the command text before any library existed.
-#
-# THE CWD LADDER IS THE LIBRARY'S, and is named nowhere else in this file but the
-# fail-closed pre-check above — which restates it by hand for the one reason that
-# block exists at all: the file that owns the rule is exactly what failed to load.
-#
-# THE ROOT used to be a private `resolve_project_root()` — one of eight byte-identical
-# copies across hooks/, held together by an agreement suite that could only ever prove
-# they had not drifted YET. The eight are gone; `project_root` is the one answer, and a
-# strictly better one: the old copy asked git for the root and stopped there, so a
-# project whose `.bionic/` sat ABOVE the repo (a repo nested in a workspace) resolved to
-# the repo and every artifact path this gate checks landed in the wrong tree. THE
-# WORKTREE CASE, which the old copy did get right and this one keeps: a linked worktree
-# maps back onto its main repository, so every worktree of one repo resolves to ONE root
-# and therefore one audit file, one docs root, one plan.
-bionic_context 2>/dev/null || exit 0
-
-# ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
-#
-# FIRST, above everything this gate decides — above the plan hygiene below, above the
-# misplacement sweep, above the run predicate. Chris, 2026-09-03: "all guardrails
-# imposed by bionic should only apply when exercising bionic. Nothing should apply until
-# bionic is triggered" — and the trigger is the canonical-sdlc skill, which writes
-# `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A commit from a session
-# that never invoked it is not this gate's business: exit 0, no stdout, no stderr.
-#
-# THE ORDERING CONTRACT BELOW IS UNCHANGED, and this guard does not join it. Plan hygiene
-# still sits ABOVE the run predicate, so an engaged session committing against a
-# malformed plan is still refused whether or not a run is open — the question this line
-# asks is not "is there a run" but "is this session bionic's at all", and it is prior to
-# both.
-#
-# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
-# foreign or unshaped session key, no key at all. The marker is the one artifact whose
-# PRESENCE opens a wall, so the fail direction is inverted here on purpose, and it is
-# inverted against this file's own fail-CLOSED posture on the library: the arming
-# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
-# which never consented is the defect this guard exists to remove.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-[ "$BIONIC_ENGAGED" = 1 ] || exit 0
-
-# ---------- JURISDICTION (wave-19 REQ-9, D10; ADR-031 amended): whose repository is this? ----------
-#
-# SECOND, right under the engagement guard and above every plan read — the plan hygiene, the
-# misplacement sweep, the run predicate and every step arm all read `$PLAN`, and none of them
-# has anything to say about a commit that lands in another repository. Until this arm the gate
-# resolved the plan from the ENGAGED ROOT first and asked which directory the commit runs in
-# some fifteen hundred lines later, so `git -C <scratch repo> commit` from an engaged session
-# was judged against this run's plan and refused for this run's evidence (A-T11.1, wave-18;
-# reproduced twice, R3 Q3). A repository `git init`-ed under the root's own record directory —
-# a test bed — drew the identical refusal: the gate never looked at the commit's directory.
-#
-# THE QUESTION IS THE REPOSITORY, NOT THE PATH. The commit's directory — the three spellings
-# `_eg_commit_cwd` reads, `-C` first — is handed to git, and git's COMMON DIR is compared to
-# the engaged root's. Common dir, never toplevel: a LINKED WORKTREE of this repository has a
-# toplevel of its own and shares the common dir, so every writer's tree stays inside and keeps
-# today's path (the row fork, the ambiguity arm, `_eg_git_wt_name`) exactly as it was. A
-# repository NESTED under the root has a common dir of its own and is outside, which is
-# AC-9.3; another repository's linked worktree is outside too and leaves here, ahead of the
-# rc-4 arm that used to catch it further down. The comparison is physical — the string, then
-# `-ef` — so a symlinked spelling of the root is the root.
-#
-# ONLY A POSITIVE ANSWER EXEMPTS. No git, a directory git places in no repository, a root
-# whose common dir cannot be read (a `.bionic/` above the repository), a relative directory,
-# a command that names two directories before the commit: each keeps today's verdict and is
-# judged below. A wall that cannot place a commit does not wave it through; only git naming a
-# DIFFERENT repository does. The two-directory case is the one that matters — `cd <scratch>
-# && cd <root> && git commit` commits in the root, and the leading `cd` must not buy it an
-# exemption; the ambiguity arm further down refuses it as before.
-#
-# AND A POSITIVE ANSWER IS ABOUT ONE COMMIT. `_eg_commit_cwd` places the FIRST commit the text
-# carries — the first `git -C <abs> commit`, else the leading `cd` — and says nothing about any
-# commit after it. So the arm exempts only a command whose text carries EXACTLY ONE commit
-# segment (`_eg_commit_count`, over the same `sh -c`/`eval`-expanded segment list every wall
-# reads) and places that one outside. Two or more commit segments are judged as before, even
-# when every one of them lands outside: `git -C <scratch> commit && git commit` and `cd
-# <scratch> && git commit && cd <root> && git commit` both commit in the root the second time,
-# and counting is what tells them apart from a single commit without placing each one (review
-# R1, wave-19). Zero is judged too — a commit this reader cannot see is not one it can place.
-#
-# AND THE ONE COMMIT MUST BE PLACED EXACTLY AS GIT WILL PLACE IT (critic C1, wave-19). The reader
-# names the FIRST absolute `-C`, the leading `cd` or the payload cwd; git obeys the LAST `-C`,
-# `--git-dir`/`--work-tree`/`GIT_DIR` name the repository outright, and a `pushd`, a nested
-# `bash -c 'cd …'` or a piped `cd` moves the shell where the reader never looks. Every one of
-# those single commits was exempted for a scratch repository while it landed in the root.
-# `_eg_placed` admits only the three shapes the reader reads exactly: one `-C`, a leading `cd`,
-# or the payload cwd. Each holds only when every other segment of the text starts with `git`,
-# `true`, `:` or `exit` (`_eg_git_only`), with no `(`, `{` or backtick anywhere. That is an
-# ALLOW-LIST (review R2-2): `if cd <root>; then :; fi; git commit`, `time cd <root> && git
-# commit` and a function named `git` all cost the exemption because their first word is not on
-# it, not because a list of moves names them. Everything else is judged below. The exotic
-# spellings are not resolved; they are not exempted.
-#
-# NOT A NEW REACH (the D11 freeze, .claude/rules/hook-authoring.md). It is the repair of the
-# gate's existing foreign-repository check — `_eg_git_wt_name` already asks git this question,
-# for linked worktrees only — widened to every repository git can place, as D10 ratified.
-#
-# AND IT EXEMPTS THIS GATE ALONE, as the rc-4 arm does: the `exit 0` leaves `_eg_body`'s
-# subshell, and the walls folded beside it in hooks/bash-walls.sh — protect-main, the
-# read-only-role arm, the background-suite guard — keep their verdicts wherever the commit
-# lands (tests/bash-walls.test.sh §18).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 # _eg_cd_targets <command text> -> sets _EG_CDS to EVERY directory the text changes into
 # before the commit AFTER the leading one, in the order the shell would obey them, one per
 # line; empty when the text names only the leading directory.
@@ -1774,11 +1512,305 @@ _eg_placed() {
   esac
 }
 
-_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS — once, for this arm and every reader below
-_eg_commit_count                     # sets _EG_COMMITS and _EG_COMMIT_NC — only ONE commit can be placed outside
-if [ "$_EG_COMMITS" -eq 1 ] \
-   && _eg_placed \
-   && _eg_outside_root "$_EG_CWD"; then
+# eg_commit_outside_root -> 0, with _EG_JUR_TOP set, when the command text carries exactly one
+# commit, placed exactly as git will place it, in a repository whose common dir is not the
+# engaged root's; 1 otherwise, and for every case the gate judges instead. It reads COMMAND,
+# the payload's cwd and BIONIC_ROOT, which its caller was handed, and asks git; it reads no
+# plan, roster or marker (D11).
+eg_commit_outside_root() {
+  _eg_commit_cwd
+  _eg_commit_count
+  [ "$_EG_COMMITS" -eq 1 ] && _eg_placed && _eg_outside_root "$_EG_CWD"
+}
+
+# The plan is read off disk when the CALL starts (PLAN is resolved at :245
+# before any of the command runs). So a single Bash call that edits the plan
+# and THEN commits is judged against the pre-edit plan: the fix the agent just
+# wrote is invisible to every arm below, and the refusal reads as though it had
+# never been made. The observed reflex on that refusal is to re-run the same
+# combined call, which fails identically forever. When the refused command's
+# text names the plan, say so. Matched against the absolute path and against
+# the path relative to the project root — the two spellings an agent writes.
+# A commit MESSAGE that merely quotes the path also matches; the line is
+# advice appended to an already-refused call, so a false positive costs a
+# sentence and a false negative costs the loop this exists to break.
+plan_write_note() {
+  local rel="$PLAN"
+  [ -n "$PLAN" ] || return 0
+  case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
+  case "$COMMAND" in
+    *"$PLAN"*|*"$rel"*)
+      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
+  esac
+}
+#
+# FILE SCOPE, DELIBERATELY (T12). The arms live inside `_eg_body`, whose nested function
+# definitions exist only once execution has reached them; the dispatch-ledger arm refuses
+# BEFORE this definition's old position was reached, so it found no function and printed
+# no note. The `refuse` shim in `wall_evidence_gate` calls it, so it is defined above that.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+
+wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
+  # Not a Bash tool call or an empty command — nothing to gate.
+  [ -n "$COMMAND" ] || return 0
+
+  local _eg_rec _eg_rc _eg_out _eg_mode _eg_verb _eg_fact _eg_fix
+  _eg_rec=$(
+    # THE SHIM, and the only line of this wall that is not the hook's own. It has
+    # `refuse`'s signature and `refuse`'s abort, and it renders nothing: the parent
+    # makes the one `refuse` call through `bionic_fold`, so the channel rule holds
+    # (cross-gate §Refuse: no hook prints a refusal directly).
+    #
+    # THREE WAYS OUT. 2 with the record written is "read it"; 3 is "this was a refusal and
+    # the record could not be written", which the parent turns into a refusal that still
+    # holds and says so. A wrong argument count is the library's to refuse, so it is handed
+    # to `_refuse_selfrefuse`, which prints its complaint and exits 2 with no record: the one
+    # case the malformed line below names.
+    #
+    # THE ONE SITE FOR THE EDIT-THEN-COMMIT NOTE (wave-21 T12, AC-9.1). `$PLAN` and `$COMMAND`
+    # exist only in THIS subshell — the parent's `refuse` call never sees the plan — so the
+    # note is computed here, once, and staged as the FIRST line of `detail`, where the
+    # twelve-line fold in refuse.sh can only cut the tail. Every `refuse exit2 commit` arm
+    # of the gate goes through this shim, so none of them is edited.
+    refuse() {
+      [ "$#" -eq 5 ] || _refuse_selfrefuse "refuse takes 5 arguments and got $#" "pass mode verb fact fix detail"
+      if [ "$2" = "commit" ]; then
+        local _eg_note
+        _eg_note="$(plan_write_note 2>/dev/null)"
+        if [ -n "$_eg_note" ]; then
+          if [ -n "$5" ]; then set -- "$1" "$2" "$3" "$4" "$_eg_note
+$5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
+        fi
+      fi
+      # A separator byte inside a field would move the fields after it: it shows as `?`.
+      set -- "${1//[$'\036\037']/?}" "${2//[$'\036\037']/?}" "${3//[$'\036\037']/?}" \
+             "${4//[$'\036\037']/?}" "${5//[$'\036\037']/?}"
+      printf '\036%s\037%s\037%s\037%s\037%s' "$@" && exit 2; exit 3
+    }
+    _eg_body
+  )
+  _eg_rc=$?
+
+  # The body's own stdout, if it ever writes any, is what precedes the record, which is the
+  # last thing written and starts at the last `\036` (the shim keeps that byte out of the
+  # fields). With no refusal the whole capture is the body's. Either way it goes on.
+  _eg_out="$_eg_rec"; _eg_rec=""
+  if [ "$_eg_rc" -eq 2 ]; then
+    case "$_eg_out" in *$'\036'*) _eg_rec="${_eg_out##*$'\036'}"; _eg_out="${_eg_out%$'\036'*}" ;; esac
+  fi
+  while [ "${_eg_out%$'\n'}" != "$_eg_out" ]; do _eg_out="${_eg_out%$'\n'}"; done
+  [ -n "$_eg_out" ] && printf '%s\n' "$_eg_out"
+
+  # Each field loses its trailing line breaks, as `$(cat <stage>/N)` took them off when the
+  # fields were files; the substitution has already taken them off the last.
+  if [ "$_eg_rc" -eq 2 ] && [ -n "$_eg_rec" ]; then
+    _eg_mode="${_eg_rec%%$'\037'*}"; _eg_rec="${_eg_rec#*$'\037'}"
+    _eg_verb="${_eg_rec%%$'\037'*}"; _eg_rec="${_eg_rec#*$'\037'}"
+    _eg_fact="${_eg_rec%%$'\037'*}"; _eg_rec="${_eg_rec#*$'\037'}"
+    _eg_fix="${_eg_rec%%$'\037'*}";  _eg_rec="${_eg_rec#*$'\037'}"
+    while [ "${_eg_mode%$'\n'}" != "$_eg_mode" ]; do _eg_mode="${_eg_mode%$'\n'}"; done
+    while [ "${_eg_verb%$'\n'}" != "$_eg_verb" ]; do _eg_verb="${_eg_verb%$'\n'}"; done
+    while [ "${_eg_fact%$'\n'}" != "$_eg_fact" ]; do _eg_fact="${_eg_fact%$'\n'}"; done
+    while [ "${_eg_fix%$'\n'}" != "$_eg_fix" ]; do _eg_fix="${_eg_fix%$'\n'}"; done
+    fold_block "$_eg_mode" "$_eg_verb" "$_eg_fact" "$_eg_fix" "$_eg_rec"
+    return 2
+  fi
+
+  # 2 WITH NO RECORD is the library refusing the gate's own refusal: its complaint, in the
+  # library's own format, is already on stderr above this line. The commit stays refused.
+  if [ "$_eg_rc" -eq 2 ]; then
+    fold_block exit2 commit "the evidence gate's own refusal is malformed" "run /bionic:doctor" \
+      "The gate refused this commit and the refusal it built was rejected by the one
+renderer; the library's complaint is on the stream above this line. The commit is
+still refused — a wall whose words are broken is not a wall that waves things past."
+    return 2
+  fi
+
+  # ANY OTHER NON-ZERO EXIT means the refusal never reached the gate: the record could not be
+  # written (3), or the subshell was killed, could not fork, or crashed. Nothing here names a
+  # file, so the line names the pipe, and the fix is the one that clears a passing cause.
+  if [ "$_eg_rc" -ne 0 ]; then
+    fold_block exit2 commit "the evidence gate could not stage its refusal on its pipe" "commit again" \
+      "The gate judges a commit in a subshell that hands its refusal back on its own stdout,
+a pipe to this hook; no temp file is involved. That subshell ended with exit $_eg_rc and
+no refusal on the pipe: it was killed, could not fork, or could not write. If the shell
+printed a reason above this line, that is the cause. The commit is still refused."
+    return 2
+  fi
+  return 0
+}
+
+# ── the hook's body, carried whole ───────────────────────────────────────────
+#
+# EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
+# LINE TO ITS LAST `exit 0`, with ONE deletion: the `audit_path` copy, which is at file
+# scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
+# note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
+# and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
+_eg_body() {
+
+# Is any segment of the command a `git commit`? The library answers by argv
+# position: git must be argv[0] (after leading VAR=value assignments and git's
+# own global options) and `commit` the subcommand. That is what makes
+# `git -C <dir> commit`, `git -c user.name=x commit` and
+# `git --no-pager commit` commits — all three were invisible to the string
+# match this replaced — while `echo "we will git commit later"` and a heredoc
+# body naming a commit stay silent.
+# [WALL: tests/git-argv.test.sh]
+IS_COMMIT=0
+# THE SAME SCREEN wall_protect_main takes (REQ-10, T11) — `git_argv_has_sub` runs
+# `git_argv_expand`, a second awk pass over the same command line, and a command
+# with no readable `git` token in it has no commit for the parser to find.
+if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
+  IS_COMMIT=1
+fi
+
+if [ "$IS_COMMIT" -eq 0 ]; then
+  exit 0
+fi
+
+# Locate the newest plan file across THIS PROJECT's plan directories:
+#   - <docs-root>/plans/      (bionic canonical-sdlc convention)
+#   - <docs-root>/incidents/  (incident-response runs)
+#
+# Picks the newest .md across those that exist. If none exist, this isn't a
+# canonical-sdlc session — let the commit through (see ABSENT vs MISPLACED
+# below).
+#
+# NOT searched, deliberately: `~/.claude/plans/` and
+# `<project>/docs/superpowers/plans/`. Both were in the search set until
+# 2026-07-28; bionic gates bionic's plans, full stop (user ruling). The global
+# directory is the harness's own, project-AGNOSTIC one — Claude Code's plan mode
+# drops unrelated notes there routinely, and selection takes the newest .md
+# across the whole set. One such note therefore won selection, carried no
+# `## SDLC State`, and this hook exited 0: every commit in that project ran
+# ungated. The superpowers directory was the same pre-`.bionic/docs` vestige
+# (the root `docs/` tree was deleted 2026-07-16); nothing writes canonical plans
+# to either.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+#
+# THE CONTEXT, RESOLVED AGAIN HERE, AND THAT IS THE POINT (REQ-1f, lib/context.sh).
+# The POSITION below the commit arm is this gate's own and it was a cost argument when
+# this body was its own process: a non-commit Bash command must not pay for a root walk.
+# THE CARRIER NO LONGER HONOURS THAT. hooks/bash-walls.sh calls `bionic_context` for
+# every Bash tool call in an engaged session, before any wall is entered, so the walk is
+# already paid by the time this line is reached and the deferral buys nothing.
+#
+# THE CALL STAYS ANYWAY, for a reason that outranks the walk it repeats: this body is
+# carried into the library VERBATIM from the hook it replaced, and the differential T23
+# rests on is a differential against that text. Deleting a line the subshell would have
+# inherited from its parent is a behaviour-preserving edit that nothing here proves is
+# behaviour-preserving. The values cannot disagree — same payload, same environment, and
+# `bionic_context` is a pure function of both — so the duplicate costs one root walk on
+# commit commands and nothing else. Consolidating it belongs with the verbatim-carry
+# guarantee it would break, not beside it. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
+# `loader_fail_closed` needed the command text before any library existed.
+#
+# THE CWD LADDER IS THE LIBRARY'S, and is named nowhere else in this file but the
+# fail-closed pre-check above — which restates it by hand for the one reason that
+# block exists at all: the file that owns the rule is exactly what failed to load.
+#
+# THE ROOT used to be a private `resolve_project_root()` — one of eight byte-identical
+# copies across hooks/, held together by an agreement suite that could only ever prove
+# they had not drifted YET. The eight are gone; `project_root` is the one answer, and a
+# strictly better one: the old copy asked git for the root and stopped there, so a
+# project whose `.bionic/` sat ABOVE the repo (a repo nested in a workspace) resolved to
+# the repo and every artifact path this gate checks landed in the wrong tree. THE
+# WORKTREE CASE, which the old copy did get right and this one keeps: a linked worktree
+# maps back onto its main repository, so every worktree of one repo resolves to ONE root
+# and therefore one audit file, one docs root, one plan.
+bionic_context 2>/dev/null || exit 0
+
+# ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
+#
+# FIRST, above everything this gate decides — above the plan hygiene below, above the
+# misplacement sweep, above the run predicate. Chris, 2026-09-03: "all guardrails
+# imposed by bionic should only apply when exercising bionic. Nothing should apply until
+# bionic is triggered" — and the trigger is the canonical-sdlc skill, which writes
+# `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A commit from a session
+# that never invoked it is not this gate's business: exit 0, no stdout, no stderr.
+#
+# THE ORDERING CONTRACT BELOW IS UNCHANGED, and this guard does not join it. Plan hygiene
+# still sits ABOVE the run predicate, so an engaged session committing against a
+# malformed plan is still refused whether or not a run is open — the question this line
+# asks is not "is there a run" but "is this session bionic's at all", and it is prior to
+# both.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose, and it is
+# inverted against this file's own fail-CLOSED posture on the library: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
+
+# ---------- JURISDICTION (wave-19 REQ-9, D10; ADR-031 amended): whose repository is this? ----------
+#
+# SECOND, right under the engagement guard and above every plan read — the plan hygiene, the
+# misplacement sweep, the run predicate and every step arm all read `$PLAN`, and none of them
+# has anything to say about a commit that lands in another repository. Until this arm the gate
+# resolved the plan from the ENGAGED ROOT first and asked which directory the commit runs in
+# some fifteen hundred lines later, so `git -C <scratch repo> commit` from an engaged session
+# was judged against this run's plan and refused for this run's evidence (A-T11.1, wave-18;
+# reproduced twice, R3 Q3). A repository `git init`-ed under the root's own record directory —
+# a test bed — drew the identical refusal: the gate never looked at the commit's directory.
+#
+# THE QUESTION IS THE REPOSITORY, NOT THE PATH. The commit's directory — the three spellings
+# `_eg_commit_cwd` reads, `-C` first — is handed to git, and git's COMMON DIR is compared to
+# the engaged root's. Common dir, never toplevel: a LINKED WORKTREE of this repository has a
+# toplevel of its own and shares the common dir, so every writer's tree stays inside and keeps
+# today's path (the row fork, the ambiguity arm, `_eg_git_wt_name`) exactly as it was. A
+# repository NESTED under the root has a common dir of its own and is outside, which is
+# AC-9.3; another repository's linked worktree is outside too and leaves here, ahead of the
+# rc-4 arm that used to catch it further down. The comparison is physical — the string, then
+# `-ef` — so a symlinked spelling of the root is the root.
+#
+# ONLY A POSITIVE ANSWER EXEMPTS. No git, a directory git places in no repository, a root
+# whose common dir cannot be read (a `.bionic/` above the repository), a relative directory,
+# a command that names two directories before the commit: each keeps today's verdict and is
+# judged below. A wall that cannot place a commit does not wave it through; only git naming a
+# DIFFERENT repository does. The two-directory case is the one that matters — `cd <scratch>
+# && cd <root> && git commit` commits in the root, and the leading `cd` must not buy it an
+# exemption; the ambiguity arm further down refuses it as before.
+#
+# AND A POSITIVE ANSWER IS ABOUT ONE COMMIT. `_eg_commit_cwd` places the FIRST commit the text
+# carries — the first `git -C <abs> commit`, else the leading `cd` — and says nothing about any
+# commit after it. So the arm exempts only a command whose text carries EXACTLY ONE commit
+# segment (`_eg_commit_count`, over the same `sh -c`/`eval`-expanded segment list every wall
+# reads) and places that one outside. Two or more commit segments are judged as before, even
+# when every one of them lands outside: `git -C <scratch> commit && git commit` and `cd
+# <scratch> && git commit && cd <root> && git commit` both commit in the root the second time,
+# and counting is what tells them apart from a single commit without placing each one (review
+# R1, wave-19). Zero is judged too — a commit this reader cannot see is not one it can place.
+#
+# AND THE ONE COMMIT MUST BE PLACED EXACTLY AS GIT WILL PLACE IT (critic C1, wave-19). The reader
+# names the FIRST absolute `-C`, the leading `cd` or the payload cwd; git obeys the LAST `-C`,
+# `--git-dir`/`--work-tree`/`GIT_DIR` name the repository outright, and a `pushd`, a nested
+# `bash -c 'cd …'` or a piped `cd` moves the shell where the reader never looks. Every one of
+# those single commits was exempted for a scratch repository while it landed in the root.
+# `_eg_placed` admits only the three shapes the reader reads exactly: one `-C`, a leading `cd`,
+# or the payload cwd. Each holds only when every other segment of the text starts with `git`,
+# `true`, `:` or `exit` (`_eg_git_only`), with no `(`, `{` or backtick anywhere. That is an
+# ALLOW-LIST (review R2-2): `if cd <root>; then :; fi; git commit`, `time cd <root> && git
+# commit` and a function named `git` all cost the exemption because their first word is not on
+# it, not because a list of moves names them. Everything else is judged below. The exotic
+# spellings are not resolved; they are not exempted.
+#
+# NOT A NEW REACH (the D11 freeze, .claude/rules/hook-authoring.md). It is the repair of the
+# gate's existing foreign-repository check — `_eg_git_wt_name` already asks git this question,
+# for linked worktrees only — widened to every repository git can place, as D10 ratified.
+#
+# AND IT EXEMPTS THIS GATE ALONE, as the rc-4 arm does: the `exit 0` leaves `_eg_body`'s
+# subshell, and the walls folded beside it in hooks/bash-walls.sh — protect-main, the
+# read-only-role arm, the background-suite guard — keep their verdicts wherever the commit
+# lands (tests/bash-walls.test.sh §18).
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+
+# The one predicate (file scope, above `wall_evidence_gate`), which hooks/bash-walls.sh's debt
+# collector asks too. It sets _EG_CWD, _EG_CWD_SRC and _EG_CDS — once, for this arm and every
+# reader below — and _EG_COMMITS and _EG_COMMIT_NC: only ONE commit can be placed outside.
+if eg_commit_outside_root; then
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here\n' \
     "$_EG_JUR_TOP" "$BIONIC_ROOT" >&2
   exit 0
@@ -2298,26 +2330,105 @@ Fix: replace the '- ${id}:' evidence with the actual command invocation and resu
       fi
       ;;
   esac
+  # THE VERDICT IS A READING NOW, NOT A WORD (wave-27 T14; D3, AC-2.2). The two `grep -Ewq`
+  # arms that stood here took the words `auditor` and `critic` on the row's own line as the
+  # verdicts; a line could carry the word with no reading behind it. The row owes what every
+  # commit from Step 6 owes, at its own effective rigor: `_eg_refuse_readings`, below.
   if [ "$status" = "done" ] && _eg_verdicts_owed; then
-    case "$eff" in
-      peer-reviewed|audited)
-        if ! grep -Ewq 'auditor' <<< "$ev"; then
-          _eg_detail="canonical-sdlc task ${id} is done at rigor '${eff}' but its evidence has no 'auditor' verdict ('${ev}').
-Plan: $PLAN
-Fix: record the independent auditor's verdict in the '- ${id}:' evidence line before marking done."
-          refuse exit2 commit "that task is done with no auditor verdict" "record the auditor's verdict" "$_eg_detail"
-        fi
-        ;;
-    esac
-    if [ "$eff" = "audited" ]; then
-      if ! grep -Ewq 'critic' <<< "$ev"; then
-        _eg_detail="canonical-sdlc task ${id} is done at rigor 'audited' but its evidence has no 'critic' verdict ('${ev}').
-Plan: $PLAN
-Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line before marking done."
-        refuse exit2 commit "that task is done with no critic verdict" "record the critic's verdict" "$_eg_detail"
-      fi
-    fi
+    _eg_refuse_readings "task ${id}" "$eff"
   fi
+}
+
+# THE READINGS A RUN OWES, JUDGED ON THE SECTION IN HAND (wave-27 T14; REQ-2 AC-2.2, D3, D19).
+# From `current: 6` a commit is admitted only when, for each question `facts_owed` (lib/proof.sh)
+# deals at <rigor>, the section holds a reading of it (`proved: kind=review … question=<q>`) whose
+# newest is not `result=fail`, or a `waived: question=<q>` line newer than that reading. Newer is
+# later in the section, the order `proof_add_line` writes in, and a waiver's fields are those before
+# ` by `: the judge's own reading (`facts_state`), so the wall and the judge never answer one
+# section text two ways on a question both can see (bash-walls §EG-6).
+#
+# A PREDICATE OVER TEXT, AND NOTHING ELSE (the freeze, .claude/rules/hook-authoring.md). It reads
+# no git and no roster: whether a reading's head is still the working head, its range and its
+# scope are `facts_state`'s, asked at `current 8`, at close-out and by the tick. Below
+# `current: 6` it never runs (D19), so an open run is untouched until its Step 6.
+#
+# AN UNKNOWN RIGOR OWES EVERY QUESTION: the dealing names no questions for it, and a typo must not
+# become a bypass (`matrix_auditor_required`'s fail-closed rule).
+#
+# _eg_reading_gaps <rigor> -> one line per owed question the section does not answer:
+# `absent<TAB><q>`, or `failing<TAB><q><TAB><evidence>`; `unreadable` when lib/proof.sh is not
+# loaded (units.sh loads it). Nothing when every question is answered.
+#
+# AND ONE LINE PER OPEN DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121),
+# `debt<TAB><suite><TAB><token>`: a debt `land` wrote to the landing record, HANDED to this wall by
+# its collector (hooks/bash-walls.sh: `BIONIC_DEBTS_OPEN`, read for `BIONIC_DEBTS_PLAN`), with no
+# `proved: kind=floor` or `kind=task` line in the section dated after its threshold (lib/proof.sh
+# `proof_debts_open`, the text half of the judge's own rule). A `landed red:` line in the plan is not
+# read. Debts handed for another plan than the one judged here are not this plan's, and are not read.
+_eg_reading_gaps() {
+  local qs
+  if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F proof_awk >/dev/null 2>&1; then
+    printf 'unreadable\n'
+    return 0
+  fi
+  qs="$(facts_owed "$1" task 2>/dev/null | awk -F'\t' '$1 == "review" { printf "%s ", $2 }')"
+  [ -n "$qs" ] || qs="$PROOF_QUESTIONS"
+  printf '%s\n' "$SECTION" | awk -v qs="$qs" "$(proof_awk)"'
+    function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = PROOF_RESULT; e[PROOF_QUESTION] = evid($0)
+      next
+    }
+    /^waived:[ \t]/ {
+      m = split($0, w, /[ \t]+/); q = ""; h = ""
+      for (i = 2; i <= m && w[i] != "by"; i++) {
+        if (w[i] ~ /^question=/) q = substr(w[i], 10)
+        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
+      }
+      if (q == "" || h !~ /^[0-9a-f]+$/ || length(h) < 7 || length(h) > 40) next
+      t[q] = "waiver"
+    }
+    END {
+      n = split(qs, Q, " ")
+      for (i = 1; i <= n; i++) {
+        q = Q[i]
+        if (!(q in t)) print "absent\t" q
+        else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
+      }
+    }'
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "${BIONIC_DEBTS_PLAN:-}" = "$PLAN" ] \
+     && declare -F proof_debts_open >/dev/null 2>&1; then
+    printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
+  fi
+}
+
+# _eg_refuse_readings <subject> <rigor> -> returns when every owed question is answered; otherwise
+# refuses the commit, naming each question and what it lacks.
+_eg_refuse_readings() {
+  local gaps lines _eg_debts
+  gaps="$(_eg_reading_gaps "$2")"
+  [ -n "$gaps" ] || return 0
+  lines="$(printf '%s\n' "$gaps" | awk -F'\t' '
+    $1 == "unreadable" { print "- the reading record cannot be read here: lib/proof.sh is not loaded beside units.sh" }
+    $1 == "absent"     { print "- " $2 ": no reading, and no waiver" }
+    $1 == "failing"    { print "- " $2 ": the newest reading is result=fail (evidence=" $3 "), and no waiver is newer" }')"
+  # A DECLARED DEBT ALONE is not a reading (wave-27 T31; D23): its own fact and fix.
+  if [ -z "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 != "debt"')" ]; then
+    lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+    _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and a suite a row landed red by declaration is still owed a green run taken after its blocker cleared:
+${lines}
+Plan: $PLAN
+Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add floor <log>'."
+    refuse exit2 commit "a declared red is still owed" "record a green run once cleared" "$_eg_detail"
+  fi
+  _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+  [ -z "$_eg_debts" ] || lines="${lines}
+${_eg_debts}"
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at rigor '${2}' needs a reading whose newest is not result=fail, or a newer waiver:
+${lines}
+Plan: $PLAN
+Fix: register each reading with 'session-poker.sh proof-add review <record> --question <q> --reader <name>', or record the waiver the user gives with 'session-poker.sh waive <q> <reply>'."
+  refuse exit2 commit "a reading question is unanswered" "record or waive each reading" "$_eg_detail"
 }
 
 # Per-row rigor FLOOR check (task 4/8, A15 — user-ratified, momentous). The
@@ -3498,7 +3609,14 @@ LINE=$(echo "$SECTION" \
        | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:" \
        | head -1)
 
-if [ -z "$LINE" ]; then
+# STEP 6 OWES READINGS, NOT A POINTER (wave-27 T14; D3). A `Step 6:` line naming a review used to
+# be what this step's commits were admitted on; from wave-27 the readings themselves are, judged
+# in `dispatch` (`_eg_refuse_readings`), so at `current: 6` the line is neither demanded nor read
+# here. Every other step keeps its line.
+_EG_STEP_LINE_OWED=1
+[ "$CURRENT" = 6 ] && _EG_STEP_LINE_OWED=0
+
+if [ -z "$LINE" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
   _eg_detail="canonical-sdlc plan file has no 'Step ${CURRENT}:' line in '## SDLC State'.
 Plan: $PLAN
 Fix: add the evidence artifact for step ${CURRENT} before committing."
@@ -3536,7 +3654,7 @@ ${CONTINUATION}"
 fi
 BLOCK_STRIPPED=$(echo "$BLOCK" | tr -d '[:space:]')
 
-if [ -z "$BLOCK_STRIPPED" ]; then
+if [ -z "$BLOCK_STRIPPED" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
   _eg_detail="canonical-sdlc step ${CURRENT} evidence line is empty in '## SDLC State'.
 Plan: $PLAN
 Fix: record the evidence artifact (commit SHA, path, link) for step ${CURRENT} before committing."
@@ -3560,7 +3678,7 @@ is_r7_key() {
 # whole line when it has no colon (the single-line "Step N: <value>" case,
 # which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
 # on colon lines and the unchanged line otherwise.
-while IFS= read -r _bline; do
+[ "$_EG_STEP_LINE_OWED" = 1 ] && while IFS= read -r _bline; do
   _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
   if is_r7_key "$_bkey"; then
     continue
@@ -4180,7 +4298,7 @@ validate_matrix() {
       # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
       # gives a mid-walk corrective commit an honest home at current: 5.
       UNDISCHARGED=1
-    elif [ "$task9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+    elif [ "$task9" = "1" ] && [ "${CURRENT%[ab]}" -lt 9 ] 2>/dev/null \
          && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
       # Close-out row before Step 9 — see the `task: 9` note above. Sits
       # BELOW the current: 5 arm on purpose: at the Verify gate the existing
@@ -4309,10 +4427,10 @@ validate_matrix() {
     # because the attribution is correct and sending the user to rewrite it
     # would point them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    if [ "$CURRENT" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
+    if [ "${CURRENT%[ab]}" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
       if [ "$status" = "waived" ] || [ "$row_is_waived" = "1" ]; then
         :
-      elif [ "$task9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+      elif [ "$task9" = "1" ] && [ "${CURRENT%[ab]}" -lt 9 ] 2>/dev/null \
            && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
         # The second of the `task: 9` tag's two arms. An auditor cannot
         # CONFIRM a row whose evidence Step 9 has not produced; demanding it
@@ -4418,7 +4536,7 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_walk_artifact() {
   local discharged b5 raw abs
-  case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
+  case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
   # Reuses the $MATRIX cache validate_matrix() fills. It runs immediately before
   # this arm at both call sites (validate_verify_step, dispatch's 6..9 case) and
@@ -4548,7 +4666,7 @@ log_finding_quiet() {  # $1=check-id  $2=detail
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
   local b5 covered_line covered_norm missing claimed_fog claimed_undeclared
-  case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
+  case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   raw=$(frontmatter_get environments)
   if [ -z "$raw" ]; then
     log_finding_quiet environments "no 'environments:' declared in frontmatter — the covered/fog check is a no-op"
@@ -4892,8 +5010,10 @@ dispatch() {
   # The walk artifact is a durable prefix condition alongside it (A5): deleting
   # the narration after the Verify gate blocks every later commit. The
   # environments claim (S3, AC-4) is the same shape: covered ⊆ declared and
-  # every fog entry's cure stay true across the whole post-Verify span.
-  case "$CURRENT" in
+  # every fog entry's cure stay true across the whole post-Verify span. A lettered step is its step
+  # here, in the walk and environments arms and in the matrix's own step tests (wave-27 T67; review
+  # pass 46 N10): `6a` binds as 6.
+  case "${CURRENT%[ab]}" in
     6|7|8|9) validate_matrix; validate_walk_artifact; validate_environments ;;
   esac
   # Log-only epic merge-target check at the integrate step.
@@ -4912,6 +5032,12 @@ dispatch() {
         validate_ship_step "$SHIP_STEP"
       fi
       ;;
+  esac
+  # THE READINGS THE RUN OWES are a prefix condition from Step 6 (wave-27 T14; D3, D19), asked
+  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them. A
+  # lettered step is its step (T31; review pass 25 F1): `6a` binds as 6, `5b` as 5.
+  case "${CURRENT%[ab]}" in
+    6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
   esac
 }
 
@@ -5347,7 +5473,8 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `proof-add` and
-# `approve` — wave-26 T5, REQ-3 D5, REQ-1); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
+# T34, D24); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5397,7 +5524,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
     shift
     _next="${1:-}"
     case "$_next" in
-      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve)
+      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check|decline|budget)
         _WALL_POKER_VERB="$_next"; return 0 ;;
     esac
   done <<< "$(git_argv_expand "$1")"
@@ -5409,7 +5536,8 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
-#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--stamp-dir <dir>] -- '<the command>'
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--kill-after <s> | --max-wait <s>]
+#                                          [--stamp-dir <dir>] [--suites <names>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5445,6 +5573,13 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # --suites: WHICH SUITES THE COMMAND RUNS (wave-26 T61, critic F1), so the land can keep the newest
 # stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
 # the one the solo check reads too.
+#
+# --max-wait: THE CALL'S OWN BOUND ON THE WAIT (wave-27 T6, critic 3 S2). The staged timeout in
+# seconds, less a ten-second margin, so a wait for a place gives up inside the call rather than
+# outliving it into the background: ARM R's raised value when it repairs the call, else the
+# call's own `timeout`, else the harness default (BASH_DEFAULT_TIMEOUT_MS, two minutes unset).
+# The shim takes the smaller of it and its own default. A short call carries --kill-after
+# instead, whose limit already bounds the wait, so it gets none.
 #
 # THE SEAM FOR T9 is `wall_booked_argv`: the one function that builds the shim's argument
 # list. An option such as `--kill-after <s>` goes in as an extra argument there.
@@ -5657,6 +5792,22 @@ wall_booked_argv() {
 # pass as typed.
 _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
 WALL_SHORT_KILL_AFTER=""
+_BSG_STAGED_MS=""
+# _bsg_wait_s — sets _BSG_WAIT_S to the shim's --max-wait for this call: the staged timeout
+# (_BSG_STAGED_MS, set by _bsg_stage_input when ARM R raises it), else the call's own, else the
+# harness default; in seconds, less ten, never under 1. A variable, not a `$( )`, so the wrap
+# forks nothing more than the timeout read. The number reading is _fo_short_pass's.
+_BSG_WAIT_S=""
+_bsg_wait_s() {
+  local _t="${_BSG_STAGED_MS:-}"
+  [ -n "$_t" ] || _t="$(bionic_jq .tool_input.timeout)"
+  [ -n "$_t" ] || _t="${BASH_DEFAULT_TIMEOUT_MS:-120000}"
+  case "$_t" in ''|*[!0-9]*) _t=120000 ;; esac
+  [ "${#_t}" -le 9 ] || _t=999999999
+  _t=$((10#$_t / 1000 - 10))
+  [ "$_t" -ge 1 ] || _t=1
+  _BSG_WAIT_S="$_t"
+}
 _bsg_wrap_text() {
   local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
@@ -5694,7 +5845,7 @@ _bsg_wrap_text() {
   _bsg_suites
   [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
-  [ -z "$_k" ] || set -- --kill-after "$_k"
+  if [ -n "$_k" ]; then set -- --kill-after "$_k"; else _bsg_wait_s; set -- --max-wait "$_BSG_WAIT_S"; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
@@ -5711,7 +5862,9 @@ _bsg_wrap_text() {
 # rc 0 when something was staged, 1 when there was nothing to stage.
 _bsg_stage_input() {
   local _t="${2:-}" _upd
+  _BSG_STAGED_MS="$_t"
   _bsg_wrap_text "$1" || _BSG_WRAP_TEXT=""
+  _BSG_STAGED_MS=""
   [ -n "$_t" ] || [ -n "$_BSG_WRAP_TEXT" ] || return 1
   _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg t "$_t" --arg c "$_BSG_WRAP_TEXT" \
     '.tool_input + (if $t == "" then {} else {timeout: ($t | tonumber)} end)
@@ -5855,6 +6008,11 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
         case "$_bsg_seg" in subagent_type=*) _bsg_role="${_bsg_seg#subagent_type=}"; break ;; esac
       done
     fi
+    # AN UNPLACED ROW NAMES NO ROLE (wave-27 T38): the row `session-poker.sh amend <agent id>`
+    # writes for an agent its start could not place carries a suite set and no type, so the
+    # payload's own `agent_type` answers, as it does for an agent with no row. Any other row with
+    # an empty role keeps §17g's reading (admitted).
+    case "$_bsg_pick" in *"|status=unplaced|"*) [ -n "$_bsg_role" ] || _bsg_row=0 ;; esac
     if [ "$_bsg_row" -eq 1 ]; then
       _bsg_whence="Your roster row names you $_bsg_role"
     else
@@ -5885,7 +6043,7 @@ the tree as it is and send the report; the orchestrator lands the work."
     *session-poker*)
       if _wall_poker_contract_verb "$COMMAND"; then
         fold_block exit2 "$_WALL_POKER_VERB" \
-          "a subagent may not change a contract or the plan" "ask the orchestrator" \
+          "a subagent may not change a contract or the plan" "ask orchestrator" \
           "\`session-poker.sh $_WALL_POKER_VERB\` changes a roster contract or the bound plan, and
 only the orchestrator does that: a dispatched agent that could would widen its own budget or
 schedule its own work. Send the orchestrator what you need — the files, suites or runs to
@@ -6001,11 +6159,11 @@ fi
 # a wrong answer costs rather than uniformly:
 #
 #   no row for this agent, or a row with no `suites_allowed` key at all
-#       A row is written for every dispatch that passes the wall, so its absence means the
-#       journal failed or the row predates the wall. Refusing every suite would punish an
-#       agent for a bookkeeping failure it did not cause, so a NAMED suite passes in
-#       silence. `tests/run.sh` still does not: a full-tree run is the one act the standing
-#       ruling caps at one per run, and no row is not a licence to spend it.
+#       A row is written for every dispatch that passes the wall, and it gains the agent's
+#       id when the agent starts (hooks/execution-recorder.sh, wave-27 T5), so its absence
+#       is a fault. A named suite or run is REFUSED, naming which of the two it is
+#       (`budget_unrecorded`); it used to pass in silence, unbudgeted and unstamped
+#       (walk-triage-3). A row that declares runs only still holds a runner form to them.
 #
 #   `suites_allowed=` present but EMPTY
 #       A budget was stated and came out empty — the impact command failed or derived
@@ -6039,7 +6197,7 @@ fi
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
 local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME=""
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -6117,6 +6275,23 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
+# WHY NO SET, when there is none (wave-27 T5, D15): a row that states none, or no row carrying
+# this id at all. `budget_unrecorded` below prints it.
+_BUDGET_UNSET_WHY="your roster row records no suite set"
+[ -n "${_BUDGET_ROW:-}" ] || _BUDGET_UNSET_WHY="no roster row carries your agent id $ACTOR"
+# ---- BEGIN an unplaced agent is told why, and how its set is recorded (wave-27 T38; F3) ----
+# A TYPE THAT IS NOT A bionic: ROLE is never placed at its start: the recorder's type join takes
+# bionic roles only, because `general-purpose` is also a name a teammate can carry. Until its launch
+# call returns it has no row, and a foreground call returns when it has finished; 1.11.0 let its
+# named suites run unbudgeted and unstamped. The reason is said, and the remedy is the one every
+# unplaced agent gets: `amend <its agent id>`, which records a set for that id (session-poker.sh).
+if [ -z "${_BUDGET_ROW:-}" ]; then
+  case "$(bionic_jq .agent_type)" in
+    bionic:*|'') : ;;
+    *) _BUDGET_UNSET_WHY="$_BUDGET_UNSET_WHY: your type $(bionic_jq .agent_type) is not a bionic: role, and its start is never placed on a row" ;;
+  esac
+fi
+# ---- END an unplaced agent is told why ----
 
 # `none` is a STATED empty set and reads as one: nothing is on the budget, so the loop
 # below refuses every target it is handed.
@@ -6351,6 +6526,29 @@ $(_budget_remedy_line "$1")"
   return 2
 }
 
+# budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
+# D15). A row with no set, or no row at all, used to let a named suite through in silence, on
+# the reading that an agent should not pay for a bookkeeping failure it did not cause. The walk
+# showed the cost (walk-triage-3 §1): a foreground runner had no row, was refused its full run,
+# and any suite it named would have run unbudgeted. The id now reaches the row at agent start
+# (hooks/execution-recorder.sh, the type join), so a missing set is a fault to name, never a run
+# to spend. The remedy names the row when there is one to widen, and the agent's own id when no
+# row carries it: `amend <id>` records a set for an agent its start could not place (wave-27
+# T38). It used to say "nothing to widen until the orchestrator records one", an act no verb did.
+budget_unrecorded() {  # <the refused suite or run>
+  local _how
+  _how="$(_budget_remedy_line "$1")"
+  fold_block exit2 suite-run "no suite set is recorded for this agent" "send main the suites you need" \
+    "${_BUDGET_UNSET_WHY}, so this BUDGET arm cannot tell a budgeted run
+from an extra one, and it refuses rather than run the suite unbudgeted and unstamped.
+
+You asked for: $1
+
+Send the orchestrator the suites you need and why; it records them.
+$_how"
+  return 2
+}
+
 # THE REMEDY LINE (T6, REQ-5, AC-5.2). A refusal that names the budget and not the verb that
 # widens it sent two readers to hunt for it. The root is `refuse_plugin_root` and each word is
 # `refuse_shell_word`, both in lib/refuse.sh since wave-24 T13 (D10), where the landing
@@ -6375,9 +6573,11 @@ _budget_remedy_line() {  # <the refused suite or run>
   # THE SCRIPT PATH IS ONE WORD (wave-24 T28; critic I2): a plugin root holding a space split
   # into two arguments when the line was pasted, so the whole path goes through
   # `refuse_shell_word`, the same quoting the row name gets.
+  # THE TARGET IS ONE `amend` READS (wave-27 T38): the row's name, or this agent's id when no row
+  # carries it or the row has no name. `<name>` was printed for both, and no row is named that.
   printf "widen it: bash %s amend %s %s --reason '<why>' (main runs it)" \
     "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")" \
-    "$(refuse_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
+    "$(refuse_shell_word "${_BUDGET_ROW_NAME:-$ACTOR}" '<name>')" "$_widen"
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
@@ -6457,11 +6657,11 @@ dispatches the runner, and the dispatch wall admits it only then."
   # The row's declared runs are the whole set for this spelling: `suites_allowed=` holds
   # shell-suite basenames and a run can never be on it, so there is no second set to ask.
   #
-  # THE FAIL DIRECTION IS UNCHANGED. A row with NEITHER statement — no `suites_allowed=`
-  # key and no declared runs — is a bookkeeping failure the agent did not cause, and a
-  # named run passes in silence exactly as a named suite does.
+  # NO STATEMENT IS REFUSED, NAMING WHY (wave-27 T5, D15). A row with NEITHER statement — no
+  # `suites_allowed=` key and no declared runs — or no row at all used to pass a named run in
+  # silence; see `budget_unrecorded`.
   if [ "$_kind" != "file" ]; then
-    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || continue
+    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_run"; return 2; }
     # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
     # are the half of the budget that can answer it.
     _shown="$RE_EXECUTES"
@@ -6470,6 +6670,7 @@ dispatches the runner, and the dispatch wall admits it only then."
     return 2
   fi
 
+  [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_target"; return 2; }
   [ "$BUDGET_STATED" = yes ] || continue
   case " $SUITES_ALLOWED " in
     *" $_target "*) : ;;

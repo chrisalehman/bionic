@@ -34,6 +34,11 @@ Zero discretion. Ambiguity, a missing interface, or a plan contradiction means S
   to lose track of what a file actually says after a sequence of Edit calls; verify by reading.
 - **Run only the suites the brief's `Suites:` names.** `cd <tree> || exit 1` guards the WHOLE
   command, so a failed `cd` cannot run the rest of it against the wrong tree.
+- **Reuse before you write:** before adding a function, file, type or configuration key, search
+  for an existing site that does the job. Your report carries one line per new site, naming
+  the pattern and the paths searched, so a reader can re-run the search:
+  `reuse: searched '<pattern>' in <paths> · reused <site>` or
+  `reuse: searched '<pattern>' in <paths> · none fits: <why>`.
 <!-- IMPLEMENTOR-MECHANICS-END -->
 
 ## Shared core
@@ -59,6 +64,9 @@ Subprocess claim: the backgrounded process main will look for.
 Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
+Questions: yours to answer.
+Lands-red: the one suite you may land red.
+Red-evidence: a file holding head: <40-hex>, your head.
 Deliverable-waiver: report by message, not a file.
 <!-- BRIEF-SCAFFOLD-READER-END -->
 

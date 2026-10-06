@@ -188,31 +188,73 @@ section "§2 hand-run parity: a suite invoked by hand re-execs once under /bin/b
 # RUNNING INTERPRETER, not a marker: after `exec /bin/bash "$0"`, `$BASH` is `/bin/bash`, so
 # the re-exec happens exactly once and can never loop (critic K-4, Step 6).
 
-HAND="$TMPROOT/hand.test.sh"
-{ printf '#!/bin/bash\n'
-  printf 'echo start >> "$HAND_COUNT"\n'
-  printf '. "%s/tests/lib/resolve-roots.sh"\n' "$REPO"
-  printf 'echo "BASH_VERSION=$BASH_VERSION" > "$HAND_OUT"\n'
-  printf 'echo "argv=$*" >> "$HAND_OUT"\n'
-  printf 'echo "roots=$BIONIC_HOOKS_DIR" >> "$HAND_OUT"\n'
-} > "$HAND"
-chmod +x "$HAND"
+# THE CHILDREN, NOT ONLY THE SUITE (wave-27 T81). The seam once re-executed the suite and
+# pinned nothing for what it starts, so a hand-run suite was 3.2 while every `bash "$HOOK"`
+# it ran took PATH's 5.3 — the world tests/run.sh never gives a suite. The probe therefore
+# also records what a child `bash -c` and a child `bash <a hook copy>` report, and the PATH
+# its children are handed. The hook copy is a real hook with one line put after its shebang
+# that prints the interpreter and exits.
+HOOK_COPY="$TMPROOT/hook-copy.sh"
+{ head -1 "$BIONIC_HOOKS_DIR/session-poker.sh"
+  printf 'printf "%%s\\n" "$BASH_VERSION"; exit 0\n'
+  tail -n +2 "$BIONIC_HOOKS_DIR/session-poker.sh"
+} > "$HOOK_COPY"
 
-hand_run() {  # hand_run <interpreter> [marker] — leaves HAND_VER / HAND_STARTS / HAND_ARGV
+mk_hand() {  # mk_hand <seam> <file> — a hand-run suite that sources <seam>
+  { printf '#!/bin/bash\n'
+    printf 'echo start >> "$HAND_COUNT"\n'
+    printf '. "%s"\n' "$1"
+    cat <<'HAND_EOF'
+echo "BASH_VERSION=$BASH_VERSION" > "$HAND_OUT"
+echo "argv=$*" >> "$HAND_OUT"
+echo "roots=$BIONIC_HOOKS_DIR" >> "$HAND_OUT"
+echo "child=$(bash -c 'echo "$BASH_VERSION"' 2>/dev/null)" >> "$HAND_OUT"
+echo "hook=$(bash "$HAND_HOOK" 2>/dev/null)" >> "$HAND_OUT"
+echo "first_target=$(readlink "${PATH%%:*}/bash" 2>/dev/null || echo NONE)" >> "$HAND_OUT"
+echo "rest=${PATH#*:}" >> "$HAND_OUT"
+echo "git=$(command -v git 2>/dev/null || echo MISSING)" >> "$HAND_OUT"
+echo "jq=$(command -v jq 2>/dev/null || echo MISSING)" >> "$HAND_OUT"
+HAND_EOF
+  } > "$2"
+  chmod +x "$2"
+}
+HAND="$TMPROOT/hand.test.sh"
+mk_hand "$REPO/tests/lib/resolve-roots.sh" "$HAND"
+
+# The PATH a hand-run is given: the foreign interpreter first, then this suite's own.
+HAND_GIVEN_PATH="$ALT_DIR:$PATH"
+
+hand_run() {  # hand_run <interpreter> [marker] [suite] — leaves HAND_VER / HAND_STARTS / HAND_ARGV / HAND_CHILD …
   : > "$TMPROOT/hand.count"; : > "$TMPROOT/hand.out"
   ( if [ -n "${2:-}" ]; then
       BIONIC_TEST_INTERPRETER_PINNED="$2"; export BIONIC_TEST_INTERPRETER_PINNED
     else
       unset BIONIC_TEST_INTERPRETER_PINNED
     fi
-    PATH="$ALT_DIR:$PATH" \
-    HAND_COUNT="$TMPROOT/hand.count" HAND_OUT="$TMPROOT/hand.out" \
-    "$1" "$HAND" one two ) >/dev/null 2>&1
+    PATH="$HAND_GIVEN_PATH" \
+    HAND_COUNT="$TMPROOT/hand.count" HAND_OUT="$TMPROOT/hand.out" HAND_HOOK="$HOOK_COPY" \
+    "$1" "${3:-$HAND}" one two ) >/dev/null 2>&1
   HAND_VER="$(sed -n 's/^BASH_VERSION=//p' "$TMPROOT/hand.out")"
   HAND_ARGV="$(sed -n 's/^argv=//p' "$TMPROOT/hand.out")"
   HAND_ROOTS="$(sed -n 's/^roots=//p' "$TMPROOT/hand.out")"
+  HAND_CHILD="$(sed -n 's/^child=//p' "$TMPROOT/hand.out")"
+  HAND_HOOKVER="$(sed -n 's/^hook=//p' "$TMPROOT/hand.out")"
+  HAND_FIRST_TARGET="$(sed -n 's/^first_target=//p' "$TMPROOT/hand.out")"
+  HAND_REST="$(sed -n 's/^rest=//p' "$TMPROOT/hand.out")"
+  HAND_GIT="$(sed -n 's/^git=//p' "$TMPROOT/hand.out")"
+  HAND_JQ="$(sed -n 's/^jq=//p' "$TMPROOT/hand.out")"
   HAND_STARTS="$(wc -l < "$TMPROOT/hand.count" | tr -d ' ')"
 }
+
+# The hook copy is a real reader of its interpreter, proved under each before any row uses it.
+expect_eq "2.0 the hook copy reports the interpreter it is run with (/bin/bash)" \
+  "$SYS_VER" "$("$SYS_BASH" "$HOOK_COPY" 2>/dev/null)"
+if [ -n "$ALT_BASH" ]; then
+  expect_eq "2.0b …and the other one under the other interpreter" \
+    "$ALT_VER" "$("$ALT_BASH" "$HOOK_COPY" 2>/dev/null)"
+else
+  skip "2.0b the hook copy under the other interpreter" "this host has only one bash"
+fi
 
 if [ -n "$ALT_BASH" ]; then
   hand_run "$ALT_BASH"
@@ -244,6 +286,39 @@ fi
 hand_run "$SYS_BASH"
 expect_eq "2.5 a hand-run suite ALREADY under /bin/bash does not re-exec" "1" "$HAND_STARTS"
 expect_eq "2.6 …and reports the system version" "$SYS_VER" "$HAND_VER"
+echo ""
+
+section "§2b hand-run parity reaches the children: the suite and all it starts get /bin/bash (T81)"
+#
+# The world tests/run.sh gives a suite is the pin first on PATH for the suite AND every process
+# it starts. A suite typed at a prompt now gets the same world from the same function, which the
+# seam calls on the hand-run path. Both ways a suite starts by hand are driven: under the other
+# interpreter (the seam re-executes it) and already under /bin/bash (no re-exec; this second
+# shape is the one that hid a 5.x-only `case` arm for weeks — the suite was 3.2 and every hook it
+# spawned was not).
+HAND_EXP_GIT="$(PATH="$HAND_GIVEN_PATH" command -v git 2>/dev/null || echo MISSING)"
+HAND_EXP_JQ="$(PATH="$HAND_GIVEN_PATH" command -v jq 2>/dev/null || echo MISSING)"
+for HAND_IN in "$ALT_BASH" "$SYS_BASH"; do
+  [ -n "$HAND_IN" ] || continue
+  HAND_SHAPE="started under /bin/bash"; [ "$HAND_IN" = "$SYS_BASH" ] || HAND_SHAPE="re-executed"
+  hand_run "$HAND_IN"
+  expect_eq "2.7 ($HAND_SHAPE) the suite itself reports the system version" "$SYS_VER" "$HAND_VER"
+  if [ -n "$ALT_BASH" ]; then
+    expect_eq "2.8 ($HAND_SHAPE) a child \`bash -c\` reports the system version" "$SYS_VER" "$HAND_CHILD"
+    expect_eq "2.9 ($HAND_SHAPE) a child \`bash <a hook copy>\` reports the system version" \
+      "$SYS_VER" "$HAND_HOOKVER"
+  else
+    skip "2.8–2.9 ($HAND_SHAPE) a child under a foreign interpreter first on PATH" "this host has only one bash"
+  fi
+  expect_eq "2.10 ($HAND_SHAPE) the first PATH entry the children get is the pin: bash -> /bin/bash" \
+    "$SYS_BASH" "$HAND_FIRST_TARGET"
+  expect_eq "2.11 ($HAND_SHAPE) …and the rest of PATH is the PATH the suite was given, unchanged" \
+    "$HAND_GIVEN_PATH" "$HAND_REST"
+  expect_eq "2.12 ($HAND_SHAPE) git resolves where it did" "$HAND_EXP_GIT" "$HAND_GIT"
+  expect_eq "2.13 ($HAND_SHAPE) jq resolves where it did" "$HAND_EXP_JQ" "$HAND_JQ"
+done
+# NOT VACUOUS: git is on this host, so 2.12 compared two real paths.
+expect_ne "2.14 git was found at all on the PATH the hand-run was given" "MISSING" "$HAND_EXP_GIT"
 echo ""
 
 section "§3 the planted 3.2 incompatibilities: the pin catches what it exists to catch (AC-10)"
@@ -380,6 +455,163 @@ expect_contains "5.3 …naming the suite and why" "- noisy.test.sh" "$DRV_OUT"
 expect_contains "5.4 …in words that send the reader to the missing command" "command not found" "$DRV_OUT"
 expect_regex "5.5 a suite that only QUOTES the phrase stays green" \
   '^  quoting\.test\.sh +✓ PASS' "$DRV_OUT"
+echo ""
+
+section "§6 one pin, one owner: the runner and the seam pin through the same function (T81)"
+#
+# Two copies of the pin are two worlds: the runner's own pin code once gave a suite and its
+# children /bin/bash while the seam, for a hand-run, gave the suite alone. The seam now owns
+# the one function and the runner calls it. Proved both ways: the runner carries no pin code of
+# its own, and a mutant of the seam's function — its PATH line removed, nothing else — takes
+# the pin away from a suite the RUNNER launches and from the children of a suite run by HAND.
+RUN_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/run.sh")"
+SEAM_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/lib/resolve-roots.sh")"
+expect_eq "6.1 the seam builds the pin (the extractor finds it there)" "1" "$SEAM_LN"
+expect_eq "6.2 …and the runner builds none of its own" "0" "$RUN_LN"
+
+MUT_TREE="$TMPROOT/mut-tree"
+mk_tree "$MUT_TREE"
+cp "$PROBE_TREE/tests/probe.test.sh" "$MUT_TREE/tests/probe.test.sh"
+MUT_SEAM="$MUT_TREE/tests/lib/resolve-roots.sh"
+anchor -E "$MUT_SEAM" '^  PATH="\$dir:\$PATH"$' 1
+grep -vE '^  PATH="\$dir:\$PATH"$' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
+expect_eq "6.3 the mutant seam still parses" "0" "$(bash -n "$MUT_SEAM" >/dev/null 2>&1; echo $?)"
+if [ -n "$ALT_BASH" ]; then
+  : > "$TMPROOT/probe.out"
+  drive "$MUT_TREE" "--serial"
+  expect_eq "6.4 the mutant tree's runner still ran its probe (not vacuous)" "0" "$DRV_RC"
+  expect_eq "6.5 the mutant takes the pin from a suite the RUNNER launches" "$ALT_VER" \
+    "$(sed -n 's/^BASH_VERSION=//p' "$TMPROOT/probe.out")"
+  mk_hand "$MUT_SEAM" "$TMPROOT/hand-mut.test.sh"
+  hand_run "$SYS_BASH" "" "$TMPROOT/hand-mut.test.sh"
+  expect_eq "6.6 …and from the children of a suite run by HAND" "$ALT_VER" "$HAND_CHILD"
+  expect_eq "6.7 …while the mutant hand-run itself still ran (not vacuous)" "$SYS_VER" "$HAND_VER"
+else
+  skip "6.4–6.7 the seam mutant breaks the runner and the hand-run alike" "this host has only one bash"
+fi
+echo ""
+
+section "§7 the pin's root is judged by the path itself, never by what a link points at (T87)"
+#
+# A hand-run's root is one predictable directory per user under the temp directory. The owner test
+# `-O` follows a link, so a link planted at that path to any directory this user owns once passed,
+# PATH carried the link's path, and repointing the link mid-run made a child `bash` run another
+# script (review pass 75, drive e1b). Each state below is planted in a directory of this suite's
+# own and handed to the function by path — never the real per-user root. A refusal returns
+# non-zero, pins nothing, leaves PATH as it was and prints the seam's line naming the check, once.
+T87_DIR="$TMPROOT/t87"
+mkdir -p "$T87_DIR"
+PIN_GIVEN="$HAND_GIVEN_PATH"
+
+# pin_call <seam> <root> — call the seam's function in a fresh /bin/bash, leaving PIN_RC, PIN_PATH
+# (PATH after the call) and PIN_ERR (the function's own stderr).
+pin_call() {
+  local out
+  out="$(PATH="$PIN_GIVEN" /bin/bash -c '. "$1" >/dev/null 2>&1 || exit 9
+    bionic_interpreter_pin "$2" 2>"$3"; echo "rc=$?"; echo "path=$PATH"' \
+    pin-call "$1" "$2" "$TMPROOT/pin.err" 2>/dev/null)"
+  PIN_RC="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  PIN_PATH="$(printf '%s\n' "$out" | sed -n 's/^path=//p')"
+  PIN_ERR="$(cat "$TMPROOT/pin.err" 2>/dev/null)"
+}
+# pin_plant <state> <base> — plant one state under <base>; prints the root to hand the function.
+pin_plant() {
+  local base="$2"
+  rm -rf "$base"; mkdir -p "$base/owned"; chmod 0700 "$base/owned"
+  case "$1" in
+    fresh)      ;;
+    reuse)      mkdir -m 0700 "$base/root" "$base/root/pin"; ln -s /bin/bash "$base/root/pin/bash" ;;
+    link-root)  ln -s "$base/owned" "$base/root" ;;
+    link-pin)   mkdir -m 0700 "$base/root"; ln -s "$base/owned" "$base/root/pin" ;;
+    mode-0777)  mkdir "$base/root"; chmod 0777 "$base/root" ;;
+    mode-0770)  mkdir "$base/root"; chmod 0770 "$base/root" ;;
+    file-root)  : > "$base/root" ;;
+    bash-other) mkdir -m 0700 "$base/root" "$base/root/pin"; ln -s /bin/sh "$base/root/pin/bash" ;;
+    runner)     printf '%s' "$(mktemp -d "$base/run.XXXXXX")"; return 0 ;;
+  esac
+  printf '%s' "$base/root"
+}
+there() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo absent; fi; }
+inode() { ls -di "$1" 2>/dev/null | awk '{print $1}'; }
+SEAM="$REPO/tests/lib/resolve-roots.sh"
+
+# THE ACCEPTED STATES. Positives first, so every negative below has its extractor proven here.
+R="$(pin_plant fresh "$T87_DIR/fresh")"
+pin_call "$SEAM" "$R"
+expect_eq "7.1 nothing at the root path: the function builds the pin and returns 0" "0" "$PIN_RC"
+expect_eq "7.2 …PATH's first entry is <root>/pin and the rest of PATH is unchanged" \
+  "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+expect_match "7.3 …the root it created is mode 0700" 'drwx------*' "$(ls -ld "$R" 2>/dev/null)"
+expect_eq "7.4 …and pin/bash is a link to exactly /bin/bash" "/bin/bash" "$(readlink "$R/pin/bash")"
+expect_eq "7.5 …with nothing printed" "" "$PIN_ERR"
+expect_eq "7.5b …and the presence extractor the refusals read finds the pin it built" "present" "$(there "$R/pin")"
+
+R="$(pin_plant reuse "$T87_DIR/reuse")"
+T87_ROOT_INO="$(inode "$R")"; T87_LINK_INO="$(inode "$R/pin/bash")"
+expect_nonempty "7.6 the inode extractor reads the planted link" "$T87_LINK_INO"
+pin_call "$SEAM" "$R"
+expect_eq "7.7 a plain 0700 root holding pin/bash -> /bin/bash is reused: returns 0" "0" "$PIN_RC"
+expect_eq "7.8 …PATH's first entry is <root>/pin" "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+expect_eq "7.9 …the root is the same directory" "$T87_ROOT_INO" "$(inode "$R")"
+expect_eq "7.10 …and the bash link is untouched, never replaced" "$T87_LINK_INO" "$(inode "$R/pin/bash")"
+
+R="$(pin_plant runner "$T87_DIR/runner")"
+pin_call "$SEAM" "$R"
+expect_eq "7.11 tests/run.sh's kind of root (its run's mktemp -d) passes every check" "0" "$PIN_RC"
+expect_eq "7.12 …and the runner's pin is what it was: <root>/pin first" "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+
+# THE REFUSED STATES. Each: non-zero, PATH as given, nothing built, the seam's line once, naming
+# the check that failed.
+t87_refused() {  # t87_refused <n> <state> <what the line names> [a path that must stay absent]
+  pin_call "$SEAM" "$R"
+  expect_ne "$1a $2: refused (non-zero)" "0" "$PIN_RC"
+  expect_eq "$1b $2: …PATH is the PATH the call was given" "$PIN_GIVEN" "$PIN_PATH"
+  [ -z "${4:-}" ] || expect_eq "$1c $2: …nothing was built (${4##*/t87/})" "absent" "$(there "$4")"
+  expect_contains "$1d $2: …the seam's own line" \
+    "resolve-roots.sh: cannot build the interpreter pin under $R" "$PIN_ERR"
+  expect_contains "$1e $2: …naming the check that failed" "$3" "$PIN_ERR"
+  expect_eq "$1f $2: …printed once" "1" "$(printf '%s\n' "$PIN_ERR" | grep -c 'cannot build the interpreter pin')"
+}
+R="$(pin_plant link-root "$T87_DIR/link-root")"
+t87_refused 7.13 "a symlink at the root path, to a directory this user owns" \
+  "$R is a symlink" "$T87_DIR/link-root/owned/pin"
+R="$(pin_plant link-pin "$T87_DIR/link-pin")"
+t87_refused 7.14 "a plain root with a symlink at <root>/pin" \
+  "$R/pin is a symlink" "$T87_DIR/link-pin/owned/bash"
+R="$(pin_plant mode-0777 "$T87_DIR/mode-0777")"
+t87_refused 7.15 "a plain root writable by others (0777)" \
+  "$R is writable by group or others" "$R/pin"
+R="$(pin_plant mode-0770 "$T87_DIR/mode-0770")"
+t87_refused 7.16 "a plain root writable by its group (0770)" \
+  "$R is writable by group or others" "$R/pin"
+R="$(pin_plant file-root "$T87_DIR/file-root")"
+t87_refused 7.17 "a file at the root path" "$R is not a directory"
+R="$(pin_plant bash-other "$T87_DIR/bash-other")"
+t87_refused 7.18 "pin/bash a link to something other than /bin/bash" \
+  "$R/pin/bash is not a link to /bin/bash"
+expect_eq "7.18g …and the foreign link is left as it was, not replaced" "/bin/sh" "$(readlink "$R/pin/bash")"
+# A root owned by another user cannot be made in a suite run without privileges (chown needs
+# root), so the owner arm is not driven here; the mode arm (7.15, 7.16) is the test of that rule.
+skip "7.19 a root owned by another user" "unprivileged: chown to another uid needs root; the mode arm 7.15-7.16 stands in"
+
+# THE MUTANT: the root's -L test removed from a copy of the seam, nothing else. It must turn the
+# symlink-root state and that state alone from refused to accepted — the other checks do not
+# lean on it, and it is what stands between a planted link and PATH.
+T87_MUT="$TMPROOT/t87-mutant-seam.sh"
+anchor -E "$SEAM" '^  \[ ! -L "\$root" \] \|\| why=' 1
+grep -vE '^  \[ ! -L "\$root" \] \|\| why=' "$SEAM" > "$T87_MUT"
+expect_eq "7.20 the mutant seam still parses" "0" "$(bash -n "$T87_MUT" >/dev/null 2>&1; echo $?)"
+T87_FLIPS=""
+for T87_STATE in fresh reuse runner link-root link-pin mode-0777 mode-0770 file-root bash-other; do
+  R="$(pin_plant "$T87_STATE" "$T87_DIR/real-$T87_STATE")"; pin_call "$SEAM" "$R"; T87_REAL="$PIN_RC"
+  R="$(pin_plant "$T87_STATE" "$T87_DIR/mut-$T87_STATE")"; pin_call "$T87_MUT" "$R"
+  [ "$T87_REAL" = "$PIN_RC" ] || T87_FLIPS="$T87_FLIPS $T87_STATE"
+  [ "$T87_STATE" != link-root ] || T87_MUT_PATH="$PIN_PATH" T87_MUT_R="$R"
+done
+expect_eq "7.21 the mutant turns the symlink-root state, and that state alone, from refused to accepted" \
+  " link-root" "$T87_FLIPS"
+expect_eq "7.22 …and under the mutant PATH carries the link's path (the defect it guards)" \
+  "$T87_MUT_R/pin:$PIN_GIVEN" "$T87_MUT_PATH"
 echo ""
 
 echo "interpreter-pin: ${SKIPPED} skipped (see SKIP: rows above)"

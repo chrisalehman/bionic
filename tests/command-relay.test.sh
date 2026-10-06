@@ -199,6 +199,7 @@ write_rc_fixture() {  # <rc-file>
   mkdir -p "$(dirname "$1")"
   {
     echo '# ─── bionic:rc:start ───'
+    echo 'unalias claude 2>/dev/null || true'
     echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
     echo '# ─── bionic:rc:end ───'
   } > "$1"

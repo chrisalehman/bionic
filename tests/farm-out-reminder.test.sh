@@ -96,13 +96,14 @@ run_hook() {
 # row that read "silent" for this wall reads exactly this instead: no deny and no advisory on
 # stdout (the object holds nothing but the event name and updatedInput), and the updated
 # command is the shim around the ORIGINAL command, byte for byte.
-expect_wrap_only() {  # <label> <command> [<options regex after --shell; default ( --quiet)?>] [<suites; default run\.sh>]
-  local _cmd _s _r="'\\''" _o="${3-( --quiet)?} --suites ${4-run\\.sh}"
+expect_wrap_only() {  # <label> <command> [<options regex after --max-wait; default none>] [<suites; default run\.sh>]
+  # Every wrap without a kill limit carries --max-wait (wave-27 T6, AC-8.3), after --quiet.
+  local _cmd _s _r="'\\''" _o="${3-} --suites ${4-run\\.sh}"
   expect_eq "$1: …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1: …the updated command runs the booking shim" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?${_o} -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --max-wait [0-9]+${_o} -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1: …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
 }
@@ -572,12 +573,12 @@ run_hook "$(with_timeout "$(mk_payload "$ADV" "$ONE")" 60000)"
 expect_regex "S9a: under advisory a short call passes with its kill limit" "$(kill_re 55 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
 expect_empty "S9b: …and draws no nudge" "$(ctx_of)"
 run_hook "$(with_timeout "$(mk_payload "$OFFREPO" "$ONE")" 60000)"
-expect_wrap_only "S9c: under off the wrap carries no kill" "$ONE" "( --quiet)?" "one\\.test\\.sh"
+expect_wrap_only "S9c: under off the wrap carries no kill" "$ONE" "" "one\\.test\\.sh"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "FARM_OUT_ALLOW=1 $ONE")" 60000)"
-expect_wrap_only "S9d: the override wins, no kill" "FARM_OUT_ALLOW=1 $ONE" "( --quiet)?" "one\\.test\\.sh"
+expect_wrap_only "S9d: the override wins, no kill" "FARM_OUT_ALLOW=1 $ONE" "" "one\\.test\\.sh"
 expect_contains "S9e: …and is audited" "farm-out [override] class=user-sanctioned" "$ERR"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE" Bash implementor)" 60000)"
-expect_wrap_only "S9f: a subagent's short call carries no kill" "$ONE" "( --quiet)?" "one\\.test\\.sh"
+expect_wrap_only "S9f: a subagent's short call carries no kill" "$ONE" "" "one\\.test\\.sh"
 run_hook "$(with_timeout "$(mk_payload "$PLAIN" "$ONE")" 60000)"
 expect_empty "S9g: an unengaged session's short call is untouched (beside S1)" "$OUT$ERR"
 

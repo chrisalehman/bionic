@@ -115,6 +115,7 @@ FIXTURE_RC="${TMP}/${LONGSEG}/${LONGSEG}/dot.zshrc"
 mkdir -p "$(dirname "$FIXTURE_RC")"
 {
   echo '# ─── bionic:rc:start ───'
+  echo 'unalias claude 2>/dev/null || true'
   echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
   echo '# ─── bionic:rc:end ───'
 } > "$FIXTURE_RC"
@@ -412,9 +413,14 @@ expect_all_lines_fit "18: git feed, missing manifest, long path — every line f
 HALF_RC="${TMP}/${LONGSEG}/half.zshrc"
 {
   echo '# ─── bionic:rc:start ───'
+  echo 'unalias claude 2>/dev/null || true'
   echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
   echo '# ─── bionic:rc:end ───'
+  # The retired env block, between its markers: since wave-27 T66 a bare export of
+  # that name is the user's (A-orch-119 (3)), and only the block is bionic's footprint.
+  echo '# ─── bionic:env:start ───'
   echo 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+  echo '# ─── bionic:env:end ───'
 } > "$HALF_RC"
 HOME6="$(make_registry_home)"
 write_empty_known_marketplaces "$HOME6"
@@ -939,12 +945,18 @@ integrity_line() {
 PROOT_STOCK="$(make_plugin_root)"
 LINE_STOCK="$(integrity_line "$PROOT_STOCK")"
 expect_match "49: an untouched install reads as stock" "*state=stock*" "$LINE_STOCK"
-# RE-POINTED AT THIS MERGE (wave-11 1c + row 1b): twenty-four — payload/context/survival.md
-# joined the manifest (1c, +1) and the split skill's eleven further finals joined it too
-# (row 1b: dispatch.md and steps/0.md … steps/9.md, +11), on the twelve this suite pinned
-# before either landed. Measured on the merged tree by counting the manifest's rows, not
-# carried forward from either pre-merge side.
-expect_match "50: …over all twenty-four rendered files, not just the six roles" "*total=24*" "$LINE_STOCK"
+# ONE PER TEMPLATE, a relation rather than a number (wave-27 T8: a hard-coded 24 went red on
+# every new rendered file). The expected total is counted from the SOURCES, the templates of
+# render.sh's five units, never from the manifest or the finals: a count taken from what the
+# renderer produced would agree with itself whatever it dropped. docs-pins 74c pins the
+# manifest to the same count.
+RENDER_TMPLS="$(ls "${REPO}"/agents-src/templates/*.md.tmpl "${REPO}"/agents-src/templates/commands/*.md.tmpl \
+  "${REPO}"/agents-src/templates/skills/canonical-sdlc/*.md.tmpl \
+  "${REPO}"/agents-src/templates/skills/canonical-sdlc/steps/*.md.tmpl \
+  "${REPO}"/agents-src/templates/context/*.md.tmpl 2>/dev/null | wc -l | tr -d ' ')"
+expect_true "50 precondition: the five render units hold templates" test "${RENDER_TMPLS:-0}" -gt 0
+expect_match "50: …over every rendered file, one per template, not just the six roles" \
+  "*total=${RENDER_TMPLS} *" "$LINE_STOCK"
 expect_match "51: …with nothing named as modified" "*modified=0 names=-*" "$LINE_STOCK"
 
 # THE DEFECT CONTROL. `stock` above is worth nothing unless the same reader turns on a

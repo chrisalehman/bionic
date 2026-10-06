@@ -268,6 +268,39 @@ if [ "$_bw_mem" = 1 ] && wall_libs memory-store cmd-class.sh; then
   BIONIC_MEM_PROJECTS="$_bw_ch/projects"
 fi
 
+# THE DECLARED DEBTS `land` WROTE, gathered for the evidence gate (wave-27 T67; A-orch-121). From
+# Step 6 the gate holds a commit while a debt is open, and a wall reads only what it is handed: so
+# this block reads the landing record of the plan this session is bound to (lib/run.sh
+# `session_plan`, the binding field the gate's own run verdict starts from; this hook asks for no
+# run verdict) into ONE fact, its open debts as lib/proof.sh `proof_debts_read` prints them, beside
+# the plan they belong to. The gate reads it only when that is the plan it judges. Only for a call
+# that holds a commit (the word, no fork otherwise), so no other call pays for the read.
+#
+# A PLAN VERB'S DRY COMMIT IS BOUND TO A COPY of the plan (wave-27 T76; review pass 60 P0-1): the
+# copy keeps `BIONIC_DEBTS_PLAN`, the plan the gate judges, and the record is the one of the plan the
+# copy was made from, which the verb wrote into its marker as `dry_of=` (lib/proof.sh
+# `proof_debt_origin`, which honours it for a plan verb's session and copy alone). So a dry commit
+# and a real commit of the same plan text at the same step get the same answer from the debt arm.
+#
+# JURISDICTION FIRST (T80; wave-19 AC-9.2). A commit that lands in another repository has no plan
+# here, so the collector asks the gate's own predicate (lib/walls.sh `eg_commit_outside_root`)
+# before it resolves anything, and for such a commit reads neither the binding nor any record.
+BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_OPEN=""
+case "$COMMAND" in
+  *commit*)
+    if ! eg_commit_outside_root; then
+      BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
+      _bw_from="$BIONIC_DEBTS_PLAN"
+      if [ -n "$_bw_from" ] && declare -F proof_debt_origin >/dev/null 2>&1; then
+        _bw_from="$(proof_debt_origin "$BIONIC_SID" "$(engaged_marker_path "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" "$_bw_from")"
+      fi
+      if [ -n "$_bw_from" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+         && _bw_rec="$(proof_debt_record "$_bw_from" "$BIONIC_ROOT")"; then
+        BIONIC_DEBTS_OPEN="$(proof_debts_read "$_bw_rec")"
+      fi
+    fi ;;
+esac
+
 bionic_fold "$EVENT" \
   wall_protect_main \
   wall_protect_database \

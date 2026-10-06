@@ -10,7 +10,8 @@
 #
 #   section <name>        opens a section that MUST assert something
 #   setup_section <name>  opens a section exempt from that rule (fixture building)
-#   ok <msg>              record a pass
+#   ok <msg>              record a pass (or a named fail, while TF_ROW_GUARD's
+#                         function prints a reason: THE ROW GUARD, beside ok() below)
 #   no <msg> [detail]     record a fail
 #   advise <msg> <reading> <cmd>...  record an ADVISORY row: it prints the
 #                         reading and the reference it is read against, and it
@@ -45,8 +46,9 @@
 # THE COUNTERS AND ok/no ARE DEFINED HERE, UNCONDITIONALLY. This file is the ONE
 # definition of PASS/FAIL/TOTAL and of what counts as a result (D1). It does not
 # DEFER: a suite that defines its own `ok()`/`no()` or resets its own counters at
-# column 0 is REFUSED by the runner's adoption wall (`_tf_adoption_refusal`,
-# below) and never runs — as is a suite that does not adopt this file at all.
+# column 0 is REFUSED by the adoption wall (`_tf_adoption_wall`, below) and
+# never runs — as is a suite that does not adopt this file at all. The runner
+# asks it before launching a suite and this file asks it at load.
 # Every suite on the roster is a client of it; the ones that once carried private
 # definitions were migrated by S5–S9 and the wall closed the door behind them.
 #
@@ -336,7 +338,21 @@ setup_section() {
 }
 
 # ── assertions ───────────────────────────────────────────────────────────────
+# THE ROW GUARD (wave-27 T80). A suite whose rows can stand on a fixture that was never made
+# names a guard function in TF_ROW_GUARD, called with the row's label. While the guard prints a
+# reason, every row this file would record as a pass — ok and each expect_* through it — is
+# recorded as a fail by its own name, carrying the reason, so no row passes having tested
+# nothing. Unset, naming no function, or silent, ok() is what it always was. It is the one way a
+# suite changes what a pass means: a suite that wraps ok() itself is a shadow the wall refuses.
 ok() {
+  if [ -n "${TF_ROW_GUARD:-}" ] && declare -F "$TF_ROW_GUARD" >/dev/null 2>&1; then
+    local _tf_why
+    _tf_why="$("$TF_ROW_GUARD" "$1")"
+    if [ -n "$_tf_why" ]; then
+      no "$1" "$_tf_why"
+      return 0
+    fi
+  fi
   TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1))
   _TF_SECTION_ROWS=$((_TF_SECTION_ROWS + 1))
   echo "PASS: $1"
@@ -720,9 +736,10 @@ _tf_scan() {
 #
 # THE RULE. A suite is refused when its source carries, at COLUMN 0 and outside
 # any heredoc body, a definition of a name THIS FILE owns, or a counter reset
-# (`PASS=0` / `FAIL=0` / `TOTAL=0`). The refusal is the runner's — tests/run.sh
-# calls `_tf_adoption_refusal` before it launches a suite — and the rule lives
-# here, beside the scanner it reads and the names it protects.
+# (`PASS=0` / `FAIL=0` / `TOTAL=0`). tests/run.sh asks `_tf_adoption_wall`
+# before it launches a suite, and this file asks it at load of the suite that
+# sourced it; the rule lives here, beside the scanner it reads and the names it
+# protects.
 #
 # WHY COLUMN 0 (A-29). A top-level definition REPLACES the framework's function
 # for the whole suite; an indented or subshell-scoped one cannot. The standing
@@ -797,6 +814,20 @@ _tf_adoption_refusal() {
     "$suite" "$unadopted" "$_TF_LIB"
 }
 
+# _tf_adoption_wall <suite> — THE WALL'S ONE LINE (wave-27 T81). Prints
+# `adoption wall: <refusal>` and returns 1 when the rule above refuses <suite>;
+# prints nothing and returns 0 when it does not. Its two callers are tests/run.sh,
+# which asks it once per roster line before launching the suite, and this file at
+# load, which asks it of the suite that sourced it. One function, so a suite run
+# alone is refused in the words the runner would have used.
+_tf_adoption_wall() {
+  local refusal
+  refusal="$(_tf_adoption_refusal "${1:-}")"
+  [ -n "$refusal" ] || return 0
+  printf 'adoption wall: %s\n' "$refusal"
+  return 1
+}
+
 # The load-time derivation (AC-14). Runs once, here, for whatever suite sourced
 # this file. A suite the framework cannot read cannot be certified by it, so an
 # unreadable $0 is an error and not a silent skip.
@@ -851,4 +882,23 @@ _tf_require_derived_helpers() {
 case "${0##*/}" in
   run.sh) : ;;
   *)      _tf_require_derived_helpers "${0:-}" ;;
+esac
+
+# THE WALL AT LOAD (wave-27 T81). The adoption wall once lived in tests/run.sh
+# alone, so a suite typed at a prompt was never asked: a private `ok()` in a
+# suite was green at every hand-run and refused only in the full run. The suite
+# that sourced this file is now asked here, before its first row, and refused in
+# the runner's own line. ITS DOMAIN IS THE RUNNER'S: a roster suite is a
+# `*.test.sh`, so a driver script another suite writes to source this file for
+# its helpers (one that never calls `finish`, by design) is not a suite and is
+# not asked. It runs AFTER the derivation, so a suite that both shadows and calls
+# a vanished helper is told about the helper first; either way it never reaches a row.
+case "${0##*/}" in
+  run.sh) : ;;
+  *.test.sh)
+    _tf_wall_line="$(_tf_adoption_wall "$0")" || {
+      printf '%s\n' "$_tf_wall_line" >&2
+      exit 1
+    }
+    unset _tf_wall_line ;;
 esac

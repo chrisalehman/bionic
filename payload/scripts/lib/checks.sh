@@ -332,26 +332,48 @@ bionic_check_env_unwritten() {  # <row id: env:<KEY>>
 }
 
 # A shell bionic writes no rc for is not a question: the step says so and changes
-# nothing, so nothing must name it either.
+# nothing, so nothing must name it either. Nor is an rc whose markers do not pair
+# up, or a path that is no file (wave-27 T46): no setup step can repair either,
+# so doctor reports them with a fix line of their own and setup's plan does not
+# offer a step that would only refuse — the principles row's rule, below. Nor is a
+# block the user changed (wave-27 T77): it is theirs to edit, and setup never asks.
+# So the row fires on env.sh `rc_state`'s `no` and `stale` only.
 bionic_check_claude_proxy() {  # <row id>
-  rc_file >/dev/null 2>&1 || return 1
-  rc_get claude-proxy && return 1
-  return 0
+  case "$(rc_state claude-proxy 2>/dev/null)" in no|stale) return 0 ;; esac
+  return 1
 }
 
-# THE PRE-MARKER SPELLING, and the one place it is written down. setup.sh carried
-# it as `SETUP_ALIAS_PATTERN` until 1.5.1; the predicate that reads it lives here
-# now, and setup's removal step reads this same name rather than a second copy.
-# Declared BEFORE the function that uses it, so a caller who sources this file
-# under `set -u` and reaches the removal step first still finds it.
-BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
+# Fires on `absent` only: an offer nobody has taken. `edited` is the user's own
+# text and not a finding, so `setup --all` can come back clean with it in place
+# (wave-27 T40, review pass 9 finding 5); `malformed` is a fault no setup step
+# can repair, so doctor reports it with its own fix line and setup's plan does
+# not offer a step that would only refuse.
+bionic_check_working_principles() {  # <row id>
+  [ "$(principles_state)" = "absent" ]
+}
 
+# THE RETIRED BLOCK, AND ONLY THE BLOCK (wave-27 T75, A-orch-162). This predicate fires
+# when setup has a removal it can take: bionic's whole block, writable, standing as
+# one unit. A bare line, bionic's own included, is never taken out by any door, and a
+# row that fired on it would offer a removal that does nothing, forever.
 bionic_check_legacy_alias() {  # <row id>
-  local line settings
+  local line
   line="$(detect_zshrc_legacy_block)"
-  [ "${line#*present=}" = "yes" ] && return 0
-  settings="$(_detect_shell_rc)"
-  [ -f "$settings" ] && grep -qE "$BIONIC_LEGACY_ALIAS_PATTERN" "$settings" 2>/dev/null && return 0
+  # A block whose markers do not pair up, or an rc bionic cannot read as text, is
+  # no step setup can take (wave-27 T51): doctor names the fault and a hand fix,
+  # and the page does not offer a removal that would only refuse. Nor is a
+  # read-only rc (wave-27 T66, review pass 40 S5): doctor says it is read-only.
+  case "${line#*present=}" in
+    yes) markers_writable "$(_detect_shell_rc)" || return 1
+         # A block that stays as one unit (wave-27 T66, A-orch-119 (3)) is none.
+         case "$(markers_block_alone "$(_detect_shell_rc)" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")" in
+           alone=yes*) return 0 ;;
+         esac
+         return 1 ;;
+    malformed|not-a-file) return 1 ;;
+  esac
+  # A bare line, bionic's or not, is no step setup can take (wave-27 T75, A-orch-162):
+  # doctor names it for the user's hand.
   return 1
 }
 
@@ -732,6 +754,7 @@ _bionic_checks_build() {
   # predicate rather than a second reading of the same file.
   _bionic_checks_emit "legacy-permission-block" "legacy permission block" "bionic_check_legacy_permission_block" "setup" "legacy-permission-block" "$r_setup"
   _bionic_checks_emit "permission-mode" "default permission mode" "bionic_check_permission_mode" "setup" "permission-mode" "$r_setup"
+  _bionic_checks_emit "working-principles" "working principles" "bionic_check_working_principles" "setup" "working-principles" "$r_setup"
 
   _bionic_checks_emit "statusline-npx" "statusLine command" "bionic_check_statusline_npx" "setup" "tool:ccstatusline" "$r_setup"
 

@@ -272,6 +272,27 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
   ok "$1"
 }
 
+# THE ROW LIST, NOT THE WHOLE TEXT (wave-27 T37; review pass 42 S1, A-orch-112). The fill refusal
+# prints `bash <hooks dir>/session-poker.sh decline <ids> …`, so a must-not over the whole reason
+# also reads the checkout's path, and a tree whose path holds `T20` turned 69c red. A row that says
+# an id is NOT named reads the ids of the refusal's `decline` operand and matches one as a whole
+# word there. The list must be non-empty, so the absence is read off a real list.
+refusal_rows() {  # -> the ids the fill refusal's decline operand names, space-joined
+  reason_of | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
+    | sed 's/.* decline //' | tr ',' ' '
+}
+expect_block_unnamed() {  # <label> <id the refusal's row list must not hold>
+  local d rows; d=$(decision_of); rows=$(refusal_rows)
+  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
+    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
+  fi
+  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
+  case " $rows " in
+    *" $2 "*) no "$1" "the row list <$rows> names <$2>"; return ;;
+  esac
+  ok "$1"
+}
+
 LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
 
@@ -746,7 +767,7 @@ SD_MISSING="stand-down unanswered"
 # 48: neither stopped nor declined -> block, naming the agent and the way out.
 d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
 fire "$d"; expect_block "48a: an unanswered stand-down blocks, naming the agent" "W-ALPHA"
-fire "$d"; expect_block "48b: …and says what would answer it" "standdown-declined"
+fire "$d"; expect_block "48b: …and says what would answer it: the hold verb, and no line in the reply (wave-27 T34)" "session-poker.sh hold W-ALPHA" "standdown-declined"
 fire "$d"; expect_block "48c: …and says the gate blocks once" "this gate blocks once"
 
 # 49: the TaskStop answers it.
@@ -1010,7 +1031,7 @@ ledger_roster "$d" acked T1
 u_prompt "$d" "merge the two landed trees and tell me where we are"
 fire "$d"; expect_block "59a: a turn ending on a fillable gap is refused, naming the first row" "T2"
 fire "$d"; expect_block "59b: …and the second — named, not counted" "T3"
-fire "$d"; expect_block "59c: …and says what answers it" "fill-declined"
+fire "$d"; expect_block "59c: …and says what answers it: the decline verb (wave-27 T34)" "session-poker.sh decline T2,T3 'why they wait'"
 
 # 60: THE DISCHARGE IS THE ONE THE TICK-PRINTED DUTY ALREADY HAD. One line in the record,
 # and the invariant is answered for this turn.
@@ -1185,7 +1206,7 @@ ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 u_prompt "$d" "anything else to start?"
-fire "$d"; expect_block "64a3d: a name written three times occupies once — one row named" "T2" "T3"
+fire "$d"; expect_block "64a3d: a name written three times occupies once — one row named" "T2" " T3"
 
 # 64a4: AC-5.1's own shape — a roster with two open rows and a plan with no `active` row:
 # gap = rung − 2. On the loaded ring (rung 2) that is zero, so nothing is owed…
@@ -1201,7 +1222,7 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W1
 ledger_roster "$d" acked W2
 u_prompt "$d" "anything else ready?"
-fire "$d"; expect_block "64a5: one open roster row against rung 2 names one row" "T2" "T3"
+fire "$d"; expect_block "64a5: one open roster row against rung 2 names one row" "T2" " T3"
 export BIONIC_PRESSURE_RING="$CLEAR_RING"
 
 # …and one row in flight leaves room, so the same table with seven refuses.
@@ -1384,6 +1405,16 @@ u_tick "$d"; both_duties "$d"; sd_stood "$d" W-BETA; u_tick_out "$d" "$(sd_line 
 fire "$d"; expect_block "58c: a gap and a stand-down together name the row" "T2"
 fire "$d"; expect_block "58d: …and the agent, in the same refusal" "W-BETA"
 
+# THE ROWS' OWN SHAPE FROM A PATH THAT HOLDS THEIR IDS (wave-27 T37; review pass 42 S1). A copy of
+# this tree's hooks and library under a directory named for T20, T8 and T13, fired as `fire` does.
+PD_IDDIR="$(mktemp -d)/w27-T20-T8-T13"
+mkdir -p "$PD_IDDIR/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$PD_IDDIR/hooks" && cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$PD_IDDIR/payload/scripts"
+pd_idhook_fire() {  # <project> — `fire` with the copied hook
+  local keep="$HOOK"; HOOK="$PD_IDDIR/hooks/stop.sh"; fire "$1"; HOOK="$keep"
+}
+require_helpers refusal_rows expect_block_unnamed pd_idhook_fire
+
 # 69: THE RUNG, NOT THE CEILING (Step-6 review R1, wave-18 T2b). Three rows are ready
 # (T2, T3, T20) against a declared ceiling of 8 — the pre-fix wall would have named all
 # three. LOADED_RING pins a critical-band sample (free_pct=10, inside [0, 12)) against
@@ -1396,7 +1427,9 @@ u_prompt "$d" "anything else ready?"
 export BIONIC_PRESSURE_RING="$LOADED_RING" BIONIC_NOW_EPOCH="1700000000"
 fire "$d"; expect_block "69a: a rung pinned below the ceiling caps the refusal at rung - open" "T2"
 fire "$d"; expect_block "69b: …and the second row, at the rung's width" "T3"
-fire "$d"; expect_block "69c: …and never the ceiling's wider count — T20 stays unnamed" "fill-declined" "T20"
+fire "$d"; expect_block_unnamed "69c: …and never the ceiling's wider count — T20 stays unnamed" "T20"
+pd_idhook_fire "$d"; expect_block_unnamed "69c2: …the same, fired from a hooks directory whose path holds T20, T8 and T13" "T20"
+expect_contains "69c3: …whose refusal carries that path (so a whole-text must-not would read T20)" "$PD_IDDIR" "$(reason_of)"
 export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
 
 # 69d: THE PAIRED CASE, rung = ceiling. The same three-ready-row table, back on the clear
@@ -1415,7 +1448,8 @@ LEDGER_INTEGRATE_8='| T8 | 8 | integrate | the merge, a gate act | implementor |
 d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_REVIEW_6" "$LEDGER_INTEGRATE_8")
 u_prompt "$d" "how is Verify going?"
 fire "$d"; expect_block "69e: AC-5.1 at current: 5 a ready Step-6 row left undispatched is refused, naming it" "T6"
-fire "$d"; expect_block "69f: Δ6 …and the Step-8 integrate row is never named at Step 5" "fill-declined" "T8"
+fire "$d"; expect_block_unnamed "69f: Δ6 …and the Step-8 integrate row is never named at Step 5" "T8"
+pd_idhook_fire "$d"; expect_block_unnamed "69f2: …the same, fired from the hooks directory whose path holds T8" "T8"
 d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_INTEGRATE_8")
 u_prompt "$d" "how is Verify going?"
 fire "$d"; expect_allow "69g: Δ6 a ledger whose only pending row is a gate act ahead of its step is not a gap"
@@ -1496,7 +1530,8 @@ fire "$d"; expect_allow "69h: C3 at current: 5 a ledger whose only pending row i
 d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_REVIEW_6" "$LEDGER_RELEASE_7")
 u_prompt "$d" "how is Verify going?"
 fire "$d"; expect_block "69i: …beside a ready Step-6 review the duty names the review" "T6"
-fire "$d"; expect_block "69j: …and never the held release" "fill-declined" "T13"
+fire "$d"; expect_block_unnamed "69j: …and never the held release" "T13"
+pd_idhook_fire "$d"; expect_block_unnamed "69j2: …the same, fired from the hooks directory whose path holds T13" "T13"
 d=$(make_env_ledger 7 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_RELEASE_7")
 u_prompt "$d" "where are we?"
 fire "$d"; expect_block "69k: at current: 7 the release is due, and an undispatched release is refused, naming it" "T13"
@@ -2061,6 +2096,15 @@ expect_contains "C0f: …a FILL asks for the dispatch, and says the launch recor
   "its launch records the row active and its ledger line" "$QT_PROMPT"
 expect_absent "C0g: …and no longer asks the orchestrator to ledger it by hand" "(and ledger it active in ## Tasks)" "$QT_PROMPT"
 expect_absent "C0d: …and the unconditional continue is gone" "Then continue the run toward its goal until a wall." "$QT_PROMPT"
+# C0h (wave-27 T34; REQ-15 AC-15.2; D24): a FILL the turn does not fill is answered by a verb that
+# records the decline on disk, never by a line in the reply the user reads. The version moves, so a
+# Patrol armed on the old prompt is asked to re-arm.
+expect_regex "C0h: AC-15.2 the Patrol prompt is version 6" "^bionic-patrol session=${SID:0:8} v=6 — " "$QT_PROMPT"
+expect_contains "C0h2: …a FILL not filled is answered by the decline verb, its reason a quoted placeholder" \
+  "session-poker.sh decline IDS 'why they wait'" "$QT_PROMPT"
+expect_absent "C0h3: …and the prompt tells the model to write no fill-declined: line" "fill-declined" "$QT_PROMPT"
+expect_absent "C0h4: …nor a standdown-declined: line" "standdown-declined" "$QT_PROMPT"
+expect_contains "C0h5: …the stand-down answer is the hold verb" "session-poker.sh hold NAME 'why it stays up'" "$QT_PROMPT"
 
 # C1: one open row whose progress file goes quiet between two ticks. The second tick prints in
 # full (the row is quieter than its cadence) and owes nothing: no status moved, nothing became

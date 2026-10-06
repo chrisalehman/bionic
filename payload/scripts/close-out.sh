@@ -200,6 +200,13 @@ co_version() {
 }
 VERSION="$(co_version)"
 
+# RELEASE -> the version this run released: the plan's own `release:` frontmatter field, or
+# nothing (wave-27 T4, D14). NEVER `VERSION`. The installed tool attests the tail; it is not
+# what shipped, and in a consumer project it is not even the same product (wave-26 had its
+# delivered line and epic row corrected by hand to the release). With no field, the delivered
+# line, the epic row and the continuation header name no version at all.
+RELEASE="$(plan_frontmatter_get "$PLAN" release)"
+
 # ─── The plan as a document ──────────────────────────────────────────────────
 
 # sdlc_section -> the `## SDLC State` section, line endings normalized, terminated by the
@@ -446,15 +453,16 @@ tmp_count() {
 # stdout, or nothing at all when the entry is not session-keyed (an ephemera file, or
 # anything shaped outside `PATROL_STATE_CLASSES`). One definition, walking the SAME
 # class list `patrol_session_state_files` builds its own paths from, so a class added
-# there is recognised here without a second list to keep in step.
+# there is recognised here without a second list to keep in step. The owner is the name
+# after `<class>-` up to its first dot, lib/patrol.sh's rule for every class (wave-27 T68): a
+# session id holds no dot, so a per-start `start-clock-<sid>.<agent id>.state` is <sid>'s.
 _co_tmp_owner() {
   local base="$1" class owner
   for class in $PATROL_STATE_CLASSES; do
     case "$base" in
       "$class"-*.state|"$class"-*.state"$PATROL_STATE_ARMED_SUFFIX")
         owner="${base#"$class"-}"
-        owner="${owner%"$PATROL_STATE_ARMED_SUFFIX"}"
-        owner="${owner%.state}"
+        owner="${owner%%.*}"
         [ -n "$owner" ] && printf '%s\n' "$owner"
         return 0
         ;;
@@ -537,7 +545,7 @@ continuation_template() {
   local sha
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   cat <<CONT_TEMPLATE
-# continuation — $WAVE_SLUG (bionic $VERSION)
+# continuation — $WAVE_SLUG${RELEASE:+ ($RELEASE)}
 
 Closed $NOW. $INTEGRATION at ${sha:-<fill: SHA>}. Wave branch \`$WORKING\` merged into
 \`$INTEGRATION\`: <fill: task count> tasks, every one RED→GREEN; <fill: floor result>.
@@ -636,11 +644,12 @@ epic_row() {
   # from the integration branch, so the integration head is a fact this script holds. The
   # ADR cell is read from the spec's `adrs:` line; it stays `<fill: ADRs>` only when neither
   # the spec nor the plan names one, because "none shipped" and "not recorded" look the same
-  # on disk.
+  # on disk. The version cell is the plan's `release:`, and `—` (the table's own empty cell)
+  # when the plan names none.
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   adrs="$(epic_adrs)"
   printf '| %s | %s | `%s` | `%s`, `.requirements.md` | %s | %s, %s @ %s |\n' \
-    "$WAVE_NUM" "$VERSION" "${PLAN##*/}" "$spec" "${adrs:-<fill: ADRs>}" "$TODAY" "$INTEGRATION" "${sha:-<fill: SHA>}"
+    "$WAVE_NUM" "${RELEASE:-—}" "${PLAN##*/}" "$spec" "${adrs:-<fill: ADRs>}" "$TODAY" "$INTEGRATION" "${sha:-<fill: SHA>}"
 }
 
 epic_has_row() {
@@ -701,7 +710,7 @@ STEP8
 
 step9_block() {
   cat <<STEP9
-- Step 9: delivered: $NOW $WAVE_SLUG $VERSION — the Step 8/9 tail was performed by close-out.sh and attested against the commit gate; continuation at $CONT_REL
+- Step 9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE} — the Step 8/9 tail was performed by close-out.sh and attested against the commit gate; continuation at $CONT_REL
   attested-by: close-out.sh $VERSION
 STEP9
 }
@@ -733,10 +742,17 @@ HANDOFF
 # `Step N:` line or the next line starting at column zero. Anything else and a second
 # close would leave the old block's keys underneath the new one, where `block_get`'s
 # first-match rule would quietly prefer them.
+#
+# THE STEP 9 LINE IS WRITTEN HERE WHEN THE PLAN HAS NONE (wave-27 T4, D14): `- Step 9:
+# (pending)`, right under the Step-8 block phase 8 writes, for phase 9 to replace. Phase 8
+# and not earlier, because nothing touches the plan before the pre-flight passes, and the
+# pre-flight writes phase 8 into its scratch copy, so the gate judges the line too.
 write_plan_blocks() {
   local phase="$1" target="${2:-$PLAN}"
-  local tmp="$target.close-out.$$"
-  CO_PHASE="$phase" CO_STEP8="$(step8_block)" CO_STEP9="$(step9_block)" CO_HANDOFF="$(handoff_block)" awk '
+  local tmp="$target.close-out.$$" step8
+  step8="$(step8_block)"
+  step9_present "$target" || step8="$step8"$'\n''- Step 9: (pending)'
+  CO_PHASE="$phase" CO_STEP8="$step8" CO_STEP9="$(step9_block)" CO_HANDOFF="$(handoff_block)" awk '
     /^## / {
       insdlc = ($0 ~ /^## SDLC State/)
       skip = 0
@@ -770,6 +786,7 @@ write_plan_blocks() {
   if [ "$phase" = 8 ]; then
     grep -qE '^- Step 8: CLOSED ' "$target" || _co_refuse "the Step-8 line did not land in $target"
     grep -qE '^  attested-by: close-out.sh ' "$target" || _co_refuse "the attestation did not land in $target"
+    step9_present "$target" || _co_refuse "the Step 9 line did not land in $target"
     return 0
   fi
 
@@ -880,23 +897,66 @@ preview_block_lines() {
   TMP_LINE="$(tmp_count) entries under $TMP_DIR (not yet wiped)"
 }
 
-# presence_missing -> the first thing a later act needs and the files do not carry, or
-# nothing. Both used to be readbacks that fired AFTER the destructive acts (critic4 Q-1):
-# phase 9 replaces a `- Step 9:` line it never finds and then refuses because none landed,
-# and act 6 appends to a `| wave |` table it never finds and then refuses because no row
-# landed. Each is known before the first act, so each is asked here, by presence alone.
-presence_missing() {
-  if ! awk '
+# step9_present <file> -> 0 when `## SDLC State` carries a `Step 9:` line.
+step9_present() {
+  awk '
     /^## / { insdlc = ($0 ~ /^## SDLC State/) }
     insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:/ { found = 1 }
     END { exit !found }
-  ' "$PLAN" 2>/dev/null; then
-    printf 'no Step 9 line in ## SDLC State of %s (add `- Step 9: (pending)`)' "$PLAN"
-    return 0
-  fi
+  ' "$1" 2>/dev/null
+}
+
+# presence_missing -> the first thing a later act needs and the files do not carry, or
+# nothing. It used to be a readback that fired AFTER the destructive acts (critic4 Q-1): act
+# 6 appends to a `| wave |` table it never finds and then refuses because no row landed.
+# That is known before the first act, so it is asked here, by presence alone.
+#
+# A MISSING STEP 9 LINE IS NO LONGER ASKED FOR (wave-27 T4, D14). It was, and the line it
+# asked for is one `session-poker.sh step-line 9` refuses as close-out's to write, so a run
+# closed by its tools alone could never get past here. Phase 8 writes it (write_plan_blocks).
+presence_missing() {
+  # A RELEASE THAT WOULD SPLIT A CELL (wave-27 T14; A-orch-28). The epic row carries `release:` in
+  # its version cell, and a `|` in it gives the row a cell more than its header, so it is refused
+  # here, before any act, as the plan verbs refuse a pipe in a cell.
+  case "$RELEASE" in
+    *'|'*) printf 'the release: field of the plan holds a | (%s), which would split the version cell of the epic row; write the release without one' "$RELEASE"; return 0 ;;
+  esac
   if [ -f "$EPIC_PLAN" ] && [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
     printf 'no | wave | table with a shipped column in %s for the wave %s row to be written into' "${EPIC_PLAN##*/}" "$WAVE_NUM"
   fi
+  return 0
+}
+
+# ─── The facts the run owes ──────────────────────────────────────────────────
+#
+# THE RUN IS CLOSED ON THE JUDGE (wave-27 T14; D3, AC-7.1). `session-poker.sh current 8` admits
+# Step 8 only when lib/proof.sh `facts_state` says every fact the run owes holds at the working
+# head; `run` and `check` ask the same function of the same head, the working branch's, and refuse
+# the same way, so a fix landed after `current 8` is read before the tail runs. FACTS_RC is the
+# judge's rc (0 covered, 1 not, 2 the plan cannot be dealt, 9 the judge could not be asked),
+# FACTS_HEAD the head judged, FACTS_LINES the owed lines that do not hold, FACTS_WHY the sentence.
+FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""
+facts_judge() {
+  local out err
+  if ! declare -F facts_state >/dev/null 2>&1; then
+    FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
+    return 0
+  fi
+  FACTS_HEAD="$(git -C "$ROOT" rev-parse --verify -q "${WORKING}^{commit}" 2>/dev/null)"
+  if [ -z "$FACTS_HEAD" ]; then
+    FACTS_WHY="the plan's working-branch '$WORKING' is not a branch in $ROOT, so there is no head to judge the facts the run owes at"
+    return 0
+  fi
+  out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?
+  err="$(cat "$TMP_DIR/.facts-judge.$$" 2>/dev/null)"; rm -f "$TMP_DIR/.facts-judge.$$"
+  case "$FACTS_RC" in
+    0) FACTS_WHY="" ;;
+    2) FACTS_LINES="$(printf '%s\n%s' "$err" "$out" | awk 'NF')"
+       FACTS_WHY="the judge could not deal this plan (facts_state exit 2), so the facts the run owes cannot be judged; what the judge said is printed with this line" ;;
+    *) FACTS_RC=1
+       FACTS_LINES="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')"
+       FACTS_WHY="the facts the run owes do not all hold at the working head $FACTS_HEAD (facts_state); record each with proof-add, or have the user waive a question" ;;
+  esac
   return 0
 }
 
@@ -990,6 +1050,14 @@ do_check() {
   fi
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || say "presence: WOULD REFUSE — $MISSING"
+  facts_judge
+  if [ "$FACTS_RC" -eq 0 ]; then
+    say "facts: every fact the run owes holds at $FACTS_HEAD"
+  else
+    say "facts: WOULD REFUSE — $FACTS_WHY"
+    [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
+  fi
+  step9_present "$PLAN" || say 'step9: no Step 9 line in ## SDLC State — run writes `- Step 9: (pending)` with the Step-8 block'
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
@@ -1084,15 +1152,22 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
-  # NOTHING IS TOUCHED UNTIL ALL FIVE OF THESE PASS (critic3 P-1, P-3), in this order: the
-  # step `run` closes, the two presence checks (a Step-9 line, a `| wave |` table), the merge verdict (act 1 is a readback and touches nothing), the
-  # branch census, and the gate's answer about the plan `run` will write. Any refusal leaves
+  # NOTHING IS TOUCHED UNTIL ALL SIX OF THESE PASS (critic3 P-1, P-3), in this order: the
+  # step `run` closes, the presence check (a `| wave |` table, a release with no `|`), the merge
+  # verdict (act 1 is a readback and touches nothing), the
+  # branch census, the facts the run owes (`facts_judge`, wave-27 T14), and the gate's answer about
+  # the plan `run` will write. Any refusal leaves
   # every branch, every tmp entry, the plan and the epic plan exactly as they were.
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_refuse "$MISSING — nothing was done"
   act_merge
   refuse_unreached
+  facts_judge
+  if [ "$FACTS_RC" -ne 0 ]; then
+    [ -n "$FACTS_LINES" ] && printf '%s\n' "$FACTS_LINES"
+    _co_refuse "$FACTS_WHY — nothing was done"
+  fi
   gate_preflight
   [ "$PREFLIGHT_RC" -eq 9 ] && _co_refuse "$PREFLIGHT_LINE — nothing was done"
   if [ "$PREFLIGHT_RC" -ne 0 ]; then
@@ -1116,7 +1191,7 @@ do_run() {
   gate_dry_run
   write_plan_blocks 9
                     say "handoff: rewritten to the closed form (resume point NONE)"
-                    say "step9: delivered: $NOW $WAVE_SLUG $VERSION"
+                    say "step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}"
   act_archive
   insert_archived
                     say "archived: $ARCHIVED_LINE"

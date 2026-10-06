@@ -41,6 +41,9 @@ Subprocess claim: the backgrounded process main will look for.
 Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
+Questions: yours to answer.
+Lands-red: the one suite you may land red.
+Red-evidence: a file holding head: <40-hex>, your head.
 Deliverable-waiver: report by message, not a file.
 <!-- BRIEF-SCAFFOLD-READER-END -->
 
