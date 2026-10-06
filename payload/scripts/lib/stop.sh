@@ -2270,7 +2270,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
   _ST_RECONCILE=""
-  local tr fold mark rest ready count want cap owed open_names FILL_ROSTER FILL_ACKS FILL_OPEN
+  local tr fold mark rest ready count want cap owed FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at rvat led standing gap rcount rgap slot
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
@@ -2481,8 +2481,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # THE WRITERS AMONG THEM (wave-24 T13, D11): `budget_open_writers` (lib/roster.sh) leaves a
   # read-only role out, as the dispatch wall and the tick's `TICK_OCCUPIED` do, so the three
   # readers of the open set count the same slots.
-  open_names="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID")"
-  FILL_OPEN="$(printf '%s\n' "$open_names" | budget_open_writers "$FILL_ROSTER")"
+  FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | budget_open_writers "$FILL_ROSTER")"
   case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
   _ST_OPEN="$FILL_OPEN"
 
@@ -2534,7 +2533,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
 $ready
 ST_WANT
   cap="$(fill_cap "$_ST_PLAN")"
-  owed="$(printf '%s\n' "$open_names" | fill_gate_owed "$FILL_ROSTER" "$BIONIC_SID")"
+  owed="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | fill_gate_owed "$FILL_ROSTER" "$BIONIC_SID")"
   _ST_WIDTH="$(fill_gate_width "$_ST_OPEN" "$owed" "$want" "$cap")"
   case "$_ST_WIDTH" in ''|*[!0-9]*) _ST_WIDTH="$_ST_OPEN" ;; esac
   _ST_FREE=$(( _ST_WIDTH - _ST_OPEN ))
