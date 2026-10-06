@@ -5010,7 +5010,7 @@ W27_CHECKS_DIR="${REPO}/payload/context"
 W27_STRUCT="${W27_CHECKS_DIR}/checks-structure.md"
 W27_QUESTIONS="evidence adversarial structure"
 W27_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction"
-W27_CAP=4500
+W27_CAP=4650  # 4,500 until wave-28 T48 (A-orch-43): the structure checks say when a check is FAIL
 W27_WHOLE='this is not a second read of each piece'
 # w27_ids_in <file> -> the structure check ids the file names as whole words, one per line.
 w27_ids_in() {
@@ -5051,12 +5051,12 @@ for _q in $W27_QUESTIONS; do
     "$(w27_form_want "$_q")" "$(w27_record_form "$_f")"
 done
 # W27-T8bm: the cap verdict T8b reads, at the boundary. The sizes are the Interfaces table's
-# 4,500 bytes typed here, not read from W27_CAP, so a raised cap or a removed check goes red.
+# 4,650 bytes typed here, not read from W27_CAP, so a raised cap or a removed check goes red.
 W27_AT_CAP="$TMP/w27-at-cap.md"; W27_PAST_CAP="$TMP/w27-past-cap.md"
-head -c 4500 /dev/zero | tr '\0' 'x' > "$W27_AT_CAP"
-head -c 4501 /dev/zero | tr '\0' 'x' > "$W27_PAST_CAP"
-expect_eq "W27-T8bm precondition: a file of exactly 4,500 bytes reads within the cap" "within" "$(w27_cap_verdict "$W27_AT_CAP")"
-expect_eq "W27-T8bm: a file of 4,501 bytes, one past the cap, is caught" "over" "$(w27_cap_verdict "$W27_PAST_CAP")"
+head -c 4650 /dev/zero | tr '\0' 'x' > "$W27_AT_CAP"
+head -c 4651 /dev/zero | tr '\0' 'x' > "$W27_PAST_CAP"
+expect_eq "W27-T8bm precondition: a file of exactly 4,650 bytes reads within the cap" "within" "$(w27_cap_verdict "$W27_AT_CAP")"
+expect_eq "W27-T8bm: a file of 4,651 bytes, one past the cap, is caught" "over" "$(w27_cap_verdict "$W27_PAST_CAP")"
 # W27-T8dm: the record form cut, reordered, or followed by another section is caught.
 W27_FORM_CUT="$TMP/w27-form-cut.md"; W27_FORM_SWAP="$TMP/w27-form-swap.md"; W27_FORM_TAIL="$TMP/w27-form-tail.md"
 anchor "$W27_STRUCT" 'scope: <piece|whole>' 1
@@ -5985,5 +5985,58 @@ W28S_DOC9="$TMP/w28s-step6.md"
 sed 's/<what is not known>/<what is unknown>/' "$STEP6_MD" > "$W28S_DOC9" 2>/dev/null
 expect_nonempty "W28-S9m precondition: the doctored steps/6.md still gives finding lines" "$(w28s_finding_form "$W28S_DOC9")"
 expect_ne "W28-S9m: a steps/6.md whose unsure: form drifts is caught" "$W28S_FORM" "$(w28s_finding_form "$W28S_DOC9")"
+
+# ============================================================
+section "§W28-T15 (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.6, AC-8.8; D19): the reading record's grammar row names the finding lines"
+# ============================================================
+# The `reading record` row of operational-rules.md's grammar table is the hand-written statement
+# of what `proof_reading` (lib/proof.sh) reads. Since T15 a reader pushed the severity scale also
+# writes its findings, and the row says so: the finding lines' shapes, that a record writes no
+# priority, that the result is derived, the plan lines registration writes, and that a reader not
+# pushed the scale is read as before.
+W28_T15_ROW="$(/usr/bin/grep -m1 '^| reading record |' "$OPRULES")"
+expect_nonempty "W28-T15a: operational-rules.md carries the reading record row (the extractor reads it)" "$W28_T15_ROW"
+expect_contains "W28-T15a2: …which still names the 1.12.0 keys" '`reviewed: <a>..<b>`, `question: <q>`' "$W28_T15_ROW"
+for w28_t15_pin in \
+  'the reader'"'"'s roster row carries `severity` in `pushed=`' \
+  '`findings: <n>`' \
+  '`finding: <n> <S1\|S2\|S3\|S4> <on\|off> <path>:<line>\|- <title>`' \
+  '`shown: <n> <command>`' \
+  '`unsure: <n> <what is not known>`' \
+  'writes no priority' \
+  'a finding to fix gives `fail`, any other finding `flag`, none `pass`' \
+  '`deferred: <record>#<n> <S> <reach> "<title>"`' \
+  '`check: <record>#<n> <S> <reach> "<title>"`' \
+  'a reader not pushed the scale is read as before'; do
+  expect_contains "W28-T15b: the reading record row says $w28_t15_pin" "$w28_t15_pin" "$W28_T15_ROW"
+done
+
+# ============================================================
+section "§W28-C (wave-28 T48; REQ-8, D19, D20): the structure checks say a check is FAIL only for a finding the table sends to fix"
+# ============================================================
+# WHAT THIS OWNS. A check's answer and the scale's table give one result. proof.sh's F6 rule
+# refuses `result: flag` beside a FAIL check and `pass` beside a FLAG, so the checks files say
+# when a check is FAIL: only for a finding the table sends to fix. Pinned here: the sentence is in
+# the rendered structure checks, once in its block, and they no longer say a check fails whenever
+# its case holds. Structure only (A-orch-43): the adversarial reader writes no `check:` line.
+# Each absence sits beside a positive on the same extractor, and a doctored copy proves each arm
+# goes red. HERMETIC: committed finals by path.
+W28C_SENTENCE='A check answers FAIL only when its failing case holds for a finding the table in `severity.md` sends to fix, FLAG when it holds for a finding that table defers or notes, or on a doubt you write as a finding, and PASS otherwise.'
+W28C_OLD='FAIL (its failing case holds; name the file and line)'
+# w28c_count <file> -> how many times the file's flattened text carries the sentence.
+w28c_count() { _flatten "$1" | /usr/bin/grep -oF -- "$W28C_SENTENCE" | /usr/bin/grep -c .; }
+expect_nonempty "W28-C1: checks-structure.md says when a check is FAIL, by the table" \
+  "$(w26_hits "$W28C_SENTENCE" "${REPO}/payload/context/checks-structure.md")"
+expect_eq "W28-C2: …and its block says it once" "1" "$(w28c_count "${BLOCK_DIR}/checks-structure.md")"
+W28C_DOC2="$(w26_doctor "${BLOCK_DIR}/checks-structure.md" "$W28C_SENTENCE")"
+expect_eq "W28-C2m: a block that says it twice is caught" "2" "$(w28c_count "$W28C_DOC2")"
+W28C_DOC1="$TMP/w28c-cut.md"
+sed 's/A check answers FAIL only/A check is FAIL only/' "${REPO}/payload/context/checks-structure.md" > "$W28C_DOC1" 2>/dev/null
+expect_contains "W28-C1m precondition: the reworded copy keeps the rest of the file" "## The record" "$(cat "$W28C_DOC1")"
+expect_eq "W28-C1m: a structure file with the sentence reworded is caught" "" "$(w26_hits "$W28C_SENTENCE" "$W28C_DOC1")"
+expect_eq "W28-C3: the structure checks no longer say FAIL whenever the case holds" "" \
+  "$(w26_hits "$W28C_OLD" "${REPO}/payload/context/checks-structure.md")"
+W28C_DOC3="$(w26_doctor "${REPO}/payload/context/checks-structure.md" "$W28C_OLD")"
+expect_nonempty "W28-C3m: a structure file that says it again is caught" "$(w26_hits "$W28C_OLD" "$W28C_DOC3")"
 
 finish

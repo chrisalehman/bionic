@@ -3383,7 +3383,7 @@ section "Section 20: §PUSH-CAP — every string the start pushes fits what the 
 # THE ROW THAT WOULD HAVE CAUGHT THE DEFECT: every role, rigor and scale `facts_owed` deals a
 # reading to, the reader's row as the dispatch wall writes it, the REAL hook driven once per
 # registration as hooks/hooks.json registers it, against the shipped context and against a copy
-# whose three checks files sit exactly at their 4,500-byte cap. It replaces CK-b1's former
+# whose three checks files sit exactly at their 4,650-byte cap. It replaces CK-b1's former
 # expectation of one 12,679-character string.
 #
 # FIXTURE FIDELITY: the dealing is the production `facts_owed` (payload/scripts/lib/proof.sh),
@@ -3452,19 +3452,20 @@ expect_ne "PC-a0 every deal was driven and its strings counted (not vacuous)" "0
 expect_empty "PC-a1 shipped context: every dealt string is one line, its own file, at most ${PC_MAX} and under 10,000 characters" "$PC_BAD"
 printf '  shipped context, characters per string:%s\n' "$PC_TABLE"
 
-# THE 4,500-BYTE FIXTURE: the cap D5 sets on a checks file, every checks file exactly at it.
-PC4_PLUG="$SANDBOX/pc-4500"
+# THE 4,650-BYTE FIXTURE: the cap on a checks file (D5's 4,500, raised by wave-28 T48, A-orch-43; the
+# docs-pins W27_CAP), every checks file exactly at it.
+PC4_PLUG="$SANDBOX/pc-cap"
 ck_plugin "$PC4_PLUG"
 for _q in evidence adversarial structure; do
   _sz=$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')
-  [ "$_sz" -lt 4500 ] && head -c "$((4500 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
-  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,500 bytes" "4500" \
+  [ "$_sz" -lt 4650 ] && head -c "$((4650 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
+  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,650 bytes" "4650" \
     "$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')"
 done
 pc_every_deal "$PC4_PLUG" "$PC4_PLUG/context" f
 expect_ne "PC-b1 every deal was driven against the fixture (not vacuous)" "0" "$PC_N"
-expect_empty "PC-b2 4,500-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
-printf '  4,500-byte checks files, characters per string:%s\n' "$PC_TABLE"
+expect_empty "PC-b2 4,650-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
+printf '  4,650-byte checks files, characters per string:%s\n' "$PC_TABLE"
 
 # OVER THE CAP: a checks file grown to 9,600 characters, a tested critic (all three questions).
 PO_PLUG="$SANDBOX/pc-over"
@@ -4132,5 +4133,46 @@ pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKSE_TR" "$CKSE_REPO" b
 expect_eq "CKS-u1 an unplaced start whose candidates agree on structure is pushed the scale" \
   "$(cks_sev_want)" "$(pc_ctx severity)"
 expect_eq "CKS-u2 …and placed on no row" "0" "$(grep -c 'status=identified' "$CKSE_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# ---- the launch call's return places it (ARM 2, wave-28 T48; read-adversarial-p7 finding 2) ----
+# The confirmed row ARM 2 appends becomes the id's last row, the one a reader's record is held
+# to, so it says what the start pushed, through the same helper the identified row uses.
+# fails-when: the confirmed row of a reader pushed the scale carries no `pushed=`, or a writer's
+# confirmed row carries one.
+CKSE_ROSTER="$CKSE_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_agent_post "$SID_A" "$CKSE_TR" "$CKSE_REPO" E1 a00000000cksunp7 toolu_01CKSE1)"
+CKSE_CONF=$(grep 'status=confirmed' "$CKSE_ROSTER" | tail -1)
+expect_eq "CKS-c1 ARM 2 places the unplaced start on its launch (the positive on its row)" \
+  "a00000000cksunp7" "$(sj_field "$CKSE_CONF" agent_id)"
+expect_eq "CKS-c2 …and the placed row says what the start pushed" \
+  "checks-structure,severity" "$(sj_field "$CKSE_CONF" pushed)"
+cks_reader "$PC_REPO_ROOT" cksconfrev w-rev reviewer structure a00000000cksrev8
+CKSC_REPO="$SANDBOX/cksconfrev/repo"; CKSC_TR="$SANDBOX/cksconfrev/home/.claude/projects/p-cksconfrev/$SID_A.jsonl"
+run_rec "$(mk_agent_post "$SID_A" "$CKSC_TR" "$CKSC_REPO" w-rev a00000000cksrev8 toolu_01a00000000cksrev8)"
+CKSC_CONF=$(grep 'status=confirmed' "$CKSC_REPO/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+expect_eq "CKS-c3 a call that returns after the start keeps the identified row's pushed= on the id's last row" \
+  "$(sj_field "$CKS_ROW" pushed)" "$(sj_field "$CKSC_CONF" pushed)"
+cks_reader "$PC_REPO_ROOT" cksconfwrt w-imp implementor "" a00000000ckswrt9
+CKSW_REPO="$SANDBOX/cksconfwrt/repo"; CKSW_TR="$SANDBOX/cksconfwrt/home/.claude/projects/p-cksconfwrt/$SID_A.jsonl"
+run_rec "$(mk_agent_post "$SID_A" "$CKSW_TR" "$CKSW_REPO" w-imp a00000000ckswrt9 toolu_01a00000000ckswrt9)"
+CKSW_CONF=$(grep 'status=confirmed' "$CKSW_REPO/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+expect_eq "CKS-c4 a writer's launch is confirmed (the positive on its row)" "w-imp" "$(sj_field "$CKSW_CONF" name)"
+expect_absent "CKS-c5 …and its confirmed row carries no pushed=" "|pushed=" "$CKSW_CONF"
+# The mutation: the same placing with ARM 2's pushed= write cut from a copy of the hook.
+CKSM_PLUG="$SANDBOX/cks-arm2-mutant"
+ck_plugin "$CKSM_PLUG"
+CKSM_HOOK="$CKSM_PLUG/hooks/execution-recorder.sh"
+CKSM_CUT='  COMPLETED=$(pushed_onto "$COMPLETED")'
+expect_eq "CKS-cm precondition: the hook carries ARM 2's pushed= write once" "1" "$(grep -cxF -- "$CKSM_CUT" "$CKSM_HOOK")"
+grep -vxF -- "$CKSM_CUT" "$REC" > "$CKSM_HOOK"
+IFS='|' read -r CKSM_REPO CKSM_TR _ _ <<< "$(make_world cksarm2mut yes)"
+sj_intended "$CKSM_REPO" M1 toolu_01CKSM1 bionic:critic suites_allowed=none questions=structure
+sj_intended "$CKSM_REPO" M2 toolu_01CKSM2 bionic:critic suites_allowed=none questions=structure
+pc_start "$CKSM_PLUG" "$(mk_subagent_start "$SID_A" "$CKSM_TR" "$CKSM_REPO" bionic:critic a00000000cksmut1)"
+REC="$CKSM_HOOK" run_rec "$(mk_agent_post "$SID_A" "$CKSM_TR" "$CKSM_REPO" M1 a00000000cksmut1 toolu_01CKSM1)"
+CKSM_CONF=$(grep 'status=confirmed' "$CKSM_REPO/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+expect_eq "CKS-cm1 precondition: the mutant still places the start" "a00000000cksmut1" "$(sj_field "$CKSM_CONF" agent_id)"
+expect_absent "CKS-cm2 …and without the write its placed row says nothing was pushed: CKS-c2 is what catches it" \
+  "|pushed=" "$CKSM_CONF"
 
 finish
