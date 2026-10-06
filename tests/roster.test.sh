@@ -565,7 +565,7 @@ expect_eq "R15c …and after lands_red= and red_evidence=, the keys before it un
 # THE COPY SHAPE. `row_copy_args` and `adopt_write_row` hand a row's own keys back to this
 # writer; a row carrying `pushed=` must survive that, not be refused as an unknown key.
 R15_ARGS=()
-while IFS= read -r R15_SEG; do R15_ARGS+=("$R15_SEG"); done < <(printf '%s' "$R15_R" | tr '|' '\n' | tail -n +2)
+while IFS= read -r R15_SEG; do R15_ARGS+=("$R15_SEG"); done < <(printf '%s\n' "$R15_R" | tr '|' '\n' | tail -n +2)
 R15_COPY="$(lib roster_row "${R15_ARGS[@]}")"; R15_RC=$?
 expect_eq "R15d a row carrying pushed=, fed back key by key, is accepted" "0" "$R15_RC"
 expect_eq "R15d2 …and reproduces byte for byte" "$R15_R" "$R15_COPY"
