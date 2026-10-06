@@ -1909,6 +1909,11 @@ _dep_remove_plan() {  # <name> -> the plan, one line
     # The venv `uv sync` built at the stable path and the lock-hash file beside it;
     # the skill's own files leave with the plugin.
     uv-project)         echo "rm -rf $(_dep_excalidraw_venv_dir) $(_dep_excalidraw_lock_hash_file)" ;;
+    # The store is content-addressed and shared: no command takes one package out
+    # without evicting what other projects hard-link from, so the line names the
+    # prune, which removes only what nothing references, and says why.
+    pnpm-store)
+      echo "pnpm store prune — the store is shared with your other projects, so this removes only the packages none of them references" ;;
     # The `.statusLine` clear is conditional: a key the user repointed at their own
     # renderer is theirs.
     statusline)
@@ -1972,23 +1977,34 @@ _dep_statusline_leftovers() {  # <name> -> 0 when this machine carries statuslin
   return 1
 }
 
+# AND THEY CAME APART ON THE VENV (wave-27 T85). A venv built against an older
+# `uv.lock` is `stale` to the report — setup re-syncs it — but it is on the disk
+# all the same, and the teardown read `stale` as "not knowable" and walked past
+# it. So the teardown asks the venv directory alone: here or not, whatever the
+# lock says, and `unknown` only when no home locates it. `check_dep` keeps
+# `stale` for doctor and setup.
 dep_teardown_state() {  # <name> -> yes | no | unknown
   local name="${1:-}" raw
-  if [ "$(dep_field "$name" install_fn_or_check)" = "statusline" ]; then
-    if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
-    return 0
-  fi
+  case "$(dep_field "$name" install_fn_or_check)" in
+    statusline)
+      if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
+      return 0 ;;
+    uv-project)
+      if [ -z "${XDG_DATA_HOME:-${HOME:-}}" ]; then echo "unknown"
+      elif [ -d "$(_dep_excalidraw_venv_dir)" ]; then echo "yes"
+      else echo "no"; fi
+      return 0 ;;
+  esac
   raw="$(check_dep "$name")" || return 1
   raw="${raw#present=}"
   echo "${raw%%|*}"
 }
 
-# 0 when `remove_dep` names this row and leaves it: every `remove-on-consent` row
-# outside the pnpm store. remove.sh asks it too, so the `--all` page, the tools
-# item and the summary agree with `remove_dep` about which rows are named.
+# 0 when `remove_dep` names this row and leaves it: every `remove-on-consent` row.
+# remove.sh asks it too, so the `--all` page, the tools item and the summary agree
+# with `remove_dep` about which rows are named.
 dep_named_only() {  # <name>
-  [ "$(dep_field "${1:-}" removal_behavior)" = "remove-on-consent" ] || return 1
-  [ "$(dep_field "${1:-}" install_fn_or_check)" != "pnpm-store" ]
+  [ "$(dep_field "${1:-}" removal_behavior)" = "remove-on-consent" ]
 }
 
 remove_dep() {  # <name>
@@ -2049,16 +2065,10 @@ remove_dep() {  # <name>
       ;;
   esac
 
-  # The pnpm store is the one `remove-on-consent` row with a line of its own.
-  if ! dep_named_only "$name"; then
-    echo "$(_dep_indent)${name}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
-    return 0
-  fi
-
   # NAMED, NEVER ACTED ON (wave-27). Every row left here is `remove-on-consent`,
   # and presence is the only thing this function can know about it: a global
-  # package, a venv, a browser cache, an MCP server, a config or skill directory
-  # look the same whether bionic put them there or the user did, and removing on
+  # package, a venv, a browser cache, a pnpm store entry, an MCP server, a config
+  # or skill directory look the same whether bionic put them there or the user did, and removing on
   # presence took a user's own package off exactly as it took bionic's. Bionic removes only what it can
   # prove is its own — the rc markers are that proof for the shell rc, the
   # registry's `<name>@bionic` id for a native plugin above — and for these rows
