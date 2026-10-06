@@ -630,9 +630,6 @@ hold_cmd() {  # <name> — a command that marks itself started and holds until <
     "$D/$1.ran" "$D/$1.go"
 }
 WR="$(world_repo)"; export WR
-# A shim from before T12 booked a place in BIONIC_SLOTS_DIR, by default under the real home: a
-# red run of these rows against such a shim must reach only the world.
-export BIONIC_SLOTS_DIR="$WORLD_ROOT/slots" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=5
 section "§WRAP — the wrapper asks the gate; a wait ends 75 and keeps its number (T12; AC-2.6, AC-2.13)"
 expect_true "B.0 the world repository the shim stamps exists" test -d "$WR/.git"
 
@@ -744,8 +741,8 @@ wait_for 20 has sl.brc
 expect_eq "B.30 BIONIC_SLOT_HELD=1 skips nothing: the shim asked, and with no room ends 75" "75" "$(brc sl)"
 expect_false "B.31 …its command never ran" has sl.ran
 MW_DIR="$MUT/wrap-believe"; mkdir -p "$MW_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$MW_DIR/scripts"
-anchor "$MW_DIR/scripts/booked.sh" '  booked_ask work' 1
-sed -i.bak 's/^  booked_ask work$/  [ -n "${BIONIC_GATE_ADMIT:-}" ] || booked_ask work/' "$MW_DIR/scripts/booked.sh"
+anchor "$MW_DIR/scripts/booked.sh" '    booked_ask work' 1
+sed -i.bak 's/^    booked_ask work$/    [ -n "${BIONIC_GATE_ADMIT:-}" ] || booked_ask work/' "$MW_DIR/scripts/booked.sh"
 stranger_rows "$MW_DIR/scripts/booked.sh" mut
 expect_eq "B.32 the mutant (believes a typed admission without asking) still ends: rc 0" "0" "$ST_RC"
 expect_eq "B.33 …and runs the stranger's command: asking is the rule" "yes" "$ST_RAN"

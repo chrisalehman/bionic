@@ -5200,7 +5200,6 @@ deny_reason() {  # $1=class $2=role
   # THE FIRST FIX IS THE SHORT ONE (wave-26 T9, D14), unless the call was already short and
   # something else kept the shim from stopping it at the limit; then that is the fix.
   case "$_FO_SHORT_WHY" in
-    held)       lead="drop the BIONIC_SLOT_HELD=1 prefix, which keeps this short call out of the shim that stops it at its limit" ;;
     background) lead="run it in the foreground, without the trailing &: a command the shell backgrounds escapes the shim that stops a short call at its limit" ;;
     tooshort)   lead="give this Bash call a timeout of $_FO_SHORT_FLOOR_MS to $_FO_SHORT_MS ms; under $_FO_SHORT_FLOOR_MS ms the command could not be stopped, and say why, before the harness's own timeout" ;;
     *) [ "$_FO_SHORT_MS" -eq 0 ] ||
@@ -5554,11 +5553,14 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # bash: CLAUDE_CODE_SHELL, else SHELL, each only as an absolute path to bash or zsh (the two
 # shells the harness runs); otherwise no --shell, which is the shim's own `bash -c`.
 #
-# LEFT ALONE: a command that is already the shim; a suite segment carrying
-# `BIONIC_SLOT_HELD=1` in its own prefix — the opt-out for a command that needs a snapshot
-# alias or function, or a `cd` that outlives the call; a command the shell itself
-# backgrounds (the shim would stamp rc=0 the instant the job detached); a plugin with no
-# shim on disk.
+# LEFT ALONE: a command that is already the shim; a command the shell itself backgrounds
+# (the shim would stamp rc=0 the instant the job detached); a plugin with no shim on disk.
+# `BIONIC_SLOT_HELD=1` in a suite segment's prefix is no opt-out any more (wave-28 T12, D13):
+# it left the suite unwrapped and so unadmitted, and now the suite asks the gate like any other.
+#
+# --agent: WHO ASKS (wave-28 T12; T2's A-T2.6). The gate records `who=<session>:<agent>`, and a
+# shell does not know its agent, so the wrap names it: the roster row's `name=` the budget arm
+# already read, else the payload's `agent_id`; a main-thread call names none (the gate's `main`).
 #
 # --quiet: a suite segment carrying `BIONIC_QUIET=1` in its prefix, or a suite file whose
 # first 30 lines hold `# runner: solo` (tests/run.sh's `_is_solo_suite` rule, read the same
@@ -5784,7 +5786,7 @@ wall_booked_argv() {
 
 # _bsg_wrap_text <suite already established: yes|no> — sets _BSG_WRAP_TEXT to the wrapped
 # command; rc 1 when this command is left alone (see the header above for which), naming
-# why in _BSG_WRAP_WHY: shim, class, background, held or noshim.
+# why in _BSG_WRAP_WHY: shim, class, background or noshim.
 #
 # A SHORT CALL (wave-26 T9, D14; T44): when farm-out-reminder has set WALL_SHORT_KILL_AFTER,
 # the shim also gets `--kill-after <s>`. Nothing else changes: only a suite is wrapped, short
@@ -5807,6 +5809,17 @@ _bsg_wait_s() {
   _t=$((10#$_t / 1000 - 10))
   [ "$_t" -ge 1 ] || _t=1
   _BSG_WAIT_S="$_t"
+}
+# _bsg_agent — sets _BSG_AGENT to the name the gate's request records for this call (T12): the
+# roster row's `name=`, which the budget arm read into _BUDGET_ROW_NAME when it ran, else the
+# payload's `agent_id` (bionic_jq's cached field); empty on the main thread. No roster read here.
+_BSG_AGENT=""
+_bsg_agent() {
+  local _id
+  _BSG_AGENT=""
+  _id="$(bionic_jq .agent_id)"
+  [ -n "$_id" ] || return 0
+  _BSG_AGENT="${_BUDGET_ROW_NAME:-$_id}"
 }
 _bsg_wrap_text() {
   local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
@@ -5834,7 +5847,6 @@ _bsg_wrap_text() {
   _wall_class_read "$COMMAND"; _lines="$_WALL_CLASS_LINES"
   while IFS=$'\t' read -r _cls _seg; do
     [ "$_cls" = suite ] || continue
-    ! _wall_prefix_sets "$_seg" BIONIC_SLOT_HELD 1 || { _BSG_WRAP_WHY=held; return 1; }
     ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
   done <<< "$_lines"
   # ONE WALK, TWO READERS (T56): where the leading `cd` segments lead is the solo reader's base
@@ -5845,7 +5857,9 @@ _bsg_wrap_text() {
   _bsg_suites
   [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
-  if [ -n "$_k" ]; then set -- --kill-after "$_k"; else _bsg_wait_s; set -- --max-wait "$_BSG_WAIT_S"; fi
+  _bsg_agent
+  [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
+  if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else _bsg_wait_s; set -- "$@" --max-wait "$_BSG_WAIT_S"; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
