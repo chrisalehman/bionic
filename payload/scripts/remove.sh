@@ -7,10 +7,9 @@
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
 # the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
 # settings, the retired permission block, the plugin data directory — and then
-# the native plugin uninstall as the finisher. The tools setup offers are NAMED,
-# never removed: nothing on a machine records which of them bionic installed, so
-# each one present is listed with the command to remove it by hand (the tools
-# item below says why).
+# the native plugin uninstall as the finisher. A tool setup offers is removed only
+# when bionic's install record names it (wave-28 T40); every other one present is
+# listed with the command to remove it by hand (the tools item below says why).
 #
 # THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
 # consent does not unlock them:
@@ -1212,8 +1211,9 @@ _rm_item_verb() {  # <id>
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
-    # Only a native plugin the registry records as bionic's reaches the page; every
-    # other tool row is named by the tools item and never offered (wave-27).
+    # Only a native plugin the registry records as bionic's, or a tool the install
+    # record names, reaches the page; every other tool row is named by the tools
+    # item and never offered (wave-27, wave-28 T40).
     tool:*)                echo "remove ${1#tool:}" ;;
     *)                     return 1 ;;
   esac
@@ -1307,7 +1307,8 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       # `dep_teardown_state` is the same probe for every row where those coincide,
       # and the honest one for the status line, where they no longer do.
       # NAMED, NEVER ASKED (wave-27). A row `remove_dep` only names has no question,
-      # so it is never on the page and the page's yes reaches none of them.
+      # so it is never on the page and the page's yes reaches none of them. A row
+      # the install record names is asked about, so it is on the page (wave-28 T40).
       [ "$RM_MODE" = "payload" ] || return 1
       dep_named_only "${id#tool:}" && return 1
       present="$(dep_teardown_state "${id#tool:}")"
@@ -2374,20 +2375,21 @@ _rm_say_block() {  # <file> <start> <end>
 # `remove_dep` is the SSoT for what happens to a dependency: a shared binary is
 # kept with consent already given, a plugin bionic declares is left to the
 # finisher below, a plugin nothing declares gets its own consented uninstall when
-# the registry records it as bionic's, and every `remove-on-consent` row is NAMED.
-# Presence is asked first so a machine is not interrogated about packages it
+# the registry records it as bionic's, a `remove-on-consent` row the install record
+# names gets its own consented removal, and every other `remove-on-consent` row is
+# NAMED. Presence is asked first so a machine is not interrogated about packages it
 # never had.
 #
-# NAMED, NEVER REMOVED (wave-27). This item used to remove a `remove-on-consent`
-# row because it was PRESENT, and presence says nothing about who installed it: a
-# package the user installed themselves came off exactly like one bionic put
-# there. Bionic removes only what it can prove is its own — the markers are that
-# proof in the shell rc, the registry's `<name>@bionic` id for a native plugin —
-# and for these rows nothing on the machine records it. So each one present is
-# printed with the command that removes it by hand, nothing is asked and nothing
-# runs, on every door and under `--all`; the summary lists them under their own
-# heading. A record of what bionic installed is what would let this item act
-# again.
+# REMOVED ONLY BEHIND THE RECORD (wave-27, wave-28 T40). This item used to remove a
+# `remove-on-consent` row because it was PRESENT, and presence says nothing about
+# who installed it: a package the user installed themselves came off exactly like
+# one bionic put there. Bionic removes only what it can prove is its own — the
+# markers are that proof in the shell rc, the registry's `<name>@bionic` id for a
+# native plugin, and the line `install_dep` wrote to the install record for these
+# rows. A recorded row is offered (on the `--all` page too) and removed on a yes;
+# a recorded row in a cache other projects share, and every row the record does not
+# name, is printed with the command that removes it by hand, and nothing is asked
+# and nothing runs; the summary lists those under their own heading.
 #
 # The dep names are read on fd 3 deliberately: a `while read < <(...)` loop would
 # take the loop's stdin from the process substitution, and remove_dep's consent
