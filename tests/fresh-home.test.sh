@@ -601,6 +601,7 @@ run_payload() {  # <script> [args...] — stdin carries the answers
     BIONIC_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     CLAUDE_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
+    BIONIC_PNPM_STORE="${FH_PNPM_STORE:-}" \
     BIONIC_DOCTOR_PROBE_SECONDS=15 \
     bash "$script" "$@" 2>&1
 }
@@ -2331,19 +2332,22 @@ expect_match "15C: …and setup installs it through the CLI, as it always did" \
 # on every door and under `--all`. The one record the machine does keep is the
 # native plugin registry's `<name>@bionic` id, and that row is still removed.
 #
-# The fixture carries one present row of each `remove-on-consent` kind except the
-# pnpm store (whose line is unchanged): statusline, npm-global, uv-tool,
-# uv-project, playwright-browser, mcp-server, github-skill — plus the native
-# `impeccable@bionic`. Every package manager on PATH is a recorder in $BIN, so a
-# call is visible in the log and reaches nothing real.
+# The fixture carries one present row of each `remove-on-consent` kind:
+# statusline, npm-global, uv-tool, uv-project, playwright-browser, pnpm-store,
+# mcp-server, github-skill — plus the native `impeccable@bionic`. Every package
+# manager on PATH is a recorder in $BIN, so a call is visible in the log and
+# reaches nothing real. The pnpm store (T85) is an index.db at the path the
+# doors are told through `BIONIC_PNPM_STORE`, so the probe never runs pnpm.
 # ---------------------------------------------------------------------------
 
 section "Group 16: remove names each declared tool it finds and removes none of them"
 
 # The rows the fixture makes present, in the table's order (the order the item
 # walks), each with its by-hand plan.
-G16_NAMES="excalidraw-renderer @playwright/cli playwright-chromium ccstatusline notebooklm context7 humanizer"
+G16_NAMES="excalidraw-renderer @playwright/cli playwright-chromium motion ccstatusline notebooklm context7 humanizer"
 G16_PW_CACHE="${HOME_FIX}/.cache/ms-playwright"
+G16_PNPM_STORE="${HOME_FIX}/.local/share/pnpm/store/v10"
+FH_PNPM_STORE="$G16_PNPM_STORE"
 
 # A path as a door prints it: the fixture home written `~/`.
 g16_home() { local tl='~/'; printf '%s' "${1//"$HOME_FIX"\//$tl}"; }
@@ -2353,6 +2357,8 @@ g16_plan() {  # <name> -> the command the by-hand line must carry
     excalidraw-renderer) printf 'rm -rf %s %s' "$(g16_home "$VENV_DIR")" "$(g16_home "${VENV_DIR}.lock.sha256")" ;;
     @playwright/cli)     printf 'npm uninstall -g @playwright/cli' ;;
     playwright-chromium) printf 'rm -rf %s' "$(g16_home "$G16_PW_CACHE")" ;;
+    motion)
+      printf 'pnpm store prune — the store is shared with your other projects, so this removes only the packages none of them references' ;;
     ccstatusline)
       printf 'npm uninstall -g ccstatusline, clear .statusLine from %s only if it still names ccstatusline, and remove %s' \
         "$(g16_home "$SETTINGS")" "$(g16_home "${HOME_FIX}/.config/ccstatusline")" ;;
@@ -2365,7 +2371,9 @@ g16_plan() {  # <name> -> the command the by-hand line must carry
 g16_plant() {  # [native] — one present row of each kind; `native` adds impeccable@bionic
   fresh_home
   mkdir -p "${HOME_FIX}/.claude/skills/humanizer" "${HOME_FIX}/.claude/skills/notebooklm" \
-           "${HOME_FIX}/.config/ccstatusline" "${G16_PW_CACHE}/chromium-1187" "${VENV_DIR}/bin"
+           "${HOME_FIX}/.config/ccstatusline" "${G16_PW_CACHE}/chromium-1187" "${VENV_DIR}/bin" \
+           "$G16_PNPM_STORE"
+  printf 'some binary-ish preamble\nmotion@12.23.12\nmore\n' > "${G16_PNPM_STORE}/index.db"
   printf '%s\n' '{"model":"opus","statusLine":{"type":"command","command":"ccstatusline"}}' > "$SETTINGS"
   cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
   printf 'ccstatusline\n@playwright/cli\n' > "${STATE}/npm-global"
@@ -2459,6 +2467,7 @@ for n in $G16_NAMES; do
   expect_eq "16 precondition: ${n} reads as present to the teardown" "yes" \
     "$(env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
          BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
+         BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
          bash -c '. "$1"; dep_teardown_state "$2"' _ "${LIB_DIR}/deps.sh" "$n" 2>/dev/null)"
 done
 : > "$CALLS"
@@ -2494,7 +2503,7 @@ g16_tilde_check() {  # <file> <shell> -> "<checked> <mismatches>"
   printf '%s %s' "$n" "$bad"
 }
 expect_no_match "16 by hand: the fixture home is not under /Users" '/Users/*' "$HOME_FIX"
-expect_eq "16 by hand: every ~/ word of the seven lines expands to its path under /bin/bash (7 words, 0 wrong)" \
+expect_eq "16 by hand: every ~/ word of the by-hand lines expands to its path under /bin/bash (7 words, 0 wrong)" \
   "7 0" "$(g16_tilde_check "$G16_INT" /bin/bash)"
 expect_eq "16 by hand: …and under zsh" "7 0" "$(g16_tilde_check "$G16_INT" "$(command -v zsh)")"
 # A path that holds the home's spelling but does not start with it is printed as it is.
@@ -2559,6 +2568,7 @@ g16_direct() {  # <name> — remove_dep under RM_ALL=1, yes on stdin; prints its
   printf 'y\ny\n' | env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
     BIONIC_TEST_BIN="$BIN" BIONIC_TEST_SHIMSRC="$SHIMSRC" BIONIC_TEST_PKG_MAP="$PKG_MAP" \
     BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
+    BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
     bash -c '. "$1"; RM_ALL=1; remove_dep "$2"; echo "rc=$?"' _ "${LIB_DIR}/deps.sh" "$1" 2>&1
 }
 g16_plant
@@ -2630,6 +2640,156 @@ expect_eq "16 named, block and tools: …ccstatusline is named with its by-hand 
 expect_absent "16 named, block and tools: …and the run never calls the machine clean" \
   "this machine is already clean" "$(cat "$G16_BOTH")"
 expect_eq "16 named, block and tools: …and nothing was called" "" "$(g16_acts)"
+
+# ── T85: the pnpm store and the excalidraw venv, each alone on the machine ──
+# The two kinds T82 held still (review pass 70): `motion` was counted removed
+# while nothing was, and a venv stale against uv.lock read "not knowable" to the
+# item and "already clean" to the `--all` page. Each fixture carries that one row
+# and nothing else, so a row the item failed to name leaves nothing else to speak.
+g16_alone() {  # motion | venv-fresh | venv-stale | venv-none
+  fresh_home
+  # The recorders' empty state, as their first probe would leave it.
+  : > "${STATE}/npm-global"; : > "${STATE}/mcp"
+  case "$1" in
+    motion)
+      mkdir -p "$G16_PNPM_STORE"
+      printf 'some binary-ish preamble\nmotion@12.23.12\nmore\n' > "${G16_PNPM_STORE}/index.db" ;;
+    venv-fresh|venv-stale)
+      mkdir -p "${VENV_DIR}/bin"
+      printf '#!/bin/bash\nexit 0\n' > "${VENV_DIR}/bin/python"; chmod +x "${VENV_DIR}/bin/python"
+      if [ "$1" = venv-fresh ]; then
+        shasum -a 256 "${PAYLOAD}/skills/excalidraw-diagram/references/uv.lock" | awk '{ print $1 }' \
+          > "$VENV_LOCK_HASH"
+      else
+        printf '%s\n' "a-lock-this-venv-was-not-synced-against" > "$VENV_LOCK_HASH"
+      fi ;;
+  esac
+  : > "$CALLS"
+}
+g16_lib() {  # <function> <name> — a deps.sh answer on the fixture machine
+  env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
+    BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
+    bash -c '. "$1"; "$2" "$3"' _ "${LIB_DIR}/deps.sh" "$1" "$2" 2>/dev/null
+}
+# The summary's removed and already-clean counts, "<removed> <clean>".
+g16_tally() {  # <file>
+  grep -F ' removed · ' "$1" | tail -1 | awk '{ print $1, $4 }'
+}
+# Every call the pnpm recorder logged.
+g16_pnpm_calls() { grep '^pnpm ' "$CALLS" 2>/dev/null; return 0; }
+
+g16_alone motion
+G16_T85_BEFORE="$(g16_snap)"
+expect_eq "16 motion alone: the pnpm store's index reads motion as present to the teardown" \
+  "yes" "$(g16_lib dep_teardown_state motion)"
+G16_M_ONLY="$TMP/g16-motion-only.txt"
+printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:motion > "$G16_M_ONLY" 2>&1
+expect_eq "16 motion --only: motion is named, with the store's by-hand command" \
+  "yes" "$(g16_pair "$G16_M_ONLY" motion "$(g16_plan motion)")"
+expect_eq "16 motion --only: …nothing asks to remove it" "0" "$(g16_asks "$G16_M_ONLY" motion)"
+expect_eq "16 motion --only: …the summary counts it neither removed nor clean (the tally reads 0 0)" \
+  "0 0" "$(g16_tally "$G16_M_ONLY")"
+expect_eq "16 motion --only: …and the summary names it to remove by hand" "motion" "$(g16_byhand "$G16_M_ONLY")"
+expect_eq "16 motion --only: …pnpm was never called" "" "$(g16_pnpm_calls)"
+g16_alone motion
+G16_M_ALL="$TMP/g16-motion-all.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_M_ALL" 2>&1
+expect_eq "16 motion --all: motion is named, with the store's by-hand command" \
+  "yes" "$(g16_pair "$G16_M_ALL" motion "$(g16_plan motion)")"
+expect_absent "16 motion --all: …motion is not on the page" "• remove motion" "$(cat "$G16_M_ALL")"
+expect_eq "16 motion --all: …no question was put to anyone" "0" "$(grep -c '\[y/N\]' "$G16_M_ALL")"
+expect_eq "16 motion --all: …the summary says 0 removed" "0" "$(g16_tally "$G16_M_ALL" | awk '{ print $1 }')"
+expect_eq "16 motion --all: …and names motion to remove by hand" "motion" "$(g16_byhand "$G16_M_ALL")"
+expect_absent "16 motion --all: …and never calls the machine clean" "this machine is already clean" "$(cat "$G16_M_ALL")"
+# The whole run probes the keep-shared `pnpm` row's version; motion asks pnpm nothing.
+expect_eq "16 motion --all: …pnpm was asked nothing but the pnpm row's version" "" \
+  "$(g16_pnpm_calls | grep -vx 'pnpm --version')"
+expect_eq "16 motion --all: …nothing was asked to remove anything" "" "$(g16_acts)"
+expect_eq "16 motion --all: …and the store is byte for byte as it was" "$G16_T85_BEFORE" "$(g16_snap)"
+env -i PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" pnpm store path >/dev/null 2>&1
+expect_ne "16 motion: the pnpm call extractor, version probes set aside, reads a call the recorder logged" "" \
+  "$(g16_pnpm_calls | grep -vx 'pnpm --version')"
+
+for g16_v in venv-fresh venv-stale; do
+  g16_alone "$g16_v"
+  G16_V_BEFORE="$(g16_snap)"
+  case "$g16_v" in venv-fresh) g16_want='present=yes*' ;; *) g16_want='present=stale*' ;; esac
+  expect_match "16 ${g16_v}: doctor's and setup's probe still reads it ${g16_want%%\**}" \
+    "$g16_want" "$(g16_lib check_dep excalidraw-renderer)"
+  expect_eq "16 ${g16_v}: the teardown reads the venv on disk as present" \
+    "yes" "$(g16_lib dep_teardown_state excalidraw-renderer)"
+  G16_V_ONLY="$TMP/g16-${g16_v}-only.txt"
+  printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:excalidraw-renderer > "$G16_V_ONLY" 2>&1
+  expect_eq "16 ${g16_v} --only: the venv is named, with its rm -rf plan" \
+    "yes" "$(g16_pair "$G16_V_ONLY" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+  expect_absent "16 ${g16_v} --only: …never 'not knowable'" "not knowable" "$(cat "$G16_V_ONLY")"
+  expect_eq "16 ${g16_v} --only: …counted neither removed nor clean (the tally reads 0 0)" \
+    "0 0" "$(g16_tally "$G16_V_ONLY")"
+  expect_eq "16 ${g16_v} --only: …and named to remove by hand" "excalidraw-renderer" "$(g16_byhand "$G16_V_ONLY")"
+  g16_alone "$g16_v"
+  G16_V_ALL="$TMP/g16-${g16_v}-all.txt"
+  printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G16_V_ALL" 2>&1
+  expect_eq "16 ${g16_v} --all: the venv is named, with its rm -rf plan" \
+    "yes" "$(g16_pair "$G16_V_ALL" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+  expect_absent "16 ${g16_v} --all: …never 'already clean'" "this machine is already clean" "$(cat "$G16_V_ALL")"
+  expect_eq "16 ${g16_v} --all: …named to remove by hand" "excalidraw-renderer" "$(g16_byhand "$G16_V_ALL")"
+  expect_eq "16 ${g16_v} --all: …nothing was called" "" "$(g16_acts)"
+  expect_eq "16 ${g16_v} --all: …and the venv is byte for byte as it was" "$G16_V_BEFORE" "$(g16_snap)"
+done
+
+g16_alone venv-none
+expect_eq "16 no venv: the teardown reads it absent" "no" "$(g16_lib dep_teardown_state excalidraw-renderer)"
+G16_V_NONE="$TMP/g16-venv-none-only.txt"
+printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:excalidraw-renderer > "$G16_V_NONE" 2>&1
+expect_contains "16 no venv --only: the row reports not installed" \
+  "excalidraw-renderer (not installed) — already clean" "$(cat "$G16_V_NONE")"
+expect_eq "16 no venv --only: …and is not named" \
+  "no" "$(g16_pair "$G16_V_NONE" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+
+# ── T85's mutants: the old `return 0` and the old `unknown`, each in a doctored copy ──
+G16_M1="$TMP/payload-g16-t85-return0"
+rm -rf "$G16_M1"; cp -R "$PAYLOAD" "$G16_M1"
+cat >> "$G16_M1/scripts/lib/deps.sh" <<'MUT'
+eval "_g16_t85_$(declare -f remove_dep)"
+remove_dep() {
+  if [ "$(dep_field "$1" install_fn_or_check)" = pnpm-store ]; then
+    echo "$(_dep_indent)${1}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
+    return 0
+  fi
+  _g16_t85_remove_dep "$@"
+}
+MUT
+expect_true "16 mutant return 0: the doctored library still parses" bash -n "$G16_M1/scripts/lib/deps.sh"
+g16_alone motion
+G16_M1_OUT="$TMP/g16-t85-return0.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G16_M1" run_payload "$G16_M1/scripts/remove.sh" --only tool:motion > "$G16_M1_OUT" 2>&1
+expect_contains "16 mutant return 0: the mutant run reached the pnpm-store line" "lives in the shared pnpm store" \
+  "$(cat "$G16_M1_OUT")"
+expect_eq "16 mutant return 0: …and the tally extractor sees it counted removed" "1 0" "$(g16_tally "$G16_M1_OUT")"
+
+G16_M2="$TMP/payload-g16-t85-unknown"
+rm -rf "$G16_M2"; cp -R "$PAYLOAD" "$G16_M2"
+cat >> "$G16_M2/scripts/lib/deps.sh" <<'MUT'
+dep_teardown_state() {
+  local name="${1:-}" raw
+  if [ "$(dep_field "$name" install_fn_or_check)" = "statusline" ]; then
+    if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
+    return 0
+  fi
+  raw="$(check_dep "$name")" || return 1
+  raw="${raw#present=}"
+  echo "${raw%%|*}"
+}
+MUT
+expect_true "16 mutant unknown: the doctored library still parses" bash -n "$G16_M2/scripts/lib/deps.sh"
+g16_alone venv-stale
+G16_M2_OUT="$TMP/g16-t85-unknown.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G16_M2" run_payload "$G16_M2/scripts/remove.sh" --only tool:excalidraw-renderer \
+  > "$G16_M2_OUT" 2>&1
+expect_contains "16 mutant unknown: the mutant run reached the tools item and called the venv not knowable" \
+  "excalidraw-renderer: presence is not knowable" "$(cat "$G16_M2_OUT")"
+expect_eq "16 mutant unknown: …and the pair extractor sees it unnamed" \
+  "no" "$(g16_pair "$G16_M2_OUT" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
 
 # ── standalone: unchanged ──
 g16_plant
