@@ -3383,7 +3383,7 @@ section "Section 20: §PUSH-CAP — every string the start pushes fits what the 
 # THE ROW THAT WOULD HAVE CAUGHT THE DEFECT: every role, rigor and scale `facts_owed` deals a
 # reading to, the reader's row as the dispatch wall writes it, the REAL hook driven once per
 # registration as hooks/hooks.json registers it, against the shipped context and against a copy
-# whose three checks files sit exactly at their 4,500-byte cap. It replaces CK-b1's former
+# whose three checks files sit exactly at their 4,650-byte cap. It replaces CK-b1's former
 # expectation of one 12,679-character string.
 #
 # FIXTURE FIDELITY: the dealing is the production `facts_owed` (payload/scripts/lib/proof.sh),
@@ -3452,19 +3452,20 @@ expect_ne "PC-a0 every deal was driven and its strings counted (not vacuous)" "0
 expect_empty "PC-a1 shipped context: every dealt string is one line, its own file, at most ${PC_MAX} and under 10,000 characters" "$PC_BAD"
 printf '  shipped context, characters per string:%s\n' "$PC_TABLE"
 
-# THE 4,500-BYTE FIXTURE: the cap D5 sets on a checks file, every checks file exactly at it.
-PC4_PLUG="$SANDBOX/pc-4500"
+# THE 4,650-BYTE FIXTURE: the cap on a checks file (D5's 4,500, raised by wave-28 T48, A-orch-43; the
+# docs-pins W27_CAP), every checks file exactly at it.
+PC4_PLUG="$SANDBOX/pc-cap"
 ck_plugin "$PC4_PLUG"
 for _q in evidence adversarial structure; do
   _sz=$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')
-  [ "$_sz" -lt 4500 ] && head -c "$((4500 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
-  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,500 bytes" "4500" \
+  [ "$_sz" -lt 4650 ] && head -c "$((4650 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
+  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,650 bytes" "4650" \
     "$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')"
 done
 pc_every_deal "$PC4_PLUG" "$PC4_PLUG/context" f
 expect_ne "PC-b1 every deal was driven against the fixture (not vacuous)" "0" "$PC_N"
-expect_empty "PC-b2 4,500-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
-printf '  4,500-byte checks files, characters per string:%s\n' "$PC_TABLE"
+expect_empty "PC-b2 4,650-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
+printf '  4,650-byte checks files, characters per string:%s\n' "$PC_TABLE"
 
 # OVER THE CAP: a checks file grown to 9,600 characters, a tested critic (all three questions).
 PO_PLUG="$SANDBOX/pc-over"
