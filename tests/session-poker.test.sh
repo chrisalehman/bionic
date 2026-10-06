@@ -2324,7 +2324,9 @@ mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready
     "| FOUR | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
   printf '%s' "$r"
 }
-fill_line() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL ' || true; }
+fill_line() {  # the tick's one `poker: FILL <ids>` line; never the sentence below it (`FILL — …`)
+  printf '%s\n' "$OUT" | awk 'index($0, "poker: FILL ") == 1 && index($0, "poker: FILL —") != 1 { print; exit }'
+}
 
 R11C="$(mk_rung_repo s11-fill-quiet)"
 gate_case s11c 0.1
@@ -4235,7 +4237,17 @@ expect_eq "…and pays a full parse per row: fourteen, not two (19i discriminate
 rm -rf "$S19I_MUT_ROOT"
 
 # Section 20 (the kill-floor target) retired with the EMERGENCY line (wave-28 T13; D14): the
-# tick names no writer to stop, and `youngest_suite_writer` went with it.
+# tick names no writer to stop, and `youngest_suite_writer` went with it. Its two fixture
+# helpers stay: later sections plant markers and acks with them.
+swept_marker() {  # <repo> <name> <state>
+  swept_marker_write "$(roster_of "$1")" "$(iso_ago 30)" "$SID" "$2" a000 "$3"
+}
+s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writer's shape
+  local le; le="$1/.bionic/tmp/sweeper-${SID}.state"
+  [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$3" "$SID" "$2" >> "$le"
+}
 
 # ============================================================
 section "Section 21: hardening — the one unfiltered field, and the tail that reaches a terminal"
