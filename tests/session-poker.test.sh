@@ -12927,6 +12927,34 @@ expect_contains "SEV-mut2 the library refuses a finding to fix beside result: fl
 expect_regex "SEV-mut2b the result mutant runs, and admits that record as flag: §FACT-derive goes red without the refusal" \
   "^flag piece [0-9a-f]+ rc=0$" "$(sev_read "$SEV_MUT/result.sh" "$SEV_DIR/d-fix-flag.md")"
 
+# ---------- a structure reading's two derivations agree (A-orch-34) ----------
+# F6 holds a structure result to its worst check; the table holds it to the findings. A FAIL check
+# beside no finding to fix, or a finding to fix beside no FAIL check, is refused in one line naming
+# both. Read through the library against the SHIPPED checks file, the one `proof-add` resolves.
+SEV_CK="${BIONIC_HOOKS_DIR}/../payload/context/checks-structure.md"
+SEV_IDS="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s); print s }' "$SEV_CK" 2>/dev/null)"
+expect_nonempty "SEV-st0 precondition: the shipped structure checks file names its check ids" "$SEV_IDS"
+sev_st() {  # <file> <result> <answer for the first id> <line>... -> a structure reading, every other check PASS
+  local f="$SEV_DIR/$1.md" r="$2" a="$3" i n=0 l; shift 3
+  { printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: %s\nscope: piece\n' "${SEV_B:0:10}" "$SEV_C1" "$r"
+    for i in $SEV_IDS; do n=$((n + 1)); if [ "$n" = 1 ]; then printf 'check: %s %s the reason\n' "$i" "$a"; else printf 'check: %s PASS nothing\n' "$i"; fi; done
+    for l in "$@"; do printf '%s\n' "$l"; done; } > "$f"
+}
+sev_stread() { bash -c '. "$1"; proof_reading "$2" structure "$3" 1; echo " rc=$?"' _ "$SEV_LIB" "$SEV_DIR/$1.md" "$SEV_CK" 2>/dev/null; }
+SEV_ID1="$(printf '%s\n' "$SEV_IDS" | head -1)"
+sev_st st-agree fail FAIL "findings: 1" "finding: 1 S2 on lib/a.sh:5 the core path is wrong" "shown: 1 bash lib/a.sh"
+expect_regex "SEV-st1 a FAIL check beside a finding to fix agrees: the reading reads as fail" "^fail piece [0-9a-f]+ rc=0$" "$(sev_stread st-agree)"
+sev_st st-failcheck fail FAIL "findings: 1" "finding: 1 S3 on - only a side path"
+SEV_OUT="$(sev_stread st-failcheck)"
+expect_contains "SEV-st2 a FAIL check beside no finding to fix is refused, naming the check" \
+  "gives check: $SEV_ID1 FAIL beside no finding to fix" "$SEV_OUT"
+expect_eq "SEV-st2b …in one line" "1" "$(printf '%s\n' "$SEV_OUT" | wc -l | tr -d ' ')"
+sev_st st-fixflag fail FLAG "findings: 1" "finding: 1 S1 off lib/a.sh:6 data lost" "shown: 1 bash lib/a.sh --lose"
+expect_contains "SEV-st3 a finding to fix beside no FAIL check is refused, naming the finding" \
+  "gives finding 1 (S1 off) to fix beside no FAIL check" "$(sev_stread st-fixflag)"
+sev_st st-flagagree flag FLAG "findings: 1" "finding: 1 S3 on - only a side path"
+expect_regex "SEV-st4 control: a FLAG check beside a deferral reads as flag" "^flag piece [0-9a-f]+ rc=0$" "$(sev_stread st-flagagree)"
+
 # ---------- §FACT-shown (AC-8.6, the record half): a fix is shown, or owes a check ----------
 sev_rec sh-dash fail "findings: 1" "finding: 1 S2 on - no place named" "shown: 1 bash lib/a.sh"
 sev_rec sh-noshown fail "findings: 1" "finding: 1 S2 on lib/a.sh:4 no command"
