@@ -13075,7 +13075,7 @@ printf 'line/v1|ev=stalled|row=T7|logs=/rec/line/T7-b-1.log,/rec/line/T7-b-1-2.l
 lt_lines() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: note: (standing|stalled) ' | tr '\n' '|' | sed 's/|$//'; }
 s60_tick
 expect_eq "LT1 the tick tells the standing red: suite, head, its failing lines and the head's log" \
-  "poker: note: standing a.test.sh at ${LT_H1:0:12} — 3 failing line(s) fail at the accepted head too: the branch's red, not a row's; log /rec/line/T1-a-${LT_H1:0:12}.log" \
+  "poker: note: standing a.test.sh at ${LT_H1:0:12} — 3 failing line(s) fail at the accepted head too: a red the branch carries, not one a row added; log /rec/line/T1-a-${LT_H1:0:12}.log" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: note: standing ')"
 expect_eq "LT2 …and the stalled entry, with both its logs" \
   "poker: note: stalled T7 — two runs ended with no verdict and no third starts; logs /rec/line/T7-b-1.log,/rec/line/T7-b-1-2.log" \
@@ -13086,7 +13086,7 @@ expect_eq "LT3 a second tick over the same record tells neither again" "" "$(lt_
 printf 'line/v1|ev=standing|head=%s|suite=a.test.sh|lines=1|log=/rec/line/T2-a-%s.log|at=2026-10-06T10:02:00Z\n' "$LT_H2" "${LT_H2:0:12}" >> "$S60_REC"
 s60_tick
 expect_eq "LT4 a new standing event, on a new head, is told by the next tick, alone" \
-  "poker: note: standing a.test.sh at ${LT_H2:0:12} — 1 failing line(s) fail at the accepted head too: the branch's red, not a row's; log /rec/line/T2-a-${LT_H2:0:12}.log" \
+  "poker: note: standing a.test.sh at ${LT_H2:0:12} — 1 failing line(s) fail at the accepted head too: a red the branch carries, not one a row added; log /rec/line/T2-a-${LT_H2:0:12}.log" \
   "$(lt_lines)"
 POKE_BOUND="$LT_BOUND_WAS"
 
