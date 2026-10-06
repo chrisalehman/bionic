@@ -2356,7 +2356,9 @@ g16_plan() {  # <name> -> the command the by-hand line must carry
   case "$1" in
     excalidraw-renderer) printf 'rm -rf %s %s' "$(g16_home "$VENV_DIR")" "$(g16_home "${VENV_DIR}.lock.sha256")" ;;
     @playwright/cli)     printf 'npm uninstall -g @playwright/cli' ;;
-    playwright-chromium) printf 'rm -rf %s' "$(g16_home "$G16_PW_CACHE")" ;;
+    # T88: the cache is shared, so the line names Playwright's own uninstall, never the cache.
+    playwright-chromium)
+      printf 'npx --yes playwright@latest uninstall — its cache is shared with your other projects, so nothing here removes it whole' ;;
     motion)
       printf 'pnpm store prune — the store is shared with your other projects, so this removes only the packages none of them references' ;;
     ccstatusline)
@@ -2503,9 +2505,10 @@ g16_tilde_check() {  # <file> <shell> -> "<checked> <mismatches>"
   printf '%s %s' "$n" "$bad"
 }
 expect_no_match "16 by hand: the fixture home is not under /Users" '/Users/*' "$HOME_FIX"
-expect_eq "16 by hand: every ~/ word of the by-hand lines expands to its path under /bin/bash (7 words, 0 wrong)" \
-  "7 0" "$(g16_tilde_check "$G16_INT" /bin/bash)"
-expect_eq "16 by hand: …and under zsh" "7 0" "$(g16_tilde_check "$G16_INT" "$(command -v zsh)")"
+# Six words: the playwright line names no path since T88.
+expect_eq "16 by hand: every ~/ word of the by-hand lines expands to its path under /bin/bash (6 words, 0 wrong)" \
+  "6 0" "$(g16_tilde_check "$G16_INT" /bin/bash)"
+expect_eq "16 by hand: …and under zsh" "6 0" "$(g16_tilde_check "$G16_INT" "$(command -v zsh)")"
 # A path that holds the home's spelling but does not start with it is printed as it is.
 expect_eq "16 by hand: only a word that starts with the home is written ~/" \
   "rm -rf /elsewhere${HOME_FIX}/x ~/y" \
@@ -2669,6 +2672,7 @@ g16_alone() {  # motion | venv-fresh | venv-stale | venv-none
 g16_lib() {  # <function> <name> — a deps.sh answer on the fixture machine
   env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_TEST_STATE="$STATE" \
     BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_PLUGIN_ROOT="$PAYLOAD" BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
+    BIONIC_PLAYWRIGHT_CACHE="$G16_PW_CACHE" \
     bash -c '. "$1"; "$2" "$3"' _ "${LIB_DIR}/deps.sh" "$1" "$2" 2>/dev/null
 }
 # The summary's removed and already-clean counts, "<removed> <clean>".
@@ -2790,6 +2794,159 @@ expect_contains "16 mutant unknown: the mutant run reached the tools item and ca
   "excalidraw-renderer: presence is not knowable" "$(cat "$G16_M2_OUT")"
 expect_eq "16 mutant unknown: …and the pair extractor sees it unnamed" \
   "no" "$(g16_pair "$G16_M2_OUT" excalidraw-renderer "$(g16_plan excalidraw-renderer)")"
+
+# ── T88: the playwright browser, alone on the machine ──
+# `ms-playwright` is one cache every project's Playwright shares, so the by-hand
+# line names Playwright's own uninstall (the browsers of the version it runs) and
+# says the cache is shared; no door prints `rm -rf` over it. Nothing here can
+# answer yes: `--only` reads /dev/null and the `--all` page reads `n`.
+g16_pw_alone() {
+  fresh_home
+  : > "${STATE}/npm-global"; : > "${STATE}/mcp"
+  mkdir -p "${G16_PW_CACHE}/chromium-1187"
+  : > "${G16_PW_CACHE}/chromium-1187/INSTALLATION_COMPLETE"
+  : > "$CALLS"
+}
+# The line printed right under <name>'s "present" line, its lead-in taken off.
+g16_byhand_line() {  # <file> <name>
+  local want1="  ${2}: present — bionic has no record that it installed it, so it is left in place." line prev=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$prev" = "$want1" ] && { printf '%s' "${line#    remove it by hand with: }"; return 0; }
+    prev="$line"
+  done < "$1"
+  return 0
+}
+g16_npx_calls() { grep '^npx ' "$CALLS" 2>/dev/null; return 0; }
+
+expect_eq "16 playwright: the stub npx is the npx every door reaches" "${BIN}/npx" \
+  "$(env -i PATH="$BIN" bash -c 'command -v npx')"
+g16_pw_alone
+G16_PW_BEFORE="$(g16_snap)"
+expect_eq "16 playwright alone: the teardown reads the browser cache as present" \
+  "yes" "$(g16_lib dep_teardown_state playwright-chromium)"
+G16_PW_ONLY="$TMP/g16-pw-only.txt"
+run_payload "$REMOVE_SH" --only tool:playwright-chromium < /dev/null > "$G16_PW_ONLY" 2>&1
+expect_eq "16 playwright --only: remove exits 0" "0" "$?"
+expect_eq "16 playwright --only: the two lines, the by-hand one byte for byte" \
+  "yes" "$(g16_pair "$G16_PW_ONLY" playwright-chromium "$(g16_plan playwright-chromium)")"
+G16_PW_LINE="$(g16_byhand_line "$G16_PW_ONLY" playwright-chromium)"
+expect_contains "16 playwright --only: the by-hand line names Playwright's own uninstall" \
+  "npx --yes playwright@latest uninstall" "$G16_PW_LINE"
+expect_contains "16 playwright --only: …and says the cache is shared" "cache is shared" "$G16_PW_LINE"
+expect_absent "16 playwright --only: …and never prints rm -rf" "rm -rf" "$G16_PW_LINE"
+expect_absent "16 playwright --only: …nor the cache's name" "ms-playwright" "$G16_PW_LINE"
+expect_absent "16 playwright --only: …and holds no quote a pasted line would leave open" "'" "$G16_PW_LINE"
+expect_absent "16 playwright --only: no line of the door removes the cache whole" \
+  "rm -rf $(g16_home "$G16_PW_CACHE")" "$(cat "$G16_PW_ONLY")"
+expect_eq "16 playwright --only: …nothing asks to remove it" "0" "$(g16_asks "$G16_PW_ONLY" playwright-chromium)"
+expect_eq "16 playwright --only: …counted neither removed nor clean (the tally reads 0 0)" \
+  "0 0" "$(g16_tally "$G16_PW_ONLY")"
+expect_eq "16 playwright --only: …named to remove by hand" "playwright-chromium" "$(g16_byhand "$G16_PW_ONLY")"
+expect_eq "16 playwright --only: …npx was never called" "" "$(g16_npx_calls)"
+expect_eq "16 playwright --only: …and the cache is byte for byte as it was" "$G16_PW_BEFORE" "$(g16_snap)"
+
+g16_pw_alone
+G16_PW_ALL="$TMP/g16-pw-all.txt"
+printf 'n\n' | run_payload "$REMOVE_SH" --all > "$G16_PW_ALL" 2>&1
+expect_eq "16 playwright --all: remove exits 0" "0" "$?"
+expect_eq "16 playwright --all: the two lines, the by-hand one byte for byte" \
+  "yes" "$(g16_pair "$G16_PW_ALL" playwright-chromium "$(g16_plan playwright-chromium)")"
+expect_absent "16 playwright --all: …it is not on the page" "• remove playwright-chromium" "$(cat "$G16_PW_ALL")"
+expect_absent "16 playwright --all: …no line of the door removes the cache whole" \
+  "rm -rf $(g16_home "$G16_PW_CACHE")" "$(cat "$G16_PW_ALL")"
+expect_eq "16 playwright --all: …named to remove by hand" "playwright-chromium" "$(g16_byhand "$G16_PW_ALL")"
+expect_eq "16 playwright --all: …npx was never called" "" "$(g16_npx_calls)"
+expect_eq "16 playwright --all: …nothing was asked to remove anything" "" "$(g16_acts)"
+expect_eq "16 playwright --all: …and the cache is byte for byte as it was" "$G16_PW_BEFORE" "$(g16_snap)"
+env -i PATH="$BIN" BIONIC_TEST_CALLS="$CALLS" BIONIC_PLAYWRIGHT_CACHE="$TMP/g16-pw-probe" npx --version >/dev/null 2>&1
+expect_ne "16 playwright: the npx call extractor reads a call the recorder logged" "" "$(g16_npx_calls)"
+
+# One line, no wider than the pnpm line it is modelled on (both from the interactive run).
+G16_PW_INT="$(g16_byhand_line "$G16_INT" playwright-chromium)"
+G16_PNPM_INT="$(g16_byhand_line "$G16_INT" motion)"
+expect_ne "16 playwright width: the interactive run printed the pnpm line (the width extractor reads)" "" "$G16_PNPM_INT"
+expect_true "16 playwright width: the playwright line is no wider than the pnpm line" \
+  test "${#G16_PW_INT}" -gt 0 -a "${#G16_PW_INT}" -le "${#G16_PNPM_INT}"
+
+# ── T88's mutant: the old arm, `rm -rf` over the whole cache, in a doctored copy ──
+G16_M3="$TMP/payload-g16-t88-rmrf"
+rm -rf "$G16_M3"; cp -R "$PAYLOAD" "$G16_M3"
+cat >> "$G16_M3/scripts/lib/deps.sh" <<'MUT'
+eval "_g16_t88_$(declare -f _dep_remove_plan)"
+_dep_remove_plan() {
+  if [ "$(dep_field "$1" install_fn_or_check)" = playwright-browser ]; then
+    echo "rm -rf $(_dep_playwright_cache)"; return 0
+  fi
+  _g16_t88__dep_remove_plan "$@"
+}
+MUT
+expect_true "16 mutant rm -rf: the doctored library still parses" bash -n "$G16_M3/scripts/lib/deps.sh"
+g16_pw_alone
+G16_M3_OUT="$TMP/g16-t88-rmrf.txt"
+FH_PAYLOAD="$G16_M3" run_payload "$G16_M3/scripts/remove.sh" --only tool:playwright-chromium < /dev/null \
+  > "$G16_M3_OUT" 2>&1
+expect_eq "16 mutant rm -rf: the mutant run named the row with the old line" \
+  "yes" "$(g16_pair "$G16_M3_OUT" playwright-chromium "rm -rf $(g16_home "$G16_PW_CACHE")")"
+expect_eq "16 mutant rm -rf: …and the byte-for-byte row reads it red" \
+  "no" "$(g16_pair "$G16_M3_OUT" playwright-chromium "$(g16_plan playwright-chromium)")"
+
+# ── T88: a store entry is read where it begins, never as the tail of a longer name ──
+# The v11 index holds `name@version` strings; `framer-motion@…` is not motion, and
+# `undici-types@…` is not types. A scoped name matches by its whole `@scope/name`.
+g16_store() {  # <entry>... — a fresh home whose pnpm store index holds exactly these entries
+  fresh_home
+  : > "${STATE}/npm-global"; : > "${STATE}/mcp"
+  mkdir -p "$G16_PNPM_STORE"
+  { printf 'some binary-ish preamble\n'; printf '%s\n' "$@"; printf 'more\n'; } > "${G16_PNPM_STORE}/index.db"
+  : > "$CALLS"
+}
+g16_store framer-motion@12.0.0
+expect_eq "16 store framer-motion only: motion reads absent" "no|unknown" "$(g16_lib _dep_check_pnpm_store motion)"
+expect_eq "16 store framer-motion only: …the teardown reads it absent" "no" "$(g16_lib dep_teardown_state motion)"
+G16_FR_DOC="$TMP/g16-framer-doctor.txt"
+run_payload "$DOCTOR_SH" < /dev/null > "$G16_FR_DOC" 2>&1
+expect_eq "16 store framer-motion only: …doctor reads motion not installed" "no" "$(dep_present "$G16_FR_DOC" motion)"
+G16_FR_ONLY="$TMP/g16-framer-only.txt"
+run_payload "$REMOVE_SH" --only tool:motion < /dev/null > "$G16_FR_ONLY" 2>&1
+expect_contains "16 store framer-motion only: …remove reports motion not installed" \
+  "motion (not installed) — already clean" "$(cat "$G16_FR_ONLY")"
+expect_eq "16 store framer-motion only: …and does not name it" \
+  "no" "$(g16_pair "$G16_FR_ONLY" motion "$(g16_plan motion)")"
+g16_store motion@12.42.2
+expect_eq "16 store motion: motion reads present, its version read" "yes|12.42.2" "$(g16_lib _dep_check_pnpm_store motion)"
+G16_MO_DOC="$TMP/g16-motion-doctor.txt"
+run_payload "$DOCTOR_SH" < /dev/null > "$G16_MO_DOC" 2>&1
+expect_eq "16 store motion: …doctor reads it installed (the row extractor reads)" "yes" "$(dep_present "$G16_MO_DOC" motion)"
+g16_store framer-motion@13.0.0 motion@12.42.2
+expect_eq "16 store both: motion reads present with its own version, not framer-motion's" \
+  "yes|12.42.2" "$(g16_lib _dep_check_pnpm_store motion)"
+g16_store undici-types@7.18.2
+expect_eq "16 store undici-types only: types reads absent" "no|unknown" "$(g16_lib _dep_check_pnpm_store types)"
+g16_store @scope/pkg@1.2.3
+expect_eq "16 store scoped: a scoped name reads present by its whole name" \
+  "yes|1.2.3" "$(g16_lib _dep_check_pnpm_store @scope/pkg)"
+expect_eq "16 store scoped: …and its bare name does not" "no|unknown" "$(g16_lib _dep_check_pnpm_store pkg)"
+g16_store lodashxget@4.4.2
+expect_eq "16 store dotted: a dot in the name is a dot, not any byte" \
+  "no|unknown" "$(g16_lib _dep_check_pnpm_store lodash.get)"
+g16_store lodash.get@4.4.2
+expect_eq "16 store dotted: …and the dotted name itself reads present" \
+  "yes|4.4.2" "$(g16_lib _dep_check_pnpm_store lodash.get)"
+
+# ── T88's mutant: the anchor taken off the match, in a doctored copy ──
+G16_M4="$TMP/payload-g16-t88-unanchored"
+rm -rf "$G16_M4"; cp -R "$PAYLOAD" "$G16_M4"
+G16_ANCHOR='(^|[^A-Za-z0-9@/_.-])'
+G16_M4_SRC="$(cat "$G16_M4/scripts/lib/deps.sh")"
+expect_contains "16 mutant unanchored: the library carries the anchor the mutant removes" "$G16_ANCHOR" "$G16_M4_SRC"
+printf '%s\n' "${G16_M4_SRC//"$G16_ANCHOR"/}" > "$G16_M4/scripts/lib/deps.sh"
+expect_absent "16 mutant unanchored: …and the doctored copy no longer does" "$G16_ANCHOR" \
+  "$(cat "$G16_M4/scripts/lib/deps.sh")"
+expect_true "16 mutant unanchored: the doctored library still parses" bash -n "$G16_M4/scripts/lib/deps.sh"
+g16_store framer-motion@12.0.0
+expect_eq "16 mutant unanchored: the framer-motion row reads motion present again" "yes|12.0.0" \
+  "$(env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_PNPM_STORE="$G16_PNPM_STORE" \
+       bash -c '. "$1"; _dep_check_pnpm_store motion' _ "$G16_M4/scripts/lib/deps.sh" 2>/dev/null)"
 
 # ── standalone: unchanged ──
 g16_plant
