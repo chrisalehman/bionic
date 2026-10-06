@@ -10,7 +10,7 @@ Versioning follows semver from 1.9.0 on:
   or an upgrade step.
 - **PATCH** for a fix within existing behaviour.
 
-## 1.12.0 — 2026-10-05
+## 1.12.0 — 2026-10-06
 
 **Upgrade before you run `/bionic:setup` or `/bionic:remove` again.** In 1.11.0, setup and
 remove can delete lines of your shell rc that are not bionic's, in six ways. 1.12.0 fixes all
