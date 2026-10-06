@@ -740,4 +740,148 @@ expect_true "(u2m) MUTANT the ready guard removed: a landing tree is built first
 expect_eq "(u2m) …and the publish's own guard still refuses it, GUARD first, nothing published" "1 GUARD T1 .bionic $TU2 $HU2" \
   "$(cat "$WORLD_ROOT/u-T1.out.rc" 2>/dev/null) $(head -1 "$WORLD_ROOT/u-T1.out") $(ll_head "$RU2")"
 
+# ============================================================================ what a red means (wave-28 T5)
+#
+# REQ-9, D8: a run with no verdict (a signal, a failed start, no end line) keeps the entry's place
+# and the suite is asked again; a second sets the entry `stalled` (exit 70). A red is the row's only
+# when it is new: the suite is run once at the accepted head in the landing tree, remembered per head,
+# and a candidate whose failing lines all fail there too is `standing`, not the row's. The declared
+# debt is §LAND-DEBT's (tests/worktree.test.sh). Each suite below ends as the harness ends one: `PASS:`
+# and `FAIL:` lines, then the verdict line `<file>: <p>/<t> passed, <f> failed …`.
+ll_flaky_body() {  # <tag> <name> <runs with no verdict> <kill|none> — later runs are green
+  local cut="kill -9 \$\$"
+  [ "$4" = none ] && cut="exit 0"
+  printf 'n=$(cat "$LL_SIG/%s.n" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$LL_SIG/%s.n"\necho "PASS: run $n"\nif [ "$n" -le %s ]; then %s; fi\necho; echo "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"; exit 0\n' \
+    "$1" "$1" "$3" "$cut" "$2"
+}
+ll_results() {  # <root> <row> <commit> -> the results of the verdicts on <commit>, in record order
+  ll_ev "$1" verdict | awk -F'|' -v r="row=$2" -v c="commit=$3" '$3 == r && $4 == c' \
+    | sed 's/.*|result=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//'
+}
+ll_last_cand() { ll_field "$(ll_ev "$1" candidate | awk -F'|' -v r="row=$2" '$3 == r' | tail -1)" commit; }   # <root> <row>
+ll_kill_bg() {  # <pid> — a background drive and every process under it
+  _line_kill_tree "$1" 2>/dev/null; kill "$1" 2>/dev/null; wait "$1" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+section "§NOVERDICT: a run with no verdict sends nothing back; the suite is asked again (AC-9.1)"
+RV="$(ll_rworld)"
+ll_commit_suite "$RV" T1 a "$(ll_flaky_body v1 a 1 kill)"
+ll_verb "$RV" T1
+KV="$(ll_last_cand "$RV" T1)"
+expect_nonempty "(v1-pre) a candidate was built" "$KV"
+expect_eq "(v1) a run killed by a signal, then a green one: ready exits 0" "0" "$LL_RC"
+expect_match "(v1) …printing LANDED" "LANDED T1 ${KV}*" "$LL_OUT"
+expect_absent "(v1) …and no RED" "RED " "$LL_OUT"
+expect_eq "(v1) the suite was asked again on the one candidate: none, then green" "none green" "$(ll_results "$RV" T1 "$KV")"
+expect_regex "(v1) …the none verdict names its own log" \
+  "\\|commit=${KV}\\|suite=a.test.sh\\|result=none\\|log=${RV}/.bionic/docs/record/wave-x/line/T1-a-${KV:0:12}.log\\|" "$(ll_ev "$RV" verdict)"
+expect_eq "(v1) the row is published, never returned" "T1|" \
+  "$(ll_ev "$RV" published | sed 's/.*|row=\([^|]*\)|.*/\1/')|$(ll_ev "$RV" returned)"
+RV2="$(ll_rworld)"
+ll_commit_suite "$RV2" T1 a "$(ll_flaky_body v2 a 1 none)"
+ll_verb "$RV2" T1
+KV2="$(ll_last_cand "$RV2" T1)"
+expect_eq "(v2) a run that exits 0 with no end line is no verdict, not green: none, then green, published" "0 none green" \
+  "$LL_RC $(ll_results "$RV2" T1 "$KV2")"
+
+# ---------------------------------------------------------------------------
+section "§STALLED: a second run with no verdict stalls the entry; no third run starts; the line passes over it (AC-9.2)"
+RT="$(ll_rworld)"; HT="$(ll_head "$RT")"
+( cd "$RT/.worktrees/T1" && world_suite a none >/dev/null ) && git -C "$RT/.worktrees/T1" commit -qam "T1: a ends early"
+ll_verb "$RT" T1
+KT="$(ll_last_cand "$RT" T1)"
+LT1="$RT/.bionic/docs/record/wave-x/line/T1-a-${KT:0:12}.log"; LT2="$RT/.bionic/docs/record/wave-x/line/T1-a-${KT:0:12}-2.log"
+expect_eq "(t1) two runs with no end line: ready exits 70" "70" "$LL_RC"
+expect_eq "(t1) …printing STALLED and both logs" "STALLED T1 ${LT1},${LT2}" "$LL_OUT"
+expect_regex "(t1) …one stalled event naming both logs" "^line/v1\\|ev=stalled\\|row=T1\\|logs=${LT1},${LT2}\\|at=[0-9T:-]+Z$" "$(ll_ev "$RT" stalled)"
+expect_eq "(t1) …two runs, no third" "none none" "$(ll_results "$RT" T1 "$KT")"
+expect_eq "(t1) …the entry kept on the line, stalled, nothing returned or published" "T1 stalled||$HT" \
+  "$(line_state "$(ll_plan "$RT")" | cut -f1,7 | tr '\t' ' ')|$(ll_ev "$RT" returned)|$(ll_head "$RT")"
+RT2="$(ll_rworld)"
+( cd "$RT2/.worktrees/T1" && world_suite a kill >/dev/null ) && git -C "$RT2/.worktrees/T1" commit -qam "T1: a is killed"
+ll_verb "$RT2" T1
+expect_eq "(t2) two runs killed by a signal: exit 70, two none verdicts" "70 none none" "$LL_RC $(ll_results "$RT2" T1 "$(ll_last_cand "$RT2" T1)")"
+RT3="$(ll_world)"; ll_launch "$RT3" T1 z
+ll_verb "$RT3" T1
+expect_eq "(t3) a suite that cannot start (the candidate has no tests/z.test.sh): exit 70, two none verdicts" "70 none none" \
+  "$LL_RC $(ll_results "$RT3" T1 "$(ll_last_cand "$RT3" T1)")"
+# (t4) the publish passes over a stalled entry ahead, as the base rule does (read-adversarial-p8 #3).
+RT4="$(ll_world)"; HT4="$(ll_head "$RT4")"
+ll_ready "$RT4" T1 "$(ll_carrier)" >/dev/null; ll_cand "$RT4" T1 "$HT4" >/dev/null
+line_event "$(ll_plan "$RT4")" stalled row=T1 logs=x.log,y.log >/dev/null
+ll_ready "$RT4" T2 "$(ll_carrier)" >/dev/null; KT4="$(ll_cand "$RT4" T2 "$HT4")"; ll_green "$RT4" T2 "$KT4"
+expect_eq "(t4-pre) T1 is present and stalled ahead of T2, whose base the base rule makes the accepted head" \
+  "T1 yes stalled|T2 yes $HT4" \
+  "$(line_state "$(ll_plan "$RT4")" | awk -F'\t' '$1 == "T1" { a = $1 " " $4 " " $7 } $1 == "T2" { b = $1 " " $4 " " $5 } END { print a "|" b }')"
+ll_pub "$RT4" T2
+expect_eq "(t4) the publish passes over the stalled entry: T2 is published (rc 0)" "0 $KT4" "$LL_RC $(ll_head "$RT4")"
+# (t5) the writer says ready again after STALLED: the entry is carried again, and lands.
+RT5="$(ll_rworld)"
+ll_commit_suite "$RT5" T1 a "$(ll_flaky_body t5 a 2 kill)"
+ll_verb "$RT5" T1
+expect_eq "(t5-pre) the first ready stalls" "70" "$LL_RC"
+ll_verb_bg "$RT5" T1 "$WORLD_ROOT/t5.out"; T5_BG=$!
+ll_wait_file "$WORLD_ROOT/t5.out.rc" 300 || ll_kill_bg "$T5_BG"
+expect_eq "(t5) ready again after STALLED carries the entry and lands it (a third run, asked for)" "0 none none green" \
+  "$(cat "$WORLD_ROOT/t5.out.rc" 2>/dev/null) $(ll_results "$RT5" T1 "$(ll_last_cand "$RT5" T1)")"
+# MUTANT: the second-none branch removed. The suite is asked a third time.
+RT6="$(ll_rworld)"
+( cd "$RT6/.worktrees/T1" && world_suite a none >/dev/null ) && git -C "$RT6/.worktrees/T1" commit -qam "T1: a ends early"
+LL_MUTANT='s/-ge 2 \]/-ge 99 ]/' LL_MUTANT_FN=_line_carry ll_drive "$RT6" T1 "$WORLD_ROOT/t6.out"; T6_BG=$!
+i=0; while [ "$i" -lt 300 ] && [ "$(ll_ev "$RT6" verdict | grep -c 'result=none')" -lt 3 ]; do sleep 0.1; i=$((i + 1)); done
+ll_kill_bg "$T6_BG"
+expect_eq "(t6m-pre) the mutant ran: the row entered the line" "1" "$(ll_ev "$RT6" ready | awk 'END { print NR }')"
+expect_true "(t6m) MUTANT second-none branch removed: a third run starts (the rows can fail)" \
+  test "$(ll_ev "$RT6" verdict | grep -c 'result=none')" -ge 3
+expect_eq "(t6m) …and no stalled event" "" "$(ll_ev "$RT6" stalled)"
+
+# ---------------------------------------------------------------------------
+section "§STANDING: a red that fails at the accepted head too is the branch's, not the row's (AC-9.3)"
+#
+# The working branch carries its own red: `a` fails `FAIL: a planted red` at the accepted head, and
+# fails one line more when a file `extra-fail` is present. T1 commits that file (a red it adds); T2
+# adds nothing to `a`.
+ll_standing_world() {  # -> root
+  local r
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T1 a; ll_launch "$r" T2 a
+  printf '#!/bin/bash\necho "PASS: a ran"\necho "FAIL: a planted red"\n[ ! -f extra-fail ] || echo "FAIL: $(cat extra-fail)"\necho; echo "a.test.sh: 1/2 passed, 1 failed  sections=1 setup=0"; exit 1\n' \
+    > "$r/tests/a.test.sh"
+  git -C "$r" commit -qam "the branch's own red" || return 1
+  printf 'T1 adds this\n' > "$r/.worktrees/T1/extra-fail"
+  git -C "$r/.worktrees/T1" add extra-fail && git -C "$r/.worktrees/T1" commit -qm "T1: one failing line more" || return 1
+  printf '%s' "$r"
+}
+RS="$(ll_standing_world)"; HS="$(ll_head "$RS")"
+ll_verb "$RS" T1
+KS1="$(ll_last_cand "$RS" T1)"
+LS1="$RS/.bionic/docs/record/wave-x/line/T1-a-${KS1:0:12}.log"; LSH="$RS/.bionic/docs/record/wave-x/line/T1-a-${HS:0:12}.log"
+expect_eq "(s1) a red that adds a failing line is the row's: exit 1, RED and the candidate's log" "1|RED T1 a.test.sh $LS1" "$LL_RC|$LL_OUT"
+expect_regex "(s1) …after the suite ran once at the accepted head, in the landing tree, red there too" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${HS}\\|suite=a.test.sh\\|result=red\\|log=${LSH}\\|" "$(ll_ev "$RS" verdict)"
+expect_contains "(s1) …its log is the head's own run" "FAIL: a planted red" "$(cat "$LSH" 2>/dev/null)"
+expect_eq "(s1) …no standing event, the row returned" "|T1" \
+  "$(ll_ev "$RS" standing)|$(ll_ev "$RS" returned | sed 's/.*|row=\([^|]*\)|.*/\1/')"
+ll_verb "$RS" T2
+KS2="$(ll_last_cand "$RS" T2)"
+expect_eq "(s2) a red whose failing lines all fail at the head: T2 is published (exit 0)" "0 $KS2" "$LL_RC $(ll_head "$RS")"
+expect_eq "(s2) …its own verdict red on its candidate" "red" "$(ll_results "$RS" T2 "$KS2")"
+expect_eq "(s2) …the head's run remembered for that head: one run there, not two" "1" \
+  "$(ll_ev "$RS" verdict | grep -c "|commit=${HS}|")"
+expect_regex "(s2) …one standing event for that head, its failing lines and the head's log" \
+  "^line/v1\\|ev=standing\\|head=${HS}\\|suite=a.test.sh\\|lines=1\\|log=${LSH}\\|at=[0-9T:-]+Z$" "$(ll_ev "$RS" standing)"
+git -C "$RS/.worktrees/T1" rm -q extra-fail && git -C "$RS/.worktrees/T1" commit -qm "T1: the added line taken out"
+ll_verb "$RS" T1
+expect_eq "(s3) the same row without its line, on a new head: published (exit 0)" "0" "$LL_RC"
+expect_eq "(s3) …the new head runs the suite once more: T1's run at T2's commit, a second standing event" "1 2" \
+  "$(ll_ev "$RS" verdict | grep -c "|row=T1|commit=${KS2}|") $(ll_ev "$RS" standing | awk 'END { print NR }')"
+# MUTANT: the comparison inverted. T1's added line is taken for the branch's, and T1 publishes.
+RSM="$(ll_standing_world)"
+LL_MUTANT='s/-eq 0 \]/-ne 0 ]/' LL_MUTANT_FN=_line_red_owner ll_drive "$RSM" T1 "$WORLD_ROOT/sm.out"
+ll_wait_file "$WORLD_ROOT/sm.out.rc" 300
+expect_eq "(s4m-pre) the mutant ran: T1 was proved on a candidate" "red" "$(ll_results "$RSM" T1 "$(ll_last_cand "$RSM" T1)")"
+expect_eq "(s4m) MUTANT comparison inverted: a red the row adds is published (the rows can fail)" "0 T1" \
+  "$(cat "$WORLD_ROOT/sm.out.rc" 2>/dev/null) $(ll_ev "$RSM" published | sed 's/.*|row=\([^|]*\)|.*/\1/')"
+
 finish

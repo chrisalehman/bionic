@@ -13057,4 +13057,37 @@ expect_eq "SEV-cur4 §CUR8-sev …and current 8 is admitted on it: deferrals and
   "$RC|$(sed -n 's/^current: //p' "$PSEV")"
 POKE_BOUND="$SEV_BOUND_WAS"
 
+# ============================================================
+section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
+# ============================================================
+#
+# `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's)
+# and `stalled` when an entry's runs twice gave no verdict. The tick reads both off the bound plan's
+# landing record and prints each as a note, once: a second tick over the same record says nothing of
+# them, and a new event is told by the next tick.
+# FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events are PLANTED in the
+# Interfaces table's `line/v1` shape, which lib/line.sh writes.
+LT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+s60_world lt-tell @A whole
+LT_H1="$(printf 'a%.0s' $(seq 40))"; LT_H2="$(printf 'b%.0s' $(seq 40))"
+printf 'line/v1|ev=standing|head=%s|suite=a.test.sh|lines=3|log=/rec/line/T1-a-%s.log|at=2026-10-06T10:00:00Z\n' "$LT_H1" "${LT_H1:0:12}" >> "$S60_REC"
+printf 'line/v1|ev=stalled|row=T7|logs=/rec/line/T7-b-1.log,/rec/line/T7-b-1-2.log|at=2026-10-06T10:01:00Z\n' >> "$S60_REC"
+lt_lines() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: note: (standing|stalled) ' | tr '\n' '|' | sed 's/|$//'; }
+s60_tick
+expect_eq "LT1 the tick tells the standing red: suite, head, its failing lines and the head's log" \
+  "poker: note: standing a.test.sh at ${LT_H1:0:12} — 3 failing line(s) fail at the accepted head too: the branch's red, not a row's; log /rec/line/T1-a-${LT_H1:0:12}.log" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: note: standing ')"
+expect_eq "LT2 …and the stalled entry, with both its logs" \
+  "poker: note: stalled T7 — two runs ended with no verdict and no third starts; logs /rec/line/T7-b-1.log,/rec/line/T7-b-1-2.log" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: note: stalled ')"
+s60_tick
+expect_nonempty "LT3-pre the second tick printed (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: ')"
+expect_eq "LT3 a second tick over the same record tells neither again" "" "$(lt_lines)"
+printf 'line/v1|ev=standing|head=%s|suite=a.test.sh|lines=1|log=/rec/line/T2-a-%s.log|at=2026-10-06T10:02:00Z\n' "$LT_H2" "${LT_H2:0:12}" >> "$S60_REC"
+s60_tick
+expect_eq "LT4 a new standing event, on a new head, is told by the next tick, alone" \
+  "poker: note: standing a.test.sh at ${LT_H2:0:12} — 1 failing line(s) fail at the accepted head too: the branch's red, not a row's; log /rec/line/T2-a-${LT_H2:0:12}.log" \
+  "$(lt_lines)"
+POKE_BOUND="$LT_BOUND_WAS"
+
 finish
