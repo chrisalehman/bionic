@@ -42,6 +42,13 @@ PROOF_READER_ROLES="bionic:auditor bionic:critic bionic:reviewer"
 PROOF_DEALING="tested=bionic:critic,bionic:critic,bionic:critic peer-reviewed=bionic:auditor,bionic:critic,bionic:critic audited=bionic:auditor,bionic:critic,bionic:reviewer"
 # The questions that read the code; at wave scale each also owes one read of the whole (D10).
 PROOF_CODE_QUESTIONS="adversarial structure"
+# THE SEVERITY SCALE'S TWO CLOSED SETS AND ITS TABLE (wave-28 T15; D19, AC-8.1, AC-8.3): a finding's
+# severity and reach, and the one priority each pair gives, `<S>:<reach>=<fix|defer|note>`. This
+# is the table's one definition: `proof_priority` reads it, and every awk that rates a finding is
+# handed it whole through its environment.
+PROOF_SEVERITIES="S1 S2 S3 S4"
+PROOF_REACHES="on off"
+PROOF_PRIORITY="S1:on=fix S1:off=fix S2:on=fix S2:off=defer S3:on=defer S3:off=note S4:on=note S4:off=note"
 
 # proof_kind_ok <kind> -> 0 when <kind> is one of PROOF_KINDS.
 proof_kind_ok() {
@@ -84,8 +91,12 @@ proof_waiver_line() {
 # with `check: <id> <answer> <reason>`, the answer one of PROOF_CHECK_ANSWERS: a checks file that
 # cannot be read, or names no id, refuses. Its result is one the checks bear out (F6): `pass`
 # beside no FLAG or FAIL check, `flag` beside no FAIL.
+# THE FINDINGS (wave-28 T15; D19): with <severity> 1 — the reader's roster row says it was pushed
+# the severity scale (`proof_pushed_severity`) — the pass must also carry its findings in the form
+# `proof_findings` reads, and its result is the one they derive (`proof_findings_result`). Without
+# it the record is read as 1.12.0 read it, every finding line ignored (AC-8.8).
 proof_reading() {
-  local rec="$1" q="$2" ck="${3:-}" span got rv rq rr rs ids miss worst
+  local rec="$1" q="$2" ck="${3:-}" sev="${4:-}" span got rv rq rr rs ids miss worst
   span="$(awk '/^reviewed:[ \t]/ { if (n++) exit } n' "$rec" 2>/dev/null)"
   [ -n "$span" ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
   # A READING RECORD IS ONE PASS, AND A KEY IS GIVEN ONCE IN IT (wave-27 T45; review pass 16
@@ -145,6 +156,13 @@ PROOF_READING
         printf 'the structure reading %s says result: %s beside check: %s; a pass stands beside no FLAG or FAIL check and a flag beside no FAIL, so write the result its checks give' "$rec" "$rr" "$worst"; return 1 ;;
     esac
   fi
+  # THE RESULT IS DERIVED FROM THE FINDINGS (wave-28 T15; D19, AC-8.4), when the reader was pushed the scale.
+  if [ "$sev" = 1 ]; then
+    got="$(_proof_findings_span "$rec" "$span")" || { printf '%s' "$got"; return 1; }
+    worst="$(proof_findings_result "$got")"
+    [ "$rr" = "$worst" ] \
+      || { printf 'the reading %s says result: %s, but its findings give %s (a finding to fix gives fail, any other finding flag, none pass); write result: %s' "$rec" "$rr" "$worst" "$worst"; return 1; }
+  fi
   printf '%s %s %s' "$rr" "$rs" "$rv"
 }
 
@@ -154,6 +172,171 @@ proof_word_in() {
   local w
   for w in $2; do [ "$1" = "$w" ] && return 0; done
   return 1
+}
+
+# ---------- A FINDING'S SEVERITY AND REACH (wave-28 T15; REQ-8, D19) ----------
+#
+# A reader pushed the severity scale writes each finding it rates, flush-left in its one pass:
+#
+#     findings: <n>
+#     finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>
+#     shown: <n> <command>             for a finding the table sends to fix
+#     unsure: <n> <what is not known>  for a finding that owes a check
+#
+# The record writes no priority: the table gives it (`proof_priority`), and a `priority: <n> <word>`
+# line that differs from the table is refused. The result follows from the priorities
+# (`proof_findings_result`). At registration `proof-add` writes the plan's `deferred:` and `check:`
+# lines (`proof_finding_lines`); the tick and `release-check` print them with their priority
+# (`proof_findings_owed`).
+
+# proof_pushed_severity <pushed> -> 0 when the roster row's `pushed=` value (the context files the
+# recorder pushed at start, comma-joined) names `severity`. The key is read through `roster_row`,
+# its one definition (lib/roster.sh): while `roster_row` does not know `pushed` (rc 2), no row
+# carries it, so the reader was not pushed the scale and its record is read as 1.12.0 read it.
+proof_pushed_severity() {
+  declare -F roster_row >/dev/null 2>&1 && roster_row pushed=x >/dev/null 2>&1 || return 1
+  case ",${1:-}," in *,severity,*) return 0 ;; *) return 1 ;; esac
+}
+
+# proof_priority <S> <reach> -> `fix`, `defer` or `note`, the table's one cell; exit 1 when either is
+# outside its set.
+proof_priority() {
+  local c
+  for c in $PROOF_PRIORITY; do
+    [ "${c%%=*}" = "${1:-}:${2:-}" ] && { printf '%s' "${c#*=}"; return 0; }
+  done
+  return 1
+}
+
+# proof_findings <record> -> the findings of the record's one pass (from its `reviewed:` line), one
+# tab-separated line each, in the order written:
+#
+#     <n> <S> <reach> <path:line|-> <fix|defer|note> <shown 1|0> <unsure 1|0> <title>
+#
+# exit 0 (nothing printed for `findings: 0`); or exit 1 with one sentence saying what the findings
+# lack and what to write (the verb's refusal). The rules: a `findings: <n>` line, given once; that
+# many `finding:` lines, each number once, each severity and reach from its set, a `<path>:<line>`
+# or `-`, and a title; a `shown:`, `unsure:` or `priority:` line names a finding the record holds;
+# a written priority is the table's; and a finding the table sends to fix carries a `<path>:<line>`
+# with a `shown:` line, or an `unsure:` line.
+proof_findings() {
+  local span
+  span="$(awk '/^reviewed:[ \t]/ { if (n++) exit } n' "$1" 2>/dev/null)"
+  [ -n "$span" ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$1"; return 1; }
+  _proof_findings_span "$1" "$span"
+}
+
+# _proof_findings_span <record> <its pass> -> proof_findings' answer for a pass already cut.
+_proof_findings_span() {
+  local out
+  out="$(printf '%s\n' "$2" | PROOF_REC="$1" PROOF_PRI="$PROOF_PRIORITY" PROOF_SEV="$PROOF_SEVERITIES" PROOF_REACH="$PROOF_REACHES" awk '
+    BEGIN {
+      rec = ENVIRON["PROOF_REC"]
+      n = split(ENVIRON["PROOF_PRI"], c, " ")
+      for (i = 1; i <= n; i++) { k = c[i]; sub(/=.*$/, "", k); v = c[i]; sub(/^[^=]*=/, "", v); pri[k] = v }
+      n = split(ENVIRON["PROOF_SEV"], c, " "); for (i = 1; i <= n; i++) sev[c[i]] = 1
+      n = split(ENVIRON["PROOF_REACH"], c, " "); for (i = 1; i <= n; i++) rch[c[i]] = 1
+    }
+    function bad(m) { if (err == "") err = "the reading " rec " " m }
+    function rest(s, k,   i) { for (i = 0; i < k; i++) sub(/^[^ \t]+[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^findings:/ {
+      if (hf++) { bad("gives findings: twice in its pass; a key is given once"); next }
+      want = rest($0, 1)
+      if (want !~ /^[0-9]+$/) bad("says findings: '"'"'" want "'"'"', which is no count; write findings: <n>, the number of finding: lines")
+      next
+    }
+    /^finding:/ {
+      m = split($0, f, /[ \t]+/); id = f[2]
+      if (id !~ /^[1-9][0-9]*$/) { bad("has a finding: line with no number (" $0 "); write finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>"); next }
+      if (id in S) { bad("gives finding " id " twice; number each finding once"); next }
+      if (!(f[3] in sev)) { bad("rates finding " id " '"'"'" f[3] "'"'"', which is not one of S1, S2, S3 or S4; rate it by the severity scale"); next }
+      if (!(f[4] in rch)) { bad("gives finding " id " the reach '"'"'" f[4] "'"'"', which is not on or off; say whether a user who follows what the run ships meets it"); next }
+      if (f[5] != "-" && f[5] !~ /^[^ \t]+:[0-9]+$/) { bad("names '"'"'" f[5] "'"'"' where finding " id " takes a <path>:<line> or -; write the file and line at the reviewed head, or -"); next }
+      t = rest($0, 5)
+      if (t == "") { bad("gives finding " id " no title; write what is wrong after its <path>:<line> or -"); next }
+      S[id] = f[3]; R[id] = f[4]; W[id] = f[5]; T[id] = t; ord[++cnt] = id
+      next
+    }
+    /^(shown|unsure):/ {
+      m = split($0, f, /[ \t]+/); k = f[1]; sub(/:$/, "", k)
+      if (rest($0, 2) == "") { bad("has a " k ": line with nothing after its number (" $0 "); write " k ": <n> " (k == "shown" ? "<command>" : "<what is not known>")); next }
+      if (k == "shown") sh[f[2]] = 1; else un[f[2]] = 1
+      named[f[2]] = k; next
+    }
+    /^priority:/ { m = split($0, f, /[ \t]+/); wp[f[2]] = f[3]; named[f[2]] = "priority"; next }
+    END {
+      if (err == "" && !hf) err = "the reading " rec " carries no findings: <n> line, and its reader was pushed the severity scale; write findings: <n> and one finding: line per finding (findings: 0 when it found none)"
+      if (err == "" && cnt != want + 0) bad("says findings: " want " but holds " cnt " finding: lines; write one finding: line per finding, and the count they make")
+      for (k in named) if (err == "" && !(k in S)) bad("has a " named[k] ": line for finding " k ", which it does not hold; name a finding it numbers")
+      for (i = 1; i <= cnt && err == ""; i++) {
+        id = ord[i]; p = pri[S[id] ":" R[id]]
+        if ((id in wp) && wp[id] != p) bad("writes priority " wp[id] " for finding " id ", but the table gives " S[id] " " R[id] " " p "; a record writes no priority, so remove the line")
+        else if (p == "fix" && !((W[id] != "-" && (id in sh)) || (id in un))) bad("sends finding " id " (" S[id] " " R[id] ") to fix, but shows it nowhere; write its <path>:<line> and shown: " id " <command>, or unsure: " id " <what is not known>")
+      }
+      if (err != "") { print "!" err; exit }
+      for (i = 1; i <= cnt; i++) { id = ord[i]; printf "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n", id, S[id], R[id], W[id], pri[S[id] ":" R[id]], (id in sh), (id in un), T[id] }
+    }')"
+  case "$out" in '!'*) printf '%s' "${out#!}"; return 1 ;; esac
+  [ -z "$out" ] || printf '%s\n' "$out"
+}
+
+# proof_findings_result <proof_findings lines> -> `fail` when one is to fix, else `flag` when there
+# are any, else `pass` (the interfaces' derived result).
+proof_findings_result() {
+  printf '%s\n' "${1:-}" | awk -F'\t' 'NF >= 5 { n++; if ($5 == "fix") f = 1 } END { print (f ? "fail" : (n ? "flag" : "pass")) }'
+}
+
+# proof_finding_lines <record path> <proof_findings lines> -> the plan lines registration writes inside
+# `## SDLC State`, newline-terminated: `deferred: <record>#<n> <S> <reach> "<title>"` for each finding
+# the table defers, then `check: <record>#<n> <S> <reach> "<title>"` for each unsure one; nothing for
+# a note, nor for a finding to fix, which the verdict carries. A `"` in a title is written `'`, so the
+# quoted title ends where its line does.
+proof_finding_lines() {
+  printf '%s\n' "${2:-}" | REC="$1" awk -F'\t' '
+    NF >= 8 { t = $8; gsub(/"/, "'"'"'", t); l = ENVIRON["REC"] "#" $1 " " $2 " " $3 " \"" t "\""
+              if ($5 == "defer") d = d "deferred: " l "\n"
+              if ($7 == 1) c = c "check: " l "\n" }
+    END { printf "%s%s", d, c }'
+}
+
+# proof_finding_rating <plan> <record>#<n> <S> <reach> -> `<S> <reach>`, the rating a REGISTERED
+# finding is read at, or nothing when it is dropped.
+#
+# THE SEAM FOR THE EFFECTIVE RATING (wave-28 T15 leaves it unbuilt; rows T41 and T42 fill it). Every
+# read of a registered record's findings passes each finding through here, and this is the one
+# place the effective rating is applied: a `check:` line for <record>#<n> carrying ` settled=<S>:<reach>`
+# gives that rating; one carrying ` refuted` drops the finding (print nothing); one carrying
+# neither holds the step (T41's `current 8` refusal); a `moved: <record>#<n> to=<defer|fix>` line
+# gives the priority it was moved to (T42). Until they land it returns the rating the record wrote,
+# which is the table's input. lib/proof.sh `facts_state` reads a reading's result from its proof
+# line; once a finding can be re-rated, that read derives the result again through here.
+proof_finding_rating() {
+  printf '%s %s' "$3" "$4"
+}
+
+# proof_findings_owed <plan> -> one line per finding the plan's `## SDLC State` carries a `deferred:` or
+# `check:` line for, in the order first written, rated through `proof_finding_rating` and given the
+# table's priority: `<record>#<n> <S> <reach> <fix|defer|note> "<title>"`. What the tick and
+# `release-check` print, so the priority a record never states is seen where the run is judged.
+proof_findings_owed() {
+  local plan="$1" id s r t p
+  [ -f "$plan" ] || return 0
+  while IFS='	' read -r id s r t; do
+    [ -n "$id" ] || continue
+    set -- $(proof_finding_rating "$plan" "$id" "$s" "$r")
+    [ $# -eq 2 ] && p="$(proof_priority "$1" "$2")" || continue
+    printf '%s %s %s %s %s\n' "$id" "$1" "$2" "$p" "$t"
+  done <<PROOF_OWED_FINDINGS
+$(awk '
+  /^[[:space:]]*```/ { fence = !fence; next }
+  fence { next }
+  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+  insdlc && /^(deferred|check):[ \t]/ {
+    m = split($0, f, /[ \t]+/); if (m < 4 || (f[2] in seen)) next
+    seen[f[2]] = 1; t = $0; if (match(t, /"[^"]*"/)) t = substr(t, RSTART, RLENGTH); else t = "\"\""
+    printf "%s\t%s\t%s\t%s\n", f[2], f[3], f[4], t
+  }' "$plan")
+PROOF_OWED_FINDINGS
 }
 
 # proof_working_branch <plan> -> the plan's `working-branch:`, or nothing. The `## SDLC State`
@@ -465,7 +648,8 @@ _proof_last_read() {
 # section's last `proved:` or `waived:` line, or, before the first, after the section's last
 # non-blank line. Exit 1 (nothing printed) when the plan has no unfenced `## SDLC State`.
 # Facts and waivers share the one block, so a line's place is its age (wave-27 T9): `facts_state`
-# reads "newer" as "later in the section".
+# reads "newer" as "later in the section". A reading's `deferred:` and `check:` lines (wave-28 T15)
+# follow its proof line and belong to the block, so the next line goes after them, not between.
 proof_add_line() {
   local plan="$1" line="$2"
   [ -f "$plan" ] || return 1
@@ -477,7 +661,7 @@ proof_add_line() {
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); if (insdlc) { seen = 1; lastn = NR }; next }
-    insdlc && /^(proved|waived):[[:space:]]/ { lastp = NR }
+    insdlc && /^(proved|waived|deferred|check):[[:space:]]/ { lastp = NR }
     insdlc && /[^[:space:]]/ { lastn = NR }
     END {
       if (!seen) exit 1

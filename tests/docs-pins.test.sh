@@ -5866,7 +5866,7 @@ W28_T15_ROW="$(/usr/bin/grep -m1 '^| reading record |' "$OPRULES")"
 expect_nonempty "W28-T15a: operational-rules.md carries the reading record row (the extractor reads it)" "$W28_T15_ROW"
 expect_contains "W28-T15a2: …which still names the 1.12.0 keys" '`reviewed: <a>..<b>`, `question: <q>`' "$W28_T15_ROW"
 for w28_t15_pin in \
-  'when the reader'"'"'s roster row carries `severity` in `pushed=`' \
+  'the reader'"'"'s roster row carries `severity` in `pushed=`' \
   '`findings: <n>`' \
   '`finding: <n> <S1\|S2\|S3\|S4> <on\|off> <path>:<line>\|- <title>`' \
   '`shown: <n> <command>`' \

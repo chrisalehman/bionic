@@ -12831,12 +12831,13 @@ sev_rec r-count flag "findings: 2" "finding: 1 S3 off lib/a.sh:3 one of two"
 sev_rec r-none fail
 sev_rec r-twice flag "findings: 2" "finding: 1 S3 off lib/a.sh:3 one" "finding: 1 S4 off - again"
 sev_rec r-where flag "findings: 1" "finding: 1 S3 off lib/a.sh a path with no line"
-for c in "r-nosev:no severity:rates finding 1 'off'" "r-noreach:no reach:the reach 'lib/a.sh:3'" \
-         "r-s5:a severity outside S1 to S4:rates finding 1 'S5'" "r-maybe:a reach outside on and off:the reach 'maybe'" \
-         "r-count:a count that differs from its lines:says findings: 2 but holds 1 finding: lines" \
-         "r-none:no findings: line at all:carries no findings: <n> line" "r-twice:a finding numbered twice:gives finding 1 twice" \
-         "r-where:a location that is neither path:line nor -:names 'lib/a.sh' where finding 1 takes"; do
-  f="${c%%:*}"; rest="${c#*:}"; why="${rest%%:*}"; want="${rest#*:}"
+# Each case is <file>@<what it lacks>@<what the refusal says>.
+for c in "r-nosev@no severity@rates finding 1 'off'" "r-noreach@no reach@the reach 'lib/a.sh:3'" \
+         "r-s5@a severity outside S1 to S4@rates finding 1 'S5'" "r-maybe@a reach outside on and off@the reach 'maybe'" \
+         "r-count@a count that differs from its lines@says findings: 2 but holds 1 finding: lines" \
+         "r-none@no findings: line at all@carries no findings: <n> line" "r-twice@a finding numbered twice@gives finding 1 twice" \
+         "r-where@a location that is neither path:line nor -@names 'lib/a.sh' where finding 1 takes"; do
+  f="${c%%@*}"; rest="${c#*@}"; why="${rest%%@*}"; want="${rest#*@}"
   s42_snap "$RSEV" "$PSEV"; sev_add "$f"
   s42_unchanged "SEV-rate §FACT-rate AC-8.1 a pushed reader's record with $why ($f)" 1 "$PSEV"
   expect_contains "SEV-rate …$f says why" "$want" "$OUT"
@@ -12877,10 +12878,10 @@ expect_eq "SEV-table4 …and one that writes the table's own priority registers 
 sev_rec d-fix-flag flag "findings: 1" "finding: 1 S1 on lib/a.sh:2 data lost" "shown: 1 bash lib/a.sh --lose"
 sev_rec d-defer-fail fail "findings: 1" "finding: 1 S2 off - a side path broken"
 sev_rec d-none-flag flag "findings: 0"
-for c in "d-fix-flag:a finding to fix beside result: flag:its findings give fail" \
-         "d-defer-fail:no finding to fix beside result: fail:its findings give flag" \
-         "d-none-flag:no finding at all beside result: flag:its findings give pass"; do
-  f="${c%%:*}"; rest="${c#*:}"; why="${rest%%:*}"; want="${rest#*:}"
+for c in "d-fix-flag@a finding to fix beside result: flag@its findings give fail" \
+         "d-defer-fail@no finding to fix beside result: fail@its findings give flag" \
+         "d-none-flag@no finding at all beside result: flag@its findings give pass"; do
+  f="${c%%@*}"; rest="${c#*@}"; why="${rest%%@*}"; want="${rest#*@}"
   s42_snap "$RSEV" "$PSEV"; sev_add "$f"
   s42_unchanged "SEV-derive §FACT-derive AC-8.4 $why ($f)" 1 "$PSEV"
   expect_contains "SEV-derive …$f names the derived result" "$want" "$OUT"
