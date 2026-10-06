@@ -30,6 +30,15 @@
 #                      overestimate held until it ages out of the three lines, `times`, an
 #                      unknown request line ignored. Mutations: no peak raised mid-run; four
 #                      lines kept
+#   §REAPED    T47     a request killed earlier is written ended (rc 137) by the next locked act
+#                      and overlaps nothing after: the next run learns its rise; one killed
+#                      during another's run still overlaps it. Mutation: the killed-write removed
+#   §ALONE     T47     an idle gate admits a promise over the room while the reading is at most
+#                      the share; a reading over it still refuses. Mutation: the idle clause removed
+#   §OWN       T47     a second ask by one who for one key, the first still polling, gets a
+#                      number of its own. Mutation: the liveness test on reuse removed
+#   §CLEARED   T47     a request returned 75 has its holder cleared, so a live caller that no
+#                      longer polls keeps no head. Mutation: the clearing removed
 #   §MACHINES  AC-7.3  the admission rows run under three planted machines and decide alike
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
@@ -43,7 +52,8 @@
 # cannot source it exits 127), not one row. Every "waits" row stands beside a positive on the
 # same request (its file exists, its asked line is read). Three mutation arms run on a copy
 # of payload/scripts/lib under the world's directory, each anchored first and each proved
-# to run (its own positive row) before its claim is read; §COST adds two more.
+# to run (its own positive row) before its claim is read; §COST adds two more, and §REAPED,
+# §ALONE, §OWN and §CLEARED one each (T47).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The machine, the clock and the cost records are SYNTHESIZED by design (the world's
@@ -102,16 +112,23 @@ fi
 #   CHILD=<n>  once admitted, run asker <n> for the same kind and key as a CHILD of this
 #              process, with BIONIC_GATE_ADMIT=<id>, before holding
 #   WORK=<sh>  once admitted, run <sh> as a child before holding (processor time for `times`)
+#   AGENT=<a>  ask as agent <a> (the who's second half) instead of <name>, so two askers share a who
+#   LIVE=1     after a 75, stay alive, polling nothing, until <dir>/<name>.go
 # Its own pid is written first, to <name>.pid.
 cat > "$WORLD_ROOT/asker.sh" <<'ASKER'
 d="$1"; n="$2"; kind="$3"; key="$4"; within="$5"
 printf '%s\n' "$$" > "$d/$n.pid"
-export BIONIC_GATE_AGENT="$n"
+export BIONIC_GATE_AGENT="${AGENT:-$n}"
 . "$GATE_LIB" 2>/dev/null
 id="$(gate_ask "$kind" "$key" --within "$within" 2>"$d/$n.err")"; rc=$?
 printf '%s\n' "$id" > "$d/$n.id"
 printf '%s\n' "$rc" > "$d/$n.rc.tmp" && mv "$d/$n.rc.tmp" "$d/$n.rc"
-[ "$rc" = 0 ] || exit 0
+if [ "$rc" != 0 ]; then
+  [ "${LIVE:-0}" = 1 ] || exit 0
+  i=0
+  while [ ! -f "$d/$n.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
+  exit 0
+fi
 if [ -n "${CHILD:-}" ]; then
   ( kid="$CHILD"; unset CHILD HOLD WORK; BIONIC_GATE_ADMIT="$id" bash "$0" "$d" "$kid" "$kind" "$key" 0 )
 fi
@@ -191,7 +208,7 @@ mutant() {  # <name> — a fresh copy of the libraries; prints the copy's gate.s
 # ── §SHARE ───────────────────────────────────────────────────────────────────
 section "§SHARE — one share per machine (AC-2.1)"
 fresh share
-world_machine 8 8192 45 1.0
+world_machine 8 8192 55 1.0
 rm -f "$CLAUDE_CONFIG_DIR/bionic/share"
 expect_eq "S.1 no share file: gate_share prints 80" "80" "$( . "$GATE_LIB" 2>/dev/null; gate_share )"
 for bad in abc 0 101 "" 1234; do
@@ -211,12 +228,12 @@ expect_eq "S.3 project A, its config and plan saying 90, reads the machine's sha
 expect_eq "S.4 project B reads the same share" "50" "$shB"
 rA="$(cd "$D/projA" && ask_fg a work k 0)"
 rB="$(cd "$D/projB" && ask_fg b work k 0)"
-expect_eq "S.5 at share 50, used 45 + a promise of 10 is refused in project A (rc 75)" "75" "$rA"
+expect_eq "S.5 at share 50, a reading of 55 is refused in project A (rc 75)" "75" "$rA"
 expect_eq "S.6 and in project B (rc 75)" "75" "$rB"
 expect_eq "S.7 project A's request names its tree" "$(cd "$D/projA" && pwd -P)" "$(field "$(req_of a)" tree)"
 expect_eq "S.8 project B's request names its own" "$(cd "$D/projB" && pwd -P)" "$(field "$(req_of b)" tree)"
 printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
-expect_eq "S.9 the same ask at share 80 is admitted (55 ≤ 80)" "0" "$(cd "$D/projA" && ask_fg a2 work k 0)"
+expect_eq "S.9 the same ask at share 80 is admitted (55 + 10 ≤ 80)" "0" "$(cd "$D/projA" && ask_fg a2 work k 0)"
 expect_eq "S.10 the store defaults to \$CLAUDE_CONFIG_DIR/bionic/gate" "$CLAUDE_CONFIG_DIR/bionic/gate" \
   "$( unset BIONIC_GATE_DIR; . "$GATE_LIB" 2>/dev/null; gate_dir )"
 
@@ -581,6 +598,204 @@ expect_eq "D.14 gate_end of a request that does not exist exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_end 999 0 2>/dev/null; echo $? )"
 expect_eq "D.15 gate_ask with an unknown kind exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_ask fast k 2>/dev/null; echo $? )"
+
+# ── §REAPED ──────────────────────────────────────────────────────────────────
+section "§REAPED — a killed request overlaps nothing once it is seen dead (T47; cost row)"
+# learn_run <gate lib> <name> <kill 0|1> — idle 30. With kill=1 a run of key x is admitted and
+# killed with signal 9, and the clock moves a minute. Then a run of key L is admitted at 30, a
+# reading of 70 is taken mid-run (gate_state), and it ends 30 s later. Sets LR_LINE (cost/L's
+# newest line), LR_KID (the killed request's id) and LR_LIST (gate_list after the run).
+learn_run() {
+  local kp
+  fresh "$2"
+  world_machine 8 8192 30 1.0
+  world_cost L 10 0.5 30
+  world_cost x 5 0.5 30
+  LR_KID=''
+  if [ "$3" = 1 ]; then
+    GATE_LIB="$1" HOLD=1 ask_bg rx work x 0; wait_for 20 has rx.rc
+    LR_KID="$(id_of rx)"; kp="$(cat "$D/rx.pid")"
+    kill -KILL "$kp"; wait_for 20 dead "$kp"
+    world_tick 60
+  fi
+  GATE_LIB="$1" HOLD=1 ask_bg r1 work L 0; wait_for 20 has r1.rc
+  GATE_LIB="$1" BIONIC_PROBE_USED_PCT=70 state >/dev/null
+  world_tick 30
+  release r1
+  LR_LINE="$(tail -n 1 "$BIONIC_GATE_DIR/cost/L" 2>/dev/null)"
+  LR_LIST="$(GATE_LIB="$1" glist)"
+}
+learn_run "$GATE" reaped-control 0
+expect_regex "R.1 control, nothing killed: the run learns its rise, 70-30=40" '^40:[0-9.]+:30:1030$' "$LR_LINE"
+learn_run "$GATE" reaped 1
+expect_eq "R.2 the killed run was admitted, and gate_list lists it killed" "0 1" \
+  "$(rc_of rx) $(printf '%s\n' "$LR_LIST" | grep -c "^${LR_KID:-none} killed ")"
+expect_regex "R.3 a run after it learns the same 40, not the carried 10" '^40:[0-9.]+:30:1090$' "$LR_LINE"
+expect_eq "R.4 the next locked act (that run's admission at 1060) wrote it ended, rc 137" "1060|137" \
+  "$(field "$LR_KID" ended)|$(field "$LR_KID" rc)"
+expect_eq "R.5 and it wrote no cost: cost/x holds its one planted line" "1" \
+  "$(wc -l < "$BIONIC_GATE_DIR/cost/x" | tr -d ' ')"
+fresh reaped-during
+world_machine 8 8192 30 1.0
+world_cost L 10 0.5 30
+world_cost x 5 0.5 30
+HOLD=1 ask_bg r1 work L 0; wait_for 20 has r1.rc
+world_tick 5
+HOLD=1 ask_bg rx work x 0; wait_for 20 has rx.rc
+rx_id="$(id_of rx)"; rx_pid="$(cat "$D/rx.pid")"
+BIONIC_PROBE_USED_PCT=70 state >/dev/null
+kill -KILL "$rx_pid"; wait_for 20 dead "$rx_pid"
+world_tick 25
+release r1
+expect_eq "R.6 two runs admitted, the second five seconds into the first" "0 0" "$(rc_of r1) $(rc_of rx)"
+expect_regex "R.7 one killed while the other ran overlapped it: the survivor carries 10" \
+  '^10:[0-9.]+:30:1030$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/L")"
+expect_eq "R.8 the survivor's gate_end wrote the killed one ended at 1030, rc 137" "1030|137" \
+  "$(field "$rx_id" ended)|$(field "$rx_id" rc)"
+expect_eq "R.9 gate_list still counts it killed, once" "1" "$(glist | grep -c "^${rx_id:-none} killed ")"
+MR="$(mutant reap)"
+anchor "$MR" "rc=137\\n'" 1
+sed -i.bak "/rc=137\\\\n'/d" "$MR"
+learn_run "$MR" reaped-mut 1
+expect_regex "R.10 the mutant (no killed-write) still admits both runs and ends the second" \
+  '^0 [0-9.]+:30:1090$' "$(rc_of rx) ${LR_LINE#*:}"
+expect_regex "R.11 the mutant carries 10 after a kill: the written end is the rule" '^10:' "$LR_LINE"
+
+# ── §ALONE ───────────────────────────────────────────────────────────────────
+section "§ALONE — a promise alone never refuses an idle gate; the reading stays the limit (T47; usage row)"
+# alone_rows <gate lib> <name> — reading 40, share 80, big promised 45 (so 40 + 45 > 80), small
+# promised 3. A big landing asks, then a small work ask behind it. Sets AL_BIG (big's rc),
+# AL_WAIT (the small ask while big runs: waiting or served) and AL_SMALL (its rc at the end).
+alone_rows() {
+  fresh "$2"
+  world_machine 8 8192 40 1.0
+  world_cost big 45 1.0 60
+  world_cost small 3 0.5 20
+  GATE_LIB="$1" HOLD=1 ask_bg ib landing big 0; wait_for 20 has ib.rc
+  AL_BIG="$(rc_of ib)"
+  GATE_LIB="$1" HOLD=1 ask_bg is work small 600; wait_for 20 asked_by is
+  sleep 0.3
+  if has is.rc; then AL_WAIT=served; else AL_WAIT=waiting; fi
+  [ "$AL_BIG" != 0 ] || release ib
+  wait_for 20 has is.rc
+  AL_SMALL="$(rc_of is)"
+  touch "$D/is.go"
+}
+alone_rows "$GATE" alone
+expect_eq "I.1 big alone on an idle gate (reading 40 + promise 45 > share 80): admitted" "0" "$AL_BIG"
+expect_eq "I.2 the 3% ask behind it took a number at 1000" "1000" "$(field "$(req_of is)" asked)"
+expect_eq "I.3 and waits while big runs (40 + 45 + 3 > 80)" "waiting" "$AL_WAIT"
+expect_eq "I.4 once big ends, the 3% ask is admitted" "0" "$AL_SMALL"
+fresh alone-new
+world_machine 8 8192 40 1.0
+world_cost big 45 1.0 60
+expect_eq "I.5 a never-seen key on an idle gate, promised the maximum (45): admitted" "0" \
+  "$(ask_fg in1 work never-seen 0)"
+expect_eq "I.6 its promise is that maximum" "45:1:60" "$(field "$(req_of in1)" promise)"
+for rd in 80:0 81:75 85:75; do
+  fresh "alone-${rd%%:*}"
+  world_machine 8 8192 "${rd%%:*}" 1.0
+  world_cost big 45 1.0 60
+  expect_eq "I.7 an idle gate reading ${rd%%:*} under share 80: big gets rc ${rd#*:}" "${rd#*:}" \
+    "$(ask_fg ir work big 0)"
+done
+MI="$(mutant alone)"
+anchor "$MI" 'if (r >= 0 && !(unf == 0 && r <= share)) {' 1
+sed -i.bak 's/if (r >= 0 \&\& !(unf == 0 \&\& r <= share)) {/if (r >= 0) {/' "$MI"
+alone_rows "$MI" alone-mut
+expect_eq "I.8 the mutant (no idle clause) still admits the 3% ask" "0" "$AL_SMALL"
+expect_eq "I.9 the mutant refuses big alone on an idle gate — the idle clause is the rule" "75" "$AL_BIG"
+
+# ── §OWN ─────────────────────────────────────────────────────────────────────
+section "§OWN — a live waiter's number is never taken over (T47; request row)"
+# own_rows <gate lib> <name> — reading 30; a holder admitted at 40 (another who); two asks by
+# one who (agent twin) for key k (25) while the first still polls. Sets OW_N (requests then),
+# OW_FIRST (the first ask's id), OW_STATE (gate_state with both waiting).
+own_rows() {
+  fresh "$2"
+  world_machine 8 8192 30 1.0
+  world_cost h 40 0.5 20
+  world_cost k 25 0.5 20
+  GATE_LIB="$1" HOLD=1 ask_bg oh work h 0; wait_for 20 has oh.rc
+  GATE_LIB="$1" AGENT=twin HOLD=1 ask_bg o1 work k 600; wait_for 20 asked_by twin
+  OW_FIRST="$(req_of twin)"
+  GATE_LIB="$1" AGENT=twin HOLD=1 ask_bg o2 work k 600; wait_for 20 has o2.pid
+  wait_for 5 nreq_is 3 || wait_for 5 resumed "$OW_FIRST" o2
+  OW_N="$(nreq)"
+  OW_STATE="$(GATE_LIB="$1" state)"
+}
+own_rows "$GATE" own
+expect_eq "O.1 the first ask by twin took number 2 at 1000" "2 1000" "$OW_FIRST $(field "$OW_FIRST" asked)"
+expect_eq "O.2 a second ask by the same who for the same key, the first still polling, took a number of its own" \
+  "3" "$OW_N"
+expect_true "O.3 the first's request still names the first asker as its holder" resumed "$OW_FIRST" o1
+expect_contains "O.4 gate_state counts both waiting" "admitted=1 waiting=2 " "$OW_STATE"
+release oh
+wait_for 20 has o1.rc; wait_for 20 has o2.rc
+expect_eq "O.5 once the holder ends both are served (30 + 25 + 25 ≤ 80)" "0 0" "$(rc_of o1) $(rc_of o2)"
+expect_eq "O.6 each under its own number" "2 3" "$(id_of o1) $(id_of o2)"
+expect_contains "O.7 gate_state then counts both admitted, none waiting" "admitted=2 waiting=0 " "$(state)"
+touch "$D/o1.go" "$D/o2.go"
+fresh own-gave-up
+world_machine 8 8192 30 1.0
+world_cost h 40 0.5 20
+world_cost k 25 0.5 20
+HOLD=1 ask_bg sh work h 0; wait_for 20 has sh.rc
+AGENT=twin HOLD=1 ask_bg s1 work k 600; wait_for 20 asked_by twin
+s1_id="$(req_of twin)"
+expect_eq "O.8 a second ask by twin that gives up returns 75" "75" "$(AGENT=twin ask_fg s2 work k 0)"
+expect_true "O.9 the first's request still names the first asker" resumed "$s1_id" s1
+release sh
+wait_for 20 has s1.rc
+expect_eq "O.10 the machine empty, the first waiter is served under its number" "0 ${s1_id:-none}" \
+  "$(rc_of s1) $(id_of s1)"
+touch "$D/s1.go"
+MO="$(mutant own)"
+anchor "$MO" '&& [ "$_R_key" = "$2" ] && ! _gate_alive; then' 1
+sed -i.bak 's/ \&\& ! _gate_alive; then$/; then/' "$MO"
+own_rows "$MO" own-mut
+expect_eq "O.11 the mutant (no liveness test on reuse) still takes the first ask's number" "2" "$OW_FIRST"
+expect_eq "O.12 the mutant hands the second ask the live waiter's number — the test is the rule" "2" "$OW_N"
+
+# ── §CLEARED ─────────────────────────────────────────────────────────────────
+section "§CLEARED — a request returned 75 is nobody's until its who asks again (T47; request row)"
+# cleared_rows <gate lib> <name> — reading 30; a holder admitted at 40; a landing promised 20
+# finds no room, returns 75, and its process lives on, polling nothing. Then the holder ends
+# and a 5% work ask comes. Sets CL_P (the landing's rc and liveness), CL_ID, CL_STATE (gate_state
+# with the holder ended) and CL_Q (the 5% ask's rc).
+cleared_rows() {
+  local p
+  fresh "$2"
+  world_machine 8 8192 30 1.0
+  world_cost h 40 0.5 20
+  world_cost a 20 0.5 20
+  world_cost b 5 0.5 20
+  GATE_LIB="$1" HOLD=1 ask_bg eh work h 0; wait_for 20 has eh.rc
+  GATE_LIB="$1" LIVE=1 ask_bg ep landing a 0; wait_for 20 has ep.rc
+  p="$(cat "$D/ep.pid")"
+  CL_P="$(rc_of ep) $(if dead "$p"; then echo dead; else echo alive; fi)"
+  CL_ID="$(req_of ep)"
+  release eh
+  CL_STATE="$(GATE_LIB="$1" state)"
+  CL_Q="$(GATE_LIB="$1" ask_fg eq work b 0)"
+}
+cleared_rows "$GATE" cleared
+expect_eq "E.1 the landing finds no room, returns 75, and its process lives on" "75 alive" "$CL_P"
+expect_eq "E.2 its request is kept (asked 1000) and its holder cleared" "1000|-" \
+  "$(field "$CL_ID" asked)|$(field "$CL_ID" holder)"
+expect_contains "E.3 with the holder ended, gate_state counts nobody waiting" "admitted=0 waiting=0 " "$CL_STATE"
+expect_eq "E.4 a later 5% ask is served" "0" "$CL_Q"
+expect_eq "E.5 the same who asking again resumes the cleared number and is admitted" "0 ${CL_ID:-none} 3" \
+  "$(AGENT=ep ask_fg ep2 landing a 0) $(id_of ep2) $(nreq)"
+touch "$D/ep.go"
+MC="$(mutant cleared)"
+anchor "$MC" '_gate_holder "$id" -' 1
+sed -i.bak '/_gate_holder "\$id" -/d' "$MC"
+cleared_rows "$MC" cleared-mut
+expect_eq "E.6 the mutant (no holder cleared) still returns 75 and the process lives on" "75 alive" "$CL_P"
+expect_eq "E.7 the mutant lets the live non-polling landing keep the head — the clearing is the rule" \
+  "75" "$CL_Q"
+touch "$D/ep.go"
 
 # ── §MACHINES ────────────────────────────────────────────────────────────────
 section "§MACHINES — the gate is proved on other machines (AC-7.3)"
