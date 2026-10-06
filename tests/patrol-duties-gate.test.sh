@@ -1023,6 +1023,20 @@ export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
 # them per row to drive the two withholding states. They stay exported for the rest of the
 # suite, whose later sections drive the same wall.
 export BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0
+# THE WIDTH IS THE GATE'S NOW (wave-28 T13; D14). The fill duty sizes its width by asking the gate
+# once per ready writer row (`fill_gate_width`), so the gate is fixture data too: its readers are
+# pinned (8 cores, 30% used, a load of 1.0 over both windows) and its store is this suite's own.
+# GATE_CLEAR holds one run on record taking 0.1 core, room for every row below; GATE_LOADED one
+# taking 1.0 under a load of 4.5, room for exactly two writers not yet showing (4.5 + 1 + 1 is
+# within 6.4 cores, a third is not) — the width row 64a4 and row 69 cap the refusal at.
+GATE_CLEAR="$(mktemp -d)/gate"; GATE_LOADED="$(mktemp -d)/gate"
+mkdir -p "$GATE_CLEAR/requests" "$GATE_CLEAR/cost" "$GATE_LOADED/requests" "$GATE_LOADED/cost"
+printf '5:0.1:30:1000\n' > "$GATE_CLEAR/cost/fixture.test.sh"
+printf '5:1.0:30:1000\n' > "$GATE_LOADED/cost/fixture.test.sh"
+gate_clear() { export BIONIC_GATE_DIR="$GATE_CLEAR" BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0; }
+gate_loaded() { export BIONIC_GATE_DIR="$GATE_LOADED" BIONIC_PROBE_BUSY_CORES=4.5 BIONIC_PROBE_BUSY_CORES_5M=4.5; }
+export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30
+gate_clear
 
 # 59: THE INVARIANT. A live ledger, two ready rows, an ordinary turn that dispatched
 # neither and never saw a tick -> REFUSE, naming both rows.
@@ -1209,21 +1223,20 @@ u_prompt "$d" "anything else to start?"
 fire "$d"; expect_block "64a3d: a name written three times occupies once — one row named" "T2" " T3"
 
 # 64a4: AC-5.1's own shape — a roster with two open rows and a plan with no `active` row:
-# gap = rung − 2. On the loaded ring (rung 2) that is zero, so nothing is owed…
-LOADED_RING_64="$(mktemp -d)/loaded.ring"
-printf '1700000000|10|0|1.0|8\n' > "$LOADED_RING_64"
+# gap = the gate's width − 2. On the loaded gate (room for two writers not yet showing) the two
+# open rows are those two, so nothing is owed…
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W1 W2
 u_prompt "$d" "anything else ready?"
-export BIONIC_PRESSURE_RING="$LOADED_RING_64"
-fire "$d"; expect_allow "64a4: two open roster rows against rung 2 leave no gap"
+gate_loaded
+fire "$d"; expect_allow "64a4: two open roster rows not yet showing take the loaded gate's room: no gap"
 # …and with one of the two acked the gap is one: exactly T2 is named, never T3.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W1
 ledger_roster "$d" acked W2
 u_prompt "$d" "anything else ready?"
-fire "$d"; expect_block "64a5: one open roster row against rung 2 names one row" "T2" " T3"
-export BIONIC_PRESSURE_RING="$CLEAR_RING"
+fire "$d"; expect_block "64a5: one open roster row on the loaded gate leaves room for one row" "T2" " T3"
+gate_clear
 
 # …and one row in flight leaves room, so the same table with seven refuses.
 d=$(make_env_ledger 4 "$LEDGER_READY_2" "$LEDGER_ACTIVE")
@@ -1341,28 +1354,28 @@ fire "$d"; expect_block "67b: …in the gap arm's wording, never the retired tic
 # same roster and finds the same full budget. Eight open rows, writers=8, rung 8: gap zero.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7 W8
-u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 unacked roster row(s): the budget is full."
-fire "$d"; expect_allow "68: a budget-full tick turn on a full roster passes on the wall's own arithmetic"
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — the cap writers=8 is reached by 8 unacked roster row(s); 2 writer row(s) wait."
+fire "$d"; expect_allow "68: a cap-reached tick turn on a full roster passes on the wall's own arithmetic"
 
 # 68b: …and the same printed words over a roster with room are not an exemption: no withheld
 # line, a gap, ready rows → refused, naming them (REQ-4 AC-4.2 fails-when: "a tick turn with
 # no FILL and no withheld line ends silently with a non-empty ready set").
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
-u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 unacked roster row(s): the budget is full."
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — the cap writers=8 is reached by 8 unacked roster row(s); 2 writer row(s) wait."
 fire "$d"; expect_block "68b: a tick turn with no FILL and no withheld line is judged on the gap" "T2"
 fire "$d"; expect_block "68c: …naming every ready row, in the gap arm's wording" "T3" "the tick printed FILL"
 
-# 68d: THE HOLD, MEASURED BY THE WALL (wave-20 Δ7). The machine reads HOLD — free memory under
-# the warning line — and the wall takes that reading itself, the one the tick's HOLD comes
-# from: the turn passes although the arithmetic finds a gap, and no printed line is needed.
+# 68d: NO ROOM, MEASURED BY THE WALL (wave-20 Δ7; wave-28 T13). The five-minute load is over the
+# share, and the wall asks the gate itself, as the tick does: the turn passes although the plan
+# has ready rows, and no printed line is needed.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_prompt "$d" "carry on"
-BIONIC_PROBE_FREE_MB=512 fire "$d"; expect_allow "68d: a machine at HOLD withholds the fill — the wall measured it"
+BIONIC_PROBE_BUSY_CORES_5M=7.0 fire "$d"; expect_allow "68d: a gate with no room withholds the fill — the wall asked it"
 
-# 68e: THE EMERGENCY, the same way.
+# 68e: MEMORY OVER THE SHARE, the same way.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_prompt "$d" "carry on"
-BIONIC_PROBE_FREE_MB=100 fire "$d"; expect_allow "68e: a machine at EMERGENCY withholds the fill"
+BIONIC_PROBE_USED_PCT=90 fire "$d"; expect_allow "68e: memory over the share withholds the fill"
 
 # 68f: THE PRINTED LINE IS NOT THE MEASUREMENT. The tick's own `fill withheld — HOLD` line in
 # its tool result, on a machine that reads clear at the wall, exempts nothing: the line is
@@ -1415,28 +1428,25 @@ pd_idhook_fire() {  # <project> — `fire` with the copied hook
 }
 require_helpers refusal_rows expect_block_unnamed pd_idhook_fire
 
-# 69: THE RUNG, NOT THE CEILING (Step-6 review R1, wave-18 T2b). Three rows are ready
-# (T2, T3, T20) against a declared ceiling of 8 — the pre-fix wall would have named all
-# three. LOADED_RING pins a critical-band sample (free_pct=10, inside [0, 12)) against
-# that ceiling: rung = (8 + 3) / 4 = 2. The wall must name exactly the rung-minus-open
-# count — T2 and T3 — and never T20, which the tick's own rung declined to order.
-LOADED_RING="$(mktemp -d)/loaded.ring"
-printf '1700000000|10|0|1.0|8\n' > "$LOADED_RING"
+# 69: THE GATE, NOT THE CEILING (Step-6 review R1, wave-18 T2b; wave-28 T13). Three rows are
+# ready (T2, T3, T20) against a declared cap of 8 — a wall sized by the cap would name all
+# three. The loaded gate has room for two writers, so the wall must name exactly T2 and T3,
+# and never T20, which the tick's own asks would not offer either.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LEDGER_READY_20")
 u_prompt "$d" "anything else ready?"
-export BIONIC_PRESSURE_RING="$LOADED_RING" BIONIC_NOW_EPOCH="1700000000"
-fire "$d"; expect_block "69a: a rung pinned below the ceiling caps the refusal at rung - open" "T2"
-fire "$d"; expect_block "69b: …and the second row, at the rung's width" "T3"
+gate_loaded
+fire "$d"; expect_block "69a: a gate with room for two caps the refusal below the cap" "T2"
+fire "$d"; expect_block "69b: …and the second row, at the gate's width" "T3"
 fire "$d"; expect_block_unnamed "69c: …and never the ceiling's wider count — T20 stays unnamed" "T20"
 pd_idhook_fire "$d"; expect_block_unnamed "69c2: …the same, fired from a hooks directory whose path holds T20, T8 and T13" "T20"
 expect_contains "69c3: …whose refusal carries that path (so a whole-text must-not would read T20)" "$PD_IDDIR" "$(reason_of)"
-export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
+gate_clear
 
-# 69d: THE PAIRED CASE, rung = ceiling. The same three-ready-row table, back on the clear
+# 69d: THE PAIRED CASE, a gate with room for more than the rows. The same three-ready-row table, back on the clear
 # ring: rung=8, gap=8-0=8, and all three ready rows fit inside it — unchanged from 59-68.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LEDGER_READY_20")
 u_prompt "$d" "anything else ready?"
-fire "$d"; expect_block "69d: a rung equal to the ceiling names every ready row, T20 included" "T20"
+fire "$d"; expect_block "69d: a gate with room names every ready row, T20 included" "T20"
 
 # 69e: READINESS IS THE PREREQUISITE GRAPH (wave-20 REQ-5, AC-5.1; Δ1, Δ6; ADR-036). At
 # current: 5 a pending Step-6 review row whose deps have landed is READY — the step is a label
@@ -1870,11 +1880,11 @@ led_user "$d" "u-turn-0005" "2026-09-23T11:00:00.000Z" "carry on"
 fire "$d"
 expect_false "L5: an unengaged session appends no ledger line" test -s "$d/$LED_LOG_REL"
 
-# L6: a machine at HOLD is recorded as HOLD, the gap with it — the report's HOLD minutes.
+# L6: no room at the gate is recorded as HOLD, the gap with it — the report's HOLD minutes.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
 led_user "$d" "u-turn-0006" "2026-09-23T11:00:00.000Z" "carry on"
-BIONIC_PROBE_FREE_MB=512 fire "$d"
-expect_eq "L6: a HOLD Stop records state=hold" "hold" "$(led_field "$(led_line "$d" 1)" state)"
+BIONIC_PROBE_BUSY_CORES_5M=7.0 fire "$d"
+expect_eq "L6: a Stop with no room at the gate records state=hold" "hold" "$(led_field "$(led_line "$d" 1)" state)"
 
 # L7: a decline is recorded with its reason, pipes squashed so the line keeps its fields.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
