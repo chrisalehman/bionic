@@ -518,6 +518,54 @@ EOF
   printf 'files=%s' "$hits"
 }
 
+# THE RECORD LINK NEVER LANDS (wave-27 T79, the walk's W2). `create` plants `<tree>/.bionic` as a
+# link to the project's one `.bionic` directory. In a project whose ignore rules never named it, a
+# writer's `git add -A` committed the link, and the land merged it: git replaced the main
+# checkout's real `.bionic`, every file of which its own `.gitignore` (`*`) ignores, with a link to
+# itself, and the plan, the roster, the record and the engagement marker were gone. `create` now
+# excludes the link; this is the second layer, for a link committed anyway (`git add -f`, a tree
+# made before the exclude, a project that cleared the line). A range whose difference names
+# `.bionic` or a path under it is refused before anything merges. The one exception is a target
+# that already tracks something at `.bionic`, an older project's own content (the `create`
+# header's "unless the branch already tracks something at that path"): there the path is not
+# bionic's, and it lands as before. `:(literal)` keeps the pathspec to exactly that path and its
+# children.
+_wt_bionic_committed() {  # <root> <onto head> <tree head> -> "<commit> <first path>" | nothing
+  local root="$1" onto_head="$2" head="$3" path commit
+  git -C "$root" cat-file -e "${onto_head}:.bionic" 2>/dev/null && return 1
+  path="$(git -C "$root" -c core.quotePath=false diff --no-renames --name-only "$onto_head" "$head" \
+    -- ':(literal).bionic' 2>/dev/null | sed -n 1p)"
+  [ -n "$path" ] || return 1
+  commit="$(git -C "$root" log --reverse --format=%H "${onto_head}..${head}" -- ':(literal).bionic' 2>/dev/null \
+    | sed -n 1p)"
+  printf '%s %s' "${commit:-$head}" "$path"
+}
+
+# The refusal goes through the refusal library (lib/refuse.sh), loaded in a subshell whose exit is
+# the refusal's own and whose stderr is this function's stdout: every land refusal is on stdout,
+# where `spawn-worktree.sh land` and the standdown's report read it, and `refuse` exits, which
+# the standdown's loop must not. Its first line names the top-level path whatever path the
+# range holds, so its width does not move; the path itself is in the detail.
+_wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit> <path>
+  local lib out
+  lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/refuse.sh"
+  out="$( {
+    # shellcheck source=/dev/null
+    . "$lib" 2>/dev/null || exit 3
+    refuse exit2 land ".bionic is committed in ${4:0:12}" "git rm -r --cached .bionic" \
+"path=${5} commit=${4} branch=${2} onto=${3}
+Nothing is merged; the tree and its stamps are kept. Merged, a committed .bionic replaces the
+project's .bionic directory, and the plan, the record and the marker in it are gone.
+Take it out of the index: git -C ${1} rm -r --cached .bionic, commit, land again."
+  } 2>&1 )"
+  if [ $? -eq 3 ] || [ -z "$out" ]; then
+    _wt_refuse "bionic-committed commit=${4} path=${5} — git -C ${1} rm -r --cached .bionic, commit, land again"
+    return 2
+  fi
+  printf '%s\n' "$out"
+  return 2
+}
+
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
   _wt_refuse "not-current branch=${1} onto=${2} onto_head=${3:-<none>} ${4} — merge ${2} into the tree, re-run its suites, land again"
 }
@@ -715,6 +763,12 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   head="$(git -C "$wt_abs" rev-parse --verify --quiet HEAD 2>/dev/null)"
   overlap="$(_wt_not_current "$root" "$onto_head" "$head")" && {
     _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
+  }
+
+  # THE RECORD LINK NEVER LANDS (wave-27 T79): a range that commits `.bionic` is refused here,
+  # before any merge, the tree and its stamps kept (see _wt_bionic_committed).
+  why="$(_wt_bionic_committed "$root" "$onto_head" "$head")" && {
+    _wt_refuse_bionic "$wt_abs" "$branch" "$onto" "${why%% *}" "${why#* }"; return 2
   }
 
   # THE RUNNER IS NEVER A DECLARED RED (wave-27 T67; review pass 46 B4): a declaration is honoured

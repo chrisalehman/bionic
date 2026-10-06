@@ -465,6 +465,10 @@ verify_legacy_removal() {  # <script> -> deleted | survived
   git -C "$rr" commit --quiet -am "no .bionic ignore"
   local sha; sha="$(git -C "$rr" rev-parse HEAD)"
   spawn_out_with "$script" "$rr" create "$sha" m2 >/dev/null
+  # An older bionic wrote no `/.bionic` exclude line (wave-27 T79 does), and that line would
+  # ignore the link: take it out again, so the link stays untracked as the arm needs.
+  grep -vxF -- "/.bionic" "$rr/.git/info/exclude" > "$rr/.git/info/exclude.t79"
+  mv "$rr/.git/info/exclude.t79" "$rr/.git/info/exclude"
   ln -s "$rr/.bionic" "$rr/.worktrees/m2/.bionic"
   spawn_out_with "$script" "$rr" remove "$rr/.worktrees/m2" >/dev/null
   if [ -d "$rr/.worktrees/m2" ] || [ -L "$rr/.worktrees/m2/.bionic" ]; then
@@ -860,9 +864,9 @@ xc_repo() {  # <dir> [gitignore-content] -> physical path; NO ignore rule for .w
   git -C "$d" commit --quiet -m "c1"
   ( cd "$d" && pwd -P )
 }
-xc_sum() {  # <repo> -> checksum of info/exclude, or "none"
-  if [ -f "$1/.git/info/exclude" ]; then cksum < "$1/.git/info/exclude"; else echo none; fi
-}
+# The exclude file's text, and that text with one line appended, compared as $(…) reads them.
+xc_text() { if [ -f "$1/.git/info/exclude" ]; then cat "$1/.git/info/exclude"; fi; }
+xc_plus() { if [ -n "$1" ]; then printf '%s\n%s' "$1" "$2"; else printf '%s' "$2"; fi; }
 xc_lines() {  # <repo> <line> -> how many times the exclude file holds exactly that line
   local f="$1/.git/info/exclude"
   if [ -f "$f" ]; then grep -cxF -- "$2" "$f" || true; else echo 0; fi
@@ -896,29 +900,30 @@ expect_eq    "remove leaves the exclude line in place" "1" "$(xc_lines "$XC1" "/
 XC2="$(xc_repo "$TMP/xc2" ".bionic
 .worktrees/
 ")"
-XC2_SUM="$(xc_sum "$XC2")"
+XC2_WAS="$(xc_text "$XC2")"
 XC2_OUT="$(spawn_out "$XC2" create "$(sha_of "$XC2")" xc-d)"
 expect_match "(ignored-parent create succeeded)" "spawn-worktree: OK path=*" "$XC2_OUT"
 expect_true  "(…and its tree exists)" test -d "${XC2}/.worktrees/xc-d"
 expect_eq    "a parent already ignored adds no exclude line" "0" "$(xc_lines "$XC2" "/.worktrees/")"
-expect_eq    "…and the exclude file is byte-for-byte what it was" "$XC2_SUM" "$(xc_sum "$XC2")"
+expect_eq    "…and the exclude file gained only the record link's line (T79)" "$(xc_plus "$XC2_WAS" /.bionic)" "$(xc_text "$XC2")"
 
 # a parent already ignored by the exclude file itself under another spelling
 XC3="$(xc_repo "$TMP/xc3")"
 mkdir -p "$XC3/.git/info"; printf '.worktrees\n' > "$XC3/.git/info/exclude"
 spawn_out "$XC3" create "$(sha_of "$XC3")" xc-e >/dev/null
 expect_true  "(exclude-spelled create made its tree)" test -d "${XC3}/.worktrees/xc-e"
-expect_eq    "a parent the exclude file already ignores is left alone" ".worktrees" "$(cat "$XC3/.git/info/exclude")"
+expect_eq    "a parent the exclude file already ignores is left alone (only the link's line follows it, T79)" ".worktrees
+/.bionic" "$(cat "$XC3/.git/info/exclude")"
 
 # a parent outside the checkout: nothing to exclude
 XC4="$(xc_repo "$TMP/xc4")"
 mkdir -p "$TMP/xc4-outside"
-XC4_SUM="$(xc_sum "$XC4")"
+XC4_WAS="$(xc_text "$XC4")"
 XC4_OUT="$(spawn_out "$XC4" create "$(sha_of "$XC4")" xc-f "$TMP/xc4-outside")"
 expect_match "(outside-parent create succeeded)" "spawn-worktree: OK path=*" "$XC4_OUT"
 expect_true  "(…and its tree is outside the checkout)" test -d "$TMP/xc4-outside/xc-f"
 expect_eq    "an outside parent adds no exclude line" "0" "$(xc_lines "$XC4" "/xc4-outside/")"
-expect_eq    "…and the exclude file is byte-for-byte what it was" "$XC4_SUM" "$(xc_sum "$XC4")"
+expect_eq    "…and the exclude file gained only the record link's line (T79)" "$(xc_plus "$XC4_WAS" /.bionic)" "$(xc_text "$XC4")"
 
 # a custom relative parent inside the checkout gets its own anchored line
 XC5="$(xc_repo "$TMP/xc5")"
@@ -939,6 +944,7 @@ expect_true  "…and the tree exists" test -d "${XC6}/.worktrees/xc-h"
 expect_eq    "…and stderr carries exactly one line" "1" "$(wc -l < "$XC6_ERR" | tr -d ' ')"
 expect_contains "…saying the checkout will read as dirty" "dirty" "$(cat "$XC6_ERR")"
 expect_contains "…and naming the line to ignore by hand" "/.worktrees/" "$(cat "$XC6_ERR")"
+expect_contains "…and the record link's line in that same one line (T79)" "/.bionic" "$(cat "$XC6_ERR")"
 # the success path is silent on stderr (the warning above is not noise that always appears)
 XC7_ERR="$TMP/xc7.err"
 ( cd "$XC1" && bash "$SPAWN" create "$XC1_SHA" xc-i >/dev/null 2>"$XC7_ERR" )
@@ -959,7 +965,68 @@ verify_clean_checkout() {  # <script> -> clean | dirty
 }
 expect_eq "live build: the checkout reads clean after a create" "clean" "$(verify_clean_checkout "$SPAWN")"
 mutate_check "mutation: the exclude call removed is caught" \
-  's|^  exclude_tree_parent "\$main_root" "\$parent_abs" "\$wt"$|  :|' \
+  's|"\$(tree_parent_line "\$main_root" "\$parent_abs" "\$wt")"|""|' \
   verify_clean_checkout "dirty"
+
+section "§XB: create keeps the record link out of every index (wave-27 T79, the walk's W2)"
+#
+# THE LOSS THIS STOPS. A project whose .gitignore does not list `.bionic` (the walk's listed
+# only `.worktrees/`) let a writer's `git add -A` commit the link `create` plants; `land` merged
+# it, and git replaced the main checkout's `.bionic` directory with a link to itself. So
+# `create` writes `/.bionic` to the repository's info/exclude beside the parent's line, and
+# `git add -A` in any tree of the repository never stages the link.
+#
+# ANTI-VACUITY. The status reader is shown seeing the link: take the line away and the same
+# repository's tree stages `.bionic`.
+XB1="$(xc_repo "$TMP/xb1" ".worktrees/
+")"
+XB1_OUT="$(spawn_out "$XB1" create "$(sha_of "$XB1")" xb-a)"
+expect_match "(the create under test succeeded and planted its link)" "spawn-worktree: OK path=* alias=*" "$XB1_OUT"
+XB1T="${XB1}/.worktrees/xb-a"
+expect_true  "(the link is in the tree)" test -L "${XB1T}/.bionic"
+echo work > "${XB1T}/a.txt"
+expect_eq    "git add -A in the tree stages the work and never the link" "A  a.txt" \
+  "$(git -C "$XB1T" add -A && git -C "$XB1T" status --porcelain)"
+expect_eq    "info/exclude holds the anchored .bionic line once" "1" "$(xc_lines "$XB1" "/.bionic")"
+expect_eq    "the project's .gitignore is untouched" ".worktrees/" "$(cat "$XB1/.gitignore")"
+spawn_out "$XB1" create "$(sha_of "$XB1")" xb-b >/dev/null
+expect_true  "(the second tree exists)" test -L "${XB1}/.worktrees/xb-b/.bionic"
+expect_eq    "a second create adds nothing: still once" "1" "$(xc_lines "$XB1" "/.bionic")"
+grep -vxF -- "/.bionic" "$XB1/.git/info/exclude" > "$TMP/xb1.exclude"; cp "$TMP/xb1.exclude" "$XB1/.git/info/exclude"
+expect_eq    "(control) without the line, git add -A in that tree stages the link" "A  .bionic" \
+  "$(git -C "${XB1}/.worktrees/xb-b" add -A && git -C "${XB1}/.worktrees/xb-b" status --porcelain)"
+git -C "${XB1}/.worktrees/xb-b" reset --quiet
+
+# a project whose .gitignore already lists .bionic gets the line too: idempotent and harmless
+XB2="$(xc_repo "$TMP/xb2")"
+XB2_OUT="$(spawn_out "$XB2" create "$(sha_of "$XB2")" xb-c)"
+expect_match "(the create in a project that ignores .bionic succeeded)" "spawn-worktree: OK path=* alias=*" "$XB2_OUT"
+expect_eq    "a project that already ignores .bionic still gets the line, once" "1" "$(xc_lines "$XB2" "/.bionic")"
+
+# a branch that tracks its own .bionic gets no link, and so no line
+XB3="$TMP/xb3"; mkdir -p "$XB3/.bionic"
+git -C "$XB3" init --quiet; git -C "$XB3" symbolic-ref HEAD refs/heads/main
+echo "tracked state" > "$XB3/.bionic/tracked.md"
+git -C "$XB3" add .bionic/tracked.md; git -C "$XB3" commit --quiet -m "a tracked .bionic"
+XB3="$(cd "$XB3" && pwd -P)"
+XB3_OUT="$(spawn_out "$XB3" create "$(sha_of "$XB3")" xb-d)"
+expect_match "(the create on a branch tracking .bionic succeeded)" "spawn-worktree: OK path=*" "$XB3_OUT"
+expect_true  "(…its .bionic is the branch's own directory)" test -f "${XB3}/.worktrees/xb-d/.bionic/tracked.md"
+expect_eq    "no link planted, so no .bionic line" "0" "$(xc_lines "$XB3" "/.bionic")"
+expect_eq    "…while the parent's line is written as before" "1" "$(xc_lines "$XB3" "/.worktrees/")"
+
+# mutation: the .bionic line dropped from the call. The verifier stages everything in a fresh tree.
+verify_link_unstaged() {  # <script> -> unstaged | staged
+  local script="$1" rr; rr="$(xc_repo "$TMP/xbm-$RANDOM" ".worktrees/
+")"
+  spawn_out_with "$script" "$rr" create "$(sha_of "$rr")" xbm >/dev/null
+  [ -L "$rr/.worktrees/xbm/.bionic" ] || { echo "no-link"; return; }
+  git -C "$rr/.worktrees/xbm" add -A
+  case "$(git -C "$rr/.worktrees/xbm" status --porcelain)" in *.bionic*) echo staged ;; *) echo unstaged ;; esac
+}
+expect_eq "live build: a fresh tree's git add -A leaves the link unstaged" "unstaged" "$(verify_link_unstaged "$SPAWN")"
+mutate_check "mutation: the .bionic line dropped from the exclude call is caught" \
+  's|"\${alias_field:+/.bionic}"|""|' \
+  verify_link_unstaged "staged"
 
 finish
