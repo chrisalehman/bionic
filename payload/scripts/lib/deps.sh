@@ -87,7 +87,9 @@
 #
 # CONSENT. `install_dep` and `remove_dep` are the only mutating entry points,
 # and neither mutates before an explicit answer on stdin. `remove_dep` mutates
-# only a native plugin the registry records as bionic's; every other row it names. No assume-yes knob
+# only what bionic can prove it installed: a native plugin the registry records as
+# bionic's, or a row the install record names (wave-28 T40); every other row it
+# names. No assume-yes knob
 # exists: "consent per event, never silent, never unattended" is the ratified
 # rule, and an env var that switches it off would be the hole in it.
 #
@@ -1091,6 +1093,96 @@ _dep_not_asked_left() {  # <name> — <name> left in place, not asked
   printf '%snot asked — %s left in place.\n' "$(_dep_indent)" "$1"
 }
 
+# ─── The install record (wave-28 T40, spec D29) ──────────────────────────────
+#
+# THE PROOF `remove` ACTS ON. A global package, a venv, a skill directory or an
+# MCP server looks the same whether bionic put it there or the user did, and a
+# teardown that removed on presence took a user's own package off exactly as it
+# took bionic's (wave-27). So the installer itself writes down what it installed,
+# and `remove_dep` acts on a `remove-on-consent` row only when this file names it.
+#
+# ONE TAB-SEPARATED LINE PER INSTALL, appended by `install_dep` after the
+# install's command exits 0 and never on a decline:
+#
+#   <row name>  <kind>  <ISO-UTC>  <bionic version>
+#
+# Appended, never rewritten, except by `dep_record_drop`, which `remove_dep` calls
+# after a removal it ran exits 0. A name may have several lines (a re-sync appends
+# another); the newest is the one read. A native plugin gets no line: the CLI's
+# own registry already proves it. Nothing reconstructs a record for an install
+# made before this file existed — such a tool keeps being named, never removed.
+#
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`, not `claude_home`: the record sits beside
+# the other user-level stores (`pressure.ring`, the share file), keyed the same way.
+dep_record_file() { printf '%s/bionic/installed\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
+
+# The version of the bionic doing the install, read from its own plugin.json —
+# the same field detect.sh's `detect_plugin_integrity` reads, without jq so the
+# record is written on a machine that has none. `unknown` when it cannot be read.
+_dep_bionic_version() {
+  local v
+  v="$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' "$(plugin_root)/.claude-plugin/plugin.json" 2>/dev/null \
+       | head -1 | grep -oE '"[^"]+"$' | tr -d '"')"
+  printf '%s\n' "${v:-unknown}"
+}
+
+dep_record_add() {  # <name> — one line, appended in a single write
+  local name="${1:-}" file kind
+  [ -n "$name" ] || return 1
+  kind="$(dep_field "$name" kind)" || return 1
+  file="$(dep_record_file)"
+  mkdir -p "${file%/*}" 2>/dev/null || return 1
+  printf '%s\t%s\t%s\t%s\n' "$name" "$kind" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(_dep_bionic_version)" \
+    >> "$file" 2>/dev/null
+}
+
+# The kind on <name>'s newest line; status 1, and nothing printed, when no line
+# names it. The one question `remove_dep` asks of the record.
+dep_record_kind() {  # <name>
+  local want="${1:-}" file n k rest found=""
+  file="$(dep_record_file)"
+  [ -n "$want" ] && [ -f "$file" ] || return 1
+  while IFS=$'\t' read -r n k rest || [ -n "$n" ]; do
+    [ "$n" = "$want" ] && [ -n "$k" ] && found="$k"
+  done < "$file"
+  [ -n "$found" ] || return 1
+  printf '%s\n' "$found"
+}
+
+# Each recorded name once, as its newest line, in the order those lines were
+# written: `<name>\t<kind>\t<at>\t<version>`. What doctor prints.
+dep_record_rows() {
+  local file i j n
+  local -a names=() lines=()
+  file="$(dep_record_file)"
+  [ -f "$file" ] || return 0
+  while IFS= read -r n || [ -n "$n" ]; do
+    [ -n "${n%%$'\t'*}" ] || continue
+    names+=("${n%%$'\t'*}"); lines+=("$n")
+  done < "$file"
+  for ((i = 0; i < ${#lines[@]}; i++)); do
+    for ((j = i + 1; j < ${#lines[@]}; j++)); do
+      [ "${names[$j]}" = "${names[$i]}" ] && continue 2
+    done
+    printf '%s\n' "${lines[$i]}"
+  done
+}
+
+# Every line for <name> taken out, the rest kept in order; through a temp file
+# beside the record and a rename, so a reader never sees half a file.
+dep_record_drop() {  # <name>
+  local want="${1:-}" file tmp line
+  file="$(dep_record_file)"
+  [ -n "$want" ] || return 1
+  [ -f "$file" ] || return 0
+  tmp="$(mktemp "${file}.XXXXXX")" || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "${line%%$'\t'*}" = "$want" ] || printf '%s\n' "$line"
+  done < "$file" > "$tmp" && mv "$tmp" "$file" && return 0
+  rm -f "$tmp"
+  return 1
+}
+
 # ─── Install ─────────────────────────────────────────────────────────────────
 #
 # One mutating entry point. The setup loop calls it once per row it installs; a
@@ -1484,13 +1576,28 @@ install_dep() {  # <name>
           fi
         fi
       fi
+      _dep_record_installed "$name"
       [ "${SETUP_ALL:-0}" = "1" ] || echo "$(_dep_indent)installed."
       return 0
     fi
   else
-    _dep_install_statusline && { [ "${SETUP_ALL:-0}" = "1" ] || echo "$(_dep_indent)installed."; return 0; }
+    _dep_install_statusline && {
+      _dep_record_installed "$name"
+      [ "${SETUP_ALL:-0}" = "1" ] || echo "$(_dep_indent)installed."
+      return 0
+    }
   fi
   return 1
+}
+
+# THE LINE THAT LETS `remove` TAKE IT BACK OFF (wave-28 T40). Written only here,
+# after the whole install exited 0. A record that cannot be written does not undo
+# an install that worked: the tool stays, and remove will name it for the user
+# rather than act on it, which is the safe side to fall on — so it is said, once.
+_dep_record_installed() {  # <name>
+  dep_record_add "$1" && return 0
+  echo "$(_dep_indent)${1} is installed, but $(dep_record_file) could not be written, so remove will name it rather than remove it." >&2
+  return 0
 }
 
 # ─── The OTHER installer, and why there are exactly two ──────────────────────
@@ -1954,7 +2061,8 @@ _dep_home_form() {  # <text>
 #   2  left in place by policy, nothing asked and nothing declined: a same-named
 #      plugin from a catalog bionic never installed from (critic F-4), or a
 #      `remove-on-consent` row, named with the command to remove it by hand
-#   1  not done — declined, or a mechanism that failed or could not be read
+#   1  not done — declined, nobody there to answer, or a mechanism that failed or
+#      could not be read
 #
 # The caller counts 0 and 2 as settled and 1 as outstanding; remove.sh's summary
 # is built on that split.
@@ -2011,11 +2119,95 @@ dep_teardown_state() {  # <name> -> yes | no | unknown
   echo "${raw%%|*}"
 }
 
-# 0 when `remove_dep` names this row and leaves it: every `remove-on-consent` row.
+# 0 when `remove_dep` names this row and leaves it: a `remove-on-consent` row the
+# install record does not name, or one that lives in a cache other projects share.
 # remove.sh asks it too, so the `--all` page, the tools item and the summary agree
-# with `remove_dep` about which rows are named.
+# with `remove_dep` about which rows are named and which are offered.
 dep_named_only() {  # <name>
-  [ "$(dep_field "${1:-}" removal_behavior)" = "remove-on-consent" ]
+  [ "$(dep_field "${1:-}" removal_behavior)" = "remove-on-consent" ] || return 1
+  dep_record_kind "${1:-}" >/dev/null || return 0
+  _dep_shared_cache "${1:-}"
+}
+
+# The two kinds that live in a cache every project on the machine shares: the
+# Playwright browsers and the pnpm store. Recorded like any install, never acted
+# on — taking bionic's entry out would take other projects' with it. The table's
+# kind or the recorded one, either: a row whose kind changed since its install is
+# still the cache it was installed into.
+_dep_shared_cache() {  # <name>
+  case "$(dep_field "${1:-}" kind 2>/dev/null)" in playwright-browser|pnpm-store) return 0 ;; esac
+  case "$(dep_record_kind "${1:-}" 2>/dev/null)" in playwright-browser|pnpm-store) return 0 ;; esac
+  return 1
+}
+
+# A recursive delete of a directory bionic created, refused for the paths no
+# removal may ever reach: nothing, the root, the home itself, a `.bionic` tree.
+# remove.sh's `_rm_purge_dir` keeps the same never-list for its own items; this
+# library stays sourceable without remove.sh, so it carries its own copy.
+_dep_rm_owned() {  # <path>
+  case "${1:-}" in
+    ""|/|"$HOME"|"$HOME/"|*/.bionic|*/.bionic/*) return 1 ;;
+  esac
+  rm -rf "$1"
+}
+
+# THE ACT, PER KIND (wave-28 T40). What wave-27's T82 deleted (673a778b), written
+# back behind the record: `remove_dep` reaches it only for a row the install record
+# names, after a yes, and it runs exactly the plan `_dep_remove_plan` printed.
+# The shared caches have no arm: they are never acted on.
+_dep_remove_act() {  # <name>
+  local name="$1" target settings
+  target="$(_dep_locator_target "$(dep_field "$name" source_url)")"
+  case "$(dep_field "$name" kind)" in
+    npm-global)   npm uninstall -g "$target" ;;
+    # notebooklm's skill directory is the second half of its install, and goes
+    # only once the first half did, as the plan's `&&` says.
+    uv-tool)
+      uv tool uninstall "$target" || return 1
+      [ "$name" = "notebooklm" ] || return 0
+      _dep_rm_owned "$(_dep_claude_home)/skills/notebooklm" ;;
+    mcp-server)   claude mcp remove "$name" -s user ;;
+    github-skill) _dep_rm_owned "$(_dep_skills_dir)/${name}" ;;
+    uv-project)
+      _dep_rm_owned "$(_dep_excalidraw_venv_dir)" && rm -f "$(_dep_excalidraw_lock_hash_file)" ;;
+    # THREE INDEPENDENT HALVES. The package goes best-effort: one that never
+    # installed cleanly is not made worse by the clear below. The `.statusLine` key
+    # goes only if it still names ccstatusline — one the user repointed at their own
+    # renderer is theirs. The layout directory goes last.
+    statusline)
+      _dep_have npm && npm uninstall -g "$target" >/dev/null 2>&1
+      settings="$(_dep_settings_file)"
+      if [ -f "$settings" ]; then
+        _dep_have jq || return 1
+        _dep_settings_write_jq "$settings" \
+          'if ((.statusLine?.command? // "") | tostring | test("ccstatusline")) then del(.statusLine) else . end' \
+          || return 1
+      fi
+      _dep_rm_owned "$(_dep_ccstatusline_config_dir)" ;;
+    *) return 1 ;;
+  esac
+}
+
+# A row the record names: the plan, one question, the act, and the record's line
+# taken out only once the act exited 0. Nobody there to answer is not a yes, and
+# not a decline either; it is left in place and counted outstanding (status 1).
+_dep_remove_recorded() {  # <name> <plan>
+  local name="$1"
+  echo "$(_dep_indent)${name}: bionic's install record says bionic installed it; bionic would run: $(_dep_home_form "$2")"
+  _dep_consent "$(_dep_indent)Remove ${name} now?"
+  case $? in
+    0) ;;
+    2) _dep_not_asked_left "$name"; return 1 ;;
+    *) echo "$(_dep_indent)declined — ${name} left in place."; return 1 ;;
+  esac
+  if ! _dep_remove_act "$name"; then
+    echo "$(_dep_indent)the removal failed — ${name} is still installed and still on the install record."
+    return 1
+  fi
+  dep_record_drop "$name" || \
+    echo "$(_dep_indent)${name} is removed, but its line could not be taken off $(dep_record_file)." >&2
+  echo "$(_dep_indent)removed."
+  return 0
 }
 
 remove_dep() {  # <name>
@@ -2076,18 +2268,27 @@ remove_dep() {  # <name>
       ;;
   esac
 
-  # NAMED, NEVER ACTED ON (wave-27). Every row left here is `remove-on-consent`,
-  # and presence is the only thing this function can know about it: a global
-  # package, a venv, a browser cache, a pnpm store entry, an MCP server, a config
-  # or skill directory look the same whether bionic put them there or the user did, and removing on
-  # presence took a user's own package off exactly as it took bionic's. Bionic removes only what it can
-  # prove is its own — the rc markers are that proof for the shell rc, the
-  # registry's `<name>@bionic` id for a native plugin above — and for these rows
-  # no proof exists yet. So the plan is composed exactly as the removal would have
-  # run it, printed as the command to run by hand, and nothing is asked or run.
-  # The code that ran it is gone, not switched off: a record of what bionic
-  # installed is what would bring it back.
+  # ACTED ON ONLY BEHIND THE RECORD (wave-27, wave-28 T40). Every row left here is
+  # `remove-on-consent`, and presence alone says nothing about who installed it: a
+  # global package, a venv, a browser cache, a pnpm store entry, an MCP server, a
+  # config or skill directory look the same whether bionic put them there or the
+  # user did, and removing on presence took a user's own package off exactly as it
+  # took bionic's. Bionic removes only what it can prove is its own — the rc markers
+  # in the shell rc, the registry's `<name>@bionic` id for a native plugin above,
+  # and for these rows the install record `install_dep` writes. A row the record
+  # names is offered and removed on a yes, unless it lives in a cache other projects
+  # share; every other row is named with the command to remove it by hand, and
+  # nothing is asked or run.
   plan="$(_dep_remove_plan "$name")" || return 1
+  if dep_record_kind "$name" >/dev/null; then
+    if _dep_shared_cache "$name"; then
+      echo "$(_dep_indent)${name}: bionic installed it, but it lives in a cache your other projects share, so it is left in place."
+      echo "$(_dep_indent)  remove it by hand with: $(_dep_home_form "$plan")"
+      return 2
+    fi
+    _dep_remove_recorded "$name" "$plan"
+    return $?
+  fi
   echo "$(_dep_indent)${name}: present — bionic has no record that it installed it, so it is left in place."
   echo "$(_dep_indent)  remove it by hand with: $(_dep_home_form "$plan")"
   return 2
