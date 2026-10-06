@@ -530,8 +530,31 @@ EOF
 # header's "unless the branch already tracks something at that path"): there the path is not
 # bionic's, and it lands as before. `:(literal)` keeps the pathspec to exactly that path and its
 # children.
+# THE KIND COMES FIRST (wave-27 T84; review pass 68). The exception exempts CONTENT UNDER a `.bionic`
+# directory the target tracks, never a change of `.bionic`'s own kind: a tree that removed the
+# tracked content and committed the link landed under it, with the same loss. So a range that
+# makes `.bionic` a link or a file where the target has a directory or nothing is refused first,
+# whatever the target tracks, naming the first commit that changed the kind. A range that removes
+# `.bionic` entirely, or makes a tracked link a directory, puts neither where a directory was.
+_wt_bionic_kind() {  # <root> <rev> -> what <rev> tracks at `.bionic`: dir | link | file | other | nothing
+  case "$(git -C "$1" ls-tree "$2" -- .bionic 2>/dev/null | awk 'NR == 1 { print $1 }')" in
+    040000) echo dir ;; 120000) echo link ;; 100644|100755) echo file ;; '') echo nothing ;; *) echo other ;;
+  esac
+}
+_wt_bionic_kind_changed() {  # <root> <onto head> <tree head> -> the first commit that changed the kind | nothing
+  local root="$1" c
+  case "$(_wt_bionic_kind "$root" "$2"):$(_wt_bionic_kind "$root" "$3")" in
+    dir:link|dir:file|nothing:link|nothing:file) : ;;
+    *) return 1 ;;
+  esac
+  for c in $(git -C "$root" log --reverse --format=%H "${2}..${3}" -- ':(literal).bionic' 2>/dev/null); do
+    [ "$(_wt_bionic_kind "$root" "${c}^")" = "$(_wt_bionic_kind "$root" "$c")" ] || { printf '%s' "$c"; return 0; }
+  done
+  printf '%s' "$3"
+}
 _wt_bionic_committed() {  # <root> <onto head> <tree head> -> "<commit> <first path>" | nothing
   local root="$1" onto_head="$2" head="$3" path commit
+  commit="$(_wt_bionic_kind_changed "$root" "$onto_head" "$head")" && { printf '%s .bionic' "$commit"; return 0; }
   git -C "$root" cat-file -e "${onto_head}:.bionic" 2>/dev/null && return 1
   path="$(git -C "$root" -c core.quotePath=false diff --no-renames --name-only "$onto_head" "$head" \
     -- ':(literal).bionic' 2>/dev/null | sed -n 1p)"

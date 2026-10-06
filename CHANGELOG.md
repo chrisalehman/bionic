@@ -208,7 +208,7 @@ Newly refused:
   debt cannot be written (`reason=debt-unwritten`). The full-suite runner is never honoured as a
   declared red.
 - `spawn-worktree.sh land`, and the stand-down's landing, for a range that commits `.bionic` or a
-  path under it, unless the target already tracks `.bionic`; nothing merges:
+  path under it, unless the target already tracks `.bionic` as a directory and the range leaves it one; nothing merges:
   `spawn-worktree: REFUSED reason=bionic-committed path=<path> commit=<commit> branch=<branch> onto=<onto> fix='git -C <tree> rm -r --cached .bionic, commit, land again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree and its stamps are kept`.
 - `session-poker.sh release-check` on a checkout with uncommitted changes, with no start for the
   release range or an empty one, and from a dispatched agent; `session-poker.sh proof-add check`
