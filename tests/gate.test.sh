@@ -22,9 +22,14 @@
 #                      typed one asks anyway; BIONIC_SLOT_HELD=1 is ignored. Mutation: the
 #                      ancestor test removed believes the stranger
 #   §WAITED    AC-4.2  a request holds its asked and admitted times, and the wait is their gap
-#   §KILLED    AC-4.3  a real child admitted and then killed with signal 9 is counted once
+#   §KILLED    AC-4.3  a real child admitted and then killed with signal 9 is counted once;
+#                      its peak is kept and it writes no cost
 #   §COST      D12     gate_end's cost line, three kept, the per-field promise, the unknown
-#                      command's promise, the memory rise and its overlap rule, `times`
+#                      command's promise, the memory rise from idle to the peak (a reading
+#                      that rises mid-run and falls before gate_end), the overlap rule, an
+#                      overestimate held until it ages out of the three lines, `times`, an
+#                      unknown request line ignored. Mutations: no peak raised mid-run; four
+#                      lines kept
 #   §MACHINES  AC-7.3  the admission rows run under three planted machines and decide alike
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
@@ -38,7 +43,7 @@
 # cannot source it exits 127), not one row. Every "waits" row stands beside a positive on the
 # same request (its file exists, its asked line is read). Three mutation arms run on a copy
 # of payload/scripts/lib under the world's directory, each anchored first and each proved
-# to run (its own positive row) before its claim is read.
+# to run (its own positive row) before its claim is read; §COST adds two more.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The machine, the clock and the cost records are SYNTHESIZED by design (the world's
@@ -462,6 +467,7 @@ HOLD=1 ask_bg kk work k 0; wait_for 20 has kk.rc
 kk_id="$(id_of kk)"; kk_pid="$(cat "$D/kk.pid")"
 expect_eq "K.1 the child is admitted" "0" "$(rc_of kk)"
 expect_eq "K.2 while it runs, a second ask finds no room (rc 75)" "75" "$(ask_fg k2 work k 0)"
+BIONIC_PROBE_USED_PCT=70 state >/dev/null
 kill -KILL "$kk_pid"
 wait_for 20 dead "$kk_pid"
 dead "$kk_pid" || no "K.3 the killed child is dead" "pid $kk_pid lives"
@@ -472,31 +478,46 @@ expect_eq "K.6 a second reading counts it once again, not twice" "1" "$(printf '
 expect_eq "K.7 it was admitted and never ended (admitted|ended)" "1000|" "$(field "$kk_id" admitted)|$(field "$kk_id" ended)"
 expect_contains "K.8 gate_state no longer counts it admitted" "admitted=0 " "$(state)"
 expect_eq "K.9 its promise is released: the same ask is now admitted" "0" "$(ask_fg k3 work k 0)"
+expect_eq "K.10 the killed run kept the peak a reading raised mid-run (70)" "70" "$(field "${kk_id:-none}" peak)"
+expect_eq "K.11 and it wrote no cost: cost/k holds the one planted line" "1 25:0.5:30:1000" \
+  "$(wc -l < "$BIONIC_GATE_DIR/cost/k" | tr -d ' ') $(head -n 1 "$BIONIC_GATE_DIR/cost/k")"
 
 # ── §COST ────────────────────────────────────────────────────────────────────
 section "§COST — a command's cost is learned from the machine (D12)"
-fresh cost
-world_machine 8 8192 40 1.0
-world_cost k 10 0.5 20
-world_cost k 4 1.5 50
-world_cost k 7 0.25 90
-world_cost other 30 3 10
-HOLD=1 ask_bg c1 work k 0; wait_for 20 has c1.rc
-c1_id="$(id_of c1)"
+# peak_run <gate lib> <name> — idle 40; a run admitted at 40, a reading of 55 mid-run (the one
+# call that samples, gate_state), back to 40 at gate_end 30 s later. Sets PK_STATE (the mid-run
+# gate_state line), PK_ID and PK_LINE (cost/k's newest line).
+peak_run() {
+  fresh "$2"
+  world_machine 8 8192 40 1.0
+  world_cost k 10 0.5 20
+  world_cost k 4 1.5 50
+  world_cost k 7 0.25 90
+  world_cost other 30 3 10
+  GATE_LIB="$1" HOLD=1 ask_bg c1 work k 0; wait_for 20 has c1.rc
+  PK_ID="$(id_of c1)"
+  PK_STATE="$(GATE_LIB="$1" BIONIC_PROBE_USED_PCT=55 state)"
+  printf 'later-field=a line this gate does not know\n' >> "$BIONIC_GATE_DIR/requests/${PK_ID:-none}"
+  world_tick 30
+  release c1
+  PK_LINE="$(tail -n 1 "$BIONIC_GATE_DIR/cost/k" 2>/dev/null)"
+}
+peak_run "$GATE" cost
+c1_id="$PK_ID"
 expect_eq "D.1 the promise is the per-field maximum of the key's lines" "10:1.5:90" "$(field "$c1_id" promise)"
-expect_contains "D.2 a reading taken during the run raises its peak (gate_state at 55)" \
-  "admitted=1 " "$(BIONIC_PROBE_USED_PCT=55 state)"
+expect_contains "D.2 a reading taken during the run (gate_state at 55) sees it admitted" "admitted=1 " "$PK_STATE"
 expect_eq "D.3 the peak is kept on the request" "55" "$(field "$c1_id" peak)"
-world_tick 30
-release c1
+expect_eq "D.16 a request line the gate does not know is ignored: the run ended all the same" \
+  "1030 a line this gate does not know" "$(field "$c1_id" ended) $(field "$c1_id" later-field)"
 expect_eq "D.4 gate_end exits 0" "0" "$(cat "$D/c1.endrc")"
 expect_eq "D.5 it writes ended at 1030" "1030" "$(field "$c1_id" ended)"
 expect_eq "D.6 and the rc" "0" "$(field "$c1_id" rc)"
 expect_eq "D.7 cost/k keeps three lines: the oldest planted is now the second" "3 4:1.5:50:1000" \
   "$(wc -l < "$BIONIC_GATE_DIR/cost/k" | tr -d ' ') $(head -n 1 "$BIONIC_GATE_DIR/cost/k")"
-expect_regex "D.8 the newest is this run: rise 55-40=15, cores, 30 s, at 1030" \
-  '^15:[0-9.]+:30:1030$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
+expect_regex "D.8 the newest is this run: rise to the peak 55-40=15 (the end read 40), 30 s, at 1030" \
+  '^15:[0-9.]+:30:1030$' "$PK_LINE"
 expect_eq "D.9 the oldest planted line is gone" "0" "$(grep -c '^10:0.5:20:' "$BIONIC_GATE_DIR/cost/k")"
+world_machine 8 8192 40 1.0
 HOLD=1 ask_bg c2 work never-seen 0; wait_for 20 has c2.rc
 expect_eq "D.10 a command never seen is promised the maximum over every cost file" "30:3:90" \
   "$(field "$(id_of c2)" promise)"
@@ -522,6 +543,40 @@ world_tick 1
 release u1
 expect_regex "D.13 the processor field is the children's time from \`times\`, over 0" \
   '^[0-9]*\.[0-9]*[1-9][0-9]*:1:' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k" | cut -d: -f2-)"
+MP="$(mutant peak)"
+anchor "$MP" 'if [ "$reading" -ge 0 ] && [ "$reading" -gt "${_R_peak:--1}" ]; then' 1
+sed -i.bak 's/if \[ "\$reading" -ge 0 \] && \[ "\$reading" -gt "\${_R_peak:--1}" \]; then/if false; then/' "$MP"
+peak_run "$MP" cost-mut
+expect_regex "D.17 the mutant (no peak raised mid-run) still ends the run and writes its line" \
+  ':30:1030$' "$PK_LINE"
+expect_regex "D.18 the mutant records 0, not the peak's 15 — the mid-run sample is the rule" '^0:' "$PK_LINE"
+# age_runs <gate lib> <name> — cost/k holds one overestimate (30, an overlapped run's measured
+# rise); four undisturbed runs follow, each rising 5. Sets AGE to the four admissions' memory
+# promises.
+age_runs() {
+  local i p
+  fresh "$2"
+  world_machine 8 8192 40 1.0
+  world_cost k 30 0.5 20
+  AGE=""
+  for i in 1 2 3 4; do
+    GATE_LIB="$1" HOLD=1 ask_bg "a$i" work k 0; wait_for 20 has "a$i.rc"
+    p="$(field "$(id_of "a$i")" promise)"; AGE="$AGE ${p%%:*}"
+    GATE_LIB="$1" BIONIC_PROBE_USED_PCT=45 state >/dev/null
+    world_tick 10
+    release "a$i"
+  done
+  AGE="${AGE# }"
+}
+age_runs "$GATE" cost-age
+expect_eq "D.19 three lower undisturbed runs do not lower the promise until the overestimate ages out" \
+  "30 30 30 5" "$AGE"
+MK="$(mutant keep4)"
+anchor "$MK" '} | tail -n 3 > "$_GD/cost/.new.$id"' 1
+sed -i.bak 's/} | tail -n 3 > "\$_GD\/cost\/.new.\$id"/} | tail -n 4 > "$_GD\/cost\/.new.$id"/' "$MK"
+age_runs "$MK" cost-age-mut
+expect_eq "D.20 the mutant keeping four lines still runs all four and holds 30 one run longer" \
+  "30 30 30 30" "$AGE"
 expect_eq "D.14 gate_end of a request that does not exist exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_end 999 0 2>/dev/null; echo $? )"
 expect_eq "D.15 gate_ask with an unknown kind exits 2" "2" \

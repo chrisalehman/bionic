@@ -16,7 +16,9 @@
 #                    tree=<abs path>  asked=<epoch>  holder=<pid>:<start>
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>,
 #                  and once ended, ended=<epoch> rc=<n>. While admitted and unfinished it also
-#                  carries peak=<pct>, the highest memory reading the gate saw during the run.
+#                  carries peak=<pct>, the highest memory reading any locked gate read saw
+#                  during the run (the plan's ruling A-orch-12). A line the gate does not know
+#                  is ignored, so a later bionic may add one.
 #   cost/<key>     at most three lines, newest last: <mem pct>:<cores>:<seconds>:<epoch>
 #                  (a `/` in the key is written `%` in the file's name)
 #   idle           the memory reading taken the last time nothing admitted was unfinished
@@ -51,6 +53,7 @@
 #             limit: it holds even when nothing is admitted.
 #   processor the larger of _res_busy_cores and the admitted processor promises, plus the
 #             newcomer's, at most share × cores ÷ 100 — or nothing admitted is unfinished.
+#             An empty or unreadable busy reading counts as 0: the promises alone decide.
 #   promise   the per-field maximum of cost/<key>; a command never seen is promised the
 #             per-field maximum over every cost file, and with no cost file at all it is
 #             admitted only when nothing admitted is unfinished. So is any command while the
@@ -59,6 +62,10 @@
 #             from the shell's own `times` over those seconds; memory, the rise from idle to
 #             the run's peak, kept only when no other admission overlapped the run, otherwise
 #             the previous memory value is carried.
+#   sampling  the peak is raised only by a locked read: a waiter's poll, gate_state, gate_end.
+#             A run nothing else polls is sampled only at its end, so a caller that holds a
+#             long run calls `gate_state` now and then while it runs (it prints one line and
+#             changes nothing but the peaks and the idle reading).
 #   time      only `_res_now`, never SECONDS or date: a planted clock moves every wait.
 #   belief    BIONIC_GATE_ADMIT=<id> is believed only while that request is admitted,
 #             unfinished, and held by this process or one of its ancestors. BIONIC_SLOT_HELD
