@@ -1106,4 +1106,50 @@ expect_contains "80b.5: …under both pages' headings" "baseline ✗ rows:" "$S8
 expect_eq "80b.6: …the shared row printed once per page, so twice" "2" \
   "$(printf '%s\n' "$S80B_BAD" | grep -c '✗ alpha-row')"
 
+section "§RECORD: doctor prints the install record, one row per recorded tool (wave-28 T40, AC-12.3)"
+
+# The record is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/installed`, so each run here names its own
+# CLAUDE_CONFIG_DIR under this suite's root rather than inheriting the runner's. Four lines: two tools,
+# one of them twice (the newest line is the one read), and a name the table does not hold.
+REC_CCD="${TMP}/rec-config"
+mkdir -p "${REC_CCD}/bionic"
+printf '%s\t%s\t%s\t%s\n' \
+  ccstatusline statusline 2026-10-01T10:00:00Z 1.12.0 \
+  @pencil.dev/cli npm-global 2026-10-01T11:00:00Z 1.12.0 \
+  retired-tool npm-global 2026-09-01T09:00:00Z 1.9.0 \
+  @pencil.dev/cli npm-global 2026-10-02T12:00:00Z 1.13.0 > "${REC_CCD}/bionic/installed"
+REC_EMPTY="${TMP}/rec-config-empty"
+mkdir -p "$REC_EMPTY"
+
+rec_section() {  # <report> -> the INSTALL RECORD section: its heading to the first blank line
+  printf '%s\n' "$1" | awk 'index($0, "INSTALL RECORD") == 1 { on = 1 } on && $0 == "" { exit } on { print }'
+}
+rec_row() {  # <section> <name> -> the section's rows for <name>
+  printf '%s\n' "$1" | awk -v n="$2" '$1 == n { print }'
+}
+
+OUT_REC="$(run_doctor CLAUDE_CONFIG_DIR="$REC_CCD")"
+SEC_REC="$(rec_section "$OUT_REC")"
+expect_nonempty "REC.1: the page carries an INSTALL RECORD section (the section extractor reads)" "$SEC_REC"
+ROW_CCS="$(rec_row "$SEC_REC" ccstatusline)"
+expect_nonempty "REC.2: the recorded ccstatusline has its row" "$ROW_CCS"
+expect_contains "REC.3: …with its kind" " statusline " "$ROW_CCS"
+expect_contains "REC.4: …the time it was installed" "2026-10-01T10:00:00Z" "$ROW_CCS"
+expect_contains "REC.5: …and the bionic that installed it" "bionic 1.12.0" "$ROW_CCS"
+ROW_PEN="$(rec_row "$SEC_REC" @pencil.dev/cli)"
+expect_eq "REC.6: a tool recorded twice has one row" "1" "$(printf '%s\n' "$ROW_PEN" | grep -c .)"
+expect_contains "REC.7: …read from its newest line" "2026-10-02T12:00:00Z  bionic 1.13.0" "$ROW_PEN"
+ROW_RET="$(rec_row "$SEC_REC" retired-tool)"
+expect_nonempty "REC.8: a name the table no longer holds has its row" "$ROW_RET"
+expect_contains "REC.9: …which says unknown" " unknown " "$ROW_RET"
+expect_contains "REC.10: …and that remove never acts on it" "remove never acts on it" "$ROW_RET"
+expect_match "REC.11: the unrecorded rg is on the page (the THIRD PARTY table names it)" "* rg *" "$OUT_REC"
+expect_eq "REC.12: …and has no row in the record's section" "" "$(rec_row "$SEC_REC" rg)"
+expect_eq "REC.13: every row of the section fits 100 columns" "" "$(too_wide "$SEC_REC")"
+
+OUT_REC0="$(run_doctor CLAUDE_CONFIG_DIR="$REC_EMPTY")"
+SEC_REC0="$(rec_section "$OUT_REC0")"
+expect_contains "REC.14: with no record the section says so" "none recorded" "$SEC_REC0"
+expect_eq "REC.15: …and has no ccstatusline row (the row extractor read one above)" "" "$(rec_row "$SEC_REC0" ccstatusline)"
+
 finish
