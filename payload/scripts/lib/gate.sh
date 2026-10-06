@@ -463,7 +463,7 @@ gate_end() {
 }
 
 gate_state() {
-  local reading share used clears now w k s p
+  local reading share used clears now w k p _kind _asked
   _gate_store || return 2
   _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
   reading="$(_gate_reading)"
@@ -473,7 +473,7 @@ gate_state() {
   now="$(_res_now)"
   # The waiting requests' promises, so the clearing time counts what is still to come.
   w=''
-  while read -r s s p k; do
+  while read -r _kind _asked p k; do
     [ -n "$p" ] || continue
     w="${w}$(_gate_promise "$k")
 "
@@ -481,7 +481,8 @@ gate_state() {
 $_G_QUEUE
 EOF
   _gate_unlock
-  set -- $(printf '%s---\n%s' "$_G_PROM" "$w" | awk -F: -v r="$reading" -v idle="$_G_IDLE" \
+  read -r used clears <<EOF
+$(printf '%s---\n%s' "$_G_PROM" "$w" | awk -F: -v r="$reading" -v idle="$_G_IDLE" \
       -v unf="$_G_UNF" -v share="$share" -v now="$now" '
     $0 == "---" { waiting = 1; next }
     NF >= 3 && !waiting { sm += $1; left = $4 + $3 - now; if (left < 0) left = 0; mt += $1 * left }
@@ -493,7 +494,7 @@ EOF
       c = mt / room / 60; ci = int(c); if (c > ci) ci++
       printf "%d %d\n", u, ci
     }')
-  used="${1:--1}" clears="${2:-0}"
+EOF
   printf 'share=%s used=%s admitted=%s waiting=%s landing-waiting=%s clears=%s\n' \
     "$share" "$used" "$_G_UNF" "$_G_WAIT" "$_G_LWAIT" "$clears"
 }
