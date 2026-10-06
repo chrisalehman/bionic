@@ -385,295 +385,15 @@ worktree_land "${OUTSIDE}/stranger" wave/fixture >/dev/null
 expect_true "a refused out-of-scope land does not even drop the legacy link" \
   test -L "${OUTSIDE}/stranger/.bionic"
 
-section "Group 5: worktree_land — D1, never land under a running suite"
+# Group 5: worktree_land — D1, never land under a running suite.
 #
-# D1 IS A FACT ABOUT PROCESSES AND DIRECTORIES (wave-20 T8c; review R2-1, R2-8; critic
-# C2-1). The land refuses while a `tests/run.sh` process has its script path or its working
-# directory inside the project root or inside the land's TARGET checkout. No session file is
-# read. In-process teammates and Agent-tool subagents share their orchestrator's session and
-# have no session file of their own, so a session can never tell the orchestrator from the
-# floor it dispatched (T8b tried, and switched D1 off for exactly that floor).
-#
-# Every arm starts its own STAND-IN RUNNER: a script at `<dir>/tests/run.sh` that only
-# sleeps, run as `bash <script>` from a chosen working directory. The real runner is never
-# started. When this suite itself runs under tests/run.sh, that runner sits in the bionic
-# checkout, outside every fixture here, so the answer is the same in both modes.
-
-S="$(new_repo "$TMP/land-busy")"
-
-RUNNER_PID=""
-# <cwd> <script as invoked> -> RUNNER_PID. Returns once the process shows the command line
-# the predicate matches, so no arm races the exec.
-start_runner() {
-  ( cd "$1" && exec bash "$2" ) >/dev/null 2>&1 &
-  RUNNER_PID=$!
-  local i=0
-  while [ $i -lt 100 ]; do
-    case "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
-    i=$((i+1)); sleep 0.05
-  done
-  return 1
-}
-stop_runner() {
-  [ -n "$RUNNER_PID" ] || return 0
-  kill "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null
-  RUNNER_PID=""
-}
-make_runner() {  # <dir> -> <dir>/tests/run.sh
-  mkdir -p "$1/tests"
-  printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$1/tests/run.sh"
-  chmod +x "$1/tests/run.sh"
-}
-trap 'stop_runner; rm -rf "$TMP"' EXIT
-
-# Somewhere that is no repository at all, and ANOTHER repository (T12 F3's topology: the
-# floor of one project and the land of another).
-ELSE="$TMP/elsewhere"; make_runner "$ELSE"
-OTHER="$(new_repo "$TMP/other-repo")"; make_runner "$OTHER"
-make_runner "$S"
-
-session_file() {  # <pid> <cwd> <status> <name>
-  printf '{"pid":%s,"sessionId":"fixture-%s","cwd":"%s","status":"%s","name":"%s","kind":"interactive"}\n' \
-    "$1" "$4" "$2" "$3" "$4" > "$CLAUDE_HOME/sessions/$1.json"
-}
-
-BT="$(new_tree "$S" busy-arm)"
-
-# Arm 1 — a runner whose SCRIPT is in the project root, started from elsewhere: refused,
-# naming the process. No session file exists anywhere in this fixture.
-expect_true "a stand-in runner started (script in the root, cwd elsewhere)" \
-  start_runner "$ELSE" "$S/tests/run.sh"
-SREFS0="$(refs_of "$S")"
-OUTB="$(worktree_land "$BT" wave/fixture)"; RCB=$?
-expect_match "a runner whose script is in this project refuses the land" \
-  "spawn-worktree: REFUSED reason=suite-running*" "$OUTB"
-expect_match "and the refusal NAMES the process" "*pid=${RUNNER_PID}*" "$OUTB"
-expect_match "and the script it runs" "*script=${S}/tests/run.sh*" "$OUTB"
-expect_eq    "the refusal exits 2" "2" "$RCB"
-expect_true  "the tree survives the refusal" test -d "$BT"
-expect_eq    "no ref moved" "$SREFS0" "$(refs_of "$S")"
-
-# Arm 2 — the same world once the runner has exited: the land goes through. A process that
-# is gone is not a running suite.
-stop_runner
-expect_match "the same land goes through once the runner is gone (the arm discriminates)" \
-  "spawn-worktree: LANDED *" "$(worktree_land "$BT" wave/fixture)"
-
-# Arm 3 — a RELATIVE invocation, `bash tests/run.sh` from the root. The command line names
-# no directory, so only the process's working directory places it.
-BT3="$(new_tree "$S" relative-arm)"
-expect_true "a stand-in runner started (relative, cwd the root)" start_runner "$S" "tests/run.sh"
-OUTB3="$(worktree_land "$BT3" wave/fixture)"; RCB3=$?
-expect_match "a relative runner whose working directory is the root refuses" \
-  "spawn-worktree: REFUSED reason=suite-running*cwd=${S} *" "$OUTB3"
-expect_eq    "that refusal exits 2" "2" "$RCB3"
-stop_runner
-
-# Arm 4 — a runner working inside a LINKED WORKTREE of this project counts as this project:
-# that is where a writer running a suite sits. The script itself lives elsewhere.
-BT4="$(new_tree "$S" from-a-tree)"
-OT4="$(new_tree "$S" writers-tree)"
-expect_true "a stand-in runner started (cwd a linked worktree)" start_runner "$OT4" "$ELSE/tests/run.sh"
-expect_match "a runner working inside one of the project's own trees refuses" \
-  "spawn-worktree: REFUSED reason=suite-running*cwd=${OT4} *" "$(worktree_land "$BT4" wave/fixture)"
-stop_runner
-
-# Arm 5 — T12 F3: a runner in ANOTHER repository never refuses this project's land, whether
-# it was invoked relatively from that repository or by its absolute path.
-expect_true "a stand-in runner started (relative, in another repository)" \
-  start_runner "$OTHER" "tests/run.sh"
-expect_match "a runner in a different repository does not refuse (T12 F3)" \
-  "spawn-worktree: LANDED branch=from-a-tree *" "$(worktree_land "$BT4" wave/fixture)"
-stop_runner
-BT5="$(new_tree "$S" other-abs-arm)"
-expect_true "a stand-in runner started (absolute, another repository's script, cwd elsewhere)" \
-  start_runner "$ELSE" "$OTHER/tests/run.sh"
-expect_match "…nor does one invoked by its absolute path" \
-  "spawn-worktree: LANDED branch=other-abs-arm *" "$(worktree_land "$BT5" wave/fixture)"
-stop_runner
-
-# Arm 6 — THE TARGET CHECKOUT IS WHERE THE MERGE HAPPENS (T8, D1), so a runner working in it
-# refuses even when that checkout lives OUTSIDE the project root, which
-# `spawn-worktree.sh create` allows with an absolute parent. The check is widened to the
-# target, never narrowed.
-SWAVE="$TMP/outside-wave"
-git -C "$S" worktree add --quiet -b wave/out "$SWAVE" wave/fixture >/dev/null 2>&1
-SWAVE="$(cd "$SWAVE" && pwd -P)"
-BT6="$(new_tree "$S" into-outside)"
-expect_true "a stand-in runner started (cwd the outside target checkout)" \
-  start_runner "$SWAVE" "$ELSE/tests/run.sh"
-OUTB6="$(worktree_land "$BT6" wave/out)"; RCB6=$?
-expect_match "a runner in the TARGET checkout, outside the root, refuses" \
-  "spawn-worktree: REFUSED reason=suite-running*cwd=${SWAVE} *" "$OUTB6"
-expect_eq    "that refusal exits 2" "2" "$RCB6"
-stop_runner
-expect_match "the same land goes through once that runner is gone (the arm discriminates)" \
-  "spawn-worktree: LANDED branch=into-outside onto=wave/out checkout=${SWAVE} *" \
-  "$(worktree_land "$BT6" wave/out)"
-
-# Arm 7 — THE ORCHESTRATOR'S OWN FLOOR (T8c; review R2-1, critic C2-1). The real fleet
-# shape: ONE session file, the orchestrator's, busy, its cwd the root; the floor it
-# dispatched runs `<wave checkout>/tests/run.sh` in the wave checkout; the land goes onto
-# the wave branch. Called with the lander's own session id (T8b's call shape, which still
-# parses) and without it: both refuse, because who runs the suite plays no part.
-SINNER="$S/.worktrees/inner"
-git -C "$S" worktree add --quiet -b wave/inner "$SINNER" wave/fixture >/dev/null 2>&1
-make_runner "$SINNER"
-BT7="$(new_tree "$S" self-arm)"
-session_file "$$" "$S" busy W-SELF
-expect_true "a stand-in runner started (the floor: absolute script in the wave checkout)" \
-  start_runner "$SINNER" "$SINNER/tests/run.sh"
-OUTB7="$(worktree_land "$BT7" wave/inner "fixture-W-SELF")"; RCB7=$?
-expect_match "(T8c: was \"the lander's OWN busy session does not refuse its own land\") the lander's own session's floor in the target checkout refuses" \
-  "spawn-worktree: REFUSED reason=suite-running*script=${SINNER}/tests/run.sh*" "$OUTB7"
-expect_eq    "that refusal exits 2" "2" "$RCB7"
-expect_match "and the call without a session id refuses the same" \
-  "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$BT7" wave/inner)"
-expect_true  "the tree survives" test -d "$BT7"
-stop_runner
-expect_match "the same land goes through once the floor has finished (the arm discriminates)" \
-  "spawn-worktree: LANDED branch=self-arm onto=wave/inner *" \
-  "$(worktree_land "$BT7" wave/inner "fixture-W-SELF")"
-
-# Arm 8 — a runner in this root refuses whoever's session started it: here a DIFFERENT
-# session's file is the busy one, and the land still refuses.
-BT8="$(new_tree "$S" other-session-arm)"
-rm -f "$CLAUDE_HOME/sessions/$$.json"
-session_file "$$" "$S" busy W-PEER2
-expect_true "a stand-in runner started (relative, cwd the root)" start_runner "$S" "tests/run.sh"
-OUTB8="$(worktree_land "$BT8" wave/fixture "some-other-session-id")"; RCB8=$?
-expect_match "(T8c: was \"a different session's busy suite in this project still refuses\") a suite in this root refuses, from any session" \
-  "spawn-worktree: REFUSED reason=suite-running*" "$OUTB8"
-expect_eq    "that refusal exits 2" "2" "$RCB8"
-stop_runner
-
-# Arm 9 — THE SESSION PLAYS NO PART IN AN ADMISSION EITHER (T12 F3 as it was measured): the
-# lander's session file busy at the root, the only runner in ANOTHER repository. The
-# pre-T8b predicate refused this, naming the lander's own session. Both call shapes land.
-rm -f "$CLAUDE_HOME/sessions/$$.json"
-session_file "$$" "$S" busy W-SELF
-expect_true "a stand-in runner started (relative, in another repository)" \
-  start_runner "$OTHER" "tests/run.sh"
-expect_match "(T8c: was \"no sid argument -> the busy session still refuses (unchanged default)\") a busy session with its only runner in another repository does not refuse" \
-  "spawn-worktree: LANDED branch=other-session-arm *" "$(worktree_land "$BT8" wave/fixture)"
-BT9="$(new_tree "$S" no-sid-arm)"
-expect_match "…nor with the lander's session id" \
-  "spawn-worktree: LANDED branch=no-sid-arm *" "$(worktree_land "$BT9" wave/fixture "fixture-W-SELF")"
-stop_runner
-
-rm -f "$CLAUDE_HOME/sessions/$$.json"
-
-# Arm 10 — A COMMAND THAT ONLY MENTIONS THE RUNNER IS NOT THE RUNNER (T31, found live in
-# wave 26). The harness runs every Bash call as `zsh -c '… <the whole command text>'`, so a
-# wait loop or a progress note naming `tests/run.sh` is a process in the project whose command
-# line holds that text. Only a process that RUNS the script counts: its interpreter's script
-# word, or its argv[0], ends in `tests/run.sh`, and that path resolves to a file.
-MENTION_PID=""
-start_mention() {  # <cwd> <shell> <-c text> -> MENTION_PID, once ps shows the text
-  ( cd "$1" && exec "$2" -c "$3" ) >/dev/null 2>&1 &
-  MENTION_PID=$!
-  local i=0
-  while [ $i -lt 100 ]; do
-    case "$(ps -o command= -p "$MENTION_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
-    i=$((i+1)); sleep 0.05
-  done
-  return 1
-}
-stop_mention() {
-  [ -n "$MENTION_PID" ] || return 0
-  kill "$MENTION_PID" 2>/dev/null; wait "$MENTION_PID" 2>/dev/null
-  MENTION_PID=""
-}
-trap 'stop_runner; stop_mention; rm -rf "$TMP"' EXIT
-BT10="$(new_tree "$S" mention-arm)"
-expect_true "a shell started in the root whose -c text names the runner bare" \
-  start_mention "$S" bash 'while :; do sleep 1; done # bash tests/run.sh'
-expect_match "a shell whose -c text names tests/run.sh does not refuse the land" \
-  "spawn-worktree: LANDED branch=mention-arm *" "$(worktree_land "$BT10" wave/fixture)"
-stop_mention
-BT11="$(new_tree "$S" quoted-mention-arm)"
-expect_true "a shell started in the root whose -c text quotes the runner, as the harness's wait loops do" \
-  start_mention "$S" bash "while :; do sleep 1; done; until ! pgrep -f 'tests/run.sh'; do sleep 30; done"
-expect_match "a quoted mention does not refuse either (it once printed script=unreadable)" \
-  "spawn-worktree: LANDED branch=quoted-mention-arm *" "$(worktree_land "$BT11" wave/fixture)"
-# The same world with the real runner started beside the mention: the runner refuses, and the
-# refusal names the runner, not the mention.
-BT12="$(new_tree "$S" mention-and-runner-arm)"
-expect_true "the mention is still running" kill -0 "$MENTION_PID"
-expect_true "a stand-in runner started beside it (relative, cwd the root)" start_runner "$S" "tests/run.sh"
-OUTB12="$(worktree_land "$BT12" wave/fixture)"; RCB12=$?
-expect_match "a real bash tests/run.sh in the root still refuses, naming the runner" \
-  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} cwd=${S} script=${S}/tests/run.sh" "$OUTB12"
-expect_eq    "that refusal exits 2" "2" "$RCB12"
-stop_runner
-stop_mention
-# A -c string whose FIRST word is a runner path is still a command string: here bash tries a
-# non-executable `tests/run.sh` in a directory of the root, fails, and loops.
-mkdir -p "$S/sub/tests"; printf 'not a runner\n' > "$S/sub/tests/run.sh"
-expect_true "a shell started whose -c string opens with a tests/run.sh that resolves in the root" \
-  start_mention "$S/sub" bash 'tests/run.sh 2>/dev/null; while :; do sleep 1; done'
-expect_match "a -c string is never a script, whatever its first word" \
-  "spawn-worktree: LANDED branch=mention-and-runner-arm *" "$(worktree_land "$BT12" wave/fixture)"
-stop_mention
-rm -rf "$S/sub"
-BT12="$(new_tree "$S" runner-shapes-arm)"
-# An interpreter option before the script, and the script as argv[0], are runners too.
-start_runner_argv() {  # <cwd> <glob> <argv>... -> RUNNER_PID, once ps shows a command matching <glob>
-  local d="$1" g="$2"; shift 2
-  ( cd "$d" && exec "$@" ) >/dev/null 2>&1 &
-  RUNNER_PID=$!
-  local i=0
-  while [ $i -lt 100 ]; do
-    [[ "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" == $g ]] && return 0
-    i=$((i+1)); sleep 0.05
-  done
-  return 1
-}
-expect_true "a stand-in runner started as bash -o pipefail tests/run.sh" \
-  start_runner_argv "$S" "*bash -o pipefail tests/run.sh" bash -o pipefail tests/run.sh
-expect_match "a runner behind an interpreter option refuses" \
-  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
-  "$(worktree_land "$BT12" wave/fixture)"
-stop_runner
-# BUNDLED OPTIONS (review 7 F7). Each `o` or `O` in a cluster takes the next word, as bash reads
-# it, so the common `bash -euo pipefail <runner>` is the runner, not `pipefail`.
-expect_true "a stand-in runner started as bash -euo pipefail tests/run.sh" \
-  start_runner_argv "$S" "*bash -euo pipefail tests/run.sh" bash -euo pipefail tests/run.sh
-expect_match "a runner behind a bundled -euo pipefail refuses" \
-  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
-  "$(worktree_land "$BT12" wave/fixture)"
-stop_runner
-# The walk itself, one argv per row, as `ps` would print it. Runners first, then the command
-# strings and stdin the same walk must never take for a script.
-for argv in "bash tests/run.sh" "bash -e tests/run.sh" "bash -o pipefail tests/run.sh" \
-            "bash -euo pipefail tests/run.sh" "bash -eo pipefail tests/run.sh" \
-            "bash +euo pipefail tests/run.sh" "bash -oo pipefail errexit tests/run.sh" \
-            "bash -eO extglob tests/run.sh" "bash - tests/run.sh" "bash -- tests/run.sh" \
-            "bash + tests/run.sh" "bash --rcfile /dev/null tests/run.sh" "zsh -euo pipefail tests/run.sh"; do
-  # shellcheck disable=SC2086  # one argv word per word, as ps prints it
-  expect_eq "the walk finds the runner in: ${argv}" "tests/run.sh" "$(_wt_runner_script $argv)"
-done
-for argv in "bash -c tests/run.sh" "bash -ec tests/run.sh" "bash -euo pipefail -c tests/run.sh" \
-            "bash -co pipefail tests/run.sh" "bash +c tests/run.sh" "bash -s tests/run.sh" \
-            "bash -o pipefail" "bash -euo"; do
-  # shellcheck disable=SC2086
-  expect_false "the walk finds no runner in: ${argv}" _wt_runner_script $argv
-done
-expect_true "a process started with the root's tests/run.sh as its argv[0]" \
-  start_runner_argv "$ELSE" "$S/tests/run.sh 30" bash -c "exec -a '$S/tests/run.sh' sleep 30"
-expect_match "a process whose argv[0] is the runner's script refuses" \
-  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
-  "$(worktree_land "$BT12" wave/fixture)"
-stop_runner
-# A runner path that resolves to no file is not a runner: the directory is the root's, the
-# script is not there.
-mkdir -p "$S/empty/tests"
-expect_true "a process started with a missing tests/run.sh in the root as its argv[0]" \
-  start_runner_argv "$ELSE" "$S/empty/tests/run.sh 30" bash -c "exec -a '$S/empty/tests/run.sh' sleep 30"
-expect_match "a runner path that resolves to no file does not refuse" \
-  "spawn-worktree: LANDED branch=runner-shapes-arm *" "$(worktree_land "$BT12" wave/fixture)"
-stop_runner
-rmdir "$S/empty/tests" "$S/empty"
+# D1 READS THE GATE'S REQUESTS SINCE WAVE-28 T12. Until then it read the process table for a
+# `tests/run.sh` whose script or working directory lay under the project root, and this group
+# drove stand-in runner processes through a dozen arms (the argv walk, a -c string that only
+# mentions the runner, bundled options, an argv[0] runner). Every suite now asks the gate for
+# itself and its request names its tree, so the arms are §LAND-BUSY-GATE's below, on planted
+# requests held by real live processes. The process walk and its rows were removed with the
+# predicate (T12 record).
 
 section "§LAND-BUSY-GATE: the busy check reads the gate's requests (wave-28 T12; D10)"
 #
@@ -702,7 +422,7 @@ gb_plant() {  # <id> <tree> <holder pid> [admitted|waiting|ended] — one reques
   } > "$BIONIC_GATE_DIR/requests/$1"
 }
 gb_clear() { rm -rf "$BIONIC_GATE_DIR"; [ -z "$GB_HOLD" ] || kill "$GB_HOLD" 2>/dev/null; GB_HOLD=""; }
-trap 'gb_clear; stop_runner; stop_mention; rm -rf "$TMP"' EXIT
+trap 'gb_clear; rm -rf "$TMP"' EXIT
 
 GBT1="$(new_tree "$GB" gate-root)"
 gb_holder; gb_plant 7 "$GB" "$GB_HOLD"
@@ -822,38 +542,35 @@ expect_true "the usage text names the land verb" \
 # off CLAUDE_CODE_SESSION_ID (`cmd_land`) and uses it for one thing: the target branch.
 # The orchestrator's shape is one busy session file at the root; the floor it dispatched
 # runs in the checkout the land merges into.
-VELSE="$TMP/verb-else"; make_runner "$VELSE"
-VOTHERREPO="$(new_repo "$TMP/verb-other-repo")"; make_runner "$VOTHERREPO"
+VOTHERREPO="$(new_repo "$TMP/verb-other-repo")"
 VSELF="$(new_tree "$V" verb-self-busy)"
 printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"self"}\n' \
   "$$" "$VSID" "$V" > "$CLAUDE_HOME/sessions/$$.json"
-expect_true "a stand-in runner started (cwd the verb's target checkout)" \
-  start_runner "$V" "$VELSE/tests/run.sh"
+gb_holder; gb_plant 21 "$V" "$GB_HOLD"
 VREFS0="$(refs_of "$V")"
 OUTVS="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" 2>/dev/null )"; RCVS=$?
-expect_match "(T8c: was \"the verb's own busy suite does not refuse its own land\") the verb's own session's floor in the target checkout refuses its own land" \
-  "spawn-worktree: REFUSED reason=suite-running*cwd=${V} *" "$OUTVS"
+expect_match "(T8c, T12) the verb's own session's floor, admitted in the target checkout, refuses its own land" \
+  "spawn-worktree: REFUSED reason=suite-running request=21 *tree=${V} *" "$OUTVS"
 expect_eq   "that refusal exits 2" "2" "$RCVS"
 expect_eq   "no ref moved" "$VREFS0" "$(refs_of "$V")"
-stop_runner
+gb_clear
 
-# The same session, its only runner in another repository: the verb lands.
-expect_true "a stand-in runner started (relative, in another repository)" \
-  start_runner "$VOTHERREPO" "tests/run.sh"
-expect_match "a runner in another repository does not refuse the verb's land" \
+# The same session, its only run in another repository: the verb lands.
+gb_holder; gb_plant 22 "$VOTHERREPO" "$GB_HOLD"
+expect_match "a run in another repository does not refuse the verb's land" \
   "spawn-worktree: LANDED branch=verb-self-busy onto=wave/fixture *" \
   "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" 2>/dev/null )"
-stop_runner
+gb_clear
 
-# A runner in this root with NO session file at all (a human's terminal): still refused.
+# A run in this root with NO session file at all (a human's terminal): still refused.
 rm -f "$CLAUDE_HOME/sessions/$$.json"
 VOTHER="$(new_tree "$V" verb-other-busy)"
-expect_true "a stand-in runner started (cwd the root)" start_runner "$V" "$VELSE/tests/run.sh"
+gb_holder; gb_plant 23 "$V" "$GB_HOLD"
 OUTVB="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VOTHER" 2>/dev/null )"; RCVB=$?
-expect_match "a suite in this root with no session file at all still refuses" \
+expect_match "a run in this root with no session file at all still refuses" \
   "spawn-worktree: REFUSED reason=suite-running*" "$OUTVB"
 expect_eq   "that refusal exits 2" "2" "$RCVB"
-stop_runner
+gb_clear
 
 section "Group 8: worktree_lease_overruns — a tree outliving its row"
 #
@@ -2019,12 +1736,11 @@ expect_true "after onto-checkout-dirty, the link still resolves" link_ok "$KO"
 git -C "$LK" checkout --quiet -- file.txt
 
 KS="$(keep_tree keep-suite)"
-make_runner "$LK"
-expect_true "a stand-in runner started in the keep fixture" start_runner "$LK" "tests/run.sh"
+gb_holder; gb_plant 31 "$LK" "$GB_HOLD"
 expect_true "suite-running arm: the link resolves before the land" link_ok "$KS"
 expect_match "suite-running is refused" "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$KS" wave/fixture)"
 expect_true "after suite-running, the link still resolves" link_ok "$KS"
-stop_runner
+gb_clear
 
 # Every refused tree above lands once its cause is gone, and only then is its link dropped.
 # None of them changed a file another landing touched, so each lands on its own green run
@@ -2079,7 +1795,7 @@ section "§LAND-SHIM: the real wall and the real shim, from the main checkout, i
 # trailing `echo "rc=$?"`) stamps rc=0 and is NOT pinned here: it lands, which is a limit
 # recorded in the T56 record, not a behaviour to keep.
 #
-# BOUNDED: a private slots store, a suite that exits at once, a fake HOME, no plugins dir.
+# BOUNDED: a private gate store, a suite that exits at once, a fake HOME, no plugins dir.
 LS="$(new_repo "$TMP/land-shim")"
 LS_SID="t56shim-0000-0000-0000-000000000000"
 LS_HOOK="${REPO}/hooks/bash-walls.sh"
@@ -2098,8 +1814,9 @@ ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = 
 }
 ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
   local q="'\\''" s; s="${1//\'/$q}"
-  ( cd "$LS" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
-      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N="${LS_SLOTS_N:-2}" BIONIC_SLOTS_MAX_WAIT="${LS_MAX_WAIT:-20}" BIONIC_SLOTS_POLL=0.1 \
+  ( cd "$LS" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET -u BIONIC_NOW_EPOCH \
+      BIONIC_GATE_DIR="$TMP/land-shim-gate" BIONIC_GATE_POLL=0.1 BIONIC_PROBE_BUSY_CORES=0 \
+      BIONIC_PROBE_USED_PCT="${LS_USED:-10}" BIONIC_NOW_FILE="${LS_NOW_FILE:-}" \
       /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
 }
 ls_tree() {  # <branch> <suite exit code> -> the tree, its suite committed, nothing else in it
@@ -2116,7 +1833,7 @@ ls_case() {  # <label> <branch> <suite rc> <command after the cd guard> <cd targ
   c="cd $5 || exit 1; $4"
   w="$(ls_wrap "$c")"
   expect_match "$1: the wall wraps it in the shim with the tree as the stamp dir" \
-    "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $t --suites a.test.sh -- *" "$w"
+    "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $t --suites a.test.sh -- *" "$w"
   ls_harness "$w"
   expect_match "$1: the shim stamped the TREE's git dir, at its head, with the suite's own code" \
     "stamp/v1|head=$(git -C "$t" rev-parse HEAD)|dirty=0|rc=$3|*" "$(tail -n 1 "$(stamp_file "$t")" 2>/dev/null)"
@@ -2191,7 +1908,7 @@ echo 0 > "$LSU_RC/su-typed-two-ways.a"
 LSU_WRAP="$(ls_wrap "cd .worktrees/su-typed-two-ways || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc")"
 ls_harness "$LSU_WRAP"
 expect_match "(c) the capture shape is wrapped with the tree and the one suite name" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
 expect_eq "(c) both stamps name a.test.sh" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSC")"
 expect_match "(c) a red typed plainly, then a green in the capture shape, LANDS" \
   "spawn-worktree: LANDED branch=su-typed-two-ways onto=wave/fixture *" "$(worktree_land "$LSC" wave/fixture)"
@@ -2224,7 +1941,7 @@ LSH="$(lsu_tree su-two-in-one)"
 echo 0 > "$LSU_RC/su-two-in-one.a"
 lsu_run "$LSH" b 1 'bash tests/a.test.sh && bash tests/b.test.sh'
 expect_match "(h) the two-suite command is wrapped naming both" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSH" a 0
 expect_eq "(h) one line names both, red; then a alone, green" \
   "a.test.sh,b.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSH")"
@@ -2234,19 +1951,28 @@ lsu_run "$LSH" b 0
 expect_match "(h) …and once b runs green alone the tree LANDS" \
   "spawn-worktree: LANDED branch=su-two-in-one onto=wave/fixture *" "$(worktree_land "$LSH" wave/fixture)"
 
-# (i) A SUITE THAT NEVER GOT A PLACE (critic 3 S5). a runs green; b waits for the one place, which
-# another run holds, and gives up (69). Its line names b, so the land refuses on it; once b runs
-# green the tree lands.
+# (i) A SUITE THE GATE NEVER ADMITTED (critic 3 S5; the gate since wave-28 T12). a runs green; b
+# asks the gate on a machine planted over the share, and its call's limit runs out on a planted
+# clock that jumps past it (75, nothing ran). Its line names b, so the land refuses on it; once b
+# runs green the tree lands.
+ls_waits() {  # <run function> <tree> <suite or runner> — one run the gate does not admit in time
+  local tk i=0
+  printf '1000\n' > "$TMP/ls-clock"
+  # The clock moves a thousand seconds a second, so the call's limit runs out whenever it began.
+  ( while [ "$i" -lt 60 ]; do i=$((i + 1)); sleep 1
+      printf '%s\n' "$((1000 + i * 1000))" > "$TMP/ls-clock.tmp" && mv -f "$TMP/ls-clock.tmp" "$TMP/ls-clock"
+    done ) &
+  tk=$!
+  LS_USED=95 LS_NOW_FILE="$TMP/ls-clock" "$@"
+  kill "$tk" 2>/dev/null; wait "$tk" 2>/dev/null
+}
 LSI="$(lsu_tree su-b-no-place)"
 lsu_run "$LSI" a 0
-sleep 60 & LSI_H=$!
-mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSI_H" > "$TMP/land-shim-slots/place.1/pid"
-export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsu_run "$LSI" b 0; unset LS_SLOTS_N LS_MAX_WAIT
-kill "$LSI_H" 2>/dev/null; wait "$LSI_H" 2>/dev/null
-expect_eq "(i) a green, then b's no-place end stamped with its suite and 69" \
-  "a.test.sh:0 b.test.sh:69" "$(lsu_stamps "$LSI")"
-expect_match "(i) a green then b out of places at one head is REFUSED, naming b" \
-  "spawn-worktree: REFUSED reason=stale-proof why=red rc=69 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
+ls_waits lsu_run "$LSI" b 0
+expect_eq "(i) a green, then b's unadmitted end stamped with its suite and 75" \
+  "a.test.sh:0 b.test.sh:75" "$(lsu_stamps "$LSI")"
+expect_match "(i) a green then b never admitted at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=75 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
 lsu_run "$LSI" b 0
 expect_match "(i) …and once b runs green the tree LANDS" \
   "spawn-worktree: LANDED branch=su-b-no-place onto=wave/fixture *" "$(worktree_land "$LSI" wave/fixture)"
@@ -2308,7 +2034,7 @@ lsn_run() {  # <tree> <runner> <rc> [<command after the cd guard>] — the runne
 LSN1="$(lsu_tree sn-npm-retry)"
 lsn_run "$LSN1" npm 1
 expect_match "(n1) npm test is wrapped naming its own text" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
 lsn_run "$LSN1" npm 0
 expect_eq "(n1) two stamps of npm_test, red then green" "npm_test:1 npm_test:0" "$(lsu_stamps "$LSN1")"
 expect_match "(n1) npm test red then npm test green at one head LANDS" \
@@ -2322,15 +2048,12 @@ OUTLSN2="$(worktree_land "$LSN2" wave/fixture)"
 expect_match "(n2) npm test red then pytest green at one head is REFUSED, naming npm_test" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=npm_test head=$(git -C "$LSN2" rev-parse HEAD) — make the suites green, *" "$OUTLSN2"
 
-# (n3) A runner that never got a place, then the same runner green.
+# (n3) A runner the gate never admitted, then the same runner green.
 LSN3="$(lsu_tree sn-npm-no-place)"
-sleep 60 & LSN3_H=$!
-mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSN3_H" > "$TMP/land-shim-slots/place.1/pid"
-export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsn_run "$LSN3" npm 0; unset LS_SLOTS_N LS_MAX_WAIT
-kill "$LSN3_H" 2>/dev/null; wait "$LSN3_H" 2>/dev/null
+ls_waits lsn_run "$LSN3" npm 0
 lsn_run "$LSN3" npm 0
-expect_eq "(n3) npm_test out of places (69), then npm_test green" "npm_test:69 npm_test:0" "$(lsu_stamps "$LSN3")"
-expect_match "(n3) a runner that never got a place, then the same runner green, LANDS" \
+expect_eq "(n3) npm_test never admitted (75), then npm_test green" "npm_test:75 npm_test:0" "$(lsu_stamps "$LSN3")"
+expect_match "(n3) a runner the gate never admitted, then the same runner green, LANDS" \
   "spawn-worktree: LANDED branch=sn-npm-no-place onto=wave/fixture *" "$(worktree_land "$LSN3" wave/fixture)"
 
 # (n4) A TRUE `?` STILL STICKS: a runner whose text the reading cannot resolve (a `$`).
@@ -2365,7 +2088,7 @@ LSN6="$(lsu_tree sn-one-file)"
 lsu_run "$LSN6" a 1
 lsu_run "$LSN6" a 1 "bash $LSN6/tests/a.test.sh"
 expect_match "(n6) the absolute path behind the cd is wrapped as a.test.sh" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSN6" a 1 'bash ./tests/a.test.sh'
 lsu_run "$LSN6" a 0 "set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc"
 expect_eq "(n6) four stamps, one name" "a.test.sh:1 a.test.sh:1 a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSN6")"
@@ -2378,7 +2101,7 @@ LSN7="$(lsu_tree sn-or-short)"
 lsu_run "$LSN7" b 1
 echo 0 > "$LSU_RC/sn-or-short.a"
 lsu_run "$LSN7" b 1 'bash tests/a.test.sh || bash tests/b.test.sh'
-expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
+expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
 expect_eq "(n7) b red, then the a || b line green as ?" "b.test.sh:1 ?:0" "$(lsu_stamps "$LSN7")"
 expect_match "(n7) b red then a || b green at one head is REFUSED, naming b" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSN7" wave/fixture)"

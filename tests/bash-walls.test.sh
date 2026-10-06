@@ -1034,7 +1034,7 @@ expect_eq "14e0: …and stderr is EXACTLY that one log line — no stray shell e
 # then rewrites `command` on the SAME object, so neither change overwrites the other.
 expect_eq "14e1: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14e2: …whose command is the booking wrap around the original" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14e3: …beside the repaired timeout" "600000" "$(updated_timeout_of)"
 
@@ -1055,7 +1055,7 @@ expect_status "14g: a suite call already at the harness maximum is not refused" 
 expect_eq "14h: …its timeout is left as the caller set it — there is nothing to repair" \
   "600000" "$(updated_timeout_of)"
 expect_regex "14h2: …and the only rewrite is the booking wrap around the original command" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_empty "14i: …no repair logged either" "$ERR"
 
@@ -1082,7 +1082,7 @@ run_hook "$(mk_payload "$R_ADV" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600
 expect_status "14m1: an advisory main-thread suite call is allowed" 0 "$ST"
 expect_eq "14m2: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14m3: …carrying the booking wrap" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait [0-9]+ --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait [0-9]+ --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14m4: …and no timeout repair on the main thread" "" "$(updated_timeout_of)"
 expect_nonempty "14m4: …(the reader works: the wrap's command is non-empty on the same object)" \
@@ -1406,7 +1406,7 @@ expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
 # carries: no nudge, no refusal, and nothing on stderr.
 expect_empty "15f2: …stderr stays empty" "$ERR"
 expect_regex "15f3: …and stdout is the booking wrap alone" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "15f4: …with no other channel beside it" '["hookEventName","updatedInput"]' \
   "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
@@ -2398,18 +2398,19 @@ expect_eq "§CDT an uppercase word that is not git ends nothing" "/b|" "$(cdt_of
 
 section "§WAIT-CEIL — the wrapped command never waits for a place longer than its call lasts (wave-27 T6, AC-8.3)"
 #
-# Critic 3 S2 (wave 26). The shim's wait defaults to 1200 s (lib/slots.sh _slots_max_wait), and
-# ARM R raises a suite call to BASH_MAX_TIMEOUT_MS, 600 000 ms on an install without tier 2: a
-# writer on a full machine waited past its own call, which the harness then moved to the
-# background, where its result is not evidence. The wrap now passes the staged timeout in
-# seconds, less a ten-second margin, as `--max-wait`; the shim uses the smaller of that and its
-# default (tests/slots.test.sh §MAX-WAIT). A short call carries `--kill-after` instead, which
-# already bounds the wait inside the call, so it gets no `--max-wait`.
+# Critic 3 S2 (wave 26). A shim with no bound of its own waits for as long as the machine is
+# full (since wave-28 T12 the gate waits until it admits), and ARM R raises a suite call to
+# BASH_MAX_TIMEOUT_MS, 600 000 ms on an install without tier 2: a writer on a full machine
+# waited past its own call, which the harness then moved to the background, where its result
+# is not evidence. The wrap passes the staged timeout in seconds, less a ten-second margin, as
+# `--max-wait`; the shim hands it to the gate as the ask's --within, and a wait that reaches it
+# ends 75 having run nothing (tests/gate.test.sh §WRAP). A short call carries `--kill-after`
+# instead, which already bounds the wait inside the call, so it gets no `--max-wait`.
 wait_ceiling_of() {  # the staged wrap's --max-wait value, or empty
   updated_command_of | awk '{ for (i = 1; i < NF; i++) if ($i == "--max-wait") { print $(i + 1); exit } }'
 }
-# The shim's default when the wrap names none: 1200 s unless BIONIC_SLOTS_MAX_WAIT says otherwise.
-WC_DEFAULT=1200
+# A wrap that named no ceiling would leave the wait unbounded: read as more than any call lasts.
+WC_DEFAULT=999999
 R_WC="$(mk_repo waitceil)"
 # ON THE BUDGET (wave-27 T5, D15): an agent suite with no recorded set is refused, never wrapped.
 bw_dispatched "$R_WC" twaitceil suites_allowed=x.test.sh suites_source=declared files=
@@ -2423,7 +2424,7 @@ expect_true "WC3: …with a wait ceiling at most the call's timeout (${WC_S:-non
   test "${WC_S:-$WC_DEFAULT}" -le 600
 expect_eq "WC4: …which is the staged timeout in seconds less ten" "590" "$WC_S"
 expect_regex "WC5: …named before --suites, the original command intact after --" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 # (b) under the tier-2 ceiling the margin follows the staged value.
 run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 1800000)" \
