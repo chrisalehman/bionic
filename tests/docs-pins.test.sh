@@ -5986,8 +5986,34 @@ sed 's/<what is not known>/<what is unknown>/' "$STEP6_MD" > "$W28S_DOC9" 2>/dev
 expect_nonempty "W28-S9m precondition: the doctored steps/6.md still gives finding lines" "$(w28s_finding_form "$W28S_DOC9")"
 expect_ne "W28-S9m: a steps/6.md whose unsure: form drifts is caught" "$W28S_FORM" "$(w28s_finding_form "$W28S_DOC9")"
 
-# ── §W28-C (wave-28 T48; REQ-8, D19, D20) ──
-#
+# ============================================================
+section "§W28-T15 (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.6, AC-8.8; D19): the reading record's grammar row names the finding lines"
+# ============================================================
+# The `reading record` row of operational-rules.md's grammar table is the hand-written statement
+# of what `proof_reading` (lib/proof.sh) reads. Since T15 a reader pushed the severity scale also
+# writes its findings, and the row says so: the finding lines' shapes, that a record writes no
+# priority, that the result is derived, the plan lines registration writes, and that a reader not
+# pushed the scale is read as before.
+W28_T15_ROW="$(/usr/bin/grep -m1 '^| reading record |' "$OPRULES")"
+expect_nonempty "W28-T15a: operational-rules.md carries the reading record row (the extractor reads it)" "$W28_T15_ROW"
+expect_contains "W28-T15a2: …which still names the 1.12.0 keys" '`reviewed: <a>..<b>`, `question: <q>`' "$W28_T15_ROW"
+for w28_t15_pin in \
+  'the reader'"'"'s roster row carries `severity` in `pushed=`' \
+  '`findings: <n>`' \
+  '`finding: <n> <S1\|S2\|S3\|S4> <on\|off> <path>:<line>\|- <title>`' \
+  '`shown: <n> <command>`' \
+  '`unsure: <n> <what is not known>`' \
+  'writes no priority' \
+  'a finding to fix gives `fail`, any other finding `flag`, none `pass`' \
+  '`deferred: <record>#<n> <S> <reach> "<title>"`' \
+  '`check: <record>#<n> <S> <reach> "<title>"`' \
+  'a reader not pushed the scale is read as before'; do
+  expect_contains "W28-T15b: the reading record row says $w28_t15_pin" "$w28_t15_pin" "$W28_T15_ROW"
+done
+
+# ============================================================
+section "§W28-C (wave-28 T48; REQ-8, D19, D20): the structure checks say a check is FAIL only for a finding the table sends to fix"
+# ============================================================
 # WHAT THIS OWNS. A check's answer and the scale's table give one result. proof.sh's F6 rule
 # refuses `result: flag` beside a FAIL check and `pass` beside a FLAG, so the checks files say
 # when a check is FAIL: only for a finding the table sends to fix. Pinned here: the sentence is in
