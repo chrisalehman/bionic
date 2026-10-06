@@ -863,12 +863,12 @@ for c in $HD_B_CASES; do
   if [ "${c#*:}" = leaks ]; then
     expect_contains "${c%%:*}: run under /bin/bash, the ) leaks the heredoc" "EOT" \
       "$(/bin/bash "$f" 2>/dev/null)"
-    expect_contains "…and the lint names it by file and line" \
+    expect_contains "${c%%:*}: …and the lint names it by file and line" \
       "${c%%:*}.sh:$(mark_line "$f" ' ) '): HEREDOC-PAREN" "$HD_B_HITS"
   else
     expect_eq "${c%%:*}: run under /bin/bash, the body prints whole" \
       "[$(sed -n 3p "$f")]" "$(/bin/bash "$f" 2>/dev/null)"
-    expect_absent "…and the lint, in the same call, does not name it" "/${c%%:*}.sh:" "$HD_B_HITS"
+    expect_absent "${c%%:*}: …and the lint, in the same call, does not name it" "/${c%%:*}.sh:" "$HD_B_HITS"
   fi
 done
 
