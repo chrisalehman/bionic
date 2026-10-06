@@ -2453,6 +2453,8 @@ expect_eq "16 --all: remove exits 0" "0" "$?"
 G16_ALL_TEXT="$(cat "$G16_ALL")"
 G16_PAGE="${G16_ALL_TEXT%%Do all of the above?*}"
 expect_ne "16 --all: the page is on the output, ahead of its question" "$G16_ALL_TEXT" "$G16_PAGE"
+expect_eq "16 --all: one question is put, the page's (the question counter reads)" \
+  "1" "$(grep -c '\[y/N\]' "$G16_ALL")"
 expect_contains "16 --all: the native row bionic's catalog installed is on the page" "• remove impeccable" "$G16_PAGE"
 for n in $G16_NAMES; do
   expect_absent "16 --all: ${n} is not on the page" "• remove ${n}" "$G16_PAGE"
@@ -2474,6 +2476,10 @@ expect_eq "16 --all, nothing on the page: ccstatusline is still named, with its 
   "yes" "$(g16_pair "$G16_ALL0" ccstatusline "$(g16_plan ccstatusline)")"
 expect_absent "16 --all, nothing on the page: …and the run does not call the machine clean" \
   "this machine is already clean" "$(cat "$G16_ALL0")"
+expect_eq "16 --all, nothing on the page: …and its summary names every row left for the user" \
+  "$G16_NAMES" "$(g16_byhand "$G16_ALL0")"
+expect_eq "16 --all, nothing on the page: …and no question was put to anyone" \
+  "0" "$(grep -c '\[y/N\]' "$G16_ALL0")"
 expect_eq "16 --all, nothing on the page: …and nothing was called" "" "$(g16_acts)"
 expect_eq "16 --all, nothing on the page: …and the fixture is byte for byte as it was" "$G16_BEFORE" "$(g16_snap)"
 

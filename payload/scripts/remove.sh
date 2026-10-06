@@ -2657,32 +2657,35 @@ if [ "$rm_all" = "1" ]; then
   if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_read_only "$RC_FILE"; then
     echo "  $(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
   fi
-  if [ "$rm_page" = "0" ]; then
+  if [ "$rm_page" = "0" ] && ! _rm_tools_named_present < /dev/null; then
     # No item runs, so the lines the alias and environment items would name are
     # named here (wave-27 T55, T66).
     if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null; then
       _rm_legacy_alias_not_ours "$RC_FILE"
       _rm_env_left "$RC_FILE"
     fi
-    # Named tool rows are never on the page, so an empty page does not make a clean
-    # machine: the tools item names them here, as it does on every other door.
-    if _rm_tools_named_present < /dev/null; then
-      _rm_item_tools < /dev/null
-      _rm_print_byhand
-      echo "  nothing for bionic to remove — the tools named above are yours to remove by hand."
-    else
-      echo "  nothing to remove — this machine is already clean."
+    echo "  nothing to remove — this machine is already clean."
+    echo ""
+    exit 0
+  fi
+  if [ "$rm_page" = "0" ]; then
+    # NOTHING TO CONSENT TO, AND STILL SOMETHING TO NAME (wave-27). A named tool row
+    # is never on the page, so an empty page does not make a clean machine. Every
+    # item runs as the per-item pass does with nobody there to answer: the answer
+    # channel is closed, so each item says what it found and none can act, and the
+    # tools item names its rows for the summary.
+    echo "  nothing for bionic to remove — each item below says what it found."
+    echo ""
+    exec < /dev/null
+  else
+    _rm_consent "Do all of the above?"; rm_all_rc=$?
+    if [ "$rm_all_rc" -ne 0 ]; then
+      echo "  nothing changed."
+      echo ""
+      exit 0
     fi
-    echo ""
-    exit 0
+    RM_ALL=1
   fi
-  _rm_consent "Do all of the above?"; rm_all_rc=$?
-  if [ "$rm_all_rc" -ne 0 ]; then
-    echo "  nothing changed."
-    echo ""
-    exit 0
-  fi
-  RM_ALL=1
 fi
 
 _rm_item_legacy_alias
