@@ -526,6 +526,47 @@ unplaced_carry() {  # <the placing row> <agent id> -> that row, carrying the id'
 }
 # ---- END an amend by id survives the placing ----
 
+# ---- BEGIN what a start pushes (wave-28 T16, T48) ----
+START_CONTEXT_DIR=$(cd "$BIONIC_LIB/../../context" 2>/dev/null && pwd) \
+  || START_CONTEXT_DIR="$BIONIC_LIB/../../context"
+# WHAT A START PUSHES, ONE ANSWER (wave-28 T16; REQ-8, D20). For a question set, the context files
+# its registrations push, by file name without `.md`, in the deal's order: `checks-<q>` for each
+# question the set holds, then `severity` when it holds a code question. A registration pushes
+# its file only when this names it; the terms registration writes it on the row it identifies as
+# `pushed=`, asking `on-disk` so a file the plugin lacks (logged by its registration, pushed by
+# none) is not named. `proof-add review` reads `severity` there to know the reader had the scale.
+# Here, above both arms, because both placing writes ask it (wave-28 T48): the start's identified
+# row and the launch call's confirmed row, either of which can be the id's last row.
+start_pushed() {  # <questions, comma-joined> [on-disk] -> the names, comma-joined; nothing for none
+  local _sp_n _sp_out=""
+  for _sp_n in checks-evidence checks-adversarial checks-structure severity; do
+    case "$_sp_n" in
+      severity) case ",$1," in *,adversarial,*|*,structure,*) : ;; *) continue ;; esac ;;
+      *)        case ",$1," in *",${_sp_n#checks-},"*) : ;; *) continue ;; esac ;;
+    esac
+    [ "${2-}" != on-disk ] || [ -r "$START_CONTEXT_DIR/$_sp_n.md" ] || continue
+    _sp_out="${_sp_out:+$_sp_out,}$_sp_n"
+  done
+  printf '%s' "$_sp_out"
+}
+# THE ONE WRITER OF THE KEY. A placing row (ARM 2's `confirmed`, ARM 3's `identified`) gets
+# `pushed=` from its own `questions=`, substituted when present and appended when absent, since
+# every reader takes the FIRST match for a key; a row whose questions push nothing is unchanged.
+pushed_onto() {  # <a placing row> -> that row, carrying `pushed=`
+  local _po_pu
+  _po_pu=$(start_pushed "$(line_field "$1" questions)" on-disk)
+  [ -n "$_po_pu" ] || { printf '%s' "$1"; return 0; }
+  printf '%s' "$1" | awk -v pu="$_po_pu" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0 }
+    {
+      f = $0
+      if (f ~ /^pushed=/) { f = "pushed=" pu; seen = 1 }
+      printf "%s%s", (NR > 1 ? "|" : ""), f
+    }
+    END { if (!seen) printf "|pushed=%s", pu }'
+}
+# ---- END what a start pushes ----
+
 # ============================================================
 # THE PLAN ROW MOVES WITH THE LAUNCH (wave-26 T12, D4, AC-1.4; T32).
 # ============================================================
@@ -711,6 +752,9 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     END { if (tid != "" && !seen) printf "|teammate_id=%s", tid }')
   # The set an amend by id recorded for this agent rides the placing row (T59; `unplaced_carry`).
   [ -n "$ROW_AGENT_ID" ] && COMPLETED=$(unplaced_carry "$COMPLETED" "$ROW_AGENT_ID")
+  # What the start pushed rides it too, from the one writer (T48): placed here, by the call's
+  # return, a reader's row is the id's last, the one its record is held to.
+  COMPLETED=$(pushed_onto "$COMPLETED")
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null || exit 0
 
   # THE PLAN ROW MOVES WITH THE CONFIRMATION (wave-26 T12, D4), only once the roster row is
@@ -859,8 +903,6 @@ if [ -n "$IS_START" ]; then
   # NOT printed: in its place goes one line naming the file to read, and stderr says so. The agent
   # starts either way: a SubagentStart hook cannot block, and this one never tries.
   BIONIC_START_PUSH_MAX=9500
-  START_CONTEXT_DIR=$(cd "$BIONIC_LIB/../../context" 2>/dev/null && pwd) \
-    || START_CONTEXT_DIR="$BIONIC_LIB/../../context"
   push_string() {  # <the file the string came from> — the string on stdin; prints one line
     local _ps_json _ps_n
     _ps_json=$(jq -Rsc --argjson max "$BIONIC_START_PUSH_MAX" '
@@ -884,24 +926,6 @@ if [ -n "$IS_START" ]; then
       return 0
     fi
     { printf '%s\n' "$2"; cat "$_dc_f"; } | push_string "$_dc_f"
-  }
-  # WHAT A START PUSHES, ONE ANSWER (wave-28 T16; REQ-8, D20). For a question set, the context files
-  # its registrations push, by file name without `.md`, in the deal's order: `checks-<q>` for each
-  # question the set holds, then `severity` when it holds a code question. A registration pushes
-  # its file only when this names it; the terms registration writes it on the row it identifies as
-  # `pushed=`, asking `on-disk` so a file the plugin lacks (logged by its registration, pushed by
-  # none) is not named. `proof-add review` reads `severity` there to know the reader had the scale.
-  start_pushed() {  # <questions, comma-joined> [on-disk] -> the names, comma-joined; nothing for none
-    local _sp_n _sp_out=""
-    for _sp_n in checks-evidence checks-adversarial checks-structure severity; do
-      case "$_sp_n" in
-        severity) case ",$1," in *,adversarial,*|*,structure,*) : ;; *) continue ;; esac ;;
-        *)        case ",$1," in *",${_sp_n#checks-},"*) : ;; *) continue ;; esac ;;
-      esac
-      [ "${2-}" != on-disk ] || [ -r "$START_CONTEXT_DIR/$_sp_n.md" ] || continue
-      _sp_out="${_sp_out:+$_sp_out,}$_sp_n"
-    done
-    printf '%s' "$_sp_out"
   }
   # THE JOINS, ONE COPY EACH, asked by the terms registration (which writes what they find) and by
   # a question registration (which only reads it), so the two cannot place one start on two rows.
@@ -1545,11 +1569,10 @@ if [ -n "$IS_START" ]; then
   # `restarted_at` follows the same substitute-or-append rule, and only on a restart: the
   # joined row is an intended/confirmed row, which no writer stamps with one, so on every
   # other identification the row is byte-identical to before T20b.
-  # `pushed=` (wave-28 T16) follows it too: what this start's question registrations push for the
-  # row's `questions=`, from the one answer they ask (`start_pushed`); a row with none gets none.
-  PUSHED=$(start_pushed "$(line_field "$ROW" questions)" on-disk)
-  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" -v td="$TERMS_AT" -v pu="$PUSHED" '
-    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0; tseen = 0; pseen = 0 }
+  # `pushed=` (wave-28 T16) is written after it by `pushed_onto`, the key's one writer: what this
+  # start's question registrations push for the row's `questions=`; a row with none gets none.
+  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" -v td="$TERMS_AT" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0; tseen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=identified"
@@ -1557,13 +1580,12 @@ if [ -n "$IS_START" ]; then
       if (f ~ /^agent_id=/) { f = "agent_id=" id; seen = 1 }
       if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
       if (ra != "" && f ~ /^restarted_at=/) { f = "restarted_at=" ra; rseen = 1 }
-      if (pu != "" && f ~ /^pushed=/) { f = "pushed=" pu; pseen = 1 }
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
     END { if (!seen) printf "|agent_id=%s", id
           if (ra != "" && !rseen) printf "|restarted_at=%s", ra
-          if (td != "" && !tseen) printf "|terms-delivered=%s", td
-          if (pu != "" && !pseen) printf "|pushed=%s", pu }')
+          if (td != "" && !tseen) printf "|terms-delivered=%s", td }')
+  IDENTIFIED=$(pushed_onto "$IDENTIFIED")
   printf '%s\n' "$IDENTIFIED" >> "$ROSTER_FILE" 2>/dev/null
   # Placed, so its clock file has done its work (T68): the start's question registrations read
   # the row above by its id.
