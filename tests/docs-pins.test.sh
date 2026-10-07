@@ -2072,7 +2072,7 @@ card3_shape() {  # <card text on stdin> -> each section heading's first word, ar
 }
 SHAPE_PLAN="$TMP/wave-97-shape.plan.md"
 printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: audited' \
-  'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' \
+  'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' \
   'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' \
   'spec: specs/epic-97/wave-97-shape.spec.md' '---' '' \
   '# fixture wave 97 · plan' '' '## Goal' '' 'Render one card to compare against the scaffold.' '' \
