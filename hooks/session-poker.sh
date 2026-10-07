@@ -25,6 +25,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -442,6 +443,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
+  die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -692,6 +694,21 @@ case "$VERB" in
       usage "waive takes exactly two arguments: the question (evidence, adversarial or structure) and the user's reply, verbatim."
     fi
     WV_Q="$1"; WV_REPLY="$2"
+    ;;
+  # TWO OPERANDS (wave-28 T17; D21): the finding, as its deferred: line names it (`<record>#<n>`), and
+  # the one sentence the changelog will carry for it. Whether the line exists and what the sentence
+  # folds to are the verb's own refusals (1), as waive's reply is; a missing or blank operand is the
+  # usage error.
+  finding-stated)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "finding-stated takes exactly two arguments: the finding (<record>#<n>, as its deferred: line names it) and its changelog sentence."
+    fi
+    case "$1" in
+      *?#[0123456789]*) : ;;
+      *) usage "finding-stated: '$1' is not <record>#<n>." ;;
+    esac
+    case "${1##*#}" in *[!0123456789]*) usage "finding-stated: '$1' is not <record>#<n>." ;; esac
+    FS_ID="$1"; FS_RAW="$2"
     ;;
   # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
@@ -3115,6 +3132,49 @@ plan_verb_id_ok() {
   case "$1" in ["$PV_ID_ALNUM"]*) : ;; *) return 1 ;; esac
   case "$1" in *[!"$PV_ID_ALNUM"._-]*) return 1 ;; esac
   return 0
+}
+
+# ---------------------------------------------------------------- the deferral's sentence
+#
+# A DEFERRED FINDING'S ONE CHANGELOG SENTENCE (wave-28 T17; D21, AC-8.7). Registering a record writes
+# `deferred: <record>#<n> <S> <reach> "<title>"` (lib/proof.sh `proof_finding_lines`); `finding-stated`
+# appends ` stated="<sentence>"` to it, the last field of the line. The sentence is folded to one line
+# of single spaces (`deferral_fold`, the one fold the changelog is read through as well), and a `\` or a `"` in it is written `\\` or `\"`, so the
+# quoted field ends where the line does and a title, which never holds a `"`, is still the line's
+# first quoted string (`proof_findings_owed` reads it so). The other half of the debt is the changelog:
+# `release-check` prints each deferral stated (the sentence is in `CHANGELOG.md`) or unstated.
+deferral_fold() {  # <text> -> its white space and control characters folded to single spaces, trimmed
+  printf '%s' "$1" | LC_ALL=C tr -s '[:space:][:cntrl:]' ' ' | sed -e 's/^ //' -e 's/ $//'
+}
+deferral_escape() {  # <folded sentence> -> as the plan holds it: \ for a backslash, \" for a quote
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+deferral_line() {  # <plan> <record>#<n> -> the first deferred: line of ## SDLC State naming it (exit 1: none)
+  awk -v id="$2" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
+    END { if (found) print line; exit (found ? 0 : 1) }' "$1"
+}
+deferral_sentence() {  # <plan> <record>#<n> -> the stated sentence, unescaped (nothing when none); exit 1: no deferred: line
+  local l
+  l="$(deferral_line "$1" "$2")" || return 1
+  printf '%s\n' "$l" | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p' | sed -e 's/\\\(.\)/\1/g'
+}
+# release_deferrals <plan> <changelog file> -> a line `release-check — deferral <id>: stated|unstated`
+# for each open deferral (a finding with a deferred: line whose effective priority is defer), in the
+# order the plan wrote them. Refuses nothing: the caller's exit is not read from it.
+release_deferrals() {
+  local plan="$1" cl="$2" DS_CL="" _id _s _r _p _t DS_ST DS_ANS
+  [ -f "$cl" ] && DS_CL="$(deferral_fold "$(cat "$cl")")"
+  proof_findings_owed "$plan" 2>/dev/null | while read -r _id _s _r _p _t; do
+    [ "$_p" = defer ] || continue
+    DS_ST="$(deferral_sentence "$plan" "$_id")" || continue
+    DS_ANS=unstated
+    [ -n "$DS_ST" ] && case "$DS_CL" in *"$DS_ST"*) DS_ANS=stated ;; esac
+    say "release-check — deferral $(clean "$_id"): $DS_ANS"
+  done
 }
 
 # ---------------------------------------------------------------- the launch sync
@@ -6392,6 +6452,45 @@ $PF_PLANL"
     exit 0
     ;;
 
+  # THE DEFERRAL'S SENTENCE (wave-28 T17; D21, AC-8.7). Stores the one changelog sentence of a deferred
+  # finding on its `deferred:` line, through the plan transaction, as ` stated="<sentence>"` (the
+  # helpers above hold the form). Stating twice replaces; the line is never given a second field.
+  # A finding with no `deferred:` line (a note, a fix, a check owed) is not stated: the verb refuses
+  # it. A sentence of `-` is refused, for `-` is what the continuation writes for no sentence.
+  finding-stated)
+    FS_SENT="$(deferral_fold "$FS_RAW")"
+    if [ -z "$FS_SENT" ]; then
+      die "REFUSED — the sentence is empty once its white space is folded; the plan is unchanged."
+      exit 1
+    fi
+    if [ "$FS_SENT" = "-" ]; then
+      die "REFUSED — '-' is what the continuation writes for a deferral with no sentence, so it cannot be one; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_open finding-stated
+    if ! deferral_line "$PV_PLAN" "$FS_ID" >/dev/null; then
+      die "REFUSED — $PV_PLAN carries no deferred: line for $(clean "$FS_ID") under ## SDLC State, and only a deferral is stated; the plan is unchanged."
+      exit 1
+    fi
+    FS_TAIL=" stated=\"$(deferral_escape "$FS_SENT")\""
+    FS_TAIL="$FS_TAIL" awk -v id="$FS_ID" '
+      /^[[:space:]]*```/ { fence = !fence; print; next }
+      fence { print; next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
+      insdlc && !done && /^deferred:[ \t]/ {
+        split($0, f, /[ \t]+/)
+        if (f[2] == id) {
+          done = 1; l = $0; i = index(l, " stated=\"")
+          if (i) l = substr(l, 1, i - 1)
+          sub(/[ \t]+$/, "", l); print l ENVIRON["FS_TAIL"]; next
+        }
+      }
+      { print }' "$PV_PLAN" > "$PV_NEW"
+    plan_verb_swap finding-stated "the sentence of $FS_ID" writer
+    say "finding-stated — $(clean "$FS_ID"): its sentence is on the deferred: line of $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
   # THE RELEASE CHECK (wave-27 T16; D12). A project may name one command in `.bionic/config.yaml`
   # under `release-check:`. This verb runs it in the checkout of the plan's working branch, with
   # BIONIC_CHECK_BASE at the last release and BIONIC_CHECK_HEAD at the working head, its words
@@ -6535,6 +6634,9 @@ RC_TAGS
     # THE PRIORITY A RECORD NEVER STATES (wave-28 T15; D19): each finding the plan defers or owes a
     # check for, with the table's priority (lib/proof.sh `proof_findings_owed`, the tick's own line).
     proof_findings_owed "$PV_PLAN" 2>/dev/null | while IFS= read -r _rc_f; do say "release-check — finding $(clean "$_rc_f")"; done
+    # THE DEFERRALS' OTHER DEBT (wave-28 T17; D21): each says whether its sentence is in the head's CHANGELOG.md.
+    # It refuses nothing, and the exit below is the check's own.
+    release_deferrals "$PV_PLAN" "$RC_CO/CHANGELOG.md"
     exit 0
     ;;
 
