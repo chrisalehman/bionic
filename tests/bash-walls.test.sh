@@ -3435,7 +3435,7 @@ sfe_verb() {  # <args...> -> SFE_RC, SFE_OUT of the verb, run in R_EG6 under the
 }
 sfe_commit() { run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"; }
 sfe_plan() {  # <current> <scale> <body lines for steps 5.. > -> a plan the gate admits at <current> bar what <body> leaves out
-  eg6_plan "$1" "$2" "$3" "$4" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
+  eg6_plan "$1" "$2" "$3" "${4:-}" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
 }
 sfe_set() { printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"; bw_bind "$R_EG6"; }
 
