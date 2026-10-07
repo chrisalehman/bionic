@@ -973,7 +973,7 @@ Fix: prepend:
   wave: wave-NN-<slug>   # omit for epic-level and continuation
   canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}
   intent: <build|bugfix|refactor|tune|spike|incident-response>
-  rigor: <tested|peer-reviewed|audited>
+  rigor: <low|medium|high>
   scale: <task|wave|epic>
   ---"
   refuse exit2 write "this artifact has no frontmatter block" "prepend a frontmatter block" "$_gs_detail"
@@ -1046,8 +1046,11 @@ Path: $FILE_PATH"
 INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
 [ -n "$INTENT" ] || block "this artifact declares no intent:" "add an intent: line" \
   "requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
+# THE SET IS PRINTED BY ITS NEW WORDS, each with what it means (wave-28 T44; AC-16.2): the
+# printed form is lib/run.sh `rigor_print`'s, so a refusal and a card say a level the same way.
+RIGOR_SET="$(printf '\n  %s' "$(rigor_print low)" "$(rigor_print medium)" "$(rigor_print high)")"
 [ -n "$RIGOR" ]  || block "this artifact declares no rigor:" "add a rigor: line" \
-  "requires rigor: (tested|peer-reviewed|audited)"
+  "requires rigor: low, medium or high:${RIGOR_SET}"
 [ -n "$SCALE" ]  || block "this artifact declares no scale:" "add a scale: line" \
   "requires scale: (task|wave|epic)"
 case "$INTENT" in
@@ -1055,11 +1058,10 @@ case "$INTENT" in
   *) block "that intent is not one of the six" "pick an allowed intent" \
   "invalid intent: '$INTENT' — allowed: build|bugfix|refactor|tune|spike|incident-response" ;;
 esac
-case "$RIGOR" in
-  tested|peer-reviewed|audited) ;;
-  *) block "that rigor is not one of the three" "pick an allowed rigor" \
-  "invalid rigor: '$RIGOR' — allowed: tested|peer-reviewed|audited" ;;
-esac
+# THE CLOSED SET IS rigor_level's (lib/run.sh; wave-28 T44, REQ-16, D35): either vocabulary is
+# one of the three levels, and an old word is read as it is, never rewritten.
+rigor_level "$RIGOR" >/dev/null || block "that rigor is not one of the three" "pick an allowed rigor" \
+  "invalid rigor: '$RIGOR' — allowed: low, medium or high:${RIGOR_SET}"
 case "$SCALE" in
   task|wave|epic) ;;
   *) block "that scale is not task, wave or epic" "pick an allowed scale" \
@@ -1096,12 +1098,13 @@ fi
 # name differs); a shared hooks-lib extraction is deliberately deferred.
 # [INSTRUMENT]
 #
-# Rigor ordering (normative): tested(0) < peer-reviewed(1) < audited(2).
+# Rigor ordering (normative): low(0) < medium(1) < high(2), on the LEVEL `rigor_level` reads
+# (lib/run.sh; wave-28 T44), so a floor and a plan written in different vocabularies compare.
 rigor_rank() {
-  case "$1" in
-    tested) echo 0 ;;
-    peer-reviewed) echo 1 ;;
-    audited) echo 2 ;;
+  case "$(rigor_level "$1")" in
+    low) echo 0 ;;
+    medium) echo 1 ;;
+    high) echo 2 ;;
     *) echo -1 ;;
   esac
 }
@@ -1128,11 +1131,13 @@ log_floor_finding() {  # $1=check-id $2=violation-detail
 }
 
 RR=$(rigor_rank "$RIGOR")
+# A finding names a level by its new word, whichever word the file carries (AC-16.2).
+RL=$(rigor_level "$RIGOR")
 # Intent floor / spike cap (derivable from intent + rigor).
 [ "$INTENT" = "incident-response" ] && [ "$RR" -lt 2 ] \
-  && log_floor_finding intent-floor "incident-response floors at audited, declared $RIGOR"
+  && log_floor_finding intent-floor "incident-response floors at high, declared $RL"
 [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
-  && log_floor_finding spike-cap "spike is capped at tested, declared $RIGOR"
+  && log_floor_finding spike-cap "spike is capped at low, declared $RL"
 
 # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
 # an unparseable/invalid value is its own finding, never a block).
@@ -1144,7 +1149,7 @@ if [ -n "$PF" ]; then
   if [ "$PR" -lt 0 ]; then
     log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml"
   elif [ "$RR" -lt "$PR" ]; then
-    log_floor_finding project-floor "project floor $PF, declared $RIGOR"
+    log_floor_finding project-floor "project floor $(rigor_level "$PF"), declared $RL"
   fi
 fi
 
@@ -1158,7 +1163,7 @@ if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
     [ "$ER" -ge 0 ] && [ "$RR" -lt "$ER" ] \
-      && log_floor_finding epic-floor "epic floor $EF (from $EPIC), declared $RIGOR"
+      && log_floor_finding epic-floor "epic floor $(rigor_level "$EF") (from $EPIC), declared $RL"
   fi
 fi
 

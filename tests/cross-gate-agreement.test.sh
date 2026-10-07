@@ -14205,4 +14205,138 @@ expect_eq "NM mutation: …and its wall still wraps and names a suite" "a.test.s
 expect_eq "NM mutation: …which names other/a.test.sh by its basename, so the agreement goes red" \
   "split a.test.sh" "$(nm_agree "$NM_MUT/hooks/bash-walls.sh" "$NM_OTHER")"
 
+
+# ============================================================
+section "RIGOR — six words, three levels: the plan-write hook and every wall site judge an old word and its new word alike, and refuse a seventh (wave-28 T44; REQ-16 AC-16.1; D35)"
+# ============================================================
+# ONE FUNCTION SAYS WHAT A RIGOR WORD MEANS. lib/run.sh `rigor_level <word>` prints `low`, `medium`
+# or `high` for `low|tested`, `medium|peer-reviewed`, `high|audited`, and returns 1 for any other
+# word. Every site that tests the word calls it: the plan-write hook's closed set and its floor
+# rank (`rigor_rank`), and in lib/walls.sh the task-row check (`effective_row_rigor`), the floor
+# rank (`rigor_ord`), the auditor relaxation (`matrix_auditor_required`) and each arm that asks
+# for the highest level (`ledger_shape_fail`, `validate_requirements_pointer`,
+# `validate_dispatch_ledger`, `plan_bring_forward`). Pinned here, for each of the three pairs:
+# every site gives the level's answer, and the old word and the new word get the same one; a
+# seventh word is refused by the closed sets. A census holds the site count at zero (no line in
+# hooks/ or payload/scripts/ tests an old word itself), and a doctored walls.sh whose auditor arm
+# tests `tested` directly splits the pair, so the agreement rows go red on it.
+RV_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+RV_HOOK="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
+RV_D="$SANDBOX/rigor"; mkdir -p "$RV_D"
+RV_SID="7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d"
+rv_level() {  # <word> -> `<level> rc=<n>`, rigor_level's answer
+  bash -c '. "$1/run.sh" >/dev/null 2>&1; out="$(rigor_level "$2")"; printf "%s rc=%s" "$out" "$?"' _ "$RV_LIB" "$1" 2>/dev/null
+}
+# A wave plan at the word, multi_agent, at current 4 with a pre-14 `## Tasks` table and none of the
+# version-14 keys: `plan_bring_forward` fires on it at the highest level and admits it below. A plan with no `## Tasks` section: the
+# dispatch ledger refuses it at the highest level and passes it below.
+rv_bf_plan() {
+  printf -- '---\nrigor: %s\nscale: wave\nmulti_agent: true\n---\n\n## SDLC State\ncurrent: 4\n\n## Tasks\n\n' "$1"
+  printf -- '| id | task | status |\n|---|---|---|\n| T1 | a | pending |\n'
+}
+printf -- '---\nrigor: high\n---\n\n## SDLC State\ncurrent: 3\n' > "$RV_D/no-tasks.plan.md"
+# THE GATE'S HELPERS ARE DEFINED INSIDE ITS BODY (`_eg_body`), so sourcing walls.sh defines none of
+# them: each is lifted out by its own definition, flush-left from `name() {` to its `}`, and a row
+# below holds every one of them defined, so no answer here is a missing function's silence.
+RV_FNS="effective_row_rigor rigor_ord matrix_auditor_required ledger_shape_fail validate_requirements_pointer step1_evidence_block evidence_line_field extract_continuation resolve_requirements_path validate_dispatch_ledger"
+export RV_FNS
+rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
+  rv_bf_plan "$2" > "$RV_D/bf-$2.plan.md"
+  bash -c '
+    . "$1/refuse.sh" >/dev/null 2>&1; . "$1/fold.sh" >/dev/null 2>&1
+    . "$1/run.sh" >/dev/null 2>&1;    . "$1/units.sh" >/dev/null 2>&1
+    . "$2" >/dev/null 2>&1
+    for fn in $RV_FNS; do
+      eval "$(awk -v n="$fn" '"'"'$0 ~ "^" n "\\(\\) *\\{" { f = 1 } f { print } f && /^}$/ { exit }'"'"' "$2")"
+    done
+    refuse() { echo refused; exit 2; }; log_finding() { echo logged; }
+    RIGOR="$3"; SCALE=wave; MULTI_AGENT=true; CURRENT=3; SECTION=""; PLAN="$5"
+    case "$4" in
+      row)      effective_row_rigor "$3" ;;
+      inherit)  effective_row_rigor "" ;;
+      ord)      rigor_ord "$3" ;;
+      auditor)  if matrix_auditor_required; then echo owed; else echo relaxed; fi ;;
+      ledger)   ledger_shape_fail f x o ;;
+      pointer)  validate_requirements_pointer; echo passed ;;
+      dispatch) validate_dispatch_ledger; echo passed ;;
+      forward)  if plan_bring_forward "$6" >/dev/null 2>&1; then echo admitted; else echo fired; fi ;;
+      defined)  for fn in $RV_FNS plan_bring_forward; do declare -F "$fn" >/dev/null || echo "missing $fn"; done; echo defined ;;
+    esac' _ "$RV_LIB" "$1" "$2" "$3" "$RV_D/no-tasks.plan.md" "$RV_D/bf-$2.plan.md" 2>/dev/null
+}
+rv_rank() {  # <word> -> the plan-write hook's own `rigor_rank` of the word
+  bash -c '. "$1/run.sh" >/dev/null 2>&1
+    eval "$(awk '"'"'index($0, "rigor_rank() {") == 1 { f = 1 } f { print } f && /^}$/ { exit }'"'"' "$2")"
+    rigor_rank "$3"' \
+    _ "$RV_LIB" "$RV_HOOK" "$1" 2>/dev/null
+}
+# The hook's closed set, on the hook itself: a spec whose frontmatter carries the word is either
+# refused on its rigor or carried past that check (to whatever the fixture lacks next).
+RV_PROJ="$RV_D/proj"; mkdir -p "$RV_PROJ/.bionic/docs/specs/epic-01-demo" "$RV_PROJ/.bionic/tmp"
+git -C "$RV_PROJ" init -q . 2>/dev/null
+: > "$RV_PROJ/.bionic/tmp/engaged-$RV_SID.state"
+rv_closed() {  # <word> -> `refused` when the hook refuses the word as a rigor, else `admitted`
+  local c in err
+  c="$(printf -- '---\ngoverning-skill: superpowers:brainstorming\nsdlc-step: 2\nepic: epic-01-demo\nwave: wave-01-x\ncanonical_sdlc_version: 14\nintent: build\nrigor: %s\nscale: wave\n---\n\n## Goal\n\nA spec.\n' "$1")"
+  in="$(jq -n --arg p "$RV_PROJ/.bionic/docs/specs/epic-01-demo/x.spec.md" --arg c "$c" --arg s "$RV_SID" \
+    '{session_id: $s, tool_name: "Write", tool_input: {file_path: $p, content: $c}}')"
+  err="$(HOME="$RV_D" CLAUDE_CODE_SESSION_ID="$RV_SID" bash "$RV_HOOK" <<< "$in" 2>&1 >/dev/null)"
+  case "$err" in *"that rigor is not one of the three"*) echo refused ;; *) echo admitted ;; esac
+}
+RV_WALLS="$RV_LIB/walls.sh"
+expect_eq "RIGOR precondition: every wall site this section asks is defined from walls.sh" "defined" \
+  "$(rv_site "$RV_WALLS" high defined)"
+for rv_pair in tested:low:0:relaxed:logged:passed:admitted \
+               peer-reviewed:medium:1:owed:logged:passed:admitted \
+               audited:high:2:owed:refused:refused:fired; do
+  IFS=: read -r rv_old rv_new rv_ord rv_aud rv_ledger rv_arm rv_bf <<< "$rv_pair"
+  for rv_w in "$rv_old" "$rv_new"; do
+    expect_eq "RIGOR $rv_w: rigor_level reads it as $rv_new" "$rv_new rc=0" "$(rv_level "$rv_w")"
+    expect_eq "RIGOR $rv_w: the hook's closed set admits it" "admitted" "$(rv_closed "$rv_w")"
+    expect_eq "RIGOR $rv_w: the hook's floor rank is $rv_ord" "$rv_ord" "$(rv_rank "$rv_w")"
+    expect_eq "RIGOR $rv_w: the wall's floor rank is $rv_ord" "$rv_ord" "$(rv_site "$RV_WALLS" "$rv_w" ord)"
+    expect_eq "RIGOR $rv_w: a task row's cell resolves to $rv_new" "$rv_new" "$(rv_site "$RV_WALLS" "$rv_w" row)"
+    expect_eq "RIGOR $rv_w: an empty cell inherits $rv_new from the plan" "$rv_new" "$(rv_site "$RV_WALLS" "$rv_w" inherit)"
+    expect_eq "RIGOR $rv_w: the matrix auditor is $rv_aud" "$rv_aud" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
+    expect_eq "RIGOR $rv_w: a ledger-shape fault is $rv_ledger" "$rv_ledger" "$(rv_site "$RV_WALLS" "$rv_w" ledger)"
+    expect_eq "RIGOR $rv_w: the requirements-pointer arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" pointer)"
+    expect_eq "RIGOR $rv_w: the dispatch-ledger arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" dispatch)"
+    expect_eq "RIGOR $rv_w: the bring-forward arm $rv_bf" "$rv_bf" "$(rv_site "$RV_WALLS" "$rv_w" forward)"
+  done
+done
+for rv_w in standard High ""; do
+  expect_eq "RIGOR seventh word '$rv_w': rigor_level refuses it" " rc=1" "$(rv_level "$rv_w")"
+  expect_eq "RIGOR seventh word '$rv_w': the hook's floor rank has no place for it" "-1" "$(rv_rank "$rv_w")"
+done
+for rv_w in standard High; do
+  expect_eq "RIGOR seventh word '$rv_w': the hook's closed set refuses it" "refused" "$(rv_closed "$rv_w")"
+  expect_eq "RIGOR seventh word '$rv_w': the task-row check reads it INVALID" "INVALID" "$(rv_site "$RV_WALLS" "$rv_w" row)"
+  expect_eq "RIGOR seventh word '$rv_w': the auditor arm stays closed on it" "owed" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
+done
+# THE CENSUS: no line outside rigor_level's own three arms tests, ranks or lists an old word. A
+# case arm (`audited)`, `tested|…`) or an equality (`= audited`, `= "audited"`) is a second
+# definition. Comments are not sites.
+RV_CENSUS_RE='(^|[^a-z-])(tested|peer-reviewed|audited)[[:space:]]*[|)]|[!=]=?[[:space:]]*"?(tested|peer-reviewed|audited)("|[[:space:]]|\]|$)'
+rv_census() {  # <dir>… -> every line in the .sh files directly under them that tests an old word
+  local d
+  for d in "$@"; do /usr/bin/grep -nE "$RV_CENSUS_RE" "$d"/*.sh 2>/dev/null; done \
+    | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' \
+    | /usr/bin/grep -vE '/run\.sh:[0-9]+:[[:space:]]*(low|medium|high)\|(tested|peer-reviewed|audited)\)'
+}
+expect_eq "RIGOR census precondition: the census reads rigor_level's own three arms" "3" \
+  "$(/usr/bin/grep -cE '^[[:space:]]*(low|medium|high)\|(tested|peer-reviewed|audited)\)' "$RV_LIB/run.sh")"
+expect_eq "RIGOR census: no site in hooks/ or payload/scripts/ tests an old word itself" "" \
+  "$(rv_census "$BIONIC_HOOKS_DIR" "$RV_LIB/.." "$RV_LIB")"
+# THE DOCTORED SITE: a walls.sh whose auditor arm tests the old word `tested` itself.
+RV_MUT="$RV_D/mut/walls.sh"; mkdir -p "$RV_D/mut"
+anchor "$RV_WALLS" 'matrix_auditor_required() {' 1
+awk '/^matrix_auditor_required\(\) *\{/ { f = 1 }
+     f && /case / { sub(/case .* in/, "case \"$RIGOR\" in") }
+     f && /low\) return 1/ { sub(/low\)/, "tested)") }
+     f && /^}/ { f = 0 } { print }' "$RV_WALLS" > "$RV_MUT"
+expect_eq "RIGOR mutation: the doctored copy tests 'tested' in exactly one arm, and the census finds it" "1" \
+  "$(rv_census "$RV_D/mut" | /usr/bin/grep -c 'tested) return 1')"
+expect_eq "RIGOR mutation: …and still runs, relaxing the auditor at 'tested'" "relaxed" "$(rv_site "$RV_MUT" tested auditor)"
+expect_ne "RIGOR mutation: …but not at 'low', so the low/tested agreement goes red" \
+  "$(rv_site "$RV_MUT" tested auditor)" "$(rv_site "$RV_MUT" low auditor)"
+
 finish

@@ -3718,4 +3718,75 @@ expect_absent "§MEM.8 …with no memory refusal" "assumptions.md" "$HOOK_STDERR
 mem_drive Write "$FAKE_HOME/.claude/projects/-x/memory/MEMORY.md" "$MEM_PROJ" BIONIC_CLAUDE_HOME="$MEM_BCH"
 expect_status "§MEM.9 ~/.claude's store while BIONIC_CLAUDE_HOME names another root: admitted" 0 "$HOOK_EXIT"
 
+# ============================================================
+section "§RIGOR — a plan in either vocabulary passes the same checks, and the refusals name low, medium and high (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35)"
+# ============================================================
+# The plan-write hook reads `rigor:` through lib/run.sh `rigor_level`: `tested`/`low`,
+# `peer-reviewed`/`medium` and `audited`/`high` are the same three levels, a plan carrying an old
+# word is read as it is, and every refusal that lists the set lists the new words in the printed
+# form, `review rigor: <level> (<n> independent reader[s])`. The floors rank levels, so a plan and
+# a floor written in different vocabularies still compare.
+for gs_rv_w in tested low peer-reviewed medium audited high; do
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-$gs_rv_w.plan.md" "$(build_plan rigor="$gs_rv_w")"
+  assert_eq "§RIGOR.1 a plan written rigor: $gs_rv_w is admitted" 0 "$HOOK_EXIT"
+done
+
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/rv-standard.plan.md" "$(build_plan rigor=standard)"
+assert_eq "§RIGOR.2 a seventh word (standard) is refused" 2 "$HOOK_EXIT"
+assert_contains "§RIGOR.2 …on its rigor" "that rigor is not one of the three" "$HOOK_STDERR"
+assert_contains "§RIGOR.2 …and the refusal names low in the printed form" \
+  "review rigor: low (one independent reader)" "$HOOK_VSTDERR"
+assert_contains "§RIGOR.2 …medium" "review rigor: medium (two independent readers)" "$HOOK_VSTDERR"
+assert_contains "§RIGOR.2 …and high" "review rigor: high (three independent readers)" "$HOOK_VSTDERR"
+for gs_rv_old in tested peer-reviewed audited; do
+  expect_absent "§RIGOR.2 …and never prints the old word $gs_rv_old" "$gs_rv_old" "$HOOK_VSTDERR"
+done
+
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/rv-none.plan.md" "$(build_plan rigor=OMIT)"
+assert_eq "§RIGOR.3 a plan with no rigor: is refused" 2 "$HOOK_EXIT"
+assert_contains "§RIGOR.3 …and the refusal names the three levels" \
+  "review rigor: high (three independent readers)" "$HOOK_VSTDERR"
+expect_absent "§RIGOR.3 …by the new words only" "audited" "$HOOK_VSTDERR"
+
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/rv-nofm.plan.md" "$MISSING_FM"
+assert_eq "§RIGOR.4 a plan with no frontmatter is refused" 2 "$HOOK_EXIT"
+assert_contains "§RIGOR.4 …and the template it prints offers the new words" "rigor: <low|medium|high>" "$HOOK_VSTDERR"
+expect_absent "§RIGOR.4 …only" "peer-reviewed" "$HOOK_VSTDERR"
+
+# THE FLOORS RANK LEVELS. Each pair is one level in the old word and in the new; the finding fires
+# (or stays silent) the same way for both, and across the two vocabularies.
+for gs_rv_w in audited high; do
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-spike-$gs_rv_w.plan.md" "$(build_plan intent=spike rigor="$gs_rv_w")"
+  assert_eq "§RIGOR.5 spike at $gs_rv_w is admitted" 0 "$HOOK_EXIT"
+  assert_contains "§RIGOR.5 …and logs spike-cap" "spike-cap" "$HOOK_STDERR"
+done
+for gs_rv_w in tested low; do
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ir-$gs_rv_w.plan.md" "$(build_plan intent=incident-response rigor="$gs_rv_w")"
+  assert_eq "§RIGOR.6 incident-response at $gs_rv_w is admitted" 0 "$HOOK_EXIT"
+  assert_contains "§RIGOR.6 …and logs intent-floor" "intent-floor" "$HOOK_STDERR"
+  assert_contains "§RIGOR.6 …naming the floor by its new word" "floors at high" "$HOOK_STDERR"
+done
+for gs_rv_pair in audited:low high:tested high:low; do
+  project=$(make_project)
+  printf 'rigor-floor: %s\n' "${gs_rv_pair%%:*}" > "$project/.bionic/config.yaml"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=build rigor="${gs_rv_pair#*:}")"
+  assert_eq "§RIGOR.7 project floor ${gs_rv_pair%%:*}, plan ${gs_rv_pair#*:}: admitted" 0 "$HOOK_EXIT"
+  assert_contains "§RIGOR.7 …and logs project-floor" "project-floor" "$(read_audit "$project")"
+done
+for gs_rv_pair in audited:high high:audited high:high; do
+  project=$(make_project)
+  printf 'rigor-floor: %s\n' "${gs_rv_pair%%:*}" > "$project/.bionic/config.yaml"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=spike rigor="${gs_rv_pair#*:}")"
+  assert_eq "§RIGOR.8 project floor ${gs_rv_pair%%:*}, spike plan ${gs_rv_pair#*:}: admitted" 0 "$HOOK_EXIT"
+  assert_contains "§RIGOR.8 …logging the spike cap, so the findings were read" "spike-cap" "$HOOK_STDERR"
+  expect_absent "§RIGOR.8 …with no floor finding (the floor is met)" "project-floor" "$HOOK_STDERR"
+  expect_absent "§RIGOR.8 …nor an invalid-floor one" "invalid rigor-floor" "$HOOK_STDERR"
+done
+
 finish
