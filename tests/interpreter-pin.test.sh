@@ -500,7 +500,7 @@ section "§7 the pin's root is judged by the path itself, never by what a link p
 # own and handed to the function by path — never the real per-user root. A refusal returns
 # non-zero, pins nothing, leaves PATH as it was and prints the seam's line naming the check, once.
 T87_DIR="$TMPROOT/t87"
-mkdir -p "$T87_DIR"
+mkdir -p "$T87_DIR"; chmod 0755 "$T87_DIR"   # a parent no other user can write (T36; AC-10.6)
 PIN_GIVEN="$HAND_GIVEN_PATH"
 
 # pin_call <seam> <root> — call the seam's function in a fresh /bin/bash, leaving PIN_RC, PIN_PATH
@@ -517,7 +517,7 @@ pin_call() {
 # pin_plant <state> <base> — plant one state under <base>; prints the root to hand the function.
 pin_plant() {
   local base="$2"
-  rm -rf "$base"; mkdir -p "$base/owned"; chmod 0700 "$base/owned"
+  rm -rf "$base"; mkdir -p "$base/owned"; chmod 0755 "$base"; chmod 0700 "$base/owned"
   case "$1" in
     fresh)      ;;
     reuse)      mkdir -m 0700 "$base/root" "$base/root/pin"; ln -s /bin/bash "$base/root/pin/bash" ;;
@@ -612,6 +612,215 @@ expect_eq "7.21 the mutant turns the symlink-root state, and that state alone, f
   " link-root" "$T87_FLIPS"
 expect_eq "7.22 …and under the mutant PATH carries the link's path (the defect it guards)" \
   "$T87_MUT_R/pin:$PIN_GIVEN" "$T87_MUT_PATH"
+
+# A REFUSED PIN STOPS A HAND RUN (wave-28 T36; AC-10.5), AND AN OPEN PARENT IS REFUSED (AC-10.6).
+# The hand path used to call the function with `|| :`, so a refused pin printed its line and the
+# suite ran on, unpinned. Now the suite stops before any check: the interfaces' line, the pin
+# marker unset, exit 2. The hand-run's root is `$TMPDIR/bionic-interpreter-pin.<uid>`, so each
+# drive points TMPDIR at a directory of this suite's own; the real per-user root is never touched.
+# The parent rule: a root whose parent group or other can write, with no sticky bit, is refused,
+# since anyone who can write the parent can rename the root away and plant their own.
+mk_stop() {  # mk_stop <seam> <file> — a hand-run suite: one line before the seam, one check after
+  { printf '#!/bin/bash\n'
+    printf 'trap '\''echo "pinned=${BIONIC_TEST_INTERPRETER_PINNED:-unset}" >> "$STOP_OUT"'\'' EXIT\n'
+    printf 'echo start >> "$STOP_OUT"\n'
+    printf '. "%s"\n' "$1"
+    printf 'echo "check ran" >> "$STOP_OUT"\n'
+  } > "$2"
+  chmod +x "$2"
+}
+# stop_run <suite> <tmpdir> — a hand run under /bin/bash; leaves STOP_RC, STOP_ERR, STOP_LOG
+stop_run() {
+  : > "$TMPROOT/stop.out"
+  ( unset BIONIC_TEST_INTERPRETER_PINNED
+    PATH="$HAND_GIVEN_PATH" TMPDIR="$2" STOP_OUT="$TMPROOT/stop.out" \
+    /bin/bash "$1" 2>"$TMPROOT/stop.err" >/dev/null )
+  STOP_RC=$?
+  STOP_ERR="$(cat "$TMPROOT/stop.err" 2>/dev/null)"
+  STOP_LOG="$(cat "$TMPROOT/stop.out" 2>/dev/null)"
+}
+STOP_SUITE="$TMPROOT/stop.test.sh"
+mk_stop "$SEAM" "$STOP_SUITE"
+STOP_UID="$(id -u)"
+
+# The positive first: a clean temp directory, the pin built, the check runs.
+T36_OK="$T87_DIR/t36-ok"; mkdir -p "$T36_OK"; chmod 0700 "$T36_OK"
+stop_run "$STOP_SUITE" "$T36_OK"
+expect_eq "7.23 a hand run whose pin can be built exits 0" "0" "$STOP_RC"
+expect_contains "7.23b …runs its check (the log extractor reads it)" "check ran" "$STOP_LOG"
+expect_contains "7.23c …with the pin marker set" "pinned=1" "$STOP_LOG"
+expect_eq "7.23d …and builds the pin under the temp directory it was given" "/bin/bash" \
+  "$(readlink "$T36_OK/bionic-interpreter-pin.$STOP_UID/pin/bash" 2>/dev/null)"
+
+# A planted symlink at the per-user root: the pin is refused, so the run stops.
+T36_LINK="$T87_DIR/t36-link"; mkdir -p "$T36_LINK/owned"; chmod 0700 "$T36_LINK" "$T36_LINK/owned"
+ln -s "$T36_LINK/owned" "$T36_LINK/bionic-interpreter-pin.$STOP_UID"
+T36_ROOT="$T36_LINK/bionic-interpreter-pin.$STOP_UID"
+stop_run "$STOP_SUITE" "$T36_LINK"
+expect_eq "7.24 a hand run whose pin is refused exits 2" "2" "$STOP_RC"
+expect_contains "7.24b …it started (the line before the seam is there)" "start" "$STOP_LOG"
+expect_absent "7.24c …and ran no check" "check ran" "$STOP_LOG"
+expect_contains "7.24d …the pin marker is unset" "pinned=unset" "$STOP_LOG"
+expect_contains "7.24e …the line names the pin's path and the reason, as the interfaces give it" \
+  "resolve-roots.sh: no interpreter pin at $T36_ROOT — $T36_ROOT is a symlink; remove $T36_ROOT or set TMPDIR, then run again" \
+  "$STOP_ERR"
+expect_eq "7.24f …printed once, and nothing else on stderr" "1" "$(printf '%s\n' "$STOP_ERR" | grep -c .)"
+
+# The parent: open to others with no sticky bit is refused; the same mode with the sticky bit is not.
+T36_OPEN="$T87_DIR/t36-open"; mkdir -p "$T36_OPEN"; chmod 0777 "$T36_OPEN"
+T36_OPEN_ROOT="$T36_OPEN/bionic-interpreter-pin.$STOP_UID"
+stop_run "$STOP_SUITE" "$T36_OPEN"
+expect_eq "7.25 a temp directory others can write, with no sticky bit: the hand run exits 2" "2" "$STOP_RC"
+expect_absent "7.25b …and runs no check" "check ran" "$STOP_LOG"
+expect_contains "7.25c …naming the open parent" \
+  "resolve-roots.sh: no interpreter pin at $T36_OPEN_ROOT — $T36_OPEN is writable by group or others and has no sticky bit; remove $T36_OPEN_ROOT or set TMPDIR, then run again" \
+  "$STOP_ERR"
+expect_eq "7.25d …and builds nothing there" "absent" "$(there "$T36_OPEN_ROOT")"
+T36_GRP="$T87_DIR/t36-group"; mkdir -p "$T36_GRP"; chmod 0770 "$T36_GRP"
+stop_run "$STOP_SUITE" "$T36_GRP"
+expect_eq "7.26 a temp directory its group can write, with no sticky bit: exits 2" "2" "$STOP_RC"
+expect_contains "7.26b …naming the open parent" "$T36_GRP is writable by group or others and has no sticky bit" "$STOP_ERR"
+T36_STICKY="$T87_DIR/t36-sticky"; mkdir -p "$T36_STICKY"; chmod 1777 "$T36_STICKY"
+stop_run "$STOP_SUITE" "$T36_STICKY"
+expect_eq "7.27 a temp directory others can write WITH the sticky bit (/tmp's mode): exits 0" "0" "$STOP_RC"
+expect_contains "7.27b …and runs its check" "check ran" "$STOP_LOG"
+expect_eq "7.27c …with the pin built under it" "/bin/bash" \
+  "$(readlink "$T36_STICKY/bionic-interpreter-pin.$STOP_UID/pin/bash" 2>/dev/null)"
+# The function itself, as tests/run.sh calls it: an open parent is refused with the seam's line.
+R="$T36_OPEN/fn-root"; pin_call "$SEAM" "$R"
+expect_ne "7.28 the function refuses a root under an open parent (non-zero)" "0" "$PIN_RC"
+expect_eq "7.28b …PATH is as given" "$PIN_GIVEN" "$PIN_PATH"
+expect_contains "7.28c …naming the parent" "$T36_OPEN is writable by group or others and has no sticky bit" "$PIN_ERR"
+R="$T36_STICKY/fn-root"; pin_call "$SEAM" "$R"
+expect_eq "7.28d …and builds one under a sticky parent" "0" "$PIN_RC"
+
+# A PARENT REACHED THROUGH A SYMLINK IS JUDGED BY WHERE IT LEADS (wave-28 T54; pass 25 adversarial #2).
+# A link's own mode is always open (lrwxr-xr-x on macOS, lrwxrwxrwx on Linux), so `ls -ld` read the
+# link and not the directory: a TMPDIR that is a link to an open, non-sticky directory built its pin
+# there. The positive beside it: a link to a directory no other user can write still builds one.
+T36_LNK_OPEN="$T87_DIR/t36-lnk-open"; ln -s "$T36_OPEN" "$T36_LNK_OPEN"
+T36_LNK_OPEN_ROOT="$T36_LNK_OPEN/bionic-interpreter-pin.$STOP_UID"
+stop_run "$STOP_SUITE" "$T36_LNK_OPEN"
+expect_eq "7.31 a temp directory that is a link to an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
+expect_absent "7.31b …and runs no check" "check ran" "$STOP_LOG"
+expect_contains "7.31c …naming the link as the open parent, with the pin's existing line" \
+  "resolve-roots.sh: no interpreter pin at $T36_LNK_OPEN_ROOT — $T36_LNK_OPEN is writable by group or others and has no sticky bit; remove $T36_LNK_OPEN_ROOT or set TMPDIR, then run again" \
+  "$STOP_ERR"
+expect_eq "7.31d …and builds nothing in the directory it leads to" "absent" "$(there "$T36_OPEN/bionic-interpreter-pin.$STOP_UID")"
+T36_LNK_OK="$T87_DIR/t36-lnk-ok"; ln -s "$T36_OK" "$T36_LNK_OK"
+stop_run "$STOP_SUITE" "$T36_LNK_OK"
+expect_eq "7.32 a link to a directory only this user can write builds its pin (the refusal is the mode, not the link)" "0" "$STOP_RC"
+expect_contains "7.32b …and runs its check" "check ran" "$STOP_LOG"
+T36_LNK_STICKY="$T87_DIR/t36-lnk-sticky"; ln -s "$T36_STICKY" "$T36_LNK_STICKY"
+stop_run "$STOP_SUITE" "$T36_LNK_STICKY"
+expect_eq "7.32c a link to an open directory WITH the sticky bit builds its pin too" "0" "$STOP_RC"
+# The mutant: the link followed no more (`ls -ld`, in the one judgment of an open directory, whose
+# two-space `case` line is the only one that indent has). The open-parent link is then accepted.
+T36_MUT3="$TMPROOT/t36-mut-nolink.sh"
+anchor -E "$SEAM" '^  case "\$\(ls -ldL "\$1" 2>/dev/null\)" in$' 1
+sed 's|^  case "$(ls -ldL "$1" 2>/dev/null)" in$|  case "$(ls -ld "$1" 2>/dev/null)" in|' "$SEAM" > "$T36_MUT3"
+expect_eq "7.33 the no-link mutant parses" "0" "$(bash -n "$T36_MUT3" >/dev/null 2>&1; echo $?)"
+R="$T36_LNK_OK/mut-ok-root"; pin_call "$T36_MUT3" "$R"
+expect_eq "7.33b …and builds a pin under a link to a closed directory (not vacuous)" "0" "$PIN_RC"
+R="$T36_LNK_OPEN/mut-root"; pin_call "$T36_MUT3" "$R"
+expect_eq "7.33c under the no-link mutant the open parent behind a link is accepted (the defect 7.31 guards)" "0" "$PIN_RC"
+R="$T36_LNK_OPEN/fn-root"; pin_call "$SEAM" "$R"
+expect_ne "7.33d control: the shipped function refuses that same root" "0" "$PIN_RC"
+
+# A LINK ON THE PARENT'S PATH IS JUDGED BY THE DIRECTORY THAT HOLDS IT (wave-28 T56; AC-10.6; pass 27).
+# T54 read where a parent link LEADS and never the directory the link sits in: a link held in a
+# directory others can write, with no sticky bit, is replaced by whoever can write that directory, and
+# the pin's `bash` is then theirs. The walk judges every link on the parent's path by its holder.
+# Holders and targets are explicit modes, never the umask's.
+T56_TGT="$T87_DIR/t56-tgt"; mkdir -p "$T56_TGT"; chmod 0700 "$T56_TGT"
+T56_HOLD="$T87_DIR/t56-hold-open"; mkdir -p "$T56_HOLD"; chmod 0777 "$T56_HOLD"
+ln -s "$T56_TGT" "$T56_HOLD/lnk"
+T56_ROOT="$T56_HOLD/lnk/bionic-interpreter-pin.$STOP_UID"
+stop_run "$STOP_SUITE" "$T56_HOLD/lnk"
+expect_eq "7.34 a temp directory that is a link held in an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
+expect_absent "7.34b …and runs no check" "check ran" "$STOP_LOG"
+expect_contains "7.34c …naming the link and the directory that holds it, with the pin's existing line" \
+  "resolve-roots.sh: no interpreter pin at $T56_ROOT — $T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable by group or others and has no sticky bit; remove $T56_ROOT or set TMPDIR, then run again" \
+  "$STOP_ERR"
+expect_eq "7.34d …and builds nothing in the directory it leads to" "absent" "$(there "$T56_TGT/bionic-interpreter-pin.$STOP_UID")"
+T56_STK="$T87_DIR/t56-hold-sticky"; mkdir -p "$T56_STK"; chmod 1777 "$T56_STK"
+ln -s "$T56_TGT" "$T56_STK/lnk"
+stop_run "$STOP_SUITE" "$T56_STK/lnk"
+expect_eq "7.35 the same link held in an open directory WITH the sticky bit builds its pin" "0" "$STOP_RC"
+expect_eq "7.35b …in the directory the link leads to" "/bin/bash" \
+  "$(readlink "$T56_TGT/bionic-interpreter-pin.$STOP_UID/pin/bash" 2>/dev/null)"
+T56_CLOSED="$T87_DIR/t56-hold-closed"; mkdir -p "$T56_CLOSED"; chmod 0700 "$T56_CLOSED"
+ln -s "$T36_OPEN" "$T56_CLOSED/lnk"
+stop_run "$STOP_SUITE" "$T56_CLOSED/lnk"
+expect_eq "7.36 a link held in a closed directory that leads to an open one is still refused (7.31's case)" "2" "$STOP_RC"
+expect_contains "7.36b …by where it leads" "$T56_CLOSED/lnk is writable by group or others and has no sticky bit" "$STOP_ERR"
+# Two links in a chain. Outer: the open holder is the outer link's. Inner: the outer link is held
+# in a closed directory and leads through a link that an open directory holds.
+T56_MID="$T87_DIR/t56-mid"; mkdir -p "$T56_MID"; chmod 0700 "$T56_MID"
+ln -s "$T56_TGT" "$T56_MID/inner"
+ln -s "$T56_MID/inner" "$T56_HOLD/outer"
+stop_run "$STOP_SUITE" "$T56_HOLD/outer"
+expect_eq "7.37 two links in a chain, the outer one held in an open directory: exits 2" "2" "$STOP_RC"
+expect_contains "7.37b …naming the outer link and its holder" "$T56_HOLD/outer is a symlink held in $T56_HOLD, which is writable" "$STOP_ERR"
+ln -s "$T56_HOLD/lnk" "$T56_MID/outer2"
+stop_run "$STOP_SUITE" "$T56_MID/outer2"
+expect_eq "7.37c two links in a chain, the outer one held closed, the inner one in an open directory: exits 2" "2" "$STOP_RC"
+expect_contains "7.37d …naming the inner link and its holder" "$T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable" "$STOP_ERR"
+ln -s "$T56_HOLD" "$T56_MID/holder-link"; ln -s "$T56_TGT" "$T56_HOLD/lnk2"
+stop_run "$STOP_SUITE" "$T56_MID/holder-link/lnk2"
+expect_eq "7.37e a holder that is itself a link is judged where it leads, and that directory is open: exits 2" "2" "$STOP_RC"
+expect_contains "7.37f …naming the link and the holder as the path spells it" \
+  "$T56_MID/holder-link/lnk2 is a symlink held in $T56_MID/holder-link, which is writable" "$STOP_ERR"
+# A cycle of links ends in a refusal, never a hang.
+T56_CYC="$T87_DIR/t56-cycle"; mkdir -p "$T56_CYC"; chmod 0700 "$T56_CYC"; ln -s "$T56_CYC/a" "$T56_CYC/a"
+stop_run "$STOP_SUITE" "$T56_CYC/a"
+expect_eq "7.38 a link that leads back to itself is refused" "2" "$STOP_RC"
+expect_contains "7.38b …naming the links" "$T56_CYC/a leads through more than 16 links" "$STOP_ERR"
+# The mutants. (1) The walk's call removed: the open holder is accepted. (2) The holder judged with
+# no sticky exemption: the sticky holder is refused. Each is proved to run before its claim is read.
+T56_MUT1="$TMPROOT/t56-mut-walk.sh"
+anchor "$SEAM" '_bionic_pin_links "$parent" 0' 1
+grep -vF '_bionic_pin_links "$parent" 0' "$SEAM" > "$T56_MUT1"
+expect_eq "7.39 the no-walk mutant parses" "0" "$(bash -n "$T56_MUT1" >/dev/null 2>&1; echo $?)"
+R="$T56_CLOSED/lnk/mut-closed-root"; pin_call "$T56_MUT1" "$R"
+expect_ne "7.39b …and still refuses the open parent behind a closed holder (not vacuous)" "0" "$PIN_RC"
+R="$T56_HOLD/lnk/mut-root"; pin_call "$T56_MUT1" "$R"
+expect_eq "7.39c under the no-walk mutant the link held in an open directory is accepted (the defect 7.34 guards)" "0" "$PIN_RC"
+R="$T56_HOLD/lnk/fn-root"; pin_call "$SEAM" "$R"
+expect_ne "7.39d control: the shipped function refuses that same root" "0" "$PIN_RC"
+T56_MUT2="$TMPROOT/t56-mut-sticky.sh"
+anchor "$SEAM" '    ?????????[tT]*) return 1 ;;' 1
+grep -vF '    ?????????[tT]*) return 1 ;;' "$SEAM" > "$T56_MUT2"
+expect_eq "7.40 the no-sticky mutant parses" "0" "$(bash -n "$T56_MUT2" >/dev/null 2>&1; echo $?)"
+R="$T36_LNK_OK/mut-nosticky-root"; pin_call "$T56_MUT2" "$R"
+expect_eq "7.40b …and builds a pin under a link held in a closed directory (not vacuous)" "0" "$PIN_RC"
+R="$T56_STK/lnk/mut-root"; pin_call "$T56_MUT2" "$R"
+expect_ne "7.40c under the no-sticky mutant the link held in a sticky directory is refused (the row 7.35 guards)" "0" "$PIN_RC"
+R="$T56_STK/lnk/fn-root"; pin_call "$SEAM" "$R"
+expect_eq "7.40d control: the shipped function builds under that same root" "0" "$PIN_RC"
+
+# THE MUTANTS. (1) The hand path's refusal turned back into `|| :`: the refused run goes on and
+# runs its check. (2) The parent check removed: the open parent is accepted. Each mutant is proved
+# to run before its claim is read.
+T36_MUT1="$TMPROOT/t36-mut-runon.sh"
+anchor "$SEAM" 'if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then' 1
+sed 's|if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then|if ! { bionic_interpreter_pin "$_bionic_pin_root" \|\| :; }; then|' \
+  "$SEAM" > "$T36_MUT1"
+expect_eq "7.29 the run-on mutant parses" "0" "$(bash -n "$T36_MUT1" >/dev/null 2>&1; echo $?)"
+mk_stop "$T36_MUT1" "$TMPROOT/stop-mut1.test.sh"
+stop_run "$TMPROOT/stop-mut1.test.sh" "$T36_OK"
+expect_eq "7.29b …and runs a hand suite whose pin is fine (not vacuous)" "0" "$STOP_RC"
+stop_run "$TMPROOT/stop-mut1.test.sh" "$T36_LINK"
+expect_contains "7.29c under the run-on mutant a refused pin runs its check (the defect 7.24c guards)" \
+  "check ran" "$STOP_LOG"
+T36_MUT2="$TMPROOT/t36-mut-parent.sh"
+anchor "$SEAM" '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"' 1
+grep -vF '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"' "$SEAM" > "$T36_MUT2"
+expect_eq "7.30 the parent mutant parses" "0" "$(bash -n "$T36_MUT2" >/dev/null 2>&1; echo $?)"
+R="$T87_DIR/t36-mut-sticky-root"; pin_call "$T36_MUT2" "$R"
+expect_eq "7.30b …and builds a pin in a plain directory (not vacuous)" "0" "$PIN_RC"
+R="$T36_OPEN/mut-root"; pin_call "$T36_MUT2" "$R"
+expect_eq "7.30c under the parent mutant the open parent is accepted (the defect 7.28 guards)" "0" "$PIN_RC"
 echo ""
 
 echo "interpreter-pin: ${SKIPPED} skipped (see SKIP: rows above)"

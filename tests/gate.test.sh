@@ -249,6 +249,32 @@ expect_eq "S.9 the same ask at share 80 is admitted (55 + 10 ≤ 80)" "0" "$(cd 
 expect_eq "S.10 the store defaults to \$CLAUDE_CONFIG_DIR/bionic/gate" "$CLAUDE_CONFIG_DIR/bionic/gate" \
   "$( unset BIONIC_GATE_DIR; . "$GATE_LIB" 2>/dev/null; gate_dir )"
 
+# The verb (T10, D16): `session-poker.sh share <n>` writes the file the gate reads. The verb runs under
+# the world's own CLAUDE_CONFIG_DIR and a HOME that holds nothing; the gate's asks follow what it wrote.
+share_verb() {  # <args...> -> the verb's output; BIONIC_CLAUDE_HOME stays as the caller set it
+  ( cd "$D" && env HOME="$WORLD_ROOT/nohome" BIONIC_PLUGINS_DIR="$WORLD_ROOT/no-plugins" \
+      bash "$REPO_ROOT/hooks/session-poker.sh" share "$@" 2>&1 )
+}
+fresh sharev
+world_machine 8 8192 55 1.0
+world_cost k 10 0.5 30
+expect_eq "S.11 the verb prints the share the gate reads (80 from fresh)" "80" "$(share_verb)"
+expect_eq "S.12 share 50 exits 0 and the gate's share is 50" "0|50" \
+  "$(share_verb 50 >/dev/null; echo "$?")|$( . "$GATE_LIB" 2>/dev/null; gate_share )"
+expect_eq "S.13 at the set share 50, a reading of 55 is refused (rc 75)" "75" "$(ask_fg v1 work k 0)"
+share_verb 80 >/dev/null
+expect_eq "S.14 the verb sets it back to 80 and the same ask is admitted (rc 0)" "0" "$(ask_fg v2 work k 0)"
+share_verb 101 >/dev/null; S15_RC=$?
+expect_eq "S.15 a refused value exits 1 and leaves the file as it was (80)" "1|80" "$S15_RC|$(sed -n 1p "$CLAUDE_CONFIG_DIR/bionic/share")"
+expect_eq "S.16 and the verb's print is the gate's (80)" "$( . "$GATE_LIB" 2>/dev/null; gate_share )" "$(share_verb)"
+# BIONIC_CLAUDE_HOME moves claude_home() for other readers, not the share file (T2's choice); the verb writes where
+# gate_share reads under it (read-structure-p6 #3)
+BCH="$D/bch"; mkdir -p "$BCH/bionic"; printf '33\n' > "$BCH/bionic/share"
+BIONIC_CLAUDE_HOME="$BCH" share_verb 45 >/dev/null
+expect_eq "S.17 with BIONIC_CLAUDE_HOME set the verb's write and gate_share's read meet (45)" "45" \
+  "$(env BIONIC_CLAUDE_HOME="$BCH" bash -c '. "$1" 2>/dev/null; gate_share' _ "$GATE_LIB")"
+expect_eq "S.18 …and the other home's own share file was not written (33)" "33" "$(sed -n 1p "$BCH/bionic/share")"
+
 # ── §HARD ────────────────────────────────────────────────────────────────────
 section "§HARD — memory is the hard limit, the processor the soft one (AC-2.2)"
 fresh hard
@@ -1052,7 +1078,7 @@ expect_eq "B.26 …and it took no number of its own" "1" "$(nreq)"
 expect_eq "B.27 the parent's request was ended once, by the parent" "0" "$(field "$(req_of np)" rc)"
 
 # A typed admission from no ancestor, and BIONIC_SLOT_HELD=1, ask anyway.
-stranger_rows() {  # <booked> <prefix> — sets ST_RC and ST_RAN for a stranger with no room
+stranger_rows() {  # <booked> <prefix> — sets ST_RC and ST_RAN for an unbooked caller with no room
   fresh "wrap-stranger-$2"
   world_machine 8 8192 60 1.0
   world_cost h 15 0.5 30
@@ -1148,5 +1174,47 @@ expect_eq "B.43 the run ended 0" "0" "$(brc pk)"
 expect_eq "B.44 a reading of 70 taken mid-run by the wrapper is the request's peak" "70" "$(field "$pk_id" peak)"
 expect_regex "B.45 …so its cost is the rise 70-40=30, though the end read 40" '^30:' \
   "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k.test.sh" 2>/dev/null)"
+
+# §NUMBER, THE TREE A REQUEST NAMES (wave-28 T36; ruling A-orch-55/56). These rows belong to
+# §NUMBER and sit here because they drive the real shim, whose harness (book_fg) §WRAP defines.
+# The doctrine runs a row's suite as `cd <row tree> || exit 1; bash tests/x.test.sh`, often from
+# the main checkout, and the wall passes `--stamp-dir <row tree>`. The shim used to ask the gate
+# from its own cwd, so the request read `tree=<main checkout>` while the stamp went to the row
+# tree, and the landing's busy check took every writer's suite for a run in the main checkout.
+# The request now names the tree the stamp goes to: --stamp-dir's checkout, else the `cd <tree>`
+# opening the command, else the shim's cwd.
+fresh number-tree
+world_machine 8 8192 40 1.0
+world_cost t.test.sh 10 0.5 30
+NT_ROW="$WR/.worktrees/T1"
+NT_ROW_P="$(cd "$NT_ROW" 2>/dev/null && pwd -P)"
+NT_WR_P="$(cd "$WR" && pwd -P)"
+expect_nonempty "N.14 the row tree the doctrine call names is a checkout of its own" \
+  "$(git -C "$NT_ROW" rev-parse --show-toplevel 2>/dev/null)"
+expect_eq "N.15 a wrapped \`cd <tree>; bash tests/x\` from the main checkout runs (rc 0)" "0" \
+  "$(book_fg nt1 --agent nt1 --max-wait 30 --stamp-dir "$NT_ROW" --suites t.test.sh -- "cd '$NT_ROW' || exit 1; true")"
+expect_eq "N.16 …and its request records tree=<the row tree>, the stamp's tree" "$NT_ROW_P" \
+  "$(field "$(req_of nt1)" tree)"
+expect_match "N.16b …while the stamp went to the row tree's git dir" "stamp/v1|*|suites=t.test.sh|*" \
+  "$(tail -n 1 "$(git -C "$NT_ROW" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null)"
+expect_eq "N.17 with no --stamp-dir, the \`cd <tree>\` opening the command names the tree" "0 $NT_ROW_P" \
+  "$(book_fg nt2 --agent nt2 --max-wait 30 --suites t.test.sh -- "cd $NT_ROW || exit 1; true") $(field "$(req_of nt2)" tree)"
+expect_eq "N.18 a command that opens with no cd names the shim's own checkout (the positive for the cwd)" \
+  "0 $NT_WR_P" "$(book_fg nt3 --agent nt3 --max-wait 30 --suites t.test.sh -- 'true') $(field "$(req_of nt3)" tree)"
+expect_eq "N.19 …and the shim's command still runs where the shim stands (its own cd moves it)" "$NT_WR_P" \
+  "$(book_fg nt4 --agent nt4 --max-wait 30 --stamp-dir "$NT_ROW" --suites t.test.sh -- "pwd -P > '$D/nt4.pwd'" >/dev/null; cat "$D/nt4.pwd" 2>/dev/null)"
+
+# THE DOOR'S RUNNER HOLDS NOTHING EITHER (wave-28 T36; D27, AC-10.2). `tests/run.sh --only a b`
+# names its suites, so the stamp can say which suites the run proved, and the wall passes
+# `--runner`: the shim takes no number, and each suite the runner starts asks for itself.
+fresh wrap-door
+world_machine 8 8192 40 1.0
+expect_eq "B.46 the door's runner (--runner, its suites named) is run, not admitted" "0" \
+  "$(book_fg dr --agent dr --max-wait 30 --runner --suites a.test.sh,b.test.sh -- 'exit 0')"
+expect_eq "B.47 …it took no number" "0" "$(nreq)"
+expect_match "B.48 …and its stamp names the suites it ran" "stamp/v1|head=*|rc=0|*|suites=a.test.sh,b.test.sh|*" \
+  "$(stamp_last)"
+expect_eq "B.49 the same call without --runner asks the gate (B.47 is not vacuous)" "0 1" \
+  "$(book_fg dq --agent dq --max-wait 30 --suites a.test.sh,b.test.sh -- 'exit 0') $(nreq)"
 
 finish
