@@ -2623,7 +2623,11 @@ DP_ROW="$(brief_field "$LIFTED" row)"; DP_LANDS_ON="$(brief_field "$LIFTED" land
 _lo_reason="$(brief_field "$LIFTED" lands_on_reason)"; _lo_bad="$(brief_field "$LIFTED" lands_on_bad)"
 _lo_ids=""
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && _lo_ids="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 }')"
-if [ -n "$DP_ROW" ] && [ -n "$_lo_ids" ] && ! printf '%s\n' "$_lo_ids" | grep -Fxq -- "$DP_ROW"; then
+# Membership by a whole line, read in the shell: a quitting `grep -q` fed from a pipe is the idiom
+# cross-gate §BP refuses (the writer can die of SIGPIPE).
+_lo_known=""
+case $'\n'"$_lo_ids"$'\n' in *$'\n'"$DP_ROW"$'\n'*) _lo_known=1 ;; esac
+if [ -n "$DP_ROW" ] && [ -n "$_lo_ids" ] && [ -z "$_lo_known" ]; then
   dp_finding "Row: $(bionic_trunc "$DP_ROW" 20) names no plan row" "name a ## Tasks row id" \
     "The Row: label binds this dispatch to a row of the bound plan, and the plan has no such row:
     Given: Row: ${DP_ROW}
