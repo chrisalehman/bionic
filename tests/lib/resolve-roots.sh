@@ -113,7 +113,9 @@ fi
 # what lies below it and never the cwd's ancestors, while PATH carries the pin's absolute physical path through every one
 # of them. It is refused, `<root> is not an absolute path`, before any walk, and never repaired with $PWD: that would
 # judge a path the caller never named. The same rule is why `cd` below never consults CDPATH: it does so only for a
-# path that is not absolute.
+# path that is not absolute. A root carrying a control character (a newline in TMPDIR) is refused before that, as
+# the first check, `<root> carries a control character` (T73), and every line this file prints shows such a
+# character as `?`: one refusal is one line.
 # THE PIN'S WHOLE PATH IS JUDGED, FROM `/` DOWN, BY ONE PREDICATE (AC-10.6; provenance below). Whoever can write a
 # directory that holds one of the path's components renames it away and puts their own in its place, between this
 # check and a child's `bash`, so the walk judges each component's HOLDER, link or not, and stops at the first
@@ -146,7 +148,10 @@ fi
 # the two would pass the judge through where it leads, and an entry that vanished before the owner read would pass
 # it too. Once the owner read has found this user's own entry, no one else can rename, unlink or replace it in a
 # sticky or 0700 holder, so every later reader that follows reads this user's own object. And PATH carries the
-# pin's PHYSICAL path (`pwd -P` of an absolute path), so no link on it is followed when a child runs `bash`.
+# pin's PHYSICAL path, so no link on it is followed when a child runs `bash`. It is taken by `cd -P` and `pwd -P`
+# (T73): a `cd` without -P is LOGICAL, it removes `<component>/..` as text before it calls chdir, while the walk,
+# the mkdir, the hold and the judge hand `..` to the kernel, which resolves it through the link. `/tmp/lnk/../r`
+# was judged and built under lnk's target and PATH took `/tmp/r`, a directory nobody judged.
 # The owner is read by _bionic_pin_owner, which prints the raw uid and is the one place a test stubs `stat`. The
 # root and the pin must be owned by THIS user (`-O`, the effective uid, a second reader of the owner and
 # stricter than the rule above): they are made here, so nothing else is expected. A refusal returns
@@ -159,7 +164,8 @@ fi
 # judged by the directory that holds it; T57, T59 the walk judges every directory, with ACLs and owners;
 # T61 the owner of `/` is trusted; T63 a missing path is refused, never "not open"; T65 the root's and the pin's
 # own entries are read without following, and PATH carries the physical path; T67 an entry that is absent at the
-# owner read, and a mkdir that fails, are refused; one function for the root and the pin; T69 a relative root is refused.
+# owner read, and a mkdir that fails, are refused; one function for the root and the pin; T69 a relative root is refused; T73 the pin's `cd`
+# is physical, and a root with a control character is refused first.
 # Never judged: where PATH's other entries lead, and what `bash -> /bin/bash` points at (/bin/bash is the
 # system's own, replaceable only by root).
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
@@ -237,6 +243,11 @@ _bionic_pin_open() {  # _bionic_pin_open <dir> [any] — succeeds when another u
   _bionic_pin_trusted "$owner" || { _BIONIC_PIN_OPEN="is owned by uid ${owner:-unknown}, who is not $_BIONIC_PIN_TRUSTED_WHO"; return 0; }
   return 1
 }
+# The walk takes an absolute path only: bionic_interpreter_pin refuses a relative root before it calls it (T69), and a
+# link's target is made absolute below. Its two relative-path rules (`cur="."` here, the `.` default in
+# _bionic_pin_parent) are kept on purpose, unreachable from the function: the no-absolute-test mutant of the suite
+# (7.86) walks a relative root from `.`, which is the defect it shows; with the rule removed it would walk `tmp/r`
+# from `/` and judge `/tmp`, a path nobody named.
 _bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why a component of <path> can be replaced; nothing when none can
   local rest="$1" cur="" holder part target linkowner why=""
   case "$1" in /*) ;; *) cur="." ;; esac
@@ -292,9 +303,10 @@ _BIONIC_PIN_WHY=""
 _BIONIC_PIN_HOLDER=""
 bionic_interpreter_pin() {
   local root="${1:-}" dir phys why="" made_root="" made_dir=""
+  local shown="${root//[[:cntrl:]]/?}"  # what a line may print of the root: a control character is never printed raw (T73)
   _BIONIC_PIN_HOLDER=""
   [ -n "$root" ] || why="no root was given"
-  [ -n "$why" ] || case "$root" in /*) ;; *) why="$root is not an absolute path" ;; esac
+  [ -n "$why" ] || case "$root" in *[[:cntrl:]]*) why="$shown carries a control character" ;; /*) ;; *) why="$root is not an absolute path" ;; esac
   [ -n "$why" ] || why="$(_bionic_pin_parent "$root")"
   [ -z "$why" ] || [ -z "$root" ] || _BIONIC_PIN_HOLDER=1
   dir="$root/pin"
@@ -303,12 +315,12 @@ bionic_interpreter_pin() {
   [ -n "$why" ] || [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
   [ -n "$why" ] || [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] \
     || why="$dir/bash is not a link to /bin/bash"
-  [ -n "$why" ] || phys="$(cd -- "$dir" 2>/dev/null && pwd -P)" || why="$dir is not a directory"
+  [ -n "$why" ] || phys="$(cd -P -- "$dir" 2>/dev/null && pwd -P)" || why="$dir is not a directory"
   _BIONIC_PIN_WHY="$why"
   if [ -n "$why" ]; then
     [ -z "$made_dir" ] || rmdir "$dir" 2>/dev/null
     [ -z "$made_root" ] || rmdir "$root" 2>/dev/null
-    echo "resolve-roots.sh: cannot build the interpreter pin under $root — $why, so nothing is pinned" >&2
+    echo "resolve-roots.sh: cannot build the interpreter pin under $shown — $why, so nothing is pinned" >&2
     return 1
   fi
   PATH="$phys:$PATH"  # the physical path: no link on it is followed when a child runs `bash`
@@ -347,7 +359,7 @@ if [ "${0##*/}" != "run.sh" ] \
       elif [ "${_BIONIC_PIN_WHY#cannot make }" != "$_BIONIC_PIN_WHY" ]; then _bionic_pin_fix="run again"
       else _bionic_pin_fix="remove $_bionic_pin_root or set TMPDIR, then run again"
       fi
-      echo "resolve-roots.sh: no interpreter pin at $_bionic_pin_root — ${_BIONIC_PIN_WHY}; ${_bionic_pin_fix}" >&2
+      echo "resolve-roots.sh: no interpreter pin at ${_bionic_pin_root//[[:cntrl:]]/?} — ${_BIONIC_PIN_WHY}; ${_bionic_pin_fix}" >&2
       unset _bionic_pin_fix
       unset BIONIC_TEST_INTERPRETER_PINNED
       exit 2

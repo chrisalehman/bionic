@@ -1641,7 +1641,8 @@ stop_run "$STOP_SUITE" "$T73_DIR/hr"$'\n'"x"
 expect_eq "7.95 a hand run whose TMPDIR holds a newline: exits 2" "2" "$STOP_RC"
 expect_eq "7.95b …with ONE line, the path remedy and the character shown as ?" \
   "$(t57_line "$T73_DIR/hr?x" "$T73_DIR/hr?x/bionic-interpreter-pin.$STOP_UID carries a control character" "$T57_FIX")" "$STOP_ERR"
-expect_eq "7.95c …the marker is unset and no check ran" "pinned=unset" "$STOP_LOG"
+expect_contains "7.95c …the marker is unset (nothing was pinned)" "pinned=unset" "$STOP_LOG"
+expect_absent "7.95d …and no check ran" "check ran" "$STOP_LOG"
 
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
