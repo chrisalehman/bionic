@@ -513,6 +513,66 @@ pin_call "$TMP/empty-sittings.md" "$ROOT"
 expect_eq "P18: an empty sittings file is red by the same line" "red: no sitting is recorded" "$PIN_OUT"
 expect_status "P18: rc 1" 1 "$PIN_RC"
 
+# A STALE MARK (wave-28 T18, ruling A-orch-110): checks files that changed after the latest sitting
+# leave its hashes behind, and the re-sit is the next step's. The sitting says so on one line,
+# `stale: checks-<q> <old>… → <new>…[, …] (…); re-sit owed: …`, and the pin passes only while that line
+# names, for every checks file whose hash differs, the hash the sitting read and the hash that ships.
+# An unmarked drift, or a line naming other hashes, is red; the line excuses nothing else.
+h8() { _detect_sha256 "$ROOT/payload/context/checks-$1.md" | cut -c1-8; }
+w8() { printf '%s' "$WRONG" | cut -c1-8; }
+stale_line() { printf 'stale: %s (T16, T48); re-sit owed: T27\n' "$1"; }
+SL_S="checks-structure $(w8)… → $(h8 structure)…"
+sitting_block 2026-10-05 structure "$WRONG" > "$TMP/stale-base.md"
+{ cat "$TMP/stale-base.md"; stale_line "$SL_S"; } > "$TMP/stale-ok.md"
+pin_call "$TMP/stale-ok.md" "$ROOT"
+expect_eq "P19: a sitting whose structure hash differs and whose stale: line names both hashes is pinned, marked stale" \
+  "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+expect_status "P19: rc 0" 0 "$PIN_RC"
+pin_call "$TMP/stale-base.md" "$ROOT"
+expect_contains "P19: the same sitting with no stale: line is an unmarked drift, red" "red: payload/context/checks-structure.md is" "$PIN_OUT"
+expect_status "P19: rc 1" 1 "$PIN_RC"
+{ cat "$TMP/stale-base.md"; stale_line "checks-structure $(w8)… → 00000000…"; } > "$TMP/stale-other-new.md"
+pin_call "$TMP/stale-other-new.md" "$ROOT"
+expect_eq "P20: a stale: line naming another hash than the one that ships is red, naming the file" \
+  "red: payload/context/checks-structure.md is $(_detect_sha256 "$ROOT/payload/context/checks-structure.md"), the latest sitting read $WRONG, and its stale: line does not name those hashes — sit the exam again" "$PIN_OUT"
+{ cat "$TMP/stale-base.md"; stale_line "checks-structure 11111111… → $(h8 structure)…"; } > "$TMP/stale-other-old.md"
+pin_call "$TMP/stale-other-old.md" "$ROOT"
+expect_contains "P20: …and one naming another hash than the sitting read is red" "its stale: line does not name those hashes" "$PIN_OUT"
+{ cat "$TMP/stale-base.md"; stale_line "checks-evidence $(w8)… → $(h8 evidence)…"; } > "$TMP/stale-other-file.md"
+pin_call "$TMP/stale-other-file.md" "$ROOT"
+expect_contains "P20: …and one naming another checks file is red" "red: payload/context/checks-structure.md is" "$PIN_OUT"
+{ cat "$TMP/stale-base.md"; printf 'stale: checks-structure %s... -> %s... (T16); re-sit owed: T27\n' "$(w8)" "$(h8 structure)"; } > "$TMP/stale-ascii.md"
+pin_call "$TMP/stale-ascii.md" "$ROOT"
+expect_contains "P20: …and a line with no arrow glyph is not the form, red" "its stale: line does not name those hashes" "$PIN_OUT"
+sitting_block 2026-10-05 structure "$WRONG" > "$TMP/stale-two.md"
+cp "$ROOT/payload/context/checks-adversarial.md" "$TMP/adv.orig"
+printf 'new text\n' >> "$ROOT/payload/context/checks-adversarial.md"
+{ cat "$TMP/stale-ok.md"; } > "$TMP/stale-one-of-two.md"
+pin_call "$TMP/stale-one-of-two.md" "$ROOT"
+expect_contains "P21: two checks files differ and the stale: line names one: red, naming the other" \
+  "red: payload/context/checks-adversarial.md is" "$PIN_OUT"
+{ cat "$TMP/stale-ok.md" | sed '$d'; stale_line "$SL_S, checks-adversarial $(_detect_sha256 "$ROOT/payload/context/checks-adversarial.md" | cut -c1-8)… → $(h8 adversarial)…"; } > "$TMP/stale-both-wrong.md"
+pin_call "$TMP/stale-both-wrong.md" "$ROOT"
+expect_contains "P21: …and a line whose second entry's old hash is not the sitting's is red" "red: payload/context/checks-adversarial.md is" "$PIN_OUT"
+old_adv="$(awk '$1 == "sha256" && $2 == "payload/context/checks-adversarial.md" { print $3 }' "$TMP/stale-two.md")"
+{ cat "$TMP/stale-two.md"; stale_line "$SL_S, checks-adversarial $(printf '%s' "$old_adv" | cut -c1-8)… → $(h8 adversarial)…"; } > "$TMP/stale-both-ok.md"
+pin_call "$TMP/stale-both-ok.md" "$ROOT"
+expect_eq "P21: …and a line naming both differing files, each old and new, is pinned, marked stale" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+cp "$TMP/adv.orig" "$ROOT/payload/context/checks-adversarial.md"
+pin_call "$TMP/stale-ok.md" "$ROOT"
+expect_eq "P21: the checks file put back, the stale sitting is pinned again by its mark" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+# a marked sitting is history: a result line for a sample since retired does not turn it red
+{ cat "$TMP/stale-ok.md"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-retired.md"
+pin_call "$TMP/stale-retired.md" "$ROOT"
+expect_eq "P22: a stale sitting's result line for a retired sample stays as history, pinned" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+{ sitting_block 2026-10-05; stale_line "$SL_S"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-nodrift.md"
+pin_call "$TMP/stale-nodrift.md" "$ROOT"
+expect_contains "P22: …while a sitting whose hashes all match is read whole, whatever its stale: line says" \
+  "red: the latest sitting has a result line for retired-sample" "$PIN_OUT"
+{ cat "$TMP/stale-ok.md"; printf '\n## 2026-10-06 later\n\n'; printf 'sha256 payload/context/checks-structure.md %s\n' "$WRONG"; } > "$TMP/stale-older.md"
+pin_call "$TMP/stale-older.md" "$ROOT"
+expect_contains "P23: a stale: line in an older sitting does not excuse the latest one" "red: " "$PIN_OUT"
+
 section "§KEY — an answer key names its defect"
 
 K="$TMP/keys"
@@ -1686,6 +1746,7 @@ for f in $EXAM_CHECKS; do
   expect_regex "SH0: the digest reads $f" '^[0-9a-f]{64}$' "$(_detect_sha256 "$REPO/$f")"
 done
 pin_call "$EXAM/sittings.md" "$REPO"
-expect_eq "SH1: the latest sitting read the checks files that ship" "pinned" "$PIN_OUT"
+expect_contains "SH1: the latest sitting read the checks files that ship, or says in a stale: line that they changed since" "pinned" "$PIN_OUT"
+expect_status "SH1: rc 0" 0 "$PIN_RC"
 
 finish
