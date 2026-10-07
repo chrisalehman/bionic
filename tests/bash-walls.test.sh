@@ -3209,6 +3209,23 @@ expect_status "EGD-4b §EG-6 AC-8.6 its finding settled to S1 on, the commit is 
 expect_contains "EGD-4c …naming the reading failing at its derived result" \
   "- adversarial: the newest reading is result=fail (evidence=record/w28t60/flag.md)" "$ERR"
 
+# ---------- a moved finding: the reading written flag is derived to fail at the moved priority ----------
+{ printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: flag\nscope: piece\nfindings: 1\n' "${H_EG6:0:10}" "$H_EG6"
+  printf 'finding: 1 S2 off x.sh:9 - a side path still wrong\n\nwhat the reader found\n'; } > "$EGD_REC/mv.md"
+EGD_MOVED='moved: record/w28t60/mv.md#1 to=fix by=Dana at=2026-10-07T12:00:00Z words="fix it before the release" why="the user ruled it"'
+EGD_MVBASE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" adversarial flag record/w28t60/mv.md)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE")"
+expect_status "EGD-5 a reading written flag whose one finding is a deferral, no move: the commit is admitted (the control)" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
+$EGD_MOVED")"
+expect_eq "EGD-6 precondition: the judge derives fail for it once a moved: line sends the finding to fix, and holds the piece line failing" \
+  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
+expect_status "EGD-6b §EG-6 AC-8.6 the moved priority is the one the wall reads: the commit is refused" 2 "$ST"
+expect_contains "EGD-6c …naming the reading failing at its derived result" \
+  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/mv.md)" "$ERR"
+
 # ---------- the mutation arm: the wall back on the written result= ----------
 EGD_MUT="$SANDBOX/derive-mutant"
 mkdir -p "$EGD_MUT/hooks"
@@ -3230,6 +3247,9 @@ expect_status "EGD-mut2 …and refuses the refuted one the shipped wall admits: 
 eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE
 $EGD_SETTLED")"
 expect_status "EGD-mut3 …and admits the one settled to fix the shipped wall refuses: EGD-4b goes red" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
+$EGD_MOVED")"
+expect_status "EGD-mut4 …and admits the moved one the shipped wall refuses: EGD-6b goes red" 0 "$ST"
 HOOK="$EGD_HOOK_KEEP"
 
 finish
