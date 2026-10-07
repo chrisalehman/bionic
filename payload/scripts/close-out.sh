@@ -668,6 +668,22 @@ co_added_ids() {  # <lines> -> the ids, space-joined
   printf '%s\n' "$1" | awk '{ printf "%s%s", (NR > 1 ? " " : ""), $2 } END { print "" }'
 }
 
+# THE RUN'S NUMBERS (wave-28 T14; D18, AC-4.5). A continuation written from the template carries the
+# report's line and one line per landed row, as `session-poker.sh landing-report --rows <plan>` prints
+# them, fenced. The plan is NAMED: act 3 has wiped the session's binding by the time act 5 writes this
+# (ruling A-orch-145). The report runs in a child, so lib/gate.sh's `gate_ask` never meets this file's.
+# A report that cannot be read leaves a <fill> mark, as every other unknown here does.
+co_landings_section() {
+  local out
+  out="$(bash "$(plugin_root)/hooks/session-poker.sh" landing-report --rows "$PLAN" 2>/dev/null)" || out=""
+  printf '## Landings\n\n'
+  if [ -n "$out" ]; then
+    printf '```\n%s\n```\n' "$out"
+  else
+    printf '<fill: landings — session-poker.sh landing-report --rows %s could not be read>\n' "$PLAN"
+  fi
+}
+
 continuation_template() {
   local sha
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
@@ -691,6 +707,8 @@ Closed $NOW. $INTEGRATION at ${sha:-<fill: SHA>}. Wave branch \`$WORKING\` merge
 <fill: carry-overs from this wave>
 
 $(co_deferrals_section)
+
+$(co_landings_section)
 
 ## Resume instruction
 

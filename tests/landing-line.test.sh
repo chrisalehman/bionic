@@ -559,6 +559,30 @@ ll_verb "$RR3" T1
 expect_eq "(r6) a launch line naming no lands_on is refused (exit 2)" "2" "$LL_RC"
 expect_contains "(r6) …saying so" "REFUSED reason=no-lands-on row=T1 name=wx-T1" "$LL_OUT"
 expect_false "(r6) …and nothing is appended" test -e "$(ll_rec "$RR3")"
+# A RUN OPEN AT UPGRADE (wave-28 T21; D26, AC-7.2): a launch row 1.12.0 wrote carries `suites_allowed=` and no
+# `row=` or `lands_on=`; ready reads its suites from there. A row naming none is refused, with the hand landing.
+RR4="$(ll_world)"
+printf '%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RR4")" \
+  suites_allowed=a.test.sh suites_source=declared)" >> "$RR4/.bionic/tmp/roster-$WORLD_SID.state"
+ll_verb "$RR4" T1
+expect_eq "(r6b) a 1.12.0 launch row (suites_allowed=, no row=, no lands_on=) lands by ready (exit 0)" "0" "$LL_RC"
+expect_eq "(r6b) …on the suites it allowed" "a.test.sh" "$(ll_field "$(ll_ev "$RR4" ready)" suites)"
+RR5="$(ll_world)"
+printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RR5")" \
+  suites_allowed=b.test.sh suites_source=declared)" >> "$RR5/.bionic/tmp/roster-$WORLD_SID.state"
+ll_verb "$RR5" T1
+expect_eq "(r6c) a row naming both reads lands_on=, not suites_allowed=" "0 a.test.sh" "$LL_RC $(ll_field "$(ll_ev "$RR5" ready)" suites)"
+RR6="$(ll_world)"
+printf '%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RR6")" \
+  suites_allowed=none suites_source=declared)" >> "$RR6/.bionic/tmp/roster-$WORLD_SID.state"
+ll_verb "$RR6" T1
+expect_eq "(r6d) a 1.12.0 row that waived every suite is refused (exit 2)" "2" "$LL_RC"
+expect_contains "(r6d) …naming the row" "REFUSED reason=no-lands-on row=T1 name=wx-T1" "$LL_OUT"
+expect_contains "(r6d) …and the hand landing" "--by-hand --reason '<why>'" "$LL_OUT"
+expect_false "(r6d) …and nothing is appended" test -e "$(ll_rec "$RR6")"
+ll_launch "$RR6" T1 none
+ll_verb "$RR6" T1
+expect_true "(r6d-control) …while the same tree, its launch row naming lands_on=none, lands and the record exists" test -e "$(ll_rec "$RR6")"
 ll_launch "$RR3" T1 none
 ll_verb "$RR3" T1
 expect_eq "(r7) lands_on=none: the candidate publishes with no run" "0 none 0" \

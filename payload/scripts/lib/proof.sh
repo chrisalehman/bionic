@@ -322,18 +322,44 @@ proof_finding_lines() {
 # nothing); neither, the check is open: the finding keeps the rating it was registered at, which the
 # scale's rule made the higher one, and the fourth word `open` says the step is held (`current 8`, the
 # judge). With no check: line it is the rating the record wrote. The priority is the table's for the
-# rating given (`proof_priority`); a `moved: <record>#<n> to=<defer|fix>` line (T42) replaces the
-# priority alone, so the third word is the one a move changes. A caller reads `set -- $(…)`: no words,
-# dropped; three or four, rated.
+# rating given (`proof_priority`); a `moved: <record>#<n> to=<defer|fix>` line (T42, `_proof_moved_to`)
+# replaces the priority alone, so the third word is the one a move changes — except that an S1 is never
+# deferred, whoever wrote the line (AC-8.9). A caller reads `set -- $(…)`: no words, dropped; three or
+# four, rated.
 proof_finding_rating() {
-  local st s="$3" r="$4"
+  local st mv s="$3" r="$4" p
   st="$(_proof_check_state "$1" "$2")"
   case "$st" in
     refuted) return 0 ;;
     settled=*:*) s="${st#settled=}"; r="${s#*:}"; s="${s%%:*}" ;;
   esac
-  printf '%s %s %s' "$s" "$r" "$(proof_priority "$s" "$r")"
+  p="$(proof_priority "$s" "$r")"
+  mv="$(_proof_moved_to "$1" "$2")"
+  case "$mv" in
+    fix) p=fix ;;
+    defer) [ "$s" = S1 ] || p=defer ;;
+  esac
+  printf '%s %s %s' "$s" "$r" "$p"
   [ "$st" != open ] || printf ' open'
+}
+
+# _proof_moved_to <plan> <record>#<n> -> `defer` or `fix`, the priority the LAST `moved:` line of
+# `## SDLC State` naming it (fences skipped) moved the finding to, or nothing when there is none
+# (wave-28 T42; D34, AC-8.9). A later move is the user's later word, so the last line decides. A line
+# is a move only when it carries who, when, the words and why, as `finding-move` writes it:
+# `moved: <record>#<n> to=<defer|fix> by=<name> at=<ISO-UTC> words="<words>" why="<why>"`.
+_proof_moved_to() {
+  [ -f "$1" ] || return 0
+  awk -v id="$2" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && /^moved:[ \t]/ {
+      split($0, f, /[ \t]+/); if (f[2] != id || (f[3] != "to=defer" && f[3] != "to=fix")) next
+      if ($0 !~ / by=[^ \t]/ || $0 !~ / at=[0-9][0-9][0-9][0-9]-/ || $0 !~ / words="/ || $0 !~ / why="/) next
+      to = substr(f[3], 4)
+    }
+    END { if (to != "") print to }' "$1"
 }
 
 # _proof_check_state <plan> <record>#<n> -> the state of the first `check:` line of `## SDLC State`
@@ -726,8 +752,9 @@ _proof_last_read() {
 # section's last `proved:` or `waived:` line, or, before the first, after the section's last
 # non-blank line. Exit 1 (nothing printed) when the plan has no unfenced `## SDLC State`.
 # Facts and waivers share the one block, so a line's place is its age (wave-27 T9): `facts_state`
-# reads "newer" as "later in the section". A reading's `deferred:` and `check:` lines (wave-28 T15)
-# follow its proof line and belong to the block, so the next line goes after them, not between.
+# reads "newer" as "later in the section". A reading's `deferred:` and `check:` lines (wave-28 T15),
+# and a finding's `moved:` lines (T42), follow its proof line and belong to the block, so the next
+# line goes after them, not between.
 proof_add_line() {
   local plan="$1" line="$2"
   [ -f "$plan" ] || return 1
@@ -739,7 +766,7 @@ proof_add_line() {
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); if (insdlc) { seen = 1; lastn = NR }; next }
-    insdlc && /^(proved|waived|deferred|check):[[:space:]]/ { lastp = NR }
+    insdlc && /^(proved|waived|deferred|check|moved):[[:space:]]/ { lastp = NR }
     insdlc && /[^[:space:]]/ { lastn = NR }
     END {
       if (!seen) exit 1

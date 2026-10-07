@@ -12496,7 +12496,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current finding-check finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -13640,5 +13640,530 @@ expect_eq "PASS-mut3 the always-refusing copy runs, and refuses the relaunch PAS
   "$RC|$(pk_n pk-c)"
 cp "$TMPROOT/pk-plan-keep" "$PSEV"
 POKE_BOUND="$PK_BOUND_WAS"
+
+# ============================================================
+section "§MOVE: a finding crosses the line only on words the user typed in this session, written with who, when and why, and never an S1 to defer (wave-28 T42; REQ-8 AC-8.9; D34)"
+# ============================================================
+#
+#   finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'
+#
+# lib/said.sh `user_said <text>` answers 0 when the text, its runs of white space folded, stands inside
+# a prompt the user typed in this session's transcript; 1 when it stands in none; 2 when the transcript
+# cannot be found or read. A tool's result, a teammate's message, another session's message, a hook's
+# added context, the orchestrator's own text, a compaction summary, a pasted block and a dispatched
+# agent's prompt never count. On rc 0 the verb writes, in place after the finding's own line,
+# `moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" why="<why>"`,
+# and a `deferred:` line when the move is to defer; every read of the record then takes the priority
+# it was moved to (lib/proof.sh `proof_finding_rating`).
+#
+# FIXTURE FIDELITY. The transcript is assembled from tests/fixtures/transcript-move/, one file per kind
+# of entry, its key sets measured on CLI 2.1.291 transcripts and every word invented (that directory's
+# README). It sits where the CLI writes one, `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session id>.jsonl`,
+# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts. Every
+# decoy carries the words the typed prompt carries (MOVE-<kind>-pre), so a reader that counted it would
+# find them. The findings are registered by the real verb on §SEV's repository and plan.
+MV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+MV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+MV_CFG="$TMPROOT/mv-cfg"; MV_PROJ="$MV_CFG/projects/-work-project"; mkdir -p "$MV_PROJ"
+export CLAUDE_CONFIG_DIR="$MV_CFG"
+MV_TX="$MV_PROJ/$SID.jsonl"
+MV_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+SAID_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/said.sh"
+MV_P='defer the flag wording until the next wave, it can wait'
+MV_Q='and move the third one to fix now'
+MV_F='start the review of the parser'
+mv_tx() { local f; cat "$MV_FX/frame.jsonl" > "$MV_TX"; for f in "$@"; do cat "$MV_FX/$f.jsonl" >> "$MV_TX"; done; }
+mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config
+  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "${2:-$SAID_LIB}" "$1" 2>/dev/null
+}
+mv_id() { printf 'record/wave-01-fixture/%s.md#%s' "$1" "${2:-1}"; }
+mv_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(mv_id "$1") "; }
+mv_moved() { /usr/bin/grep -F "moved: $(mv_id "$1") " "$PSEV"; }
+
+# ---------- user_said, on the library (unit rows) ----------
+mv_tx typed
+expect_eq "MOVE-said1 §MOVE the words of a typed prompt, its runs of white space folded: found (rc 0)" "0" "$(mv_said "$MV_P")"
+expect_eq "MOVE-said2 …the words given with runs of their own, a line break and a tab: found" "0" \
+  "$(mv_said "$(printf 'defer  the flag\nwording until the next wave,\tit can wait')")"
+expect_eq "MOVE-said3 …words the transcript does not carry: not found (rc 1)" "1" "$(mv_said 'defer every finding at once')"
+expect_eq "MOVE-said4 …white space alone says nothing (rc 1)" "1" "$(mv_said '   ')"
+mv_tx queued
+expect_eq "MOVE-said5 a prompt the user typed while a turn ran (a queued command): found" "0" "$(mv_said "$MV_Q")"
+for c in "tool-result@a tool's result" "teammate@a teammate's message" "peer@another session's message" \
+         "peer-queued@another session's message delivered mid-turn" "hook-context@a hook's added context" \
+         "orchestrator@the orchestrator's own text" "compact@a compaction summary" \
+         "pasted@a block the user pasted into a prompt" "sidechain@a dispatched agent's prompt"; do
+  k="${c%%@*}"; d="${c#*@}"
+  expect_contains "MOVE-$k-pre precondition: the $k fixture carries the words, as a raw read of the file finds them" \
+    "$MV_P" "$(cat "$MV_FX/$k.jsonl")"
+  mv_tx "$k"
+  expect_eq "MOVE-said-$k §MOVE the same words only in $d: not found (rc 1)" "1" "$(mv_said "$MV_P")"
+  expect_eq "MOVE-said-$k-pos …while the typed prompt beside it in the same transcript is found" "0" "$(mv_said "$MV_F")"
+done
+mv_tx typed; printf '{"type":"user","message":{"role":"us' >> "$MV_TX"
+expect_eq "MOVE-said6 a transcript whose last line is torn mid-write is still read: found" "0" "$(mv_said "$MV_P")"
+rm -f "$MV_TX"
+expect_eq "MOVE-said-none no transcript for the session: rc 2" "2" "$(mv_said "$MV_P")"
+mv_tx typed
+expect_eq "MOVE-said-nosid …no session key: rc 2" "2" \
+  "$(env -u CLAUDE_CODE_SESSION_ID bash -c '. "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "$SAID_LIB" "$MV_P" 2>/dev/null)"
+chmod 000 "$MV_TX"
+expect_eq "MOVE-said-unread …a transcript that cannot be read: rc 2" "2" "$(mv_said "$MV_P")"
+chmod 600 "$MV_TX"; mv "$MV_TX" "$TMPROOT/mv-real.jsonl"; ln -s "$TMPROOT/mv-real.jsonl" "$MV_TX"
+expect_eq "MOVE-said-link …a transcript that is a symbolic link is not this session's: rc 2" "2" "$(mv_said "$MV_P")"
+rm -f "$MV_TX"; mv_tx typed
+expect_eq "MOVE-said-back …and the same transcript, a regular file again, is found" "0" "$(mv_said "$MV_P")"
+
+# ---------- the mutation arm: user_said counting a tool's result ----------
+MV_MUT="$(mktemp -d "$TMPROOT/mv-mut.XXXXXX")"
+MV_NEEDLE='if .type == "user" and .isMeta != true and .isSidechain != true and (.origin.kind? // "") == "human" then .message.content | words'
+anchor "$SAID_LIB" "$MV_NEEDLE" 1
+MV_N="$MV_NEEDLE" awk 'BEGIN { n = ENVIRON["MV_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if .type == \"user\" then .message.content | tostring" substr($0, i + length(n)); print }' \
+  "$SAID_LIB" > "$MV_MUT/said.sh"
+expect_eq "MOVE-mut0 the mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MV_MUT/said.sh" | /usr/bin/grep -c '^>')"
+mv_tx tool-result
+expect_eq "MOVE-mut1 the mutant runs: it finds the typed prompt as the library does" "0" "$(mv_said "$MV_F" "$MV_MUT/said.sh")"
+expect_eq "MOVE-mut2 …and counts the tool's result, so MOVE-said-tool-result goes red under it" "0" "$(mv_said "$MV_P" "$MV_MUT/said.sh")"
+
+# ---------- the seam: a moved: line re-rates at every read (unit rows on a planted plan) ----------
+MV_SP="$TMPROOT/mv-seam.plan.md"
+mv_seam() {  # <moved: lines...> -> the plan holding them under ## SDLC State
+  { printf '# plan\n\n## SDLC State\n\ncurrent: 4\n'; for l in "$@"; do printf '%s\n' "$l"; done; printf '\n## Tasks\n'; } > "$MV_SP"
+}
+mv_rate() { bash -c '. "$1"; proof_finding_rating "$2" "$3" "$4" "$5"' _ "$SEV_LIB" "$MV_SP" "$1" "$2" "$3" 2>/dev/null; }
+MV_WHO='by=Dana Fixture at=2026-10-07T12:00:00Z words="later" why="the docs pass"'
+mv_seam "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam1 a finding to fix moved to defer takes defer at the read" "S2 on defer" "$(mv_rate record/x.md#1 S2 on)"
+expect_eq "MOVE-seam1b …and a finding the line does not name keeps the table's priority" "S2 on fix" "$(mv_rate record/x.md#2 S2 on)"
+mv_seam "moved: record/x.md#1 to=fix $MV_WHO"
+expect_eq "MOVE-seam2 a deferral moved to fix takes fix at the read" "S2 off fix" "$(mv_rate record/x.md#1 S2 off)"
+mv_seam "moved: record/x.md#1 to=fix $MV_WHO" "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam3 two moves: the later one is the user's last word" "S2 on defer" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam4 a moved: line deferring an S1, written by hand, is not honoured: an S1 is never deferred" "S1 on fix" "$(mv_rate record/x.md#1 S1 on)"
+mv_seam "moved: record/x.md#1 to=defer by=Dana Fixture at=2026-10-07T12:00:00Z words=\"later\""
+expect_eq "MOVE-seam5 a moved: line that lacks why is not honoured" "S2 on fix" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam '```' "moved: record/x.md#1 to=defer $MV_WHO" '```'
+expect_eq "MOVE-seam6 a moved: line inside a fence is not read" "S2 on fix" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam "check: record/x.md#1 S2 on \"t\"" "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam7 a move keeps an open check open: the fourth word stays" "S2 on defer open" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam "check: record/x.md#1 S2 on \"t\" refuted by=record/c.md" "moved: record/x.md#1 to=fix $MV_WHO"
+expect_eq "MOVE-seam8 a move does not bring back a refuted finding" "" "$(mv_rate record/x.md#1 S2 on)"
+expect_eq "MOVE-seam8b …positive on the same plan: another finding is rated" "S3 off note" "$(mv_rate record/x.md#2 S3 off)"
+
+# ---------- the verb, on §SEV's repository and plan ----------
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=mv-crit agent_id=a-mv-crit subagent_type=bionic:critic \
+     files="$(sev_files "mv-s1 mv-def mv-fix mv-later")")" >> "$SEV_RS"
+sev_cur 4
+sev_rec mv-s1 fail "findings: 1" "finding: 1 S1 on lib/a.sh:5 a write that loses the last line" "shown: 1 bash lib/a.sh --write"
+sev_add mv-s1 mv-crit
+expect_eq "MOVE-0 precondition: an S1 to fix registers (exit 0)" "0" "$RC"
+sev_rec mv-def fail "findings: 1" "finding: 1 S2 on lib/a.sh:3 a flag the help text misnames" "shown: 1 bash lib/a.sh --help"
+sev_add mv-def mv-crit
+expect_eq "MOVE-0b precondition: an S2 to fix registers, and writes no deferred: line (exit 0)" "0|0" \
+  "$RC|$(/usr/bin/grep -c "^deferred: $(mv_id mv-def) " "$PSEV")"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "MOVE-0c precondition: the newest adversarial reading holds a finding to fix: current 8" 1 "$PSEV"
+sev_cur 4
+
+mv_tx typed
+s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id mv-def)" defer "$(printf 'defer the flag  wording\nuntil the next wave, it can wait')" 'the wording waits for the docs pass'
+expect_eq "MOVE-1 §MOVE AC-8.9 words that stand in a typed prompt move the finding (exit 0)" "0" "$RC"
+expect_regex "MOVE-1b …the moved: line carries who, when, the words folded and why" \
+  "^moved: $(mv_id mv-def) to=defer by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z words=\"$MV_P\" why=\"the wording waits for the docs pass\"\$" \
+  "$(mv_moved mv-def)"
+expect_eq "MOVE-1c …a move to defer writes the finding's deferred: line" \
+  "deferred: $(mv_id mv-def) S2 on \"a flag the help text misnames\"" "$(/usr/bin/grep "^deferred: $(mv_id mv-def) " "$PSEV")"
+expect_eq "MOVE-1d …and the moved: line stands in place after the finding's own line" "moved: $(mv_id mv-def)" \
+  "$(/usr/bin/grep -A1 "^deferred: $(mv_id mv-def) " "$PSEV" | tail -1 | awk '{ print $1, $2 }')"
+expect_eq "MOVE-1e …the owed reader gives it the priority it was moved to" \
+  "$(mv_id mv-def) S2 on defer \"a flag the help text misnames\"" "$(mv_owed mv-def)"
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "MOVE-1f …and a finding moved to defer no longer holds the step: current 8 is admitted on a reading written result=fail" \
+  "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+sev_cur 4
+
+# The same words in every other kind of entry, never in a typed prompt: each refused, the plan unchanged.
+sev_rec mv-fix flag "findings: 1" "finding: 1 S2 off - a message the log prints twice"
+sev_add mv-fix mv-crit
+expect_eq "MOVE-2-pre precondition: a deferral registers with its deferred: line (exit 0)" \
+  "0|deferred: $(mv_id mv-fix) S2 off \"a message the log prints twice\"" "$RC|$(/usr/bin/grep "^deferred: $(mv_id mv-fix) " "$PSEV")"
+for k in tool-result teammate peer peer-queued hook-context orchestrator compact pasted sidechain; do
+  mv_tx "$k"; s42_snap "$RSEV" "$PSEV"
+  poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P" 'the user asked'
+  s42_unchanged "MOVE-2-$k §MOVE AC-8.9 the words stand only in the $k entry" 1 "$PSEV"
+  expect_contains "MOVE-2-$k …saying they stand in no prompt the user typed" "in no prompt the user typed" "$OUT"
+done
+rm -f "$MV_TX"; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P" 'the user asked'
+s42_unchanged "MOVE-3 §MOVE no transcript for the session" 1 "$PSEV"
+expect_contains "MOVE-3b …naming the transcript as what cannot be found or read" "transcript cannot be found or read" "$OUT"
+mv_tx typed; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id mv-s1)" defer "$MV_P" 'the user asked'
+s42_unchanged "MOVE-4 §MOVE AC-8.9 an S1 to defer, on words the user typed" 1 "$PSEV"
+expect_contains "MOVE-4b …naming the rule" "an S1 is never deferred" "$OUT"
+poke "$RSEV" finding-move "$(mv_id mv-s1)" fix "$MV_P" 'it stays a fix'
+expect_eq "MOVE-4c …while the same S1 moved to fix on the same words is written (exit 0)" "0|1" "$RC|$(mv_moved mv-s1 | wc -l | tr -d ' ')"
+
+# A deferral moved to fix holds the step until a later passing review covers the fix.
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "MOVE-5-pre precondition: the deferral alone does not hold the step" "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+sev_cur 4
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P" 'the log is read by the next tool'
+expect_eq "MOVE-5 a deferral moved to fix on typed words (exit 0), and the owed reader gives it fix" \
+  "0|$(mv_id mv-fix) S2 off fix \"a message the log prints twice\"" "$RC|$(mv_owed mv-fix)"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "MOVE-5b …and current 8 is refused on the reading written result=flag: its result is derived through the move" 1 "$PSEV"
+expect_contains "MOVE-5c …naming that reading failing" \
+  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/mv-fix.md')" "$OUT"
+sev_cur 4
+sev_rec mv-later pass "findings: 0"
+sev_add mv-later mv-crit
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "MOVE-5d …until a later passing review covers the fix: current 8 is admitted" "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+sev_cur 4
+
+# Who, the finding, and the operands.
+s42_snap "$RSEV" "$PSEV"
+git -C "$RSEV" config --unset user.name
+printf '' > "$TMPROOT/mv-nogit"
+GIT_CONFIG_GLOBAL="$TMPROOT/mv-nogit" GIT_CONFIG_NOSYSTEM=1 poke "$RSEV" finding-move "$(mv_id mv-fix)" defer "$MV_P" 'the user asked'
+git -C "$RSEV" config user.name "Dana Fixture"
+s42_unchanged "MOVE-6 §MOVE AC-8.9 no git user.name to say who moved it" 1 "$PSEV"
+expect_contains "MOVE-6b …naming what is missing" "user.name" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move record/wave-01-fixture/nowhere.md#1 fix "$MV_P" 'the user asked'
+s42_unchanged "MOVE-7 a record no proof line registers" 1 "$PSEV"
+expect_contains "MOVE-7b …naming why" "registered" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move "$(mv_id mv-def 3)" fix "$MV_P" 'the user asked'
+s42_unchanged "MOVE-8 a finding number its record does not hold" 1 "$PSEV"
+expect_contains "MOVE-8b …naming it" "holds no finding 3" "$OUT"
+for c in "MOVE-9@a third form@$(mv_id mv-fix)@later@$MV_P@why" "MOVE-9b@no why@$(mv_id mv-fix)@fix@$MV_P@ " \
+         "MOVE-9c@no words@$(mv_id mv-fix)@fix@ @why" "MOVE-9d@a finding that is not <record>#<n>@record/wave-01-fixture/mv-fix.md@fix@$MV_P@why"; do
+  IFS=@ read -r lbl why1 id to w y <<EOF
+$c
+EOF
+  s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move "$id" "$to" "$w" "$y"
+  s42_unchanged "$lbl usage: $why1" 2 "$PSEV"
+done
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P"
+s42_unchanged "MOVE-9e usage: three operands" 2 "$PSEV"
+expect_contains "MOVE-9f …the usage names the verb's operands" "finding-move takes" "$OUT"
+
+POKE_BOUND="$MV_BOUND_WAS"
+if [ "$MV_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$MV_CCD_WAS"; fi
+
+# ============================================================
+section "§REPORT-RTL §REPORT-KINDS §REPORT-PRINT: the run's numbers folded from the landing record and the gate's requests (wave-28 T14; REQ-4 AC-4.1, AC-4.4, AC-4.5; D18)"
+# ============================================================
+#
+# `landing-report [--rows]` folds the bound plan's landing record (`line/v1` events) and the gate's
+# request files into one line, and with `--rows` one line per landed row. Ready-to-landed is a
+# subtraction of two event times, from a row's FIRST `ready` to its `published`; a hand or a git landing
+# prints `-`. Median and p75 are linear interpolation over the sorted minutes (wave-27's baseline rule):
+# an even set's median is the mean of its middle two, a set of one is that one value. Requests count
+# when their `tree=` is the project or below it and they were asked at or after the record's first
+# `line/v1` event. FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events and the
+# requests are PLANTED in the Interfaces table's shapes, which lib/line.sh and lib/gate.sh write.
+RP_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RP_E0=1791280800   # 2026-10-06T10:00:00Z
+RP_C1="$(printf 'c%.0s' $(seq 40))"; RP_C2="$(printf 'd%.0s' $(seq 40))"
+rp_ev() { printf 'line/v1|%s\n' "$1" >> "$S60_REC"; }   # <fields after line/v1|> -> one event
+rp_ready() {  # <row> <name> <at hh:mm:ss>
+  rp_ev "ev=ready|row=$1|name=$2|commit=$RP_C1|branch=wt/01-$1|tree=$RP_ROOT/.worktrees/01-$1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T$3Z"
+}
+rp_cand() { rp_ev "ev=candidate|row=$1|base=$RP_C1|commit=$RP_C2|tree=$RP_ROOT/.bionic/tmp/landing/1|at=2026-10-06T$2Z"; }
+rp_verdict() { rp_ev "ev=verdict|row=$1|commit=$RP_C2|suite=$2|result=$3|log=/rec/$1-$2.log|at=2026-10-06T$4Z"; }
+rp_pub() { rp_ev "ev=published|row=$1|commit=$RP_C2|kind=$2|by=-|why=-|at=2026-10-06T$3Z"; }
+rp_req() {  # <id> <who agent> <tree> <asked> <admitted|-> [<extra line>...] -> one request file
+  local id="$1" who="$2" tree="$3" asked="$4" adm="$5"; shift 5
+  {
+    printf 'key=a.test.sh\nkind=landing\nwho=%s:%s\ntree=%s\nasked=%s\nholder=%s\n' "$SID" "$who" "$tree" "$asked" "$RP_DEAD:x"
+    [ "$adm" = - ] || printf 'admitted=%s\npromise=5:0.1:30\n' "$adm"
+    for _l in "$@"; do printf '%s\n' "$_l"; done
+  } > "$RP_GATE/requests/$id"
+}
+rp_world() {  # <label> -> §60's world, an empty record, an empty gate store
+  s60_world "$1" @A whole
+  RP_ROOT="$(cd "$R59W" && pwd -P)"
+  RP_GATE="$TMPROOT/rp-gate-$1"; rm -rf "$RP_GATE"; mkdir -p "$RP_GATE/requests" "$RP_GATE/cost"
+  poke_bind "$R59W"
+}
+rp_report() { BIONIC_GATE_DIR="$RP_GATE" poke "$R59W" landing-report "$@"; }
+rp_line() { printf '%s\n' "$OUT" | /usr/bin/grep '^landings: '; }
+rp_rows() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^T[0-9]+ (queue|hand|git) ' | tr '\n' '|' | sed 's/|$//'; }
+( : ) & RP_DEAD=$!; wait "$RP_DEAD" 2>/dev/null
+sleep 300 & RP_LIVE=$!
+RP_LIVE_START="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$RP_LIVE" | awk '{ $1 = $1; print }')"
+
+# ---------- §REPORT-RTL: ready-to-landed is a subtraction, from the FIRST ready ----------
+rp_world rp-rtl
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00; rp_verdict T1 a.test.sh green 10:05:00
+rp_ready T1 w-T1 10:20:00; rp_pub T1 queue 10:30:00
+rp_ready T2 w-T2 11:00:00; rp_ready T3 w-T3 11:00:00; rp_pub T2 queue 11:15:00
+rp_pub T3 queue 12:00:00
+rp_ready T4 - 12:10:00; rp_cand T4 12:10:10; rp_pub T4 hand 12:10:30
+rp_pub T5 git 12:20:00
+rp_req 1 w-T1 "$RP_ROOT" $((RP_E0 + 120)) $((RP_E0 + 210)) "ended=$((RP_E0 + 300))" rc=0
+rp_req 2 w-T1 "$RP_ROOT" $((RP_E0 - 3600)) $((RP_E0 - 3500)) "ended=$((RP_E0 - 3400))" rc=0
+rp_req 3 w-T2 "$RP_ROOT/.worktrees/01-T2" $((RP_E0 + 3900)) $((RP_E0 + 3930)) "ended=$((RP_E0 + 3990))" rc=0
+rp_req 4 main "$RP_ROOT" $((RP_E0 + 4000)) $((RP_E0 + 4000)) "ended=$((RP_E0 + 4060))" rc=0
+rp_req 5 w-T3 /elsewhere/project $((RP_E0 + 4000)) $((RP_E0 + 4500)) "ended=$((RP_E0 + 4600))" rc=0
+rp_req 6 w-T3 "$RP_ROOT" $((RP_E0 + 4100)) -
+RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 · waited median=30s · killed=0"
+rp_report
+expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, waits over the project's requests" \
+  "0|$RP_RTL_LINE" "$RC|$(rp_line)"
+rp_report --rows
+expect_eq "RTL2 --rows prints the same line first" "$RP_RTL_LINE" "$(printf '%s\n' "$OUT" | head -1)"
+expect_eq "RTL3 …then a line per landed row in the record's order: T1's minutes run from its FIRST ready (30.0, not 10.0), a hand and a git landing print -" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=30s|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=0s|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=0s|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=0s" \
+  "$(rp_rows)"
+# A-orch-12: a request may carry `peak=` and a line no reader knows; the fold reads only its own keys.
+printf 'peak=62\ncolour=blue\n' >> "$RP_GATE/requests/4"; printf 'peak=71\n' >> "$RP_GATE/requests/1"
+rp_report --rows
+expect_eq "RTL4 a request carrying peak= and an unknown line folds to the same report" \
+  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "$(rp_line)|$(rp_rows | cut -d'|' -f1)"
+# THE PLAN OPERAND (A-orch-145): a named plan first, else the session's bound run (RTL1 to RTL4 read the
+# bound run), else the verb's no-run refusal. The named plan is read from another project, unbound.
+RP_NORUN="$(make_repo rp-norun)"; ( cd "$RP_NORUN" && git commit -q --allow-empty -m init )
+BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report "$P59W" --rows
+expect_eq "RTL10 a named plan, from an unbound session in another project: exit 0, that plan's line and rows, its waits scoped to its own project" \
+  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "$RC|$(rp_line)|$(rp_rows | cut -d'|' -f1)"
+BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report
+expect_eq "RTL11 no plan named and no run bound: the verb's no-run refusal (2), and no line" \
+  "2|poker: REFUSED — this session has no run to report on; bind its plan first.|" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep 'no run to report on')|$(rp_line)"
+poke "$RP_NORUN" landing-report "$RP_NORUN/no/such.plan.md"
+expect_eq "RTL12 a named plan that is no file is refused (2), naming it" \
+  "2|poker: REFUSED — no plan file at $RP_NORUN/no/such.plan.md; name the plan whose landings to report." \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep 'no plan file at')"
+# The even set and the set of one: the rule, pinned.
+rp_world rp-even
+rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
+rp_report
+expect_eq "RTL5 two landings of 10 and 20 minutes: median 15.0 (the middle two's mean), p75 17.5 (interpolated), max 20.0" \
+  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "$(rp_line)"
+rp_world rp-one
+rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:07:30
+rp_report
+expect_eq "RTL6 one landing of 7.5 minutes: its median, p75 and max are 7.5" \
+  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "$(rp_line)"
+# Empty and absent records: the line with zeros, exit 0.
+rp_world rp-empty
+rp_report
+RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+expect_eq "RTL7 an empty record prints the line with zeros and exits 0" "0|$RP_ZERO" "$RC|$(rp_line)"
+rm -f "$S60_REC"
+rp_report --rows
+expect_eq "RTL8 an absent record prints the same, and --rows adds no row" "0|$RP_ZERO|" "$RC|$(rp_line)|$(rp_rows)"
+rp_report --bogus
+expect_eq "RTL9 an unknown flag is the usage error (2)" "2" "$RC"
+# THE MUTATION ARM: the first ready replaced by the last turns RTL3 red (T1 reads 10.0).
+RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rp-mut.XXXXXX")"
+rd_mutant lastready 's/if (!(rk in rdy)) rdy\[rk\] = e$/rdy[rk] = e/'
+expect_eq "RTL-mut0 the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff "$POKER" "$RD_MUT/lastready/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+rp_world rp-mut
+rp_ready T1 w-T1 10:00:00; rp_ready T1 w-T1 10:20:00; rp_pub T1 queue 10:30:00
+RP_REAL_POKER="$POKER"; POKER="$RD_MUT/lastready/hooks/session-poker.sh"
+rp_report --rows
+POKER="$RP_REAL_POKER"
+expect_eq "RTL-mut1 the last-ready mutant still runs (exit 0) and reads T1's minutes from its LAST ready, 10.0, where RTL3 reads 30.0" \
+  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=0s" "$RC|$(rp_rows)"
+rp_report --rows
+expect_eq "RTL-mut1b …control: the real poker over the same record reads 30.0" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s" "$(rp_rows)"
+rm -rf "$RD_MUT"
+
+# ---------- §REPORT-KINDS: landings by kind, runs by outcome, killed runs ----------
+rp_world rp-kinds
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00; rp_verdict T1 a.test.sh green 10:05:00; rp_pub T1 queue 10:10:00
+rp_ready T2 - 10:20:00; rp_cand T2 10:20:05; rp_pub T2 hand 10:20:30
+rp_pub T3 git 10:30:00
+# T4 is red then green on an unchanged tree: two verdicts for one row commit, red first, no ready between.
+rp_ready T4 w-T4 10:40:00; rp_cand T4 10:41:00; rp_verdict T4 a.test.sh red 10:45:00; rp_verdict T4 a.test.sh green 10:50:00
+# T5 is red, then said ready again (a changed tree), then green: not red-then-green.
+rp_ready T5 w-T5 11:00:00; rp_verdict T5 a.test.sh red 11:05:00; rp_ready T5 w-T5 11:10:00; rp_verdict T5 a.test.sh green 11:15:00
+rp_verdict T6 a.test.sh none 11:20:00; rp_verdict T6 a.test.sh discarded 11:21:00
+printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-06T10:09:00Z|suites=a.test.sh\n' \
+  "$RP_C1" "$RP_C2" "$RP_C1" >> "$S60_REC"
+# Killed: admitted with a dead holder and no end; ended by a signal (rc over 128). Not killed: a clean
+# end, and an admitted run whose holder lives.
+rp_req 1 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460))
+rp_req 2 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460)) "ended=$((RP_E0 + 2700))" rc=137
+rp_req 3 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460)) "ended=$((RP_E0 + 2700))" rc=0
+rp_req 4 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460))
+sed "s/^holder=.*/holder=$RP_LIVE:$RP_LIVE_START/" "$RP_GATE/requests/4" > "$RP_GATE/requests/4.t" && mv "$RP_GATE/requests/4.t" "$RP_GATE/requests/4"
+expect_contains "RK0 precondition: request 4's holder is the live sleeper, by pid and start" "holder=$RP_LIVE:" "$(cat "$RP_GATE/requests/4")"
+rp_report --rows
+expect_eq "RK1 a queue, a hand and a git landing each count under their own kind; green, red, none, discarded and red-then-green each as planted; two runs killed" \
+  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2" \
+  "$(rp_line)"
+expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
+  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
+expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=0s" \
+  "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T3 ')"
+expect_eq "RK4 …and rows that never landed print no row" "T1|T2|T3" "$(rp_rows | tr '|' '\n' | awk '{ print $1 }' | tr '\n' '|' | sed 's/|$//')"
+# A malformed line is skipped and counted, never fatal.
+rp_ev "ev=published|row=T9|commit=$RP_C2|kind=bogus|by=-|why=-|at=2026-10-06T12:00:00Z"
+rp_ev "ev=verdict|row=T9|commit=$RP_C2|suite=a.test.sh|at=2026-10-06T12:00:00Z"
+rp_ev "ev=ready|row=T9|at=not-a-time"
+rp_report
+expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one line on stderr counting them" \
+  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
+  "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
+
+# ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
+rp_world rp-print
+rp_ready T1 w-T1 10:00:00
+rp_tick() { poke_pressure "$R59W" 8192 1.0 tick; }
+rp_tl() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: landings: '; }
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
+expect_nonempty "RP0 precondition: the tick printed (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: ')"
+expect_eq "RP1 a record with no published event: the tick prints no landings line" "" "$(rp_tl)"
+rp_pub T1 queue 10:30:00
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
+expect_eq "RP2 a record with a published event: the tick prints the report's first line" \
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+rp_tick
+expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
+expect_eq "RP3b …and still prints the landings line: it is outside the digest" \
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
+rp_tick
+expect_contains "RP4 a new landing moves no decision: the next tick still says unchanged (nothing reads the numbers to decide)" "poker: unchanged since " "$OUT"
+expect_eq "RP4b …and its landings line carries the new figure" \
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+# AC-4.5 corrected: a review row and a dropped row added to the plan change no figure.
+rp_report --rows; RP_BEFORE="$OUT"
+awk '{ print } /^\| T8 \| 4 \| build/ {
+  print "| T9 | 6 | review | a later review | critic | — | 30 | REQ-1 | r9.md | — | — | pending |  |"
+  print "| T10 | 4 | build | a dropped build | implementor | — | 30 | REQ-1 | d.sh | — | — | dropped |  |" }' "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+expect_eq "RP5 precondition: the plan now holds the review row and the dropped row" "2" "$(/usr/bin/grep -cE '^\| T(9|10) \|' "$P59W")"
+rp_report --rows
+expect_eq "RP5b …and the report, line and rows, is byte for byte what it was" "$RP_BEFORE" "$OUT"
+# release-check prints it with each row, after the deferrals (§RC-DEFER's world, its check declared again).
+RP_SEV_REC="$RSEV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+[ -f "$RP_SEV_REC" ] && cp "$RP_SEV_REC" "$TMPROOT/rp-sev-rec"
+mkdir -p "${RP_SEV_REC%/*}"; S60_REC="$RP_SEV_REC"; : > "$S60_REC"; RP_ROOT="$(cd "$RSEV" && pwd -P)"
+rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00; rp_pub T2 git 10:40:00
+printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/config.yaml"
+BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
+expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
+expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+  "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
+cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
+if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
+kill "$RP_LIVE" 2>/dev/null; wait "$RP_LIVE" 2>/dev/null
+POKE_BOUND="$RP_BOUND_WAS"
+
+section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan's bytes outside the row's own lines are unchanged after ready, a tick and a hand landing (wave-28 T21; D26, REQ-2 AC-2.11, REQ-7 AC-7.2)"
+#
+# The fixture is a plan AS 1.12.0 WROTE IT (tests/fixtures/upgrade-1.12.0): canonical_sdlc_version 14, the
+# `parallel-budget:` line the probe wrote (`source=probe`), rows with no `Lands-on:` label, roster launch rows with
+# `suites_allowed=` and neither `row=` nor `lands_on=`, and in T1's tree a stamp (1.12.0's bare form) saying RED.
+# The run continues: `ready` lands T1 on a run of its own, a tick passes, a person lands T2 by hand, and the plan
+# differs from what 1.12.0 wrote in the three lines of each landed row and nowhere else. The tool never edits the
+# line itself.
+UP_ENV_WAS="$(export -p | /usr/bin/grep -E '^(declare -x|export) (BIONIC_PROBE_|BIONIC_NOW_FILE|CLAUDE_CONFIG_DIR|BIONIC_GATE_DIR|BIONIC_VERB_LOG|WORLD_)')"
+. "$(dirname "$0")/lib/world.sh"
+. "$(dirname "$0")/fixtures/upgrade-1.12.0/install.sh"
+export CLAUDE_CONFIG_DIR="$WORLD_ROOT/home"
+mkdir -p "$CLAUDE_CONFIG_DIR/bionic"; printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+world_machine 8 8192 40 0.5
+world_clock 1000
+world_cost a.test.sh 5 0.5 5
+UP_SPAWN="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+UP_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe'
+up_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+up_world() {  # [<T1 suites_allowed>] -> a world root holding the 1.12.0 fixture
+  local r
+  r="$(world_repo)" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  up_install "$r" "$@" || return 1
+  printf '%s' "$r"
+}
+up_rows_out() {  # <plan> <id>... -> the plan with each named row's own lines (tasks, step line, ledger) left out
+  local p="$1"; shift
+  awk -v ids="$*" 'BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) w[a[i]] = 1 }
+    { if (match($0, /^\| T[0-9]+ \|/)) { id = substr($0, 3, RLENGTH - 4); if (id in w) next }
+      if (match($0, /^- T[0-9]+:/)) { id = substr($0, 3, RLENGTH - 3); if (id in w) next }
+      print }' "$p"
+}
+up_changed() {  # <before> <after> -> how many lines of <after> are not in <before>
+  diff "$1" "$2" | /usr/bin/grep -c '^>'
+}
+up_same() {  # <before> <after> <id>... -> `same` when only the named rows' own lines differ
+  local a="$1" b="$2"; shift 2
+  [ "$(up_rows_out "$a" "$@" | cksum)" = "$(up_rows_out "$b" "$@" | cksum)" ] && printf same || printf differ
+}
+up_ready() {  # <tree> -> UP_OUT, UP_RC
+  UP_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 bash "$UP_SPAWN" ready 2>&1 )"; UP_RC=$?
+}
+UPG="$(up_world)"
+expect_nonempty "(fixture) the 1.12.0 world was made" "$UPG"
+UPG_P="$(up_plan "$UPG")"
+UPG_BEFORE="$UPG_P.before"; cp "$UPG_P" "$UPG_BEFORE"
+UPG_STAMPS="$(git -C "$UPG/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-stamps"
+expect_contains "(up-pre) the planted stamp says RED (rc=1) at T1's head, as 1.12.0's land would read it" \
+  "|head=$(git -C "$UPG/.worktrees/T1" rev-parse HEAD)|dirty=0|rc=1|" "$(cat "$UPG_STAMPS")"
+expect_contains "(up-pre) the fixture plan carries the probe's budget line, and the version 14" "$UP_BUDGET" "$(cat "$UPG_P")"
+expect_contains "(up-pre) …version 14" "canonical_sdlc_version: 14" "$(cat "$UPG_P")"
+expect_eq "(up-pre) …and its rows carry no Lands-on label" "0" "$(/usr/bin/grep -ci 'lands-on' "$UPG_P" | tr -d ' ')"
+
+# ---------- ready ----------
+up_ready "$UPG/.worktrees/T1"
+expect_eq "(up-a1) ready lands the 1.12.0 row beside a stamp that says RED (exit 0)" "0" "$UP_RC"
+expect_match "(up-a1) …printing LANDED, then the owed line" "LANDED T1 *
+landed T1 * — owed: complete task T1, then stop wx-T1" "$UP_OUT"
+cp "$UPG_P" "$UPG_P.after-ready"
+expect_eq "(up-a2) the row's own three lines changed (its status, its step line, its ledger cell)" "3" "$(up_changed "$UPG_BEFORE" "$UPG_P")"
+expect_eq "(up-a2) …and every other byte of the plan is the one 1.12.0 wrote" "same" "$(up_same "$UPG_BEFORE" "$UPG_P" T1)"
+expect_contains "(up-a3) …the probe's budget line among them, as written" "$UP_BUDGET" "$(cat "$UPG_P")"
+expect_contains "(up-a3) …and the version still 14" "canonical_sdlc_version: 14" "$(cat "$UPG_P")"
+
+# ---------- a tick ----------
+( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$POKER" arm ) >/dev/null 2>&1
+UP_TICK="$( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$POKER" tick 2>&1 )"
+expect_contains "(up-b1) a tick ran on the fixture's run (its decision line was printed)" "poker-tick/v1|" "$UP_TICK"
+expect_eq "(up-b1) …and left the plan byte for byte as ready left it" "same" "$(cmp -s "$UPG_P.after-ready" "$UPG_P" && echo same || echo differ)"
+
+# ---------- a hand landing ----------
+UP_HAND="$( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$UP_SPAWN" land "$UPG/.worktrees/T2" --by-hand --reason "fixture" 2>&1 )"; UP_HAND_RC=$?
+expect_eq "(up-c1) a hand landing of T2 lands it (exit 0)" "0" "$UP_HAND_RC"
+expect_contains "(up-c1) …printing the owed line" "landed T2 " "$UP_HAND"
+expect_eq "(up-c2) the hand landing changed the three lines of T2 and no others" "3" "$(up_changed "$UPG_P.after-ready" "$UPG_P")"
+expect_eq "(up-c2) …and, whole, the plan differs from 1.12.0's in T1's and T2's own lines alone" "same" "$(up_same "$UPG_BEFORE" "$UPG_P" T1 T2)"
+expect_contains "(up-c3) …the budget line is as the probe wrote it" "$UP_BUDGET" "$(cat "$UPG_P")"
+
+# ---------- the mutation arm: a tool that edits the line ----------
+# A copy of the hooks whose `row-landed` also changes one byte of the budget line; it is run in a world of its own
+# from a directory outside every checkout, and the tracked file is not touched.
+UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
+cp -R "${BIONIC_HOOKS_DIR}" "$UPM_DIR/hooks" && ln -s "${BIONIC_SCRIPTS_DIR}/payload" "$UPM_DIR/payload"
+awk '/^    plan_verb_swap row-landed "\$PV_ID landed at/ && !d { print "    sed \"s/^\\(parallel-budget: .*\\)source=probe/\\1source=probes/\" \"$PV_NEW\" > \"$PV_NEW.m\" && mv -f \"$PV_NEW.m\" \"$PV_NEW\""; d = 1 }
+  { print }' "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$UPM_DIR/hooks/session-poker.sh"
+expect_eq "(up-m0) the mutant differs from the hook by the one line that edits the budget" "1" \
+  "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$UPM_DIR/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+UPM="$(up_world)"
+UPM_P="$(up_plan "$UPM")"; cp "$UPM_P" "$UPM_P.before"
+UPM_OUT="$( cd "$UPM" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$UPM_DIR/hooks/session-poker.sh" row-landed T1 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z 2>&1 )"; UPM_RC=$?
+expect_eq "(up-m1) the mutant's verb ran and wrote the row (exit 0)" "0" "$UPM_RC"
+expect_eq "(up-m1) …its three lines changed, as the real verb's do" "3" "$(( $(up_changed "$UPM_P.before" "$UPM_P") - 1 ))"
+expect_eq "(up-m2) …and the bytes row goes red: the plan differs outside T1's own lines" "differ" "$(up_same "$UPM_P.before" "$UPM_P" T1)"
+expect_eq "(up-m2) …because the budget line is no longer the one the probe wrote (the real runs above hold it once)" "0 1" \
+  "$(/usr/bin/grep -cFx -- "$UP_BUDGET" "$UPM_P" | tr -d ' ') $(/usr/bin/grep -cFx -- "$UP_BUDGET" "$UPG_P" | tr -d ' ')"
+rm -rf "$UPM_DIR"
+for UP_V in $(compgen -e | /usr/bin/grep -E '^(BIONIC_PROBE_|BIONIC_NOW_FILE$|CLAUDE_CONFIG_DIR$|BIONIC_GATE_DIR$|BIONIC_VERB_LOG$)'); do unset "$UP_V"; done
+eval "$UP_ENV_WAS"
 
 finish
