@@ -11,7 +11,9 @@
 # THE STORE. `${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}`, one per
 # machine, holding:
 #
-#   requests/<id>  one file per request, <id> a whole number given in turn. Lines:
+#   requests/<id>  one file per request, <id> a whole number: the highest number present plus one
+#                  (so after a prune takes the highest away, the next ask may take it again;
+#                  a live request is never pruned, so a number in use is never given twice). Lines:
 #                    key=<command key>  kind=<landing|work|whole>  who=<session id>:<agent>
 #                    tree=<abs path>  asked=<epoch>  holder=<pid>:<start>
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>,
@@ -38,18 +40,31 @@
 #   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
 #   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
-#   gate_asked               names (a who each) on stdin; prints those with a request that has no
-#                            ended= line, in the order given, and is rc 0 when it printed any. One
-#                            read of the store answers every name.
+#   gate_asked               names (a who each) on stdin; prints those with an OPEN request (see
+#                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
+#                            One read of the store answers every name, and it takes no lock.
 #   gate_share               the machine's share, 1 to 100 (absent or unreadable: 80)
 #   gate_promise <key>       the per-field promise for a key, <mem>:<cores>:<seconds>, loading the
 #                            store itself; nothing when no cost is on record anywhere
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
 #
+# WHICH VERBS WALK THE STORE. gate_ask, gate_end, gate_state and gate_room take the lock and run
+# the scan (`_gate_scan`), which tallies the open requests, writes the end of a killed one and
+# prunes (below); so gate_state and gate_room, which read, also remove. gate_list takes the lock
+# and only reads. gate_asked takes no lock and only reads. Neither of those two reaps or prunes.
+#
 # THE KNOBS. BIONIC_GATE_POLL (seconds between a waiter's polls, default 2) and BIONIC_GATE_KEEP
-# (seconds an ended request is kept before the next scan removes it, default 86400; the cost
-# records are what the gate learned and are never pruned, and a request nothing has ended is
-# never pruned however old).
+# (whole seconds a request that is no longer open is kept before the next scan removes it, default
+# 86400; anything else is refused to the default, with one line on stderr per process). The cost
+# records are what the gate learned and are never pruned.
+#
+# WHAT IS PRUNED, AND WHAT "NEVER PRUNED" PROTECTED. A request nothing has ended used to be kept
+# however old, so that a waiter's number and turn, and a run's record, could not be taken from
+# under it. What that protected is a request somebody still holds. The live-holder rule protects
+# exactly that and no more: an open request, whose holder lives, is never pruned, however old; a
+# request that is not open is pruned once it is older than BIONIC_GATE_KEEP — an ended one by its
+# ended=, one never admitted that nobody holds (holder=-, or its holder died) by its asked=, one
+# killed unseen after the scan has written its end. Pruned in one batch, `xargs -0 rm -f`.
 #
 # WHO ASKS. `who` is `${CLAUDE_CODE_SESSION_ID:-none}:${BIONIC_GATE_AGENT:-main}`; the holder is
 # `$$`, the process that runs the command and whose death ends its claim. The caller gives the
@@ -58,9 +73,15 @@
 # THE RULES, each taken under lock/:
 #
 #   alive     a request's holder is alive by the pid-and-start rule of lib/slots.sh
-#             (`_slots_holds`, called, not copied). Admitted, dead and never ended is killed:
+#             (`_slots_live`, called, not copied). Admitted, dead and never ended is killed:
 #             the next locked act that reads it writes it ended=<now> rc=137, after which it
 #             overlaps nothing.
+#   open      (T71) ONE rule, `_gate_open`, which the scan, gate_list, gate_asked and the prune
+#             all read: a request is open when it has no ended= line AND its holder is alive.
+#             An open request is waiting (not admitted) or admitted; every other is ended,
+#             killed, or gone (never admitted, nobody holds it). An open request counts in the
+#             load and the promises and its who is showing; no other does, and none is kept
+#             past BIONIC_GATE_KEEP.
 #   order     among waiting requests whose holder is alive: kind=whole only when nothing
 #             admitted is unfinished, then landing before work, then the lowest asked, ties by
 #             id. Only the head of that order is admitted; nothing passes it.
@@ -178,13 +199,11 @@ _gate_unlock() {
   [ "$(_slots_pid_of "$_GD/lock")" = "$_GATE_ME" ] && rm -rf "$_GD/lock"
 }
 
-# _gate_holds <pid> <start> — under the lock: the request's holder is alive. The rule is
-# lib/slots.sh's, which reads a holder's start from a directory; the probe is that directory.
+# _gate_holds <pid> <start> — the request's holder is alive. The rule is lib/slots.sh's
+# `_slots_live`, which takes the start itself, so the answer needs no lock and no probe
+# directory (gate_asked asks it without the lock).
 _gate_holds() {
-  local d="$_GD/lock/probe"
-  [ -d "$d" ] || mkdir "$d" 2>/dev/null
-  if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/since"; else rm -f "$d/since"; fi
-  _slots_holds "$d" "$1"
+  _slots_live "$1" "${2:-}"
 }
 
 # _gate_ancestor <pid> — rc 0 when <pid> is the process taking the lock or one of its ancestors.
@@ -225,6 +244,33 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
 _gate_alive() {  # the request last read has a live holder (holder=- is nobody)
   case "$_R_holder" in ''|-) return 1 ;; esac
   _gate_holds "${_R_holder%%:*}" "${_R_holder#*:}"
+}
+
+# _gate_num <string> — rc 0 and _G_NUM the string as a decimal whole number (leading zeros are
+# zeros, never octal), when it is 1 to 15 digits; rc 1 for anything else. Nothing the gate does
+# arithmetic on under its lock comes from a file or the environment without passing it.
+_gate_num() {
+  _G_NUM=''
+  case "${1:-}" in ''|*[!0-9]*|????????????????*) return 1 ;; esac
+  _G_NUM=$((10#$1))
+}
+
+# _gate_open — after _gate_read: THE RULE of which requests are open (see THE RULES). rc 0 when
+# the request has no ended= line and its holder lives. Sets _R_state to what the request is:
+#   waiting   open, not admitted            admitted  open, admitted
+#   ended     ended                         killed    ended with rc 137
+#   dying     admitted, never ended, holder dead: not yet written ended (the scan does)
+#   gone      never admitted, nobody holds it (holder=-, or a dead holder)
+_gate_open() {
+  if [ -n "$_R_ended" ]; then
+    if [ "$_R_rc" = 137 ]; then _R_state=killed; else _R_state=ended; fi
+  elif _gate_alive; then
+    if [ -n "$_R_admitted" ]; then _R_state=admitted; else _R_state=waiting; fi
+  elif [ -n "$_R_admitted" ]; then _R_state=dying
+  else _R_state=gone
+  fi
+  case "$_R_state" in waiting|admitted) return 0 ;; esac
+  return 1
 }
 
 # _gate_reap <file> — under the lock, after _gate_read: the request was admitted, has no ended
@@ -268,32 +314,47 @@ _gate_promise() {
            END { if (n) printf "%g:%g:%g\n", m[1], m[2], m[3] }' "$@" 2>/dev/null
 }
 
-# _gate_scan — under the lock: tallies the live requests. Sets
+# _gate_scan — under the lock: tallies the open requests (`_gate_open`). Sets
 #   _G_UNF      admitted and unfinished (holder alive, no ended)   _G_WHOLE  one of them is whole
 #   _G_PROM     their "<mem>:<cores>:<seconds>:<admitted>" lines
 #   _G_WAIT     waiting (holder alive, not admitted)   _G_LWAIT  of them, landings
 #   _G_QUEUE    their "<kind> <asked> <id> <key>" lines
-# raises the peak of every admitted, unfinished request to the reading <pct> it is given, and
-# writes the end of every admitted request whose holder is dead (_gate_reap), and removes every
-# ended request older than BIONIC_GATE_KEEP seconds.
+# raises the peak of every admitted, unfinished request to the reading <pct> it is given, writes
+# the end of every admitted request whose holder is dead (_gate_reap), and removes, in one batch,
+# every request that is not open and is older than BIONIC_GATE_KEEP seconds (ended: by its ended=;
+# gone, never admitted and nobody's: by its asked=). A number it cannot read as decimal is never
+# aged out; BIONIC_GATE_KEEP that is not a whole number of seconds is refused to 86400, with one
+# stderr line a process.
 _gate_scan() {
-  local f id reading="${1:--1}" keep="${BIONIC_GATE_KEEP:-86400}" now=''
-  case "$keep" in ''|*[!0-9]*) keep=86400 ;; esac
+  local f id reading="${1:--1}" keep="${BIONIC_GATE_KEEP:-86400}" now='' born old=()
+  if _gate_num "$keep"; then
+    keep="$_G_NUM"
+  else
+    if [ -z "${_GATE_KEEP_SAID:-}" ]; then
+      _GATE_KEEP_SAID=1
+      echo "gate: BIONIC_GATE_KEEP='${keep:0:20}' is not a whole number of seconds; 86400 is used" >&2
+    fi
+    keep=86400
+  fi
   _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE=''
   for f in "$_GD"/requests/*; do
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
     _gate_read "$f" || continue
-    if [ -n "$_R_ended" ]; then
-      # An ended request older than the bound is removed here, under the lock, on the walk
-      # every verb already takes (T52); `now` is read once, and only when one is found.
-      case "$_R_ended" in *[!0-9]*) continue ;; esac
-      [ -n "$now" ] || now="$(_res_now)"
-      [ "$((now - _R_ended))" -le "$keep" ] || rm -f "$f"
-      continue
-    fi
-    if ! _gate_alive; then
-      [ -z "$_R_admitted" ] || _gate_reap "$f"
+    if ! _gate_open; then
+      case "$_R_state" in
+        dying) _gate_reap "$f"; continue ;;
+        gone) born="$_R_asked" ;;
+        *) born="$_R_ended" ;;
+      esac
+      _gate_num "$born" || continue
+      born="$_G_NUM"
+      # `now` is read once, and only when a request that is not open is found.
+      if [ -z "$now" ]; then
+        if _gate_num "$(_res_now)"; then now="$_G_NUM"; else now=-; fi
+      fi
+      [ "$now" != - ] || continue
+      [ "$((now - born))" -le "$keep" ] || old[${#old[@]}]="$f"
       continue
     fi
     if [ -n "$_R_admitted" ]; then
@@ -311,6 +372,8 @@ _gate_scan() {
 "
     fi
   done
+  # One batch, however many: xargs cuts it to what an exec takes, and printf is a builtin.
+  [ "${#old[@]}" -eq 0 ] || printf '%s\0' "${old[@]}" | xargs -0 rm -f
 }
 
 # _gate_head — the id the serve order admits next, from the last scan; nothing when none.
@@ -555,6 +618,9 @@ gate_end() {
   return 0
 }
 
+# gate_state — one line, the gate as it stands. It takes the lock and runs the scan, so it raises
+# the peaks, keeps the idle reading current, writes the end of a request found killed and prunes
+# what the scan prunes; it starts and ends nothing.
 gate_state() {
   local reading share used room load promised
   _gate_store || return 2
@@ -605,8 +671,9 @@ _gate_room_line() {
 }
 
 # gate_room [--owed <n>] — may another writer start now? One line, and rc 0 for yes. It takes
-# the lock for its scan, so it is a sampler too: like gate_state it raises the peaks and keeps
-# the idle reading current, and changes nothing else.
+# the lock for its scan, so it is a sampler too: like gate_state it raises the peaks, keeps the
+# idle reading current, writes the end of a request found killed and prunes what the scan
+# prunes, and changes nothing else.
 gate_room() {
   local owed=0 reading
   while [ "$#" -gt 0 ]; do
@@ -625,34 +692,52 @@ gate_room() {
   _gate_room_line "$reading" "$((10#$owed))"
 }
 
-# gate_asked — names on stdin, one who per line: prints, in the order given, each that has a
-# request in the store with no ended= line, and is rc 0 when it printed any. A writer that has
-# asked and is still running is showing in the load or in a promise and is owed no longer; one
-# whose request ended shows nowhere. ONE awk reads every request file once (the names come first
-# on stdin, `-`), so the cost does not grow with the writers asked about (T52: the old walk forked
-# a grep per file per name, 8 s at 600 requests under the stop wall's 10 s timeout).
+# gate_asked — names on stdin, one who per line: prints, in the order given, each that has an
+# OPEN request (`_gate_open`: no ended= line and a live holder), and is rc 0 when it printed any.
+# A writer with an open request is showing in the load or in a promise and is owed no longer; one
+# whose request ended, or whose holder is gone, shows nowhere. It takes no lock and changes nothing.
+#
+# ONE awk reads the store, so the cost does not grow with the writers asked about (T52: the old
+# walk forked a grep per file per name, 8 s at 600 requests under the stop wall's 10 s timeout).
+# It is handed no argument list (T71: a glob of 18,000 request files failed the exec, and a file
+# pruned between the glob and the read ended awk at exit 2): the paths go to its standard input
+# and it opens them itself, one at a time with `getline` and `close`; a file that is gone is
+# skipped, not fatal. It is a pre-filter only: it hands back the paths whose file names a who and
+# has no ended= line (a file with no who names nobody), and the rule itself, `_gate_open`, is then
+# read on each of those. The paths on stdin were picked over `find -print0 | xargs -0 awk` because
+# one process gives one answer with nothing to fold; xargs would cut the list into several awks.
 gate_asked() {
+  local names cands f nm open='
+' hit=1
   _GD="$(gate_dir)"
+  names="$(cat)"
   set -- "$_GD"/requests/[0-9]*
-  [ -e "$1" ] || { cat >/dev/null; return 1; }
-  awk '
-    FILENAME == "-" { if ($0 != "") { n++; name[n] = $0 }; next }
-    FNR == 1 { flush() }
-    /^who=/ { w = substr($0, 5); next }
-    /^ended=/ { ended = 1 }
-    function flush() { if (w != "" && !ended) open[w] = 1; w = ""; ended = 0 }
-    END {
-      flush()
-      for (i = 1; i <= n; i++) if (name[i] in open) { print name[i]; hit = 1 }
-      exit !hit
-    }' - "$@" 2>/dev/null
+  [ -e "$1" ] || return 1
+  cands="$(printf '%s\n' "$@" | awk '
+    { f = $0; r = (getline l < f); if (r < 0) next; ended = 0; who = 0
+      while (r > 0) { if (l ~ /^ended=./) ended = 1; else if (l ~ /^who=/) who = 1; r = (getline l < f) }
+      close(f); if (who && !ended) print f }' 2>/dev/null)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    _gate_read "$f" 2>/dev/null || continue
+    if _gate_open; then open="${open}${_R_who}
+"; fi
+  done <<< "$cands"
+  while IFS= read -r nm; do
+    [ -n "$nm" ] || continue
+    case "$open" in *"
+$nm
+"*) printf '%s\n' "$nm"; hit=0 ;; esac
+  done <<< "$names"
+  return $hit
 }
 
 # gate_list — one line per request, lowest id first:
 #   <id> <waiting|admitted|ended|killed|gone> kind=<k> asked=<e> admitted=<e|-> ended=<e|-> rc=<n|-> key=<key>
 # killed: admitted and either ended with rc 137 (the gate's _gate_reap, or a run killed by
 # signal 9) or never ended with its holder dead. gone: never admitted, no live holder (its
-# number is kept for the next ask by the same who for the same key).
+# number is kept for the next ask by the same who for the same key, until BIONIC_GATE_KEEP).
+# The state is `_gate_open`'s; gate_list takes the lock and reads, and prunes and reaps nothing.
 gate_list() {
   local f id st
   _gate_store || return 2
@@ -661,13 +746,8 @@ gate_list() {
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
     _gate_read "$f" || continue
-    if [ -n "$_R_ended" ]; then
-      if [ "$_R_rc" = 137 ]; then st=killed; else st=ended; fi
-    elif _gate_alive; then
-      if [ -n "$_R_admitted" ]; then st=admitted; else st=waiting; fi
-    elif [ -n "$_R_admitted" ]; then st=killed
-    else st=gone
-    fi
+    _gate_open || :
+    case "$_R_state" in dying) st=killed ;; *) st="$_R_state" ;; esac
     printf '%s %s kind=%s asked=%s admitted=%s ended=%s rc=%s key=%s\n' "$id" "$st" "$_R_kind" \
       "${_R_asked:--}" "${_R_admitted:--}" "${_R_ended:--}" "${_R_rc:--}" "$_R_key"
   done | sort -n -k1,1
