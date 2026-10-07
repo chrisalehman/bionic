@@ -2017,8 +2017,8 @@ expect_eq "UR3 …and the roster now carries exactly one row of the name" "1" "$
 UR3_ROW="$(grep '|name=ghost|' "$(ur_roster)" | head -1)"
 expect_contains "UR3 …a closed row" "|status=closed|" "$UR3_ROW"
 expect_contains "UR3 …in this session" "|session=${SID_A}|" "$UR3_ROW"
-expect_contains "UR3 …carrying the reason in source=, not waiver= (a waiver reads as a waived contract)" \
-  "|source=unrostered-stop: spawned past its hook timeout; the roster never saw it|" "$UR3_ROW"
+expect_contains "UR3 …carrying the reason on reason=, not waiver= (a waiver reads as a waived contract; T77 moved it off source=)" \
+  "|reason=spawned past its hook timeout; the roster never saw it|" "$UR3_ROW"
 expect_absent "UR3 …and no waiver on it" "|waiver=spawned" "$UR3_ROW"
 UR3_OPEN="$(bash -c '. "$1"; roster_open_names "$2" ""' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" "$(ur_roster)" 2>/dev/null)"
 expect_eq "UR3 …and the roster's one open-name reader does not list it" "" "$UR3_OPEN"
@@ -2178,6 +2178,139 @@ expect_true "SD4 the deadline sits at least 2 s under the registration's timeout
 expect_true "SD4 …and clear of an ordinary stop's cost (at least 4 s)" test "${SD4_DEADLINE:-0}" -ge 4
 rm -rf "$SD_ROOT"
 GUARD="$SD_SAVED_GUARD"
+
+section "§UNROSTERED-ROSTERS — \"the roster never saw it\" is asked of EVERY roster of the project (wave-28 T77; REQ-5, REQ-6, D8; A-orch-239)"
+#
+# THE FINDING (pass 54, adversarial #1). T70's verb and the guard's unrostered branch decided "the roster never
+# saw this agent" by reading THIS session's roster alone. A writer a PREDECESSOR session's roster holds, its
+# contract unmet, is the state every `/clear` leaves until `adopt` copies the rows: it was recorded as
+# unrostered and the guard then passed its stop. The question is now one read over every `roster-*.state` of
+# the project, in the verb (it refuses, naming the session and the row's status) and in the guard (the record
+# is honoured only while that read still finds no row). A dead session's roster counts: a row is a row until
+# the sweeper removes it.
+#
+# fails-when: a name a predecessor's roster (live or dead) holds is recorded as unrostered, or its stop is
+# passed on a record; a row that appeared after the record does not withdraw it; the true unrostered case (no
+# roster anywhere holds the name) stops being honoured once; a `why` carrying `|`, a line break or a carriage
+# return is recorded; the stop's reason is not on a `reason=` key of its row; or the guard spells either order
+# schema twice, or differently from the verb.
+up_pred() {  # <sid> <name> [status] -> a row of <name> on <sid>'s roster, an unmet deliverable owed
+  sg_roster_row "$UR_REPO" "$1" "$2" "a${2}-4040404040404040" "" "${3:-identified}" "$UR_REPO/out/never.md"
+}
+up_planted_record() {  # <name> -> a record the verb would have written, planted by hand
+  mkdir -p "$UR_REPO/.bionic/tmp"
+  printf 'stop-unrostered/v1|at=2026-10-07T00:00:00Z|epoch=%s|session=%s|by=orchestrator|why=planted|target=%s\n' \
+    "$(date -u +%s)" "$SID_A" "$1" >> "$(ur_orders)"
+}
+up_nrecords() { [ -f "$(ur_orders)" ] && grep -c '^stop-unrostered/v1|' "$(ur_orders)" || echo 0; }
+
+# (1) A PREDECESSOR'S LIVE ROW. The verb refuses, names the session and the status, and records nothing; the
+# guard, handed a record anyway, refuses the stop as before.
+ur_world pa
+up_pred "$SID_B" ghost identified
+ur_record ghost 'the roster never saw it'
+expect_status "UP1 a name a predecessor's roster holds (identified) is NOT recorded as unrostered" 2 "$UR_RC"
+expect_contains "UP1 …naming the predecessor session" "roster ${SID_B:0:8}" "$UR_OUT"
+expect_contains "UP1 …and the row's status" "row identified" "$UR_OUT"
+expect_contains "UP1 …and the way out" "adopt it, or stop it by its own session's rules" "$UR_OUT"
+expect_eq "UP1 …and recorded nothing" "0" "$(up_nrecords)"
+up_planted_record ghost
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UP1 …and the guard refuses the stop even on a record: the predecessor still holds the row" 2 "$GUARD_ST"
+expect_contains "UP1 …as on no roster row of THIS session, as before" "no roster row of this session" "$GUARD_ERR"
+expect_eq "UP1 …writing no row" "0" "$(ur_rows_of ghost)"
+expect_eq "UP1 …and leaving the predecessor's row open" "1" \
+  "$(grep -c '|status=identified|' "$UR_REPO/.bionic/tmp/roster-${SID_B}.state")"
+UP1_LINE="$(printf '%s\n' "$UR_OUT" | grep -m1 'REFUSED')"
+expect_nonempty "UP1 precondition: the verb's refusal line is read" "$UP1_LINE"
+expect_true "UP1 …first line inside the 100 columns (it is $(bionic_cols "$UP1_LINE") with a 5-character name)" \
+  test "$(bionic_cols "$UP1_LINE")" -le 100
+
+# (2) A DEAD SESSION'S ROSTER COUNTS. Nothing about its session is alive: an old file, no engaged marker, no
+# sweeper ledger. The row is still a row until the sweeper removes the file.
+ur_world pb
+up_pred "$SID_C" ghost confirmed
+touch -t 202001010000 "$UR_REPO/.bionic/tmp/roster-${SID_C}.state"
+ur_record ghost 'a dead session never saw it'
+expect_status "UP2 a name a DEAD session's roster holds is NOT recorded" 2 "$UR_RC"
+expect_contains "UP2 …naming that session and the status" "roster ${SID_C:0:8}'s row confirmed" "$UR_OUT"
+up_planted_record ghost
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UP2 …and the guard refuses the stop on a planted record" 2 "$GUARD_ST"
+
+# (3) ADOPTED SINCE THE RECORD. The record was fair when it was made (no roster anywhere held the name); a
+# row that appeared afterwards makes the branch refuse as before.
+ur_world pc
+ur_record ghost 'no roster holds it today'
+expect_status "UP3 precondition: with no roster holding the name the verb records" 0 "$UR_RC"
+expect_eq "UP3 precondition: one record" "1" "$(up_nrecords)"
+up_pred "$SID_B" ghost identified
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UP3 a row that appeared since the record withdraws it: the stop is REFUSED" 2 "$GUARD_ST"
+expect_eq "UP3 …and nothing was written to this roster" "0" "$(ur_rows_of ghost)"
+
+# (4) THE TRUE UNROSTERED CASE, as T70 built it: the project's rosters exist and hold other names; none holds
+# this one. Recorded, honoured once, a closed row.
+ur_world pd
+up_pred "$SID_B" bystander identified
+up_pred "$SID_C" other-bystander confirmed
+ur_record ghost 'no roster anywhere holds it'
+expect_status "UP4 a name no roster of the project holds IS recorded" 0 "$UR_RC"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UP4 …and its stop is PERMITTED" 0 "$GUARD_ST"
+expect_contains "UP4 …on the orchestrator's word" "STOP RECORDED (unrostered, by the orchestrator)" "$GUARD_ERR"
+expect_eq "UP4 …writing the one closed row" "1" "$(ur_rows_of ghost)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UP4 …and the second stop is REFUSED" 2 "$GUARD_ST"
+expect_eq "UP4 …leaving the bystanders' rosters as they were" "1" \
+  "$(grep -c '|name=bystander|' "$UR_REPO/.bionic/tmp/roster-${SID_B}.state")"
+
+# (5) THE REASON IS ONE PLAIN LINE. The roster splits on `|` and the order reader on lines; a reason carrying
+# either could forge a field or a record, so the verb refuses it rather than folding it.
+ur_world pe
+ur_record ghost 'one|two'
+expect_status "UP5 a reason carrying a pipe is REFUSED" 2 "$UR_RC"
+expect_contains "UP5 …saying why" "one plain line" "$UR_OUT"
+ur_record ghost $'line one\nline two'
+expect_status "UP5 …and so is a line break" 2 "$UR_RC"
+ur_record ghost $'with a\rreturn'
+expect_status "UP5 …and a carriage return" 2 "$UR_RC"
+expect_eq "UP5 …and none of the three recorded anything" "0" "$(up_nrecords)"
+UP5_LINE="$(printf '%s\n' "$UR_OUT" | grep -m1 'REFUSED')"
+expect_nonempty "UP5 precondition: the refusal line is read" "$UP5_LINE"
+expect_true "UP5 …first line inside the 100 columns (it is $(bionic_cols "$UP5_LINE"))" test "$(bionic_cols "$UP5_LINE")" -le 100
+ur_record ghost 'one plain reason, with a comma; and a colon: and an equals sign a=b'
+expect_status "UP5 …while the same drive with a plain reason IS recorded" 0 "$UR_RC"
+expect_contains "UP5 …with the reason whole" "|why=one plain reason, with a comma; and a colon: and an equals sign a=b|target=ghost" \
+  "$(grep '^stop-unrostered/v1|' "$(ur_orders)")"
+expect_eq "UP5 …as one record" "1" "$(up_nrecords)"
+
+# (6) THE STOP'S REASON IS ITS OWN KEY. `source=` is where a deliverable's path came from; `waiver=` reads as
+# a waived contract. The reason rides `reason=`.
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UP6 precondition: the recorded stop is permitted" 0 "$GUARD_ST"
+UP6_ROW="$(grep '|name=ghost|' "$(ur_roster)" | head -1)"
+expect_contains "UP6 the closed row carries the reason on reason=" \
+  "|reason=one plain reason, with a comma; and a colon: and an equals sign a=b|" "$UP6_ROW"
+expect_contains "UP6 …and source= is empty, as a row with no deliverable has it" "|source=|" "$UP6_ROW"
+expect_absent "UP6 …and nothing of the reason is on source= or waiver=" "source=unrostered-stop" "$UP6_ROW"
+expect_absent "UP6 …nor on waiver=" "|waiver=one" "$UP6_ROW"
+
+# (7) THE GUARD SPELLS EACH ORDER SCHEMA ONCE, and as the verb does. A second literal is a second place for
+# the two hooks to drift; the constants are held equal here, as the order TTL's two copies are.
+UP7_G_UNR="$(sed -n 's/^UNROSTERED_SCHEMA="\(.*\)"$/\1/p' "$GUARD" | head -1)"
+UP7_V_UNR="$(sed -n 's/^UNROSTERED_SCHEMA="\(.*\)"$/\1/p' "$HERE/stop-orders.sh" | head -1)"
+UP7_G_ORD="$(sed -n 's/^ORDER_SCHEMA="\(.*\)"$/\1/p' "$GUARD" | head -1)"
+UP7_V_ORD="$(sed -n 's/^ORDER_SCHEMA="\(.*\)"$/\1/p' "$HERE/stop-orders.sh" | head -1)"
+expect_nonempty "UP7 precondition: the verb names its unrostered schema" "$UP7_V_UNR"
+expect_nonempty "UP7 the guard names the unrostered schema as a constant" "$UP7_G_UNR"
+expect_eq "UP7 …equal to the verb's" "$UP7_V_UNR" "$UP7_G_UNR"
+expect_nonempty "UP7 precondition: the verb names the order schema" "$UP7_V_ORD"
+expect_nonempty "UP7 the guard names the order schema as a constant" "$UP7_G_ORD"
+expect_eq "UP7 …equal to the verb's" "$UP7_V_ORD" "$UP7_G_ORD"
+expect_eq "UP7 the guard's code spells stop-unrostered/v1 once" "1" \
+  "$(grep -v '^[[:space:]]*#' "$GUARD" | grep -c 'stop-unrostered/v1')"
+expect_eq "UP7 …and stop-order/v1 once" "1" "$(grep -v '^[[:space:]]*#' "$GUARD" | grep -c 'stop-order/v1')"
 
 
 finish

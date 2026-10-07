@@ -1940,7 +1940,7 @@ EOF
 # A chain `units_chain` refuses (a cycle) is printed as unknown with its reason, never dropped.
 # Called inside the scheduler's one parse of the table (`tick_plan_memoised`), so the rows, the
 # waiting reads, the edges and the ready set are one reading.
-tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set
+tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
   local rows waiting all offered line chain ids mins
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
@@ -1948,8 +1948,11 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
   waiting="$(units_waiting "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
   all="${SCHED_READY_ALL:-}"
   offered="$(printf '%s' "${SCHED_READY:-}" | tr '\n' ' ')"
+  SCHED_BEHIND=""
   while IFS= read -r line; do
-    [ -n "$line" ] && say "WAIT $(clean "$line")"
+    [ -n "$line" ] || continue
+    case "$line" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${line%% *}" ;; esac
+    say "WAIT $(clean "$line")"
   done <<TICK_WAIT
 $(printf '\034rows\n%s\n\034wait\n%s\n' "$rows" "$waiting" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
@@ -3310,12 +3313,13 @@ plan_verb_id_ok() {
 # A DEFERRED FINDING'S ONE CHANGELOG SENTENCE (wave-28 T17; D21, AC-8.7). Registering a record writes
 # `deferred: <record>#<n> <S> <reach> "<title>"` (lib/proof.sh `proof_finding_lines`); `finding-stated`
 # appends ` stated="<sentence>"` to it, the last field of the line. The sentence is folded to one line
-# of single spaces (`deferral_fold`, the one fold the changelog is read through as well), and a `\` or a `"` in it is written `\\` or `\"`, so the
+# of single spaces (`deferral_fold`, lib/said.sh's `said_fold`, the one fold the changelog is read through as well), and a `\` or a `"` in it is written `\\` or `\"`, so the
 # quoted field ends where the line does and a title, which never holds a `"`, is still the line's
 # first quoted string (`proof_findings_owed` reads it so). The other half of the debt is the changelog:
 # `release-check` prints each deferral stated (the sentence is in `CHANGELOG.md`) or unstated.
-deferral_fold() {  # <text> -> its white space and control characters folded to single spaces, trimmed
-  printf '%s' "$1" | LC_ALL=C tr -s '[:space:][:cntrl:]' ' ' | sed -e 's/^ //' -e 's/ $//'
+deferral_fold() {  # <text> -> its white space and control characters folded to single spaces, trimmed: lib/said.sh's one fold
+  declare -F said_fold >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/said.sh" ] && . "$BIONIC_LIB/said.sh"; }
+  said_fold "$1"
 }
 deferral_escape() {  # <folded sentence> -> as the plan holds it: \ for a backslash, \" for a quote
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
@@ -7130,14 +7134,14 @@ $PF_PLANL"
   # on words lib/said.sh `user_said` finds in a prompt the user typed in this session's transcript (a
   # tool's result, a teammate's or another session's message, a hook's context and the orchestrator's
   # own text never count; rc 2, no transcript, refuses too; the words stand as WHOLE WORDS and are at
-  # least three of them unless they are a whole typed prompt, rc 3 refusing the short ones, T66). An S1, at the rating every read gives it
+  # least SAID_MIN_WORDS (three) of them unless they are a whole typed prompt, rc 3 refusing the short ones, T66). An S1, at the rating every read gives it
   # (lib/proof.sh `proof_finding_rating`), is never deferred. The move is written in place after the
   # finding's last line, through the plan transaction:
   #
   #   moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" why="<why>"
   #
   # the words folded to one line by lib/said.sh's own fold (`said_fold`, the rule the check is made
-  # through; the verb passes the raw words to `user_said`), the why by `deferral_fold`, both escaped as a
+  # through; the verb passes the raw words to `user_said`), the why by `deferral_fold` (the same fold), both escaped as a
   # deferral's sentence is (`deferral_escape`); a move to defer first writes the finding's `deferred:`
   # line when the plan holds none (placed by `proof_add_line`). Every read then takes the priority the last move gave it.
   # Main thread only, by the existing arm's list (lib/walls.sh `_wall_poker_contract_verb`).
@@ -7196,7 +7200,7 @@ FM_FINDING
       exit 1
     fi
     if [ "$FM_SAID" -eq 3 ]; then
-      die "REFUSED — the words \"$(clean "$FM_WORDS")\" are too short to be the user's decision; quote at least three of their words, or their whole prompt. The plan is unchanged."
+      die "REFUSED — the words \"$(clean "$FM_WORDS")\" are too short to be the user's decision; quote at least $SAID_MIN_WORDS of their words, or their whole prompt. The plan is unchanged."
       exit 1
     fi
     if [ "$FM_SAID" -ne 0 ]; then
@@ -7779,7 +7783,13 @@ RC_TAGS
     # THE FILL BAND'S OWN SENTENCE. The `poker: FILL <ids>` line the duty wall reads was printed
     # by the scheduler where it was decided; this says what the decision line then says, so the
     # two channels agree on one tick (D5).
-    tick_fill_sentence() { say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them."; }
+    #
+    # AND THE READY ROWS BEHIND THE GAP (wave-28 T74; A-orch-226). The rows the width parked (`WAIT <id> — ready; no
+    # writer slot free`) are named too, because declining every FILL row frees their slot and the stop wall then
+    # asks for them: one decline answers the set the wall counts. The `poker: FILL <ids>` line keeps its own ids.
+    tick_fill_sentence() {
+      say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them${SCHED_BEHIND:+ · behind the gap: ${SCHED_BEHIND} — a decline of a FILL row frees their slot; dispatch or decline them in the same turn}."
+    }
 
     # THE STOP ORDERS THIS TICK OWES, written once the decision is known (wave-24 T7; D1, D4). An
     # unchanged tick writes none: the stop wall reads its stand-down set off this tick's orders,
@@ -8611,6 +8621,7 @@ EOF
     # THE FILL THIS TICK ORDERED, empty until the scheduler names one — the FILL band's own
     # input to the ranked decision below (D5).
     SCHED_FILL=""
+    SCHED_BEHIND=""
 
     # The plan and its budget, read once. Both may be absent — a project with no plan, or a
     # plan written before Step 0 ever probed — and the tick then fills nothing and says why.
