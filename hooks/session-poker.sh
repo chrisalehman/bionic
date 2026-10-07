@@ -454,6 +454,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
+  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row"
   exit 2
 }
 
@@ -793,6 +794,19 @@ case "$VERB" in
   fill-report)
     [ $# -le 1 ] || usage "fill-report takes at most one argument: the plan whose fill ledger to read."
     FILL_REPORT_ARG="${1:-}"
+    ;;
+  # ONE OPTIONAL FLAG AND ONE OPTIONAL OPERAND, IN EITHER ORDER (wave-28 T14; D18; A-orch-145): `--rows`
+  # adds a line per landed row; `<plan>` names the run, as fill-report's does, for a caller with no
+  # binding left (close-out writes its continuation after its tmp is wiped).
+  landing-report)
+    LR_ROWS=no; LR_ARG=""
+    for _lr_a in "$@"; do
+      case "$_lr_a" in
+        --rows) [ "$LR_ROWS" = no ] || usage "landing-report takes --rows once."; LR_ROWS=yes ;;
+        -*) usage "landing-report takes one flag, --rows, and at most one plan." ;;
+        *) [ -z "$LR_ARG" ] || usage "landing-report takes one flag, --rows, and at most one plan."; LR_ARG="$_lr_a" ;;
+      esac
+    done
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -3804,6 +3818,132 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # confirms each with a plain `[ -e ]` — no second `rm`, no per-file function call. See the
 # verb's own comments for the full shape, including the per-session age gate that decides
 # which sessions reach the delete list at all.
+
+# ---------------------------------------------------------------- the run's numbers
+#
+# THE RUN'S NUMBERS ARE FOLDED FROM THE TWO RECORDS, AND ONLY PRINTED (wave-28 T14; D18, REQ-4).
+# `landing_report` reads the landing record's `line/v1` events and the gate's request files, and prints
+#
+#   landings: queue=<n> hand=<n> git=<n> · ready-to-landed median=<m>m p75=<m>m max=<m>m · runs: green=<n> red=<n> none=<n> discarded=<n> red-then-green=<n> · waited median=<s>s · killed=<n>
+#
+# and with rows, one line per landed row in the record's order:
+#
+#   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s
+#
+# NOTHING READS THESE NUMBERS TO DECIDE (D18). The tick prints the first line outside its digest, so a
+# landing moves no decision; no hook or wall library names the report (tests/docs-pins.test.sh §W28-46).
+#
+# THE DEFINITIONS (the plan's T14). Ready-to-landed is a queue landing's `published` time less its row's
+# FIRST `ready` since the row last landed; a hand or a git landing prints `-` and joins no figure. Median
+# and p75 are linear interpolation over the sorted minutes, wave-27's baseline rule: an even set's median
+# is the mean of its middle two, a set of one is that value; an empty set prints 0. Runs count `verdict`
+# events by result. Red-then-green is a red then a green for one row and suite with no `ready` for that
+# row between (an unchanged tree), counted once per such pair. Waited is a request's `admitted` less its
+# `asked`; killed is a request admitted whose holder is dead with no `ended` line, or that ended over 128.
+# A request counts when its `tree=` is the project or under it and it was asked at or after the record's
+# first `line/v1` event; a row's own wait is its requests by the roster name its `ready` carries, asked
+# from its first ready to its landing. Times are the events' own `at=`, never a message's.
+#
+# FAIL-SOFT. An absent or empty record is the line with zeros. A `line/v1` line this fold reads (`ready`,
+# `verdict`, `published`) that lacks a field it needs is skipped and counted, and the count is one line
+# on stderr; an event of another kind, and every line that is not `line/v1`, is not this fold's. A
+# request line the fold does not know (`peak=`, anything newer) is ignored. The gate's lock is not
+# taken: this is a read, and a request the gate is writing reads as it stands.
+landing_report() {  # <record> <project root> <rows yes|no> -> the line [and rows]; rc 0
+  local rec="$1" root="$2" rows="$3" gd f l asked adm ended rc who tree holder dead reqs="" out mal
+  gd="${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
+  for f in "$gd"/requests/*; do
+    case "${f##*/}" in ''|*[!0-9]*) continue ;; esac
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    asked='' adm='' ended='' rc='' who='' tree='' holder=''
+    while IFS= read -r l || [ -n "$l" ]; do
+      case "$l" in
+        asked=*) asked="${l#asked=}" ;;
+        admitted=*) adm="${l#admitted=}" ;;
+        ended=*) ended="${l#ended=}" ;;
+        rc=*) rc="${l#rc=}" ;;
+        who=*) who="${l#who=}" ;;
+        tree=*) tree="${l#tree=}" ;;
+        holder=*) holder="${l#holder=}" ;;
+      esac
+    done < "$f"
+    dead=0
+    if [ -n "$adm" ] && [ -z "$ended" ]; then
+      case "$holder" in
+        ''|-) dead=1 ;;
+        *) if declare -F _slots_live >/dev/null 2>&1; then _slots_live "${holder%%:*}" "${holder#*:}" || dead=1
+           else kill -0 "${holder%%:*}" 2>/dev/null || dead=1; fi ;;
+      esac
+    fi
+    reqs="${reqs}${asked}	${adm}	${ended}	${rc}	${who#*:}	${tree}	${dead}
+"
+  done
+  [ -f "$rec" ] && [ ! -L "$rec" ] || rec=/dev/null
+  out="$(printf '%s' "$reqs" | awk -v root="$root" -v rows="$rows" "$_PATROL_ISO_AWK"'
+    function num(s) { return s ~ /^[0-9]+$/ }
+    function sortn(a, n,   i, j, t) { for (i = 2; i <= n; i++) { t = a[i]; for (j = i - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t } }
+    function pct(a, n, p,   pos, lo, fr) {
+      if (n == 0) return 0
+      sortn(a, n); pos = p * (n - 1); lo = int(pos); fr = pos - lo
+      return (lo + 1 < n) ? a[lo + 1] + (a[lo + 2] - a[lo + 1]) * fr : a[lo + 1]
+    }
+    phase == 0 { split($0, q, "\t"); nq++
+      qa[nq] = q[1]; qd[nq] = q[2]; qe[nq] = q[3]; qr[nq] = q[4]; qw[nq] = q[5]; qt[nq] = q[6]; qx[nq] = q[7]; next }
+    index($0, "line/v1|") != 1 { next }
+    {
+      split("", kv); nf = split($0, p, "|")
+      for (i = 2; i <= nf; i++) { j = index(p[i], "="); if (j > 1) kv[substr(p[i], 1, j - 1)] = substr(p[i], j + 1) }
+      ev = kv["ev"]; rk = kv["row"]; e = iso2epoch(kv["at"])
+      if (ev != "ready" && ev != "verdict" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
+      if (rk == "" || e < 0) { mal++; next }
+      if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded)$/)) { mal++; next }
+      if (ev == "published" && kv["kind"] !~ /^(queue|hand|git)$/) { mal++; next }
+      if (t0 == "") t0 = e
+      iso[e] = kv["at"]
+    }
+    ev == "ready" {
+      if (!(rk in rdy)) rdy[rk] = e
+      span[rk]++; nm[rk] = (kv["name"] == "" ? "-" : kv["name"]); next
+    }
+    ev == "verdict" {
+      res = kv["result"]; cnt[res]++; nrun[rk]++
+      vk = rk SUBSEP span[rk] SUBSEP kv["suite"]
+      if (res == "red") red[vk] = 1
+      else if (res == "green" && (vk in red)) { rtg++; delete red[vk] }
+      next
+    }
+    ev == "published" {
+      k = kv["kind"]; kinds[k]++; n++
+      prow[n] = rk; pk[n] = k; pat[n] = kv["at"]; pe[n] = e; pruns[n] = nrun[rk] + 0
+      pfrom[n] = ((rk in rdy) ? rdy[rk] : ""); pname[n] = ((rk in nm) ? nm[rk] : "-")
+      if (k == "queue" && pfrom[n] != "") { pmin[n] = (e - pfrom[n]) / 60; mins[++nm2] = pmin[n] }
+      delete rdy[rk]; nrun[rk] = 0; delete nm[rk]
+    }
+    END {
+      for (i = 1; i <= nq; i++) {
+        inq[i] = (t0 != "" && num(qa[i]) && qa[i] >= t0 && (qt[i] == root || index(qt[i], root "/") == 1))
+        if (!inq[i]) continue
+        if (num(qd[i])) wts[++nw] = qd[i] - qa[i]
+        if (num(qd[i]) && ((qe[i] == "" && qx[i] == 1) || (qe[i] != "" && qr[i] + 0 > 128))) killed++
+      }
+      wm = pct(wts, nw, 0.5)
+      printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d · waited median=%ds · killed=%d\n",
+        kinds["queue"], kinds["hand"], kinds["git"], pct(mins, nm2, 0.5), pct(mins, nm2, 0.75), pct(mins, nm2, 1),
+        cnt["green"], cnt["red"], cnt["none"], cnt["discarded"], rtg, int(wm + 0.5), killed
+      if (rows == "yes") for (r = 1; r <= n; r++) {
+        w = 0
+        if (pname[r] != "-" && pfrom[r] != "") for (i = 1; i <= nq; i++)
+          if (inq[i] && num(qd[i]) && qw[i] == pname[r] && qa[i] >= pfrom[r] && qa[i] <= pe[r]) w += qd[i] - qa[i]
+        if (r in pmin) printf "%s %s ready=%s landed=%s minutes=%.1f runs=%d waited=%ds\n", prow[r], pk[r], iso[pfrom[r]], pat[r], pmin[r], pruns[r], w
+        else printf "%s %s ready=- landed=%s minutes=- runs=%d waited=%ds\n", prow[r], pk[r], pat[r], pruns[r], w
+      }
+      if (mal) printf "#malformed %d\n", mal
+    }' phase=0 - phase=1 "$rec")"
+  mal="$(printf '%s\n' "$out" | sed -n 's/^#malformed //p')"
+  printf '%s\n' "$out" | /usr/bin/grep -v '^#malformed '
+  [ -z "$mal" ] || die "landing-report — $mal malformed line/v1 line(s) skipped in $1"
+  return 0
+}
 
 
 # ---------------------------------------------------------------- verbs
@@ -7090,6 +7230,51 @@ RC_TAGS
     # THE DEFERRALS' OTHER DEBT (wave-28 T17; D21): each says whether its sentence is in the head's CHANGELOG.md.
     # It refuses nothing, and the exit below is the check's own.
     release_deferrals "$PV_PLAN" "$RC_CO/CHANGELOG.md"
+    # THE RUN'S NUMBERS (wave-28 T14; D18): the report's line and each landed row, read and printed only.
+    landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$(cd "$PV_REPO" 2>/dev/null && pwd -P)" yes \
+      | while IFS= read -r _rc_l; do say "release-check — $_rc_l"; done
+    exit 0
+    ;;
+
+  # THE RUN'S NUMBERS (wave-28 T14; D18, REQ-4). The fold and its definitions are `landing_report`'s,
+  # above the verbs. The plan is the one named, resolved as fill-report resolves its operand (a path
+  # from the project root, else from the docs root), or else this session's bound run; the record is
+  # that plan's landing record, under the plan's own project. It writes nothing and exits 0 whatever
+  # the record holds.
+  landing-report)
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    LR_PLAN=""
+    if [ -n "$LR_ARG" ]; then
+      case "$LR_ARG" in
+        /*) LR_PLAN="$LR_ARG" ;;
+        *)  LR_PLAN="$REPO_REAL/$LR_ARG"
+            [ -f "$LR_PLAN" ] || LR_PLAN="$(docs_root "$REPO_REAL")/$LR_ARG" ;;
+      esac
+      if [ ! -f "$LR_PLAN" ] || [ -L "$LR_PLAN" ]; then
+        die "REFUSED — no plan file at $LR_ARG; name the plan whose landings to report."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; a report without an operand is for THIS session's run."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      LR_PLAN="$POKER_RUN_PLAN"
+      if [ -z "$LR_PLAN" ] || [ ! -f "$LR_PLAN" ]; then
+        die "REFUSED — this session has no run to report on; bind its plan first."
+        exit 2
+      fi
+    fi
+    LR_ROOT="$(cd "$(project_root "${LR_PLAN%/*}")" 2>/dev/null && pwd -P)"
+    [ -n "$LR_ROOT" ] || LR_ROOT="$REPO_REAL"
+    landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS"
     exit 0
     ;;
 
@@ -7248,7 +7433,7 @@ RC_TAGS
     [ -z "$TICK_BUF" ] || _UNITS_MEMO_FLOOR="$TICK_BUF.floor"
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
     TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""
-    TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""
+    TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""; TICK_LANDINGS=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
     TICK_REARM=""
@@ -7270,6 +7455,9 @@ RC_TAGS
         # A START IS TOLD BY THE TICK THAT PRINTED ITS LINE (wave-27 T37; review pass 36 S1).
         [ -z "${US_TOLD_PENDING:-}" ] || printf '%s' "$US_TOLD_PENDING" >> "$ROSTER_FILE" 2>/dev/null
       fi
+      # THE RUN'S LANDING LINE PRINTS ON EITHER PATH, OUTSIDE THE DIGEST (wave-28 T14; D18): a landing
+      # moves no decision, so an unchanged tick still carries the line, with its new figures.
+      [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
         write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
@@ -7514,6 +7702,11 @@ RC_TAGS
       done <<EOF
 $(/usr/bin/grep -E '^line/v1\|ev=(standing|stalled)\|' "$LT_REC" 2>/dev/null)
 EOF
+    fi
+    # THE RUN'S LANDING LINE (wave-28 T14; D18): the report's first line, once the record holds a landing.
+    # It is printed by the exit trap after the decision and enters no hash.
+    if [ -n "$LT_REC" ] && /usr/bin/grep -q '^line/v1|ev=published|' "$LT_REC" 2>/dev/null; then
+      TICK_LANDINGS="$(landing_report "$LT_REC" "$REPO_REAL" no 2>/dev/null | head -1)"
     fi
 
     # ---------- THE GATE REQUESTS, READ ONCE (wave-25 T5, REQ-4 AC-4.3; D7) ----------
