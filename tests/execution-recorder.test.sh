@@ -1727,14 +1727,14 @@ expect_contains "12f engaged with no plan on disk: the row is still confirmed" \
   "status=confirmed" "$(cat "$E2_REPO/.bionic/tmp/roster-${SID_A}.state")"
 
 # ============================================================
-section "Section 13: THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15)"
+section "Section 13: NO PRESSURE SAMPLE (wave-28 T13, D14; was wave-roster-lifecycle S9, AC-15)"
 # ============================================================
 #
-# One `pressure_sample` call after the engagement check, on every engaged Bash
-# PostToolUse payload — not tied to whether that payload carries a stop-check
-# machine line, and not fired on the Agent or SubagentStart arms. Isolated with
-# its own ring (BIONIC_PRESSURE_RING) and clock (BIONIC_NOW_EPOCH) so this suite
-# never touches the real machine-scoped ring.
+# The recorder used to take one `pressure_sample` on every engaged Bash call, for the rung's
+# median. No width reads the ring any more (the gate reads the machine when it decides), so the
+# sampler went with the rung: an engaged Bash call writes nothing to the ring. Isolated with its
+# own ring (BIONIC_PRESSURE_RING) and clock (BIONIC_NOW_EPOCH) so this suite never touches the
+# real machine-scoped ring.
 
 P_RING="$SANDBOX/pressure/p13.ring"
 P_NOW=1700000000
@@ -1750,34 +1750,23 @@ run_rec_pressure() {  # <payload-json> — like run_rec, with the pressure fixtu
 
 IFS='|' read -r P_REPO P_TR P_SUB P_CFG <<< "$(make_world pressure yes)"
 
-# (a) an engaged Bash call carrying NO stop-check machine line still samples.
-# A plain, unremarkable command — the overwhelming majority of Bash calls in a
-# session — is exactly the case the old early exit on empty MLINES used to skip
-# before it ever reached the engagement check or this sample.
-rm -f "$P_RING"
-run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo hi" "hi")"
-expect_status "13a an ordinary Bash call still exits 0" "0" "$REC_ST"
-expect_file   "13a …and one ring line was appended" "$P_RING"
-expect_eq     "13a …exactly one" "1" "$(wc -l < "$P_RING" | tr -d ' ')"
-
-# (b) a second engaged Bash call samples again — the ring grows, it is not
-# replaced (pressure_sample's own append-then-prune, not this hook's business).
-run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo two" "two")"
-expect_eq "13b a second engaged call appends a second line" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
-
-# (c) UNENGAGED: the marker removed, the same shape of call samples nothing.
-rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo three" "three")"
-expect_status "13c unengaged: still exits 0" "0" "$REC_ST"
-expect_eq     "13c …and the ring is untouched" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
-: > "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-
-# (d) the Agent arm (a dispatch confirming) does not sample — only Bash does.
+# (a) an engaged Bash call writes nothing to the ring. The extractor (the ring's line count) is
+# proved first on a sample the library itself takes under the same pins.
 P_ROSTER="$P_REPO/.bionic/tmp/roster-${SID_A}.state"
-seed_roster "$P_REPO" "$SID_A" "w99-pressure" "toolu_01PRESSUREAGENT"
-run_rec_pressure "$(mk_agent_post "$SID_A" "$P_TR" "$P_REPO" "w99-pressure" "apressure-2222222222222222" "toolu_01PRESSUREAGENT")"
-expect_contains "13d the Agent call still confirms its roster row" "status=confirmed" "$(cat "$P_ROSTER")"
-expect_eq       "13d …but appends nothing to the ring" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
+P_LIB_RES="$(cd "$(dirname "$REC")/../payload/scripts/lib" 2>/dev/null && pwd -P)/resources.sh"
+[ -r "$P_LIB_RES" ] || P_LIB_RES="$(cd "$(dirname "$REC")/../scripts/lib" 2>/dev/null && pwd -P)/resources.sh"
+rm -f "$P_RING"
+( export BIONIC_PRESSURE_RING="$P_RING" BIONIC_NOW_EPOCH="$P_NOW" BIONIC_PROBE_FREE_PCT=44 \
+    BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6
+  . "$P_LIB_RES" >/dev/null 2>&1; pressure_sample 8 ) >/dev/null 2>&1
+expect_eq "13a0 the ring's line count reads a sample the library takes (the extractor reads)" "1" \
+  "$(wc -l < "$P_RING" 2>/dev/null | tr -d ' ')"
+run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo hi" "hi")"
+expect_status "13a an ordinary engaged Bash call exits 0" "0" "$REC_ST"
+expect_eq     "13a2 …and appends nothing to the ring: the sampler went with the rung" "1" \
+  "$(wc -l < "$P_RING" | tr -d ' ')"
+expect_eq     "13a3 the hook carries no pressure_sample call" "0" \
+  "$(/usr/bin/grep -c 'pressure_sample' "$REC" || true)"
 
 # (e) FAILURE-TOLERANT: an unwritable ring path does not crash the hook or block
 # the rest of its work — pressure_sample's own failure (return 2, a stderr line)
@@ -1835,7 +1824,7 @@ run_rec_counted() {  # <payload-json> — run_rec_pressure with a counting jq on
 : > "$P_JQC"
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo four" "four")"
 expect_status "13f an ordinary Bash call still exits 0" "0" "$REC_ST"
-expect_eq "13f …and the sample still landed on it" "3" "$(wc -l < "$P_RING" | tr -d ' ')"
+expect_eq "13f …and nothing landed on the ring" "1" "$(wc -l < "$P_RING" | tr -d ' ')"
 # THE CONSTANT HAS MOVED TWICE, and each move made the hot path cheaper rather than changing
 # what this row is for. 4 -> 3 at epic-23 wave-12-fixit-171 T11: `bionic_context` stopped
 # spending two `jq` processes on the payload and spends one on the whole field roster
@@ -2998,7 +2987,7 @@ expect_eq "SJ-a5 …and the launch's correlation key" "toolu_01SJA" "$(sj_field 
 sj_walls "$SJA_REPO" 'bash tests/run.sh' "$SJ_AID"
 expect_eq "SJ-a6 after the start, bash-walls admits the runner's full run" "0" "$SJ_ST"
 expect_regex "SJ-a7 …wrapped in the booking shim and stamped run.sh" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --max-wait [0-9]+)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)?( --max-wait [0-9]+)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
 
 # THE LAUNCH CALL'S RETURN STAYS THE SECOND WRITER OF THE SAME VALUE (the sync shape, capture D).
 run_rec "$(jq -n --arg s "$SID_A" --arg t "$SJA_TR" --arg c "$SJA_REPO" --arg a "$SJ_AID" \

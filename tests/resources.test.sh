@@ -1100,7 +1100,7 @@ section "M — _res_used_pct, _res_busy_cores, _res_cores, _res_total_mb, _res_n
 # fixture is a synthetic /proc in the kernel's own shapes (`MemTotal:  4000000 kB`,
 # `/proc/loadavg` `0.75 0.50 0.25 1/200 4242`), reached through BIONIC_PROBE_PROC, with `uname`
 # and `nproc` stubbed — it is declared synthetic: no Linux host was measured for it.
-M_UNPIN="BIONIC_PROBE_USED_PCT BIONIC_PROBE_BUSY_CORES BIONIC_PROBE_CORES BIONIC_PROBE_TOTAL_MB
+M_UNPIN="BIONIC_PROBE_USED_PCT BIONIC_PROBE_BUSY_CORES BIONIC_PROBE_BUSY_CORES_5M BIONIC_PROBE_CORES BIONIC_PROBE_TOTAL_MB
   BIONIC_PROBE_FREE_PCT BIONIC_PROBE_FREE_MB BIONIC_PROBE_LOAD_1M BIONIC_PROBE_SWAP_PCT
   BIONIC_PROBE_PROC BIONIC_NOW_EPOCH BIONIC_NOW_FILE BIONIC_LOAD_NOW_FILE"
 M_DAR="$TMPROOT/stub-m-darwin"; M_LIN="$TMPROOT/stub-m-linux"; M_PROC="$TMPROOT/proc-m"
@@ -1181,6 +1181,22 @@ expect_eq "M.24 a file that holds no epoch falls back to the pin" "1000" \
 expect_regex "M.25 …and with no pin, to the real clock" '^[0-9]{10,}$' \
   "$(m_read - _res_now BIONIC_NOW_FILE="$TMPROOT/no-such-clock")"
 
+# The five-minute reading (wave-28 T13; D14): `_res_busy_cores_5m`, read the way
+# `_res_busy_cores` is, from the load average's second figure. The stubs above carry it:
+# `{ 1.60 1.20 1.10 }` on Darwin, `0.75 0.50 0.25 …` in the synthetic /proc.
+expect_eq "M.26 BIONIC_PROBE_BUSY_CORES_5M pins _res_busy_cores_5m, a decimal" "3.5" \
+  "$(m_read - _res_busy_cores_5m BIONIC_PROBE_BUSY_CORES_5M=3.5)"
+expect_eq "M.27 the one-minute pin does not move the five-minute reading (Darwin stubs)" "1.20" \
+  "$(m_read "$M_DAR" _res_busy_cores_5m BIONIC_PROBE_BUSY_CORES=9 BIONIC_PROBE_LOAD_1M=9)"
+expect_eq "M.28 Darwin: the five-minute figure is vm.loadavg's second" "1.20" \
+  "$(m_read "$M_DAR" _res_busy_cores_5m)"
+expect_eq "M.29 …beside the one-minute figure the same call reads" "1.60 1.20" \
+  "$(m_read "$M_DAR" _res_busy_cores) $(m_read "$M_DAR" _res_busy_cores_5m)"
+expect_eq "M.30 Linux: the five-minute figure is /proc/loadavg's second field" "0.50" \
+  "$(m_read "$M_LIN" _res_busy_cores_5m BIONIC_PROBE_PROC="$M_PROC")"
+expect_regex "M.31 live: the five-minute figure is a decimal" '^[0-9]+(\.[0-9]+)?$' \
+  "$(m_read - _res_busy_cores_5m)"
+
 # ════════════════════════════════════════════════════ §N — tests/lib/world.sh (T1, D23)
 
 section "N — the model world: machine, clock, cost, repository, suites, verb log (wave-28 D23)"
@@ -1207,6 +1223,12 @@ N_M2="$( world_machine 32 65536 50 3 2>&1; printf '%s %s' "$(_res_cores)" "$(_re
 expect_eq "N.2 a second machine at the same used share plants its own size" "32 65536" "$N_M2"
 expect_eq "N.3 a used share over 100 is refused with rc 2" 2 \
   "$( world_machine 4 4096 101 1 >/dev/null 2>&1; printf '%s' "$?" )"
+N_M5="$( world_machine 4 4096 50 1.5 2>&1; printf '%s %s' "$(_res_busy_cores)" "$(_res_busy_cores_5m)" )"
+expect_eq "N.3a with no fifth figure the five-minute load is the one-minute one" "1.5 1.5" "$N_M5"
+N_M5B="$( world_machine 4 4096 50 1.5 3.25 2>&1; printf '%s %s' "$(_res_busy_cores)" "$(_res_busy_cores_5m)" )"
+expect_eq "N.3b world_machine's fifth figure plants the five-minute load alone" "1.5 3.25" "$N_M5B"
+expect_eq "N.3c a five-minute figure that is not a decimal is refused with rc 2" 2 \
+  "$( world_machine 4 4096 50 1 x >/dev/null 2>&1; printf '%s' "$?" )"
 
 # world_clock and world_tick move _res_now, for this shell and for a child it starts.
 N_C="$( world_clock 1000 2>&1; a="$(_res_now)"; world_tick 30 2>&1; b="$(_res_now)"
