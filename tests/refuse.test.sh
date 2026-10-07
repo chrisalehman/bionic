@@ -1207,16 +1207,39 @@ INV_W28_T55_MAX=1
 # when the brief has no Row: to say which. A brief-check refusal beside T55's, one per inventory bullet
 # tagged `(wave-28 T58`, at most one.
 INV_W28_T58_MAX=1
+# AND T70's SIX (wave-28 T70; REQ-5, REQ-6, D8; A-orch-231): the dispatch wall and the stop guard stop
+# admitting what they could not record or judge. The dispatch wall refuses a launch whose roster path is a
+# link, whose row did not build, or whose roster cannot be written, and refuses first when its own
+# deadline passes (four sites); the stop guard refuses first when its own deadline passes and refuses a
+# recorded unrostered stop it cannot write onto the roster (two). Each is a refusal beside T58's, one per
+# inventory bullet tagged `(wave-28 T70`, at most six.
+INV_W28_T70_MAX=6
 # THE ALLOWANCE IS ONE TABLE (wave-28 T58, read-structure-p31 #4): `<inventory tag>|<most bullets that
 # many sites may carry>`, read by `inv_w28_ceiling`. A new row adds its constant and one line here.
 INV_W28_TAGGED="REQ-10's door|1
 (wave-28 T7|$INV_W28_T7_MAX
 (wave-28 T55|$INV_W28_T55_MAX
-(wave-28 T58|$INV_W28_T58_MAX"
+(wave-28 T58|$INV_W28_T58_MAX
+(wave-28 T70|$INV_W28_T70_MAX"
+# A TAG ENDING IN A DIGIT IS NOT THE PREFIX OF A LONGER NUMBER (wave-28 T70; A-orch-230 b): `(wave-28 T7`
+# is counted in a bullet tagged `(wave-28 T7)` or `(wave-28 T7;`, never in one tagged `(wave-28 T70)`, which
+# a plain substring match counted under T7 and turned this pin red the day a row with a longer id landed.
+# A bullet is counted once, however many times it carries the tag.
+inv_tag_count() {  # <tag> <inventory> -> the bullets carrying the tag
+  awk -v tag="$1" '
+    { line = $0; ld = (substr(tag, length(tag)) ~ /[0-9]/)
+      while ((i = index(line, tag)) > 0) {
+        nx = substr(line, i + length(tag), 1)
+        if (!(ld && nx ~ /[0-9]/)) { c++; break }
+        line = substr(line, i + length(tag))
+      }
+    }
+    END { print c + 0 }' "$2" 2>/dev/null
+}
 inv_w28_ceiling() {  # <inventory> -> 1.12.0's sites, plus each tagged row's, as the inventory tags them
   local n=0 tag max c
   while IFS='|' read -r tag max; do
-    c="$(grep -cF "$tag" "$1" 2>/dev/null)"; [ "${c:-0}" -le "$max" ] || c="$max"
+    c="$(inv_tag_count "$tag" "$1")"; [ "${c:-0}" -le "$max" ] || c="$max"
     n=$((n + ${c:-0}))
   done <<EOF
 $INV_W28_TAGGED
@@ -1226,17 +1249,21 @@ EOF
 inv_w28_excess() {  # <root> <inventory> -> a line when the sites pass 1.12.0's but for the door's one and T7's
   local n c
   n="$(inv_w28_sites "$1")"; c="$(inv_w28_ceiling "$2")"
-  [ "$n" -le "$c" ] || printf 'sites=%s over %s: 1.12.0 %s plus the door, T7, T55 and T58, as tagged\n' "$n" "$c" "$INV_W28_BASE"
+  [ "$n" -le "$c" ] || printf 'sites=%s over %s: 1.12.0 %s plus the door, T7, T55, T58 and T70, as tagged\n' "$n" "$c" "$INV_W28_BASE"
 }
 INV_W28_N="$(inv_w28_sites "$REPO_ROOT")"
 expect_true "INV-W28a precondition: the four wall files' sites are read (${INV_W28_N})" test "$INV_W28_N" -gt 0
 expect_eq "INV-W28t7 precondition: the inventory carries T7's four tagged bullets" "4" \
-  "$(grep -c '(wave-28 T7' "$INV_FILE" 2>/dev/null)"
+  "$(inv_tag_count '(wave-28 T7' "$INV_FILE")"
 expect_eq "INV-W28t55 precondition: the inventory carries T55's one tagged bullet" "1" \
-  "$(grep -c '(wave-28 T55' "$INV_FILE" 2>/dev/null)"
+  "$(inv_tag_count '(wave-28 T55' "$INV_FILE")"
 expect_eq "INV-W28t58 precondition: the inventory carries T58's one tagged bullet" "1" \
-  "$(grep -c '(wave-28 T58' "$INV_FILE" 2>/dev/null)"
-expect_eq "INV-W28a no wall file gains a refusal site beyond 1.12.0's, but REQ-10's door, T7's four, T55's one and T58's one" "" \
+  "$(inv_tag_count '(wave-28 T58' "$INV_FILE")"
+expect_eq "INV-W28t70 precondition: the inventory carries T70's six tagged bullets" "6" \
+  "$(inv_tag_count '(wave-28 T70' "$INV_FILE")"
+expect_eq "INV-W28t7b the tag count reads a tag as a whole number: T7's four bullets, not T70's beside them" "4" \
+  "$(inv_tag_count '(wave-28 T7' "$INV_FILE")"
+expect_eq "INV-W28a no wall file gains a refusal site beyond 1.12.0's, but REQ-10's door, T7's four, T55's one, T58's one and T70's six" "" \
   "$(inv_w28_excess "$REPO_ROOT" "$INV_FILE")"
 INV_W28_SYN="$(mktemp -d)"
 for _f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do

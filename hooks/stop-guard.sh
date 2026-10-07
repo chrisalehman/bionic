@@ -311,6 +311,55 @@ bionic_context 2>/dev/null || exit 0
 bionic_context 2>/dev/null || exit 0
 [ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
+# ---------- THE GUARD'S OWN DEADLINE (wave-28 T70; A-orch-231 3) ----------
+#
+# THE HARNESS CANCELS A HOOK AT ITS REGISTRATION'S TIMEOUT (hooks.json: 10 s) AND ADMITS THE CALL.
+# One session's transcript shows about thirty `hook_cancelled` at 10 s on `PreToolUse:TaskStop`: thirty
+# stops this guard never judged, and a live writer with an unmet contract can be killed by a slow
+# guard, which is the harm the guard exists to refuse. So the guard refuses first: a timer signals
+# this shell at SG_DEADLINE_S, 3 s under the registration (bounds.sh's rule for every inner bound),
+# and the handler DENIES the stop — a stop the guard cannot judge is refused, never admitted.
+#
+# A RECORDED HUMAN ORDER IS READ FIRST and is never refused by the deadline: `SG_ORDER_HONOURED` is
+# set the moment `order_current` answers, before the verdict read that follows it (the slow step of
+# that branch), and the handler then lets the stop through with the order's own sentence. The limit
+# is bash's: a trap runs between commands, so one foreground command that itself outlasts the
+# registration is not interrupted. The slow step, if one stands out, is T32's to find (the verdict
+# read and the observation are the two this guard spends time in).
+SG_DEADLINE_S=7
+SG_DEADLINE_LIVE=0
+SG_DEADLINE_PID=""
+SG_ORDER_HONOURED=""
+sg_deadline_hit() {
+  [ "$SG_DEADLINE_LIVE" = 1 ] || return 0
+  SG_DEADLINE_LIVE=0
+  if [ -n "$SG_ORDER_HONOURED" ]; then
+    echo "STOP ORDERED (by ${ORDER_BY:-human}) — executing. The contract verdict was not read in time." >&2
+    exit 0
+  fi
+  refuse exit2 stop "the stop guard did not finish in ${SG_DEADLINE_S} s" "stop again" \
+"The stop guard had not judged this stop ${SG_DEADLINE_S} s after it began. The harness cancels a hook at its
+registration's timeout and admits the call, so the guard refuses first: a stop it cannot judge is not made.
+
+Nothing was stopped.
+
+Fix: stop again. If a human ordered this stop, record the order and it executes without the look:
+     ${ORDER_CMD} <the agent>"
+}
+sg_deadline_stop() {
+  [ -z "$SG_DEADLINE_PID" ] || kill "$SG_DEADLINE_PID" 2>/dev/null
+  return 0
+}
+trap sg_deadline_hit ALRM
+trap sg_deadline_stop EXIT
+SG_DEADLINE_LIVE=1
+( trap 'kill "$_sg_sp" 2>/dev/null; exit 0' TERM
+  sleep "$SG_DEADLINE_S" & _sg_sp=$!
+  wait "$_sg_sp" && kill -ALRM $$ 2>/dev/null
+) >/dev/null 2>&1 </dev/null &
+SG_DEADLINE_PID=$!
+disown "$SG_DEADLINE_PID" 2>/dev/null || :
+
 # ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
 #
 # It used to take the run predicate here — `PLAN=$(active_run <repo>)`, exit 0 on false —
@@ -610,6 +659,7 @@ order_current() {
 }
 
 if order_current; then
+  SG_ORDER_HONOURED=1
   take_verdict
   # ONE LINE, and it is information rather than a verdict on the operator. R3: a
   # user-ordered stop executes at once; what an unmet contract earns is a sentence naming
@@ -621,6 +671,61 @@ if order_current; then
   else
     echo "STOP ORDERED (by ${ORDER_BY}) — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
   fi
+  exit 0
+fi
+
+# THE ORCHESTRATOR'S RECORDED STOP OF AN AGENT THE ROSTER NEVER SAW (wave-28 T70; A-orch-205 to 208).
+# `stop-orders.sh unrostered <name> '<why>'` checked, when it recorded, that this session's roster
+# carried no row of the name and that a fresh panel listed it. This gate honours that line ONCE:
+# only for a name this roster STILL has no row of (so a name the roster has seen — alive, with an
+# unmet contract — is never laundered through it: the look decides, as ever), only within the
+# order TTL, and only over a roster it can read and write. It is spent by its own act: the stop is
+# written onto the roster as a CLOSED row (`source=unrostered-stop: <why>`; NOT `waiver=`, which the sweeper reads as a
+# waived contract and would discharge the name's next stop), the
+# name then has a row, and a second stop of it meets the ordinary refusal. It is the orchestrator's
+# word, `by=orchestrator`, and is not an `order`: the human's reader above never sees it.
+UNROSTERED_WHY=""
+unrostered_current() {
+  local f="$ORDERS_FILE" line t e now delta
+  [ -L "$f" ] && return 1
+  [ -f "$f" ] || return 1
+  now=$(date -u +%s)
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "stop-unrostered/v1|"*) : ;; *) continue ;; esac
+    t=$(line_field "$line" target)
+    [ -n "$t" ] || continue
+    [ "$t" = "$RAW" ] || [ "$t" = "$BASE" ] || continue
+    e=$(line_field "$line" epoch)
+    case "$e" in ''|*[!0-9]*) continue ;; esac
+    delta=$((now - e))
+    if [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ]; then
+      UNROSTERED_WHY=$(line_field "$line" why)
+      return 0
+    fi
+  done < "$f"
+  return 1
+}
+if [ -z "$ROW_BY_NAME" ] && [ -z "$ROSTER_UNREADABLE" ] && [ -z "$TYPED_AS_ID" ] && unrostered_current; then
+  SG_DEADLINE_LIVE=0
+  UR_ROW=$(roster_row status=closed "session=${BIONIC_SID}" "name=${BASE}" agent_id= \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "source=unrostered-stop: ${UNROSTERED_WHY}" plan=none) || UR_ROW=""
+  UR_WROTE=0
+  if [ -n "$UR_ROW" ]; then
+    if [ ! -e "$ROSTER_FILE" ]; then
+      { roster_header >> "$ROSTER_FILE"; } 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
+    fi
+    { printf '%s\n' "$UR_ROW" >> "$ROSTER_FILE"; } 2>/dev/null && UR_WROTE=1
+  fi
+  if [ "$UR_WROTE" -ne 1 ]; then
+    refuse exit2 stop "the stop could not be recorded" "make the roster writable" \
+"Target '${RAW}' is recorded as an unrostered stop, but the roster could not take the row for it:
+    ${ROSTER_FILE}
+The stop is the roster's to carry (the sweeper and the Patrol read the row), so it is not made while
+the row cannot be written. Nothing was stopped.
+
+Fix: make ${STATE_DIR} and the roster writable by this user, then stop again."
+  fi
+  echo "STOP RECORDED (unrostered, by the orchestrator) — executing. Reason: ${UNROSTERED_WHY}" >&2
   exit 0
 fi
 
