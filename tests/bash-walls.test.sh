@@ -2861,4 +2861,28 @@ run_hook "$(mk_payload "$RU" 'git commit -m "x"' "$ACTOR" omit Bash bionic:test-
 expect_contains "UP10 the unplaced test-runner's commit is refused by its own type" \
   "bionic:test-runner: a read-only role never commits" "$ERR"
 
+section "§LOOPVAR — a suite run through a glob loop or a bare variable is refused from a subagent (wave-28 T11, D13)"
+# ============================================================
+#
+# Wave-27 review pass 8 F5: the walk's hand-copied loop `{ for s in tests/*.test.sh; do if bash
+# "$s"; … } | tee` read class none, so a budgeted agent ran every suite in the tree unrefused. The
+# classifier now claims the variable (tests/cmd-class.test.sh §LOOP T11), and the budget's
+# unexpanded-name arm refuses it in one line inside 100 columns (the suites run with
+# BIONIC_REFUSE_STRICT=1, so a longer first line refuses its own call). Beside it, a loop over
+# files that are plainly no suite passes, on the same agent and row.
+#
+# fails-when: the glob loop or the bare variable passes; the refusal is not the unexpanded arm.
+R_LV="$(mk_repo loopvar)"
+bw_dispatched "$R_LV" t11writer "suites_allowed=archive.test.sh" suites_source=declared files=
+for _lv in '{ for s in tests/*.test.sh; do if bash "$s"; then :; fi; done; } | tee log' 'bash "$SUITE"'; do
+  run_hook "$(mk_payload "$R_LV" "$_lv" "$ACTOR" omit Bash test-runner)"
+  expect_status "LV1 [$_lv] is refused" 2 "$ST"
+  LV_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+  expect_contains "LV2 …by the unexpanded-name arm, naming the budget" "unexpanded name; allowed: archive.test.sh" "$LV_LINE"
+  expect_eq "LV3 …in one line of at most 100 columns" "yes" "$([ -n "$LV_LINE" ] && [ "${#LV_LINE}" -le 100 ] && echo yes || echo no)"
+done
+run_hook "$(mk_payload "$R_LV" 'for f in docs/*.md; do bash "$f"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "LV4 a loop over files that are plainly no suite passes" 0 "$ST"
+expect_absent "LV4 …with no suite refusal" "unexpanded name" "$ERR"
+
 finish
