@@ -1177,16 +1177,12 @@ expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # out and asserted, so the remainder is held to the emptiness this section has always
 # claimed.
 DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c 'run resolved by newest-plan fallback (session unbound) — /')
-# …AND THE BUDGET BACKSTOP, lifted the same way and for the same reason (epic-23 wave-20 T2,
-# REQ-10 AC-10.2): this fixture's plan is live and carries no `parallel-budget:` line, so the
-# gate names the missing key (ADR-035). A line about the budget, not the attestation —
-# asserted positively, then held out of the remainder.
-DP_BACKSTOP=$(printf '%s\n' "$OUT" | grep -c '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
-DP_REST=$(printf '%s\n' "$OUT" | grep -v '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
+# THE BUDGET BACKSTOP IS GONE (wave-28 T9; D15): this fixture's plan is live and carries no
+# `parallel-budget:` line, and no plan owes one, so the gate's whole output is held to the
+# emptiness this section has always claimed. Until wave-28 a WARN naming the key was lifted out.
 expect_eq "start gate: a bound session hears no fallback announcement (the fixture is bound)" \
   "0" "$DP_RESOLUTION"
-expect_eq "start gate: …and names the keyless live plan's missing budget key, once" "1" "$DP_BACKSTOP"
-expect_eq "start gate: and passes in silence about the attestation" "" "$DP_REST"
+expect_eq "start gate: and passes in silence about the attestation (and the keyless plan)" "" "$OUT"
 # THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
 # `engaged_session` before anything else, keyed to the session in hand — so without a
 # marker for THIS spelling the gate would exit at the switch and the exact-compare claim
@@ -6028,7 +6024,7 @@ s4_plan() {  # <path> <current> [writers]
     # looks for it. A `parallel-budget:` appended after the body parses as prose and the
     # ceiling reads as absent, which makes the budget wall inert — and an inert wall is not
     # an observation.
-    [ -n "${3:-}" ] && printf 'parallel-budget: writers=%s test_jobs=2 model=opus\n' "$3"
+    [ -n "${3:-}" ] && printf 'parallel-budget: writers=%s test_jobs=2 model=opus source=user\n' "$3"
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf 'current: %s\n' "$2"
     # APPROVED, as write_plan's fixtures are and for its reason (wave-20 T7, AC-9.1).
@@ -7880,7 +7876,7 @@ mkdir -p "$(dirname "$RG_PLAN")"
   printf -- '---\n'
   printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
   printf 'intent: build\nrigor: audited\nscale: wave\n'
-  printf 'parallel-budget: writers=%s test_jobs=%s model=opus\n' "$RG_CEIL" "$RG_CEIL"
+  printf 'parallel-budget: writers=%s test_jobs=%s model=opus source=user\n' "$RG_CEIL" "$RG_CEIL"
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
   printf 'current: 4\n\n- Step 3: prior evidence\n'
 } > "$RG_PLAN"
@@ -7990,8 +7986,12 @@ printf '#!/bin/bash\nexit 0\n' > "$RG_NOSAMP/tests/stub.test.sh"
 # lesson the poker's own anchor just below already carries). S25 moved this call inside an
 # `if [ "$DRY_RUN" -eq 0 ]` guard, re-indenting it two spaces; `[[:space:]]*` absorbs that
 # reindent and any future one.
+#
+# REPLACED BY `:`, NOT DELETED (wave-28 T53). The call is the only command in its `if …; then`,
+# and a deleted line left `then fi`, which bash refuses to parse: the mutant died before its
+# first suite, so its untouched ring proved a dead runner, not a runner that stopped sampling.
 anchor -E "$REPO_ROOT/tests/run.sh" '^[[:space:]]*pressure_sample >/dev/null 2>&1 \|\| :$' 1
-grep -vE '^[[:space:]]*pressure_sample >/dev/null 2>&1 \|\| :$' "$REPO_ROOT/tests/run.sh" \
+sed -E 's/^([[:space:]]*)pressure_sample >\/dev\/null 2>&1 \|\| :$/\1:/' "$REPO_ROOT/tests/run.sh" \
   > "$RG_NOSAMP/tests/run.sh"
 # THE SHIPPED CONTROL TREE for the runner half: the real tests/run.sh, byte for byte, in a
 # scratch tree with no real suite files — so "shipped" and "no-sample" differ ONLY in the
@@ -8005,27 +8005,75 @@ printf '#!/bin/bash\nexit 0\n' > "$RG_SHIPPED/tests/stub.test.sh"
 expect_eq "the shipped control tree carries the runner byte for byte (not vacuous)" "yes" \
   "$(cmp -s "$REPO_ROOT/tests/run.sh" "$RG_SHIPPED/tests/run.sh" && echo yes || echo no)"
 
+# THE DRIVES HOLD AN ADMISSION, AND EACH IS BOUNDED (wave-28 T53; AC-2.6, AC-2.12). Since T12
+# every `--one` worker asks the gate for its suite with no ceiling (a wait at the gate never
+# ends a run, AC-2.6), and the gate reads the machine through the same pins this section
+# plants critical: with its memory reader unpinned it read 92 % used, admitted nothing, and the
+# worker polled for ever (T44's third merge; T9's RED). So the fixture asks ONCE, under the
+# clear reading, in a store of this section's own, and hands both drives that admission in
+# BIONIC_GATE_ADMIT. Its holder is this suite's shell (the `$$` of a `$( )`), the gate believes
+# it for any descendant, so the workers run as a nested run's do (tests/run.sh NESTING) and ask
+# nothing of their own — while the ring's sensors stay critical for the sample under test.
+# The ask itself is bounded (`--within`, on the real clock: `_res_now` under a pinned epoch
+# never moves), and each drive runs under lib/detect.sh's `detect_bounded`, so a drive the
+# gate still holds ends "hung" — red on both rows below — inside RG_DRIVE_BOUND seconds
+# instead of hanging the suite. The bound is the rows' guard; the admission is the fix.
+RG_GATE="$SANDBOX/rg/gate"
+RG_DRIVE_BOUND=120
+RG_ADMIT="$( unset BIONIC_GATE_ADMIT BIONIC_NOW_EPOCH BIONIC_LOAD_NOW_FILE BIONIC_PROBE_USED_PCT
+  eval "export $RG_CLEAR_ENV"; export BIONIC_GATE_DIR="$RG_GATE"
+  . "$LIB_DIR_SRC/gate.sh" >/dev/null 2>&1 && gate_ask work rg-runner-drive --within 30 2>/dev/null )" \
+  || RG_ADMIT=""
+expect_eq "§RG the bound the drives run under is loaded (not vacuous)" "yes" \
+  "$( . "$LIB_DIR_SRC/detect.sh" >/dev/null 2>&1; declare -F detect_bounded >/dev/null && echo yes || echo no)"
+
 # rg_runner_samples <tree> -> "yes" if <tree>/tests/run.sh's ORDINARY (non-dry) path
-# appends exactly one line to a ring seeded with one clear sample; "no" otherwise.
+# appends exactly one line to a ring seeded with one clear sample; "no" otherwise; "hung"
+# when the drive did not end inside RG_DRIVE_BOUND.
 rg_runner_samples() {
-  local tree="$1" before after
+  local tree="$1" before after rc
   rg_seed_clear
   before="$(wc -l < "$RG_RING" | tr -d ' ')"
   ( eval "export $RG_CRIT_ENV"
     cd "$tree" &&
     export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
-           BIONIC_TEST_JOBS_CEILING="$RG_CEIL"
-    bash tests/run.sh >/dev/null 2>&1 )
+           BIONIC_TEST_JOBS_CEILING="$RG_CEIL" \
+           BIONIC_GATE_DIR="$RG_GATE" BIONIC_GATE_ADMIT="$RG_ADMIT" &&
+    . "$LIB_DIR_SRC/detect.sh" >/dev/null 2>&1 &&
+    detect_bounded "$RG_DRIVE_BOUND" bash tests/run.sh >"$SANDBOX/rg/drive-${tree##*/}.out" 2>&1 )
+  rc=$?
   after="$(wc -l < "$RG_RING" | tr -d ' ')"
+  [ "$rc" -ne 124 ] || { echo hung; return 0; }
   [ "$after" -eq "$((before + 1))" ] && echo yes || echo no
 }
 
 RG_RUN_SHIPPED_SAMPLES=$(rg_runner_samples "$RG_SHIPPED")
 RG_RUN_NOSAMP_SAMPLES=$(rg_runner_samples "$RG_NOSAMP")
+[ -z "$RG_ADMIT" ] || ( unset BIONIC_NOW_EPOCH BIONIC_LOAD_NOW_FILE; export BIONIC_GATE_DIR="$RG_GATE"
+  . "$LIB_DIR_SRC/gate.sh" >/dev/null 2>&1 && gate_end "$RG_ADMIT" 0 >/dev/null 2>&1 )
 expect_eq "the shipped runner's ordinary path samples once (AC-15)" "yes" \
   "$RG_RUN_SHIPPED_SAMPLES"
 expect_eq "a runner that stopped sampling leaves the ring untouched: the removal is CAUGHT" \
   "no" "$RG_RUN_NOSAMP_SAMPLES"
+# T53 ROWS. "no" above means the mutant RAN and did not sample — never that it died before its
+# first suite, which a deleted line inside `if …; then` once made it do — so each drive shows
+# its stub ran; and the admission is shown held: the fixture's one request is in the store and
+# no worker of either drive took one of its own.
+expect_eq "§RG the no-sample mutant is a script bash can read (not vacuous)" "0" \
+  "$(bash -n "$RG_NOSAMP/tests/run.sh" >/dev/null 2>&1; echo $?)"
+expect_contains "§RG the shipped drive ran its stub suite to the end" "Gating: 1 passed" \
+  "$(cat "$SANDBOX/rg/drive-rg-shipped.out" 2>/dev/null)"
+expect_contains "§RG …and so did the no-sample drive: its 'no' is a runner that ran" "Gating: 1 passed" \
+  "$(cat "$SANDBOX/rg/drive-rg-nosample.out" 2>/dev/null)"
+rg_store_keys() {  # <key> -> how many requests in the section's own gate store carry it
+  cat "$RG_GATE"/requests/* 2>/dev/null | LC_ALL=C awk -v k="key=$1" '$0 == k { c++ } END { print c + 0 }'
+}
+expect_eq "§RG the fixture holds one admission for its drives, in the section's own store" "1" \
+  "$(rg_store_keys rg-runner-drive)"
+expect_eq "§RG …and the drives' workers ran under it: they asked the gate nothing of their own" "0" \
+  "$(rg_store_keys stub.test.sh)"
+expect_eq "§RG …and the fixture ends what it took: its admission is closed, rc 0" "0" \
+  "$(sed -n 's/^rc=//p' "$RG_GATE/requests/${RG_ADMIT:-none}" 2>/dev/null)"
 
 # --- RG.5 the pin is honoured: this section's readings are on this section's ring ---
 #
@@ -11650,7 +11698,7 @@ cgc_world() {  # <case: again|met|done> -> repo path
       ;;
   esac
   cgc_plan "$r/.bionic/docs/plans/epic-99/cgc.plan.md" \
-    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/cgc.plan.md"
   s4_attest "$r" "$SID_A"
   jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
@@ -11927,7 +11975,7 @@ cgt_world() {  # <case: met|done> -> repo path
   swept_marker_write "$ro" 2026-09-01T01:00:00Z "$SID_A" "$nm" "acgt$1-5f0e3c2a9b7d4e61" MET
   [ "$1" != done ] || cgc_ack "$le" 2026-09-01T01:00:00Z "$nm"
   cgc_plan "$r/.bionic/docs/plans/epic-99/cgt.plan.md" \
-    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/cgt.plan.md"
   s4_attest "$r" "$SID_A"
   jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
@@ -12147,7 +12195,14 @@ section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave
 # and `budget_line_of` (strict `^parallel-budget:`) and `budget_field` (a whole field, a
 # decimal integer) in payload/scripts/lib/run.sh, called by all four.
 #
-# THE ANSWER EACH READER GIVES is its writer count, `-` for none:
+# A PERSON'S CAP, OR NONE (wave-28 T9; D15, REQ-2 AC-2.9/AC-2.10). The three width readers now
+# read `budget_cap` (lib/run.sh): `writers=` only from a line whose `source=` is `user` or
+# `override`. A probe's line and a line with no `source=` answer `-` in all three, and the
+# governing-skill hook reads no line at all: no plan owes it, so every Write is admitted.
+#
+# THE ANSWER EACH READER GIVES is its writer count, `-` for none. With no cap the tick and the stop
+# wall size the fill by the gate alone, which has room for all ten ready rows, so their answer for
+# a `-` case is 10; preflight has no ceiling and answers `-`.
 #   tick         how many of the ten ready rows its FILL names: the gate has room for all
 #                ten, so the cap is the width (wave-28 T13: the rung line it used to read is gone)
 #   preflight    the budget refusal's `writers: budget=<n>` (ten open rows, so any n refuses)
@@ -12180,9 +12235,6 @@ cgb_tick() {  # <repo> -> writers
   cgc_ring
   out=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
            "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) )
-  case "$out" in
-    *"carries no parallel-budget: writers="*) printf -- '-'; return 0 ;;
-  esac
   out=$(printf '%s\n' "$out" | sed -n 's/^poker: FILL //p' | head -1)
   [ -n "$out" ] || { printf '?'; return 0; }
   printf '%s' "$(printf '%s\n' $out | grep -c '^R[0-9]')"
@@ -12203,7 +12255,7 @@ cgb_stopwall() {  # <repo> -> writers
   out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
   case "$out" in
-    *"Fill budget unreadable"*) printf -- '-'; return 0 ;;
+    '') printf -- '-'; return 0 ;;
   esac
   ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
   if [ -z "$ids" ]; then printf '?'; return 0; fi
@@ -12240,19 +12292,22 @@ A fixture plan for the budget reader.
       '{session_id:$s, tool_name:"Write", tool_input:{file_path:$p, content:$c}}' \
     | env HOME="$r" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SG_W" 2>&1)
   case "$CGB_GS_OUT" in
-    *"carries no parallel-budget: writers="*) printf 'absent' ;;
-    *) printf 'present' ;;
+    *"parallel-budget"*) printf 'refused' ;;
+    *) printf 'admitted' ;;
   esac
 }
 
 # <label>|<budget line, verbatim>|<the one answer>
-CGB_CASES='max-writers|parallel-budget: max_writers=9 writers=3 suites=2|3
-plain|parallel-budget: writers=3 suites=2|3
-leading-space|  parallel-budget: writers=3 suites=2|-
-space-before-colon|parallel-budget : writers=3 suites=2|-
-leading-zero|parallel-budget: writers=08 suites=2|8
-empty-field|parallel-budget: writers= suites=2|-
-no-writers|parallel-budget: suites=2|-'
+CGB_CASES='max-writers|parallel-budget: max_writers=9 writers=3 suites=2 source=user|3
+plain|parallel-budget: writers=3 suites=2 source=user|3
+override|parallel-budget: writers=3 suites=2 source=override|3
+probe|parallel-budget: writers=3 suites=2 source=probe|-
+no-source|parallel-budget: writers=3 suites=2|-
+leading-space|  parallel-budget: writers=3 suites=2 source=user|-
+space-before-colon|parallel-budget : writers=3 suites=2 source=user|-
+leading-zero|parallel-budget: writers=08 suites=2 source=user|8
+empty-field|parallel-budget: writers= suites=2 source=user|-
+no-writers|parallel-budget: suites=2 source=user|-'
 
 while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   [ -n "$_cgb_label" ] || continue
@@ -12266,18 +12321,17 @@ while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   cgb_open_rows "$_cgb_r"
   cgb_preflight "$_cgb_r"; _cgb_pf="$CGB_PF"
   _cgb_gs=$(cgb_govskill "$_cgb_line")
-  expect_eq "CG-budget ${_cgb_label}: the tick reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_tk"
+  _cgb_w="$_cgb_want"; [ "$_cgb_want" = "-" ] && _cgb_w=10
+  expect_eq "CG-budget ${_cgb_label}: the tick fills ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_tk"
   expect_eq "CG-budget ${_cgb_label}: dispatch preflight reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_pf"
-  expect_eq "CG-budget ${_cgb_label}: the stop wall reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_st"
-  expect_eq "CG-budget ${_cgb_label}: the governing-skill hook agrees on presence" \
-    "$([ "$_cgb_want" = "-" ] && echo absent || echo present)" "$_cgb_gs"
+  expect_eq "CG-budget ${_cgb_label}: the stop wall names ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_st"
+  expect_eq "CG-budget ${_cgb_label}: the governing-skill hook admits the Write (no plan owes the line)" \
+    "admitted" "$_cgb_gs"
   if [ "$_cgb_want" = "-" ]; then
-    # AC-10.2's second half: a live plan without a readable key is NAMED at dispatch, never
-    # passed in silence (ADR-035's backstop, on preflight's own wire).
-    expect_contains "CG-budget ${_cgb_label}: …and preflight names the missing key" \
-      "no parallel-budget: line with a writers= field" "$CGB_PF_OUT"
-    expect_contains "CG-budget ${_cgb_label}: …citing the decision that makes it a measurement" \
-      "ADR-035" "$CGB_PF_OUT"
+    # No cap is not a fault (D15): preflight passes with no ceiling and names no key. Until
+    # wave-28 it named the missing key, citing ADR-035.
+    expect_absent "CG-budget ${_cgb_label}: …and preflight names no budget line" \
+      "parallel-budget" "$CGB_PF_OUT"
   fi
 done <<< "$CGB_CASES"
 
@@ -12378,7 +12432,7 @@ roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
 # writers=1 and one ready row against three open rows: no fillable gap, so the stand-down is
 # the only duty the wall can name.
 cgc_plan "$CGSD_R/.bionic/docs/plans/epic-99/cgsd.plan.md" \
-  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
 s4_bind "$CGSD_R" "$SID_A" "$CGSD_R/.bionic/docs/plans/epic-99/cgsd.plan.md"
 s4_attest "$CGSD_R" "$SID_A"
 # THE TICK'S PANEL: a fresh ListAgents answer in this session's transcript, where the tick
@@ -12446,7 +12500,7 @@ done
 roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
   tool_use_id=toolu_01HDOPEN deliverable="$HD_R/never-written.md" >> "$HD_RO"
 cgc_plan "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md" \
-  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
 s4_bind "$HD_R" "$SID_A" "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md"
 s4_attest "$HD_R" "$SID_A"
 HD_CFG="$SANDBOX/hd-config"; mkdir -p "$HD_CFG/projects/-hd"
@@ -12511,7 +12565,7 @@ done
 expect_eq "OCC precondition: the fixture roster holds four rows, three of them read-only" "4/3" \
   "$(grep -c '^roster-state/' "$OCC_RO")/$(grep -c 'subagent_type=bionic:' "$OCC_RO")"
 cgc_plan "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md" \
-  'parallel-budget: writers=1 suites=9 worktrees=32 test_jobs=8 source=probe' 1
+  'parallel-budget: writers=1 suites=9 worktrees=32 test_jobs=8 source=user' 1
 s4_bind "$OCC_R" "$SID_A" "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md"
 s4_attest "$OCC_R" "$SID_A"
 occ_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
@@ -12576,7 +12630,7 @@ CGT_STOP="$BIONIC_HOOKS_DIR/stop.sh"
 CGT_POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
 CGT_R=$(new_repo cgturn)
 CGT_PLAN="$CGT_R/.bionic/docs/plans/epic-99/cgturn.plan.md"
-cgc_plan "$CGT_PLAN" 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+cgc_plan "$CGT_PLAN" 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' 2
 s4_bind "$CGT_R" "$SID_A" "$CGT_PLAN"
 CGT_RO="$CGT_R/.bionic/tmp/roster-$SID_A.state"
 roster_header > "$CGT_RO"
@@ -12597,6 +12651,13 @@ jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidec
 cgt_agent toolu_01CGTA1 W-R1
 CGT_OUT="$(cgt_stop false)"
 expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
+# THE TWO DUTIES READ ONE LAUNCHED SET (wave-28 T38; REQ-13, D30). The task-entry duty binds a launch
+# to a plan row through the fill duty's own `_ST_LAUNCHED`, the set the recorder writes as `launched=`:
+# the same Stop's ledger line and its entry clause name the same launch. fails-when: they disagree.
+expect_contains "CG-entry the recorder's line for turn A's first Stop records the launch W-R1" "|launched=W-R1|" \
+  "$(head -n 1 "$CGT_R/.bionic/docs/record/cgturn/fill-ledger.log" 2>/dev/null)"
+expect_contains "CG-entry …and the same Stop's entry duty owes that launch's row, R1, folded into the fill's detail" \
+  "tasks: dispatched R1 this turn, 0 of 1 task entries set in progress" "$CGT_OUT"
 jq -nc '{type:"user",isMeta:true,uuid:"u-cgt-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$CGT_TR"
 cgt_agent toolu_01CGTA2 W-R2
 cgt_stop true >/dev/null
@@ -12858,7 +12919,7 @@ rigor: audited
 scale: wave
 multi_agent: true
 use_worktree: true
-parallel-budget: writers=8 suites=4 worktrees=8 test_jobs=8 source=probe
+parallel-budget: writers=8 suites=4 worktrees=8 test_jobs=8 source=user
 ---
 
 # Fixture plan
@@ -13006,6 +13067,9 @@ AM_RE_A='`'"$AM_RUN_A"'`'
 am_world() {  # <label> -> repo path (a teammate roster for w1, session $AM_SID, engaged)
   local r ro
   r=$(new_repo "am-$1")
+  # THE PROJECT HAS THE RUNNER'S DOOR (wave-28 T54): the one door fires only where tests/run.sh says --only,
+  # so this world plants the same runner as tests/bash-walls.test.sh's bw_door, committed with the seed.
+  mkdir -p "$r/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$r/tests/run.sh"
   arm_patrol "$r" "$AM_SID"; engage_sids "$r" "$AM_SID"
   ro="$r/.bionic/tmp/roster-$AM_SID.state"
   roster_header > "$ro"
@@ -13075,16 +13139,16 @@ expect_eq "AM1 …and the name's latest row IS the id's latest row: the verb and
 
 # ---- AM2: amend --suites+ -> the budget arm admits the added suite (AC-1.2, suites half) ----
 AM_R2=$(am_world 2)
-am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only s.test.sh"
 expect_eq "AM2 [poker amend -> bash-walls budget arm] BEFORE the amend the arm refuses the added suite" "2" "$AM_ARM_ST"
 expect_absent "AM2 …and the budget it names does not carry the added suite" "s.test.sh" "$(am_budget_line "$AM_ARM_OUT")"
 am_amend "$AM_R2" w1 --suites+ tests/s.test.sh --reason x
 expect_eq "AM2 the amend exits 0" "0" "$AM_RC"
-am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only s.test.sh"
 expect_eq "AM2 AFTER the amend the arm ADMITS the added suite (AC-1.2)" "0" "$AM_ARM_ST"
-am_arm "$AM_R2" "$AM_ID" "bash tests/a.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only a.test.sh"
 expect_eq "AM2 …and still admits the suite the brief declared" "0" "$AM_ARM_ST"
-am_arm "$AM_R2" "$AM_ID" "bash tests/z.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only z.test.sh"
 expect_eq "AM2 …and still refuses a suite nobody declared" "2" "$AM_ARM_ST"
 expect_eq "AM2 …and the name's latest row IS the id's latest row" "$(am_last "$AM_R2")" "$(am_idpick "$AM_R2")"
 
@@ -13447,7 +13511,7 @@ expect_eq "UB.3 duties gate, bound-open (control): the same write discharges the
 UB4=$(new_repo "ub-fill"); UB4_P="$UB4/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB4_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -13537,7 +13601,7 @@ expect_absent "UB.7 …and never told it is unbound" "session unbound" "$UB7_OUT
 UB8=$(new_repo "ub-tick"); UB8_P="$UB8/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB8_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -13603,7 +13667,7 @@ SID_C="c3c3c3c3-0000-4000-8000-00000000000c"
 UB9=$(new_repo "ub-engage"); UB9_P="$UB9/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB9_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -13651,7 +13715,7 @@ sd_world() {  # <label> <ready ids the ledger line answered, comma-joined> -> re
   r=$(new_repo "sd-$1")
   roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
   cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
-    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' 2
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
   s4_attest "$r" "$SID_A"
   mkdir -p "$r/.bionic/docs/record/sd"
@@ -13708,7 +13772,7 @@ sd_world_verb() {  # <label> <ids to decline, comma-joined> -> repo
   r=$(new_repo "sdv-$1")
   roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
   cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
-    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' 2
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
   s4_attest "$r" "$SID_A"
   ( cd "$r" && sd_env bash "$CGSD_POKER" decline "$2" 'R1 waits on the base merge' ) > "$r/sd-decline.out" 2>&1
@@ -14002,6 +14066,48 @@ expect_eq "FACT-SEV mutation: the doctored scale still reads (S1 on is fix)" "fi
 expect_ne "FACT-SEV mutation: …and its S2 off is no longer the library's, so the agreement row goes red" \
   "$(fsev_lib S2 off)" "$(fsev_scale "$FSEV_D/severity.mut.md" S2 off)"
 
+# §FACT-CHECK (wave-28 T41; REQ-8 AC-8.6, D33). AN OPEN CHECK HOLDS THE STEP, AND EVERY READER ASKS ONE
+# READER WHICH CHECKS ARE OPEN. A `check:` line is open while it carries neither ` settled=` nor
+# ` refuted` after its quoted title; lib/proof.sh `proof_checks_open` is the one reader (the owed lines
+# whose priority is `check`, rated through `proof_finding_rating`). The step's two readers ask it: the
+# judge (`facts_state`, which the tick's integrate row and close-out read too) holds each as a
+# `finding-check<TAB><record>#<n><TAB>open` line, and `current 8` (session-poker.sh) refuses naming
+# each. Pinned here: on one plan the judge holds exactly the open set the reader gives (a settled, a
+# refuted and a fenced line are not open; a title holding the words is); `current 8`'s refusal reads it
+# by that name; and a doctored judge that no longer asks the reader splits from it.
+FCHK_D="$PRF_D/fchk"; mkdir -p "$FCHK_D"
+git -C "$FCHK_D" init -q 2>/dev/null; git -C "$FCHK_D" -c user.name=f -c user.email=f@x commit -q --allow-empty -m init 2>/dev/null
+FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
+{
+  printf -- '---\nrigor: audited\nscale: task\nbase-sha: %s\nworking-branch: main\n---\n# fact-check fixture\n\n## SDLC State\n\ncurrent: 7\n' "$FCHK_H"
+  printf 'check: record/w/a.md#1 S3 off "open, no settlement"\n'
+  printf 'check: record/w/a.md#2 S1 on "settled" settled=S2:off by=record/w/c.md\n'
+  printf 'check: record/w/a.md#3 S2 on "refuted" refuted by=record/w/c.md\n'
+  printf 'check: record/w/a.md#4 S4 on "a title that says refuted and settled=S1:on"\n'
+  printf '\n```\ncheck: record/w/a.md#5 S1 on "fenced"\n```\n'
+} > "$FCHK_D/plan.md"
+fchk_open() { bash -c '. "$1" && proof_checks_open "$2"' _ "${2:-$PRF_LIB/proof.sh}" "$1" 2>/dev/null | awk '{ printf "%s%s", (n++ ? " " : ""), $1 }'; }
+fchk_judge() { bash -c '. "$1" && facts_state "$2" "$3"' _ "${2:-$PRF_LIB/proof.sh}" "$1" "$FCHK_H" 2>/dev/null \
+  | awk -F'\t' '$1 == "finding-check" && $NF == "open" { printf "%s%s", (n++ ? " " : ""), $2 }'; }
+expect_regex "FACT-CHECK precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
+expect_eq "FACT-CHECK the one reader gives the open checks: no settlement, and a title holding the words" \
+  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md")"
+expect_eq "FACT-CHECK the judge holds exactly that set" "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md")"
+expect_eq "FACT-CHECK …and says so by its exit" "1" \
+  "$(bash -c '. "$1" && facts_state "$2" "$3" >/dev/null 2>&1; echo $?' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H")"
+expect_eq "FACT-CHECK current 8's refusal asks the same reader, by name" "1" \
+  "$(/usr/bin/grep -c 'proof_checks_open "\$PV_PLAN"' "$PRF_POKER")"
+FCHK_NEEDLE='done < <(proof_checks_open "$plan" 2>/dev/null)'
+FCHK_MUT="$FCHK_D/proof.sh.mut"
+anchor "$PRF_LIB/proof.sh" "$FCHK_NEEDLE" 1
+FCHK_N="$FCHK_NEEDLE" awk 'BEGIN { n = ENVIRON["FCHK_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "done < /dev/null" substr($0, i + length(n)); print }' \
+  "$PRF_LIB/proof.sh" > "$FCHK_MUT"
+cp "$PRF_LIB/run.sh" "$PRF_LIB/roots.sh" "$FCHK_D/" 2>/dev/null
+expect_eq "FACT-CHECK mutation: the doctored judge still gives the reader's set through its own reader (it runs)" \
+  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md" "$FCHK_MUT")"
+expect_ne "FACT-CHECK mutation: …and, no longer asking it, holds nothing, so the agreement row goes red" \
+  "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md" "$FCHK_MUT")"
+
 # ============================================================
 section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"
 # ============================================================
@@ -14101,18 +14207,22 @@ deal_table() {  # <rigor> [<SKILL.md>] -> `<question>=bionic:<role>` per questio
       exit
     }' "${2:-$DEAL_SKILL}" 2>/dev/null
 }
-for deal_r in tested peer-reviewed audited; do
-  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_r row the reader parses" \
-    "$(deal_table "$deal_r")"
-  expect_eq "DEAL table $deal_r: the rendered row equals what facts_owed deals" \
-    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_r")"
+# RE-POINTED (wave-28 T22, AC-16.3): the rendered table names each level by its new word; the
+# dealing still reads the plan's word, old or new, through rigor_level, so each level's row is held
+# to what facts_owed deals its old-word twin.
+for deal_p in low:tested medium:peer-reviewed high:audited; do
+  deal_r="${deal_p#*:}"; deal_l="${deal_p%%:*}"
+  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_l row the reader parses" \
+    "$(deal_table "$deal_l")"
+  expect_eq "DEAL table $deal_l: the rendered row equals what facts_owed deals $deal_r" \
+    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_l")"
 done
 DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
 anchor "$DEAL_SKILL" 'reviewer `structure`' 1
 sed 's/reviewer `structure`/critic `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
-expect_nonempty "DEAL table mutation: the doctored audited row still parses" "$(deal_table audited "$DEAL_SKILL_MUT")"
+expect_nonempty "DEAL table mutation: the doctored high row still parses" "$(deal_table high "$DEAL_SKILL_MUT")"
 expect_ne "DEAL table mutation: …and splits from the dealing, so the row goes red" \
-  "$(deal_roles audited task)" "$(deal_table audited "$DEAL_SKILL_MUT")"
+  "$(deal_roles audited task)" "$(deal_table high "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
@@ -14190,14 +14300,15 @@ mkdir -p "$NM_MUT/hooks" "$NM_MUT/scripts/lib"
 cp "$BIONIC_HOOKS_DIR"/*.sh "$NM_MUT/hooks/" 2>/dev/null
 cp "$NM_LIB"/*.sh "$NM_MUT/scripts/lib/" 2>/dev/null
 cp "$NM_LIB/../booked.sh" "$NM_MUT/scripts/booked.sh" 2>/dev/null
-NM_NEEDLE='if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then'
+# The line as wave-28 T36 spells it (a door claim, kind `only`, is scoped like a file claim).
+NM_NEEDLE='if { [ "$_k" != file ] && [ "$_k" != only ]; } || ! cmd_claim_scope "$_root" "$_b" "$_p"; then'
 anchor "$NM_LIB/walls.sh" "$NM_NEEDLE" 1
 NM_N="$NM_NEEDLE" awk '
-  BEGIN { n = ENVIRON["NM_N"]; r = "if [ \"$_k\" != file ]; then" }
+  BEGIN { n = ENVIRON["NM_N"]; r = "if [ \"$_k\" != file ] && [ \"$_k\" != only ]; then" }
   { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' \
   "$NM_LIB/walls.sh" > "$NM_MUT/scripts/lib/walls.sh"
 expect_eq "NM mutation: the doctored copy lost exactly the scoping call" "0 1" \
-  "$(grep -cF -- "$NM_NEEDLE" "$NM_MUT/scripts/lib/walls.sh") $(grep -cF -- 'if [ "$_k" != file ]; then' "$NM_MUT/scripts/lib/walls.sh")"
+  "$(grep -cF -- "$NM_NEEDLE" "$NM_MUT/scripts/lib/walls.sh") $(grep -cF -- 'if [ "$_k" != file ] && [ "$_k" != only ]; then' "$NM_MUT/scripts/lib/walls.sh")"
 expect_eq "NM mutation: …and its wall still wraps and names a suite" "a.test.sh" \
   "$(nm_names "$NM_MUT/hooks/bash-walls.sh" 'bash tests/a.test.sh')"
 expect_eq "NM mutation: …which names other/a.test.sh by its basename, so the agreement goes red" \

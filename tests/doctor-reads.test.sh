@@ -1149,6 +1149,9 @@ expect_eq "REC.13: every row of the section fits 100 columns" "" "$(too_wide "$S
 
 OUT_REC0="$(run_doctor CLAUDE_CONFIG_DIR="$REC_EMPTY")"
 SEC_REC0="$(rec_section "$OUT_REC0")"
+expect_contains "REC.16: the heading says remove also acts on a native plugin the CLI registry proves (wave-28 T10)" \
+  "INSTALL RECORD — what bionic installed; remove acts on these and on registry-proven plugins" "$SEC_REC"
+expect_eq "REC.17: …and the heading fits 100 columns" "" "$(too_wide "$(printf '%s\n' "$SEC_REC" | head -1)")"
 expect_contains "REC.14: with no record the section says so" "none recorded" "$SEC_REC0"
 expect_eq "REC.15: …and has no ccstatusline row (the row extractor read one above)" "" "$(rec_row "$SEC_REC0" ccstatusline)"
 
@@ -1178,5 +1181,44 @@ SEC_G0="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$G_CCD0")")"
 expect_contains "G.6: with no share file the row says 80, the default" "80% of this machine (the default; no share file)" "$SEC_G0"
 expect_contains "G.7: with no store the gate row says nothing has asked" "no store yet — nothing has asked the gate" "$SEC_G0"
 expect_false "G.8: …and doctor made no store (the store above was read, G.4)" test -e "${G_CCD0}/bionic/gate"
+
+section "§SHARE-DOCTOR: doctor reports the share the verb wrote, and its source (wave-28 T10, D16)"
+
+# The share row is T13's; this section drives the verb that sets the file and reads the row after it. The verb runs
+# under a CLAUDE_CONFIG_DIR of this section's own and a HOME that holds nothing.
+SD_CCD="${TMP}/share-doc-config"
+mkdir -p "$SD_CCD"
+share_set() {  # <args...> -> the verb's exit code, its output in SD_OUT
+  SD_OUT="$( cd "$TMP" && env HOME="${TMP}/no-home" CLAUDE_CONFIG_DIR="$SD_CCD" BIONIC_PLUGINS_DIR="${TMP}/no-plugins" \
+    bash "${REPO}/hooks/session-poker.sh" share "$@" 2>&1 )"
+}
+SD_SEC0="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_contains "SD.1: before the verb, the share row says the default and that no file is there" \
+  "80% of this machine (the default; no share file)" "$SD_SEC0"
+share_set 65; SD_RC=$?
+expect_eq "SD.2: the verb sets 65 (exit 0)" "0" "$SD_RC"
+SD_SEC1="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_contains "SD.3: after it, the row says 65 and that the file set it" "65% of this machine (set in bionic/share)" "$SD_SEC1"
+expect_eq "SD.4: …and the section has one share row, not two" "1" "$(printf '%s\n' "$SD_SEC1" | grep -c ' share ')"
+expect_eq "SD.5: …every row of it fits 100 columns" "" "$(too_wide "$SD_SEC1")"
+share_set 101; SD_RC2=$?
+SD_SEC2="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_eq "SD.6: a refused value exits 1 and the row still says 65, the refusal having written nothing" "1" "$SD_RC2"
+expect_contains "SD.6b: …the row is as it was" "65% of this machine (set in bionic/share)" "$SD_SEC2"
+share_set 100
+SD_SEC3="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_contains "SD.7: share 100 is reported as 100" "100% of this machine (set in bionic/share)" "$SD_SEC3"
+expect_eq "SD.8: …and every row fits 100 columns at the widest share" "" "$(too_wide "$SD_SEC3")"
+
+# the source is judged by the VALUE, as gate_share judges it (read-structure-p19 #5): a file the gate would refuse is the default
+for SD_JUNK in abc 0 101 1234 ""; do
+  printf '%s\n' "$SD_JUNK" > "${SD_CCD}/bionic/share"
+  SD_SECJ="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+  expect_contains "SD.9 a share file holding '$SD_JUNK' reads 80, the default, as the gate does" \
+    "80% of this machine (the default; no share file)" "$SD_SECJ"
+done
+printf '65\n' > "${SD_CCD}/bionic/share"
+expect_contains "SD.10 control: a valid value in the same file reads as set" "65% of this machine (set in bionic/share)" \
+  "$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
 
 finish

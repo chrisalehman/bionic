@@ -452,7 +452,7 @@ for _dr_role in auditor critic implementor researcher reviewer senior-implemento
   expect_true "12c: agents/$_dr_role.md carries the DISPATCH-RULES markers" \
     bash -c 'case "$1" in *"<!-- DISPATCH-RULES-BEGIN -->"*"<!-- DISPATCH-RULES-END -->"*) exit 0 ;; esac; exit 1' _ "$_dr_body"
   expect_true "12d: …and the block's own words, so an empty injection cannot pass" \
-    bash -c 'case "$1" in *"one \`bash tests/<name>.test.sh\` per suite"*"ever end your turn"*) exit 0 ;; esac; exit 1' _ "$_dr_body"
+    bash -c 'case "$1" in *"\`tests/run.sh --only <name>.test.sh\`, one call each"*"ever end your turn"*) exit 0 ;; esac; exit 1' _ "$_dr_body"
 done
 
 finish

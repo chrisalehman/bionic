@@ -38,6 +38,9 @@
 #   fill_row_launched <task id> <names>
 #                                      0 when one of <names> (comma-joined Agent names) is a
 #                                      dispatch name for that id — the inverse of fill_name.
+#   fill_launched_rows <roster> <sid> <names>
+#                                      the same names, each replaced by the `row=` its latest
+#                                      row in that session carries (wave-28 T7, D17).
 #
 # WHY A LIBRARY AT ALL (D2). Both of these lived inside `hooks/session-poker.sh` — the ready
 # set inline in the `tick` verb, reading five shell variables the tick had built, and
@@ -495,6 +498,34 @@ fill_row_launched() {  # <task id> <names, comma-joined> -> 0 launched · 1 not
     case "$base" in *"-$id") return 0 ;; esac
   done
   return 1
+}
+
+# ── THE ROW LABEL BEFORE THE NAME (wave-28 T7; REQ-3, D17) ────────────────────
+#
+# A brief's `Row: <id>` binds its dispatch to a row whatever the agent is called, and the dispatch
+# wall writes it on the launch row as `row=`. So a reader of "which rows did these launches start"
+# asks the roster first: each name whose latest row in this session carries `row=` stands for that
+# id, and `fill_row_launched` then matches it as the id itself; a name with none stays a name and
+# is matched by the rule above. No roster, a symlink, or no names: the names as given.
+fill_launched_rows() {  # <roster> <session id> <names, comma-joined> -> the names, row= first
+  local roster="${1:-}" sid="${2:-}" names="${3:-}"
+  [ -n "$names" ] && [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] \
+    || { printf '%s' "$names"; return 0; }
+  awk -F'|' -v sid="$sid" -v names="$names" '
+    $1 == "roster-state/v1" {
+      split("", kv)
+      for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1) { k = substr($i, 1, e - 1); if (!(k in kv)) kv[k] = substr($i, e + 1) } }
+      if (kv["name"] == "" || (kv["session"] != "" && kv["session"] != sid)) next
+      row[kv["name"]] = kv["row"]
+    }
+    END {
+      n = split(names, nm, ","); out = ""
+      for (i = 1; i <= n; i++) {
+        v = ((nm[i] in row) && row[nm[i]] != "") ? row[nm[i]] : nm[i]
+        out = out (i > 1 ? "," : "") v
+      }
+      printf "%s", out
+    }' "$roster" 2>/dev/null || printf '%s' "$names"
 }
 
 # ── THE STANDING FILL DECLINE (wave-24 T8, T27; D2, AC-4.7) ──────────────────

@@ -47,7 +47,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 First user-facing action:
 
-> **Canonical SDLC engaged — `<intent>` · `<rigor>` · `<scale>` (`<what that rigor buys>`).**
+> **Canonical SDLC engaged — `<intent> · <level> rigor · <scale>`** (for example `build · high rigor · wave`), then the line `bash <plugin-root>/scripts/card.sh rigor <rigor>` prints, which says what that rigor buys: `review rigor: high (three independent readers)`.
 
 Triple not yet declared → say so and list the axes. Invoked as `help` → render the axis tables and stop.
 
@@ -62,22 +62,22 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 | `refactor` | Change structure, preserve behavior. Covers upgrades, migrations, removals/deprecations. | `behavior-preservation:` in the Step-5 block; migrations add `compat-matrix:`/`revert-plan:` (or `n/a: not a migration`). Log-only. |
 | `tune` | Move a NAMED measurement toward a target. If you cannot name the measurement, it is not tune. | `baseline:`/`target:`/`re-measure:` in the Step-5 block, all three. Log-only. |
 | `spike` | Timeboxed research. **Ships no code at any rigor.** | Writeup only at `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md`. No plan file, no spec, no ADR, no commits to the integration branch. |
-| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Close-out. |
+| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `high`. Monitoring-gap closure is part of Close-out. |
 
 **Document and research deliverables — writeups, research reports — don't belong here.** Plain
 plan mode serves them better than any row in this table, `spike` included: it ships no code at
 any rigor, but its writeup is a timeboxed research artifact, not a general document-production
 mode.
 
-**rigor** — how many independent minds answer the questions. Cumulative.
+**rigor** — how many independent minds answer the questions: `low`, `medium` or `high`. Cumulative. `low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads either word as the same level, and a file carrying an old word is read as it is and never rewritten.
 
 Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the tests floor `pass == total`. `evidence`: is the proof honest. `adversarial`: what is wrong that nobody asked about. `structure`: is it built from what exists, and shaped well. Rigor sets how many independent readers hold the last three.
 
 | Rigor | Independent readers | Who holds which question |
 |---|---|---|
-| `tested` | one | critic holds all three |
-| `peer-reviewed` | two; + a separate spec, and at `scale: task` a proof-shaped ledger row | auditor `evidence`, critic `adversarial` and `structure` |
-| `audited` | three; + per-step checkpoint commits, expanded stop-and-wake, and at `scale: wave` a `## Tasks` section in a multi-agent plan | auditor `evidence`, critic `adversarial`, reviewer `structure` |
+| `low` | one | critic holds all three |
+| `medium` | two; + a separate spec, and at `scale: task` a proof-shaped ledger row | auditor `evidence`, critic `adversarial` and `structure` |
+| `high` | three; + per-step checkpoint commits, expanded stop-and-wake, and at `scale: wave` a `## Tasks` section in a multi-agent plan | auditor `evidence`, critic `adversarial`, reviewer `structure` |
 
 At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` turns a reading into a fact.
 
@@ -89,7 +89,7 @@ At `scale: wave` each code question (`adversarial`, `structure`) also owes `scop
 | `wave` | Full set (0–9). Default. | One wave spec + plan; tasks inside Step 4. | Wave branch off the epic integration branch; merges back at Step 8. |
 | `epic` | 0–3 only. | `epic.spec.md` + `epic.plan.md`; carves waves. Does NOT run 4–9. | Owns `epic/NN-<slug>`; merges to mainline once, at close. |
 
-**Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→tested and `build`/`refactor`/`tune`→peer-reviewed; at `wave` and above, `audited`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `audited`, `spike` is CAPPED at `tested`), flag (security-touching or privacy/vulnerable-population work floors at `audited`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). One adjacent check does block, and it is not a floor: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a floor the user has overridden.
+**Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→low and `build`/`refactor`/`tune`→medium; at `wave` and above, `high`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `high`, `spike` is CAPPED at `low`), flag (security-touching or privacy/vulnerable-population work floors at `high`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). One adjacent check does block, and it is not a floor: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a floor the user has overridden.
 
 Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. The wave that owns the integration point carries the flag floor.
 
