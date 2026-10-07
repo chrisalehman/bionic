@@ -4041,8 +4041,8 @@ sf_run --replace "$SF_PLAN" 5 pass=4
 expect_eq "SF-1 --replace: the block's pass: line is replaced where it stands (exit 0)" "0" "$SF_RC"
 expect_eq "SF-1b …the block holds one pass: line, with the new value" "  pass: 4" \
   "$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  pass:/ { print }')"
-expect_eq "SF-1c …its place is kept: the line before it is the blank the block had" "" \
-  "$(printf '%s\n' "$SF_OUT" | awk '/^  pass: 4$/ { print prev; exit } { prev = $0 }')"
+expect_eq "SF-1c …its place is kept: the line before it is the blank the block had" "[]" \
+  "$(printf '%s\n' "$SF_OUT" | awk '/^  pass: 4$/ { print "[" prev "]"; exit } { prev = $0 }')"
 expect_eq "SF-1d …and it is the only line that differs (one removed, one added)" "1 1" \
   "$(diff "$SF_PLAN" <(printf '%s\n' "$SF_OUT") | awk '/^</ { a++ } /^>/ { b++ } END { print a + 0, b + 0 }')"
 expect_eq "SF-1e …the same key in another section, and on another step's line, is left as written" "2" \
@@ -4059,8 +4059,9 @@ expect_eq "SF-3 several keys at once: two replaced, one written, one line each" 
 sf_run --replace "$SF_PLAN.dup" 5 pass=4
 expect_eq "SF-4 a block holding the key twice leaves one line of it, the new value" "1|  pass: 4" \
   "$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  pass:/ { n++; l = $0 } END { print n + 0 "|" l }')"
-expect_eq "SF-5 the fill mode (no flag) still leaves a key the block has as written (control: 1.12.0 behaviour)" "  pass: 3" \
-  "$(sf_run "$SF_PLAN" 5 pass=4 | awk '/^- Step 5:/ { f = 1; next } f && /^  pass:/ { print; exit }')"
+sf_run "$SF_PLAN" 5 pass=4
+expect_eq "SF-5 the fill mode (no flag) still leaves a key the block has as written (control: 1.12.0 behaviour)" "0|  pass: 3" \
+  "$SF_RC|$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } f && /^  pass:/ { print; exit }')"
 sf_run --replace "$SF_PLAN" 5 $'cmd=a\nb'
 expect_eq "SF-6 a value with a line break: exit 4, and nothing on stdout" "4|0" \
   "$SF_RC|$(printf %s "$SF_OUT" | wc -c | tr -d ' ')"
