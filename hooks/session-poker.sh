@@ -439,6 +439,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
+  die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
@@ -625,6 +626,21 @@ case "$VERB" in
       esac
     done
     PV_PAIRS=("$@")
+    ;;
+  # THE LANDING'S ROW (wave-28 T6; D7, A-orch-81): an id, the landed commit (40 hex) and the
+  # publish's instant (ISO-UTC); a hand landing adds `--by-hand <who> <why>`. The shapes are the
+  # usage error's; the values a plan cannot hold are the verb's own refusal.
+  row-landed)
+    RL_BY=""; RL_WHY=""; RL_HAND=0
+    if [ $# -eq 6 ] && [ "$4" = "--by-hand" ]; then RL_HAND=1; RL_BY="$5"; RL_WHY="$6"; set -- "$1" "$2" "$3"; fi
+    [ $# -eq 3 ] && [ -n "$1" ] || usage "row-landed takes <id> <40-hex commit> <ISO-UTC> [--by-hand <who> <why>]."
+    case "$2" in *[!0-9a-f]*|'') usage "row-landed: '$2' is not a 40-hex commit." ;; esac
+    [ "${#2}" -eq 40 ] || usage "row-landed: '$2' is not a 40-hex commit."
+    case "$3" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) usage "row-landed: '$3' is not an ISO-UTC instant (YYYY-MM-DDTHH:MM:SSZ)." ;;
+    esac
+    PV_ID="$1"; RL_COMMIT="$2"; RL_AT="$3"
     ;;
   step-line)
     PV_APPEND=""
@@ -5911,6 +5927,79 @@ EOF
     [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
     plan_verb_swap "$VERB" "$PV_WHAT" writer
     say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE LANDING'S ROW (wave-28 T6; REQ-3 AC-3.2, D7; ruling A-orch-81). `line_publish`
+  # (lib/line.sh) runs this verb, as a command, inside its publish lock once the fast-forward and
+  # its `published` event are written: the row's status `landed` (`units_table_cells` on the tasks
+  # table, judged by `units_validate` as `task-set` judges a status), its `- T<n>:` line
+  # (`units_step_line`) and its dispatch-ledger row's `landed` cell (`units_table_cells` on the
+  # ledger), onto ONE copy and through ONE `plan_verb_swap ... writer`: all three lines or none.
+  # Writer mode is the point: past Step 4 the dry copy reads `current: 4`, so the declared debt the
+  # publish has just written (T5) cannot refuse the publish's own bookkeeping, and the debt stays
+  # in the bound plan's landing record for the gate to read at the next step move (wave-27 passes
+  # 60 and 63: the dry copy is `plan_verb_open`'s own, so the gate resolves it to the real plan).
+  # The step line gains ` landed <commit> <at>` after its own text (a hand landing: ` landed-by-hand:
+  # <who> <at> "<why>"`, the hand landing's interface), once: a text already there is not added
+  # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
+  # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
+  # same landing finds the plan already so and writes nothing.
+  row-landed)
+    if ! plan_verb_id_ok "$PV_ID"; then
+      die "REFUSED — '$(clean "$PV_ID")' is not one row id; the plan is unchanged."
+      exit 1
+    fi
+    if ! plan_verb_value_ok "$RL_BY" || ! plan_verb_value_ok "$RL_WHY"; then
+      die "REFUSED — the hand landing's name or reason carries a |, a tab or a line break, which no plan line can hold; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_open row-landed
+    PV_RC=0
+    units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      1) die "REFUSED — $PV_PLAN carries no ## Tasks table; the plan is unchanged."; exit 1 ;;
+      2) die "REFUSED — the ## Tasks table carries no row $PV_ID; the plan is unchanged."; exit 1 ;;
+      5) die "REFUSED — the ## Tasks table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
+      *) die "REFUSED — the ## Tasks row $PV_ID cannot take status landed; the plan is unchanged."; exit 1 ;;
+    esac
+    PV_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+    if [ -n "$PV_VIOL" ]; then
+      die "REFUSED — with $PV_ID landed, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+      printf '%s\n' "$PV_VIOL" >&2
+      exit 1
+    fi
+    case "$PV_ID" in
+      T[0-9]*)
+        RL_TEXT="landed $RL_COMMIT $RL_AT"
+        [ "$RL_HAND" -eq 0 ] || RL_TEXT="landed-by-hand: $RL_BY $RL_AT \"$RL_WHY\""
+        RL_REST="$(units_step_text "$PV_NEW" "$PV_ID" 2>/dev/null)"
+        case " $RL_REST " in
+          *" $RL_TEXT "*) RL_LINE="$RL_REST" ;;
+          *) RL_LINE="${RL_REST:+$RL_REST }$RL_TEXT" ;;
+        esac
+        if ! units_step_line "$PV_NEW" "$PV_ID" "$RL_LINE" > "$PV_NEW.2" 2>/dev/null; then
+          die "REFUSED — $PV_PLAN carries no ## SDLC State section for the $PV_ID line; the plan is unchanged."
+          exit 1
+        fi
+        mv -f "$PV_NEW.2" "$PV_NEW" ;;
+    esac
+    PV_RC=0
+    units_table_cells "$PV_NEW" set ledger "$PV_ID" "landed=landed $RL_AT $RL_COMMIT" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
+    if [ "$PV_RC" -eq 2 ]; then
+      PV_RC=0
+      units_table_cells "$PV_NEW" add ledger "$PV_ID" "landed=landed $RL_AT $RL_COMMIT" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
+    fi
+    case "$PV_RC" in
+      0) mv -f "$PV_NEW.2" "$PV_NEW" ;;
+      1) rm -f "$PV_NEW.2" ;;
+      3) die "REFUSED — the ## Dispatch ledger header carries no landed column; the plan is unchanged."; exit 1 ;;
+      5) die "REFUSED — the ## Dispatch ledger table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
+      *) die "REFUSED — the ledger row $PV_ID cannot take its landed cell; the plan is unchanged."; exit 1 ;;
+    esac
+    plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
+    say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
     exit 0
     ;;
 
