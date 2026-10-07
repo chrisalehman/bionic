@@ -681,6 +681,91 @@ expect_match "a runner path that resolves to no file does not refuse" \
 stop_runner
 rmdir "$S/empty/tests" "$S/empty"
 
+section "§LAND-BUSY-GATE: the busy check reads the gate's requests (wave-28 T12; D10)"
+#
+# A RUN THE GATE ADMITTED IS A RUN (T12). Every suite now asks the gate, the runner's included,
+# each for itself, and the request records the tree it runs in (`tree=`, git's toplevel where
+# it asked). So the land refuses while an admitted, unfinished request whose holder is alive
+# names the project's main checkout or the land's target checkout as its tree. A request in a
+# writer's own tree does not refuse (a writer's suite would otherwise refuse every land of the
+# wave, the reason D1 once counted only the runner); a waiting request has run nothing; an
+# ended or killed one runs nothing. The store is this suite's own.
+export BIONIC_GATE_DIR="$TMP/gate"
+GB="$(new_repo "$TMP/busy-gate")"
+GB_HOLD=""
+gb_holder() {  # -> GB_HOLD, a live process that is not this shell's child (no zombie)
+  GB_HOLD="$( ( sleep 60 >/dev/null 2>&1 & printf '%s' "$!" ) )"
+}
+gb_plant() {  # <id> <tree> <holder pid> [admitted|waiting|ended] — one request file
+  local st
+  st="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$3" 2>/dev/null | awk '{ $1 = $1; print }')"
+  mkdir -p "$BIONIC_GATE_DIR/requests"
+  { printf 'key=x.test.sh\nkind=work\nwho=fixture:w\ntree=%s\nasked=1000\nholder=%s:%s\n' "$2" "$3" "$st"
+    case "${4:-admitted}" in
+      admitted) printf 'admitted=1001\npromise=1:0.5:10\n' ;;
+      ended) printf 'admitted=1001\npromise=1:0.5:10\nended=1002\nrc=0\n' ;;
+    esac
+  } > "$BIONIC_GATE_DIR/requests/$1"
+}
+gb_clear() { rm -rf "$BIONIC_GATE_DIR"; [ -z "$GB_HOLD" ] || kill "$GB_HOLD" 2>/dev/null; GB_HOLD=""; }
+trap 'gb_clear; stop_runner; stop_mention; rm -rf "$TMP"' EXIT
+
+GBT1="$(new_tree "$GB" gate-root)"
+gb_holder; gb_plant 7 "$GB" "$GB_HOLD"
+GBREFS0="$(refs_of "$GB")"
+OUTG1="$(worktree_land "$GBT1" wave/fixture)"; RCG1=$?
+expect_match "an admitted run in the main checkout refuses the land" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$OUTG1"
+expect_match "…naming the request, its key and its tree" "*request=7 key=x.test.sh tree=${GB} *" "$OUTG1"
+expect_match "…and its holder" "*holder=${GB_HOLD}*" "$OUTG1"
+expect_eq    "the refusal exits 2" "2" "$RCG1"
+expect_eq    "no ref moved" "$GBREFS0" "$(refs_of "$GB")"
+gb_plant 7 "$GB" "$GB_HOLD" waiting
+expect_match "a request that is only waiting has run nothing: the land goes through" \
+  "spawn-worktree: LANDED branch=gate-root *" "$(worktree_land "$GBT1" wave/fixture)"
+gb_clear
+
+GBT2="$(new_tree "$GB" gate-ended)"
+gb_holder; gb_plant 8 "$GB" "$GB_HOLD" ended
+expect_match "an ended request does not refuse" \
+  "spawn-worktree: LANDED branch=gate-ended *" "$(worktree_land "$GBT2" wave/fixture)"
+gb_clear
+
+GBT3="$(new_tree "$GB" gate-dead)"
+gb_holder; gb_plant 9 "$GB" "$GB_HOLD"; kill "$GB_HOLD" 2>/dev/null
+i=0; while kill -0 "$GB_HOLD" 2>/dev/null && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+GB_HOLD=""
+expect_match "an admitted request whose holder is dead (killed) does not refuse" \
+  "spawn-worktree: LANDED branch=gate-dead *" "$(worktree_land "$GBT3" wave/fixture)"
+gb_clear
+
+GBT4="$(new_tree "$GB" gate-writer)"
+GBW="$(new_tree "$GB" gate-writers-own)"
+gb_holder; gb_plant 10 "$GBW" "$GB_HOLD"
+expect_match "a run in a writer's own tree does not refuse another tree's land" \
+  "spawn-worktree: LANDED branch=gate-writer *" "$(worktree_land "$GBT4" wave/fixture)"
+gb_clear
+
+GBO="$(new_repo "$TMP/busy-gate-other")"
+GBT5="$(new_tree "$GB" gate-other)"
+gb_holder; gb_plant 11 "$GBO" "$GB_HOLD"
+expect_match "a run in another repository does not refuse" \
+  "spawn-worktree: LANDED branch=gate-other *" "$(worktree_land "$GBT5" wave/fixture)"
+gb_clear
+
+GBWAVE="$TMP/busy-gate-outside-wave"
+git -C "$GB" worktree add --quiet -b wave/gout "$GBWAVE" wave/fixture >/dev/null 2>&1
+GBWAVE="$(cd "$GBWAVE" && pwd -P)"
+GBT6="$(new_tree "$GB" gate-into-outside)"
+gb_holder; gb_plant 12 "$GBWAVE" "$GB_HOLD"
+OUTG6="$(worktree_land "$GBT6" wave/gout)"; RCG6=$?
+expect_match "an admitted run in the TARGET checkout, outside the root, refuses" \
+  "spawn-worktree: REFUSED reason=suite-running request=12 *tree=${GBWAVE} *" "$OUTG6"
+expect_eq    "that refusal exits 2" "2" "$RCG6"
+gb_clear
+expect_match "the same land goes through once that run is gone" \
+  "spawn-worktree: LANDED branch=gate-into-outside onto=wave/gout *" "$(worktree_land "$GBT6" wave/gout)"
+
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
 G="$(new_repo "$TMP/land-legacy")"
@@ -2000,12 +2085,11 @@ expect_true "after onto-checkout-dirty, the link still resolves" link_ok "$KO"
 git -C "$LK" checkout --quiet -- file.txt
 
 KS="$(keep_tree keep-suite)"
-make_runner "$LK"
-expect_true "a stand-in runner started in the keep fixture" start_runner "$LK" "tests/run.sh"
+gb_holder; gb_plant 31 "$LK" "$GB_HOLD"
 expect_true "suite-running arm: the link resolves before the land" link_ok "$KS"
 expect_match "suite-running is refused" "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$KS" wave/fixture)"
 expect_true "after suite-running, the link still resolves" link_ok "$KS"
-stop_runner
+gb_clear
 
 # Every refused tree above lands once its cause is gone, and only then is its link dropped.
 # None of them changed a file another landing touched, so each lands on its own green run
@@ -2060,7 +2144,7 @@ section "§LAND-SHIM: the real wall and the real shim, from the main checkout, i
 # trailing `echo "rc=$?"`) stamps rc=0 and is NOT pinned here: it lands, which is a limit
 # recorded in the T56 record, not a behaviour to keep.
 #
-# BOUNDED: a private slots store, a suite that exits at once, a fake HOME, no plugins dir.
+# BOUNDED: a private gate store, a suite that exits at once, a fake HOME, no plugins dir.
 LS="$(new_repo "$TMP/land-shim")"
 LS_SID="t56shim-0000-0000-0000-000000000000"
 LS_HOOK="${REPO}/hooks/bash-walls.sh"
@@ -2079,8 +2163,9 @@ ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = 
 }
 ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
   local q="'\\''" s; s="${1//\'/$q}"
-  ( cd "$LS" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
-      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N="${LS_SLOTS_N:-2}" BIONIC_SLOTS_MAX_WAIT="${LS_MAX_WAIT:-20}" BIONIC_SLOTS_POLL=0.1 \
+  ( cd "$LS" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET -u BIONIC_NOW_EPOCH \
+      BIONIC_GATE_DIR="$TMP/land-shim-gate" BIONIC_GATE_POLL=0.1 BIONIC_PROBE_BUSY_CORES=0 \
+      BIONIC_PROBE_USED_PCT="${LS_USED:-10}" BIONIC_NOW_FILE="${LS_NOW_FILE:-}" \
       /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
 }
 ls_tree() {  # <branch> <suite exit code> -> the tree, its suite committed, nothing else in it
@@ -2097,7 +2182,7 @@ ls_case() {  # <label> <branch> <suite rc> <command after the cd guard> <cd targ
   c="cd $5 || exit 1; $4"
   w="$(ls_wrap "$c")"
   expect_match "$1: the wall wraps it in the shim with the tree as the stamp dir" \
-    "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $t --suites a.test.sh -- *" "$w"
+    "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $t --suites a.test.sh -- *" "$w"
   ls_harness "$w"
   expect_match "$1: the shim stamped the TREE's git dir, at its head, with the suite's own code" \
     "stamp/v1|head=$(git -C "$t" rev-parse HEAD)|dirty=0|rc=$3|*" "$(tail -n 1 "$(stamp_file "$t")" 2>/dev/null)"
@@ -2172,7 +2257,7 @@ echo 0 > "$LSU_RC/su-typed-two-ways.a"
 LSU_WRAP="$(ls_wrap "cd .worktrees/su-typed-two-ways || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc")"
 ls_harness "$LSU_WRAP"
 expect_match "(c) the capture shape is wrapped with the tree and the one suite name" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
 expect_eq "(c) both stamps name a.test.sh" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSC")"
 expect_match "(c) a red typed plainly, then a green in the capture shape, LANDS" \
   "spawn-worktree: LANDED branch=su-typed-two-ways onto=wave/fixture *" "$(worktree_land "$LSC" wave/fixture)"
@@ -2205,7 +2290,7 @@ LSH="$(lsu_tree su-two-in-one)"
 echo 0 > "$LSU_RC/su-two-in-one.a"
 lsu_run "$LSH" b 1 'bash tests/a.test.sh && bash tests/b.test.sh'
 expect_match "(h) the two-suite command is wrapped naming both" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSH" a 0
 expect_eq "(h) one line names both, red; then a alone, green" \
   "a.test.sh,b.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSH")"
@@ -2215,19 +2300,28 @@ lsu_run "$LSH" b 0
 expect_match "(h) …and once b runs green alone the tree LANDS" \
   "spawn-worktree: LANDED branch=su-two-in-one onto=wave/fixture *" "$(worktree_land "$LSH" wave/fixture)"
 
-# (i) A SUITE THAT NEVER GOT A PLACE (critic 3 S5). a runs green; b waits for the one place, which
-# another run holds, and gives up (69). Its line names b, so the land refuses on it; once b runs
-# green the tree lands.
+# (i) A SUITE THE GATE NEVER ADMITTED (critic 3 S5; the gate since wave-28 T12). a runs green; b
+# asks the gate on a machine planted over the share, and its call's limit runs out on a planted
+# clock that jumps past it (75, nothing ran). Its line names b, so the land refuses on it; once b
+# runs green the tree lands.
+ls_waits() {  # <run function> <tree> <suite or runner> — one run the gate does not admit in time
+  local tk i=0
+  printf '1000\n' > "$TMP/ls-clock"
+  # The clock moves a thousand seconds a second, so the call's limit runs out whenever it began.
+  ( while [ "$i" -lt 60 ]; do i=$((i + 1)); sleep 1
+      printf '%s\n' "$((1000 + i * 1000))" > "$TMP/ls-clock.tmp" && mv -f "$TMP/ls-clock.tmp" "$TMP/ls-clock"
+    done ) &
+  tk=$!
+  LS_USED=95 LS_NOW_FILE="$TMP/ls-clock" "$@"
+  kill "$tk" 2>/dev/null; wait "$tk" 2>/dev/null
+}
 LSI="$(lsu_tree su-b-no-place)"
 lsu_run "$LSI" a 0
-sleep 60 & LSI_H=$!
-mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSI_H" > "$TMP/land-shim-slots/place.1/pid"
-export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsu_run "$LSI" b 0; unset LS_SLOTS_N LS_MAX_WAIT
-kill "$LSI_H" 2>/dev/null; wait "$LSI_H" 2>/dev/null
-expect_eq "(i) a green, then b's no-place end stamped with its suite and 69" \
-  "a.test.sh:0 b.test.sh:69" "$(lsu_stamps "$LSI")"
-expect_match "(i) a green then b out of places at one head is REFUSED, naming b" \
-  "spawn-worktree: REFUSED reason=stale-proof why=red rc=69 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
+ls_waits lsu_run "$LSI" b 0
+expect_eq "(i) a green, then b's unadmitted end stamped with its suite and 75" \
+  "a.test.sh:0 b.test.sh:75" "$(lsu_stamps "$LSI")"
+expect_match "(i) a green then b never admitted at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=75 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
 lsu_run "$LSI" b 0
 expect_match "(i) …and once b runs green the tree LANDS" \
   "spawn-worktree: LANDED branch=su-b-no-place onto=wave/fixture *" "$(worktree_land "$LSI" wave/fixture)"
@@ -2289,7 +2383,7 @@ lsn_run() {  # <tree> <runner> <rc> [<command after the cd guard>] — the runne
 LSN1="$(lsu_tree sn-npm-retry)"
 lsn_run "$LSN1" npm 1
 expect_match "(n1) npm test is wrapped naming its own text" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
 lsn_run "$LSN1" npm 0
 expect_eq "(n1) two stamps of npm_test, red then green" "npm_test:1 npm_test:0" "$(lsu_stamps "$LSN1")"
 expect_match "(n1) npm test red then npm test green at one head LANDS" \
@@ -2303,15 +2397,12 @@ OUTLSN2="$(worktree_land "$LSN2" wave/fixture)"
 expect_match "(n2) npm test red then pytest green at one head is REFUSED, naming npm_test" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=npm_test head=$(git -C "$LSN2" rev-parse HEAD) — make the suites green, *" "$OUTLSN2"
 
-# (n3) A runner that never got a place, then the same runner green.
+# (n3) A runner the gate never admitted, then the same runner green.
 LSN3="$(lsu_tree sn-npm-no-place)"
-sleep 60 & LSN3_H=$!
-mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSN3_H" > "$TMP/land-shim-slots/place.1/pid"
-export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsn_run "$LSN3" npm 0; unset LS_SLOTS_N LS_MAX_WAIT
-kill "$LSN3_H" 2>/dev/null; wait "$LSN3_H" 2>/dev/null
+ls_waits lsn_run "$LSN3" npm 0
 lsn_run "$LSN3" npm 0
-expect_eq "(n3) npm_test out of places (69), then npm_test green" "npm_test:69 npm_test:0" "$(lsu_stamps "$LSN3")"
-expect_match "(n3) a runner that never got a place, then the same runner green, LANDS" \
+expect_eq "(n3) npm_test never admitted (75), then npm_test green" "npm_test:75 npm_test:0" "$(lsu_stamps "$LSN3")"
+expect_match "(n3) a runner the gate never admitted, then the same runner green, LANDS" \
   "spawn-worktree: LANDED branch=sn-npm-no-place onto=wave/fixture *" "$(worktree_land "$LSN3" wave/fixture)"
 
 # (n4) A TRUE `?` STILL STICKS: a runner whose text the reading cannot resolve (a `$`).
@@ -2346,7 +2437,7 @@ LSN6="$(lsu_tree sn-one-file)"
 lsu_run "$LSN6" a 1
 lsu_run "$LSN6" a 1 "bash $LSN6/tests/a.test.sh"
 expect_match "(n6) the absolute path behind the cd is wrapped as a.test.sh" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSN6" a 1 'bash ./tests/a.test.sh'
 lsu_run "$LSN6" a 0 "set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc"
 expect_eq "(n6) four stamps, one name" "a.test.sh:1 a.test.sh:1 a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSN6")"
@@ -2359,7 +2450,7 @@ LSN7="$(lsu_tree sn-or-short)"
 lsu_run "$LSN7" b 1
 echo 0 > "$LSU_RC/sn-or-short.a"
 lsu_run "$LSN7" b 1 'bash tests/a.test.sh || bash tests/b.test.sh'
-expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
+expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
 expect_eq "(n7) b red, then the a || b line green as ?" "b.test.sh:1 ?:0" "$(lsu_stamps "$LSN7")"
 expect_match "(n7) b red then a || b green at one head is REFUSED, naming b" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSN7" wave/fixture)"

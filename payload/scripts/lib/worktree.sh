@@ -113,10 +113,24 @@ _wt_drop_legacy_link() {  # <worktree abs> -> 0 if one was deleted
 # ---------------------------------------------------------------------------
 # D1 — "never merge under a running suite", as one predicate.
 #
-# A FACT ABOUT PROCESSES AND DIRECTORIES (wave-20 T8c; review R2-1, R2-8; critic C2-1).
-# The land refuses while a `tests/run.sh` process has its SCRIPT PATH or its WORKING
-# DIRECTORY inside the project root (every linked worktree under it included) or inside
-# the land's target checkout. Nothing else is read.
+# A RUN THE GATE ADMITTED (wave-28 T12; D10). Every suite asks the machine's one gate before it
+# runs (payload/scripts/booked.sh for a Bash call, tests/run.sh for each suite of a run), and the
+# request records the tree it runs in (`tree=`, git's toplevel where it asked, or the shim's
+# --stamp-dir). So the land refuses while a request that is ADMITTED, NOT ENDED and whose holder
+# is ALIVE (lib/slots.sh's rule, `_slots_live`) names the project's main checkout or the land's
+# TARGET checkout as its tree. A request in a writer's own tree does not refuse: counting a
+# writer's suite in its own tree would refuse every land of a wave while any writer tests (the
+# reason the walk below counts only the runner). The store is the gate's (`gate_dir` in
+# lib/gate.sh, spelled here so this library does not load the gate's verbs); a store that is
+# absent or cannot be read gives no opinion.
+#
+# AND, AS BEFORE THE GATE, A RUNNER PROCESS (wave-20 T8c; review R2-1, R2-8; critic C2-1): a run
+# that never asked (a runner on a tree without the gate library, an older bionic) is still
+# found by its process.
+#
+# A FACT ABOUT PROCESSES AND DIRECTORIES. The walk refuses while a `tests/run.sh` process has
+# its SCRIPT PATH or its WORKING DIRECTORY inside the project root (every linked worktree under
+# it included) or inside the land's target checkout. Nothing else is read.
 #
 # NO SESSION PLAYS ANY PART. Until T8b the predicate was a conjunction: a busy session
 # file in this project AND a `tests/run.sh` anywhere on the machine. The process half never
@@ -218,7 +232,50 @@ _wt_runner_script() {  # <argv word>...
   return 1
 }
 
-# The D1 predicate. Prints `pid=<pid> cwd=<cwd> script=<path>` for the first runner that
+_wt_liveness() {  # rc 0 once lib/slots.sh's liveness rule is loaded
+  declare -F _slots_live >/dev/null 2>&1 && return 0
+  local lib
+  lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/slots.sh"
+  [ -r "$lib" ] || return 1
+  # shellcheck source=/dev/null
+  . "$lib" 2>/dev/null || return 1
+  declare -F _slots_live >/dev/null 2>&1
+}
+
+# _wt_busy_request <main-root> [target-checkout] — the gate's half of D1. Prints
+# `request=<id> key=<key> tree=<tree> holder=<pid>` for the first admitted, unended request with a
+# live holder whose tree is the main checkout or the target checkout, in the store's listing
+# order, and returns 0; returns 1 when none is.
+_wt_busy_request() {
+  local root="${1:-}" co="${2:-}" store f id l key tree holder adm ended
+  [ -n "$root" ] || return 1
+  _wt_liveness || return 1
+  store="${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
+  for f in "$store"/requests/*; do
+    id="${f##*/}"
+    case "$id" in ''|*[!0-9]*) continue ;; esac
+    key=''; tree=''; holder=''; adm=''; ended=''
+    while IFS= read -r l || [ -n "$l" ]; do
+      case "$l" in
+        key=*) key="${l#key=}" ;;
+        tree=*) tree="${l#tree=}" ;;
+        holder=*) holder="${l#holder=}" ;;
+        admitted=*) adm="${l#admitted=}" ;;
+        ended=*) ended="${l#ended=}" ;;
+      esac
+    done < "$f" 2>/dev/null
+    [ -n "$adm" ] && [ -z "$ended" ] && [ -n "$tree" ] || continue
+    [ "$tree" = "$root" ] || { [ -n "$co" ] && [ "$tree" = "$co" ]; } || continue
+    case "$holder" in *:*) : ;; *) continue ;; esac
+    _slots_live "${holder%%:*}" "${holder#*:}" || continue
+    printf 'request=%s key=%s tree=%s holder=%s' "$id" "$key" "$tree" "${holder%%:*}"
+    return 0
+  done
+  return 1
+}
+
+# The D1 predicate: the gate's requests first (_wt_busy_request, whose line it prints), then the
+# runner walk. The walk prints `pid=<pid> cwd=<cwd> script=<path>` for the first runner that
 # satisfies it and returns 0; returns 1 when none does. A working directory that could not
 # be read prints `unreadable`. The script is `_wt_runner_script`'s word, taken against the
 # working directory when it is relative, with its directory made physical, so a symlinked
@@ -228,10 +285,11 @@ _wt_runner_script() {  # <argv word>...
 # lie inside the first two. The line asks about the checkout that holds the branch, and the row trees
 # and landing trees nested in it are other checkouts: a runner whose working directory, or whose
 # script when its directory is unreadable, lies in one of them is left out.
-_wt_busy_suite() {  # <main-root> [target-checkout] [nested dirs left out] -> pid=... cwd=... script=...
+_wt_busy_suite() {  # <main-root> [target-checkout] [nested dirs left out] -> request=... | pid=... cwd=... script=...
   local root="${1:-}" co="${2:-}" out="${3:-}" pids cwds pid cmd cwd script dir x skip
   local -a words
   [ -n "$root" ] || return 1
+  _wt_busy_request "$root" "$co" && return 0
   pids="$(_wt_suite_pids)"
   [ -n "$pids" ] || return 1
   # shellcheck disable=SC2086  # one pid per word, digits only
