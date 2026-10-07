@@ -25,6 +25,7 @@
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   env:auto-memory override=<file|none|unknown> dir=<path|none> files=<n>
+#   env:share state=<file|default> path=<file>
 #   state:half-uninstalled=<yes|no>
 #   load-state=<loaded|failed|absent|unknown> error=<CLI error text|-> [cause=<text>]
 #   dup=<bare-name> ids=<a@x>,<b@y> fix=<consolidation command>
@@ -391,6 +392,35 @@ detect_rc_claude_proxy() {
 #   malformed — the markers do not pair up; nothing reads or writes the block
 detect_working_principles() {
   echo "env:working-principles state=$(principles_state)"
+  return 0
+}
+
+# THE MACHINE'S SHARE (wave-28 T10; D16). One file, `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share`, holds
+# one integer, 1 to 100; absent or unreadable, the share is 80 and nothing is written. The path is spelled as
+# `gate_share` (lib/gate.sh) spells it — CLAUDE_CONFIG_DIR and not `claude_home`, which BIONIC_CLAUDE_HOME moves —
+# because the file this names must be the file the gate reads. `session-poker.sh share <n>` spells it again, in
+# the hook, and tests/gate.test.sh §SHARE holds the three to one file. Setup, remove and doctor ask here.
+#
+#   file    — the file's first word is a whole number from 1 to 100: the share was set
+#   default — anything else, an absent or unreadable file or a value `gate_share` would refuse included: the
+#             gate's 80 stands. The source is judged by the VALUE exactly as `gate_share` judges it (read-
+#             structure-p19 #5), so a file holding `abc` is reported as the default it is.
+detect_share_file() {
+  printf '%s/bionic/share\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+}
+
+detect_share() {
+  local f v=''
+  f="$(detect_share_file)"
+  { read -r v < "$f"; } 2>/dev/null
+  v="${v%%[[:space:]]*}"
+  case "$v" in ''|*[!0-9]*|????*) v=0 ;; esac
+  v=$((10#$v))
+  if [ "$v" -ge 1 ] && [ "$v" -le 100 ]; then
+    echo "env:share state=file path=${f}"
+  else
+    echo "env:share state=default path=${f}"
+  fi
   return 0
 }
 

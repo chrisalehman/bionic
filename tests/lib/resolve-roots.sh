@@ -123,24 +123,62 @@ fi
 # THE PARENT IS JUDGED TOO (wave-28 T36; AC-10.6; Chris "D3: 1"). Whoever can write the root's
 # parent directory can rename the root away and make their own in its place, between this check
 # and a child's `bash`. So a parent that group or others can write is refused unless it carries
-# the sticky bit, which is what keeps a shared /tmp safe: there only a file's owner may rename it.
+# the sticky bit, which is what keeps a shared /tmp safe: there only a file's owner may rename it. The
+# parent is read THROUGH a symlink (`ls -ldL`, wave-28 T54): a link's own mode is always open, so a
+# parent reached through one is judged by the directory it leads to.
+#
+# EVERY LINK ON THE PARENT'S PATH IS JUDGED BY THE DIRECTORY THAT HOLDS IT (wave-28 T56; AC-10.6).
+# Where a link leads says nothing about who may replace the link: whoever can write the directory
+# holding it repoints it mid-run and supplies the `bash` every child resolves. So the walk goes
+# down the path one component at a time; each link is refused when its holder is open by the
+# parent's own rule (group or others can write it, no sticky bit), and then the link's target is
+# walked the same way, so a chain of links, and a holder that is itself a link, are covered. A
+# holder is read through links like the parent: it is the directory the link really sits in.
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
   if [ ! -d "$1" ]; then echo "$1 is not a directory"
   elif [ ! -O "$1" ]; then echo "$1 is not owned by this user"
   else
-    case "$(ls -ld "$1" 2>/dev/null)" in
+    case "$(ls -ldL "$1" 2>/dev/null)" in
       ?????w*|????????w*) echo "$1 is writable by group or others" ;;
     esac
   fi
 }
+_bionic_pin_open() {  # _bionic_pin_open <dir> — succeeds when group or others can write <dir> and it has no sticky bit
+  case "$(ls -ldL "$1" 2>/dev/null)" in
+    ?????????[tT]*) return 1 ;;
+    ?????w*|????????w*) return 0 ;;
+  esac
+  return 1
+}
+_bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why a link on <path> can be replaced; nothing when none can
+  local rest="$1" cur="" holder part target why=""
+  case "$1" in /*) ;; *) cur="." ;; esac
+  [ "$2" -le 16 ] || { echo "${3:-$1} leads through more than 16 links"; return; }
+  while [ -n "$rest" ] && [ -z "$why" ]; do
+    part="${rest%%/*}"
+    if [ "$part" = "$rest" ]; then rest=""; else rest="${rest#*/}"; fi
+    [ -n "$part" ] || { [ -z "$cur" ] || cur="$cur/"; continue; }  # a doubled slash stays as the caller spelled it
+    holder="${cur:-/}"
+    cur="$cur/$part"
+    [ -L "$cur" ] || continue
+    if _bionic_pin_open "$holder"; then
+      why="$cur is a symlink held in $holder, which is writable by group or others and has no sticky bit"
+    else
+      target="$(readlink "$cur")"
+      case "$target" in /*) ;; *) target="$holder/$target" ;; esac
+      why="$(_bionic_pin_links "$target" $(($2 + 1)) "${3:-$1}")"
+    fi
+  done
+  [ -z "$why" ] || echo "$why"
+}
 _bionic_pin_parent() {  # _bionic_pin_parent <root> — prints why <root>'s parent is open; nothing when it is not
-  local parent="${1%/*}"
+  local parent="${1%/*}" why=""
   [ "$parent" != "$1" ] || parent="."
   [ -n "$parent" ] || parent="/"
-  case "$(ls -ld "$parent" 2>/dev/null)" in
-    ?????????[tT]*) : ;;
-    ?????w*|????????w*) echo "$parent is writable by group or others and has no sticky bit" ;;
-  esac
+  why="$(_bionic_pin_links "$parent" 0)"
+  if [ -n "$why" ]; then echo "$why"
+  elif _bionic_pin_open "$parent"; then echo "$parent is writable by group or others and has no sticky bit"
+  fi
 }
 _BIONIC_PIN_WHY=""
 bionic_interpreter_pin() {

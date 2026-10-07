@@ -5473,7 +5473,7 @@ return 0
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
 # `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
-# T34, D24); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# T34, D24; `share` — wave-28 T10, D16, in both its forms); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5529,7 +5529,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         shift
         _next="${1:-}"
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|decline|budget)
+          amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|decline|budget|share)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
         esac ;;
       spawn-worktree.sh)
@@ -5710,6 +5710,27 @@ _bsg_cd_walk() {
   return 0
 }
 
+# _door_in_tree — sets _DOOR_HERE to yes when THE PROJECT THE RUN IS IN HAS THE RUNNER'S DOOR, else no
+# (wave-28 T54, D27; A-orch-124/125). The one predicate behind both halves of the door: the arm that
+# refuses a bare run, and the wrap that tells the shim `--runner`. The project is the tree the shim
+# asks from (booked.sh's `tree=`: `--stamp-dir`, else a leading `cd <dir>`, else the payload's cwd):
+# `_bsg_cd_walk`'s `_BSG_STAMP_DIR` when the walk is sure of a `cd`, else the payload's cwd
+# (`_BSG_CWD`), the same expression `_bsg_suites` roots its stamp names at; so the caller has walked
+# the command first. A walk that is not sure falls back to the cwd, as the shim does when it reads no
+# `cd` it can trust. Its checkout's tests/run.sh must say `--only`: a project with
+# suites and no runner, or a runner of its own that takes no flag, has no door to point an agent at.
+# A tree the walk cannot name (no cwd in the payload, a `cd` into nothing) has no runner to find;
+# `git -C ""` would read the hook's own directory instead, so it is not asked.
+_DOOR_HERE=no
+_door_in_tree() {
+  local _top _dir="${_BSG_STAMP_DIR:-$_BSG_CWD}"
+  _DOOR_HERE=no
+  [ -n "$_dir" ] && [ -d "$_dir" ] || return 0
+  _top="$(git -C "$_dir" rev-parse --show-toplevel 2>/dev/null)" || _top="$_dir"
+  [ -f "$_top/tests/run.sh" ] || return 0
+  ! grep -qF -- '--only' "$_top/tests/run.sh" 2>/dev/null || _DOOR_HERE=yes
+}
+
 # _BSG_TARGETS — the command's suite claims, cmd-class.sh's `targets` reading: one
 # `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61):
 # the solo check and the suite names below both read it, so naming the suites costs no fork.
@@ -5767,11 +5788,17 @@ _BSG_SUITES=""
 _BSG_RUNNER=0
 _BSG_NAME_MAX=100
 _bsg_suites() {
-  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}" _only=0 _other=0
+  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}" _only=0 _other=0 _asked=0
   _BSG_SUITES=""; _BSG_RUNNER=0
   while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] || continue
     if [ "$_k" = split ]; then _BSG_SUITES='?'; return 0; fi
+    # NO DOOR IN THIS PROJECT, NO RUNNER CLAIM (wave-28 T54, A-orch-125): its `tests/run.sh --only`
+    # is the full tree under its own name, as at 903c971b, and the shim is not told it is the runner.
+    if [ "$_k" = only ]; then
+      [ "$_asked" = 1 ] || { _door_in_tree; _asked=1; }
+      if [ "$_DOOR_HERE" != yes ]; then _k=file; _b=run.sh; _p="${_p%/*}/run.sh"; fi
+    fi
     case "$_k:$_b" in only:*) _only=1 ;; file:run.sh) : ;; *) _other=1 ;; esac
     if { [ "$_k" != file ] && [ "$_k" != only ]; } || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
       _b='?'
@@ -6635,6 +6662,18 @@ _CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT")
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
 
+  # ---------- THE PROJECT'S DOOR, ASKED ONCE FOR THIS CLAIM (wave-28 T54, D27; A-orch-124/125) ----------
+  #
+  # The door below, and the runner claim, exist only where the project the run is in has the
+  # runner's door (`_door_in_tree`). Where it has none, a `tests/run.sh --only <suite>` call is not a
+  # door claim: it is the `file` claim for `run.sh` that the classifier made of it at 903c971b, judged
+  # by the full-tree arm just below, and a bare suite run goes on to the budget.
+  _DOOR_HERE=no
+  if [ "$_kind" = "file" ] || [ "$_kind" = "only" ]; then
+    _wall_class_read "$COMMAND"; _bsg_cd_walk "$_WALL_CLASS_LINES"; _door_in_tree
+    if [ "$_kind" = "only" ] && [ "$_DOOR_HERE" != yes ]; then _kind="file"; _target="run.sh"; fi
+  fi
+
   # ---------- THE FULL TREE, FIRST AND FAIL-CLOSED ----------
   #
   # AHEAD OF THE DECLARED RUNS, and that order is the whole of the full-run rule. The
@@ -6685,7 +6724,11 @@ dispatches the runner, and the dispatch wall admits it only then."
   # one line naming the door; the door's own claims are `only` and go on to the budget below. The
   # main thread never reaches this loop (the partition above), so a person's bare run is not
   # refused and keeps the seam's pin. This arm holds the runner's world, not the queue (D9).
-  if [ "$_kind" = "file" ]; then
+  #
+  # ONLY WHERE THE PROJECT HAS THE DOOR (wave-28 T54, D27; A-orch-124): `_DOOR_HERE`, read above. Without
+  # the door a `file` claim goes on to the budget below as it did before T36, and an off-budget bare
+  # run is refused there as it always was.
+  if [ "$_kind" = "file" ] && [ "$_DOOR_HERE" = yes ]; then
     _door_name="$_target"
     case "$_door_name" in *'$'*|*'`'*|'') _door_name='<suite>' ;; esac
     _door_fact="use tests/run.sh --only $_door_name"
