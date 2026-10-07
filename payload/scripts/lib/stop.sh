@@ -2179,7 +2179,8 @@ return 2
 #   _ST_TURN        the turn key: the prompt record's uuid, else its timestamp, else empty
 #   _ST_MARK_TS     the prompt record's timestamp, or empty
 #   _ST_LAUNCHED    comma-joined names of this turn's main-thread Agent calls, less the ones
-#                   whose result was an error (a dispatch the preflight refused)
+#                   whose result was an error (a dispatch the preflight refused); once the
+#                   roster is read, each name whose row carries `row=` is that id (wave-28 T7)
 #   _ST_DECLINED    the turn's last `fill-declined:` reason, from the model's own text only
 #   _ST_CURRENT _ST_STATE _ST_CEILING _ST_WIDTH _ST_OPEN _ST_FREE   the ledger's numbers
 #   _ST_READY       every ready id, space-joined, untrimmed — the plan's set, launches included
@@ -2464,6 +2465,12 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
   if [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
     return 0
+  fi
+  # THE ROW LABEL FIRST (wave-28 T7; D17): a launch whose roster row carries `row=` counts as that
+  # row's, by the id itself; only a launch with none is matched by its name. The ledger records the
+  # same list, so the standing decline reads the launches as this count did.
+  if declare -F fill_launched_rows >/dev/null 2>&1; then
+    _ST_LAUNCHED="$(fill_launched_rows "$FILL_ROSTER" "$BIONIC_SID" "$_ST_LAUNCHED")"
   fi
   # THE WRITERS AMONG THEM (wave-24 T13, D11): `budget_open_writers` (lib/roster.sh) leaves a
   # read-only role out, as the dispatch wall and the tick's `TICK_OCCUPIED` do, so the three
