@@ -779,6 +779,20 @@ case "$VERB" in
       die "REFUSED — this session's roster carries a row of $_target; stop it as any rostered agent."
       exit 2
     fi
+    # ... and NO ROSTER OF THE PROJECT does (wave-28 T77; A-orch-239). The question "the roster never saw this
+    # agent" is asked of every `roster-*.state` under the state directory, a predecessor's and a dead
+    # session's included: a writer a predecessor's roster still holds, its contract unmet, is exactly what a
+    # `/clear` leaves until `adopt` copies the rows, and recording it as unrostered would pass its stop.
+    declare -F roster_sessions_with_name >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    _held="$(roster_sessions_with_name "$STATE_DIR" "$_target")"
+    if [ -n "$_held" ]; then
+      while IFS='|' read -r _hsid _hstat; do
+        [ -n "$_hsid" ] || continue
+        die "REFUSED — $_target is on roster ${_hsid:0:8}'s row ${_hstat:-with no status}."
+      done <<< "$_held"
+      die "Adopt it, or stop it by its own session's rules; nothing was recorded."
+      exit 2
+    fi
     read_panel
     if [ "$_live_ok" -ne 1 ]; then
       die "REFUSED — no fresh panel reading; a verb that cannot see does not record a stop for $_target."
