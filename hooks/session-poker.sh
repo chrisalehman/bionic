@@ -5443,7 +5443,7 @@ EOF
       exit 1
     fi
     BG_LINE=1
-    printf '%s\n' "$BG_LINES" | grep -q '^parallel-budget:' || BG_LINE=0
+    case "$BG_LINES" in 'parallel-budget:'*|*$'\n''parallel-budget:'*) : ;; *) BG_LINE=0 ;; esac
     BG_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
     if [ -z "$BG_WHO" ] || ! plan_verb_value_ok "$BG_WHO"; then
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who capped it; the plan is unchanged."
