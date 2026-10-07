@@ -721,3 +721,35 @@ roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work c
     index($0, "|extended=") || (index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|held=") && !index($0, "|adopted_from=")) { m = "" }
     END { if (m == "") exit 1; print m }' "$f" 2>/dev/null
 }
+
+# ---------- WHICH ROSTERS OF THE PROJECT HOLD A NAME (wave-28 T77; A-orch-239, A-orch-241) ----------
+#
+# ONE READ OVER EVERY `roster-*.state` OF A STATE DIRECTORY, asked "does any roster hold a row of this
+# name". `stop-orders.sh unrostered` and the stop guard's unrostered branch used to answer "the roster never
+# saw this agent" from THIS session's file alone, so a writer a predecessor's roster still held (the state
+# every `/clear` leaves until `adopt` copies the rows) was recorded as unrostered and its stop passed. Both
+# now ask this function; the guard's `accepted_addresses` is the same walk and calls it too.
+#
+# The walk is `adopt`'s own (`hooks/session-poker.sh`, its `for ADOPT_RF in … roster-*.state` loop, which is
+# inline there and not callable): a regular file, never a link, the session id off the file name. Unlike
+# `adopt` it does NOT skip this session's roster, and it does not ask whether the session is alive: a dead
+# session's roster counts, because a row is a row until the sweeper removes the file.
+#
+# AN ANSWER PER ROSTER: `<session-id>|<status>`, the status of the LAST row of the name on that roster (the
+# row `adopt` and the guard would read), one line per roster that holds one. Nothing printed, rc 0, when no
+# roster does. A file this process cannot open holds nothing it can read, like every other reader here.
+roster_sessions_with_name() {  # <state dir> <name> -> "<session-id>|<status>" per roster holding a row of the name
+  local dir="$1" name="$2" f sid st
+  [ -n "$name" ] || return 0
+  for f in "$dir"/roster-*.state; do
+    [ -f "$f" ] || continue
+    [ -L "$f" ] && continue
+    sid="${f##*/}"; sid="${sid#roster-}"; sid="${sid%.state}"
+    [ -n "$sid" ] || continue
+    st="$(ROSTER_WN="$name" awk "$_ROSTER_OPEN_AWK"'
+      index($0, "roster-state/") == 1 && _roster_kv($0, "name") == ENVIRON["ROSTER_WN"] { found = 1; last = _roster_kv($0, "status") }
+      END { if (found) print "=" last }' "$f" 2>/dev/null)"
+    case "$st" in "="*) printf '%s|%s\n' "$sid" "${st#=}" ;; esac
+  done
+  return 0
+}

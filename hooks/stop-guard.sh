@@ -707,7 +707,14 @@ unrostered_current() {
   UNROSTERED_WHY=$(line_field "$ORDER_LINE" why)
   return 0
 }
-if [ -z "$ROW_BY_NAME" ] && [ -z "$ROSTER_UNREADABLE" ] && [ -z "$TYPED_AS_ID" ] && unrostered_current; then
+# THE RECORD IS HONOURED ONLY WHILE NO ROSTER OF THE PROJECT HOLDS THE NAME (wave-28 T77; A-orch-239): this
+# session's, a predecessor's, a dead session's. The verb asked the same question when it recorded; a row that
+# appeared since (an `adopt`, a predecessor's roster that was not read) withdraws the record, and the stop meets
+# the ordinary refusal below. A name that reads as no rostered name is the only one that gets this far.
+unrostered_anywhere() {  # -> 0 when no roster of the project has a row of the name
+  [ -z "$(roster_sessions_with_name "$STATE_DIR" "$BASE")" ]
+}
+if [ -z "$ROW_BY_NAME" ] && [ -z "$ROSTER_UNREADABLE" ] && [ -z "$TYPED_AS_ID" ] && unrostered_current && unrostered_anywhere; then
   SG_DEADLINE_LIVE=0
   UR_ROW=$(roster_row status=closed "session=${BIONIC_SID}" "name=${BASE}" agent_id= \
     "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "reason=${UNROSTERED_WHY}" plan=none) || UR_ROW=""
@@ -797,15 +804,12 @@ is_bash_task_shaped() {  # <typed> -> 0 if it is a recorded background-shell id 
 # primitive takes. It is the one spelling this gate prints and the one it accepts (Section R),
 # and it is built from the roster FILENAME because that is the session that wrote the row.
 accepted_addresses() {  # -> "    <name>@session-xxxxxxxx" per launcher, newline separated
-  local f b out=""
-  for f in "$STATE_DIR"/roster-*.state; do
-    [ -f "$f" ] || continue
-    [ -L "$f" ] && continue
-    grep -qF "|name=${BASE}|" "$f" || continue
-    b="${f##*/roster-}"; b="${b%.state}"
-    out="${out}    ${BASE}@session-$(printf '%s' "$b" | cut -c1-8)
+  local sid out=""
+  while IFS='|' read -r sid _; do
+    [ -n "$sid" ] || continue
+    out="${out}    ${BASE}@session-$(printf '%s' "$sid" | cut -c1-8)
 "
-  done
+  done <<< "$(roster_sessions_with_name "$STATE_DIR" "$BASE")"
   printf '%s' "$out"
 }
 

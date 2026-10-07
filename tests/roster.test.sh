@@ -737,4 +737,40 @@ expect_status "R18g2 …and the open-name reader does not list it (a reason is n
 lib roster_row "${R5_BASE[@]}" "reasons=x" >/dev/null
 expect_status "R18h a near-miss key (reasons=) is still refused" "2" "$?"
 
+section "R19 — roster_sessions_with_name: which rosters of the project hold a row of a name (wave-28 T77; A-orch-239, A-orch-241)"
+# One read over every roster-*.state of a state directory, adopt's walk (a regular file, never a link, the session
+# id off the file name) without adopt's skip of the caller's own roster and without any liveness question: a dead
+# session's roster counts. An answer is `<session-id>|<status of the name's LAST row there>`. fails-when: a roster
+# holding the name is missed, a link is followed, a dead session's roster is skipped, the first row of a name is
+# reported where the last is the current one, or a name that only appears inside another field is matched.
+R19_D="$R7_DIR/r19"
+mkdir -p "$R19_D"
+R19_PLANT() {  # <sid> <name> <status> [<name> <status>]... -> a roster file of that session
+  local f="$R19_D/roster-$1.state" sid="$1" n st; shift
+  : > "$f"
+  while [ $# -ge 2 ]; do
+    lib roster_row "status=$2" "session=$sid" "name=$1" agent_id= launched_at=2026-10-07T00:00:00Z plan=none >> "$f"
+    shift 2
+  done
+}
+R19_PLANT s1 ghost intended ghost identified other confirmed
+R19_PLANT s2-dead ghost confirmed
+touch -t 202001010000 "$R19_D/roster-s2-dead.state"
+R19_PLANT s4 other confirmed
+ln -s "$R19_D/roster-s1.state" "$R19_D/roster-s3-link.state"
+printf 'roster-state/v1|status=confirmed|session=s5|name=bystander|deliverable=|name=ghost|plan=none\n' > "$R19_D/roster-s5.state"
+R19_GOT="$(lib roster_sessions_with_name "$R19_D" ghost)"
+expect_eq "R19a two rosters hold the name: this session's kind and a dead session's, the last row's status on each" \
+  "$(printf 's1|identified\ns2-dead|confirmed')" "$R19_GOT"
+expect_eq "R19b a symlinked roster is skipped, though it points at one that holds the name (the positive is R19a's s1)" "0" \
+  "$(printf '%s\n' "$R19_GOT" | grep -c 's3-link')"
+expect_eq "R19c a name appearing only as a later duplicate key on a bystander's row is not matched (s5: the first name= decides)" "0" \
+  "$(printf '%s\n' "$R19_GOT" | grep -c 's5')"
+expect_eq "R19d another name finds its own rosters" "$(printf 's1|confirmed\ns4|confirmed')" "$(lib roster_sessions_with_name "$R19_D" other)"
+expect_eq "R19e a name no roster holds prints nothing" "" "$(lib roster_sessions_with_name "$R19_D" nobody)"
+lib roster_sessions_with_name "$R19_D" nobody >/dev/null
+expect_status "R19e2 …and is rc 0" "0" "$?"
+expect_eq "R19f an empty name prints nothing" "" "$(lib roster_sessions_with_name "$R19_D" "")"
+expect_eq "R19g a directory with no roster prints nothing" "" "$(lib roster_sessions_with_name "$R7_DIR/r19-none" ghost)"
+
 finish
