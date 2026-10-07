@@ -1006,6 +1006,7 @@ T59_STUB="$TMPROOT/t59-stub"; mkdir -p "$T59_STUB"
 cat > "$T59_STUB/stat" <<'STUB'
 #!/bin/sh
 for d; do :; done
+[ "$d" != / ] || d=t61-fsroot  # the filesystem root has no name of its own
 f="$T59_STAT_DIR/${d##*/}"
 case " $* " in *" -L "*) ;; *) f="$f.nf" ;; esac  # a call that does not follow links reads <name>.nf
 if [ -f "$f" ]; then cat "$f"; else PATH=/usr/bin:/bin exec stat "$@"; fi
@@ -1087,6 +1088,73 @@ expect_eq "7.57c …and the pin is built there" "present" "$(there "$T59_LNK/mut
 t59_own "$SEAM" "$T59_LNK/r4"
 expect_ne "7.57d control: the shipped function refuses that same path" "0" "$PIN_RC"
 rm -f "$T59_STAT_DIR/t59-lnk.nf"
+# THE OWNER OF THE FILESYSTEM ROOT IS TRUSTED TOO (wave-28 T61; AC-10.6; pass 34). In an unprivileged Linux
+# user namespace every uid with no mapping, root's included, reads as the overflow uid 65534: `/` and the
+# directories on the way down all read 65534, and "this user or root" refused every pin. The stub answers
+# 65534 for `/` (it is named t61-fsroot) and for an ancestor: the namespace's shape. An ancestor owned by
+# a DIFFERENT uid is still refused, and the owner of `/` is trusted only where it is the root's own.
+T61_FS="$T59_STAT_DIR/t61-fsroot"; T61_NS=65534
+printf '%s\n' "$T61_NS" > "$T61_FS"; printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-anc"
+t59_own "$SEAM" "$T59_SUB/n1"
+expect_eq "7.58 the stub answers 65534 for / and for an ancestor (a user namespace): the pin is built" "0" "$PIN_RC"
+expect_eq "7.58b …and is there" "present" "$(there "$T59_SUB/n1/pin")"
+STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T59_SUB"; unset STOP_PATH
+expect_eq "7.58c …a hand run there exits 0" "0" "$STOP_RC"
+expect_contains "7.58d …and runs its check" "check ran" "$STOP_LOG"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-anc"
+t59_own "$SEAM" "$T59_SUB/n2"
+expect_ne "7.59 / reads 65534 and an ancestor reads another, mapped uid: refused" "0" "$PIN_RC"
+expect_contains "7.59b …naming the directory and that uid" "$T59_ANC $T59_WHY_OWN" "$PIN_ERR"
+expect_eq "7.59c …and nothing is built there" "absent" "$(there "$T59_SUB/n2")"
+STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T59_SUB"; unset STOP_PATH
+expect_eq "7.59d the hand run exits 2" "2" "$STOP_RC"
+expect_contains "7.59e …naming the directory and that uid, with the path remedy" \
+  "$(t57_line "$T59_SUB" "$T59_ANC $T59_WHY_OWN" "$T57_FIX")" "$STOP_ERR"
+rm -f "$T61_FS"; printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-anc"
+t59_own "$SEAM" "$T59_SUB/n3"
+expect_ne "7.59f / reads as the root it is and an ancestor reads 65534: refused (the overflow uid is trusted only where / has it)" "0" "$PIN_RC"
+expect_contains "7.59g …naming the directory and 65534" "$T59_ANC is owned by uid $T61_NS, who is neither you nor root" "$PIN_ERR"
+printf '%s\n' "$T61_NS" > "$T61_FS"; printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-lnk.nf"
+t59_own "$SEAM" "$T59_LNK/n4"
+expect_eq "7.59h a link on the path owned by the uid / has: built (the link's own owner is judged by the same rule)" "0" "$PIN_RC"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-lnk.nf"
+t59_own "$SEAM" "$T59_LNK/n5"
+expect_ne "7.59i …and a link owned by another mapped uid is still refused" "0" "$PIN_RC"
+rm -f "$T59_STAT_DIR/t59-lnk.nf" "$T59_STAT_DIR/t59-anc" "$T61_FS"
+# a TMPDIR that does not exist names its real cause, not an owner nobody could read
+T61_MISS="$T59_OWN/t61-no-such-tmp"
+stop_run "$STOP_SUITE" "$T61_MISS"
+expect_eq "7.60 a TMPDIR that does not exist: the hand run exits 2" "2" "$STOP_RC"
+expect_contains "7.60b …naming the root as not a directory, with the path remedy" \
+  "$(t57_line "$T61_MISS" "$T61_MISS/bionic-interpreter-pin.$STOP_UID is not a directory" "$T57_FIX")" "$STOP_ERR"
+expect_absent "7.60c …and not naming an owner nobody could read" "uid unknown" "$STOP_ERR"
+pin_call "$SEAM" "$T61_MISS/bionic-interpreter-pin.$STOP_UID"
+expect_contains "7.60d the function's own line says the same" "is not a directory, so nothing is pinned" "$PIN_ERR"
+# a root another user planted at the predictable name cannot be removed from a sticky /tmp: the path remedy
+T61_STK="$T87_DIR/t61-sticky"; mkdir -p "$T61_STK"; chmod 1777 "$T61_STK"
+T61_PLANT="$T61_STK/bionic-interpreter-pin.$STOP_UID"; mkdir -m 0700 "$T61_PLANT"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID"
+cp "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID" "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID.nf"
+STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T61_STK"; unset STOP_PATH
+expect_eq "7.61 a root planted by another uid at the predictable name: the hand run exits 2" "2" "$STOP_RC"
+expect_contains "7.61b …naming the root and its owner, with the path remedy (this user cannot remove it)" \
+  "$(t57_line "$T61_STK" "$T61_PLANT $T59_WHY_OWN" "$T57_FIX")" "$STOP_ERR"
+expect_eq "7.61c …and the root is still there" "present" "$(there "$T61_PLANT")"
+rm -f "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID" "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID.nf"
+# the mutant: the third trusted owner removed. The namespace shape is refused again (the defect 7.58 guards).
+T61_MUT="$TMPROOT/t61-mut-fsowner.sh"
+anchor "$SEAM" '|| uid=0' 1
+grep -vF '|| uid=0' "$SEAM" > "$T61_MUT"
+expect_eq "7.62 the no-root-owner mutant parses" "0" "$(bash -n "$T61_MUT" >/dev/null 2>&1; echo $?)"
+t59_own "$T61_MUT" "$T59_SUB/n6"
+expect_eq "7.62b …and builds where no stub is set (not vacuous)" "0" "$PIN_RC"
+printf '%s\n' "$T61_NS" > "$T61_FS"; printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-anc"
+t59_own "$T61_MUT" "$T59_SUB/n7"
+expect_ne "7.62c under the mutant the namespace shape is refused (the defect 7.58 guards)" "0" "$PIN_RC"
+expect_contains "7.62d …naming 65534 as an owner who is neither this user nor root" "is owned by uid $T61_NS, who is neither you nor root" "$PIN_ERR"
+t59_own "$SEAM" "$T59_SUB/n8"
+expect_eq "7.62e control: the shipped function builds that same shape" "0" "$PIN_RC"
+rm -f "$T61_FS" "$T59_STAT_DIR/t59-anc"
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
   T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
