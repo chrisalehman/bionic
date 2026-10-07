@@ -902,8 +902,8 @@ if [ "$T57_ACL" = 1 ]; then
   T57_INH_ROOT="$T57_INH/bionic-interpreter-pin.$STOP_UID"
   stop_run "$STOP_SUITE" "$T57_INH"
   expect_eq "7.47 an inheritable entry on a 0700 temp directory: the made root inherits it, the hand run exits 2" "2" "$STOP_RC"
-  expect_contains "7.47b …naming the root and the entry, with the root's own remedy" \
-    "resolve-roots.sh: no interpreter pin at $T57_INH_ROOT — $T57_INH_ROOT carries an ACL letting group:everyone add_file,add_subdirectory,delete_child; remove $T57_INH_ROOT or set TMPDIR, then run again" \
+  expect_contains "7.47b …naming the root and the entry, with the path remedy (the root is gone, so removing it helps nothing)" \
+    "resolve-roots.sh: no interpreter pin at $T57_INH_ROOT — $T57_INH_ROOT carries an ACL letting group:everyone add_file,add_subdirectory,delete_child; $T57_FIX, then run again" \
     "$STOP_ERR"
   expect_eq "7.47c …and the root it made is removed" "absent" "$(there "$T57_INH_ROOT")"
   R="$T57_INH/fn-root"; pin_call "$SEAM" "$R"
