@@ -3018,7 +3018,7 @@ bw_dispatched "$R_NO" t54writer "suites_allowed=alpha.test.sh" suites_source=dec
 run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
 expect_status "DOOR.29 a runner without --only, called with --only, is the full tree: refused" 2 "$ST"
 expect_contains "DOOR.29b …by the full-tree arm, as at 903c971b" "full tree refused; allowed: alpha.test.sh" "$(dr_line)"
-expect_absent "DOOR.29c …and the door has no say" "one door" "$ERR"
+expect_absent "DOOR.29c …and the door has no say" "(one door)" "$(dr_line)"
 bw_dispatched "$R_NO" t54full "suites_allowed=run.sh" suites_source=declared files=
 run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
 expect_status "DOOR.30 …and passes on a row that carries the full tree" 0 "$ST"
@@ -3065,7 +3065,7 @@ bw_dispatched "$R_DR" t36writer "suites_allowed=alpha.test.sh" suites_source=dec
 # in every project (the defect), with it inverted it fires only where there is none, and with the
 # `--only` read dropped a runner of the project's own is taken for the door. Each runs before its
 # absence is read: the mutant parses, and still refuses an off-budget run.
-DRP_FN='^_door_in_tree() {'
+DRP_FN='^_door_in_tree\(\) \{'
 DRP_READ='grep -qF -- '"'--only'"
 mk_door_mutant() {  # <dir> <shell text appended to walls.sh: a later definition wins>
   rm -rf "$1"; mkdir -p "$1/hooks"
