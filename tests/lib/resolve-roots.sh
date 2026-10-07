@@ -155,7 +155,9 @@ fi
 # after they are made, where what they inherited is an ordinary entry (the macOS `only_inherit` rule).
 # On macOS `writesecurity` and `chown` count: their holder grants itself the rest. And a directory on
 # the path owned by neither this user nor root is open: its owner renames what it holds whatever its
-# mode says. The owner is read by _bionic_pin_owner, the one place a test stubs `stat`.
+# mode says. So is a LINK on the path owned by neither (wave-28 T59, A-T56.5): `stat -L` reads where a
+# link leads, so the link's own owner is read without following it, and whoever owns the link may repoint it.
+# The owner is read by _bionic_pin_owner, the one place a test stubs `stat`.
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
   if [ ! -d "$1" ]; then echo "$1 is not a directory"
   elif [ ! -O "$1" ]; then echo "$1 is not owned by this user"
@@ -191,8 +193,10 @@ _bionic_pin_acl_getfacl() {  # _bionic_pin_acl_getfacl <dir> — prints "<princi
     break
   done
 }
-_bionic_pin_owner() {  # _bionic_pin_owner <dir> — prints the uid that owns <dir>, read through links
-  stat -L -c %u "$1" 2>/dev/null || stat -L -f %u "$1" 2>/dev/null
+_bionic_pin_owner() {  # _bionic_pin_owner <path> [nofollow] — prints the uid that owns <path>, read through links unless `nofollow`
+  local follow="-L"
+  [ "${2:-}" != nofollow ] || follow=""
+  stat $follow -c %u "$1" 2>/dev/null || stat $follow -f %u "$1" 2>/dev/null
 }
 _BIONIC_PIN_ACL=""
 _bionic_pin_acl() {  # _bionic_pin_acl <dir> <`ls -ldLe` output of <dir>> — leaves the first ACL entry that lets anyone but the owner change what <dir> holds in _BIONIC_PIN_ACL
@@ -223,7 +227,7 @@ _bionic_pin_open() {  # _bionic_pin_open <dir> [any] — succeeds when another u
   return 1
 }
 _bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why a component of <path> can be replaced; nothing when none can
-  local rest="$1" cur="" holder part target why=""
+  local rest="$1" cur="" holder part target linkowner why=""
   case "$1" in /*) ;; *) cur="." ;; esac
   [ "$2" -le 16 ] || { echo "${3:-$1} leads through more than 16 links"; return; }
   while [ -n "$rest" ] && [ -z "$why" ]; do
@@ -237,9 +241,13 @@ _bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why
       else why="$holder $_BIONIC_PIN_OPEN"
       fi
     elif [ -L "$cur" ]; then
-      target="$(readlink "$cur")"
-      case "$target" in /*) ;; *) target="$holder/$target" ;; esac
-      why="$(_bionic_pin_links "$target" $(($2 + 1)) "${3:-$1}")"
+      linkowner="$(_bionic_pin_owner "$cur" nofollow)"  # the link's own owner repoints it, whatever it leads to
+      case "$linkowner" in 0|"$UID") ;; *) why="$cur is a symlink owned by uid ${linkowner:-unknown}, who is neither you nor root" ;; esac
+      if [ -z "$why" ]; then
+        target="$(readlink "$cur")"
+        case "$target" in /*) ;; *) target="$holder/$target" ;; esac
+        why="$(_bionic_pin_links "$target" $(($2 + 1)) "${3:-$1}")"
+      fi
     fi
   done
   [ -z "$why" ] || echo "$why"
