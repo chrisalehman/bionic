@@ -6475,10 +6475,11 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # variable part is one extra fault plus two not-checked lines; the fixed part is unmoved.
 # RAISED 17 -> 18 (wave-27 T17, D5): the scaffold gained the readers' `Questions:` line; the FIXED part is fifteen, ELEVEN scaffold lines.
 # RAISED 18 -> 20 (wave-27 T31, D23): the scaffold gained `Lands-red:` and `Red-evidence:`; the FIXED part is seventeen, THIRTEEN scaffold lines.
-expect_eq "§combined meta: the shipped scaffold is thirteen lines, the count both caps are built on" \
-  "13" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 20 lines (17 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 20 ] && echo 0 || echo 1)"
+# RAISED 20 -> 22 (wave-28 T58, repairing the pin after T7/T22): the scaffold gained `Row:` and `Lands-on:`; the FIXED part is nineteen, FIFTEEN scaffold lines.
+expect_eq "§combined meta: the shipped scaffold is fifteen lines, the count both caps are built on" \
+  "15" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 22 lines (19 + 1 extra fault + 2 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 22 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE FULL-RUN WALL'S LINE IS NAMED — a cap without saying which line fills it is a
@@ -7462,8 +7463,9 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
 # The fixed part is FOURTEEN since wave-24 T9 (AC-4.8): the scaffold's tenth line is the
 # optional `Done marker:` (§combined holds the ten). Three faults: fourteen plus two.
-expect_status "§three-arms …and the wire is at most 19 lines (17 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 19 ] && echo 0 || echo 1)"
+# The fixed part is NINETEEN since wave-28 T7/T22 (the scaffold's `Row:` and `Lands-on:`); the cap follows (wave-28 T58).
+expect_status "§three-arms …and the wire is at most 21 lines (19 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 21 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
 # MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is
@@ -9035,7 +9037,13 @@ expect_contains "§scaffold-walk precondition: …and Files: lists the record" "
 expect_absent "§scaffold-walk precondition: …and no placeholder is left" "<" "$WALK_ER"
 WALK_ERB="$(walk_fill_re evidence "$WALK_REC/T3-evidence.md" B)"
 expect_contains "§scaffold-walk precondition: shape B carries the same run" "Re-executes: \`$WALK_RUN\`" "$WALK_ERB"
-expect_absent "§scaffold-walk precondition: …and no Suites: line" "Suites:" "$WALK_ERB"
+# NO `Suites:` LINE means no line that BEGINS with the label: the scaffold's `Lands-on:` comment names the
+# word ("within Suites:") since wave-28 T7, so a substring read is red on a brief that has no such line
+# (wave-28 T58). The positive beside it: shape A, on the same reader, has exactly one.
+expect_eq "§scaffold-walk precondition: …shape A, read by the same line reader, carries one Suites: line" "1" \
+  "$(printf '%s\n' "$WALK_ER" | /usr/bin/grep -c '^Suites:')"
+expect_eq "§scaffold-walk precondition: …and shape B carries no line that begins Suites:" "0" \
+  "$(printf '%s\n' "$WALK_ERB" | /usr/bin/grep -c '^Suites:')"
 REPO=$(walk_repo rwalk5 audited)
 expect_nonempty "§scaffold-walk precondition: the walk repo's .bionic holds its bound plan" \
   "$(/usr/bin/grep -rls '^rigor: audited' "$REPO/.bionic")"
@@ -11125,7 +11133,7 @@ expect_eq "LO8 the scaffold slot pasted unfilled declares nothing: the bound wri
 expect_contains "LO8b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
 
 # ============================================================================
-section "§ROW-LABEL — Row: binds the dispatch to a row whatever the agent is called (wave-28 T7; REQ-3 AC-3.4, D17)"
+section "§ROW-LABEL — Row: binds the dispatch to a row of the plan, and a Row: the name contradicts is refused (wave-28 T7, T55; REQ-3 AC-3.4, D17)"
 # ============================================================================
 # `Row: <id>` on a line of its own is written on the launch row as `row=<id>`; the launch record,
 # the fill and the stop wall read it before the name match (tests/session-poker.test.sh §ROW-LABEL,
@@ -11172,7 +11180,10 @@ section "§ONE-ROW — a dispatch is bound to ONE row, whichever arm asks (wave-
 t55_gate() {  # <tag> <name> <body lines> [<extra row ids, space-separated>] -> GATE_*, T7_ROW
   local _x _ids=""
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  for _x in ${4:-}; do _ids="${_ids}| ${_x} | 4 | build | long | implementor | — | 30 | REQ-1 | c.sh | — | — | pending | — |
+  local _r
+  for _x in ${4:-}; do
+    _r="—"; case "$_x" in *=*) _r="${_x#*=}"; _x="${_x%%=*}" ;; esac   # `<id>=<reads>` gives the row a reads cell
+    _ids="${_ids}| ${_x} | 4 | build | long | implementor | — | 30 | REQ-1 | c.sh | — | — | pending | ${_r} |
 "; done
   printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| T2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n| T9 | 7 | doc | the release | implementor | — | 20 | REQ-1 | CHANGELOG.md | — | — | pending | approval:release |\n%s' "$_ids" \
     >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
@@ -11263,6 +11274,65 @@ Lands-on: widget'
 expect_eq "OR10b with the reader returning the name's row alone, P2 is ADMITTED (the row above is red on it)" \
   "allow" "$GATE_VERDICT"
 GATE="$OR_SAVED_GATE"; rm -rf "$OR_ROOT"
+
+# AN NAME THAT MATCHES MORE THAN ONE ROW, WITH NO Row:, IS REFUSED (wave-28 T58; REQ-5, D8). The reader
+# bound the first match and the approval arm judged only it, so a second match that waits for approval
+# was carried past (the pass-31 probe: `x-A-T1` against rows T1 and A-T1). The launch record already
+# records nothing for such a name; the wall now says the same. A `Row:` resolves it (T55's mismatch arm
+# still judges a label outside the matches); a name that matches one row or none is as T55 built it.
+# FIXTURES: rows T1, T2, T9 and A-T1 (A-T1 reads approval:release); `x-A-T1` matches T1 and A-T1, in
+# plan order. SYNTHESIZED from the probe. fails-when: the ambiguous name is admitted, its line names
+# no row or is over 100 columns, or a Row: on it is not bound and judged.
+AN_ROWS="A-T1=approval:release"
+t55_gate an1 x-A-T1 'Lands-on: widget' "$AN_ROWS"
+expect_eq "AN1 (the probe) a name that matches T1 and A-T1, no Row:, is refused" "deny" "$GATE_VERDICT"
+expect_contains "AN1b …the one line names both rows and the fix" \
+  "the name matches rows T1, A-T1 (add Row: T1)" "$(t7_first)"
+expect_eq "AN1c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_contains "AN1d …the detail names the dispatch's name and the plan" "x-A-T1" "$GATE_VERR"
+expect_eq "AN1e …and no row is written" "" "$T7_ROW"
+expect_absent "AN1f …and no approval wait rides with it: the first match is judged by nothing" "waits for approval" "$GATE_VERR"
+t55_gate an2 x-A-T1 'Row: A-T1
+Lands-on: widget' "$AN_ROWS"
+expect_eq "AN2 the same name briefed Row: A-T1 is bound to A-T1 and refused by the approval arm" "deny" "$GATE_VERDICT"
+expect_contains "AN2b …the line names A-T1's wait" "row A-T1 waits for approval:release" "$(t7_first)"
+expect_contains "AN2c …the detail names the row" "row A-T1 of" "$GATE_VERR"
+expect_absent "AN2d …and no ambiguity line rides with it" "matches rows" "$GATE_ERR$GATE_VERR"
+t55_gate an3 x-A-T1 'Row: T1
+Lands-on: widget' "$AN_ROWS"
+expect_eq "AN3 the same name briefed Row: T1 is admitted" "allow" "$GATE_VERDICT"
+expect_eq "AN3b …the row carries row=T1" "T1" "$(roster_field "$T7_ROW" row)"
+t55_gate an4 w-T9 'Lands-on: widget' "$AN_ROWS"
+expect_eq "AN4 a name that matches exactly one row (T9) is bound to it, as before: refused for its wait" "deny" "$GATE_VERDICT"
+expect_contains "AN4b …by T9's wait" "$OR_WAIT" "$(t7_first)"
+expect_contains "AN4c …the detail names the row" "row T9 of" "$GATE_VERR"
+expect_absent "AN4d …with no ambiguity line" "matches rows" "$GATE_ERR$GATE_VERR"
+t55_gate an5 w-misc 'Row: T2
+Lands-on: widget' "$AN_ROWS"
+expect_eq "AN5 a name that matches no row briefed Row: T2 is still admitted (OR5 stands)" "allow" "$GATE_VERDICT"
+t55_gate an6 w-T2 'Lands-on: widget' "$AN_ROWS"
+expect_eq "AN6 a name that matches exactly one row (T2), no Row:, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "AN6b …and its row is written" "intended" "$(roster_field "$T7_ROW" status)"
+AN_LX="a-row-id-of-forty-characters-long-0001"; AN_LY="b-row-${AN_LX}"
+t55_gate an7 "w-${AN_LY}" 'Lands-on: widget' "$AN_LX $AN_LY"
+expect_eq "AN7 the widest case, two long row ids one behind the other's name, is refused" "deny" "$GATE_VERDICT"
+expect_contains "AN7b …each id cut to eleven columns on the one line" \
+  "the name matches rows a-row-id-o…, b-row-a-ro… (add Row: a-row-id-o…)" "$(t7_first)"
+expect_eq "AN7c …and that line is at most 100 columns" "ok" "$(t7_cols_ok)"
+
+# THE MUTATION ARM: the ambiguity check removed, so the first match is bound as before. The shipped
+# reader refuses AN1; a doctored copy of the hook admits it, so the row above can fail.
+AN_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/t58-reader.XXXXXX")
+AN_HOOKS=$(s21_plant "$AN_ROOT")
+sed 's/^  if \[ -z "\$DP_ROW" \] \&\& \[ -n "\$DP_NAME_AMBIG" \]; then$/  if false; then/' "$GATE" > "$AN_HOOKS/dispatch-preflight.sh"
+expect_eq "AN8 meta: the doctored reader landed (the sed anchor still matches)" "1" \
+  "$(/usr/bin/grep -c '^  if false; then$' "$AN_HOOKS/dispatch-preflight.sh")"
+AN_SAVED_GATE="$GATE"; GATE="$AN_HOOKS/dispatch-preflight.sh"
+t55_gate an8 x-A-T1 'Lands-on: widget' "$AN_ROWS"
+expect_eq "AN8b with the check removed, the ambiguous name is ADMITTED on its first match (AN1 is red on it)" \
+  "allow" "$GATE_VERDICT"
+expect_eq "AN8c …and its row is written, bound to the first match" "intended" "$(roster_field "$T7_ROW" status)"
+GATE="$AN_SAVED_GATE"; rm -rf "$AN_ROOT"
 
 # ============================================================================
 section "§BARE — a bare file name with an extension is a deliverable (wave-28 T7; REQ-15 AC-15.1, D32)"
