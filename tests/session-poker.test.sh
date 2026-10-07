@@ -6166,6 +6166,13 @@ jq -nc '{type:"assistant",isSidechain:false,
            {type:"tool_use",id:"toolu_1",name:"Agent",input:{name:"T2",prompt:"row T2"}},
            {type:"tool_use",id:"toolu_2",name:"Agent",input:{name:"T3",prompt:"row T3"}}]}}' \
   >> "$S31C_TR"
+# THE TURN SETS THE TWO ROWS' TASK ENTRIES IN PROGRESS (wave-28 T38; REQ-13, D30): a dispatch turn
+# owes one per row, and this row pins the fill alone.
+jq -nc '{type:"assistant",isSidechain:false,agentId:null,
+         message:{role:"assistant",content:[
+           {type:"tool_use",id:"toolu_u2",name:"TaskUpdate",input:{taskId:"2",status:"in_progress"}},
+           {type:"tool_use",id:"toolu_u3",name:"TaskUpdate",input:{taskId:"3",status:"in_progress"}}]}}' \
+  >> "$S31C_TR"
 s31_stop "$R31C" "$S31C_TR"
 expect_eq "31c a turn that dispatched both ready rows is not refused" "" "$(s31_decision)"
 
