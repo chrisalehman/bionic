@@ -26,6 +26,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -420,6 +421,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
+  die "  bash ${HOOK_DIR}/session-poker.sh share [<n>]   print the machine's share, 1 to 100 (80 when none is set); with <n>, set it: one integer in the user-level share file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh window     the instant this session's roster begins, UTC ISO-8601 (empty when it cannot be dated)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
@@ -741,6 +743,13 @@ case "$VERB" in
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
+    ;;
+  # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). No operand prints it; one operand sets it. The
+  # value's own shape is the verb's refusal (1); a second operand is the usage error.
+  share)
+    [ $# -le 1 ] || usage "share takes at most one argument: the share to set, 1 to 100."
+    SH_SET=no; SH_ARG=""
+    if [ $# -eq 1 ]; then SH_SET=yes; SH_ARG="$1"; fi
     ;;
   # ONE OPTIONAL OPERAND (wave-20 REQ-5, AC-5.6): the plan whose ledger to read. Without it, the
   # session's own run — the one every other verb here resolves.
@@ -3754,6 +3763,45 @@ case "$VERB" in
     }
     printf '%s\n' "$SECS"
     exit 0
+    ;;
+
+  # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). The share is one integer, 1 to 100, in
+  # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share`; with no file the gate's share is 80. Printing it asks
+  # `gate_share`, the one reader, so what this prints is what the gate decides on. Setting it writes that
+  # file by the SAME path expression `gate_share` reads (not `claude_home`, which BIONIC_CLAUDE_HOME moves),
+  # through a staged copy and a rename so a reader never sees half a number. It is the machine's and not a
+  # run's: no session key, roster or engagement is read, and nothing but the file is written. REFUSED (1):
+  # a value that is not a whole number from 1 to 100 (leading zeros read as decimal), or a file that cannot be
+  # written; either way the share is as it was. The contract-verb arm of the bash wall lists `share`, so a
+  # subagent may call neither form.
+  share)
+    SH_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"
+    if [ "$SH_SET" = no ]; then
+      if ! declare -F gate_share >/dev/null 2>&1; then
+        die "REFUSED — lib/gate.sh did not load, so the share cannot be read."
+        exit 3
+      fi
+      gate_share
+      exit 0
+    fi
+    case "$SH_ARG" in
+      ''|*[!0-9]*) SH_BAD=yes ;;
+      *) if [ "${#SH_ARG}" -gt 9 ]; then SH_BAD=yes
+         else SH_N=$((10#$SH_ARG)); if [ "$SH_N" -ge 1 ] && [ "$SH_N" -le 100 ]; then SH_BAD=no; else SH_BAD=yes; fi; fi ;;
+    esac
+    if [ "$SH_BAD" = yes ]; then
+      die "REFUSED — share $(printf '%q' "${SH_ARG:0:20}") is not a whole number from 1 to 100; the share is unchanged."
+      exit 1
+    fi
+    SH_TMP="${SH_FILE}.tmp.$$"
+    if mkdir -p "${SH_FILE%/*}" 2>/dev/null && printf '%s\n' "$SH_N" > "$SH_TMP" 2>/dev/null \
+       && mv -f "$SH_TMP" "$SH_FILE" 2>/dev/null; then
+      say "share set to $SH_N"
+      exit 0
+    fi
+    rm -f "$SH_TMP" 2>/dev/null
+    die "REFUSED — the share file could not be written; the share is unchanged."
+    exit 1
     ;;
 
   # THE DEFAULT, WITHOUT THE CONFIG — added for hooks/dispatch-preflight.sh's arming wall

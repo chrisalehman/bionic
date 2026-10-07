@@ -2095,6 +2095,11 @@ am_refused "19v4: bash session-poker.sh finding-stated" \
 # mark its own row landed. `ready` runs it as a command, after the publish; a subagent never does.
 am_refused "19v5: bash session-poker.sh row-landed" \
   "bash $AM_POKER row-landed T2 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z"
+# §ARM-A (share) — wave-28 T10, REQ-2 AC-2.1 surfaces, D16: the share is the one number that bounds every heavy command on
+# the machine, so an agent that could set it could widen its own room. Both forms are the main thread's: the arm reads the
+# verb, not its operands. The verb joins the existing arm's list; there is no second arm.
+am_refused "19v6: bash session-poker.sh share <n>" "bash $AM_POKER share 90"
+am_refused "19v7: bash session-poker.sh share, the bare form" "bash $AM_POKER share"
 # §ARM-A (land --by-hand) — wave-28 T3, REQ-5 AC-5.2, D9: the hand landing publishes a row past the
 # line, so only the main thread may call it. The arm gains a second script name, not a second arm.
 AM_SW="/opt/plugin/scripts/spawn-worktree.sh"
@@ -2123,6 +2128,8 @@ am_admitted "19j9: finding-stated from the main thread" \
   "bash $AM_POKER finding-stated 'record/wave-01/r.md#1' 'a sentence'" ""
 am_admitted "19j10: row-landed from the main thread" \
   "bash $AM_POKER row-landed T2 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z" ""
+am_admitted "19j11: share <n> from the main thread" "bash $AM_POKER share 90" ""
+am_admitted "19j12: share from the main thread" "bash $AM_POKER share" ""
 
 # EVERY VERB ON THE LIST, READ FROM THE LIST (wave-27 T16; team-lead ruling). The refusal line is
 # `bionic: <verb> refused — <fact> (<fix>)`, capped at 100 columns by refuse.sh, and a verb long
@@ -2137,6 +2144,7 @@ expect_contains "19x0 precondition: the verb list is read from walls.sh's case a
 expect_contains "19x0b …and the last verb added, release-check" "release-check" "$AM_VERBS"
 expect_contains "19x0c …and the verb T17 added, finding-stated" "finding-stated" "$AM_VERBS"
 expect_contains "19x0d …and the verb T6 added, row-landed" "row-landed" "$AM_VERBS"
+expect_contains "19x0e …and the verb T10 added, share" " share " " $AM_VERBS "
 for _am_v in $AM_VERBS; do
   am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
 done
