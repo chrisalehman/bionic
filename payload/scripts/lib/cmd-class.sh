@@ -46,7 +46,9 @@
 #      for `npm run build`) decides. A token that carried WHITESPACE INSIDE QUOTES is prose
 #      by construction and is replaced with an opaque marker that matches nothing. A SCRIPT
 #      at argv[0] decides too: `./tests/run.sh` runs the suite as surely as
-#      `bash tests/run.sh` does.
+#      `bash tests/run.sh` does. A SHELL WHOSE SCRIPT IS A BARE VARIABLE (`bash "$s"` in a
+#      glob loop, `bash "$SUITE"`) is a suite claim naming that variable, unless every text
+#      in the command that binds it plainly names no suite (wave-28 T11, D13).
 #
 # THE SUPERSET RULE (R-12, critic C-1 2026-08-30). Steps 2 and 3 together exist so that this
 # reading is a superset of the `(^|[;&| ])bash +tests/run\.sh` string match bionic 1.3.1
@@ -648,7 +650,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # positions this does. It is set ONLY for the two script forms that name a file —
     # pytest, `npm test`, `go test` and `make test` are suite-class and name no
     # tests/<x>.test.sh, so they leave it empty and the caller reports no target.
-    function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift, n0) {
+    function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift, n0, shc) {
       LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0
       n = argv_tok(s, a)
       if (n == 0) return "none"
@@ -683,10 +685,11 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         # here: the command names a file it will not run, so it is not suite-class and it
         # names no target for any budget to hold. `-o <mode>` takes its value as a separate
         # word, which comes off with it or the mode word becomes a phantom script.
-        i = 2
+        i = 2; shc = 0
         while (i <= n && substr(a[i], 1, 1) == "-") {
           if (sh_noexec(a[i])) return "none"
           if (a[i] == "-o") { i++; if (i <= n && a[i] == "noexec") return "none" }
+          if (a[i] ~ /^-[A-Za-z]*c[A-Za-z]*$/) shc = 1
           i++
         }
         a1 = (i <= n ? a[i] : ""); b1 = base(a1)
@@ -698,6 +701,16 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         # (critic C-2). On its own the word says nothing, so it stays none.
         if (b1 == "run.sh" && (is_runner(a1) || (a1 == "run.sh" && CD_SEEN))) {
           if (runsh_noop(a, i + 1, n)) return "none"
+          LAST_TARGET = b1; LAST_PATH = a1; return "suite"
+        }
+        # A SCRIPT NAMED BY A BARE VARIABLE IS A SUITE CLAIM (wave-28 T11, D13; wave-27 review
+        # pass 8 F5). `for s in tests/*.test.sh; do bash "$s"; done` and `bash "$SUITE"` read
+        # none here, so a suite run that way was never budgeted, wrapped or gated. A variable as
+        # the whole script operand, or as its last path component (`bash "tests/$n"`), is now
+        # claimed under its own name: the unexpanded-name arm of the budget refuses it and the wrap
+        # names it `?`. Not after `-c`, whose operand is a command string, and not when every
+        # text that binds the variable plainly names no suite (`var_plain`, section 6).
+        if (!shc && b1 ~ /^[$]([A-Za-z_][A-Za-z0-9_]*|[{][A-Za-z_][A-Za-z0-9_]*[}])$/ && !var_plain(b1)) {
           LAST_TARGET = b1; LAST_PATH = a1; return "suite"
         }
         return "none"
@@ -912,6 +925,64 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
       return out
     }
+    # A VARIABLE THAT PLAINLY NAMES NO SUITE (wave-28 T11, D13). The bare-variable arm in
+    # classify_argv_read claims `bash "$V"` as a suite unless this answers 1: every segment of
+    # the command that assigns V (`assigns`, above) is a `for V in <words>` header or a plain
+    # `V=<value>` head, no word or value could name a suite (`could_suite`), and one of them
+    # comes before the segment being read (VP_I). Anything else is a name nothing here can vouch
+    # for, so it stays a claim: another kind of assignment (`read`, `export`), no binding before
+    # the use, or a command `expand_unsafe` distrusts. Inside an unwrapped `bash -c` string the
+    # same top-level bindings are read: an unexported one is empty to the inner shell, so it runs
+    # no suite either, and an exported one is an assignment this does not trust. Read only when
+    # the arm fires, so a command with no such operand pays nothing for it.
+    function var_plain(w,   V, j, h, nw, W, x, known) {
+      if (VP_I < 1) return 0
+      V = w; gsub(/[${}]/, "", V)
+      if (VP_UNSAFE < 0) VP_UNSAFE = expand_unsafe(VP_K, seg, out)
+      if (VP_UNSAFE) return 0
+      known = 0
+      for (j = 1; j <= VP_K; j++) {
+        if (!assigns(seg[j], V)) continue
+        h = HEAD[j]
+        if (match(h, "^for[ \t]+" V "[ \t]+in([ \t]|$)")) {
+          nw = split(trim(substr(h, RLENGTH + 1)), W, /[ \t]+/)
+          if (nw < 1) return 0
+          for (x = 1; x <= nw; x++) if (could_suite(W[x])) return 0
+        } else if (index(h, V "=") == 1) {
+          if (could_suite_value(substr(h, length(V) + 2))) return 0
+        } else return 0
+        if (j < VP_I) known = 1
+      }
+      return known
+    }
+    # Could this word, once the shell expands it, name a suite? Its LAST PATH COMPONENT decides,
+    # since that is the basename the suite arm reads: a literal one is a suite name or it is not;
+    # a glob can match a suite unless the literal text after its last `*`, `?` or `]` rules out
+    # every name ending `.test.sh` or `run.sh`; an expansion, a brace or a quote left in it is
+    # unknown, so it could. `docs/*.md` and `$T/probe.sh` cannot; `tests/*`, `*.sh` and `$f` can.
+    function could_suite(w,   c, t) {
+      w = dequote_whole(w)
+      if (w == "") return 0
+      c = w; sub(/.*\//, "", c)
+      if (c ~ /[$`(){}\\"\047]/) return 1
+      t = c; sub(/^.*[*?\]]/, "", t)
+      if (t == c) return (c == "test.sh" || c == "run.sh" || c ~ /\.test\.sh$/)
+      return (t == "" || sfx_of(".test.sh", t) || sfx_of("run.sh", t) || sfx_of(t, ".test.sh"))
+    }
+    function sfx_of(s, t) { return (length(t) <= length(s) && substr(s, length(s) - length(t) + 1) == t) }
+    # The value of `V=<value>` as one word, or 1 (could) when it is more than one: a prefix
+    # assignment in front of a command, or a quoted value holding a space. `$(mktemp …)` is a
+    # fresh file, never a suite, unless its own text names one or a path follows it.
+    function could_suite_value(v,   r) {
+      v = dequote_whole(v)
+      if (match(v, /^[$][(]mktemp[^()`;&|]*[)]/) || match(v, /^`mktemp[^()`;&|]*`/)) {
+        if (index(substr(v, 1, RLENGTH), "test.sh") || index(substr(v, 1, RLENGTH), "run.sh")) return 1
+        r = substr(v, RLENGTH + 1)
+        return (r == "" ? 0 : (substr(r, 1, 1) == "/" ? could_suite(r) : 1))
+      }
+      if (v ~ /[ \t]/) return 1
+      return could_suite(v)
+    }
     # NX[i] texts XT[i, 1..NX[i]] per segment: the segment itself, or one per value.
     function expand_all(k, sg, all,   i, j, f, h, V, val, pv, nc, AV, AJ, AL, na, x, y, nx, nn, X, Y, W, nw, BV, BL, nb, over, b) {
       for (i = 1; i <= k; i++) { NX[i] = 1; XT[i, 1] = sg[i] }
@@ -999,7 +1070,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         }
         if (over || !hit) continue
         for (x = 1; x <= nx; x++) {
-          LAST_TARGET = ""; LAST_KIND = ""; LAST_PATH = ""
+          LAST_TARGET = ""; LAST_KIND = ""; LAST_PATH = ""; VP_I = i
           if (class_seg(trim(X[x]), 0) != "suite" || LAST_KIND != "file") continue
           if (LAST_PATH == "" || index(LAST_PATH, "$") || index(LAST_PATH, "`")) continue
           t = "bash " LAST_PATH
@@ -1110,6 +1181,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # into segments() and overwrites SEPKIND.
       if (mode == "targets") for (tj = 1; tj <= k; tj++) TSK[tj] = SEPKIND[tj]
       compound_pass(k, seg)
+      # What var_plain (section 6) reads: the top-level segments, and the one it is reading.
+      VP_K = k; VP_UNSAFE = -1; VP_I = 0
       # mode=looplines: cmd_suite_loop_lines (wave-24 T13) — section 7, ahead of expand_all.
       if (mode == "looplines") { loop_lines(k, seg); exit }
       expand_all(k, seg, out)
@@ -1122,6 +1195,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         for (x = 1; x <= NX[i]; x++) {
           t = trim(XT[i, x])
           LAST_TARGET = ""; LAST_KIND = ""; LAST_RUN = ""
+          VP_I = i
           cls = class_seg(t, 0)
           if (mode == "targets") {
             # TWO SUITE RUNS SHARE ONE EXIT CODE ONLY ACROSS `&&` (wave-26 T63, critic K4-N1).
