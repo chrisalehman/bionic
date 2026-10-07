@@ -633,7 +633,7 @@ mk_stop() {  # mk_stop <seam> <file> — a hand-run suite: one line before the s
 stop_run() {
   : > "$TMPROOT/stop.out"
   ( unset BIONIC_TEST_INTERPRETER_PINNED
-    PATH="$HAND_GIVEN_PATH" TMPDIR="$2" STOP_OUT="$TMPROOT/stop.out" \
+    PATH="${STOP_PATH:-$HAND_GIVEN_PATH}" TMPDIR="$2" STOP_OUT="$TMPROOT/stop.out" \
     /bin/bash "$1" 2>"$TMPROOT/stop.err" >/dev/null )
   STOP_RC=$?
   STOP_ERR="$(cat "$TMPROOT/stop.err" 2>/dev/null)"
@@ -928,12 +928,15 @@ cat > "$T57_STUB/getfacl" <<'STUB'
 for d; do :; done
 case "$d" in
   */t57-lx) cat "$T57_GETFACL_OUT" ;;
-  *) printf 'user::rwx\ngroup::r-x\nother::r-x\n' ;;
+  *) if [ -f "$T59_GETFACL_DIR/${d##*/}" ]; then cat "$T59_GETFACL_DIR/${d##*/}"
+     else printf 'user::rwx\ngroup::r-x\nother::r-x\n'
+     fi ;;
 esac
 STUB
 chmod +x "$T57_STUB/getfacl"
 T57_LX="$T87_DIR/t57-lx"; mkdir -p "$T57_LX"; chmod 0700 "$T57_LX"
 T57_GETFACL_OUT="$TMPROOT/t57-getfacl.out"; export T57_GETFACL_OUT
+T59_GETFACL_DIR="$TMPROOT/t59-getfacl"; mkdir -p "$T59_GETFACL_DIR"; export T59_GETFACL_DIR  # answers by the directory's own name
 t57_lx() {  # t57_lx <seam> <root-name> <acl text> — pin_call with the stub's answer for the parent
   printf '%b' "$3" > "$T57_GETFACL_OUT"
   PIN_GIVEN="$T57_STUB:$HAND_GIVEN_PATH"; pin_call "$1" "$T57_LX/$2"; PIN_GIVEN="$HAND_GIVEN_PATH"
@@ -954,6 +957,129 @@ expect_eq "7.48h …and is there" "present" "$(there "$T57_LX/lx-default/pin")"
 t57_lx "$T57_MUT2" lx-mut 'user::rwx\nuser:mallory:rw-\ngroup::---\nmask::rw-\nother::---\n'
 expect_eq "7.48i under the no-ACL mutant the named user is accepted (the defect 7.48c guards)" "0" "$PIN_RC"
 expect_eq "7.48j …and the pin is built there" "present" "$(there "$T57_LX/lx-mut/pin")"
+
+# THE PREDICATE READS THE ACL'S BASE ENTRIES AS THE MODE, THE OWNER, AND THE RIGHTS THAT GRANT RIGHTS
+# (wave-28 T59; AC-10.6; pass 32). Linux `getfacl -p` prints the base entries `user::`, `group::`,
+# `other::` and `mask::` for EVERY directory: they repeat the mode and are not grants, so a sticky
+# 1777 /tmp, which the mode check lets through, must not be refused for them. A default: entry is
+# what CHILDREN inherit; a made root and pin are judged after they are made, where an inherited entry
+# is an access entry, so default: entries are never counted (the macOS only_inherit rule). Whose
+# directory it is can only be stubbed (no hermetic row can plant another uid's directory): the owner
+# reader is `stat`, and the stub answers for one directory name and passes every other call through.
+T59_ME="$(id -un)"
+T59_MUT_BASE="$TMPROOT/t59-mut-base.sh"
+anchor "$SEAM" '[ -n "$name" ] || continue' 1
+grep -vF '[ -n "$name" ] || continue' "$SEAM" > "$T59_MUT_BASE"
+t59_lx() {  # t59_lx <seam> <name> <mode> <getfacl text> [<root>] — a directory of this row's own, the stub's answer for it, pin_call under it
+  local d="$T87_DIR/t59-lx-$2"
+  mkdir -p "$d"; chmod "$3" "$d"
+  printf '%b' "$4" > "$T59_GETFACL_DIR/t59-lx-$2"
+  PIN_GIVEN="$T57_STUB:$HAND_GIVEN_PATH"; pin_call "$1" "$d/${5:-root}"; PIN_GIVEN="$HAND_GIVEN_PATH"
+}
+T59_BASE="# file: tmp\\n# owner: $T59_ME\\n# group: wheel\\n# flags: --t\\nuser::rwx\\ngroup::rwx\\nother::rwx\\n"
+t59_lx "$SEAM" sticky 1777 "$T59_BASE"
+expect_eq "7.49 a sticky 1777 directory whose getfacl lists only the base entries (a Linux /tmp): the pin is built" "0" "$PIN_RC"
+expect_eq "7.49b …and is there" "present" "$(there "$T87_DIR/t59-lx-sticky/root/pin")"
+expect_eq "7.49c the fixture is open by mode and sticky (the extractor reads the t)" "t" "$(ls -ld "$T87_DIR/t59-lx-sticky" | cut -c10)"
+t59_lx "$T59_MUT_BASE" sticky-mut 1777 "$T59_BASE"
+expect_ne "7.49d under the base-entries mutant the same directory is refused (the defect 7.49 guards)" "0" "$PIN_RC"
+expect_contains "7.49e …naming the base entry" "$T87_DIR/t59-lx-sticky-mut carries an ACL letting group write" "$PIN_ERR"
+t59_lx "$T59_MUT_BASE" closed 0700 "# file: d\\n# owner: $T59_ME\\nuser::rwx\\ngroup::---\\nother::---\\n"
+expect_eq "7.49f …and builds a closed directory whose base entries hold no w (not vacuous)" "0" "$PIN_RC"
+t59_lx "$SEAM" named 0700 "# file: d\\n# owner: $T59_ME\\n# group: wheel\\nuser::rwx\\nuser:bob:rwx\\ngroup::---\\nmask::rwx\\nother::---\\n"
+expect_ne "7.50 a full getfacl listing with a named user holding w: refused" "0" "$PIN_RC"
+expect_contains "7.50b …naming the entry" "$T87_DIR/t59-lx-named carries an ACL letting user:bob write" "$PIN_ERR"
+t59_lx "$SEAM" named-me 0700 "# file: d\\n# owner: $T59_ME\\nuser::rwx\\nuser:$T59_ME:rwx\\ngroup::---\\nmask::rwx\\nother::---\\n"
+expect_eq "7.50c the same entry naming the directory's own owner is the owner's: built" "0" "$PIN_RC"
+t59_lx "$SEAM" named-me2 0700 "# file: d\\n# owner: someone-else\\nuser::rwx\\nuser:$T59_ME:rwx\\ngroup::---\\nmask::rwx\\nother::---\\n"
+expect_contains "7.50d …and when the owner is another it is a grant" "$T87_DIR/t59-lx-named-me2 carries an ACL letting user:$T59_ME write" "$PIN_ERR"
+t59_lx "$SEAM" default 0700 "# file: d\\n# owner: $T59_ME\\nuser::rwx\\ngroup::---\\nother::---\\ndefault:user::rwx\\ndefault:group::rwx\\ndefault:other::---\\n"
+expect_eq "7.51 default entries on the parent are what children inherit, not a grant on the parent: built" "0" "$PIN_RC"
+expect_eq "7.51b …and is there" "present" "$(there "$T87_DIR/t59-lx-default/root/pin")"
+printf '%b' "user::rwx\\nuser:bob:rwx\\ngroup::---\\nmask::rwx\\nother::---\\n" > "$T59_GETFACL_DIR/inhroot"
+t59_lx "$SEAM" inherit 0700 "user::rwx\\ngroup::---\\nother::---\\ndefault:user:bob:rwx\\n" inhroot
+expect_ne "7.51c the made root carries what it inherited, as an access entry: refused" "0" "$PIN_RC"
+expect_contains "7.51d …naming the root and the entry" "$T87_DIR/t59-lx-inherit/inhroot carries an ACL letting user:bob write" "$PIN_ERR"
+expect_eq "7.51e …and the root it made is removed" "absent" "$(there "$T87_DIR/t59-lx-inherit/inhroot")"
+# The owner. A directory on the path owned by neither this user nor root can rename what it holds.
+T59_STUB="$TMPROOT/t59-stub"; mkdir -p "$T59_STUB"
+cat > "$T59_STUB/stat" <<'STUB'
+#!/bin/sh
+for d; do :; done
+if [ -f "$T59_STAT_DIR/${d##*/}" ]; then cat "$T59_STAT_DIR/${d##*/}"
+else PATH=/usr/bin:/bin exec stat "$@"
+fi
+STUB
+chmod +x "$T59_STUB/stat"
+T59_STAT_DIR="$TMPROOT/t59-stat"; mkdir -p "$T59_STAT_DIR"; export T59_STAT_DIR
+t59_own() {  # t59_own <seam> <root> — pin_call with the stat stub first on PATH
+  PIN_GIVEN="$T59_STUB:$HAND_GIVEN_PATH"; pin_call "$1" "$2"; PIN_GIVEN="$HAND_GIVEN_PATH"
+}
+T59_OWN="$T87_DIR/t59-own"; mkdir -p "$T59_OWN/t59-anc/t59-sub"
+chmod 0755 "$T59_OWN" "$T59_OWN/t59-anc"; chmod 0700 "$T59_OWN/t59-anc/t59-sub"
+T59_ANC="$T59_OWN/t59-anc"; T59_SUB="$T59_ANC/t59-sub"
+T59_OTHER=54321; [ "$T59_OTHER" != "$(id -u)" ] || T59_OTHER=54322
+T59_WHY_OWN="is owned by uid $T59_OTHER, who is neither you nor root"
+t59_own "$SEAM" "$T59_SUB/r1"
+expect_eq "7.52 under the stub with no answer set, the real reader passes this user's own directories: built" "0" "$PIN_RC"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-anc"
+t59_own "$SEAM" "$T59_SUB/r2"
+expect_ne "7.52b an ancestor owned by another user, closed by mode: refused" "0" "$PIN_RC"
+expect_contains "7.52c …naming the directory and its owner" "$T59_ANC $T59_WHY_OWN" "$PIN_ERR"
+expect_eq "7.52d …PATH is as given" "$PIN_GIVEN" "$PIN_PATH"
+expect_eq "7.52e …and nothing is built there" "absent" "$(there "$T59_SUB/r2")"
+STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T59_SUB"; unset STOP_PATH
+expect_eq "7.52f the hand run exits 2" "2" "$STOP_RC"
+expect_contains "7.52g …naming the directory and its owner, with the path remedy" \
+  "$(t57_line "$T59_SUB" "$T59_ANC $T59_WHY_OWN" "$T57_FIX")" "$STOP_ERR"
+printf '0\n' > "$T59_STAT_DIR/t59-anc"
+t59_own "$SEAM" "$T59_SUB/r3"
+expect_eq "7.52h the same ancestor owned by root: built" "0" "$PIN_RC"
+expect_eq "7.52i …and is there" "present" "$(there "$T59_SUB/r3/pin")"
+rm -f "$T59_STAT_DIR/t59-anc"; printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-sub"
+t59_own "$SEAM" "$T59_SUB/r4"
+expect_contains "7.52j the parent itself owned by another user: refused, naming it" "$T59_SUB $T59_WHY_OWN" "$PIN_ERR"
+rm -f "$T59_STAT_DIR/t59-sub"
+T59_MUT_OWN="$TMPROOT/t59-mut-owner.sh"
+anchor "$SEAM" 'case "$owner" in 0|"$UID") ;;' 1
+grep -vF 'case "$owner" in 0|"$UID") ;;' "$SEAM" > "$T59_MUT_OWN"
+expect_eq "7.53 the no-owner mutant parses" "0" "$(bash -n "$T59_MUT_OWN" >/dev/null 2>&1; echo $?)"
+t59_own "$T59_MUT_OWN" "$T57_SUB/mut-owner-ctl"
+expect_ne "7.53b …and still refuses an open ancestor (not vacuous)" "0" "$PIN_RC"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-anc"
+t59_own "$T59_MUT_OWN" "$T59_SUB/mut-owner"
+expect_eq "7.53c under the no-owner mutant the other user's ancestor is accepted (the defect 7.52b guards)" "0" "$PIN_RC"
+expect_eq "7.53d …and the pin is built there" "present" "$(there "$T59_SUB/mut-owner/pin")"
+t59_own "$SEAM" "$T59_SUB/r5"
+expect_ne "7.53e control: the shipped function refuses that same path" "0" "$PIN_RC"
+rm -f "$T59_STAT_DIR/t59-anc"
+# The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
+if [ "$T57_ACL" = 1 ]; then
+  T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
+  anchor "$SEAM" ' writesecurity chown; do' 1
+  sed 's/ writesecurity chown; do/ chown; do/' "$SEAM" > "$T59_MUT_WS"
+  sed 's/ writesecurity chown; do/ writesecurity; do/' "$SEAM" > "$T59_MUT_CH"
+  expect_eq "7.54 the two rights mutants parse" "0" "$(bash -n "$T59_MUT_WS" >/dev/null 2>&1 && bash -n "$T59_MUT_CH" >/dev/null 2>&1; echo $?)"
+  for t59_right in writesecurity chown; do
+    T59_RD="$T87_DIR/t59-right-$t59_right"; mkdir -p "$T59_RD"; chmod 0700 "$T59_RD"
+    chmod +a "everyone allow $t59_right" "$T59_RD"
+    expect_eq "7.55 [$t59_right] the ACL extractor reads the entry" "1" "$(ls -lde "$T59_RD" | grep -c "group:everyone allow $t59_right")"
+    stop_run "$STOP_SUITE" "$T59_RD"
+    expect_eq "7.55b [$t59_right] a 0700 temp directory whose ACL lets everyone have it: the hand run exits 2" "2" "$STOP_RC"
+    expect_contains "7.55c [$t59_right] …naming the entry" \
+      "$(t57_line "$T59_RD" "$T59_RD carries an ACL letting group:everyone $t59_right" "$T57_FIX")" "$STOP_ERR"
+    expect_eq "7.55d [$t59_right] …and builds nothing there" "absent" "$(there "$T59_RD/bionic-interpreter-pin.$STOP_UID")"
+    case "$t59_right" in writesecurity) t59_mut="$T59_MUT_WS" t59_ctl="$T59_MUT_CH" ;; *) t59_mut="$T59_MUT_CH" t59_ctl="$T59_MUT_WS" ;; esac
+    pin_call "$t59_mut" "$T59_RD/mut-root"
+    expect_eq "7.55e [$t59_right] with that right dropped from the list the entry is accepted (the defect 7.55b guards)" "0" "$PIN_RC"
+    pin_call "$t59_ctl" "$T59_RD/ctl-root"
+    expect_ne "7.55f [$t59_right] …and the other mutant still refuses it (not vacuous)" "0" "$PIN_RC"
+    chmod -N "$T59_RD" 2>/dev/null
+  done
+else
+  skip "7.54 the rights that grant rights (macOS: writesecurity and chown on a 0700 directory)" \
+    "chmod +a is not available on this host"
+fi
 
 # THE MUTANTS. (1) The hand path's refusal turned back into `|| :`: the refused run goes on and
 # runs its check. (2) The parent check removed: the open parent is accepted. Each mutant is proved
