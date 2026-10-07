@@ -14979,6 +14979,31 @@ sf_usage "SF-9e usage: a task id, which has a line and no block" T2 head=0123abc
 sf_usage "SF-9f usage: three operands" 5 head=0123abc pass=3
 sf_usage "SF-9g usage: a step that is not one" 12 head=0123abc
 
+# ---------- the mutation arm: replace mode appending a second line ----------
+# A copy of the library whose --replace writes the new line after the old one, behind a copy of the hook that
+# reads it: the same `step-field 5 pass=` writes a block with two pass: lines, so SF-2's one line goes red.
+SFM_NEEDLE='if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
+SFM_UNITS="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/units.sh"
+anchor "$SFM_UNITS" "$SFM_NEEDLE" 1
+SFM_DIR="$TMPROOT/poker-sf-mut"; rm -rf "$SFM_DIR"; mkdir -p "$SFM_DIR/hooks" "$SFM_DIR/scripts"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$SFM_DIR/scripts/lib"
+for _sf_f in "$(dirname "$POKER")"/*; do [ "${_sf_f##*/}" = session-poker.sh ] || ln -s "$_sf_f" "$SFM_DIR/hooks/${_sf_f##*/}"; done
+cp "$POKER" "$SFM_DIR/hooks/session-poker.sh"
+SFM_R='if (replace && (i in at_line)) { print L[i]; print "  " key[at_line[i]] ": " val[at_line[i]] }'
+SF_N="$SFM_NEEDLE" SF_R="$SFM_R" awk 'BEGIN { n = ENVIRON["SF_N"]; r = ENVIRON["SF_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' \
+  "$SFM_UNITS" > "$SFM_DIR/scripts/lib/units.sh"
+expect_eq "SF-mut0 the append copy of the library differs from it in one line" "1" "$(diff "$SFM_UNITS" "$SFM_DIR/scripts/lib/units.sh" | /usr/bin/grep -c '^>')"
+cp "$PSF" "$TMPROOT/sf-plan-keep"
+SFM_POKER="$POKER"; POKER="$SFM_DIR/hooks/session-poker.sh"
+poke "$RSF" step-field 5 pass=9
+POKER="$SFM_POKER"
+expect_eq "SF-mut1 the mutant runs and writes the plan (exit 0, the new value is there)" "0|1" "$RC|$(sf_block "$PSF" 5 | /usr/bin/grep -cxF -- '  pass: 9')"
+expect_eq "SF-mut2 …but the block holds two pass: lines, where SF-2 found one" "2" "$(sf_block "$PSF" 5 | /usr/bin/grep -c '^  pass: ')"
+cp "$TMPROOT/sf-plan-keep" "$PSF"
+poke "$RSF" step-field 5 pass=9
+expect_eq "SF-mut3 the verb itself, on the same plan: one pass: line" "0|1" "$RC|$(sf_block "$PSF" 5 | /usr/bin/grep -c '^  pass: ')"
+cp "$TMPROOT/sf-plan-keep" "$PSF"
+
 # ============================================================
 section "§STEP-FIELD (share): current 4 at wave scale also writes the Step-4 plan fact share: <n> (wave-28 T8; A-orch-140; D16; AC-2.11)"
 # ============================================================
