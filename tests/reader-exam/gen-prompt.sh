@@ -14,17 +14,43 @@
 # record. One brief is one dispatch. Readers that must not share a build get a call each.
 #
 # Environment:
+#   PLUGIN=<dir>  (required) the plugin copy of README step 1, an absolute path. Each brief ends with
+#                the files its reader is to read, by path in that copy and never pasted: the checks
+#                file of each question its `Questions:` line names, then the severity scale. They are
+#                the files the recorder pushes a reader at start (hooks/execution-recorder.sh,
+#                `start_pushed`), and the scale goes to every reader, because every reader is asked
+#                to write its findings as finding lines (wave-28 T18, D22), the one that is dealt
+#                `evidence` alone included.
 #   STEP_ZERO=1  before any dispatch, the session lists the Agent tool's descriptions of
 #                bionic:reviewer and bionic:critic, quoted exactly as the tool gives them.
 #
 # The prompt says nothing about the project: everything the session knows comes from the briefs.
 set -euo pipefail
 [ "$#" -ge 1 ] || { echo "usage: gen-prompt.sh <brief file>..." >&2; exit 2; }
+[ -n "${PLUGIN:-}" ] || { echo "gen-prompt.sh: PLUGIN is not set; give the plugin copy of README step 1 as PLUGIN=<dir>" >&2; exit 2; }
+case "$PLUGIN" in /*) ;; *) echo "gen-prompt.sh: PLUGIN=$PLUGIN is not an absolute path" >&2; exit 2 ;; esac
+plug="${PLUGIN%/}"
+
+# brief_questions <brief file> — the questions its `Questions:` line names, one line, blank-joined.
+brief_questions() {
+  sed -n 's/^Questions:[[:blank:]]*//p' "$1" | head -n 1 | tr -d '\r' | tr ',' ' ' | tr -s '[:blank:]' ' ' | sed 's/^ //; s/ $//'
+}
+
 for f in "$@"; do
   [ -r "$f" ] || { echo "gen-prompt.sh: cannot read $f" >&2; exit 2; }
   head -n 1 "$f" | grep -Eq '^subagent_type: [A-Za-z0-9:_-]+$' \
     || { echo "gen-prompt.sh: line 1 of $f is not 'subagent_type: <agent type>'" >&2; exit 2; }
   [ "$(wc -l < "$f")" -ge 2 ] || { echo "gen-prompt.sh: $f holds no brief after line 1" >&2; exit 2; }
+  qs="$(brief_questions "$f")"
+  [ -n "$qs" ] || { echo "gen-prompt.sh: $f has no Questions: line" >&2; exit 2; }
+  for q in $qs; do
+    case "$q" in
+      evidence|adversarial|structure) ;;
+      *) echo "gen-prompt.sh: $f names the question '$q', which is none of evidence, adversarial, structure" >&2; exit 2 ;;
+    esac
+    [ -r "$plug/context/checks-$q.md" ] || { echo "gen-prompt.sh: $plug/context/checks-$q.md cannot be read" >&2; exit 2; }
+  done
+  [ -r "$plug/context/severity.md" ] || { echo "gen-prompt.sh: $plug/context/severity.md cannot be read" >&2; exit 2; }
 done
 
 printf '%s\n\n' "/bionic:canonical-sdlc This session starts no run: do not carry out any step of the skill, write no plan, and change no file of this repository outside .bionic/docs/record/. Do only the following."
@@ -51,6 +77,12 @@ for f in "$@"; do
   echo "BEGIN"
   tail -n +2 "$f"
   [ -z "$(tail -c 1 "$f")" ] || echo
+  qs="$(brief_questions "$f")"
+  printf '\nRead each of these files in full before you start; the plugin ships them and they bind this review:\n'
+  for q in evidence adversarial structure; do
+    case " $qs " in *" $q "*) printf '%s/context/checks-%s.md\n' "$plug" "$q" ;; esac
+  done
+  printf '%s/context/severity.md\n' "$plug"
   echo "END"
   echo
 done
