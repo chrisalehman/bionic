@@ -603,7 +603,7 @@ expect_eq "R16a landed= and landed_at= are written when passed, last, after push
   "${R5_PLAIN}|pushed=checks-evidence|landed=${R16_C}|landed_at=${R16_AT}" "$R16_R"
 R16_ARGS=()
 while IFS= read -r R16_SEG; do R16_ARGS+=("$R16_SEG"); done < <(printf '%s\n' "$R16_R" | tr '|' '\n' | tail -n +2)
-expect_eq "R16b a marked row, fed back key by key, reproduces byte for byte" "$R16_R" "$(lib roster_row "${R16_ARGS[@]}")"
+expect_eq "R16b a marked row, fed back key by key, reproduces byte for byte" "$R16_R" "$(lib roster_row ${R16_ARGS[@]+"${R16_ARGS[@]}"})"
 mkdir -p "$R7_DIR/r16"
 R16_F="$R7_DIR/r16/roster-s1.state"
 R16_L="$(lib roster_row status=intended session=s1 name=w28-T6 agent_id= launched_at=2026-10-07T03:15:00Z \

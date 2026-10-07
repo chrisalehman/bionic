@@ -997,8 +997,8 @@ ll_verb "$RW" T1
 LL_OUT_W1="$LL_OUT"
 KW="$(ll_field "$(ll_ev "$RW" published | grep '|row=T1|' | tail -1)" commit)"
 AW="$(ll_field "$(ll_ev "$RW" published | grep '|row=T1|' | tail -1)" at)"
-expect_eq "(w0) precondition: ready exits 0 and the published event names the candidate" "0 yes" \
-  "$LL_RC $(case "$KW" in [0-9a-f]???????????????????????????????????????) echo yes ;; *) echo "no:$KW" ;; esac)"
+expect_eq "(w0) precondition: ready exits 0 and the published event names a 40-hex candidate" "0 1" \
+  "$LL_RC $(printf '%s\n' "$KW" | grep -cE '^[0-9a-f]{40}$')"
 expect_eq "(w1) the row's status is landed" "landed" "$(ll_cell "$PW" tasks T1 status)"
 expect_eq "(w1b) …the other row's status is as it was (the positive on that extractor)" "active" "$(ll_cell "$PW" tasks T2 status)"
 expect_eq "(w2) the row's - T1: line gains the landed commit and the publish's instant" "- T1: active landed ${KW} ${AW}" "$(ll_stepline "$PW" T1)"
@@ -1033,8 +1033,8 @@ RD="$(ll_world)"; PD="$(ll_plan "$RD")"
 ll_launch "$RD" T1 'a, b.test.sh' lands_red='b.test.sh until T9'
 ll_redsuite "$RD" T1 b
 ll_verb "$RD" T1
-expect_eq "(w8) precondition: the declared red publishes (exit 0, DEBT said)" "0 yes" \
-  "$LL_RC $(case "$LL_OUT" in *'DEBT T1 b.test.sh'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "(w8) precondition: the declared red publishes (exit 0, DEBT said)" "0 1" \
+  "$LL_RC $(printf '%s\n' "$LL_OUT" | grep -c '^DEBT T1 b.test.sh ')"
 expect_eq "(w8b) the plan write is admitted on the real plan over the debt: status landed" "landed" "$(ll_cell "$PD" tasks T1 status)"
 expect_eq "(w8c) …and the gate's reader of the bound plan deals the debt T5 wrote" "debt	b.test.sh	T9" \
   "$(bash -c '. "$1/proof.sh" && proof_debts "$2"' _ "$REPO/payload/scripts/lib" "$PD" | cut -f1-3)"
