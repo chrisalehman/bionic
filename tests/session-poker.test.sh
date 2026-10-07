@@ -12500,7 +12500,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add release-check row-landed step-field step-line task-add waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -14707,5 +14707,190 @@ POKER="$PM_POKER"
 expect_eq "PASSM-mut1 the mutant runs and registers the second pass over the move (exit 0, two proof lines): PASSM-3 goes red" "0|2" "$RC|$(pm_n pm-a)"
 cp "$TMPROOT/pm-plan-keep" "$PSEV"
 POKE_BOUND="$PM_BOUND_WAS"
+
+# ============================================================
+section "§STEP-FIELD: a verb writes or replaces one field of a step's block, in the grammar the gate reads (wave-28 T8; REQ-3 AC-3.5; D17)"
+# ============================================================
+#
+#   step-field <N> <key>=<value>     N a step (0-9 and 4a-style), key one of head cmd pass total output merge
+#                                    worktree-removed adr share; the two-space-indented `<key>: <value>` line
+#                                    under `- Step N:` is written after the block's last line, or replaced
+#                                    where it stands (lib/units.sh `units_step_fields --replace`)
+#
+# It takes the plan transaction every row verb takes (copy, dry commit through the real gate, checksum, swap).
+# REFUSED, plan byte-identical: a value with a line break, a key outside the nine, a step with no line, a key
+# the step line itself carries, and Step 9 (close-out's); a usage error (exit 2): not exactly `<N> <key>=<value>`,
+# a step that is not N, an empty value. The verb's refusals are the verb family's (`die`), not refuse.sh's.
+# FIXTURE FIDELITY: §42's repository and plan writer (a plan the real gate admits), the real verb; every row's
+# evidence is the plan's own bytes (git diff --numstat, the line's place) and the gate's next verdict.
+SF_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RSF="$(make_repo sf-field)"; ( cd "$RSF" && git commit -q --allow-empty -m init )
+PSF="$(s42_plan "$RSF" 4)"
+poke "$RSF" step-line 5 'floor run'
+poke "$RSF" step-line 7 documenting
+poke "$RSF" step-line 8 integrating
+s42_snap "$RSF" "$PSF"
+s34_gate "$RSF"
+expect_eq "SF-0 precondition: the fixture plan at current: 4, Steps 5, 7 and 8 written, is admitted by the real gate" "0" "$GATE_RC"
+sf_block() {  # <plan> <N> -> the step's own lines: the step line and the indented lines under it
+  awk -v n="$2" '$0 ~ ("^- Step " n ":") { f = 1; print; next } f && /^  / { print; next } f { exit }' "$1"
+}
+sf_lineno() { awk -v k="$2" 'index($0, "  " k ": ") == 1 { print NR; exit }' "$1"; }
+sf_first() { printf '%s\n' "$OUT" | sed -n 1p; }
+SF_ROWS="4|share|55|60
+5|cmd|bash tests/run.sh|bash tests/x.test.sh
+5|pass|3|4
+5|total|3|4
+5|output|record/floor.log|record/floor-2.log
+5|head|0123abc|4567def
+7|adr|docs/adr-0001.md|docs/adr-0002.md
+8|merge|0123456789abcdef0123456789abcdef01234567|89abcdef0123456789abcdef0123456789abcdef
+8|worktree-removed|yes|done .worktrees/x"
+while IFS='|' read -r sfn sfk sfv1 sfv2 <&3; do
+  s42_snap "$RSF" "$PSF"
+  poke "$RSF" step-field "$sfn" "$sfk=$sfv1"
+  expect_eq "SF-1-$sfk step-field $sfn $sfk= of a key the block lacks exits 0" "0" "$RC"
+  expect_eq "SF-1-$sfk …one line added, none removed (git diff --numstat)" "1 0;" "$(s42_numstat "$RSF")"
+  expect_eq "SF-1-$sfk …it is the indented line under - Step $sfn:" "1" "$(sf_block "$PSF" "$sfn" | /usr/bin/grep -cxF -- "  $sfk: $sfv1")"
+  expect_contains "SF-1-$sfk …and says what it did" "step-field — Step $sfn $sfk" "$OUT"
+  SF_AT="$(sf_lineno "$PSF" "$sfk")"
+  s42_snap "$RSF" "$PSF"
+  poke "$RSF" step-field "$sfn" "$sfk=$sfv2"
+  expect_eq "SF-2-$sfk the same key again exits 0" "0" "$RC"
+  expect_eq "SF-2-$sfk …one line replaced, none added" "1 1;" "$(s42_numstat "$RSF")"
+  expect_eq "SF-2-$sfk …the block holds one line of the key, the new value" "1" "$(sf_block "$PSF" "$sfn" | /usr/bin/grep -cxF -- "  $sfk: $sfv2")"
+  expect_eq "SF-2-$sfk …and no other line of it, under any step" "1" "$(/usr/bin/grep -c "^  $sfk: " "$PSF")"
+  expect_eq "SF-2-$sfk …on the line where it stood" "$SF_AT" "$(sf_lineno "$PSF" "$sfk")"
+done 3<<< "$SF_ROWS"
+s42_snap "$RSF" "$PSF"
+s34_gate "$RSF"
+expect_eq "SF-3 the plan with all nine fields written and replaced is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "SF-3b …and the Step-4 block still opens with its own three fields (the verb wrote after them)" "worktree|base-sha|branch|share" \
+  "$(sf_block "$PSF" 4 | sed -n '2,$p' | sed 's/^  \([a-z-]*\):.*/\1/' | paste -sd'|' -)"
+
+# ---------- the refusals: plan byte-identical, one first line each, at most 100 columns ----------
+sf_refused() {  # <label> <want rc> <want first-line text> <args…>
+  local label="$1" rc="$2" want="$3"; shift 3
+  s42_snap "$RSF" "$PSF"; poke "$RSF" step-field "$@"
+  s42_unchanged "$label" "$rc" "$PSF"
+  expect_contains "$label …saying why" "$want" "$(sf_first)"
+  SF_W="$(sf_first | wc -m | tr -d ' ')"
+  expect_true "$label …in a first line of at most 100 columns (measured $SF_W)" test "$SF_W" -gt 1 -a "$SF_W" -le 101
+}
+sf_refused "SF-4 a value with a line break (§STEP-FIELD refusal 1)" 1 "carries a line break" 5 $'cmd=bash a\nb'
+sf_refused "SF-4b …a carriage return the same" 1 "carries a line break" 5 $'cmd=bash a\rb'
+sf_refused "SF-5 a key outside the nine (refusal 2)" 1 "is not a step field" 5 colour=red
+sf_refused "SF-5b …a key near one (Pass)" 1 "is not a step field" 5 Pass=3
+sf_refused "SF-5c …the longest key a person types, 80 characters" 1 "is not a step field" 5 "$(printf 'k%.0s' $(seq 1 80))=1"
+expect_contains "SF-5d …the second line names the nine" "head, cmd, pass, total, output, merge, worktree-removed, adr, share" "$OUT"
+sf_refused "SF-6 a step with no line (refusal 3)" 1 "no Step 6 line" 6 head=0123abc
+sf_refused "SF-7 Step 9, close-out's" 1 "close-out's" 9 head=0123abc
+poke "$RSF" step-line 6 'pass: 9'
+s42_snap "$RSF" "$PSF"
+sf_refused "SF-8 a key the step line itself carries" 1 "carries 'pass:'" 6 pass=4
+sf_usage() {  # <label> <args…> -> exit 2, plan unchanged
+  s42_snap "$RSF" "$PSF"; poke "$RSF" step-field "$@"
+  s42_unchanged "$1" 2 "$PSF"
+}
+sf_usage "SF-9 usage: no operand" 
+sf_usage "SF-9b usage: a step and no field" 5
+sf_usage "SF-9c usage: an operand with no =" 5 head
+sf_usage "SF-9d usage: an empty value" 5 head=
+sf_usage "SF-9e usage: a task id, which has a line and no block" T2 head=0123abc
+sf_usage "SF-9f usage: three operands" 5 head=0123abc pass=3
+sf_usage "SF-9g usage: a step that is not one" 12 head=0123abc
+
+# ============================================================
+section "§STEP-FIELD (share): current 4 at wave scale also writes the Step-4 plan fact share: <n> (wave-28 T8; A-orch-140; D16; AC-2.11)"
+# ============================================================
+#
+# `current 4` fills the Step-4 block (worktree, base-sha, branch) from the plan's working-branch. At wave scale it
+# also writes `share: <n>`, the value lib/gate.sh `gate_share` prints, through the same writer, so the gate reads it
+# as a field; a block that already carries the line is not rewritten, and a task-scale plan gets none.
+SH_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+SH_CFG="$TMPROOT/sf-share-cfg"; mkdir -p "$SH_CFG/bionic"; export CLAUDE_CONFIG_DIR="$SH_CFG"
+printf '55\n' > "$SH_CFG/bionic/share"
+sf_wave() {  # <label> <block body> [<scale>] -> a repo and plan at current: 3 with working-branch, snapped
+  local r p
+  r="$(make_repo "$1")"
+  ( cd "$r" && git commit -q --allow-empty -m init && git checkout -q -b wave/01-fixture )
+  p="$(s42_plan "$r" 3 "$2")"
+  awk '{ print } /^current: 3$/ { print "working-branch: wave/01-fixture" }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  if [ "${3:-wave}" != wave ]; then sed "s/^scale: wave$/scale: $3/" "$p" > "$p.tmp" && mv "$p.tmp" "$p"; fi
+  s42_snap "$r" "$p"
+  printf '%s\n%s' "$r" "$p"
+}
+SH_W="$(sf_wave sf-share-w '  note: the block owes its fields')"; RSW="${SH_W%%$'\n'*}"; PSW="${SH_W#*$'\n'}"
+poke "$RSW" current 4
+expect_eq "SF-10 current 4 on a wave plan exits 0" "0" "$RC"
+expect_eq "SF-10b …the Step-4 block gains share: 55, the value gate_share prints" "1" "$(sf_block "$PSW" 4 | /usr/bin/grep -cxF -- '  share: 55')"
+expect_eq "SF-10c …after the three fields the verb fills (worktree, base-sha, branch, share)" "worktree|base-sha|branch|share" \
+  "$(sf_block "$PSW" 4 | sed -n '/^  note:/,$p' | sed -n '2,$p' | sed 's/^  \([a-z-]*\):.*/\1/' | paste -sd'|' -)"
+expect_eq "SF-10d …current: plus four added lines and nothing else (git diff --numstat)" "5 1;" "$(s42_numstat "$RSW")"
+expect_contains "SF-10e …and says the block gained it" "share=55" "$OUT"
+s34_gate "$RSW"
+expect_eq "SF-10f …and the first Step-4 commit is admitted with the line in the block" "0" "$GATE_RC"
+rm -f "$SH_CFG/bionic/share"
+SH_D="$(sf_wave sf-share-d '  note: the block owes its fields')"; RSD="${SH_D%%$'\n'*}"; PSD="${SH_D#*$'\n'}"
+poke "$RSD" current 4
+expect_eq "SF-11 with no share file, current 4 writes the gate's 80" "0|1" "$RC|$(sf_block "$PSD" 4 | /usr/bin/grep -cxF -- '  share: 80')"
+printf '55\n' > "$SH_CFG/bionic/share"
+SH_P="$(sf_wave sf-share-p '  share: 33
+  note: the block carries a share already')"; RSP="${SH_P%%$'\n'*}"; PSP="${SH_P#*$'\n'}"
+poke "$RSP" current 4
+expect_eq "SF-12 a block already carrying share: 33 keeps it (AC-2.11: not rewritten), and gains the rest" "0|1|1|1" \
+  "$RC|$(sf_block "$PSP" 4 | /usr/bin/grep -cxF -- '  share: 33')|$(sf_block "$PSP" 4 | /usr/bin/grep -c '^  share:')|$(sf_block "$PSP" 4 | /usr/bin/grep -cxF -- '  branch: wave/01-fixture')"
+SH_T="$(sf_wave sf-share-t '  note: the block owes its fields' task)"; RST="${SH_T%%$'\n'*}"; PST="${SH_T#*$'\n'}"
+expect_eq "SF-13-pre precondition: the plan is task scale" "1" "$(/usr/bin/grep -c '^scale: task$' "$PST")"
+poke "$RST" current 4
+expect_eq "SF-13 a task-scale plan: current 4 fills the three fields and writes no share:" "0|1|0" \
+  "$RC|$(sf_block "$PST" 4 | /usr/bin/grep -cxF -- '  branch: wave/01-fixture')|$(/usr/bin/grep -c '^  share:' "$PST")"
+if [ "$SH_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$SH_CCD_WAS"; fi
+
+# ============================================================
+section "§STEP-FIELD (writers): finding-check's code writer is read by the Files matcher, and every agent the row carried (wave-28 T8; A-orch-159, A-orch-161)"
+# ============================================================
+#
+# `finding-check` refuses a check record written by the finding's reader or by the code's writer. The writer was the
+# CURRENT agent cell of each `## Tasks` row whose Files entry EQUALS the finding's path. Now the row is found by the
+# matcher the dispatch grammar uses (lib/units.sh: an exact path, a directory, a glob, a path suffix), and the
+# agents are every one the row has carried: its Tasks cell, the name in its dispatch-ledger agent cell
+# (`<role> (<name>)`), and each roster row of the project labelled `row=<id>`.
+# FIXTURE FIDELITY: §SEV's repository, plan and roster; the rows by the production verbs (task-add, task-set,
+# ledger-add), the roster row by `roster_row_fixture` (the production writer, `row=` its own key).
+SFW_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=sfw-crit agent_id=a-sfw-crit subagent_type=bionic:critic files="$(sev_files "sfw-a")")" >> "$SEV_RS"
+roster_row_fixture session="$SID" name=sfw-impl-x agent_id=a-sfw-impl-x subagent_type=bionic:implementor row=T7 >> "$SEV_RS"
+sev_cur 4
+poke "$RSEV" task-add T7 4 build 'the directory writer' sfw-impl-b '—' 30 REQ-1 'lib/'
+poke "$RSEV" task-set T7 status=landed
+poke "$RSEV" ledger-add T7 'agent=implementor (sfw-impl)'
+expect_eq "SFW-0 precondition: a landed Tasks row T7 whose Files is the directory lib/, its agent sfw-impl-b, and a ledger row naming sfw-impl" "1|1|1" \
+  "$(/usr/bin/grep -c '^| T7 | 4 | build | the directory writer | sfw-impl-b .* | lib/ | .* | landed |$' "$PSEV")|$(/usr/bin/grep -c '^| T7 | implementor (sfw-impl) |' "$PSEV")|$(/usr/bin/grep -c '^- T7:' "$PSEV")"
+SFW_H="$(git -C "$SEV_WT" rev-parse HEAD)"
+pk_rec sfw-a "$SFW_H" flag "findings: 4" \
+  "finding: 1 S3 off lib/c.sh:4 - a path the Files entry lib/ covers" "unsure: 1 which caller" \
+  "finding: 2 S3 off lib/c.sh:5 - a path the first instance wrote" "unsure: 2 which caller" \
+  "finding: 3 S3 off lib/c.sh:6 - a path a roster successor wrote" "unsure: 3 which caller" \
+  "finding: 4 S3 off lib/c.sh:7 - a path a third agent may check" "unsure: 4 which caller"
+poke "$RSEV" proof-add review record/wave-01-fixture/sfw-a.md --question adversarial --reader sfw-crit
+expect_eq "SFW-0b precondition: the reading registers with its four check: lines (exit 0)" "0|4" "$RC|$(/usr/bin/grep -c "^check: record/wave-01-fixture/sfw-a.md#" "$PSEV")"
+sfw_chk() { chk_rec "$1" "$2"; }
+sfw_chk sfw-by-cell sfw-impl-b; sfw_chk sfw-by-ledger sfw-impl; sfw_chk sfw-by-roster sfw-impl-x; sfw_chk sfw-by-third sfw-third
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#1 refuted record/wave-01-fixture/sfw-by-cell.md
+s42_unchanged "SFW-1 A-orch-159 a check written by the agent of a row whose Files is a DIRECTORY holding the finding's file" 1 "$PSEV"
+expect_contains "SFW-1b …is refused as the code's writer, naming the path" "the agent of the ## Tasks row whose Files hold lib/c.sh" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#2 refuted record/wave-01-fixture/sfw-by-ledger.md
+s42_unchanged "SFW-2 A-orch-161 a check written by the FIRST instance of the row (the name in the dispatch ledger's agent cell)" 1 "$PSEV"
+expect_contains "SFW-2b …is refused as the code's writer" "the agent of the ## Tasks row whose Files hold lib/c.sh" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#3 refuted record/wave-01-fixture/sfw-by-roster.md
+s42_unchanged "SFW-3 A-orch-161 a check written by an instance the roster labels row=T7" 1 "$PSEV"
+expect_contains "SFW-3b …is refused as the code's writer" "the agent of the ## Tasks row whose Files hold lib/c.sh" "$OUT"
+poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#4 refuted record/wave-01-fixture/sfw-by-third.md
+expect_eq "SFW-4 the same finding-check by a third agent is admitted (the refusals above were the writer's)" "0|1" \
+  "$RC|$(/usr/bin/grep -c '^check: record/wave-01-fixture/sfw-a.md#4 .* refuted by=record/wave-01-fixture/sfw-by-third.md$' "$PSEV")"
+POKE_BOUND="$SFW_BOUND_WAS"
+POKE_BOUND="$SF_BOUND_WAS"
 
 finish

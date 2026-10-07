@@ -4014,4 +4014,67 @@ expect_eq "IJ.3 the judge's covered handed in: integrate is ready" "T3" \
 expect_eq "IJ.3b …and nothing is waited on for proof:review (the extractor read IJ.1b's line on the same plan)" "" \
   "$(UNITS_FACTS_STATE=covered call units_waiting "$FS_PLAN" 8 | ij_why)"
 
+
+# ---------------------------------------------------------------------------
+section "§STEP-FIELD — wave-28 T8: units_step_fields --replace writes or replaces one field of a step block (REQ-3 AC-3.5; D17)"
+# ---------------------------------------------------------------------------
+# `units_step_fields <plan> <N> <key=value>…` fills what a block lacks and never rewrites what is there
+# (the `current 4` fill). `--replace` is the mode `session-poker.sh step-field` writes through: a key the
+# block has is REPLACED where it stands (one line, its place kept), a key it lacks is written after the
+# block's last line, and the rest of the plan is the same bytes. Exit 1 no `Step N:` line · 4 a value with
+# a line break · 5 a key the step line itself carries (the gate reads it before any indented line, so a
+# second line could not win and a rewrite would be the step-line verb's). FIXTURE FIDELITY: the block is the
+# gate's own grammar (walls.sh `extract_continuation`): the indented lines under `- Step N:`.
+SF_PLAN="$SANDBOX/sf.plan.md"
+sf_plan() {
+  { printf '# plan\n\n## SDLC State\n\ncurrent: 5\n\n'
+    printf -- '- Step 4: opened\n  worktree: .\n  branch: wave/x\n'
+    printf -- '- Step 5: floor\n  cmd: bash tests/run.sh\n\n  pass: 3\n  total: 4\n  output: record/x.log\n'
+    printf -- '- Step 6: pass: 9\n'
+    printf -- '- T1: landed\n\n## Notes\n\nStep 5 pass: elsewhere\n  pass: 77\n'; } > "$SF_PLAN"
+}
+sf_plan
+sf_run() {  # sets SF_OUT (stdout) and SF_RC, in this shell
+  call units_step_fields "$@" > "$SANDBOX/sf.out"; SF_RC=$CALL_RC; SF_OUT="$(cat "$SANDBOX/sf.out")"
+}
+sf_run --replace "$SF_PLAN" 5 pass=4
+expect_eq "SF-1 --replace: the block's pass: line is replaced where it stands (exit 0)" "0" "$SF_RC"
+expect_eq "SF-1b …the block holds one pass: line, with the new value" "  pass: 4" \
+  "$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  pass:/ { print }')"
+expect_eq "SF-1c …its place is kept: the line before it is the blank the block had" "" \
+  "$(printf '%s\n' "$SF_OUT" | awk '/^  pass: 4$/ { print prev; exit } { prev = $0 }')"
+expect_eq "SF-1d …and it is the only line that differs (one removed, one added)" "1 1" \
+  "$(diff "$SF_PLAN" <(printf '%s\n' "$SF_OUT") | awk '/^</ { a++ } /^>/ { b++ } END { print a + 0, b + 0 }')"
+expect_eq "SF-1e …the same key in another section, and on another step's line, is left as written" "2" \
+  "$(printf '%s\n' "$SF_OUT" | /usr/bin/grep -cE '^  pass: 77$|^- Step 6: pass: 9$')"
+sf_run --replace "$SF_PLAN" 5 head=abc1234
+expect_eq "SF-2 --replace of a key the block lacks writes it after the block's last line (exit 0)" "0" "$SF_RC"
+expect_eq "SF-2b …directly under the last field, before the next step's line" "  output: record/x.log|  head: abc1234|- Step 6: pass: 9" \
+  "$(printf '%s\n' "$SF_OUT" | awk '/^  output:/ { f = 1 } f { printf "%s%s", (n++ ? "|" : ""), $0 } /^- Step 6:/ { exit }')"
+sf_run --replace "$SF_PLAN" 5 pass=4 total=4 head=abc1234
+expect_eq "SF-3 several keys at once: two replaced, one written, one line each" "pass: 4|total: 4|head: abc1234" \
+  "$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  (pass|total|head):/ { sub(/^  /, ""); printf "%s%s", (n++ ? "|" : ""), $0 }')"
+# a duplicate of the key in the block: the gate reads the first, so the first is replaced and the rest go
+{ sed 's/^  total: 4$/  pass: 5\n  total: 4/' "$SF_PLAN"; } > "$SF_PLAN.dup"
+sf_run --replace "$SF_PLAN.dup" 5 pass=4
+expect_eq "SF-4 a block holding the key twice leaves one line of it, the new value" "1|  pass: 4" \
+  "$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  pass:/ { n++; l = $0 } END { print n + 0 "|" l }')"
+expect_eq "SF-5 the fill mode (no flag) still leaves a key the block has as written (control: 1.12.0 behaviour)" "  pass: 3" \
+  "$(sf_run "$SF_PLAN" 5 pass=4 | awk '/^- Step 5:/ { f = 1; next } f && /^  pass:/ { print; exit }')"
+sf_run --replace "$SF_PLAN" 5 $'cmd=a\nb'
+expect_eq "SF-6 a value with a line break: exit 4, and nothing on stdout" "4|0" \
+  "$SF_RC|$(printf %s "$SF_OUT" | wc -c | tr -d ' ')"
+sf_run --replace "$SF_PLAN" 5 $'cmd=a\rb' >/dev/null
+expect_eq "SF-6b …and a carriage return the same" "4" "$SF_RC"
+sf_run --replace "$SF_PLAN" 8 head=abc1234 >/dev/null
+expect_eq "SF-7 a step with no line: exit 1" "1" "$SF_RC"
+sf_run --replace "$SF_PLAN" 6 pass=4 >/dev/null
+expect_eq "SF-8 a key the step line itself carries: exit 5, nothing replaced or written" "5" "$SF_RC"
+sf_run --replace "$SF_PLAN" 5 pass >/dev/null
+expect_eq "SF-9 an operand with no =: exit 3" "3" "$SF_RC"
+# a value holding regex and awk metacharacters is written as it is
+sf_run --replace "$SF_PLAN" 5 'cmd=bash tests/a.test.sh && echo "$X" \1 & .*'
+expect_eq "SF-10 a value with & \\1 .* and a quote is written as typed" '  cmd: bash tests/a.test.sh && echo "$X" \1 & .*' \
+  "$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } f && /^  cmd:/ { print; exit }')"
+
 finish
