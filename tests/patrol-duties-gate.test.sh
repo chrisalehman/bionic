@@ -661,6 +661,17 @@ a_agent_sidechain() {  # <dir> <name>
     >> "$1/transcript.jsonl"
 }
 
+# A TASK ENTRY SET IN PROGRESS (wave-28 T38; REQ-13, D30), the harness's TaskUpdate shape. A turn
+# that dispatched plan rows owes one per row, so a row here that pins "the dispatching turn ends"
+# sets them, as the doctrine's dispatch turn does.
+a_taskup() {  # <dir> <task number>
+  jq -nc --arg n "$2" \
+    '{type:"assistant",isSidechain:false,agentId:null,
+      message:{role:"assistant",content:[{type:"tool_use",id:("toolu_up" + $n),name:"TaskUpdate",
+        input:{taskId:$n,status:"in_progress"}}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
 both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD one alone
   a_tool "$1" ListAgents; a_tool "$1" TaskList
 }
@@ -1079,6 +1090,7 @@ ledger_roster "$d" open W-T2 W-T3
 u_prompt "$d" "dispatch the batch"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_agent "$d" "W-T3" "row T3, implementor."
+a_taskup "$d" 2; a_taskup "$d" 3
 fire "$d"; expect_allow "60b: a turn that dispatched every ready row is not refused"
 
 # 60c: …and a turn that dispatched ONE of the two is refused, naming only the other.
@@ -1086,6 +1098,7 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first one"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
 
 # 60d: A ROW THIS TURN LAUNCHED IS NEVER NAMED AS MISSED (T11b; review R4, T12 F7). Two agents
@@ -1099,12 +1112,14 @@ ledger_roster "$d" open W-T2 W-T3
 u_prompt "$d" "dispatch the batch"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_agent "$d" "W-T3" "row T3, implementor."
+a_taskup "$d" 2; a_taskup "$d" 3
 fire "$d"; expect_allow "60d: (T11b: was \"launched but still pending in the plan — the gap stands, T2 named\") a turn that launched every ready row is not refused, ledgered active or not"
 # 60e: …and one launched of two, both pending: the one left out is named, the launched one never.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_block "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
 
 # 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
@@ -1124,6 +1139,7 @@ d=$(make_env_ledger 4 "$LEDGER_SENT_2" "$LEDGER_BLOCKED")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "start the row behind T2"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_allow "62b: a pending row behind an unlanded dep is not ready, so the turn ends"
 
 # 63: NO PLAN OWES THE LINE (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a live ledger with
@@ -1734,6 +1750,7 @@ ledger_roster "$d" open W-T2
 led_user "$d" "u-turn-0001" "2026-09-23T10:00:00.000Z" "dispatch T2"
 led_agent "$d" "toolu_A1" "W-T2" "2026-09-23T10:00:05.000Z"
 led_result "$d" "toolu_A1" "2026-09-23T10:00:06.000Z" false "Spawned W-T2"
+a_taskup "$d" 2
 fire "$d"; expect_allow "L1a: Stop 1 — the dispatching turn ends clean"
 L1="$(led_line "$d" 1)"
 expect_contains "L1b: AC-5.5 Stop 1 appended a fill-ledger/v1 line" "fill-ledger/v1|" "$L1"
@@ -1794,6 +1811,7 @@ ledger_roster "$d" open W-T2
 led_user "$d" "u-turn-0008" "2026-09-23T12:00:00.000Z" "dispatch the batch"
 led_agent "$d" "toolu_B1" "W-T2" "2026-09-23T12:00:05.000Z"
 led_result "$d" "toolu_B1" "2026-09-23T12:00:06.000Z" false "Spawned W-T2"
+a_taskup "$d" 2
 fire "$d"; expect_block "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
 expect_eq "L8b: …its line names the launch" "W-T2" "$(led_field "$(led_line "$d" 1)" launched)"
 led_feedback "$d" "u-fb-0008" "2026-09-23T12:00:10.000Z"
@@ -1837,6 +1855,7 @@ ledger_roster "$d" open W-T2
 led_user "$d" "u-turn-0010" "2026-09-23T14:00:00.000Z" "dispatch T2, then load the skill"
 led_agent "$d" "toolu_C1" "W-T2" "2026-09-23T14:00:05.000Z"
 led_result "$d" "toolu_C1" "2026-09-23T14:00:06.000Z" false "Spawned W-T2"
+a_taskup "$d" 2
 led_skill "$d" "toolu_C2" "u-skill-0010" "2026-09-23T14:00:07.000Z"
 fire "$d"; expect_allow "L10a: the turn ends clean"
 expect_eq "L10b: T11b the skill body opens no turn — the line is keyed by the prompt" \
