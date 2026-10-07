@@ -707,4 +707,34 @@ expect_eq "R17j2 …and, fed back key by key, the one writer reproduces it byte 
   "$(lib roster_row "${R17_ARGS[@]}")"
 expect_eq "R17j3 …its row= still reads by key" "T23" "$(field_of_row "$R17_GOT" row)"
 
+section "R18 — the stop's reason is a row key: reason= (wave-28 T77; REQ-5, REQ-6, D8; A-orch-239 2a)"
+# The stop guard writes the orchestrator's reason for an unrostered stop onto the closed row it appends. It
+# rode `source=` (the writer's word for where a deliverable's path came from) and could not ride `waiver=`
+# (the sweeper reads that as a waived contract). `reason=` is its own key, present-if-passed, between the
+# done marker and `tool_use_id=`, so a 1.12.0 row is unmoved. fails-when: the key is refused or misplaced,
+# a pipe in the reason forges a segment, or a row carrying it does not read back by key.
+R18_WHY="spawned past its hook timeout; the roster never saw it: a=b"
+R18_R="$(lib roster_row "${R5_BASE[@]}" "reason=$R18_WHY")"; R18_RC=$?
+expect_eq "R18a reason= is accepted (rc 0)" "0" "$R18_RC"
+expect_eq "R18b …and read back by key, whole" "$R18_WHY" "$(field_of_row "$R18_R" reason)"
+expect_contains "R18c …between the other keys and tool_use_id=, where an optional key sits" "|reason=${R18_WHY}|tool_use_id=" "$R18_R"
+expect_absent "R18d a row passed no reason carries no reason= (the 1.12.0 row, byte for byte)" "reason=" "$(lib roster_row "${R5_BASE[@]}")"
+expect_eq "R18d2 …and still equals the plain row the suite pins" "$R5_PLAIN" "$(lib roster_row "${R5_BASE[@]}")"
+R18_P="$(lib roster_row "${R5_BASE[@]}" "reason=one|two=three")"
+expect_eq "R18e a pipe in the reason is folded, so no segment is forged" "0" "$(count_fields "$R18_P" "two=three")"
+expect_eq "R18e2 …and the reason reads back with the fold (the positive on that extractor)" "one two=three" "$(field_of_row "$R18_P" reason)"
+R18_ARGS=()
+while IFS= read -r R18_SEG; do R18_ARGS+=("$R18_SEG"); done < <(printf '%s\n' "$R18_R" | tr '|' '\n' | tail -n +2)
+expect_eq "R18f a row carrying it, fed back key by key, reproduces byte for byte" "$R18_R" "$(lib roster_row ${R18_ARGS[@]+"${R18_ARGS[@]}"})"
+mkdir -p "$R7_DIR/r18"
+R18_F="$R7_DIR/r18/roster-s1.state"
+R18_C="$(lib roster_row status=closed session=s1 name=ghost agent_id= launched_at=2026-10-07T03:15:00Z plan=none "reason=$R18_WHY")"
+printf '%s\n' "$R18_C" > "$R18_F"
+expect_eq "R18g the roster's by-name readers see the closed row and its reason" "$R18_WHY" \
+  "$(field_of_row "$(grep '|name=ghost|' "$R18_F")" reason)"
+lib roster_open_names "$R18_F" "" | grep -qx ghost
+expect_status "R18g2 …and the open-name reader does not list it (a reason is not a live contract)" "1" "$?"
+lib roster_row "${R5_BASE[@]}" "reasons=x" >/dev/null
+expect_status "R18h a near-miss key (reasons=) is still refused" "2" "$?"
+
 finish
