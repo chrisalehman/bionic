@@ -704,8 +704,8 @@ gate_room() {
 # and it opens them itself, one at a time with `getline` and `close`; a file that is gone is
 # skipped, not fatal. It is a pre-filter only: it hands back the paths whose file names a who and
 # has no ended= line (a file with no who names nobody), and the rule itself, `_gate_open`, is then
-# read on each of those. A single process gives one answer
-# with nothing to fold, which `find -print0 | xargs -0 awk`, cut into several awks, would not.
+# read on each of those. The paths on stdin were picked over `find -print0 | xargs -0 awk` because
+# one process gives one answer with nothing to fold; xargs would cut the list into several awks.
 gate_asked() {
   local names cands f nm open='
 ' hit=1
@@ -715,7 +715,7 @@ gate_asked() {
   [ -e "$1" ] || return 1
   cands="$(printf '%s\n' "$@" | awk '
     { f = $0; r = (getline l < f); if (r < 0) next; ended = 0; who = 0
-      while (r > 0) { if (l ~ /^ended=/) ended = 1; else if (l ~ /^who=/) who = 1; r = (getline l < f) }
+      while (r > 0) { if (l ~ /^ended=./) ended = 1; else if (l ~ /^who=/) who = 1; r = (getline l < f) }
       close(f); if (who && !ended) print f }' 2>/dev/null)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -746,7 +746,7 @@ gate_list() {
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
     _gate_read "$f" || continue
-    _gate_open
+    _gate_open || :
     case "$_R_state" in dying) st=killed ;; *) st="$_R_state" ;; esac
     printf '%s %s kind=%s asked=%s admitted=%s ended=%s rc=%s key=%s\n' "$id" "$st" "$_R_kind" \
       "${_R_asked:--}" "${_R_admitted:--}" "${_R_ended:--}" "${_R_rc:--}" "$_R_key"
