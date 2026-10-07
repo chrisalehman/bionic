@@ -603,6 +603,17 @@ expect_eq "D.14 gate_end of a request that does not exist exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_end 999 0 2>/dev/null; echo $? )"
 expect_eq "D.15 gate_ask with an unknown kind exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_ask fast k 2>/dev/null; echo $? )"
+# THE PUBLIC READER (T13; pass 12): `gate_promise <key>` prints what `_gate_promise` prints,
+# loading the store itself, so a caller outside the lock can ask what a key is promised.
+fresh promise-public
+world_cost k 10 0.5 30
+world_cost k 5 2 30
+expect_eq "D.21 gate_promise prints the per-field maximum for a key, loading the store itself" \
+  "10:2:30" "$( . "$GATE_LIB" 2>/dev/null; gate_promise k 2>/dev/null )"
+expect_eq "D.22 a key never seen is promised the maximum over every cost file" \
+  "10:2:30" "$( . "$GATE_LIB" 2>/dev/null; gate_promise never 2>/dev/null )"
+expect_eq "D.23 no key is a usage error (rc 2)" "2" \
+  "$( . "$GATE_LIB" 2>/dev/null; gate_promise 2>/dev/null; echo $? )"
 
 # ── §ROOM ────────────────────────────────────────────────────────────────────
 # gate_room [--owed <n>] (wave-28 T13; D14): may another writer start? Every row plants an
