@@ -699,8 +699,21 @@ for s in $(exam_samples "$REPO"); do
   q="$(sed -n 's/^question: //p' "$key")"
   idents="$(sed -n 's/^names: //p' "$key")"
   tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
-  ff="$(sed -n 's/^finding-file: //p' "$key")"; ff="${ff%% | *}"
+  ff_all="$(sed -n 's/^finding-file: //p' "$key")"; ff="${ff_all%% | *}"
   fr="$(sed -n 's/^finding-rating: //p' "$key")"; fr="${fr%% | *}"
+  # The file a record without the identifier declares on: the first file of the key whose own path
+  # holds none of the identifiers (a path that holds one would name the defect by itself).
+  ffb=""; fa="$ff_all"
+  while [ -n "$fa" ]; do
+    a="${fa%% | *}"; [ "$a" = "$fa" ] && fa="" || fa="${fa#* | }"
+    hit=0; ia="$idents"
+    while [ -n "$ia" ]; do
+      i1="${ia%% | *}"; [ "$i1" = "$ia" ] && ia="" || ia="${ia#* | }"
+      case "$a" in *"$i1"*) hit=1 ;; esac
+    done
+    [ "$hit" = 0 ] && [ -z "$ffb" ] && ffb="$a"
+  done
+  ffb="${ffb:-$ff}"
   n=0
   while [ -n "$idents" ]; do
     ident="${idents%% | *}"
@@ -711,7 +724,7 @@ for s in $(exam_samples "$REPO"); do
     expect_eq "SC3 $s: the key's question, result, token, names: '$ident' and a declared finding on $ff are met" "met: declared" "$(exam_score "$key" "$R/$s-named-$n.md")"
   done
   # shellcheck disable=SC2086
-  frec "$R/$s-bare.md" "$q" "$(sed -n 's/^result: //p' "$key")" $fr "$ff" "$tok"
+  frec "$R/$s-bare.md" "$q" "$(sed -n 's/^result: //p' "$key")" $fr "$ffb" "$tok"
   expect_eq "SC3 $s: the same record without the identifier is missed" "missed" "$(exam_score "$key" "$R/$s-bare.md")"
   # shellcheck disable=SC2086
   frec "$R/$s-elsewhere.md" "$([ "$q" = evidence ] && echo adversarial || echo evidence)" \
