@@ -12679,7 +12679,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current launch-sync proof-add release-check step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current finding-stated launch-sync proof-add release-check step-line task-add waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -13089,5 +13089,194 @@ expect_eq "LT4 a new standing event, on a new head, is told by the next tick, al
   "poker: note: standing a.test.sh at ${LT_H2:0:12} — 1 failing line(s) fail at the accepted head too: a red the branch carries, not one a row added; log /rec/line/T2-a-${LT_H2:0:12}.log" \
   "$(lt_lines)"
 POKE_BOUND="$LT_BOUND_WAS"
+
+# ============================================================
+section "§RC-DEFER §RC-STATED §RC-PARSE: a deferral is held to its debts, the stated sentence and the release check's list of them (wave-28 T17; REQ-8 AC-8.7; D21)"
+# ============================================================
+#
+# `finding-stated <record>#<n> '<sentence>'` stores a deferred finding's one changelog sentence on its
+# `deferred:` line, as ` stated="<sentence>"`, the last field, through the plan transaction. `release-check`
+# prints `deferral <record>#<n>: stated` when the working head's CHANGELOG.md holds the sentence (white
+# space folded, so a wrapped line matches), else `unstated`, and its exit is the check's own. The rows
+# run on §SEV's fixture, whose plan holds deferrals the real verb registered, in its working branch's
+# worktree, which is where release-check reads the changelog. One deferral's sentence is made of the
+# words the plan's own parsers read, and every row after it runs with that line in the plan (§RC-PARSE).
+RD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RD_ID1="record/wave-01-fixture/t-S2-off.md#1"
+RD_ID2="record/wave-01-fixture/t-S3-on.md#1"
+RD_ID3="record/wave-01-fixture/sh-defer-unsure.md#1"
+RD_ID4="record/wave-01-fixture/r-pri-ok.md#1"
+RD_ID5="record/wave-01-fixture/c-later.md#1"
+RD_CHK="record/wave-01-fixture/sh-unsure.md#1"
+RD_SA="The install record now lists what setup placed"
+RD_SQ='Said "go" \ now | here'
+RD_HAZ='done; delivered: now - Step 9: delivered: x current: 9 approved-by: me proved: kind=floor head=abc'
+rd_line() { /usr/bin/grep -F "deferred: $1 " "$PSEV"; }  # the plan's deferred: line for a finding
+rd_state() {  # <id> -> stated|unstated, from the last release-check's output; nothing when it printed no line
+  local l
+  l="$(printf '%s\n' "$OUT" | /usr/bin/grep -F "release-check — deferral $1: ")" || return 0
+  printf '%s' "${l##*: }"
+}
+printf '#!/bin/bash\necho "scan: entries=0 hits=0"\nexit 0\n' > "$TMPROOT/rd-check.sh"
+cp "$RSEV/.bionic/config.yaml" "$TMPROOT/rd-config" 2>/dev/null || : > "$TMPROOT/rd-config"
+printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/config.yaml"
+for _rd in "$RD_ID1" "$RD_ID2" "$RD_ID3" "$RD_ID4" "$RD_ID5"; do
+  expect_eq "RD-0 precondition: $_rd has one deferred: line with no sentence yet" "1|0" \
+    "$(rd_line "$_rd" | wc -l | tr -d ' ')|$(rd_line "$_rd" | /usr/bin/grep -c ' stated=')"
+done
+expect_eq "RD-0b precondition: $RD_CHK is a check owed with no deferred: line, and the working head has no CHANGELOG.md" "0|no" \
+  "$(rd_line "$RD_CHK" | wc -l | tr -d ' ')|$([ -e "$SEV_WT/CHANGELOG.md" ] && echo yes || echo no)"
+
+# ---------- §RC-DEFER: a deferral reads unstated until its sentence is in the changelog ----------
+poke "$RSEV" release-check
+expect_eq "RD-1 release-check over a plan holding deferrals none of which is stated exits 0 (it refuses nothing)" "0" "$RC"
+expect_eq "RD-1b …and prints each deferral unstated: $RD_ID1" "unstated" "$(rd_state "$RD_ID1")"
+expect_eq "RD-1c …and $RD_ID2" "unstated" "$(rd_state "$RD_ID2")"
+expect_eq "RD-1d …one line per deferred: line the plan holds, and no line for a check owed" "$(/usr/bin/grep -c '^deferred: ' "$PSEV" | tr -d ' ')|0" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: release-check — deferral ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -cF "deferral $RD_CHK")"
+expect_eq "RD-1e …and the finding lines it already printed keep their form" "1" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -cx "poker: release-check — finding $RD_ID1 S2 off defer \"the S2 off cell\"")"
+poke "$RSEV" finding-stated "$RD_ID1" "$RD_SA"
+expect_eq "RD-2 finding-stated on a deferral exits 0" "0" "$RC"
+expect_eq "RD-2b …and appends the sentence to that deferred: line, the last field" \
+  "deferred: $RD_ID1 S2 off \"the S2 off cell\" stated=\"$RD_SA\"" "$(rd_line "$RD_ID1")"
+expect_eq "RD-2c …and to no other deferred: line" "1" "$(/usr/bin/grep -c '^deferred: .* stated=' "$PSEV" | tr -d ' ')"
+poke "$RSEV" release-check
+expect_eq "RD-3 a stated deferral whose sentence is not in the changelog is still unstated (exit 0)" "0|unstated" "$RC|$(rd_state "$RD_ID1")"
+
+# ---------- §RC-PARSE: a deferred: line whose sentence carries the plan's own words passes its parsers ----------
+poke "$RSEV" finding-stated "$RD_ID4" "$RD_HAZ"
+expect_eq "RD-4 finding-stated with a sentence made of the words the plan's parsers read exits 0 (the dry commit passed the gate)" "0" "$RC"
+expect_eq "RD-4b …and the line carries it whole" "deferred: $RD_ID4 S2 off \"written as the table writes it\" stated=\"$RD_HAZ\"" "$(rd_line "$RD_ID4")"
+sev_cur 4
+s34_gate "$RSEV"
+expect_eq "RD-4c the real commit gate admits the plan carrying it (at the step a writer's dry commit judges)" "0" "$GATE_RC"
+cp "$PSEV" "$TMPROOT/rd-plan-keep"; sed '/^approved-by:/d' "$TMPROOT/rd-plan-keep" > "$PSEV"
+s34_gate "$RSEV"
+expect_eq "RD-4c2 …and the same gate refuses it with the approval line taken out, so the row above reads the plan" "2" "$GATE_RC"
+cp "$TMPROOT/rd-plan-keep" "$PSEV"
+sev_cur 7
+poke "$RSEV" current 8
+expect_eq "RD-4d current 8 is admitted over the plan (the judge reads the facts past the deferred: lines)" "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+expect_eq "RD-4e …and the run still reads open (run_open: 0), the sentence's delivered: taken for no step line" "0" \
+  "$(bash -c '. "$1/run.sh" || exit 9; run_open "$2" >/dev/null 2>&1; echo $?' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$PSEV")"
+poke "$RSEV" release-check
+expect_eq "RD-4f release-check still prints that deferral's line, as a sentence (exit 0)" "0|unstated" "$RC|$(rd_state "$RD_ID4")"
+
+# the tick prints a stated deferral by its title, not its sentence
+RSEVT2="$(make_repo rd-tick)"; new_roster "$RSEVT2"
+PSEVT2="$(s47_plan "$RSEVT2" 2 \
+  "| T1 | 4 | build | ready | implementor | — | 30 | REQ-x | payload/x.sh | pending | |")"
+awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#2 S2 off \"a side path\" stated=\"said \\\"x\\\" | y\""; d = 1 }' \
+  "$PSEVT2" > "$PSEVT2.tmp" && mv "$PSEVT2.tmp" "$PSEVT2"
+poke_pressure "$RSEVT2" 8192 1.0 tick
+expect_contains "RD-5 the tick fills the ready row (the path it prints FINDING on)" "poker: FILL T1" "$OUT"
+expect_eq "RD-5b …and prints the stated deferral by its title alone" "1" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -cx 'poker: FINDING record/w/rev.md#2 S2 off defer "a side path"')"
+
+# ---------- §RC-STATED: the sentence in the changelog makes a deferral stated ----------
+RD_CL="## 1.13.0 — fixture
+- The install record now lists
+  what setup placed, and remove acts only on it."
+s57_commit "$SEV_WT" CHANGELOG.md "$RD_CL" >/dev/null
+poke "$RSEV" release-check
+expect_eq "RD-6 with the sentence in the head's CHANGELOG.md, wrapped across two lines, the deferral reads stated (exit 0)" "0|stated" "$RC|$(rd_state "$RD_ID1")"
+expect_eq "RD-6b …while a deferral with no sentence still reads unstated" "unstated" "$(rd_state "$RD_ID2")"
+poke "$RSEV" finding-stated "$RD_ID1" "a sentence the changelog does not hold"
+expect_eq "RD-7 stating again replaces the sentence: one stated= on the line, and it is the new one" "1|deferred: $RD_ID1 S2 off \"the S2 off cell\" stated=\"a sentence the changelog does not hold\"" \
+  "$(rd_line "$RD_ID1" | /usr/bin/grep -o ' stated=' | wc -l | tr -d ' ')|$(rd_line "$RD_ID1")"
+poke "$RSEV" release-check
+expect_eq "RD-7b …and the deferral reads unstated again" "unstated" "$(rd_state "$RD_ID1")"
+poke "$RSEV" finding-stated "$RD_ID1" "$RD_SA"
+poke "$RSEV" release-check
+expect_eq "RD-7c …and stated again once the changelog's sentence is put back" "stated" "$(rd_state "$RD_ID1")"
+poke "$RSEV" finding-stated "$RD_ID1" "$RD_SA"
+expect_eq "RD-7d stating the same sentence twice writes nothing (exit 0)" "0" "$RC"
+expect_contains "RD-7e …and says so" "nothing was written" "$OUT"
+poke "$RSEV" finding-stated "$RD_ID2" "$RD_SQ"
+expect_eq "RD-8 a sentence with a quote, a backslash and a pipe is stored escaped, the field still one quoted string" \
+  "0|deferred: $RD_ID2 S3 on \"the S3 on cell\" stated=\"Said \\\"go\\\" \\\\ now | here\"" "$RC|$(rd_line "$RD_ID2")"
+s57_commit "$SEV_WT" CHANGELOG.md "- Said \"go\" \\ now | here" >/dev/null
+poke "$RSEV" release-check
+expect_eq "RD-8b …and matches the changelog's own text verbatim: stated" "stated" "$(rd_state "$RD_ID2")"
+poke "$RSEV" finding-stated "$RD_ID3" "The install  record
+now lists	what setup placed."
+expect_eq "RD-9 a sentence with a line break, a tab and a double space is stored folded to single spaces" \
+  "0|deferred: $RD_ID3 S3 on \"a 'quoted' word wrong\" stated=\"The install record now lists what setup placed.\"" "$RC|$(rd_line "$RD_ID3")"
+s57_commit "$SEV_WT" CHANGELOG.md "- The install record now lists what setup placed." >/dev/null
+poke "$RSEV" release-check
+expect_eq "RD-9b …and that folded sentence is read against the changelog: stated" "stated" "$(rd_state "$RD_ID3")"
+expect_eq "RD-9c …the other deferrals' states unchanged by it (ID2 stated, ID5 unstated)" "stated|unstated" "$(rd_state "$RD_ID2")|$(rd_state "$RD_ID5")"
+
+# ---------- refusals: byte-identical plan ----------
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_CHK" "a sentence"
+s42_unchanged "RD-10 a finding that is a check owed, with no deferred: line, is not stated" 1 "$PSEV"
+expect_contains "RD-10b …naming why" "carries no deferred: line for $RD_CHK" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "record/wave-01-fixture/nowhere.md#9" "a sentence"
+s42_unchanged "RD-10c a finding the plan does not hold" 1 "$PSEV"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_ID5" "-"
+s42_unchanged "RD-10d the sentence - (what the continuation writes for none)" 1 "$PSEV"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_ID5" "   "
+s42_unchanged "RD-10e a blank sentence is the usage error" 2 "$PSEV"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_ID5"
+s42_unchanged "RD-10f one operand is the usage error" 2 "$PSEV"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "no-hash-here" "a sentence"
+s42_unchanged "RD-10g a finding that is not <record>#<n> is the usage error" 2 "$PSEV"
+poke "$RSEV" finding-stated "$RD_ID5" "a sentence for the last deferral"
+expect_eq "RD-10h control: the same call on a deferral exits 0, so the refusals above are the verb's own" "0" "$RC"
+expect_eq "RD-10i …and writes the sentence" "1" "$(rd_line "$RD_ID5" | /usr/bin/grep -c 'stated="a sentence for the last deferral"')"
+
+# ---------- the arm: a subagent may not state a deferral ----------
+rd_wall() {  # <command> -> the real wall's exit and refusal for a rostered subagent's call
+  local input
+  input="$(jq -n --arg s "$SID" --arg cwd "$RSEV" --arg cmd "$1" '{session_id: $s, cwd: $cwd,
+    hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $cmd},
+    tool_use_id: "toolu_rd", agent_id: "a-implementor", agent_type: "implementor"}')"
+  GATE_ERR="$( cd "$RSEV" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 \
+    bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" 2>&1 >/dev/null )"
+  GATE_RC=$?
+}
+rd_wall "bash $POKER finding-stated '$RD_ID5' 'a sentence'"
+expect_eq "RD-11 a subagent's finding-stated is refused by the existing arm (exit 2)" "2" "$GATE_RC"
+expect_contains "RD-11b …naming the rule" "a subagent may not change a contract or the plan" "$GATE_ERR"
+rd_wall "bash $POKER tick"
+expect_eq "RD-11c control: a read-only verb of the same agent is admitted" "0" "$GATE_RC"
+
+# ---------- the mutation arms: a doctored copy of the poker per fix ----------
+RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rd-mut.XXXXXX")"
+rd_mutant() {  # <name> <sed script> -> $RD_MUT/<name>/hooks/session-poker.sh, siblings and lib linked in
+  local d="$RD_MUT/$1" _sib
+  mkdir -p "$d/hooks" "$d/scripts"
+  ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$d/scripts/lib"
+  for _sib in "$(dirname "$POKER")"/*; do
+    [ "$(basename "$_sib")" = session-poker.sh ] && continue
+    ln -s "$_sib" "$d/hooks/$(basename "$_sib")"
+  done
+  sed "$2" "$POKER" > "$d/hooks/session-poker.sh"
+}
+rd_mutant nowrite 's/^    FS_TAIL=" stated=.*$/    FS_TAIL=""/'
+rd_mutant inverted 's/^    \[ -n "\$DS_ST" \] && case .*$/    [ -n "$DS_ST" ] \&\& case "$DS_CL" in *"$DS_ST"*) : ;; *) DS_ANS=stated ;; esac/'
+expect_eq "RD-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
+  "$(diff "$POKER" "$RD_MUT/nowrite/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/inverted/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+RD_REAL_POKER="$POKER"
+POKER="$RD_MUT/nowrite/hooks/session-poker.sh"
+poke "$RSEV" finding-stated "$RD_ID5" "a sentence for the doctored verb"
+POKER="$RD_REAL_POKER"
+expect_eq "RD-mut1 the verb with its write removed still runs (exit 0)" "0" "$RC"
+expect_eq "RD-mut1b …and writes no sentence, where the real verb writes it (RD-2b, RD-10i go red on it)" "0" \
+  "$(rd_line "$RD_ID5" | /usr/bin/grep -c 'a sentence for the doctored verb')"
+poke "$RSEV" finding-stated "$RD_ID5" "a sentence for the doctored verb"
+expect_eq "RD-mut1c …control: the real verb, given the same call, writes it" "0|1" \
+  "$RC|$(rd_line "$RD_ID5" | /usr/bin/grep -c 'a sentence for the doctored verb')"
+POKER="$RD_MUT/inverted/hooks/session-poker.sh"
+poke "$RSEV" release-check
+POKER="$RD_REAL_POKER"
+expect_eq "RD-mut2 the release check with its match inverted still runs and prints its deferrals (exit 0)" "0|yes" \
+  "$RC|$([ -n "$(rd_state "$RD_ID2")" ] && echo yes || echo no)"
+expect_eq "RD-mut2b …and reads the stated deferral unstated, which RD-6 and RD-8b read stated (they go red on it)" "unstated" "$(rd_state "$RD_ID1")"
+rm -rf "$RD_MUT"
+
+cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
+POKE_BOUND="$RD_BOUND_WAS"
 
 finish
