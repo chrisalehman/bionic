@@ -1078,7 +1078,7 @@ expect_eq "B.26 …and it took no number of its own" "1" "$(nreq)"
 expect_eq "B.27 the parent's request was ended once, by the parent" "0" "$(field "$(req_of np)" rc)"
 
 # A typed admission from no ancestor, and BIONIC_SLOT_HELD=1, ask anyway.
-stranger_rows() {  # <booked> <prefix> — sets ST_RC and ST_RAN for a stranger with no room
+stranger_rows() {  # <booked> <prefix> — sets ST_RC and ST_RAN for an unbooked caller with no room
   fresh "wrap-stranger-$2"
   world_machine 8 8192 60 1.0
   world_cost h 15 0.5 30
