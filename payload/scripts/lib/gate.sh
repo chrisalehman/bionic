@@ -38,11 +38,18 @@
 #   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
 #   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
-#   gate_asked <who>         rc 0 when that who has a request in the store, ever
+#   gate_asked               names (a who each) on stdin; prints those with a request that has no
+#                            ended= line, in the order given, and is rc 0 when it printed any. One
+#                            read of the store answers every name.
 #   gate_share               the machine's share, 1 to 100 (absent or unreadable: 80)
 #   gate_promise <key>       the per-field promise for a key, <mem>:<cores>:<seconds>, loading the
 #                            store itself; nothing when no cost is on record anywhere
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
+#
+# THE KNOBS. BIONIC_GATE_POLL (seconds between a waiter's polls, default 2) and BIONIC_GATE_KEEP
+# (seconds an ended request is kept before the next scan removes it, default 86400; the cost
+# records are what the gate learned and are never pruned, and a request nothing has ended is
+# never pruned however old).
 #
 # WHO ASKS. `who` is `${CLAUDE_CODE_SESSION_ID:-none}:${BIONIC_GATE_AGENT:-main}`; the holder is
 # `$$`, the process that runs the command and whose death ends its claim. The caller gives the
@@ -267,15 +274,24 @@ _gate_promise() {
 #   _G_WAIT     waiting (holder alive, not admitted)   _G_LWAIT  of them, landings
 #   _G_QUEUE    their "<kind> <asked> <id> <key>" lines
 # raises the peak of every admitted, unfinished request to the reading <pct> it is given, and
-# writes the end of every admitted request whose holder is dead (_gate_reap).
+# writes the end of every admitted request whose holder is dead (_gate_reap), and removes every
+# ended request older than BIONIC_GATE_KEEP seconds.
 _gate_scan() {
-  local f id reading="${1:--1}"
+  local f id reading="${1:--1}" keep="${BIONIC_GATE_KEEP:-86400}" now=''
+  case "$keep" in ''|*[!0-9]*) keep=86400 ;; esac
   _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE=''
   for f in "$_GD"/requests/*; do
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
     _gate_read "$f" || continue
-    [ -z "$_R_ended" ] || continue
+    if [ -n "$_R_ended" ]; then
+      # An ended request older than the bound is removed here, under the lock, on the walk
+      # every verb already takes (T52); `now` is read once, and only when one is found.
+      case "$_R_ended" in *[!0-9]*) continue ;; esac
+      [ -n "$now" ] || now="$(_res_now)"
+      [ "$((now - _R_ended))" -le "$keep" ] || rm -f "$f"
+      continue
+    fi
     if ! _gate_alive; then
       [ -z "$_R_admitted" ] || _gate_reap "$f"
       continue
@@ -568,7 +584,7 @@ _gate_room_line() {
     END { if (n) printf "%g", m }')"
   printf '%s' "$_G_PROM" | awk -F: -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" \
       -v most="$most" -v share="$(gate_share)" -v cores="$(_res_cores)" -v unf="$_G_UNF" \
-      -v wait="$_G_WAIT" "$_GATE_FITS_AWK"'
+      -v wait="$_G_WAIT" -v used="$(gate_usage "$1")" "$_GATE_FITS_AWK"'
     function known(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
     NF >= 3 { pc += $2 }
     END {
@@ -580,7 +596,7 @@ _gate_room_line() {
       if (!known(b1) || !known(b5) || r < 0) { if (!quiet) room = 0 }
       if (known(b1)) { if (b1 + prom > lim) room = 0 }
       if (known(b5)) { if (b5 + prom > lim) room = 0 }
-      if (r >= 0 && !fits(r, share)) room = 0
+      if (r >= 0 && !fits(used, share)) room = 0
       if (all) room = 0
       if (wait > 0) room = 0
       printf "room=%s load=%s/%s cores=%d promised=%g waiting=%d\n", (room ? "yes" : "no"), b1, b5, cores, prom, wait
@@ -609,17 +625,27 @@ gate_room() {
   _gate_room_line "$reading" "$((10#$owed))"
 }
 
-# gate_asked <who> — rc 0 when the store holds a request by that who, in any state: a writer
-# that has asked once is showing in the load or in a promise, and is owed no longer.
+# gate_asked — names on stdin, one who per line: prints, in the order given, each that has a
+# request in the store with no ended= line, and is rc 0 when it printed any. A writer that has
+# asked and is still running is showing in the load or in a promise and is owed no longer; one
+# whose request ended shows nowhere. ONE awk reads every request file once (the names come first
+# on stdin, `-`), so the cost does not grow with the writers asked about (T52: the old walk forked
+# a grep per file per name, 8 s at 600 requests under the stop wall's 10 s timeout).
 gate_asked() {
-  local f
-  [ -n "${1:-}" ] || return 1
   _GD="$(gate_dir)"
-  for f in "$_GD"/requests/*; do
-    case "${f##*/}" in ''|*[!0-9]*) continue ;; esac
-    grep -qxF "who=$1" "$f" 2>/dev/null && return 0
-  done
-  return 1
+  set -- "$_GD"/requests/[0-9]*
+  [ -e "$1" ] || { cat >/dev/null; return 1; }
+  awk '
+    FILENAME == "-" { if ($0 != "") { n++; name[n] = $0 }; next }
+    FNR == 1 { flush() }
+    /^who=/ { w = substr($0, 5); next }
+    /^ended=/ { ended = 1 }
+    function flush() { if (w != "" && !ended) open[w] = 1; w = ""; ended = 0 }
+    END {
+      flush()
+      for (i = 1; i <= n; i++) if (name[i] in open) { print name[i]; hit = 1 }
+      exit !hit
+    }' - "$@" 2>/dev/null
 }
 
 # gate_list — one line per request, lowest id first:
