@@ -14190,14 +14190,15 @@ mkdir -p "$NM_MUT/hooks" "$NM_MUT/scripts/lib"
 cp "$BIONIC_HOOKS_DIR"/*.sh "$NM_MUT/hooks/" 2>/dev/null
 cp "$NM_LIB"/*.sh "$NM_MUT/scripts/lib/" 2>/dev/null
 cp "$NM_LIB/../booked.sh" "$NM_MUT/scripts/booked.sh" 2>/dev/null
-NM_NEEDLE='if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then'
+# The line as wave-28 T36 spells it (a door claim, kind `only`, is scoped like a file claim).
+NM_NEEDLE='if { [ "$_k" != file ] && [ "$_k" != only ]; } || ! cmd_claim_scope "$_root" "$_b" "$_p"; then'
 anchor "$NM_LIB/walls.sh" "$NM_NEEDLE" 1
 NM_N="$NM_NEEDLE" awk '
-  BEGIN { n = ENVIRON["NM_N"]; r = "if [ \"$_k\" != file ]; then" }
+  BEGIN { n = ENVIRON["NM_N"]; r = "if [ \"$_k\" != file ] && [ \"$_k\" != only ]; then" }
   { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' \
   "$NM_LIB/walls.sh" > "$NM_MUT/scripts/lib/walls.sh"
 expect_eq "NM mutation: the doctored copy lost exactly the scoping call" "0 1" \
-  "$(grep -cF -- "$NM_NEEDLE" "$NM_MUT/scripts/lib/walls.sh") $(grep -cF -- 'if [ "$_k" != file ]; then' "$NM_MUT/scripts/lib/walls.sh")"
+  "$(grep -cF -- "$NM_NEEDLE" "$NM_MUT/scripts/lib/walls.sh") $(grep -cF -- 'if [ "$_k" != file ] && [ "$_k" != only ]; then' "$NM_MUT/scripts/lib/walls.sh")"
 expect_eq "NM mutation: …and its wall still wraps and names a suite" "a.test.sh" \
   "$(nm_names "$NM_MUT/hooks/bash-walls.sh" 'bash tests/a.test.sh')"
 expect_eq "NM mutation: …which names other/a.test.sh by its basename, so the agreement goes red" \
