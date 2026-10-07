@@ -2944,8 +2944,11 @@ expect_absent "DOOR.13 …and never as the full tree" "full tree" "$ERR"
 run_hook "$(mk_payload "$R_DR" 'tests/run.sh --only alpha.test.sh beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
 expect_status "DOOR.14 one off-budget name among several refuses the call" 2 "$ST"
 
-# The main thread: the door's arm never speaks there. Unengaged here, so no other wall judges it.
-R_DRM="$(mk_repo door-main no)"
+# The main thread: the door's arm never speaks there. Engaged, in farm-out's advisory mode (as
+# WC7 drives it), so the one wall that may refuse a main-thread suite stands aside.
+R_DRM="$(mk_repo door-main)"
+printf 'farm-out-mode: advisory\n' > "$R_DRM/.bionic/config.yaml"
+bw_dispatched "$R_DRM" t36main "suites_allowed=beta.test.sh" suites_source=declared files=
 run_hook "$(mk_payload "$R_DRM" 'bash tests/alpha.test.sh' "" omit Bash "" 1800000)"
 expect_ne "DOOR.15 the main thread's bare run is not refused" "2" "$ST"
 expect_absent "DOOR.16 …and the door's line is not printed" "tests/run.sh --only" "$ERR"
