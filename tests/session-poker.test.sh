@@ -13193,7 +13193,7 @@ section "§CHECK: a finding the reviewer cannot settle owes a check — the sett
 CHK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
   "$(roster_row_fixture session="$SID" name=chk-crit agent_id=a-chk-crit subagent_type=bionic:critic \
-     files="$(sev_files "k-open k-fixto k-defer k-note k-ref k-uns k-w")")" >> "$SEV_RS"
+     files="$(sev_files "k-base k-open k-fixto k-defer k-note k-ref k-uns k-w")")" >> "$SEV_RS"
 chk_id() { printf 'record/wave-01-fixture/%s.md#1' "$1"; }
 chk_line() { /usr/bin/grep -F "check: $(chk_id "$1") " "$PSEV"; }
 chk_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(chk_id "$1") "; }
@@ -13203,6 +13203,15 @@ chk_rec chk-a chk-agent; chk_rec chk-rev chk-crit; chk_rec chk-writer implemento
 mkdir -p "$RSEV/notes"; printf 'written-by: chk-agent\n' > "$RSEV/notes/chk-out.md"
 expect_contains "CHECK-0 precondition: the Tasks row whose Files hold b.sh names implementor as its agent" \
   "| implementor | — | 30 | REQ-1 | b.sh |" "$(/usr/bin/grep '^| T2 |' "$PSEV")"
+# The working head moved past C1 after §CUR8-sev (§RC-STATED commits the changelog), so the facts the
+# judge reads are planted again at it (§CUR8-sev's way), and each reading below reads to it.
+SEV_C1="$(git -C "$SEV_WT" rev-parse HEAD)"
+sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-07T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
+sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
+sev_rec k-base flag "findings: 1" "finding: 1 S4 off - a word the reader rated" 
+sev_cur 4; sev_add k-base chk-crit; sev_cur 7
+poke "$RSEV" current 8
+expect_eq "CHECK-0b precondition: with every fact at the working head and no check open, current 8 is admitted" "0|8" "$RC|$(chk_cur)"
 
 # ---------- an open check holds the step ----------
 sev_cur 4

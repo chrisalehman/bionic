@@ -26,6 +26,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle a check a finding owes, on its check: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -445,6 +446,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle the check an unsure finding owes, on its check: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -725,6 +727,25 @@ case "$VERB" in
     esac
     case "${1##*#}" in *[!0123456789]*) usage "finding-stated: '$1' is not <record>#<n>." ;; esac
     FS_ID="$1"; FS_RAW="$2"
+    ;;
+  # THREE FORMS (wave-28 T41; D33): the finding, as its check: line names it (`<record>#<n>`), how the
+  # check came out — `settled <S> <reach>`, `refuted` or `unsettled` — and the check record. A fourth
+  # form, a missing operand or an id of another shape is the usage error; whether the rating is on the
+  # scale, the line exists and the record is a third agent's are the verb's own refusals (1).
+  finding-check)
+    FC_USAGE="finding-check takes <record>#<n> (as its check: line names it), then settled <S> <reach>, refuted or unsettled, then the check record."
+    case "${2:-}" in
+      settled) [ $# -eq 5 ] || usage "$FC_USAGE"; FC_S="$3"; FC_R="$4"; FC_REC="$5" ;;
+      refuted|unsettled) [ $# -eq 3 ] || usage "$FC_USAGE"; FC_S=""; FC_R=""; FC_REC="$3" ;;
+      *) usage "$FC_USAGE" ;;
+    esac
+    case "$1" in
+      *?#[0123456789]*) : ;;
+      *) usage "finding-check: '$1' is not <record>#<n>." ;;
+    esac
+    case "${1##*#}" in *[!0123456789]*) usage "finding-check: '$1' is not <record>#<n>." ;; esac
+    [ -n "$FC_REC" ] || usage "$FC_USAGE"
+    FC_ID="$1"; FC_HOW="$2"
     ;;
   # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
@@ -3138,6 +3159,24 @@ cur8_judge() {
   die "REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
   printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
   die "Take the reading or the floor run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
+  exit 1
+}
+
+# cur8_checks -> returns when no check a finding owes is open on the bound plan; otherwise refuses
+# `current 8`, exit 1, the plan unchanged, naming each open check (wave-28 T41; REQ-8 AC-8.6, D33).
+# The open set is lib/proof.sh `proof_checks_open`'s, the one reader the judge (`facts_state`) asks too.
+cur8_checks() {
+  local open
+  if ! { declare -F proof_checks_open >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_checks_open >/dev/null 2>&1; then
+    die "REFUSED — current: 8 is admitted only when no check a finding owes is open, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
+  open="$(proof_checks_open "$PV_PLAN" 2>/dev/null)"
+  [ -n "$open" ] || return 0
+  die "REFUSED — current: 8 waits on each check a finding owes; these check: lines are open (no settled=, no refuted):"
+  printf '%s\n' "$open" | awk '{ id = $1; s = $2; r = $3; t = $0; sub(/^[^"]*/, "", t); print "- " id " " s " " r " " t }' >&2
+  die "Settle each with finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>, a record written by an agent that is neither the finding's reviewer nor the code's writer; the plan is unchanged."
   exit 1
 }
 
@@ -6101,6 +6140,7 @@ EOF
     PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
     case "$PV_KEY" in
       8|8a|8b)
+        cur8_checks
         cur8_judge
         PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     esac
@@ -6608,6 +6648,130 @@ $PF_PLANL"
     exit 0
     ;;
 
+  # THE CHECK A FINDING OWES, SETTLED (wave-28 T41; REQ-8 AC-8.6, D33). An `unsure:` finding wrote
+  # `check: <record>#<n> <S> <reach> "<title>"` at registration (lib/proof.sh `proof_finding_lines`);
+  # this appends how its check came out to that line, in place, through the plan transaction:
+  #
+  #   settled <S> <reach>   ` settled=<S>:<reach> by=<check record>`    the rating every read now takes
+  #   refuted               ` refuted by=<check record>`                 every read drops the finding
+  #   unsettled             ` settled=<its own S>:<reach> by=<…>`        the rating it was registered at stands
+  #
+  # A settlement the table defers writes the finding's `deferred:` line as well (placed by
+  # `proof_add_line`), unless the plan already holds one. THE CHECK IS A THIRD AGENT'S: the check record
+  # is a file under record/ of the docs root, as a proof's evidence is, and its flush-left
+  # `written-by: <name>` line names who wrote it — never the reader on the finding's proof line, nor the
+  # agent of a `## Tasks` row whose Files hold the file the finding names. A check is settled once.
+  finding-check)
+    if ! { declare -F proof_findings_owed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F _proof_check_state >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    if [ "$FC_HOW" = settled ] && ! proof_priority "$FC_S" "$FC_R" >/dev/null; then
+      die "REFUSED — '$(clean "$FC_S $FC_R")' is no rating on the severity scale: write <S1|S2|S3|S4> <on|off>. The plan is unchanged."
+      exit 1
+    fi
+    plan_verb_open finding-check
+    FC_LINE="$(awk -v id="$FC_ID" '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && /^check:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { print; exit } }' "$PV_PLAN")"
+    if [ -z "$FC_LINE" ]; then
+      die "REFUSED — $PV_PLAN carries no check: line for $(clean "$FC_ID") under ## SDLC State, and only a check a finding owes is settled; the plan is unchanged."
+      exit 1
+    fi
+    FC_ST="$(_proof_check_state "$PV_PLAN" "$FC_ID")"
+    if [ "$FC_ST" != open ]; then
+      die "REFUSED — the check of $(clean "$FC_ID") is already $FC_ST on its check: line, and a check is settled once; the plan is unchanged."
+      exit 1
+    fi
+    FC_DOCS="$(docs_root "$PV_REPO")"
+    FC_DOCS="$(cd "$FC_DOCS" 2>/dev/null && pwd -P)"
+    case "$FC_REC" in
+      *[[:space:]]*|*'|'*)
+        die "REFUSED — the check record '$(clean "$FC_REC")' carries a space, a tab, a line break or a |, which the check: line cannot hold; rename the file. The plan is unchanged."
+        exit 1 ;;
+    esac
+    case "$FC_REC" in /*) FC_ABS="$FC_REC" ;; *) FC_ABS="$FC_DOCS/$FC_REC" ;; esac
+    if [ -L "$FC_ABS" ]; then
+      die "REFUSED — the check record $(clean "$FC_REC") is a symbolic link, and what it points at can change after the settlement; copy it into the record. The plan is unchanged."
+      exit 1
+    fi
+    FC_REAL=""
+    [ -n "$FC_DOCS" ] && [ -f "$FC_ABS" ] && FC_REAL="$(cd "$(dirname "$FC_ABS")" 2>/dev/null && pwd -P)/$(basename "$FC_ABS")"
+    if [ -z "$FC_REAL" ]; then
+      die "REFUSED — the check record $(clean "$FC_REC") does not exist (read as $(clean "$FC_ABS")); write the check's record first, then settle it. The plan is unchanged."
+      exit 1
+    fi
+    case "$FC_REAL" in
+      "$FC_DOCS"/record/*) FC_REL="${FC_REAL#"$FC_DOCS"/}" ;;
+      *)
+        die "REFUSED — the check record $(clean "$FC_REC") is not under record/ of the docs root ($FC_DOCS/record/); a check is settled by a record. The plan is unchanged."
+        exit 1 ;;
+    esac
+    FC_BY="$(awk '/^written-by:[ \t]/ { v = $0; sub(/^written-by:[ \t]+/, "", v); sub(/[ \t].*$/, "", v); print v; exit }' "$FC_REAL" 2>/dev/null)"
+    if [ -z "$FC_BY" ]; then
+      die "REFUSED — the check record $(clean "$FC_REL") does not say who wrote it; write written-by: <the checking agent's roster name> in it, an agent that is neither the finding's reviewer nor the code's writer. The plan is unchanged."
+      exit 1
+    fi
+    # The reviewer: the reader its proof line names (the last one citing the record). The writers: the
+    # agent of each `## Tasks` row whose Files hold the file the finding names (`-` names none).
+    FC_RECD="${FC_ID%#*}"; FC_N="${FC_ID##*#}"
+    FC_READER="$(awk -v ev="$FC_RECD" '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && /^proved:[ \t]/ { e = ""; r = ""; m = split($0, f, /[ \t]+/)
+        for (i = 2; i <= m; i++) { if (f[i] == "evidence=" ev) e = 1; else if (f[i] ~ /^reader=/) r = substr(f[i], 8) }
+        if (e) who = r }
+      END { print who }' "$PV_PLAN")"
+    FC_PATH="$(proof_findings "$FC_DOCS/$FC_RECD" 2>/dev/null | awk -F'\t' -v n="$FC_N" '$1 == n { print $4; exit }')"
+    FC_PATH="${FC_PATH%:*}"; [ "$FC_PATH" != - ] || FC_PATH=""
+    FC_WRITERS=""
+    [ -z "$FC_PATH" ] || FC_WRITERS=" $(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v p="$FC_PATH" '
+      { a = $5; sub(/[ (].*$/, "", a); if (a == "" || a == "—") next
+        m = split($9, fs, /[ ,]+/); for (i = 1; i <= m; i++) { gsub(/`/, "", fs[i]); if (fs[i] == p) { print a; break } } }' | tr '\n' ' ')"
+    if [ -n "$FC_READER" ] && [ "$FC_BY" = "$FC_READER" ]; then
+      die "REFUSED — the check record $(clean "$FC_REL") was written by $(clean "$FC_BY"), the reader of $(clean "$FC_RECD"); a check is written by an agent that is neither the finding's reviewer nor the code's writer. The plan is unchanged."
+      exit 1
+    fi
+    case "$FC_WRITERS" in
+      *" $FC_BY "*)
+        die "REFUSED — the check record $(clean "$FC_REL") was written by $(clean "$FC_BY"), the agent of the ## Tasks row whose Files hold $(clean "$FC_PATH"); a check is written by an agent that is neither the finding's reviewer nor the code's writer. The plan is unchanged."
+        exit 1 ;;
+    esac
+    case "$FC_HOW" in
+      unsettled)
+        FC_S="$(printf '%s\n' "$FC_LINE" | awk '{ print $3 }')"; FC_R="$(printf '%s\n' "$FC_LINE" | awk '{ print $4 }')"
+        FC_TAIL=" settled=$FC_S:$FC_R by=$FC_REL" ;;
+      settled)   FC_TAIL=" settled=$FC_S:$FC_R by=$FC_REL" ;;
+      refuted)   FC_TAIL=" refuted by=$FC_REL" ;;
+    esac
+    FC_TAIL="$FC_TAIL" awk -v id="$FC_ID" '
+      /^[[:space:]]*```/ { fence = !fence; print; next }
+      fence { print; next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
+      insdlc && !done && /^check:[ \t]/ {
+        split($0, f, /[ \t]+/)
+        if (f[2] == id) { done = 1; l = $0; sub(/[ \t]+$/, "", l); print l ENVIRON["FC_TAIL"]; next }
+      }
+      { print }' "$PV_PLAN" > "$PV_NEW"
+    FC_DEF=""
+    if [ "$FC_HOW" != refuted ] && [ "$(proof_priority "$FC_S" "$FC_R")" = defer ] && ! deferral_line "$PV_PLAN" "$FC_ID" >/dev/null; then
+      FC_DEF="deferred: $FC_ID $FC_S $FC_R $(printf '%s\n' "$FC_LINE" | awk '{ if (match($0, /"[^"]*"/)) print substr($0, RSTART, RLENGTH); else print "\"\"" }')"
+      if ! proof_add_line "$PV_NEW" "$FC_DEF" > "$PV_NEW.2" 2>/dev/null || [ ! -s "$PV_NEW.2" ]; then
+        die "REFUSED — the deferred: line for $(clean "$FC_ID") could not be placed under ## SDLC State; the plan is unchanged."
+        exit 1
+      fi
+      mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    plan_verb_swap finding-check "the check of $FC_ID" writer
+    say "finding-check — $(clean "$FC_ID"):$(clean "$FC_TAIL") on its check: line of $PV_PLAN; dry-committed first."
+    [ -z "$FC_DEF" ] || say "finding-check — $(clean "$FC_DEF")"
+    exit 0
+    ;;
+
   # THE RELEASE CHECK (wave-27 T16; D12). A project may name one command in `.bionic/config.yaml`
   # under `release-check:`. This verb runs it in the checkout of the plan's working branch, with
   # BIONIC_CHECK_BASE at the last release and BIONIC_CHECK_HEAD at the working head, its words
@@ -7035,6 +7199,8 @@ RC_TAGS
             $2 == "note:" { print $3, $4, $5; next }
             $2 == "NOTIFY" && index($0, " started without its checks: ") > 0 { print; next }
             $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY)$/ { print $2, $3, $4 }
+            # An open check is told once (wave-28 T41; D33): a new one, or one settled, moves the hash.
+            $2 == "FINDING" && $6 == "check" { print $2, $3, $6 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
       fi
