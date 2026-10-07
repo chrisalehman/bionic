@@ -8895,11 +8895,16 @@ walk_start() {  # <repo> <name> -> the real execution recorder starts the dispat
           bash "${BIONIC_HOOKS_DIR}/execution-recorder.sh" >/dev/null 2>&1 )
 }
 WALK_OUT=""; WALK_RC=0
-walk_register() {  # <repo> <record path> <question> <reader> -> writes the record, then proof-add
-  local repo="$1" rec="$2" q="$3" base head id
+# A reader dealt a code question is pushed the severity scale (T16), so its records carry the
+# finding lines (T15): `findings: 0`, the walk planting none. The one reader the walk deals
+# `evidence` alone is not pushed it, and its record stays in the 1.12.0 form: pass `old` as the
+# fifth argument.
+walk_register() {  # <repo> <record path> <question> <reader> [old] -> writes the record, then proof-add
+  local repo="$1" rec="$2" q="$3" form="${5:-scaled}" base head id
   base="$(git -C "$repo" rev-list --max-parents=0 HEAD)"; head="$(git -C "$repo" rev-parse HEAD)"
   mkdir -p "$(dirname "$repo/$rec")"
   { printf 'reviewed: %s..%s\nquestion: %s\nresult: pass\nscope: piece\n' "$base" "$head" "$q"
+    [ "$form" = old ] || printf 'findings: 0\n'
     if [ "$q" = structure ]; then
       for id in reuse one-site single-job open-closed substitution narrow-interface dependency-direction; do
         printf 'check: %s PASS nothing found\n' "$id"; done
@@ -9011,7 +9016,7 @@ expect_eq "§scaffold-walk audited: the auditor, Suites: none beside its pytest 
 expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
 expect_eq "§scaffold-walk …and its record" "$WALK_REC/T3-evidence.md" "$(roster_field "$(q_row "$REPO")" files)"
 walk_start "$REPO" wq-walk5
-walk_register "$REPO" "$WALK_REC/T3-evidence.md" evidence wq-walk5
+walk_register "$REPO" "$WALK_REC/T3-evidence.md" evidence wq-walk5 old
 expect_eq "§scaffold-walk …and the evidence record registers" "0" "$WALK_RC"
 REPO=$(walk_repo rwalk6 audited)
 # walk_verdict -> the gate's verdict, and on a refusal its reason, so a red row says why.
