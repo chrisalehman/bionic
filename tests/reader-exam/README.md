@@ -4,7 +4,10 @@ Readers (the auditor, the critic, the reviewer) are held to the checks files the
 at start: `payload/context/checks-evidence.md`, `checks-adversarial.md` and
 `checks-structure.md`. The exam asks whether a reader holding those files catches defects
 that really got past a reader, and does not fail a change that has none (spec D11 of
-wave-27; design ledger Δ4).
+wave-27; design ledger Δ4). A defect sample is passed only when the reader's record carries a
+`finding:` line that names the planted defect's file at a severity and reach the priority table
+sends to fix (S1 on, S1 off, S2 on); a record that only describes the defect, or declares it at
+a rating the table defers or notes, fails the sample (spec D22 of wave-28).
 
 It is the one check that needs a live model, so it is not in the hermetic suite. What the
 suite holds it to is `tests/reader-exam.test.sh`: the latest sitting in `sittings.md` names
@@ -22,30 +25,44 @@ be sat again before the tree is green.
     `result: <pass|flag|fail>` (what the reader must reach),
     `token: <string>` (a string the reader's record must contain), and, on every sample but
     `clean`, `names: <identifier>` (an identifier the record must also contain, to show it
-    named the planted defect and did not reach the result for another reason). A `token:` or
-    `names:` line may hold alternatives separated by ` | `, any one of which meets it: the
-    spellings a finder writes for the same thing.
-- `score.sh`: `exam_score <expect.txt> <record>` prints `met` or `missed`. Sourced, it defines
-  its functions and runs nothing. It is step 5 below, and the suite holds the real keys to it.
+    named the planted defect and did not reach the result for another reason),
+    `finding-file: <path>` (the file the record's `finding:` line must name: the planted defect's,
+    or the owner it bypasses) and `finding-rating: <S> <reach>` (the ratings that pass it, each
+    one the table sends to fix). A `token:`, `names:`, `finding-file:` or `finding-rating:` line
+    may hold alternatives separated by ` | `, any one of which meets it: the spellings a finder
+    writes for the same thing.
+- `score.sh`: `exam_score <expect.txt> <record>` prints `met: declared` (the record declares the
+  planted defect; `clean` asks no declaration and prints `met`), or `missed`, which says why when
+  the miss is the declaration: `missed: described only`, `missed: declared at <S> <reach>:
+  deferred` (or `noted`), `missed: no finding names <file>`, `missed: finding lines refused:
+  <why>`. It reads the `finding:` lines through `proof_findings` of
+  `payload/scripts/lib/proof.sh`, the reader the registering verb uses. Sourced, it defines its
+  functions and runs nothing. It is step 5 below, and the suite holds the real keys to it.
 - `materialize.sh <sample dir> <dest>`: builds the repository a reader is given, with an empty
   `.bionic/` of its own, and prints its range `<a>..<b>`. The key does not travel into it,
   and a `<dest>` whose path, as written or resolved, names the sample in any case is refused.
 - `run-session.sh <dest> <plugin copy> <prompt file> <output file>` and
-  `gen-prompt.sh <brief file>...`: the two helpers step 3 names. The first starts one
-  session headless, the second writes its prompt.
+  `PLUGIN=<plugin copy> gen-prompt.sh <brief file>...`: the two helpers step 3 names. The first
+  starts one session headless, the second writes its prompt, and ends each brief with the files
+  its reader is to read, by path in the plugin copy: its checks file for each question it is
+  dealt and the severity scale, as shipped.
 - `sittings.md`: every sitting, newest last. The suite reads the last one in the file.
 
 ## The samples
 
 Each is rebuilt small from a defect wave-26 shipped past a reader, in a made-up project. The
-records named are under `.bionic/docs/record/wave-26-never-idle/`.
+records named are under `.bionic/docs/record/wave-26-never-idle/`. The planted defect is one the
+priority table sends to fix at an honest rating (a core function giving a wrong result with no
+workaround, `S2 on`); a defect the table would defer or note at any honest rating is no sample.
+`dup-helper-no-table` (a second copy of a reader, with the same behaviour as the first) was
+retired for that reason at wave-28 T18: a duplicate that agrees with its owner has no functional
+effect, which the scale rates S4 and the table notes.
 
-| sample | question | key | rebuilt from |
+| sample | question | key (each also declares a finding on its file, rated `S1 on`, `S1 off` or `S2 on`) | rebuilt from |
 |---|---|---|---|
-| `dup-counter` | structure | `fail`, `check: reuse FAIL` or `check: one-site FAIL`, names `tree_dirty_count` | `review.md` (final review): the duplication FLAG, "three dirty-tree counters", and its ownership row for the run stamp, where the stamp writer computed the dirty count again instead of using the one the land reads, and computed it differently |
-| `dup-helper-no-table` | structure | `fail`, `check: reuse FAIL`, names `proof_field` | `review.md`: "two copies of the proof line's `at=` reader" beside the one reader of the proof line. Rebuilt at task scale, with no design and so no ownership table, so the reader has to search |
-| `admit-not-require` | evidence | `fail`, `REFUTED`, names `land.sh` | `auditor.md` §1b item 1, AC-3.4 REFUTED: the requirement said a full run "is required", the design and its test only showed one is admitted, and the land took the tree with none |
-| `red-then-green` | adversarial | `fail`, `land_check`, names `tail -n 1`, `tail -n1` or `tail -1` | `critic.md` F1: the landing check read only the last stamp, while the doctrine makes one call per suite, so a red suite followed by a green one at the same head landed |
+| `dup-counter` | structure | `fail`, `check: reuse FAIL` or `check: one-site FAIL`, names `tree_dirty_count`, file `bin/stamp.sh` | `review.md` (final review): the duplication FLAG, "three dirty-tree counters", and its ownership row for the run stamp, where the stamp writer computed the dirty count again instead of using the one the land reads, and computed it differently |
+| `admit-not-require` | evidence | `fail`, `REFUTED`, names `land.sh`, file `bin/land.sh` or `lib/fullrun.sh` | `auditor.md` §1b item 1, AC-3.4 REFUTED: the requirement said a full run "is required", the design and its test only showed one is admitted, and the land took the tree with none |
+| `red-then-green` | adversarial | `fail`, `land_check`, names `tail -n 1`, `tail -n1` or `tail -1`, file `lib/landcheck.sh` | `critic.md` F1: the landing check read only the last stamp, while the doctrine makes one call per suite, so a red suite followed by a green one at the same head landed |
 | `clean` | all three | not `fail`, `branch-name` | no defect: a small change that reuses what exists, with its spec, design table, matrix and evidence in order |
 
 ## Sitting the exam
@@ -86,12 +103,12 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    apart at start, and neither is pushed a checks file. Started one after the other, the second
    reads the first's record in its own tree. So each of the two gets a build and a session of
    its own. Readers of different types share their sample's build and are dispatched
-   together. That makes seven builds: `clean` twice (the auditor, the critic and the
+   together. That makes six builds: `clean` twice (the auditor, the critic and the
    reviewer, then the one-mind critic), `red-then-green` twice, and one for each other sample.
    The first sitting used eight, because step 3's proof took a `clean` build for one reviewer.
 3. **Open an engaged session on the built sample.** `cd <dest> && claude --plugin-dir
-   "$PLUGIN"`, or, headless as the first sitting ran it, `bash tests/reader-exam/gen-prompt.sh
-   <brief file>... > <prompt file>` and then `bash tests/reader-exam/run-session.sh <dest>
+   "$PLUGIN"`, or, headless as the first sitting ran it, `PLUGIN="$PLUGIN" bash
+   tests/reader-exam/gen-prompt.sh <brief file>... > <prompt file>` and then `bash tests/reader-exam/run-session.sh <dest>
    "$PLUGIN" <prompt file> <output file>`. The session's project is the built sample, so the readers' working directory,
    records and searches stay inside it. The built sample carries its own `.bionic/`, so it is
    a bionic root, and the session's first act is `/bionic:canonical-sdlc`, so it is engaged.
@@ -116,13 +133,17 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      the parent session's identity variables, so the session carries only its own. A session
      or a reader denied a tool is reported to the user and never worked round. It writes
      `<output file>` (the JSON result, which holds the session's id), `<output file>.err` and
-     `<output file>.time`. `gen-prompt.sh` writes the
-     prompt on stdout: `/bionic:canonical-sdlc` first, then an instruction to dispatch each brief
+     `<output file>.time`. `gen-prompt.sh`, which refuses a
+     `PLUGIN` that is not an absolute directory holding the files it names, writes the prompt on
+     stdout: `/bionic:canonical-sdlc` first, then an instruction to dispatch each brief
      exactly as written, to the agent type named on its first line, in the foreground, and, on a
      refusal, to stop and never retry; to save any record a reader returned as text, unchanged,
      at the path its brief names; and to reply with each record's path and whether it exists.
      Each `<brief file>` is the line `subagent_type: <agent type>` and then the brief of
-     step 4, which is dispatched without that first line. The briefs given to one call are the
+     step 4, which is dispatched without that first line and with the generator's closing lines:
+     the plugin copy's `context/checks-<q>.md` for each question on its `Questions:` line and
+     `context/severity.md`, which every reader is given, the one dealt `evidence` alone included,
+     since every reader is asked to declare what it finds as `finding:` lines. The briefs given to one call are the
      readers that share a build (step 2), so the prompt sends them together, in one message;
      `STEP_ZERO=1` has the session quote the agent descriptions first, as below.
    - **Loading the built roles.** `--plugin-dir "$PLUGIN"` loads the copy's roles and hooks in
@@ -223,8 +244,10 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    exam_score tests/reader-exam/samples/<name>/expect.txt <record>
    ```
 
-   It prints `met` or `missed`. A reader passes the exam when its record for each question the
-   key names is met. The one-mind critic's records for the questions the key does not name are
+   It prints `met: declared` or `met`, or `missed` and, for a miss on the declaration, why (see
+   `score.sh` above). A reader passes the exam when its record for each question the key names is
+   met, and on a defect sample that takes a `finding:` line on the planted defect's file at a
+   rating the table sends to fix. The one-mind critic's records for the questions the key does not name are
    kept (step 6) and not scored, and get no `result` line: on a defect sample they were never
    asked to find that defect. The scorer reads a record's `question:` line and not its path, so
    a `missed` on a record without one is a record to check before anything goes to a fix row.
@@ -259,6 +282,12 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    does not complete a sample), no line is for a question its sample's key does not name,
    every `result` line reads `met`, no two lines for one sample and question disagree, and
    every reached result is one its sample's key admits.
+   **A sitting whose checks files changed since** is marked, below its last line, by one line:
+   `stale: checks-<q> <old>… → <new>…[, …] (<the rows that changed them>); re-sit owed: <row>`, the
+   first eight or more hex digits of the hash the sitting read and of the one that ships, for every
+   checks file whose digest differs. The suite then passes the pin as history (its `result`
+   lines are not read, a retired sample's among them) and stays red on a differing file the line
+   does not name, or names with other hashes; the next sitting, appended below, replaces the mark.
 8. **A miss is sent back.** A reader that misses a sample sends its checks file to a fix row.
    The sitting is recorded as it went, so the suite is red from then until the fixed file is
    sat again and that sitting is appended below it.
@@ -271,7 +300,10 @@ real defect, and with nothing in a comment or a file name that gives the defect 
 above names the record it came from. Its key's `names:` identifier names the planted defect
 or the owner it bypasses, and is in as few files of the built tree as can be: an identifier
 that every file of the change carries is found by any record and shows nothing, and so is a
-word of the criterion's own sentence, which a reader quotes whatever its verdict. Prefer the
+word of the criterion's own sentence, which a reader quotes whatever its verdict. Its key's
+`finding-file:` names the file the planted defect is in, or the owner it bypasses, and every
+file named is in the built sample at its head; its `finding-rating:` lists the ratings the
+table sends to fix, and the defect must honestly be rated one of them. Prefer the
 owner the change should have gone through, which no line of the change holds. An identifier
 may sit in a context line of the patch only when no added or removed line holds it and the
 owner has no other name; the key's author logs it (`admit-not-require`'s `land.sh` is in the

@@ -592,4 +592,59 @@ expect_eq "R15f3 …and its pushed= reads empty: absent, the 1.12.0 state" "" "$
 lib roster_row "${R5_BASE[@]}" "push=severity" >/dev/null
 expect_status "R15g a near-miss key is still refused" "2" "$?"
 
+section "R16 — the landing's mark: landed= and landed_at= on the row's roster line (wave-28 T6; REQ-3 AC-3.2, D7)"
+# `line_publish` marks the landed row's roster line (`roster_mark_landed`): the name's latest row,
+# copied, gaining `landed=<40-hex> landed_at=<ISO-UTC>` LAST, appended by one write. The two keys are
+# present-if-passed in the one writer, so a marked row fed back key by key reproduces byte for byte.
+R16_C="0123456789abcdef0123456789abcdef01234567"
+R16_AT="2026-10-07T03:30:00Z"
+R16_R="$(lib roster_row "${R5_BASE[@]}" "pushed=checks-evidence" "landed=$R16_C" "landed_at=$R16_AT")"
+expect_eq "R16a landed= and landed_at= are written when passed, last, after pushed=" \
+  "${R5_PLAIN}|pushed=checks-evidence|landed=${R16_C}|landed_at=${R16_AT}" "$R16_R"
+R16_ARGS=()
+while IFS= read -r R16_SEG; do R16_ARGS+=("$R16_SEG"); done < <(printf '%s\n' "$R16_R" | tr '|' '\n' | tail -n +2)
+expect_eq "R16b a marked row, fed back key by key, reproduces byte for byte" "$R16_R" "$(lib roster_row ${R16_ARGS[@]+"${R16_ARGS[@]}"})"
+mkdir -p "$R7_DIR/r16"
+R16_F="$R7_DIR/r16/roster-s1.state"
+R16_L="$(lib roster_row status=intended session=s1 name=w28-T6 agent_id= launched_at=2026-10-07T03:15:00Z \
+  subagent_type=bionic:senior-implementor deliverable=record/T6.md tool_use_id=toolu_6 plan=none)"
+R16_I="$(lib roster_row status=identified session=s1 name=w28-T6 agent_id=a16 launched_at=2026-10-07T03:15:00Z \
+  subagent_type=bionic:senior-implementor deliverable=record/T6.md tool_use_id=toolu_6 plan=none)"
+R16_O="$(lib roster_row status=identified session=s1 name=w28-T7 agent_id=a17 launched_at=2026-10-07T03:15:00Z \
+  subagent_type=bionic:senior-implementor deliverable=record/T7.md tool_use_id=toolu_7 plan=none)"
+printf '%s\n' "$R16_L" "$R16_I" "$R16_O" > "$R16_F"
+lib roster_mark_landed "$R16_F" w28-T6 "$R16_C" "$R16_AT"
+expect_status "R16c roster_mark_landed marks the name (rc 0)" "0" "$?"
+expect_eq "R16c2 …appending ONE line: the name's latest row gaining the two keys, last" \
+  "${R16_I}|landed=${R16_C}|landed_at=${R16_AT}" "$(tail -n +4 "$R16_F")"
+expect_eq "R16c3 …and leaving every earlier line as it was" "$(printf '%s\n' "$R16_L" "$R16_I" "$R16_O")" "$(head -3 "$R16_F")"
+R16_GOT="$(lib roster_row_for_id "$R16_F" a16)"
+expect_eq "R16d the existing by-id reader returns the marked row" "${R16_I}|landed=${R16_C}|landed_at=${R16_AT}" "$R16_GOT"
+expect_eq "R16d2 …its landed= reads by key" "$R16_C" "$(field_of_row "$R16_GOT" landed)"
+expect_eq "R16d3 …and so does its landed_at=" "$R16_AT" "$(field_of_row "$R16_GOT" landed_at)"
+expect_eq "R16e roster_landed reads the mark back: commit and time" "$(printf '%s\t%s' "$R16_C" "$R16_AT")" \
+  "$(lib roster_landed "$R16_F" w28-T6)"
+expect_eq "R16e2 …the other name's row reads its agent id by key (the positive on that row)" "a17" \
+  "$(field_of_row "$(lib roster_row_for_id "$R16_F" a17)" agent_id)"
+lib roster_landed "$R16_F" w28-T7 >/dev/null
+expect_status "R16e3 …and a name with no mark answers 1" "1" "$?"
+lib roster_mark_landed "$R16_F" w28-T6 "$R16_C" "$R16_AT"
+expect_eq "R16f a second mark of the same commit appends nothing (four lines)" "4" "$(awk 'END { print NR }' "$R16_F")"
+lib roster_mark_landed "$R16_F" w28-T6 "not-a-commit" "$R16_AT"
+expect_status "R16g a commit that is not 40 hex is refused (rc 2)" "2" "$?"
+lib roster_mark_landed "$R16_F" w28-T6 "$R16_C" "2026-10-07 03:30"
+expect_status "R16g2 …and so is a time that is not ISO-UTC" "2" "$?"
+lib roster_mark_landed "$R16_F" w28-none "$R16_C" "$R16_AT"
+expect_status "R16g3 …and a name with no row (rc 1)" "1" "$?"
+expect_eq "R16g4 …none of them appends a line" "4" "$(awk 'END { print NR }' "$R16_F")"
+# A NEW LAUNCH OF THE NAME IS NEW WORK, and so is an `extend` row: the mark belongs to the work it marked.
+printf '%s\n' "$R16_L" >> "$R16_F"
+lib roster_landed "$R16_F" w28-T6 >/dev/null
+expect_status "R16h a later launch line of the name clears the mark (rc 1)" "1" "$?"
+printf '%s|extended=2026-10-07T04:00:00Z more\n' "${R16_I}|landed=${R16_C}|landed_at=${R16_AT}" >> "$R16_F"
+lib roster_landed "$R16_F" w28-T6 >/dev/null
+expect_status "R16h2 …and so does an extend row, even one that copied the keys" "1" "$?"
+printf '%s|held=2026-10-07T04:10:00Z x fp=1:2:3|landed=%s|landed_at=%s\n' "$R16_I" "$R16_C" "$R16_AT" >> "$R16_F"
+expect_eq "R16h3 …while a later mark reads again" "$(printf '%s\t%s' "$R16_C" "$R16_AT")" "$(lib roster_landed "$R16_F" w28-T6)"
+
 finish
