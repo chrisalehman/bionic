@@ -2947,7 +2947,9 @@ RD
 ld_world() {  # <lands_on> <lands_red> [<suite> red]... -> a world root; T1's launch line declares the red
   local r l="$1" d="$2"
   shift 2
-  r="$(world_repo)" || return 1
+  # The world binds its plan through the production `bind_plan` (lib/binding.sh), which this suite
+  # shadows with a fixture of its own (above): the world is made where the production one is back.
+  r="$( . "${REPO}/payload/scripts/lib/run.sh" && . "${REPO}/payload/scripts/lib/binding.sh" && world_repo )" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
   printf '%s|row=T1|lands_on=%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 \
     plan="$r/.bionic/docs/plans/epic-x/wave-x.plan.md" "lands_red=$d" "red_evidence=record/wave-x/T1-red.md")" "$l" \
@@ -2993,7 +2995,7 @@ ld_ready "$LD1"
 LD1_PUB="$(grep '^line/v1|ev=published|row=T1|' "$(ld_rec "$LD1")" 2>/dev/null)"
 LD1_AT="$(printf '%s' "$LD1_PUB" | sed -n 's/.*|at=\([^|]*\)$/\1/p')"
 expect_match "(d1) precondition: the declared red publishes (exit 0), saying it lands red and owes the debt" \
-  "0|DEBT T1 a.test.sh * — published red*LANDED T1 $(ld_head "$LD1")*" "$LD_RC|$LD_OUT"
+  "0|DEBT T1 a.test.sh — published red*LANDED T1 $(ld_head "$LD1")*" "$LD_RC|$LD_OUT"
 expect_match "(d1a) B3 the publish wrote the debt: the row, its branch and head, the suite, the token, the publish's time" \
   "debt: id=?* row=T1 branch=wt/T1 head=${LD1_H} suite=a.test.sh token=ext:vendor-key at=${LD1_AT}" \
   "$(grep '^debt: ' "$(ld_rec "$LD1")" 2>/dev/null)"
