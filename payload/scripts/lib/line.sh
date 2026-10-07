@@ -402,9 +402,11 @@ _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
     declare -F roster_mark_landed >/dev/null 2>&1 || return 0
   fi
   roster="${2%/}/.bionic/tmp/roster-${LINE_SID}.state"
+  # THE NAME the way `line_ready` finds it (wave-28 T64): the launch line's, else the plan agent's cell, so a
+  # run adopted after a clear (no launch line on this roster) is marked too. No row of the name, no mark.
   launch="$(_wt_launch_row "$roster" row "$3")" \
-    || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$1" "$3")")" || return 0
-  name="$(_wt_field "$launch" name)"
+    || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$1" "$3")")" || launch=""
+  name="${launch:+$(_wt_field "$launch" name)}"; [ -n "$name" ] || name="$(_line_plan_agent "$1" "$3")"
   [ -n "$name" ] || return 0
   roster_mark_landed "$roster" "$name" "$4" "$5" && LINE_MARKED="$name"
 }
