@@ -588,6 +588,122 @@ ll_verb "$RR3" T1
 expect_eq "(r7) lands_on=none: the candidate publishes with no run" "0 none 0" \
   "$LL_RC $(ll_field "$(ll_ev "$RR3" ready)" suites) $(ll_ev "$RR3" verdict | awk 'END { print NR }')"
 
+# THE ROW THE WALL READS (wave-28 T64; D26, REQ-7 AC-7.2, REQ-2 AC-2.11). `ready` takes a row's suites from the
+# roster row the walls read for its agent (`roster_row_for_id`: the latest row carrying the agent's id, the
+# successors `amend`, `hold`, `extend`, the landed mark and `adopt` write included), never from the launch row alone.
+# Rows are the 1.12.0 shape (no `row=`, no `lands_on=`): the plan row's agent cell, `wx-T1`, finds them.
+ll_roster() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "$WORLD_SID"; }
+ll_wrow() {  # <root> <key=value>... — one row of wx-T1 on the roster, through the production writer
+  local r="$1"
+  shift
+  printf '%s\n' "$(roster_row_fixture session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$r")" \
+    suites_source=declared "$@")" >> "$(ll_roster "$r")"
+}
+ll_wide() {  # <root> <suites> [more] — the launch, its identification, then an amend widening to <suites>
+  ll_wrow "$1" status=intended suites_allowed=a.test.sh
+  ll_wrow "$1" status=identified suites_allowed=a.test.sh
+  [ -z "${3:-}" ] || ll_wrow "$1" status=identified suites_allowed=a.test.sh "$3"
+  ll_wrow "$1" status=identified suites_allowed="$2" amended='2026-10-07T00:00:00Z widened'
+}
+ll_verdicts() { ll_ev "$1" verdict | sed 's/.*|suite=\([^|]*\)|result=\([^|]*\)|.*/\1:\2/' | tr '\n' ' ' | sed 's/ $//'; }   # <root>
+RM1="$(ll_world)"; HM1="$(ll_head "$RM1")"
+ll_wide "$RM1" 'a.test.sh b.test.sh'
+ll_redsuite "$RM1" T1 b
+ll_verb "$RM1" T1
+KM1="$(ll_field "$(ll_ev "$RM1" candidate)" commit)"
+expect_eq "(r6e) a row amended to a b, b red on the candidate: ready exits 1, RED naming b" \
+  "1 RED T1 b.test.sh $RM1/.bionic/docs/record/wave-x/line/T1-b-${KM1:0:12}.log" "$LL_RC $LL_OUT"
+expect_eq "(r6e) …proved on the amended set, both suites run" "a.test.sh,b.test.sh a.test.sh:green b.test.sh:red" \
+  "$(ll_field "$(ll_ev "$RM1" ready)" suites) $(ll_verdicts "$RM1")"
+expect_eq "(r6e) …and nothing is published" "$HM1" "$(ll_head "$RM1")"
+RM2="$(ll_world)"
+ll_wide "$RM2" 'a.test.sh b.test.sh'
+ll_verb "$RM2" T1
+expect_eq "(r6f) the same row, every suite green: LANDED (exit 0)" "0 LANDED" "$LL_RC $(printf '%s' "$LL_OUT" | cut -d' ' -f1)"
+expect_eq "(r6f) …on both suites of the amended set, the stamp read for neither" "a.test.sh,b.test.sh a.test.sh:green b.test.sh:green" \
+  "$(ll_field "$(ll_ev "$RM2" ready)" suites) $(ll_verdicts "$RM2")"
+RM3="$(ll_world)"
+ll_wrow "$RM3" status=identified suites_allowed='a.test.sh b.test.sh' adopted_from=99999999-0000-4000-8000-000000000000
+ll_redsuite "$RM3" T1 b
+ll_verb "$RM3" T1
+expect_eq "(r6g) an adopted row (adopted_from=, no launch row) stands as the launch row: proved on its suites, b red" \
+  "1 a.test.sh,b.test.sh a.test.sh:green b.test.sh:red" "$LL_RC $(ll_field "$(ll_ev "$RM3" ready)" suites) $(ll_verdicts "$RM3")"
+RM3b="$(ll_world)"
+ll_verb "$RM3b" T1
+expect_eq "(r6g) …while a roster with no row of the agent is refused no-launch-row (exit 2)" "2" "$LL_RC"
+expect_contains "(r6g) …naming the row" "REFUSED reason=no-launch-row row=T1 roster=" "$LL_OUT"
+ll_wrow "$RM3b" status=identified suites_allowed=a.test.sh adopted_from=99999999-0000-4000-8000-000000000000
+ll_verb "$RM3b" T1
+expect_eq "(r6g) …and the same tree with an adopted row of the agent lands (exit 0)" "0 a.test.sh" "$LL_RC $(ll_field "$(ll_ev "$RM3b" ready)" suites)"
+RM4="$(ll_world)"
+ll_wide "$RM4" 'a.test.sh b.test.sh' held='2026-10-07T00:10:00Z waiting on T2'
+ll_wrow "$RM4" status=identified suites_allowed='a.test.sh b.test.sh' extended='2026-10-07T00:20:00Z more time'
+ll_redsuite "$RM4" T1 b
+ll_verb "$RM4" T1
+expect_eq "(r6h) a hold and an extend after the amend: still the amended set, b red (exit 1)" \
+  "1 a.test.sh,b.test.sh a.test.sh:green b.test.sh:red" "$LL_RC $(ll_field "$(ll_ev "$RM4" ready)" suites) $(ll_verdicts "$RM4")"
+RM4b="$(ll_world)"
+ll_wrow "$RM4b" status=intended suites_allowed=a.test.sh
+ll_wrow "$RM4b" status=identified suites_allowed=a.test.sh held='2026-10-07T00:10:00Z waiting on T2'
+ll_wrow "$RM4b" status=identified suites_allowed=a.test.sh extended='2026-10-07T00:20:00Z more time'
+ll_wrow "$RM4b" status=identified suites_allowed='a.test.sh b.test.sh' amended='2026-10-07T00:30:00Z widened'
+ll_redsuite "$RM4b" T1 b
+ll_verb "$RM4b" T1
+expect_eq "(r6h) a hold and an extend BETWEEN the launch and the amend: the same" \
+  "1 a.test.sh,b.test.sh a.test.sh:green b.test.sh:red" "$LL_RC $(ll_field "$(ll_ev "$RM4b" ready)" suites) $(ll_verdicts "$RM4b")"
+RM4c="$(ll_world)"
+ll_wide "$RM4c" 'a.test.sh b.test.sh'
+ll_wrow "$RM4c" status=identified suites_allowed='a.test.sh b.test.sh' amended='2026-10-07T00:30:00Z widened' \
+  landed=0123456789abcdef0123456789abcdef01234567 landed_at=2026-10-07T00:40:00Z
+ll_verb "$RM4c" T1
+expect_eq "(r6h) …and a landed mark after the amend: the same (exit 0)" "0 a.test.sh,b.test.sh" \
+  "$LL_RC $(ll_field "$(ll_ev "$RM4c" ready)" suites)"
+# One suite-name parser, the label's (brief.sh, `Lands-on:`): a bare name with or without `.test.sh`, a path by its
+# basename; `run.sh` (the budget's full-runner token) is no suite. The refusal names the key the value came from.
+RM5="$(ll_world)"
+ll_wrow "$RM5" status=intended suites_allowed='a.test.sh run.sh'
+ll_verb "$RM5" T1
+expect_eq "(r6i) suites_allowed= naming run.sh is refused, naming that key (exit 2)" "2" "$LL_RC"
+expect_contains "(r6i) …lands-on-unreadable, the row and suites_allowed=, not lands_on=" \
+  "REFUSED reason=lands-on-unreadable row=T1 suites_allowed=a.test.sh run.sh" "$LL_OUT"
+expect_contains "(r6i) …with the hand landing" "--by-hand --reason '<why>'" "$LL_OUT"
+expect_false "(r6i) …and nothing is appended" test -e "$(ll_rec "$RM5")"
+ll_wrow "$RM5" status=identified suites_allowed=a.test.sh amended='2026-10-07T00:30:00Z narrowed'
+ll_verb "$RM5" T1
+expect_eq "(r6i) …while the same tree, its current row naming a.test.sh, lands (exit 0)" "0 a.test.sh" \
+  "$LL_RC $(ll_field "$(ll_ev "$RM5" ready)" suites)"
+RM6="$(ll_world)"
+ll_launch "$RM6" T1 'tests/a.test.sh run.sh'
+ll_verb "$RM6" T1
+expect_eq "(r6j) lands_on= naming run.sh is refused naming lands_on= (exit 2)" "2 REFUSED reason=lands-on-unreadable row=T1 lands_on=tests/a.test.sh run.sh" \
+  "$LL_RC $(printf '%s' "$LL_OUT" | sed 's/^spawn-worktree: //; s/ — .*//')"
+expect_false "(r6j) …and nothing is appended" test -e "$(ll_rec "$RM6")"
+ll_launch "$RM6" T1 'tests/a.test.sh a'
+ll_verb "$RM6" T1
+expect_eq "(r6j) …while the same tree, its row naming a path and a bare name, lands once on a.test.sh (exit 0)" "0 a.test.sh" \
+  "$LL_RC $(ll_field "$(ll_ev "$RM6" ready)" suites)"
+# THE MUTANTS: the launch-row read restored (the amend row lands with b unrun), and the fallback winning over lands_on=.
+RM7="$(ll_world)"; HM7="$(ll_head "$RM7")"
+ll_wide "$RM7" 'a.test.sh b.test.sh'
+ll_redsuite "$RM7" T1 b
+LL_MUTANT='s/_line_current_row /false /' LL_MUTANT_FN=line_ready ll_drive "$RM7" T1 "$WORLD_ROOT/m7-T1.out"
+ll_wait_file "$WORLD_ROOT/m7-T1.out.rc" 300
+expect_eq "(r6em-pre) the mutant ran: the row entered the line, proved on a.test.sh alone" "a.test.sh a.test.sh:green" \
+  "$(ll_field "$(ll_ev "$RM7" ready)" suites) $(ll_verdicts "$RM7")"
+expect_eq "(r6em) MUTANT the launch-row read restored: the amended row lands with b unrun, red on the branch (the row can fail)" \
+  "0 yes" "$(cat "$WORLD_ROOT/m7-T1.out.rc" 2>/dev/null) $([ "$(ll_head "$RM7")" != "$HM7" ] && echo yes || echo no)"
+RM8="$(ll_world)"
+printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RM8")" \
+  suites_allowed=b.test.sh suites_source=declared)" >> "$(ll_roster "$RM8")"
+LL_MUTANT='s/if \[ -z "\$lands" \]; then/if true; then/' LL_MUTANT_FN=line_ready ll_drive "$RM8" T1 "$WORLD_ROOT/m8-T1.out"
+ll_wait_file "$WORLD_ROOT/m8-T1.out.rc" 300
+expect_eq "(r6cm) MUTANT suites_allowed= wins over lands_on=: the row is proved on b.test.sh (the row can fail)" "b.test.sh" \
+  "$(ll_field "$(ll_ev "$RM8" ready)" suites)"
+# The parser, asked directly: the label's grammar.
+expect_eq "(r6k) the suite-name parser: names, paths, run.sh, none" \
+  "a.test.sh|a.test.sh,b.test.sh|a.test.sh|none|FAIL|FAIL|FAIL" \
+  "$(_line_suites a)|$(_line_suites 'a.test.sh, b')|$(_line_suites tests/a.test.sh)|$(_line_suites 'none docs')|$(_line_suites run.sh || echo FAIL)|$(_line_suites 'a.b' || echo FAIL)|$(_line_suites -x || echo FAIL)"
+
 # ---------------------------------------------------------------------------
 section "§PROOF: the tool makes the proof; no stamp is read (AC-1.2)"
 #
