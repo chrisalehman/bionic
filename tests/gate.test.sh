@@ -35,6 +35,13 @@
 #                      give no room; a quiet machine gives room; two asks on one reading give
 #                      room once; gate_state prints the loads where clears= stood. Mutations:
 #                      the waiting clause, the owed count, the five-minute reading
+#   §OPEN      T71     one rule says which requests are open (no ended= line, holder alive): the
+#                      scan, gate_list, gate_asked and the prune read it; a holder-gone request is
+#                      not showing and is pruned after BIONIC_GATE_KEEP; gate_asked answers over
+#                      20,000 request files, takes no lock and survives a file removed mid-read;
+#                      2,000 expired requests are pruned by a batch, under a second; ended=008 and
+#                      BIONIC_GATE_KEEP=abc abort nothing. Mutations: the rule split back, the exec
+#                      list back, an rm per file back, the decimal read removed
 #   §REAPED    T47     a request killed earlier is written ended (rc 137) by the next locked act
 #                      and overlaps nothing after: the next run learns its rise; one killed
 #                      during another's run still overlaps it. Mutation: the killed-write removed
@@ -65,7 +72,7 @@
 # same request (its file exists, its asked line is read). Three mutation arms run on a copy
 # of payload/scripts/lib under the world's directory, each anchored first and each proved
 # to run (its own positive row) before its claim is read; §COST adds two more, and §REAPED,
-# §ALONE, §OWN and §CLEARED one each (T47).
+# §ALONE, §OWN and §CLEARED one each (T47). §OPEN adds four (T71).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The machine, the clock and the cost records are SYNTHESIZED by design (the world's
@@ -1072,6 +1079,81 @@ rm -rf "$BIONIC_GATE_DIR/lock"
 plant_ended 2 "op:k2" 13000
 expect_eq "OP.35 BIONIC_GATE_KEEP=0500 reads as 500: both go, nothing said" "rc=0 lock=free gone gone 0" \
   "$(op_run 0500 | tr '\n' ' ' | sed 's/ $//') $(gone_or_kept 1) $(gone_or_kept 2) $(wc -l < "$D/op-err" | tr -d ' ')"
+rm -rf "$BIONIC_GATE_DIR/lock"
+
+# The mutants: each rule put back by itself on a copy of the library, proved to run, and read red.
+# (1) the rule split again — open means "no ended= line" and nothing more, as gate_asked's awk once
+# spelled it.
+fresh open-mut-split
+world_machine 8 8192 30 1.0
+world_clock 100000
+plant_gone 11 "op:g11" 13000
+plant_live 13 "op:g13" 10
+MS="$(mutant open-split)"
+anchor "$MS" 'elif _gate_alive; then' 1
+sed -i.bak 's/elif _gate_alive; then/elif true; then/' "$MS"
+expect_eq "OP.M1 the mutant (open = no ended= line) still names the live waiter (it runs)" "yes" \
+  "$(case "$(GA_LIB="$MS" ga op:g11 op:g13)" in *op:g13*) echo yes ;; *) echo no ;; esac)"
+expect_eq "OP.M2 …and names the holder-gone writer too, which OP.5 reads red: the live-holder rule is the row" \
+  "op:g11 op:g13 |0" "$(GA_LIB="$MS" ga op:g11 op:g13)"
+# (2) the exec-argument list put back: every request path to one awk, as T52 shipped it.
+fresh open-mut-exec
+world_machine 8 8192 30 1.0
+plant_live 1 "op:w1"; plant_live 2 "op:w2"
+ME="$(mutant open-exec)"
+anchor "$ME" 'gate_asked() {' 1
+cat >> "$ME" <<'MUTANT'
+gate_asked() {  # T52's: every request path in one awk's argument list
+  _GD="$(gate_dir)"
+  set -- "$_GD"/requests/[0-9]*
+  [ -e "$1" ] || { cat >/dev/null; return 1; }
+  awk '
+    FILENAME == "-" { if ($0 != "") { n++; name[n] = $0 }; next }
+    FNR == 1 { flush() }
+    /^who=/ { w = substr($0, 5); next }
+    /^ended=/ { ended = 1 }
+    function flush() { if (w != "" && !ended) open[w] = 1; w = ""; ended = 0 }
+    END {
+      flush()
+      for (i = 1; i <= n; i++) if (name[i] in open) { print name[i]; hit = 1 }
+      exit !hit
+    }' - "$@" 2>/dev/null
+}
+MUTANT
+expect_eq "OP.M3 the mutant (exec list) answers a small store: it runs" "op:w1 op:w2 |0" "$(GA_LIB="$ME" ga op:w1 op:w2)"
+mkdir -p "$BIONIC_GATE_DIR/requests"
+awk -v d="$BIONIC_GATE_DIR/requests" 'BEGIN { for (i = 1; i <= 20000; i++) { f = d "/" (100000 + i); printf "" > f; close(f) } }'
+expect_eq "OP.M4 …and over 20,002 files it answers nothing — OP.16 reads red" "|126" "$(GA_LIB="$ME" ga op:w1 op:w2)"
+expect_eq "OP.M5 …where the shipped rule answers (OP.16's positive on the same store)" "op:w1 op:w2 |0" "$(ga op:w1 op:w2)"
+find "$BIONIC_GATE_DIR/requests" -name '1[0-9][0-9][0-9][0-9][0-9]' -delete
+# (3) one rm per file put back.
+fresh open-mut-rm
+world_machine 8 8192 30 1.0
+world_clock 100000
+plant_ended_many 300 "op:e" 900
+MR2="$(mutant open-rm)"
+anchor "$MR2" '|| old[${#old[@]}]="$f"' 1
+sed -i.bak '/|| old\[\${#old\[@\]}\]="\$f"/c\
+      [ "$((now - born))" -le "$keep" ] || rm -f "$f"' "$MR2"
+: > "$WORLD_ROOT/op-rms"
+OP_R="$( . "$MR2" 2>/dev/null; PATH="$op_stub/rm-dir:$PATH" gate_room 2>&1 )"
+expect_eq "OP.M6 the mutant (rm per file) still prunes all 300 and answers (it runs)" "0 yes" \
+  "$(nreq) $(case "$OP_R" in room=yes*) echo yes ;; *) echo no ;; esac)"
+expect_true "OP.M7 …forking an rm each, which OP.25's bound reads red" \
+  test "$(wc -l < "$WORLD_ROOT/op-rms" | tr -d ' ')" -ge 300
+# (4) the decimal read taken out.
+fresh open-mut-dec
+world_machine 8 8192 30 1.0
+world_clock 100000
+plant_raw 1 "op:d" "99000"
+MD="$(mutant open-dec)"
+anchor "$MD" '_G_NUM=$((10#$1))' 1
+sed -i.bak 's/10#\$1/$1/' "$MD"
+expect_eq "OP.M8 the mutant (no 10#) reads an ordinary ended= and finishes (it runs)" "rc=0 lock=free" \
+  "$(GATE_LIB="$MD" op_run - | tr '\n' ' ' | sed 's/ $//')"
+plant_raw 2 "op:d" "008"
+expect_eq "OP.M9 …and with ended=008 it aborts under the lock, which OP.27 reads red" " lock=held" \
+  "$(GATE_LIB="$MD" op_run - | tr '\n' ' ' | sed 's/ $//')"
 rm -rf "$BIONIC_GATE_DIR/lock"
 
 # ── §REAPED ──────────────────────────────────────────────────────────────────
