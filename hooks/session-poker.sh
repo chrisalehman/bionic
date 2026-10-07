@@ -450,7 +450,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
-  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row"
+  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row"
   exit 2
 }
 
@@ -758,11 +758,18 @@ case "$VERB" in
     [ $# -le 1 ] || usage "fill-report takes at most one argument: the plan whose fill ledger to read."
     FILL_REPORT_ARG="${1:-}"
     ;;
-  # ONE OPTIONAL FLAG (wave-28 T14; D18): `--rows` adds a line per landed row to the report's one line.
+  # ONE OPTIONAL FLAG AND ONE OPTIONAL OPERAND, IN EITHER ORDER (wave-28 T14; D18; A-orch-145): `--rows`
+  # adds a line per landed row; `<plan>` names the run, as fill-report's does, for a caller with no
+  # binding left (close-out writes its continuation after its tmp is wiped).
   landing-report)
-    LR_ROWS=no
-    if [ $# -eq 1 ] && [ "$1" = --rows ]; then LR_ROWS=yes
-    elif [ $# -ne 0 ]; then usage "landing-report takes at most one flag: --rows."; fi
+    LR_ROWS=no; LR_ARG=""
+    for _lr_a in "$@"; do
+      case "$_lr_a" in
+        --rows) [ "$LR_ROWS" = no ] || usage "landing-report takes --rows once."; LR_ROWS=yes ;;
+        -*) usage "landing-report takes one flag, --rows, and at most one plan." ;;
+        *) [ -z "$LR_ARG" ] || usage "landing-report takes one flag, --rows, and at most one plan."; LR_ARG="$_lr_a" ;;
+      esac
+    done
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -6942,8 +6949,10 @@ RC_TAGS
     ;;
 
   # THE RUN'S NUMBERS (wave-28 T14; D18, REQ-4). The fold and its definitions are `landing_report`'s,
-  # above the verbs. The run is this session's, resolved as every verb here resolves it; the record is
-  # its plan's landing record. It writes nothing and exits 0 whatever the record holds.
+  # above the verbs. The plan is the one named, resolved as fill-report resolves its operand (a path
+  # from the project root, else from the docs root), or else this session's bound run; the record is
+  # that plan's landing record, under the plan's own project. It writes nothing and exits 0 whatever
+  # the record holds.
   landing-report)
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -6951,17 +6960,33 @@ RC_TAGS
       die "REFUSED — cannot resolve the working directory."
       exit 2
     fi
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key; the report is for THIS session's run."
-      exit 3
+    LR_PLAN=""
+    if [ -n "$LR_ARG" ]; then
+      case "$LR_ARG" in
+        /*) LR_PLAN="$LR_ARG" ;;
+        *)  LR_PLAN="$REPO_REAL/$LR_ARG"
+            [ -f "$LR_PLAN" ] || LR_PLAN="$(docs_root "$REPO_REAL")/$LR_ARG" ;;
+      esac
+      if [ ! -f "$LR_PLAN" ] || [ -L "$LR_PLAN" ]; then
+        die "REFUSED — no plan file at $LR_ARG; name the plan whose landings to report."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; a report without an operand is for THIS session's run."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      LR_PLAN="$POKER_RUN_PLAN"
+      if [ -z "$LR_PLAN" ] || [ ! -f "$LR_PLAN" ]; then
+        die "REFUSED — this session has no run to report on; bind its plan first."
+        exit 2
+      fi
     fi
-    resolve_run "$REPO_REAL" "$SESSION_ID"
-    if [ -z "$POKER_RUN_PLAN" ] || [ ! -f "$POKER_RUN_PLAN" ]; then
-      die "REFUSED — this session has no run to report on; bind its plan first."
-      exit 2
-    fi
-    landing_report "$(_wt_proofs_path "$REPO_REAL" "$POKER_RUN_PLAN")" "$REPO_REAL" "$LR_ROWS"
+    LR_ROOT="$(cd "$(project_root "${LR_PLAN%/*}")" 2>/dev/null && pwd -P)"
+    [ -n "$LR_ROOT" ] || LR_ROOT="$REPO_REAL"
+    landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS"
     exit 0
     ;;
 
