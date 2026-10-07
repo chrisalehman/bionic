@@ -6958,7 +6958,7 @@ RC_TAGS
     fi
     resolve_run "$REPO_REAL" "$SESSION_ID"
     if [ -z "$POKER_RUN_PLAN" ] || [ ! -f "$POKER_RUN_PLAN" ]; then
-      die "REFUSED — this session has no run to report on; bind one: session-poker.sh bind <plan>."
+      die "REFUSED — this session has no run to report on; bind its plan first."
       exit 2
     fi
     landing_report "$(_wt_proofs_path "$REPO_REAL" "$POKER_RUN_PLAN")" "$REPO_REAL" "$LR_ROWS"
