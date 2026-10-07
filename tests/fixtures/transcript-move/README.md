@@ -18,7 +18,14 @@ transcripts on 2026-10-07; every value — ids, paths, names and every word of t
 | `orchestrator.jsonl` | the orchestrator's own text | `type: assistant` |
 | `compact.jsonl` | a compaction summary | `isCompactSummary: true`, no `origin` |
 | `pasted.jsonl` | a typed prompt whose words are pasted | `origin.kind: human`, the words inside `<pasted_content …>` |
+| `slash-args.jsonl` | a slash command typed WITH arguments | `type: user`, `origin.kind: human`, `turnOrigin: human`; the content is the CLI's wrapper `<command-message>…</command-message><command-name>…</command-name><command-args>…</command-args>`, which counts as typed |
+| `slash-bare.jsonl` | a slash command typed WITHOUT arguments | `type: user`, no `origin`, empty `<command-args>`; refused, as a prompt with no origin is |
 | `sidechain.jsonl` | a dispatched agent's prompt | `isSidechain: true`, no `origin` |
 
 Every decoy carries the words `typed.jsonl` carries (`defer the flag wording until the next
 wave, it can wait`), single-spaced, so a reader that counted it would find them.
+
+Slash commands (corrected at wave-28 T66): with arguments the entry carries `origin.kind: human` and the
+CLI's wrapper text counts as typed, tags included; without arguments it carries no `origin` and is
+not a typed prompt. `slash-bare.jsonl` holds the decoy words in `<command-message>` so a reader that
+counted an entry with no origin would find them.
