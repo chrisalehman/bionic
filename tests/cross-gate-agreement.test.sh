@@ -1168,16 +1168,12 @@ expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # out and asserted, so the remainder is held to the emptiness this section has always
 # claimed.
 DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c 'run resolved by newest-plan fallback (session unbound) — /')
-# …AND THE BUDGET BACKSTOP, lifted the same way and for the same reason (epic-23 wave-20 T2,
-# REQ-10 AC-10.2): this fixture's plan is live and carries no `parallel-budget:` line, so the
-# gate names the missing key (ADR-035). A line about the budget, not the attestation —
-# asserted positively, then held out of the remainder.
-DP_BACKSTOP=$(printf '%s\n' "$OUT" | grep -c '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
-DP_REST=$(printf '%s\n' "$OUT" | grep -v '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
+# THE BUDGET BACKSTOP IS GONE (wave-28 T9; D15): this fixture's plan is live and carries no
+# `parallel-budget:` line, and no plan owes one, so the gate's whole output is held to the
+# emptiness this section has always claimed. Until wave-28 a WARN naming the key was lifted out.
 expect_eq "start gate: a bound session hears no fallback announcement (the fixture is bound)" \
   "0" "$DP_RESOLUTION"
-expect_eq "start gate: …and names the keyless live plan's missing budget key, once" "1" "$DP_BACKSTOP"
-expect_eq "start gate: and passes in silence about the attestation" "" "$DP_REST"
+expect_eq "start gate: and passes in silence about the attestation (and the keyless plan)" "" "$OUT"
 # THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
 # `engaged_session` before anything else, keyed to the session in hand — so without a
 # marker for THIS spelling the gate would exit at the switch and the exact-compare claim
@@ -6019,7 +6015,7 @@ s4_plan() {  # <path> <current> [writers]
     # looks for it. A `parallel-budget:` appended after the body parses as prose and the
     # ceiling reads as absent, which makes the budget wall inert — and an inert wall is not
     # an observation.
-    [ -n "${3:-}" ] && printf 'parallel-budget: writers=%s test_jobs=2 model=opus\n' "$3"
+    [ -n "${3:-}" ] && printf 'parallel-budget: writers=%s test_jobs=2 model=opus source=user\n' "$3"
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf 'current: %s\n' "$2"
     # APPROVED, as write_plan's fixtures are and for its reason (wave-20 T7, AC-9.1).
@@ -7866,7 +7862,7 @@ mkdir -p "$(dirname "$RG_PLAN")"
   printf -- '---\n'
   printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
   printf 'intent: build\nrigor: audited\nscale: wave\n'
-  printf 'parallel-budget: writers=%s test_jobs=%s model=opus\n' "$RG_CEIL" "$RG_CEIL"
+  printf 'parallel-budget: writers=%s test_jobs=%s model=opus source=user\n' "$RG_CEIL" "$RG_CEIL"
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
   printf 'current: 4\n\n- Step 3: prior evidence\n'
 } > "$RG_PLAN"
@@ -11688,7 +11684,7 @@ cgc_world() {  # <case: again|met|done> -> repo path
       ;;
   esac
   cgc_plan "$r/.bionic/docs/plans/epic-99/cgc.plan.md" \
-    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/cgc.plan.md"
   s4_attest "$r" "$SID_A"
   jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
@@ -11966,7 +11962,7 @@ cgt_world() {  # <case: met|done> -> repo path
   swept_marker_write "$ro" 2026-09-01T01:00:00Z "$SID_A" "$nm" "acgt$1-5f0e3c2a9b7d4e61" MET
   [ "$1" != done ] || cgc_ack "$le" 2026-09-01T01:00:00Z "$nm"
   cgc_plan "$r/.bionic/docs/plans/epic-99/cgt.plan.md" \
-    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/cgt.plan.md"
   s4_attest "$r" "$SID_A"
   jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
@@ -12214,6 +12210,11 @@ section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave
 # and `budget_line_of` (strict `^parallel-budget:`) and `budget_field` (a whole field, a
 # decimal integer) in payload/scripts/lib/run.sh, called by all four.
 #
+# A PERSON'S CAP, OR NONE (wave-28 T9; D15, REQ-2 AC-2.9/AC-2.10). The three width readers now
+# read `budget_cap` (lib/run.sh): `writers=` only from a line whose `source=` is `user` or
+# `override`. A probe's line and a line with no `source=` answer `-` in all three, and the
+# governing-skill hook reads no line at all: no plan owes it, so every Write is admitted.
+#
 # THE ANSWER EACH READER GIVES is its writer count, `-` for none:
 #   tick         the `rung=<r>/<writers>` report line
 #   preflight    the budget refusal's `writers: budget=<n>` (ten open rows, so any n refuses)
@@ -12265,6 +12266,7 @@ cgb_stopwall() {  # <repo> -> writers
     | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
   case "$out" in
     *"Fill budget unreadable"*) printf -- '-'; return 0 ;;
+    '') printf -- '-'; return 0 ;;
   esac
   ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
   if [ -z "$ids" ]; then printf '?'; return 0; fi
@@ -12301,19 +12303,22 @@ A fixture plan for the budget reader.
       '{session_id:$s, tool_name:"Write", tool_input:{file_path:$p, content:$c}}' \
     | env HOME="$r" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SG_W" 2>&1)
   case "$CGB_GS_OUT" in
-    *"carries no parallel-budget: writers="*) printf 'absent' ;;
-    *) printf 'present' ;;
+    *"parallel-budget"*) printf 'refused' ;;
+    *) printf 'admitted' ;;
   esac
 }
 
 # <label>|<budget line, verbatim>|<the one answer>
-CGB_CASES='max-writers|parallel-budget: max_writers=9 writers=3 suites=2|3
-plain|parallel-budget: writers=3 suites=2|3
-leading-space|  parallel-budget: writers=3 suites=2|-
-space-before-colon|parallel-budget : writers=3 suites=2|-
-leading-zero|parallel-budget: writers=08 suites=2|8
-empty-field|parallel-budget: writers= suites=2|-
-no-writers|parallel-budget: suites=2|-'
+CGB_CASES='max-writers|parallel-budget: max_writers=9 writers=3 suites=2 source=user|3
+plain|parallel-budget: writers=3 suites=2 source=user|3
+override|parallel-budget: writers=3 suites=2 source=override|3
+probe|parallel-budget: writers=3 suites=2 source=probe|-
+no-source|parallel-budget: writers=3 suites=2|-
+leading-space|  parallel-budget: writers=3 suites=2 source=user|-
+space-before-colon|parallel-budget : writers=3 suites=2 source=user|-
+leading-zero|parallel-budget: writers=08 suites=2 source=user|8
+empty-field|parallel-budget: writers= suites=2 source=user|-
+no-writers|parallel-budget: suites=2 source=user|-'
 
 while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   [ -n "$_cgb_label" ] || continue
@@ -12330,15 +12335,13 @@ while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   expect_eq "CG-budget ${_cgb_label}: the tick reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_tk"
   expect_eq "CG-budget ${_cgb_label}: dispatch preflight reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_pf"
   expect_eq "CG-budget ${_cgb_label}: the stop wall reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_st"
-  expect_eq "CG-budget ${_cgb_label}: the governing-skill hook agrees on presence" \
-    "$([ "$_cgb_want" = "-" ] && echo absent || echo present)" "$_cgb_gs"
+  expect_eq "CG-budget ${_cgb_label}: the governing-skill hook admits the Write (no plan owes the line)" \
+    "admitted" "$_cgb_gs"
   if [ "$_cgb_want" = "-" ]; then
-    # AC-10.2's second half: a live plan without a readable key is NAMED at dispatch, never
-    # passed in silence (ADR-035's backstop, on preflight's own wire).
-    expect_contains "CG-budget ${_cgb_label}: …and preflight names the missing key" \
-      "no parallel-budget: line with a writers= field" "$CGB_PF_OUT"
-    expect_contains "CG-budget ${_cgb_label}: …citing the decision that makes it a measurement" \
-      "ADR-035" "$CGB_PF_OUT"
+    # No cap is not a fault (D15): preflight passes with no ceiling and names no key. Until
+    # wave-28 it named the missing key, citing ADR-035.
+    expect_absent "CG-budget ${_cgb_label}: …and preflight names no budget line" \
+      "parallel-budget" "$CGB_PF_OUT"
   fi
 done <<< "$CGB_CASES"
 
@@ -12384,7 +12387,7 @@ roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
 # writers=1 and one ready row against three open rows: no fillable gap, so the stand-down is
 # the only duty the wall can name.
 cgc_plan "$CGSD_R/.bionic/docs/plans/epic-99/cgsd.plan.md" \
-  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
 s4_bind "$CGSD_R" "$SID_A" "$CGSD_R/.bionic/docs/plans/epic-99/cgsd.plan.md"
 s4_attest "$CGSD_R" "$SID_A"
 # THE TICK'S PANEL: a fresh ListAgents answer in this session's transcript, where the tick
@@ -12452,7 +12455,7 @@ done
 roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
   tool_use_id=toolu_01HDOPEN deliverable="$HD_R/never-written.md" >> "$HD_RO"
 cgc_plan "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md" \
-  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=user' 1
 s4_bind "$HD_R" "$SID_A" "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md"
 s4_attest "$HD_R" "$SID_A"
 HD_CFG="$SANDBOX/hd-config"; mkdir -p "$HD_CFG/projects/-hd"
@@ -12517,7 +12520,7 @@ done
 expect_eq "OCC precondition: the fixture roster holds four rows, three of them read-only" "4/3" \
   "$(grep -c '^roster-state/' "$OCC_RO")/$(grep -c 'subagent_type=bionic:' "$OCC_RO")"
 cgc_plan "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md" \
-  'parallel-budget: writers=1 suites=9 worktrees=32 test_jobs=8 source=probe' 1
+  'parallel-budget: writers=1 suites=9 worktrees=32 test_jobs=8 source=user' 1
 s4_bind "$OCC_R" "$SID_A" "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md"
 s4_attest "$OCC_R" "$SID_A"
 occ_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
@@ -12581,7 +12584,7 @@ CGT_STOP="$BIONIC_HOOKS_DIR/stop.sh"
 CGT_POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
 CGT_R=$(new_repo cgturn)
 CGT_PLAN="$CGT_R/.bionic/docs/plans/epic-99/cgturn.plan.md"
-cgc_plan "$CGT_PLAN" 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+cgc_plan "$CGT_PLAN" 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' 2
 s4_bind "$CGT_R" "$SID_A" "$CGT_PLAN"
 CGT_RO="$CGT_R/.bionic/tmp/roster-$SID_A.state"
 roster_header > "$CGT_RO"
@@ -12863,7 +12866,7 @@ rigor: audited
 scale: wave
 multi_agent: true
 use_worktree: true
-parallel-budget: writers=8 suites=4 worktrees=8 test_jobs=8 source=probe
+parallel-budget: writers=8 suites=4 worktrees=8 test_jobs=8 source=user
 ---
 
 # Fixture plan
@@ -13452,7 +13455,7 @@ expect_eq "UB.3 duties gate, bound-open (control): the same write discharges the
 UB4=$(new_repo "ub-fill"); UB4_P="$UB4/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB4_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -13542,7 +13545,7 @@ expect_absent "UB.7 …and never told it is unbound" "session unbound" "$UB7_OUT
 UB8=$(new_repo "ub-tick"); UB8_P="$UB8/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB8_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -13608,7 +13611,7 @@ SID_C="c3c3c3c3-0000-4000-8000-00000000000c"
 UB9=$(new_repo "ub-engage"); UB9_P="$UB9/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB9_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -13656,7 +13659,7 @@ sd_world() {  # <label> <ready ids the ledger line answered, comma-joined> -> re
   r=$(new_repo "sd-$1")
   roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
   cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
-    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' 2
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
   s4_attest "$r" "$SID_A"
   mkdir -p "$r/.bionic/docs/record/sd"
@@ -13713,7 +13716,7 @@ sd_world_verb() {  # <label> <ids to decline, comma-joined> -> repo
   r=$(new_repo "sdv-$1")
   roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
   cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
-    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' 2
   s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
   s4_attest "$r" "$SID_A"
   ( cd "$r" && sd_env bash "$CGSD_POKER" decline "$2" 'R1 waits on the base merge' ) > "$r/sd-decline.out" 2>&1

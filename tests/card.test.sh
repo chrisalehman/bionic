@@ -590,7 +590,7 @@ cat > "$PLAN_FIX" <<'FIXEOF'
 sdlc-step: 3
 walk: required
 rigor: peer-reviewed
-parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 working-branch: wave/99-fixture
 integration-branch: main
 base-sha: abc1234
@@ -1188,7 +1188,7 @@ sdlc-step: 3
 scale: task
 walk: exempt
 rigor: audited
-parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 ---
 
 # fixture task run 18 · plan
@@ -1315,7 +1315,7 @@ sdlc-step: 3
 scale: wave
 walk: required
 rigor: audited
-parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 working-branch: wave/98-twobatch
 integration-branch: main
 base-sha: abc1234
@@ -1709,7 +1709,7 @@ expect_eq "S3-SHAPE 6: Branches, Tasks, Chain and width, Verification, Artifacts
 S3C_PLAN="${T10_ROOT_CFG}/wave-97-chain.plan.md"
 {
   printf '%s\n' '---' 'sdlc-step: 3' 'scale: wave' 'walk: required' 'rigor: peer-reviewed' \
-    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' \
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' \
     'working-branch: wave/97-chain' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
     '# fixture wave 97 · plan' '' '## Goal' '' 'Run eight tasks whose chain and width are known.' '' \
     '## SDLC State' '' 'integration-branch: main' 'current: 3' '' '## Tasks' '' \
@@ -1743,6 +1743,23 @@ expect_eq "S3-CHAIN 5: under a ceiling of 3 the peak width is capped at 3" \
   "1" "$(printf '%s\n' "$S3C3" | grep -c -x -F '    peak width     3 of 3 writers' | tr -cd '0-9')"
 expect_eq "S3-CHAIN 5a: …and the chain does not change" \
   "1" "$(printf '%s\n' "$S3C3" | grep -c -x -F '    longest chain  T1 → T2 → T3 · 135 min' | tr -cd '0-9')"
+# §CARD-CAP (wave-28 T9; D15). The card reads `budget_cap` (lib/run.sh): `writers=` only from a
+# line a person wrote, one whole field. The same chain fixture under the probe's line has no
+# ceiling, so the peak is the plan's own and the writers are "not declared"; `max_writers=9`
+# beside a person's `writers=3` reads 3, where the card's old substring match read 9.
+# fails-when: the probe's 8 is printed as a ceiling, or max_writers= is read as writers=.
+S3CP_PLAN="${T10_ROOT_CFG}/wave-97-chainp.plan.md"
+sed 's/source=user/source=probe/' "$S3C_PLAN" > "$S3CP_PLAN"
+expect_contains "§CARD-CAP.0 meta: the fixture carries the probe's line" "writers=8 suites=4 worktrees=32 test_jobs=8 source=probe" "$(cat "$S3CP_PLAN")"
+whole_card step3 "$S3CP_PLAN"; S3CP="$WC_OUT"
+expect_eq "§CARD-CAP.1 the probe's writers=8 is no ceiling: the peak is the plan's own, writers not declared" \
+  "1" "$(printf '%s\n' "$S3CP" | grep -c -x -F '    peak width     5 · writers not declared' | tr -cd '0-9')"
+expect_absent "§CARD-CAP.1b …and no batch is read against eight" "of 8" "$S3CP"
+S3CM_PLAN="${T10_ROOT_CFG}/wave-97-chainm.plan.md"
+sed 's/writers=8 suites=4/max_writers=9 writers=3 suites=4/' "$S3C_PLAN" > "$S3CM_PLAN"
+whole_card step3 "$S3CM_PLAN"; S3CM="$WC_OUT"
+expect_eq "§CARD-CAP.2 max_writers=9 writers=3 source=user reads the whole field: 3" \
+  "1" "$(printf '%s\n' "$S3CM" | grep -c -x -F '    peak width     3 of 3 writers' | tr -cd '0-9')"
 # A legacy table (deps, no reads column) is the same graph read from its deps cells: T10_WAVE_2B
 # is five 30-minute rows, T4 after T1 and T5 after T1, T2 and T3. Two chains tie at 60 minutes;
 # the one whose ids come first is T1, T4.
