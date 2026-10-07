@@ -1650,4 +1650,111 @@ for c in workspaces gate; do
 done
 expect_eq "5.14: only B's 2 spared files remain under .bionic/tmp/" "2" "$(tmp_entries "$P7")"
 
+section "CARRY — wave-28 T17 (AC-8.7, D21): close-out writes every open deferral, with its sentence, under ## Deferrals of the continuation"
+# ============================================================
+# A deferral is held to its debts: the plan carries one `deferred:` line per finding the table
+# defers (`session-poker.sh proof-add` writes it; `finding-stated` adds ` stated="<sentence>"`), and
+# close-out carries each into the continuation, in the one form the next wave's Step 1 card reads:
+#
+#   deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>
+#
+# in the plan's order, `-` for a deferral with no sentence, a `"` or a `\` in a sentence written
+# `\"` and `\\` as the plan holds it. A `check:` line is a check owed, not a deferral, and is not
+# carried. The heading is written whether or not there is anything under it, so a continuation
+# that reports no deferral differs from one written before the heading existed.
+CARRY_REC="record/wave-01-fixture/rev.md"
+# carry_plant <project> <line>... -> each line inside the plan's ## SDLC State, after approved-by:
+carry_plant() {
+  local proj="$1" plan="$1/$PLAN_REL" l; shift
+  case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_plant: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
+  local lines=""
+  for l in "$@"; do lines="${lines}${l}
+"; done
+  CARRY_LINES="$lines" awk '{ print } /^approved-by: / && !d { printf "%s", ENVIRON["CARRY_LINES"]; d = 1 }' "$plan" > "$plan.carry" \
+    && mv "$plan.carry" "$plan"
+}
+# carry_section <continuation> -> what stands under the heading `## Deferrals`, up to the next `## `,
+# blank lines dropped; nothing when there is no such heading.
+carry_section() {
+  awk '/^## / { s = ($0 == "## Deferrals"); next } s && NF { print }' "$1"
+}
+CARRY_W="wave-01-fixture"
+CARRY_Q1='Said \"go\" \\ now | here'   # the sentence: Said "go" \ now | here, as the plan holds it
+PC="$(mk_fixture carry1)"; advance_to "$PC" 8
+carry_plant "$PC" \
+  "deferred: $CARRY_REC#2 S3 on \"second, written first\" stated=\"The second sentence.\"" \
+  "deferred: $CARRY_REC#1 S2 off \"first, unstated\"" \
+  "check: $CARRY_REC#4 S1 off \"a check owed, not a deferral\"" \
+  "deferred: $CARRY_REC#3 S2 off \"third, quoted\" stated=\"$CARRY_Q1\""
+expect_eq "CARRY-0 precondition: the plan carries three deferred: lines and one check: line inside its SDLC State" "3 1" \
+  "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ d++ } s && /^check: /{ c++ } END { print d + 0, c + 0 }' "$PC/$PLAN_REL")"
+run_close "$PC" run
+expect_eq "CARRY-1 run exits 0 over a plan carrying deferred: and check: lines (the gate and the parsers admit it)" "0" "$CO_RC"
+expect_eq "CARRY-2 the continuation carries the heading ## Deferrals exactly once, flush left" "1" \
+  "$(/usr/bin/grep -c '^## Deferrals$' "$PC/$CONT_REL" | tr -d ' ')"
+expect_nonempty "CARRY-3 precondition: the extractor finds lines under the heading" "$(carry_section "$PC/$CONT_REL")"
+expect_eq "CARRY-4 …one line per open deferral, in the plan's order, in the fixed form (a check: line is not carried)" \
+"deferred: $CARRY_REC#2 S3 on \"second, written first\" stated=\"The second sentence.\" from=$CARRY_W
+deferred: $CARRY_REC#1 S2 off \"first, unstated\" stated=\"-\" from=$CARRY_W
+deferred: $CARRY_REC#3 S2 off \"third, quoted\" stated=\"$CARRY_Q1\" from=$CARRY_W" \
+  "$(carry_section "$PC/$CONT_REL")"
+expect_eq "CARRY-5 …and the heading comes after the template's Next wave section and before the Resume instruction" "yes" \
+  "$(awk '/^## Next wave/ { a = NR } /^## Deferrals$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PC/$CONT_REL")"
+expect_eq "CARRY-6 the plan close-out closed still reads closed (run_open says 1)" "1" "$(run_open_rc "$PC/$PLAN_REL")"
+
+# none: the heading and nothing under it
+PN="$(mk_fixture carry2)"; advance_to "$PN" 8
+run_close "$PN" run
+expect_eq "CARRY-7 a run with no deferral exits 0" "0" "$CO_RC"
+expect_eq "CARRY-8 …and writes the heading ## Deferrals once, with nothing under it" "1|0" \
+  "$(/usr/bin/grep -c '^## Deferrals$' "$PN/$CONT_REL" | tr -d ' ')|$(carry_section "$PN/$CONT_REL" | wc -l | tr -d ' ')"
+
+# an existing continuation is never overwritten: a missing heading is appended, a present one is left
+PE="$(mk_fixture carry3)"; advance_to "$PE" 8
+carry_plant "$PE" "deferred: $CARRY_REC#1 S2 off \"kept\" stated=\"A kept sentence.\""
+mkdir -p "$PE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Resume instruction\n\nedited by a person\n' > "$PE/$CONT_REL"
+run_close "$PE" run
+expect_eq "CARRY-9 a continuation that exists without the heading: run exits 0" "0" "$CO_RC"
+expect_eq "CARRY-10 …its own text is kept, byte for byte, at the top" "# continuation — hand written
+
+## Resume instruction
+
+edited by a person" "$(head -5 "$PE/$CONT_REL")"
+expect_eq "CARRY-11 …and the deferral is appended under a ## Deferrals heading" \
+  "deferred: $CARRY_REC#1 S2 off \"kept\" stated=\"A kept sentence.\" from=$CARRY_W" "$(carry_section "$PE/$CONT_REL")"
+PH="$(mk_fixture carry4)"; advance_to "$PH" 8
+carry_plant "$PH" "deferred: $CARRY_REC#1 S2 off \"not carried over a written heading\" stated=\"A sentence.\""
+mkdir -p "$PH/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\nnone, said the person\n' > "$PH/$CONT_REL"
+CARRY_SUM="$(cksum < "$PH/$CONT_REL")"
+run_close "$PH" run
+expect_eq "CARRY-12 a continuation that already carries the heading: run exits 0" "0" "$CO_RC"
+expect_eq "CARRY-13 …and is left as it stands" "$CARRY_SUM" "$(cksum < "$PH/$CONT_REL")"
+
+# check never writes it, and names what run would carry
+PK="$(mk_fixture carry5)"; advance_to "$PK" 8
+carry_plant "$PK" "deferred: $CARRY_REC#1 S2 off \"checked\""
+run_close "$PK" check
+expect_eq "CARRY-14 check exits 0 and writes no continuation" "0|no" \
+  "$CO_RC|$([ -e "$PK/$CONT_REL" ] && echo yes || echo no)"
+
+# the mutation arm: a doctored copy of close-out.sh with the heading dropped from the template
+CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-carry-mut.XXXXXX")"
+mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
+sed "s/printf '## Deferrals/printf '## Carried over/" "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
+expect_eq "CARRY-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PM="$(mk_fixture carry6)"; advance_to "$PM" 8
+carry_plant "$PM" "deferred: $CARRY_REC#1 S2 off \"mutant\" stated=\"A sentence.\""
+( cd "$PM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    bash "$CARRY_MUT/scripts/close-out.sh" "$PM/$PLAN_REL" run ) > "$SANDBOX/carry-mut.out" 2>&1
+CARRY_MRC=$?
+expect_eq "CARRY-mut1 the doctored run still closes and writes its continuation (the mutant runs)" "0|yes" \
+  "$CARRY_MRC|$([ -s "$PM/$CONT_REL" ] && echo yes || echo no)"
+expect_eq "CARRY-mut2 …and the doctored continuation has no ## Deferrals heading, so CARRY-2 and CARRY-4 go red on it" "0|0" \
+  "$(/usr/bin/grep -c '^## Deferrals$' "$PM/$CONT_REL" | tr -d ' ')|$(carry_section "$PM/$CONT_REL" | wc -l | tr -d ' ')"
+rm -rf "$CARRY_MUT"
+
+
 finish
