@@ -473,8 +473,8 @@ MUT_TREE="$TMPROOT/mut-tree"
 mk_tree "$MUT_TREE"
 cp "$PROBE_TREE/tests/probe.test.sh" "$MUT_TREE/tests/probe.test.sh"
 MUT_SEAM="$MUT_TREE/tests/lib/resolve-roots.sh"
-anchor -E "$MUT_SEAM" '^  PATH="\$dir:\$PATH"$' 1
-grep -vE '^  PATH="\$dir:\$PATH"$' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
+anchor -E "$MUT_SEAM" '^  PATH="\$phys:\$PATH"' 1
+grep -vE '^  PATH="\$phys:\$PATH"' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
 expect_eq "6.3 the mutant seam still parses" "0" "$(bash -n "$MUT_SEAM" >/dev/null 2>&1; echo $?)"
 if [ -n "$ALT_BASH" ]; then
   : > "$TMPROOT/probe.out"
@@ -532,6 +532,7 @@ pin_plant() {
   printf '%s' "$base/root"
 }
 there() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo absent; fi; }
+phys() { ( cd "$1" 2>/dev/null && pwd -P ); }   # the path with no link on it: what PATH carries (T65)
 inode() { ls -di "$1" 2>/dev/null | awk '{print $1}'; }
 SEAM="$REPO/tests/lib/resolve-roots.sh"
 
@@ -539,8 +540,8 @@ SEAM="$REPO/tests/lib/resolve-roots.sh"
 R="$(pin_plant fresh "$T87_DIR/fresh")"
 pin_call "$SEAM" "$R"
 expect_eq "7.1 nothing at the root path: the function builds the pin and returns 0" "0" "$PIN_RC"
-expect_eq "7.2 …PATH's first entry is <root>/pin and the rest of PATH is unchanged" \
-  "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+expect_eq "7.2 …PATH's first entry is <root>/pin, as its physical path, and the rest of PATH is unchanged" \
+  "$(phys "$R/pin"):$PIN_GIVEN" "$PIN_PATH"
 expect_match "7.3 …the root it created is mode 0700" 'drwx------*' "$(ls -ld "$R" 2>/dev/null)"
 expect_eq "7.4 …and pin/bash is a link to exactly /bin/bash" "/bin/bash" "$(readlink "$R/pin/bash")"
 expect_eq "7.5 …with nothing printed" "" "$PIN_ERR"
@@ -551,14 +552,14 @@ T87_ROOT_INO="$(inode "$R")"; T87_LINK_INO="$(inode "$R/pin/bash")"
 expect_nonempty "7.6 the inode extractor reads the planted link" "$T87_LINK_INO"
 pin_call "$SEAM" "$R"
 expect_eq "7.7 a plain 0700 root holding pin/bash -> /bin/bash is reused: returns 0" "0" "$PIN_RC"
-expect_eq "7.8 …PATH's first entry is <root>/pin" "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+expect_eq "7.8 …PATH's first entry is <root>/pin (physical)" "$(phys "$R/pin"):$PIN_GIVEN" "$PIN_PATH"
 expect_eq "7.9 …the root is the same directory" "$T87_ROOT_INO" "$(inode "$R")"
 expect_eq "7.10 …and the bash link is untouched, never replaced" "$T87_LINK_INO" "$(inode "$R/pin/bash")"
 
 R="$(pin_plant runner "$T87_DIR/runner")"
 pin_call "$SEAM" "$R"
 expect_eq "7.11 tests/run.sh's kind of root (its run's mktemp -d) passes every check" "0" "$PIN_RC"
-expect_eq "7.12 …and the runner's pin is what it was: <root>/pin first" "$R/pin:$PIN_GIVEN" "$PIN_PATH"
+expect_eq "7.12 …and the runner's pin is what it was: <root>/pin first (physical)" "$(phys "$R/pin"):$PIN_GIVEN" "$PIN_PATH"
 
 # THE REFUSED STATES. Each: non-zero, PATH as given, nothing built, the seam's line once, naming
 # the check that failed.
@@ -594,12 +595,14 @@ expect_eq "7.18g …and the foreign link is left as it was, not replaced" "/bin/
 # root), so the owner arm is not driven here; the mode arm (7.15, 7.16) is the test of that rule.
 skip "7.19 a root owned by another user" "unprivileged: chown to another uid needs root; the mode arm 7.15-7.16 stands in"
 
-# THE MUTANT: the root's -L test removed from a copy of the seam, nothing else. It must turn the
-# symlink-root state and that state alone from refused to accepted — the other checks do not
-# lean on it, and it is what stands between a planted link and PATH.
+# THE MUTANT: the -L test removed from a copy of the seam, nothing else. The root and the pin go through one
+# function (T67), so it is one test, and it must turn the two link states, the root's and the pin's, and those
+# alone from refused to accepted — the other checks do not lean on it, and it is what stands between a
+# planted link and PATH.
 T87_MUT="$TMPROOT/t87-mutant-seam.sh"
-anchor -E "$SEAM" '^  \[ ! -L "\$root" \] \|\| why=' 1
-grep -vE '^  \[ ! -L "\$root" \] \|\| why=' "$SEAM" > "$T87_MUT"
+T67_LINK_LINE='  [ ! -L "$1" ] || { _BIONIC_PIN_STEP="$1 is a symlink"; return 0; }'
+anchor "$SEAM" "$T67_LINK_LINE" 1
+grep -vxF "$T67_LINK_LINE" "$SEAM" > "$T87_MUT"
 expect_eq "7.20 the mutant seam still parses" "0" "$(bash -n "$T87_MUT" >/dev/null 2>&1; echo $?)"
 T87_FLIPS=""
 for T87_STATE in fresh reuse runner link-root link-pin mode-0777 mode-0770 file-root bash-other; do
@@ -608,10 +611,10 @@ for T87_STATE in fresh reuse runner link-root link-pin mode-0777 mode-0770 file-
   [ "$T87_REAL" = "$PIN_RC" ] || T87_FLIPS="$T87_FLIPS $T87_STATE"
   [ "$T87_STATE" != link-root ] || T87_MUT_PATH="$PIN_PATH" T87_MUT_R="$R"
 done
-expect_eq "7.21 the mutant turns the symlink-root state, and that state alone, from refused to accepted" \
-  " link-root" "$T87_FLIPS"
-expect_eq "7.22 …and under the mutant PATH carries the link's path (the defect it guards)" \
-  "$T87_MUT_R/pin:$PIN_GIVEN" "$T87_MUT_PATH"
+expect_eq "7.21 the mutant turns the two link states, the root's and the pin's, and those alone, from refused to accepted" \
+  " link-root link-pin" "$T87_FLIPS"
+expect_eq "7.22 …and under the mutant the link is followed and PATH carries the pin built through it, physically (the defect it guards)" \
+  "$(phys "$T87_MUT_R/pin"):$PIN_GIVEN" "$T87_MUT_PATH"
 
 # A REFUSED PIN STOPS A HAND RUN (wave-28 T36; AC-10.5), AND AN OPEN PARENT IS REFUSED (AC-10.6).
 # The hand path used to call the function with `|| :`, so a refused pin printed its line and the
@@ -1020,7 +1023,7 @@ T59_OWN="$T87_DIR/t59-own"; mkdir -p "$T59_OWN/t59-anc/t59-sub"
 chmod 0755 "$T59_OWN" "$T59_OWN/t59-anc"; chmod 0700 "$T59_OWN/t59-anc/t59-sub"
 T59_ANC="$T59_OWN/t59-anc"; T59_SUB="$T59_ANC/t59-sub"
 T59_OTHER=54321; [ "$T59_OTHER" != "$(id -u)" ] || T59_OTHER=54322
-T59_WHY_OWN="is owned by uid $T59_OTHER, who is neither you nor root"
+T59_WHY_OWN="is owned by uid $T59_OTHER, who is not you, root or the owner of /"
 t59_own "$SEAM" "$T59_SUB/r1"
 expect_eq "7.52 under the stub with no answer set, the real reader passes this user's own directories: built" "0" "$PIN_RC"
 printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-anc"
@@ -1060,7 +1063,7 @@ rm -f "$T59_STAT_DIR/t59-anc"
 T59_HOLD="$T87_DIR/t59-hold"; mkdir -p "$T59_HOLD"; chmod 1777 "$T59_HOLD"
 T59_TGT="$T87_DIR/t59-tgt"; mkdir -p "$T59_TGT"; chmod 0700 "$T59_TGT"
 ln -s "$T59_TGT" "$T59_HOLD/t59-lnk"; T59_LNK="$T59_HOLD/t59-lnk"
-T59_WHY_LNK="$T59_LNK is a symlink owned by uid $T59_OTHER, who is neither you nor root"
+T59_WHY_LNK="$T59_LNK is a symlink owned by uid $T59_OTHER, who is not you, root or the owner of /"
 t59_own "$SEAM" "$T59_LNK/r1"
 expect_eq "7.56 a link in a sticky holder leading to this user's directory, owned by this user: built" "0" "$PIN_RC"
 expect_eq "7.56b …and is there" "present" "$(there "$T59_LNK/r1/pin")"
@@ -1113,7 +1116,7 @@ expect_contains "7.59e …naming the directory and that uid, with the path remed
 rm -f "$T61_FS"; printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-anc"
 t59_own "$SEAM" "$T59_SUB/n3"
 expect_ne "7.59f / reads as the root it is and an ancestor reads 65534: refused (the overflow uid is trusted only where / has it)" "0" "$PIN_RC"
-expect_contains "7.59g …naming the directory and 65534" "$T59_ANC is owned by uid $T61_NS, who is neither you nor root" "$PIN_ERR"
+expect_contains "7.59g …naming the directory and 65534" "$T59_ANC is owned by uid $T61_NS, who is not you, root or the owner of /" "$PIN_ERR"
 printf '%s\n' "$T61_NS" > "$T61_FS"; printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-lnk.nf"
 t59_own "$SEAM" "$T59_LNK/n4"
 expect_eq "7.59h a link on the path owned by the uid / has: built (the link's own owner is judged by the same rule)" "0" "$PIN_RC"
@@ -1137,8 +1140,8 @@ printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID"
 cp "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID" "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID.nf"
 STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T61_STK"; unset STOP_PATH
 expect_eq "7.61 a root planted by another uid at the predictable name: the hand run exits 2" "2" "$STOP_RC"
-expect_contains "7.61b …naming the root and its owner, with the path remedy (this user cannot remove it)" \
-  "$(t57_line "$T61_STK" "$T61_PLANT $T59_WHY_OWN" "$T57_FIX")" "$STOP_ERR"
+expect_contains "7.61b …naming the root and its owner (T65: the entry itself must be this user's), with the path remedy (this user cannot remove it)" \
+  "$(t57_line "$T61_STK" "$T61_PLANT is owned by uid $T59_OTHER, who is not you" "$T57_FIX")" "$STOP_ERR"
 expect_eq "7.61c …and the root is still there" "present" "$(there "$T61_PLANT")"
 rm -f "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID" "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID.nf"
 # the mutant: the third trusted owner removed. The namespace shape is refused again (the defect 7.58 guards).
@@ -1152,7 +1155,7 @@ expect_eq "7.62b …and builds where no stub is set (not vacuous)" "0" "$PIN_RC"
 printf '%s\n' "$T61_NS" > "$T61_FS"; printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-anc"
 t59_own "$T61_MUT" "$T59_SUB/n7"
 expect_ne "7.62c under the mutant the namespace shape is refused (the defect 7.58 guards)" "0" "$PIN_RC"
-expect_contains "7.62d …naming 65534 as an owner who is neither this user nor root" "is owned by uid $T61_NS, who is neither you nor root" "$PIN_ERR"
+expect_contains "7.62d …naming 65534 as an owner who is not this user, root or the owner of /" "is owned by uid $T61_NS, who is not you, root or the owner of /" "$PIN_ERR"
 t59_own "$SEAM" "$T59_SUB/n8"
 expect_eq "7.62e control: the shipped function builds that same shape" "0" "$PIN_RC"
 rm -f "$T61_FS" "$T59_STAT_DIR/t59-anc"
@@ -1237,6 +1240,248 @@ expect_eq "7.67c under the mutant the race builds the pin (the defect 7.63 guard
 expect_eq "7.67d …and it is there, in a directory made after the walk" "present" "$(there "$T63_RACER2/bionic-interpreter-pin.$STOP_UID/pin/bash")"
 t63_race "$SEAM" "$T63_DIR/racer3"
 expect_ne "7.67e control: the shipped function refuses the same race" "0" "$PIN_RC"
+
+# THE ROOT'S OWN ENTRY IS JUDGED BY ITS OWN OWNER, WITHOUT FOLLOWING (wave-28 T65; AC-10.6; pass 40 #1). T63's
+# walk judged the root after the `-L` test, and every reader after that test follows links: a root another
+# user planted at the predictable name in a sticky /tmp and swapped for a link between the `-L` test and the
+# judge passed (the link leads to a directory of the victim's), the pin was built there and PATH carried it
+# through the planter's link, which the planter can repoint. The entry's own owner (`stat` without `-L`, the
+# stub's `<name>.nf`) is now read before the `-L` test and the judge, for the root and for `pin`, and must be
+# this user. The swap is built the reader's way: the judge is wrapped so the swap happens right after the
+# `-L` test; the stub says the planted entry's own owner is another user, as a planter's would be.
+T65_DIR="$T87_DIR/t65"; mkdir -p "$T65_DIR"; chmod 0755 "$T65_DIR"
+# t65_swap <seam> <root> <victim> — pin <root> under the stat stub; right after the root's -L test it is renamed away and a link to <victim> takes its name
+t65_swap() {
+  local out
+  out="$(PATH="$T59_STUB:$HAND_GIVEN_PATH" T65_ROOT="$2" T65_VICTIM="$3" /bin/bash -c '. "$1" >/dev/null 2>&1 || exit 9
+    eval "t65_orig_$(declare -f _bionic_pin_judge)"
+    t65_done=""
+    _bionic_pin_judge() {
+      if [ "$1" = "$T65_ROOT" ] && [ -z "$t65_done" ]; then t65_done=1; mv "$T65_ROOT" "$T65_ROOT.away"; ln -s "$T65_VICTIM" "$T65_ROOT"; fi
+      t65_orig__bionic_pin_judge "$@"
+    }
+    bionic_interpreter_pin "$T65_ROOT" 2>"$2"; echo "rc=$?"; echo "path=$PATH"' \
+    t65-swap "$1" "$TMPROOT/pin.err" 2>/dev/null)"
+  PIN_RC="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  PIN_PATH="$(printf '%s\n' "$out" | sed -n 's/^path=//p')"
+  PIN_ERR="$(cat "$TMPROOT/pin.err" 2>/dev/null)"
+}
+# t65_plant <name> — a closed root of this user's under its own parent, a victim directory beside it, the stub saying the root's OWN owner is another user
+t65_plant() {
+  mkdir -p "$T65_DIR/$1"; chmod 0755 "$T65_DIR/$1"
+  mkdir -m 0700 "$T65_DIR/$1/t65-root-$1" "$T65_DIR/$1/victim"
+  printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t65-root-$1.nf"
+}
+T65_WHY="is owned by uid $T59_OTHER, who is not you"
+t65_plant swap
+T65_R="$T65_DIR/swap/t65-root-swap"; T65_V="$T65_DIR/swap/victim"
+expect_eq "7.68 the owner reader without following prints this user's uid on a real entry (the extractor the rows below lean on)" \
+  "$(printf '%s\nrc=0' "$STOP_UID")" "$(t63_fn "$SEAM" _bionic_pin_owner "$T65_DIR/swap/victim" nofollow)"
+t65_swap "$SEAM" "$T65_R" "$T65_V"
+expect_ne "7.68b a root whose own entry is another user's, swapped for a link after the -L test: refused" "0" "$PIN_RC"
+expect_contains "7.68c …naming the entry and its owner" "$T65_R $T65_WHY" "$PIN_ERR"
+expect_eq "7.68d …and nothing is made in the victim's directory" "absent" "$(there "$T65_V/pin")"
+expect_eq "7.68e …PATH is as given" "$T59_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
+expect_eq "7.68f …the planter's entry is still there, not replaced" "present" "$(there "$T65_R")"
+# the mutant: the root's owner read removed. The swap builds through the link (the defect 7.68b guards).
+T65_MUT="$TMPROOT/t65-mut-rootowner.sh"
+T67_ENTRY_LINE='  _BIONIC_PIN_STEP="$(_bionic_pin_entry "$1")"'
+anchor "$SEAM" "$T67_ENTRY_LINE" 1
+grep -vxF "$T67_ENTRY_LINE" "$SEAM" > "$T65_MUT"
+expect_eq "7.69 the no-root-owner mutant parses" "0" "$(bash -n "$T65_MUT" >/dev/null 2>&1; echo $?)"
+t65_plant mut
+t65_swap "$T65_MUT" "$T65_DIR/mut/t65-root-mut" "$T65_DIR/mut/victim"
+expect_eq "7.69b under the mutant the swap builds (the defect 7.68b guards)" "0" "$PIN_RC"
+expect_eq "7.69c …through the link, in the victim's directory (the harness ran the swap)" "present" "$(there "$T65_DIR/mut/victim/pin/bash")"
+expect_eq "7.69d …and PATH carries a pin built there" "$(phys "$T65_DIR/mut/victim/pin"):$T59_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
+t65_plant ctl
+t65_swap "$SEAM" "$T65_DIR/ctl/t65-root-ctl" "$T65_DIR/ctl/victim"
+expect_ne "7.69e control: the shipped function refuses the same swap" "0" "$PIN_RC"
+expect_eq "7.69f …and the victim's directory is untouched" "absent" "$(there "$T65_DIR/ctl/victim/pin")"
+rm -f "$T59_STAT_DIR"/t65-root-*.nf
+# a link planted before the call is refused as before (7.24e), and a pre-existing root of this user's is built
+R="$(pin_plant link-root "$T65_DIR/link")"; pin_call "$SEAM" "$R"
+expect_ne "7.70 a root that is a link planted before the call: refused" "0" "$PIN_RC"
+expect_contains "7.70b …as a symlink" "$R is a symlink" "$PIN_ERR"
+expect_eq "7.70c …and PATH is as given" "$PIN_GIVEN" "$PIN_PATH"
+R="$(pin_plant reuse "$T65_DIR/reuse")"
+printf '%s\n' "$STOP_UID" > "$T59_STAT_DIR/root.nf"
+t59_own "$SEAM" "$R"
+expect_eq "7.70d a root pre-existing, closed, whose own owner reads as this user: built" "0" "$PIN_RC"
+rm -f "$T59_STAT_DIR/root.nf"
+# the pin directory's own entry is read the same way
+T65_PR="$T65_DIR/pinown/t65-pin-root"; mkdir -p "$T65_DIR/pinown"; chmod 0755 "$T65_DIR/pinown"; mkdir -m 0700 "$T65_PR" "$T65_PR/pin"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/pin.nf"
+t59_own "$SEAM" "$T65_PR"
+expect_ne "7.71 a pin directory whose own entry is another user's: refused" "0" "$PIN_RC"
+expect_contains "7.71b …naming the entry and its owner" "$T65_PR/pin $T65_WHY" "$PIN_ERR"
+expect_eq "7.71c …and no bash link is made in it" "absent" "$(there "$T65_PR/pin/bash")"
+expect_eq "7.71d …PATH is as given" "$T59_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
+T65_MUT_PIN="$TMPROOT/t65-mut-pinowner.sh"
+anchor "$SEAM" "$T67_ENTRY_LINE" 1
+grep -vxF "$T67_ENTRY_LINE" "$SEAM" > "$T65_MUT_PIN"
+expect_eq "7.71e the no-pin-owner mutant parses" "0" "$(bash -n "$T65_MUT_PIN" >/dev/null 2>&1; echo $?)"
+t59_own "$T65_MUT_PIN" "$T65_PR"
+expect_eq "7.71f under the mutant the other user's pin directory is used (the defect 7.71 guards)" "0" "$PIN_RC"
+expect_eq "7.71g …and bash is linked in it" "present" "$(there "$T65_PR/pin/bash")"
+rm -f "$T59_STAT_DIR/pin.nf"
+# PATH carries the physical path: a TMPDIR reached through a link this user owns
+mkdir -p "$T65_DIR/phys/real"; chmod 0755 "$T65_DIR/phys"; chmod 0700 "$T65_DIR/phys/real"; ln -s real "$T65_DIR/phys/lnk"
+pin_call "$SEAM" "$T65_DIR/phys/lnk/t65-phys-root"
+expect_eq "7.72 a root reached through a link this user owns: built" "0" "$PIN_RC"
+T65_FIRST="${PIN_PATH%%:*}"
+expect_eq "7.72b …PATH's first entry is the physical directory, pinned" "$(phys "$T65_DIR/phys/real")/t65-phys-root/pin" "$T65_FIRST"
+expect_eq "7.72c …and it holds bash -> /bin/bash" "/bin/bash" "$(readlink "$T65_FIRST/bash" 2>/dev/null)"
+expect_eq "7.72d …and it names no link: it is its own physical path" "$T65_FIRST" "$(phys "$T65_FIRST")"
+expect_eq "7.72e …the rest of PATH is unchanged" "$T65_FIRST:$PIN_GIVEN" "$PIN_PATH"
+T65_MUT_PHYS="$TMPROOT/t65-mut-phys.sh"
+anchor "$SEAM" ' pwd -P)" || why=' 1
+sed 's# pwd -P)" || why=# pwd)" || why=#' "$SEAM" > "$T65_MUT_PHYS"
+expect_eq "7.73 the logical-path mutant parses" "0" "$(bash -n "$T65_MUT_PHYS" >/dev/null 2>&1; echo $?)"
+pin_call "$T65_MUT_PHYS" "$T65_DIR/phys/lnk/t65-mut-root"
+expect_eq "7.73b under the mutant the pin is built (not vacuous)" "0" "$PIN_RC"
+expect_eq "7.73c …and PATH's first entry is the path through the link (the defect 7.72b guards)" \
+  "$(cd "$T65_DIR/phys/lnk" && pwd)/t65-mut-root/pin" "${PIN_PATH%%:*}"
+
+# AN ENTRY THAT IS ABSENT AT THE OWNER READ IS REFUSED (wave-28 T67; AC-10.6; pass 42 #1). T65's owner read said
+# nothing for a path that was not there ("the judge names it"). A planter whose root existed at the mkdir guard
+# removed it before that read, and planted a LINK after the `-L` test: the judge followed the link into a
+# directory of the victim's that the walk never judged, and `pin` was made there. The same gap is a mkdir that
+# fails. Now an absent entry is refused where the owner is read (`<path> does not exist`), and a mkdir that fails
+# is refused at the call (`cannot make <path>`). The race is built the reader's way: the entry read and the judge
+# are wrapped, the first removes the target before it reads, the second plants the link when nothing is there.
+T67_DIR="$T87_DIR/t67"; mkdir -p "$T67_DIR"; chmod 0755 "$T67_DIR"
+# t67_plant <name> [pin] — a sticky parent holding this user's closed, empty root (with `pin` inside when asked), and a victim: a closed directory of this user's in a group-writable, non-sticky holder
+t67_plant() {
+  local b="$T67_DIR/$1"
+  mkdir -p "$b"; chmod 0755 "$b"
+  mkdir -m 1777 "$b/par"; chmod 1777 "$b/par"
+  mkdir -m 0700 "$b/par/t67-root"
+  [ "${2:-}" != pin ] || mkdir -m 0700 "$b/par/t67-root/pin"
+  mkdir -m 0775 "$b/shared"; chmod 0775 "$b/shared"; mkdir -m 0700 "$b/shared/work"
+}
+# t67_vanish <seam> <root> <target> <victim> — pin <root>; <target> is removed right before its owner is read, and a link to <victim> takes its name right before the judge reads it
+t67_vanish() {
+  local out
+  out="$(PATH="$PIN_GIVEN" T67_TARGET="$3" T67_VICTIM="$4" /bin/bash -c '. "$1" >/dev/null 2>&1 || exit 9
+    eval "t67_orig_$(declare -f _bionic_pin_entry)"; eval "t67_orig_$(declare -f _bionic_pin_judge)"
+    _bionic_pin_entry() { if [ "$1" = "$T67_TARGET" ]; then rmdir "$T67_TARGET"; fi; t67_orig__bionic_pin_entry "$@"; }
+    _bionic_pin_judge() { if [ "$1" = "$T67_TARGET" ] && [ ! -e "$T67_TARGET" ]; then ln -s "$T67_VICTIM" "$T67_TARGET"; fi; t67_orig__bionic_pin_judge "$@"; }
+    bionic_interpreter_pin "$2" 2>"$3"; echo "rc=$?"; echo "path=$PATH"' \
+    t67-vanish "$1" "$2" "$TMPROOT/pin.err" 2>/dev/null)"
+  PIN_RC="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  PIN_PATH="$(printf '%s\n' "$out" | sed -n 's/^path=//p')"
+  PIN_ERR="$(cat "$TMPROOT/pin.err" 2>/dev/null)"
+}
+# the mutant: the absent return restored. The vanished entry passes the owner read (the defect 7.74b guards).
+T67_MUT_ABS="$TMPROOT/t67-mut-absent.sh"
+T67_ABS_LINE='  [ -e "$1" ] || [ -L "$1" ] || { echo "$1 does not exist"; return 0; }'
+anchor "$SEAM" "$T67_ABS_LINE" 1
+T67_LINE="$T67_ABS_LINE" awk 'ENVIRON["T67_LINE"] == $0 { print "  [ -e \"$1\" ] || [ -L \"$1\" ] || return 0"; next } { print }' "$SEAM" > "$T67_MUT_ABS"
+t67_plant root; T67_R="$T67_DIR/root/par/t67-root"; T67_V="$T67_DIR/root/shared/work"
+t67_vanish "$SEAM" "$T67_R" "$T67_R" "$T67_V"
+expect_ne "7.74 a root present at the mkdir guard, removed before its owner is read, a link planted after: refused" "0" "$PIN_RC"
+expect_contains "7.74b …naming the entry as not there" "$T67_R does not exist" "$PIN_ERR"
+expect_eq "7.74c …and nothing is made in the victim's directory" "absent" "$(there "$T67_V/pin")"
+expect_eq "7.74d …PATH is as given" "$HAND_GIVEN_PATH" "$PIN_PATH"
+expect_eq "7.74e …the root is gone and nothing took its place (the harness ran the removal)" "absent" "$(there "$T67_R")"
+expect_eq "7.75 the absent-return mutant parses" "0" "$(bash -n "$T67_MUT_ABS" >/dev/null 2>&1; echo $?)"
+t67_plant rmut
+t67_vanish "$T67_MUT_ABS" "$T67_DIR/rmut/par/t67-root" "$T67_DIR/rmut/par/t67-root" "$T67_DIR/rmut/shared/work"
+expect_eq "7.75b under the mutant the vanished root builds (the defect 7.74 guards)" "0" "$PIN_RC"
+expect_eq "7.75c …the planted link took its name (the harness ran the plant)" "$T67_DIR/rmut/shared/work" "$(readlink "$T67_DIR/rmut/par/t67-root")"
+expect_eq "7.75d …and the pin is made in the victim's directory, which the walk refuses" "present" "$(there "$T67_DIR/rmut/shared/work/pin/bash")"
+expect_eq "7.75e …and PATH carries it" "$(phys "$T67_DIR/rmut/shared/work/pin"):$HAND_GIVEN_PATH" "$PIN_PATH"
+# the same for `pin`
+t67_plant pin pin; T67_PR="$T67_DIR/pin/par/t67-root"; T67_PV="$T67_DIR/pin/shared/work"
+t67_vanish "$SEAM" "$T67_PR" "$T67_PR/pin" "$T67_PV"
+expect_ne "7.76 a pin present at the mkdir guard, removed before its owner is read, a link planted after: refused" "0" "$PIN_RC"
+expect_contains "7.76b …naming the entry as not there" "$T67_PR/pin does not exist" "$PIN_ERR"
+expect_eq "7.76c …and no bash link is made in the victim's directory" "absent" "$(there "$T67_PV/bash")"
+expect_eq "7.76d …PATH is as given" "$HAND_GIVEN_PATH" "$PIN_PATH"
+expect_eq "7.76e …the pin is gone and nothing took its name (the harness ran the removal)" "absent" "$(there "$T67_PR/pin")"
+t67_plant pmut pin
+t67_vanish "$T67_MUT_ABS" "$T67_DIR/pmut/par/t67-root" "$T67_DIR/pmut/par/t67-root/pin" "$T67_DIR/pmut/shared/work"
+expect_eq "7.76f under the mutant the vanished pin builds (the defect 7.76 guards)" "0" "$PIN_RC"
+expect_eq "7.76g …through the planted link, bash linked in the victim's directory" "present" "$(there "$T67_DIR/pmut/shared/work/bash")"
+expect_eq "7.76h …and PATH carries the victim's directory" "$(phys "$T67_DIR/pmut/shared/work"):$HAND_GIVEN_PATH" "$PIN_PATH"
+# the owner read alone: what it says of an absent path, a dangling link (an entry) and a real directory
+mkdir -p "$T67_DIR/alone"; chmod 0755 "$T67_DIR/alone"; mkdir -m 0700 "$T67_DIR/alone/real"; ln -s "$T67_DIR/alone/nowhere" "$T67_DIR/alone/dangling"
+expect_eq "7.77 _bionic_pin_entry, alone: a path that is not there is named" \
+  "$(printf '%s\nrc=0' "$T67_DIR/alone/nowhere does not exist")" "$(t63_fn "$SEAM" _bionic_pin_entry "$T67_DIR/alone/nowhere")"
+expect_eq "7.77b …a directory of this user's says nothing" "rc=0" "$(t63_fn "$SEAM" _bionic_pin_entry "$T67_DIR/alone/real")"
+expect_eq "7.77c …and a link to nowhere is an entry: its own owner is read, this user's says nothing" "rc=0" "$(t63_fn "$SEAM" _bionic_pin_entry "$T67_DIR/alone/dangling")"
+# a mkdir that fails is refused by name. The stub is first on PATH: it fails the paths its glob matches and passes the rest to the real one.
+T67_STUB="$TMPROOT/t67-stub"; mkdir -p "$T67_STUB"
+cat > "$T67_STUB/mkdir" <<'STUB'
+#!/bin/sh
+for d; do :; done
+case "$d" in $T67_MKDIR_FAIL) echo "$d" >> "$T67_MKDIR_LOG"; exit 1 ;; esac
+PATH=/usr/bin:/bin exec mkdir "$@"
+STUB
+chmod +x "$T67_STUB/mkdir"
+T67_MKDIR_LOG="$TMPROOT/t67-mkdir.log"; export T67_MKDIR_LOG
+# t67_mk <seam> <root> <glob> — pin_call with the mkdir stub first on PATH, failing the paths <glob> matches
+t67_mk() { PIN_GIVEN="$T67_STUB:$HAND_GIVEN_PATH"; T67_MKDIR_FAIL="$3" pin_call "$1" "$2"; PIN_GIVEN="$HAND_GIVEN_PATH"; }
+mkdir -p "$T67_DIR/mk"; chmod 0755 "$T67_DIR/mk"
+: > "$T67_MKDIR_LOG"
+t67_mk "$SEAM" "$T67_DIR/mk/ok-root" 'no-such-path'
+expect_eq "7.78 the mkdir stub that fails nothing passes the real one: built" "0" "$PIN_RC"
+expect_eq "7.78a …and the pin is there" "present" "$(there "$T67_DIR/mk/ok-root/pin/bash")"
+t67_mk "$SEAM" "$T67_DIR/mk/no-root" '*'
+expect_ne "7.78c a root that cannot be made: refused" "0" "$PIN_RC"
+expect_contains "7.78d …by name, in the seam's own line" "under $T67_DIR/mk/no-root — cannot make $T67_DIR/mk/no-root, so nothing is pinned" "$PIN_ERR"
+expect_eq "7.78e …PATH is as given" "$T67_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
+expect_contains "7.78f …and the stub is what refused it (the harness ran the failure)" "$T67_DIR/mk/no-root" "$(cat "$T67_MKDIR_LOG")"
+t67_mk "$SEAM" "$T67_DIR/mk/no-pin" '*/pin'
+expect_ne "7.79 a pin that cannot be made: refused" "0" "$PIN_RC"
+expect_contains "7.79b …by name" "cannot make $T67_DIR/mk/no-pin/pin, so nothing is pinned" "$PIN_ERR"
+expect_eq "7.79c …the root this call made is removed" "absent" "$(there "$T67_DIR/mk/no-pin")"
+expect_eq "7.79d …PATH is as given" "$T67_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
+# the mutant: the mkdir refusal removed. The failure reads as a later reader's wording (the defect 7.78d guards).
+T67_MUT_MK="$TMPROOT/t67-mut-mkdir.sh"
+T67_MK_LINE='    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _BIONIC_PIN_STEP="cannot make $1"; return 0; }'
+anchor "$SEAM" "$T67_MK_LINE" 1
+T67_LINE="$T67_MK_LINE" awk 'ENVIRON["T67_LINE"] == $0 { print "    mkdir -m 0700 \"$1\" 2>/dev/null && _BIONIC_PIN_MADE=1"; next } { print }' "$SEAM" > "$T67_MUT_MK"
+expect_eq "7.80 the no-refusal mutant parses" "0" "$(bash -n "$T67_MUT_MK" >/dev/null 2>&1; echo $?)"
+t67_mk "$T67_MUT_MK" "$T67_DIR/mk/mut-root" '*'
+expect_ne "7.80b under the mutant the root that cannot be made is still refused (not vacuous)" "0" "$PIN_RC"
+expect_contains "7.80c …but by the entry read's wording, after the fact" "$T67_DIR/mk/mut-root does not exist" "$PIN_ERR"
+expect_absent "7.80d …and not by name (the defect 7.78d guards)" "cannot make" "$PIN_ERR"
+# the hand run: the chooser reads the entry through the same function, so a root that could not be made gets the path remedy, and the line carries the reason
+mkdir -m 0700 "$T67_DIR/chooser"
+STOP_PATH="$T67_STUB:$HAND_GIVEN_PATH" T67_MKDIR_FAIL='*' stop_run "$STOP_SUITE" "$T67_DIR/chooser"
+expect_eq "7.81 a hand run whose root cannot be made exits 2" "2" "$STOP_RC"
+expect_contains "7.81b …naming the reason, with the path remedy (nothing there to remove)" \
+  "$(t57_line "$T67_DIR/chooser" "cannot make $T67_DIR/chooser/bionic-interpreter-pin.$STOP_UID" "$T57_FIX")" "$STOP_ERR"
+expect_absent "7.81c …and runs no check" "check ran" "$STOP_LOG"
+# PATH carries ONE directory when CDPATH is exported and the root is relative: `cd` honours CDPATH for a path that
+# starts with neither `/` nor `.`, goes to the directory CDPATH names and PRINTS it, so the capture held two lines
+# and the pin was off while the marker said on (pass 42 #2).
+T67_CD="$T67_DIR/cd"
+mkdir -p "$T67_CD/cwd/tmp" "$T67_CD/elsewhere/tmp/r/pin"; chmod 0755 "$T67_CD" "$T67_CD/cwd" "$T67_CD/cwd/tmp" "$T67_CD/elsewhere"
+chmod 0700 "$T67_CD/elsewhere/tmp/r" "$T67_CD/elsewhere/tmp/r/pin"; ln -s /bin/bash "$T67_CD/elsewhere/tmp/r/pin/bash"
+# t67_cd <seam> — pin the relative root `tmp/r` from a directory of this suite's own with CDPATH exported at another; leaves PIN_RC and T67_FIRST (PATH's first entry, a newline in it shown as ~)
+t67_cd() {
+  local out
+  rm -rf "$T67_CD/cwd/tmp/r"
+  out="$(cd "$T67_CD/cwd" && PATH="$HAND_GIVEN_PATH" CDPATH="$T67_CD/elsewhere" /bin/bash -c '. "$1" >/dev/null 2>&1 || exit 9
+    bionic_interpreter_pin tmp/r 2>/dev/null; echo "rc=$?"; printf "first=%s\n" "$(printf %s "${PATH%%:*}" | tr "\n" "~")"' t67-cd "$1" 2>/dev/null)"
+  PIN_RC="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  T67_FIRST="$(printf '%s\n' "$out" | sed -n 's/^first=//p')"
+}
+t67_cd "$SEAM"
+expect_eq "7.82 a relative root with CDPATH exported at a directory holding the same relative path: built" "0" "$PIN_RC"
+expect_eq "7.82b …PATH's first entry is one line, the physical directory the pin was built in" "$(phys "$T67_CD/cwd/tmp/r/pin")" "$T67_FIRST"
+expect_eq "7.82c …and it holds bash -> /bin/bash" "/bin/bash" "$(readlink "$T67_CD/cwd/tmp/r/pin/bash" 2>/dev/null)"
+T67_MUT_CD="$TMPROOT/t67-mut-cdpath.sh"
+anchor "$SEAM" 'unset CDPATH; cd -- "$dir"' 1
+sed 's/unset CDPATH; cd -- "$dir"/cd -- "$dir"/' "$SEAM" > "$T67_MUT_CD"
+expect_eq "7.83 the CDPATH mutant parses" "0" "$(bash -n "$T67_MUT_CD" >/dev/null 2>&1; echo $?)"
+t67_cd "$T67_MUT_CD"
+expect_eq "7.83b under the mutant the pin is built (not vacuous)" "0" "$PIN_RC"
+expect_contains "7.83c …and PATH's first entry spans two lines (the defect 7.82b guards)" "~" "$T67_FIRST"
+
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
   T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
