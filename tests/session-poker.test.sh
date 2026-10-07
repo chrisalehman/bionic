@@ -14595,6 +14595,18 @@ s/^      if ((g in hasc) && .*$/      if ((rk SUBSEP kv["commit"]) in headc \&\&
 rd_mutant kill137 's/^      ended) case .*$/      ended) ;;/'
 rd_mutant late 's/^        \[ -z "\$TICK_LANDINGS" \] || say "\$TICK_LANDINGS"$/        :/
 s/^        cat "\$TICK_BUF" 2>\/dev\/null$/        cat "$TICK_BUF" 2>\/dev\/null; [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"/'
+# THE 137-ONLY MUTANT DOCTORS TWO COPIES (wave-28 T8; A-orch-250): since T76 `gate.sh` `_gate_open` itself states `killed` for
+# an ended request over 128, so the poker's own arm above is redundant and doctoring it alone changes nothing. The mutant's
+# lib directory is therefore a COPY of the library whose `_gate_open` is back to 137-only, planted where the hook's
+# BIONIC_LIB finds it, beside the poker doctored as before (without its arm, only the gate's state can say killed).
+RI_LIB="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)"
+RI_GNEEDLE='if _gate_num "$_R_rc" && [ "$_G_NUM" -gt 128 ]; then _R_state=killed; fi'
+anchor "$RI_LIB/gate.sh" "$RI_GNEEDLE" 1
+rm -f "$RD_MUT/kill137/scripts/lib"; cp -R "$RI_LIB" "$RD_MUT/kill137/scripts/lib"
+RI_N="$RI_GNEEDLE" RI_R='if [ "$_R_rc" = 137 ]; then _R_state=killed; fi' awk 'BEGIN { n = ENVIRON["RI_N"]; r = ENVIRON["RI_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' \
+  "$RI_LIB/gate.sh" > "$RD_MUT/kill137/scripts/lib/gate.sh"
+expect_eq "RI-mut0b the doctored gate.sh copy differs from the library in one line (the doctor took)" "1" \
+  "$(diff "$RI_LIB/gate.sh" "$RD_MUT/kill137/scripts/lib/gate.sh" | /usr/bin/grep -c '^>')"
 expect_eq "RI-mut0 each doctored poker differs from the real one in the lines its doctor names: 1, 3, 1 and 2 (the four doctors took)" "1|3|1|2" \
   "$(for _m in noclear excl kill137 late; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
 RI_REAL_POKER="$POKER"
