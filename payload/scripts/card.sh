@@ -77,6 +77,9 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/roots.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/fill.sh"
+# `budget_cap`, the one reader of a person's writer cap (wave-28 T9; D15).
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/run.sh"
 
 # THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The
 # `## Tasks` ledger has two shapes — the wave's eleven columns and the task run's six,
@@ -778,9 +781,6 @@ fm == 1 {
   else if (k == "requirements") REQSF = v
   else if (k == "spec") SPECF = v
   else if (k == "design") DPTR = v
-  else if (k == "parallel-budget") {
-    if (match(v, /writers=[0-9]+/)) WRITERS = substr(v, RSTART + 8, RLENGTH - 8)
-  }
   next
 }
 /^## / {
@@ -956,7 +956,6 @@ END {
   print "META" OFS "ledger" OFS LEDGER
   print "META" OFS "reqs" OFS REQSF
   print "META" OFS "approach" OFS APPROACH
-  print "META" OFS "writers" OFS WRITERS
   print "META" OFS "firstb" OFS FIRSTB
   print "META" OFS "mrows" OFS mrows
   print "META" OFS "spec" OFS SPECF
@@ -1001,7 +1000,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
           ledger) WCARD_LEDGER="$v" ;;   reqs) WCARD_REQS="$v" ;;
           approach) WCARD_APPROACH="$v" ;;
           scale) WCARD_SCALE="$v" ;;     design) WCARD_DESIGN="$v" ;;
-          writers) WCARD_WRITERS="$v" ;; firstb) WCARD_FIRSTB="$v" ;;
+          firstb) WCARD_FIRSTB="$v" ;;
           mrows) WCARD_MROWS="$v" ;;
           spec) WCARD_SPEC="$v" ;;       dptr) WCARD_DPTR="$v" ;;
         esac ;;
@@ -1017,6 +1016,12 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
             WCARD_ADRV[${#WCARD_ADRV[@]}]="${rest#*"$CARD_TAB"}" ;;
     esac
   done < <(printf '%s\n' "$out")
+  # THE WRITERS ARE A PERSON'S CAP, READ BY FIELD (wave-28 T9; D15): `budget_cap` (lib/run.sh)
+  # answers from a `parallel-budget:` line whose `source=` is `user` or `override`, one whole
+  # `writers=` field. The card's own awk used to cut the first SUBSTRING `writers=`, so
+  # `max_writers=9 writers=3` read 9 here and 3 to every other reader, and it took a probe's
+  # number for a ceiling. With no cap the card says the writers are not declared.
+  WCARD_WRITERS="$(budget_cap "$2")"; WCARD_WRITERS="${WCARD_WRITERS#writers=}"
   # THE ONE ASSIGNMENT OF THE SCALE, made before any row is spec'd: `_card_spec task`
   # reads it, and a whole card is the only caller that can know it.
   case "$WCARD_SCALE" in

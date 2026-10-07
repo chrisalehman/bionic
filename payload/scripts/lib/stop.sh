@@ -1851,26 +1851,18 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # `_ST_GAP`, the rows neither launched nor answered by the standing decline, and the refusal
 # names only those. The predicate is "a row is unanswered", never "a decline exists".
 #
-# THE BUDGET IS A MEASUREMENT THE PLAN CARRIES (wave-19 REQ-3, D5; ADR-035). Step 0 writes
-# `parallel-budget: writers=N …` and the governing-skill hook refuses a plan Write without it,
-# so a live ledger reaching this wall without a readable `writers=` is a plan that slipped past
-# that wall, and the turn is refused once, naming the key — exactly where the missing width
-# would have hidden a fillable row (at least one row ready at width one). `stop_turn_facts`
-# computes that too.
+# NO PLAN OWES A BUDGET LINE (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a live ledger whose
+# plan carried no readable `writers=` was refused once here, naming the key Step 0 wrote from
+# the machine probe. A line caps a run only when a person wrote it (`budget_cap`, lib/run.sh),
+# so a plan with none is an ordinary plan and this wall says nothing about it.
 FILL_SRC=""
 FILL_MISSING=""
-if [ "$_ST_NO_BUDGET" = 1 ]; then
-  FILL_SRC="BUDGET"
-elif [ "${_ST_GAP:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_DECLINED" ]; then
+if [ "${_ST_GAP:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_DECLINED" ]; then
   FILL_SRC="GAP"
   FILL_MISSING="$_ST_NAMED"
 fi
 
-if [ "$FILL_SRC" = "BUDGET" ]; then
-  FILL_REASON="Fill budget unreadable: the run's ledger is live past Step 3, and its plan (${PLAN_NAME}) carries no parallel-budget: line with a writers=<digits> field, so no turn can be judged for a fillable gap. The budget is a measurement Step 0 writes — resources_probe, then resources_budget over what it printed — verbatim into the plan's frontmatter as parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe (source=override when the probe cannot read the machine). Add it, then stop again — this gate blocks once."
-  FILL_FACT="the plan carries no parallel-budget: writers="
-  FILL_FIX="add Step 0's budget line"
-elif [ "$FILL_SRC" = "GAP" ]; then
+if [ "$FILL_SRC" = "GAP" ]; then
   # THE INVARIANT'S OWN WORDING, and the only one left: what is true of every refused turn is
   # the state — the ledger is live, these rows are ready, slots are free after this turn's
   # launches — whether or not a tick fired in it.
@@ -2098,15 +2090,11 @@ if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
     # always had. Both halves are budgeted: `bionic: stop refused — <fact> (<fix>)` is capped
     # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
     # these read as tightly as they do.
-    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ] && [ "$FILL_SRC" = "BUDGET" ]; then
-      fold_block block stop "no parallel-budget: key, and a STANDDOWN unanswered" \
-        "add the key; stop or decline" "$TELL_REASON"
-    elif [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
+    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
       fold_block block stop "a FILL and a STANDDOWN went unanswered" \
         "dispatch, stop, or decline" "$TELL_REASON"
     elif [ -n "$FILL_REASON" ]; then
-      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the budget backstop or the
-      # computed gap.
+      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap.
       fold_block block stop "$FILL_FACT" "$FILL_FIX" \
         "$TELL_REASON"
     elif [ -n "$STANDDOWN_REASON" ]; then
@@ -2204,7 +2192,6 @@ return 2
 #   _ST_GAP         min(free, |ready not launched and not answered by the standing decline|) —
 #                   what the wall refuses on; _ST_MISSED when nothing stands
 #   _ST_NAMED       the first _ST_GAP of those ids, the ones a refusal names
-#   _ST_NO_BUDGET   1 when a live ledger has no readable writers= and a row is ready
 #   _ST_TICK_DUTY   on a tick turn, `none` when the tick's digest file says `duty=none`, else
 #                   `owed` — the task-list duty's one input from the tick (wave-24 T8, D5)
 #   _ST_RECONCILE   on a tick turn with a fresh digest, its `reconcile=` (`step4` or `grew`): the
@@ -2266,7 +2253,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_STREAM=""; _ST_PLAN=""; _ST_LIVE=0; _ST_TICK=0; _ST_TURN=""; _ST_MARK_TS=""
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
-  _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
+  _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
   _ST_RECONCILE=""
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
@@ -2455,8 +2442,9 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   [ -n "$_ST_PLAN" ] && fill_ledger_live "$_ST_PLAN" || return 0
   _ST_LIVE=1
   _ST_CURRENT="$(_fill_current_field "$_ST_PLAN")"
-  # THE ONE BUDGET READER (wave-20 T2, D10): run.sh's strict line and whole-field integer.
-  _ST_CEILING="$(budget_field "$(plan_budget_line "$_ST_PLAN")" writers)"
+  # A PERSON'S CAP, OR NONE (wave-28 T9; D15): `budget_cap` (lib/run.sh) answers only from a
+  # line whose `source=` is `user` or `override`; a probe's number caps nothing.
+  _ST_CEILING="$(budget_cap "$_ST_PLAN")"; _ST_CEILING="${_ST_CEILING#writers=}"
 
   # THE PRESSURE STATE, MEASURED HERE (Δ7): `resources_pressure`, the reading the tick's HOLD
   # and EMERGENCY come from. An unreadable reading is `ok` — the tick's own fallback — which
@@ -2467,11 +2455,10 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_STATE="${pressure#state=}"; _ST_STATE="${_ST_STATE%% *}"
   case "$_ST_STATE" in ok|hold|emergency) : ;; *) _ST_STATE=ok ;; esac
 
-  if [ -z "$_ST_CEILING" ]; then
-    # "AT LEAST ONE ROW READY AT THE UNIT" IS THE READY SET AT WIDTH ONE (wave-19 REQ-6, D7).
-    [ -n "$(fill_ready_set "$_ST_PLAN" 1 0 2>/dev/null)" ] && _ST_NO_BUDGET=1
-    return 0
-  fi
+  # NO CAP, NO WIDTH TO JUDGE ON HERE: the width without a person's cap is the gate's (wave-28
+  # T13, D14), and until it is read here this duty has nothing to size the gap against. Nothing
+  # is refused and nothing is said: no plan owes the line (D15).
+  [ -n "$_ST_CEILING" ] || return 0
 
   # THE OCCUPANCY IS THE ONE CLOSE PREDICATE'S OPEN SET (wave-20 T2, D10): this session's
   # roster rows not closed by a later ack. A roster or ledger that is a symlink is not read,
