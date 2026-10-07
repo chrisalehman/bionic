@@ -790,7 +790,7 @@ case "$VERB" in
         [ -n "$_hsid" ] || continue
         die "REFUSED — $_target is on roster ${_hsid:0:8}'s row ${_hstat:-with no status}."
       done <<< "$_held"
-      die "Adopt it, or stop it by its own session's rules; nothing was recorded."
+      die "adopt it, or stop it by its own session's rules; nothing was recorded."
       exit 2
     fi
     read_panel
