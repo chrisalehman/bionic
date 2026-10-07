@@ -5758,15 +5758,22 @@ _bsg_solo_target() {
 #
 # A name never carries `|`, `,`, `=`, a space or a newline, so the field stays one field; the shim
 # filters it again (booked.sh).
+#
+# THE DOOR'S CLAIMS (wave-28 T36; D27): an `only` claim is a suite `tests/run.sh --only` names, and
+# it is named like a file claim. _BSG_RUNNER is 1 when there is one and every claim is the runner's
+# (`only`, or the full tree's `run.sh`): the shim then gets `--runner` and asks nothing, since each
+# suite the runner starts asks for itself.
 _BSG_SUITES=""
+_BSG_RUNNER=0
 _BSG_NAME_MAX=100
 _bsg_suites() {
-  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}"
-  _BSG_SUITES=""
+  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}" _only=0 _other=0
+  _BSG_SUITES=""; _BSG_RUNNER=0
   while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] || continue
     if [ "$_k" = split ]; then _BSG_SUITES='?'; return 0; fi
-    if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
+    case "$_k:$_b" in only:*) _only=1 ;; file:run.sh) : ;; *) _other=1 ;; esac
+    if { [ "$_k" != file ] && [ "$_k" != only ]; } || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
       _b='?'
       case "$_r" in
         ''|*'$'*|*'`'*) : ;;
@@ -5778,6 +5785,7 @@ _bsg_suites() {
     _BSG_SUITES="${_BSG_SUITES:+$_BSG_SUITES,}$_b"
   done <<< "$_BSG_TARGETS"
   [ -n "$_BSG_SUITES" ] || _BSG_SUITES='?'
+  [ "$_only" = 0 ] || [ "$_other" = 1 ] || _BSG_RUNNER=1
 }
 
 # wall_booked_argv <command> <quiet: 0|1> [<shim option>...] — sets WALL_BOOKED_ARGV to the
@@ -5876,6 +5884,7 @@ _bsg_wrap_text() {
   if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else _bsg_wait_s; set -- "$@" --max-wait "$_BSG_WAIT_S"; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
+  [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
@@ -6226,7 +6235,7 @@ fi
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
 local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -6656,8 +6665,8 @@ full run from a writer row costs forty minutes and proves a head nobody is relea
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
-Run the suites your brief named instead, one call each, by the suite file itself:
-    bash tests/${_ft_first:-<suite>.test.sh}
+Run the suites your brief named instead, through the one door (wave-28 T36):
+    tests/run.sh --only ${_ft_first:-<suite>.test.sh}
 \`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
 queue only the runner itself builds, and it is the full-tree runner as far as this budget
 is concerned. If the change cannot be bounded — a merge from outside the run, or a file the
@@ -6665,6 +6674,37 @@ map answers with every suite or with none — say so in your report: the orchest
 dispatches the runner, and the dispatch wall admits it only then."
     return 2
   fi
+  # ---- BEGIN THE ONE DOOR (wave-28 T36; D27, REQ-10 AC-10.1) ----
+  #
+  # A DISPATCHED AGENT RUNS A SUITE THROUGH THE RUNNER, NEVER BARE. `bash tests/x.test.sh`, typed
+  # by an agent, runs the suite in whatever world the agent's shell happens to give it: the
+  # runner's interpreter pin, its environment, its adoption wall and its one gate ask per suite
+  # are all the runner's, and a bare run gets none of them. `tests/run.sh --only x.test.sh` gets
+  # them all (tests/run.sh, THE DOOR). So every bare form the classifier reads — the literal
+  # path, a loop, a variable (wave-28 T11's forms) — is a `file` claim and is refused here, with
+  # one line naming the door; the door's own claims are `only` and go on to the budget below. The
+  # main thread never reaches this loop (the partition above), so a person's bare run is not
+  # refused and keeps the seam's pin. This arm holds the runner's world, not the queue (D9).
+  if [ "$_kind" = "file" ]; then
+    _door_name="$_target"
+    case "$_door_name" in *'$'*|*'`'*|'') _door_name='<suite>' ;; esac
+    _door_fact="use tests/run.sh --only $_door_name"
+    [ $(( $(bionic_cols "bionic: suite-run refused — $_door_fact (one door)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
+      || _door_fact="use tests/run.sh --only <suite>"
+    fold_block exit2 suite-run "$_door_fact" "one door" \
+      "A dispatched agent runs a suite through the runner, never by the suite file alone. The
+runner gives the suite its world: the interpreter pin (bash -> /bin/bash first on PATH), its
+environment, the adoption wall, and one gate ask per suite. A bare run gets none of them.
+
+You ran: $_run
+
+Run it through the one door instead, one call, naming each suite by its file name:
+    tests/run.sh --only ${_door_name}
+Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
+    return 2
+  fi
+  # ---- END THE ONE DOOR ----
+
   # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------
   #
   # `re_executes=` is a DECLARATION the dispatch wall already admitted, so a command that
@@ -6689,7 +6729,7 @@ dispatches the runner, and the dispatch wall admits it only then."
   # NO STATEMENT IS REFUSED, NAMING WHY (wave-27 T5, D15). A row with NEITHER statement — no
   # `suites_allowed=` key and no declared runs — or no row at all used to pass a named run in
   # silence; see `budget_unrecorded`.
-  if [ "$_kind" != "file" ]; then
+  if [ "$_kind" != "file" ] && [ "$_kind" != "only" ]; then
     [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_run"; return 2; }
     # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
     # are the half of the budget that can answer it.
