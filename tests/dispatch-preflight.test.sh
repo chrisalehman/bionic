@@ -3318,16 +3318,16 @@ s22_roster_row "$REPO" "$SID_A" "W-TWO"
 expect_contains "§CAP.1 meta: the plan carries the probe's line" "parallel-budget: writers=1 suites=9 worktrees=9 test_jobs=4 source=probe" \
   "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "§CAP.1 source=probe writers=1 with two open rows → the third dispatch passes" "0" "$GATE_ST"
-expect_absent "§CAP.1b …no ceiling count is printed" "writers: budget=" "$GATE_ERR"
-expect_absent "§CAP.1c …and nothing is said about the budget line" "parallel-budget" "$GATE_ERR"
+expect_eq "§CAP.1 source=probe writers=1 with two open rows → the third dispatch is admitted" "allow" "$GATE_VERDICT"
+expect_absent "§CAP.1b …no ceiling count is printed" "writers: budget=" "$GATE_ERR$GATE_VERR"
+expect_absent "§CAP.1c …and nothing is said about the budget line" "parallel-budget" "$GATE_ERR$GATE_VERR"
 
 REPO=$(make_repo r22c2 yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "§CAP.2 a line with no source= caps nothing: writers=1 and one open row → passes" "0" "$GATE_ST"
+expect_eq "§CAP.2 a line with no source= caps nothing: writers=1 and one open row → admitted" "allow" "$GATE_VERDICT"
 
 REPO=$(make_repo r22c3 yes)
 write_attestation "$REPO" "$SID_A"
@@ -3337,7 +3337,7 @@ s22_roster_row "$REPO" "$SID_A" "W-THREE"
 expect_absent "§CAP.3 meta: the live plan carries no parallel-budget: line" "parallel-budget" \
   "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "§CAP.3 no line in a live plan → passes, three rows notwithstanding" "0" "$GATE_ST"
+expect_eq "§CAP.3 no line in a live plan → admitted, three rows notwithstanding" "allow" "$GATE_VERDICT"
 expect_absent "§CAP.3b …and the plan is not named for want of the line" "parallel-budget" "$GATE_ERR"
 expect_absent "§CAP.3c …nor is the budget listed as not checked" "not checked: budget" "$GATE_ERR$GATE_VERR"
 
@@ -3351,7 +3351,7 @@ s22_roster_row "$REPO" "$SID_A" "W-ONE"
 expect_contains "§CAP.4 meta: the plan carries the indented key" "  parallel-budget: writers=1" \
   "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "§CAP.4 an indented key reads as no key: nothing is refused on writers=1" "0" "$GATE_ST"
+expect_eq "§CAP.4 an indented key reads as no key: nothing is refused on writers=1" "allow" "$GATE_VERDICT"
 
 # §CAP-USER — A PERSON'S LIMIT STILL CAPS (wave-28 T9; D15, REQ-2 AC-2.10). The same two open
 # rows that §CAP.1 admitted a third beside are refused when a person wrote the line. This is the
@@ -3416,7 +3416,7 @@ s22_set_budget "$REPO" "writers=9 suites=9 worktrees=1 test_jobs=4 source=user"
 s22_fake_tree "$REPO" "one"
 s22_fake_tree "$REPO" "two"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22h worktrees=1 with two live trees → passes: no worktrees ceiling" "0" "$GATE_ST"
+expect_eq "r22h worktrees=1 with two live trees → admitted: no worktrees ceiling" "allow" "$GATE_VERDICT"
 expect_absent "r22h2 …and no tree count is printed" "worktrees: budget=" "$GATE_ERR$GATE_VERR"
 
 # --- r22g: the wall and the Patrol count the same open rows on THIS fixture. AC-7
