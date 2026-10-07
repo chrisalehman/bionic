@@ -1337,7 +1337,8 @@ sed 's# pwd -P)" || why=# pwd)" || why=#' "$SEAM" > "$T65_MUT_PHYS"
 expect_eq "7.73 the logical-path mutant parses" "0" "$(bash -n "$T65_MUT_PHYS" >/dev/null 2>&1; echo $?)"
 pin_call "$T65_MUT_PHYS" "$T65_DIR/phys/lnk/t65-mut-root"
 expect_eq "7.73b under the mutant the pin is built (not vacuous)" "0" "$PIN_RC"
-expect_contains "7.73c …and PATH carries the link's path (the defect 7.72b guards)" "$T65_DIR/phys/lnk/t65-mut-root/pin:" "$PIN_PATH:"
+expect_eq "7.73c …and PATH's first entry is the path through the link (the defect 7.72b guards)" \
+  "$(cd "$T65_DIR/phys/lnk" && pwd)/t65-mut-root/pin" "${PIN_PATH%%:*}"
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
   T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
