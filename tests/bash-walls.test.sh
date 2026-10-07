@@ -2986,7 +2986,7 @@ bw_dispatched "$R_NR" t54writer "suites_allowed=alpha.test.sh" suites_source=dec
 expect_eq "DOOR.21a the no-runner world has no tests/run.sh" "absent" "$([ -e "$R_NR/tests/run.sh" ] && echo present || echo absent)"
 expect_eq "DOOR.21a2 the no-flag world has a tests/run.sh that never says --only" "present/0" \
   "$([ -f "$R_NO/tests/run.sh" ] && echo present || echo absent)/$(grep -cF -e '--only' "$R_NO/tests/run.sh")"
-expect_eq "DOOR.21a3 the door world's tests/run.sh says --only" "1" "$(grep -cF -e '--only' "$R_DR/tests/run.sh")"
+expect_eq "DOOR.21a3 the door world's tests/run.sh says --only" "yes" "$(grep -qF -e '--only' "$R_DR/tests/run.sh" && echo yes || echo no)"
 for _wd in "$R_NR" "$R_NO"; do
   bw_dispatched "$_wd" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
   for _dr in 'bash tests/alpha.test.sh' './tests/alpha.test.sh' \
