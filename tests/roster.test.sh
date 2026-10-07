@@ -683,5 +683,18 @@ expect_eq "R17h2 …its files= reads by key (the positive on that extractor)" "a
 expect_eq "R17h3 …and its row= reads empty: absent, the 1.12.0 state" "" "$(field_of_row "$R17_GOT" row)"
 lib roster_row "${R5_BASE[@]}" "lands-on=a.test.sh" >/dev/null
 expect_status "R17i a near-miss key (lands-on=) is still refused" "2" "$?"
+# With T6's mark beside them (A-T7.14): the landing marks a row the dispatch wall labelled, and the mark
+# stays LAST, after row= and lands_on=. fails-when: the merge orders the two pairs the other way, or the
+# mark's copy drops a label.
+lib roster_mark_landed "$R17_F" w-A2 "0123456789abcdef0123456789abcdef01234567" "2026-10-07T03:30:00Z"
+expect_status "R17j precondition: roster_mark_landed marks the labelled row (rc 0)" "0" "$?"
+R17_GOT="$(lib roster_row_for_id "$R17_F" a16-new)"
+expect_eq "R17j the marked row keeps row= and lands_on=, the mark last" \
+  "${R17_NEW}|landed=0123456789abcdef0123456789abcdef01234567|landed_at=2026-10-07T03:30:00Z" "$R17_GOT"
+R17_ARGS=()
+while IFS= read -r R17_SEG; do R17_ARGS+=("$R17_SEG"); done < <(printf '%s\n' "$R17_GOT" | tr '|' '\n' | tail -n +2)
+expect_eq "R17j2 …and, fed back key by key, the one writer reproduces it byte for byte" "$R17_GOT" \
+  "$(lib roster_row "${R17_ARGS[@]}")"
+expect_eq "R17j3 …its row= still reads by key" "T23" "$(field_of_row "$R17_GOT" row)"
 
 finish
