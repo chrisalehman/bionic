@@ -2112,10 +2112,16 @@ expect_eq "FL0 precondition: the plan carries no floor fact, and the working hea
 fl_poke floor-run
 expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 rc=0" \
   "0|head=$FL_H dirty=0 rc=0" "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
-fl_poke proof-add floor "record/wave-01-fixture/floor-run-$FL_H.log"
-expect_eq "FL2 proof-add floor writes the floor fact from that log (exit 0)" "0|1" \
-  "$FL_RC|$(/usr/bin/grep -c "^proved: kind=floor head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
-expect_contains "FL2b …saying what it wrote" "proof-add — kind=floor head=$FL_H" "$FL_OUT"
+# THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
+# with the project root, as proof-add calls it, attests the declared log, and proof_add_line places the line.
+# proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
+# Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
+FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
+  h="$(proof_attested floor "$2/record/wave-01-fixture/floor-run-$3.log" "$4" "" "" "$5")" || { printf "%s" "$h"; exit 1; }
+  proof_add_line "$6" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/floor-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
+  _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
+expect_eq "FL2 the judge attests the declared floor's log at the working head, and the floor fact is written from it" "$FL_H|1" \
+  "$FL_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
 fl_poke current 8
 expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed -n 's/^current: //p' "$PFL/$PLAN_REL")"
 run_close "$PFL" run
