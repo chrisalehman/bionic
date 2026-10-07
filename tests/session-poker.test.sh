@@ -13810,9 +13810,11 @@ poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'it' 'the user said it'
 s42_unchanged "MOVE-10 §MOVE a quote of one word is refused as too short" 1 "$PSEV"
 MV_SHORT_LINE="poker: REFUSED — the words \"it\" are too short to be the user's decision; quote at least three of their words, or their whole prompt. The plan is unchanged."
 expect_eq "MOVE-10b …with the refusal as measured" "$MV_SHORT_LINE" "$OUT"
+s42_snap "$RSEV" "$PSEV"
 poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'fix it' 'the user said it'
 s42_unchanged "MOVE-10c 'fix it' inside a longer prompt is refused as too short as well" 1 "$PSEV"
 expect_contains "MOVE-10d …naming the rule" "too short to be the user's decision" "$OUT"
+s42_snap "$RSEV" "$PSEV"
 poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'zzz yyy' 'the user said it'
 s42_unchanged "MOVE-10e two words no prompt holds are refused as standing in no prompt (not as short)" 1 "$PSEV"
 expect_contains "MOVE-10f …naming that rule" "in no prompt the user typed" "$OUT"
