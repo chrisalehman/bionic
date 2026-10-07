@@ -6678,12 +6678,13 @@ PF_OTHER_LIST
       die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
-    # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `check:` or `deferred:` line is
-    # keyed `<record>#<n>`, so a second pass registered on the path of a first would inherit its
-    # settlement (a refuted #1 drops the new pass's S1). A reading's path whose proof line names
-    # another head is refused, and so is one a `check:`/`deferred:` line already names; a relaunched
-    # reader re-registering an unsettled record (the same head, no such line) is admitted as before.
-    # The key stays unique by construction, so `_proof_check_state` is unchanged (lib/proof.sh).
+    # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `check:`, `deferred:` or `moved:`
+    # line is keyed `<record>#<n>`, so a second pass registered on the path of a first would inherit its
+    # settlement (a refuted #1 drops the new pass's S1) or its move. A reading's path whose proof line
+    # names another head is refused, and so is one such a line already names (lib/proof.sh
+    # `proof_bind_awk` is the one predicate, T72); a relaunched reader re-registering an unsettled record
+    # (the same head, no such line) is admitted as before. The key stays unique by construction, so
+    # `_proof_check_state` is unchanged.
     if [ -n "$PF_QUESTION" ]; then
       PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"
       case "$PF_PASS" in
@@ -6691,7 +6692,7 @@ PF_OTHER_LIST
           die "REFUSED — $(clean "$PF_REL") is already registered at $(clean "${PF_PASS#head }" | cut -c1-12), not ${PF_HEAD:0:12}: write the pass to a new record path. The plan is unchanged."
           exit 1 ;;
         settled\ *)
-          die "REFUSED — $(clean "$PF_REL") at ${PF_HEAD:0:12} already has a check: or deferred: line: write the pass to a new record path. The plan is unchanged."
+          die "REFUSED — $(clean "$PF_REL") at ${PF_HEAD:0:12} already has a check:, deferred: or moved: line: write the pass to a new record path. The plan is unchanged."
           exit 1 ;;
       esac
     fi

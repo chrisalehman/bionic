@@ -1527,6 +1527,31 @@ eg_commit_outside_root() {
   [ "$_EG_COMMITS" -eq 1 ] && _eg_placed && _eg_outside_root "$_EG_CWD"
 }
 
+# THE STEP FROM WHICH THE GATE READS A RUN'S READINGS AND VERDICTS, named once (wave-28 T72; D33, D19).
+# eg_step_reads_readings <current> -> 0 when the declared `current:` is a numbered step of 6 or more (a
+# sub-step letter binds as its step), 1 otherwise: `_eg_verdicts_owed` asks it of the run's own word, and
+# the collector in hooks/bash-walls.sh asks it (through `eg_plan_reads_readings`) before it derives the
+# readings' results at all, because the wall reads them from here and not below. The wall's `case` at
+# its last call (steps 6 to 9) is the same rule at the steps the lifecycle has.
+eg_step_reads_readings() {
+  local _c="${1%[ab]}"
+  case "$_c" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_c" -ge 6 ]
+}
+
+# eg_plan_reads_readings <plan> -> 0 when <plan>'s declared `current:` is such a step: the first
+# `current:` line of the unfenced `## SDLC State`, line endings translated and white space stripped, as the
+# gate's own `CURRENT` reads it. FILE SCOPE, for the collector, which asks before the wall's body has run.
+eg_plan_reads_readings() {
+  [ -f "${1:-}" ] || return 1
+  eg_step_reads_readings "$(normalize_newlines "$1" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## SDLC State/ { flag = 1; next }
+    /^## / { flag = 0 }
+    flag && /^[[:space:]]*current[[:space:]]*:/ { sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit }')"
+}
+
 # The plan is read off disk when the CALL starts (PLAN is resolved at :245
 # before any of the command runs). So a single Bash call that edits the plan
 # and THEN commits is judged against the pre-edit plan: the fix the agent just
@@ -2313,9 +2338,7 @@ is_proof_shaped() {  # $1 = evidence value
 # answers is "has the run reached the step that produces verdicts", which no
 # per-commit subject can move.
 _eg_verdicts_owed() {
-  local _c="${_EG_DECLARED_CURRENT%[ab]}"
-  case "$_c" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$_c" -ge 6 ]
+  eg_step_reads_readings "$_EG_DECLARED_CURRENT"
 }
 
 apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
@@ -2377,14 +2400,16 @@ _eg_reading_gaps() {
   # re-rated is judged on its derived result, handed here by the collector (hooks/bash-walls.sh,
   # `BIONIC_READINGS`, read for `BIONIC_DEBTS_PLAN` as the debts are) and keyed by evidence and
   # written result; a reading it names no line for keeps the result its proof line wrote.
-  local der=""
-  [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || der="${BIONIC_READINGS:-}"
+  local der="" handed=0
+  # THE HANDED FACTS ARE FOR ONE PLAN, asked once here for the readings and the debts alike (wave-28
+  # T72): lines the collector read for another plan than the one judged are not this plan's.
+  [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1
+  [ "$handed" = 0 ] || der="${BIONIC_READINGS:-}"
   printf '%s\n' "$SECTION" | BIONIC_DERIVED="$der" awk -v qs="$qs" "$(proof_awk)"'
-    function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
     BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
             for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      ev = evid($0)
+      ev = PROOF_EVIDENCE
       t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT; e[PROOF_QUESTION] = ev
       next
     }
@@ -2405,7 +2430,7 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
-  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "${BIONIC_DEBTS_PLAN:-}" = "$PLAN" ] \
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] \
      && declare -F proof_debts_open >/dev/null 2>&1; then
     printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
