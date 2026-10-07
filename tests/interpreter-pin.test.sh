@@ -57,7 +57,7 @@ SKIPPED=0
 skip() { SKIPPED=$((SKIPPED + 1)); echo "SKIP: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/interpreter-pin-test.XXXXXX")"
-trap 'rm -rf "$TMPROOT"' EXIT
+trap 'chmod -R -N "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"' EXIT   # an ACL row's entry never outlives the run (T57)
 
 SYS_BASH="/bin/bash"
 SYS_VER="$("$SYS_BASH" -c 'echo "$BASH_VERSION"' 2>/dev/null)"
@@ -673,7 +673,7 @@ stop_run "$STOP_SUITE" "$T36_OPEN"
 expect_eq "7.25 a temp directory others can write, with no sticky bit: the hand run exits 2" "2" "$STOP_RC"
 expect_absent "7.25b …and runs no check" "check ran" "$STOP_LOG"
 expect_contains "7.25c …naming the open parent" \
-  "resolve-roots.sh: no interpreter pin at $T36_OPEN_ROOT — $T36_OPEN is writable by group or others and has no sticky bit; remove $T36_OPEN_ROOT or set TMPDIR, then run again" \
+  "resolve-roots.sh: no interpreter pin at $T36_OPEN_ROOT — $T36_OPEN is writable by group or others and has no sticky bit; set TMPDIR to a directory only you can write, then run again" \
   "$STOP_ERR"
 expect_eq "7.25d …and builds nothing there" "absent" "$(there "$T36_OPEN_ROOT")"
 T36_GRP="$T87_DIR/t36-group"; mkdir -p "$T36_GRP"; chmod 0770 "$T36_GRP"
@@ -704,7 +704,7 @@ stop_run "$STOP_SUITE" "$T36_LNK_OPEN"
 expect_eq "7.31 a temp directory that is a link to an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
 expect_absent "7.31b …and runs no check" "check ran" "$STOP_LOG"
 expect_contains "7.31c …naming the link as the open parent, with the pin's existing line" \
-  "resolve-roots.sh: no interpreter pin at $T36_LNK_OPEN_ROOT — $T36_LNK_OPEN is writable by group or others and has no sticky bit; remove $T36_LNK_OPEN_ROOT or set TMPDIR, then run again" \
+  "resolve-roots.sh: no interpreter pin at $T36_LNK_OPEN_ROOT — $T36_LNK_OPEN is writable by group or others and has no sticky bit; set TMPDIR to a directory only you can write, then run again" \
   "$STOP_ERR"
 expect_eq "7.31d …and builds nothing in the directory it leads to" "absent" "$(there "$T36_OPEN/bionic-interpreter-pin.$STOP_UID")"
 T36_LNK_OK="$T87_DIR/t36-lnk-ok"; ln -s "$T36_OK" "$T36_LNK_OK"
@@ -714,11 +714,13 @@ expect_contains "7.32b …and runs its check" "check ran" "$STOP_LOG"
 T36_LNK_STICKY="$T87_DIR/t36-lnk-sticky"; ln -s "$T36_STICKY" "$T36_LNK_STICKY"
 stop_run "$STOP_SUITE" "$T36_LNK_STICKY"
 expect_eq "7.32c a link to an open directory WITH the sticky bit builds its pin too" "0" "$STOP_RC"
-# The mutant: the link followed no more (`ls -ld`, in the one judgment of an open directory, whose
-# two-space `case` line is the only one that indent has). The open-parent link is then accepted.
+# The mutant: the link followed no more (`ls -ld`, in the one predicate of an open directory, which
+# reads the directory with `ls -ldLe` and, where ls has no -e, with `ls -ldL`: both lines are turned).
+# The open-parent link is then accepted.
 T36_MUT3="$TMPROOT/t36-mut-nolink.sh"
-anchor -E "$SEAM" '^  case "\$\(ls -ldL "\$1" 2>/dev/null\)" in$' 1
-sed 's|^  case "$(ls -ldL "$1" 2>/dev/null)" in$|  case "$(ls -ld "$1" 2>/dev/null)" in|' "$SEAM" > "$T36_MUT3"
+anchor "$SEAM" 'out="$(ls -ldLe "$1" 2>/dev/null)"' 1
+anchor "$SEAM" '[ -n "$out" ] || out="$(ls -ldL "$1" 2>/dev/null)"' 1
+sed -e 's|out="$(ls -ldLe "$1"|out="$(ls -lde "$1"|' -e 's|out="$(ls -ldL "$1"|out="$(ls -ld "$1"|' "$SEAM" > "$T36_MUT3"
 expect_eq "7.33 the no-link mutant parses" "0" "$(bash -n "$T36_MUT3" >/dev/null 2>&1; echo $?)"
 R="$T36_LNK_OK/mut-ok-root"; pin_call "$T36_MUT3" "$R"
 expect_eq "7.33b …and builds a pin under a link to a closed directory (not vacuous)" "0" "$PIN_RC"
@@ -740,7 +742,7 @@ stop_run "$STOP_SUITE" "$T56_HOLD/lnk"
 expect_eq "7.34 a temp directory that is a link held in an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
 expect_absent "7.34b …and runs no check" "check ran" "$STOP_LOG"
 expect_contains "7.34c …naming the link and the directory that holds it, with the pin's existing line" \
-  "resolve-roots.sh: no interpreter pin at $T56_ROOT — $T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable by group or others and has no sticky bit; remove $T56_ROOT or set TMPDIR, then run again" \
+  "resolve-roots.sh: no interpreter pin at $T56_ROOT — $T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable by group or others and has no sticky bit; set TMPDIR to a directory only you can write, then run again" \
   "$STOP_ERR"
 expect_eq "7.34d …and builds nothing in the directory it leads to" "absent" "$(there "$T56_TGT/bionic-interpreter-pin.$STOP_UID")"
 T56_STK="$T87_DIR/t56-hold-sticky"; mkdir -p "$T56_STK"; chmod 1777 "$T56_STK"
@@ -789,8 +791,8 @@ expect_eq "7.39c under the no-walk mutant the link held in an open directory is 
 R="$T56_HOLD/lnk/fn-root"; pin_call "$SEAM" "$R"
 expect_ne "7.39d control: the shipped function refuses that same root" "0" "$PIN_RC"
 T56_MUT2="$TMPROOT/t56-mut-sticky.sh"
-anchor "$SEAM" '    ?????????[tT]*) return 1 ;;' 1
-grep -vF '    ?????????[tT]*) return 1 ;;' "$SEAM" > "$T56_MUT2"
+anchor "$SEAM" '    ?????????[tT]*) sticky=1 ;;' 1
+grep -vF '    ?????????[tT]*) sticky=1 ;;' "$SEAM" > "$T56_MUT2"
 expect_eq "7.40 the no-sticky mutant parses" "0" "$(bash -n "$T56_MUT2" >/dev/null 2>&1; echo $?)"
 R="$T36_LNK_OK/mut-nosticky-root"; pin_call "$T56_MUT2" "$R"
 expect_eq "7.40b …and builds a pin under a link held in a closed directory (not vacuous)" "0" "$PIN_RC"
@@ -798,6 +800,160 @@ R="$T56_STK/lnk/mut-root"; pin_call "$T56_MUT2" "$R"
 expect_ne "7.40c under the no-sticky mutant the link held in a sticky directory is refused (the row 7.35 guards)" "0" "$PIN_RC"
 R="$T56_STK/lnk/fn-root"; pin_call "$SEAM" "$R"
 expect_eq "7.40d control: the shipped function builds under that same root" "0" "$PIN_RC"
+
+# EVERY DIRECTORY ON THE PARENT'S PATH IS JUDGED, AND AN ACL COUNTS AS OPEN (wave-28 T57; AC-10.6; pass 29).
+# T56 judged a component's holder only when the component was a link: `TMPDIR=<0777>/sub` with `sub`
+# at 0700 still built a pin, and `sub` can be renamed away mid-run. And "open" was read from the mode
+# string alone, so a macOS ACL letting everyone add and delete entries in a 0700 parent passed, and the
+# root and pin the function makes inherited it. Mutants first (their anchors, then the rows that use them).
+T57_MUT1="$TMPROOT/t57-mut-ancestor.sh"
+anchor -E "$SEAM" '^    cur="\$cur/\$part"$' 1
+awk '{print} $0 == "    cur=\"$cur/$part\"" {print "    [ -L \"$cur\" ] || continue"}' "$SEAM" > "$T57_MUT1"
+T57_MUT2="$TMPROOT/t57-mut-acl.sh"
+anchor "$SEAM" '  _bionic_pin_acl "$1" "$out"' 1
+grep -vF '  _bionic_pin_acl "$1" "$out"' "$SEAM" > "$T57_MUT2"
+# t57_line <tmpdir> <why> <remedy> — the hand run's one stderr line, as the seam prints it
+t57_line() { printf 'resolve-roots.sh: no interpreter pin at %s — %s; %s, then run again' \
+  "$1/bionic-interpreter-pin.$STOP_UID" "$2" "$3"; }
+T57_FIX="set TMPDIR to a directory only you can write"
+# Case A: a closed leaf inside an open, non-sticky directory, no link anywhere.
+T57_OPEN="$T87_DIR/t57-open"; mkdir -p "$T57_OPEN/sub"; chmod 0700 "$T57_OPEN/sub"; chmod 0777 "$T57_OPEN"
+T57_SUB="$T57_OPEN/sub"
+stop_run "$STOP_SUITE" "$T57_SUB"
+expect_eq "7.41 a temp directory that is closed but sits in an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
+expect_absent "7.41b …and runs no check" "check ran" "$STOP_LOG"
+expect_contains "7.41c …naming the open ancestor, and the remedy that helps" \
+  "$(t57_line "$T57_SUB" "$T57_OPEN is writable by group or others and has no sticky bit" "$T57_FIX")" "$STOP_ERR"
+expect_eq "7.41d …and builds nothing there" "absent" "$(there "$T57_SUB/bionic-interpreter-pin.$STOP_UID")"
+R="$T57_SUB/fn-root"; pin_call "$SEAM" "$R"
+expect_ne "7.41e the function refuses a root under that path (non-zero)" "0" "$PIN_RC"
+expect_eq "7.41f …PATH is as given" "$PIN_GIVEN" "$PIN_PATH"
+expect_contains "7.41g …naming the ancestor" "$T57_OPEN is writable by group or others and has no sticky bit" "$PIN_ERR"
+# Case A2: the open directory is three levels above the parent.
+T57_OPEN2="$T87_DIR/t57-open2"; mkdir -p "$T57_OPEN2/s1/s2/s3"; chmod 0777 "$T57_OPEN2"
+chmod 0700 "$T57_OPEN2/s1" "$T57_OPEN2/s1/s2" "$T57_OPEN2/s1/s2/s3"
+stop_run "$STOP_SUITE" "$T57_OPEN2/s1/s2/s3"
+expect_eq "7.42 the same, three levels above the temp directory: exits 2" "2" "$STOP_RC"
+expect_contains "7.42b …naming the open directory" \
+  "$(t57_line "$T57_OPEN2/s1/s2/s3" "$T57_OPEN2 is writable by group or others and has no sticky bit" "$T57_FIX")" "$STOP_ERR"
+# The same shape with the sticky bit builds (a shared /tmp over a private directory).
+T57_STK="$T87_DIR/t57-sticky"; mkdir -p "$T57_STK/sub"; chmod 0700 "$T57_STK/sub"; chmod 1777 "$T57_STK"
+stop_run "$STOP_SUITE" "$T57_STK/sub"
+expect_eq "7.43 a closed temp directory in an open directory WITH the sticky bit builds its pin" "0" "$STOP_RC"
+expect_eq "7.43b …in that directory" "/bin/bash" \
+  "$(readlink "$T57_STK/sub/bionic-interpreter-pin.$STOP_UID/pin/bash" 2>/dev/null)"
+R="$T57_STK/sub/mut-root"; pin_call "$T56_MUT2" "$R"
+expect_ne "7.43c under the no-sticky mutant the sticky ancestor is refused (the row 7.43 guards)" "0" "$PIN_RC"
+# The mutant for this half: the link-only short-circuit restored.
+expect_eq "7.44 the no-ancestor mutant parses" "0" "$(bash -n "$T57_MUT1" >/dev/null 2>&1; echo $?)"
+R="$T57_STK/sub/mut-ok-root"; pin_call "$T57_MUT1" "$R"
+expect_eq "7.44b …and builds under a sticky ancestor (not vacuous)" "0" "$PIN_RC"
+R="$T57_SUB/mut-root"; pin_call "$T57_MUT1" "$R"
+expect_eq "7.44c under the no-ancestor mutant the open ancestor is accepted (the defect 7.41 guards)" "0" "$PIN_RC"
+expect_eq "7.44d …and the pin is built there" "present" "$(there "$R/pin")"
+R="$T57_SUB/fn-root2"; pin_call "$SEAM" "$R"
+expect_ne "7.44e control: the shipped function refuses that same path" "0" "$PIN_RC"
+# The ACL reader, on macOS. The rows skip with their reason where `chmod +a` is not there.
+T57_ACLP="$T87_DIR/t57-aclprobe"; mkdir -p "$T57_ACLP"; chmod 0700 "$T57_ACLP"
+T57_ACL=0
+if chmod +a "everyone allow add_file,add_subdirectory,delete_child" "$T57_ACLP" 2>/dev/null \
+   && [ "$(ls -lde "$T57_ACLP" 2>/dev/null | grep -c 'group:everyone allow add_file,add_subdirectory,delete_child')" = 1 ]; then
+  T57_ACL=1
+fi
+if [ "$T57_ACL" = 1 ]; then
+  T57_WHY_ACL="$T57_ACLP carries an ACL letting group:everyone add_file,add_subdirectory,delete_child"
+  stop_run "$STOP_SUITE" "$T57_ACLP"
+  expect_eq "7.45 a 0700 temp directory whose ACL lets everyone add and delete entries: the hand run exits 2" "2" "$STOP_RC"
+  expect_absent "7.45b …and runs no check" "check ran" "$STOP_LOG"
+  expect_contains "7.45c …naming the entry" "$(t57_line "$T57_ACLP" "$T57_WHY_ACL" "$T57_FIX")" "$STOP_ERR"
+  expect_eq "7.45d …and builds nothing there" "absent" "$(there "$T57_ACLP/bionic-interpreter-pin.$STOP_UID")"
+  # The same entry on an ancestor of a closed temp directory.
+  mkdir -p "$T57_ACLP/up/sub"; chmod 0700 "$T57_ACLP/up" "$T57_ACLP/up/sub"; chmod -N "$T57_ACLP"
+  chmod +a "everyone allow add_file,add_subdirectory,delete_child" "$T57_ACLP/up"
+  stop_run "$STOP_SUITE" "$T57_ACLP/up/sub"
+  expect_eq "7.45e the entry on an ancestor of the temp directory: exits 2" "2" "$STOP_RC"
+  expect_contains "7.45f …naming the ancestor" \
+    "$(t57_line "$T57_ACLP/up/sub" "$T57_ACLP/up carries an ACL letting group:everyone add_file,add_subdirectory,delete_child" "$T57_FIX")" "$STOP_ERR"
+  R="$T57_ACLP/up/sub/mut-root"; pin_call "$T57_MUT2" "$R"
+  expect_eq "7.45g under the no-ACL mutant the entry is accepted (the defect 7.45 guards)" "0" "$PIN_RC"
+  expect_eq "7.45h …and the pin is built there" "present" "$(there "$R/pin")"
+  R="$T57_ACLP/up/sub/fn-root"; pin_call "$SEAM" "$R"
+  expect_ne "7.45i control: the shipped function refuses that same path" "0" "$PIN_RC"
+  chmod -N "$T57_ACLP/up"
+  # Entries that grant no one else the power to replace anything build: a deny, a read, the owner's own.
+  T57_NO1="$T87_DIR/t57-acl-deny"; mkdir -p "$T57_NO1"; chmod 0700 "$T57_NO1"; chmod +a "everyone deny add_file,delete_child" "$T57_NO1"
+  stop_run "$STOP_SUITE" "$T57_NO1"
+  expect_eq "7.46 a 0700 temp directory whose ACL only DENIES builds its pin" "0" "$STOP_RC"
+  chmod -N "$T57_NO1"
+  T57_NO2="$T87_DIR/t57-acl-read"; mkdir -p "$T57_NO2"; chmod 0700 "$T57_NO2"; chmod +a "everyone allow read" "$T57_NO2"
+  expect_eq "7.46b the ACL extractor reads the read-only entry" "1" "$(ls -lde "$T57_NO2" | grep -c 'group:everyone allow list')"
+  stop_run "$STOP_SUITE" "$T57_NO2"
+  expect_eq "7.46c …a read-only entry for everyone builds its pin" "0" "$STOP_RC"
+  chmod -N "$T57_NO2"
+  T57_NO3="$T87_DIR/t57-acl-owner"; mkdir -p "$T57_NO3"; chmod 0700 "$T57_NO3"
+  chmod +a "$(id -un) allow add_file,add_subdirectory,delete_child" "$T57_NO3"
+  expect_eq "7.46d the ACL extractor reads the owner's entry" "1" "$(ls -lde "$T57_NO3" | grep -c "user:$(id -un) allow add_file")"
+  stop_run "$STOP_SUITE" "$T57_NO3"
+  expect_eq "7.46e …an entry for the owner alone builds its pin" "0" "$STOP_RC"
+  chmod -N "$T57_NO3"
+  # An inheritable entry that does not apply to the parent itself: the root the function makes inherits it.
+  T57_INH="$T87_DIR/t57-acl-inherit"; mkdir -p "$T57_INH"; chmod 0700 "$T57_INH"
+  chmod +a "everyone allow add_file,add_subdirectory,delete_child,file_inherit,directory_inherit,only_inherit" "$T57_INH"
+  T57_INH_ROOT="$T57_INH/bionic-interpreter-pin.$STOP_UID"
+  stop_run "$STOP_SUITE" "$T57_INH"
+  expect_eq "7.47 an inheritable entry on a 0700 temp directory: the made root inherits it, the hand run exits 2" "2" "$STOP_RC"
+  expect_contains "7.47b …naming the root and the entry, with the root's own remedy" \
+    "resolve-roots.sh: no interpreter pin at $T57_INH_ROOT — $T57_INH_ROOT carries an ACL letting group:everyone add_file,add_subdirectory,delete_child; remove $T57_INH_ROOT or set TMPDIR, then run again" \
+    "$STOP_ERR"
+  expect_eq "7.47c …and the root it made is removed" "absent" "$(there "$T57_INH_ROOT")"
+  R="$T57_INH/fn-root"; pin_call "$SEAM" "$R"
+  expect_ne "7.47d the function refuses it too" "0" "$PIN_RC"
+  expect_eq "7.47e …PATH is as given" "$PIN_GIVEN" "$PIN_PATH"
+  expect_eq "7.47f …and removes the root it made" "absent" "$(there "$R")"
+  R="$T57_INH/mut-root"; pin_call "$T57_MUT2" "$R"
+  expect_eq "7.47g under the no-ACL mutant the inheriting root is accepted (the defect 7.47 guards)" "0" "$PIN_RC"
+  expect_eq "7.47h …and stays, with its pin" "present" "$(there "$R/pin")"
+  chmod -N "$T57_INH" "$R" "$R/pin" 2>/dev/null
+else
+  skip "7.45 the ACL reader (macOS: a 0700 directory whose ACL lets everyone add and delete entries)" \
+    "chmod +a is not available on this host, or ls -lde does not list the entry it made"
+  skip "7.47 an inheritable ACL entry on the temp directory: the made root is refused and removed" \
+    "chmod +a is not available on this host"
+fi
+chmod -N "$T57_ACLP" 2>/dev/null
+# The reader for a host with getfacl (Linux), driven by a stub that answers for one directory only.
+T57_STUB="$TMPROOT/t57-stub"; mkdir -p "$T57_STUB"
+cat > "$T57_STUB/getfacl" <<'STUB'
+#!/bin/sh
+for d; do :; done
+case "$d" in
+  */t57-lx) cat "$T57_GETFACL_OUT" ;;
+  *) printf 'user::rwx\ngroup::r-x\nother::r-x\n' ;;
+esac
+STUB
+chmod +x "$T57_STUB/getfacl"
+T57_LX="$T87_DIR/t57-lx"; mkdir -p "$T57_LX"; chmod 0700 "$T57_LX"
+T57_GETFACL_OUT="$TMPROOT/t57-getfacl.out"; export T57_GETFACL_OUT
+t57_lx() {  # t57_lx <seam> <root-name> <acl text> — pin_call with the stub's answer for the parent
+  printf '%b' "$3" > "$T57_GETFACL_OUT"
+  PIN_GIVEN="$T57_STUB:$HAND_GIVEN_PATH"; pin_call "$1" "$T57_LX/$2"; PIN_GIVEN="$HAND_GIVEN_PATH"
+}
+t57_lx "$SEAM" lx-plain '# file: x\nuser::rwx\ngroup::---\nother::---\n'
+expect_eq "7.48 getfacl lists only the owner's and the base entries: the pin is built" "0" "$PIN_RC"
+expect_eq "7.48b …and is there" "present" "$(there "$T57_LX/lx-plain/pin")"
+t57_lx "$SEAM" lx-named 'user::rwx\nuser:mallory:rw-\ngroup::---\nmask::rw-\nother::---\n'
+expect_ne "7.48c a named user with w: the function refuses (non-zero)" "0" "$PIN_RC"
+expect_contains "7.48d …naming the entry" "$T57_LX carries an ACL letting user:mallory write" "$PIN_ERR"
+t57_lx "$SEAM" lx-group 'user::rwx\ngroup:wheel:-w-\nmask::rwx\nother::---\n'
+expect_contains "7.48e a named group with w: refused, naming it" "$T57_LX carries an ACL letting group:wheel write" "$PIN_ERR"
+t57_lx "$SEAM" lx-masked 'user::rwx\nuser:mallory:rwx\t#effective:r--\ngroup::---\nmask::r--\nother::---\n'
+expect_eq "7.48f a named user whose effective rights lack w: the pin is built" "0" "$PIN_RC"
+t57_lx "$SEAM" lx-default 'user::rwx\ngroup::---\nother::---\ndefault:user:mallory:rwx\n'
+expect_eq "7.48g a default entry (it applies to what is made inside, not to the directory): the pin is built" "0" "$PIN_RC"
+expect_eq "7.48h …and is there" "present" "$(there "$T57_LX/lx-default/pin")"
+t57_lx "$T57_MUT2" lx-mut 'user::rwx\nuser:mallory:rw-\ngroup::---\nmask::rw-\nother::---\n'
+expect_eq "7.48i under the no-ACL mutant the named user is accepted (the defect 7.48c guards)" "0" "$PIN_RC"
+expect_eq "7.48j …and the pin is built there" "present" "$(there "$T57_LX/lx-mut/pin")"
 
 # THE MUTANTS. (1) The hand path's refusal turned back into `|| :`: the refused run goes on and
 # runs its check. (2) The parent check removed: the open parent is accepted. Each mutant is proved
