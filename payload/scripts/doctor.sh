@@ -281,6 +281,10 @@ done
 . "${DOCTOR_LIB}/run.sh"
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/resources.sh"
+# THE GATE (wave-28 T13; D14): RESOURCES reports the machine's share and the gate's state. Sourced
+# softly, so a payload without it still diagnoses everything else.
+# shellcheck source=/dev/null
+[ -r "${DOCTOR_LIB}/gate.sh" ] && . "${DOCTOR_LIB}/gate.sh"
 # checks.sh, THE TABLE OF CHECKS — one row per fact bionic needs true on a
 # machine, and for each row the label this page prints, the party that repairs it
 # and the hint that names that party. setup.sh renders its roster from the same
@@ -1896,6 +1900,27 @@ if [ -n "$_doctor_probe_line" ]; then
     "$(_p_get cores) cores · $(_p_get mem_gb) GB · $(_p_get disk_free_gb) GB free · load $(_p_get load_1m) · $(_p_get os)")"
 else
   _res_add "$(_doctor_item "$DOCTOR_NIL" "machine" "unknown — the resources probe did not answer")"
+fi
+
+# THE SHARE AND THE GATE (wave-28 T13; D14, D16). The share is the one number a person sets for
+# this machine; the gate line is what it holds now. A store nothing has asked yet is not made
+# here — doctor creates nothing — so the line says so instead of reading it.
+if declare -F gate_share >/dev/null 2>&1; then
+  _g_share="$(gate_share)"
+  if [ -r "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share" ]; then _g_from="set in bionic/share"
+  else _g_from="the default; no share file"; fi
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "share" "${_g_share}% of this machine (${_g_from})")"
+  if [ -d "$(gate_dir)/requests" ]; then
+    _g_st="$(gate_state 2>/dev/null)"
+    _g_f() { printf '%s' "$_g_st" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
+    if [ -n "$_g_st" ]; then
+      _res_add "$(_doctor_item "$DOCTOR_NIL" "gate" "used $(_g_f used)% · admitted $(_g_f admitted) · waiting $(_g_f waiting) · load $(_g_f load) · promised $(_g_f promised)")"
+    else
+      _res_add "$(_doctor_item "$DOCTOR_NIL" "gate" "unreadable — its lock could not be had")"
+    fi
+  else
+    _res_add "$(_doctor_item "$DOCTOR_NIL" "gate" "no store yet — nothing has asked the gate")"
+  fi
 fi
 
 # THE SET IS THE FILES IN THIS PROJECT, NOT THE MACHINE'S LIVE SESSIONS
