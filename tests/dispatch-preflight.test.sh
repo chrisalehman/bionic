@@ -6475,10 +6475,11 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # variable part is one extra fault plus two not-checked lines; the fixed part is unmoved.
 # RAISED 17 -> 18 (wave-27 T17, D5): the scaffold gained the readers' `Questions:` line; the FIXED part is fifteen, ELEVEN scaffold lines.
 # RAISED 18 -> 20 (wave-27 T31, D23): the scaffold gained `Lands-red:` and `Red-evidence:`; the FIXED part is seventeen, THIRTEEN scaffold lines.
-expect_eq "§combined meta: the shipped scaffold is thirteen lines, the count both caps are built on" \
-  "13" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 20 lines (17 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 20 ] && echo 0 || echo 1)"
+# RAISED 20 -> 22 (wave-28 T58, repairing the pin after T7/T22): the scaffold gained `Row:` and `Lands-on:`; the FIXED part is nineteen, FIFTEEN scaffold lines.
+expect_eq "§combined meta: the shipped scaffold is fifteen lines, the count both caps are built on" \
+  "15" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 22 lines (19 + 1 extra fault + 2 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 22 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE FULL-RUN WALL'S LINE IS NAMED — a cap without saying which line fills it is a
@@ -7462,8 +7463,9 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
 # The fixed part is FOURTEEN since wave-24 T9 (AC-4.8): the scaffold's tenth line is the
 # optional `Done marker:` (§combined holds the ten). Three faults: fourteen plus two.
-expect_status "§three-arms …and the wire is at most 19 lines (17 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 19 ] && echo 0 || echo 1)"
+# The fixed part is NINETEEN since wave-28 T7/T22 (the scaffold's `Row:` and `Lands-on:`); the cap follows (wave-28 T58).
+expect_status "§three-arms …and the wire is at most 21 lines (19 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 21 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
 # MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is
@@ -9035,7 +9037,13 @@ expect_contains "§scaffold-walk precondition: …and Files: lists the record" "
 expect_absent "§scaffold-walk precondition: …and no placeholder is left" "<" "$WALK_ER"
 WALK_ERB="$(walk_fill_re evidence "$WALK_REC/T3-evidence.md" B)"
 expect_contains "§scaffold-walk precondition: shape B carries the same run" "Re-executes: \`$WALK_RUN\`" "$WALK_ERB"
-expect_absent "§scaffold-walk precondition: …and no Suites: line" "Suites:" "$WALK_ERB"
+# NO `Suites:` LINE means no line that BEGINS with the label: the scaffold's `Lands-on:` comment names the
+# word ("within Suites:") since wave-28 T7, so a substring read is red on a brief that has no such line
+# (wave-28 T58). The positive beside it: shape A, on the same reader, has exactly one.
+expect_eq "§scaffold-walk precondition: …shape A, read by the same line reader, carries one Suites: line" "1" \
+  "$(printf '%s\n' "$WALK_ER" | /usr/bin/grep -c '^Suites:')"
+expect_eq "§scaffold-walk precondition: …and shape B carries no line that begins Suites:" "0" \
+  "$(printf '%s\n' "$WALK_ERB" | /usr/bin/grep -c '^Suites:')"
 REPO=$(walk_repo rwalk5 audited)
 expect_nonempty "§scaffold-walk precondition: the walk repo's .bionic holds its bound plan" \
   "$(/usr/bin/grep -rls '^rigor: audited' "$REPO/.bionic")"
