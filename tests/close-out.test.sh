@@ -1684,8 +1684,10 @@ PC="$(mk_fixture carry1)"; advance_to "$PC" 8
 carry_plant "$PC" \
   "deferred: $CARRY_REC#2 S3 on \"second, written first\" stated=\"The second sentence.\"" \
   "deferred: $CARRY_REC#1 S2 off \"first, unstated\"" \
-  "check: $CARRY_REC#4 S1 off \"a check owed, not a deferral\"" \
+  "check: $CARRY_REC#4 S1 off \"a settled check, not a deferral\" settled=S2:off by=record/wave-01-fixture/chk.md" \
   "deferred: $CARRY_REC#3 S2 off \"third, quoted\" stated=\"$CARRY_Q1\""
+# The check: line is SETTLED (wave-28 T14, ruling A-orch-165): since T41 an open check holds the step, so
+# the fixture settles it, in finding-check's form, at a rating the table defers (S2 off).
 expect_eq "CARRY-0 precondition: the plan carries three deferred: lines and one check: line inside its SDLC State" "3 1" \
   "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ d++ } s && /^check: /{ c++ } END { print d + 0, c + 0 }' "$PC/$PLAN_REL")"
 run_close "$PC" run
