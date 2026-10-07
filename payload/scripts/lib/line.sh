@@ -944,13 +944,17 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
   id="$(gate_ask landing "$1" ${2:+--within "$2"})"; rc=$?
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\n' "$id" > "$5"
-  ( [ -e "$3/.git" ] && cd "$3" && exec bash "tests/$1" ) > "$4" 2>&1 < /dev/null &
-  p=$!
-  while kill -0 "$p" 2>/dev/null; do
-    kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }
-    sleep "$LINE_POLL"; gate_state >/dev/null 2>&1
-  done
-  wait "$p" 2>/dev/null; rc=$?   # a suite ended by a signal is a `none` verdict, not a line on the carrier's output
-  gate_end "$id" "$rc" >/dev/null 2>&1
+  # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended
+  # by a signal is a `none` verdict, and the shell's notice of the kill is no line of ready's output.
+  {
+    ( [ -e "$3/.git" ] && cd "$3" && exec bash "tests/$1" ) > "$4" 2>&1 < /dev/null &
+    p=$!
+    while kill -0 "$p" 2>/dev/null; do
+      kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }
+      sleep "$LINE_POLL"; gate_state >/dev/null 2>&1
+    done
+    wait "$p"; rc=$?
+    gate_end "$id" "$rc" >/dev/null 2>&1
+  } 2>/dev/null
   printf 'rc=%s\n' "$rc" >> "$5"
 }
