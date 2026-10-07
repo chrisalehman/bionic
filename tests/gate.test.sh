@@ -962,6 +962,17 @@ state > "$D/op-state"
 expect_contains "OP.3 the scan tallies the same two: one admitted, one waiting" "admitted=1 waiting=1 " "$(cat "$D/op-state")"
 expect_eq "OP.4 …and wrote the sixth's end (rc 137) while it was at it" "137" "$(field 6 rc)"
 
+# The pre-filter in gate_asked reads the LAST ended= line, as _gate_read does: a later empty
+# ended= takes the end back, so a request the rule calls open is named, not skipped.
+fresh open-reread
+world_machine 8 8192 30 1.0
+world_clock 100000
+plant_live 1 "op:w1" 99000
+printf 'ended=5\nended=\n' >> "$BIONIC_GATE_DIR/requests/1"
+expect_eq "OP.4b a later empty ended= line leaves the request open: the list calls it waiting (positive)" "1 waiting" \
+  "$(glist | awk '{ printf "%s %s", $1, $2 }')"
+expect_eq "OP.4c …and gate_asked, reading the last ended= as the rule does, names it" "op:w1 |0" "$(ga op:w1)"
+
 # A request nobody holds is not showing, and goes after BIONIC_GATE_KEEP like an ended one.
 fresh open-gone
 world_machine 8 8192 30 1.0
