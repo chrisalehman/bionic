@@ -282,6 +282,12 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    does not complete a sample), no line is for a question its sample's key does not name,
    every `result` line reads `met`, no two lines for one sample and question disagree, and
    every reached result is one its sample's key admits.
+   **A sitting whose checks files changed since** is marked, below its last line, by one line:
+   `stale: checks-<q> <old>… → <new>…[, …] (<the rows that changed them>); re-sit owed: <row>`, the
+   first eight or more hex digits of the hash the sitting read and of the one that ships, for every
+   checks file whose digest differs. The suite then passes the pin as history (its `result`
+   lines are not read, a retired sample's among them) and stays red on a differing file the line
+   does not name, or names with other hashes; the next sitting, appended below, replaces the mark.
 8. **A miss is sent back.** A reader that misses a sample sends its checks file to a fix row.
    The sitting is recorded as it went, so the suite is red from then until the fixed file is
    sat again and that sitting is appended below it.
