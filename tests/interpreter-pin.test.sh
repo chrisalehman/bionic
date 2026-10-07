@@ -676,7 +676,7 @@ stop_run "$STOP_SUITE" "$T36_OPEN"
 expect_eq "7.25 a temp directory others can write, with no sticky bit: the hand run exits 2" "2" "$STOP_RC"
 expect_absent "7.25b …and runs no check" "check ran" "$STOP_LOG"
 expect_contains "7.25c …naming the open parent" \
-  "resolve-roots.sh: no interpreter pin at $T36_OPEN_ROOT — $T36_OPEN is writable by group or others and has no sticky bit; set TMPDIR to a directory only you can write, then run again" \
+  "resolve-roots.sh: no interpreter pin at $T36_OPEN_ROOT — $T36_OPEN is writable by group or others and has no sticky bit; set TMPDIR to an absolute directory only you can write, then run again" \
   "$STOP_ERR"
 expect_eq "7.25d …and builds nothing there" "absent" "$(there "$T36_OPEN_ROOT")"
 T36_GRP="$T87_DIR/t36-group"; mkdir -p "$T36_GRP"; chmod 0770 "$T36_GRP"
@@ -707,7 +707,7 @@ stop_run "$STOP_SUITE" "$T36_LNK_OPEN"
 expect_eq "7.31 a temp directory that is a link to an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
 expect_absent "7.31b …and runs no check" "check ran" "$STOP_LOG"
 expect_contains "7.31c …naming the link as the open parent, with the pin's existing line" \
-  "resolve-roots.sh: no interpreter pin at $T36_LNK_OPEN_ROOT — $T36_LNK_OPEN is writable by group or others and has no sticky bit; set TMPDIR to a directory only you can write, then run again" \
+  "resolve-roots.sh: no interpreter pin at $T36_LNK_OPEN_ROOT — $T36_LNK_OPEN is writable by group or others and has no sticky bit; set TMPDIR to an absolute directory only you can write, then run again" \
   "$STOP_ERR"
 expect_eq "7.31d …and builds nothing in the directory it leads to" "absent" "$(there "$T36_OPEN/bionic-interpreter-pin.$STOP_UID")"
 T36_LNK_OK="$T87_DIR/t36-lnk-ok"; ln -s "$T36_OK" "$T36_LNK_OK"
@@ -745,7 +745,7 @@ stop_run "$STOP_SUITE" "$T56_HOLD/lnk"
 expect_eq "7.34 a temp directory that is a link held in an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
 expect_absent "7.34b …and runs no check" "check ran" "$STOP_LOG"
 expect_contains "7.34c …naming the link and the directory that holds it, with the pin's existing line" \
-  "resolve-roots.sh: no interpreter pin at $T56_ROOT — $T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable by group or others and has no sticky bit; set TMPDIR to a directory only you can write, then run again" \
+  "resolve-roots.sh: no interpreter pin at $T56_ROOT — $T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable by group or others and has no sticky bit; set TMPDIR to an absolute directory only you can write, then run again" \
   "$STOP_ERR"
 expect_eq "7.34d …and builds nothing in the directory it leads to" "absent" "$(there "$T56_TGT/bionic-interpreter-pin.$STOP_UID")"
 T56_STK="$T87_DIR/t56-hold-sticky"; mkdir -p "$T56_STK"; chmod 1777 "$T56_STK"
@@ -1581,7 +1581,7 @@ t69_hooks() {
 printf 'hooks=%s\n' "$(printf %s "$BIONIC_HOOKS_DIR" | tr '\n' '~')" >> "$STOP_OUT"
 SUITE
   cd "$w" || return 1
-  CDPATH="${3:-}" stop_run tests/x.test.sh "$T69_DIR/repo-tmp"
+  BIONIC_HOOKS_DIR="" CDPATH="${3:-}" stop_run tests/x.test.sh "$T69_DIR/repo-tmp"
   cd "$here" || return 1
   T69_HOOKS="$(printf '%s\n' "$STOP_LOG" | sed -n 's/^hooks=//p')"
 }
