@@ -88,7 +88,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh; do
+for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh proof.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -106,6 +106,8 @@ done
 . "${CO_LIB}/patrol.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/units.sh"
+# shellcheck source=/dev/null
+. "${CO_LIB}/proof.sh"
 
 # CO_SID -> this script's own identity, read from the ambient environment BEFORE
 # anything below ever touches CLAUDE_CODE_SESSION_ID (`gate_ask`'s one
@@ -541,6 +543,44 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 # knew those answers, and the second run of a close-out is exactly when that edit would be
 # destroyed.
 CONT_LINE=""
+
+# THE DEFERRALS THE CONTINUATION CARRIES (wave-28 T17; D21, AC-8.7). One line per open deferral, in
+# the order the plan wrote them, in the one form the next wave's Step 1 card reads:
+#
+#     deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>
+#
+# OPEN is what lib/proof.sh `proof_findings_owed` says: a finding with a `deferred:` line whose
+# effective priority is `defer`, rated through the one place the effective rating is applied. A
+# `check:` line alone is a check owed, not a deferral. The sentence is the plan line's ` stated="..."`
+# field copied as it stands (a `\` or a `"` in it is already written `\\` or `\"`), `-` when the
+# line has none; a deferral is carried whether or not it is stated. The reader of the line is
+# `deferral_line`'s twin in hooks/session-poker.sh, which reads the same line to print `stated` or
+# `unstated` at the release check.
+co_deferral_line() {  # <record>#<n> -> the first deferred: line of ## SDLC State naming it
+  awk -v id="$1" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
+    END { if (found) print line; exit (found ? 0 : 1) }' "$PLAN"
+}
+co_deferrals() {  # -> the lines, or nothing
+  local id s r p t l st
+  proof_findings_owed "$PLAN" 2>/dev/null | while read -r id s r p t; do
+    [ "$p" = defer ] || continue
+    l="$(co_deferral_line "$id")" || continue
+    st="$(printf '%s\n' "$l" | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p')"
+    printf 'deferred: %s %s %s %s stated="%s" from=%s\n' "$id" "$s" "$r" "$t" "${st:--}" "$WAVE_SLUG"
+  done
+}
+# co_deferrals_section -> the heading and its lines, written whether or not there is anything under it
+co_deferrals_section() {
+  local lines
+  lines="$(co_deferrals)"
+  printf '## Deferrals\n'
+  [ -z "$lines" ] || printf '\n%s\n' "$lines"
+}
+
 continuation_template() {
   local sha
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
@@ -563,6 +603,8 @@ Closed $NOW. $INTEGRATION at ${sha:-<fill: SHA>}. Wave branch \`$WORKING\` merge
 
 <fill: carry-overs from this wave>
 
+$(co_deferrals_section)
+
 ## Resume instruction
 
 Nothing to resume: the run is delivered. <fill: Patrol job id> deleted and the stamp
@@ -573,6 +615,14 @@ CONT_TEMPLATE
 
 act_continuation() {
   if [ -f "$CONT" ]; then
+    # A CONTINUATION WRITTEN BEFORE THIS CLOSE-OUT KEEPS EVERY BYTE IT HAS; the deferrals the plan
+    # owes are appended under their heading when it carries none, so the debt is never dropped.
+    if ! /usr/bin/grep -q '^## Deferrals$' "$CONT" 2>/dev/null; then
+      { printf '\n'; co_deferrals_section; } >> "$CONT" 2>/dev/null \
+        || _co_refuse "could not append the deferrals to the continuation at $CONT"
+      CONT_LINE="$CONT_REL already written — left as it stands, with the ## Deferrals section appended"
+      return 0
+    fi
     CONT_LINE="$CONT_REL already written — left as it stands"
     return 0
   fi
