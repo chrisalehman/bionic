@@ -623,7 +623,7 @@ expect_contains "B9a …saying the name could not be resolved at hook time" \
 # The sentence and its line shape are the ones tests/bash-walls.test.sh 15b5b pins on the same
 # reassigning fixture (wave-24 T28, A-T28.7): one wording, owned by walls.sh's unexpanded arm.
 expect_contains "B9a …and telling the reader what to type instead: literal lines, one call each" \
-  "Write the literal lines you mean, one call each: bash tests/<name>.test.sh" "$VERR"
+  "Write the literal names you mean, through the one door: tests/run.sh --only <name>.test.sh" "$VERR"
 # THE HEADLINE THE READER ACTS ON must not claim the suite is off a budget the hook never
 # managed to check it against.
 expect_absent "B9a …never claiming it is off the budget" "is not on this agent's suite budget" "$ERR"
@@ -633,7 +633,7 @@ guarded "$R1" 'tests/run.sh --only "${s}.test.sh"'
 expect_eq "B9b the brace spelling reads the same way" "2" "$ST"
 expect_contains "B9b …with the same refusal" \
   "unexpanded name; allowed: alpha.test.sh" "$ERR"
-guarded "$R1" 'bash tests/`suite_name`.test.sh'
+guarded "$R1" 'tests/run.sh --only `suite_name`.test.sh'
 expect_eq "B9c a command substitution reads the same way" "2" "$ST"
 expect_contains "B9c …with the same refusal" \
   "unexpanded name; allowed: alpha.test.sh" "$ERR"
@@ -842,15 +842,15 @@ guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B12c a plain foreground suite is ALLOWED" "0" "$ST"
 expect_empty "B12c …silently" "$OUT$ERR"
 
-guarded "$R1" 'bash tests/alpha.test.sh > /tmp/bg-log 2>&1; echo rc=$?'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh > /tmp/bg-log 2>&1; echo rc=$?'
 expect_eq "B12d a redirected foreground suite (2>&1, no trailing &) is ALLOWED" "0" "$ST"
 expect_empty "B12d …silently" "$OUT$ERR"
 
-guarded "$R1" 'bash tests/alpha.test.sh && echo done'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh && echo done'
 expect_eq "B12e a suite followed by && is ALLOWED" "0" "$ST"
 expect_empty "B12e …silently" "$OUT$ERR"
 
-guarded "$R1" 'bash tests/alpha.test.sh --note "a & b"'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh --note "a & b"'
 expect_eq "B12f a & INSIDE QUOTES is not read as backgrounding" "0" "$ST"
 expect_empty "B12f …silently" "$OUT$ERR"
 
@@ -1069,7 +1069,7 @@ expect_contains "B14f …naming it" "gamma.test.sh" "$VERR"
 guarded "$R1" 'X=gamma.test.sh; bash tests/$X'
 expect_eq "B14g an off-budget suite held whole in a variable is REFUSED" "2" "$ST"
 expect_contains "B14g …naming it, resolved" "gamma.test.sh" "$VERR"
-guarded "$R1" 'X=alpha.test.sh; bash tests/$X'
+guarded "$R1" 'X=alpha.test.sh; tests/run.sh --only $X'
 expect_eq "B14h control: the same shape holding an on-budget suite is ALLOWED" "0" "$ST"
 expect_empty "B14h …silently" "$OUT$ERR"
 
@@ -1081,7 +1081,7 @@ section "B15 — wave-25 T12: a command NAME is read the way the machine resolve
 # class none, so an off-budget suite passed this arm in silence. R1's row is the budget.
 guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B15a control: an on-budget suite is allowed" "0" "$ST"
-guarded "$R1" 'BASH tests/alpha.test.sh'
+guarded "$R1" 'BASH tests/run.sh --only alpha.test.sh'
 expect_eq "B15a …and so is its capitalised form" "0" "$ST"
 for sp in 'BASH tests/gamma.test.sh' 'SUDO bash tests/gamma.test.sh' 'Bash -c "bash tests/gamma.test.sh"' \
           'ENV PIN=1 Bash tests/gamma.test.sh' 'cd /tmp && BASH tests/gamma.test.sh'; do
@@ -1137,10 +1137,12 @@ printf '#!/bin/bash\necho t\n' > "$RW/tests/t.test.sh"
 printf '#!/bin/bash\n# a timing suite\n# runner: solo\necho solo\n' > "$RW/tests/solo.test.sh"
 
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
-guarded "$RW" 'bash tests/t.test.sh'
+# An agent runs a suite through the one door (wave-28 T36; D27): its wrap names the suite and
+# tells the shim it is the runner (--runner), so the runner's own suites ask the gate.
+guarded "$RW" 'tests/run.sh --only t.test.sh'
 expect_eq "W1a an armed agent's on-budget suite is allowed" "0" "$ST"
 expect_eq "W1b …and comes back as the shim around the original, under the harness's shell" \
-  "bash $SHIM --shell $WSH --agent w-wrap $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH --agent w-wrap $(mw) --suites t.test.sh --runner -- 'tests/run.sh --only t.test.sh'" "$WRAP"
 expect_empty "W1c …with nothing said on stderr" "$ERR"
 # THE GATE'S WHO (wave-28 T12; T2's A-T2.6). A shell does not know which agent it runs for, so
 # the wall, which reads the agent's roster row, hands the shim `--agent <roster name>`; the shim
@@ -1182,8 +1184,8 @@ for sp in "bash $SHIM -- 'bash tests/t.test.sh'" \
 done
 # BIONIC_SLOT_HELD=1 IS NO OPT-OUT ANY MORE (wave-28 T12; D13): a suite segment carrying it in its
 # own prefix is wrapped like any other, so it asks the gate.
-for sp in 'BIONIC_SLOT_HELD=1 bash tests/t.test.sh' \
-          'cd . && BIONIC_SLOT_HELD=1 bash tests/t.test.sh 2>&1 | tee /tmp/w.log'; do
+for sp in 'BIONIC_SLOT_HELD=1 tests/run.sh --only t.test.sh' \
+          'cd . && BIONIC_SLOT_HELD=1 tests/run.sh --only t.test.sh 2>&1 | tee /tmp/w.log'; do
   guarded "$RW" "$sp"
   expect_eq "W4f [$sp] is allowed" "0" "$ST"
   expect_contains "W4f …and wrapped in the shim: the prefix skips nothing" "booked.sh" "$WRAP"
@@ -1206,18 +1208,26 @@ expect_nonempty "W4e …while the same suite in the foreground is" "$WRAP"
 
 # THE TIMING CHECK: a target carrying `# runner: solo` in its first 30 lines, or
 # BIONIC_QUIET=1 in the suite segment's own prefix, takes the whole machine.
-guarded "$RW" 'bash tests/solo.test.sh'
+# Since wave-28 T36 an agent's bare suite run is refused (the one door), so the wall's solo
+# reading of a bare form is driven where bare forms still run: the main thread, by the override.
+run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 bash tests/solo.test.sh' "")" "$GUARD"
 expect_eq "W5a a solo suite is wrapped with --quiet" \
-  "bash $SHIM --shell $WSH --quiet --agent w-wrap $(mw) --suites solo.test.sh -- 'bash tests/solo.test.sh'" "$WRAP"
-guarded "$RW" 'BIONIC_QUIET=1 bash tests/t.test.sh'
+  "bash $SHIM --shell $WSH --quiet $(mw) --suites solo.test.sh -- 'FARM_OUT_ALLOW=1 bash tests/solo.test.sh'" "$WRAP"
+run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 BIONIC_QUIET=1 bash tests/t.test.sh' "")" "$GUARD"
 expect_eq "W5b BIONIC_QUIET=1 in the prefix is --quiet" \
-  "bash $SHIM --shell $WSH --quiet --agent w-wrap $(mw) --suites t.test.sh -- 'BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
-guarded "$RW" 'cd tests && bash solo.test.sh'
+  "bash $SHIM --shell $WSH --quiet $(mw) --suites t.test.sh -- 'FARM_OUT_ALLOW=1 BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
+run_hook "$(mk_payload "$RW" 'cd tests && FARM_OUT_ALLOW=1 bash solo.test.sh' "")" "$GUARD"
 expect_eq "W5c a solo suite reached through a leading cd is --quiet too (and stamps where the cd went)" \
-  "bash $SHIM --shell $WSH --quiet --agent w-wrap $(mw) --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && bash solo.test.sh'" "$WRAP"
-guarded "$RW" 'bash tests/t.test.sh'
+  "bash $SHIM --shell $WSH --quiet $(mw) --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && FARM_OUT_ALLOW=1 bash solo.test.sh'" "$WRAP"
+run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh' "")" "$GUARD"
 expect_absent "W5d a plain suite is not" "--quiet" "$WRAP"
 expect_nonempty "W5d …though it is wrapped" "$WRAP"
+# THE DOOR'S SOLO SUITE (wave-28 T36): the runner holds a solo suite out of its batch and asks the
+# gate for the whole machine itself (tests/run.sh _solo_run), so the wrap stays plain: --runner,
+# never --quiet, which would make the shim hold the machine the runner then asks for.
+guarded "$RW" 'tests/run.sh --only solo.test.sh'
+expect_eq "W5e an agent's door call naming a solo suite is wrapped with --runner and no --quiet" \
+  "bash $SHIM --shell $WSH --agent w-wrap $(mw) --suites solo.test.sh --runner -- 'tests/run.sh --only solo.test.sh'" "$WRAP"
 
 # WHERE THE STAMP GOES (wave-26 T56, final review B1). The shim stands in the payload's cwd,
 # the main checkout, while `cd <tree> || exit 1; bash tests/…` runs the suite in the tree. So
@@ -1234,40 +1244,40 @@ w10() {  # <label> <command> <expected --stamp-dir value, or "" for none> [<expe
   if [ -n "$3" ]; then
     _wall_q="$3"; case "$3" in *' '*) _wall_q="$(sq "$3")" ;; esac
     expect_eq "W10$1 …with --stamp-dir $3" \
-      "bash $SHIM --shell $WSH --agent w-wrap $(mw) --stamp-dir $_wall_q --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
+      "bash $SHIM --shell $WSH --agent w-wrap $(mw) --stamp-dir $_wall_q --suites ${4:-t.test.sh --runner} -- $(sq "$2")" "$WRAP"
   else
-    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH --agent w-wrap $(mw) --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
+    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH --agent w-wrap $(mw) --suites ${4:-t.test.sh --runner} -- $(sq "$2")" "$WRAP"
   fi
 }
-w10 a "cd $W10_ABS || exit 1; bash tests/t.test.sh" "$W10_ABS"
-w10 b 'cd .worktrees/t1 && bash tests/t.test.sh' "$RW/.worktrees/t1"
-w10 c "cd $SANDBOX/trees; cd t1 || exit 1; bash tests/t.test.sh" "$SANDBOX/trees/t1"
-w10 d "cd '$SANDBOX/a tree' || exit 1; bash tests/t.test.sh" "$SANDBOX/a tree"
-w10 e "cd \"$W10_ABS\" || exit 1; bash tests/t.test.sh" "$W10_ABS"
-w10 f 'bash tests/t.test.sh' ""
+w10 a "cd $W10_ABS || exit 1; tests/run.sh --only t.test.sh" "$W10_ABS"
+w10 b 'cd .worktrees/t1 && tests/run.sh --only t.test.sh' "$RW/.worktrees/t1"
+w10 c "cd $SANDBOX/trees; cd t1 || exit 1; tests/run.sh --only t.test.sh" "$SANDBOX/trees/t1"
+w10 d "cd '$SANDBOX/a tree' || exit 1; tests/run.sh --only t.test.sh" "$SANDBOX/a tree"
+w10 e "cd \"$W10_ABS\" || exit 1; tests/run.sh --only t.test.sh" "$W10_ABS"
+w10 f 'tests/run.sh --only t.test.sh' ""
 # The doctrine's evidence shape (T58's), behind the cwd guard and in a brace group.
-w10 g "cd $W10_ABS || exit 1; set -o pipefail; bash tests/t.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" "$W10_ABS"
-w10 h "{ cd $W10_ABS || exit 1; bash tests/t.test.sh; }" "$W10_ABS"
-w10 i "cd $W10_ABS || exit 1; { bash tests/t.test.sh; echo \"rc=\$?\"; } > /dev/null 2>&1" "$W10_ABS"
+w10 g "cd $W10_ABS || exit 1; set -o pipefail; tests/run.sh --only t.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" "$W10_ABS"
+w10 h "{ cd $W10_ABS || exit 1; tests/run.sh --only t.test.sh; }" "$W10_ABS"
+w10 i "cd $W10_ABS || exit 1; { tests/run.sh --only t.test.sh; echo \"rc=\$?\"; } > /dev/null 2>&1" "$W10_ABS"
 # No sure reading: each of these stamps the shim's own directory, as before T56.
-w10 j 'cd "$T" || exit 1; bash tests/t.test.sh' ""
-w10 k "(cd $W10_ABS; true); bash tests/t.test.sh" ""
-w10 l "true | cd $W10_ABS; bash tests/t.test.sh" ""
+w10 j 'cd "$T" || exit 1; tests/run.sh --only t.test.sh' ""
+w10 k "(cd $W10_ABS; true); tests/run.sh --only t.test.sh" ""
+w10 l "true | cd $W10_ABS; tests/run.sh --only t.test.sh" ""
 # (A `cd` the shell backgrounds, `cd x & bash tests/…`, never reaches the wrap: ARM 1 refuses it.)
-w10 m "true || cd $W10_ABS; bash tests/t.test.sh" ""
-w10 n "pushd $W10_ABS && bash tests/t.test.sh" ""
-w10 o "cd $SANDBOX && pushd trees && bash tests/t.test.sh" ""
-w10 p "if cd $W10_ABS; then bash tests/t.test.sh; fi" ""
-w10 q 'cd $(git rev-parse --show-toplevel) && bash tests/t.test.sh' ""
-w10 r "cd -P $W10_ABS && bash tests/t.test.sh" ""
+w10 m "true || cd $W10_ABS; tests/run.sh --only t.test.sh" ""
+w10 n "pushd $W10_ABS && tests/run.sh --only t.test.sh" ""
+w10 o "cd $SANDBOX && pushd trees && tests/run.sh --only t.test.sh" ""
+w10 p "if cd $W10_ABS; then tests/run.sh --only t.test.sh; fi" ""
+w10 q 'cd $(git rev-parse --show-toplevel) && tests/run.sh --only t.test.sh' ""
+w10 r "cd -P $W10_ABS && tests/run.sh --only t.test.sh" ""
 # A cd the wall cannot read, then an ABSOLUTE one: the absolute one decides where the suite runs.
-w10 s "cd \"\$T\"; cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
+w10 s "cd \"\$T\"; cd $W10_ABS && tests/run.sh --only t.test.sh" "$W10_ABS"
 # …but a RELATIVE one after it does not: relative to an unknown place is unknown.
-w10 t 'cd "$T"; cd t1 && bash tests/t.test.sh' ""
+w10 t 'cd "$T"; cd t1 && tests/run.sh --only t.test.sh' ""
 # Only the cd segments AHEAD of the first suite count. (Two runs joined by `;` are named `?`, T63.)
-w10 u "bash tests/t.test.sh; cd $W10_ABS; bash tests/t.test.sh" "" "'?'"
+w10 u "tests/run.sh --only t.test.sh; cd $W10_ABS; tests/run.sh --only t.test.sh" "" "'?'"
 # A cd behind `&&` runs whenever the suite does (a failed step before it stops both), so it counts.
-w10 v "true && cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
+w10 v "true && cd $W10_ABS && tests/run.sh --only t.test.sh" "$W10_ABS"
 
 # WHICH SUITES THE STAMP NAMES (wave-26 T61, critic F1; T63, critic K4-S1/N1/N2). The land keeps
 # the newest stamp of each suite, so the wall hands the shim `--suites <names>`, one per suite the
@@ -1329,21 +1339,21 @@ done
 # WHICH SHELL: CLAUDE_CODE_SHELL, then SHELL, each only when it names bash or zsh by an
 # absolute path; otherwise no --shell, which is the shim's bash -c.
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL=$(command -v bash)"
-guarded "$RW" 'bash tests/t.test.sh'
+guarded "$RW" 'tests/run.sh --only t.test.sh'
 expect_eq "W6a CLAUDE_CODE_SHELL wins over SHELL" \
-  "bash $SHIM --shell $(command -v bash) --agent w-wrap $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $(command -v bash) --agent w-wrap $(mw) --suites t.test.sh --runner -- 'tests/run.sh --only t.test.sh'" "$WRAP"
 EXTRA_ENV="SHELL=/bin/sh CLAUDE_CODE_SHELL="
-guarded "$RW" 'bash tests/t.test.sh'
+guarded "$RW" 'tests/run.sh --only t.test.sh'
 expect_eq "W6b a shell the harness would not use names none: bash -c" \
-  "bash $SHIM --agent w-wrap $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --agent w-wrap $(mw) --suites t.test.sh --runner -- 'tests/run.sh --only t.test.sh'" "$WRAP"
 EXTRA_ENV="SHELL= CLAUDE_CODE_SHELL="
-guarded "$RW" 'bash tests/t.test.sh'
-expect_eq "W6c neither set: bash -c" "bash $SHIM --agent w-wrap $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+guarded "$RW" 'tests/run.sh --only t.test.sh'
+expect_eq "W6c neither set: bash -c" "bash $SHIM --agent w-wrap $(mw) --suites t.test.sh --runner -- 'tests/run.sh --only t.test.sh'" "$WRAP"
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
 
 # ONE ANSWER, BOTH REWRITES: ARM R raises a missing timeout and the wrap rewrites the
 # command, in that order, on the same object.
-NO_TIMEOUT=$(mk_payload "$RW" 'bash tests/t.test.sh' "$ACTOR" | jq -c 'del(.tool_input.timeout)')
+NO_TIMEOUT=$(mk_payload "$RW" 'tests/run.sh --only t.test.sh' "$ACTOR" | jq -c 'del(.tool_input.timeout)')
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL= BASH_MAX_TIMEOUT_MS=600000"
 run_hook "$NO_TIMEOUT" "$GUARD"
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
@@ -1351,7 +1361,7 @@ expect_eq "W7a a suite with no timeout is allowed" "0" "$ST"
 expect_eq "W7b …its timeout is raised to the harness maximum" "600000" \
   "$(printf '%s' "$WRAP_INPUT" | jq -r '.timeout')"
 expect_eq "W7c …and its command is wrapped, in the same updatedInput" \
-  "bash $SHIM --shell $WSH --agent w-wrap $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH --agent w-wrap $(mw) --suites t.test.sh --runner -- 'tests/run.sh --only t.test.sh'" "$WRAP"
 expect_contains "W7d …and the repair is logged as before" "repaired from=absent to=600000" "$ERR"
 
 # BEHAVIOUR. Each command runs once as the harness runs it and once as the harness runs its
