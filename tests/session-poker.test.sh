@@ -9126,9 +9126,9 @@ awk '
 printf 'impact-command: bash %s\n' "$S54_MAP" > "$R54/.bionic/config.yaml"
 # s54_full <log> -> the copied runner, run whole in the working checkout, its log in the record
 s54_full() {
-  ( cd "$S54_WT" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_PLACE -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
-      -u BIONIC_LOAD_NOW_FILE BIONIC_SLOTS_DIR="$TMPROOT/s54-slots" BIONIC_SLOTS_N=2 BIONIC_SLOTS_POLL=0.1 \
-      BIONIC_SLOTS_MAX_WAIT=20 BIONIC_SLOTS_NOTE_S=5 BIONIC_PRESSURE_RING="$TMPROOT/s54-ring" \
+  ( cd "$S54_WT" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET \
+      -u BIONIC_LOAD_NOW_FILE BIONIC_GATE_DIR="$TMPROOT/s54-gate" BIONIC_GATE_POLL=0.1 \
+      BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PRESSURE_RING="$TMPROOT/s54-ring" \
       BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
       bash tests/run.sh ) > "$S54_REC/$1" 2>&1
 }
