@@ -707,4 +707,70 @@ expect_eq "R17j2 …and, fed back key by key, the one writer reproduces it byte 
   "$(lib roster_row "${R17_ARGS[@]}")"
 expect_eq "R17j3 …its row= still reads by key" "T23" "$(field_of_row "$R17_GOT" row)"
 
+section "R18 — the stop's reason is a row key: reason= (wave-28 T77; REQ-5, REQ-6, D8; A-orch-239 2a)"
+# The stop guard writes the orchestrator's reason for an unrostered stop onto the closed row it appends. It
+# rode `source=` (the writer's word for where a deliverable's path came from) and could not ride `waiver=`
+# (the sweeper reads that as a waived contract). `reason=` is its own key, present-if-passed, between the
+# done marker and `tool_use_id=`, so a 1.12.0 row is unmoved. fails-when: the key is refused or misplaced,
+# a pipe in the reason forges a segment, or a row carrying it does not read back by key.
+R18_WHY="spawned past its hook timeout; the roster never saw it: a=b"
+R18_R="$(lib roster_row "${R5_BASE[@]}" "reason=$R18_WHY")"; R18_RC=$?
+expect_eq "R18a reason= is accepted (rc 0)" "0" "$R18_RC"
+expect_eq "R18b …and read back by key, whole" "$R18_WHY" "$(field_of_row "$R18_R" reason)"
+expect_contains "R18c …between the other keys and tool_use_id=, where an optional key sits" "|reason=${R18_WHY}|tool_use_id=" "$R18_R"
+expect_absent "R18d a row passed no reason carries no reason= (the 1.12.0 row, byte for byte)" "reason=" "$(lib roster_row "${R5_BASE[@]}")"
+expect_eq "R18d2 …and still equals the plain row the suite pins" "$R5_PLAIN" "$(lib roster_row "${R5_BASE[@]}")"
+R18_P="$(lib roster_row "${R5_BASE[@]}" "reason=one|two=three")"
+expect_eq "R18e a pipe in the reason is folded, so no segment is forged" "0" "$(count_fields "$R18_P" "two=three")"
+expect_eq "R18e2 …and the reason reads back with the fold (the positive on that extractor)" "one two=three" "$(field_of_row "$R18_P" reason)"
+R18_ARGS=()
+while IFS= read -r R18_SEG; do R18_ARGS+=("$R18_SEG"); done < <(printf '%s\n' "$R18_R" | tr '|' '\n' | tail -n +2)
+expect_eq "R18f a row carrying it, fed back key by key, reproduces byte for byte" "$R18_R" "$(lib roster_row ${R18_ARGS[@]+"${R18_ARGS[@]}"})"
+mkdir -p "$R7_DIR/r18"
+R18_F="$R7_DIR/r18/roster-s1.state"
+R18_C="$(lib roster_row status=closed session=s1 name=ghost agent_id= launched_at=2026-10-07T03:15:00Z plan=none "reason=$R18_WHY")"
+printf '%s\n' "$R18_C" > "$R18_F"
+expect_eq "R18g the roster's by-name readers see the closed row and its reason" "$R18_WHY" \
+  "$(field_of_row "$(grep '|name=ghost|' "$R18_F")" reason)"
+lib roster_open_names "$R18_F" "" | grep -qx ghost
+expect_status "R18g2 …and the open-name reader does not list it (a reason is not a live contract)" "1" "$?"
+lib roster_row "${R5_BASE[@]}" "reasons=x" >/dev/null
+expect_status "R18h a near-miss key (reasons=) is still refused" "2" "$?"
+
+section "R19 — roster_sessions_with_name: which rosters of the project hold a row of a name (wave-28 T77; A-orch-239, A-orch-241)"
+# One read over every roster-*.state of a state directory, adopt's walk (a regular file, never a link, the session
+# id off the file name) without adopt's skip of the caller's own roster and without any liveness question: a dead
+# session's roster counts. An answer is `<session-id>|<status of the name's LAST row there>`. fails-when: a roster
+# holding the name is missed, a link is followed, a dead session's roster is skipped, the first row of a name is
+# reported where the last is the current one, or a name that only appears inside another field is matched.
+R19_D="$R7_DIR/r19"
+mkdir -p "$R19_D"
+R19_PLANT() {  # <sid> <name> <status> [<name> <status>]... -> a roster file of that session
+  local f="$R19_D/roster-$1.state" sid="$1" n st; shift
+  : > "$f"
+  while [ $# -ge 2 ]; do
+    lib roster_row "status=$2" "session=$sid" "name=$1" agent_id= launched_at=2026-10-07T00:00:00Z plan=none >> "$f"
+    shift 2
+  done
+}
+R19_PLANT s1 ghost intended ghost identified other confirmed
+R19_PLANT s2-dead ghost confirmed
+touch -t 202001010000 "$R19_D/roster-s2-dead.state"
+R19_PLANT s4 other confirmed
+ln -s "$R19_D/roster-s1.state" "$R19_D/roster-s3-link.state"
+printf 'roster-state/v1|status=confirmed|session=s5|name=bystander|deliverable=|name=ghost|plan=none\n' > "$R19_D/roster-s5.state"
+R19_GOT="$(lib roster_sessions_with_name "$R19_D" ghost)"
+expect_eq "R19a two rosters hold the name: this session's kind and a dead session's, the last row's status on each" \
+  "$(printf 's1|identified\ns2-dead|confirmed')" "$R19_GOT"
+expect_eq "R19b a symlinked roster is skipped, though it points at one that holds the name (the positive is R19a's s1)" "0" \
+  "$(printf '%s\n' "$R19_GOT" | grep -c 's3-link')"
+expect_eq "R19c a name appearing only as a later duplicate key on a bystander's row is not matched (s5: the first name= decides)" "0" \
+  "$(printf '%s\n' "$R19_GOT" | grep -c 's5')"
+expect_eq "R19d another name finds its own rosters" "$(printf 's1|confirmed\ns4|confirmed')" "$(lib roster_sessions_with_name "$R19_D" other)"
+expect_eq "R19e a name no roster holds prints nothing" "" "$(lib roster_sessions_with_name "$R19_D" nobody)"
+lib roster_sessions_with_name "$R19_D" nobody >/dev/null
+expect_status "R19e2 …and is rc 0" "0" "$?"
+expect_eq "R19f an empty name prints nothing" "" "$(lib roster_sessions_with_name "$R19_D" "")"
+expect_eq "R19g a directory with no roster prints nothing" "" "$(lib roster_sessions_with_name "$R7_DIR/r19-none" ghost)"
+
 finish
