@@ -1536,29 +1536,33 @@ expect_status "our own roster was written" "1" "$(roster_rows "$(roster_path "$R
 expect_status "the prune leaves attestations alone" "0" \
   "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
 
-section "S10g — a roster WRITE FAILURE warns and leaves the verdict alone"
+section "S10g — a roster WRITE FAILURE is a refusal, never an admission (wave-28 T70)"
 #
-# TDD §7: starts fail open. The roster is a ledger, not a wall — a gate that
-# refused a dispatch because it could not journal it would be a new failure
-# mode, not a safety property.
+# TDD §7 said starts fail open and the roster was a ledger, not a wall. That was the wrong rule
+# (wave-28 T70, A-orch-205 to 212): a dispatch the roster does not carry is one no later wall can
+# judge, so a launch that cannot be journalled is refused in the dispatch wall's own shape and
+# nothing is spawned. The row is built and appended last, after every wall has spoken, so the
+# refusal leaves no row behind.
 
 REPO=$(make_repo r10g yes)
 write_attestation "$REPO" "$SID_A"
 chmod 555 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 chmod 755 "$REPO/.bionic/tmp"
-expect_status "an unwritable state dir does not change the PASS verdict" "0" "$GATE_ST"
-expect_empty "a write failure prints nothing on stdout" "$GATE_OUT"
-expect_contains "a write failure is warned on stderr" "WARN" "$GATE_ERR"
+expect_eq "an unwritable state dir REFUSES the dispatch" "deny" "$GATE_VERDICT"
+expect_contains "…on one line, in the dispatch wall's shape" \
+  "bionic: dispatch refused — the roster cannot be written (make it writable)" "$GATE_ERR"
+expect_contains "…the detail names the roster path" "roster-${SID_A}.state" "$GATE_VERR"
+expect_contains "…and the reason the append gave" "Permission denied" "$GATE_VERR"
 expect_status "no roster file was left behind" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-section "S10h — a symlinked roster path is never written through (§8)"
+section "S10h — a symlinked roster path is never written through, and the dispatch is refused (§8; wave-28 T70)"
 #
-# A hostile repo controls its own .bionic/ contents. It may make this gate fail
-# to journal; it must not gain an arbitrary-file append. (The DIRECTORY-level
-# variants are already refused upstream by the attestation check — S8 drives
-# them — so the file level is the only one reachable here.)
+# A hostile repo controls its own .bionic/ contents. It must not gain an arbitrary-file append,
+# and since T70 it must not gain a silent admission either. (The DIRECTORY-level variants are
+# already refused upstream by the attestation check — S8 drives them — so the file level is the
+# only one reachable here.)
 
 REPO=$(make_repo r10h yes)
 write_attestation "$REPO" "$SID_A"
@@ -1566,8 +1570,10 @@ DECOY_ROSTER="$SANDBOX/decoy-roster.txt"
 printf 'untouched\n' > "$DECOY_ROSTER"
 ln -s "$DECOY_ROSTER" "$(roster_path "$REPO" "$SID_A")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "a symlinked roster path does not change the PASS verdict" "0" "$GATE_ST"
-expect_contains "a symlinked roster path is warned" "WARN" "$GATE_ERR"
+expect_eq "a symlinked roster path REFUSES the dispatch" "deny" "$GATE_VERDICT"
+expect_contains "…on one line, in the dispatch wall's shape" \
+  "bionic: dispatch refused — the roster path is a symbolic link (remove the link)" "$GATE_ERR"
+expect_contains "…the detail names the link" "roster-${SID_A}.state" "$GATE_VERR"
 expect_status "the symlink target is not appended to" "untouched" "$(cat "$DECOY_ROSTER")"
 
 section "S10i — no row on any path that is not a launch"
@@ -11286,8 +11292,8 @@ GATE="$OR_SAVED_GATE"; rm -rf "$OR_ROOT"
 AN_ROWS="A-T1=approval:release"
 t55_gate an1 x-A-T1 'Lands-on: widget' "$AN_ROWS"
 expect_eq "AN1 (the probe) a name that matches T1 and A-T1, no Row:, is refused" "deny" "$GATE_VERDICT"
-expect_contains "AN1b …the one line names both rows and the fix" \
-  "the name matches rows T1, A-T1 (add Row: T1)" "$(t7_first)"
+expect_contains "AN1b …the one line names both rows and the fix (no row named as the remedy: A-orch-230 a)" \
+  "the name matches rows T1, A-T1 (add Row: <id>)" "$(t7_first)"
 expect_eq "AN1c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
 expect_contains "AN1d …the detail names the dispatch's name and the plan" "x-A-T1" "$GATE_VERR"
 expect_eq "AN1e …and no row is written" "" "$T7_ROW"
@@ -11317,7 +11323,7 @@ AN_LX="a-row-id-of-forty-characters-long-0001"; AN_LY="b-row-${AN_LX}"
 t55_gate an7 "w-${AN_LY}" 'Lands-on: widget' "$AN_LX $AN_LY"
 expect_eq "AN7 the widest case, two long row ids one behind the other's name, is refused" "deny" "$GATE_VERDICT"
 expect_contains "AN7b …each id cut to eleven columns on the one line" \
-  "the name matches rows a-row-id-o…, b-row-a-ro… (add Row: a-row-id-o…)" "$(t7_first)"
+  "the name matches rows a-row-id-o…, b-row-a-ro… (add Row: <id>)" "$(t7_first)"
 expect_eq "AN7c …and that line is at most 100 columns" "ok" "$(t7_cols_ok)"
 
 # THE MUTATION ARM: the ambiguity check removed, so the first match is bound as before. The shipped
@@ -11424,5 +11430,136 @@ expect_contains "RV6 …on its own line" "$RV6_LINE" "$GATE_ERR"
 expect_eq "RV6 …which is 87 columns" "87" "$(rv_cols "$RV6_LINE")"
 expect_contains "RV6 …the detail names the role as typed" "Role:  bionic:reviewer" "$GATE_VERR"
 expect_contains "RV6 …and the level in the printed form" "review rigor: medium (two independent readers)" "$GATE_VERR"
+
+# ============================================================================
+section "§RECORDER — a dispatch the roster cannot carry is refused, and a slow wall refuses too (wave-28 T70; REQ-5, REQ-6, D8)"
+# ============================================================================
+# THE FINDING (A-orch-205 to 212). Two dispatches of one row were ADMITTED and journalled nothing; the
+# harness transcript shows why: both `PreToolUse:Agent` hooks are `hook_cancelled` at 15012 and 15016 ms,
+# the registration's own 15 s. A cancelled hook is an admitted dispatch, and the roster append is the
+# hook's last step, so a wall that overran left a writer running with no row for any later wall to judge.
+# The three paths the plan listed (a symlinked roster, an unwritable one, a row that did not build) were
+# warnings or silent exits; none was what happened, and all three are refusals now. The fourth is the
+# overrun: the wall carries a deadline of its own, strictly under the registration (the rule bounds.sh
+# states for every inner bound), and refuses when the deadline passes before the row is journalled.
+#
+# fails-when: an unwritable, symlinked or unbuilt roster ADMITS the dispatch; a wall that has not finished by
+# the deadline lets the dispatch through; the deadline sits at or over the registration's timeout; or the
+# read-only role launched from inside an agent (S20's legitimate case) is refused or journalled.
+RC_N=0
+rc_repo() {  # <tag> -> REPO, attested, bound to the fixture wave
+  RC_N=$((RC_N + 1)); REPO=$(make_repo "rc-$1-$RC_N" yes); write_attestation "$REPO" "$SID_A"
+}
+rc_rows() { roster_rows "$(roster_path "$REPO" "$SID_A")"; }
+# rc_plant <root> <plain|unbuilt|slow> -> the path of a copy of the hook beside a library whose roster.sh
+# is the shipped one with `roster_row` replaced: unbuilt returns 2 (the row does not build); slow waits
+# 14 s and then builds the real row, so a wall with no deadline admits it with a row and a wall with one
+# refuses it with none.
+rc_plant() {
+  local root="$1" mode="$2" lib f
+  lib="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
+  mkdir -p "$root/hooks" "$root/scripts/lib"
+  for f in "$lib"/*; do
+    [ "${f##*/}" = roster.sh ] && continue
+    ln -s "$f" "$root/scripts/lib/${f##*/}"
+  done
+  cp "$lib/roster.sh" "$root/scripts/lib/roster.sh"
+  case "$mode" in
+    unbuilt) printf '%s\n' 'roster_row() { return 2; }' >> "$root/scripts/lib/roster.sh" ;;
+    slow)    printf '%s\n' '_rc_f="$(declare -f roster_row)"; eval "_rc_orig_${_rc_f}"' \
+                           'roster_row() { sleep 14; _rc_orig_roster_row "$@"; }' >> "$root/scripts/lib/roster.sh" ;;
+  esac
+  cp "$GATE" "$root/hooks/dispatch-preflight.sh"
+  printf '%s' "$root/hooks/dispatch-preflight.sh"
+}
+RC_SAVED_GATE="$GATE"
+RC_ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/rc-t70.XXXXXX")" && pwd -P)
+
+# --- RC1: the control. A writable roster journals one row and the dispatch passes, silent.
+rc_repo c1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "RC1 a writable roster admits the dispatch" "allow" "$GATE_VERDICT"
+expect_eq "RC1 …and journals exactly one row" "1" "$(rc_rows)"
+expect_empty "RC1 …and says nothing on the allow path" "$GATE_ERR"
+
+# --- RC2: S10g and S10h above are the unwritable and the symlinked path. Here the wording is held to
+# the width the driver sweeps, and the unwritable path's reason is named as the shell gave it.
+rc_repo c2
+chmod 555 "$REPO/.bionic/tmp"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+chmod 755 "$REPO/.bionic/tmp"
+RC2_LINE="bionic: dispatch refused — the roster cannot be written (make it writable)"
+expect_eq "RC2 the refusal's first line is the one the inventory prints" "$RC2_LINE" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "RC2 …and it is 74 columns, inside the 100" "74" "$(bionic_cols "$RC2_LINE")"
+expect_contains "RC2 …the detail says no row was written and the launch was not admitted" \
+  "No row was written, so the launch is not admitted" "$GATE_VERR"
+
+# --- RC3: a row that does not build is refused, not appended blank and not warned about.
+RC3_GATE="$(rc_plant "$RC_ROOT/unbuilt" unbuilt)"
+rc_repo c3
+GATE="$RC3_GATE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+GATE="$RC_SAVED_GATE"
+expect_eq "RC3 a launch row that does not build REFUSES the dispatch" "deny" "$GATE_VERDICT"
+RC3_LINE="bionic: dispatch refused — the launch row did not build (run /bionic:doctor)"
+expect_eq "RC3 …on its own line" "$RC3_LINE" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "RC3 …which is 76 columns" "76" "$(bionic_cols "$RC3_LINE")"
+expect_contains "RC3 …the detail names the roster path" "roster-${SID_A}.state" "$GATE_VERR"
+expect_eq "RC3 …and no row, blank or otherwise, was appended" "0" "$(rc_rows)"
+RC3P_GATE="$(rc_plant "$RC_ROOT/plain" plain)"
+rc_repo c3p
+GATE="$RC3P_GATE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+GATE="$RC_SAVED_GATE"
+expect_eq "RC3 control: the same copy with the shipped roster.sh admits and journals" "1" "$(rc_rows)"
+
+# --- RC4: the delegation arm's legitimate case is untouched. A read-only role launched from inside an
+# agent is admitted, silent, and journals no row (S20, depth one), even on a roster path the other
+# paths refuse: the delegation arm answers before any of them.
+rc_repo c4
+ln -s "$DECOY_ROSTER" "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" \
+             "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq -c '. + {agent_id:"a70nested-0123456789ab"}')"
+expect_eq "RC4 a read-only role launched from inside an agent is admitted" "allow" "$GATE_VERDICT"
+RC4_LINE="bionic: dispatch admitted without a roster row — a read-only role launched from inside an agent; the ledger stays at depth one"
+expect_eq "RC4 …saying so on one line (A-orch-231 2), on a roster path a main-thread dispatch would be refused for" \
+  "$RC4_LINE" "$GATE_ERR"
+expect_eq "RC4 …which is 126 columns, a notice and not a refusal" "126" "$(bionic_cols "$RC4_LINE")"
+expect_status "RC4 …and the decoy was not appended to" "untouched" "$(cat "$DECOY_ROSTER")"
+
+# --- RC5: THE DEADLINE. The wall waits 14 s inside the row's build, past the deadline.
+RC5_GATE="$(rc_plant "$RC_ROOT/slow" slow)"
+rc_repo c5
+GATE="$RC5_GATE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+GATE="$RC_SAVED_GATE"
+expect_eq "RC5 a wall still working at its deadline REFUSES the dispatch" "deny" "$GATE_VERDICT"
+RC5_LINE="bionic: dispatch refused — the wall ran out of time (dispatch again)"
+expect_eq "RC5 …on its own line" "$RC5_LINE" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "RC5 …which is 68 columns" "68" "$(bionic_cols "$RC5_LINE")"
+expect_eq "RC5 …and no row was journalled for the refused launch" "0" "$(rc_rows)"
+expect_true "RC5 …after the deadline, not before it (waited at least 11 s)" test "$GATE_TIME" -ge 11
+expect_contains "RC5 …the detail names the roster the row would have gone to" "roster-${SID_A}.state" "$GATE_VERR"
+
+# --- RC6: THE DEADLINE IS UNDER THE REGISTRATION. Both numbers are read, not transcribed.
+RC6_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GATE" | head -1)"
+RC6_TIMEOUT="$(jq -r '.hooks.PreToolUse[] | select(.matcher == "Agent") | .hooks[] | select(.command | test("dispatch-preflight")) | .timeout' "${BIONIC_HOOKS_DIR}/hooks.json" 2>/dev/null)"
+expect_nonempty "RC6 precondition: the hook names its deadline" "$RC6_DEADLINE"
+expect_nonempty "RC6 precondition: hooks.json registers the hook with a timeout" "$RC6_TIMEOUT"
+expect_true "RC6 the deadline sits at least 2 s under the registration's timeout (${RC6_DEADLINE:-?} under ${RC6_TIMEOUT:-?})" \
+  test "${RC6_DEADLINE:-99}" -le "$(( ${RC6_TIMEOUT:-0} - 2 ))"
+expect_true "RC6 …and above the slowest recorded healthy dispatch (3.8 s)" test "${RC6_DEADLINE:-0}" -ge 8
+
+# --- RC7: THE WATCHDOG LEAVES NOTHING BEHIND. A passed dispatch's hook returns at once, not at the
+# deadline, and its timer does not outlive it.
+rc_repo c7
+RC7_T0=$(date +%s)
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_true "RC7 an allowed dispatch returns well inside the deadline (took ${GATE_TIME}s)" test "$GATE_TIME" -le 6
+expect_eq "RC7 …and journalled its row" "1" "$(rc_rows)"
+rm -rf "$RC_ROOT"
+GATE="$RC_SAVED_GATE"
+
 
 finish
