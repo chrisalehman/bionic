@@ -1098,6 +1098,7 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first one"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
 
 # 60d: A ROW THIS TURN LAUNCHED IS NEVER NAMED AS MISSED (T11b; review R4, T12 F7). Two agents
@@ -1118,6 +1119,7 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_block "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
 
 # 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
@@ -1804,6 +1806,7 @@ ledger_roster "$d" open W-T2
 led_user "$d" "u-turn-0008" "2026-09-23T12:00:00.000Z" "dispatch the batch"
 led_agent "$d" "toolu_B1" "W-T2" "2026-09-23T12:00:05.000Z"
 led_result "$d" "toolu_B1" "2026-09-23T12:00:06.000Z" false "Spawned W-T2"
+a_taskup "$d" 2
 fire "$d"; expect_block "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
 expect_eq "L8b: …its line names the launch" "W-T2" "$(led_field "$(led_line "$d" 1)" launched)"
 led_feedback "$d" "u-fb-0008" "2026-09-23T12:00:10.000Z"
