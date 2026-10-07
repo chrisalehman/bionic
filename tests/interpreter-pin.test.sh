@@ -1042,8 +1042,8 @@ t59_own "$SEAM" "$T59_SUB/r4"
 expect_contains "7.52j the parent itself owned by another user: refused, naming it" "$T59_SUB $T59_WHY_OWN" "$PIN_ERR"
 rm -f "$T59_STAT_DIR/t59-sub"
 T59_MUT_OWN="$TMPROOT/t59-mut-owner.sh"
-anchor "$SEAM" 'case "$owner" in 0|"$UID") ;;' 1
-grep -vF 'case "$owner" in 0|"$UID") ;;' "$SEAM" > "$T59_MUT_OWN"
+anchor "$SEAM" '_bionic_pin_trusted "$owner" ||' 1
+grep -vF '_bionic_pin_trusted "$owner" ||' "$SEAM" > "$T59_MUT_OWN"
 expect_eq "7.53 the no-owner mutant parses" "0" "$(bash -n "$T59_MUT_OWN" >/dev/null 2>&1; echo $?)"
 t59_own "$T59_MUT_OWN" "$T57_SUB/mut-owner-ctl"
 expect_ne "7.53b …and still refuses an open ancestor (not vacuous)" "0" "$PIN_RC"
@@ -1078,8 +1078,8 @@ t59_own "$SEAM" "$T59_LNK/r3"
 expect_eq "7.56h the same link owned by root: built" "0" "$PIN_RC"
 rm -f "$T59_STAT_DIR/t59-lnk.nf"
 T59_MUT_LNK="$TMPROOT/t59-mut-linkowner.sh"
-anchor "$SEAM" 'case "$linkowner" in 0|"$UID") ;;' 1
-grep -vF 'case "$linkowner" in 0|"$UID") ;;' "$SEAM" > "$T59_MUT_LNK"
+anchor "$SEAM" '_bionic_pin_trusted "$linkowner" ||' 1
+grep -vF '_bionic_pin_trusted "$linkowner" ||' "$SEAM" > "$T59_MUT_LNK"
 expect_eq "7.57 the no-link-owner mutant parses" "0" "$(bash -n "$T59_MUT_LNK" >/dev/null 2>&1; echo $?)"
 printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-lnk.nf"
 t59_own "$T59_MUT_LNK" "$T59_LNK/mut-root"
@@ -1143,8 +1143,9 @@ expect_eq "7.61c …and the root is still there" "present" "$(there "$T61_PLANT"
 rm -f "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID" "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID.nf"
 # the mutant: the third trusted owner removed. The namespace shape is refused again (the defect 7.58 guards).
 T61_MUT="$TMPROOT/t61-mut-fsowner.sh"
-anchor "$SEAM" '|| uid=0' 1
-grep -vF '|| uid=0' "$SEAM" > "$T61_MUT"
+anchor "$SEAM" '[ "$1" = "$(_bionic_pin_owner /)" ]' 1
+T61_LINE='[ "$1" = "$(_bionic_pin_owner /)" ]' \
+  awk 'index($0, ENVIRON["T61_LINE"]) { print "  return 1"; next } { print }' "$SEAM" > "$T61_MUT"
 expect_eq "7.62 the no-root-owner mutant parses" "0" "$(bash -n "$T61_MUT" >/dev/null 2>&1; echo $?)"
 t59_own "$T61_MUT" "$T59_SUB/n6"
 expect_eq "7.62b …and builds where no stub is set (not vacuous)" "0" "$PIN_RC"
