@@ -14968,8 +14968,7 @@ poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
 expect_eq "FD-a6 proof-add floor accepts the declared floor's log (exit 0)" "0" "$RC"
 expect_regex "FD-a7 …and writes the proof line at the working head, naming that log" \
   "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log$" "$(fd_proved)"
-s57_state "$PFD" "$FD_W"
-expect_eq "FD-a8 …which the judge reads as the floor covered at the head, with no roster to count" "covered" "$(s57_of floor)"
+expect_eq "FD-a8 …which proof_last reads back as the floor at the working head, with no roster counted" "$FD_W" "$(s46_last "$PFD" floor)"
 
 # ---------- AC-17.1: the same log at another head, dirty, red, or in the old shape is refused ----------
 FD_OTHER="0123456789abcdef0123456789abcdef01234567"
@@ -15086,7 +15085,7 @@ for _fdm in no-arm no-rc no-by; do
     "$(diff "$S46_LIB" "$FD_MUT/$_fdm.sh" | /usr/bin/grep -c '^<' | tr -d ' ')|$(bash -n "$FD_MUT/$_fdm.sh" 2>/dev/null; echo $?)"
 done
 expect_eq "FD-m1 the declared arm removed: the mutant runs (a tests/run.sh-shaped refusal) and refuses the green declared log, so FD-a6 goes red under it" \
-  "1|yes" "$(r="$(fd_attest "$FD_MUT/no-arm.sh" "$FD_LOG")"; printf '%s|%s' "${r%%|*}" "$(case "$r" in *'carries no head=<sha> dirty=<n> line'*) echo yes ;; *) echo no ;; esac)")"
+  "1|yes" "$(r="$(fd_attest "$FD_MUT/no-arm.sh" "$FD_LOG")"; printf '%s|%s' "${r%%|*}" "$(case "$r" in (*'carries no head=<sha> dirty=<n> line'*) echo yes ;; (*) echo no ;; esac)")"
 expect_eq "FD-m2 the rc test dropped: the mutant admits the rc=1 log, so FD-r3 goes red under it" "0|$FD_W" "$(fd_attest "$FD_MUT/no-rc.sh" "$FD_REC/fd-red.log")"
 expect_eq "FD-m3 the floor-attested-by: test dropped: the mutant admits the unattested record, so FD-t3 goes red under it" \
   "0|$FD_W" "$(fd_attest "$FD_MUT/no-by.sh" "$FD_REC/fd-att-noby.md")"
