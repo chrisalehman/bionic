@@ -11204,7 +11204,7 @@ expect_contains "OR4b …the line says the label is not the name's row (the fix 
 expect_eq "OR4c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
 expect_contains "OR4d …the detail names both rows and the plan" "wave-01-test.plan.md" "$GATE_VERR"
 expect_eq "OR4e …and no row is written" "" "$T7_ROW"
-OR_LA="a-row-id-of-forty-characters-long-0000001"; OR_LB="b-row-id-of-forty-characters-long-0000002"
+OR_LA="a-row-id-of-forty-characters-long-000001"; OR_LB="b-row-id-of-forty-characters-long-000002"
 t55_gate or4w "w-${OR_LB}" "Row: ${OR_LA}
 Lands-on: widget" "$OR_LA $OR_LB"
 expect_eq "OR4f the widest case, two forty-character row ids, is refused for the mismatch" "deny" "$GATE_VERDICT"
