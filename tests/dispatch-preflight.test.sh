@@ -11132,8 +11132,8 @@ section "§ROW-LABEL — Row: binds the dispatch to a row whatever the agent is 
 # tests/stop.test.sh §LAUNCHED). A Row: naming no row of the bound plan is refused.
 # fails-when: the label is not written, a row the plan lacks is admitted, or a fenced example binds.
 t7_gate rl1 'Row: T23
-Lands-on: widget' w-A2
-expect_eq "RL1 an agent named w-A2 briefed Row: T23 with its Lands-on: is admitted" "allow" "$GATE_VERDICT"
+Lands-on: widget' w-misc
+expect_eq "RL1 an agent named w-misc (no row's name) briefed Row: T23 with its Lands-on: is admitted" "allow" "$GATE_VERDICT"
 expect_eq "RL1b …the row carries row=T23" "T23" "$(roster_field "$T7_ROW" row)"
 expect_eq "RL1c …and lands_on=widget.test.sh" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
 t7_gate rl1n 'Row: T23' w-misc
@@ -11155,6 +11155,114 @@ Row: T23
 expect_eq "RL4 a Row: inside a fenced block is an example: the unbound writer is admitted" "allow" "$GATE_VERDICT"
 expect_contains "RL4b …its row is written" "status=intended" "$T7_ROW"
 expect_absent "RL4c …with no row= on it" "|row=" "$T7_ROW"
+
+# ============================================================================
+section "§ONE-ROW — a dispatch is bound to ONE row, whichever arm asks (wave-28 T55; REQ-1 AC-1.1, AC-1.3, D4)"
+# ============================================================================
+# T7 made `Row:` bind the launch record, the fill, the stop wall and the landing; the approval arm and
+# the full-run floor still found the row by the agent's NAME. The wall now answers "whose dispatch is
+# this" in one place (`dp_row_reader`): the brief's `Row:` when it carries one, else the row the name
+# matches, and every arm reads that id. A `Row:` naming a row other than the one the name matches is
+# refused; a name that matches no row with a `Row:` that names one is T7's design and stays admitted.
+# FIXTURES: make_repo's approved plan with T1, T2 and T9 (T9 reads approval:release, never recorded).
+# P1-P3 are the reader's probe (w28-T24-r26 probe-dp.log). SYNTHESIZED.
+# fails-when: a Row:-bound dispatch under a name that matches no row, or another row, passes the
+# approval arm; the full-run floor reads the name when the brief carries Row:; the mismatch is
+# admitted or its line is over 100 columns; a name that matches nothing is refused for its Row:.
+t55_gate() {  # <tag> <name> <body lines> [<extra row ids, space-separated>] -> GATE_*, T7_ROW
+  local _x _ids=""
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  for _x in ${4:-}; do _ids="${_ids}| ${_x} | 4 | build | long | implementor | — | 30 | REQ-1 | c.sh | — | — | pending | — |
+"; done
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| T2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n| T9 | 7 | doc | the release | implementor | — | 20 | REQ-1 | CHANGELOG.md | — | — | pending | approval:release |\n%s' "$_ids" \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$3")" "$2" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+OR_WAIT="row T9 waits for approval:release"
+
+t55_gate or1 w-T9 'Lands-on: widget'
+expect_eq "OR1 (P1) an agent named w-T9, no Row:, is refused: its row waits for the release's approval" "deny" "$GATE_VERDICT"
+expect_contains "OR1b …the line names the row and the approval" "$OR_WAIT" "$(t7_first)"
+t55_gate or2 w-release 'Row: T9
+Lands-on: widget'
+expect_eq "OR2 (P2) an agent named w-release (no row's name) briefed Row: T9 is refused by the approval arm" "deny" "$GATE_VERDICT"
+expect_contains "OR2b …the line names the row the label bound and the approval" "$OR_WAIT" "$(t7_first)"
+expect_eq "OR2c …and no row is written" "" "$T7_ROW"
+t55_gate or3 w-T1 'Row: T9
+Lands-on: widget'
+expect_eq "OR3 (P3) an agent named w-T1 briefed Row: T9 is refused" "deny" "$GATE_VERDICT"
+expect_contains "OR3b …the approval wait is on the wire" "$OR_WAIT" "$GATE_ERR"
+expect_contains "OR3c …and so is the Row:/name mismatch" "Row: T9 is not the name's row T1" "$GATE_ERR"
+expect_eq "OR3d …and no row is written" "" "$T7_ROW"
+
+t55_gate or4 w-T1 'Row: T2
+Lands-on: widget'
+expect_eq "OR4 a name that matches T1 briefed Row: T2 (a row waiting on nothing) is refused" "deny" "$GATE_VERDICT"
+expect_contains "OR4b …the line says the label is not the name's row (the fix named)" \
+  "Row: T2 is not the name's row T1 (rename or drop Row:)" "$(t7_first)"
+expect_eq "OR4c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_contains "OR4d …the detail names both rows and the plan" "wave-01-test.plan.md" "$GATE_VERR"
+expect_eq "OR4e …and no row is written" "" "$T7_ROW"
+OR_LA="a-row-id-of-forty-characters-long-0000001"; OR_LB="b-row-id-of-forty-characters-long-0000002"
+t55_gate or4w "w-${OR_LB}" "Row: ${OR_LA}
+Lands-on: widget" "$OR_LA $OR_LB"
+expect_eq "OR4f the widest case, two forty-character row ids, is refused for the mismatch" "deny" "$GATE_VERDICT"
+expect_contains "OR4g …each id cut to eleven columns on the one line" "Row: a-row-id-o… is not the name's row b-row-id-o…" "$(t7_first)"
+expect_eq "OR4h …and that line is at most 100 columns" "ok" "$(t7_cols_ok)"
+
+t55_gate or5 w-misc 'Row: T2
+Lands-on: widget'
+expect_eq "OR5 a name that matches no row briefed Row: T2 is admitted (T7's design)" "allow" "$GATE_VERDICT"
+expect_eq "OR5b …the row carries row=T2" "T2" "$(roster_field "$T7_ROW" row)"
+t55_gate or6 w-T2 'Row: T2
+Lands-on: widget'
+expect_eq "OR6 a name that matches T2 briefed Row: T2 is admitted" "allow" "$GATE_VERDICT"
+expect_eq "OR6b …the row carries row=T2" "T2" "$(roster_field "$T7_ROW" row)"
+t55_gate or7 w-T9 'Row: T9
+Lands-on: widget'
+expect_eq "OR7 a name and a Row: that agree on T9 are held by T9's approval alike" "deny" "$GATE_VERDICT"
+expect_contains "OR7b …naming the wait" "$OR_WAIT" "$(t7_first)"
+t55_gate or8 w-release 'Row: T99
+Lands-on: widget'
+expect_contains "OR8 a Row: naming no plan row is still the one refusal, never a mismatch beside it" \
+  "Row: T99 names no plan row" "$(t7_first)"
+expect_absent "OR8b …and no mismatch line rides with it" "is not the name's row" "$GATE_ERR"
+
+# THE FULL-RUN FLOOR finds its row by the same reader. T12 waits on T2 only; T13 (another verify row)
+# waits on T5. A dispatch that names no row is held by both; one briefed Row: T12 under a name that
+# matches nothing is held by T2 alone.
+OR_FLOOR="$(pf_repo orfloor)"
+write_attestation "$OR_FLOOR" "$SID_A"
+pf_plan "$OR_FLOOR" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T2 4 active 'lib/two.sh, tests/two.test.sh')" \
+  "$(pf_row T5 4 active 'lib/five.sh, tests/five.test.sh')" \
+  "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt verify 'T1, T2')" \
+  "$(pf_row T13 5 pending .bionic/docs/record/w99-other.txt verify 'T1, T5')"
+run_gate "$(mk_agent_payload "$SID_A" "$OR_FLOOR" "$PF_FULL_BRIEF" "w99-orx")"
+expect_eq "OR9 precondition: a full run naming no row is refused" "deny" "$GATE_VERDICT"
+expect_eq "OR9b …held by both open writers (the open verify rows' waits), so the reader is told apart" \
+  "T2 T5" "$(pf_line | /usr/bin/grep -o 'T2\|T5' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+run_gate "$(mk_agent_payload "$SID_A" "$OR_FLOOR" "$PF_FULL_BRIEF
+Row: T12" "w99-orx")"
+expect_eq "OR9c the same full run briefed Row: T12 is refused, held by T12's wait" "deny" "$GATE_VERDICT"
+expect_contains "OR9d …naming T2, the writer T12 waits on" "T2" "$(pf_line)"
+expect_absent "OR9e …and not T5, which only T13 waits on: the floor row is the label's, not the name's" "T5" "$(pf_line)"
+
+# THE MUTATION ARM: the reader returning the name's row alone. The shipped reader denies P2; a doctored
+# copy of the hook whose reader ignores Row: admits it, so the row above can fail.
+OR_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/t55-reader.XXXXXX")
+OR_HOOKS=$(s21_plant "$OR_ROOT")
+sed 's/^  DP_BOUND_ROW="${DP_ROW:-$DP_NAME_ROW}"$/  DP_BOUND_ROW="$DP_NAME_ROW"/' "$GATE" > "$OR_HOOKS/dispatch-preflight.sh"
+expect_eq "OR10 meta: the doctored reader landed (the sed anchor still matches)" "1" \
+  "$(/usr/bin/grep -c '^  DP_BOUND_ROW="\$DP_NAME_ROW"$' "$OR_HOOKS/dispatch-preflight.sh")"
+OR_SAVED_GATE="$GATE"; GATE="$OR_HOOKS/dispatch-preflight.sh"
+t55_gate or10 w-release 'Row: T9
+Lands-on: widget'
+expect_eq "OR10b with the reader returning the name's row alone, P2 is ADMITTED (the row above is red on it)" \
+  "allow" "$GATE_VERDICT"
+GATE="$OR_SAVED_GATE"; rm -rf "$OR_ROOT"
 
 # ============================================================================
 section "§BARE — a bare file name with an extension is a deliverable (wave-28 T7; REQ-15 AC-15.1, D32)"
