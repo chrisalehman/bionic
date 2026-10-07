@@ -888,4 +888,54 @@ expect_eq "(s4m-pre) the mutant ran: T1 was proved on a candidate" "red" "$(ll_r
 expect_eq "(s4m) MUTANT comparison inverted: a red the row adds is published (the rows can fail)" "0 T1" \
   "$(cat "$WORLD_ROOT/sm.out.rc" 2>/dev/null) $(ll_ev "$RSM" published | sed 's/.*|row=\([^|]*\)|.*/\1/')"
 
+# ---------------------------------------------------------------------------
+section "§AHEAD-CONFLICT: a wait on a conflicting candidate ahead ends when that entry resolves (ruling A-orch-51)"
+#
+# T1 is ahead, proving on a suite that waits for its go; T2 adds the same new file with other text, so
+# it conflicts with T1's candidate (not with the accepted head) and waits for T1. Once T1 publishes,
+# the accepted head is T1's candidate: T2 rebuilds on it, conflicts with the accepted head, and is
+# returned with CONFLICT — it never sleeps on for ever (read-adversarial-p12, the reader's probe3).
+ll_conflict_world() {  # <tag> -> root
+  local r
+  r="$(ll_rworld)" || return 1
+  ll_commit_suite "$r" T1 a "$(ll_block_body "$1-T1" a green)"
+  printf 'one\n' > "$r/.worktrees/T1/shared.txt"; git -C "$r/.worktrees/T1" add shared.txt && git -C "$r/.worktrees/T1" commit -qm "T1: shared one"
+  printf 'two\n' > "$r/.worktrees/T2/shared.txt"; git -C "$r/.worktrees/T2" add shared.txt && git -C "$r/.worktrees/T2" commit -qm "T2: shared two"
+  printf '%s' "$r"
+}
+RK="$(ll_conflict_world k)"
+ll_verb_bg "$RK" T1 "$WORLD_ROOT/k-T1.out"
+ll_wait_lines "$LL_SIG/k-T1.runs" 1
+ll_verb_bg "$RK" T2 "$WORLD_ROOT/k-T2.out"; K2_BG=$!
+sleep 2
+expect_false "(k0-pre) T2 waits on T1's candidate while T1 proves" test -e "$WORLD_ROOT/k-T2.out.rc"
+touch "$LL_SIG/k-T1.go"
+ll_wait_file "$WORLD_ROOT/k-T1.out.rc" 300
+ll_wait_file "$WORLD_ROOT/k-T2.out.rc" 150 || ll_kill_bg "$K2_BG"
+expect_eq "(k1) T1 publishes; T2's wait then ends: CONFLICT with the accepted head, exit 1" "0|1|CONFLICT T2 shared.txt" \
+  "$(cat "$WORLD_ROOT/k-T1.out.rc" 2>/dev/null)|$(cat "$WORLD_ROOT/k-T2.out.rc" 2>/dev/null)|$(cat "$WORLD_ROOT/k-T2.out" 2>/dev/null)"
+expect_regex "(k1) …T2 returned why=conflict" "^line/v1\\|ev=returned\\|row=T2\\|why=conflict\\|detail=shared.txt\\|" "$(ll_ev "$RK" returned)"
+# MUTANT: the wait's end removed. T2 sleeps on after T1 publishes.
+RKM="$(ll_conflict_world km)"
+ll_verb_bg "$RKM" T1 "$WORLD_ROOT/km-T1.out"
+ll_wait_lines "$LL_SIG/km-T1.runs" 1
+LL_MUTANT='s/! _line_ahead_open /false \&\& _line_ahead_open /' LL_MUTANT_FN=_line_carry \
+  ll_drive "$RKM" T2 "$WORLD_ROOT/km-T2.out"; KM2_BG=$!
+sleep 2; touch "$LL_SIG/km-T1.go"
+ll_wait_file "$WORLD_ROOT/km-T1.out.rc" 300
+ll_wait_file "$WORLD_ROOT/km-T2.out.rc" 80
+expect_eq "(k2m-pre) the mutant ran: T1 published and T2 entered the line" "0 1" \
+  "$(cat "$WORLD_ROOT/km-T1.out.rc" 2>/dev/null) $(ll_ev "$RKM" ready | grep -c '|row=T2|')"
+expect_false "(k2m) MUTANT the wait's end removed: T2 still waits 8 s after T1 published (the row can fail)" \
+  test -e "$WORLD_ROOT/km-T2.out.rc"
+ll_kill_bg "$KM2_BG"
+
+# ---------------------------------------------------------------------------
+section "§INPUTS: the poll and --within read as numbers (read-structure-p12 #7, read-adversarial-p12 #4)"
+expect_eq "(i1) BIONIC_LINE_POLL that is no number falls back to 1 s; a decimal one is kept" "1 0.2" \
+  "$(BIONIC_LINE_POLL=abc bash -c '. "$1" && printf %s "$LINE_POLL"' _ "$LINE") $(BIONIC_LINE_POLL=0.2 bash -c '. "$1" && printf %s "$LINE_POLL"' _ "$LINE")"
+RI="$(ll_rworld)"
+ll_verb "$RI" T1 --within 08
+expect_eq "(i2) --within 08 is eight seconds, not an octal error: the 5 s suite runs and lands" "0" "$LL_RC"
+
 finish
