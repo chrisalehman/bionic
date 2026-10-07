@@ -124,6 +124,15 @@
 # out of the recorder unchanged; only its own appended `teammate_id=` is positional, and it
 # appends at the END either way.
 
+# THE STOP'S REASON IS A ROW KEY OF ITS OWN (wave-28 T77; A-orch-239 2a). `reason=<why>` rides the closed
+# row `hooks/stop-guard.sh` appends when it honours the orchestrator's recorded stop of an agent the
+# roster never saw: the sentence the orchestrator gave, so the sweeper and the Patrol see WHY the row is
+# closed. Present-if-passed, after `done=` and before `tool_use_id=`, so a row 1.12.0 wrote is unmoved.
+# It is prose like the rest (the `|` fold applies; nothing compares it back to something a human typed).
+# It is NOT `source=` (the writer's word for where a deliverable's path came from; a stop has none) and
+# NOT `waiver=` (the sweeper reads a waiver as a WAIVED contract, which would discharge the name's next
+# stop: A-T70.7).
+
 ROSTER_SCHEMA_VERSION="v1"
 
 # ---------- THE READ-ONLY ROLE SET (wave-20 T7, REQ-9, D9, Δ12) ------------------------
@@ -281,9 +290,10 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
-  local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed="" row="" lands_on=""
+  local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed="" row="" lands_on="" reason=""
   local landed="" landed_at="" has_landed=0 has_landed_at=0
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
+  local has_reason=0
   local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0 has_pushed=0
   local has_row=0 has_lands_on=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
@@ -331,6 +341,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       extended)      extended="$val";     has_extended=1 ;;
       held)          held="$val";         has_held=1 ;;
       done)          done_marker="$val";  has_done=1 ;;
+      reason)        reason="$val";       has_reason=1 ;;
       questions)     questions="$val";    has_questions=1 ;;
       lands_red)     lands_red="$val";    has_lands_red=1 ;;
       red_evidence)  red_evidence="$val"; has_red_evidence=1 ;;
@@ -363,6 +374,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_extended" -eq 1 ]; then out="$out|extended=$extended"; fi
   if [ "$has_held" -eq 1 ]; then     out="$out|held=$held"; fi
   if [ "$has_done" -eq 1 ]; then     out="$out|done=$done_marker"; fi
+  if [ "$has_reason" -eq 1 ]; then   out="$out|reason=$reason"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
   if [ "$has_questions" -eq 1 ]; then out="$out|questions=$questions"; fi
   if [ "$has_lands_red" -eq 1 ]; then out="$out|lands_red=$lands_red"; fi
