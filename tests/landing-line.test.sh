@@ -964,6 +964,11 @@ expect_eq "(lb2) lands_red=, cut at its first word as ready cuts it, decodes to 
   "${LB_RED_READ%% *}" "$(_line_suites "${LB_RED_READ%% *}")"
 expect_contains "(lb3) …and that suite is one of the row's lands_on suites, in the same spelling" \
   ",${LB_RED_READ%% *}," ",$(_line_suites "$LB_ON_READ"),"
+# The token half (read-structure-p17 #5): the wall writes a debt only as `<suite> until <token>`, so
+# ready's token cut (`${debt#* until }`, line.sh) and land's (`${lands_red#* until }`, worktree.sh) read
+# the one token; a debt with no ` until ` is never written, so where the two cuts differ is unreached.
+expect_eq "(lb3t) …and the debt carries its token after one ' until ', the cut both decoders make" \
+  "ext:vendor-fix" "${LB_RED_READ#* until }"
 LB_NONE="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
   brief_field "$(lift_contract_fields 'Lands-on: none — prose only')" lands_on)"
 expect_eq "(lb4) Lands-on: none lifts as none, which _line_suites reads as no suites" "none|none" \
