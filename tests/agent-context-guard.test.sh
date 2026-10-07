@@ -64,7 +64,10 @@ make_repo() {
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name "T"
   echo seed > "$repo/README.md"
-  git -C "$repo" add README.md
+  # THE PROJECT HAS THE RUNNER'S DOOR (wave-28 T54): the one door fires only where tests/run.sh says --only,
+  # so this world plants the same runner as tests/bash-walls.test.sh's bw_door, committed with the seed.
+  mkdir -p "$repo/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$repo/tests/run.sh"
+  git -C "$repo" add README.md tests/run.sh
   git -C "$repo" commit -qm seed 2>/dev/null
   mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
   cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'

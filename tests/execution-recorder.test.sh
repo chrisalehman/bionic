@@ -3697,7 +3697,9 @@ WN_IMP=bionic:implementor
 wn_world() {  # <label> -> "<repo>|<transcript>|<config dir>", its tests/ holding three suites
   local repo tr sub cfg
   IFS='|' read -r repo tr sub cfg <<< "$(make_world "$1" yes)"
-  mkdir -p "$repo/tests"
+  # THE PROJECT HAS THE RUNNER'S DOOR (wave-28 T54): the one door fires only where tests/run.sh says --only,
+  # so this world plants the same runner as tests/bash-walls.test.sh's bw_door, committed with the seed.
+  mkdir -p "$repo/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$repo/tests/run.sh"
   for _wn_s in alpha beta gamma; do printf '#!/bin/bash\n' > "$repo/tests/${_wn_s}.test.sh"; done
   printf '%s|%s|%s' "$repo" "$tr" "$cfg"
 }

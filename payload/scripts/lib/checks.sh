@@ -352,6 +352,15 @@ bionic_check_working_principles() {  # <row id>
   [ "$(principles_state)" = "absent" ]
 }
 
+# THE SHARE OFFER (wave-28 T10; D16). Fires while no share file is there, which is an offer nobody has
+# taken and not a fault: the gate's 80 stands without one. So the row carries no label and doctor prints
+# no fix line for it; its one line on that page is the RESOURCES share row, which says where the number
+# came from. Setup's roster and `--only share` read it.
+bionic_check_share() {  # <row id>
+  case "$(detect_share)" in *"state=default "*) return 0 ;; esac
+  return 1
+}
+
 # THE RETIRED BLOCK, AND ONLY THE BLOCK (wave-27 T75, A-orch-162). This predicate fires
 # when setup has a removal it can take: bionic's whole block, writable, standing as
 # one unit. A bare line, bionic's own included, is never taken out by any door, and a
@@ -755,6 +764,7 @@ _bionic_checks_build() {
   _bionic_checks_emit "legacy-permission-block" "legacy permission block" "bionic_check_legacy_permission_block" "setup" "legacy-permission-block" "$r_setup"
   _bionic_checks_emit "permission-mode" "default permission mode" "bionic_check_permission_mode" "setup" "permission-mode" "$r_setup"
   _bionic_checks_emit "working-principles" "working principles" "bionic_check_working_principles" "setup" "working-principles" "$r_setup"
+  _bionic_checks_emit "share" "" "bionic_check_share" "setup" "share" "$r_setup"
 
   _bionic_checks_emit "statusline-npx" "statusLine command" "bionic_check_statusline_npx" "setup" "tool:ccstatusline" "$r_setup"
 

@@ -14,13 +14,12 @@ DISCRETIONARY task execution under TDD. Judgment and taste are licensed WITHIN t
 <!-- REPORT-CONTRACT-BEGIN -->
 Every factual claim in your report — a test result, a file's existence, a command's
 outcome — carries the command that proves it and either its output or the path of a saved log
-holding that output, or the explicit label `unverified`. The orchestrator re-checks an
-`unverified` claim only when it acts on that claim; a claim with neither proof nor label is a
-contract violation.
+holding that output, or the explicit label `unverified`. A claim with neither proof nor label
+is a contract violation.
 
 **Deliver the report with the SendMessage tool**, naming your artifact's path, to whoever
-dispatched you (`to: "main"` unless your brief says otherwise). Completion is signaled,
-never inferred: plain final text and going idle reach no one. Send it, then stop.
+dispatched you (`to: "main"` unless your brief says otherwise). Plain final text and going idle
+reach no one. Send it, then stop.
 <!-- REPORT-CONTRACT-END -->
 
 ## Discretion contract
@@ -65,13 +64,15 @@ Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
 Questions: yours to answer.
+Row: the plan row you run.
+Lands-on: the suites `ready` proves through the gate: when green, say ready from your tree; it is your last act.
 Lands-red: the one suite you may land red.
 Red-evidence: a file holding head: <40-hex>, your head.
 Deliverable-waiver: report by message, not a file.
 <!-- BRIEF-SCAFFOLD-READER-END -->
 
 <!-- DISPATCH-RULES-BEGIN -->
-- **Spell each suite literally**: one `bash tests/<name>.test.sh` per suite, one call each.
+- **Where `tests/run.sh` takes `--only`, use the door**: `tests/run.sh --only <name>.test.sh`, one call each.
 - **Never end your turn with a command or an external run (CI, a background task) in flight**:
   watch it in the foreground.
 - **A multi-step script goes in a file in your workspace**, run as `bash <file>`, never inline
