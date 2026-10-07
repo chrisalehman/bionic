@@ -2110,6 +2110,10 @@ am_refused "19v8: bash session-poker.sh finding-check" \
 # existing arm's list; there is no second arm.
 am_refused "19v9: bash session-poker.sh finding-move" \
   "bash $AM_POKER finding-move 'record/wave-01/r.md#1' defer 'later' 'the docs pass'"
+# §ARM-A (step-field) — wave-28 T8, REQ-3 AC-3.5, D17: the verb writes the fields the evidence gate reads (`head:`,
+# `pass:`, `total:`), so an agent that could run it could write the evidence of its own step. The verb joins the
+# existing arm's list; there is no second arm.
+am_refused "19v10: bash session-poker.sh step-field" "bash $AM_POKER step-field 5 head=0123456"
 # §ARM-A (land --by-hand) — wave-28 T3, REQ-5 AC-5.2, D9: the hand landing publishes a row past the
 # line, so only the main thread may call it. The arm gains a second script name, not a second arm.
 AM_SW="/opt/plugin/scripts/spawn-worktree.sh"
@@ -3321,9 +3325,14 @@ egd_derive_ms() {  # <scripts dir> -> ms one `proof_readings_derived` takes over
   bash -c '. "$1/lib/roots.sh" 2>/dev/null; . "$1/lib/proof.sh" && proof_readings_derived "$2" "$3"' _ "$1" "$EGD_TPLAN" "$R_EG6" >"$SANDBOX/egd-derived.out" 2>/dev/null
   t1="$(egd_ms)"; printf '%s' "$((t1 - t0))"
 }
+# THE BOUND IS 1200 ms (wave-28 T8; A-orch-243): a wall-clock bound in a suite that is not solo (the `# runner: solo`
+# marker holds a whole SUITE out of the parallel batch, never one row) measured the library at 605 to 742 ms at load ~6
+# on an 8-core machine, against the 1000 ms first set; 1200 ms clears that and the per-reading mutant (1377 ms) still
+# fails it. A red here is a timing row: it is re-run once alone before it counts.
+EGD_BOUND_MS=1200
 EGD_DMS="$(egd_derive_ms "$EGD_SCRIPTS")"  # the quickest of three: a spike of load on a shared machine is not the library's
 for _egd_i in 2 3; do EGD_D2="$(egd_derive_ms "$EGD_SCRIPTS")"; [ "$EGD_D2" -ge "$EGD_DMS" ] || EGD_DMS="$EGD_D2"; done
-expect_eq "EGD-8 §EG-DERIVE (T72) one pass: $EGD_N check lines over a $(wc -l < "$EGD_TPLAN" | tr -d ' ')-line plan are derived in under 1000 ms (took $EGD_DMS ms; 13 s before)" "ok" "$(egd_within "$EGD_DMS" 1000)"
+expect_eq "EGD-8 §EG-DERIVE (T72) one pass: $EGD_N check lines over a $(wc -l < "$EGD_TPLAN" | tr -d ' ')-line plan are derived in under $EGD_BOUND_MS ms (took $EGD_DMS ms; 13 s before)" "ok" "$(egd_within "$EGD_DMS" "$EGD_BOUND_MS")"
 expect_eq "EGD-8b …and the lines are there to be read (the extractor returns real output): $EGD_N written fail, derived pass" "$EGD_N" \
   "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
 
@@ -3387,7 +3396,7 @@ expect_eq "EGD-mut2 the per-reading copy of the library parses" "0" "$(bash -n "
 EGD_MDMS="$(egd_derive_ms "$EGD_MP")"
 expect_eq "EGD-mut3 the per-reading copy derives the same lines (the extractor returns real output)…" "$EGD_N" \
   "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
-expect_eq "EGD-mut4 …but not in under 1000 ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" 1000 | cut -c1-4)"
+expect_eq "EGD-mut4 …but not in under $EGD_BOUND_MS ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" "$EGD_BOUND_MS" | cut -c1-4)"
 # (3) nothing binds, yet the collector hands the lines over: the no-binding-line exit removed
 EGD_NB='if (!nbind) exit'
 anchor "$EGD_SCRIPTS/lib/proof.sh" "$EGD_NB" 1
@@ -3412,5 +3421,97 @@ eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_REFUTED")"
 expect_status "EGD-mut8 the mutant reads the lines handed for another plan and admits the refuted reading: EGD-10b goes red" 0 "$ST"
 HOOK="$EGD_HOOK_KEEP"
+
+# ---------------------------------------------------------------------------
+section "§EG-STEPFIELD — the evidence gate reads each field the step-field verb wrote, at its step (wave-28 T8; REQ-3 AC-3.5; D17)"
+# ---------------------------------------------------------------------------
+# `session-poker.sh step-field <N> <key>=<value>` writes or replaces the indented `<key>: <value>` line under
+# `- Step N:` in the grammar the gate reads (walls.sh `extract_continuation`, `block_get`). FIXTURE FIDELITY: §EG-6's
+# repository and plan writer (a plan the gate admits bar the field under test); the VERB is the real one, run in this
+# repository under the session the gate judges, writing the bound plan through its own dry commit; the next
+# `git commit` is judged by the real gate. Each row below is a field the gate reads: absent, the commit is refused
+# naming it; written by the verb, admitted; replaced by the verb with a value the gate rejects, refused again.
+SFE_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+SFE_HEAD="$H_EG6"
+sfe_verb() {  # <args...> -> SFE_RC, SFE_OUT of the verb, run in R_EG6 under the gate's session
+  SFE_OUT="$( cd "$R_EG6" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+    bash "$SFE_POKER" "$@" 2>&1 )"
+  SFE_RC=$?
+}
+sfe_commit() { run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"; }
+sfe_plan() {  # <current> <scale> <body lines for steps 5.. > -> a plan the gate admits at <current> bar what <body> leaves out
+  eg6_plan "$1" "$2" "$3" "${4:-}" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
+}
+sfe_set() { printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"; bw_bind "$R_EG6"; }
+
+# Step 5: cmd, pass, total, output, head
+sfe_set "$(sfe_plan 5 wave "")"
+sfe_commit
+expect_status "SFE-0 control: the Step-5 block without cmd, pass, total, output and head is refused by the gate" 2 "$ST"
+expect_contains "SFE-0b …naming the fields it lacks" "cmd pass total output" "$ERR"
+sfe_verb step-field 5 cmd="bash tests/run.sh"
+expect_eq "SFE-1 step-field 5 cmd= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_verb step-field 5 pass=3
+sfe_verb step-field 5 total=3
+sfe_verb step-field 5 output=record/generic-evidence.md
+sfe_commit
+expect_status "SFE-2 cmd, pass, total and output written by the verb, the head still absent: refused" 2 "$ST"
+expect_contains "SFE-2b …on the head alone" "carries no 'head:'" "$ERR"
+sfe_verb step-field 5 head="$SFE_HEAD"
+expect_eq "SFE-3 step-field 5 head= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-4 the five fields the verb wrote are read by the gate: admitted" 0 "$ST"
+sfe_verb step-field 5 pass=2
+expect_eq "SFE-5 step-field 5 pass=2 replaces the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-5b the gate reads the pass the verb wrote: pass 2 of total 3 is refused" 2 "$ST"
+expect_contains "SFE-5c …in the gate's words" "pass=2 but total=3" "$ERR"
+expect_eq "SFE-5d …and the block holds one pass: line" "1" "$(awk '/^- Step 5:/ { f = 1; next } /^- Step 6:|^## / { f = 0 } f && /^  pass:/ { n++ } END { print n + 0 }' "$R_EG6/.bionic/docs/plans/active.md")"
+sfe_verb step-field 5 pass=3
+sfe_verb step-field 5 head=feedfacecafe
+sfe_commit
+expect_status "SFE-6 a head the verb replaced with a hash that is no commit here: refused" 2 "$ST"
+expect_contains "SFE-6b …in the gate's words" "is not a commit in the repository" "$ERR"
+sfe_verb step-field 5 head="$SFE_HEAD"
+sfe_commit
+expect_status "SFE-7 the head replaced by the verb with the commit: admitted again" 0 "$ST"
+
+# Step 7: adr
+sfe_set "$(sfe_plan 7 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+- Step 7: documenting")"
+sfe_commit
+expect_status "SFE-8 control: the Step-7 block with no adr, rca or n/a is refused" 2 "$ST"
+expect_contains "SFE-8b …naming them" "adr: <path>" "$ERR"
+sfe_verb step-field 7 adr=docs/adr-0001.md
+expect_eq "SFE-9 step-field 7 adr= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-9b the gate reads the adr the verb wrote: admitted" 0 "$ST"
+
+# Step 8: merge, worktree-removed (cleanup: n/a is the block's own line)
+sfe_set "$(sfe_plan 8 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+- Step 8: integrating
+  cleanup: n/a")"
+sfe_commit
+expect_status "SFE-10 control: the Step-8 block without merge and worktree-removed is refused" 2 "$ST"
+expect_contains "SFE-10b …naming both" "merge worktree-removed" "$ERR"
+sfe_verb step-field 8 merge=0123456789abcdef0123456789abcdef01234567
+sfe_commit
+expect_status "SFE-11 merge written by the verb, worktree-removed still absent: refused, on that field alone" 2 "$ST"
+expect_contains "SFE-11b …naming worktree-removed" "worktree-removed" "$ERR"
+sfe_verb step-field 8 worktree-removed=yes
+sfe_commit
+expect_status "SFE-12 both fields the verb wrote are read by the gate: admitted" 0 "$ST"
+
+# Step 4: share (no rule of the gate's reads it; the block stays admitted and the line is the gate's own grammar)
+sfe_set "$(sfe_plan 4 wave "")"
+sfe_commit
+expect_status "SFE-13 control: the Step-4 block, as the gate admits it" 0 "$ST"
+sfe_verb step-field 4 share=55
+expect_eq "SFE-14 step-field 4 share= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-14b …and the block with the share line is admitted" 0 "$ST"
+expect_eq "SFE-14c …the line is the indented one, under the Step 4 line, before Step 5" "  share: 55|- Step 5: floor run" \
+  "$(awk '/^- Step 4:/ { f = 1; next } f && /^  share:/ { l = $0; getline n; print l "|" n; exit }' "$R_EG6/.bionic/docs/plans/active.md")"
+sfe_set "$(sfe_plan 5 wave "")"
 
 finish
