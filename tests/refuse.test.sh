@@ -1217,8 +1217,14 @@ INV_W28_SYN="$(mktemp -d)"
 for _f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
   mkdir -p "$INV_W28_SYN/${_f%/*}"; cp "$REPO_ROOT/$_f" "$INV_W28_SYN/$_f"
 done
-printf '%s\n' '  fold_block exit2 queue "a row must wait its turn in the line" "say ready" "planted"' \
-  '  fold_block exit2 queue "a second planted arm" "say ready" "planted"' >> "$INV_W28_SYN/payload/scripts/lib/walls.sh"
+# AS MANY ARMS AS PASS THE CEILING FROM WHERE THE TREE STANDS (wave-28 T9): a row that removes
+# refusal sites (T9 took out two) leaves the tree under 1.12.0's count, so a fixed two would not
+# reach past it. One arm more than the room left, the door's included.
+_inv_w28_k=$(( INV_W28_BASE + 2 - INV_W28_N )); [ "$_inv_w28_k" -ge 2 ] || _inv_w28_k=2
+while [ "$_inv_w28_k" -gt 0 ]; do
+  printf '%s\n' "  fold_block exit2 queue \"planted arm ${_inv_w28_k}\" \"say ready\" \"planted\"" >> "$INV_W28_SYN/payload/scripts/lib/walls.sh"
+  _inv_w28_k=$((_inv_w28_k - 1))
+done
 expect_contains "INV-W28b a planted queue arm past the ceiling is reported, so the check can fail" "sites=" \
   "$(inv_w28_excess "$INV_W28_SYN" "$INV_FILE")"
 rm -rf "$INV_W28_SYN"
