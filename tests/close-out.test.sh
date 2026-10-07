@@ -2058,4 +2058,33 @@ expect_eq "LAND-mut2 …and carries no ## Landings, so LAND-2 and LAND-4 go red 
   "$(/usr/bin/grep -c '^## Landings$' "$PLM/$CONT_REL" | tr -d ' ')"
 rm -rf "$LAND_MUT"
 
+# ---- wave-28 T62 (AC-4.6, D18): a run open across the upgrade holds `landed:` lines and no line/v1 event ----
+# The report says so (`landings: unmeasured`) where it once printed zeros; the continuation's section is
+# that one line, with no fence and no row.
+PLU="$(mk_fixture landings5)"; advance_to "$PLU" 8
+LAND_UREC="$PLU/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+mkdir -p "${LAND_UREC%/*}"
+printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-06T10:09:00Z|suites=a.test.sh\n' \
+  "$LAND_C" "$LAND_C" "$LAND_C" > "$LAND_UREC"
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLU" run
+expect_eq "LAND-9 a record of landed lines and no line/v1 event: run exits 0 and ## Landings is the one unmeasured line" \
+  "0|landings: unmeasured — the landing record holds no line/v1 events" "$CO_RC|$(land_section "$PLU/$CONT_REL")"
+expect_eq "LAND-9b …under no fence, and with no zeros anywhere in the continuation" "0|0" \
+  "$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLU/$CONT_REL" | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^landings: queue=0 ' "$PLU/$CONT_REL" | tr -d ' ')"
+# the mutation arm: the unfenced branch never taken, so the section is fenced again
+LAND_UMUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-unm-mut.XXXXXX")"
+mkdir -p "$LAND_UMUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$LAND_UMUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$LAND_UMUT/scripts/card.sh"
+sed 's/^      "landings: unmeasured "\*)/      "landings: never "*)/' "$SCRIPT" > "$LAND_UMUT/scripts/close-out.sh"
+expect_eq "LAND-mut3 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$LAND_UMUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PLV="$(mk_fixture landings6)"; advance_to "$PLV" 8
+mkdir -p "$PLV/.bionic/docs/record/wave-01-fixture"; cp "$LAND_UREC" "$PLV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+( cd "$PLV" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    BIONIC_GATE_DIR="$LAND_GATE" bash "$LAND_UMUT/scripts/close-out.sh" "$PLV/$PLAN_REL" run ) > "$SANDBOX/land-umut.out" 2>&1
+LAND_UMRC=$?
+expect_eq "LAND-mut4 the doctored run still closes and fences the line (two fence lines), which LAND-9b forbids" "0|2" \
+  "$LAND_UMRC|$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLV/$CONT_REL" | wc -l | tr -d ' ')"
+rm -rf "$LAND_UMUT"
+
 finish
