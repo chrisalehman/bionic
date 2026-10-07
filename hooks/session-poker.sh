@@ -28,6 +28,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
 #     bash <plugin-root>/hooks/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle a check a finding owes, on its check: line (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -449,6 +450,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle the check an unsure finding owes, on its check: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -749,6 +751,20 @@ case "$VERB" in
     case "${1##*#}" in *[!0123456789]*) usage "finding-check: '$1' is not <record>#<n>." ;; esac
     [ -n "$FC_REC" ] || usage "$FC_USAGE"
     FC_ID="$1"; FC_HOW="$2"
+    ;;
+  # FOUR OPERANDS (wave-28 T42; D34): the finding (`<record>#<n>`), where it goes (defer or fix), the
+  # user's words as typed and why. A missing or blank operand, another direction or an id of another
+  # shape is the usage error; whether the words stand in a typed prompt is the verb's own refusal (1).
+  finding-move)
+    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why."
+    [ $# -eq 4 ] && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$FM_USAGE"
+    case "$2" in defer|fix) : ;; *) usage "$FM_USAGE" ;; esac
+    case "$1" in
+      *?#[0123456789]*) : ;;
+      *) usage "finding-move: '$1' is not <record>#<n>." ;;
+    esac
+    case "${1##*#}" in *[!0123456789]*) usage "finding-move: '$1' is not <record>#<n>." ;; esac
+    FM_ID="$1"; FM_TO="$2"; FM_RAW="$3"; FM_WHY_RAW="$4"
     ;;
   # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
@@ -6971,6 +6987,114 @@ $PF_PLANL"
     plan_verb_swap finding-check "the check of $FC_ID" writer
     say "finding-check — $(clean "$FC_ID"):$(clean "$FC_TAIL") on its check: line of $PV_PLAN; dry-committed first."
     [ -z "$FC_DEF" ] || say "finding-check — $(clean "$FC_DEF")"
+    exit 0
+    ;;
+
+  # A MOVE IS THE USER'S PROVEN WORD (wave-28 T42; REQ-8 AC-8.9, D34). A registered finding — one whose
+  # record a `proved:` line names as its evidence — is moved across the line, to defer or to fix, only
+  # on words lib/said.sh `user_said` finds in a prompt the user typed in this session's transcript (a
+  # tool's result, a teammate's or another session's message, a hook's context and the orchestrator's
+  # own text never count; rc 2, no transcript, refuses too). An S1, at the rating every read gives it
+  # (lib/proof.sh `proof_finding_rating`), is never deferred. The move is written in place after the
+  # finding's last line, through the plan transaction:
+  #
+  #   moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" why="<why>"
+  #
+  # the words and why folded to one line and escaped as a deferral's sentence is (`deferral_fold`,
+  # `deferral_escape`); a move to defer first writes the finding's `deferred:` line when the plan holds
+  # none (placed by `proof_add_line`). Every read then takes the priority the last move gave it.
+  # Main thread only, by the existing arm's list (lib/walls.sh `_wall_poker_contract_verb`).
+  finding-move)
+    if ! { declare -F proof_finding_rating >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F _proof_moved_to >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
+      . "$BIONIC_LIB/said.sh"
+    fi
+    if ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    FM_WORDS="$(deferral_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"
+    plan_verb_open finding-move
+    FM_REC="${FM_ID%#*}"; FM_N="${FM_ID##*#}"
+    if ! awk -v ev="$FM_REC" '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && /^proved:[ \t]/ { m = split($0, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] == "evidence=" ev) hit = 1 }
+      END { exit !hit }' "$PV_PLAN"; then
+      die "REFUSED — $(clean "$FM_REC") is no reading registered under ## SDLC State (no proved: line names it as its evidence), and only a registered finding is moved; the plan is unchanged."
+      exit 1
+    fi
+    FM_DOCS="$(docs_root "$PV_REPO")"
+    FM_F="$(proof_findings "$FM_DOCS/$FM_REC" 2>/dev/null | awk -F'\t' -v n="$FM_N" '$1 == n { print; exit }')"
+    if [ -z "$FM_F" ]; then
+      die "REFUSED — the reading $(clean "$FM_REC") holds no finding $FM_N (read as $(clean "$FM_DOCS/$FM_REC")); the plan is unchanged."
+      exit 1
+    fi
+    IFS='	' read -r _ FM_S FM_R _ _ _ _ FM_TITLE <<FM_FINDING
+$FM_F
+FM_FINDING
+    set -- $(proof_finding_rating "$PV_PLAN" "$FM_ID" "$FM_S" "$FM_R")
+    if [ $# -lt 3 ]; then
+      die "REFUSED — $(clean "$FM_ID") was refuted by its check, so there is no finding to move; the plan is unchanged."
+      exit 1
+    fi
+    FM_S="$1"; FM_R="$2"
+    if [ "$FM_TO" = defer ] && [ "$FM_S" = S1 ]; then
+      die "REFUSED — $(clean "$FM_ID") is rated S1 $FM_R, and an S1 is never deferred, whoever asks; the plan is unchanged."
+      exit 1
+    fi
+    FM_WHO="$(deferral_fold "$(git -C "$PV_REPO" config user.name 2>/dev/null)")"
+    if [ -z "$FM_WHO" ]; then
+      die "REFUSED — no git user.name is set for $PV_REPO, and a move records who made it; set it, then move again. The plan is unchanged."
+      exit 1
+    fi
+    user_said "$FM_WORDS"; FM_SAID=$?
+    if [ "$FM_SAID" -eq 2 ]; then
+      die "REFUSED — this session's transcript cannot be found or read (session ${CLAUDE_CODE_SESSION_ID:-none} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged."
+      exit 1
+    fi
+    if [ "$FM_SAID" -ne 0 ]; then
+      die "REFUSED — the words \"$(clean "$FM_WORDS")\" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged."
+      exit 1
+    fi
+    cp "$PV_PLAN" "$PV_NEW"
+    FM_DEF=""
+    if [ "$FM_TO" = defer ] && ! deferral_line "$PV_PLAN" "$FM_ID" >/dev/null; then
+      FM_DEF="deferred: $FM_ID $FM_S $FM_R \"$(printf '%s' "$FM_TITLE" | tr '"' "'")\""
+      if ! proof_add_line "$PV_NEW" "$FM_DEF" > "$PV_NEW.2" 2>/dev/null || [ ! -s "$PV_NEW.2" ]; then
+        die "REFUSED — the deferred: line for $(clean "$FM_ID") could not be placed under ## SDLC State; the plan is unchanged."
+        exit 1
+      fi
+      mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    FM_LINE="moved: $FM_ID to=$FM_TO by=$FM_WHO at=$(iso_now) words=\"$(deferral_escape "$FM_WORDS")\" why=\"$(deferral_escape "$FM_WHY")\""
+    # IN PLACE: after the last line of the block naming the finding (its deferred:, check: or an earlier
+    # moved: line), else after the last proof line naming its record; else where proof_add_line puts it.
+    FM_LINE="$FM_LINE" awk -v id="$FM_ID" -v ev="$FM_REC" '
+      BEGIN { L = ENVIRON["FM_LINE"] }
+      { row[NR] = $0 }
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && /^(deferred|check|moved):[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) own = NR }
+      insdlc && /^proved:[ \t]/ { m = split($0, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] == "evidence=" ev) pr = NR }
+      END {
+        at = own ? own : pr
+        if (!at) exit 1
+        for (i = 1; i <= NR; i++) { print row[i]; if (i == at) print L }
+      }' "$PV_NEW" > "$PV_NEW.2" && [ -s "$PV_NEW.2" ] || {
+      die "REFUSED — the moved: line for $(clean "$FM_ID") could not be placed under ## SDLC State; the plan is unchanged."
+      exit 1
+    }
+    mv -f "$PV_NEW.2" "$PV_NEW"
+    plan_verb_swap finding-move "the move of $FM_ID" writer
+    say "finding-move — $(clean "$FM_ID") to $FM_TO on the user's words, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first."
+    [ -z "$FM_DEF" ] || say "finding-move — $(clean "$FM_DEF")"
     exit 0
     ;;
 

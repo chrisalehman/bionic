@@ -12496,7 +12496,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current finding-check finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -13512,6 +13512,221 @@ expect_ne "CHECK-mut3 …and returns the line's own rating for the settled line,
 POKE_BOUND="$CHK_BOUND_WAS"
 
 # ============================================================
+section "§MOVE: a finding crosses the line only on words the user typed in this session, written with who, when and why, and never an S1 to defer (wave-28 T42; REQ-8 AC-8.9; D34)"
+# ============================================================
+#
+#   finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'
+#
+# lib/said.sh `user_said <text>` answers 0 when the text, its runs of white space folded, stands inside
+# a prompt the user typed in this session's transcript; 1 when it stands in none; 2 when the transcript
+# cannot be found or read. A tool's result, a teammate's message, another session's message, a hook's
+# added context, the orchestrator's own text, a compaction summary, a pasted block and a dispatched
+# agent's prompt never count. On rc 0 the verb writes, in place after the finding's own line,
+# `moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" why="<why>"`,
+# and a `deferred:` line when the move is to defer; every read of the record then takes the priority
+# it was moved to (lib/proof.sh `proof_finding_rating`).
+#
+# FIXTURE FIDELITY. The transcript is assembled from tests/fixtures/transcript-move/, one file per kind
+# of entry, its key sets measured on CLI 2.1.291 transcripts and every word invented (that directory's
+# README). It sits where the CLI writes one, `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session id>.jsonl`,
+# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts. Every
+# decoy carries the words the typed prompt carries (MOVE-<kind>-pre), so a reader that counted it would
+# find them. The findings are registered by the real verb on §SEV's repository and plan.
+MV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+MV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+MV_CFG="$TMPROOT/mv-cfg"; MV_PROJ="$MV_CFG/projects/-work-project"; mkdir -p "$MV_PROJ"
+export CLAUDE_CONFIG_DIR="$MV_CFG"
+MV_TX="$MV_PROJ/$SID.jsonl"
+MV_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+SAID_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/said.sh"
+MV_P='defer the flag wording until the next wave, it can wait'
+MV_Q='and move the third one to fix now'
+MV_F='start the review of the parser'
+mv_tx() { local f; cat "$MV_FX/frame.jsonl" > "$MV_TX"; for f in "$@"; do cat "$MV_FX/$f.jsonl" >> "$MV_TX"; done; }
+mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config
+  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "${2:-$SAID_LIB}" "$1" 2>/dev/null
+}
+mv_id() { printf 'record/wave-01-fixture/%s.md#%s' "$1" "${2:-1}"; }
+mv_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(mv_id "$1") "; }
+mv_moved() { /usr/bin/grep -F "moved: $(mv_id "$1") " "$PSEV"; }
+
+# ---------- user_said, on the library (unit rows) ----------
+mv_tx typed
+expect_eq "MOVE-said1 §MOVE the words of a typed prompt, its runs of white space folded: found (rc 0)" "0" "$(mv_said "$MV_P")"
+expect_eq "MOVE-said2 …the words given with runs of their own, a line break and a tab: found" "0" \
+  "$(mv_said "$(printf 'defer  the flag\nwording until the next wave,\tit can wait')")"
+expect_eq "MOVE-said3 …words the transcript does not carry: not found (rc 1)" "1" "$(mv_said 'defer every finding at once')"
+expect_eq "MOVE-said4 …white space alone says nothing (rc 1)" "1" "$(mv_said '   ')"
+mv_tx queued
+expect_eq "MOVE-said5 a prompt the user typed while a turn ran (a queued command): found" "0" "$(mv_said "$MV_Q")"
+for c in "tool-result@a tool's result" "teammate@a teammate's message" "peer@another session's message" \
+         "peer-queued@another session's message delivered mid-turn" "hook-context@a hook's added context" \
+         "orchestrator@the orchestrator's own text" "compact@a compaction summary" \
+         "pasted@a block the user pasted into a prompt" "sidechain@a dispatched agent's prompt"; do
+  k="${c%%@*}"; d="${c#*@}"
+  expect_contains "MOVE-$k-pre precondition: the $k fixture carries the words, as a raw read of the file finds them" \
+    "$MV_P" "$(cat "$MV_FX/$k.jsonl")"
+  mv_tx "$k"
+  expect_eq "MOVE-said-$k §MOVE the same words only in $d: not found (rc 1)" "1" "$(mv_said "$MV_P")"
+  expect_eq "MOVE-said-$k-pos …while the typed prompt beside it in the same transcript is found" "0" "$(mv_said "$MV_F")"
+done
+mv_tx typed; printf '{"type":"user","message":{"role":"us' >> "$MV_TX"
+expect_eq "MOVE-said6 a transcript whose last line is torn mid-write is still read: found" "0" "$(mv_said "$MV_P")"
+rm -f "$MV_TX"
+expect_eq "MOVE-said-none no transcript for the session: rc 2" "2" "$(mv_said "$MV_P")"
+mv_tx typed
+expect_eq "MOVE-said-nosid …no session key: rc 2" "2" \
+  "$(env -u CLAUDE_CODE_SESSION_ID bash -c '. "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "$SAID_LIB" "$MV_P" 2>/dev/null)"
+chmod 000 "$MV_TX"
+expect_eq "MOVE-said-unread …a transcript that cannot be read: rc 2" "2" "$(mv_said "$MV_P")"
+chmod 600 "$MV_TX"; mv "$MV_TX" "$TMPROOT/mv-real.jsonl"; ln -s "$TMPROOT/mv-real.jsonl" "$MV_TX"
+expect_eq "MOVE-said-link …a transcript that is a symbolic link is not this session's: rc 2" "2" "$(mv_said "$MV_P")"
+rm -f "$MV_TX"; mv_tx typed
+expect_eq "MOVE-said-back …and the same transcript, a regular file again, is found" "0" "$(mv_said "$MV_P")"
+
+# ---------- the mutation arm: user_said counting a tool's result ----------
+MV_MUT="$(mktemp -d "$TMPROOT/mv-mut.XXXXXX")"
+MV_NEEDLE='if .type == "user" and .isMeta != true and .isSidechain != true and (.origin.kind? // "") == "human" then .message.content | words'
+anchor "$SAID_LIB" "$MV_NEEDLE" 1
+MV_N="$MV_NEEDLE" awk 'BEGIN { n = ENVIRON["MV_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if .type == \"user\" then .message.content | tostring" substr($0, i + length(n)); print }' \
+  "$SAID_LIB" > "$MV_MUT/said.sh"
+expect_eq "MOVE-mut0 the mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MV_MUT/said.sh" | /usr/bin/grep -c '^>')"
+mv_tx tool-result
+expect_eq "MOVE-mut1 the mutant runs: it finds the typed prompt as the library does" "0" "$(mv_said "$MV_F" "$MV_MUT/said.sh")"
+expect_eq "MOVE-mut2 …and counts the tool's result, so MOVE-said-tool-result goes red under it" "0" "$(mv_said "$MV_P" "$MV_MUT/said.sh")"
+
+# ---------- the seam: a moved: line re-rates at every read (unit rows on a planted plan) ----------
+MV_SP="$TMPROOT/mv-seam.plan.md"
+mv_seam() {  # <moved: lines...> -> the plan holding them under ## SDLC State
+  { printf '# plan\n\n## SDLC State\n\ncurrent: 4\n'; for l in "$@"; do printf '%s\n' "$l"; done; printf '\n## Tasks\n'; } > "$MV_SP"
+}
+mv_rate() { bash -c '. "$1"; proof_finding_rating "$2" "$3" "$4" "$5"' _ "$SEV_LIB" "$MV_SP" "$1" "$2" "$3" 2>/dev/null; }
+MV_WHO='by=Dana Fixture at=2026-10-07T12:00:00Z words="later" why="the docs pass"'
+mv_seam "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam1 a finding to fix moved to defer takes defer at the read" "S2 on defer" "$(mv_rate record/x.md#1 S2 on)"
+expect_eq "MOVE-seam1b …and a finding the line does not name keeps the table's priority" "S2 on fix" "$(mv_rate record/x.md#2 S2 on)"
+mv_seam "moved: record/x.md#1 to=fix $MV_WHO"
+expect_eq "MOVE-seam2 a deferral moved to fix takes fix at the read" "S2 off fix" "$(mv_rate record/x.md#1 S2 off)"
+mv_seam "moved: record/x.md#1 to=fix $MV_WHO" "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam3 two moves: the later one is the user's last word" "S2 on defer" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam4 a moved: line deferring an S1, written by hand, is not honoured: an S1 is never deferred" "S1 on fix" "$(mv_rate record/x.md#1 S1 on)"
+mv_seam "moved: record/x.md#1 to=defer by=Dana Fixture at=2026-10-07T12:00:00Z words=\"later\""
+expect_eq "MOVE-seam5 a moved: line that lacks why is not honoured" "S2 on fix" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam '```' "moved: record/x.md#1 to=defer $MV_WHO" '```'
+expect_eq "MOVE-seam6 a moved: line inside a fence is not read" "S2 on fix" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam "check: record/x.md#1 S2 on \"t\"" "moved: record/x.md#1 to=defer $MV_WHO"
+expect_eq "MOVE-seam7 a move keeps an open check open: the fourth word stays" "S2 on defer open" "$(mv_rate record/x.md#1 S2 on)"
+mv_seam "check: record/x.md#1 S2 on \"t\" refuted by=record/c.md" "moved: record/x.md#1 to=fix $MV_WHO"
+expect_eq "MOVE-seam8 a move does not bring back a refuted finding" "" "$(mv_rate record/x.md#1 S2 on)"
+expect_eq "MOVE-seam8b …positive on the same plan: another finding is rated" "S3 off note" "$(mv_rate record/x.md#2 S3 off)"
+
+# ---------- the verb, on §SEV's repository and plan ----------
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=mv-crit agent_id=a-mv-crit subagent_type=bionic:critic \
+     files="$(sev_files "mv-s1 mv-def mv-fix mv-later")")" >> "$SEV_RS"
+sev_cur 4
+sev_rec mv-s1 fail "findings: 1" "finding: 1 S1 on lib/a.sh:5 a write that loses the last line" "shown: 1 bash lib/a.sh --write"
+sev_add mv-s1 mv-crit
+expect_eq "MOVE-0 precondition: an S1 to fix registers (exit 0)" "0" "$RC"
+sev_rec mv-def fail "findings: 1" "finding: 1 S2 on lib/a.sh:3 a flag the help text misnames" "shown: 1 bash lib/a.sh --help"
+sev_add mv-def mv-crit
+expect_eq "MOVE-0b precondition: an S2 to fix registers, and writes no deferred: line (exit 0)" "0|0" \
+  "$RC|$(/usr/bin/grep -c "^deferred: $(mv_id mv-def) " "$PSEV")"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "MOVE-0c precondition: the newest adversarial reading holds a finding to fix: current 8" 1 "$PSEV"
+sev_cur 4
+
+mv_tx typed
+s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id mv-def)" defer "$(printf 'defer the flag  wording\nuntil the next wave, it can wait')" 'the wording waits for the docs pass'
+expect_eq "MOVE-1 §MOVE AC-8.9 words that stand in a typed prompt move the finding (exit 0)" "0" "$RC"
+expect_regex "MOVE-1b …the moved: line carries who, when, the words folded and why" \
+  "^moved: $(mv_id mv-def) to=defer by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z words=\"$MV_P\" why=\"the wording waits for the docs pass\"\$" \
+  "$(mv_moved mv-def)"
+expect_eq "MOVE-1c …a move to defer writes the finding's deferred: line" \
+  "deferred: $(mv_id mv-def) S2 on \"a flag the help text misnames\"" "$(/usr/bin/grep "^deferred: $(mv_id mv-def) " "$PSEV")"
+expect_eq "MOVE-1d …and the moved: line stands in place after the finding's own line" "moved: $(mv_id mv-def)" \
+  "$(/usr/bin/grep -A1 "^deferred: $(mv_id mv-def) " "$PSEV" | tail -1 | awk '{ print $1, $2 }')"
+expect_eq "MOVE-1e …the owed reader gives it the priority it was moved to" \
+  "$(mv_id mv-def) S2 on defer \"a flag the help text misnames\"" "$(mv_owed mv-def)"
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "MOVE-1f …and a finding moved to defer no longer holds the step: current 8 is admitted on a reading written result=fail" \
+  "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+sev_cur 4
+
+# The same words in every other kind of entry, never in a typed prompt: each refused, the plan unchanged.
+sev_rec mv-fix flag "findings: 1" "finding: 1 S2 off - a message the log prints twice"
+sev_add mv-fix mv-crit
+expect_eq "MOVE-2-pre precondition: a deferral registers with its deferred: line (exit 0)" \
+  "0|deferred: $(mv_id mv-fix) S2 off \"a message the log prints twice\"" "$RC|$(/usr/bin/grep "^deferred: $(mv_id mv-fix) " "$PSEV")"
+for k in tool-result teammate peer peer-queued hook-context orchestrator compact pasted sidechain; do
+  mv_tx "$k"; s42_snap "$RSEV" "$PSEV"
+  poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P" 'the user asked'
+  s42_unchanged "MOVE-2-$k §MOVE AC-8.9 the words stand only in the $k entry" 1 "$PSEV"
+  expect_contains "MOVE-2-$k …saying they stand in no prompt the user typed" "in no prompt the user typed" "$OUT"
+done
+rm -f "$MV_TX"; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P" 'the user asked'
+s42_unchanged "MOVE-3 §MOVE no transcript for the session" 1 "$PSEV"
+expect_contains "MOVE-3b …naming the transcript as what cannot be found or read" "transcript cannot be found or read" "$OUT"
+mv_tx typed; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id mv-s1)" defer "$MV_P" 'the user asked'
+s42_unchanged "MOVE-4 §MOVE AC-8.9 an S1 to defer, on words the user typed" 1 "$PSEV"
+expect_contains "MOVE-4b …naming the rule" "an S1 is never deferred" "$OUT"
+poke "$RSEV" finding-move "$(mv_id mv-s1)" fix "$MV_P" 'it stays a fix'
+expect_eq "MOVE-4c …while the same S1 moved to fix on the same words is written (exit 0)" "0|1" "$RC|$(mv_moved mv-s1 | wc -l | tr -d ' ')"
+
+# A deferral moved to fix holds the step until a later passing review covers the fix.
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "MOVE-5-pre precondition: the deferral alone does not hold the step" "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+sev_cur 4
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P" 'the log is read by the next tool'
+expect_eq "MOVE-5 a deferral moved to fix on typed words (exit 0), and the owed reader gives it fix" \
+  "0|$(mv_id mv-fix) S2 off fix \"a message the log prints twice\"" "$RC|$(mv_owed mv-fix)"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "MOVE-5b …and current 8 is refused on the reading written result=flag: its result is derived through the move" 1 "$PSEV"
+expect_contains "MOVE-5c …naming that reading failing" \
+  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/mv-fix.md')" "$OUT"
+sev_cur 4
+sev_rec mv-later pass "findings: 0"
+sev_add mv-later mv-crit
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "MOVE-5d …until a later passing review covers the fix: current 8 is admitted" "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+sev_cur 4
+
+# Who, the finding, and the operands.
+s42_snap "$RSEV" "$PSEV"
+git -C "$RSEV" config --unset user.name
+printf '' > "$TMPROOT/mv-nogit"
+GIT_CONFIG_GLOBAL="$TMPROOT/mv-nogit" GIT_CONFIG_NOSYSTEM=1 poke "$RSEV" finding-move "$(mv_id mv-fix)" defer "$MV_P" 'the user asked'
+git -C "$RSEV" config user.name "Dana Fixture"
+s42_unchanged "MOVE-6 §MOVE AC-8.9 no git user.name to say who moved it" 1 "$PSEV"
+expect_contains "MOVE-6b …naming what is missing" "user.name" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move record/wave-01-fixture/nowhere.md#1 fix "$MV_P" 'the user asked'
+s42_unchanged "MOVE-7 a record no proof line registers" 1 "$PSEV"
+expect_contains "MOVE-7b …naming why" "registered" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move "$(mv_id mv-def 3)" fix "$MV_P" 'the user asked'
+s42_unchanged "MOVE-8 a finding number its record does not hold" 1 "$PSEV"
+expect_contains "MOVE-8b …naming it" "holds no finding 3" "$OUT"
+for c in "MOVE-9@a third form@$(mv_id mv-fix)@later@$MV_P@why" "MOVE-9b@no why@$(mv_id mv-fix)@fix@$MV_P@ " \
+         "MOVE-9c@no words@$(mv_id mv-fix)@fix@ @why" "MOVE-9d@a finding that is not <record>#<n>@record/wave-01-fixture/mv-fix.md@fix@$MV_P@why"; do
+  IFS=@ read -r lbl why1 id to w y <<EOF
+$c
+EOF
+  s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move "$id" "$to" "$w" "$y"
+  s42_unchanged "$lbl usage: $why1" 2 "$PSEV"
+done
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P"
+s42_unchanged "MOVE-9e usage: three operands" 2 "$PSEV"
+expect_contains "MOVE-9f …the usage names the verb's operands" "finding-move takes" "$OUT"
+
+POKE_BOUND="$MV_BOUND_WAS"
+if [ "$MV_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$MV_CCD_WAS"; fi
+
+# ============================================================
 section "§REPORT-RTL §REPORT-KINDS §REPORT-PRINT: the run's numbers folded from the landing record and the gate's requests (wave-28 T14; REQ-4 AC-4.1, AC-4.4, AC-4.5; D18)"
 # ============================================================
 #
@@ -13858,5 +14073,105 @@ expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbi
 POKER="$RK_REAL_POKER"
 rm -rf "$RD_MUT"
 POKE_BOUND="$RK_BOUND_WAS"
+
+section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan's bytes outside the row's own lines are unchanged after ready, a tick and a hand landing (wave-28 T21; D26, REQ-2 AC-2.11, REQ-7 AC-7.2)"
+#
+# The fixture is a plan AS 1.12.0 WROTE IT (tests/fixtures/upgrade-1.12.0): canonical_sdlc_version 14, the
+# `parallel-budget:` line the probe wrote (`source=probe`), rows with no `Lands-on:` label, roster launch rows with
+# `suites_allowed=` and neither `row=` nor `lands_on=`, and in T1's tree a stamp (1.12.0's bare form) saying RED.
+# The run continues: `ready` lands T1 on a run of its own, a tick passes, a person lands T2 by hand, and the plan
+# differs from what 1.12.0 wrote in the three lines of each landed row and nowhere else. The tool never edits the
+# line itself.
+UP_ENV_WAS="$(export -p | /usr/bin/grep -E '^(declare -x|export) (BIONIC_PROBE_|BIONIC_NOW_FILE|CLAUDE_CONFIG_DIR|BIONIC_GATE_DIR|BIONIC_VERB_LOG|WORLD_)')"
+. "$(dirname "$0")/lib/world.sh"
+. "$(dirname "$0")/fixtures/upgrade-1.12.0/install.sh"
+export CLAUDE_CONFIG_DIR="$WORLD_ROOT/home"
+mkdir -p "$CLAUDE_CONFIG_DIR/bionic"; printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+world_machine 8 8192 40 0.5
+world_clock 1000
+world_cost a.test.sh 5 0.5 5
+UP_SPAWN="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+UP_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe'
+up_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+up_world() {  # [<T1 suites_allowed>] -> a world root holding the 1.12.0 fixture
+  local r
+  r="$(world_repo)" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  up_install "$r" "$@" || return 1
+  printf '%s' "$r"
+}
+up_rows_out() {  # <plan> <id>... -> the plan with each named row's own lines (tasks, step line, ledger) left out
+  local p="$1"; shift
+  awk -v ids="$*" 'BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) w[a[i]] = 1 }
+    { if (match($0, /^\| T[0-9]+ \|/)) { id = substr($0, 3, RLENGTH - 4); if (id in w) next }
+      if (match($0, /^- T[0-9]+:/)) { id = substr($0, 3, RLENGTH - 3); if (id in w) next }
+      print }' "$p"
+}
+up_changed() {  # <before> <after> -> how many lines of <after> are not in <before>
+  diff "$1" "$2" | /usr/bin/grep -c '^>'
+}
+up_same() {  # <before> <after> <id>... -> `same` when only the named rows' own lines differ
+  local a="$1" b="$2"; shift 2
+  [ "$(up_rows_out "$a" "$@" | cksum)" = "$(up_rows_out "$b" "$@" | cksum)" ] && printf same || printf differ
+}
+up_ready() {  # <tree> -> UP_OUT, UP_RC
+  UP_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 bash "$UP_SPAWN" ready 2>&1 )"; UP_RC=$?
+}
+UPG="$(up_world)"
+expect_nonempty "(fixture) the 1.12.0 world was made" "$UPG"
+UPG_P="$(up_plan "$UPG")"
+UPG_BEFORE="$UPG_P.before"; cp "$UPG_P" "$UPG_BEFORE"
+UPG_STAMPS="$(git -C "$UPG/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-stamps"
+expect_contains "(up-pre) the planted stamp says RED (rc=1) at T1's head, as 1.12.0's land would read it" \
+  "|head=$(git -C "$UPG/.worktrees/T1" rev-parse HEAD)|dirty=0|rc=1|" "$(cat "$UPG_STAMPS")"
+expect_contains "(up-pre) the fixture plan carries the probe's budget line, and the version 14" "$UP_BUDGET" "$(cat "$UPG_P")"
+expect_contains "(up-pre) …version 14" "canonical_sdlc_version: 14" "$(cat "$UPG_P")"
+expect_eq "(up-pre) …and its rows carry no Lands-on label" "0" "$(/usr/bin/grep -ci 'lands-on' "$UPG_P" | tr -d ' ')"
+
+# ---------- ready ----------
+up_ready "$UPG/.worktrees/T1"
+expect_eq "(up-a1) ready lands the 1.12.0 row beside a stamp that says RED (exit 0)" "0" "$UP_RC"
+expect_match "(up-a1) …printing LANDED, then the owed line" "LANDED T1 *
+landed T1 * — owed: complete task T1, then stop wx-T1" "$UP_OUT"
+cp "$UPG_P" "$UPG_P.after-ready"
+expect_eq "(up-a2) the row's own three lines changed (its status, its step line, its ledger cell)" "3" "$(up_changed "$UPG_BEFORE" "$UPG_P")"
+expect_eq "(up-a2) …and every other byte of the plan is the one 1.12.0 wrote" "same" "$(up_same "$UPG_BEFORE" "$UPG_P" T1)"
+expect_contains "(up-a3) …the probe's budget line among them, as written" "$UP_BUDGET" "$(cat "$UPG_P")"
+expect_contains "(up-a3) …and the version still 14" "canonical_sdlc_version: 14" "$(cat "$UPG_P")"
+
+# ---------- a tick ----------
+( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$POKER" arm ) >/dev/null 2>&1
+UP_TICK="$( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$POKER" tick 2>&1 )"
+expect_contains "(up-b1) a tick ran on the fixture's run (its decision line was printed)" "poker-tick/v1|" "$UP_TICK"
+expect_eq "(up-b1) …and left the plan byte for byte as ready left it" "same" "$(cmp -s "$UPG_P.after-ready" "$UPG_P" && echo same || echo differ)"
+
+# ---------- a hand landing ----------
+UP_HAND="$( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$UP_SPAWN" land "$UPG/.worktrees/T2" --by-hand --reason "fixture" 2>&1 )"; UP_HAND_RC=$?
+expect_eq "(up-c1) a hand landing of T2 lands it (exit 0)" "0" "$UP_HAND_RC"
+expect_contains "(up-c1) …printing the owed line" "landed T2 " "$UP_HAND"
+expect_eq "(up-c2) the hand landing changed the three lines of T2 and no others" "3" "$(up_changed "$UPG_P.after-ready" "$UPG_P")"
+expect_eq "(up-c2) …and, whole, the plan differs from 1.12.0's in T1's and T2's own lines alone" "same" "$(up_same "$UPG_BEFORE" "$UPG_P" T1 T2)"
+expect_contains "(up-c3) …the budget line is as the probe wrote it" "$UP_BUDGET" "$(cat "$UPG_P")"
+
+# ---------- the mutation arm: a tool that edits the line ----------
+# A copy of the hooks whose `row-landed` also changes one byte of the budget line; it is run in a world of its own
+# from a directory outside every checkout, and the tracked file is not touched.
+UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
+cp -R "${BIONIC_HOOKS_DIR}" "$UPM_DIR/hooks" && ln -s "${BIONIC_SCRIPTS_DIR}/payload" "$UPM_DIR/payload"
+awk '/^    plan_verb_swap row-landed "\$PV_ID landed at/ && !d { print "    sed \"s/^\\(parallel-budget: .*\\)source=probe/\\1source=probes/\" \"$PV_NEW\" > \"$PV_NEW.m\" && mv -f \"$PV_NEW.m\" \"$PV_NEW\""; d = 1 }
+  { print }' "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$UPM_DIR/hooks/session-poker.sh"
+expect_eq "(up-m0) the mutant differs from the hook by the one line that edits the budget" "1" \
+  "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$UPM_DIR/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+UPM="$(up_world)"
+UPM_P="$(up_plan "$UPM")"; cp "$UPM_P" "$UPM_P.before"
+UPM_OUT="$( cd "$UPM" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$UPM_DIR/hooks/session-poker.sh" row-landed T1 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z 2>&1 )"; UPM_RC=$?
+expect_eq "(up-m1) the mutant's verb ran and wrote the row (exit 0)" "0" "$UPM_RC"
+expect_eq "(up-m1) …its three lines changed, as the real verb's do" "3" "$(( $(up_changed "$UPM_P.before" "$UPM_P") - 1 ))"
+expect_eq "(up-m2) …and the bytes row goes red: the plan differs outside T1's own lines" "differ" "$(up_same "$UPM_P.before" "$UPM_P" T1)"
+expect_eq "(up-m2) …because the budget line is no longer the one the probe wrote (the real runs above hold it once)" "0 1" \
+  "$(/usr/bin/grep -cFx -- "$UP_BUDGET" "$UPM_P" | tr -d ' ') $(/usr/bin/grep -cFx -- "$UP_BUDGET" "$UPG_P" | tr -d ' ')"
+rm -rf "$UPM_DIR"
+for UP_V in $(compgen -e | /usr/bin/grep -E '^(BIONIC_PROBE_|BIONIC_NOW_FILE$|CLAUDE_CONFIG_DIR$|BIONIC_GATE_DIR$|BIONIC_VERB_LOG$)'); do unset "$UP_V"; done
+eval "$UP_ENV_WAS"
 
 finish
