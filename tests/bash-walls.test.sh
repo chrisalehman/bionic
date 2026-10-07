@@ -2071,6 +2071,11 @@ am_refused "19v2: bash session-poker.sh waive" "bash $AM_POKER waive adversarial
 # §ARM-A (release-check) — wave-27 T16, D12, A-orch-44: the verb writes the release's check fact,
 # so an agent that could run it could record the release check of its own head.
 am_refused "19v3: bash session-poker.sh release-check" "bash $AM_POKER release-check"
+# §ARM-A (finding-stated) — wave-28 T17, REQ-8 AC-8.7, D21: the sentence a deferral is stated by is
+# what the release check reads against the changelog, so an agent that could write one could state
+# its own deferral. The verb joins the existing arm's list; there is no second arm.
+am_refused "19v4: bash session-poker.sh finding-stated" \
+  "bash $AM_POKER finding-stated 'record/wave-01/r.md#1' 'a sentence'"
 # §ARM-A (land --by-hand) — wave-28 T3, REQ-5 AC-5.2, D9: the hand landing publishes a row past the
 # line, so only the main thread may call it. The arm gains a second script name, not a second arm.
 AM_SW="/opt/plugin/scripts/spawn-worktree.sh"
@@ -2095,6 +2100,8 @@ am_admitted "19j5: proof-add from the main thread" \
 am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19j7: waive from the main thread" "bash $AM_POKER waive adversarial 'ship it'" ""
 am_admitted "19j8: release-check from the main thread" "bash $AM_POKER release-check" ""
+am_admitted "19j9: finding-stated from the main thread" \
+  "bash $AM_POKER finding-stated 'record/wave-01/r.md#1' 'a sentence'" ""
 
 # EVERY VERB ON THE LIST, READ FROM THE LIST (wave-27 T16; team-lead ruling). The refusal line is
 # `bionic: <verb> refused — <fact> (<fix>)`, capped at 100 columns by refuse.sh, and a verb long
@@ -2107,6 +2114,7 @@ AM_VERBS="$(awk '/^_wall_poker_contract_verb\(\)/ { f = 1 } f && /^}/ { exit }
   "$WALLS_LIB/walls.sh")"
 expect_contains "19x0 precondition: the verb list is read from walls.sh's case arm (it names amend)" "amend" "$AM_VERBS"
 expect_contains "19x0b …and the last verb added, release-check" "release-check" "$AM_VERBS"
+expect_contains "19x0c …and the verb T17 added, finding-stated" "finding-stated" "$AM_VERBS"
 for _am_v in $AM_VERBS; do
   am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
 done
