@@ -5473,7 +5473,7 @@ return 0
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
 # `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
-# T34, D24); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# T34, D24; `share` — wave-28 T10, D16, in both its forms); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5529,7 +5529,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         shift
         _next="${1:-}"
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|decline|budget)
+          amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|decline|budget|share)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
         esac ;;
       spawn-worktree.sh)
@@ -5710,6 +5710,27 @@ _bsg_cd_walk() {
   return 0
 }
 
+# _door_in_tree — sets _DOOR_HERE to yes when THE PROJECT THE RUN IS IN HAS THE RUNNER'S DOOR, else no
+# (wave-28 T54, D27; A-orch-124/125). The one predicate behind both halves of the door: the arm that
+# refuses a bare run, and the wrap that tells the shim `--runner`. The project is the tree the shim
+# asks from (booked.sh's `tree=`: `--stamp-dir`, else a leading `cd <dir>`, else the payload's cwd):
+# `_bsg_cd_walk`'s `_BSG_STAMP_DIR` when the walk is sure of a `cd`, else the payload's cwd
+# (`_BSG_CWD`), the same expression `_bsg_suites` roots its stamp names at; so the caller has walked
+# the command first. A walk that is not sure falls back to the cwd, as the shim does when it reads no
+# `cd` it can trust. Its checkout's tests/run.sh must say `--only`: a project with
+# suites and no runner, or a runner of its own that takes no flag, has no door to point an agent at.
+# A tree the walk cannot name (no cwd in the payload, a `cd` into nothing) has no runner to find;
+# `git -C ""` would read the hook's own directory instead, so it is not asked.
+_DOOR_HERE=no
+_door_in_tree() {
+  local _top _dir="${_BSG_STAMP_DIR:-$_BSG_CWD}"
+  _DOOR_HERE=no
+  [ -n "$_dir" ] && [ -d "$_dir" ] || return 0
+  _top="$(git -C "$_dir" rev-parse --show-toplevel 2>/dev/null)" || _top="$_dir"
+  [ -f "$_top/tests/run.sh" ] || return 0
+  ! grep -qF -- '--only' "$_top/tests/run.sh" 2>/dev/null || _DOOR_HERE=yes
+}
+
 # _BSG_TARGETS — the command's suite claims, cmd-class.sh's `targets` reading: one
 # `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61):
 # the solo check and the suite names below both read it, so naming the suites costs no fork.
@@ -5758,15 +5779,28 @@ _bsg_solo_target() {
 #
 # A name never carries `|`, `,`, `=`, a space or a newline, so the field stays one field; the shim
 # filters it again (booked.sh).
+#
+# THE DOOR'S CLAIMS (wave-28 T36; D27): an `only` claim is a suite `tests/run.sh --only` names, and
+# it is named like a file claim. _BSG_RUNNER is 1 when there is one and every claim is the runner's
+# (`only`, or the full tree's `run.sh`): the shim then gets `--runner` and asks nothing, since each
+# suite the runner starts asks for itself.
 _BSG_SUITES=""
+_BSG_RUNNER=0
 _BSG_NAME_MAX=100
 _bsg_suites() {
-  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}"
-  _BSG_SUITES=""
+  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}" _only=0 _other=0 _asked=0
+  _BSG_SUITES=""; _BSG_RUNNER=0
   while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] || continue
     if [ "$_k" = split ]; then _BSG_SUITES='?'; return 0; fi
-    if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
+    # NO DOOR IN THIS PROJECT, NO RUNNER CLAIM (wave-28 T54, A-orch-125): its `tests/run.sh --only`
+    # is the full tree under its own name, as at 903c971b, and the shim is not told it is the runner.
+    if [ "$_k" = only ]; then
+      [ "$_asked" = 1 ] || { _door_in_tree; _asked=1; }
+      if [ "$_DOOR_HERE" != yes ]; then _k=file; _b=run.sh; _p="${_p%/*}/run.sh"; fi
+    fi
+    case "$_k:$_b" in only:*) _only=1 ;; file:run.sh) : ;; *) _other=1 ;; esac
+    if { [ "$_k" != file ] && [ "$_k" != only ]; } || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
       _b='?'
       case "$_r" in
         ''|*'$'*|*'`'*) : ;;
@@ -5778,6 +5812,7 @@ _bsg_suites() {
     _BSG_SUITES="${_BSG_SUITES:+$_BSG_SUITES,}$_b"
   done <<< "$_BSG_TARGETS"
   [ -n "$_BSG_SUITES" ] || _BSG_SUITES='?'
+  [ "$_only" = 0 ] || [ "$_other" = 1 ] || _BSG_RUNNER=1
 }
 
 # wall_booked_argv <command> <quiet: 0|1> [<shim option>...] — sets WALL_BOOKED_ARGV to the
@@ -5876,6 +5911,7 @@ _bsg_wrap_text() {
   if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else _bsg_wait_s; set -- "$@" --max-wait "$_BSG_WAIT_S"; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
+  [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
@@ -6226,7 +6262,7 @@ fi
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
 local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -6523,7 +6559,7 @@ ${_loop_lines}"
         _spell="From this text no literal list can be derived: a command substitution, a glob or
 a prefix assignment names no words, and a loop whose body reassigns its variable runs something
 other than the words of its header, so no line is printed for it.
-Write the literal lines you mean, one call each: bash tests/<name>.test.sh"
+Write the literal names you mean, through the one door: tests/run.sh --only <name>.test.sh"
       fi
       fold_block exit2 suite-run \
         "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
@@ -6626,6 +6662,18 @@ _CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT")
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
 
+  # ---------- THE PROJECT'S DOOR, ASKED ONCE FOR THIS CLAIM (wave-28 T54, D27; A-orch-124/125) ----------
+  #
+  # The door below, and the runner claim, exist only where the project the run is in has the
+  # runner's door (`_door_in_tree`). Where it has none, a `tests/run.sh --only <suite>` call is not a
+  # door claim: it is the `file` claim for `run.sh` that the classifier made of it at 903c971b, judged
+  # by the full-tree arm just below, and a bare suite run goes on to the budget.
+  _DOOR_HERE=no
+  if [ "$_kind" = "file" ] || [ "$_kind" = "only" ]; then
+    _wall_class_read "$COMMAND"; _bsg_cd_walk "$_WALL_CLASS_LINES"; _door_in_tree
+    if [ "$_kind" = "only" ] && [ "$_DOOR_HERE" != yes ]; then _kind="file"; _target="run.sh"; fi
+  fi
+
   # ---------- THE FULL TREE, FIRST AND FAIL-CLOSED ----------
   #
   # AHEAD OF THE DECLARED RUNS, and that order is the whole of the full-run rule. The
@@ -6656,8 +6704,8 @@ full run from a writer row costs forty minutes and proves a head nobody is relea
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
-Run the suites your brief named instead, one call each, by the suite file itself:
-    bash tests/${_ft_first:-<suite>.test.sh}
+Run the suites your brief named instead, through the one door (wave-28 T36):
+    tests/run.sh --only ${_ft_first:-<suite>.test.sh}
 \`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
 queue only the runner itself builds, and it is the full-tree runner as far as this budget
 is concerned. If the change cannot be bounded — a merge from outside the run, or a file the
@@ -6665,6 +6713,41 @@ map answers with every suite or with none — say so in your report: the orchest
 dispatches the runner, and the dispatch wall admits it only then."
     return 2
   fi
+  # ---- BEGIN THE ONE DOOR (wave-28 T36; D27, REQ-10 AC-10.1) ----
+  #
+  # A DISPATCHED AGENT RUNS A SUITE THROUGH THE RUNNER, NEVER BARE. `bash tests/x.test.sh`, typed
+  # by an agent, runs the suite in whatever world the agent's shell happens to give it: the
+  # runner's interpreter pin, its environment, its adoption wall and its one gate ask per suite
+  # are all the runner's, and a bare run gets none of them. `tests/run.sh --only x.test.sh` gets
+  # them all (tests/run.sh, THE DOOR). So every bare form the classifier reads — the literal
+  # path, a loop, a variable (wave-28 T11's forms) — is a `file` claim and is refused here, with
+  # one line naming the door; the door's own claims are `only` and go on to the budget below. The
+  # main thread never reaches this loop (the partition above), so a person's bare run is not
+  # refused and keeps the seam's pin. This arm holds the runner's world, not the queue (D9).
+  #
+  # ONLY WHERE THE PROJECT HAS THE DOOR (wave-28 T54, D27; A-orch-124): `_DOOR_HERE`, read above. Without
+  # the door a `file` claim goes on to the budget below as it did before T36, and an off-budget bare
+  # run is refused there as it always was.
+  if [ "$_kind" = "file" ] && [ "$_DOOR_HERE" = yes ]; then
+    _door_name="$_target"
+    case "$_door_name" in *'$'*|*'`'*|'') _door_name='<suite>' ;; esac
+    _door_fact="use tests/run.sh --only $_door_name"
+    [ $(( $(bionic_cols "bionic: suite-run refused — $_door_fact (one door)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
+      || _door_fact="use tests/run.sh --only <suite>"
+    fold_block exit2 suite-run "$_door_fact" "one door" \
+      "A dispatched agent runs a suite through the runner, never by the suite file alone. The
+runner gives the suite its world: the interpreter pin (bash -> /bin/bash first on PATH), its
+environment, the adoption wall, and one gate ask per suite. A bare run gets none of them.
+
+You ran: $_run
+
+Run it through the one door instead, one call, naming each suite by its file name:
+    tests/run.sh --only ${_door_name}
+Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
+    return 2
+  fi
+  # ---- END THE ONE DOOR ----
+
   # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------
   #
   # `re_executes=` is a DECLARATION the dispatch wall already admitted, so a command that
@@ -6689,7 +6772,7 @@ dispatches the runner, and the dispatch wall admits it only then."
   # NO STATEMENT IS REFUSED, NAMING WHY (wave-27 T5, D15). A row with NEITHER statement — no
   # `suites_allowed=` key and no declared runs — or no row at all used to pass a named run in
   # silence; see `budget_unrecorded`.
-  if [ "$_kind" != "file" ]; then
+  if [ "$_kind" != "file" ] && [ "$_kind" != "only" ]; then
     [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_run"; return 2; }
     # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
     # are the half of the budget that can answer it.
