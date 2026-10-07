@@ -373,6 +373,10 @@ _setup_class_wanted() {  # <class>
 # disagree with the run it is a plan FOR, which is the one defect a consent
 # screen must not have.
 
+# `gate_share`'s own fallback (lib/gate.sh). Setup does not load the gate, so the figure is repeated here, once,
+# for the plan page and the share step; tests/principles-item.test.sh §SHARE-ITEM holds it to the gate's 80.
+SETUP_SHARE_DEFAULT=80
+
 # What one item changes, in the words the item's own question uses. Product
 # words only: this lands on a person's screen, and it is the only description
 # of that item they get before they answer.
@@ -428,6 +432,9 @@ _setup_item_verb() {  # <name>
       # is not pending), and its text is not on the page: step 13 prints it and
       # asks again, live, before writing — so the page says so.
       say "show bionic's working principles and ask again before adding them to $(principles_file)" ;;
+    share)
+      # THE DEFAULT IS THE GATE'S (wave-28 T10, D16): a yes writes it, a no writes nothing.
+      say "write bionic's share of this machine, ${SETUP_SHARE_DEFAULT}%, to $(detect_share_file)" ;;
     *)                  return 1 ;;
   esac
   return 0
@@ -1882,6 +1889,60 @@ setup_working_principles() {
   return 0
 }
 
+# ─── Step 14 — the machine's share ───────────────────────────────────────────
+#
+# ONE NUMBER FOR THE MACHINE (wave-28 T10; spec D16). The gate holds every heavy command to a share of the
+# memory and processors this machine has, and the share is one file the user sets: `detect_share_file`,
+# an integer 1 to 100, 80 when there is none. A yes writes the default so the number is there to change; a
+# no writes nothing and the default stands, exactly as a declined principles block leaves CLAUDE.md alone.
+# A share already there is the user's and is never asked about or overwritten, whatever it holds. The
+# number is changed afterwards with `session-poker.sh share <n>`, which this step names with the real path.
+#
+# SETUP_SHARE_DEFAULT, set above `_setup_item_verb` (the plan names it), is `gate_share`'s own fallback.
+
+_setup_poker_path() {
+  local p
+  p="$(_setup_self_path)"
+  printf '%s/hooks/session-poker.sh' "${p%/scripts/setup.sh}"
+}
+
+setup_share() {
+  _setup_wants share || return 0
+  say ""
+  say "14. Machine share"
+  local file rc tmp
+  file="$(detect_share_file)"
+
+  # idempotence guard: share item
+  case "$(detect_share)" in
+    *"state=file "*) item "$SETUP_OK" "share" "already set — nothing to do"; say "   file: ${file}"; return 0 ;;
+  esac
+
+  say "   bionic asks one gate before every heavy command, and the gate holds all of them to a share of this"
+  say "   machine's memory and processors: ${SETUP_SHARE_DEFAULT}% unless you set another. A no writes nothing."
+  say "   file: ${file}"
+  consent "   Write the share, ${SETUP_SHARE_DEFAULT}%, to that file?"; rc=$?
+  if [ "$rc" -ne 0 ]; then  # consent gate: share item
+    _setup_say_declined "$rc" "${file} is unchanged; the share stays at its default, ${SETUP_SHARE_DEFAULT}%."
+    action "write the machine's share to ${file} — $(_setup_answer_yes share)"
+    return 0
+  fi
+
+  tmp="${file}.bionic.tmp.$$"
+  if mkdir -p "${file%/*}" 2>/dev/null && printf '%s\n' "$SETUP_SHARE_DEFAULT" > "$tmp" 2>/dev/null \
+     && mv -f "$tmp" "$file" 2>/dev/null; then
+    item "$SETUP_OK" "share" "${SETUP_SHARE_DEFAULT}% written — the gate reads it"
+    say "   file: ${file}"
+    say "   change it any time, 1 to 100: bash $(_setup_poker_path) share <n>"
+  else
+    rm -f "$tmp" 2>/dev/null
+    item "$SETUP_BAD" "share" "could not write the share file — it is as it was"
+    say "   file: ${file}"
+    action "write the machine's share to ${file} (bionic could not write the file)"
+  fi
+  return 0
+}
+
 # ─── The summary ─────────────────────────────────────────────────────────────
 
 setup_summary() {
@@ -2027,6 +2088,7 @@ setup_legacy_hook_files
 setup_legacy_agent_copies
 setup_permission_mode
 setup_working_principles
+setup_share
 setup_summary
 
 exit 0

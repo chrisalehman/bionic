@@ -5473,7 +5473,7 @@ return 0
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `proof-add` and
 # `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
-# T34, D24); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# T34, D24; `share` — wave-28 T10, D16, in both its forms); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5529,7 +5529,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         shift
         _next="${1:-}"
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check|finding-stated|decline|budget)
+          amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check|finding-stated|decline|budget|share)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
         esac ;;
       spawn-worktree.sh)
