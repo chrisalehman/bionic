@@ -13511,4 +13511,214 @@ expect_ne "CHECK-mut3 …and returns the line's own rating for the settled line,
   "S1 on fix" "$(chk_rate "$CHK_MUT/proof.sh" "$(chk_id k-fixto)" S3 off)"
 POKE_BOUND="$CHK_BOUND_WAS"
 
+# ============================================================
+section "§REPORT-RTL §REPORT-KINDS §REPORT-PRINT: the run's numbers folded from the landing record and the gate's requests (wave-28 T14; REQ-4 AC-4.1, AC-4.4, AC-4.5; D18)"
+# ============================================================
+#
+# `landing-report [--rows]` folds the bound plan's landing record (`line/v1` events) and the gate's
+# request files into one line, and with `--rows` one line per landed row. Ready-to-landed is a
+# subtraction of two event times, from a row's FIRST `ready` to its `published`; a hand or a git landing
+# prints `-`. Median and p75 are linear interpolation over the sorted minutes (wave-27's baseline rule):
+# an even set's median is the mean of its middle two, a set of one is that one value. Requests count
+# when their `tree=` is the project or below it and they were asked at or after the record's first
+# `line/v1` event. FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events and the
+# requests are PLANTED in the Interfaces table's shapes, which lib/line.sh and lib/gate.sh write.
+RP_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RP_E0=1791280800   # 2026-10-06T10:00:00Z
+RP_C1="$(printf 'c%.0s' $(seq 40))"; RP_C2="$(printf 'd%.0s' $(seq 40))"
+rp_ev() { printf 'line/v1|%s\n' "$1" >> "$S60_REC"; }   # <fields after line/v1|> -> one event
+rp_ready() {  # <row> <name> <at hh:mm:ss>
+  rp_ev "ev=ready|row=$1|name=$2|commit=$RP_C1|branch=wt/01-$1|tree=$RP_ROOT/.worktrees/01-$1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T$3Z"
+}
+rp_cand() { rp_ev "ev=candidate|row=$1|base=$RP_C1|commit=$RP_C2|tree=$RP_ROOT/.bionic/tmp/landing/1|at=2026-10-06T$2Z"; }
+rp_verdict() { rp_ev "ev=verdict|row=$1|commit=$RP_C2|suite=$2|result=$3|log=/rec/$1-$2.log|at=2026-10-06T$4Z"; }
+rp_pub() { rp_ev "ev=published|row=$1|commit=$RP_C2|kind=$2|by=-|why=-|at=2026-10-06T$3Z"; }
+rp_req() {  # <id> <who agent> <tree> <asked> <admitted|-> [<extra line>...] -> one request file
+  local id="$1" who="$2" tree="$3" asked="$4" adm="$5"; shift 5
+  {
+    printf 'key=a.test.sh\nkind=landing\nwho=%s:%s\ntree=%s\nasked=%s\nholder=%s\n' "$SID" "$who" "$tree" "$asked" "$RP_DEAD:x"
+    [ "$adm" = - ] || printf 'admitted=%s\npromise=5:0.1:30\n' "$adm"
+    for _l in "$@"; do printf '%s\n' "$_l"; done
+  } > "$RP_GATE/requests/$id"
+}
+rp_world() {  # <label> -> §60's world, an empty record, an empty gate store
+  s60_world "$1" @A whole
+  RP_ROOT="$(cd "$R59W" && pwd -P)"
+  RP_GATE="$TMPROOT/rp-gate-$1"; rm -rf "$RP_GATE"; mkdir -p "$RP_GATE/requests" "$RP_GATE/cost"
+  poke_bind "$R59W"
+}
+rp_report() { BIONIC_GATE_DIR="$RP_GATE" poke "$R59W" landing-report "$@"; }
+rp_line() { printf '%s\n' "$OUT" | /usr/bin/grep '^landings: '; }
+rp_rows() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^T[0-9]+ (queue|hand|git) ' | tr '\n' '|' | sed 's/|$//'; }
+( : ) & RP_DEAD=$!; wait "$RP_DEAD" 2>/dev/null
+sleep 300 & RP_LIVE=$!
+RP_LIVE_START="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$RP_LIVE" | awk '{ $1 = $1; print }')"
+
+# ---------- §REPORT-RTL: ready-to-landed is a subtraction, from the FIRST ready ----------
+rp_world rp-rtl
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00; rp_verdict T1 a.test.sh green 10:05:00
+rp_ready T1 w-T1 10:20:00; rp_pub T1 queue 10:30:00
+rp_ready T2 w-T2 11:00:00; rp_ready T3 w-T3 11:00:00; rp_pub T2 queue 11:15:00
+rp_pub T3 queue 12:00:00
+rp_ready T4 - 12:10:00; rp_cand T4 12:10:10; rp_pub T4 hand 12:10:30
+rp_pub T5 git 12:20:00
+rp_req 1 w-T1 "$RP_ROOT" $((RP_E0 + 120)) $((RP_E0 + 210)) "ended=$((RP_E0 + 300))" rc=0
+rp_req 2 w-T1 "$RP_ROOT" $((RP_E0 - 3600)) $((RP_E0 - 3500)) "ended=$((RP_E0 - 3400))" rc=0
+rp_req 3 w-T2 "$RP_ROOT/.worktrees/01-T2" $((RP_E0 + 3900)) $((RP_E0 + 3930)) "ended=$((RP_E0 + 3990))" rc=0
+rp_req 4 main "$RP_ROOT" $((RP_E0 + 4000)) $((RP_E0 + 4000)) "ended=$((RP_E0 + 4060))" rc=0
+rp_req 5 w-T3 /elsewhere/project $((RP_E0 + 4000)) $((RP_E0 + 4500)) "ended=$((RP_E0 + 4600))" rc=0
+rp_req 6 w-T3 "$RP_ROOT" $((RP_E0 + 4100)) -
+RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 · waited median=30s · killed=0"
+rp_report
+expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, waits over the project's requests" \
+  "0|$RP_RTL_LINE" "$RC|$(rp_line)"
+rp_report --rows
+expect_eq "RTL2 --rows prints the same line first" "$RP_RTL_LINE" "$(printf '%s\n' "$OUT" | head -1)"
+expect_eq "RTL3 …then a line per landed row in the record's order: T1's minutes run from its FIRST ready (30.0, not 10.0), a hand and a git landing print -" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=30s|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=0s|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=0s|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=0s" \
+  "$(rp_rows)"
+# A-orch-12: a request may carry `peak=` and a line no reader knows; the fold reads only its own keys.
+printf 'peak=62\ncolour=blue\n' >> "$RP_GATE/requests/4"; printf 'peak=71\n' >> "$RP_GATE/requests/1"
+rp_report --rows
+expect_eq "RTL4 a request carrying peak= and an unknown line folds to the same report" \
+  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "$(rp_line)|$(rp_rows | cut -d'|' -f1)"
+# THE PLAN OPERAND (A-orch-145): a named plan first, else the session's bound run (RTL1 to RTL4 read the
+# bound run), else the verb's no-run refusal. The named plan is read from another project, unbound.
+RP_NORUN="$(make_repo rp-norun)"; ( cd "$RP_NORUN" && git commit -q --allow-empty -m init )
+BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report "$P59W" --rows
+expect_eq "RTL10 a named plan, from an unbound session in another project: exit 0, that plan's line and rows, its waits scoped to its own project" \
+  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "$RC|$(rp_line)|$(rp_rows | cut -d'|' -f1)"
+BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report
+expect_eq "RTL11 no plan named and no run bound: the verb's no-run refusal (2), and no line" \
+  "2|poker: REFUSED — this session has no run to report on; bind its plan first.|" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep 'no run to report on')|$(rp_line)"
+poke "$RP_NORUN" landing-report "$RP_NORUN/no/such.plan.md"
+expect_eq "RTL12 a named plan that is no file is refused (2), naming it" \
+  "2|poker: REFUSED — no plan file at $RP_NORUN/no/such.plan.md; name the plan whose landings to report." \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep 'no plan file at')"
+# The even set and the set of one: the rule, pinned.
+rp_world rp-even
+rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
+rp_report
+expect_eq "RTL5 two landings of 10 and 20 minutes: median 15.0 (the middle two's mean), p75 17.5 (interpolated), max 20.0" \
+  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "$(rp_line)"
+rp_world rp-one
+rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:07:30
+rp_report
+expect_eq "RTL6 one landing of 7.5 minutes: its median, p75 and max are 7.5" \
+  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "$(rp_line)"
+# Empty and absent records: the line with zeros, exit 0.
+rp_world rp-empty
+rp_report
+RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+expect_eq "RTL7 an empty record prints the line with zeros and exits 0" "0|$RP_ZERO" "$RC|$(rp_line)"
+rm -f "$S60_REC"
+rp_report --rows
+expect_eq "RTL8 an absent record prints the same, and --rows adds no row" "0|$RP_ZERO|" "$RC|$(rp_line)|$(rp_rows)"
+rp_report --bogus
+expect_eq "RTL9 an unknown flag is the usage error (2)" "2" "$RC"
+# THE MUTATION ARM: the first ready replaced by the last turns RTL3 red (T1 reads 10.0).
+RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rp-mut.XXXXXX")"
+rd_mutant lastready 's/if (!(rk in rdy)) rdy\[rk\] = e$/rdy[rk] = e/'
+expect_eq "RTL-mut0 the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff "$POKER" "$RD_MUT/lastready/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+rp_world rp-mut
+rp_ready T1 w-T1 10:00:00; rp_ready T1 w-T1 10:20:00; rp_pub T1 queue 10:30:00
+RP_REAL_POKER="$POKER"; POKER="$RD_MUT/lastready/hooks/session-poker.sh"
+rp_report --rows
+POKER="$RP_REAL_POKER"
+expect_eq "RTL-mut1 the last-ready mutant still runs (exit 0) and reads T1's minutes from its LAST ready, 10.0, where RTL3 reads 30.0" \
+  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=0s" "$RC|$(rp_rows)"
+rp_report --rows
+expect_eq "RTL-mut1b …control: the real poker over the same record reads 30.0" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s" "$(rp_rows)"
+rm -rf "$RD_MUT"
+
+# ---------- §REPORT-KINDS: landings by kind, runs by outcome, killed runs ----------
+rp_world rp-kinds
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00; rp_verdict T1 a.test.sh green 10:05:00; rp_pub T1 queue 10:10:00
+rp_ready T2 - 10:20:00; rp_cand T2 10:20:05; rp_pub T2 hand 10:20:30
+rp_pub T3 git 10:30:00
+# T4 is red then green on an unchanged tree: two verdicts for one row commit, red first, no ready between.
+rp_ready T4 w-T4 10:40:00; rp_cand T4 10:41:00; rp_verdict T4 a.test.sh red 10:45:00; rp_verdict T4 a.test.sh green 10:50:00
+# T5 is red, then said ready again (a changed tree), then green: not red-then-green.
+rp_ready T5 w-T5 11:00:00; rp_verdict T5 a.test.sh red 11:05:00; rp_ready T5 w-T5 11:10:00; rp_verdict T5 a.test.sh green 11:15:00
+rp_verdict T6 a.test.sh none 11:20:00; rp_verdict T6 a.test.sh discarded 11:21:00
+printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-06T10:09:00Z|suites=a.test.sh\n' \
+  "$RP_C1" "$RP_C2" "$RP_C1" >> "$S60_REC"
+# Killed: admitted with a dead holder and no end; ended by a signal (rc over 128). Not killed: a clean
+# end, and an admitted run whose holder lives.
+rp_req 1 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460))
+rp_req 2 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460)) "ended=$((RP_E0 + 2700))" rc=137
+rp_req 3 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460)) "ended=$((RP_E0 + 2700))" rc=0
+rp_req 4 w-T4 "$RP_ROOT" $((RP_E0 + 2460)) $((RP_E0 + 2460))
+sed "s/^holder=.*/holder=$RP_LIVE:$RP_LIVE_START/" "$RP_GATE/requests/4" > "$RP_GATE/requests/4.t" && mv "$RP_GATE/requests/4.t" "$RP_GATE/requests/4"
+expect_contains "RK0 precondition: request 4's holder is the live sleeper, by pid and start" "holder=$RP_LIVE:" "$(cat "$RP_GATE/requests/4")"
+rp_report --rows
+expect_eq "RK1 a queue, a hand and a git landing each count under their own kind; green, red, none, discarded and red-then-green each as planted; two runs killed" \
+  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2" \
+  "$(rp_line)"
+expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
+  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
+expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=0s" \
+  "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T3 ')"
+expect_eq "RK4 …and rows that never landed print no row" "T1|T2|T3" "$(rp_rows | tr '|' '\n' | awk '{ print $1 }' | tr '\n' '|' | sed 's/|$//')"
+# A malformed line is skipped and counted, never fatal.
+rp_ev "ev=published|row=T9|commit=$RP_C2|kind=bogus|by=-|why=-|at=2026-10-06T12:00:00Z"
+rp_ev "ev=verdict|row=T9|commit=$RP_C2|suite=a.test.sh|at=2026-10-06T12:00:00Z"
+rp_ev "ev=ready|row=T9|at=not-a-time"
+rp_report
+expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one line on stderr counting them" \
+  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
+  "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
+
+# ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
+rp_world rp-print
+rp_ready T1 w-T1 10:00:00
+rp_tick() { poke_pressure "$R59W" 8192 1.0 tick; }
+rp_tl() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: landings: '; }
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
+expect_nonempty "RP0 precondition: the tick printed (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: ')"
+expect_eq "RP1 a record with no published event: the tick prints no landings line" "" "$(rp_tl)"
+rp_pub T1 queue 10:30:00
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
+expect_eq "RP2 a record with a published event: the tick prints the report's first line" \
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+rp_tick
+expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
+expect_eq "RP3b …and still prints the landings line: it is outside the digest" \
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
+rp_tick
+expect_contains "RP4 a new landing moves no decision: the next tick still says unchanged (nothing reads the numbers to decide)" "poker: unchanged since " "$OUT"
+expect_eq "RP4b …and its landings line carries the new figure" \
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+# AC-4.5 corrected: a review row and a dropped row added to the plan change no figure.
+rp_report --rows; RP_BEFORE="$OUT"
+awk '{ print } /^\| T8 \| 4 \| build/ {
+  print "| T9 | 6 | review | a later review | critic | — | 30 | REQ-1 | r9.md | — | — | pending |  |"
+  print "| T10 | 4 | build | a dropped build | implementor | — | 30 | REQ-1 | d.sh | — | — | dropped |  |" }' "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+expect_eq "RP5 precondition: the plan now holds the review row and the dropped row" "2" "$(/usr/bin/grep -cE '^\| T(9|10) \|' "$P59W")"
+rp_report --rows
+expect_eq "RP5b …and the report, line and rows, is byte for byte what it was" "$RP_BEFORE" "$OUT"
+# release-check prints it with each row, after the deferrals (§RC-DEFER's world, its check declared again).
+RP_SEV_REC="$RSEV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+[ -f "$RP_SEV_REC" ] && cp "$RP_SEV_REC" "$TMPROOT/rp-sev-rec"
+mkdir -p "${RP_SEV_REC%/*}"; S60_REC="$RP_SEV_REC"; : > "$S60_REC"; RP_ROOT="$(cd "$RSEV" && pwd -P)"
+rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00; rp_pub T2 git 10:40:00
+printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/config.yaml"
+BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
+expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
+expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+  "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
+cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
+if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
+kill "$RP_LIVE" 2>/dev/null; wait "$RP_LIVE" 2>/dev/null
+POKE_BOUND="$RP_BOUND_WAS"
+
 finish
