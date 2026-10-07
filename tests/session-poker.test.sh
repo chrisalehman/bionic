@@ -14956,8 +14956,8 @@ sf_refused() {  # <label> <want rc> <want first-line text> <args…>
   SF_W="$(sf_first | wc -m | tr -d ' ')"
   expect_true "$label …in a first line of at most 100 columns (measured $SF_W)" test "$SF_W" -gt 1 -a "$SF_W" -le 101
 }
-sf_refused "SF-4 a value with a line break (§STEP-FIELD refusal 1)" 1 "carries a line break" 5 $'cmd=bash a\nb'
-sf_refused "SF-4b …a carriage return the same" 1 "carries a line break" 5 $'cmd=bash a\rb'
+sf_refused "SF-4 a value with a line break (§STEP-FIELD refusal 1)" 1 "has a line break" 5 $'cmd=bash a\nb'
+sf_refused "SF-4b …a carriage return the same" 1 "has a line break" 5 $'cmd=bash a\rb'
 sf_refused "SF-5 a key outside the nine (refusal 2)" 1 "is not a step field" 5 colour=red
 sf_refused "SF-5b …a key near one (Pass)" 1 "is not a step field" 5 Pass=3
 sf_refused "SF-5c …the longest key a person types, 80 characters" 1 "is not a step field" 5 "$(printf 'k%.0s' $(seq 1 80))=1"
