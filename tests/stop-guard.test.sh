@@ -2017,7 +2017,9 @@ expect_eq "UR3 …and the roster now carries exactly one row of the name" "1" "$
 UR3_ROW="$(grep '|name=ghost|' "$(ur_roster)" | head -1)"
 expect_contains "UR3 …a closed row" "|status=closed|" "$UR3_ROW"
 expect_contains "UR3 …in this session" "|session=${SID_A}|" "$UR3_ROW"
-expect_contains "UR3 …carrying the reason" "|waiver=spawned past its hook timeout; the roster never saw it|" "$UR3_ROW"
+expect_contains "UR3 …carrying the reason in source=, not waiver= (a waiver reads as a waived contract)" \
+  "|source=unrostered-stop: spawned past its hook timeout; the roster never saw it|" "$UR3_ROW"
+expect_absent "UR3 …and no waiver on it" "|waiver=spawned" "$UR3_ROW"
 UR3_OPEN="$(bash -c '. "$1"; roster_open_names "$2" ""' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" "$(ur_roster)" 2>/dev/null)"
 expect_eq "UR3 …and the roster's one open-name reader does not list it" "" "$UR3_OPEN"
 

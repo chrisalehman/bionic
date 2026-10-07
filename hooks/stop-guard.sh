@@ -680,7 +680,8 @@ fi
 # only for a name this roster STILL has no row of (so a name the roster has seen — alive, with an
 # unmet contract — is never laundered through it: the look decides, as ever), only within the
 # order TTL, and only over a roster it can read and write. It is spent by its own act: the stop is
-# written onto the roster as a CLOSED row (`source=unrostered-stop`, the reason in `waiver=`), the
+# written onto the roster as a CLOSED row (`source=unrostered-stop: <why>`; NOT `waiver=`, which the sweeper reads as a
+# waived contract and would discharge the name's next stop), the
 # name then has a row, and a second stop of it meets the ordinary refusal. It is the orchestrator's
 # word, `by=orchestrator`, and is not an `order`: the human's reader above never sees it.
 UNROSTERED_WHY=""
@@ -707,7 +708,7 @@ unrostered_current() {
 if [ -z "$ROW_BY_NAME" ] && [ -z "$ROSTER_UNREADABLE" ] && [ -z "$TYPED_AS_ID" ] && unrostered_current; then
   SG_DEADLINE_LIVE=0
   UR_ROW=$(roster_row status=closed "session=${BIONIC_SID}" "name=${BASE}" agent_id= \
-    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" source=unrostered-stop "waiver=${UNROSTERED_WHY}" plan=none) || UR_ROW=""
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "source=unrostered-stop: ${UNROSTERED_WHY}" plan=none) || UR_ROW=""
   UR_WROTE=0
   if [ -n "$UR_ROW" ]; then
     if [ ! -e "$ROSTER_FILE" ]; then
