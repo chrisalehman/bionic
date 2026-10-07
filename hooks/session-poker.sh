@@ -2163,7 +2163,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes|done
+adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes|done|lands_on|lands_red|red_evidence|row
   # THE OPEN SET IS ASKED ONCE, of the one predicate, over the predecessor's roster as it
   # stands — no session filter, because every row on it carries the predecessor's own id.
   # Handed to awk through the environment rather than `-v`, which would read a backslash in
@@ -2219,6 +2219,13 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       v = kv($0, "re_executes");    if (v != "") rex[n]    = v
       # THE DONE MARKER (wave-24 T9, D3): the same contract, so its completion signal too.
       v = kv($0, "done");           if (v != "") dmark[n]  = v
+      # THE LANDING KEYS (wave-28 T68; A-orch-216): `lands_on=`, `lands_red=`, `red_evidence=` and `row=` are what the
+      # dispatch wall wrote from the brief, and what `ready` reads the suites and the declared debt from. Carried
+      # forward as the instrument fields are, or an adopted row would be proved on its budget with its debt dropped.
+      v = kv($0, "lands_on");       if (v != "") lon[n]    = v
+      v = kv($0, "lands_red");      if (v != "") lred[n]   = v
+      v = kv($0, "red_evidence");   if (v != "") revid[n]  = v
+      v = kv($0, "row");            if (v != "") lrow[n]   = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
@@ -2236,10 +2243,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       for (i = 1; i <= cnt; i++) {
         n = order[i]
         if (!(n in isopen)) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
-               files[n], sallow[n], ssrc[n], rex[n], dmark[n]
+               files[n], sallow[n], ssrc[n], rex[n], dmark[n], lon[n], lred[n], revid[n], lrow[n]
       }
     }
   ' "$1" 2>/dev/null
@@ -2299,10 +2306,11 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> [<done>] -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> [<done> [<lands_on> <lands_red> <red_evidence> <row>]] -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
   local files="${14:-}" sallow="${15:-}" ssrc="${16:-}" rex="${17:-}" dmark="${18:-}"
+  local lon="${19:-}" lred="${20:-}" revid="${21:-}" lrow="${22:-}"
   local -a RR_ARGS
   local ROW=""
   local -a INSTRUMENT_FIELDS
@@ -2391,6 +2399,10 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     "adopted_from=$(clean "$osid")"
     tool_use_id=
     "plan=$(clean "$plan")"
+    ${lon:+"lands_on=$(clean "$lon")"}
+    ${lred:+"lands_red=$(clean "$lred")"}
+    ${revid:+"red_evidence=$(clean "$revid")"}
+    ${lrow:+"row=$(clean "$lrow")"}
   )
   # THE DECLARED RUNS, CARRIED BY NAME (REQ-1 AC-1.1's adopt half). `re_executes=` is a
   # trailing optional field of the row, and the row's SHAPE is `roster_row`'s — so it is
@@ -3837,11 +3849,15 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # FIRST `ready` since the row last landed; a hand or a git landing prints `-` and joins no figure. Median
 # and p75 are linear interpolation over the sorted minutes, wave-27's baseline rule: an even set's median
 # is the mean of its middle two, a set of one is that value; an empty set prints 0. Runs count `verdict`
-# events by result, a ROW'S runs only: the accepted head's own run, which `_line_red_owner` records under
-# the row id at the head's commit, is not the row's (a verdict at the base of one of the row's candidates
-# and at none of its own commits) and is counted nowhere. Red-then-green is a red then a green for one row,
+# events by result, a ROW'S runs only, by INCLUSION (wave-28 T68): a verdict is the row's only at one of the
+# row's own commits since its last landing (a `ready` commit= or a `candidate` commit=). The accepted head's
+# own run, which `_line_red_owner` records under the row id at the head's commit, is at none of them and is
+# counted nowhere; a row that landed before starts its own set again at its next `ready`, and a row with no
+# candidate since its last landing has no commit of its own to include by, so every verdict under its id counts
+# (T14's count). Red-then-green is a red then a green for one row,
 # one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Waited is a request's `admitted` less its
-# `asked`; killed is a request admitted whose holder is dead with no `ended` line, or that ended over 128.
+# `asked`; killed is a request admitted whose holder is dead with no `ended` line, or that ended with rc 137
+# (lib/gate.sh `gate_list`'s rule, read through `_gate_read`, not retyped here).
 # A request counts when its `tree=` is the project or under it and it was asked at or after the record's
 # first `line/v1` event; a row's own wait is its requests by the roster name its `ready` carries, asked
 # from its first ready to its landing. Times are the events' own `at=`, never a message's.
@@ -3860,29 +3876,18 @@ landing_unmeasured() {  # <record> -> rc 0 when it holds `landed:` lines and no 
   ! /usr/bin/grep -q '^line/v1|' "$1" 2>/dev/null
 }
 landing_report() {  # <record> <project root> <rows yes|no> -> the line [and rows]; rc 0
-  local rec="$1" root="$2" rows="$3" gd f l asked adm ended rc who tree holder dead reqs="" out mal
+  local rec="$1" root="$2" rows="$3" gd f asked adm ended rc who tree holder dead reqs="" out mal
   gd="${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
   for f in "$gd"/requests/*; do
     case "${f##*/}" in ''|*[!0-9]*) continue ;; esac
     [ -f "$f" ] && [ ! -L "$f" ] || continue
-    asked='' adm='' ended='' rc='' who='' tree='' holder=''
-    while IFS= read -r l || [ -n "$l" ]; do
-      case "$l" in
-        asked=*) asked="${l#asked=}" ;;
-        admitted=*) adm="${l#admitted=}" ;;
-        ended=*) ended="${l#ended=}" ;;
-        rc=*) rc="${l#rc=}" ;;
-        who=*) who="${l#who=}" ;;
-        tree=*) tree="${l#tree=}" ;;
-        holder=*) holder="${l#holder=}" ;;
-      esac
-    done < "$f"
+    _gate_read "$f" 2>/dev/null || continue   # lib/gate.sh's reader: no gate library, no requests
+    asked="$_R_asked" adm="$_R_admitted" ended="$_R_ended" rc="$_R_rc" who="$_R_who" tree="$_R_tree" holder="$_R_holder"
     dead=0
     if [ -n "$adm" ] && [ -z "$ended" ]; then
       case "$holder" in
         ''|-) dead=1 ;;
-        *) if declare -F _slots_live >/dev/null 2>&1; then _slots_live "${holder%%:*}" "${holder#*:}" || dead=1
-           else kill -0 "${holder%%:*}" 2>/dev/null || dead=1; fi ;;
+        *) _slots_live "${holder%%:*}" "${holder#*:}" || dead=1 ;;
       esac
     fi
     reqs="${reqs}${asked}	${adm}	${ended}	${rc}	${who#*:}	${tree}	${dead}
@@ -3905,8 +3910,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       split("", kv); nf = split($0, p, "|")
       for (i = 2; i <= nf; i++) { j = index(p[i], "="); if (j > 1) kv[substr(p[i], 1, j - 1)] = substr(p[i], j + 1) }
       ev = kv["ev"]; rk = kv["row"]; e = iso2epoch(kv["at"])
-      if (ev == "candidate" && kv["base"] != "") headc[rk SUBSEP kv["base"]] = 1
-      if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[rk SUBSEP kv["commit"]] = 1
+      g = rk SUBSEP (gen[rk] + 0)
+      if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
+      if (ev == "candidate") hasc[g] = 1
       if (ev != "ready" && ev != "verdict" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
       if (rk == "" || e < 0) { mal++; next }
       if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded)$/)) { mal++; next }
@@ -3919,7 +3925,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       span[rk]++; nm[rk] = (kv["name"] == "" ? "-" : kv["name"]); next
     }
     ev == "verdict" {
-      if ((rk SUBSEP kv["commit"]) in headc && !((rk SUBSEP kv["commit"]) in ownc)) next
+      if ((g in hasc) && !((g SUBSEP kv["commit"]) in ownc)) next
       res = kv["result"]; cnt[res]++; nrun[rk]++
       vk = rk SUBSEP span[rk] SUBSEP kv["commit"] SUBSEP kv["suite"]
       if (res == "red") red[vk] = 1
@@ -3932,13 +3938,14 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       pfrom[n] = ((rk in rdy) ? rdy[rk] : ""); pname[n] = ((rk in nm) ? nm[rk] : "-")
       if (k == "queue" && pfrom[n] != "") { pmin[n] = (e - pfrom[n]) / 60; mins[++nm2] = pmin[n] }
       delete rdy[rk]; nrun[rk] = 0; delete nm[rk]
+      gen[rk]++
     }
     END {
       for (i = 1; i <= nq; i++) {
         inq[i] = (t0 != "" && num(qa[i]) && qa[i] >= t0 && (qt[i] == root || index(qt[i], root "/") == 1))
         if (!inq[i]) continue
         if (num(qd[i])) wts[++nw] = qd[i] - qa[i]
-        if (num(qd[i]) && ((qe[i] == "" && qx[i] == 1) || (qe[i] != "" && qr[i] + 0 > 128))) killed++
+        if (num(qd[i]) && ((qe[i] == "" && qx[i] == 1) || (qe[i] != "" && qr[i] == "137"))) killed++
       }
       wm = pct(wts, nw, 0.5)
       printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d · waited median=%ds · killed=%d\n",
@@ -4433,7 +4440,7 @@ case "$VERB" in
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
       while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER \
-                            RFILES RSALLOW RSSRC RREX RDONE; do
+                            RFILES RSALLOW RSSRC RREX RDONE RLON RLRED RREVID RLROW; do
         [ -n "$RNAME" ] || continue
 
         # ---- IS THIS ROW STILL SOMEBODY'S WORK? (REQ-9 AC-9.1/9.2; D10)
@@ -4725,7 +4732,7 @@ case "$VERB" in
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
                    "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
-                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX" "$RDONE"; then
+                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX" "$RDONE" "$RLON" "$RLRED" "$RREVID" "$RLROW"; then
                 ROW_JOURNALLED=yes
                 # THE MARKER COPY (S17, AC-12 attempt 2). `payload/scripts/lib/stop.sh`
                 # (`stop_landing_gate`, reached from hooks/stop.sh) is this schema's one
@@ -7488,14 +7495,15 @@ RC_TAGS
       if [ "$TICK_UNCHANGED" = yes ]; then
         say "unchanged since ${TICK_SINCE} — decision=${TICK_DECIDED}"
       else
+        # THE RUN'S LANDING LINE PRINTS IN THE RE-ARM SLOT, ABOVE THE BUFFER (wave-28 T14, T62, T68; D18, AC-10.4):
+        # the buffer ends with the decision line, which is the tick's last line, so this line is printed before it
+        # and never after. A landing moves no decision (RP4), so it never makes a tick changed: the line shows on the
+        # ticks that print in full for another reason, and an `unchanged` tick stays the one line the Patrol ends on.
+        [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"
         cat "$TICK_BUF" 2>/dev/null
         # A START IS TOLD BY THE TICK THAT PRINTED ITS LINE (wave-27 T37; review pass 36 S1).
         [ -z "${US_TOLD_PENDING:-}" ] || printf '%s' "$US_TOLD_PENDING" >> "$ROSTER_FILE" 2>/dev/null
       fi
-      # THE RUN'S LANDING LINE PRINTS ON A TICK THAT IS NOT `unchanged`, OUTSIDE THE DIGEST (wave-28 T14, T62;
-      # D18): a landing moves no decision (RP4), so it never makes a tick changed; the line shows on the
-      # ticks that print in full for another reason, and an `unchanged` tick stays the one line the Patrol ends on.
-      [ "$TICK_UNCHANGED" = yes ] || [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
         write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
@@ -7742,7 +7750,7 @@ $(/usr/bin/grep -E '^line/v1\|ev=(standing|stalled)\|' "$LT_REC" 2>/dev/null)
 EOF
     fi
     # THE RUN'S LANDING LINE (wave-28 T14; D18): the report's first line, once the record holds a landing.
-    # It is printed by the exit trap after the decision and enters no hash.
+    # It is printed by the exit trap above the buffer, in the re-arm slot, so the decision stays the last line, and it enters no hash.
     if [ -n "$LT_REC" ] && { /usr/bin/grep -q '^line/v1|ev=published|' "$LT_REC" 2>/dev/null || landing_unmeasured "$LT_REC"; }; then
       TICK_LANDINGS="$(landing_report "$LT_REC" "$REPO_REAL" no 2>/dev/null | head -1)"
     fi
