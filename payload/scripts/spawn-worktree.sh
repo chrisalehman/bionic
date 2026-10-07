@@ -152,7 +152,9 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
         --for <name>, also appends one workspace/v1 line for that agent to
         <main-root>/.bionic/tmp/workspaces-<session>.state (session from
         CLAUDE_CODE_SESSION_ID); refused, before anything is made, with no
-        session or when the record could not be written.
+        session or when the record could not be written. Refused when the
+        project's volume has less free space than the largest tree already
+        there (disk-low, naming both figures in KB).
 remove  removes the worktree and KEEPS the branch, deleting the
         <worktree>/.bionic link first (the one create planted, or a legacy
         one an older bionic left).
@@ -281,6 +283,34 @@ exclude_lines() {  # <main-root> <line or empty>... — appends each line the ex
   return 0
 }
 
+# THE DISK, BEFORE A TREE (wave-28 T9; D15, REQ-2). The dispatch wall's worktrees ceiling went
+# with the probe's budget line: it counted trees against a figure Step 0 derived from free disk
+# once. What it stood for is asked here, of the disk as it is, at the one place a tree is made:
+# a new tree needs at least as much free space on the project's volume as the largest tree
+# already there. Both figures are in KB: free from `df -Pk` at the main root, each tree's from
+# `du -sk` (which does not follow the planted `.bionic` link). A figure this cannot read
+# refuses nothing, as no reading is not a bad reading. BIONIC_PROBE_DISK_FREE_KB and
+# BIONIC_PROBE_TREE_KB plant the two figures, the BIONIC_PROBE_* idiom of lib/resources.sh.
+disk_room_refusal() {  # <main-root> -> `disk-low free_kb=<n> largest_tree_kb=<n>`, or nothing
+  local root="$1" free largest="${BIONIC_PROBE_TREE_KB:-}" p sz
+  free="${BIONIC_PROBE_DISK_FREE_KB:-$(df -Pk "$root" 2>/dev/null | awk 'NR == 2 { print $4 }')}"
+  case "$free" in ''|*[!0-9]*) return 0 ;; esac
+  if [ -z "$largest" ]; then
+    largest=0
+    while IFS= read -r p; do
+      [ -d "$p" ] || continue
+      sz="$(du -sk "$p" 2>/dev/null | awk '{ print $1; exit }')"
+      case "$sz" in ''|*[!0-9]*) continue ;; esac
+      [ "$sz" -gt "$largest" ] && largest="$sz"
+    done <<EOF
+$(git -C "$root" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | tail -n +2)
+EOF
+  fi
+  case "$largest" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$free" -lt "$largest" ] && printf 'disk-low free_kb=%s largest_tree_kb=%s' "$free" "$largest"
+  return 0
+}
+
 cmd_create() {
   local base="" parent="" name="" named=0 n=0 sid="" why=""
   branch=""
@@ -327,6 +357,9 @@ cmd_create() {
   if git -C "$main_root" show-ref --verify --quiet "refs/heads/${branch}"; then
     _wt_refuse branch-exists
   fi
+
+  why="$(disk_room_refusal "$main_root")"
+  [ -z "$why" ] || _wt_refuse "$why"
 
   # `..` as a path COMPONENT only: a directory whose name merely contains dots
   # is nobody's escape attempt.
