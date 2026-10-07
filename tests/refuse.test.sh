@@ -1212,6 +1212,33 @@ printf '%s\n' '  fold_block exit2 queue "a row must wait its turn in the line" "
 expect_contains "INV-W28b a planted queue arm past the ceiling is reported, so the check can fail" "sites=" \
   "$(inv_w28_excess "$INV_W28_SYN" "$INV_FILE")"
 rm -rf "$INV_W28_SYN"
+# THE TASK-ENTRY DUTY IS THE DUTY WALL'S OWN (wave-28 T38; REQ-13 AC-13.2, D30). A dispatch turn's
+# task entries are a second trigger of the task-list duty, refused through its existing forwarder:
+# lib/stop.sh gains no refusal site over 1.12.0's 13 (`inv_sites` over `git show v1.12.0:<file>`),
+# and the duty's first line is a FACT the forwarder carries, never a site of its own, so the
+# inventory's `lib/stop.sh` section gains no line. fails-when: lib/stop.sh passes 13 sites, or the
+# entry duty's fact is spelled on a site.
+INV_T38_BASE=13
+INV_T38_STOP="$REPO_ROOT/payload/scripts/lib/stop.sh"
+INV_T38_SITES="$(inv_sites "$INV_T38_STOP")"
+INV_T38_N="$(printf '%s\n' "$INV_T38_SITES" | awk 'NF { c++ } END { print c + 0 }')"
+expect_true "INV-T38a precondition: lib/stop.sh's refusal sites are read (${INV_T38_N})" test "$INV_T38_N" -gt 0
+expect_true "INV-T38a lib/stop.sh gains no refusal site over 1.12.0's ${INV_T38_BASE}" test "$INV_T38_N" -le "$INV_T38_BASE"
+expect_contains "INV-T38b precondition: the duty wall's forwarder is one of its sites" \
+  'fold_block block stop "$FACT" "$FIX" "$REASON"' "$INV_T38_SITES"
+expect_contains "INV-T38b the entry duty's fact is a FACT the forwarder carries" \
+  "FACT=\"a dispatched row's entry is not in progress\"" "$(cat "$INV_T38_STOP")"
+expect_absent "INV-T38c …and no refusal site spells it" "entry is not in progress" "$INV_T38_SITES"
+INV_T38_SYN="$(mktemp -d)"
+cp "$INV_T38_STOP" "$INV_T38_SYN/stop.sh"
+printf '%s\n' "  fold_block block stop \"a dispatched row's entry is not in progress\" \"TaskUpdate each to in_progress\" \"x\"" \
+  >> "$INV_T38_SYN/stop.sh"
+INV_T38_SYN_SITES="$(inv_sites "$INV_T38_SYN/stop.sh")"
+expect_contains "INV-T38d a planted entry site is read by the extractor, so INV-T38c can fail" \
+  "entry is not in progress" "$INV_T38_SYN_SITES"
+expect_true "INV-T38d …and it puts lib/stop.sh one site past what it was, so INV-T38a can fail" \
+  test "$(printf '%s\n' "$INV_T38_SYN_SITES" | awk 'NF { c++ } END { print c + 0 }')" -eq $((INV_T38_N + 1))
+rm -rf "$INV_T38_SYN"
 # The events a hook can refuse on, and every registration 1.12.0 shipped on them.
 INV_W28_HOOKS='PermissionRequest - ${CLAUDE_PLUGIN_ROOT}/hooks/permission-answer.sh
 PreToolUse Agent ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh
