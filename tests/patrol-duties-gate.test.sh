@@ -1601,7 +1601,9 @@ expect_plant_inert() {  # <label> — the baseline verdict: refused, both ready 
   if [ "$(decision_of)" != "block" ]; then no "$1" "decision=<$(decision_of)> stdout=<$HOOK_OUT>"; return; fi
   case "$r" in *T2*) ;; *) no "$1" "T2 not named: $r"; return ;; esac
   case "$r" in *T3*) ;; *) no "$1" "T3 not named: $r"; return ;; esac
-  case "$r" in *T9*) no "$1" "the planted T9 was named: $r"; return ;; esac
+  # PATHS ARE NOT IDS (wave-28 T9): the refusal prints the poker's path, and a tree named for row T9
+  # (`.worktrees/28-T9/…`) carries the planted id in it. Every word holding a slash is dropped first.
+  case "$(printf '%s' "$r" | sed 's#[^[:space:]]*/[^[:space:]]*##g')" in *T9*) no "$1" "the planted T9 was named: $r"; return ;; esac
   ok "$1"
 }
 
