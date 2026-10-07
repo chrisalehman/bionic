@@ -1142,70 +1142,35 @@ from there — this refusal is the main thread's alone."
   fi
 fi
 
-# ---------- the budget wall: the run's parallel ceiling ----------
+# ---------- the budget wall: a person's cap on writers ----------
 #
-# Step 0 probes the machine and writes ONE string into the plan's frontmatter —
-# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=…` — byte-identical
-# to the `budget=` value the preflight attestation records (L-RESOURCES/2). This wall
-# reads that string and never re-derives it: there is one owner of the numbers and it is
-# not here.
-#
-# INERT WITHOUT THE LINE, which is the property that matters most: every plan written
-# before this wave, and every project that never ran Step 0's probe, dispatches exactly
-# as it did. A budget is a ceiling a run OPTS INTO.
+# A CAP IS A PERSON'S WORD (wave-28 T9; D15, REQ-2 AC-2.9/AC-2.10). The plan's frontmatter may
+# carry `parallel-budget: writers=N … source=…`, and this wall obeys its `writers=` only when a
+# person wrote it: `budget_cap` (payload/scripts/lib/run.sh) answers from a line whose
+# `source=` is `user` (the hand cap verb's) or `override`, and nothing otherwise. A probe's
+# number caps nothing — the width is the gate's, asked by the run as it goes — so a plan with
+# no line, a 1.12.0 plan carrying `source=probe`, and a line with no `source=` all dispatch
+# with no ceiling here, and nothing is said about it: no plan owes the line.
 #
 # THE LEADING FRONTMATTER BLOCK ONLY. A `parallel-budget:` inside the plan body is prose
-# — this wave's own plan quotes the header in a task description — and a wall that read
-# it would take a quotation for configuration.
+# — a plan quoting the header in a task description — and a wall that read it would take a
+# quotation for configuration (`plan_budget_line`, which `budget_cap` reads through).
 #
-# THE ONE PLAN-BOUND ARM OF THIS GATE (task-engaged-session, AC-23). The ceiling is a
-# property of the run, declared in its plan, so an engaged session with no plan on disk
-# yet has no ceiling to be over and this wall stays silent — while every plan-free wall
-# above and below it fires. The read is guarded rather than left to awk's empty-filename
-# error, so the skip is a decision this file states, not a side effect of a failed open.
+# THE ONE PLAN-BOUND ARM OF THIS GATE (task-engaged-session, AC-23). The cap is a property of
+# the run, declared in its plan, so an engaged session with no plan on disk yet has no cap to
+# be over and this wall stays silent — while every plan-free wall above and below it fires.
 #
-# THE ONE BUDGET READER (epic-23 wave-20 T2, D10). `plan_budget_line` and `budget_field` in
-# payload/scripts/lib/run.sh are the reading the tick, the stop wall and the governing-skill
-# hook take too: the strict `parallel-budget:` line of the leading frontmatter, and one whole
-# field as a decimal integer. A field that is absent or not an integer leaves its own arm
-# unmeasured rather than refusing on a question this wall cannot answer — the §7 direction
-# every start-side ambiguity takes — and says so once.
+# NO WORKTREES CEILING (wave-28 T9; D15). It refused at `live trees + 1 > worktrees=`, a figure
+# the probe derived from free disk at Step 0. What it stood for is checked where a tree is
+# made: `spawn-worktree.sh create` refuses when the project's volume has less free than the
+# largest tree already there.
 PARALLEL_BUDGET=""
 [ -n "$PLAN" ] && PARALLEL_BUDGET="$(plan_budget_line "$PLAN")"
+DP_BUDGET_WRITERS=""
+[ -n "$PLAN" ] && DP_BUDGET_WRITERS="$(budget_cap "$PLAN")"
+DP_BUDGET_WRITERS="${DP_BUDGET_WRITERS#writers=}"
 
-# NO LINE ON A LIVE PLAN IS NAMED, NEVER PASSED IN SILENCE (REQ-10 AC-10.2; ADR-035). The
-# budget is a measurement every plan carries — the governing-skill hook refuses a plan Write
-# without `writers=` — so a plan past Step 3 reaching here without a readable one slipped
-# past that wall, by a later hand edit or a spelling no reader takes. Nothing is refused on
-# it: with no ceiling there is nothing to be over, and the dispatch goes ahead. It is SAID,
-# on the pass path (one WARN line) and on the refusal wire (AC-8.2's not-checked line), the
-# backstop the stop wall names at turn end. Below Step 4 a plan is still being written and
-# nothing is owed yet — the stop wall's own boundary (fill_ledger_live, past Step 3). A
-# `current: T<n>` is a task-scale plan, past Step 3 by the approval arm's rule.
-DP_BUDGET_WRITERS=""; DP_BUDGET_NAMED=""
-[ -n "$PARALLEL_BUDGET" ] && DP_BUDGET_WRITERS="$(budget_field "$PARALLEL_BUDGET" writers)"
-if [ -n "$PLAN" ] && [ -z "$DP_BUDGET_WRITERS" ]; then
-  DP_BUDGET_CURRENT=$(awk '
-    /^## SDLC State/ { st = 1; next }
-    st && /^## / { exit }
-    st && /^[[:space:]]*current[[:space:]]*:/ {
-      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
-      print; exit }
-  ' "$PLAN" 2>/dev/null) || DP_BUDGET_CURRENT=""
-  case "$DP_BUDGET_CURRENT" in
-    T[0-9]*) DP_BUDGET_STEP=4 ;;
-    *) DP_BUDGET_STEP="${DP_BUDGET_CURRENT%%[!0-9]*}" ;;
-  esac
-  case "$DP_BUDGET_STEP" in ''|*[!0-9]*) DP_BUDGET_STEP="" ;; esac
-  if [ -n "$DP_BUDGET_STEP" ] && [ "$DP_BUDGET_STEP" -ge 4 ]; then
-    printf 'dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field, so the writer budget is unmeasured (ADR-035: the budget is a measurement Step 0 writes). Plan: %s. Add Step 0'"'"'s line to its frontmatter: parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe\n' \
-      "$PLAN" >&2
-    dp_not_checked "budget" "a parallel-budget: line with a writers= field in the plan (ADR-035)"
-    DP_BUDGET_NAMED=1
-  fi
-fi
-
-if [ -n "$PARALLEL_BUDGET" ]; then
+if [ -n "$DP_BUDGET_WRITERS" ]; then
 
   # OPEN ROWS, in one pass over the roster (spec AC-7).
   #
@@ -1415,23 +1380,10 @@ $2
 WRITERNAMES
   }
 
-  # LIVE LEASES ON DISK. A directory under `.worktrees` whose `.git` is a FILE is a
-  # linked worktree; anything else there is a leftover, not a lease (WALLS/4).
-  budget_live_trees() {  # <project root> -> count
-    local root="$1" d n=0
-    [ -d "$root/.worktrees" ] || { printf '0'; return 0; }
-    for d in "$root"/.worktrees/*; do
-      [ -d "$d" ] || continue
-      [ -f "$d/.git" ] || continue
-      n=$(( n + 1 ))
-    done
-    printf '%s' "$n"
-  }
-
   # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The ceilings are readings of
   # ONE wall and one repair — "land or stand down a row" clears whichever of them fired — so
   # reporting each would spend a line of the refusal's budget per ceiling to say one thing
-  # several ways (two since wave-26 T8 removed the suites arm). The guard keeps the arm's
+  # several ways (one since wave-28 T9 removed the worktrees arm; wave-26 T8 removed suites). The guard keeps the arm's
   # pre-REQ-8 behaviour exactly: the first ceiling passed is the one named. What changed is that the wall records instead of exiting, so
   # the arms after it are read in the same pass.
   BUDGET_DENIED=""
@@ -1448,12 +1400,11 @@ $3}
 budget: ${PARALLEL_BUDGET}
   declared by ${PLAN}
 
-That string is derived once, at Step 0, from this machine's own resources probe, and
-recorded verbatim — nothing re-derives it here, and raising it is a Step-0 act.
+That cap is a person's (source=user or source=override): the hand cap verb wrote it, or
+someone typed it. Nothing here raises it; raising it is that person's edit of the line.
 
 Fix: land or stand down an open row first (\`bash ${HOOK_DIR}/stop-orders.sh
-standdown\` computes the batch), or re-run Step 0's probe and raise the line if the
-machine genuinely has the room."
+standdown\` computes the batch), or ask the user to raise the plan's writers= cap."
   }
 
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
@@ -1474,51 +1425,19 @@ machine genuinely has the room."
   case "$BUDGET_COUNTS" in *$'\n'*) BUDGET_OPEN_NAMES="${BUDGET_COUNTS#*$'\n'}" ;; esac
   BUDGET_COUNTS="${BUDGET_COUNTS%%$'\n'*}"
   BUDGET_OPEN="$BUDGET_COUNTS"
-  BUDGET_UNMEASURED=""
-
   B_WRITERS="$DP_BUDGET_WRITERS"
-  if [ -n "$B_WRITERS" ]; then
-    # A READ-ONLY DISPATCH ASKS FOR NO WRITER SLOT (wave-24 T10, D11): the +1 is a writer's.
-    BUDGET_ASK=1
-    role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
-    [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
-      "this passes the run's writer budget" \
-      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))" \
-      "$(budget_writer_rows "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")"
-  elif [ -z "$DP_BUDGET_NAMED" ]; then
-    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
-  fi
+  # A READ-ONLY DISPATCH ASKS FOR NO WRITER SLOT (wave-24 T10, D11): the +1 is a writer's.
+  BUDGET_ASK=1
+  role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
+  [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
+    "this passes the run's writer budget" \
+    "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))" \
+    "$(budget_writer_rows "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")"
 
   # NO SUITES ARM (wave-26 T8; D8, REQ-6 AC-6.3). It refused a dispatch at
   # `claimed + 1 > suites`: a suite booked for every claiming agent's whole life, and one more
   # for every dispatch, read-only included. A suite run books its own machine-wide place as it
   # starts now (payload/scripts/lib/slots.sh), so hand-out counts no suites.
-
-  B_TREES=$(budget_field "$PARALLEL_BUDGET" worktrees)
-  if [ -n "$B_TREES" ]; then
-    BUDGET_LIVE=$(budget_live_trees "$BIONIC_ROOT")
-    # A READ-ONLY DISPATCH ASKS FOR NO WORKTREE (wave-26 T8, D8), as it asks for no writer
-    # slot above: it writes nothing, so it is handed no tree.
-    BUDGET_TREE_ASK=1
-    role_is_readonly "$DP_SUBAGENT" && BUDGET_TREE_ASK=0
-    [ $(( BUDGET_LIVE + BUDGET_TREE_ASK )) -gt "$B_TREES" ] && budget_deny \
-      "this passes the run's worktree budget" \
-      "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + BUDGET_TREE_ASK ))"
-  else
-    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} worktrees"
-  fi
-
-  # Said once, on the pass path, and only when a field the line should have carried was
-  # unreadable: a wall that could not measure an arm must never go quiet about it.
-  if [ -n "$BUDGET_UNMEASURED" ]; then
-    printf 'dispatch-preflight: WARN the plan'"'"'s parallel-budget line carries no readable%s field; %s unmeasured. Line: %s\n' \
-      "$BUDGET_UNMEASURED" "${BUDGET_UNMEASURED# }" "$PARALLEL_BUDGET" >&2
-    # AND ON THE REFUSAL'S OWN WIRE (AC-8.2). The WARN above is the pass path's; a dispatch
-    # being refused for something else needs the same fact where the model reads, or the
-    # author repairs three faults and meets a ceiling that was never measured. This is R2's
-    # per-field shape, which AC-8.2 names as the one the rest of the file should copy.
-    dp_not_checked "budget" "the parallel-budget: line to carry${BUDGET_UNMEASURED}"
-  fi
 fi
 
 warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
