@@ -3010,6 +3010,32 @@ expect_status "DOOR.23 a project whose tests/run.sh takes --only still refuses t
 expect_eq "DOOR.23b …with the door's line, text unchanged" \
   "bionic: suite-run refused — use tests/run.sh --only alpha.test.sh (one door)" "$(dr_line)"
 
+# THE RUNNER HALF (A-orch-125): the same predicate governs the call that NAMES the door. Where the
+# project has none, `tests/run.sh --only <suite>` is the full tree under the project's own runner,
+# judged as at 903c971b (the budget names the full tree, never the shim's `--runner`), so a runner
+# that ignores the flag cannot be handed an admission it never asks for.
+bw_dispatched "$R_NO" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.29 a runner without --only, called with --only, is the full tree: refused" 2 "$ST"
+expect_contains "DOOR.29b …by the full-tree arm, as at 903c971b" "full tree refused; allowed: alpha.test.sh" "$(dr_line)"
+expect_absent "DOOR.29c …and the door has no say" "one door" "$ERR"
+bw_dispatched "$R_NO" t54full "suites_allowed=run.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.30 …and passes on a row that carries the full tree" 0 "$ST"
+expect_regex "DOOR.30b …wrapped for the shim" "booked\\.sh.* --suites [^ ]+ -- " "$(updated_command_of)"
+expect_absent "DOOR.30c …with no --runner, so the gate is asked for the run" " --runner" "$(updated_command_of)"
+bw_dispatched "$R_NO" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+R_NOM="$(mk_repo door-main-noonly yes noonly)"
+printf 'farm-out-mode: advisory\n' > "$R_NOM/.bionic/config.yaml"
+bw_dispatched "$R_NOM" t54main "suites_allowed=beta.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NOM" 'tests/run.sh --only alpha.test.sh' "" omit Bash "" 1800000)"
+expect_status "DOOR.31 the main thread, no door: the call passes" 0 "$ST"
+expect_regex "DOOR.31b …wrapped, the shim named" "booked\\.sh.* --suites [^ ]+ -- " "$(updated_command_of)"
+expect_absent "DOOR.31c …and not told it is the runner" " --runner" "$(updated_command_of)"
+run_hook "$(mk_payload "$R_DRM" 'tests/run.sh --only alpha.test.sh' "" omit Bash "" 1800000)"
+expect_regex "DOOR.31d control: the same call where the project has the door IS the runner's" \
+  "booked\\.sh.* --suites alpha\\.test\\.sh --runner -- " "$(updated_command_of)"
+
 # THE TREE IS THE COMMAND'S: a leading `cd <tree>` moves the project the door is looked for in,
 # the way it moves the shim's --stamp-dir. The checkout the hook's root names is not asked.
 DR_WT_DOOR="$R_NR/.worktrees/door"; DR_WT_NONE="$R_DR/.worktrees/nodoor"
@@ -3039,23 +3065,27 @@ bw_dispatched "$R_DR" t36writer "suites_allowed=alpha.test.sh" suites_source=dec
 # in every project (the defect), with it inverted it fires only where there is none, and with the
 # `--only` read dropped a runner of the project's own is taken for the door. Each runs before its
 # absence is read: the mutant parses, and still refuses an off-budget run.
-DRP_ANCHOR='if [ "$_door_here" = yes ]; then'
+DRP_FN='^_door_in_tree() {'
 DRP_READ='grep -qF -- '"'--only'"
-mk_door_mutant() {  # <dir> <sed script over walls.sh>
+mk_door_mutant() {  # <dir> <shell text appended to walls.sh: a later definition wins>
   rm -rf "$1"; mkdir -p "$1/hooks"
   cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$1/scripts"
   cp "$HOOK" "$1/hooks/bash-walls.sh"
-  sed -e "$2" "$1/scripts/lib/walls.sh" > "$1/walls.tmp" && mv "$1/walls.tmp" "$1/scripts/lib/walls.sh"
+  case "$2" in
+    UNREAD) sed -e "s/! grep -qF -- '--only' .*|| _DOOR_HERE=yes/_DOOR_HERE=yes/" "$1/scripts/lib/walls.sh" > "$1/walls.tmp" && mv "$1/walls.tmp" "$1/scripts/lib/walls.sh" ;;
+    *) printf '\n%s\n' "$2" >> "$1/scripts/lib/walls.sh" ;;
+  esac
 }
-anchor "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_ANCHOR" 1
+anchor -E "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_FN" 1
 anchor "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_READ" 1
 DRP_KEEP="$HOOK"
 for _m in removed inverted unread; do
   DRP_DIR="$SANDBOX/door-pred-$_m"
   case "$_m" in
-    removed)  mk_door_mutant "$DRP_DIR" 's/if \[ "\$_door_here" = yes \]; then/if true; then/' ;;
-    inverted) mk_door_mutant "$DRP_DIR" 's/if \[ "\$_door_here" = yes \]; then/if [ "$_door_here" != yes ]; then/' ;;
-    unread)   mk_door_mutant "$DRP_DIR" "s/! grep -qF -- '--only' .*|| _door_here=yes/_door_here=yes/" ;;
+    removed)  mk_door_mutant "$DRP_DIR" '_door_in_tree() { _DOOR_HERE=yes; }' ;;
+    inverted) mk_door_mutant "$DRP_DIR" 'eval "$(declare -f _door_in_tree | sed "1s/_door_in_tree/_door_in_tree_real/")"
+_door_in_tree() { _door_in_tree_real; if [ "$_DOOR_HERE" = yes ]; then _DOOR_HERE=no; else _DOOR_HERE=yes; fi; }' ;;
+    unread)   mk_door_mutant "$DRP_DIR" UNREAD ;;
   esac
   expect_eq "DOOR.26 [$_m] the mutant library parses" "0" "$(bash -n "$DRP_DIR/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
   expect_eq "DOOR.26b [$_m] and differs from the shipped library" "differs" "$(diff -q "$DRP_DIR/scripts/lib/walls.sh" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" >/dev/null 2>&1 && echo same || echo differs)"
@@ -3069,6 +3099,11 @@ for _m in removed inverted unread; do
   expect_status "DOOR.27 [$_m] the no-runner project's on-budget bare run reads $_want_nr under the mutant" "$_want_nr" "$ST"
   run_hook "$(mk_payload "$R_NO" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
   expect_status "DOOR.28 [$_m] the no-flag runner project's run is refused under the mutant (red against DOOR.21)" 2 "$ST"
+  run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.28b [$_m] the no-flag runner's --only call passes as a door claim under the mutant (red against DOOR.29)" 0 "$ST"
+  run_hook "$(mk_payload "$R_DR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  case "$_m" in inverted) _want_dr=0 ;; *) _want_dr=2 ;; esac
+  expect_status "DOOR.28c [$_m] the project with the door reads $_want_dr (the shipped library: 2)" "$_want_dr" "$ST"
   HOOK="$DRP_KEEP"
 done
 
