@@ -2682,6 +2682,11 @@ row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
   for k in files suites_allowed suites_source teammate_id adopted_from questions; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
+  # `row=` and `lands_on=` too (wave-28 T7; D4, D17): the row a dispatch binds and the suites it
+  # lands on are its contract, read off its latest row, so an amended, held or extended row keeps them.
+  for k in row lands_on; do
+    row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
+  done
   # `pushed=` too (wave-28 T15; A-orch-9): what a reader was pushed at start decides how its record
   # is read (lib/proof.sh `proof_pushed_severity`), so an amended, held or extended reader row keeps
   # it. Only where `roster_row` knows the key (wave-28 T16), so a copy never fails on it.
@@ -3413,7 +3418,7 @@ launch_sync_launches() {  # <roster> <sid> <open names, one per line>
       if (kv["session"] != "" && kv["session"] != sid) next
       at[nm] = NR; r++; last[nm] = r
       rn[r] = nm; ri[r] = kv["agent_id"]; rt[r] = kv["tool_use_id"]; rl[r] = kv["launched_at"]
-      rec[nm] = kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"]
+      rec[nm] = kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"] "\037" kv["row"]
     }
     END {
       for (q = 1; q <= r; q++) {
@@ -3498,13 +3503,13 @@ launch_sync_project() {
   local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
   local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
   local us=$'\037'
-  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG LGDT pairs lpairs
+  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LBR LROW FINAL LGID LGAG LGDT pairs lpairs
   LS_SAID=""; LS_FAILS=""; LS_HANDS=""; LS_PROOFS=""; LS_PROOFS_READ=no
   open="$(roster_open_names "$roster" "$acks" "$sid" 2>/dev/null)"
   [ -n "$open" ] || return 1
-  while IFS="$us" read -r name la du dl ty; do
+  while IFS="$us" read -r name la du dl ty rw; do
     [ -n "$name" ] || continue
-    LN[nl]="$name"; LLA[nl]="$la"; LDU[nl]="$du"; LDL[nl]="$dl"; LTY[nl]="$ty"; nl=$((nl + 1))
+    LN[nl]="$name"; LLA[nl]="$la"; LDU[nl]="$du"; LDL[nl]="$dl"; LTY[nl]="$ty"; LBR[nl]="$rw"; nl=$((nl + 1))
   done <<EOF
 $(launch_sync_launches "$roster" "$sid" "$open")
 EOF
@@ -3520,8 +3525,12 @@ EOF
   j=0
   while [ "$j" -lt "$nl" ]; do
     hits=0; h=-1; i=0
+    # THE ROW LABEL FIRST (wave-28 T7; D17): a launch whose row carries `row=` is that row's, by the
+    # id itself; only a launch with none is matched by its name.
     while [ "$i" -lt "$n" ]; do
-      if fill_row_launched "${RID[i]}" "${LN[j]}"; then hits=$((hits + 1)); h="$i"; fi
+      if [ -n "${LBR[j]}" ]; then
+        [ "${RID[i]}" = "${LBR[j]}" ] && { hits=$((hits + 1)); h="$i"; }
+      elif fill_row_launched "${RID[i]}" "${LN[j]}"; then hits=$((hits + 1)); h="$i"; fi
       i=$((i + 1))
     done
     LROW[j]=-1

@@ -5301,9 +5301,12 @@ PF_MAP="$SANDBOX/pf-map.sh"
   printf 'done\n'
 } > "$PF_MAP"
 
+# The floor row lands no code, so its brief names no landing suite (wave-28 T7, ruling A-orch-73: a
+# writer brief that binds a row, as `w99-T12` binds T12, carries a Lands-on: line).
 PF_FULL_BRIEF='Your task: run the full suite on the working head.
 Expected artifact: .bionic/docs/record/w28-floor.log
 Expected duration: ~40 minutes.
+Lands-on: none the floor row proves the head with the full suite and lands no code
 Suites: tests/run.sh'
 
 # pf_repo <name> -> a wave fixture checked out on `wave/99-test`, five suites, the map stub.
@@ -9904,6 +9907,10 @@ GATE="$ROOT_GATE_SAVED"
 
 # ===========================================================================
 section "§GATES — only human gates hold: nothing writes before approved-by:, a release waits for approved: release, a doc row is not held by its step (wave-26 T13; REQ-6 AC-6.2; D3)"
+# A dispatch named for a row (`w-T1`, `w-T9`) binds it, so its writer brief names the suites it lands
+# on (wave-28 T7, ruling A-orch-73); the line changes nothing else these rows read.
+GATES_BRIEF="$BRIEF_FULL
+Lands-on: widget"
 # ===========================================================================
 #
 # AN APPROVAL IS AN INPUT ONLY THE USER'S ACT WRITES (D3). `approval:plan` is the `approved-by:`
@@ -9941,13 +9948,13 @@ GATES_RELEASE='approved: release by dana 2026-10-04T05:00:00Z "Ship it."'
 REPO=$(make_repo rgates1 yes)
 write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES1 AC-6.2 a writer for T1 before approved-by: is refused" "deny" "$GATE_VERDICT"
 expect_eq "GATES1b …and the ready set offers nothing before approved-by:" "" "$(gates_ready "$GATES_P")"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
 expect_contains "GATES1c the control: with approved-by: written, the ready set offers T1" "T1 " "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES1d …and the dispatch wall admits the writer for T1" "0" "$GATE_ST"
 # A TABLE WITHOUT `reads` applies no kind default, so nothing in the table itself waits for the
@@ -9974,7 +9981,7 @@ expect_contains "GATES1f …and offers T1 once approved-by: is written" \
 REPO=$(make_repo rgates2 yes)
 write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES2 AC-6.2 a dispatch for the release row before approved: release is refused" "deny" "$GATE_VERDICT"
 expect_contains "GATES2b …naming the approval it waits for" "approval:release" "$GATE_VERR"
@@ -9984,7 +9991,7 @@ expect_contains "GATES2d the ready set on the same plan offers T1 (the extractor
 expect_absent "GATES2e …and not the release" "T9" "$GATES_READY"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED
 $GATES_RELEASE")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES2f with approved: release written, the release dispatch is admitted" "0" "$GATE_ST"
 expect_contains "GATES2g …and the ready set offers it" "T9" "$(gates_ready "$GATES_P")"
@@ -10002,7 +10009,7 @@ write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "- $GATES_APPROVED")"
 expect_contains "GATES4 precondition: the plan carries the bulleted line" "- approved-by: dana" "$(cat "$GATES_P")"
 expect_contains "GATES4 the ready set offers T1 on a bulleted approved-by:" "T1 " "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES4b …and the dispatch wall admits its writer" "allow" "$GATE_VERDICT"
 REPO=$(make_repo rgates4f yes)
@@ -10013,7 +10020,7 @@ approved-by: example 2026-01-01T00:00Z "approved"
 expect_contains "GATES4c precondition: the plan carries approved-by: only inside a fence" \
   'approved-by: example' "$(cat "$GATES_P")"
 expect_eq "GATES4c the ready set offers nothing on a fenced approved-by:" "" "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES4d …and the dispatch wall refuses its writer" "deny" "$GATE_VERDICT"
 expect_contains "GATES4d …as unapproved" "unapproved" "$GATE_ERR"
@@ -10024,7 +10031,7 @@ write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
 sed 's/| approval:release |$/| live:approval:release |/' "$GATES_P" > "$GATES_P.tmp" && mv "$GATES_P.tmp" "$GATES_P"
 expect_contains "GATES5 precondition: T9 reads live:approval:release" "| live:approval:release |" "$(cat "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES5 a dispatch for a row reading live:approval:release before approved: release is refused" \
   "deny" "$GATE_VERDICT"
@@ -11047,6 +11054,124 @@ expect_contains "T72-S3 …and says the verb reads with a logical cd, so .. is f
 expect_absent "T72-S3 …never that the verb reads with cd -P" 'with `cd -P`' "$T72_S3"
 
 # ============================================================================
+section "§LANDS-ON — a writer binding a row names the suites it lands on (wave-28 T7; REQ-1 AC-1.4, D4)"
+# =====================================================================
+# ============================================================================
+#
+# A brief carries `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>` on a line of its own.
+# The wall writes it on the launch row as `lands_on=`, each suite as `<name>.test.sh` (the spelling
+# `lands_red=` has and lib/line.sh `_line_suites` decodes), and refuses: a writer brief that binds a
+# row of the bound plan and carries no line (ruling A-orch-73: a dispatch binding no row is owed
+# none; A-orch-71: whatever version wrote the plan); `none` with no reason; a suite outside the set
+# the checks derived. FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh), on
+# make_repo's approved, bound plan with a `## Tasks` table holding T23 and A2. SYNTHESIZED.
+# fails-when: a bound writer with no line, a reasonless none, or an outside suite is admitted; a
+# well-formed line is refused or not written in the one spelling; an unbound writer is refused.
+t7_gate() {  # <repo tag> <body lines> [<name>] [<subagent_type>] [<brief>] -> GATE_*, T7_ROW
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| A2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${5:-$(adv_brief "$2")}" "${3:-w99-T23}" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${4:-implementor}")"
+  T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+t7_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+t7_cols_ok() { [ "$(bionic_cols "$(t7_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(t7_first)")"; }
+
+t7_gate lo1 'Scope constraint: touch only payload/scripts/lib/widget.sh.'
+expect_eq "LO1 a writer named w99-T23 (row T23's by the name match) with no Lands-on: line is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO1b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
+expect_contains "LO1c …the detail gives the line to add" "    Lands-on: <suite>[, <suite>]" "$GATE_VERR"
+expect_contains "LO1d …and the none form with its reason" "    Lands-on: none <reason>" "$GATE_VERR"
+expect_eq "LO1e …its first line is at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_eq "LO1f …and no row is written" "" "$T7_ROW"
+
+t7_gate lo2 'Lands-on: widget'
+expect_eq "LO2 Lands-on: widget, a suite of the row's set named bare, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "LO2b …the row carries lands_on=widget.test.sh, the one spelling" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
+t7_gate lo2t 'Lands-on: tests/widget.test.sh  # the suite this row lands on'
+expect_eq "LO2t Lands-on: tests/widget.test.sh with a trailing comment is admitted, written by its basename" \
+  "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+
+LO3_S="a-suite-name-of-sixty-characters-long-enough-to-wrap.test.sh"
+t7_gate lo3 "Lands-on: widget.test.sh, ${LO3_S}"
+expect_eq "LO3 a Lands-on: naming a suite outside the row's set is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO3b …the line names the suite, cut to fit" "Lands-on: a-suite-name" "$(t7_first)"
+expect_contains "LO3c …and its fix" "(name a suite the row runs)" "$(t7_first)"
+expect_eq "LO3d …its first line at most 100 columns with a sixty-character name" "ok" "$(t7_cols_ok)"
+expect_contains "LO3e …the detail names the set it may name from" "Suites: widget.test.sh" "$GATE_VERR"
+expect_eq "LO3f …and no row is written" "" "$T7_ROW"
+t7_gate lo3r 'Lands-on: run.sh'
+expect_contains "LO3r the full-suite runner is no suite of the line: refused as outside the set" "Lands-on: run.sh is outside Suites:" "$(t7_first)"
+
+t7_gate lo4 'Lands-on: none'
+expect_eq "LO4 Lands-on: none with no reason is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO4b …the line says it gives no reason" "Lands-on: none gives no reason" "$(t7_first)"
+expect_eq "LO4c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
+t7_gate lo5 'Lands-on: none — the row edits only prose no suite reads'
+expect_eq "LO5 Lands-on: none with a reason is admitted, the row carrying lands_on=none" \
+  "allow|none" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+
+t7_gate lo6 'Scope constraint: touch only payload/scripts/lib/widget.sh.' w99-misc
+expect_eq "LO6 an unbound writer (w99-misc is no row's name, no Row: label) with no Lands-on: is admitted" "allow" "$GATE_VERDICT"
+expect_contains "LO6b …its row is written (the extractor reads a real row)" "status=intended" "$T7_ROW"
+expect_absent "LO6c …with no lands_on= on it" "lands_on=" "$T7_ROW"
+t7_gate lo7 'Scope constraint: read only.' w99-T23 bionic:researcher \
+  "$(adv_brief 'Scope constraint: read only.' | sed '/^Files:/d; s#^Suites: .*#Suites: none#')"
+expect_eq "LO7 a read-only role bound to T23 by its name, with no Lands-on:, is admitted" "allow" "$GATE_VERDICT"
+expect_contains "LO7b …its row is written" "subagent_type=bionic:researcher" "$T7_ROW"
+t7_gate lo8 'Lands-on: <suite>[, <suite>]'
+expect_eq "LO8 the scaffold slot pasted unfilled declares nothing: the bound writer is refused for no line" \
+  "deny" "$GATE_VERDICT"
+expect_contains "LO8b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
+
+# ============================================================================
+section "§ROW-LABEL — Row: binds the dispatch to a row whatever the agent is called (wave-28 T7; REQ-3 AC-3.4, D17)"
+# ============================================================================
+# `Row: <id>` on a line of its own is written on the launch row as `row=<id>`; the launch record,
+# the fill and the stop wall read it before the name match (tests/session-poker.test.sh §ROW-LABEL,
+# tests/stop.test.sh §LAUNCHED). A Row: naming no row of the bound plan is refused.
+# fails-when: the label is not written, a row the plan lacks is admitted, or a fenced example binds.
+t7_gate rl1 'Row: T23
+Lands-on: widget' w-A2
+expect_eq "RL1 an agent named w-A2 briefed Row: T23 with its Lands-on: is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RL1b …the row carries row=T23" "T23" "$(roster_field "$T7_ROW" row)"
+expect_eq "RL1c …and lands_on=widget.test.sh" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
+t7_gate rl1n 'Row: T23' w-misc
+expect_eq "RL1n Row: T23 binds an agent no name match would: with no Lands-on: it is refused" "deny" "$GATE_VERDICT"
+expect_contains "RL1n2 …for the missing line" "the brief has no Lands-on: line" "$(t7_first)"
+t7_gate rl2 'Row: T99
+Lands-on: widget' w-A2
+expect_eq "RL2 Row: T99, no row of the bound plan, is refused" "deny" "$GATE_VERDICT"
+expect_contains "RL2b …the line names the label" "Row: T99 names no plan row" "$(t7_first)"
+expect_eq "RL2c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_contains "RL2d …the detail names the plan" "wave-01-test.plan.md" "$GATE_VERR"
+t7_gate rl3 'Lands-on: widget'
+expect_contains "RL3 a brief with no Row: is admitted and its row written" "status=intended" "$T7_ROW"
+expect_absent "RL3b …with no row= on it" "|row=" "$T7_ROW"
+t7_gate rl4 'An example of the label, never read:
+```
+Row: T23
+```' w-misc
+expect_eq "RL4 a Row: inside a fenced block is an example: the unbound writer is admitted" "allow" "$GATE_VERDICT"
+expect_contains "RL4b …its row is written" "status=intended" "$T7_ROW"
+expect_absent "RL4c …with no row= on it" "|row=" "$T7_ROW"
+
+# ============================================================================
+section "§BARE — a bare file name with an extension is a deliverable (wave-28 T7; REQ-15 AC-15.1, D32)"
+# ============================================================================
+# The deliverable span takes a name `files_entry` calls a path, as a Files: item is read: a name with
+# an extension on a stem holding a letter. A word of prose is not one. The writer here binds no row.
+# fails-when: `Expected artifact: notes.md` is refused, or a span of prose names a deliverable.
+t7_bare() { adv_brief 'Scope constraint: touch only payload/scripts/lib/widget.sh.' | sed "s#^Expected artifact: .*#Expected artifact: $1#"; }
+t7_gate bare1 '' w99-bare implementor "$(t7_bare 'notes.md')"
+expect_eq "BARE1 Expected artifact: notes.md is admitted" "allow" "$GATE_VERDICT"
+expect_eq "BARE1b …the row's deliverable is notes.md" "notes.md" "$(roster_field "$T7_ROW" deliverable)"
+t7_gate bare2 '' w99-bare implementor "$(t7_bare 'a written report of the findings.')"
+expect_eq "BARE2 a span of prose with no file name is refused" "deny" "$GATE_VERDICT"
+expect_contains "BARE2b …it still names no deliverable" "this brief names no deliverable" "$(t7_first)"
+t7_gate bare3 '' w99-bare implementor "$(t7_bare 'version 1.12.0 of the notes')"
+expect_contains "BARE3 a version number is no file name: still no deliverable" "this brief names no deliverable" "$(t7_first)"
+=======
 section "§RIGOR — the dealing reads a plan in either vocabulary alike, and prints the level by its new word (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35, A-orch-7)"
 # ============================================================================
 # The wall asks lib/proof.sh `facts_owed`, which reads the plan's word through lib/run.sh

@@ -1077,4 +1077,40 @@ RI="$(ll_rworld)"
 ll_verb "$RI" T1 --within 08
 expect_eq "(i2) --within 08 is eight seconds, not an octal error: the 5 s suite runs and lands" "0" "$LL_RC"
 
+section "§LABELS: the launch line's lands_on= and lands_red= read back through the carrier's decoder (wave-28 T7; read-structure-p12 #8)"
+# The dispatch wall writes `lands_on=` from the brief's `Lands-on:` line, spelled by the lift
+# (lib/brief.sh), and `lands_red=` as `<suite basename> until <token>`; `ready` reads both off the launch
+# line through `_line_suites`. One row per key, through the real lift and the real row writer, so the
+# writer and the decoder cannot drift. fails-when: the lifted spelling is not what `_line_suites`
+# decodes it to, or the debt's suite is not one of the row's suites in that same spelling.
+LB_LIFT="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
+  l="$(lift_contract_fields 'Lands-on: a, tests/b.test.sh, ./c.test.sh  # the row suites
+Lands-red: tests/b.test.sh until ext:vendor-fix')"
+  printf '%s|%s' "$(brief_field "$l" lands_on)" "$(brief_field "$l" lands_red)")"
+LB_ON="${LB_LIFT%%|*}"; LB_RED_LINE="${LB_LIFT#*|}"
+expect_eq "(lb0) precondition: the lift reads the Lands-on: line (the positive on that extractor)" \
+  "a.test.sh,b.test.sh,c.test.sh" "$LB_ON"
+# the wall writes the debt by its suite basename (hooks/dispatch-preflight.sh, `${_lr_suite##*/}`)
+LB_RED_SUITE="${LB_RED_LINE%% *}"; LB_RED="${LB_RED_SUITE##*/} until ${LB_RED_LINE##* until }"
+LB_ROW="$(roster_row status=intended session=s1 name=w-A2 agent_id= launched_at=2026-10-07T01:00:00Z \
+  subagent_type=implementor deliverable=record/n.md tool_use_id=toolu_n plan=none \
+  "lands_red=${LB_RED}" row=T23 "lands_on=${LB_ON}")"
+LB_ON_READ="$(_wt_field "$LB_ROW" lands_on)"
+expect_eq "(lb1) lands_on= on the launch line decodes to itself through _line_suites" \
+  "$LB_ON_READ" "$(_line_suites "$LB_ON_READ")"
+LB_RED_READ="$(_wt_field "$LB_ROW" lands_red)"
+expect_eq "(lb2) lands_red=, cut at its first word as ready cuts it, decodes to itself through _line_suites" \
+  "${LB_RED_READ%% *}" "$(_line_suites "${LB_RED_READ%% *}")"
+expect_contains "(lb3) …and that suite is one of the row's lands_on suites, in the same spelling" \
+  ",${LB_RED_READ%% *}," ",$(_line_suites "$LB_ON_READ"),"
+# The token half (read-structure-p17 #5): the wall writes a debt only as `<suite> until <token>`, so
+# ready's token cut (`${debt#* until }`, line.sh) and land's (`${lands_red#* until }`, worktree.sh) read
+# the one token; a debt with no ` until ` is never written, so where the two cuts differ is unreached.
+expect_eq "(lb3t) …and the debt carries its token after one ' until ', the cut both decoders make" \
+  "ext:vendor-fix" "${LB_RED_READ#* until }"
+LB_NONE="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
+  brief_field "$(lift_contract_fields 'Lands-on: none — prose only')" lands_on)"
+expect_eq "(lb4) Lands-on: none lifts as none, which _line_suites reads as no suites" "none|none" \
+  "${LB_NONE}|$(_line_suites "$LB_NONE")"
+
 finish
