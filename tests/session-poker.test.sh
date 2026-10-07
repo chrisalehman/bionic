@@ -13065,6 +13065,8 @@ section "§SHARE-VERB: session-poker.sh share prints the machine's share and sha
 SV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"; SV_HOME_WAS="$HOME"
 SV_ROOT="$(mktemp -d "$TMPROOT/share-verb.XXXXXX")"
 SV_R="$(make_repo share-verb)"
+new_roster "$SV_R"
+roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$(roster_of "$SV_R")"
 SV_CCD="$SV_ROOT/ccd"; SV_FILE="$SV_CCD/bionic/share"; mkdir -p "$SV_CCD"
 sv_poke() {  # <args...> -> the verb under CLAUDE_CONFIG_DIR=$SV_CCD, from the engaged fixture repo
   export CLAUDE_CONFIG_DIR="$SV_CCD"
