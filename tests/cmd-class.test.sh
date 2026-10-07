@@ -2381,6 +2381,10 @@ expect_eq "§ONLY the full tree is still run.sh beside a door call" "only:a.test
 case_is none 'tests/run.sh --only' "§ONLY --only with no name runs nothing: none"
 case_is none 'tests/run.sh --only a.test.sh --dry-run' "§ONLY --dry-run beside it runs nothing: none"
 case_is suite 'tests/run.sh --only a.test.sh' "§ONLY the door is suite-class"
+loop_lines_are "tests/run.sh --only a.test.sh
+tests/run.sh --only b.test.sh" 'for s in a b; do tests/run.sh --only "$s.test.sh"; done; eval :'
+loop_lines_are "bash tests/a.test.sh
+bash tests/b.test.sh" 'for s in a b; do bash "tests/$s.test.sh"; done; eval :'
 expect_eq "§ONLY cmd_suite_targets projects the door's suites" "a.test.sh|b.test.sh" \
   "$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" /r' _ "$LIB" 'tests/run.sh --only a.test.sh b.test.sh' 2>&1 | paste -sd'|' -)"
 expect_eq "§ONLY the targets reading carries the path in the runner's directory, no split" \
