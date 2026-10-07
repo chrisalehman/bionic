@@ -3252,4 +3252,165 @@ $EGD_MOVED")"
 expect_status "EGD-mut4 …and admits the moved one the shipped wall refuses: EGD-6b goes red" 0 "$ST"
 HOOK="$EGD_HOOK_KEEP"
 
+# ---------------------------------------------------------------------------
+section "§EG-DERIVE (T72) — the collector derives only where the gate reads, in one pass (wave-28 T72; REQ-8 AC-8.6, AC-8.7; D33; A-orch-213)"
+# ---------------------------------------------------------------------------
+# T60's collector ran `proof_readings_derived` on every commit in a bound root at every step, one awk
+# over the plan per reading and more per `check:` line, while the wall reads `BIONIC_READINGS` only from
+# `current: 6` (measured on a copy of this wave's plan: 13 s with 88 check lines, against the hook's 10 s
+# clock, past which the CLI lets the commit through). The collector now derives only when the plan's
+# declared `current:` is a step the wall reads (lib/walls.sh `eg_plan_reads_readings`, the wall's own
+# step rule `eg_step_reads_readings`), only when a `check:`, `deferred:` or `moved:` line binds a pass,
+# and in one pass over the plan. FIXTURE FIDELITY: §EG-DERIVE's repository, plan writer and gate drive;
+# 88 readings in the producing verb's line shape, each with a record of one finding and a `check:` line;
+# the collector's hand-over is read through a COPY of the hook that writes `BIONIC_READINGS` out just
+# before the verdict is folded (the copy changes nothing else).
+EGD_NOBS="$SANDBOX/egd-readings-seen"
+egd_ms() { perl -MTime::HiRes=time -e 'printf "%d", time * 1000'; }
+egd_hook() {  # <name> <scripts dir> <code> -> a copy of the hook that runs <code> just before it folds the verdict
+  local d="$SANDBOX/egd-hook-$1"
+  mkdir -p "$d/hooks"; ln -s "$2" "$d/scripts" 2>/dev/null
+  EGD_CODE="$3" awk 'BEGIN { c = ENVIRON["EGD_CODE"] } index($0, "bionic_fold \"$EVENT\"") == 1 { print c } { print }' \
+    "$EGD_HOOK_KEEP" > "$d/hooks/bash-walls.sh"
+  printf '%s' "$d/hooks/bash-walls.sh"
+}
+egd_seen() {  # -> `seen|<lines handed>` once the copy has run, `unseen|` before
+  if [ -f "$EGD_NOBS" ]; then printf 'seen|%s' "$(grep -c . "$EGD_NOBS")"; else printf 'unseen|'; fi
+}
+egd_within() {  # <ms> <bound ms> -> `ok`, or `slow (<ms> ms)`
+  if [ "$1" -lt "$2" ] 2>/dev/null; then printf ok; else printf 'slow (%s ms)' "$1"; fi
+}
+EGD_SCRIPTS="$BIONIC_SCRIPTS_DIR/payload/scripts"
+EGD_N=88
+EGD88=""; EGD88_CHECKS=""
+for _egd_i in $(seq 1 "$EGD_N"); do
+  egd_rec "w88-$_egd_i" fail "finding: 1 S1 on x.sh:9 - data lost on a second run"
+  EGD88="${EGD88:+$EGD88
+}$(eg6_reading "$H_EG6" adversarial fail "record/w28t60/w88-$_egd_i.md")"
+  EGD88_CHECKS="${EGD88_CHECKS:+$EGD88_CHECKS
+}check: record/w28t60/w88-$_egd_i.md#1 S1 on \"data lost on a second run\" refuted by=record/w28t60/chk.md"
+done
+EGD88_PLAN_BODY="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$EGD88
+$EGD88_CHECKS"
+EGD_PROBE="$(egd_hook probe "$EGD_SCRIPTS" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'")"
+HOOK="$EGD_PROBE"
+
+# ---------- the gate: a commit below the step that reads is not derived for ----------
+rm -f "$EGD_NOBS"
+EGD_T0="$(egd_ms)"; eg6_gate "$(eg6_plan 4 wave "$EGD88_PLAN_BODY")"; EGD_MS4=$(( $(egd_ms) - EGD_T0 ))
+expect_eq "EGD-7 precondition: the plan holds $EGD_N reading lines of the adversarial question and $EGD_N check: lines" \
+  "$EGD_N|$EGD_N" "$(grep -c '^proved: .*question=adversarial' "$R_EG6/.bionic/docs/plans/active.md")|$(grep -c '^check: ' "$R_EG6/.bionic/docs/plans/active.md")"
+expect_eq "EGD-7a §EG-DERIVE (T72) at current: 4 the hook ran (the copy wrote its file) and handed the wall no readings" "seen|0" "$(egd_seen)"
+expect_eq "EGD-7b …and the commit took well under the hook's 10 s clock (under 3000 ms)" "ok" "$(egd_within "$EGD_MS4" 3000)"
+rm -f "$EGD_NOBS"
+EGD_T0="$(egd_ms)"; eg6_gate "$(eg6_plan 6 wave "$EGD88_PLAN_BODY")"; EGD_MS6=$(( $(egd_ms) - EGD_T0 ))
+expect_eq "EGD-7c the same plan at current: 6: the collector handed the wall a derived result for each reading it read" \
+  "seen|$((EGD_N + 2))" "$(egd_seen)"
+expect_eq "EGD-7d …$EGD_N of them written fail and derived pass (every finding refuted)" "$EGD_N" \
+  "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$EGD_NOBS" | grep -c .)"
+expect_status "EGD-7e …and the wall read them: the commit is admitted, though every reading was written result=fail" 0 "$ST"
+expect_eq "EGD-7f …in well under the hook's 10 s clock (under 3000 ms)" "ok" "$(egd_within "$EGD_MS6" 3000)"
+# the derivation alone, over a plan the size of this wave's: one pass
+EGD_TPLAN="$SANDBOX/egd-time.plan.md"
+{ cat "$R_EG6/.bionic/docs/plans/active.md"; printf '\n## Notes\n\n'; for _egd_i in $(seq 1 3000); do printf 'prose line %s of the plan body\n' "$_egd_i"; done; } > "$EGD_TPLAN"
+egd_derive_ms() {  # <scripts dir> -> ms one `proof_readings_derived` takes over $EGD_TPLAN (the records are the fixture's)
+  local t0 t1
+  t0="$(egd_ms)"
+  bash -c '. "$1/lib/roots.sh" 2>/dev/null; . "$1/lib/proof.sh" && proof_readings_derived "$2" "$3"' _ "$1" "$EGD_TPLAN" "$R_EG6" >"$SANDBOX/egd-derived.out" 2>/dev/null
+  t1="$(egd_ms)"; printf '%s' "$((t1 - t0))"
+}
+EGD_DMS="$(egd_derive_ms "$EGD_SCRIPTS")"  # the quickest of three: a spike of load on a shared machine is not the library's
+for _egd_i in 2 3; do EGD_D2="$(egd_derive_ms "$EGD_SCRIPTS")"; [ "$EGD_D2" -ge "$EGD_DMS" ] || EGD_DMS="$EGD_D2"; done
+expect_eq "EGD-8 §EG-DERIVE (T72) one pass: $EGD_N check lines over a $(wc -l < "$EGD_TPLAN" | tr -d ' ')-line plan are derived in under 1000 ms (took $EGD_DMS ms; 13 s before)" "ok" "$(egd_within "$EGD_DMS" 1000)"
+expect_eq "EGD-8b …and the lines are there to be read (the extractor returns real output): $EGD_N written fail, derived pass" "$EGD_N" \
+  "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
+
+# ---------- no line binds a pass: nothing to derive, the written results stand ----------
+rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_eq "EGD-9 §EG-DERIVE (T72) readings and no check:, deferred: or moved: line, at current: 6: the collector handed the wall nothing" "seen|0" "$(egd_seen)"
+expect_status "EGD-9b …and the wall's verdict is the written result's: the failing reading is refused (EGD-1)" 2 "$ST"
+rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_eq "EGD-9c …while the same readings with one check: line are derived (the extractor does return lines)" "seen|3" "$(egd_seen)"
+expect_status "EGD-9d …and the refuted reading is admitted (EGD-2)" 0 "$ST"
+
+# ---------- the facts are for one plan: BIONIC_DEBTS_PLAN other than the plan judged ----------
+EGD_OTHER="$(egd_hook other "$EGD_SCRIPTS" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'; BIONIC_DEBTS_PLAN=/nonexistent/other.plan.md")"
+HOOK="$EGD_OTHER"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_eq "EGD-10 §EG-DERIVE (T72) the collector derived the lines (the extractor returns real output)…" "seen|3" "$(egd_seen)"
+expect_status "EGD-10b …but handed for another plan than the one judged they are ignored: the failing reading is refused, as written" 2 "$ST"
+HOOK="$EGD_PROBE"
+
+# ---------- the mutation arms ----------
+# (1) the step gate removed from the collector: the commit at current 4 is derived for
+EGD_GATE=' && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"'
+anchor "$EGD_HOOK_KEEP" "$EGD_GATE" 1
+EGD_MG="$SANDBOX/egd-mut-gate"; mkdir -p "$EGD_MG/hooks"; ln -s "$EGD_SCRIPTS" "$EGD_MG/scripts"
+EGD_N_="$EGD_GATE" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) substr($0, i + length(n)); print }' \
+  "$EGD_PROBE" > "$EGD_MG/hooks/bash-walls.sh"
+expect_eq "EGD-mut0 the gate-removed copy differs from the probe copy in one line" "1" "$(diff "$EGD_PROBE" "$EGD_MG/hooks/bash-walls.sh" | grep -c '^>')"
+HOOK="$EGD_MG/hooks/bash-walls.sh"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 4 wave "$EGD88_PLAN_BODY")"
+expect_eq "EGD-mut1 the mutant derives at current: 4 and hands the wall $((EGD_N + 2)) lines: EGD-7a goes red" "seen|$((EGD_N + 2))" "$(egd_seen)"
+# (2) one pass back to one per reading: the old function appended to a copy of the library
+EGD_MP="$SANDBOX/egd-mut-pass"; rm -rf "$EGD_MP"; cp -R "$EGD_SCRIPTS" "$EGD_MP"
+cat >> "$EGD_MP/lib/proof.sh" <<'EGD_OLD_FN'
+
+proof_readings_derived() {
+  local plan="${1:-}" tree="${2:-}" droot="" ev res lines
+  [ -f "$plan" ] || return 0
+  droot="$(docs_root "$tree" 2>/dev/null)"
+  lines="$(awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      m = split($0, f, /[ \t]+/); ev = ""
+      for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) ev = substr(f[i], 10)
+      if (ev != "" && !((ev SUBSEP PROOF_RESULT) in seen)) { seen[ev SUBSEP PROOF_RESULT] = 1; print ev "\t" PROOF_RESULT }
+    }' "$plan")"
+  while IFS='	' read -r ev res; do
+    [ -n "$ev" ] || continue
+    printf '%s\t%s\t%s\n' "$ev" "$res" "$(_proof_reading_result "$plan" "$droot" "$ev" "$res")"
+  done <<PROOF_READINGS
+$lines
+PROOF_READINGS
+}
+EGD_OLD_FN
+expect_eq "EGD-mut2 the per-reading copy of the library parses" "0" "$(bash -n "$EGD_MP/lib/proof.sh" >/dev/null 2>&1; echo $?)"
+EGD_MDMS="$(egd_derive_ms "$EGD_MP")"
+expect_eq "EGD-mut3 the per-reading copy derives the same lines (the extractor returns real output)…" "$EGD_N" \
+  "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
+expect_eq "EGD-mut4 …but not in under 1000 ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" 1000 | cut -c1-4)"
+# (3) nothing binds, yet the collector hands the lines over: the no-binding-line exit removed
+EGD_NB='if (!nbind) exit'
+anchor "$EGD_SCRIPTS/lib/proof.sh" "$EGD_NB" 1
+EGD_MB="$SANDBOX/egd-mut-bind"; rm -rf "$EGD_MB"; cp -R "$EGD_SCRIPTS" "$EGD_MB"
+EGD_N_="$EGD_NB" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if (0) exit" substr($0, i + length(n)); print }' \
+  "$EGD_SCRIPTS/lib/proof.sh" > "$EGD_MB/lib/proof.sh"
+expect_eq "EGD-mut5 the copy without the no-binding exit differs from the library in one line" "1" \
+  "$(diff "$EGD_SCRIPTS/lib/proof.sh" "$EGD_MB/lib/proof.sh" | grep -c '^>')"
+HOOK="$(egd_hook mutbind "$EGD_MB" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'")"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_eq "EGD-mut6 the mutant hands the wall the readings' written results as derived lines: EGD-9 goes red" "seen|3" "$(egd_seen)"
+# (4) the plan guard removed from the wall: lines handed for another plan are read
+EGD_GUARD='[ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1'
+anchor "$EGD_SCRIPTS/lib/walls.sh" "$EGD_GUARD" 1
+EGD_MW="$SANDBOX/egd-mut-guard"; rm -rf "$EGD_MW"; cp -R "$EGD_SCRIPTS" "$EGD_MW"
+EGD_N_="$EGD_GUARD" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "handed=1" substr($0, i + length(n)); print }' \
+  "$EGD_SCRIPTS/lib/walls.sh" > "$EGD_MW/lib/walls.sh"
+expect_eq "EGD-mut7 the guard-removed copy differs from the library in one line" "1" \
+  "$(diff "$EGD_SCRIPTS/lib/walls.sh" "$EGD_MW/lib/walls.sh" | grep -c '^>')"
+HOOK="$(egd_hook mutguard "$EGD_MW" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'; BIONIC_DEBTS_PLAN=/nonexistent/other.plan.md")"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_status "EGD-mut8 the mutant reads the lines handed for another plan and admits the refuted reading: EGD-10b goes red" 0 "$ST"
+HOOK="$EGD_HOOK_KEEP"
+
 finish
