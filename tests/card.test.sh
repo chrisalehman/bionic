@@ -1854,4 +1854,154 @@ expect_eq "W27-42j: …and prints exactly what it printed before the column exis
     "    second thing owner lib/second.sh  surfaces the fixture card       test tests/second.test.sh")" \
   "$W27_OWN_OLD"
 
+section "INHERIT — wave-28 T43 (AC-8.10, D21): the Step 1 card lists every deferral the last closed run left open"
+# A deferral is faced again. Close-out writes each open deferral under `## Deferrals` of the run's
+# continuation (T17's closing note); the next wave's Step 1 card reads the continuation of the MOST
+# RECENTLY CLOSED run (the newest `- Step 9: delivered: <stamp>` among plans that read closed) and
+# prints, under `Inherited deferrals`, every `deferred:` line the requirements file's
+# `## Inherited deferrals` section does not dispose of with exactly one of
+#   adopted: <id> as REQ-<n>  ·  again: <id>  ·  closed: <id> <reason>
+# A disposal naming an id the continuation does not carry disposed of nothing and is refused.
+# HERMETIC: a throwaway project under the mktemp sandbox, never this repository's docs.
+INH_P="${CARD_SANDBOX}/inherit-proj"
+INH_D="${INH_P}/.bionic/docs"
+INH_REC="record/wave-1-a/read-adversarial-p1.md"
+INH_L1="deferred: ${INH_REC}#1 S2 off \"the first deferral\" stated=\"-\" from=wave-1-a"
+# A sentence holding an escaped quote and an escaped backslash, as close-out writes it; long
+# enough that the card must fold it to stay inside the budget.
+INH_L2='deferred: record/wave-1-a/read-adversarial-p1.md#2 S3 on "the second deferral" stated="Said \"go\" \\ now, and meant it." from=wave-1-a'
+INH_LOLD="deferred: record/wave-0-old/rev.md#1 S3 on \"an older run's deferral\" stated=\"-\" from=wave-0-old"
+INH_LOPEN="deferred: record/wave-2-b/rev.md#1 S3 on \"an open run's line\" stated=\"-\" from=wave-2-b"
+# inh_plan <slug> <current> [<delivered stamp>] -> a plan under the fixture's docs root
+inh_plan() {
+  mkdir -p "$INH_D/plans/epic-9"
+  { printf -- '---\nscale: wave\nrequirements: specs/epic-9/%s.requirements.md\n---\n\n# %s\n\n## SDLC State\n\ncurrent: %s\n\n' "$1" "$1" "$2"
+    [ -z "${3:-}" ] || printf -- '- Step 9: delivered: %s %s — the fixture closed\n' "$3" "$1"
+  } > "$INH_D/plans/epic-9/$1.plan.md"
+}
+# inh_cont <slug> <line>... -> that run's continuation, the lines written as given
+inh_cont() {
+  local slug="$1"; shift
+  mkdir -p "$INH_D/record/$slug"
+  printf '%s\n' "# continuation — $slug" "" "$@" > "$INH_D/record/$slug/continuation.md"
+}
+# inh_req <name> [<line>...] -> a requirements file; with lines, they make its ## Inherited deferrals
+inh_req() {
+  local f="$INH_D/specs/epic-9/$1.requirements.md"; shift
+  mkdir -p "${f%/*}"
+  cp "$REQ_FIX" "$f"
+  if [ "$#" -gt 0 ]; then printf '\n## Inherited deferrals\n\n' >> "$f"; printf '%s\n' "$@" >> "$f"; fi
+  printf '%s' "$f"
+}
+# inh_block <card> -> each line printed under `  Inherited deferrals`, its folds joined back
+inh_block() {
+  printf '%s\n' "$1" | awk '
+    /^  Inherited deferrals$/ { s = 1; next }
+    s && !/^    / { exit }
+    s { t = substr($0, 5); if (t ~ /^deferred: /) { if (cur != "") print cur; cur = t } else cur = cur " " t }
+    END { if (cur != "") print cur }'
+}
+inh_heads() { printf '%s\n' "$1" | /usr/bin/grep -cx '  Inherited deferrals' | tr -d ' '; }
+inh_plan wave-0-old 9 2026-01-01T00:00Z
+inh_cont wave-0-old "## Deferrals" "" "$INH_LOLD"
+inh_plan wave-1-a 9 2026-02-01T00:00Z
+inh_cont wave-1-a "## Next wave: x" "" "carry-overs" "" "## Deferrals" "" "$INH_L1" "$INH_L2" "" "## Resume instruction" "" "nothing"
+inh_plan wave-2-b 4
+inh_cont wave-2-b "## Deferrals" "" "$INH_LOPEN"
+# THE NEWEST CLOSE DECIDES, NOT THE NEWEST FILE: the older closed run's plan is written last.
+sleep 1; touch "$INH_D/plans/epic-9/wave-0-old.plan.md" "$INH_D/plans/epic-9/wave-2-b.plan.md"
+
+INH_R0="$(inh_req wave-2-b)"
+whole_card step1 "$INH_R0"; INH_C0="$WC_OUT"
+expect_eq "INHERIT-1 step1 over a project whose last closed run left two deferrals exits 0" "0" "$WC_RC"
+expect_eq "INHERIT-1a …prints the Inherited deferrals heading once" "1" "$(inh_heads "$INH_C0")"
+expect_nonempty "INHERIT-1b precondition: the extractor reads lines under the heading" "$(inh_block "$INH_C0")"
+expect_eq "INHERIT-2 …and lists both deferrals, each as written, in the continuation's order" \
+  "$INH_L1
+$INH_L2" "$(inh_block "$INH_C0")"
+expect_contains "INHERIT-3 a stated sentence holding an escaped quote reaches the card verbatim" \
+  'stated="Said \"go\" \\ now, and meant it."' "$(inh_block "$INH_C0")"
+expect_absent "INHERIT-4 the older closed run's deferral is not listed (its plan is the newer file)" "an older run's deferral" "$INH_C0"
+expect_absent "INHERIT-4a …nor an open run's continuation line" "an open run's line" "$INH_C0"
+expect_empty "INHERIT-5 no line of the card is wider than the budget, the folded deferral included" "$(over_budget "$INH_C0")"
+expect_eq "INHERIT-5a the section sits between Not Doing and Artifacts" "yes" \
+  "$(printf '%s\n' "$INH_C0" | awk '/^  Not Doing$/ { a = NR } /^  Inherited deferrals$/ { b = NR } /^  Artifacts$/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }')"
+
+INH_RA="$(inh_req wave-2-b "adopted: ${INH_REC}#1 as REQ-2")"
+whole_card step1 "$INH_RA"
+expect_eq "INHERIT-6 adopted as a requirement: exit 0, and the adopted one leaves the list while the other stays" \
+  "0|$INH_L2" "$WC_RC|$(inh_block "$WC_OUT")"
+INH_RG="$(inh_req wave-2-b "again: record/wave-1-a/read-adversarial-p1.md#2")"
+whole_card step1 "$INH_RG"
+expect_eq "INHERIT-7 deferred again: the again one leaves the list" "0|$INH_L1" "$WC_RC|$(inh_block "$WC_OUT")"
+INH_RC="$(inh_req wave-2-b "closed: ${INH_REC}#1 fixed by the wave that found it")"
+whole_card step1 "$INH_RC"
+expect_eq "INHERIT-8 closed with a reason: the closed one leaves the list" "0|$INH_L2" "$WC_RC|$(inh_block "$WC_OUT")"
+INH_RB="$(inh_req wave-2-b "closed: ${INH_REC}#1 no longer reachable" "" "again: record/wave-1-a/read-adversarial-p1.md#2")"
+whole_card step1 "$INH_RB"; INH_CB="$WC_OUT"
+expect_eq "INHERIT-9 both disposed of: the heading stays, with nothing under it" "0|1|" \
+  "$WC_RC|$(inh_heads "$INH_CB")|$(inh_block "$INH_CB")"
+INH_RM="$(inh_req wave-2-b "closed: ${INH_REC}#1" "- again: record/wave-1-a/read-adversarial-p1.md#2" "adopted: ${INH_REC}#1")"
+whole_card step1 "$INH_RM"
+expect_eq "INHERIT-10 a line in none of the three exact forms disposes of nothing: both stay listed" \
+  "0|$INH_L1
+$INH_L2" "$WC_RC|$(inh_block "$WC_OUT")"
+
+INH_RU="$(inh_req wave-2-b "again: ${INH_REC}#1" "closed: record/wave-9-z/rev.md#7 it never existed")"
+whole_card step1 "$INH_RU"
+INH_REF1="card.sh: step1 refused — a disposal names a deferral the last closed run did not leave"
+expect_eq "INHERIT-11 a disposal naming an id the continuation does not carry is refused, exit 2" "2" "$WC_RC"
+expect_empty "INHERIT-11a …with nothing on stdout (no half card)" "$WC_OUT"
+expect_eq "INHERIT-11b …its first line, exactly" "$INH_REF1" "$(printf '%s\n' "$WC_ERR" | head -1)"
+expect_eq "INHERIT-11c …and its second line is the disposal as written" \
+  "  closed: record/wave-9-z/rev.md#7 it never existed" "$(printf '%s\n' "$WC_ERR" | sed -n 2p)"
+expect_true "INHERIT-11d …the first line fits the 100-column refusal width" \
+  test "$(cols "$(printf '%s\n' "$WC_ERR" | head -1)")" -le 100
+
+# no heading, and the heading with nothing under it: the section prints, empty
+inh_cont wave-1-a "## Next wave: x" "" "a continuation written before the heading existed"
+whole_card step1 "$INH_R0"; INH_CN="$WC_OUT"
+expect_eq "INHERIT-12 a continuation without ## Deferrals: exit 0, the section printed with nothing under it" "0|1|" \
+  "$WC_RC|$(inh_heads "$INH_CN")|$(inh_block "$INH_CN")"
+inh_cont wave-1-a "## Deferrals" "" "## Resume instruction" "" "nothing"
+whole_card step1 "$INH_R0"; INH_CE="$WC_OUT"
+expect_eq "INHERIT-13 the heading with nothing under it: the section printed with nothing under it" "0|1|" \
+  "$WC_RC|$(inh_heads "$INH_CE")|$(inh_block "$INH_CE")"
+# the newest closed run moves: wave-1-a reopened, so wave-0-old is the last closed
+inh_cont wave-1-a "## Deferrals" "" "$INH_L1" "$INH_L2"
+inh_plan wave-1-a 8
+whole_card step1 "$INH_R0"
+expect_eq "INHERIT-14 with the newer run reopened, the older closed run's continuation is the one read" \
+  "0|$INH_LOLD" "$WC_RC|$(inh_block "$WC_OUT")"
+inh_plan wave-1-a 9 2026-02-01T00:00Z
+# a requirements file outside any project: no closed run, the heading with nothing under it
+whole_card step1 "$REQ_FIX"
+expect_eq "INHERIT-15 a requirements file with no closed run above it: the section printed with nothing under it" "0|1|" \
+  "$WC_RC|$(inh_heads "$WC_OUT")|$(inh_block "$WC_OUT")"
+
+# the reading close-out carries from: `card.sh inherited <plan>`, one `<disposal>\t<line>` per line
+inh_req wave-2-b "adopted: ${INH_REC}#1 as REQ-1" "closed: record/wave-9-z/rev.md#7 an unknown id is no refusal here" >/dev/null
+INH_V="$(bash "$CARD_SH" inherited "$INH_D/plans/epic-9/wave-2-b.plan.md" 2>/dev/null 0<&-)"; INH_VRC=$?
+expect_eq "INHERIT-16 card.sh inherited <plan> reads the plan's requirements file and tags each inherited line" \
+  "0|adopted	$INH_L1
+open	$INH_L2" "$INH_VRC|$INH_V"
+inh_req wave-2-b "again: record/wave-1-a/read-adversarial-p1.md#2" >/dev/null
+expect_eq "INHERIT-16a …an again: line is tagged again" "open	$INH_L1
+again	$INH_L2" "$(bash "$CARD_SH" inherited "$INH_D/plans/epic-9/wave-2-b.plan.md" 2>/dev/null 0<&-)"
+
+# the mutation arm: a doctored copy of card.sh whose disposal filter lets every line through
+INH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/card-inherit-mut.XXXXXX")"
+mkdir -p "$INH_MUT/scripts"; ln -s "${REPO}/payload/scripts/lib" "$INH_MUT/scripts/lib"
+sed 's/\[ "${l%%	\*}" = open \] || continue/:/' "$CARD_SH" > "$INH_MUT/scripts/card.sh"
+expect_eq "INHERIT-mut0 the doctored copy differs from card.sh in exactly one line (the doctor took)" "1" \
+  "$(diff "$CARD_SH" "$INH_MUT/scripts/card.sh" | /usr/bin/grep -c '^>')"
+INH_RA="$(inh_req wave-2-b "adopted: ${INH_REC}#1 as REQ-2")"
+bash "$INH_MUT/scripts/card.sh" step1 "$INH_RA" > "$INH_MUT/out" 2>/dev/null 0<&-; INH_MRC=$?
+INH_MOUT="$(cat "$INH_MUT/out")"
+expect_eq "INHERIT-mut1 the doctored card still renders (the mutant runs)" "0|1" "$INH_MRC|$(inh_heads "$INH_MOUT")"
+expect_eq "INHERIT-mut2 …and lists the adopted deferral again, so INHERIT-6 goes red on it" \
+  "$INH_L1
+$INH_L2" "$(inh_block "$INH_MOUT")"
+rm -rf "$INH_MUT"
+
 finish

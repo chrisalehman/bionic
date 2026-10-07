@@ -1742,6 +1742,7 @@ expect_eq "CARRY-14 check exits 0 and writes no continuation" "0|no" \
 # the mutation arm: a doctored copy of close-out.sh with the heading dropped from the template
 CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-carry-mut.XXXXXX")"
 mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"   # close-out reads the inherited deferrals through it (T43)
 sed "s/printf '## Deferrals/printf '## Carried over/" "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
 expect_eq "CARRY-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
   "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
@@ -1756,5 +1757,97 @@ expect_eq "CARRY-mut2 …and the doctored continuation has no ## Deferrals headi
   "$(/usr/bin/grep -c '^## Deferrals$' "$PM/$CONT_REL" | tr -d ' ')|$(carry_section "$PM/$CONT_REL" | wc -l | tr -d ' ')"
 rm -rf "$CARRY_MUT"
 
+
+# ============================================================
+# CARRY, continued — wave-28 T43 (AC-8.10, D21): what the run inherited and did not settle is carried
+# ============================================================
+# The run's requirements file disposes of the deferrals the last closed run left, under
+# `## Inherited deferrals`: `adopted: <id> as REQ-<n>`, `again: <id>`, `closed: <id> <reason>`.
+# Close-out writes, after this run's own lines, every inherited line deferred again and every one the
+# requirements file did not dispose of, each as the old continuation wrote it, its `from=` kept. An
+# adopted or a closed one is not carried. The reading is card.sh's (`card.sh inherited <plan>`), the
+# one the Step 1 card listed them from.
+CARRY_PREV="wave-00-prev"
+CARRY_PR="record/$CARRY_PREV/read-adversarial-p2.md"
+CARRY_P1="deferred: $CARRY_PR#1 S2 off \"deferred again\" stated=\"Kept \\\"as is\\\".\" from=$CARRY_PREV"
+CARRY_P2="deferred: $CARRY_PR#2 S3 on \"left undisposed\" stated=\"-\" from=$CARRY_PREV"
+CARRY_P3="deferred: $CARRY_PR#3 S3 on \"adopted\" stated=\"-\" from=$CARRY_PREV"
+CARRY_P4="deferred: $CARRY_PR#4 S2 off \"closed\" stated=\"-\" from=$CARRY_PREV"
+# carry_prev <project> -> a closed predecessor in the same epic, older than the plan under test, and
+# its continuation carrying the four lines above under ## Deferrals
+carry_prev() {
+  local proj="$1" pp="$1/.bionic/docs/plans/epic-fx/$CARRY_PREV.plan.md"
+  case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_prev: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
+  printf -- '---\nscale: wave\n---\n\n# %s\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: 2026-01-02T00:00Z %s — closed before the fixture\n' \
+    "$CARRY_PREV" "$CARRY_PREV" > "$pp"
+  touch -t 202601020000 "$pp"
+  mkdir -p "$proj/.bionic/docs/record/$CARRY_PREV"
+  printf '%s\n' "# continuation — $CARRY_PREV" "" "## Deferrals" "" "$CARRY_P1" "$CARRY_P2" "$CARRY_P3" "$CARRY_P4" \
+    "" "## Resume instruction" "" "nothing" > "$proj/.bionic/docs/record/$CARRY_PREV/continuation.md"
+}
+# carry_req <project> <line>... -> the plan names a requirements file whose ## Inherited deferrals holds the lines
+carry_req() {
+  local proj="$1" plan="$1/$PLAN_REL" rel="specs/epic-fx/wave-01-fixture.requirements.md"; shift
+  case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_req: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
+  mkdir -p "$proj/.bionic/docs/specs/epic-fx"
+  { printf '# fixture requirements\n\n## Goal\n\nThe fixture.\n\n## Inherited deferrals\n\n'; printf '%s\n' "$@"; } \
+    > "$proj/.bionic/docs/$rel"
+  sed "s#^walk: exempt\$#&\\
+requirements: $rel#" "$plan" > "$plan.req" && mv "$plan.req" "$plan"
+}
+PI="$(mk_fixture carry7)"; advance_to "$PI" 8
+carry_prev "$PI"
+carry_req "$PI" "again: $CARRY_PR#1" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
+carry_plant "$PI" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
+expect_eq "CARRY-15 precondition: the predecessor reads closed, the plan names its requirements file, which holds three disposals" \
+  "1|1|3" "$(run_open_rc "$PI/.bionic/docs/plans/epic-fx/$CARRY_PREV.plan.md")|$(/usr/bin/grep -c '^requirements: ' "$PI/$PLAN_REL" | tr -d ' ')|$(/usr/bin/grep -cE '^(again|adopted|closed): ' "$PI/.bionic/docs/specs/epic-fx/wave-01-fixture.requirements.md" | tr -d ' ')"
+run_close "$PI" run
+expect_eq "CARRY-16 run exits 0 over a run that inherited four deferrals" "0" "$CO_RC"
+expect_nonempty "CARRY-17 precondition: the extractor finds lines under the heading" "$(carry_section "$PI/$CONT_REL")"
+expect_eq "CARRY-18 this run's own line first, then the one deferred again and the undisposed one, as written, from= kept" \
+"deferred: $CARRY_REC#1 S2 off \"this run's own\" stated=\"-\" from=$CARRY_W
+$CARRY_P1
+$CARRY_P2" "$(carry_section "$PI/$CONT_REL")"
+expect_absent "CARRY-19 …the adopted one is not carried" "\"adopted\"" "$(carry_section "$PI/$CONT_REL")"
+expect_absent "CARRY-19a …nor the closed one" "\"closed\"" "$(carry_section "$PI/$CONT_REL")"
+
+# a run whose plan names no requirements file disposed of nothing: every inherited line is carried
+PJ="$(mk_fixture carry8)"; advance_to "$PJ" 8
+carry_prev "$PJ"
+run_close "$PJ" run
+expect_eq "CARRY-20 no requirements file: run exits 0 and carries all four inherited lines, in their order" \
+  "0|$CARRY_P1
+$CARRY_P2
+$CARRY_P3
+$CARRY_P4" "$CO_RC|$(carry_section "$PJ/$CONT_REL")"
+
+# an existing continuation without the heading gets the carried lines in the appended section too
+PL="$(mk_fixture carry9)"; advance_to "$PL" 8
+carry_prev "$PL"
+carry_req "$PL" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $CARRY_PR#3 done" "closed: $CARRY_PR#4 done"
+mkdir -p "$PL/${CONT_REL%/*}"
+printf '# continuation — hand written\n' > "$PL/$CONT_REL"
+run_close "$PL" run
+expect_eq "CARRY-21 an existing continuation without the heading: the again line is appended under it" \
+  "0|$CARRY_P1" "$CO_RC|$(carry_section "$PL/$CONT_REL")"
+
+# the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
+CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-inherit-mut.XXXXXX")"
+mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"
+sed 's/\$1 == "again" || \$1 == "open"/$1 == "none"/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
+expect_eq "CARRY-mut3 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PQ="$(mk_fixture carry10)"; advance_to "$PQ" 8
+carry_prev "$PQ"
+carry_req "$PQ" "again: $CARRY_PR#1"
+( cd "$PQ" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    bash "$CARRY_MUT/scripts/close-out.sh" "$PQ/$PLAN_REL" run ) > "$SANDBOX/carry-mut.out" 2>&1
+CARRY_MRC=$?
+expect_eq "CARRY-mut4 the doctored run still closes and writes its continuation's heading (the mutant runs)" "0|1" \
+  "$CARRY_MRC|$(/usr/bin/grep -c '^## Deferrals$' "$PQ/$CONT_REL" | tr -d ' ')"
+expect_eq "CARRY-mut5 …and carries neither the again line nor the undisposed ones, so CARRY-18 and CARRY-20 go red on it" "0" \
+  "$(carry_section "$PQ/$CONT_REL" | wc -l | tr -d ' ')"
+rm -rf "$CARRY_MUT"
 
 finish
