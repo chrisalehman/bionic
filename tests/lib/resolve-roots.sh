@@ -123,12 +123,14 @@ fi
 # THE PARENT IS JUDGED TOO (wave-28 T36; AC-10.6; Chris "D3: 1"). Whoever can write the root's
 # parent directory can rename the root away and make their own in its place, between this check
 # and a child's `bash`. So a parent that group or others can write is refused unless it carries
-# the sticky bit, which is what keeps a shared /tmp safe: there only a file's owner may rename it.
+# the sticky bit, which is what keeps a shared /tmp safe: there only a file's owner may rename it. The
+# parent is read THROUGH a symlink (`ls -ldL`, wave-28 T54): a link's own mode is always open, so a
+# parent reached through one is judged by the directory it leads to.
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
   if [ ! -d "$1" ]; then echo "$1 is not a directory"
   elif [ ! -O "$1" ]; then echo "$1 is not owned by this user"
   else
-    case "$(ls -ld "$1" 2>/dev/null)" in
+    case "$(ls -ldL "$1" 2>/dev/null)" in
       ?????w*|????????w*) echo "$1 is writable by group or others" ;;
     esac
   fi
@@ -137,7 +139,7 @@ _bionic_pin_parent() {  # _bionic_pin_parent <root> — prints why <root>'s pare
   local parent="${1%/*}"
   [ "$parent" != "$1" ] || parent="."
   [ -n "$parent" ] || parent="/"
-  case "$(ls -ld "$parent" 2>/dev/null)" in
+  case "$(ls -ldL "$parent" 2>/dev/null)" in
     ?????????[tT]*) : ;;
     ?????w*|????????w*) echo "$parent is writable by group or others and has no sticky bit" ;;
   esac
