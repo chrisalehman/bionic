@@ -18,11 +18,17 @@
 #             whether empty or holding a sitting's lines under no header, is red for that.
 #             Otherwise the verdict is red and names why. A checks file edited after its sitting
 #             turns it red.
-#   §KEY      `exam_key` on planted keys: three lines for `clean`, four for every other
-#             sample, the fourth a `names:` line, whose alternatives are separated by ` | `.
+#   §KEY      `exam_key` on planted keys: three lines for `clean`, six for every other
+#             sample: a `names:` line, whose alternatives are separated by ` | `, then a
+#             `finding-file:` line and a `finding-rating:` line whose every rating the priority
+#             table sends to fix (wave-28 T18, D22).
 #   §SCORE    `exam_score` (tests/reader-exam/score.sh, README step 5) on the real keys: a
 #             record is met only on the key's question, with the key's result, one of its
-#             tokens and one of its `names:` alternatives, read through CR LF line ends and
+#             tokens and one of its `names:` alternatives, and a declared `finding:` line on
+#             the key's file at a rating the table sends to fix (SD rows: described only,
+#             deferred, noted, another file and refused lines each fail and say which; the
+#             lines are read by proof.sh's `proof_findings`; a doctored scorer restoring the
+#             described-only pass is the mutation arm), read through CR LF line ends and
 #             trailing blanks and under a caller's IFS; sourcing score.sh is held to defining
 #             its functions and nothing else, against doctored copies that act.
 #   §DEST     materialize.sh refuses a destination whose path, logical or real, names the
@@ -36,8 +42,9 @@
 #             directory, read from the README and applied to a made-up path; run-session.sh run
 #             against a fake CLI binary (the call it makes, the variables it clears, the binary
 #             and not a function of the same name, no widening flag); gen-prompt.sh on made-up
-#             briefs; neither helper nor any prompt it writes names a sample or the exam. No
-#             session is started.
+#             briefs; neither helper nor any prompt it writes names a sample or the exam; each
+#             brief ends with the shipped scale's path and its questions' checks files, by path
+#             and never pasted (R9, wave-28 T18). No session is started.
 #   §HELPERS  (T64) run-session.sh against a fake CLI on a throwaway PATH: a claude that is a
 #             relative path (an entry `.`, an empty one, a named relative one) or a file inside
 #             <dest>, reached through a link or not, is refused and never runs; a <dest> that is
@@ -756,7 +763,7 @@ for s in $(exam_samples "$REPO"); do
   # shellcheck disable=SC2086
   frec "$R/$s-sd4.md" "$q" "$res" S2 on docs/elsewhere.md "$tok" "$ident"
   expect_eq "SD4 $s: a fix-grade finding on another file fails, naming the file asked for" \
-    "missed: no finding names ${ff}" "$(exam_score "$key" "$R/$s-sd4.md")"
+    "missed: no finding names $(sed -n 's/^finding-file: //p' "$key" | sed 's/ | / or /g')" "$(exam_score "$key" "$R/$s-sd4.md")"
   # a fix-grade finding with no command and no unsure: line is one the verb would refuse
   grep -v '^shown:' "$R/$s-sd1.md" > "$R/$s-sd5.md"
   expect_contains "SD5 $s: a fix-grade finding with no shown: or unsure: line fails as one the verb refuses" \
