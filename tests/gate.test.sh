@@ -30,6 +30,11 @@
 #                      overestimate held until it ages out of the three lines, `times`, an
 #                      unknown request line ignored. Mutations: no peak raised mid-run; four
 #                      lines kept
+#   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, a waiting
+#                      request, promised work not yet showing and memory over the share each
+#                      give no room; a quiet machine gives room; two asks on one reading give
+#                      room once; gate_state prints the loads where clears= stood. Mutations:
+#                      the waiting clause, the owed count, the five-minute reading
 #   §REAPED    T47     a request killed earlier is written ended (rc 137) by the next locked act
 #                      and overlaps nothing after: the next run learns its rise; one killed
 #                      during another's run still overlaps it. Mutation: the killed-write removed
@@ -421,7 +426,7 @@ expect_eq "F.1 the writer asked first, the landing later; the landing is admitte
 expect_contains "F.2 gate_state counted both waiting, one a landing" "waiting=2 landing-waiting=1" "$FIRST_STATE"
 expect_contains "F.3 gate_state counted the one admitted" "admitted=1" "$FIRST_STATE"
 expect_regex "F.4 gate_state prints its one line" \
-  '^share=80 used=[0-9-]+ admitted=1 waiting=2 landing-waiting=1 clears=[0-9]+$' "$FIRST_STATE"
+  '^share=80 used=[0-9-]+ admitted=1 waiting=2 landing-waiting=1 load=[0-9.-]+/[0-9.-]+ promised=[0-9.]+$' "$FIRST_STATE"
 MF="$(mutant first)"
 anchor "$MF" 'else r = ($1 == "landing" ? 1 : 2)' 1
 sed -i.bak 's/else r = (\$1 == "landing" ? 1 : 2)/else r = 2/' "$MF"
@@ -605,7 +610,121 @@ expect_eq "D.14 gate_end of a request that does not exist exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_end 999 0 2>/dev/null; echo $? )"
 expect_eq "D.15 gate_ask with an unknown kind exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_ask fast k 2>/dev/null; echo $? )"
+# THE PUBLIC READER (T13; pass 12): `gate_promise <key>` prints what `_gate_promise` prints,
+# loading the store itself, so a caller outside the lock can ask what a key is promised.
+fresh promise-public
+world_cost k 10 0.5 30
+world_cost k 5 2 30
+expect_eq "D.21 gate_promise prints the per-field maximum for a key, loading the store itself" \
+  "10:2:30" "$( . "$GATE_LIB" 2>/dev/null; gate_promise k 2>/dev/null )"
+expect_eq "D.22 a key never seen is promised the maximum over every cost file" \
+  "10:2:30" "$( . "$GATE_LIB" 2>/dev/null; gate_promise never 2>/dev/null )"
+expect_eq "D.23 no key is a usage error (rc 2)" "2" \
+  "$( . "$GATE_LIB" 2>/dev/null; gate_promise 2>/dev/null; echo $? )"
 
+# ── §ROOM ────────────────────────────────────────────────────────────────────
+# gate_room [--owed <n>] (wave-28 T13; D14): may another writer start? Every row plants an
+# 8-core machine under a share of 80, so the processor limit is 6.4 cores. `room` runs the
+# verb in a child and appends its rc to the one line it prints.
+section "§ROOM — width follows the machine's load (AC-2.5)"
+room() { ( . "$GATE_LIB" 2>/dev/null; o="$(gate_room "$@" 2>&1)"; r=$?; printf '%s rc=%s' "$o" "$r" ); }
+fresh room-quiet
+world_machine 8 8192 30 1.0
+world_cost k 5 1.5 30
+expect_eq "RM.1 a quiet machine gives room" \
+  "room=yes load=1.0/1.0 cores=8 promised=0 waiting=0 rc=0" "$(room)"
+fresh room-5m
+world_machine 8 8192 30 1.0 7.0
+world_cost k 5 1.5 30
+expect_eq "RM.2 a five-minute load of 7.0, over 6.4 cores, gives no room though the last minute is quiet" \
+  "room=no load=1.0/7.0 cores=8 promised=0 waiting=0 rc=1" "$(room)"
+expect_eq "RM.3 …and the same machine with its five-minute load at 1.0 gives room" \
+  "room=yes load=1.0/1.0 cores=8 promised=0 waiting=0 rc=0" "$(BIONIC_PROBE_BUSY_CORES_5M=1.0 room)"
+expect_eq "RM.4 a one-minute load over the share gives no room either" \
+  "room=no load=7.0/1.0 cores=8 promised=0 waiting=0 rc=1" \
+  "$(BIONIC_PROBE_BUSY_CORES=7.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 room)"
+M5="$(mutant room-5m)"
+anchor "$M5" 'if (known(b5)) { if (b5 + prom > lim) room = 0 }' 1
+sed -i.bak 's/if (known(b5)) { if (b5 + prom > lim) room = 0 }/if (0) room = 0/' "$M5"
+expect_eq "RM.4a the mutant that ignores the five-minute load runs and gives room — the reading is the rule" \
+  "room=yes load=1.0/7.0 cores=8 promised=0 waiting=0 rc=0" "$(GATE_LIB="$M5" room)"
+fresh room-wait
+world_machine 8 8192 30 1.0
+world_cost k 5 0.5 30
+HOLD=1 ask_bg rw1 work k 0; wait_for 20 has rw1.rc
+ask_bg rw2 whole k 600; wait_for 20 asked_by rw2
+expect_eq "RM.5 one is admitted and a whole request waits behind it (rc|asked|admitted)" "0|1000|" \
+  "$(rc_of rw1)|$(field "$(req_of rw2)" asked)|$(field "$(req_of rw2)" admitted)"
+expect_eq "RM.6 a waiting request gives no room, though the load and the promises fit" \
+  "room=no load=1.0/1.0 cores=8 promised=0.5 waiting=1 rc=1" "$(room)"
+MW="$(mutant room-wait)"
+anchor "$MW" 'if (wait > 0) room = 0' 1
+sed -i.bak 's/if (wait > 0) room = 0/if (0) room = 0/' "$MW"
+expect_eq "RM.7 the mutant without the waiting clause runs and gives room — the clause is the rule" \
+  "room=yes load=1.0/1.0 cores=8 promised=0.5 waiting=1 rc=0" "$(GATE_LIB="$MW" room)"
+release rw1
+fresh room-prom
+world_machine 8 8192 30 1.0
+world_cost k 5 6 30
+HOLD=1 ask_bg rp1 work k 0; wait_for 20 has rp1.rc
+expect_eq "RM.8 a run is admitted promising 6 cores (rc|promise)" "0|5:6:30" \
+  "$(rc_of rp1)|$(field "$(req_of rp1)" promise)"
+expect_eq "RM.9 a load of 1.0 plus the 6 promised and not yet showing is over 6.4: no room" \
+  "room=no load=1.0/1.0 cores=8 promised=6 waiting=0 rc=1" "$(room)"
+release rp1
+expect_eq "RM.10 once it has ended its promise no longer counts" \
+  "room=yes load=1.0/1.0 cores=8 promised=0 waiting=0 rc=0" "$(room)"
+fresh room-owed
+world_machine 8 8192 30 1.0
+world_cost k 5 3 30
+expect_eq "RM.11 one writer owed at the largest promise on record, 3 cores: 1.0 + 3 fits" \
+  "room=yes load=1.0/1.0 cores=8 promised=3 waiting=0 rc=0" "$(room --owed 1)"
+expect_eq "RM.12 two writers owed: 1.0 + 6 is over 6.4, no room" \
+  "room=no load=1.0/1.0 cores=8 promised=6 waiting=0 rc=1" "$(room --owed 2)"
+MO="$(mutant room-owed)"
+anchor "$MO" 'prom = pc + owed * most' 1
+sed -i.bak 's/prom = pc + owed \* most/prom = pc + 0 * most/' "$MO"
+expect_eq "RM.13 the mutant that drops the owed count runs and gives room — the count is the rule" \
+  "room=yes load=1.0/1.0 cores=8 promised=0 waiting=0 rc=0" "$(GATE_LIB="$MO" room --owed 2)"
+fresh room-two
+world_machine 8 8192 30 4.0
+world_cost k 5 3 30
+expect_eq "RM.14 the first ask on one reading, nothing offered yet: room" \
+  "room=yes load=4.0/4.0 cores=8 promised=0 waiting=0 rc=0" "$(room --owed 0)"
+expect_eq "RM.15 the second ask on the same reading counts the first: 4.0 + 3 is over 6.4" \
+  "room=no load=4.0/4.0 cores=8 promised=3 waiting=0 rc=1" "$(room --owed 1)"
+fresh room-nocost
+world_machine 8 8192 30 1.0
+expect_eq "RM.16 no cost on record and nothing owed: room" \
+  "room=yes load=1.0/1.0 cores=8 promised=0 waiting=0 rc=0" "$(room)"
+expect_eq "RM.17 no cost on record: one writer not yet showing takes all the room" \
+  "room=no load=1.0/1.0 cores=8 promised=8 waiting=0 rc=1" "$(room --owed 1)"
+fresh room-mem
+world_machine 8 8192 85 1.0
+world_cost k 5 1 30
+expect_eq "RM.18 memory used 85 under a share of 80 gives no room" \
+  "room=no load=1.0/1.0 cores=8 promised=0 waiting=0 rc=1" "$(room)"
+expect_eq "RM.19 …and 80 used gives room (at most the share)" \
+  "room=yes load=1.0/1.0 cores=8 promised=0 waiting=0 rc=0" "$(BIONIC_PROBE_USED_PCT=80 room)"
+fresh room-blind
+world_machine 8 8192 30 1.0
+world_cost k 5 1 30
+expect_eq "RM.20 an unreadable five-minute load with nothing admitted, waiting or owed: room" \
+  "room=yes load=1.0/-1 cores=8 promised=0 waiting=0 rc=0" "$(BIONIC_PROBE_BUSY_CORES_5M=-1 room)"
+expect_eq "RM.21 …and with one writer owed: no room" \
+  "room=no load=1.0/-1 cores=8 promised=1 waiting=0 rc=1" "$(BIONIC_PROBE_BUSY_CORES_5M=-1 room --owed 1)"
+expect_eq "RM.22 an unreadable memory reading with one writer owed: no room" \
+  "room=no load=1.0/1.0 cores=8 promised=1 waiting=0 rc=1" "$(BIONIC_PROBE_USED_PCT=-1 room --owed 1)"
+expect_eq "RM.23 an owed count that is not a whole number is a usage error (rc 2)" "2" \
+  "$( . "$GATE_LIB" 2>/dev/null; gate_room --owed x >/dev/null 2>&1; echo $? )"
+fresh room-state
+world_machine 8 8192 30 1.0 2.5
+world_cost k 5 0.5 30
+HOLD=1 ask_bg rs1 work k 0; wait_for 20 has rs1.rc
+expect_eq "RM.24 gate_state prints the loads and the promised cores where clears= stood" \
+  "share=80 used=35 admitted=1 waiting=0 landing-waiting=0 load=1.0/2.5 promised=0.5" "$(state)"
+expect_absent "RM.25 …and no clears= field" "clears=" "$(state)"
+release rs1
 # ── §REAPED ──────────────────────────────────────────────────────────────────
 section "§REAPED — a killed request overlaps nothing once it is seen dead (T47; cost row)"
 # learn_run <gate lib> <name> <kill 0|1> — idle 30. With kill=1 a run of key x is admitted and
@@ -707,8 +826,8 @@ for rd in 80:0 81:75 85:75; do
     "$(ask_fg ir work big 0)"
 done
 MI="$(mutant alone)"
-anchor "$MI" 'if (r >= 0 && !(unf == 0 && r <= share)) {' 1
-sed -i.bak 's/if (r >= 0 \&\& !(unf == 0 \&\& r <= share)) {/if (r >= 0) {/' "$MI"
+anchor "$MI" 'if (r >= 0 && !(unf == 0 && fits(r, share))) {' 1
+sed -i.bak 's/if (r >= 0 \&\& !(unf == 0 \&\& fits(r, share))) {/if (r >= 0) {/' "$MI"
 alone_rows "$MI" alone-mut
 expect_eq "I.8 the mutant (no idle clause) still admits the 3% ask" "0" "$AL_SMALL"
 expect_eq "I.9 the mutant refuses big alone on an idle gate — the idle clause is the rule" "75" "$AL_BIG"
