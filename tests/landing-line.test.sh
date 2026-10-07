@@ -842,15 +842,16 @@ section "§STANDING: a red that fails at the accepted head too is the branch's, 
 # The working branch carries its own red: `a` fails `FAIL: a planted red` at the accepted head, and
 # fails one line more when a file `extra-fail` is present. T1 commits that file (a red it adds); T2
 # adds nothing to `a`.
-ll_standing_world() {  # -> root
-  local r
+ll_standing_world() {  # [T1's file] [its text] [dup: the head fails the planted label twice] -> root
+  local r f="${1:-extra-fail}" t="${2:-T1 adds this}"
   r="$(ll_world)" || return 1
   ll_launch "$r" T1 a; ll_launch "$r" T2 a
-  printf '#!/bin/bash\necho "PASS: a ran"\necho "FAIL: a planted red"\n[ ! -f extra-fail ] || echo "FAIL: $(cat extra-fail)"\necho; echo "a.test.sh: 1/2 passed, 1 failed  sections=1 setup=0"; exit 1\n' \
+  printf '#!/bin/bash\necho "PASS: a ran"\necho "FAIL: a planted red"\n[ ! -f dup-at-head ] || [ -f fix ] || echo "FAIL: a planted red"\n[ ! -f extra-fail ] || echo "FAIL: $(cat extra-fail)"\necho; echo "a.test.sh: 1/2 passed, 1 failed  sections=1 setup=0"; exit 1\n' \
     > "$r/tests/a.test.sh"
+  if [ -n "${3:-}" ]; then : > "$r/dup-at-head"; git -C "$r" add dup-at-head || return 1; fi
   git -C "$r" commit -qam "the branch's own red" || return 1
-  printf 'T1 adds this\n' > "$r/.worktrees/T1/extra-fail"
-  git -C "$r/.worktrees/T1" add extra-fail && git -C "$r/.worktrees/T1" commit -qm "T1: one failing line more" || return 1
+  printf '%s\n' "$t" > "$r/.worktrees/T1/$f"
+  git -C "$r/.worktrees/T1" add "$f" && git -C "$r/.worktrees/T1" commit -qm "T1: one failing line more" || return 1
   printf '%s' "$r"
 }
 RS="$(ll_standing_world)"; HS="$(ll_head "$RS")"
@@ -887,6 +888,41 @@ ll_wait_file "$WORLD_ROOT/sm.out.rc" 300
 expect_eq "(s4m-pre) the mutant ran: T1 was proved on a candidate" "red" "$(ll_results "$RSM" T1 "$(ll_last_cand "$RSM" T1)")"
 expect_eq "(s4m) MUTANT comparison inverted: a red the row adds is published (the rows can fail)" "0 T1" \
   "$(cat "$WORLD_ROOT/sm.out.rc" 2>/dev/null) $(ll_ev "$RSM" published | sed 's/.*|row=\([^|]*\)|.*/\1/')"
+# THE FAILING LINES ARE COUNTED, line for line (fixit T51): the head fails `FAIL: a planted red` once; a
+# candidate that fails the SAME label a second time has added a line, though no new text.
+RS5="$(ll_standing_world extra-fail 'a planted red')"; HS5="$(ll_head "$RS5")"
+ll_verb "$RS5" T1
+KS5="$(ll_last_cand "$RS5" T1)"
+LS5="$RS5/.bionic/docs/record/wave-x/line/T1-a-${KS5:0:12}.log"
+expect_eq "(s5) a second failing line under a label the head fails once is the row's: exit 1, RED and the candidate's log" \
+  "1|RED T1 a.test.sh $LS5" "$LL_RC|$LL_OUT"
+expect_eq "(s5) …that log holds the label twice, the added line among them; the head's run holds it once" "2 1" \
+  "$(grep -c '^FAIL: a planted red$' "$LS5" 2>/dev/null) $(grep -c '^FAIL: a planted red$' "$RS5/.bionic/docs/record/wave-x/line/T1-a-${HS5:0:12}.log" 2>/dev/null)"
+expect_eq "(s5) …no standing event, the row returned" "|T1" \
+  "$(ll_ev "$RS5" standing)|$(ll_ev "$RS5" returned | sed 's/.*|row=\([^|]*\)|.*/\1/')"
+# The head fails the label twice (`dup-at-head`); a row that adds nothing fails it twice too.
+RS6="$(ll_standing_world extra-fail 'T1 adds this' dup)"; HS6="$(ll_head "$RS6")"
+ll_verb "$RS6" T2
+KS6="$(ll_last_cand "$RS6" T2)"
+expect_eq "(s6) equal counts under one label: T2 is published (exit 0), its own verdict red" "0 $KS6 red" \
+  "$LL_RC $(ll_head "$RS6") $(ll_results "$RS6" T2 "$KS6")"
+expect_regex "(s6) …one standing event for that head naming both of its failing lines" \
+  "^line/v1\\|ev=standing\\|head=${HS6}\\|suite=a.test.sh\\|lines=2\\|" "$(ll_ev "$RS6" standing)"
+# T1 adds `fix`, which takes one of the head's two lines away: fewer lines than the head's is standing.
+RS7="$(ll_standing_world fix 'T1 fixes one' dup)"; HS7="$(ll_head "$RS7")"
+ll_verb "$RS7" T1
+KS7="$(ll_last_cand "$RS7" T1)"
+LS7="$RS7/.bionic/docs/record/wave-x/line/T1-a-${KS7:0:12}.log"
+expect_eq "(s7) one line fewer than the head's under the label: published (exit 0)" "0 $KS7" "$LL_RC $(ll_head "$RS7")"
+expect_eq "(s7) …the candidate's own run held the label once, the head's twice (the rows can fail)" "1 2" \
+  "$(grep -c '^FAIL: a planted red$' "$LS7" 2>/dev/null) $(grep -c '^FAIL: a planted red$' "$RS7/.bionic/docs/record/wave-x/line/T1-a-${HS7:0:12}.log" 2>/dev/null)"
+# MUTANT: the set difference restored (a line counts as new only when its text is absent at the head).
+RS8="$(ll_standing_world extra-fail 'a planted red')"
+LL_MUTANT='s/c\[k\] > h\[k\]/!(k in h)/' LL_MUTANT_FN=_line_new_fails ll_drive "$RS8" T1 "$WORLD_ROOT/s8m.out"
+ll_wait_file "$WORLD_ROOT/s8m.out.rc" 300
+expect_eq "(s8m-pre) the mutant ran: T1 was proved on a candidate" "red" "$(ll_results "$RS8" T1 "$(ll_last_cand "$RS8" T1)")"
+expect_eq "(s8m) MUTANT set difference restored: the second line under the label lands (the rows can fail)" "0 T1" \
+  "$(cat "$WORLD_ROOT/s8m.out.rc" 2>/dev/null) $(ll_ev "$RS8" published | sed 's/.*|row=\([^|]*\)|.*/\1/')"
 
 # ---------------------------------------------------------------------------
 section "§AHEAD-CONFLICT: a wait on a conflicting candidate ahead ends when that entry resolves (ruling A-orch-51)"
