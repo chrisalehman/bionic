@@ -967,11 +967,150 @@ expect_false "(k2m) MUTANT the wait's end removed: T2 still waits 8 s after T1 p
 ll_kill_bg "$KM2_BG"
 
 # ---------------------------------------------------------------------------
+section "§ROW: the publish writes the row — status, step line, ledger line — in one transaction, and marks the roster (AC-3.2)"
+#
+# Inside the lock, after the `published` event: `session-poker.sh row-landed <id> <commit> <at>`, run as a
+# command on the BOUND plan (one copy, one dry commit as a writer, one swap: all three lines or none),
+# then the roster mark `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line. The writer's tree
+# stands: it goes at `stopped <name>` (tests/stop-orders.test.sh Section 10). Mutants are seds over the
+# functions in the driver's own process (LL_MUTANT_FN), never the tracked file.
+ll_lworld() {  # -> ll_rworld with a `## Dispatch ledger` table holding a row for T1 (none for T2)
+  local r p
+  r="$(ll_rworld)" || return 1
+  p="$(ll_plan "$r")"
+  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n| T1 | wx-T1 | 2026-10-07T00:00Z | 10 min | T1.md | — | tree T1 |\n' >> "$p"
+  printf '%s' "$r"
+}
+ll_cell() {  # <plan> <table: tasks|ledger> <id> <column> -> the cell, trimmed
+  awk -F'|' -v sect="$2" -v id="$3" -v col="$4" '
+    /^## / { on = (sect == "tasks" ? ($0 ~ /^## Tasks/) : ($0 ~ /^## Dispatch ledger/)); hdr = 0; next }
+    on && /^\|/ { for (i = 2; i < NF; i++) { c = $i; gsub(/^ +| +$/, "", c); v[i] = c }
+      if (!hdr) { for (i = 2; i < NF; i++) if (v[i] == col) k = i; hdr = 1; next }
+      if (v[2] == id && k) { print v[k]; exit } }' "$1"
+}
+ll_stepline() { grep -E "^- $2:" "$1" | head -1; }   # <plan> <id> -> the row's `- T<n>:` line
+ll_mark() { grep "|name=$2|" "$1/.bionic/tmp/roster-$WORLD_SID.state" | tail -1; }   # <root> <name> -> its latest roster line
+
+RW="$(ll_lworld)"; PW="$(ll_plan "$RW")"
+: > "$(world_verbs)"
+ll_verb "$RW" T1
+LL_OUT_W1="$LL_OUT"
+KW="$(ll_field "$(ll_ev "$RW" published | grep '|row=T1|' | tail -1)" commit)"
+AW="$(ll_field "$(ll_ev "$RW" published | grep '|row=T1|' | tail -1)" at)"
+expect_eq "(w0) precondition: ready exits 0 and the published event names a 40-hex candidate" "0 1" \
+  "$LL_RC $(printf '%s\n' "$KW" | grep -cE '^[0-9a-f]{40}$')"
+expect_eq "(w1) the row's status is landed" "landed" "$(ll_cell "$PW" tasks T1 status)"
+expect_eq "(w1b) …the other row's status is as it was (the positive on that extractor)" "active" "$(ll_cell "$PW" tasks T2 status)"
+expect_eq "(w2) the row's - T1: line gains the landed commit and the publish's instant" "- T1: active landed ${KW} ${AW}" "$(ll_stepline "$PW" T1)"
+expect_eq "(w3) the ledger row's landed cell reads landed <at> <commit>" "landed ${AW} ${KW}" "$(ll_cell "$PW" ledger T1 landed)"
+expect_contains "(w4) the row's roster line gains landed= and landed_at=, the same commit and instant" \
+  "|landed=${KW}|landed_at=${AW}" "$(ll_mark "$RW" wx-T1)"
+if [ -d "$RW/.worktrees/T1" ]; then ok "(w5) the writer's tree stands after its landing: it goes at the stop"; else no "(w5) the writer's tree stands after its landing: it goes at the stop"; fi
+ll_verb "$RW" T2
+KW2="$(ll_field "$(ll_ev "$RW" published | grep '|row=T2|' | tail -1)" commit)"
+expect_eq "(w6) a second row lands with no verb between: ready twice in the verb log" "$(printf 'ready\nready')" "$(cat "$(world_verbs)")"
+expect_eq "(w6b) …its status is landed" "landed" "$(ll_cell "$PW" tasks T2 status)"
+expect_eq "(w6c) …and the ledger, which had no row T2, gains one with its landed cell" \
+  "landed $(ll_field "$(ll_ev "$RW" published | grep '|row=T2|' | tail -1)" at) ${KW2}" "$(ll_cell "$PW" ledger T2 landed)"
+expect_eq "(w6d) …and T1's row still reads as its landing wrote it" "landed ${AW} ${KW}" "$(ll_cell "$PW" ledger T1 landed)"
+
+# ONE TRANSACTION: a ledger the verb cannot write (two rows T1) refuses the whole write after the publish;
+# the status and the step line are not written either, and the refusal is printed, never swallowed.
+RX="$(ll_lworld)"; PX="$(ll_plan "$RX")"
+printf '| T1 | wx-T1 | 2026-10-07T00:00Z | 10 min | T1.md | — | a second row T1 |\n' >> "$PX"
+PX0="$(cat "$PX")"
+ll_verb "$RX" T1
+expect_eq "(w7) a refused plan write after the publish: ready still exits 0 (the row is published)" "0" "$LL_RC"
+expect_eq "(w7b) …and the plan is byte-identical: no status, no step line, no ledger line" "$PX0" "$(cat "$PX")"
+expect_contains "(w7c) …the verb's refusal is printed" "carries more than one row T1" "$LL_OUT"
+expect_contains "(w7d) …with the row and what is owed by hand" "PLAN-UNWRITTEN T1" "$LL_OUT"
+expect_contains "(w7e) …while the roster mark is still written" "|landed=" "$(ll_mark "$RX" wx-T1)"
+
+# THE DEBT T5 WROTE IS WHAT THE GATE READS AFTER THE WRITE (wave-27 passes 60, 63): a declared red
+# publishes with its debt; the writer-mode write is admitted on the REAL plan, and the gate's own reader
+# of the bound plan's record (lib/proof.sh `proof_debts`) still deals the debt.
+RD="$(ll_world)"; PD="$(ll_plan "$RD")"
+ll_launch "$RD" T1 'a, b.test.sh' lands_red='b.test.sh until T9'
+ll_redsuite "$RD" T1 b
+ll_verb "$RD" T1
+expect_eq "(w8) precondition: the declared red publishes (exit 0, DEBT said)" "0 1" \
+  "$LL_RC $(printf '%s\n' "$LL_OUT" | grep -c '^DEBT T1 b.test.sh ')"
+expect_eq "(w8b) the plan write is admitted on the real plan over the debt: status landed" "landed" "$(ll_cell "$PD" tasks T1 status)"
+expect_eq "(w8c) …and the gate's reader of the bound plan deals the debt T5 wrote" "debt	b.test.sh	T9" \
+  "$(bash -c '. "$1/proof.sh" && proof_debts "$2"' _ "$REPO/payload/scripts/lib" "$PD" | cut -f1-3)"
+
+# MUTANTS, each run as the driver runs ready; the rows above fail on each.
+RM1="$(ll_lworld)"
+LL_MUTANT_FN=_line_plan_write LL_MUTANT='s|bash "$poker" row-landed|cp "$1" "$1.copy" \&\& : |' ll_drive "$RM1" T1 "$WORLD_ROOT/m1.out"
+ll_wait_file "$WORLD_ROOT/m1.out.rc" 600
+expect_eq "(w1m) mutant: the write goes to a copy — the mutant ran and published (rc 0)" "0" "$(cat "$WORLD_ROOT/m1.out.rc" 2>/dev/null)"
+expect_eq "(w1m2) …and the bound plan's status is NOT landed: (w1) is the row that fails" "active" "$(ll_cell "$(ll_plan "$RM1")" tasks T1 status)"
+RM2="$(ll_lworld)"
+LL_MUTANT_FN=_line_roster_mark LL_MUTANT='s|roster_mark_landed |: |' ll_drive "$RM2" T1 "$WORLD_ROOT/m2.out"
+ll_wait_file "$WORLD_ROOT/m2.out.rc" 600
+expect_eq "(w4m) mutant: the mark skipped — the mutant ran and published (rc 0)" "0" "$(cat "$WORLD_ROOT/m2.out.rc" 2>/dev/null)"
+expect_absent "(w4m2) …and the roster line carries no mark: (w4) is the row that fails" "|landed=" "$(ll_mark "$RM2" wx-T1)"
+expect_contains "(w4m3) …the roster line read is the row's (the positive on that extractor)" "|name=wx-T1|" "$(ll_mark "$RM2" wx-T1)"
+RM3="$(ll_lworld)"
+LL_MUTANT_FN=_line_carry LL_MUTANT='s|_line_owed "$row" "$cand" "$name";|_line_owed "$row" "$cand" "$name"; git -C "$root" worktree remove --force "$wt";|' \
+  ll_drive "$RM3" T1 "$WORLD_ROOT/m3.out"
+ll_wait_file "$WORLD_ROOT/m3.out.rc" 600
+expect_eq "(w5m) mutant: the removal moved back to the landing — the mutant ran and published (rc 0)" "0" "$(cat "$WORLD_ROOT/m3.out.rc" 2>/dev/null)"
+if [ ! -d "$RM3/.worktrees/T1" ]; then ok "(w5m2) …and the tree is gone: (w5) is the row that fails"; else no "(w5m2) …and the tree is gone: (w5) is the row that fails"; fi
+
+# ---------------------------------------------------------------------------
+section "§OWED: what is still owed prints as one line, after the write and the mark, naming no verb (AC-3.3)"
+expect_eq "(o1) the owed line is printed once, last, byte for byte, the name off the roster row" \
+  "landed T1 ${KW} — owed: complete task T1, then stop wx-T1" "$(printf '%s\n' "$LL_OUT_W1" | grep '^landed T1 ')"
+expect_eq "(o1b) …exactly one such line, and it is the last line of ready's output" "1 yes" \
+  "$(printf '%s\n' "$LL_OUT_W1" | grep -c '^landed T1 ') $([ "$(printf '%s\n' "$LL_OUT_W1" | tail -1)" = "landed T1 ${KW} — owed: complete task T1, then stop wx-T1" ] && echo yes || echo no)"
+expect_absent "(o2) …it names no plan or roster verb" "row-landed" "$LL_OUT_W1"
+expect_absent "(o2b) …nor the poker script" "session-poker" "$LL_OUT_W1"
+expect_contains "(o3) by the time it prints, the mark and the plan row are written (read back from the mutant-free run)" \
+  "landed=${KW}" "$(ll_mark "$RW" wx-T1)"
+
+# ---------------------------------------------------------------------------
 section "§INPUTS: the poll and --within read as numbers (read-structure-p12 #7, read-adversarial-p12 #4)"
 expect_eq "(i1) BIONIC_LINE_POLL that is no number falls back to 1 s; a decimal one is kept" "1 0.2" \
   "$(BIONIC_LINE_POLL=abc bash -c '. "$1" && printf %s "$LINE_POLL"' _ "$LINE") $(BIONIC_LINE_POLL=0.2 bash -c '. "$1" && printf %s "$LINE_POLL"' _ "$LINE")"
 RI="$(ll_rworld)"
 ll_verb "$RI" T1 --within 08
 expect_eq "(i2) --within 08 is eight seconds, not an octal error: the 5 s suite runs and lands" "0" "$LL_RC"
+
+section "§LABELS: the launch line's lands_on= and lands_red= read back through the carrier's decoder (wave-28 T7; read-structure-p12 #8)"
+# The dispatch wall writes `lands_on=` from the brief's `Lands-on:` line, spelled by the lift
+# (lib/brief.sh), and `lands_red=` as `<suite basename> until <token>`; `ready` reads both off the launch
+# line through `_line_suites`. One row per key, through the real lift and the real row writer, so the
+# writer and the decoder cannot drift. fails-when: the lifted spelling is not what `_line_suites`
+# decodes it to, or the debt's suite is not one of the row's suites in that same spelling.
+LB_LIFT="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
+  l="$(lift_contract_fields 'Lands-on: a, tests/b.test.sh, ./c.test.sh  # the row suites
+Lands-red: tests/b.test.sh until ext:vendor-fix')"
+  printf '%s|%s' "$(brief_field "$l" lands_on)" "$(brief_field "$l" lands_red)")"
+LB_ON="${LB_LIFT%%|*}"; LB_RED_LINE="${LB_LIFT#*|}"
+expect_eq "(lb0) precondition: the lift reads the Lands-on: line (the positive on that extractor)" \
+  "a.test.sh,b.test.sh,c.test.sh" "$LB_ON"
+# the wall writes the debt by its suite basename (hooks/dispatch-preflight.sh, `${_lr_suite##*/}`)
+LB_RED_SUITE="${LB_RED_LINE%% *}"; LB_RED="${LB_RED_SUITE##*/} until ${LB_RED_LINE##* until }"
+LB_ROW="$(roster_row status=intended session=s1 name=w-A2 agent_id= launched_at=2026-10-07T01:00:00Z \
+  subagent_type=implementor deliverable=record/n.md tool_use_id=toolu_n plan=none \
+  "lands_red=${LB_RED}" row=T23 "lands_on=${LB_ON}")"
+LB_ON_READ="$(_wt_field "$LB_ROW" lands_on)"
+expect_eq "(lb1) lands_on= on the launch line decodes to itself through _line_suites" \
+  "$LB_ON_READ" "$(_line_suites "$LB_ON_READ")"
+LB_RED_READ="$(_wt_field "$LB_ROW" lands_red)"
+expect_eq "(lb2) lands_red=, cut at its first word as ready cuts it, decodes to itself through _line_suites" \
+  "${LB_RED_READ%% *}" "$(_line_suites "${LB_RED_READ%% *}")"
+expect_contains "(lb3) …and that suite is one of the row's lands_on suites, in the same spelling" \
+  ",${LB_RED_READ%% *}," ",$(_line_suites "$LB_ON_READ"),"
+# The token half (read-structure-p17 #5): the wall writes a debt only as `<suite> until <token>`, so
+# ready's token cut (`${debt#* until }`, line.sh) and land's (`${lands_red#* until }`, worktree.sh) read
+# the one token; a debt with no ` until ` is never written, so where the two cuts differ is unreached.
+expect_eq "(lb3t) …and the debt carries its token after one ' until ', the cut both decoders make" \
+  "ext:vendor-fix" "${LB_RED_READ#* until }"
+LB_NONE="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
+  brief_field "$(lift_contract_fields 'Lands-on: none — prose only')" lands_on)"
+expect_eq "(lb4) Lands-on: none lifts as none, which _line_suites reads as no suites" "none|none" \
+  "${LB_NONE}|$(_line_suites "$LB_NONE")"
 
 finish

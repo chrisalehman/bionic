@@ -486,7 +486,7 @@ s7_fixture() {  # -> project dir on stdout
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
@@ -695,7 +695,7 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
@@ -730,6 +730,10 @@ S9_D="$(s9_fixture)"
 roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000001 deliverable= \
   >> "$S9_D/.bionic/tmp/roster-$SID.state"
 S9_TX="$(mktemp)"; s9_transcript "$S9_TX" w9-T13
+# THE TURN SETS ITS ENTRY IN PROGRESS (wave-28 T38, A-T38.5): otherwise the task-entry clause
+# names T13 as dispatched in this refusal's detail, and 9e reads every T13 as "named as missed".
+jq -nc '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-09-19T00:00:05Z",
+  message:{role:"assistant",content:[{type:"tool_use",id:"toolu_s9up",name:"TaskUpdate",input:{taskId:"1",status:"in_progress"}}]}}' >> "$S9_TX"
 s7_fire "$S9_D" "$S9_TX"
 expect_contains "9a: the turn that launched one of two ready rows is refused for the fill" \
   "Fillable gap at turn end" "$(reason_of)"
@@ -813,7 +817,7 @@ ub_world() {  # -> the root on stdout; p1 newest, p2 older
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-ub"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# p1\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
@@ -892,7 +896,7 @@ sd_fixture() {  # -> project dir; T7 pending, writers=8, current: 4
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
@@ -1258,10 +1262,10 @@ bu_fixture() {  # <budget line> -> project dir; three writers open, T7 ready
   printf '%s' "$d"
 }
 require_helpers bu_fixture
-BU_C="$(bu_fixture 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe')"
+BU_C="$(bu_fixture 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user')"
 sd_turn "$SD_TX" u-bu-1
 s7_fire "$BU_C" "$SD_TX"
-expect_eq "BU1 control: the probe's eight writers with three open owe the ready row" "block" "$(sd_decision)"
+expect_eq "BU1 control: a person's eight writers with three open owe the ready row" "block" "$(sd_decision)"
 BU_D="$(bu_fixture "$(printf 'parallel-budget: writers=3 suites=2 worktrees=8 test_jobs=8 source=user\nbudget-override: Dana Fixture 2026-10-04 derived=8 chosen=3')")"
 expect_contains "BU2 precondition: the header carries the user's cap" "writers=3 suites=2 worktrees=8 test_jobs=8 source=user" \
   "$(cat "$BU_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md")"
@@ -1270,6 +1274,34 @@ expect_eq "BU2b AC-15.4 the user's cap of three reached: the wall asks for nothi
 BU_LINE="$(sd_led "$BU_D" | tail -1)"
 expect_eq "BU2c …the turn's ledger line reads the cap" "3" "$(sd_field "$BU_LINE" ceiling)"
 expect_eq "BU2d …and records no decline" "" "$(sd_field "$BU_LINE" declined)"
+
+# §NOBUDGET — NO PLAN OWES THE LINE, AND A PROBE'S NUMBER CAPS NOTHING (wave-28 T9; D15, REQ-2
+# AC-2.9). Until wave-28 a live ledger whose plan carried no readable `writers=` was refused once
+# ("Fill budget unreadable", naming Step 0's key), and a probe-written `writers=3` capped the fill
+# the way BU2's person's line does. The same roster and the same ready row as BU1/BU2, on the
+# suite's quiet planted machine: with no line the wall judges the gap the gate leaves, as for any
+# plan, and names no key; with the probe's `writers=3` and three open the ready row is still owed,
+# where BU2's person's 3 owes nothing (the paired control), and the ledger's `ceiling=` is empty:
+# the width and the ledger read the one cap reader. fails-when: a plan with no line is refused on
+# the budget, or the probe's 3 caps the fill.
+sd_reason() { printf '%s' "$STOP_OUT" | jq -r '.reason // ""' 2>/dev/null; }
+BU_N="$(bu_fixture 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user')"
+/usr/bin/grep -v '^parallel-budget:' "$BU_N/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md" > "$BU_N/p.tmp" \
+  && mv "$BU_N/p.tmp" "$BU_N/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+expect_absent "§NOBUDGET.0 meta: the live plan carries no parallel-budget: line" "parallel-budget" \
+  "$(cat "$BU_N/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md")"
+expect_contains "§NOBUDGET.0b meta: …and is still the live fixture (current: 4)" "current: 4" \
+  "$(cat "$BU_N/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md")"
+s7_fire "$BU_N" "$SD_TX"
+expect_contains "§NOBUDGET.1 a live plan with no line is judged on the gap the gate leaves, like any plan" \
+  "Fillable gap" "$(sd_reason)"
+expect_absent "§NOBUDGET.1b …and is never refused for want of the line" "parallel-budget" "$(sd_reason)"
+BU_P="$(bu_fixture 'parallel-budget: writers=3 suites=2 worktrees=8 test_jobs=8 source=probe')"
+s7_fire "$BU_P" "$SD_TX"
+expect_eq "§NOBUDGET.2 the probe's writers=3 with three open caps nothing: the ready row is owed" "block" "$(sd_decision)"
+expect_contains "§NOBUDGET.2b …named in the refusal" "T7" "$(sd_reason)"
+expect_eq "§NOBUDGET.2c …and the ledger's ceiling= is empty: no cap was read" "" "$(sd_field "$(sd_led "$BU_P" | tail -1)" ceiling)"
+expect_contains "§NOBUDGET.2d meta: …the ledger line is there to read" "fill-ledger/v1|" "$(sd_led "$BU_P" | tail -1)"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1285,7 +1317,7 @@ fo_fixture() {  # <subagent_type of the one open row> -> project dir; writers=1,
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
@@ -1343,7 +1375,7 @@ fw_fixture() {  # <status of T5> -> project dir
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n'
     printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
@@ -1439,7 +1471,7 @@ fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
   fl_git "$d" init -q 2>/dev/null; fl_git "$d" checkout -q -b wave/99-fl 2>/dev/null
   printf '.bionic/\n' > "$d/.gitignore"; fl_git "$d" add .gitignore; fl_git "$d" commit -qm base
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\nrigor: tested\nscale: wave\nbase-sha: %s\n' "$(fl_git "$d" rev-parse HEAD)"
-    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 8\nworking-branch: wave/99-fl\n'
     printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 8: in progress\n\n'
     printf '## Tasks\n\n'
@@ -1520,7 +1552,7 @@ ls_world() {  # -> project dir; T3 and T4 pending build rows, T2 active, the ses
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
     printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
     printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\n'
     printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
     printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
@@ -1691,7 +1723,7 @@ lh_fixture() {  # -> project dir; T1 landed (writes lib/a.sh), T2 a review prove
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n'
     printf 'proved: kind=review head=%s at=2026-10-04T00:00:00Z evidence=record/r.txt\n\n- Step 4: in progress\n\n' "$LH_A"
     printf '## Tasks\n\n'
@@ -1923,5 +1955,183 @@ for rw_cause in step4 grew; do
   expect_true "RW5c ($rw_cause) …and the first line keeps to 100 columns" \
     test "$(rw_first | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
 done
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "TASK-ENTRY: a turn that dispatched a row sets its task entry in progress (wave-28 T38; REQ-13 AC-13.1, AC-13.3; D30)"
+
+# The task-list duty gains a second trigger: a turn that launched an agent bound to a plan row owes
+# as many task updates setting `in_progress` as rows it dispatched. Fewer refuses once, under the
+# duty wall's existing refusal; a turn that dispatched no row owes nothing, tick or no tick. The
+# wall counts; it cannot tell which entry belongs to which row.
+# THE RECORDS ARE THE HARNESS'S SHAPES, copied off a real session's transcript (2026-10-06): an
+# Agent tool_use with `input:{description,name,prompt,subagent_type}`, a TaskUpdate tool_use with
+# `input:{taskId,status}` on an assistant record carrying `agentId:null`, and its result record
+# `"Updated task #<n> status"` with `toolUseResult.statusChange`. FIXTURE: §9's plan with both rows
+# `active` (the launch recorder's mark), so no fill is owed and the duty is measured alone.
+# fails-when: a turn that dispatched two rows and set one entry in progress ends unrefused, or a
+# turn with no row dispatch is refused.
+te_fixture() {  # [pending] -> project dir; §9's plan, T13 and T14 active unless `pending`
+  local d
+  d="$(s9_fixture)"
+  [ "${1:-}" = pending ] || sed -i.bak 's/| pending | — |$/| active | — |/' \
+    "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+  printf '%s' "$d"
+}
+te_transcript() {  # <file> <plain|tick> <item>... — A:<name> launch · U:<n>:<status> update · UE:<n> refused update · L TaskList
+  local f="$1" kind="$2" it n s; shift 2
+  if [ "$kind" = tick ]; then
+    jq -nc --arg t "bionic-patrol session=${SID:0:8} — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row." \
+      '{type:"user",isMeta:true,isSidechain:false,userType:"external",uuid:"u-te",timestamp:"2026-10-06T00:00:00Z",message:{role:"user",content:$t}}' > "$f"
+  else
+    jq -nc '{type:"user",isSidechain:false,userType:"external",uuid:"u-te",timestamp:"2026-10-06T00:00:00Z",message:{role:"user",content:"dispatch what is ready"}}' > "$f"
+  fi
+  for it in "$@"; do
+    case "$it" in
+      A:*) n="${it#A:}"
+        jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:01Z",
+          message:{role:"assistant",content:[{type:"tool_use",id:("toolu_" + $n),name:"Agent",
+            input:{description:"task",name:$n,prompt:("Task " + $n),subagent_type:"bionic:implementor"}}]}}' >> "$f"
+        jq -nc --arg n "$n" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:02Z",
+          message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_" + $n),content:[{type:"text",text:"Spawned successfully."}]}]},
+          toolUseResult:{status:"teammate_spawned"}}' >> "$f" ;;
+      U:*|UE:*) n="${it#*:}"; s="${n#*:}"; n="${n%%:*}"; [ "$s" != "$n" ] || s=in_progress
+        jq -nc --arg n "$n" --arg s "$s" '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:03Z",
+          message:{role:"assistant",content:[{type:"tool_use",id:("toolu_up" + $n + $s),name:"TaskUpdate",input:{taskId:$n,status:$s}}]}}' >> "$f"
+        if [ "${it%%:*}" = UE ]; then
+          jq -nc --arg n "$n" --arg s "$s" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:04Z",
+            message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_up" + $n + $s),is_error:true,content:("Task #" + $n + " not found")}]}}' >> "$f"
+        else
+          jq -nc --arg n "$n" --arg s "$s" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:04Z",
+            message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_up" + $n + $s),content:("Updated task #" + $n + " status")}]},
+            toolUseResult:{success:true,taskId:$n,updatedFields:["status"],statusChange:{from:"pending",to:$s}}}' >> "$f"
+        fi ;;
+      L) jq -nc '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:05Z",
+           message:{role:"assistant",content:[{type:"tool_use",id:"toolu_tl",name:"TaskList",input:{}}]}}' >> "$f" ;;
+    esac
+  done
+}
+te_roster() {  # <project> <name>... — the intended rows the dispatch wall writes at launch
+  local d="$1" n; shift
+  for n in "$@"; do
+    roster_row_fixture status=intended session="$SID" name="$n" agent_id="ate${n//[^A-Za-z0-9]/}0000000001" deliverable= \
+      tool_use_id="toolu_$n" >> "$d/.bionic/tmp/roster-$SID.state"
+  done
+}
+te_turn() {  # <project> <plain|tick> <stop_hook_active> <item>... -> fires the Stop
+  local d="$1" kind="$2" sha="$3" tx; shift 3
+  tx="$(mktemp)"; te_transcript "$tx" "$kind" "$@"
+  fire "$d" Stop "$sha" "$(jq -nc --arg t "$tx" '{transcript_path:$t}')"
+}
+te_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+te_first() { printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' || true; }
+require_helpers te_fixture te_transcript te_roster te_turn te_decision te_first
+TE_TEXT2="tasks: dispatched T13 T14 this turn, 1 of 2 task entries set in progress — set each dispatched row's entry in progress"
+TE_LINE="bionic: stop refused — a dispatched row's entry is not in progress (TaskUpdate each to in_progress)"
+TE_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$TE_RING"
+export BIONIC_PRESSURE_RING="$TE_RING" BIONIC_NOW_EPOCH=1700000000
+
+TE_TX="$(mktemp)"; te_transcript "$TE_TX" plain A:w9-T13 A:w9-T14 U:1:in_progress
+expect_eq "TE0 precondition: the planted turn holds two Agent launches" "2" \
+  "$(jq -r 'select(.type=="assistant") | .message.content[] | select(.name=="Agent") | .id' "$TE_TX" | wc -l | tr -d ' ')"
+expect_eq "TE0b precondition: …and one TaskUpdate setting in_progress, as the harness writes it" "1:in_progress" \
+  "$(jq -r 'select(.type=="assistant") | .message.content[] | select(.name=="TaskUpdate") | "\(.input.taskId):\(.input.status)"' "$TE_TX")"
+
+# AC-13.1: dispatched 2, entered 1 -> refused once, with the interface's text; entered 2 -> ends.
+TE_D="$(te_fixture)"; te_roster "$TE_D" w9-T13 w9-T14
+te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress
+expect_eq "TE1 dispatched two rows, set one entry in progress: the turn is refused" "block" "$(te_decision)"
+expect_contains "TE1b …with the interface's text, naming the rows and the act" "$TE_TEXT2" "$(reason_of)"
+expect_eq "TE1c …under the duty wall's refusal line, the only one" "$TE_LINE" "$(te_first)"
+expect_eq "TE1d …one refusal, not two" "1" "$(refusal_lines)"
+expect_true "TE1e …and the line keeps to 100 columns" test "$(printf '%s' "$(te_first)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
+te_turn "$TE_D" plain true A:w9-T13 A:w9-T14 U:1:in_progress
+expect_eq "TE2 refused ONCE: the re-entered Stop of the same turn ends" "" "$(te_decision)"
+te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:2:in_progress
+expect_eq "TE3 dispatched two, set two in progress: the turn ends" "" "$(te_decision)"
+expect_absent "TE3b …and no refusal names the task entries" "tasks: dispatched" "$(reason_of)$STOP_ERR"
+
+# What counts as an entry: a task number, once; the in_progress status; an update that took.
+te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:1:in_progress
+expect_contains "TE4 the same task set twice is one entry: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
+te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:2:completed
+expect_contains "TE5 an update to completed is no entry set in progress: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
+te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress UE:2
+expect_contains "TE6 a TaskUpdate the harness refused set nothing: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
+te_turn "$TE_D" plain false A:w9-T13 A:w9-T13-r2 U:1:in_progress
+expect_eq "TE7 two launches of one row are one row dispatched: one entry answers it" "" "$(te_decision)"
+te_turn "$TE_D" plain false A:w9-T13 A:w9-T13-r2
+expect_contains "TE7b …and with none set it is refused, naming the row once" \
+  "tasks: dispatched T13 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
+
+# AC-13.3: a turn that dispatched no row owes nothing — no launch, or a launch bound to no row.
+te_roster "$TE_D" researcher-a
+te_turn "$TE_D" plain false A:researcher-a
+expect_eq "TE8 a launch whose name binds no plan row owes nothing" "" "$(te_decision)"
+te_turn "$TE_D" plain false A:researcher-a A:w9-T14
+expect_contains "TE8b …beside a bound launch, only the bound row is owed" \
+  "tasks: dispatched T14 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
+te_turn "$TE_D" plain false
+expect_eq "TE9 a turn with no launch owes nothing" "" "$(te_decision)"
+
+# With a tick in the turn: the tick's refresh duty and the entry duty are one wall, one refusal.
+te_turn "$TE_D" tick false L
+expect_eq "TE10 a tick turn that refreshed and dispatched nothing ends" "" "$(te_decision)"
+te_turn "$TE_D" tick false L A:w9-T13 A:w9-T14
+expect_eq "TE11 a tick turn that refreshed and dispatched two rows with no entry set is refused" "block" "$(te_decision)"
+expect_eq "TE11b …under the entry duty's line" "$TE_LINE" "$(te_first)"
+expect_contains "TE11c …0 of 2" "tasks: dispatched T13 T14 this turn, 0 of 2 task entries set in progress" "$(reason_of)"
+te_turn "$TE_D" tick false L A:w9-T13 A:w9-T14 U:7:in_progress U:8:in_progress
+expect_eq "TE12 a tick turn that refreshed and set both entries ends" "" "$(te_decision)"
+te_turn "$TE_D" tick false A:w9-T13 A:w9-T14
+expect_contains "TE13 a tick turn missing both duties is refused once, the refresh's line first" \
+  "no task-list refresh since this tick" "$(te_first)"
+expect_eq "TE13b …one refusal" "1" "$(refusal_lines)"
+expect_contains "TE13c …its detail keeps the refresh paragraph" "Patrol duties incomplete: no task-list refresh" "$(reason_of)"
+expect_contains "TE13d …and adds the entries" "tasks: dispatched T13 T14 this turn, 0 of 2 task entries set in progress" "$(reason_of)"
+te_turn "$TE_D" tick false
+expect_contains "TE14 a tick turn with no refresh and no launch is refused as before" \
+  "no task-list refresh since this tick" "$(te_first)"
+expect_absent "TE14b …and owes no entries" "tasks: dispatched" "$(reason_of)"
+
+# Beside the fill: the FILL keeps its line, the entries ride in its detail.
+TE_DP="$(te_fixture pending)"; te_roster "$TE_DP" w9-T13
+te_turn "$TE_DP" plain false A:w9-T13
+expect_contains "TE15 a half-filled gap keeps the fill's line" "launched 1 of 2" "$(te_first)"
+expect_contains "TE15b …and its detail names the entry owed" \
+  "tasks: dispatched T13 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "§LAUNCHED: a launch whose row carries row= counts as that row's launch (wave-28 T7; REQ-3 AC-3.4, D17)"
+
+# A brief's `Row: <id>` is written on the launch row as `row=<id>`. The fill duty's launched count
+# reads it before the name: an agent named `w-A2` briefed `Row: T14` launched T14, though no name
+# match would say so. The name match stays the fallback for a row with none. FIXTURE: section 9's
+# plan (T13 and T14 pending, writers=8) and transcript, the width pinned the same way.
+# fails-when: the labelled launch reads 0 of 2, or T14 is named as not launched.
+S9_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$S9_RING"
+export BIONIC_PRESSURE_RING="$S9_RING" BIONIC_NOW_EPOCH=1700000000
+SL_D="$(s9_fixture)"
+roster_row_fixture status=intended session="$SID" name=w-A2 agent_id=awA200000000001 deliverable= row=T14 \
+  >> "$SL_D/.bionic/tmp/roster-$SID.state"
+expect_contains "LAUNCHED precondition: the launch row carries row=T14" "|row=T14" "$(grep 'name=w-A2' "$SL_D/.bionic/tmp/roster-$SID.state")"
+SL_TX="$(mktemp)"; s9_transcript "$SL_TX" w-A2
+s7_fire "$SL_D" "$SL_TX"
+expect_contains "LAUNCHED1 w-A2 briefed Row: T14 counts as launched: 1 of 2" "launched 1 of 2" "$(s9_headline)"
+expect_contains "LAUNCHED2 …and the row not launched is T13 alone" "not launched: T13" "$(s9_headline)"
+expect_absent "LAUNCHED3 …T14 is never named as not launched" "T14" "$(s9_headline)"
+expect_contains "LAUNCHED4 …and the fill ledger records the launch by its row" "|launched=T14|" \
+  "$(cat "$SL_D/.bionic/docs/record/wave-09-fixture/fill-ledger.log" 2>/dev/null)"
+# The fallback, so LAUNCHED1 cannot pass on a constant: the same name with no row= matches no row.
+SL_D0="$(s9_fixture)"
+roster_row_fixture status=intended session="$SID" name=w-A2 agent_id=awA200000000002 deliverable= \
+  >> "$SL_D0/.bionic/tmp/roster-$SID.state"
+SL_TX0="$(mktemp)"; s9_transcript "$SL_TX0" w-A2
+s7_fire "$SL_D0" "$SL_TX0"
+expect_contains "LAUNCHED5 the same w-A2 with no row= launched no ready row: 0 of 2" "launched 0 of 2" "$(s9_headline)"
+expect_contains "LAUNCHED6 …and the name match still counts a name that is a row's: w9-T13 is T13's" "launched 1 of 2" \
+  "$(SL_D1="$(s9_fixture)"; roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000009 deliverable= \
+       >> "$SL_D1/.bionic/tmp/roster-$SID.state"; SL_TX1="$(mktemp)"; s9_transcript "$SL_TX1" w9-T13
+     s7_fire "$SL_D1" "$SL_TX1"; s9_headline)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 finish

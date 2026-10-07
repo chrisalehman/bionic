@@ -1407,6 +1407,62 @@ $s.test.sh' 'for s in a b; do bash tests/$s.test.sh; done; bash tests/$s.test.sh
 # THE SAME SHAPE WITH THE VARIABLE INSIDE ITS OWN GROUP resolves, beside `(s=a); …` above.
 targets_are 'a.test.sh' '(s=a; bash tests/$s.test.sh)'
 
+# A SUITE RUN THROUGH A GLOB LOOP OR A BARE VARIABLE IS A SUITE, HOWEVER SPELLED (wave-28 T11,
+# D13, AC-2.12; wave-27 review pass 8 F5). `for s in tests/*.test.sh; do bash "$s"; done` and
+# `bash "$SUITE"` read class none, so the run went unbudgeted, unwrapped and past the gate. A
+# shell whose script is a bare variable (the whole operand, or its last path component) is now a
+# suite claim naming that variable, which the budget's unexpanded-name arm refuses and the wrap
+# names `?` — unless every text in the command that binds the variable plainly names no suite.
+# Each positive has its negative on the same two extractors. The false-positive cost is real: a
+# wrapped command loses its `cd`, and an agent's budget refuses a `$` claim outright.
+loop_var_is() {  # <expected class> <expected targets, newline-joined> <command>
+  expect_eq "§LOOP T11 class [$3]" "$1" "$(class_of "$3")"
+  targets_are "$2" "$3"
+}
+loop_var_is suite '$s' 'for s in tests/*.test.sh; do bash "$s"; done'
+loop_var_is suite '$s' '{ for s in tests/*.test.sh; do if bash "$s"; then :; fi; done; } | tee log'
+loop_var_is suite '$s' 'for s in tests/*; do bash $s; done'
+loop_var_is suite '$s' 'for s in tests/*.sh; do bash "$s" 2>&1 | tee -a log; done'
+loop_var_is suite '$s' 'for s in $(ls tests/*.test.sh); do bash "$s"; done'
+loop_var_is suite '$n' 'for n in $(ls tests); do bash "tests/$n"; done'
+loop_var_is suite '$s' 'while read -r s; do bash "$s"; done < list'
+loop_var_is suite '$SUITE' 'bash "$SUITE"'
+loop_var_is suite '$SUITE' 'sh $SUITE'
+loop_var_is suite '${S}' 'bash "${S}"'
+loop_var_is suite '$f' 'bash -x "$f"'
+loop_var_is suite '$f' 'cd "$T" && bash "$f" 2>&1 | tee log'
+# A binding that COULD name a suite keeps the claim: a reassignment in the body, a second
+# assignment, a value whose basename is a suite, a value nothing here can read.
+loop_var_is suite '$f' 'for f in docs/*.md; do f=tests/a.test.sh; bash "$f"; done'
+loop_var_is suite '$S' 'S=x.sh; S=tests/a.test.sh; bash "$S"'
+loop_var_is suite '$S' 'S="$T/a.test.sh"; bash "$S"'
+loop_var_is suite '$S' 'S=$(pick); bash "$S"'
+loop_var_is suite '$S' 'bash "$S"; S=x.sh'
+loop_var_is suite '$f' 'for f in docs/*.md; do bash "$f"; done; eval :'
+expect_eq "§LOOP T11 a bare-variable claim is a FILE claim" "file" "$(claim_kinds_of 'bash "$SUITE"')"
+expect_eq "§LOOP T11 …and stays named when scoped to a repo root, as the budget arm asks" '$s' \
+  "$(targets_of_in "$C8_ROOT" 'for s in tests/*.test.sh; do bash "$s"; done')"
+expect_eq "§LOOP T11 …whose run is the segment as typed" 'bash "$s"' \
+  "$(claim_run_of 'for s in tests/*.test.sh; do bash "$s"; done')"
+# PLAINLY NOT A SUITE — the same extractors, beside the rows above.
+loop_var_is none '' 'for f in docs/*.md; do bash "$f"; done'
+loop_var_is none '' 'for f in docs/*.md; do wc -l "$f"; done'
+loop_var_is none '' 'for s in tests/*.test.sh; do echo "$s"; done'
+loop_var_is none '' 'for s in tests/*.test.sh; do bash -n "$s"; done'
+loop_var_is none '' 'for f in a.sh "$D"/b.sh scripts/*.py; do bash "$f"; done'
+loop_var_is none '' 'f=scripts/x.sh; bash "$f"'
+loop_var_is none '' 'S="$T/probe.sh"; bash "$S" "$PWD"'
+loop_var_is none '' 'F=$(mktemp); bash "$F"'
+loop_var_is none '' 'F=$(mktemp "${TMPDIR:-/tmp}/p.XXXXXX"); bash "$F"'
+loop_var_is none '' 'bash -c "$CMD"'
+loop_var_is none '' 'bash -x -c "$CMD"'
+loop_var_is none '' 'bash "$1"'
+loop_var_is none '' 'echo '"'"'bash "$f"'"'"
+loop_var_is none '' 'cat > x <<EOF
+bash "$f"
+EOF'
+loop_var_is none '' '"$S"'
+
 section "§LOOPLINES — wave-24 T13 (D10, AC-6.3): the loop's own words, as the lines to run"
 # THE REFUSAL THAT HAD NOTHING TO PRINT. A `$` claim the classifier will not resolve used to
 # be answered with a canned `alpha`/`beta` example. `cmd_suite_loop_lines` is the one reading
@@ -1450,6 +1506,10 @@ loop_lines_are '' 'for s in a*; do bash tests/$s.test.sh; done'
 loop_lines_are '' 's=a bash tests/$s.test.sh'
 loop_lines_are '' 'for s in a b; do echo $s; done; bash tests/$s.test.sh'
 loop_lines_are '' 'for s in a b; do s=c; echo "tests/$s.test.sh"; done'
+# A glob loop and a bare variable are suite claims now (§LOOP T11) and still print no line: a
+# glob names no words, so the refusal asks for the literal lines meant.
+loop_lines_are '' 'for s in tests/*.test.sh; do bash "$s"; done'
+loop_lines_are '' 'bash "$SUITE"'
 
 
 section "§VAR — REQ-6 AC-6.4 (D9): a variable holding a whole suite name is a suite run"
@@ -2293,5 +2353,81 @@ expect_eq "§SCOPE cd x || exit 1; a: the cd guard ahead of one suite is no spli
   "$(split_of 'cd x || exit 1; bash tests/a.test.sh')"
 expect_eq "§SCOPE the budget's claims never carry the split line" "file|file" \
   "$(claim_kinds_of 'bash tests/a.test.sh || bash tests/b.test.sh' | paste -sd'|' -)"
+
+section "§ONLY — wave-28 T36 (D27, AC-10.1/10.2): the door claims each suite it names, never the full tree"
+# `tests/run.sh --only a.test.sh b.test.sh` runs the named suites in the runner's world. The
+# reading claims each one as kind `only` (a file claim made through the door), scoped to the
+# runner's own directory, so the budget holds the call to the writer's own suites and the stamp
+# names them; the bare forms stay kind `file`, which the wall refuses from an agent.
+only_rows() {  # <command> -> the scoped claims as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" /r' _ "$LIB" "$1" 2>&1 | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§ONLY one name: one only claim" "only:a.test.sh" "$(only_rows 'tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY two names: one claim each, in order" "only:a.test.sh|only:b.test.sh" \
+  "$(only_rows 'bash tests/run.sh --only a.test.sh b.test.sh')"
+expect_eq "§ONLY the evidence shape: the redirection is not a name" "only:a.test.sh" \
+  "$(only_rows 'cd /r || exit 1; LOG=l; set -o pipefail; bash tests/run.sh --only a.test.sh 2>&1 | tee "$LOG"; rc=$?; exit $rc')"
+expect_eq "§ONLY …nor is a log after >" "only:a.test.sh" "$(only_rows 'tests/run.sh --only a.test.sh > log 2>&1')"
+expect_eq "§ONLY an absolute runner in this repo is scoped like a relative one" "only:a.test.sh" \
+  "$(only_rows 'bash /r/tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY another repository's runner claims nothing here (dropped by scope)" "" \
+  "$(only_rows 'bash /else/tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY …while the same names under this repo's runner are claimed (the positive)" "only:a.test.sh" \
+  "$(only_rows 'bash ./tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY the bare suite is a file claim (the wall's door refuses it from an agent)" "file:a.test.sh" \
+  "$(only_rows 'bash tests/a.test.sh')"
+expect_eq "§ONLY the full tree is still run.sh beside a door call" "only:a.test.sh|file:run.sh" \
+  "$(only_rows 'tests/run.sh --only a.test.sh && tests/run.sh')"
+case_is none 'tests/run.sh --only' "§ONLY --only with no name runs nothing: none"
+case_is none 'tests/run.sh --only a.test.sh --dry-run' "§ONLY --dry-run beside it runs nothing: none"
+case_is suite 'tests/run.sh --only a.test.sh' "§ONLY the door is suite-class"
+loop_lines_are "tests/run.sh --only a.test.sh
+tests/run.sh --only b.test.sh" 'for s in a b; do tests/run.sh --only "$s.test.sh"; done; eval :'
+loop_lines_are "bash tests/a.test.sh
+bash tests/b.test.sh" 'for s in a b; do bash "tests/$s.test.sh"; done; eval :'
+expect_eq "§ONLY cmd_suite_targets projects the door's suites" "a.test.sh|b.test.sh" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" /r' _ "$LIB" 'tests/run.sh --only a.test.sh b.test.sh' 2>&1 | paste -sd'|' -)"
+expect_eq "§ONLY the targets reading carries the path in the runner's directory, no split" \
+  "only	a.test.sh	tests/a.test.sh|only	b.test.sh	tests/b.test.sh" \
+  "$(printf '%s' 'tests/run.sh --only a.test.sh b.test.sh' | bash -c '. "$1" || exit 9; _cmd_class_awk targets' _ "$LIB" 2>&1 | awk -F'\t' '{ print $1 "\t" $2 "\t" $4 }' | paste -sd'|' -)"
+
+section "§NAME — wave-28 T36 (read-structure-p20 #1): one predicate says what a suite name is"
+# The script-operand arm, the argv[0] arm and could_suite each spelled the suite-name rule, and
+# could_suite had drifted from the runner rule: `scripts/*run.sh` was claimed though
+# `scripts/run.sh` reads none. One function, is_suite_name, now answers for all of them, and a
+# `run.sh` is the runner only in a directory that is, or could be, `tests`.
+expect_eq "§NAME the library defines the predicate once" "1" \
+  "$(grep -c '^    function is_suite_name(c) {' "$LIB")"
+expect_eq "§NAME …and no arm spells the rule on its own any more" "0" \
+  "$(grep -cE 'b[01] == "test\.sh" \|\| b[01] ~|c == "test\.sh" \|\| c == "run\.sh"' "$LIB")"
+# THE DRIFT ROW: the literal reader (a path typed out) and the variable reader (a glob loop over
+# the same directory) give one answer for each directory.
+for _nm in tests x/tests scripts x; do
+  expect_eq "§NAME drift: \`bash $_nm/run.sh\` and a loop over $_nm/*run.sh read alike" \
+    "$(class_of "bash $_nm/run.sh")" "$(class_of "for f in $_nm/*run.sh; do bash \"\$f\"; done")"
+done
+expect_eq "§NAME drift: …and the two answers are not all one (the rows can differ)" "suite none" \
+  "$(class_of 'bash tests/run.sh') $(class_of 'bash scripts/run.sh')"
+loop_var_is none "" 'for f in scripts/*run.sh; do bash "$f"; done'
+loop_var_is suite '$f' 'for f in tests/*run.sh; do bash "$f"; done'
+loop_var_is suite '$d' 'for d in x/*/run.sh; do bash "$d"; done'
+
+section "§P20 — wave-28 T36 (read-adversarial-p20 #1–#4): the classifier's edges"
+# #1 a binding opening with a command substitution is read past it (A-orch-93).
+loop_var_is none "" 'S="$(git rev-parse --show-toplevel)/tool.sh"; bash "$S"'
+loop_var_is suite '$S' 'S="$(git rev-parse --show-toplevel)/a.test.sh"; bash "$S"'
+loop_var_is suite '$S' 'S="$(pick a b)"; bash "$S"'
+# #3 the value of --rcfile / --init-file is never the script.
+case_is none 'bash --rcfile "$r" x.sh' "§P20 #3 --rcfile's value is not the script"
+case_is none 'bash --init-file "$r" x.sh' "§P20 #3 …nor --init-file's"
+case_is suite 'bash --rcfile /dev/null tests/a.test.sh' "§P20 #3 …while the script after it is read (the positive)"
+# #4 -O / +O and each o in a cluster take their value.
+case_is none 'bash -O extglob x.sh' "§P20 #4 -O's value is not the script"
+case_is suite 'bash -O extglob tests/a.test.sh' "§P20 #4 …the suite after it is read"
+case_is suite 'bash -euo pipefail tests/a.test.sh' "§P20 #4 a cluster's o takes pipefail, and the suite is read"
+case_is suite 'bash +O nullglob tests/a.test.sh' "§P20 #4 a + option is skipped like a - one"
+case_is none 'bash -o noexec tests/a.test.sh' "§P20 #4 -o noexec still runs nothing"
+case_is suite 'bash +o noexec tests/a.test.sh' "§P20 #4 …while +o noexec turns it off: a run"
+expect_eq "§P20 #4 -O's value is never a claim" "" "$(only_rows 'bash -O extglob "$s"' | sed 's/file:\$s//')"
 
 finish
