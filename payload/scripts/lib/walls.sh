@@ -6685,7 +6685,28 @@ dispatches the runner, and the dispatch wall admits it only then."
   # one line naming the door; the door's own claims are `only` and go on to the budget below. The
   # main thread never reaches this loop (the partition above), so a person's bare run is not
   # refused and keeps the seam's pin. This arm holds the runner's world, not the queue (D9).
+  #
+  # ONLY WHERE THE PROJECT HAS THE DOOR (wave-28 T54, D27; A-orch-124). bionic serves other
+  # projects: one with suites and no tests/run.sh, or a tests/run.sh of its own that takes no
+  # `--only`, has no door to point an agent at, and refusing its on-budget bare run sends the
+  # agent to a form that does not exist there. The project is the tree the shim asks from
+  # (booked.sh's `tree=`: `--stamp-dir`, else a leading `cd <dir>`, else the payload's cwd) —
+  # `_bsg_cd_walk`'s `_BSG_CD_DIR`, which IS the --stamp-dir when the walk is sure of it — and
+  # its checkout's tests/run.sh must say `--only`. Without the door the claim goes on to the
+  # budget below as it did before T36; an off-budget bare run is refused there as it always was.
+  _door_here=no
   if [ "$_kind" = "file" ]; then
+    _wall_class_read "$COMMAND"; _bsg_cd_walk "$_WALL_CLASS_LINES"
+    # A tree the walk cannot name (no cwd in the payload, a `cd` into nothing) has no runner to
+    # find: `git -C ""` would read the hook's own directory instead, so it is not asked.
+    if [ -n "$_BSG_CD_DIR" ] && [ -d "$_BSG_CD_DIR" ]; then
+      _door_top="$(git -C "$_BSG_CD_DIR" rev-parse --show-toplevel 2>/dev/null)" || _door_top="$_BSG_CD_DIR"
+      if [ -f "$_door_top/tests/run.sh" ]; then
+        ! grep -qF -- '--only' "$_door_top/tests/run.sh" 2>/dev/null || _door_here=yes
+      fi
+    fi
+  fi
+  if [ "$_door_here" = yes ]; then
     _door_name="$_target"
     case "$_door_name" in *'$'*|*'`'*|'') _door_name='<suite>' ;; esac
     _door_fact="use tests/run.sh --only $_door_name"
