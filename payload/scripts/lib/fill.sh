@@ -24,6 +24,15 @@
 #                                      and silent whenever the ledger is not live or the
 #                                      table carries no ready row.
 #   fill_readonly_ids <plan>           the ids of the rows that take no writer slot.
+#   fill_gate_width <open> <owed> <ready writers> [<cap>]
+#                                      the writer width the gate gives: <open> plus one row
+#                                      for each `gate_room` that answers yes, asked once per
+#                                      ready writer row with the rows already offered counted
+#                                      as owed, stopping at the first no or at <cap>.
+#   fill_gate_owed <roster> <session id>
+#                                      of the open names on stdin, the writers that have not
+#                                      asked the gate for a run yet.
+#   fill_cap <plan>                    a person's cap on writers, or nothing.
 #   fill_name <roster> <task id>       the agent NAME to dispatch that id under, which is the
 #                                      id itself until this session has already spent it.
 #   fill_row_launched <task id> <names>
@@ -48,10 +57,9 @@
 # measure them differently and both are right: the tick counts open rows off the roster it
 # is already walking, trimmed by transcript liveness, while the stop wall counts the same
 # roster's rows minus acks (wave-19 REQ-5; the wall's count is never below the tick's); both take the
-# width from the same reading — `pressure_level` against the budget's declared ceiling, the
-# ceiling itself only when the rung will not parse (wave-18 review R1: a wall that measured
-# against the ceiling refused turns naming rows the tick had withheld). What may not differ
-# is the READY SET, and that is what lives here.
+# width from the same function, `fill_gate_width` below, which asks the gate (wave-28 T13, D14;
+# wave-18 review R1: a wall that measured against another width refused turns naming rows the
+# tick had withheld). What may not differ is the READY SET, and that is what lives here.
 #
 # TWO TABLE SHAPES, ONE READER. `payload/scripts/lib/units.sh` is the one parser of
 # `## Tasks` at either scale, and `units_ready` grew the task-scale arm in the same wave
@@ -87,6 +95,13 @@ _FILL_LIB_DIR="$(cd "$(_fill_self_dir)" && pwd -P)"
 if ! declare -F units_ready >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_FILL_LIB_DIR/units.sh"
+fi
+# THE GATE, SOURCED THE SAME WAY (wave-28 T13): `fill_gate_width` asks `gate_room`. A copy of
+# this file whose directory holds no gate.sh leaves it undefined, and the width is then the
+# open count alone: no room is offered on a gate nobody can read.
+if ! declare -F gate_room >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/gate.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_FILL_LIB_DIR/gate.sh"
 fi
 
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
@@ -323,6 +338,63 @@ _fill_ready_rows() {  # <plan> <gap> [<answered ids> [tagged]]
 $ready
 FILL_READY_ROWS
   return 0
+}
+
+# ── THE WIDTH, FROM THE GATE (wave-28 T13; D14, AC-2.5, AC-2.8) ──────────────
+#
+# fill_gate_width <open> <owed> <ready writers> [<cap>] -> the writer width: <open> plus the
+# rows the gate offers. ONE ROW TO A YES. Each ready writer row is a `gate_room --owed <n>`, <n>
+# being <owed> (the live writers not yet showing) plus the rows already offered on this reading,
+# so two rows are never offered on a reading with room for one; the first no ends it. A
+# person's cap (<cap>, `budget_cap`'s writers) caps the open plus the offered. The tick and the
+# stop wall both size their fill here, so the two give one answer on one reading.
+fill_gate_width() {  # <open> <owed> <ready writers> [<cap>]
+  local open="${1:-0}" owed="${2:-0}" want="${3:-0}" cap="${4:-}" k=0
+  case "$open" in ''|*[!0-9]*) open=0 ;; esac
+  case "$owed" in ''|*[!0-9]*) owed=0 ;; esac
+  case "$want" in ''|*[!0-9]*) want=0 ;; esac
+  case "$cap" in *[!0-9]*) cap="" ;; esac
+  if declare -F gate_room >/dev/null 2>&1; then
+    while [ "$k" -lt "$want" ]; do
+      if [ -n "$cap" ] && [ $((open + k)) -ge "$cap" ]; then break; fi
+      gate_room --owed $((owed + k)) >/dev/null 2>&1 || break
+      k=$((k + 1))
+    done
+  fi
+  printf '%s' "$((open + k))"
+}
+
+# fill_cap <plan> -> a person's cap on writers, or nothing (D15; ruling A-orch-30). `budget_cap`
+# (lib/run.sh, row T9) answers only from a line a person wrote; until that function exists the
+# plan's `writers=` is read as it always was, so the cap behaves as before and T9 flips this one
+# place. The tick and the stop wall both read the cap here.
+fill_cap() {  # <plan>
+  local c=''
+  if declare -F budget_cap >/dev/null 2>&1; then
+    c="$(budget_cap "${1:-}" 2>/dev/null)"; c="${c#writers=}"
+  elif declare -F budget_field >/dev/null 2>&1 && declare -F plan_budget_line >/dev/null 2>&1; then
+    c="$(budget_field "$(plan_budget_line "${1:-}")" writers)"
+  fi
+  case "$c" in ''|*[!0-9]*) c="" ;; esac
+  printf '%s' "$c"
+}
+
+# fill_gate_owed <roster> <session id> -> how many of the open names on stdin are writers whose
+# agent has no request at the gate yet (`gate_asked <session>:<name>`, the request's `who`).
+# A writer that has asked is showing — in the load, or in an admitted promise — and is owed no
+# longer; one that has not is counted at the largest promise on record. A read-only role is
+# no writer (`budget_open_writers`, lib/roster.sh), as the open count it rides beside.
+fill_gate_owed() {  # <roster> <session id>; stdin: the open names, one per line
+  local f="${1:-}" sid="${2:-}" nm n=0
+  while IFS= read -r nm; do
+    [ -n "$nm" ] || continue
+    if declare -F budget_open_writers >/dev/null 2>&1; then
+      [ "$(printf '%s\n' "$nm" | budget_open_writers "$f")" = 1 ] || continue
+    fi
+    declare -F gate_asked >/dev/null 2>&1 && gate_asked "$sid:$nm" && continue
+    n=$((n + 1))
+  done
+  printf '%s' "$n"
 }
 
 # fill_ready_tagged <plan> -> every ready id, untrimmed, as `<id><TAB>w` (takes a writer slot) or

@@ -1310,6 +1310,22 @@ w11 s 'bash tests/a.test.sh | tee l && bash tests/b.test.sh' "--suites '?'"
 w11 t "bash tests/a.test.sh
 npm test" "--suites '?'"
 
+# A SUITE RUN THROUGH A GLOB LOOP OR A BARE VARIABLE IS WRAPPED (wave-28 T11, D13, AC-2.12). Until
+# T11 the classifier read both as class none, so they ran unwrapped: no gate, no stamp. Their claim
+# names a variable no stamp can place, so the shim is told `?`. Each beside a command of the same
+# shape that plainly runs no suite, on the same repo and reader, which is left alone.
+w11 u 'for s in tests/*.test.sh; do bash "$s"; done' "--suites '?'"
+w11 v '{ for s in tests/*.test.sh; do if bash "$s"; then :; fi; done; } | tee log' "--suites '?'"
+w11 w 'bash "$SUITE"' "--suites '?'"
+w11 x 'sh $SUITE' "--suites '?'"
+for sp in 'for f in docs/*.md; do bash "$f"; done' \
+          'for s in tests/*.test.sh; do echo "$s"; done' \
+          'S="$T/probe.sh"; bash "$S"'; do
+  run_hook "$(mk_payload "$RU" "$sp" "$ACTOR")" "$GUARD"
+  expect_eq "W12 [$sp] is allowed" "0" "$ST"
+  expect_empty "W12 …and left alone: no wrap, so its cd and shell stay the harness's" "$WRAP"
+done
+
 # WHICH SHELL: CLAUDE_CODE_SHELL, then SHELL, each only when it names bash or zsh by an
 # absolute path; otherwise no --shell, which is the shim's bash -c.
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL=$(command -v bash)"
