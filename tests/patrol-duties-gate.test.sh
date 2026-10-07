@@ -944,7 +944,7 @@ section "Section 5c: the fill duty is an INVARIANT — a live ledger with rows r
 # A project whose plan is a LIVE wave ledger: writers=8, at <current>, with the rows given.
 # LEDGER_BUDGET is the header's budget line; `make_env_ledger_keyless` blanks it, which is
 # the one plan shape REQ-3 refuses at write time and the wall names as a backstop.
-LEDGER_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe'
+LEDGER_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user'
 make_env_ledger_keyless() { LEDGER_BUDGET='' make_env_ledger "$@"; }
 make_env_ledger() {  # <current> <row>... -> project dir on stdout
   local cur="$1"; shift
@@ -1112,14 +1112,16 @@ u_prompt "$d" "start the row behind T2"
 a_agent "$d" "W-T2" "row T2, implementor."
 fire "$d"; expect_allow "62b: a pending row behind an unlanded dep is not ready, so the turn ends"
 
-# 63: THE BUDGET IS A MEASUREMENT, AND ITS ABSENCE IS NAMED, NEVER SILENT (wave-19 REQ-3
-# AC-3.2, D5; ADR-035 decision 2). A live ledger with ready rows and no `parallel-budget:`
-# line is a plan the governing-skill hook would have refused to write; the wall is the
-# backstop, and it names the key rather than ending the turn in silence.
+# 63: NO PLAN OWES THE LINE (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a live ledger with
+# ready rows and no `parallel-budget:` line was refused once, naming the key Step 0 wrote from
+# the probe (wave-19 REQ-3, ADR-035). A line caps a run only when a person wrote it now, so the
+# same ledger is not refused on the budget. The keyed control beside it (63a0) blocks on the gap.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "carry on"
+fire "$d"; expect_block "63a0 control: the same ledger under a person's cap of eight owes its ready rows" "T2"
 d=$(make_env_ledger_keyless 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_prompt "$d" "carry on"
-fire "$d"; expect_block "63a: a live ledger with no budget key is refused, naming the key" "parallel-budget:"
-fire "$d"; expect_block "63b: …and the field the width is read from" "writers="
+fire "$d"; expect_allow "63a: a live ledger with no budget line is not refused on the budget"
 # …and the same keyless plan below Step 4 is not a live ledger: nothing is owed yet.
 d=$(make_env_ledger_keyless 3 "$LEDGER_LANDED" "$LEDGER_READY_2")
 u_prompt "$d" "carry on"
@@ -1240,7 +1242,7 @@ fire "$d"; expect_block "64b: one row in flight against writers=8 leaves room, a
 # ordinary turn. Pre-fix the tick dropped the MET row from its occupancy and filled T2 T3;
 # the wall counts every unacked row and names T2 alone.
 POKER_64M="${BIONIC_HOOKS_DIR}/session-poker.sh"
-d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user' \
       make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 echo "done" > "$d/landed-64m.md"
 : > "$d/W-MET.done"   # the agent said so, by its Done marker: MET needs it (wave-24 T9, D3)
@@ -1285,7 +1287,7 @@ rm -rf "$CFG_64M"
 # does not list. That is exactly what the trim used to drop for the fill (A-T2.13), so it is
 # the differential's other half. writers=2, one such row, two ready rows: the real tick's
 # FILL is compared with the ids the wall's refusal names on an ordinary turn.
-d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user' \
       make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 roster_row_fixture status=intended session="$SID" name=W-UNMET agent_id= \
   deliverable="$d/never-written-64n.md" >> "$d/.bionic/tmp/roster-$SID.state"
@@ -2152,7 +2154,7 @@ rm -rf "$QT_CFG"
 # tick owes nothing even on its first tick. It does NOT print WAITING's "nothing ready" — a row
 # IS ready — but names the row on its WAIT line with the reason it waits (wave-26 T13; review-6
 # F3). C3d is the control: the same world with the row's read unlanded prints WAITING.
-d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=user' \
   make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2"); ( cd "$d" && git init -q . 2>/dev/null )
 { roster_header
   roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$d/never-written-c3.md" \
@@ -2170,7 +2172,7 @@ fire "$d"; expect_allow "C3c: …so its turn ends with no TaskList"
 rm -rf "$QT_CFG"
 LEDGER_WAITS_2='| T2 | 4 | build | waits on an unlanded row | implementor | T9 | 30m | REQ-x | b.sh | pending | — |'
 LEDGER_ACTIVE_9='| T9 | 4 | build | the row in flight | implementor | — | 30m | REQ-x | c.sh | active | .worktrees/T9 |'
-d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=user' \
   make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_ACTIVE_9" "$LEDGER_WAITS_2"); ( cd "$d" && git init -q . 2>/dev/null )
 { roster_header
   roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$d/never-written-c3d.md" \
@@ -2199,7 +2201,7 @@ rm -rf "$QT_CFG"
 # The control is the same sequence with no status move: its FILL tick owes nothing.
 c5_world() {  # -> project dir; writers=1, T2 ready, T5 behind it
   local d
-  d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+  d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=user' \
     make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_BLOCKED"); ( cd "$d" && git init -q . 2>/dev/null )
   printf '%s' "$d"
 }

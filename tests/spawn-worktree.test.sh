@@ -278,6 +278,37 @@ mkdir -p "$NB/.bionic"
 expect_match "the same repo is accepted once .bionic exists (the arm discriminates)" \
   "spawn-worktree: OK *" "$(spawn_out "$NB" create "$NBSHA" nostate)"
 
+section "§DISK: create refuses when free disk is under the largest tree (wave-28 T9; D15, REQ-2)"
+#
+# The dispatch wall's worktrees ceiling went with the probe's budget line (D15). What it stood
+# for is asked where a tree is made: `create` refuses when the project's volume has less free
+# space than the largest tree already there, naming both figures in KB. The figures are planted
+# (BIONIC_PROBE_DISK_FREE_KB, BIONIC_PROBE_TREE_KB); a disk is never filled. DISK.4 plants only
+# the free figure and lets the script measure the real tree, so the measuring path is driven.
+# fails-when: a create under the largest tree's size is admitted, or one at or over it refused,
+# or the refusal names a figure it was not given.
+RD="$(new_repo "$TMP/rd")"
+SHAD="$(sha_of "$RD")"
+OUTD1="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=5 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-low 2>/dev/null )"
+expect_eq "DISK.1 free 5 KB under a largest tree of 9 KB is refused, naming both figures" \
+  "spawn-worktree: FAIL reason=disk-low free_kb=5 largest_tree_kb=9" "$OUTD1"
+expect_false "DISK.1b …leaving no worktree behind" test -e "${RD}/.worktrees/d-low"
+expect_false "DISK.1c …and no branch" git -C "$RD" show-ref --verify --quiet refs/heads/d-low
+expect_eq "DISK.1d …exiting 2, a refusal" "2" \
+  "$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=5 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-low >/dev/null 2>&1; echo $? )"
+OUTD2="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=9 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-even 2>/dev/null )"
+expect_match "DISK.2 free equal to the largest tree is admitted" "spawn-worktree: OK path=${RD}/.worktrees/d-even *" "$OUTD2"
+OUTD3="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=1 BIONIC_PROBE_TREE_KB=0 bash "$SPAWN" create "$SHAD" d-none 2>/dev/null )"
+expect_match "DISK.3 with no tree's size to meet, a small free figure is admitted" "spawn-worktree: OK path=${RD}/.worktrees/d-none *" "$OUTD3"
+DSZ="$(du -sk "${RD}/.worktrees/d-even" | awk '{ print $1 }')"
+expect_true "DISK.4 meta: a real tree stands and du reads it above 1 KB (${DSZ})" test "${DSZ:-0}" -gt 1
+OUTD4="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=1 bash "$SPAWN" create "$SHAD" d-meas 2>/dev/null )"
+expect_match "DISK.4 free 1 KB against the measured trees is refused, naming the largest it measured" \
+  "spawn-worktree: FAIL reason=disk-low free_kb=1 largest_tree_kb=[0-9]*" "$OUTD4"
+expect_false "DISK.4b …and nothing was made" test -e "${RD}/.worktrees/d-meas"
+OUTD5="$( cd "$RD" && bash "$SPAWN" create "$SHAD" d-real 2>/dev/null )"
+expect_match "DISK.5 control: the real disk has room for a tree this small" "spawn-worktree: OK path=${RD}/.worktrees/d-real *" "$OUTD5"
+
 section "Group 8: create — a tracked .bionic in the branch is left alone, no alias planted"
 #
 # Until C2 this fixture was the self-verification failure: `git worktree add`
