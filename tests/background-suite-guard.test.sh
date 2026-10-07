@@ -1240,6 +1240,11 @@ expect_eq "W5e an agent's door call naming a solo suite is wrapped with --runner
 # subshell, a pipe, a background job, `pushd`), gives no option at all: the shim then stamps
 # its own directory, as before, never a guessed one.
 W10_ABS="$SANDBOX/trees/t1"
+# The trees these rows `cd` into are projects with the runner's door (wave-28 T54): the wall looks for
+# it in the tree the shim stamps, and a tree with none reads `tests/run.sh --only` as the full tree.
+for _w10_d in "$W10_ABS" "$RW/.worktrees/t1" "$SANDBOX/a tree"; do
+  mkdir -p "$_w10_d/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$_w10_d/tests/run.sh"
+done
 w10() {  # <label> <command> <expected --stamp-dir value, or "" for none> [<expected --suites word; default t.test.sh>]
   guarded "$RW" "$2"
   expect_eq "W10$1 [$2] is allowed" "0" "$ST"
