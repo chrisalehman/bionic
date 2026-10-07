@@ -1727,10 +1727,14 @@ PH="$(mk_fixture carry4)"; advance_to "$PH" 8
 carry_plant "$PH" "deferred: $CARRY_REC#1 S2 off \"not carried over a written heading\" stated=\"A sentence.\""
 mkdir -p "$PH/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\nnone, said the person\n' > "$PH/$CONT_REL"
-CARRY_SUM="$(cksum < "$PH/$CONT_REL")"
 run_close "$PH" run
 expect_eq "CARRY-12 a continuation that already carries the heading: run exits 0" "0" "$CO_RC"
-expect_eq "CARRY-13 …and is left as it stands" "$CARRY_SUM" "$(cksum < "$PH/$CONT_REL")"
+# wave-28 T50 (A-orch-74) supersedes A-T17.6's "with the heading, never touched": the merge adds the run's
+# own line it lacks under the heading, after the line a person wrote there, which stays
+expect_eq "CARRY-13 …the line a person wrote stays, and the run's own deferral it lacked is added under it" \
+  "none, said the person
+deferred: $CARRY_REC#1 S2 off \"not carried over a written heading\" stated=\"A sentence.\" from=$CARRY_W" \
+  "$(carry_section "$PH/$CONT_REL")"
 
 # check never writes it, and names what run would carry
 PK="$(mk_fixture carry5)"; advance_to "$PK" 8
@@ -1894,17 +1898,24 @@ expect_eq "CARRY-26b …the hand-written text around the section is kept, byte f
   "# continuation — hand written||## Chris decides||1. none||" "$(sed -n '1p;2p;3p;4p;5p;6p' "$PX/$CONT_REL" | tr '\n' '|')"
 expect_eq "CARRY-26c …and the section is followed by a blank line and the next heading as it was" \
   "|## Resume instruction||Nothing to resume." "$(tail -4 "$PX/$CONT_REL" | tr '\n' '|' | sed 's/|$//')"
-CARRY_CK1="$(cksum < "$PX/$CONT_REL")"
-run_close "$PX" run
-expect_eq "CARRY-27 a second run adds nothing: the continuation is byte for byte what the first left" "0|$CARRY_CK1" \
-  "$CO_RC|$(cksum < "$PX/$CONT_REL")"
-expect_contains "CARRY-27a …and says it is left as it stands" \
+# a second close-out over what the first left adds nothing: the continuation the first run wrote is
+# planted in a fresh fixture at the same step (a closed plan refuses a second run outright)
+PX2="$(mk_fixture carry17)"; advance_to "$PX2" 8
+carry_prev "$PX2"
+carry_req "$PX2" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
+carry_plant "$PX2" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
+mkdir -p "$PX2/${CONT_REL%/*}"; cp "$PX/$CONT_REL" "$PX2/$CONT_REL"
+CARRY_CK1="$(cksum < "$PX2/$CONT_REL")"
+expect_eq "CARRY-27 precondition: the planted continuation is the first run's, with its three lines under the heading" "3" \
+  "$(carry_section "$PX2/$CONT_REL" | wc -l | tr -d ' ')"
+run_close "$PX2" check
+expect_contains "CARRY-27a check over it names none: left as it stands" \
   "continuation: ${CONT_REL#.bionic/docs/} already written — left as it stands" "$CO_OUT"
-expect_absent "CARRY-27b …with no added lines in it" "deferred lines added" "$CO_OUT"
-run_close "$PX" check
-expect_contains "CARRY-27c check then names none: left as it stands" \
-  "continuation: ${CONT_REL#.bionic/docs/} already written — left as it stands" "$CO_OUT"
-expect_absent "CARRY-27d …and no add" "run adds" "$CO_OUT"
+expect_absent "CARRY-27b …and names no add" "run adds" "$CO_OUT"
+run_close "$PX2" run
+expect_eq "CARRY-27c run exits 0 and the continuation is byte for byte what the first run left" "0|$CARRY_CK1" \
+  "$CO_RC|$(cksum < "$PX2/$CONT_REL")"
+expect_absent "CARRY-27d …with no line reported added" "deferred line" "$CO_OUT"
 
 # a line already under the heading, byte for byte, is not written twice; the one missing is added alone
 PY="$(mk_fixture carry15)"; advance_to "$PY" 8
