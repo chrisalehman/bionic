@@ -623,6 +623,51 @@ co_deferrals_section() {
   [ -z "$lines" ] || printf '\n%s\n' "$lines"
 }
 
+# THE MERGE INTO A CONTINUATION THAT ALREADY CARRIES THE HEADING (wave-28 T50; A-orch-74 supersedes
+# A-T17.6's "with the heading, never touched"). Every line close-out would write — this run's own
+# deferrals, then what it carries — that is not under the first `## Deferrals` heading outside a fence,
+# byte for byte, is added at the end of that section, each once; what a person wrote there stays. A
+# continuation holding every line is left as it stands.
+co_cont_missing() {  # -> the lines owed that are not under the heading yet, in order
+  CO_WANT="$(co_deferrals)${CO_CARRIED:+
+$CO_CARRIED}" awk '
+    BEGIN { n = split(ENVIRON["CO_WANT"], w, "\n") }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    !fence && !first && $0 == "## Deferrals" { first = insec = 1; next }
+    !fence && /^## / { insec = 0; next }
+    insec && !fence { have[$0] = 1 }
+    END { for (i = 1; i <= n; i++) if (w[i] != "" && !have[w[i]] && !seen[w[i]]++) print w[i] }' "$CONT"
+}
+co_cont_merge() {  # <lines> -> $CONT with the lines added at the end of its ## Deferrals section
+  local tmp="$CONT.close-out.$$"
+  CO_ADD="$1" awk '
+    function fin(more,   i) {
+      if (content) { print ENVIRON["CO_ADD"]; for (i = 0; i < blanks; i++) print "" }
+      else { print ""; print ENVIRON["CO_ADD"]; if (more) print "" }
+      insec = 0; done = 1; blanks = 0
+    }
+    /^[[:space:]]*```/ { fence = !fence }
+    done { print; next }
+    !insec { print; if (!fence && $0 == "## Deferrals") insec = 1; next }
+    !fence && /^## / { fin(1); print; next }
+    NF == 0 { blanks++; next }
+    { for (i = 0; i < blanks; i++) print ""; blanks = 0; content = 1; print }
+    END { if (!done && insec) fin(0) }' "$CONT" > "$tmp" 2>/dev/null
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp"
+    _co_refuse "could not add the deferrals to the continuation at $CONT"
+  fi
+  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "could not add the deferrals to the continuation at $CONT"; }
+}
+co_added_phrase() {  # <lines> -> "<n> deferred line(s)"
+  local n
+  n="$(printf '%s\n' "$1" | wc -l | tr -d ' ')"
+  printf '%s deferred line%s' "$n" "$([ "$n" = 1 ] || echo s)"
+}
+co_added_ids() {  # <lines> -> the ids, space-joined
+  printf '%s\n' "$1" | awk '{ printf "%s%s", (NR > 1 ? " " : ""), $2 } END { print "" }'
+}
+
 continuation_template() {
   local sha
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
@@ -656,17 +701,23 @@ CONT_TEMPLATE
 }
 
 act_continuation() {
-  if [ ! -f "$CONT" ] || ! co_cont_has_deferrals; then
-    CO_CARRIED="$(co_carried)" \
-      || _co_refuse "could not read the deferrals this run inherited (card.sh inherited) — no continuation written"
-  fi
+  local missing
+  CO_CARRIED="$(co_carried)" \
+    || _co_refuse "could not read the deferrals this run inherited (card.sh inherited) — no continuation written"
   if [ -f "$CONT" ]; then
     # A CONTINUATION WRITTEN BEFORE THIS CLOSE-OUT KEEPS EVERY BYTE IT HAS; the deferrals the plan
-    # owes are appended under their heading when it carries none, so the debt is never dropped.
+    # owes are appended under their heading when it carries none, and merged into the section when it
+    # does (each line once, a person's lines kept), so the debt is never dropped.
     if ! co_cont_has_deferrals; then
       { printf '\n'; co_deferrals_section; } >> "$CONT" 2>/dev/null \
         || _co_refuse "could not append the deferrals to the continuation at $CONT"
       CONT_LINE="$CONT_REL already written — left as it stands, with the ## Deferrals section appended"
+      return 0
+    fi
+    missing="$(co_cont_missing)"
+    if [ -n "$missing" ]; then
+      co_cont_merge "$missing"
+      CONT_LINE="$CONT_REL already written — left as it stands, with $(co_added_phrase "$missing") added under ## Deferrals"
       return 0
     fi
     CONT_LINE="$CONT_REL already written — left as it stands"
@@ -1138,7 +1189,7 @@ insert_archived() {
 # usually a refusal, because the block `run` is about to write is not written yet. That is
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
-  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count
+  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
@@ -1198,7 +1249,14 @@ do_check() {
   if [ -f "$CONT" ] && ! co_cont_has_deferrals; then
     say "continuation: $CONT_REL already written — run appends the ## Deferrals section"
   elif [ -f "$CONT" ]; then
-    say "continuation: $CONT_REL already written — left as it stands"
+    CO_CARRIED="$(co_carried)" \
+      || _co_refuse "could not read the deferrals this run inherited (card.sh inherited)"
+    missing="$(co_cont_missing)"
+    if [ -n "$missing" ]; then
+      say "continuation: $CONT_REL already written — run adds $(co_added_phrase "$missing") under ## Deferrals: $(co_added_ids "$missing")"
+    else
+      say "continuation: $CONT_REL already written — left as it stands"
+    fi
   else
     say "continuation: $CONT_REL would be written from the close-out template"
   fi
