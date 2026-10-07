@@ -3325,9 +3325,14 @@ egd_derive_ms() {  # <scripts dir> -> ms one `proof_readings_derived` takes over
   bash -c '. "$1/lib/roots.sh" 2>/dev/null; . "$1/lib/proof.sh" && proof_readings_derived "$2" "$3"' _ "$1" "$EGD_TPLAN" "$R_EG6" >"$SANDBOX/egd-derived.out" 2>/dev/null
   t1="$(egd_ms)"; printf '%s' "$((t1 - t0))"
 }
+# THE BOUND IS 1200 ms (wave-28 T8; A-orch-243): a wall-clock bound in a suite that is not solo (the `# runner: solo`
+# marker holds a whole SUITE out of the parallel batch, never one row) measured the library at 605 to 742 ms at load ~6
+# on an 8-core machine, against the 1000 ms first set; 1200 ms clears that and the per-reading mutant (1377 ms) still
+# fails it. A red here is a timing row: it is re-run once alone before it counts.
+EGD_BOUND_MS=1200
 EGD_DMS="$(egd_derive_ms "$EGD_SCRIPTS")"  # the quickest of three: a spike of load on a shared machine is not the library's
 for _egd_i in 2 3; do EGD_D2="$(egd_derive_ms "$EGD_SCRIPTS")"; [ "$EGD_D2" -ge "$EGD_DMS" ] || EGD_DMS="$EGD_D2"; done
-expect_eq "EGD-8 §EG-DERIVE (T72) one pass: $EGD_N check lines over a $(wc -l < "$EGD_TPLAN" | tr -d ' ')-line plan are derived in under 1000 ms (took $EGD_DMS ms; 13 s before)" "ok" "$(egd_within "$EGD_DMS" 1000)"
+expect_eq "EGD-8 §EG-DERIVE (T72) one pass: $EGD_N check lines over a $(wc -l < "$EGD_TPLAN" | tr -d ' ')-line plan are derived in under $EGD_BOUND_MS ms (took $EGD_DMS ms; 13 s before)" "ok" "$(egd_within "$EGD_DMS" "$EGD_BOUND_MS")"
 expect_eq "EGD-8b …and the lines are there to be read (the extractor returns real output): $EGD_N written fail, derived pass" "$EGD_N" \
   "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
 
@@ -3391,7 +3396,7 @@ expect_eq "EGD-mut2 the per-reading copy of the library parses" "0" "$(bash -n "
 EGD_MDMS="$(egd_derive_ms "$EGD_MP")"
 expect_eq "EGD-mut3 the per-reading copy derives the same lines (the extractor returns real output)…" "$EGD_N" \
   "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
-expect_eq "EGD-mut4 …but not in under 1000 ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" 1000 | cut -c1-4)"
+expect_eq "EGD-mut4 …but not in under $EGD_BOUND_MS ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" "$EGD_BOUND_MS" | cut -c1-4)"
 # (3) nothing binds, yet the collector hands the lines over: the no-binding-line exit removed
 EGD_NB='if (!nbind) exit'
 anchor "$EGD_SCRIPTS/lib/proof.sh" "$EGD_NB" 1
