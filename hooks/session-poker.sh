@@ -7011,15 +7011,17 @@ $PF_PLANL"
   # record a `proved:` line names as its evidence — is moved across the line, to defer or to fix, only
   # on words lib/said.sh `user_said` finds in a prompt the user typed in this session's transcript (a
   # tool's result, a teammate's or another session's message, a hook's context and the orchestrator's
-  # own text never count; rc 2, no transcript, refuses too). An S1, at the rating every read gives it
+  # own text never count; rc 2, no transcript, refuses too; the words stand as WHOLE WORDS and are at
+  # least three of them unless they are a whole typed prompt, rc 3 refusing the short ones, T66). An S1, at the rating every read gives it
   # (lib/proof.sh `proof_finding_rating`), is never deferred. The move is written in place after the
   # finding's last line, through the plan transaction:
   #
   #   moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" why="<why>"
   #
-  # the words and why folded to one line and escaped as a deferral's sentence is (`deferral_fold`,
-  # `deferral_escape`); a move to defer first writes the finding's `deferred:` line when the plan holds
-  # none (placed by `proof_add_line`). Every read then takes the priority the last move gave it.
+  # the words folded to one line by lib/said.sh's own fold (`said_fold`, the rule the check is made
+  # through; the verb passes the raw words to `user_said`), the why by `deferral_fold`, both escaped as a
+  # deferral's sentence is (`deferral_escape`); a move to defer first writes the finding's `deferred:`
+  # line when the plan holds none (placed by `proof_add_line`). Every read then takes the priority the last move gave it.
   # Main thread only, by the existing arm's list (lib/walls.sh `_wall_poker_contract_verb`).
   finding-move)
     if ! { declare -F proof_finding_rating >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -7034,7 +7036,7 @@ $PF_PLANL"
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
-    FM_WORDS="$(deferral_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"
+    FM_WORDS="$(said_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"
     plan_verb_open finding-move
     FM_REC="${FM_ID%#*}"; FM_N="${FM_ID##*#}"
     if ! awk -v ev="$FM_REC" '
@@ -7070,9 +7072,13 @@ FM_FINDING
       die "REFUSED — no git user.name is set for $PV_REPO, and a move records who made it; set it, then move again. The plan is unchanged."
       exit 1
     fi
-    user_said "$FM_WORDS"; FM_SAID=$?
+    user_said "$FM_RAW"; FM_SAID=$?
     if [ "$FM_SAID" -eq 2 ]; then
       die "REFUSED — this session's transcript cannot be found or read (session ${CLAUDE_CODE_SESSION_ID:-none} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged."
+      exit 1
+    fi
+    if [ "$FM_SAID" -eq 3 ]; then
+      die "REFUSED — the words \"$(clean "$FM_WORDS")\" are too short to be the user's decision; quote at least three of their words, or their whole prompt. The plan is unchanged."
       exit 1
     fi
     if [ "$FM_SAID" -ne 0 ]; then
