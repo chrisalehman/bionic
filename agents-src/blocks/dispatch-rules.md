@@ -1,4 +1,4 @@
-- **Spell each suite literally**: one `bash tests/<name>.test.sh` per suite, one call each.
+- **Run a suite only through the door**: `tests/run.sh --only <name>.test.sh`, one call each.
 - **Never end your turn with a command or an external run (CI, a background task) in flight**:
   watch it in the foreground.
 - **A multi-step script goes in a file in your workspace**, run as `bash <file>`, never inline
