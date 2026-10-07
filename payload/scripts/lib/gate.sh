@@ -702,8 +702,9 @@ gate_room() {
 # It is handed no argument list (T71: a glob of 18,000 request files failed the exec, and a file
 # pruned between the glob and the read ended awk at exit 2): the paths go to its standard input
 # and it opens them itself, one at a time with `getline` and `close`; a file that is gone is
-# skipped, not fatal. It is a pre-filter only: it hands back the paths whose file has no ended= line, and the
-# rule itself, `_gate_open`, is then read on each of those. A single process gives one answer
+# skipped, not fatal. It is a pre-filter only: it hands back the paths whose file names a who and
+# has no ended= line (a file with no who names nobody), and the rule itself, `_gate_open`, is then
+# read on each of those. A single process gives one answer
 # with nothing to fold, which `find -print0 | xargs -0 awk`, cut into several awks, would not.
 gate_asked() {
   local names cands f nm open='
@@ -713,9 +714,9 @@ gate_asked() {
   set -- "$_GD"/requests/[0-9]*
   [ -e "$1" ] || return 1
   cands="$(printf '%s\n' "$@" | awk '
-    { f = $0; r = (getline l < f); if (r < 0) next; ended = 0
-      while (r > 0) { if (l ~ /^ended=/) ended = 1; r = (getline l < f) }
-      close(f); if (!ended) print f }' 2>/dev/null)"
+    { f = $0; r = (getline l < f); if (r < 0) next; ended = 0; who = 0
+      while (r > 0) { if (l ~ /^ended=/) ended = 1; else if (l ~ /^who=/) who = 1; r = (getline l < f) }
+      close(f); if (who && !ended) print f }' 2>/dev/null)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     _gate_read "$f" 2>/dev/null || continue

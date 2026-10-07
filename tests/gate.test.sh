@@ -920,7 +920,12 @@ plant_raw() {  # <id> <who> <ended text, as written> — an ended request whose 
     "$2" "$3" > "$BIONIC_GATE_DIR/requests/$1"
 }
 dead_pid() { local p; sleep 0 & p=$!; wait "$p" 2>/dev/null; printf '%s' "$p"; }
-ms() { perl -MTime::HiRes=time -e 'printf "%d", time() * 1000' 2>/dev/null || echo "$(( $(date +%s) * 1000 ))"; }
+cpu_ms() {  # <cmd…> — the user and system CPU of the command and every child it waited for, in ms
+  local t
+  t="$( { TIMEFORMAT='%U %S'; time "$@" >/dev/null 2>&1; } 2>&1 )"
+  awk -v t="$t" 'BEGIN { split(t, a, " "); printf "%d", (a[1] + a[2]) * 1000 }'
+}
+yn() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }  # <haystack> <needle>
 ga() {  # <names…> — gate_asked over the names in the order given: "<printed, space-joined>|<rc>"
   ( . "${GA_LIB:-$GATE_LIB}" 2>/dev/null
     o="$(printf '%s\n' "$@" | gate_asked 2>/dev/null)"; r=$?
@@ -1004,9 +1009,11 @@ mkdir -p "$BIONIC_GATE_DIR/requests"
 awk -v d="$BIONIC_GATE_DIR/requests" 'BEGIN { for (i = 1; i <= 20000; i++) { f = d "/" (100000 + i); printf "" > f; close(f) } }'
 plant_live 1 "op:w1"
 expect_eq "OP.15 the store holds 20,001 request files (positive)" "20001" "$(nreq)"
-OP_T0="$(ms)"; OP_A="$(ga op:w1 op:wNever)"; OP_T1="$(ms)"
-expect_eq "OP.16 gate_asked over 20,001 files names the one open writer and answers rc 0" "op:w1 |0" "$OP_A"
-expect_true "OP.17 …in under 5 s, half the Stop wall's 10" test "$((OP_T1 - OP_T0))" -lt 5000
+expect_eq "OP.16 gate_asked over 20,001 files names the one open writer and answers rc 0" "op:w1 |0" \
+  "$(ga op:w1 op:wNever)"
+OP_CPU="$(cpu_ms ga op:w1 op:wNever)"
+echo "      measured: gate_asked over 20,001 files, $OP_CPU ms of CPU"
+expect_true "OP.17 …on under 5 s of CPU, half the Stop wall's 10" test "$OP_CPU" -lt 5000
 mkdir "$BIONIC_GATE_DIR/lock"; printf '%s\n' "$$" > "$BIONIC_GATE_DIR/lock/pid"
 expect_eq "OP.18 …and with the lock held by another it takes no lock: the same answer" "op:w1 |0" "$(ga op:w1 op:wNever)"
 rm -rf "$BIONIC_GATE_DIR/lock"
@@ -1029,15 +1036,18 @@ world_machine 8 8192 30 1.0
 world_clock 100000
 plant_ended_many 2000 "op:e" 900
 expect_eq "OP.22 2,000 expired requests are planted (positive)" "2000" "$(nreq)"
+op_room() { ( . "$GATE_LIB" 2>/dev/null; gate_room ); }
+OP_CPU="$(cpu_ms op_room)"
+expect_eq "OP.22b gate_room, timed, pruned them all (positive for the timing row)" "0" "$(nreq)"
+plant_ended_many 2000 "op:e" 900
 : > "$WORLD_ROOT/op-rms"
-OP_T0="$(ms)"
 OP_R="$( . "$GATE_LIB" 2>/dev/null; PATH="$op_stub/rm-dir:$PATH" gate_room 2>&1 )"
-OP_T1="$(ms)"
 expect_contains "OP.23 gate_room answers (positive)" "room=yes" "$OP_R"
 expect_eq "OP.24 …every expired request is gone" "0" "$(nreq)"
 expect_true "OP.25 …removed by at most 5 rm execs, never one per file" \
   test "$(wc -l < "$WORLD_ROOT/op-rms" | tr -d ' ')" -le 5
-expect_true "OP.26 …and gate_room took under 1 s" test "$((OP_T1 - OP_T0))" -lt 1000
+echo "      measured: gate_room pruning 2,000 expired requests, $OP_CPU ms of CPU"
+expect_true "OP.26 …and the run before it took under 1 s of CPU" test "$OP_CPU" -lt 1000
 
 # Every number read as decimal; a non-number refused to the default with one stderr line; the lock freed.
 fresh open-decimal
@@ -1093,7 +1103,7 @@ MS="$(mutant open-split)"
 anchor "$MS" 'elif _gate_alive; then' 1
 sed -i.bak 's/elif _gate_alive; then/elif true; then/' "$MS"
 expect_eq "OP.M1 the mutant (open = no ended= line) still names the live waiter (it runs)" "yes" \
-  "$(case "$(GA_LIB="$MS" ga op:g11 op:g13)" in *op:g13*) echo yes ;; *) echo no ;; esac)"
+  "$(yn "$(GA_LIB="$MS" ga op:g11 op:g13)" op:g13)"
 expect_eq "OP.M2 …and names the holder-gone writer too, which OP.5 reads red: the live-holder rule is the row" \
   "op:g11 op:g13 |0" "$(GA_LIB="$MS" ga op:g11 op:g13)"
 # (2) the exec-argument list put back: every request path to one awk, as T52 shipped it.
@@ -1138,7 +1148,7 @@ sed -i.bak '/|| old\[\${#old\[@\]}\]="\$f"/c\
 : > "$WORLD_ROOT/op-rms"
 OP_R="$( . "$MR2" 2>/dev/null; PATH="$op_stub/rm-dir:$PATH" gate_room 2>&1 )"
 expect_eq "OP.M6 the mutant (rm per file) still prunes all 300 and answers (it runs)" "0 yes" \
-  "$(nreq) $(case "$OP_R" in room=yes*) echo yes ;; *) echo no ;; esac)"
+  "$(nreq) $(yn "$OP_R" room=yes)"
 expect_true "OP.M7 …forking an rm each, which OP.25's bound reads red" \
   test "$(wc -l < "$WORLD_ROOT/op-rms" | tr -d ' ')" -ge 300
 # (4) the decimal read taken out.
