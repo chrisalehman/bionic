@@ -969,7 +969,7 @@ expect_eq "7.48j …and the pin is built there" "present" "$(there "$T57_LX/lx-m
 T59_ME="$(id -un)"
 T59_MUT_BASE="$TMPROOT/t59-mut-base.sh"
 anchor "$SEAM" '[ -n "$name" ] || continue' 1
-grep -vF '[ -n "$name" ] || continue' "$SEAM" > "$T59_MUT_BASE"
+sed 's/\[ -n "\$name" \] || continue.*/case "$line" in user::*|mask::*) continue ;; esac/' "$SEAM" > "$T59_MUT_BASE"  # the reader as T57 shipped it
 t59_lx() {  # t59_lx <seam> <name> <mode> <getfacl text> [<root>] — a directory of this row's own, the stub's answer for it, pin_call under it
   local d="$T87_DIR/t59-lx-$2"
   mkdir -p "$d"; chmod "$3" "$d"
@@ -1026,7 +1026,7 @@ printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-anc"
 t59_own "$SEAM" "$T59_SUB/r2"
 expect_ne "7.52b an ancestor owned by another user, closed by mode: refused" "0" "$PIN_RC"
 expect_contains "7.52c …naming the directory and its owner" "$T59_ANC $T59_WHY_OWN" "$PIN_ERR"
-expect_eq "7.52d …PATH is as given" "$PIN_GIVEN" "$PIN_PATH"
+expect_eq "7.52d …PATH is as given" "$T59_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
 expect_eq "7.52e …and nothing is built there" "absent" "$(there "$T59_SUB/r2")"
 STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T59_SUB"; unset STOP_PATH
 expect_eq "7.52f the hand run exits 2" "2" "$STOP_RC"
