@@ -14616,4 +14616,91 @@ rm -rf "$RD_MUT"
 
 POKE_BOUND="$RI_BOUND_WAS"
 
+section "§PASS-MOVED: a moved: line binds a record's pass as a check: or deferred: line does — one predicate for the lines that bind it, so proof-add refuses a second registration over a move (wave-28 T72; REQ-8 AC-8.6, AC-8.9; D33, D34; A-T60.5, A-orch-213)"
+# ============================================================
+#
+# `proof_pass_conflict` (the registering verb's guard) read `check:`/`deferred:` lines as the ones that bind
+# a record's pass, and `_proof_reading_result` (the judge's re-derivation) read `check:`/`moved:`: a record
+# path with only a `moved:` line was admitted for a second pass at the same head, and the new pass's
+# finding #n inherited the move (A-T60.5; probed: an S4 typo read as fix). The two callers now ask ONE
+# predicate (lib/proof.sh `proof_bind_awk`), which names all three. A move is the user's word about one
+# finding of one pass, keyed `<record>#<n>` as a check is, and it changes the priority a later reader of
+# that path judges (T42's seam), so it binds. FIXTURE FIDELITY: §PASS-KEY's repository, plan, roster and
+# verb; the move is a line planted in the producing verb's shape (the transcript the verb itself needs is
+# §MOVE's).
+PM_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=pm-crit agent_id=a-pm-crit subagent_type=bionic:critic \
+     files="$(sev_files "pm-a pm-b")")" >> "$SEV_RS"
+sev_cur 4
+pm_add() { poke "$RSEV" proof-add review "record/wave-01-fixture/$1.md" --question adversarial --reader pm-crit; }
+pm_n() { /usr/bin/grep -c "^proved: .* evidence=record/wave-01-fixture/$1.md " "$PSEV"; }
+pm_line() {  # <line> -> the plan with the line placed where the verb places a finding's line
+  bash -c '. "$1"; proof_add_line "$2" "$3"' _ "$SEV_LIB" "$PSEV" "$1" > "$PSEV.new" && mv "$PSEV.new" "$PSEV"
+}
+PM_H="$(git -C "$SEV_WT" rev-parse HEAD)"
+
+# ---------- the probe: a moved: line alone, then the same record again at the same head ----------
+pk_rec pm-a "$PM_H" flag "findings: 1" "finding: 1 S4 off b.sh:3 - a typo in a comment"
+pm_add pm-a
+expect_eq "PASSM-1 precondition: the note registers (exit 0, one proof line) and no check:, deferred: or moved: line names it" "0|1|0" \
+  "$RC|$(pm_n pm-a)|$(/usr/bin/grep -c -E "^(check|deferred|moved): record/wave-01-fixture/pm-a.md#" "$PSEV")"
+pm_line "moved: $(chk_id pm-a) to=fix by=Dana Fixture at=2026-10-07T12:00:00Z words=\"fix that one\" why=\"the user ruled it\""
+expect_eq "PASSM-2 precondition: the plan holds the move and the judge derives fail for the reading its proof line writes as flag" "1|fail" \
+  "$(/usr/bin/grep -c "^moved: $(chk_id pm-a) " "$PSEV")|$(pk_derived "$SEV_LIB" pm-a flag)"
+s42_snap "$RSEV" "$PSEV"
+pm_add pm-a
+s42_unchanged "PASSM-3 §PASS-MOVED the same record at the same head, a moved: line alone already naming it" 1 "$PSEV"
+expect_nonempty "PASSM-3a the refusal line is there to read (the extractor returns real output)" "$(pk_ref)"
+expect_contains "PASSM-3b …naming the path" "record/wave-01-fixture/pm-a.md" "$(pk_ref)"
+expect_contains "PASSM-3c …the head" "${PM_H:0:12}" "$(pk_ref)"
+expect_contains "PASSM-3d …the lines that hold the pass, the move among them" "already has a check:, deferred: or moved: line" "$(pk_ref)"
+expect_contains "PASSM-3e …and the fix" "write the pass to a new record path" "$(pk_ref)"
+expect_eq "PASSM-3f …in one line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c .)"
+expect_eq "PASSM-3g …and still one proof line for the path" "1" "$(pm_n pm-a)"
+# a move on another record's finding does not bind this path: its relaunch is admitted as before
+pk_rec pm-b "$PM_H" pass "findings: 0"
+pm_add pm-b
+pm_add pm-b
+expect_eq "PASSM-4 a moved: line naming pm-a does not bind pm-b: its relaunch registers again (exit 0, two proof lines)" "0|2" "$RC|$(pm_n pm-b)"
+
+# ---------- one predicate: the guard and the judge's re-derivation agree on every kind of line ----------
+PM_R=record/wave-01-fixture/pm-c.md
+pk_rec pm-c "$PM_H" pass "findings: 1" "finding: 1 S1 on x.sh:9 - data lost on a second run" "shown: 1 bash x.sh"
+pm_agree() {  # <plan line> -> `<what proof_pass_conflict says>|<the result _proof_reading_result derives for a reading written pass>`
+  printf '## SDLC State\n\ncurrent: 4\nproved: kind=review head=%s at=2026-10-07T00:00:00Z evidence=%s question=adversarial reader=r result=pass scope=piece\n%s\n\n## Tasks\n' \
+    "$PM_H" "$PM_R" "$1" > "$TMPROOT/pm-agree.md"
+  bash -c '. "$1"; c="$(proof_pass_conflict "$2" "$3" "$4")"; printf "%s|%s" "${c%% *}" "$(_proof_reading_result "$2" "$5" "$3" pass)"' \
+    _ "$SEV_LIB" "$TMPROOT/pm-agree.md" "$PM_R" "$PM_H" "$RSEV/.bionic/docs" 2>/dev/null
+}
+expect_eq "PASSM-5 no line binds the pass: no conflict, and the written result stands" "|pass" "$(pm_agree "")"
+expect_eq "PASSM-5a a check: line binds it: a conflict, and the finding is read at its rating (S1 on fix: fail)" "settled|fail" \
+  "$(pm_agree "check: $PM_R#1 S1 on \"data lost\"")"
+expect_eq "PASSM-5b a deferred: line binds it for the judge as it does for the guard (T72: the judge read check:/moved: only)" "settled|fail" \
+  "$(pm_agree "deferred: $PM_R#1 S1 on \"data lost\"")"
+expect_eq "PASSM-5c a moved: line binds it for the guard as it does for the judge (T72: the guard read check:/deferred: only)" "settled|fail" \
+  "$(pm_agree "moved: $PM_R#1 to=fix by=Dana Fixture at=2026-10-07T12:00:00Z words=\"fix it\" why=\"ruled\"")"
+expect_eq "PASSM-5d a check: line of another record binds neither" "|pass" "$(pm_agree "check: record/wave-01-fixture/other.md#1 S1 on \"x\"")"
+expect_eq "PASSM-5e a check: line inside a fence binds neither" "|pass" "$(pm_agree '```
+check: '"$PM_R"'#1 S1 on "x"
+```')"
+
+# ---------- the mutation arm: moved: left out of the predicate ----------
+PM_NEEDLE='/^(check|deferred|moved):[ \t]/'
+anchor "$SEV_LIB" "$PM_NEEDLE" 1
+PM_MUT="$TMPROOT/poker-moved-mut"; rm -rf "$PM_MUT"; mkdir -p "$PM_MUT/hooks"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PM_MUT/scripts-lib" && mkdir -p "$PM_MUT/scripts" && mv "$PM_MUT/scripts-lib" "$PM_MUT/scripts/lib"
+for _pm_f in "$(dirname "$POKER")"/*; do [ "${_pm_f##*/}" = session-poker.sh ] || ln -s "$_pm_f" "$PM_MUT/hooks/${_pm_f##*/}"; done
+cp "$POKER" "$PM_MUT/hooks/session-poker.sh"
+PM_N="$PM_NEEDLE" PM_R='/^(check|deferred):[ \t]/' awk 'BEGIN { n = ENVIRON["PM_N"]; r = ENVIRON["PM_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$SEV_LIB" > "$PM_MUT/scripts/lib/proof.sh"
+expect_eq "PASSM-mut0 the moved:-left-out copy of the library differs from it in one line" "1" \
+  "$(diff "$SEV_LIB" "$PM_MUT/scripts/lib/proof.sh" | /usr/bin/grep -c '^>')"
+PM_POKER="$POKER"; cp "$PSEV" "$TMPROOT/pm-plan-keep"
+POKER="$PM_MUT/hooks/session-poker.sh"; pm_add pm-a
+POKER="$PM_POKER"
+expect_eq "PASSM-mut1 the mutant runs and registers the second pass over the move (exit 0, two proof lines): PASSM-3 goes red" "0|2" "$RC|$(pm_n pm-a)"
+cp "$TMPROOT/pm-plan-keep" "$PSEV"
+POKE_BOUND="$PM_BOUND_WAS"
+
 finish
