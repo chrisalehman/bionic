@@ -3028,7 +3028,7 @@ expect_status "DOOR.25 a root with the door, a cd into a tree that has none: pas
 expect_regex "DOOR.25b …wrapped, stamping the tree it ran in" "--stamp-dir [^ ]*/nodoor .*--suites alpha\\.test\\.sh -- " "$(updated_command_of)"
 # A cwd inside the project is still the project: the runner is looked for at the checkout's top.
 mkdir -p "$R_DR/sub"
-for _dr in 'bash ../tests/alpha.test.sh' 'bash "$PWD/../tests/alpha.test.sh"'; do
+for _dr in "bash $R_DR/tests/alpha.test.sh" 'bash "$PWD/../tests/alpha.test.sh"'; do
   run_hook "$(mk_payload "$R_DR/sub" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
   expect_status "DOOR.25c [$_dr] standing in a subdirectory of the project with the door: refused" 2 "$ST"
   expect_contains "DOOR.25d …by the door's line" "use tests/run.sh --only " "$(dr_line)"
