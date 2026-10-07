@@ -1125,11 +1125,11 @@ rm -f "$T59_STAT_DIR/t59-lnk.nf" "$T59_STAT_DIR/t59-anc" "$T61_FS"
 T61_MISS="$T59_OWN/t61-no-such-tmp"
 stop_run "$STOP_SUITE" "$T61_MISS"
 expect_eq "7.60 a TMPDIR that does not exist: the hand run exits 2" "2" "$STOP_RC"
-expect_contains "7.60b …naming the root as not a directory, with the path remedy" \
-  "$(t57_line "$T61_MISS" "$T61_MISS/bionic-interpreter-pin.$STOP_UID is not a directory" "$T57_FIX")" "$STOP_ERR"
+expect_contains "7.60b …naming the missing parent as not a directory (T63: refused where the walk meets it), with the path remedy" \
+  "$(t57_line "$T61_MISS" "$T61_MISS is not a directory" "$T57_FIX")" "$STOP_ERR"
 expect_absent "7.60c …and not naming an owner nobody could read" "uid unknown" "$STOP_ERR"
 pin_call "$SEAM" "$T61_MISS/bionic-interpreter-pin.$STOP_UID"
-expect_contains "7.60d the function's own line says the same" "is not a directory, so nothing is pinned" "$PIN_ERR"
+expect_contains "7.60d the function's own line says the same" "$T61_MISS is not a directory, so nothing is pinned" "$PIN_ERR"
 # a root another user planted at the predictable name cannot be removed from a sticky /tmp: the path remedy
 T61_STK="$T87_DIR/t61-sticky"; mkdir -p "$T61_STK"; chmod 1777 "$T61_STK"
 T61_PLANT="$T61_STK/bionic-interpreter-pin.$STOP_UID"; mkdir -m 0700 "$T61_PLANT"
@@ -1155,6 +1155,87 @@ expect_contains "7.62d …naming 65534 as an owner who is neither this user nor 
 t59_own "$SEAM" "$T59_SUB/n8"
 expect_eq "7.62e control: the shipped function builds that same shape" "0" "$PIN_RC"
 rm -f "$T61_FS" "$T59_STAT_DIR/t59-anc"
+# A MISSING PARENT IS REFUSED, NEVER "NOT OPEN" (wave-28 T63; AC-10.6; pass 38). T61 let a path that does not
+# exist read "not open", so a parent that was absent when the walk judged it passed, and another user made it
+# before the mkdir: it was never judged again and owned the pin. A path that does not exist is refused where
+# the walk meets it, as `<path> is not a directory`. The race is built the reader's way: the walk's own
+# function is wrapped so that the parent appears (mode 0777) right after the walk has judged it.
+T63_DIR="$T87_DIR/t63"; mkdir -p "$T63_DIR"; chmod 0755 "$T63_DIR"
+# t63_race <seam> <parent> — pin <parent>'s child root; <parent> is made 0777 right after the walk, before the mkdir
+t63_race() {
+  local out
+  out="$(PATH="$PIN_GIVEN" /bin/bash -c '. "$1" >/dev/null 2>&1 || exit 9
+    racer="$2"
+    eval "t63_orig_$(declare -f _bionic_pin_parent)"
+    _bionic_pin_parent() { local r; r="$(t63_orig__bionic_pin_parent "$@")"; mkdir -m 0777 "$racer" 2>/dev/null; chmod 0777 "$racer"; printf "%s" "$r"; }
+    bionic_interpreter_pin "$racer/bionic-interpreter-pin.$UID" 2>"$3"; echo "rc=$?"' \
+    t63-race "$1" "$2" "$TMPROOT/pin.err" 2>/dev/null)"
+  PIN_RC="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  PIN_ERR="$(cat "$TMPROOT/pin.err" 2>/dev/null)"
+}
+# t63_fn <seam> <function> [args] — one helper run alone, with the stat stub first on PATH: prints its output, then rc=<n>
+t63_fn() {
+  local seam="$1"; shift
+  PATH="$T59_STUB:$HAND_GIVEN_PATH" /bin/bash -c '. "$1" >/dev/null 2>&1 || exit 9; shift; "$@"; echo "rc=$?"' t63-fn "$seam" "$@" 2>/dev/null
+}
+T63_RACER="$T63_DIR/racer"
+t63_race "$SEAM" "$T63_RACER"
+expect_ne "7.63 a parent absent when the walk judged it and made 0777 before the mkdir: refused" "0" "$PIN_RC"
+expect_contains "7.63b …naming the parent as not a directory" "$T63_RACER is not a directory" "$PIN_ERR"
+expect_eq "7.63c …the racer's directory is there (the harness ran the race)" "present" "$(there "$T63_RACER")"
+expect_eq "7.63d …and nothing is built in it" "absent" "$(there "$T63_RACER/bionic-interpreter-pin.$STOP_UID")"
+mkdir -m 0700 "$T63_DIR/closed"
+pin_call "$SEAM" "$T63_DIR/closed/bionic-interpreter-pin.$STOP_UID"
+expect_eq "7.63e a parent present and closed: built" "0" "$PIN_RC"
+expect_eq "7.63f …and is there" "present" "$(there "$T63_DIR/closed/bionic-interpreter-pin.$STOP_UID/pin/bash")"
+pin_call "$SEAM" "$T63_DIR/gone/deeper/root"
+expect_ne "7.64 an ancestor of the parent that does not exist: refused" "0" "$PIN_RC"
+expect_contains "7.64b …naming the first path that is missing as not a directory" "$T63_DIR/gone is not a directory" "$PIN_ERR"
+expect_eq "7.64c …and nothing is made there" "absent" "$(there "$T63_DIR/gone")"
+ln -s "$T63_DIR/nowhere" "$T63_DIR/dangling"
+pin_call "$SEAM" "$T63_DIR/dangling/root"
+expect_ne "7.64d a parent that is a link to nowhere: refused" "0" "$PIN_RC"
+expect_contains "7.64e …naming the link as not a directory" "$T63_DIR/dangling is not a directory" "$PIN_ERR"
+expect_eq "7.64f …and nothing is made through it" "absent" "$(there "$T63_DIR/nowhere")"
+# the trust rule is one predicate: this user, root, and the owner of `/`; the owner reader prints the raw uid
+rm -f "$T61_FS"
+expect_eq "7.65 _bionic_pin_trusted, alone: this user" "rc=0" "$(t63_fn "$SEAM" _bionic_pin_trusted "$STOP_UID")"
+expect_eq "7.65b …root" "rc=0" "$(t63_fn "$SEAM" _bionic_pin_trusted 0)"
+expect_eq "7.65c …a mapped other uid is not" "rc=1" "$(t63_fn "$SEAM" _bionic_pin_trusted "$T59_OTHER")"
+expect_eq "7.65d …an owner that could not be read is not" "rc=1" "$(t63_fn "$SEAM" _bionic_pin_trusted "")"
+expect_eq "7.65e …65534 is not, where / is root's" "rc=1" "$(t63_fn "$SEAM" _bionic_pin_trusted "$T61_NS")"
+printf '%s\n' "$T61_NS" > "$T61_FS"
+expect_eq "7.65f …the owner of / is, called alone (no entry point has set anything)" "rc=0" "$(t63_fn "$SEAM" _bionic_pin_trusted "$T61_NS")"
+expect_eq "7.65g …a mapped other uid is still not, where / reads 65534" "rc=1" "$(t63_fn "$SEAM" _bionic_pin_trusted "$T59_OTHER")"
+printf '%s\n' "$T61_NS" > "$T59_STAT_DIR/t59-anc"
+expect_eq "7.65h the owner reader prints the raw uid, the namespace's included" "$(printf '%s\nrc=0' "$T61_NS")" "$(t63_fn "$SEAM" _bionic_pin_owner "$T59_ANC")"
+rm -f "$T61_FS" "$T59_STAT_DIR/t59-anc"
+# the remedy chooser reads the raw owner: `remove` is offered for a root this user owns, even where / reads as this user
+T63_CH="$T63_DIR/chooser"; mkdir -m 0700 "$T63_CH"
+T63_CH_ROOT="$T63_CH/bionic-interpreter-pin.$STOP_UID"; mkdir -m 0777 "$T63_CH_ROOT"; chmod 0777 "$T63_CH_ROOT"
+T63_CH_LINE="$(t57_line "$T63_CH" "$T63_CH_ROOT is writable by group or others" "remove $T63_CH_ROOT or set TMPDIR")"
+stop_run "$STOP_SUITE" "$T63_CH"
+expect_eq "7.66 a root of this user's, open by mode: the hand run exits 2" "2" "$STOP_RC"
+expect_contains "7.66b …and offers to remove it" "$T63_CH_LINE" "$STOP_ERR"
+printf '%s\n' "$STOP_UID" > "$T61_FS"
+STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T63_CH"; unset STOP_PATH
+expect_eq "7.66c the same where / reads as this user: the hand run exits 2" "2" "$STOP_RC"
+expect_contains "7.66d …and still offers to remove it (the owner it reads is the raw one)" "$T63_CH_LINE" "$STOP_ERR"
+rm -f "$T61_FS"
+# the mutant: the missing-path refusal removed, T61's "not open" back. The race builds (the defect 7.63 guards).
+T63_MUT="$TMPROOT/t63-mut-missing.sh"
+anchor "$SEAM" '[ -e "$1" ] || { _BIONIC_PIN_OPEN="is not a directory"; return 0; }' 1
+T63_LINE='[ -e "$1" ] || { _BIONIC_PIN_OPEN="is not a directory"; return 0; }' \
+  awk 'index($0, ENVIRON["T63_LINE"]) { print "  [ -e \"$1\" ] || return 1"; next } { print }' "$SEAM" > "$T63_MUT"
+expect_eq "7.67 the missing-path mutant parses" "0" "$(bash -n "$T63_MUT" >/dev/null 2>&1; echo $?)"
+pin_call "$T63_MUT" "$T63_DIR/closed/mut-root"
+expect_eq "7.67b …and builds where the parent is present (not vacuous)" "0" "$PIN_RC"
+T63_RACER2="$T63_DIR/racer2"
+t63_race "$T63_MUT" "$T63_RACER2"
+expect_eq "7.67c under the mutant the race builds the pin (the defect 7.63 guards)" "0" "$PIN_RC"
+expect_eq "7.67d …and it is there, in a directory made after the walk" "present" "$(there "$T63_RACER2/bionic-interpreter-pin.$STOP_UID/pin/bash")"
+t63_race "$SEAM" "$T63_DIR/racer3"
+expect_ne "7.67e control: the shipped function refuses the same race" "0" "$PIN_RC"
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
   T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
