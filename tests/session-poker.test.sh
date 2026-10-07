@@ -14517,15 +14517,19 @@ rp_report --rows
 expect_eq "RI-N a row with a ready and verdicts but no candidate counts both its verdicts (there is no commit of its own to include by)" \
   "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
 
-# ---------- ruling (3): killed is decided once, through the gate's rule (rc 137 only) ----------
+# ---------- ruling (3): killed is decided once, through the gate's rule, and an exit over 128 is a kill (D18) ----------
+# (A-orch-233, T72: "137 only" of A-orch-179/198 is withdrawn; the spec's figure is "admitted, no end, holder gone,
+# or an exit over 128", and the gate's own callers write 128+signal)
 rp_world ri-kill
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:10:00
 rp_req 1 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=137
 rp_req 2 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=143
-rp_req 3 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=0
+rp_req 3 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=130
+rp_req 4 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=128
+rp_req 5 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=0
 rp_report
-expect_eq "RI-K three admitted requests ended with rc 137, 143 and 0: killed=1 (the gate's rule, 137 only; a 143 is an ended run)" \
-  "0|killed=1" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
+expect_eq "RI-K five admitted requests ended with rc 137, 143, 130, 128 and 0: killed=3 (an exit over 128 is a kill, 128 itself is an ended run)" \
+  "0|killed=3" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
 
 # ---------- ruling (2): the landings line is above the decision line, which is the tick's last line ----------
 ri_tick() {  # <label> -> a landing planted, then one tick that prints in full, stdout alone in S27_OUT
@@ -14574,11 +14578,11 @@ rd_mutant noclear 's/^      gen\[rk\]++$/      # mutant: the own set is never cl
 rd_mutant excl 's/^      if (ev == "candidate") hasc\[g\] = 1$/      if (ev == "candidate" \&\& kv["base"] != "") headc[rk SUBSEP kv["base"]] = 1/
 s/^      if ((ev == "candidate" || ev == "ready") && kv\["commit"\] != "") ownc\[g SUBSEP kv\["commit"\]\] = 1$/      if ((ev == "candidate" || ev == "ready") \&\& kv["commit"] != "") ownc[rk SUBSEP kv["commit"]] = 1/
 s/^      if ((g in hasc) && .*$/      if ((rk SUBSEP kv["commit"]) in headc \&\& !((rk SUBSEP kv["commit"]) in ownc)) next/'
-rd_mutant kill128 's/^    _R_state=.*$/&; [ "${_R_rc:-0}" -gt 128 ] \&\& _R_state=killed/'
+rd_mutant kill137 's/^      ended) case .*$/      ended) ;;/'
 rd_mutant late 's/^        \[ -z "\$TICK_LANDINGS" \] || say "\$TICK_LANDINGS"$/        :/
 s/^        cat "\$TICK_BUF" 2>\/dev\/null$/        cat "$TICK_BUF" 2>\/dev\/null; [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"/'
 expect_eq "RI-mut0 each doctored poker differs from the real one in the lines its doctor names: 1, 3, 1 and 2 (the four doctors took)" "1|3|1|2" \
-  "$(for _m in noclear excl kill128 late; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
+  "$(for _m in noclear excl kill137 late; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
 RI_REAL_POKER="$POKER"
 # the own set never cleared: P3's second landing counts its first candidate's head run again (RI-P3a reads green=2)
 ri_p3 ri-mut-p3
@@ -14596,15 +14600,16 @@ expect_eq "RI-mut2 the exclusion mutant still runs (exit 0) and reads P1's green
 POKER="$RI_REAL_POKER"; rp_report --rows
 expect_eq "RI-mut2b …control: the real poker over the same record reads green=2 and T2 runs=2" \
   "runs: green=2 red=1 none=0 discarded=0 red-then-green=0|runs=2" "$(rk_runs)|$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ' | grep -o 'runs=[0-9]*')"
-# rc over 128 is killed again: RI-K's 143 counts
+# "137 only" again (the arm for an exit over 128 dropped): RI-K's 143 and 130 do not count
 rp_world ri-mut-kill
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:10:00
 rp_req 1 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=137
 rp_req 2 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=143
-POKER="$RD_MUT/kill128/hooks/session-poker.sh"; rp_report
-expect_eq "RI-mut3 the rc-over-128 mutant still runs and reads killed=2 where RI-K reads the gate's rule" "0|killed=2" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
+rp_req 3 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=130
+POKER="$RD_MUT/kill137/hooks/session-poker.sh"; rp_report
+expect_eq "RI-mut3 the 137-only mutant still runs and reads killed=1 where RI-K reads killed=3 for the same shape" "0|killed=1" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
 POKER="$RI_REAL_POKER"; rp_report
-expect_eq "RI-mut3b …control: the real poker reads killed=1 over the same requests" "killed=1" "$(rp_line | grep -o 'killed=[0-9]*')"
+expect_eq "RI-mut3b …control: the real poker reads killed=3 over the same requests (143 and 130 are kills)" "killed=3" "$(rp_line | grep -o 'killed=[0-9]*')"
 # the landings line after the buffer again: the decision line is no longer last
 POKER="$RD_MUT/late/hooks/session-poker.sh"; ri_tick ri-mut-pos
 expect_eq "RI-mut4 the late mutant still prints both lines and puts the landings line after the decision line: not-above, the tick's last line the landings line" \
