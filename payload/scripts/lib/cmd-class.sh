@@ -1128,7 +1128,18 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         if (over || !hit) continue
         for (x = 1; x <= nx; x++) {
           LAST_TARGET = ""; LAST_KIND = ""; LAST_PATH = ""; VP_I = i
-          if (class_seg(trim(X[x]), 0) != "suite" || LAST_KIND != "file") continue
+          # THE DOOR LOOP (wave-28 T36): a body `tests/run.sh --only "$s.test.sh"` resolves to
+          # one door line per value, in the runner path as typed.
+          if (class_seg(trim(X[x]), 0) == "suite" && LAST_KIND == "only") {
+            no = split(LAST_ONLY, ON, " ")
+            for (oj = 1; oj <= no; oj++) {
+              if (index(ON[oj], "$") || index(ON[oj], "`")) continue
+              t = LAST_PATH " --only " ON[oj]
+              if (!(t in seen)) { seen[t] = 1; print t }
+            }
+            continue
+          }
+          if (LAST_KIND != "file") continue
           if (LAST_PATH == "" || index(LAST_PATH, "$") || index(LAST_PATH, "`")) continue
           t = "bash " LAST_PATH
           if (!(t in seen)) { seen[t] = 1; print t }
