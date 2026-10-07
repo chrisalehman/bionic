@@ -289,29 +289,33 @@ _bionic_pin_entry() {  # _bionic_pin_entry <path> — prints why <path>'s OWN en
   owner="$(_bionic_pin_owner "$1" nofollow)"
   [ "$owner" = "$UID" ] || echo "$1 is owned by uid ${owner:-unknown}, who is not you"
 }
-_bionic_pin_hold() {  # _bionic_pin_hold <path> — makes <path> when nothing is there, then leaves in _BIONIC_PIN_STEP why it cannot hold the pin (empty when it can) and in _BIONIC_PIN_MADE whether this call made it
-  _BIONIC_PIN_STEP=""; _BIONIC_PIN_MADE=""
+_bionic_pin_unmade() {  # _bionic_pin_unmade <path> <root|pin> — the mkdir of <path> failed: leaves the reason in _BIONIC_PIN_STEP and its class in _BIONIC_PIN_CLASS
+  _BIONIC_PIN_STEP="cannot make $1"; _BIONIC_PIN_CLASS="make-$2"
+  [ ! -e "$1" ] && [ ! -L "$1" ] || _BIONIC_PIN_CLASS=race  # something is there now: a run of this user's made it first, and it is in use
+}
+_bionic_pin_hold() {  # _bionic_pin_hold <path> <root|pin> — makes <path> when nothing is there, then leaves in _BIONIC_PIN_STEP why it cannot hold the pin (empty when it can), in _BIONIC_PIN_MADE whether this call made it and in _BIONIC_PIN_CLASS the reason's class: race and make-<root|pin> (_bionic_pin_unmade), entry (the ROOT's own entry is not this user's), else empty
+  _BIONIC_PIN_STEP=""; _BIONIC_PIN_MADE=""; _BIONIC_PIN_CLASS=""
   if [ ! -e "$1" ] && [ ! -L "$1" ]; then
-    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _BIONIC_PIN_STEP="cannot make $1"; return 0; }
+    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _bionic_pin_unmade "$1" "$2"; return 0; }
   fi
   _BIONIC_PIN_STEP="$(_bionic_pin_entry "$1")"
-  [ -z "$_BIONIC_PIN_STEP" ] || return 0
+  [ -z "$_BIONIC_PIN_STEP" ] || { [ "$2" != root ] || _BIONIC_PIN_CLASS=entry; return 0; }
   [ ! -L "$1" ] || { _BIONIC_PIN_STEP="$1 is a symlink"; return 0; }
   _BIONIC_PIN_STEP="$(_bionic_pin_judge "$1")"
 }
 _BIONIC_PIN_WHY=""
-_BIONIC_PIN_HOLDER=""
+_BIONIC_PIN_CLASS=""
 bionic_interpreter_pin() {
   local root="${1:-}" dir phys why="" made_root="" made_dir=""
   local shown="${root//[[:cntrl:]]/?}"  # what a line may print of the root: a control character is never printed raw (T73)
-  _BIONIC_PIN_HOLDER=""
+  _BIONIC_PIN_CLASS=""
   [ -n "$root" ] || why="no root was given"
   [ -n "$why" ] || case "$root" in *[[:cntrl:]]*) why="$shown carries a control character" ;; /*) ;; *) why="$root is not an absolute path" ;; esac
   [ -n "$why" ] || why="$(_bionic_pin_parent "$root")"
-  [ -z "$why" ] || [ -z "$root" ] || _BIONIC_PIN_HOLDER=1
+  [ -z "$why" ] || [ -z "$root" ] || _BIONIC_PIN_CLASS=path
   dir="$root/pin"
-  [ -n "$why" ] || { _bionic_pin_hold "$root"; why="$_BIONIC_PIN_STEP"; made_root="$_BIONIC_PIN_MADE"; }
-  [ -n "$why" ] || { _bionic_pin_hold "$dir"; why="$_BIONIC_PIN_STEP"; made_dir="$_BIONIC_PIN_MADE"; }
+  [ -n "$why" ] || { _bionic_pin_hold "$root" root; why="$_BIONIC_PIN_STEP"; made_root="$_BIONIC_PIN_MADE"; }
+  [ -n "$why" ] || { _bionic_pin_hold "$dir" pin; why="$_BIONIC_PIN_STEP"; made_dir="$_BIONIC_PIN_MADE"; }
   [ -n "$why" ] || [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
   [ -n "$why" ] || [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] \
     || why="$dir/bash is not a link to /bin/bash"
@@ -319,7 +323,7 @@ bionic_interpreter_pin() {
   _BIONIC_PIN_WHY="$why"
   if [ -n "$why" ]; then
     [ -z "$made_dir" ] || rmdir "$dir" 2>/dev/null
-    [ -z "$made_root" ] || rmdir "$root" 2>/dev/null
+    [ -z "$made_root" ] || { rmdir "$root" 2>/dev/null && _BIONIC_PIN_CLASS=entry; }  # a root made here and taken down again is nothing to remove
     echo "resolve-roots.sh: cannot build the interpreter pin under $shown — $why, so nothing is pinned" >&2
     return 1
   fi
@@ -329,6 +333,16 @@ bionic_interpreter_pin() {
   export BIONIC_TEST_INTERPRETER_PINNED
 }
 
+# THE REMEDY, BY THE REASON'S CLASS (_BIONIC_PIN_CLASS, left by the function and by _bionic_pin_hold): the one place the
+# hand run's remedy is chosen. Removing the root helps only when this user owns it (another user's cannot be removed
+# from a sticky /tmp), the path to it was not the refusal, and no run of this user's is using it.
+_bionic_pin_remedy() {  # _bionic_pin_remedy <root> — prints what to do about the refusal whose class is in _BIONIC_PIN_CLASS
+  case "$_BIONIC_PIN_CLASS" in
+    path|make-root|entry) echo "set TMPDIR to an absolute directory only you can write, then run again" ;;  # the way to the root, or the root, is not this user's to use: nothing there to remove
+    race) echo "run again" ;;  # a run of this user's made it first and is using it (T69)
+    *) echo "remove $1 or set TMPDIR, then run again" ;;  # make-pin, and every refusal of what this user's own root holds (T73)
+  esac
+}
 # THE HAND-RUN PATH. A relative TMPDIR makes a relative root, which the function refuses by name. The seam calls the function right after its re-exec — in the /bin/bash copy,
 # or in a suite started under /bin/bash in the first place — unless the first PATH entry is
 # already a pin (a suite tests/run.sh launched, or one this seam already pinned). The test is
@@ -354,13 +368,7 @@ if [ "${0##*/}" != "run.sh" ] \
     _bionic_pin_root="${TMPDIR:-/tmp}"
     _bionic_pin_root="${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}"
     if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then
-      # the remedy is what would help: removing the root helps only when this user owns it (another user's cannot be removed from a sticky /tmp), the path to it was not the refusal, and no run of this user's is using it (a lost race: the root is there and in use, so run again)
-      if [ -n "$_BIONIC_PIN_HOLDER" ] || [ -n "$(_bionic_pin_entry "$_bionic_pin_root")" ]; then _bionic_pin_fix="set TMPDIR to an absolute directory only you can write, then run again"
-      elif [ "${_BIONIC_PIN_WHY#cannot make }" != "$_BIONIC_PIN_WHY" ]; then _bionic_pin_fix="run again"
-      else _bionic_pin_fix="remove $_bionic_pin_root or set TMPDIR, then run again"
-      fi
-      echo "resolve-roots.sh: no interpreter pin at ${_bionic_pin_root//[[:cntrl:]]/?} — ${_BIONIC_PIN_WHY}; ${_bionic_pin_fix}" >&2
-      unset _bionic_pin_fix
+      echo "resolve-roots.sh: no interpreter pin at ${_bionic_pin_root//[[:cntrl:]]/?} — ${_BIONIC_PIN_WHY}; $(_bionic_pin_remedy "$_bionic_pin_root")" >&2
       unset BIONIC_TEST_INTERPRETER_PINNED
       exit 2
     fi
