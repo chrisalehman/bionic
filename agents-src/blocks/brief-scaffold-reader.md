@@ -9,6 +9,8 @@ Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
 Questions: yours to answer.
+Row: the plan row you run.
+Lands-on: the suites `ready` proves through the gate: when green, say ready from your tree; it is your last act.
 Lands-red: the one suite you may land red.
 Red-evidence: a file holding head: <40-hex>, your head.
 Deliverable-waiver: report by message, not a file.

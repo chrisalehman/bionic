@@ -21,14 +21,16 @@ about doing the job well; they are about still being alive to report it.
   timeout to it and logs the repair, so name the maximum yourself and the call is never demoted.
 - **Your suite budget is on your roster row, and it is a wall.** Your brief declared the FILES
   this task touches (`Files:`) or the closed set of suites it may run (`Suites:`), and the
-  dispatch wall recorded the resulting set before you started. A `bash tests/<x>.test.sh`
-  outside that set is REFUSED, and so is `tests/run.sh` unless your own row carries it. A task
+  dispatch wall recorded the resulting set before you started. You run a suite through one
+  door, `tests/run.sh --only <x>.test.sh`; a suite outside that set is REFUSED, and so is the
+  whole `tests/run.sh` unless your own row carries it. A task
   lands on the suites its change affects. The full suite runs once, on the head being released;
   after that pass a later change is proved by its affected suites, and a second full run is
   needed only when the change cannot be bounded: a merge from outside the run, or a changed
-  file the file-to-suite map answers with every suite or with none. **Spell each suite as a literal path and call it once per suite** — the wall reads
-  your command text before the shell expands it, so `for s in a b; do bash "tests/$s.test.sh";
-  done` is refused by the unexpanded name `$s.test.sh`, whatever the loop would have run.
+  file the file-to-suite map answers with every suite or with none. **Name each suite by its file name in the door, once per call** — the wall reads
+  your command text before the shell expands it, so a loop over `"$s.test.sh"` is refused by
+  the unexpanded name, whatever the loop would have run, and a bare suite command is refused
+  with `bionic: suite-run refused — use tests/run.sh --only <suite file> (one door)`.
   `FARM_OUT_ALLOW=1` does not widen it: that override is the orchestrator's escape from
   the orchestrator's own wall and is ignored inside a dispatched agent. If the change genuinely
   reaches further than your brief said, say so in your report and SendMessage the orchestrator
@@ -40,7 +42,7 @@ about doing the job well; they are about still being alive to report it.
   silently for a dispatched agent, so inside this role foreground-first stands whole: run
   the suite here. Add the prefix only when your brief tells you to.
 - **Suite output always goes to a file, with its exit code.**
-  `set -o pipefail; <command> 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc` (the command must exit with the suite's code, because `land` reads that code from the stamp) — never `PIPESTATUS`,
+  `cd <TREE> || exit 1; LOG=<path>; set -o pipefail; tests/run.sh --only <suite>.test.sh 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc` — never `PIPESTATUS`,
   which the tool shell leaves empty; validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
   forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
   fallback below: the harness's background-Bash output file is ephemeral and can vanish before
@@ -55,11 +57,11 @@ about doing the job well; they are about still being alive to report it.
   `<cmd> > "$LOG" 2>&1; echo "EXIT=$?" >> "$LOG"`. Nothing else writes that line, so a launch
   without it is a Monitor that never fires. Then print the path and stop; the orchestrator arms
   a Monitor on the file's `EXIT=` line.
-- **You do not set your test width.** `tests/run.sh` samples the machine and reads its own
-  width off the pressure rung at suite start, so there is nothing here for you to compute,
-  export, or call — `pressure_level` is a shell function in a sourced library, not a command
-  you can run. Set `BIONIC_TEST_JOBS_CEILING` only when your brief names a ceiling, and never
-  above the one it names.
+- **You do not set your test width.** Every suite asks the gate for its place, and the gate
+  admits it when the machine has room under the share; a run it cannot admit in its time
+  exits 75 with the line to run again, and nothing ran, so run that line again. There is
+  nothing here for you to compute or export. Set `BIONIC_TEST_JOBS_CEILING` only when your
+  brief names a ceiling, and never above the one it names.
 
 **`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
 the fleet: the agents keep running, their rosters stay on disk, and

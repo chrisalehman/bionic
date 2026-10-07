@@ -375,19 +375,22 @@ SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
 AGENT_RULES="${REPO}/.claude/rules/agent-discipline.md"
 
 # The four pinned strings, spelled here exactly as they must appear on disk.
-PIN_PROBE='`resources_probe` prints `cores=… mem_gb=… disk_free_gb=…`; `resources_budget <cores> <mem_gb> <disk_free_gb>` yields the run'"'"'s `parallel-budget:`, verbatim in plan frontmatter, displayed, never re-derived downstream.'
+# RE-POINTED (wave-28 T22, AC-7.4): the probe estimates and caps nothing; width is the gate's.
+PIN_PROBE='`resources_probe` prints `cores=… mem_gb=… disk_free_gb=…`, and the card shows the probe'"'"'s estimate, which caps nothing.'
 # RE-POINTED AT THE CORRECTED DOCTRINE (Step-6 architecture A-2). The old needle pinned
 # `dispatches in one batch up to `writers`` — the ceiling, unregulated — while the tick fills
 # to the RUNG off a live-trimmed open count, so the pin was holding a contradiction green. A
 # pin follows the sentence it is a pin FOR: when the doctrine is corrected the needle moves
 # with it, or the test outlives the thing it was protecting.
-PIN_FILL='every ready task dispatches in one batch sized by the rung the tick prints — `poker: rung=<n>/<ceiling>`, the machine'"'"'s answer to how wide it will carry right now — with `writers` as the ceiling that rung is taken against and the only number the wall enforces'
+# RE-POINTED (wave-28 T22, AC-7.4): the fill is the gate's; the one cap is a person's.
+PIN_FILL='**Fill the gate.** Every ready task dispatches in the batch the tick'"'"'s `FILL` line names; sequence only for shared state. The one cap is a person'"'"'s'
 # RE-POINTED, WRITER-FACING (Step-6 readability R-8). The old needle held a sentence that
 # was correct in SKILL.md — where it addresses the DISPATCHER, and where PIN_JOBS_SKILL still
 # holds it — and had been pasted verbatim into a block every other bullet of which is
 # second-person to the writer. It also named a fix no writer can execute: `pressure_level` is
 # a function in a sourced library, not a command on PATH, and tests/run.sh already calls it.
-PIN_JOBS='**You do not set your test width.** `tests/run.sh` samples the machine and reads its own width off the pressure rung at suite start, so there is nothing here for you to compute, export, or call — `pressure_level` is a shell function in a sourced library, not a command you can run. Set `BIONIC_TEST_JOBS_CEILING` only when your brief names a ceiling, and never above the one it names.'
+# RE-POINTED (wave-28 T22, AC-7.4): every suite asks the gate; the rung is gone.
+PIN_JOBS='**You do not set your test width.** Every suite asks the gate for its place, and the gate admits it when the machine has room under the share; a run it cannot admit in its time exits 75 with the line to run again, and nothing ran, so run that line again. There is nothing here for you to compute or export. Set `BIONIC_TEST_JOBS_CEILING` only when your brief names a ceiling, and never above the one it names.'
 
 # has_pin <file> <string> -> 0 when the file carries the string.
 #
@@ -413,9 +416,9 @@ else
 fi
 
 if has_pin "$SURVIVAL_BLOCK" "$PIN_JOBS"; then
-  ok "11: agents-src/blocks/survival.md carries the rung-pointer sentence verbatim (AC-18)"
+  ok "11: agents-src/blocks/survival.md carries the width sentence verbatim (AC-18)"
 else
-  no "11: agents-src/blocks/survival.md carries the rung-pointer sentence verbatim (AC-18)" \
+  no "11: agents-src/blocks/survival.md carries the width sentence verbatim (AC-18)" \
      "file: $SURVIVAL_BLOCK"
 fi
 
@@ -429,9 +432,9 @@ fi
 # text?"), asked of the one file that now carries it.
 SURVIVAL_SHIPPED="${REPO}/payload/context/survival.md"
 if has_pin "$SURVIVAL_SHIPPED" "$PIN_JOBS"; then
-  ok "12: the rendered payload/context/survival.md carries the rung-pointer sentence (render is current, AC-18)"
+  ok "12: the rendered payload/context/survival.md carries the width sentence (render is current, AC-18)"
 else
-  no "12: the rendered payload/context/survival.md carries the rung-pointer sentence (render is current, AC-18)" \
+  no "12: the rendered payload/context/survival.md carries the width sentence (render is current, AC-18)" \
      "file: $SURVIVAL_SHIPPED — run 'bash agents-src/render.sh'"
 fi
 
@@ -496,9 +499,9 @@ expect_eq "16: the '/clear' marker exists ONLY at its two expected homes (no thi
 
 # --- Anti-vacuity: the same extractors must report a mutation ---
 
-anchor "$STEP0_MD" 'never re-derived downstream' 1
+anchor "$STEP0_MD" 'which caps nothing' 1
 DOCTORED_SKILL="$TMP/skill-mutated.md"
-sed 's/never re-derived downstream/re-derived wherever convenient/' "$STEP0_MD" > "$DOCTORED_SKILL"
+sed 's/which caps nothing/which caps the run/' "$STEP0_MD" > "$DOCTORED_SKILL"
 if has_pin "$DOCTORED_SKILL" "$PIN_PROBE"; then
   no "17: a doctored SKILL.md fails the probe pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
@@ -555,7 +558,8 @@ expect_ne "19: a doctored survival.md reads as a different '/clear' paragraph (p
 
 section "Section 3: the SCHED Patrol-text pins (AC-30, AC-38)"
 
-PIN_THROTTLE='**the tick reads pressure to throttle, never to re-derive the budget** — the ceiling is the plan header'"'"'s `parallel-budget:`, written once by Step 0 from the probe, and no live reading ever raises or lowers it.'
+# RE-POINTED (wave-28 T22, AC-7.4): the throttle sentence went with the rung; the tick's gate line replaces it.
+PIN_THROTTLE='Width is the gate'"'"'s, read off the machine as it is: every tick prints one gate line, `poker: gate share=<n> used=<n>% load=<1m>/<5m> of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no>`'
 PIN_QUIET='**An armed session that has dispatched nothing yet decides QUIET, never REFUSED** — `poker: QUIET — armed, nothing dispatched yet on this session`, stamp kept — because arming precedes dispatch by design'
 
 if has_pin "$DISPATCH_MD" "$PIN_THROTTLE"; then
@@ -577,21 +581,22 @@ fi
 # list at S10 (S8's report: "docs-pins.test.sh:327 still pins the token in SKILL.md and is
 # S10's to retire" — NARROW is gone from hooks/session-poker.sh entirely).
 PINS_RUNGS_MISSING=""
-for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'session-poker.sh decline' 'approval:<name>'; do
+# RE-POINTED (wave-28 T22, AC-7.4): the two HOLDS and the rung line are gone; the gate line and its two no-FILL lines name width now.
+for token in 'poker: gate share=<n>' 'poker: over share' 'the gate gives no room' 'FILL <ids>' 'session-poker.sh decline' 'approval:<name>'; do
   has_pin "$DISPATCH_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
 done
 if [ -z "$PINS_RUNGS_MISSING" ]; then
-  ok "22: SKILL.md's Patrol section names both rungs, the tick's rung line, the FILL line and the decline"
+  ok "22: SKILL.md's Patrol section names the gate line, its over-share and no-room lines, the FILL line and the decline"
 else
-  no "22: SKILL.md's Patrol section names both rungs, the tick's rung line, the FILL line and the decline" \
+  no "22: SKILL.md's Patrol section names the gate line, its over-share and no-room lines, the FILL line and the decline" \
      "missing:${PINS_RUNGS_MISSING}"
 fi
 
 # --- Anti-vacuity: the same extractor must report a mutation ---
 
-anchor "$DISPATCH_MD" 'never to re-derive the budget' 1
+anchor "$DISPATCH_MD" 'read off the machine as it is' 1
 DOCTORED_SCHED="$TMP/skill-sched-mutated.md"
-sed 's/never to re-derive the budget/and to re-derive the budget/' "$DISPATCH_MD" > "$DOCTORED_SCHED"
+sed 's/read off the machine as it is/read off the plan header/' "$DISPATCH_MD" > "$DOCTORED_SCHED"
 if has_pin "$DOCTORED_SCHED" "$PIN_THROTTLE"; then
   no "23: a doctored SKILL.md fails the throttle pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
@@ -855,7 +860,8 @@ PIN_TASKLIST='**The resume ritual rebuilds the task list after it binds:** run `
 # word `rung` for the advisory pair AND for `pressure_level`'s integer eleven words apart.
 # RE-POINTED (wave-26): the NARROW/RELAX retirement sentence described a mechanism long gone
 # and was cut; the pin now holds the sentence that says what sizes a fill.
-PIN_RUNG='Neither resizes a fill. The rung is `pressure_level`'"'"'s integer, printed on every tick as `poker: rung=<n>/<ceiling>`, and it is the number a fill is sized by.'
+# RE-POINTED (wave-28 T22, AC-7.4): the rung is gone; the fill asks the gate per ready writer row.
+PIN_RUNG='The fill asks the gate once per ready writer row and stops at its first no; the only cap is a person'"'"'s.'
 
 if has_pin "$DISPATCH_MD" "$PIN_TASKLIST"; then
   ok "48: SKILL.md's resume ritual rebuilds the task list after it binds, verbatim"
@@ -881,9 +887,9 @@ else
   ok "50: a doctored SKILL.md fails the task-list pin (pin discriminates)"
 fi
 
-anchor "$DISPATCH_MD" 'it is the number a fill is sized by' 1
+anchor "$DISPATCH_MD" 'stops at its first no' 1
 DOCTORED_RUNG="$TMP/skill-rung-mutated.md"
-sed 's/it is the number a fill is sized by/it is a number a fill may ignore/' "$DISPATCH_MD" > "$DOCTORED_RUNG"
+sed 's/stops at its first no/stops at its ceiling/' "$DISPATCH_MD" > "$DOCTORED_RUNG"
 if has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
   no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
      "the pin matched a doctored copy"
@@ -1070,9 +1076,9 @@ expect_true "53 precondition: the dispatch terms still tell the writer it does n
   has_pin "$SURVIVAL_SHIPPED" "$PIN_JOBS"
 expect_false "53: dispatch.md no longer tells a brief to point the writer at the rung" \
   has_pin "$DISPATCH_MD" "$PIN_JOBS_SKILL"
-anchor "$DISPATCH_MD" '**Fill the budget.**' 1
+anchor "$DISPATCH_MD" '**Fill the gate.**' 1
 DOCTORED_SKILL_JOBS="$TMP/skill-jobs-mutated.md"
-sed 's/\*\*Fill the budget\.\*\*/**Fill the budget.** Each brief in the batch points the writer at the rung: `take your test width from pressure_level at suite start`./' \
+sed 's/\*\*Fill the gate\.\*\*/**Fill the gate.** Each brief in the batch points the writer at the rung: `take your test width from pressure_level at suite start`./' \
   "$DISPATCH_MD" > "$DOCTORED_SKILL_JOBS"
 expect_true "54: a dispatch.md that brings the sentence back is caught (pin discriminates)" \
   has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"
@@ -1203,7 +1209,8 @@ expect_eq "63: …over a non-empty rendered file" "0" \
 # reads the budget rule said nothing about it. A fresh agent with no plan read hit exactly
 # that on its first attempt (the walk, heading 10b). Pinned in the SOURCE block, and
 # reaching every generated role file, on the same footing as the rule it qualifies.
-PIN_S13_SPELLING='Spell each suite as a literal path and call it once per suite'
+# RE-POINTED (wave-28 T22, AC-10.4): a suite is named by its file name in the one door.
+PIN_S13_SPELLING='Name each suite by its file name in the door, once per call'
 if has_pin "$SURVIVAL_BLOCK" "$PIN_S13_SPELLING"; then
   ok "63b: the spelling rule is in agents-src/blocks/survival.md, the rendered SOURCE"
 else
@@ -2728,7 +2735,8 @@ AC2_SURFACES="${REPO}/skills/canonical-sdlc/dispatch.md"
 # scaffold present once. The exact templated line the block emits is unambiguous: zero says
 # the block never rendered there, two says it rendered twice (a stray hand-copy alongside
 # the injected one).
-AC2_SCAFFOLD_LINE='Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<name>.md>'
+# RE-POINTED (wave-28 T22, AC-15.1): the label takes a bare file name.
+AC2_SCAFFOLD_LINE='Expected artifact: <ONE path inside the repo, or a bare file name, e.g. .bionic/docs/record/<wave>/<name>.md>'
 AC2_MISSING=""
 AC2_DOUBLED=""
 for _sf in $AC2_SURFACES; do
@@ -4407,7 +4415,7 @@ expect_contains "PB-b3: AC-3.4 — the rule names the inline form it replaces" \
 anchor "${REPO}/agents/researcher.md" "$PB_RULE" 1
 grep -vF -- "$PB_RULE" "${REPO}/agents/researcher.md" > "$TMP/pb-role-doctored.md" 2>/dev/null
 expect_contains "PB-b4 precondition: the doctored role file still carries the shared block's other rules" \
-  'Spell each suite literally' "$(cat "$TMP/pb-role-doctored.md")"
+  'Run a suite only through the door' "$(cat "$TMP/pb-role-doctored.md")"
 expect_eq "PB-b4: a role file with the rule's line removed reads as missing it (the pin discriminates)" \
   "0" "$(grep -cF -- "$PB_RULE" "$TMP/pb-role-doctored.md" | tr -cd '0-9')"
 
@@ -5371,8 +5379,9 @@ expect_eq "W27-144e: …and the scaffold's own line, pasted unfilled, lifts noth
   "$(W27_144_LIFT "$(_flatten "$DISPATCH_MD" | grep -o 'Lands-red: <suite> until <ext:slug | approval:name>')")"
 # S2 (wave-27 T67; review pass 46): the doctrine says who writes the debt, what the orchestrator does
 # not do, and that the evidence names the head. Each pin is a literal span on its own file.
-W27_144_WRITER='`land` writes the debt, the orchestrator copies nothing'
-expect_nonempty "W27-144f: S2 dispatch.md says land writes the debt and the orchestrator copies nothing" \
+# RE-POINTED (wave-28 T22): in dispatch.md `ready` writes the debt; the shared span names no verb.
+W27_144_WRITER='writes the debt, the orchestrator copies nothing'
+expect_nonempty "W27-144f: S2 dispatch.md says the landing writes the debt and the orchestrator copies nothing" \
   "$(w26_hits "$W27_144_WRITER" "$DISPATCH_MD")"
 expect_nonempty "W27-144g: …and operational-rules.md says the same" "$(w26_hits "$W27_144_WRITER" "$OPRULES")"
 expect_nonempty "W27-144h: …operational-rules.md says the evidence holds head: <40-hex>" \
@@ -6038,5 +6047,150 @@ expect_eq "W28-C3: the structure checks no longer say FAIL whenever the case hol
   "$(w26_hits "$W28C_OLD" "${REPO}/payload/context/checks-structure.md")"
 W28C_DOC3="$(w26_doctor "${REPO}/payload/context/checks-structure.md" "$W28C_OLD")"
 expect_nonempty "W28-C3m: a structure file that says it again is caught" "$(w26_hits "$W28C_OLD" "$W28C_DOC3")"
+
+section "§W28-74 (wave-28 T22; REQ-7 AC-7.4, D25): the doctrine describes one landing line and one gate"
+# ============================================================
+# WHAT THIS OWNS. The shipped doctrine teaches one landing path, `ready` from the writer's tree
+# (a person's hand landing beside it), and one gate for width. It no longer orders a writer's
+# final proof run, a probe-written budget, the rung or the hold. Pinned here: dispatch.md quotes
+# `ready` and its owed line and the tick's gate line; steps/0.md says the probe caps nothing and
+# width is the gate's; every role file names `ready` and the gate; and no rendered doctrine file
+# carries a retired word. Each absence sits beside a positive on the same extractor, and a doctored
+# copy proves each arm goes red. HERMETIC: committed finals by path; doctored copies under $TMP.
+W28_74_FILES="$(ls "${SKILL_DIR}"/SKILL.md "${SKILL_DIR}"/dispatch.md "${SKILL_DIR}"/steps/*.md \
+  "${REPO}"/agents/*.md "${REPO}"/payload/context/survival.md 2>/dev/null)"
+W28_74_READY='bash <plugin-root>/scripts/spawn-worktree.sh ready'
+W28_74_OWED='`landed <row> <commit> — owed: complete task <row>, then stop <name>`'
+W28_74_GATE='`poker: gate share=<n> used=<n>% load=<1m>/<5m> of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no>`'
+W28_74_NOPROOF='No writer runs a proof for the landing; `ready` makes its own.'
+W28_74_ROLE='Lands-on: the suites `ready` proves through the gate: when green, say ready from your tree; it is your last act.'
+expect_nonempty "W28-74a: dispatch.md tells the writer to say ready from its tree" "$(w26_hits "$W28_74_READY" "$DISPATCH_MD")"
+expect_nonempty "W28-74a2: …and quotes ready's owed line" "$(w26_hits "$W28_74_OWED" "$DISPATCH_MD")"
+expect_nonempty "W28-74a3: …and says no writer runs a proof for the landing" "$(w26_hits "$W28_74_NOPROOF" "$DISPATCH_MD")"
+expect_nonempty "W28-74b: dispatch.md quotes the tick's one gate line" "$(w26_hits "$W28_74_GATE" "$DISPATCH_MD")"
+expect_nonempty "W28-74c: steps/0.md says the probe's estimate caps nothing" \
+  "$(w26_hits 'the card shows the probe'"'"'s estimate, which caps nothing' "$STEP0_MD")"
+expect_nonempty "W28-74c2: …and that width is the gate's" "$(w26_hits 'Width is the gate'"'"'s' "$STEP0_MD")"
+W28_74_RN=0; W28_74_RMISS=""
+for _w74r in "${REPO}"/agents/*.md; do
+  [ -f "$_w74r" ] || continue
+  W28_74_RN=$((W28_74_RN + 1))
+  has_pin "$_w74r" "$W28_74_ROLE" || W28_74_RMISS="${W28_74_RMISS} ${_w74r##*/}"
+done
+expect_eq "W28-74d precondition: the role files are the roles render.sh renders" \
+  "yes" "$(role_files_are_roles "${REPO}/agents" "$ROLES_DECLARED")"
+expect_eq "W28-74d: every role file names ready and the gate in one sentence (missing in:${W28_74_RMISS:- none})" "" "$W28_74_RMISS"
+expect_eq "W28-74d2: …and the sentence lives once, in the reader scaffold block" "1" \
+  "$(_flatten "${BLOCK_DIR}/brief-scaffold-reader.md" | /usr/bin/grep -oF -- "$W28_74_ROLE" | /usr/bin/grep -c .)"
+W28_74_DOCR="$TMP/w28-74-role.md"
+/usr/bin/grep -vF 'Lands-on:' "${REPO}/agents/implementor.md" > "$W28_74_DOCR" 2>/dev/null
+expect_contains "W28-74dm precondition: the doctored role file keeps its other scaffold lines" "Row: the plan row you run." "$(cat "$W28_74_DOCR")"
+expect_eq "W28-74dm: a role file without the sentence is caught" "" "$(w26_hits "$W28_74_ROLE" "$W28_74_DOCR")"
+# w28_74_words <file>… -> `<file>:<word>` for each retired whole word a file carries (case kept:
+# `HOLD` is the throttle, `hold` the stand-down verb, which stays).
+w28_74_words() {
+  local f w
+  for f in "$@"; do
+    for w in rung EMERGENCY HOLD resources_budget pressure_level worktree_land_for_session; do
+      /usr/bin/grep -qw -- "$w" "$f" 2>/dev/null && printf '%s:%s\n' "${f#"$REPO"/}" "$w"
+    done
+  done
+}
+# W28_74_SPANS: retired sentences, one per line: the probe-written budget, the writer's final proof
+# run, the stamp the landing read, and the landing standdown made.
+W28_74_SPANS='written once by Step 0 from the probe
+A task lands on its own green run
+because `land` reads that code from the stamp
+Landing is automatic:'
+w28_74_spans() {
+  local f l
+  for f in "$@"; do
+    while IFS= read -r l; do [ -n "$l" ] && has_pin "$f" "$l" && printf '%s: %s\n' "${f#"$REPO"/}" "$l"; done <<< "$W28_74_SPANS"
+  done
+}
+# shellcheck disable=SC2086
+expect_nonempty "W28-74e precondition: the doctrine set is read (it names ready)" "$(w26_hits 'ready' $W28_74_FILES)"
+# shellcheck disable=SC2086
+expect_eq "W28-74e: no rendered doctrine file names the rung, the hold, the kill floor or the probe budget" "" "$(w28_74_words $W28_74_FILES)"
+W28_74_DOCW="$(w26_doctor "$DISPATCH_MD" 'The tick sizes a fill by the rung.')"
+expect_eq "W28-74em: a dispatch.md that names the rung again is caught" "${W28_74_DOCW#"$REPO"/}:rung" "$(w28_74_words "$W28_74_DOCW")"
+W28_74_DOCH="$(w26_doctor "$DISPATCH_MD" 'EMERGENCY and HOLD fill nothing.')"
+expect_eq "W28-74em2: …and one that names the two holds is caught" "2" "$(w28_74_words "$W28_74_DOCH" | /usr/bin/grep -c .)"
+# shellcheck disable=SC2086
+expect_eq "W28-74f: no rendered doctrine file orders a final proof run, a probe-written budget or a stamp landing" "" "$(w28_74_spans $W28_74_FILES)"
+W28_74_DOCS="$(w26_doctor "$DISPATCH_MD" 'A task lands on its own green run, taken on a clean committed tree.')"
+expect_nonempty "W28-74fm: a dispatch.md that orders the final proof run again is caught" "$(w28_74_spans "$W28_74_DOCS")"
+expect_nonempty "W28-74g: standdown reports and lands nothing" \
+  "$(w26_hits 'reports each open row'"'"'s tree as it stands and the stoppable addresses, and lands nothing' "$DISPATCH_MD")"
+
+section "§W28-104 (wave-28 T22; REQ-10 AC-10.4, D27): the brief rule and the dispatch doctrine name only the door"
+# ============================================================
+# WHAT THIS OWNS. A dispatched agent runs a suite through one door, `tests/run.sh --only`. The
+# role files' brief rule, the dispatch terms and dispatch.md name it, quote the door's refusal and
+# rule 5 in the door form, and none shows a bare `bash tests/<suite>.test.sh` as the way to run
+# one. Each absence sits beside a positive on the same extractor; doctored copies prove each arm.
+W28_104_FILES="$DISPATCH_MD ${REPO}/payload/context/survival.md $(ls "${REPO}"/agents/*.md 2>/dev/null)"
+W28_104_RULE5='cd <TREE> || exit 1; LOG=<path>; set -o pipefail; tests/run.sh --only <suite>.test.sh 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc'
+W28_104_REFUSAL='`bionic: suite-run refused — use tests/run.sh --only <suite file> (one door)`'
+# w28_104_door <file>… -> the files that name the door.
+w28_104_door() { local f; for f in "$@"; do /usr/bin/grep -qF 'tests/run.sh --only' "$f" 2>/dev/null && printf '%s\n' "${f#"$REPO"/}"; done; }
+# w28_104_bare <file>… -> `<file>:<line>` for each bare suite command a file shows.
+w28_104_bare() { local f; for f in "$@"; do /usr/bin/grep -nE 'bash "?tests/[^[:space:]`"]*\.test\.sh' "$f" 2>/dev/null | sed "s|^|${f#"$REPO"/}:|"; done; }
+W28_104_N=0; for _w104 in $W28_104_FILES; do W28_104_N=$((W28_104_N + 1)); done
+# shellcheck disable=SC2086
+expect_eq "W28-104a: dispatch.md, the dispatch terms and every role file name the door" \
+  "$W28_104_N" "$(w28_104_door $W28_104_FILES | /usr/bin/grep -c .)"
+expect_nonempty "W28-104b: dispatch.md gives rule 5 in the door form" "$(w26_hits "$W28_104_RULE5" "$DISPATCH_MD")"
+expect_nonempty "W28-104b2: …and so do the dispatch terms" "$(w26_hits "$W28_104_RULE5" "${REPO}/payload/context/survival.md")"
+expect_nonempty "W28-104c: dispatch.md quotes the door's refusal" "$(w26_hits "$W28_104_REFUSAL" "$DISPATCH_MD")"
+# shellcheck disable=SC2086
+expect_eq "W28-104d: none of them shows a bare suite command" "" "$(w28_104_bare $W28_104_FILES)"
+W28_104_DOCB="$(w26_doctor "${REPO}/agents/researcher.md" '- Run one `bash tests/<name>.test.sh` per suite.')"
+expect_nonempty "W28-104dm: a role file that shows the bare command again is caught" "$(w28_104_bare "$W28_104_DOCB")"
+W28_104_DOCQ="$(w26_doctor "$DISPATCH_MD" 'for s in a b; do bash "tests/$s.test.sh"; done')"
+expect_nonempty "W28-104dm2: …and so is a quoted loop over the bare form" "$(w28_104_bare "$W28_104_DOCQ")"
+W28_104_DOCD="$TMP/w28-104-nodoor.md"
+sed 's|tests/run.sh --only|tests/RUN.sh --ONLY|g' "${REPO}/agents/critic.md" > "$W28_104_DOCD" 2>/dev/null
+expect_contains "W28-104am precondition: the doctored copy keeps its dispatch rules" "ever end your turn" "$(cat "$W28_104_DOCD")"
+expect_eq "W28-104am: a role file that drops the door is caught" "" "$(w28_104_door "$W28_104_DOCD")"
+
+section "§W28-R (wave-28 T22; REQ-16 AC-16.3, D35): the doctrine teaches the levels by the new words only"
+# ============================================================
+# WHAT THIS OWNS. Rigor is taught as low, medium and high. The old words appear in one mapping
+# sentence, once, in SKILL.md, and nowhere else in a rendered skill, step or role file. A run is
+# announced as `<intent> · <level> rigor · <scale>`, for example `build · high rigor · wave`, and
+# the announcement prints `card.sh rigor`'s line (A-orch-98: the verb's caller). The field in files
+# stays `rigor:`. Each absence sits beside a positive on the same extractor; doctored copies prove it.
+W28R_MAP='`low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads either word as the same level, and a file carrying an old word is read as it is and never rewritten.'
+W28R_FILES="$(ls "${SKILL_DIR}"/SKILL.md "${SKILL_DIR}"/dispatch.md "${SKILL_DIR}"/steps/*.md "${REPO}"/agents/*.md 2>/dev/null)"
+# w28r_old <file>… -> `<file>:<word>` for each old level word outside the mapping sentence.
+w28r_old() {
+  local f
+  for f in "$@"; do
+    _flatten "$f" | awk -v m="$W28R_MAP" '{ while ((i = index($0, m)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(m)); print }' \
+      | /usr/bin/grep -owE '(tested|peer-reviewed|audited)' | sed "s|^|${f#"$REPO"/}:|"
+  done
+}
+# shellcheck disable=SC2086
+expect_eq "W28-R1: the mapping sentence is said once across the rendered skill, step and role files" "1" \
+  "$(for _w28r in $W28R_FILES; do _flatten "$_w28r" | /usr/bin/grep -oF -- "$W28R_MAP"; done | /usr/bin/grep -c .)"
+expect_nonempty "W28-R1b: …and SKILL.md is where it is said" "$(w26_hits "$W28R_MAP" "${SKILL_DIR}/SKILL.md")"
+# shellcheck disable=SC2086
+expect_eq "W28-R2: outside it, no rendered skill, step or role file names a level by an old word" "" "$(w28r_old $W28R_FILES)"
+W28R_DOC="$(w26_doctor "${SKILL_DIR}/steps/5.md" 'At `audited` the reviewer holds structure.')"
+expect_eq "W28-R2m: a step file that teaches a level by an old word is caught" "${W28R_DOC#"$REPO"/}:audited" "$(w28r_old "$W28R_DOC")"
+W28R_DOC2="$(w26_doctor "${SKILL_DIR}/SKILL.md" "$W28R_MAP")"
+expect_eq "W28-R2m2: a second mapping sentence is not mistaken for a level taught" "" "$(w28r_old "$W28R_DOC2")"
+W28R_ROWS="$(/usr/bin/grep -oE '^\| `(low|medium|high)` \|' "${SKILL_DIR}/SKILL.md" | tr -d '|` ' | tr '\n' ' ')"
+expect_eq "W28-R3: SKILL.md's rigor table rows are low, medium and high" "low medium high " "$W28R_ROWS"
+expect_nonempty "W28-R4: SKILL.md announces a run as <intent> · <level> rigor · <scale>" \
+  "$(w26_hits '`<intent> · <level> rigor · <scale>`' "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-R4b: …for example build · high rigor · wave" "$(w26_hits '`build · high rigor · wave`' "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-R5: the announcement prints card.sh rigor's line (the verb's caller)" \
+  "$(w26_hits 'bash <plugin-root>/scripts/card.sh rigor <rigor>' "${SKILL_DIR}/SKILL.md")"
+W28R_CARD="$(bash "${REPO}/payload/scripts/card.sh" rigor audited 2>/dev/null)"
+expect_eq "W28-R5b: …and the line the announcement quotes is the one card.sh prints" "review rigor: high (three independent readers)" "$W28R_CARD"
+expect_nonempty "W28-R5c: …quoted in SKILL.md as printed" "$(w26_hits "\`${W28R_CARD:-<none>}\`" "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-R6: the reviewer role is dealt structure at high rigor" "$(w26_hits 'Dealt `structure` at high rigor' "${REPO}/agents/reviewer.md")"
 
 finish
