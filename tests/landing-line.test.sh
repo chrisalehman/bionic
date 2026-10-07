@@ -652,6 +652,11 @@ expect_contains "(r6g) …naming the row" "REFUSED reason=no-launch-row row=T1 r
 ll_wrow "$RM3b" status=identified suites_allowed=a.test.sh adopted_from=99999999-0000-4000-8000-000000000000
 ll_verb "$RM3b" T1
 expect_eq "(r6g) …and the same tree with an adopted row of the agent lands (exit 0)" "0 a.test.sh" "$LL_RC $(ll_field "$(ll_ev "$RM3b" ready)" suites)"
+K3B="$(ll_field "$(ll_ev "$RM3b" published)" commit)"
+expect_nonempty "(r6g2-pre) the adopted row's landing was published" "$K3B"
+expect_contains "(r6g2) the adopted-only row's landing is marked on its roster row (the mark reads the row the wall reads)" "|landed=${K3B}|" \
+  "$(grep '|name=wx-T1|' "$(ll_roster "$RM3b")" | tail -1)"
+expect_contains "(r6g2) …and the owed line is printed, naming the agent" "owed: complete task T1, then stop wx-T1" "$LL_OUT"
 RM4="$(ll_world)"
 ll_wide "$RM4" 'a.test.sh b.test.sh' held='2026-10-07T00:10:00Z waiting on T2'
 ll_wrow "$RM4" status=identified suites_allowed='a.test.sh b.test.sh' extended='2026-10-07T00:20:00Z more time'
