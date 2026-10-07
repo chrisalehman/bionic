@@ -12489,7 +12489,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current finding-check finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -13601,7 +13601,7 @@ expect_eq "MOVE-seam1b …and a finding the line does not name keeps the table's
 mv_seam "moved: record/x.md#1 to=fix $MV_WHO"
 expect_eq "MOVE-seam2 a deferral moved to fix takes fix at the read" "S2 off fix" "$(mv_rate record/x.md#1 S2 off)"
 mv_seam "moved: record/x.md#1 to=fix $MV_WHO" "moved: record/x.md#1 to=defer $MV_WHO"
-expect_eq "MOVE-seam3 two moves: the later one is the user's last word" "S2 off defer" "$(mv_rate record/x.md#1 S2 off)"
+expect_eq "MOVE-seam3 two moves: the later one is the user's last word" "S2 on defer" "$(mv_rate record/x.md#1 S2 on)"
 mv_seam "moved: record/x.md#1 to=defer $MV_WHO"
 expect_eq "MOVE-seam4 a moved: line deferring an S1, written by hand, is not honoured: an S1 is never deferred" "S1 on fix" "$(mv_rate record/x.md#1 S1 on)"
 mv_seam "moved: record/x.md#1 to=defer by=Dana Fixture at=2026-10-07T12:00:00Z words=\"later\""
