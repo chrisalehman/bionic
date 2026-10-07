@@ -254,12 +254,14 @@ _gate_num() {
 # _gate_open — after _gate_read: THE RULE of which requests are open (see THE RULES). rc 0 when
 # the request has no ended= line and its holder lives. Sets _R_state to what the request is:
 #   waiting   open, not admitted            admitted  open, admitted
-#   ended     ended                         killed    ended with rc 137
+#   ended     ended                         killed    ended with rc over 128 (a signal; 137 is
+#                                                     the gate's own write)
 #   dying     admitted, never ended, holder dead: not yet written ended (the scan does)
 #   gone      never admitted, nobody holds it (holder=-, or a dead holder)
 _gate_open() {
   if [ -n "$_R_ended" ]; then
-    if [ "$_R_rc" = 137 ]; then _R_state=killed; else _R_state=ended; fi
+    _R_state=ended
+    if _gate_num "$_R_rc" && [ "$_G_NUM" -gt 128 ]; then _R_state=killed; fi
   elif _gate_alive; then
     if [ -n "$_R_admitted" ]; then _R_state=admitted; else _R_state=waiting; fi
   elif [ -n "$_R_admitted" ]; then _R_state=dying
@@ -730,8 +732,8 @@ $nm
 
 # gate_list — one line per request, lowest id first:
 #   <id> <waiting|admitted|ended|killed|gone> kind=<k> asked=<e> admitted=<e|-> ended=<e|-> rc=<n|-> key=<key>
-# killed: admitted and either ended with rc 137 (the gate's _gate_reap, or a run killed by
-# signal 9) or never ended with its holder dead. gone: never admitted, no live holder (its
+# killed: admitted and either ended with rc over 128 (the gate's _gate_reap writes 137; a run
+# killed by a signal ends 128+n) or never ended with its holder dead. gone: never admitted, no live holder (its
 # number is kept for the next ask by the same who for the same key, until BIONIC_GATE_KEEP).
 # The state is `_gate_open`'s; gate_list takes the lock and reads, and prunes and reaps nothing.
 gate_list() {
