@@ -14773,6 +14773,7 @@ MP_N="$MP_HOOK_NEEDLE" awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if
   "$POKER" > "$MP_HROOT/hooks/session-poker.sh"
 expect_eq "MP-fillmut0 the hook mutant differs from the hook in one line" "1" "$(diff "$POKER" "$MP_HROOT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
 MP_POKER_WAS="$POKER"; POKER="$MP_HROOT/hooks/session-poker.sh"
+forget_digest "$R74B"
 poke_pressure "$R74B" 8192 1.0 tick
 POKER="$MP_POKER_WAS"
 expect_eq "MP-fillmut1 the mutant still runs and still prints the FILL line (exit 0)" "0|poker: FILL T3" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -x 'poker: FILL T3')"
