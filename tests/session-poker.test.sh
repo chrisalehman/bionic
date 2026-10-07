@@ -13544,7 +13544,9 @@ MV_Q='and move the third one to fix now'
 MV_F='start the review of the parser'
 mv_tx() { local f; cat "$MV_FX/frame.jsonl" > "$MV_TX"; for f in "$@"; do cat "$MV_FX/$f.jsonl" >> "$MV_TX"; done; }
 mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config
-  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "${2:-$SAID_LIB}" "$1" 2>/dev/null
+  # the library finds session.sh beside itself; a mutant copy in another directory has none, so it is
+  # given the session function first (the library itself is run as the verb meets it, alone)
+  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '[ -z "$3" ] || . "$3"; . "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "${2:-$SAID_LIB}" "$1" "${2:+${SAID_LIB%/*}/session.sh}" 2>/dev/null
 }
 mv_id() { printf 'record/wave-01-fixture/%s.md#%s' "$1" "${2:-1}"; }
 mv_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(mv_id "$1") "; }
