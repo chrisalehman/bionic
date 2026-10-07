@@ -45,6 +45,7 @@
 # USAGE
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
+#     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -90,7 +91,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>, or card.sh inherited <requirements file>\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -1442,7 +1443,92 @@ _card_chain_block() {  # <plan>
   _card_batch_widths "$plan" "$WCARD_WRITERS" "$CARD_SCALE" || :
 }
 
-_card_step1() {  # <artifact path>
+# ── INHERITED DEFERRALS (epic-23 wave-28 T43; REQ-8 AC-8.10, D21, A-orch-64) ─────────────
+#
+# A DEFERRAL IS FACED AGAIN. Close-out writes every open deferral under `## Deferrals` of the run's
+# continuation, `record/<wave slug>/continuation.md` under the docs root (a tree `archive_run`
+# never moves), one line each:
+#
+#     deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>
+#
+# The next wave's Step 1 card lists every one until the requirements file's `## Inherited
+# deferrals` section disposes of it with exactly one of three lines, `<id>` being `<record>#<n>`:
+#
+#     adopted: <id> as REQ-<n>   ·   again: <id>   ·   closed: <id> <reason>
+#
+# Any other line there disposes of nothing, so its deferral stays on the card. A disposal naming an
+# id the continuation does not carry disposed of nothing either, and the card refuses rather than
+# let the user believe a debt was settled.
+#
+# THE PREDECESSOR IS THE NEWEST CONTINUATION under the docs root, by mtime ("the next wave's Step 1
+# card reads the newest continuation", D21), and never the run's own. A requirements file is named
+# `<wave slug>.requirements.md`, so the run's own continuation is `record/<that slug>/continuation.md`;
+# it is skipped however new it is, because close-out reads through this same function and the
+# run's own continuation may already be written when it does.
+#
+# ONE READER, TWO CALLERS. `step1` prints the `open` lines; close-out calls `card.sh inherited
+# <requirements file>` and carries the `again` and `open` ones into the new continuation. The card
+# and the carry cannot disagree about what was left open, because they are one reading.
+_card_predecessor() {  # <docs root> <own wave slug> -> the newest other continuation, or nothing
+  local f best=""
+  for f in "$1"/record/*/continuation.md; do
+    [ -f "$f" ] || continue
+    [ "$f" != "$1/record/$2/continuation.md" ] || continue
+    if [ -z "$best" ] || [ "$f" -nt "$best" ]; then best="$f"; fi
+  done
+  printf '%s' "$best"
+}
+
+_card_disposals() {  # <requirements file> -> `<adopted|again|closed>\t<id>\t<line>` per disposal
+  [ -f "$1" ] && [ -r "$1" ] || return 0
+  awk '
+    { sub(/\r$/, ""); sub(/[ \t]+$/, "") }
+    /^## / { s = ($0 == "## Inherited deferrals"); next }
+    !s { next }
+    /^adopted:[ \t]+[^ \t]+#[0-9]+[ \t]+as[ \t]+REQ-[0-9]+$/ { split($0, f, /[ \t]+/); print "adopted\t" f[2] "\t" $0; next }
+    /^again:[ \t]+[^ \t]+#[0-9]+$/ { split($0, f, /[ \t]+/); print "again\t" f[2] "\t" $0; next }
+    /^closed:[ \t]+[^ \t]+#[0-9]+[ \t]+[^ \t]/ { split($0, f, /[ \t]+/); print "closed\t" f[2] "\t" $0 }' "$1"
+}
+
+# _card_inherited <requirements file> -> one `<open|adopted|again|closed>\t<deferred line>` per line of
+# the predecessor's `## Deferrals`, in its order and as written, then one `unknown\t<disposal line>`
+# per disposal naming none of them. The first disposal of an id is the one that counts.
+_card_inherited() {
+  local root cont slug
+  root="$(_card_plan_root "$1")"
+  [ -n "$root" ] || return 0
+  slug="${1##*/}"; slug="${slug%.requirements.md}"
+  cont="$(_card_predecessor "$(docs_root "$root")" "$slug")"
+  [ -n "$cont" ] || cont=/dev/null
+  CARD_DISPOSALS="$(_card_disposals "$1")" awk '
+    BEGIN {
+      n = split(ENVIRON["CARD_DISPOSALS"], d, "\n")
+      for (i = 1; i <= n; i++) {
+        if (split(d[i], p, "\t") < 3 || (p[2] in kind)) continue
+        kind[p[2]] = p[1]; said[p[2]] = p[3]; ord[++m] = p[2]
+      }
+    }
+    { sub(/\r$/, "") }
+    /^## / { s = ($0 ~ /^## Deferrals[ \t]*$/); next }
+    s && /^deferred:[ \t]/ {
+      split($0, f, /[ \t]+/); seen[f[2]] = 1
+      print ((f[2] in kind) ? kind[f[2]] : "open") "\t" $0
+    }
+    END { for (i = 1; i <= m; i++) if (!(ord[i] in seen)) print "unknown\t" said[ord[i]] }' "$cont"
+}
+
+# THE REFUSAL IS EXIT 2 WITH NOTHING ON STDOUT: the disposal is checked before the card's first line.
+_card_inherit_refuse() {  # <the disposal line>
+  printf 'card.sh: step1 refused — a disposal names a deferral the newest continuation does not carry\n  %s\n' \
+    "$1" >&2
+  exit 2
+}
+
+_card_step1() {  # <citation path> <artifact path as given>
+  local inh l
+  inh="$(_card_inherited "$2")"
+  l="$(printf '%s\n' "$inh" | sed -n "s/^unknown${CARD_TAB}//p" | head -1)"
+  [ -z "$l" ] || _card_inherit_refuse "$l"
   printf 'Step 1 · Requirements\n\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
   printf '\n'
@@ -1453,6 +1539,13 @@ _card_step1() {  # <artifact path>
   printf '\n  Not Doing\n'
   local b
   for b in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do _card_fold_at 4 "$b"; done
+  # Each open line as written, folded only where the budget makes it (its next line starts at the
+  # same indent, and only a line's first fold starts `deferred:`).
+  printf '\n  Inherited deferrals\n'
+  while IFS= read -r l; do
+    [ "${l%%"$CARD_TAB"*}" = open ] || continue
+    _card_fold_at 4 "${l#*"$CARD_TAB"}"
+  done <<< "$inh"
   printf '\n  Artifacts\n    requirements  %s\n\n' "$1"
   printf 'Do you approve these requirements? Reply "approved" to approve it.\n'
   printf 'explain <requirement>\n'
@@ -1757,6 +1850,12 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
 [ "$#" -ge 1 ] || _card_usage "no row kind"
 
 case "$1" in
+  inherited)
+    # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that
+    # names no file disposes of nothing; its name still says whose run it is.
+    [ "$#" -eq 2 ] || _card_usage "inherited takes exactly one requirements file path (got $(( $# - 1 )))"
+    _card_inherited "$2" | /usr/bin/grep -v "^unknown${CARD_TAB}"
+    exit 0 ;;
   step1|step2|step3)
     if [ "$1" = step2 ]; then
       [ "$#" -ge 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
@@ -1772,7 +1871,7 @@ case "$1" in
     fi
     _card_art="$(_card_artifact_rel "$2")"
     case "$1" in
-      step1) _card_step1 "$_card_art" ;;
+      step1) _card_step1 "$_card_art" "$2" ;;
       step2) _card_step2 "$_card_art" ;;
       step3) _card_step3 "$_card_art" "$2" ;;
     esac
