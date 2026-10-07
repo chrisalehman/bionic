@@ -45,6 +45,7 @@
 # USAGE
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
+#     bash card.sh rigor <word>                         (the Step 0 card's rigor line)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
@@ -78,6 +79,11 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/roots.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/fill.sh"
+# THE ONE READING OF A RIGOR WORD (wave-28 T44; REQ-16 AC-16.2, D35). A card prints a level by
+# its new word with its label and meaning, `rigor_print`, whichever vocabulary the plan carries.
+# And `budget_cap`, the one reader of a person's writer cap (wave-28 T9; D15).
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/run.sh"
 
 # THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The
 # `## Tasks` ledger has two shapes — the wave's eleven columns and the task run's six,
@@ -779,9 +785,6 @@ fm == 1 {
   else if (k == "requirements") REQSF = v
   else if (k == "spec") SPECF = v
   else if (k == "design") DPTR = v
-  else if (k == "parallel-budget") {
-    if (match(v, /writers=[0-9]+/)) WRITERS = substr(v, RSTART + 8, RLENGTH - 8)
-  }
   next
 }
 /^## / {
@@ -957,7 +960,6 @@ END {
   print "META" OFS "ledger" OFS LEDGER
   print "META" OFS "reqs" OFS REQSF
   print "META" OFS "approach" OFS APPROACH
-  print "META" OFS "writers" OFS WRITERS
   print "META" OFS "firstb" OFS FIRSTB
   print "META" OFS "mrows" OFS mrows
   print "META" OFS "spec" OFS SPECF
@@ -1002,7 +1004,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
           ledger) WCARD_LEDGER="$v" ;;   reqs) WCARD_REQS="$v" ;;
           approach) WCARD_APPROACH="$v" ;;
           scale) WCARD_SCALE="$v" ;;     design) WCARD_DESIGN="$v" ;;
-          writers) WCARD_WRITERS="$v" ;; firstb) WCARD_FIRSTB="$v" ;;
+          firstb) WCARD_FIRSTB="$v" ;;
           mrows) WCARD_MROWS="$v" ;;
           spec) WCARD_SPEC="$v" ;;       dptr) WCARD_DPTR="$v" ;;
         esac ;;
@@ -1018,6 +1020,12 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
             WCARD_ADRV[${#WCARD_ADRV[@]}]="${rest#*"$CARD_TAB"}" ;;
     esac
   done < <(printf '%s\n' "$out")
+  # THE WRITERS ARE A PERSON'S CAP, READ BY FIELD (wave-28 T9; D15): `budget_cap` (lib/run.sh)
+  # answers from a `parallel-budget:` line whose `source=` is `user` or `override`, one whole
+  # `writers=` field. The card's own awk used to cut the first SUBSTRING `writers=`, so
+  # `max_writers=9 writers=3` read 9 here and 3 to every other reader, and it took a probe's
+  # number for a ceiling. With no cap the card says the writers are not declared.
+  WCARD_WRITERS="$(budget_cap "$2")"; WCARD_WRITERS="${WCARD_WRITERS#writers=}"
   # THE ONE ASSIGNMENT OF THE SCALE, made before any row is spec'd: `_card_spec task`
   # reads it, and a whole card is the only caller that can know it.
   case "$WCARD_SCALE" in
@@ -1798,6 +1806,7 @@ _card_step3() {  # <citation path> <artifact path as given>
   _card_branches
   printf '\n'
   CARD_ROWS=( ${WCARD_TROW[@]+"${WCARD_TROW[@]}"} )
+  [ "$CARD_SCALE" != "task" ] || _card_rigor_cells
   _card_render_batch task
   printf '\n'
   if [ "$CARD_SCALE" = "task" ]; then
@@ -1809,12 +1818,37 @@ _card_step3() {  # <citation path> <artifact path as given>
   else
     _card_chain_block "$2"
   fi
-  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s · auditor %s\n' \
-    "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "${WCARD_RIGOR:-not declared}"
+  # THE RIGOR HAS A LINE OF ITS OWN: its label and meaning do not fit beside a configured floor
+  # inside the line budget, and the level is what the approval reads at a glance.
+  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s\n    %s\n' \
+    "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "$(_card_rigor_line "$WCARD_RIGOR")"
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
   printf '\nDo you approve this plan? Reply "approved" to approve it.\n'
   printf 'show evals <req> · show task <n> · explain <decision>\n'
+}
+
+# ── THE REVIEW RIGOR, PRINTED (wave-28 T44; AC-16.2) ─────────────────────────
+#
+# A level prints as `review rigor: <level> (<n> independent reader[s])` and never by an old word.
+# A plan that declares no rigor, or a word that is no level, says so in place of the level; a
+# task-scale row's rigor cell prints the level's word alone (the column is headed `rigor`, and the
+# meaning is the Verification line's), and a cell that names no level prints as it is written.
+_card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification block's rigor phrase
+  [ -n "${1:-}" ] || { printf 'review rigor: not declared'; return 0; }
+  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (low, medium or high)" "$1"
+}
+_card_rigor_cells() {  # rewrites CARD_ROWS' third cell (a task row's rigor) to its level
+  local i row id rest cell tail lvl
+  for i in ${CARD_ROWS[@]+"${!CARD_ROWS[@]}"}; do
+    row="${CARD_ROWS[$i]}"
+    id="${row%%"$CARD_TAB"*}"; rest="${row#*"$CARD_TAB"}"
+    [ "$rest" != "$row" ] || continue
+    tail="${rest#*"$CARD_TAB"}"; [ "$tail" != "$rest" ] || continue
+    cell="${tail%%"$CARD_TAB"*}"
+    lvl="$(rigor_level "$cell")" || continue
+    CARD_ROWS[$i]="${id}${CARD_TAB}${rest%%"$CARD_TAB"*}${CARD_TAB}${lvl}${tail#"$cell"}"
+  done
 }
 
 # ── ONE BATCH, RENDERED ──────────────────────────────────────────────────────
@@ -1852,6 +1886,11 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
 [ "$#" -ge 1 ] || _card_usage "no row kind"
 
 case "$1" in
+  rigor)
+    [ "$#" -eq 2 ] || _card_usage "rigor takes exactly one word (got $(( $# - 1 )))"
+    rigor_print "$2" && exit 0
+    printf "card.sh: '%s' is no review rigor — use low, medium or high\n" "$2" >&2
+    exit 1 ;;
   inherited)
     # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that
     # names no file disposes of nothing; its name still says whose run it is.

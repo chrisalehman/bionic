@@ -46,7 +46,9 @@
 #      for `npm run build`) decides. A token that carried WHITESPACE INSIDE QUOTES is prose
 #      by construction and is replaced with an opaque marker that matches nothing. A SCRIPT
 #      at argv[0] decides too: `./tests/run.sh` runs the suite as surely as
-#      `bash tests/run.sh` does.
+#      `bash tests/run.sh` does. A SHELL WHOSE SCRIPT IS A BARE VARIABLE (`bash "$s"` in a
+#      glob loop, `bash "$SUITE"`) is a suite claim naming that variable, unless every text
+#      in the command that binds it plainly names no suite (wave-28 T11, D13).
 #
 # THE SUPERSET RULE (R-12, critic C-1 2026-08-30). Steps 2 and 3 together exist so that this
 # reading is a superset of the `(^|[;&| ])bash +tests/run\.sh` string match bionic 1.3.1
@@ -334,6 +336,26 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # scratch `<dir>/run.sh` or `scripts/run.sh` was refused as the full tree.
     function is_runner(p) {
       return (p == "tests/run.sh" || p ~ /\/tests\/run\.sh$/)
+    }
+    # WHAT IS A SUITE NAME, ONCE (wave-28 T36; read-structure-p20 #1). A file name ending
+    # `.test.sh`, or `test.sh` itself. The script-operand arm, the argv[0] arm, `could_suite` and
+    # the runner`s `--only` operands all ask this one function; it was spelled three times, and
+    # the third had drifted from the runner rule (`is_runner`, above).
+    function is_suite_name(c) {
+      return (c == "test.sh" || c ~ /\.test\.sh$/)
+    }
+    # THE DOOR`S OPERANDS (wave-28 T36; D27). `tests/run.sh --only a.test.sh b.test.sh` runs the
+    # named suites, so it claims each one, not the full tree: sets LAST_ONLY to the names, space
+    # joined, and returns 1 when `--only` is there. The names are read up to the next option or the
+    # first redirection (`2>&1`, `> log`).
+    function runsh_only(a, from, n,   j, on) {
+      LAST_ONLY = ""; on = 0
+      for (j = from; j <= n; j++) {
+        if (a[j] == "--only") { on = 1; continue }
+        if (substr(a[j], 1, 1) == "-" || a[j] ~ /^[0-9&]*[<>]/) { if (on) on = 2; continue }
+        if (on == 1) LAST_ONLY = LAST_ONLY (LAST_ONLY == "" ? "" : " ") a[j]
+      }
+      return (on > 0)
     }
 
     # ---------- 1. heredocs ----------
@@ -648,8 +670,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # positions this does. It is set ONLY for the two script forms that name a file —
     # pytest, `npm test`, `go test` and `make test` are suite-class and name no
     # tests/<x>.test.sh, so they leave it empty and the caller reports no target.
-    function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift, n0) {
-      LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0
+    function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift, n0, shc, nv, v) {
+      LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0; LAST_ONLY = ""
       n = argv_tok(s, a)
       if (n == 0) return "none"
       # `--dry-run` IS A MODE THAT RUNS NOTHING (the walk, A-36a; critic K-2). It is read
@@ -683,21 +705,45 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         # here: the command names a file it will not run, so it is not suite-class and it
         # names no target for any budget to hold. `-o <mode>` takes its value as a separate
         # word, which comes off with it or the mode word becomes a phantom script.
-        i = 2
-        while (i <= n && substr(a[i], 1, 1) == "-") {
+        # AN OPTION THAT TAKES A VALUE TAKES THE NEXT WORD (wave-28 T36; read-adversarial-p20 #3,
+        # #4). `--rcfile`/`--init-file <file>` and each `o` or `O` in a cluster (`-O extglob`,
+        # `-euo pipefail`, `+O nullglob`) take the word after them, as bash reads it, so that word is
+        # never read as the script. A `+` option sets a mode off and is skipped like a `-` one.
+        i = 2; shc = 0
+        while (i <= n && (substr(a[i], 1, 1) == "-" || (substr(a[i], 1, 1) == "+" && a[i] ~ /^[+][A-Za-z]+$/))) {
+          if (a[i] == "--") { i++; break }
           if (sh_noexec(a[i])) return "none"
-          if (a[i] == "-o") { i++; if (i <= n && a[i] == "noexec") return "none" }
+          if (a[i] == "--rcfile" || a[i] == "--init-file") { i += 2; continue }
+          if (a[i] ~ /^-[A-Za-z]*c[A-Za-z]*$/) shc = 1
+          if (a[i] ~ /^[-+][A-Za-z]+$/) {
+            nv = gsub(/[oO]/, "&", a[i])
+            for (v = 1; v <= nv; v++) {
+              i++
+              if (i <= n && substr(a[i - v], 1, 1) == "-" && a[i] == "noexec") return "none"
+            }
+          }
           i++
         }
         a1 = (i <= n ? a[i] : ""); b1 = base(a1)
         if (b1 ~ /^claude-(bootstrap|reset)\.sh$/) return "bootstrap"
-        if (b1 == "test.sh" || b1 ~ /\.test\.sh$/) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
+        if (is_suite_name(b1)) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
         # A bare `run.sh` is only a suite invocation when a cd put us in its
         # directory — which is exactly the shape `cd <worktree>/tests && bash
         # run.sh` takes, and the shape the path-component requirement missed
         # (critic C-2). On its own the word says nothing, so it stays none.
         if (b1 == "run.sh" && (is_runner(a1) || (a1 == "run.sh" && CD_SEEN))) {
           if (runsh_noop(a, i + 1, n)) return "none"
+          if (runsh_only(a, i + 1, n) && LAST_ONLY == "") return "none"
+          LAST_TARGET = b1; LAST_PATH = a1; return "suite"
+        }
+        # A SCRIPT NAMED BY A BARE VARIABLE IS A SUITE CLAIM (wave-28 T11, D13; wave-27 review
+        # pass 8 F5). `for s in tests/*.test.sh; do bash "$s"; done` and `bash "$SUITE"` read
+        # none here, so a suite run that way was never budgeted, wrapped or gated. A variable as
+        # the whole script operand, or as its last path component (`bash "tests/$n"`), is now
+        # claimed under its own name: the unexpanded-name arm of the budget refuses it and the wrap
+        # names it `?`. Not after `-c`, whose operand is a command string, and not when every
+        # text that binds the variable plainly names no suite (`var_plain`, section 6).
+        if (!shc && b1 ~ /^[$]([A-Za-z_][A-Za-z0-9_]*|[{][A-Za-z_][A-Za-z0-9_]*[}])$/ && !var_plain(b1)) {
           LAST_TARGET = b1; LAST_PATH = a1; return "suite"
         }
         return "none"
@@ -710,8 +756,9 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # through every arm to none. The path component is what separates running
       # it from naming it: `ls tests/run.sh` is argv[0] ls and stays none, and a
       # bare `run.sh` word is not something the shell would run either.
-      if (index(a[1], "/") > 0 && ((b0 == "run.sh" && is_runner(a[1])) || b0 == "test.sh" || b0 ~ /\.test\.sh$/)) {
+      if (index(a[1], "/") > 0 && ((b0 == "run.sh" && is_runner(a[1])) || is_suite_name(b0))) {
         if (b0 == "run.sh" && runsh_noop(a, 2, n)) return "none"
+        if (b0 == "run.sh" && runsh_only(a, 2, n) && LAST_ONLY == "") return "none"
         LAST_TARGET = b0
         LAST_PATH = a[1]
         return "suite"
@@ -767,6 +814,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       LAST_RUN = cmdnorm_run(s)
       c = classify_argv_read(s)
       if (c != "suite") { LAST_KIND = ""; return c }
+      if (LAST_ONLY != "") { LAST_KIND = "only"; return c }
       if (LAST_TARGET != "") { LAST_KIND = "file"; return c }
       LAST_TARGET = LAST_RUN
       LAST_KIND = "run"
@@ -912,6 +960,86 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
       return out
     }
+    # A VARIABLE THAT PLAINLY NAMES NO SUITE (wave-28 T11, D13). The bare-variable arm in
+    # classify_argv_read claims `bash "$V"` as a suite unless this answers 1: every segment of
+    # the command that assigns V (`assigns`, above) is a `for V in <words>` header or a plain
+    # `V=<value>` head, no word or value could name a suite (`could_suite`), and one of them
+    # comes before the segment being read (VP_I). Anything else is a name nothing here can vouch
+    # for, so it stays a claim: another kind of assignment (`read`, `export`), no binding before
+    # the use, or a command `expand_unsafe` distrusts. Inside an unwrapped `bash -c` string the
+    # same top-level bindings are read: an unexported one is empty to the inner shell, so it runs
+    # no suite either, and an exported one is an assignment this does not trust. Read only when
+    # the arm fires, so a command with no such operand pays nothing for it.
+    function var_plain(w,   V, j, h, nw, W, x, known) {
+      if (VP_I < 1) return 0
+      V = w; gsub(/[${}]/, "", V)
+      if (VP_UNSAFE < 0) VP_UNSAFE = expand_unsafe(VP_K, seg, out)
+      if (VP_UNSAFE) return 0
+      known = 0
+      for (j = 1; j <= VP_K; j++) {
+        if (!assigns(seg[j], V)) continue
+        h = HEAD[j]
+        if (match(h, "^for[ \t]+" V "[ \t]+in([ \t]|$)")) {
+          nw = split(trim(substr(h, RLENGTH + 1)), W, /[ \t]+/)
+          if (nw < 1) return 0
+          for (x = 1; x <= nw; x++) if (could_suite(W[x])) return 0
+        } else if (index(h, V "=") == 1) {
+          if (could_suite_value(substr(h, length(V) + 2))) return 0
+        } else return 0
+        if (j < VP_I) known = 1
+      }
+      return known
+    }
+    # Could this word, once the shell expands it, name a suite? Its LAST PATH COMPONENT decides,
+    # since that is the basename the suite arm reads: a literal one is a suite name or it is not;
+    # a glob can match a suite unless the literal text after its last `*`, `?` or `]` rules out
+    # every name ending `.test.sh` or `run.sh`; an expansion, a brace or a quote left in it is
+    # unknown, so it could. `docs/*.md` and `$T/probe.sh` cannot; `tests/*`, `*.sh` and `$f` can.
+    # A `run.sh` component is the runner only where `is_runner` would say so: in a directory named
+    # `tests`, or one an expansion or a glob could make `tests` (wave-28 T36; read-structure-p20 #1,
+    # read-adversarial-p20 #2). `scripts/*run.sh` and `x/run.sh` cannot; `x/*/run.sh` and a bare
+    # `run.sh` (a `cd` may have put it there) can.
+    function could_suite(w,   c, t, d) {
+      w = dequote_whole(w)
+      if (w == "") return 0
+      c = w; sub(/.*\//, "", c)
+      if (c ~ /[$`(){}\\"\047]/) return 1
+      d = (index(w, "/") ? substr(w, 1, length(w) - length(c) - 1) : "")
+      t = c; sub(/^.*[*?\]]/, "", t)
+      if (t == c) return (is_suite_name(c) || (c == "run.sh" && could_tests_dir(d, index(w, "/"))))
+      return (t == "" || sfx_of(".test.sh", t) || sfx_of(t, ".test.sh") || (sfx_of("run.sh", t) && could_tests_dir(d, index(w, "/"))))
+    }
+    function could_tests_dir(d, slashed,   e, t) {
+      if (!slashed) return 1
+      e = d; sub(/.*\//, "", e)
+      if (e ~ /[$`(){}\\"\047]/) return 1
+      t = e; sub(/^.*[*?\]]/, "", t)
+      if (t == e) return (e == "tests")
+      return (t == "" || sfx_of("tests", t))
+    }
+    function sfx_of(s, t) { return (length(t) <= length(s) && substr(s, length(s) - length(t) + 1) == t) }
+    # The value of `V=<value>` as one word, or 1 (could) when it is more than one: a prefix
+    # assignment in front of a command, or a quoted value holding a space. `$(mktemp …)` is a
+    # fresh file, never a suite, unless its own text names one or a path follows it.
+    # A LEADING COMMAND SUBSTITUTION IS READ PAST (wave-28 T36; read-adversarial-p20 #1, A-orch-93).
+    # `$(git rev-parse --show-toplevel)/tool.sh` holds a space, and a space used to make the whole
+    # value unknown before its last path component was read; the component after the substitution
+    # is what the suite arm reads, so it decides. A substitution with nothing after it is unknown.
+    function could_suite_value(v,   r, m) {
+      v = dequote_whole(v)
+      if (match(v, /^[$][(]mktemp[^()`;&|]*[)]/) || match(v, /^`mktemp[^()`;&|]*`/)) {
+        if (index(substr(v, 1, RLENGTH), "test.sh") || index(substr(v, 1, RLENGTH), "run.sh")) return 1
+        r = substr(v, RLENGTH + 1)
+        return (r == "" ? 0 : (substr(r, 1, 1) == "/" ? could_suite(r) : 1))
+      }
+      if (match(v, /^[$][(][^()`]*[)]/) || match(v, /^`[^`]*`/)) {
+        r = substr(v, RLENGTH + 1)
+        if (r != "" && substr(r, 1, 1) == "/" && r !~ /[ \t]/) return could_suite(r)
+        return 1
+      }
+      if (v ~ /[ \t]/) return 1
+      return could_suite(v)
+    }
     # NX[i] texts XT[i, 1..NX[i]] per segment: the segment itself, or one per value.
     function expand_all(k, sg, all,   i, j, f, h, V, val, pv, nc, AV, AJ, AL, na, x, y, nx, nn, X, Y, W, nw, BV, BL, nb, over, b) {
       for (i = 1; i <= k; i++) { NX[i] = 1; XT[i, 1] = sg[i] }
@@ -999,8 +1127,19 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         }
         if (over || !hit) continue
         for (x = 1; x <= nx; x++) {
-          LAST_TARGET = ""; LAST_KIND = ""; LAST_PATH = ""
-          if (class_seg(trim(X[x]), 0) != "suite" || LAST_KIND != "file") continue
+          LAST_TARGET = ""; LAST_KIND = ""; LAST_PATH = ""; VP_I = i
+          # THE DOOR LOOP (wave-28 T36): a body `tests/run.sh --only "$s.test.sh"` resolves to
+          # one door line per value, in the runner path as typed.
+          if (class_seg(trim(X[x]), 0) == "suite" && LAST_KIND == "only") {
+            no = split(LAST_ONLY, ON, " ")
+            for (oj = 1; oj <= no; oj++) {
+              if (index(ON[oj], "$") || index(ON[oj], "`")) continue
+              t = LAST_PATH " --only " ON[oj]
+              if (!(t in seen)) { seen[t] = 1; print t }
+            }
+            continue
+          }
+          if (LAST_KIND != "file") continue
           if (LAST_PATH == "" || index(LAST_PATH, "$") || index(LAST_PATH, "`")) continue
           t = "bash " LAST_PATH
           if (!(t in seen)) { seen[t] = 1; print t }
@@ -1110,6 +1249,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # into segments() and overwrites SEPKIND.
       if (mode == "targets") for (tj = 1; tj <= k; tj++) TSK[tj] = SEPKIND[tj]
       compound_pass(k, seg)
+      # What var_plain (section 6) reads: the top-level segments, and the one it is reading.
+      VP_K = k; VP_UNSAFE = -1; VP_I = 0
       # mode=looplines: cmd_suite_loop_lines (wave-24 T13) — section 7, ahead of expand_all.
       if (mode == "looplines") { loop_lines(k, seg); exit }
       expand_all(k, seg, out)
@@ -1122,6 +1263,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         for (x = 1; x <= NX[i]; x++) {
           t = trim(XT[i, x])
           LAST_TARGET = ""; LAST_KIND = ""; LAST_RUN = ""
+          VP_I = i
           cls = class_seg(t, 0)
           if (mode == "targets") {
             # TWO SUITE RUNS SHARE ONE EXIT CODE ONLY ACROSS `&&` (wave-26 T63, critic K4-N1).
@@ -1139,8 +1281,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
             }
             # ONE LINE PER DISTINCT CLAIM, in position order. A command naming the same
             # suite twice states one budget claim, and the caller compares a set.
-            if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && !(LAST_TARGET in tgt_seen)) {
-              tgt_seen[LAST_TARGET] = 1
+            if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && (LAST_KIND == "only" || !(LAST_TARGET in tgt_seen))) {
+              if (LAST_KIND != "only") tgt_seen[LAST_TARGET] = 1
               # KIND, TARGET, RUN AND PATH, tab-separated. The shell wrappers are the only
               # callers: `cmd_suite_claims` scopes the path to a repository and drops it,
               # `cmd_suite_targets` keeps the basename of the file claims. The path answers
@@ -1152,6 +1294,17 @@ _cmd_class_awk() {  # <mode> ; command on stdin
               # so an empty column anywhere but the end shifts every column after it by one.
               # Measured here, not reasoned about — a run claim (no path) handed its run to
               # the path variable and left the run empty.
+              if (LAST_KIND == "only") {
+                # ONE CLAIM PER NAMED SUITE (T36), scoped to the runner`s own directory.
+                od = LAST_PATH; sub(/[^\/]*$/, "", od)
+                no = split(LAST_ONLY, ON, " ")
+                for (oj = 1; oj <= no; oj++) {
+                  ob = base(ON[oj])
+                  if (("only:" ob) in tgt_seen) continue
+                  tgt_seen["only:" ob] = 1
+                  printf "%s\t%s\t%s\t%s\n", "only", ob, LAST_RUN, od ob
+                }
+              } else
               printf "%s\t%s\t%s\t%s\n", LAST_KIND, LAST_TARGET, LAST_RUN, LAST_PATH
             }
           } else {
@@ -2109,14 +2262,18 @@ cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per
   #     is a name nothing here can vouch for.
   #
   # The reading's closing `split` line (wave-26 T63) is the stamp's business, not a claim.
+  #
+  # `only` IS A FILE CLAIM MADE THROUGH THE DOOR (wave-28 T36; D27): one per suite that
+  # `tests/run.sh --only` names, its path in the runner's own directory, scoped like `file`. The
+  # kind stays apart so the wall can tell a suite run through the runner from a bare one.
   local _root="${2-}" _k _b _r _p _s
   printf '%s' "${1-}" | _cmd_class_awk targets | while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] && [ "$_k" != split ] || continue
-    if [ "$_k" != "file" ]; then printf '%s\t%s\t%s\n' "$_k" "$_b" "$_r"; continue; fi
+    if [ "$_k" != "file" ] && [ "$_k" != "only" ]; then printf '%s\t%s\t%s\n' "$_k" "$_b" "$_r"; continue; fi
     [ -n "$_b" ] || continue
     _s=0
     [ -z "$_root" ] || cmd_claim_scope "$_root" "$_b" "$_p" || _s=$?
-    [ "$_s" = 1 ] || printf 'file\t%s\t%s\n' "$_b" "$_r"
+    [ "$_s" = 1 ] || printf '%s\t%s\t%s\n' "$_k" "$_b" "$_r"
   done
   return 0
 }
@@ -2157,7 +2314,7 @@ cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suit
   # read this; a caller that also holds runner forms reads the claims.
   local _k _b _r
   cmd_suite_claims "${1-}" "${2-}" | while IFS=$'\t' read -r _k _b _r; do
-    [ "$_k" = "file" ] || continue
+    [ "$_k" = "file" ] || [ "$_k" = "only" ] || continue
     printf '%s\n' "$_b"
   done
   return 0

@@ -2190,7 +2190,7 @@ plant_request() {
 # 11a — no room at the gate: the five-minute load over the share. The fixture has ready work
 # and no open row, so a tick that filled would fill.
 R11A="$(make_repo s11-noroom)"; new_roster "$R11A"
-wave_plan "$R11A" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R11A" "writers=4 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| DONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| NEXT | 4 | build | fixture task | implementor | DONE | 15m | REQ-x | a.sh | pending |"
 gate_case s11a 0.1
@@ -2209,7 +2209,7 @@ expect_absent "11a7 …or a withheld line" "fill withheld" "$OUT"
 
 # 11b — ONE gate line per tick, on QUIET and on FILL alike, and never a rung beside it.
 R11B="$(make_repo s11-gate-quiet)"; new_roster "$R11B"
-wave_plan "$R11B" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
+wave_plan "$R11B" "writers=8 suites=2 worktrees=8 test_jobs=18 source=user" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
 add_row "$R11B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 gate_case s11b 0.1
@@ -2223,7 +2223,7 @@ expect_eq "11b4 …and no rung line (the count extractor reads the gate line abo
   "$(count_lines_matching 'poker: rung=' "$OUT")"
 
 R11B2="$(make_repo s11-gate-fill)"; new_roster "$R11B2"
-wave_plan "$R11B2" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
+wave_plan "$R11B2" "writers=8 suites=2 worktrees=8 test_jobs=18 source=user" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| NEXT | 4 | build | fixture task | implementor | A | 15m | REQ-x | a.sh | pending |"
 PLAN_R11B2="$R11B2/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
@@ -2236,7 +2236,7 @@ expect_eq "11b7 …still exactly one gate line" "1" "$(count_lines_matching 'pok
 # The two exit paths above the scheduler: the armed first tick (no roster file) and DISARM.
 R11B4="$(make_repo s11-gate-no-roster)"
 poke "$R11B4" arm
-wave_plan "$R11B4" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
+wave_plan "$R11B4" "writers=8 suites=2 worktrees=8 test_jobs=18 source=user" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
 poke "$R11B4" tick
 expect_contains "11b8 the pre-dispatch (no-roster) tick decides QUIET" "decision=QUIET" "$OUT"
@@ -2291,7 +2291,7 @@ rm -rf "$POKER_MUT_PLANEDIT_ROOT"
 # 11d — over the share the tick names what holds the memory, and stops no one. The admitted
 # request is held by this suite's own shell; nothing is named for a stop.
 R11D="$(make_repo s11-over-share)"; new_roster "$R11D"
-wave_plan "$R11D" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R11D" "writers=8 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| B | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 add_row "$R11D" status=intended name=young-suite-runner deliverable=b.md duration="4 hours" \
@@ -2316,7 +2316,7 @@ expect_absent "11d5 under the share the same store prints no over-share line (11
 # 4.0 the gate has room while 4.0 + the owed runs stays within 6.4: three rows, then a no.
 mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready tasks
   local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
+  wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=18 source=user" \
     "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
@@ -2380,14 +2380,16 @@ poke "$R11C6" tick
 expect_eq "FG.9 with no cost on record one row is offered: the next would take all the room" \
   "poker: FILL ONE" "$(fill_line)"
 
-# A plan with no budget line still prints the gate line, and says why it is not filling.
+# A plan with no budget line still prints the gate line. §NOBUDGET (wave-28 T9; D15, AC-2.9): no
+# plan owes the line, so the gate alone sizes its fill, and the key is named nowhere. Until wave-28
+# this plan filled nothing and the tick named the key Step 0 was to write.
 R11C7="$(make_repo s11-gate-nobudget)"; new_roster "$R11C7"
 wave_plan "$R11C7" "-" "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 gate_case s11c7 0.1
 poke "$R11C7" tick
 expect_contains "FG.10 a plan with no parallel-budget still prints the gate line" "$GATE_LINE_QUIET" "$OUT"
-expect_contains "FG.11 …and says why it is not filling, naming the key (wave-19 REQ-3 AC-3.2)" \
-  "carries no parallel-budget: writers=" "$OUT"
+expect_contains "§NOBUDGET.1 …and the gate sizes its fill: the ready row is offered" "poker: FILL A" "$OUT"
+expect_absent "§NOBUDGET.1b …naming no parallel-budget: key" "parallel-budget" "$OUT"
 
 # NARROW and its counter file stay gone (AC-17), and no tick writes a .holds sibling.
 R11C8="$(mk_rung_repo s11-no-holds)"
@@ -2416,7 +2418,7 @@ section "Section 12: FILL — gap, readiness, and table order (AC-29, S7)"
 
 # ---------- 12a: three ready, gap two -> exactly two, in table order ----------
 R12A="$(make_repo s12-fill-two)"; new_roster "$R12A"
-wave_plan "$R12A" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12A" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
   "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
@@ -2446,14 +2448,14 @@ expect_absent "…and does not reach the third" "THREE" "$(printf '%s\n' "$OUT" 
 # 12a-T22-a: the id is free -> the name IS the id (this is the invariant every other
 # fixture in this section rests on, asserted here rather than assumed).
 R12AT="$(make_repo s12-fill-name-free)"; new_roster "$R12AT"
-wave_plan "$R12AT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12AT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12AT" 8192 1.0 tick
 expect_contains "12a-T22-a an unspent id is its own agent name" "poker: FILL ONE" "$OUT"
 
 # 12a-T22-b: the id already has a CLOSED row -> the name is `ONE-r2`.
 R12BT="$(make_repo s12-fill-name-r2)"; new_roster "$R12BT"
-wave_plan "$R12BT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12BT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 add_row "$R12BT" name=ONE deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
 swept_marker_write "$(roster_of "$R12BT")" "$(iso_ago 30)" "$SID" ONE a000 MET
@@ -2466,7 +2468,7 @@ R12CT="$(make_repo s12-fill-name-r3)"; new_roster "$R12CT"
 # writers=4: the two spent rows below are still OPEN to the budget (their deliverable was
 # never written), so a ceiling of 2 would close the gap and this case would prove nothing
 # about naming.
-wave_plan "$R12CT" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12CT" "writers=4 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 add_row "$R12CT" name=ONE deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
 swept_marker_write "$(roster_of "$R12CT")" "$(iso_ago 30)" "$SID" ONE a000 MET
@@ -2480,7 +2482,7 @@ expect_absent "…and never re-offers the taken one" "poker: FILL ONE-r2" "$OUT"
 # the dispatch wall's in-flight arm uses, so the two cannot disagree about which names are
 # available.
 R12DT="$(make_repo s12-fill-name-other)"; new_roster "$R12DT"
-wave_plan "$R12DT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12DT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 add_row_to "$R12DT" "other-session-id" name=ONE deliverable=a.md duration="15m"
 poke_pressure "$R12DT" 8192 1.0 tick
@@ -2647,7 +2649,7 @@ unset CLAUDE_CONFIG_DIR
 #
 # The same plan, one open row on the roster: writers=2 minus one open row is a gap of one.
 R12B="$(make_repo s12-fill-gap-one)"; new_roster "$R12B"
-wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
   "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -2658,7 +2660,7 @@ expect_absent "…and the second ready task waits" "TWO" "$(printf '%s\n' "$OUT"
 
 # ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
 R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
-wave_plan "$R12C" "writers=1 suites=1 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12C" "writers=1 suites=1 worktrees=8 test_jobs=8 source=user" \
   "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 add_row "$R12C" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12C" 8192 1.0 tick
@@ -2676,13 +2678,15 @@ wave_plan "$R12D" "-" \
   "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12D" 8192 1.0 tick
 expect_eq "a plan with no parallel-budget line still ticks cleanly (exit 0)" "0" "$RC"
-expect_absent "…and fills nothing" "poker: FILL" "$OUT"
-expect_contains "…naming the missing key as the reason, as Step 0 writes it" \
-  "carries no parallel-budget: writers=<n>" "$OUT"
+# §NOBUDGET (wave-28 T9; D15, AC-2.9): the old note named the key and sent the run to Step 0;
+# no plan owes the line now. fails-when: the tick names the key or tells Step 0 to write it.
+expect_contains "§NOBUDGET.2 …and decides" "decision=" "$OUT"
+expect_absent "§NOBUDGET.2b …naming no missing key" "parallel-budget" "$OUT"
+expect_absent "§NOBUDGET.2c …nor Step 0's probe" "resources_budget" "$OUT"
 
 # ---------- 12e: a pending task with an unlanded dependency is not ready ----------
 R12E="$(make_repo s12-unlanded-dep)"; new_roster "$R12E"
-wave_plan "$R12E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |" \
   "| DEPENDENT | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
   "| FREE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
@@ -2692,7 +2696,7 @@ expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$(printf '%s\n' "$OUT
 
 # Several deps, one of them unlanded: ALL of them must be landed, not any.
 R12F="$(make_repo s12-multi-dep)"; new_roster "$R12F"
-wave_plan "$R12F" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12F" "writers=8 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| B | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |" \
   "| C | 4 | build | fixture task | implementor | A,B | 15m | REQ-x | a.sh | pending |"
@@ -2704,7 +2708,7 @@ expect_absent "…so C waits for every one of them" " C" "$(printf '%s\n' "$OUT"
 # dependency holds its task back — a task held costs a batch, a task dispatched onto an
 # unlanded dependency costs the writer's whole run.
 R12G="$(make_repo s12-unknown-dep)"; new_roster "$R12G"
-wave_plan "$R12G" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12G" "writers=8 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| ORPHAN | 4 | build | fixture task | implementor | NOT-IN-THIS-TABLE | 15m | REQ-x | a.sh | pending |" \
   "| FINE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12G" 8192 1.0 tick
@@ -2721,7 +2725,7 @@ f12h="$R12H/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 mkdir -p "$(dirname "$f12h")"
 {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
   printf '## Tasks\n\n'
   printf '| status | owner | id | step | complexity | deps |\n|---|---|---|---|---|---|\n'
@@ -2741,7 +2745,7 @@ f12i="$R12I/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 mkdir -p "$(dirname "$f12i")"
 {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
   printf 'The task table looks like this:\n\n'
   printf '```\n## Tasks\n\n'
@@ -2764,7 +2768,7 @@ f12j="$R12J/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 mkdir -p "$(dirname "$f12j")"
 {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
   printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 9\n\n'
   printf -- '- Step 9: delivered: bionic 9.9.9; report: record/fixture/close-out.md\n\n'
   printf '## Tasks\n\n'
@@ -2792,7 +2796,7 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   mkdir -p "$(dirname "$f")"
   {
     printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n%s\n\n' "$current" "$SP_APPROVED_LINE"
     printf -- '- Step %s: in progress\n\n' "$current"
     printf '## Tasks\n\n'
@@ -2867,7 +2871,7 @@ STOP_HOOK_12L="${BIONIC_HOOKS_DIR}/stop.sh"
 export CLAUDE_CONFIG_DIR="$S12_CFG"
 s12_answer none
 R12L="$(make_repo s12-differential)"; new_roster "$R12L"
-wave_plan "$R12L" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R12L" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| BASE | 4 | build | landed, its row still open on the roster | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
   "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -2930,7 +2934,7 @@ s12l_tick_ids() {  # <the tick's whole channel> -> the FILL ids, sorted, space-t
 }
 s12l_met_repo() {  # <label> -> a repo: writers=2, BASE landed, ONE/TWO ready, one MET row
   local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| BASE | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -2970,7 +2974,7 @@ expect_eq "12l6 …and the stop wall, reading the same ledger, names the same tw
 # names too.
 s12l_unmet_repo() {  # <label> -> a repo: writers=2, BASE UNMET+open on the roster, ONE/TWO ready
   local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| BASE | 4 | build | landed, its row still open on the roster | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -3010,7 +3014,7 @@ expect_absent "12l7e …and an unknown-panel tick reports no GONE line (nothing 
 # the report still recommends it — but has to name what it actually is.
 s12l_stilllive_repo() {  # <label> -> a repo: writers=2, BASE STILL-LIVE (progress artifact), ONE/TWO ready
   local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| BASE | 4 | build | still working, progress artifact fresh | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -3039,7 +3043,7 @@ S12L7H_MARKER="bionic-t2f-claim-marker-$$"
 S12L7H_PID=$!
 s12l_stilllive_claim_repo() {  # <label> -> a repo: writers=2, BASE STILL-LIVE (claimed process), ONE/TWO ready
   local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| BASE | 4 | build | still working, claimed process live | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -3074,7 +3078,7 @@ s12l_ambiguous_repo() {  # <label> -> a repo: writers=2, two contracts share BAS
   # itself calls into, tests/lib/roster-row.sh) takes the override directly, the same way
   # tests/session-sweeper.test.sh's own "one name, two contracts" fixture (`RA`/`dup`) does.
   local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| BASE | 4 | build | two dispatches share this name | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -3938,9 +3942,9 @@ expect_eq "resolve_run under bound-open (control): the plan, open, silent" \
 R18E="$(make_repo s18-scheduler)"; new_roster "$R18E"
 poke "$R18E" arm
 P18E_MINE="$(wave_plan_at "$R18E" 'epic-18/mine.plan.md' \
-  "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" "| MINE-TASK | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
+  "writers=4 suites=2 worktrees=8 test_jobs=8 source=user" "| MINE-TASK | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
 P18E_THEIRS="$(wave_plan_at "$R18E" 'epic-18/theirs.plan.md' \
-  "writers=9 suites=2 worktrees=8 test_jobs=8 source=probe" "| THEIRS-TASK | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
+  "writers=9 suites=2 worktrees=8 test_jobs=8 source=user" "| THEIRS-TASK | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
 bind_marker "$R18E" "$P18E_MINE"
 # THE READING IS FIXTURE DATA, exactly as Section 11 makes it: a FILL assertion taken on
 # whatever memory this machine happens to have free is an assertion that passes or fails on
@@ -3995,7 +3999,7 @@ s19_fill() {  # <the tick's whole channel> -> the ids it filled, or empty
 }
 
 s19_plan() {  # <repo> — writers=2, one landed base and two pending tasks
-  wave_plan "$1" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  wave_plan "$1" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
@@ -4189,7 +4193,7 @@ poke_counted() {  # <repo> <args...> -> sets OUT, RC; appends to $S19I_COUNT
 }
 
 R19I="$(make_repo s19-one-parse)"; new_roster "$R19I"
-wave_plan "$R19I" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+wave_plan "$R19I" "writers=8 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
 S19I_NAMES=""
 S19I_N=1
@@ -4388,7 +4392,7 @@ s22_plan_at_current() {  # <repo> <current> -> the path, an eight-task writers=8
   {
     printf -- '---\n'
     printf 'governing-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan (mirrors the observed wave-01 shape)\n\n'
     printf '## SDLC State\n\ncurrent: %s\n' "$cur"
     # Approved exactly when the step says Step 3 has passed, so every row below still reads
@@ -4512,7 +4516,7 @@ s22_plan_no_current() {  # <repo> -> the path, the 22-fixture shape with no curr
   {
     printf -- '---\n'
     printf 'governing-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan (mirrors the observed wave-01 shape, minus current:)\n\n'
     printf '## SDLC State\n\n- Step 3: in progress\n\n'
     printf '## Tasks\n\n'
@@ -5135,7 +5139,7 @@ expect_absent "27d2 …and is not named on a NOTIFY" "rows=mute-writer" "$OUT"
 # The duty wall (payload/scripts/lib/stop.sh) reads the PRINTED line and is unchanged; what
 # changes is that a tick that ordered work no longer reports nothing was wanted.
 R27E="$(make_repo s27-fill)"; new_roster "$R27E"
-wave_plan "$R27E" "writers=8 suites=4 worktrees=32 test_jobs=8 source=probe" \
+wave_plan "$R27E" "writers=8 suites=4 worktrees=32 test_jobs=8 source=user" \
   "| T13 | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 s19_answer none
 poke_pressure "$R27E" 8192 1.0 tick
@@ -5152,7 +5156,7 @@ expect_eq "27e5 …and FILL is not the exit-1 band: NOTIFY alone is" "0" "$RC"
 # "ranked maximum" as against "first arm wins".
 R27F="$(make_repo s27-rank)"; new_roster "$R27F"
 mkdir -p "$R27F/.bionic/docs/record"
-wave_plan "$R27F" "writers=8 suites=4 worktrees=32 test_jobs=8 source=probe" \
+wave_plan "$R27F" "writers=8 suites=4 worktrees=32 test_jobs=8 source=user" \
   "| T13 | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 add_row "$R27F" name=overdue-writer status=identified agent_id=aover-one-27000000000000005 \
   deliverable="$R27F/.bionic/docs/record/over.md" duration="1 minute" \
@@ -5183,10 +5187,10 @@ s19_answer stale "open-writer:running"
 poke_split "$R27G" tick
 expect_contains "27g the stale-panel deferral prints as a note" \
   "poker: note: stand-down deferred" "$S27_OUT"
-expect_contains "27g2 …the missing budget prints as a note" \
-  "poker: note: no FILL —" "$S27_OUT"
-expect_contains "27g3 …and names the key it could not read, as Step 0 writes it" \
-  "parallel-budget: writers=" "$S27_OUT"
+expect_absent "27g2 …and the plan with no line takes no note (wave-28 T9: no plan owes the line)" \
+  "poker: note: no FILL" "$S27_OUT"
+expect_absent "27g3 …and names no key it could not read (D15: no plan owes the line)" \
+  "parallel-budget" "$S27_OUT"
 expect_absent "27g3b …and no longer calls the budget an opt-in (wave-19 REQ-3, ADR-035)" \
   "opts into" "$S27_OUT"
 expect_eq "27g4 the LAST stdout line is the decision line" "poker-tick/v1" \
@@ -6080,7 +6084,7 @@ s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2
     printf -- '---\n'
     printf 'governing-skill: superpowers:writing-plans\n'
     printf 'scale: task\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture task-scale plan\n\n'
     printf '## SDLC State\n\ncurrent: %s\n%s\n\n- %s: in progress\n\n' "$cur" "$SP_APPROVED_LINE" "$cur"
     printf '## Tasks\n\n'
@@ -6165,6 +6169,13 @@ jq -nc '{type:"assistant",isSidechain:false,
          message:{role:"assistant",content:[
            {type:"tool_use",id:"toolu_1",name:"Agent",input:{name:"T2",prompt:"row T2"}},
            {type:"tool_use",id:"toolu_2",name:"Agent",input:{name:"T3",prompt:"row T3"}}]}}' \
+  >> "$S31C_TR"
+# THE TURN SETS THE TWO ROWS' TASK ENTRIES IN PROGRESS (wave-28 T38; REQ-13, D30): a dispatch turn
+# owes one per row, and this row pins the fill alone.
+jq -nc '{type:"assistant",isSidechain:false,agentId:null,
+         message:{role:"assistant",content:[
+           {type:"tool_use",id:"toolu_u2",name:"TaskUpdate",input:{taskId:"2",status:"in_progress"}},
+           {type:"tool_use",id:"toolu_u3",name:"TaskUpdate",input:{taskId:"3",status:"in_progress"}}]}}' \
   >> "$S31C_TR"
 s31_stop "$R31C" "$S31C_TR"
 expect_eq "31c a turn that dispatched both ready rows is not refused" "" "$(s31_decision)"
@@ -6529,7 +6540,7 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
     printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
     printf '# fixture wave\n\n## SDLC State\n\ncurrent: %s\n' "$cur"
     printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
     printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
@@ -6783,7 +6794,7 @@ expect_eq "35p two operands is a usage error (exit 2)" "2" "$RC"
 S35Q_STOP="$(dirname "$POKER")/stop.sh"
 R35Q="$(make_repo s35q)"
 P35Q="$(plan_at "$R35Q" epic-99-fixture/wave-35q-refused.plan.md "$(
-  printf -- '---\ngoverning-skill: canonical-sdlc\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n---\n\n'
+  printf -- '---\ngoverning-skill: canonical-sdlc\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n---\n\n'
   plan_body 4
   printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -7126,7 +7137,7 @@ P40D="$(sp_plan_at_step "$R40D" 4 \
   "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
 /usr/bin/grep -v '^parallel-budget:' "$P40D" > "$P40D.new" && mv "$P40D.new" "$P40D"
 poke_pressure "$R40D" 8192 1.0 tick
-expect_contains "40d precondition: the tick takes the no-budget note" "carries no parallel-budget: writers=<n>" "$OUT"
+expect_absent "40d precondition: the tick names no budget key on a plan with no line" "parallel-budget" "$OUT"
 expect_contains "40d AC-3.3 with no budget the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40d" "$OUT"
 expect_contains "40d2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
 expect_eq "40d3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
@@ -7196,7 +7207,7 @@ s41_transcript() {  # <messages from w-1> <name:status>... -> this session's tra
 s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed deliverable
   local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
   local p; p="$(wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
-    "writers=1 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
   bind_marker "$r" "$p"
   echo "done" > "$r/w1-report.md"; backdate "$r/w1-report.md" 300
@@ -8052,7 +8063,7 @@ s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, 
   mkdir -p "$(dirname "$f")"
   {
     printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=%s suites=2 worktrees=8 test_jobs=8 source=probe\n' "$writers"
+    printf 'parallel-budget: writers=%s suites=2 worktrees=8 test_jobs=8 source=user\n' "$writers"
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
@@ -8783,7 +8794,7 @@ s50_plan() {  # <repo> <current> <approved-by line, or empty> -> the plan path
   mkdir -p "$(dirname "$f")"
   {
     printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n%s\n\n- Step %s: in progress\n\n' "$2" "$3" "$2"
     printf '## Tasks\n\n%s' "$SP_TASKS_HEADER"
     printf '| T1 | 4 | build | ready, the long one | implementor | — | 20m | REQ-x | a.sh | pending |\n'
@@ -9871,7 +9882,7 @@ mkdir -p "$(dirname "$P57T")"
   # A task-scale plan carries its base in the frontmatter (T45, A-orch-56): with none, a first
   # reading is refused and the judge exits 2 (section 63 pins that twin).
   printf 'base-sha: %s\n' "$S57T_B"
-  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
+  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
   printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
   printf -- '- T1: the fix, in .worktrees/01-task\n\n'
   printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
@@ -10927,7 +10938,7 @@ s63_task_plan() {  # <repo> <plan> -> a scale: task plan as 57t writes it, with 
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
     printf 'rigor: tested\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
     printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
     printf -- '- T1: the fix, in .worktrees/01-task\n\n'
     printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
@@ -11667,6 +11678,37 @@ expect_contains "65r2 …the header still reads the user's three" "parallel-budg
 expect_regex "65r3 …and derived= is still the probe's eight" \
   '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
 expect_eq "65r4 …one override line" "1" "$(/usr/bin/grep -c '^budget-override:' "$P65B" | tr -d ' ')"
+# §CAP-USER, THE VERB'S HALF (wave-28 T9; D15, REQ-2 AC-2.10). No plan owes the line, so `budget` on
+# a plan with none no longer refuses ("Step 0 writes it"): it writes `parallel-budget: writers=<n>
+# source=user` below the opening `---`, and an override line with no `derived=`, as nothing was
+# derived. On a 1.12.0 plan carrying the probe's line the cap in force is a person's (`budget_cap`),
+# which a probe line is not, so a number above the probe's is recorded, the probe's kept as
+# `derived=`. fails-when: the no-line plan is refused or left without a line; the probe's 8 refuses 12.
+R65N="$(make_repo s65-budget-noline)"; ( cd "$R65N" && git commit -q --allow-empty -m init )
+git -C "$R65N" config user.name "Dana Fixture"
+P65N="$(s42_plan "$R65N" 4)"
+/usr/bin/grep -v '^parallel-budget:' "$P65N" > "$P65N.tmp" && mv "$P65N.tmp" "$P65N"
+s42_snap "$R65N" "$P65N"
+expect_absent "65s0 meta: the plan carries no parallel-budget: line" "parallel-budget" "$(cat "$P65N")"
+poke "$R65N" budget writers=3 'three at most'
+expect_eq "65s §CAP-USER budget writers=3 on a plan with no line exits 0" "0" "$RC"
+expect_eq "65s2 …and writes the line, a person's" "parallel-budget: writers=3 source=user" \
+  "$(/usr/bin/grep '^parallel-budget:' "$P65N")"
+expect_regex "65s3 …with the override line, no derived= (nothing was derived)" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P65N")"
+expect_eq "65s4 …inside the leading frontmatter, first" "parallel-budget: writers=3 source=user" "$(sed -n 2p "$P65N")"
+R65Q="$(make_repo s65-budget-probe)"; ( cd "$R65Q" && git commit -q --allow-empty -m init )
+git -C "$R65Q" config user.name "Dana Fixture"
+P65Q="$(s42_plan "$R65Q" 4)"
+sed 's/^\(parallel-budget: .*\)source=user/\1source=probe/' "$P65Q" > "$P65Q.tmp" && mv "$P65Q.tmp" "$P65Q"
+s42_snap "$R65Q" "$P65Q"
+expect_contains "65t0 meta: the plan carries the probe's eight" "parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe" "$(cat "$P65Q")"
+poke "$R65Q" budget writers=12 'twelve'
+expect_eq "65t §CAP-USER the probe's 8 is no cap: writers=12 is recorded (exit 0)" "0" "$RC"
+expect_eq "65t2 …the line is the person's now" "parallel-budget: writers=12 suites=4 worktrees=32 test_jobs=8 source=user" \
+  "$(/usr/bin/grep '^parallel-budget:' "$P65Q")"
+expect_regex "65t3 …and derived= keeps the probe's eight" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=12$' "$(/usr/bin/grep '^budget-override:' "$P65Q")"
 POKE_BOUND="$S65_BOUND_WAS"
 
 
@@ -12454,7 +12496,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current finding-stated launch-sync proof-add release-check step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current finding-check finding-stated launch-sync proof-add release-check row-landed step-line task-add waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -12504,6 +12546,38 @@ expect_eq "69g7 …and leaves it holding nothing" "" "$(ls -A "$S69_EMPTY")"
 expect_eq "69g8 …while the plan's own directory holds no copy left behind" "wave-x.plan.md" "$(ls -A "${P69%/*}")"
 POKE_BOUND="$S69_BOUND_WAS"
 
+# ============================================================
+section "Section 70 §RIGOR: a plan carrying high advances where one carrying audited does, and is dealt the same set (wave-28 T44; REQ-16 AC-16.1; D35, A-orch-7)"
+# ============================================================
+# The judge reads the rigor word through lib/run.sh `rigor_level` (proof.sh `facts_owed`), so a
+# plan in the new words is dealt the readers the old word deals it: the same roles hold the same
+# questions, `current 8` is refused on the same missing fact and admitted on the same set. §61's
+# fixture, unchanged, with only its `rigor:` line set to each word of a pair.
+S70_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S70_H="$(git -C "$S61_WT" rev-parse HEAD 2>/dev/null)"
+expect_regex "70a0 precondition: §61's working branch still has a head" '^[0-9a-f]{40}$' "$S70_H"
+s70_deal() {  # <rigor> -> facts_owed's review lines at wave scale, one per line
+  bash -c '. "$1" && facts_owed "$2" wave' _ "$S61_LIB" "$1" 2>/dev/null | /usr/bin/grep '^review'
+}
+for s70p in audited:high peer-reviewed:medium tested:low; do
+  s70o="${s70p%%:*}"; s70n="${s70p#*:}"
+  expect_nonempty "70a $s70o is dealt readings (the extractor reads real output)" "$(s70_deal "$s70o")"
+  expect_eq "70b $s70n is dealt exactly what $s70o is" "$(s70_deal "$s70o")" "$(s70_deal "$s70n")"
+  for s70w in "$s70o" "$s70n"; do
+    s61_reset; s61_rigor "$s70w"; s61_owed "$S70_H" structure
+    s42_snap "$R61" "$P61"
+    poke "$R61" current 8
+    s42_unchanged "70c at $s70w, current 8 with no structure fact" 1 "$P61"
+    expect_contains "70c2 …at $s70w, naming the structure question's holder absent" \
+      "$(printf 'review\tstructure\t%s\tpiece\tabsent' "$(s70_deal "$s70o" | awk -F'\t' '$2 == "structure" { print $3; exit }')")" "$OUT"
+    s61_fact structure "$S70_H" pass piece; s61_fact structure "$S70_H" pass whole
+    poke "$R61" current 8
+    expect_eq "70d …at $s70w, the same plan with it advances (exit 0)" "0" "$RC"
+    expect_eq "70d2 …and reads current: 8" "8" "$(s61_cur)"
+  done
+done
+s61_reset
+POKE_BOUND="$S70_BOUND_WAS"
 
 # ============================================================
 section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"
@@ -12757,7 +12831,8 @@ expect_eq "SEV-shown5 …and the two lines follow the proof line they belong to 
 SEV_OWED="$(bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null)"
 expect_contains "SEV-owed proof_findings_owed prints a deferral with the table's priority" \
   'record/wave-01-fixture/t-S2-off.md#1 S2 off defer "the S2 off cell"' "$SEV_OWED"
-expect_contains "SEV-owed2 …and an unsure S1 with fix" 'record/wave-01-fixture/sh-unsure.md#1 S1 off fix "cannot run it here"' "$SEV_OWED"
+# An open check is printed as what it is, a check, not the priority it would take (wave-28 T41; D33, AC-8.6).
+expect_contains "SEV-owed2 …and an unsure S1 as the check it owes" 'record/wave-01-fixture/sh-unsure.md#1 S1 off check "cannot run it here"' "$SEV_OWED"
 expect_eq "SEV-owed3 …each finding once, though it has a deferred: and a check: line" "1" \
   "$(printf '%s\n' "$SEV_OWED" | /usr/bin/grep -c 'sh-defer-unsure.md#1 ')"
 
@@ -12797,7 +12872,20 @@ awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#2 S2 off \"
 poke_pressure "$RSEVT" 8192 1.0 tick
 expect_contains "SEV-tick the tick fills the ready row (the path it prints FINDING on)" "poker: FILL T1" "$OUT"
 expect_contains "SEV-tick2 …and prints a deferred finding with its priority" 'poker: FINDING record/w/rev.md#2 S2 off defer "a side path"' "$OUT"
-expect_contains "SEV-tick3 …and a finding that owes a check with its own" 'poker: FINDING record/w/rev.md#3 S1 on fix "unsure of it"' "$OUT"
+expect_contains "SEV-tick3 …and a finding that owes a check as the check it owes (wave-28 T41)" 'poker: FINDING record/w/rev.md#3 S1 on check "unsure of it"' "$OUT"
+
+# ---------- (wave-28 T41; D33) the two checks §FACT-shown owes are settled before the step is judged ----------
+# An open check holds `current 8` (§CHECK, at the end of this file), so §CUR8-sev, which judges the
+# verdict alone, starts with none open: the S1 is refuted and the deferral settled at its own rating,
+# by a check record whose header names a third agent (`written-by:`), neither the reviewer nor a writer.
+chk_rec() {  # <name> <writer, or - for none> -> a check record under the record directory
+  { printf '# check\n\n'; [ "$2" = - ] || printf 'written-by: %s\n' "$2"; printf '\nwhat the check ran and saw\n'; } > "$SEV_DIR/$1.md"
+}
+chk_rec chk-pre chk-agent
+poke "$RSEV" finding-check record/wave-01-fixture/sh-unsure.md#1 refuted record/wave-01-fixture/chk-pre.md
+expect_eq "CHECK-pre the unsure S1 is refuted by a third agent's check record (exit 0)" "0" "$RC"
+poke "$RSEV" finding-check record/wave-01-fixture/sh-defer-unsure.md#1 unsettled record/wave-01-fixture/chk-pre.md
+expect_eq "CHECK-pre2 …and the unsure deferral settled at its own rating, so it is an open deferral (exit 0)" "0" "$RC"
 
 # ---------- §CUR8-sev (AC-8.5): the step into integration follows the derived verdict ----------
 # The plan moves to current: 7 and every other fact it owes is planted at C1 by the production
@@ -13053,5 +13141,374 @@ rm -rf "$RD_MUT"
 
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 POKE_BOUND="$RD_BOUND_WAS"
+
+# ============================================================
+section "§SHARE-VERB: session-poker.sh share prints the machine's share and share <n> sets it (wave-28 T10; REQ-2 AC-2.1 surfaces; D16)"
+# ============================================================
+#
+# `share` prints what `gate_share` prints; `share <n>` writes one integer, 1 to 100, to
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share` (the path expression gate_share reads) and refuses anything
+# else with one line. Main thread only: `share` joins the existing contract-verb arm's list. EVERY drive here names
+# its own CLAUDE_CONFIG_DIR (and a HOME of its own where it unsets it), so no row can write this machine's file.
+SV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"; SV_HOME_WAS="$HOME"
+SV_ROOT="$(mktemp -d "$TMPROOT/share-verb.XXXXXX")"
+SV_R="$(make_repo share-verb)"
+new_roster "$SV_R"
+roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$(roster_of "$SV_R")"
+SV_CCD="$SV_ROOT/ccd"; SV_FILE="$SV_CCD/bionic/share"; mkdir -p "$SV_CCD"
+sv_poke() {  # <args...> -> the verb under CLAUDE_CONFIG_DIR=$SV_CCD, from the engaged fixture repo
+  export CLAUDE_CONFIG_DIR="$SV_CCD"
+  poke "$SV_R" "$@"
+}
+sv_read() { { read -r SV_V < "$SV_FILE"; } 2>/dev/null; printf '%s' "${SV_V:-}"; SV_V=""; }
+sv_gate_read() {  # <ccd> [<env assignment>...] -> what gate_share prints under that config directory
+  local ccd="$1"; shift
+  env "$@" CLAUDE_CONFIG_DIR="$ccd" HOME="$SV_ROOT/nohome" bash -c '. "$1" 2>/dev/null; gate_share' _ \
+    "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/gate.sh"
+}
+
+sv_poke share
+expect_eq "SV-1 with no share file the verb prints 80 (exit 0)" "0|80" "$RC|$OUT"
+expect_eq "SV-1b …and writes nothing: reading made no file" "no" "$([ -e "$SV_FILE" ] && echo yes || echo no)"
+sv_poke share 70
+expect_eq "SV-2 share 70 exits 0" "0" "$RC"
+expect_eq "SV-2b …writes the file: one integer on one line" "70" "$(sv_read)"
+expect_eq "SV-2c …the file is that line and nothing else" "1" "$(wc -l < "$SV_FILE" | tr -d ' ')"
+expect_eq "SV-2d …and says so on one line" "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+expect_contains "SV-2e …naming the value" "70" "$OUT"
+sv_poke share
+expect_eq "SV-3 share prints 70 now (exit 0)" "0|70" "$RC|$OUT"
+expect_eq "SV-3b …and gate_share, read under the same config directory, prints what the verb printed" "70" "$(sv_gate_read "$SV_CCD")"
+
+# the edges, then the refusals — each beside a set that wrote, so an unchanged file is read as unchanged
+sv_poke share 1
+expect_eq "SV-4 share 1 is the lowest value taken" "0|1" "$RC|$(sv_read)"
+sv_poke share 100
+expect_eq "SV-4b share 100 is the highest" "0|100" "$RC|$(sv_read)"
+sv_poke share 070
+expect_eq "SV-4c share 070 is read as the integer 70 and written as 70" "0|70" "$RC|$(sv_read)"
+for SV_BAD in 0 101 abc -5 5.5 "" " 7" 7x 1000 +5 0x10 99999999999999999999; do
+  sv_poke share 70
+  sv_poke share "$SV_BAD"
+  expect_eq "SV-5 share '$SV_BAD' is refused (exit 1) with one line" "1|1" "$RC|$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  expect_contains "SV-5b …that begins REFUSED and names the range" "poker: REFUSED — " "$OUT"
+  expect_eq "SV-5c …and the share is as it was (70)" "70" "$(sv_read)"
+done
+sv_poke share 70
+sv_poke share 50 60
+expect_eq "SV-6 two operands are the usage error (exit 2)" "2|70" "$RC|$(sv_read)"
+expect_eq "SV-6b …and the file is as it was, a set beside it having written (70)" "70" "$(sv_read)"
+
+# a share that cannot be written is refused, one line
+SV_BLOCK="$SV_ROOT/blocked"; : > "$SV_BLOCK"
+CLAUDE_CONFIG_DIR_SAVE="$SV_CCD"; SV_CCD="$SV_BLOCK/under-a-file"
+sv_poke share 40
+expect_eq "SV-7 a config directory that cannot hold the file is refused (exit 1) with one line" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+expect_contains "SV-7b …saying the share is unchanged" "unchanged" "$OUT"
+SV_CCD="$CLAUDE_CONFIG_DIR_SAVE"
+
+# no CLAUDE_CONFIG_DIR: the file is under $HOME/.claude, as the gate reads it
+SV_HOME="$SV_ROOT/home"; mkdir -p "$SV_HOME"
+unset CLAUDE_CONFIG_DIR; export HOME="$SV_HOME"
+poke "$SV_R" share 60
+SV_RC_H="$RC"
+poke "$SV_R" share
+SV_OUT_H="$OUT"
+export HOME="$SV_HOME_WAS"
+expect_eq "SV-8 with CLAUDE_CONFIG_DIR unset the verb writes \$HOME/.claude/bionic/share and reads it back" "0|60" "$SV_RC_H|$SV_OUT_H"
+expect_eq "SV-8b …and gate_share under that HOME reads the same" "60" \
+  "$(env -u CLAUDE_CONFIG_DIR HOME="$SV_HOME" bash -c '. "$1" 2>/dev/null; gate_share' _ \
+      "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/gate.sh")"
+
+# BIONIC_CLAUDE_HOME moves the claude home for most readers; the gate's share file ignores it, so the verb's write must
+# meet the gate's read there too (T2's path choice stands; read-structure-p6 #3)
+SV_BCH="$SV_ROOT/bch"; mkdir -p "$SV_BCH/bionic"
+printf '33\n' > "$SV_BCH/bionic/share"
+export BIONIC_CLAUDE_HOME="$SV_BCH"
+sv_poke share 45
+SV_RC_B="$RC"
+unset BIONIC_CLAUDE_HOME
+expect_eq "SV-9 with BIONIC_CLAUDE_HOME set the verb writes the CLAUDE_CONFIG_DIR file (exit 0, 45)" "0|45" "$SV_RC_B|$(sv_read)"
+expect_eq "SV-9b …gate_share under the same two variables reads that write" "45" \
+  "$(sv_gate_read "$SV_CCD" BIONIC_CLAUDE_HOME="$SV_BCH")"
+expect_eq "SV-9c …and the other claude home's file was not touched (33)" "33" "$(head -1 "$SV_BCH/bionic/share")"
+
+# the share is the machine's, not a run's: a directory no run engaged answers the same
+SV_PLAIN="$SV_ROOT/plain"; mkdir -p "$SV_PLAIN"
+export CLAUDE_CONFIG_DIR="$SV_CCD"
+poke "$SV_PLAIN" share 55
+expect_eq "SV-10 from a directory that is no engaged run the verb still sets the share (exit 0, 55)" "0|55" "$RC|$(sv_read)"
+poke "$SV_PLAIN" share
+expect_eq "SV-10b …and prints it" "0|55" "$RC|$OUT"
+
+# usage lists it
+poke "$SV_R"
+expect_contains "SV-11 the usage names the share verb" "session-poker.sh share" "$OUT"
+
+# the arm: a subagent may call neither form
+sv_wall() {  # <command> -> the real wall's exit and refusal for a rostered subagent's call
+  local input
+  input="$(jq -n --arg s "$SID" --arg cwd "$SV_R" --arg cmd "$1" '{session_id: $s, cwd: $cwd,
+    hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $cmd},
+    tool_use_id: "toolu_sv", agent_id: "a-implementor", agent_type: "implementor"}')"
+  GATE_ERR="$( cd "$SV_R" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 \
+    bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" 2>&1 >/dev/null )"
+  GATE_RC=$?
+}
+sv_wall "bash $POKER share 90"
+expect_eq "SV-12 a subagent's share <n> is refused by the existing arm (exit 2)" "2" "$GATE_RC"
+expect_contains "SV-12b …naming the rule" "a subagent may not change a contract or the plan" "$GATE_ERR"
+sv_wall "bash $POKER share"
+expect_eq "SV-12c …and its bare share, the arm's list being by verb (exit 2)" "2" "$GATE_RC"
+sv_wall "bash $POKER tick"
+expect_eq "SV-12d control: a read-only verb of the same agent is admitted" "0" "$GATE_RC"
+expect_eq "SV-12e …and none of those calls wrote the share (still 55)" "55" "$(sv_read)"
+
+# mutation: a poker that writes to BIONIC_CLAUDE_HOME's directory, as claude_home would, and the meet row reads it
+SV_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-sv-mut.XXXXXX")"
+mkdir -p "$SV_MUT/hooks" "$SV_MUT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$SV_MUT/scripts/lib"
+for SV_SIB in "$(dirname "$POKER")"/*; do
+  [ "$(basename "$SV_SIB")" = session-poker.sh ] && continue
+  ln -s "$SV_SIB" "$SV_MUT/hooks/$(basename "$SV_SIB")"
+done
+sed 's|SH_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"|SH_FILE="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/bionic/share"|' "$POKER" > "$SV_MUT/hooks/session-poker.sh"
+expect_eq "SV-mut0 the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff "$POKER" "$SV_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+SV_REAL_POKER="$POKER"; POKER="$SV_MUT/hooks/session-poker.sh"
+export BIONIC_CLAUDE_HOME="$SV_BCH"
+sv_poke share 11
+SV_RC_M="$RC"
+unset BIONIC_CLAUDE_HOME
+POKER="$SV_REAL_POKER"
+expect_eq "SV-mut1 the doctored verb still runs (exit 0)" "0" "$SV_RC_M"
+expect_eq "SV-mut1b …and writes the other home's file, where the real verb wrote the gate's (SV-9, SV-9c go red on it)" "11" \
+  "$(head -1 "$SV_BCH/bionic/share")"
+expect_ne "SV-mut1c …so gate_share under the two variables no longer reads the write" "11" \
+  "$(sv_gate_read "$SV_CCD" BIONIC_CLAUDE_HOME="$SV_BCH")"
+rm -rf "$SV_MUT" "$SV_ROOT"
+if [ "$SV_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$SV_CCD_WAS"; fi
+export HOME="$SV_HOME_WAS"
+
+# ============================================================
+section "§ROW-LABEL: the launch record binds a launch by its row= first, the name after (wave-28 T7; REQ-3 AC-3.4, D17)"
+# ============================================================
+# A brief's `Row: <id>` is written on the launch row as `row=<id>` (hooks/dispatch-preflight.sh).
+# `launch-sync` reads it before the name match: an agent named `w-T24` briefed `Row: T23` sets T23
+# active, never T24, whose id its name carries (AC-3.4's `w-A2` case, made stricter: a plan id is `T<n>`). The name match stays the fallback (Section 49's
+# w-T6, which carries no row=). FIXTURE: Section 49's plan shape, rows T23 and T24 pending, a real
+# linked tree recorded for the name. fails-when: T23 stays pending, or T24 is set active.
+SRL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRL="$(make_repo s-t7-row)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
+PRL="$(s34_plan "$RRL" 4)"
+sed -e 's/^| T2 | 4 | build | the second build | implementor |/| T2 | 4 | build | the second build | w-T2 |/' \
+    "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
+awk '{ print } /^- T5: pending dispatch/ { print "- T23: pending dispatch"; print "- T24: pending dispatch" }
+  /^\| T2 \| 4 \| build/ {
+  print "| T23 | 4 | build | the labelled build | — | — | 30 | REQ-1 | h.sh | — | — | pending |"
+  print "| T24 | 4 | build | the named build | — | — | 30 | REQ-1 | i.sh | — | — | pending |" }' "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
+new_roster "$RRL"
+add_row "$RRL" name=w-T2 agent_id=a-w-T2 launched_at="$(iso_ago 600)"
+printf '%s|row=T23|lands_on=a.test.sh\n' "$(mkrow name=w-T24 agent_id=a-w-T24 launched_at="$(iso_ago 60)" deliverable=a2.md \
+  duration="45 minutes" subagent_type=bionic:implementor)" >> "$(roster_of "$RRL")"
+TRL_TREE="$(cd "$RRL" && pwd -P)/.worktrees/01-T23"; git -C "$RRL" worktree add -q -b wt/01-T23 "$TRL_TREE" >/dev/null 2>&1
+printf 'workspace/v1|session=%s|name=w-T24|path=%s|branch=wt/01-T23|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-07T01:00:00Z\n' \
+  "$SID" "$TRL_TREE" "$PRL" >> "$RRL/.bionic/tmp/workspaces-$SID.state"
+expect_contains "RL precondition: the roster row carries row=T23" "|row=T23" "$(grep 'name=w-T24' "$(roster_of "$RRL")")"
+expect_contains "RL precondition: T23 is in the table, pending" "| h.sh | — | — | pending |" "$(grep '^| T23 |' "$PRL")"
+s34_gate "$RRL"
+expect_eq "RL precondition: the fixture is admitted by the real commit gate" "0" "$GATE_RC"
+poke_pressure "$RRL" 8192 1.0 tick
+expect_contains "RL1 the tick records w-T24 under its Row: label, T23, and says so" "poker: LAUNCHED T23 w-T24" "$OUT"
+expect_contains "RL1b …row T23 is active in its tree, its agent w-T24" \
+  "| w-T24 | — | 30 | REQ-1 | h.sh | .worktrees/01-T23 | 01234567 | active |" "$(grep '^| T23 |' "$PRL")"
+expect_contains "RL1c …and T24, which the name alone would have matched, stays pending" "| i.sh | — | — | pending |" \
+  "$(grep '^| T24 |' "$PRL")"
+POKE_BOUND="$SRL_BOUND_WAS"
+
+# ============================================================
+section "§CHECK: a finding the reviewer cannot settle owes a check — the settle verb, the effective rating at every read, and the step held while a check is open (wave-28 T41; REQ-8 AC-8.6; D33)"
+# ============================================================
+#
+# An `unsure:` finding writes `check: <record>#<n> <S> <reach> "<title>"` at registration (§SEV), and
+# the finding is neither a fix nor a deferral until a check settles it:
+#
+#   finding-check <record>#<n> settled <S> <reach> <check record>   ` settled=<S>:<reach> by=<check record>`
+#   finding-check <record>#<n> refuted <check record>               ` refuted by=<check record>`
+#   finding-check <record>#<n> unsettled <check record>             ` settled=<its own S>:<reach> by=…`
+#
+# appended to the check: line in place, through the plan transaction; a settlement the table defers
+# writes the finding's `deferred:` line too. Every read of a registered record applies the effective
+# rating (lib/proof.sh `proof_finding_rating`): the owed reader, the tick, and the judge, which derives
+# a reading's result again from its findings. `current 8` is refused while a check: line carries
+# neither ` settled=` nor ` refuted`, naming each. The check record is a file under the record
+# directory whose `written-by: <name>` line names an agent that is neither the reviewer on the
+# finding's proof line nor the agent of a `## Tasks` row whose Files hold the finding's file.
+# FIXTURE FIDELITY: §SEV's repository, plan and roster; each reading is registered by the real verb.
+CHK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=chk-crit agent_id=a-chk-crit subagent_type=bionic:critic \
+     files="$(sev_files "k-base k-open k-fixto k-defer k-note k-ref k-uns k-w")")" >> "$SEV_RS"
+chk_id() { printf 'record/wave-01-fixture/%s.md#1' "$1"; }
+chk_line() { /usr/bin/grep -F "check: $(chk_id "$1") " "$PSEV"; }
+chk_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(chk_id "$1") "; }
+chk_cur() { sed -n 's/^current: //p' "$PSEV"; }
+CHK_A=record/wave-01-fixture/chk-a.md
+chk_rec chk-a chk-agent; chk_rec chk-rev chk-crit; chk_rec chk-writer implementor; chk_rec chk-anon -
+mkdir -p "$RSEV/notes"; printf 'written-by: chk-agent\n' > "$RSEV/notes/chk-out.md"
+expect_contains "CHECK-0 precondition: the Tasks row whose Files hold b.sh names implementor as its agent" \
+  "| implementor | — | 30 | REQ-1 | b.sh |" "$(/usr/bin/grep '^| T2 |' "$PSEV")"
+# The working head moved past C1 after §CUR8-sev (§RC-STATED commits the changelog), so the facts the
+# judge reads are planted again at it (§CUR8-sev's way), and each reading below reads to it.
+SEV_C1="$(git -C "$SEV_WT" rev-parse HEAD)"
+sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-07T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
+sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
+sev_rec k-base flag "findings: 1" "finding: 1 S4 off - a word the reader rated" 
+sev_cur 4; sev_add k-base chk-crit; sev_cur 7
+poke "$RSEV" current 8
+expect_eq "CHECK-0b precondition: with every fact at the working head and no check open, current 8 is admitted" "0|8" "$RC|$(chk_cur)"
+
+# ---------- an open check holds the step ----------
+sev_cur 4
+sev_rec k-open flag "findings: 1" "finding: 1 S3 off - a message the reader could not rate" "unsure: 1 which shells print it"
+sev_add k-open chk-crit
+expect_eq "CHECK-1 §CHECK AC-8.6 an unsure finding registers and writes its check: line (exit 0)" \
+  "0|check: $(chk_id k-open) S3 off \"a message the reader could not rate\"" "$RC|$(chk_line k-open)"
+expect_eq "CHECK-2 …the owed reader prints it as what it is, a check, not a priority" \
+  "$(chk_id k-open) S3 off check \"a message the reader could not rate\"" "$(chk_owed k-open)"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "CHECK-3 §CHECK current 8 while a check: line carries neither settled= nor refuted" 1 "$PSEV"
+expect_contains "CHECK-3b …naming the open check" "$(chk_id k-open) S3 off \"a message the reader could not rate\"" "$OUT"
+expect_contains "CHECK-3c …and the verb that settles it" "finding-check <record>#<n>" "$OUT"
+# unsettled: the line's own rating stands, and with no check open the step is admitted.
+sev_cur 4
+poke "$RSEV" finding-check "$(chk_id k-open)" unsettled "$CHK_A"
+expect_eq "CHECK-4 unsettled settles at the line's own rating (exit 0)" \
+  "0|check: $(chk_id k-open) S3 off \"a message the reader could not rate\" settled=S3:off by=$CHK_A" "$RC|$(chk_line k-open)"
+expect_eq "CHECK-4b …and every read takes the table's priority for it again" \
+  "$(chk_id k-open) S3 off note \"a message the reader could not rate\"" "$(chk_owed k-open)"
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "CHECK-4c …and current 8 is admitted once no check is open" "0|8" "$RC|$(chk_cur)"
+sev_cur 4; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-check "$(chk_id k-open)" settled S1 on "$CHK_A"
+s42_unchanged "CHECK-5 a second settlement of a settled check: line" 1 "$PSEV"
+expect_contains "CHECK-5b …naming the settlement it already carries" "settled=S3:off" "$OUT"
+
+# ---------- settled to fix: the reading's result is derived again ----------
+sev_rec k-fixto flag "findings: 1" "finding: 1 S3 off - a path the reader could not run" "unsure: 1 needs a second machine"
+sev_add k-fixto chk-crit
+poke "$RSEV" finding-check "$(chk_id k-fixto)" settled S1 on "$CHK_A"
+expect_eq "CHECK-6 settled <S> <reach> appends settled=<S>:<reach> by=<check record> (exit 0)" \
+  "0|check: $(chk_id k-fixto) S3 off \"a path the reader could not run\" settled=S1:on by=$CHK_A" "$RC|$(chk_line k-fixto)"
+expect_eq "CHECK-6b …and the owed reader rates it as settled, to fix" \
+  "$(chk_id k-fixto) S1 on fix \"a path the reader could not run\"" "$(chk_owed k-fixto)"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "CHECK-6c …and current 8 is refused on a reading written result=flag: its result is derived through the settled rating" 1 "$PSEV"
+expect_contains "CHECK-6d …naming that reading failing" \
+  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/k-fixto.md')" "$OUT"
+sev_cur 4
+
+# ---------- settled to defer: the deferred: line is written ----------
+sev_rec k-defer flag "findings: 1" "finding: 1 S4 off - wording the reader could not judge" "unsure: 1 the audience is unknown"
+sev_add k-defer chk-crit
+expect_eq "CHECK-7-pre precondition: an unsure note writes no deferred: line" "0" "$(/usr/bin/grep -c "^deferred: $(chk_id k-defer) " "$PSEV")"
+poke "$RSEV" finding-check "$(chk_id k-defer)" settled S2 off "$CHK_A"
+expect_eq "CHECK-7 a settlement the table defers writes the finding's deferred: line (exit 0)" \
+  "0|deferred: $(chk_id k-defer) S2 off \"wording the reader could not judge\"" "$RC|$(/usr/bin/grep "^deferred: $(chk_id k-defer) " "$PSEV")"
+expect_eq "CHECK-7b …and the owed reader gives it defer" "$(chk_id k-defer) S2 off defer \"wording the reader could not judge\"" "$(chk_owed k-defer)"
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "CHECK-7c …and a deferral does not hold the step: current 8 is admitted" "0|8" "$RC|$(chk_cur)"
+sev_cur 4
+
+# ---------- settled to a note: a reading written result=fail is admitted ----------
+sev_rec k-note fail "findings: 1" "finding: 1 S1 on - a crash the reader could not reproduce" "unsure: 1 no core file"
+sev_add k-note chk-crit
+poke "$RSEV" finding-check "$(chk_id k-note)" settled S4 on "$CHK_A"
+expect_eq "CHECK-8 settled to a note (exit 0), and the owed reader gives it note" \
+  "0|$(chk_id k-note) S4 on note \"a crash the reader could not reproduce\"" "$RC|$(chk_owed k-note)"
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "CHECK-8b …and current 8 is admitted though the proof line says result=fail: the judge derives it through the settled rating" \
+  "0|8" "$RC|$(chk_cur)"
+sev_cur 4
+
+# ---------- refuted: the finding is dropped ----------
+sev_rec k-ref fail "findings: 1" "finding: 1 S2 on - a leak the reader could not show" "unsure: 1 the tool is not here"
+sev_add k-ref chk-crit
+poke "$RSEV" finding-check "$(chk_id k-ref)" refuted "$CHK_A"
+expect_eq "CHECK-9 refuted appends refuted by=<check record> (exit 0)" \
+  "0|check: $(chk_id k-ref) S2 on \"a leak the reader could not show\" refuted by=$CHK_A" "$RC|$(chk_line k-ref)"
+expect_eq "CHECK-9b …and every read drops it: the owed reader prints nothing for it" "" "$(chk_owed k-ref)"
+sev_cur 7; poke "$RSEV" current 8
+expect_eq "CHECK-9c …and current 8 is admitted on the reading written result=fail" "0|8" "$RC|$(chk_cur)"
+sev_cur 4
+
+# ---------- unsettled keeps the line's own rating, the higher one ----------
+sev_rec k-uns fail "findings: 1" "finding: 1 S1 off - a race the reader could not time" "unsure: 1 needs load"
+sev_add k-uns chk-crit
+poke "$RSEV" finding-check "$(chk_id k-uns)" unsettled "$CHK_A"
+expect_eq "CHECK-10 unsettled keeps S1 off: the owed reader gives it fix (exit 0)" \
+  "0|$(chk_id k-uns) S1 off fix \"a race the reader could not time\"" "$RC|$(chk_owed k-uns)"
+sev_cur 7; s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" current 8
+s42_unchanged "CHECK-10b …and current 8 is refused, the reading failing at the rating the record wrote" 1 "$PSEV"
+expect_contains "CHECK-10c …naming that reading failing" \
+  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/k-uns.md')" "$OUT"
+sev_cur 4
+
+# ---------- who may write a check record, and where ----------
+sev_rec k-w flag "findings: 1" "finding: 1 S3 off b.sh:3 a call the reader could not trace" "unsure: 1 the caller is generated"
+sev_add k-w chk-crit
+expect_eq "CHECK-11-pre precondition: k-w registers with its check: line (exit 0)" "0|1" "$RC|$(chk_line k-w | wc -l | tr -d ' ')"
+for c in "chk-rev@by the finding's reviewer@chk-crit" "chk-writer@by the writer of the code the finding names@implementor" \
+         "chk-anon@that does not say who wrote it@written-by:" "chk-missing@that does not exist@does not exist"; do
+  f="${c%%@*}"; rest="${c#*@}"; why="${rest%%@*}"; want="${rest#*@}"
+  s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" refuted "record/wave-01-fixture/$f.md"
+  s42_unchanged "CHECK-11 a check record $why ($f)" 1 "$PSEV"
+  expect_contains "CHECK-11 …$f says why" "$want" "$OUT"
+done
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" refuted "$RSEV/notes/chk-out.md"
+s42_unchanged "CHECK-12 a check record outside the record directory" 1 "$PSEV"
+expect_contains "CHECK-12b …naming the record directory" "is not under record/" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/nowhere.md#3 refuted "$CHK_A"
+s42_unchanged "CHECK-13 a <record>#<n> with no check: line" 1 "$PSEV"
+expect_contains "CHECK-13b …naming why" "carries no check: line for record/wave-01-fixture/nowhere.md#3" "$OUT"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" settled S5 on "$CHK_A"
+s42_unchanged "CHECK-14 a settlement at a rating outside the scale" 1 "$PSEV"
+poke "$RSEV" finding-check "$(chk_id k-w)" settled S3 on "$CHK_A"
+expect_eq "CHECK-15 the same finding settled on a third agent's record is admitted (the refusals above were the writer's)" \
+  "0|check: $(chk_id k-w) S3 off \"a call the reader could not trace\" settled=S3:on by=$CHK_A" "$RC|$(chk_line k-w)"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" confirmed "$CHK_A"
+s42_unchanged "CHECK-16 usage: a fourth form" 2 "$PSEV"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" settled S1 "$CHK_A"
+s42_unchanged "CHECK-16b usage: a settlement with no reach" 2 "$PSEV"
+s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/k-w.md refuted "$CHK_A"
+s42_unchanged "CHECK-16c usage: a finding that is not <record>#<n>" 2 "$PSEV"
+
+# ---------- the tick prints each open check once ----------
+awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#4 S2 off \"both lines\""; print "check: record/w/rev.md#4 S2 off \"both lines\""; d = 1 }' \
+  "$PSEVT" > "$PSEVT.tmp" && mv "$PSEVT.tmp" "$PSEVT"
+poke_pressure "$RSEVT" 8192 1.0 tick
+expect_nonempty "CHECK-17-pre the tick printed FINDING lines (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FINDING ')"
+expect_eq "CHECK-17 the tick prints a finding with a deferred: and an open check: line once, as the check it owes" \
+  'poker: FINDING record/w/rev.md#4 S2 off check "both lines"' "$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'poker: FINDING record/w/rev.md#4 ')"
+
+# ---------- the mutation arm: the seam returning the line's own rating for a settled line ----------
+CHK_MUT="$(mktemp -d "$TMPROOT/chk-mut.XXXXXX")"
+CHK_NEEDLE='settled=*:*) s="${st#settled=}"; r="${s#*:}"; s="${s%%:*}" ;;'
+anchor "$SEV_LIB" "$CHK_NEEDLE" 1
+CHK_N="$CHK_NEEDLE" awk 'BEGIN { n = ENVIRON["CHK_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "settled=*:*) : ;;" substr($0, i + length(n)); print }' \
+  "$SEV_LIB" > "$CHK_MUT/proof.sh"
+chk_rate() { bash -c '. "$1"; proof_finding_rating "$2" "$3" "$4" "$5"' _ "$1" "$PSEV" "$2" "$3" "$4" 2>/dev/null; }
+expect_eq "CHECK-mut0 the mutant differs from the library in one line" "1" "$(diff "$SEV_LIB" "$CHK_MUT/proof.sh" | /usr/bin/grep -c '^>')"
+expect_eq "CHECK-mut1 the library rates the finding settled to fix at its settlement" "S1 on fix" "$(chk_rate "$SEV_LIB" "$(chk_id k-fixto)" S3 off)"
+expect_eq "CHECK-mut2 the mutant runs: it drops the refuted finding as the library does" "" "$(chk_rate "$CHK_MUT/proof.sh" "$(chk_id k-ref)" S2 on)"
+expect_eq "CHECK-mut2b …and rates a finding with no check: line at its own rating" "S2 off defer" \
+  "$(chk_rate "$CHK_MUT/proof.sh" record/wave-01-fixture/t-S2-off.md#1 S2 off)"
+expect_ne "CHECK-mut3 …and returns the line's own rating for the settled line, so CHECK-6b goes red" \
+  "S1 on fix" "$(chk_rate "$CHK_MUT/proof.sh" "$(chk_id k-fixto)" S3 off)"
+POKE_BOUND="$CHK_BOUND_WAS"
 
 finish

@@ -909,12 +909,21 @@ fi
 # dispatch that would start one anyway, whatever the role, because the thing being waited for
 # is the user's act and no role is entitled to stand in for it.
 #
-# WHICH ROW A DISPATCH IS: the Agent call's NAME, by the rule `fill_row_launched` uses — the id
-# itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. A name that
-# is no row's id is not judged here. `approval:plan` is the arm above.
+# WHICH ROW A DISPATCH IS: ONE ANSWER, asked here once (wave-28 T55). The brief's `Row:` when it
+# carries one (T7), else the row the Agent call's NAME matches, by the rule `fill_row_launched` uses —
+# the id itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. This arm,
+# T7's Lands-on arm and the full-run wall's floor row all read `DP_BOUND_ROW`; none reads the name
+# again. A name that is no row's id and a brief with no `Row:` bind nothing, and nothing is judged.
+# `approval:plan` is the arm above.
 DP_ROW_NAME=$(_jq '.tool_input.name')
-# DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. This arm
-# and the full-run wall's floor row both read through it.
+# The brief is lifted here, the one place the label is read: the lift needs only the role and the
+# brief, and a `Row:` is a field of it. The role goes in with the brief (wave-20 T4; REQ-7, Δ3, Δ9): it
+# decides the run cap, which `brief_validate_fields` reads off the same role below. Nothing else goes
+# in: the Files: reader reads an item by its own text, and this hook lists no directory for it
+# (wave-27 T42, A-orch-46).
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
+# DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. Only the
+# reader below calls it.
 DP_MINE_AWK='
     function mine(id,   b, l) {
       b = nm
@@ -923,9 +932,20 @@ DP_MINE_AWK='
       l = length(id)
       return (length(b) > l + 1 && substr(b, length(b) - l) == "-" id)
     }'
-if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
-  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"'
-    $1 != "" && mine($1) {
+# dp_row_reader — sets DP_ROW (the brief's `Row:`, or empty), DP_NAME_ROWS (every plan row the name
+# matches, one per line), DP_NAME_ROW (the first) and DP_BOUND_ROW: the row this dispatch is bound to.
+dp_row_reader() {
+  DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""
+  if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
+    DP_NAME_ROWS="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1 }')"
+    DP_NAME_ROW="${DP_NAME_ROWS%%$'\n'*}"
+  fi
+  DP_BOUND_ROW="${DP_ROW:-$DP_NAME_ROW}"
+}
+dp_row_reader
+if [ -n "$PLAN" ] && [ -n "$DP_BOUND_ROW" ]; then
+  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v id="$DP_BOUND_ROW" '
+    $1 != "" && $1 == id {
       m = split($13, a, ",")
       for (k = 1; k <= m; k++) {
         t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
@@ -952,7 +972,7 @@ if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
       case "$DP_APPROVALS_HAD" in *" $DP_AW_NAME "*) continue ;; esac
       dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \
         "record it with the approve verb" \
-        "Dispatch: ${DP_ROW_NAME} (row ${DP_AW_ID} of ${PLAN})
+        "Dispatch: ${DP_ROW_NAME:-<unnamed>} (row ${DP_AW_ID} of ${PLAN})
 Reads:    approval:${DP_AW_NAME} — and ## SDLC State carries no 'approved: ${DP_AW_NAME}' line.
 
 An approval is an act of the user. The row waits for it, the ready set does not offer it, and no
@@ -1142,70 +1162,35 @@ from there — this refusal is the main thread's alone."
   fi
 fi
 
-# ---------- the budget wall: the run's parallel ceiling ----------
+# ---------- the budget wall: a person's cap on writers ----------
 #
-# Step 0 probes the machine and writes ONE string into the plan's frontmatter —
-# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=…` — byte-identical
-# to the `budget=` value the preflight attestation records (L-RESOURCES/2). This wall
-# reads that string and never re-derives it: there is one owner of the numbers and it is
-# not here.
-#
-# INERT WITHOUT THE LINE, which is the property that matters most: every plan written
-# before this wave, and every project that never ran Step 0's probe, dispatches exactly
-# as it did. A budget is a ceiling a run OPTS INTO.
+# A CAP IS A PERSON'S WORD (wave-28 T9; D15, REQ-2 AC-2.9/AC-2.10). The plan's frontmatter may
+# carry `parallel-budget: writers=N … source=…`, and this wall obeys its `writers=` only when a
+# person wrote it: `budget_cap` (payload/scripts/lib/run.sh) answers from a line whose
+# `source=` is `user` (the hand cap verb's) or `override`, and nothing otherwise. A probe's
+# number caps nothing — the width is the gate's, asked by the run as it goes — so a plan with
+# no line, a 1.12.0 plan carrying `source=probe`, and a line with no `source=` all dispatch
+# with no ceiling here, and nothing is said about it: no plan owes the line.
 #
 # THE LEADING FRONTMATTER BLOCK ONLY. A `parallel-budget:` inside the plan body is prose
-# — this wave's own plan quotes the header in a task description — and a wall that read
-# it would take a quotation for configuration.
+# — a plan quoting the header in a task description — and a wall that read it would take a
+# quotation for configuration (`plan_budget_line`, which `budget_cap` reads through).
 #
-# THE ONE PLAN-BOUND ARM OF THIS GATE (task-engaged-session, AC-23). The ceiling is a
-# property of the run, declared in its plan, so an engaged session with no plan on disk
-# yet has no ceiling to be over and this wall stays silent — while every plan-free wall
-# above and below it fires. The read is guarded rather than left to awk's empty-filename
-# error, so the skip is a decision this file states, not a side effect of a failed open.
+# THE ONE PLAN-BOUND ARM OF THIS GATE (task-engaged-session, AC-23). The cap is a property of
+# the run, declared in its plan, so an engaged session with no plan on disk yet has no cap to
+# be over and this wall stays silent — while every plan-free wall above and below it fires.
 #
-# THE ONE BUDGET READER (epic-23 wave-20 T2, D10). `plan_budget_line` and `budget_field` in
-# payload/scripts/lib/run.sh are the reading the tick, the stop wall and the governing-skill
-# hook take too: the strict `parallel-budget:` line of the leading frontmatter, and one whole
-# field as a decimal integer. A field that is absent or not an integer leaves its own arm
-# unmeasured rather than refusing on a question this wall cannot answer — the §7 direction
-# every start-side ambiguity takes — and says so once.
+# NO WORKTREES CEILING (wave-28 T9; D15). It refused at `live trees + 1 > worktrees=`, a figure
+# the probe derived from free disk at Step 0. What it stood for is checked where a tree is
+# made: `spawn-worktree.sh create` refuses when the project's volume has less free than the
+# largest tree already there.
 PARALLEL_BUDGET=""
 [ -n "$PLAN" ] && PARALLEL_BUDGET="$(plan_budget_line "$PLAN")"
+DP_BUDGET_WRITERS=""
+[ -n "$PLAN" ] && DP_BUDGET_WRITERS="$(budget_cap "$PLAN")"
+DP_BUDGET_WRITERS="${DP_BUDGET_WRITERS#writers=}"
 
-# NO LINE ON A LIVE PLAN IS NAMED, NEVER PASSED IN SILENCE (REQ-10 AC-10.2; ADR-035). The
-# budget is a measurement every plan carries — the governing-skill hook refuses a plan Write
-# without `writers=` — so a plan past Step 3 reaching here without a readable one slipped
-# past that wall, by a later hand edit or a spelling no reader takes. Nothing is refused on
-# it: with no ceiling there is nothing to be over, and the dispatch goes ahead. It is SAID,
-# on the pass path (one WARN line) and on the refusal wire (AC-8.2's not-checked line), the
-# backstop the stop wall names at turn end. Below Step 4 a plan is still being written and
-# nothing is owed yet — the stop wall's own boundary (fill_ledger_live, past Step 3). A
-# `current: T<n>` is a task-scale plan, past Step 3 by the approval arm's rule.
-DP_BUDGET_WRITERS=""; DP_BUDGET_NAMED=""
-[ -n "$PARALLEL_BUDGET" ] && DP_BUDGET_WRITERS="$(budget_field "$PARALLEL_BUDGET" writers)"
-if [ -n "$PLAN" ] && [ -z "$DP_BUDGET_WRITERS" ]; then
-  DP_BUDGET_CURRENT=$(awk '
-    /^## SDLC State/ { st = 1; next }
-    st && /^## / { exit }
-    st && /^[[:space:]]*current[[:space:]]*:/ {
-      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
-      print; exit }
-  ' "$PLAN" 2>/dev/null) || DP_BUDGET_CURRENT=""
-  case "$DP_BUDGET_CURRENT" in
-    T[0-9]*) DP_BUDGET_STEP=4 ;;
-    *) DP_BUDGET_STEP="${DP_BUDGET_CURRENT%%[!0-9]*}" ;;
-  esac
-  case "$DP_BUDGET_STEP" in ''|*[!0-9]*) DP_BUDGET_STEP="" ;; esac
-  if [ -n "$DP_BUDGET_STEP" ] && [ "$DP_BUDGET_STEP" -ge 4 ]; then
-    printf 'dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field, so the writer budget is unmeasured (ADR-035: the budget is a measurement Step 0 writes). Plan: %s. Add Step 0'"'"'s line to its frontmatter: parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe\n' \
-      "$PLAN" >&2
-    dp_not_checked "budget" "a parallel-budget: line with a writers= field in the plan (ADR-035)"
-    DP_BUDGET_NAMED=1
-  fi
-fi
-
-if [ -n "$PARALLEL_BUDGET" ]; then
+if [ -n "$DP_BUDGET_WRITERS" ]; then
 
   # OPEN ROWS, in one pass over the roster (spec AC-7).
   #
@@ -1415,23 +1400,10 @@ $2
 WRITERNAMES
   }
 
-  # LIVE LEASES ON DISK. A directory under `.worktrees` whose `.git` is a FILE is a
-  # linked worktree; anything else there is a leftover, not a lease (WALLS/4).
-  budget_live_trees() {  # <project root> -> count
-    local root="$1" d n=0
-    [ -d "$root/.worktrees" ] || { printf '0'; return 0; }
-    for d in "$root"/.worktrees/*; do
-      [ -d "$d" ] || continue
-      [ -f "$d/.git" ] || continue
-      n=$(( n + 1 ))
-    done
-    printf '%s' "$n"
-  }
-
   # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The ceilings are readings of
   # ONE wall and one repair — "land or stand down a row" clears whichever of them fired — so
   # reporting each would spend a line of the refusal's budget per ceiling to say one thing
-  # several ways (two since wave-26 T8 removed the suites arm). The guard keeps the arm's
+  # several ways (one since wave-28 T9 removed the worktrees arm; wave-26 T8 removed suites). The guard keeps the arm's
   # pre-REQ-8 behaviour exactly: the first ceiling passed is the one named. What changed is that the wall records instead of exiting, so
   # the arms after it are read in the same pass.
   BUDGET_DENIED=""
@@ -1448,12 +1420,11 @@ $3}
 budget: ${PARALLEL_BUDGET}
   declared by ${PLAN}
 
-That string is derived once, at Step 0, from this machine's own resources probe, and
-recorded verbatim — nothing re-derives it here, and raising it is a Step-0 act.
+That cap is a person's (source=user or source=override): the hand cap verb wrote it, or
+someone typed it. Nothing here raises it; raising it is that person's edit of the line.
 
 Fix: land or stand down an open row first (\`bash ${HOOK_DIR}/stop-orders.sh
-standdown\` computes the batch), or re-run Step 0's probe and raise the line if the
-machine genuinely has the room."
+standdown\` computes the batch), or ask the user to raise the plan's writers= cap."
   }
 
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
@@ -1474,51 +1445,19 @@ machine genuinely has the room."
   case "$BUDGET_COUNTS" in *$'\n'*) BUDGET_OPEN_NAMES="${BUDGET_COUNTS#*$'\n'}" ;; esac
   BUDGET_COUNTS="${BUDGET_COUNTS%%$'\n'*}"
   BUDGET_OPEN="$BUDGET_COUNTS"
-  BUDGET_UNMEASURED=""
-
   B_WRITERS="$DP_BUDGET_WRITERS"
-  if [ -n "$B_WRITERS" ]; then
-    # A READ-ONLY DISPATCH ASKS FOR NO WRITER SLOT (wave-24 T10, D11): the +1 is a writer's.
-    BUDGET_ASK=1
-    role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
-    [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
-      "this passes the run's writer budget" \
-      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))" \
-      "$(budget_writer_rows "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")"
-  elif [ -z "$DP_BUDGET_NAMED" ]; then
-    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
-  fi
+  # A READ-ONLY DISPATCH ASKS FOR NO WRITER SLOT (wave-24 T10, D11): the +1 is a writer's.
+  BUDGET_ASK=1
+  role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
+  [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
+    "this passes the run's writer budget" \
+    "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))" \
+    "$(budget_writer_rows "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")"
 
   # NO SUITES ARM (wave-26 T8; D8, REQ-6 AC-6.3). It refused a dispatch at
   # `claimed + 1 > suites`: a suite booked for every claiming agent's whole life, and one more
   # for every dispatch, read-only included. A suite run books its own machine-wide place as it
   # starts now (payload/scripts/lib/slots.sh), so hand-out counts no suites.
-
-  B_TREES=$(budget_field "$PARALLEL_BUDGET" worktrees)
-  if [ -n "$B_TREES" ]; then
-    BUDGET_LIVE=$(budget_live_trees "$BIONIC_ROOT")
-    # A READ-ONLY DISPATCH ASKS FOR NO WORKTREE (wave-26 T8, D8), as it asks for no writer
-    # slot above: it writes nothing, so it is handed no tree.
-    BUDGET_TREE_ASK=1
-    role_is_readonly "$DP_SUBAGENT" && BUDGET_TREE_ASK=0
-    [ $(( BUDGET_LIVE + BUDGET_TREE_ASK )) -gt "$B_TREES" ] && budget_deny \
-      "this passes the run's worktree budget" \
-      "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + BUDGET_TREE_ASK ))"
-  else
-    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} worktrees"
-  fi
-
-  # Said once, on the pass path, and only when a field the line should have carried was
-  # unreadable: a wall that could not measure an arm must never go quiet about it.
-  if [ -n "$BUDGET_UNMEASURED" ]; then
-    printf 'dispatch-preflight: WARN the plan'"'"'s parallel-budget line carries no readable%s field; %s unmeasured. Line: %s\n' \
-      "$BUDGET_UNMEASURED" "${BUDGET_UNMEASURED# }" "$PARALLEL_BUDGET" >&2
-    # AND ON THE REFUSAL'S OWN WIRE (AC-8.2). The WARN above is the pass path's; a dispatch
-    # being refused for something else needs the same fact where the model reads, or the
-    # author repairs three faults and meets a ceiling that was never measured. This is R2's
-    # per-field shape, which AC-8.2 names as the one the rest of the file should copy.
-    dp_not_checked "budget" "the parallel-budget: line to carry${BUDGET_UNMEASURED}"
-  fi
 fi
 
 warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
@@ -1646,11 +1585,7 @@ agent is gone, frees the name — a landing marker alone does not."
   fi
 fi
 
-# THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap, which
-# `brief_validate_fields` reads off the same role below. Nothing else goes in: the Files: reader
-# reads an item by its own text, and this hook lists no directory for it (wave-27 T42, A-orch-46).
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
-
+# THE BRIEF IS LIFTED ABOVE, at the row reader (wave-28 T55): `LIFTED` is read from here on.
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
 }
@@ -2158,6 +2093,14 @@ case "$DP_SUBAGENT" in
         dp_not_checked "the Questions: dealing" "a plan rigor and scale that facts_owed deals"
       fi
     fi
+    # THE LEVEL AS PRINTED (wave-28 T44; AC-16.2): a detail names the plan's rigor by its new word
+    # with its meaning, lib/run.sh `rigor_print`; a word that is no level is quoted as written.
+    _q_level="$(rigor_print "$_q_rigor" 2>/dev/null)" || _q_level="rigor ${_q_rigor:-none}"
+    # THE FIRST LINE NAMES THE LEVEL IN THE ANNOUNCEMENT'S FORM, `<level> rigor`, with the role's
+    # short name, and keeps the set the user acts on (A-orch-17): the printed form and the role as
+    # typed do not fit a 100-column line beside the set, so they ride the detail.
+    _q_short="$(rigor_level "$_q_rigor" 2>/dev/null)" || _q_short="${_q_rigor:-no}"
+    _q_role="${DP_SUBAGENT#bionic:}"
     # The holder of each question, one line apiece, for the refusal details.
     _q_holders=""
     for _q_q in evidence adversarial structure; do
@@ -2211,11 +2154,11 @@ Fix: name only the three questions, on a line of its own —
 Then retry the dispatch."
     fi
     if [ -n "$_q_dealable" ] && [ -z "$_q_dealt" ]; then
-      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: nothing" "dispatch its holder" \
+      dp_finding "${_q_short} rigor deals ${_q_role}: nothing" "dispatch its holder" \
         "The plan's rigor deals this reader no question, so there is nothing to dispatch it for:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set:-(no Questions: line)}
-    Dealt: nothing at rigor ${_q_rigor}, scale ${_q_scale}
+    Dealt: nothing at ${_q_level}, scale ${_q_scale}
 
 Each question is read by the one role the rigor deals it to:
 ${_q_holders}
@@ -2228,8 +2171,8 @@ from evidence, adversarial and structure."
       [ -n "$PLAN" ] && _q_why="The bound plan's rigor (${_q_rigor:-none}) and scale (${_q_scale:-none}) deal nothing, so the
 dealing is not checked: name the questions this reader answers, from evidence,
 adversarial and structure."
-      [ -n "$_q_dealt" ] && _q_why="The plan's rigor (${_q_rigor}) deals this role the set below, and its checks are pushed
-to it at start from that line."
+      [ -n "$_q_dealt" ] && _q_why="The plan deals this role the set below at ${_q_level}, and its checks are
+pushed to it at start from that line."
       dp_finding "${DP_SUBAGENT} names no Questions: line" "add the Questions: line" \
         "A reader is dispatched for its questions, and this brief names none:
     Role: ${DP_SUBAGENT}
@@ -2241,11 +2184,11 @@ Fix: add this line to the brief, on a line of its own —
 
 Then retry the dispatch."
     elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
-      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: ${_q_dealt}" "use that set" \
+      dp_finding "${_q_short} rigor deals ${_q_role}: ${_q_dealt}" "use that set" \
         "The Questions: line names a set the plan's rigor does not deal this reader:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set//,/, }
-    Dealt: ${_q_dealt//,/, } (rigor ${_q_rigor}, scale ${_q_scale})
+    Dealt: ${_q_dealt//,/, } (${_q_level}, scale ${_q_scale})
 
 Each question is read by the one role the rigor deals it to:
 ${_q_holders}
@@ -2600,6 +2543,104 @@ Then retry the dispatch."
   fi
 fi
 
+# ================================ THE ROW AND THE SUITES IT LANDS ON (wave-28 T7; REQ-1, REQ-3, D4, D17)
+#
+# A BRIEF NAMES ITS ROW AND THE SUITES THAT ROW LANDS ON. `Row: <id>` binds the dispatch to a row of
+# the bound plan whatever the agent is called; the launch record, the fill and the stop wall read the
+# row's `row=` first and the name match after. `Lands-on: <suite>[, <suite>]` names the suites `ready`
+# runs, exactly those; `Lands-on: none <reason>` names none, and says why. The lift writes both in one
+# spelling (brief.sh); this arm is their one writer onto the row and refuses: a writer that binds a row
+# and carries no Lands-on: line; `none` with no reason; a suite outside the set the checks above
+# derived (`SUITES_ALLOWED`, the set a declared red is held to); and a Row: naming no row of the plan.
+# A dispatch that binds no row (no Row: label, and a name that is no row id) has no row to land, so
+# it owes no Lands-on: line.
+DP_LANDS_ON="$(brief_field "$LIFTED" lands_on)"
+_lo_reason="$(brief_field "$LIFTED" lands_on_reason)"; _lo_bad="$(brief_field "$LIFTED" lands_on_bad)"
+_lo_ids=""
+[ -n "$PLAN" ] && [ -f "$PLAN" ] && _lo_ids="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 }')"
+# Membership by a whole line, read in the shell: a quitting `grep -q` fed from a pipe is the idiom
+# cross-gate §BP refuses (the writer can die of SIGPIPE).
+_lo_known=""
+case $'\n'"$_lo_ids"$'\n' in *$'\n'"$DP_ROW"$'\n'*) _lo_known=1 ;; esac
+if [ -n "$DP_ROW" ] && [ -n "$_lo_ids" ] && [ -z "$_lo_known" ]; then
+  dp_finding "Row: $(bionic_trunc "$DP_ROW" 20) names no plan row" "name a ## Tasks row id" \
+    "The Row: label binds this dispatch to a row of the bound plan, and the plan has no such row:
+    Given: Row: ${DP_ROW}
+    Plan:  ${PLAN}
+
+Fix: name the id of the row this agent runs, as the plan's ## Tasks table spells it.
+
+Then retry the dispatch."
+fi
+# A LABEL AND A NAME THAT DISAGREE ARE A LIE (wave-28 T55): the label binds the dispatch to one row and
+# the name's match to another. Only a name that matches a row is judged; a name that matches none with
+# a Row: that names one is T7's design and stays admitted.
+_lo_agrees=""
+case $'\n'"$DP_NAME_ROWS"$'\n' in *$'\n'"$DP_ROW"$'\n'*) _lo_agrees=1 ;; esac
+if [ -n "$DP_ROW" ] && [ -n "$_lo_known" ] && [ -n "$DP_NAME_ROWS" ] && [ -z "$_lo_agrees" ]; then
+  dp_finding "Row: $(bionic_trunc "$DP_ROW" 11) is not the name's row $(bionic_trunc "$DP_NAME_ROW" 11)" \
+    "rename or drop Row:" \
+    "The Row: label binds this dispatch to one row of the bound plan and the agent's name to another:
+    Row:  ${DP_ROW}
+    Name: ${DP_ROW_NAME} (row ${DP_NAME_ROW})
+    Plan: ${PLAN}
+
+Every wall reads one row per dispatch, so a label and a name that disagree leave the walls asking
+different rows. A name that matches no row may carry any Row:.
+
+Fix: name the agent for its row (the name the Patrol's FILL line printed), or give Row: the id that
+name matches, or drop Row: and let the name bind.
+
+Then retry the dispatch."
+fi
+_lo_binds=""
+[ -z "$DP_BOUND_ROW" ] || _lo_binds=1
+if [ -z "$DP_LANDS_ON" ] && [ -z "$_lo_bad" ] && [ -n "$_lo_binds" ] && ! role_is_readonly "$DP_SUBAGENT"; then
+  dp_finding "the brief has no Lands-on: line" "add Lands-on: <suites> or none <why>" \
+    "A writer's row lands on the suites its brief names, and this brief names none:
+    Dispatch: ${DP_ROW_NAME:-<unnamed>}${DP_ROW:+ (Row: ${DP_ROW})}
+    Suites:   ${SUITES_ALLOWED:-(none)}
+
+ready runs exactly the suites the row's launch line names, so a row with none cannot land.
+
+Fix: add a line of its own naming the suites this row lands on, from its suite set —
+    Lands-on: <suite>[, <suite>]
+  or, for a row no suite proves —
+    Lands-on: none <reason>
+
+Then retry the dispatch."
+fi
+if [ "$DP_LANDS_ON" = none ] && [ -z "$_lo_reason" ]; then
+  dp_finding "Lands-on: none gives no reason" "write the reason after none" \
+    "A row may land on no suite only with a reason the reader can check:
+    Given: Lands-on: none
+
+Fix: say why no suite proves this row, on the same line —
+    Lands-on: none <reason>
+
+Then retry the dispatch."
+fi
+_lo_out=""
+if [ -n "$_lo_bad" ]; then
+  _lo_out="${_lo_bad%% *}"
+elif [ -n "$DP_LANDS_ON" ] && [ "$DP_LANDS_ON" != none ]; then
+  for _lo_s in ${DP_LANDS_ON//,/ }; do
+    case " $SUITES_ALLOWED " in *" $_lo_s "*) : ;; *) _lo_out="$_lo_s"; break ;; esac
+  done
+fi
+if [ -n "$_lo_out" ]; then
+  # The name rides in the fact, cut as the declared red's is: the fixed words and the fix take 84.
+  dp_finding "Lands-on: $(bionic_trunc "$_lo_out" 15) is outside Suites:" "name a suite the row runs" \
+    "A row lands only on suites it runs, and this one's suite set does not hold this one:
+    Given:  Lands-on: ${DP_LANDS_ON:+${DP_LANDS_ON} }${_lo_bad}
+    Suites: ${SUITES_ALLOWED:-(none)}
+
+Fix: name only suites of the row's own set, each as <name>.test.sh or tests/<name>.test.sh, or add
+the suite to the brief's Suites: or Files: line so the row runs it.
+
+Then retry the dispatch."
+fi
+
 # ===================================================== THE FULL-RUN WALL (wave-26 REQ-3, D6)
 # (replaces the one-regression wall, AC-24, and the floor-once wall, REQ-5 D7, of 1.10.)
 #
@@ -2624,9 +2665,9 @@ fi
 # floor, held the floor for ever, and a `record/…` path read as tracked. Now lib/units.sh
 # `units_floor_holds` answers: the rows the floor row waits on through its deps and its reads,
 # judged by the ready set's own program, not landed, that write a tracked file by its
-# `writes_head` — one owner for both questions. The floor row is the dispatch's own, by its name
-# (`mine`, the approval arm's rule); a dispatch that names no row is held by what the plan's open
-# verify and test rows wait on.
+# `writes_head` — one owner for both questions. The floor row is the dispatch's own, by
+# `DP_BOUND_ROW`, the one reader (wave-28 T55: the brief's `Row:`, else the row its name matches); a
+# dispatch that binds no row is held by what the plan's open verify and test rows wait on.
 #
 # LOADED LAZILY, LIKE brief.sh's BOUND. proof.sh is sourced at the one arm that spends it, from
 # the directory the loader settled on. A copied hook whose library directory predates proof.sh
@@ -2636,8 +2677,8 @@ fi
 fr_open_writers() {  # -> `id<TAB>step<TAB>status` for each row the floor waits on that writes the head
   local floor=""
   [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
-  [ -z "$DP_ROW_NAME" ] || floor="$(units_rows "$PLAN" 2>/dev/null \
-    | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1; exit }')"
+  [ -z "$DP_BOUND_ROW" ] || floor="$(units_rows "$PLAN" 2>/dev/null \
+    | awk -F'\t' -v id="$DP_BOUND_ROW" '$1 != "" && $1 == id { print $1; exit }')"
   units_floor_holds "$PLAN" "$floor" 2>/dev/null
 }
 # fr_fit <budget> <item>... -> the items comma-joined while they fit <budget> columns, then
@@ -2966,7 +3007,9 @@ ROW=$(roster_row \
   "plan=${ROSTER_PLAN}" \
   ${DP_QUESTIONS:+"questions=${DP_QUESTIONS}"} \
   ${DP_LANDS_RED:+"lands_red=${DP_LANDS_RED}"} \
-  ${DP_RED_EVIDENCE:+"red_evidence=${DP_RED_EVIDENCE}"}) || ROW=""
+  ${DP_RED_EVIDENCE:+"red_evidence=${DP_RED_EVIDENCE}"} \
+  ${DP_ROW:+"row=${DP_ROW}"} \
+  ${DP_LANDS_ON:+"lands_on=${DP_LANDS_ON}"}) || ROW=""
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then

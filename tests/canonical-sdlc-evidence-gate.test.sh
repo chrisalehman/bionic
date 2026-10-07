@@ -4272,7 +4272,7 @@ has_ui: false
 multi_agent: false
 deploy_target: none
 model_plan: orchestrator=fable-5-high
-parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 ---
 
 ## Goal
@@ -5408,7 +5408,8 @@ fi
 # RAISES itself to peer-reviewed is judged at peer-reviewed.
 s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED' peer-reviewed tested
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "at rigor 'peer-reviewed'" <<<"$HOOK_VSTDERR"; then
+# The refusal names the level by its new word since wave-28 T44 (AC-16.2): peer-reviewed is medium.
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "at review rigor medium" <<<"$HOOK_VSTDERR"; then
   ok "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6"
 else
   no "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6" \
@@ -9435,5 +9436,66 @@ git -C "$hHd" checkout -q - 2>/dev/null
 write_plan "$hHd" "$(plan 5 "$(step5_head "$HD_OTHER" 'working-branch: wave/99-fx')" "$matrix_complete")" > /dev/null
 expect_block "HEADd3 …and a head the working branch does not hold → block" \
   "$hHd" 'git commit -m "x"' "does not contain head:"
+
+# ============================================================
+section "§RIGOR — a plan in either vocabulary is judged alike by the evidence gate (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35)"
+# ============================================================
+# Each fixture below is one this suite already pins in the old words. Its twin is the same plan
+# with every rigor word (the frontmatter `rigor:` and each `## Tasks` rigor cell) written in the new
+# vocabulary: tested → low, peer-reviewed → medium, audited → high. The gate must give the twin the
+# verdict it gives the original, word for word on the user's line. The fixtures themselves are not
+# changed; a twin is derived from them here.
+eg_rv_twin() {  # <plan text> -> the same plan in the new words
+  sed -E 's/^rigor: tested$/rigor: low/; s/^rigor: peer-reviewed$/rigor: medium/; s/^rigor: audited$/rigor: high/
+          s/\| tested \|/| low |/g; s/\| peer-reviewed \|/| medium |/g; s/\| audited \|/| high |/g'
+}
+eg_rv_verdict() {  # <plan text> -> `exit=<n> <the user line>`, the home's path made neutral
+  local h; h=$(make_home)
+  write_plan "$h" "$1" > /dev/null
+  run_hook "$h" 'git commit -m "x"'
+  printf 'exit=%s %s' "$HOOK_EXIT" "$(printf '%s\n' "$HOOK_STDERR" | head -1 | sed "s#$h#HOME#g")"
+}
+eg_rv_pair() {  # <label> <want exit> <plan text>
+  local tw old new
+  tw="$(printf '%s\n' "$3" | eg_rv_twin)"
+  expect_ne "§RIGOR $1: the twin carries the new words" "$3" "$tw"
+  old="$(eg_rv_verdict "$3")"; new="$(eg_rv_verdict "$tw")"
+  expect_eq "§RIGOR $1: the old-word plan exits $2" "exit=$2" "${old%% *}"
+  expect_eq "§RIGOR $1: the new-word twin gets the same verdict" "$old" "$new"
+}
+eg_rv_pair "22b1 medium cell, prose evidence" 2 "$(task_plan_rigor tested "$v22b_t2_prose")"
+eg_rv_pair "22b7 low cell, prose evidence" 0 "$(task_plan_rigor tested "$v22b_t2_tested_prose")"
+eg_rv_pair "22c1 high plan, bad status" 2 "$(task_plan "$v22c_bad_enum")"
+eg_rv_pair "22c2 medium plan, bad status" 0 "$(task_plan_rigor peer-reviewed "$v22c_bad_enum")"
+eg_rv_pair "22d1 low plan, medium cell" 2 "$(task_plan_rigor tested "$v22d1_body")"
+eg_rv_pair "22d2 high plan, low cell, no waiver" 2 "$(task_plan "$v22d2_body")"
+eg_rv_pair "22d2b high plan, low cell, waiver" 0 "$(task_plan "$v22d2b_body")"
+eg_rv_pair "22c5 high multi_agent wave, no ## Tasks" 2 "$(d7_wave_plan "" "")"
+eg_rv_pair "22c9 medium multi_agent wave, no ## Tasks" 0 "$(d7_wave_plan "" "" peer-reviewed true)"
+eg_rv_pair "32a low wave at 6, auditor cells empty" 0 "$(plan_rigor tested 6 "$step6_body" "$m32_empty_aud")"
+eg_rv_pair "32e low wave at 5, no auditor pointer" 0 "$(plan_rigor tested 5 "$step5_noaud" "$m32_empty_aud")"
+eg_rv_pair "32 high wave at 5, no auditor pointer" 2 "$(plan_rigor audited 5 "$step5_noaud" "$m32_empty_aud")"
+
+# ACROSS THE VOCABULARIES: a floor and a cell in different words still compare as levels.
+eg_rv_mixed() {  # <label> <frontmatter word> <cell word> <want exit>
+  local body
+  body="$(printf '%s\n' "$v22d2_body" | sed -E "s/\\| tested \\|/| $3 |/")"
+  h=$(make_home); write_plan "$h" "$(task_plan_rigor "$2" "$body")" > /dev/null
+  run_hook "$h" 'git commit -m "x"'
+  expect_eq "§RIGOR mixed $1" "$4" "$HOOK_EXIT"
+}
+eg_rv_mixed "plan high, cell tested: a downgrade" high tested 2
+eg_rv_mixed "plan audited, cell low: a downgrade" audited low 2
+eg_rv_mixed "plan low, cell tested: the same level" low tested 0
+eg_rv_mixed "plan tested, cell low: the same level" tested low 0
+
+# A SEVENTH WORD IN A CELL is refused, and the refusal names the three levels by their new words.
+h=$(make_home)
+write_plan "$h" "$(task_plan_rigor low "$(printf '%s\n' "$v22b_t2_tested_prose" | sed -E 's/\| tested \| fix/| standard | fix/')")" > /dev/null
+expect_block "§RIGOR seventh word: a 'standard' cell is refused" "$h" 'git commit -m "x"' "invalid rigor 'standard'"
+expect_contains "§RIGOR seventh word: …naming low, medium and high" "low, medium or high" "$HOOK_VSTDERR"
+for eg_rv_old in tested peer-reviewed audited; do
+  expect_absent "§RIGOR seventh word: …and not the old word $eg_rv_old, on its line or in its detail" "$eg_rv_old" "$HOOK_VSTDERR"
+done
 
 finish
