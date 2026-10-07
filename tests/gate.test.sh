@@ -894,17 +894,21 @@ release ou1
 # mid-read; the prune removes in one batch and reads every number as decimal.
 section "§OPEN — one rule says which requests are open; gate_asked and the prune survive growth (T71)"
 plant_live() {  # <id> <who> [asked] — a request nothing has ended whose holder lives (this shell)
+  mkdir -p "$BIONIC_GATE_DIR/requests"
   printf 'key=k\nkind=work\nwho=%s\ntree=/t\nasked=%s\nholder=%s:\n' "$2" "${3:-900}" "$$" \
     > "$BIONIC_GATE_DIR/requests/$1"
 }
 plant_gone() {  # <id> <who> <asked> — never admitted, nobody holds it (a 75's, or its holder died)
+  mkdir -p "$BIONIC_GATE_DIR/requests"
   printf 'key=k\nkind=work\nwho=%s\ntree=/t\nasked=%s\nholder=-\n' "$2" "$3" > "$BIONIC_GATE_DIR/requests/$1"
 }
 plant_dying() {  # <id> <who> <asked> <dead pid> — admitted, never ended, its holder dead
+  mkdir -p "$BIONIC_GATE_DIR/requests"
   printf 'key=k\nkind=work\nwho=%s\ntree=/t\nasked=%s\nholder=%s:\nadmitted=%s\npromise=5:1:30\n' \
     "$2" "$3" "$4" "$(( $3 + 10 ))" > "$BIONIC_GATE_DIR/requests/$1"
 }
 plant_raw() {  # <id> <who> <ended text, as written> — an ended request whose number is typed as given
+  mkdir -p "$BIONIC_GATE_DIR/requests"
   printf 'key=k\nkind=work\nwho=%s\ntree=/t\nasked=1\nholder=-\nadmitted=2\npromise=5:1:30\nended=%s\nrc=0\n' \
     "$2" "$3" > "$BIONIC_GATE_DIR/requests/$1"
 }
@@ -989,6 +993,7 @@ expect_eq "OP.14 a request number is the highest present plus one: after a prune
 # ARG_MAX: 20,000 request files, empty (planted by one awk), and one open request among them.
 fresh open-20k
 world_machine 8 8192 30 1.0
+mkdir -p "$BIONIC_GATE_DIR/requests"
 awk -v d="$BIONIC_GATE_DIR/requests" 'BEGIN { for (i = 1; i <= 20000; i++) { f = d "/" (100000 + i); printf "" > f; close(f) } }'
 plant_live 1 "op:w1"
 expect_eq "OP.15 the store holds 20,001 request files (positive)" "20001" "$(nreq)"
