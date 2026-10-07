@@ -647,6 +647,16 @@ expect_status "R16h2 …and so does an extend row, even one that copied the keys
 printf '%s|held=2026-10-07T04:10:00Z x fp=1:2:3|landed=%s|landed_at=%s\n' "$R16_I" "$R16_C" "$R16_AT" >> "$R16_F"
 expect_eq "R16h3 …while a later mark reads again" "$(printf '%s\t%s' "$R16_C" "$R16_AT")" "$(lib roster_landed "$R16_F" w28-T6)"
 
+# A WRITER RE-OPENED WITH `extend` BEFORE IT LANDS (wave-28 T21; A-orch-105 #2): the mark is written on the latest
+# row, the extend row's copy, which keeps `extended=`. It is the mark of the work it was written on, and
+# roster_landed reads it; an extend row that merely copied an earlier landing's keys (R16h2) still clears it.
+R16_F2="$R7_DIR/r16/roster-s2.state"
+printf '%s\n' "$R16_L" "$R16_I" "${R16_I}|extended=2026-10-07T04:00:00Z more" > "$R16_F2"
+lib roster_mark_landed "$R16_F2" w28-T6 "$R16_C" "$R16_AT"
+expect_status "R16i precondition: roster_mark_landed marks the re-opened row (rc 0)" "0" "$?"
+expect_contains "R16i2 …the marked row carries extended= beside the mark (the positive on that extractor)" "|extended=2026-10-07T04:00:00Z more|" "$(tail -1 "$R16_F2")"
+expect_eq "R16i3 roster_landed reads the mark past extended=" "$(printf '%s\t%s' "$R16_C" "$R16_AT")" "$(lib roster_landed "$R16_F2" w28-T6)"
+
 section "R17 — the row a dispatch binds and the suites it lands on are row keys (wave-28 T7; REQ-1, REQ-3, D4, D17)"
 # The dispatch wall writes a brief's `Row:` as `row=<id>` and its `Lands-on:` as
 # `lands_on=<a.test.sh,b.test.sh|none>`. Both present-if-passed, trailing `pushed=`, so a row 1.12.0
