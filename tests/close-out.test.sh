@@ -1961,4 +1961,26 @@ expect_eq "CARRY-mut5 …and carries neither the again line nor the undisposed o
   "$(carry_section "$PQ/$CONT_REL" | wc -l | tr -d ' ')"
 rm -rf "$CARRY_MUT"
 
+# the merge's mutation arm (T50): a doctored copy of close-out.sh whose merge writes nothing
+CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-merge-mut.XXXXXX")"
+mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"
+sed 's/^      co_cont_merge "\$missing"$/      :/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
+expect_eq "CARRY-mut6 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PR="$(mk_fixture carry18)"; advance_to "$PR" 8
+carry_prev "$PR"
+carry_req "$PR" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
+carry_plant "$PR" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
+mkdir -p "$PR/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n%s\n' "$CARRY_OWN" > "$PR/$CONT_REL"
+( cd "$PR" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    bash "$CARRY_MUT/scripts/close-out.sh" "$PR/$PLAN_REL" run ) > "$SANDBOX/carry-mut.out" 2>&1
+CARRY_MRC=$?
+expect_eq "CARRY-mut7 the doctored run still closes, and the hand-written continuation keeps its own line (the mutant runs)" "0|$CARRY_OWN" \
+  "$CARRY_MRC|$(carry_section "$PR/$CONT_REL")"
+expect_eq "CARRY-mut8 …and adds nothing carried, so CARRY-26 and CARRY-28a go red on it" "1" \
+  "$(carry_section "$PR/$CONT_REL" | wc -l | tr -d ' ')"
+rm -rf "$CARRY_MUT"
+
 finish
