@@ -678,7 +678,10 @@ co_landings_section() {
   out="$(bash "$(plugin_root)/hooks/session-poker.sh" landing-report --rows "$PLAN" 2>/dev/null)" || out=""
   printf '## Landings\n\n'
   if [ -n "$out" ]; then
-    printf '```\n%s\n```\n' "$out"
+    case "$out" in
+      "landings: unmeasured "*) printf '%s\n' "$out" ;;
+      *) printf '```\n%s\n```\n' "$out" ;;
+    esac
   else
     printf '<fill: landings — session-poker.sh landing-report --rows %s could not be read>\n' "$PLAN"
   fi
