@@ -774,14 +774,14 @@ expect_contains "7.37f …naming the link and the holder as the path spells it" 
 T56_CYC="$T87_DIR/t56-cycle"; mkdir -p "$T56_CYC"; chmod 0700 "$T56_CYC"; ln -s "$T56_CYC/a" "$T56_CYC/a"
 stop_run "$STOP_SUITE" "$T56_CYC/a"
 expect_eq "7.38 a link that leads back to itself is refused" "2" "$STOP_RC"
-expect_contains "7.38b …naming the links" "$T56_CYC/a is reached through more than 16 links" "$STOP_ERR"
+expect_contains "7.38b …naming the links" "$T56_CYC/a leads through more than 16 links" "$STOP_ERR"
 # The mutants. (1) The walk's call removed: the open holder is accepted. (2) The holder judged with
 # no sticky exemption: the sticky holder is refused. Each is proved to run before its claim is read.
 T56_MUT1="$TMPROOT/t56-mut-walk.sh"
 anchor "$SEAM" '_bionic_pin_links "$parent" 0' 1
 grep -vF '_bionic_pin_links "$parent" 0' "$SEAM" > "$T56_MUT1"
 expect_eq "7.39 the no-walk mutant parses" "0" "$(bash -n "$T56_MUT1" >/dev/null 2>&1; echo $?)"
-R="$T56_CLOSED/mut-closed-root"; pin_call "$T56_MUT1" "$R"
+R="$T56_CLOSED/lnk/mut-closed-root"; pin_call "$T56_MUT1" "$R"
 expect_ne "7.39b …and still refuses the open parent behind a closed holder (not vacuous)" "0" "$PIN_RC"
 R="$T56_HOLD/lnk/mut-root"; pin_call "$T56_MUT1" "$R"
 expect_eq "7.39c under the no-walk mutant the link held in an open directory is accepted (the defect 7.34 guards)" "0" "$PIN_RC"
