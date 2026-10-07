@@ -13905,13 +13905,11 @@ expect_eq "RP2 a record with a published event: the tick prints the report's fir
   "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
 rp_tick
 expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
-expect_eq "RP3b …and still prints the landings line: it is outside the digest" \
-  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+expect_eq "RP3b …and prints no landings line: an unchanged tick is the one line the Patrol ends on (wave-28 T62; RK-T3)" "" "$(rp_tl)"
 rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
 rp_tick
 expect_contains "RP4 a new landing moves no decision: the next tick still says unchanged (nothing reads the numbers to decide)" "poker: unchanged since " "$OUT"
-expect_eq "RP4b …and its landings line carries the new figure" \
-  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+expect_eq "RP4b …and that unchanged tick prints no landings line; the next tick that prints in full carries the new figure (RK-T6)" "" "$(rp_tl)"
 # AC-4.5 corrected: a review row and a dropped row added to the plan change no figure.
 rp_report --rows; RP_BEFORE="$OUT"
 awk '{ print } /^\| T8 \| 4 \| build/ {
@@ -13935,6 +13933,146 @@ cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
 kill "$RP_LIVE" 2>/dev/null; wait "$RP_LIVE" 2>/dev/null
 POKE_BOUND="$RP_BOUND_WAS"
+
+# ============================================================
+section "§REPORT-KEY: the report counts a row's runs by the row's commit, prints on a changed tick, and says unmeasured (wave-28 T62; REQ-4 AC-4.1, AC-4.4, AC-4.6; D18)"
+# ============================================================
+#
+# Pass 37 found three faults in T14's report. (1) The fold keyed red-then-green on row, span and suite and
+# read no `commit=`, so the accepted HEAD's run that `_line_red_owner` records under the row id (after the
+# candidate's red) printed a real regression as a flake and inflated the row's runs. D18 says "two
+# verdicts for one row commit, red first, no ready between": the pair is keyed on the commit as well, and
+# a verdict at a commit that is the base of one of the row's candidates and none of the row's own is the
+# head's run, shown nowhere. (2) Every unchanged tick printed the landings line, against the Patrol's
+# literal "printed only `unchanged` -> end it". (3) A record of `landed:` lines with no `line/v1` event
+# (a run open across the upgrade) read as zeros. FIXTURE FIDELITY: the events are planted in the shape
+# lib/line.sh writes them: `candidate` carries `base=<head>` and `commit=<candidate>`, the row's verdicts
+# carry the candidate, and the head's run carries `commit=<head>` under the same row id.
+RK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RK_H="$(printf 'e%.0s' $(seq 40))"; RK_H2="$(printf 'f%.0s' $(seq 40))"; RK_C3="$(printf '3%.0s' $(seq 40))"; RK_C4="$(printf '4%.0s' $(seq 40))"
+rk_cand() { rp_ev "ev=candidate|row=$1|base=$2|commit=$3|tree=$RP_ROOT/.bionic/tmp/landing/1|at=2026-10-06T$4Z"; }   # <row> <base> <cand> <hh:mm:ss>
+rk_verdict() { rp_ev "ev=verdict|row=$1|commit=$2|suite=a.test.sh|result=$3|log=/rec/$1.log|at=2026-10-06T$4Z"; }   # <row> <commit> <result> <hh:mm:ss>
+rk_tl() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: landings: '; }
+rk_tick() { poke_pressure "$R59W" 8192 1.0 tick; }
+RK_RUNS_RE='runs: green=[0-9]* red=[0-9]* none=[0-9]* discarded=[0-9]* red-then-green=[0-9]*'
+rk_runs() { printf '%s\n' "$OUT" | /usr/bin/grep '^landings: ' | grep -o "$RK_RUNS_RE"; }
+
+# ---------- (1) the row's run is the row's commit: a regression the head's green run hides is not a flake ----------
+rp_world rk-key1
+rp_ready T1 w-T1 10:00:00; rk_cand T1 "$RK_H" "$RP_C2" 10:00:30
+rk_verdict T1 "$RP_C2" red 10:05:00; rk_verdict T1 "$RK_H" green 10:09:00
+rp_ev "ev=returned|row=T1|why=red|detail=/rec/T1.log|at=2026-10-06T10:09:01Z"
+rp_report
+expect_eq "RK-K1 a row's red, then the accepted head's green run under the row id, then returned: red=1 green=0 red-then-green=0 (the head's run is not the row's)" \
+  "0|runs: green=0 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
+rp_ready T1 w-T1 11:00:00; rk_verdict T1 "$RP_C2" green 11:05:00; rp_pub T1 queue 11:06:00
+rp_report --rows
+expect_eq "RK-K2 …fixed, re-readied, green, landed: the row's runs=2 (its red and its green, not the head's), and the line reads green=1 red=1 red-then-green=0" \
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T11:06:00Z minutes=66.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+# a true flake: two verdicts for one commit, red first, no ready between; the head's run sits between them
+rp_world rk-key2
+rp_ready T2 w-T2 10:00:00; rk_cand T2 "$RK_H" "$RK_C3" 10:00:30
+rk_verdict T2 "$RK_C3" red 10:05:00; rk_verdict T2 "$RK_H" green 10:08:00; rk_verdict T2 "$RK_C3" green 10:12:00; rp_pub T2 queue 10:13:00
+rp_report --rows
+expect_eq "RK-K3 a true flake: red, the head's run between, green at the same commit and no ready between: red-then-green=1, green=1 red=1, runs=2" \
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=1|T2 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:13:00Z minutes=13.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+# a red, then a green at ANOTHER candidate of the same ready (the head moved): two commits, so not a flake
+rp_world rk-key3
+rp_ready T3 w-T3 10:00:00; rk_cand T3 "$RK_H" "$RK_C3" 10:00:30; rk_verdict T3 "$RK_C3" red 10:05:00
+rk_cand T3 "$RK_H2" "$RK_C4" 10:07:00; rk_verdict T3 "$RK_C4" green 10:12:00; rp_pub T3 queue 10:13:00
+rp_report
+expect_eq "RK-K4 a red at one candidate and a green at the next (no ready between): two row commits, red-then-green=0" \
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0" "$(rk_runs)"
+
+# ---------- (2) the landings line prints on a tick that is not unchanged ----------
+rp_world rk-tick
+rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00
+RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rk_tick
+expect_eq "RK-T1 a tick that prints in full (no digest yet) carries the landings line" "$RK_LINE" "$(rk_tl)"
+rk_tick
+expect_contains "RK-T2 precondition: the next tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
+expect_eq "RK-T3 …and an unchanged tick prints no landings line (the Patrol's \"printed only unchanged: end it\" holds)" "" "$(rk_tl)"
+rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
+rk_tick
+expect_contains "RK-T4 precondition: a new landing alone leaves the tick unchanged (RP4: nothing reads the numbers to decide)" "poker: unchanged since " "$OUT"
+expect_eq "RK-T5 …and still no landings line" "" "$(rk_tl)"
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rk_tick
+expect_eq "RK-T6 the next tick that prints in full carries the line with the new landing's figures" \
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rk_tl)"
+
+# ---------- (3) a record with no line/v1 event is unmeasured, never zeros ----------
+RK_UNM="landings: unmeasured — the landing record holds no line/v1 events"
+rp_world rk-unm
+printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-06T10:09:00Z|suites=a.test.sh\n' \
+  "$RP_C1" "$RP_C2" "$RP_C1" >> "$S60_REC"
+printf 'landed: row=T2 branch=wt/01-T2 head=%s merge=%s at=2026-10-06T10:20:00Z\n' "$RP_C1" "$RP_C2" >> "$S60_REC"
+rp_report --rows
+expect_eq "RK-U1 a record of landed lines and no line/v1 event: landing-report --rows exits 0 and prints the one unmeasured line and no row, not zeros" \
+  "0|$RK_UNM" "$RC|$OUT"
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rk_tick
+expect_eq "RK-U2 the tick, printing in full, carries the unmeasured line (the record holds no published event)" "poker: $RK_UNM" "$(rk_tl)"
+# release-check prints it, and no per-row line (RP6's world, its check declared again)
+RK_SEV_REC="$RSEV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+[ -f "$RK_SEV_REC" ] && cp "$RK_SEV_REC" "$TMPROOT/rk-sev-rec"
+mkdir -p "${RK_SEV_REC%/*}"; S60_REC="$RK_SEV_REC"; : > "$S60_REC"; RP_ROOT="$(cd "$RSEV" && pwd -P)"
+printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\n' "$RP_C1" "$RP_C2" >> "$S60_REC"
+printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/config.yaml"
+BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
+expect_eq "RK-U3 release-check over such a record exits 0 and prints the unmeasured line, last, with no landed-row line" \
+  "0|poker: release-check — $RK_UNM|0" \
+  "$RC|$(printf '%s\n' "$OUT" | tail -1)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: release-check — T[0-9]* ')"
+cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
+if [ -f "$TMPROOT/rk-sev-rec" ]; then cp "$TMPROOT/rk-sev-rec" "$RK_SEV_REC"; else rm -f "$RK_SEV_REC"; fi
+# the longest form the line prints in is under 100 columns (the em dash is three bytes, one column)
+RK_LONG="poker: release-check — $RK_UNM"
+expect_eq "RK-U4 the longest printed form of the unmeasured line is at most 100 columns" "yes" \
+  "$([ $(( $(printf '%s' "$RK_LONG" | wc -c | tr -d ' ') - 4 )) -le 100 ] && echo yes || echo no)"
+
+# ---------- the mutation arms: each item's fix undone turns its rows red ----------
+RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rk-mut.XXXXXX")"
+rd_mutant nohead 's/^      if ((rk SUBSEP kv\["commit"\]) in headc .*$/      # mutant: the head run is counted/'
+rd_mutant nokey 's/^      vk = rk SUBSEP span\[rk\] SUBSEP kv\["commit"\] SUBSEP kv\["suite"\]$/      vk = rk SUBSEP span[rk] SUBSEP kv["suite"]/'
+rd_mutant noguard 's/^      \[ "\$TICK_UNCHANGED" = yes \] || \[ -z "\$TICK_LANDINGS" \] || say /      [ -z "$TICK_LANDINGS" ] || say /'
+rd_mutant nounm 's/^  if landing_unmeasured "\$rec"; then .*$/  :/'
+expect_eq "RK-mut0 each doctored poker differs from the real one in exactly one line (the four doctors took)" "1|1|1|1" \
+  "$(for _m in nohead nokey noguard nounm; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
+RK_REAL_POKER="$POKER"
+# commit ignored (the head's run counted): the probe's shape reads green=1 where RK-K1 reads 0
+rp_world rk-mut1
+rp_ready T1 w-T1 10:00:00; rk_cand T1 "$RK_H" "$RP_C2" 10:00:30
+rk_verdict T1 "$RP_C2" red 10:05:00; rk_verdict T1 "$RK_H" green 10:09:00
+POKER="$RD_MUT/nohead/hooks/session-poker.sh"; rp_report
+expect_eq "RK-mut1 the head-run mutant still runs (exit 0) and counts the head's green: green=1 red=1 where RK-K1 reads green=0 red=1" \
+  "0|runs: green=1 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
+POKER="$RK_REAL_POKER"; rp_report
+expect_eq "RK-mut1b …control: the real poker over the same record reads green=0 red=1" "runs: green=0 red=1 none=0 discarded=0 red-then-green=0" "$(rk_runs)"
+# the pair's key without the commit: RK-K4's red and green at two candidates read as a flake
+rp_world rk-mut2
+rp_ready T3 w-T3 10:00:00; rk_cand T3 "$RK_H" "$RK_C3" 10:00:30; rk_verdict T3 "$RK_C3" red 10:05:00
+rk_cand T3 "$RK_H2" "$RK_C4" 10:07:00; rk_verdict T3 "$RK_C4" green 10:12:00
+POKER="$RD_MUT/nokey/hooks/session-poker.sh"; rp_report
+expect_eq "RK-mut2 the commit-less key mutant still runs and reads red-then-green=1 where RK-K4 reads 0" \
+  "0|runs: green=1 red=1 none=0 discarded=0 red-then-green=1" "$RC|$(rk_runs)"
+POKER="$RK_REAL_POKER"; rp_report
+expect_eq "RK-mut2b …control: the real poker reads red-then-green=0" "runs: green=1 red=1 none=0 discarded=0 red-then-green=0" "$(rk_runs)"
+# the unchanged guard removed: an unchanged tick prints the line again
+rp_world rk-mut3
+rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00
+rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rk_tick; rk_tick
+POKER="$RD_MUT/noguard/hooks/session-poker.sh"; rk_tick
+expect_eq "RK-mut3 the no-guard mutant's unchanged tick still says unchanged and prints the landings line RK-T3 forbids" \
+  "unchanged|$RK_LINE" "$(printf '%s\n' "$OUT" | /usr/bin/grep -q '^poker: unchanged since ' && echo unchanged)|$(rk_tl)"
+POKER="$RK_REAL_POKER"
+# the unmeasured arm removed: zeros again
+rp_world rk-mut4
+printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\n' "$RP_C1" "$RP_C2" >> "$S60_REC"
+POKER="$RD_MUT/nounm/hooks/session-poker.sh"; rp_report --rows
+expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "$RC|$OUT"
+POKER="$RK_REAL_POKER"
+rm -rf "$RD_MUT"
+POKE_BOUND="$RK_BOUND_WAS"
 
 section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan's bytes outside the row's own lines are unchanged after ready, a tick and a hand landing (wave-28 T21; D26, REQ-2 AC-2.11, REQ-7 AC-7.2)"
 #
