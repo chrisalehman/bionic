@@ -109,6 +109,11 @@ fi
 # symlink and nothing else, and removing it while another suite's children resolve `bash`
 # through it would be the race. An entry already there is never replaced, for the same reason.
 #
+# THE ROOT IS ABSOLUTE OR IT IS REFUSED (T69). A relative root is a path from `.`, so a walk of it would judge the cwd and
+# what lies below it and never the cwd's ancestors, while PATH carries the pin's absolute physical path through every one
+# of them. It is refused, `<root> is not an absolute path`, before any walk, and never repaired with $PWD: that would
+# judge a path the caller never named. The same rule is why `cd` below never consults CDPATH: it does so only for a
+# path that is not absolute.
 # THE PIN'S WHOLE PATH IS JUDGED, FROM `/` DOWN, BY ONE PREDICATE (AC-10.6; provenance below). Whoever can write a
 # directory that holds one of the path's components renames it away and puts their own in its place, between this
 # check and a child's `bash`, so the walk judges each component's HOLDER, link or not, and stops at the first
@@ -141,8 +146,7 @@ fi
 # the two would pass the judge through where it leads, and an entry that vanished before the owner read would pass
 # it too. Once the owner read has found this user's own entry, no one else can rename, unlink or replace it in a
 # sticky or 0700 holder, so every later reader that follows reads this user's own object. And PATH carries the
-# pin's PHYSICAL path (`pwd -P`, with CDPATH unset: `cd` searches it for a relative path and prints where it went),
-# so no link on it is followed when a child runs `bash`.
+# pin's PHYSICAL path (`pwd -P` of an absolute path), so no link on it is followed when a child runs `bash`.
 # The owner is read by _bionic_pin_owner, which prints the raw uid and is the one place a test stubs `stat`. The
 # root and the pin must be owned by THIS user (`-O`, the effective uid, a second reader of the owner and
 # stricter than the rule above): they are made here, so nothing else is expected. A refusal returns
@@ -155,7 +159,7 @@ fi
 # judged by the directory that holds it; T57, T59 the walk judges every directory, with ACLs and owners;
 # T61 the owner of `/` is trusted; T63 a missing path is refused, never "not open"; T65 the root's and the pin's
 # own entries are read without following, and PATH carries the physical path; T67 an entry that is absent at the
-# owner read, and a mkdir that fails, are refused; one function for the root and the pin; CDPATH is unset for the cd.
+# owner read, and a mkdir that fails, are refused; one function for the root and the pin; T69 a relative root is refused.
 # Never judged: where PATH's other entries lead, and what `bash -> /bin/bash` points at (/bin/bash is the
 # system's own, replaceable only by root).
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
@@ -290,6 +294,7 @@ bionic_interpreter_pin() {
   local root="${1:-}" dir phys why="" made_root="" made_dir=""
   _BIONIC_PIN_HOLDER=""
   [ -n "$root" ] || why="no root was given"
+  [ -n "$why" ] || case "$root" in /*) ;; *) why="$root is not an absolute path" ;; esac
   [ -n "$why" ] || why="$(_bionic_pin_parent "$root")"
   [ -z "$why" ] || [ -z "$root" ] || _BIONIC_PIN_HOLDER=1
   dir="$root/pin"
@@ -298,7 +303,7 @@ bionic_interpreter_pin() {
   [ -n "$why" ] || [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
   [ -n "$why" ] || [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] \
     || why="$dir/bash is not a link to /bin/bash"
-  [ -n "$why" ] || phys="$(unset CDPATH; cd -- "$dir" 2>/dev/null && pwd -P)" || why="$dir is not a directory"
+  [ -n "$why" ] || phys="$(cd -- "$dir" 2>/dev/null && pwd -P)" || why="$dir is not a directory"
   _BIONIC_PIN_WHY="$why"
   if [ -n "$why" ]; then
     [ -z "$made_dir" ] || rmdir "$dir" 2>/dev/null
@@ -312,7 +317,7 @@ bionic_interpreter_pin() {
   export BIONIC_TEST_INTERPRETER_PINNED
 }
 
-# THE HAND-RUN PATH. The seam calls the function right after its re-exec — in the /bin/bash copy,
+# THE HAND-RUN PATH. A relative TMPDIR makes a relative root, which the function refuses by name. The seam calls the function right after its re-exec — in the /bin/bash copy,
 # or in a suite started under /bin/bash in the first place — unless the first PATH entry is
 # already a pin (a suite tests/run.sh launched, or one this seam already pinned). The test is
 # the directory, not the marker, for the reason the re-exec's test is the interpreter (K-4).
@@ -337,11 +342,12 @@ if [ "${0##*/}" != "run.sh" ] \
     _bionic_pin_root="${TMPDIR:-/tmp}"
     _bionic_pin_root="${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}"
     if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then
-      # the remedy is what would help: removing the root helps only when this user owns it (another user's cannot be removed from a sticky /tmp) and the path to it was not the refusal
-      if [ -n "$_BIONIC_PIN_HOLDER" ] || [ -n "$(_bionic_pin_entry "$_bionic_pin_root")" ]; then _bionic_pin_fix="set TMPDIR to a directory only you can write"
-      else _bionic_pin_fix="remove $_bionic_pin_root or set TMPDIR"
+      # the remedy is what would help: removing the root helps only when this user owns it (another user's cannot be removed from a sticky /tmp), the path to it was not the refusal, and no run of this user's is using it (a lost race: the root is there and in use, so run again)
+      if [ -n "$_BIONIC_PIN_HOLDER" ] || [ -n "$(_bionic_pin_entry "$_bionic_pin_root")" ]; then _bionic_pin_fix="set TMPDIR to an absolute directory only you can write, then run again"
+      elif [ "${_BIONIC_PIN_WHY#cannot make }" != "$_BIONIC_PIN_WHY" ]; then _bionic_pin_fix="run again"
+      else _bionic_pin_fix="remove $_bionic_pin_root or set TMPDIR, then run again"
       fi
-      echo "resolve-roots.sh: no interpreter pin at $_bionic_pin_root — ${_BIONIC_PIN_WHY}; ${_bionic_pin_fix}, then run again" >&2
+      echo "resolve-roots.sh: no interpreter pin at $_bionic_pin_root — ${_BIONIC_PIN_WHY}; ${_bionic_pin_fix}" >&2
       unset _bionic_pin_fix
       unset BIONIC_TEST_INTERPRETER_PINNED
       exit 2
@@ -350,7 +356,7 @@ if [ "${0##*/}" != "run.sh" ] \
   fi
 fi
 
-_bionic_seam_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || {
+_bionic_seam_repo="$(unset CDPATH; cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || {
   echo "resolve-roots.sh: cannot resolve repo root from ${BASH_SOURCE[0]}" >&2
   # shellcheck disable=SC2317  # reached when this file is executed, not sourced
   return 1 2>/dev/null || exit 1
