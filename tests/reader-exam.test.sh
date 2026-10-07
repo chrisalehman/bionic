@@ -134,11 +134,17 @@ exam_dealt_role() {
 #                          the one dealt its own question, no two lines for one sample and question
 #                          that disagree, every `result` line reads `met`, and each reached
 #                          result is one its sample's key admits (exam_meets, score.sh)
+#   pinned (stale: the re-sit is owed)
+#                          a checks file's digest differs from the sitting's, and the sitting's
+#                          `stale:` line names, for every such file, the hash it read and the
+#                          hash that ships (wave-28 A-orch-110); its result lines are then history
+#                          and are not read
 #   red <reason>           anything else
 # A sitting is a section headed `## <YYYY-MM-DD>…`; the latest is the last in the file, by
 # file order and not by date. Any other line opening with `##` is red wherever it is.
 exam_pin() {
   local file="$1" root="$2" sittings latest f lines want have s samples bad results line kqs q r dealt
+  local drift="" nm names o n
   [ -r "$file" ] || { echo "red: $file cannot be read"; return 1; }
   # A block under a malformed header would fold into the sitting above it, or count as none.
   bad="$(grep -nE '^##' "$file" | grep -vE '^[0-9]+:## [0-9]{4}-[0-9]{2}-[0-9]{2}( |$)' | head -n 1)"
@@ -154,8 +160,28 @@ exam_pin() {
       *) echo "red: the latest sitting has more than one sha256 line for $f"; return 1 ;;
     esac
     have="$(_detect_sha256 "$root/$f")" || { echo "red: $f cannot be digested"; return 1; }
-    [ "$want" = "$have" ] || { echo "red: $f is $have, the latest sitting read $want — sit the exam again"; return 1; }
+    [ "$want" = "$have" ] || drift="${drift:+$drift }$f:$want:$have"
   done
+  # A checks file that changed after the sitting leaves its hash behind. The sitting is marked stale
+  # by one `stale:` line naming, for each such file, the hash it read and the hash that ships
+  # (A-orch-110): the re-sit is owed, and until it is sat the sitting is history. An unmarked drift
+  # stays red, as does a line that names other hashes.
+  for f in $drift; do
+    have="${f##*:}"; want="${f%:*}"; want="${want##*:}"; f="${f%%:*}"
+    names="$(exam_stale_names "$latest" "$(basename "$f" .md)")"
+    set -f; set -- $names; set +f; o="${1:-}"; n="${2:-}"
+    if [ "${#o}" -ge 8 ] && [ "${#n}" -ge 8 ] && case "$want" in "$o"*) true ;; *) false ;; esac \
+       && case "$have" in "$n"*) true ;; *) false ;; esac; then
+      continue
+    fi
+    if printf '%s\n' "$latest" | grep -q '^stale:'; then
+      echo "red: $f is $have, the latest sitting read $want, and its stale: line does not name those hashes — sit the exam again"
+    else
+      echo "red: $f is $have, the latest sitting read $want — sit the exam again"
+    fi
+    return 1
+  done
+  [ -z "$drift" ] || { echo "pinned (stale: the re-sit is owed)"; return 0; }
   # A hash with no readers behind it is the pin lying: every sample was sat, and met.
   samples="$(exam_samples "$root")"
   [ -n "$samples" ] || { echo "red: $root has no samples"; return 1; }
@@ -271,6 +297,22 @@ exam_named_path() {
   exam_record_paths "$1" | ALL="$(exam_samples "$2")" awk '
     BEGIN { n = split(ENVIRON["ALL"], a, "\n") }
     { l = tolower($0); for (i = 1; i <= n; i++) if (a[i] != "" && index(l, a[i])) { print; exit } }'
+}
+
+# exam_stale_names <a sitting's text> <checks-<q>> — `<old> <new>`, the hex prefixes the sitting's
+# `stale:` line gives for that checks file as `checks-<q> <old>… → <new>…`; nothing when it gives none.
+# The glyph is found with index(), never compared with ==.
+exam_stale_names() {
+  printf '%s\n' "$1" | awk -v name="$2" '
+    $1 == "stale:" {
+      for (i = 2; i <= NF - 3; i++) if ($i == name) {
+        if (index($(i + 2), "→") == 0) continue
+        o = ""; n = ""
+        if (match($(i + 1), /^[0-9a-f]+/)) o = substr($(i + 1), 1, RLENGTH)
+        if (match($(i + 3), /^[0-9a-f]+/)) n = substr($(i + 3), 1, RLENGTH)
+        if (o != "" && n != "") { print o, n; exit }
+      }
+    }'
 }
 
 # pin_call <sittings file> <root> — sets PIN_OUT and PIN_RC.

@@ -27,7 +27,10 @@ protocol for sitting them (its `README.md`).
   three checks files it names differs from the hashes of the latest sitting, and when that
   sitting lacks a `met` result for any sample. An edit to a checks file's block or template
   changes the file too. The fix is a sitting, appended to `sittings.md`, never a hash retyped
-  by hand: a hash with no readers behind it is the pin lying.
+  by hand: a hash with no readers behind it is the pin lying. When the files change in a wave
+  whose sitting is a later row's, the sitting carries one `stale:` line naming the old and the new
+  hash of each file that changed, and the pin passes as history until that sitting is sat; an
+  unmarked drift stays red.
 - **A sample gives nothing away.** No comment, file name or commit message in the sample
   names its defect; the sample's own name stays behind when it is materialized, and
   `materialize.sh` refuses a destination whose path names it.
