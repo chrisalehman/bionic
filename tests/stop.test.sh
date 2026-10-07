@@ -720,6 +720,10 @@ S9_D="$(s9_fixture)"
 roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000001 deliverable= \
   >> "$S9_D/.bionic/tmp/roster-$SID.state"
 S9_TX="$(mktemp)"; s9_transcript "$S9_TX" w9-T13
+# THE TURN SETS ITS ENTRY IN PROGRESS (wave-28 T38, A-T38.5): otherwise the task-entry clause
+# names T13 as dispatched in this refusal's detail, and 9e reads every T13 as "named as missed".
+jq -nc '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-09-19T00:00:05Z",
+  message:{role:"assistant",content:[{type:"tool_use",id:"toolu_s9up",name:"TaskUpdate",input:{taskId:"1",status:"in_progress"}}]}}' >> "$S9_TX"
 s7_fire "$S9_D" "$S9_TX"
 expect_contains "9a: the turn that launched one of two ready rows is refused for the fill" \
   "Fillable gap at turn end" "$(reason_of)"
