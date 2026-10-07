@@ -574,15 +574,21 @@ ll_verb "$RR5" T1
 expect_eq "(r6c) a row naming both reads lands_on=, not suites_allowed=" "0 a.test.sh" "$LL_RC $(ll_field "$(ll_ev "$RR5" ready)" suites)"
 RR6="$(ll_world)"
 printf '%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RR6")" \
-  suites_allowed=none suites_source=declared)" >> "$RR6/.bionic/tmp/roster-$WORLD_SID.state"
+  suites_allowed= suites_source=declared)" >> "$RR6/.bionic/tmp/roster-$WORLD_SID.state"
 ll_verb "$RR6" T1
-expect_eq "(r6d) a 1.12.0 row that waived every suite is refused (exit 2)" "2" "$LL_RC"
+expect_eq "(r6d) a 1.12.0 row that names no suite (suites_allowed= empty) is refused (exit 2)" "2" "$LL_RC"
 expect_contains "(r6d) …naming the row" "REFUSED reason=no-lands-on row=T1 name=wx-T1" "$LL_OUT"
 expect_contains "(r6d) …and the hand landing" "--by-hand --reason '<why>'" "$LL_OUT"
 expect_false "(r6d) …and nothing is appended" test -e "$(ll_rec "$RR6")"
 ll_launch "$RR6" T1 none
 ll_verb "$RR6" T1
 expect_true "(r6d-control) …while the same tree, its launch row naming lands_on=none, lands and the record exists" test -e "$(ll_rec "$RR6")"
+RR6b="$(ll_world)"
+printf '%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RR6b")" \
+  suites_allowed='none docs only' suites_source=declared)" >> "$RR6b/.bionic/tmp/roster-$WORLD_SID.state"
+ll_verb "$RR6b" T1
+expect_eq "(r6d2) suites_allowed=none means what lands_on=none means: the candidate publishes with no run" "0 none 0" \
+  "$LL_RC $(ll_field "$(ll_ev "$RR6b" ready)" suites) $(ll_ev "$RR6b" verdict | awk 'END { print NR }')"
 ll_launch "$RR3" T1 none
 ll_verb "$RR3" T1
 expect_eq "(r7) lands_on=none: the candidate publishes with no run" "0 none 0" \
