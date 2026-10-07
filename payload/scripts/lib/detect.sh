@@ -401,16 +401,22 @@ detect_working_principles() {
 # because the file this names must be the file the gate reads. `session-poker.sh share <n>` spells it again, in
 # the hook, and tests/gate.test.sh §SHARE holds the three to one file. Setup, remove and doctor ask here.
 #
-#   file    — a regular, readable file is there: the share was set
-#   default — none is: the gate's 80 stands
+#   file    — the file's first word is a whole number from 1 to 100: the share was set
+#   default — anything else, an absent or unreadable file or a value `gate_share` would refuse included: the
+#             gate's 80 stands. The source is judged by the VALUE exactly as `gate_share` judges it (read-
+#             structure-p19 #5), so a file holding `abc` is reported as the default it is.
 detect_share_file() {
   printf '%s/bionic/share\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 }
 
 detect_share() {
-  local f
+  local f v=''
   f="$(detect_share_file)"
-  if [ -f "$f" ] && [ -r "$f" ]; then
+  { read -r v < "$f"; } 2>/dev/null
+  v="${v%%[[:space:]]*}"
+  case "$v" in ''|*[!0-9]*|????*) v=0 ;; esac
+  v=$((10#$v))
+  if [ "$v" -ge 1 ] && [ "$v" -le 100 ]; then
     echo "env:share state=file path=${f}"
   else
     echo "env:share state=default path=${f}"

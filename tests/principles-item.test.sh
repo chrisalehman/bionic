@@ -1341,6 +1341,12 @@ rec_env "$SH_D" env BIONIC_CLAUDE_HOME="$SH_D/other" bash "${REC_PAYLOAD:-$PAYLO
 expect_eq "SHARE-ITEM home: with BIONIC_CLAUDE_HOME set the share is written under CLAUDE_CONFIG_DIR (80)" "80" "$(sh_value "$SH_D")"
 expect_eq "SHARE-ITEM home: …and not under BIONIC_CLAUDE_HOME" "no" "$([ -e "$SH_D/other/bionic/share" ] && echo yes || echo no)"
 
+# a file the gate would refuse reads as the default, so setup offers a share over it (the value judges, as gate_share does)
+SH_J="$(rec_home)"; mkdir -p "$SH_J/.claude/bionic"; printf 'abc\n' > "$(sh_file "$SH_J")"
+expect_eq "SHARE-ITEM junk: a file holding abc fires the share item (0)" "0" "$(sh_pending "$SH_J")"
+rec_setup "$SH_J" share y >/dev/null 2>&1
+expect_eq "SHARE-ITEM junk: a yes replaces it with the default (80)" "80" "$(sh_value "$SH_J")"
+
 # the roster and the plan page name it
 SH_E="$(rec_home)"
 SH_E_LIST="$(rec_env "$SH_E" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --list 2>&1)"

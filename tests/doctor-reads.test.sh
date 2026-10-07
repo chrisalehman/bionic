@@ -1210,4 +1210,15 @@ SD_SEC3="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
 expect_contains "SD.7: share 100 is reported as 100" "100% of this machine (set in bionic/share)" "$SD_SEC3"
 expect_eq "SD.8: …and every row fits 100 columns at the widest share" "" "$(too_wide "$SD_SEC3")"
 
+# the source is judged by the VALUE, as gate_share judges it (read-structure-p19 #5): a file the gate would refuse is the default
+for SD_JUNK in abc 0 101 1234 ""; do
+  printf '%s\n' "$SD_JUNK" > "${SD_CCD}/bionic/share"
+  SD_SECJ="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+  expect_contains "SD.9 a share file holding '$SD_JUNK' reads 80, the default, as the gate does" \
+    "80% of this machine (the default; no share file)" "$SD_SECJ"
+done
+printf '65\n' > "${SD_CCD}/bionic/share"
+expect_contains "SD.10 control: a valid value in the same file reads as set" "65% of this machine (set in bionic/share)" \
+  "$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+
 finish
