@@ -63,6 +63,15 @@ export BIONIC_PROBE_FREE_MB=8192
 export BIONIC_PROBE_LOAD_1M=1.0
 export BIONIC_PROBE_FREE_PCT=60
 export BIONIC_PROBE_SWAP_PCT=0
+# THE GATE IS FIXTURE DATA TOO (wave-28 T13; D14). The tick sizes its fill at the gate, which
+# reads the machine through the readers' pins and its store at BIONIC_GATE_DIR: 8 cores, 30%
+# used, a load of 1.0 over the last minute and the last five, and one run on record that takes
+# 0.1 core — room for every row a fixture here offers. §11 plants its own per case.
+export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
+SP_GATE_DIR="$TMPROOT/gate"
+export BIONIC_GATE_DIR="$SP_GATE_DIR"
+mkdir -p "$SP_GATE_DIR/requests" "$SP_GATE_DIR/cost"
+printf '5:0.1:30:1000\n' > "$SP_GATE_DIR/cost/fixture.test.sh"
 
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
@@ -2015,7 +2024,7 @@ expect_absent "…never DISARM off a delivery it cannot place in time" "decision
 expect_contains "…naming the missing arming record as the reason" "arming record" "$OUT"
 
 # ============================================================
-section "Section 11: pressure — HOLD, EMERGENCY, and the RUNG (AC-17, AC-30, S8)"
+section "Section 11: the gate — §TICK-GATE and §FILL-GATE (AC-17; wave-28 T13, AC-2.5, AC-2.8)"
 # ============================================================
 #
 # WHAT THESE CASES OWN. The tick reads `resources_pressure` before it considers a single
@@ -2155,156 +2164,106 @@ count_lines_matching() {  # <needle> <output> -> integer
   printf '%s' "$n"
 }
 
-# ---------- 11a: a HOLD prints its measurement and fills nothing ----------
+# ---------- §TICK-GATE: one gate line on every tick, and no rung, hold or emergency (AC-2.8) ----------
 #
-# The fixture has ready work AND a gap, so a tick that filled would fill. That is the whole
-# discriminator: "no FILL under pressure" is only a claim if a FILL was available.
-R11A="$(make_repo s11-hold)"; new_roster "$R11A"
+# THE LINE IS THE CONTRACT (wave-28 T13; D14): `poker: gate share=<n> used=<n>% load=<1m>/<5m>
+# of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no>`, printed once from every exit
+# path, in place of the rung, the HOLD and the EMERGENCY. The machine is the suite's planted one
+# (8 cores, 30% used, a load of 1.0 over both windows) and the gate a store of its own per case.
+GATE_LINE_QUIET="poker: gate share=80 used=30% load=1.0/1.0 of 8 promised=0 admitted=0 waiting=0 room=yes"
+gate_case() {  # <label> <cores one run takes> — a store of this case's own, one cost line on record
+  BIONIC_GATE_DIR="$TMPROOT/gate-$1"; export BIONIC_GATE_DIR
+  rm -rf "$BIONIC_GATE_DIR"; mkdir -p "$BIONIC_GATE_DIR/requests" "$BIONIC_GATE_DIR/cost"
+  printf '5:%s:30:1000\n' "$2" > "$BIONIC_GATE_DIR/cost/fixture.test.sh"
+}
+# plant_request <who> <waiting|admitted> <key> — a request held by this suite's own shell, so the
+# gate's liveness rule finds its holder alive for as long as the suite runs.
+plant_request() {
+  local n start
+  n="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | /usr/bin/grep -c '^[0-9][0-9]*$')"
+  start="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$$" | awk '{ $1 = $1; print }')"
+  { printf 'key=%s\nkind=work\nwho=%s\ntree=/\nasked=1000\nholder=%s:%s\n' "$3" "$1" "$$" "$start"
+    [ "$2" = admitted ] && printf 'admitted=1000\npromise=5:1:30\n'
+  } > "$BIONIC_GATE_DIR/requests/$((n + 1))"
+}
+
+# 11a — no room at the gate: the five-minute load over the share. The fixture has ready work
+# and no open row, so a tick that filled would fill.
+R11A="$(make_repo s11-noroom)"; new_roster "$R11A"
 wave_plan "$R11A" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| DONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| NEXT | 4 | build | fixture task | implementor | DONE | 15m | REQ-x | a.sh | pending |"
-poke_pressure "$R11A" 512 1.0 tick
-expect_eq "a tick under memory pressure still exits 0 — HOLD is a decision, not a failure" \
-  "0" "$RC"
-expect_contains "…and prints HOLD with the free-memory reading" "poker: HOLD free_mb=512" "$OUT"
-expect_contains "…and the load reading beside it" "load_1m=1.0" "$OUT"
-expect_contains "…saying plainly that nothing is being filled" "no fills" "$OUT"
-expect_absent "…and fills nothing, though a ready task and a gap both exist" "poker: FILL" "$OUT"
-# THE WITHHELD LINE (wave-19 REQ-4 AC-4.1, D6). The stop wall exempts a tick turn from the
-# fill invariant only on this line, so the HOLD path prints it beside its measurement.
-expect_contains "11a2 …and prints the withheld line the stop wall reads, with the measurement" \
-  "poker: fill withheld — HOLD free_mb=512 load_1m=1.0" "$OUT"
+gate_case s11a 0.1
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke "$R11A" tick
+expect_eq "11a a tick with no room still exits 0 — it is a decision, not a failure" "0" "$RC"
+expect_contains "11a1 …and prints the gate line, the five-minute load over 6.4 cores, room=no" \
+  "poker: gate share=80 used=30% load=1.0/7.0 of 8 promised=0 admitted=0 waiting=0 room=no" "$OUT"
+expect_contains "11a2 …saying why nothing is filled" "no FILL — the gate gives no room (its line above); 1 writer row(s) wait." "$OUT"
+expect_absent "11a3 …and fills nothing, though a ready task and an empty roster both exist" "poker: FILL" "$OUT"
+forget_digest "$R11A"
+poke "$R11A" tick
+expect_contains "11a4 the same fixture on a quiet machine gives room (11a discriminates)" "$GATE_LINE_QUIET" "$OUT"
+expect_contains "11a5 …and FILLs" "poker: FILL NEXT" "$OUT"
+expect_absent "11a6 …and no tick prints a HOLD" "HOLD" "$OUT"
+expect_absent "11a7 …or a withheld line" "fill withheld" "$OUT"
 
-# The paired positive: the SAME repo, the SAME plan, with the machine reading healthy.
-# Without it, 11a passes on a tick that can never fill anything.
-poke_pressure "$R11A" 8192 1.0 tick
-expect_contains "the same fixture with memory to spare DOES fill (11a discriminates)" \
-  "poker: FILL NEXT" "$OUT"
-expect_absent "…and prints no HOLD" "poker: HOLD" "$OUT"
-expect_absent "11a3 …and withholds nothing" "fill withheld" "$OUT"
-
-# ---------- 11b: ONE rung line per tick, on QUIET and on FILL alike (AC-17) ----------
-#
-# WHAT REPLACED NARROW. NARROW was advice computed from a COUNT the tick carried across
-# firings in a sibling file — a stored fact about the machine, owned by a hook that only
-# wakes every twenty minutes. The rung is the same judgment taken as a pure function of the
-# ring at the moment of use, so it needs no counter, no sibling file and no second firing;
-# what the tick owes the operator is therefore a REPORT, not a recommendation, and it owes
-# it on every tick rather than on the second consecutive hold.
-#
-# THE LINE IS THE CONTRACT, and it is one line: `rung=<n>/<ceiling>` is the fill width and
-# the ceiling it was taken against, `writers=` and `test_jobs=` are that same band applied to
-# the two numbers the plan header carries (D3: "one fraction applied to both").
-R11B="$(make_repo s11-rung-quiet)"; new_roster "$R11B"
+# 11b — ONE gate line per tick, on QUIET and on FILL alike, and never a rung beside it.
+R11B="$(make_repo s11-gate-quiet)"; new_roster "$R11B"
 wave_plan "$R11B" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
-# One open row, well inside its declared duration: the decision is QUIET and there is no
-# pending task to fill, so this tick prints no FILL at all.
 add_row "$R11B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
-poke_rung "$R11B" 60 0 tick
-expect_eq "a QUIET tick exits 0" "0" "$RC"
-expect_contains "…decides QUIET" "decision=QUIET" "$OUT"
-expect_absent   "…fills nothing" "poker: FILL" "$OUT"
-expect_contains "…and STILL prints the rung, on a clear ring at the full ceiling" \
-  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
-expect_eq       "…exactly once, not once per arm" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+gate_case s11b 0.1
+poke "$R11B" tick
+expect_eq "11b a QUIET tick exits 0" "0" "$RC"
+expect_contains "11b1 …decides QUIET" "decision=QUIET" "$OUT"
+expect_contains "11b2 …and prints the gate line, its open writer counted as owed (0.1 promised)" \
+  "poker: gate share=80 used=30% load=1.0/1.0 of 8 promised=0.1 admitted=0 waiting=0 room=yes" "$OUT"
+expect_eq "11b3 …exactly once" "1" "$(count_lines_matching 'poker: gate share=' "$OUT")"
+expect_eq "11b4 …and no rung line (the count extractor reads the gate line above)" "0" \
+  "$(count_lines_matching 'poker: rung=' "$OUT")"
 
-# THE PAIRED POSITIVE: the same shape on a tick that FILLS. Without it, "on every tick" is a
-# claim proven on one kind of tick.
-R11B2="$(make_repo s11-rung-fill)"; new_roster "$R11B2"
+R11B2="$(make_repo s11-gate-fill)"; new_roster "$R11B2"
 wave_plan "$R11B2" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| NEXT | 4 | build | fixture task | implementor | A | 15m | REQ-x | a.sh | pending |"
 PLAN_R11B2="$R11B2/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
-poke_rung "$R11B2" 60 0 tick
-expect_contains "a FILLING tick prints the rung too" \
-  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
-expect_contains "…beside the fill it decided" "poker: FILL NEXT" "$OUT"
-expect_eq       "…still exactly one rung line" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+gate_case s11b2 0.1
+poke "$R11B2" tick
+expect_contains "11b5 a FILLING tick prints the gate line" "$GATE_LINE_QUIET" "$OUT"
+expect_contains "11b6 …beside the fill it decided" "poker: FILL NEXT" "$OUT"
+expect_eq "11b7 …still exactly one gate line" "1" "$(count_lines_matching 'poker: gate share=' "$OUT")"
 
-# AND UNDER A HOLD, where no fill happens at all: the report is unconditional, so an operator
-# reading a held tick still learns what width the machine would allow if it were not held.
-BIONIC_PROBE_FREE_MB=512 poke_rung "$R11B2" 60 0 tick
-expect_contains "a HELD tick prints the rung as well" "poker: rung=8/8" "$OUT"
-expect_contains "…alongside the HOLD" "poker: HOLD" "$OUT"
-
-# ---------- 11b2: the two exit paths ABOVE the report (Step-6 review C-5) ----------
-#
-# AC-17 reads "on every tick", and two arms exit before the scheduler block ever runs: the
-# pre-dispatch QUIET of §13a — no roster file at all, which is the FIRST tick of every run
-# by design, because arming precedes dispatch — and the terminal DISARM of §9c/§12j. The
-# §11b fixture above calls `new_roster`, so it exercises the roster-present arm that already
-# printed; these two are the ones that did not, and the first of them is the tick an
-# operator sees most: the one taken right before the first dispatch, where "what width will
-# this machine carry" is the whole question.
-R11B4="$(make_repo s11-rung-no-roster)"
-# Deliberately NO new_roster — §13a's pre-dispatch state — but WITH a budget to report.
+# The two exit paths above the scheduler: the armed first tick (no roster file) and DISARM.
+R11B4="$(make_repo s11-gate-no-roster)"
 poke "$R11B4" arm
 wave_plan "$R11B4" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
-poke_rung "$R11B4" 60 0 tick
-expect_eq "the pre-dispatch (no-roster) QUIET tick exits 0" "0" "$RC"
-expect_contains "…decides QUIET" "decision=QUIET" "$OUT"
-expect_contains "…and says the pre-dispatch line" "armed, nothing dispatched yet" "$OUT"
-expect_contains "…and STILL prints the rung — this is the first tick of every run" \
-  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
-expect_eq "…exactly once, not once per arm" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+poke "$R11B4" tick
+expect_contains "11b8 the pre-dispatch (no-roster) tick decides QUIET" "decision=QUIET" "$OUT"
+expect_contains "11b9 …and STILL prints the gate line — the first tick of every run" "$GATE_LINE_QUIET" "$OUT"
+expect_eq "11b10 …exactly once" "1" "$(count_lines_matching 'poker: gate share=' "$OUT")"
 
-# THE DISARM ARM. `delivered_plan` carries no `parallel-budget:` frontmatter, so this row
-# also pins the missing-ceiling spelling the report's own comment promises: the line is
-# PRINTED with `-` rather than withheld, because "the tick said nothing" and "the tick said
-# there is no ceiling" are different facts and only the second one is true.
-R11B5="$(make_repo s11-rung-disarm)"; new_roster "$R11B5"; armed_ago "$R11B5"
+R11B5="$(make_repo s11-gate-disarm)"; new_roster "$R11B5"; armed_ago "$R11B5"
 delivered_plan "$R11B5"
-poke_rung "$R11B5" 60 0 tick
-expect_eq "a DISARM tick exits 0" "0" "$RC"
-expect_contains "…decides DISARM" "decision=DISARM" "$OUT"
-expect_contains "…and STILL prints the rung, with the missing ceiling spelled out" \
-  "poker: rung=-/- writers=- test_jobs=-" "$OUT"
-expect_eq "…exactly once" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+poke "$R11B5" tick
+expect_contains "11b11 a DISARM tick decides DISARM" "decision=DISARM" "$OUT"
+expect_contains "11b12 …and prints the gate line too, with no budget on the plan" "$GATE_LINE_QUIET" "$OUT"
+expect_eq "11b13 …exactly once" "1" "$(count_lines_matching 'poker: gate share=' "$OUT")"
 
-# THE PAIRED POSITIVE FOR THAT ARM: the same terminal decision over a plan that DOES carry a
-# budget, so the `-` above is proven to be the absent CEILING and not an absent report.
-R11B6="$(make_repo s11-rung-disarm-budget)"; new_roster "$R11B6"; armed_ago "$R11B6"
-write_plan "$R11B6" "$(printf -- '---\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=18 source=probe\n---\n\n# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n- Step 9: delivered: bionic 9.9.9; report: record/fixture/close-out.md\n')"
-poke_rung "$R11B6" 60 0 tick
-expect_contains "a DISARM tick over a BUDGETED plan prints the real rung (11b5 discriminates)" \
-  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
-expect_contains "…and still DISARMs" "decision=DISARM" "$OUT"
-
-# ---------- 11b3: the tick never edits the plan (AC-17's third clause) ----------
-#
-# THE CLAUSE THE READBACK NAMED AS UNPINNED. The rung line and the FILL line are both console
-# output; neither is a claim about the file on disk. A tick that decided to fill by rewriting
-# the plan's own header — instead of only PRINTING what it decided — would still pass every
-# case above. The plan is the one artifact every other reader (active_plan, open_runs, the
-# bound marker) trusts to describe what a run intends, so a tick that edited it would be a
-# second writer of state the rest of the wave assumes only Step 4 authorship touches.
-#
-# A REAL TICK THAT BOTH PRINTS THE RUNG AND FILLS — reusing R11B2's already-filling fixture —
-# so the claim is proven on the same kind of tick that has something to write, not on an idle
-# one that never reaches the fill path at all.
+# 11b3 — the tick never edits the plan (AC-17's third clause), proven on a filling tick.
 CKSUM_11B3_BEFORE="$(cksum < "$PLAN_R11B2")"
 MTIME_11B3_BEFORE="$(stat -f %m "$PLAN_R11B2" 2>/dev/null || stat -c %Y "$PLAN_R11B2")"
-poke_rung "$R11B2" 60 0 tick
-expect_contains "the same FILLING tick, run again, still prints the rung" \
-  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
+forget_digest "$R11B2"
+poke "$R11B2" tick
+expect_contains "the same FILLING tick, run again, still fills" "poker: FILL NEXT" "$OUT"
 expect_eq "…and the plan's bytes are byte-identical after the tick" "$CKSUM_11B3_BEFORE" \
   "$(cksum < "$PLAN_R11B2")"
 expect_eq "…and the plan's mtime is untouched by the tick" "$MTIME_11B3_BEFORE" \
   "$(stat -f %m "$PLAN_R11B2" 2>/dev/null || stat -c %Y "$PLAN_R11B2")"
-
-# THE ANTI-VACUITY ARM. A doctored copy of the poker appends one byte to the plan right where
-# the real tick only READS it (`SCHED_PLAN="$POKER_RUN_PLAN"`, now inside `sched_budget_read`
-# and so indented two rather than four — the anchor follows the code, C-5), so the pin above
-# is proven to discriminate a tick that DOES edit the plan from one that does not.
 POKER_MUT_PLANEDIT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-planedit-mut.XXXXXX")"
 mkdir -p "$POKER_MUT_PLANEDIT_ROOT/hooks" "$POKER_MUT_PLANEDIT_ROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" \
   "$POKER_MUT_PLANEDIT_ROOT/scripts/lib"
-# EVERY OTHER SIBLING HOOK, LINKED IN — `tick` refuses outright with no sibling
-# hooks/session-sweeper.sh on disk, which a hooks/-plus-scripts/lib copy (the shape the
-# 20m-default mutant above uses) does not provide because that mutant never runs `tick`.
 for _sib in "$(dirname "$POKER")"/*; do
   _sibname="$(basename "$_sib")"
   [ "$_sibname" = "session-poker.sh" ] && continue
@@ -2318,7 +2277,7 @@ expect_eq "planedit meta: the sed anchor landed exactly once (the doctor took)" 
 CKSUM_11B3_MUT_BEFORE="$(cksum < "$PLAN_R11B2")"
 POKER_REAL_11B3="$POKER"; POKER="$POKER_MUT_PLANEDIT"
 forget_digest "$R11B2"
-poke_rung "$R11B2" 60 0 tick
+poke "$R11B2" tick
 POKER="$POKER_REAL_11B3"
 expect_contains "the doctored tick still fills (the mutation is only in the plan-touch path)" \
   "poker: FILL NEXT" "$OUT"
@@ -2329,11 +2288,32 @@ else
 fi
 rm -rf "$POKER_MUT_PLANEDIT_ROOT"
 
-# ---------- 11c: the rung IS the band, and the FILL is sized by it (AC-17, AC-14) ----------
+# 11d — over the share the tick names what holds the memory, and stops no one. The admitted
+# request is held by this suite's own shell; nothing is named for a stop.
+R11D="$(make_repo s11-over-share)"; new_roster "$R11D"
+wave_plan "$R11D" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| B | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row "$R11D" status=intended name=young-suite-runner deliverable=b.md duration="4 hours" \
+  claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
+gate_case s11d 0.1
+plant_request "$SID:young-suite-runner" admitted heavy.test.sh
+BIONIC_PROBE_USED_PCT=90 poke "$R11D" tick
+expect_contains "11d over the share the gate line reads used=90% and room=no" \
+  "poker: gate share=80 used=90% load=1.0/1.0 of 8 promised=1 admitted=1 waiting=0 room=no" "$OUT"
+expect_contains "11d1 …and the line under it names what holds the memory" \
+  "poker: over share — used=90% admitted: heavy.test.sh" "$OUT"
+expect_absent "11d2 …and names no writer to stop" "stop youngest" "$OUT"
+expect_absent "11d3 …and prints no EMERGENCY" "EMERGENCY" "$OUT"
+expect_absent "11d4 …and fills nothing" "poker: FILL" "$OUT"
+forget_digest "$R11D"
+poke "$R11D" tick
+expect_absent "11d5 under the share the same store prints no over-share line (11d1 discriminates)" "over share" "$OUT"
+
+# ---------- §FILL-GATE: the tick's fill follows the gate (AC-2.5) ----------
 #
-# THE DISCRIMINATOR. Four ready tasks and a writers ceiling of eight means a clear machine
-# fills all four; the same fixture on a critical ring must fill exactly the quarter-ceiling.
-# A test that only ever ran clear would pass against a tick that ignored the ring entirely.
+# Four ready writer rows and a cap of eight. One run on record takes 1.0 core, so on a load of
+# 4.0 the gate has room while 4.0 + the owed runs stays within 6.4: three rows, then a no.
 mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready tasks
   local r; r="$(make_repo "$1")"; new_roster "$r"
   wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
@@ -2344,177 +2324,86 @@ mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready
     "| FOUR | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
   printf '%s' "$r"
 }
+fill_line() {  # the tick's one `poker: FILL <ids>` line; never the sentence below it (`FILL — …`)
+  printf '%s\n' "$OUT" | awk 'index($0, "poker: FILL ") == 1 && index($0, "poker: FILL —") != 1 { print; exit }'
+}
 
-R11C="$(mk_rung_repo s11-rung-clear)"
-poke_rung "$R11C" 60 0 tick
-expect_contains "a CLEAR ring reports the full ceiling" \
-  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
-expect_contains "…and fills the whole gap" "poker: FILL ONE TWO THREE FOUR" "$OUT"
+R11C="$(mk_rung_repo s11-fill-quiet)"
+gate_case s11c 0.1
+poke "$R11C" tick
+expect_eq "FG.1 a quiet machine offers every ready row" "poker: FILL ONE TWO THREE FOUR" "$(fill_line)"
 
-R11C2="$(mk_rung_repo s11-rung-warning)"
-poke_rung "$R11C2" 20 0 tick
-expect_contains "a WARNING ring halves both numbers" \
-  "poker: rung=4/8 writers=4 test_jobs=9" "$OUT"
-expect_contains "…and the fill is still under the halved rung" "poker: FILL ONE TWO THREE FOUR" "$OUT"
+R11C2="$(mk_rung_repo s11-fill-load)"
+gate_case s11c2 1.0
+BIONIC_PROBE_BUSY_CORES=4.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 poke "$R11C2" tick
+expect_eq "FG.2 a load of 4.0 and 1.0 core a run: three rows, one ask each, then a no" \
+  "poker: FILL ONE TWO THREE" "$(fill_line)"
 
-R11C3="$(mk_rung_repo s11-rung-critical)"
-poke_rung "$R11C3" 8 0 tick
-expect_contains "a CRITICAL ring quarters both numbers" \
-  "poker: rung=2/8 writers=2 test_jobs=5" "$OUT"
-expect_contains "…and the fill names ONLY the quarter-ceiling, in table order" \
-  "poker: FILL ONE TWO" "$OUT"
-expect_absent   "…never the third ready task" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+R11C3="$(mk_rung_repo s11-fill-owed)"
+gate_case s11c3 1.0
+add_row "$R11C3" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+BIONIC_PROBE_BUSY_CORES=4.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 poke "$R11C3" tick
+expect_eq "FG.3 one open writer not yet showing is owed: two rows" "poker: FILL ONE TWO" "$(fill_line)"
+plant_request "$SID:w1" admitted w1.test.sh
+forget_digest "$R11C3"
+BIONIC_PROBE_BUSY_CORES=4.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 BIONIC_PROBE_USED_PCT=30 poke "$R11C3" tick
+expect_eq "FG.4 once it has asked, its promise counts instead (1.0 core): still two rows" \
+  "poker: FILL ONE TWO" "$(fill_line)"
 
-# SWAP REACHES THE SAME BAND BY THE OTHER TERM, so the rung is not a free-percentage
-# thermometer wearing a band's name.
-R11C4="$(mk_rung_repo s11-rung-critical-swap)"
-poke_rung "$R11C4" 60 95 tick
-expect_contains "swap past the critical line quarters it too, on a healthy free percentage" \
-  "poker: rung=2/8 writers=2 test_jobs=5" "$OUT"
+R11C4="$(mk_rung_repo s11-fill-wait)"
+gate_case s11c4 0.1
+plant_request "$SID:other" waiting other.test.sh
+poke "$R11C4" tick
+expect_contains "FG.5 a waiting request gives no room" "waiting=1 room=no" "$OUT"
+expect_eq "FG.6 …and the tick offers nothing" "" "$(fill_line)"
 
-# THE OPEN ROWS COME OFF THE RUNG, NOT OFF THE CEILING. This is the whole point of sizing
-# the fill by the rung: two open rows against a quartered rung of 2 is a gap of ZERO, where
-# against the ceiling of 8 it would still be a gap of six.
-R11C5="$(mk_rung_repo s11-rung-critical-open)"
+R11C5="$(mk_rung_repo s11-fill-cap)"
+gate_case s11c5 0.1
+wave_plan "$R11C5" "writers=2 suites=2 worktrees=8 test_jobs=18 source=user" \
+  "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+  "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+  "| THREE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+poke "$R11C5" tick
+expect_eq "FG.7 a person's cap of two caps a gate with room for more" "poker: FILL ONE TWO" "$(fill_line)"
 add_row "$R11C5" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
-poke_rung "$R11C5" 8 0 tick
-expect_contains "one open row against a rung of 2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent   "…and the second ready task waits on the machine, not on the budget" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 add_row "$R11C5" name=w2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
-poke_rung "$R11C5" 8 0 tick
-expect_absent   "two open rows against a rung of 2 fill nothing" "poker: FILL" "$OUT"
-expect_contains "…and say which number closed the gap — the RUNG, named beside its ceiling" \
-  "rung=2 of writers=8" "$OUT"
+forget_digest "$R11C5"
+poke "$R11C5" tick
+expect_contains "FG.8 at the cap the tick says the cap is reached" \
+  "no FILL — the cap writers=2 is reached by 2 unacked roster row(s); 3 writer row(s) wait." "$OUT"
 
-# ---------- 11c2: no plan budget, and the line still prints ----------
-#
-# The rung is a function of (ring, CEILING) and a plan that opts into no budget offers no
-# ceiling. The honest report is the line with its fields empty rather than a number invented
-# from somewhere else — and the line is still printed, because "the tick reported nothing"
-# and "the tick reported no ceiling" are different facts.
-R11C6="$(make_repo s11-rung-nobudget)"; new_roster "$R11C6"
-wave_plan "$R11C6" "-" "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
-poke_rung "$R11C6" 60 0 tick
-expect_contains "a plan with no parallel-budget still prints the rung line" \
-  "poker: rung=-/- writers=- test_jobs=-" "$OUT"
-expect_contains "…and says why it is not filling, naming the key (wave-19 REQ-3 AC-3.2)" \
+R11C6="$(mk_rung_repo s11-fill-nocost)"
+gate_case s11c6 0.1
+rm -f "$BIONIC_GATE_DIR/cost/fixture.test.sh"
+poke "$R11C6" tick
+expect_eq "FG.9 with no cost on record one row is offered: the next would take all the room" \
+  "poker: FILL ONE" "$(fill_line)"
+
+# A plan with no budget line still prints the gate line, and says why it is not filling.
+R11C7="$(make_repo s11-gate-nobudget)"; new_roster "$R11C7"
+wave_plan "$R11C7" "-" "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+gate_case s11c7 0.1
+poke "$R11C7" tick
+expect_contains "FG.10 a plan with no parallel-budget still prints the gate line" "$GATE_LINE_QUIET" "$OUT"
+expect_contains "FG.11 …and says why it is not filling, naming the key (wave-19 REQ-3 AC-3.2)" \
   "carries no parallel-budget: writers=" "$OUT"
 
-# ---------- 11c3: NARROW and its counter file are GONE (AC-17) ----------
-#
-# TWO ASSERTIONS, BECAUSE THEY FAIL DIFFERENTLY. The first is about the script: a NARROW that
-# survived anywhere in it — in a comment, in a dead branch — is a second answer to "how wide
-# should this wave run" living beside the rung. The second is about the DISK: `.holds` was
-# the only cross-tick state the scheduler kept, and a tick that still wrote it would be
-# storing a liveness fact it no longer owns (D0). Three consecutive holds is what used to
-# make the counter reach 2 and fire.
-R11C7="$(mk_rung_repo s11-no-holds)"
-BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
-forget_digest "$R11C7"
-BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
-forget_digest "$R11C7"
-BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
-expect_contains "the third consecutive hold is still just a HOLD" "poker: HOLD" "$OUT"
+# NARROW and its counter file stay gone (AC-17), and no tick writes a .holds sibling.
+R11C8="$(mk_rung_repo s11-no-holds)"
+gate_case s11c8 0.1
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke "$R11C8" tick
+forget_digest "$R11C8"
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke "$R11C8" tick
+expect_contains "the second tick with no room is still just no room" "room=no" "$OUT"
 expect_absent   "…and never recommends a width" "NARROW" "$OUT"
 expect_eq       "…and no .holds sibling of the stamp was ever written" "" \
-  "$(ls "$R11C7/.bionic/tmp/" 2>/dev/null | /usr/bin/grep '\.holds$' || true)"
+  "$(ls "$R11C8/.bionic/tmp/" 2>/dev/null | /usr/bin/grep '\.holds$' || true)"
 expect_eq       "the script carries no NARROW at all — not in code, not in a comment" "0" \
   "$(/usr/bin/grep -c 'NARROW' "$POKER" || true)"
-
-# ---------- 11c4: the tick SAMPLES before it reads (AC-15, the Patrol's half) ----------
-#
-# WHY THIS CASE HAS TO SEED THE RING. `pressure_level` takes a single sample of its own when
-# the ring is EMPTY — a first consumer on a cold machine must have something to answer from —
-# so every case above would read the right band whether the tick sampled or not. The
-# consumers-sample rule (D3 amendment: plugin hooks were not observed firing inside
-# subagents, so nothing else fills the ring while writers run) is only observable against a
-# ring that already holds a reading of ANOTHER band.
-#
-# THE ARITHMETIC THAT MAKES IT A DISCRIMINATOR. One CLEAR reading is already in the window.
-# The machine now reads CRITICAL. A tick that samples leaves two readings, and an even split
-# resolves to the worse band (S7) — critical, a rung of 2. A tick that only READ would see
-# the clear reading alone and report the full ceiling of 8.
-R11C8="$(mk_rung_repo s11-tick-samples)"
-RING8="$TMPROOT/ring-tick-samples.ring"; rm -f "$RING8"
-seed_ring "$RING8" 60 0
-expect_eq "the seeded ring holds exactly one CLEAR reading" "1" \
-  "$(wc -l < "$RING8" | tr -d ' ')"
-BIONIC_PRESSURE_RING="$RING8" BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 poke "$R11C8" tick
-expect_contains "the tick's OWN reading is in the median it answers from" "poker: rung=2/8" "$OUT"
-expect_eq       "…because it appended one, leaving two readings in the ring" "2" \
-  "$(wc -l < "$RING8" | tr -d ' ')"
-# THE PAIRED NEGATIVE, same seeded ring shape, machine still CLEAR: sampling is not a way of
-# always reading critical. Two clear readings stay clear and the ceiling is untouched.
-R11C9="$(mk_rung_repo s11-tick-samples-clear)"
-RING9="$TMPROOT/ring-tick-samples-clear.ring"; rm -f "$RING9"
-seed_ring "$RING9" 60 0
-BIONIC_PRESSURE_RING="$RING9" BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_SWAP_PCT=0 poke "$R11C9" tick
-expect_contains "a tick that samples a CLEAR machine onto a clear ring stays at the ceiling" \
-  "poker: rung=8/8" "$OUT"
-
-# ---------- 11d: EMERGENCY names the youngest suite-running writer ----------
-#
-# The kill floor. The tick NAMES a writer and stops nothing itself — stopping a writer
-# destroys work, and an irreversible act taken by a hook off one reading is what this design
-# refuses. The address it prints is the one both stop gates accept (POKER/8).
-#
-# "SUITE-RUNNING" IS READ OFF THE LEDGER (WALLS/3): an open row whose `claims=` is non-empty
-# declared a subprocess claim and spends a suite. YOUNGEST, because the youngest writer has
-# the least work to lose.
-R11D="$(make_repo s11-emergency)"; new_roster "$R11D"
-wave_plan "$R11D" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
-  "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| B | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
-# `status=intended` is the dispatch record — the row hooks/dispatch-preflight.sh appends
-# when it admits a dispatch, carrying that brief's declared `claims=`. It is the predicate
-# lib/patrol.sh's `patrol_roster_state` and the dispatch wall's own budget arm both count
-# on (WALLS/2, WALLS/3), and the roster is append-only, so later `identified`/`confirmed`
-# rows for the same name are transitions rather than second dispatches.
-add_row "$R11D" status=intended name=old-suite-runner deliverable=a.md duration="4 hours" \
-  claims="bash tests/run.sh" launched_at="$(iso_ago 3600)"
-add_row "$R11D" status=intended name=young-suite-runner deliverable=b.md duration="4 hours" \
-  claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
-add_row "$R11D" status=intended name=no-claim-writer deliverable=c.md duration="4 hours" \
-  launched_at="$(iso_ago 10)"
-poke_pressure "$R11D" 100 1.0 tick
-expect_contains "at the kill floor the tick prints EMERGENCY with the reading" \
-  "poker: EMERGENCY free_mb=100" "$OUT"
-expect_contains "…naming the YOUNGEST suite-running writer, at the stop address" \
-  "stop youngest suite-running writer young-suite-runner@session-$(printf '%s' "$SID" | cut -c1-8)" "$OUT"
-expect_absent "…never the older one" "old-suite-runner@" "$OUT"
-expect_absent "…and never a writer that claimed no suite" "no-claim-writer@" "$OUT"
-expect_absent "…and fills nothing at the kill floor" "poker: FILL" "$OUT"
-expect_contains "11d2 …and prints the withheld line the stop wall reads, with the measurement" \
-  "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
-
-# A roster with no suite-claiming row says so rather than naming a writer at random: the
-# pressure is real and it is not this session's to relieve.
-R11E="$(make_repo s11-emergency-noclaim)"; new_roster "$R11E"
-wave_plan "$R11E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
-  "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
-add_row "$R11E" status=intended name=quiet-writer deliverable=a.md duration="4 hours" \
-  launched_at="$(iso_ago 60)"
-poke_pressure "$R11E" 100 1.0 tick
-expect_contains "an EMERGENCY with no suite-running writer names no one" \
-  "no suite-running writer on this roster to stop" "$OUT"
-expect_contains "11e2 …and still withholds the fill, by its measurement" \
-  "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
-
-# ---------- 11f: an unreadable reading is ZERO FREE MEMORY, and that is the kill floor ----
-#
-# lib/resources.sh answers a SAFE fact rather than an empty field when it cannot read one
-# ("A probe that cannot read a fact answers a SAFE fact, never an empty field"), so a
-# garbage `free_mb` reads as 0 — below the emergency floor. This case pins the direction
-# that fall takes rather than assuming it: a broken probe stops the wave from GROWING, it
-# never silently widens it, and the tick still exits 0 because EMERGENCY is a decision.
-R11F="$(make_repo s11-probe-junk)"; new_roster "$R11F"
-wave_plan "$R11F" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
-  "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
-poke_pressure "$R11F" "not-a-number" "not-a-load" tick
-expect_eq "an unparseable pressure reading still exits 0" "0" "$RC"
-expect_contains "…and reads as zero free memory: the safe fact, not an empty field" \
-  "poker: EMERGENCY free_mb=0" "$OUT"
-expect_absent "…so the wave is never widened off a reading nobody could take" "poker: FILL" "$OUT"
+expect_eq       "the script carries no rung reader any more" "0" \
+  "$(/usr/bin/grep -c 'pressure_level\|resources_pressure\|pressure_sample' "$POKER" || true)"
+export BIONIC_GATE_DIR="$SP_GATE_DIR"
 
 # ============================================================
 section "Section 12: FILL — gap, readiness, and table order (AC-29, S7)"
@@ -2774,7 +2663,7 @@ wave_plan "$R12C" "writers=1 suites=1 worktrees=8 test_jobs=8 source=probe" \
 add_row "$R12C" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12C" 8192 1.0 tick
 expect_absent "a full budget fills nothing" "poker: FILL" "$OUT"
-expect_contains "…and says which number closed the gap" "writers=1 and 1 unacked roster row(s): the budget is full" "$OUT"
+expect_contains "…and says which number closed the gap: the cap" "the cap writers=1 is reached by 1 unacked roster row(s)" "$OUT"
 
 # ---------- 12d: no parallel-budget line -> inert, and it says why ----------
 #
@@ -4347,132 +4236,18 @@ expect_eq "…and pays a full parse per row: fourteen, not two (19i discriminate
   "$(/usr/bin/grep -c . "$S19I_COUNT" | tr -d ' ')"
 rm -rf "$S19I_MUT_ROOT"
 
-# ============================================================
-section "Section 20: the kill-floor target reads the ONE openness predicate, and only MET closes a row"
-# ============================================================
-#
-# TWO DEFINITIONS OF "OPEN" LIVED IN THIS FILE after S19. The tick's `open=` moved onto
-# `live_row_open` — the one predicate, payload/scripts/lib/agents.sh — while
-# `youngest_suite_writer`, the arm that names an agent for the orchestrator to STOP at the
-# kill floor, kept the pre-S19 roster spelling. The least consequential number the tick
-# prints asked the live set; the most consequential NAME it prints did not, and so could
-# name a writer the harness had already finished with (Step-6 correctness review, out-of-axis
-# note on `youngest_suite_writer`).
-#
-# AND THE MARKER READ WAS STATE-BLIND. `hooks/session-start.sh`'s `open_rows` and the poker's
-# own `adopt_fold` both require `state=MET` before a `landing-swept/v1` line closes a row;
-# this arm and lib/patrol.sh's `patrol_roster_state` took ANY marker. S17's
-# `adopt_copy_marker` is a second writer that puts non-MET markers on a successor's roster BY
-# DESIGN, so the two readers that ignored `state=` are exactly the two that now meet them
-# (Step-6 security review, out-of-axis note 2).
-#
-# THE FALLBACK IS THE TICK'S OWN, unchanged: STALE and NONE mean the roster spelling stands,
-# because the Patrol's prompt runs before any ListAgents and a kill-floor arm that went silent
-# on a first tick would be a wall firing on the healthy path.
-
+# Section 20 (the kill-floor target) retired with the EMERGENCY line (wave-28 T13; D14): the
+# tick names no writer to stop, and `youngest_suite_writer` went with it. Its two fixture
+# helpers stay: later sections plant markers and acks with them.
 swept_marker() {  # <repo> <name> <state>
   swept_marker_write "$(roster_of "$1")" "$(iso_ago 30)" "$SID" "$2" a000 "$3"
 }
-
-s20_repo() {  # <label> -> a repo with ONE intended, suite-claiming row named `suite-writer`
-  local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
-    "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
-  add_row "$r" status=intended name=suite-writer deliverable=a.md duration="4 hours" \
-    claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
-  printf '%s' "$r"
-}
-S20_TARGET="stop youngest suite-running writer suite-writer@session-$(printf '%s' "$SID" | cut -c1-8)"
-S20_NONE="no suite-running writer on this roster to stop"
-
-# ---------- 20a: an UNMET marker does NOT close the row ----------
-#
-# The state S17 made ordinary: a predecessor's verdict copied verbatim onto this roster,
-# saying the contract was NOT met. The row is still open work, and a kill floor that read it
-# as closed would report there is nobody to stop while the machine is dying.
-R20A="$(s20_repo s20-unmet-marker)"
-swept_marker "$R20A" suite-writer UNMET
-s19_answer fresh "suite-writer:running"
-poke_pressure "$R20A" 100 1.0 tick
-expect_contains "an UNMET landing-swept marker leaves the row open, so the kill floor names it" \
-  "$S20_TARGET" "$OUT"
-
-# ---------- 20b: the paired positive — RE-AUTHORED (epic-23 wave-20 T20, REQ-10, D10) ----------
-#
-# It read "a MET marker DOES close it". `youngest_suite_writer` was one of the last two roster
-# readers that closed a name on a `landing-swept/v1|state=MET` marker alone (found by T17,
-# approved by Chris); it now asks the one close predicate, `roster_open_names`
-# (payload/scripts/lib/roster.sh): a name is closed by an ack stamped after its latest launch,
-# and by nothing else (ADR-034 d1). So the MET marker joins the UNMET one above — it leaves
-# the row open, and a running writer behind it is still the one to stop — and the paired
-# positive that keeps 20a honest is the ack. Both halves are pinned.
 s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writer's shape
   local le; le="$1/.bionic/tmp/sweeper-${SID}.state"
   [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
   printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
     "$3" "$SID" "$2" >> "$le"
 }
-R20B="$(s20_repo s20-met-marker)"
-swept_marker "$R20B" suite-writer MET
-s19_answer fresh "suite-writer:running"
-poke_pressure "$R20B" 100 1.0 tick
-expect_contains "20b T20: a MET marker with no ack leaves the row open, so the kill floor still names it" \
-  "$S20_TARGET" "$OUT"
-
-R20B2="$(s20_repo s20-acked)"
-swept_marker "$R20B2" suite-writer MET
-s20_ack "$R20B2" suite-writer "$(iso_ago 0)"
-s19_answer fresh "suite-writer:running"
-poke_pressure "$R20B2" 100 1.0 tick
-expect_contains "…while an ack after its launch closes it, and the kill floor names no one (20a discriminates)" \
-  "$S20_NONE" "$OUT"
-expect_absent "…and never the acked writer's address" "suite-writer@" "$OUT"
-
-# 20b3: AN ACK OLDER THAN THE LAUNCH CLOSES NOTHING. The predicate orders the two stamps; a
-# name acked before this dispatch was launched is a relaunch, and it is open again.
-R20B3="$(s20_repo s20-acked-before-launch)"
-s20_ack "$R20B3" suite-writer "$(iso_ago 600)"
-s19_answer fresh "suite-writer:running"
-poke_pressure "$R20B3" 100 1.0 tick
-expect_contains "…and an ack older than the launch closes nothing: the kill floor names the relaunched writer" \
-  "$S20_TARGET" "$OUT"
-
-# ---------- 20c: an IDLE agent is not a writer to stop ----------
-#
-# Finished and unstopped. The roster still carries the row — the tick writes nothing — but
-# the harness has already let the agent go, so stopping it destroys nothing and the address
-# is noise at the one moment the operator needs a real one.
-R20C="$(s20_repo s20-live-idle)"
-s19_answer fresh "suite-writer:idle"
-poke_pressure "$R20C" 100 1.0 tick
-expect_contains "an IDLE agent is not named at the kill floor" "$S20_NONE" "$OUT"
-expect_absent "…so the orchestrator is never handed a stop address for an agent already gone" \
-  "suite-writer@" "$OUT"
-
-# ---------- 20d: the control — the same row, still running ----------
-R20D="$(s20_repo s20-live-running)"
-s19_answer fresh "suite-writer:running"
-poke_pressure "$R20D" 100 1.0 tick
-expect_contains "…while the same row with a RUNNING agent IS named (20c discriminates)" \
-  "$S20_TARGET" "$OUT"
-
-# ---------- 20e/20f: STALE and NONE fall back to the roster spelling ----------
-#
-# The same fallback `open=` takes twenty lines above, for the same reason: freshness is a
-# property of the transcript, not of any one name, and the tick holds no authority. A
-# fallback that went silent would make the kill floor useless on precisely the tick that runs
-# before the session's first ListAgents.
-R20E="$(s20_repo s20-live-stale)"
-s19_answer stale "suite-writer:idle"
-poke_pressure "$R20E" 100 1.0 tick
-expect_contains "a STALE answer falls back to the roster and still names the writer" \
-  "$S20_TARGET" "$OUT"
-
-R20F="$(s20_repo s20-live-none)"
-s19_answer none
-poke_pressure "$R20F" 100 1.0 tick
-expect_contains "…and so does an answer the transcript does not carry at all" \
-  "$S20_TARGET" "$OUT"
 
 # ============================================================
 section "Section 21: hardening — the one unfiltered field, and the tail that reaches a terminal"
@@ -4677,8 +4452,8 @@ add_row "$R22D" name=w7 deliverable=g.md duration="4 hours" launched_at="$(iso_a
 add_row "$R22D" name=w8 deliverable=h.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R22D" 8192 1.0 tick
 expect_absent "an approved-but-full budget still fills nothing" "poker: FILL" "$OUT"
-expect_contains "…and still says the budget is full, not the approval line" \
-  "the budget is full" "$OUT"
+expect_contains "…and still says the cap is reached, not the approval line" \
+  "the cap writers=8 is reached by 8 unacked roster row(s)" "$OUT"
 expect_absent "…never the approval-pending wording" "Step-3 approval pending" "$OUT"
 
 # ---------- 22e/22f: the sub-step letter — the ONE grammar this repo already has ----------
@@ -7192,8 +6967,8 @@ poke_pressure "$R38A" 8192 1.0 tick
 expect_contains "38a AC-3.3 the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-ce9520e" "$OUT"
 expect_contains "38b …the ready row is filled" "poker: FILL T3" "$OUT"
 expect_absent "38c …and the held row is not on the FILL line" "T2" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
-S38_RUNG="$(s38_line_no 'poker: rung=')"; S38_HELD="$(s38_line_no 'poker: HELD ')"; S38_FILL="$(s38_line_no 'poker: FILL ')"
-expect_true "38d …and the HELD line sits after the rung line and before the FILL line (rung=$S38_RUNG held=$S38_HELD fill=$S38_FILL)" \
+S38_RUNG="$(s38_line_no 'poker: gate share=')"; S38_HELD="$(s38_line_no 'poker: HELD ')"; S38_FILL="$(s38_line_no 'poker: FILL ')"
+expect_true "38d …and the HELD line sits after the gate line and before the FILL line (gate=$S38_RUNG held=$S38_HELD fill=$S38_FILL)" \
   test "$S38_RUNG" -gt 0 -a "$S38_HELD" -gt "$S38_RUNG" -a "$S38_FILL" -gt "$S38_HELD"
 
 # 38e — NOTHING ELSE READY: the HELD line still prints, and the no-FILL line's step sentence
@@ -7272,7 +7047,7 @@ expect_contains "39k an empty roster: the agent-named active row ticks a launch 
   "poker: LEDGER T1 launch w-T1" "$OUT"
 
 # ============================================================
-section "Section 40: HELD and LEDGER print in EVERY tick state — no roster, HOLD, EMERGENCY, no budget (wave-21 T13; REQ-3 AC-3.3, REQ-4 AC-4.1/AC-4.2)"
+section "Section 40: HELD and LEDGER print in EVERY tick state — no roster, no room, over the share, no budget (wave-21 T13; REQ-3 AC-3.3, REQ-4 AC-4.1/AC-4.2; wave-28 T13)"
 # ============================================================
 #
 # THE AUDIT'S REFUTATION, PINNED (record/wave-21-fixit-188/audit-3b45d05.md). Through T5 the
@@ -7302,28 +7077,28 @@ expect_contains "40a3 AC-4.1 …and the agent-named active row owes its line, as
   "poker: LEDGER T3 evidence" "$OUT"
 expect_eq "40a4 …each HELD line once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40a5 …each LEDGER line once" "2" "$(s40_count 'poker: LEDGER ')"
-S40_RUNG="$(s38_line_no 'poker: rung=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
+S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
 S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_QUIET="$(s38_line_no 'poker: QUIET')"
-expect_true "40a6 …after the rung line and before the QUIET line (rung=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER quiet=$S40_QUIET)" \
+expect_true "40a6 …after the gate line and before the QUIET line (gate=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER quiet=$S40_QUIET)" \
   test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_QUIET" -gt "$S40_LEDGER"
 
-# 40b — HOLD: a roster, a ready row and a gap, and the machine short on memory. No fill, and
+# 40b — NO ROOM: a roster, a ready row, and a five-minute load over the share. No fill, and
 # the lint still runs: a busy machine has nothing to do with the ledger.
 R40B="$(make_repo s40-hold)"; new_roster "$R40B"
 sp_plan_at_step "$R40B" 4 \
   "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
-poke_pressure "$R40B" 512 1.0 tick
-expect_contains "40b precondition: the tick is under HOLD" "poker: HOLD free_mb=512" "$OUT"
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke "$R40B" tick
+expect_contains "40b precondition: the gate gives no room" "poker: no FILL — the gate gives no room" "$OUT"
 expect_absent "40b precondition: …and fills nothing" "poker: FILL" "$OUT"
-expect_contains "40b AC-3.3 under HOLD the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40b" "$OUT"
+expect_contains "40b AC-3.3 with no room the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40b" "$OUT"
 expect_contains "40b2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
 expect_eq "40b3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40b4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
-S40_RUNG="$(s38_line_no 'poker: rung=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
-S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_HOLD="$(s38_line_no 'poker: HOLD ')"
-expect_true "40b5 …after the rung line and before the HOLD line (rung=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER hold=$S40_HOLD)" \
+S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
+S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_HOLD="$(s38_line_no 'poker: no FILL — the gate')"
+expect_true "40b5 …after the gate line and before the no-room line (gate=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER noroom=$S40_HOLD)" \
   test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_HOLD" -gt "$S40_LEDGER"
 # THE PAIRED POSITIVE: the same repo on a healthy machine fills T3 and prints each line once.
 poke_pressure "$R40B" 8192 1.0 tick
@@ -7331,14 +7106,14 @@ expect_contains "40b6 …the same plan on a healthy machine fills the ready row"
 expect_eq "40b7 …and still prints HELD once, not once per arm" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40b8 …and LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 
-# 40c — EMERGENCY: the same pair under the kill floor.
+# 40c — OVER THE SHARE: the same pair with memory used past the share.
 R40C="$(make_repo s40-emergency)"; new_roster "$R40C"
 sp_plan_at_step "$R40C" 4 \
   "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
-poke_pressure "$R40C" 100 1.0 tick
-expect_contains "40c precondition: the tick is under EMERGENCY" "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
-expect_contains "40c AC-3.3 under EMERGENCY the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40c" "$OUT"
+BIONIC_PROBE_USED_PCT=90 poke "$R40C" tick
+expect_contains "40c precondition: the tick is over the share" "poker: over share — used=90% admitted: none" "$OUT"
+expect_contains "40c AC-3.3 over the share the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40c" "$OUT"
 expect_contains "40c2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
 expect_eq "40c3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
@@ -7377,9 +7152,9 @@ expect_contains "40e AC-3.3 the DISARM tick prints the ext:-held row's HELD line
 expect_contains "40e2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
 expect_eq "40e3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40e4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
-S40_RUNG="$(s38_line_no 'poker: rung=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
+S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
 S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_DISARM="$(s38_line_no 'poker: DISARM')"
-expect_true "40e5 …after the rung line and before the DISARM line (rung=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER disarm=$S40_DISARM)" \
+expect_true "40e5 …after the gate line and before the DISARM line (gate=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER disarm=$S40_DISARM)" \
   test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_DISARM" -gt "$S40_LEDGER"
 # ============================================================
 section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest, version (wave-24 T7; REQ-4 AC-4.1–4.6, 4.9, 4.11; D1, D4, D5; ADR-041)"
@@ -7640,15 +7415,15 @@ poke "$R41V" arm
 poke "$R41V" tick
 expect_eq "41g3 …and an armed one prints none" "0" "$(s41_count "$OUT" "re-arm the Patrol")"
 expect_contains "41g4 …while still printing its decision" "decision=" "$OUT"
-# ---------- §DIGEST-emergency (D4): an EMERGENCY names a writer to stop on every tick ----------
+# ---------- §DIGEST-over (D4; wave-28 T13): a tick over the share prints in full every time ----------
 R41X="$(make_repo s41-emergency)"; new_roster "$R41X"; armed_ago "$R41X"
 add_row "$R41X" name=suite-writer deliverable="$R41X/never-written.md" duration="4 hours" \
   claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
 plant_answer "$S41_TR" fresh "suite-writer:running"
-poke_pressure "$R41X" 100 1.0 tick
-expect_contains "41h precondition: the first EMERGENCY tick names the writer" "poker: EMERGENCY" "$OUT"
-poke_pressure "$R41X" 100 1.0 tick
-expect_contains "41h2 the second EMERGENCY tick over the same facts still prints in full" "poker: EMERGENCY" "$OUT"
+BIONIC_PROBE_USED_PCT=90 poke "$R41X" tick
+expect_contains "41h precondition: the first tick over the share names what holds the memory" "poker: over share" "$OUT"
+BIONIC_PROBE_USED_PCT=90 poke "$R41X" tick
+expect_contains "41h2 the second tick over the same facts still prints in full" "poker: over share" "$OUT"
 expect_absent "41h3 …never as unchanged" "unchanged since" "$OUT"
 unset CLAUDE_CONFIG_DIR
 
@@ -9039,7 +8814,7 @@ expect_true "50e …each above the band's sentence (fill=$S50_FILL wait=$S50_WAI
 expect_regex "50f the decision line agrees with what the tick printed: last, FILL, and the fill field" \
   '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=FILL\|total=0\|open=0\|fill=T1 T2 T3$' "$(s50_last)"
 expect_absent "50f2 …and the QUIET sentence is not printed beside it" "poker: QUIET" "$OUT"
-expect_eq "50g the rung prints once, from the one site" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+expect_eq "50g the gate line prints once, from the one site" "1" "$(count_lines_matching 'poker: gate share=' "$OUT")"
 expect_eq "50h the stamp is kept" "yes" "$([ -f "$(stamp_of "$R50")" ] && echo yes || echo no)"
 expect_eq "50i the tick digest the stop collector reads carries the FILL band, and the duty it owes" \
   "decision=FILL duty=owed" \
@@ -11868,7 +11643,7 @@ expect_eq "65n5 …and the commit gate admits the plan" "0" "$GATE_RC"
 S65B_LINES="$(s65_count "$R65B" wave-01-fixture)"
 poke_pressure "$R65B" 8192 1.0 tick
 expect_absent "65o with the user's cap reached the tick offers no writer row" "poker: FILL" "$OUT"
-expect_contains "65o2 …saying the budget is full at the user's three" "of writers=3" "$OUT"
+expect_contains "65o2 …saying the cap is reached at the user's three" "the cap writers=3 is reached" "$OUT"
 S65B_TR="$(s31_transcript "$R65B" "carry on")"
 s31_stop "$R65B" "$S65B_TR"
 expect_eq "65p …and the turn-end wall asks for nothing" "" "$(s31_decision)"
@@ -12729,6 +12504,38 @@ expect_eq "69g7 …and leaves it holding nothing" "" "$(ls -A "$S69_EMPTY")"
 expect_eq "69g8 …while the plan's own directory holds no copy left behind" "wave-x.plan.md" "$(ls -A "${P69%/*}")"
 POKE_BOUND="$S69_BOUND_WAS"
 
+# ============================================================
+section "Section 70 §RIGOR: a plan carrying high advances where one carrying audited does, and is dealt the same set (wave-28 T44; REQ-16 AC-16.1; D35, A-orch-7)"
+# ============================================================
+# The judge reads the rigor word through lib/run.sh `rigor_level` (proof.sh `facts_owed`), so a
+# plan in the new words is dealt the readers the old word deals it: the same roles hold the same
+# questions, `current 8` is refused on the same missing fact and admitted on the same set. §61's
+# fixture, unchanged, with only its `rigor:` line set to each word of a pair.
+S70_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S70_H="$(git -C "$S61_WT" rev-parse HEAD 2>/dev/null)"
+expect_regex "70a0 precondition: §61's working branch still has a head" '^[0-9a-f]{40}$' "$S70_H"
+s70_deal() {  # <rigor> -> facts_owed's review lines at wave scale, one per line
+  bash -c '. "$1" && facts_owed "$2" wave' _ "$S61_LIB" "$1" 2>/dev/null | /usr/bin/grep '^review'
+}
+for s70p in audited:high peer-reviewed:medium tested:low; do
+  s70o="${s70p%%:*}"; s70n="${s70p#*:}"
+  expect_nonempty "70a $s70o is dealt readings (the extractor reads real output)" "$(s70_deal "$s70o")"
+  expect_eq "70b $s70n is dealt exactly what $s70o is" "$(s70_deal "$s70o")" "$(s70_deal "$s70n")"
+  for s70w in "$s70o" "$s70n"; do
+    s61_reset; s61_rigor "$s70w"; s61_owed "$S70_H" structure
+    s42_snap "$R61" "$P61"
+    poke "$R61" current 8
+    s42_unchanged "70c at $s70w, current 8 with no structure fact" 1 "$P61"
+    expect_contains "70c2 …at $s70w, naming the structure question's holder absent" \
+      "$(printf 'review\tstructure\t%s\tpiece\tabsent' "$(s70_deal "$s70o" | awk -F'\t' '$2 == "structure" { print $3; exit }')")" "$OUT"
+    s61_fact structure "$S70_H" pass piece; s61_fact structure "$S70_H" pass whole
+    poke "$R61" current 8
+    expect_eq "70d …at $s70w, the same plan with it advances (exit 0)" "0" "$RC"
+    expect_eq "70d2 …and reads current: 8" "8" "$(s61_cur)"
+  done
+done
+s61_reset
+POKE_BOUND="$S70_BOUND_WAS"
 
 # ============================================================
 section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"

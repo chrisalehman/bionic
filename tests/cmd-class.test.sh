@@ -1407,6 +1407,62 @@ $s.test.sh' 'for s in a b; do bash tests/$s.test.sh; done; bash tests/$s.test.sh
 # THE SAME SHAPE WITH THE VARIABLE INSIDE ITS OWN GROUP resolves, beside `(s=a); …` above.
 targets_are 'a.test.sh' '(s=a; bash tests/$s.test.sh)'
 
+# A SUITE RUN THROUGH A GLOB LOOP OR A BARE VARIABLE IS A SUITE, HOWEVER SPELLED (wave-28 T11,
+# D13, AC-2.12; wave-27 review pass 8 F5). `for s in tests/*.test.sh; do bash "$s"; done` and
+# `bash "$SUITE"` read class none, so the run went unbudgeted, unwrapped and past the gate. A
+# shell whose script is a bare variable (the whole operand, or its last path component) is now a
+# suite claim naming that variable, which the budget's unexpanded-name arm refuses and the wrap
+# names `?` — unless every text in the command that binds the variable plainly names no suite.
+# Each positive has its negative on the same two extractors. The false-positive cost is real: a
+# wrapped command loses its `cd`, and an agent's budget refuses a `$` claim outright.
+loop_var_is() {  # <expected class> <expected targets, newline-joined> <command>
+  expect_eq "§LOOP T11 class [$3]" "$1" "$(class_of "$3")"
+  targets_are "$2" "$3"
+}
+loop_var_is suite '$s' 'for s in tests/*.test.sh; do bash "$s"; done'
+loop_var_is suite '$s' '{ for s in tests/*.test.sh; do if bash "$s"; then :; fi; done; } | tee log'
+loop_var_is suite '$s' 'for s in tests/*; do bash $s; done'
+loop_var_is suite '$s' 'for s in tests/*.sh; do bash "$s" 2>&1 | tee -a log; done'
+loop_var_is suite '$s' 'for s in $(ls tests/*.test.sh); do bash "$s"; done'
+loop_var_is suite '$n' 'for n in $(ls tests); do bash "tests/$n"; done'
+loop_var_is suite '$s' 'while read -r s; do bash "$s"; done < list'
+loop_var_is suite '$SUITE' 'bash "$SUITE"'
+loop_var_is suite '$SUITE' 'sh $SUITE'
+loop_var_is suite '${S}' 'bash "${S}"'
+loop_var_is suite '$f' 'bash -x "$f"'
+loop_var_is suite '$f' 'cd "$T" && bash "$f" 2>&1 | tee log'
+# A binding that COULD name a suite keeps the claim: a reassignment in the body, a second
+# assignment, a value whose basename is a suite, a value nothing here can read.
+loop_var_is suite '$f' 'for f in docs/*.md; do f=tests/a.test.sh; bash "$f"; done'
+loop_var_is suite '$S' 'S=x.sh; S=tests/a.test.sh; bash "$S"'
+loop_var_is suite '$S' 'S="$T/a.test.sh"; bash "$S"'
+loop_var_is suite '$S' 'S=$(pick); bash "$S"'
+loop_var_is suite '$S' 'bash "$S"; S=x.sh'
+loop_var_is suite '$f' 'for f in docs/*.md; do bash "$f"; done; eval :'
+expect_eq "§LOOP T11 a bare-variable claim is a FILE claim" "file" "$(claim_kinds_of 'bash "$SUITE"')"
+expect_eq "§LOOP T11 …and stays named when scoped to a repo root, as the budget arm asks" '$s' \
+  "$(targets_of_in "$C8_ROOT" 'for s in tests/*.test.sh; do bash "$s"; done')"
+expect_eq "§LOOP T11 …whose run is the segment as typed" 'bash "$s"' \
+  "$(claim_run_of 'for s in tests/*.test.sh; do bash "$s"; done')"
+# PLAINLY NOT A SUITE — the same extractors, beside the rows above.
+loop_var_is none '' 'for f in docs/*.md; do bash "$f"; done'
+loop_var_is none '' 'for f in docs/*.md; do wc -l "$f"; done'
+loop_var_is none '' 'for s in tests/*.test.sh; do echo "$s"; done'
+loop_var_is none '' 'for s in tests/*.test.sh; do bash -n "$s"; done'
+loop_var_is none '' 'for f in a.sh "$D"/b.sh scripts/*.py; do bash "$f"; done'
+loop_var_is none '' 'f=scripts/x.sh; bash "$f"'
+loop_var_is none '' 'S="$T/probe.sh"; bash "$S" "$PWD"'
+loop_var_is none '' 'F=$(mktemp); bash "$F"'
+loop_var_is none '' 'F=$(mktemp "${TMPDIR:-/tmp}/p.XXXXXX"); bash "$F"'
+loop_var_is none '' 'bash -c "$CMD"'
+loop_var_is none '' 'bash -x -c "$CMD"'
+loop_var_is none '' 'bash "$1"'
+loop_var_is none '' 'echo '"'"'bash "$f"'"'"
+loop_var_is none '' 'cat > x <<EOF
+bash "$f"
+EOF'
+loop_var_is none '' '"$S"'
+
 section "§LOOPLINES — wave-24 T13 (D10, AC-6.3): the loop's own words, as the lines to run"
 # THE REFUSAL THAT HAD NOTHING TO PRINT. A `$` claim the classifier will not resolve used to
 # be answered with a canned `alpha`/`beta` example. `cmd_suite_loop_lines` is the one reading
@@ -1450,6 +1506,10 @@ loop_lines_are '' 'for s in a*; do bash tests/$s.test.sh; done'
 loop_lines_are '' 's=a bash tests/$s.test.sh'
 loop_lines_are '' 'for s in a b; do echo $s; done; bash tests/$s.test.sh'
 loop_lines_are '' 'for s in a b; do s=c; echo "tests/$s.test.sh"; done'
+# A glob loop and a bare variable are suite claims now (§LOOP T11) and still print no line: a
+# glob names no words, so the refusal asks for the literal lines meant.
+loop_lines_are '' 'for s in tests/*.test.sh; do bash "$s"; done'
+loop_lines_are '' 'bash "$SUITE"'
 
 
 section "§VAR — REQ-6 AC-6.4 (D9): a variable holding a whole suite name is a suite run"

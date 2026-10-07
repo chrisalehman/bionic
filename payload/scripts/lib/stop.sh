@@ -83,8 +83,9 @@ fi
 
 # RESOURCES.SH IS SOURCED THE SAME WAY (wave-18 T2b, R1): `hooks/stop.sh`'s own
 # `BIONIC_LIB_WANT` does not name it, and this row's Files: declaration is this file
-# alone, so the dependency is met here rather than by widening the hook's want-list.
-if ! declare -F pressure_level >/dev/null 2>&1; then
+# alone, so the dependency is met here rather than by widening the hook's want-list. The gate
+# (lib/gate.sh, which the fill duty asks through fill.sh) reads its readers.
+if ! declare -F _res_used_pct >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_STOP_LIB_DIR/resources.sh"
 fi
@@ -1828,14 +1829,14 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 #   - the READY SET is the plan's (`fill_ready_set`, T10's prerequisite graph), untrimmed;
 #   - the OCCUPANCY is the roster's (`roster_open_names`), which a dispatch joins at launch,
 #     so it already counts this turn's launches when the Stop fires;
-#   - the PRESSURE STATE is `resources_pressure`'s, the reading the tick's HOLD and EMERGENCY
-#     come from, taken here rather than read back out of the tick's words;
+#   - the WIDTH is the gate's (`fill_gate_width`, lib/fill.sh; wave-28 T13, D14), asked here
+#     the way the tick asks it rather than read back out of the tick's words;
 #   - the only transcript fact is a DECLINE, and only the model's own: a main-thread assistant
 #     `text` block, `fill-declined: <reason>` at the start of a line.
 # JUDGED BY COUNT: after the turn's launches, `missed = min(free writer slots, ready writer rows
 # this turn did not launch) + the ready read-only rows it did not launch` (a verify or review row
-# takes no writer slot; wave-26 T13, D9), and a turn with `missed > 0` on a machine that reads
-# `ok` and no decline is refused once, naming those rows. No id is ever matched against a
+# takes no writer slot; wave-26 T13, D9), and a turn with `missed > 0`, a gate that gave room
+# and no decline is refused once, naming those rows. No id is ever matched against a
 # dispatch's PROMPT words. A dispatched row leaves the plan's ready set when the launch recorder
 # (hooks/execution-recorder.sh, wave-26 T12) sets it `active`, and until then the turn that
 # launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
@@ -2270,7 +2271,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
   _ST_RECONCILE=""
-  local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
+  local tr fold mark rest ready count want cap owed FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at rvat led standing gap rcount rgap slot
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
@@ -2459,14 +2460,10 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # THE ONE BUDGET READER (wave-20 T2, D10): run.sh's strict line and whole-field integer.
   _ST_CEILING="$(budget_field "$(plan_budget_line "$_ST_PLAN")" writers)"
 
-  # THE PRESSURE STATE, MEASURED HERE (Δ7): `resources_pressure`, the reading the tick's HOLD
-  # and EMERGENCY come from. An unreadable reading is `ok` — the tick's own fallback — which
-  # is the direction that refuses more, never less.
-  cores="$(_res_cores 2>/dev/null)"
-  case "$cores" in ''|*[!0-9]*|0) cores=1 ;; esac
-  pressure="$(resources_pressure "$cores" 2>/dev/null)" || pressure=""
-  _ST_STATE="${pressure#state=}"; _ST_STATE="${_ST_STATE%% *}"
-  case "$_ST_STATE" in ok|hold|emergency) : ;; *) _ST_STATE=ok ;; esac
+  # THE STATE IS THE GATE'S (wave-28 T13; D14): `hold` when it gives no room for one ready
+  # writer row, read below beside the width; `ok` otherwise. A gate that will not answer is
+  # `ok` with no room, so a turn is never refused on a width nobody could read.
+  _ST_STATE=ok
 
   if [ -z "$_ST_CEILING" ]; then
     # "AT LEAST ONE ROW READY AT THE UNIT" IS THE READY SET AT WIDTH ONE (wave-19 REQ-6, D7).
@@ -2488,20 +2485,12 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   if declare -F fill_launched_rows >/dev/null 2>&1; then
     _ST_LAUNCHED="$(fill_launched_rows "$FILL_ROSTER" "$BIONIC_SID" "$_ST_LAUNCHED")"
   fi
-  # THE RUNG, FALLING BACK TO THE CEILING — the width the tick names (Step-6 review R1,
-  # wave-18 T2b): `pressure_level` over the declared `writers=`, bound to the tick's own
-  # `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"` by patrol-duties-gate 69 and session-poker 12l2.
-  rung="$(pressure_level "$_ST_CEILING" 2>/dev/null)" || rung=""
-  case "$rung" in ''|*[!0-9]*) rung="" ;; esac
-  _ST_WIDTH="${rung:-$_ST_CEILING}"
   # THE WRITERS AMONG THEM (wave-24 T13, D11): `budget_open_writers` (lib/roster.sh) leaves a
   # read-only role out, as the dispatch wall and the tick's `TICK_OCCUPIED` do, so the three
   # readers of the open set count the same slots.
   FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | budget_open_writers "$FILL_ROSTER")"
   case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
   _ST_OPEN="$FILL_OPEN"
-  _ST_FREE=$(( _ST_WIDTH - _ST_OPEN ))
-  [ "$_ST_FREE" -ge 0 ] || _ST_FREE=0
 
   # EVERY READY ROW, UNTRIMMED, in one parse of the table (wave-19 REQ-6, D7): the width passed
   # is wide enough that `fill_ready_set`'s own trim never bites, and the trim to the free
@@ -2532,6 +2521,33 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # counted and named in full. A row that waits for a read is not in this set at all, so it is
   # never demanded.
   ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" UNITS_FACTS_STATE="$_ST_FACTS" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
+
+  # THE WIDTH, ASKED AS THE TICK ASKS IT (wave-28 T13; D14, AC-2.8): the ready writer rows this
+  # turn did not launch, offered one `gate_room` at a time (`fill_gate_width`), the open writers
+  # not yet showing counted as owed (`fill_gate_owed`), and a person's cap obeyed. The tick and
+  # this wall size their fill by the one function, so on one reading they name the same rows: the
+  # rows a standing decline answered stay in the count, as they stay in `missed` (the ledger
+  # charges their idle time to the decline), and the loop below names only the others, up to the
+  # free slots. A gate that gives no row when a row waits and no cap holds it is the HOLD the
+  # ledger records: a machine fact the plan cannot hold. Counted in this shell, never inside
+  # `$( )`: bash 3.2 reads a `case` pattern's `)` there as the substitution's end.
+  want=0
+  while IFS=$'\t' read -r rest slot; do
+    [ "$slot" = w ] || continue
+    fill_row_launched "$rest" "$_ST_LAUNCHED" && continue
+    want=$((want + 1))
+  done <<ST_WANT
+$ready
+ST_WANT
+  cap="$(fill_cap "$_ST_PLAN")"
+  owed="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | fill_gate_owed "$FILL_ROSTER" "$BIONIC_SID")"
+  _ST_WIDTH="$(fill_gate_width "$_ST_OPEN" "$owed" "$want" "$cap")"
+  case "$_ST_WIDTH" in ''|*[!0-9]*) _ST_WIDTH="$_ST_OPEN" ;; esac
+  _ST_FREE=$(( _ST_WIDTH - _ST_OPEN ))
+  [ "$_ST_FREE" -ge 0 ] || _ST_FREE=0
+  if [ "$want" -gt 0 ] && [ "$_ST_FREE" -eq 0 ] && { [ -z "$cap" ] || [ "$_ST_OPEN" -lt "$cap" ]; }; then
+    _ST_STATE=hold
+  fi
   count=0; gap=0; rcount=0; rgap=0; _ST_READY=""; _ST_NAMED=""
   while IFS=$'\t' read -r rest slot; do
     [ -n "$rest" ] || continue

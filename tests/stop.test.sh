@@ -56,6 +56,16 @@ bash -n "$HOOK" || { echo "stop: $HOOK does not parse — suite refuses to run";
 SID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 AID="a-worker-0123456789abcdef"
 
+# THE GATE IS FIXTURE DATA (wave-28 T13; D14). The fill duty sizes its width at the gate, which
+# reads the machine through the readers' pins and its store at BIONIC_GATE_DIR: 8 cores, 30%
+# used, a load of 1.0 over both windows, and one run on record taking 0.1 core — room for every
+# row a fixture here makes ready, so no width below is this host's load.
+STOP_GATE="$(cd "$(mktemp -d)" && pwd -P)/gate"
+mkdir -p "$STOP_GATE/requests" "$STOP_GATE/cost"
+printf '5:0.1:30:1000\n' > "$STOP_GATE/cost/fixture.test.sh"
+export BIONIC_GATE_DIR="$STOP_GATE"
+export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
+
 # ---------- fixtures ----------
 
 # RESOLVED (`pwd -P`): mktemp answers under /var, which is a symlink to /private/var
@@ -726,8 +736,10 @@ expect_contains "9a: the turn that launched one of two ready rows is refused for
 expect_contains "9b: T11b the headline states the counts — launched 1 of 2" "launched 1 of 2" "$(s9_headline)"
 expect_contains "9c: …and names the row that was not launched" "not launched: T14" "$(s9_headline)"
 expect_contains "9d: …as the reason does" "T14" "$(reason_of)"
+# The hook's own path is taken out of the reason first: the decline command the refusal prints
+# names it, and a checkout whose path holds the row id (a worktree for row T13) would match there.
 expect_absent "9e: T11b the row this turn launched is never named as missed, pending or not" \
-  "T13" "$(s9_headline)$(reason_of)"
+  "T13" "$(s9_headline)$(reason_of | sed -E 's#[^ ]*session-poker\.sh##g')"
 S9_LED="$S9_D/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
 expect_contains "9f: …and the ledger's ready set is still the plan's, both rows" "|ready=T13,T14|" "$(cat "$S9_LED" 2>/dev/null)"
 expect_contains "9g: …with one row missed, not two" "|missed=1" "$(cat "$S9_LED" 2>/dev/null)"
@@ -766,6 +778,20 @@ expect_eq "9j: eight ready rows still refuse through the JSON block, not a refus
 expect_contains "9k: …the headline counts the names it could not fit" "more (dispatch or decline)" "$(s9_headline)"
 expect_true "9l: …and keeps to 100 columns" test "$(printf '%s' "$(s9_headline)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
 expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
+
+# THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.8). 9h's fixture, nothing launched, under a
+# five-minute load over the share: the gate gives no room, so the wall owes no row and its
+# ledger records the hold. 9h above is the same fixture with room, and refuses.
+S9_DG="$(s9_fixture)"
+S9_TXG="$(mktemp)"; s9_transcript "$S9_TXG"
+BIONIC_PROBE_BUSY_CORES_5M=7.0 s7_fire "$S9_DG" "$S9_TXG"
+S9_LEDG="$S9_DG/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
+expect_contains "9q: with no room at the gate the ledger records the hold, both rows ready, none free" \
+  "|state=hold|" "$(cat "$S9_LEDG" 2>/dev/null)"
+expect_contains "9r: …free=0" "|free=0|" "$(cat "$S9_LEDG" 2>/dev/null)"
+expect_absent "9s: …and the wall refuses no fill" "Fillable gap" "$(reason_of)"
+expect_contains "9t: the same fixture with room records state=ok (9q discriminates)" "|state=ok|" \
+  "$(cat "$S9_LED0" 2>/dev/null)"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1295,8 +1321,8 @@ expect_contains "FO1c: …naming the ready row" "T7" "$(reason_of)"
 # FO2: the same fixture with a WRITER open — no slot is free, so neither the tick nor the wall
 # asks for a fill. The control that FO1 cannot pass on a wall that refuses every turn.
 FO_DW="$(fo_fixture implementor)"
-expect_contains "FO2a: with a writer open the tick reports the budget full" \
-  "the budget is full" "$(fo_tick "$FO_DW")"
+expect_contains "FO2a: with a writer open the tick reports the cap reached" \
+  "the cap writers=1 is reached" "$(fo_tick "$FO_DW")"
 sd_turn "$FO_TX" u-fo-2
 s7_fire "$FO_DW" "$FO_TX"
 expect_absent "FO2b: …and the stop wall asks for no fill" "Fillable gap" "$(reason_of)$STOP_ERR"
