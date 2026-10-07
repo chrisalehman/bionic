@@ -258,13 +258,15 @@ run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
 # payload/scripts/booked.sh, so a G9 cell that read "silent" reads exactly this instead: no
 # deny and no advisory (the object holds nothing but the event name and updatedInput), and
 # the updated command is the shim around the ORIGINAL command, byte for byte.
+# The wrap names the agent (` --agent <name>`) since wave-28 T12; the reader accepts it, as
+# tests/bash-walls.test.sh's wrap readers do (fixed here at wave-28 T36, which owns this file's rows).
 expect_wrap_only() {
   local _cmd _s _r="'\\''"
   expect_eq "$1 …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1 …the updated command runs the booking shim" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --max-wait [0-9]+$3 -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)? --max-wait [0-9]+$3 -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1 …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
 }
