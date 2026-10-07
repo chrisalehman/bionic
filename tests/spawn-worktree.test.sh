@@ -1092,6 +1092,14 @@ rd_world() {  # -> a world root with T1's launch line naming a.test.sh
   local r
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  # THE PLAN THE REAL COMMIT GATE ADMITS (wave-28 T9, after T6): `ready` now writes the row's own
+  # line through `row-landed`, whose dry commit runs the real gate over the world's plan, so the
+  # plan carries what landing-line's ll_world gives it: the version, the approval and the rows' lines.
+  awk '{ print }
+    /^working-branch: / { print "canonical_sdlc_version: 14" }
+    /^current: 4$/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; print "- Step 4: started"; print "- T1: active"; print "- T2: active" }' \
+    "$r/.bionic/docs/plans/epic-x/wave-x.plan.md" > "$r/.bionic/docs/plans/epic-x/wave-x.plan.md.n" \
+    && mv "$r/.bionic/docs/plans/epic-x/wave-x.plan.md.n" "$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
   printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 \
     agent_id=b00T1 plan="$r/.bionic/docs/plans/epic-x/wave-x.plan.md")" >> "$r/.bionic/tmp/roster-$WORLD_SID.state"
   printf '%s' "$r"
