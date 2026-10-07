@@ -13008,6 +13008,9 @@ AM_RE_A='`'"$AM_RUN_A"'`'
 am_world() {  # <label> -> repo path (a teammate roster for w1, session $AM_SID, engaged)
   local r ro
   r=$(new_repo "am-$1")
+  # THE PROJECT HAS THE RUNNER'S DOOR (wave-28 T54): the one door fires only where tests/run.sh says --only,
+  # so this world plants the same runner as tests/bash-walls.test.sh's bw_door, committed with the seed.
+  mkdir -p "$r/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$r/tests/run.sh"
   arm_patrol "$r" "$AM_SID"; engage_sids "$r" "$AM_SID"
   ro="$r/.bionic/tmp/roster-$AM_SID.state"
   roster_header > "$ro"
