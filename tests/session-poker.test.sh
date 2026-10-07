@@ -14574,7 +14574,7 @@ rd_mutant noclear 's/^      gen\[rk\]++$/      # mutant: the own set is never cl
 rd_mutant excl 's/^      if (ev == "candidate") hasc\[g\] = 1$/      if (ev == "candidate" \&\& kv["base"] != "") headc[rk SUBSEP kv["base"]] = 1/
 s/^      if ((ev == "candidate" || ev == "ready") && kv\["commit"\] != "") ownc\[g SUBSEP kv\["commit"\]\] = 1$/      if ((ev == "candidate" || ev == "ready") \&\& kv["commit"] != "") ownc[rk SUBSEP kv["commit"]] = 1/
 s/^      if ((g in hasc) && .*$/      if ((rk SUBSEP kv["commit"]) in headc \&\& !((rk SUBSEP kv["commit"]) in ownc)) next/'
-rd_mutant kill128 's/qr\[i\] == "137"/qr[i] + 0 > 128/'
+rd_mutant kill128 's/^    _R_state=.*$/&; [ "${_R_rc:-0}" -gt 128 ] \&\& _R_state=killed/'
 rd_mutant late 's/^        \[ -z "\$TICK_LANDINGS" \] || say "\$TICK_LANDINGS"$/        :/
 s/^        cat "\$TICK_BUF" 2>\/dev\/null$/        cat "$TICK_BUF" 2>\/dev\/null; [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"/'
 expect_eq "RI-mut0 each doctored poker differs from the real one in the lines its doctor names: 1, 3, 1 and 2 (the four doctors took)" "1|3|1|2" \
