@@ -1006,9 +1006,9 @@ T59_STUB="$TMPROOT/t59-stub"; mkdir -p "$T59_STUB"
 cat > "$T59_STUB/stat" <<'STUB'
 #!/bin/sh
 for d; do :; done
-if [ -f "$T59_STAT_DIR/${d##*/}" ]; then cat "$T59_STAT_DIR/${d##*/}"
-else PATH=/usr/bin:/bin exec stat "$@"
-fi
+f="$T59_STAT_DIR/${d##*/}"
+case " $* " in *" -L "*) ;; *) f="$f.nf" ;; esac  # a call that does not follow links reads <name>.nf
+if [ -f "$f" ]; then cat "$f"; else PATH=/usr/bin:/bin exec stat "$@"; fi
 STUB
 chmod +x "$T59_STUB/stat"
 T59_STAT_DIR="$TMPROOT/t59-stat"; mkdir -p "$T59_STAT_DIR"; export T59_STAT_DIR
@@ -1053,6 +1053,40 @@ expect_eq "7.53d …and the pin is built there" "present" "$(there "$T59_SUB/mut
 t59_own "$SEAM" "$T59_SUB/r5"
 expect_ne "7.53e control: the shipped function refuses that same path" "0" "$PIN_RC"
 rm -f "$T59_STAT_DIR/t59-anc"
+# A link's OWN owner (A-T56.5; ruling A-orch-157). `stat -L` reads where a link leads; a link planted by
+# another user in a sticky holder leading to a directory this user owns passes every judgment above, and
+# its owner may repoint it. The no-follow read is the stub's `<name>.nf`.
+T59_HOLD="$T87_DIR/t59-hold"; mkdir -p "$T59_HOLD"; chmod 1777 "$T59_HOLD"
+T59_TGT="$T87_DIR/t59-tgt"; mkdir -p "$T59_TGT"; chmod 0700 "$T59_TGT"
+ln -s "$T59_TGT" "$T59_HOLD/t59-lnk"; T59_LNK="$T59_HOLD/t59-lnk"
+T59_WHY_LNK="$T59_LNK is a symlink owned by uid $T59_OTHER, who is neither you nor root"
+t59_own "$SEAM" "$T59_LNK/r1"
+expect_eq "7.56 a link in a sticky holder leading to this user's directory, owned by this user: built" "0" "$PIN_RC"
+expect_eq "7.56b …and is there" "present" "$(there "$T59_LNK/r1/pin")"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-lnk.nf"
+t59_own "$SEAM" "$T59_LNK/r2"
+expect_ne "7.56c the same link owned by another user: refused" "0" "$PIN_RC"
+expect_contains "7.56d …naming the link and its owner" "$T59_WHY_LNK" "$PIN_ERR"
+expect_eq "7.56e …and nothing is built there" "absent" "$(there "$T59_TGT/r2")"
+STOP_PATH="$T59_STUB:$HAND_GIVEN_PATH" stop_run "$STOP_SUITE" "$T59_LNK"; unset STOP_PATH
+expect_eq "7.56f the hand run exits 2" "2" "$STOP_RC"
+expect_contains "7.56g …naming the link and its owner, with the path remedy" \
+  "$(t57_line "$T59_LNK" "$T59_WHY_LNK" "$T57_FIX")" "$STOP_ERR"
+printf '0\n' > "$T59_STAT_DIR/t59-lnk.nf"
+t59_own "$SEAM" "$T59_LNK/r3"
+expect_eq "7.56h the same link owned by root: built" "0" "$PIN_RC"
+rm -f "$T59_STAT_DIR/t59-lnk.nf"
+T59_MUT_LNK="$TMPROOT/t59-mut-linkowner.sh"
+anchor "$SEAM" 'case "$linkowner" in 0|"$UID") ;;' 1
+grep -vF 'case "$linkowner" in 0|"$UID") ;;' "$SEAM" > "$T59_MUT_LNK"
+expect_eq "7.57 the no-link-owner mutant parses" "0" "$(bash -n "$T59_MUT_LNK" >/dev/null 2>&1; echo $?)"
+printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-lnk.nf"
+t59_own "$T59_MUT_LNK" "$T59_LNK/mut-root"
+expect_eq "7.57b under the no-link-owner mutant the other user's link is accepted (the defect 7.56c guards)" "0" "$PIN_RC"
+expect_eq "7.57c …and the pin is built there" "present" "$(there "$T59_LNK/mut-root/pin")"
+t59_own "$SEAM" "$T59_LNK/r4"
+expect_ne "7.57d control: the shipped function refuses that same path" "0" "$PIN_RC"
+rm -f "$T59_STAT_DIR/t59-lnk.nf"
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
   T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
