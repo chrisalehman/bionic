@@ -13122,6 +13122,155 @@ cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 POKE_BOUND="$RD_BOUND_WAS"
 
 # ============================================================
+section "§SHARE-VERB: session-poker.sh share prints the machine's share and share <n> sets it (wave-28 T10; REQ-2 AC-2.1 surfaces; D16)"
+# ============================================================
+#
+# `share` prints what `gate_share` prints; `share <n>` writes one integer, 1 to 100, to
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share` (the path expression gate_share reads) and refuses anything
+# else with one line. Main thread only: `share` joins the existing contract-verb arm's list. EVERY drive here names
+# its own CLAUDE_CONFIG_DIR (and a HOME of its own where it unsets it), so no row can write this machine's file.
+SV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"; SV_HOME_WAS="$HOME"
+SV_ROOT="$(mktemp -d "$TMPROOT/share-verb.XXXXXX")"
+SV_R="$(make_repo share-verb)"
+new_roster "$SV_R"
+roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$(roster_of "$SV_R")"
+SV_CCD="$SV_ROOT/ccd"; SV_FILE="$SV_CCD/bionic/share"; mkdir -p "$SV_CCD"
+sv_poke() {  # <args...> -> the verb under CLAUDE_CONFIG_DIR=$SV_CCD, from the engaged fixture repo
+  export CLAUDE_CONFIG_DIR="$SV_CCD"
+  poke "$SV_R" "$@"
+}
+sv_read() { { read -r SV_V < "$SV_FILE"; } 2>/dev/null; printf '%s' "${SV_V:-}"; SV_V=""; }
+sv_gate_read() {  # <ccd> [<env assignment>...] -> what gate_share prints under that config directory
+  local ccd="$1"; shift
+  env "$@" CLAUDE_CONFIG_DIR="$ccd" HOME="$SV_ROOT/nohome" bash -c '. "$1" 2>/dev/null; gate_share' _ \
+    "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/gate.sh"
+}
+
+sv_poke share
+expect_eq "SV-1 with no share file the verb prints 80 (exit 0)" "0|80" "$RC|$OUT"
+expect_eq "SV-1b …and writes nothing: reading made no file" "no" "$([ -e "$SV_FILE" ] && echo yes || echo no)"
+sv_poke share 70
+expect_eq "SV-2 share 70 exits 0" "0" "$RC"
+expect_eq "SV-2b …writes the file: one integer on one line" "70" "$(sv_read)"
+expect_eq "SV-2c …the file is that line and nothing else" "1" "$(wc -l < "$SV_FILE" | tr -d ' ')"
+expect_eq "SV-2d …and says so on one line" "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+expect_contains "SV-2e …naming the value" "70" "$OUT"
+sv_poke share
+expect_eq "SV-3 share prints 70 now (exit 0)" "0|70" "$RC|$OUT"
+expect_eq "SV-3b …and gate_share, read under the same config directory, prints what the verb printed" "70" "$(sv_gate_read "$SV_CCD")"
+
+# the edges, then the refusals — each beside a set that wrote, so an unchanged file is read as unchanged
+sv_poke share 1
+expect_eq "SV-4 share 1 is the lowest value taken" "0|1" "$RC|$(sv_read)"
+sv_poke share 100
+expect_eq "SV-4b share 100 is the highest" "0|100" "$RC|$(sv_read)"
+sv_poke share 070
+expect_eq "SV-4c share 070 is read as the integer 70 and written as 70" "0|70" "$RC|$(sv_read)"
+for SV_BAD in 0 101 abc -5 5.5 "" " 7" 7x 1000 +5 0x10 99999999999999999999; do
+  sv_poke share 70
+  sv_poke share "$SV_BAD"
+  expect_eq "SV-5 share '$SV_BAD' is refused (exit 1) with one line" "1|1" "$RC|$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  expect_contains "SV-5b …that begins REFUSED and names the range" "poker: REFUSED — " "$OUT"
+  expect_eq "SV-5c …and the share is as it was (70)" "70" "$(sv_read)"
+done
+sv_poke share 70
+sv_poke share 50 60
+expect_eq "SV-6 two operands are the usage error (exit 2)" "2|70" "$RC|$(sv_read)"
+expect_eq "SV-6b …and the file is as it was, a set beside it having written (70)" "70" "$(sv_read)"
+
+# a share that cannot be written is refused, one line
+SV_BLOCK="$SV_ROOT/blocked"; : > "$SV_BLOCK"
+CLAUDE_CONFIG_DIR_SAVE="$SV_CCD"; SV_CCD="$SV_BLOCK/under-a-file"
+sv_poke share 40
+expect_eq "SV-7 a config directory that cannot hold the file is refused (exit 1) with one line" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+expect_contains "SV-7b …saying the share is unchanged" "unchanged" "$OUT"
+SV_CCD="$CLAUDE_CONFIG_DIR_SAVE"
+
+# no CLAUDE_CONFIG_DIR: the file is under $HOME/.claude, as the gate reads it
+SV_HOME="$SV_ROOT/home"; mkdir -p "$SV_HOME"
+unset CLAUDE_CONFIG_DIR; export HOME="$SV_HOME"
+poke "$SV_R" share 60
+SV_RC_H="$RC"
+poke "$SV_R" share
+SV_OUT_H="$OUT"
+export HOME="$SV_HOME_WAS"
+expect_eq "SV-8 with CLAUDE_CONFIG_DIR unset the verb writes \$HOME/.claude/bionic/share and reads it back" "0|60" "$SV_RC_H|$SV_OUT_H"
+expect_eq "SV-8b …and gate_share under that HOME reads the same" "60" \
+  "$(env -u CLAUDE_CONFIG_DIR HOME="$SV_HOME" bash -c '. "$1" 2>/dev/null; gate_share' _ \
+      "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/gate.sh")"
+
+# BIONIC_CLAUDE_HOME moves the claude home for most readers; the gate's share file ignores it, so the verb's write must
+# meet the gate's read there too (T2's path choice stands; read-structure-p6 #3)
+SV_BCH="$SV_ROOT/bch"; mkdir -p "$SV_BCH/bionic"
+printf '33\n' > "$SV_BCH/bionic/share"
+export BIONIC_CLAUDE_HOME="$SV_BCH"
+sv_poke share 45
+SV_RC_B="$RC"
+unset BIONIC_CLAUDE_HOME
+expect_eq "SV-9 with BIONIC_CLAUDE_HOME set the verb writes the CLAUDE_CONFIG_DIR file (exit 0, 45)" "0|45" "$SV_RC_B|$(sv_read)"
+expect_eq "SV-9b …gate_share under the same two variables reads that write" "45" \
+  "$(sv_gate_read "$SV_CCD" BIONIC_CLAUDE_HOME="$SV_BCH")"
+expect_eq "SV-9c …and the other claude home's file was not touched (33)" "33" "$(head -1 "$SV_BCH/bionic/share")"
+
+# the share is the machine's, not a run's: a directory no run engaged answers the same
+SV_PLAIN="$SV_ROOT/plain"; mkdir -p "$SV_PLAIN"
+export CLAUDE_CONFIG_DIR="$SV_CCD"
+poke "$SV_PLAIN" share 55
+expect_eq "SV-10 from a directory that is no engaged run the verb still sets the share (exit 0, 55)" "0|55" "$RC|$(sv_read)"
+poke "$SV_PLAIN" share
+expect_eq "SV-10b …and prints it" "0|55" "$RC|$OUT"
+
+# usage lists it
+poke "$SV_R"
+expect_contains "SV-11 the usage names the share verb" "session-poker.sh share" "$OUT"
+
+# the arm: a subagent may call neither form
+sv_wall() {  # <command> -> the real wall's exit and refusal for a rostered subagent's call
+  local input
+  input="$(jq -n --arg s "$SID" --arg cwd "$SV_R" --arg cmd "$1" '{session_id: $s, cwd: $cwd,
+    hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $cmd},
+    tool_use_id: "toolu_sv", agent_id: "a-implementor", agent_type: "implementor"}')"
+  GATE_ERR="$( cd "$SV_R" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 \
+    bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" 2>&1 >/dev/null )"
+  GATE_RC=$?
+}
+sv_wall "bash $POKER share 90"
+expect_eq "SV-12 a subagent's share <n> is refused by the existing arm (exit 2)" "2" "$GATE_RC"
+expect_contains "SV-12b …naming the rule" "a subagent may not change a contract or the plan" "$GATE_ERR"
+sv_wall "bash $POKER share"
+expect_eq "SV-12c …and its bare share, the arm's list being by verb (exit 2)" "2" "$GATE_RC"
+sv_wall "bash $POKER tick"
+expect_eq "SV-12d control: a read-only verb of the same agent is admitted" "0" "$GATE_RC"
+expect_eq "SV-12e …and none of those calls wrote the share (still 55)" "55" "$(sv_read)"
+
+# mutation: a poker that writes to BIONIC_CLAUDE_HOME's directory, as claude_home would, and the meet row reads it
+SV_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-sv-mut.XXXXXX")"
+mkdir -p "$SV_MUT/hooks" "$SV_MUT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$SV_MUT/scripts/lib"
+for SV_SIB in "$(dirname "$POKER")"/*; do
+  [ "$(basename "$SV_SIB")" = session-poker.sh ] && continue
+  ln -s "$SV_SIB" "$SV_MUT/hooks/$(basename "$SV_SIB")"
+done
+sed 's|SH_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"|SH_FILE="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/bionic/share"|' "$POKER" > "$SV_MUT/hooks/session-poker.sh"
+expect_eq "SV-mut0 the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff "$POKER" "$SV_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+SV_REAL_POKER="$POKER"; POKER="$SV_MUT/hooks/session-poker.sh"
+export BIONIC_CLAUDE_HOME="$SV_BCH"
+sv_poke share 11
+SV_RC_M="$RC"
+unset BIONIC_CLAUDE_HOME
+POKER="$SV_REAL_POKER"
+expect_eq "SV-mut1 the doctored verb still runs (exit 0)" "0" "$SV_RC_M"
+expect_eq "SV-mut1b …and writes the other home's file, where the real verb wrote the gate's (SV-9, SV-9c go red on it)" "11" \
+  "$(head -1 "$SV_BCH/bionic/share")"
+expect_ne "SV-mut1c …so gate_share under the two variables no longer reads the write" "11" \
+  "$(sv_gate_read "$SV_CCD" BIONIC_CLAUDE_HOME="$SV_BCH")"
+rm -rf "$SV_MUT" "$SV_ROOT"
+if [ "$SV_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$SV_CCD_WAS"; fi
+export HOME="$SV_HOME_WAS"
+
+# ============================================================
 section "§ROW-LABEL: the launch record binds a launch by its row= first, the name after (wave-28 T7; REQ-3 AC-3.4, D17)"
 # ============================================================
 # A brief's `Row: <id>` is written on the launch row as `row=<id>` (hooks/dispatch-preflight.sh).
