@@ -6209,7 +6209,7 @@ ${REPO}/payload/scripts/lib/stop.sh"
 w28_46_reads() { local f; for f in "$@"; do /usr/bin/grep -nE "$W28_46_RE" "$f" 2>/dev/null | sed "s|^|${f#"$REPO"/}:|"; done; }
 W28_46_N=0; for _w46 in $W28_46_FILES; do [ -f "$_w46" ] && W28_46_N=$((W28_46_N + 1)); done
 expect_eq "W28-46a precondition: hooks.json registers at least the commit wall and the stop hook, and both wall libraries exist" \
-  "yes|yes|yes" "$(case "$W28_46_FILES" in *hooks/bash-walls.sh*) echo yes ;; *) echo no ;; esac)|$(case "$W28_46_FILES" in *hooks/stop.sh*) echo yes ;; *) echo no ;; esac)|$([ "$W28_46_N" -ge 4 ] && echo yes || echo no)"
+  "2|yes" "$(printf '%s\n' "$W28_46_FILES" | /usr/bin/grep -cE '/hooks/(bash-walls|stop)\.sh$')|$([ "$W28_46_N" -ge 4 ] && echo yes || echo no)"
 expect_nonempty "W28-46b positive: the extractor finds the fold where it lives, in session-poker.sh" \
   "$(w28_46_reads "${REPO}/hooks/session-poker.sh" | /usr/bin/grep -F 'landing_report')"
 # shellcheck disable=SC2086
