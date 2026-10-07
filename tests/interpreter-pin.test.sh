@@ -714,10 +714,11 @@ expect_contains "7.32b …and runs its check" "check ran" "$STOP_LOG"
 T36_LNK_STICKY="$T87_DIR/t36-lnk-sticky"; ln -s "$T36_STICKY" "$T36_LNK_STICKY"
 stop_run "$STOP_SUITE" "$T36_LNK_STICKY"
 expect_eq "7.32c a link to an open directory WITH the sticky bit builds its pin too" "0" "$STOP_RC"
-# The mutant: the link followed no more (`ls -ld`). The open-parent link is then accepted.
+# The mutant: the link followed no more (`ls -ld`, in the one judgment of an open directory, whose
+# two-space `case` line is the only one that indent has). The open-parent link is then accepted.
 T36_MUT3="$TMPROOT/t36-mut-nolink.sh"
-anchor "$SEAM" 'case "$(ls -ldL "$parent" 2>/dev/null)" in' 1
-sed 's|case "$(ls -ldL "$parent" 2>/dev/null)" in|case "$(ls -ld "$parent" 2>/dev/null)" in|' "$SEAM" > "$T36_MUT3"
+anchor -E "$SEAM" '^  case "\$\(ls -ldL "\$1" 2>/dev/null\)" in$' 1
+sed 's|^  case "$(ls -ldL "$1" 2>/dev/null)" in$|  case "$(ls -ld "$1" 2>/dev/null)" in|' "$SEAM" > "$T36_MUT3"
 expect_eq "7.33 the no-link mutant parses" "0" "$(bash -n "$T36_MUT3" >/dev/null 2>&1; echo $?)"
 R="$T36_LNK_OK/mut-ok-root"; pin_call "$T36_MUT3" "$R"
 expect_eq "7.33b …and builds a pin under a link to a closed directory (not vacuous)" "0" "$PIN_RC"
