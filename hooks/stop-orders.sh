@@ -594,9 +594,20 @@ case "$VERB" in
       die "REFUSED — no contract row named $_target on this session's roster; nothing was acked."
       exit 2
     fi
+    # THE MARK, NOT THE ACK, IS THE LICENCE FOR THE TREE (wave-28 T21; A-orch-105 #1). A landed row the Patrol
+    # already acked (MET and gone) still has its tree: `stopped` writes no second ack for it, and removes the
+    # tree below, behind the same fresh-panel check as any other. An acked row with no mark is refused as ever.
+    _mark=""
+    # shellcheck source=/dev/null
+    { declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null \
+      && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
+    _acked=0
     if [ "$(line_field "$_line" acked)" = "yes" ]; then
-      die "REFUSED — $_target is already acked; a second ack would say nothing new."
-      exit 2
+      if [ -z "$_mark" ]; then
+        die "REFUSED — $_target is already acked; a second ack would say nothing new."
+        exit 2
+      fi
+      _acked=1
     fi
     # THE REASON FOLLOWS THE VERDICT (wave-19 T1e, audit V-1; REQ-1 AC-1.2). A landed row
     # (MET or WAIVED) closes `landed`. An UNMET row whose agent is gone closes `abandoned`:
@@ -629,17 +640,16 @@ case "$VERB" in
       UNMET)        _reason=abandoned ;;
       STILL-LIVE)   _reason=abandoned; _still_live=1 ;;
       *)
-        die "REFUSED — $_target's contract is $_state, not landed; nothing was acked."
-        exit 2
+        if [ "$_acked" -eq 1 ]; then _reason=landed; else
+          die "REFUSED — $_target's contract is $_state, not landed; nothing was acked."
+          exit 2
+        fi
         ;;
     esac
+    [ "$_acked" -eq 0 ] || _still_live=0
     # THE LANDING'S MARK DECIDES (wave-28 T6; D7). A row the line published carries
     # `landed=<40-hex> landed_at=<ISO-UTC>` on its roster line (lib/roster.sh `roster_landed`): it
     # closes `landed` whatever its deliverable says, and its tree goes once the row is closed (below).
-    _mark=""
-    # shellcheck source=/dev/null
-    { declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null \
-      && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
     [ -z "$_mark" ] || _reason=landed
     # THE FRESH PANEL, through the one shared read above (`read_panel` / `_is_live`, the same
     # predicate standdown uses). C4 holds for every state: no fresh answer, or the name still
@@ -680,14 +690,18 @@ case "$VERB" in
       _cad=$(printf '%s' "$_detail" | grep -oE '\([0-9]+s\)' | tr -d '()s')
       say "panel-gone overrides STILL-LIVE (progress ${_age:-?}s old, cadence ${_cad:-?}s)"
     fi
-    if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                 CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                 bash "$SWEEPER" ack "$_target" --by human --reason "$_reason" 2>&1 ); then
-      die "REFUSED — the sweeper could not ack $_target: $(printf '%s' "$_ack" | head -1)"
-      exit 2
+    if [ "$_acked" -eq 1 ]; then
+      say "stopped: $_target — its row was already closed (acked)."
+    else
+      if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                   CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                   bash "$SWEEPER" ack "$_target" --by human --reason "$_reason" 2>&1 ); then
+        die "REFUSED — the sweeper could not ack $_target: $(printf '%s' "$_ack" | head -1)"
+        exit 2
+      fi
+      [ -n "$_ack" ] && printf '%s\n' "$_ack"
+      say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
     fi
-    [ -n "$_ack" ] && printf '%s\n' "$_ack"
-    say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
     # THE TREE GOES AT THE STOP (wave-28 T6; D7, AC-3.2). Only for a row carrying the mark: the tree
     # recorded for the name (`workspace_for_name`), else the convention's, removed by
     # lib/worktree.sh `worktree_remove_landed` — never the branch, never a tree whose head is not in the

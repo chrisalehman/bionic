@@ -646,7 +646,14 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
     || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$plan" "$row")")" \
     || { _wt_refuse "no-launch-row row=${row} roster=${roster} — ready reads the row's suites off its launch line"; return 2; }
   name="$(_wt_field "$launch" name)"; lands="$(_wt_field "$launch" lands_on)"
-  [ -n "$lands" ] || { _wt_refuse "no-lands-on row=${row} name=${name:-<none>} — the launch line names no lands_on, so ready has no suites to run"; return 2; }
+  # A RUN OPEN AT UPGRADE CONTINUES (wave-28 T21; D26, AC-7.2). A launch row 1.12.0 wrote carries no `lands_on=`;
+  # its record of the brief's `Suites:` is `suites_allowed=`, and those are the suites `ready` proves. A row that
+  # names none (empty, or the waiver `none`) is landed by a person, and the refusal says how.
+  if [ -z "$lands" ]; then
+    lands="$(_wt_field "$launch" suites_allowed)"
+    case "$lands" in none|none[[:space:]]*) lands="" ;; esac
+  fi
+  [ -n "$lands" ] || { _wt_refuse "no-lands-on row=${row} name=${name:-<none>} — no suite to run; land ${wt} --by-hand --reason '<why>'"; return 2; }
   suites="$(_line_suites "$lands")" || { _wt_refuse "lands-on-unreadable row=${row} lands_on=${lands}"; return 2; }
   # The debt is a suite's file name; the full-suite runner, or anything else, is never one (B4). Its
   # token (`lands_red=<suite> until <token>`) rides to the debt write in LINE_DEBT_TOKEN.
