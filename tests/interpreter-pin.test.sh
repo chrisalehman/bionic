@@ -726,6 +726,78 @@ expect_eq "7.33c under the no-link mutant the open parent behind a link is accep
 R="$T36_LNK_OPEN/fn-root"; pin_call "$SEAM" "$R"
 expect_ne "7.33d control: the shipped function refuses that same root" "0" "$PIN_RC"
 
+# A LINK ON THE PARENT'S PATH IS JUDGED BY THE DIRECTORY THAT HOLDS IT (wave-28 T56; AC-10.6; pass 27).
+# T54 read where a parent link LEADS and never the directory the link sits in: a link held in a
+# directory others can write, with no sticky bit, is replaced by whoever can write that directory, and
+# the pin's `bash` is then theirs. The walk judges every link on the parent's path by its holder.
+# Holders and targets are explicit modes, never the umask's.
+T56_TGT="$T87_DIR/t56-tgt"; mkdir -p "$T56_TGT"; chmod 0700 "$T56_TGT"
+T56_HOLD="$T87_DIR/t56-hold-open"; mkdir -p "$T56_HOLD"; chmod 0777 "$T56_HOLD"
+ln -s "$T56_TGT" "$T56_HOLD/lnk"
+T56_ROOT="$T56_HOLD/lnk/bionic-interpreter-pin.$STOP_UID"
+stop_run "$STOP_SUITE" "$T56_HOLD/lnk"
+expect_eq "7.34 a temp directory that is a link held in an open, non-sticky directory: the hand run exits 2" "2" "$STOP_RC"
+expect_absent "7.34b …and runs no check" "check ran" "$STOP_LOG"
+expect_contains "7.34c …naming the link and the directory that holds it, with the pin's existing line" \
+  "resolve-roots.sh: no interpreter pin at $T56_ROOT — $T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable by group or others and has no sticky bit; remove $T56_ROOT or set TMPDIR, then run again" \
+  "$STOP_ERR"
+expect_eq "7.34d …and builds nothing in the directory it leads to" "absent" "$(there "$T56_TGT/bionic-interpreter-pin.$STOP_UID")"
+T56_STK="$T87_DIR/t56-hold-sticky"; mkdir -p "$T56_STK"; chmod 1777 "$T56_STK"
+ln -s "$T56_TGT" "$T56_STK/lnk"
+stop_run "$STOP_SUITE" "$T56_STK/lnk"
+expect_eq "7.35 the same link held in an open directory WITH the sticky bit builds its pin" "0" "$STOP_RC"
+expect_eq "7.35b …in the directory the link leads to" "/bin/bash" \
+  "$(readlink "$T56_TGT/bionic-interpreter-pin.$STOP_UID/pin/bash" 2>/dev/null)"
+T56_CLOSED="$T87_DIR/t56-hold-closed"; mkdir -p "$T56_CLOSED"; chmod 0700 "$T56_CLOSED"
+ln -s "$T36_OPEN" "$T56_CLOSED/lnk"
+stop_run "$STOP_SUITE" "$T56_CLOSED/lnk"
+expect_eq "7.36 a link held in a closed directory that leads to an open one is still refused (7.31's case)" "2" "$STOP_RC"
+expect_contains "7.36b …by where it leads" "$T56_CLOSED/lnk is writable by group or others and has no sticky bit" "$STOP_ERR"
+# Two links in a chain. Outer: the open holder is the outer link's. Inner: the outer link is held
+# in a closed directory and leads through a link that an open directory holds.
+T56_MID="$T87_DIR/t56-mid"; mkdir -p "$T56_MID"; chmod 0700 "$T56_MID"
+ln -s "$T56_TGT" "$T56_MID/inner"
+ln -s "$T56_MID/inner" "$T56_HOLD/outer"
+stop_run "$STOP_SUITE" "$T56_HOLD/outer"
+expect_eq "7.37 two links in a chain, the outer one held in an open directory: exits 2" "2" "$STOP_RC"
+expect_contains "7.37b …naming the outer link and its holder" "$T56_HOLD/outer is a symlink held in $T56_HOLD, which is writable" "$STOP_ERR"
+ln -s "$T56_HOLD/lnk" "$T56_MID/outer2"
+stop_run "$STOP_SUITE" "$T56_MID/outer2"
+expect_eq "7.37c two links in a chain, the outer one held closed, the inner one in an open directory: exits 2" "2" "$STOP_RC"
+expect_contains "7.37d …naming the inner link and its holder" "$T56_HOLD/lnk is a symlink held in $T56_HOLD, which is writable" "$STOP_ERR"
+ln -s "$T56_HOLD" "$T56_MID/holder-link"; ln -s "$T56_TGT" "$T56_HOLD/lnk2"
+stop_run "$STOP_SUITE" "$T56_MID/holder-link/lnk2"
+expect_eq "7.37e a holder that is itself a link is judged where it leads, and that directory is open: exits 2" "2" "$STOP_RC"
+expect_contains "7.37f …naming the link and the holder as the path spells it" \
+  "$T56_MID/holder-link/lnk2 is a symlink held in $T56_MID/holder-link, which is writable" "$STOP_ERR"
+# A cycle of links ends in a refusal, never a hang.
+T56_CYC="$T87_DIR/t56-cycle"; mkdir -p "$T56_CYC"; chmod 0700 "$T56_CYC"; ln -s "$T56_CYC/a" "$T56_CYC/a"
+stop_run "$STOP_SUITE" "$T56_CYC/a"
+expect_eq "7.38 a link that leads back to itself is refused" "2" "$STOP_RC"
+expect_contains "7.38b …naming the links" "$T56_CYC/a is reached through more than 16 links" "$STOP_ERR"
+# The mutants. (1) The walk's call removed: the open holder is accepted. (2) The holder judged with
+# no sticky exemption: the sticky holder is refused. Each is proved to run before its claim is read.
+T56_MUT1="$TMPROOT/t56-mut-walk.sh"
+anchor "$SEAM" '_bionic_pin_links "$parent" 0' 1
+grep -vF '_bionic_pin_links "$parent" 0' "$SEAM" > "$T56_MUT1"
+expect_eq "7.39 the no-walk mutant parses" "0" "$(bash -n "$T56_MUT1" >/dev/null 2>&1; echo $?)"
+R="$T56_CLOSED/mut-closed-root"; pin_call "$T56_MUT1" "$R"
+expect_ne "7.39b …and still refuses the open parent behind a closed holder (not vacuous)" "0" "$PIN_RC"
+R="$T56_HOLD/lnk/mut-root"; pin_call "$T56_MUT1" "$R"
+expect_eq "7.39c under the no-walk mutant the link held in an open directory is accepted (the defect 7.34 guards)" "0" "$PIN_RC"
+R="$T56_HOLD/lnk/fn-root"; pin_call "$SEAM" "$R"
+expect_ne "7.39d control: the shipped function refuses that same root" "0" "$PIN_RC"
+T56_MUT2="$TMPROOT/t56-mut-sticky.sh"
+anchor "$SEAM" '    ?????????[tT]*) return 1 ;;' 1
+grep -vF '    ?????????[tT]*) return 1 ;;' "$SEAM" > "$T56_MUT2"
+expect_eq "7.40 the no-sticky mutant parses" "0" "$(bash -n "$T56_MUT2" >/dev/null 2>&1; echo $?)"
+R="$T36_LNK_OK/mut-nosticky-root"; pin_call "$T56_MUT2" "$R"
+expect_eq "7.40b …and builds a pin under a link held in a closed directory (not vacuous)" "0" "$PIN_RC"
+R="$T56_STK/lnk/mut-root"; pin_call "$T56_MUT2" "$R"
+expect_ne "7.40c under the no-sticky mutant the link held in a sticky directory is refused (the row 7.35 guards)" "0" "$PIN_RC"
+R="$T56_STK/lnk/fn-root"; pin_call "$SEAM" "$R"
+expect_eq "7.40d control: the shipped function builds under that same root" "0" "$PIN_RC"
+
 # THE MUTANTS. (1) The hand path's refusal turned back into `|| :`: the refused run goes on and
 # runs its check. (2) The parent check removed: the open parent is accepted. Each mutant is proved
 # to run before its claim is read.
