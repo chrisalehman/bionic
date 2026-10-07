@@ -109,6 +109,15 @@ trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
+# THE GATE IS FIXTURE DATA (wave-28 T13; D14). The tick and the stop wall size their fill at the
+# gate, which reads the machine through the readers' pins and its store at BIONIC_GATE_DIR: 8
+# cores, 30% used, a load of 1.0 over the last minute and the last five, and one run on record
+# that takes 0.1 core, so every width below is the fixture's cap or its ready rows, never this
+# host's load. §ROOM plants its own.
+export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
+export BIONIC_GATE_DIR="$SANDBOX/gate"
+mkdir -p "$BIONIC_GATE_DIR/requests" "$BIONIC_GATE_DIR/cost"
+printf '5:0.1:30:1000\n' > "$BIONIC_GATE_DIR/cost/fixture.test.sh"
 # Since task 4/5, hooks/stop-check.sh reads CLAUDE_CODE_SESSION_ID; since S6 it reads it to
 # find the session TRANSCRIPT the live set is recorded in, which is the whole of resolution.
 # This suite runs inside a real Claude Code session, which exports a real one, and an
@@ -7800,7 +7809,7 @@ expect_eq "restored: bind_plan answers canonically again for ./…" \
   "$PC_CANON" "$(pc_bind_lib "$SID_A" "$PC_DOT")"
 
 # ============================================================
-section "RG — THE PRESSURE RUNG: two consumers, one ring, one rung"
+section "RG — THE PRESSURE RUNG: the runner reads one ring (the tick's half retired, wave-28 T13)"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design §3): "machine pressure level · owning module
@@ -7809,7 +7818,12 @@ section "RG — THE PRESSURE RUNG: two consumers, one ring, one rung"
 # compute one rung; band mutation moves both". AC-14 states the function's own contract and
 # AC-15 states the consumers' obligation to SAMPLE before they read.
 #
-# THE TWO CONSUMERS ARE UNRELATED PROGRAMS. `tests/run.sh` sets a suite's job width;
+# THE TICK'S HALF IS RETIRED (wave-28 T13; D14, AC-2.8): the tick sizes its fill at the gate and
+# prints no rung, so every row below that drove `session-poker.sh tick` for a rung is gone, and
+# what stays holds the runner's half until its own row retires it. §ROOM holds the tick and the
+# stop wall to one answer now.
+#
+# THE TWO CONSUMERS WERE UNRELATED PROGRAMS. `tests/run.sh` sets a suite's job width;
 # `session-poker.sh tick` reports the rung and fills writers by it. They share nothing but
 # the library and the ring — which is the design (D4: pressure describes the machine, so the
 # ring is machine-scoped) and therefore the thing to hold. Every ring in this section lives
@@ -7877,15 +7891,6 @@ rg_runner() {  # -> the width tests/run.sh would run at, under the pinned enviro
     bash "$RG_TREE_RUNNER/tests/run.sh" --dry-run 2>/dev/null ) \
     | sed -n 's/^JOBS=//p' | head -1
 }
-rg_tick() {  # -> the rung field of the tick's report line, under the same environment
-  ( cd "$RG_REPO"
-    eval "export $1"
-    export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
-           CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$RG_REPO/no-such-config"
-    bash "$RG_TREE_POKER/hooks/session-poker.sh" tick 2>&1 ) \
-    | sed -n 's/.*rung=\([0-9-]*\)\/.*/\1/p' | head -1
-}
-
 RG_LIB_RES="$LIB_DIR_SRC/resources.sh"
 RG_TREE_RUNNER="$REPO_ROOT"
 RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
@@ -7896,19 +7901,14 @@ expect_eq "the runner this section drives is on disk (not vacuous)" "yes" \
 
 # --- RG.1 one ring, one rung: a CLEAR machine gives both consumers the ceiling --
 rg_seed_clear; RG_RUN_CLEAR=$(rg_runner "$RG_CLEAR_ENV")
-rg_seed_clear; RG_TICK_CLEAR=$(rg_tick "$RG_CLEAR_ENV")
 expect_eq "a clear machine gives the runner the whole ceiling" "$RG_CEIL" "$RG_RUN_CLEAR"
-expect_eq "…and gives the tick the same number" "$RG_CEIL" "$RG_TICK_CLEAR"
 
 # --- RG.2 …and a CRITICAL machine quarters it for both, identically ------------
 # The runner's half is seeded directly with the critical reading (S25: --dry-run only
 # reads the ring now, it does not sample), while the tick still takes its own live
 # sample under the same env — two different mechanisms landing on the same rung.
 rg_seed "$RG_CRIT_ENV"; RG_RUN_CRIT=$(rg_runner "$RG_CRIT_ENV")
-rg_seed_clear; RG_TICK_CRIT=$(rg_tick "$RG_CRIT_ENV")
 expect_eq "a critical machine quarters the runner's width" "2" "$RG_RUN_CRIT"
-expect_eq "…and quarters the tick's rung to the same number" "2" "$RG_TICK_CRIT"
-expect_eq "the two consumers computed ONE rung, not two" "$RG_RUN_CRIT" "$RG_TICK_CRIT"
 # NON-VACUITY: the two numbers differ between RG.1 and RG.2, so the equality above is not
 # two constants agreeing.
 expect_eq "…and it is not the clear answer wearing a different name" "no" \
@@ -7942,13 +7942,10 @@ cp "$RG_MUT/scripts/lib"/*.sh "$RG_MUT/payload/scripts/lib/" 2>/dev/null
 
 RG_TREE_RUNNER="$RG_MUT"; RG_TREE_POKER="$RG_MUT"
 rg_seed "$RG_CRIT_ENV"; RG_RUN_BAND=$(rg_runner "$RG_CRIT_ENV")
-rg_seed_clear; RG_TICK_BAND=$(rg_tick "$RG_CRIT_ENV")
 RG_TREE_RUNNER="$REPO_ROOT"; RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
 [ -d "$RG_TREE_POKER/scripts/lib" ] || RG_TREE_POKER="$BIONIC_HOOKS_DIR/../payload"
 
 expect_eq "moved band threshold: the runner halves instead of quartering" "4" "$RG_RUN_BAND"
-expect_eq "…and the tick moves with it, to the same number" "4" "$RG_TICK_BAND"
-expect_eq "…so one threshold change moved BOTH consumers" "$RG_RUN_BAND" "$RG_TICK_BAND"
 
 # --- RG.4 THE SAMPLING PROBE (S8's uncaught-probe finding) --------------------
 #
@@ -7992,20 +7989,6 @@ printf '#!/bin/bash\nexit 0\n' > "$RG_NOSAMP/tests/stub.test.sh"
 anchor -E "$REPO_ROOT/tests/run.sh" '^[[:space:]]*pressure_sample >/dev/null 2>&1 \|\| :$' 1
 grep -vE '^[[:space:]]*pressure_sample >/dev/null 2>&1 \|\| :$' "$REPO_ROOT/tests/run.sh" \
   > "$RG_NOSAMP/tests/run.sh"
-# the tick with ITS `pressure_sample` line removed, and nothing else changed.
-#
-# ANCHORED ON THE CALL'S STABLE TOKENS, NOT ON ITS INDENTATION OR ITS VARIABLE NAME (critic
-# K-1). The prior anchor pinned both — four leading spaces and the literal `$SCHED_CORES` —
-# and S21 (`61b8ca8`) moved the call into `sched_budget_read`, re-indenting it to two spaces
-# and renaming the local to `$cores`; the anchor then matched nothing, the "doctored" copy
-# was byte-identical to the shipped one, and this section's own meta-check row (below) is what
-# caught it. `pressure_sample`, the `>/dev/null 2>&1 || :` suffix and the one-line shape are the
-# part of this call that is actually load-bearing; a future reindent or a rename of the local
-# holding the core count should not be able to silently disarm this probe again.
-anchor -E "$SPO" '^[[:space:]]*pressure_sample "\$[A-Za-z_][A-Za-z0-9_]*" >/dev/null 2>&1 \|\| :$' 1
-grep -vE '^[[:space:]]*pressure_sample "\$[A-Za-z_][A-Za-z0-9_]*" >/dev/null 2>&1 \|\| :$' "$SPO" \
-  > "$RG_NOSAMP/hooks/session-poker.sh"
-
 # THE SHIPPED CONTROL TREE for the runner half: the real tests/run.sh, byte for byte, in a
 # scratch tree with no real suite files — so "shipped" and "no-sample" differ ONLY in the
 # one line the grep above removed, never in which suites they would (fail to) run.
@@ -8039,21 +8022,6 @@ expect_eq "the shipped runner's ordinary path samples once (AC-15)" "yes" \
   "$RG_RUN_SHIPPED_SAMPLES"
 expect_eq "a runner that stopped sampling leaves the ring untouched: the removal is CAUGHT" \
   "no" "$RG_RUN_NOSAMP_SAMPLES"
-
-# the shipped tick, over the SEEDED ring — it samples, so it reads the quarter
-rg_seed_clear; RG_TICK_SEEDED=$(rg_tick "$RG_CRIT_ENV")
-expect_eq "over a seeded ring the shipped tick still reads the critical quarter" "2" \
-  "$RG_TICK_SEEDED"
-
-RG_TREE_POKER="$RG_NOSAMP"
-rg_seed_clear; RG_TICK_NOSAMP=$(rg_tick "$RG_CRIT_ENV")
-RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
-[ -d "$RG_TREE_POKER/scripts/lib" ] || RG_TREE_POKER="$BIONIC_HOOKS_DIR/../payload"
-
-expect_eq "a tick that stopped sampling reports the whole ceiling too" \
-  "$RG_CEIL" "$RG_TICK_NOSAMP"
-expect_eq "…which is not what the shipped tick reports: that removal is CAUGHT as well" "no" \
-  "$([ "$RG_TICK_NOSAMP" = "$RG_TICK_SEEDED" ] && echo yes || echo no)"
 
 # --- RG.5 the pin is honoured: this section's readings are on this section's ring ---
 #
@@ -10346,18 +10314,12 @@ expect_eq "S17b …and the key-set pin goes red on it (the pin discriminates)" \
 # §S15b pins `adopt_copy_marker`. `youngest_suite_writer` was the OTHER function in the same
 # file greping the bare literal, and it is the one whose failure mode is silent: no closing
 # markers found reads there as "every row is still open", which fills the writer budget.
-expect_eq "S17c youngest_suite_writer greps the shared constant, not a literal" \
-  "0" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
-# RE-AUTHORED (epic-23 wave-20 T20, REQ-10, D10). It read "…and it does grep the marker,
-# through the constant", expecting 1. `youngest_suite_writer` no longer reads a marker at all:
-# it closes a name through `roster_open_names`, under which a MET marker closes nothing
-# (§CG-close T20 drives it). The zero above is still not absence — the function's close is
-# now the predicate call, and that is what the non-vacuity row asks for.
-expect_eq "S17c …and it greps no marker at all any more, through the constant or otherwise (T20: was 1)" \
-  "0" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF '${SWEPT_SCHEMA}')"
-expect_eq "S17c …because it closes through the one predicate (the zero is not absence)" \
-  "1" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF 'roster_open_names "$roster"')"
-
+# RETIRED WITH THE EMERGENCY LINE (wave-28 T13; D14): the kill floor named a writer to stop,
+# and the gate admits no run past memory's share, so the function and its two marker pins go.
+expect_eq "S17c youngest_suite_writer is gone with the EMERGENCY line" "0" \
+  "$(grep -c '^youngest_suite_writer()' "$PARTY_PK")"
+expect_eq "S17c …while the marker's other reader stands (the count extractor reads the file)" "1" \
+  "$(grep -c '^adopt_copy_marker()' "$PARTY_PK")"
 
 # ============================================================
 section "B — no backtick pair hides inside a double-quoted assertion name (AC-B.1/AC-B.2, epic-22 task 7)"
@@ -11934,7 +11896,8 @@ section "CG-close T20 — the last two MET-closing readers give the four's answe
 #                SubagentStart for an `identified` id is journalled `duplicate-start` unless
 #                the name's contract is closed — and a MET marker read as closed
 #   kill floor   hooks/session-poker.sh's `youngest_suite_writer`: the EMERGENCY arm's one
-#                stop address skipped every name carrying a MET marker
+#                stop address skipped every name carrying a MET marker (retired with the
+#                EMERGENCY line, wave-28 T13: the two readers left are driven below)
 # So on a MET-but-unacked name the recorder let a resumed copy start unjournalled and the
 # kill floor named nobody, while the four readers CG-close drives called the same name open.
 #
@@ -11944,8 +11907,6 @@ section "CG-close T20 — the last two MET-closing readers give the four's answe
 #   done   the same, then acked after its launch                          -> CLOSED
 # `done` is the paired positive: without it, readers that never close anything would pass.
 #   recorder     a second SubagentStart for the identified id: journalled = open
-#   kill floor   a tick at free_mb=100: names `<name>@session-…` = open, "no suite-running
-#                writer" = closed
 #   adopt_fold   CG-close's own driver (`cgc_adopt`)
 # THE RECORDER IS DRIVEN LAST: the row it journals is a new history for the next reader.
 
@@ -11976,30 +11937,15 @@ cgt_recorder() {  # <repo> <case> [recorder] -> open | closed
     | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "${3:-$PARTY_ER}" >/dev/null 2>&1
   if grep -qF "|status=duplicate-start|" "$ro"; then printf 'open'; else printf 'closed'; fi
 }
-cgt_killfloor() {  # <repo> <name> [poker] -> open | closed | other:<channel>
-  local out
-  cgc_ring
-  out=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
-           "${CGC_ENV[@]}" BIONIC_PROBE_FREE_MB=100 BIONIC_PROBE_LOAD_1M=1.0 \
-           bash "${3:-$PARTY_PK_S}" tick 2>&1 ) )
-  case "$out" in
-    *"stop youngest suite-running writer $2@session-"*) printf 'open' ;;
-    *"no suite-running writer on this roster to stop"*) printf 'closed' ;;
-    *) printf 'other:%s' "$out" ;;
-  esac
-}
-
 for _cgt in met:open done:closed; do
   _cgt_case="${_cgt%%:*}"; _cgt_want="${_cgt#*:}"; _cgt_name="cgt-$_cgt_case"
   _cgt_r=$(cgt_world "$_cgt_case")
   _cgt_ad=$(cgc_adopt "$_cgt_r" "$_cgt_name")
-  _cgt_kf=$(cgt_killfloor "$_cgt_r" "$_cgt_name")
   _cgt_er=$(cgt_recorder "$_cgt_r" "$_cgt_case")
   expect_eq "CG-close T20 ${_cgt_case}: the tick's adopt_fold (one of the four) answers ${_cgt_want}" "$_cgt_want" "$_cgt_ad"
-  expect_eq "CG-close T20 ${_cgt_case}: the kill floor's youngest_suite_writer answers ${_cgt_want}" "$_cgt_want" "$_cgt_kf"
   expect_eq "CG-close T20 ${_cgt_case}: the recorder's duplicate-start check answers ${_cgt_want}" "$_cgt_want" "$_cgt_er"
-  expect_eq "CG-close T20 ${_cgt_case}: ONE answer across the three readers" "1" \
-    "$(printf '%s\n' "$_cgt_ad" "$_cgt_kf" "$_cgt_er" | sort -u | wc -l | tr -d ' ')"
+  expect_eq "CG-close T20 ${_cgt_case}: ONE answer across the two readers" "1" \
+    "$(printf '%s\n' "$_cgt_ad" "$_cgt_er" | sort -u | wc -l | tr -d ' ')"
 done
 
 # BOTH NEW READERS NAME THE ONE PREDICATE, and neither keeps a private MET close. The
@@ -12008,8 +11954,6 @@ for _cgt_f in "$PARTY_ER" "$CGC_POKER"; do
   expect_true "CG-close T20 ${_cgt_f##*/} calls roster_open_names" \
     grep -q 'roster_open_names "' "$_cgt_f"
 done
-expect_eq "CG-close T20 youngest_suite_writer keeps no MET-marker skip" "0" \
-  "$(awk '/^youngest_suite_writer\(\) \{/,/^\}/' "$CGC_POKER" | grep -cE 'state=MET|SWEPT_SCHEMA' || true)"
 
 # THE MUTATION PROOF: each new reader's old MET close restored in a copy, nothing else
 # touched, must answer `closed` on `met` — the one-answer row above would then go red.
@@ -12017,27 +11961,16 @@ CGT_MUT="$SANDBOX/cgt-mut"
 CGT_MUT_HOOK="$(plant_hook_tree "$CGT_MUT")"
 cp "$SWEEPER" "$CGT_MUT_HOOK/session-sweeper.sh"   # the tick refuses without its sibling
 # The marker token is read off the shared constant, never spelled (§S17's scan).
-anchor "$CGC_POKER" '*"$nl$RN$nl"*) : ;; *) continue ;; esac' 1
 anchor "$PARTY_ER" 'grep -qxF -- "$DUP_NAME" <<< "$(roster_open_names ' 1
-awk -v mk="${SWEPT_SCHEMA}|" '{
-  if (index($0, "*\"$nl$RN$nl\"*) : ;; *) continue ;; esac") > 0) {
-    print "    case \"$(grep -F \"" mk "\" \"$roster\" | grep -F \"|state=MET\")\" in *\"|name=${RN}|\"*) continue ;; esac  # mutant: the MET skip"
-    next
-  }
-  print }' "$CGC_POKER" > "$CGT_MUT_HOOK/session-poker.sh"
 awk -v mk="${SWEPT_SCHEMA}|" '{
   if (index($0, "grep -qxF -- \"$DUP_NAME\" <<< \"$(roster_open_names ") > 0) {
     print "    grep -F \"" mk "\" \"$ROSTER_FILE\" | grep -F \"|name=${DUP_NAME}|\" | grep -qF \"|state=MET\" && DUP_PRIOR=\"\"  # mutant: the MET close"
     next
   }
   print }' "$PARTY_ER" > "$CGT_MUT_HOOK/execution-recorder.sh"
-expect_eq "CG-close T20 meta: the kill-floor mutant planted its MET skip" "1" \
-  "$(grep -c 'mutant: the MET skip' "$CGT_MUT_HOOK/session-poker.sh")"
 expect_eq "CG-close T20 meta: the recorder mutant planted its MET close" "1" \
   "$(grep -c 'mutant: the MET close' "$CGT_MUT_HOOK/execution-recorder.sh")"
 _cgt_r=$(cgt_world met)
-expect_eq "CG-close T20 MUTANT a MET-skipping kill floor names nobody on a MET-but-unacked name (the row discriminates)" \
-  "closed" "$(cgt_killfloor "$_cgt_r" cgt-met "$CGT_MUT_HOOK/session-poker.sh")"
 expect_eq "CG-close T20 MUTANT a MET-closing recorder journals no duplicate on a MET-but-unacked name (the row discriminates)" \
   "closed" "$(cgt_recorder "$_cgt_r" met "$CGT_MUT_HOOK/execution-recorder.sh")"
 
@@ -12215,8 +12148,11 @@ section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave
 # `override`. A probe's line and a line with no `source=` answer `-` in all three, and the
 # governing-skill hook reads no line at all: no plan owes it, so every Write is admitted.
 #
-# THE ANSWER EACH READER GIVES is its writer count, `-` for none:
-#   tick         the `rung=<r>/<writers>` report line
+# THE ANSWER EACH READER GIVES is its writer count, `-` for none. With no cap the tick and the stop
+# wall size the fill by the gate alone, which has room for all ten ready rows, so their answer for
+# a `-` case is 10; preflight has no ceiling and answers `-`.
+#   tick         how many of the ten ready rows its FILL names: the gate has room for all
+#                ten, so the cap is the width (wave-28 T13: the rung line it used to read is gone)
 #   preflight    the budget refusal's `writers: budget=<n>` (ten open rows, so any n refuses)
 #   stop wall    the width of the ready set it names, over ten ready rows and an empty roster
 #   gov hook     presence only (its one use is "does a writers= exist"): the Write is
@@ -12246,8 +12182,10 @@ cgb_tick() {  # <repo> -> writers
   local out
   cgc_ring
   out=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
-           "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) | sed -n 's/.*poker: rung=[0-9-]*\/\([0-9-]*\) .*/\1/p' | head -1)
-  printf '%s' "${out:-?}"
+           "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) )
+  out=$(printf '%s\n' "$out" | sed -n 's/^poker: FILL //p' | head -1)
+  [ -n "$out" ] || { printf '?'; return 0; }
+  printf '%s' "$(printf '%s\n' $out | grep -c '^R[0-9]')"
 }
 # SETS GLOBALS, and is called bare — never inside `$( … )`, whose subshell would take the
 # captured output with it (the first RED run died on exactly that, under `set -u`).
@@ -12265,7 +12203,6 @@ cgb_stopwall() {  # <repo> -> writers
   out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
   case "$out" in
-    *"Fill budget unreadable"*) printf -- '-'; return 0 ;;
     '') printf -- '-'; return 0 ;;
   esac
   ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
@@ -12332,9 +12269,10 @@ while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   cgb_open_rows "$_cgb_r"
   cgb_preflight "$_cgb_r"; _cgb_pf="$CGB_PF"
   _cgb_gs=$(cgb_govskill "$_cgb_line")
-  expect_eq "CG-budget ${_cgb_label}: the tick reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_tk"
+  _cgb_w="$_cgb_want"; [ "$_cgb_want" = "-" ] && _cgb_w=10
+  expect_eq "CG-budget ${_cgb_label}: the tick fills ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_tk"
   expect_eq "CG-budget ${_cgb_label}: dispatch preflight reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_pf"
-  expect_eq "CG-budget ${_cgb_label}: the stop wall reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_st"
+  expect_eq "CG-budget ${_cgb_label}: the stop wall names ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_st"
   expect_eq "CG-budget ${_cgb_label}: the governing-skill hook admits the Write (no plan owes the line)" \
     "admitted" "$_cgb_gs"
   if [ "$_cgb_want" = "-" ]; then
@@ -12355,6 +12293,61 @@ expect_eq "CG-budget no reader cuts writers= at its first substring any more" "0
 expect_eq "CG-budget the stop wall no longer reads the budget through plan_frontmatter_get" "0" \
   "$(grep -c 'plan_frontmatter_get "$PLAN" parallel-budget' "$CGC_LIBDIR/stop.sh" || true)"
 
+
+# ============================================================
+section "§ROOM — the tick and the stop wall give one answer on width (wave-28 T13; REQ-2 AC-2.8, D14)"
+# ============================================================
+#
+# THE ONE ANSWER. The tick offers a writer row for each `gate_room` that says yes and the stop
+# wall owes the same rows, both through `fill_gate_width` (lib/fill.sh), so on one planted
+# reading they name the same count. A gate store of this section's own, one run on record taking
+# 1.0 core, ten ready rows and a person's cap of eight; the reading moves, the answer moves, and
+# the two readers move together. The wall owes nothing when the gate gives no room — its HOLD —
+# and that is the count 0, the tick's empty FILL.
+#   quiet   a load of 1.0: 1.0 + k owed runs fits 6.4 cores for k = 0 … 5            -> 6
+#   loaded  a load of 4.0 over both windows                                           -> 3
+#   5m      a quiet minute, a five-minute load of 7.0                                 -> 0
+room_world() {  # <label> -> repo path, with ten ready rows under a cap of eight
+  cgb_world "room-$1" 'parallel-budget: writers=8 suites=2 source=user'
+}
+room_stop() {  # <repo> -> how many writer rows the stop wall owes, 0 when it refuses nothing
+  local out ids
+  out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
+  ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
+  if [ -z "$ids" ]; then printf '0'; return 0; fi
+  printf '%s' "$(printf '%s\n' $ids | grep -c '^R[0-9]')"
+}
+room_tick() {  # <repo> — sets ROOM_TICK_OUT (the tick's channel) and ROOM_TK (rows its FILL names)
+  local ids
+  ROOM_TICK_OUT=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+           "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) )
+  ids=$(printf '%s\n' "$ROOM_TICK_OUT" | awk 'index($0, "poker: FILL ") == 1 && index($0, "poker: FILL —") != 1 { print substr($0, 13); exit }')
+  ROOM_TK=$(printf '%s\n' $ids | grep -c '^R[0-9]')
+}
+ROOM_GATE="$SANDBOX/room-gate"
+ROOM_GATE_SAVED="$BIONIC_GATE_DIR"
+mkdir -p "$ROOM_GATE/requests" "$ROOM_GATE/cost"
+printf '5:1.0:30:1000\n' > "$ROOM_GATE/cost/fixture.test.sh"
+export BIONIC_GATE_DIR="$ROOM_GATE"
+for _rm in quiet:1.0:1.0:6 loaded:4.0:4.0:3 5m:1.0:7.0:0; do
+  IFS=: read -r _rm_case _rm_b1 _rm_b5 _rm_want <<< "$_rm"
+  _rm_r=$(room_world "$_rm_case")
+  cgc_row "$_rm_r/.bionic/tmp/roster-$SID_A.state" room-tickrow 2026-09-01T00:00:00Z toolu_01ROOMTICK
+  cgc_ack "$_rm_r/.bionic/tmp/sweeper-$SID_A.state" 2026-09-01T01:00:00Z room-tickrow
+  export BIONIC_PROBE_BUSY_CORES="$_rm_b1" BIONIC_PROBE_BUSY_CORES_5M="$_rm_b5"
+  room_tick "$_rm_r"; _rm_tk="$ROOM_TK"
+  _rm_st=$(room_stop "$_rm_r")
+  expect_eq "ROOM ${_rm_case}: the tick offers ${_rm_want} row(s)" "$_rm_want" "$_rm_tk"
+  expect_eq "ROOM ${_rm_case}: the stop wall owes the same ${_rm_want}" "$_rm_want" "$_rm_st"
+  expect_contains "ROOM ${_rm_case}: …and the tick printed its one gate line" "poker: gate share=80 used=30% load=${_rm_b1}/${_rm_b5} of 8 " "$ROOM_TICK_OUT"
+done
+export BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_GATE_DIR="$ROOM_GATE_SAVED"
+# THE TWO READERS SIZE THEIR FILL BY THE ONE FUNCTION, and neither keeps a width of its own.
+expect_true "ROOM the tick sizes its fill by fill_gate_width" grep -q 'fill_gate_width "' "$CGC_POKER"
+expect_true "ROOM the stop wall sizes its fill by fill_gate_width" grep -q 'fill_gate_width "' "$CGC_LIBDIR/stop.sh"
+expect_eq "ROOM neither reads a rung any more" "0" \
+  "$(cat "$CGC_POKER" "$CGC_LIBDIR/stop.sh" | grep -c 'pressure_level\|resources_pressure' || true)"
 
 # ============================================================
 section "CG-standdown — the tick's printed stand-down set IS the stop wall's computed one (epic-23 wave-20 T19; REQ-5 AC-5.4's plants, on the stand-down)"
@@ -12531,7 +12524,8 @@ OCC_PF_N=$(printf '%s\n' "$OCC_PF" | sed -n 's/.*writers: budget=1 open=\([0-9][
 cgc_ring
 OCC_TICK=$( cd "$OCC_R" && occ_env bash "$CGSD_POKER" tick 2>&1 )
 OCC_TICK_N=$(printf '%s\n' "$OCC_TICK" | sed -n -e 's/.* occupied=\([0-9][0-9]*\) gap=.*/\1/p' \
-  -e 's/.* and \([0-9][0-9]*\) unacked roster row(s).*/\1/p' | head -1)
+  -e 's/.* and \([0-9][0-9]*\) unacked roster row(s).*/\1/p' \
+  -e 's/.* reached by \([0-9][0-9]*\) unacked roster row(s).*/\1/p' | head -1)
 expect_eq "OCC1 preflight refuses a writer, counting ONE open writer" "1" "$OCC_PF_N"
 expect_eq "OCC2 the tick's occupancy is ONE" "1" "$OCC_TICK_N"
 expect_eq "OCC3 …and the two readers' numbers are equal" "$OCC_PF_N" "$OCC_TICK_N"
@@ -12845,17 +12839,17 @@ section "CG-ledger — ONE ledger reader: the gate's refusal ids ARE the tick's 
 # printed its LEDGER lines only inside the FILL branch, while the gate reads the ledger in every
 # state — so under HOLD, or on the first tick before any roster exists, a plan the gate refused
 # ticked clean. `cgl_case` runs the whole agreement once per state: FILL (a healthy machine and
-# a roster), HOLD (free memory below the hold floor) and NO ROSTER (armed, nothing dispatched:
+# a roster), NO ROOM (a five-minute load over the share; was HOLD) and NO ROSTER (armed, nothing dispatched:
 # the first tick of every run). With no roster both readers take the no-roster rule, so T3's
 # agent-named active row is an `evidence` finding there rather than a `launch` one, and the
 # gate folds the two evidence rows into one refusal.
-# cgl_case <label> <free_mb> <roster: yes|no> <want kinds> <want refusals>
+# cgl_case <label> <five-minute load> <roster: yes|no> <want kinds> <want refusals>
 cgl_case() {
-  local lbl="$1" free="$2" roster="$3" want_kinds="$4" want_n="$5"
+  local lbl="$1" load5="$2" roster="$3" want_kinds="$4" want_n="$5"
   CGL_R=$(new_repo "cgl${lbl}")
   CGL_P="$CGL_R/.bionic/docs/plans/epic-99/cgl.plan.md"
   CGL_RO="$CGL_R/.bionic/tmp/roster-$SID_A.state"
-  CGL_FREE="$free"
+  CGL_LOAD5="$load5"
   mkdir -p "$(dirname "$CGL_P")"
   cat > "$CGL_P" <<CGLEOF
 ---
@@ -12908,7 +12902,7 @@ CGLEOF
   [ "$roster" = yes ] || ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGC_POKER" arm >/dev/null 2>&1 )
   CGL_TICK="$(cgl_tick)"
   case "$lbl" in
-    -hold) expect_contains "CG-ledger${lbl} precondition: the tick is under HOLD" "poker: HOLD free_mb=${free}" "$CGL_TICK" ;;
+    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=0.1 admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
     -noroster) expect_contains "CG-ledger${lbl} precondition: the tick is the armed first tick, QUIET" \
                  "poker: QUIET — armed, nothing dispatched yet on this session" "$CGL_TICK" ;;
   esac
@@ -12952,7 +12946,7 @@ cgl_tick() {
   cgc_ring
   ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" \
       BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
-      BIONIC_PROBE_FREE_MB="${CGL_FREE:-8192}" \
+      BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_BUSY_CORES_5M="${CGL_LOAD5:-1.0}" \
       bash "$CGC_POKER" tick 2>&1 )
 }
 # The gate's whole channel goes to CGL_OUT and its status to CGL_RC, in this shell: a
@@ -12962,9 +12956,9 @@ cgl_gate() {
     | env -u CLAUDE_PROJECT_DIR HOME="$CGL_R" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_EG" 2>&1)
   CGL_RC=$?
 }
-cgl_case ""          8192 yes "evidence launch status " 3
-cgl_case "-hold"     512  yes "evidence launch status " 3
-cgl_case "-noroster" 8192 no  "evidence status " 2
+cgl_case ""          1.0 yes "evidence launch status " 3
+cgl_case "-hold"     7.0 yes "evidence launch status " 3
+cgl_case "-noroster" 1.0 no  "evidence status " 2
 
 
 # ============================================================

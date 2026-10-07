@@ -284,6 +284,15 @@ BIONIC_LOADER_REFUSE
 # in it, and the two can never name different rows.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fill.sh"
+# THE GATE (wave-28 T13; D14, AC-2.8): `gate_room` is the one answer on width, asked once per
+# ready row (`fill_gate_width`, lib/fill.sh), and `gate_state` gives the tick its gate line.
+# Sourced softly, beside the want-list rather than in it: a hook copied outside the repo
+# resolves its libraries from a checkout that may not carry gate.sh yet, and the tick then says
+# the gate is unreadable and offers nothing, rather than failing to load at all.
+if ! declare -F gate_room >/dev/null 2>&1 && [ -f "$BIONIC_LIB/gate.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/gate.sh"
+fi
 # THE ONE PREDICATE FOR "TOO QUIET" (REQ-10 AC-10.1, D9; ADR-028). `observe_class` classifies
 # a dispatched row `delivered`/`alive`/`idle` from two mtimes against the cadence the row's
 # own brief declared. Both readers in this file — the tick's row loop and `adopt`'s liveness
@@ -377,11 +386,11 @@ PATROL_PROMPT_VERSION=6
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
 # one firing to the next, and the input to a halve-the-width recommendation that fired on
-# the second of them. Both are gone. Width is now a pure function of the pressure ring and the plan's
-# ceiling, read at the moment of use (`pressure_level`, lib/resources.sh), so "sustained"
-# is a property of the ring's own smoothing window rather than of two firings twenty minutes
-# apart — and a fact nobody stores is a fact that cannot go stale. What the tick owes the
-# operator is therefore a REPORT of the rung, printed every tick, not advice to act on.
+# the second of them. Both are gone. Width is read at the gate at the moment of use
+# (`gate_room`, lib/gate.sh; wave-28 T13, D14): the load over the last minute and the last
+# five, plus the work promised and not yet showing, against the machine's share — and a fact
+# nobody stores is a fact that cannot go stale. What the tick owes the operator is therefore a
+# REPORT of the gate, printed every tick, not advice to act on.
 
 # `adopt`'s own schema, and the two numbers its report tail is cut with. The floor is what
 # separates a REPORT from the one-line sign-offs that usually follow it in an agent's
@@ -1536,7 +1545,7 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
 
 # ---------------------------------------------------------------- the scheduler
 #
-# FILL / HOLD / EMERGENCY, and the RUNG (spec AC-17, AC-29, AC-31; design-ledger D3).
+# FILL, sized at the gate (spec AC-17, AC-29, AC-31; design-ledger D3; wave-28 T13, D14).
 #
 # THE PROBLEM. A wave's width was a number in a brief, and a ceiling nobody reaches is a
 # wave running one writer at a time by accident: this repo's own 1.4.0 wave dispatched six
@@ -1544,34 +1553,17 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
 # on the machine was watching for the gap, because the only thing that fires on its own is
 # the Patrol tick — and the tick had no opinion about width.
 #
-# THE FOUR DECISIONS, and the ONE rule that orders them. Pressure is read FIRST, every tick,
-# before a single fill is considered: filling a machine that is already starving is the one
-# mistake that costs work rather than time (lib/resources.sh, "MEMORY IS HARD, COMPUTE IS
-# SOFT" — the measured failure is a kernel SIGKILL mid-suite).
+# THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.5, AC-2.8; the owner's "Option 2"). The
+# tick fills by asking `gate_room` once per ready row, the writers not yet showing counted as
+# owed, and stops at the first no (`fill_gate_width`, lib/fill.sh); a person's cap (`fill_cap`,
+# the stop wall's reader too) still caps. It prints ONE gate line on every tick, in place of the
+# rung, the HOLD and the EMERGENCY that came before it:
 #
-#   EMERGENCY  free memory under the kill floor -> name the youngest suite-running writer
-#              for the orchestrator to stop through the stopping standard. Nothing is
-#              filled, and the tick does not stop anything itself.
-#   HOLD       free memory or load past the warning line -> no fills this tick, with the
-#              measurement printed beside the verdict (a HOLD with no number is
-#              indistinguishable from a bug).
-#   FILL       otherwise -> the ready tasks, up to the gap between the RUNG and the rows
-#              already open on this session's roster.
+#   gate share=<n> used=<n>% load=<1m>/<5m> of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no>
 #
-# AND ONE REPORT, ON EVERY TICK: `rung=<n>/<ceiling> writers=<w> test_jobs=<j>`. The rung is
-# `pressure_level`'s answer over the machine-scoped pressure ring — the median band of the
-# last few minutes turned into a fraction of the Step-0 ceiling (ceiling, half, quarter,
-# floor of one) — and the one fraction is applied to BOTH numbers the header carries (D3).
-# It replaces the retired halve-the-width recommendation, which halved `test_jobs` on the
-# second consecutive hold and needed a counter file to know what "second" meant. Nothing is stored now: two
-# consumers reading one ring at one moment compute one answer, and a plan header nobody
-# edits stays the ceiling it was written as.
-#
-# THE TICK READS PRESSURE TO THROTTLE, NEVER TO RE-DERIVE THE BUDGET. `resources_budget` is
-# a pure function of machine FACTS and is written once, into the plan header, by Step 0. A
-# tick that lowered `writers` because the machine was briefly busy would make the ceiling a
-# function of the weather, which is the drift lib/resources.sh exists to remove. Everything
-# here either reads that string or refuses to act; nothing here writes it.
+# and, while memory is over the share, `over share — used=<n>% admitted: <keys>`. The gate
+# admits no run past memory's share, so nothing is left for a tick to stop: the line names what
+# holds the memory and leaves the act to the orchestrator.
 #
 # EVERY DECISION IS ADVISORY. The tick prints; the orchestrator dispatches, stops and edits
 # the plan. hooks/patrol-duties-gate.sh is what makes a printed FILL binding — the tick's
@@ -1601,7 +1593,7 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
 # run). What the move buys is the STEP: the widened table carries one, so a tick at
 # `current: 5` fills Step-5 rows and not the Step-6 rows sitting ready behind them.
 
-# ---------------------------------------------------------------- the rung report
+# ---------------------------------------------------------------- the gate report
 #
 # THE CEILINGS STEP 0 MEASURED, read once. Both may be absent — a project with no plan, or a
 # plan that slipped past the governing-skill hook's budget arm (wave-19 REQ-3, ADR-035) —
@@ -1654,7 +1646,7 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
 # and that reads git, so the readiness program is handed the answer through UNITS_FACTS_STATE, as
 # it is handed the head: `covered`, or the owed lines that do not hold, `; `-joined. It is asked
 # only when the plan carries an open integrate row (no other read turns on it), and once per tick
-# (`rung_report` reads the budget a second time). Unset, the integrate row waits, saying so.
+# (`gate_report` reads the budget a second time). Unset, the integrate row waits, saying so.
 # THE FLOOR IS ASKED FIRST, FROM THE TICK'S OWN MEMO (`_units_floor_state`, the one proof_state run
 # the schedule spends anyway): while it does not hold, integrate waits on proof:floor whatever the
 # readings say, so the judge, which would run proof_state again, is not asked.
@@ -1734,56 +1726,40 @@ sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-st
   case "$step" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$step" ;; esac
 }
 
-# ── THE RUNG, SAMPLED AND REPORTED (AC-17). One sample appended to the machine-scoped ring,
-# then the rung read back off it — the order the design names, because a consumer that read
-# without sampling would answer from other sessions' readings alone and a first consumer on
-# a cold machine would answer from nothing at all.
+# ── THE GATE LINE, ON EVERY TICK (wave-28 T13; D14, AC-2.8). One `gate_state` and one
+# `gate_room` with the writers not yet showing as owed, printed as one line from every exit
+# path, as the rung line was (AC-17: the first tick of a run takes the armed arm, and the DISARM
+# arm exits above the scheduler). `gate_state` takes the gate's lock, so the tick is also one of
+# the gate's samplers: each line raises the peak of every admitted run.
 #
-# ONE FRACTION, BOTH CEILINGS (D3). `pressure_level` is a pure function of (ring, ceiling):
-# the median band inside the smoothing window picks the fraction, and the fraction is applied
-# to `writers` and to `test_jobs` separately because they are different ceilings, not because
-# they are different judgments. Nothing is stored; two ticks a second apart over one ring
-# compute one answer.
-#
-# A MISSING CEILING IS REPORTED AS MISSING. A plan with no budget line offers nothing to
-# take a fraction OF, and inventing a ceiling here is the one thing this arm may never do —
-# so the fields read `-` and the line is still printed. "The tick said nothing" and "the tick
-# said there is no ceiling" are different facts, and only the second one is true.
-#
-# ON EVERY TICK, WHICH MEANS FROM EVERY EXIT PATH (Step-6 review C-5). AC-17 reads "prints
-# the current rung as one line of its output on every tick", and this report used to sit in
-# the scheduler block — below the pre-dispatch QUIET arm and below DISARM, both of which
-# `exit 0` above it. The first tick of every run takes the pre-dispatch arm, by design (arming
-# precedes dispatch), so the tick where "what width will this machine carry" is most useful
-# was the one tick that never answered it. A FUNCTION rather than a hoisted block, because the
-# two early arms exit before the scheduler has read a budget and this is the only place that
-# read may live without being taken twice.
-rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUNG, says one line
-  local cores
+# NO GATE IS NO ROOM. A gate.sh that did not load is a width this tick does not have, and the
+# line says so; a fill sized on nothing would be the guess the gate exists to replace.
+gate_report() {  # <project root> <session id> -> sets SCHED_GATE_ROOM/SCHED_OWED, says one line
+  local st rm used share keys
   sched_budget_read "$1" "${2:-}"
-  # THE CORE COUNT, TAKEN HERE ONLY IF THE CALLER HAS NOT TAKEN IT. The scheduler block reads
-  # `resources_probe` for its HOLD/EMERGENCY arm and leaves the answer in `SCHED_CORES`; the
-  # two early arms have no such reading, and `pressure_sample` needs one to band a load
-  # average. A bad or missing value is 1 rather than a refusal: an unsampled ring is a rung
-  # this tick does not have, and that is a worse answer than a conservative core count.
-  cores="${SCHED_CORES:-}"
-  case "$cores" in ''|*[!0-9]*) cores="$(space_field "$(resources_probe)" cores)" ;; esac
-  case "$cores" in ''|*[!0-9]*) cores=1 ;; esac
-  [ "$cores" -ge 1 ] || cores=1
-  pressure_sample "$cores" >/dev/null 2>&1 || :
-  SCHED_RUNG=""
-  SCHED_JOBS_RUNG=""
-  case "${SCHED_WRITERS:-}" in
-    ''|0) : ;;
-    *) SCHED_RUNG="$(pressure_level "$SCHED_WRITERS" 2>/dev/null)" || SCHED_RUNG="" ;;
-  esac
-  case "${SCHED_JOBS:-}" in
-    ''|0) : ;;
-    *) SCHED_JOBS_RUNG="$(pressure_level "$SCHED_JOBS" 2>/dev/null)" || SCHED_JOBS_RUNG="" ;;
-  esac
-  case "${SCHED_RUNG:-}" in ''|*[!0-9]*) SCHED_RUNG="" ;; esac
-  case "${SCHED_JOBS_RUNG:-}" in ''|*[!0-9]*) SCHED_JOBS_RUNG="" ;; esac
-  say "rung=${SCHED_RUNG:--}/${SCHED_WRITERS:--} writers=${SCHED_RUNG:--} test_jobs=${SCHED_JOBS_RUNG:--}"
+  SCHED_GATE_ROOM=no; SCHED_OVER=no
+  SCHED_OWED="$(sched_owed)"
+  if ! declare -F gate_room >/dev/null 2>&1 || ! declare -F fill_gate_width >/dev/null 2>&1; then
+    say "gate unreadable — lib/gate.sh did not load, so no row is offered"
+    return 0
+  fi
+  st="$(gate_state 2>/dev/null)"
+  rm="$(gate_room --owed "$SCHED_OWED" 2>/dev/null)"
+  share="$(space_field "$st" share)"; used="$(space_field "$st" used)"
+  SCHED_GATE_ROOM="$(space_field "$rm" room)"
+  say "gate share=${share:--} used=${used:--}% load=$(space_field "$rm" load) of $(space_field "$rm" cores) promised=$(space_field "$rm" promised) admitted=$(space_field "$st" admitted) waiting=$(space_field "$st" waiting) room=${SCHED_GATE_ROOM:-no}"
+  case "$used$share" in *[!0-9]*|'') return 0 ;; esac
+  [ "$used" -gt "$share" ] || return 0
+  SCHED_OVER=yes
+  keys="$(gate_list 2>/dev/null | awk '$2 == "admitted" && match($0, / key=/) { printf "%s%s", (n++ ? ", " : ""), substr($0, RSTART + 5) }')"
+  say "over share — used=${used}% admitted: ${keys:-none}"
+}
+
+# THE WRITERS NOT YET SHOWING (D14): the open writer rows of this tick whose agent has not asked
+# the gate for a run, read by `fill_gate_owed` (lib/fill.sh) — the count the stop wall takes too.
+sched_owed() {
+  if ! declare -F fill_gate_owed >/dev/null 2>&1; then printf '0'; return 0; fi
+  printf '%s' "${TICK_OCC_NAMES:-}" | fill_gate_owed "${ROSTER_FILE:-}" "${SESSION_ID:-}"
 }
 
 # ---------------------------------------------------------------- the plan report
@@ -1795,7 +1771,7 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # `parallel-budget`. The commit gate reads the ledger in every state, so a plan the gate
 # refused ticked clean — AC-4.1's fails-when, word for word. Neither report has anything to do
 # with the machine or the budget, so neither waits on them: every arm that decides calls this
-# once, after its rung line and before its own sentence, and no arm prints them a second time.
+# once, after its gate line and before its own sentence, and no arm prints them a second time.
 #
 #   HELD (T4; D3, ADR-037 decision 2). `units_held` names two kinds of row the ready set leaves
 #     out: one held FOR ITS STEP (a gate act ahead of `current:`) and one held BY THE WORLD
@@ -1967,43 +1943,6 @@ tick_plan_memoised() {
   fi
 }
 
-# THE YOUNGEST SUITE-RUNNING WRITER on this session's roster, as the address the stopping
-# standard takes — `<name>@session-<id8>`, the one spelling both stop gates accept
-# (POKER/8). Empty when there is none.
-#
-# "SUITE-RUNNING" IS READ OFF THE LEDGER, never off the process table (WALLS/3): an open row
-# whose `claims=` field is non-empty declared a subprocess claim and therefore spends a
-# suite. A `pgrep` per row would be truer to the word "running" and would put a process
-# spawn per row inside a Patrol tick.
-#
-# "OPEN" IS THE ONE PREDICATE THE REST OF THE TICK USES (S19; Step-6 correctness review,
-# out-of-axis note). A `status=intended` row survives the roster pass if its name is OPEN by
-# the one close predicate, and it survives the live pass if `live_row_open` — the fleet's
-# single row-openness predicate, payload/scripts/lib/agents.sh — still calls its agent live on
-# this session's transcript. Before S19 the arm stopped at the roster pass, so the tick's
-# advisory `open=` asked the live set while the one NAME it prints for the operator to act on
-# did not: the kill floor could hand back a stop address for an agent the harness had already
-# let go.
-#
-# CLOSED MEANS ACKED AFTER THE LATEST LAUNCH (epic-23 wave-20 T20, REQ-10, D10; found by T17,
-# approved by Chris). The roster pass asks `roster_open_names` (payload/scripts/lib/roster.sh)
-# over this session's roster and ack ledger, the predicate the dispatch wall, the sweeper, the
-# stop wall and `adopt_fold` below all ask. Until T20 this arm closed a name on a
-# `landing-swept/v1|…|state=MET` marker alone (and before S17's review, on any marker). A MET
-# marker records that a landing was SEEN, not that the agent left, so a writer still running
-# behind one was invisible to the kill floor while every other reader counted it open. An
-# UNMET marker, which S17's `adopt_copy_marker` copies onto a successor's roster by design,
-# closes nothing either — as it never did.
-#
-# STALE AND NONE KEEP THE ROSTER SPELLING, the same fallback and the same reason as the
-# tick's `open=` below: the Patrol's prompt runs before any ListAgents, so an arm that went
-# silent on an unusable answer would go silent on the first tick of every session — and a
-# kill floor that says nothing while the machine dies is worse than one that names a writer
-# who has already finished. Freshness is a property of the TRANSCRIPT, so the first unusable
-# answer abandons the whole live pass rather than one row of it.
-#
-# YOUNGEST, because the rung is a kill floor and the youngest writer has the least work to
-# lose. `launched_at` is an ISO-8601 Z stamp, so a lexical max IS a chronological max.
 # ---------------------------------------------------------------- the agent name
 #
 # THE NAME A DISPATCH USES IS DERIVED, NEVER CHOSEN (T22, A-orch-33; Chris, first
@@ -2014,64 +1953,6 @@ tick_plan_memoised() {
 # tick may also have printed, and a second idea of which name is free would let the two
 # disagree about what "dispatch T5" means. The body is unchanged, and the tick and `adopt`
 # call it exactly as they did.
-
-youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
-  local roster="$1" sid="$2" open cands live_cands live_ok tr lrc name tab nl RL RN CL
-  [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
-  tab="$(printf '\t')"
-  nl="
-"
-
-  # THE OPEN NAMES, ONCE (epic-23 wave-20 T20): the one close predicate over this roster and
-  # the session's ack ledger beside it, the ledger `session-sweeper.sh ack` writes. One process
-  # for the whole pass; each row below is a membership test in the shell. An unnamed row
-  # answers `(unnamed)` there and has no stop address here, so it is skipped before the test.
-  open="$(roster_open_names "$roster" "${roster%/*}/sweeper-${sid}.state" "$sid")"
-
-  # PASS ONE — THE ROSTER. Kept in the current shell rather than a pipeline subshell, because
-  # the live pass below carries a decision ACROSS rows (the first STALE abandons all of them)
-  # and a subshell would drop it on the floor.
-  cands=""
-  while IFS= read -r RL; do
-    [ -n "$RL" ] || continue
-    [ -n "$(line_field "$RL" claims)" ] || continue
-    RN="$(line_field "$RL" name)"
-    [ -n "$RN" ] || continue
-    case "$nl$open$nl" in *"$nl$RN$nl"*) : ;; *) continue ;; esac
-    cands="${cands}$(line_field "$RL" launched_at)${tab}${RN}
-"
-  done <<ROSTER_ROWS
-$(grep '^roster-state/v1|status=intended|' "$roster" 2>/dev/null || true)
-ROSTER_ROWS
-  [ -n "$cands" ] || return 0
-
-  # PASS TWO — THE LIVE SET. The reader's one stderr line is dropped here rather than
-  # reported: this function's stdout IS the stop address, and the tick already says out loud
-  # when its own live read fell back (`live set <state> — …`) above the report.
-  tr="$(session_transcript "$sid")" || tr=""
-  if [ -n "$tr" ]; then
-    live_cands=""; live_ok=yes
-    while IFS= read -r CL; do
-      [ -n "$CL" ] || continue
-      lrc=0
-      { live_row_open "$tr" "${CL##*"$tab"}"; } >/dev/null 2>&1 || lrc=$?
-      case "$lrc" in
-        0) live_cands="${live_cands}${CL}
-" ;;
-        1) : ;;
-        *) live_ok=no; break ;;
-      esac
-    done <<ROSTER_CANDS
-$cands
-ROSTER_CANDS
-    [ "$live_ok" = yes ] && cands="$live_cands"
-  fi
-  [ -n "$cands" ] || return 0
-
-  name="$(printf '%s' "$cands" | sort | tail -1 | cut -f2-)"
-  [ -n "$name" ] || return 0
-  printf '%s@session-%s' "$(clean "$name")" "$(printf '%s' "$sid" | cut -c1-8)"
-}
 
 # ---------------------------------------------------------------- adoption
 #
@@ -2469,10 +2350,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # SOURCE roster's own landing verdict for that name beside it, verbatim, so a reader that
 # trusts the marker rather than re-deriving from disk (`hooks/session-start.sh`'s
 # `open_rows`, which scans the roster it was handed for a `landing-swept/v1|…|name=<X>|`
-# line) sees the same answer on the successor that stood on the predecessor. This file's own
-# `youngest_suite_writer` no longer needs the marker for that: since T20 (epic-23 wave-20) it
-# asks `roster_open_names` once for the whole open set and checks each candidate name against
-# it directly, so its answer already agrees with the sweep without reading a copied line.
+# line) sees the same answer on the successor that stood on the predecessor.
 #
 # payload/scripts/lib/stop.sh (`stop_landing_gate`, reached from hooks/stop.sh) is this
 # schema's one ORIGINATING writer. This call site is the second writer, made deliberately
@@ -4574,11 +4452,8 @@ case "$VERB" in
                 # already produced onto the roster this session is now the owner of, so
                 # `hooks/session-start.sh`'s `open_rows` — which still reads a marker
                 # straight off the SAME roster file as ground truth, with no re-derivation —
-                # sees the same history on the successor that stood on the predecessor. This
-                # file's own `youngest_suite_writer` no longer needs the copy for that: since
-                # T20 (epic-23 wave-20) it asks `roster_open_names` once for the open set and
-                # checks each candidate against it directly. A closed name can never reach
-                # here either way: `adopt_fold` excludes it through that same
+                # sees the same history on the successor that stood on the predecessor. A
+                # closed name can never reach here: `adopt_fold` excludes it through the
                 # `roster_open_names` predicate (an ack later than the row's launch), not a
                 # `met[]` filter, so only a still-open history is ever offered to copy.
                 adopt_copy_marker "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")"
@@ -6980,7 +6855,8 @@ RC_TAGS
     # sorted, and the named lines the tick printed reduced to their kind and subject (a
     # STANDDOWN, a held row, a GONE report, a duplicate tell, an ext: hold, a ledger finding, a
     # standing fill decline, a note). Never an instant, an age or a measurement: those move on every tick by themselves.
-    # DISARM is terminal and an EMERGENCY names a writer to stop, so both always print in full.
+    # DISARM is terminal and a tick over the share names what holds the memory, so both always
+    # print in full.
     #
     # THE GATE (wave-25 T5; D7). A pending gate request raises the band to NOTIFY unless it is
     # DISARM, which outranks it; the caller passes the band it reached without the gate and reads
@@ -7042,7 +6918,7 @@ RC_TAGS
           printf 'change=%s\n' "$TICK_CHANGE"
           printf 'decision=%s|total=%s|open=%s|notify=%s|fill=%s|trees=%s\n' "$1" "$TOTAL" "$OPEN" \
             "${NOTIFY_ROWS:-}" "${SCHED_FILL:-}" "${LEASE_TREES:-}"
-          printf 'pressure=%s|rung=%s|current=%s\n' "${SCHED_STATE:-}" "${SCHED_RUNG:-}" "$cur"
+          printf 'room=%s|current=%s\n' "${SCHED_GATE_ROOM:-}" "$cur"
           [ -z "$TICK_GATE_KEYS" ] || printf 'gate=%s\n' "$TICK_GATE_KEYS"
           printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
             $1 == "landing-verdict/v1" {
@@ -7076,7 +6952,7 @@ RC_TAGS
         [ -n "$prev" ] && TICK_CHANGE_STORE="$prev"
       fi
       prev="$(tick_digest_field "$TICK_DIGEST_FILE" digest)"
-      if [ -n "$TICK_DIGEST" ] && [ "$1" != DISARM ] && [ "${SCHED_STATE:-}" != emergency ] \
+      if [ -n "$TICK_DIGEST" ] && [ "$1" != DISARM ] && [ "${SCHED_OVER:-}" != yes ] \
          && [ -z "$TICK_GATE_NEW" ] && [ "$TICK_DIGEST" = "$prev" ]; then
         TICK_UNCHANGED=yes
         TICK_SINCE="$(tick_digest_field "$TICK_DIGEST_FILE" since)"
@@ -7174,6 +7050,34 @@ RC_TAGS
     # tick must not. It leaves a lock another writer holds to that writer.
     if [ -f "$ROSTER_FILE" ]; then
       ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" launch-sync 2>&1 ) || :
+    fi
+
+    # ---------- THE LINE'S STANDING REDS AND STALLED ENTRIES, EACH TOLD ONCE (wave-28 T5; D8) ----------
+    #
+    # `ready` (lib/line.sh) appends `standing` when a red fails at the accepted head too, so the
+    # branch's and not a row's, and `stalled` when an entry's suite twice gave no verdict and `ready`
+    # exited 70. The first tick that reads one off the bound plan's landing record prints it as a note,
+    # with its logs; the event line then goes into `.bionic/tmp/line-told-<sid>.state` and is never
+    # printed again. A note enters the decision's hash, so the tick that tells one prints in full.
+    resolve_run "$REPO_REAL" "$SESSION_ID"
+    LT_TOLD="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state"
+    LT_REC=""
+    [ -z "$POKER_RUN_PLAN" ] \
+      || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$POKER_RUN_PLAN" .plan.md)/landing-proofs.log"
+    if [ -n "$LT_REC" ] && [ -f "$LT_REC" ] && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}"; then
+      lt_f() { printf '%s\n' "$LT_EV" | tr '|' '\n' | sed -n "s/^$1=//p" | head -1; }   # <key> -> its value in the event
+      while IFS= read -r LT_EV; do
+        [ -n "$LT_EV" ] || continue
+        [ -f "$LT_TOLD" ] && /usr/bin/grep -qxF -- "$LT_EV" "$LT_TOLD" && continue
+        case "$LT_EV" in
+          *'|ev=standing|'*) LT_H="$(lt_f head)"
+            note "standing $(lt_f suite) at ${LT_H:0:12} — $(lt_f lines) failing line(s) fail at the accepted head too: a red the branch carries, not one a row added; log $(lt_f log)" ;;
+          *) note "stalled $(lt_f row) — two runs ended with no verdict and no third starts; logs $(lt_f logs)" ;;
+        esac
+        printf '%s\n' "$LT_EV" >> "$LT_TOLD"
+      done <<EOF
+$(/usr/bin/grep -E '^line/v1\|ev=(standing|stalled)\|' "$LT_REC" 2>/dev/null)
+EOF
     fi
 
     # ---------- THE GATE REQUESTS, READ ONCE (wave-25 T5, REQ-4 AC-4.3; D7) ----------
@@ -7482,10 +7386,6 @@ EOF
         # first row would warm a cache nobody sees and every open row would pay a full
         # parse: two whole-file `jq` passes and nine spawns. Measured on this machine, one
         # tick over twelve open rows and a 4.1 MB transcript ran jq 24 times.
-        #
-        # IT ALSO WARMS `youngest_suite_writer` (the EMERGENCY arm below), which asks the
-        # same predicate per candidate row inside its own substitution — a subshell of this
-        # one, so it inherits what is cached here and adds no parse of its own.
         #
         # LAZILY, INSIDE THE `OPEN_ROSTER > 0` ARM, for the same reason the wall does it
         # lazily: a roster with nothing open reads the transcript zero times. Its answer is
@@ -7915,8 +7815,8 @@ EOF
 
     # ─────────────────────────────────────── the scheduler, defined once for two callers
     #
-    # ONE SITE, TWO ARMS (wave-26 T59; REQ-6 AC-6.6). The pressure reading, the budget, the
-    # EMERGENCY line and the scheduler's body below are what every tick that decides prints its
+    # ONE SITE, TWO ARMS (wave-26 T59; REQ-6 AC-6.6). The gate line, the budget and the
+    # scheduler's body below are what every tick that decides prints its
     # FILL, RANGE, WAIT and CHAIN lines from. The armed first tick (no roster yet, just below)
     # exits above the place this is called on every other tick, so it calls it too: the one tick
     # where every ready row is still unstarted names them, from this same code. Defined here,
@@ -7925,17 +7825,6 @@ EOF
     # THE FILL THIS TICK ORDERED, empty until the scheduler names one — the FILL band's own
     # input to the ranked decision below (D5).
     SCHED_FILL=""
-    SCHED_CORES="$(space_field "$(resources_probe)" cores)"
-    case "${SCHED_CORES:-}" in ''|*[!0-9]*) SCHED_CORES=1 ;; esac
-    [ "$SCHED_CORES" -ge 1 ] || SCHED_CORES=1
-    SCHED_PRESSURE="$(resources_pressure "$SCHED_CORES" 2>/dev/null)" || SCHED_PRESSURE=""
-    SCHED_STATE="$(space_field "$SCHED_PRESSURE" state)"
-    SCHED_FREE="$(space_field "$SCHED_PRESSURE" free_mb)"
-    SCHED_LOAD="$(space_field "$SCHED_PRESSURE" load_1m)"
-    # A pressure read that will not parse is not an emergency and not a hold: it is a
-    # reading this tick does not have, and the fill decision proceeds on the budget alone.
-    # Refusing to fill on an unreadable probe would let one broken `vm_stat` stall a wave.
-    case "${SCHED_STATE:-}" in ok|hold|emergency) : ;; *) SCHED_STATE=ok ;; esac
 
     # The plan and its budget, read once. Both may be absent — a project with no plan, or a
     # plan written before Step 0 ever probed — and the tick then fills nothing and says why.
@@ -7949,39 +7838,20 @@ EOF
     # tasks would be worse than either failure alone (AC-1).
     sched_budget_read "$REPO_REAL" "$SESSION_ID"
 
-    if [ "$SCHED_STATE" = emergency ]; then
-      # THE KILL FLOOR. The tick NAMES the writer and stops nothing itself: stopping a
-      # writer destroys work, and an irreversible act taken by a hook off a single reading
-      # is the one thing this design refuses (design-ledger S7). The orchestrator executes
-      # it through the stopping standard, which is why the line carries the address that
-      # standard takes rather than a name.
-      SCHED_TARGET="$(youngest_suite_writer "$ROSTER_FILE" "$SESSION_ID")"
-      if [ -n "$SCHED_TARGET" ]; then
-        say "EMERGENCY free_mb=${SCHED_FREE} — stop youngest suite-running writer ${SCHED_TARGET}"
-      else
-        say "EMERGENCY free_mb=${SCHED_FREE} — no suite-running writer on this roster to stop; the pressure is not this session's to relieve"
-      fi
-      # THE WITHHELD LINE (wave-19 REQ-4 AC-4.1, D6; ADR-034 decision 3). The stop wall
-      # judges a tick turn that printed no FILL against its own ready set, and exempts it
-      # only on this line: a machine fact the plan cannot hold. `payload/scripts/lib/stop.sh`
-      # reads the first word after the dash, so the reason leads and the measurement follows.
-      say "fill withheld — EMERGENCY free_mb=${SCHED_FREE}"
-    fi
-
     # THE SCHEDULER'S BODY, RUN UNDER ONE PARSE OF THE TABLE (wave-21 T13; review-bed/perf).
     # The holds, the findings and the ready set are three questions of one table; asked bare
     # they parsed it four times a tick. Defined here and called once, just below its body, so
     # every assignment it makes is this shell's — nothing in it runs in a subshell.
     tick_schedule() {
-    # THE REPORT, AND THE CEILINGS IT IS TAKEN AGAINST — both in `rung_report` above, which
+    # THE REPORT, AND THE CEILINGS IT IS TAKEN AGAINST — both in `gate_report` above, which
     # the DISARM arm, exiting above this block, calls for itself (AC-17, Step-6 review C-5);
     # the armed first tick calls this whole scheduler instead (T59).
     # The budget read is memoized, so reaching it a second time here costs one plan read.
-    rung_report "$REPO_REAL" "$SESSION_ID"
+    gate_report "$REPO_REAL" "$SESSION_ID"
 
-    # THE HOLDS AND THE LEDGER, BEFORE THE HOLD SPLIT (wave-21 T13). Every arm below — HOLD,
-    # EMERGENCY, no plan, an unreadable `current:`, Step-3 approval pending, no budget, a full
-    # budget, a fill — gets them once, here, and none prints them again.
+    # THE HOLDS AND THE LEDGER, BEFORE ANY ARM (wave-21 T13). Every arm below — no plan, an
+    # unreadable `current:`, Step-3 approval pending, no budget, no room at the gate, a fill —
+    # gets them once, here, and none prints them again.
     tick_plan_report
 
     # THE UNTRIMMED READY SET, ASKED ONCE FOR EVERY ARM (wave-26 T13; review-6 F3). The WAIT
@@ -7993,222 +7863,213 @@ EOF
       SCHED_READY_ALL="$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     fi
 
-    if [ "$SCHED_STATE" = hold ] || [ "$SCHED_STATE" = emergency ]; then
-      # HOLD AND EMERGENCY ARE ADVICE TO THE MODEL, and that is all they have ever been.
-      # They keep their meaning here: a measurement, a verdict, and no fills this tick.
-      # What they no longer do is accumulate — the counter that made a second consecutive
-      # hold mean something was the scheduler's only cross-tick state, and the rung above
-      # answers the width question from the ring instead.
-      if [ "$SCHED_STATE" = hold ]; then
-        say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
-        # …and the withheld line the stop wall exempts on (REQ-4 AC-4.1; the EMERGENCY arm
-        # above prints its own). Only these two paths print one.
-        say "fill withheld — HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD}"
-      fi
+    # ── FILL. gap = the GATE's width − RUNNING, ready = pending tasks whose deps all landed.
+    #
+    # RUNNING IS `open` (WALLS/2): the rows already counted above, on THIS session's
+    # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
+    # the loop's own count rather than a second walk, because two definitions of "running"
+    # in one file is the drift the count exists to prevent.
+    #
+    # THE APPROVAL GATE COMES FIRST, ahead of the budget/readiness checks below (AC-5). A
+    # plan below `current: 4` has not passed Step 3, and no reading of the budget or the
+    # task table changes that — so this is a wall in front of the rest of the arm, not one
+    # more branch beside them.
+    #
+    # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
+    # review-b finding (c)/N-2). An empty field, a line that will not parse, or a `T<n>`
+    # against a table that NUMBERS its rows are all cases where this gate cannot tell which
+    # unit the run is on — and falling through to the readiness/budget checks on THAT basis
+    # is DOUBT-then-FILL: the one shape this arm exists to prevent, measured live on a plan
+    # whose `current:` carried a sub-step letter (`3b`) that the old digit-only read
+    # rejected as unreadable and then filled anyway. So this differs from an unreadable
+    # RUNG, which falls back to the ceiling — there is no safe fallback for "did Step 3
+    # pass," only "no."
+    #
+    # A TASK-SCALE `current: T<n>` IS READABLE NOW, against a task-shaped table (wave-18
+    # REQ-3, D2; ADR-033 decision 2). It names the unit the run is on, which is a run past
+    # its plan, and `fill_step_token` is what pairs the field with the table's shape: the
+    # token is the number at wave scale, `T<n>` at task scale, and empty when the two
+    # disagree. The withhold above is exactly that empty answer, so the shape this arm was
+    # built for — a wave table sitting at `current: T1` (§22g) — still fills nothing.
+    # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
+    # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
+    # report, the ready set — inherits the answer instead of parsing the plan again.
+    #
+    # AN UNREADABLE BOUND PLAN FILLS NOTHING, AND SAYS WHICH PLAN (wave-20 T1, REQ-2). Its
+    # `current:`, its approval and its task table are all unreadable, and no other plan is
+    # read in its place; the three reads below are skipped so the line names the cause
+    # rather than a symptom ("current: unreadable (none)").
+    SCHED_CURRENT=""; SCHED_STEP=""
+    if [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
+      _fill_current_load "$SCHED_PLAN"
+      SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
+      SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
+    fi
+    if [ "$POKER_RUN_OPEN" = unreadable ]; then
+      say "no FILL — bound plan unreadable — ${SCHED_PLAN}"
+    elif [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
+      SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
+      say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
+    elif [ -n "$SCHED_PLAN" ] && ! fill_plan_approved "$SCHED_PLAN"; then
+      # THE GATE IS THE APPROVAL LINE, NOT THE STEP (wave-26 T13; D3, AC-6.2): the one fact
+      # `fill_ledger_live` and the dispatch wall key on. The step is named because it is
+      # what a reader looks for; the line says which fact is missing.
+      say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: ## SDLC State carries no approved-by: line"
+    elif [ -z "$SCHED_PLAN" ]; then
+      note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
     else
-      # ── FILL. gap = the RUNG − RUNNING, ready = pending tasks whose deps all landed.
-      #
-      # RUNNING IS `open` (WALLS/2): the rows already counted above, on THIS session's
-      # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
-      # the loop's own count rather than a second walk, because two definitions of "running"
-      # in one file is the drift the count exists to prevent.
-      #
-      # THE APPROVAL GATE COMES FIRST, ahead of the budget/readiness checks below (AC-5). A
-      # plan below `current: 4` has not passed Step 3, and no reading of the budget or the
-      # task table changes that — so this is a wall in front of the rest of the arm, not one
-      # more branch beside them.
-      #
-      # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
-      # review-b finding (c)/N-2). An empty field, a line that will not parse, or a `T<n>`
-      # against a table that NUMBERS its rows are all cases where this gate cannot tell which
-      # unit the run is on — and falling through to the readiness/budget checks on THAT basis
-      # is DOUBT-then-FILL: the one shape this arm exists to prevent, measured live on a plan
-      # whose `current:` carried a sub-step letter (`3b`) that the old digit-only read
-      # rejected as unreadable and then filled anyway. So this differs from an unreadable
-      # RUNG, which falls back to the ceiling — there is no safe fallback for "did Step 3
-      # pass," only "no."
-      #
-      # A TASK-SCALE `current: T<n>` IS READABLE NOW, against a task-shaped table (wave-18
-      # REQ-3, D2; ADR-033 decision 2). It names the unit the run is on, which is a run past
-      # its plan, and `fill_step_token` is what pairs the field with the table's shape: the
-      # token is the number at wave scale, `T<n>` at task scale, and empty when the two
-      # disagree. The withhold above is exactly that empty answer, so the shape this arm was
-      # built for — a wave table sitting at `current: T1` (§22g) — still fills nothing.
-      # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
-      # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
-      # report, the ready set — inherits the answer instead of parsing the plan again.
-      #
-      # AN UNREADABLE BOUND PLAN FILLS NOTHING, AND SAYS WHICH PLAN (wave-20 T1, REQ-2). Its
-      # `current:`, its approval and its task table are all unreadable, and no other plan is
-      # read in its place; the three reads below are skipped so the line names the cause
-      # rather than a symptom ("current: unreadable (none)").
-      SCHED_CURRENT=""; SCHED_STEP=""
-      if [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
-        _fill_current_load "$SCHED_PLAN"
-        SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
-        SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
+      # NO CAP IS NOT A FAULT (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a plan with no
+      # `parallel-budget: writers=<n>` took a note here telling Step 0 to write one. No plan owes
+      # the line now, and a probe's number is no cap: with no person's cap the width below is the
+      # gate's alone (`fill_cap` answers nothing, so `fill_gate_width` runs uncapped).
+      # THE HOLDS AND THE LEDGER were printed by `tick_plan_report` above, and `SCHED_HOLDS`
+      # still carries the step holds for the no-FILL line below (wave-21 T13).
+      # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
+      # treats the rows the session's latest `fill-declined:` answered as answered until the
+      # ready set gains a row it did not see (wave-26 T15; D16), so a FILL naming them asked
+      # again for an answer already given.
+      # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
+      # prints the decline while it stands and the ready set below leaves its rows out.
+      SCHED_SD="$(fill_standing_decline "$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"
+      SCHED_SD_AT=""; SCHED_SD_WHY=""; SCHED_SD_IDS=""
+      if [ -n "$SCHED_SD" ]; then
+        IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_SD"
+        say "fill-declined standing since ${SCHED_SD_AT} — $(clean "$SCHED_SD_WHY")"
       fi
-      if [ "$POKER_RUN_OPEN" = unreadable ]; then
-        say "no FILL — bound plan unreadable — ${SCHED_PLAN}"
-      elif [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
-        SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
-        say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
-      elif [ -n "$SCHED_PLAN" ] && ! fill_plan_approved "$SCHED_PLAN"; then
-        # THE GATE IS THE APPROVAL LINE, NOT THE STEP (wave-26 T13; D3, AC-6.2): the one fact
-        # `fill_ledger_live` and the dispatch wall key on. The step is named because it is
-        # what a reader looks for; the line says which fact is missing.
-        say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: ## SDLC State carries no approved-by: line"
-      elif [ -z "$SCHED_PLAN" ]; then
-        note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
-      elif [ -z "$SCHED_WRITERS" ]; then
-        # NO CAP IS NOT A FAULT (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 this arm noted
-        # that the plan carried no `parallel-budget: writers=<n>` and told Step 0 to write one; no
-        # plan owes the line now, and a probe's number is not a cap. With no person's cap the
-        # width is the gate's (wave-28 T13, D14), which this arm does not read yet, so it fills
-        # nothing and says only the width it has.
-        say "no FILL — width=- (no cap a person wrote, and no gate width read here)."
-      else
-        # THE HOLDS AND THE LEDGER were printed by `tick_plan_report` above the HOLD split, and
-        # `SCHED_HOLDS` still carries the step holds for the no-FILL line below (wave-21 T13).
-        # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
-        # the run may ever run at; the rung is what the machine will carry right now, and
-        # filling to the first while the second says otherwise is the mistake this whole arm
-        # exists to prevent. An unreadable rung falls back to the CEILING rather than to a
-        # floor — the same direction `pressure_level` itself takes when the ring holds no
-        # usable evidence, for the same reason: no reading is not a bad reading, and a wave
-        # that stalled on a missing probe would be worse than one that filled its budget.
-        # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
-        # treats the rows the session's latest `fill-declined:` answered as answered until the
-        # ready set gains a row it did not see (wave-26 T15; D16), so a FILL naming them asked
-        # again for an answer already given.
-        # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
-        # prints the decline while it stands and the ready set below leaves its rows out.
-        SCHED_SD="$(fill_standing_decline "$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"
-        SCHED_SD_AT=""; SCHED_SD_WHY=""; SCHED_SD_IDS=""
-        if [ -n "$SCHED_SD" ]; then
-          IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_SD"
-          say "fill-declined standing since ${SCHED_SD_AT} — $(clean "$SCHED_SD_WHY")"
-        fi
-        SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"
-        SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
-        [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
-        # A FULL WRITER BUDGET STILL OFFERS THE READ-ONLY ROWS (wave-26 T13; D9): a verify or
-        # review row takes no writer slot, and `fill_ready_set` offers it whatever the gap. So
-        # the set is asked at a closed gap too, and "the budget is full" is said only when it
-        # offered nothing.
-        SCHED_RO_READY=""
-        [ "$SCHED_GAP" -eq 0 ] && SCHED_RO_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")"
-        if [ "$SCHED_GAP" -eq 0 ] && [ -z "$SCHED_RO_READY" ]; then
-          SCHED_READY=""
-          say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${TICK_OCCUPIED} unacked roster row(s): the budget is full."
+      # THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.5). The writer rows ready and not
+      # answered by the standing decline are offered one at a time: `fill_gate_width` asks
+      # `gate_room` once per row, with the open writers not yet showing plus the rows already
+      # offered on this reading counted as owed, and stops at the first no or at a person's cap.
+      # A gate line that read no room offers none, so the line and the fill never disagree.
+      SCHED_CAP="$(fill_cap "$SCHED_PLAN")"
+      SCHED_READY_W="$(fill_ready_tagged "$SCHED_PLAN" 2>/dev/null \
+        | awk -F'\t' -v sd=" $SCHED_SD_IDS " '$2 == "w" && index(sd, " " $1 " ") == 0 { n++ } END { print n + 0 }')"
+      SCHED_WIDTH="$TICK_OCCUPIED"
+      [ "${SCHED_GATE_ROOM:-}" = yes ] \
+        && SCHED_WIDTH="$(fill_gate_width "$TICK_OCCUPIED" "$SCHED_OWED" "$SCHED_READY_W" "$SCHED_CAP")"
+      case "$SCHED_WIDTH" in ''|*[!0-9]*) SCHED_WIDTH="$TICK_OCCUPIED" ;; esac
+      SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
+      [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
+      # A FULL WRITER BUDGET STILL OFFERS THE READ-ONLY ROWS (wave-26 T13; D9): a verify or
+      # review row takes no writer slot, and `fill_ready_set` offers it whatever the gap. So
+      # the set is asked at a closed gap too, and "the budget is full" is said only when it
+      # offered nothing.
+      SCHED_RO_READY=""
+      [ "$SCHED_GAP" -eq 0 ] && SCHED_RO_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")"
+      if [ "$SCHED_GAP" -eq 0 ] && [ -z "$SCHED_RO_READY" ] && [ "$SCHED_READY_W" -gt 0 ]; then
+        SCHED_READY=""
+        if [ -n "$SCHED_CAP" ] && [ "$TICK_OCCUPIED" -ge "$SCHED_CAP" ]; then
+          say "no FILL — the cap writers=${SCHED_CAP} is reached by ${TICK_OCCUPIED} unacked roster row(s); ${SCHED_READY_W} writer row(s) wait."
         else
-          # READY IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). Through
-          # 1.8.6 ready was asked at the step the plan is on (REQ-1e, AC-1e.4), and a
-          # Step-6 review whose deps had landed sat unfilled all through Verify. A work
-          # row is now ready when it is pending and every dependency has landed, whatever
-          # its step; only a gate act — an integrate or close row, or a doc row at Step 7
-          # or later (the release; T10b) — still waits for `current:` to reach its step.
-          # `SCHED_STEP` is still passed — it is what holds those gate acts — already read
-          # and already proven readable by the approval gate above, which is why this needs
-          # no second parse and no fallback: a `current:` that would not parse took the
-          # withhold arm and never reached here.
-          #
-          # AND THE SET IS THE LIBRARY'S, TRIM INCLUDED (wave-18 REQ-3, D2; ADR-033
-          # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
-          # duty computes at the end of every turn, so the rows this tick ORDERS and the
-          # rows that turn's end REFUSES to leave undispatched are one answer rather than
-          # two. It takes the width and the occupancy this arm measured: the rung, and the
-          # roster's unacked rows after this tick's own acks. The wall measures both the
-          # same way (the rung from `pressure_level`, the occupancy by the same predicate:
-          # wave-19 audit V-2, T2d), so what it names is what this prints.
-          SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
-          SCHED_IDS=""; SCHED_N=0; SCHED_OFFERED=""
-          while IFS= read -r TASK_ID; do
-            [ -n "$TASK_ID" ] || continue
-            # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
-            # same string for a task that has never run, which is why every fixture and every
-            # doc example still reads `FILL T1 T2`. They diverge when the id is already spent,
-            # and then the ONLY safe token to print is the free one: see `fill_name` for why
-            # the roster, and not the plan, is what "spent" is read from.
-            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(fill_name "$ROSTER_FILE" "$(clean "$TASK_ID")")"
-            SCHED_N=$((SCHED_N + 1)); SCHED_OFFERED="${SCHED_OFFERED} $(clean "$TASK_ID")"
-          done <<EOF
+          say "no FILL — the gate gives no room (its line above); ${SCHED_READY_W} writer row(s) wait."
+        fi
+      else
+        # READY IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). Through
+        # 1.8.6 ready was asked at the step the plan is on (REQ-1e, AC-1e.4), and a
+        # Step-6 review whose deps had landed sat unfilled all through Verify. A work
+        # row is now ready when it is pending and every dependency has landed, whatever
+        # its step; only a gate act — an integrate or close row, or a doc row at Step 7
+        # or later (the release; T10b) — still waits for `current:` to reach its step.
+        # `SCHED_STEP` is still passed — it is what holds those gate acts — already read
+        # and already proven readable by the approval gate above, which is why this needs
+        # no second parse and no fallback: a `current:` that would not parse took the
+        # withhold arm and never reached here.
+        #
+        # AND THE SET IS THE LIBRARY'S, TRIM INCLUDED (wave-18 REQ-3, D2; ADR-033
+        # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
+        # duty computes at the end of every turn, so the rows this tick ORDERS and the
+        # rows that turn's end REFUSES to leave undispatched are one answer rather than
+        # two. It takes the width and the occupancy this arm measured: the gate's width, and
+        # the roster's unacked rows after this tick's own acks. The wall measures both the
+        # same way (the width from `fill_gate_width`, the occupancy by the same predicate:
+        # wave-19 audit V-2, T2d), so what it names is what this prints.
+        SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
+        SCHED_IDS=""; SCHED_N=0; SCHED_OFFERED=""
+        while IFS= read -r TASK_ID; do
+          [ -n "$TASK_ID" ] || continue
+          # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
+          # same string for a task that has never run, which is why every fixture and every
+          # doc example still reads `FILL T1 T2`. They diverge when the id is already spent,
+          # and then the ONLY safe token to print is the free one: see `fill_name` for why
+          # the roster, and not the plan, is what "spent" is read from.
+          SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(fill_name "$ROSTER_FILE" "$(clean "$TASK_ID")")"
+          SCHED_N=$((SCHED_N + 1)); SCHED_OFFERED="${SCHED_OFFERED} $(clean "$TASK_ID")"
+        done <<EOF
 $SCHED_READY
 EOF
-          if [ "$SCHED_N" -gt 0 ]; then
-            # THE PRINTED LINE IS THE DUTY WALL'S (payload/scripts/lib/stop.sh reads
-            # `poker: FILL ` out of this turn's raw tool result) and is unchanged to the byte.
-            # WHAT CHANGES is that the ids are also carried to the decision line, so a tick
-            # that ordered work stops reporting that nothing was wanted (REQ-10 AC-10.2, D5:
-            # observed 19:00:46Z as `poker: FILL T13` above `decision=QUIET`).
-            say "FILL ${SCHED_IDS}"
-            SCHED_FILL="$SCHED_IDS"
-            # THE RANGE AN OFFERED REVIEW READS (wave-26 T32; T14, AC-6.5): one line per offered
-            # row that reads `live:head`, naming the difference past the last review proof, from
-            # the head this tick already read (UNITS_LIVE_HEAD; no git here). Before the first
-            # review proof there is no range, and no line: the review reads all the landed work.
-            # THE RANGE IS THE ROW'S (wave-27 T10; D4): a read row's starts at the oldest last
-            # reading among its own questions, so two rows offered at once can print two ranges;
-            # a bare `live:head` row's is the one range 1.11.0 printed.
-            # WHAT MOVED INSIDE IT (wave-27 T43; D10; A-orch-48, A-orch-71): once every question
-            # the row reads has its whole reading, a `MOVED` line names each plan row whose landing
-            # lies inside the range, with the matrix criteria it serves. A landing is a merge the
-            # run's landing record (`landing-proofs.log`, written by land) gives a row.
-            # THE LIST IS PRINTED ONLY WHEN IT IS THE WHOLE RANGE (wave-27 T34; review pass 30
-            # should-fix 1 and 2, A-orch-86): this tick lists the range's first-parent commits with
-            # ONE `git rev-list` per offered row and hands them to the library, which runs no git.
-            # When every one is the merge of a header naming a row (`units_unrecorded` prints
-            # none), the rows are named (`units_rows_in_range`); otherwise one `MOVED unknown` line
-            # says how many are not, in place of every other, and the read is the whole range. A
-            # header with `row=—`, a commit made straight on the working branch and a landed row
-            # of any kind that left no header are all that case. `MOVED none` is an empty range.
-            while IFS="$(printf '\t')" read -r LR_ID _; do
-              [ -n "$LR_ID" ] || continue
-              case "$SCHED_OFFERED " in *" $LR_ID "*) ;; *) continue ;; esac
-              SCHED_RANGE="$(units_live_range "$SCHED_PLAN" "$LR_ID" 2>/dev/null)"
-              [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
-              [ -n "$SCHED_RANGE" ] && units_whole_read "$SCHED_PLAN" "$LR_ID" || continue
-              LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$SCHED_PLAN" .plan.md)/landing-proofs.log"
-              if ! LR_IN="$(git -C "$REPO_REAL" rev-list --first-parent "$SCHED_RANGE" 2>/dev/null)"; then
-                say "MOVED unknown — the range's commits cannot be listed"
-                continue
-              fi
-              [ -n "$LR_IN" ] || { say "MOVED none"; continue; }
-              LR_UNK="$(printf '%s\n' "$LR_IN" | units_unrecorded "$SCHED_PLAN" "$LR_REC" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
-              LR_MOVED=""
-              [ "$LR_UNK" = 0 ] && LR_MOVED="$(printf '%s\n' "$LR_IN" | units_rows_in_range "$SCHED_PLAN" "$SCHED_RANGE" "$LR_REC" 2>/dev/null)"
-              if [ -z "$LR_MOVED" ]; then
-                # A range every commit of which a header names, and no row's last landing among
-                # them, cannot be listed whole either: said as the same one line.
-                [ "$LR_UNK" = 0 ] && LR_UNK="$(printf '%s\n' "$LR_IN" | awk 'NF { n++ } END { print n + 0 }')"
-                say "MOVED unknown — ${LR_UNK} commit(s) in the range are no recorded landing"
-                continue
-              fi
-              while IFS="$(printf '\t')" read -r LM_ID _ LM_CRIT; do
-                [ -n "$LM_ID" ] && say "MOVED $LM_ID — ${LM_CRIT:-no criterion in the matrix}"
-              done <<EOF_MV
+        if [ "$SCHED_N" -gt 0 ]; then
+          # THE PRINTED LINE IS THE DUTY WALL'S (payload/scripts/lib/stop.sh reads
+          # `poker: FILL ` out of this turn's raw tool result) and is unchanged to the byte.
+          # WHAT CHANGES is that the ids are also carried to the decision line, so a tick
+          # that ordered work stops reporting that nothing was wanted (REQ-10 AC-10.2, D5:
+          # observed 19:00:46Z as `poker: FILL T13` above `decision=QUIET`).
+          say "FILL ${SCHED_IDS}"
+          SCHED_FILL="$SCHED_IDS"
+          # THE RANGE AN OFFERED REVIEW READS (wave-26 T32; T14, AC-6.5): one line per offered
+          # row that reads `live:head`, naming the difference past the last review proof, from
+          # the head this tick already read (UNITS_LIVE_HEAD; no git here). Before the first
+          # review proof there is no range, and no line: the review reads all the landed work.
+          # THE RANGE IS THE ROW'S (wave-27 T10; D4): a read row's starts at the oldest last
+          # reading among its own questions, so two rows offered at once can print two ranges;
+          # a bare `live:head` row's is the one range 1.11.0 printed.
+          # WHAT MOVED INSIDE IT (wave-27 T43; D10; A-orch-48, A-orch-71): once every question
+          # the row reads has its whole reading, a `MOVED` line names each plan row whose landing
+          # lies inside the range, with the matrix criteria it serves. A landing is a merge the
+          # run's landing record (`landing-proofs.log`, written by land) gives a row.
+          # THE LIST IS PRINTED ONLY WHEN IT IS THE WHOLE RANGE (wave-27 T34; review pass 30
+          # should-fix 1 and 2, A-orch-86): this tick lists the range's first-parent commits with
+          # ONE `git rev-list` per offered row and hands them to the library, which runs no git.
+          # When every one is the merge of a header naming a row (`units_unrecorded` prints
+          # none), the rows are named (`units_rows_in_range`); otherwise one `MOVED unknown` line
+          # says how many are not, in place of every other, and the read is the whole range. A
+          # header with `row=—`, a commit made straight on the working branch and a landed row
+          # of any kind that left no header are all that case. `MOVED none` is an empty range.
+          while IFS="$(printf '\t')" read -r LR_ID _; do
+            [ -n "$LR_ID" ] || continue
+            case "$SCHED_OFFERED " in *" $LR_ID "*) ;; *) continue ;; esac
+            SCHED_RANGE="$(units_live_range "$SCHED_PLAN" "$LR_ID" 2>/dev/null)"
+            [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
+            [ -n "$SCHED_RANGE" ] && units_whole_read "$SCHED_PLAN" "$LR_ID" || continue
+            LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$SCHED_PLAN" .plan.md)/landing-proofs.log"
+            if ! LR_IN="$(git -C "$REPO_REAL" rev-list --first-parent "$SCHED_RANGE" 2>/dev/null)"; then
+              say "MOVED unknown — the range's commits cannot be listed"
+              continue
+            fi
+            [ -n "$LR_IN" ] || { say "MOVED none"; continue; }
+            LR_UNK="$(printf '%s\n' "$LR_IN" | units_unrecorded "$SCHED_PLAN" "$LR_REC" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
+            LR_MOVED=""
+            [ "$LR_UNK" = 0 ] && LR_MOVED="$(printf '%s\n' "$LR_IN" | units_rows_in_range "$SCHED_PLAN" "$SCHED_RANGE" "$LR_REC" 2>/dev/null)"
+            if [ -z "$LR_MOVED" ]; then
+              # A range every commit of which a header names, and no row's last landing among
+              # them, cannot be listed whole either: said as the same one line.
+              [ "$LR_UNK" = 0 ] && LR_UNK="$(printf '%s\n' "$LR_IN" | awk 'NF { n++ } END { print n + 0 }')"
+              say "MOVED unknown — ${LR_UNK} commit(s) in the range are no recorded landing"
+              continue
+            fi
+            while IFS="$(printf '\t')" read -r LM_ID _ LM_CRIT; do
+              [ -n "$LM_ID" ] && say "MOVED $LM_ID — ${LM_CRIT:-no criterion in the matrix}"
+            done <<EOF_MV
 $LR_MOVED
 EOF_MV
-            done <<EOF
+          done <<EOF
 $(units_live_rows "$SCHED_PLAN" 2>/dev/null)
 EOF
+        else
+          # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
+          # which answer holds the rows, and the standing line above says why.
+          if [ -n "$SCHED_SD_IDS" ] && [ -n "${SCHED_READY_ALL// /}" ]; then
+            say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready."
           else
-            # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
-            # which answer holds the rows, and the standing line above says why.
-            if [ -n "$SCHED_SD_IDS" ] && [ -n "$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")" ]; then
-              say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready."
-            else
-              # THE REASONS ARE PER ROW NOW (wave-26 T13; D9, AC-6.6). Through 1.10 this line
-              # carried one sentence for every waiting row and named only the step holds; each
-              # waiting row is on its own WAIT line below, with the read it lacks and the row
-              # that writes it, the step holds among them.
-              say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready."
-            fi
+            # THE REASONS ARE PER ROW NOW (wave-26 T13; D9, AC-6.6). Through 1.10 this line
+            # carried one sentence for every waiting row and named only the step holds; each
+            # waiting row is on its own WAIT line below, with the read it lacks and the row
+            # that writes it, the step holds among them.
+            say "no FILL — width=${SCHED_WIDTH} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready."
           fi
         fi
-        tick_wait_report
-        tick_finding_report
       fi
+      tick_wait_report
+      tick_finding_report
     fi
 
     }
@@ -8336,7 +8197,7 @@ EOF
       # stopping, and that is not the point: the acceptance criterion is that every tick
       # reports it, and an operator reading the last tick of a run in a transcript should not
       # have to know which arm printed the line and which did not.
-      rung_report "$REPO_REAL" "$SESSION_ID"
+      gate_report "$REPO_REAL" "$SESSION_ID"
       # …AND THE PLAN REPORT, for the same reason (wave-21 T13): a delivered run whose ledger
       # still carries a finding is one the gate would refuse, and this is the last tick to say so.
       tick_plan_memoised tick_plan_report
