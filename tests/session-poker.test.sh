@@ -2431,7 +2431,8 @@ poke_pressure "$R12A" 8192 1.0 tick
 expect_eq "a filling tick exits 0" "0" "$RC"
 expect_contains "three ready and a gap of two fills exactly two, in table order" \
   "poker: FILL ONE TWO" "$OUT"
-expect_absent "…and does not reach the third" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+expect_absent "…and does not reach the third" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL' | /usr/bin/grep -v '^poker: FILL — ')"
+expect_eq "…(the FILL line, its sentence set aside, is exactly the two)" "poker: FILL ONE TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL' | /usr/bin/grep -v '^poker: FILL — ')"
 
 # ---------- 12a-T22: THE FILL LINE PRINTS THE NAME, NOT THE TASK ID ----------
 #
@@ -2660,7 +2661,7 @@ wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
 add_row "$R12B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12B" 8192 1.0 tick
 expect_contains "one open row against writers=2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent "…and the second ready task waits" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+expect_absent "…and the second ready task waits" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL' | /usr/bin/grep -v '^poker: FILL — ')"
 
 # ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
 R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
@@ -8141,7 +8142,8 @@ R47F="$(make_repo s46-early-full)"; new_roster "$R47F"; s47_early "$R47F"
 add_row "$R47F" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R47F" 8192 1.0 tick
 expect_contains "47l D9 with no writer slot free the read-only review is still offered" "poker: FILL T3" "$OUT"
-expect_absent "47l2 …and the doc row, a writer, is not on the FILL line" "T2" "$(s47_lines FILL)"
+expect_absent "47l2 …and the doc row, a writer, is not on the FILL line (its sentence, which names the rows behind the gap, set aside)" "T2" "$(s47_lines FILL | /usr/bin/grep -v '^poker: FILL — ')"
+expect_eq "47l2b …positive on the same extractor: the FILL line is the review alone" "poker: FILL T3" "$(s47_lines FILL | /usr/bin/grep -v '^poker: FILL — ')"
 expect_contains "47l3 …it is on a WAIT line saying it is ready and waits for a writer slot" \
   "poker: WAIT T2 — ready; no writer slot free" "$OUT"
 # REVIEW 10 ANSWER (b) (wave-26 T46): THE EXEMPTION IS THE RECORD, NOT THE KIND ALONE. A verify
@@ -13814,7 +13816,8 @@ mv_prompts 'do not defer it, fix it now'
 s42_snap "$RSEV" "$PSEV"
 poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'it' 'the user said it'
 s42_unchanged "MOVE-10 §MOVE a quote of one word is refused as too short" 1 "$PSEV"
-MV_SHORT_LINE="poker: REFUSED — the words \"it\" are too short to be the user's decision; quote at least three of their words, or their whole prompt. The plan is unchanged."
+MV_MIN="$(bash -c '. "$1" 2>/dev/null; printf "%s" "$SAID_MIN_WORDS"' _ "$SAID_LIB")"
+MV_SHORT_LINE="poker: REFUSED — the words \"it\" are too short to be the user's decision; quote at least ${MV_MIN} of their words, or their whole prompt. The plan is unchanged."
 expect_eq "MOVE-10b …with the refusal as measured" "$MV_SHORT_LINE" "$OUT"
 s42_snap "$RSEV" "$PSEV"
 poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'fix it' 'the user said it'
@@ -13854,23 +13857,33 @@ if [ -n "$MV_REAL_SID" ]; then
     [ -f "${d}${MV_REAL_SID}.jsonl" ] && [ -r "${d}${MV_REAL_SID}.jsonl" ] && [ ! -L "${d}${MV_REAL_SID}.jsonl" ] && { MV_REAL_TX="${d}${MV_REAL_SID}.jsonl"; break; }
   done
 fi
-mv_keys() {  # <fixture> <jq select of the real entries> <sub-object path> -> "n=<real entries> missing=<fixture keys no real entry carries>"
-  jq -nRr --slurpfile fx "$MV_FX/$1.jsonl" '
+# THE KEYS user_said READS, and only those (wave-28 T74; A-orch-221): a key the CLI drops or renames that the library
+# never looks at must not redden the suite, and one it reads must. A typed prompt: type, origin.kind, message.content
+# and isSidechain; a prompt typed while a turn ran: the attachment's type, origin.kind and prompt.
+mv_keys() {  # <fixture file> <jq select of the real entries> <paths read, dotted, space-separated> [<transcript>] -> "n=<real entries> missing=<paths read that the fixture or every real entry lacks>"
+  jq -nRr --slurpfile fx "$1" --arg paths "$3" '
     [inputs | fromjson? | objects | select('"$2"')] as $r
-    | def ks(f): [$r[] | f | keys[]] | unique;
-      "n=\($r | length) missing=\((($fx[0] | keys) - ks(.)) + ((($fx[0] | '"$3"' | keys) - ks('"$3"')) | map("'"$3"'." + .)) | join(","))"' "$MV_REAL_TX" 2>/dev/null
+    | ($paths | split(" ") | map(split("."))) as $ps
+    | "n=\($r | length) missing=\([$ps[] | select(. as $p | ($fx[0] | getpath($p)) == null or ([$r[] | getpath($p) | values] | length) == 0) | join(".")] | join(","))"' \
+    "${4:-$MV_REAL_TX}" 2>/dev/null
 }
-MV_KEY_ROWS="typed@.type == \"user\" and (.origin.kind? // \"\") == \"human\" and (.message.content | type) == \"string\"@.message
-queued@.type == \"attachment\" and .attachment.type? == \"queued_command\" and (.attachment.origin.kind? // \"\") == \"human\"@.attachment
-slash-args@.type == \"user\" and (.origin.kind? // \"\") == \"human\" and ((.message.content | type) == \"string\") and (.message.content | contains(\"<command-args>\"))@.message"
+MV_KEY_TYPED='.type == "user" and (.origin.kind? // "") == "human" and (.message.content | type) == "string"'
+MV_READ_TYPED='type origin.kind message.content isSidechain'
+MV_KEY_QUEUED='.type == "attachment" and .attachment.type? == "queued_command" and (.attachment.origin.kind? // "") == "human"'
+MV_READ_QUEUED='type attachment.type attachment.origin.kind attachment.prompt'
+MV_KEY_SLASH='.type == "user" and (.origin.kind? // "") == "human" and ((.message.content | type) == "string") and (.message.content | contains("<command-args>"))'
+MV_READ_SLASH='type origin.kind message.content isSidechain'
+MV_KEY_ROWS="typed@$MV_KEY_TYPED@$MV_READ_TYPED
+queued@$MV_KEY_QUEUED@$MV_READ_QUEUED
+slash-args@$MV_KEY_SLASH@$MV_READ_SLASH"
 if [ -z "$MV_REAL_TX" ]; then
   ok "MOVE-keys §MOVE skipped: this session's own transcript is not readable here (no CLAUDE_CODE_SESSION_ID, or none under ${MV_REAL_CFG}/projects)"
 else
-  while IFS='@' read -r k sel sub; do
-    MV_KR="$(mv_keys "$k" "$sel" "$sub")"
+  while IFS='@' read -r k sel rd; do
+    MV_KR="$(mv_keys "$MV_FX/$k.jsonl" "$sel" "$rd")"
     case "$MV_KR" in
       n=0\ *) ok "MOVE-keys-$k skipped: this session's transcript holds no entry of that kind yet" ;;
-      *) expect_regex "MOVE-keys-$k the $k fixture's keys all appear in this session's own entries of that kind (a CLI rename turns this red)" \
+      *) expect_regex "MOVE-keys-$k the keys user_said reads from a $k entry all appear in the fixture and in this session's own entries of that kind (a CLI rename turns this red)" \
            '^n=[1-9][0-9]* missing=$' "$MV_KR" ;;
     esac
   done <<EOF2
@@ -14707,5 +14720,170 @@ POKER="$PM_POKER"
 expect_eq "PASSM-mut1 the mutant runs and registers the second pass over the move (exit 0, two proof lines): PASSM-3 goes red" "0|2" "$RC|$(pm_n pm-a)"
 cp "$TMPROOT/pm-plan-keep" "$PSEV"
 POKE_BOUND="$PM_BOUND_WAS"
+
+section "§MOVE-PASTED §MOVE-WORD §MOVE-FOLD §MOVE-SLASH §MOVE-MIN §MOVE-KEYS §FILL-BEHIND: user_said cuts a pasted block as the CLI writes it, one word class, one fold, the arguments of a slash command, one constant; the tick names the rows behind the gap (wave-28 T74; REQ-8 AC-8.9; D34; A-orch-221, A-orch-226)"
+# ============================================================
+#
+# Pass 49 found that lib/said.sh cut `<pasted_content …>…</pasted_content>` out of a typed prompt, while the CLI
+# closes the block WITH the id (`</pasted_content id="…">`): the cut matched nothing and pasted words counted as
+# typed in every pasted prompt this project has (T42's fixture invented the bare close, so no row could catch it).
+# The fixture pasted.jsonl is now the CLI's shape (tests/fixtures/transcript-move/README.md names the provenance).
+# Beside it, in passing: ONE word-character class (`'` and U+2019 both) for the boundary test and the word count,
+# ONE fold (the poker's deferral_fold is lib/said.sh's said_fold), the whole-prompt rule of a slash command taken
+# on its arguments, session.sh found beside the library at source time, "three" one constant, and the key-set
+# rows narrowed to the keys user_said reads. The §MOVE helpers (mv_tx, mv_prompts, mv_said, mv_mutline) and its
+# repository (RSEV, PSEV) are the ones the rows above use.
+#
+# §FILL-BEHIND (A-orch-226) is first and runs under the suite's own CLAUDE_CONFIG_DIR: the tick's FILL sentence
+# names the READY rows it parked for width, so one decline of a FILL row answers the set the stop wall counts.
+MP_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+
+# ---------- §FILL-BEHIND: the sentence names the rows behind the gap; the FILL line's own ids do not move ----------
+s74_plan() {  # <repo> <extra rows>... -> writers=1; a landed build, a doc writer, a review, then the extra rows
+  local repo="$1"; shift
+  s47_plan "$repo" 1 \
+    "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
+    "| T2 | 7 | doc | the release notes draft | implementor | — | 20 | REQ-x | .bionic/docs/record/notes.md | pending | approval:plan, head |" \
+    "| T3 | 6 | review | the review | critic | — | 30 | REQ-x | .bionic/docs/record/review.md | pending | |" "$@" >/dev/null
+}
+s74_fill() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL — '; }
+R74B="$(make_repo s74-behind)"; new_roster "$R74B"
+s74_plan "$R74B" "| T4 | 7 | doc | more notes | implementor | — | 20 | REQ-x | .bionic/docs/record/notes2.md | pending | approval:plan, head |"
+add_row "$R74B" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R74B" 8192 1.0 tick
+expect_eq "MP-fill1 §FILL-BEHIND with the writer gap closed the review is the only FILL row: the line keeps its ids (exit 0)" \
+  "0|poker: FILL T3" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -x 'poker: FILL T3')"
+expect_eq "MP-fill2 …both doc writers are on WAIT lines, parked for width" \
+  "poker: WAIT T2 — ready; no writer slot free (gap 0)|poker: WAIT T4 — ready; no writer slot free (gap 0)" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: WAIT T[24] ' | paste -sd'|' -)"
+expect_eq "MP-fill3 …and the FILL sentence names them: one decline of T3 answers the set the stop wall counts" \
+  "poker: FILL — T3 named for dispatch; the decision line carries them · behind the gap: T2 T4 — a decline of a FILL row frees their slot; dispatch or decline them in the same turn." \
+  "$(s74_fill)"
+R74C="$(make_repo s74-none)"; new_roster "$R74C"; s74_plan "$R74C"
+poke_pressure "$R74C" 8192 1.0 tick
+expect_eq "MP-fill4 positive, the same extractor: with nothing parked the sentence is what it was, and says nothing of a gap" \
+  "poker: FILL — T2 T3 named for dispatch; the decision line carries them." "$(s74_fill)"
+# THE MUTANT: the parked ids dropped from the sentence (a doctored copy of the hook, its siblings and library linked in).
+MP_HROOT="$(mktemp -d "$TMPROOT/mp-hook.XXXXXX")"; mkdir -p "$MP_HROOT/hooks" "$MP_HROOT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MP_HROOT/scripts/lib"
+for _sib in "$(dirname "$POKER")"/*; do _sibn="$(basename "$_sib")"; [ "$_sibn" = "session-poker.sh" ] || ln -s "$_sib" "$MP_HROOT/hooks/$_sibn"; done
+MP_HOOK_NEEDLE='SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${line%% *}"'
+anchor "$POKER" "$MP_HOOK_NEEDLE" 1
+MP_N="$MP_HOOK_NEEDLE" awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) ":" substr($0, i + length(n)); print }' \
+  "$POKER" > "$MP_HROOT/hooks/session-poker.sh"
+expect_eq "MP-fillmut0 the hook mutant differs from the hook in one line" "1" "$(diff "$POKER" "$MP_HROOT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+MP_POKER_WAS="$POKER"; POKER="$MP_HROOT/hooks/session-poker.sh"
+forget_digest "$R74B"
+poke_pressure "$R74B" 8192 1.0 tick
+POKER="$MP_POKER_WAS"
+expect_eq "MP-fillmut1 the mutant still runs and still prints the FILL line (exit 0)" "0|poker: FILL T3" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -x 'poker: FILL T3')"
+expect_eq "MP-fillmut2 …and its sentence has no gap clause, so MP-fill3 goes red under it" \
+  "poker: FILL — T3 named for dispatch; the decision line carries them." "$(s74_fill)"
+rm -rf "$MP_HROOT"
+
+# ---------- from here the rows read §MOVE's transcript under its own CLAUDE_CONFIG_DIR ----------
+MP_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"; export CLAUDE_CONFIG_DIR="$MV_CFG"
+MP_MUT="$(mktemp -d "$TMPROOT/mp-mut.XXXXXX")"
+mp_sub() {  # <needle> <replacement> <out> -> the library with the needle (a substring, once) replaced
+  MP_N="$1" MP_R="$2" awk 'BEGIN { n = ENVIRON["MP_N"]; r = ENVIRON["MP_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$SAID_LIB" > "$3"
+}
+
+# ---------- §MOVE-PASTED (ruling 1): a pasted block, closed as the CLI closes it, is cut ----------
+expect_regex "MP-p0 precondition: the fixture's block closes as the CLI closes it, with the id" \
+  '^</pasted_content id="[0-9a-f-]{36}">$' "$(jq -r '.message.content' "$MV_FX/pasted.jsonl" | /usr/bin/grep -o '</pasted_content[^>]*>')"
+mv_tx pasted
+expect_eq "MP-p1 §MOVE-PASTED AC-8.9 the words pasted inside a typed prompt are not the user's: not found (rc 1)" "1" "$(mv_said "$MV_P")"
+expect_eq "MP-p2 …the words typed before the block are found (rc 0)" "0" "$(mv_said 'what do you make of this?')"
+expect_eq "MP-p3 …and the words typed after it are found (rc 0)" "0" "$(mv_said 'and then tell me which you would pick')"
+MP_CUT='</pasted_content\\b[^>]*>'
+anchor "$SAID_LIB" "$MP_CUT" 1
+mp_sub "$MP_CUT" '</pasted_content>' "$MP_MUT/said-bare.sh"
+expect_eq "MP-pmut0 the bare-close mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MP_MUT/said-bare.sh" | /usr/bin/grep -c '^>')"
+expect_eq "MP-pmut1 the mutant runs: it finds the words typed before the block" "0" "$(mv_said 'what do you make of this?' "$MP_MUT/said-bare.sh")"
+expect_eq "MP-pmut2 …and counts the pasted words (rc 0, not 1), so MP-p1 goes red under it" "0" "$(mv_said "$MV_P" "$MP_MUT/said-bare.sh")"
+
+# ---------- §MOVE-WORD (ruling 2a): one word-character class for the boundary and the count ----------
+mv_prompts 'defer it - now'
+expect_eq "MP-w1 §MOVE-WORD a hyphen is a word character in the count as in the boundary: 'defer it -' is three words, found (rc 0)" "0" "$(mv_said 'defer it -')"
+expect_eq "MP-w2 …positive beside it, the same transcript: 'defer it' is two words and a short quote (rc 3)" "3" "$(mv_said 'defer it')"
+mv_prompts 'do not defer it now' 'he said defer it’s fine now'
+expect_eq "MP-w3 positive: with the ASCII apostrophe, 'defer it now' is found as whole words (rc 0)" "0" "$(mv_said 'defer it now')"
+mv_prompts 'don’t defer it now'
+expect_eq "MP-w4 the typographic apostrophe joins what it touches: 't defer it now' out of 'don’t defer it now' is not found (rc 1)" "1" "$(mv_said 't defer it now')"
+expect_eq "MP-w5 …positive beside it, the same transcript: 'defer it now' is found (rc 0)" "0" "$(mv_said 'defer it now')"
+mv_prompts 'he said defer it’s fine now'
+expect_eq "MP-w6 …and after the quote: 'said defer it' out of 'said defer it’s fine' is not found (rc 1)" "1" "$(mv_said 'said defer it')"
+expect_eq "MP-w7 …positive: 'he said defer' is found (rc 0)" "0" "$(mv_said 'he said defer')"
+expect_eq "MP-w8 the class is spelled once in the library (it carries one \\x27)" "1" \
+  "$(/usr/bin/grep -c 'x27' "$SAID_LIB" | tr -d ' ')"
+MP_WC='def wc:'
+anchor "$SAID_LIB" "$MP_WC" 1
+mv_mutline "$MP_WC" 'def wc: "[\\w\\x27-]";' "$MP_MUT/said-ascii.sh"
+expect_eq "MP-wmut0 the ASCII-only mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MP_MUT/said-ascii.sh" | /usr/bin/grep -c '^>')"
+mv_prompts 'don’t defer it now'
+expect_eq "MP-wmut1 the mutant runs: it finds the whole prompt" "0" "$(mv_said 'don’t defer it now' "$MP_MUT/said-ascii.sh")"
+expect_eq "MP-wmut2 …and finds 't defer it now' inside 'don’t' (rc 0, not 1), so MP-w4 goes red under it" "0" \
+  "$(mv_said 't defer it now' "$MP_MUT/said-ascii.sh")"
+
+# ---------- §MOVE-SLASH (ruling 2c): a command's whole-prompt rule is its arguments ----------
+mv_slash() {  # <arguments> -> a transcript: the frame, then a slash command typed with these arguments
+  cat "$MV_FX/frame.jsonl" > "$MV_TX"
+  jq -c --arg a "$1" '.message.content = "<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>" + $a + "</command-args>"' \
+    "$MV_FX/slash-args.jsonl" >> "$MV_TX"
+}
+mv_slash 'defer it'
+expect_eq "MP-s1 §MOVE-SLASH a two-word decision typed as a command's arguments is the user's whole prompt: found (rc 0)" "0" "$(mv_said 'defer it')"
+mv_slash 'defer it now please'
+expect_eq "MP-s2 …positive beside it, longer arguments: a three-word piece is found (rc 0)" "0" "$(mv_said 'defer it now')"
+expect_eq "MP-s3 …and two of its words are short, as in any longer prompt (rc 3)" "3" "$(mv_said 'defer it')"
+mv_tx typed
+
+# ---------- §MOVE-FOLD (ruling 2b): the words, the why and the author fold by one rule ----------
+MP_NBSP="$(printf '\302\240')"; MP_LS="$(printf '\342\200\250')"; MP_NEL="$(printf '\302\205')"
+mv_tx typed; sev_cur 4
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$(printf 'defer the flag wording\302\240until the next wave, it can wait')" "the${MP_NBSP}docs${MP_LS}pass${MP_NEL}here"
+expect_regex "MP-f1 §MOVE-FOLD a no-break space, a line separator and a next-line in the why fold as white space, as in the words (exit 0)" \
+  "^0\|moved: .* words=\"$MV_P\" why=\"the docs pass here\"\$" "$RC|$(mv_moved mv-fix | tail -1)"
+
+# ---------- §MOVE-SELF (ruling 2d): session.sh is found beside the library at source time ----------
+MP_LIBDIR="${SAID_LIB%/*}"
+expect_eq "MP-d1 §MOVE-SELF the library sourced by a relative path, the working directory then moved: found (rc 0)" "0" \
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+expect_eq "MP-d2 …sourced by a bare name, the working directory then moved: found (rc 0)" "0" \
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+expect_eq "MP-d3 …positive, the working directory kept: found (rc 0)" "0" \
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+
+# ---------- §MOVE-MIN (ruling 2e): "three" is one constant ----------
+MP_MIN="$(bash -c '. "$1" 2>/dev/null; printf "%s" "$SAID_MIN_WORDS"' _ "$SAID_LIB")"
+expect_regex "MP-m1 §MOVE-MIN the library names its minimum once, as a number" '^[1-9][0-9]*$' "$MP_MIN"
+expect_eq "MP-m2 …the verb's refusal text is made from that constant and spells no number of its own" "0|1" \
+  "$(/usr/bin/grep -c 'at least three' "$POKER" | tr -d ' ')|$(/usr/bin/grep -c 'at least \$SAID_MIN_WORDS' "$POKER" | tr -d ' ')"
+SAID_MIN_NEEDLE='SAID_MIN_WORDS='
+anchor "$SAID_LIB" "$SAID_MIN_NEEDLE" 1
+mv_mutline "$SAID_MIN_NEEDLE" 'SAID_MIN_WORDS=4' "$MP_MUT/said-four.sh"
+mv_prompts 'please defer it now ok'
+expect_eq "MP-m3 the library's rule is the constant: three words are enough at 3 (rc 0)" "0" "$(mv_said 'defer it now')"
+expect_eq "MP-m4 …and at 4 the same three words are short (rc 3) while four are enough (rc 0)" "3|0" \
+  "$(mv_said 'defer it now' "$MP_MUT/said-four.sh")|$(mv_said 'defer it now ok' "$MP_MUT/said-four.sh")"
+mv_tx typed
+rm -rf "$MP_MUT"
+
+# ---------- §MOVE-KEYS (ruling 2f): the key-set rows read only the keys user_said reads ----------
+# A planted transcript stands for the real one: the typed fixture's entries, then with an UNREAD key dropped
+# (slug is not read) and with a READ key dropped (isSidechain is read).
+MP_KTX="$TMPROOT/mp-keys.jsonl"
+jq -c 'del(.turnPosition)' "$MV_FX/typed.jsonl" > "$MP_KTX"
+expect_eq "MP-k1 §MOVE-KEYS a CLI that dropped a key user_said does not read (turnPosition) leaves the typed row green" \
+  "n=1 missing=" "$(mv_keys "$MV_FX/typed.jsonl" "$MV_KEY_TYPED" "$MV_READ_TYPED" "$MP_KTX")"
+jq -c 'del(.isSidechain)' "$MV_FX/typed.jsonl" > "$MP_KTX"
+expect_eq "MP-k2 …and one that dropped a key it reads (isSidechain) turns it red, naming the key" \
+  "n=1 missing=isSidechain" "$(mv_keys "$MV_FX/typed.jsonl" "$MV_KEY_TYPED" "$MV_READ_TYPED" "$MP_KTX")"
+cp "$MV_FX/typed.jsonl" "$MP_KTX"
+expect_eq "MP-k3 …positive, the entries as the fixture has them: nothing missing" \
+  "n=1 missing=" "$(mv_keys "$MV_FX/typed.jsonl" "$MV_KEY_TYPED" "$MV_READ_TYPED" "$MP_KTX")"
+
+if [ "$MP_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$MP_CCD_WAS"; fi
+POKE_BOUND="$MP_BOUND_WAS"
 
 finish
