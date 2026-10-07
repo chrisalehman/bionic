@@ -3856,8 +3856,9 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # candidate since its last landing has no commit of its own to include by, so every verdict under its id counts
 # (T14's count). Red-then-green is a red then a green for one row,
 # one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Waited is a request's `admitted` less its
-# `asked`; killed is a request admitted that ended with rc 137 or whose holder is dead with no `ended` line
-# (lib/gate.sh `_gate_open`'s state, read through `_gate_read`, not retyped here; wave-28 T68).
+# `asked`; killed is a request admitted that ended with an exit over 128 (a signal: 137 from the reaper, 143
+# from a TERMed suite) or whose holder is dead with no `ended` line, as D18 says (lib/gate.sh `_gate_open`'s
+# state, read through `_gate_read`, not retyped here; wave-28 T68, T72).
 # A request counts when its `tree=` is the project or under it and it was asked at or after the record's
 # first `line/v1` event; a row's own wait is its requests by the roster name its `ready` carries, asked
 # from its first ready to its landing. Times are the events' own `at=`, never a message's.
@@ -3882,10 +3883,15 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
     case "${f##*/}" in ''|*[!0-9]*) continue ;; esac
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     # lib/gate.sh's reader and its one rule (`_gate_open`, T71), lock-free: a request is killed when it ended with
-    # rc 137 or was admitted, never ended and has no live holder. No gate library, no requests.
+    # an exit over 128 (D18: the reaper writes 137, a TERMed suite's 143 reaches `gate_end`) or was admitted,
+    # never ended and has no live holder. No gate library, no requests.
     _gate_read "$f" 2>/dev/null || continue
     _R_state=''; _gate_open 2>/dev/null
-    case "$_R_state" in killed|dying) dead=1 ;; *) dead=0 ;; esac
+    dead=0
+    case "$_R_state" in
+      killed|dying) dead=1 ;;
+      ended) case "${_R_rc:-}" in ''|*[!0-9]*) ;; *) [ "$_R_rc" -le 128 ] || dead=1 ;; esac ;;
+    esac
     reqs="${reqs}${_R_asked}	${_R_admitted}	${_R_who#*:}	${_R_tree}	${dead}
 "
   done
@@ -6678,12 +6684,13 @@ PF_OTHER_LIST
       die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
-    # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `check:` or `deferred:` line is
-    # keyed `<record>#<n>`, so a second pass registered on the path of a first would inherit its
-    # settlement (a refuted #1 drops the new pass's S1). A reading's path whose proof line names
-    # another head is refused, and so is one a `check:`/`deferred:` line already names; a relaunched
-    # reader re-registering an unsettled record (the same head, no such line) is admitted as before.
-    # The key stays unique by construction, so `_proof_check_state` is unchanged (lib/proof.sh).
+    # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `check:`, `deferred:` or `moved:`
+    # line is keyed `<record>#<n>`, so a second pass registered on the path of a first would inherit its
+    # settlement (a refuted #1 drops the new pass's S1) or its move. A reading's path whose proof line
+    # names another head is refused, and so is one such a line already names (lib/proof.sh
+    # `proof_bind_awk` is the one predicate, T72); a relaunched reader re-registering an unsettled record
+    # (the same head, no such line) is admitted as before. The key stays unique by construction, so
+    # `_proof_check_state` is unchanged.
     if [ -n "$PF_QUESTION" ]; then
       PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"
       case "$PF_PASS" in
@@ -6691,7 +6698,7 @@ PF_OTHER_LIST
           die "REFUSED — $(clean "$PF_REL") is already registered at $(clean "${PF_PASS#head }" | cut -c1-12), not ${PF_HEAD:0:12}: write the pass to a new record path. The plan is unchanged."
           exit 1 ;;
         settled\ *)
-          die "REFUSED — $(clean "$PF_REL") at ${PF_HEAD:0:12} already has a check: or deferred: line: write the pass to a new record path. The plan is unchanged."
+          die "REFUSED — $(clean "$PF_REL") at ${PF_HEAD:0:12} already has a check:, deferred: or moved: line: write the pass to a new record path. The plan is unchanged."
           exit 1 ;;
       esac
     fi

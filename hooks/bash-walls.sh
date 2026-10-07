@@ -291,11 +291,15 @@ case "$COMMAND" in
     if ! eg_commit_outside_root; then
       BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
       # THE READINGS' RESULTS AS THE JUDGE DERIVES THEM (wave-28 T60; D33, AC-8.6; A-orch-161). A
-      # reading re-rated by a `check:` line is judged on its derived result, which needs the record
-      # its findings are in; the gate reads no record, so the collector reads it once, for the plan
-      # the gate judges, and hands the lines over beside `BIONIC_DEBTS_PLAN` (lib/proof.sh
-      # `proof_readings_derived`; the gate's `_eg_reading_gaps` takes them only for that plan).
-      if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1; then
+      # reading re-rated by a `check:`, `deferred:` or `moved:` line is judged on its derived result,
+      # which needs the record its findings are in; the gate reads no record, so the collector reads it
+      # once, for the plan the gate judges, and hands the lines over beside `BIONIC_DEBTS_PLAN`
+      # (lib/proof.sh `proof_readings_derived`; the gate's `_eg_reading_gaps` takes them only for that
+      # plan). ONLY WHEN THE GATE READS THEM (T72): the gate reads the readings from the step
+      # `eg_step_reads_readings` names, so a commit below it derives nothing, and the deriver itself
+      # prints nothing for a plan with no line that binds a pass. The hook's clock is 10 s, past which
+      # the walls fail open for the commit.
+      if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1 && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"; then
         BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" 2>/dev/null)" || BIONIC_READINGS=""
       fi
       _bw_from="$BIONIC_DEBTS_PLAN"
