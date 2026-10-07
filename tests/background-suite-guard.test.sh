@@ -232,15 +232,15 @@ R1=$(mk_repo b1)
 dispatched "$R1" "$ACTOR" name=w-b1 "suites_allowed=alpha.test.sh beta.test.sh" \
   suites_source=derived files=payload/scripts/lib/widget.sh
 
-guarded "$R1" 'bash tests/alpha.test.sh'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B1a a suite ON the budget is allowed" "0" "$ST"
 expect_empty "B1a …silently" "$OUT$ERR"
 
-guarded "$R1" 'bash tests/beta.test.sh 2>&1 | tee /tmp/b.log'
+guarded "$R1" 'tests/run.sh --only beta.test.sh 2>&1 | tee /tmp/b.log'
 expect_eq "B1b …and so is the other one, tee'd as a real brief would run it" "0" "$ST"
 expect_empty "B1b …silently" "$OUT$ERR"
 
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B1c a suite OFF the budget is REFUSED" "2" "$ST"
 expect_contains "B1c …naming the suite that was asked for" "gamma.test.sh" "$VERR"
 expect_contains "B1c …naming the set that was recorded" "alpha.test.sh beta.test.sh" "$VERR"
@@ -260,7 +260,7 @@ done
 
 # A CHAIN IS REFUSED FOR ITS OFF-BUDGET MEMBER, even when the first member is allowed —
 # the arm reads every suite the command names, not the first one.
-guarded "$R1" 'bash tests/alpha.test.sh && bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh && tests/run.sh --only gamma.test.sh'
 expect_eq "B1e a chain carrying one off-budget suite is REFUSED" "2" "$ST"
 expect_contains "B1e …naming the member that was off it" "gamma.test.sh" "$VERR"
 
@@ -300,7 +300,7 @@ guarded "$R2" 'bash tests/run.sh'
 expect_eq "B2b the Step-5 runner, whose row carries run.sh, is allowed" "0" "$ST"
 expect_empty "B2b …silently" "$OUT$ERR"
 # …and that row is not a licence for everything else.
-guarded "$R2" 'bash tests/alpha.test.sh'
+guarded "$R2" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B2c …but its row does not license a suite it does not name" "2" "$ST"
 
 section "B3 — FARM_OUT_ALLOW does not widen a budget (AC-21)"
@@ -310,16 +310,16 @@ section "B3 — FARM_OUT_ALLOW does not widen a budget (AC-21)"
 # to widen its own instrument would have a budget in name only.
 guarded "$R1" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
 expect_eq "B3a the override as a command prefix does not open the full tree" "2" "$ST"
-guarded "$R1" 'cd /tmp && FARM_OUT_ALLOW=1 bash tests/gamma.test.sh'
+guarded "$R1" 'cd /tmp && FARM_OUT_ALLOW=1 tests/run.sh --only gamma.test.sh'
 expect_eq "B3b …nor mid-chain, for an off-budget suite" "2" "$ST"
 EXTRA_ENV="FARM_OUT_ALLOW=1"
 guarded "$R1" 'bash tests/run.sh'
 expect_eq "B3c …nor set in the agent's own environment" "2" "$ST"
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B3d …for either arm" "2" "$ST"
 # NON-VACUITY: with the override set, an ON-budget suite still passes — so B3c/B3d are the
 # budget refusing, not the override breaking the hook.
-guarded "$R1" 'bash tests/alpha.test.sh'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B3e non-vacuity: an on-budget suite still passes with the override set" "0" "$ST"
 EXTRA_ENV=""
 
@@ -332,7 +332,7 @@ section "B4 — the three states of suites_allowed, and no row at all"
 
 R4A=$(mk_repo b4a)
 dispatched "$R4A" "$ACTOR" name=w-b4a suites_allowed=none suites_source=declared files=
-guarded "$R4A" 'bash tests/alpha.test.sh'
+guarded "$R4A" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B4a a Suites: none row refuses every named suite" "2" "$ST"
 expect_contains "B4a …saying the brief declared none" "Suites: none" "$VERR"
 guarded "$R4A" 'bash tests/run.sh'
@@ -340,7 +340,7 @@ expect_eq "B4a …and the full tree with it" "2" "$ST"
 
 R4B=$(mk_repo b4b)
 dispatched "$R4B" "$ACTOR" name=w-b4b suites_allowed= suites_source=derived files=x/y.sh
-guarded "$R4B" 'bash tests/alpha.test.sh'
+guarded "$R4B" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B4b an EMPTY budget refuses a named suite" "2" "$ST"
 expect_contains "B4b …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
 expect_contains "B4b …and why: the row records none" "your roster row records no suite set" "$VERR"
@@ -351,7 +351,7 @@ expect_eq "B4b …and the full tree too" "2" "$ST"
 
 R4C=$(mk_repo b4c)
 dispatched "$R4C" "$ACTOR" name=w-b4c          # a pre-wall row: no key at all
-guarded "$R4C" 'bash tests/alpha.test.sh'
+guarded "$R4C" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B4c a row from before the wall refuses a named suite" "2" "$ST"
 expect_contains "B4c …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
 guarded "$R4C" 'bash tests/run.sh'
@@ -366,7 +366,7 @@ expect_absent "B4c …and it carries no suites_allowed key" \
 
 R4D=$(mk_repo b4d)                                   # no row for this agent at all
 dispatched "$R4D" "$OTHER" name=someone-else suites_allowed=alpha.test.sh suites_source=declared files=
-guarded "$R4D" 'bash tests/alpha.test.sh'
+guarded "$R4D" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B4d no row for this agent refuses a named suite" "2" "$ST"
 expect_contains "B4d …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
 expect_contains "B4d …and why: no row carries its id" "no roster row carries your agent id $ACTOR" "$VERR"
@@ -380,14 +380,14 @@ expect_absent "B4d …never the other agent's row, whose set is not its budget" 
 guarded "$R4D" 'bash tests/run.sh'
 expect_eq "B4d …and still refuses the full tree" "2" "$ST"
 # A NAME THE HOOK CANNOT EXPAND, from an agent with no set: refused for the missing set.
-guarded "$R4D" 'for s in alpha beta; do s=gamma; bash "tests/$s.test.sh"; done'
+guarded "$R4D" 'for s in alpha beta; do s=gamma; tests/run.sh --only "$s.test.sh"; done'
 expect_eq "B4d a suite named by a variable is refused too" "2" "$ST"
 expect_contains "B4d …for the missing set" "no suite set is recorded for this agent" "$ERR"
 expect_empty "B4d …with nothing staged to run it" "$WRAP"
 # NON-VACUITY: the other agent's row IS on this roster, joined at its start, and binds IT.
-guarded "$R4D" 'bash tests/alpha.test.sh' "$OTHER"
+guarded "$R4D" 'tests/run.sh --only alpha.test.sh' "$OTHER"
 expect_eq "B4d control: the other agent's own budgeted suite is admitted" "0" "$ST"
-guarded "$R4D" 'bash tests/gamma.test.sh' "$OTHER"
+guarded "$R4D" 'tests/run.sh --only gamma.test.sh' "$OTHER"
 expect_eq "B4d control: …and its off-budget suite refused by its own set" "2" "$ST"
 expect_contains "B4d control: …the set its start joined" "alpha.test.sh" "$VERR"
 
@@ -407,7 +407,7 @@ BSG_TYPE="$BSG_TYPE_WAS"
 expect_absent "B4e precondition: the start of a test-runner joined no row (no row carries the id)" \
   "agent_id=$ACTOR" "$(cat "$R4E/.bionic/tmp/roster-$SID.state")"
 expect_contains "B4e precondition: …while its launch row is there" "|name=w-b4e|" "$(cat "$R4E/.bionic/tmp/roster-$SID.state")"
-guarded "$R4E" 'bash tests/alpha.test.sh'
+guarded "$R4E" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B4e1 the unplaced agent's suite is refused" "2" "$ST"
 expect_contains "B4e2 …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
 expect_contains "B4e3 …and why: its type is not a bionic: role, so its start is never placed" \
@@ -429,10 +429,10 @@ else
 fi
 expect_eq "B4e5 the printed line, run as printed by the orchestrator, exits 0" "0" "$B4E_RC"
 expect_contains "B4e6 …saying it recorded the set for that id" "poker: amended — $ACTOR" "$B4E_OUT"
-guarded "$R4E" 'bash tests/alpha.test.sh'
+guarded "$R4E" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B4e7 …and the suite it named now runs" "0" "$ST"
 expect_nonempty "B4e8 …wrapped in the booking shim" "$WRAP"
-guarded "$R4E" 'bash tests/gamma.test.sh'
+guarded "$R4E" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B4e9 a suite it did not name is still refused" "2" "$ST"
 expect_contains "B4e10 …against the set it recorded" "alpha.test.sh" "$VERR"
 expect_contains "B4e11 …and its remedy names the same id" "amend $ACTOR --suites+ gamma.test.sh" "$VERR"
@@ -446,9 +446,9 @@ dispatched "$R5" "$ACTOR" name=w-b5 suites_allowed=alpha.test.sh \
   suites_source=declared files=
 add_row "$R5" name=w-b5 "agent_id=$ACTOR" status=confirmed suites_allowed="alpha.test.sh delta.test.sh" \
   suites_source=declared files=
-guarded "$R5" 'bash tests/delta.test.sh'
+guarded "$R5" 'tests/run.sh --only delta.test.sh'
 expect_eq "B5a a suite the LATER row allows is allowed" "0" "$ST"
-guarded "$R5" 'bash tests/epsilon.test.sh'
+guarded "$R5" 'tests/run.sh --only epsilon.test.sh'
 expect_eq "B5b …and one neither row allows is still refused" "2" "$ST"
 expect_contains "B5b …against the later row's set" "alpha.test.sh delta.test.sh" "$VERR"
 
@@ -484,7 +484,7 @@ expect_absent "B6a …with no budget refusal in it" "budget" "$ERR"
 expect_absent "B6a …and no backgrounded-suite refusal either" "never read" "$ERR"
 # POSITIVE CONTROL: the same command, same repo, from an agent context, refuses — so B6a
 # is the partition and not a dud fixture.
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B6a control: the same command from an agent context REFUSES" "2" "$ST"
 
 # THE SAME PAYLOAD BACKGROUNDED, which is the arm the wrapper used to scope. Driven
@@ -495,42 +495,42 @@ run_hook "$(mk_payload "$R1" 'bash tests/gamma.test.sh' "" true)" "$GUARD"
 expect_eq "B6b …and a MAIN-THREAD backgrounded suite is silent too" "0" "$ST"
 expect_absent "B6b …the backgrounded-suite refusal does not fire there" \
   "a backgrounded suite's result is never read" "$ERR"
-guarded "$R1" 'bash tests/gamma.test.sh' "$ACTOR" true
+guarded "$R1" 'tests/run.sh --only gamma.test.sh' "$ACTOR" true
 expect_eq "B6b control: backgrounded from an agent context, REFUSED" "2" "$ST"
 
 # UNENGAGED: bionic's walls bind only a session that invoked canonical-sdlc.
 rm -f "$R1/.bionic/tmp/engaged-$SID.state"
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B6c an unengaged session is silent even off-budget (through the guard)" "0" "$ST"
 run_hook "$(mk_payload "$R1" 'bash tests/gamma.test.sh' "$ACTOR")" "$GUARD"
 expect_eq "B6c …and with an agent context as well" "0" "$ST"
 expect_empty "B6c …silently" "$OUT$ERR"
 : > "$R1/.bionic/tmp/engaged-$SID.state"
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B6c control: with the marker back, it REFUSES again" "2" "$ST"
 
 # UNARMED (no roster): the guard in front never runs the wall, so nothing is refused, and
 # the wall driven straight has no row to read and takes the no-statement path.
 R6=$(mk_repo b6)
 rm -f "$R6/.bionic/tmp/roster-$SID.state"
-guarded "$R6" 'bash tests/gamma.test.sh'
+guarded "$R6" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B6d an unarmed session is silent (the guard in front never runs the wall)" "0" "$ST"
 
 section "B7 — which arm speaks when both apply"
 # A backgrounded suite is refused whether or not it is on the budget, and being on the
 # budget is no answer to "nobody read the result" — so the B-9 arm speaks first.
-guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" true
+guarded "$R1" 'tests/run.sh --only alpha.test.sh' "$ACTOR" true
 expect_eq "B7a an ON-budget suite, backgrounded, is still REFUSED" "2" "$ST"
 expect_contains "B7a …by the B-9 arm, whose fact is on the user line" \
   "a backgrounded suite's result is never read" "$ERR"
 expect_absent "B7a …and not by the budget arm" "BUDGET" "$ERR"
 
-guarded "$R1" 'bash tests/gamma.test.sh' "$ACTOR" true
+guarded "$R1" 'tests/run.sh --only gamma.test.sh' "$ACTOR" true
 expect_eq "B7b an OFF-budget suite, backgrounded, is refused too" "2" "$ST"
 expect_contains "B7b …still by the B-9 arm, which is the wider refusal" \
   "a backgrounded suite's result is never read" "$ERR"
 
-guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" false
+guarded "$R1" 'tests/run.sh --only alpha.test.sh' "$ACTOR" false
 expect_eq "B7c run_in_background false is not backgrounded, and on-budget passes" "0" "$ST"
 expect_empty "B7c …silently" "$OUT$ERR"
 
@@ -559,7 +559,7 @@ expect_eq "B8d2 a script merely NAMED run.sh is not the full tree, and is allowe
 expect_empty "B8d2 …silently" "$OUT$ERR"
 
 # CONTROL: the same basename inside the repo is refused, so B8c is scoping and not silence.
-guarded "$R1" 'bash tests/probe2.test.sh'
+guarded "$R1" 'tests/run.sh --only probe2.test.sh'
 expect_eq "B8e control: the same basename INSIDE the repo is REFUSED" "2" "$ST"
 
 # THE SPLIT IS GUARDED. `bash tests/*.test.sh` names the literal `*.test.sh`, and the loop
@@ -608,15 +608,15 @@ section "B9 — a suite named by a shell VARIABLE is a different refusal (C-5, A
 # over two on-budget suites passes, and the same loop carrying an off-budget word draws the
 # ORDINARY refusal naming it. The unexpanded refusal is kept for a body that reassigns the
 # variable, which is the shape B9a now drives.
-guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
+guarded "$R1" 'for s in alpha beta; do tests/run.sh --only "$s.test.sh"; done'
 expect_eq "B9a0 a loop over a literal list of on-budget suites is ALLOWED" "0" "$ST"
 expect_empty "B9a0 …silently" "$OUT$ERR"
-guarded "$R1" 'for s in alpha gamma; do bash "tests/$s.test.sh"; done'
+guarded "$R1" 'for s in alpha gamma; do tests/run.sh --only "$s.test.sh"; done'
 expect_eq "B9a1 the same loop naming an off-budget suite is REFUSED" "2" "$ST"
 expect_contains "B9a1 …naming the off-budget suite, resolved" "gamma.test.sh" "$VERR"
 expect_absent "B9a1 …not as an unexpanded name" "unexpanded name" "$ERR"
 
-guarded "$R1" 'for s in alpha beta; do s=gamma; bash "tests/$s.test.sh"; done'
+guarded "$R1" 'for s in alpha beta; do s=gamma; tests/run.sh --only "$s.test.sh"; done'
 expect_eq "B9a a variable-named suite is still REFUSED" "2" "$ST"
 expect_contains "B9a …saying the name could not be resolved at hook time" \
   "unexpanded name; allowed: alpha.test.sh" "$ERR"
@@ -629,7 +629,7 @@ expect_contains "B9a …and telling the reader what to type instead: literal lin
 expect_absent "B9a …never claiming it is off the budget" "is not on this agent's suite budget" "$ERR"
 
 # THE BRACE FORM AND A COMMAND SUBSTITUTION ARE THE SAME STATE.
-guarded "$R1" 'bash "tests/${s}.test.sh"'
+guarded "$R1" 'tests/run.sh --only "${s}.test.sh"'
 expect_eq "B9b the brace spelling reads the same way" "2" "$ST"
 expect_contains "B9b …with the same refusal" \
   "unexpanded name; allowed: alpha.test.sh" "$ERR"
@@ -640,14 +640,14 @@ expect_contains "B9c …with the same refusal" \
 
 # CONTROL: the literal spelling the refusal asks for is allowed, so B9a is about the
 # spelling and not about the suite.
-guarded "$R1" 'bash tests/alpha.test.sh'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B9e control: the literal spelling of an on-budget suite passes" "0" "$ST"
 expect_empty "B9e …silently" "$OUT$ERR"
 
 # THE ORDINARY REFUSAL'S OWN ALIGNMENT. `You asked for : x` carried a space before the
 # colon — column alignment against the line above it, and a typo to everyone who did not
 # notice. Both labels now end at the colon and the values align on the padding.
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B9f control: an ordinary off-budget suite still refuses" "2" "$ST"
 expect_contains "B9f …and its label carries no space before the colon" "You asked for:" "$VERR"
 expect_absent "B9f …the stray space is gone" "You asked for :" "$ERR"
@@ -751,7 +751,7 @@ b11_line() {  # <label> <expected line>   (reads $ERR from the last `guarded`)
   else no "$1: with its detail beneath it, no knob set" "nothing after the verdict"; fi
 }
 
-guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" true
+guarded "$R1" 'tests/run.sh --only alpha.test.sh' "$ACTOR" true
 b11_line "B11a row 11 (backgrounded)" \
   "bionic: suite-run refused — a backgrounded suite's result is never read (run it in the foreground)"
 
@@ -764,11 +764,11 @@ b11_line "B11a row 11 (backgrounded)" \
 # now shows one token instead of "alpha.test.sh +1 more" — recomputed through
 # `_budget_wire_fact`, not hand-guessed (T25 report).
 # A body that reassigns `s` (wave-24 T5): a literal loop alone now resolves (B9a0).
-guarded "$R1" 'for s in alpha beta; do s=gamma; bash "tests/$s.test.sh"; done'
+guarded "$R1" 'for s in alpha beta; do s=gamma; tests/run.sh --only "$s.test.sh"; done'
 b11_line "B11b row 12 (an unexpanded name)" \
   "bionic: suite-run refused — unexpanded name; allowed: alpha.test.sh (spell each suite literally)"
 
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 b11_line "B11c row 13 (off the budget)" \
   "bionic: suite-run refused — allowed: alpha.test.sh beta.test.sh (run only the budgeted suites)"
 
@@ -777,7 +777,7 @@ b11_line "B11d row 14 (the full tree)" \
   "bionic: suite-run refused — full tree refused; allowed: alpha.test.sh (run your brief's suites)"
 
 # NO RECORDED SET (wave-27 T5, D15): R4D carries no row for this agent.
-guarded "$R4D" 'bash tests/alpha.test.sh'
+guarded "$R4D" 'tests/run.sh --only alpha.test.sh'
 b11_line "B11d2 no set recorded" \
   "bionic: suite-run refused — no suite set is recorded for this agent (send main the suites you need)"
 
@@ -790,7 +790,7 @@ b11_line "B11d2 no set recorded" \
 # the absence: the verdict line is the ruled sentence and carries none of the prose, and
 # the prose is on the stream beneath it with no knob set. Asserted on the line and on the
 # stream separately, so neither half can pass over an empty capture.
-guarded "$R1" 'bash tests/gamma.test.sh'
+guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_contains "B11e even without the knob the allowed set now reaches the DEFAULT stream" \
   "alpha.test.sh beta.test.sh" "$ERR"
 expect_absent "B11e …but the explanatory PROSE is NOT on the verdict line" "On the budget:" \
@@ -838,7 +838,7 @@ expect_contains "B12b …by the same B-9 fact" \
 
 # AC-6.3: the foreground forms are untouched. alpha.test.sh is ON R1's budget so a false
 # refusal here can only be this new arm, never ARM 2.
-guarded "$R1" 'bash tests/alpha.test.sh'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B12c a plain foreground suite is ALLOWED" "0" "$ST"
 expect_empty "B12c …silently" "$OUT$ERR"
 
@@ -913,11 +913,11 @@ expect_empty "B13d …silently" "$OUT$ERR"
 R13B=$(mk_repo b13b)
 dispatched "$R13B" "$ACTOR" name=w-b13b "suites_allowed=alpha.test.sh" \
   suites_source=declared files=payload/scripts/lib/widget.sh \
-  "re_executes=\`bash tests/gamma.test.sh\`"
-guarded "$R13B" 'bash tests/gamma.test.sh'
+  "re_executes=\`tests/run.sh --only gamma.test.sh\`"
+guarded "$R13B" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B13e a declared run naming a shell suite is allowed" "0" "$ST"
 expect_empty "B13e …silently" "$OUT$ERR"
-guarded "$R13B" 'bash tests/delta.test.sh'
+guarded "$R13B" 'tests/run.sh --only delta.test.sh'
 expect_eq "B13f …and a suite NEITHER channel names is still refused" "2" "$ST"
 expect_contains "B13f …naming the suite that was asked for" "delta.test.sh" "$VERR"
 
@@ -960,7 +960,7 @@ guarded "$R13E" 'bash tests/run.sh'
 expect_eq "B13j a DECLARED run naming the full tree is still REFUSED" "2" "$ST"
 expect_contains "B13j …by the full-tree arm" "The full suite runs once, on the head being released" "$VERR"
 # The same row still holds its other half: the declared set is not voided by the refusal.
-guarded "$R13E" 'bash tests/alpha.test.sh'
+guarded "$R13E" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B13k …and the row's budgeted suite still runs" "0" "$ST"
 expect_empty "B13k …silently" "$OUT$ERR"
 
@@ -1044,7 +1044,7 @@ section "B14 — wave-24 T5 (AC-6.4, 7.3, 7.5, 7.6): the classifier is right in 
 # agent meets them.
 
 # ADMITTED NOW (were refused).
-guarded "$R1" 'bash tests/alpha.test.sh & bash tests/beta.test.sh & wait'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh & tests/run.sh --only beta.test.sh & wait'
 expect_eq "B14a a fan-out that waits is ALLOWED" "0" "$ST"
 expect_empty "B14a …silently" "$OUT$ERR"
 guarded "$R1" '<tests/gamma.test.sh wc -l'
@@ -1055,15 +1055,15 @@ expect_eq "B14c an off-budget suite named only in a case pattern is ALLOWED" "0"
 expect_empty "B14c …silently" "$OUT$ERR"
 
 # STILL REFUSED beside them, the same arm speaking.
-guarded "$R1" 'bash tests/alpha.test.sh & bash tests/beta.test.sh'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh & tests/run.sh --only beta.test.sh'
 expect_eq "B14d a fan-out that does not wait is still REFUSED" "2" "$ST"
 expect_contains "B14d …by the backgrounded-suite fact" "a backgrounded suite's result is never read" "$ERR"
 
 # REFUSED NOW (were bypasses — class none, so no arm saw a suite).
-guarded "$R1" '2>/dev/null bash tests/gamma.test.sh'
+guarded "$R1" '2>/dev/null tests/run.sh --only gamma.test.sh'
 expect_eq "B14e an off-budget run behind a leading redirect is REFUSED" "2" "$ST"
 expect_contains "B14e …naming it" "gamma.test.sh" "$VERR"
-guarded "$R1" 'case $x in a) bash tests/gamma.test.sh;; esac'
+guarded "$R1" 'case $x in a) tests/run.sh --only gamma.test.sh;; esac'
 expect_eq "B14f an off-budget run inside a case arm is REFUSED" "2" "$ST"
 expect_contains "B14f …naming it" "gamma.test.sh" "$VERR"
 guarded "$R1" 'X=gamma.test.sh; bash tests/$X'
@@ -1079,7 +1079,7 @@ section "B15 — wave-25 T12: a command NAME is read the way the machine resolve
 # reached through any of them is the run its lower-case form is: on the budget, off it, or
 # backgrounded. Before T12 the classifier left the capitalised word as argv[0] and read
 # class none, so an off-budget suite passed this arm in silence. R1's row is the budget.
-guarded "$R1" 'bash tests/alpha.test.sh'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B15a control: an on-budget suite is allowed" "0" "$ST"
 guarded "$R1" 'BASH tests/alpha.test.sh'
 expect_eq "B15a …and so is its capitalised form" "0" "$ST"
@@ -1091,11 +1091,11 @@ for sp in 'BASH tests/gamma.test.sh' 'SUDO bash tests/gamma.test.sh' 'Bash -c "b
 done
 guarded "$R1" 'PYTEST'
 expect_eq "B15c a capitalised runner form outside the row's set is REFUSED, as pytest is" "2" "$ST"
-guarded "$R1" 'NOHUP bash tests/alpha.test.sh'
+guarded "$R1" 'NOHUP tests/run.sh --only alpha.test.sh'
 expect_eq "B15d NOHUP backgrounds an on-budget suite: REFUSED, as nohup is" "2" "$ST"
 expect_contains "B15d …by the B-9 fact" "a backgrounded suite's result is never read" "$ERR"
 # WAIT is /usr/bin/WAIT, which collects no job of this shell: the suite is still backgrounded.
-guarded "$R1" 'bash tests/alpha.test.sh & WAIT'
+guarded "$R1" 'tests/run.sh --only alpha.test.sh & WAIT'
 expect_eq "B15e WAIT is not wait: the backgrounded suite is REFUSED" "2" "$ST"
 expect_contains "B15e …by the B-9 fact" "a backgrounded suite's result is never read" "$ERR"
 # ONLY THE WORD FOLDS: an operand path keeps its case, beside B15a's positive.
