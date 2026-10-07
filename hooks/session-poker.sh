@@ -25,6 +25,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's declared floor in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
 #     bash <plugin-root>/hooks/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle a check a finding owes, on its check: line (writes the plan)
@@ -448,6 +449,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
+  die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run .bionic/config.yaml's floor: command in the working branch's checkout; write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle the check an unsure finding owes, on its check: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
@@ -770,6 +772,10 @@ case "$VERB" in
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
   release-check)
     [ $# -eq 0 ] || usage "release-check takes no arguments: it runs from the nearest tag reachable from the plan's integration-branch that is a proper ancestor of the working head (else its base-sha) to that head."
+    ;;
+  # NO OPERAND (wave-28 T75; D36): the command is the project's `floor:` and the head is the working one.
+  floor-run)
+    [ $# -eq 0 ] || usage "floor-run takes no arguments: it runs .bionic/config.yaml's floor: command at the working branch's head."
     ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
@@ -6683,8 +6689,9 @@ PF_OTHER_LIST
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
     # The plan goes too: a review's range must start at or before its last review proof (T62).
     # A reading's range starts at or before the last proof of its own question (wave-27 T2; D1).
+    # The project root goes too: a project that declares its floor has it judged by its own contract (T75; D36).
     PF_CO="$(proof_checkout "$PV_REPO" "$PF_WB")"
-    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PF_CO" "$PV_PLAN" "$PF_QUESTION")"; then
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PF_CO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO")"; then
       die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
@@ -7284,6 +7291,84 @@ RC_TAGS
     # THE RUN'S NUMBERS (wave-28 T14; D18): the report's line and each landed row, read and printed only.
     landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$(cd "$PV_REPO" 2>/dev/null && pwd -P)" yes \
       | while IFS= read -r _rc_l; do say "release-check — $_rc_l"; done
+    exit 0
+    ;;
+
+  # THE DECLARED FLOOR'S RUN (wave-28 T75; REQ-17 AC-17.1, D36). A project whose floor is not tests/run.sh
+  # names it in `.bionic/config.yaml` under `floor:`, split on blanks with globbing off as `release-check:`
+  # is. This verb runs it in the checkout of the plan's working branch, reading the head and the dirty
+  # count (`_wt_piece_dirt`, land's reading: untracked files count, the record link does not) before the
+  # run and again after it: a run that moved either is not a run of the head it read, so it is refused
+  # and no log is written. Otherwise every run keeps its log, `record/<wave>/floor-run-<head>.log`, the
+  # n-th at one head `floor-run-<head>-<n>.log`, opening `head=<40-hex> dirty=<n> rc=<n>`, then
+  # `command: <cmd>`, then the output, and the verb exits with the command's code.
+  # IT RUNS AND LOGS; IT WRITES NO PROOF. `release-check` writes its own fact because a check is a run the
+  # verb owns; a floor is evidence the run cites, and `proof-add floor` stays the one writer of its line
+  # (lib/proof.sh `_proof_floor_declared` judges the log there). With no key it refuses and runs nothing.
+  floor-run)
+    FR_CMD="$(config_value "$(project_root "$PWD")" floor "" 2>/dev/null)"
+    if [ -z "$FR_CMD" ]; then
+      die "REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run."
+      exit 1
+    fi
+    if ! { declare -F proof_checkout >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_working_branch >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
+      exit 2
+    fi
+    plan_verb_open floor-run
+    FR_WB="$(proof_working_branch "$PV_PLAN")"
+    FR_CO=""; [ -z "$FR_WB" ] || FR_CO="$(proof_checkout "$PV_REPO" "$FR_WB")" || FR_CO=""
+    FR_HEAD=""; [ -z "$FR_CO" ] || FR_HEAD="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
+    case "$FR_HEAD" in
+      [0-9a-f]*) : ;;
+      *)
+        die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${FR_WB:-(none named)} checked out, so there is no head to run the floor at; nothing was run."
+        exit 1 ;;
+    esac
+    FR_DIRTY="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"
+    FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-floor-run.XXXXXX")" || {
+      die "REFUSED — no scratch file for the floor's output can be made under ${TMPDIR:-/tmp}; nothing was run."
+      exit 1
+    }
+    ( cd "$FR_CO" 2>/dev/null || exit 1
+      set -f
+      # shellcheck disable=SC2086  # the configured command splits on blanks, as release-check's does
+      exec $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
+    FR_RC=$?
+    FR_NOW="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
+    FR_DIRTY2="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"
+    FR_MOVED=""
+    [ "$FR_NOW" = "$FR_HEAD" ] || FR_MOVED="head ${FR_HEAD:0:12} to ${FR_NOW:-<none>}"
+    [ "$FR_DIRTY2" = "$FR_DIRTY" ] || FR_MOVED="${FR_MOVED:+$FR_MOVED, }dirty=$FR_DIRTY to dirty=$FR_DIRTY2"
+    if [ -n "$FR_MOVED" ]; then
+      cat "$FR_TMP"; rm -f "$FR_TMP"
+      die "REFUSED — the floor ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run floor-run again."
+      exit 1
+    fi
+    FR_WAVE="${PV_PLAN##*/}"; FR_WAVE="${FR_WAVE%.plan.md}"
+    FR_DOCS="$(docs_root "$PV_REPO")"
+    FR_REL="record/$FR_WAVE/floor-run-$FR_HEAD.log"; FR_NTH=1
+    while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/floor-run-$FR_HEAD-$FR_NTH.log"; done
+    FR_LOG="$FR_DOCS/$FR_REL"
+    if ! mkdir -p "${FR_LOG%/*}" 2>/dev/null \
+       || ! { printf 'head=%s dirty=%s rc=%s\ncommand: %s\n' "$FR_HEAD" "$FR_DIRTY" "$FR_RC" "$FR_CMD"; cat "$FR_TMP"; } > "$FR_LOG" 2>/dev/null; then
+      cat "$FR_TMP"; rm -f "$FR_TMP"
+      die "REFUSED — the floor exited $FR_RC, but its log $FR_LOG cannot be written."
+      exit 1
+    fi
+    if [ "$FR_RC" -ne 0 ]; then
+      cat "$FR_TMP"; rm -f "$FR_TMP"
+      die "floor-run — the floor ($(clean "$FR_CMD")) exited $FR_RC at ${FR_HEAD:0:12}; its log is $FR_REL. Fix what it names, commit, and run floor-run again."
+      exit "$FR_RC"
+    fi
+    rm -f "$FR_TMP"
+    say "floor-run — head=$FR_HEAD dirty=$FR_DIRTY rc=0 evidence=$FR_REL"
+    if [ "$FR_DIRTY" -ne 0 ]; then
+      say "floor-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add floor refuses this log; commit and run floor-run again."
+    else
+      say "floor-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add floor $FR_REL"
+    fi
     exit 0
     ;;
 
