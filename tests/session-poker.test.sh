@@ -12504,6 +12504,38 @@ expect_eq "69g7 …and leaves it holding nothing" "" "$(ls -A "$S69_EMPTY")"
 expect_eq "69g8 …while the plan's own directory holds no copy left behind" "wave-x.plan.md" "$(ls -A "${P69%/*}")"
 POKE_BOUND="$S69_BOUND_WAS"
 
+# ============================================================
+section "Section 70 §RIGOR: a plan carrying high advances where one carrying audited does, and is dealt the same set (wave-28 T44; REQ-16 AC-16.1; D35, A-orch-7)"
+# ============================================================
+# The judge reads the rigor word through lib/run.sh `rigor_level` (proof.sh `facts_owed`), so a
+# plan in the new words is dealt the readers the old word deals it: the same roles hold the same
+# questions, `current 8` is refused on the same missing fact and admitted on the same set. §61's
+# fixture, unchanged, with only its `rigor:` line set to each word of a pair.
+S70_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S70_H="$(git -C "$S61_WT" rev-parse HEAD 2>/dev/null)"
+expect_regex "70a0 precondition: §61's working branch still has a head" '^[0-9a-f]{40}$' "$S70_H"
+s70_deal() {  # <rigor> -> facts_owed's review lines at wave scale, one per line
+  bash -c '. "$1" && facts_owed "$2" wave' _ "$S61_LIB" "$1" 2>/dev/null | /usr/bin/grep '^review'
+}
+for s70p in audited:high peer-reviewed:medium tested:low; do
+  s70o="${s70p%%:*}"; s70n="${s70p#*:}"
+  expect_nonempty "70a $s70o is dealt readings (the extractor reads real output)" "$(s70_deal "$s70o")"
+  expect_eq "70b $s70n is dealt exactly what $s70o is" "$(s70_deal "$s70o")" "$(s70_deal "$s70n")"
+  for s70w in "$s70o" "$s70n"; do
+    s61_reset; s61_rigor "$s70w"; s61_owed "$S70_H" structure
+    s42_snap "$R61" "$P61"
+    poke "$R61" current 8
+    s42_unchanged "70c at $s70w, current 8 with no structure fact" 1 "$P61"
+    expect_contains "70c2 …at $s70w, naming the structure question's holder absent" \
+      "$(printf 'review\tstructure\t%s\tpiece\tabsent' "$(s70_deal "$s70o" | awk -F'\t' '$2 == "structure" { print $3; exit }')")" "$OUT"
+    s61_fact structure "$S70_H" pass piece; s61_fact structure "$S70_H" pass whole
+    poke "$R61" current 8
+    expect_eq "70d …at $s70w, the same plan with it advances (exit 0)" "0" "$RC"
+    expect_eq "70d2 …and reads current: 8" "8" "$(s61_cur)"
+  done
+done
+s61_reset
+POKE_BOUND="$S70_BOUND_WAS"
 
 # ============================================================
 section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"
