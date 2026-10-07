@@ -5713,18 +5713,20 @@ _bsg_cd_walk() {
 # _door_in_tree — sets _DOOR_HERE to yes when THE PROJECT THE RUN IS IN HAS THE RUNNER'S DOOR, else no
 # (wave-28 T54, D27; A-orch-124/125). The one predicate behind both halves of the door: the arm that
 # refuses a bare run, and the wrap that tells the shim `--runner`. The project is the tree the shim
-# asks from (booked.sh's `tree=`: `--stamp-dir`, else a leading `cd <dir>`, else the payload's cwd),
-# which is `_bsg_cd_walk`'s `_BSG_CD_DIR` (it IS the --stamp-dir when the walk is sure of it), so the
-# caller has walked the command first. Its checkout's tests/run.sh must say `--only`: a project with
+# asks from (booked.sh's `tree=`: `--stamp-dir`, else a leading `cd <dir>`, else the payload's cwd):
+# `_bsg_cd_walk`'s `_BSG_STAMP_DIR` when the walk is sure of a `cd`, else the payload's cwd
+# (`_BSG_CWD`), the same expression `_bsg_suites` roots its stamp names at; so the caller has walked
+# the command first. A walk that is not sure falls back to the cwd, as the shim does when it reads no
+# `cd` it can trust. Its checkout's tests/run.sh must say `--only`: a project with
 # suites and no runner, or a runner of its own that takes no flag, has no door to point an agent at.
 # A tree the walk cannot name (no cwd in the payload, a `cd` into nothing) has no runner to find;
 # `git -C ""` would read the hook's own directory instead, so it is not asked.
 _DOOR_HERE=no
 _door_in_tree() {
-  local _top
+  local _top _dir="${_BSG_STAMP_DIR:-$_BSG_CWD}"
   _DOOR_HERE=no
-  [ -n "$_BSG_CD_DIR" ] && [ -d "$_BSG_CD_DIR" ] || return 0
-  _top="$(git -C "$_BSG_CD_DIR" rev-parse --show-toplevel 2>/dev/null)" || _top="$_BSG_CD_DIR"
+  [ -n "$_dir" ] && [ -d "$_dir" ] || return 0
+  _top="$(git -C "$_dir" rev-parse --show-toplevel 2>/dev/null)" || _top="$_dir"
   [ -f "$_top/tests/run.sh" ] || return 0
   ! grep -qF -- '--only' "$_top/tests/run.sh" 2>/dev/null || _DOOR_HERE=yes
 }
