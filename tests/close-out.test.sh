@@ -1684,8 +1684,10 @@ PC="$(mk_fixture carry1)"; advance_to "$PC" 8
 carry_plant "$PC" \
   "deferred: $CARRY_REC#2 S3 on \"second, written first\" stated=\"The second sentence.\"" \
   "deferred: $CARRY_REC#1 S2 off \"first, unstated\"" \
-  "check: $CARRY_REC#4 S1 off \"a check owed, not a deferral\"" \
+  "check: $CARRY_REC#4 S1 off \"a settled check, not a deferral\" settled=S2:off by=record/wave-01-fixture/chk.md" \
   "deferred: $CARRY_REC#3 S2 off \"third, quoted\" stated=\"$CARRY_Q1\""
+# The check: line is SETTLED (wave-28 T14, ruling A-orch-165): since T41 an open check holds the step, so
+# the fixture settles it, in finding-check's form, at a rating the table defers (S2 off).
 expect_eq "CARRY-0 precondition: the plan carries three deferred: lines and one check: line inside its SDLC State" "3 1" \
   "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ d++ } s && /^check: /{ c++ } END { print d + 0, c + 0 }' "$PC/$PLAN_REL")"
 run_close "$PC" run
@@ -1982,5 +1984,107 @@ expect_eq "CARRY-mut7 the doctored run still closes, and the hand-written contin
 expect_eq "CARRY-mut8 …and adds nothing carried, so CARRY-26 and CARRY-28a go red on it" "1" \
   "$(carry_section "$PR/$CONT_REL" | wc -l | tr -d ' ')"
 rm -rf "$CARRY_MUT"
+
+
+# ============================================================
+section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints the run's numbers with each landed row"
+# ============================================================
+# A continuation close-out writes from its template carries `## Landings`: the report's line and one
+# line per landed row (`session-poker.sh landing-report --rows <plan>`), read from the run's landing
+# record and the gate's requests and only printed. The plan is NAMED to the report, never resolved
+# through the session: act 3 has wiped the session's binding before the continuation is written.
+# FIXTURE FIDELITY: the events are PLANTED in the Interfaces table's `line/v1` shape, which
+# lib/line.sh writes; the gate store is the sandbox's own, empty.
+LAND_GATE="$SANDBOX/land-gate"; mkdir -p "$LAND_GATE/requests"
+LAND_C="$(printf 'c%.0s' $(seq 40))"
+# land_section <continuation> -> what stands under `## Landings`, up to the next `## `, fences and blank
+# lines dropped; nothing when there is no such heading.
+land_section() { awk '/^## / { s = ($0 == "## Landings"); next } s && NF && !/^```/ { print }' "$1"; }
+land_plant() {  # <project> -> a ready and a queue landing for T1, a git landing for T2
+  local rec="$1/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "land_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  mkdir -p "${rec%/*}"
+  printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
+  printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
+  printf 'line/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
+}
+PLD="$(mk_fixture landings1)"; advance_to "$PLD" 8
+land_plant "$PLD"
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLD" run
+expect_eq "LAND-1 run exits 0 over a run whose landing record holds two landings" "0" "$CO_RC"
+expect_eq "LAND-2 the continuation carries the heading ## Landings exactly once" "1" \
+  "$(/usr/bin/grep -c '^## Landings$' "$PLD/$CONT_REL" | tr -d ' ')"
+expect_nonempty "LAND-3 precondition: the extractor finds lines under the heading" "$(land_section "$PLD/$CONT_REL")"
+expect_eq "LAND-4 …the report's line, then a line per landed row, as landing-report --rows prints them" \
+"landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0
+T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=0s
+T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+  "$(land_section "$PLD/$CONT_REL")"
+expect_eq "LAND-5 …and the heading sits after ## Deferrals and before the Resume instruction" "yes" \
+  "$(awk '/^## Deferrals$/ { a = NR } /^## Landings$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PLD/$CONT_REL")"
+expect_eq "LAND-6 …and the Deferrals section above it still ends at its own heading (nothing of the report under it)" "0" \
+  "$(awk '/^## / { s = ($0 == "## Deferrals"); next } s && /^landings: /' "$PLD/$CONT_REL" | wc -l | tr -d ' ')"
+# no record: the line with zeros
+PLZ="$(mk_fixture landings2)"; advance_to "$PLZ" 8
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLZ" run
+expect_eq "LAND-7 a run with no landing record exits 0 and its continuation carries the line with zeros, and no row" \
+  "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "$CO_RC|$(land_section "$PLZ/$CONT_REL")"
+# an existing continuation is never overwritten: no section is added to it
+PLE="$(mk_fixture landings3)"; advance_to "$PLE" 8
+land_plant "$PLE"
+mkdir -p "$PLE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PLE/$CONT_REL"
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLE" run
+expect_eq "LAND-8 a continuation written before close-out keeps its bytes: run exits 0 and adds no ## Landings" "0|0" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Landings$' "$PLE/$CONT_REL" | tr -d ' ')"
+expect_eq "LAND-8b …control: the same continuation keeps its own line" "1" "$(/usr/bin/grep -c '^edited by a person$' "$PLE/$CONT_REL" | tr -d ' ')"
+# the mutation arm: a doctored copy whose template drops the section
+LAND_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-land-mut.XXXXXX")"
+mkdir -p "$LAND_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$LAND_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$LAND_MUT/scripts/card.sh"
+sed 's/^\$(co_landings_section)$//' "$SCRIPT" > "$LAND_MUT/scripts/close-out.sh"
+expect_eq "LAND-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$LAND_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PLM="$(mk_fixture landings4)"; advance_to "$PLM" 8
+land_plant "$PLM"
+( cd "$PLM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    BIONIC_GATE_DIR="$LAND_GATE" bash "$LAND_MUT/scripts/close-out.sh" "$PLM/$PLAN_REL" run ) > "$SANDBOX/land-mut.out" 2>&1
+LAND_MRC=$?
+expect_eq "LAND-mut1 the doctored run still closes and writes its continuation (the mutant runs)" "0|1" \
+  "$LAND_MRC|$(/usr/bin/grep -c '^## Deferrals$' "$PLM/$CONT_REL" | tr -d ' ')"
+expect_eq "LAND-mut2 …and carries no ## Landings, so LAND-2 and LAND-4 go red on it" "0" \
+  "$(/usr/bin/grep -c '^## Landings$' "$PLM/$CONT_REL" | tr -d ' ')"
+rm -rf "$LAND_MUT"
+
+# ---- wave-28 T62 (AC-4.6, D18): a run open across the upgrade holds `landed:` lines and no line/v1 event ----
+# The report says so (`landings: unmeasured`) where it once printed zeros; the continuation's section is
+# that one line, with no fence and no row.
+PLU="$(mk_fixture landings5)"; advance_to "$PLU" 8
+LAND_UREC="$PLU/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+mkdir -p "${LAND_UREC%/*}"
+printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-06T10:09:00Z|suites=a.test.sh\n' \
+  "$LAND_C" "$LAND_C" "$LAND_C" > "$LAND_UREC"
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLU" run
+expect_eq "LAND-9 a record of landed lines and no line/v1 event: run exits 0 and ## Landings is the one unmeasured line" \
+  "0|landings: unmeasured — the landing record holds no line/v1 events" "$CO_RC|$(land_section "$PLU/$CONT_REL")"
+expect_eq "LAND-9b …under no fence, and with no zeros anywhere in the continuation" "0|0" \
+  "$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLU/$CONT_REL" | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^landings: queue=0 ' "$PLU/$CONT_REL" | tr -d ' ')"
+# the mutation arm: the unfenced branch never taken, so the section is fenced again
+LAND_UMUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-unm-mut.XXXXXX")"
+mkdir -p "$LAND_UMUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$LAND_UMUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$LAND_UMUT/scripts/card.sh"
+sed 's/^      "landings: unmeasured "\*)/      "landings: never "*)/' "$SCRIPT" > "$LAND_UMUT/scripts/close-out.sh"
+expect_eq "LAND-mut3 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$LAND_UMUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PLV="$(mk_fixture landings6)"; advance_to "$PLV" 8
+mkdir -p "$PLV/.bionic/docs/record/wave-01-fixture"; cp "$LAND_UREC" "$PLV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+( cd "$PLV" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    BIONIC_GATE_DIR="$LAND_GATE" bash "$LAND_UMUT/scripts/close-out.sh" "$PLV/$PLAN_REL" run ) > "$SANDBOX/land-umut.out" 2>&1
+LAND_UMRC=$?
+expect_eq "LAND-mut4 the doctored run still closes and fences the line (two fence lines), which LAND-9b forbids" "0|2" \
+  "$LAND_UMRC|$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLV/$CONT_REL" | wc -l | tr -d ' ')"
+rm -rf "$LAND_UMUT"
 
 finish

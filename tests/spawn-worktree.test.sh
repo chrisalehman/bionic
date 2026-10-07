@@ -278,6 +278,37 @@ mkdir -p "$NB/.bionic"
 expect_match "the same repo is accepted once .bionic exists (the arm discriminates)" \
   "spawn-worktree: OK *" "$(spawn_out "$NB" create "$NBSHA" nostate)"
 
+section "§DISK: create refuses when free disk is under the largest tree (wave-28 T9; D15, REQ-2)"
+#
+# The dispatch wall's worktrees ceiling went with the probe's budget line (D15). What it stood
+# for is asked where a tree is made: `create` refuses when the project's volume has less free
+# space than the largest tree already there, naming both figures in KB. The figures are planted
+# (BIONIC_PROBE_DISK_FREE_KB, BIONIC_PROBE_TREE_KB); a disk is never filled. DISK.4 plants only
+# the free figure and lets the script measure the real tree, so the measuring path is driven.
+# fails-when: a create under the largest tree's size is admitted, or one at or over it refused,
+# or the refusal names a figure it was not given.
+RD="$(new_repo "$TMP/rd")"
+SHAD="$(sha_of "$RD")"
+OUTD1="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=5 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-low 2>/dev/null )"
+expect_eq "DISK.1 free 5 KB under a largest tree of 9 KB is refused, naming both figures" \
+  "spawn-worktree: FAIL reason=disk-low free_kb=5 largest_tree_kb=9" "$OUTD1"
+expect_false "DISK.1b …leaving no worktree behind" test -e "${RD}/.worktrees/d-low"
+expect_false "DISK.1c …and no branch" git -C "$RD" show-ref --verify --quiet refs/heads/d-low
+expect_eq "DISK.1d …exiting 2, a refusal" "2" \
+  "$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=5 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-low-rc >/dev/null 2>&1; echo $? )"
+OUTD2="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=9 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-even 2>/dev/null )"
+expect_match "DISK.2 free equal to the largest tree is admitted" "spawn-worktree: OK path=${RD}/.worktrees/d-even *" "$OUTD2"
+OUTD3="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=1 BIONIC_PROBE_TREE_KB=0 bash "$SPAWN" create "$SHAD" d-none 2>/dev/null )"
+expect_match "DISK.3 with no tree's size to meet, a small free figure is admitted" "spawn-worktree: OK path=${RD}/.worktrees/d-none *" "$OUTD3"
+DSZ="$(du -sk "${RD}/.worktrees/d-even" | awk '{ print $1 }')"
+expect_true "DISK.4 meta: a real tree stands and du reads it above 1 KB (${DSZ})" test "${DSZ:-0}" -gt 1
+OUTD4="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=1 bash "$SPAWN" create "$SHAD" d-meas 2>/dev/null )"
+expect_match "DISK.4 free 1 KB against the measured trees is refused, naming the largest it measured" \
+  "spawn-worktree: FAIL reason=disk-low free_kb=1 largest_tree_kb=[0-9]*" "$OUTD4"
+expect_false "DISK.4b …and nothing was made" test -e "${RD}/.worktrees/d-meas"
+OUTD5="$( cd "$RD" && bash "$SPAWN" create "$SHAD" d-real 2>/dev/null )"
+expect_match "DISK.5 control: the real disk has room for a tree this small" "spawn-worktree: OK path=${RD}/.worktrees/d-real *" "$OUTD5"
+
 section "Group 8: create — a tracked .bionic in the branch is left alone, no alias planted"
 #
 # Until C2 this fixture was the self-verification failure: `git worktree add`
@@ -1061,6 +1092,14 @@ rd_world() {  # -> a world root with T1's launch line naming a.test.sh
   local r
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  # THE PLAN THE REAL COMMIT GATE ADMITS (wave-28 T9, after T6): `ready` now writes the row's own
+  # line through `row-landed`, whose dry commit runs the real gate over the world's plan, so the
+  # plan carries what landing-line's ll_world gives it: the version, the approval and the rows' lines.
+  awk '{ print }
+    /^working-branch: / { print "canonical_sdlc_version: 14" }
+    /^current: 4$/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; print "- Step 4: started"; print "- T1: active"; print "- T2: active" }' \
+    "$r/.bionic/docs/plans/epic-x/wave-x.plan.md" > "$r/.bionic/docs/plans/epic-x/wave-x.plan.md.n" \
+    && mv "$r/.bionic/docs/plans/epic-x/wave-x.plan.md.n" "$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
   printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 \
     agent_id=b00T1 plan="$r/.bionic/docs/plans/epic-x/wave-x.plan.md")" >> "$r/.bionic/tmp/roster-$WORLD_SID.state"
   printf '%s' "$r"
@@ -1107,5 +1146,84 @@ expect_match "…printing LANDED, then the owed line" \
 landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
 expect_eq "…and the working branch moved to the landed commit" \
   "$(git -C "$RDB" rev-parse wave/x)" "$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
+
+section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan lands by ready, its stamp is never read, a bare land names the new verbs (wave-28 T21; D26, REQ-2 AC-2.11, REQ-7 AC-7.2)"
+#
+# The fixture is a plan AS 1.12.0 WROTE IT (tests/fixtures/upgrade-1.12.0): the `source=probe` budget line, rows
+# with no `Lands-on:` label, and roster launch rows carrying `suites_allowed=` and neither `row=` nor `lands_on=`.
+# T1's tree holds a stamp, in the bare form 1.12.0's land read, that says RED for a.test.sh at T1's head. `ready`
+# lands the row on a green run of its own and reads no stamp.
+. "$(dirname "$0")/fixtures/upgrade-1.12.0/install.sh"
+world_cost a.test.sh 5 0.5 5
+up_world() {  # [<T1 suites_allowed>] -> a world root holding the 1.12.0 fixture (its own launch rows, not rd_world's)
+  local r
+  r="$(world_repo)" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  up_install "$r" "$@" || return 1
+  printf '%s' "$r"
+}
+up_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
+UPA="$(up_world)"
+UPA_T1="$UPA/.worktrees/T1"
+UPA_HEAD="$(git -C "$UPA_T1" rev-parse HEAD)"
+UPA_STAMPS="$(git -C "$UPA_T1" rev-parse --absolute-git-dir)/bionic-stamps"
+UPA_WHY="$(bash -c '. "$1" 2>/dev/null; _wt_stale_proof "$2" "$3"' _ "${REPO}/payload/scripts/lib/worktree.sh" "$UPA_T1" "$UPA_HEAD" 2>&1)"
+expect_match "(up1-pre) the planted stamp is a RED to 1.12.0's own reader: the land judges the tree's runs stale" "why=*" "$UPA_WHY"
+UPA_STAMP_BYTES="$(cat "$UPA_STAMPS")"
+rd_ready "$UPA_T1"
+expect_eq "(up1) ready on the 1.12.0 fixture lands the row (exit 0)" "0" "$RD_RC"
+expect_match "(up1) …printing LANDED, then the owed line" "LANDED T1 *
+landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
+UPA_C="$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
+expect_eq "(up1) …and the working branch moved to the landed commit" "$UPA_C" "$(git -C "$UPA" rev-parse wave/x)"
+expect_contains "(up2) the suite that decided it ran on the candidate and was green, whatever the stamp said" \
+  "|ev=verdict|row=T1|commit=${UPA_C}|suite=a.test.sh|result=green|" "$(cat "$(up_rec "$UPA")" 2>/dev/null)"
+expect_eq "(up2) …and the stamp is exactly as it was planted (ready neither read nor wrote it)" "$UPA_STAMP_BYTES" "$(cat "$UPA_STAMPS")"
+
+# THE MUTATION ARM: a copy of the scripts whose `ready` judges the tree's stamps as 1.12.0's land did. It runs in a
+# directory made outside every checkout; the tracked file is never touched.
+UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
+cp -R "${REPO}/payload/scripts" "$UPM_DIR/scripts" 2>/dev/null
+awk '/^  # THE ROSTER.S LAUNCH LINE \(labels, D4\)/ && !d { print "  why=\"$(_wt_stale_proof \"$wt\" \"$head\")\" && { _wt_refuse \"stale-proof ${why}\"; return 2; }"; d = 1 }
+  { print }' "${REPO}/payload/scripts/lib/line.sh" > "$UPM_DIR/scripts/lib/line.sh"
+expect_eq "(up3-pre) the mutant differs from line.sh by the one stamp-reading line" "1" \
+  "$(diff "${REPO}/payload/scripts/lib/line.sh" "$UPM_DIR/scripts/lib/line.sh" | /usr/bin/grep -c '^>')"
+UPM="$(up_world)"
+UPM_OUT="$( cd "$UPM/.worktrees/T1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 bash "$UPM_DIR/scripts/spawn-worktree.sh" ready 2>&1 )"; UPM_RC=$?
+expect_eq "(up3) the mutant that reads the stamp refuses the row (exit 2), so (up1) goes red against it" "2" "$UPM_RC"
+expect_contains "(up3) …saying the proof was stale" "REFUSED reason=stale-proof" "$UPM_OUT"
+rm -rf "$UPM_DIR"
+
+# A 1.12.0 ROW THAT NAMES NO SUITE: one line, naming the person's landing, and nothing appended to the line.
+UPB="$(up_world -)"
+UPB_T1="$UPB/.worktrees/T1"
+rd_ready "$UPB_T1"
+expect_eq "(up4) a launch row naming no suite is refused (exit 2)" "2" "$RD_RC"
+expect_eq "(up4) …in one line" "1" "$(printf '%s\n' "$RD_OUT" | awk 'END { print NR }')"
+expect_contains "(up4) …naming the row and its writer" "REFUSED reason=no-lands-on row=T1 name=wx-T1" "$RD_OUT"
+expect_contains "(up4) …and the hand landing, with its reason" "land ${UPB_T1} --by-hand --reason '<why>'" "$RD_OUT"
+expect_false "(up4) …and nothing was appended to the line" test -e "$(up_rec "$UPB")"
+printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$UPB/.bionic/docs/plans/epic-x/wave-x.plan.md")" \
+  >> "$UPB/.bionic/tmp/roster-$WORLD_SID.state"
+rd_ready "$UPB_T1"
+expect_eq "(up4-control) the same tree lands once the launch row names a suite, and the line then holds its entry" "0 yes" \
+  "$RD_RC $(test -s "$(up_rec "$UPB")" && echo yes || echo no)"
+UPC="$(up_world)"
+UPC_T2="$UPC/.worktrees/T2"
+rd_ready "$UPC_T2"
+expect_eq "(up5) a row whose brief waived every suite (suites_allowed=none) is refused the same way (exit 2)" "2" "$RD_RC"
+expect_contains "(up5) …naming the hand landing" "land ${UPC_T2} --by-hand --reason '<why>'" "$RD_OUT"
+
+# A BARE `land` ON THE FIXTURE: the old verb names both new ones, and moves nothing.
+UPD="$(up_world)"
+UPD_REFS="$(git -C "$UPD" for-each-ref --format='%(refname) %(objectname)')"
+UPD_PLAN="$(cat "$UPD/.bionic/docs/plans/epic-x/wave-x.plan.md")"
+UPD_OUT="$( cd "$UPD" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$UPD/.worktrees/T1" 2>&1 )"; UPD_RC=$?
+expect_eq "(up6) a bare land on the fixture prints the line naming ready and --by-hand, exactly" \
+  "land: the line lands a row with \"ready\"; a person lands one with \"land <tree> --by-hand --reason '<why>'\"" "$UPD_OUT"
+expect_eq "(up6) …and exits 2" "2" "$UPD_RC"
+expect_nonempty "(up6-pre) the refs read back" "$UPD_REFS"
+expect_eq "(up6) …and no ref moved" "$UPD_REFS" "$(git -C "$UPD" for-each-ref --format='%(refname) %(objectname)')"
+expect_eq "(up6) …and the plan is as it was" "$UPD_PLAN" "$(cat "$UPD/.bionic/docs/plans/epic-x/wave-x.plan.md")"
 
 finish

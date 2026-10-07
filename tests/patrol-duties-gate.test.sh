@@ -661,6 +661,17 @@ a_agent_sidechain() {  # <dir> <name>
     >> "$1/transcript.jsonl"
 }
 
+# A TASK ENTRY SET IN PROGRESS (wave-28 T38; REQ-13, D30), the harness's TaskUpdate shape. A turn
+# that dispatched plan rows owes one per row, so a row here that pins "the dispatching turn ends"
+# sets them, as the doctrine's dispatch turn does.
+a_taskup() {  # <dir> <task number>
+  jq -nc --arg n "$2" \
+    '{type:"assistant",isSidechain:false,agentId:null,
+      message:{role:"assistant",content:[{type:"tool_use",id:("toolu_up" + $n),name:"TaskUpdate",
+        input:{taskId:$n,status:"in_progress"}}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
 both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD one alone
   a_tool "$1" ListAgents; a_tool "$1" TaskList
 }
@@ -944,7 +955,7 @@ section "Section 5c: the fill duty is an INVARIANT — a live ledger with rows r
 # A project whose plan is a LIVE wave ledger: writers=8, at <current>, with the rows given.
 # LEDGER_BUDGET is the header's budget line; `make_env_ledger_keyless` blanks it, which is
 # the one plan shape REQ-3 refuses at write time and the wall names as a backstop.
-LEDGER_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe'
+LEDGER_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user'
 make_env_ledger_keyless() { LEDGER_BUDGET='' make_env_ledger "$@"; }
 make_env_ledger() {  # <current> <row>... -> project dir on stdout
   local cur="$1"; shift
@@ -1079,6 +1090,7 @@ ledger_roster "$d" open W-T2 W-T3
 u_prompt "$d" "dispatch the batch"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_agent "$d" "W-T3" "row T3, implementor."
+a_taskup "$d" 2; a_taskup "$d" 3
 fire "$d"; expect_allow "60b: a turn that dispatched every ready row is not refused"
 
 # 60c: …and a turn that dispatched ONE of the two is refused, naming only the other.
@@ -1086,6 +1098,7 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first one"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
 
 # 60d: A ROW THIS TURN LAUNCHED IS NEVER NAMED AS MISSED (T11b; review R4, T12 F7). Two agents
@@ -1099,12 +1112,14 @@ ledger_roster "$d" open W-T2 W-T3
 u_prompt "$d" "dispatch the batch"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_agent "$d" "W-T3" "row T3, implementor."
+a_taskup "$d" 2; a_taskup "$d" 3
 fire "$d"; expect_allow "60d: (T11b: was \"launched but still pending in the plan — the gap stands, T2 named\") a turn that launched every ready row is not refused, ledgered active or not"
 # 60e: …and one launched of two, both pending: the one left out is named, the launched one never.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_block "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
 
 # 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
@@ -1124,16 +1139,20 @@ d=$(make_env_ledger 4 "$LEDGER_SENT_2" "$LEDGER_BLOCKED")
 ledger_roster "$d" open W-T2
 u_prompt "$d" "start the row behind T2"
 a_agent "$d" "W-T2" "row T2, implementor."
+a_taskup "$d" 2
 fire "$d"; expect_allow "62b: a pending row behind an unlanded dep is not ready, so the turn ends"
 
-# 63: THE BUDGET IS A MEASUREMENT, AND ITS ABSENCE IS NAMED, NEVER SILENT (wave-19 REQ-3
-# AC-3.2, D5; ADR-035 decision 2). A live ledger with ready rows and no `parallel-budget:`
-# line is a plan the governing-skill hook would have refused to write; the wall is the
-# backstop, and it names the key rather than ending the turn in silence.
+# 63: NO PLAN OWES THE LINE (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a live ledger with
+# ready rows and no `parallel-budget:` line was refused once, naming the key Step 0 wrote from
+# the probe (wave-19 REQ-3, ADR-035). A line caps a run only when a person wrote it now, so the
+# same ledger is judged on the gap the gate leaves, as a keyed one is (63a0), and the refusal
+# names no key.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "carry on"
+fire "$d"; expect_block "63a0 control: the same ledger under a person's cap of eight owes its ready rows" "T2"
 d=$(make_env_ledger_keyless 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_prompt "$d" "carry on"
-fire "$d"; expect_block "63a: a live ledger with no budget key is refused, naming the key" "parallel-budget:"
-fire "$d"; expect_block "63b: …and the field the width is read from" "writers="
+fire "$d"; expect_block "63a: a live ledger with no budget line is judged on the gate's gap, never refused for the line" "T2" "parallel-budget"
 # …and the same keyless plan below Step 4 is not a live ledger: nothing is owed yet.
 d=$(make_env_ledger_keyless 3 "$LEDGER_LANDED" "$LEDGER_READY_2")
 u_prompt "$d" "carry on"
@@ -1253,7 +1272,7 @@ fire "$d"; expect_block "64b: one row in flight against writers=8 leaves room, a
 # ordinary turn. Pre-fix the tick dropped the MET row from its occupancy and filled T2 T3;
 # the wall counts every unacked row and names T2 alone.
 POKER_64M="${BIONIC_HOOKS_DIR}/session-poker.sh"
-d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user' \
       make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 echo "done" > "$d/landed-64m.md"
 : > "$d/W-MET.done"   # the agent said so, by its Done marker: MET needs it (wave-24 T9, D3)
@@ -1298,7 +1317,7 @@ rm -rf "$CFG_64M"
 # does not list. That is exactly what the trim used to drop for the fill (A-T2.13), so it is
 # the differential's other half. writers=2, one such row, two ready rows: the real tick's
 # FILL is compared with the ids the wall's refusal names on an ordinary turn.
-d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user' \
       make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 roster_row_fixture status=intended session="$SID" name=W-UNMET agent_id= \
   deliverable="$d/never-written-64n.md" >> "$d/.bionic/tmp/roster-$SID.state"
@@ -1598,7 +1617,9 @@ expect_plant_inert() {  # <label> — the baseline verdict: refused, both ready 
   if [ "$(decision_of)" != "block" ]; then no "$1" "decision=<$(decision_of)> stdout=<$HOOK_OUT>"; return; fi
   case "$r" in *T2*) ;; *) no "$1" "T2 not named: $r"; return ;; esac
   case "$r" in *T3*) ;; *) no "$1" "T3 not named: $r"; return ;; esac
-  case "$r" in *T9*) no "$1" "the planted T9 was named: $r"; return ;; esac
+  # PATHS ARE NOT IDS (wave-28 T9): the refusal prints the poker's path, and a tree named for row T9
+  # (`.worktrees/28-T9/…`) carries the planted id in it. Every word holding a slash is dropped first.
+  case "$(printf '%s' "$r" | sed 's#[^[:space:]]*/[^[:space:]]*##g')" in *T9*) no "$1" "the planted T9 was named: $r"; return ;; esac
   ok "$1"
 }
 
@@ -1729,6 +1750,7 @@ ledger_roster "$d" open W-T2
 led_user "$d" "u-turn-0001" "2026-09-23T10:00:00.000Z" "dispatch T2"
 led_agent "$d" "toolu_A1" "W-T2" "2026-09-23T10:00:05.000Z"
 led_result "$d" "toolu_A1" "2026-09-23T10:00:06.000Z" false "Spawned W-T2"
+a_taskup "$d" 2
 fire "$d"; expect_allow "L1a: Stop 1 — the dispatching turn ends clean"
 L1="$(led_line "$d" 1)"
 expect_contains "L1b: AC-5.5 Stop 1 appended a fill-ledger/v1 line" "fill-ledger/v1|" "$L1"
@@ -1789,6 +1811,7 @@ ledger_roster "$d" open W-T2
 led_user "$d" "u-turn-0008" "2026-09-23T12:00:00.000Z" "dispatch the batch"
 led_agent "$d" "toolu_B1" "W-T2" "2026-09-23T12:00:05.000Z"
 led_result "$d" "toolu_B1" "2026-09-23T12:00:06.000Z" false "Spawned W-T2"
+a_taskup "$d" 2
 fire "$d"; expect_block "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
 expect_eq "L8b: …its line names the launch" "W-T2" "$(led_field "$(led_line "$d" 1)" launched)"
 led_feedback "$d" "u-fb-0008" "2026-09-23T12:00:10.000Z"
@@ -1832,6 +1855,7 @@ ledger_roster "$d" open W-T2
 led_user "$d" "u-turn-0010" "2026-09-23T14:00:00.000Z" "dispatch T2, then load the skill"
 led_agent "$d" "toolu_C1" "W-T2" "2026-09-23T14:00:05.000Z"
 led_result "$d" "toolu_C1" "2026-09-23T14:00:06.000Z" false "Spawned W-T2"
+a_taskup "$d" 2
 led_skill "$d" "toolu_C2" "u-skill-0010" "2026-09-23T14:00:07.000Z"
 fire "$d"; expect_allow "L10a: the turn ends clean"
 expect_eq "L10b: T11b the skill body opens no turn — the line is keyed by the prompt" \
@@ -2162,7 +2186,7 @@ rm -rf "$QT_CFG"
 # tick owes nothing even on its first tick. It does NOT print WAITING's "nothing ready" — a row
 # IS ready — but names the row on its WAIT line with the reason it waits (wave-26 T13; review-6
 # F3). C3d is the control: the same world with the row's read unlanded prints WAITING.
-d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=user' \
   make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2"); ( cd "$d" && git init -q . 2>/dev/null )
 { roster_header
   roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$d/never-written-c3.md" \
@@ -2180,7 +2204,7 @@ fire "$d"; expect_allow "C3c: …so its turn ends with no TaskList"
 rm -rf "$QT_CFG"
 LEDGER_WAITS_2='| T2 | 4 | build | waits on an unlanded row | implementor | T9 | 30m | REQ-x | b.sh | pending | — |'
 LEDGER_ACTIVE_9='| T9 | 4 | build | the row in flight | implementor | — | 30m | REQ-x | c.sh | active | .worktrees/T9 |'
-d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=user' \
   make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_ACTIVE_9" "$LEDGER_WAITS_2"); ( cd "$d" && git init -q . 2>/dev/null )
 { roster_header
   roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$d/never-written-c3d.md" \
@@ -2209,7 +2233,7 @@ rm -rf "$QT_CFG"
 # The control is the same sequence with no status move: its FILL tick owes nothing.
 c5_world() {  # -> project dir; writers=1, T2 ready, T5 behind it
   local d
-  d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+  d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=user' \
     make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_BLOCKED"); ( cd "$d" && git init -q . 2>/dev/null )
   printf '%s' "$d"
 }

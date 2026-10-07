@@ -86,12 +86,19 @@
 # files `hooks/execution-recorder.sh`'s question registrations push at start, by file name
 # without `.md` (`checks-adversarial,severity`); the recorder writes it on the row it identifies.
 # A reading from a reader whose row carries `severity` there owes the finding lines. Present-if-
-# passed and LAST: a row 1.12.0 wrote has none, and reads by every key it does carry.
+# passed: a row 1.12.0 wrote has none, and reads by every key it does carry.
+#
+# THE ROW AND THE SUITES IT LANDS ON (wave-28 T7; REQ-1, REQ-3, D4, D17). `row=<id>` is a brief's
+# `Row:` label, the plan row the dispatch binds, read before the name match by the launch record,
+# the fill and the stop wall; `lands_on=<a.test.sh,b.test.sh|none>` its `Lands-on:` line, the suites
+# `ready` runs (lib/line.sh `_line_suites` decodes it). The dispatch wall writes both; `amend`, `hold`
+# and `extend` copy them. Present-if-passed and they TRAIL `pushed=`: a row 1.12.0 wrote has neither.
 #
 # THE LANDING'S MARK (wave-28 T6; REQ-3, D7). `landed=<40-hex> landed_at=<ISO-UTC>` are written by
 # `roster_mark_landed` (below), the landing's one act on the roster, and read by `roster_landed`:
 # `stop-orders.sh stopped` removes the writer's tree only for a marked row. Present-if-passed and
-# LAST, after `pushed=`: an unmarked row is byte-identical to the rows before them.
+# LAST, after `pushed=` and T7's `row=`/`lands_on=`: an unmarked row is byte-identical to the rows
+# before them.
 #
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
@@ -274,10 +281,11 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
-  local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed=""
+  local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed="" row="" lands_on=""
   local landed="" landed_at="" has_landed=0 has_landed_at=0
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
   local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0 has_pushed=0
+  local has_row=0 has_lands_on=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -327,6 +335,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       lands_red)     lands_red="$val";    has_lands_red=1 ;;
       red_evidence)  red_evidence="$val"; has_red_evidence=1 ;;
       pushed)        pushed="$val";       has_pushed=1 ;;
+      row)           row="$val";          has_row=1 ;;
+      lands_on)      lands_on="$val";     has_lands_on=1 ;;
       landed)        landed="$val";       has_landed=1 ;;
       landed_at)     landed_at="$val";    has_landed_at=1 ;;
       files)          files="$val";          has_files=1 ;;
@@ -358,6 +368,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_lands_red" -eq 1 ]; then out="$out|lands_red=$lands_red"; fi
   if [ "$has_red_evidence" -eq 1 ]; then out="$out|red_evidence=$red_evidence"; fi
   if [ "$has_pushed" -eq 1 ]; then out="$out|pushed=$pushed"; fi
+  if [ "$has_row" -eq 1 ]; then      out="$out|row=$row"; fi
+  if [ "$has_lands_on" -eq 1 ]; then out="$out|lands_on=$lands_on"; fi
   if [ "$has_landed" -eq 1 ]; then out="$out|landed=$landed"; fi
   if [ "$has_landed_at" -eq 1 ]; then out="$out|landed_at=$landed_at"; fi
   printf '%s\n' "$out"
@@ -680,7 +692,9 @@ roster_mark_landed() {  # <roster> <name> <40-hex commit> <ISO-UTC> -> 0 · 1 ·
 
 # The mark of <name>'s CURRENT work: `<commit><TAB><at>` from the latest row carrying `landed=` since
 # the name's latest launch line (a `status=intended` row no verb copied) and since its latest
-# `extend` row (re-opened work is new work), whatever amend or hold rows came between. rc 1 when none.
+# `extend` row (re-opened work is new work), whatever amend or hold rows came between. A mark written on a
+# re-opened row keeps that row's `extended=` and is read as the mark it is (wave-28 T21, A-orch-105 #2); an extend
+# row carrying a commit already seen has only copied an earlier landing's keys, and clears the mark. rc 1 when none.
 roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work carries no mark
   local f="${1:-}" name="${2:-}"
   [ -n "$name" ] || return 1
@@ -689,7 +703,9 @@ roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work c
     function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
     index($0, "roster-state/") != 1 || !index($0 "|", k) { next }
     { c = kv("landed") }
-    c != "" && !index($0, "|extended=") { m = c "\t" kv("landed_at"); next }
+    c != "" && !index($0, "|extended=") { m = c "\t" kv("landed_at"); seen[c] = 1; next }
+    c != "" && !(c in seen) { m = c "\t" kv("landed_at"); seen[c] = 1; next }
+    c != "" { seen[c] = 1 }
     index($0, "|extended=") || (index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|held=") && !index($0, "|adopted_from=")) { m = "" }
     END { if (m == "") exit 1; print m }' "$f" 2>/dev/null
 }

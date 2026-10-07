@@ -86,11 +86,13 @@ and what it leaves behind.
 
 - `intent` is what the deliverable is: `build`, `bugfix`, `refactor`, `tune`, `spike`, or
   `incident-response`.
-- `rigor` is how hard the evidence has to try to lie. `tested` means test-driven, red before
-  green, with one independent critic reading the evidence, the code and its structure.
-  `peer-reviewed` adds a separate spec and gives the evidence to an independent auditor.
-  `audited` gives the structure to an independent reviewer. Each level contains the one below
-  it.
+- `rigor` is how hard the evidence has to try to lie: `low`, `medium` or `high`. `low` means
+  test-driven, red before green, with one independent critic reading the evidence, the code
+  and its structure. `medium` adds a separate spec and gives the evidence to an independent
+  auditor. `high` gives the structure to an independent reviewer. Each level contains the one
+  below it. `low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads
+  either word as the same level, and a file carrying an old word is read as it is and never
+  rewritten.
 - `scale` is the unit of decomposition: `task` for several small pieces inside one session,
   `wave` for a change with its own spec, plan and branch, `epic` for work that carves waves
   and runs only the first four steps itself.
@@ -201,7 +203,9 @@ you are not using:
 - A subagent's completion is refused when the artifact it declared is not on disk, and
   stopping one requires having looked at it first.
 
-Every wall has a matching test suite. `bash tests/run.sh` runs all of them.
+Every wall has a matching test suite. `bash tests/run.sh` runs all of them, and
+`bash tests/run.sh --only <suite>.test.sh` runs the ones it names; a dispatched agent runs a
+suite only that way. A writer lands its work by saying `spawn-worktree.sh ready` from its tree.
 
 ## The agents bionic dispatches
 

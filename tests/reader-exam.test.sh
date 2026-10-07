@@ -18,11 +18,17 @@
 #             whether empty or holding a sitting's lines under no header, is red for that.
 #             Otherwise the verdict is red and names why. A checks file edited after its sitting
 #             turns it red.
-#   §KEY      `exam_key` on planted keys: three lines for `clean`, four for every other
-#             sample, the fourth a `names:` line, whose alternatives are separated by ` | `.
+#   §KEY      `exam_key` on planted keys: three lines for `clean`, six for every other
+#             sample: a `names:` line, whose alternatives are separated by ` | `, then a
+#             `finding-file:` line and a `finding-rating:` line whose every rating the priority
+#             table sends to fix (wave-28 T18, D22).
 #   §SCORE    `exam_score` (tests/reader-exam/score.sh, README step 5) on the real keys: a
 #             record is met only on the key's question, with the key's result, one of its
-#             tokens and one of its `names:` alternatives, read through CR LF line ends and
+#             tokens and one of its `names:` alternatives, and a declared `finding:` line on
+#             the key's file at a rating the table sends to fix (SD rows: described only,
+#             deferred, noted, another file and refused lines each fail and say which; the
+#             lines are read by proof.sh's `proof_findings`; a doctored scorer restoring the
+#             described-only pass is the mutation arm), read through CR LF line ends and
 #             trailing blanks and under a caller's IFS; sourcing score.sh is held to defining
 #             its functions and nothing else, against doctored copies that act.
 #   §DEST     materialize.sh refuses a destination whose path, logical or real, names the
@@ -36,8 +42,9 @@
 #             directory, read from the README and applied to a made-up path; run-session.sh run
 #             against a fake CLI binary (the call it makes, the variables it clears, the binary
 #             and not a function of the same name, no widening flag); gen-prompt.sh on made-up
-#             briefs; neither helper nor any prompt it writes names a sample or the exam. No
-#             session is started.
+#             briefs; neither helper nor any prompt it writes names a sample or the exam; each
+#             brief ends with the shipped scale's path and its questions' checks files, by path
+#             and never pasted (R9, wave-28 T18). No session is started.
 #   §HELPERS  (T64) run-session.sh against a fake CLI on a throwaway PATH: a claude that is a
 #             relative path (an entry `.`, an empty one, a named relative one) or a file inside
 #             <dest>, reached through a link or not, is refused and never runs; a <dest> that is
@@ -127,11 +134,17 @@ exam_dealt_role() {
 #                          the one dealt its own question, no two lines for one sample and question
 #                          that disagree, every `result` line reads `met`, and each reached
 #                          result is one its sample's key admits (exam_meets, score.sh)
+#   pinned (stale: the re-sit is owed)
+#                          a checks file's digest differs from the sitting's, and the sitting's
+#                          `stale:` line names, for every such file, the hash it read and the
+#                          hash that ships (wave-28 A-orch-110); its result lines are then history
+#                          and are not read
 #   red <reason>           anything else
 # A sitting is a section headed `## <YYYY-MM-DD>…`; the latest is the last in the file, by
 # file order and not by date. Any other line opening with `##` is red wherever it is.
 exam_pin() {
   local file="$1" root="$2" sittings latest f lines want have s samples bad results line kqs q r dealt
+  local drift="" nm names o n
   [ -r "$file" ] || { echo "red: $file cannot be read"; return 1; }
   # A block under a malformed header would fold into the sitting above it, or count as none.
   bad="$(grep -nE '^##' "$file" | grep -vE '^[0-9]+:## [0-9]{4}-[0-9]{2}-[0-9]{2}( |$)' | head -n 1)"
@@ -147,8 +160,28 @@ exam_pin() {
       *) echo "red: the latest sitting has more than one sha256 line for $f"; return 1 ;;
     esac
     have="$(_detect_sha256 "$root/$f")" || { echo "red: $f cannot be digested"; return 1; }
-    [ "$want" = "$have" ] || { echo "red: $f is $have, the latest sitting read $want — sit the exam again"; return 1; }
+    [ "$want" = "$have" ] || drift="${drift:+$drift }$f:$want:$have"
   done
+  # A checks file that changed after the sitting leaves its hash behind. The sitting is marked stale
+  # by one `stale:` line naming, for each such file, the hash it read and the hash that ships
+  # (A-orch-110): the re-sit is owed, and until it is sat the sitting is history. An unmarked drift
+  # stays red, as does a line that names other hashes.
+  for f in $drift; do
+    have="${f##*:}"; want="${f%:*}"; want="${want##*:}"; f="${f%%:*}"
+    names="$(exam_stale_names "$latest" "$(basename "$f" .md)")"
+    set -f; set -- $names; set +f; o="${1:-}"; n="${2:-}"
+    if [ "${#o}" -ge 8 ] && [ "${#n}" -ge 8 ] && case "$want" in "$o"*) true ;; *) false ;; esac \
+       && case "$have" in "$n"*) true ;; *) false ;; esac; then
+      continue
+    fi
+    if printf '%s\n' "$latest" | grep -q '^stale:'; then
+      echo "red: $f is $have, the latest sitting read $want, and its stale: line does not name those hashes — sit the exam again"
+    else
+      echo "red: $f is $have, the latest sitting read $want — sit the exam again"
+    fi
+    return 1
+  done
+  [ -z "$drift" ] || { echo "pinned (stale: the re-sit is owed)"; return 0; }
   # A hash with no readers behind it is the pin lying: every sample was sat, and met.
   samples="$(exam_samples "$root")"
   [ -n "$samples" ] || { echo "red: $root has no samples"; return 1; }
@@ -211,11 +244,14 @@ RESULTS
 }
 
 # exam_key <sample> <key file> — prints `key` when the answer key is in shape, else one red
-# line. Three lines for `clean` (question, result, token); four for every other sample, the
-# fourth `names: <identifier>[ | <identifier>]...`: the spellings of the one thing that shows
-# the record named the planted defect, which `clean` has none of. No alternative is empty.
+# line. Three lines for `clean` (question, result, token); six for every other sample: the
+# fourth `names: <identifier>[ | <identifier>]...`, the spellings of the one thing that shows
+# the record named the planted defect, which `clean` has none of; the fifth
+# `finding-file: <path>[ | <path>]...`, the file the reader's `finding:` line must name; the sixth
+# `finding-rating: <S> <reach>[ | <S> <reach>]...`, the ratings that pass it, each one the table
+# sends to fix (`proof_priority`, the table's one cell) (wave-28 T18, D22). No alternative is empty.
 exam_key() {
-  local name="$1" key="$2" n want
+  local name="$1" key="$2" n want alt
   [ -r "$key" ] || { echo "red: $key cannot be read"; return 1; }
   sed -n 1p "$key" | grep -Eq '^question: (evidence|adversarial|structure)(, (evidence|adversarial|structure))*$' \
     || { echo "red: $name's key line 1 is not a question line"; return 1; }
@@ -226,11 +262,23 @@ exam_key() {
   if [ "$name" = clean ]; then
     want=3
     ! grep -q '^names:' "$key" || { echo "red: clean's key has a names: line, and clean has no defect to name"; return 1; }
+    ! grep -q '^finding-' "$key" || { echo "red: clean's key has a finding- line, and clean has no defect to declare"; return 1; }
   else
-    want=4
+    want=6
     sed -n 4p "$key" | grep -Eq '^names: [^ ]' || { echo "red: $name's key has no names: line"; return 1; }
     ! sed -n 4p "$key" | sed 's/^names: //' | awk -F ' [|] ' '{ for (i = 1; i <= NF; i++) if ($i ~ /^[[:blank:]]*$/) e = 1 } END { exit !e }' \
       || { echo "red: $name's names: line has an empty alternative"; return 1; }
+    sed -n 5p "$key" | grep -Eq '^finding-file: [^ ]' || { echo "red: $name's key has no finding-file: line"; return 1; }
+    ! sed -n 5p "$key" | sed 's/^finding-file: //' | awk -F ' [|] ' '{ for (i = 1; i <= NF; i++) if ($i ~ /^[[:blank:]]*$/ || $i ~ /[[:blank:]]/) e = 1 } END { exit !e }' \
+      || { echo "red: $name's finding-file: line has an empty alternative or one holding a blank"; return 1; }
+    sed -n 6p "$key" | grep -Eq '^finding-rating: [^ ]' || { echo "red: $name's key has no finding-rating: line"; return 1; }
+    while IFS= read -r alt; do
+      # shellcheck disable=SC2086
+      [ "$(proof_priority $alt 2>/dev/null)" = fix ] \
+        || { echo "red: $name's finding-rating: '$alt' is not a rating the table sends to fix"; return 1; }
+    done <<ALTS
+$(sed -n 6p "$key" | sed 's/^finding-rating: //' | awk -F ' [|] ' '{ for (i = 1; i <= NF; i++) print $i }')
+ALTS
   fi
   n="$(awk 'END { print NR }' "$key")"
   [ "$n" = "$want" ] || { echo "red: $name's key has $n lines, not $want"; return 1; }
@@ -249,6 +297,22 @@ exam_named_path() {
   exam_record_paths "$1" | ALL="$(exam_samples "$2")" awk '
     BEGIN { n = split(ENVIRON["ALL"], a, "\n") }
     { l = tolower($0); for (i = 1; i <= n; i++) if (a[i] != "" && index(l, a[i])) { print; exit } }'
+}
+
+# exam_stale_names <a sitting's text> <checks-<q>> — `<old> <new>`, the hex prefixes the sitting's
+# `stale:` line gives for that checks file as `checks-<q> <old>… → <new>…`; nothing when it gives none.
+# The glyph is found with index(), never compared with ==.
+exam_stale_names() {
+  printf '%s\n' "$1" | awk -v name="$2" '
+    $1 == "stale:" {
+      for (i = 2; i <= NF - 3; i++) if ($i == name) {
+        if (index($(i + 2), "→") == 0) continue
+        o = ""; n = ""
+        if (match($(i + 1), /^[0-9a-f]+/)) o = substr($(i + 1), 1, RLENGTH)
+        if (match($(i + 3), /^[0-9a-f]+/)) n = substr($(i + 3), 1, RLENGTH)
+        if (o != "" && n != "") { print o, n; exit }
+      }
+    }'
 }
 
 # pin_call <sittings file> <root> — sets PIN_OUT and PIN_RC.
@@ -491,13 +555,73 @@ pin_call "$TMP/empty-sittings.md" "$ROOT"
 expect_eq "P18: an empty sittings file is red by the same line" "red: no sitting is recorded" "$PIN_OUT"
 expect_status "P18: rc 1" 1 "$PIN_RC"
 
+# A STALE MARK (wave-28 T18, ruling A-orch-110): checks files that changed after the latest sitting
+# leave its hashes behind, and the re-sit is the next step's. The sitting says so on one line,
+# `stale: checks-<q> <old>… → <new>…[, …] (…); re-sit owed: …`, and the pin passes only while that line
+# names, for every checks file whose hash differs, the hash the sitting read and the hash that ships.
+# An unmarked drift, or a line naming other hashes, is red; the line excuses nothing else.
+h8() { _detect_sha256 "$ROOT/payload/context/checks-$1.md" | cut -c1-8; }
+w8() { printf '%s' "$WRONG" | cut -c1-8; }
+stale_line() { printf 'stale: %s (T16, T48); re-sit owed: T27\n' "$1"; }
+SL_S="checks-structure $(w8)… → $(h8 structure)…"
+sitting_block 2026-10-05 structure "$WRONG" > "$TMP/stale-base.md"
+{ cat "$TMP/stale-base.md"; stale_line "$SL_S"; } > "$TMP/stale-ok.md"
+pin_call "$TMP/stale-ok.md" "$ROOT"
+expect_eq "P19: a sitting whose structure hash differs and whose stale: line names both hashes is pinned, marked stale" \
+  "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+expect_status "P19: rc 0" 0 "$PIN_RC"
+pin_call "$TMP/stale-base.md" "$ROOT"
+expect_contains "P19: the same sitting with no stale: line is an unmarked drift, red" "red: payload/context/checks-structure.md is" "$PIN_OUT"
+expect_status "P19: rc 1" 1 "$PIN_RC"
+{ cat "$TMP/stale-base.md"; stale_line "checks-structure $(w8)… → 00000000…"; } > "$TMP/stale-other-new.md"
+pin_call "$TMP/stale-other-new.md" "$ROOT"
+expect_eq "P20: a stale: line naming another hash than the one that ships is red, naming the file" \
+  "red: payload/context/checks-structure.md is $(_detect_sha256 "$ROOT/payload/context/checks-structure.md"), the latest sitting read $WRONG, and its stale: line does not name those hashes — sit the exam again" "$PIN_OUT"
+{ cat "$TMP/stale-base.md"; stale_line "checks-structure 11111111… → $(h8 structure)…"; } > "$TMP/stale-other-old.md"
+pin_call "$TMP/stale-other-old.md" "$ROOT"
+expect_contains "P20: …and one naming another hash than the sitting read is red" "its stale: line does not name those hashes" "$PIN_OUT"
+{ cat "$TMP/stale-base.md"; stale_line "checks-evidence $(w8)… → $(h8 evidence)…"; } > "$TMP/stale-other-file.md"
+pin_call "$TMP/stale-other-file.md" "$ROOT"
+expect_contains "P20: …and one naming another checks file is red" "red: payload/context/checks-structure.md is" "$PIN_OUT"
+{ cat "$TMP/stale-base.md"; printf 'stale: checks-structure %s... -> %s... (T16); re-sit owed: T27\n' "$(w8)" "$(h8 structure)"; } > "$TMP/stale-ascii.md"
+pin_call "$TMP/stale-ascii.md" "$ROOT"
+expect_contains "P20: …and a line with no arrow glyph is not the form, red" "its stale: line does not name those hashes" "$PIN_OUT"
+sitting_block 2026-10-05 structure "$WRONG" > "$TMP/stale-two.md"
+cp "$ROOT/payload/context/checks-adversarial.md" "$TMP/adv.orig"
+printf 'new text\n' >> "$ROOT/payload/context/checks-adversarial.md"
+{ cat "$TMP/stale-ok.md"; } > "$TMP/stale-one-of-two.md"
+pin_call "$TMP/stale-one-of-two.md" "$ROOT"
+expect_contains "P21: two checks files differ and the stale: line names one: red, naming the other" \
+  "red: payload/context/checks-adversarial.md is" "$PIN_OUT"
+{ cat "$TMP/stale-ok.md" | sed '$d'; stale_line "$SL_S, checks-adversarial $(_detect_sha256 "$ROOT/payload/context/checks-adversarial.md" | cut -c1-8)… → $(h8 adversarial)…"; } > "$TMP/stale-both-wrong.md"
+pin_call "$TMP/stale-both-wrong.md" "$ROOT"
+expect_contains "P21: …and a line whose second entry's old hash is not the sitting's is red" "red: payload/context/checks-adversarial.md is" "$PIN_OUT"
+old_adv="$(awk '$1 == "sha256" && $2 == "payload/context/checks-adversarial.md" { print $3 }' "$TMP/stale-two.md")"
+{ cat "$TMP/stale-two.md"; stale_line "$SL_S, checks-adversarial $(printf '%s' "$old_adv" | cut -c1-8)… → $(h8 adversarial)…"; } > "$TMP/stale-both-ok.md"
+pin_call "$TMP/stale-both-ok.md" "$ROOT"
+expect_eq "P21: …and a line naming both differing files, each old and new, is pinned, marked stale" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+cp "$TMP/adv.orig" "$ROOT/payload/context/checks-adversarial.md"
+pin_call "$TMP/stale-ok.md" "$ROOT"
+expect_eq "P21: the checks file put back, the stale sitting is pinned again by its mark" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+# a marked sitting is history: a result line for a sample since retired does not turn it red
+{ cat "$TMP/stale-ok.md"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-retired.md"
+pin_call "$TMP/stale-retired.md" "$ROOT"
+expect_eq "P22: a stale sitting's result line for a retired sample stays as history, pinned" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
+{ sitting_block 2026-10-05; stale_line "$SL_S"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-nodrift.md"
+pin_call "$TMP/stale-nodrift.md" "$ROOT"
+expect_contains "P22: …while a sitting whose hashes all match is read whole, whatever its stale: line says" \
+  "red: the latest sitting has a result line for retired-sample" "$PIN_OUT"
+{ cat "$TMP/stale-ok.md"; printf '\n## 2026-10-06 later\n\n'; printf 'sha256 payload/context/checks-structure.md %s\n' "$WRONG"; } > "$TMP/stale-older.md"
+pin_call "$TMP/stale-older.md" "$ROOT"
+expect_contains "P23: a stale: line in an older sitting does not excuse the latest one" "red: " "$PIN_OUT"
+
 section "§KEY — an answer key names its defect"
 
 K="$TMP/keys"
 mkdir -p "$K"
-printf 'question: structure\nresult: fail\ntoken: check: reuse FAIL\nnames: some_owner\n' > "$K/defect.txt"
-expect_eq "K1: a defect key with a names: line is in shape" "key" "$(exam_key planted "$K/defect.txt")"
-sed '$d' "$K/defect.txt" > "$K/defect-unnamed.txt"
+printf 'question: structure\nresult: fail\ntoken: check: reuse FAIL\nnames: some_owner\nfinding-file: bin/some.sh\nfinding-rating: S2 on\n' > "$K/defect.txt"
+expect_eq "K1: a defect key with a names:, finding-file: and finding-rating: line is in shape" "key" "$(exam_key planted "$K/defect.txt")"
+{ sed -n 1,3p "$K/defect.txt"; sed -n 5,6p "$K/defect.txt"; } > "$K/defect-unnamed.txt"
 expect_eq "K2: a defect key with no names: line is red" \
   "red: planted's key has no names: line" "$(exam_key planted "$K/defect-unnamed.txt")"
 expect_status "K2: rc 1" 1 "$(exam_key planted "$K/defect-unnamed.txt" >/dev/null; echo $?)"
@@ -511,14 +635,55 @@ expect_eq "K4: clean's key has no names: line, and none is asked of it" "key" "$
 { cat "$K/clean.txt"; printf 'names: some_owner\n'; } > "$K/clean-named.txt"
 expect_eq "K4: clean's key with a names: line is red" \
   "red: clean's key has a names: line, and clean has no defect to name" "$(exam_key clean "$K/clean-named.txt")"
-{ cat "$K/defect.txt"; printf 'extra\n'; } > "$K/defect-five.txt"
-expect_eq "K5: a defect key with a fifth line is red" \
-  "red: planted's key has 5 lines, not 4" "$(exam_key planted "$K/defect-five.txt")"
+{ cat "$K/defect.txt"; printf 'extra\n'; } > "$K/defect-seven.txt"
+expect_eq "K5: a defect key with a seventh line is red" \
+  "red: planted's key has 7 lines, not 6" "$(exam_key planted "$K/defect-seven.txt")"
+# wave-28 T18 (D22): a defect key says the file a finding must name and the ratings that pass it.
+sed -n 1,4p "$K/defect.txt" > "$K/defect-nofile.txt"
+printf 'finding-rating: S2 on\n' >> "$K/defect-nofile.txt"
+expect_eq "K6: a defect key with no finding-file: line is red" \
+  "red: planted's key has no finding-file: line" "$(exam_key planted "$K/defect-nofile.txt")"
+sed -n 1,5p "$K/defect.txt" > "$K/defect-norating.txt"
+expect_eq "K7: a defect key with no finding-rating: line is red" \
+  "red: planted's key has no finding-rating: line" "$(exam_key planted "$K/defect-norating.txt")"
+sed 's/^finding-file: .*/finding-file: bin\/some.sh | lib\/other.sh/' "$K/defect.txt" > "$K/defect-twofiles.txt"
+expect_eq "K8: a finding-file: line holding two alternatives is in shape" "key" "$(exam_key planted "$K/defect-twofiles.txt")"
+sed 's/^finding-file: .*/finding-file: bin\/some.sh |  | lib\/other.sh/' "$K/defect.txt" > "$K/defect-emptyfile.txt"
+expect_eq "K8: a finding-file: line with an empty alternative is red" \
+  "red: planted's finding-file: line has an empty alternative or one holding a blank" "$(exam_key planted "$K/defect-emptyfile.txt")"
+for rating in 'S2 off' 'S3 on' 'S3 off' 'S4 on' 'S4 off' 'S5 on' 'S2'; do
+  sed "s/^finding-rating: .*/finding-rating: $rating/" "$K/defect.txt" > "$K/defect-rating.txt"
+  expect_eq "K9: a finding-rating: of '$rating', which the table does not send to fix, is red" \
+    "red: planted's finding-rating: '$rating' is not a rating the table sends to fix" "$(exam_key planted "$K/defect-rating.txt")"
+done
+for rating in 'S1 on' 'S1 off' 'S2 on' 'S1 on | S1 off | S2 on'; do
+  sed "s/^finding-rating: .*/finding-rating: $rating/" "$K/defect.txt" > "$K/defect-rating.txt"
+  expect_eq "K9: a finding-rating: of '$rating', each one the table sends to fix, is in shape" "key" "$(exam_key planted "$K/defect-rating.txt")"
+done
+sed 's/^finding-rating: .*/finding-rating: S2 on | S3 on/' "$K/defect.txt" > "$K/defect-rating.txt"
+expect_eq "K9: one alternative the table defers makes the line red, and the red names it" \
+  "red: planted's finding-rating: 'S3 on' is not a rating the table sends to fix" "$(exam_key planted "$K/defect-rating.txt")"
+{ cat "$K/clean.txt"; printf 'finding-file: bin/some.sh\n'; } > "$K/clean-declared.txt"
+expect_eq "K10: clean's key with a finding-file: line is red" \
+  "red: clean's key has a finding- line, and clean has no defect to declare" "$(exam_key clean "$K/clean-declared.txt")"
 
 section "§SCORE — README step 5 against the real keys"
 
 # record <file> <question> <result line> <line>... — a planted reader's record on one question.
 record() { local f="$1" q="$2"; shift 2; printf '%s\n' "reviewed: aaa..bbb" "question: $q" "$@" > "$f"; }
+# frec <file> <question> <result> <S> <reach> <path> <line>... — a planted reader's record on one
+# question that DECLARES one finding as a record writes it (wave-28 T18, D22): `findings: 1`, a
+# `finding: 1 <S> <reach> <path>:7 <title>`, and a `shown: 1` line when the table sends it to fix
+# (`proof_priority`). The lines after <path> are the record's other lines.
+frec() {
+  local f="$1" q="$2" res="$3" sev="${4:-}" reach="${5:-}" path="${6:-}"
+  shift $(( $# < 6 ? $# : 6 ))
+  {
+    printf '%s\n' "reviewed: aaa..bbb" "question: $q" "result: $res" "findings: 1" "finding: 1 $sev $reach $path:7 the planted defect"
+    [ "$(proof_priority "$sev" "$reach")" != fix ] || printf 'shown: 1 grep -n x %s\n' "$path"
+    printf '%s\n' "$@"
+  } > "$f"
+}
 R="$TMP/records"
 mkdir -p "$R"
 # score_act <score.sh> — what sourcing it does to a caller, as one line: `functions: <names>`
@@ -566,8 +731,8 @@ score_act() {
   ' _ "$1" "$snapdir" 2>&1)"
   printf '%s\n' "${out:-ended the shell}"
 }
-expect_eq "SC0: sourcing score.sh defines its three functions and does nothing else" \
-  "functions: exam_field exam_meets exam_score" "$(score_act "$EXAM/score.sh")"
+expect_eq "SC0: sourcing score.sh defines its four functions and does nothing else" \
+  "functions: exam_declared exam_field exam_meets exam_score" "$(score_act "$EXAM/score.sh")"
 # The same probe against doctored copies of score.sh, each one appended act. A mutant's row
 # reads its own verdict, beside the real file's `functions:` line above from the same probe.
 SC0_MUT="$TMP/score-mutants"
@@ -596,20 +761,20 @@ ACTS
 DC="$EXAM/samples/dup-counter/expect.txt"
 DC_NAMES="$(sed -n 's/^names: //p' "$DC")"
 expect_nonempty "SC0: the dup-counter key has a names: identifier to score on" "$DC_NAMES"
-record "$R/one-site.md" structure "result: fail" "check: reuse PASS a new file with a new job" \
+frec "$R/one-site.md" structure fail S2 on bin/stamp.sh "check: reuse PASS a new file with a new job" \
   "check: one-site FAIL the dirty count is computed again, not read from $DC_NAMES"
-expect_eq "SC1: dup-counter: check: one-site FAIL with the identifier is met" "met" \
+expect_eq "SC1: dup-counter: check: one-site FAIL with the identifier, and a declared finding, is met" "met: declared" \
   "$(exam_score "$DC" "$R/one-site.md")"
-record "$R/reuse.md" structure "result: fail" "check: reuse FAIL bin/stamp.sh counts dirt again beside $DC_NAMES"
-expect_eq "SC1: dup-counter: check: reuse FAIL with the identifier is met" "met" \
+frec "$R/reuse.md" structure fail S2 on bin/stamp.sh "check: reuse FAIL bin/stamp.sh counts dirt again beside $DC_NAMES"
+expect_eq "SC1: dup-counter: check: reuse FAIL with the identifier, and a declared finding, is met" "met: declared" \
   "$(exam_score "$DC" "$R/reuse.md")"
-record "$R/one-site-bare.md" structure "result: fail" "check: one-site FAIL a value is computed twice"
+frec "$R/one-site-bare.md" structure fail S2 on bin/stamp.sh "check: one-site FAIL a value is computed twice"
 expect_eq "SC2: dup-counter: check: one-site FAIL without the identifier is missed" "missed" \
   "$(exam_score "$DC" "$R/one-site-bare.md")"
-record "$R/reuse-bare.md" structure "result: fail" "check: reuse FAIL a helper is copied"
+frec "$R/reuse-bare.md" structure fail S2 on bin/stamp.sh "check: reuse FAIL a helper is copied"
 expect_eq "SC2: dup-counter: check: reuse FAIL without the identifier is missed" "missed" \
   "$(exam_score "$DC" "$R/reuse-bare.md")"
-record "$R/neither.md" structure "result: fail" "check: single-job FAIL beside $DC_NAMES"
+frec "$R/neither.md" structure fail S2 on bin/stamp.sh "check: single-job FAIL beside $DC_NAMES"
 expect_eq "SC2: dup-counter: the identifier under another check is missed" "missed" \
   "$(exam_score "$DC" "$R/neither.md")"
 
@@ -619,7 +784,7 @@ expect_eq "SC2: dup-counter: the identifier under another check is missed" "miss
 ifs_score() { bash -c 'IFS="$1"; . "$2"; exam_score "$3" "$4"' _ "$1" "$EXAM/score.sh" "$2" "$3"; }
 ifs_rows() {
   local label="$1" ifs="$2"
-  expect_eq "SC2b: under $label a met record is met" "met" "$(ifs_score "$ifs" "$DC" "$R/one-site.md")"
+  expect_eq "SC2b: under $label a met record is met" "met: declared" "$(ifs_score "$ifs" "$DC" "$R/one-site.md")"
   expect_eq "SC2b: under $label a missed record is missed" "missed" "$(ifs_score "$ifs" "$DC" "$R/one-site-bare.md")"
 }
 ifs_rows "the default IFS" "$(printf ' \t\n')"
@@ -636,21 +801,138 @@ for s in $(exam_samples "$REPO"); do
   q="$(sed -n 's/^question: //p' "$key")"
   idents="$(sed -n 's/^names: //p' "$key")"
   tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
+  ff_all="$(sed -n 's/^finding-file: //p' "$key")"; ff="${ff_all%% | *}"
+  fr="$(sed -n 's/^finding-rating: //p' "$key")"; fr="${fr%% | *}"
+  # The file a record without the identifier declares on: the first file of the key whose own path
+  # holds none of the identifiers (a path that holds one would name the defect by itself).
+  ffb=""; fa="$ff_all"
+  while [ -n "$fa" ]; do
+    a="${fa%% | *}"; [ "$a" = "$fa" ] && fa="" || fa="${fa#* | }"
+    hit=0; ia="$idents"
+    while [ -n "$ia" ]; do
+      i1="${ia%% | *}"; [ "$i1" = "$ia" ] && ia="" || ia="${ia#* | }"
+      case "$a" in *"$i1"*) hit=1 ;; esac
+    done
+    [ "$hit" = 0 ] && [ -z "$ffb" ] && ffb="$a"
+  done
+  ffb="${ffb:-$ff}"
   n=0
   while [ -n "$idents" ]; do
     ident="${idents%% | *}"
     [ "$ident" = "$idents" ] && idents="" || idents="${idents#* | }"
     n=$((n + 1))
-    record "$R/$s-named-$n.md" "$q" "$(sed -n 2p "$key")" "$tok" "$ident"
-    expect_eq "SC3 $s: the key's question, result, token and names: '$ident' are met" "met" "$(exam_score "$key" "$R/$s-named-$n.md")"
+    # shellcheck disable=SC2086
+    frec "$R/$s-named-$n.md" "$q" "$(sed -n 's/^result: //p' "$key")" $fr "$ff" "$tok" "$ident"
+    expect_eq "SC3 $s: the key's question, result, token, names: '$ident' and a declared finding on $ff are met" "met: declared" "$(exam_score "$key" "$R/$s-named-$n.md")"
   done
-  record "$R/$s-bare.md" "$q" "$(sed -n 2p "$key")" "$tok"
+  # shellcheck disable=SC2086
+  frec "$R/$s-bare.md" "$q" "$(sed -n 's/^result: //p' "$key")" $fr "$ffb" "$tok"
   expect_eq "SC3 $s: the same record without the identifier is missed" "missed" "$(exam_score "$key" "$R/$s-bare.md")"
-  record "$R/$s-elsewhere.md" "$([ "$q" = evidence ] && echo adversarial || echo evidence)" \
-    "$(sed -n 2p "$key")" "$tok" "${ident:-}"
+  # shellcheck disable=SC2086
+  frec "$R/$s-elsewhere.md" "$([ "$q" = evidence ] && echo adversarial || echo evidence)" \
+    "$(sed -n 's/^result: //p' "$key")" $fr "$ff" "$tok" "${ident:-}"
   expect_eq "SC3 $s: the named record on a question the key does not name is missed" "missed" \
     "$(exam_score "$key" "$R/$s-elsewhere.md")"
 done
+
+# D22 (wave-28 T18): a sample is passed only on a declared finding the priority table sends to
+# fix, on the planted defect's file. The same record, one edit apart: declared and fix-grade is met;
+# described in prose only, declared at a rating the table defers or notes, declared on another file,
+# or declared with its lines refused is missed, and the line says which.
+for s in $(exam_samples "$REPO"); do
+  [ "$s" = clean ] && continue
+  key="$EXAM/samples/$s/expect.txt"
+  q="$(sed -n 's/^question: //p' "$key")"; res="$(sed -n 's/^result: //p' "$key")"
+  tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
+  ident="$(sed -n 's/^names: //p' "$key")"; ident="${ident%% | *}"
+  ff="$(sed -n 's/^finding-file: //p' "$key")"; ff="${ff%% | *}"
+  expect_nonempty "SD0 $s: the key names the file a finding must name" "$ff"
+  fr_all="$(sed -n 's/^finding-rating: //p' "$key")"
+  expect_nonempty "SD0 $s: the key names the ratings that pass it" "$fr_all"
+  # every rating the key admits is met, each on the same record
+  while [ -n "$fr_all" ]; do
+    fr="${fr_all%% | *}"
+    [ "$fr" = "$fr_all" ] && fr_all="" || fr_all="${fr_all#* | }"
+    # shellcheck disable=SC2086
+    frec "$R/$s-sd1.md" "$q" "$res" $fr "$ff" "$tok" "$ident"
+    expect_eq "SD1 $s: a finding declared at $fr on $ff passes the sample" "met: declared" "$(exam_score "$key" "$R/$s-sd1.md")"
+  done
+  fr="${fr:-S2 on}"
+  # the same record with its finding lines taken out: the defect is described, not declared
+  grep -vE '^(findings|finding|shown):' "$R/$s-sd1.md" > "$R/$s-sd2.md"
+  expect_true "SD2 $s: the described-only record still names the defect" grep -qF -- "$ident" "$R/$s-sd2.md"
+  expect_true "SD2 $s: …and carries its result" grep -qx "result: $res" "$R/$s-sd2.md"
+  expect_eq "SD2 $s: a record that only describes the defect fails, and the line says so" "missed: described only" \
+    "$(exam_score "$key" "$R/$s-sd2.md")"
+  { grep -vE '^(findings|finding|shown):' "$R/$s-sd1.md"; printf 'findings: 0\n'; } > "$R/$s-sd2b.md"
+  expect_eq "SD2 $s: findings: 0 beside a description of the defect is described only too" "missed: described only" \
+    "$(exam_score "$key" "$R/$s-sd2b.md")"
+  # the table defers or notes the same finding at a lower rating
+  for low in 'S2 off:deferred' 'S3 on:deferred' 'S3 off:noted' 'S4 on:noted' 'S4 off:noted'; do
+    # shellcheck disable=SC2086
+    frec "$R/$s-sd3.md" "$q" "$res" ${low%%:*} "$ff" "$tok" "$ident"
+    expect_eq "SD3 $s: a declaration at ${low%%:*} on $ff is $([ "${low#*:}" = deferred ] && echo deferred || echo noted) by the table and fails" \
+      "missed: declared at ${low%%:*}: ${low#*:}" "$(exam_score "$key" "$R/$s-sd3.md")"
+  done
+  # a finding on a file that is not the planted defect's
+  # shellcheck disable=SC2086
+  frec "$R/$s-sd4.md" "$q" "$res" S2 on docs/elsewhere.md "$tok" "$ident"
+  expect_eq "SD4 $s: a fix-grade finding on another file fails, naming the file asked for" \
+    "missed: no finding names $(sed -n 's/^finding-file: //p' "$key" | sed 's/ | / or /g')" "$(exam_score "$key" "$R/$s-sd4.md")"
+  # a fix-grade finding with no command and no unsure: line is one the verb would refuse
+  grep -v '^shown:' "$R/$s-sd1.md" > "$R/$s-sd5.md"
+  expect_contains "SD5 $s: a fix-grade finding with no shown: or unsure: line fails as one the verb refuses" \
+    "missed: finding lines refused: " "$(exam_score "$key" "$R/$s-sd5.md")"
+  { cat "$R/$s-sd5.md"; printf 'unsure: 1 whether a user meets it\n'; } > "$R/$s-sd5b.md"
+  expect_eq "SD5 $s: …and the same finding with an unsure: line is declared" "met: declared" "$(exam_score "$key" "$R/$s-sd5b.md")"
+  # a pass the record's own result contradicts is still read on result: a declaration beside result: pass is missed
+  # shellcheck disable=SC2086
+  frec "$R/$s-sd6.md" "$q" pass S2 on "$ff" "$tok" "$ident"
+  expect_eq "SD6 $s: a declared fix-grade finding beside result: pass is missed on the result" "missed" "$(exam_score "$key" "$R/$s-sd6.md")"
+done
+
+# The declaration is read by the registering verb's own reader (proof_findings): the verdict of a
+# record the scorer calls declared is the reader's, never a second parse. A doctored copy of
+# proof.sh that answers no findings turns every declaration into described only, and the real
+# reader's answer on the same record is its own.
+DCK="$EXAM/samples/dup-counter/expect.txt"
+frec "$R/sd7-declared.md" structure fail S2 on bin/stamp.sh "check: reuse FAIL bin/stamp.sh counts dirt again beside $DC_NAMES"
+grep -vE '^(findings|finding|shown):' "$R/sd7-declared.md" > "$R/sd7-described.md"
+SD_REAL="$(proof_findings "$R/sd7-declared.md" 2>&1)"
+expect_nonempty "SD7: the registering verb's reader answers a finding row for the declared record" "$SD_REAL"
+expect_contains "SD7: …and its row is the one the scorer reads: finding 1, S2, on, bin/stamp.sh:7, fix" \
+  "$(printf '1\tS2\ton\tbin/stamp.sh:7\tfix')" "$SD_REAL"
+SD_MIRROR="$TMP/sd-mirror"
+mkdir -p "$SD_MIRROR/tests/reader-exam" "$SD_MIRROR/payload/scripts/lib"
+cp "$EXAM/score.sh" "$SD_MIRROR/tests/reader-exam/score.sh"
+cp "$REPO/payload/scripts/lib/proof.sh" "$SD_MIRROR/payload/scripts/lib/proof.sh"
+expect_eq "SD7: a byte copy of score.sh and proof.sh in a mirrored tree scores the record as the real one does" \
+  "$(exam_score "$DCK" "$R/sd7-declared.md")" \
+  "$(bash -c '. "$1"; exam_score "$2" "$3"' _ "$SD_MIRROR/tests/reader-exam/score.sh" "$DCK" "$R/sd7-declared.md")"
+printf '%s\n' 'proof_findings() { return 0; }' >> "$SD_MIRROR/payload/scripts/lib/proof.sh"
+expect_eq "SD7: with the reader doctored to answer no findings, the same record is described only (the scorer asks the reader)" \
+  "missed: described only" \
+  "$(bash -c '. "$1"; exam_score "$2" "$3"' _ "$SD_MIRROR/tests/reader-exam/score.sh" "$DCK" "$R/sd7-declared.md")"
+expect_eq "SD7: …and the real tree's answer on the record is unchanged" "met: declared" \
+  "$(exam_score "$DCK" "$R/sd7-declared.md")"
+
+# MUTATION ARM: a score.sh that restores the described-only pass. The doctored copy's declaration
+# check says `declared` whatever the record holds; the row first proves the mutant still runs
+# (a fix-grade record is met), then reads the absence: the described-only record the real scorer
+# fails is met by the mutant, and the same record is missed by the real one.
+SD_MUT="$TMP/sd-mutant"
+mkdir -p "$SD_MUT/tests/reader-exam" "$SD_MUT/payload/scripts/lib"
+cp "$REPO/payload/scripts/lib/proof.sh" "$SD_MUT/payload/scripts/lib/proof.sh"
+sed 's/^exam_declared() {$/exam_declared() { echo declared; return 0/' "$EXAM/score.sh" > "$SD_MUT/tests/reader-exam/score.sh"
+expect_ne "SD8: the doctored scorer differs from score.sh" "$(cat "$EXAM/score.sh")" "$(cat "$SD_MUT/tests/reader-exam/score.sh")"
+expect_true "SD8: …and still parses" bash -n "$SD_MUT/tests/reader-exam/score.sh"
+sd_mut() { bash -c '. "$1"; exam_score "$2" "$3"' _ "$SD_MUT/tests/reader-exam/score.sh" "$1" "$2"; }
+expect_eq "SD8: the mutant still runs: a declared record is met by it" "met: declared" \
+  "$(sd_mut "$DCK" "$R/sd7-declared.md")"
+expect_eq "SD8: the mutant restores the described-only pass: the record that only describes the defect is met" "met: declared" \
+  "$(sd_mut "$DCK" "$R/sd7-described.md")"
+expect_eq "SD8: …which the real scorer fails on the same record" "missed: described only" \
+  "$(exam_score "$DCK" "$R/sd7-described.md")"
 
 CL="$EXAM/samples/clean/expect.txt"
 CL_TOK="$(sed -n 's/^token: //p' "$CL")"
@@ -679,6 +961,9 @@ reviewed: a..b
 question: structure
 result: fail
 scope: piece
+findings: 1
+finding: 1 S2 on bin/stamp.sh:9 the stamp counts dirt its own way, and counts .trellis/
+shown: 1 grep -n porcelain bin/stamp.sh
 check: one-site FAIL bin/stamp.sh:9 counts dirt with git status --porcelain | wc -l; the owner is lib/tree.sh tree_dirty_count, which excludes .trellis/
 R
 cat > "$R/onemind-passed.md" <<'R'
@@ -703,27 +988,30 @@ one_pass "$R/onemind-passed.md" structure "$R/passed-structure.md"
 one_pass "$R/onemind-passed.md" adversarial "$R/passed-adversarial.md"
 expect_eq "SC5: the split holds the found critic's structure FAIL" "result: fail" "$(grep '^result:' "$R/found-structure.md")"
 expect_eq "SC5: the split holds the passing critic's adversarial fail" "result: fail" "$(grep '^result:' "$R/passed-adversarial.md")"
-expect_eq "SC5: the critic that found the defect, at its structure path, is met" "met" \
+expect_eq "SC5: the critic that found the defect, at its structure path, is met" "met: declared" \
   "$(exam_score "$DC" "$R/found-structure.md")"
 expect_eq "SC5: …and its adversarial record, which passed, is not what the structure key reads" "missed" \
   "$(exam_score "$DC" "$R/found-adversarial.md")"
-expect_eq "SC5: the critic that passed the structure question is missed" "missed" \
+expect_eq "SC5: the critic that passed the structure question is missed, with no finding declared" "missed: described only" \
   "$(exam_score "$DC" "$R/passed-structure.md")"
-expect_eq "SC5: the one file of three passes is scored on its structure pass: found, met" "met" \
+expect_eq "SC5: the one file of three passes is scored on its structure pass: found, met" "met: declared" \
   "$(exam_score "$DC" "$R/onemind-found.md")"
-expect_eq "SC5: the one file of three passes is scored on its structure pass: passed, missed though another pass fails" "missed" \
+expect_eq "SC5: the one file of three passes is scored on its structure pass: passed, missed though another pass fails" "missed: described only" \
   "$(exam_score "$DC" "$R/onemind-passed.md")"
 
 # admit-not-require: the owner the land bypasses names the defect; the criterion's own word
-# does not.
+# does not. A finding may name either file the key lists (bin/land.sh, lib/fullrun.sh).
 AN="$EXAM/samples/admit-not-require/expect.txt"
-record "$R/adm-found.md" evidence "result: fail" \
+frec "$R/adm-found.md" evidence fail S2 on lib/fullrun.sh \
   "AC-1.1: REFUTED. The criterion requires a full run before the land; D1 and the test only show the full run is admitted, and bin/land.sh never asks for one."
-expect_eq "SC6: admit-not-require: requires, with land.sh, is met" "met" "$(exam_score "$AN" "$R/adm-found.md")"
-record "$R/adm-unnamed.md" evidence "result: fail" \
+expect_eq "SC6: admit-not-require: requires, with land.sh, is met" "met: declared" "$(exam_score "$AN" "$R/adm-found.md")"
+frec "$R/adm-found-land.md" evidence fail S2 on bin/land.sh \
+  "AC-1.1: REFUTED. The criterion requires a full run before the land; D1 and the test only show the full run is admitted."
+expect_eq "SC6: admit-not-require: a finding on bin/land.sh is met" "met: declared" "$(exam_score "$AN" "$R/adm-found-land.md")"
+frec "$R/adm-unnamed.md" evidence fail S2 on lib/fullrun.sh \
   "AC-1.1: REFUTED. The criterion requires a full run before the change lands; D1 and the test only show the full run is admitted."
 expect_eq "SC6: admit-not-require: requires, without land.sh, is missed" "missed" "$(exam_score "$AN" "$R/adm-unnamed.md")"
-record "$R/adm-quoted.md" evidence "result: fail" \
+frec "$R/adm-quoted.md" evidence fail S2 on lib/fullrun.sh \
   "AC-1.1 (\"When a changed file is read by no suite, a full run is required before the change lands\"): REFUTED. The T1 record's evidence is tier T2 but carries no fixture-fidelity declaration."
 expect_eq "SC6: admit-not-require: a record that quotes the criterion and fails it for another reason is missed" "missed" \
   "$(exam_score "$AN" "$R/adm-quoted.md")"
@@ -731,19 +1019,19 @@ expect_eq "SC6: admit-not-require: a record that quotes the criterion and fails 
 # red-then-green: the spellings a finder writes.
 RG="$EXAM/samples/red-then-green/expect.txt"
 for sp in 'tail -n1' 'tail -1'; do
-  record "$R/rtg.md" adversarial "result: fail" \
+  frec "$R/rtg.md" adversarial fail S2 on lib/landcheck.sh \
     "lib/landcheck.sh:10 land_check reads only the last stamp line ($sp); a red suite stamped before a green one at the same head lands."
-  expect_eq "SC7: red-then-green: a finder who writes '$sp' is met" "met" "$(exam_score "$RG" "$R/rtg.md")"
+  expect_eq "SC7: red-then-green: a finder who writes '$sp' is met" "met: declared" "$(exam_score "$RG" "$R/rtg.md")"
 done
-record "$R/rtg-two.md" adversarial "result: fail" "lib/landcheck.sh:10 land_check should read tail -n 2 instead"
+frec "$R/rtg-two.md" adversarial fail S2 on lib/landcheck.sh "lib/landcheck.sh:10 land_check should read tail -n 2 instead"
 expect_eq "SC7: red-then-green: 'tail -n 2' is missed" "missed" "$(exam_score "$RG" "$R/rtg-two.md")"
 
 # A line end of CR LF, and white space after a value, are not a miss.
-printf 'reviewed: a..b\r\nquestion: structure\r\nresult: fail\r\nscope: piece\r\ncheck: reuse FAIL bin/stamp.sh counts again beside tree_dirty_count\r\n' > "$R/crlf.md"
-expect_eq "SC8: a correct record with CR LF line ends is met" "met" "$(exam_score "$DC" "$R/crlf.md")"
-printf 'reviewed: a..b\nquestion: structure \nresult: fail \nscope: piece\ncheck: reuse FAIL beside tree_dirty_count\n' > "$R/trail.md"
-expect_eq "SC8: a correct record with a space after its question and result is met" "met" "$(exam_score "$DC" "$R/trail.md")"
-printf 'reviewed: a..b\r\nquestion: structure\r\nresult: pass \r\nscope: piece\r\ncheck: reuse FAIL beside tree_dirty_count\r\n' > "$R/crlf-pass.md"
+printf 'reviewed: a..b\r\nquestion: structure\r\nresult: fail\r\nscope: piece\r\nfindings: 1\r\nfinding: 1 S2 on bin/stamp.sh:9 counts dirt again\r\nshown: 1 grep -n porcelain bin/stamp.sh\r\ncheck: reuse FAIL bin/stamp.sh counts again beside tree_dirty_count\r\n' > "$R/crlf.md"
+expect_eq "SC8: a correct record with CR LF line ends is met" "met: declared" "$(exam_score "$DC" "$R/crlf.md")"
+printf 'reviewed: a..b\nquestion: structure \nresult: fail \nscope: piece\nfindings: 1\nfinding: 1 S2 on bin/stamp.sh:9 counts dirt again\nshown: 1 grep -n porcelain bin/stamp.sh\ncheck: reuse FAIL beside tree_dirty_count\n' > "$R/trail.md"
+expect_eq "SC8: a correct record with a space after its question and result is met" "met: declared" "$(exam_score "$DC" "$R/trail.md")"
+printf 'reviewed: a..b\r\nquestion: structure\r\nresult: pass \r\nscope: piece\r\nfindings: 1\r\nfinding: 1 S2 on bin/stamp.sh:9 counts dirt again\r\nshown: 1 grep -n porcelain bin/stamp.sh\r\ncheck: reuse FAIL beside tree_dirty_count\r\n' > "$R/crlf-pass.md"
 expect_eq "SC8: the same line ends on a record that passed are still missed" "missed" "$(exam_score "$DC" "$R/crlf-pass.md")"
 
 section "§DEST — a destination that names its sample is refused"
@@ -795,6 +1083,14 @@ for s in $SAMPLES; do
   expect_eq "S2 $s: the range is the two commits the repository holds" \
     "$out" "$(git -C "$TMP/m$n" rev-parse HEAD~1 2>/dev/null)..$(git -C "$TMP/m$n" rev-parse HEAD 2>/dev/null)"
   expect_nonempty "S2 $s: the change commit changes files" "$(git -C "$TMP/m$n" diff --name-only HEAD~1 HEAD 2>/dev/null)"
+  # D22 (wave-28 T18): the file a finding must name is a file the built sample holds at its head.
+  ffs="$(sed -n 's/^finding-file: //p' "$key")"
+  [ "$s" = clean ] || expect_nonempty "S5 $s: the key names a file for a finding" "$ffs"
+  while [ -n "$ffs" ]; do
+    ff="${ffs%% | *}"
+    [ "$ff" = "$ffs" ] && ffs="" || ffs="${ffs#* | }"
+    expect_true "S5 $s: finding-file '$ff' is a file the built sample holds at its head" git -C "$TMP/m$n" cat-file -e "HEAD:$ff"
+  done
   expect_false "S2 $s: the answer key does not travel" test -e "$TMP/m$n/expect.txt"
   expect_true "S3 $s: the built sample carries its own .bionic/ root" test -d "$TMP/m$n/.bionic"
   # git does not list an empty directory, so the exclude line is only read once a record is
@@ -870,7 +1166,8 @@ expect_contains "R4: …and never worked round" "never worked round" "$RUN_TEXT"
 # Run against a fake CLI binary on PATH, with a shell function of the same name exported beside it
 # and the parent session's variables set: what the fake sees is what a real session would.
 RV="$TMP/recipe"
-mkdir -p "$RV/bin" "$RV/dest" "$RV/plugin"
+mkdir -p "$RV/bin" "$RV/dest" "$RV/plugin/context"
+for f in checks-evidence checks-adversarial checks-structure severity; do printf 'text of %s\n' "$f" > "$RV/plugin/context/$f.md"; done
 cat > "$RV/bin/claude" <<'FAKE'
 #!/bin/bash
 {
@@ -914,24 +1211,37 @@ expect_false "R5: …and nothing is written" test -e "$RV/out2.json"
 # says is the brief's.
 printf 'subagent_type: bionic:critic\nQuestions: structure\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-critic-structure.md\n\nRead /tmp/q/s1 over a..b.\n' > "$RV/brief-1.txt"
 printf 'subagent_type: bionic:reviewer\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-reviewer-evidence.md\nno final newline' > "$RV/brief-2.txt"
-bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" > "$RV/prompt-1.txt"; rc=$?
+PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" > "$RV/prompt-1.txt"; rc=$?
 P="$(cat "$RV/prompt-1.txt")"
 expect_status "R7: gen-prompt.sh writes a prompt for two briefs" 0 "$rc"
 expect_eq "R7: the prompt opens with /bionic:canonical-sdlc" "/bionic:canonical-sdlc" "$(head -n 1 "$RV/prompt-1.txt" | cut -d ' ' -f 1)"
 expect_contains "R7: each brief goes to the agent type its first line names" "=== Brief 1 — subagent_type: bionic:critic ===" "$P"
 expect_contains "R7: …the second to its own" "=== Brief 2 — subagent_type: bionic:reviewer ===" "$P"
+# read_block <plugin copy> <question>... — the lines gen-prompt.sh ends a brief with (wave-28 T18,
+# D22): the files the recorder pushes a reader, by path in the plugin copy and never pasted: its
+# checks file for each question it is dealt, in the order evidence, adversarial, structure, then the
+# severity scale.
+read_block() {
+  local plug="$1" q; shift
+  printf '\nRead each of these files in full before you start; the plugin ships them and they bind this review:\n'
+  for q in evidence adversarial structure; do
+    case " $* " in *" $q "*) printf '%s/context/checks-%s.md\n' "$plug" "$q" ;; esac
+  done
+  printf '%s/context/severity.md\n' "$plug"
+}
 for n in 1 2; do
-  expect_eq "R7: brief $n is dispatched verbatim, its first line left off and nothing else" \
-    "$(tail -n +2 "$RV/brief-$n.txt"; [ -z "$(tail -c 1 "$RV/brief-$n.txt")" ] || echo)" \
+  case "$n" in 1) rq=structure ;; 2) rq=evidence ;; esac
+  expect_eq "R7: brief $n is dispatched as written, its first line left off, and ends with the files it is to read" \
+    "$(tail -n +2 "$RV/brief-$n.txt"; [ -z "$(tail -c 1 "$RV/brief-$n.txt")" ] || echo; read_block "$RV/plugin" "$rq")" \
     "$(awk -v n="$n" '$0 ~ "^=== Brief " n " " { f = 1; next } f && $0 == "END" { exit } f && $0 != "BEGIN" { print }' "$RV/prompt-1.txt")"
 done
 expect_contains "R7: the briefs given to one call go together, in one message" "together, in one message" "$P"
 expect_absent "R7: …and never one after another, which lets the second reader read the first's record" "after another" "$P"
 printf 'subagent_type: bionic:auditor\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-auditor-evidence.md\n' > "$RV/brief-3.txt"
-P3="$(bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" "$RV/brief-3.txt")"
+P3="$(PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" "$RV/brief-3.txt")"
 expect_contains "R7: three briefs are told to go together, in one message" "Dispatch the 3 briefs below together, in one message" "$P3"
 expect_contains "R7: …each under its own agent type" "=== Brief 3 — subagent_type: bionic:auditor ===" "$P3"
-P1="$(bash "$GEN" "$RV/brief-1.txt")"
+P1="$(PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-1.txt")"
 expect_contains "R7: one brief is one dispatch" "Dispatch the brief below." "$P1"
 expect_absent "R7: …with no word of a message of several" "together" "$P1"
 expect_contains "R7: …not in the background" "do not run it in the background" "$P"
@@ -939,11 +1249,11 @@ expect_contains "R7: a refusal stops the session and is never retried" "do not t
 expect_contains "R7: a record a reader returned is saved unchanged at the path its brief names" "save the record exactly as the reader returned it at that path" "$P"
 expect_contains "R7: the session replies with each record's path and whether it exists" "whether that file exists" "$P"
 expect_contains "R7: TOGETHER is not a switch: set to 0 it changes nothing" "together, in one message" \
-  "$(TOGETHER=0 bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt")"
+  "$(PLUGIN="$RV/plugin" TOGETHER=0 bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt")"
 expect_contains "R7: STEP_ZERO=1 adds the description quote" "quoting each one's description exactly" \
-  "$(STEP_ZERO=1 bash "$GEN" "$RV/brief-1.txt")"
+  "$(PLUGIN="$RV/plugin" STEP_ZERO=1 bash "$GEN" "$RV/brief-1.txt")"
 printf 'bionic:critic\nQuestions: structure\n' > "$RV/brief-bad.txt"
-out="$(bash "$GEN" "$RV/brief-bad.txt" 2>/dev/null)"; rc=$?
+out="$(PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-bad.txt" 2>/dev/null)"; rc=$?
 expect_status "R7: a brief with no agent type on its first line is refused" 2 "$rc"
 expect_empty "R7: …and no prompt is written" "$out"
 
@@ -952,15 +1262,64 @@ expect_empty "R7: …and no prompt is written" "$out"
 SAMPLE_NAMES="$(exam_samples "$REPO" | paste -sd'|' -)"
 expect_nonempty "R8: the real samples are listed" "$SAMPLE_NAMES"
 NAMED_RE="exam|sample|planted|defect|key|$SAMPLE_NAMES"
-printf 'subagent_type: bionic:critic\nRead the dup-counter sample.\n' > "$RV/brief-named.txt"
+printf 'subagent_type: bionic:critic\nQuestions: structure\nRead the dup-counter sample.\n' > "$RV/brief-named.txt"
+# The plugin copy's path is the caller's own and may hold any word (this suite's is under a
+# directory named for the suite), so it is taken out of the prompt before the words are read.
 expect_nonempty "R8: the extractor finds a sample's name in a prompt written for a brief that holds one" \
-  "$(bash "$GEN" "$RV/brief-named.txt" | grep -ioE "$NAMED_RE")"
-expect_empty "R8: the prompt for made-up briefs holds none of the five sample names, nor exam, sample, planted, defect or key" \
-  "$(grep -ioE "$NAMED_RE" "$RV/prompt-1.txt")"
+  "$(PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-named.txt" | sed "s|$RV/plugin||g" | grep -ioE "$NAMED_RE")"
+expect_empty "R8: the prompt for made-up briefs holds none of the sample names, nor exam, sample, planted, defect or key" \
+  "$(sed "s|$RV/plugin||g" "$RV/prompt-1.txt" | grep -ioE "$NAMED_RE")"
 for h in "$RUN" "$GEN"; do
   expect_nonempty "R8: ${h##*/} is read" "$(head -n 1 "$h")"
   expect_empty "R8: ${h##*/} holds none of them either" "$(grep -inE "$NAMED_RE" "$h")"
 done
+
+
+# D22 (wave-28 T18): a reader is given the scale's file as shipped, by path, and the checks file
+# of each question it is dealt: the files the recorder pushes (`start_pushed`, hooks/execution-recorder.sh),
+# named from the plugin copy of README step 1 and never pasted into the prompt. Every reader of a
+# defect sample is asked for finding lines, so the evidence reader is given the scale too.
+printf 'subagent_type: bionic:critic\nQuestions: evidence, adversarial, structure\nFiles: /tmp/q/s2/r.md\n\nRead /tmp/q/s2.\n' > "$RV/brief-one-mind.txt"
+printf 'subagent_type: bionic:auditor\nQuestions: evidence\nFiles: /tmp/q/s3/r.md\n\nRead /tmp/q/s3.\n' > "$RV/brief-auditor.txt"
+P9="$(PLUGIN="$REPO/payload" bash "$GEN" "$RV/brief-one-mind.txt")"
+expect_contains "R9: a reader is given the scale's file as shipped, by its path at the head" "$REPO/payload/context/severity.md" "$P9"
+expect_true "R9: …the path names a file that exists" test -s "$REPO/payload/context/severity.md"
+expect_eq "R9: …once per reader" "1" "$(printf '%s\n' "$P9" | grep -c "/context/severity.md")"
+SEV_LINE="Severity says how bad a finding is if a user meets it"
+expect_true "R9: the sentence looked for is one the shipped scale holds" grep -qF -- "$SEV_LINE" "$REPO/payload/context/severity.md"
+expect_absent "R9: the scale's text is not pasted into the prompt" "$SEV_LINE" "$P9"
+for q in evidence adversarial structure; do
+  expect_contains "R9: the one-mind critic is given checks-$q.md of the plugin copy" "$REPO/payload/context/checks-$q.md" "$P9"
+done
+P9="$(PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-auditor.txt")"
+expect_contains "R9: an auditor dealt evidence is given checks-evidence.md" "$RV/plugin/context/checks-evidence.md" "$P9"
+expect_absent "R9: …and no checks file of a question it is not dealt" "checks-adversarial.md" "$P9"
+expect_absent "R9: …nor checks-structure.md" "checks-structure.md" "$P9"
+expect_contains "R9: …and, asked for finding lines like every reader, the scale" "$RV/plugin/context/severity.md" "$P9"
+P9="$(PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-1.txt" "$RV/brief-auditor.txt")"
+expect_eq "R9: two briefs, two scale lines: each reader is given its own" "2" "$(printf '%s\n' "$P9" | grep -c "/context/severity.md")"
+r9() { local out; out="$("$@" 2>&1 >/dev/null)"; echo "rc=$? ${out%%$'\n'*}"; }
+expect_eq "R9: with PLUGIN unset, gen-prompt.sh refuses and says why" \
+  "rc=2 gen-prompt.sh: PLUGIN is not set; give the plugin copy of README step 1 as PLUGIN=<dir>" \
+  "$(r9 env -u PLUGIN bash "$GEN" "$RV/brief-1.txt")"
+expect_eq "R9: a PLUGIN that is a relative path is refused" \
+  "rc=2 gen-prompt.sh: PLUGIN=plugin is not an absolute path" "$(r9 env PLUGIN=plugin bash "$GEN" "$RV/brief-1.txt")"
+mkdir -p "$RV/plugin-noscale/context"
+printf 'x\n' > "$RV/plugin-noscale/context/checks-structure.md"
+expect_eq "R9: a plugin copy with no severity scale is refused, naming the file" \
+  "rc=2 gen-prompt.sh: $RV/plugin-noscale/context/severity.md cannot be read" "$(r9 env PLUGIN="$RV/plugin-noscale" bash "$GEN" "$RV/brief-1.txt")"
+mkdir -p "$RV/plugin-nochecks/context"
+printf 'x\n' > "$RV/plugin-nochecks/context/severity.md"
+expect_eq "R9: a plugin copy with no checks file for the brief's question is refused, naming the file" \
+  "rc=2 gen-prompt.sh: $RV/plugin-nochecks/context/checks-structure.md cannot be read" "$(r9 env PLUGIN="$RV/plugin-nochecks" bash "$GEN" "$RV/brief-1.txt")"
+printf 'subagent_type: bionic:critic\nFiles: /tmp/q/s1/r.md\nRead it.\n' > "$RV/brief-noq.txt"
+expect_eq "R9: a brief with no Questions: line is refused, since no checks file can be named for it" \
+  "rc=2 gen-prompt.sh: $RV/brief-noq.txt has no Questions: line" "$(r9 env PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-noq.txt")"
+printf 'subagent_type: bionic:critic\nQuestions: evidence, taste\nRead it.\n' > "$RV/brief-badq.txt"
+expect_eq "R9: a brief dealt a question the recorder pushes nothing for is refused, naming it" \
+  "rc=2 gen-prompt.sh: $RV/brief-badq.txt names the question 'taste', which is none of evidence, adversarial, structure" \
+  "$(r9 env PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-badq.txt")"
+expect_empty "R9: a refused call writes no prompt" "$(env -u PLUGIN bash "$GEN" "$RV/brief-1.txt" 2>/dev/null)"
 
 section "§HELPERS — whose claude runs, where a session or a build may sit, no fifth argument (T64)"
 
@@ -1429,6 +1788,7 @@ for f in $EXAM_CHECKS; do
   expect_regex "SH0: the digest reads $f" '^[0-9a-f]{64}$' "$(_detect_sha256 "$REPO/$f")"
 done
 pin_call "$EXAM/sittings.md" "$REPO"
-expect_eq "SH1: the latest sitting read the checks files that ship" "pinned" "$PIN_OUT"
+expect_contains "SH1: the latest sitting read the checks files that ship, or says in a stale: line that they changed since" "pinned" "$PIN_OUT"
+expect_status "SH1: rc 0" 0 "$PIN_RC"
 
 finish

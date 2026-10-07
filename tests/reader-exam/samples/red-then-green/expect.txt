@@ -2,3 +2,5 @@ question: adversarial
 result: fail
 token: land_check
 names: tail -n 1 | tail -n1 | tail -1
+finding-file: lib/landcheck.sh
+finding-rating: S1 on | S1 off | S2 on
