@@ -766,6 +766,48 @@ gb_clear
 expect_match "the same land goes through once that run is gone" \
   "spawn-worktree: LANDED branch=gate-into-outside onto=wave/gout *" "$(worktree_land "$GBT6" wave/gout)"
 
+# THE REAL SHIM, NOT A PLANTED FILE (wave-28 T36; ruling A-orch-55/56). The rows above write their
+# request files by hand, which is how no suite saw the shim name its own cwd as the tree: the
+# doctrine's `cd <row tree> || exit 1; bash tests/x.test.sh`, wrapped from the main checkout with
+# `--stamp-dir <row tree>`, wrote `tree=<main checkout>` and refused every land as suite-running.
+# These rows drive payload/scripts/booked.sh itself, from the main checkout, holding mid-run.
+GB_SHIM="${REPO}/payload/scripts/booked.sh"
+gb_shim_bg() {  # <stamp dir or ""> <command> — the real shim, started in the main checkout; GB_SHIM_PID
+  ( cd "$GB" && BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_BUSY_CORES_5M=0 \
+      BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_GATE_POLL=0.1 \
+      bash "$GB_SHIM" --agent w-own --max-wait 60 ${1:+--stamp-dir "$1"} --suites x.test.sh -- "$2" \
+      >/dev/null 2>&1 ) &
+  GB_SHIM_PID=$!
+}
+gb_admitted() {  # rc 0 once a request in the store carries an admitted line
+  local i=0
+  while [ "$i" -lt 200 ]; do
+    grep -qs '^admitted=' "$BIONIC_GATE_DIR"/requests/* && return 0
+    i=$((i + 1)); sleep 0.05
+  done
+  return 1
+}
+gb_shim_end() {  # <go file> — let the held command end, and wait for the shim
+  touch "$1"; wait "$GB_SHIM_PID" 2>/dev/null; GB_SHIM_PID=""
+}
+GBW7="$(new_tree "$GB" gate-shim-own)"
+GBT7="$(new_tree "$GB" gate-shim-land)"
+gb_clear
+gb_shim_bg "" "while [ ! -f '$TMP/gb7a.go' ]; do sleep 0.05; done"
+expect_true "the real shim, run in the main checkout, is admitted" gb_admitted
+expect_match "…and its run makes the main checkout busy: the land refuses (the positive for the row below)" \
+  "spawn-worktree: REFUSED reason=suite-running request=* tree=${GB} *" "$(worktree_land "$GBT7" wave/fixture)"
+gb_shim_end "$TMP/gb7a.go"
+gb_clear
+gb_shim_bg "$GBW7" "cd '$GBW7' || exit 1; while [ ! -f '$TMP/gb7b.go' ]; do sleep 0.05; done"
+expect_true "a writer's suite run from the main checkout (cd <tree>, --stamp-dir <tree>) is admitted" gb_admitted
+expect_eq "…its request names the writer's tree, the stamp's tree" "$(cd "$GBW7" && pwd -P)" \
+  "$(sed -n 's/^tree=//p' "$BIONIC_GATE_DIR"/requests/* 2>/dev/null | tail -n 1)"
+expect_match "…and it does not make the main checkout busy: another tree lands" \
+  "spawn-worktree: LANDED branch=gate-shim-land *" "$(worktree_land "$GBT7" wave/fixture)"
+gb_shim_end "$TMP/gb7b.go"
+gb_clear
+
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
 G="$(new_repo "$TMP/land-legacy")"
