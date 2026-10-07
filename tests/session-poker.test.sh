@@ -14530,15 +14530,19 @@ rp_report --rows
 expect_eq "RI-N a row with a ready and verdicts but no candidate counts both its verdicts (there is no commit of its own to include by)" \
   "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
 
-# ---------- ruling (3): killed is decided once, through the gate's rule (rc 137 only) ----------
+# ---------- ruling (3): killed is decided once, through the gate's rule, and an exit over 128 is a kill (D18) ----------
+# (A-orch-233, T72: "137 only" of A-orch-179/198 is withdrawn; the spec's figure is "admitted, no end, holder gone,
+# or an exit over 128", and the gate's own callers write 128+signal)
 rp_world ri-kill
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:10:00
 rp_req 1 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=137
 rp_req 2 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=143
-rp_req 3 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=0
+rp_req 3 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=130
+rp_req 4 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=128
+rp_req 5 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=0
 rp_report
-expect_eq "RI-K three admitted requests ended with rc 137, 143 and 0: killed=1 (the gate's rule, 137 only; a 143 is an ended run)" \
-  "0|killed=1" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
+expect_eq "RI-K five admitted requests ended with rc 137, 143, 130, 128 and 0: killed=3 (an exit over 128 is a kill, 128 itself is an ended run)" \
+  "0|killed=3" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
 
 # ---------- ruling (2): the landings line is above the decision line, which is the tick's last line ----------
 ri_tick() {  # <label> -> a landing planted, then one tick that prints in full, stdout alone in S27_OUT
@@ -14587,11 +14591,11 @@ rd_mutant noclear 's/^      gen\[rk\]++$/      # mutant: the own set is never cl
 rd_mutant excl 's/^      if (ev == "candidate") hasc\[g\] = 1$/      if (ev == "candidate" \&\& kv["base"] != "") headc[rk SUBSEP kv["base"]] = 1/
 s/^      if ((ev == "candidate" || ev == "ready") && kv\["commit"\] != "") ownc\[g SUBSEP kv\["commit"\]\] = 1$/      if ((ev == "candidate" || ev == "ready") \&\& kv["commit"] != "") ownc[rk SUBSEP kv["commit"]] = 1/
 s/^      if ((g in hasc) && .*$/      if ((rk SUBSEP kv["commit"]) in headc \&\& !((rk SUBSEP kv["commit"]) in ownc)) next/'
-rd_mutant kill128 's/^    _R_state=.*$/&; [ "${_R_rc:-0}" -gt 128 ] \&\& _R_state=killed/'
+rd_mutant kill137 's/^      ended) case .*$/      ended) ;;/'
 rd_mutant late 's/^        \[ -z "\$TICK_LANDINGS" \] || say "\$TICK_LANDINGS"$/        :/
 s/^        cat "\$TICK_BUF" 2>\/dev\/null$/        cat "$TICK_BUF" 2>\/dev\/null; [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"/'
 expect_eq "RI-mut0 each doctored poker differs from the real one in the lines its doctor names: 1, 3, 1 and 2 (the four doctors took)" "1|3|1|2" \
-  "$(for _m in noclear excl kill128 late; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
+  "$(for _m in noclear excl kill137 late; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
 RI_REAL_POKER="$POKER"
 # the own set never cleared: P3's second landing counts its first candidate's head run again (RI-P3a reads green=2)
 ri_p3 ri-mut-p3
@@ -14609,15 +14613,16 @@ expect_eq "RI-mut2 the exclusion mutant still runs (exit 0) and reads P1's green
 POKER="$RI_REAL_POKER"; rp_report --rows
 expect_eq "RI-mut2b …control: the real poker over the same record reads green=2 and T2 runs=2" \
   "runs: green=2 red=1 none=0 discarded=0 red-then-green=0|runs=2" "$(rk_runs)|$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ' | grep -o 'runs=[0-9]*')"
-# rc over 128 is killed again: RI-K's 143 counts
+# "137 only" again (the arm for an exit over 128 dropped): RI-K's 143 and 130 do not count
 rp_world ri-mut-kill
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:10:00
 rp_req 1 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=137
 rp_req 2 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=143
-POKER="$RD_MUT/kill128/hooks/session-poker.sh"; rp_report
-expect_eq "RI-mut3 the rc-over-128 mutant still runs and reads killed=2 where RI-K reads the gate's rule" "0|killed=2" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
+rp_req 3 w-T1 "$RP_ROOT" $((RP_E0 + 60)) $((RP_E0 + 60)) "ended=$((RP_E0 + 300))" rc=130
+POKER="$RD_MUT/kill137/hooks/session-poker.sh"; rp_report
+expect_eq "RI-mut3 the 137-only mutant still runs and reads killed=1 where RI-K reads killed=3 for the same shape" "0|killed=1" "$RC|$(rp_line | grep -o 'killed=[0-9]*')"
 POKER="$RI_REAL_POKER"; rp_report
-expect_eq "RI-mut3b …control: the real poker reads killed=1 over the same requests" "killed=1" "$(rp_line | grep -o 'killed=[0-9]*')"
+expect_eq "RI-mut3b …control: the real poker reads killed=3 over the same requests (143 and 130 are kills)" "killed=3" "$(rp_line | grep -o 'killed=[0-9]*')"
 # the landings line after the buffer again: the decision line is no longer last
 POKER="$RD_MUT/late/hooks/session-poker.sh"; ri_tick ri-mut-pos
 expect_eq "RI-mut4 the late mutant still prints both lines and puts the landings line after the decision line: not-above, the tick's last line the landings line" \
@@ -14628,6 +14633,93 @@ POKER="$RI_REAL_POKER"
 rm -rf "$RD_MUT"
 
 POKE_BOUND="$RI_BOUND_WAS"
+
+section "§PASS-MOVED: a moved: line binds a record's pass as a check: or deferred: line does — one predicate for the lines that bind it, so proof-add refuses a second registration over a move (wave-28 T72; REQ-8 AC-8.6, AC-8.9; D33, D34; A-T60.5, A-orch-213)"
+# ============================================================
+#
+# `proof_pass_conflict` (the registering verb's guard) read `check:`/`deferred:` lines as the ones that bind
+# a record's pass, and `_proof_reading_result` (the judge's re-derivation) read `check:`/`moved:`: a record
+# path with only a `moved:` line was admitted for a second pass at the same head, and the new pass's
+# finding #n inherited the move (A-T60.5; probed: an S4 typo read as fix). The two callers now ask ONE
+# predicate (lib/proof.sh `proof_bind_awk`), which names all three. A move is the user's word about one
+# finding of one pass, keyed `<record>#<n>` as a check is, and it changes the priority a later reader of
+# that path judges (T42's seam), so it binds. FIXTURE FIDELITY: §PASS-KEY's repository, plan, roster and
+# verb; the move is a line planted in the producing verb's shape (the transcript the verb itself needs is
+# §MOVE's).
+PM_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=pm-crit agent_id=a-pm-crit subagent_type=bionic:critic \
+     files="$(sev_files "pm-a pm-b")")" >> "$SEV_RS"
+sev_cur 4
+pm_add() { poke "$RSEV" proof-add review "record/wave-01-fixture/$1.md" --question adversarial --reader pm-crit; }
+pm_n() { /usr/bin/grep -c "^proved: .* evidence=record/wave-01-fixture/$1.md " "$PSEV"; }
+pm_line() {  # <line> -> the plan with the line placed where the verb places a finding's line
+  bash -c '. "$1"; proof_add_line "$2" "$3"' _ "$SEV_LIB" "$PSEV" "$1" > "$PSEV.new" && mv "$PSEV.new" "$PSEV"
+}
+PM_H="$(git -C "$SEV_WT" rev-parse HEAD)"
+
+# ---------- the probe: a moved: line alone, then the same record again at the same head ----------
+pk_rec pm-a "$PM_H" flag "findings: 1" "finding: 1 S4 off b.sh:3 - a typo in a comment"
+pm_add pm-a
+expect_eq "PASSM-1 precondition: the note registers (exit 0, one proof line) and no check:, deferred: or moved: line names it" "0|1|0" \
+  "$RC|$(pm_n pm-a)|$(/usr/bin/grep -c -E "^(check|deferred|moved): record/wave-01-fixture/pm-a.md#" "$PSEV")"
+pm_line "moved: $(chk_id pm-a) to=fix by=Dana Fixture at=2026-10-07T12:00:00Z words=\"fix that one\" why=\"the user ruled it\""
+expect_eq "PASSM-2 precondition: the plan holds the move and the judge derives fail for the reading its proof line writes as flag" "1|fail" \
+  "$(/usr/bin/grep -c "^moved: $(chk_id pm-a) " "$PSEV")|$(pk_derived "$SEV_LIB" pm-a flag)"
+s42_snap "$RSEV" "$PSEV"
+pm_add pm-a
+s42_unchanged "PASSM-3 §PASS-MOVED the same record at the same head, a moved: line alone already naming it" 1 "$PSEV"
+expect_nonempty "PASSM-3a the refusal line is there to read (the extractor returns real output)" "$(pk_ref)"
+expect_contains "PASSM-3b …naming the path" "record/wave-01-fixture/pm-a.md" "$(pk_ref)"
+expect_contains "PASSM-3c …the head" "${PM_H:0:12}" "$(pk_ref)"
+expect_contains "PASSM-3d …the lines that hold the pass, the move among them" "already has a check:, deferred: or moved: line" "$(pk_ref)"
+expect_contains "PASSM-3e …and the fix" "write the pass to a new record path" "$(pk_ref)"
+expect_eq "PASSM-3f …in one line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c .)"
+expect_eq "PASSM-3g …and still one proof line for the path" "1" "$(pm_n pm-a)"
+# a move on another record's finding does not bind this path: its relaunch is admitted as before
+pk_rec pm-b "$PM_H" pass "findings: 0"
+pm_add pm-b
+pm_add pm-b
+expect_eq "PASSM-4 a moved: line naming pm-a does not bind pm-b: its relaunch registers again (exit 0, two proof lines)" "0|2" "$RC|$(pm_n pm-b)"
+
+# ---------- one predicate: the guard and the judge's re-derivation agree on every kind of line ----------
+PM_R=record/wave-01-fixture/pm-c.md
+pk_rec pm-c "$PM_H" pass "findings: 1" "finding: 1 S1 on x.sh:9 - data lost on a second run" "shown: 1 bash x.sh"
+pm_agree() {  # <plan line> -> `<what proof_pass_conflict says>|<the result _proof_reading_result derives for a reading written pass>`
+  printf '## SDLC State\n\ncurrent: 4\nproved: kind=review head=%s at=2026-10-07T00:00:00Z evidence=%s question=adversarial reader=r result=pass scope=piece\n%s\n\n## Tasks\n' \
+    "$PM_H" "$PM_R" "$1" > "$TMPROOT/pm-agree.md"
+  bash -c '. "$1"; c="$(proof_pass_conflict "$2" "$3" "$4")"; printf "%s|%s" "${c%% *}" "$(_proof_reading_result "$2" "$5" "$3" pass)"' \
+    _ "$SEV_LIB" "$TMPROOT/pm-agree.md" "$PM_R" "$PM_H" "$RSEV/.bionic/docs" 2>/dev/null
+}
+expect_eq "PASSM-5 no line binds the pass: no conflict, and the written result stands" "|pass" "$(pm_agree "")"
+expect_eq "PASSM-5a a check: line binds it: a conflict, and the finding is read at its rating (S1 on fix: fail)" "settled|fail" \
+  "$(pm_agree "check: $PM_R#1 S1 on \"data lost\"")"
+expect_eq "PASSM-5b a deferred: line binds it for the judge as it does for the guard (T72: the judge read check:/moved: only)" "settled|fail" \
+  "$(pm_agree "deferred: $PM_R#1 S1 on \"data lost\"")"
+expect_eq "PASSM-5c a moved: line binds it for the guard as it does for the judge (T72: the guard read check:/deferred: only)" "settled|fail" \
+  "$(pm_agree "moved: $PM_R#1 to=fix by=Dana Fixture at=2026-10-07T12:00:00Z words=\"fix it\" why=\"ruled\"")"
+expect_eq "PASSM-5d a check: line of another record binds neither" "|pass" "$(pm_agree "check: record/wave-01-fixture/other.md#1 S1 on \"x\"")"
+expect_eq "PASSM-5e a check: line inside a fence binds neither" "|pass" "$(pm_agree '```
+check: '"$PM_R"'#1 S1 on "x"
+```')"
+
+# ---------- the mutation arm: moved: left out of the predicate ----------
+PM_NEEDLE='/^(check|deferred|moved):[ \t]/'
+anchor "$SEV_LIB" "$PM_NEEDLE" 1
+PM_MUT="$TMPROOT/poker-moved-mut"; rm -rf "$PM_MUT"; mkdir -p "$PM_MUT/hooks"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PM_MUT/scripts-lib" && mkdir -p "$PM_MUT/scripts" && mv "$PM_MUT/scripts-lib" "$PM_MUT/scripts/lib"
+for _pm_f in "$(dirname "$POKER")"/*; do [ "${_pm_f##*/}" = session-poker.sh ] || ln -s "$_pm_f" "$PM_MUT/hooks/${_pm_f##*/}"; done
+cp "$POKER" "$PM_MUT/hooks/session-poker.sh"
+PM_N="$PM_NEEDLE" PM_R='/^(check|deferred):[ \t]/' awk 'BEGIN { n = ENVIRON["PM_N"]; r = ENVIRON["PM_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$SEV_LIB" > "$PM_MUT/scripts/lib/proof.sh"
+expect_eq "PASSM-mut0 the moved:-left-out copy of the library differs from it in one line" "1" \
+  "$(diff "$SEV_LIB" "$PM_MUT/scripts/lib/proof.sh" | /usr/bin/grep -c '^>')"
+PM_POKER="$POKER"; cp "$PSEV" "$TMPROOT/pm-plan-keep"
+POKER="$PM_MUT/hooks/session-poker.sh"; pm_add pm-a
+POKER="$PM_POKER"
+expect_eq "PASSM-mut1 the mutant runs and registers the second pass over the move (exit 0, two proof lines): PASSM-3 goes red" "0|2" "$RC|$(pm_n pm-a)"
+cp "$TMPROOT/pm-plan-keep" "$PSEV"
+POKE_BOUND="$PM_BOUND_WAS"
 
 section "§MOVE-PASTED §MOVE-WORD §MOVE-FOLD §MOVE-SLASH §MOVE-MIN §MOVE-KEYS §FILL-BEHIND: user_said cuts a pasted block as the CLI writes it, one word class, one fold, the arguments of a slash command, one constant; the tick names the rows behind the gap (wave-28 T74; REQ-8 AC-8.9; D34; A-orch-221, A-orch-226)"
 # ============================================================
