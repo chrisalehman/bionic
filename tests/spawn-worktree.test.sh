@@ -1155,9 +1155,15 @@ section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan lands by r
 # lands the row on a green run of its own and reads no stamp.
 . "$(dirname "$0")/fixtures/upgrade-1.12.0/install.sh"
 world_cost a.test.sh 5 0.5 5
+up_world() {  # [<T1 suites_allowed>] -> a world root holding the 1.12.0 fixture (its own launch rows, not rd_world's)
+  local r
+  r="$(world_repo)" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  up_install "$r" "$@" || return 1
+  printf '%s' "$r"
+}
 up_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
-UPA="$(rd_world)"
-up_install "$UPA"
+UPA="$(up_world)"
 UPA_T1="$UPA/.worktrees/T1"
 UPA_HEAD="$(git -C "$UPA_T1" rev-parse HEAD)"
 UPA_STAMPS="$(git -C "$UPA_T1" rev-parse --absolute-git-dir)/bionic-stamps"
@@ -1182,16 +1188,14 @@ awk '/^  # THE ROSTER.S LAUNCH LINE \(labels, D4\)/ && !d { print "  why=\"$(_wt
   { print }' "${REPO}/payload/scripts/lib/line.sh" > "$UPM_DIR/scripts/lib/line.sh"
 expect_eq "(up3-pre) the mutant differs from line.sh by the one stamp-reading line" "1" \
   "$(diff "${REPO}/payload/scripts/lib/line.sh" "$UPM_DIR/scripts/lib/line.sh" | /usr/bin/grep -c '^>')"
-UPM="$(rd_world)"
-up_install "$UPM"
+UPM="$(up_world)"
 UPM_OUT="$( cd "$UPM/.worktrees/T1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 bash "$UPM_DIR/scripts/spawn-worktree.sh" ready 2>&1 )"; UPM_RC=$?
 expect_eq "(up3) the mutant that reads the stamp refuses the row (exit 2), so (up1) goes red against it" "2" "$UPM_RC"
 expect_contains "(up3) …saying the proof was stale" "REFUSED reason=stale-proof" "$UPM_OUT"
 rm -rf "$UPM_DIR"
 
 # A 1.12.0 ROW THAT NAMES NO SUITE: one line, naming the person's landing, and nothing appended to the line.
-UPB="$(rd_world)"
-up_install "$UPB" -
+UPB="$(up_world -)"
 UPB_T1="$UPB/.worktrees/T1"
 rd_ready "$UPB_T1"
 expect_eq "(up4) a launch row naming no suite is refused (exit 2)" "2" "$RD_RC"
@@ -1204,16 +1208,14 @@ printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended se
 rd_ready "$UPB_T1"
 expect_eq "(up4-control) the same tree lands once the launch row names a suite, and the line then holds its entry" "0 yes" \
   "$RD_RC $(test -s "$(up_rec "$UPB")" && echo yes || echo no)"
-UPC="$(rd_world)"
-up_install "$UPC"
+UPC="$(up_world)"
 UPC_T2="$UPC/.worktrees/T2"
 rd_ready "$UPC_T2"
 expect_eq "(up5) a row whose brief waived every suite (suites_allowed=none) is refused the same way (exit 2)" "2" "$RD_RC"
 expect_contains "(up5) …naming the hand landing" "land ${UPC_T2} --by-hand --reason '<why>'" "$RD_OUT"
 
 # A BARE `land` ON THE FIXTURE: the old verb names both new ones, and moves nothing.
-UPD="$(rd_world)"
-up_install "$UPD"
+UPD="$(up_world)"
 UPD_REFS="$(git -C "$UPD" for-each-ref --format='%(refname) %(objectname)')"
 UPD_PLAN="$(cat "$UPD/.bionic/docs/plans/epic-x/wave-x.plan.md")"
 UPD_OUT="$( cd "$UPD" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$UPD/.worktrees/T1" 2>&1 )"; UPD_RC=$?
