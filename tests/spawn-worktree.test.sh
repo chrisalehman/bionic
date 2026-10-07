@@ -1147,4 +1147,83 @@ landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
 expect_eq "…and the working branch moved to the landed commit" \
   "$(git -C "$RDB" rev-parse wave/x)" "$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
 
+section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan lands by ready, its stamp is never read, a bare land names the new verbs (wave-28 T21; D26, REQ-2 AC-2.11, REQ-7 AC-7.2)"
+#
+# The fixture is a plan AS 1.12.0 WROTE IT (tests/fixtures/upgrade-1.12.0): the `source=probe` budget line, rows
+# with no `Lands-on:` label, and roster launch rows carrying `suites_allowed=` and neither `row=` nor `lands_on=`.
+# T1's tree holds a stamp, in the bare form 1.12.0's land read, that says RED for a.test.sh at T1's head. `ready`
+# lands the row on a green run of its own and reads no stamp.
+. "$(dirname "$0")/fixtures/upgrade-1.12.0/install.sh"
+world_cost a.test.sh 5 0.5 5
+up_world() {  # [<T1 suites_allowed>] -> a world root holding the 1.12.0 fixture (its own launch rows, not rd_world's)
+  local r
+  r="$(world_repo)" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  up_install "$r" "$@" || return 1
+  printf '%s' "$r"
+}
+up_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
+UPA="$(up_world)"
+UPA_T1="$UPA/.worktrees/T1"
+UPA_HEAD="$(git -C "$UPA_T1" rev-parse HEAD)"
+UPA_STAMPS="$(git -C "$UPA_T1" rev-parse --absolute-git-dir)/bionic-stamps"
+UPA_WHY="$(bash -c '. "$1" 2>/dev/null; _wt_stale_proof "$2" "$3"' _ "${REPO}/payload/scripts/lib/worktree.sh" "$UPA_T1" "$UPA_HEAD" 2>&1)"
+expect_match "(up1-pre) the planted stamp is a RED to 1.12.0's own reader: the land judges the tree's runs stale" "why=*" "$UPA_WHY"
+UPA_STAMP_BYTES="$(cat "$UPA_STAMPS")"
+rd_ready "$UPA_T1"
+expect_eq "(up1) ready on the 1.12.0 fixture lands the row (exit 0)" "0" "$RD_RC"
+expect_match "(up1) …printing LANDED, then the owed line" "LANDED T1 *
+landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
+UPA_C="$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
+expect_eq "(up1) …and the working branch moved to the landed commit" "$UPA_C" "$(git -C "$UPA" rev-parse wave/x)"
+expect_contains "(up2) the suite that decided it ran on the candidate and was green, whatever the stamp said" \
+  "|ev=verdict|row=T1|commit=${UPA_C}|suite=a.test.sh|result=green|" "$(cat "$(up_rec "$UPA")" 2>/dev/null)"
+expect_eq "(up2) …and the stamp is exactly as it was planted (ready neither read nor wrote it)" "$UPA_STAMP_BYTES" "$(cat "$UPA_STAMPS")"
+
+# THE MUTATION ARM: a copy of the scripts whose `ready` judges the tree's stamps as 1.12.0's land did. It runs in a
+# directory made outside every checkout; the tracked file is never touched.
+UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
+cp -R "${REPO}/payload/scripts" "$UPM_DIR/scripts" 2>/dev/null
+awk '/^  # THE ROSTER.S LAUNCH LINE \(labels, D4\)/ && !d { print "  why=\"$(_wt_stale_proof \"$wt\" \"$head\")\" && { _wt_refuse \"stale-proof ${why}\"; return 2; }"; d = 1 }
+  { print }' "${REPO}/payload/scripts/lib/line.sh" > "$UPM_DIR/scripts/lib/line.sh"
+expect_eq "(up3-pre) the mutant differs from line.sh by the one stamp-reading line" "1" \
+  "$(diff "${REPO}/payload/scripts/lib/line.sh" "$UPM_DIR/scripts/lib/line.sh" | /usr/bin/grep -c '^>')"
+UPM="$(up_world)"
+UPM_OUT="$( cd "$UPM/.worktrees/T1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 bash "$UPM_DIR/scripts/spawn-worktree.sh" ready 2>&1 )"; UPM_RC=$?
+expect_eq "(up3) the mutant that reads the stamp refuses the row (exit 2), so (up1) goes red against it" "2" "$UPM_RC"
+expect_contains "(up3) …saying the proof was stale" "REFUSED reason=stale-proof" "$UPM_OUT"
+rm -rf "$UPM_DIR"
+
+# A 1.12.0 ROW THAT NAMES NO SUITE: one line, naming the person's landing, and nothing appended to the line.
+UPB="$(up_world -)"
+UPB_T1="$UPB/.worktrees/T1"
+rd_ready "$UPB_T1"
+expect_eq "(up4) a launch row naming no suite is refused (exit 2)" "2" "$RD_RC"
+expect_eq "(up4) …in one line" "1" "$(printf '%s\n' "$RD_OUT" | awk 'END { print NR }')"
+expect_contains "(up4) …naming the row and its writer" "REFUSED reason=no-lands-on row=T1 name=wx-T1" "$RD_OUT"
+expect_contains "(up4) …and the hand landing, with its reason" "land ${UPB_T1} --by-hand --reason '<why>'" "$RD_OUT"
+expect_false "(up4) …and nothing was appended to the line" test -e "$(up_rec "$UPB")"
+printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$UPB/.bionic/docs/plans/epic-x/wave-x.plan.md")" \
+  >> "$UPB/.bionic/tmp/roster-$WORLD_SID.state"
+rd_ready "$UPB_T1"
+expect_eq "(up4-control) the same tree lands once the launch row names a suite, and the line then holds its entry" "0 yes" \
+  "$RD_RC $(test -s "$(up_rec "$UPB")" && echo yes || echo no)"
+UPC="$(up_world)"
+UPC_T2="$UPC/.worktrees/T2"
+rd_ready "$UPC_T2"
+expect_eq "(up5) a row whose brief waived every suite (suites_allowed=none) is refused the same way (exit 2)" "2" "$RD_RC"
+expect_contains "(up5) …naming the hand landing" "land ${UPC_T2} --by-hand --reason '<why>'" "$RD_OUT"
+
+# A BARE `land` ON THE FIXTURE: the old verb names both new ones, and moves nothing.
+UPD="$(up_world)"
+UPD_REFS="$(git -C "$UPD" for-each-ref --format='%(refname) %(objectname)')"
+UPD_PLAN="$(cat "$UPD/.bionic/docs/plans/epic-x/wave-x.plan.md")"
+UPD_OUT="$( cd "$UPD" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$UPD/.worktrees/T1" 2>&1 )"; UPD_RC=$?
+expect_eq "(up6) a bare land on the fixture prints the line naming ready and --by-hand, exactly" \
+  "land: the line lands a row with \"ready\"; a person lands one with \"land <tree> --by-hand --reason '<why>'\"" "$UPD_OUT"
+expect_eq "(up6) …and exits 2" "2" "$UPD_RC"
+expect_nonempty "(up6-pre) the refs read back" "$UPD_REFS"
+expect_eq "(up6) …and no ref moved" "$UPD_REFS" "$(git -C "$UPD" for-each-ref --format='%(refname) %(objectname)')"
+expect_eq "(up6) …and the plan is as it was" "$UPD_PLAN" "$(cat "$UPD/.bionic/docs/plans/epic-x/wave-x.plan.md")"
+
 finish

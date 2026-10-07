@@ -692,7 +692,9 @@ roster_mark_landed() {  # <roster> <name> <40-hex commit> <ISO-UTC> -> 0 · 1 ·
 
 # The mark of <name>'s CURRENT work: `<commit><TAB><at>` from the latest row carrying `landed=` since
 # the name's latest launch line (a `status=intended` row no verb copied) and since its latest
-# `extend` row (re-opened work is new work), whatever amend or hold rows came between. rc 1 when none.
+# `extend` row (re-opened work is new work), whatever amend or hold rows came between. A mark written on a
+# re-opened row keeps that row's `extended=` and is read as the mark it is (wave-28 T21, A-orch-105 #2); an extend
+# row carrying a commit already seen has only copied an earlier landing's keys, and clears the mark. rc 1 when none.
 roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work carries no mark
   local f="${1:-}" name="${2:-}"
   [ -n "$name" ] || return 1
@@ -701,7 +703,9 @@ roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work c
     function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
     index($0, "roster-state/") != 1 || !index($0 "|", k) { next }
     { c = kv("landed") }
-    c != "" && !index($0, "|extended=") { m = c "\t" kv("landed_at"); next }
+    c != "" && !index($0, "|extended=") { m = c "\t" kv("landed_at"); seen[c] = 1; next }
+    c != "" && !(c in seen) { m = c "\t" kv("landed_at"); seen[c] = 1; next }
+    c != "" { seen[c] = 1 }
     index($0, "|extended=") || (index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|held=") && !index($0, "|adopted_from=")) { m = "" }
     END { if (m == "") exit 1; print m }' "$f" 2>/dev/null
 }
