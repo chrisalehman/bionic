@@ -1036,7 +1036,7 @@ world_machine 8 8192 30 1.0
 world_clock 100000
 plant_ended_many 2000 "op:e" 900
 expect_eq "OP.22 2,000 expired requests are planted (positive)" "2000" "$(nreq)"
-op_room() { ( . "$GATE_LIB" 2>/dev/null; gate_room ); }
+op_room() { ( . "${1:-$GATE_LIB}" 2>/dev/null; gate_room ); }
 OP_CPU="$(cpu_ms op_room)"
 expect_eq "OP.22b gate_room, timed, pruned them all (positive for the timing row)" "0" "$(nreq)"
 plant_ended_many 2000 "op:e" 900
@@ -1047,7 +1047,8 @@ expect_eq "OP.24 …every expired request is gone" "0" "$(nreq)"
 expect_true "OP.25 …removed by at most 5 rm execs, never one per file" \
   test "$(wc -l < "$WORLD_ROOT/op-rms" | tr -d ' ')" -le 5
 echo "      measured: gate_room pruning 2,000 expired requests, $OP_CPU ms of CPU"
-expect_true "OP.26 …and the run before it took under 1 s of CPU" test "$OP_CPU" -lt 1000
+expect_true "OP.26 …and the run before it took under 2 s of CPU (about 0.8 s; an rm per file is over 4 s)" \
+  test "$OP_CPU" -lt 2000
 
 # Every number read as decimal; a non-number refused to the default with one stderr line; the lock freed.
 fresh open-decimal
@@ -1140,17 +1141,18 @@ find "$BIONIC_GATE_DIR/requests" -name '1[0-9][0-9][0-9][0-9][0-9]' -delete
 fresh open-mut-rm
 world_machine 8 8192 30 1.0
 world_clock 100000
-plant_ended_many 300 "op:e" 900
+plant_ended_many 2000 "op:e" 900
 MR2="$(mutant open-rm)"
 anchor "$MR2" '|| old[${#old[@]}]="$f"' 1
 sed -i.bak '/|| old\[\${#old\[@\]}\]="\$f"/c\
       [ "$((now - born))" -le "$keep" ] || rm -f "$f"' "$MR2"
 : > "$WORLD_ROOT/op-rms"
-OP_R="$( . "$MR2" 2>/dev/null; PATH="$op_stub/rm-dir:$PATH" gate_room 2>&1 )"
-expect_eq "OP.M6 the mutant (rm per file) still prunes all 300 and answers (it runs)" "0 yes" \
-  "$(nreq) $(yn "$OP_R" room=yes)"
+OP_CPU="$(PATH="$op_stub/rm-dir:$PATH" cpu_ms op_room "$MR2")"
+echo "      measured: the mutant pruning 2,000 expired requests, $OP_CPU ms of CPU"
+expect_eq "OP.M6 the mutant (rm per file) still prunes all 2,000 (it runs)" "0" "$(nreq)"
 expect_true "OP.M7 …forking an rm each, which OP.25's bound reads red" \
-  test "$(wc -l < "$WORLD_ROOT/op-rms" | tr -d ' ')" -ge 300
+  test "$(wc -l < "$WORLD_ROOT/op-rms" | tr -d ' ')" -ge 2000
+expect_true "OP.M7b …and costing over 2 s of CPU, which OP.26's bound reads red" test "$OP_CPU" -ge 2000
 # (4) the decimal read taken out.
 fresh open-mut-dec
 world_machine 8 8192 30 1.0
