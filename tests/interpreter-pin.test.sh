@@ -714,11 +714,13 @@ expect_contains "7.32b …and runs its check" "check ran" "$STOP_LOG"
 T36_LNK_STICKY="$T87_DIR/t36-lnk-sticky"; ln -s "$T36_STICKY" "$T36_LNK_STICKY"
 stop_run "$STOP_SUITE" "$T36_LNK_STICKY"
 expect_eq "7.32c a link to an open directory WITH the sticky bit builds its pin too" "0" "$STOP_RC"
-# The mutant: the link followed no more (`ls -ld`, in the one judgment of an open directory, whose
-# two-space `case` line is the only one that indent has). The open-parent link is then accepted.
+# The mutant: the link followed no more (`ls -ld`, in the one predicate of an open directory, which
+# reads the directory with `ls -ldLe` and, where ls has no -e, with `ls -ldL`: both lines are turned).
+# The open-parent link is then accepted.
 T36_MUT3="$TMPROOT/t36-mut-nolink.sh"
-anchor -E "$SEAM" '^  case "\$\(ls -ldL "\$1" 2>/dev/null\)" in$' 1
-sed 's|^  case "$(ls -ldL "$1" 2>/dev/null)" in$|  case "$(ls -ld "$1" 2>/dev/null)" in|' "$SEAM" > "$T36_MUT3"
+anchor "$SEAM" 'out="$(ls -ldLe "$1" 2>/dev/null)"' 1
+anchor "$SEAM" '[ -n "$out" ] || out="$(ls -ldL "$1" 2>/dev/null)"' 1
+sed -e 's|out="$(ls -ldLe "$1"|out="$(ls -lde "$1"|' -e 's|out="$(ls -ldL "$1"|out="$(ls -ld "$1"|' "$SEAM" > "$T36_MUT3"
 expect_eq "7.33 the no-link mutant parses" "0" "$(bash -n "$T36_MUT3" >/dev/null 2>&1; echo $?)"
 R="$T36_LNK_OK/mut-ok-root"; pin_call "$T36_MUT3" "$R"
 expect_eq "7.33b …and builds a pin under a link to a closed directory (not vacuous)" "0" "$PIN_RC"
@@ -789,8 +791,8 @@ expect_eq "7.39c under the no-walk mutant the link held in an open directory is 
 R="$T56_HOLD/lnk/fn-root"; pin_call "$SEAM" "$R"
 expect_ne "7.39d control: the shipped function refuses that same root" "0" "$PIN_RC"
 T56_MUT2="$TMPROOT/t56-mut-sticky.sh"
-anchor "$SEAM" '    ?????????[tT]*) return 1 ;;' 1
-grep -vF '    ?????????[tT]*) return 1 ;;' "$SEAM" > "$T56_MUT2"
+anchor "$SEAM" '    ?????????[tT]*) sticky=1 ;;' 1
+grep -vF '    ?????????[tT]*) sticky=1 ;;' "$SEAM" > "$T56_MUT2"
 expect_eq "7.40 the no-sticky mutant parses" "0" "$(bash -n "$T56_MUT2" >/dev/null 2>&1; echo $?)"
 R="$T36_LNK_OK/mut-nosticky-root"; pin_call "$T56_MUT2" "$R"
 expect_eq "7.40b …and builds a pin under a link held in a closed directory (not vacuous)" "0" "$PIN_RC"
@@ -808,8 +810,8 @@ T57_MUT1="$TMPROOT/t57-mut-ancestor.sh"
 anchor -E "$SEAM" '^    cur="\$cur/\$part"$' 1
 awk '{print} $0 == "    cur=\"$cur/$part\"" {print "    [ -L \"$cur\" ] || continue"}' "$SEAM" > "$T57_MUT1"
 T57_MUT2="$TMPROOT/t57-mut-acl.sh"
-anchor -E "$SEAM" '^  acl="\$\(_bionic_pin_acl "\$1"\)"$' 1
-sed 's|^  acl="$(_bionic_pin_acl "$1")"$|  acl=""|' "$SEAM" > "$T57_MUT2"
+anchor "$SEAM" '  _bionic_pin_acl "$1" "$out"' 1
+grep -vF '  _bionic_pin_acl "$1" "$out"' "$SEAM" > "$T57_MUT2"
 # t57_line <tmpdir> <why> <remedy> — the hand run's one stderr line, as the seam prints it
 t57_line() { printf 'resolve-roots.sh: no interpreter pin at %s — %s; %s, then run again' \
   "$1/bionic-interpreter-pin.$STOP_UID" "$2" "$3"; }
