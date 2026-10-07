@@ -973,6 +973,19 @@ expect_eq "OP.4b a later empty ended= line leaves the request open: the list cal
   "$(glist | awk '{ printf "%s %s", $1, $2 }')"
 expect_eq "OP.4c …and gate_asked, reading the last ended= as the rule does, names it" "op:w1 |0" "$(ga op:w1)"
 
+# A run is killed when it ended with an exit over 128 (D18): a signal's 128+n, 143 from the rollover kills
+# and 137 from signal 9 alike. 128 itself and 0 are exits, not kills.
+fresh open-killed-rc
+world_machine 8 8192 30 1.0
+world_clock 100000
+plant_ended 1 "op:r143" 99500; printf 'rc=143\n' >> "$BIONIC_GATE_DIR/requests/1"
+plant_ended 2 "op:r128" 99500; printf 'rc=128\n' >> "$BIONIC_GATE_DIR/requests/2"
+plant_ended 3 "op:r0" 99500
+plant_ended 4 "op:r137" 99500; printf 'rc=137\n' >> "$BIONIC_GATE_DIR/requests/4"
+OP_KRC='1 killed|2 ended|3 ended|4 killed'
+expect_eq "OP.4d gate_list names an ended request with rc 143 killed, as it does one with rc 137; 128 and 0 stay ended" \
+  "$OP_KRC" "$(glist | awk '{ printf "%s%s %s", (n++ ? "|" : ""), $1, $2 }')"
+
 # A request nobody holds is not showing, and goes after BIONIC_GATE_KEEP like an ended one.
 fresh open-gone
 world_machine 8 8192 30 1.0
@@ -1178,6 +1191,19 @@ plant_raw 2 "op:d" "008"
 expect_eq "OP.M9 …and with ended=008 it aborts under the lock, which OP.27 reads red" " lock=held" \
   "$(GATE_LIB="$MD" op_run - | tr '\n' ' ' | sed 's/ $//')"
 rm -rf "$BIONIC_GATE_DIR/lock"
+# (5) the killed rule back to 137 only, as _gate_open once spelled it.
+fresh open-mut-137
+world_machine 8 8192 30 1.0
+world_clock 100000
+plant_ended 1 "op:r143" 99500; printf 'rc=143\n' >> "$BIONIC_GATE_DIR/requests/1"
+plant_ended 4 "op:r137" 99500; printf 'rc=137\n' >> "$BIONIC_GATE_DIR/requests/4"
+M137="$(mutant open-137)"
+anchor "$M137" '[ "$_G_NUM" -gt 128 ]' 1
+sed -i.bak 's/\[ "\$_G_NUM" -gt 128 \]/[ "$_G_NUM" -eq 137 ]/' "$M137"
+expect_eq "OP.M10 the mutant (killed is rc 137 only) still names the rc 137 request killed (it runs)" "4 killed" \
+  "$(GATE_LIB="$M137" glist | awk '$2 == "killed" { print $1 " " $2 }')"
+expect_eq "OP.M11 …and reads the rc 143 request ended, which OP.4d reads red: the over-128 rule is the row" "1 ended" \
+  "$(GATE_LIB="$M137" glist | awk '$1 == 1 { print $1 " " $2 }')"
 
 # ── §REAPED ──────────────────────────────────────────────────────────────────
 section "§REAPED — a killed request overlaps nothing once it is seen dead (T47; cost row)"
