@@ -62,8 +62,10 @@
 # one the session roster never saw (wave-28 T70; A-orch-205 to 208): a dispatch the wall admitted
 # and did not journal. The stop guard refuses such a stop by name and by id, and its one escape,
 # `order`, is a record that a HUMAN asked, which the orchestrator may not claim. This verb is the
-# orchestrator's own: `unrostered <name> '<why>' [--at <epoch>]` checks that THIS session's roster
-# carries no row of the name and that a fresh panel reading lists it, then records
+# orchestrator's own: `unrostered <name> '<why>' [--at <epoch>]` checks that NO roster of the project
+# (this session's, a predecessor's, a dead session's: `roster_sessions_with_name`) carries a row of the name and
+# that a fresh panel reading lists it, and that the reason is one plain line (no `|`, newline or carriage
+# return), then records
 # `stop-unrostered/v1|…|by=orchestrator|why=…|target=<name>`. The guard honours that line ONCE,
 # within the order TTL, writes the stop onto the roster as a closed row, and a second stop of the
 # name is refused again. It is not an `order`: the guard's human-order reader never sees it.
