@@ -643,3 +643,7 @@ Each line below was cut from a capped file and kept here, verbatim or reworded i
 - **dispatch.md, liveness fields (wave 28).** A subprocess claim — a process pattern plus its output file — is conditional-required: declared only when the task backgrounds a long-running command; the backgrounding paragraph beside it says the same as a rule.
 
 - **dispatch.md, fresh by default (wave 28).** Synchronous main-thread execution exists only under `multi_agent: false`, where there are no subagents at all.
+
+- **dispatch.md, backgrounding (wave 28).** Declaring `claims=` is what lets the verdict call a mid-flight row STILL-LIVE instead of UNMET; nothing watches it between decisions.
+
+- **dispatch.md, the non-response procedure (wave 28).** Rationale, failure model, and use cases for the starting standard, the stopping standard, and the non-response procedure: `design/orchestrator-subagent-coordination.md`.

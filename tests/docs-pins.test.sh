@@ -4415,7 +4415,7 @@ expect_contains "PB-b3: AC-3.4 — the rule names the inline form it replaces" \
 anchor "${REPO}/agents/researcher.md" "$PB_RULE" 1
 grep -vF -- "$PB_RULE" "${REPO}/agents/researcher.md" > "$TMP/pb-role-doctored.md" 2>/dev/null
 expect_contains "PB-b4 precondition: the doctored role file still carries the shared block's other rules" \
-  'Run a suite only through the door' "$(cat "$TMP/pb-role-doctored.md")"
+  'use the door' "$(cat "$TMP/pb-role-doctored.md")"
 expect_eq "PB-b4: a role file with the rule's line removed reads as missing it (the pin discriminates)" \
   "0" "$(grep -cF -- "$PB_RULE" "$TMP/pb-role-doctored.md" | tr -cd '0-9')"
 
