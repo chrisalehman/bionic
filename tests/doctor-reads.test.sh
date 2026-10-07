@@ -1152,4 +1152,31 @@ SEC_REC0="$(rec_section "$OUT_REC0")"
 expect_contains "REC.14: with no record the section says so" "none recorded" "$SEC_REC0"
 expect_eq "REC.15: …and has no ccstatusline row (the row extractor read one above)" "" "$(rec_row "$SEC_REC0" ccstatusline)"
 
+section "§GATE: RESOURCES reports the machine's share and the gate's state (wave-28 T13, D14)"
+
+# A share file of 70 and a gate store nothing has asked yet, under a CLAUDE_CONFIG_DIR of this
+# suite's own; the machine is planted by the readers' pins, so the line is the gate's, not this host's.
+G_CCD="${TMP}/gate-config"
+mkdir -p "${G_CCD}/bionic/gate/requests" "${G_CCD}/bionic/gate/cost"
+printf '70\n' > "${G_CCD}/bionic/share"
+res_section() {  # <report> -> the RESOURCES section: its heading to the first blank line
+  printf '%s\n' "$1" | awk '$0 == "RESOURCES" { on = 1 } on && $0 == "" { exit } on { print }'
+}
+OUT_G="$(run_doctor CLAUDE_CONFIG_DIR="$G_CCD" BIONIC_PROBE_USED_PCT=40 BIONIC_PROBE_BUSY_CORES=1.5 \
+  BIONIC_PROBE_BUSY_CORES_5M=2.5 BIONIC_PROBE_CORES=8)"
+SEC_G="$(res_section "$OUT_G")"
+expect_nonempty "G.1: the page carries a RESOURCES section (the section extractor reads)" "$SEC_G"
+expect_contains "G.2: the share row reads the share file" "share" "$(printf '%s\n' "$SEC_G" | grep ' share ')"
+expect_contains "G.3: …its 70%, set in the file" "70% of this machine (set in bionic/share)" "$SEC_G"
+expect_contains "G.4: the gate row reads the store: used, admitted, waiting, the loads, the promises" \
+  "used 40% · admitted 0 · waiting 0 · load 1.5/2.5 · promised 0" "$SEC_G"
+expect_eq "G.5: every row of the section fits 100 columns" "" "$(too_wide "$SEC_G")"
+
+G_CCD0="${TMP}/gate-config-empty"
+mkdir -p "$G_CCD0"
+SEC_G0="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$G_CCD0")")"
+expect_contains "G.6: with no share file the row says 80, the default" "80% of this machine (the default; no share file)" "$SEC_G0"
+expect_contains "G.7: with no store the gate row says nothing has asked" "no store yet — nothing has asked the gate" "$SEC_G0"
+expect_false "G.8: …and doctor made no store (the store above was read, G.4)" test -e "${G_CCD0}/bionic/gate"
+
 finish
