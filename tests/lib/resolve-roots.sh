@@ -192,6 +192,7 @@ _bionic_pin_owner() {  # _bionic_pin_owner <path> [nofollow] — prints the uid 
   [ "${2:-}" != nofollow ] || follow=""
   stat $follow -c %u "$1" 2>/dev/null || stat $follow -f %u "$1" 2>/dev/null
 }
+_BIONIC_PIN_TRUSTED_WHO="you, root or the owner of /"  # _bionic_pin_trusted's list in words: the one wording its refusals use
 _bionic_pin_trusted() {  # _bionic_pin_trusted <uid> — succeeds when <uid> may own a directory or link on the pin's path: this user, root, or the owner of `/`
   [ -n "$1" ] || return 1  # an owner that could not be read
   case "$1" in 0|"$UID") return 0 ;; esac
@@ -223,7 +224,7 @@ _bionic_pin_open() {  # _bionic_pin_open <dir> [any] — succeeds when another u
   _bionic_pin_acl "$1" "$out"
   [ -z "$_BIONIC_PIN_ACL" ] || { _BIONIC_PIN_OPEN="carries an ACL letting $_BIONIC_PIN_ACL"; return 0; }
   owner="$(_bionic_pin_owner "$1")"
-  _bionic_pin_trusted "$owner" || { _BIONIC_PIN_OPEN="is owned by uid ${owner:-unknown}, who is neither you nor root"; return 0; }
+  _bionic_pin_trusted "$owner" || { _BIONIC_PIN_OPEN="is owned by uid ${owner:-unknown}, who is not $_BIONIC_PIN_TRUSTED_WHO"; return 0; }
   return 1
 }
 _bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why a component of <path> can be replaced; nothing when none can
@@ -242,7 +243,7 @@ _bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why
       fi
     elif [ -L "$cur" ]; then
       linkowner="$(_bionic_pin_owner "$cur" nofollow)"  # the link's own owner repoints it, whatever it leads to
-      _bionic_pin_trusted "$linkowner" || why="$cur is a symlink owned by uid ${linkowner:-unknown}, who is neither you nor root"
+      _bionic_pin_trusted "$linkowner" || why="$cur is a symlink owned by uid ${linkowner:-unknown}, who is not $_BIONIC_PIN_TRUSTED_WHO"
       if [ -z "$why" ]; then
         target="$(readlink "$cur")"
         case "$target" in /*) ;; *) target="$holder/$target" ;; esac
