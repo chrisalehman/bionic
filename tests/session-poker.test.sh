@@ -13279,4 +13279,37 @@ rm -rf "$RD_MUT"
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 POKE_BOUND="$RD_BOUND_WAS"
 
+# ============================================================
+section "§ROW-LABEL: the launch record binds a launch by its row= first, the name after (wave-28 T7; REQ-3 AC-3.4, D17)"
+# ============================================================
+# A brief's `Row: <id>` is written on the launch row as `row=<id>` (hooks/dispatch-preflight.sh).
+# `launch-sync` reads it before the name match: an agent named `w-A2` briefed `Row: T23` sets T23
+# active, never A2, whose id its name carries. The name match stays the fallback (Section 49's
+# w-T6, which carries no row=). FIXTURE: Section 49's plan shape, rows T23 and A2 pending, a real
+# linked tree recorded for the name. fails-when: T23 stays pending, or A2 is set active.
+SRL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRL="$(make_repo s-t7-row)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
+PRL="$(s34_plan "$RRL" 4)"
+awk '{ print } /^- T5: pending dispatch/ { print "- T23: pending dispatch"; print "- A2: pending dispatch" }
+  /^\| T2 \| 4 \| build/ {
+  print "| T23 | 4 | build | the labelled build | — | — | 30 | REQ-1 | h.sh | — | — | pending |"
+  print "| A2 | 4 | build | the named build | — | — | 30 | REQ-1 | i.sh | — | — | pending |" }' "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
+new_roster "$RRL"
+printf '%s|row=T23|lands_on=a.test.sh\n' "$(mkrow name=w-A2 agent_id=a-w-A2 launched_at="$(iso_ago 60)" deliverable=a2.md \
+  duration="45 minutes" subagent_type=bionic:implementor)" >> "$(roster_of "$RRL")"
+TRL_TREE="$(cd "$RRL" && pwd -P)/.worktrees/01-T23"; git -C "$RRL" worktree add -q -b wt/01-T23 "$TRL_TREE" >/dev/null 2>&1
+printf 'workspace/v1|session=%s|name=w-A2|path=%s|branch=wt/01-T23|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-07T01:00:00Z\n' \
+  "$SID" "$TRL_TREE" "$PRL" >> "$RRL/.bionic/tmp/workspaces-$SID.state"
+expect_contains "RL precondition: the roster row carries row=T23" "|row=T23" "$(grep 'name=w-A2' "$(roster_of "$RRL")")"
+expect_contains "RL precondition: T23 is in the table, pending" "| h.sh | — | — | pending |" "$(grep '^| T23 |' "$PRL")"
+s34_gate "$RRL"
+expect_eq "RL precondition: the fixture is admitted by the real commit gate" "0" "$GATE_RC"
+poke_pressure "$RRL" 8192 1.0 tick
+expect_contains "RL1 the tick records w-A2 under its Row: label, T23, and says so" "poker: LAUNCHED T23 w-A2" "$OUT"
+expect_contains "RL1b …row T23 is active in its tree, its agent w-A2" \
+  "| w-A2 | — | 30 | REQ-1 | h.sh | .worktrees/01-T23 | 01234567 | active |" "$(grep '^| T23 |' "$PRL")"
+expect_contains "RL1c …and A2, which the name alone would have matched, stays pending" "| i.sh | — | — | pending |" \
+  "$(grep '^| A2 |' "$PRL")"
+POKE_BOUND="$SRL_BOUND_WAS"
+
 finish
