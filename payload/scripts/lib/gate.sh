@@ -81,7 +81,8 @@
 #             An open request is waiting (not admitted) or admitted; every other is ended,
 #             killed, or gone (never admitted, nobody holds it). An open request counts in the
 #             load and the promises and its who is showing; no other does, and none is kept
-#             past BIONIC_GATE_KEEP.
+#             past BIONIC_GATE_KEEP unless its asked= (gone) or ended= (ended) is not a decimal
+#             number: a file with no such number, an empty one among them, is never aged out.
 #   order     among waiting requests whose holder is alive: kind=whole only when nothing
 #             admitted is unfinished, then landing before work, then the lowest asked, ties by
 #             id. Only the head of that order is admitted; nothing passes it.
@@ -139,11 +140,12 @@ if ! type -t _res_used_pct >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/resources.sh"
   # shellcheck disable=SC1091
   . "$_GATE_LIB_DIR/resources.sh"
 fi
-if ! type -t _slots_holds >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/slots.sh" ]; then
+if ! type -t _slots_live >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/slots.sh" ]; then
   # shellcheck disable=SC1091
   . "$_GATE_LIB_DIR/slots.sh"
 fi
 
+_GATE_KEEP_DEFAULT=86400   # seconds a request that is no longer open is kept (BIONIC_GATE_KEEP's default)
 _GD=""        # the store, set by each verb
 _GATE_ME=""   # the real pid of the shell taking the lock (a `$( )` subshell is not `$$`)
 
@@ -199,13 +201,6 @@ _gate_unlock() {
   [ "$(_slots_pid_of "$_GD/lock")" = "$_GATE_ME" ] && rm -rf "$_GD/lock"
 }
 
-# _gate_holds <pid> <start> — the request's holder is alive. The rule is lib/slots.sh's
-# `_slots_live`, which takes the start itself, so the answer needs no lock and no probe
-# directory (gate_asked asks it without the lock).
-_gate_holds() {
-  _slots_live "$1" "${2:-}"
-}
-
 # _gate_ancestor <pid> — rc 0 when <pid> is the process taking the lock or one of its ancestors.
 _gate_ancestor() {
   local p="$_GATE_ME" i=0
@@ -243,12 +238,13 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
 
 _gate_alive() {  # the request last read has a live holder (holder=- is nobody)
   case "$_R_holder" in ''|-) return 1 ;; esac
-  _gate_holds "${_R_holder%%:*}" "${_R_holder#*:}"
+  _slots_live "${_R_holder%%:*}" "${_R_holder#*:}"
 }
 
 # _gate_num <string> — rc 0 and _G_NUM the string as a decimal whole number (leading zeros are
-# zeros, never octal), when it is 1 to 15 digits; rc 1 for anything else. Nothing the gate does
-# arithmetic on under its lock comes from a file or the environment without passing it.
+# zeros, never octal), when it is 1 to 15 digits; rc 1 for anything else. The prune's arithmetic
+# passes through it: BIONIC_GATE_KEEP, a request's asked= or ended=, and the clock. The rest under
+# the lock (the peak test, gate_end's overlap test, the request numbers) does not.
 _gate_num() {
   _G_NUM=''
   case "${1:-}" in ''|*[!0-9]*|????????????????*) return 1 ;; esac
@@ -326,15 +322,15 @@ _gate_promise() {
 # aged out; BIONIC_GATE_KEEP that is not a whole number of seconds is refused to 86400, with one
 # stderr line a process.
 _gate_scan() {
-  local f id reading="${1:--1}" keep="${BIONIC_GATE_KEEP:-86400}" now='' born old=()
+  local f id reading="${1:--1}" keep="${BIONIC_GATE_KEEP:-$_GATE_KEEP_DEFAULT}" now='' born old=()
   if _gate_num "$keep"; then
     keep="$_G_NUM"
   else
     if [ -z "${_GATE_KEEP_SAID:-}" ]; then
       _GATE_KEEP_SAID=1
-      echo "gate: BIONIC_GATE_KEEP='${keep:0:20}' is not a whole number of seconds; 86400 is used" >&2
+      echo "gate: BIONIC_GATE_KEEP='${keep:0:20}' is not a whole number of seconds; $_GATE_KEEP_DEFAULT is used" >&2
     fi
-    keep=86400
+    keep="$_GATE_KEEP_DEFAULT"
   fi
   _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE=''
   for f in "$_GD"/requests/*; do
@@ -703,8 +699,8 @@ gate_room() {
 # pruned between the glob and the read ended awk at exit 2): the paths go to its standard input
 # and it opens them itself, one at a time with `getline` and `close`; a file that is gone is
 # skipped, not fatal. It is a pre-filter only: it hands back the paths whose file names a who and
-# has no ended= line (a file with no who names nobody), and the rule itself, `_gate_open`, is then
-# read on each of those. The paths on stdin were picked over `find -print0 | xargs -0 awk` because
+# whose last ended= line, as `_gate_read` takes it, is empty or absent (a file with no who names
+# nobody), and the rule itself, `_gate_open`, is then read on each of those. The paths on stdin were picked over `find -print0 | xargs -0 awk` because
 # one process gives one answer with nothing to fold; xargs would cut the list into several awks.
 gate_asked() {
   local names cands f nm open='
@@ -715,7 +711,7 @@ gate_asked() {
   [ -e "$1" ] || return 1
   cands="$(printf '%s\n' "$@" | awk '
     { f = $0; r = (getline l < f); if (r < 0) next; ended = 0; who = 0
-      while (r > 0) { if (l ~ /^ended=./) ended = 1; else if (l ~ /^who=/) who = 1; r = (getline l < f) }
+      while (r > 0) { if (l ~ /^ended=/) ended = (l ~ /^ended=./); else if (l ~ /^who=/) who = 1; r = (getline l < f) }
       close(f); if (who && !ended) print f }' 2>/dev/null)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
