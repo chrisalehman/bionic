@@ -1599,6 +1599,50 @@ expect_eq "7.91b …and gives one line where no CDPATH is exported (not vacuous)
 t69_hooks "$T69_MUT_REPO" mcd "$T69_DIR/repo-other"
 expect_contains "7.91c under the mutant, CDPATH exported, the value spans two lines (the defect 7.90b guards)" "~" "$T69_HOOKS"
 
+# THE PIN'S cd IS PHYSICAL (wave-28 T73; AC-10.6; pass 48 #1). Bash's `cd` without -P removes `<component>/..` as TEXT
+# before it calls chdir; the walk, mkdir, the hold and the judge hand `..` to the kernel, which resolves it through the
+# link. For `<W>/mylink/../r` with mylink -> <W>/priv/sub the pin is judged and built under <W>/priv/r while a logical
+# `cd` lands in <W>/r, a directory nobody judged. The decoy is planted at <W>/r/pin because bash falls back to the
+# physical path when the textual one does not exist: without it the logical `cd` goes to the right place by luck.
+T73_DIR="$T87_DIR/t73"; mkdir -p "$T73_DIR/priv/sub" "$T73_DIR/r/pin"; chmod 0755 "$T73_DIR"; chmod 0700 "$T73_DIR/priv" "$T73_DIR/priv/sub"
+ln -s "$T73_DIR/priv/sub" "$T73_DIR/mylink"; : > "$T73_DIR/r/pin/bash"
+pin_call "$SEAM" "$T73_DIR/mylink/../r"
+expect_eq "7.92 an absolute root that passes a link and then .. : built" "0" "$PIN_RC"
+expect_eq "7.92b …PATH's first entry is the pin the walk judged, under the link's target (physical)" \
+  "$(phys "$T73_DIR/priv/r/pin"):$HAND_GIVEN_PATH" "$PIN_PATH"
+expect_eq "7.92c …and that pin holds bash -> /bin/bash" "/bin/bash" "$(readlink "$T73_DIR/priv/r/pin/bash" 2>/dev/null)"
+expect_eq "7.92d …the decoy the logical path names is untouched (a file, not the pin's link)" "regular" \
+  "$([ -f "$T73_DIR/r/pin/bash" ] && [ ! -L "$T73_DIR/r/pin/bash" ] && echo regular)"
+# the mutant: the pin's `cd` made logical again (the defect 7.92b guards)
+T73_MUT_CD="$TMPROOT/t73-mut-cd.sh"
+anchor "$SEAM" 'phys="$(cd -P -- "$dir"' 1
+sed 's/phys="$(cd -P -- "$dir"/phys="$(cd -- "$dir"/' "$SEAM" > "$T73_MUT_CD"
+expect_eq "7.93 the logical-cd mutant parses" "0" "$(bash -n "$T73_MUT_CD" >/dev/null 2>&1; echo $?)"
+pin_call "$T73_MUT_CD" "$T73_DIR/plain"
+expect_eq "7.93b …and pins a root with no link on it (not vacuous)" "$(phys "$T73_DIR/plain/pin"):$HAND_GIVEN_PATH" "$PIN_PATH"
+pin_call "$T73_MUT_CD" "$T73_DIR/mylink/../r"
+expect_eq "7.93c under the mutant PATH's first entry is the decoy nobody judged (the defect 7.92b guards)" \
+  "$(phys "$T73_DIR/r/pin"):$HAND_GIVEN_PATH" "$PIN_PATH"
+# A ROOT WITH A CONTROL CHARACTER IS REFUSED FIRST AND NEVER PRINTED RAW (T73; pass 48 #3). A newline in TMPDIR split
+# the one refusal line into three. The check comes before the absolute test (a relative root with a newline is named
+# for the character) and the line shows each control character as `?`.
+T73_NL="$T73_DIR/nl"$'\n'"x"
+pin_call "$SEAM" "$T73_NL"
+expect_ne "7.94 a root with a newline in it: refused" "0" "$PIN_RC"
+expect_eq "7.94b …by one line that names the root with the newline shown as ?" \
+  "resolve-roots.sh: cannot build the interpreter pin under $T73_DIR/nl?x — $T73_DIR/nl?x carries a control character, so nothing is pinned" "$PIN_ERR"
+expect_eq "7.94c …PATH is as given, and nothing is made" "$HAND_GIVEN_PATH:absent" "$PIN_PATH:$(there "$T73_NL")"
+pin_call "$SEAM" "$T73_DIR/t"$'\t'"x"
+expect_contains "7.94d a tab is a control character too" "$T73_DIR/t?x carries a control character, so nothing is pinned" "$PIN_ERR"
+pin_call "$SEAM" a$'\n'b
+expect_contains "7.94e a relative root with a newline is named for the character, not for being relative (the first check)" \
+  "a?b carries a control character, so nothing is pinned" "$PIN_ERR"
+stop_run "$STOP_SUITE" "$T73_DIR/hr"$'\n'"x"
+expect_eq "7.95 a hand run whose TMPDIR holds a newline: exits 2" "2" "$STOP_RC"
+expect_eq "7.95b …with ONE line, the path remedy and the character shown as ?" \
+  "$(t57_line "$T73_DIR/hr?x" "$T73_DIR/hr?x/bionic-interpreter-pin.$STOP_UID carries a control character" "$T57_FIX")" "$STOP_ERR"
+expect_eq "7.95c …the marker is unset and no check ran" "pinned=unset" "$STOP_LOG"
+
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
   T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
