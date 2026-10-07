@@ -647,4 +647,54 @@ expect_status "R16h2 …and so does an extend row, even one that copied the keys
 printf '%s|held=2026-10-07T04:10:00Z x fp=1:2:3|landed=%s|landed_at=%s\n' "$R16_I" "$R16_C" "$R16_AT" >> "$R16_F"
 expect_eq "R16h3 …while a later mark reads again" "$(printf '%s\t%s' "$R16_C" "$R16_AT")" "$(lib roster_landed "$R16_F" w28-T6)"
 
+section "R17 — the row a dispatch binds and the suites it lands on are row keys (wave-28 T7; REQ-1, REQ-3, D4, D17)"
+# The dispatch wall writes a brief's `Row:` as `row=<id>` and its `Lands-on:` as
+# `lands_on=<a.test.sh,b.test.sh|none>`. Both present-if-passed, trailing `pushed=`, so a row 1.12.0
+# wrote is unmoved and reads by every key it carries. fails-when: either key is refused or misplaced,
+# or a 1.12.0 row stops reading.
+R17_R="$(lib roster_row "${R5_BASE[@]}" "pushed=checks-evidence" "row=T23" "lands_on=a.test.sh,b.test.sh")"
+expect_eq "R17a row= and lands_on= are written when passed, after pushed=" \
+  "${R5_PLAIN}|pushed=checks-evidence|row=T23|lands_on=a.test.sh,b.test.sh" "$R17_R"
+expect_eq "R17b …row= read back by key" "T23" "$(field_of_row "$R17_R" row)"
+expect_eq "R17c …lands_on= read back by key" "a.test.sh,b.test.sh" "$(field_of_row "$R17_R" lands_on)"
+R17_N="$(lib roster_row "${R5_BASE[@]}" "lands_on=none")"
+expect_eq "R17d lands_on=none alone, with no row=, follows the base row" "${R5_PLAIN}|lands_on=none" "$R17_N"
+R17_ARGS=()
+while IFS= read -r R17_SEG; do R17_ARGS+=("$R17_SEG"); done < <(printf '%s\n' "$R17_R" | tr '|' '\n' | tail -n +2)
+R17_COPY="$(lib roster_row "${R17_ARGS[@]}")"; R17_RC=$?
+expect_eq "R17e a row carrying both, fed back key by key, is accepted" "0" "$R17_RC"
+expect_eq "R17e2 …and reproduces byte for byte" "$R17_R" "$R17_COPY"
+mkdir -p "$R7_DIR/r17"
+R17_F="$R7_DIR/r17/roster-s1.state"
+R17_NEW="$(lib roster_row status=identified session=s1 name=w-A2 agent_id=a16-new launched_at=2026-10-07T01:00:00Z \
+  subagent_type=implementor deliverable=record/n.md tool_use_id=toolu_n plan=none row=T23 lands_on=a.test.sh)"
+R17_OLD="$(lib roster_row status=identified session=s1 name=w27-T5 agent_id=a16-old launched_at=2026-10-05T01:00:00Z \
+  subagent_type=implementor deliverable=record/o.md tool_use_id=toolu_o plan=none files=a.sh)"
+expect_absent "R17f0 precondition: the 1.12.0 row carries no row=" "|row=" "$R17_OLD"
+expect_absent "R17f0b …nor lands_on=" "lands_on=" "$R17_OLD"
+expect_contains "R17f0c …beside the files= it does carry" "|files=a.sh" "$R17_OLD"
+printf '%s\n' "$R17_NEW" "$R17_OLD" > "$R17_F"
+R17_GOT="$(lib roster_row_for_id "$R17_F" a16-new)"
+expect_eq "R17g a row with both keys is read by id" "$R17_NEW" "$R17_GOT"
+expect_eq "R17g2 …its row= reads by key" "T23" "$(field_of_row "$R17_GOT" row)"
+R17_GOT="$(lib roster_row_for_id "$R17_F" a16-old)"
+expect_eq "R17h a 1.12.0 row with neither is read by id" "$R17_OLD" "$R17_GOT"
+expect_eq "R17h2 …its files= reads by key (the positive on that extractor)" "a.sh" "$(field_of_row "$R17_GOT" files)"
+expect_eq "R17h3 …and its row= reads empty: absent, the 1.12.0 state" "" "$(field_of_row "$R17_GOT" row)"
+lib roster_row "${R5_BASE[@]}" "lands-on=a.test.sh" >/dev/null
+expect_status "R17i a near-miss key (lands-on=) is still refused" "2" "$?"
+# With T6's mark beside them (A-T7.14): the landing marks a row the dispatch wall labelled, and the mark
+# stays LAST, after row= and lands_on=. fails-when: the merge orders the two pairs the other way, or the
+# mark's copy drops a label.
+lib roster_mark_landed "$R17_F" w-A2 "0123456789abcdef0123456789abcdef01234567" "2026-10-07T03:30:00Z"
+expect_status "R17j precondition: roster_mark_landed marks the labelled row (rc 0)" "0" "$?"
+R17_GOT="$(lib roster_row_for_id "$R17_F" a16-new)"
+expect_eq "R17j the marked row keeps row= and lands_on=, the mark last" \
+  "${R17_NEW}|landed=0123456789abcdef0123456789abcdef01234567|landed_at=2026-10-07T03:30:00Z" "$R17_GOT"
+R17_ARGS=()
+while IFS= read -r R17_SEG; do R17_ARGS+=("$R17_SEG"); done < <(printf '%s\n' "$R17_GOT" | tr '|' '\n' | tail -n +2)
+expect_eq "R17j2 …and, fed back key by key, the one writer reproduces it byte for byte" "$R17_GOT" \
+  "$(lib roster_row "${R17_ARGS[@]}")"
+expect_eq "R17j3 …its row= still reads by key" "T23" "$(field_of_row "$R17_GOT" row)"
+
 finish
