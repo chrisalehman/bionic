@@ -909,12 +909,21 @@ fi
 # dispatch that would start one anyway, whatever the role, because the thing being waited for
 # is the user's act and no role is entitled to stand in for it.
 #
-# WHICH ROW A DISPATCH IS: the Agent call's NAME, by the rule `fill_row_launched` uses — the id
-# itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. A name that
-# is no row's id is not judged here. `approval:plan` is the arm above.
+# WHICH ROW A DISPATCH IS: ONE ANSWER, asked here once (wave-28 T55). The brief's `Row:` when it
+# carries one (T7), else the row the Agent call's NAME matches, by the rule `fill_row_launched` uses —
+# the id itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. This arm,
+# T7's Lands-on arm and the full-run wall's floor row all read `DP_BOUND_ROW`; none reads the name
+# again. A name that is no row's id and a brief with no `Row:` bind nothing, and nothing is judged.
+# `approval:plan` is the arm above.
 DP_ROW_NAME=$(_jq '.tool_input.name')
-# DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. This arm
-# and the full-run wall's floor row both read through it.
+# The brief is lifted here, the one place the label is read: the lift needs only the role and the
+# brief, and a `Row:` is a field of it. The role goes in with the brief (wave-20 T4; REQ-7, Δ3, Δ9): it
+# decides the run cap, which `brief_validate_fields` reads off the same role below. Nothing else goes
+# in: the Files: reader reads an item by its own text, and this hook lists no directory for it
+# (wave-27 T42, A-orch-46).
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
+# DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. Only the
+# reader below calls it.
 DP_MINE_AWK='
     function mine(id,   b, l) {
       b = nm
@@ -923,9 +932,20 @@ DP_MINE_AWK='
       l = length(id)
       return (length(b) > l + 1 && substr(b, length(b) - l) == "-" id)
     }'
-if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
-  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"'
-    $1 != "" && mine($1) {
+# dp_row_reader — sets DP_ROW (the brief's `Row:`, or empty), DP_NAME_ROWS (every plan row the name
+# matches, one per line), DP_NAME_ROW (the first) and DP_BOUND_ROW: the row this dispatch is bound to.
+dp_row_reader() {
+  DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""
+  if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
+    DP_NAME_ROWS="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1 }')"
+    DP_NAME_ROW="${DP_NAME_ROWS%%$'\n'*}"
+  fi
+  DP_BOUND_ROW="${DP_ROW:-$DP_NAME_ROW}"
+}
+dp_row_reader
+if [ -n "$PLAN" ] && [ -n "$DP_BOUND_ROW" ]; then
+  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v id="$DP_BOUND_ROW" '
+    $1 != "" && $1 == id {
       m = split($13, a, ",")
       for (k = 1; k <= m; k++) {
         t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
@@ -952,7 +972,7 @@ if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
       case "$DP_APPROVALS_HAD" in *" $DP_AW_NAME "*) continue ;; esac
       dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \
         "record it with the approve verb" \
-        "Dispatch: ${DP_ROW_NAME} (row ${DP_AW_ID} of ${PLAN})
+        "Dispatch: ${DP_ROW_NAME:-<unnamed>} (row ${DP_AW_ID} of ${PLAN})
 Reads:    approval:${DP_AW_NAME} — and ## SDLC State carries no 'approved: ${DP_AW_NAME}' line.
 
 An approval is an act of the user. The row waits for it, the ready set does not offer it, and no
@@ -1565,11 +1585,7 @@ agent is gone, frees the name — a landing marker alone does not."
   fi
 fi
 
-# THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap, which
-# `brief_validate_fields` reads off the same role below. Nothing else goes in: the Files: reader
-# reads an item by its own text, and this hook lists no directory for it (wave-27 T42, A-orch-46).
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
-
+# THE BRIEF IS LIFTED ABOVE, at the row reader (wave-28 T55): `LIFTED` is read from here on.
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
 }
@@ -2538,7 +2554,7 @@ fi
 # derived (`SUITES_ALLOWED`, the set a declared red is held to); and a Row: naming no row of the plan.
 # A dispatch that binds no row (no Row: label, and a name that is no row id) has no row to land, so
 # it owes no Lands-on: line.
-DP_ROW="$(brief_field "$LIFTED" row)"; DP_LANDS_ON="$(brief_field "$LIFTED" lands_on)"
+DP_LANDS_ON="$(brief_field "$LIFTED" lands_on)"
 _lo_reason="$(brief_field "$LIFTED" lands_on_reason)"; _lo_bad="$(brief_field "$LIFTED" lands_on_bad)"
 _lo_ids=""
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && _lo_ids="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 }')"
@@ -2556,13 +2572,29 @@ Fix: name the id of the row this agent runs, as the plan's ## Tasks table spells
 
 Then retry the dispatch."
 fi
-_lo_binds=""
-if [ -n "$DP_ROW" ]; then
-  _lo_binds=1
-elif [ -n "$_lo_ids" ] && [ -n "$DP_ROW_NAME" ] \
-     && printf '%s\n' "$_lo_ids" | awk -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' mine($1) { f = 1 } END { exit !f }'; then
-  _lo_binds=1
+# A LABEL AND A NAME THAT DISAGREE ARE A LIE (wave-28 T55): the label binds the dispatch to one row and
+# the name's match to another. Only a name that matches a row is judged; a name that matches none with
+# a Row: that names one is T7's design and stays admitted.
+_lo_agrees=""
+case $'\n'"$DP_NAME_ROWS"$'\n' in *$'\n'"$DP_ROW"$'\n'*) _lo_agrees=1 ;; esac
+if [ -n "$DP_ROW" ] && [ -n "$_lo_known" ] && [ -n "$DP_NAME_ROWS" ] && [ -z "$_lo_agrees" ]; then
+  dp_finding "Row: $(bionic_trunc "$DP_ROW" 11) is not the name's row $(bionic_trunc "$DP_NAME_ROW" 11)" \
+    "rename or drop Row:" \
+    "The Row: label binds this dispatch to one row of the bound plan and the agent's name to another:
+    Row:  ${DP_ROW}
+    Name: ${DP_ROW_NAME} (row ${DP_NAME_ROW})
+    Plan: ${PLAN}
+
+Every wall reads one row per dispatch, so a label and a name that disagree leave the walls asking
+different rows. A name that matches no row may carry any Row:.
+
+Fix: name the agent for its row (the name the Patrol's FILL line printed), or give Row: the id that
+name matches, or drop Row: and let the name bind.
+
+Then retry the dispatch."
 fi
+_lo_binds=""
+[ -z "$DP_BOUND_ROW" ] || _lo_binds=1
 if [ -z "$DP_LANDS_ON" ] && [ -z "$_lo_bad" ] && [ -n "$_lo_binds" ] && ! role_is_readonly "$DP_SUBAGENT"; then
   dp_finding "the brief has no Lands-on: line" "add Lands-on: <suites> or none <why>" \
     "A writer's row lands on the suites its brief names, and this brief names none:
@@ -2633,9 +2665,9 @@ fi
 # floor, held the floor for ever, and a `record/…` path read as tracked. Now lib/units.sh
 # `units_floor_holds` answers: the rows the floor row waits on through its deps and its reads,
 # judged by the ready set's own program, not landed, that write a tracked file by its
-# `writes_head` — one owner for both questions. The floor row is the dispatch's own, by its name
-# (`mine`, the approval arm's rule); a dispatch that names no row is held by what the plan's open
-# verify and test rows wait on.
+# `writes_head` — one owner for both questions. The floor row is the dispatch's own, by
+# `DP_BOUND_ROW`, the one reader (wave-28 T55: the brief's `Row:`, else the row its name matches); a
+# dispatch that binds no row is held by what the plan's open verify and test rows wait on.
 #
 # LOADED LAZILY, LIKE brief.sh's BOUND. proof.sh is sourced at the one arm that spends it, from
 # the directory the loader settled on. A copied hook whose library directory predates proof.sh
@@ -2645,8 +2677,8 @@ fi
 fr_open_writers() {  # -> `id<TAB>step<TAB>status` for each row the floor waits on that writes the head
   local floor=""
   [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
-  [ -z "$DP_ROW_NAME" ] || floor="$(units_rows "$PLAN" 2>/dev/null \
-    | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1; exit }')"
+  [ -z "$DP_BOUND_ROW" ] || floor="$(units_rows "$PLAN" 2>/dev/null \
+    | awk -F'\t' -v id="$DP_BOUND_ROW" '$1 != "" && $1 == id { print $1; exit }')"
   units_floor_holds "$PLAN" "$floor" 2>/dev/null
 }
 # fr_fit <budget> <item>... -> the items comma-joined while they fit <budget> columns, then
