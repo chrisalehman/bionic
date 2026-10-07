@@ -150,14 +150,14 @@ _bionic_pin_open() {  # _bionic_pin_open <dir> — succeeds when group or others
   esac
   return 1
 }
-_bionic_pin_links() {  # _bionic_pin_links <path> <depth> — prints why a link on <path> can be replaced; nothing when none can
+_bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why a link on <path> can be replaced; nothing when none can
   local rest="$1" cur="" holder part target why=""
   case "$1" in /*) ;; *) cur="." ;; esac
-  [ "$2" -le 16 ] || { echo "$1 is reached through more than 16 links"; return; }
+  [ "$2" -le 16 ] || { echo "${3:-$1} leads through more than 16 links"; return; }
   while [ -n "$rest" ] && [ -z "$why" ]; do
     part="${rest%%/*}"
     if [ "$part" = "$rest" ]; then rest=""; else rest="${rest#*/}"; fi
-    [ -n "$part" ] || continue
+    [ -n "$part" ] || { [ -z "$cur" ] || cur="$cur/"; continue; }  # a doubled slash stays as the caller spelled it
     holder="${cur:-/}"
     cur="$cur/$part"
     [ -L "$cur" ] || continue
@@ -166,7 +166,7 @@ _bionic_pin_links() {  # _bionic_pin_links <path> <depth> — prints why a link 
     else
       target="$(readlink "$cur")"
       case "$target" in /*) ;; *) target="$holder/$target" ;; esac
-      why="$(_bionic_pin_links "$target" $(($2 + 1)))"
+      why="$(_bionic_pin_links "$target" $(($2 + 1)) "${3:-$1}")"
     fi
   done
   [ -z "$why" ] || echo "$why"
