@@ -40,6 +40,8 @@
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
 #   gate_asked <who>         rc 0 when that who has a request in the store, ever
 #   gate_share               the machine's share, 1 to 100 (absent or unreadable: 80)
+#   gate_promise <key>       the per-field promise for a key, <mem>:<cores>:<seconds>, loading the
+#                            store itself; nothing when no cost is on record anywhere
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
 #
 # WHO ASKS. `who` is `${CLAUDE_CODE_SESSION_ID:-none}:${BIONIC_GATE_AGENT:-main}`; the holder is
@@ -238,6 +240,14 @@ _gate_cost_file() {  # <key> -> its cost file
 
 # _gate_promise <key> -> <mem>:<cores>:<seconds>, the per-field maximum of the key's cost
 # file, else over every cost file; nothing when no cost file holds a line.
+# gate_promise <key> — the public reader the ownership table names (wave-28 T13; pass 12): the
+# same answer as `_gate_promise`, with the store loaded first so a caller outside the lock can ask.
+gate_promise() {
+  [ -n "${1:-}" ] || { echo "gate: usage: gate_promise <key>" >&2; return 2; }
+  _gate_store || return 2
+  _gate_promise "$1"
+}
+
 _gate_promise() {
   local f
   f="$(_gate_cost_file "$1")"
