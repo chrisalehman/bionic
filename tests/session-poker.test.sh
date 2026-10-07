@@ -13504,4 +13504,104 @@ expect_ne "CHECK-mut3 …and returns the line's own rating for the settled line,
   "S1 on fix" "$(chk_rate "$CHK_MUT/proof.sh" "$(chk_id k-fixto)" S3 off)"
 POKE_BOUND="$CHK_BOUND_WAS"
 
+section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan's bytes outside the row's own lines are unchanged after ready, a tick and a hand landing (wave-28 T21; D26, REQ-2 AC-2.11, REQ-7 AC-7.2)"
+#
+# The fixture is a plan AS 1.12.0 WROTE IT (tests/fixtures/upgrade-1.12.0): canonical_sdlc_version 14, the
+# `parallel-budget:` line the probe wrote (`source=probe`), rows with no `Lands-on:` label, roster launch rows with
+# `suites_allowed=` and neither `row=` nor `lands_on=`, and in T1's tree a stamp (1.12.0's bare form) saying RED.
+# The run continues: `ready` lands T1 on a run of its own, a tick passes, a person lands T2 by hand, and the plan
+# differs from what 1.12.0 wrote in the three lines of each landed row and nowhere else. The tool never edits the
+# line itself.
+UP_ENV_WAS="$(export -p | /usr/bin/grep -E '^(declare -x|export) (BIONIC_PROBE_|BIONIC_NOW_FILE|CLAUDE_CONFIG_DIR|BIONIC_GATE_DIR|BIONIC_VERB_LOG|WORLD_)')"
+. "$(dirname "$0")/lib/world.sh"
+. "$(dirname "$0")/fixtures/upgrade-1.12.0/install.sh"
+export CLAUDE_CONFIG_DIR="$WORLD_ROOT/home"
+mkdir -p "$CLAUDE_CONFIG_DIR/bionic"; printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+world_machine 8 8192 40 0.5
+world_clock 1000
+world_cost a.test.sh 5 0.5 5
+UP_SPAWN="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+UP_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe'
+up_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+up_world() {  # [<T1 suites_allowed>] -> a world root holding the 1.12.0 fixture
+  local r
+  r="$(world_repo)" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  up_install "$r" "$@" || return 1
+  printf '%s' "$r"
+}
+up_rows_out() {  # <plan> <id>... -> the plan with each named row's own lines (tasks, step line, ledger) left out
+  local p="$1"; shift
+  awk -v ids="$*" 'BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) w[a[i]] = 1 }
+    { if (match($0, /^\| T[0-9]+ \|/)) { id = substr($0, 3, RLENGTH - 4); if (id in w) next }
+      if (match($0, /^- T[0-9]+:/)) { id = substr($0, 3, RLENGTH - 3); if (id in w) next }
+      print }' "$p"
+}
+up_changed() {  # <before> <after> -> how many lines of <after> are not in <before>
+  diff "$1" "$2" | /usr/bin/grep -c '^>'
+}
+up_same() {  # <before> <after> <id>... -> `same` when only the named rows' own lines differ
+  local a="$1" b="$2"; shift 2
+  [ "$(up_rows_out "$a" "$@" | cksum)" = "$(up_rows_out "$b" "$@" | cksum)" ] && printf same || printf differ
+}
+up_ready() {  # <tree> -> UP_OUT, UP_RC
+  UP_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 bash "$UP_SPAWN" ready 2>&1 )"; UP_RC=$?
+}
+UPG="$(up_world)"
+expect_nonempty "(fixture) the 1.12.0 world was made" "$UPG"
+UPG_P="$(up_plan "$UPG")"
+UPG_BEFORE="$UPG_P.before"; cp "$UPG_P" "$UPG_BEFORE"
+UPG_STAMPS="$(git -C "$UPG/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-stamps"
+expect_contains "(up-pre) the planted stamp says RED (rc=1) at T1's head, as 1.12.0's land would read it" \
+  "|head=$(git -C "$UPG/.worktrees/T1" rev-parse HEAD)|dirty=0|rc=1|" "$(cat "$UPG_STAMPS")"
+expect_contains "(up-pre) the fixture plan carries the probe's budget line, and the version 14" "$UP_BUDGET" "$(cat "$UPG_P")"
+expect_contains "(up-pre) …version 14" "canonical_sdlc_version: 14" "$(cat "$UPG_P")"
+expect_eq "(up-pre) …and its rows carry no Lands-on label" "0" "$(/usr/bin/grep -ci 'lands-on' "$UPG_P" | tr -d ' ')"
+
+# ---------- ready ----------
+up_ready "$UPG/.worktrees/T1"
+expect_eq "(up-a1) ready lands the 1.12.0 row beside a stamp that says RED (exit 0)" "0" "$UP_RC"
+expect_match "(up-a1) …printing LANDED, then the owed line" "LANDED T1 *
+landed T1 * — owed: complete task T1, then stop wx-T1" "$UP_OUT"
+cp "$UPG_P" "$UPG_P.after-ready"
+expect_eq "(up-a2) the row's own three lines changed (its status, its step line, its ledger cell)" "3" "$(up_changed "$UPG_BEFORE" "$UPG_P")"
+expect_eq "(up-a2) …and every other byte of the plan is the one 1.12.0 wrote" "same" "$(up_same "$UPG_BEFORE" "$UPG_P" T1)"
+expect_contains "(up-a3) …the probe's budget line among them, as written" "$UP_BUDGET" "$(cat "$UPG_P")"
+expect_contains "(up-a3) …and the version still 14" "canonical_sdlc_version: 14" "$(cat "$UPG_P")"
+
+# ---------- a tick ----------
+( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$POKER" arm ) >/dev/null 2>&1
+UP_TICK="$( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$POKER" tick 2>&1 )"
+expect_contains "(up-b1) a tick ran on the fixture's run (its decision line was printed)" "poker-tick/v1|" "$UP_TICK"
+expect_eq "(up-b1) …and left the plan byte for byte as ready left it" "same" "$(cmp -s "$UPG_P.after-ready" "$UPG_P" && echo same || echo differ)"
+
+# ---------- a hand landing ----------
+UP_HAND="$( cd "$UPG" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$UP_SPAWN" land "$UPG/.worktrees/T2" --by-hand --reason "fixture" 2>&1 )"; UP_HAND_RC=$?
+expect_eq "(up-c1) a hand landing of T2 lands it (exit 0)" "0" "$UP_HAND_RC"
+expect_contains "(up-c1) …printing the owed line" "landed T2 " "$UP_HAND"
+expect_eq "(up-c2) the hand landing changed the three lines of T2 and no others" "3" "$(up_changed "$UPG_P.after-ready" "$UPG_P")"
+expect_eq "(up-c2) …and, whole, the plan differs from 1.12.0's in T1's and T2's own lines alone" "same" "$(up_same "$UPG_BEFORE" "$UPG_P" T1 T2)"
+expect_contains "(up-c3) …the budget line is as the probe wrote it" "$UP_BUDGET" "$(cat "$UPG_P")"
+
+# ---------- the mutation arm: a tool that edits the line ----------
+# A copy of the hooks whose `row-landed` also changes one byte of the budget line; it is run in a world of its own
+# from a directory outside every checkout, and the tracked file is not touched.
+UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
+cp -R "${BIONIC_HOOKS_DIR}" "$UPM_DIR/hooks" && ln -s "${BIONIC_SCRIPTS_DIR}/payload" "$UPM_DIR/payload"
+awk '/^    plan_verb_swap row-landed "\$PV_ID landed at/ && !d { print "    sed \"s/^\\(parallel-budget: .*\\)source=probe/\\1source=probes/\" \"$PV_NEW\" > \"$PV_NEW.m\" && mv -f \"$PV_NEW.m\" \"$PV_NEW\""; d = 1 }
+  { print }' "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$UPM_DIR/hooks/session-poker.sh"
+expect_eq "(up-m0) the mutant differs from the hook by the one line that edits the budget" "1" \
+  "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$UPM_DIR/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+UPM="$(up_world)"
+UPM_P="$(up_plan "$UPM")"; cp "$UPM_P" "$UPM_P.before"
+UPM_OUT="$( cd "$UPM" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$UPM_DIR/hooks/session-poker.sh" row-landed T1 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z 2>&1 )"; UPM_RC=$?
+expect_eq "(up-m1) the mutant's verb ran and wrote the row (exit 0)" "0" "$UPM_RC"
+expect_eq "(up-m1) …its three lines changed, as the real verb's do" "3" "$(( $(up_changed "$UPM_P.before" "$UPM_P") - 1 ))"
+expect_eq "(up-m2) …and the bytes row goes red: the plan differs outside T1's own lines" "differ" "$(up_same "$UPM_P.before" "$UPM_P" T1)"
+expect_eq "(up-m2) …because the budget line is no longer the one the probe wrote (the real runs above hold it once)" "0 1" \
+  "$(/usr/bin/grep -cFx -- "$UP_BUDGET" "$UPM_P" | tr -d ' ') $(/usr/bin/grep -cFx -- "$UP_BUDGET" "$UPG_P" | tr -d ' ')"
+rm -rf "$UPM_DIR"
+for UP_V in $(compgen -e | /usr/bin/grep -E '^(BIONIC_PROBE_|BIONIC_NOW_FILE$|CLAUDE_CONFIG_DIR$|BIONIC_GATE_DIR$|BIONIC_VERB_LOG$)'); do unset "$UP_V"; done
+eval "$UP_ENV_WAS"
+
 finish
