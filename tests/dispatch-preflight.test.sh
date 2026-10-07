@@ -7474,10 +7474,12 @@ expect_status "§three-arms …and the wire is at most 21 lines (19 + one per ad
   "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 21 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
-# MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is
-# fourteen lines now, so the floor that proves growth is fifteen.
-expect_status "§three-arms …and it really grew: more than the fourteen-line fixed part" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 15 ] && echo 0 || echo 1)"
+# MOVED WITH THE FIXED PART (wave-21 T7; wave-24 T9; wave-28 T76): a wire that grew by nothing is the
+# nineteen-line fixed part, at most 19 newlines, so the floor that proves growth is twenty. It sat at
+# fifteen, four under the fixed part, and passed a wire that had grown by nothing.
+echo "      measured: the three-arm wire is $(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ') newlines"
+expect_status "§three-arms …and it really grew: more than the nineteen-line fixed part" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 20 ] && echo 0 || echo 1)"
 # THE SHAPE BANS OF WAVE-13 STAND: no per-fault heading, no fault-count sentence, no
 # stacked `Fix:` paragraphs. One line per fault is a LINE, not a section.
 expect_absent "§three-arms …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
@@ -9050,6 +9052,10 @@ expect_eq "§scaffold-walk precondition: …shape A, read by the same line reade
   "$(printf '%s\n' "$WALK_ER" | /usr/bin/grep -c '^Suites:')"
 expect_eq "§scaffold-walk precondition: …and shape B carries no line that begins Suites:" "0" \
   "$(printf '%s\n' "$WALK_ERB" | /usr/bin/grep -c '^Suites:')"
+# What that negative can miss (T76): shape B still carries the word, in the Lands-on: comment, so a read
+# of the word anywhere in the brief counts it and this row, which reads line starts, does not.
+expect_contains "§scaffold-walk precondition: …while shape B still carries the word in a comment (what the negative can miss)" \
+  "within Suites:" "$WALK_ERB"
 REPO=$(walk_repo rwalk5 audited)
 expect_nonempty "§scaffold-walk precondition: the walk repo's .bionic holds its bound plan" \
   "$(/usr/bin/grep -rls '^rigor: audited' "$REPO/.bionic")"
@@ -11355,7 +11361,6 @@ expect_eq "BARE2 a span of prose with no file name is refused" "deny" "$GATE_VER
 expect_contains "BARE2b …it still names no deliverable" "this brief names no deliverable" "$(t7_first)"
 t7_gate bare3 '' w99-bare implementor "$(t7_bare 'version 1.12.0 of the notes')"
 expect_contains "BARE3 a version number is no file name: still no deliverable" "this brief names no deliverable" "$(t7_first)"
-=======
 section "§RIGOR — the dealing reads a plan in either vocabulary alike, and prints the level by its new word (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35, A-orch-7)"
 # ============================================================================
 # The wall asks lib/proof.sh `facts_owed`, which reads the plan's word through lib/run.sh
