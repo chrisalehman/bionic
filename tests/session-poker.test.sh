@@ -13536,6 +13536,7 @@ pk_rec() {  # <file> <head> <result> [<line>...] -> an adversarial piece reading
     printf '\nwhat the reader found\n'; } > "$f"
 }
 pk_add() { poke "$RSEV" proof-add review "record/wave-01-fixture/$1.md" --question adversarial --reader pk-crit; }
+pk_ref() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: REFUSED'; }  # the refusal line, of the last poke
 pk_n() { /usr/bin/grep -c "^proved: .* evidence=record/wave-01-fixture/$1.md " "$PSEV"; }
 pk_derived() {  # <lib> <file> <written result> -> the result the judge derives for the reading
   bash -c '. "$1"; _proof_reading_result "$2" "$3" "$4" "$5"' _ "$1" "$PSEV" "$RSEV/.bionic/docs" "record/wave-01-fixture/$2.md" "$3" 2>/dev/null
@@ -13556,11 +13557,14 @@ pk_rec pk-a "$PK_H2" fail "findings: 1" "finding: 1 S1 on b.sh:3 - a second find
 s42_snap "$RSEV" "$PSEV"
 pk_add pk-a
 s42_unchanged "PASS-2 §PASS-KEY a second pass on a path whose proof line names another head" 1 "$PSEV"
-expect_contains "PASS-2b …naming the path" "record/wave-01-fixture/pk-a.md" "$OUT"
-expect_contains "PASS-2c …and the head the earlier pass stands at" "${PK_H1:0:12}" "$OUT"
-expect_contains "PASS-2d …and the head it was offered at" "${PK_H2:0:12}" "$OUT"
-expect_contains "PASS-2e …and the fix" "write the pass to a new record path" "$OUT"
+expect_nonempty "PASS-2a the refusal line is there to read (the extractor returns real output)" "$(pk_ref)"
+expect_contains "PASS-2b …naming the path" "record/wave-01-fixture/pk-a.md" "$(pk_ref)"
+expect_contains "PASS-2c …and the head the earlier pass stands at" "${PK_H1:0:12}" "$(pk_ref)"
+expect_contains "PASS-2d …and the head it was offered at" "${PK_H2:0:12}" "$(pk_ref)"
+expect_contains "PASS-2e …and the fix" "write the pass to a new record path" "$(pk_ref)"
 expect_eq "PASS-2f …in one line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c .)"
+expect_regex "PASS-2h …and its first line is one the verb's own shape (REFUSED — …, the plan unchanged)" \
+  '^poker: REFUSED — .*The plan is unchanged\.$' "$(pk_ref)"
 expect_eq "PASS-2g …and still one proof line for the path" "1" "$(pk_n pk-a)"
 # the same pass-2 reading on a path of its own is admitted: the fix the refusal names
 cp "$SEV_DIR/pk-a.md" "$SEV_DIR/pk-b.md"
@@ -13585,9 +13589,10 @@ expect_eq "PASS-5 precondition: an unsure finding registers with its check: line
 s42_snap "$RSEV" "$PSEV"
 pk_add pk-d
 s42_unchanged "PASS-5b §PASS-KEY the same record at the same head, a check: line already naming it" 1 "$PSEV"
-expect_contains "PASS-5c …naming the path, the head and the fix" "record/wave-01-fixture/pk-d.md" "$OUT"
-expect_contains "PASS-5d …the head" "${PK_H2:0:12}" "$OUT"
-expect_contains "PASS-5e …and the fix" "write the pass to a new record path" "$OUT"
+expect_nonempty "PASS-5c the refusal line is there to read" "$(pk_ref)"
+expect_contains "PASS-5d …naming the path" "record/wave-01-fixture/pk-d.md" "$(pk_ref)"
+expect_contains "PASS-5e …the head" "${PK_H2:0:12}" "$(pk_ref)"
+expect_contains "PASS-5e2 …and the fix" "write the pass to a new record path" "$(pk_ref)"
 poke "$RSEV" finding-check "$(chk_id pk-d)" settled S2 off "$CHK_A"
 expect_eq "PASS-5f precondition: the settlement writes the finding's deferred: line (exit 0)" "0|1" \
   "$RC|$(/usr/bin/grep -c "^deferred: $(chk_id pk-d) " "$PSEV")"
@@ -13606,13 +13611,16 @@ s42_unchanged "PASS-6b §PASS-KEY the same head, a deferred: line alone naming t
 # ---------- the mutation arms: the guard removed, and the guard refusing every second registration ----------
 PK_ANCHOR='PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"'
 anchor "$POKER" "$PK_ANCHOR" 1
-PK_MUT="$TMPROOT/poker-pass-mut"; mkdir -p "$PK_MUT/hooks" "$PK_MUT/scripts"
+PK_MUT="$TMPROOT/poker-pass-mut"; mkdir -p "$PK_MUT/hooks" "$PK_MUT/scripts" "$PK_MUT/b/hooks" "$PK_MUT/b/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PK_MUT/scripts/lib"
+for _pk_f in "$(dirname "$POKER")"/*; do  # the verb's siblings (the dry commit's wall among them), by link
+  [ "${_pk_f##*/}" = session-poker.sh ] || { ln -s "$_pk_f" "$PK_MUT/hooks/${_pk_f##*/}"; ln -s "$_pk_f" "$PK_MUT/b/hooks/${_pk_f##*/}" 2>/dev/null; }
+done
 PK_N="$PK_ANCHOR" PK_R='PF_PASS=""' awk 'BEGIN { n = ENVIRON["PK_N"]; r = ENVIRON["PK_R"] }
   { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$POKER" > "$PK_MUT/hooks/session-poker.sh"
 expect_eq "PASS-mut0 the guard-removed copy differs from the verb in one line" "1" \
   "$(diff "$POKER" "$PK_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
-mkdir -p "$PK_MUT/b/hooks" "$PK_MUT/b/scripts"; ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PK_MUT/b/scripts/lib"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PK_MUT/b/scripts/lib"
 PK_N="$PK_ANCHOR" PK_R='PF_PASS="head x y"' awk 'BEGIN { n = ENVIRON["PK_N"]; r = ENVIRON["PK_R"] }
   { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$POKER" > "$PK_MUT/b/hooks/session-poker.sh"
 expect_eq "PASS-mut0b the always-refusing copy differs from the verb in one line" "1" \
