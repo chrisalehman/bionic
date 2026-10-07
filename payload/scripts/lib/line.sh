@@ -647,6 +647,23 @@ _line_current_row() {  # <roster> <name> -> the row the walls read for that agen
   roster_row_for_id "$roster" "$id"
 }
 
+# WHAT A ROW LANDS ON, decided in one place (wave-28 T64; A-orch-188). The value comes from one of two keys and
+# both go through `_line_suites`, so `none` parses the same way; what it MEANS is the key's: `lands_on=none <why>`
+# is a declared waiver (D17) and lands with no run, while `suites_allowed=none` (or empty) on a row 1.12.0 wrote is
+# an absence, since 1.12.0 had no waiver, and is landed by a person. Prints `<key>|<value>|<suites>` and returns
+# 0 landed on <suites> (`none` for the waiver) · 3 no suite named, by the absence arm · 1 a name that is no suite.
+_line_lands() {  # <the roster row>
+  local key=lands_on v suites
+  v="$(_wt_field "$1" lands_on)"
+  [ -n "$v" ] || { key=suites_allowed; v="$(_wt_field "$1" suites_allowed)"; }
+  printf '%s|%s|' "$key" "${v:0:60}"
+  [ -n "$v" ] || return 3
+  suites="$(_line_suites "$v")" || return 1
+  printf '%s' "$suites"
+  [ "$suites" != none ] || [ "$key" = lands_on ] || return 3
+  return 0
+}
+
 line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command> -> 0 · 1 · 2 · 75
   local target="${1:-}" root="${2:-}" sid="${3:-}" within="${4:-}" again="${5:-}"
   local onto plan wt branch head acc c row roster launch now key name lands suites debt rec deadline=""
@@ -684,15 +701,15 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   now="$(_line_current_row "$roster" "$name")" || now="$launch"
   [ -n "$now" ] || { _wt_refuse "no-launch-row row=${row} roster=${roster} — ready reads the row's suites off the roster row the walls read"; return 2; }
   [ -n "$launch" ] || launch="$now"
-  name="$(_wt_field "$now" name)"; lands="$(_wt_field "$now" lands_on)"; key=lands_on
+  name="$(_wt_field "$now" name)"
   # A RUN OPEN AT UPGRADE CONTINUES (wave-28 T21; D26, AC-7.2). A row 1.12.0 wrote carries no `lands_on=`; its
-  # record of the brief's `Suites:` is `suites_allowed=`, and those are the suites `ready` proves, through the
-  # parser the label uses. A row that names none (empty) is landed by a person, and the refusal says how.
-  if [ -z "$lands" ]; then
-    lands="$(_wt_field "$now" suites_allowed)"; key=suites_allowed
-  fi
-  [ -n "$lands" ] || { _wt_refuse "no-lands-on row=${row} name=${name:-<none>} — no suite to run; land ${wt} --by-hand --reason '<why>'"; return 2; }
-  suites="$(_line_suites "$lands")" || { _wt_refuse "lands-on-unreadable row=${row} ${key}=${lands:0:60} — name suites bare, or land ${wt} --by-hand --reason '<why>'"; return 2; }
+  # record of the brief's `Suites:` is `suites_allowed=`, and those are the suites `ready` proves (`_line_lands`).
+  lands="$(_line_lands "$now")"; c=$?
+  key="${lands%%|*}"; lands="${lands#*|}"; suites="${lands#*|}"; lands="${lands%%|*}"
+  case $c in
+    3) _wt_refuse "no-lands-on row=${row} name=${name:-<none>} ${key}=${lands} — no suite to run; land ${wt} --by-hand --reason '<why>'"; return 2 ;;
+    1) _wt_refuse "lands-on-unreadable row=${row} ${key}=${lands} — name suites bare, or land ${wt} --by-hand --reason '<why>'"; return 2 ;;
+  esac
   # The debt is a suite's file name; the full-suite runner, or anything else, is never one (B4). Its
   # token (`lands_red=<suite> until <token>`) rides to the debt write in LINE_DEBT_TOKEN.
   debt="$(_wt_field "$launch" lands_red)"; LINE_DEBT_TOKEN=-
