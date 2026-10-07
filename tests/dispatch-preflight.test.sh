@@ -5275,9 +5275,12 @@ PF_MAP="$SANDBOX/pf-map.sh"
   printf 'done\n'
 } > "$PF_MAP"
 
+# The floor row lands no code, so its brief names no landing suite (wave-28 T7, ruling A-orch-73: a
+# writer brief that binds a row, as `w99-T12` binds T12, carries a Lands-on: line).
 PF_FULL_BRIEF='Your task: run the full suite on the working head.
 Expected artifact: .bionic/docs/record/w28-floor.log
 Expected duration: ~40 minutes.
+Lands-on: none the floor row proves the head with the full suite and lands no code
 Suites: tests/run.sh'
 
 # pf_repo <name> -> a wave fixture checked out on `wave/99-test`, five suites, the map stub.
@@ -9878,6 +9881,10 @@ GATE="$ROOT_GATE_SAVED"
 
 # ===========================================================================
 section "§GATES — only human gates hold: nothing writes before approved-by:, a release waits for approved: release, a doc row is not held by its step (wave-26 T13; REQ-6 AC-6.2; D3)"
+# A dispatch named for a row (`w-T1`, `w-T9`) binds it, so its writer brief names the suites it lands
+# on (wave-28 T7, ruling A-orch-73); the line changes nothing else these rows read.
+GATES_BRIEF="$BRIEF_FULL
+Lands-on: widget"
 # ===========================================================================
 #
 # AN APPROVAL IS AN INPUT ONLY THE USER'S ACT WRITES (D3). `approval:plan` is the `approved-by:`
@@ -9915,13 +9922,13 @@ GATES_RELEASE='approved: release by dana 2026-10-04T05:00:00Z "Ship it."'
 REPO=$(make_repo rgates1 yes)
 write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES1 AC-6.2 a writer for T1 before approved-by: is refused" "deny" "$GATE_VERDICT"
 expect_eq "GATES1b …and the ready set offers nothing before approved-by:" "" "$(gates_ready "$GATES_P")"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
 expect_contains "GATES1c the control: with approved-by: written, the ready set offers T1" "T1 " "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES1d …and the dispatch wall admits the writer for T1" "0" "$GATE_ST"
 # A TABLE WITHOUT `reads` applies no kind default, so nothing in the table itself waits for the
@@ -9948,7 +9955,7 @@ expect_contains "GATES1f …and offers T1 once approved-by: is written" \
 REPO=$(make_repo rgates2 yes)
 write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES2 AC-6.2 a dispatch for the release row before approved: release is refused" "deny" "$GATE_VERDICT"
 expect_contains "GATES2b …naming the approval it waits for" "approval:release" "$GATE_VERR"
@@ -9958,7 +9965,7 @@ expect_contains "GATES2d the ready set on the same plan offers T1 (the extractor
 expect_absent "GATES2e …and not the release" "T9" "$GATES_READY"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED
 $GATES_RELEASE")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES2f with approved: release written, the release dispatch is admitted" "0" "$GATE_ST"
 expect_contains "GATES2g …and the ready set offers it" "T9" "$(gates_ready "$GATES_P")"
@@ -9976,7 +9983,7 @@ write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "- $GATES_APPROVED")"
 expect_contains "GATES4 precondition: the plan carries the bulleted line" "- approved-by: dana" "$(cat "$GATES_P")"
 expect_contains "GATES4 the ready set offers T1 on a bulleted approved-by:" "T1 " "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES4b …and the dispatch wall admits its writer" "allow" "$GATE_VERDICT"
 REPO=$(make_repo rgates4f yes)
@@ -9987,7 +9994,7 @@ approved-by: example 2026-01-01T00:00Z "approved"
 expect_contains "GATES4c precondition: the plan carries approved-by: only inside a fence" \
   'approved-by: example' "$(cat "$GATES_P")"
 expect_eq "GATES4c the ready set offers nothing on a fenced approved-by:" "" "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES4d …and the dispatch wall refuses its writer" "deny" "$GATE_VERDICT"
 expect_contains "GATES4d …as unapproved" "unapproved" "$GATE_ERR"
@@ -9998,7 +10005,7 @@ write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
 sed 's/| approval:release |$/| live:approval:release |/' "$GATES_P" > "$GATES_P.tmp" && mv "$GATES_P.tmp" "$GATES_P"
 expect_contains "GATES5 precondition: T9 reads live:approval:release" "| live:approval:release |" "$(cat "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES5 a dispatch for a row reading live:approval:release before approved: release is refused" \
   "deny" "$GATE_VERDICT"

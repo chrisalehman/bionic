@@ -651,8 +651,9 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
     # a canonical label and was refused for naming none (R6-4). The span is the one the
     # label owns, bounded at the next label or a blank line as every other field is.
     # A BARE FILE NAME IS A DELIVERABLE (wave-28 T7; REQ-15, AC-15.1, D32): `files` 2 reads each
-    # word as before and also takes one `files_entry` calls a path, a name with an extension
-    # (`notes.md`), by the rule a Files: item is read by; a word of prose stays out.
+    # word as before and also takes a word with no `/` that `files_entry` calls a path, a name with
+    # an extension (`notes.md`), by the rule a Files: item is read by; a word of prose stays out, and
+    # a word with a `/` is still judged by `ispath` alone (`4/4` names no file).
     function span_paths(h) { return paths(spanof(h), DELIV_MAX, "", 2) }
     # The declared deliverable: walk EVERY deliverable-kind label hit in position order
     # and return the paths of the first that yields any. Iterating (rather than taking
@@ -977,7 +978,7 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       for (i = 1; i <= n; i++) {
         t = (files == 1 ? arr[i] : trimtok(arr[i]))
         k = (files == 1 ? files_entry(t) : 2 * ispath(t))
-        if (files == 2 && k == 0 && files_entry(t) == 2) k = 2
+        if (files == 2 && k == 0 && index(t, "/") == 0 && files_entry(t) == 2) k = 2
         if (k == 0 || seen[t]) continue
         seen[t] = 1
         if (k == 1) { unread = (unread == "" ? t : unread " " t); continue }
