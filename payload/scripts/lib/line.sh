@@ -63,8 +63,9 @@ if ! declare -F _slots_take_one >/dev/null 2>&1; then
 fi
 
 # What the caller of `line_publish` says it is: the queue's carrier (`ready`) by default; the hand
-# landing sets kind=hand, the git user, the reason and the session its plan write runs under.
-LINE_KIND="queue"; LINE_BY="-"; LINE_WHY="-"; LINE_SID=""
+# landing sets kind=hand, the git user and the reason. Both set the session the publish's plan write
+# and roster mark run under (LINE_SID; wave-28 T6).
+LINE_KIND="queue"; LINE_BY="-"; LINE_WHY="-"; LINE_SID=""; LINE_MARKED=""
 
 _line_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 _line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not
@@ -365,20 +366,47 @@ _line_pause() {  # <row>
   while [ ! -e "$d/$1.go" ] && [ "$i" -lt 6000 ]; do sleep 0.1; i=$((i + 1)); done
 }
 
-# THE HAND LANDING'S ROW TEXT (AC-5.1): the row's `- T<n>:` line gains `landed-by-hand: <user>
-# <ISO-UTC> "<why>"`, written through the plan's one transaction (`session-poker.sh step-line`, as
-# a command: the plan verbs live in the hook script). A row that is no plan row has no line.
-_line_hand_text() {  # <plan> <row> <by> <at> <why> -> 0 written or nothing to write
-  local plan="$1" row="$2" rest text poker root
-  case "$row" in T[0-9]*) : ;; *) return 0 ;; esac
-  rest="$(awk -v k="$row" '
-    /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
-    s && match($0, "^[ \t]*-?[ \t]*" k "[ \t]*:") { r = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", r); print r; exit }' "$plan" 2>/dev/null)"
-  text="landed-by-hand: ${3} ${4} \"${5}\""
-  [ -z "$rest" ] || text="${rest} ${text}"
+# THE PLAN WRITE (wave-28 T6; D7, AC-3.2; ruling A-orch-81): the row's status `landed`, its `- T<n>:`
+# line and its dispatch-ledger line, in ONE transaction on the BOUND plan: `session-poker.sh row-landed`,
+# run as a command (the plan verbs live in the hook script and exit on refusal), whose one copy is
+# `plan_verb_open`'s and whose one dry commit is a writer's (wave-27 passes 60, 63: no copy stands in for
+# the plan here). A hand landing's line gains its `landed-by-hand:` text in the same write. A row that is
+# no plan row has nothing to write. rc 1 when the verb refused or could not run; its words are printed
+# by the caller, after the publish, never swallowed (LINE_PLAN_SAID).
+_line_plan_write() {  # <plan> <row> <commit> <at> -> 0 written or nothing to write · 1 refused
+  local poker root rc
+  LINE_PLAN_SAID=""
+  _line_plan_agent "$1" "$2" >/dev/null || return 0
   poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
-  root="$(_line_root "$plan")" || return 1
-  ( cd "$root" && CLAUDE_CODE_SESSION_ID="${LINE_SID}" bash "$poker" step-line "$row" "$text" ) >/dev/null 2>&1
+  root="$(_line_root "$1")" || { LINE_PLAN_SAID="the plan's root cannot be read"; return 1; }
+  if [ "$LINE_KIND" = hand ]; then
+    LINE_PLAN_SAID="$( cd "$root" && CLAUDE_CODE_SESSION_ID="${LINE_SID}" bash "$poker" row-landed "$2" "$3" "$4" --by-hand "$LINE_BY" "$LINE_WHY" 2>&1 )"; rc=$?
+  else
+    LINE_PLAN_SAID="$( cd "$root" && CLAUDE_CODE_SESSION_ID="${LINE_SID}" bash "$poker" row-landed "$2" "$3" "$4" 2>&1 )"; rc=$?
+  fi
+  [ "$rc" -eq 0 ] && return 0
+  return 1
+}
+
+# THE ROSTER MARK (wave-28 T6; D7): the row's roster line gains `landed=<40-hex> landed_at=<ISO-UTC>`
+# (lib/roster.sh `roster_mark_landed`, the roster's one marker). The row's line is its launch line's
+# name, found as `ready` finds it: by `row=`, else by the plan row's agent. Sets LINE_MARKED to the
+# name marked (empty when the row has no line on this session's roster, as a hand landing may not).
+_line_roster_mark() {  # <plan> <root> <row> <commit> <at>
+  local roster launch name
+  LINE_MARKED=""
+  [ -n "$LINE_SID" ] || return 0
+  if ! declare -F roster_mark_landed >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    [ -r "$_LINE_LIB_DIR/roster.sh" ] && . "$_LINE_LIB_DIR/roster.sh" 2>/dev/null
+    declare -F roster_mark_landed >/dev/null 2>&1 || return 0
+  fi
+  roster="${2%/}/.bionic/tmp/roster-${LINE_SID}.state"
+  launch="$(_wt_launch_row "$roster" row "$3")" \
+    || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$1" "$3")")" || return 0
+  name="$(_wt_field "$launch" name)"
+  [ -n "$name" ] || return 0
+  roster_mark_landed "$roster" "$name" "$4" "$5" && LINE_MARKED="$name"
 }
 
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
@@ -454,11 +482,16 @@ EOF
   [ -z "$LINE_DEBT_ID" ] \
     || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
          "$row" "$LINE_DEBT_SUITE" "$LINE_DEBT_SUITE" "$LINE_DEBT_ID" "$rec"
-  # 9. THE PLAN WRITE — T6's seam: the row's status, its `- T<n>:` line and its ledger line, through
-  # the one transaction. The hand landing's text is written here now.
-  [ "$LINE_KIND" != hand ] || _line_hand_text "$plan" "$row" "$LINE_BY" "$at" "$LINE_WHY" \
-    || printf 'NOTE %s — published; the row line was not written (session-poker.sh step-line refused)\n' "$row"
-  # 10. THE ROSTER MARK — T6's seam: `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
+  # 9. THE PLAN WRITE (T6): the row's status, its `- T<n>:` line and its ledger line, in one
+  # transaction, at the publish's own instant. A refusal now is after the publish: it is printed, with
+  # what is owed by hand, and the publish stands.
+  if ! _line_plan_write "$plan" "$row" "$cand" "$at"; then
+    [ -z "$LINE_PLAN_SAID" ] || printf '%s\n' "$LINE_PLAN_SAID"
+    printf 'PLAN-UNWRITTEN %s — published %s; the plan row is not written: run row-landed %s %s %s from the main thread\n' \
+      "$row" "$cand" "$row" "$cand" "$at"
+  fi
+  # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
+  _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
   return 0
@@ -526,7 +559,9 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> — the carrier's own subshel
   done
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" = 0 ] || return 2
-  _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec"
+  _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?
+  # What is owed, when the row has an agent on this session's roster (T6): its task, then its stop.
+  [ -z "$LINE_MARKED" ] || _line_owed "$row" "$LINE_PUBLISHED" "$LINE_MARKED"
 }
 
 # ---------------------------------------------------------------------------- the carrier
@@ -623,6 +658,7 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
     _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:-<none>} branch=${branch} — the landing record cannot be written, so nothing is published; make it writable, say ready again"; return 2
   }
   [ -z "$within" ] || deadline=$(( $(_res_now) + 10#$within ))   # decimal: `08` is eight seconds
+  LINE_SID="$sid"   # the session the publish's plan write and roster mark run under (T6)
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
 }
 

@@ -633,6 +633,14 @@ case "$VERB" in
         exit 2
         ;;
     esac
+    # THE LANDING'S MARK DECIDES (wave-28 T6; D7). A row the line published carries
+    # `landed=<40-hex> landed_at=<ISO-UTC>` on its roster line (lib/roster.sh `roster_landed`): it
+    # closes `landed` whatever its deliverable says, and its tree goes once the row is closed (below).
+    _mark=""
+    # shellcheck source=/dev/null
+    { declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null \
+      && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
+    [ -z "$_mark" ] || _reason=landed
     # THE FRESH PANEL, through the one shared read above (`read_panel` / `_is_live`, the same
     # predicate standdown uses). C4 holds for every state: no fresh answer, or the name still
     # on it, is a refusal that names the verdict. A verb that cannot see does not ack, and an
@@ -680,6 +688,27 @@ case "$VERB" in
     fi
     [ -n "$_ack" ] && printf '%s\n' "$_ack"
     say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
+    # THE TREE GOES AT THE STOP (wave-28 T6; D7, AC-3.2). Only for a row carrying the mark: the tree
+    # recorded for the name (`workspace_for_name`), else the convention's, removed by
+    # lib/worktree.sh `worktree_remove_landed` — never the branch, never a tree whose head is not in the
+    # landed commit. A row with no mark (abandoned, read-only) keeps its tree, as it always has.
+    if [ -n "$_mark" ]; then
+      _wt_lib="${HOOK_DIR}/../payload/scripts/lib/worktree.sh"
+      [ -f "$_wt_lib" ] || _wt_lib="${HOOK_DIR}/../scripts/lib/worktree.sh"
+      # shellcheck source=/dev/null
+      [ -f "$_wt_lib" ] && . "$_wt_lib"
+      if declare -f worktree_remove_landed >/dev/null 2>&1; then
+        _tree="$(workspace_for_name "$REPO_REAL" "$SESSION_ID" "$_target" 2>/dev/null)" \
+          || _tree="$(worktree_for_row "$REPO_REAL" "$_target")"
+        _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+        _c="${_mark%%$'\t'*}"
+        _kept="$(worktree_remove_landed "$REPO_REAL" "$_tree" "$_c")"
+        case $? in
+          0) say "stopped: $_target — its tree is removed: $_tree (branch ${_tbr:-unknown} stays; landed ${_c:0:12})" ;;
+          2) say "stopped: $_target — its tree stands: $_tree; $_kept" ;;
+        esac
+      fi
+    fi
     exit 0
     ;;
 
@@ -704,21 +733,20 @@ case "$VERB" in
     # or empty verdict costs nothing at all.
     fold_roster
 
-    # THE LEASE ENDS HERE (bionic 1.4.0, spec AC-28, design ledger C1). A
-    # discharged row's worktree is a leased slot nobody holds any more, and
-    # standing the agent down is the moment to give the disk back. The act — a
-    # --no-ff merge into the bound plan's working branch, a removal, a prune,
-    # and the refusals around them — belongs to payload/scripts/lib/worktree.sh,
-    # whose `worktree_land_for_session` spawn-worktree.sh's `land` verb calls
-    # too (wave-20 T8, REQ-1, D1); this is a call site and not a second copy of
-    # the judgment. The Patrol tick lands nothing. Two spellings of the library path because
-    # the repo ships payload/hooks as a symlink to hooks/ and `$0` is textual.
-    # A missing library costs nothing: the stand-down report is what this verb
-    # owes, and the landing is additive to it.
+    # STANDDOWN LANDS NOTHING (wave-28 T6; D7). Until 1.13.0 the lease ended here: each discharged
+    # row's tree was merged onto the bound plan's working branch and removed (bionic 1.4.0, AC-28).
+    # A row now lands through `ready` (lib/line.sh, the line's one publish), which marks its roster
+    # line `landed=<40-hex> landed_at=<ISO-UTC>`, and its tree goes at `stopped <name>`. So this pass
+    # merges nothing, removes nothing and moves no ref; it reports each tree as it stands, and a row
+    # carrying the mark is stoppable by it. The worktree library is read for the name-to-tree mapping
+    # alone (`worktree_for_row`); the roster library for the mark (`roster_landed`).
     _wt_lib="${HOOK_DIR}/../payload/scripts/lib/worktree.sh"
     [ -f "$_wt_lib" ] || _wt_lib="${HOOK_DIR}/../scripts/lib/worktree.sh"
     # shellcheck source=/dev/null
     [ -f "$_wt_lib" ] && . "$_wt_lib"
+    # shellcheck source=/dev/null
+    declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    _mark_of() { declare -F roster_landed >/dev/null 2>&1 && roster_landed "$ROSTER_FILE" "$1" 2>/dev/null; }   # <name>
 
     # THE LIVE SET, read ONCE for the whole batch through the shared `read_panel` above the
     # verbs: it decides whether an acked row is gone and annotates LEFT ALONE rows. A stale or
@@ -727,31 +755,27 @@ case "$VERB" in
     # than none.
     read_panel
 
-    # ONE CALL SITE for ending a row's lease, shared by the READY branch (a MET/WAIVED/still-
-    # listed-acked row) and the acked-and-gone branch, which needs the exact same landing but
-    # never enters READY. Appends one line to _landed for every tree it finds, so the operator
-    # sees every tree this pass touched, whichever branch found it.
-    #
-    # ONLY A LANDED ROW IS MERGED (wave-19 T1f, review R2-1). The land is a --no-ff merge into
-    # this session's bound plan's working branch. An ack closes a name whatever its
-    # reason (A-T1.11), and since T1e `stopped` acks an UNMET-and-gone row `abandoned` — so
-    # "acked" is not "landed", and merging on the ack alone put an abandoned agent's partial
-    # work into the target branch (masked on main/master by the protected-branch refusal,
-    # live on any other). The VERDICT decides, never the ack's reason: the reason is a label,
-    # the verdict is the fact. MET or WAIVED lands. Anything else leaves tree and branch in
-    # place — no merge and no removal, since a human salvages what the agent left — and says
-    # so on the same LEASES report.
+    # ONE CALL SITE for reporting a row's tree, shared by the READY branch and the acked-and-gone
+    # branch. Appends one line to _landed for every tree it finds. A marked row's tree stands until
+    # its stop; a MET or WAIVED row with no mark has not landed (its writer says ready, or a person
+    # lands it by hand); any other row's tree is left for a human to salvage, as before.
     _land_row_tree() {  # <name> <verdict state>
-      declare -f worktree_land_for_session >/dev/null 2>&1 || return 0
+      declare -f worktree_for_row >/dev/null 2>&1 || return 0
       _tree="$(worktree_for_row "$REPO_REAL" "$1")"
       [ -d "$_tree" ] || return 0
+      _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+      _tmark="$(_mark_of "$1")"
+      if [ -n "$_tmark" ]; then
+        _landed="${_landed}  landed $(printf '%.12s' "$_tmark") — tree stands until stopped $1: $_tree   ($1)
+"
+        return 0
+      fi
       case "$2" in
         MET|WAIVED)
-          _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land_for_session "$_tree" "$REPO_REAL" "$SESSION_ID")   ($1)
+          _landed="${_landed}  not landed — tree stands: $_tree (branch ${_tbr:-unknown}); its writer says ready from it, or a person lands it with land <tree> --by-hand --reason '<why>'   ($1)
 "
           ;;
         *)
-          _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
           _tword="abandoned"; [ "$2" = "UNMET" ] || _tword="unlanded ($2)"
           _landed="${_landed}  ${_tword} — tree stands: $_tree (branch ${_tbr:-unknown}); remove or salvage by hand   ($1)
 "
@@ -804,6 +828,9 @@ case "$VERB" in
           continue
         fi
         _why="acked"
+      elif _rmark="$(_mark_of "$_name")" && [ -n "$_rmark" ]; then
+        # STOPPABLE BY ITS ROSTER MARK (wave-28 T6; D7): the line published it.
+        _why="landed $(printf '%.12s' "$_rmark")"
       elif [ "$_state" = "WAIVED" ]; then
         _why="waived"
       elif [ "$_state" = "MET" ] && [ -n "$_deliv" ]; then
@@ -843,7 +870,7 @@ EOF
       say "nothing has landed; there is nobody to stand down."
     fi
     if [ -n "$_landed" ]; then
-      say "LEASES — the worktree of each row this pass found, landed, refused, or left standing:"
+      say "LEASES — the worktree of each row this pass found, as it stands (standdown lands nothing):"
       printf '%s' "$_landed"
     fi
     if [ "$_nheld" -gt 0 ]; then

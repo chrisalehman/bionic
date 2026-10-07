@@ -117,7 +117,13 @@ fi
 # first, right after the one mkdir, which never creates through a link), is not a directory, is
 # not this user's, or is writable by group or others. A root made here is mode 0700. A refusal
 # returns non-zero, pins nothing, leaves PATH alone and prints this seam's line once, naming the
-# check; the caller adds nothing to it.
+# check; the caller adds nothing to it. The reason is also left in _BIONIC_PIN_WHY (empty when
+# the pin was built), for the hand-run path below, which prints its own line instead.
+#
+# THE PARENT IS JUDGED TOO (wave-28 T36; AC-10.6; Chris "D3: 1"). Whoever can write the root's
+# parent directory can rename the root away and make their own in its place, between this check
+# and a child's `bash`. So a parent that group or others can write is refused unless it carries
+# the sticky bit, which is what keeps a shared /tmp safe: there only a file's owner may rename it.
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
   if [ ! -d "$1" ]; then echo "$1 is not a directory"
   elif [ ! -O "$1" ]; then echo "$1 is not owned by this user"
@@ -127,9 +133,20 @@ _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot h
     esac
   fi
 }
+_bionic_pin_parent() {  # _bionic_pin_parent <root> — prints why <root>'s parent is open; nothing when it is not
+  local parent="${1%/*}"
+  [ "$parent" != "$1" ] || parent="."
+  [ -n "$parent" ] || parent="/"
+  case "$(ls -ld "$parent" 2>/dev/null)" in
+    ?????????[tT]*) : ;;
+    ?????w*|????????w*) echo "$parent is writable by group or others and has no sticky bit" ;;
+  esac
+}
+_BIONIC_PIN_WHY=""
 bionic_interpreter_pin() {
   local root="${1:-}" dir why=""
   [ -n "$root" ] || why="no root was given"
+  [ -n "$why" ] || why="$(_bionic_pin_parent "$root")"
   dir="$root/pin"
   [ -n "$why" ] || [ -e "$root" ] || [ -L "$root" ] || mkdir -m 0700 "$root" 2>/dev/null
   [ ! -L "$root" ] || why="$root is a symlink"
@@ -140,6 +157,7 @@ bionic_interpreter_pin() {
   [ -n "$why" ] || [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
   [ -n "$why" ] || [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] \
     || why="$dir/bash is not a link to /bin/bash"
+  _BIONIC_PIN_WHY="$why"
   if [ -n "$why" ]; then
     echo "resolve-roots.sh: cannot build the interpreter pin under $root — $why, so nothing is pinned" >&2
     return 1
@@ -154,6 +172,12 @@ bionic_interpreter_pin() {
 # or in a suite started under /bin/bash in the first place — unless the first PATH entry is
 # already a pin (a suite tests/run.sh launched, or one this seam already pinned). The test is
 # the directory, not the marker, for the reason the re-exec's test is the interpreter (K-4).
+#
+# A REFUSED PIN STOPS THE RUN, AS THE RUNNER STOPS (wave-28 T36; AC-10.5; wave-27 review pass 75).
+# This path used to end `|| :`, so a refused pin printed its line and the suite ran on unpinned —
+# the world a full run never gives it, which is the whole thing the pin exists to prevent. Now
+# the suite runs no check: it prints one line naming the pin's path and the reason, unsets the
+# marker (nothing was pinned) and exits 2, the runner's own code for "nothing was run".
 if [ "${0##*/}" != "run.sh" ] \
    && [ -x "/bin/bash" ] \
    && [ -f "$0" ] && [ -r "$0" ]; then
@@ -167,7 +191,12 @@ if [ "${0##*/}" != "run.sh" ] \
     fi
   elif [ "$(readlink "${PATH%%:*}/bash" 2>/dev/null)" != "/bin/bash" ]; then
     _bionic_pin_root="${TMPDIR:-/tmp}"
-    bionic_interpreter_pin "${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}" || :
+    _bionic_pin_root="${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}"
+    if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then
+      echo "resolve-roots.sh: no interpreter pin at $_bionic_pin_root — ${_BIONIC_PIN_WHY}; remove $_bionic_pin_root or set TMPDIR, then run again" >&2
+      unset BIONIC_TEST_INTERPRETER_PINNED
+      exit 2
+    fi
     unset _bionic_pin_root
   fi
 fi

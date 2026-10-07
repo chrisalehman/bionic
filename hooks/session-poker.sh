@@ -439,6 +439,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
+  die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
@@ -625,6 +626,21 @@ case "$VERB" in
       esac
     done
     PV_PAIRS=("$@")
+    ;;
+  # THE LANDING'S ROW (wave-28 T6; D7, A-orch-81): an id, the landed commit (40 hex) and the
+  # publish's instant (ISO-UTC); a hand landing adds `--by-hand <who> <why>`. The shapes are the
+  # usage error's; the values a plan cannot hold are the verb's own refusal.
+  row-landed)
+    RL_BY=""; RL_WHY=""; RL_HAND=0
+    if [ $# -eq 6 ] && [ "$4" = "--by-hand" ]; then RL_HAND=1; RL_BY="$5"; RL_WHY="$6"; set -- "$1" "$2" "$3"; fi
+    [ $# -eq 3 ] && [ -n "$1" ] || usage "row-landed takes <id> <40-hex commit> <ISO-UTC> [--by-hand <who> <why>]."
+    case "$2" in *[!0-9a-f]*|'') usage "row-landed: '$2' is not a 40-hex commit." ;; esac
+    [ "${#2}" -eq 40 ] || usage "row-landed: '$2' is not a 40-hex commit."
+    case "$3" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) usage "row-landed: '$3' is not an ISO-UTC instant (YYYY-MM-DDTHH:MM:SSZ)." ;;
+    esac
+    PV_ID="$1"; RL_COMMIT="$2"; RL_AT="$3"
     ;;
   step-line)
     PV_APPEND=""
@@ -1610,7 +1626,11 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
   SCHED_BUDGET=""
   [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ] \
     && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
-  SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
+  # A PERSON'S CAP, OR NONE (wave-28 T9; D15): `budget_cap` (lib/run.sh) answers only from a
+  # line whose `source=` is `user` or `override`, so a probe's `writers=` sizes nothing here.
+  SCHED_WRITERS=""
+  [ -n "$SCHED_BUDGET" ] && SCHED_WRITERS="$(budget_cap "$SCHED_PLAN")"
+  SCHED_WRITERS="${SCHED_WRITERS#writers=}"
   SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
   sched_live_head "$1"
   sched_facts_state "$1"
@@ -1896,7 +1916,7 @@ TICK_WAIT
                 m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH)
                 printf "N\t%s\t%d\n", $1, m }'
               units_edges "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
-            } | units_chain "${SCHED_WRITERS:-1}" 2>&1 )" || {
+            } | units_chain "${SCHED_WRITERS:-$(printf '%s\n' "$rows" | grep -c .)}" 2>&1 )" || {
     say "CHAIN unknown — $(clean "$chain")"
     return 0
   }
@@ -5376,9 +5396,14 @@ EOF
   # verify, so it must not be a way for a model to raise its own cap: a value above the derived
   # ceiling is refused, and raising it is the user's own edit of the plan's `parallel-budget:` line.
   # (T74 narrowed "the derived ceiling" to the cap in force; see below.)
+  # A PLAN WITH NO LINE GETS ONE (wave-28 T9; D15, REQ-2 AC-2.10). No plan owes a budget line, so
+  # the verb no longer refuses a plan without one: it writes `parallel-budget: writers=<n>
+  # source=user` directly below the opening `---`, and `budget-override: <who> <date> chosen=<n>`
+  # under it, with no `derived=` because nothing was derived.
   # It goes through the plan transaction every plan verb takes. REFUSED: a value that is not a
   # whole number, or 0 (1); one above the cap in force (1); a reply with a line break (1); a
-  # plan with no budget line to cap, or a `writers=`/`derived=` there that is not 1 to 4 digits (1).
+  # `writers=`/`derived=` on the plan's lines that is not 1 to 4 digits, or a plan with no
+  # leading frontmatter to write into (1).
   # The cap in force asked again is the plan transaction's no-op: "already reads so" (0).
   budget)
     case "$BG_N" in
@@ -5432,26 +5457,35 @@ EOF
       esac
       if [ "$BG_F" = writers ]; then BG_HAVE=$((10#$BG_V)); else BG_DERIVED=$((10#$BG_V)); fi
     done
-    if [ -z "$BG_HAVE" ]; then
-      die "REFUSED — $PV_PLAN carries no parallel-budget: writers=<n> in its frontmatter to cap; Step 0 writes it. The plan is unchanged."
-      exit 1
-    fi
+    # THE CAP IN FORCE IS A PERSON'S (wave-28 T9; D15): `budget_cap`, which answers only from a
+    # `source=user` or `source=override` line. A probe's `writers=` caps nothing, so the verb
+    # records any n over it; the probe's figure is still carried as `derived=`.
+    BG_CAP="$(budget_cap "$PV_PLAN")"; BG_CAP="${BG_CAP#writers=}"
     [ -n "$BG_DERIVED" ] || BG_DERIVED="$BG_HAVE"
-    if [ "$BG_N" -gt "$BG_HAVE" ]; then
-      die "REFUSED — writers=$BG_N is above the cap in force ($BG_HAVE): budget only lowers it."
+    if [ -n "$BG_CAP" ] && [ "$BG_N" -gt "$BG_CAP" ]; then
+      die "REFUSED — writers=$BG_N is above the cap in force ($BG_CAP): budget only lowers it."
       die "Raising it is the user's own edit of the plan's parallel-budget: line in $PV_PLAN; the plan is unchanged."
       exit 1
     fi
+    BG_LINE=1
+    case "$BG_LINES" in 'parallel-budget:'*|*$'\n''parallel-budget:'*) : ;; *) BG_LINE=0 ;; esac
     BG_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
     if [ -z "$BG_WHO" ] || ! plan_verb_value_ok "$BG_WHO"; then
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who capped it; the plan is unchanged."
       exit 1
     fi
-    BG_OVR="budget-override: $BG_WHO $(date -u +%Y-%m-%d) derived=$BG_DERIVED chosen=$BG_N"
+    BG_OVR="budget-override: $BG_WHO $(date -u +%Y-%m-%d)${BG_DERIVED:+ derived=$BG_DERIVED} chosen=$BG_N"
     # THE VALUES GO IN THROUGH THE ENVIRONMENT, as approve's line does: `-v` would read a backslash
     # in a user name as an escape.
-    if ! BG_OVR="$BG_OVR" BG_N="$BG_N" awk '
-      NR == 1 && $0 == "---" { f = 1; print; next }
+    if ! BG_OVR="$BG_OVR" BG_N="$BG_N" BG_LINE="$BG_LINE" awk '
+      NR == 1 && $0 == "---" {
+        f = 1; print
+        if (ENVIRON["BG_LINE"] == "0") {
+          print "parallel-budget: writers=" ENVIRON["BG_N"] " source=user"
+          print ENVIRON["BG_OVR"]; done = 1
+        }
+        next
+      }
       f && $0 == "---" { f = 0; print; next }
       f && /^budget-override:/ { next }
       f && !done && /^parallel-budget:/ {
@@ -5463,6 +5497,7 @@ EOF
           else if (!src && w[i] ~ /^source=/) { w[i] = "source=user"; src = 1 }
           out = out (out == "" ? "" : " ") w[i]
         }
+        if (!wr) out = "writers=" ENVIRON["BG_N"] (out == "" ? "" : " ") out
         if (!src) out = out " source=user"
         print "parallel-budget: " out
         print ENVIRON["BG_OVR"]
@@ -5470,7 +5505,7 @@ EOF
       }
       { print }
       END { if (!done) exit 1 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN carries no parallel-budget: line in its leading frontmatter; the plan is unchanged."
+      die "REFUSED — $PV_PLAN has no leading frontmatter to write the cap into; the plan is unchanged."
       exit 1
     fi
     plan_verb_swap budget "writers=$BG_N (source=user)" writer
@@ -5901,6 +5936,79 @@ EOF
     [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
     plan_verb_swap "$VERB" "$PV_WHAT" writer
     say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE LANDING'S ROW (wave-28 T6; REQ-3 AC-3.2, D7; ruling A-orch-81). `line_publish`
+  # (lib/line.sh) runs this verb, as a command, inside its publish lock once the fast-forward and
+  # its `published` event are written: the row's status `landed` (`units_table_cells` on the tasks
+  # table, judged by `units_validate` as `task-set` judges a status), its `- T<n>:` line
+  # (`units_step_line`) and its dispatch-ledger row's `landed` cell (`units_table_cells` on the
+  # ledger), onto ONE copy and through ONE `plan_verb_swap ... writer`: all three lines or none.
+  # Writer mode is the point: past Step 4 the dry copy reads `current: 4`, so the declared debt the
+  # publish has just written (T5) cannot refuse the publish's own bookkeeping, and the debt stays
+  # in the bound plan's landing record for the gate to read at the next step move (wave-27 passes
+  # 60 and 63: the dry copy is `plan_verb_open`'s own, so the gate resolves it to the real plan).
+  # The step line gains ` landed <commit> <at>` after its own text (a hand landing: ` landed-by-hand:
+  # <who> <at> "<why>"`, the hand landing's interface), once: a text already there is not added
+  # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
+  # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
+  # same landing finds the plan already so and writes nothing.
+  row-landed)
+    if ! plan_verb_id_ok "$PV_ID"; then
+      die "REFUSED — '$(clean "$PV_ID")' is not one row id; the plan is unchanged."
+      exit 1
+    fi
+    if ! plan_verb_value_ok "$RL_BY" || ! plan_verb_value_ok "$RL_WHY"; then
+      die "REFUSED — the hand landing's name or reason carries a |, a tab or a line break, which no plan line can hold; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_open row-landed
+    PV_RC=0
+    units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      1) die "REFUSED — $PV_PLAN carries no ## Tasks table; the plan is unchanged."; exit 1 ;;
+      2) die "REFUSED — the ## Tasks table carries no row $PV_ID; the plan is unchanged."; exit 1 ;;
+      5) die "REFUSED — the ## Tasks table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
+      *) die "REFUSED — the ## Tasks row $PV_ID cannot take status landed; the plan is unchanged."; exit 1 ;;
+    esac
+    PV_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+    if [ -n "$PV_VIOL" ]; then
+      die "REFUSED — with $PV_ID landed, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+      printf '%s\n' "$PV_VIOL" >&2
+      exit 1
+    fi
+    case "$PV_ID" in
+      T[0-9]*)
+        RL_TEXT="landed $RL_COMMIT $RL_AT"
+        [ "$RL_HAND" -eq 0 ] || RL_TEXT="landed-by-hand: $RL_BY $RL_AT \"$RL_WHY\""
+        RL_REST="$(units_step_text "$PV_NEW" "$PV_ID" 2>/dev/null)"
+        case " $RL_REST " in
+          *" $RL_TEXT "*) RL_LINE="$RL_REST" ;;
+          *) RL_LINE="${RL_REST:+$RL_REST }$RL_TEXT" ;;
+        esac
+        if ! units_step_line "$PV_NEW" "$PV_ID" "$RL_LINE" > "$PV_NEW.2" 2>/dev/null; then
+          die "REFUSED — $PV_PLAN carries no ## SDLC State section for the $PV_ID line; the plan is unchanged."
+          exit 1
+        fi
+        mv -f "$PV_NEW.2" "$PV_NEW" ;;
+    esac
+    PV_RC=0
+    units_table_cells "$PV_NEW" set ledger "$PV_ID" "landed=landed $RL_AT $RL_COMMIT" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
+    if [ "$PV_RC" -eq 2 ]; then
+      PV_RC=0
+      units_table_cells "$PV_NEW" add ledger "$PV_ID" "landed=landed $RL_AT $RL_COMMIT" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
+    fi
+    case "$PV_RC" in
+      0) mv -f "$PV_NEW.2" "$PV_NEW" ;;
+      1) rm -f "$PV_NEW.2" ;;
+      3) die "REFUSED — the ## Dispatch ledger header carries no landed column; the plan is unchanged."; exit 1 ;;
+      5) die "REFUSED — the ## Dispatch ledger table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
+      *) die "REFUSED — the ledger row $PV_ID cannot take its landed cell; the plan is unchanged."; exit 1 ;;
+    esac
+    plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
+    say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
     exit 0
     ;;
 
@@ -7905,18 +8013,13 @@ EOF
       # `fill_ledger_live` and the dispatch wall key on. The step is named because it is
       # what a reader looks for; the line says which fact is missing.
       say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: ## SDLC State carries no approved-by: line"
-    elif [ -z "$SCHED_WRITERS" ]; then
-      # A NOTE, BECAUSE THE TICK ITSELF CAN DO NOTHING ABOUT IT (REQ-10 AC-10.4; seed A 8e).
-      # The budget is a measurement Step 0 writes (wave-19 REQ-3 AC-3.2, ADR-035): the
-      # governing-skill hook refuses a plan Write without it and the stop wall refuses the
-      # turn, so this line is the backstop's third voice, and it names the key as Step 0
-      # writes it so the one plan edit that quiets it is legible from the line alone.
-      if [ -z "$SCHED_PLAN" ]; then
-        note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
-      else
-        note "no FILL — ${SCHED_PLAN} carries no parallel-budget: writers=<n> in its frontmatter; Step 0 measures it (resources_probe, then resources_budget) and writes it verbatim."
-      fi
+    elif [ -z "$SCHED_PLAN" ]; then
+      note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
     else
+      # NO CAP IS NOT A FAULT (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a plan with no
+      # `parallel-budget: writers=<n>` took a note here telling Step 0 to write one. No plan owes
+      # the line now, and a probe's number is no cap: with no person's cap the width below is the
+      # gate's alone (`fill_cap` answers nothing, so `fill_gate_width` runs uncapped).
       # THE HOLDS AND THE LEDGER were printed by `tick_plan_report` above, and `SCHED_HOLDS`
       # still carries the step holds for the no-FILL line below (wave-21 T13).
       # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
