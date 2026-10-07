@@ -309,7 +309,8 @@ if [ "${0##*/}" != "run.sh" ] \
     _bionic_pin_root="${TMPDIR:-/tmp}"
     _bionic_pin_root="${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}"
     if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then
-      if [ -n "$_BIONIC_PIN_HOLDER" ]; then _bionic_pin_fix="set TMPDIR to a directory only you can write"  # removing the root changes nothing there
+      # the remedy is what would help: removing the root helps only when one is still there and the path to it was not the refusal
+      if [ -n "$_BIONIC_PIN_HOLDER" ] || { [ ! -e "$_bionic_pin_root" ] && [ ! -L "$_bionic_pin_root" ]; }; then _bionic_pin_fix="set TMPDIR to a directory only you can write"
       else _bionic_pin_fix="remove $_bionic_pin_root or set TMPDIR"
       fi
       echo "resolve-roots.sh: no interpreter pin at $_bionic_pin_root — ${_BIONIC_PIN_WHY}; ${_bionic_pin_fix}, then run again" >&2
