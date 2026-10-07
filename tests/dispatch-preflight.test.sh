@@ -7475,11 +7475,12 @@ expect_status "§three-arms …and the wire is at most 21 lines (19 + one per ad
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
 # MOVED WITH THE FIXED PART (wave-21 T7; wave-24 T9; wave-28 T76): a wire that grew by nothing is the
-# nineteen-line fixed part, at most 19 newlines, so the floor that proves growth is twenty. It sat at
-# fifteen, four under the fixed part, and passed a wire that had grown by nothing.
+# nineteen-line fixed part, 19 newlines, and the two extra faults bought two more: 21, measured. The floor that
+# proves growth is that 21, which the cap above holds from the other side. It sat at fifteen, four under the
+# fixed part, and passed a wire that had grown by nothing.
 echo "      measured: the three-arm wire is $(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ') newlines"
-expect_status "§three-arms …and it really grew: more than the nineteen-line fixed part" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 20 ] && echo 0 || echo 1)"
+expect_status "§three-arms …and it really grew: the nineteen-line fixed part and the two lines the extra faults bought" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 21 ] && echo 0 || echo 1)"
 # THE SHAPE BANS OF WAVE-13 STAND: no per-fault heading, no fault-count sentence, no
 # stacked `Fix:` paragraphs. One line per fault is a LINE, not a section.
 expect_absent "§three-arms …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
