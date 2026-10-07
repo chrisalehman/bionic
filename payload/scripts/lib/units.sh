@@ -2242,6 +2242,27 @@ units_step_line() {
     }' "$plan"
 }
 
+# units_step_text <plan> <N|T<n>> -> the text of that line of `## SDLC State`, found exactly as
+#   `units_step_line` finds the line it writes (its pattern, fences skipped, the first one in the
+#   section), blanks trimmed; nothing when the line is absent (wave-28 T6: `row-landed` adds to the
+#   text a row's line already has). Exit 1 no `## SDLC State`.
+units_step_text() {
+  local plan="${1:-}" key="${2:-}"
+  [ -n "$plan" ] && [ -f "$plan" ] || return 1
+  US_KEY="$key" awk '
+    BEGIN {
+      key = ENVIRON["US_KEY"]; kq = key; gsub(/[.]/, "[.]", kq)
+      pat = (key !~ /^T/) ? ("^[ \t]*-?[ \t]*Step[ \t]+" kq "[ \t]*:") : ("^[ \t]*-?[ \t]*" kq "[ \t]*:")
+    }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { if (sdlc == 1) sdlc = 2; if (!seen && $0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }; next }
+    sdlc == 1 && !found && match($0, pat) {
+      r = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", r); print r; found = 1
+    }
+    END { if (!seen) exit 1 }' "$plan"
+}
+
 # units_set_current <plan> <value> -> the whole plan with the first `current:` line of
 #   `## SDLC State` reading `current: <value>`. Exit 1 when the section or the line is absent.
 #   Which values are legal is the caller's (the poker refuses 9, close-out's alone); this only
