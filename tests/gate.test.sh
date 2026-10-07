@@ -1149,4 +1149,46 @@ expect_eq "B.44 a reading of 70 taken mid-run by the wrapper is the request's pe
 expect_regex "B.45 …so its cost is the rise 70-40=30, though the end read 40" '^30:' \
   "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k.test.sh" 2>/dev/null)"
 
+# §NUMBER, THE TREE A REQUEST NAMES (wave-28 T36; ruling A-orch-55/56). These rows belong to
+# §NUMBER and sit here because they drive the real shim, whose harness (book_fg) §WRAP defines.
+# The doctrine runs a row's suite as `cd <row tree> || exit 1; bash tests/x.test.sh`, often from
+# the main checkout, and the wall passes `--stamp-dir <row tree>`. The shim used to ask the gate
+# from its own cwd, so the request read `tree=<main checkout>` while the stamp went to the row
+# tree, and the landing's busy check took every writer's suite for a run in the main checkout.
+# The request now names the tree the stamp goes to: --stamp-dir's checkout, else the `cd <tree>`
+# opening the command, else the shim's cwd.
+fresh number-tree
+world_machine 8 8192 40 1.0
+world_cost t.test.sh 10 0.5 30
+NT_ROW="$WR/.worktrees/T1"
+NT_ROW_P="$(cd "$NT_ROW" 2>/dev/null && pwd -P)"
+NT_WR_P="$(cd "$WR" && pwd -P)"
+expect_nonempty "N.14 the row tree the doctrine call names is a checkout of its own" \
+  "$(git -C "$NT_ROW" rev-parse --show-toplevel 2>/dev/null)"
+expect_eq "N.15 a wrapped \`cd <tree>; bash tests/x\` from the main checkout runs (rc 0)" "0" \
+  "$(book_fg nt1 --agent nt1 --max-wait 30 --stamp-dir "$NT_ROW" --suites t.test.sh -- "cd '$NT_ROW' || exit 1; true")"
+expect_eq "N.16 …and its request records tree=<the row tree>, the stamp's tree" "$NT_ROW_P" \
+  "$(field "$(req_of nt1)" tree)"
+expect_match "N.16b …while the stamp went to the row tree's git dir" "stamp/v1|*|suites=t.test.sh|*" \
+  "$(tail -n 1 "$(git -C "$NT_ROW" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null)"
+expect_eq "N.17 with no --stamp-dir, the \`cd <tree>\` opening the command names the tree" "0 $NT_ROW_P" \
+  "$(book_fg nt2 --agent nt2 --max-wait 30 --suites t.test.sh -- "cd $NT_ROW || exit 1; true") $(field "$(req_of nt2)" tree)"
+expect_eq "N.18 a command that opens with no cd names the shim's own checkout (the positive for the cwd)" \
+  "0 $NT_WR_P" "$(book_fg nt3 --agent nt3 --max-wait 30 --suites t.test.sh -- 'true') $(field "$(req_of nt3)" tree)"
+expect_eq "N.19 …and the shim's command still runs where the shim stands (its own cd moves it)" "$NT_WR_P" \
+  "$(book_fg nt4 --agent nt4 --max-wait 30 --stamp-dir "$NT_ROW" --suites t.test.sh -- "pwd -P > '$D/nt4.pwd'" >/dev/null; cat "$D/nt4.pwd" 2>/dev/null)"
+
+# THE DOOR'S RUNNER HOLDS NOTHING EITHER (wave-28 T36; D27, AC-10.2). `tests/run.sh --only a b`
+# names its suites, so the stamp can say which suites the run proved, and the wall passes
+# `--runner`: the shim takes no number, and each suite the runner starts asks for itself.
+fresh wrap-door
+world_machine 8 8192 40 1.0
+expect_eq "B.46 the door's runner (--runner, its suites named) is run, not admitted" "0" \
+  "$(book_fg dr --agent dr --max-wait 30 --runner --suites a.test.sh,b.test.sh -- 'exit 0')"
+expect_eq "B.47 …it took no number" "0" "$(nreq)"
+expect_match "B.48 …and its stamp names the suites it ran" "stamp/v1|head=*|rc=0|*|suites=a.test.sh,b.test.sh|*" \
+  "$(stamp_last)"
+expect_eq "B.49 the same call without --runner asks the gate (B.47 is not vacuous)" "0 1" \
+  "$(book_fg dq --agent dq --max-wait 30 --suites a.test.sh,b.test.sh -- 'exit 0') $(nreq)"
+
 finish

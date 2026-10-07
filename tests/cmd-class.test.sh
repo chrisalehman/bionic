@@ -2354,4 +2354,76 @@ expect_eq "§SCOPE cd x || exit 1; a: the cd guard ahead of one suite is no spli
 expect_eq "§SCOPE the budget's claims never carry the split line" "file|file" \
   "$(claim_kinds_of 'bash tests/a.test.sh || bash tests/b.test.sh' | paste -sd'|' -)"
 
+section "§ONLY — wave-28 T36 (D27, AC-10.1/10.2): the door claims each suite it names, never the full tree"
+# `tests/run.sh --only a.test.sh b.test.sh` runs the named suites in the runner's world. The
+# reading claims each one as kind `only` (a file claim made through the door), scoped to the
+# runner's own directory, so the budget holds the call to the writer's own suites and the stamp
+# names them; the bare forms stay kind `file`, which the wall refuses from an agent.
+only_rows() {  # <command> -> the scoped claims as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" /r' _ "$LIB" "$1" 2>&1 | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§ONLY one name: one only claim" "only:a.test.sh" "$(only_rows 'tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY two names: one claim each, in order" "only:a.test.sh|only:b.test.sh" \
+  "$(only_rows 'bash tests/run.sh --only a.test.sh b.test.sh')"
+expect_eq "§ONLY the evidence shape: the redirection is not a name" "only:a.test.sh" \
+  "$(only_rows 'cd /r || exit 1; LOG=l; set -o pipefail; bash tests/run.sh --only a.test.sh 2>&1 | tee "$LOG"; rc=$?; exit $rc')"
+expect_eq "§ONLY …nor is a log after >" "only:a.test.sh" "$(only_rows 'tests/run.sh --only a.test.sh > log 2>&1')"
+expect_eq "§ONLY an absolute runner in this repo is scoped like a relative one" "only:a.test.sh" \
+  "$(only_rows 'bash /r/tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY another repository's runner claims nothing here (dropped by scope)" "" \
+  "$(only_rows 'bash /else/tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY …while the same names under this repo's runner are claimed (the positive)" "only:a.test.sh" \
+  "$(only_rows 'bash ./tests/run.sh --only a.test.sh')"
+expect_eq "§ONLY the bare suite is a file claim (the wall's door refuses it from an agent)" "file:a.test.sh" \
+  "$(only_rows 'bash tests/a.test.sh')"
+expect_eq "§ONLY the full tree is still run.sh beside a door call" "only:a.test.sh|file:run.sh" \
+  "$(only_rows 'tests/run.sh --only a.test.sh && tests/run.sh')"
+case_is none 'tests/run.sh --only' "§ONLY --only with no name runs nothing: none"
+case_is none 'tests/run.sh --only a.test.sh --dry-run' "§ONLY --dry-run beside it runs nothing: none"
+case_is suite 'tests/run.sh --only a.test.sh' "§ONLY the door is suite-class"
+expect_eq "§ONLY cmd_suite_targets projects the door's suites" "a.test.sh|b.test.sh" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" /r' _ "$LIB" 'tests/run.sh --only a.test.sh b.test.sh' 2>&1 | paste -sd'|' -)"
+expect_eq "§ONLY the targets reading carries the path in the runner's directory, no split" \
+  "only	a.test.sh	tests/a.test.sh|only	b.test.sh	tests/b.test.sh" \
+  "$(printf '%s' 'tests/run.sh --only a.test.sh b.test.sh' | bash -c '. "$1" || exit 9; _cmd_class_awk targets' _ "$LIB" 2>&1 | awk -F'\t' '{ print $1 "\t" $2 "\t" $4 }' | paste -sd'|' -)"
+
+section "§NAME — wave-28 T36 (read-structure-p20 #1): one predicate says what a suite name is"
+# The script-operand arm, the argv[0] arm and could_suite each spelled the suite-name rule, and
+# could_suite had drifted from the runner rule: `scripts/*run.sh` was claimed though
+# `scripts/run.sh` reads none. One function, is_suite_name, now answers for all of them, and a
+# `run.sh` is the runner only in a directory that is, or could be, `tests`.
+expect_eq "§NAME the library defines the predicate once" "1" \
+  "$(grep -c '^    function is_suite_name(c) {' "$LIB")"
+expect_eq "§NAME …and no arm spells the rule on its own any more" "0" \
+  "$(grep -cE 'b[01] == "test\.sh" \|\| b[01] ~|c == "test\.sh" \|\| c == "run\.sh"' "$LIB")"
+# THE DRIFT ROW: the literal reader (a path typed out) and the variable reader (a glob loop over
+# the same directory) give one answer for each directory.
+for _nm in tests x/tests scripts x; do
+  expect_eq "§NAME drift: \`bash $_nm/run.sh\` and a loop over $_nm/*run.sh read alike" \
+    "$(class_of "bash $_nm/run.sh")" "$(class_of "for f in $_nm/*run.sh; do bash \"\$f\"; done")"
+done
+expect_eq "§NAME drift: …and the two answers are not all one (the rows can differ)" "suite none" \
+  "$(class_of 'bash tests/run.sh') $(class_of 'bash scripts/run.sh')"
+loop_var_is none "" 'for f in scripts/*run.sh; do bash "$f"; done'
+loop_var_is suite '$f' 'for f in tests/*run.sh; do bash "$f"; done'
+loop_var_is suite '$d' 'for d in x/*/run.sh; do bash "$d"; done'
+
+section "§P20 — wave-28 T36 (read-adversarial-p20 #1–#4): the classifier's edges"
+# #1 a binding opening with a command substitution is read past it (A-orch-93).
+loop_var_is none "" 'S="$(git rev-parse --show-toplevel)/tool.sh"; bash "$S"'
+loop_var_is suite '$S' 'S="$(git rev-parse --show-toplevel)/a.test.sh"; bash "$S"'
+loop_var_is suite '$S' 'S="$(pick a b)"; bash "$S"'
+# #3 the value of --rcfile / --init-file is never the script.
+case_is none 'bash --rcfile "$r" x.sh' "§P20 #3 --rcfile's value is not the script"
+case_is none 'bash --init-file "$r" x.sh' "§P20 #3 …nor --init-file's"
+case_is suite 'bash --rcfile /dev/null tests/a.test.sh' "§P20 #3 …while the script after it is read (the positive)"
+# #4 -O / +O and each o in a cluster take their value.
+case_is none 'bash -O extglob x.sh' "§P20 #4 -O's value is not the script"
+case_is suite 'bash -O extglob tests/a.test.sh' "§P20 #4 …the suite after it is read"
+case_is suite 'bash -euo pipefail tests/a.test.sh' "§P20 #4 a cluster's o takes pipefail, and the suite is read"
+case_is suite 'bash +O nullglob tests/a.test.sh' "§P20 #4 a + option is skipped like a - one"
+case_is none 'bash -o noexec tests/a.test.sh' "§P20 #4 -o noexec still runs nothing"
+case_is suite 'bash +o noexec tests/a.test.sh' "§P20 #4 …while +o noexec turns it off: a run"
+expect_eq "§P20 #4 -O's value is never a claim" "" "$(only_rows 'bash -O extglob "$s"' | sed 's/file:\$s//')"
+
 finish

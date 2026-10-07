@@ -2878,11 +2878,96 @@ for _lv in '{ for s in tests/*.test.sh; do if bash "$s"; then :; fi; done; } | t
   run_hook "$(mk_payload "$R_LV" "$_lv" "$ACTOR" omit Bash test-runner)"
   expect_status "LV1 [$_lv] is refused" 2 "$ST"
   LV_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
-  expect_contains "LV2 …by the unexpanded-name arm, naming the budget" "unexpanded name; allowed: archive.test.sh" "$LV_LINE"
+  # Since wave-28 T36 the one door answers first: a bare form from an agent is refused naming
+  # `tests/run.sh --only`, before the budget's unexpanded-name arm is reached.
+  expect_contains "LV2 …by the door's line (wave-28 T36), ahead of the unexpanded-name arm" "use tests/run.sh --only " "$LV_LINE"
   expect_eq "LV3 …in one line of at most 100 columns" "yes" "$([ -n "$LV_LINE" ] && [ "${#LV_LINE}" -le 100 ] && echo yes || echo no)"
 done
 run_hook "$(mk_payload "$R_LV" 'for f in docs/*.md; do bash "$f"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "LV4 a loop over files that are plainly no suite passes" 0 "$ST"
 expect_absent "LV4 …with no suite refusal" "unexpanded name" "$ERR"
+
+section "§DOOR — a dispatched agent runs a suite through tests/run.sh --only, never bare (wave-28 T36; D27, AC-10.1, AC-10.3)"
+# ============================================================
+#
+# THE ONE DOOR. A bare suite command typed by a dispatched agent runs in whatever world the
+# agent's shell gives it; `tests/run.sh --only <suite>` runs it in the runner's (the interpreter
+# pin, the environment, the adoption wall, one gate ask per suite). So the wall refuses every bare
+# form the classifier reads — the literal path, the rule-5 evidence shape, a script at argv[0], a
+# literal loop, a glob loop, a bare variable — in one line of at most 100 columns that names the
+# door; the door form itself goes on to the budget like a suite file, and is never the full tree.
+# The main thread is not refused: a person's bare run keeps the seam's pin
+# (tests/interpreter-pin.test.sh §2 drives that pin on a hand run).
+#
+# fails-when: an agent's bare run passes, or its refusal omits `tests/run.sh --only`; the door
+# form is refused on its own budget or read as the full tree; the main thread's bare run is refused.
+R_DR="$(mk_repo door)"
+bw_dispatched "$R_DR" t36writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+dr_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
+dr_fits() { local l; l="$(dr_line)"; [ -n "$l" ] && [ "${#l}" -le 100 ] && echo yes || echo no; }
+for _dr in 'bash tests/alpha.test.sh' \
+           "cd '$R_DR' || exit 1; LOG=x.log; set -o pipefail; bash tests/alpha.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" \
+           './tests/alpha.test.sh' 'bash -x tests/alpha.test.sh'; do
+  run_hook "$(mk_payload "$R_DR" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.1 [$_dr] an on-budget bare run from an agent is refused" 2 "$ST"
+  expect_contains "DOOR.2 [$_dr] …with one line naming the door and the suite" \
+    "use tests/run.sh --only alpha.test.sh" "$(dr_line)"
+  expect_eq "DOOR.3 [$_dr] …of at most 100 columns" "yes" "$(dr_fits)"
+done
+for _dr in 'for s in alpha beta; do bash "tests/$s.test.sh"; done' \
+           'for s in tests/*.test.sh; do bash "$s"; done' 'bash "$SUITE"' \
+           'while read -r s; do bash "$s"; done < list'; do
+  run_hook "$(mk_payload "$R_DR" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.4 [$_dr] a loop or variable form from an agent is refused" 2 "$ST"
+  expect_contains "DOOR.5 [$_dr] …by the door's line" "use tests/run.sh --only " "$(dr_line)"
+  expect_eq "DOOR.6 [$_dr] …of at most 100 columns" "yes" "$(dr_fits)"
+done
+run_hook "$(mk_payload "$R_DR" 'bash tests/canonical-sdlc-governing-skill.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_contains "DOOR.7 a suite name too long for the line still names the door, by placeholder" \
+  "use tests/run.sh --only <suite>" "$(dr_line)"
+expect_eq "DOOR.7b …and stays inside 100 columns" "yes" "$(dr_fits)"
+expect_contains "DOOR.7c …while the detail carries the suite's own command" \
+  "tests/run.sh --only canonical-sdlc-governing-skill.test.sh" "$ERR"
+
+# The door itself: on the budget it passes, wrapped for the runner; off it, the budget refuses.
+run_hook "$(mk_payload "$R_DR" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_ne "DOOR.8 the door form on the budget is not refused" "2" "$ST"
+expect_absent "DOOR.8b …with no refusal line" "refused" "$ERR"
+expect_regex "DOOR.9 …it is wrapped, its suite named, and the shim told it is the runner" \
+  "booked\\.sh.* --suites alpha\\.test\\.sh --runner -- " "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+run_hook "$(mk_payload "$R_DR" "cd '$R_DR' || exit 1; LOG=x.log; set -o pipefail; bash tests/run.sh --only alpha.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" "$ACTOR" omit Bash test-runner 1800000)"
+expect_ne "DOOR.10 the door in the evidence shape passes on the budget" "2" "$ST"
+run_hook "$(mk_payload "$R_DR" 'tests/run.sh --only beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.11 the door form naming a suite off the budget is refused" 2 "$ST"
+expect_contains "DOOR.12 …by the budget arm, naming the budget" "allowed: alpha.test.sh" "$(dr_line)"
+expect_absent "DOOR.13 …and never as the full tree" "full tree" "$ERR"
+run_hook "$(mk_payload "$R_DR" 'tests/run.sh --only alpha.test.sh beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.14 one off-budget name among several refuses the call" 2 "$ST"
+
+# The main thread: the door's arm never speaks there. Unengaged here, so no other wall judges it.
+R_DRM="$(mk_repo door-main no)"
+run_hook "$(mk_payload "$R_DRM" 'bash tests/alpha.test.sh' "" omit Bash "" 1800000)"
+expect_ne "DOOR.15 the main thread's bare run is not refused" "2" "$ST"
+expect_absent "DOOR.16 …and the door's line is not printed" "tests/run.sh --only" "$ERR"
+expect_regex "DOOR.17 …it is wrapped as it always was, so the suite it runs gets the seam's pin" \
+  "booked\\.sh.* --suites alpha\\.test\\.sh -- " "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+
+# THE MUTANT: the door's block cut from a copy of the library. The bare on-budget run must then
+# pass, which is what DOOR.1 exists to refuse. The copy is a plugin tree of its own (hooks/ beside
+# scripts/), so the hook's loader finds the doctored library first.
+DR_MUT="$SANDBOX/door-mutant"
+mkdir -p "$DR_MUT/hooks"
+cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$DR_MUT/scripts"
+cp "$HOOK" "$DR_MUT/hooks/bash-walls.sh"
+anchor "$DR_MUT/scripts/lib/walls.sh" '# ---- BEGIN THE ONE DOOR' 1
+awk '/# ---- BEGIN THE ONE DOOR/ { skip = 1 } !skip { print } /# ---- END THE ONE DOOR ----/ { skip = 0 }' \
+  "$DR_MUT/scripts/lib/walls.sh" > "$DR_MUT/walls.tmp" && mv "$DR_MUT/walls.tmp" "$DR_MUT/scripts/lib/walls.sh"
+expect_eq "DOOR.18 the mutant library parses" "0" "$(bash -n "$DR_MUT/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
+DR_HOOK_KEEP="$HOOK"; HOOK="$DR_MUT/hooks/bash-walls.sh"
+run_hook "$(mk_payload "$R_DR" 'bash tests/beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.19 the mutant still refuses an off-budget run (it runs, not vacuous)" 2 "$ST"
+run_hook "$(mk_payload "$R_DR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_ne "DOOR.20 under the mutant an agent's bare on-budget run passes (the defect DOOR.1 guards)" "2" "$ST"
+HOOK="$DR_HOOK_KEEP"
 
 finish
