@@ -934,13 +934,36 @@ DP_MINE_AWK='
     }'
 # dp_row_reader — sets DP_ROW (the brief's `Row:`, or empty), DP_NAME_ROWS (every plan row the name
 # matches, one per line), DP_NAME_ROW (the first) and DP_BOUND_ROW: the row this dispatch is bound to.
+# A name that matches more than one row, with no `Row:` to say which, binds NOTHING and is refused
+# (wave-28 T58): the launch record records no row for such a name either (session-poker NOT-RECORDED),
+# and binding the first would let the approval arm pass a second match that waits for approval.
 dp_row_reader() {
-  DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""
+  DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""; DP_NAME_AMBIG=""
   if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
     DP_NAME_ROWS="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1 }')"
     DP_NAME_ROW="${DP_NAME_ROWS%%$'\n'*}"
+    case "$DP_NAME_ROWS" in *$'\n'*) DP_NAME_AMBIG=1 ;; esac
   fi
   DP_BOUND_ROW="${DP_ROW:-$DP_NAME_ROW}"
+  if [ -z "$DP_ROW" ] && [ -n "$DP_NAME_AMBIG" ]; then
+    DP_BOUND_ROW=""
+    _ar_rest="${DP_NAME_ROWS#*$'\n'}"
+    dp_finding "the name matches rows $(bionic_trunc "$DP_NAME_ROW" 11), $(bionic_trunc "${_ar_rest%%$'\n'*}" 11)" \
+      "add Row: $(bionic_trunc "$DP_NAME_ROW" 11)" \
+      "The agent's name matches more than one row of the bound plan, and the brief has no Row: to say which:
+    Dispatch: ${DP_ROW_NAME}
+    Rows:     $(printf '%s' "$DP_NAME_ROWS" | tr '\n' ' ')
+    Plan:     ${PLAN}
+
+Every wall reads one row per dispatch, and the launch record records none for such a name.
+
+Fix: add a line of its own to the brief naming the row this agent runs, as the plan's ## Tasks table
+spells it —
+    Row: <id>
+  or name the agent for one row only.
+
+Then retry the dispatch."
+  fi
 }
 dp_row_reader
 if [ -n "$PLAN" ] && [ -n "$DP_BOUND_ROW" ]; then
@@ -2546,8 +2569,9 @@ fi
 # ================================ THE ROW AND THE SUITES IT LANDS ON (wave-28 T7; REQ-1, REQ-3, D4, D17)
 #
 # A BRIEF NAMES ITS ROW AND THE SUITES THAT ROW LANDS ON. `Row: <id>` binds the dispatch to a row of
-# the bound plan whatever the agent is called; the launch record, the fill and the stop wall read the
-# row's `row=` first and the name match after. `Lands-on: <suite>[, <suite>]` names the suites `ready`
+# the bound plan; the launch record, the fill, the stop wall, the landing, the approval arm and the
+# full-run floor read it first and the name match after (a `Row:` that contradicts the name's row is
+# refused below). `Lands-on: <suite>[, <suite>]` names the suites `ready`
 # runs, exactly those; `Lands-on: none <reason>` names none, and says why. The lift writes both in one
 # spelling (brief.sh); this arm is their one writer onto the row and refuses: a writer that binds a row
 # and carries no Lands-on: line; `none` with no reason; a suite outside the set the checks above

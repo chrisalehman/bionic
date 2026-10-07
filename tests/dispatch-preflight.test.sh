@@ -11125,7 +11125,7 @@ expect_eq "LO8 the scaffold slot pasted unfilled declares nothing: the bound wri
 expect_contains "LO8b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
 
 # ============================================================================
-section "§ROW-LABEL — Row: binds the dispatch to a row whatever the agent is called (wave-28 T7; REQ-3 AC-3.4, D17)"
+section "§ROW-LABEL — Row: binds the dispatch to a row of the plan, and a Row: the name contradicts is refused (wave-28 T7, T55; REQ-3 AC-3.4, D17)"
 # ============================================================================
 # `Row: <id>` on a line of its own is written on the launch row as `row=<id>`; the launch record,
 # the fill and the stop wall read it before the name match (tests/session-poker.test.sh §ROW-LABEL,
