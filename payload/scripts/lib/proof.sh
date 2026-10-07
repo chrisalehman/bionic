@@ -775,6 +775,64 @@ proof_add_line() {
     }' "$plan"
 }
 
+# proof_pass_conflict <plan> <record path> <head> -> why <record path> cannot be registered for another
+# pass at <head>, or nothing (wave-28 T60; D33, AC-8.6). ONE RECORD PATH IS ONE PASS: a `check:` or
+# `deferred:` line is keyed `<record>#<n>` (`_proof_check_state`), so a second pass on the same path
+# would inherit the first pass's settlement. The key stays unique by construction when the path is
+# registered for one pass only, so the verb asks here before it writes. A reading's proof line (one with a
+# `question=`) whose `evidence=` is <record path> and whose head is not <head> prints `head <that head>`;
+# otherwise, when a `check:` or `deferred:` line of `## SDLC State` names `<record path>#`, `settled <head>`.
+# A reader relaunched on an unsettled record (the same head, no such line) gets nothing: it is admitted.
+proof_pass_conflict() {
+  [ -f "$1" ] || return 0
+  awk -v rec="$2" -v head="$3" "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    /^(check|deferred):[ \t]/ { split($0, f, /[ \t]+/); if (index(f[2], rec "#") == 1) child = 1; next }
+    proof_fields($0) && PROOF_QUESTION != "" {
+      m = split($0, f, /[ \t]+/); ev = ""
+      for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) ev = substr(f[i], 10)
+      if (ev == rec && PROOF_HEAD != head && other == "") other = PROOF_HEAD
+    }
+    END { if (other != "") print "head " other; else if (child) print "settled " head }' "$1"
+}
+
+# proof_readings_derived <plan> <tree> -> `<evidence><TAB><written result><TAB><derived result>` for each
+# reading proof line (`kind=review` with a `question=`) of the plan's unfenced `## SDLC State`, the
+# derived result what `_proof_reading_result` gives it (wave-28 T60; D33, AC-8.6; A-orch-161). The
+# commit wall judges text and reads no record, so its collector (hooks/bash-walls.sh) asks this once
+# and hands the lines over, and the wall and the judge answer a reading's result one way. <tree> is the
+# project root whose docs root holds the records; with no docs root, the derived result is the written one.
+proof_readings_derived() {
+  local plan="${1:-}" tree="${2:-}" droot="" ev res d lines
+  [ -f "$plan" ] || return 0
+  if [ -n "$tree" ]; then
+    if ! declare -F docs_root >/dev/null 2>&1; then
+      d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+      # shellcheck source=/dev/null
+      . "$d/roots.sh" >/dev/null 2>&1
+    fi
+    ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
+  fi
+  lines="$(awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      m = split($0, f, /[ \t]+/); ev = ""
+      for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) ev = substr(f[i], 10)
+      if (ev != "" && !((ev SUBSEP PROOF_RESULT) in seen)) { seen[ev SUBSEP PROOF_RESULT] = 1; print ev "\t" PROOF_RESULT }
+    }' "$plan")"
+  while IFS='	' read -r ev res; do
+    [ -n "$ev" ] || continue
+    printf '%s\t%s\t%s\n' "$ev" "$res" "$(_proof_reading_result "$plan" "$droot" "$ev" "$res")"
+  done <<PROOF_READINGS
+$lines
+PROOF_READINGS
+}
+
 # proof_state <plan> <tree> -> what the change since the last floor proof needs, one line:
 #
 #     covered<TAB><head>               the working branch's head is the one the proof names, or
