@@ -98,7 +98,21 @@ mk_repo() {
   git -C "$repo" checkout -q -b feature/t23 2>/dev/null
   printf 'generic fixture proof\n' > "$repo/.bionic/docs/record/generic-evidence.md"
   [ "${2:-yes}" = yes ] && : > "$repo/.bionic/tmp/engaged-$SID.state"
+  bw_door "$repo" "${3:-with}"
   printf '%s' "$repo"
+}
+
+# bw_door <dir> [with|noonly|none] — what <dir>'s tests/run.sh is (wave-28 T54, D27). THE ONE DOOR
+# fires only in a project whose runner takes `--only`, so a world is built WITH one by default (the
+# project this suite's agent rows stand in is bionic's own shape); `noonly` is a runner of the
+# project's own that takes no flag, and `none` is a project with suites and no runner at all.
+bw_door() {
+  mkdir -p "$1/tests"
+  case "${2:-with}" in
+    none)   rm -f "$1/tests/run.sh" ;;
+    noonly) printf '#!/bin/bash\n# the project'"'"'s own runner: every suite, in order, no flags\nfor s in tests/*.test.sh; do bash "$s" || exit 1; done\n' > "$1/tests/run.sh" ;;
+    *)      printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$1/tests/run.sh" ;;
+  esac
 }
 
 # bw_bind <repo> — an ENGAGED session in <repo> is bound to the plan the case just wrote at
@@ -2954,6 +2968,102 @@ expect_ne "DOOR.15 the main thread's bare run is not refused" "2" "$ST"
 expect_absent "DOOR.16 …and the door's line is not printed" "tests/run.sh --only" "$ERR"
 expect_regex "DOOR.17 …it is wrapped as it always was, so the suite it runs gets the seam's pin" \
   "booked\\.sh.* --suites alpha\\.test\\.sh -- " "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+
+# THE DOOR FIRES ONLY WHERE THE PROJECT HAS IT (wave-28 T54, D27; A-orch-124). bionic bears on
+# other projects: one with suites under tests/ and no tests/run.sh, or a tests/run.sh of its own
+# that takes no `--only`, has no door to be pointed at, so an agent's ON-BUDGET bare run there goes
+# on to the budget as it did before T36 (the verdict and the rewrite of 903c971b). The project is
+# the tree the shim asks from (`cd <dir>` or the payload's cwd, read by `_bsg_cd_walk`), not the
+# repository the hook's root names. The budget arm itself is untouched: an off-budget bare run in
+# a project without the door is refused by it, so the door's absence widens nothing.
+#
+# fails-when: a project without the door has its on-budget bare run refused; a project with the
+# door has it passed; an off-budget run passes without the door; the tree read is the root's and
+# not the command's.
+R_NR="$(mk_repo door-norunner yes none)"
+R_NO="$(mk_repo door-noonly yes noonly)"
+bw_dispatched "$R_NR" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+expect_eq "DOOR.21a the no-runner world has no tests/run.sh" "absent" "$([ -e "$R_NR/tests/run.sh" ] && echo present || echo absent)"
+expect_eq "DOOR.21a2 the no-flag world has a tests/run.sh that never says --only" "present/0" \
+  "$([ -f "$R_NO/tests/run.sh" ] && echo present || echo absent)/$(grep -cF -e '--only' "$R_NO/tests/run.sh")"
+expect_eq "DOOR.21a3 the door world's tests/run.sh says --only" "1" "$(grep -cF -e '--only' "$R_DR/tests/run.sh")"
+for _wd in "$R_NR" "$R_NO"; do
+  bw_dispatched "$_wd" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+  for _dr in 'bash tests/alpha.test.sh' './tests/alpha.test.sh' \
+             "cd '$_wd' || exit 1; LOG=x.log; set -o pipefail; bash tests/alpha.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc"; do
+    run_hook "$(mk_payload "$_wd" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
+    expect_status "DOOR.21 [${_wd##*/}] [$_dr] an on-budget bare run passes where the project has no door" 0 "$ST"
+    expect_absent "DOOR.21b …with no refusal line" "refused" "$ERR"
+    expect_regex "DOOR.21c …it is wrapped for the shim exactly as before the door: its suite named, no --runner" \
+      "booked\\.sh.* --agent t54writer .*--max-wait 1790 .*--suites alpha\\.test\\.sh -- " "$(updated_command_of)"
+    expect_absent "DOOR.21d …and the shim is not told it is the runner" " --runner" "$(updated_command_of)"
+  done
+  run_hook "$(mk_payload "$_wd" 'bash tests/beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.22 [${_wd##*/}] an OFF-budget bare run is still refused without the door" 2 "$ST"
+  expect_contains "DOOR.22b …by the budget arm, naming the budget" "allowed: alpha.test.sh" "$(dr_line)"
+  expect_absent "DOOR.22c …and not by the door, which has nothing to point at" "use tests/run.sh --only" "$ERR"
+  expect_eq "DOOR.22d …in a line of at most 100 columns" "yes" "$(dr_fits)"
+done
+# The same extractor and the same call in a project WITH the door: refused, the line exactly as T36 printed it.
+run_hook "$(mk_payload "$R_DR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.23 a project whose tests/run.sh takes --only still refuses the on-budget bare run" 2 "$ST"
+expect_eq "DOOR.23b …with the door's line, text unchanged" \
+  "bionic: suite-run refused — use tests/run.sh --only alpha.test.sh (one door)" "$(dr_line)"
+
+# THE TREE IS THE COMMAND'S: a leading `cd <tree>` moves the project the door is looked for in,
+# the way it moves the shim's --stamp-dir. The checkout the hook's root names is not asked.
+DR_WT_DOOR="$R_NR/.worktrees/door"; DR_WT_NONE="$R_DR/.worktrees/nodoor"
+git -C "$R_NR" worktree add -q -b wt-door "$DR_WT_DOOR" 2>/dev/null
+git -C "$R_DR" worktree add -q -b wt-nodoor "$DR_WT_NONE" 2>/dev/null
+bw_door "$DR_WT_DOOR" with; bw_door "$DR_WT_NONE" none
+expect_eq "DOOR.24a the two trees are real worktrees of their own" "$DR_WT_DOOR/$DR_WT_NONE" \
+  "$(git -C "$DR_WT_DOOR" rev-parse --show-toplevel)/$(git -C "$DR_WT_NONE" rev-parse --show-toplevel)"
+bw_dispatched "$R_NR" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NR" "cd '$DR_WT_DOOR' || exit 1; bash tests/alpha.test.sh" "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.24 a root with no runner, a cd into a tree that has the door: refused" 2 "$ST"
+expect_eq "DOOR.24b …by the door's line" "bionic: suite-run refused — use tests/run.sh --only alpha.test.sh (one door)" "$(dr_line)"
+bw_dispatched "$R_DR" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_DR" "cd '$DR_WT_NONE' || exit 1; bash tests/alpha.test.sh" "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.25 a root with the door, a cd into a tree that has none: passes" 0 "$ST"
+expect_regex "DOOR.25b …wrapped, stamping the tree it ran in" "--stamp-dir [^ ]*/nodoor .*--suites alpha\\.test\\.sh -- " "$(updated_command_of)"
+bw_dispatched "$R_DR" t36writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+
+# THE MUTANTS of the predicate, on doctored copies of the library: with it removed the door fires
+# in every project (the defect), with it inverted it fires only where there is none, and with the
+# `--only` read dropped a runner of the project's own is taken for the door. Each runs before its
+# absence is read: the mutant parses, and still refuses an off-budget run.
+DRP_ANCHOR='if [ "$_door_here" = yes ]; then'
+DRP_READ='grep -qF -- '"'--only'"
+mk_door_mutant() {  # <dir> <sed script over walls.sh>
+  rm -rf "$1"; mkdir -p "$1/hooks"
+  cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$1/scripts"
+  cp "$HOOK" "$1/hooks/bash-walls.sh"
+  sed -e "$2" "$1/scripts/lib/walls.sh" > "$1/walls.tmp" && mv "$1/walls.tmp" "$1/scripts/lib/walls.sh"
+}
+anchor "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_ANCHOR" 1
+anchor "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_READ" 1
+DRP_KEEP="$HOOK"
+for _m in removed inverted unread; do
+  DRP_DIR="$SANDBOX/door-pred-$_m"
+  case "$_m" in
+    removed)  mk_door_mutant "$DRP_DIR" 's/if \[ "\$_door_here" = yes \]; then/if true; then/' ;;
+    inverted) mk_door_mutant "$DRP_DIR" 's/if \[ "\$_door_here" = yes \]; then/if [ "$_door_here" != yes ]; then/' ;;
+    unread)   mk_door_mutant "$DRP_DIR" "s/! grep -qF -- '--only' .*|| _door_here=yes/_door_here=yes/" ;;
+  esac
+  expect_eq "DOOR.26 [$_m] the mutant library parses" "0" "$(bash -n "$DRP_DIR/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
+  expect_eq "DOOR.26b [$_m] and differs from the shipped library" "differs" "$(diff -q "$DRP_DIR/scripts/lib/walls.sh" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" >/dev/null 2>&1 && echo same || echo differs)"
+  HOOK="$DRP_DIR/hooks/bash-walls.sh"
+  run_hook "$(mk_payload "$R_NR" 'bash tests/beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.26c [$_m] the mutant still refuses an off-budget run (it runs, not vacuous)" 2 "$ST"
+  run_hook "$(mk_payload "$R_NR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  # The shipped library answers 0 to both calls (DOOR.21). Removed and inverted fire the door at both;
+  # the unread one takes the no-flag runner for the door and still finds no runner at all in R_NR.
+  case "$_m" in unread) _want_nr=0 ;; *) _want_nr=2 ;; esac
+  expect_status "DOOR.27 [$_m] the no-runner project's on-budget bare run reads $_want_nr under the mutant" "$_want_nr" "$ST"
+  run_hook "$(mk_payload "$R_NO" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.28 [$_m] the no-flag runner project's run is refused under the mutant (red against DOOR.21)" 2 "$ST"
+  HOOK="$DRP_KEEP"
+done
 
 # THE MUTANT: the door's block cut from a copy of the library. The bare on-budget run must then
 # pass, which is what DOOR.1 exists to refuse. The copy is a plugin tree of its own (hooks/ beside
