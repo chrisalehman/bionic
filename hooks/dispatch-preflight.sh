@@ -2527,6 +2527,88 @@ Then retry the dispatch."
   fi
 fi
 
+# ================================ THE ROW AND THE SUITES IT LANDS ON (wave-28 T7; REQ-1, REQ-3, D4, D17)
+#
+# A BRIEF NAMES ITS ROW AND THE SUITES THAT ROW LANDS ON. `Row: <id>` binds the dispatch to a row of
+# the bound plan whatever the agent is called; the launch record, the fill and the stop wall read the
+# row's `row=` first and the name match after. `Lands-on: <suite>[, <suite>]` names the suites `ready`
+# runs, exactly those; `Lands-on: none <reason>` names none, and says why. The lift writes both in one
+# spelling (brief.sh); this arm is their one writer onto the row and refuses: a writer that binds a row
+# and carries no Lands-on: line; `none` with no reason; a suite outside the set the checks above
+# derived (`SUITES_ALLOWED`, the set a declared red is held to); and a Row: naming no row of the plan.
+# A dispatch that binds no row (no Row: label, and a name that is no row id) has no row to land, so
+# it owes no Lands-on: line.
+DP_ROW="$(brief_field "$LIFTED" row)"; DP_LANDS_ON="$(brief_field "$LIFTED" lands_on)"
+_lo_reason="$(brief_field "$LIFTED" lands_on_reason)"; _lo_bad="$(brief_field "$LIFTED" lands_on_bad)"
+_lo_ids=""
+[ -n "$PLAN" ] && [ -f "$PLAN" ] && _lo_ids="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 }')"
+# Membership by a whole line, read in the shell: a quitting `grep -q` fed from a pipe is the idiom
+# cross-gate §BP refuses (the writer can die of SIGPIPE).
+_lo_known=""
+case $'\n'"$_lo_ids"$'\n' in *$'\n'"$DP_ROW"$'\n'*) _lo_known=1 ;; esac
+if [ -n "$DP_ROW" ] && [ -n "$_lo_ids" ] && [ -z "$_lo_known" ]; then
+  dp_finding "Row: $(bionic_trunc "$DP_ROW" 20) names no plan row" "name a ## Tasks row id" \
+    "The Row: label binds this dispatch to a row of the bound plan, and the plan has no such row:
+    Given: Row: ${DP_ROW}
+    Plan:  ${PLAN}
+
+Fix: name the id of the row this agent runs, as the plan's ## Tasks table spells it.
+
+Then retry the dispatch."
+fi
+_lo_binds=""
+if [ -n "$DP_ROW" ]; then
+  _lo_binds=1
+elif [ -n "$_lo_ids" ] && [ -n "$DP_ROW_NAME" ] \
+     && printf '%s\n' "$_lo_ids" | awk -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' mine($1) { f = 1 } END { exit !f }'; then
+  _lo_binds=1
+fi
+if [ -z "$DP_LANDS_ON" ] && [ -z "$_lo_bad" ] && [ -n "$_lo_binds" ] && ! role_is_readonly "$DP_SUBAGENT"; then
+  dp_finding "the brief has no Lands-on: line" "add Lands-on: <suites> or none <why>" \
+    "A writer's row lands on the suites its brief names, and this brief names none:
+    Dispatch: ${DP_ROW_NAME:-<unnamed>}${DP_ROW:+ (Row: ${DP_ROW})}
+    Suites:   ${SUITES_ALLOWED:-(none)}
+
+ready runs exactly the suites the row's launch line names, so a row with none cannot land.
+
+Fix: add a line of its own naming the suites this row lands on, from its suite set —
+    Lands-on: <suite>[, <suite>]
+  or, for a row no suite proves —
+    Lands-on: none <reason>
+
+Then retry the dispatch."
+fi
+if [ "$DP_LANDS_ON" = none ] && [ -z "$_lo_reason" ]; then
+  dp_finding "Lands-on: none gives no reason" "write the reason after none" \
+    "A row may land on no suite only with a reason the reader can check:
+    Given: Lands-on: none
+
+Fix: say why no suite proves this row, on the same line —
+    Lands-on: none <reason>
+
+Then retry the dispatch."
+fi
+_lo_out=""
+if [ -n "$_lo_bad" ]; then
+  _lo_out="${_lo_bad%% *}"
+elif [ -n "$DP_LANDS_ON" ] && [ "$DP_LANDS_ON" != none ]; then
+  for _lo_s in ${DP_LANDS_ON//,/ }; do
+    case " $SUITES_ALLOWED " in *" $_lo_s "*) : ;; *) _lo_out="$_lo_s"; break ;; esac
+  done
+fi
+if [ -n "$_lo_out" ]; then
+  # The name rides in the fact, cut as the declared red's is: the fixed words and the fix take 84.
+  dp_finding "Lands-on: $(bionic_trunc "$_lo_out" 15) is outside Suites:" "name a suite the row runs" \
+    "A row lands only on suites it runs, and this one's suite set does not hold this one:
+    Given:  Lands-on: ${DP_LANDS_ON:+${DP_LANDS_ON} }${_lo_bad}
+    Suites: ${SUITES_ALLOWED:-(none)}
+
+Fix: name only suites of the row's own set, each as <name>.test.sh or tests/<name>.test.sh, or add
+the suite to the brief's Suites: or Files: line so the row runs it.
+
+Then retry the dispatch."
+fi
+
 # ===================================================== THE FULL-RUN WALL (wave-26 REQ-3, D6)
 # (replaces the one-regression wall, AC-24, and the floor-once wall, REQ-5 D7, of 1.10.)
 #
@@ -2893,7 +2975,9 @@ ROW=$(roster_row \
   "plan=${ROSTER_PLAN}" \
   ${DP_QUESTIONS:+"questions=${DP_QUESTIONS}"} \
   ${DP_LANDS_RED:+"lands_red=${DP_LANDS_RED}"} \
-  ${DP_RED_EVIDENCE:+"red_evidence=${DP_RED_EVIDENCE}"}) || ROW=""
+  ${DP_RED_EVIDENCE:+"red_evidence=${DP_RED_EVIDENCE}"} \
+  ${DP_ROW:+"row=${DP_ROW}"} \
+  ${DP_LANDS_ON:+"lands_on=${DP_LANDS_ON}"}) || ROW=""
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
