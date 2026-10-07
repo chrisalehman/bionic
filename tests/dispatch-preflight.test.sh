@@ -8904,6 +8904,7 @@ walk_register() {  # <repo> <record path> <question> <reader> [old] -> writes th
   base="$(git -C "$repo" rev-list --max-parents=0 HEAD)"; head="$(git -C "$repo" rev-parse HEAD)"
   mkdir -p "$(dirname "$repo/$rec")"
   { printf 'reviewed: %s..%s\nquestion: %s\nresult: pass\nscope: piece\n' "$base" "$head" "$q"
+    [ "$form" = old ] || printf 'findings: 0\n'
     if [ "$q" = structure ]; then
       for id in reuse one-site single-job open-closed substitution narrow-interface dependency-direction; do
         printf 'check: %s PASS nothing found\n' "$id"; done
