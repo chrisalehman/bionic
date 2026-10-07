@@ -1335,7 +1335,7 @@ expect_eq "7.72c …and it holds bash -> /bin/bash" "/bin/bash" "$(readlink "$T6
 expect_eq "7.72d …and it names no link: it is its own physical path" "$T65_FIRST" "$(phys "$T65_FIRST")"
 expect_eq "7.72e …the rest of PATH is unchanged" "$T65_FIRST:$PIN_GIVEN" "$PIN_PATH"
 T65_MUT_PHYS="$TMPROOT/t65-mut-phys.sh"
-anchor "$SEAM" ' cd -P -- "$dir" 2>/dev/null && pwd -P)"' 1
+anchor "$SEAM" 'cd -P -- "$dir" 2>/dev/null && pwd -P)"' 1
 sed 's#cd -P -- "$dir" 2>/dev/null && pwd -P)"#cd -- "$dir" 2>/dev/null \&\& pwd)"#' "$SEAM" > "$T65_MUT_PHYS"
 expect_eq "7.73 the logical-path mutant parses" "0" "$(bash -n "$T65_MUT_PHYS" >/dev/null 2>&1; echo $?)"
 pin_call "$T65_MUT_PHYS" "$T65_DIR/phys/lnk/t65-mut-root"
