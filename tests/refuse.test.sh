@@ -1199,13 +1199,16 @@ inv_w28_sites() {  # <root> -> the four wall files' refusal sites, counted
 # queue, so they ride on top of the ceiling as the door does: one per inventory bullet tagged
 # `(wave-28 T7`, at most four. A fifth site with no tagged bullet still fails the pin.
 INV_W28_T7_MAX=4
+inv_w28_ceiling() {  # <inventory> -> 1.12.0's sites, plus the door's one and T7's, as the inventory tags them
+  local door t7
+  door="$(grep -c "REQ-10's door" "$1" 2>/dev/null)"; [ "${door:-0}" -le 1 ] || door=1
+  t7="$(grep -c '(wave-28 T7' "$1" 2>/dev/null)"; [ "${t7:-0}" -le "$INV_W28_T7_MAX" ] || t7="$INV_W28_T7_MAX"
+  printf '%s' $((INV_W28_BASE + ${door:-0} + ${t7:-0}))
+}
 inv_w28_excess() {  # <root> <inventory> -> a line when the sites pass 1.12.0's but for the door's one and T7's
-  local n door t7
-  n="$(inv_w28_sites "$1")"
-  door="$(grep -c "REQ-10's door" "$2" 2>/dev/null)"; [ "${door:-0}" -le 1 ] || door=1
-  t7="$(grep -c '(wave-28 T7' "$2" 2>/dev/null)"; [ "${t7:-0}" -le "$INV_W28_T7_MAX" ] || t7="$INV_W28_T7_MAX"
-  [ "$n" -le $((INV_W28_BASE + ${door:-0} + ${t7:-0})) ] \
-    || printf 'sites=%s over 1.12.0 %s plus the door %s plus T7 %s\n' "$n" "$INV_W28_BASE" "${door:-0}" "${t7:-0}"
+  local n c
+  n="$(inv_w28_sites "$1")"; c="$(inv_w28_ceiling "$2")"
+  [ "$n" -le "$c" ] || printf 'sites=%s over %s: 1.12.0 %s plus the door and T7, as tagged\n' "$n" "$c" "$INV_W28_BASE"
 }
 INV_W28_N="$(inv_w28_sites "$REPO_ROOT")"
 expect_true "INV-W28a precondition: the four wall files' sites are read (${INV_W28_N})" test "$INV_W28_N" -gt 0
@@ -1219,8 +1222,9 @@ for _f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatc
 done
 # AS MANY ARMS AS PASS THE CEILING FROM WHERE THE TREE STANDS (wave-28 T9): a row that removes
 # refusal sites (T9 took out two) leaves the tree under 1.12.0's count, so a fixed two would not
-# reach past it. One arm more than the room left, the door's included.
-_inv_w28_k=$(( INV_W28_BASE + 2 - INV_W28_N )); [ "$_inv_w28_k" -ge 2 ] || _inv_w28_k=2
+# reach past it. One arm more than the room left under the ceiling, the door's and T7's included (the
+# ceiling is read from the inventory as inv_w28_excess reads it, so the two cannot part).
+_inv_w28_k=$(( $(inv_w28_ceiling "$INV_FILE") + 1 - INV_W28_N )); [ "$_inv_w28_k" -ge 1 ] || _inv_w28_k=1
 while [ "$_inv_w28_k" -gt 0 ]; do
   printf '%s\n' "  fold_block exit2 queue \"planted arm ${_inv_w28_k}\" \"say ready\" \"planted\"" >> "$INV_W28_SYN/payload/scripts/lib/walls.sh"
   _inv_w28_k=$((_inv_w28_k - 1))
