@@ -2373,10 +2373,19 @@ _eg_reading_gaps() {
   fi
   qs="$(facts_owed "$1" task 2>/dev/null | awk -F'\t' '$1 == "review" { printf "%s ", $2 }')"
   [ -n "$qs" ] || qs="$PROOF_QUESTIONS"
-  printf '%s\n' "$SECTION" | awk -v qs="$qs" "$(proof_awk)"'
+  # THE RESULT IS THE ONE THE JUDGE DERIVES (wave-28 T60; D33, AC-8.6): a reading a `check:` line
+  # re-rated is judged on its derived result, handed here by the collector (hooks/bash-walls.sh,
+  # `BIONIC_READINGS`, read for `BIONIC_DEBTS_PLAN` as the debts are) and keyed by evidence and
+  # written result; a reading it names no line for keeps the result its proof line wrote.
+  local der=""
+  [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || der="${BIONIC_READINGS:-}"
+  printf '%s\n' "$SECTION" | BIONIC_DERIVED="$der" awk -v qs="$qs" "$(proof_awk)"'
     function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
+    BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
+            for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = PROOF_RESULT; e[PROOF_QUESTION] = evid($0)
+      ev = evid($0)
+      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT; e[PROOF_QUESTION] = ev
       next
     }
     /^waived:[ \t]/ {
