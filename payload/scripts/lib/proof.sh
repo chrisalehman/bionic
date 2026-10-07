@@ -213,9 +213,17 @@ proof_pushed_severity() {
 # proof_priority <S> <reach> -> `fix`, `defer` or `note`, the table's one cell; exit 1 when either is
 # outside its set.
 proof_priority() {
+  _proof_priority_var "${1:-}" "${2:-}" || return 1
+  printf '%s' "$_PROOF_P"
+}
+
+# _proof_priority_var <S> <reach> -> proof_priority's cell in `_PROOF_P` and no fork, for the batch reader
+# (wave-28 T72), which asks it once per finding of every bound reading.
+_proof_priority_var() {
   local c
+  _PROOF_P=""
   for c in $PROOF_PRIORITY; do
-    [ "${c%%=*}" = "${1:-}:${2:-}" ] && { printf '%s' "${c#*=}"; return 0; }
+    [ "${c%%=*}" = "${1:-}:${2:-}" ] && { _PROOF_P="${c#*=}"; return 0; }
   done
   return 1
 }
@@ -241,7 +249,7 @@ proof_findings() {
 # _proof_findings_span <record> <its pass> -> proof_findings' answer for a pass already cut.
 _proof_findings_span() {
   local out
-  out="$(printf '%s\n' "$2" | PROOF_REC="$1" PROOF_PRI="$PROOF_PRIORITY" PROOF_SEV="$PROOF_SEVERITIES" PROOF_REACH="$PROOF_REACHES" awk '
+  out="$(PROOF_REC="$1" PROOF_PRI="$PROOF_PRIORITY" PROOF_SEV="$PROOF_SEVERITIES" PROOF_REACH="$PROOF_REACHES" awk '
     BEGIN {
       rec = ENVIRON["PROOF_REC"]
       n = split(ENVIRON["PROOF_PRI"], c, " ")
@@ -287,7 +295,7 @@ _proof_findings_span() {
       }
       if (err != "") { print "!" err; exit }
       for (i = 1; i <= cnt; i++) { id = ord[i]; printf "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n", id, S[id], R[id], W[id], pri[S[id] ":" R[id]], (id in sh), (id in un), T[id] }
-    }')"
+    }' <<< "$2")"
   case "$out" in '!'*) printf '%s' "${out#!}"; return 1 ;; esac
   [ -z "$out" ] || printf '%s\n' "$out"
 }
@@ -295,7 +303,22 @@ _proof_findings_span() {
 # proof_findings_result <proof_findings lines> -> `fail` when one is to fix, else `flag` when there
 # are any, else `pass` (the interfaces' derived result).
 proof_findings_result() {
-  printf '%s\n' "${1:-}" | awk -F'\t' 'NF >= 5 { n++; if ($5 == "fix") f = 1 } END { print (f ? "fail" : (n ? "flag" : "pass")) }'
+  _proof_result_var "${1:-}"
+  printf '%s\n' "$_PROOF_RESULT"
+}
+
+# _proof_result_var <proof_findings lines> -> proof_findings_result's word in `_PROOF_RESULT`, with no fork
+# (wave-28 T72): the batch reader asks it once per bound reading, and a fork per ask is most of its cost.
+# A finding line is one with a fifth field, the priority.
+_proof_result_var() {
+  local a b c d p _r any=0 fix=0
+  while IFS='	' read -r a b c d p _r; do
+    [ -n "$p" ] || continue
+    any=1; [ "$p" != fix ] || fix=1
+  done <<PROOF_RESULT_LINES
+${1:-}
+PROOF_RESULT_LINES
+  if [ "$fix" = 1 ]; then _PROOF_RESULT=fail; elif [ "$any" = 1 ]; then _PROOF_RESULT=flag; else _PROOF_RESULT=pass; fi
 }
 
 # proof_finding_lines <record path> <proof_findings lines> -> the plan lines registration writes inside
@@ -327,20 +350,28 @@ proof_finding_lines() {
 # deferred, whoever wrote the line (AC-8.9). A caller reads `set -- $(…)`: no words, dropped; three or
 # four, rated.
 proof_finding_rating() {
-  local st mv s="$3" r="$4" p
-  st="$(_proof_check_state "$1" "$2")"
+  _proof_rating_apply "$(_proof_check_state "$1" "$2")" "$(_proof_moved_to "$1" "$2")" "$3" "$4"
+  printf '%s' "$_PROOF_RATING"
+}
+
+# _proof_rating_apply <check state> <moved to> <S> <reach> -> proof_finding_rating's answer once the two
+# plan reads are in hand, in `_PROOF_RATING` and no fork (wave-28 T72): the batch reader
+# (`proof_readings_derived`) gathers every finding's state and move in one pass over the plan and asks
+# here, so the rule is spelled once.
+_proof_rating_apply() {
+  local st="$1" mv="$2" s="$3" r="$4" p
+  _PROOF_RATING=""
   case "$st" in
     refuted) return 0 ;;
     settled=*:*) s="${st#settled=}"; r="${s#*:}"; s="${s%%:*}" ;;
   esac
-  p="$(proof_priority "$s" "$r")"
-  mv="$(_proof_moved_to "$1" "$2")"
+  _proof_priority_var "$s" "$r"; p="$_PROOF_P"
   case "$mv" in
     fix) p=fix ;;
     defer) [ "$s" = S1 ] || p=defer ;;
   esac
-  printf '%s %s %s' "$s" "$r" "$p"
-  [ "$st" != open ] || printf ' open'
+  _PROOF_RATING="$s $r $p"
+  [ "$st" != open ] || _PROOF_RATING="$_PROOF_RATING open"
 }
 
 # _proof_moved_to <plan> <record>#<n> -> `defer` or `fix`, the priority the LAST `moved:` line of
@@ -350,15 +381,11 @@ proof_finding_rating() {
 # `moved: <record>#<n> to=<defer|fix> by=<name> at=<ISO-UTC> words="<words>" why="<why>"`.
 _proof_moved_to() {
   [ -f "$1" ] || return 0
-  awk -v id="$2" '
+  awk -v id="$2" "$(proof_bind_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^moved:[ \t]/ {
-      split($0, f, /[ \t]+/); if (f[2] != id || (f[3] != "to=defer" && f[3] != "to=fix")) next
-      if ($0 !~ / by=[^ \t]/ || $0 !~ / at=[0-9][0-9][0-9][0-9]-/ || $0 !~ / words="/ || $0 !~ / why="/) next
-      to = substr(f[3], 4)
-    }
+    insdlc && /^moved:[ \t]/ && proof_bound($0) == id { m = proof_move_of($0); if (m != "") to = m }
     END { if (to != "") print to }' "$1"
 }
 
@@ -368,18 +395,11 @@ _proof_moved_to() {
 # words is still the title (a title never holds a `"`: registration writes it `'`).
 _proof_check_state() {
   [ -f "$1" ] || return 0
-  awk -v id="$2" '
+  awk -v id="$2" "$(proof_bind_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^check:[ \t]/ {
-      split($0, f, /[ \t]+/); if (f[2] != id) next
-      t = $0; i = index(t, "\""); if (i) { t = substr(t, i + 1); i = index(t, "\""); t = (i ? substr(t, i + 1) : "") }
-      st = "open"
-      if (match(t, /(^|[ \t])settled=S[1-4]:(on|off)([ \t]|$)/)) { st = substr(t, RSTART, RLENGTH); gsub(/[ \t]/, "", st) }
-      else if (t ~ /(^|[ \t])refuted([ \t]|$)/) st = "refuted"
-      print st; exit
-    }' "$1"
+    insdlc && /^check:[ \t]/ && proof_bound($0) == id { print proof_check_of($0); exit }' "$1"
 }
 
 # proof_findings_owed <plan> -> one line per finding the plan's `## SDLC State` carries a `deferred:` or
@@ -418,29 +438,66 @@ proof_checks_open() {
 }
 
 # _proof_reading_result <plan> <docs root> <evidence> <written result> -> the reading's result as its
-# findings give it at their effective ratings (wave-28 T41; D33): a reading re-rated by a `check:` line
-# settled or refuted (or, from T42, a `moved:` line) is derived again from its record through
-# `proof_finding_rating`; any other reading, or one whose record cannot be read, keeps its written result.
+# findings give it at their effective ratings (wave-28 T41; D33): a reading whose record a binding line
+# names (`proof_bind_awk`: a `check:`, `deferred:` or `moved:` line keyed to a finding of it) is derived
+# again from its record at the ratings the plan gives its findings; any other reading, or one whose
+# record cannot be read, keeps its written result.
 _proof_reading_result() {
-  local plan="$1" droot="$2" ev="$3" res="$4" got n s r w out=""
+  local plan="$1" droot="$2" ev="$3" res="$4" tab
   [ -n "$droot" ] && [ -n "$ev" ] && [ -f "$droot/$ev" ] || { printf '%s' "$res"; return 0; }
-  awk -v p="$ev#" '
+  tab="$(_proof_binding_table "$plan" "$ev")" || { printf '%s' "$res"; return 0; }
+  _proof_reading_derive "$droot" "$ev" "$res" "$tab"
+  printf '%s' "$PROOF_DERIVED"
+}
+
+# _proof_binding_table <plan> <record> -> one line per finding of <record> a binding line of the plan's
+# unfenced `## SDLC State` is keyed to: `<record>#<n><TAB><check state><TAB><moved to>`, each `-` when the
+# plan says none (`_proof_check_state`'s and `_proof_moved_to`'s answers, read together in one pass);
+# exit 1, nothing printed, when no binding line names the record.
+_proof_binding_table() {
+  [ -f "$1" ] || return 1
+  awk -v rec="$2" "$(proof_bind_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^(check|moved):[ \t]/ { split($0, f, /[ \t]+/); if (index(f[2], p) == 1) { hit = 1; exit } }
-    END { exit !hit }' "$plan" || { printf '%s' "$res"; return 0; }
-  got="$(proof_findings "$droot/$ev" 2>/dev/null)" || { printf '%s' "$res"; return 0; }
+    insdlc && proof_binds($0, rec) {
+      hit = 1; id = proof_bound($0); ids[id] = 1
+      if ($0 ~ /^check:/) { if (!(id in cs)) cs[id] = proof_check_of($0) }
+      else if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
+    }
+    END {
+      if (!hit) exit 1
+      for (id in ids) print id "\t" (id in cs ? cs[id] : "-") "\t" (id in mv ? mv[id] : "-")
+    }' "$1"
+}
+
+# _proof_reading_derive <docs root> <evidence> <written result> <binding table> -> in `PROOF_DERIVED`, the
+# result <evidence>'s findings give at the ratings the table (`_proof_binding_table`'s lines) says: the one
+# derivation, asked once per reading by `_proof_reading_result` and once per bound reading by
+# `proof_readings_derived`, which prints it without a fork. A record that cannot be read keeps the
+# written result.
+_proof_reading_derive() {
+  local droot="$1" ev="$2" res="$3" nl tb tab got n s r w row st mv out=""
+  nl=$'\n'; tb=$'\t'; tab="$nl$4"; PROOF_DERIVED="$res"
+  got="$(proof_findings "$droot/$ev" 2>/dev/null)" || return 0
   while IFS='	' read -r n s r w _; do
     [ -n "$n" ] || continue
-    set -- $(proof_finding_rating "$plan" "$ev#$n" "$s" "$r")
+    st=""; mv=""
+    case "$tab" in
+      *"$nl$ev#$n$tb"*)
+        row="${tab#*"$nl$ev#$n$tb"}"; row="${row%%"$nl"*}"
+        st="${row%%"$tb"*}"; mv="${row#*"$tb"}"
+        [ "$st" != - ] || st=""; [ "$mv" != - ] || mv="" ;;
+    esac
+    _proof_rating_apply "$st" "$mv" "$s" "$r"
+    set -- $_PROOF_RATING
     [ $# -ge 3 ] || continue
     out="$out$n	$1	$2	$w	$3
 "
   done <<PROOF_READING_FINDINGS
 $got
 PROOF_READING_FINDINGS
-  proof_findings_result "$out"
+  _proof_result_var "$out"; PROOF_DERIVED="$_PROOF_RESULT"
 }
 
 # proof_working_branch <plan> -> the plan's `working-branch:`, or nothing. The `## SDLC State`
@@ -698,7 +755,8 @@ proof_base_id() {
 # proof_awk -> the awk function `proof_fields(s)`, THE ONE READING OF A PROOF LINE (wave-26 T14;
 # review 7 F6): 1 when <s> is a proof line, its kind in PROOF_KIND and its head in PROOF_HEAD; a
 # reading's four fields in PROOF_QUESTION, PROOF_READER, PROOF_RESULT and PROOF_SCOPE, each empty
-# on a line that carries none (wave-27 T2).
+# on a line that carries none (wave-27 T2), and its record in PROOF_EVIDENCE (wave-28 T72: the one
+# `evidence=` reader, where five programs each spelled their own).
 # A proof line starts `proved:` at the first column (a bulleted `- proved:` is prose, not the
 # line the writer writes), and carries `kind=<lower-case word>` and `head=<7 to 40 lower-case
 # hex>` among its space-separated fields (`head=none` is no head). `proof_last` and the
@@ -706,7 +764,7 @@ proof_base_id() {
 proof_awk() {
   printf '%s' '
     function proof_fields(s,   f, m, i) {
-      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""
+      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""; PROOF_EVIDENCE = ""
       if (s !~ /^proved:[ \t]/) return 0
       m = split(s, f, /[ \t]+/)
       for (i = 2; i <= m; i++) {
@@ -716,8 +774,49 @@ proof_awk() {
         else if (f[i] ~ /^reader=/) PROOF_READER = substr(f[i], 8)
         else if (f[i] ~ /^result=/) PROOF_RESULT = substr(f[i], 8)
         else if (f[i] ~ /^scope=/) PROOF_SCOPE = substr(f[i], 7)
+        else if (f[i] ~ /^evidence=/) PROOF_EVIDENCE = substr(f[i], 10)
       }
       return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
+    }
+  '
+}
+
+# proof_bind_awk -> awk source: THE ONE PREDICATE for the lines that bind a record's pass, and the reads of
+# what such a line says (wave-28 T72; D33, D34, AC-8.6, AC-8.9; A-T60.5, A-orch-213). A `check:`,
+# `deferred:` or `moved:` line of `## SDLC State` is keyed `<record>#<n>`: it settles, defers or moves ONE
+# finding of ONE pass, and every read of the record's findings applies it (`proof_finding_rating`), so a
+# second pass registered on the same path would inherit it. `moved:` binds for the reason a check does: a
+# move is the user's word about one finding, it changes the priority a later reader of that path judges
+# (T42's seam), and a path that carries one is a settled pass whatever else it carries. Both callers
+# (`proof_pass_conflict`, the registering verb's guard, and `_proof_reading_result`, the judge's
+# re-derivation) and the batch reader (`proof_readings_derived`) ask these, so none can spell it again:
+#
+#     proof_bound(line)       the `<record>#<n>` a binding line is keyed to, else ""
+#     proof_binds(line, rec)  1 when the line is keyed to a finding of the record <rec>
+#     proof_check_of(line)    what a `check:` line says: `settled=<S>:<reach>`, `refuted` or `open`
+#                             (only what follows the quoted title is read: a title that holds the words
+#                             is still the title; registration writes a `"` in one as `'`)
+#     proof_move_of(line)     `defer` or `fix` when a `moved:` line is a whole move (who, when, the words
+#                             and why, as `finding-move` writes it), else ""
+proof_bind_awk() {
+  printf '%s' '
+    function proof_bound(s,   f) {
+      if (s !~ /^(check|deferred|moved):[ \t]/) return ""
+      split(s, f, /[ \t]+/); return f[2]
+    }
+    function proof_binds(s, rec) { return index(proof_bound(s), rec "#") == 1 }
+    function proof_check_of(s,   t, i, st) {
+      t = s; i = index(t, "\""); if (i) { t = substr(t, i + 1); i = index(t, "\""); t = (i ? substr(t, i + 1) : "") }
+      st = "open"
+      if (match(t, /(^|[ \t])settled=S[1-4]:(on|off)([ \t]|$)/)) { st = substr(t, RSTART, RLENGTH); gsub(/[ \t]/, "", st) }
+      else if (t ~ /(^|[ \t])refuted([ \t]|$)/) st = "refuted"
+      return st
+    }
+    function proof_move_of(s,   f) {
+      split(s, f, /[ \t]+/)
+      if (f[3] != "to=defer" && f[3] != "to=fix") return ""
+      if (s !~ / by=[^ \t]/ || s !~ / at=[0-9][0-9][0-9][0-9]-/ || s !~ / words="/ || s !~ / why="/) return ""
+      return substr(f[3], 4)
     }
   '
 }
@@ -776,61 +875,88 @@ proof_add_line() {
 }
 
 # proof_pass_conflict <plan> <record path> <head> -> why <record path> cannot be registered for another
-# pass at <head>, or nothing (wave-28 T60; D33, AC-8.6). ONE RECORD PATH IS ONE PASS: a `check:` or
-# `deferred:` line is keyed `<record>#<n>` (`_proof_check_state`), so a second pass on the same path
-# would inherit the first pass's settlement. The key stays unique by construction when the path is
-# registered for one pass only, so the verb asks here before it writes. A reading's proof line (one with a
-# `question=`) whose `evidence=` is <record path> and whose head is not <head> prints `head <that head>`;
-# otherwise, when a `check:` or `deferred:` line of `## SDLC State` names `<record path>#`, `settled <head>`.
-# A reader relaunched on an unsettled record (the same head, no such line) gets nothing: it is admitted.
+# pass at <head>, or nothing (wave-28 T60; D33, AC-8.6). ONE RECORD PATH IS ONE PASS: a line that binds a
+# pass (`proof_bind_awk`: `check:`, `deferred:` or `moved:`) is keyed `<record>#<n>`, so a second pass on
+# the same path would inherit the first pass's settlement, deferral or move. The key stays unique by
+# construction when the path is registered for one pass only, so the verb asks here before it writes. A
+# reading's proof line (one with a `question=`) whose `evidence=` is <record path> and whose head is not
+# <head> prints `head <that head>`; otherwise, when a binding line of `## SDLC State` names
+# `<record path>#`, `settled <head>`. A reader relaunched on an unsettled record (the same head, no such
+# line) gets nothing: it is admitted.
 proof_pass_conflict() {
   [ -f "$1" ] || return 0
-  awk -v rec="$2" -v head="$3" "$(proof_awk)"'
+  awk -v rec="$2" -v head="$3" "$(proof_awk)$(proof_bind_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     !insdlc { next }
-    /^(check|deferred):[ \t]/ { split($0, f, /[ \t]+/); if (index(f[2], rec "#") == 1) child = 1; next }
-    proof_fields($0) && PROOF_QUESTION != "" {
-      m = split($0, f, /[ \t]+/); ev = ""
-      for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) ev = substr(f[i], 10)
-      if (ev == rec && PROOF_HEAD != head && other == "") other = PROOF_HEAD
-    }
+    proof_bound($0) != "" { if (proof_binds($0, rec)) child = 1; next }
+    proof_fields($0) && PROOF_QUESTION != "" { if (PROOF_EVIDENCE == rec && PROOF_HEAD != head && other == "") other = PROOF_HEAD }
     END { if (other != "") print "head " other; else if (child) print "settled " head }' "$1"
 }
 
 # proof_readings_derived <plan> <tree> -> `<evidence><TAB><written result><TAB><derived result>` for each
 # reading proof line (`kind=review` with a `question=`) of the plan's unfenced `## SDLC State`, the
-# derived result what `_proof_reading_result` gives it (wave-28 T60; D33, AC-8.6; A-orch-161). The
-# commit wall judges text and reads no record, so its collector (hooks/bash-walls.sh) asks this once
-# and hands the lines over, and the wall and the judge answer a reading's result one way. <tree> is the
-# project root whose docs root holds the records; with no docs root, the derived result is the written one.
+# derived result what `_proof_reading_result` gives it (wave-28 T60; D33, AC-8.6; A-orch-161), and
+# NOTHING when no binding line (`proof_bind_awk`) is in the plan: every derived result is then the
+# written one. The commit wall judges text and reads no record, so its collector (hooks/bash-walls.sh)
+# asks this once, from the step the wall reads (lib/walls.sh `eg_plan_reads_readings`), and hands the
+# lines over; the wall and the judge answer a reading's result one way. ONE PASS OVER THE PLAN (T72): the
+# readings and every binding line's state are gathered together (each reading's own lines come to the
+# shell just before it), and only a reading a binding line names is derived from its record, so the cost
+# is one plan read and one record read per bound reading, not a plan read per reading and per finding. <tree> is the project root whose docs root holds the records;
+# with no docs root, the derived result is the written one.
 proof_readings_derived() {
-  local plan="${1:-}" tree="${2:-}" droot="" ev res d lines
+  local plan="${1:-}" tree="${2:-}" droot="" k a b c tab="" nl
   [ -f "$plan" ] || return 0
+  nl=$'\n'
   if [ -n "$tree" ]; then
-    if ! declare -F docs_root >/dev/null 2>&1; then
-      d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-      # shellcheck source=/dev/null
-      . "$d/roots.sh" >/dev/null 2>&1
-    fi
+    _proof_roots_load
     ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
   fi
-  lines="$(awk "$(proof_awk)"'
+  while IFS='	' read -r k a b c; do
+    case "$k" in
+      S) tab="$tab$a	$b	$c$nl" ;;
+      R) PROOF_DERIVED="$c"
+         if [ "$b" = 1 ] && [ -n "$droot" ] && [ -f "$droot/$a" ]; then _proof_reading_derive "$droot" "$a" "$c" "$tab"; fi
+         printf '%s\t%s\t%s\n' "$a" "$c" "$PROOF_DERIVED"; tab="" ;;
+    esac
+  done <<PROOF_READINGS
+$(awk "$(proof_awk)$(proof_bind_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      m = split($0, f, /[ \t]+/); ev = ""
-      for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) ev = substr(f[i], 10)
-      if (ev != "" && !((ev SUBSEP PROOF_RESULT) in seen)) { seen[ev SUBSEP PROOF_RESULT] = 1; print ev "\t" PROOF_RESULT }
-    }' "$plan")"
-  while IFS='	' read -r ev res; do
-    [ -n "$ev" ] || continue
-    printf '%s\t%s\t%s\n' "$ev" "$res" "$(_proof_reading_result "$plan" "$droot" "$ev" "$res")"
-  done <<PROOF_READINGS
-$lines
+    !insdlc { next }
+    proof_bound($0) != "" {
+      nbind++; id = proof_bound($0); ids[id] = 1
+      if ($0 ~ /^check:/) { if (!(id in cs)) cs[id] = proof_check_of($0) }
+      else if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
+      next
+    }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" && !((PROOF_EVIDENCE SUBSEP PROOF_RESULT) in seen) {
+      seen[PROOF_EVIDENCE SUBSEP PROOF_RESULT] = 1; nr++; rev[nr] = PROOF_EVIDENCE; rres[nr] = PROOF_RESULT
+    }
+    END {
+      if (!nbind) exit
+      for (i = 1; i <= nr; i++) {
+        hit = 0; p = rev[i] "#"
+        for (id in ids) if (index(id, p) == 1) { hit = 1; print "S\t" id "\t" (id in cs ? cs[id] : "-") "\t" (id in mv ? mv[id] : "-") }
+        print "R\t" rev[i] "\t" hit "\t" rres[i]
+      }
+    }' "$plan")
 PROOF_READINGS
+}
+
+# _proof_roots_load -> lib/roots.sh sourced beside this file unless its readers are loaded: the one lazy
+# source of it in this library (wave-28 T72; four copies of it stood here), for a caller that sourced
+# proof.sh alone.
+_proof_roots_load() {
+  local d
+  declare -F docs_root >/dev/null 2>&1 && declare -F config_value >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  # shellcheck source=/dev/null
+  . "$d/roots.sh" >/dev/null 2>&1
+  return 0
 }
 
 # proof_state <plan> <tree> -> what the change since the last floor proof needs, one line:
@@ -933,10 +1059,7 @@ PROOF_FILES
   fi
 
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  if ! declare -F config_value >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$d/roots.sh" >/dev/null 2>&1
-  fi
+  _proof_roots_load
   if [ -z "${IMPACT_BOUND_S:-}" ]; then
     # shellcheck source=/dev/null
     . "$d/bounds.sh" >/dev/null 2>&1
@@ -1046,11 +1169,7 @@ facts_owed() {
     }')" || return 1
   printf '%s\n' "$owed"
   [ -n "${3:-}" ] || return 0
-  if ! declare -F config_value >/dev/null 2>&1; then
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-    # shellcheck source=/dev/null
-    . "$d/roots.sh" >/dev/null 2>&1
-  fi
+  _proof_roots_load
   [ -z "$(config_value "$3" release-check "" 2>/dev/null)" ] || printf 'check\n'
   [ -z "${4:-}" ] || proof_debts "$4" "$3"
   return 0
@@ -1072,18 +1191,14 @@ proof_debts() {
 # landing-proofs.log`, the record `land` writes for that plan (lib/worktree.sh `_wt_proofs_path`, the
 # same rule: this file does not load worktree.sh). rc 1 when no path can be named.
 proof_debt_record() {
-  local plan="${1:-}" tree="${2:-}" slug d
+  local plan="${1:-}" tree="${2:-}" slug
   [ -f "$plan" ] || return 1
   slug="${plan##*/}"; slug="${slug%.plan.md}"
   [ -n "$slug" ] || return 1
   [ -n "$tree" ] || tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
   [ -n "$tree" ] || return 1
-  if ! declare -F docs_root >/dev/null 2>&1; then
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-    # shellcheck source=/dev/null
-    . "$d/roots.sh" >/dev/null 2>&1
-    declare -F docs_root >/dev/null 2>&1 || return 1
-  fi
+  _proof_roots_load
+  declare -F docs_root >/dev/null 2>&1 || return 1
   printf '%s/record/%s/landing-proofs.log' "$(docs_root "$tree")" "$slug"
 }
 
@@ -1265,13 +1380,12 @@ review	"*)
     case "$droot" in "$tree"/?*) pfx="${droot#"$tree"/}"; pfx="${pfx%/}/" ;; esac
   fi
   chains="$(awk -v qs="$PROOF_QUESTIONS" "$(proof_awk)"'
-    function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     !insdlc { next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      q = PROOF_QUESTION; pt[q] = "fact"; pr[q] = PROOF_RESULT; ph[q] = PROOF_HEAD; pe[q] = evid($0)
+      q = PROOF_QUESTION; pt[q] = "fact"; pr[q] = PROOF_RESULT; ph[q] = PROOF_HEAD; pe[q] = PROOF_EVIDENCE
       if (PROOF_SCOPE == "whole") { wt[q] = "fact"; wr[q] = PROOF_RESULT; we[q] = pe[q] }
       next
     }
@@ -1327,13 +1441,12 @@ PROOF_CHAIN
       check)
         x=""; [ -z "$tree" ] || x="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
         x="$(awk -v h="$head" -v hh="${x:-$head}" "$(proof_awk)"'
-          function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
-          /^[[:space:]]*```/ { fence = !fence; next }
+                /^[[:space:]]*```/ { fence = !fence; next }
           fence { next }
           /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
           insdlc && proof_fields($0) && PROOF_KIND == "check" {
             last = PROOF_HEAD
-            if (last == h || last == hh) { at = 1; fail = (PROOF_RESULT == "fail"); ev = evid($0) }
+            if (last == h || last == hh) { at = 1; fail = (PROOF_RESULT == "fail"); ev = PROOF_EVIDENCE }
           }
           END { if (at && fail) print "failing\t" ev; else if (at) print "covered"; else print last }' "$plan")"
         case "$x" in
@@ -1439,9 +1552,9 @@ $(awk -v t="$clear" "$(proof_awk)"'
   fence { next }
   /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
   insdlc && proof_fields($0) && (PROOF_KIND == "floor" || PROOF_KIND == "task") {
-    m = split($0, f, /[ \t]+/); at = ""; ev = ""
-    for (i = 2; i <= m; i++) { if (f[i] ~ /^at=/) at = substr(f[i], 4); else if (f[i] ~ /^evidence=/) ev = substr(f[i], 10) }
-    if (at > t) print PROOF_KIND "\t" ev
+    m = split($0, f, /[ \t]+/); at = ""
+    for (i = 2; i <= m; i++) if (f[i] ~ /^at=/) at = substr(f[i], 4)
+    if (at > t) print PROOF_KIND "\t" PROOF_EVIDENCE
   }' "$plan")
 PROOF_LATER
   printf 'absent'
