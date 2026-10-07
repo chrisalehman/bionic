@@ -525,11 +525,14 @@ run_hook "$(with_timeout "$(mk_payload "$SHORTR" 'ls -la')" 5000)"
 expect_status "S6a: a short ls exits 0" 0 "$ST"
 expect_empty "S6b: …and is neither wrapped nor answered (beside S1's wrap)" "$OUT"
 
-# A SHORT TIMEOUT THE SHIM CANNOT ENFORCE IS NOT SHORT. The opt-out keeps the command out of the
-# shim, and a shell-backgrounded command detaches from it; neither can be stopped at the limit.
+# A SHORT TIMEOUT THE SHIM CANNOT ENFORCE IS NOT SHORT: a shell-backgrounded command detaches from
+# the shim and cannot be stopped at the limit. `BIONIC_SLOT_HELD=1` in the prefix kept a suite out
+# of the shim until wave-28 T12 (D13); it is no opt-out now, so such a call is wrapped with the
+# kill limit and passes like any other short suite call.
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "BIONIC_SLOT_HELD=1 $ONE")" 60000)"
-expect_eq "S7a: a short call carrying BIONIC_SLOT_HELD=1 is refused" "deny" "$(decision_of)"
-expect_contains "S7b: …its first fix names the prefix that kept it from the kill" "BIONIC_SLOT_HELD=1" "$(first_fix)"
+expect_status "S7a: a short call carrying BIONIC_SLOT_HELD=1 passes" 0 "$ST"
+expect_regex "S7b: …wrapped with the kill limit, like any short suite call" \
+  "$(kill_re 55 "'BIONIC_SLOT_HELD=1 bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE &")" 60000)"
 expect_eq "S7c: a short call the shell backgrounds is refused" "deny" "$(decision_of)"
 expect_contains "S7d: …its first fix says to run it in the foreground" "foreground" "$(first_fix)"
