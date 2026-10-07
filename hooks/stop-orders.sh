@@ -62,8 +62,10 @@
 # one the session roster never saw (wave-28 T70; A-orch-205 to 208): a dispatch the wall admitted
 # and did not journal. The stop guard refuses such a stop by name and by id, and its one escape,
 # `order`, is a record that a HUMAN asked, which the orchestrator may not claim. This verb is the
-# orchestrator's own: `unrostered <name> '<why>' [--at <epoch>]` checks that THIS session's roster
-# carries no row of the name and that a fresh panel reading lists it, then records
+# orchestrator's own: `unrostered <name> '<why>' [--at <epoch>]` checks that NO roster of the project
+# (this session's, a predecessor's, a dead session's: `roster_sessions_with_name`) carries a row of the name and
+# that a fresh panel reading lists it, and that the reason is one plain line (no `|`, newline or carriage
+# return), then records
 # `stop-unrostered/v1|…|by=orchestrator|why=…|target=<name>`. The guard honours that line ONCE,
 # within the order TTL, writes the stop onto the roster as a closed row, and a second stop of the
 # name is refused again. It is not an `order`: the guard's human-order reader never sees it.
@@ -761,6 +763,15 @@ case "$VERB" in
     # roster has NO row of the name (a name it has seen belongs to the ordinary stop, with its
     # look), and a FRESH panel reading lists the name (an agent nothing lists is no agent of this
     # session's to stop). A verb that cannot see does not record, as `stopped` does not ack.
+    # THE REASON IS ONE PLAIN LINE, judged BEFORE `clean` folds it. The roster splits a row on `|` and the
+    # orders file a record on a line, so a reason carrying either could forge a field or a record; folding
+    # it to a space would record a sentence its author did not write. It is refused instead (wave-28 T77).
+    case "$ORDER_WHY" in
+      *'|'*|*$'\n'*|*$'\r'*)
+        die "REFUSED — the reason holds a | or a line break; say it in one plain line."
+        exit 2
+        ;;
+    esac
     _target="$(clean "$ORDER_TARGET")"
     _why="$(clean "$ORDER_WHY")"
     [ -n "$_target" ] || usage "unrostered needs a non-empty target."
@@ -768,6 +779,20 @@ case "$VERB" in
     fold_roster
     if [ -n "$(roster_row_for "$_target")" ]; then
       die "REFUSED — this session's roster carries a row of $_target; stop it as any rostered agent."
+      exit 2
+    fi
+    # ... and NO ROSTER OF THE PROJECT does (wave-28 T77; A-orch-239). The question "the roster never saw this
+    # agent" is asked of every `roster-*.state` under the state directory, a predecessor's and a dead
+    # session's included: a writer a predecessor's roster still holds, its contract unmet, is exactly what a
+    # `/clear` leaves until `adopt` copies the rows, and recording it as unrostered would pass its stop.
+    declare -F roster_sessions_with_name >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    _held="$(roster_sessions_with_name "$STATE_DIR" "$_target")"
+    if [ -n "$_held" ]; then
+      while IFS='|' read -r _hsid _hstat; do
+        [ -n "$_hsid" ] || continue
+        die "REFUSED — $_target is on roster ${_hsid:0:8}'s row ${_hstat:-with no status}."
+      done <<< "$_held"
+      die "adopt it, or stop it by its own session's rules; nothing was recorded."
       exit 2
     fi
     read_panel

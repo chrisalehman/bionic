@@ -124,6 +124,15 @@
 # out of the recorder unchanged; only its own appended `teammate_id=` is positional, and it
 # appends at the END either way.
 
+# THE STOP'S REASON IS A ROW KEY OF ITS OWN (wave-28 T77; A-orch-239 2a). `reason=<why>` rides the closed
+# row `hooks/stop-guard.sh` appends when it honours the orchestrator's recorded stop of an agent the
+# roster never saw: the sentence the orchestrator gave, so the sweeper and the Patrol see WHY the row is
+# closed. Present-if-passed, after `done=` and before `tool_use_id=`, so a row 1.12.0 wrote is unmoved.
+# It is prose like the rest (the `|` fold applies; nothing compares it back to something a human typed).
+# It is NOT `source=` (the writer's word for where a deliverable's path came from; a stop has none) and
+# NOT `waiver=` (the sweeper reads a waiver as a WAIVED contract, which would discharge the name's next
+# stop: A-T70.7).
+
 ROSTER_SCHEMA_VERSION="v1"
 
 # ---------- THE READ-ONLY ROLE SET (wave-20 T7, REQ-9, D9, Δ12) ------------------------
@@ -281,9 +290,10 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
-  local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed="" row="" lands_on=""
+  local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed="" row="" lands_on="" reason=""
   local landed="" landed_at="" has_landed=0 has_landed_at=0
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
+  local has_reason=0
   local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0 has_pushed=0
   local has_row=0 has_lands_on=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
@@ -331,6 +341,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       extended)      extended="$val";     has_extended=1 ;;
       held)          held="$val";         has_held=1 ;;
       done)          done_marker="$val";  has_done=1 ;;
+      reason)        reason="$val";       has_reason=1 ;;
       questions)     questions="$val";    has_questions=1 ;;
       lands_red)     lands_red="$val";    has_lands_red=1 ;;
       red_evidence)  red_evidence="$val"; has_red_evidence=1 ;;
@@ -363,6 +374,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_extended" -eq 1 ]; then out="$out|extended=$extended"; fi
   if [ "$has_held" -eq 1 ]; then     out="$out|held=$held"; fi
   if [ "$has_done" -eq 1 ]; then     out="$out|done=$done_marker"; fi
+  if [ "$has_reason" -eq 1 ]; then   out="$out|reason=$reason"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
   if [ "$has_questions" -eq 1 ]; then out="$out|questions=$questions"; fi
   if [ "$has_lands_red" -eq 1 ]; then out="$out|lands_red=$lands_red"; fi
@@ -708,4 +720,36 @@ roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work c
     c != "" { seen[c] = 1 }
     index($0, "|extended=") || (index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|held=") && !index($0, "|adopted_from=")) { m = "" }
     END { if (m == "") exit 1; print m }' "$f" 2>/dev/null
+}
+
+# ---------- WHICH ROSTERS OF THE PROJECT HOLD A NAME (wave-28 T77; A-orch-239, A-orch-241) ----------
+#
+# ONE READ OVER EVERY `roster-*.state` OF A STATE DIRECTORY, asked "does any roster hold a row of this
+# name". `stop-orders.sh unrostered` and the stop guard's unrostered branch used to answer "the roster never
+# saw this agent" from THIS session's file alone, so a writer a predecessor's roster still held (the state
+# every `/clear` leaves until `adopt` copies the rows) was recorded as unrostered and its stop passed. Both
+# now ask this function; the guard's `accepted_addresses` is the same walk and calls it too.
+#
+# The walk is `adopt`'s own (`hooks/session-poker.sh`, its `for ADOPT_RF in … roster-*.state` loop, which is
+# inline there and not callable): a regular file, never a link, the session id off the file name. Unlike
+# `adopt` it does NOT skip this session's roster, and it does not ask whether the session is alive: a dead
+# session's roster counts, because a row is a row until the sweeper removes the file.
+#
+# AN ANSWER PER ROSTER: `<session-id>|<status>`, the status of the LAST row of the name on that roster (the
+# row `adopt` and the guard would read), one line per roster that holds one. Nothing printed, rc 0, when no
+# roster does. A file this process cannot open holds nothing it can read, like every other reader here.
+roster_sessions_with_name() {  # <state dir> <name> -> "<session-id>|<status>" per roster holding a row of the name
+  local dir="$1" name="$2" f sid st
+  [ -n "$name" ] || return 0
+  for f in "$dir"/roster-*.state; do
+    [ -f "$f" ] || continue
+    [ -L "$f" ] && continue
+    sid="${f##*/}"; sid="${sid#roster-}"; sid="${sid%.state}"
+    [ -n "$sid" ] || continue
+    st="$(ROSTER_WN="$name" awk "$_ROSTER_OPEN_AWK"'
+      index($0, "roster-state/") == 1 && _roster_kv($0, "name") == ENVIRON["ROSTER_WN"] { found = 1; last = _roster_kv($0, "status") }
+      END { if (found) print "=" last }' "$f" 2>/dev/null)"
+    case "$st" in "="*) printf '%s|%s\n' "$sid" "${st#=}" ;; esac
+  done
+  return 0
 }
