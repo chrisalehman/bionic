@@ -295,7 +295,7 @@ expect_eq "DISK.1 free 5 KB under a largest tree of 9 KB is refused, naming both
 expect_false "DISK.1b …leaving no worktree behind" test -e "${RD}/.worktrees/d-low"
 expect_false "DISK.1c …and no branch" git -C "$RD" show-ref --verify --quiet refs/heads/d-low
 expect_eq "DISK.1d …exiting 2, a refusal" "2" \
-  "$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=5 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-low >/dev/null 2>&1; echo $? )"
+  "$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=5 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-low-rc >/dev/null 2>&1; echo $? )"
 OUTD2="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=9 BIONIC_PROBE_TREE_KB=9 bash "$SPAWN" create "$SHAD" d-even 2>/dev/null )"
 expect_match "DISK.2 free equal to the largest tree is admitted" "spawn-worktree: OK path=${RD}/.worktrees/d-even *" "$OUTD2"
 OUTD3="$( cd "$RD" && BIONIC_PROBE_DISK_FREE_KB=1 BIONIC_PROBE_TREE_KB=0 bash "$SPAWN" create "$SHAD" d-none 2>/dev/null )"
