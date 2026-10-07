@@ -722,7 +722,7 @@ expect_contains "59a: …and T1's kind, depends and agent cells" "implementor" "
 expect_contains "59b: …and T2, whose depends cell is T1" "T2" "$S3"
 expect_contains "60: Parallel width reads the plan's own writer budget" "8 writers" "$S3"
 expect_contains "61: Verification counts the matrix rows" "3 matrix rows" "$S3"
-expect_contains "61a: …and names the walk and the auditor rigor" "peer-reviewed" "$S3"
+expect_contains "61a: …and names the walk and the review rigor" "review rigor: medium (two independent readers)" "$S3"
 expect_contains "62: the Step-3 card ends at its own approval question" \
   'Do you approve this plan? Reply "approved" to approve it.' "$S3"
 
@@ -1259,9 +1259,9 @@ expect_eq "156: AC-4.1 — T1's worktree cell starts at the worktree heading's c
 expect_eq "156a: …and T1's status cell at the status heading's column" \
   "$(col_of "$T10_HDR" "status")" "$(col_of "$T10_ROW1" "pending")"
 expect_eq "156b: …and T1's rigor cell at the rigor heading's column" \
-  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW1" "audited")"
+  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW1" "high")"
 expect_eq "156c: …and T2's rigor cell too, so the batch width holds for both rows" \
-  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW2" "peer-reviewed")"
+  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW2" "medium")"
 expect_contains "156d: …and the description column carries the unit's first sentence" \
   "The first unit in one line." "$T10_ROW1"
 expect_absent "156e: …and not the rest of the description cell" \
@@ -1853,6 +1853,45 @@ expect_eq "W27-42j: …and prints exactly what it printed before the column exis
     "    first thing  owner lib/first.sh   surfaces card.sh rows           test tests/first.test.sh" \
     "    second thing owner lib/second.sh  surfaces the fixture card       test tests/second.test.sh")" \
   "$W27_OWN_OLD"
+
+section "Section W28-44: T44 — §RIGOR-PRINT, a level prints with its label and its meaning (AC-16.2; D35)"
+# A level prints as `review rigor: <level> (<one|two|three> independent reader[s])`, from lib/run.sh
+# `rigor_print`, and never by an old word, whichever word the plan carries. `card.sh rigor <word>`
+# is the Step 0 card's rigor line; the Step-3 card's Verification block and a task-scale card's
+# rigor column print the level. The plans here are the fixtures above, unchanged: one carries
+# `rigor: peer-reviewed`, the task-scale one `rigor: audited` with `audited` and `peer-reviewed` cells.
+for rp_pair in tested:"review rigor: low (one independent reader)" \
+               low:"review rigor: low (one independent reader)" \
+               peer-reviewed:"review rigor: medium (two independent readers)" \
+               medium:"review rigor: medium (two independent readers)" \
+               audited:"review rigor: high (three independent readers)" \
+               high:"review rigor: high (three independent readers)"; do
+  whole_card rigor "${rp_pair%%:*}"
+  expect_eq "RP1 the Step 0 rigor line of a plan carrying ${rp_pair%%:*}" "${rp_pair#*:}" "$WC_OUT"
+  expect_eq "RP1 …exits 0" "0" "$WC_RC"
+done
+whole_card rigor standard
+expect_eq "RP2 a seventh word is no level: exit 1" "1" "$WC_RC"
+expect_contains "RP2 …and stderr names the three levels" "low, medium or high" "$WC_ERR"
+
+whole_card step3 "$T10_TASK_PLAN"; RP_TASK="$WC_OUT"
+expect_contains "RP3 the Step 3 card of a plan carrying audited prints its level, label and meaning" \
+  "review rigor: high (three independent readers)" "$RP_TASK"
+RP_ROW1="$(printf '%s\n' "$RP_TASK" | grep -m1 '^    T1 ')"
+RP_ROW2="$(printf '%s\n' "$RP_TASK" | grep -m1 '^    T2 ')"
+RP_HDR="$(printf '%s\n' "$RP_TASK" | grep -m1 '^  Tasks')"
+expect_eq "RP4 T1's audited cell prints as high, under the rigor heading" \
+  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW1" "high")"
+expect_eq "RP4 …and T2's peer-reviewed cell as medium" \
+  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW2" "medium")"
+expect_contains "RP4 …and a cell that names no level prints as written" "self-verified" "$RP_TASK"
+for rp_old in tested peer-reviewed audited; do
+  expect_absent "RP5 the task-scale card never prints the old word $rp_old" "$rp_old" "$RP_TASK"
+done
+whole_card step3 "$PLAN_FIX"; RP_WAVE="$WC_OUT"
+expect_contains "RP6 the Step 3 card of a plan carrying peer-reviewed prints medium, labelled" \
+  "review rigor: medium (two independent readers)" "$RP_WAVE"
+expect_absent "RP6 …and not the old word" "peer-reviewed" "$RP_WAVE"
 
 section "INHERIT — wave-28 T43 (AC-8.10, D21): the Step 1 card lists every deferral the newest continuation left open"
 # A deferral is faced again. Close-out writes each open deferral under `## Deferrals` of the run's

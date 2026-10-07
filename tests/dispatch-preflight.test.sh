@@ -8568,7 +8568,7 @@ REPO=$(make_repo rq2 yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" q2 bionic:auditor "$(q_brief q2 'Questions: evidence, structure')"
 expect_eq "Q2 audited: an auditor with Questions: evidence, structure is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q2 …the line names the rigor, the role and the set it deals" \
-  "audited deals bionic:auditor: evidence" "$GATE_ERR"
+  "high rigor deals auditor: evidence" "$GATE_ERR"
 expect_contains "Q2 …the detail names the set the brief gave" "evidence, structure" "$GATE_VERR"
 expect_contains "Q2 …and the line to write" "    Questions: evidence" "$GATE_VERR"
 
@@ -8596,7 +8596,7 @@ REPO=$(make_repo rq5 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" t
 q_gate "$REPO" q5 bionic:auditor "$(q_brief q5 'Questions: evidence')"
 expect_eq "Q5 tested: an auditor with Questions: evidence is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q5 …the line says that rigor deals the auditor nothing" \
-  "tested deals bionic:auditor: nothing" "$GATE_ERR"
+  "low rigor deals auditor: nothing" "$GATE_ERR"
 expect_contains "Q5 …and the detail names the role that holds the question" \
   "evidence is dealt to bionic:critic" "$GATE_VERR"
 
@@ -8640,7 +8640,8 @@ for _q_none in "tested bionic:reviewer structure" "peer-reviewed bionic:reviewer
   REPO=$(make_repo "rq8n-$1" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$1"
   q_gate "$REPO" "q8n-$1" "$2" "$(q_brief q8n "Questions: $3")"
   expect_eq "Q8n $1 deals $2 nothing: refused" "deny" "$GATE_VERDICT"
-  expect_contains "Q8n …saying so" "$1 deals $2: nothing" "$GATE_ERR"
+  # The line names the level by its new word and the role by its short name (wave-28 T44, A-orch-17).
+  expect_contains "Q8n …saying so" "$(bash -c '. "$1" && rigor_level "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh" "$1") rigor deals ${2#bionic:}: nothing" "$GATE_ERR"
 done
 set --
 
@@ -11019,5 +11020,81 @@ expect_contains "T72-S3 the placing's comment is found in the wall" "PLACES IT" 
 expect_contains "T72-S3 …and says the verb reads with a logical cd, so .. is folded in the text first" \
   'a logical `cd` and then `pwd -P`, so `..` is folded in the text before' "$T72_S3"
 expect_absent "T72-S3 …never that the verb reads with cd -P" 'with `cd -P`' "$T72_S3"
+
+# ============================================================================
+section "§RIGOR — the dealing reads a plan in either vocabulary alike, and prints the level by its new word (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35, A-orch-7)"
+# ============================================================================
+# The wall asks lib/proof.sh `facts_owed`, which reads the plan's word through lib/run.sh
+# `rigor_level`: a plan written `high` deals each reader what one written `audited` does, and a
+# refusal names the level as `rigor_print` prints it, never by the old word. §Q's fixtures and
+# helpers, the plan's rigor line set to each word of a pair.
+RV_N=0
+rv_gate() {  # <tag> <rigor> <role> <questions line or empty> -> GATE_* for that dispatch
+  # The repository is named by a counter, never by the rigor word, so no path in a refusal carries it.
+  RV_N=$((RV_N + 1))
+  REPO=$(make_repo "rv-$1-$RV_N" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$2"
+  q_gate "$REPO" "rv-$1" "$3" "$(q_brief "rv-$1" "$4")"
+}
+for rv_case in "tested|low|bionic:auditor|Questions: evidence|deny" \
+               "tested|low|bionic:critic|Questions: evidence, adversarial, structure|allow" \
+               "peer-reviewed|medium|bionic:critic|Questions: adversarial, structure|allow" \
+               "peer-reviewed|medium|bionic:reviewer|Questions: structure|deny" \
+               "audited|high|bionic:reviewer|Questions: structure|allow" \
+               "audited|high|bionic:auditor|Questions: evidence, structure|deny"; do
+  IFS='|' read -r rv_o rv_n rv_role rv_q rv_want <<< "$rv_case"
+  rv_gate o "$rv_o" "$rv_role" "$rv_q"; rv_ov="$GATE_VERDICT"; rv_oq="$(roster_field "$(q_row "$REPO")" questions)"
+  rv_gate n "$rv_n" "$rv_role" "$rv_q"
+  expect_eq "RV1 $rv_o, $rv_role, '$rv_q': $rv_want" "$rv_want" "$rv_ov"
+  expect_eq "RV1 …and $rv_n gives the same verdict" "$rv_ov" "$GATE_VERDICT"
+  [ "$rv_want" = allow ] && expect_eq "RV1 …and records the same set" "$rv_oq" "$(roster_field "$(q_row "$REPO")" questions)"
+done
+
+# THE PRINTED FORM, in each vocabulary: the role dealt nothing, and the set the rigor deals.
+for rv_w in tested low; do
+  rv_gate p "$rv_w" bionic:auditor 'Questions: evidence'
+  expect_eq "RV2 $rv_w: an auditor is dealt nothing and refused" "deny" "$GATE_VERDICT"
+  expect_contains "RV2 …the detail names the level, labelled" \
+    "Dealt: nothing at review rigor: low (one independent reader), scale wave" "$GATE_VERR"
+  for rv_old in tested peer-reviewed audited; do
+    expect_absent "RV2 …at $rv_w the refusal never prints the old word $rv_old" "$rv_old" "$GATE_VERR"
+  done
+done
+for rv_w in audited high; do
+  rv_gate s "$rv_w" bionic:auditor 'Questions: evidence, structure'
+  expect_eq "RV3 $rv_w: an auditor naming more than it is dealt is refused" "deny" "$GATE_VERDICT"
+  expect_contains "RV3 …the detail names the dealt set and the level, labelled" \
+    "Dealt: evidence (review rigor: high (three independent readers), scale wave)" "$GATE_VERR"
+  for rv_old in tested peer-reviewed audited; do
+    expect_absent "RV3 …at $rv_w the refusal never prints the old word $rv_old" "$rv_old" "$GATE_VERR"
+  done
+done
+for rv_w in peer-reviewed medium; do
+  rv_gate m "$rv_w" bionic:critic ''
+  expect_eq "RV4 $rv_w: a critic with no Questions: line is refused" "deny" "$GATE_VERDICT"
+  expect_contains "RV4 …the detail names the level the set is dealt at, labelled" \
+    "review rigor: medium (two independent readers)" "$GATE_VERR"
+  expect_absent "RV4 …at $rv_w the refusal never prints the old word peer-reviewed" "peer-reviewed" "$GATE_VERR"
+done
+
+# THE LONGEST VALUES, UNDER THE STRICT WIDTH (A-orch-17). Each refusal is driven at the widest value
+# it can carry: low deals the critic all three questions, and medium deals the reviewer nothing.
+# Under BIONIC_REFUSE_STRICT=1 an over-wide line refuses its own call, so a whole line here is the
+# proof it fits. No suite drove this case before; the old line was 102 columns at its widest.
+rv_cols() { printf '%s' "$1" | LC_ALL=en_US.UTF-8 awk '{ print length($0) }'; }
+expect_eq "RV5 precondition: this suite runs with the strict refusal width" "1" "${BIONIC_REFUSE_STRICT:-}"
+rv_gate w low bionic:critic 'Questions: evidence'
+expect_eq "RV5 low: a critic naming one of its three questions is refused" "deny" "$GATE_VERDICT"
+RV5_LINE="bionic: dispatch refused — low rigor deals critic: evidence,adversarial,structure (use that set)"
+expect_contains "RV5 …on its own line, the whole set kept" "$RV5_LINE" "$GATE_ERR"
+expect_eq "RV5 …which is 98 columns, inside the 100" "98" "$(rv_cols "$RV5_LINE")"
+expect_contains "RV5 …the detail names the role as typed" "Role:  bionic:critic" "$GATE_VERR"
+expect_contains "RV5 …and the level in the printed form" "review rigor: low (one independent reader)" "$GATE_VERR"
+rv_gate w medium bionic:reviewer 'Questions: structure'
+expect_eq "RV6 medium: a reviewer is dealt nothing and refused" "deny" "$GATE_VERDICT"
+RV6_LINE="bionic: dispatch refused — medium rigor deals reviewer: nothing (dispatch its holder)"
+expect_contains "RV6 …on its own line" "$RV6_LINE" "$GATE_ERR"
+expect_eq "RV6 …which is 87 columns" "87" "$(rv_cols "$RV6_LINE")"
+expect_contains "RV6 …the detail names the role as typed" "Role:  bionic:reviewer" "$GATE_VERR"
+expect_contains "RV6 …and the level in the printed form" "review rigor: medium (two independent readers)" "$GATE_VERR"
 
 finish
