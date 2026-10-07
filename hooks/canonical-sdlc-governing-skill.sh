@@ -1239,27 +1239,13 @@ may write there — this refusal is the main thread's alone."
     ;;
 esac
 
-# ---------- `parallel-budget:` is a MEASUREMENT Step 0 writes; a plan without it does not write ----------
-# (wave-19 REQ-3, D5; ADR-035, which reverses spec AC-26 and assumption WALLS/5.)
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-#
-# Step 0 probes the machine — `resources_probe`, then `resources_budget` over what it
-# printed — and writes the result into plan frontmatter as one string,
-# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe|override`,
-# byte-identical to the `budget=` value the preflight attestation records. It is a recorded
-# measurement, not a ceiling a run opts into: the tick, the stop wall and the dispatch wall
-# all size the run from it, and a plan without it left each of them a silent branch — a hole
-# a consumer fell through (wave-18 A-T11.3). So the invariant is enforced ONCE, here, at the
-# write that creates the plan: a `*.plan.md` whose frontmatter carries no `parallel-budget:`
-# line with a `writers=<digits>` field is refused, naming the key and Step 0's derivation.
-# A machine the probe cannot read gets the line by hand (`source=override`); the header has
-# always accepted any `writers=N`, so no new surface exists.
-#
-# ONLY `writers=` IS READ. It is the one field the fill invariant consumes; `suites=`,
-# `worktrees=`, `test_jobs=` and `source=` stay accepted and unparsed here, and their one
-# reader is still the dispatch wall's budget arm. No plan is exempt by state: a closed or
-# abandoned plan that is re-written gets the key brought forward, like
-# `canonical_sdlc_version`, rather than an exemption this arm would have to keep forever.
+# ---------- `parallel-budget:` is not required (wave-28 T9; D15, REQ-2 AC-2.9) ----------
+# Until wave-28 a `*.plan.md` Write whose frontmatter carried no `parallel-budget:` line with a
+# `writers=<digits>` field was refused here (wave-19 REQ-3, ADR-035): the line was a measurement
+# Step 0 copied from the machine probe, and every width reader sized the run from it. The width
+# is the gate's now, so no plan needs the line: a line caps a run only when a person wrote it
+# (`budget_cap` in lib/run.sh, `source=user` or `source=override`), and this hook neither
+# requires nor reads it.
 
 # ---------- required frontmatter flags + model_plan ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
@@ -1289,39 +1275,6 @@ Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}
 Required:                     model_plan"
   refuse exit2 write "this plan is missing frontmatter flags" "run Step 0 to set them" "$_gs_detail"
 fi
-
-# ---------- the budget key, a plan's alone (REQ-3 AC-3.1; the docblock above) ----------
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-#
-# Present means a `parallel-budget:` line whose value carries `writers=` followed by digits
-# as its own field, READ BY THE ONE BUDGET READER every other reader calls: run.sh's
-# `budget_line_of` (exactly `parallel-budget:` at column 0, colon immediately after the key)
-# over the text being written — this hook has no file yet — and `budget_field` (one whole
-# field, a decimal integer; epic-23 wave-20 T2, D10). Before wave-19-fixit-186 C5 this hook
-# admitted `  parallel-budget:` and `parallel-budget :` too, spellings every other reader
-# treats as no line; until wave-20 it cut `writers=` at its first SUBSTRING, so
-# `max_writers=9 writers=3` read 9 here and 3 to the tick. A header this admits now is a
-# header every reader sizes identically, and a header it refuses is one none of them could.
-case "$BASENAME" in
-  *.plan.md)
-    _gs_budget=$(budget_line_of "$FRONTMATTER")
-    _gs_writers=$(budget_field "$_gs_budget" writers)
-    if [ -z "$_gs_writers" ]; then
-      _gs_detail="canonical-sdlc plan '$BASENAME' carries no parallel-budget: line with a writers=<digits> field.
-Path: $FILE_PATH
-Found:   ${_gs_budget:-(no parallel-budget: line)}
-Why:     the budget is a measurement Step 0 writes, not a ceiling a run opts into — the tick,
-         the stop wall and the dispatch wall all size the run from writers=, and a plan without
-         it would leave each of them nothing to read (ADR-035).
-Fix:     run Step 0's derivation — resources_probe prints cores= mem_gb= disk_free_gb=, and
-         resources_budget <cores> <mem_gb> <disk_free_gb> yields the line — then write it
-         verbatim into this plan's frontmatter:
-           parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe
-         A machine the probe cannot read takes the line by hand, with source=override."
-      refuse exit2 write "this plan carries no parallel-budget: writers=" "run Step 0's resource probe" "$_gs_detail"
-    fi
-    ;;
-esac
 
 # ---------- pre-registered Verification Matrix required at Step 3+ ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]

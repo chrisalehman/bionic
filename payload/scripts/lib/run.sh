@@ -218,6 +218,28 @@ budget_field() {  # <budget line> <key> -> a non-negative integer, or empty
   return 0
 }
 
+# budget_cap <plan> -> `writers=<n>` from a `parallel-budget:` line whose `source=` is `user`
+# or `override`, else nothing (wave-28 T9; D15, REQ-2 AC-2.9/AC-2.10).
+#
+# A CAP IS A PERSON'S WORD. The line used to be a measurement Step 0 copied from the machine
+# probe, and every reader obeyed it; a probe's number now caps nothing, because the width comes
+# from the machine as it is (the gate), not from a figure taken once at Step 0. `source=user`
+# is what the hand cap verb writes, `source=override` what a person typed when the probe could
+# not read the machine. A line with no `source=`, or `source=probe`, or any other source,
+# answers nothing, so a plan written under 1.12.0 keeps working and its probe number caps
+# nothing. The FIRST `source=` field decides, as `budget_field` takes the first `writers=`.
+budget_cap() {  # <plan> -> `writers=<n>`, or nothing
+  local line w s
+  line="$(plan_budget_line "${1:-}")"
+  [ -n "$line" ] || return 0
+  w="$(budget_field "$line" writers)"
+  [ -n "$w" ] || return 0
+  s=" ${line//$'\t'/ } "
+  case "$s" in *" source="*) s="${s#* source=}"; s="${s%% *}" ;; *) return 0 ;; esac
+  case "$s" in user|override) printf 'writers=%s' "$w" ;; esac
+  return 0
+}
+
 # _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
 # walked to depth <= 2) that carries a flush-left `## SDLC State`, NUL-separated, in walk
 # order: plans/ then incidents/, and within each whatever order `find` produced. Prints
