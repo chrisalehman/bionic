@@ -7990,8 +7990,12 @@ printf '#!/bin/bash\nexit 0\n' > "$RG_NOSAMP/tests/stub.test.sh"
 # lesson the poker's own anchor just below already carries). S25 moved this call inside an
 # `if [ "$DRY_RUN" -eq 0 ]` guard, re-indenting it two spaces; `[[:space:]]*` absorbs that
 # reindent and any future one.
+#
+# REPLACED BY `:`, NOT DELETED (wave-28 T53). The call is the only command in its `if …; then`,
+# and a deleted line left `then fi`, which bash refuses to parse: the mutant died before its
+# first suite, so its untouched ring proved a dead runner, not a runner that stopped sampling.
 anchor -E "$REPO_ROOT/tests/run.sh" '^[[:space:]]*pressure_sample >/dev/null 2>&1 \|\| :$' 1
-grep -vE '^[[:space:]]*pressure_sample >/dev/null 2>&1 \|\| :$' "$REPO_ROOT/tests/run.sh" \
+sed -E 's/^([[:space:]]*)pressure_sample >\/dev\/null 2>&1 \|\| :$/\1:/' "$REPO_ROOT/tests/run.sh" \
   > "$RG_NOSAMP/tests/run.sh"
 # THE SHIPPED CONTROL TREE for the runner half: the real tests/run.sh, byte for byte, in a
 # scratch tree with no real suite files — so "shipped" and "no-sample" differ ONLY in the
@@ -8005,27 +8009,75 @@ printf '#!/bin/bash\nexit 0\n' > "$RG_SHIPPED/tests/stub.test.sh"
 expect_eq "the shipped control tree carries the runner byte for byte (not vacuous)" "yes" \
   "$(cmp -s "$REPO_ROOT/tests/run.sh" "$RG_SHIPPED/tests/run.sh" && echo yes || echo no)"
 
+# THE DRIVES HOLD AN ADMISSION, AND EACH IS BOUNDED (wave-28 T53; AC-2.6, AC-2.12). Since T12
+# every `--one` worker asks the gate for its suite with no ceiling (a wait at the gate never
+# ends a run, AC-2.6), and the gate reads the machine through the same pins this section
+# plants critical: with its memory reader unpinned it read 92 % used, admitted nothing, and the
+# worker polled for ever (T44's third merge; T9's RED). So the fixture asks ONCE, under the
+# clear reading, in a store of this section's own, and hands both drives that admission in
+# BIONIC_GATE_ADMIT. Its holder is this suite's shell (the `$$` of a `$( )`), the gate believes
+# it for any descendant, so the workers run as a nested run's do (tests/run.sh NESTING) and ask
+# nothing of their own — while the ring's sensors stay critical for the sample under test.
+# The ask itself is bounded (`--within`, on the real clock: `_res_now` under a pinned epoch
+# never moves), and each drive runs under lib/detect.sh's `detect_bounded`, so a drive the
+# gate still holds ends "hung" — red on both rows below — inside RG_DRIVE_BOUND seconds
+# instead of hanging the suite. The bound is the rows' guard; the admission is the fix.
+RG_GATE="$SANDBOX/rg/gate"
+RG_DRIVE_BOUND=120
+RG_ADMIT="$( unset BIONIC_GATE_ADMIT BIONIC_NOW_EPOCH BIONIC_LOAD_NOW_FILE BIONIC_PROBE_USED_PCT
+  eval "export $RG_CLEAR_ENV"; export BIONIC_GATE_DIR="$RG_GATE"
+  . "$LIB_DIR_SRC/gate.sh" >/dev/null 2>&1 && gate_ask work rg-runner-drive --within 30 2>/dev/null )" \
+  || RG_ADMIT=""
+expect_eq "§RG the bound the drives run under is loaded (not vacuous)" "yes" \
+  "$( . "$LIB_DIR_SRC/detect.sh" >/dev/null 2>&1; declare -F detect_bounded >/dev/null && echo yes || echo no)"
+
 # rg_runner_samples <tree> -> "yes" if <tree>/tests/run.sh's ORDINARY (non-dry) path
-# appends exactly one line to a ring seeded with one clear sample; "no" otherwise.
+# appends exactly one line to a ring seeded with one clear sample; "no" otherwise; "hung"
+# when the drive did not end inside RG_DRIVE_BOUND.
 rg_runner_samples() {
-  local tree="$1" before after
+  local tree="$1" before after rc
   rg_seed_clear
   before="$(wc -l < "$RG_RING" | tr -d ' ')"
   ( eval "export $RG_CRIT_ENV"
     cd "$tree" &&
     export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
-           BIONIC_TEST_JOBS_CEILING="$RG_CEIL"
-    bash tests/run.sh >/dev/null 2>&1 )
+           BIONIC_TEST_JOBS_CEILING="$RG_CEIL" \
+           BIONIC_GATE_DIR="$RG_GATE" BIONIC_GATE_ADMIT="$RG_ADMIT" &&
+    . "$LIB_DIR_SRC/detect.sh" >/dev/null 2>&1 &&
+    detect_bounded "$RG_DRIVE_BOUND" bash tests/run.sh >"$SANDBOX/rg/drive-${tree##*/}.out" 2>&1 )
+  rc=$?
   after="$(wc -l < "$RG_RING" | tr -d ' ')"
+  [ "$rc" -ne 124 ] || { echo hung; return 0; }
   [ "$after" -eq "$((before + 1))" ] && echo yes || echo no
 }
 
 RG_RUN_SHIPPED_SAMPLES=$(rg_runner_samples "$RG_SHIPPED")
 RG_RUN_NOSAMP_SAMPLES=$(rg_runner_samples "$RG_NOSAMP")
+[ -z "$RG_ADMIT" ] || ( unset BIONIC_NOW_EPOCH BIONIC_LOAD_NOW_FILE; export BIONIC_GATE_DIR="$RG_GATE"
+  . "$LIB_DIR_SRC/gate.sh" >/dev/null 2>&1 && gate_end "$RG_ADMIT" 0 >/dev/null 2>&1 )
 expect_eq "the shipped runner's ordinary path samples once (AC-15)" "yes" \
   "$RG_RUN_SHIPPED_SAMPLES"
 expect_eq "a runner that stopped sampling leaves the ring untouched: the removal is CAUGHT" \
   "no" "$RG_RUN_NOSAMP_SAMPLES"
+# T53 ROWS. "no" above means the mutant RAN and did not sample — never that it died before its
+# first suite, which a deleted line inside `if …; then` once made it do — so each drive shows
+# its stub ran; and the admission is shown held: the fixture's one request is in the store and
+# no worker of either drive took one of its own.
+expect_eq "§RG the no-sample mutant is a script bash can read (not vacuous)" "0" \
+  "$(bash -n "$RG_NOSAMP/tests/run.sh" >/dev/null 2>&1; echo $?)"
+expect_contains "§RG the shipped drive ran its stub suite to the end" "Gating: 1 passed" \
+  "$(cat "$SANDBOX/rg/drive-rg-shipped.out" 2>/dev/null)"
+expect_contains "§RG …and so did the no-sample drive: its 'no' is a runner that ran" "Gating: 1 passed" \
+  "$(cat "$SANDBOX/rg/drive-rg-nosample.out" 2>/dev/null)"
+rg_store_keys() {  # <key> -> how many requests in the section's own gate store carry it
+  cat "$RG_GATE"/requests/* 2>/dev/null | LC_ALL=C awk -v k="key=$1" '$0 == k { c++ } END { print c + 0 }'
+}
+expect_eq "§RG the fixture holds one admission for its drives, in the section's own store" "1" \
+  "$(rg_store_keys rg-runner-drive)"
+expect_eq "§RG …and the drives' workers ran under it: they asked the gate nothing of their own" "0" \
+  "$(rg_store_keys stub.test.sh)"
+expect_eq "§RG …and the fixture ends what it took: its admission is closed, rc 0" "0" \
+  "$(sed -n 's/^rc=//p' "$RG_GATE/requests/${RG_ADMIT:-none}" 2>/dev/null)"
 
 # --- RG.5 the pin is honoured: this section's readings are on this section's ring ---
 #
