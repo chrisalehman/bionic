@@ -282,6 +282,57 @@ bionic_context 2>/dev/null || exit 0
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
 [ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
+# ---------- THE WALL'S OWN DEADLINE (wave-28 T70; A-orch-205 to 212, A-orch-231) ----------
+#
+# THE HARNESS CANCELS A HOOK AT ITS REGISTRATION'S TIMEOUT (hooks.json: 15 s) AND ADMITS THE CALL.
+# The roster append is this hook's last step, so a wall that overran left a writer running with no
+# row for any later wall to judge: the suite wall refused its runs, `amend` and the Patrol could not
+# see it, and the stop guard would not stop it. The session transcript shows it twice, as
+# `hook_cancelled` at 15016 and 15012 ms; the eleven dispatches that session journalled took 1.0 to
+# 3.8 s. The slowness itself was not reproduced (a 69-name fuzz against the real plan and the real
+# 21 MB transcript ran in 1 to 2 s) — this bounds a cause nobody has seen.
+#
+# SO THE WALL REFUSES FIRST. A timer started here signals this shell at DP_DEADLINE_S, 3 s under
+# the registration (the rule payload/scripts/lib/bounds.sh states for every inner bound: strictly
+# under, margin named), and the handler denies the dispatch in the wall's own shape. It is armed
+# only for an engaged session (everything above is a bystander's silent exit), and it is disarmed
+# the moment the row is built, before the first byte of the roster is written, so a refusal never
+# leaves a row behind. THE LIMIT, STATED: bash runs a trap between commands, so a single foreground
+# command that itself outlasts the registration is not interrupted; the waits in this hook are
+# bounded (the impact derivation polls at IMPACT_BOUND_S), which is why the cumulative overrun is
+# the case this catches.
+DP_DEADLINE_S=12
+DP_DEADLINE_LIVE=0
+DP_DEADLINE_PID=""
+dp_deadline_hit() {
+  [ "$DP_DEADLINE_LIVE" = 1 ] || return 0
+  DP_DEADLINE_LIVE=0
+  refuse deny dispatch "the wall ran out of time" "dispatch again" \
+"The dispatch wall had not finished ${DP_DEADLINE_S} s after it started. The harness cancels a hook at its
+registration's timeout and admits the call, so this wall refuses first.
+
+Roster:  ${ROSTER_FILE:-(not reached)}
+No row was written for this launch, and nothing was spawned.
+
+Fix: dispatch again. If it recurs the machine is overloaded: wait for the running suites to finish,
+     or run /bionic:doctor."
+}
+dp_deadline_stop() {
+  [ -z "$DP_DEADLINE_PID" ] || kill "$DP_DEADLINE_PID" 2>/dev/null
+  return 0
+}
+trap dp_deadline_hit ALRM
+trap dp_deadline_stop EXIT
+DP_DEADLINE_LIVE=1
+# The timer is a subshell with no output of its own and no stdin, so the harness has nothing to wait
+# on after the hook exits; it is a job of this shell only until `disown` drops it from the table.
+( trap 'kill "$_dp_sp" 2>/dev/null; exit 0' TERM
+  sleep "$DP_DEADLINE_S" & _dp_sp=$!
+  wait "$_dp_sp" && kill -ALRM $$ 2>/dev/null
+) >/dev/null 2>&1 </dev/null &
+DP_DEADLINE_PID=$!
+disown "$DP_DEADLINE_PID" 2>/dev/null || :
+
 # ---------- THE RUN PREDICATE (AC-7, AC-8) — now DATA, not scope ----------
 #
 # One reader for "is there a run to protect": lib/run.sh's `session_run` (which was
@@ -914,6 +965,8 @@ fi
 # the id itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. This arm,
 # T7's Lands-on arm and the full-run wall's floor row all read `DP_BOUND_ROW`; none reads the name
 # again. A name that is no row's id and a brief with no `Row:` bind nothing, and nothing is judged.
+# A name that matches MORE than one row, with no `Row:`, binds nothing either and is refused, naming the
+# rows it matched but no remedy row (wave-28 T58; the reader below carries the rule).
 # `approval:plan` is the arm above.
 DP_ROW_NAME=$(_jq '.tool_input.name')
 # The brief is lifted here, the one place the label is read: the lift needs only the role and the
@@ -949,7 +1002,7 @@ dp_row_reader() {
     DP_BOUND_ROW=""
     _ar_rest="${DP_NAME_ROWS#*$'\n'}"
     dp_finding "the name matches rows $(bionic_trunc "$DP_NAME_ROW" 11), $(bionic_trunc "${_ar_rest%%$'\n'*}" 11)" \
-      "add Row: $(bionic_trunc "$DP_NAME_ROW" 11)" \
+      "add Row: <id>" \
       "The agent's name matches more than one row of the bound plan, and the brief has no Row: to say which:
     Dispatch: ${DP_ROW_NAME}
     Rows:     $(printf '%s' "$DP_NAME_ROWS" | tr '\n' ' ')
@@ -1059,12 +1112,15 @@ fi
 # The attestation gate has decided. Everything below is a LEDGER — it appends one
 # row describing the launch that is about to happen — with exactly ONE exception,
 # marked as such where it sits: the absent-deliverable wall (user-directed,
-# post-wave-04). Apart from that field, starts fail open (TDD §7), so every
-# failure here — an unwritable directory, a hostile path, a brief missing its
-# duration or progress path — warns and lets the dispatch through. A gate that
-# refused a dispatch because it could not JOURNAL it would be a new failure mode,
-# not a safety property; refusing one that gave itself nothing to be checked
-# against is the property the wave was built to have.
+# post-wave-04). A brief missing its duration or progress path is recorded as absent and
+# warned about, and the dispatch goes through. THE JOURNAL ITSELF IS NOT OPTIONAL (wave-28
+# T70, A-orch-231): this paragraph said an unwritable directory or a hostile path warned and
+# let the dispatch through, and that was the wrong rule. A dispatch the roster does not carry
+# is one no later wall can judge — the suite wall, `amend`, the Patrol and the stop guard all
+# read the row — so a launch whose row did not build, or could not be appended, or whose
+# roster path is a link, is REFUSED in this wall's own shape, naming the roster and the
+# reason, and nothing is spawned. The one exit that journals nothing is the delegation
+# arm's legitimate case, below, and it says so.
 #
 # WHY THIS LIVES IN THE START GATE and not in a fresh hook: the row must exist
 # BEFORE the agent does. PostToolUse fires after the spawn, and the epic's whole
@@ -2911,10 +2967,17 @@ fi
 # no dispatch ever reached here carrying it: every nested launch was journalled onto the
 # orchestrator's roster as a contract it owed (triage-B D2c, driven). It asks
 # `is_agent_context` now, whose first spelling is the payload's own top-level `agent_id`.
-# Silent, and on the pass side — a dispatch that got this far has been allowed (and, from
-# inside an agent, is a read-only role by the delegation arm), and this line only declines
-# to write it down.
+# On the pass side — a dispatch that got this far has been allowed (and, from inside an agent,
+# is a read-only role by the delegation arm), and this line only declines to write it down.
+# THIS EXIT IS REACHABLE ONLY BY A READ-ONLY ROLE LAUNCHED FROM INSIDE AN AGENT: the delegation
+# arm above refuses every other dispatch made there, so nothing that needs a roster row (a
+# writer, which is budgeted, contracted and suite-walled) can arrive here. That is what makes
+# not journalling safe, and it is why the ruling (wave-28 T70, A-orch-231) keeps the ledger at
+# depth one (S20) and does not widen the roster's readers for a `source=delegated` row. It is
+# not silent any more: one stderr line says what happened, so the dispatching agent sees that
+# this admission carries no row.
 if is_agent_context; then
+  printf '%s\n' "bionic: dispatch admitted without a roster row — a read-only role launched from inside an agent; the ledger stays at depth one" >&2
   exit 0
 fi
 
@@ -2924,8 +2987,14 @@ fi
 # path and gets its own check — a hostile repo may make this gate fail to
 # journal, but must not gain an append to a file it points at (§8).
 if [ -L "$ROSTER_FILE" ]; then
-  warn "the roster path is a symbolic link; nothing was written through it: $ROSTER_FILE"
-  exit 0
+  refuse deny dispatch "the roster path is a symbolic link" "remove the link" \
+"Roster:  ${ROSTER_FILE}
+Reason:  it is a symbolic link, and nothing is ever written through one.
+
+No row was written, so the launch is not admitted: a dispatch the roster does not carry is one no
+later wall can judge.
+
+Fix: remove the link (rm ${ROSTER_FILE}), then dispatch again."
 fi
 
 prune_stale_rosters
@@ -3035,42 +3104,59 @@ ROW=$(roster_row \
   ${DP_ROW:+"row=${DP_ROW}"} \
   ${DP_LANDS_ON:+"lands_on=${DP_LANDS_ON}"}) || ROW=""
 
-WROTE=1
+# THE ROW IS BUILT AND THE ROSTER IS WRITTEN LAST, and a launch the roster cannot carry is refused
+# (wave-28 T70). `roster_row` refuses a field name no reader knows rather than writing it, so an
+# empty `$ROW` is a defect in this hook or its library — refused, never appended blank and never
+# called journalled. The deadline is disarmed here, before the first byte is written: past this line
+# the dispatch is the roster's, and a timer firing between the append and the exit would refuse a
+# launch it had already recorded.
+DP_DEADLINE_LIVE=0
+if [ -z "$ROW" ]; then
+  refuse deny dispatch "the launch row did not build" "run /bionic:doctor" \
+"Roster:  ${ROSTER_FILE}
+Reason:  roster_row (payload/scripts/lib/roster.sh) refused a field of this launch.
+
+No row was written, so the launch is not admitted: a dispatch the roster does not carry is one no
+later wall can judge.
+
+Fix: run /bionic:doctor; if it reports nothing, the library and this hook are from different
+     versions — reinstall the plugin."
+fi
 if [ ! -e "$ROSTER_FILE" ]; then
   # A concurrent dispatch in the same session can lose this race and write the
   # header twice; both are comment lines and every reader skips them. The ROWS
   # are what must not interleave, and each is a single short append.
-  roster_header >> "$ROSTER_FILE" 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
+  { roster_header >> "$ROSTER_FILE"; } 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
 fi
-# A ROW THAT DID NOT BUILD IS NOT APPENDED. `roster_row` refuses a field name no reader
-# knows rather than writing it, and an empty `$ROW` here would put a blank line on the
-# roster and call it journalled. The existing WROTE=0 path already says the launch could
-# not be journalled, which is the true thing to say in both cases.
-if [ -n "$ROW" ]; then
-  printf '%s\n' "$ROW" >> "$ROSTER_FILE" 2>/dev/null || WROTE=0
-else
-  WROTE=0
+# No lock, unlike the observation record: that one is a read-modify-write of the whole file, this
+# one is a single O_APPEND write of well under a pipe buffer, which the kernel does not interleave.
+# A failed append is the shell's own message, read back so the refusal can name the reason.
+DP_WERR=""
+DP_WROTE=1
+DP_WERR=$( { printf '%s\n' "$ROW" >> "$ROSTER_FILE"; } 2>&1 ) || DP_WROTE=0
+if [ "$DP_WROTE" -eq 0 ]; then
+  refuse deny dispatch "the roster cannot be written" "make it writable" \
+"Roster:  ${ROSTER_FILE}
+Reason:  ${DP_WERR##*: }
+
+No row was written, so the launch is not admitted: a dispatch the roster does not carry is one no
+later wall can judge (the suite wall, amend, the Patrol and the stop guard all read the row).
+
+Fix: make ${STATE_DIR} and the roster writable by this user, then dispatch again."
 fi
 
-# No lock, unlike the observation record: that one is a read-modify-write of the
-# whole file, this one is a single O_APPEND write of well under a pipe buffer,
-# which the kernel does not interleave. A lock here would put a failure mode
-# (a wedged lock directory) in front of a dispatch, on the fail-open side.
-if [ "$WROTE" -eq 0 ]; then
-  warn "the launch could not be journalled to the roster (the dispatch is unaffected): $ROSTER_FILE"
-else
-  if [ -n "$ABSENT" ]; then
-    warn "roster row for \"${AGENT_NAME:-(unnamed)}\" records absent brief field(s): ${ABSENT//,/, }"
-  fi
-  # The waiver echo. A dispatch that took the escape says so out loud as it
-  # passes, with the reason it gave — so the operator reads the waiver at the
-  # moment it is spent, not only later off the roster row that also holds it.
-  if [ -n "$C_WAIVER" ]; then
-    warn "the absent-deliverable wall was waived by the brief: ${C_WAIVER}"
-  fi
-  if [ -n "$CONTENDED_OWNER" ]; then
-    warn "the deliverable ${CONTENDED_PATH} is already owned by an open roster row: \"${CONTENDED_OWNER}\" — two rows on one artifact make the second landing verdict unfalsifiable"
-  fi
+# The roster carries the launch; what follows is only ever said.
+if [ -n "$ABSENT" ]; then
+  warn "roster row for \"${AGENT_NAME:-(unnamed)}\" records absent brief field(s): ${ABSENT//,/, }"
+fi
+# The waiver echo. A dispatch that took the escape says so out loud as it
+# passes, with the reason it gave — so the operator reads the waiver at the
+# moment it is spent, not only later off the roster row that also holds it.
+if [ -n "$C_WAIVER" ]; then
+  warn "the absent-deliverable wall was waived by the brief: ${C_WAIVER}"
+fi
+if [ -n "$CONTENDED_OWNER" ]; then
+  warn "the deliverable ${CONTENDED_PATH} is already owned by an open roster row: \"${CONTENDED_OWNER}\" — two rows on one artifact make the second landing verdict unfalsifiable"
 fi
 
 # Present and mine: pass in silence — the allow path prints NOTHING about the check it
