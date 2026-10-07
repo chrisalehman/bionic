@@ -1851,6 +1851,19 @@ expect_contains "CARRY-22c over a continuation that carries the heading, check s
   "continuation: ${CONT_REL#.bionic/docs/} already written — left as it stands" "$CO_OUT"
 expect_absent "CARRY-22d …and names no append" "appends the ## Deferrals" "$CO_OUT"
 
+# a ## Deferrals inside a code fence of an existing continuation is an example, not the section: the
+# section is still appended (read-adversarial-p15 #4)
+PF="$(mk_fixture carry13)"; advance_to "$PF" 8
+carry_plant "$PF" "deferred: $CARRY_REC#1 S2 off \"behind a fence\""
+mkdir -p "$PF/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n```\n## Deferrals\n\ndeferred: an example of the form\n```\n' > "$PF/$CONT_REL"
+run_close "$PF" run
+carry_section_unfenced() { awk '/^```/ { f = !f; next } f { next } /^## / { s = ($0 == "## Deferrals"); next } s && NF { print }' "$1"; }
+expect_eq "CARRY-23 an existing continuation whose only ## Deferrals is fenced: run appends the section, its deferral under it" \
+  "0|deferred: $CARRY_REC#1 S2 off \"behind a fence\" stated=\"-\" from=$CARRY_W" "$CO_RC|$(carry_section_unfenced "$PF/$CONT_REL")"
+expect_eq "CARRY-23a …and the fenced example is kept as it was" "1" \
+  "$(/usr/bin/grep -c '^deferred: an example of the form$' "$PF/$CONT_REL" | tr -d ' ')"
+
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
 CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-inherit-mut.XXXXXX")"
 mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"

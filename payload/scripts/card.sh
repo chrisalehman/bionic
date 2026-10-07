@@ -1509,6 +1509,8 @@ _card_inherited() {
       }
     }
     { sub(/\r$/, "") }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
     /^## / { s = ($0 ~ /^## Deferrals[ \t]*$/); next }
     s && /^deferred:[ \t]/ {
       split($0, f, /[ \t]+/); seen[f[2]] = 1
