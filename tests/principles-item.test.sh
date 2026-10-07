@@ -1273,4 +1273,121 @@ expect_contains "RECORD-REMOVE --all: the recorded tool is on the page" "• rem
 expect_absent "RECORD-REMOVE --all: …the page answered no removes nothing" "npm uninstall" "$(rec_calls "$REC_R7")"
 expect_eq "RECORD-REMOVE --all: …and the line stays" "1" "$(rec_count "$REC_R7" "$REC_TOOL")"
 
+# ===========================================================================
+# THE SHARE — wave-28 T10 (spec D16, REQ-2 AC-2.1 surfaces).
+#
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share` holds one integer, 1 to 100; absent means 80. Setup offers
+# to write it by the principles item's pattern: a yes writes the default share, a no leaves it unset and the
+# default stands, a share already there is never asked about or overwritten. `remove` takes the file out on a yes.
+# Every drive is behind the record section's stubs, a throwaway home and CLAUDE_CONFIG_DIR (rule 13); no `--all`
+# drive is answered anything but `n`.
+# ===========================================================================
+
+sh_file() { printf '%s/.claude/bionic/share' "$1"; }
+sh_value() {  # <home> -> the first line of the home's share file, nothing when there is none
+  local v=""
+  { read -r v < "$(sh_file "$1")"; } 2>/dev/null
+  printf '%s' "$v"
+}
+sh_has() { [ -e "$(sh_file "$1")" ] && echo yes || echo no; }
+sh_pending() {  # <home> -> 0|1: the checks table's answer for the share item, asked in the record environment
+  rec_env "$1" bash -c '. "$1" >/dev/null 2>&1 || exit 9; bionic_check_item_pending share; echo $?' _ \
+    "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/checks.sh"
+}
+
+# ---------------------------------------------------------------------------
+section "§SHARE-ITEM: setup offers the share, a yes writes it, a no leaves the default, a share already there is kept"
+# ---------------------------------------------------------------------------
+
+SH_A="$(rec_home)"
+expect_eq "SHARE-ITEM precondition: a fresh home has no share file" "no" "$(sh_has "$SH_A")"
+expect_eq "SHARE-ITEM: the checks table fires the share item on it (0)" "0" "$(sh_pending "$SH_A")"
+SH_A_OUT="$(rec_setup "$SH_A" share y)"
+expect_eq "SHARE-ITEM yes: the file is written, the default, one integer" "80" "$(sh_value "$SH_A")"
+expect_eq "SHARE-ITEM yes: …and it is the one line" "1" "$(wc -l < "$(sh_file "$SH_A")" | tr -d ' ')"
+expect_contains "SHARE-ITEM yes: the item says it wrote it" "✓ share" "$SH_A_OUT"
+expect_contains "SHARE-ITEM yes: …naming the file" "bionic/share" "$SH_A_OUT"
+expect_contains "SHARE-ITEM yes: …and how to change it" "session-poker.sh share <n>" "$SH_A_OUT"
+expect_eq "SHARE-ITEM yes: the checks table no longer fires it (1)" "1" "$(sh_pending "$SH_A")"
+expect_contains "SHARE-ITEM yes: a narrowed run's summary is clean" "nothing left to do for share." "$SH_A_OUT"
+
+# idempotent: asked again, it is not asked, and the file is as it was
+SH_A_AGAIN="$(rec_setup "$SH_A" share n)"
+expect_contains "SHARE-ITEM again: the item says there is nothing to do" "nothing to do" "$SH_A_AGAIN"
+expect_absent "SHARE-ITEM again: …and asks nothing (no decline line)" "declined" "$SH_A_AGAIN"
+expect_eq "SHARE-ITEM again: …the file is as it was (80)" "80" "$(sh_value "$SH_A")"
+
+# a share the user set is theirs: never overwritten by the offer, and the item is not pending
+SH_B="$(rec_home)"; mkdir -p "$SH_B/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_B")"
+SH_B_OUT="$(rec_setup "$SH_B" share y)"
+expect_eq "SHARE-ITEM set: a share of 65 is kept through a yes (65)" "65" "$(sh_value "$SH_B")"
+expect_contains "SHARE-ITEM set: …said as already set" "nothing to do" "$SH_B_OUT"
+expect_eq "SHARE-ITEM set: …and the item is not pending (1)" "1" "$(sh_pending "$SH_B")"
+
+# a no leaves the default: nothing written, the item pending, the gate reads 80
+SH_C="$(rec_home)"
+SH_C_OUT="$(rec_setup "$SH_C" share n)"
+expect_eq "SHARE-ITEM no: nothing is written (the yes above wrote)" "no" "$(sh_has "$SH_C")"
+expect_contains "SHARE-ITEM no: the item says declined" "declined" "$SH_C_OUT"
+expect_contains "SHARE-ITEM no: …names the default that stands" "80%" "$SH_C_OUT"
+expect_contains "SHARE-ITEM no: …and the line that would answer yes" "--only share" "$SH_C_OUT"
+expect_eq "SHARE-ITEM no: the gate's share is the default (80)" "80" \
+  "$(rec_env "$SH_C" bash -c '. "$1" 2>/dev/null; gate_share' _ "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/gate.sh")"
+expect_eq "SHARE-ITEM no: …and the item is still pending (0)" "0" "$(sh_pending "$SH_C")"
+
+# the write goes where the gate reads, not to BIONIC_CLAUDE_HOME's directory
+SH_D="$(rec_home)"; mkdir -p "$SH_D/other"
+rec_env "$SH_D" env BIONIC_CLAUDE_HOME="$SH_D/other" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only share <<< 'y' >/dev/null 2>&1
+expect_eq "SHARE-ITEM home: with BIONIC_CLAUDE_HOME set the share is written under CLAUDE_CONFIG_DIR (80)" "80" "$(sh_value "$SH_D")"
+expect_eq "SHARE-ITEM home: …and not under BIONIC_CLAUDE_HOME" "no" "$([ -e "$SH_D/other/bionic/share" ] && echo yes || echo no)"
+
+# the roster and the plan page name it
+SH_E="$(rec_home)"
+SH_E_LIST="$(rec_env "$SH_E" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --list 2>&1)"
+expect_contains "SHARE-ITEM roster: setup --list names the share item" "share" "$SH_E_LIST"
+SH_E_ALL="$(printf 'n\n' | rec_env "$SH_E" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --all 2>&1)"
+SH_E_PAGE="${SH_E_ALL%%Do all of the above?*}"
+expect_ne "SHARE-ITEM page: the --all page is on the output ahead of its question" "$SH_E_ALL" "$SH_E_PAGE"
+expect_contains "SHARE-ITEM page: it names the share and the file it would write" "write bionic's share of this machine, 80%, to " "$SH_E_PAGE"
+expect_eq "SHARE-ITEM page: answered no, nothing is written" "no" "$(sh_has "$SH_E")"
+
+# ---------------------------------------------------------------------------
+section "§SHARE-REMOVE: remove takes the share file out on a yes, and only that file"
+# ---------------------------------------------------------------------------
+
+SH_R="$(rec_home)"
+rec_setup "$SH_R" share y >/dev/null 2>&1
+printf 'ccstatusline\tstatusline\t2026-10-01T10:00:00Z\t1.12.0\n' > "$(rec_file "$SH_R")"
+expect_eq "SHARE-REMOVE precondition: setup wrote the share (80)" "80" "$(sh_value "$SH_R")"
+SH_R_NO="$(rec_remove "$SH_R" share n)"
+expect_eq "SHARE-REMOVE no: the file stays" "80" "$(sh_value "$SH_R")"
+expect_contains "SHARE-REMOVE no: the item says declined, and the file is left in place" "declined — bionic's share file" "$SH_R_NO"
+SH_R_YES="$(rec_remove "$SH_R" share y)"
+expect_eq "SHARE-REMOVE yes: the share file is gone" "no" "$(sh_has "$SH_R")"
+expect_contains "SHARE-REMOVE yes: the item says removed" "✓ bionic's share file" "$SH_R_YES"
+expect_contains "SHARE-REMOVE yes: …naming the file" "bionic/share" "$SH_R_YES"
+expect_eq "SHARE-REMOVE yes: the install record beside it is untouched (1 line)" "1" "$(rec_count "$SH_R" ccstatusline)"
+expect_eq "SHARE-REMOVE yes: …and the directory stays" "yes" "$([ -d "$SH_R/.claude/bionic" ] && echo yes || echo no)"
+SH_R_AGAIN="$(rec_remove "$SH_R" share y)"
+expect_contains "SHARE-REMOVE again: with no file the item is already clean" "already clean" "$SH_R_AGAIN"
+
+# a share a user set by hand is bionic's file too (the verb writes the same one)
+SH_R2="$(rec_home)"; mkdir -p "$SH_R2/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_R2")"
+rec_remove "$SH_R2" share y >/dev/null 2>&1
+expect_eq "SHARE-REMOVE set: a share set by the verb is removed on a yes as well" "no" "$(sh_has "$SH_R2")"
+
+# a share that is not a regular file is named and left alone
+SH_R3="$(rec_home)"; mkdir -p "$SH_R3/.claude/bionic/share"
+SH_R3_OUT="$(rec_remove "$SH_R3" share y)"
+expect_eq "SHARE-REMOVE not-a-file: a directory at the share's path is left (still there)" "yes" "$([ -d "$SH_R3/.claude/bionic/share" ] && echo yes || echo no)"
+expect_absent "SHARE-REMOVE not-a-file: …and nothing is reported removed" "✓ bionic's share file" "$SH_R3_OUT"
+
+# the --all page names it, answered no
+SH_R4="$(rec_home)"; mkdir -p "$SH_R4/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_R4")"
+SH_R4_OUT="$(printf 'n\n' | rec_env "$SH_R4" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/remove.sh" --all 2>&1)"
+SH_R4_PAGE="${SH_R4_OUT%%Do all of the above?*}"
+expect_ne "SHARE-REMOVE --all: the page is on the output, ahead of its question" "$SH_R4_OUT" "$SH_R4_PAGE"
+expect_contains "SHARE-REMOVE --all: the share file is on it" "• delete bionic's share file " "$SH_R4_PAGE"
+expect_eq "SHARE-REMOVE --all: answered no, the file stays (65)" "65" "$(sh_value "$SH_R4")"
+
 finish
