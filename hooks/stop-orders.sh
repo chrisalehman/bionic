@@ -761,6 +761,15 @@ case "$VERB" in
     # roster has NO row of the name (a name it has seen belongs to the ordinary stop, with its
     # look), and a FRESH panel reading lists the name (an agent nothing lists is no agent of this
     # session's to stop). A verb that cannot see does not record, as `stopped` does not ack.
+    # THE REASON IS ONE PLAIN LINE, judged BEFORE `clean` folds it. The roster splits a row on `|` and the
+    # orders file a record on a line, so a reason carrying either could forge a field or a record; folding
+    # it to a space would record a sentence its author did not write. It is refused instead (wave-28 T77).
+    case "$ORDER_WHY" in
+      *'|'*|*$'\n'*|*$'\r'*)
+        die "REFUSED — the reason holds a | or a line break; say it in one plain line."
+        exit 2
+        ;;
+    esac
     _target="$(clean "$ORDER_TARGET")"
     _why="$(clean "$ORDER_WHY")"
     [ -n "$_target" ] || usage "unrostered needs a non-empty target."
