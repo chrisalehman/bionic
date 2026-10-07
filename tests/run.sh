@@ -32,6 +32,7 @@
 #   bash tests/run.sh              width from the machine's own pressure rung
 #   bash tests/run.sh --serial     one at a time, in roster order
 #   bash tests/run.sh --dry-run    print the job width and exit, run nothing
+#   bash tests/run.sh --only a.test.sh [b.test.sh …]   the named suites only (see THE DOOR)
 #   BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh   the ceiling the rung reads against
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
 #   BIONIC_TEST_PROGRESS=p.tsv bash tests/run.sh also append <UTC>TAB<label>TAB<rc>
@@ -236,16 +237,39 @@ unset BIONIC_TEST_TIMING
 # Refused, not ignored. Before this task the runner read no argv at all, so
 # `bash tests/run.sh --serial` ran the whole roster and looked like it had
 # honoured a flag it had never heard of.
+#
+# THE DOOR: `--only <suite>[ <suite>…]` (wave-28 T36; D27, AC-10.2). A dispatched agent runs a
+# suite through this runner and never by `bash tests/<suite>.test.sh`, which the Bash wall
+# refuses it, so the suite gets the world a full run gives it: the interpreter pin, the
+# environment, the roster wall, the adoption wall and one gate ask per suite (`--one`). The
+# names are file names (`a.test.sh`), read until the next option; the roster below is narrowed
+# to them, in roster order. A name the roster does not hold, or a path, refuses the whole call
+# before anything runs: a run that quietly skipped a name would read as that suite's proof.
 SERIAL=0
 DRY_RUN=0
+ONLY=0; _only_names=()
+_usage="usage: bash tests/run.sh [--serial] [--dry-run] [--only <suite> [<suite>…]]"
 while [ $# -gt 0 ]; do
   case "$1" in
     --serial) SERIAL=1 ;;
     --dry-run) DRY_RUN=1 ;;
+    --only)
+      ONLY=1
+      while [ $# -gt 1 ]; do
+        case "$2" in -*) break ;; esac
+        _only_names+=("$2"); shift
+      done
+      if [ "${#_only_names[@]}" -eq 0 ]; then
+        echo "tests/run.sh: --only needs at least one suite file name" >&2
+        echo "$_usage" >&2
+        exit 2
+      fi
+      ;;
     -h|--help)
-      echo "usage: bash tests/run.sh [--serial] [--dry-run]"
+      echo "$_usage"
       echo "  --serial            one suite at a time, in roster order"
       echo "  --dry-run           print the job width and exit; run nothing"
+      echo "  --only <suite>…     run only the named suites (file names, e.g. a.test.sh)"
       echo "  BIONIC_TEST_JOBS_CEILING  the ceiling the pressure rung reads against (default 8)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
       echo "  BIONIC_TEST_PROGRESS  a file to append to, one <UTC>TAB<label>TAB<rc>"
@@ -254,7 +278,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "tests/run.sh: unknown option: $1" >&2
-      echo "usage: bash tests/run.sh [--serial] [--dry-run]" >&2
+      echo "$_usage" >&2
       exit 2
       ;;
   esac
@@ -364,6 +388,34 @@ if [ -n "$_roster_refusals" ]; then
   printf '%s' "$_roster_refusals" >&2
   echo "tests/run.sh: nothing was run. Every gating suite is a regular file named in [A-Za-z0-9._-], starts with #!/bin/bash and sources tests/lib/assert.sh; a protocol meant to be run by hand belongs in .bionic/tests/." >&2
   exit 2
+fi
+
+# THE DOOR NARROWS THE ROSTER, AFTER THE WALL (T36). The wall above has judged the whole
+# directory, as for a full run; the named suites are then the roster, in roster order, each
+# once. Every name is checked before anything is narrowed, so one bad name runs nothing.
+if [ "$ONLY" -eq 1 ]; then
+  _only_bad=""
+  for _only_name in "${_only_names[@]}"; do
+    case "$_only_name" in
+      */*) _only_bad="${_only_bad}tests/run.sh: --only names ${_only_name}, a path — name a suite by its file name (a.test.sh)"$'\n'; continue ;;
+    esac
+    _only_hit=0
+    for _roster_file in "$@"; do [ "${_roster_file##*/}" = "$_only_name" ] && _only_hit=1; done
+    [ "$_only_hit" -eq 1 ] || \
+      _only_bad="${_only_bad}tests/run.sh: --only names ${_only_name}, which is not a suite under tests/"$'\n'
+  done
+  if [ -n "$_only_bad" ]; then
+    printf '%s' "$_only_bad" >&2
+    echo "tests/run.sh: nothing was run." >&2
+    exit 2
+  fi
+  _only_files=()
+  for _roster_file in "$@"; do
+    for _only_name in "${_only_names[@]}"; do
+      if [ "${_roster_file##*/}" = "$_only_name" ]; then _only_files+=("$_roster_file"); break; fi
+    done
+  done
+  set -- ${_only_files+"${_only_files[@]}"}
 fi
 
 # ── TIMING-BOUND SUITES RUN SOLO (T20, A-orch-28; why-session-start-slow.md) ──

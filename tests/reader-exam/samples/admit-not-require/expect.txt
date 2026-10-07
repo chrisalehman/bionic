@@ -2,3 +2,5 @@ question: evidence
 result: fail
 token: REFUTED
 names: land.sh
+finding-file: bin/land.sh | lib/fullrun.sh
+finding-rating: S1 on | S1 off | S2 on

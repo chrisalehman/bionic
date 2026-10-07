@@ -1955,81 +1955,39 @@ walls_with_budget() {  # <parallel-budget value> -> the keyless header carrying 
     NR == 1 && $0 == "---" { print; print "parallel-budget: " v; next }
     { print }'
 }
-WALLS_PLAN_WITH_BUDGET="$(walls_with_budget "writers=22 suites=18 worktrees=32 test_jobs=18 source=probe")"
+WALLS_PLAN_WITH_BUDGET="$(walls_with_budget "writers=22 suites=18 worktrees=32 test_jobs=18 source=user")"
 
-echo "Write: plan header WITHOUT parallel-budget: → block, naming the key (REQ-3 AC-3.1)"
-run_write "$walls_plan" "$WALLS_PLAN_NO_BUDGET"
-assert_eq "walls-1 a plan with no parallel-budget: is refused" 2 "$HOOK_EXIT"
-assert_contains "walls-1b …the refusal line names the key" "parallel-budget:" "$HOOK_STDERR"
-assert_contains "walls-1c …and the detail names Step 0's derivation, probe first" "resources_probe" "$HOOK_VSTDERR"
-assert_contains "walls-1d …then the budget it yields" "resources_budget" "$HOOK_VSTDERR"
-
-echo "Write: parallel-budget: with no writers= field → block"
-run_write "$walls_plan" "$(walls_with_budget "suites=18 worktrees=32 test_jobs=18 source=probe")"
-assert_eq "walls-1e a budget line carrying no writers= is refused" 2 "$HOOK_EXIT"
-run_write "$walls_plan" "$(walls_with_budget "writers=many suites=18 source=probe")"
-assert_eq "walls-1e2 …and so is a writers= that is not digits" 2 "$HOOK_EXIT"
-
-# walls-1i/1j (critic C5, wave-19): the ONE key spelling every reader shares is
-# `parallel-budget:` at column 0, colon immediately after — no leading whitespace, no
-# whitespace before the colon. That is byte-identical to `hooks/session-poker.sh`'s
-# `plan_budget_line` (`/^parallel-budget:[ \t]*/`) and `hooks/dispatch-preflight.sh`'s
-# budget wall (same awk pattern). Before the fix this hook's own pattern
-# (`^[[:space:]]*parallel-budget[[:space:]]*:`) admitted both variants below — a header
-# the tick and the dispatch wall would then read as carrying NO parallel-budget: line at
-# all, so a plan judged fine here goes unmeasured everywhere else. Refused after the fix.
+# §NOBUDGET — NO PLAN NEEDS THE LINE (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a plan
+# Write whose header carried no `parallel-budget:` line with a `writers=<digits>` field was
+# refused here, naming Step 0's probe (wave-19 REQ-3, ADR-035). A line caps a run only when a
+# person wrote it now (`budget_cap`, lib/run.sh), so the hook neither requires nor reads it:
+# every shape it used to refuse writes, silently. fails-when: a plan with no line is refused.
+section "§NOBUDGET — a plan write with no parallel-budget: line is admitted (wave-28 T9, AC-2.9)"
 walls_with_budget_raw() {  # <literal header line> -> the keyless header carrying that line verbatim
   printf '%s' "$WALLS_PLAN_NO_BUDGET" | awk -v v="$1" '
     NR == 1 && $0 == "---" { print; print v; next }
     { print }'
 }
-
-echo "Write: leading whitespace before the key → block (tick/dispatch-wall cannot read it)"
-run_write "$walls_plan" "$(walls_with_budget_raw " parallel-budget: writers=4 suites=2 worktrees=8 test_jobs=4 source=probe")"
-assert_eq "walls-1i leading whitespace before parallel-budget: is refused" 2 "$HOOK_EXIT"
-assert_contains "walls-1i2 …naming the key" "parallel-budget:" "$HOOK_STDERR"
-
-echo "Write: whitespace before the colon → block (tick/dispatch-wall cannot read it)"
-run_write "$walls_plan" "$(walls_with_budget_raw "parallel-budget : writers=4 suites=2 worktrees=8 test_jobs=4 source=probe")"
-assert_eq "walls-1j whitespace before the colon is refused" 2 "$HOOK_EXIT"
-assert_contains "walls-1j2 …naming the key" "parallel-budget:" "$HOOK_STDERR"
-
-echo "Write: the canonical spelling, no whitespace anywhere near the key → allow (control)"
-run_write "$walls_plan" "$(walls_with_budget_raw "parallel-budget: writers=4 suites=2 worktrees=8 test_jobs=4 source=probe")"
-assert_eq "walls-1k the canonical spelling still writes" 0 "$HOOK_EXIT"
-
-echo "Write: a SPEC with no parallel-budget: → allow (the arm is the plan's alone)"
-run_write "$project/.bionic/docs/specs/epic-01-demo/walls-nobudget.spec.md" \
-  "$(build_plan omit=parallel-budget waived="$SPEC_DESIGN_WAIVER")"
-assert_eq "walls-1f a keyless spec still writes" 0 "$HOOK_EXIT"
-
-# AC-3.4, THE TREE HALF: no OPEN plan lacks the key. `run_open` (payload/scripts/lib/run.sh)
-# is the run predicate every gate uses, crossed with `grep -L` for the key — the same pair
-# the Step-2 research drove over the live tree (R2 Q5). A fixture tree carries one plan of
-# each shape a real tree holds: open-and-keyed, closed-and-keyless (delivered), and
-# abandoned-and-keyless. The intersection is empty; the paired mutation (an open keyless
-# plan) makes it non-empty, so the row discriminates.
-AC34_RUN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh"
-ac34_open_keyless() {  # <plans dir> -> open plans lacking the key, one per line
-  local f
-  ( . "$AC34_RUN_LIB" >/dev/null 2>&1
-    for f in $(/usr/bin/grep -rL '^parallel-budget:.*writers=[0-9]' --include='*.plan.md' "$1" 2>/dev/null); do
-      run_open "$f" && printf '%s\n' "$f"
-    done ) 2>/dev/null
-}
-ac34_tree=$(mktemp -d)
-mkdir -p "$ac34_tree/epic-01"
-printf -- '---\nparallel-budget: writers=8 source=probe\n---\n\n## SDLC State\n\ncurrent: 4\n' \
-  > "$ac34_tree/epic-01/open.plan.md"
-printf -- '---\ngoverning-skill: x\n---\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: 2026-09-01\n' \
-  > "$ac34_tree/epic-01/closed.plan.md"
-printf -- '---\nabandoned: 2026-09-07 reset\n---\n\n## SDLC State\n\ncurrent: 4\n' \
-  > "$ac34_tree/epic-01/abandoned.plan.md"
-assert_eq "walls-1g AC-3.4 no open plan in the tree lacks the key" "" "$(ac34_open_keyless "$ac34_tree")"
-printf -- '---\ngoverning-skill: x\n---\n\n## SDLC State\n\ncurrent: 4\n' > "$ac34_tree/epic-01/stray.plan.md"
-assert_contains "walls-1h …and an open keyless plan is found (the row discriminates)" \
-  "stray.plan.md" "$(ac34_open_keyless "$ac34_tree")"
-rm -rf "$ac34_tree"
+expect_absent "§NOBUDGET.0 meta: the keyless header carries no parallel-budget: line" \
+  "parallel-budget" "$WALLS_PLAN_NO_BUDGET"
+expect_contains "§NOBUDGET.0b meta: …and is otherwise a whole plan header (model_plan present)" \
+  "model_plan:" "$WALLS_PLAN_NO_BUDGET"
+run_write "$walls_plan" "$WALLS_PLAN_NO_BUDGET"
+expect_status "§NOBUDGET.1 a plan with no parallel-budget: line writes" 0 "$HOOK_EXIT"
+expect_empty "§NOBUDGET.1b …and the hook says nothing about it" "$HOOK_STDERR"
+run_write "$walls_plan" "$(walls_with_budget "suites=18 worktrees=32 test_jobs=18 source=probe")"
+expect_status "§NOBUDGET.2 a line carrying no writers= writes" 0 "$HOOK_EXIT"
+run_write "$walls_plan" "$(walls_with_budget "writers=many suites=18 source=probe")"
+expect_status "§NOBUDGET.3 …and so does a writers= that is not digits" 0 "$HOOK_EXIT"
+run_write "$walls_plan" "$(walls_with_budget_raw " parallel-budget: writers=4 source=probe")"
+expect_status "§NOBUDGET.4 a key with leading whitespace writes (no reader takes it; nothing owes it)" 0 "$HOOK_EXIT"
+run_write "$walls_plan" "$(walls_with_budget_raw "parallel-budget: writers=4 source=user")"
+expect_status "§NOBUDGET.5 a person's cap writes too" 0 "$HOOK_EXIT"
+expect_empty "§NOBUDGET.5b …silently" "$HOOK_STDERR"
+# THE CONTROL: the hook still refuses a plan missing a flag it does require, so a hook that
+# admitted every Write would not pass the rows above for the right reason.
+run_write "$walls_plan" "$(build_plan omit=model_plan)"
+expect_status "§NOBUDGET.6 control: a plan missing model_plan is still refused" 2 "$HOOK_EXIT"
 
 echo "Write: plan header WITH parallel-budget: → allow"
 run_write "$walls_plan" "$WALLS_PLAN_WITH_BUDGET"
