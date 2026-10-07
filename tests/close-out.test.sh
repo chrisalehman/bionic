@@ -1864,6 +1864,73 @@ expect_eq "CARRY-23 an existing continuation whose only ## Deferrals is fenced: 
 expect_eq "CARRY-23a …and the fenced example is kept as it was" "1" \
   "$(/usr/bin/grep -c '^deferred: an example of the form$' "$PF/$CONT_REL" | tr -d ' ')"
 
+# a continuation written by hand BEFORE Step 9 with the heading and this run's own line under it (the
+# shape steps/9.md invites) still gets what the run inherited and did not settle (wave-28 T50, AC-8.10;
+# read-adversarial-p16 #1): close-out merges, each line written once, the missing ones at the end of the
+# section; check names what run will add, and says "left as it stands" only when nothing would be added
+CARRY_OWN="deferred: $CARRY_REC#1 S2 off \"this run's own\" stated=\"-\" from=$CARRY_W"
+PX="$(mk_fixture carry14)"; advance_to "$PX" 8
+carry_prev "$PX"
+carry_req "$PX" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
+carry_plant "$PX" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
+mkdir -p "$PX/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Chris decides\n\n1. none\n\n## Deferrals\n\n%s\n\n## Resume instruction\n\nNothing to resume.\n' \
+  "$CARRY_OWN" > "$PX/$CONT_REL"
+expect_eq "CARRY-24 precondition: the hand-written continuation holds the heading and this run's own line, and nothing carried" \
+  "$CARRY_OWN" "$(carry_section "$PX/$CONT_REL")"
+CARRY_CK0="$(cksum < "$PX/$CONT_REL")"
+run_close "$PX" check
+expect_contains "CARRY-25 check over a continuation with the heading names the 2 lines run will add, by id" \
+  "continuation: ${CONT_REL#.bionic/docs/} already written — run adds 2 deferred lines under ## Deferrals: $CARRY_PR#1 $CARRY_PR#2" "$CO_OUT"
+expect_eq "CARRY-25a …and check writes nothing" "$CARRY_CK0" "$(cksum < "$PX/$CONT_REL")"
+run_close "$PX" run
+expect_eq "CARRY-26 run exits 0, and the section holds this run's own line first, then the two the run inherited and did not dispose of" \
+  "0|$CARRY_OWN
+$CARRY_P1
+$CARRY_P2" "$CO_RC|$(carry_section "$PX/$CONT_REL")"
+expect_contains "CARRY-26a …and run says it added them" \
+  "continuation: ${CONT_REL#.bionic/docs/} already written — left as it stands, with 2 deferred lines added under ## Deferrals" "$CO_OUT"
+expect_eq "CARRY-26b …the hand-written text around the section is kept, byte for byte" \
+  "# continuation — hand written||## Chris decides||1. none||" "$(sed -n '1p;2p;3p;4p;5p;6p' "$PX/$CONT_REL" | tr '\n' '|')"
+expect_eq "CARRY-26c …and the section is followed by a blank line and the next heading as it was" \
+  "|## Resume instruction||Nothing to resume." "$(tail -4 "$PX/$CONT_REL" | tr '\n' '|' | sed 's/|$//')"
+CARRY_CK1="$(cksum < "$PX/$CONT_REL")"
+run_close "$PX" run
+expect_eq "CARRY-27 a second run adds nothing: the continuation is byte for byte what the first left" "0|$CARRY_CK1" \
+  "$CO_RC|$(cksum < "$PX/$CONT_REL")"
+expect_contains "CARRY-27a …and says it is left as it stands" \
+  "continuation: ${CONT_REL#.bionic/docs/} already written — left as it stands" "$CO_OUT"
+expect_absent "CARRY-27b …with no added lines in it" "deferred lines added" "$CO_OUT"
+run_close "$PX" check
+expect_contains "CARRY-27c check then names none: left as it stands" \
+  "continuation: ${CONT_REL#.bionic/docs/} already written — left as it stands" "$CO_OUT"
+expect_absent "CARRY-27d …and no add" "run adds" "$CO_OUT"
+
+# a line already under the heading, byte for byte, is not written twice; the one missing is added alone
+PY="$(mk_fixture carry15)"; advance_to "$PY" 8
+carry_prev "$PY"
+carry_req "$PY" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
+mkdir -p "$PY/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n%s\n' "$CARRY_P2" > "$PY/$CONT_REL"
+run_close "$PY" check
+expect_contains "CARRY-28 check names only the one line that is not there" \
+  "run adds 1 deferred line under ## Deferrals: $CARRY_PR#1" "$CO_OUT"
+run_close "$PY" run
+expect_eq "CARRY-28a run adds the missing one after the one that was there, and the one that was there once" \
+  "0|$CARRY_P2
+$CARRY_P1" "$CO_RC|$(carry_section "$PY/$CONT_REL")"
+
+# a heading with nothing under it, then the next heading: the lines go under it, a blank line between
+PZ="$(mk_fixture carry16)"; advance_to "$PZ" 8
+carry_prev "$PZ"
+carry_req "$PZ" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $CARRY_PR#3 done" "closed: $CARRY_PR#4 done"
+mkdir -p "$PZ/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nNothing.\n' > "$PZ/$CONT_REL"
+run_close "$PZ" run
+expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept" \
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Resume instruction||Nothing.|" \
+  "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
+
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
 CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-inherit-mut.XXXXXX")"
 mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
