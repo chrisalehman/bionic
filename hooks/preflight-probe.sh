@@ -49,9 +49,12 @@
 # derived from it. The five probe fields and the budget line come from
 # payload/scripts/lib/resources.sh; nothing here re-derives them.
 #
-#   * The budget VALUE is deliberately the whole `parallel-budget:` string the plan header
-#     carries, so Step 0, the dispatch wall and doctor read one string instead of four
-#     fields and a formula. `source=probe` distinguishes it from a hand-set override.
+#   * The budget VALUE is the whole `parallel-budget:`-shaped string `resources_budget` derives,
+#     labelled `source=probe`. It is THE PROBE'S ESTIMATE AND CAPS NOTHING (wave-28 T9; D15):
+#     a plan's line caps a run only when a person wrote it (`budget_cap` in lib/run.sh,
+#     `source=user` or `source=override`), and Step 0 no longer copies this string into the
+#     plan. The field keeps its key and its value, so doctor and every reader of an
+#     attestation on disk read it as before; what changed is what it is called.
 #   * A machine where the library cannot be read still takes an attestation, and it is a
 #     VERSION 1 one. Resources are a context probe, never a blocking one (§4): a missing
 #     library must not stop a dispatch, and an empty-fielded v2 would be a lie about a
@@ -564,7 +567,7 @@ if [ -n "$RESOURCES_LIB" ]; then
     if [ -n "$_budget" ]; then
       PROBE_BUDGET="$_budget source=probe"
       say "machine: ${PROBE_CORES}c, ${PROBE_MEM_GB} GB, ${PROBE_DISK_GB} GB free, load ${PROBE_LOAD_1M} (${PROBE_OS})"
-      say "budget: $PROBE_BUDGET"
+      say "probe estimate (caps nothing; a cap is a person's): $PROBE_BUDGET"
     fi
   fi
   # Any gap in the five fields or the budget leaves PROBE_BUDGET empty, and the write below
