@@ -1899,6 +1899,8 @@ inh_block() {
 inh_heads() { printf '%s\n' "$1" | /usr/bin/grep -cx '  Inherited deferrals' | tr -d ' '; }
 inh_cont wave-0-old 202601010000 "## Deferrals" "" "$INH_LOLD"
 inh_cont wave-1-a 202602010000 "## Next wave: x" "" "carry-overs" "" "## Deferrals" "" "$INH_L1" "$INH_L2" "" "## Resume instruction" "" "nothing"
+# (The Artifacts path of a requirements file outside the project prints whole, unbound by the budget
+# — rows 67/68 above — so INHERIT-5 reads every other line.)
 # THE RUN'S OWN CONTINUATION IS NEVER ITS PREDECESSOR, however new: wave-2-b is the run the
 # requirements file below is for (its name says so), and its continuation is the newest file.
 inh_cont wave-2-b 203001010000 "## Deferrals" "" "$INH_LOPEN"
@@ -1915,7 +1917,8 @@ expect_contains "INHERIT-3 a stated sentence holding an escaped quote reaches th
   'stated="Said \"go\" \\ now, and meant it."' "$(inh_block "$INH_C0")"
 expect_absent "INHERIT-4 the older continuation's deferral is not listed" "an older run's deferral" "$INH_C0"
 expect_absent "INHERIT-4a …nor a line of the run's own continuation, the newest file" "an open run's line" "$INH_C0"
-expect_empty "INHERIT-5 no line of the card is wider than the budget, the folded deferral included" "$(over_budget "$INH_C0")"
+expect_empty "INHERIT-5 no line of the card is wider than the budget, the folded deferral included" \
+  "$(over_budget "$(printf '%s\n' "$INH_C0" | /usr/bin/grep -v '^    requirements  ')")"
 expect_eq "INHERIT-5a the section sits between Not Doing and Artifacts" "yes" \
   "$(printf '%s\n' "$INH_C0" | awk '/^  Not Doing$/ { a = NR } /^  Inherited deferrals$/ { b = NR } /^  Artifacts$/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }')"
 
@@ -1950,7 +1953,9 @@ expect_eq "INHERIT-11c …and its second line is the disposal as written" \
 expect_true "INHERIT-11d …the first line fits the 100-column refusal width" \
   test "$(cols "$(printf '%s\n' "$WC_ERR" | head -1)")" -le 100
 
-# no heading, and the heading with nothing under it: the section prints, empty
+# no heading, and the heading with nothing under it: the section prints, empty (the requirements file
+# is written afresh, with no disposal: the rows above left theirs in it)
+INH_R0="$(inh_req wave-2-b)"
 inh_cont wave-1-a 202602010000 "## Next wave: x" "" "a continuation written before the heading existed"
 whole_card step1 "$INH_R0"; INH_CN="$WC_OUT"
 expect_eq "INHERIT-12 a continuation without ## Deferrals: exit 0, the section printed with nothing under it" "0|1|" \
