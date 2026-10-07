@@ -1578,6 +1578,7 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
   local _LS_OUT _LS_RC LAUNCH_REASON=""
+  local ENTRY_REASON _TE_IDS _TE_N _TE_ID
   local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1811,6 +1812,38 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
     print "tasklist"
   }
 ')
+
+# ---------- THE TASK LIST'S SECOND TRIGGER: a dispatch turn sets its entries in progress ----------
+#
+# (wave-28 T38; REQ-13, D30.) The refresh above is owed to a tick; this is owed to a DISPATCH, tick
+# or no tick. A turn that launched an agent bound to a plan row owes as many TaskUpdate calls
+# setting `in_progress` as rows it dispatched (`_ST_ENTERED`, folded in `stop_turn_facts`). A hook
+# cannot write the task list, so a refusal is the only enforcement there is, and it is this duty's:
+# no new site. Alone, the verdict `entry` goes to the forwarder below; beside another duty it rides
+# in that duty's detail, as the launch and marker reasons do. It refuses once, through the same
+# `stop_hook_active` guard as every duty here. The wall counts; it cannot tell which entry belongs
+# to which row, so the predicate is a count, never a match.
+#
+# BOUND IS THE FILL DUTY'S OWN LAUNCHED SET: a plan row a turn launched is a row `fill_row_launched`
+# finds in `_ST_LAUNCHED`, the one computation of the turn's launches the ledger also records (a
+# refused dispatch left out). Every row of the bound plan's table counts, whatever its status: the
+# launch recorder sets a dispatched row `active` before this Stop reads it. A launch that binds no
+# row (a helper, a researcher) owes nothing, and a row launched twice is one row.
+ENTRY_REASON=""
+if [ -n "$_ST_LAUNCHED" ] && [ -n "$_ST_PLAN" ]; then
+  _TE_IDS=""; _TE_N=0
+  while IFS=$'\t' read -r _TE_ID _; do
+    case "$_TE_ID" in ''|*[!A-Za-z0-9_.-]*) continue ;; esac
+    fill_row_launched "$_TE_ID" "$_ST_LAUNCHED" || continue
+    case " $_TE_IDS " in *" $_TE_ID "*) continue ;; esac
+    _TE_IDS="${_TE_IDS}${_TE_IDS:+ }${_TE_ID}"; _TE_N=$((_TE_N + 1))
+  done <<TE_ROWS
+$(units_rows "$_ST_PLAN" 2>/dev/null)
+TE_ROWS
+  if [ "$_TE_N" -gt 0 ] && [ "${_ST_ENTERED:-0}" -lt "$_TE_N" ]; then
+    ENTRY_REASON="tasks: dispatched ${_TE_IDS} this turn, ${_ST_ENTERED:-0} of ${_TE_N} task entries set in progress — set each dispatched row's entry in progress"
+  fi
+fi
 
 # ---------- THE THIRD DUTY: no turn ends on a fillable gap (AC-29; wave-20 REQ-5, Δ7) ----
 #
@@ -2081,6 +2114,15 @@ TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
 [ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
 [ -n "$LAUNCH_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${LAUNCH_REASON}"
+# THE TASK ENTRIES (wave-28 T38) ride beside any other duty, in its detail and under its line; alone,
+# they are the verdict, refused through the forwarder below.
+if [ -n "$ENTRY_REASON" ]; then
+  if [ -z "$TELL_REASON" ] && [ "$VERDICT" != tasklist ]; then
+    VERDICT=entry
+  else
+    TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${ENTRY_REASON}"
+  fi
+fi
 
 # The two folds are judged TOGETHER, so a turn that skipped a duty AND left a FILL
 # unanswered is told both things once. Blocking on one and staying silent about the other
@@ -2126,7 +2168,8 @@ fi
 # value and no path is interpolated into them. The fill clause is the one
 # exception and it carries task ids read out of the transcript — filtered in the
 # fold above to `[A-Za-z0-9_.-]+` and handed to jq through `--arg`, so neither a
-# shell nor a JSON quoting surface is opened by them.
+# shell nor a JSON quoting surface is opened by them. The task-entry clause carries
+# plan row ids under the same filter, and two counts.
 # THE FACT AND THE FIX COME FROM THE VERDICT, one row per duty missed (table rows
 # 111-113); the existing paragraph stays whole as `detail`.
 case "$VERDICT" in
@@ -2145,6 +2188,10 @@ case "$VERDICT" in
       grew)  FIX='TaskList, rebuild it, then stop again'
              REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the ## Tasks table grew (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete the pending entries after the new row and recreate them. Do it, then stop again — this gate blocks once.' ;;
     esac ;;
+  entry)
+    # THE DISPATCH TURN'S ENTRIES, alone (wave-28 T38): the fix names the act the wall counts.
+    FACT="a dispatched row's entry is not in progress"; FIX='TaskUpdate each to in_progress'
+    REASON="$ENTRY_REASON" ;;
   *)
     return "$_adv" ;;
 esac
@@ -2182,6 +2229,9 @@ return 2
 #                   whose result was an error (a dispatch the preflight refused); once the
 #                   roster is read, each name whose row carries `row=` is that id (wave-28 T7)
 #   _ST_DECLINED    the turn's last `fill-declined:` reason, from the model's own text only
+#   _ST_ENTERED     how many task entries the turn set `in_progress`: distinct task numbers of
+#                   its main-thread TaskUpdate calls with that status, less the ones whose result
+#                   was an error — the task-entry duty's count (wave-28 T38, D30)
 #   _ST_CURRENT _ST_STATE _ST_CEILING _ST_WIDTH _ST_OPEN _ST_FREE   the ledger's numbers
 #   _ST_READY       every ready id, space-joined, untrimmed — the plan's set, launches included
 #   _ST_READY_N     how many ids _ST_READY holds
@@ -2225,6 +2275,9 @@ return 2
 #                                    which writes no roster row and launched nothing — or a
 #                                    refused TaskStop, which stopped nothing (any tool's error)
 #   STOP <task id words> <tool_use id>  a main-thread TaskStop tool_use — the stand-down's answer
+#   TASKUP <task number> <status> <tool_use id>  a main-thread TaskUpdate tool_use — the
+#                                    task-entry duty's evidence (wave-28 T38, D30). The harness
+#                                    writes `input:{taskId,status}`; nothing else of it is read
 #   DECLINE <reason>                 `fill-declined: <reason>` at a LINE START of a main-thread
 #                                    assistant TEXT block — never thinking, never a tool_use
 #                                    input, never a tool result (AC-5.4: prose quoting, a file
@@ -2257,7 +2310,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
-  _ST_RECONCILE=""
+  _ST_RECONCILE=""; _ST_ENTERED=0
   local tr fold mark rest ready count want cap owed FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at rvat led standing gap rcount rgap slot
 
@@ -2334,6 +2387,11 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
                 "STOP\t" + (([.input.task_id?, .input.name?, .input.shell_id?]
                               | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
                 + "\t" + ((.id // "") | tostring)
+              else empty end ),
+            ( if .name == "TaskUpdate" then
+                "TASKUP\t" + (((.input.taskId // "") | tostring) | gsub("[\n\t\r]"; " "))
+                + "\t" + (((.input.status // "") | tostring) | gsub("[\n\t\r]"; " "))
+                + "\t" + ((.id // "") | tostring)
               else empty end )
         else empty
         end
@@ -2350,22 +2408,30 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       t = $2; sub(/^[ \t]+/, "", t)
       tick = (index(t, mark) == 1)
       ts = $3; key = ($4 != "" ? $4 : $3)
-      n = 0; decl = ""
+      n = 0; decl = ""; u = 0
       next
     }
     $1 == "AGENT"    { n++; an[n] = $2; aid[n] = $3; next }
     $1 == "AGENTERR" { if ($2 != "") err[$2] = 1; next }
     $1 == "DECLINE"  { decl = $2; next }
+    $1 == "TASKUP"   { if ($3 == "in_progress" && $2 != "") { u++; ut[u] = $2; uid[u] = $4 } next }
     END {
       launched = ""
       for (i = 1; i <= n; i++) {
         if (aid[i] != "" && (aid[i] in err)) continue
         launched = launched (launched == "" ? "" : ",") an[i]
       }
-      printf "%d\037%s\037%s\037%s\037%s\n", tick + 0, key, ts, launched, decl
+      entered = 0; seen = " "
+      for (i = 1; i <= u; i++) {
+        if (uid[i] != "" && (uid[i] in err)) continue
+        if (index(seen, " " ut[i] " ") > 0) continue
+        seen = seen ut[i] " "; entered++
+      }
+      printf "%d\037%s\037%s\037%s\037%s\037%d\n", tick + 0, key, ts, launched, decl, entered
     }')"
-  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED <<< "$fold"
+  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED _ST_ENTERED <<< "$fold"
   case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
+  case "$_ST_ENTERED" in ''|*[!0-9]*) _ST_ENTERED=0 ;; esac
 
   # THE TICK'S DUTY LINE (wave-24 T8; D5, AC-4.13). The tick writes `duty=none` beside its
   # digest when it printed `unchanged`, or owed no reconcile
