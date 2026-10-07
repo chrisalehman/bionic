@@ -587,7 +587,13 @@ RR6b="$(ll_world)"
 printf '%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RR6b")" \
   suites_allowed='none docs only' suites_source=declared)" >> "$RR6b/.bionic/tmp/roster-$WORLD_SID.state"
 ll_verb "$RR6b" T1
-expect_eq "(r6d2) suites_allowed=none means what lands_on=none means: the candidate publishes with no run" "0 none 0" \
+expect_eq "(r6d2) suites_allowed=none on a 1.12.0 row is an absence, not a waiver: refused (exit 2), naming its key" "2 yes" \
+  "$LL_RC $(printf '%s' "$LL_OUT" | grep -qF "REFUSED reason=no-lands-on row=T1 name=wx-T1 suites_allowed=none docs only — " && echo yes || echo no)"
+expect_contains "(r6d2) …and the hand landing" "--by-hand --reason '<why>'" "$LL_OUT"
+expect_false "(r6d2) …and nothing is appended" test -e "$(ll_rec "$RR6b")"
+ll_launch "$RR6b" T1 'none docs only'
+ll_verb "$RR6b" T1
+expect_eq "(r6d3) …while the same tree, lands_on=none <why> (a declared waiver) publishes with no run (the one parser, the key's meaning)" "0 none 0" \
   "$LL_RC $(ll_field "$(ll_ev "$RR6b" ready)" suites) $(ll_ev "$RR6b" verdict | awk 'END { print NR }')"
 ll_launch "$RR3" T1 none
 ll_verb "$RR3" T1
@@ -706,10 +712,17 @@ expect_eq "(r6em) MUTANT the launch-row read restored: the amended row lands wit
 RM8="$(ll_world)"
 printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RM8")" \
   suites_allowed=b.test.sh suites_source=declared)" >> "$(ll_roster "$RM8")"
-LL_MUTANT='s/if \[ -z "\$lands" \]; then/if true; then/' LL_MUTANT_FN=line_ready ll_drive "$RM8" T1 "$WORLD_ROOT/m8-T1.out"
+LL_MUTANT='s/\[ -n "\$v" \] || {/false || {/' LL_MUTANT_FN=_line_lands ll_drive "$RM8" T1 "$WORLD_ROOT/m8-T1.out"
 ll_wait_file "$WORLD_ROOT/m8-T1.out.rc" 300
 expect_eq "(r6cm) MUTANT suites_allowed= wins over lands_on=: the row is proved on b.test.sh (the row can fail)" "b.test.sh" \
   "$(ll_field "$(ll_ev "$RM8" ready)" suites)"
+RM9="$(ll_world)"
+printf '%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 plan="$(ll_plan "$RM9")" \
+  suites_allowed=none suites_source=declared)" >> "$(ll_roster "$RM9")"
+LL_MUTANT='s/\[ "\$key" = lands_on \] || return 3/:/' LL_MUTANT_FN=_line_lands ll_drive "$RM9" T1 "$WORLD_ROOT/m9-T1.out"
+ll_wait_file "$WORLD_ROOT/m9-T1.out.rc" 300
+expect_eq "(r6dm) MUTANT the absence arm removed: suites_allowed=none lands with no run (the row can fail)" "0 none" \
+  "$(cat "$WORLD_ROOT/m9-T1.out.rc" 2>/dev/null) $(ll_field "$(ll_ev "$RM9" ready)" suites)"
 # The parser, asked directly: the label's grammar.
 expect_eq "(r6k) the suite-name parser: names, paths, run.sh, none" \
   "a.test.sh|a.test.sh,b.test.sh|a.test.sh|none|FAIL|FAIL|FAIL" \
