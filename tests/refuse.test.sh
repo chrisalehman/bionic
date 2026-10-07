@@ -1199,22 +1199,29 @@ inv_w28_sites() {  # <root> -> the four wall files' refusal sites, counted
 # queue, so they ride on top of the ceiling as the door does: one per inventory bullet tagged
 # `(wave-28 T7`, at most four. A fifth site with no tagged bullet still fails the pin.
 INV_W28_T7_MAX=4
-inv_w28_ceiling() {  # <inventory> -> 1.12.0's sites, plus the door's one and T7's, as the inventory tags them
-  local door t7
+# AND T55's ONE (wave-28 T55; D4): the dispatch wall refuses a Row: that names a row other than the one
+# the agent's name matches. It is a brief-check refusal beside T7's, not a wall that enforces the queue,
+# so it rides on top as T7's four do: one per inventory bullet tagged `(wave-28 T55`, at most one.
+INV_W28_T55_MAX=1
+inv_w28_ceiling() {  # <inventory> -> 1.12.0's sites, plus the door's one, T7's and T55's, as the inventory tags them
+  local door t7 t55
   door="$(grep -c "REQ-10's door" "$1" 2>/dev/null)"; [ "${door:-0}" -le 1 ] || door=1
   t7="$(grep -c '(wave-28 T7' "$1" 2>/dev/null)"; [ "${t7:-0}" -le "$INV_W28_T7_MAX" ] || t7="$INV_W28_T7_MAX"
-  printf '%s' $((INV_W28_BASE + ${door:-0} + ${t7:-0}))
+  t55="$(grep -c '(wave-28 T55' "$1" 2>/dev/null)"; [ "${t55:-0}" -le "$INV_W28_T55_MAX" ] || t55="$INV_W28_T55_MAX"
+  printf '%s' $((INV_W28_BASE + ${door:-0} + ${t7:-0} + ${t55:-0}))
 }
 inv_w28_excess() {  # <root> <inventory> -> a line when the sites pass 1.12.0's but for the door's one and T7's
   local n c
   n="$(inv_w28_sites "$1")"; c="$(inv_w28_ceiling "$2")"
-  [ "$n" -le "$c" ] || printf 'sites=%s over %s: 1.12.0 %s plus the door and T7, as tagged\n' "$n" "$c" "$INV_W28_BASE"
+  [ "$n" -le "$c" ] || printf 'sites=%s over %s: 1.12.0 %s plus the door, T7 and T55, as tagged\n' "$n" "$c" "$INV_W28_BASE"
 }
 INV_W28_N="$(inv_w28_sites "$REPO_ROOT")"
 expect_true "INV-W28a precondition: the four wall files' sites are read (${INV_W28_N})" test "$INV_W28_N" -gt 0
 expect_eq "INV-W28t7 precondition: the inventory carries T7's four tagged bullets" "4" \
   "$(grep -c '(wave-28 T7' "$INV_FILE" 2>/dev/null)"
-expect_eq "INV-W28a no wall file gains a refusal site beyond 1.12.0's, but REQ-10's door and T7's four" "" \
+expect_eq "INV-W28t55 precondition: the inventory carries T55's one tagged bullet" "1" \
+  "$(grep -c '(wave-28 T55' "$INV_FILE" 2>/dev/null)"
+expect_eq "INV-W28a no wall file gains a refusal site beyond 1.12.0's, but REQ-10's door, T7's four and T55's one" "" \
   "$(inv_w28_excess "$REPO_ROOT" "$INV_FILE")"
 INV_W28_SYN="$(mktemp -d)"
 for _f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
@@ -1222,7 +1229,7 @@ for _f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatc
 done
 # AS MANY ARMS AS PASS THE CEILING FROM WHERE THE TREE STANDS (wave-28 T9): a row that removes
 # refusal sites (T9 took out two) leaves the tree under 1.12.0's count, so a fixed two would not
-# reach past it. One arm more than the room left under the ceiling, the door's and T7's included (the
+# reach past it. One arm more than the room left under the ceiling, the door's, T7's and T55's included (the
 # ceiling is read from the inventory as inv_w28_excess reads it, so the two cannot part).
 _inv_w28_k=$(( $(inv_w28_ceiling "$INV_FILE") + 1 - INV_W28_N )); [ "$_inv_w28_k" -ge 1 ] || _inv_w28_k=1
 while [ "$_inv_w28_k" -gt 0 ]; do
