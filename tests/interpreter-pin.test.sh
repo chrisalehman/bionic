@@ -1643,6 +1643,30 @@ expect_eq "7.95b …with ONE line, the path remedy and the character shown as ?"
   "$(t57_line "$T73_DIR/hr?x" "$T73_DIR/hr?x/bionic-interpreter-pin.$STOP_UID carries a control character" "$T57_FIX")" "$STOP_ERR"
 expect_contains "7.95c …the marker is unset (nothing was pinned)" "pinned=unset" "$STOP_LOG"
 expect_absent "7.95d …and no check ran" "check ran" "$STOP_LOG"
+# THE REMEDY IS KEYED ON WHICH mkdir FAILED (T73; pass 48 #2, structure #2). A root of this user's that cannot take the
+# pin (read-only, a full disk) failed the same way every time, and `run again` was the remedy; only a lost race
+# (7.88) is cured by running again. The two are told apart where the mkdir fails: the path is there afterwards or not.
+T73_RO="$T73_DIR/ro"; mkdir -p "$T73_RO"; chmod 0700 "$T73_RO"
+T73_RO_ROOT="$T73_RO/bionic-interpreter-pin.$STOP_UID"; mkdir -m 0500 "$T73_RO_ROOT"
+stop_run "$STOP_SUITE" "$T73_RO"
+expect_eq "7.96 a hand run whose root is this user's and read-only: exits 2" "2" "$STOP_RC"
+expect_eq "7.96b …naming the pin that cannot be made, with the remedy to remove the root" \
+  "$(t57_line "$T73_RO" "cannot make $T73_RO_ROOT/pin" "remove $T73_RO_ROOT or set TMPDIR")" "$STOP_ERR"
+expect_eq "7.96c …the root is still there (the harness ran the failure) and no check ran" "present:" "$(there "$T73_RO_ROOT"):$(printf %s "$STOP_LOG" | grep 'check ran')"
+chmod 0700 "$T73_RO_ROOT"
+T73_SP="$T73_DIR/sp"; mkdir -p "$T73_SP"; chmod 0700 "$T73_SP"; mkdir -m 0700 "$T73_SP/bionic-interpreter-pin.$STOP_UID"
+: > "$T67_MKDIR_LOG"
+STOP_PATH="$T67_STUB:$HAND_GIVEN_PATH" T67_MKDIR_FAIL='*/pin' stop_run "$STOP_SUITE" "$T73_SP"
+expect_eq "7.97 a pin whose mkdir fails and leaves nothing, in a root of this user's: exits 2, the root is there" "2:present" "$STOP_RC:$(there "$T73_SP/bionic-interpreter-pin.$STOP_UID")"
+expect_eq "7.97b …naming the pin, with the remedy to remove the root" \
+  "$(t57_line "$T73_SP" "cannot make $T73_SP/bionic-interpreter-pin.$STOP_UID/pin" "remove $T73_SP/bionic-interpreter-pin.$STOP_UID or set TMPDIR")" "$STOP_ERR"
+expect_contains "7.97c …and the stub is what refused it (the harness ran the failure)" "$T73_SP/bionic-interpreter-pin.$STOP_UID/pin" "$(cat "$T67_MKDIR_LOG")"
+# the same failure when this call made the root: it is taken down again, so there is nothing to remove
+T73_SF="$T73_DIR/sf"; mkdir -p "$T73_SF"; chmod 0700 "$T73_SF"
+STOP_PATH="$T67_STUB:$HAND_GIVEN_PATH" T67_MKDIR_FAIL='*/pin' stop_run "$STOP_SUITE" "$T73_SF"
+expect_eq "7.98 the pin's mkdir fails in a root this call made: exits 2, the root is taken down again" "2:absent" "$STOP_RC:$(there "$T73_SF/bionic-interpreter-pin.$STOP_UID")"
+expect_eq "7.98b …and the remedy is the path's (nothing there to remove)" \
+  "$(t57_line "$T73_SF" "cannot make $T73_SF/bionic-interpreter-pin.$STOP_UID/pin" "$T57_FIX")" "$STOP_ERR"
 
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
