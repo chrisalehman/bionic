@@ -733,8 +733,9 @@ $nm
 # gate_list — one line per request, lowest id first:
 #   <id> <waiting|admitted|ended|killed|gone> kind=<k> asked=<e> admitted=<e|-> ended=<e|-> rc=<n|-> key=<key>
 # killed: admitted and either ended with rc over 128 (the gate's _gate_reap writes 137; a run
-# killed by a signal ends 128+n) or never ended with its holder dead. gone: never admitted, no live holder (its
-# number is kept for the next ask by the same who for the same key, until BIONIC_GATE_KEEP).
+# killed by a signal ends 128+n) or never ended with its holder dead. gone: never admitted, no
+# live holder (its number is kept for the next ask by the same who for the same key, until
+# BIONIC_GATE_KEEP).
 # The state is `_gate_open`'s; gate_list takes the lock and reads, and prunes and reaps nothing.
 gate_list() {
   local f id st
