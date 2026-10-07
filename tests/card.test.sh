@@ -1990,6 +1990,18 @@ expect_eq "INHERIT-16b …a requirements path naming no file disposes of nothing
   "open	$INH_L1
 open	$INH_L2" "$(bash "$CARD_SH" inherited "$INH_RV" 2>/dev/null 0<&-)"
 
+# a ## Deferrals inside a code fence is an example of the form, not the section (read-adversarial-p15 #4)
+INH_R0="$(inh_req wave-2-b)"
+inh_cont wave-1-a 202602010000 "## Notes" "" '```' "## Deferrals" "" "$INH_LOLD" '```'
+whole_card step1 "$INH_R0"; INH_CF="$WC_OUT"
+expect_eq "INHERIT-17 a continuation whose only ## Deferrals is fenced: the section printed with nothing under it" "0|1|" \
+  "$WC_RC|$(inh_heads "$INH_CF")|$(inh_block "$INH_CF")"
+inh_cont wave-1-a 202602010000 "## Notes" "" '```' "## Deferrals" "" "$INH_LOLD" '```' "" "## Deferrals" "" "$INH_L1"
+whole_card step1 "$INH_R0"
+expect_eq "INHERIT-17a …and with the real heading after the fence, only the real line is listed" "0|$INH_L1" \
+  "$WC_RC|$(inh_block "$WC_OUT")"
+inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_L2"
+
 # the mutation arm: a doctored copy of card.sh whose disposal filter lets every line through
 INH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/card-inherit-mut.XXXXXX")"
 mkdir -p "$INH_MUT/scripts"; ln -s "${REPO}/payload/scripts/lib" "$INH_MUT/scripts/lib"

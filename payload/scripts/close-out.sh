@@ -606,6 +606,12 @@ co_carried() {  # -> every inherited deferred: line deferred again or left undis
   out="$(bash "$CO_SCRIPTS/card.sh" inherited "$(co_requirements)" 2>/dev/null)" || return 1
   printf '%s\n' "$out" | awk -F '\t' '$1 == "again" || $1 == "open" { print substr($0, length($1) + 2) }'
 }
+# co_cont_has_deferrals -> 0 when the existing continuation carries the heading outside a code fence
+# (a pasted example of the form is not the section; read-adversarial-p15 #4)
+co_cont_has_deferrals() {
+  awk '/^[[:space:]]*```/ { fence = !fence; next } !fence && $0 == "## Deferrals" { found = 1; exit }
+       END { exit !found }' "$CONT" 2>/dev/null
+}
 # co_deferrals_section -> the heading and its lines, written whether or not there is anything under it:
 # this run's own deferrals first, then what it carries (CO_CARRIED, read by act_continuation)
 co_deferrals_section() {
@@ -650,14 +656,14 @@ CONT_TEMPLATE
 }
 
 act_continuation() {
-  if [ ! -f "$CONT" ] || ! /usr/bin/grep -q '^## Deferrals$' "$CONT" 2>/dev/null; then
+  if [ ! -f "$CONT" ] || ! co_cont_has_deferrals; then
     CO_CARRIED="$(co_carried)" \
       || _co_refuse "could not read the deferrals this run inherited (card.sh inherited) — no continuation written"
   fi
   if [ -f "$CONT" ]; then
     # A CONTINUATION WRITTEN BEFORE THIS CLOSE-OUT KEEPS EVERY BYTE IT HAS; the deferrals the plan
     # owes are appended under their heading when it carries none, so the debt is never dropped.
-    if ! /usr/bin/grep -q '^## Deferrals$' "$CONT" 2>/dev/null; then
+    if ! co_cont_has_deferrals; then
       { printf '\n'; co_deferrals_section; } >> "$CONT" 2>/dev/null \
         || _co_refuse "could not append the deferrals to the continuation at $CONT"
       CONT_LINE="$CONT_REL already written — left as it stands, with the ## Deferrals section appended"
@@ -1189,7 +1195,7 @@ do_check() {
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
-  if [ -f "$CONT" ] && ! /usr/bin/grep -q '^## Deferrals$' "$CONT" 2>/dev/null; then
+  if [ -f "$CONT" ] && ! co_cont_has_deferrals; then
     say "continuation: $CONT_REL already written — run appends the ## Deferrals section"
   elif [ -f "$CONT" ]; then
     say "continuation: $CONT_REL already written — left as it stands"
