@@ -12679,7 +12679,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current launch-sync proof-add release-check step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current finding-stated launch-sync proof-add release-check step-line task-add waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -13115,8 +13115,13 @@ expect_eq "RD-3 a stated deferral whose sentence is not in the changelog is stil
 poke "$RSEV" finding-stated "$RD_ID4" "$RD_HAZ"
 expect_eq "RD-4 finding-stated with a sentence made of the words the plan's parsers read exits 0 (the dry commit passed the gate)" "0" "$RC"
 expect_eq "RD-4b …and the line carries it whole" "deferred: $RD_ID4 S2 off \"written as the table writes it\" stated=\"$RD_HAZ\"" "$(rd_line "$RD_ID4")"
+sev_cur 4
 s34_gate "$RSEV"
-expect_eq "RD-4c the real commit gate admits the plan carrying it" "0" "$GATE_RC"
+expect_eq "RD-4c the real commit gate admits the plan carrying it (at the step a writer's dry commit judges)" "0" "$GATE_RC"
+cp "$PSEV" "$TMPROOT/rd-plan-keep"; sed '/^approved-by:/d' "$TMPROOT/rd-plan-keep" > "$PSEV"
+s34_gate "$RSEV"
+expect_eq "RD-4c2 …and the same gate refuses it with the approval line taken out, so the row above reads the plan" "2" "$GATE_RC"
+cp "$TMPROOT/rd-plan-keep" "$PSEV"
 sev_cur 7
 poke "$RSEV" current 8
 expect_eq "RD-4d current 8 is admitted over the plan (the judge reads the facts past the deferred: lines)" "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
