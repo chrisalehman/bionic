@@ -605,17 +605,51 @@ EOF
 }
 # `lands_on=` as the roster holds it (labels, D4): `none`, or suite names separated by `,` or blanks,
 # each a bare file name with or without `.test.sh`. Prints them as `<name>.test.sh`, comma-joined.
-_line_suites() {  # <lands_on value> -> `a.test.sh,b.test.sh` | none; 1 when a name is not bare
+# THE LABEL'S OWN GRAMMAR (wave-28 T64): the same one `payload/scripts/lib/brief.sh` lifts a `Lands-on:` line
+# with — a name is `[A-Za-z0-9_][A-Za-z0-9_-]*` with or without `.test.sh`, a path is read by its basename,
+# a repeat is dropped — so a value no label could have written (`run.sh`, the budget's full-runner token,
+# or `a.b`) is no suite. The value of `suites_allowed=` goes through here too: one parser, one verdict.
+_line_suites() {  # <lands_on value> -> `a.test.sh,b.test.sh` | none; 1 when a name is not a suite
   case "$1" in none|none[[:space:]]*) printf 'none\n'; return 0 ;; esac
   printf '%s\n' "$1" | tr ', \t' '\n\n\n' | awk '
-    NF { if ($0 !~ /^[A-Za-z0-9_][A-Za-z0-9._-]*$/) { bad = 1; exit }
-         sub(/\.test\.sh$/, ""); o = o (o == "" ? "" : ",") $0 ".test.sh" }
+    NF { t = $0; sub(/.*\//, "", t)
+         if (t !~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) { bad = 1; exit }
+         sub(/\.test\.sh$/, "", t); t = t ".test.sh"
+         if (index("," o ",", "," t ",") == 0) o = o (o == "" ? "" : ",") t }
     END { if (bad || o == "") exit 1; print o }'
+}
+
+# THE ROW THE WALL READS (wave-28 T64; D26, REQ-7 AC-7.2, REQ-2 AC-2.11). The launch line is the row `row=` or
+# the plan's agent cell finds first, and it stays the source of the debt (`lands_red=`, written by the dispatch
+# wall alone). The row's SUITES are the budget the walls hold the agent to: `amend` widens them, `hold`, `extend`
+# and the landed mark copy them forward, and `adopt` carries them across a clear. So they are read off the row
+# `roster_row_for_id` picks for the agent's id (the budget wall's own pick, payload/scripts/lib/roster.sh), never
+# off the launch line alone. The id is the latest one a row of the name carries since the name's latest launch
+# line: a launch line has none until the recorder identifies the agent, and a roster with no launch line of the
+# name (the adopted one) holds the id on the adopted row. No id, no pick: the caller keeps the launch line.
+_line_load_roster() {
+  declare -F roster_row_for_id >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/roster.sh" ] && . "$_LINE_LIB_DIR/roster.sh" 2>/dev/null
+  declare -F roster_row_for_id >/dev/null 2>&1
+}
+_line_current_row() {  # <roster> <name> -> the row the walls read for that agent; 1 when no id is known
+  local roster="${1:-}" name="${2:-}" id
+  { [ -n "$name" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; } || return 1
+  _line_load_roster || return 1
+  id="$(awk -F'|' -v k="|name=${name}|" '
+    index($0, "roster-state/") != 1 || !index($0 "|", k) { next }
+    index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|extended=") \
+      && !index($0, "|held=") && !index($0, "|adopted_from=") { id = "" }
+    { for (i = 2; i <= NF; i++) if (index($i, "agent_id=") == 1) { if (length($i) > 9) id = substr($i, 10); break } }
+    END { print id }' "$roster" 2>/dev/null)"
+  [ -n "$id" ] || return 1
+  roster_row_for_id "$roster" "$id"
 }
 
 line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command> -> 0 · 1 · 2 · 75
   local target="${1:-}" root="${2:-}" sid="${3:-}" within="${4:-}" again="${5:-}"
-  local onto plan wt branch head acc c row roster launch name lands suites debt rec deadline=""
+  local onto plan wt branch head acc c row roster launch now key name lands suites debt rec deadline=""
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
   _line_load_run || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
   _line_load_gate || { _wt_refuse "gate-library-unloadable path=${_LINE_LIB_DIR}/gate.sh"; return 2; }
@@ -643,18 +677,22 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   # for T5's debt write (`line_publish` step 6).
   roster="${root%/}/.bionic/tmp/roster-${sid}.state"
   launch="$(_wt_launch_row "$roster" row "$row")" \
-    || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$plan" "$row")")" \
-    || { _wt_refuse "no-launch-row row=${row} roster=${roster} — ready reads the row's suites off its launch line"; return 2; }
-  name="$(_wt_field "$launch" name)"; lands="$(_wt_field "$launch" lands_on)"
-  # A RUN OPEN AT UPGRADE CONTINUES (wave-28 T21; D26, AC-7.2). A launch row 1.12.0 wrote carries no `lands_on=`;
-  # its record of the brief's `Suites:` is `suites_allowed=`, and those are the suites `ready` proves. A row that
-  # names none (empty, or the waiver `none`) is landed by a person, and the refusal says how.
+    || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$plan" "$row")")" || launch=""
+  # THE ROW THE WALL READS (wave-28 T64): the suites come off the row the walls read for this agent, the launch
+  # line's successors included; an adopted row, with no launch line of this roster, stands as the launch line.
+  name="${launch:+$(_wt_field "$launch" name)}"; [ -n "$name" ] || name="$(_line_plan_agent "$plan" "$row")"
+  now="$(_line_current_row "$roster" "$name")" || now="$launch"
+  [ -n "$now" ] || { _wt_refuse "no-launch-row row=${row} roster=${roster} — ready reads the row's suites off the roster row the walls read"; return 2; }
+  [ -n "$launch" ] || launch="$now"
+  name="$(_wt_field "$now" name)"; lands="$(_wt_field "$now" lands_on)"; key=lands_on
+  # A RUN OPEN AT UPGRADE CONTINUES (wave-28 T21; D26, AC-7.2). A row 1.12.0 wrote carries no `lands_on=`; its
+  # record of the brief's `Suites:` is `suites_allowed=`, and those are the suites `ready` proves, through the
+  # parser the label uses. A row that names none (empty) is landed by a person, and the refusal says how.
   if [ -z "$lands" ]; then
-    lands="$(_wt_field "$launch" suites_allowed)"
-    case "$lands" in none|none[[:space:]]*) lands="" ;; esac
+    lands="$(_wt_field "$now" suites_allowed)"; key=suites_allowed
   fi
   [ -n "$lands" ] || { _wt_refuse "no-lands-on row=${row} name=${name:-<none>} — no suite to run; land ${wt} --by-hand --reason '<why>'"; return 2; }
-  suites="$(_line_suites "$lands")" || { _wt_refuse "lands-on-unreadable row=${row} lands_on=${lands}"; return 2; }
+  suites="$(_line_suites "$lands")" || { _wt_refuse "lands-on-unreadable row=${row} ${key}=${lands:0:60} — name suites bare, or land ${wt} --by-hand --reason '<why>'"; return 2; }
   # The debt is a suite's file name; the full-suite runner, or anything else, is never one (B4). Its
   # token (`lands_red=<suite> until <token>`) rides to the debt write in LINE_DEBT_TOKEN.
   debt="$(_wt_field "$launch" lands_red)"; LINE_DEBT_TOKEN=-
