@@ -7157,6 +7157,34 @@ RC_TAGS
       ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" launch-sync 2>&1 ) || :
     fi
 
+    # ---------- THE LINE'S STANDING REDS AND STALLED ENTRIES, EACH TOLD ONCE (wave-28 T5; D8) ----------
+    #
+    # `ready` (lib/line.sh) appends `standing` when a red fails at the accepted head too, so the
+    # branch's and not a row's, and `stalled` when an entry's suite twice gave no verdict and `ready`
+    # exited 70. The first tick that reads one off the bound plan's landing record prints it as a note,
+    # with its logs; the event line then goes into `.bionic/tmp/line-told-<sid>.state` and is never
+    # printed again. A note enters the decision's hash, so the tick that tells one prints in full.
+    resolve_run "$REPO_REAL" "$SESSION_ID"
+    LT_TOLD="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state"
+    LT_REC=""
+    [ -z "$POKER_RUN_PLAN" ] \
+      || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$POKER_RUN_PLAN" .plan.md)/landing-proofs.log"
+    if [ -n "$LT_REC" ] && [ -f "$LT_REC" ] && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}"; then
+      lt_f() { printf '%s\n' "$LT_EV" | tr '|' '\n' | sed -n "s/^$1=//p" | head -1; }   # <key> -> its value in the event
+      while IFS= read -r LT_EV; do
+        [ -n "$LT_EV" ] || continue
+        [ -f "$LT_TOLD" ] && /usr/bin/grep -qxF -- "$LT_EV" "$LT_TOLD" && continue
+        case "$LT_EV" in
+          *'|ev=standing|'*) LT_H="$(lt_f head)"
+            note "standing $(lt_f suite) at ${LT_H:0:12} — $(lt_f lines) failing line(s) fail at the accepted head too: a red the branch carries, not one a row added; log $(lt_f log)" ;;
+          *) note "stalled $(lt_f row) — two runs ended with no verdict and no third starts; logs $(lt_f logs)" ;;
+        esac
+        printf '%s\n' "$LT_EV" >> "$LT_TOLD"
+      done <<EOF
+$(/usr/bin/grep -E '^line/v1\|ev=(standing|stalled)\|' "$LT_REC" 2>/dev/null)
+EOF
+    fi
+
     # ---------- THE GATE REQUESTS, READ ONCE (wave-25 T5, REQ-4 AC-4.3; D7) ----------
     #
     # Read here, above every arm that decides, so the armed tick before any dispatch and the
