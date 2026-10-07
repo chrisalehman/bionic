@@ -6373,7 +6373,7 @@ EOF
   step-field)
     case "$PV_KEY" in
       9|9a|9b)
-        die "REFUSED — the Step 9 block is close-out's to write (bash <plugin-root>/scripts/close-out.sh)."
+        die "REFUSED — the Step 9 block is close-out's to write (scripts/close-out.sh); nothing was written."
         exit 1 ;;
     esac
     case "$PV_FKEY" in
@@ -6385,7 +6385,7 @@ EOF
     esac
     case "$PV_FVAL" in
       *$'\n'*|*$'\r'*)
-        die "REFUSED — a step field is one line, and the value carries a line break; the plan is unchanged."
+        die "REFUSED — a step field is one line, and the value has a line break; the plan is unchanged."
         exit 1 ;;
     esac
     plan_verb_open step-field

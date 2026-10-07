@@ -7691,7 +7691,8 @@ expect_contains "42f10 …the Step-4 block carries its branch" "  branch: wave/0
 expect_contains "42f11 …its base-sha, the branch head at the advance" \
   "  base-sha: $(git -C "$R42C" rev-parse --short wave/01-fixture)" "$(cat "$P42C")"
 expect_contains "42f12 …and its worktree, the checkout holding the branch" "  worktree: ." "$(cat "$P42C")"
-expect_eq "42f13 …and nothing else moved: current: plus three added lines" "4 1;" "$(s42_numstat "$R42C")"
+# (wave-28 T8, A-orch-140: at wave scale the block gains a fourth line, share: <n>, D16's plan fact; §STEP-FIELD (share) pins it)
+expect_eq "42f13 …and nothing else moved: current: plus the three fields and the share fact, four added lines" "5 1;" "$(s42_numstat "$R42C")"
 s34_gate "$R42C"
 expect_eq "42f14 …and the first Step-4 commit is admitted" "0" "$GATE_RC"
 
