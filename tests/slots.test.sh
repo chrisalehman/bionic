@@ -1,57 +1,63 @@
 #!/bin/bash
-# tests/slots.test.sh — payload/scripts/lib/slots.sh and payload/scripts/booked.sh: a suite
-# run books one of N machine-wide places, and a timing check books the whole machine
-# (epic-23 wave-26-never-idle, T6; REQ-6 AC-6.3, AC-6.4 hermetic; spec D8, D14).
+# tests/slots.test.sh — payload/scripts/booked.sh, the shim every wrapped suite runs in, and
+# payload/scripts/lib/slots.sh, the liveness rule it and the gate share (epic-23
+# wave-26-never-idle, T6; REQ-6 AC-6.3, AC-6.4 hermetic; spec D8, D14; on the gate since
+# wave-28-finished-work-lands T12: D10, D13, AC-2.6, AC-2.13).
 #
 # WHAT IS UNDER TEST. The claims, one section each:
 #
-#   §BOOK        with N places, take N+1 and the last one waits, names who holds the
-#                places, and proceeds when one is released; a dead holder's place is
-#                reclaimed; a killed command gives its place back; two takers racing for
-#                one place produce exactly one winner; every wait has a ceiling; and
-#                `--kill-after` stops a command past its limit with exit 124. Review 4
-#                (T36): a stale reap lock never gives two winners (B9); a reused pid does
-#                not hold a place and a dead place is reaped on every take (B10, B11); an
-#                unwritable store runs a shared command unbooked at once and refuses a
-#                whole-machine take at once (B12); several words after `--` are refused,
-#                never re-parsed (B13).
-#   §QUIET       a whole-machine take waits for the held places to drain, blocks new takes
-#                while it holds, does not start above the settled load, and prints `void`
-#                (retrying twice, then exit 75) when the load rose during the run. Taken
-#                from inside a held place it waits for the OTHER places only, and two such
-#                takes do not deadlock each other. Review 4 (T36): every wait of one call
-#                shares one ceiling (Q8), and the run's own load is not a disturbance (Q9).
+#   §RUN         the shim runs the command it was given (one word after `--`, through `bash -c`)
+#                and answers its code; it asks the gate first and ends its request on every end,
+#                a signal included; a shim killed with SIGKILL leaves a request the gate counts
+#                killed, and the next ask proceeds; `--kill-after` stops a command past its limit
+#                with exit 124; a store that cannot be written runs an ordinary command
+#                unadmitted at once and refuses a whole-machine run at once (69); several words
+#                after `--` are refused, never re-parsed.
+#   §LIVE        lib/slots.sh as T12 left it: the liveness rule (a pid that lives and started
+#                when the record says; a reused pid does not hold) and the directory claim the
+#                gate's lock is built on, exactly one winner per race.
+#   §QUIET       a whole-machine run waits at the gate while another run is admitted, holds
+#                every other ask off while it runs, does not start above the settled load, and
+#                prints `void` (retrying twice under the same admission, then exit 75) when the
+#                load rose during the run; one ceiling covers the settle and every retry; the
+#                run's own load is not a disturbance; a failure stays a failure.
 #   §STAMP       a `stamp/v1` line goes into the git directory of the tree the command ran
 #                in, with the head and dirty count read BEFORE the command and its rc after;
 #                the tree's own `.bionic` link is not counted dirty; `cmd=` is one line with
-#                no `|`; outside a git tree, no stamp and no error.
-#   §NESTED-ENV  `BIONIC_SLOT_HELD=1` books nothing and is what the command sees; a shim
-#                inside a shim never waits on its own parent; `BIONIC_QUIET=1` is `--quiet`.
+#                no `|`; outside a git tree, no stamp and no error; every end stamps, a wait at
+#                the gate that ran out (75) included.
+#   §NESTED-ENV  the command sees BIONIC_GATE_ADMIT naming its request; a shim inside a shim is
+#                believed and never waits on its parent; BIONIC_SLOT_HELD=1 skips nothing;
+#                `BIONIC_QUIET=1` is `--quiet`.
 #   §SHELL       `--shell <path>` runs the command the way the harness runs a Bash call
 #                (`<path> -c "eval '<cmd>'"`), so its output, diagnostics and exit code are
 #                the harness's own; the stamp's `cmd=` stays the command as given (T7).
-#   §QUIET-HELD  `BIONIC_SLOT_HELD=1` with no valid place of its own is not nested: its
-#                whole-machine take waits for every place (wave-27 T6, AC-8.2).
-#   §SOLO-SAME   a whole-machine take or settle that gives up on its first try runs the
-#                command once, unbooked, and void, as tests/run.sh does; the store and the
-#                short limit keep 69 and 124 (wave-27 T6, AC-8.4).
-#   §MAX-WAIT    `--max-wait <s>` caps every wait at the smaller of it and the default
-#                (wave-27 T6, AC-8.3; the wrap that passes it is tests/bash-walls.test.sh).
+#   §KILL        --kill-after stops the command's whole process group; its limit covers the
+#                wait at the gate, which ends 75, never 124 (AC-2.6).
 #
-# HERMETIC. No row touches the real store: every call sets BIONIC_SLOTS_DIR to a scratch
-# directory and BIONIC_SLOTS_N, and the load is read from BIONIC_LOAD_NOW_FILE, a file the
-# row writes. Every row's commands run with cwd under the scratch root and
+# REMOVED AT T12, with the place count, the take loop and the wait they pinned (lib/slots.sh's
+# slots_take, slots_take_all, slots_release, slots_count and the knobs BIONIC_SLOTS_*): §BOOK's
+# B3, B3b, B6, B9, B11; §QUIET's Q2 mutation, Q5's drain and Q6 (lending a place to a nested
+# take); K9's freed-place rows; §QUIET-HELD, §SOLO-SAME and §MAX-WAIT. Their claims are now the
+# gate's: tests/gate.test.sh §NUMBER, §TWO, §ANCESTOR and §WRAP. §BOOK became §RUN (B2 now waits
+# at the gate), and its B5 race and B10 reused pid became §LIVE's L2 and L1.
+#
+# HERMETIC. No row touches the real store: every call sets BIONIC_GATE_DIR to a scratch
+# directory, pins the memory reading low and the processor idle (a row that wants a full
+# machine pins the memory over the share instead), and reads the load from BIONIC_LOAD_NOW_FILE,
+# a file the row writes. Every row's commands run with cwd under the scratch root and
 # GIT_CEILING_DIRECTORIES above it, so no stamp can land in this repository's git dir.
 # Every wait in a row is gated on a file the row touches, never on a bare sleep, and every
 # gate and every shim wait has a ceiling, so a regression fails a row instead of hanging.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
-#   * The store, the place count and the load are SYNTHESIZED, by design: the claims are
-#     about how takers interact, and a real store or a real load would make them depend on
-#     what the machine is doing. resources_settled's reading of the real machine is
+#   * The store's readings and the load are SYNTHESIZED, by design: the claims are about how
+#     the shim and the gate interact, and a real reading would make them depend on what the
+#     machine is doing. resources_settled's reading of the real machine is
 #     tests/resources.test.sh's to assert, not this suite's.
-#   * Holder pids are REAL processes: a booked command that is still running, or a pid
-#     taken from a process that has exited (the dead-holder row). Nothing fakes liveness.
+#   * Holder pids are REAL processes: a booked command that is still running, a planted
+#     request held by a live `sleep`, or a pid taken from a process that has exited. Nothing
+#     fakes liveness.
 #   * The git trees in §STAMP are real repositories made with `git init`, and the linked
 #     worktree is a real `git worktree add`, so the git-dir each stamp lands in is git's
 #     own answer.
@@ -60,13 +66,9 @@
 #   * The suite refuses to run when either subject is missing or does not parse.
 #   * Every absence (a command that must not have started, a waiting line that must not
 #     appear) sits beside a positive on the same output in the same row.
-#   * Two rule-bearing rows carry a mutation control on a scratch copy of the library: the
-#     race row with the claim's `mkdir` made non-exclusive (more than one winner), and the
-#     whole-machine block with the quiet-marker check removed (the shared take proceeds).
-#     Each anchors its mutation first and proves the mutant still runs.
-#   * The stale-lock row (B9) slows the takers' liveness check by 50 ms, in the takers
-#     only, to widen the window it tests; against the library before T36 it gave two or
-#     more winners in 7 to 9 rounds of 10 (T36 record). Its pass is structural, not timing.
+#   * The claim race (§LIVE) carries a mutation control on a scratch copy of the library: the
+#     claim's `mkdir` made non-exclusive gives more than one winner. It anchors its mutation
+#     first and proves the mutant still runs.
 #
 # Usage: bash tests/slots.test.sh
 
@@ -79,9 +81,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 BOOKED="$REPO_ROOT/payload/scripts/booked.sh"
 SLOTS="$REPO_ROOT/payload/scripts/lib/slots.sh"
 
-# A run of this suite may itself be inside a booked command (the Bash wall wraps suites in
-# the shim), and the rows below measure what an UNBOOKED caller sees.
-unset BIONIC_SLOT_HELD BIONIC_SLOT_PLACE BIONIC_SLOT_QUIET BIONIC_QUIET GIT_DIR GIT_WORK_TREE
+# A run of this suite may itself be inside an admitted command (the Bash wall wraps suites in
+# the shim, and the runner asks for each suite), and the rows below measure a caller that
+# holds nothing.
+unset BIONIC_GATE_ADMIT BIONIC_GATE_AGENT BIONIC_SLOT_HELD BIONIC_QUIET BIONIC_NOW_FILE \
+  BIONIC_NOW_EPOCH GIT_DIR GIT_WORK_TREE
 
 for _subj in "$BOOKED" "$SLOTS"; do
   if [ ! -r "$_subj" ] || ! bash -n "$_subj" 2>/dev/null; then
@@ -112,20 +116,24 @@ trap cleanup EXIT
 
 # ── fixture helpers ──────────────────────────────────────────────────────────
 
+# The gate's environment every booked call here gets: an idle processor and a low memory
+# reading, so an ask is decided by what this row has admitted and nothing else.
+GE=(-u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10
+  BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192)
+
 newrow() {  # <name> — a fresh row directory, store and load file; resets the knobs
   ROW="$TMPROOT/$1"
   mkdir -p "$ROW"
   ST="$ROW/store"
   LOADF="$ROW/load"
   printf '0.00\n' > "$LOADF"
-  SN=2; MW=30; NOTE=60; POLL=0.1; BK_SCRIPT="$BOOKED"
+  MW=30; POLL=0.1; USED=10; BK_SCRIPT="$BOOKED"
 }
 
-bk() {  # booked.sh with this row's store, count, ceilings and load; cwd is the row
+bk() {  # booked.sh with this row's store, readings, settle ceiling and load; cwd is the row
   ( cd "$ROW" || exit 1
-    env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N="$SN" BIONIC_SLOTS_POLL="$POLL" \
-        BIONIC_SLOTS_MAX_WAIT="$MW" BIONIC_SLOTS_NOTE_S="$NOTE" \
-        BIONIC_LOAD_NOW_FILE="$LOADF" bash "$BK_SCRIPT" "$@" )
+    env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_GATE_POLL="$POLL" BIONIC_PROBE_USED_PCT="$USED" \
+        BIONIC_SETTLE_MAX_WAIT="$MW" BIONIC_LOAD_NOW_FILE="$LOADF" bash "$BK_SCRIPT" "$@" )
 }
 
 gate() {  # <name> — a command that marks itself started, then holds until <name>.go
@@ -151,12 +159,28 @@ wait_text() {  # <file> <needle> [<seconds>] — rc 0 once the file contains the
   return 0
 }
 
-held_pids() {  # every pid recorded in this row's store, space separated
-  cat "$ST"/place.*/pid 2>/dev/null | tr '\n' ' '
+# The admitted, unfinished requests in this row's store: their holders' pids (held_pids) and
+# their ids (places, empty once every run has ended).
+_unfinished() {  # <field: pid|id>
+  local f h
+  for f in "$ST"/requests/[0-9]*; do
+    [ -f "$f" ] || continue
+    grep -q '^admitted=' "$f" && ! grep -q '^ended=' "$f" || continue
+    if [ "$1" = id ]; then printf '%s ' "${f##*/}"; continue; fi
+    h="$(sed -n 's/^holder=//p' "$f" | tail -n 1)"
+    printf '%s ' "${h%%:*}"
+  done
 }
+held_pids() { _unfinished pid; }
+places() { _unfinished id; }
+nreq() { ls "$ST/requests" 2>/dev/null | grep -c '^[0-9][0-9]*$'; }
 
-places() {  # the place directories in this row's store, by name
-  ( cd "$ST" 2>/dev/null && ls -d place.* 2>/dev/null | tr '\n' ' ' )
+plant_req() {  # <id> <holder pid> — a foreign run the gate admitted, held by a live process
+  local st
+  st="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$2" 2>/dev/null | awk '{ $1 = $1; print }')"
+  mkdir -p "$ST/requests"
+  printf 'key=foreign\nkind=work\nwho=foreign:w\ntree=/\nasked=1\nholder=%s:%s\nadmitted=1\npromise=1:0.1:10\n' \
+    "$2" "$st" > "$ST/requests/$1"
 }
 
 mutant_tree() {  # <name> — a scratch copy of booked.sh and its libraries; prints its root
@@ -174,8 +198,8 @@ dead_pid() {  # a pid that existed and has exited
   printf '%s' "$p"
 }
 
-# ════════════════════════════════════════════════════════════════════ §BOOK
-section "BOOK — one place per run; N+1 waits; dead holders reclaimed; one winner per race"
+# ════════════════════════════════════════════════════════════════════ §RUN
+section "RUN — the shim asks, runs the command as given, and ends its request on every end"
 
 # B1. The command runs through `bash -c` exactly as given, and its exit code is the shim's.
 newrow b1
@@ -183,152 +207,58 @@ B1_OUT="$(bk -- 'printf "%s|%s\n" a "b  c"; exit 7' 2>"$ROW/err")"; B1_RC=$?
 expect_status "B1.1 the shim's exit code is the command's" 7 "$B1_RC"
 expect_eq "B1.2 the command ran through bash -c as given (quotes, spaces and the pipe kept)" \
   "a|b  c" "$B1_OUT"
-expect_eq "B1.3 a place was released after the run" "" "$(places)"
-expect_true "B1.4 …and one was taken (the store exists)" test -d "$ST"
+expect_eq "B1.3 its request was ended after the run" "" "$(places)"
+expect_eq "B1.4 …and one was asked (the store holds it)" "1" "$(nreq)"
 expect_eq "B1.5 the command reads the shim's stdin, not /dev/null" "piped-in" \
   "$(printf 'piped-in\n' | bk -- cat 2>/dev/null)"
 
-# B2. With two places, a third take waits, names the holders, and proceeds on a release.
+# B2. A second run asks while the first holds the gate's only room (no cost on record, so the
+# gate admits one at a time): it waits, says so, and runs once the first ends.
 newrow b2
 bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; B2_A=$!
-bk -- "$(gate b)" > "$ROW/b.out" 2>&1 & BG="$BG $!"; B2_B=$!
-wait_file "$ROW/a.started"; wait_file "$ROW/b.started"
-B2_HELD="$(held_pids)"
-expect_regex "B2.1 both places are held by live pids" '^[0-9]+ [0-9]+ $' "$B2_HELD"
+wait_file "$ROW/a.started"
 bk -- "touch $ROW/c.started" > "$ROW/c.out" 2>&1 & BG="$BG $!"; B2_C=$!
-expect_true "B2.2 the third take prints that it is waiting" wait_text "$ROW/c.out" "waiting"
-B2_WAITLINE="$(grep -m1 -F waiting "$ROW/c.out")"
-for _p in $B2_HELD; do
-  expect_contains "B2.3 the waiting line names holder pid $_p" "$_p" "$B2_WAITLINE"
-done
-expect_false "B2.4 …and the third command has not started while both are held" \
-  test -e "$ROW/c.started"
+expect_true "B2.1 the second run prints that it waits at the gate" wait_text "$ROW/c.out" "waits for its turn"
+expect_false "B2.2 …and has not started while the first is admitted" test -e "$ROW/c.started"
 touch "$ROW/a.go"
-expect_true "B2.5 the third command starts once a place is released" wait_file "$ROW/c.started"
+expect_true "B2.3 it starts once the first ends" wait_file "$ROW/c.started"
 wait "$B2_C"; B2_CRC=$?
-expect_status "B2.6 …and the third shim exits with its command's code" 0 "$B2_CRC"
-touch "$ROW/b.go"; wait "$B2_A" "$B2_B" 2>/dev/null
-expect_eq "B2.7 every place is free once all three are done" "" "$(places)"
+expect_status "B2.4 …and the second shim exits with its command's code" 0 "$B2_CRC"
+wait "$B2_A" 2>/dev/null
+expect_eq "B2.5 every request is ended once both are done" "" "$(places)"
 
-# B3. A place whose holder pid is gone is free to the next taker.
-newrow b3
-SN=1; MW=3
-B3_DEAD="$(dead_pid)"
-mkdir -p "$ST/place.1"; printf '%s\n' "$B3_DEAD" > "$ST/place.1/pid"
-expect_false "B3.1 the planted holder pid is dead" kill -0 "$B3_DEAD"
-B3_OUT="$(bk -- 'echo ran' 2>&1)"; B3_RC=$?
-expect_status "B3.2 the take over a dead holder succeeds" 0 "$B3_RC"
-expect_contains "B3.3 …and the command ran" "ran" "$B3_OUT"
-expect_absent "B3.4 …without waiting" "waiting" "$B3_OUT"
-
-# B3b. A place left with no holder file (a taker killed between mkdir and the pid write) is
-# reclaimed once it is old; a fresh one is a take in progress and is left alone.
-newrow b3b
-SN=1; MW=1
-mkdir -p "$ST/place.1"
-B3B_OUT="$(bk -- 'echo ran' 2>&1)"; B3B_RC=$?
-expect_status "B3b.1 a fresh place with no holder file is not reclaimed (the wait runs out)" \
-  69 "$B3B_RC"
-expect_absent "B3b.2 …and the command did not run" "ran" "$B3B_OUT"
-touch -t 202001010000 "$ST/place.1"
-B3B_OUT="$(bk -- 'echo ran' 2>&1)"; B3B_RC=$?
-expect_status "B3b.3 the same place, aged past the orphan line, is reclaimed" 0 "$B3B_RC"
-expect_contains "B3b.4 …and the command ran" "ran" "$B3B_OUT"
-
-# B4. A shim killed by a signal kills its command and gives its place back.
+# B4. A shim killed by a signal kills its command and ends its request with the signal's code.
 newrow b4
-SN=1; MW=5
 bk -- "echo \$\$ > $ROW/cmd.kid; touch $ROW/k.started; sleep 30" > "$ROW/k.out" 2>&1 &
 BG="$BG $!"; B4_BG=$!
 wait_file "$ROW/k.started"
 B4_SHIM="$(held_pids)"; B4_SHIM="${B4_SHIM% }"
-expect_regex "B4.1 the running command holds the place" '^[0-9]+$' "$B4_SHIM"
+expect_regex "B4.1 the running command's shim holds the admission" '^[0-9]+$' "$B4_SHIM"
+B4_ID="$(places)"; B4_ID="${B4_ID% }"
 B4_CMD="$(cat "$ROW/cmd.kid" 2>/dev/null)"
 kill -TERM "$B4_SHIM" 2>/dev/null
 wait "$B4_BG" 2>/dev/null
 expect_true "B4.2 the shim is gone after TERM" bash -c "! kill -0 $B4_SHIM 2>/dev/null"
-expect_eq "B4.3 …and its place was released, not left to be reclaimed" "" "$(places)"
+expect_eq "B4.3 …and its request was ended, with 143" "143" \
+  "$(sed -n 's/^rc=//p' "$ST/requests/${B4_ID:-none}" 2>/dev/null)"
 expect_true "B4.4 …and its command was killed with it" \
   bash -c "for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 ${B4_CMD:-999999} 2>/dev/null || exit 0; sleep 0.2; done; exit 1"
 B4_OUT="$(bk -- 'echo next' 2>&1)"
-expect_contains "B4.5 the next take proceeds" "next" "$B4_OUT"
+expect_contains "B4.5 the next run proceeds" "next" "$B4_OUT"
 
-# B4b. A shim killed with SIGKILL runs no trap: its place stays, and the next taker
-# reclaims it because the holder pid is gone.
+# B4b. A shim killed with SIGKILL runs no trap: its request is never ended, and the gate counts
+# it killed because its holder is gone, so the next ask is admitted at once.
 newrow b4b
-SN=1; MW=5
 bk -- "echo \$\$ > $ROW/cmd.kid; touch $ROW/k.started; sleep 30" > "$ROW/k.out" 2>&1 &
 BG="$BG $!"
 wait_file "$ROW/k.started"
 B4B_SHIM="$(held_pids)"; B4B_SHIM="${B4B_SHIM% }"
 kill -KILL "$B4B_SHIM" 2>/dev/null
-expect_regex "B4b.1 the SIGKILLed shim's place is still on disk" 'place\.1' "$(places)"
+expect_regex "B4b.1 the SIGKILLed shim's request is still unended on disk" '^[0-9]+ $' "$(places)"
 B4B_OUT="$(bk -- 'echo reclaimed' 2>&1)"; B4B_RC=$?
-expect_status "B4b.2 the next take reclaims it" 0 "$B4B_RC"
+expect_status "B4b.2 the next ask is admitted" 0 "$B4B_RC"
 expect_contains "B4b.3 …and runs" "reclaimed" "$B4B_OUT"
-
-# B5. Takers racing for one place: exactly one wins, round after round.
-cat > "$TMPROOT/taker.sh" <<'TAKER'
-. "$1"
-while [ ! -f "$2/start" ]; do sleep 0.01; done
-if slots_take >/dev/null 2>&1; then
-  echo WIN > "$2/res.$$"
-  n=0; while [ ! -f "$2/go" ] && [ $n -lt 400 ]; do n=$((n + 1)); sleep 0.05; done
-  slots_release
-else
-  echo LOSE > "$2/res.$$"
-fi
-TAKER
-race_round() {  # <lib> <dir> — six takers, one place; prints the number of winners
-  local lib="$1" d="$2" i n=0 pids=""
-  mkdir -p "$d"
-  for i in 1 2 3 4 5 6; do
-    env BIONIC_SLOTS_DIR="$d/store" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=0 \
-      BIONIC_SLOTS_POLL=0.05 "$BASH" "$TMPROOT/taker.sh" "$lib" "$d" &
-    pids="$pids $!"; BG="$BG $!"
-  done
-  touch "$d/start"
-  while [ "$(ls "$d"/res.* 2>/dev/null | wc -l | tr -d ' ')" -lt 6 ] && [ "$n" -lt 400 ]; do
-    n=$((n + 1)); sleep 0.05
-  done
-  grep -l WIN "$d"/res.* 2>/dev/null | wc -l | tr -d ' '
-  touch "$d/go"
-  for i in $pids; do wait "$i" 2>/dev/null; done
-}
-B5_BAD=""; B5_SEEN=""
-for _r in 1 2 3 4 5; do
-  _w="$(race_round "$SLOTS" "$TMPROOT/b5/r$_r")"
-  B5_SEEN="$B5_SEEN $_w"
-  [ "$_w" = "1" ] || B5_BAD="$B5_BAD round$_r=$_w"
-done
-expect_eq "B5.1 every round of six takers for one place had exactly one winner (saw:$B5_SEEN)" \
-  "" "$B5_BAD"
-expect_regex "B5.2 …and the rounds ran (one result per round)" '^( 1){5}$' "$B5_SEEN"
-# Mutation control: a non-exclusive claim lets more than one taker in.
-B5M="$(mutant_tree b5-mut)"
-anchor "$B5M/scripts/lib/slots.sh" 'mkdir "$place" 2>/dev/null || return 1' 1
-sed -i.bak 's|mkdir "$place" 2>/dev/null \|\| return 1|mkdir -p "$place" 2>/dev/null \|\| return 1|' \
-  "$B5M/scripts/lib/slots.sh"
-expect_true "B5.3 the mutant library still parses" bash -n "$B5M/scripts/lib/slots.sh"
-B5M_W="$(race_round "$B5M/scripts/lib/slots.sh" "$TMPROOT/b5/mut")"
-expect_true "B5.4 MUTATION: with mkdir -p the same race has more than one winner (saw $B5M_W)" \
-  test "${B5M_W:-0}" -gt 1
-
-# B6. Every wait has a ceiling: at the maximum the shim gives up non-zero, naming the
-# holder, and notes the wait once at the start and then once per interval, not per poll.
-newrow b6
-SN=1; MW=3; NOTE=1
-bk -- "$(gate h)" > "$ROW/h.out" 2>&1 & BG="$BG $!"; B6_H=$!
-wait_file "$ROW/h.started"
-B6_HOLDER="$(held_pids)"; B6_HOLDER="${B6_HOLDER% }"
-B6_OUT="$(bk -- "touch $ROW/w.ran" 2>&1)"; B6_RC=$?
-expect_status "B6.1 at the maximum wait the shim exits 69" 69 "$B6_RC"
-expect_contains "B6.2 …naming who holds the place" "$B6_HOLDER" "$(printf '%s' "$B6_OUT" | tail -1)"
-expect_false "B6.3 …and its command never ran" test -e "$ROW/w.ran"
-B6_NOTES="$(printf '%s\n' "$B6_OUT" | grep -c waiting)"
-expect_true "B6.4 the wait is noted at the start and once per interval, not once per poll (saw $B6_NOTES)" \
-  test "$B6_NOTES" -ge 2 -a "$B6_NOTES" -le 5
-touch "$ROW/h.go"; wait "$B6_H" 2>/dev/null
+expect_absent "B4b.4 …without waiting" "waits for its turn" "$B4B_OUT"
 
 # B7. --kill-after: past the limit the command and its children are killed, one line says
 # it ran past the short limit, and the shim exits 124. Under the limit, nothing changes.
@@ -355,125 +285,30 @@ expect_status "B8.1 no -- is a usage error (exit 2)" 2 "$B8_RC"
 expect_contains "B8.2 …that says what the usage is" "--" "$B8_OUT"
 expect_false "B8.3 …and runs nothing" test -e "$ROW/u.ran"
 
-# B9. A stale reap lock cannot give two winners (review 4 F1). One place and the `.reap`
-# lock are both left by a dead pid, so every taker must first steal the lock. Before T36 two
-# stealers that both read the dead pid could each drop the lock, the second dropping the
-# first's fresh one, and both then reclaimed the place. The takers' liveness check is slowed
-# by 50 ms (the window between reading the lock's pid and acting on it), which made the old
-# library give two or more winners in 7 and 9 of 10 rounds in two runs; on a library
-# that steals the lock one stealer at a time, the count is one whatever the timing.
-cat > "$TMPROOT/stealer.sh" <<'STEALER'
-. "$1"
-_slots_alive() { sleep 0.05; [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
-while [ ! -f "$2/start" ]; do :; done
-if slots_take >/dev/null 2>&1; then
-  echo WIN > "$2/res.$$"
-  n=0; while [ ! -f "$2/go" ] && [ $n -lt 400 ]; do n=$((n + 1)); sleep 0.05; done
-  slots_release
-else
-  echo LOSE > "$2/res.$$"
-fi
-STEALER
-B9_K=8; B9_R=10
-steal_round() {  # <dir> — B9_K takers, one place and the lock left by a dead pid; prints winners
-  local d="$1" i n=0 pids="" dead
-  mkdir -p "$d/store/place.1" "$d/store/.reap"
-  dead="$(dead_pid)"
-  printf '%s\n' "$dead" > "$d/store/place.1/pid"; printf '%s\n' "$dead" > "$d/store/.reap/pid"
-  i=0
-  while [ "$i" -lt "$B9_K" ]; do
-    env BIONIC_SLOTS_DIR="$d/store" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=0 \
-      BIONIC_SLOTS_POLL=0.05 "$BASH" "$TMPROOT/stealer.sh" "$SLOTS" "$d" 2>/dev/null &
-    pids="$pids $!"; BG="$BG $!"; i=$((i + 1))
-  done
-  sleep 0.2; touch "$d/start"
-  while [ "$(ls "$d"/res.* 2>/dev/null | wc -l | tr -d ' ')" -lt "$B9_K" ] && [ "$n" -lt 600 ]; do
-    n=$((n + 1)); sleep 0.05
-  done
-  grep -l WIN "$d"/res.* 2>/dev/null | wc -l | tr -d ' '
-  touch "$d/go"
-  for i in $pids; do wait "$i" 2>/dev/null; done
-}
-B9_BAD=""; B9_SEEN=""; _r=1
-while [ "$_r" -le "$B9_R" ]; do
-  _w="$(steal_round "$TMPROOT/b9/r$_r")"
-  B9_SEEN="$B9_SEEN $_w"
-  [ "$_w" = "1" ] || B9_BAD="$B9_BAD round$_r=$_w"
-  _r=$((_r + 1))
-done
-expect_eq "B9.1 a stale reap lock never gives two winners: $B9_R rounds of $B9_K takers (saw:$B9_SEEN)" \
-  "" "$B9_BAD"
-expect_regex "B9.2 …and every round ran (one count per round)" "^( [0-9]+){$B9_R}\$" "$B9_SEEN"
-
-# B10. A holder is the process that claimed the place, not just its pid (review 4 F2). A
-# place whose pid now belongs to a different, live process (the pid was reused) is free.
-newrow b10
-SN=1; MW=2
-sleep 60 & B10_LIVE=$!; BG="$BG $!"
-mkdir -p "$ST/place.1"
-printf 'Thu Jan 1 00:00:00 2015\n' > "$ST/place.1/since"
-printf '%s\n' "$B10_LIVE" > "$ST/place.1/pid"
-expect_true "B10.1 the planted pid is a live process" kill -0 "$B10_LIVE"
-B10_OUT="$(bk -- 'echo ran' 2>&1)"; B10_RC=$?
-expect_status "B10.2 a place held by a reused pid is taken" 0 "$B10_RC"
-expect_contains "B10.3 …and the command ran" "ran" "$B10_OUT"
-expect_absent "B10.4 …without waiting" "waiting" "$B10_OUT"
-# The claim records the holder's start, and a live holder whose start matches still holds.
-newrow b10b
-SN=1; MW=2
-bk -- "$(gate h)" > "$ROW/h.out" 2>&1 & BG="$BG $!"; B10_H=$!
-wait_file "$ROW/h.started"
-B10_HOLDER="$(held_pids)"; B10_HOLDER="${B10_HOLDER% }"
-B10_SINCE="$(cat "$ST/place.1/since" 2>/dev/null)"
-expect_nonempty "B10.5 a claim records its holder's start time" "$B10_SINCE"
-B10_PS="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$B10_HOLDER" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')"
-expect_eq "B10.6 …as the process's own start time" "$B10_PS" "$B10_SINCE"
-MW=1
-B10_OUT="$(bk -- "touch $ROW/w.ran" 2>&1)"; B10_RC=$?
-expect_status "B10.7 that live holder still holds the place (the take runs out)" 69 "$B10_RC"
-expect_false "B10.8 …and its command did not run" test -e "$ROW/w.ran"
-touch "$ROW/h.go"; wait "$B10_H" 2>/dev/null
-
-# B11. A dead place is reaped on every take, not only when a take finds no place free (F2).
-newrow b11
-SN=3; MW=5
-mkdir -p "$ST/place.3"; printf '%s\n' "$(dead_pid)" > "$ST/place.3/pid"
-B11_OUT="$(bk -- "ls $ST" 2>&1)"; B11_RC=$?
-expect_status "B11.1 a take with a free place proceeds" 0 "$B11_RC"
-expect_contains "B11.2 …holding place.1 while its command runs" "place.1" "$B11_OUT"
-expect_absent "B11.3 …and the dead holder's place.3 is gone by then" "place.3" "$B11_OUT"
-
-# B12. A store that cannot be written (review 4 F5). Booking manages throughput, it is not a
-# guard: a shared take runs its command UNBOOKED at once, with one line naming the store. A
-# whole-machine take does not run, because a timing result taken without the machine is
+# B12. A store that cannot be written (review 4 F5). The gate manages throughput, it is not a
+# guard: an ordinary run goes on UNADMITTED at once, with one line naming the store. A
+# whole-machine run does not run, because a timing result taken without the machine is
 # worth nothing: it refuses at once, naming the store.
 newrow b12
-SN=2; MW=6
+MW=6
 mkdir -p "$ST"; chmod 555 "$ST"
 B12_T0=$SECONDS
-B12_OUT="$(bk -- 'echo ran-unbooked; exit 3' 2>&1)"; B12_RC=$?
+B12_OUT="$(bk -- 'echo ran-unadmitted; exit 3' 2>&1)"; B12_RC=$?
 B12_DT=$((SECONDS - B12_T0))
-expect_status "B12.1 an unwritable store: a shared take runs its command anyway" 3 "$B12_RC"
-expect_contains "B12.2 …which ran" "ran-unbooked" "$B12_OUT"
-expect_true "B12.3 …at once, not after the wait (took ${B12_DT}s, ceiling ${MW}s)" test "$B12_DT" -le 2
-B12_LINE="$(printf '%s\n' "$B12_OUT" | grep -F "$ST")"
-expect_nonempty "B12.4 one line names the store" "$B12_LINE"
-expect_contains "B12.5 …and says the command ran unbooked" "unbooked" "$B12_LINE"
-expect_eq "B12.6 …and it is the only line about it" 1 "$(printf '%s\n' "$B12_OUT" | grep -c -F "$ST")"
+expect_status "B12.1 an unwritable store: an ordinary run runs its command anyway" 3 "$B12_RC"
+expect_contains "B12.2 …which ran" "ran-unadmitted" "$B12_OUT"
+expect_true "B12.3 …at once (took ${B12_DT}s)" test "$B12_DT" -le 2
+B12_LINE="$(printf '%s\n' "$B12_OUT" | grep -F "booked:" | grep -F "$ST")"
+expect_nonempty "B12.4 the shim's line names the store" "$B12_LINE"
+expect_contains "B12.5 …and says the command runs unadmitted" "unadmitted" "$B12_LINE"
+expect_eq "B12.6 …and it is the shim's only line about it" 1 "$(printf '%s\n' "$B12_OUT" | grep -F "booked:" | grep -c -F "$ST")"
 B12_T0=$SECONDS
 B12_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; B12_RC=$?
 B12_DT=$((SECONDS - B12_T0))
-expect_status "B12.7 a whole-machine take on the same store refuses (69)" 69 "$B12_RC"
+expect_status "B12.7 a whole-machine run on the same store refuses (69)" 69 "$B12_RC"
 expect_false "B12.8 …and its command never ran" test -e "$ROW/q.ran"
-expect_true "B12.9 …at once (took ${B12_DT}s, ceiling ${MW}s)" test "$B12_DT" -le 2
+expect_true "B12.9 …at once (took ${B12_DT}s)" test "$B12_DT" -le 2
 expect_contains "B12.10 …naming the store" "$ST" "$B12_OUT"
-# tests/run.sh calls the lib directly for a solo suite and reports any non-zero take as VOID.
-B12_T0=$SECONDS
-( . "$SLOTS"; BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT="$MW" \
-    slots_take_all "$$" runner >/dev/null 2>&1 ); B12_RC=$?
-B12_DT=$((SECONDS - B12_T0))
-expect_ne "B12.11 slots_take_all itself answers non-zero on that store" 0 "$B12_RC"
-expect_true "B12.12 …at once (took ${B12_DT}s)" test "$B12_DT" -le 2
 chmod 755 "$ST"
 
 # B13. Words after `--` are never re-parsed as shell (review 4 F6). The one meaning is one
@@ -496,70 +331,137 @@ B13_OUT="$(bk --kill-after 5 -- "printf '%s\n' 'x; echo SECOND-COMMAND-RAN'" 2>&
 expect_eq "B13.10 the same command as one word runs under --kill-after, its argument literal" \
   "x; echo SECOND-COMMAND-RAN" "$B13_OUT"
 
-# ═══════════════════════════════════════════════════════════════════ §QUIET
-section "QUIET — the whole machine: drain, block, settle, re-read, void"
+# ═══════════════════════════════════════════════════════════════════ §LIVE
+section "LIVE — the liveness rule and the claim, what lib/slots.sh keeps"
 
-# Q1. A whole-machine take waits for the held places to drain.
+# L1. The rule: a holder is a live pid that started when its record says (review 4 F2).
+newrow l1
+sleep 60 & L1_LIVE=$!; BG="$BG $L1_LIVE"
+L1_START="$( . "$SLOTS"; _slots_since "$L1_LIVE" )"
+L1_PS="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$L1_LIVE" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')"
+expect_nonempty "L1.1 _slots_since reads a live process's start" "$L1_START"
+expect_eq "L1.2 …as ps prints it, one space between fields" "$L1_PS" "$L1_START"
+expect_true "L1.3 a live pid with its own start is live" bash -c '. "$1"; _slots_live "$2" "$3"' _ "$SLOTS" "$L1_LIVE" "$L1_START"
+expect_false "L1.4 the same live pid with another start (a reused pid) is not" \
+  bash -c '. "$1"; _slots_live "$2" "Thu Jan 1 00:00:00 2015"' _ "$SLOTS" "$L1_LIVE"
+expect_true "L1.5 a record with no start (an older bionic) falls back to kill -0" \
+  bash -c '. "$1"; _slots_live "$2" ""' _ "$SLOTS" "$L1_LIVE"
+L1_DEAD="$(dead_pid)"
+expect_false "L1.6 a dead pid is not live, whatever its record says" \
+  bash -c '. "$1"; _slots_live "$2" ""' _ "$SLOTS" "$L1_DEAD"
+mkdir -p "$ROW/claim"; printf '%s\n' "$L1_START" > "$ROW/claim/since"
+expect_true "L1.7 _slots_holds reads the start from the claim directory" \
+  bash -c '. "$1"; _slots_holds "$2" "$3"' _ "$SLOTS" "$ROW/claim" "$L1_LIVE"
+printf 'Thu Jan 1 00:00:00 2015\n' > "$ROW/claim/since"
+expect_false "L1.8 …and a claim whose start is not the pid's is not held" \
+  bash -c '. "$1"; _slots_holds "$2" "$3"' _ "$SLOTS" "$ROW/claim" "$L1_LIVE"
+kill "$L1_LIVE" 2>/dev/null; wait "$L1_LIVE" 2>/dev/null
+
+# L2. Claimers racing for one directory: exactly one wins, round after round. The gate's lock
+# is this claim.
+cat > "$TMPROOT/taker.sh" <<'TAKER'
+. "$1"
+while [ ! -f "$2/start" ]; do sleep 0.01; done
+if _slots_claim "$2/claim" "$$"; then echo WIN > "$2/res.$$"; else echo LOSE > "$2/res.$$"; fi
+TAKER
+race_round() {  # <lib> <dir> — six claimers, one directory; prints the number of winners
+  local lib="$1" d="$2" i n=0 pids=""
+  mkdir -p "$d"
+  for i in 1 2 3 4 5 6; do
+    "$BASH" "$TMPROOT/taker.sh" "$lib" "$d" &
+    pids="$pids $!"; BG="$BG $!"
+  done
+  touch "$d/start"
+  while [ "$(ls "$d"/res.* 2>/dev/null | wc -l | tr -d ' ')" -lt 6 ] && [ "$n" -lt 400 ]; do
+    n=$((n + 1)); sleep 0.05
+  done
+  grep -l WIN "$d"/res.* 2>/dev/null | wc -l | tr -d ' '
+  for i in $pids; do wait "$i" 2>/dev/null; done
+}
+L2_BAD=""; L2_SEEN=""
+for _r in 1 2 3 4 5; do
+  _w="$(race_round "$SLOTS" "$TMPROOT/l2/r$_r")"
+  L2_SEEN="$L2_SEEN $_w"
+  [ "$_w" = "1" ] || L2_BAD="$L2_BAD round$_r=$_w"
+done
+expect_eq "L2.1 every round of six claimers for one directory had exactly one winner (saw:$L2_SEEN)" \
+  "" "$L2_BAD"
+expect_regex "L2.2 …and the rounds ran (one result per round)" '^( 1){5}$' "$L2_SEEN"
+# Mutation control: a non-exclusive claim lets more than one claimer in.
+L2M="$(mutant_tree l2-mut)"
+anchor "$L2M/scripts/lib/slots.sh" 'mkdir "$place" 2>/dev/null || return 1' 1
+sed -i.bak 's|mkdir "$place" 2>/dev/null \|\| return 1|mkdir -p "$place" 2>/dev/null \|\| return 1|' \
+  "$L2M/scripts/lib/slots.sh"
+expect_true "L2.3 the mutant library still parses" bash -n "$L2M/scripts/lib/slots.sh"
+L2M_W="$(race_round "$L2M/scripts/lib/slots.sh" "$TMPROOT/l2/mut")"
+expect_true "L2.4 MUTATION: with mkdir -p the same race has more than one winner (saw $L2M_W)" \
+  test "${L2M_W:-0}" -gt 1
+expect_eq "L2.5 the place count, the take loop and the wait are gone from the library" "" \
+  "$(grep -E '^(slots_take|slots_take_all|slots_release|slots_count|_slots_max_wait|_slots_poll)\(\)' "$SLOTS")"
+expect_nonempty "L2.6 …while the liveness rule stays (L2.5 reads the same file)" \
+  "$(grep -E '^_slots_live\(\)' "$SLOTS")"
+
+# L3. The take-over lib/line.sh's publish lock uses (`_slots_take_one`, B3 and B3b before T12): a
+# claim whose holder is dead, or one left with no holder and older than the orphan line, is
+# reclaimed once; a live holder's, or a fresh claim still being written, is not.
+newrow l3
+l3_take() {  # <dir> — _slots_take_one on <dir> for this shell; prints rc and the pid it holds
+  bash -c '. "$1"; _slots_take_one "$2" "$3" "$$" l3; echo "$? $(cat "$3/pid" 2>/dev/null)"' _ "$SLOTS" "$ROW" "$1"
+}
+L3_DEAD="$(dead_pid)"
+mkdir -p "$ROW/dead"; printf '%s\n' "$L3_DEAD" > "$ROW/dead/pid"
+L3_OUT="$(l3_take "$ROW/dead")"
+expect_regex "L3.1 a claim whose holder is dead is reclaimed (rc 0) for the new holder" '^0 [0-9]+$' "$L3_OUT"
+expect_ne "L3.2 …which now names the taker, not the dead holder" "0 $L3_DEAD" "$L3_OUT"
+sleep 60 & L3_LIVE=$!; BG="$BG $L3_LIVE"
+mkdir -p "$ROW/live"; printf '%s\n' "$L3_LIVE" > "$ROW/live/pid"
+expect_regex "L3.3 a live holder's claim is not taken (rc 1)" '^1 ' "$(l3_take "$ROW/live")"
+expect_eq "L3.4 …and it still names that holder" "$L3_LIVE" "$(cat "$ROW/live/pid")"
+mkdir -p "$ROW/fresh"
+expect_regex "L3.5 a fresh claim with no holder yet is a take in progress, left alone (rc 1)" '^1' "$(l3_take "$ROW/fresh")"
+touch -t 202001010000 "$ROW/fresh"
+expect_regex "L3.6 …the same claim aged past the orphan line is reclaimed (rc 0)" '^0 [0-9]+$' "$(l3_take "$ROW/fresh")"
+kill "$L3_LIVE" 2>/dev/null; wait "$L3_LIVE" 2>/dev/null
+
+# ═══════════════════════════════════════════════════════════════════ §QUIET
+section "QUIET — the whole machine: ask, hold, settle, re-read, void"
+
+# Q1. A whole-machine run waits at the gate while another run is admitted.
 newrow q1
 bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; Q1_A=$!
 wait_file "$ROW/a.started"
 bk --quiet -- "touch $ROW/q.started" > "$ROW/q.out" 2>&1 & BG="$BG $!"; Q1_Q=$!
-expect_true "Q1.1 the whole-machine take prints that it is waiting" wait_text "$ROW/q.out" "waiting"
-expect_contains "Q1.2 …naming the holder" "$(held_pids | awk '{print $1}')" \
-  "$(grep -m1 -F waiting "$ROW/q.out")"
-expect_false "Q1.3 …and has not started while a place is held" test -e "$ROW/q.started"
+expect_true "Q1.1 the whole-machine run prints that it waits at the gate" wait_text "$ROW/q.out" "waits for its turn"
+expect_contains "Q1.2 …as a whole request" "(whole " "$(grep -m1 -F 'waits for its turn' "$ROW/q.out")"
+expect_false "Q1.3 …and has not started while the other run is admitted" test -e "$ROW/q.started"
 touch "$ROW/a.go"
-expect_true "Q1.4 it starts once the held place drains" wait_file "$ROW/q.started"
+expect_true "Q1.4 it starts once the other run ends" wait_file "$ROW/q.started"
 wait "$Q1_Q"; Q1_RC=$?
 expect_status "Q1.5 …and exits with its command's code" 0 "$Q1_RC"
 wait "$Q1_A" 2>/dev/null
 
-# Q2. While the whole machine is held, a new shared take waits — even for a place that
-# frees while the hold is still draining. The whole-machine taker polls slowly (2 s) and the
-# shared one fast (0.1 s), so without the marker the shared take would win the freed place.
-q2_drive() {  # <booked script> -> Q2_FIRST (who ran first), Q2_EARLY (1 if C ran during Q)
-  BK_SCRIPT="$1"
-  bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; Q2_A=$!
-  wait_file "$ROW/a.started"
-  POLL=2
-  bk --quiet -- "echo Q >> $ROW/order; $(gate q)" > "$ROW/q.out" 2>&1 & BG="$BG $!"; Q2_Q=$!
-  POLL=0.1
-  wait_text "$ROW/q.out" "waiting"
-  bk -- "echo C >> $ROW/order; touch $ROW/c.started" > "$ROW/c.out" 2>&1 & BG="$BG $!"; Q2_C=$!
-  Q2_WAITED=0; wait_text "$ROW/c.out" "waiting" 5 && Q2_WAITED=1
-  touch "$ROW/a.go"
-  wait_file "$ROW/q.started" 10
-  Q2_EARLY=0; [ -e "$ROW/c.started" ] && Q2_EARLY=1
-  Q2_FIRST="$(head -1 "$ROW/order" 2>/dev/null)"
-  touch "$ROW/q.go"
-  wait_file "$ROW/c.started" 10
-  wait "$Q2_A" "$Q2_Q" "$Q2_C" 2>/dev/null
-}
+# Q2. While the whole machine is held, a new ordinary ask waits.
 newrow q2
-q2_drive "$BOOKED"
-expect_eq "Q2.1 a shared take during a whole-machine hold waits" 1 "$Q2_WAITED"
-expect_eq "Q2.2 …and the place freed during the drain goes to the whole-machine take" \
-  "Q" "$Q2_FIRST"
-expect_eq "Q2.3 …and the shared command has not run while the hold runs" 0 "$Q2_EARLY"
-expect_true "Q2.4 …then it runs" test -e "$ROW/c.started"
-# Mutation control: without the quiet-marker check the shared take takes the freed place.
-Q2M="$(mutant_tree q2-mut)"
-anchor "$Q2M/scripts/lib/slots.sh" '_slots_quiet_blocks() {' 1
-sed -i.bak 's|^_slots_quiet_blocks() {|_slots_quiet_blocks() { return 1;|' "$Q2M/scripts/lib/slots.sh"
-expect_true "Q2.5 the mutant library still parses" bash -n "$Q2M/scripts/lib/slots.sh"
-newrow q2m
-q2_drive "$Q2M/scripts/booked.sh"
-expect_eq "Q2.6 MUTATION: without the marker check the shared take runs first" "C" "$Q2_FIRST"
+bk --quiet -- "echo Q >> $ROW/order; $(gate q)" > "$ROW/q.out" 2>&1 & BG="$BG $!"; Q2_Q=$!
+wait_file "$ROW/q.started"
+bk -- "echo C >> $ROW/order; touch $ROW/c.started" > "$ROW/c.out" 2>&1 & BG="$BG $!"; Q2_C=$!
+Q2_WAITED=0; wait_text "$ROW/c.out" "waits for its turn" 5 && Q2_WAITED=1
+expect_eq "Q2.1 an ordinary ask during a whole-machine hold waits" 1 "$Q2_WAITED"
+expect_false "Q2.2 …and the ordinary command has not run while the hold runs" test -e "$ROW/c.started"
+touch "$ROW/q.go"
+wait_file "$ROW/c.started" 10
+expect_true "Q2.3 …then it runs" test -e "$ROW/c.started"
+expect_eq "Q2.4 …after the whole-machine command" "Q C" "$(tr '\n' ' ' < "$ROW/order" | sed 's/ $//')"
+wait "$Q2_Q" "$Q2_C" 2>/dev/null
 
 # Q3. It does not start above the settled load; it starts once the load settles. A load that
-# never settles within the ceiling gets the runner's answer (wave-27 T6, §SOLO-SAME): one
-# unbooked run, void.
+# never settles within the ceiling gets the runner's answer: one run, void.
 newrow q3
 printf '99.0\n' > "$LOADF"; MW=2
 Q3_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q3_RC=$?
-expect_status "Q3.1 above the settled line the whole-machine take gives up at the ceiling, and the run is void (75)" \
+expect_status "Q3.1 above the settled line the settle gives up at the ceiling, and the run is void (75)" \
   75 "$Q3_RC"
-expect_true "Q3.2 …its command ran once, unbooked, after the ceiling" test -e "$ROW/q.ran"
+expect_true "Q3.2 …its command ran once, after the ceiling" test -e "$ROW/q.ran"
 expect_contains "Q3.3 …and says it was waiting for the load to settle" "settle" "$Q3_OUT"
 rm -f "$ROW/q.ran"
 MW=20
@@ -569,14 +471,14 @@ expect_status "Q3.4 once the load settles it runs" 0 "$Q3_RC"
 expect_true "Q3.5 …its command" test -e "$ROW/q.ran"
 expect_contains "Q3.6 …after noting the wait for the load" "settle" "$Q3_OUT"
 
-# Q4. A load that rose during the run voids it: `void`, release, retry; twice, then exit 75.
+# Q4. A load that rose during the run voids it: `void`, settle, retry; twice, then exit 75.
 newrow q4
 Q4_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 &"
 Q4_OUT="$(bk --quiet -- "$Q4_CMD" 2>&1)"; Q4_RC=$?
 expect_status "Q4.1 a run voided every time exits 75, not the command's code" 75 "$Q4_RC"
 expect_regex "Q4.2 …printing void" '(^|[^a-z])void([^a-z]|$)' "$Q4_OUT"
 expect_eq "Q4.3 …after the first run and two retries" 3 "$(wc -l < "$ROW/runs" | tr -d ' ')"
-expect_eq "Q4.4 …and every place is free afterwards" "" "$(places)"
+expect_eq "Q4.4 …all under one whole request, ended afterwards" "1 " "$(nreq) $(places)"
 # Once only: the second run is clean, so the shim answers with the command's own code.
 newrow q4b
 Q4B_CMD="if [ ! -f $ROW/runs ]; then printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & fi; echo run >> $ROW/runs; exit 4"
@@ -585,48 +487,26 @@ expect_status "Q4.5 a run voided once and clean on retry exits with the command'
 expect_eq "Q4.6 …having run twice" 2 "$(wc -l < "$ROW/runs" | tr -d ' ')"
 expect_regex "Q4.7 …and printed void for the first" '(^|[^a-z])void([^a-z]|$)' "$Q4B_OUT"
 
-# Q5. From inside a held place a whole-machine take waits for the OTHER places only.
+# Q5. A whole-machine run nested in an ordinary admitted command is believed under the parent's
+# admission: it runs, takes no number, and still settles (the hold is not the whole machine).
 newrow q5
 Q5_OUT="$(bk -- "bash $BOOKED --quiet -- 'echo inner-ran'" 2>&1)"; Q5_RC=$?
-expect_status "Q5.1 a whole-machine take nested in a booked command completes" 0 "$Q5_RC"
+expect_status "Q5.1 a whole-machine run nested in a booked command completes" 0 "$Q5_RC"
 expect_contains "Q5.2 …running its command" "inner-ran" "$Q5_OUT"
-bk -- "$(gate x)" > "$ROW/x.out" 2>&1 & BG="$BG $!"; Q5_X=$!
-wait_file "$ROW/x.started"
-bk -- "bash $BOOKED --quiet -- 'touch $ROW/inner.ran'" > "$ROW/o.out" 2>&1 & BG="$BG $!"; Q5_O=$!
-expect_true "Q5.3 with the other place held elsewhere, the nested take waits" \
-  wait_text "$ROW/o.out" "waiting"
-expect_false "Q5.4 …and has not run" test -e "$ROW/inner.ran"
-touch "$ROW/x.go"
-expect_true "Q5.5 it runs once the other place drains" wait_file "$ROW/inner.ran"
-wait "$Q5_O" "$Q5_X" 2>/dev/null
+expect_eq "Q5.3 …under its parent's admission: one request in all" "1" "$(nreq)"
 
-# Q6. Two booked commands that each nest a whole-machine take do not deadlock: a nested
-# take waiting for the machine lends its parent's place to the one that holds it.
-newrow q6
-for _n in 1 2; do
-  bk -- "touch $ROW/o$_n.in; n=0; while [ ! -f $ROW/both ] && [ \$n -lt 400 ]; do n=\$((n+1)); sleep 0.05; done; bash $BOOKED --quiet -- 'touch $ROW/q$_n.ran'" \
-    > "$ROW/o$_n.out" 2>&1 &
-  BG="$BG $!"; eval "Q6_O$_n=\$!"
-done
-wait_file "$ROW/o1.in"; wait_file "$ROW/o2.in"
-expect_regex "Q6.1 both outer commands hold a place" '^[0-9]+ [0-9]+ $' "$(held_pids)"
-touch "$ROW/both"
-wait "$Q6_O1"; Q6_RC1=$?
-wait "$Q6_O2"; Q6_RC2=$?
-expect_eq "Q6.2 both complete without running out the wait" "0 0" "$Q6_RC1 $Q6_RC2"
-expect_true "Q6.3 …and both nested commands ran" test -e "$ROW/q1.ran" -a -e "$ROW/q2.ran"
-
-# Q7. A whole-machine take inside a whole-machine hold already has the machine.
+# Q7. A whole-machine run inside a whole-machine hold already has the machine.
 newrow q7
 MW=5
 Q7_OUT="$(bk --quiet -- "bash $BOOKED --quiet -- 'echo nested-quiet'" 2>&1)"; Q7_RC=$?
-expect_status "Q7.1 a whole-machine take nested in one completes" 0 "$Q7_RC"
+expect_status "Q7.1 a whole-machine run nested in one completes" 0 "$Q7_RC"
 expect_contains "Q7.2 …and runs" "nested-quiet" "$Q7_OUT"
+expect_eq "Q7.3 …taking no number of its own" "1" "$(nreq)"
 
-# Q8. One ceiling covers every wait of one call (review 4 F3): the drain, the settle and
-# every void retry share BIONIC_SLOTS_MAX_WAIT. Before T36 each wait got the whole ceiling.
-# The foreign place drains at half the ceiling, so the drain always completes inside it and
-# the two shapes stay apart: one ceiling ends at 8 s, a fresh one per wait at 4 + 8 s.
+# Q8. One ceiling covers every wait of one call (review 4 F3): the wait at the gate, the settle
+# and every void retry share it, counted from the shim's start. The other run ends at half the
+# ceiling, so the wait always completes inside it and the two shapes stay apart: one ceiling
+# ends at 8 s, a fresh one per wait at 4 + 8 s.
 newrow q8
 MW=8
 bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; Q8_A=$!
@@ -636,9 +516,9 @@ printf '99.0\n' > "$LOADF"
 Q8_T0=$SECONDS
 Q8_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q8_RC=$?
 Q8_DT=$((SECONDS - Q8_T0))
-expect_status "Q8.1 a drain then a load that never settles gives up, and the one run is void (75)" 75 "$Q8_RC"
-expect_true "Q8.2 …running its command once, unbooked (wave-27 T6, §SOLO-SAME)" test -e "$ROW/q.ran"
-expect_contains "Q8.3 …after waiting for the drain" "drain" "$Q8_OUT"
+expect_status "Q8.1 a wait then a load that never settles gives up, and the one run is void (75)" 75 "$Q8_RC"
+expect_true "Q8.2 …running its command once" test -e "$ROW/q.ran"
+expect_contains "Q8.3 …after waiting at the gate" "waits for its turn" "$Q8_OUT"
 expect_true "Q8.4 …within one ceiling for both waits (took ${Q8_DT}s, ceiling ${MW}s)" \
   test "$Q8_DT" -le $((MW + 2))
 wait "$Q8_A" 2>/dev/null
@@ -693,7 +573,7 @@ expect_status "Q10.1 a failing run voided every time exits with its own code (3)
 expect_contains "Q10.2 …and still says it was void" "booked: void — the load rose above" "$Q10_OUT"
 expect_eq "Q10.3 …after the first run and two retries, as a passing void does (Q4.3)" 3 \
   "$(wc -l < "$ROW/runs" | tr -d ' ')"
-expect_eq "Q10.4 …and every place is free afterwards" "" "$(places)"
+expect_eq "Q10.4 …and its request was ended afterwards" "" "$(places)"
 # The other void end: the ceiling runs out before a retry can start (Q8's second shape).
 newrow q10b
 MW=4
@@ -718,7 +598,7 @@ mkrepo "$ROW/repo"
 printf 'x\n' > "$ROW/repo/untracked"
 S1_HEAD="$(git -C "$ROW/repo" rev-parse HEAD)"
 S1_STAMPS="$(stamps_of "$ROW/repo")"
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" -- 'touch new1; exit 3' ) >/dev/null 2>&1; S1_RC=$?
 expect_status "S1.1 the shim still answers the command's code" 3 "$S1_RC"
 S1_LINE="$(tail -1 "$S1_STAMPS" 2>/dev/null)"
@@ -728,7 +608,7 @@ expect_regex "S1.3 the stamp is stamp/v1 with head, the PRE-run dirty count, rc,
   "$S1_LINE"
 
 S1_BEFORE="$(wc -l < "$S1_STAMPS" | tr -d ' ')"
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" -- 'echo a | cat' ) >/dev/null 2>&1
 S1_AFTER="$(wc -l < "$S1_STAMPS" | tr -d ' ')"
 expect_eq "S2.1 a second run appends one line" "$((S1_BEFORE + 1))" "$S1_AFTER"
@@ -739,7 +619,7 @@ expect_regex "S2.3 …and the command is still legible" 'cmd=echo a .* cat$' "$S
 expect_regex "S2.4 …with dirty counting the file the previous command made" '\|dirty=2\|' "$S2_LINE"
 
 S3_LONG=": $(printf 'x%.0s' $(seq 1 200))"
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" -- "$S3_LONG" ) >/dev/null 2>&1
 S3_CMD="$(tail -1 "$S1_STAMPS" | sed 's/.*|cmd=//')"
 expect_eq "S3.1 the cmd field keeps the first 120 characters" 120 "${#S3_CMD}"
@@ -761,7 +641,7 @@ git -C "$ROW/main" worktree add -q "$ROW/wt" -b side 2>/dev/null
 S5_MAIN_STAMPS="$(stamps_of "$ROW/main")"
 S5_WT_STAMPS="$(stamps_of "$ROW/wt")"
 expect_ne "S5.1 the worktree has a git dir of its own" "$S5_MAIN_STAMPS" "$S5_WT_STAMPS"
-( cd "$ROW/wt" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+( cd "$ROW/wt" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" -- 'true' ) >/dev/null 2>&1
 expect_regex "S5.2 the stamp lands in the worktree's git dir with its head" \
   "head=$(git -C "$ROW/wt" rev-parse HEAD)\\|" "$(tail -1 "$S5_WT_STAMPS" 2>/dev/null)"
@@ -770,16 +650,16 @@ expect_false "S5.3 …and not in the main checkout's" test -e "$S5_MAIN_STAMPS"
 # S6. A voided timing check is stamped with the void code, so it never reads as green.
 newrow s6
 mkrepo "$ROW/repo"
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=20 \
-    BIONIC_SLOTS_POLL=0.1 BIONIC_LOAD_NOW_FILE="$LOADF" \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
+    BIONIC_LOAD_NOW_FILE="$LOADF" \
     bash "$BOOKED" --quiet -- "printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 &" ) \
   >/dev/null 2>&1; S6_RC=$?
 expect_status "S6.1 the voided run exits 75" 75 "$S6_RC"
 expect_regex "S6.2 …and its stamp carries rc=75" '\|rc=75\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
 # A voided run that FAILED is stamped with its own code (review 12 F2, A-T50.1): still red, and
 # red for its own reason. The stamp has no field for the void, and its shape does not change.
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=20 \
-    BIONIC_SLOTS_POLL=0.1 BIONIC_LOAD_NOW_FILE="$LOADF" \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
+    BIONIC_LOAD_NOW_FILE="$LOADF" \
     bash "$BOOKED" --quiet -- "printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & exit 3" ) \
   >/dev/null 2>&1; S6_RC=$?
 expect_status "S6.3 a voided run that failed exits with its own code (3)" 3 "$S6_RC"
@@ -790,7 +670,7 @@ expect_regex "S6.4 …and its stamp carries rc=3, not rc=75" '\|rc=3\|' "$(tail 
 # every other untracked path — and a `.bionic` that is a plain file — as before.
 newrow s7
 st_run() {  # <tree> <command> — one booked run in <tree>
-  ( cd "$1" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+  ( cd "$1" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
       bash "$BOOKED" -- "$2" ) >/dev/null 2>&1
 }
 mkrepo "$ROW/repo"
@@ -844,7 +724,7 @@ S9_MAIN_STAMPS="$(stamps_of "$ROW/main")"
 S9_WT_STAMPS="$(stamps_of "$ROW/wt")"
 s9_run() {  # <command> <shim option>... — one booked run standing in the main checkout
   local c="$1"; shift
-  ( cd "$ROW/main" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+  ( cd "$ROW/main" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
       bash "$BOOKED" "$@" -- "$c" ) 2>"$ROW/err"
 }
 S9_OUT="$(s9_run 'cd ../wt || exit 1; echo ran; exit 4' --stamp-dir "$ROW/wt")"; S9_RC=$?
@@ -893,7 +773,7 @@ S10_STAMPS="$(stamps_of "$ROW/repo")"
 S10_HEAD="$(git -C "$ROW/repo" rev-parse HEAD)"
 s10_run() {  # <command> <shim option>... — one booked run in the repo
   local c="$1"; shift
-  ( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+  ( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
       bash "$BOOKED" "$@" -- "$c" ) 2>"$ROW/err"
 }
 s10_run 'exit 3' --suites a.test.sh >/dev/null; S10_RC=$?
@@ -931,81 +811,76 @@ expect_regex "S10.8 beside --stamp-dir, the field goes with the stamp into that 
   "^stamp/v1\\|head=$(git -C "$ROW/wt" rev-parse HEAD)\\|dirty=0\\|rc=1\\|at=[^|]*\\|suites=b\\.test\\.sh\\|cmd=exit 1\$" \
   "$(tail -1 "$(stamps_of "$ROW/wt")" 2>/dev/null)"
 
-# S11. A RUN THAT NEVER FINISHED STILL STAMPS (wave-26 T61, critic 3 S5). A suite that never got
-# its place (69), was stopped at its short limit while it waited (124), or was signalled while it
+# S11. A RUN THAT NEVER FINISHED STILL STAMPS (wave-26 T61, critic 3 S5). A suite the gate did not
+# admit within its call's limit (75, under --max-wait or --kill-after alike) or signalled while it
 # waited (128+n) used to leave no line, so "a green, b never ran" at one head read as a's proof
-# alone. Each of these ends now stamps the code it ended on and the suites it was handed; the
-# land refuses on it and names the suite. A usage error (exit 2) still stamps nothing (S10.7).
+# alone. Each of these ends stamps the code it ended on and the suites it was handed; the land
+# refuses on it and names the suite. A usage error (exit 2) still stamps nothing (S10.7). The
+# machine is planted over the share, so the gate admits nothing.
 newrow s11
 mkrepo "$ROW/repo"
 S11_STAMPS="$(stamps_of "$ROW/repo")"
-sleep 60 & S11_H=$!; BG="$BG $S11_H"
-mkdir -p "$ST/place.1"; printf '%s\n' "$S11_H" > "$ST/place.1/pid"
-s11_run() {  # <max wait> <shim option>... — one booked run in the repo, the only place held
-  local mw="$1"; shift
-  ( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_POLL=0.1 \
-      BIONIC_SLOTS_MAX_WAIT="$mw" bash "$BOOKED" "$@" -- "touch $ROW/s11.ran" ) >"$ROW/out" 2>&1
+s11_run() {  # <shim option>... — one booked run in the repo, on a machine the gate admits nothing on
+  ( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_PROBE_USED_PCT=95 \
+      bash "$BOOKED" "$@" -- "touch $ROW/s11.ran" ) >"$ROW/out" 2>&1
 }
-s11_run 1 --suites b.test.sh; S11_RC=$?
-expect_status "S11.1 no place within the ceiling: the shim exits 69" 69 "$S11_RC"
+s11_run --max-wait 1 --suites b.test.sh; S11_RC=$?
+expect_status "S11.1 not admitted within its limit: the shim exits 75" 75 "$S11_RC"
 expect_false "S11.1 …and its command never ran" test -e "$ROW/s11.ran"
-expect_regex "S11.2 …and it stamped that end: rc=69, with the suite it was handed" \
-  "^stamp/v1\\|head=$(git -C "$ROW/repo" rev-parse HEAD)\\|dirty=0\\|rc=69\\|at=[^|]*\\|suites=b\\.test\\.sh\\|cmd=touch " \
+expect_regex "S11.2 …and it stamped that end: rc=75, with the suite it was handed" \
+  "^stamp/v1\\|head=$(git -C "$ROW/repo" rev-parse HEAD)\\|dirty=0\\|rc=75\\|at=[^|]*\\|suites=b\\.test\\.sh\\|cmd=touch " \
   "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
-s11_run 12 --kill-after 1 --suites c.test.sh; S11_RC=$?
-expect_status "S11.3 stopped at its short limit while it waited: 124" 124 "$S11_RC"
-expect_regex "S11.4 …and it stamped rc=124 with its suite" \
-  "\\|rc=124\\|at=[^|]*\\|suites=c\\.test\\.sh\\|cmd=touch " "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
-( cd "$ROW/repo" && exec env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_POLL=0.1 \
-    BIONIC_SLOTS_MAX_WAIT=20 BIONIC_SLOTS_NOTE_S=60 bash "$BOOKED" --suites d.test.sh -- "touch $ROW/s11.ran" ) \
+s11_run --kill-after 1 --suites c.test.sh; S11_RC=$?
+expect_status "S11.3 its short limit spent waiting: 75, not 124 (a wait never ends in a kill)" 75 "$S11_RC"
+expect_regex "S11.4 …and it stamped rc=75 with its suite" \
+  "\\|rc=75\\|at=[^|]*\\|suites=c\\.test\\.sh\\|cmd=touch " "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
+( cd "$ROW/repo" && exec env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_PROBE_USED_PCT=95 \
+    bash "$BOOKED" --suites d.test.sh -- "touch $ROW/s11.ran" ) \
   >"$ROW/sig.out" 2>&1 & S11_S=$!; BG="$BG $S11_S"
-expect_true "S11.5 a run waiting for its place says so" wait_text "$ROW/sig.out" "waiting"
+expect_true "S11.5 a run waiting at the gate says so" wait_text "$ROW/sig.out" "waits for its turn"
 kill -TERM "$S11_S" 2>/dev/null; wait "$S11_S" 2>/dev/null; S11_RC=$?
 expect_status "S11.5 …and signalled while it waits it ends 143" 143 "$S11_RC"
 expect_regex "S11.6 …and it stamped rc=143 with its suite, though it never ran" \
   "\\|rc=143\\|at=[^|]*\\|suites=d\\.test\\.sh\\|cmd=touch " "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
 expect_false "S11.6 …its command never ran" test -e "$ROW/s11.ran"
 expect_eq "S11.7 three ends, three lines" "3" "$(grep -c . "$S11_STAMPS" 2>/dev/null)"
-kill "$S11_H" 2>/dev/null; wait "$S11_H" 2>/dev/null
+expect_contains "S11.8 the 75 says to run the command again, naming it" "run again: touch $ROW/s11.ran" \
+  "$(cat "$ROW/out")"
 
 # ══════════════════════════════════════════════════════════════════ §NESTED-ENV
-section "NESTED-ENV — a command inside a place books nothing and never waits on its parent"
+section "NESTED-ENV — a command runs under its own admission and a nested one never waits on its parent"
 
 newrow n1
-expect_eq "N1.1 the command sees BIONIC_SLOT_HELD=1" "1" \
-  "$(bk -- 'printf %s "${BIONIC_SLOT_HELD:-unset}"' 2>/dev/null)"
+N1_SEEN="$(bk -- 'printf %s "${BIONIC_GATE_ADMIT:-unset}"' 2>/dev/null)"
+expect_eq "N1.1 the command sees BIONIC_GATE_ADMIT naming its own request" "$(ls "$ST/requests" 2>/dev/null | grep '^[0-9]' | head -n 1)" "$N1_SEEN"
+expect_regex "N1.2 …a request id" '^[0-9]+$' "$N1_SEEN"
 
-# N2. With BIONIC_SLOT_HELD=1 in the environment the shim takes nothing, even with every
-# place held by someone else.
+# N2. BIONIC_SLOT_HELD=1 in the environment skips nothing (wave-28 T12, AC-2.13): on a machine
+# the gate admits nothing on, the shim asks, waits, and ends 75 with nothing run.
 newrow n2
-SN=1; MW=2
-bk -- "$(gate h)" > "$ROW/h.out" 2>&1 & BG="$BG $!"; N2_H=$!
-wait_file "$ROW/h.started"
-N2_BEFORE="$(held_pids)"
-N2_OUT="$( cd "$ROW" && env BIONIC_SLOT_HELD=1 BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 \
-  BIONIC_SLOTS_MAX_WAIT=2 BIONIC_SLOTS_POLL=0.1 bash "$BOOKED" -- 'echo ran' 2>&1)"; N2_RC=$?
-expect_status "N2.1 a held run proceeds with every place taken" 0 "$N2_RC"
-expect_eq "N2.2 …and runs" "ran" "$N2_OUT"
-expect_eq "N2.3 …without taking or touching a place" "$N2_BEFORE" "$(held_pids)"
-touch "$ROW/h.go"; wait "$N2_H" 2>/dev/null
+N2_OUT="$( cd "$ROW" && env "${GE[@]}" BIONIC_SLOT_HELD=1 BIONIC_GATE_DIR="$ST" BIONIC_PROBE_USED_PCT=95 \
+  bash "$BOOKED" --max-wait 1 -- "touch $ROW/n2.ran" 2>&1)"; N2_RC=$?
+expect_status "N2.1 a run marked held still asks, and is not admitted (75)" 75 "$N2_RC"
+expect_false "N2.2 …and does not run" test -e "$ROW/n2.ran"
+expect_eq "N2.3 …having taken a number" "1" "$(nreq)"
 
-# N3. A shim inside a shim, one place: the inner run does not wait on its own parent.
+# N3. A shim inside a shim, where the gate admits one at a time: the inner run is believed under
+# its parent's admission and does not wait on it.
 newrow n3
-SN=1; MW=5
 N3_OUT="$(bk -- "bash $BOOKED -- 'echo inner'" 2>&1)"; N3_RC=$?
-expect_status "N3.1 a booked command nested in one, with one place, completes" 0 "$N3_RC"
+expect_status "N3.1 a booked command nested in one completes" 0 "$N3_RC"
 expect_eq "N3.2 …at once, without waiting" "inner" "$N3_OUT"
+expect_eq "N3.3 …and took no number of its own" "1" "$(nreq)"
 
 # N4. BIONIC_QUIET=1 in the environment is --quiet.
 newrow n4
 printf '99.0\n' > "$LOADF"; MW=1
-N4_OUT="$( cd "$ROW" && env BIONIC_QUIET=1 BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 \
-  BIONIC_SLOTS_MAX_WAIT=1 BIONIC_SLOTS_POLL=0.1 BIONIC_LOAD_NOW_FILE="$LOADF" \
-  bash "$BOOKED" -- "touch $ROW/q.ran" 2>&1)"; N4_RC=$?
+N4_OUT="$( cd "$ROW" && env "${GE[@]}" BIONIC_QUIET=1 BIONIC_GATE_DIR="$ST" BIONIC_SETTLE_MAX_WAIT=1 \
+  BIONIC_LOAD_NOW_FILE="$LOADF" bash "$BOOKED" -- "touch $ROW/q.ran" 2>&1)"; N4_RC=$?
 expect_status "N4.1 BIONIC_QUIET=1 waits for a settled load like --quiet (gives up, void: 75)" 75 "$N4_RC"
 expect_contains "N4.2 …saying the load never settled" "never settled" "$N4_OUT"
 N4_OUT="$(bk -- "touch $ROW/plain.ran" 2>&1)"; N4_RC=$?
-expect_status "N4.3 without it, the same load does not hold a shared take" 0 "$N4_RC"
+expect_status "N4.3 without it, the same load does not hold an ordinary run" 0 "$N4_RC"
 expect_true "N4.4 …which runs" test -e "$ROW/plain.ran"
 
 # ════════════════════════════════════════════════════════════════════ §SHELL
@@ -1049,8 +924,8 @@ case "$H_SH" in
 esac
 
 newrow h2
-H2_OUT="$(bk --shell "$H_SH" -- 'printf %s "${BIONIC_SLOT_HELD:-unset}"' 2>/dev/null)"
-expect_eq "H2.1 under --shell the command is still inside its place" "1" "$H2_OUT"
+H2_OUT="$(bk --shell "$H_SH" -- 'printf %s "${BIONIC_GATE_ADMIT:-unset}"' 2>/dev/null)"
+expect_regex "H2.1 under --shell the command still runs under its own admission" '^[0-9]+$' "$H2_OUT"
 H2_OUT="$(bk --shell="$H_SH" -- 'echo eq-form' 2>&1)"; H2_RC=$?
 expect_status "H2.2 --shell=<path> is the same option" 0 "$H2_RC"
 expect_eq "H2.3 …and runs" "eq-form" "$H2_OUT"
@@ -1062,7 +937,7 @@ expect_status "H2.5 an empty --shell is a usage error" 2 "$H2_RC"
 newrow h3
 mkrepo "$ROW/repo"
 H3_STAMPS="$(stamps_of "$ROW/repo")"
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" --shell "$H_SH" -- "echo 'it''s'; exit 5" ) >/dev/null 2>&1; H3_RC=$?
 expect_status "H3.1 under --shell the shim answers the command's code" 5 "$H3_RC"
 H3_LINE="$(tail -1 "$H3_STAMPS" 2>/dev/null)"
@@ -1108,53 +983,51 @@ expect_contains "K2.5 …with its output" "inside" "$K2_OUT"
 newrow k3
 mkrepo "$ROW/repo"
 K3_STAMPS="$(stamps_of "$ROW/repo")"
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" --kill-after 1 -- 'sleep 20' ) >/dev/null 2>&1; K3_RC=$?
 expect_status "K3.1 the killed run exits 124" 124 "$K3_RC"
 expect_regex "K3.2 …and its stamp says rc=124" '\|rc=124\|' "$(tail -1 "$K3_STAMPS" 2>/dev/null)"
 
-# K4. THE LIMIT COVERS THE WAIT FOR A PLACE (review 8 F2, A-T44.2). The only place is held past
-# the limit, so the command cannot start inside it: the shim gives up AT the limit, not at the
-# ceiling, with the line and the code of a run killed at its limit, and runs nothing.
+# K4. THE LIMIT COVERS THE WAIT AT THE GATE (review 8 F2, A-T44.2; wave-28 T12, AC-2.6). The
+# machine is planted over the share, so the command cannot start inside its limit: the shim
+# gives up AT the limit with the gate's line and 75, never 124 (a wait never ends in a kill),
+# and runs nothing.
 newrow k4
 mkrepo "$ROW/repo"
 K4_STAMPS="$(stamps_of "$ROW/repo")"
-sleep 30 & K4_H=$!; BG="$BG $K4_H"
-mkdir -p "$ST/place.1"; printf '%s\n' "$K4_H" > "$ST/place.1/pid"
 K4_T0=$SECONDS
-K4_OUT="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_POLL=0.1 \
-    BIONIC_SLOTS_MAX_WAIT=12 bash "$BOOKED" --kill-after 2 -- "touch $ROW/k4.ran" 2>&1 )"; K4_RC=$?
+K4_OUT="$( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_PROBE_USED_PCT=95 \
+    bash "$BOOKED" --kill-after 2 -- "touch $ROW/k4.ran" 2>&1 )"; K4_RC=$?
 K4_DT=$(( SECONDS - K4_T0 ))
-expect_status "K4.1 a short command with no place free inside its limit exits 124" 124 "$K4_RC"
-expect_true "K4.2 …at its 2 s limit, not at the 12 s ceiling (took ${K4_DT}s)" test "$K4_DT" -lt 10
-expect_contains "K4.3 …it waited, naming the holder" "$K4_H" "$K4_OUT"
-expect_contains "K4.4 …with the line of a run stopped at its limit" \
-  "booked: stopped after 2s — over the short limit; a longer command belongs in a subagent" "$K4_OUT"
+expect_status "K4.1 a short command not admitted inside its limit exits 75" 75 "$K4_RC"
+expect_true "K4.2 …at its 2 s limit (took ${K4_DT}s)" test "$K4_DT" -lt 10
+expect_contains "K4.3 …it waited at the gate" "waits for its turn" "$K4_OUT"
+expect_contains "K4.4 …and says the gate did not admit it within its limit" \
+  "booked: the gate did not admit this command within 2s" "$K4_OUT"
+expect_absent "K4.4b …not that it was stopped at its limit: nothing ran to stop" "over the short limit" "$K4_OUT"
 expect_false "K4.5 …and its command never ran" test -e "$ROW/k4.ran"
-# Since T61 (critic 3 S5) a run that never got its place still stamps, with the code it ended
-# on, so a land never reads "this suite did not run" as nothing to answer for.
-expect_eq "K4.6 …and it stamped once, rc=124, though it ran nothing" "1 rc=124" \
+expect_eq "K4.6 …and it stamped once, rc=75, though it ran nothing" "1 rc=75" \
   "$(grep -c . "$K4_STAMPS" 2>/dev/null) $(tail -1 "$K4_STAMPS" 2>/dev/null | tr '|' '\n' | grep '^rc=')"
-kill "$K4_H" 2>/dev/null; wait "$K4_H" 2>/dev/null
-( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=12 \
+( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" --kill-after 5 -- "touch $ROW/k4.ran" ) >/dev/null 2>&1; K4_RC=$?
-expect_status "K4.7 with the holder gone the same call runs" 0 "$K4_RC"
+expect_status "K4.7 with room on the machine the same call runs" 0 "$K4_RC"
 expect_true "K4.8 …its command ran" test -e "$ROW/k4.ran"
 expect_eq "K4.9 …and it stamped its own line, rc=0 (beside K4.6)" "2 rc=0" \
   "$(grep -c . "$K4_STAMPS" 2>/dev/null) $(tail -1 "$K4_STAMPS" 2>/dev/null | tr '|' '\n' | grep '^rc=')"
 
-# K5. THE KILL IS TIMED FROM THE SHIM'S START, so the wait spends the limit. The place is held
-# for 4 s and the command needs 4 s: inside a 6 s limit counted from the run it would finish
-# (at about 8 s, 2 s to spare); counted from the shim's start it is stopped at 6 s (2 s early).
+# K5. THE KILL IS TIMED FROM THE SHIM'S START, so the wait spends the limit. Another run is
+# admitted for 4 s and the command needs 4 s: inside a 6 s limit counted from the run it would
+# finish (at about 8 s, 2 s to spare); counted from the shim's start it is stopped at 6 s.
 newrow k5
-SN=1; MW=30
-( sleep 4 ) & K5_H=$!; BG="$BG $K5_H"
-mkdir -p "$ST/place.1"; printf '%s\n' "$K5_H" > "$ST/place.1/pid"
+MW=30
+K5_H="$( ( sleep 4 >/dev/null 2>&1 & printf '%s' "$!" ) )"
+plant_req 1 "$K5_H"
 K5_OUT="$(bk --kill-after 6 -- 'sleep 4; echo finished' 2>&1)"; K5_RC=$?
-expect_contains "K5.1 the command waited for its place" "waiting for a place" "$K5_OUT"
+expect_contains "K5.1 the command waited at the gate" "waits for its turn" "$K5_OUT"
 expect_status "K5.2 …and was stopped at 6 s from the shim's start: exit 124" 124 "$K5_RC"
 expect_contains "K5.3 …with the short-limit line" "over the short limit" "$K5_OUT"
-expect_absent "K5.4 …before it could finish" "finished" "$K5_OUT"
+expect_eq "K5.4 …before it could finish: no line of its own output reads finished (the gate's line names the command)" \
+  "0" "$(printf '%s\n' "$K5_OUT" | grep -cx finished)"
 
 # K6. A BOOKED COMMAND KEEPS THE SIGNALS IT WOULD HAVE UNWRAPPED (review 8 F3, A-T44.5). A command
 # started in the background without job control starts with SIGINT and SIGQUIT ignored, and
@@ -1179,19 +1052,19 @@ expect_eq "K6.8 …and under --kill-after, which always had job control" "$K6_PL
 # K7. EVERY COMMAND LEADS ITS OWN PROCESS GROUP NOW, so a shim stopped by a signal kills the
 # group with the tree: a child whose parent already exited dies too, as under --kill-after (K1).
 newrow k7
-SN=1; MW=5
+MW=5
 bk -- "(sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/orphan.kid); touch $ROW/k.started; sleep 30" > "$ROW/k.out" 2>&1 &
 BG="$BG $!"; K7_BG=$!
 wait_file "$ROW/k.started"
 K7_SHIM="$(held_pids)"; K7_SHIM="${K7_SHIM% }"
-expect_regex "K7.1 the running command holds the place" '^[0-9]+$' "$K7_SHIM"
+expect_regex "K7.1 the running command's shim holds the admission" '^[0-9]+$' "$K7_SHIM"
 K7_KID="$(cat "$ROW/orphan.kid" 2>/dev/null)"
 expect_regex "K7.2 the orphaned child recorded its pid" '^[0-9]+$' "$K7_KID"
 kill -TERM "$K7_SHIM" 2>/dev/null
 wait "$K7_BG" 2>/dev/null
 expect_true "K7.3 TERM to the shim kills the orphan too, outside the tree but inside the group" \
   bash -c "for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 ${K7_KID:-999999} 2>/dev/null || exit 0; sleep 0.2; done; exit 1"
-expect_eq "K7.4 …and the place was released" "" "$(places)"
+expect_eq "K7.4 …and its request was ended" "" "$(places)"
 
 # K8. A SIGNAL SENT TO THE SHIM REACHES THE COMMAND AS ITSELF, AND QUIT IS TAKEN TOO (review 12
 # F3, A-T50.2). K6 has the command signal itself; here the signal comes from outside, as an
@@ -1204,7 +1077,7 @@ expect_eq "K7.4 …and the place was released" "" "$(places)"
 # EVERY WAIT HERE IS BOUNDED: a shim that does not end within 8 s of the signal is a failed row,
 # and the row then stops what it started itself, so a regression fails in seconds, never hangs.
 newrow k8
-SN=1; MW=5
+MW=5
 K8_CMD="for s in INT QUIT TERM HUP; do trap \"echo got-\$s > $ROW/k8.saw; exit 7\" \$s; done; echo \$\$ > $ROW/k8.pid; (sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/k8.kid); touch $ROW/k8.started; while :; do sleep 0.1; done"
 gone() {  # <pid> — rc 0 once the pid is gone, within two seconds
   local i=0
@@ -1217,8 +1090,8 @@ k8_drive() {  # <signal> [<shim option>...] -> K8_RC (or "hung"), K8_SAW, K8_PID
   rm -f "$ROW"/k8.*
   # `exec` all the way down, so the job's pid IS the shim's.
   ( cd "$ROW" || exit 1
-    exec env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N="$SN" BIONIC_SLOTS_POLL="$POLL" \
-      BIONIC_SLOTS_MAX_WAIT="$MW" BIONIC_SLOTS_NOTE_S="$NOTE" BIONIC_LOAD_NOW_FILE="$LOADF" \
+    exec env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
+      BIONIC_LOAD_NOW_FILE="$LOADF" \
       perl -e '$SIG{INT} = $SIG{QUIT} = "DEFAULT"; exec @ARGV or exit 126' \
       bash "$BK_SCRIPT" "$@" -- "$K8_CMD" ) > "$ROW/k8.out" 2>&1 &
   _job=$!
@@ -1246,20 +1119,20 @@ k8_reap() {  # after the rows: a command a failing shim left running is this sui
 for _k8 in INT:130 QUIT:131 TERM:143 HUP:129; do
   _sig="${_k8%:*}"
   k8_drive "$_sig"
-  expect_eq "K8.0 [$_sig] the shim holds the place" 1 "$K8_SHIM_OK"
+  expect_eq "K8.0 [$_sig] the shim holds the admission" 1 "$K8_SHIM_OK"
   expect_regex "K8.1 [$_sig] the command and its orphan were running" '^[0-9]+ [0-9]+$' "$K8_PID $K8_KID"
   expect_eq "K8.2 [$_sig] the command saw the signal the shim took, not TERM" "got-$_sig" "$K8_SAW"
   expect_status "K8.3 [$_sig] the shim exits 128 + the signal's number" "${_k8#*:}" "$K8_RC"
   expect_true "K8.4 [$_sig] the command is gone" gone "$K8_PID"
   expect_true "K8.5 [$_sig] …and so is its orphan, outside its tree but inside its group" gone "$K8_KID"
-  expect_eq "K8.6 [$_sig] …and the place was released (beside K7.1's held place)" "" "$(places)"
+  expect_eq "K8.6 [$_sig] …and its request was ended (beside K7.1's held admission)" "" "$(places)"
   k8_reap
 done
 for _sig in INT QUIT; do
   k8_drive "$_sig" --shell "$H_SH"
   expect_eq "K8.7 [$_sig] under --shell ${H_SH##*/} the command saw the signal too" "got-$_sig" "$K8_SAW"
   expect_true "K8.8 [$_sig] …and it is gone" gone "$K8_PID"
-  expect_eq "K8.9 [$_sig] …with the place free" "" "$(places)"
+  expect_eq "K8.9 [$_sig] …with its request ended" "" "$(places)"
   k8_reap
 done
 
@@ -1290,21 +1163,8 @@ expect_true "K9.3 …and a second boundary fell inside the command in at least 4
 k9_align
 _out="$(bk --kill-after 1 -- 'sleep 3; echo done' 2>&1)"; _rc=$?
 expect_status "K9.4 the same limit still stops a 3 s command (124; beside K9.1 on the same code)" 124 "$_rc"
-# The limit spends the wait for a place too (K4), and gives up there by the same rule. The only
-# place is held until 0.9 s after the aligned start: inside the limit, so the command runs.
-SN=1
-for _i in 1 2 3; do
-  k9_align
-  ( sleep 0.9 ) & K9_H=$!; BG="$BG $K9_H"
-  mkdir -p "$ST/place.1"; printf '%s\n' "$K9_H" > "$ST/place.1/pid"
-  _out="$(bk --kill-after 1 -- 'echo ran' 2>&1)"; _rc=$?
-  expect_status "K9.5 [$_i] a place freed 0.9 s in is taken under a 1 s limit, not given up early" 0 "$_rc"
-  expect_contains "K9.6 [$_i] …it waited for it first" "waiting for a place" "$_out"
-  wait "$K9_H" 2>/dev/null
-done
-
 # U1. --unbooked IS GONE (the lead's ruling at T44): only a suite is wrapped, so the shim has no
-# command to run without a place. The flag is now an unknown option.
+# command to run without asking. The flag is now an unknown option.
 newrow u1
 bk --unbooked --kill-after 5 -- "touch $ROW/u.ran" > "$ROW/u.out" 2>&1; U1_RC=$?
 expect_status "U1.1 --unbooked is a usage error (exit 2)" 2 "$U1_RC"
@@ -1314,126 +1174,5 @@ expect_false "U1.4 …and the command did not run" test -e "$ROW/u.ran"
 bk --kill-after 5 -- "touch $ROW/u.ran" > /dev/null 2>&1; U1_RC=$?
 expect_status "U1.5 the same call without it runs" 0 "$U1_RC"
 expect_true "U1.6 …and its command ran (beside U1.4)" test -e "$ROW/u.ran"
-
-# ═════════════════════════════════════════════════════════════ §QUIET-HELD
-section "QUIET-HELD — BIONIC_SLOT_HELD=1 with no place of its own takes no foreign place (wave-27 T6, AC-8.2)"
-# Critic 3 S1 (wave 26). `BIONIC_SLOT_HELD=1` with no usable BIONIC_SLOT_PLACE is the opt-out a
-# user types in front of a run (booked.sh's header), not a nested call: the shim and the runner
-# export the place with HELD wherever they nest. Read as "nested, parent place unknown", it let
-# the whole-machine take finish with ONE place still held by another process, so a timing check
-# ran beside that process's suite. Read as not nested, the take waits for every place.
-qh_take() {  # HELD=1 and no place: the library's whole-machine take in a child bash; prints rc=<n>
-  ( cd "$ROW" && env -u BIONIC_SLOT_PLACE BIONIC_SLOT_HELD=1 BIONIC_SLOTS_DIR="$ST" \
-      BIONIC_SLOTS_N="$SN" BIONIC_SLOTS_MAX_WAIT="$MW" BIONIC_SLOTS_POLL="$POLL" \
-      BIONIC_SLOTS_NOTE_S="$NOTE" \
-      bash -c '. "$1"; slots_take_all "$$" qh >/dev/null 2>&1; rc=$?; slots_release "$$"; echo "rc=$rc"' _ "$SLOTS" )
-}
-newrow qh1
-MW=2
-bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; QH1_A=$!
-wait_file "$ROW/a.started"
-QH1_HOLDER="$(held_pids | awk '{print $1}')"
-expect_regex "QH1.1 another process holds a place" '^[0-9]+$' "$QH1_HOLDER"
-expect_eq "QH1.2 HELD with no place: the whole-machine take does not complete past it (gives up, rc 1)" \
-  "rc=1" "$(qh_take)"
-expect_eq "QH1.3 …and the other process still holds its place" "$QH1_HOLDER" "$(held_pids | awk '{print $1}')"
-touch "$ROW/a.go"; wait "$QH1_A" 2>/dev/null
-expect_eq "QH1.4 the same take with no other holder completes (rc 0, beside QH1.2)" "rc=0" "$(qh_take)"
-# Through the shim, as typed in front of a timing suite: it waits for the drain, then runs.
-newrow qh2
-MW=20
-bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; QH2_A=$!
-wait_file "$ROW/a.started"
-( export BIONIC_SLOT_HELD=1; unset BIONIC_SLOT_PLACE; bk --quiet -- "touch $ROW/q.ran" ) \
-  > "$ROW/q.out" 2>&1 & BG="$BG $!"; QH2_Q=$!
-expect_true "QH2.1 the opt-out's whole-machine take waits for the other place to drain" \
-  wait_text "$ROW/q.out" "drain"
-expect_false "QH2.2 …and has not run its command while that place is held" test -e "$ROW/q.ran"
-touch "$ROW/a.go"
-expect_true "QH2.3 it runs once the place drains" wait_file "$ROW/q.ran"
-wait "$QH2_Q"; QH2_RC=$?
-expect_status "QH2.4 …and exits with its command's code" 0 "$QH2_RC"
-wait "$QH2_A" 2>/dev/null
-
-# ═════════════════════════════════════════════════════════════ §SOLO-SAME
-section "SOLO-SAME — a whole-machine take that gives up on its first try runs once and is void, as tests/run.sh does (wave-27 T6, AC-8.4)"
-# Critic 3 S4 (wave 26). The runner, when its solo take or settle gives up at the ceiling, runs
-# the suite once unbooked and reports it VOID (tests/run.sh _solo_run). The shim exited 69 and
-# never ran the command, so on a busy machine a writer had no result for a timing suite at all.
-# Now the shim gives the runner's answer: run once unbooked, print `void` and the reason, and
-# end with the command's code, or 75 over a pass. A store it cannot write keeps 69 (B12.7,
-# B12.8), and so does a give-up at the short limit, which keeps 124 (SS4): no time is left there.
-newrow ss1
-printf '99.0\n' > "$LOADF"; MW=2
-SS1_OUT="$(bk --quiet -- "echo run >> $ROW/runs; exit 3" 2>&1)"; SS1_RC=$?
-expect_eq "SS1.1 on a machine that never settles the command runs once" 1 \
-  "$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
-expect_status "SS1.2 …and a failing run keeps its own code (3)" 3 "$SS1_RC"
-expect_regex "SS1.3 …printing void" '(^|[^a-z])void([^a-z]|$)' "$SS1_OUT"
-expect_contains "SS1.4 …saying it ran unbooked and is not retried" "it ran unbooked and is not retried" "$SS1_OUT"
-expect_contains "SS1.5 …after the give-up line naming the load" "never settled" "$SS1_OUT"
-expect_eq "SS1.6 …and every place is free afterwards" "" "$(places)"
-# A pass is void (75), and the stamp says 75, never a green.
-newrow ss2
-mkrepo "$ROW/repo"
-printf '99.0\n' > "$LOADF"; MW=2
-SS2_OUT="$(bk --quiet --stamp-dir repo -- "echo run >> $ROW/runs" 2>&1)"; SS2_RC=$?
-expect_eq "SS2.1 a passing command on a machine that never settles runs once" 1 \
-  "$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
-expect_status "SS2.2 …and is void (75), not green" 75 "$SS2_RC"
-expect_regex "SS2.3 …stamped rc=75" '\|rc=75\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
-# The drain gives up too: another place never drains within the ceiling.
-newrow ss3
-MW=2
-bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; SS3_A=$!
-wait_file "$ROW/a.started"
-SS3_OUT="$(bk --quiet -- "echo run >> $ROW/runs; exit 5" 2>&1)"; SS3_RC=$?
-expect_eq "SS3.1 a drain that gives up runs the command once" 1 \
-  "$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
-expect_status "SS3.2 …with its own code (5)" 5 "$SS3_RC"
-expect_contains "SS3.3 …after the give-up line naming the drain" "drain" "$SS3_OUT"
-expect_contains "SS3.4 …and is void" "it ran unbooked and is not retried" "$SS3_OUT"
-touch "$ROW/a.go"; wait "$SS3_A" 2>/dev/null
-# SS4. At the short limit the wait spent the call: nothing runs, and the end is 124 as before.
-newrow ss4
-printf '99.0\n' > "$LOADF"; MW=20
-SS4_OUT="$(bk --quiet --kill-after 1 -- "echo run >> $ROW/runs" 2>&1)"; SS4_RC=$?
-expect_status "SS4.1 a give-up at the short limit stays 124" 124 "$SS4_RC"
-expect_contains "SS4.2 …with the short-limit line" "over the short limit" "$SS4_OUT"
-expect_false "SS4.3 …and the command never ran (beside SS1.1's run on the same file)" test -e "$ROW/runs"
-
-# ═══════════════════════════════════════════════════════════════ §MAX-WAIT
-section "MAX-WAIT — --max-wait <s> caps every wait at the smaller of it and the shim's default (wave-27 T6, AC-8.3)"
-# Critic 3 S2 (wave 26). The wall passes the call's own timeout, less ten seconds, so a wait for
-# a place gives up inside the call instead of outliving it (tests/bash-walls.test.sh §WAIT-CEIL
-# pins the wrap). Here: the shim honours it, and never lets it raise its default.
-newrow mw1
-SN=1; MW=30
-bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; MW1_A=$!
-wait_file "$ROW/a.started"
-MW1_T0=$SECONDS
-MW1_OUT="$(bk --max-wait 2 -- "touch $ROW/m.ran" 2>&1)"; MW1_RC=$?
-MW1_DT=$((SECONDS - MW1_T0))
-expect_status "MW1.1 no place within --max-wait 2: the shim exits 69" 69 "$MW1_RC"
-expect_true "MW1.2 …at --max-wait, not the default ceiling (took ${MW1_DT}s, default ${MW}s)" \
-  test "$MW1_DT" -le 4
-expect_contains "MW1.3 …with the lib's give-up line naming the holder" "gave up after" "$MW1_OUT"
-expect_false "MW1.4 …and the command never ran" test -e "$ROW/m.ran"
-MW=2
-MW1_T0=$SECONDS
-bk --max-wait 30 -- "touch $ROW/m.ran" >/dev/null 2>&1; MW1_RC=$?
-MW1_DT=$((SECONDS - MW1_T0))
-expect_status "MW1.5 a --max-wait above the default does not raise it: 69" 69 "$MW1_RC"
-expect_true "MW1.6 …at the default ceiling (took ${MW1_DT}s, default ${MW}s)" test "$MW1_DT" -le 4
-touch "$ROW/a.go"; wait "$MW1_A" 2>/dev/null
-MW1_OUT="$(bk --max-wait 2 -- "touch $ROW/m.ran; echo ran" 2>&1)"; MW1_RC=$?
-expect_status "MW1.7 with a place free the command runs under --max-wait (beside MW1.4)" 0 "$MW1_RC"
-expect_eq "MW1.8 …with its output" "ran" "$MW1_OUT"
-for _v in 0 x -3; do
-  bk --max-wait "$_v" -- true >/dev/null 2>&1; MW1_RC=$?
-  expect_status "MW1.9 --max-wait '$_v' is a usage error (2)" 2 "$MW1_RC"
-done
-bk --max-wait=2 -- true >/dev/null 2>&1; MW1_RC=$?
-expect_status "MW1.10 --max-wait=<s> is read as well (0, beside MW1.9's 2)" 0 "$MW1_RC"
 
 finish
