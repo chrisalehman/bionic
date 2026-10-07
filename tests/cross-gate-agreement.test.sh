@@ -12599,6 +12599,13 @@ jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidec
 cgt_agent toolu_01CGTA1 W-R1
 CGT_OUT="$(cgt_stop false)"
 expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
+# THE TWO DUTIES READ ONE LAUNCHED SET (wave-28 T38; REQ-13, D30). The task-entry duty binds a launch
+# to a plan row through the fill duty's own `_ST_LAUNCHED`, the set the recorder writes as `launched=`:
+# the same Stop's ledger line and its entry clause name the same launch. fails-when: they disagree.
+expect_contains "CG-entry the recorder's line for turn A's first Stop records the launch W-R1" "|launched=W-R1|" \
+  "$(head -n 1 "$CGT_R/.bionic/docs/record/cgturn/fill-ledger.log" 2>/dev/null)"
+expect_contains "CG-entry …and the same Stop's entry duty owes that launch's row, R1, folded into the fill's detail" \
+  "tasks: dispatched R1 this turn, 0 of 1 task entries set in progress" "$CGT_OUT"
 jq -nc '{type:"user",isMeta:true,uuid:"u-cgt-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$CGT_TR"
 cgt_agent toolu_01CGTA2 W-R2
 cgt_stop true >/dev/null
