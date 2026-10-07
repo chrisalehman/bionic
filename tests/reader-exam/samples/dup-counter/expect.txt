@@ -2,3 +2,5 @@ question: structure
 result: fail
 token: check: reuse FAIL | check: one-site FAIL
 names: tree_dirty_count
+finding-file: bin/stamp.sh
+finding-rating: S1 on | S1 off | S2 on
