@@ -6373,7 +6373,7 @@ EOF
   step-field)
     case "$PV_KEY" in
       9|9a|9b)
-        die "REFUSED — the Step 9 block is close-out's to write (scripts/close-out.sh); nothing was written."
+        die "REFUSED — the Step 9 block is close-out's to write (scripts/close-out.sh)."
         exit 1 ;;
     esac
     case "$PV_FKEY" in
