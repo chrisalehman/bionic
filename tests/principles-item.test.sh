@@ -1357,6 +1357,7 @@ section "§SHARE-REMOVE: remove takes the share file out on a yes, and only that
 
 SH_R="$(rec_home)"
 rec_setup "$SH_R" share y >/dev/null 2>&1
+mkdir -p "$SH_R/.claude/bionic"
 printf 'ccstatusline\tstatusline\t2026-10-01T10:00:00Z\t1.12.0\n' > "$(rec_file "$SH_R")"
 expect_eq "SHARE-REMOVE precondition: setup wrote the share (80)" "80" "$(sh_value "$SH_R")"
 SH_R_NO="$(rec_remove "$SH_R" share n)"
