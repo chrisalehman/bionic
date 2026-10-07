@@ -650,7 +650,10 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
     # "Expected artifact: a written report. Put it at PATH when done." named a path under
     # a canonical label and was refused for naming none (R6-4). The span is the one the
     # label owns, bounded at the next label or a blank line as every other field is.
-    function span_paths(h) { return paths(spanof(h), DELIV_MAX, "") }
+    # A BARE FILE NAME IS A DELIVERABLE (wave-28 T7; REQ-15, AC-15.1, D32): `files` 2 reads each
+    # word as before and also takes one `files_entry` calls a path, a name with an extension
+    # (`notes.md`), by the rule a Files: item is read by; a word of prose stays out.
+    function span_paths(h) { return paths(spanof(h), DELIV_MAX, "", 2) }
     # The declared deliverable: walk EVERY deliverable-kind label hit in position order
     # and return the paths of the first that yields any. Iterating (rather than taking
     # only firsthit) recovers a real labeled line that an earlier, pathless
@@ -959,19 +962,22 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       MRout = out; MRc = c; MRdropped = dropped
       return out
     }
-    # <files> set: the span is a Files: span, split into items by `files_split` and read item by
+    # <files> 2: a deliverable span, read word by word as with no <files>, where a bare file name
+    # `files_entry` calls a path is a path too (span_paths, above).
+    # <files> 1: the span is a Files: span, split into items by `files_split` and read item by
     # item by `files_entry`. `none` alone is no files. A bare word prints as `files_unread=`
     # (space-joined) and an item that is no path in any spelling as `files_bad=` (comma-joined,
     # since an item holds no comma), for `brief_validate_fields` to refuse.
     function paths(s, maxn, warnlabel, files,   n, arr, i, t, k, out, seen, c, dropped, unread, bad) {
       out = ""; c = 0; dropped = ""; unread = ""; bad = ""
-      if (files) {
+      if (files == 1) {
         n = files_split(s, arr)
         if (n == 1 && tolower(arr[1]) == "none") return ""
       } else n = split(s, arr, /[ \t\r\n]+/)
       for (i = 1; i <= n; i++) {
-        t = (files ? arr[i] : trimtok(arr[i]))
-        k = (files ? files_entry(t) : 2 * ispath(t))
+        t = (files == 1 ? arr[i] : trimtok(arr[i]))
+        k = (files == 1 ? files_entry(t) : 2 * ispath(t))
+        if (files == 2 && k == 0 && files_entry(t) == 2) k = 2
         if (k == 0 || seen[t]) continue
         seen[t] = 1
         if (k == 1) { unread = (unread == "" ? t : unread " " t); continue }
@@ -1129,6 +1135,10 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       # line of its own. The longer label first, as the table runs.
       addlabel("red-evidence",       "red_evidence", "", 1)
       addlabel("lands-red",          "lands_red", "", 1)
+      # THE ROW A DISPATCH BINDS AND THE SUITES IT LANDS ON (wave-28 T7; D4, D17), pinned to line
+      # start like the two lines of a debt: `Row: <id>` and `Lands-on: <suite>[, <suite>] | none <reason>`.
+      addlabel("lands-on",           "lands_on", "", 1)
+      addlabel("row",                "row", "", 1)
       addlabel("suites",             "suites", "", 1)
       addlabel("files",              "files",  "", 1)
       addlabel("scope",              "-")
@@ -1306,6 +1316,51 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
         for (i = 1; i in RW; i++) if (RW[i] != "") { v = trimtok(RW[i]); break }
         if (v != "" && !istemplate(v)) print "red_evidence=" v
       }
+      # THE ROW AND THE SUITES IT LANDS ON (wave-28 T7; REQ-1, REQ-3, D4, D17): `Row: <id>` and
+      # `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>`, each on a line of its own, read
+      # as Questions: is: a fenced line is an example, a trailing ` # ...` comment comes off, and an
+      # unfilled slot declares nothing. `row=` is the first word. `lands_on=` is written in ONE
+      # spelling, the one the dispatch wall gives `lands_red=` and the line decodes (`_line_suites`):
+      # each suite by its basename as `<name>.test.sh`, comma-joined. A word that is no suite name
+      # prints as `lands_on_bad=`; `none` prints `lands_on=none`, its reason as `lands_on_reason=`.
+      split("", LOH); nlo = 0; nro = 0
+      for (j = 1; j <= nh; j++) {
+        if (HK[j] != "lands_on" && HK[j] != "row") continue
+        if (!fences_unbalanced() && in_code_block(HLS[j], 1)) continue
+        if (HK[j] == "row" && nro == 0) nro = j
+        if (HK[j] == "lands_on" && nlo == 0) nlo = j
+      }
+      if (nro > 0) {
+        v = spanof(nro); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
+        split(v, RW, /[ \t\r]+/); v = ""
+        for (i = 1; i in RW; i++) if (RW[i] != "") { v = RW[i]; break }
+        if (v != "" && !istemplate(v)) { v = trimtok(v); if (v != "") print "row=" v }
+      }
+      if (nlo > 0) {
+        v = spanof(nlo); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
+        gsub(/[ \t\r]+/, " ", v); sub(/^ /, "", v); sub(/ $/, "", v)
+        if (v != "" && !istemplate(v)) {
+          if (tolower(v) ~ /^none([ \t,;:.]|$)/) {
+            v = substr(v, 5); sub(/^[^A-Za-z0-9]+/, "", v)
+            print "lands_on=none"
+            if (v ~ /[A-Za-z0-9]/) print "lands_on_reason=" v
+          } else {
+            nlw = split(v, LW, /[ \t,]+/); lo = ""; lbad = ""
+            for (i = 1; i <= nlw; i++) {
+              t = trimtok(LW[i]); if (t == "") continue
+              sub(/.*\//, "", t)
+              if (t ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) {
+                sub(/\.test\.sh$/, "", t); t = t ".test.sh"
+                if (index("," lo ",", "," t ",") == 0) lo = (lo == "" ? t : lo "," t)
+              } else if (index(" " lbad " ", " " LW[i] " ") == 0) lbad = (lbad == "" ? LW[i] : lbad " " LW[i])
+            }
+            if (lo != "") print "lands_on=" lo
+            if (lbad != "") print "lands_on_bad=" lbad
+          }
+        }
+      }
       # THE RUNS THE BRIEF DECLARES, MARKS AND ALL (REQ-1 AC-1.1/AC-1.6). List-valued and
       # self-delimiting: the value is the author-marked runs, space-joined, so the roster row
       # carries the same spelling the author wrote and the writer-side budget arm can compare
@@ -1354,7 +1409,10 @@ brief_field() {
                       while [ "${#v}" -gt 40 ] && [ "${v% *}" != "$v" ]; do v="${v% *}"; done
                       printf '%s' "$v" ;;
     lands_red|red_evidence) sanitize "$v" 300 ;;
-    files)            sanitize "$v" 900 files ;;
+    row)              sanitize "$v" 40 ;;
+    lands_on)         sanitize "$v" 900 suites_allowed ;;
+    lands_on_reason|lands_on_bad) sanitize "$v" 300 ;;
+    files)          sanitize "$v" 900 files ;;
     suites)           sanitize "$v" 900 suites_allowed ;;
     re_executes)      sanitize "$v" 900 re_executes ;;
     re_executes_bad)  sanitize "$v" 300 re_executes ;;

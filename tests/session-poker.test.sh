@@ -13290,11 +13290,14 @@ section "§ROW-LABEL: the launch record binds a launch by its row= first, the na
 SRL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RRL="$(make_repo s-t7-row)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
 PRL="$(s34_plan "$RRL" 4)"
+sed -e 's/^| T2 | 4 | build | the second build | implementor |/| T2 | 4 | build | the second build | w-T2 |/' \
+    "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
 awk '{ print } /^- T5: pending dispatch/ { print "- T23: pending dispatch"; print "- T24: pending dispatch" }
   /^\| T2 \| 4 \| build/ {
   print "| T23 | 4 | build | the labelled build | — | — | 30 | REQ-1 | h.sh | — | — | pending |"
   print "| T24 | 4 | build | the named build | — | — | 30 | REQ-1 | i.sh | — | — | pending |" }' "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
 new_roster "$RRL"
+add_row "$RRL" name=w-T2 agent_id=a-w-T2 launched_at="$(iso_ago 600)"
 printf '%s|row=T23|lands_on=a.test.sh\n' "$(mkrow name=w-T24 agent_id=a-w-T24 launched_at="$(iso_ago 60)" deliverable=a2.md \
   duration="45 minutes" subagent_type=bionic:implementor)" >> "$(roster_of "$RRL")"
 TRL_TREE="$(cd "$RRL" && pwd -P)/.worktrees/01-T23"; git -C "$RRL" worktree add -q -b wt/01-T23 "$TRL_TREE" >/dev/null 2>&1
