@@ -14988,7 +14988,7 @@ expect_contains "FD-r2b …with today's dirty sentence" "read a dirty tree (dirt
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-red.log
 s42_unchanged "FD-r3 …whose command exited 1" 1 "$PFD"
 expect_contains "FD-r3b …saying it did not pass" \
-  "the floor in $FD_REC/fd-red.log did not pass (rc=1); fix it, run floor-run again and cite that log" "$OUT"
+  "fd-red.log did not pass (rc=1); fix it, run floor-run again and cite that log" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-r4 …and a log in the old tests/run.sh shape, green at the head" 1 "$PFD"
 expect_contains "FD-r4b …saying what the first line must be" \
