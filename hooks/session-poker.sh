@@ -3837,18 +3837,28 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # FIRST `ready` since the row last landed; a hand or a git landing prints `-` and joins no figure. Median
 # and p75 are linear interpolation over the sorted minutes, wave-27's baseline rule: an even set's median
 # is the mean of its middle two, a set of one is that value; an empty set prints 0. Runs count `verdict`
-# events by result. Red-then-green is a red then a green for one row and suite with no `ready` for that
-# row between (an unchanged tree), counted once per such pair. Waited is a request's `admitted` less its
+# events by result, a ROW'S runs only: the accepted head's own run, which `_line_red_owner` records under
+# the row id at the head's commit, is not the row's (a verdict at the base of one of the row's candidates
+# and at none of its own commits) and is counted nowhere. Red-then-green is a red then a green for one row,
+# one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Waited is a request's `admitted` less its
 # `asked`; killed is a request admitted whose holder is dead with no `ended` line, or that ended over 128.
 # A request counts when its `tree=` is the project or under it and it was asked at or after the record's
 # first `line/v1` event; a row's own wait is its requests by the roster name its `ready` carries, asked
 # from its first ready to its landing. Times are the events' own `at=`, never a message's.
+#
+# UNMEASURED (wave-28 T62). A record that holds `landed:` lines and no `line/v1` event (a run open across the
+# upgrade) prints the one line `landings: unmeasured — the landing record holds no line/v1 events`, and no row.
 #
 # FAIL-SOFT. An absent or empty record is the line with zeros. A `line/v1` line this fold reads (`ready`,
 # `verdict`, `published`) that lacks a field it needs is skipped and counted, and the count is one line
 # on stderr; an event of another kind, and every line that is not `line/v1`, is not this fold's. A
 # request line the fold does not know (`peak=`, anything newer) is ignored. The gate's lock is not
 # taken: this is a read, and a request the gate is writing reads as it stands.
+landing_unmeasured() {  # <record> -> rc 0 when it holds `landed:` lines and no `line/v1` event
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  /usr/bin/grep -q '^landed:' "$1" 2>/dev/null || return 1
+  ! /usr/bin/grep -q '^line/v1|' "$1" 2>/dev/null
+}
 landing_report() {  # <record> <project root> <rows yes|no> -> the line [and rows]; rc 0
   local rec="$1" root="$2" rows="$3" gd f l asked adm ended rc who tree holder dead reqs="" out mal
   gd="${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
@@ -3878,6 +3888,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
     reqs="${reqs}${asked}	${adm}	${ended}	${rc}	${who#*:}	${tree}	${dead}
 "
   done
+  if landing_unmeasured "$rec"; then printf 'landings: unmeasured — the landing record holds no line/v1 events\n'; return 0; fi
   [ -f "$rec" ] && [ ! -L "$rec" ] || rec=/dev/null
   out="$(printf '%s' "$reqs" | awk -v root="$root" -v rows="$rows" "$_PATROL_ISO_AWK"'
     function num(s) { return s ~ /^[0-9]+$/ }
@@ -3894,6 +3905,8 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       split("", kv); nf = split($0, p, "|")
       for (i = 2; i <= nf; i++) { j = index(p[i], "="); if (j > 1) kv[substr(p[i], 1, j - 1)] = substr(p[i], j + 1) }
       ev = kv["ev"]; rk = kv["row"]; e = iso2epoch(kv["at"])
+      if (ev == "candidate" && kv["base"] != "") headc[rk SUBSEP kv["base"]] = 1
+      if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[rk SUBSEP kv["commit"]] = 1
       if (ev != "ready" && ev != "verdict" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
       if (rk == "" || e < 0) { mal++; next }
       if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded)$/)) { mal++; next }
@@ -3906,8 +3919,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       span[rk]++; nm[rk] = (kv["name"] == "" ? "-" : kv["name"]); next
     }
     ev == "verdict" {
+      if ((rk SUBSEP kv["commit"]) in headc && !((rk SUBSEP kv["commit"]) in ownc)) next
       res = kv["result"]; cnt[res]++; nrun[rk]++
-      vk = rk SUBSEP span[rk] SUBSEP kv["suite"]
+      vk = rk SUBSEP span[rk] SUBSEP kv["commit"] SUBSEP kv["suite"]
       if (res == "red") red[vk] = 1
       else if (res == "green" && (vk in red)) { rtg++; delete red[vk] }
       next
@@ -7472,9 +7486,10 @@ RC_TAGS
         # A START IS TOLD BY THE TICK THAT PRINTED ITS LINE (wave-27 T37; review pass 36 S1).
         [ -z "${US_TOLD_PENDING:-}" ] || printf '%s' "$US_TOLD_PENDING" >> "$ROSTER_FILE" 2>/dev/null
       fi
-      # THE RUN'S LANDING LINE PRINTS ON EITHER PATH, OUTSIDE THE DIGEST (wave-28 T14; D18): a landing
-      # moves no decision, so an unchanged tick still carries the line, with its new figures.
-      [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"
+      # THE RUN'S LANDING LINE PRINTS ON A TICK THAT IS NOT `unchanged`, OUTSIDE THE DIGEST (wave-28 T14, T62;
+      # D18): a landing moves no decision (RP4), so it never makes a tick changed; the line shows on the
+      # ticks that print in full for another reason, and an `unchanged` tick stays the one line the Patrol ends on.
+      [ "$TICK_UNCHANGED" = yes ] || [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
         write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
@@ -7722,7 +7737,7 @@ EOF
     fi
     # THE RUN'S LANDING LINE (wave-28 T14; D18): the report's first line, once the record holds a landing.
     # It is printed by the exit trap after the decision and enters no hash.
-    if [ -n "$LT_REC" ] && /usr/bin/grep -q '^line/v1|ev=published|' "$LT_REC" 2>/dev/null; then
+    if [ -n "$LT_REC" ] && { /usr/bin/grep -q '^line/v1|ev=published|' "$LT_REC" 2>/dev/null || landing_unmeasured "$LT_REC"; }; then
       TICK_LANDINGS="$(landing_report "$LT_REC" "$REPO_REAL" no 2>/dev/null | head -1)"
     fi
 
