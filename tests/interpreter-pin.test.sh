@@ -698,7 +698,7 @@ expect_eq "7.28d …and builds one under a sticky parent" "0" "$PIN_RC"
 # runs its check. (2) The parent check removed: the open parent is accepted. Each mutant is proved
 # to run before its claim is read.
 T36_MUT1="$TMPROOT/t36-mut-runon.sh"
-anchor -F "$SEAM" 'if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then' 1
+anchor "$SEAM" 'if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then' 1
 sed 's|if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then|if ! { bionic_interpreter_pin "$_bionic_pin_root" \|\| :; }; then|' \
   "$SEAM" > "$T36_MUT1"
 expect_eq "7.29 the run-on mutant parses" "0" "$(bash -n "$T36_MUT1" >/dev/null 2>&1; echo $?)"
@@ -709,7 +709,7 @@ stop_run "$TMPROOT/stop-mut1.test.sh" "$T36_LINK"
 expect_contains "7.29c under the run-on mutant a refused pin runs its check (the defect 7.24c guards)" \
   "check ran" "$STOP_LOG"
 T36_MUT2="$TMPROOT/t36-mut-parent.sh"
-anchor -F "$SEAM" '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"' 1
+anchor "$SEAM" '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"' 1
 grep -vF '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"' "$SEAM" > "$T36_MUT2"
 expect_eq "7.30 the parent mutant parses" "0" "$(bash -n "$T36_MUT2" >/dev/null 2>&1; echo $?)"
 R="$T87_DIR/t36-mut-sticky-root"; pin_call "$T36_MUT2" "$R"
