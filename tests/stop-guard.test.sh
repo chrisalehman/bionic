@@ -2095,5 +2095,87 @@ expect_status "UR9 a roster the stop cannot be written to: the stop is REFUSED" 
 expect_contains "UR9 …in the gate's own words" "bionic: stop refused — the stop could not be recorded (make the roster writable)" "$GUARD_ERR"
 expect_eq "UR9 …and no row was written" "0" "$(ur_rows_of ghost)"
 
+section "§GUARD-DEADLINE — a guard still working at its deadline refuses the stop; a human's order is read first (wave-28 T70; A-orch-231 3)"
+#
+# `PreToolUse:TaskStop` shows ~30 `hook_cancelled` at the registration's own 10 s in one session: a cancelled
+# hook is an admitted stop, so a slow guard let through stops it never judged. The guard carries a deadline
+# of its own, 3 s under the registration, and DENIES when it has not finished: a stop it cannot judge is
+# refused. A recorded human order is read before any slow step, so the order's stop is never refused by it.
+#
+# fails-when: a guard still working at its deadline lets the stop through; a human's order is refused by the
+# deadline; or the deadline sits at or over the registration's timeout.
+SD_N=0
+# sd_plant <root> <plain|slowobs|slowsweep> -> the path of a copy of the guard beside a library whose
+# observe.sh is the shipped one with `observe_agent` made to wait 9 s first (slowobs), and a sweeper that
+# waits 9 s and answers nothing (slowsweep: the verdict an order's branch asks for).
+sd_plant() {
+  local root="$1" mode="$2" lib f
+  lib="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
+  mkdir -p "$root/hooks" "$root/scripts/lib"
+  for f in "$lib"/*; do
+    [ "${f##*/}" = observe.sh ] && continue
+    ln -s "$f" "$root/scripts/lib/${f##*/}"
+  done
+  cp "$lib/observe.sh" "$root/scripts/lib/observe.sh"
+  cp "$GUARD" "$root/hooks/stop-guard.sh"
+  cp "$HERE/session-sweeper.sh" "$root/hooks/session-sweeper.sh"
+  case "$mode" in
+    slowobs)   printf '%s\n' '_sd_f="$(declare -f observe_agent)"; eval "_sd_orig_${_sd_f}"' \
+                             'observe_agent() { sleep 9; _sd_orig_observe_agent "$@"; }' >> "$root/scripts/lib/observe.sh" ;;
+    slowsweep) printf '#!/bin/bash\nsleep 9\nexit 0\n' > "$root/hooks/session-sweeper.sh" ;;
+  esac
+  printf '%s' "$root/hooks/stop-guard.sh"
+}
+SD_SAVED_GUARD="$GUARD"
+SD_ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/sd-t70.XXXXXX")" && pwd -P)
+sd_world() {  # <tag> -> UR_REPO UR_TR UR_SUB: an idle, rostered agent "slowpoke" with nothing contracted
+  SD_N=$((SD_N + 1))
+  IFS='|' read -r UR_REPO UR_TR UR_SUB <<< "$(make_world "sd$1$SD_N" yes)"
+  plant_agent "$UR_SUB" "aslowpoke-6060606060606060" "slowpoke"
+  age_log "$UR_SUB" "aslowpoke-6060606060606060"
+  sg_roster_row "$UR_REPO" "$SID_A" "slowpoke" "aslowpoke-6060606060606060" "" "identified"
+}
+
+# SD1: the control. The shipped copy permits the idle agent's stop, so the refusal below has something to be.
+sd_world c
+GUARD="$(sd_plant "$SD_ROOT/plain" plain)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "slowpoke")"
+GUARD="$SD_SAVED_GUARD"
+expect_status "SD1 control: an idle rostered agent's stop is PERMITTED by an unhurried guard" 0 "$GUARD_ST"
+
+# SD2: the observation waits 9 s, past the 7 s deadline: the stop is refused, in one line.
+sd_world s
+GUARD="$(sd_plant "$SD_ROOT/slowobs" slowobs)"
+SD2_T0=$(date +%s)
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "slowpoke")"
+SD2_T=$(( $(date +%s) - SD2_T0 ))
+GUARD="$SD_SAVED_GUARD"
+expect_status "SD2 a guard still working at its deadline REFUSES the stop" 2 "$GUARD_ST"
+SD2_LINE="bionic: stop refused — the stop guard did not finish in 7 s (stop again)"
+expect_eq "SD2 …on its own line" "$SD2_LINE" "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "SD2 …which is 72 columns, inside the 100" "72" "$(bionic_cols "$SD2_LINE")"
+expect_true "SD2 …after the deadline, not before it (waited ${SD2_T}s, at least 6)" test "$SD2_T" -ge 6
+
+# SD3: a recorded human order is read first. The verdict an order's branch asks the sweeper for waits 9 s;
+# the stop is executed all the same.
+sd_world o
+order_stop "$UR_REPO" "$SID_A" slowpoke
+GUARD="$(sd_plant "$SD_ROOT/slowsweep" slowsweep)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "slowpoke")"
+GUARD="$SD_SAVED_GUARD"
+expect_status "SD3 a recorded human order executes though the guard's other work outran its deadline" 0 "$GUARD_ST"
+expect_contains "SD3 …as the order's own sentence" "STOP ORDERED (by human) — executing" "$GUARD_ERR"
+
+# SD4: the deadline is under the registration, both numbers read.
+SD4_DEADLINE="$(sed -n 's/^SG_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GUARD" | head -1)"
+SD4_TIMEOUT="$(jq -r '.hooks.PreToolUse[] | select(.matcher == "TaskStop") | .hooks[] | select(.command | test("stop-guard")) | .timeout' "$HERE/hooks.json" 2>/dev/null)"
+expect_nonempty "SD4 precondition: the guard names its deadline" "$SD4_DEADLINE"
+expect_nonempty "SD4 precondition: hooks.json registers the guard with a timeout" "$SD4_TIMEOUT"
+expect_true "SD4 the deadline sits at least 2 s under the registration's timeout (${SD4_DEADLINE:-?} under ${SD4_TIMEOUT:-?})" \
+  test "${SD4_DEADLINE:-99}" -le "$(( ${SD4_TIMEOUT:-0} - 2 ))"
+expect_true "SD4 …and clear of an ordinary stop's cost (at least 4 s)" test "${SD4_DEADLINE:-0}" -ge 4
+rm -rf "$SD_ROOT"
+GUARD="$SD_SAVED_GUARD"
+
 
 finish
