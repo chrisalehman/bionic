@@ -619,7 +619,7 @@ expect_eq "(r6e) …and nothing is published" "$HM1" "$(ll_head "$RM1")"
 RM2="$(ll_world)"
 ll_wide "$RM2" 'a.test.sh b.test.sh'
 ll_verb "$RM2" T1
-expect_eq "(r6f) the same row, every suite green: LANDED (exit 0)" "0 LANDED" "$LL_RC $(printf '%s' "$LL_OUT" | cut -d' ' -f1)"
+expect_eq "(r6f) the same row, every suite green: LANDED (exit 0)" "0 LANDED" "$LL_RC $(printf '%s\n' "$LL_OUT" | head -1 | cut -d' ' -f1)"
 expect_eq "(r6f) …on both suites of the amended set, the stamp read for neither" "a.test.sh,b.test.sh a.test.sh:green b.test.sh:green" \
   "$(ll_field "$(ll_ev "$RM2" ready)" suites) $(ll_verdicts "$RM2")"
 RM3="$(ll_world)"
