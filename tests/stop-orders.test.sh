@@ -1155,4 +1155,48 @@ expect_contains "10d2: …its tree stands, saying why" \
   "stopped: mk-d — its tree stands: $R17_REAL/.worktrees/mk-d; its head" "$OUT"
 if [ -f "$R17/.worktrees/mk-d/later.txt" ]; then ok "10d3: …the later commit's tree is still on disk"; else no "10d3: …the later commit's tree is still on disk"; fi
 
+# THE MARK, NOT THE ACK, IS THE LICENCE FOR THE TREE (wave-28 T21; A-orch-105 #1). The Patrol tick acks a
+# landed row it finds MET and gone; `stopped` refused every acked row, so that row's tree could never be
+# removed and standdown pointed at the refused command. A marked row the tick already acked now has its tree
+# removed by `stopped`, with no second ack; an acked row with NO mark is refused as ever.
+R18="$(make_repo stopped-acked-marked)"
+R18_REAL="$(cd "$R18" && pwd -P)"
+echo seed > "$R18/README.md"
+git -C "$R18" add README.md >/dev/null 2>&1
+git -C "$R18" commit -qm seed >/dev/null 2>&1
+for t in mk-e mk-f; do
+  git -C "$R18" worktree add -q -b "$t" "$R18/.worktrees/$t" >/dev/null 2>&1
+  echo "$t" > "$R18/.worktrees/$t/$t.txt"
+  git -C "$R18/.worktrees/$t" add -A >/dev/null 2>&1
+  git -C "$R18/.worktrees/$t" commit -qm "$t work" >/dev/null 2>&1
+done
+for t in mk-e mk-f; do git -C "$R18" merge -q --no-ff -m "merge $t (land)" "$t" >/dev/null 2>&1; done
+R18_L="$(git -C "$R18" rev-parse HEAD)"
+R18SLUG=$(printf '%s' "$R18" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R18SLUG"
+R18TR="$R8CFG/projects/$R18SLUG/$SID.jsonl"
+for t in mk-e mk-f; do
+  echo done > "$R18/.bionic/docs/record/$t.md"
+  so_roster_row "$R18" "$t" ".bionic/docs/record/$t.md" "" "$t@session-6c85684c" "" "" "" "$(so_said "$R18" "$t")"
+done
+so_mark "$R18" mk-e "$R18_L"
+so_bind_plan "$R18" wave/fixture >/dev/null
+plant_live "$R18TR" fresh
+for t in mk-e mk-f; do
+  ( cd "$R18" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack "$t" --by patrol --reason moot-and-gone ) >/dev/null 2>&1
+done
+R18_LEDGER="$(cat "$R18/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
+expect_contains "10e-pre: the Patrol's ack of mk-e is on the ledger" "|name=mk-e|by=patrol|" "$R18_LEDGER"
+expect_contains "10e-pre: …and mk-f's" "|name=mk-f|by=patrol|" "$R18_LEDGER"
+run_orders_cfg "$R18" stopped mk-e
+expect_status "10e: stopped on a marked row the Patrol already acked exits 0" 0 "$ST"
+expect_contains "10e2: …its tree is removed, said so with the landed commit" \
+  "stopped: mk-e — its tree is removed: $R18_REAL/.worktrees/mk-e (branch mk-e stays; landed ${R18_L:0:12})" "$OUT"
+if [ ! -d "$R18/.worktrees/mk-e" ]; then ok "10e3: …the tree is gone from disk"; else no "10e3: …the tree is gone from disk"; fi
+expect_eq "10e4: …and no second ack is written" "1" \
+  "$(grep -c '|event=ack|.*|name=mk-e|' "$R18/.bionic/tmp/sweeper-$SID.state" | tr -d ' ')"
+run_orders_cfg "$R18" stopped mk-f
+expect_status "10f: stopped on an acked row with no mark is refused, exit 2" 2 "$ST"
+if [ -d "$R18/.worktrees/mk-f" ]; then ok "10f2: …and its tree stands"; else no "10f2: …and its tree stands"; fi
+
 finish

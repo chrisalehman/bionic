@@ -1,0 +1,1 @@
+stamp/v1|head=@HEAD@|dirty=0|rc=1|at=2026-01-01T00:30:00Z|suites=a.test.sh|cmd=bash tests/a.test.sh
