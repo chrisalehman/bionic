@@ -549,6 +549,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> — the carrier's own subshel
 # ahead waits until that base changes. The publish is `line_publish`, asked once the entry is first
 # in line on the accepted head.
 LINE_POLL="${BIONIC_LINE_POLL:-1}"
+case "$LINE_POLL" in ''|.|*.*.*|*[!0-9.]*) LINE_POLL=1 ;; esac   # seconds, whole or decimal; else the default
 
 _line_load_gate() {
   declare -F gate_ask >/dev/null 2>&1 && return 0
@@ -621,7 +622,7 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   rec="$(line_record "$plan")" && _wt_proofs_prove "$rec" || {
     _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:-<none>} branch=${branch} — the landing record cannot be written, so nothing is published; make it writable, say ready again"; return 2
   }
-  [ -z "$within" ] || deadline=$(( $(_res_now) + within ))
+  [ -z "$within" ] || deadline=$(( $(_res_now) + 10#$within ))   # decimal: `08` is eight seconds
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
 }
 
@@ -633,7 +634,7 @@ _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empt
 # present exactly while this runs, and its landing tree is freed when it ends.
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
-  local debt="${10}" deadline="${11}" again="${12}" head ent base cand cbase first waitbase="" held=""
+  local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
   local c rc s said
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   trap '[ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"' EXIT
@@ -644,14 +645,20 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
   while :; do
     head="$(line_head "$plan")"
     _line_count_git "$plan" "$rec" "$root" "$head"
-    ent="$(_line_entries "$rec" "$head")"
-    first="$(printf '%s\n' "$ent" | awk -F'\t' '$4 == "yes" && $7 != "stalled" { print $1; exit }')"
-    ent="$(printf '%s\n' "$ent" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')"
+    all="$(_line_entries "$rec" "$head")"
+    first="$(printf '%s\n' "$all" | awk -F'\t' '$4 == "yes" && $7 != "stalled" { print $1; exit }')"
+    ent="$(printf '%s\n' "$all" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')"
     [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name"; return $?; }
     IFS=$'\t' read -r _ _ _ _ base cand _ _ _ cbase _ _ _ <<EOF
 $ent
 EOF
-    # 1. THE BASE: wait while the entry ahead has no candidate, or while ours conflicts with it.
+    # 1. THE BASE: wait while the entry ahead has no candidate, or while ours conflicts with it. A wait on a
+    # conflicting candidate ahead ends once that entry resolves: published (the base is then the accepted
+    # head, and a conflict with it returns the row), returned or stalled (the base rule gives the next
+    # base) — read off the fold, never off the head (ruling A-orch-51).
+    if [ -n "$waitbase" ] && [ "$base" = "$waitbase" ] && ! _line_ahead_open "$all" "$row" "$waitbase"; then
+      waitbase=""
+    fi
     if [ "$base" = - ] || [ "$base" = "$waitbase" ]; then
       _line_late "$deadline" && { _line_waiting "$row" "$again"; return 75; }
       sleep "$LINE_POLL"; continue
@@ -743,6 +750,12 @@ EOF
     _line_late "$deadline" && { _line_waiting "$row" "$again"; return 75; }
     sleep "$LINE_POLL"
   done
+}
+
+# An entry other than <row> still in line, present and not stalled, whose candidate is <candidate>:
+# the one a conflicting row waits on (A-orch-51). <entries> is `_line_entries`'s output.
+_line_ahead_open() {  # <entries> <row> <candidate>
+  printf '%s\n' "$1" | awk -F'\t' -v r="$2" -v c="$3" '$1 != r && $6 == c && $4 == "yes" && $7 != "stalled" { f = 1 } END { exit !f }'
 }
 
 # The entry left the fold while its carrier ran: a person's own git merge carried it (published
