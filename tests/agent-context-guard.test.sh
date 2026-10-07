@@ -64,7 +64,10 @@ make_repo() {
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name "T"
   echo seed > "$repo/README.md"
-  git -C "$repo" add README.md
+  # THE PROJECT HAS THE RUNNER'S DOOR (wave-28 T54): the one door fires only where tests/run.sh says --only,
+  # so this world plants the same runner as tests/bash-walls.test.sh's bw_door, committed with the seed.
+  mkdir -p "$repo/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$repo/tests/run.sh"
+  git -C "$repo" add README.md tests/run.sh
   git -C "$repo" commit -qm seed 2>/dev/null
   mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
   cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
@@ -258,13 +261,15 @@ run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
 # payload/scripts/booked.sh, so a G9 cell that read "silent" reads exactly this instead: no
 # deny and no advisory (the object holds nothing but the event name and updatedInput), and
 # the updated command is the shim around the ORIGINAL command, byte for byte.
+# The wrap names the agent (` --agent <name>`) since wave-28 T12; the reader accepts it, as
+# tests/bash-walls.test.sh's wrap readers do (fixed here at wave-28 T36, which owns this file's rows).
 expect_wrap_only() {
   local _cmd _s _r="'\\''"
   expect_eq "$1 …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1 …the updated command runs the booking shim" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --max-wait [0-9]+$3 -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)? --max-wait [0-9]+$3 -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1 …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
 }
@@ -619,8 +624,10 @@ roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
   suites_allowed=alpha.test.sh suites_source=declared files= \
   >> "$REPO_S/.bionic/tmp/roster-$SID.state"
 
-# CELL 1: agent context + armed -> the arm runs, and refuses the off-budget suite.
-run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+# CELL 1: agent context + armed -> the arm runs, and refuses the off-budget suite. An agent runs a
+# suite through the one door, `tests/run.sh --only <suite>` (wave-28 T36; D27): its bare form is
+# refused by the door before the budget is asked, so the budget's cells are driven in the door form.
+run_wall "$(mk_suite_payload "$REPO_S" 'tests/run.sh --only gamma.test.sh' yes)" "$SUITE_WALL"
 expect_eq "G9.1 agent context + armed: the budget arm REFUSES an off-budget suite" "2" "$ST"
 # Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25: "off budget:" inverted its meaning —
 # the set printed is what IS allowed, not what is off budget — renamed to "allowed:").
@@ -628,7 +635,7 @@ expect_contains "G9.1 …in the ruled one line, and it is the BUDGET arm's" \
   "suite-run refused — allowed:" "$ERR"
 expect_contains "G9.1 …and the row's own token now reaches the DEFAULT stderr (T8, AC-5.2)" \
   "alpha.test.sh" "$ERR"
-run_wall_verbose "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+run_wall_verbose "$(mk_suite_payload "$REPO_S" 'tests/run.sh --only gamma.test.sh' yes)" "$SUITE_WALL"
 expect_contains "G9.1 …in the arm's own words" "BUDGET" "$VERR"
 expect_contains "G9.1 …naming the recorded set" "alpha.test.sh" "$VERR"
 
@@ -640,11 +647,11 @@ expect_contains "G9.1 …naming the recorded set" "alpha.test.sh" "$VERR"
 # has nothing to do, so the silence asserted below is the budget arm's own and nothing
 # else's. An on-budget call with NO timeout is allowed too, but not silently: it is repaired
 # on the way out, which is tests/bash-walls.test.sh §14x-14z's row, not this file's.
-run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/alpha.test.sh' yes 1800000)" "$SUITE_WALL"
+run_wall "$(mk_suite_payload "$REPO_S" 'tests/run.sh --only alpha.test.sh' yes 1800000)" "$SUITE_WALL"
 expect_eq "G9.1 control: an ON-budget suite passes the same process" "0" "$ST"
 # SILENT NOW MEANS NO REFUSAL AND NO ADVISORY (wave-26 T7): every allowed suite call carries
 # the booking wrap, so stdout is that and nothing else, and stderr stays empty.
-expect_wrap_only "G9.1" 'bash tests/alpha.test.sh' ' --suites alpha\.test\.sh'
+expect_wrap_only "G9.1" 'tests/run.sh --only alpha.test.sh' ' --suites alpha\.test\.sh --runner'
 expect_empty "G9.1 …and nothing on stderr" "$ERR"
 
 # CELL 2: MAIN THREAD (no agent_id) + armed -> silent. This is the cell the wrapper used

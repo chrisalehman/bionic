@@ -3264,13 +3264,13 @@ section "S22: the parallel-budget arm"
 # --- writers: at the ceiling, refuse; one under it, pass.
 REPO=$(make_repo r22a yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "W-TWO"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "r22a two open rows against writers=2 → the third dispatch is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "…naming the budget line verbatim" \
-  "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe" "$GATE_VERR"
+  "writers=2 suites=9 worktrees=9 test_jobs=4 source=user" "$GATE_VERR"
 expect_contains "…and the count that broke it" "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_VERR"
 # IN THE REFUSAL'S DETAIL, which is where the gate names it (`declared by <plan>`). This row
 # used to read the user stream and was satisfied there by the unbound session's fallback
@@ -3279,73 +3279,108 @@ expect_contains "…naming the plan the budget came from" "$REPO/.bionic/docs/pl
 
 REPO=$(make_repo r22b yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r22b one open row against writers=2 → the second dispatch passes" "0" "$GATE_ST"
 expect_absent "…and says nothing about a budget on the pass path" "parallel budget" "$GATE_ERR"
 
-# --- unmeasured without the line, and SAID (epic-23 wave-20 T2, REQ-10 AC-10.2, D10;
-#     ADR-035). The same roster that refused above still dispatches when the plan declares
-#     no budget — the ceilings cannot be measured, so nothing is refused on them — but a
-#     LIVE plan (past Step 3) without the key is a plan that slipped past the governing-skill
-#     hook's Write wall, and this wall names the key rather than passing it in silence. Until
-#     this wave it was silent here: "inert without the line" was the rule of a budget a run
-#     OPTED INTO, and ADR-035 made the budget a measurement every plan carries.
+# §CAP — A PROBE'S NUMBER CAPS NOTHING, AND NO PLAN OWES THE LINE (wave-28 T9; D15, REQ-2
+# AC-2.9). The wall obeys `writers=` only from a line a person wrote: `budget_cap` (lib/run.sh)
+# answers from `source=user` or `source=override`, nothing else. Until wave-28 a live plan with
+# no readable line was NAMED here (a WARN and a `not checked: budget` line, ADR-035), and a
+# probe-written `writers=1` refused the second writer. Now each of those dispatches with no
+# ceiling and nothing said. fails-when: `source=probe writers=1` refuses anything, or a plan
+# with no line is named.
+section "§CAP — a probe's writers= refuses nothing; a plan with no line is not named (wave-28 T9, AC-2.9)"
+CAP_RUN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh"
+cap_of() {  # <budget value or "-"> -> what budget_cap prints for a plan carrying that line
+  local d; d="$(mktemp -d)"
+  if [ "$1" = "-" ]; then printf -- '---\nx: y\n---\n' > "$d/p.plan.md"
+  else printf -- '---\nparallel-budget: %s\n---\n' "$1" > "$d/p.plan.md"; fi
+  ( . "$CAP_RUN_LIB" >/dev/null 2>&1; budget_cap "$d/p.plan.md" )
+  rm -rf "$d"
+}
+require_helpers cap_of
+expect_eq "§CAP.u1 budget_cap: source=user answers writers=<n>" "writers=3" "$(cap_of "writers=3 suites=2 source=user")"
+expect_eq "§CAP.u2 budget_cap: source=override answers too" "writers=4" "$(cap_of "writers=4 source=override")"
+expect_eq "§CAP.u3 budget_cap: source=probe answers nothing" "" "$(cap_of "writers=3 suites=2 source=probe")"
+expect_eq "§CAP.u4 budget_cap: a line with no source= answers nothing" "" "$(cap_of "writers=3 suites=2")"
+expect_eq "§CAP.u5 budget_cap: no line answers nothing" "" "$(cap_of -)"
+expect_eq "§CAP.u6 budget_cap: the whole field, not max_writers=" "writers=2" "$(cap_of "max_writers=9 writers=2 source=user")"
+expect_eq "§CAP.u7 budget_cap: a user line with no writers= answers nothing" "" "$(cap_of "suites=2 source=user")"
+
 REPO=$(make_repo r22c yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "W-TWO"
+expect_contains "§CAP.1 meta: the plan carries the probe's line" "parallel-budget: writers=1 suites=9 worktrees=9 test_jobs=4 source=probe" \
+  "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "§CAP.1 source=probe writers=1 with two open rows → the third dispatch is admitted" "allow" "$GATE_VERDICT"
+expect_absent "§CAP.1b …no ceiling count is printed" "writers: budget=" "$GATE_ERR$GATE_VERR"
+expect_absent "§CAP.1c …and nothing is said about the budget line" "parallel-budget" "$GATE_ERR$GATE_VERR"
+
+REPO=$(make_repo r22c2 yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "§CAP.2 a line with no source= caps nothing: writers=1 and one open row → admitted" "allow" "$GATE_VERDICT"
+
+REPO=$(make_repo r22c3 yes)
 write_attestation "$REPO" "$SID_A"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "W-TWO"
 s22_roster_row "$REPO" "$SID_A" "W-THREE"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22c no parallel-budget: in a live plan → no ceiling refuses, three rows notwithstanding" "0" "$GATE_ST"
-expect_absent "…and no ceiling count is printed" "writers: budget=" "$GATE_ERR"
-expect_contains "r22c2 …but the missing key is NAMED on the pass path (AC-10.2)" \
-  "no parallel-budget: line with a writers= field" "$GATE_ERR"
-expect_contains "r22c2 …citing the decision that makes the budget a measurement" "ADR-035" "$GATE_ERR"
-expect_contains "r22c2 …and naming the plan it read" \
-  "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$GATE_ERR"
-
-# r22c3 — A KEY SPELLED ANY OTHER WAY IS NO KEY. A leading space before `parallel-budget:`
-# is the spelling the stop wall used to read as 3 and the tick, preflight and the hook read
-# as nothing; one strict reader now answers "no line" for all four, so it gets the same
-# named backstop as an absent key.
-REPO=$(make_repo r22c3 yes)
-write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-sed -i '' 's/^parallel-budget: /  parallel-budget: /' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-s22_roster_row "$REPO" "$SID_A" "W-ONE"
-expect_contains "r22c3 meta: the plan carries the indented key" "  parallel-budget: writers=1" \
+expect_absent "§CAP.3 meta: the live plan carries no parallel-budget: line" "parallel-budget" \
   "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22c3 an indented key reads as no key: nothing is refused on writers=1" "0" "$GATE_ST"
-expect_contains "r22c3 …and the key is named as missing" "no parallel-budget: line with a writers= field" "$GATE_ERR"
+expect_eq "§CAP.3 no line in a live plan → admitted, three rows notwithstanding" "allow" "$GATE_VERDICT"
+expect_absent "§CAP.3b …and the plan is not named for want of the line" "parallel-budget" "$GATE_ERR"
+expect_absent "§CAP.3c …nor is the budget listed as not checked" "not checked: budget" "$GATE_ERR$GATE_VERR"
 
-# r22c4 — BELOW STEP 4 NOTHING IS OWED. A plan at `current: 3` is still being written, so a
-# missing key there is not a live run's gap and nothing is said (the stop wall's backstop
-# takes the same boundary: fill_ledger_live, past Step 3).
+# A KEY SPELLED ANY OTHER WAY IS NO KEY: an indented person's line reads as no line, so it caps
+# nothing and is not named either.
 REPO=$(make_repo r22c4 yes)
 write_attestation "$REPO" "$SID_A"
-sed -i '' 's/^current: 4$/current: 3/' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
+sed -i '' 's/^parallel-budget: /  parallel-budget: /' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+expect_contains "§CAP.4 meta: the plan carries the indented key" "  parallel-budget: writers=1" \
+  "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22c4 a keyless plan at current: 3 dispatches" "0" "$GATE_ST"
-expect_absent "r22c4 …and nothing is said about the key" "no parallel-budget: line" "$GATE_ERR"
+expect_eq "§CAP.4 an indented key reads as no key: nothing is refused on writers=1" "allow" "$GATE_VERDICT"
 
-# r22c5 — THE PAIRED CONTROL: a keyed plan at current: 4 says nothing about a missing key.
-# Without it r22c2 is green on a wall that prints the line on every dispatch.
-REPO=$(make_repo r22c5 yes)
+# §CAP-USER — A PERSON'S LIMIT STILL CAPS (wave-28 T9; D15, REQ-2 AC-2.10). The same two open
+# rows that §CAP.1 admitted a third beside are refused when a person wrote the line. This is the
+# paired control for §CAP.1: the fixture differs in the one word. fails-when: a third writer is
+# admitted under `source=user writers=2`.
+section "§CAP-USER — a person's writers= refuses the writer past it (wave-28 T9, AC-2.10)"
+REPO=$(make_repo r22cu yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=user"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "W-TWO"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22c5 a keyed live plan dispatches" "0" "$GATE_ST"
-expect_absent "r22c5 …and names no missing key" "no parallel-budget: line" "$GATE_ERR"
+expect_eq "§CAP-USER.1 source=user writers=2 with two open rows → the third writer is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "§CAP-USER.1b …on the writer count" "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_VERR"
+expect_contains "§CAP-USER.1c …saying the cap is a person's" "That cap is a person's" "$GATE_VERR"
+REPO=$(make_repo r22co yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 source=override"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "§CAP-USER.2 source=override writers=1 with one open row → REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "§CAP-USER.2b …on the writer count" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
 # r22c6 — max_writers IS NOT writers. The field is read whole: `max_writers=9 writers=1`
 # carries a ceiling of ONE, so one open row refuses the second dispatch (the 9-vs-3 defect,
 # triage-D, at this wall's own numbers).
 REPO=$(make_repo r22c6 yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "max_writers=9 writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "max_writers=9 writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "r22c6 max_writers=9 writers=1 with one open row → REFUSED on writers=1" "deny" "$GATE_VERDICT"
@@ -3357,7 +3392,7 @@ expect_contains "…naming the whole-field reading" "writers: budget=1 open=1 wi
 #     THIS TURN's ListAgents answer is the only thing that opens or closes it.
 REPO=$(make_repo r22d yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "r22d one LIVE row against writers=1 → refused (the control)" "deny" "$GATE_VERDICT"
@@ -3371,27 +3406,18 @@ expect_status "…and the same row, absent from a fresh answer, no longer counts
 #     dispatch on an open subprocess claim, r22e and r22f, moved to §READONLY-FREE, which
 #     proves the arm is gone for a writer and for a read-only role alike.
 
-# --- worktrees: live linked trees on disk.
+# --- NO WORKTREES CEILING (wave-28 T9; D15). A person's line that names `worktrees=1` with a
+#     live tree standing still dispatches: what the ceiling stood for is asked of the disk where a
+#     tree is made (`spawn-worktree.sh create`, tests/spawn-worktree.test.sh §DISK). The writer
+#     cap on the same line is obeyed, so the pass is the worktrees arm's absence, not an inert line.
 REPO=$(make_repo r22h yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=1 test_jobs=4 source=probe"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22h worktrees=1 with no tree standing → passes (the control)" "0" "$GATE_ST"
-# A DISTINCT NAME, because the control above was ALLOWED and journalled `w99-impl` on this
-# repo's roster (wave-14 REQ-8). Re-using it would put the name-in-flight arm's fault beside
-# the worktree ceiling's, and since the arms pool now that is one refusal naming two
-# things — a true answer to a question this section is not asking.
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=1 test_jobs=4 source=user"
 s22_fake_tree "$REPO" "one"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl-b")"
-expect_eq "…one live tree against worktrees=1 → REFUSED" "deny" "$GATE_VERDICT"
-expect_contains "…naming the tree count" "worktrees: budget=1 live=1 with-this-dispatch=2" "$GATE_VERR"
-# A plain directory under .worktrees is not a leased tree — only a linked one is.
-REPO=$(make_repo r22i yes)
-write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=1 test_jobs=4 source=probe"
-mkdir -p "$REPO/.worktrees/not-a-tree"
+s22_fake_tree "$REPO" "two"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22i a bare directory under .worktrees is not a lease → passes" "0" "$GATE_ST"
+expect_eq "r22h worktrees=1 with two live trees → admitted: no worktrees ceiling" "allow" "$GATE_VERDICT"
+expect_absent "r22h2 …and no tree count is printed" "worktrees: budget=" "$GATE_ERR$GATE_VERR"
 
 # --- r22g: the wall and the Patrol count the same open rows on THIS fixture. AC-7
 #     retires `landing-swept` as the wall's own signal — W-FOUR is left off the fresh
@@ -3401,7 +3427,7 @@ expect_status "r22i a bare directory under .worktrees is not a lease → passes"
 #     its launch, so W-FOUR is closed for the Patrol's count by an ack instead.
 REPO=$(make_repo r22g yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "W-TWO"
 s22_roster_row "$REPO" "$SID_A" "W-THREE"
@@ -3430,7 +3456,7 @@ section "S22b: the budget count is read off the fresh live set"
 # would have been the SECOND writer (budget=1, one row not counted) is allowed.
 REPO=$(make_repo r22ja yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "r1"
 R22JA_T="$SANDBOX/.r22ja.jsonl"
 mk_transcript "$R22JA_T" fresh W-OTHER
@@ -3444,7 +3470,7 @@ expect_absent "…specifically no writers count printed" "writers:" "$GATE_ERR"
 # open=1, and the same dispatch is now the second writer against a budget of one.
 REPO=$(make_repo r22jb yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "r1"
 R22JB_T="$SANDBOX/.r22jb.jsonl"
 mk_transcript "$R22JB_T" fresh r1
@@ -3472,7 +3498,7 @@ section "S22b-nla: with no ListAgents answer the count is the open roster rows"
 # (a) N=2 rows, NO answer in the transcript at all, ceiling 3 -> 2+1 = 3 fits: ALLOWED.
 REPO=$(make_repo r22nla yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "n1"
 s22_roster_row "$REPO" "$SID_A" "n2"
 R22NLA_NONE="$SANDBOX/.r22nla-none.jsonl"
@@ -3489,7 +3515,7 @@ expect_absent "…and no tool call is demanded of the dispatcher" \
 # 2+1 = 3 passes it: REFUSED, and the count it names is the roster's own N.
 REPO=$(make_repo r22nlb yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "n1"
 s22_roster_row "$REPO" "$SID_A" "n2"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLA_NONE")"
@@ -3511,7 +3537,7 @@ expect_absent "…nor refusing for want of a fresh answer" "live-agents: none" "
 # Without this arm a hard-coded 2 would pass (a) and (b) both.
 REPO=$(make_repo r22nlc yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "n1"
 s22_roster_row "$REPO" "$SID_A" "n2"
 s22_roster_row "$REPO" "$SID_A" "n3"
@@ -3527,7 +3553,7 @@ expect_contains "…counting three, because three is what the roster holds" \
 # refresh it is the very chore D1 struck. Same two rows, same ceiling of 2 as (b).
 REPO=$(make_repo r22nld yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "n1"
 s22_roster_row "$REPO" "$SID_A" "n2"
 R22NLD_STALE="$SANDBOX/.r22nld-stale.jsonl"
@@ -3546,7 +3572,7 @@ expect_absent "…not on the staleness" "call ListAgents" "$GATE_VERR"
 # would refuse here.
 REPO=$(make_repo r22nle yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "n1"
 s22_roster_row "$REPO" "$SID_A" "n2"
 R22NLE_FRESH="$SANDBOX/.r22nle-fresh.jsonl"
@@ -3563,7 +3589,7 @@ expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 # rows there is nothing to count and nothing to say.
 REPO=$(make_repo r22jd yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 R22JD_STALE="$SANDBOX/.r22jd-stale.jsonl"
 mk_transcript "$R22JD_STALE" stale r1
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JD_STALE")"
@@ -3667,7 +3693,7 @@ expect_nonempty "§budget-markers meta: the ack fixture read a ledger schema out
 # marker-free close is (d): the same seven rows ACKED.
 REPO=$(make_repo r22mka yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=user"
 for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
 R22MK_STALE="$SANDBOX/.r22mk-stale.jsonl"
@@ -3685,7 +3711,7 @@ expect_absent "…and nothing is said about the panel's staleness" "live-agents:
 # answer (a) now gives, which is the point: the markers changed nothing.
 REPO=$(make_repo r22mkb yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=user"
 for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
 expect_eq "r22mkb the same nine rows UNMARKED on the same stale panel -> REFUSED" "deny" "$GATE_VERDICT"
@@ -3699,7 +3725,7 @@ expect_contains "…naming the count the roster holds" \
 # markers say landed, the panel says working, and the panel is the truth: open=9, REFUSED.
 REPO=$(make_repo r22mkc yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=user"
 for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
 R22MK_FRESH="$SANDBOX/.r22mk-fresh.jsonl"
@@ -3716,7 +3742,7 @@ expect_contains "…counting all nine open, because the panel said so" \
 # sweeper's own ledger instead. open=2, ALLOWED.
 REPO=$(make_repo r22mkd yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=user"
 for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK_LANDED; do s22_ack "$REPO" "$SID_A" "$_n"; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
@@ -3729,7 +3755,7 @@ expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 # comparison is by time, and an ack that predates the launch closes nothing: open=9, REFUSED.
 REPO=$(make_repo r22mke yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=user"
 for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK_LANDED; do s22_ack "$REPO" "$SID_A" "$_n" 2026-09-01T00:00:00Z; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
@@ -3743,7 +3769,7 @@ expect_contains "…counting all nine open" \
 # refuses. This is what makes the reading above a LATEST-CONTRACT reading and not a set.
 REPO=$(make_repo r22mkf yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=user"
 for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK_LANDED; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
@@ -3771,7 +3797,7 @@ mk_transcript "$R22MK9_STALE" stale $S22MK9_NAMES
 
 REPO=$(make_repo r22mki yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=user"
 for _n in $S22MK9_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK9_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK9_STALE")"
@@ -3782,7 +3808,7 @@ expect_contains "r22mki …counting all eight open" "writers: budget=8 open=8 wi
 # ninth is over — the same answer (i) gives, because the markers change nothing.
 REPO=$(make_repo r22mki2 yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=user"
 for _n in $S22MK9_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK9_STALE")"
 expect_eq "r22mki2 the same eight rows UNMARKED at the same ceiling -> REFUSED" "deny" "$GATE_VERDICT"
@@ -3793,7 +3819,7 @@ expect_contains "r22mki2 …naming the count the roster holds" \
 # the eight acked on the sweeper's own ledger instead of marked: open=2, ALLOWED.
 REPO=$(make_repo r22mki3 yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=user"
 for _n in $S22MK9_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK9_LANDED; do s22_ack "$REPO" "$SID_A" "$_n"; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK9_STALE")"
@@ -3824,7 +3850,7 @@ section "§budget-markers-pipe: a closed name past the pipe buffer is still reco
 R22MKH_N=6000
 REPO=$(make_repo r22mkh yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 
 R22MKH_F="$(roster_path "$REPO" "$SID_A")"
 mkdir -p "$(dirname "$R22MKH_F")"
@@ -3903,7 +3929,7 @@ section "S22c: an idle (finished, unstopped) teammate does not count open"
 # a fresh answer — with `running` changed to `idle`. r22jb REFUSES. This must pass.
 REPO=$(make_repo r22ka yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "r1"
 R22KA_T="$SANDBOX/.r22ka.jsonl"
 mk_transcript "$R22KA_T" fresh "r1:idle"
@@ -3922,7 +3948,7 @@ expect_contains "r22ka meta: the answer body names r1 idle, not running" \
 # say 2; a rule that stopped counting altogether would say 0 and let this through.
 REPO=$(make_repo r22kb yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "r1"
 s22_roster_row "$REPO" "$SID_A" "r2"
 R22KB_T="$SANDBOX/.r22kb.jsonl"
@@ -3937,7 +3963,7 @@ expect_contains "…counting the running one ONLY: open=1, not open=2" \
 # in one root launching same-named agents — is unresolvable, so the slot is spent.
 REPO=$(make_repo r22kc yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "r1"
 R22KC_T="$SANDBOX/.r22kc.jsonl"
 mk_transcript "$R22KC_T" fresh "r1:idle" "r1:idle"
@@ -3954,7 +3980,7 @@ expect_contains "…open=1 on the safe direction, even though neither copy reads
 # outcome is the same exit, for a reason the operator can act on without a tool call.
 REPO=$(make_repo r22kd yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "r1"
 R22KD_T="$SANDBOX/.r22kd.jsonl"
 mk_transcript "$R22KD_T" stale "r1:idle"
@@ -3974,7 +4000,7 @@ expect_contains "…counting the row the stale answer could not speak for" \
 # rule under test counts the one running writer and lets the dispatch through.
 REPO=$(make_repo r22ke yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "s6-stop-resolution"
 s22_roster_row "$REPO" "$SID_A" "s5-dispatch-budget"
 # THE BODY IS THE CORPUS'S OWN LINE, not a copy of it (S17). This section is about ONE
@@ -3999,7 +4025,7 @@ expect_absent "…no writers refusal, because open=1 and not 2" "writers:" "$GAT
 # passing against a gate that had simply stopped counting.
 REPO=$(make_repo r22kf yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "s6-stop-resolution"
 s22_roster_row "$REPO" "$SID_A" "s5-dispatch-budget"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KE_T")"
@@ -4023,7 +4049,7 @@ expect_contains "…open=1, the finished agent uncounted" \
 # not depend on that staying true.
 REPO=$(make_repo r22kh yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "r1"
 R22KH_T="$SANDBOX/.r22kh.jsonl"
 mk_transcript "$R22KH_T" fresh "r1:starting"
@@ -4243,7 +4269,7 @@ expect_absent "r24h …and the budget wall stays silent" "parallel-budget" "$GAT
 # whose ceiling is already full IS refused by that wall.
 S24_BUDGET=$(make_repo r24bw yes)
 S24_PLAN="$S24_BUDGET/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-awk 'NR==2 { print "parallel-budget: writers=0 suites=4 worktrees=32 test_jobs=8 source=probe" } { print }' \
+awk 'NR==2 { print "parallel-budget: writers=0 suites=4 worktrees=32 test_jobs=8 source=user" } { print }' \
   "$S24_PLAN" > "$S24_PLAN.tmp" && mv "$S24_PLAN.tmp" "$S24_PLAN"
 run_gate "$(mk_agent_payload "$SID_A" "$S24_BUDGET")"
 expect_eq "r24i the same brief against a FULL budget is REFUSED" "deny" "$GATE_VERDICT"
@@ -4348,8 +4374,8 @@ section "S25a: bound-open — the caller's OWN plan is the ceiling"
 # A's budget is tight (writers=1, already at the ceiling with one open row); B's is
 # loose (writers=99). Bound to A, the dispatch is refused by A's ceiling — proof
 # that a second open plan in the same root (B, newer, looser) is never consulted.
-s25_repo r25a "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe" \
-              "writers=99 suites=9 worktrees=9 test_jobs=4 source=probe"
+s25_repo r25a "writers=1 suites=9 worktrees=9 test_jobs=4 source=user" \
+              "writers=99 suites=9 worktrees=9 test_jobs=4 source=user"
 write_attestation "$S25_REPO" "$SID_A"
 s25_bind "$S25_REPO" "$SID_A" "$S25_PLAN_A"
 s22_roster_row "$S25_REPO" "$SID_A" "W-ONE"
@@ -4368,8 +4394,8 @@ section "S25b: fallback — unbound, the newest plan is announced and never acte
 # never read, and the writer is refused with the bind instruction instead — not with B's
 # budget, which is somebody else's run. The positive (advisory, bind refusal) sits beside
 # its negative (gone once bound) on the same fixture.
-s25_repo r25b "writers=99 suites=9 worktrees=9 test_jobs=4 source=probe" \
-              "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s25_repo r25b "writers=99 suites=9 worktrees=9 test_jobs=4 source=user" \
+              "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 S25_REPO2="$S25_REPO"
 # PHYSICAL, because the fallback path comes off active_plan's own resolution —
 # `project_root` calls `pwd -P` internally (payload/scripts/lib/root.sh) — while
@@ -4412,8 +4438,8 @@ section "S25c: bound-closed — a plan that closed is no open run at all"
 # passes (the budget wall is inert, as it is for any engaged-with-no-plan
 # session) and the closed-plan advisory names A; B's path is nowhere in the
 # output, proving B was never the fallback here.
-s25_repo r25c "suites=9 worktrees=9 test_jobs=4 source=probe" \
-              "writers=0 suites=9 worktrees=9 test_jobs=4 source=probe"
+s25_repo r25c "suites=9 worktrees=9 test_jobs=4 source=user" \
+              "writers=0 suites=9 worktrees=9 test_jobs=4 source=user"
 S25_REPO3="$S25_REPO"
 s25_deliver "$S25_PLAN_A"
 write_attestation "$S25_REPO3" "$SID_A"
@@ -4432,8 +4458,8 @@ section "S25d: the roster row's plan= field (AC-2, §Roster attribution)"
 # Roster attribution is the BINDING, not the resolved run: a session bound to A
 # gets plan=A on its row even though the budget/fallback logic above resolves
 # differently case by case. An unbound session's row carries the literal "none".
-s25_repo r25d "suites=9 worktrees=9 test_jobs=4 source=probe" \
-              "suites=9 worktrees=9 test_jobs=4 source=probe"
+s25_repo r25d "suites=9 worktrees=9 test_jobs=4 source=user" \
+              "suites=9 worktrees=9 test_jobs=4 source=user"
 S25_REPO4="$S25_REPO"
 # PHYSICAL, same reason as S25_PLAN_B_PHYS above: s25_bind (S11) writes through the real
 # bind_plan, which stores the CANONICAL directory (`pwd -P`), not the sandbox's logical one.
@@ -4446,8 +4472,8 @@ S25_ROW=$(roster_nth_row "$(roster_path "$S25_REPO4" "$SID_A")" 1)
 expect_status "25d2: the row's plan= field is A's path, verbatim" "$S25_PLAN_A_PHYS" \
   "$(roster_field "$S25_ROW" plan)"
 
-s25_repo r25e "suites=9 worktrees=9 test_jobs=4 source=probe" \
-              "suites=9 worktrees=9 test_jobs=4 source=probe"
+s25_repo r25e "suites=9 worktrees=9 test_jobs=4 source=user" \
+              "suites=9 worktrees=9 test_jobs=4 source=user"
 S25_REPO5="$S25_REPO"
 write_attestation "$S25_REPO5" "$SID_A"
 # A READ-ONLY ROLE, because an unbound session's writer is refused with the bind instruction
@@ -4474,8 +4500,8 @@ expect_status "25d4: the row's plan= field is the literal 'none'" "none" \
 # would lose to the real one at `line_field`'s `head -1` today, which makes a value-only
 # assertion pass for a reason that could evaporate under any reader change. The field COUNT
 # is what says no segment was injected.
-s25_repo r25f "suites=9 worktrees=9 test_jobs=4 source=probe" \
-              "suites=9 worktrees=9 test_jobs=4 source=probe"
+s25_repo r25f "suites=9 worktrees=9 test_jobs=4 source=user" \
+              "suites=9 worktrees=9 test_jobs=4 source=user"
 S25_REPO6="$S25_REPO"
 write_attestation "$S25_REPO6" "$SID_A"
 S25_EVIL="$S25_REPO6/.bionic/docs/plans/epic-99-test/wave-99|status=landed|name=ghost.plan.md"
@@ -4532,7 +4558,7 @@ chmod +x "$S26_SHIM/jq"
 
 REPO=$(make_repo r26 yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=99 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=99 suites=9 worktrees=9 test_jobs=4 source=user"
 S26_N=1
 while [ "$S26_N" -le 12 ]; do
   s22_roster_row "$REPO" "$SID_A" "r26-$S26_N"
@@ -4884,7 +4910,7 @@ REPO=$(make_repo r27l yes)
 write_attestation "$REPO" "$SID_A"
 # A BUDGETED PLAN, as every live plan is (ADR-035): since epic-23 wave-20 T2 a keyless live
 # plan earns preflight's named-backstop WARN, and this row's "no WARN" is about the suite cap.
-s22_set_budget "$REPO" "writers=99 suites=99 worktrees=99 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=99 suites=99 worktrees=99 test_jobs=4 source=user"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
 Expected artifact: .bionic/docs/record/w27l.md
 Expected duration: 5 minutes
@@ -5275,9 +5301,12 @@ PF_MAP="$SANDBOX/pf-map.sh"
   printf 'done\n'
 } > "$PF_MAP"
 
+# The floor row lands no code, so its brief names no landing suite (wave-28 T7, ruling A-orch-73: a
+# writer brief that binds a row, as `w99-T12` binds T12, carries a Lands-on: line).
 PF_FULL_BRIEF='Your task: run the full suite on the working head.
 Expected artifact: .bionic/docs/record/w28-floor.log
 Expected duration: ~40 minutes.
+Lands-on: none the floor row proves the head with the full suite and lands no code
 Suites: tests/run.sh'
 
 # pf_repo <name> -> a wave fixture checked out on `wave/99-test`, five suites, the map stub.
@@ -6358,7 +6387,7 @@ REPO=$(make_repo rcomb yes)
 # A BUDGETED PLAN (ADR-035). Since epic-23 wave-20 T2 a keyless live plan adds its own
 # `not checked: budget` line to the wire, and this arm's line cap counts the scaffold's walls,
 # not the budget's; a real plan carries the key, so the fixture does too.
-s22_set_budget "$REPO" "writers=99 suites=99 worktrees=99 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=99 suites=99 worktrees=99 test_jobs=4 source=user"
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "combobot")"
 
@@ -7099,7 +7128,7 @@ mk_transcript "$T22NF_NONE" none
 # (a) THE REFUSAL. One open `intended` row named `T5`; a dispatch that names `T5` again.
 REPO=$(make_repo t22nfa yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T5"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
 expect_eq "t22nfa a name with an open intended row is REFUSED" "deny" "$GATE_VERDICT"
@@ -7110,7 +7139,7 @@ expect_contains "…and the detail names the name and its status" "T5" "$GATE_VE
 # (b) A CONFIRMED ROW IS OPEN TOO. The three live statuses are one class here.
 REPO=$(make_repo t22nfb yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 roster_row_no_plan status=confirmed "session=$SID_A" name=T6 agent_id=aT6-1111111111111111 \
   launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
   deliverable=/tmp/d-T6 source=declared "duration=~10 minutes" progress= \
@@ -7122,7 +7151,7 @@ expect_contains "…naming the same fact" "that name is in flight" "$GATE_ERR"
 # (c) AN IDENTIFIED ROW IS OPEN TOO.
 REPO=$(make_repo t22nfc yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 roster_row_no_plan status=identified "session=$SID_A" name=T7 agent_id=aT7-2222222222222222 \
   launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
   deliverable=/tmp/d-T7 source=declared "duration=~10 minutes" progress= \
@@ -7135,7 +7164,7 @@ expect_eq "t22nfc a name with an open identified row is REFUSED" "deny" "$GATE_V
 # pass (a)-(c) and fail here.
 REPO=$(make_repo t22nfd yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T5"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5-r2" "claude-sonnet-5" "$T22NF_NONE")"
 expect_status "t22nfd the name the FILL line would derive instead is ALLOWED" "0" "$GATE_ST"
@@ -7147,7 +7176,7 @@ expect_absent "…and nothing is said about a name in flight" "in flight" "$GATE
 # seen; the agent behind it may still be on the panel. REFUSED.
 REPO=$(make_repo t22nfe yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T8"
 s22_sweep "$REPO" "$SID_A" "T8"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T8" "claude-sonnet-5" "$T22NF_NONE")"
@@ -7164,7 +7193,7 @@ expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
 # scope every other roster reader in the fleet already uses.
 REPO=$(make_repo t22nff yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_B" "T9"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T9" "claude-sonnet-5" "$T22NF_NONE")"
 expect_status "t22nff a predecessor session's row does not reserve the name here" "0" "$GATE_ST"
@@ -7173,7 +7202,7 @@ expect_status "t22nff a predecessor session's row does not reserve the name here
 # flight, and an arm that refused one would break every unnamed async dispatch in the fleet.
 REPO=$(make_repo t22nfg yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T5"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "-" "claude-sonnet-5" "$T22NF_NONE")"
 expect_absent "t22nfg an unnamed dispatch is never refused for a name in flight" \
@@ -7191,7 +7220,7 @@ expect_absent "t22nfg an unnamed dispatch is never refused for a name in flight"
 # newest intended/confirmed/identified row of that name does not close it.
 REPO=$(make_repo t22nfh yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T5"
 roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-1111111111111111 \
   launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
@@ -7218,7 +7247,7 @@ expect_contains "…and the status it names is the LATEST row's, not the first l
 # nothing now, D10, and the marker is kept to show it.)
 REPO=$(make_repo t22nfi yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T5"
 s22_sweep "$REPO" "$SID_A" "T5"
 s22_roster_row "$REPO" "$SID_A" "T5"
@@ -7243,7 +7272,7 @@ expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
 # open row of the name — and (j2) is the way out.
 REPO=$(make_repo t22nfj yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T5"
 s22_sweep "$REPO" "$SID_A" "T5"
 # The ADOPT-SHAPED row, and the one field that separates it from (h)'s ordinary relaunch:
@@ -7283,7 +7312,7 @@ expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
 # before its last launch is admitted (AC-1.4) — (k) is the first half, (l) the second.
 REPO=$(make_repo t22nfk yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T16-k"
 s22_ack "$REPO" "$SID_A" "T16-k"
 # META, and the anti-vacuity arm: the ack really is on the ledger, under the schema its WRITER
@@ -7308,7 +7337,7 @@ expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR$GATE_REASON"
 # relaunched agent sits behind.
 REPO=$(make_repo t22nfl yes)
 write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "T16-l"
 s22_ack "$REPO" "$SID_A" "T16-l"
 roster_row_no_plan status=identified "session=$SID_A" name=T16-l agent_id=aT16l-111111111111 \
@@ -7399,7 +7428,7 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r3arms yes)
 write_attestation "$REPO" "$SID_A"
 rm -f "$(s21_stamp_path "$REPO" "$SID_A")"                      # fault 1: arm 7a, the Patrol
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"                          # fault 2: arm 10, the budget
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONE_SHAPE_FAULT" "w3arms")"
 
@@ -9629,7 +9658,7 @@ RO_NONE="$SANDBOX/.ro-none.jsonl"
 mk_transcript "$RO_NONE" none
 
 # ro1 — a read-only dispatch at open == writers is ADMITTED; the paired control is a writer.
-REPO=$(ro_budget_repo ro1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo ro1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro1-r" "claude-sonnet-5" "$RO_NONE" "bionic:researcher")"
 expect_eq "ro1 one writer open against writers=1 → a researcher dispatch is ADMITTED (no +1)" "allow" "$GATE_VERDICT"
@@ -9639,7 +9668,7 @@ expect_contains "ro1c …at the writer count" "writers: budget=1 open=1 with-thi
 
 # ro2 — a read-only ROW holds no writer slot: a writer is admitted past it, on a dark panel and
 # on a fresh one that lists it.
-REPO=$(ro_budget_repo ro2 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo ro2 "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro2-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "ro2 one researcher open against writers=1, dark panel → a writer is ADMITTED" "allow" "$GATE_VERDICT"
@@ -9650,7 +9679,7 @@ expect_eq "ro2b …and with the researcher LISTED on a fresh panel" "allow" "$GA
 
 # ro3 — the exclusion is per row: a researcher and a writer open, writers=1, a writer is
 # refused and the count it names is the writer's alone.
-REPO=$(ro_budget_repo ro3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo ro3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro3-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
@@ -9663,7 +9692,7 @@ expect_contains "ro3 …open counts the writer and not the researcher" \
 _ro=0
 for _t in researcher acme:helper general-purpose ""; do
   _ro=$((_ro + 1))
-  REPO=$(ro_budget_repo "ro4-$_ro" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+  REPO=$(ro_budget_repo "ro4-$_ro" "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
   s22_roster_row "$REPO" "$SID_A" "X-ONE" "" "$_t"
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro4-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
   expect_eq "ro4 an open row of type '${_t:-<empty>}' still holds a writer slot → a writer is REFUSED" "deny" "$GATE_VERDICT"
@@ -9672,14 +9701,14 @@ done
 
 # ro5 — a read-only row that declared a claim holds nothing at hand-out. Until wave-26 T8 (D8)
 # it held a SUITE slot and a writer behind it was refused on `suites:`.
-REPO=$(ro_budget_repo ro5 "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo ro5 "writers=9 suites=1 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "R-ONE" "bash tests/run.sh" "bionic:researcher"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro5-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "ro5 a claim-declaring researcher open against suites=1 → a writer is ADMITTED" "allow" "$GATE_VERDICT"
 
 # ro6 — a read-only row CLOSED by an ack on a dark panel gives nothing back it never held:
 # the writer count stays what the open writers say.
-REPO=$(ro_budget_repo ro6 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo ro6 "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_ack "$REPO" "$SID_A" "R-ONE"
@@ -9693,7 +9722,7 @@ section "§TR — a test-runner row holds no slot at hand-out (AC-7.2, supersede
 # Until wave-26 a `bionic:test-runner` row held a SUITE slot, claim or no claim (wave-24 T10,
 # AC-7.2), for the hand-out suites ceiling. That ceiling is gone — a suite run books a
 # machine-wide place as it starts — so the old refusal's fixture is admitted now.
-REPO=$(ro_budget_repo tr1 "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo tr1 "writers=9 suites=2 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "T-ONE" "" "bionic:test-runner"
 s22_roster_row "$REPO" "$SID_A" "T-TWO" "bash tests/run.sh" "bionic:test-runner"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
@@ -9706,7 +9735,7 @@ section "§READONLY-FREE — hand-out counts no suites; a read-only dispatch ask
 # rf1 — as many claimed rows open as the old suite budget, as many trees standing as the tree
 # budget, and a researcher dispatches. The writer ceiling still binds: on the same roster a
 # writer past it is refused, and that refusal names the writers and no suite count.
-REPO=$(ro_budget_repo rf1 "writers=2 suites=2 worktrees=2 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo rf1 "writers=2 suites=2 worktrees=2 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "W-ONE" "bash tests/widget.test.sh"
 s22_roster_row "$REPO" "$SID_A" "W-TWO" "bash tests/gadget.test.sh"
 s22_fake_tree "$REPO" "one"
@@ -9720,21 +9749,20 @@ expect_contains "rf1w …naming the writer count" "writers: budget=2 open=2 with
 expect_absent "rf1w …and no suite count" "suites:" "$GATE_VERR"
 
 # rf2 — a writer at the old suite ceiling: one claimed row open against suites=1.
-REPO=$(ro_budget_repo rf2 "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo rf2 "writers=9 suites=1 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "W-ONE" "bash tests/run.sh"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "rf2-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "rf2 one claimed row open against suites=1 → a writer is ADMITTED" "allow" "$GATE_VERDICT"
 
-# rf3 — the tree budget full: a read-only dispatch is handed no tree, so it passes; a writer is
-# handed one, so it is refused, and its count carries this dispatch's one.
-REPO=$(ro_budget_repo rf3 "writers=9 suites=9 worktrees=1 test_jobs=4 source=probe")
+# rf3 — the tree budget full: a read-only dispatch is handed no tree, so it passes. A writer
+# passes too since wave-28 T9 (D15) removed the worktrees ceiling: free disk is asked where a tree
+# is made (spawn-worktree.sh create), not counted here.
+REPO=$(ro_budget_repo rf3 "writers=9 suites=9 worktrees=1 test_jobs=4 source=user")
 s22_fake_tree "$REPO" "one"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "rf3-r" "claude-sonnet-5" "$RO_NONE" "bionic:researcher")"
 expect_eq "rf3 one tree standing at worktrees=1 → a researcher is ADMITTED" "allow" "$GATE_VERDICT"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "rf3-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
-expect_eq "rf3w …while a writer on the same tree budget is REFUSED" "deny" "$GATE_VERDICT"
-expect_contains "rf3w …naming the tree count with this dispatch's one" \
-  "worktrees: budget=1 live=1 with-this-dispatch=2" "$GATE_VERR"
+expect_eq "rf3w …and a writer on the same line is ADMITTED: no worktrees ceiling (wave-28 T9)" "allow" "$GATE_VERDICT"
 
 # ================================== §WHY: A REFUSAL SAYS HOW TO GET PAST IT
 # (wave-24 T13; REQ-6 AC-6.7; D10. Chris 2026-10-03: "Why can't it be obvious from the outset
@@ -9747,7 +9775,7 @@ section "§WHY — the writer budget names its rows, a timeout says so, a comple
 # why1 — the writer-budget refusal lists the open rows it COUNTED, each with the command that
 # closes it. The count is `budget_open_writers`, so a read-only row it did not count is not
 # listed: the positive and the negative read the same reason.
-REPO=$(ro_budget_repo why1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo why1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "why1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
@@ -9787,7 +9815,7 @@ expect_absent "why2f …and is never called a timeout" "timed out" "$WHY2F"
 # scaffold: it would tell the author to add nothing. Two faults on a complete brief: the writer
 # budget and the name in flight. The control is the same two faults on a brief missing one
 # line, which still carries the marked scaffold.
-REPO=$(ro_budget_repo why3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo why3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "W-ONE" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "why3 two faults on a complete brief → REFUSED" "deny" "$GATE_VERDICT"
@@ -9855,7 +9883,7 @@ cp -RL "${BIONIC_SCRIPTS_DIR}/payload" "$ROOT_SP"
 ROOT_GATE_SAVED="$GATE"; GATE="$ROOT_SP/hooks/dispatch-preflight.sh"
 expect_true "root0 the gate under test is the copy under a root with a space" test -f "$GATE"
 
-REPO=$(ro_budget_repo root1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo root1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "root1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "root1 one open writer against writers=1 → REFUSED" "deny" "$GATE_VERDICT"
@@ -9879,6 +9907,10 @@ GATE="$ROOT_GATE_SAVED"
 
 # ===========================================================================
 section "§GATES — only human gates hold: nothing writes before approved-by:, a release waits for approved: release, a doc row is not held by its step (wave-26 T13; REQ-6 AC-6.2; D3)"
+# A dispatch named for a row (`w-T1`, `w-T9`) binds it, so its writer brief names the suites it lands
+# on (wave-28 T7, ruling A-orch-73); the line changes nothing else these rows read.
+GATES_BRIEF="$BRIEF_FULL
+Lands-on: widget"
 # ===========================================================================
 #
 # AN APPROVAL IS AN INPUT ONLY THE USER'S ACT WRITES (D3). `approval:plan` is the `approved-by:`
@@ -9916,13 +9948,13 @@ GATES_RELEASE='approved: release by dana 2026-10-04T05:00:00Z "Ship it."'
 REPO=$(make_repo rgates1 yes)
 write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES1 AC-6.2 a writer for T1 before approved-by: is refused" "deny" "$GATE_VERDICT"
 expect_eq "GATES1b …and the ready set offers nothing before approved-by:" "" "$(gates_ready "$GATES_P")"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
 expect_contains "GATES1c the control: with approved-by: written, the ready set offers T1" "T1 " "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES1d …and the dispatch wall admits the writer for T1" "0" "$GATE_ST"
 # A TABLE WITHOUT `reads` applies no kind default, so nothing in the table itself waits for the
@@ -9949,7 +9981,7 @@ expect_contains "GATES1f …and offers T1 once approved-by: is written" \
 REPO=$(make_repo rgates2 yes)
 write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES2 AC-6.2 a dispatch for the release row before approved: release is refused" "deny" "$GATE_VERDICT"
 expect_contains "GATES2b …naming the approval it waits for" "approval:release" "$GATE_VERR"
@@ -9959,7 +9991,7 @@ expect_contains "GATES2d the ready set on the same plan offers T1 (the extractor
 expect_absent "GATES2e …and not the release" "T9" "$GATES_READY"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED
 $GATES_RELEASE")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES2f with approved: release written, the release dispatch is admitted" "0" "$GATE_ST"
 expect_contains "GATES2g …and the ready set offers it" "T9" "$(gates_ready "$GATES_P")"
@@ -9977,7 +10009,7 @@ write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "- $GATES_APPROVED")"
 expect_contains "GATES4 precondition: the plan carries the bulleted line" "- approved-by: dana" "$(cat "$GATES_P")"
 expect_contains "GATES4 the ready set offers T1 on a bulleted approved-by:" "T1 " "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES4b …and the dispatch wall admits its writer" "allow" "$GATE_VERDICT"
 REPO=$(make_repo rgates4f yes)
@@ -9988,7 +10020,7 @@ approved-by: example 2026-01-01T00:00Z "approved"
 expect_contains "GATES4c precondition: the plan carries approved-by: only inside a fence" \
   'approved-by: example' "$(cat "$GATES_P")"
 expect_eq "GATES4c the ready set offers nothing on a fenced approved-by:" "" "$(gates_ready "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES4d …and the dispatch wall refuses its writer" "deny" "$GATE_VERDICT"
 expect_contains "GATES4d …as unapproved" "unapproved" "$GATE_ERR"
@@ -9999,7 +10031,7 @@ write_attestation "$REPO" "$SID_A"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
 sed 's/| approval:release |$/| live:approval:release |/' "$GATES_P" > "$GATES_P.tmp" && mv "$GATES_P.tmp" "$GATES_P"
 expect_contains "GATES5 precondition: T9 reads live:approval:release" "| live:approval:release |" "$(cat "$GATES_P")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_eq "GATES5 a dispatch for a row reading live:approval:release before approved: release is refused" \
   "deny" "$GATE_VERDICT"
@@ -10484,7 +10516,7 @@ REPO=$(make_repo rb1k yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" b1k bionic:implementor "$(b1_brief "$B1_ADV" 'adversarial, structure')"
 expect_eq "T49-B1 a writer carrying two questions and one record is not judged by the count" "allow" "$GATE_VERDICT"
 # a Files: line on a read-only role changes nothing else: no writer slot, no worktree demand, no derivation
-REPO=$(ro_budget_repo rb1l "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+REPO=$(ro_budget_repo rb1l "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(B1_SUITES=none b1_brief "$B1_ADV" 'adversarial' "Files: $B1_ADV")" "b1l-r" "claude-sonnet-5" "$RO_NONE" "bionic:critic")"
 expect_eq "T49-B1 a critic with a Files: line is admitted" "allow" "$GATE_VERDICT"
 B1_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
@@ -11022,6 +11054,124 @@ expect_contains "T72-S3 …and says the verb reads with a logical cd, so .. is f
 expect_absent "T72-S3 …never that the verb reads with cd -P" 'with `cd -P`' "$T72_S3"
 
 # ============================================================================
+section "§LANDS-ON — a writer binding a row names the suites it lands on (wave-28 T7; REQ-1 AC-1.4, D4)"
+# =====================================================================
+# ============================================================================
+#
+# A brief carries `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>` on a line of its own.
+# The wall writes it on the launch row as `lands_on=`, each suite as `<name>.test.sh` (the spelling
+# `lands_red=` has and lib/line.sh `_line_suites` decodes), and refuses: a writer brief that binds a
+# row of the bound plan and carries no line (ruling A-orch-73: a dispatch binding no row is owed
+# none; A-orch-71: whatever version wrote the plan); `none` with no reason; a suite outside the set
+# the checks derived. FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh), on
+# make_repo's approved, bound plan with a `## Tasks` table holding T23 and A2. SYNTHESIZED.
+# fails-when: a bound writer with no line, a reasonless none, or an outside suite is admitted; a
+# well-formed line is refused or not written in the one spelling; an unbound writer is refused.
+t7_gate() {  # <repo tag> <body lines> [<name>] [<subagent_type>] [<brief>] -> GATE_*, T7_ROW
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| A2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${5:-$(adv_brief "$2")}" "${3:-w99-T23}" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${4:-implementor}")"
+  T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+t7_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+t7_cols_ok() { [ "$(bionic_cols "$(t7_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(t7_first)")"; }
+
+t7_gate lo1 'Scope constraint: touch only payload/scripts/lib/widget.sh.'
+expect_eq "LO1 a writer named w99-T23 (row T23's by the name match) with no Lands-on: line is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO1b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
+expect_contains "LO1c …the detail gives the line to add" "    Lands-on: <suite>[, <suite>]" "$GATE_VERR"
+expect_contains "LO1d …and the none form with its reason" "    Lands-on: none <reason>" "$GATE_VERR"
+expect_eq "LO1e …its first line is at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_eq "LO1f …and no row is written" "" "$T7_ROW"
+
+t7_gate lo2 'Lands-on: widget'
+expect_eq "LO2 Lands-on: widget, a suite of the row's set named bare, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "LO2b …the row carries lands_on=widget.test.sh, the one spelling" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
+t7_gate lo2t 'Lands-on: tests/widget.test.sh  # the suite this row lands on'
+expect_eq "LO2t Lands-on: tests/widget.test.sh with a trailing comment is admitted, written by its basename" \
+  "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+
+LO3_S="a-suite-name-of-sixty-characters-long-enough-to-wrap.test.sh"
+t7_gate lo3 "Lands-on: widget.test.sh, ${LO3_S}"
+expect_eq "LO3 a Lands-on: naming a suite outside the row's set is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO3b …the line names the suite, cut to fit" "Lands-on: a-suite-name" "$(t7_first)"
+expect_contains "LO3c …and its fix" "(name a suite the row runs)" "$(t7_first)"
+expect_eq "LO3d …its first line at most 100 columns with a sixty-character name" "ok" "$(t7_cols_ok)"
+expect_contains "LO3e …the detail names the set it may name from" "Suites: widget.test.sh" "$GATE_VERR"
+expect_eq "LO3f …and no row is written" "" "$T7_ROW"
+t7_gate lo3r 'Lands-on: run.sh'
+expect_contains "LO3r the full-suite runner is no suite of the line: refused as outside the set" "Lands-on: run.sh is outside Suites:" "$(t7_first)"
+
+t7_gate lo4 'Lands-on: none'
+expect_eq "LO4 Lands-on: none with no reason is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO4b …the line says it gives no reason" "Lands-on: none gives no reason" "$(t7_first)"
+expect_eq "LO4c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
+t7_gate lo5 'Lands-on: none — the row edits only prose no suite reads'
+expect_eq "LO5 Lands-on: none with a reason is admitted, the row carrying lands_on=none" \
+  "allow|none" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+
+t7_gate lo6 'Scope constraint: touch only payload/scripts/lib/widget.sh.' w99-misc
+expect_eq "LO6 an unbound writer (w99-misc is no row's name, no Row: label) with no Lands-on: is admitted" "allow" "$GATE_VERDICT"
+expect_contains "LO6b …its row is written (the extractor reads a real row)" "status=intended" "$T7_ROW"
+expect_absent "LO6c …with no lands_on= on it" "lands_on=" "$T7_ROW"
+t7_gate lo7 'Scope constraint: read only.' w99-T23 bionic:researcher \
+  "$(adv_brief 'Scope constraint: read only.' | sed '/^Files:/d; s#^Suites: .*#Suites: none#')"
+expect_eq "LO7 a read-only role bound to T23 by its name, with no Lands-on:, is admitted" "allow" "$GATE_VERDICT"
+expect_contains "LO7b …its row is written" "subagent_type=bionic:researcher" "$T7_ROW"
+t7_gate lo8 'Lands-on: <suite>[, <suite>]'
+expect_eq "LO8 the scaffold slot pasted unfilled declares nothing: the bound writer is refused for no line" \
+  "deny" "$GATE_VERDICT"
+expect_contains "LO8b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
+
+# ============================================================================
+section "§ROW-LABEL — Row: binds the dispatch to a row whatever the agent is called (wave-28 T7; REQ-3 AC-3.4, D17)"
+# ============================================================================
+# `Row: <id>` on a line of its own is written on the launch row as `row=<id>`; the launch record,
+# the fill and the stop wall read it before the name match (tests/session-poker.test.sh §ROW-LABEL,
+# tests/stop.test.sh §LAUNCHED). A Row: naming no row of the bound plan is refused.
+# fails-when: the label is not written, a row the plan lacks is admitted, or a fenced example binds.
+t7_gate rl1 'Row: T23
+Lands-on: widget' w-A2
+expect_eq "RL1 an agent named w-A2 briefed Row: T23 with its Lands-on: is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RL1b …the row carries row=T23" "T23" "$(roster_field "$T7_ROW" row)"
+expect_eq "RL1c …and lands_on=widget.test.sh" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
+t7_gate rl1n 'Row: T23' w-misc
+expect_eq "RL1n Row: T23 binds an agent no name match would: with no Lands-on: it is refused" "deny" "$GATE_VERDICT"
+expect_contains "RL1n2 …for the missing line" "the brief has no Lands-on: line" "$(t7_first)"
+t7_gate rl2 'Row: T99
+Lands-on: widget' w-A2
+expect_eq "RL2 Row: T99, no row of the bound plan, is refused" "deny" "$GATE_VERDICT"
+expect_contains "RL2b …the line names the label" "Row: T99 names no plan row" "$(t7_first)"
+expect_eq "RL2c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_contains "RL2d …the detail names the plan" "wave-01-test.plan.md" "$GATE_VERR"
+t7_gate rl3 'Lands-on: widget'
+expect_contains "RL3 a brief with no Row: is admitted and its row written" "status=intended" "$T7_ROW"
+expect_absent "RL3b …with no row= on it" "|row=" "$T7_ROW"
+t7_gate rl4 'An example of the label, never read:
+```
+Row: T23
+```' w-misc
+expect_eq "RL4 a Row: inside a fenced block is an example: the unbound writer is admitted" "allow" "$GATE_VERDICT"
+expect_contains "RL4b …its row is written" "status=intended" "$T7_ROW"
+expect_absent "RL4c …with no row= on it" "|row=" "$T7_ROW"
+
+# ============================================================================
+section "§BARE — a bare file name with an extension is a deliverable (wave-28 T7; REQ-15 AC-15.1, D32)"
+# ============================================================================
+# The deliverable span takes a name `files_entry` calls a path, as a Files: item is read: a name with
+# an extension on a stem holding a letter. A word of prose is not one. The writer here binds no row.
+# fails-when: `Expected artifact: notes.md` is refused, or a span of prose names a deliverable.
+t7_bare() { adv_brief 'Scope constraint: touch only payload/scripts/lib/widget.sh.' | sed "s#^Expected artifact: .*#Expected artifact: $1#"; }
+t7_gate bare1 '' w99-bare implementor "$(t7_bare 'notes.md')"
+expect_eq "BARE1 Expected artifact: notes.md is admitted" "allow" "$GATE_VERDICT"
+expect_eq "BARE1b …the row's deliverable is notes.md" "notes.md" "$(roster_field "$T7_ROW" deliverable)"
+t7_gate bare2 '' w99-bare implementor "$(t7_bare 'a written report of the findings.')"
+expect_eq "BARE2 a span of prose with no file name is refused" "deny" "$GATE_VERDICT"
+expect_contains "BARE2b …it still names no deliverable" "this brief names no deliverable" "$(t7_first)"
+t7_gate bare3 '' w99-bare implementor "$(t7_bare 'version 1.12.0 of the notes')"
+expect_contains "BARE3 a version number is no file name: still no deliverable" "this brief names no deliverable" "$(t7_first)"
+=======
 section "§RIGOR — the dealing reads a plan in either vocabulary alike, and prints the level by its new word (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35, A-orch-7)"
 # ============================================================================
 # The wall asks lib/proof.sh `facts_owed`, which reads the plan's word through lib/run.sh
