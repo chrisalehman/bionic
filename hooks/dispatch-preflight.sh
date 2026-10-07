@@ -2158,6 +2158,14 @@ case "$DP_SUBAGENT" in
         dp_not_checked "the Questions: dealing" "a plan rigor and scale that facts_owed deals"
       fi
     fi
+    # THE LEVEL AS PRINTED (wave-28 T44; AC-16.2): a detail names the plan's rigor by its new word
+    # with its meaning, lib/run.sh `rigor_print`; a word that is no level is quoted as written.
+    _q_level="$(rigor_print "$_q_rigor" 2>/dev/null)" || _q_level="rigor ${_q_rigor:-none}"
+    # THE FIRST LINE NAMES THE LEVEL IN THE ANNOUNCEMENT'S FORM, `<level> rigor`, with the role's
+    # short name, and keeps the set the user acts on (A-orch-17): the printed form and the role as
+    # typed do not fit a 100-column line beside the set, so they ride the detail.
+    _q_short="$(rigor_level "$_q_rigor" 2>/dev/null)" || _q_short="${_q_rigor:-no}"
+    _q_role="${DP_SUBAGENT#bionic:}"
     # The holder of each question, one line apiece, for the refusal details.
     _q_holders=""
     for _q_q in evidence adversarial structure; do
@@ -2211,11 +2219,11 @@ Fix: name only the three questions, on a line of its own —
 Then retry the dispatch."
     fi
     if [ -n "$_q_dealable" ] && [ -z "$_q_dealt" ]; then
-      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: nothing" "dispatch its holder" \
+      dp_finding "${_q_short} rigor deals ${_q_role}: nothing" "dispatch its holder" \
         "The plan's rigor deals this reader no question, so there is nothing to dispatch it for:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set:-(no Questions: line)}
-    Dealt: nothing at rigor ${_q_rigor}, scale ${_q_scale}
+    Dealt: nothing at ${_q_level}, scale ${_q_scale}
 
 Each question is read by the one role the rigor deals it to:
 ${_q_holders}
@@ -2228,8 +2236,8 @@ from evidence, adversarial and structure."
       [ -n "$PLAN" ] && _q_why="The bound plan's rigor (${_q_rigor:-none}) and scale (${_q_scale:-none}) deal nothing, so the
 dealing is not checked: name the questions this reader answers, from evidence,
 adversarial and structure."
-      [ -n "$_q_dealt" ] && _q_why="The plan's rigor (${_q_rigor}) deals this role the set below, and its checks are pushed
-to it at start from that line."
+      [ -n "$_q_dealt" ] && _q_why="The plan deals this role the set below at ${_q_level}, and its checks are
+pushed to it at start from that line."
       dp_finding "${DP_SUBAGENT} names no Questions: line" "add the Questions: line" \
         "A reader is dispatched for its questions, and this brief names none:
     Role: ${DP_SUBAGENT}
@@ -2241,11 +2249,11 @@ Fix: add this line to the brief, on a line of its own —
 
 Then retry the dispatch."
     elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
-      dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: ${_q_dealt}" "use that set" \
+      dp_finding "${_q_short} rigor deals ${_q_role}: ${_q_dealt}" "use that set" \
         "The Questions: line names a set the plan's rigor does not deal this reader:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set//,/, }
-    Dealt: ${_q_dealt//,/, } (rigor ${_q_rigor}, scale ${_q_scale})
+    Dealt: ${_q_dealt//,/, } (${_q_level}, scale ${_q_scale})
 
 Each question is read by the one role the rigor deals it to:
 ${_q_holders}
