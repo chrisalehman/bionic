@@ -2431,7 +2431,8 @@ poke_pressure "$R12A" 8192 1.0 tick
 expect_eq "a filling tick exits 0" "0" "$RC"
 expect_contains "three ready and a gap of two fills exactly two, in table order" \
   "poker: FILL ONE TWO" "$OUT"
-expect_absent "…and does not reach the third" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+expect_absent "…and does not reach the third" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL' | /usr/bin/grep -v '^poker: FILL — ')"
+expect_eq "…(the FILL line, its sentence set aside, is exactly the two)" "poker: FILL ONE TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL' | /usr/bin/grep -v '^poker: FILL — ')"
 
 # ---------- 12a-T22: THE FILL LINE PRINTS THE NAME, NOT THE TASK ID ----------
 #
@@ -2660,7 +2661,7 @@ wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=user" \
 add_row "$R12B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12B" 8192 1.0 tick
 expect_contains "one open row against writers=2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent "…and the second ready task waits" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+expect_absent "…and the second ready task waits" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL' | /usr/bin/grep -v '^poker: FILL — ')"
 
 # ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
 R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
@@ -8141,7 +8142,8 @@ R47F="$(make_repo s46-early-full)"; new_roster "$R47F"; s47_early "$R47F"
 add_row "$R47F" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R47F" 8192 1.0 tick
 expect_contains "47l D9 with no writer slot free the read-only review is still offered" "poker: FILL T3" "$OUT"
-expect_absent "47l2 …and the doc row, a writer, is not on the FILL line" "T2" "$(s47_lines FILL)"
+expect_absent "47l2 …and the doc row, a writer, is not on the FILL line (its sentence, which names the rows behind the gap, set aside)" "T2" "$(s47_lines FILL | /usr/bin/grep -v '^poker: FILL — ')"
+expect_eq "47l2b …positive on the same extractor: the FILL line is the review alone" "poker: FILL T3" "$(s47_lines FILL | /usr/bin/grep -v '^poker: FILL — ')"
 expect_contains "47l3 …it is on a WAIT line saying it is ready and waits for a writer slot" \
   "poker: WAIT T2 — ready; no writer slot free" "$OUT"
 # REVIEW 10 ANSWER (b) (wave-26 T46): THE EXEMPTION IS THE RECORD, NOT THE KIND ALONE. A verify
@@ -14675,7 +14677,7 @@ ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MP_HROOT/
 for _sib in "$(dirname "$POKER")"/*; do _sibn="$(basename "$_sib")"; [ "$_sibn" = "session-poker.sh" ] || ln -s "$_sib" "$MP_HROOT/hooks/$_sibn"; done
 MP_HOOK_NEEDLE='SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${line%% *}"'
 anchor "$POKER" "$MP_HOOK_NEEDLE" 1
-MP_N="$MP_HOOK_NEEDLE" awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) ": # parked ids dropped" substr($0, i + length(n)); print }' \
+MP_N="$MP_HOOK_NEEDLE" awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) ":" substr($0, i + length(n)); print }' \
   "$POKER" > "$MP_HROOT/hooks/session-poker.sh"
 expect_eq "MP-fillmut0 the hook mutant differs from the hook in one line" "1" "$(diff "$POKER" "$MP_HROOT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
 MP_POKER_WAS="$POKER"; POKER="$MP_HROOT/hooks/session-poker.sh"
