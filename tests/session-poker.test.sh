@@ -13379,6 +13379,21 @@ rp_report --rows
 expect_eq "RTL4 a request carrying peak= and an unknown line folds to the same report" \
   "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
   "$(rp_line)|$(rp_rows | cut -d'|' -f1)"
+# THE PLAN OPERAND (A-orch-145): a named plan first, else the session's bound run (RTL1 to RTL4 read the
+# bound run), else the verb's no-run refusal. The named plan is read from another project, unbound.
+RP_NORUN="$(make_repo rp-norun)"; ( cd "$RP_NORUN" && git commit -q --allow-empty -m init )
+BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report "$P59W" --rows
+expect_eq "RTL10 a named plan, from an unbound session in another project: exit 0, that plan's line and rows, its waits scoped to its own project" \
+  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "$RC|$(rp_line)|$(rp_rows | cut -d'|' -f1)"
+BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report
+expect_eq "RTL11 no plan named and no run bound: the verb's no-run refusal (2), and no line" \
+  "2|poker: REFUSED — this session has no run to report on; bind its plan first.|" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep 'no run to report on')|$(rp_line)"
+poke "$RP_NORUN" landing-report "$RP_NORUN/no/such.plan.md"
+expect_eq "RTL12 a named plan that is no file is refused (2), naming it" \
+  "2|poker: REFUSED — no plan file at $RP_NORUN/no/such.plan.md; name the plan whose landings to report." \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep 'no plan file at')"
 # The even set and the set of one: the rule, pinned.
 rp_world rp-even
 rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
