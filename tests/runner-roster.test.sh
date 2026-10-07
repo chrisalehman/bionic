@@ -1683,4 +1683,112 @@ expect_eq "T.7 --serial: …the nested run really ran" "yes" \
 expect_eq "T.8 --serial: …and the timing file names the outer tree's suites only" \
   "$(rr_glob "$TT")" "$(rrt_labels "$TTS")"
 
+# ============================================================
+section "§ONLY the named suites, and no other, in the runner's world (wave-28 T36; D27, AC-10.2)"
+# ============================================================
+#
+# THE CLAIM. `tests/run.sh --only <suite>[ <suite>…]` is the one door a dispatched agent runs a
+# suite through. It runs exactly the named suites, and each one gets what a full run gives it:
+# the interpreter pin (bash -> /bin/bash first on PATH), the environment stamp, the roster wall
+# and the adoption wall, and one gate ask per suite. A name the roster does not hold is refused
+# by name and nothing runs; a suite nobody named never runs.
+TO="$TMPROOT/only"; RO_GATE="$TMPROOT/only-gate"
+rr_tree "$TO"
+ro_stub() {  # <name> — a green suite recording the interpreter and the admission it ran under
+  { printf '#!/bin/bash\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf ': > "$RR_MARKS/%s.ran"\n' "$1"
+    printf 'printf "%%s\\n" "$BASH_VERSION" > "$RR_MARKS/%s.ver"\n' "$1"
+    printf 'printf "%%s\\n" "$(readlink "${PATH%%%%:*}/bash")" > "$RR_MARKS/%s.pin"\n' "$1"
+    printf 'printf "%%s\\n" "${BIONIC_GATE_ADMIT:-none}" > "$RR_MARKS/%s.admit"\n' "$1"
+    printf 'section "%s"\n' "$1"
+    printf 'expect_eq "%s ran" "x" "x"\n' "$1"
+    printf 'finish\n'
+  } > "${2:-$TO}/tests/$1.test.sh"
+}
+ro_stub only-a; ro_stub only-b
+# A suite that does not adopt the framework (no `finish`): the adoption wall's to refuse.
+{ printf '#!/bin/bash\n. "$(dirname "$0")/lib/assert.sh"\n: > "$RR_MARKS/only-c.ran"\nexit 0\n'; } > "$TO/tests/only-c.test.sh"
+ro_drive() {  # <runner args…> — the scratch runner on this section's own store; RR_OUT, RR_RC
+  rm -rf "$RO_GATE"; rm -f "$RR_MARKS"/only-*
+  RR_OUT="$( cd "${RO_DIR:-$TO}" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/only-ring" \
+    BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 \
+    BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+    env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RO_GATE" bash tests/run.sh "$@" 2>&1 )"
+  RR_RC=$?
+}
+ro_ran() { [ -f "$RR_MARKS/$1.ran" ] && echo yes || echo no; }
+ro_reqs() {  # one line per request: <key> <kind> <rc>, sorted
+  local f
+  for f in "$RO_GATE"/requests/[0-9]*; do
+    [ -f "$f" ] || continue
+    printf '%s %s %s\n' "$(sed -n 's/^key=//p' "$f" | tail -n 1)" "$(sed -n 's/^kind=//p' "$f" | tail -n 1)" \
+      "$(sed -n 's/^rc=//p' "$f" | tail -n 1)"
+  done | sort
+}
+RO_SYS_VER="$(/bin/bash -c 'echo "$BASH_VERSION"')"
+
+ro_drive --only only-a.test.sh
+expect_eq "ONLY.1 --only only-a.test.sh is green" "0" "$RR_RC"
+expect_eq "ONLY.2 …the named suite ran (the mark extractor reads it)" "yes" "$(ro_ran only-a)"
+expect_eq "ONLY.3 …and the suite nobody named did not" "no" "$(ro_ran only-b)"
+expect_eq "ONLY.4 the run printed the named suite's label and no other" "only-a.test.sh" "$(rr_labels "$RR_OUT")"
+expect_contains "ONLY.5 …and tallied one suite" "Gating: 1 passed, 0 failed" "$RR_OUT"
+expect_eq "ONLY.6 it ran under the interpreter the full run uses: /bin/bash's version" \
+  "$RO_SYS_VER" "$(cat "$RR_MARKS/only-a.ver" 2>/dev/null)"
+expect_eq "ONLY.7 …through the pin, first on PATH: bash -> /bin/bash" "/bin/bash" "$(cat "$RR_MARKS/only-a.pin" 2>/dev/null)"
+expect_regex "ONLY.8 the environment stamp is printed, as for a full run" '^env: os=[a-z]+ bash=' "$RR_OUT"
+expect_eq "ONLY.9 one gate ask for the suite, keyed by its file name, ended with its code" \
+  "only-a.test.sh work 0" "$(ro_reqs)"
+expect_eq "ONLY.10 …and the suite ran under that request" \
+  "$(grep -l '^key=only-a.test.sh$' "$RO_GATE"/requests/[0-9]* 2>/dev/null | head -n 1 | sed 's#.*/##')" \
+  "$(cat "$RR_MARKS/only-a.admit" 2>/dev/null)"
+
+ro_drive --only only-b.test.sh only-a.test.sh
+expect_eq "ONLY.11 two names: green" "0" "$RR_RC"
+expect_eq "ONLY.12 …both ran" "yes yes" "$(ro_ran only-a) $(ro_ran only-b)"
+expect_eq "ONLY.13 …in roster order, whatever order they were named in" "only-a.test.sh
+only-b.test.sh" "$(rr_labels "$RR_OUT")"
+expect_eq "ONLY.14 …one ask per suite" "only-a.test.sh work 0
+only-b.test.sh work 0" "$(ro_reqs)"
+expect_eq "ONLY.15 …and the unnamed suite still did not run" "no" "$(ro_ran only-c)"
+
+ro_drive --serial --only only-b.test.sh
+expect_eq "ONLY.16 --serial --only: green" "0" "$RR_RC"
+expect_eq "ONLY.17 …the named suite alone ran" "yes no" "$(ro_ran only-b) $(ro_ran only-a)"
+expect_eq "ONLY.18 …with its one ask" "only-b.test.sh work 0" "$(ro_reqs)"
+
+ro_drive --only only-c.test.sh
+expect_eq "ONLY.19 the adoption wall holds for a named suite: the run fails" "1" "$RR_RC"
+expect_contains "ONLY.20 …refused by the wall, by name" "REFUSED (the adoption wall)" "$RR_OUT"
+expect_eq "ONLY.21 …and it never ran" "no" "$(ro_ran only-c)"
+
+ro_drive --only nope.test.sh
+expect_eq "ONLY.22 a name the roster does not hold is refused: exit 2" "2" "$RR_RC"
+expect_contains "ONLY.23 …naming it" "tests/run.sh: --only names nope.test.sh, which is not a suite under tests/" "$RR_OUT"
+expect_eq "ONLY.24 …and nothing ran" "no no" "$(ro_ran only-a) $(ro_ran only-b)"
+ro_drive --only only-a.test.sh nope.test.sh
+expect_eq "ONLY.25 one bad name among good ones refuses the whole call: exit 2, nothing ran" "2 no" \
+  "$RR_RC $(ro_ran only-a)"
+ro_drive --only tests/only-a.test.sh
+expect_eq "ONLY.26 a path, not a file name, is refused: exit 2" "2" "$RR_RC"
+expect_contains "ONLY.27 …saying what to type" "name a suite by its file name" "$RR_OUT"
+ro_drive --only
+expect_eq "ONLY.28 --only with no name is usage: exit 2" "2" "$RR_RC"
+expect_contains "ONLY.29 …and the usage names the door" "--only <suite>" "$RR_OUT"
+ro_drive --only only-a.test.sh --dry-run
+expect_eq "ONLY.30 --dry-run still runs nothing" "0 no" "$RR_RC $(ro_ran only-a)"
+
+# THE MUTANT: a runner copy whose --only filter is gone (the roster is not narrowed). The rows
+# above that read "the unnamed suite did not run" must move: under it, only-b runs.
+TOM="$TMPROOT/only-mut"
+rr_tree "$TOM"; ro_stub only-a "$TOM"; ro_stub only-b "$TOM"
+anchor -F "$TOM/tests/run.sh" '  set -- ${_only_files+"${_only_files[@]}"}' 1
+grep -vF '  set -- ${_only_files+"${_only_files[@]}"}' "$RUNNER" > "$TOM/tests/run.sh"
+expect_eq "ONLY.31 the mutant runner parses" "0" "$(bash -n "$TOM/tests/run.sh" >/dev/null 2>&1; echo $?)"
+RO_DIR="$TOM" ro_drive --only only-a.test.sh
+expect_eq "ONLY.32 …and still runs the named suite (not vacuous)" "yes" "$(ro_ran only-a)"
+expect_eq "ONLY.33 under the mutant the unnamed suite runs (the defect ONLY.3 guards)" "yes" "$(ro_ran only-b)"
+
 finish
