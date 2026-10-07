@@ -13454,7 +13454,7 @@ rp_ev "ev=verdict|row=T9|commit=$RP_C2|suite=a.test.sh|at=2026-10-06T12:00:00Z"
 rp_ev "ev=ready|row=T9|at=not-a-time"
 rp_report
 expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one line on stderr counting them" \
-  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $S60_REC" \
+  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
   "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
 
 # ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
