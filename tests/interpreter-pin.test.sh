@@ -57,7 +57,7 @@ SKIPPED=0
 skip() { SKIPPED=$((SKIPPED + 1)); echo "SKIP: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/interpreter-pin-test.XXXXXX")"
-trap 'rm -rf "$TMPROOT"' EXIT
+trap 'chmod -R -N "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"' EXIT   # an ACL row's entry never outlives the run (T57)
 
 SYS_BASH="/bin/bash"
 SYS_VER="$("$SYS_BASH" -c 'echo "$BASH_VERSION"' 2>/dev/null)"
@@ -882,15 +882,18 @@ if [ "$T57_ACL" = 1 ]; then
   T57_NO1="$T87_DIR/t57-acl-deny"; mkdir -p "$T57_NO1"; chmod 0700 "$T57_NO1"; chmod +a "everyone deny add_file,delete_child" "$T57_NO1"
   stop_run "$STOP_SUITE" "$T57_NO1"
   expect_eq "7.46 a 0700 temp directory whose ACL only DENIES builds its pin" "0" "$STOP_RC"
+  chmod -N "$T57_NO1"
   T57_NO2="$T87_DIR/t57-acl-read"; mkdir -p "$T57_NO2"; chmod 0700 "$T57_NO2"; chmod +a "everyone allow read" "$T57_NO2"
   expect_eq "7.46b the ACL extractor reads the read-only entry" "1" "$(ls -lde "$T57_NO2" | grep -c 'group:everyone allow list')"
   stop_run "$STOP_SUITE" "$T57_NO2"
   expect_eq "7.46c …a read-only entry for everyone builds its pin" "0" "$STOP_RC"
+  chmod -N "$T57_NO2"
   T57_NO3="$T87_DIR/t57-acl-owner"; mkdir -p "$T57_NO3"; chmod 0700 "$T57_NO3"
   chmod +a "$(id -un) allow add_file,add_subdirectory,delete_child" "$T57_NO3"
   expect_eq "7.46d the ACL extractor reads the owner's entry" "1" "$(ls -lde "$T57_NO3" | grep -c "user:$(id -un) allow add_file")"
   stop_run "$STOP_SUITE" "$T57_NO3"
   expect_eq "7.46e …an entry for the owner alone builds its pin" "0" "$STOP_RC"
+  chmod -N "$T57_NO3"
   # An inheritable entry that does not apply to the parent itself: the root the function makes inherits it.
   T57_INH="$T87_DIR/t57-acl-inherit"; mkdir -p "$T57_INH"; chmod 0700 "$T57_INH"
   chmod +a "everyone allow add_file,add_subdirectory,delete_child,file_inherit,directory_inherit,only_inherit" "$T57_INH"
