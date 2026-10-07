@@ -1988,7 +1988,7 @@ open	$INH_L2" "$(bash "$CARD_SH" inherited "$INH_RV" 2>/dev/null 0<&-)"
 # the mutation arm: a doctored copy of card.sh whose disposal filter lets every line through
 INH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/card-inherit-mut.XXXXXX")"
 mkdir -p "$INH_MUT/scripts"; ln -s "${REPO}/payload/scripts/lib" "$INH_MUT/scripts/lib"
-sed 's/\[ "${l%%	\*}" = open \] || continue/:/' "$CARD_SH" > "$INH_MUT/scripts/card.sh"
+sed 's/\[ "\${l%%"\$CARD_TAB"\*}" = open \] || continue/:/' "$CARD_SH" > "$INH_MUT/scripts/card.sh"
 expect_eq "INHERIT-mut0 the doctored copy differs from card.sh in exactly one line (the doctor took)" "1" \
   "$(diff "$CARD_SH" "$INH_MUT/scripts/card.sh" | /usr/bin/grep -c '^>')"
 INH_RA="$(inh_req wave-2-b "adopted: ${INH_REC}#1 as REQ-2")"
