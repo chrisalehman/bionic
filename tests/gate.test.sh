@@ -259,9 +259,9 @@ fresh sharev
 world_machine 8 8192 55 1.0
 world_cost k 10 0.5 30
 expect_eq "S.11 the verb prints the share the gate reads (80 from fresh)" "80" "$(share_verb)"
-expect_eq "S.12 share 60 exits 0 and the gate's share is 60" "0|60" \
-  "$(share_verb 60 >/dev/null; echo "$?")|$( . "$GATE_LIB" 2>/dev/null; gate_share )"
-expect_eq "S.13 at the set share 60, a reading of 55 and a promise of 10 is refused (rc 75)" "75" "$(ask_fg v1 work k 0)"
+expect_eq "S.12 share 50 exits 0 and the gate's share is 50" "0|50" \
+  "$(share_verb 50 >/dev/null; echo "$?")|$( . "$GATE_LIB" 2>/dev/null; gate_share )"
+expect_eq "S.13 at the set share 50, a reading of 55 is refused (rc 75)" "75" "$(ask_fg v1 work k 0)"
 share_verb 80 >/dev/null
 expect_eq "S.14 the verb sets it back to 80 and the same ask is admitted (rc 0)" "0" "$(ask_fg v2 work k 0)"
 share_verb 101 >/dev/null; S15_RC=$?
