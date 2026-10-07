@@ -380,21 +380,26 @@ fill_cap() {  # <plan>
 }
 
 # fill_gate_owed <roster> <session id> -> how many of the open names on stdin are writers whose
-# agent has no request at the gate yet (`gate_asked <session>:<name>`, the request's `who`).
-# A writer that has asked is showing — in the load, or in an admitted promise — and is owed no
-# longer; one that has not is counted at the largest promise on record. A read-only role is
-# no writer (`budget_open_writers`, lib/roster.sh), as the open count it rides beside.
+# agent has no unended request at the gate (`gate_asked`, one call over every name, matched on the
+# request's `who` = `<session>:<name>`). A writer that has asked and is running is showing — in
+# the load, or in an admitted promise — and is owed no longer; one that has not, or whose request
+# has ended, is counted at the largest promise on record. A read-only role is no writer
+# (`budget_open_writers`, lib/roster.sh), as the open count it rides beside.
 fill_gate_owed() {  # <roster> <session id>; stdin: the open names, one per line
-  local f="${1:-}" sid="${2:-}" nm n=0
+  local f="${1:-}" sid="${2:-}" nm n=0 whos='' shown=0
   while IFS= read -r nm; do
     [ -n "$nm" ] || continue
     if declare -F budget_open_writers >/dev/null 2>&1; then
       [ "$(printf '%s\n' "$nm" | budget_open_writers "$f")" = 1 ] || continue
     fi
-    declare -F gate_asked >/dev/null 2>&1 && gate_asked "$sid:$nm" && continue
     n=$((n + 1))
+    whos="${whos}${sid}:${nm}
+"
   done
-  printf '%s' "$n"
+  if [ "$n" -gt 0 ] && declare -F gate_asked >/dev/null 2>&1; then
+    shown="$(printf '%s' "$whos" | gate_asked | wc -l | tr -d ' ')"
+  fi
+  printf '%s' "$((n - shown))"
 }
 
 # fill_ready_tagged <plan> -> every ready id, untrimmed, as `<id><TAB>w` (takes a writer slot) or
