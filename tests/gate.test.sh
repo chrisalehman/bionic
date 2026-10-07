@@ -725,6 +725,141 @@ expect_eq "RM.24 gate_state prints the loads and the promised cores where clears
   "share=80 used=35 admitted=1 waiting=0 landing-waiting=0 load=1.0/2.5 promised=0.5" "$(state)"
 expect_absent "RM.25 …and no clears= field" "clears=" "$(state)"
 release rs1
+# ── §OWED ────────────────────────────────────────────────────────────────────
+# (wave-28 T52, a fixit on T13; AC-2.5, AC-2.8.) The stop wall's owed count asks the gate who is
+# showing on every Stop, under a 10 s hook timeout. It used to fork one grep per request file per
+# open writer, over a store that was never pruned. Now one awk reads every request once and counts
+# the unended ones, and the scan removes ended requests older than BIONIC_GATE_KEEP. The budget is
+# read two ways: the grep forks a stub on PATH sees (none are allowed) and the wall time in whole
+# seconds from `date +%s` around the call (at most 1, which a call under a second meets even across
+# a tick; the per-file walk over 2,000 files is tens of seconds).
+section "§OWED — the owed count reads the store once and the store is pruned (T52)"
+plant_ended() {  # <id> <who> <ended epoch> — one ended request
+  mkdir -p "$BIONIC_GATE_DIR/requests"
+  printf 'key=k\nkind=work\nwho=%s\ntree=/t\nasked=%s\nholder=-\nadmitted=%s\npromise=5:1:30\nended=%s\nrc=0\n' \
+    "$2" "$(( $3 - 20 ))" "$(( $3 - 10 ))" "$3" > "$BIONIC_GATE_DIR/requests/$1"
+}
+plant_ended_many() {  # <n> <who prefix> <ended epoch> — n ended requests, ids 100001 up, in one awk
+  mkdir -p "$BIONIC_GATE_DIR/requests"
+  awk -v n="$1" -v p="$2" -v e="$3" -v d="$BIONIC_GATE_DIR/requests" 'BEGIN {
+    for (i = 1; i <= n; i++) {
+      f = d "/" (100000 + i)
+      printf "key=k\nkind=work\nwho=%s%d\ntree=/t\nasked=%d\nholder=-\nadmitted=%d\npromise=5:1:30\nended=%d\nrc=0\n",
+        p, i, e - 20, e - 10, e > f
+      close(f)
+    }
+  }'
+}
+plant_open() {  # <id> <who> — one request nothing has ended (waiting, nobody holds it)
+  printf 'key=k\nkind=work\nwho=%s\ntree=/t\nasked=900\nholder=-\n' "$2" > "$BIONIC_GATE_DIR/requests/$1"
+}
+gone_or_kept() { [ -e "$BIONIC_GATE_DIR/requests/$1" ] && echo kept || echo gone; }
+mkdir -p "$WORLD_ROOT/owed-stub"
+printf '#!/bin/sh\necho x >> "%s"\nexec /usr/bin/grep "$@"\n' "$WORLD_ROOT/owed-greps" > "$WORLD_ROOT/owed-stub/grep"
+chmod +x "$WORLD_ROOT/owed-stub/grep"
+owed_names() {  # the writers asked about: w1..w6 open, wEnded ended, wNever never asked
+  printf '%s:w%s\n' "$WORLD_SID" 1 2 3 4 5 6
+  printf '%s:wEnded\n%s:wNever\n' "$WORLD_SID" "$WORLD_SID"
+}
+owed_count() {  # <gate lib> — fill_gate_owed over owed_names' names, a stub counting grep forks
+  : > "$WORLD_ROOT/owed-greps"
+  ( . "$1" 2>/dev/null; . "$REPO_ROOT/payload/scripts/lib/fill.sh" 2>/dev/null
+    owed_names | sed "s/^$WORLD_SID://" \
+      | PATH="$WORLD_ROOT/owed-stub:$PATH" fill_gate_owed /nonexistent "$WORLD_SID" )
+}
+fresh owed-budget
+world_machine 8 8192 30 1.0
+plant_ended_many 2000 "$WORLD_SID:e" 900
+plant_ended 99999 "$WORLD_SID:wEnded" 900
+for i in 1 2 3 4 5 6; do plant_open "$i" "$WORLD_SID:w$i"; done
+expect_eq "OW.1 the planted store reads: six requests without an ended line (positive)" "6" \
+  "$(/usr/bin/grep -L '^ended=' "$BIONIC_GATE_DIR"/requests/[0-9]* | wc -l | tr -d ' ')"
+expect_eq "OW.2 …among 2,007 request files" "2007" "$(nreq)"
+OW_T0="$(date +%s)"
+OW_N="$(owed_count "$GATE_LIB")"
+OW_T1="$(date +%s)"
+OW_GREPS="$(wc -l < "$WORLD_ROOT/owed-greps" | tr -d ' ')"
+expect_eq "OW.3 the owed count is the names with no unended request: the one that ended and the one never asked" \
+  "2" "$OW_N"
+expect_eq "OW.4 the count over a 2,000-request store forks no grep (the budget, by fork count)" "0" "$OW_GREPS"
+expect_true "OW.5 …and takes at most one wall second (the budget, by time)" test "$((OW_T1 - OW_T0))" -le 1
+OW_ASKED="$( . "$GATE_LIB" 2>/dev/null; owed_names | gate_asked | tr '\n' ' ' )"
+expect_eq "OW.6 gate_asked on stdin prints exactly the names with an unended request, in the order given" \
+  "$(printf '%s:w%s ' "$WORLD_SID" 1 2 3 4 5 6)" "$OW_ASKED"
+expect_eq "OW.7 …rc 0 when any is showing" "0" \
+  "$( . "$GATE_LIB" 2>/dev/null; printf '%s\n' "$WORLD_SID:w1" | gate_asked >/dev/null; echo $? )"
+expect_eq "OW.8 …and rc 1, nothing printed, when none is" "|1" \
+  "$( . "$GATE_LIB" 2>/dev/null; o="$(printf '%s\n' "$WORLD_SID:wNever" | gate_asked)"; echo "$o|$?" )"
+fresh owed-empty
+mkdir -p "$BIONIC_GATE_DIR/requests"
+expect_eq "OW.9 an empty store prints nothing and answers rc 1" "|1" \
+  "$( . "$GATE_LIB" 2>/dev/null; o="$(printf '%s\n' "$WORLD_SID:w1" | gate_asked)"; echo "$o|$?" )"
+# The mutant: the per-file grep walk, one fork per request file per name, put back over the same
+# verb. A smaller store keeps its run short; the fork count is what the budget row reads.
+fresh owed-mutant
+world_machine 8 8192 30 1.0
+plant_ended_many 150 "$WORLD_SID:e" 900
+plant_ended 99999 "$WORLD_SID:wEnded" 900
+for i in 1 2 3 4 5 6; do plant_open "$i" "$WORLD_SID:w$i"; done
+OM="$(mutant owed)"
+anchor "$OM" 'gate_asked() {' 1
+cat >> "$OM" <<'MUTANT'
+gate_asked() {  # the old walk: one grep per request file per name
+  local nm f hit=1
+  _GD="$(gate_dir)"
+  while IFS= read -r nm; do
+    for f in "$_GD"/requests/[0-9]*; do
+      grep -qxF "who=$nm" "$f" 2>/dev/null && { printf '%s\n' "$nm"; hit=0; break; }
+    done
+  done
+  return $hit
+}
+MUTANT
+OWM_N="$(owed_count "$OM")"
+OWM_GREPS="$(wc -l < "$WORLD_ROOT/owed-greps" | tr -d ' ')"
+expect_eq "OW.10 the mutant runs, and still counts the ended request as asked: the old walk's answer" "1" "$OWM_N"
+expect_true "OW.11 …and it forks a grep per file per name, which OW.4's fork count reads red" \
+  test "$OWM_GREPS" -ge 300
+
+# The prune: an ended request older than BIONIC_GATE_KEEP goes at the next scan; a younger one,
+# every unended one and the cost records stay.
+fresh owed-prune
+world_machine 8 8192 30 1.0
+world_clock 100000
+world_cost k 5 1 30
+plant_ended 7 "$WORLD_SID:old" 13000
+plant_ended 9 "$WORLD_SID:young" 14000
+plant_open 8 "$WORLD_SID:waiting"
+expect_eq "OW.12 the planted store reads: two ended requests and an unended one (positive)" \
+  "$WORLD_SID:old $WORLD_SID:waiting $WORLD_SID:young" "$(field 7 who) $(field 8 who) $(field 9 who)"
+state >/dev/null
+expect_eq "OW.13 the default bound is a day: an ended request 87000 s old is gone" "gone" "$(gone_or_kept 7)"
+expect_eq "OW.14 …one 86000 s old stays (positive: it is read)" "$WORLD_SID:young" "$(field 9 who)"
+expect_eq "OW.15 …an unended request stays, however old" "$WORLD_SID:waiting" "$(field 8 who)"
+expect_eq "OW.16 …and the cost record stays" "k" "$(ls "$BIONIC_GATE_DIR/cost")"
+BIONIC_GATE_KEEP=500 state >/dev/null
+expect_eq "OW.17 BIONIC_GATE_KEEP=500 removes the one 86000 s old as well" "gone" "$(gone_or_kept 9)"
+expect_eq "OW.18 …and still the unended one and the cost record stay" "$WORLD_SID:waiting k" \
+  "$(field 8 who) $(ls "$BIONIC_GATE_DIR/cost")"
+fresh owed-keep-young
+world_machine 8 8192 30 1.0
+world_clock 100000
+plant_ended 9 "$WORLD_SID:y" 99900
+BIONIC_GATE_KEEP=500 state >/dev/null
+expect_eq "OW.19 an ended request younger than the bound stays" "$WORLD_SID:y" "$(field 9 who)"
+
+# gate_room reads the figure the admission test reads: gate_usage, not the raw reading.
+fresh owed-usage
+world_machine 8 8192 50 1.0
+world_cost k 50 1 30
+HOLD=1 ask_bg ou1 work k 0; wait_for 20 has ou1.rc
+printf '40\n' > "$BIONIC_GATE_DIR/idle"
+expect_eq "OW.20 the run is admitted (positive), idle 40 and a 50-point promise: used=90" \
+  "0|share=80 used=90" "$(rc_of ou1)|$(state | cut -d' ' -f1,2)"
+expect_eq "OW.21 used=90 over a share of 80, the raw reading 50: no room" \
+  "room=no load=1.0/1.0 cores=8 promised=1 waiting=0 rc=1" "$(room)"
+release ou1
+
 # ── §REAPED ──────────────────────────────────────────────────────────────────
 section "§REAPED — a killed request overlaps nothing once it is seen dead (T47; cost row)"
 # learn_run <gate lib> <name> <kill 0|1> — idle 30. With kill=1 a run of key x is admitted and
