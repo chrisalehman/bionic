@@ -384,7 +384,8 @@ _res_now() {
   date +%s 2>/dev/null
 }
 
-# _res_used_pct / _res_busy_cores / _res_total_mb — the gate's readings (wave-28 D11, D23).
+# _res_used_pct / _res_busy_cores / _res_busy_cores_5m / _res_total_mb — the gate's readings
+# (wave-28 D11, D14, D23).
 #
 # SHARES, NOT SIZES. The gate decides in percentages of this machine — memory used against
 # the share, busy cores against share × cores — so the same asks decide alike on a 4-core
@@ -424,6 +425,22 @@ _res_busy_cores() {
     return 0
   fi
   _res_load_1m
+}
+
+# _res_busy_cores_5m — the same reading over the last five minutes (wave-28 T13; D14): the load
+# average's second figure, read as `_res_load_1m` reads the first. The gate offers a writer
+# only while both figures leave room, so a burst that has just ended still counts until the
+# five-minute figure has seen it go.
+_res_busy_cores_5m() {
+  if [ -n "${BIONIC_PROBE_BUSY_CORES_5M:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_BUSY_CORES_5M}"
+    return 0
+  fi
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) sysctl -n vm.loadavg 2>/dev/null | awk '{ print $3 }' ;;
+    Linux)  awk '{ print $2 }' "${BIONIC_PROBE_PROC:-/proc}/loadavg" 2>/dev/null ;;
+    *)      printf '0' ;;
+  esac
 }
 
 # _res_total_mb — physical memory in MB (2^20 bytes); -1 when it cannot be read.

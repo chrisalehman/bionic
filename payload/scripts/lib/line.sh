@@ -842,10 +842,11 @@ _line_head_verdict() {  # <rec> <head> <suite>
 _line_fails() {  # <log>
   awk '{ sub(/\r$/, ""); sub(/^[ \t]+/, ""); if (index($0, "FAIL: ") != 1) next; sub(/[ \t]+$/, ""); print }' "$1" 2>/dev/null
 }
-# How many of the candidate's failing lines do not fail at the head.
+# How many of the candidate's failing lines the head does not fail: the lines are counted, one for one,
+# so a label the head fails once and the candidate twice has one line more.
 _line_new_fails() {  # <candidate's log> <head's log>
   { _line_fails "$2" | sed 's/^/h /'; _line_fails "$1" | sed 's/^/c /'; } \
-    | awk '{ k = substr($0, 3) } /^h / { h[k] = 1; next } !(k in h) { n++ } END { print n + 0 }'
+    | awk '{ k = substr($0, 3) } /^h / { h[k]++; next } { c[k]++; if (c[k] > h[k]) n++ } END { print n + 0 }'
 }
 
 # THE DECLARED DEBT (wave-27 T67; D8, AC-9.4): the entry's declared suite when its verdict on
