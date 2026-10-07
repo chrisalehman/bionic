@@ -13877,8 +13877,8 @@ slash-args@$MV_KEY_SLASH@$MV_READ_SLASH"
 if [ -z "$MV_REAL_TX" ]; then
   ok "MOVE-keys §MOVE skipped: this session's own transcript is not readable here (no CLAUDE_CODE_SESSION_ID, or none under ${MV_REAL_CFG}/projects)"
 else
-  while IFS='@' read -r k sel read; do
-    MV_KR="$(mv_keys "$MV_FX/$k.jsonl" "$sel" "$read")"
+  while IFS='@' read -r k sel rd; do
+    MV_KR="$(mv_keys "$MV_FX/$k.jsonl" "$sel" "$rd")"
     case "$MV_KR" in
       n=0\ *) ok "MOVE-keys-$k skipped: this session's transcript holds no entry of that kind yet" ;;
       *) expect_regex "MOVE-keys-$k the keys user_said reads from a $k entry all appear in the fixture and in this session's own entries of that kind (a CLI rename turns this red)" \
