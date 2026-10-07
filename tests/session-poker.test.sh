@@ -13584,6 +13584,59 @@ expect_eq "MOVE-said-link …a transcript that is a symbolic link is not this se
 rm -f "$MV_TX"; mv_tx typed
 expect_eq "MOVE-said-back …and the same transcript, a regular file again, is found" "0" "$(mv_said "$MV_P")"
 
+# ---------- whole words, and enough of them (wave-28 T66; REQ-8 AC-8.9; D34; A-orch-190) ----------
+#
+# user_said's two rules beside the fold. A WORD CHARACTER is a letter or digit (any script), `_`, `-` or
+# `'`; a quote stands in a prompt only where the character before it and the one after it are not word
+# characters (a prompt's own start and end count as neither), and the match is case-sensitive. A quote of
+# fewer than THREE words (the folded text split on single spaces) answers rc 3, unless the folded quote is
+# a whole typed prompt, which answers 0. rc 1 is the quote no prompt holds as whole words, however short.
+mv_prompts() {  # <prompt>... -> a transcript: the frame, then one typed prompt each (the typed fixture's keys)
+  local p; cat "$MV_FX/frame.jsonl" > "$MV_TX"
+  for p in "$@"; do jq -c --arg p "$p" '.message.content = $p' "$MV_FX/typed.jsonl" >> "$MV_TX"; done
+}
+mv_prompts 'do not defer it, fix it now' 'press e, then 2 to pick' 'do not defer it at all'
+expect_eq "MOVE-said-w1 §MOVE a quote of one word that stands whole in a prompt is too short (rc 3): '2'" "3" "$(mv_said '2')"
+expect_eq "MOVE-said-w2 …'e'" "3" "$(mv_said 'e')"
+expect_eq "MOVE-said-w3 …'it'" "3" "$(mv_said 'it')"
+expect_eq "MOVE-said-w4 …'defer it' inside 'do not defer it, fix it now': it passes the boundary rule (not rc 1) and is refused as short (rc 3)" \
+  "3" "$(mv_said 'defer it')"
+expect_eq "MOVE-said-w5 …positive, the same transcript: the whole prompt 'do not defer it, fix it now' is found" "0" \
+  "$(mv_said 'do not defer it, fix it now')"
+expect_eq "MOVE-said-w6 …and three of its words, 'fix it now', are found" "0" "$(mv_said 'fix it now')"
+expect_eq "MOVE-said-w7 …THE LIMIT OF MECHANICAL PROOF: 'defer it at all' out of 'do not defer it at all' passes both rules (negation is the reader's to judge from words=)" \
+  "0" "$(mv_said 'defer it at all')"
+mv_prompts 'defer it'
+expect_eq "MOVE-said-w8 a prompt typed as 'defer it' alone: the quote 'defer it' is the user's whole word (rc 0)" "0" "$(mv_said 'defer it')"
+expect_eq "MOVE-said-w9 …with the prompt's runs of white space and the quote's folded the same way: found" "0" \
+  "$(mv_said "$(printf 'defer \t it')")"
+expect_eq "MOVE-said-w10 …but one word of it, 'defer', is a quote of one word and not the prompt (rc 3)" "3" "$(mv_said 'defer')"
+mv_prompts 'please defer it now'
+expect_eq "MOVE-said-w11 'please defer it now' quoted as 'defer it now': three words, found (rc 0)" "0" "$(mv_said 'defer it now')"
+expect_eq "MOVE-said-w12 …the quote's runs of white space and a line break folded: found" "0" "$(mv_said "$(printf 'defer   it\nnow')")"
+expect_eq "MOVE-said-w13 …a control character between its words folds as white space does: found (one fold, in said.sh)" "0" \
+  "$(mv_said "$(printf 'defer it\001now')")"
+expect_eq "MOVE-said-w14 …the start cut inside a word, 'lease defer it now': not found (rc 1)" "1" "$(mv_said 'lease defer it now')"
+expect_eq "MOVE-said-w15 …the end cut inside a word, 'please defer it no': not found (rc 1)" "1" "$(mv_said 'please defer it no')"
+expect_eq "MOVE-said-w16 …a letter in another case, 'Defer it now': not found (rc 1)" "1" "$(mv_said 'Defer it now')"
+expect_eq "MOVE-said-w17 …'defer it' inside it: two words, found as whole words and refused as short (rc 3)" "3" "$(mv_said 'defer it')"
+mv_prompts 'undefer items now' 'prefix the name'
+expect_eq "MOVE-said-w18 'undefer items' quoted as 'defer it': a word boundary at neither end, not found (rc 1)" "1" "$(mv_said 'defer it')"
+expect_eq "MOVE-said-w19 …'fix' quoted against 'prefix': not found (rc 1)" "1" "$(mv_said 'fix')"
+expect_eq "MOVE-said-w20 …positive, the same transcript: the whole prompt 'undefer items now' is found" "0" "$(mv_said 'undefer items now')"
+mv_prompts "never pre-defer it now" "o'defer it now" 'step_defer it now' 'v2defer it now' 'édefer it now'
+expect_eq "MOVE-said-w21 a word character joins what it touches: 'defer it now' after a hyphen, an apostrophe, an underscore, a digit and a letter of another script: not found (rc 1)" \
+  "1" "$(mv_said 'defer it now')"
+expect_eq "MOVE-said-w22 …positive, the same transcript: 'never pre-defer it' is found" "0" "$(mv_said 'never pre-defer it')"
+mv_tx slash-args
+expect_eq "MOVE-said-slash1 a slash command typed WITH arguments carries origin human: its arguments are found (rc 0)" "0" "$(mv_said 'tighten the second finding')"
+expect_eq "MOVE-said-slash2 …and the CLI's wrapper text around them counts as typed: found" "0" \
+  "$(mv_said 'review</command-name> <command-args>tighten the second')"
+mv_tx slash-bare
+expect_eq "MOVE-said-slash3 a slash command typed WITHOUT arguments carries no origin: its words are not found (rc 1)" "1" "$(mv_said "$MV_P")"
+expect_eq "MOVE-said-slash4 …while the typed prompt beside it in the same transcript is found" "0" "$(mv_said "$MV_F")"
+mv_tx typed
+
 # ---------- the mutation arm: user_said counting a tool's result ----------
 MV_MUT="$(mktemp -d "$TMPROOT/mv-mut.XXXXXX")"
 MV_NEEDLE='if .type == "user" and .isMeta != true and .isSidechain != true and (.origin.kind? // "") == "human" then .message.content | words'
@@ -13594,6 +13647,33 @@ expect_eq "MOVE-mut0 the mutant differs from the library in one line" "1" "$(dif
 mv_tx tool-result
 expect_eq "MOVE-mut1 the mutant runs: it finds the typed prompt as the library does" "0" "$(mv_said "$MV_F" "$MV_MUT/said.sh")"
 expect_eq "MOVE-mut2 …and counts the tool's result, so MOVE-said-tool-result goes red under it" "0" "$(mv_said "$MV_P" "$MV_MUT/said.sh")"
+
+# ---------- the mutation arms of the two rules (T66): each rule's line replaced, on a copy ----------
+MV_BNEEDLE='def bounded($w; $p):'
+MV_LNEEDLE='def enough($w; $p):'
+anchor "$SAID_LIB" "$MV_BNEEDLE" 1
+anchor "$SAID_LIB" "$MV_LNEEDLE" 1
+mv_mutline() {  # <needle> <replacement line> <out> -> the library with the one line holding <needle> replaced
+  MV_N="$1" MV_R="$2" awk 'BEGIN { n = ENVIRON["MV_N"] } index($0, n) { print ENVIRON["MV_R"]; next } { print }' "$SAID_LIB" > "$3"
+}
+mkdir -p "$MV_MUT/b" "$MV_MUT/l"
+mv_mutline "$MV_BNEEDLE" 'def bounded($w; $p): $p | contains($w);' "$MV_MUT/b/said.sh"
+mv_mutline "$MV_LNEEDLE" 'def enough($w; $p): true;' "$MV_MUT/l/said.sh"
+expect_eq "MOVE-mutB0 the boundary mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MV_MUT/b/said.sh" | /usr/bin/grep -c '^>')"
+expect_eq "MOVE-mutL0 the length mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MV_MUT/l/said.sh" | /usr/bin/grep -c '^>')"
+mv_prompts 'undefer items now' 'prefix the name'
+expect_eq "MOVE-mutB1 the boundary mutant runs: it finds a whole prompt as the library does" "0" "$(mv_said 'undefer items now' "$MV_MUT/b/said.sh")"
+expect_eq "MOVE-mutB2 …and finds 'defer it' inside 'undefer items' (rc 3 for a short quote, not 1), so MOVE-said-w18 goes red under it" "3" \
+  "$(mv_said 'defer it' "$MV_MUT/b/said.sh")"
+expect_eq "MOVE-mutB3 …and finds 'fix' inside 'prefix', so MOVE-said-w19 goes red under it" "3" "$(mv_said 'fix' "$MV_MUT/b/said.sh")"
+mv_prompts 'do not defer it, fix it now' 'press e, then 2 to pick'
+expect_eq "MOVE-mutL1 the length mutant runs: it finds a whole prompt as the library does" "0" "$(mv_said 'do not defer it, fix it now' "$MV_MUT/l/said.sh")"
+expect_eq "MOVE-mutL2 …and accepts 'it' (rc 0, not 3), so MOVE-said-w3 goes red under it" "0" "$(mv_said 'it' "$MV_MUT/l/said.sh")"
+expect_eq "MOVE-mutL3 …and accepts 'defer it' inside a longer prompt, so MOVE-said-w4 goes red under it" "0" "$(mv_said 'defer it' "$MV_MUT/l/said.sh")"
+mv_tx slash-bare
+expect_eq "MOVE-mut3 the origin mutant counts a slash command typed without arguments, so MOVE-said-slash3 goes red under it" "0" \
+  "$(mv_said "$MV_P" "$MV_MUT/said.sh")"
+mv_tx typed
 
 # ---------- the seam: a moved: line re-rates at every read (unit rows on a planted plan) ----------
 MV_SP="$TMPROOT/mv-seam.plan.md"
@@ -13722,6 +13802,73 @@ done
 s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$MV_P"
 s42_unchanged "MOVE-9e usage: three operands" 2 "$PSEV"
 expect_contains "MOVE-9f …the usage names the verb's operands" "finding-move takes" "$OUT"
+
+# ---------- the verb, on the two rules (T66) ----------
+mv_prompts 'do not defer it, fix it now'
+s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'it' 'the user said it'
+s42_unchanged "MOVE-10 §MOVE a quote of one word is refused as too short" 1 "$PSEV"
+MV_SHORT_LINE="poker: REFUSED — the words \"it\" are too short to be the user's decision; quote at least three of their words, or their whole prompt. The plan is unchanged."
+expect_eq "MOVE-10b …with the refusal as measured" "$MV_SHORT_LINE" "$OUT"
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'fix it' 'the user said it'
+s42_unchanged "MOVE-10c 'fix it' inside a longer prompt is refused as too short as well" 1 "$PSEV"
+expect_contains "MOVE-10d …naming the rule" "too short to be the user's decision" "$OUT"
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'zzz yyy' 'the user said it'
+s42_unchanged "MOVE-10e two words no prompt holds are refused as standing in no prompt (not as short)" 1 "$PSEV"
+expect_contains "MOVE-10f …naming that rule" "in no prompt the user typed" "$OUT"
+MV_NMOVES="$(/usr/bin/grep -c "^moved: $(mv_id mv-fix) " "$PSEV")"
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix 'fix it now' 'three words are enough'
+expect_eq "MOVE-10g positive, the same transcript: three of the user's words move the finding (exit 0, one more moved: line)" \
+  "0|$((MV_NMOVES + 1))" "$RC|$(/usr/bin/grep -c "^moved: $(mv_id mv-fix) " "$PSEV")"
+mv_prompts 'fix it'
+MV_NMOVES="$(/usr/bin/grep -c "^moved: $(mv_id mv-fix) " "$PSEV")"
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$(printf 'fix \t it')" 'the whole prompt is the word'
+expect_eq "MOVE-11 a quote of two words that is the user's whole prompt moves the finding (exit 0, one more moved: line)" \
+  "0|$((MV_NMOVES + 1))" "$RC|$(/usr/bin/grep -c "^moved: $(mv_id mv-fix) " "$PSEV")"
+expect_regex "MOVE-11b …its words= folded once, by the one rule" "words=\"fix it\" why=\"the whole prompt is the word\"\$" \
+  "$(/usr/bin/grep "^moved: $(mv_id mv-fix) " "$PSEV" | tail -1)"
+mv_prompts 'please defer it now'
+poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$(printf 'defer it\001now')" 'a control character is white space'
+expect_regex "MOVE-12 a control character in the words is folded as white space, in the check and in the line (exit 0)" \
+  "^0\|moved: .* words=\"defer it now\" why=\"a control character is white space\"\$" \
+  "$RC|$(/usr/bin/grep "^moved: $(mv_id mv-fix) " "$PSEV" | tail -1)"
+mv_tx typed
+
+# ---------- the fixtures' key sets against this session's own transcript (read-only; key names only) ----------
+# A CLI that renames a key the fixtures carry would make user_said refuse every real move without a word;
+# this turns that into a red row. The transcript is the one the suite itself runs under, read where the CLI
+# keeps it; a machine with none readable skips with its reason.
+MV_REAL_SID="${CLAUDE_CODE_SESSION_ID:-}"
+MV_REAL_CFG="$MV_CCD_WAS"; [ "$MV_REAL_CFG" != "__unset__" ] || MV_REAL_CFG="$HOME/.claude"
+MV_REAL_TX=""
+if [ -n "$MV_REAL_SID" ]; then
+  for d in "$MV_REAL_CFG"/projects/*/; do
+    [ -f "${d}${MV_REAL_SID}.jsonl" ] && [ -r "${d}${MV_REAL_SID}.jsonl" ] && [ ! -L "${d}${MV_REAL_SID}.jsonl" ] && { MV_REAL_TX="${d}${MV_REAL_SID}.jsonl"; break; }
+  done
+fi
+mv_keys() {  # <fixture> <jq select of the real entries> <sub-object path> -> "n=<real entries> missing=<fixture keys no real entry carries>"
+  jq -nRr --slurpfile fx "$MV_FX/$1.jsonl" '
+    [inputs | fromjson? | objects | select('"$2"')] as $r
+    | def ks(f): [$r[] | f | keys[]] | unique;
+      "n=\($r | length) missing=\((($fx[0] | keys) - ks(.)) + ((($fx[0] | '"$3"' | keys) - ks('"$3"')) | map("'"$3"'." + .)) | join(","))"' "$MV_REAL_TX" 2>/dev/null
+}
+MV_KEY_ROWS="typed@.type == \"user\" and (.origin.kind? // \"\") == \"human\" and (.message.content | type) == \"string\"@.message
+queued@.type == \"attachment\" and .attachment.type? == \"queued_command\" and (.attachment.origin.kind? // \"\") == \"human\"@.attachment
+slash-args@.type == \"user\" and (.origin.kind? // \"\") == \"human\" and ((.message.content | type) == \"string\") and (.message.content | contains(\"<command-args>\"))@.message"
+if [ -z "$MV_REAL_TX" ]; then
+  ok "MOVE-keys §MOVE skipped: this session's own transcript is not readable here (no CLAUDE_CODE_SESSION_ID, or none under ${MV_REAL_CFG}/projects)"
+else
+  while IFS='@' read -r k sel sub; do
+    MV_KR="$(mv_keys "$k" "$sel" "$sub")"
+    case "$MV_KR" in
+      n=0\ *) ok "MOVE-keys-$k skipped: this session's transcript holds no entry of that kind yet" ;;
+      *) expect_regex "MOVE-keys-$k the $k fixture's keys all appear in this session's own entries of that kind (a CLI rename turns this red)" \
+           '^n=[1-9][0-9]* missing=$' "$MV_KR" ;;
+    esac
+  done <<EOF2
+$MV_KEY_ROWS
+EOF2
+fi
 
 POKE_BOUND="$MV_BOUND_WAS"
 if [ "$MV_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$MV_CCD_WAS"; fi
