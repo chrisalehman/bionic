@@ -2115,6 +2115,7 @@ expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), i
 fl_poke proof-add floor "record/wave-01-fixture/floor-run-$FL_H.log"
 expect_eq "FL2 proof-add floor writes the floor fact from that log (exit 0)" "0|1" \
   "$FL_RC|$(/usr/bin/grep -c "^proved: kind=floor head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
+expect_contains "FL2b …saying what it wrote" "proof-add — kind=floor head=$FL_H" "$FL_OUT"
 fl_poke current 8
 expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed -n 's/^current: //p' "$PFL/$PLAN_REL")"
 run_close "$PFL" run
