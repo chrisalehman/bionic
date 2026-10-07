@@ -380,7 +380,7 @@ fill_cap() {  # <plan>
 }
 
 # fill_gate_owed <roster> <session id> -> how many of the open names on stdin are writers whose
-# agent has no unended request at the gate (`gate_asked`, one call over every name, matched on the
+# agent has no open request at the gate (`gate_asked`, one call over every name, matched on the
 # request's `who` = `<session>:<name>`). A writer that has asked and is running is showing — in
 # the load, or in an admitted promise — and is owed no longer; one that has not, or whose request
 # has ended, is counted at the largest promise on record. A read-only role is no writer

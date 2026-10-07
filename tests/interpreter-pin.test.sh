@@ -592,8 +592,9 @@ t87_refused 7.18 "pin/bash a link to something other than /bin/bash" \
   "$R/pin/bash is not a link to /bin/bash"
 expect_eq "7.18g …and the foreign link is left as it was, not replaced" "/bin/sh" "$(readlink "$R/pin/bash")"
 # A root owned by another user cannot be made in a suite run without privileges (chown needs
-# root), so the owner arm is not driven here; the mode arm (7.15, 7.16) is the test of that rule.
-skip "7.19 a root owned by another user" "unprivileged: chown to another uid needs root; the mode arm 7.15-7.16 stands in"
+# root), so no real one is planted here; the owner reader is stubbed instead (T59 on): 7.61 plants one at the
+# predictable name and the hand run refuses it, 7.69 is the mutant that stops judging the root's own owner.
+skip "7.19 a root owned by another user" "unprivileged: chown to another uid needs root; the stat stub drives the owner arm at 7.61 and 7.69"
 
 # THE MUTANT: the -L test removed from a copy of the seam, nothing else. The root and the pin go through one
 # function (T67), so it is one test, and it must turn the two link states, the root's and the pin's, and those
