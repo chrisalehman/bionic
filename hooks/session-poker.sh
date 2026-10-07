@@ -26,6 +26,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -420,6 +421,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
+  die "  bash ${HOOK_DIR}/session-poker.sh share [<n>]   print the machine's share, 1 to 100 (80 when none is set); with <n>, set it: one integer in the user-level share file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh window     the instant this session's roster begins, UTC ISO-8601 (empty when it cannot be dated)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
@@ -741,6 +743,13 @@ case "$VERB" in
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
+    ;;
+  # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). No operand prints it; one operand sets it. The
+  # value's own shape is the verb's refusal (1); a second operand is the usage error.
+  share)
+    [ $# -le 1 ] || usage "share takes at most one argument: the share to set, 1 to 100."
+    SH_SET=no; SH_ARG=""
+    if [ $# -eq 1 ]; then SH_SET=yes; SH_ARG="$1"; fi
     ;;
   # ONE OPTIONAL OPERAND (wave-20 REQ-5, AC-5.6): the plan whose ledger to read. Without it, the
   # session's own run — the one every other verb here resolves.
@@ -2682,6 +2691,11 @@ row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
   for k in files suites_allowed suites_source teammate_id adopted_from questions; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
+  # `row=` and `lands_on=` too (wave-28 T7; D4, D17): the row a dispatch binds and the suites it
+  # lands on are its contract, read off its latest row, so an amended, held or extended row keeps them.
+  for k in row lands_on; do
+    row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
+  done
   # `pushed=` too (wave-28 T15; A-orch-9): what a reader was pushed at start decides how its record
   # is read (lib/proof.sh `proof_pushed_severity`), so an amended, held or extended reader row keeps
   # it. Only where `roster_row` knows the key (wave-28 T16), so a copy never fails on it.
@@ -3413,7 +3427,7 @@ launch_sync_launches() {  # <roster> <sid> <open names, one per line>
       if (kv["session"] != "" && kv["session"] != sid) next
       at[nm] = NR; r++; last[nm] = r
       rn[r] = nm; ri[r] = kv["agent_id"]; rt[r] = kv["tool_use_id"]; rl[r] = kv["launched_at"]
-      rec[nm] = kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"]
+      rec[nm] = kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"] "\037" kv["row"]
     }
     END {
       for (q = 1; q <= r; q++) {
@@ -3498,13 +3512,13 @@ launch_sync_project() {
   local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
   local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
   local us=$'\037'
-  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG LGDT pairs lpairs
+  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LBR LROW FINAL LGID LGAG LGDT pairs lpairs
   LS_SAID=""; LS_FAILS=""; LS_HANDS=""; LS_PROOFS=""; LS_PROOFS_READ=no
   open="$(roster_open_names "$roster" "$acks" "$sid" 2>/dev/null)"
   [ -n "$open" ] || return 1
-  while IFS="$us" read -r name la du dl ty; do
+  while IFS="$us" read -r name la du dl ty rw; do
     [ -n "$name" ] || continue
-    LN[nl]="$name"; LLA[nl]="$la"; LDU[nl]="$du"; LDL[nl]="$dl"; LTY[nl]="$ty"; nl=$((nl + 1))
+    LN[nl]="$name"; LLA[nl]="$la"; LDU[nl]="$du"; LDL[nl]="$dl"; LTY[nl]="$ty"; LBR[nl]="$rw"; nl=$((nl + 1))
   done <<EOF
 $(launch_sync_launches "$roster" "$sid" "$open")
 EOF
@@ -3520,8 +3534,12 @@ EOF
   j=0
   while [ "$j" -lt "$nl" ]; do
     hits=0; h=-1; i=0
+    # THE ROW LABEL FIRST (wave-28 T7; D17): a launch whose row carries `row=` is that row's, by the
+    # id itself; only a launch with none is matched by its name.
     while [ "$i" -lt "$n" ]; do
-      if fill_row_launched "${RID[i]}" "${LN[j]}"; then hits=$((hits + 1)); h="$i"; fi
+      if [ -n "${LBR[j]}" ]; then
+        [ "${RID[i]}" = "${LBR[j]}" ] && { hits=$((hits + 1)); h="$i"; }
+      elif fill_row_launched "${RID[i]}" "${LN[j]}"; then hits=$((hits + 1)); h="$i"; fi
       i=$((i + 1))
     done
     LROW[j]=-1
@@ -3745,6 +3763,45 @@ case "$VERB" in
     }
     printf '%s\n' "$SECS"
     exit 0
+    ;;
+
+  # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). The share is one integer, 1 to 100, in
+  # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share`; with no file the gate's share is 80. Printing it asks
+  # `gate_share`, the one reader, so what this prints is what the gate decides on. Setting it writes that
+  # file by the SAME path expression `gate_share` reads (not `claude_home`, which BIONIC_CLAUDE_HOME moves),
+  # through a staged copy and a rename so a reader never sees half a number. It is the machine's and not a
+  # run's: no session key, roster or engagement is read, and nothing but the file is written. REFUSED (1):
+  # a value that is not a whole number from 1 to 100 (leading zeros read as decimal), or a file that cannot be
+  # written; either way the share is as it was. The contract-verb arm of the bash wall lists `share`, so a
+  # subagent may call neither form.
+  share)
+    SH_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"
+    if [ "$SH_SET" = no ]; then
+      if ! declare -F gate_share >/dev/null 2>&1; then
+        die "REFUSED — lib/gate.sh did not load, so the share cannot be read."
+        exit 3
+      fi
+      gate_share
+      exit 0
+    fi
+    case "$SH_ARG" in
+      ''|*[!0-9]*) SH_BAD=yes ;;
+      *) if [ "${#SH_ARG}" -gt 9 ]; then SH_BAD=yes
+         else SH_N=$((10#$SH_ARG)); if [ "$SH_N" -ge 1 ] && [ "$SH_N" -le 100 ]; then SH_BAD=no; else SH_BAD=yes; fi; fi ;;
+    esac
+    if [ "$SH_BAD" = yes ]; then
+      die "REFUSED — share $(printf '%q' "${SH_ARG:0:20}") is not a whole number from 1 to 100; the share is unchanged."
+      exit 1
+    fi
+    SH_TMP="${SH_FILE}.tmp.$$"
+    if mkdir -p "${SH_FILE%/*}" 2>/dev/null && printf '%s\n' "$SH_N" > "$SH_TMP" 2>/dev/null \
+       && mv -f "$SH_TMP" "$SH_FILE" 2>/dev/null; then
+      say "share set to $SH_N"
+      exit 0
+    fi
+    rm -f "$SH_TMP" 2>/dev/null
+    die "REFUSED — the share file could not be written; the share is unchanged."
+    exit 1
     ;;
 
   # THE DEFAULT, WITHOUT THE CONFIG — added for hooks/dispatch-preflight.sh's arming wall

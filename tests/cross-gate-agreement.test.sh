@@ -13008,6 +13008,9 @@ AM_RE_A='`'"$AM_RUN_A"'`'
 am_world() {  # <label> -> repo path (a teammate roster for w1, session $AM_SID, engaged)
   local r ro
   r=$(new_repo "am-$1")
+  # THE PROJECT HAS THE RUNNER'S DOOR (wave-28 T54): the one door fires only where tests/run.sh says --only,
+  # so this world plants the same runner as tests/bash-walls.test.sh's bw_door, committed with the seed.
+  mkdir -p "$r/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$r/tests/run.sh"
   arm_patrol "$r" "$AM_SID"; engage_sids "$r" "$AM_SID"
   ro="$r/.bionic/tmp/roster-$AM_SID.state"
   roster_header > "$ro"
@@ -13077,16 +13080,16 @@ expect_eq "AM1 …and the name's latest row IS the id's latest row: the verb and
 
 # ---- AM2: amend --suites+ -> the budget arm admits the added suite (AC-1.2, suites half) ----
 AM_R2=$(am_world 2)
-am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only s.test.sh"
 expect_eq "AM2 [poker amend -> bash-walls budget arm] BEFORE the amend the arm refuses the added suite" "2" "$AM_ARM_ST"
 expect_absent "AM2 …and the budget it names does not carry the added suite" "s.test.sh" "$(am_budget_line "$AM_ARM_OUT")"
 am_amend "$AM_R2" w1 --suites+ tests/s.test.sh --reason x
 expect_eq "AM2 the amend exits 0" "0" "$AM_RC"
-am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only s.test.sh"
 expect_eq "AM2 AFTER the amend the arm ADMITS the added suite (AC-1.2)" "0" "$AM_ARM_ST"
-am_arm "$AM_R2" "$AM_ID" "bash tests/a.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only a.test.sh"
 expect_eq "AM2 …and still admits the suite the brief declared" "0" "$AM_ARM_ST"
-am_arm "$AM_R2" "$AM_ID" "bash tests/z.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only z.test.sh"
 expect_eq "AM2 …and still refuses a suite nobody declared" "2" "$AM_ARM_ST"
 expect_eq "AM2 …and the name's latest row IS the id's latest row" "$(am_last "$AM_R2")" "$(am_idpick "$AM_R2")"
 
@@ -14196,14 +14199,15 @@ mkdir -p "$NM_MUT/hooks" "$NM_MUT/scripts/lib"
 cp "$BIONIC_HOOKS_DIR"/*.sh "$NM_MUT/hooks/" 2>/dev/null
 cp "$NM_LIB"/*.sh "$NM_MUT/scripts/lib/" 2>/dev/null
 cp "$NM_LIB/../booked.sh" "$NM_MUT/scripts/booked.sh" 2>/dev/null
-NM_NEEDLE='if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then'
+# The line as wave-28 T36 spells it (a door claim, kind `only`, is scoped like a file claim).
+NM_NEEDLE='if { [ "$_k" != file ] && [ "$_k" != only ]; } || ! cmd_claim_scope "$_root" "$_b" "$_p"; then'
 anchor "$NM_LIB/walls.sh" "$NM_NEEDLE" 1
 NM_N="$NM_NEEDLE" awk '
-  BEGIN { n = ENVIRON["NM_N"]; r = "if [ \"$_k\" != file ]; then" }
+  BEGIN { n = ENVIRON["NM_N"]; r = "if [ \"$_k\" != file ] && [ \"$_k\" != only ]; then" }
   { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' \
   "$NM_LIB/walls.sh" > "$NM_MUT/scripts/lib/walls.sh"
 expect_eq "NM mutation: the doctored copy lost exactly the scoping call" "0 1" \
-  "$(grep -cF -- "$NM_NEEDLE" "$NM_MUT/scripts/lib/walls.sh") $(grep -cF -- 'if [ "$_k" != file ]; then' "$NM_MUT/scripts/lib/walls.sh")"
+  "$(grep -cF -- "$NM_NEEDLE" "$NM_MUT/scripts/lib/walls.sh") $(grep -cF -- 'if [ "$_k" != file ] && [ "$_k" != only ]; then' "$NM_MUT/scripts/lib/walls.sh")"
 expect_eq "NM mutation: …and its wall still wraps and names a suite" "a.test.sh" \
   "$(nm_names "$NM_MUT/hooks/bash-walls.sh" 'bash tests/a.test.sh')"
 expect_eq "NM mutation: …which names other/a.test.sh by its basename, so the agreement goes red" \

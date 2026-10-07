@@ -1952,4 +1952,38 @@ for rw_cause in step4 grew; do
     test "$(rw_first | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
 done
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "§LAUNCHED: a launch whose row carries row= counts as that row's launch (wave-28 T7; REQ-3 AC-3.4, D17)"
+
+# A brief's `Row: <id>` is written on the launch row as `row=<id>`. The fill duty's launched count
+# reads it before the name: an agent named `w-A2` briefed `Row: T14` launched T14, though no name
+# match would say so. The name match stays the fallback for a row with none. FIXTURE: section 9's
+# plan (T13 and T14 pending, writers=8) and transcript, the width pinned the same way.
+# fails-when: the labelled launch reads 0 of 2, or T14 is named as not launched.
+S9_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$S9_RING"
+export BIONIC_PRESSURE_RING="$S9_RING" BIONIC_NOW_EPOCH=1700000000
+SL_D="$(s9_fixture)"
+roster_row_fixture status=intended session="$SID" name=w-A2 agent_id=awA200000000001 deliverable= row=T14 \
+  >> "$SL_D/.bionic/tmp/roster-$SID.state"
+expect_contains "LAUNCHED precondition: the launch row carries row=T14" "|row=T14" "$(grep 'name=w-A2' "$SL_D/.bionic/tmp/roster-$SID.state")"
+SL_TX="$(mktemp)"; s9_transcript "$SL_TX" w-A2
+s7_fire "$SL_D" "$SL_TX"
+expect_contains "LAUNCHED1 w-A2 briefed Row: T14 counts as launched: 1 of 2" "launched 1 of 2" "$(s9_headline)"
+expect_contains "LAUNCHED2 …and the row not launched is T13 alone" "not launched: T13" "$(s9_headline)"
+expect_absent "LAUNCHED3 …T14 is never named as not launched" "T14" "$(s9_headline)"
+expect_contains "LAUNCHED4 …and the fill ledger records the launch by its row" "|launched=T14|" \
+  "$(cat "$SL_D/.bionic/docs/record/wave-09-fixture/fill-ledger.log" 2>/dev/null)"
+# The fallback, so LAUNCHED1 cannot pass on a constant: the same name with no row= matches no row.
+SL_D0="$(s9_fixture)"
+roster_row_fixture status=intended session="$SID" name=w-A2 agent_id=awA200000000002 deliverable= \
+  >> "$SL_D0/.bionic/tmp/roster-$SID.state"
+SL_TX0="$(mktemp)"; s9_transcript "$SL_TX0" w-A2
+s7_fire "$SL_D0" "$SL_TX0"
+expect_contains "LAUNCHED5 the same w-A2 with no row= launched no ready row: 0 of 2" "launched 0 of 2" "$(s9_headline)"
+expect_contains "LAUNCHED6 …and the name match still counts a name that is a row's: w9-T13 is T13's" "launched 1 of 2" \
+  "$(SL_D1="$(s9_fixture)"; roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000009 deliverable= \
+       >> "$SL_D1/.bionic/tmp/roster-$SID.state"; SL_TX1="$(mktemp)"; s9_transcript "$SL_TX1" w9-T13
+     s7_fire "$SL_D1" "$SL_TX1"; s9_headline)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
 finish

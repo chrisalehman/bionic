@@ -1907,8 +1907,9 @@ fi
 # here — doctor creates nothing — so the line says so instead of reading it.
 if declare -F gate_share >/dev/null 2>&1; then
   _g_share="$(gate_share)"
-  if [ -r "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share" ]; then _g_from="set in bionic/share"
-  else _g_from="the default; no share file"; fi
+  # THE SOURCE IS detect.sh's (wave-28 T10): `state=file` when the share file is there, `default` when the
+  # gate's 80 stands. The file is the one `session-poker.sh share <n>` and setup's share step write.
+  case "$(detect_share)" in *"state=file "*) _g_from="set in bionic/share" ;; *) _g_from="the default; no share file" ;; esac
   _res_add "$(_doctor_item "$DOCTOR_NIL" "share" "${_g_share}% of this machine (${_g_from})")"
   if [ -d "$(gate_dir)/requests" ]; then
     _g_st="$(gate_state 2>/dev/null)"
@@ -2526,11 +2527,14 @@ printf '%s' "$THIRD_ROWS"
 # WHAT `remove` MAY ACT ON, AND NOTHING ELSE. `install_dep` writes a line for each
 # tool it installs; `remove` offers to take a tool off only when this record names
 # it, and names every other tool it finds with the command to remove it by hand.
+# The one other thing it takes off is a native plugin the CLI's own registry holds
+# as bionic's (`remove_dep`'s native arm, which never reaches `install_dep` and so
+# has no line here), and the heading says both (wave-28 T10, T40's offer).
 # So the page shows the record itself: one row per name, read from its newest
 # line. A name bionic's table no longer holds is printed `unknown`, because no
 # door acts on it — the table is what says how to remove a thing.
 echo ""
-echo "INSTALL RECORD — what bionic installed; remove acts only on these"
+echo "INSTALL RECORD — what bionic installed; remove acts on these and on registry-proven plugins"
 INSTALL_RECORD_ROWS="$(dep_record_rows)"
 if [ -z "$INSTALL_RECORD_ROWS" ]; then
   echo "  none recorded"

@@ -5,7 +5,7 @@
 #
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--quiet] [--shell <path>]
-#                                        [--stamp-dir <dir>] [--suites <names>]
+#                                        [--stamp-dir <dir>] [--suites <names>] [--runner]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -105,6 +105,19 @@
 # runner) is not asked for: each of its suites asks for itself (tests/run.sh --one), so one
 # admission never stands for a whole run. It is still stamped.
 #
+# --runner: THE DOOR'S RUNNER HOLDS NOTHING EITHER (wave-28 T36; D27, AC-10.2). `tests/run.sh
+# --only a.test.sh b.test.sh` is the runner, but its --suites names the suites it runs, so the
+# stamp says which ones the run proved; the wall passes --runner beside them, when every suite the
+# command runs is run by the runner, and the shim then asks nothing, as for `run.sh`.
+#
+# THE TREE THE ASK NAMES (wave-28 T36; ruling A-orch-55/56). The gate's request records the tree
+# the command runs in (`tree=`, git's toplevel where the ask is made), and the landing's busy
+# check reads it. That is the tree the stamp goes to: the checkout --stamp-dir resolves inside,
+# else the directory a literal `cd <dir>` opening the command names, else where the shim stands.
+# The shim makes its ask from there and comes straight back, so the command still runs where the
+# shim stands. It used to ask from its own cwd only, so a doctrine call made from the main
+# checkout named the main checkout and every writer's suite read as a run there.
+#
 # A STORE THAT CANNOT BE WRITTEN (T36, review 4 F5). The gate manages throughput; it is not a
 # guard. So an ordinary command runs UNADMITTED at once, with one stderr line that names the
 # store and says so. A whole-machine run does not run (exit 69, the line names the store): a
@@ -197,11 +210,11 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; max_wait=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""
+kill_after=""; max_wait=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
@@ -217,6 +230,7 @@ while [ "$#" -gt 0 ]; do
     --stamp-dir=*)  stamp_dir="${1#--stamp-dir=}"; [ -n "$stamp_dir" ] || booked_usage; shift ;;
     --suites)       [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; suites="$2"; shift 2 ;;
     --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
+    --runner)       runner=1; shift ;;
     --)             sep=1; shift; break ;;
     *)              booked_usage ;;
   esac
@@ -418,13 +432,28 @@ booked_not_admitted() {  # the gate did not admit the command within the call's 
   exit "$BOOKED_WAITED_RC"
 }
 
+# booked_cd_dir — the directory a literal `cd <dir>` opening the command names, or nothing. A
+# plain word only: a quote, an expansion, a glob or a `~` is not read, and the ask then names
+# where the shim stands.
+booked_cd_dir() {
+  local c="${cmd#"${cmd%%[![:space:]]*}"}" d
+  case "$c" in cd[[:space:]]*) : ;; *) return 0 ;; esac
+  d="${c#cd}"; d="${d#"${d%%[![:space:]]*}"}"; d="${d%%[[:space:];&|]*}"
+  case "$d" in ''|-*|*[\'\"\$\`\\~*?\[]*) return 0 ;; esac
+  printf '%s' "$d"
+}
+BOOKED_ASK_DIR="$stamp_dir"
+[ -n "$BOOKED_ASK_DIR" ] || BOOKED_ASK_DIR="$(booked_cd_dir)"
+
 # booked_ask <work|whole> — asks the gate in this shell (never in `$( )`: a signal must reach
 # the trap while it waits, and the holder is this process). Sets BOOKED_ID and BOOKED_OWN and
 # exports BIONIC_GATE_ADMIT; ends the shim itself on a wait that ran out (75) and on a store it
 # cannot write for a whole run (69). An ordinary run on such a store goes on unadmitted.
 booked_ask() {
-  local rc
+  local rc here="$PWD" moved=0
   BOOKED_IDF="$(mktemp "${TMPDIR:-/tmp}/booked-id.XXXXXX" 2>/dev/null)"
+  # Asked from the stamp's tree (THE TREE THE ASK NAMES), in this shell, then straight back.
+  if [ -n "$BOOKED_ASK_DIR" ] && cd "$BOOKED_ASK_DIR" 2>/dev/null; then moved=1; fi
   if [ -n "$BOOKED_IDF" ]; then
     gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} > "$BOOKED_IDF"; rc=$?
     { read -r BOOKED_ID < "$BOOKED_IDF"; } 2>/dev/null
@@ -432,6 +461,7 @@ booked_ask() {
   else
     BOOKED_ID="$(gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"})"; rc=$?
   fi
+  [ "$moved" -eq 0 ] || cd "$here" 2>/dev/null
   case "$rc" in
     0)
       # Held by this process, or by an ancestor whose admission the gate believed (nested).
@@ -524,7 +554,7 @@ case "$BOOKED_SAMPLE_TICKS" in ''|*[!0-9]*|0) BOOKED_SAMPLE_TICKS=10 ;; esac
 
 if [ "$quiet" -eq 0 ]; then
   # THE RUNNER HOLDS NOTHING (D13): each of its suites asks for itself.
-  if [ "$suites" != run.sh ]; then
+  if [ "$suites" != run.sh ] && [ "$runner" -eq 0 ]; then
     booked_ask work
   fi
   booked_run
