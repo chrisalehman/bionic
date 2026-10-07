@@ -611,7 +611,11 @@ ll_wide() {  # <root> <suites> [more] — the launch, its identification, then a
   [ -z "${3:-}" ] || ll_wrow "$1" status=identified suites_allowed=a.test.sh "$3"
   ll_wrow "$1" status=identified suites_allowed="$2" amended='2026-10-07T00:00:00Z widened'
 }
-ll_verdicts() { ll_ev "$1" verdict | sed 's/.*|suite=\([^|]*\)|result=\([^|]*\)|.*/\1:\2/' | tr '\n' ' ' | sed 's/ $//'; }   # <root>
+ll_verdicts() {  # <root> -> `suite:result` of each verdict on the row's candidate (a red is asked once more at the head)
+  local k
+  k="$(ll_field "$(ll_ev "$1" candidate | head -1)" commit)"
+  ll_ev "$1" verdict | grep -F "|commit=${k}|" | sed 's/.*|suite=\([^|]*\)|result=\([^|]*\)|.*/\1:\2/' | tr '\n' ' ' | sed 's/ $//'
+}
 RM1="$(ll_world)"; HM1="$(ll_head "$RM1")"
 ll_wide "$RM1" 'a.test.sh b.test.sh'
 ll_redsuite "$RM1" T1 b
@@ -635,6 +639,7 @@ ll_verb "$RM3" T1
 expect_eq "(r6g) an adopted row (adopted_from=, no launch row) stands as the launch row: proved on its suites, b red" \
   "1 a.test.sh,b.test.sh a.test.sh:green b.test.sh:red" "$LL_RC $(ll_field "$(ll_ev "$RM3" ready)" suites) $(ll_verdicts "$RM3")"
 RM3b="$(ll_world)"
+grep -v '|name=wx-T1|' "$(ll_roster "$RM3b")" > "$(ll_roster "$RM3b").n" && mv "$(ll_roster "$RM3b").n" "$(ll_roster "$RM3b")"
 ll_verb "$RM3b" T1
 expect_eq "(r6g) …while a roster with no row of the agent is refused no-launch-row (exit 2)" "2" "$LL_RC"
 expect_contains "(r6g) …naming the row" "REFUSED reason=no-launch-row row=T1 roster=" "$LL_OUT"
