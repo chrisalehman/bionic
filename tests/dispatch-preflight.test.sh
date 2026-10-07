@@ -11193,7 +11193,7 @@ t55_gate or3 w-T1 'Row: T9
 Lands-on: widget'
 expect_eq "OR3 (P3) an agent named w-T1 briefed Row: T9 is refused" "deny" "$GATE_VERDICT"
 expect_contains "OR3b …the approval wait is on the wire" "$OR_WAIT" "$GATE_ERR"
-expect_contains "OR3c …and so is the Row:/name mismatch" "Row: T9 is not the name's row T1" "$GATE_ERR"
+expect_contains "OR3c …and so is the Row:/name mismatch, one line beside it on the several-fault wire" "Row: T9 is not the name's row T1 (rename or drop Row:)" "$GATE_VERR"
 expect_eq "OR3d …and no row is written" "" "$T7_ROW"
 
 t55_gate or4 w-T1 'Row: T2
