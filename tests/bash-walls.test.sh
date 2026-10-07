@@ -3149,4 +3149,107 @@ run_hook "$(mk_payload "$R_DR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash tes
 expect_ne "DOOR.20 under the mutant an agent's bare on-budget run passes (the defect DOOR.1 guards)" "2" "$ST"
 HOOK="$DR_HOOK_KEEP"
 
+# ---------------------------------------------------------------------------
+section "§EG-DERIVE — the commit wall reads a reading's result as the judge derives it (wave-28 T60; REQ-8 AC-8.6, AC-8.7; D33; A-orch-161)"
+# ---------------------------------------------------------------------------
+# A reading a `check:` line re-rates (refuted, or settled to another rating) has a result its findings
+# derive at their effective ratings, which the judge reads (lib/proof.sh `_proof_reading_result`). The
+# wall used to read the `result=` the review registered, so after a refutation the judge admitted
+# `current 8` and the release commits were refused (§EG-6's promise, the wall and the judge never answer
+# a section two ways, was false for it). The collector (hooks/bash-walls.sh) now hands the wall the
+# derived result for the plan it judges. FIXTURE FIDELITY: §EG-6's repository, plan writer and gate drive;
+# the records are in the shape the producing verb reads (`reviewed:`, `findings:`, `finding:`, `unsure:`),
+# the judge half is `facts_state` over the same plan text.
+EGD_REC="$R_EG6/.bionic/docs/record/w28t60"
+mkdir -p "$EGD_REC"
+egd_rec() {  # <file> <result> <finding line> -> a one-finding adversarial reading record with an unsure line
+  { printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: %s\nscope: piece\nfindings: 1\n' "${H_EG6:0:10}" "$H_EG6" "$2"
+    printf '%s\nunsure: 1 needs a second machine\n\nwhat the reader found\n' "$3"; } > "$EGD_REC/$1.md"
+}
+egd_rec adv fail "finding: 1 S1 on x.sh:9 - data lost on a second run"
+egd_rec flag flag "finding: 1 S3 off x.sh:9 - a message the reader could not rate"
+printf 'written-by: egd-agent\n' > "$EGD_REC/chk.md"
+EGD_REFUTED='check: record/w28t60/adv.md#1 S1 on "data lost on a second run" refuted by=record/w28t60/chk.md'
+EGD_SETTLED='check: record/w28t60/flag.md#1 S3 off "a message the reader could not rate" settled=S1:on by=record/w28t60/chk.md'
+egd_judge() {  # <question> -> the judge's state of its piece line, over the plan eg6_gate wrote last
+  bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$R_EG6/.bionic/docs/plans/active.md" "$H_EG6" 2>/dev/null \
+    | awk -F'\t' -v q="$1" '$1 == "review" && $2 == q && $4 == "piece" { print $5 }'
+}
+egd_lib() {  # <plan> <evidence> <written> -> the result the judge derives
+  bash -c '. "$1" && _proof_reading_result "$2" "$3" "$4" "$5"' _ "$EG6_LIB" "$1" "$R_EG6/.bionic/docs" "$2" "$3" 2>/dev/null
+}
+
+# ---------- a refuted finding: the reading written result=fail is derived to pass ----------
+EGD_BASE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" adversarial fail record/w28t60/adv.md)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_status "EGD-1 the newest adversarial reading is result=fail and no check names it: the commit is refused (the control)" 2 "$ST"
+expect_contains "EGD-1b …naming the failing reading and its evidence" \
+  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/adv.md)" "$ERR"
+expect_eq "EGD-1c …and the judge reads that piece line as failing, on the same text" "failing" "$(egd_judge adversarial)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_eq "EGD-2c precondition: the judge derives pass for the reading its proof line writes as fail (its only finding refuted)" \
+  "pass|covered" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
+expect_status "EGD-2 §EG-6 AC-8.6 the only finding refuted by a check: line, the Step-6 commit is admitted" 0 "$ST"
+expect_absent "EGD-2b …and no reading question is named unanswered" "a reading question is unanswered" "$ERR"
+
+# ---------- a finding settled to fix on a reading written flag ----------
+EGD_FLAGBASE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" adversarial flag record/w28t60/flag.md)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE")"
+expect_status "EGD-3 the reading written result=flag and no check settling it: the commit is admitted (the control)" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE
+$EGD_SETTLED")"
+expect_eq "EGD-4 precondition: the judge derives fail for the reading its proof line writes as flag, and holds the piece line failing" \
+  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/flag.md flag)|$(egd_judge adversarial)"
+expect_status "EGD-4b §EG-6 AC-8.6 its finding settled to S1 on, the commit is refused" 2 "$ST"
+expect_contains "EGD-4c …naming the reading failing at its derived result" \
+  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/flag.md)" "$ERR"
+
+# ---------- a moved finding: the reading written flag is derived to fail at the moved priority ----------
+{ printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: flag\nscope: piece\nfindings: 1\n' "${H_EG6:0:10}" "$H_EG6"
+  printf 'finding: 1 S2 off x.sh:9 - a side path still wrong\n\nwhat the reader found\n'; } > "$EGD_REC/mv.md"
+EGD_MOVED='moved: record/w28t60/mv.md#1 to=fix by=Dana at=2026-10-07T12:00:00Z words="fix it before the release" why="the user ruled it"'
+EGD_MVBASE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" adversarial flag record/w28t60/mv.md)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE")"
+expect_status "EGD-5 a reading written flag whose one finding is a deferral, no move: the commit is admitted (the control)" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
+$EGD_MOVED")"
+expect_eq "EGD-6 precondition: the judge derives fail for it once a moved: line sends the finding to fix, and holds the piece line failing" \
+  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
+expect_status "EGD-6b §EG-6 AC-8.6 the moved priority is the one the wall reads: the commit is refused" 2 "$ST"
+expect_contains "EGD-6c …naming the reading failing at its derived result" \
+  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/mv.md)" "$ERR"
+
+# ---------- the mutation arm: the wall back on the written result= ----------
+EGD_MUT="$SANDBOX/derive-mutant"
+mkdir -p "$EGD_MUT/hooks"
+cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$EGD_MUT/scripts"
+cp "$HOOK" "$EGD_MUT/hooks/bash-walls.sh"
+EGD_NEEDLE='r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
+anchor "$EGD_MUT/scripts/lib/walls.sh" "$EGD_NEEDLE" 1
+EGD_N="$EGD_NEEDLE" awk 'BEGIN { n = ENVIRON["EGD_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "r[PROOF_QUESTION] = PROOF_RESULT;" substr($0, i + length(n)); print }' \
+  "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" > "$EGD_MUT/scripts/lib/walls.sh"
+expect_eq "EGD-mut0 the mutant library differs from the shipped one in one line" "1" \
+  "$(diff "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$EGD_MUT/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
+expect_eq "EGD-mut0b …and parses" "0" "$(bash -n "$EGD_MUT/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
+EGD_HOOK_KEEP="$HOOK"; HOOK="$EGD_MUT/hooks/bash-walls.sh"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_status "EGD-mut1 the mutant runs: it refuses the failing reading no check names, as the shipped wall does (EGD-1)" 2 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_status "EGD-mut2 …and refuses the refuted one the shipped wall admits: EGD-2 goes red" 2 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE
+$EGD_SETTLED")"
+expect_status "EGD-mut3 …and admits the one settled to fix the shipped wall refuses: EGD-4b goes red" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
+$EGD_MOVED")"
+expect_status "EGD-mut4 …and admits the moved one the shipped wall refuses: EGD-6b goes red" 0 "$ST"
+HOOK="$EGD_HOOK_KEEP"
+
 finish
