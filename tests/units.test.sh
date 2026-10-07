@@ -4078,4 +4078,20 @@ sf_run --replace "$SF_PLAN" 5 'cmd=bash tests/a.test.sh && echo "$X" \1 & .*'
 expect_eq "SF-10 a value with & \\1 .* and a quote is written as typed" '  cmd: bash tests/a.test.sh && echo "$X" \1 & .*' \
   "$(printf '%s\n' "$SF_OUT" | awk '/^- Step 5:/ { f = 1; next } f && /^  cmd:/ { print; exit }')"
 
+# THE MUTATION ARM: a copy of the library whose replace mode writes the new line AFTER the old one (an append
+# where a replacement belongs) turns SF-1b, SF-1d and SF-4 red. The copy is made in the sandbox, never in the tree.
+SF_NEEDLE='if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
+anchor "$LIB" "$SF_NEEDLE" 1
+SF_MUT="$SANDBOX/units-mut-append.sh"
+SF_R='if (replace && (i in at_line)) { print L[i]; print "  " key[at_line[i]] ": " val[at_line[i]] }'
+SF_N="$SF_NEEDLE" SF_R="$SF_R" awk 'BEGIN { n = ENVIRON["SF_N"]; r = ENVIRON["SF_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$LIB" > "$SF_MUT"
+expect_eq "SF-mut0 the append copy of the library differs from it in one line" "1" "$(diff "$LIB" "$SF_MUT" | grep -c '^>')"
+SF_MOUT="$(bash -c '. "$1" >/dev/null 2>&1; units_step_fields --replace "$2" 5 pass=4' _ "$SF_MUT" "$SF_PLAN" 2>/dev/null)"
+expect_eq "SF-mut1 the mutant runs and returns the plan (its output is real: the Step 5 line is there)" "1" \
+  "$(printf '%s\n' "$SF_MOUT" | grep -c '^- Step 5: floor$')"
+expect_eq "SF-mut2 …but its Step 5 block holds two pass: lines (the old one kept), so SF-1b's one line goes red" "2" \
+  "$(printf '%s\n' "$SF_MOUT" | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  pass:/ { n++ } END { print n + 0 }')"
+expect_eq "SF-mut3 …and the library's own replacement holds one (the same extractor on the same plan)" "1" \
+  "$(call units_step_fields --replace "$SF_PLAN" 5 pass=4 | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  pass:/ { n++ } END { print n + 0 }')"
+
 finish
