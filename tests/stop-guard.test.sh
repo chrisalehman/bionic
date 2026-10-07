@@ -1961,4 +1961,223 @@ expect_contains "…and the working log named is the intermediate adopter's own 
 expect_absent "…never the launcher's stale path" \
   "$AL17_SUB_B/agent-${AID17}.jsonl" "$GUARD_VERR"
 
+section "§UNROSTERED — a listed agent the roster never saw is stopped on the orchestrator's recorded reason, once (wave-28 T70; REQ-6, D8)"
+#
+# THE FINDING (A-orch-205 to 208). A dispatch the wall admitted and the roster never recorded left a
+# writer the harness LISTS and this gate refused to stop, by name and by id, its only escape a HUMAN's
+# recorded order, which the orchestrator may not claim. `stop-orders.sh unrostered <name> '<why>'` is
+# the orchestrator's own word for that one case: it records, after checking that the roster carries no
+# row of the name and a fresh panel lists it, and the gate honours it ONCE, writing the stop onto the
+# roster as a closed row so the sweeper and the Patrol see it. `order` stays the human's, untouched.
+#
+# fails-when: an unrostered listed agent is stopped without a record; a record opens a stop for any other
+# name, for a name the roster HAS seen, past its TTL, or twice; the stop leaves the roster without its
+# row; or the verb records for a name nothing lists.
+UR_SIDE=0
+ur_world() {  # <tag> -> sets UR_REPO UR_TR UR_SUB UR_HOME, a world with the live agent "ghost" and no roster
+  IFS='|' read -r UR_REPO UR_TR UR_SUB <<< "$(make_world "ur$1" yes)"
+  UR_HOME="${UR_REPO%/repo}/home/.claude"
+  plant_agent "$UR_SUB" "aghost-4040404040404040" "ghost"
+}
+ur_record() {  # <name> <why> [more args] -> UR_OUT, UR_RC — the verb, run for real against UR_REPO
+  UR_OUT=$( cd "$UR_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$UR_HOME" \
+            bash "$HERE/stop-orders.sh" unrostered "$@" 2>&1 ); UR_RC=$?
+}
+ur_roster() { printf '%s/.bionic/tmp/roster-%s.state' "$UR_REPO" "$SID_A"; }
+ur_orders() { printf '%s/.bionic/tmp/stop-orders-%s.state' "$UR_REPO" "$SID_A"; }
+ur_rows_of() { [ -f "$(ur_roster)" ] || { echo 0; return 0; }; awk -v n="|name=$1|" 'index($0, n) { c++ } END { print c + 0 }' "$(ur_roster)"; }
+
+# (1) BEFORE ANY RECORD: refused by name and by id, as ever. The positive is (3) below, on the same drive.
+ur_world a
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR1 an unrostered listed agent, stopped by name: REFUSED" 2 "$GUARD_ST"
+expect_contains "UR1 …as on no roster row of this session" "no roster row of this session" "$GUARD_ERR"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "aghost-4040404040404040")"
+expect_status "UR1 …and by its agent id: REFUSED" 2 "$GUARD_ST"
+expect_contains "UR1 …as carrying no id on the roster" "the session roster carries no id" "$GUARD_ERR"
+
+# (2) THE VERB. It records, says what it recorded, and writes a line the human's `order` reader never honours.
+ur_record ghost 'spawned past its hook timeout; the roster never saw it'
+expect_status "UR2 the verb records for a listed name the roster never saw" 0 "$UR_RC"
+expect_contains "UR2 …and says so, with the reason" "unrostered stop recorded: ghost" "$UR_OUT"
+UR2_LINE="$(grep '^stop-unrostered/v1|' "$(ur_orders)" | head -1)"
+expect_nonempty "UR2 precondition: the orders file carries the record" "$UR2_LINE"
+expect_contains "UR2 …by the orchestrator" "|by=orchestrator|" "$UR2_LINE"
+expect_contains "UR2 …with the reason" "|why=spawned past its hook timeout; the roster never saw it|" "$UR2_LINE"
+expect_contains "UR2 …and the target last" "|target=ghost" "$UR2_LINE"
+expect_eq "UR2 …and it is not a human order: no stop-order/v1 line was written" "0" \
+  "$(grep -c '^stop-order/v1|' "$(ur_orders)")"
+
+# (3) THE GUARD HONOURS IT, ONCE, and the stop is on the roster.
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR3 with the record, the same stop by name is PERMITTED" 0 "$GUARD_ST"
+expect_contains "UR3 …and the gate says whose word it took" "STOP RECORDED (unrostered, by the orchestrator)" "$GUARD_ERR"
+expect_contains "UR3 …with the reason" "spawned past its hook timeout" "$GUARD_ERR"
+expect_eq "UR3 …and the roster now carries exactly one row of the name" "1" "$(ur_rows_of ghost)"
+UR3_ROW="$(grep '|name=ghost|' "$(ur_roster)" | head -1)"
+expect_contains "UR3 …a closed row" "|status=closed|" "$UR3_ROW"
+expect_contains "UR3 …in this session" "|session=${SID_A}|" "$UR3_ROW"
+expect_contains "UR3 …carrying the reason in source=, not waiver= (a waiver reads as a waived contract)" \
+  "|source=unrostered-stop: spawned past its hook timeout; the roster never saw it|" "$UR3_ROW"
+expect_absent "UR3 …and no waiver on it" "|waiver=spawned" "$UR3_ROW"
+UR3_OPEN="$(bash -c '. "$1"; roster_open_names "$2" ""' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" "$(ur_roster)" 2>/dev/null)"
+expect_eq "UR3 …and the roster's one open-name reader does not list it" "" "$UR3_OPEN"
+
+# (4) ONCE. The same stop again is refused again, and the verb will not record for a name the roster has now seen.
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR4 a second stop of the same name is REFUSED again" 2 "$GUARD_ST"
+expect_eq "UR4 …and wrote no second row" "1" "$(ur_rows_of ghost)"
+ur_record ghost 'again'
+expect_status "UR4 …and the verb refuses to record for a name the roster carries a row of" 2 "$UR_RC"
+expect_contains "UR4 …saying so" "roster carries a row" "$UR_OUT"
+
+# (5) THE VERB'S OWN REFUSALS. Each is paired with (2)'s accepted drive above.
+ur_world b
+ur_record ghost
+expect_status "UR5 a record with no reason is refused" 2 "$UR_RC"
+ur_record ghost '   '
+expect_status "UR5 …and so is a blank one" 2 "$UR_RC"
+ur_record phantom 'nothing lists this'
+expect_status "UR5 a name the fresh panel does not list is refused" 2 "$UR_RC"
+expect_contains "UR5 …saying the panel does not list it" "not listed" "$UR_OUT"
+plant_live "$UR_TR" stale ghost
+ur_record ghost 'the panel is stale'
+expect_status "UR5 a stale panel reading is refused" 2 "$UR_RC"
+expect_eq "UR5 …and recorded nothing" "0" "$([ -f "$(ur_orders)" ] && grep -c '^stop-unrostered/v1|' "$(ur_orders)" || echo 0)"
+plant_live "$UR_TR" fresh ghost
+sg_roster_row "$UR_REPO" "$SID_A" "ghost" "aghost-4040404040404040" "" "identified"
+ur_record ghost 'the roster has seen it'
+expect_status "UR5 a name the roster carries a row of is refused" 2 "$UR_RC"
+
+# (6) A RECORD OPENS THE ONE NAME IT NAMES. Two ghosts are listed; one is recorded.
+ur_world c
+plant_agent "$UR_SUB" "aghost2-5050505050505050" "ghost2"
+ur_record ghost2 'only this one'
+expect_status "UR6 precondition: the record for ghost2 is accepted" 0 "$UR_RC"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR6 the other listed ghost is still REFUSED" 2 "$GUARD_ST"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost2")"
+expect_status "UR6 …and the recorded one is PERMITTED" 0 "$GUARD_ST"
+
+# (7) A RECORD OUTLIVES NEITHER ITS CLOCK NOR THE ROSTER'S KNOWLEDGE.
+ur_world d
+ur_record ghost 'recorded long ago' --at $(( $(date -u +%s) - 4000 ))
+expect_status "UR7 precondition: a backdated record is accepted by the verb" 0 "$UR_RC"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR7 …and the gate refuses it past the order TTL" 2 "$GUARD_ST"
+ur_record ghost 'recorded just now'
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR7 …a fresh record beside it is honoured" 0 "$GUARD_ST"
+
+# (8) THE RECORD LAUNDERS NOTHING THE ROSTER HAS SEEN. A line planted by hand for an agent that IS on the
+# roster, alive with nothing delivered, does not discharge its stop: the gate's own look still decides.
+ur_world e
+sg_roster_row "$UR_REPO" "$SID_A" "ghost" "aghost-4040404040404040" "" "identified"
+mkdir -p "$UR_REPO/.bionic/tmp"
+printf 'stop-unrostered/v1|at=2026-10-07T00:00:00Z|epoch=%s|session=%s|by=orchestrator|why=planted|target=ghost\n' \
+  "$(date -u +%s)" "$SID_A" >> "$(ur_orders)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR8 a rostered, alive agent with a planted record is still REFUSED" 2 "$GUARD_ST"
+expect_contains "UR8 …on the gate's own look" "it is still working" "$GUARD_ERR"
+
+# (9) THE ROSTER IS NOT READ OR WRITTEN THROUGH A LINK, and a stop that cannot be recorded is not made.
+ur_world f
+ur_record ghost 'link case'
+printf 'untouched\n' > "$SANDBOX/ur-decoy-roster"
+ln -s "$SANDBOX/ur-decoy-roster" "$(ur_roster)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+expect_status "UR9 a symlinked roster: the stop is REFUSED" 2 "$GUARD_ST"
+expect_eq "UR9 …and nothing was appended through the link" "untouched" "$(cat "$SANDBOX/ur-decoy-roster")"
+ur_world g
+ur_record ghost 'unwritable roster'
+mkdir -p "$UR_REPO/.bionic/tmp"; roster_header > "$(ur_roster)"; chmod 444 "$(ur_roster)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
+chmod 644 "$(ur_roster)"
+expect_status "UR9 a roster the stop cannot be written to: the stop is REFUSED" 2 "$GUARD_ST"
+expect_contains "UR9 …in the gate's own words" "bionic: stop refused — the stop could not be recorded (make the roster writable)" "$GUARD_ERR"
+expect_eq "UR9 …and no row was written" "0" "$(ur_rows_of ghost)"
+
+section "§GUARD-DEADLINE — a guard still working at its deadline refuses the stop; a human's order is read first (wave-28 T70; A-orch-231 3)"
+#
+# `PreToolUse:TaskStop` shows ~30 `hook_cancelled` at the registration's own 10 s in one session: a cancelled
+# hook is an admitted stop, so a slow guard let through stops it never judged. The guard carries a deadline
+# of its own, 3 s under the registration, and DENIES when it has not finished: a stop it cannot judge is
+# refused. A recorded human order is read before any slow step, so the order's stop is never refused by it.
+#
+# fails-when: a guard still working at its deadline lets the stop through; a human's order is refused by the
+# deadline; or the deadline sits at or over the registration's timeout.
+SD_N=0
+# sd_plant <root> <plain|slowobs|slowsweep> -> the path of a copy of the guard beside a library whose
+# observe.sh is the shipped one with `observe_agent` made to wait 9 s first (slowobs), and a sweeper that
+# waits 9 s and answers nothing (slowsweep: the verdict an order's branch asks for).
+sd_plant() {
+  local root="$1" mode="$2" lib f
+  lib="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
+  mkdir -p "$root/hooks" "$root/scripts/lib"
+  for f in "$lib"/*; do
+    [ "${f##*/}" = observe.sh ] && continue
+    ln -s "$f" "$root/scripts/lib/${f##*/}"
+  done
+  cp "$lib/observe.sh" "$root/scripts/lib/observe.sh"
+  cp "$GUARD" "$root/hooks/stop-guard.sh"
+  cp "$HERE/session-sweeper.sh" "$root/hooks/session-sweeper.sh"
+  case "$mode" in
+    slowobs)   printf '%s\n' '_sd_f="$(declare -f observe_agent)"; eval "_sd_orig_${_sd_f}"' \
+                             'observe_agent() { sleep 9; _sd_orig_observe_agent "$@"; }' >> "$root/scripts/lib/observe.sh" ;;
+    slowsweep) printf '#!/bin/bash\nsleep 9\nexit 0\n' > "$root/hooks/session-sweeper.sh" ;;
+  esac
+  printf '%s' "$root/hooks/stop-guard.sh"
+}
+SD_SAVED_GUARD="$GUARD"
+SD_ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/sd-t70.XXXXXX")" && pwd -P)
+sd_world() {  # <tag> -> UR_REPO UR_TR UR_SUB: an idle, rostered agent "slowpoke" with nothing contracted
+  SD_N=$((SD_N + 1))
+  IFS='|' read -r UR_REPO UR_TR UR_SUB <<< "$(make_world "sd$1$SD_N" yes)"
+  plant_agent "$UR_SUB" "aslowpoke-6060606060606060" "slowpoke"
+  age_log "$UR_SUB" "aslowpoke-6060606060606060"
+  sg_roster_row "$UR_REPO" "$SID_A" "slowpoke" "aslowpoke-6060606060606060" "" "identified"
+}
+
+# SD1: the control. The shipped copy permits the idle agent's stop, so the refusal below has something to be.
+sd_world c
+GUARD="$(sd_plant "$SD_ROOT/plain" plain)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "slowpoke")"
+GUARD="$SD_SAVED_GUARD"
+expect_status "SD1 control: an idle rostered agent's stop is PERMITTED by an unhurried guard" 0 "$GUARD_ST"
+
+# SD2: the observation waits 9 s, past the 7 s deadline: the stop is refused, in one line.
+sd_world s
+GUARD="$(sd_plant "$SD_ROOT/slowobs" slowobs)"
+SD2_T0=$(date +%s)
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "slowpoke")"
+SD2_T=$(( $(date +%s) - SD2_T0 ))
+GUARD="$SD_SAVED_GUARD"
+expect_status "SD2 a guard still working at its deadline REFUSES the stop" 2 "$GUARD_ST"
+SD2_LINE="bionic: stop refused — the stop guard did not finish in 7 s (stop again)"
+expect_eq "SD2 …on its own line" "$SD2_LINE" "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "SD2 …which is 72 columns, inside the 100" "72" "$(bionic_cols "$SD2_LINE")"
+expect_true "SD2 …after the deadline, not before it (waited ${SD2_T}s, at least 6)" test "$SD2_T" -ge 6
+
+# SD3: a recorded human order is read first. The verdict an order's branch asks the sweeper for waits 9 s;
+# the stop is executed all the same.
+sd_world o
+order_stop "$UR_REPO" "$SID_A" slowpoke
+GUARD="$(sd_plant "$SD_ROOT/slowsweep" slowsweep)"
+run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "slowpoke")"
+GUARD="$SD_SAVED_GUARD"
+expect_status "SD3 a recorded human order executes though the guard's other work outran its deadline" 0 "$GUARD_ST"
+expect_contains "SD3 …as the order's own sentence" "STOP ORDERED (by human) — executing" "$GUARD_ERR"
+
+# SD4: the deadline is under the registration, both numbers read.
+SD4_DEADLINE="$(sed -n 's/^SG_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GUARD" | head -1)"
+SD4_TIMEOUT="$(jq -r '.hooks.PreToolUse[] | select(.matcher == "TaskStop") | .hooks[] | select(.command | test("stop-guard")) | .timeout' "$HERE/hooks.json" 2>/dev/null)"
+expect_nonempty "SD4 precondition: the guard names its deadline" "$SD4_DEADLINE"
+expect_nonempty "SD4 precondition: hooks.json registers the guard with a timeout" "$SD4_TIMEOUT"
+expect_true "SD4 the deadline sits at least 2 s under the registration's timeout (${SD4_DEADLINE:-?} under ${SD4_TIMEOUT:-?})" \
+  test "${SD4_DEADLINE:-99}" -le "$(( ${SD4_TIMEOUT:-0} - 2 ))"
+expect_true "SD4 …and clear of an ordinary stop's cost (at least 4 s)" test "${SD4_DEADLINE:-0}" -ge 4
+rm -rf "$SD_ROOT"
+GUARD="$SD_SAVED_GUARD"
+
+
 finish
