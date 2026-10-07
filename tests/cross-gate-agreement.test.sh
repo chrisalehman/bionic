@@ -14106,18 +14106,22 @@ deal_table() {  # <rigor> [<SKILL.md>] -> `<question>=bionic:<role>` per questio
       exit
     }' "${2:-$DEAL_SKILL}" 2>/dev/null
 }
-for deal_r in tested peer-reviewed audited; do
-  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_r row the reader parses" \
-    "$(deal_table "$deal_r")"
-  expect_eq "DEAL table $deal_r: the rendered row equals what facts_owed deals" \
-    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_r")"
+# RE-POINTED (wave-28 T22, AC-16.3): the rendered table names each level by its new word; the
+# dealing still reads the plan's word, old or new, through rigor_level, so each level's row is held
+# to what facts_owed deals its old-word twin.
+for deal_p in low:tested medium:peer-reviewed high:audited; do
+  deal_r="${deal_p#*:}"; deal_l="${deal_p%%:*}"
+  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_l row the reader parses" \
+    "$(deal_table "$deal_l")"
+  expect_eq "DEAL table $deal_l: the rendered row equals what facts_owed deals $deal_r" \
+    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_l")"
 done
 DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
 anchor "$DEAL_SKILL" 'reviewer `structure`' 1
 sed 's/reviewer `structure`/critic `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
-expect_nonempty "DEAL table mutation: the doctored audited row still parses" "$(deal_table audited "$DEAL_SKILL_MUT")"
+expect_nonempty "DEAL table mutation: the doctored high row still parses" "$(deal_table high "$DEAL_SKILL_MUT")"
 expect_ne "DEAL table mutation: …and splits from the dealing, so the row goes red" \
-  "$(deal_roles audited task)" "$(deal_table audited "$DEAL_SKILL_MUT")"
+  "$(deal_roles audited task)" "$(deal_table high "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
