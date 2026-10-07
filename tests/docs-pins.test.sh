@@ -6193,4 +6193,32 @@ expect_eq "W28-R5b: …and the line the announcement quotes is the one card.sh p
 expect_nonempty "W28-R5c: …quoted in SKILL.md as printed" "$(w26_hits "\`${W28R_CARD:-<none>}\`" "${SKILL_DIR}/SKILL.md")"
 expect_nonempty "W28-R6: the reviewer role is dealt structure at high rigor" "$(w26_hits 'Dealt `structure` at high rigor' "${REPO}/agents/reviewer.md")"
 
+
+section "§W28-46 (wave-28 T14; REQ-4 AC-4.6, D18): no number blocks — no hook and no wall library reads the report or the gate's request times"
+# ============================================================
+# WHAT THIS OWNS. `session-poker.sh landing-report` folds the landing record and the gate's requests
+# into numbers that only print (D18). No hook the plugin registers (hooks/hooks.json) and no wall
+# library (lib/walls.sh, lib/stop.sh) names the report or reads a request's `asked=`, `admitted=` or
+# `ended=` time. The extractor is proven on the file that does fold them, beside each absence, and a
+# doctored hook that reads a request time is caught.
+W28_46_RE='landing-report|landing_report|(^|[^A-Za-z0-9_])(asked|admitted|ended)='
+W28_46_FILES="$(/usr/bin/grep -oE '/hooks/[a-z0-9-]+\.sh' "${REPO}/hooks/hooks.json" 2>/dev/null | LC_ALL=C sort -u | sed "s|^|${REPO}|")
+${REPO}/payload/scripts/lib/walls.sh
+${REPO}/payload/scripts/lib/stop.sh"
+# w28_46_reads <file>… -> `<file>:<line>` for each line naming the report or a request time.
+w28_46_reads() { local f; for f in "$@"; do /usr/bin/grep -nE "$W28_46_RE" "$f" 2>/dev/null | sed "s|^|${f#"$REPO"/}:|"; done; }
+W28_46_N=0; for _w46 in $W28_46_FILES; do [ -f "$_w46" ] && W28_46_N=$((W28_46_N + 1)); done
+expect_eq "W28-46a precondition: hooks.json registers at least the commit wall and the stop hook, and both wall libraries exist" \
+  "yes|yes|yes" "$(case "$W28_46_FILES" in *hooks/bash-walls.sh*) echo yes ;; *) echo no ;; esac)|$(case "$W28_46_FILES" in *hooks/stop.sh*) echo yes ;; *) echo no ;; esac)|$([ "$W28_46_N" -ge 4 ] && echo yes || echo no)"
+expect_nonempty "W28-46b positive: the extractor finds the fold where it lives, in session-poker.sh" \
+  "$(w28_46_reads "${REPO}/hooks/session-poker.sh" | /usr/bin/grep -F 'landing_report')"
+# shellcheck disable=SC2086
+expect_eq "W28-46c: no registered hook and no wall library names the report or reads a request's times" "" "$(w28_46_reads $W28_46_FILES)"
+W28_46_DOC="$(w26_doctor "${REPO}/hooks/stop-guard.sh" 'w="$(sed -n "s/^admitted=//p" "$req")"')"
+expect_nonempty "W28-46cm: a hook doctored to read a request's admitted time is caught" "$(w28_46_reads "$W28_46_DOC")"
+W28_46_DOC2="$(w26_doctor "${REPO}/payload/scripts/lib/walls.sh" '[ "$(bash "$poker" landing-report | cut -d= -f2)" -gt 3 ] && exit 2')"
+expect_nonempty "W28-46cm2: …and a wall library doctored to branch on the report" "$(w28_46_reads "$W28_46_DOC2")"
+expect_eq "W28-46d: a local named _asked= is no request time (the extractor's boundary)" "" \
+  "$(w28_46_reads "$(w26_doctor "${REPO}/hooks/stop-guard.sh" 'local _asked=0 _q_admitted=""')")"
+
 finish
