@@ -1603,18 +1603,47 @@ landing_tree_point() {  # <tree> <commit> -> 0 once the tree is detached at <com
 }
 landing_tree_free() { rm -f "${1:-/nonexistent}.held"; }   # <tree> — the hold removed
 
-# THE HAND LANDING'S LAST ACT (wave-28 T3, D9): as land ended its lease, the writer's tree goes once
-# its row is published: the record link dropped, `git worktree remove`, prune; and land's LANDED line.
-_wt_hand_remove() {  # <tree abs> <root> <branch> <onto> <checkout> <published> <record>
+# THE TREE'S REMOVAL, one act for its two callers: the record link dropped, `git worktree remove`
+# (which refuses a tree with changes), prune; the link put back when the removal is refused. The
+# branch is never touched. rc 1 when git refused.
+_wt_tree_remove() {  # <tree abs> <root>
   local wt="$1" root="$2" link_to
   link_to="$(readlink "${wt}/.bionic" 2>/dev/null)"
   _wt_drop_legacy_link "$wt" || :
   if ! git -C "$root" worktree remove "$wt" >/dev/null 2>&1; then
     [ -n "$link_to" ] && [ ! -e "${wt}/.bionic" ] && ln -s "$link_to" "${wt}/.bionic" 2>/dev/null
-    _wt_refuse "worktree-remove-refused path=${wt} merged=${6}"; return 2
+    return 1
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
+}
+
+# THE HAND LANDING'S LAST ACT (wave-28 T3, D9): as land ended its lease, the writer's tree goes once
+# its row is published, and land's LANDED line says so. (A queue landing's tree goes at the stop:
+# `worktree_remove_landed`, from `stop-orders.sh stopped`; wave-28 T6.)
+_wt_hand_remove() {  # <tree abs> <root> <branch> <onto> <checkout> <published> <record>
+  local wt="$1"
+  _wt_tree_remove "$wt" "$2" || { _wt_refuse "worktree-remove-refused path=${wt} merged=${6}"; return 2; }
   _wt_say "LANDED branch=${3} onto=${4} checkout=${5} merge=${6} removed=${wt} proofs=${7}"
+}
+
+# THE TREE GOES AT THE STOP (wave-28 T6; D7, AC-3.2): `stop-orders.sh stopped <name>` removes the tree
+# of a row whose roster line carries the landing's mark, once the row is closed. Only a linked tree of
+# <root> (never the main checkout), only when its head is in the landed commit (a commit the writer
+# made after its landing is never dropped from disk), and never the branch. Prints why when it keeps
+# the tree. rc 0 removed · 1 no tree there · 2 kept.
+worktree_remove_landed() {  # <root> <tree> <landed commit> -> 0 · 1 · 2
+  local root="${1:-}" wt head c linked=""
+  wt="$(_wt_abs "${2:-}" 2>/dev/null)" || return 1
+  while IFS= read -r c; do
+    [ "$(_wt_abs "$c" 2>/dev/null)" = "$wt" ] && linked=1
+  done <<EOF
+$(_wt_checkouts "$root" | tail -n +2 | cut -f2)
+EOF
+  [ -n "$linked" ] || { printf 'it is not a linked tree of %s' "$root"; return 2; }
+  head="$(git -C "$wt" rev-parse --verify -q HEAD 2>/dev/null)" || { printf 'its head cannot be read'; return 2; }
+  git -C "$root" merge-base --is-ancestor "$head" "$3" 2>/dev/null \
+    || { printf 'its head %.12s is not in the landed commit %.12s' "$head" "$3"; return 2; }
+  _wt_tree_remove "$wt" "$root" || { printf 'git worktree remove refused it (changes in the tree?)'; return 2; }
 }
 
 # _wt_plan_current <plan> -> the plan's raw `current:` value, read by lib/fill.sh's one reader of
