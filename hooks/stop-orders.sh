@@ -6,10 +6,11 @@
 #
 # This is NOT a hook. Like hooks/session-sweeper.sh and hooks/stop-check.sh it lives in
 # hooks/ for test-harness pairing and to ride the payload's hooks/ directory into the
-# mounted plugin; it is registered on NO channel. Three verbs, one invocation each:
+# mounted plugin; it is registered on NO channel. Four verbs, one invocation each:
 #
 #     bash ~/.claude/hooks/stop-orders.sh order <target> [--at <epoch>]
 #     bash ~/.claude/hooks/stop-orders.sh stopped <name>
+#     bash ~/.claude/hooks/stop-orders.sh unrostered <name> '<why>' [--at <epoch>]
 #     bash ~/.claude/hooks/stop-orders.sh standdown
 #
 # STOPPED closes the row of an agent that has been stopped, through the sweeper's own ack
@@ -57,6 +58,16 @@
 #   sweeper-<session>.state      read-only input, owned by hooks/session-sweeper.sh
 #   stop-orders-<session>.state  the orders this script owns (append-only)
 #
+# UNROSTERED records the ORCHESTRATOR's word (never a human's) that an agent the harness lists is
+# one the session roster never saw (wave-28 T70; A-orch-205 to 208): a dispatch the wall admitted
+# and did not journal. The stop guard refuses such a stop by name and by id, and its one escape,
+# `order`, is a record that a HUMAN asked, which the orchestrator may not claim. This verb is the
+# orchestrator's own: `unrostered <name> '<why>' [--at <epoch>]` checks that THIS session's roster
+# carries no row of the name and that a fresh panel reading lists it, then records
+# `stop-unrostered/v1|…|by=orchestrator|why=…|target=<name>`. The guard honours that line ONCE,
+# within the order TTL, writes the stop onto the roster as a closed row, and a second stop of the
+# name is refused again. It is not an `order`: the guard's human-order reader never sees it.
+#
 # Exit codes:
 #   0 — the order was recorded / the row was acked / the stand-down was computed
 #   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable; a
@@ -78,6 +89,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
 ORDER_SCHEMA="stop-order/v1"
+UNROSTERED_SCHEMA="stop-unrostered/v1"
 ROSTER_VERSION="v1"
 
 # HOW LONG AN ORDER IS CURRENT, in seconds. Duplicated as a literal in
@@ -96,6 +108,8 @@ usage() {  # [message]
   die "        record a stop order and print what stopping gives up"
   die "  bash ${HOOK_DIR}/stop-orders.sh stopped <name>"
   die "        close the row of an agent you have stopped (the sweeper's ack, reason landed or abandoned)"
+  die "  bash ${HOOK_DIR}/stop-orders.sh unrostered <name> '<why>' [--at <epoch>]"
+  die "        record the orchestrator's word that a listed agent is one the roster never saw"
   die "  bash ${HOOK_DIR}/stop-orders.sh standdown"
   die "        list every landed row with an address you can stop it by"
   exit 2
@@ -105,6 +119,7 @@ usage() {  # [message]
 VERB="$1"; shift
 
 ORDER_TARGET=""
+ORDER_WHY=""
 ORDER_AT=""
 # WHO SAID STOP (bionic 1.8.0, REQ-1 D1). An order used to mean exactly one thing — a human
 # said stop — and that is still the default, because a caller that names no author is a
@@ -148,6 +163,20 @@ case "$VERB" in
     case "$1" in -*) usage "the target comes first: '$1' is an option, not a target." ;; esac
     ORDER_TARGET="$1"; shift
     [ $# -eq 0 ] || usage "stopped takes one target and no options; got $1."
+    ;;
+  unrostered)
+    [ $# -ge 2 ] || usage "unrostered needs a name and a reason: unrostered <name> '<why>'."
+    case "$1" in -*) usage "the target comes first: '$1' is an option, not a target." ;; esac
+    ORDER_TARGET="$1"; ORDER_WHY="$2"; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --at)
+          [ $# -ge 2 ] || usage "--at needs an epoch."
+          case "$2" in ''|*[!0-9]*) usage "--at takes epoch seconds; got '$2'." ;; esac
+          ORDER_AT="$2"; shift 2 ;;
+        *) usage "unknown argument: $1" ;;
+      esac
+    done
     ;;
   standdown)
     [ $# -eq 0 ] || usage "standdown takes no arguments; got $#."
@@ -723,6 +752,48 @@ case "$VERB" in
         esac
       fi
     fi
+    exit 0
+    ;;
+
+  unrostered)
+    # THE ORCHESTRATOR'S WORD FOR THE ONE CASE `order` cannot serve (wave-28 T70). Two facts are
+    # checked before anything is written, both from state the system wrote itself: this session's
+    # roster has NO row of the name (a name it has seen belongs to the ordinary stop, with its
+    # look), and a FRESH panel reading lists the name (an agent nothing lists is no agent of this
+    # session's to stop). A verb that cannot see does not record, as `stopped` does not ack.
+    _target="$(clean "$ORDER_TARGET")"
+    _why="$(clean "$ORDER_WHY")"
+    [ -n "$_target" ] || usage "unrostered needs a non-empty target."
+    [ -n "$_why" ] || usage "unrostered needs a reason: say why the roster never saw $_target."
+    fold_roster
+    if [ -n "$(roster_row_for "$_target")" ]; then
+      die "REFUSED — this session's roster carries a row of $_target; stop it as any rostered agent."
+      exit 2
+    fi
+    read_panel
+    if [ "$_live_ok" -ne 1 ]; then
+      die "REFUSED — no fresh panel reading; a verb that cannot see does not record a stop for $_target."
+      exit 2
+    fi
+    if ! _is_live "$_target"; then
+      die "REFUSED — $_target is not listed by the fresh panel; nothing was recorded."
+      exit 2
+    fi
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    if [ ! -d "$STATE_DIR" ]; then
+      die "REFUSED — the state directory could not be created ($STATE_DIR)."
+      exit 2
+    fi
+    _at="${ORDER_AT:-$(now_epoch)}"
+    [ -f "$ORDERS_FILE" ] || printf '# bionic stop orders — schema %s — machine-local, safe to delete\n' \
+      "$ORDER_SCHEMA" >> "$ORDERS_FILE" 2>/dev/null
+    if ! printf '%s|at=%s|epoch=%s|session=%s|by=orchestrator|why=%s|target=%s\n' \
+         "$UNROSTERED_SCHEMA" "$(iso_now)" "$_at" "$SESSION_ID" "$_why" "$_target" >> "$ORDERS_FILE" 2>/dev/null; then
+      die "REFUSED — the record could not be written to $ORDERS_FILE."
+      exit 2
+    fi
+    say "unrostered stop recorded: $_target — reason: $_why"
+    say "the gate passes the next stop of it, once, for $((ORDER_TTL_SECONDS / 60)) minutes, and writes the stop onto the roster."
     exit 0
     ;;
 
