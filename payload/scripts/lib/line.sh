@@ -34,7 +34,8 @@
 # rule's: the candidate of the nearest earlier entry that is present and not stalled, else the
 # accepted head; `-` while that entry has no candidate yet (the entry waits). The candidate is its
 # latest `candidate` event's commit, `-` before one. The outcome: stalled (a `stalled` event after
-# its candidate), waiting (no candidate), green (every suite green on the candidate, or `none`),
+# its candidate and its latest `ready`: a writer who says ready again has the entry carried again),
+# waiting (no candidate), green (every suite green on the candidate, or `none`),
 # declared (every red is the declared debt suite), standing (every red is a suite a `standing`
 # event names at the candidate's base), else proving.
 #
@@ -130,7 +131,8 @@ _line_fold() {  # <record>
       ev = substr($2, 4); row = fv("row")
       if (ev == "ready") {
         e = cur[row]
-        if (e == "" || !open[e]) { e = ++n; cur[row] = e; open[e] = 1; rowof[e] = row; cand[e] = ""; stl[e] = 0 }
+        if (e == "" || !open[e]) { e = ++n; cur[row] = e; open[e] = 1; rowof[e] = row; cand[e] = "" }
+        stl[e] = 0
         name[e] = fv("name"); com[e] = fv("commit"); car[e] = fv("carrier"); sui[e] = fv("suites")
         debt[e] = fv("debt"); br[e] = fv("branch"); tr[e] = fv("tree")
       } else if (ev == "candidate") {
@@ -389,7 +391,8 @@ line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 move
   _line_lock_take "$lk" "$row" || return $?
   head="$(line_head "$plan")"
   ent="$(_line_entries "$rec" "$head")"
-  first="$(printf '%s\n' "$ent" | awk -F'\t' '$4 == "yes" { print $1; exit }')"
+  # First in line is the first present entry the base rule does not pass over: never a stalled one.
+  first="$(printf '%s\n' "$ent" | awk -F'\t' '$4 == "yes" && $7 != "stalled" { print $1; exit }')"
   IFS=$'\t' read -r _ name com present base cand out sui car cbase cat br tr <<EOF
 $(printf '%s\n' "$ent" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')
 EOF
@@ -422,7 +425,10 @@ EOF
   _wt_release_check "$root" "${rundir:-$root}" "$head" "$cand" "$tr" "$br" "$branch"; rc=$?
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" -eq 0 ] || { _line_lock_drop "$lk"; return 2; }
-  # 6. THE DEBT WRITE — T5's seam: a declared red's `debt:` line, written before the fast-forward.
+  # 6. THE DEBT WRITE (wave-28 T5; D8, AC-9.4): a declared red's `debt:` line, at the publish's own
+  # instant, before the fast-forward (else rc 2, nothing published).
+  at="$(_line_now)"
+  _line_debt_write "$rec" "$row" "$com" "$cand" "$br" "$at" || { _line_lock_drop "$lk"; return 2; }
   # 7. THE FAST-FORWARD, after the pause seam.
   _line_pause "$row"
   if [ -n "$co" ]; then
@@ -431,14 +437,23 @@ EOF
     git -C "$root" update-ref -m "line: publish ${row}" "refs/heads/${branch}" "$cand" "$head" >/dev/null 2>&1; rc=$?
   fi
   if [ "$rc" -ne 0 ]; then
+    # A debt written for a publish that did not happen is voided; a void that cannot be written
+    # leaves the debt standing, and the refusal says so and what clears it.
+    if [ -n "$LINE_DEBT_ID" ] && ! _wt_debt_void "$rec" "$LINE_DEBT_ID" "$br" publish-failed; then
+      _line_lock_drop "$lk"
+      _wt_refuse "publish-failed row=${row} branch=${branch} candidate=${cand} checkout=${co:-<none>} debt=unvoided path=${rec} — the fast-forward failed after the debt for ${LINE_DEBT_SUITE} was written and not voided (its void's append answered proofs=unwritten: ${_WT_PROOFS_SAW:-the append failed}), so the run owes it: a green run of ${LINE_DEBT_SUITE} after now covers it like any other; say ready again once the fast-forward can be made"
+      return 2
+    fi
     _line_lock_drop "$lk"
     _wt_refuse "publish-failed row=${row} branch=${branch} candidate=${cand} checkout=${co:-<none>} — the fast-forward did not go through and nothing is published; say ready again"
     return 2
   fi
-  # 8. THE `published` EVENT, one instant for the record and the row.
-  at="$(_line_now)"
+  # 8. THE `published` EVENT, one instant for the record, the row and the debt.
   _wt_proofs_put "$rec" "line/v1|ev=published|row=${row}|commit=${cand}|kind=${LINE_KIND}|by=${LINE_BY}|why=${LINE_WHY}|at=${at}"
   _wt_proofs_append "$rec" "$row" "$br" "$com" "$cand" "" "$at"
+  [ -z "$LINE_DEBT_ID" ] \
+    || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
+         "$row" "$LINE_DEBT_SUITE" "$LINE_DEBT_SUITE" "$LINE_DEBT_ID" "$rec"
   # 9. THE PLAN WRITE — T6's seam: the row's status, its `- T<n>:` line and its ledger line, through
   # the one transaction. The hand landing's text is written here now.
   [ "$LINE_KIND" != hand ] || _line_hand_text "$plan" "$row" "$LINE_BY" "$at" "$LINE_WHY" \
@@ -534,6 +549,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> — the carrier's own subshel
 # ahead waits until that base changes. The publish is `line_publish`, asked once the entry is first
 # in line on the accepted head.
 LINE_POLL="${BIONIC_LINE_POLL:-1}"
+case "$LINE_POLL" in ''|.|*.*.*|*[!0-9.]*) LINE_POLL=1 ;; esac   # seconds, whole or decimal; else the default
 
 _line_load_gate() {
   declare -F gate_ask >/dev/null 2>&1 && return 0
@@ -597,12 +613,16 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   name="$(_wt_field "$launch" name)"; lands="$(_wt_field "$launch" lands_on)"
   [ -n "$lands" ] || { _wt_refuse "no-lands-on row=${row} name=${name:-<none>} — the launch line names no lands_on, so ready has no suites to run"; return 2; }
   suites="$(_line_suites "$lands")" || { _wt_refuse "lands-on-unreadable row=${row} lands_on=${lands}"; return 2; }
-  debt="$(_wt_field "$launch" lands_red)"; debt="${debt%% *}"; [ -n "$debt" ] || debt=-
+  # The debt is a suite's file name; the full-suite runner, or anything else, is never one (B4). Its
+  # token (`lands_red=<suite> until <token>`) rides to the debt write in LINE_DEBT_TOKEN.
+  debt="$(_wt_field "$launch" lands_red)"; LINE_DEBT_TOKEN=-
+  case "$debt" in *' until '?*) LINE_DEBT_TOKEN="${debt#* until }" ;; esac
+  debt="${debt%% *}"; case "$debt" in ?*.test.sh) : ;; *) debt=- ;; esac
   case "${name}${debt}" in *'|'*|'') _wt_refuse "row-unwritable branch=${branch}"; return 2 ;; esac
   rec="$(line_record "$plan")" && _wt_proofs_prove "$rec" || {
     _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:-<none>} branch=${branch} — the landing record cannot be written, so nothing is published; make it writable, say ready again"; return 2
   }
-  [ -z "$within" ] || deadline=$(( $(_res_now) + within ))
+  [ -z "$within" ] || deadline=$(( $(_res_now) + 10#$within ))   # decimal: `08` is eight seconds
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
 }
 
@@ -614,7 +634,7 @@ _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empt
 # present exactly while this runs, and its landing tree is freed when it ends.
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
-  local debt="${10}" deadline="${11}" again="${12}" head ent base cand cbase first waitbase="" held=""
+  local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
   local c rc s said
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   trap '[ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"' EXIT
@@ -625,14 +645,20 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
   while :; do
     head="$(line_head "$plan")"
     _line_count_git "$plan" "$rec" "$root" "$head"
-    ent="$(_line_entries "$rec" "$head")"
-    first="$(printf '%s\n' "$ent" | awk -F'\t' '$4 == "yes" { print $1; exit }')"
-    ent="$(printf '%s\n' "$ent" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')"
+    all="$(_line_entries "$rec" "$head")"
+    first="$(printf '%s\n' "$all" | awk -F'\t' '$4 == "yes" && $7 != "stalled" { print $1; exit }')"
+    ent="$(printf '%s\n' "$all" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')"
     [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name"; return $?; }
     IFS=$'\t' read -r _ _ _ _ base cand _ _ _ cbase _ _ _ <<EOF
 $ent
 EOF
-    # 1. THE BASE: wait while the entry ahead has no candidate, or while ours conflicts with it.
+    # 1. THE BASE: wait while the entry ahead has no candidate, or while ours conflicts with it. A wait on a
+    # conflicting candidate ahead ends once that entry resolves: published (the base is then the accepted
+    # head, and a conflict with it returns the row), returned or stalled (the base rule gives the next
+    # base) — read off the fold, never off the head (ruling A-orch-51).
+    if [ -n "$waitbase" ] && [ "$base" = "$waitbase" ] && ! _line_ahead_open "$all" "$row" "$waitbase"; then
+      waitbase=""
+    fi
     if [ "$base" = - ] || [ "$base" = "$waitbase" ]; then
       _line_late "$deadline" && { _line_waiting "$row" "$again"; return 75; }
       sleep "$LINE_POLL"; continue
@@ -655,28 +681,53 @@ EOF
         *) _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${base}"; return 2 ;;
       esac
     fi
-    # 3. THE PROOF: each named suite not yet green on this candidate, in the order named.
+    # 3. THE PROOF: each named suite not yet green on this candidate, in the order named. A suite
+    # already red on it is not run again: its red is judged again from its log (below).
     for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
       [ "$s" != none ] || break
       _line_proved "$rec" "$row" "$cand" "$s" && continue
-      # Each run starts from the candidate, clean, in a landing tree this carrier holds (a carrier
-      # run again finds the candidate built by the one before it, and no tree yet).
       [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
-      landing_tree_point "$_LINE_LT" "$cand" || { _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${cand}"; return 2; }
-      _line_prove "$plan" "$rec" "$row" "$cand" "$cbase" "$_LINE_LT" "$s" "$deadline"
+      LINE_LOG="$(_line_red_log "$rec" "$row" "$cand" "$s")"
+      if [ -n "$LINE_LOG" ]; then
+        LINE_RESULT=judge
+      else
+        # Each run starts from the candidate, clean, in a landing tree this carrier holds (a carrier
+        # run again finds the candidate built by the one before it, and no tree yet).
+        landing_tree_point "$_LINE_LT" "$cand" || { _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${cand}"; return 2; }
+        _line_prove "$plan" "$rec" "$row" "$cand" "$cbase" "$_LINE_LT" "$s" "$deadline"
+      fi
       case "$LINE_RESULT" in
-        green) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=green "log=${LINE_LOG}" >/dev/null ;;
+        green) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=green "log=${LINE_LOG}" >/dev/null
+          continue ;;
         waiting) _line_waiting "$row" "$again"; return 75 ;;
         replaced) continue 2 ;;
         discarded) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=discarded "log=${LINE_LOG}" >/dev/null
           continue 2 ;;
-        red)
-          line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=red "log=${LINE_LOG}" >/dev/null
-          # T5's seam: a `none` verdict asked again, a red that also fails at the accepted head
-          # (`standing`), and a red only on the declared debt suite (`$debt`) are decided here.
-          line_event "$plan" returned "row=${row}" why=red "detail=${LINE_LOG}" >/dev/null
-          printf 'RED %s %s %s\n' "$row" "$s" "$LINE_LOG"; return 1 ;;
+        # NO VERDICT (D8, AC-9.1, AC-9.2): the entry keeps its place and the suite is asked again; the
+        # second time, the entry is stalled and put to the orchestrator with both logs.
+        none) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=none "log=${LINE_LOG}" >/dev/null
+          said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
+          if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
+            said="$(printf '%s\n' "$said" | awk 'NF { l[++n] = $0 } END { print l[n - 1] "," l[n] }')"
+            line_event "$plan" stalled "row=${row}" "logs=${said}" >/dev/null
+            printf 'STALLED %s %s\n' "$row" "$said"; return 70
+          fi
+          continue 2 ;;
+        red) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=red "log=${LINE_LOG}" >/dev/null ;;
+        judge) : ;;
         *) _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
+      esac
+      # A RED IS THE ROW'S ONLY WHEN IT IS NEW (D8, AC-9.3, AC-9.4): the declared debt suite's red, and a
+      # red whose failing lines all fail at the accepted head too, count for this row as passed.
+      c="$LINE_LOG"
+      _line_red_owner "$plan" "$rec" "$row" "$cbase" "$s" "$c" "$debt" "$deadline"
+      case "$LINE_RED" in
+        declared|standing) : ;;
+        waiting) _line_waiting "$row" "$again"; return 75 ;;
+        replaced) continue 2 ;;
+        gate) _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
+        *) line_event "$plan" returned "row=${row}" why=red "detail=${c}" >/dev/null
+           printf 'RED %s %s %s\n' "$row" "$s" "$c"; return 1 ;;
       esac
     done
     # 4. THE PUBLISH, once first in line on the accepted head (line_publish asks both again, locked).
@@ -701,6 +752,12 @@ EOF
   done
 }
 
+# An entry other than <row> still in line, present and not stalled, whose candidate is <candidate>:
+# the one a conflicting row waits on (A-orch-51). <entries> is `_line_entries`'s output.
+_line_ahead_open() {  # <entries> <row> <candidate>
+  printf '%s\n' "$1" | awk -F'\t' -v r="$2" -v c="$3" '$1 != r && $6 == c && $4 == "yes" && $7 != "stalled" { f = 1 } END { exit !f }'
+}
+
 # The entry left the fold while its carrier ran: a person's own git merge carried it (published
 # kind=git), or something else closed it.
 _line_closed() {  # <rec> <row> <name>
@@ -720,6 +777,98 @@ _line_proved() {  # <rec> <row> <candidate> <suite>
     $3 == r && ($2 == "ev=published" || $2 == "ev=returned") { ok = 0 }
     $2 == "ev=verdict" && $3 == r && $4 == c && $5 == s { ok = ($6 == "result=green") }
     END { exit !ok }' "$1" 2>/dev/null
+}
+
+# The logs of the `none` verdicts for <suite> on <candidate> since the entry's latest `ready`, one per
+# line (a carrier started again asks again).
+_line_none_logs() {  # <rec> <row> <candidate> <suite>
+  awk -F'|' -v r="row=$2" -v c="commit=$3" -v s="suite=$4" '
+    $3 == r && ($2 == "ev=ready" || $2 == "ev=published" || $2 == "ev=returned") { n = 0 }
+    $2 == "ev=verdict" && $3 == r && $4 == c && $5 == s && $6 == "result=none" { l[++n] = substr($7, 5) }
+    END { for (i = 1; i <= n; i++) print l[i] }' "$1" 2>/dev/null
+}
+# The log of a red verdict for <suite> on <candidate> since the entry opened, or nothing.
+_line_red_log() {  # <rec> <row> <candidate> <suite>
+  awk -F'|' -v r="row=$2" -v c="commit=$3" -v s="suite=$4" '
+    $3 == r && ($2 == "ev=published" || $2 == "ev=returned") { l = "" }
+    $2 == "ev=verdict" && $3 == r && $4 == c && $5 == s { l = ($6 == "result=red" ? substr($7, 5) : "") }
+    END { if (l != "") print l }' "$1" 2>/dev/null
+}
+
+# A RED IS THE ROW'S ONLY WHEN IT IS NEW (D8). Sets LINE_RED:
+#   declared  <suite> is the row's declared debt suite: it publishes, its debt written (line_publish)
+#   standing  every failing line of the candidate's log fails at the accepted head too: the branch's
+#   row       anything else: the red returns the row
+#   waiting | replaced | gate   the run at the head could not be made now (as `_line_prove` says)
+# THE RUN AT THE ACCEPTED HEAD is made once per head and suite, in the landing tree pointed at the head,
+# and remembered by its own `verdict` event (`commit=<head>`): a second row on the same head reads it,
+# a new head runs it once more. A run there with no verdict proves nothing, so the red stays the row's.
+# The comparison is of FAILING LINES (`_line_fails`), never of exit codes or counts. When the row adds
+# none, one `standing` event is appended for that head and suite, naming the head's failing lines.
+_line_red_owner() {  # <plan> <rec> <row> <cbase> <suite> <candidate's log> <debt> <deadline>
+  local plan="$1" rec="$2" row="$3" s="$5" head hr="" hl=""
+  if [ "$s" = "$7" ]; then LINE_RED=declared; return 0; fi
+  LINE_RED=row
+  head="$(line_head "$plan")" || return 0
+  IFS=$'\t' read -r hr hl <<EOT
+$(_line_head_verdict "$rec" "$head" "$s")
+EOT
+  if [ -z "$hr" ]; then
+    landing_tree_point "$_LINE_LT" "$head" || { LINE_RED=gate; LINE_LOG="landing-tree-unpointable tree=${_LINE_LT} base=${head}"; return 0; }
+    _line_prove "$plan" "$rec" "$row" "$head" "$4" "$_LINE_LT" "$s" "$8"
+    case "$LINE_RESULT" in
+      green|red|none) line_event "$plan" verdict "row=${row}" "commit=${head}" "suite=${s}" "result=${LINE_RESULT}" "log=${LINE_LOG}" >/dev/null
+        hr="$LINE_RESULT"; hl="$LINE_LOG" ;;
+      discarded) line_event "$plan" verdict "row=${row}" "commit=${head}" "suite=${s}" result=discarded "log=${LINE_LOG}" >/dev/null
+        LINE_RED=replaced; return 0 ;;
+      *) LINE_RED="$LINE_RESULT"; return 0 ;;
+    esac
+  fi
+  [ "$hr" = red ] || return 0
+  if [ "$(_line_new_fails "$6" "$hl")" -eq 0 ]; then
+    LINE_RED=standing
+    awk -F'|' -v h="head=${head}" -v s="suite=${s}" '$2 == "ev=standing" && $3 == h && $4 == s { f = 1 } END { exit !f }' "$rec" 2>/dev/null \
+      || line_event "$plan" standing "head=${head}" "suite=${s}" "lines=$(_line_fails "$hl" | awk 'END { print NR }')" "log=${hl}" >/dev/null
+  fi
+}
+# The remembered run of <suite> at <head>: `<green|red><TAB><log>` of its latest such verdict, or nothing.
+_line_head_verdict() {  # <rec> <head> <suite>
+  awk -F'|' -v c="commit=$2" -v s="suite=$3" '
+    $2 == "ev=verdict" && $4 == c && $5 == s && ($6 == "result=green" || $6 == "result=red") { v = substr($6, 8) "\t" substr($7, 5) }
+    END { if (v != "") print v }' "$1" 2>/dev/null
+}
+# A log's failing lines, as the suite harness prints them (tests/lib/assert.sh: `FAIL: <label>`), each
+# normalised: the indent before `FAIL:`, a carriage return and trailing blanks dropped; one per line.
+_line_fails() {  # <log>
+  awk '{ sub(/\r$/, ""); sub(/^[ \t]+/, ""); if (index($0, "FAIL: ") != 1) next; sub(/[ \t]+$/, ""); print }' "$1" 2>/dev/null
+}
+# How many of the candidate's failing lines do not fail at the head.
+_line_new_fails() {  # <candidate's log> <head's log>
+  { _line_fails "$2" | sed 's/^/h /'; _line_fails "$1" | sed 's/^/c /'; } \
+    | awk '{ k = substr($0, 3) } /^h / { h[k] = 1; next } !(k in h) { n++ } END { print n + 0 }'
+}
+
+# THE DECLARED DEBT (wave-27 T67; D8, AC-9.4): the entry's declared suite when its verdict on
+# <candidate> is red. Read from the record: the `debt=` of the entry's latest `ready`.
+_line_declared() {  # <rec> <row> <candidate> -> the suite; 1 when nothing is owed
+  awk -F'|' -v r="row=$2" -v c="commit=$3" '
+    $3 == r && ($2 == "ev=published" || $2 == "ev=returned") { d = "" }
+    $2 == "ev=ready" && $3 == r { for (i = 3; i <= NF; i++) if (index($i, "debt=") == 1) d = substr($i, 6) }
+    $2 == "ev=verdict" && $3 == r && $4 == c { v[substr($5, 7)] = substr($6, 8) }
+    END { if (d != "" && d != "-" && v[d] == "red") { print d; exit 0 } exit 1 }' "$1" 2>/dev/null
+}
+# THE DEBT'S WRITE, inside the publish lock, before the fast-forward: one `debt:` line by the debt's
+# one writer (lib/worktree.sh `_wt_debt_write`), naming the row, its branch and head, the suite, the
+# token the launch line declared (LINE_DEBT_TOKEN, `-` when none) and the publish's instant. Sets
+# LINE_DEBT_ID and LINE_DEBT_SUITE (empty when nothing is owed); rc 1, refused, when it cannot be written.
+_line_debt_write() {  # <rec> <row> <row commit> <candidate> <row branch> <at>
+  local d
+  LINE_DEBT_ID=""; LINE_DEBT_SUITE=""
+  d="$(_line_declared "$1" "$2" "$4")" || return 0
+  LINE_DEBT_SUITE="$d"; LINE_DEBT_ID="$$.${RANDOM}${RANDOM}"
+  _wt_debt_write "$1" "$LINE_DEBT_ID" "$2" "$5" "$3" "$d" "${LINE_DEBT_TOKEN:--}" "$6" && return 0
+  _wt_refuse "debt-unwritten why=proofs-unwritable suite=${d} path=${1} row=${2} — the declared red's debt cannot be written to the landing record (${_WT_PROOFS_SAW:-the append failed}), so nothing is published; make it writable, say ready again"
+  LINE_DEBT_ID=""; return 1
 }
 
 # A suite's log, under the record directory: `line/<row>-<suite>-<candidate's 12 hex>[-<n>].log`.
@@ -743,9 +892,14 @@ _line_time_for() {  # <suite> <deadline> -> seconds
   awk -v s="${s:-0}" -v l="$left" 'BEGIN { if (s + 0 > l + 0) exit 1; printf "%d\n", l - s }'
 }
 
-# The run's verdict: green on rc 0, red otherwise. T5's seam: a signal, a failed start or no end line
-# in the log is `none`.
-_line_verdict() { if [ "${1:-1}" = 0 ]; then echo green; else echo red; fi; }   # <rc> <log>
+# The run's verdict (D8): `none` when it ended by a signal (128 + n), could not start (126, 127, or
+# no rc at all), or its log holds no end line, the harness's `<file>: <p>/<t> passed, <f> failed`;
+# otherwise green on rc 0 and red on any other.
+_line_verdict() {  # <rc> <log>
+  case "${1:-}" in ''|*[!0-9]*) echo none; return 0 ;; esac
+  if [ "$1" -ge 126 ] || ! grep -Eq '^[^ ]+: [0-9]+/[0-9]+ passed, [0-9]+ failed( |$)' "$2" 2>/dev/null; then echo none
+  elif [ "$1" = 0 ]; then echo green; else echo red; fi
+}
 
 # The entry's base by the fold is no longer <cbase>, or the entry is gone.
 _line_replaced() {  # <rec> <plan> <row> <cbase>
@@ -769,7 +923,7 @@ _line_kill_tree() {  # <pid>
 # ONE SUITE ON THE CANDIDATE. The runner is a process of its own, so the gate's request is held by
 # it: when the carrier stops a run whose base was replaced, the runner and its suite are killed, the
 # gate counts the request killed and learns no cost from it. While a run lasts the carrier watches
-# the fold. Sets LINE_RESULT (green | red | discarded | replaced | waiting | gate) and LINE_LOG.
+# the fold. Sets LINE_RESULT (green | red | none | discarded | replaced | waiting | gate) and LINE_LOG.
 _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite> <deadline>
   local within="" res rp r
   LINE_RESULT=""; LINE_LOG="$(_line_suite_log "$2" "$3" "$7" "$4")"
@@ -803,13 +957,17 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
   id="$(gate_ask landing "$1" ${2:+--within "$2"})"; rc=$?
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\n' "$id" > "$5"
-  ( [ -e "$3/.git" ] && cd "$3" && exec bash "tests/$1" ) > "$4" 2>&1 < /dev/null &
-  p=$!
-  while kill -0 "$p" 2>/dev/null; do
-    kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }
-    sleep "$LINE_POLL"; gate_state >/dev/null 2>&1
-  done
-  wait "$p"; rc=$?
-  gate_end "$id" "$rc" >/dev/null 2>&1
+  # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended
+  # by a signal is a `none` verdict, and the shell's notice of the kill is no line of ready's output.
+  {
+    ( [ -e "$3/.git" ] && cd "$3" && exec bash "tests/$1" ) > "$4" 2>&1 < /dev/null &
+    p=$!
+    while kill -0 "$p" 2>/dev/null; do
+      kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }
+      sleep "$LINE_POLL"; gate_state >/dev/null 2>&1
+    done
+    wait "$p"; rc=$?
+    gate_end "$id" "$rc" >/dev/null 2>&1
+  } 2>/dev/null
   printf 'rc=%s\n' "$rc" >> "$5"
 }

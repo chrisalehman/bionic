@@ -1451,14 +1451,14 @@ _wt_proofs_write() {  # <file> <text> -> 0 appended, 1 not (the proofs=unwritten
 }
 
 # THE DEBT'S ONE WRITER (wave-27 T67; review pass 46 B3; A-orch-120). A declared red is owed because
-# `land` wrote it here, never because a line was copied into the plan: the judge (lib/proof.sh
-# `proof_debts`) reads these lines and nothing else.
+# `land`, or since wave-28 T5 `line_publish` (lib/line.sh), wrote it here, never because a line was
+# copied into the plan: the judge (lib/proof.sh `proof_debts`) reads these lines and nothing else.
 #   debt: id=<id> row=<row|—> branch=<b> head=<40-hex> suite=<suite> token=<token> at=<ISO-UTC>
-#   void: id=<id> branch=<b> at=<ISO-UTC> why=<merge-failed|merge-undone>
+#   void: id=<id> branch=<b> at=<ISO-UTC> why=<merge-failed|merge-undone|publish-failed>
 # Each is one whole line, appended by the one write a landing's block is appended by
 # (`_wt_proofs_write`), with no lock: a line that cannot be written is the append answering
-# `proofs=unwritten`. A debt is written before the merge; a void names the debt of a landing whose
-# merge failed or was undone.
+# `proofs=unwritten`. A debt is written before the merge (the line's fast-forward); a void names the
+# debt of a landing whose merge or fast-forward failed, or was undone.
 _wt_debt_write() {  # <record> <id> <row> <branch> <head> <suite> <token> <at> -> 0 written, 1 not
   _wt_proofs_put "$1" "debt: id=${2} row=${3:-—} branch=${4} head=${5} suite=${6} token=${7} at=${8}"
 }
