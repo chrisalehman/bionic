@@ -6532,7 +6532,7 @@ ${_loop_lines}"
         _spell="From this text no literal list can be derived: a command substitution, a glob or
 a prefix assignment names no words, and a loop whose body reassigns its variable runs something
 other than the words of its header, so no line is printed for it.
-Write the literal lines you mean, one call each: bash tests/<name>.test.sh"
+Write the literal names you mean, through the one door: tests/run.sh --only <name>.test.sh"
       fi
       fold_block exit2 suite-run \
         "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \

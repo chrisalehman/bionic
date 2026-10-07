@@ -1324,7 +1324,7 @@ expect_contains "15b4: …saying no literal list can be derived from a body that
   "no literal list can be derived" "$ERR"
 expect_contains "15b5: …naming the reassignment as the reason" "reassigns its variable" "$ERR"
 expect_contains "15b5b: …and asking for the literal lines the agent means" \
-  "Write the literal lines you mean, one call each: bash tests/<name>.test.sh" "$ERR"
+  "Write the literal names you mean, through the one door: tests/run.sh --only <name>.test.sh" "$ERR"
 expect_absent "15b6: …never the header's words as a line to run" "bash tests/a.test.sh" "$ERR"
 expect_absent "15b6b: …never the canned alpha example the arm used to print" "alpha.test.sh" "$ERR"
 # THE FIX IS THE LOOP'S OWN WORDS when the body leaves the variable alone (wave-24 T13, D10,
