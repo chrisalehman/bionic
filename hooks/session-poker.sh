@@ -3856,8 +3856,8 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # candidate since its last landing has no commit of its own to include by, so every verdict under its id counts
 # (T14's count). Red-then-green is a red then a green for one row,
 # one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Waited is a request's `admitted` less its
-# `asked`; killed is a request admitted whose holder is dead with no `ended` line, or that ended with rc 137
-# (lib/gate.sh `gate_list`'s rule, read through `_gate_read`, not retyped here).
+# `asked`; killed is a request admitted that ended with rc 137 or whose holder is dead with no `ended` line
+# (lib/gate.sh `_gate_open`'s state, read through `_gate_read`, not retyped here; wave-28 T68).
 # A request counts when its `tree=` is the project or under it and it was asked at or after the record's
 # first `line/v1` event; a row's own wait is its requests by the roster name its `ready` carries, asked
 # from its first ready to its landing. Times are the events' own `at=`, never a message's.
@@ -3876,21 +3876,17 @@ landing_unmeasured() {  # <record> -> rc 0 when it holds `landed:` lines and no 
   ! /usr/bin/grep -q '^line/v1|' "$1" 2>/dev/null
 }
 landing_report() {  # <record> <project root> <rows yes|no> -> the line [and rows]; rc 0
-  local rec="$1" root="$2" rows="$3" gd f asked adm ended rc who tree holder dead reqs="" out mal
+  local rec="$1" root="$2" rows="$3" gd f dead reqs="" out mal
   gd="${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
   for f in "$gd"/requests/*; do
     case "${f##*/}" in ''|*[!0-9]*) continue ;; esac
     [ -f "$f" ] && [ ! -L "$f" ] || continue
-    _gate_read "$f" 2>/dev/null || continue   # lib/gate.sh's reader: no gate library, no requests
-    asked="$_R_asked" adm="$_R_admitted" ended="$_R_ended" rc="$_R_rc" who="$_R_who" tree="$_R_tree" holder="$_R_holder"
-    dead=0
-    if [ -n "$adm" ] && [ -z "$ended" ]; then
-      case "$holder" in
-        ''|-) dead=1 ;;
-        *) _slots_live "${holder%%:*}" "${holder#*:}" || dead=1 ;;
-      esac
-    fi
-    reqs="${reqs}${asked}	${adm}	${ended}	${rc}	${who#*:}	${tree}	${dead}
+    # lib/gate.sh's reader and its one rule (`_gate_open`, T71), lock-free: a request is killed when it ended with
+    # rc 137 or was admitted, never ended and has no live holder. No gate library, no requests.
+    _gate_read "$f" 2>/dev/null || continue
+    _R_state=''; _gate_open 2>/dev/null
+    case "$_R_state" in killed|dying) dead=1 ;; *) dead=0 ;; esac
+    reqs="${reqs}${_R_asked}	${_R_admitted}	${_R_who#*:}	${_R_tree}	${dead}
 "
   done
   if landing_unmeasured "$rec"; then printf 'landings: unmeasured — the landing record holds no line/v1 events\n'; return 0; fi
@@ -3904,7 +3900,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       return (lo + 1 < n) ? a[lo + 1] + (a[lo + 2] - a[lo + 1]) * fr : a[lo + 1]
     }
     phase == 0 { split($0, q, "\t"); nq++
-      qa[nq] = q[1]; qd[nq] = q[2]; qe[nq] = q[3]; qr[nq] = q[4]; qw[nq] = q[5]; qt[nq] = q[6]; qx[nq] = q[7]; next }
+      qa[nq] = q[1]; qd[nq] = q[2]; qw[nq] = q[3]; qt[nq] = q[4]; qx[nq] = q[5]; next }
     index($0, "line/v1|") != 1 { next }
     {
       split("", kv); nf = split($0, p, "|")
@@ -3945,7 +3941,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
         inq[i] = (t0 != "" && num(qa[i]) && qa[i] >= t0 && (qt[i] == root || index(qt[i], root "/") == 1))
         if (!inq[i]) continue
         if (num(qd[i])) wts[++nw] = qd[i] - qa[i]
-        if (num(qd[i]) && ((qe[i] == "" && qx[i] == 1) || (qe[i] != "" && qr[i] == "137"))) killed++
+        if (num(qd[i]) && qx[i] == 1) killed++
       }
       wm = pct(wts, nw, 0.5)
       printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d · waited median=%ds · killed=%d\n",
