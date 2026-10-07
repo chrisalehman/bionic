@@ -1335,8 +1335,8 @@ expect_eq "7.72c …and it holds bash -> /bin/bash" "/bin/bash" "$(readlink "$T6
 expect_eq "7.72d …and it names no link: it is its own physical path" "$T65_FIRST" "$(phys "$T65_FIRST")"
 expect_eq "7.72e …the rest of PATH is unchanged" "$T65_FIRST:$PIN_GIVEN" "$PIN_PATH"
 T65_MUT_PHYS="$TMPROOT/t65-mut-phys.sh"
-anchor "$SEAM" ' pwd -P)" || why=' 1
-sed 's# pwd -P)" || why=# pwd)" || why=#' "$SEAM" > "$T65_MUT_PHYS"
+anchor "$SEAM" 'cd -P -- "$dir" 2>/dev/null && pwd -P)"' 1
+sed 's#cd -P -- "$dir" 2>/dev/null && pwd -P)"#cd -- "$dir" 2>/dev/null \&\& pwd)"#' "$SEAM" > "$T65_MUT_PHYS"
 expect_eq "7.73 the logical-path mutant parses" "0" "$(bash -n "$T65_MUT_PHYS" >/dev/null 2>&1; echo $?)"
 pin_call "$T65_MUT_PHYS" "$T65_DIR/phys/lnk/t65-mut-root"
 expect_eq "7.73b under the mutant the pin is built (not vacuous)" "0" "$PIN_RC"
@@ -1440,7 +1440,7 @@ expect_eq "7.79c …the root this call made is removed" "absent" "$(there "$T67_
 expect_eq "7.79d …PATH is as given" "$T67_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
 # the mutant: the mkdir refusal removed. The failure reads as a later reader's wording (the defect 7.78d guards).
 T67_MUT_MK="$TMPROOT/t67-mut-mkdir.sh"
-T67_MK_LINE='    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _BIONIC_PIN_STEP="cannot make $1"; return 0; }'
+T67_MK_LINE='    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _bionic_pin_unmade "$1" "$2"; return 0; }'
 anchor "$SEAM" "$T67_MK_LINE" 1
 T67_LINE="$T67_MK_LINE" awk 'ENVIRON["T67_LINE"] == $0 { print "    mkdir -m 0700 \"$1\" 2>/dev/null && _BIONIC_PIN_MADE=1"; next } { print }' "$SEAM" > "$T67_MUT_MK"
 expect_eq "7.80 the no-refusal mutant parses" "0" "$(bash -n "$T67_MUT_MK" >/dev/null 2>&1; echo $?)"
@@ -1507,9 +1507,9 @@ t69_rel "$SEAM" "$T69_DIR/ok/cwd/r" "$T69_DIR/ok/cwd"
 expect_eq "7.85h control: an absolute root, the same call from a cwd of this suite's own: built" "0" "$PIN_RC"
 # the mutant: the absolute test removed. The relative root builds through the open holder (the defect 7.85 guards).
 T69_MUT_ABS="$TMPROOT/t69-mut-abs.sh"
-T69_ABS_LINE='  [ -n "$why" ] || case "$root" in /*) ;; *) why="$root is not an absolute path" ;; esac'
-anchor "$SEAM" "$T69_ABS_LINE" 1
-grep -vF "$T69_ABS_LINE" "$SEAM" > "$T69_MUT_ABS"
+T69_ABS_ARM=' /*) ;; *) why="$root is not an absolute path" ;;'
+anchor "$SEAM" "$T69_ABS_ARM" 1
+T69_ARM="$T69_ABS_ARM" awk '{ i = index($0, ENVIRON["T69_ARM"]); if (i) $0 = substr($0, 1, i - 1) substr($0, i + length(ENVIRON["T69_ARM"])); print }' "$SEAM" > "$T69_MUT_ABS"
 expect_eq "7.86 the no-absolute-test mutant parses" "0" "$(bash -n "$T69_MUT_ABS" >/dev/null 2>&1; echo $?)"
 t69_rel "$T69_MUT_ABS" "$T69_DIR/ok/cwd/mut" "$T69_DIR/ok/cwd"
 expect_eq "7.86b …and builds an absolute root (not vacuous)" "0" "$PIN_RC"
@@ -1560,7 +1560,7 @@ expect_contains "7.88f …naming the pin, with the remedy run again" \
 expect_absent "7.88g …and never offering to remove it" "remove" "$STOP_ERR"
 # the mutant: the race arm removed. The chooser offers to remove the root again (the defect 7.88 guards).
 T69_MUT_RACE="$TMPROOT/t69-mut-race.sh"
-T69_RACE_LINE='      elif [ "${_BIONIC_PIN_WHY#cannot make }" != "$_BIONIC_PIN_WHY" ]; then _bionic_pin_fix="run again"'
+T69_RACE_LINE='    race) echo "run again" ;;'
 anchor "$SEAM" "$T69_RACE_LINE" 1
 grep -vF "$T69_RACE_LINE" "$SEAM" > "$T69_MUT_RACE"
 expect_eq "7.89 the no-race-arm mutant parses" "0" "$(bash -n "$T69_MUT_RACE" >/dev/null 2>&1; echo $?)"
@@ -1598,6 +1598,85 @@ t69_hooks "$T69_MUT_REPO" mctl
 expect_eq "7.91b …and gives one line where no CDPATH is exported (not vacuous)" "$(phys "$T69_DIR/repo-mctl")/hooks" "$T69_HOOKS"
 t69_hooks "$T69_MUT_REPO" mcd "$T69_DIR/repo-other"
 expect_contains "7.91c under the mutant, CDPATH exported, the value spans two lines (the defect 7.90b guards)" "~" "$T69_HOOKS"
+
+# THE PIN'S cd IS PHYSICAL (wave-28 T73; AC-10.6; pass 48 #1). Bash's `cd` without -P removes `<component>/..` as TEXT
+# before it calls chdir; the walk, mkdir, the hold and the judge hand `..` to the kernel, which resolves it through the
+# link. For `<W>/mylink/../r` with mylink -> <W>/priv/sub the pin is judged and built under <W>/priv/r while a logical
+# `cd` lands in <W>/r, a directory nobody judged. The decoy is planted at <W>/r/pin because bash falls back to the
+# physical path when the textual one does not exist: without it the logical `cd` goes to the right place by luck.
+T73_DIR="$T87_DIR/t73"; mkdir -p "$T73_DIR/priv/sub" "$T73_DIR/r/pin"; chmod 0755 "$T73_DIR"; chmod 0700 "$T73_DIR/priv" "$T73_DIR/priv/sub"
+ln -s "$T73_DIR/priv/sub" "$T73_DIR/mylink"; : > "$T73_DIR/r/pin/bash"
+pin_call "$SEAM" "$T73_DIR/mylink/../r"
+expect_eq "7.92 an absolute root that passes a link and then .. : built" "0" "$PIN_RC"
+expect_eq "7.92b …PATH's first entry is the pin the walk judged, under the link's target (physical)" \
+  "$(phys "$T73_DIR/priv/r/pin"):$HAND_GIVEN_PATH" "$PIN_PATH"
+expect_eq "7.92c …and that pin holds bash -> /bin/bash" "/bin/bash" "$(readlink "$T73_DIR/priv/r/pin/bash" 2>/dev/null)"
+expect_eq "7.92d …the decoy the logical path names is untouched (a file, not the pin's link)" "regular" \
+  "$([ -f "$T73_DIR/r/pin/bash" ] && [ ! -L "$T73_DIR/r/pin/bash" ] && echo regular)"
+# the mutant: the pin's `cd` made logical again (the defect 7.92b guards)
+T73_MUT_CD="$TMPROOT/t73-mut-cd.sh"
+anchor "$SEAM" 'phys="$(cd -P -- "$dir"' 1
+sed 's/phys="$(cd -P -- "$dir"/phys="$(cd -- "$dir"/' "$SEAM" > "$T73_MUT_CD"
+expect_eq "7.93 the logical-cd mutant parses" "0" "$(bash -n "$T73_MUT_CD" >/dev/null 2>&1; echo $?)"
+pin_call "$T73_MUT_CD" "$T73_DIR/plain"
+expect_eq "7.93b …and pins a root with no link on it (not vacuous)" "$(phys "$T73_DIR/plain/pin"):$HAND_GIVEN_PATH" "$PIN_PATH"
+pin_call "$T73_MUT_CD" "$T73_DIR/mylink/../r"
+expect_eq "7.93c under the mutant PATH's first entry is the decoy nobody judged (the defect 7.92b guards)" \
+  "$(phys "$T73_DIR/r/pin"):$HAND_GIVEN_PATH" "$PIN_PATH"
+# A ROOT WITH A CONTROL CHARACTER IS REFUSED FIRST AND NEVER PRINTED RAW (T73; pass 48 #3). A newline in TMPDIR split
+# the one refusal line into three. The check comes before the absolute test (a relative root with a newline is named
+# for the character) and the line shows each control character as `?`.
+T73_NL="$T73_DIR/nl"$'\n'"x"
+pin_call "$SEAM" "$T73_NL"
+expect_ne "7.94 a root with a newline in it: refused" "0" "$PIN_RC"
+expect_eq "7.94b …by one line that names the root with the newline shown as ?" \
+  "resolve-roots.sh: cannot build the interpreter pin under $T73_DIR/nl?x — $T73_DIR/nl?x carries a control character, so nothing is pinned" "$PIN_ERR"
+expect_eq "7.94c …PATH is as given, and nothing is made" "$HAND_GIVEN_PATH:absent" "$PIN_PATH:$(there "$T73_NL")"
+pin_call "$SEAM" "$T73_DIR/t"$'\t'"x"
+expect_contains "7.94d a tab is a control character too" "$T73_DIR/t?x carries a control character, so nothing is pinned" "$PIN_ERR"
+pin_call "$SEAM" a$'\n'b
+expect_contains "7.94e a relative root with a newline is named for the character, not for being relative (the first check)" \
+  "a?b carries a control character, so nothing is pinned" "$PIN_ERR"
+stop_run "$STOP_SUITE" "$T73_DIR/hr"$'\n'"x"
+expect_eq "7.95 a hand run whose TMPDIR holds a newline: exits 2" "2" "$STOP_RC"
+expect_eq "7.95b …with ONE line, the path remedy and the character shown as ?" \
+  "$(t57_line "$T73_DIR/hr?x" "$T73_DIR/hr?x/bionic-interpreter-pin.$STOP_UID carries a control character" "$T57_FIX")" "$STOP_ERR"
+expect_contains "7.95c …the marker is unset (nothing was pinned)" "pinned=unset" "$STOP_LOG"
+expect_absent "7.95d …and no check ran" "check ran" "$STOP_LOG"
+# THE REMEDY IS KEYED ON WHICH mkdir FAILED (T73; pass 48 #2, structure #2). A root of this user's that cannot take the
+# pin (read-only, a full disk) failed the same way every time, and `run again` was the remedy; only a lost race
+# (7.88) is cured by running again. The two are told apart where the mkdir fails: the path is there afterwards or not.
+T73_RO="$T73_DIR/ro"; mkdir -p "$T73_RO"; chmod 0700 "$T73_RO"
+T73_RO_ROOT="$T73_RO/bionic-interpreter-pin.$STOP_UID"; mkdir -m 0500 "$T73_RO_ROOT"
+stop_run "$STOP_SUITE" "$T73_RO"
+expect_eq "7.96 a hand run whose root is this user's and read-only: exits 2" "2" "$STOP_RC"
+expect_eq "7.96b …naming the pin that cannot be made, with the remedy to remove the root" \
+  "$(t57_line "$T73_RO" "cannot make $T73_RO_ROOT/pin" "remove $T73_RO_ROOT or set TMPDIR")" "$STOP_ERR"
+expect_eq "7.96c …the root is still there (the harness ran the failure) and no check ran" "present:" "$(there "$T73_RO_ROOT"):$(printf %s "$STOP_LOG" | grep 'check ran')"
+chmod 0700 "$T73_RO_ROOT"
+T73_SP="$T73_DIR/sp"; mkdir -p "$T73_SP"; chmod 0700 "$T73_SP"; mkdir -m 0700 "$T73_SP/bionic-interpreter-pin.$STOP_UID"
+: > "$T67_MKDIR_LOG"
+STOP_PATH="$T67_STUB:$HAND_GIVEN_PATH" T67_MKDIR_FAIL='*/pin' stop_run "$STOP_SUITE" "$T73_SP"
+expect_eq "7.97 a pin whose mkdir fails and leaves nothing, in a root of this user's: exits 2, the root is there" "2:present" "$STOP_RC:$(there "$T73_SP/bionic-interpreter-pin.$STOP_UID")"
+expect_eq "7.97b …naming the pin, with the remedy to remove the root" \
+  "$(t57_line "$T73_SP" "cannot make $T73_SP/bionic-interpreter-pin.$STOP_UID/pin" "remove $T73_SP/bionic-interpreter-pin.$STOP_UID or set TMPDIR")" "$STOP_ERR"
+expect_contains "7.97c …and the stub is what refused it (the harness ran the failure)" "$T73_SP/bionic-interpreter-pin.$STOP_UID/pin" "$(cat "$T67_MKDIR_LOG")"
+# the same failure when this call made the root: it is taken down again, so there is nothing to remove
+T73_SF="$T73_DIR/sf"; mkdir -p "$T73_SF"; chmod 0700 "$T73_SF"
+STOP_PATH="$T67_STUB:$HAND_GIVEN_PATH" T67_MKDIR_FAIL='*/pin' stop_run "$STOP_SUITE" "$T73_SF"
+expect_eq "7.98 the pin's mkdir fails in a root this call made: exits 2, the root is taken down again" "2:absent" "$STOP_RC:$(there "$T73_SF/bionic-interpreter-pin.$STOP_UID")"
+expect_eq "7.98b …and the remedy is the path's (nothing there to remove)" \
+  "$(t57_line "$T73_SF" "cannot make $T73_SF/bionic-interpreter-pin.$STOP_UID/pin" "$T57_FIX")" "$STOP_ERR"
+# the mutant: a root taken down again no longer changes the class. The remedy offers to remove what is not there (the defect 7.98b guards).
+T73_MUT_ENT="$TMPROOT/t73-mut-entry.sh"
+anchor "$SEAM" 'rmdir "$root" 2>/dev/null && _BIONIC_PIN_CLASS=entry' 1
+sed 's/rmdir "$root" 2>\/dev\/null && _BIONIC_PIN_CLASS=entry/rmdir "$root" 2>\/dev\/null/' "$SEAM" > "$T73_MUT_ENT"
+expect_eq "7.99 the taken-down-root mutant parses" "0" "$(bash -n "$T73_MUT_ENT" >/dev/null 2>&1; echo $?)"
+mk_stop "$T73_MUT_ENT" "$TMPROOT/stop-mut-ent.test.sh"
+T73_SM="$T73_DIR/sm"; mkdir -p "$T73_SM"; chmod 0700 "$T73_SM"
+STOP_PATH="$T67_STUB:$HAND_GIVEN_PATH" T67_MKDIR_FAIL='*/pin' stop_run "$TMPROOT/stop-mut-ent.test.sh" "$T73_SM"
+expect_eq "7.99b under the mutant the pin is still refused and the root taken down (not vacuous)" "2:absent" "$STOP_RC:$(there "$T73_SM/bionic-interpreter-pin.$STOP_UID")"
+expect_contains "7.99c …but it offers to remove the root that is not there (the defect 7.98b guards)" "remove $T73_SM/bionic-interpreter-pin.$STOP_UID or set TMPDIR" "$STOP_ERR"
 
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
 if [ "$T57_ACL" = 1 ]; then
