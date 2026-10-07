@@ -11292,8 +11292,8 @@ GATE="$OR_SAVED_GATE"; rm -rf "$OR_ROOT"
 AN_ROWS="A-T1=approval:release"
 t55_gate an1 x-A-T1 'Lands-on: widget' "$AN_ROWS"
 expect_eq "AN1 (the probe) a name that matches T1 and A-T1, no Row:, is refused" "deny" "$GATE_VERDICT"
-expect_contains "AN1b …the one line names both rows and the fix" \
-  "the name matches rows T1, A-T1 (add Row: T1)" "$(t7_first)"
+expect_contains "AN1b …the one line names both rows and the fix (no row named as the remedy: A-orch-230 a)" \
+  "the name matches rows T1, A-T1 (add Row: <id>)" "$(t7_first)"
 expect_eq "AN1c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
 expect_contains "AN1d …the detail names the dispatch's name and the plan" "x-A-T1" "$GATE_VERR"
 expect_eq "AN1e …and no row is written" "" "$T7_ROW"
@@ -11323,7 +11323,7 @@ AN_LX="a-row-id-of-forty-characters-long-0001"; AN_LY="b-row-${AN_LX}"
 t55_gate an7 "w-${AN_LY}" 'Lands-on: widget' "$AN_LX $AN_LY"
 expect_eq "AN7 the widest case, two long row ids one behind the other's name, is refused" "deny" "$GATE_VERDICT"
 expect_contains "AN7b …each id cut to eleven columns on the one line" \
-  "the name matches rows a-row-id-o…, b-row-a-ro… (add Row: a-row-id-o…)" "$(t7_first)"
+  "the name matches rows a-row-id-o…, b-row-a-ro… (add Row: <id>)" "$(t7_first)"
 expect_eq "AN7c …and that line is at most 100 columns" "ok" "$(t7_cols_ok)"
 
 # THE MUTATION ARM: the ambiguity check removed, so the first match is bound as before. The shipped
@@ -11522,7 +11522,10 @@ ln -s "$DECOY_ROSTER" "$(roster_path "$REPO" "$SID_A")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" \
              "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq -c '. + {agent_id:"a70nested-0123456789ab"}')"
 expect_eq "RC4 a read-only role launched from inside an agent is admitted" "allow" "$GATE_VERDICT"
-expect_empty "RC4 …in silence, on a roster path a main-thread dispatch would be refused for" "$GATE_ERR"
+RC4_LINE="bionic: dispatch admitted without a roster row — a read-only role launched from inside an agent; the ledger stays at depth one"
+expect_eq "RC4 …saying so on one line (A-orch-231 2), on a roster path a main-thread dispatch would be refused for" \
+  "$RC4_LINE" "$GATE_ERR"
+expect_eq "RC4 …which is 126 columns, a notice and not a refusal" "126" "$(bionic_cols "$RC4_LINE")"
 expect_status "RC4 …and the decoy was not appended to" "untouched" "$(cat "$DECOY_ROSTER")"
 
 # --- RC5: THE DEADLINE. The wall waits 14 s inside the row's build, past the deadline.
