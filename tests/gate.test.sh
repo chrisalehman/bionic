@@ -758,7 +758,8 @@ mkdir -p "$WORLD_ROOT/owed-stub"
 printf '#!/bin/sh\necho x >> "%s"\nexec /usr/bin/grep "$@"\n' "$WORLD_ROOT/owed-greps" > "$WORLD_ROOT/owed-stub/grep"
 chmod +x "$WORLD_ROOT/owed-stub/grep"
 owed_names() {  # the writers asked about: w1..w6 open, wEnded ended, wNever never asked
-  printf '%s:w%s\n' "$WORLD_SID" 1 2 3 4 5 6
+  local i
+  for i in 1 2 3 4 5 6; do printf '%s:w%s\n' "$WORLD_SID" "$i"; done
   printf '%s:wEnded\n%s:wNever\n' "$WORLD_SID" "$WORLD_SID"
 }
 owed_count() {  # <gate lib> — fill_gate_owed over owed_names' names, a stub counting grep forks
@@ -785,7 +786,7 @@ expect_eq "OW.4 the count over a 2,000-request store forks no grep (the budget, 
 expect_true "OW.5 …and takes at most one wall second (the budget, by time)" test "$((OW_T1 - OW_T0))" -le 1
 OW_ASKED="$( . "$GATE_LIB" 2>/dev/null; owed_names | gate_asked | tr '\n' ' ' )"
 expect_eq "OW.6 gate_asked on stdin prints exactly the names with an unended request, in the order given" \
-  "$(printf '%s:w%s ' "$WORLD_SID" 1 2 3 4 5 6)" "$OW_ASKED"
+  "$(for i in 1 2 3 4 5 6; do printf '%s:w%s ' "$WORLD_SID" "$i"; done)" "$OW_ASKED"
 expect_eq "OW.7 …rc 0 when any is showing" "0" \
   "$( . "$GATE_LIB" 2>/dev/null; printf '%s\n' "$WORLD_SID:w1" | gate_asked >/dev/null; echo $? )"
 expect_eq "OW.8 …and rc 1, nothing printed, when none is" "|1" \
