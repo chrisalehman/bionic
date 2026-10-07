@@ -91,6 +91,7 @@
 #   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
 #   spawn-worktree.sh remove <worktree-path>
 #   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
+#   spawn-worktree.sh ready  [--within <seconds>]
 
 set -uo pipefail
 
@@ -136,6 +137,7 @@ Usage:
   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
   spawn-worktree.sh remove <worktree-path>
   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
+  spawn-worktree.sh ready  [--within <seconds>]
 
 create  makes the branch AND the worktree at exactly <base-sha>, verifies
         both, plants <worktree>/.bionic -> <main-root>/.bionic (D7; unless the
@@ -168,6 +170,17 @@ land    a person's landing (the line lands a row with ready). With
         (HELD) while a run is live in the checkout that holds the branch,
         and stops (MOVED) when a real checkout moved. A bare land prints
         the two ways and exits 2.
+ready   the writer's landing, run from the row's own tree. Refuses a tree
+        that is dirty, detached or not ahead, and a range that commits
+        .bionic (GUARD, exit 1), before any landing tree is taken. Enters
+        the row in the line with the suites its launch line names
+        (lands_on=), builds the candidate on what is ahead of it, runs each
+        suite there through the gate, and publishes when every suite is
+        green and the row is first in line: LANDED and the acts still owed
+        (exit 0). A red suite returns the row, printing RED and its log; a
+        conflict with the accepted head prints CONFLICT (exit 1). With
+        --within, a suite whose promised seconds exceed the time left is
+        not started: WAITING and the same command to run again (exit 75).
 USAGE
 }
 
@@ -460,10 +473,44 @@ cmd_land() {
   exit $?
 }
 
+# THE WRITER'S LANDING IS `ready` (wave-28 T4, D3): run from the row's own tree, it judges the tree
+# once, enters the row in the line and carries it: the candidate built, each suite the row lands on
+# run through the gate, published when green and first in line (lib/line.sh `line_ready`). Exit 0
+# `LANDED <row> <commit>` and the owed line; 1 `RED`, `CONFLICT` or `GUARD`; 75 `WAITING` with the
+# same command to run again; 2 a refusal. `--within <seconds>` bounds it: no suite starts whose
+# promised seconds exceed the time left.
+cmd_ready() {
+  local within="" has_within=0 lib sid root tree self again
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --within) has_within=1; within="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+      --within=*) has_within=1; within="${1#--within=}"; shift ;;
+      *) contract "REFUSED reason=usage arg=${1} — spawn-worktree.sh ready [--within <seconds>]"; exit 2 ;;
+    esac
+  done
+  case "$has_within:$within" in
+    1:|1:*[!0-9]*) contract "REFUSED reason=usage within=${within:-<none>} — --within takes whole seconds"; exit 2 ;;
+  esac
+  for lib in "$LIB_WORKTREE" "${LIB_WORKTREE%/*}/session.sh" "${LIB_WORKTREE%/*}/line.sh"; do
+    [ -f "$lib" ] || { contract "REFUSED reason=library-missing path=${lib}"; exit 2; }
+    # shellcheck source=/dev/null
+    . "$lib" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${lib}"; exit 2; }
+  done
+  tree="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || { contract "REFUSED reason=not-a-tree path=$(pwd -P) — run ready from the row's own tree"; exit 2; }
+  sid="$(session_id 2>/dev/null)" || sid=""
+  root="$(worktree_root "$tree" 2>/dev/null)" || root=""
+  self="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)/$(basename "$0")"
+  again="bash $(_wt_shquote "$self") ready${within:+ --within ${within}}"
+  WORKTREE_CONTRACT_PROG="$PROG" line_ready "$tree" "$root" "$sid" "$within" "$again"
+  exit $?
+}
+
 case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   remove) shift; cmd_remove "$@" ;;
   land)   shift; cmd_land "$@" ;;
+  ready)  shift; cmd_ready "$@" ;;
   -h|--help|help) usage; exit 0 ;;
   "") usage >&2; _wt_refuse usage ;;
   *) usage >&2; _wt_refuse unknown-verb ;;
