@@ -1044,4 +1044,68 @@ mutate_check "mutation: the .bionic line dropped from the exclude call is caught
   's|"\${alias_field:+/.bionic}"|""|' \
   verify_link_unstaged "staged"
 
+section "§READY: the writer's landing — its tree refusals and the WAITING line (wave-28 T4, D3)"
+#
+# `ready` runs from the row's own tree in the model world (tests/lib/world.sh): the bound plan's
+# working branch `wave/x`, row trees T1 and T2, and T1's launch line on the roster naming the suite
+# it lands on. A tree that is detached, dirty or not ahead is refused (exit 2) before anything is
+# appended to the line; a suite whose promised seconds exceed the time left is never started.
+. "$(dirname "$0")/lib/world.sh"
+. "${REPO}/payload/scripts/lib/roster.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+export CLAUDE_CONFIG_DIR="$WORLD_ROOT/home"
+mkdir -p "$CLAUDE_CONFIG_DIR/bionic"; printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+world_machine 8 8192 40 0.5
+world_clock 1000
+rd_world() {  # -> a world root with T1's launch line naming a.test.sh
+  local r
+  r="$(world_repo)" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 \
+    agent_id=b00T1 plan="$r/.bionic/docs/plans/epic-x/wave-x.plan.md")" >> "$r/.bionic/tmp/roster-$WORLD_SID.state"
+  printf '%s' "$r"
+}
+rd_ready() {  # <tree> [args] -> RD_OUT, RD_RC
+  local t="$1"; shift
+  RD_OUT="$( cd "$t" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 bash "$SPAWN" ready "$@" 2>&1 )"; RD_RC=$?
+}
+rd_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
+RDA="$(rd_world)"
+expect_nonempty "(fixture) the world repository was made" "$RDA"
+git -C "$RDA/.worktrees/T1" checkout -q --detach
+rd_ready "$RDA/.worktrees/T1"
+expect_eq "ready from a detached tree is refused (exit 2)" "2" "$RD_RC"
+expect_match "…naming why" "spawn-worktree: REFUSED reason=detached path=*/.worktrees/T1 — *" "$RD_OUT"
+git -C "$RDA/.worktrees/T1" checkout -q wt/T1
+echo dirt >> "$RDA/.worktrees/T1/T1.txt"
+rd_ready "$RDA/.worktrees/T1"
+expect_eq "ready from a dirty tree is refused (exit 2)" "2" "$RD_RC"
+expect_match "…naming why" "spawn-worktree: REFUSED reason=dirty-tree path=*/.worktrees/T1 branch=wt/T1" "$RD_OUT"
+git -C "$RDA/.worktrees/T1" checkout -q -- T1.txt
+git -C "$RDA" merge -q --no-ff -m "T1 by hand" wt/T1
+rd_ready "$RDA/.worktrees/T1"
+expect_eq "ready from a tree not ahead of the working branch is refused (exit 2)" "2" "$RD_RC"
+expect_eq "…naming why" "spawn-worktree: REFUSED reason=nothing-to-land branch=wt/T1 onto=wave/x" "$RD_OUT"
+expect_false "…and none of the three appended anything to the line" test -e "$(rd_rec "$RDA")"
+expect_false "…or took a landing tree" test -e "$RDA/.bionic/tmp/landing"
+rd_ready "$RDA/.worktrees/T1" --within soon
+expect_eq "--within takes whole seconds (exit 2)" "2" "$RD_RC"
+expect_match "…saying so" "spawn-worktree: REFUSED reason=usage within=soon — *" "$RD_OUT"
+
+RDB="$(rd_world)"
+world_cost a.test.sh 5 0.5 600
+rd_ready "$RDB/.worktrees/T1" --within 60
+expect_eq "a suite promising more seconds than are left: exit 75" "75" "$RD_RC"
+expect_eq "…printing WAITING and the same command, exactly" \
+  "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$RD_OUT"
+expect_contains "…the entry kept on the line" "|ev=ready|row=T1|" "$(cat "$(rd_rec "$RDB")" 2>/dev/null)"
+expect_absent "…and no suite run" "ev=verdict" "$(cat "$(rd_rec "$RDB")" 2>/dev/null)"
+rd_ready "$RDB/.worktrees/T1" --within 900
+expect_eq "the same command with the time: LANDED (exit 0)" "0" "$RD_RC"
+expect_match "…printing LANDED, then the owed line" \
+  "LANDED T1 *
+landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
+expect_eq "…and the working branch moved to the landed commit" \
+  "$(git -C "$RDB" rev-parse wave/x)" "$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
+
 finish
