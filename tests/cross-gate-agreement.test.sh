@@ -13075,16 +13075,16 @@ expect_eq "AM1 …and the name's latest row IS the id's latest row: the verb and
 
 # ---- AM2: amend --suites+ -> the budget arm admits the added suite (AC-1.2, suites half) ----
 AM_R2=$(am_world 2)
-am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only s.test.sh"
 expect_eq "AM2 [poker amend -> bash-walls budget arm] BEFORE the amend the arm refuses the added suite" "2" "$AM_ARM_ST"
 expect_absent "AM2 …and the budget it names does not carry the added suite" "s.test.sh" "$(am_budget_line "$AM_ARM_OUT")"
 am_amend "$AM_R2" w1 --suites+ tests/s.test.sh --reason x
 expect_eq "AM2 the amend exits 0" "0" "$AM_RC"
-am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only s.test.sh"
 expect_eq "AM2 AFTER the amend the arm ADMITS the added suite (AC-1.2)" "0" "$AM_ARM_ST"
-am_arm "$AM_R2" "$AM_ID" "bash tests/a.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only a.test.sh"
 expect_eq "AM2 …and still admits the suite the brief declared" "0" "$AM_ARM_ST"
-am_arm "$AM_R2" "$AM_ID" "bash tests/z.test.sh"
+am_arm "$AM_R2" "$AM_ID" "tests/run.sh --only z.test.sh"
 expect_eq "AM2 …and still refuses a suite nobody declared" "2" "$AM_ARM_ST"
 expect_eq "AM2 …and the name's latest row IS the id's latest row" "$(am_last "$AM_R2")" "$(am_idpick "$AM_R2")"
 

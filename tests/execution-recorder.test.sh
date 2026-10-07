@@ -3733,7 +3733,7 @@ for _wn in 301 3600; do
   sj_intended "$WNA_REPO" "w$_wn" "toolu_01WNA$_wn" "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago "$_wn")"
   run_rec "$(mk_subagent_start "$SID_A" "$WNA_TR" "$WNA_REPO" "$WN_IMP" "a00000000wna$_wn")"
   expect_eq "WN-a1 ($_wn s) a lone launch outside the window is joined" "w$_wn:a00000000wna$_wn" "$(sj_e_joined "$WNA_REPO")"
-  wn_walls "$WNA_REPO" 'bash tests/alpha.test.sh' "a00000000wna$_wn" "$WN_IMP"
+  wn_walls "$WNA_REPO" 'tests/run.sh --only alpha.test.sh' "a00000000wna$_wn" "$WN_IMP"
   expect_eq "WN-a2 ($_wn s) …and the writer's suite is admitted" "0" "$SJ_ST"
   expect_nonempty "WN-a3 ($_wn s) …wrapped in the booking shim" "$(sj_wrap)"
 done
@@ -3818,17 +3818,17 @@ run_rec "$(mk_subagent_start "$SID_A" "$WNH_TR" "$WNH_REPO" "$WN_IMP" "$WNH_A")"
 expect_eq "WN-f precondition: the start was placed on neither launch" "0 identified rows" "$(sj_e_joined "$WNH_REPO")"
 wn_amend "$WNH_REPO" "$WNH_TR" "$WNH_CFG" "$WNH_A" gamma.test.sh
 expect_contains "WN-f precondition: amend by id recorded the set (rc=$WN_POKE_ST)" "poker: amended — $WNH_A" "$WN_POKE_OUT"
-wn_walls "$WNH_REPO" 'bash tests/gamma.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only gamma.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f precondition: …and gamma runs" "0" "$SJ_ST"
 wn_return "$WNH_REPO" "$WNH_TR" toolu_01WNHL1 "$WNH_A" "$WN_IMP" wL1
 WNH_LAST=$(wn_last_for_id "$WNH_REPO" "$WNH_A")
 expect_eq "WN-f1 the launch call's return places the agent: the last row for its id is the confirmed one" \
   "confirmed:wL1" "$(sj_field "$WNH_LAST" status):$(sj_field "$WNH_LAST" name)"
-wn_walls "$WNH_REPO" 'bash tests/gamma.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only gamma.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f2 …and the suite the amend recorded is still admitted" "0" "$SJ_ST"
-wn_walls "$WNH_REPO" 'bash tests/alpha.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only alpha.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f3 …beside the launch's own set" "0" "$SJ_ST"
-wn_walls "$WNH_REPO" 'bash tests/beta.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only beta.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f4 …while the other launch's suite is still refused" "2" "$SJ_ST"
 
 IFS='|' read -r WNI_REPO WNI_TR WNI_CFG <<< "$(wn_world wnamendstart)"
@@ -3844,9 +3844,9 @@ run_rec "$(mk_subagent_start "$SID_A" "$WNI_TR" "$WNI_REPO" "$WN_IMP" "$WNI_A")"
 WNI_LAST=$(wn_last_for_id "$WNI_REPO" "$WNI_A")
 expect_eq "WN-g1 a later start places the agent: the last row for its id is the identified one" \
   "identified:wM1" "$(sj_field "$WNI_LAST" status):$(sj_field "$WNI_LAST" name)"
-wn_walls "$WNI_REPO" 'bash tests/gamma.test.sh' "$WNI_A" "$WN_IMP"
+wn_walls "$WNI_REPO" 'tests/run.sh --only gamma.test.sh' "$WNI_A" "$WN_IMP"
 expect_eq "WN-g2 …and the suite the amend recorded is still admitted" "0" "$SJ_ST"
-wn_walls "$WNI_REPO" 'bash tests/alpha.test.sh' "$WNI_A" "$WN_IMP"
+wn_walls "$WNI_REPO" 'tests/run.sh --only alpha.test.sh' "$WNI_A" "$WN_IMP"
 expect_eq "WN-g3 …beside the launch's own set" "0" "$SJ_ST"
 
 # ============================================================
@@ -3889,9 +3889,9 @@ expect_contains "GR-a2 …A is told what a start among several fresh launches is
   "2 launches of $WN_IMP on this session roster have no id and the start names none of them; agent a00000000graaaa is left to the return of its launch call" "$GRA_ERR_A"
 expect_contains "GR-a3 …and so is B" \
   "2 launches of $WN_IMP on this session roster have no id and the start names none of them; agent a00000000grabbb is left to the return of its launch call" "$REC_ERR"
-wn_walls "$GRA_REPO" 'bash tests/beta.test.sh' a00000000graaaa "$WN_IMP"
+wn_walls "$GRA_REPO" 'tests/run.sh --only beta.test.sh' a00000000graaaa "$WN_IMP"
 expect_eq "GR-a4 A cannot run B's suite" "2" "$SJ_ST"
-wn_walls "$GRA_REPO" 'bash tests/alpha.test.sh' a00000000graaaa "$WN_IMP"
+wn_walls "$GRA_REPO" 'tests/run.sh --only alpha.test.sh' a00000000graaaa "$WN_IMP"
 expect_eq "GR-a5 A's own suite is refused while it is unplaced" "2" "$SJ_ST"
 GRA_FIX=$(printf '%s\n' "$SJ_ERR" | grep -F 'widen it: ' | head -1)
 GRA_CMD="${GRA_FIX#*widen it: }"; GRA_CMD="${GRA_CMD% (main runs it)}"
@@ -3903,7 +3903,7 @@ if [ -n "$GRA_FIX" ]; then
     CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_PROJECT_DIR= bash -c "$GRA_CMD" 2>&1 ); GRA_RC=$?
 else GRA_OUT="no remedy line was printed"; GRA_RC=1; fi
 expect_eq "GR-a7 the line, run as printed by the orchestrator, exits 0 ($GRA_OUT)" "0" "$GRA_RC"
-wn_walls "$GRA_REPO" 'bash tests/alpha.test.sh' a00000000graaaa "$WN_IMP"
+wn_walls "$GRA_REPO" 'tests/run.sh --only alpha.test.sh' a00000000graaaa "$WN_IMP"
 expect_eq "GR-a8 …and A's own suite is then admitted" "0" "$SJ_ST"
 
 # ---- GR-b: the same, the two starts at once, ten pairs: no agent on the other's launch (B1) ----
