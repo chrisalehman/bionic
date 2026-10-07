@@ -88,13 +88,19 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh; do
+for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh proof.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
     exit 2
   fi
 done
+# card.sh is executed, not sourced: it holds the one reading of the deferrals a run inherited (T43).
+if [ ! -f "${CO_SCRIPTS}/card.sh" ]; then
+  echo "close-out.sh: cannot find ${CO_SCRIPTS}/card.sh — the payload looks incomplete." >&2
+  echo "              reinstall with: claude plugin install bionic@bionic" >&2
+  exit 2
+fi
 
 # shellcheck source=/dev/null
 . "${CO_LIB}/roots.sh"
@@ -106,6 +112,8 @@ done
 . "${CO_LIB}/patrol.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/units.sh"
+# shellcheck source=/dev/null
+. "${CO_LIB}/proof.sh"
 
 # CO_SID -> this script's own identity, read from the ambient environment BEFORE
 # anything below ever touches CLAUDE_CODE_SESSION_ID (`gate_ask`'s one
@@ -541,6 +549,125 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 # knew those answers, and the second run of a close-out is exactly when that edit would be
 # destroyed.
 CONT_LINE=""
+
+# THE DEFERRALS THE CONTINUATION CARRIES (wave-28 T17; D21, AC-8.7). One line per open deferral, in
+# the order the plan wrote them, in the one form the next wave's Step 1 card reads:
+#
+#     deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>
+#
+# OPEN is what lib/proof.sh `proof_findings_owed` says: a finding with a `deferred:` line whose
+# effective priority is `defer`, rated through the one place the effective rating is applied. A
+# `check:` line alone is a check owed, not a deferral. The sentence is the plan line's ` stated="..."`
+# field copied as it stands (a `\` or a `"` in it is already written `\\` or `\"`), `-` when the
+# line has none; a deferral is carried whether or not it is stated. The reader of the line is
+# `deferral_line`'s twin in hooks/session-poker.sh, which reads the same line to print `stated` or
+# `unstated` at the release check.
+co_deferral_line() {  # <record>#<n> -> the first deferred: line of ## SDLC State naming it
+  awk -v id="$1" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
+    END { if (found) print line; exit (found ? 0 : 1) }' "$PLAN"
+}
+co_deferrals() {  # -> the lines, or nothing
+  local id s r p t l st
+  proof_findings_owed "$PLAN" 2>/dev/null | while read -r id s r p t; do
+    [ "$p" = defer ] || continue
+    l="$(co_deferral_line "$id")" || continue
+    st="$(printf '%s\n' "$l" | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p')"
+    printf 'deferred: %s %s %s %s stated="%s" from=%s\n' "$id" "$s" "$r" "$t" "${st:--}" "$WAVE_SLUG"
+  done
+}
+
+# THE DEFERRALS THIS RUN INHERITED AND DID NOT SETTLE (wave-28 T43; D21, AC-8.10). The run's
+# requirements file disposes of what the newest continuation before it left open, under `## Inherited
+# deferrals`: `adopted: <id> as REQ-<n>`, `again: <id>`, `closed: <id> <reason>`. Every line deferred
+# again, and every one not disposed of, is carried after this run's own, AS THE OLD CONTINUATION WROTE
+# IT, its `from=` kept; an adopted or a closed one is not. The reading is card.sh's (`card.sh inherited`),
+# the one the Step 1 card listed them from, so the card and the carry are one answer. A plan that names
+# no requirements file, or one that is not there, disposed of nothing: the path handed over is then
+# `<plans dir>/<wave slug>.requirements.md`, whose name still tells card.sh which run's own continuation
+# to skip.
+CO_CARRIED=""
+co_requirements() {  # -> the run's requirements file, or the path naming none
+  local r
+  r="$(plan_frontmatter_get "$PLAN" requirements)"
+  case "$r" in
+    '') ;;
+    /*) ;;
+    *)  r="$DROOT/$r" ;;
+  esac
+  [ -n "$r" ] && [ -f "$r" ] || r="$PLANS_DIR/$WAVE_SLUG.requirements.md"
+  printf '%s\n' "$r"
+}
+co_carried() {  # -> every inherited deferred: line deferred again or left undisposed, as written
+  local out
+  out="$(bash "$CO_SCRIPTS/card.sh" inherited "$(co_requirements)" 2>/dev/null)" || return 1
+  printf '%s\n' "$out" | awk -F '\t' '$1 == "again" || $1 == "open" { print substr($0, length($1) + 2) }'
+}
+# co_cont_has_deferrals -> 0 when the existing continuation carries the heading outside a code fence
+# (a pasted example of the form is not the section; read-adversarial-p15 #4)
+co_cont_has_deferrals() {
+  awk '/^[[:space:]]*```/ { fence = !fence; next } !fence && $0 == "## Deferrals" { found = 1; exit }
+       END { exit !found }' "$CONT" 2>/dev/null
+}
+# co_deferrals_section -> the heading and its lines, written whether or not there is anything under it:
+# this run's own deferrals first, then what it carries (CO_CARRIED, read by act_continuation)
+co_deferrals_section() {
+  local lines
+  lines="$(co_deferrals)"
+  [ -z "$CO_CARRIED" ] || lines="${lines:+$lines
+}$CO_CARRIED"
+  printf '## Deferrals\n'
+  [ -z "$lines" ] || printf '\n%s\n' "$lines"
+}
+
+# THE MERGE INTO A CONTINUATION THAT ALREADY CARRIES THE HEADING (wave-28 T50; A-orch-74 supersedes
+# A-T17.6's "with the heading, never touched"). Every line close-out would write — this run's own
+# deferrals, then what it carries — that is not under the first `## Deferrals` heading outside a fence,
+# byte for byte, is added at the end of that section, each once; what a person wrote there stays. A
+# continuation holding every line is left as it stands.
+co_cont_missing() {  # -> the lines owed that are not under the heading yet, in order
+  CO_WANT="$(co_deferrals)${CO_CARRIED:+
+$CO_CARRIED}" awk '
+    BEGIN { n = split(ENVIRON["CO_WANT"], w, "\n") }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    !fence && !first && $0 == "## Deferrals" { first = insec = 1; next }
+    !fence && /^## / { insec = 0; next }
+    insec && !fence { have[$0] = 1 }
+    END { for (i = 1; i <= n; i++) if (w[i] != "" && !have[w[i]] && !seen[w[i]]++) print w[i] }' "$CONT"
+}
+co_cont_merge() {  # <lines> -> $CONT with the lines added at the end of its ## Deferrals section
+  local tmp="$CONT.close-out.$$"
+  CO_ADD="$1" awk '
+    function fin(more,   i) {
+      if (content) { print ENVIRON["CO_ADD"]; for (i = 0; i < blanks; i++) print "" }
+      else { print ""; print ENVIRON["CO_ADD"]; if (more) print "" }
+      insec = 0; done = 1; blanks = 0
+    }
+    /^[[:space:]]*```/ { fence = !fence }
+    done { print; next }
+    !insec { print; if (!fence && $0 == "## Deferrals") insec = 1; next }
+    !fence && /^## / { fin(1); print; next }
+    NF == 0 { blanks++; next }
+    { for (i = 0; i < blanks; i++) print ""; blanks = 0; content = 1; print }
+    END { if (!done && insec) fin(0) }' "$CONT" > "$tmp" 2>/dev/null
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp"
+    _co_refuse "could not add the deferrals to the continuation at $CONT"
+  fi
+  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "could not add the deferrals to the continuation at $CONT"; }
+}
+co_added_phrase() {  # <lines> -> "<n> deferred line(s)"
+  local n
+  n="$(printf '%s\n' "$1" | wc -l | tr -d ' ')"
+  printf '%s deferred line%s' "$n" "$([ "$n" = 1 ] || echo s)"
+}
+co_added_ids() {  # <lines> -> the ids, space-joined
+  printf '%s\n' "$1" | awk '{ printf "%s%s", (NR > 1 ? " " : ""), $2 } END { print "" }'
+}
+
 continuation_template() {
   local sha
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
@@ -563,6 +690,8 @@ Closed $NOW. $INTEGRATION at ${sha:-<fill: SHA>}. Wave branch \`$WORKING\` merge
 
 <fill: carry-overs from this wave>
 
+$(co_deferrals_section)
+
 ## Resume instruction
 
 Nothing to resume: the run is delivered. <fill: Patrol job id> deleted and the stamp
@@ -572,7 +701,25 @@ CONT_TEMPLATE
 }
 
 act_continuation() {
+  local missing
+  CO_CARRIED="$(co_carried)" \
+    || _co_refuse "could not read the deferrals this run inherited (card.sh inherited) — no continuation written"
   if [ -f "$CONT" ]; then
+    # A CONTINUATION WRITTEN BEFORE THIS CLOSE-OUT KEEPS EVERY BYTE IT HAS; the deferrals the plan
+    # owes are appended under their heading when it carries none, and merged into the section when it
+    # does (each line once, a person's lines kept), so the debt is never dropped.
+    if ! co_cont_has_deferrals; then
+      { printf '\n'; co_deferrals_section; } >> "$CONT" 2>/dev/null \
+        || _co_refuse "could not append the deferrals to the continuation at $CONT"
+      CONT_LINE="$CONT_REL already written — left as it stands, with the ## Deferrals section appended"
+      return 0
+    fi
+    missing="$(co_cont_missing)"
+    if [ -n "$missing" ]; then
+      co_cont_merge "$missing"
+      CONT_LINE="$CONT_REL already written — left as it stands, with $(co_added_phrase "$missing") added under ## Deferrals"
+      return 0
+    fi
     CONT_LINE="$CONT_REL already written — left as it stands"
     return 0
   fi
@@ -1042,7 +1189,7 @@ insert_archived() {
 # usually a refusal, because the block `run` is about to write is not written yet. That is
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
-  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count
+  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
@@ -1099,8 +1246,17 @@ do_check() {
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
-  if [ -f "$CONT" ]; then
-    say "continuation: $CONT_REL already written — left as it stands"
+  if [ -f "$CONT" ] && ! co_cont_has_deferrals; then
+    say "continuation: $CONT_REL already written — run appends the ## Deferrals section"
+  elif [ -f "$CONT" ]; then
+    CO_CARRIED="$(co_carried)" \
+      || _co_refuse "could not read the deferrals this run inherited (card.sh inherited)"
+    missing="$(co_cont_missing)"
+    if [ -n "$missing" ]; then
+      say "continuation: $CONT_REL already written — run adds $(co_added_phrase "$missing") under ## Deferrals: $(co_added_ids "$missing")"
+    else
+      say "continuation: $CONT_REL already written — left as it stands"
+    fi
   else
     say "continuation: $CONT_REL would be written from the close-out template"
   fi

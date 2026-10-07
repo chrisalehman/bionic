@@ -8,7 +8,7 @@
 #
 # THE SEVEN VERBS (the plan's interface row, verbatim in shape):
 #
-#   world_machine <cores> <total_mb> <used_pct> <busy_cores>   exports the readers' pins
+#   world_machine <cores> <total_mb> <used_pct> <busy_cores> [<busy_5m>]  exports the readers' pins
 #   world_clock <epoch>                                        plants the clock file
 #   world_tick <seconds>                                       moves it forward
 #   world_cost <key> <mem_pct> <cores> <seconds>               appends to cost/<key>
@@ -97,12 +97,14 @@ _world_refuse() {  # <verb> <message> -> rc 2
   return 2
 }
 
-# world_machine <cores> <total_mb> <used_pct> <busy_cores> — plants the machine every reader
-# in payload/scripts/lib/resources.sh answers for. The four new pins carry the arguments; the
-# older readers are planted to the SAME machine (free % = 100 − used, free MB = that share of
-# total, load = busy cores, swap 0), so no reader in the world disagrees with another.
+# world_machine <cores> <total_mb> <used_pct> <busy_cores> [<busy_5m>] — plants the machine
+# every reader in payload/scripts/lib/resources.sh answers for. The four new pins carry the
+# arguments; the older readers are planted to the SAME machine (free % = 100 − used, free MB =
+# that share of total, load = busy cores, swap 0), so no reader in the world disagrees with
+# another. The fifth plants the five-minute load (wave-28 T13, D14); absent, it is the busy
+# cores, a machine whose load has held still.
 world_machine() {
-  local cores="${1:-}" total="${2:-}" used="${3:-}" busy="${4:-}"
+  local cores="${1:-}" total="${2:-}" used="${3:-}" busy="${4:-}" busy5="${5:-${4:-}}"
   _res_is_uint "$cores" && [ "$cores" -ge 1 ] \
     || { _world_refuse world_machine "cores must be a whole number ≥ 1, got '$cores'"; return 2; }
   _res_is_uint "$total" && [ "$total" -ge 1 ] \
@@ -111,8 +113,10 @@ world_machine() {
     || { _world_refuse world_machine "used_pct must be 0 to 100, got '$used'"; return 2; }
   _world_is_num "$busy" \
     || { _world_refuse world_machine "busy_cores must be a decimal ≥ 0, got '$busy'"; return 2; }
+  _world_is_num "$busy5" \
+    || { _world_refuse world_machine "busy_5m must be a decimal ≥ 0, got '$busy5'"; return 2; }
   export BIONIC_PROBE_CORES="$cores" BIONIC_PROBE_TOTAL_MB="$total"
-  export BIONIC_PROBE_USED_PCT="$used" BIONIC_PROBE_BUSY_CORES="$busy"
+  export BIONIC_PROBE_USED_PCT="$used" BIONIC_PROBE_BUSY_CORES="$busy" BIONIC_PROBE_BUSY_CORES_5M="$busy5"
   export BIONIC_PROBE_FREE_PCT="$(( 100 - used ))"
   export BIONIC_PROBE_FREE_MB="$(( total * (100 - used) / 100 ))"
   export BIONIC_PROBE_LOAD_1M="$busy" BIONIC_PROBE_SWAP_PCT=0
