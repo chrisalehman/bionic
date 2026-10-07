@@ -2099,6 +2099,7 @@ te_turn "$TE_DP" plain false A:w9-T13
 expect_contains "TE15 a half-filled gap keeps the fill's line" "launched 1 of 2" "$(te_first)"
 expect_contains "TE15b …and its detail names the entry owed" \
   "tasks: dispatched T13 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "§LAUNCHED: a launch whose row carries row= counts as that row's launch (wave-28 T7; REQ-3 AC-3.4, D17)"

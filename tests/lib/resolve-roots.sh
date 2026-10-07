@@ -244,13 +244,10 @@ _bionic_pin_open() {  # _bionic_pin_open <dir> [any] — succeeds when another u
   return 1
 }
 # The walk takes an absolute path only: bionic_interpreter_pin refuses a relative root before it calls it (T69), and a
-# link's target is made absolute below. Its two relative-path rules (`cur="."` here, the `.` default in
-# _bionic_pin_parent) are kept on purpose, unreachable from the function: the no-absolute-test mutant of the suite
-# (7.86) walks a relative root from `.`, which is the defect it shows; with the rule removed it would walk `tmp/r`
-# from `/` and judge `/tmp`, a path nobody named.
+# link's target is made absolute below. Handed a relative path anyway it walks it from `/`, as if it began there; it has
+# no rule for `.`, and none is needed (the no-absolute-test mutant of the suite, 7.86, is handed one and builds).
 _bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why a component of <path> can be replaced; nothing when none can
   local rest="$1" cur="" holder part target linkowner why=""
-  case "$1" in /*) ;; *) cur="." ;; esac
   [ "$2" -le 16 ] || { echo "${3:-$1} leads through more than 16 links"; return; }
   while [ -n "$rest" ] && [ -z "$why" ]; do
     part="${rest%%/*}"
@@ -276,7 +273,6 @@ _bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why
 }
 _bionic_pin_parent() {  # _bionic_pin_parent <root> — prints why <root>'s parent is open; nothing when it is not
   local parent="${1%/*}" why=""
-  [ "$parent" != "$1" ] || parent="."
   [ -n "$parent" ] || parent="/"
   why="$(_bionic_pin_links "$parent" 0)"
   if [ -n "$why" ]; then echo "$why"
