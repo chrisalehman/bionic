@@ -473,8 +473,8 @@ MUT_TREE="$TMPROOT/mut-tree"
 mk_tree "$MUT_TREE"
 cp "$PROBE_TREE/tests/probe.test.sh" "$MUT_TREE/tests/probe.test.sh"
 MUT_SEAM="$MUT_TREE/tests/lib/resolve-roots.sh"
-anchor -E "$MUT_SEAM" '^  PATH="\$dir:\$PATH"$' 1
-grep -vE '^  PATH="\$dir:\$PATH"$' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
+anchor -E "$MUT_SEAM" '^  PATH="\$phys:\$PATH"' 1
+grep -vE '^  PATH="\$phys:\$PATH"' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
 expect_eq "6.3 the mutant seam still parses" "0" "$(bash -n "$MUT_SEAM" >/dev/null 2>&1; echo $?)"
 if [ -n "$ALT_BASH" ]; then
   : > "$TMPROOT/probe.out"
