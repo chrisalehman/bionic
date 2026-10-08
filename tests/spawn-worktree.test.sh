@@ -1147,6 +1147,59 @@ landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
 expect_eq "…and the working branch moved to the landed commit" \
   "$(git -C "$RDB" rev-parse wave/x)" "$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
 
+section "§STAMP-DETACHED: a detached run's stamp, written with nobody waiting, is accepted by the stamp reader and ready lands over it (wave-30 T8; D6, AC-3.6)"
+#
+# `booked.sh --detach` runs ask → run → end → stamp in a session of its own, so the stamp is
+# written by the detached side at the run's end, after the caller is gone. Each world below starts
+# one detached run of its row tree's suite from a caller whose whole process group is then killed
+# with SIGKILL, and waits for the run's log to end `rc=`. THE READER is `_wt_stale_proof`
+# (lib/worktree.sh), the one every stamp consumer calls (`land`; T13's bounded proof): it must
+# judge the detached green stamp proof and the detached red one red, byte-compatible with the
+# foreground shim's. `ready` itself reads no stamp since wave-28 T21 (§UPGRADE up2/up3 pin that:
+# it runs the row's suites on the candidate), so its half of AC-3.6 is that it lands the tree the
+# detached run stamped, and nothing a detached run leaves behind (its log lives under the
+# project's `.bionic/tmp/runs`, not in the tree) makes the tree refused.
+SD_BOOKED="${REPO}/payload/scripts/booked.sh"
+sd_run() {  # <tree> <command> -> SD_LOG: the run's log, once it ends rc=; the caller's group is killed first
+  local t="$1" c="$2" out="$TMP/sd.$$.$RANDOM" pg i=0
+  set -m
+  ( cd "$t" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 \
+      bash "$SD_BOOKED" --detach --agent wx-T1 --suites a.test.sh -- "$c"; sleep 60 ) > "$out" 2>&1 &
+  pg=$!
+  set +m
+  while ! grep -q '^booked: started ' "$out" 2>/dev/null && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.1; done
+  SD_LOG="$(sed -n 's/^booked: started .*log=\([^ ]*\).*/\1/p' "$out" | head -n 1)"
+  kill -KILL -- "-$pg" 2>/dev/null
+  i=0
+  while ! tail -n 1 "$SD_LOG" 2>/dev/null | grep -q '^rc=' && [ "$i" -lt 300 ]; do i=$((i + 1)); sleep 0.1; done
+}
+SDA="$(rd_world)"
+expect_nonempty "(fixture) the green world was made" "$SDA"
+SDA_T1="$SDA/.worktrees/T1"
+SDA_HEAD="$(git -C "$SDA_T1" rev-parse HEAD)"
+sd_run "$SDA_T1" "bash tests/a.test.sh"
+expect_nonempty "SD.1 the detached run started and named its log" "$SD_LOG"
+expect_eq "SD.2 its caller's group was killed and the run still ended rc=0" "rc=0" "$(tail -n 1 "$SD_LOG" 2>/dev/null)"
+SDA_STAMP="$(tail -n 1 "$(git -C "$SDA_T1" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null)"
+expect_match "SD.3 the detached side stamped T1's own git dir at its head, clean, green, its suite" \
+  "stamp/v1|head=${SDA_HEAD}|dirty=0|rc=0|at=*|suites=a.test.sh|cmd=bash tests/a.test.sh" "$SDA_STAMP"
+SDA_PROOF="$(bash -c '. "$1" 2>/dev/null; _wt_stale_proof "$2" "$3"; echo "rc=$?"' _ "${REPO}/payload/scripts/lib/worktree.sh" "$SDA_T1" "$SDA_HEAD" 2>&1)"
+expect_eq "SD.4 the stamp reader (_wt_stale_proof) judges it proof (rc 1), printing that very line" \
+  "$(printf '%s\nrc=1' "$SDA_STAMP")" "$SDA_PROOF"
+rd_ready "$SDA_T1" --within 900
+expect_eq "SD.5 ready accepts it: LANDED (exit 0)" "0" "$RD_RC"
+expect_match "SD.6 …printing LANDED" "LANDED T1 *" "$RD_OUT"
+
+SDB="$(rd_world)"
+expect_nonempty "(fixture) the red world was made" "$SDB"
+SDB_T1="$SDB/.worktrees/T1"
+SDB_HEAD="$(git -C "$SDB_T1" rev-parse HEAD)"
+sd_run "$SDB_T1" "exit 1"
+expect_eq "SD.7 a red detached run ends its log rc=1" "rc=1" "$(tail -n 1 "$SD_LOG" 2>/dev/null)"
+SDB_PROOF="$(bash -c '. "$1" 2>/dev/null; _wt_stale_proof "$2" "$3"; echo " rc=$?"' _ "${REPO}/payload/scripts/lib/worktree.sh" "$SDB_T1" "$SDB_HEAD" 2>&1)"
+expect_match "SD.8 the same reader judges the red detached stamp red (rc 0), naming its suite" \
+  "why=red rc=1 suite=a.test.sh head=${SDB_HEAD} — * rc=0" "$SDB_PROOF"
+
 section "§UPGRADE: a run open at upgrade continues — a 1.12.0 plan lands by ready, its stamp is never read, a bare land names the new verbs (wave-28 T21; D26, REQ-2 AC-2.11, REQ-7 AC-7.2)"
 #
 # The fixture is a plan AS 1.12.0 WROTE IT (tests/fixtures/upgrade-1.12.0): the `source=probe` budget line, rows
