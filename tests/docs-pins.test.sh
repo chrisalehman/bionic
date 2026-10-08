@@ -5017,16 +5017,18 @@ expect_nonempty "W27-42mp precondition: the doctored copy still carries the owne
 W27_CHECKS_DIR="${REPO}/payload/context"
 W27_STRUCT="${W27_CHECKS_DIR}/checks-structure.md"
 W27_QUESTIONS="evidence adversarial structure"
-W27_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction"
-W27_CAP=4650  # 4,500 until wave-28 T48 (A-orch-43): the structure checks say when a check is FAIL
+W27_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction over-engineering"
+W27_CAP=5000  # 4,500 until wave-28 T48 (A-orch-43); 4,650 until wave-30 T4 (A-T4.1): the security
+              # clause, the per-row power line and the may-raise section with over-engineering
 W27_WHOLE='this is not a second read of each piece'
 # w27_ids_in <file> -> the structure check ids the file names as whole words, one per line.
 w27_ids_in() {
   local id
   for id in $W27_IDS; do _flatten "$1" | grep -qwF -- "$id" && printf '%s\n' "$id"; done
 }
-# w27_check_line <file> <id> -> the file's check line for the id, in the interface form.
-w27_check_line() { grep -F -- "- **$2** — " "$1" 2>/dev/null | head -1; }
+# w27_check_line <file> <id> -> the file's check line for the id, in the interface form: `- **<id>** — `
+# for a check that must be answered, `- `<id>` — ` for one the reader may raise (wave-30 T4).
+w27_check_line() { grep -F -e "- **$2** — " -e "- \`$2\` — " "$1" 2>/dev/null | head -1; }
 # w27_cap_verdict <file> -> "within" when the file is at most the cap, "over" when past it or unreadable.
 w27_cap_verdict() {
   local n; n="$(wc -c < "$1" 2>/dev/null | tr -cd '0-9')"
@@ -5058,13 +5060,13 @@ for _q in $W27_QUESTIONS; do
   expect_eq "W27-T8d: …and the file ends with the record form, every line in order" \
     "$(w27_form_want "$_q")" "$(w27_record_form "$_f")"
 done
-# W27-T8bm: the cap verdict T8b reads, at the boundary. The sizes are the Interfaces table's
-# 4,650 bytes typed here, not read from W27_CAP, so a raised cap or a removed check goes red.
+# W27-T8bm: the cap verdict T8b reads, at the boundary. The sizes are the cap's 5,000 bytes
+# (wave-30 T4, A-T4.1) typed here, not read from W27_CAP, so a raised cap or a removed check goes red.
 W27_AT_CAP="$TMP/w27-at-cap.md"; W27_PAST_CAP="$TMP/w27-past-cap.md"
-head -c 4650 /dev/zero | tr '\0' 'x' > "$W27_AT_CAP"
-head -c 4651 /dev/zero | tr '\0' 'x' > "$W27_PAST_CAP"
-expect_eq "W27-T8bm precondition: a file of exactly 4,650 bytes reads within the cap" "within" "$(w27_cap_verdict "$W27_AT_CAP")"
-expect_eq "W27-T8bm: a file of 4,651 bytes, one past the cap, is caught" "over" "$(w27_cap_verdict "$W27_PAST_CAP")"
+head -c 5000 /dev/zero | tr '\0' 'x' > "$W27_AT_CAP"
+head -c 5001 /dev/zero | tr '\0' 'x' > "$W27_PAST_CAP"
+expect_eq "W27-T8bm precondition: a file of exactly 5,000 bytes reads within the cap" "within" "$(w27_cap_verdict "$W27_AT_CAP")"
+expect_eq "W27-T8bm: a file of 5,001 bytes, one past the cap, is caught" "over" "$(w27_cap_verdict "$W27_PAST_CAP")"
 # W27-T8dm: the record form cut, reordered, or followed by another section is caught.
 W27_FORM_CUT="$TMP/w27-form-cut.md"; W27_FORM_SWAP="$TMP/w27-form-swap.md"; W27_FORM_TAIL="$TMP/w27-form-tail.md"
 anchor "$W27_STRUCT" 'scope: <piece|whole>' 1
@@ -5085,8 +5087,8 @@ for _id in $W27_IDS; do
   expect_contains "W27-T8f: …and its line names the case it fails on" "Fails when " "$_line"
 done
 W27_NOFAIL="$TMP/w27-nofail.md"
-anchor "$W27_STRUCT" '- **single-job** — ' 1
-sed '/^- \*\*single-job\*\* — /s/Fails when /Wrong when /' "$W27_STRUCT" > "$W27_NOFAIL" 2>/dev/null
+anchor "$W27_STRUCT" '- `single-job` — ' 1
+sed '/^- `single-job` — /s/Fails when /Wrong when /' "$W27_STRUCT" > "$W27_NOFAIL" 2>/dev/null
 expect_nonempty "W27-T8fm precondition: the doctored copy still has the single-job line" \
   "$(w27_check_line "$W27_NOFAIL" single-job)"
 expect_absent "W27-T8fm: a single-job line with no failing case is caught" \
@@ -6143,7 +6145,7 @@ expect_eq "W28-71D9b: …and dispatch.md no longer carries the one it cut" "" \
 # extractor, and a doctored copy proves each arm goes red. HERMETIC: committed finals by path.
 W28S_BLOCK="${BLOCK_DIR}/severity.md"
 W28S_FILE="${REPO}/payload/context/severity.md"
-W28S_CAP=2700
+W28S_CAP=3700  # 2,700 until wave-30 T4 (A-T4.2): the debt table sits beside the harm table
 W28S_POINTER='Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.'
 W28S_AGE='Age does not lower a rating. Say "older than the reviewed range" beside it.'
 W28S_SPEC=""
@@ -6191,12 +6193,17 @@ w28s_finding_form() {
 }
 
 expect_true "W28-S0: payload/context/severity.md is rendered and non-empty" test -s "$W28S_FILE"
-expect_eq "W28-S1: AC-8.2 — the scale's block is the spec's \"The severity scale\", word for word" \
-  "$W28S_SPEC" "$(cat "$W28S_BLOCK" 2>/dev/null)"
+# RE-POINTED (wave-30 T4; AC-11.1, A-T4.2): the block OPENS with the spec's scale, word for word,
+# and the debt table follows it (§W30-DEBT-TABLE); w28s_harm reads the opening as many lines as the
+# spec has.
+W28S_SPEC_LINES="$(printf '%s\n' "$W28S_SPEC" | awk 'END { print NR }')"
+w28s_harm() { head -n "$W28S_SPEC_LINES" "$1" 2>/dev/null; }
+expect_eq "W28-S1: AC-8.2 — the scale's block opens with the spec's \"The severity scale\", word for word" \
+  "$W28S_SPEC" "$(w28s_harm "$W28S_BLOCK")"
 W28S_DOC1="$TMP/w28s-reworded.md"
 sed 's/the tables decide/the brief decides/' "$W28S_BLOCK" > "$W28S_DOC1" 2>/dev/null
 expect_contains "W28-S1m precondition: the doctored copy keeps the rest of the scale" "S1 Critical" "$(cat "$W28S_DOC1")"
-expect_ne "W28-S1m: a scale with one rule reworded is caught" "$W28S_SPEC" "$(cat "$W28S_DOC1")"
+expect_ne "W28-S1m: a scale with one rule reworded is caught" "$W28S_SPEC" "$(w28s_harm "$W28S_DOC1")"
 same_everywhere "W28-S2" "the scale is one text in the block and the rendered file" "$W28S_BLOCK" SEVERITY "$W28S_FILE"
 W28S_BYTES="$(wc -c < "$W28S_FILE" 2>/dev/null | tr -cd '0-9')"
 expect_true "W28-S3: …and fits the ${W28S_CAP}-byte cap (${W28S_BYTES:-missing} B)" test "${W28S_BYTES:-99999}" -le "$W28S_CAP"
@@ -6281,7 +6288,9 @@ section "§W28-C (wave-28 T48; REQ-8, D19, D20): the structure checks say a chec
 # its case holds. Structure only (A-orch-43): the adversarial reader writes no `check:` line.
 # Each absence sits beside a positive on the same extractor, and a doctored copy proves each arm
 # goes red. HERMETIC: committed finals by path.
-W28C_SENTENCE='A check answers FAIL only when its failing case holds for a finding the table in `severity.md` sends to fix, FLAG when it holds for a finding that table defers or notes, or on a doubt you write as a finding, and PASS otherwise.'
+# RE-POINTED (wave-30 T4; AC-9.5, AC-11.1, A-T4.3): `reuse` and `one-site` are rated on the debt
+# table, so FLAG is a debt finding and FAIL only a harm finding the table sends to fix.
+W28C_SENTENCE='A check answers FLAG when its failing case holds, a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity; FAIL only when copies already disagree where a user meets it, a finding the harm table sends to fix; PASS otherwise.'
 W28C_OLD='FAIL (its failing case holds; name the file and line)'
 # w28c_count <file> -> how many times the file's flattened text carries the sentence.
 w28c_count() { _flatten "$1" | /usr/bin/grep -oF -- "$W28C_SENTENCE" | /usr/bin/grep -c .; }
@@ -6291,7 +6300,7 @@ expect_eq "W28-C2: …and its block says it once" "1" "$(w28c_count "${BLOCK_DIR
 W28C_DOC2="$(w26_doctor "${BLOCK_DIR}/checks-structure.md" "$W28C_SENTENCE")"
 expect_eq "W28-C2m: a block that says it twice is caught" "2" "$(w28c_count "$W28C_DOC2")"
 W28C_DOC1="$TMP/w28c-cut.md"
-sed 's/A check answers FAIL only/A check is FAIL only/' "${REPO}/payload/context/checks-structure.md" > "$W28C_DOC1" 2>/dev/null
+sed 's/A check answers FLAG when/A check is FLAG when/' "${REPO}/payload/context/checks-structure.md" > "$W28C_DOC1" 2>/dev/null
 expect_contains "W28-C1m precondition: the reworded copy keeps the rest of the file" "## The record" "$(cat "$W28C_DOC1")"
 expect_eq "W28-C1m: a structure file with the sentence reworded is caught" "" "$(w26_hits "$W28C_SENTENCE" "$W28C_DOC1")"
 expect_eq "W28-C3: the structure checks no longer say FAIL whenever the case holds" "" \
@@ -6497,5 +6506,123 @@ W28F_CUT="$TMP/w28f-no-floor-row.md"
 expect_nonempty "W28-F2m precondition: the cut copy keeps the declared check row" \
   "$(w26_hits '| declared check |' "$W28F_CUT")"
 expect_eq "W28-F2m: …and a table missing the declared floor row is caught" "" "$(w26_hits "$W28F_ROW" "$W28F_CUT")"
+
+
+# ============================================================
+section "§W30-CHECKS-CLAUSES (wave-30 T4; REQ-9 AC-9.5, D2, D3): the checks files carry the rulings"
+# ============================================================
+# WHAT THIS OWNS. The four clauses Step 2 ruled into the checks files (design-ledger Δ2): a named
+# security / trust-boundary clause and a Known-limits pointer in the adversarial checks; the per-row
+# test-power question in the evidence checks, beside the whole-change revert-and-watch; and in the
+# structure checks, `reuse` and `one-site` as the only checks that must be answered, the five SOLID
+# checks and over-engineering as findings the reader may raise. "Must be answered" is what
+# `proof_reading` (lib/proof.sh) reads: the ids it owes a `check:` line for are the file's
+# `- **<id>**` items, so the pin runs that function on the shipped file. Each absence sits beside a
+# positive on the same extractor, and a doctored copy proves each arm goes red. HERMETIC: committed
+# finals by path; records and doctored copies under $TMP.
+W30C_ADV="${REPO}/payload/context/checks-adversarial.md"
+W30C_EVID="${REPO}/payload/context/checks-evidence.md"
+W30C_STRUCT="${REPO}/payload/context/checks-structure.md"
+W30C_LIB="${REPO}/payload/scripts/lib/proof.sh"
+W30C_SEC='**Security and trust boundaries.** Ask of every change: what untrusted input reaches it, what permission it exercises or gates, what it can expose, and whether it fails closed.'
+W30C_OPS='Ask too what happens when a dependency is missing, and whether install, upgrade and remove leave consistent state.'
+W30C_KL="**Known limits.** Read the project's Known limits where it keeps them, such as its changelog. A change that reopens a listed limit, or meets one without saying so, is a finding."
+W30C_POWER='Per row, also ask: does a changed condition have a test that fails when it is wrong?'
+W30C_BESIDE='leaves its row without power. Once per wave, go one step past judgment with a revert-and-watch demonstration'
+W30C_MAY='You may raise these as findings when their case holds. They are not checks: write no `check:` line for them.'
+W30C_OVER='- `over-engineering` — Does each abstraction earn its place? Fails when the change adds an abstraction, parameter or indirection with one case or one caller.'
+W30C_MAYIDS="single-job open-closed substitution narrow-interface dependency-direction over-engineering"
+
+for _w30c in "$W30C_SEC" "$W30C_OPS" "$W30C_KL"; do
+  expect_nonempty "W30-C1: AC-9.5 — checks-adversarial.md carries: ${_w30c:0:70}" "$(w26_hits "$_w30c" "$W30C_ADV")"
+done
+W30C_ADV_CUT="$TMP/w30c-adv-cut.md"
+anchor "$W30C_ADV" '**Security and trust boundaries.**' 1
+/usr/bin/grep -vF -- '**Security and trust boundaries.**' "$W30C_ADV" > "$W30C_ADV_CUT" 2>/dev/null
+expect_nonempty "W30-C1m precondition: the cut copy keeps the Known-limits pointer" "$(w26_hits "$W30C_KL" "$W30C_ADV_CUT")"
+expect_eq "W30-C1m: an adversarial file with the security clause cut is caught" "" "$(w26_hits "$W30C_SEC" "$W30C_ADV_CUT")"
+
+expect_nonempty "W30-C2: AC-9.5 — checks-evidence.md asks the per-row power question" "$(w26_hits "$W30C_POWER" "$W30C_EVID")"
+expect_nonempty "W30-C2b: …beside the whole-change revert-and-watch" "$(w26_hits "$W30C_BESIDE" "$W30C_EVID")"
+W30C_EVID_CUT="$TMP/w30c-evid-cut.md"
+sed 's/ Per row, also ask: does a changed condition have a test that fails when it is wrong?//' "$W30C_EVID" > "$W30C_EVID_CUT" 2>/dev/null
+expect_nonempty "W30-C2m precondition: the cut copy keeps the revert-and-watch" "$(w26_hits 'revert-and-watch demonstration' "$W30C_EVID_CUT")"
+expect_eq "W30-C2m: an evidence file with the per-row question cut is caught" "" "$(w26_hits "$W30C_POWER" "$W30C_EVID_CUT")"
+
+expect_nonempty "W30-C3: AC-9.5 — checks-structure.md says the may-raise checks owe no check: line" "$(w26_hits "$W30C_MAY" "$W30C_STRUCT")"
+expect_nonempty "W30-C3b: …and adds over-engineering in the may-raise class" "$(w26_hits "$W30C_OVER" "$W30C_STRUCT")"
+# w30c_section <file> <heading> -> the lines of the `## <heading>` section.
+w30c_section() { awk -v h="## $2" '/^## / { p = ($0 == h); next } p' "$1" 2>/dev/null; }
+expect_nonempty "W30-C3c precondition: the structure file has a What you may raise section" \
+  "$(w30c_section "$W30C_STRUCT" 'What you may raise')"
+for _id in $W30C_MAYIDS; do
+  expect_nonempty "W30-C3c: \`${_id}\` is listed under What you may raise" \
+    "$(w30c_section "$W30C_STRUCT" 'What you may raise' | /usr/bin/grep -F -- "- \`${_id}\` — ")"
+done
+
+# The ids proof_reading owes a check: line for, read by the function the verb runs. A record that
+# answers reuse and one-site alone registers; one that leaves one-site out is refused; and a copy
+# of the file that makes single-job a `- **<id>**` item again refuses the two-line record.
+W30C_REC="$TMP/w30c-rec"; mkdir -p "$W30C_REC"
+w30c_rec() {  # <file> <check line>… -> a structure reading answering the given checks
+  local f="$1"; shift
+  { printf 'reviewed: aaaaaaaaaa..bbbbbbbbbb\nquestion: structure\nresult: pass\nscope: piece\n'
+    for _l in "$@"; do printf '%s\n' "$_l"; done; } > "$f"
+}
+w30c_read() { bash -c '. "$1" && proof_reading "$2" structure "$3"' _ "$W30C_LIB" "$1" "$2" 2>/dev/null; }
+w30c_rec "$W30C_REC/two.md" 'check: reuse PASS compared with lib/' 'check: one-site PASS compared with lib/'
+w30c_rec "$W30C_REC/one.md" 'check: reuse PASS compared with lib/'
+expect_eq "W30-C4: AC-9.5 — the shipped structure checks accept a record answering reuse and one-site alone" \
+  "pass piece aaaaaaaaaa" "$(w30c_read "$W30C_REC/two.md" "$W30C_STRUCT")"
+expect_contains "W30-C4b: …and still refuse one that leaves one-site unanswered" "leaves one-site unanswered" \
+  "$(w30c_read "$W30C_REC/one.md" "$W30C_STRUCT")"
+W30C_DEMAND="$(w26_doctor "$W30C_STRUCT" '- **single-job** — Does each unit have one reason to change?')"
+expect_contains "W30-C4m: a structure file that demands single-job again is caught" "leaves single-job unanswered" \
+  "$(w30c_read "$W30C_REC/two.md" "$W30C_DEMAND")"
+
+# ============================================================
+section "§W30-DEBT-TABLE (wave-30 T4; REQ-11 AC-11.1, D2, P2): severity.md rates debt by kind beside the harm table"
+# ============================================================
+# WHAT THIS OWNS. A finding is classed by who pays and when (design-ledger P3): harm on the
+# severity tables, debt on a table of its own. Pinned here: the rendered scale carries the debt
+# table after the harm tables, inside the scale's span; each of its three kinds has disposition
+# burn-when-touched and no severity; the rule says a debt finding names its concept and sites and
+# where the orchestrator records it; and the structure checks rate `reuse` and `one-site` on that
+# table. Each absence sits beside a positive on the same extractor, and a doctored copy proves each
+# arm goes red. HERMETIC: committed finals by path.
+W30D_HEAD='| Kind | What it is | Disposition |'
+W30D_RULE='A debt finding names its concept and its sites, never a severity'
+W30D_LINE='`debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`'
+W30D_BURN='Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it in `record/<run>/debt.md` at the sitting, and the next row whose Files touch the concept burns it inside its own work.'
+W30D_STRUCT='a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity'
+# w30d_rows <file> -> the debt table's rows inside the scale's span, one per line.
+w30d_rows() {
+  marker_span "$1" SEVERITY | awk -v h="$W30D_HEAD" '$0 == h { p = 1; next } p && /^\|---/ { next } p && /^\|/ { print; next } p { exit }'
+}
+expect_nonempty "W30-D1: AC-11.1 — the rendered severity.md carries the debt table's header in the scale" \
+  "$(marker_span "$W28S_FILE" SEVERITY | /usr/bin/grep -xF -- "$W30D_HEAD")"
+expect_eq "W30-D1b: …after the harm table's last row" "1" \
+  "$(marker_span "$W28S_FILE" SEVERITY | awk -v h="$W30D_HEAD" '/^\| S4 \| note \| note \|$/ { s = NR } $0 == h && s && NR > s { print 1; exit }')"
+W30D_ROWS="$(w30d_rows "$W28S_FILE")"
+for _k in duplicate unpinned-pair one-case-abstraction; do
+  expect_contains "W30-D2: the debt table rates \`${_k}\` burn-when-touched" "burn-when-touched: \`<concept>\`" \
+    "$(printf '%s\n' "$W30D_ROWS" | /usr/bin/grep -F -- "| ${_k} |")"
+done
+expect_eq "W30-D2b: …in three rows" "3" "$(printf '%s\n' "$W30D_ROWS" | /usr/bin/grep -c '^|')"
+expect_eq "W30-D2c: …none of which names a severity level" "" "$(printf '%s\n' "$W30D_ROWS" | /usr/bin/grep -E 'S[1-4]')"
+W30D_DOC2="$TMP/w30d-sev-row.md"
+sed 's/^| duplicate | \(.*\) | burn-when-touched: `<concept>` |$/| duplicate | \1 | S3 |/' "$W28S_FILE" > "$W30D_DOC2" 2>/dev/null
+expect_nonempty "W30-D2m precondition: the doctored copy keeps its duplicate row" "$(w30d_rows "$W30D_DOC2" | /usr/bin/grep -F '| duplicate |')"
+expect_nonempty "W30-D2m: a debt row rated by a severity is caught" "$(w30d_rows "$W30D_DOC2" | /usr/bin/grep -E 'S[1-4]')"
+for _w30d in "$W30D_RULE" "$W30D_LINE" "$W30D_BURN"; do
+  expect_nonempty "W30-D3: AC-11.1 — severity.md says: ${_w30d:0:70}" "$(w26_hits "$_w30d" "$W28S_FILE")"
+done
+W30D_DOC3="$TMP/w30d-no-table.md"
+anchor "$W28S_FILE" "$W30D_HEAD" 1
+/usr/bin/grep -vxF -- "$W30D_HEAD" "$W28S_FILE" > "$W30D_DOC3" 2>/dev/null
+expect_nonempty "W30-D3m precondition: the cut copy keeps the harm table" "$(marker_span "$W30D_DOC3" SEVERITY | /usr/bin/grep -F '| S1 Critical |')"
+expect_eq "W30-D3m: a scale with the debt table's header cut is caught" "" "$(w30d_rows "$W30D_DOC3")"
+expect_nonempty "W30-D4: AC-11.1 — the structure checks rate reuse and one-site on the debt table, by kind" \
+  "$(w26_hits "$W30D_STRUCT" "${REPO}/payload/context/checks-structure.md")"
 
 finish
