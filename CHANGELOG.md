@@ -266,18 +266,18 @@ the first line of a refusal to 100.
   `finding:` lines, rates a finding outside S1 to S4 or a reach other than `on` or `off`, names no
   `<path>:<line>` or `-`, sends a finding to fix without a `shown:` command or an `unsure:` line, writes
   a `priority:` the table does not give, or says a `result:` its findings do not derive; each line
-  begins `REFUSED — the reading <record> …` and says what to write. For `structure`, a `check:` that answers
+  begins `poker: REFUSED — the reading <record> …` and says what to write. For `structure`, a `check:` that answers
   FAIL beside no finding to fix, and a finding to fix beside no FAIL check, are refused the same way.
   A record path registered again for another pass:
   `poker: REFUSED — <record> is already registered at <12 hex>, not <12 hex>: write the pass to a new record path. The plan is unchanged.`
 - `session-poker.sh finding-check`: refused, with the plan unchanged, for a check the plan does not owe, a
   check already settled, a check record that is missing, a link, outside the record directory, with no
   `written-by:` or written by the finding's reviewer or the code's writer; and `current 8`:
-  `REFUSED — current: 8 waits on each check a finding owes; these check: lines are open (no settled=, no refuted):`.
+  `poker: REFUSED — current: 8 waits on each check a finding owes; these check: lines are open (no settled=, no refuted):`.
 - `session-poker.sh finding-move`: refused, with the plan unchanged, for a finding the plan does not register,
   a finding its check refuted, an S1 moved to defer, a repository with no `git user.name`, a session whose
   transcript cannot be read, and words that stand in no prompt the user typed in this session:
-  `REFUSED — the words "<words>" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged.`
+  `poker: REFUSED — the words "<words>" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged.`
   and a quote too short to be a decision:
   `poker: REFUSED — the words "<words>" are too short to be the user's decision; quote at least 3 of their words, or their whole prompt. The plan is unchanged.`
 - `session-poker.sh floor-run` for a project that declares no `floor:`, for a plan whose working branch no
@@ -462,8 +462,10 @@ Known limits, carried to the next release:
 - Known limit: quote the user's words without the typographic quotes that surround them; a `’` inside a
   word (`don’t`) is fine.
 - Known limit: a suite call that carries a `$( )`, a pipe, a `&`, a backquote or a subshell between its
-  `cd` and the suite may be stamped against the main checkout; keep the call in the doctrine's suite-call
-  form (`cd <tree> || exit 1; LOG=…; bash tests/run.sh --only <suite> > "$LOG" 2>&1`) and read the stamp.
+  `cd` and the suite may be stamped against the main checkout, and so may the `> "$LOG"` redirect form, a
+  `cd "$VAR"`, a `cd` behind `||`, and a variable assigned in the call and used in the suite segment; keep
+  the call in the doctrine's suite-call form
+  (`cd <tree> || exit 1; LOG=…; bash tests/run.sh --only <suite> 2>&1 | tee "$LOG"`) and read the stamp.
 - Known limit: under `claude -p` in auto mode the CLI's own classifier can deny the Patrol's recurring
   `CronCreate` as unauthorized persistence, so no clock is armed until you approve the job; the session
   reports that the Patrol is not running and asks you to.
@@ -495,11 +497,13 @@ Known limits, carried to the next release:
 - Known limit: under `claude -p` the prompt's transcript entry carries no `origin`, so `user_said` finds
   no words the user typed and `finding-move` is refused; make a move in an interactive session.
 - Known limit: a writer dispatched in the foreground cannot land through `ready` while it runs — its
-  roster launch row is written when it returns, so `ready` finds no row and refuses `no-launch-row`;
-  dispatch writers in the background, as the doctrine says.
+  plan row's worktree cell is filled only when the dispatch call returns, so `ready` falls back to the
+  branch name; dispatch writers in the background, as the doctrine says.
 - Known limit: after a foreground writer's landing, the owed `TaskStop` finds the agent already
   completed, so the stop guard never fires and the tick keeps its row open (`stand-down deferred`) until
   the roster is swept; a background writer is stopped as the owed line says.
+- Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not the
+  scale; readers holding a code question, and the exam's readers, grade by the scale.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
