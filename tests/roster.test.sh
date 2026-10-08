@@ -758,7 +758,12 @@ R19_PLANT s2-dead ghost confirmed
 touch -t 202001010000 "$R19_D/roster-s2-dead.state"
 R19_PLANT s4 other confirmed
 ln -s "$R19_D/roster-s1.state" "$R19_D/roster-s3-link.state"
-printf 'roster-state/v1|status=confirmed|session=s5|name=bystander|deliverable=|name=ghost|plan=none\n' > "$R19_D/roster-s5.state"
+# s5's row is the writer's, then forged: no writer emits a duplicate key, so the second `name=` is spliced
+# into roster_row's own output rather than the row being typed out (S17, cross-gate-agreement).
+lib roster_row status=confirmed session=s5 name=bystander agent_id= launched_at=2026-10-07T00:00:00Z plan=none \
+  | sed 's/|plan=none$/|name=ghost|plan=none/' > "$R19_D/roster-s5.state"
+expect_contains "R19 fixture: s5's row carries the spliced duplicate name= after its own" \
+  "|name=bystander|" "$(grep -F '|name=ghost|plan=none' "$R19_D/roster-s5.state")"
 R19_GOT="$(lib roster_sessions_with_name "$R19_D" ghost)"
 expect_eq "R19a two rosters hold the name: this session's kind and a dead session's, the last row's status on each" \
   "$(printf 's1|identified\ns2-dead|confirmed')" "$R19_GOT"

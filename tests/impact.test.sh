@@ -441,8 +441,11 @@ expect_eq "real: …by NAMING the path, not merely by copying the payload" \
 # NOT VACUOUS. The row above would pass against a program that reported one
 # constant reason for this suite, so the complement is asserted over the same
 # suite: a payload file close-out.test.sh does NOT name answers `payload-copy`.
+# The example is a data file, not a script: a script can come to be reached
+# transitively as the tree grows (lib/width.sh did, through close-out.sh's
+# wave-28 reads), while a file nothing sources keeps only the copier's edge.
 expect_eq "real: …while a payload file that suite does NOT name is only a payload-copy" \
-  "payload-copy" "$(reason_for "$REPO" close-out.test.sh payload/scripts/lib/width.sh | cut -d: -f1)"
+  "payload-copy" "$(reason_for "$REPO" close-out.test.sh payload/ccstatusline/settings.json | cut -d: -f1)"
 
 # REQ-4 AC-4.1 (D6) on the real tree — the exact fixture research row 4a proved
 # live at main @ c0e2c18: `bash tests/lib/impact.sh tests/brand-new-thing.test.sh`
