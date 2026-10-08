@@ -176,26 +176,28 @@ expect_true "non-numeric argument is refused (non-zero exit)" [ "$?" -ne 0 ]
 resources_budget 8 8 >/dev/null 2>&1
 expect_true "a missing argument is refused (non-zero exit)" [ "$?" -ne 0 ]
 
-# The Step-0 skill text (REQ-5, AC-5.1) documents a two-call recipe, not a single
-# zero-argument shortcut. This row reads the RENDERED sentence itself — never a copy
-# pasted into this suite — so a future edit that drifts the doc from the real API goes
-# red here, not silently. It then runs the recipe exactly as the sentence describes:
-# `resources_probe`'s output feeds `resources_budget`'s three positional arguments.
+# The Step-0 skill text (REQ-5, AC-5.1) names the probe and what its estimate is worth.
+# This row reads the RENDERED sentence itself — never a copy pasted into this suite — so
+# a future edit that drifts the doc from the real API goes red here, not silently. It
+# then runs the call exactly as the sentence describes it.
+#
+# THE BUDGET CALL LEFT THE DOCTRINE ON PURPOSE (wave-28 T22; tests/docs-pins.test.sh
+# W28-74e pins `resources_budget` out of every rendered doctrine file). Width is the
+# gate's, and the probe's estimate caps nothing, so Step 0 no longer tells a reader to
+# derive a `parallel-budget:` from the probe. `resources_budget` itself is §B's subject.
 STEP0_RECIPE_MD="$REPO_ROOT/skills/canonical-sdlc/steps/0.md"
 if [ -r "$STEP0_RECIPE_MD" ]; then
   STEP0_RECIPE_FLAT="$(tr '\n' ' ' < "$STEP0_RECIPE_MD")"
   expect_true "Step-0 skill text names the probe call verbatim" \
-    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F '`resources_probe` prints `cores=')" ]
-  expect_true "Step-0 skill text names the budget call's three positional args verbatim" \
-    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F '`resources_budget <cores> <mem_gb> <disk_free_gb>`')" ]
+    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F '`resources_probe` prints `cores=… mem_gb=… disk_free_gb=…`')" ]
+  expect_true "Step-0 skill text says the probe's estimate caps nothing" \
+    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F "the probe's estimate, which caps nothing")" ]
+  expect_eq "…and no longer tells a reader to derive a budget from it (T22)" \
+    "" "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -oF 'resources_budget')"
 
-  RECIPE_OUT="$(
-    p="$(resources_probe)"
-    c="$(field "$p" cores)"; m="$(field "$p" mem_gb)"; d="$(field "$p" disk_free_gb)"
-    resources_budget "$c" "$m" "$d"
-  )"
-  expect_regex "the rendered sentence's two calls, run in sequence, print a writers= line" \
-    '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+$' "$RECIPE_OUT"
+  RECIPE_OUT="$(resources_probe)"
+  expect_regex "the probe the sentence names prints the three keys it lists, in order" \
+    '^cores=[0-9]+ mem_gb=[0-9]+ disk_free_gb=[0-9]+ ' "$RECIPE_OUT"
 else
   echo "FAIL: $STEP0_RECIPE_MD is not readable"
 fi
