@@ -216,7 +216,7 @@ own standing duties and model:
 | Role | Model | What it does |
 |---|---|---|
 | `researcher` | Opus | Reads code and docs, returns a summary with `file:line` citations. Cannot write. |
-| `test-runner` | Haiku | Runs suites and reports every result. Never fixes, never re-runs to green. |
+| `test-runner` | Sonnet | Runs suites and reports every result. Never fixes, never re-runs to green. |
 | `implementor` | Sonnet | Executes a slice mechanically. The plan is literal; ambiguity means stop and ask. |
 | `senior-implementor` | Opus | Executes slices that need judgment, and root-cause debugging. Logs every call it made. |
 | `auditor` | Opus | At the verify gate and, at the rigors that deal it `evidence`, at Step 6, tries to falsify the evidence, never the code. Read-only on tracked files; writes its own record through the shell. |
