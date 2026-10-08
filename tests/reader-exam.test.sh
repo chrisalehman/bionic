@@ -21,7 +21,8 @@
 #   §KEY      `exam_key` on planted keys: three lines for `clean`, six for every other
 #             sample: a `names:` line, whose alternatives are separated by ` | `, then a
 #             `finding-file:` line and a `finding-rating:` line whose every rating the priority
-#             table sends to fix (wave-28 T18, D22).
+#             table sends to fix (wave-28 T18, D22), or, on a debt sample, a `finding-kind:` line
+#             naming a kind of the debt table (wave-30 T22, D2).
 #   §SCORE    `exam_score` (tests/reader-exam/score.sh, README step 5) on the real keys: a
 #             record is met only on the key's question, with the key's result, one of its
 #             tokens and one of its `names:` alternatives, and a declared `finding:` line on
@@ -271,6 +272,13 @@ exam_key() {
     sed -n 5p "$key" | grep -Eq '^finding-file: [^ ]' || { echo "red: $name's key has no finding-file: line"; return 1; }
     ! sed -n 5p "$key" | sed 's/^finding-file: //' | awk -F ' [|] ' '{ for (i = 1; i <= NF; i++) if ($i ~ /^[[:blank:]]*$/ || $i ~ /[[:blank:]]/) e = 1 } END { exit !e }' \
       || { echo "red: $name's finding-file: line has an empty alternative or one holding a blank"; return 1; }
+    # A DEBT SAMPLE (wave-30 T22; D2) is keyed by the debt table's kind, never a rating: its sixth line is
+    # `finding-kind: <kind>`, one of lib/proof.sh PROOF_DEBT_KINDS.
+    if sed -n 6p "$key" | grep -q '^finding-kind:'; then
+      alt="$(sed -n 6p "$key" | sed 's/^finding-kind: //')"
+      proof_word_in "$alt" "$PROOF_DEBT_KINDS" \
+        || { echo "red: $name's finding-kind: '$alt' is not a kind on the debt table"; return 1; }
+    else
     sed -n 6p "$key" | grep -Eq '^finding-rating: [^ ]' || { echo "red: $name's key has no finding-rating: line"; return 1; }
     while IFS= read -r alt; do
       # shellcheck disable=SC2086
@@ -279,6 +287,7 @@ exam_key() {
     done <<ALTS
 $(sed -n 6p "$key" | sed 's/^finding-rating: //' | awk -F ' [|] ' '{ for (i = 1; i <= NF; i++) print $i }')
 ALTS
+    fi
   fi
   n="$(awk 'END { print NR }' "$key")"
   [ "$n" = "$want" ] || { echo "red: $name's key has $n lines, not $want"; return 1; }
@@ -663,6 +672,12 @@ done
 sed 's/^finding-rating: .*/finding-rating: S2 on | S3 on/' "$K/defect.txt" > "$K/defect-rating.txt"
 expect_eq "K9: one alternative the table defers makes the line red, and the red names it" \
   "red: planted's finding-rating: 'S3 on' is not a rating the table sends to fix" "$(exam_key planted "$K/defect-rating.txt")"
+# wave-30 T22 (D2): a debt sample's sixth line is the debt table's kind, in place of the ratings.
+sed 's/^finding-rating: .*/finding-kind: one-case-abstraction/' "$K/defect.txt" > "$K/defect-kind.txt"
+expect_eq "K11: a defect key whose sixth line is finding-kind: one-case-abstraction is in shape" "key" "$(exam_key planted "$K/defect-kind.txt")"
+sed 's/^finding-rating: .*/finding-kind: smell/' "$K/defect.txt" > "$K/defect-badkind.txt"
+expect_eq "K11b: a finding-kind: outside the debt table is red, naming it" \
+  "red: planted's finding-kind: 'smell' is not a kind on the debt table" "$(exam_key planted "$K/defect-badkind.txt")"
 { cat "$K/clean.txt"; printf 'finding-file: bin/some.sh\n'; } > "$K/clean-declared.txt"
 expect_eq "K10: clean's key with a finding-file: line is red" \
   "red: clean's key has a finding- line, and clean has no defect to declare" "$(exam_key clean "$K/clean-declared.txt")"
@@ -798,6 +813,8 @@ ifs_rows "an empty IFS" ""
 for s in $(exam_samples "$REPO"); do
   [ "$s" = clean ] && continue
   key="$EXAM/samples/$s/expect.txt"
+  # A debt key has no rating to declare at: §SCORE's DK rows hold it (wave-30 T22, A-T22.10).
+  [ -z "$(sed -n 's/^finding-kind: //p' "$key")" ] || continue
   q="$(sed -n 's/^question: //p' "$key")"
   idents="$(sed -n 's/^names: //p' "$key")"
   tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
@@ -842,6 +859,7 @@ done
 for s in $(exam_samples "$REPO"); do
   [ "$s" = clean ] && continue
   key="$EXAM/samples/$s/expect.txt"
+  [ -z "$(sed -n 's/^finding-kind: //p' "$key")" ] || continue
   q="$(sed -n 's/^question: //p' "$key")"; res="$(sed -n 's/^result: //p' "$key")"
   tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
   ident="$(sed -n 's/^names: //p' "$key")"; ident="${ident%% | *}"
@@ -933,6 +951,66 @@ expect_eq "SD8: the mutant restores the described-only pass: the record that onl
   "$(sd_mut "$DCK" "$R/sd7-described.md")"
 expect_eq "SD8: …which the real scorer fails on the same record" "missed: described only" \
   "$(exam_score "$DCK" "$R/sd7-described.md")"
+
+# DEBT KEYS (wave-30 T22; D2, AC-9.3; A-orch-19). A debt sample is passed only on a `debt:` line of the
+# key's kind naming one of its files, read by proof_findings as the verb reads it; no severity, no
+# reach. The harm loops above skip a debt key (their SD4/SD6 plant an `S2 on` finding, which a debt key
+# reads as the rating miss DK5 pins). The same record, one edit apart, as SD does.
+# drec <file> <question> <result> <kind> <path> <line>... — a planted record declaring one debt finding.
+drec() {
+  local f="$1" q="$2" res="$3" kind="$4" path="$5"
+  shift 5
+  { printf '%s\n' "reviewed: aaa..bbb" "question: $q" "result: $res" "findings: 0" "debt: $kind planted_concept $path:7"; printf '%s\n' "$@"; } > "$f"
+}
+DK_N=0
+for s in $(exam_samples "$REPO"); do
+  key="$EXAM/samples/$s/expect.txt"
+  kind="$(sed -n 's/^finding-kind: //p' "$key")"
+  [ -n "$kind" ] || continue
+  DK_N=$((DK_N + 1))
+  q="$(sed -n 's/^question: //p' "$key")"; res="$(sed -n 's/^result: //p' "$key")"
+  tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
+  idents="$(sed -n 's/^names: //p' "$key")"; ident="${idents%% | *}"
+  ff_all="$(sed -n 's/^finding-file: //p' "$key")"; ff="${ff_all%% | *}"
+  expect_eq "DK0 $s: a debt key asks result: flag (debt never gives fail)" "flag" "$res"
+  n=0; ia="$idents"
+  while [ -n "$ia" ]; do
+    i1="${ia%% | *}"; [ "$i1" = "$ia" ] && ia="" || ia="${ia#* | }"
+    n=$((n + 1))
+    drec "$R/$s-dk1-$n.md" "$q" "$res" "$kind" "$ff" "$tok" "$i1"
+    expect_eq "DK1 $s: a debt line of kind $kind on $ff, with the token and names: '$i1', is met" "met: declared" "$(exam_score "$key" "$R/$s-dk1-$n.md")"
+  done
+  drec "$R/$s-dk1b.md" "$q" "$res" "$kind" "$ff" "$tok"
+  expect_eq "DK1b $s: the same record without the identifier is missed" "missed" "$(exam_score "$key" "$R/$s-dk1b.md")"
+  drec "$R/$s-dk1c.md" "$([ "$q" = evidence ] && echo adversarial || echo evidence)" "$res" "$kind" "$ff" "$tok" "$ident"
+  expect_eq "DK1c $s: the named record on a question the key does not name is missed" "missed" "$(exam_score "$key" "$R/$s-dk1c.md")"
+  grep -vE '^(findings|debt):' "$R/$s-dk1-1.md" > "$R/$s-dk2.md"
+  expect_true "DK2 $s: the described-only record still names the defect" grep -qF -- "$ident" "$R/$s-dk2.md"
+  expect_eq "DK2 $s: a record that only describes it fails, and the line says so" "missed: described only" "$(exam_score "$key" "$R/$s-dk2.md")"
+  { cat "$R/$s-dk2.md"; printf 'findings: 0\n'; } > "$R/$s-dk2b.md"
+  expect_eq "DK2b $s: findings: 0 and no debt line is described only too" "missed: described only" "$(exam_score "$key" "$R/$s-dk2b.md")"
+  other=""; for k in $PROOF_DEBT_KINDS; do [ "$k" = "$kind" ] || { other="$k"; break; }; done
+  drec "$R/$s-dk3.md" "$q" "$res" "$other" "$ff" "$tok" "$ident"
+  expect_eq "DK3 $s: a debt line of another kind ($other) on $ff is missed, naming the kind" \
+    "missed: declared as debt $other: not the kind this key asks" "$(exam_score "$key" "$R/$s-dk3.md")"
+  drec "$R/$s-dk4.md" "$q" "$res" "$kind" docs/elsewhere.md "$tok" "$ident"
+  expect_eq "DK4 $s: a debt line on another file is missed, naming the file asked for" \
+    "missed: no debt line names ${ff_all// | / or }" "$(exam_score "$key" "$R/$s-dk4.md")"
+  # The SD4/SD6 plant on a debt key: a harm-rated finding on the file is a rating miss (A-T22.10).
+  frec "$R/$s-dk5.md" "$q" "$res" S2 on "$ff" "$tok" "$ident"
+  expect_eq "DK5 $s: an S2 on finding on $ff, with no debt line, is missed as a rating a debt key does not take" \
+    "missed: declared at S2 on: a debt key asks a debt: line of kind $kind" "$(exam_score "$key" "$R/$s-dk5.md")"
+  sed "s/^debt: $kind /debt: $kind S3 /" "$R/$s-dk1-1.md" > "$R/$s-dk6.md"
+  expect_contains "DK6 $s: a debt line carrying a severity is one the verb refuses" \
+    "missed: finding lines refused: " "$(exam_score "$key" "$R/$s-dk6.md")"
+  drec "$R/$s-dk7.md" "$q" pass "$kind" "$ff" "$tok" "$ident"
+  expect_eq "DK7 $s: a declared debt line beside result: pass is missed on the result" "missed" "$(exam_score "$key" "$R/$s-dk7.md")"
+done
+expect_eq "DK-n: the exam holds one debt key, and the DK rows read it" "1" "$DK_N"
+# A harm key is not passed by a debt line on its file: the table sends no debt to fix.
+drec "$R/dk9.md" structure fail duplicate bin/stamp.sh "check: reuse FAIL bin/stamp.sh counts dirt again beside $DC_NAMES"
+expect_eq "DK9: dup-counter (a harm key): a debt line on its file is missed, naming the kind" \
+  "missed: declared as debt duplicate: not a rating this key admits" "$(exam_score "$DC" "$R/dk9.md")"
 
 CL="$EXAM/samples/clean/expect.txt"
 CL_TOK="$(sed -n 's/^token: //p' "$CL")"

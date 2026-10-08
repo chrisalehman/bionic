@@ -2128,4 +2128,63 @@ run_close "$PFL" run
 expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc 0), the plan closed" "0|1" \
   "$CO_RC|$(run_open_rc "$PFL/$PLAN_REL")"
 
+section "DEBT-CARD — wave-30 T22 (AC-11.4, AC-11.2; D2, P2): the release card says the run's touches and burns; the continuation carries each unburned item"
+# ============================================================
+# The run's ledger is `record/<run>/debt.md` (lib/proof.sh `proof_debt_ledger_path`). close-out prints
+# `debt: touched <N> · burned <M>`: N the touches summed over every item, M the items burned, never the
+# ledger's length. The continuation's ## Deferrals carries one line per unburned item, after the
+# deferred: lines, in the form
+#
+#   debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>
+#
+# fails-when: the card omits the line or prints a count of items; the continuation omits an unburned item.
+# FIXTURE FIDELITY: the ledger is planted in the line shape `session-poker.sh debt` writes (session-poker-4
+# §DEBT-LEDGER pins the shape against the verb).
+debt_plant() {  # <project> -> the ledger: three items, five touches, one burned
+  local d="$1/.bionic/docs/record/wave-01-fixture"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "debt_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  mkdir -p "$d"
+  printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
+    'tree_count | duplicate | lib/a.sh:1, lib/b.sh:2 | raised-by record/wave-01-fixture/critic-structure.md | touches 4 | —' \
+    'log_shim | one-case-abstraction | lib/c.sh:3 | raised-by record/wave-01-fixture/critic-structure.md | touches 1 | burned T3' \
+    'pair_x | unpinned-pair | lib/d.sh:9 | raised-by record/wave-01-fixture/critic-adversarial.md | touches 0 | —' > "$d/debt.md"
+}
+PDB="$(mk_fixture debtcard1)"; advance_to "$PDB" 8
+debt_plant "$PDB"
+run_close "$PDB" check
+expect_eq "DEBT-CARD-1 check exits 0 over a run that keeps a debt ledger" "0" "$CO_RC"
+expect_eq "DEBT-CARD-2 …and its card prints the run's touches and burns: 4+1+0 touched, one burned" \
+  "debt: touched 5 · burned 1" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^debt: ')"
+run_close "$PDB" run
+expect_eq "DEBT-CARD-3 run exits 0" "0" "$CO_RC"
+expect_eq "DEBT-CARD-4 …and prints the same line once (AC-11.4), not the ledger's three items" \
+  "debt: touched 5 · burned 1" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^debt: ')"
+expect_nonempty "DEBT-CARD-5 precondition: the extractor finds lines under ## Deferrals" "$(carry_section "$PDB/$CONT_REL")"
+expect_eq "DEBT-CARD-6 the continuation carries each unburned item, in ledger order, and not the burned one (AC-11.2)" \
+"debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W" \
+  "$(carry_section "$PDB/$CONT_REL" | /usr/bin/grep '^debt: ')"
+expect_absent "DEBT-CARD-7 …the burned item is not carried" "log_shim" "$(carry_section "$PDB/$CONT_REL")"
+
+# no ledger: the card still says it, at zero (the line is never omitted)
+PDN="$(mk_fixture debtcard2)"; advance_to "$PDN" 8
+run_close "$PDN" run
+expect_eq "DEBT-CARD-8 a run with no ledger exits 0 and its card prints touched 0 · burned 0" \
+  "0|debt: touched 0 · burned 0" "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^debt: ')"
+expect_nonempty "DEBT-CARD-9 precondition: its continuation has a Deferrals heading to read" "$(/usr/bin/grep '^## Deferrals$' "$PDN/$CONT_REL")"
+expect_absent "DEBT-CARD-9b …and carries no debt line" "debt: " "$(carry_section "$PDN/$CONT_REL")"
+
+# an existing continuation with the heading: an unburned item not under it yet is merged in, each once
+PDE="$(mk_fixture debtcard3)"; advance_to "$PDE" 8
+debt_plant "$PDE"
+mkdir -p "$PDE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\nnone, said the person\n' > "$PDE/$CONT_REL"
+run_close "$PDE" run
+expect_eq "DEBT-CARD-10 run over a written continuation exits 0" "0" "$CO_RC"
+expect_eq "DEBT-CARD-11 …the person's line kept, both unburned items added under the heading" \
+"none, said the person
+debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W" \
+  "$(carry_section "$PDE/$CONT_REL")"
+
 finish
