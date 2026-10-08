@@ -99,6 +99,8 @@ Three operator commands carry the fact-discharged paths: `bash <plugin-root>/hoo
 **Stop and wake** for: an ambiguous spec needing a judgment call, new external-API auth, anything affecting billing, destructive migrations, secrets or production infrastructure, and anything the user's own config marks as requiring approval. Append a `## Wake Note` and do not proceed past it.
 <!-- ORCHESTRATOR-DISPATCH-END -->
 
+**No store in a suite.** The runner hands every suite an environment with no gate store: `tests/run.sh` strips `BIONIC_GATE_DIR` from each worker's suite process, and a runner exports none itself. A suite that needs a store makes its own fixture.
+
 <!-- BRIEF-SCAFFOLD-BEGIN -->
 ### Scaffold
 
