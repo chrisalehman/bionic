@@ -510,6 +510,16 @@ Known limits, carried to the next release:
   the roster is swept; a background writer is stopped as the owed line says.
 - Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not the
   scale; readers holding a code question, and the exam's readers, grade by the scale.
+- Known limit: `ready` holds a `landing` admission while it proves a row but does not export it as
+  `BIONIC_GATE_ADMIT`, so a suite that drives the real runner under `ready` asks the gate again, and
+  that nested ask has no bound; a row whose suites drive the runner is proved with the gate store
+  pointed at a throwaway directory.
+- Known limit: `ready` proves a row with `exec bash tests/<suite>` — the bash on PATH, not the
+  interpreter pin the floor runs under — so a row can land green under `ready` and go red on the
+  floor; the floor is the judge.
+- Known limit: an evidence verdict's `result` moves with rigor: at `low` the critic holds `evidence`
+  with the severity scale and a REFUTED rated S3 or S4 registers `flag`; at `medium` and `high` the
+  auditor holds `evidence` without the scale and the same REFUTED registers `fail`.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
