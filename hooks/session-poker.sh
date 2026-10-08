@@ -464,6 +464,10 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debt ledger, one line per item"
   exit 2
 }
 
@@ -869,6 +873,24 @@ case "$VERB" in
     RR_WRITE=no
     if [ $# -eq 1 ] && [ "$1" = --write ]; then RR_WRITE=yes
     elif [ $# -ne 0 ]; then usage "regression-runs takes at most one flag: --write."; fi
+    ;;
+  # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). A subcommand, its operands, and at most one
+  # plan last, which names the run as landing-report's does; without it, the session's bound run.
+  debt)
+    DEBT_SUB="${1:-}"; [ $# -eq 0 ] || shift
+    DEBT_A=""; DEBT_B=""; DEBT_PLAN_ARG=""
+    case "$DEBT_SUB" in
+      add)     { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt add takes a reading record and at most one plan."
+               DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
+      touched) { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt touched takes a concept and at most one plan."
+               DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
+      burn)    { [ $# -ge 2 ] && [ $# -le 3 ]; } || usage "debt burn takes a concept, a row and at most one plan."
+               DEBT_A="$1"; DEBT_B="$2"; DEBT_PLAN_ARG="${3:-}" ;;
+      list)    [ $# -le 1 ] || usage "debt list takes at most one plan."
+               DEBT_PLAN_ARG="${1:-}" ;;
+      *) usage "debt takes add, touched, burn or list." ;;
+    esac
+    [ "$DEBT_SUB" = add ] || case "$DEBT_A$DEBT_B" in *'|'*|*' '*|*'	'*) usage "a debt concept or row is one word, with no | in it." ;; esac
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -7692,6 +7714,137 @@ RC_TAGS
   # from the project root, else from the docs root), or else this session's bound run; the record is
   # that plan's landing record, under the plan's own project. It writes nothing and exits 0 whatever
   # the record holds.
+  # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). `record/<run>/debt.md` (lib/proof.sh
+  # `proof_debt_ledger_path`, whose comment holds the line's shape) has this verb as its one writer, under
+  # a lock beside the file (`launch_sync_lock`, the plan writer's own). `add` reads the reading's
+  # `debt:` lines through `proof_findings`, the registering verb's reader, and writes a line per concept
+  # and kind it does not hold yet; `touched` adds one to the touches of every unburned item of the
+  # concept (the dispatch wall's advisory calls it); `burn` writes `burned <row>` in their last cell.
+  # Exit 0 done; 1 refused, the ledger unchanged; 2 the run or the record cannot be found; 75 another
+  # writer held the lock for the whole wait.
+  debt)
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    DEBT_PLAN=""
+    if [ -n "$DEBT_PLAN_ARG" ]; then
+      case "$DEBT_PLAN_ARG" in
+        /*) DEBT_PLAN="$DEBT_PLAN_ARG" ;;
+        *)  DEBT_PLAN="$REPO_REAL/$DEBT_PLAN_ARG"
+            [ -f "$DEBT_PLAN" ] || DEBT_PLAN="$(docs_root "$REPO_REAL")/$DEBT_PLAN_ARG" ;;
+      esac
+      if [ ! -f "$DEBT_PLAN" ] || [ -L "$DEBT_PLAN" ]; then
+        die "REFUSED — no plan file at $DEBT_PLAN_ARG; name the plan whose debt ledger this is."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; name the plan: debt $DEBT_SUB … <plan>."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      DEBT_PLAN="$POKER_RUN_PLAN"
+      if [ -z "$DEBT_PLAN" ] || [ ! -f "$DEBT_PLAN" ]; then
+        die "REFUSED — this session has no run; bind its plan first, or name it: debt $DEBT_SUB … <plan>."
+        exit 2
+      fi
+    fi
+    if ! { declare -F proof_debt_items >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null; }; } \
+       || ! declare -F proof_debt_items >/dev/null 2>&1; then
+      die "REFUSED — lib/proof.sh cannot be loaded, so the debt ledger cannot be read; reinstall the plugin."
+      exit 2
+    fi
+    DEBT_ROOT="$(cd "$(project_root "${DEBT_PLAN%/*}")" 2>/dev/null && pwd -P)"
+    [ -n "$DEBT_ROOT" ] || DEBT_ROOT="$REPO_REAL"
+    DEBT_DOCS="$(docs_root "$DEBT_ROOT")"
+    DEBT_FILE="$(proof_debt_ledger_path "$DEBT_ROOT" "$DEBT_PLAN")"
+    DEBT_REL="${DEBT_FILE#"$DEBT_DOCS"/}"
+    if [ "$DEBT_SUB" = list ]; then
+      if [ ! -f "$DEBT_FILE" ]; then
+        say "debt list — no ledger yet at $DEBT_REL"
+        exit 0
+      fi
+      awk '!/^#/ && NF' "$DEBT_FILE"
+      exit 0
+    fi
+    DEBT_ROWS=""; DEBT_RECREL=""
+    if [ "$DEBT_SUB" = add ]; then
+      case "$DEBT_A" in
+        /*) DEBT_REC="$DEBT_A" ;;
+        *)  DEBT_REC="$DEBT_DOCS/$DEBT_A"; [ -f "$DEBT_REC" ] || DEBT_REC="$REPO_REAL/$DEBT_A" ;;
+      esac
+      if [ ! -f "$DEBT_REC" ]; then
+        die "REFUSED — no reading record at $DEBT_A; name it as proof-add does, record/<wave>/<file>."
+        exit 2
+      fi
+      DEBT_RECREL="$DEBT_A"
+      case "$DEBT_REC" in "$DEBT_DOCS"/*) DEBT_RECREL="${DEBT_REC#"$DEBT_DOCS"/}" ;; esac
+      if ! DEBT_ROWS="$(proof_findings "$DEBT_REC")"; then
+        die "REFUSED — $DEBT_ROWS"
+        exit 1
+      fi
+      DEBT_ROWS="$(printf '%s\n' "$DEBT_ROWS" | awk -F'\t' '$1 == "debt"')"
+      if [ -z "$DEBT_ROWS" ]; then
+        say "debt add — the reading $DEBT_RECREL carries no debt: line; nothing added"
+        exit 0
+      fi
+      mkdir -p "${DEBT_FILE%/*}" 2>/dev/null
+    fi
+    if [ ! -d "${DEBT_FILE%/*}" ] || { [ "$DEBT_SUB" != add ] && [ ! -f "$DEBT_FILE" ]; }; then
+      die "REFUSED — no debt ledger at $DEBT_REL; debt add writes it from a reading's debt: lines."
+      exit 1
+    fi
+    launch_sync_lock "$DEBT_FILE.lock" yes; DEBT_LRC=$?
+    if [ "$DEBT_LRC" != 0 ]; then
+      die "WAITING — another writer held the debt ledger's lock ($DEBT_FILE.lock) for the whole wait; run the same command again."
+      exit 75
+    fi
+    trap 'launch_sync_unlock; rm -f "$DEBT_FILE.new.$$"' EXIT
+    DEBT_NEW="$DEBT_FILE.new.$$"
+    case "$DEBT_SUB" in
+      add)
+        DEBT_SAID="$(PROOF_HAVE="$(proof_debt_items "$DEBT_FILE")" DEBT_RECREL="$DEBT_RECREL" DEBT_HEAD="$PROOF_DEBT_HEADER" awk -F'\t' -v out="$DEBT_NEW" '
+          BEGIN { n = split(ENVIRON["PROOF_HAVE"], h, "\n"); for (i = 1; i <= n; i++) { split(h[i], c, "\t"); have[c[1] "\t" c[2]] = 1 } }
+          { k = $3 "\t" $2
+            if (k in have) { there++; print $3 " " $2 " already in the ledger"; next }
+            have[k] = 1; added++
+            line[added] = $3 " | " $2 " | " $4 " | raised-by " ENVIRON["DEBT_RECREL"] " | touches 0 | —"
+            print $3 " " $2 " " $4 }
+          END { for (i = 1; i <= added; i++) print line[i] > out; printf "%d added, %d already there", added, there }' <<< "$DEBT_ROWS")"
+        if [ -f "$DEBT_FILE" ]; then cat "$DEBT_FILE"; else printf '%s\n' "$PROOF_DEBT_HEADER"; fi > "$DEBT_NEW.all" 2>/dev/null \
+          && { [ ! -f "$DEBT_NEW" ] || cat "$DEBT_NEW" >> "$DEBT_NEW.all"; } && mv "$DEBT_NEW.all" "$DEBT_FILE" 2>/dev/null \
+          || { rm -f "$DEBT_NEW.all"; die "REFUSED — the debt ledger at $DEBT_REL cannot be written."; exit 1; }
+        printf '%s\n' "$DEBT_SAID" | while IFS= read -r _dl; do
+          case "$_dl" in *' added, '*' already there') say "debt add — $_dl: $DEBT_REL" ;; *) say "debt add — $_dl" ;; esac
+        done
+        exit 0
+        ;;
+      touched|burn)
+        DEBT_SAID="$(awk -v c="$DEBT_A" -v r="$DEBT_B" -v sub_="$DEBT_SUB" -v out="$DEBT_NEW" '
+          { l = $0 }
+          !/^#/ && NF && split($0, f, / \| /) == 6 && f[1] == c && index(f[6], "burned ") != 1 && f[5] ~ /^touches [0-9]+$/ {
+            if (sub_ == "touched") { f[5] = "touches " (substr(f[5], 9) + 1); said = f[1] " " f[2] " " f[5] }
+            else { f[6] = "burned " r; said = f[1] " " f[2] " burned " r }
+            l = f[1]; for (i = 2; i <= 6; i++) l = l " | " f[i]
+            print said
+          }
+          { print l > out }' "$DEBT_FILE")"
+        if [ -z "$DEBT_SAID" ]; then
+          die "REFUSED — no unburned item of the debt ledger at $DEBT_REL names $DEBT_A; debt list prints what it holds."
+          exit 1
+        fi
+        mv "$DEBT_NEW" "$DEBT_FILE" 2>/dev/null \
+          || { die "REFUSED — the debt ledger at $DEBT_REL cannot be written."; exit 1; }
+        printf '%s\n' "$DEBT_SAID" | while IFS= read -r _dl; do say "debt $DEBT_SUB — $_dl"; done
+        exit 0
+        ;;
+    esac
+    ;;
+
   landing-report)
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"

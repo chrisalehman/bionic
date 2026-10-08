@@ -6654,6 +6654,50 @@ expect_nonempty "W30-S2m precondition: the cut copy keeps the surrounding doctri
 expect_eq "W30-S2m: …and a dispatch.md with the sentence's paragraph cut is caught" "" "$(w26_hits "$W30S_HAND" "$W30S_CUT")"
 
 # ============================================================
+section "§W30-DEBT-LEDGER (wave-30 T22; REQ-11 AC-11.2, AC-11.4, D2, P2): operational-rules documents the run's debt ledger, its printed lines and its carry"
+# ============================================================
+# WHAT THIS OWNS. The records table of operational-rules.md carries a `debt ledger` row: the path, the
+# header and the item line exactly as lib/proof.sh's PROOF_DEBT_HEADER spells them (one shape, two
+# places, held together here), the verb that writes it, and the three lines the tools print from it
+# (the dispatch advisory, ready's landing line, the release card's). The close-out section names the
+# continuation's `debt:` line in the form close-out.sh writes. The parser's kinds (PROOF_DEBT_KINDS) are
+# the debt table's kinds of severity.md, in its order. HERMETIC: committed files by path.
+W30L_PROOF="${REPO}/payload/scripts/lib/proof.sh"
+W30L_CO="${REPO}/payload/scripts/close-out.sh"
+W30L_OPEN='| debt ledger | `<docs-root>/record/<the bound plan'"'"'s name less .plan.md>/debt.md`'
+W30L_HDR="$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_HEADER"' _ "$W30L_PROOF" 2>/dev/null)"
+expect_nonempty "W30-L0 precondition: lib/proof.sh defines the ledger's header" "$W30L_HDR"
+# w30l_row <file> -> the records table's debt ledger row, or nothing.
+w30l_row() { /usr/bin/grep -F -- "$W30L_OPEN" "$1" 2>/dev/null | head -n 1; }
+W30L_ROW="$(w30l_row "$OPRULES")"
+expect_nonempty "W30-L1: AC-11.2 — operational-rules.md's records table carries the debt ledger row" "$W30L_ROW"
+expect_contains "W30-L2: …its header, as lib/proof.sh writes it (each | escaped for the table)" \
+  "\`${W30L_HDR//|/\\|}\`" "$W30L_ROW"
+for _w30l in '`<concept> \| <kind> \| <sites> \| raised-by <record> \| touches <N> \| —`' '`burned <row>`' \
+  '`session-poker.sh debt add <reading record> [<plan>]`' '`debt touched <concept> [<plan>]`' '`debt burn <concept> <row> [<plan>]`' \
+  '`debt: <concept> <kind> touches <N> — burn it in this row or say why not`' '`debt: burned <N>, touched <M>`' '`debt: touched <N> · burned <M>`'; do
+  expect_contains "W30-L3: …and says ${_w30l:0:60}" "$_w30l" "$W30L_ROW"
+done
+W30L_CARRY='debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>'
+expect_nonempty "W30-L4: AC-11.2 — the close-out section names the continuation's debt line" "$(w26_hits "\`$W30L_CARRY\`" "$OPRULES")"
+expect_nonempty "W30-L4b: …in the form close-out.sh prints it" \
+  "$(/usr/bin/grep -F -- 'debt: %s %s \"%s\" touches=%s raised-by=%s from=%s' "$W30L_CO")"
+W30L_CUT="$TMP/w30l-no-row.md"
+/usr/bin/grep -vF -- "$W30L_OPEN" "$OPRULES" > "$W30L_CUT" 2>/dev/null
+expect_nonempty "W30-L1m precondition: the cut copy keeps the declared debt row beside it" "$(/usr/bin/grep -F '| declared debt |' "$W30L_CUT")"
+expect_eq "W30-L1m: …and an operational-rules.md with the row cut is caught" "" "$(w30l_row "$W30L_CUT")"
+# The parser's kinds are the table's, in its order (an unpinned pair otherwise).
+w30l_kinds() { w30d_rows "$1" | awk -F'|' '{ k = $2; gsub(/^ +| +$/, "", k); printf "%s%s", (n++ ? " " : ""), k }'; }
+W30L_TABLE="$(w30l_kinds "$W28S_FILE")"
+expect_nonempty "W30-L5 precondition: severity.md's debt table yields its kinds" "$W30L_TABLE"
+expect_eq "W30-L5: lib/proof.sh PROOF_DEBT_KINDS is the debt table's kinds, in its order" "$W30L_TABLE" \
+  "$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_KINDS"' _ "$W30L_PROOF" 2>/dev/null)"
+W30L_DOC="$TMP/w30l-sev.md"
+/usr/bin/grep -vF -- '| unpinned-pair |' "$W28S_FILE" > "$W30L_DOC" 2>/dev/null
+expect_ne "W30-L5m: a table that lost a kind no longer equals the parser's list" \
+  "$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_KINDS"' _ "$W30L_PROOF" 2>/dev/null)" "$(w30l_kinds "$W30L_DOC")"
+
+# ============================================================
 section "§EXIT-137 — the test-runner never infers a timeout from exit 137 (wave-30 T12; REQ-3 AC-3.3)"
 # ============================================================
 # A suite killed on a full machine exits 137 well inside its limit; reported as a timeout, it sends

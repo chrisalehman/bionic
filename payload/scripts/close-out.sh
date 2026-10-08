@@ -615,7 +615,7 @@ co_deferral_line() {  # <record>#<n> -> the first deferred: line of ## SDLC Stat
     insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
     END { if (found) print line; exit (found ? 0 : 1) }' "$PLAN"
 }
-co_deferrals() {  # -> the lines, or nothing
+co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned debt (co_debts)
   local id s r p t l st
   proof_findings_owed "$PLAN" 2>/dev/null | while read -r id s r p t; do
     [ "$p" = defer ] || continue
@@ -623,6 +623,32 @@ co_deferrals() {  # -> the lines, or nothing
     st="$(printf '%s\n' "$l" | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p')"
     printf 'deferred: %s %s %s %s stated="%s" from=%s\n' "$id" "$s" "$r" "$t" "${st:--}" "$WAVE_SLUG"
   done
+  co_debts
+}
+
+# THE DEBT THE CONTINUATION CARRIES (wave-30 T22; D2, P2, AC-11.2). Every item of the run's debt ledger
+# (lib/proof.sh `proof_debt_ledger_path`, `proof_debt_items`) not yet burned, in ledger order, after the
+# deferrals and under the same heading, in the one form:
+#
+#     debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>
+#
+# A burned item is paid and is not carried. The merge into an existing continuation is the deferrals'
+# (co_cont_missing), so a line already under the heading is not written twice.
+co_debts() {
+  local led
+  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
+  proof_debt_items "$led" | awk -F'\t' -v w="$WAVE_SLUG" \
+    '$6 == "-" { printf "debt: %s %s \"%s\" touches=%s raised-by=%s from=%s\n", $1, $2, $3, $5, $4, w }'
+}
+
+# THE CARD'S DEBT LINE (wave-30 T22; P2, AC-11.4): `debt: touched <N> · burned <M>` for the run, N the
+# touches summed over every item of its ledger, M the items burned (`proof_debt_counts`), never the
+# ledger's length; `touched 0 · burned 0` when the run kept none, so the line is never omitted.
+co_debt_card() {
+  local led
+  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || led=""
+  set -- $(proof_debt_counts "$led" 2>/dev/null)
+  printf 'debt: touched %s · burned %s\n' "${1:-0}" "${2:-0}"
 }
 
 # THE DEFERRALS THIS RUN INHERITED AND DID NOT SETTLE (wave-28 T43; D21, AC-8.10). The run's
@@ -1315,6 +1341,7 @@ do_check() {
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
+  say "$(co_debt_card)"
   if [ -f "$CONT" ] && ! co_cont_has_deferrals; then
     say "continuation: $CONT_REL already written — run appends the ## Deferrals section"
   elif [ -f "$CONT" ]; then
@@ -1406,6 +1433,7 @@ do_run() {
   co_regression_runs; say "regression-runs: $RR_LINE"
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
+                    say "$(co_debt_card)"
   act_continuation; say "continuation: $CONT_LINE"
   act_epic;         say "epic-row: $EPIC_LINE"
                     say "patrol: $PATROL_LINE"

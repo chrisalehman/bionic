@@ -2197,4 +2197,93 @@ expect_status "16mb …and that one path is the contract on the row" \
 # ============================================================================
 
 
+section "§DEBT-ADVISORY — a brief whose Files touch a debted concept carries the item, and its touches go up (wave-30 T22; REQ-11 AC-11.3; D2, P2)"
+# ============================================================================
+#
+# The run's ledger is `record/<run>/debt.md` (lib/proof.sh `proof_debt_ledger_path`). When an allowed
+# brief's `Files:` covers a site of an unburned item (the path, a directory above it, or a glob over
+# it: units.sh `cell_covers`), the advisory block carries `debt: <concept> <kind> touches N — burn it
+# in this row or say why not`, and the wall asks `session-poker.sh debt touched <concept> <plan>`, the
+# ledger's one writer, so N is the count with this row in it.
+#
+# fails-when: a row whose Files hit a debted concept dispatches with no advisory, or touches does not
+# increment.
+#
+# FIXTURE FIDELITY: the real wall over make_repo's bound wave plan; the ledger is planted in the line
+# shape the verb writes (session-poker-4 §DEBT-LEDGER pins that shape against the verb), and read back
+# after the wall ran.
+dbt_brief() {  # <Files value> [<body line>]
+  printf '%s\n' "Your task: build the widget seam." "${2:-Keep the seam narrow.}" \
+    "Expected artifact: .bionic/docs/record/w99-widget.md" "Expected duration: ~25 minutes." \
+    "Progress artifact: .bionic/tmp/w99-widget.progress" "Files: $1" "Suites: tests/widget.test.sh"
+}
+dbt_ledger() {  # <repo> -> the planted ledger's path
+  local d="$1/.bionic/docs/record/wave-01-test"
+  mkdir -p "$d"
+  printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
+    'widget_parse | duplicate | payload/scripts/lib/widget.sh:12, payload/scripts/lib/gadget.sh:40 | raised-by record/wave-01-test/critic-structure.md | touches 1 | —' \
+    'old_shim | one-case-abstraction | payload/scripts/lib/widget.sh:3 | raised-by record/wave-01-test/critic-structure.md | touches 0 | burned T2' \
+    'far_away | unpinned-pair | hooks/far.sh:9 | raised-by record/wave-01-test/critic-structure.md | touches 0 | —' > "$d/debt.md"
+  printf '%s' "$d/debt.md"
+}
+dbt_ctx() { printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+dbt_cell() { /usr/bin/grep "^$2 " "$1" 2>/dev/null | awk -F' [|] ' '{ print $5 }'; }   # <ledger> <concept> -> its touches cell
+DBT_WANT='debt: widget_parse duplicate touches 2 — burn it in this row or say why not'
+
+REPO=$(make_repo dbthit yes)
+write_attestation "$REPO" "$SID_A"
+DBT_L="$(dbt_ledger "$REPO")"
+expect_eq "DA0 precondition: the planted item reads touches 1" "touches 1" "$(dbt_cell "$DBT_L" widget_parse)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(dbt_brief payload/scripts/lib/widget.sh)" "w99-dbt")"
+expect_eq "DA1 a brief whose Files name a debted site is ADMITTED" "allow" "$GATE_VERDICT"
+DBT_CTX="$(dbt_ctx)"
+expect_contains "DA1b …and the advisory block carries the item with its new count (AC-11.3)" "$DBT_WANT" "$DBT_CTX"
+expect_contains "DA1c …under the advisory's own heading" "brief advisory (the dispatch is allowed; nothing was refused)" "$DBT_CTX"
+expect_eq "DA1d …and the ledger's touches went from 1 to 2" "touches 2" "$(dbt_cell "$DBT_L" widget_parse)"
+expect_absent "DA1e …while an item burned already, at a site the Files name, is not advised" "old_shim" "$DBT_CTX"
+expect_eq "DA1f …nor touched" "touches 0" "$(dbt_cell "$DBT_L" old_shim)"
+expect_absent "DA1g …and an item whose sites the Files miss is not advised" "far_away" "$DBT_CTX"
+expect_eq "DA1h …nor touched" "touches 0" "$(dbt_cell "$DBT_L" far_away)"
+
+REPO=$(make_repo dbtdir yes)
+write_attestation "$REPO" "$SID_A"
+DBT_L="$(dbt_ledger "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(dbt_brief payload/scripts/lib/gadget.sh)" "w99-dbt")"
+expect_contains "DA2 the item's other site hit alone carries it too" "$DBT_WANT" "$(dbt_ctx)"
+expect_eq "DA2b …touches 1 to 2" "touches 2" "$(dbt_cell "$DBT_L" widget_parse)"
+REPO=$(make_repo dbtglob yes)
+write_attestation "$REPO" "$SID_A"
+DBT_L="$(dbt_ledger "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(dbt_brief 'payload/scripts/lib/')" "w99-dbt")"
+expect_contains "DA3 a Files directory above a site carries the item" "$DBT_WANT" "$(dbt_ctx)"
+expect_eq "DA3b …touches 1 to 2" "touches 2" "$(dbt_cell "$DBT_L" widget_parse)"
+
+REPO=$(make_repo dbtmiss yes)
+write_attestation "$REPO" "$SID_A"
+DBT_L="$(dbt_ledger "$REPO")"
+cp "$DBT_L" "$SANDBOX/dbt-before"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(dbt_brief payload/scripts/lib/other.sh 'When the seam is in, run `bash tests/foo.test.sh` and report the count.')" "w99-dbt")"
+expect_eq "DA4 a brief whose Files miss every site is ADMITTED" "allow" "$GATE_VERDICT"
+DBT_CTX="$(dbt_ctx)"
+expect_contains "DA4b …its advisory block is there (the undeclared run it carries)" "amend w99-dbt --suites+ foo.test.sh" "$DBT_CTX"
+expect_absent "DA4c …and holds no debt line" "debt: " "$DBT_CTX"
+expect_eq "DA4d …the ledger still reads touches 1" "touches 1" "$(dbt_cell "$DBT_L" widget_parse)"
+expect_true "DA4e …byte-identical" cmp -s "$SANDBOX/dbt-before" "$DBT_L"
+
+REPO=$(make_repo dbtref yes)
+write_attestation "$REPO" "$SID_A"
+DBT_L="$(dbt_ledger "$REPO")"
+cp "$DBT_L" "$SANDBOX/dbt-before"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget seam.
+Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh" "w99-dbt")"
+expect_eq "DA5 a refused brief whose Files hit a debted site is refused" "deny" "$GATE_VERDICT"
+expect_nonempty "DA5a …with its refusal on the model's wire" "$GATE_REASON"
+expect_absent "DA5b …carrying the refusal alone, no debt line" "debt: widget_parse" "$GATE_REASON$GATE_OUT"
+expect_eq "DA5c …and the ledger is not touched (touches 1)" "touches 1" "$(dbt_cell "$DBT_L" widget_parse)"
+expect_true "DA5d …byte-identical" cmp -s "$SANDBOX/dbt-before" "$DBT_L"
+
+# ============================================================================
+
+
 finish

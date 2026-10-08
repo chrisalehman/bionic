@@ -38,13 +38,21 @@ exam_field() {
 #   declared at <S> <reach>: deferred     the table defers the rating (S2 off, S3 on)
 #   declared at <S> <reach>: noted        the table notes it (S3 off, S4)
 #   declared at <S> <reach>: not a rating this key admits    fix-grade, but not on the key's list
+#   declared as debt <kind>: not a rating this key admits    a debt: line on a harm key's file
+# A DEBT KEY (wave-30 T22; D2) carries `finding-kind: <kind>` in place of `finding-rating:`: the pass
+# must carry a `debt:` line of that kind (proof_findings' `debt` row) with a site on one of the key's
+# files. Its reasons:
+#   no debt line names <file>[ or <file>]                      debt lines, none on a file of the key
+#   declared as debt <kind>: not the kind this key asks        a debt line of another kind
+#   declared at <S> <reach>: a debt key asks a debt: line of kind <kind>   a rated finding instead
 # A file matches by its path as written, or under a directory (an absolute path in the project).
 exam_declared() {
-  local key="$1" pass="$2" files ratings lib rec out rc id sev reach loc pri shown unsure title
-  local path alts alt onfile ok why first=""
+  local key="$1" pass="$2" files ratings kind lib rec out rc id sev reach loc pri shown unsure title
+  local path alts alt onfile ok why first="" sites site
   files="$(exam_field "$key" finding-file)"; ratings="$(exam_field "$key" finding-rating)"
+  kind="$(exam_field "$key" finding-kind)"
   [ -n "$files" ] || { echo "declared"; return 0; }
-  grep -Eq '^(findings|finding):' "$pass" || { echo "described only"; return 1; }
+  grep -Eq '^(findings|finding|debt):' "$pass" || { echo "described only"; return 1; }
   lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/payload/scripts/lib/proof.sh"
   [ -r "$lib" ] || { echo "finding lines refused: $lib cannot be read"; return 1; }
   # The reader cuts a pass from its `reviewed:` line to the next one: the pass is given one of its own.
@@ -58,13 +66,31 @@ exam_declared() {
   [ -n "$out" ] || { echo "described only"; return 1; }
   while IFS=$'\t' read -r id sev reach loc pri shown unsure title; do
     [ -n "$id" ] || continue
-    path="${loc%:*}"; path="${path#./}"
-    onfile=0; alts="$files"
-    while [ -n "$alts" ]; do
-      alt="${alts%% | *}"; if [ "$alt" = "$alts" ]; then alts=""; else alts="${alts#* | }"; fi
-      case "$path" in "$alt"|*/"$alt") onfile=1 ;; esac
+    # A debt row is `debt <kind> <concept> <sites> burn`: each site is a <path>:<line>.
+    sites="$loc"; [ "$id" = debt ] || sites="${loc%%, *}"
+    onfile=0
+    while [ -n "$sites" ]; do
+      site="${sites%%, *}"; if [ "$site" = "$sites" ]; then sites=""; else sites="${sites#*, }"; fi
+      path="${site%:*}"; path="${path#./}"
+      alts="$files"
+      while [ -n "$alts" ]; do
+        alt="${alts%% | *}"; if [ "$alt" = "$alts" ]; then alts=""; else alts="${alts#* | }"; fi
+        case "$path" in "$alt"|*/"$alt") onfile=1 ;; esac
+      done
     done
     [ "$onfile" = 1 ] || continue
+    if [ "$id" = debt ]; then
+      if [ -n "$kind" ] && [ "$sev" = "$kind" ]; then echo "declared"; return 0; fi
+      if [ -z "$first" ]; then
+        if [ -n "$kind" ]; then first="declared as debt $sev: not the kind this key asks"
+        else first="declared as debt $sev: not a rating this key admits"; fi
+      fi
+      continue
+    fi
+    if [ -n "$kind" ]; then
+      [ -n "$first" ] || first="declared at $sev $reach: a debt key asks a debt: line of kind $kind"
+      continue
+    fi
     ok=0; alts="$ratings"
     while [ -n "$alts" ]; do
       alt="${alts%% | *}"; if [ "$alt" = "$alts" ]; then alts=""; else alts="${alts#* | }"; fi
@@ -83,6 +109,7 @@ exam_declared() {
 $out
 EOF
   [ -z "$first" ] || { echo "$first"; return 1; }
+  if [ -n "$kind" ]; then echo "no debt line names ${files// | / or }"; return 1; fi
   echo "no finding names ${files// | / or }"; return 1
 }
 

@@ -1282,4 +1282,25 @@ LB_NONE="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
 expect_eq "(lb4) Lands-on: none lifts as none, which _line_suites reads as no suites" "none|none" \
   "${LB_NONE}|$(_line_suites "$LB_NONE")"
 
+section "§DEBT-LINE: ready's landing report says what the row did to the run's debt (wave-30 T22; REQ-11 AC-11.3; D2, P2)"
+# When the run keeps `record/<run>/debt.md` (lib/proof.sh `proof_debt_ledger_path`), `ready` prints
+# `debt: burned <N>, touched <M>` between LANDED and the owed line: N the items whose last cell says
+# `burned <row>`, M the items one of whose sites the row's `Files` cell covers. The world plan's T1
+# writes `T1.txt`. With no ledger (r1 above) the output is LANDED and the owed line alone.
+# fails-when: a landing over a ledger prints no debt line, or counts what the row did not touch or burn.
+world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
+RDB="$(ll_rworld)"
+mkdir -p "$RDB/.bionic/docs/record/wave-x"
+printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
+  't1_seam | duplicate | T1.txt:1 | raised-by record/wave-x/critic-structure.md | touches 1 | —' \
+  'old_case | one-case-abstraction | T1.txt:2, lib/x.sh:4 | raised-by record/wave-x/critic-structure.md | touches 1 | burned T1' \
+  'elsewhere | unpinned-pair | T2.txt:1 | raised-by record/wave-x/critic-structure.md | touches 0 | burned T2' \
+  > "$RDB/.bionic/docs/record/wave-x/debt.md"
+ll_verb "$RDB" T1
+KDB="$(ll_ev "$RDB" candidate | head -1)"; KDB="$(ll_field "$KDB" commit)"
+expect_eq "(db1) ready over a run with a ledger exits 0" "0" "$LL_RC"
+expect_nonempty "(db1-pre) a candidate was built" "$KDB"
+expect_eq "(db2) …printing LANDED, the row's debt line, and the owed line last, exactly" \
+  "$(printf 'LANDED T1 %s\ndebt: burned 1, touched 2\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$KDB" "$KDB")" "$LL_OUT"
+
 finish
