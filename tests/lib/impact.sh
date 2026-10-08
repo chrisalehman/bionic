@@ -506,7 +506,7 @@ LIBDIRS="$(find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" -o -pa
 # leaving them out: wiping payload/scripts/lib/patrol.sh turned four suites red
 # that the derivation could not see, all of them reading it through a hook.
 EXTRACT_FILES=""
-for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/lib/*.sh \
+for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/lib/*.sh "$ROOT"/tests/*.prelude.sh \
          "$ROOT"/payload/scripts/*.sh "$ROOT"/hooks/*.sh; do
   [ -f "$f" ] && EXTRACT_FILES="$EXTRACT_FILES $f"
 done
@@ -828,14 +828,24 @@ awk -F'\t' '$1 ~ /^tests\/[^\/]*\.test\.sh$/ {
 # transitive through tests/lib — a helper the suite sources reads files the
 # suite never names (code map §3.5: bound-marker's six consumers). Iterated, so
 # a helper that sources a helper is followed too.
-awk -F'\t' '$2 == "source" && $3 ~ /^tests\/lib\// { print }' "$WORK/all" | sort -u >"$WORK/suite_libs"
+#
+# A SHARD'S PRELUDE IS THE SAME HOP (wave-30 T1; ruling A-orch-23). A long suite
+# split into shards keeps what they share in `tests/<suite>.prelude.sh` beside
+# them, and each shard sources it: the gate the shards drive is named there, and
+# so are the fixtures and helpers that read further files. A prelude is followed
+# exactly as a tests/lib helper is, with the same reason, so a shard is answered
+# for every file its prelude reads. It is NOT under tests/lib, and that is the
+# point: proof_state's "tests/lib owes a full run" rule does not reach it, so an
+# edit to a prelude is bounded by the shards that source it.
+awk -F'\t' '$2 == "source" && ($3 ~ /^tests\/lib\// || $3 ~ /^tests\/[^\/]*\.prelude\.sh$/) { print }' \
+  "$WORK/all" | sort -u >"$WORK/suite_libs"
 # one hop, then a second for a helper that sources a helper
 for hop in 1 2; do
   while IFS="$(printf '\t')" read -r suite _k lib; do
     [ -n "$suite" ] || continue
     _emit_for "$suite" "transitive-lib" "$lib"
   done <"$WORK/suite_libs" >>"$WORK/all"
-  awk -F'\t' '$2 == "transitive-lib" && $3 ~ /^tests\/lib\// { print }' "$WORK/all" \
+  awk -F'\t' '$2 == "transitive-lib" && ($3 ~ /^tests\/lib\// || $3 ~ /^tests\/[^\/]*\.prelude\.sh$/) { print }' "$WORK/all" \
     | sort -u >"$WORK/suite_libs.next"
   if cmp -s "$WORK/suite_libs" "$WORK/suite_libs.next"; then break; fi
   mv "$WORK/suite_libs.next" "$WORK/suite_libs"
