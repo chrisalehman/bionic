@@ -75,6 +75,8 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
 - **Canonical-sdlc modes (v3, 2026-05-10):** `autonomous` (default — absorbs prior `full`/`bugfix`/`refactor`/`overnight`; per-step checkpoint commits + adversarial critic mandatory + expanded stop-and-wake are baseline), `epic-scope`, `incident-response`, `design-refresh`, `spike`. Load-time announcement is mandatory: first user-facing action when the skill loads is `Canonical SDLC engaged — mode: <mode>.`. Legacy plans declaring `mode: overnight` still work (the skill text refers to it as a legacy equivalent of `autonomous`), but new plans should use the current mode names. v3 (2026-05-10) flattened step numbering to contiguous 0–14 (cut former Step 4 worktree, former 8b → 8, former 12.5 → 13, former 13 → 14). **v5 (2026-06-19)** adopted a gate model and collapsed to 11 steps (0–10): Steps 5+6 → **5 Verify** (gate; tests/build + browser + perf/a11y modalities), 7+8 → **6 Review** (gate; 5-axis + adversarial stances), 12+13 → **9 Integrate & close**; Step 10 Commit dissolved into a cross-cutting **commit rhythm**; Document→7, External review→8, Ship→10. v1–v4 grandfathered (v3/v4 keep the 0–14 shape table); v5 inherits v4's flag contract (5 discriminator + 2 opt-in + `model_plan`) and uses its own evidence shape switch.
 
+- **A hook that finds the engagement marker but no open run (moved back from the history section, wave 28 release).** It still enforces whatever it can enforce without one — the Patrol checkpoint, the deliverable wall, the always-on guards — and skips only the arms that measure against a step, a budget, or a roster. The marker is never removed during the session once written: `disarm` removes only the Patrol stamp, never the marker, so a session that invoked canonical-sdlc is bionic's for the whole rest of its life, run open or closed. (`dispatch.md` is at its byte ratchet, so the sentence lives here; the history section keeps its original wording.)
+
 ## Artifact paths and frontmatter
 
 - **Canonical-sdlc artifacts live in `.bionic/docs/{specs,plans,adrs,incidents}/epic-NN-<slug>/`** (default docs-root; the `docs/bionic/` override retired 2026-07-16 — epics 01–05 migrated in place, hook resolution probe-proven). Directory-per-epic layout: `epic.plan.md` + `wave-NN-<slug>.plan.md` + `continuation.md` at the epic-dir root; parallel specs/ and adrs/ trees. Zero-padded epic numbers, kebab-case slugs. Evidence-gate hook descends 2 levels to find nested plans; governing-skill hook enforces frontmatter on artifact-named files under these paths. Both dirs gitignored.
@@ -649,3 +651,15 @@ Each line below was cut from a capped file and kept here, verbatim or reworded i
 - **dispatch.md, backgrounding (wave 28).** Declaring `claims=` is what lets the verdict call a mid-flight row STILL-LIVE instead of UNMET; nothing watches it between decisions.
 
 - **dispatch.md, the non-response procedure (wave 28).** Rationale, failure model, and use cases for the starting standard, the stopping standard, and the non-response procedure: `design/orchestrator-subagent-coordination.md`.
+
+- **dispatch.md, command discipline (wave 28 release).** A writer's last act on its tree is `ready`; it touches nothing after it. (The paragraph "One line lands a row" says the same.)
+
+- **dispatch.md, the Patrol (wave 28 release).** Never an OS cron, never a resident process — the job is session-scoped, dies with the session, and the roster on disk is the record that survives it; its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm.
+
+- **dispatch.md, the Patrol (wave 28 release).** The stamp is the only record on disk that a Patrol is running here, so a `CronDelete` without the `disarm` leaves a deliberate stop that reads exactly like a Patrol a plugin update killed — and `hooks/patrol-revive.sh`, which cannot tell the two apart, then reports the stop you chose as a death on every remaining turn of the session.
+
+- **dispatch.md, phase-gated dispatch (wave 28 release).** A redirect sent mid-phase is read at the gate, bounding the steering race instead of pretending mail delivery is instant.
+
+- **dispatch.md, normative values (wave 28 release).** After correcting any such value, grep every artifact that restates it: decision records drift independently of the prose they record, and single-document review sweeps miss them.
+
+- **dispatch.md, when a report is lost (wave 28 release).** A read-only dispatch whose findings live only in a transcript is one cleanup away from having produced nothing.
