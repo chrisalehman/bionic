@@ -9647,14 +9647,19 @@ s56_rec st-crit.md "$S56_C4" "$S56_C4" structure flag piece "$S56_ALL"
 poke "$R56" proof-add review record/wave-01-fixture/st-crit.md --question structure --reader w-crit
 expect_eq "56g10 …and by a critic whose row lists it among two questions" "0" "$RC"
 POKER="$S56_POKER_REAL"
-# THE SHIPPED CHECKS FILE AND THE VERB AGREE: read through the same function the verb runs, the
-# file the plugin ships accepts a record answering the Interfaces table's seven ids and refuses
-# one that leaves single-job out.
+# THE SHIPPED CHECKS FILE AND THE VERB AGREE: read through the same function the verb runs.
+# RE-POINTED (wave-30 T4; AC-9.5, A-orch-6): the shipped file owes a check: line for `reuse` and
+# `one-site` only, the five SOLID checks and over-engineering being findings a reader may raise.
+# So it accepts a record answering all seven or those two alone, and refuses one that leaves
+# one-site out.
 S56_SHIPPED="${BIONIC_HOOKS_DIR}/../payload/context/checks-structure.md"
 s56_read() { bash -c '. "$1" && proof_reading "$2" structure "$3"' _ "$S46_LIB" "$1" "$S56_SHIPPED" 2>/dev/null; }
+s56_rec st-two.md "${S56_B:0:10}" "$S56_C4" structure pass whole 'check: reuse PASS nothing to report' 'check: one-site PASS nothing to report'
+s56_rec st-no-onesite.md "${S56_B:0:10}" "$S56_C4" structure pass whole 'check: reuse PASS nothing to report'
 expect_eq "56g11 the shipped checks file accepts a record answering the seven ids" "pass whole ${S56_B:0:10}" "$(s56_read "$S56_REC/st-all.md")"
-expect_contains "56g12 …and refuses one that leaves single-job unanswered" "leaves single-job unanswered" \
-  "$(s56_read "$S56_REC/st-no-single.md")"
+expect_eq "56g11b …and one answering reuse and one-site alone" "pass whole ${S56_B:0:10}" "$(s56_read "$S56_REC/st-two.md")"
+expect_contains "56g12 …and refuses one that leaves one-site unanswered" "leaves one-site unanswered" \
+  "$(s56_read "$S56_REC/st-no-onesite.md")"
 expect_eq "56h no projection copy is left beside the plan" "" \
   "$(find "$R56/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 POKE_BOUND="$S56_BOUND_WAS"

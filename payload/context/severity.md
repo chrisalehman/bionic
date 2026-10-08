@@ -30,6 +30,23 @@ what the run ships meets it. Rate both; the table gives the consequence.
 - Age does not lower a rating. Say "older than the reviewed range" beside it.
 - A brief never re-rates, and no agent moves a finding across the line. If a brief and these
   tables disagree, the tables decide.
+
+The two tables above are the harm table. Debt is paid by the next change that touches it, not by
+a user: a finding of class debt is rated by its kind and the concept it names on this table, never
+by severity.
+
+| Kind | What it is | Disposition |
+|---|---|---|
+| duplicate | A second copy of a concept the ownership table or a search already locates | burn-when-touched: `<concept>` |
+| unpinned-pair | A shared pair with no named agreement test | burn-when-touched: `<concept>` |
+| one-case-abstraction | An abstraction, parameter or indirection with one case or one caller | burn-when-touched: `<concept>` |
+
+- A debt finding names its concept and its sites, never a severity, on one line flush left:
+  `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`. It is not a `finding:` line, and it
+  sets `result` to `flag` when no finding sets it higher.
+- Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it
+  in `record/<run>/debt.md` at the sitting, and the next row whose Files touch the concept burns
+  it inside its own work.
 <!-- SEVERITY-END -->
 
 ## The finding lines

@@ -58,3 +58,4 @@ result admit-not-require evidence auditor fail met exam-sitting.md#resit-admit-n
 result admit-not-require evidence one-mind fail met exam-sitting.md#resit-admit-not-require-one-mind-evidence
 result red-then-green adversarial critic fail met exam-sitting.md#red-then-green-critic-adversarial
 result red-then-green adversarial one-mind fail met exam-sitting.md#resit-red-then-green-one-mind-adversarial
+stale: checks-evidence db831e94… → cf938731…, checks-adversarial 6c8978b7… → f7cf47a0…, checks-structure 81594487… → e779b863… (T4); re-sit owed: T25
