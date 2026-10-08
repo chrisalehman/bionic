@@ -5940,6 +5940,12 @@ expect_contains "W28-71p: the task-entry duty" "**A dispatching turn keeps the t
 expect_contains "W28-71q: the install record" "~/.claude/bionic/installed" "$W28_71_J"
 expect_contains "W28-71r: the hazards lint" '`tests/shell-lint.test.sh`' "$W28_71_J"
 expect_contains "W28-71s: the guard's fix now ends say ready again" 'ends "say ready again"' "$W28_71_J"
+expect_contains "W28-71z: the door is the shape from 1.13.0 on, and a 1.12.0 wall reads it as the full tree" \
+  'The door is the shape from 1.13.0 on: a 1.12.0 wall reads `tests/run.sh --only` as the full tree' "$W28_71_J"
+expect_contains "W28-71y: a project declares its floor (D36)" \
+  'A project declares its floor with `floor: <command>` in `.bionic/config.yaml`; `floor-run` runs it and `proof-add floor` accepts its log; `floor-attestation: user` accepts the user'"'"'s attestation record; a project with neither keeps the `tests/run.sh` rule.' "$W28_71_J"
+expect_contains "W28-71y2: …floor-run refuses a project that declares no floor, with the line it prints" \
+  'poker: REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run.' "$W28_71_J"
 # W28-71t: each refusal the entry quotes carries a fix the code at this head prints. W27-R5's extractor
 # reads any entry's "Newly refused" part; the code spells a fix in double quotes or, in lib/stop.sh, in
 # single quotes (FIX='…'), so this gap reader accepts either.
@@ -5976,7 +5982,13 @@ for _w2871 in \
   'a successor instance with no `row=` label and no ledger or Tasks cell naming it is not counted as the code'"'"'s writer' \
   'the landings figures count only landings the line recorded as events' \
   'the landings line'"'"'s gate figures count requests still in the store' \
-  'a pasted block containing a `</pasted_content …>` close inside its text is cut at that inner close'; do
+  'a pasted block containing a `</pasted_content …>` close inside its text is cut at that inner close' \
+  'a row whose Files cell marks a path unmergeable (`path!`) is not found as that path'"'"'s writer by `finding-check`' \
+  'a floor declared with `floor:` or attested with `floor-attestation: user` proves the floor as a whole' \
+  'the attestation record is the user'"'"'s own word: the tool checks its two lines and the head, never who wrote `floor-attested-by:`' \
+  '`config_value` reads a `floor:` key wherever it stands in `.bionic/config.yaml`' \
+  'a request number is reused after the gate prunes a gone request, so an orphaned waiter may admit a newcomer'"'"'s request' \
+  'the deadline of the dispatch wall and of the stop guard is a trap that bash runs only after a running'; do
   expect_contains "W28-71w: the entry states the limit: ${_w2871:0:60}…" "Known limit: $_w2871" "$W28_71_LIM"
 done
 # …and a limit a row closed in the wave is not written.
@@ -5986,7 +5998,9 @@ for _w2871 in \
   'a symlink on the interpreter pin'"'"'s parent path is judged by the mode of the directory that holds it' \
   'once a run has one landing, the Patrol'"'"'s tick prints a `poker: landings:` line on every tick' \
   'D16'"'"'s Step-4 fact `share: <n>` is not written on the plan by any verb' \
-  '`finding-check` decides whether a check record'"'"'s writer is the code'"'"'s writer by exact match'; do
+  '`finding-check` decides whether a check record'"'"'s writer is the code'"'"'s writer by exact match' \
+  'in a project whose `tests/run.sh` takes no `--only`' \
+  'the gate'"'"'s request files are never pruned'; do
   expect_absent "W28-71x: the entry does not state the closed limit: ${_w2871:0:60}…" "$_w2871" "$W28_71_LIM"
 done
 
@@ -6042,17 +6056,27 @@ expect_nonempty "W28-71D3: the liveness paragraph names the claimed process befo
 expect_nonempty "W28-71D4: the dispatch paragraph tells the orchestrator to run launch-sync after every dispatch and read it" \
   "$(w26_hits 'Run `session-poker.sh launch-sync` after every dispatch and read it' "$DISPATCH_MD")"
 expect_nonempty "W28-71D4b: …a launch the roster cannot carry is refused, and the wall and the guard refuse at a deadline" \
-  "$(w26_hits 'A launch the roster cannot carry is refused, never admitted; the dispatch wall and the stop guard each refuse at a deadline 3 s under their registration.' "$DISPATCH_MD")"
+  "$(w26_hits 'A launch the roster cannot carry is refused; the dispatch wall and the stop guard each refuse at a deadline 3 s under their registration.' "$DISPATCH_MD")"
 expect_nonempty "W28-71D5: an agent no roster holds is stopped as unrostered, once, and a predecessor's live writer is refused" \
   "$(w26_hits "stop-orders.sh unrostered <name> '<why>'\`, once; a predecessor's live writer is refused (adopt it), and \`order\` stays the human's." "$DISPATCH_MD")"
 expect_nonempty "W28-71D6: the plan-verb list carries step-field, and current 4 records the share" \
-  "$(w26_hits '`step-field <N> <key>=<value>` (one field of a step'"'"'s evidence block), `current <N>` (at 4 on a wave it records `share: <n>`)' "$DISPATCH_MD")"
+  "$(w26_hits '`step-field <N> <key>=<value>`, `current <N>` (at 4 on a wave it records `share: <n>`)' "$DISPATCH_MD")"
+expect_nonempty "W28-71D6b: …and floor-run, which writes no plan" \
+  "$(w26_hits '`floor-run` runs the declared floor and writes no plan.' "$DISPATCH_MD")"
+expect_nonempty "W28-71D10: steps/5.md teaches the declared floor's log and the attestation record" \
+  "$(w26_hits 'runs it with `session-poker.sh floor-run` and records that log the same way: it opens `head=<40-hex> dirty=<n> rc=<n>` and is judged by that line alone.' "${SKILL_DIR}/steps/5.md")"
+expect_nonempty "W28-71D10b: …and the attestation file's two lines" \
+  "$(w26_hits 'a `head=<40-hex> dirty=0` line and a `floor-attested-by: <who> <when> <what ran>` line.' "${SKILL_DIR}/steps/5.md")"
+expect_nonempty "W28-71D11: SKILL.md's artifact layout names the floor keys beside the config file" \
+  "$(w26_hits '`release-check:`, and `floor: <command>` or `floor-attestation: user` # when a project'"'"'s floor is not tests/run.sh' "${SKILL_DIR}/SKILL.md")"
 expect_nonempty "W28-71D7: the tick's landings line sits above the decision line" \
   "$(w26_hits 'a changed tick prints `poker: landings: …` above the decision line' "$DISPATCH_MD")"
 expect_nonempty "W28-71D8: steps/6.md teaches the check, the move and the one-pass rule" \
   "$(w26_hits 'A record path registers one pass; the `check:`, `deferred:` and `moved:` lines that bind a finding belong to that pass' "${SKILL_DIR}/steps/6.md")"
 expect_nonempty "W28-71D8b: …finding-check and finding-move by name" \
   "$(w26_hits '`session-poker.sh finding-move <record>#<n> <defer|fix>' "${SKILL_DIR}/steps/6.md")"
+expect_nonempty "W28-71D12: operational-rules states the marker-but-no-open-run rule under the engagement section" \
+  "$(w26_hits 'It still enforces whatever it can enforce without one' "$W28_71D_OPS")"
 expect_nonempty "W28-71D9: operational-rules keeps the sentences the release cut from dispatch.md" \
   "$(w26_hits 'its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm' "$W28_71D_OPS")"
 expect_eq "W28-71D9b: …and dispatch.md no longer carries the one it cut" "" \

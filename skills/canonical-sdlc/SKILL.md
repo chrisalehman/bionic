@@ -110,7 +110,9 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
                                   # alive, never by class name
 .bionic/.gitignore                # literally `*` — written on tree creation; this is what
                                   # keeps the whole tree out of git, not the project .gitignore
-.bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default
+.bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default;
+                                  # `release-check:`, and `floor: <command>` or `floor-attestation: user`
+                                  # when a project's floor is not tests/run.sh
 ```
 
 The first five are lifecycle artifacts and are gated: the governing-skill hook enforces
