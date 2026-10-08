@@ -7,10 +7,9 @@
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
 # the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
 # settings, the retired permission block, the plugin data directory — and then
-# the native plugin uninstall as the finisher. The tools setup offers are NAMED,
-# never removed: nothing on a machine records which of them bionic installed, so
-# each one present is listed with the command to remove it by hand (the tools
-# item below says why).
+# the native plugin uninstall as the finisher. A tool setup offers is removed only
+# when bionic's install record names it (wave-28 T40); every other one present is
+# listed with the command to remove it by hand (the tools item below says why).
 #
 # THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
 # consent does not unlock them:
@@ -1083,6 +1082,11 @@ _rm_dir_is_empty() {  # <dir> — true when nothing is inside
 
 RC_FILE="$(_rm_shell_rc)"
 RM_PRINCIPLES_FILE="$(_rm_claude_home)/CLAUDE.md"
+# THE SHARE FILE (wave-28 T10, D16). Spelled as lib/gate.sh's `gate_share` and lib/detect.sh's
+# `detect_share_file` spell it, CLAUDE_CONFIG_DIR and not `_rm_claude_home`: BIONIC_CLAUDE_HOME moves the
+# claude home for the readers above but not the share the gate reads. A standalone copy, as the
+# markers above are: this door has no library to ask. tests/principles-item.test.sh §SHARE-REMOVE holds it.
+RM_SHARE_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"
 RM_SETTINGS="$(_rm_settings_file)"
 RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
 RM_DATA_ROOT="$(_rm_plugin_data_dir)"
@@ -1135,6 +1139,7 @@ _rm_item_ids() {
   echo "legacy-permission-block"
   echo "permission-mode"
   echo "working-principles"
+  echo "share"
   if [ "$RM_MODE" = "payload" ]; then
     # fd 3: the standard input belongs to the questions, never to a list.
     while IFS= read -r n <&3; do
@@ -1209,11 +1214,13 @@ _rm_item_verb() {  # <id>
       else
         echo "remove bionic's working principles from ${RM_PRINCIPLES_FILE}"
       fi ;;
+    share)                 echo "delete bionic's share file ${RM_SHARE_FILE}" ;;
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
-    # Only a native plugin the registry records as bionic's reaches the page; every
-    # other tool row is named by the tools item and never offered (wave-27).
+    # Only a native plugin the registry records as bionic's, or a tool the install
+    # record names, reaches the page; every other tool row is named by the tools
+    # item and never offered (wave-27, wave-28 T40).
     tool:*)                echo "remove ${1#tool:}" ;;
     *)                     return 1 ;;
   esac
@@ -1269,6 +1276,11 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
     working-principles)
       _rm_regular "$RM_PRINCIPLES_FILE" >/dev/null || return 1
       _rm_file_has_marker "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" ;;
+    # A share file that is a regular file bionic can read. A directory or a link to nothing is not on
+    # the page; its item says what it found (wave-28 T10).
+    share)
+      [ -f "$RM_SHARE_FILE" ] || return 1
+      _rm_regular "$RM_SHARE_FILE" >/dev/null ;;
     legacy-hooks)
       [ -f "$RM_SETTINGS" ] || return 1
       _rm_have jq || return 1
@@ -1307,7 +1319,8 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       # `dep_teardown_state` is the same probe for every row where those coincide,
       # and the honest one for the status line, where they no longer do.
       # NAMED, NEVER ASKED (wave-27). A row `remove_dep` only names has no question,
-      # so it is never on the page and the page's yes reaches none of them.
+      # so it is never on the page and the page's yes reaches none of them. A row
+      # the install record names is asked about, so it is on the page (wave-28 T40).
       [ "$RM_MODE" = "payload" ] || return 1
       dep_named_only "${id#tool:}" && return 1
       present="$(dep_teardown_state "${id#tool:}")"
@@ -2374,20 +2387,21 @@ _rm_say_block() {  # <file> <start> <end>
 # `remove_dep` is the SSoT for what happens to a dependency: a shared binary is
 # kept with consent already given, a plugin bionic declares is left to the
 # finisher below, a plugin nothing declares gets its own consented uninstall when
-# the registry records it as bionic's, and every `remove-on-consent` row is NAMED.
-# Presence is asked first so a machine is not interrogated about packages it
+# the registry records it as bionic's, a `remove-on-consent` row the install record
+# names gets its own consented removal, and every other `remove-on-consent` row is
+# NAMED. Presence is asked first so a machine is not interrogated about packages it
 # never had.
 #
-# NAMED, NEVER REMOVED (wave-27). This item used to remove a `remove-on-consent`
-# row because it was PRESENT, and presence says nothing about who installed it: a
-# package the user installed themselves came off exactly like one bionic put
-# there. Bionic removes only what it can prove is its own — the markers are that
-# proof in the shell rc, the registry's `<name>@bionic` id for a native plugin —
-# and for these rows nothing on the machine records it. So each one present is
-# printed with the command that removes it by hand, nothing is asked and nothing
-# runs, on every door and under `--all`; the summary lists them under their own
-# heading. A record of what bionic installed is what would let this item act
-# again.
+# REMOVED ONLY BEHIND THE RECORD (wave-27, wave-28 T40). This item used to remove a
+# `remove-on-consent` row because it was PRESENT, and presence says nothing about
+# who installed it: a package the user installed themselves came off exactly like
+# one bionic put there. Bionic removes only what it can prove is its own — the
+# markers are that proof in the shell rc, the registry's `<name>@bionic` id for a
+# native plugin, and the line `install_dep` wrote to the install record for these
+# rows. A recorded row is offered (on the `--all` page too) and removed on a yes;
+# a recorded row in a cache other projects share, and every row the record does not
+# name, is printed with the command that removes it by hand, and nothing is asked
+# and nothing runs; the summary lists those under their own heading.
 #
 # The dep names are read on fd 3 deliberately: a `while read < <(...)` loop would
 # take the loop's stdin from the process substitution, and remove_dep's consent
@@ -2482,6 +2496,34 @@ _rm_item_tools() {
 # The glob is `bionic-*` and it is announced entry by entry before the question,
 # because a plugin whose name merely STARTS with "bionic" would also match it and
 # the user is the one who can tell.
+
+# ─── Item: the machine's share ───────────────────────────────────────────────
+#
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share` is bionic's own file, one integer, written by setup's
+# share step or by `session-poker.sh share <n>` (wave-28 T10, D16). It goes on a yes and nothing else in
+# that directory does: the install record, the gate's store and the pressure ring are other items' or no
+# one's to take. With it gone the gate's default, 80, stands. A path that is no regular file is named and
+# left alone, as the principles item leaves one.
+_rm_item_share() {
+  _rm_wants share || return 0
+  echo "the machine's share:"
+  if _rm_say_not_a_file "$RM_SHARE_FILE"; then echo ""; return 0; fi
+  if ! _rm_item_pending share; then
+    _rm_clean "bionic's share file ${RM_SHARE_FILE}"
+    echo ""
+    return 0
+  fi
+  if _rm_consent "Delete bionic's share file ${RM_SHARE_FILE}? The share goes back to its default, 80%."; then
+    if rm -f "$RM_SHARE_FILE" 2>/dev/null && [ ! -e "$RM_SHARE_FILE" ]; then
+      _rm_removed "bionic's share file ${RM_SHARE_FILE}"
+    else
+      _rm_leftover "${RM_SHARE_FILE} could not be deleted — the share is as it was"
+    fi
+  else
+    _rm_skipped "$?" share "bionic's share file ${RM_SHARE_FILE}"
+  fi
+  echo ""
+}
 
 _rm_item_plugin_data() {
   _rm_wants plugin-data || return 0
@@ -2832,6 +2874,7 @@ _rm_item_legacy_agent_copies
 _rm_item_permission_block
 _rm_item_permission_mode
 _rm_item_working_principles
+_rm_item_share
 _rm_item_tools
 _rm_item_plugin_data
 _rm_item_plugin

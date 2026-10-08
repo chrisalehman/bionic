@@ -1,4 +1,4 @@
-Is the change built from what already exists, and shaped well? Read the code in the range. You are shown no other reader's verdict. Answer every check below on its own `check:` line: PASS, FLAG (a doubt, or a lesser case you name), FAIL (its failing case holds; name the file and line), or `n/a` with the reason it cannot apply to this range. An unanswered check makes the verb refuse the record. "Looks clean" is not an answer: a PASS names what you compared it against. Old code the change did not write never fails a check; a unit it edits fails only if the edit made the case worse.
+Is the change built from what already exists, and shaped well? Read the code in the range. You are shown no other reader's verdict. Answer every check below on its own `check:` line: PASS, FLAG, FAIL, or `n/a` with the reason it cannot apply to this range. A check answers FAIL only when its failing case holds for a finding the table in `severity.md` sends to fix, FLAG when it holds for a finding that table defers or notes, or on a doubt you write as a finding, and PASS otherwise. An unanswered check makes the verb refuse the record. "Looks clean" is not an answer: a PASS names what you compared it against. Age does not lower a rating. Say "older than the reviewed range" beside it.
 
 ## Inputs
 
@@ -33,4 +33,4 @@ scope: <piece|whole>
 check: <id> <PASS|FLAG|FAIL|n/a> <reason>
 ```
 
-`<a>..<b>` is the range you read; `b` is the head your answer is about. `result` is `fail` when any check is FAIL, `flag` when any is FLAG, otherwise `pass`.
+`<a>..<b>` is the range you read; `b` is the head your answer is about. Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.

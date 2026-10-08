@@ -176,26 +176,28 @@ expect_true "non-numeric argument is refused (non-zero exit)" [ "$?" -ne 0 ]
 resources_budget 8 8 >/dev/null 2>&1
 expect_true "a missing argument is refused (non-zero exit)" [ "$?" -ne 0 ]
 
-# The Step-0 skill text (REQ-5, AC-5.1) documents a two-call recipe, not a single
-# zero-argument shortcut. This row reads the RENDERED sentence itself — never a copy
-# pasted into this suite — so a future edit that drifts the doc from the real API goes
-# red here, not silently. It then runs the recipe exactly as the sentence describes:
-# `resources_probe`'s output feeds `resources_budget`'s three positional arguments.
+# The Step-0 skill text (REQ-5, AC-5.1) names the probe and what its estimate is worth.
+# This row reads the RENDERED sentence itself — never a copy pasted into this suite — so
+# a future edit that drifts the doc from the real API goes red here, not silently. It
+# then runs the call exactly as the sentence describes it.
+#
+# THE BUDGET CALL LEFT THE DOCTRINE ON PURPOSE (wave-28 T22; tests/docs-pins.test.sh
+# W28-74e pins `resources_budget` out of every rendered doctrine file). Width is the
+# gate's, and the probe's estimate caps nothing, so Step 0 no longer tells a reader to
+# derive a `parallel-budget:` from the probe. `resources_budget` itself is §B's subject.
 STEP0_RECIPE_MD="$REPO_ROOT/skills/canonical-sdlc/steps/0.md"
 if [ -r "$STEP0_RECIPE_MD" ]; then
   STEP0_RECIPE_FLAT="$(tr '\n' ' ' < "$STEP0_RECIPE_MD")"
   expect_true "Step-0 skill text names the probe call verbatim" \
-    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F '`resources_probe` prints `cores=')" ]
-  expect_true "Step-0 skill text names the budget call's three positional args verbatim" \
-    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F '`resources_budget <cores> <mem_gb> <disk_free_gb>`')" ]
+    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F '`resources_probe` prints `cores=… mem_gb=… disk_free_gb=…`')" ]
+  expect_true "Step-0 skill text says the probe's estimate caps nothing" \
+    [ -n "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -F "the probe's estimate, which caps nothing")" ]
+  expect_eq "…and no longer tells a reader to derive a budget from it (T22)" \
+    "" "$(printf '%s' "$STEP0_RECIPE_FLAT" | grep -oF 'resources_budget')"
 
-  RECIPE_OUT="$(
-    p="$(resources_probe)"
-    c="$(field "$p" cores)"; m="$(field "$p" mem_gb)"; d="$(field "$p" disk_free_gb)"
-    resources_budget "$c" "$m" "$d"
-  )"
-  expect_regex "the rendered sentence's two calls, run in sequence, print a writers= line" \
-    '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+$' "$RECIPE_OUT"
+  RECIPE_OUT="$(resources_probe)"
+  expect_regex "the probe the sentence names prints the three keys it lists, in order" \
+    '^cores=[0-9]+ mem_gb=[0-9]+ disk_free_gb=[0-9]+ ' "$RECIPE_OUT"
 else
   echo "FAIL: $STEP0_RECIPE_MD is not readable"
 fi
@@ -1089,5 +1091,316 @@ expect_eq "L.19 one foreign single-threaded process over the same run is a distu
   "$(undisturbed "$L_DIST" 2 "$L_OWN")"
 expect_eq "L.20 an unreadable load is still not calm" 1 "$(undisturbed garbage 2 0)"
 expect_eq "L.21 a bad <own> is refused with rc 2" 2 "$(undisturbed 0.1 2 lots)"
+
+# ═══════════════════════════════════ §M — the gate's four readers and the movable clock (T1)
+
+section "M — _res_used_pct, _res_busy_cores, _res_cores, _res_total_mb, _res_now (wave-28 D23)"
+
+# FIXTURE FIDELITY. The Darwin stubs are §H's, measured on this machine (memory_pressure ends
+# `System-wide memory free percentage: 44%`; hw.ncpu 8; hw.memsize 8589934592; vm.loadavg
+# `{ 1.60 1.20 1.10 }`), plus a `uname` stub so the branch is taken on any host. The Linux
+# fixture is a synthetic /proc in the kernel's own shapes (`MemTotal:  4000000 kB`,
+# `/proc/loadavg` `0.75 0.50 0.25 1/200 4242`), reached through BIONIC_PROBE_PROC, with `uname`
+# and `nproc` stubbed — it is declared synthetic: no Linux host was measured for it.
+M_UNPIN="BIONIC_PROBE_USED_PCT BIONIC_PROBE_BUSY_CORES BIONIC_PROBE_BUSY_CORES_5M BIONIC_PROBE_CORES BIONIC_PROBE_TOTAL_MB
+  BIONIC_PROBE_FREE_PCT BIONIC_PROBE_FREE_MB BIONIC_PROBE_LOAD_1M BIONIC_PROBE_SWAP_PCT
+  BIONIC_PROBE_PROC BIONIC_NOW_EPOCH BIONIC_NOW_FILE BIONIC_LOAD_NOW_FILE"
+M_DAR="$TMPROOT/stub-m-darwin"; M_LIN="$TMPROOT/stub-m-linux"; M_PROC="$TMPROOT/proc-m"
+mkdir -p "$M_DAR" "$M_LIN" "$M_PROC"
+cp "$STUBS/memory_pressure" "$STUBS/sysctl" "$M_DAR/"
+printf '#!/bin/bash\necho Darwin\n' > "$M_DAR/uname"
+printf '#!/bin/bash\necho Linux\n'  > "$M_LIN/uname"
+printf '#!/bin/bash\necho 4\n'      > "$M_LIN/nproc"
+chmod +x "$M_DAR"/* "$M_LIN"/*
+printf 'MemTotal:        4000000 kB\nMemFree:          200000 kB\nMemAvailable:    1000000 kB\n' \
+  > "$M_PROC/meminfo"
+printf '0.75 0.50 0.25 1/200 4242\n' > "$M_PROC/loadavg"
+m_read() {  # <stub dir or -> <reader> [VAR=value]... -> the reader's answer, every pin unset first
+  local dir="$1" fn="$2"; shift 2
+  (
+    # shellcheck disable=SC2086
+    unset $M_UNPIN
+    [ "$dir" = - ] || PATH="$dir:$PATH"
+    for kv in "$@"; do export "$kv"; done
+    "$fn"
+  ) 2>/dev/null
+}
+
+# Under pins: each reader answers its pin verbatim.
+expect_eq "M.1 BIONIC_PROBE_USED_PCT pins _res_used_pct" "37" \
+  "$(m_read - _res_used_pct BIONIC_PROBE_USED_PCT=37)"
+expect_eq "M.2 BIONIC_PROBE_BUSY_CORES pins _res_busy_cores, a decimal" "2.5" \
+  "$(m_read - _res_busy_cores BIONIC_PROBE_BUSY_CORES=2.5)"
+expect_eq "M.3 BIONIC_PROBE_CORES pins _res_cores" "32" "$(m_read - _res_cores BIONIC_PROBE_CORES=32)"
+expect_eq "M.4 BIONIC_PROBE_TOTAL_MB pins _res_total_mb" "65536" \
+  "$(m_read - _res_total_mb BIONIC_PROBE_TOTAL_MB=65536)"
+expect_eq "M.5 the used pin outranks the live sensor under the Darwin stubs" "37" \
+  "$(m_read "$M_DAR" _res_used_pct BIONIC_PROBE_USED_PCT=37)"
+expect_eq "M.6 an existing free-% pin is the same machine read the other way: 100 − 80" "20" \
+  "$(m_read - _res_used_pct BIONIC_PROBE_FREE_PCT=80)"
+
+# Under Darwin stubs, no pins.
+expect_eq "M.7 Darwin: used is 100 minus memory_pressure's free 44%" "56" "$(m_read "$M_DAR" _res_used_pct)"
+expect_eq "M.8 Darwin: cores is hw.ncpu" "8" "$(m_read "$M_DAR" _res_cores)"
+expect_eq "M.9 Darwin: total_mb is hw.memsize over 2^20" "8192" "$(m_read "$M_DAR" _res_total_mb)"
+expect_eq "M.10 Darwin: busy cores is the one-minute load" "1.60" "$(m_read "$M_DAR" _res_busy_cores)"
+mkdir -p "$TMPROOT/stub-m-dbroken"
+cp "$M_DAR/uname" "$M_DAR/sysctl" "$TMPROOT/stub-m-dbroken/"
+cp "$STUBS/memory_pressure-broken" "$TMPROOT/stub-m-dbroken/memory_pressure"
+chmod +x "$TMPROOT/stub-m-dbroken"/*
+expect_eq "M.11 Darwin: an unreadable memory_pressure reads -1, never 100 used" "-1" \
+  "$(m_read "$TMPROOT/stub-m-dbroken" _res_used_pct)"
+
+# Under Linux stubs, no pins.
+expect_eq "M.12 Linux: used is 100 minus MemAvailable over MemTotal (1000000/4000000)" "75" \
+  "$(m_read "$M_LIN" _res_used_pct BIONIC_PROBE_PROC="$M_PROC")"
+expect_eq "M.13 Linux: cores is nproc" "4" "$(m_read "$M_LIN" _res_cores BIONIC_PROBE_PROC="$M_PROC")"
+expect_eq "M.14 Linux: total_mb is MemTotal kB over 1024" "3906" \
+  "$(m_read "$M_LIN" _res_total_mb BIONIC_PROBE_PROC="$M_PROC")"
+expect_eq "M.15 Linux: busy cores is /proc/loadavg's first field" "0.75" \
+  "$(m_read "$M_LIN" _res_busy_cores BIONIC_PROBE_PROC="$M_PROC")"
+expect_eq "M.16 Linux: the free % the band reads comes from the same /proc" "25" \
+  "$(m_read "$M_LIN" _res_free_pct BIONIC_PROBE_PROC="$M_PROC")"
+
+# The live machine: shape only, the §C convention.
+expect_regex "M.17 live: used_pct is 0 to 100, or -1" '^(-1|100|[0-9]{1,2})$' "$(m_read - _res_used_pct)"
+expect_regex "M.18 live: busy cores is a decimal" '^[0-9]+(\.[0-9]+)?$' "$(m_read - _res_busy_cores)"
+expect_regex "M.19 live: total_mb is a positive count" '^[1-9][0-9]*$' "$(m_read - _res_total_mb)"
+
+# The clock: BIONIC_NOW_EPOCH, or the first line of BIONIC_NOW_FILE, re-read on every call.
+M_CLOCK="$TMPROOT/clock-m"
+printf '2000\nignored\n' > "$M_CLOCK"
+expect_eq "M.20 BIONIC_NOW_EPOCH pins _res_now" "1000" "$(m_read - _res_now BIONIC_NOW_EPOCH=1000)"
+expect_eq "M.21 BIONIC_NOW_FILE's first line is the clock" "2000" \
+  "$(m_read - _res_now BIONIC_NOW_FILE="$M_CLOCK")"
+M_TWO="$( unset BIONIC_NOW_EPOCH; export BIONIC_NOW_FILE="$M_CLOCK"
+          a="$(_res_now)"; printf '2060\n' > "$M_CLOCK"; b="$(_res_now)"; printf '%s %s' "$a" "$b" )"
+expect_eq "M.22 the file is re-read on every call, so a clock moved mid-run is seen" "2000 2060" "$M_TWO"
+expect_eq "M.23 the file outranks the epoch pin (the BIONIC_LOAD_NOW_FILE precedent)" "2060" \
+  "$(m_read - _res_now BIONIC_NOW_EPOCH=1000 BIONIC_NOW_FILE="$M_CLOCK")"
+expect_eq "M.24 a file that holds no epoch falls back to the pin" "1000" \
+  "$(m_read - _res_now BIONIC_NOW_EPOCH=1000 BIONIC_NOW_FILE="$TMPROOT/no-such-clock")"
+expect_regex "M.25 …and with no pin, to the real clock" '^[0-9]{10,}$' \
+  "$(m_read - _res_now BIONIC_NOW_FILE="$TMPROOT/no-such-clock")"
+
+# The five-minute reading (wave-28 T13; D14): `_res_busy_cores_5m`, read the way
+# `_res_busy_cores` is, from the load average's second figure. The stubs above carry it:
+# `{ 1.60 1.20 1.10 }` on Darwin, `0.75 0.50 0.25 …` in the synthetic /proc.
+expect_eq "M.26 BIONIC_PROBE_BUSY_CORES_5M pins _res_busy_cores_5m, a decimal" "3.5" \
+  "$(m_read - _res_busy_cores_5m BIONIC_PROBE_BUSY_CORES_5M=3.5)"
+expect_eq "M.27 the one-minute pin does not move the five-minute reading (Darwin stubs)" "1.20" \
+  "$(m_read "$M_DAR" _res_busy_cores_5m BIONIC_PROBE_BUSY_CORES=9 BIONIC_PROBE_LOAD_1M=9)"
+expect_eq "M.28 Darwin: the five-minute figure is vm.loadavg's second" "1.20" \
+  "$(m_read "$M_DAR" _res_busy_cores_5m)"
+expect_eq "M.29 …beside the one-minute figure the same call reads" "1.60 1.20" \
+  "$(m_read "$M_DAR" _res_busy_cores) $(m_read "$M_DAR" _res_busy_cores_5m)"
+expect_eq "M.30 Linux: the five-minute figure is /proc/loadavg's second field" "0.50" \
+  "$(m_read "$M_LIN" _res_busy_cores_5m BIONIC_PROBE_PROC="$M_PROC")"
+expect_regex "M.31 live: the five-minute figure is a decimal" '^[0-9]+(\.[0-9]+)?$' \
+  "$(m_read - _res_busy_cores_5m)"
+
+# ════════════════════════════════════════════════════ §N — tests/lib/world.sh (T1, D23)
+
+section "N — the model world: machine, clock, cost, repository, suites, verb log (wave-28 D23)"
+
+# Sourced in the canonical `. "$(dirname "$0")/lib/…"` form on a line of its own: that is the
+# shape tests/lib/impact.sh reads as a `source` edge, and so follows into what world.sh
+# itself sources (resources.sh, bound-marker.sh, roster-row.sh) — the world's registration
+# with the file-to-suite map is this line.
+WORLD_LIB="$REPO_ROOT/tests/lib/world.sh"; N_SRC=1
+if [ -r "$WORLD_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$(dirname "$0")/lib/world.sh"
+  N_SRC=$?
+fi
+expect_eq "N.0 tests/lib/world.sh sources" 0 "$N_SRC"
+
+# world_machine plants all four readers, and the older readers agree with them.
+N_M="$( world_machine 4 4096 50 1.5 2>&1
+        printf '%s %s %s %s %s' "$(_res_cores)" "$(_res_total_mb)" "$(_res_used_pct)" \
+          "$(_res_busy_cores)" "$(_res_free_pct)" )"
+expect_eq "N.1 world_machine 4 4096 50 1.5 → cores, total_mb, used, busy (and free 50)" \
+  "4 4096 50 1.5 50" "$N_M"
+N_M2="$( world_machine 32 65536 50 3 2>&1; printf '%s %s' "$(_res_cores)" "$(_res_total_mb)" )"
+expect_eq "N.2 a second machine at the same used share plants its own size" "32 65536" "$N_M2"
+expect_eq "N.3 a used share over 100 is refused with rc 2" 2 \
+  "$( world_machine 4 4096 101 1 >/dev/null 2>&1; printf '%s' "$?" )"
+N_M5="$( world_machine 4 4096 50 1.5 2>&1; printf '%s %s' "$(_res_busy_cores)" "$(_res_busy_cores_5m)" )"
+expect_eq "N.3a with no fifth figure the five-minute load is the one-minute one" "1.5 1.5" "$N_M5"
+N_M5B="$( world_machine 4 4096 50 1.5 3.25 2>&1; printf '%s %s' "$(_res_busy_cores)" "$(_res_busy_cores_5m)" )"
+expect_eq "N.3b world_machine's fifth figure plants the five-minute load alone" "1.5 3.25" "$N_M5B"
+expect_eq "N.3c a five-minute figure that is not a decimal is refused with rc 2" 2 \
+  "$( world_machine 4 4096 50 1 x >/dev/null 2>&1; printf '%s' "$?" )"
+
+# world_clock and world_tick move _res_now, for this shell and for a child it starts.
+N_C="$( world_clock 1000 2>&1; a="$(_res_now)"; world_tick 30 2>&1; b="$(_res_now)"
+        c="$(bash -c ". \"$LIB\"; _res_now")"; printf '%s %s %s' "$a" "$b" "$c" )"
+expect_eq "N.4 world_clock 1000, world_tick 30 → 1000 then 1030, and a child reads 1030" \
+  "1000 1030 1030" "$N_C"
+expect_eq "N.5 world_tick with no clock planted is refused with rc 2" 2 \
+  "$( unset BIONIC_NOW_FILE; world_tick 5 >/dev/null 2>&1; printf '%s' "$?" )"
+
+# world_cost writes the gate store's cost/<key>, newest last, at most three lines.
+N_COST="$( world_clock 5000 >/dev/null 2>&1
+           world_cost a.test.sh 12 1.5 90 2>&1; world_tick 10 >/dev/null 2>&1
+           world_cost a.test.sh 14 2 80 2>&1;  world_tick 10 >/dev/null 2>&1
+           world_cost a.test.sh 9 1 70 2>&1;   world_tick 10 >/dev/null 2>&1
+           world_cost a.test.sh 11 1 60 2>&1
+           printf '%s|' "$BIONIC_GATE_DIR"; tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/a.test.sh" )"
+expect_eq "N.6 four world_cost calls keep the newest three, <mem>:<cores>:<seconds>:<epoch>" \
+  "14:2:80:5010 9:1:70:5020 11:1:60:5030 " "${N_COST#*|}"
+expect_eq "N.7 …in the gate store the world owns, never the real home's" "${WORLD_ROOT:-unset}/gate" \
+  "${N_COST%%|*}"
+expect_eq "N.8 a key holding a slash is refused with rc 2" 2 \
+  "$( world_cost a/b 1 1 1 >/dev/null 2>&1; printf '%s' "$?" )"
+
+# world_repo: the fixture repository, built with real git outside every checkout.
+N_ROOT="$(world_repo 2>/dev/null)"
+expect_true "N.9 world_repo prints a directory that exists" test -d "${N_ROOT:-/nonexistent}"
+expect_status "N.10 the root's parent lies outside every checkout" 128 \
+  "$( [ -n "$N_ROOT" ] || exit 99
+      git -C "$(dirname "$N_ROOT")" rev-parse --show-toplevel >/dev/null 2>&1; echo $? )"
+expect_eq "N.11 git's own toplevel is the printed root" "${N_ROOT:-no root printed}" \
+  "$(git -C "${N_ROOT:-/nonexistent}" rev-parse --show-toplevel 2>/dev/null)"
+expect_eq "N.12 the checkout holds the working branch wave/x" "wave/x" \
+  "$(git -C "${N_ROOT:-/nonexistent}" branch --show-current 2>/dev/null)"
+expect_eq "N.13 wave/x carries the two suites" "tests/a.test.sh tests/b.test.sh" \
+  "$(git -C "${N_ROOT:-/nonexistent}" ls-tree -r --name-only wave/x -- tests 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+N_PLAN="${N_ROOT:-/nonexistent}/.bionic/docs/plans/epic-x/wave-x.plan.md"
+expect_eq "N.14 the plan names wave/x as its working branch" "working-branch: wave/x" \
+  "$(grep '^working-branch:' "$N_PLAN" 2>/dev/null)"
+expect_eq "N.15 the session's engaged marker binds that plan" "plan=$N_PLAN" \
+  "$(grep '^plan=' "${N_ROOT:-/nonexistent}/.bionic/tmp/engaged-${WORLD_SID:-none}.state" 2>/dev/null)"
+N_ROSTER="${N_ROOT:-/nonexistent}/.bionic/tmp/roster-${WORLD_SID:-none}.state"
+expect_eq "N.16 the roster holds one row per row tree, named wx-T1 and wx-T2" "wx-T1 wx-T2" \
+  "$(tr '|' '\n' < "$N_ROSTER" 2>/dev/null | sed -n 's/^name=//p' | tr '\n' ' ' | sed 's/ $//')"
+for t in T1 T2; do
+  N_T="${N_ROOT:-/nonexistent}/.worktrees/$t"
+  expect_eq "N.17-$t the row tree $t is on branch wt/$t" "wt/$t" \
+    "$(git -C "$N_T" branch --show-current 2>/dev/null)"
+  expect_eq "N.18-$t …one commit ahead of wave/x" "1" \
+    "$(git -C "${N_ROOT:-/nonexistent}" rev-list --count "wave/x..wt/$t" 2>/dev/null)"
+  expect_eq "N.19-$t …and its .bionic is the root's" "${N_ROOT}/.bionic" \
+    "$(readlink "$N_T/.bionic" 2>/dev/null)"
+done
+expect_eq "N.20 the checkout and both trees are clean" "" \
+  "$( for d in "$N_ROOT" "$N_ROOT/.worktrees/T1" "$N_ROOT/.worktrees/T2"; do
+        git -C "$d" status --porcelain 2>&1; done )"
+expect_eq "N.21 …and that cleanliness was read off real checkouts" "3" \
+  "$( n=0; for d in "$N_ROOT" "$N_ROOT/.worktrees/T1" "$N_ROOT/.worktrees/T2"; do
+        git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 && n=$((n+1)); done; echo $n )"
+
+# world_suite: four endings, each run for real.
+N_SD="${WORLD_ROOT:-/nonexistent}/world-suites"; mkdir -p "$N_SD"
+n_suite() {  # <name> <ending> -> "<rc>|<output>"
+  local p out rc
+  p="$( cd "$N_SD" && world_suite "$1" "$2" 2>/dev/null )"
+  out="$(bash "${p:-/nonexistent}" 2>&1)"; rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+N_G="$(n_suite g green)"; N_R="$(n_suite r red)"; N_N="$(n_suite n none)"; N_K="$(n_suite k kill)"
+expect_true "N.22 world_suite writes tests/<name>.test.sh under the current directory" \
+  test -f "$N_SD/tests/g.test.sh"
+expect_eq "N.23 green: rc 0" "0" "${N_G%%|*}"
+expect_regex "N.24 green: ends with the framework's verdict line, 0 failed" \
+  'g\.test\.sh: 1/1 passed, 0 failed' "${N_G#*|}"
+expect_eq "N.25 red: rc 1" "1" "${N_R%%|*}"
+expect_eq "N.26 red: exactly one FAIL: line" "1" "$(printf '%s\n' "${N_R#*|}" | grep -c '^FAIL: ')"
+expect_regex "N.27 red: the verdict line counts it" 'r\.test\.sh: 1/2 passed, 1 failed' "${N_R#*|}"
+expect_contains "N.28 none: the suite ran (its PASS line is there)" "PASS: " "${N_N#*|}"
+expect_absent "N.29 none: …and it exited before its end line" "passed," "${N_N#*|}"
+expect_eq "N.30 kill: the suite died by signal 9 (rc 137)" "137" "${N_K%%|*}"
+expect_contains "N.31 kill: …after it had started" "PASS: " "${N_K#*|}"
+expect_eq "N.32 an unknown ending is refused with rc 2" 2 \
+  "$( cd "$N_SD" && world_suite x maybe >/dev/null 2>&1; printf '%s' "$?" )"
+
+# world_verbs: the verb log's path.
+N_V="$(world_verbs 2>/dev/null)"
+expect_true "N.33 world_verbs prints a file that exists" test -f "${N_V:-/nonexistent}"
+expect_eq "N.34 …the one BIONIC_VERB_LOG names for the commands under test" "${BIONIC_VERB_LOG:-unset}" "$N_V"
+
+# The world is removed when the shell that sourced it exits (rule 12: no fixture outlives it).
+N_EXIT="$( bash -c '. "$1"; r="$(world_repo)"; [ -d "$r/.git" ] && printf "%s" "$r"' _ "$WORLD_LIB" 2>/dev/null )"
+expect_true "N.35 a child that sourced the world built a repository" test -n "$N_EXIT"
+expect_true "N.36 …and it is gone once that child exited" test ! -e "${N_EXIT:-/nonexistent}/.git"
+N_KEEP="$( bash -c 'trap "echo suite-trap-ran" EXIT; . "$1"' _ "$WORLD_LIB" 2>/dev/null )"
+expect_eq "N.37 sourcing the world keeps the suite's own EXIT trap" "suite-trap-ran" "$N_KEEP"
+
+# T45 (review pass 1 of T1, findings 1, 2, 3 and 5): the world writes no suite outside itself,
+# its clock never shows the real time mid-tick, and its trap neither turns red green nor
+# leaks the world on the chained branch every real suite takes.
+
+# world_suite refuses unless the current directory, resolved, lies inside WORLD_ROOT.
+N_OUT="$TMPROOT/outside-the-world"; mkdir -p "$N_OUT"
+ln -s "$N_OUT" "${WORLD_ROOT:-/nonexistent}/link-out" 2>/dev/null
+n_where() {  # <dir> <name> -> "<rc>|<file|dir|none>|<stderr lines>|<stderr>|<stdout>"
+  local out rc made=none err="$TMPROOT/n_where.err"
+  out="$( cd "$1" && world_suite "$2" green 2>"$err" )"; rc=$?
+  [ -d "$1/tests" ] && made=dir
+  [ -f "$1/tests/$2.test.sh" ] && made=file
+  printf '%s|%s|%s|%s|%s' "$rc" "$made" "$(wc -l < "$err" | tr -d ' ')" "$(cat "$err")" "$out"
+}
+N_W_OUT="$(n_where "$N_OUT" x)"
+expect_eq "N.38 world_suite from a directory outside the world: rc 2, no tests/ made there" \
+  "2|none" "$(printf '%s' "$N_W_OUT" | cut -d'|' -f1-2)"
+expect_regex "N.39 …refused in one line that says why" '^1\|world_suite: .*outside' \
+  "$(printf '%s' "$N_W_OUT" | cut -d'|' -f3-4)"
+expect_eq "N.40 the same call inside world_repo's root: rc 0, the path printed, the file there" \
+  "0|file|0||${N_ROOT:-no root}/tests/x.test.sh" "$(n_where "${N_ROOT:-/nonexistent}" x)"
+expect_eq "N.41 a link inside the world that resolves outside it is refused (pwd -P)" \
+  "2|none" "$(n_where "${WORLD_ROOT:-/nonexistent}/link-out" y | cut -d'|' -f1-2)"
+
+# The clock file is replaced by a rename, never truncated in place: a new inode each write.
+n_inode() { ls -i "$1" 2>/dev/null | awk '{ print $1 }'; }
+n_renamed() {  # <inode before> <inode after> -> renamed | same-file | no-inode
+  if [ -z "$1" ] || [ -z "$2" ]; then echo no-inode
+  elif [ "$1" != "$2" ]; then echo renamed
+  else echo same-file; fi
+}
+expect_eq "N.42 world_tick replaces the clock file by a rename, and the clock moved" "7005|renamed" \
+  "$( world_clock 7000 >/dev/null 2>&1; a="$(n_inode "$BIONIC_NOW_FILE")"
+      world_tick 5 >/dev/null 2>&1; b="$(n_inode "$BIONIC_NOW_FILE")"
+      printf '%s|%s' "$(_res_now)" "$(n_renamed "$a" "$b")" )"
+expect_eq "N.43 world_clock over a planted clock replaces it by a rename too" "8000|renamed" \
+  "$( world_clock 7000 >/dev/null 2>&1; a="$(n_inode "$BIONIC_NOW_FILE")"
+      world_clock 8000 >/dev/null 2>&1; b="$(n_inode "$BIONIC_NOW_FILE")"
+      printf '%s|%s' "$(_res_now)" "$(n_renamed "$a" "$b")" )"
+expect_eq "N.44 …and leaves no temporary file beside it" "clock" \
+  "$(ls -A "${WORLD_ROOT:-/nonexistent}" 2>/dev/null | grep clock | tr '\n' ' ' | sed 's/ $//')"
+# The worked answer: a reader looping _res_now while 1000 ticks run reads only planted epochs.
+N_RACE="$( world_clock 1000 >/dev/null 2>&1 || exit 1
+  stop="$WORLD_ROOT/race.stop"; seen="$WORLD_ROOT/race.seen"; rm -f "$stop"
+  ( while [ ! -e "$stop" ]; do _res_now; echo; done > "$seen" ) &
+  i=0; while [ "$i" -lt 1000 ]; do world_tick 1 >/dev/null 2>&1; i=$((i + 1)); done
+  : > "$stop"; wait
+  awk '$1 < 1000 || $1 > 2000 { bad++ } END { printf "%d|%d", NR, bad + 0 }' "$seen" )"
+expect_true "N.45 a reader ran beside 1000 ticks and read the clock at least 100 times" \
+  test "${N_RACE%%|*}" -ge 100
+expect_eq "N.46 …and every value it read was a planted epoch, never the real clock" \
+  "0" "${N_RACE#*|}"
+
+# The chained trap hands the suite's own trap the status the shell began to exit with.
+expect_eq "N.47 a suite whose own trap ends 'exit \$rc' still exits red after a red run" \
+  "saw=1|1" \
+  "$( out="$(bash -c 'trap "rc=\$?; echo saw=\$rc; exit \$rc" EXIT; . "$1"; false; exit 1' \
+        _ "$WORLD_LIB" 2>/dev/null)"; printf '%s|%s' "$out" "$?" )"
+expect_eq "N.48 …and green after a green run" "saw=0|0" \
+  "$( out="$(bash -c 'trap "rc=\$?; echo saw=\$rc; exit \$rc" EXIT; . "$1"; exit 0' \
+        _ "$WORLD_LIB" 2>/dev/null)"; printf '%s|%s' "$out" "$?" )"
+expect_eq "N.49 with no earlier trap the exit status is unchanged (exit 3, a last false, exit 0)" \
+  "3 1 0" \
+  "$( bash -c '. "$1"; exit 3' _ "$WORLD_LIB" 2>/dev/null; a=$?
+      bash -c '. "$1"; false' _ "$WORLD_LIB" 2>/dev/null; b=$?
+      bash -c '. "$1"; exit 0' _ "$WORLD_LIB" 2>/dev/null; c=$?
+      printf '%s %s %s' "$a" "$b" "$c" )"
+
+# Cleanup on the CHAINED branch: a suite with its own EXIT trap before sourcing the world.
+N_CH="$( bash -c 'trap "echo suite-trap-ran" EXIT; . "$1"; r="$(world_repo)"
+                  [ -d "$r/.git" ] && printf "%s\n" "$WORLD_ROOT"' _ "$WORLD_LIB" 2>/dev/null )"
+N_CH_DIR="$(printf '%s\n' "$N_CH" | sed -n 1p)"
+expect_regex "N.50 the chained branch: the world built a repository and the suite's trap ran" \
+  '/world\.[^/|]+\|suite-trap-ran$' "${N_CH_DIR}|$(printf '%s\n' "$N_CH" | sed -n 2p)"
+expect_eq "N.51 …and the world's directory is gone once that suite exited" "gone" \
+  "$( [ -n "$N_CH_DIR" ] && [ ! -e "$N_CH_DIR" ] && echo gone || echo "present or unknown" )"
 
 finish

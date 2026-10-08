@@ -109,51 +109,246 @@ fi
 # symlink and nothing else, and removing it while another suite's children resolve `bash`
 # through it would be the race. An entry already there is never replaced, for the same reason.
 #
-# THE PATH ITSELF IS JUDGED, NEVER WHAT A LINK POINTS AT (wave-27 T87; review pass 75). That
-# per-user root is a predictable name, and under a shared /tmp anyone can plant it first. `-O`
-# and `-d` follow a link, so a link planted there to any directory this user owns once passed,
-# PATH carried the link's path, and the planter could repoint it mid-run to put their own `bash`
-# under every child. So each of the root and <root>/pin is refused when it IS a symlink (tested
-# first, right after the one mkdir, which never creates through a link), is not a directory, is
-# not this user's, or is writable by group or others. A root made here is mode 0700. A refusal
-# returns non-zero, pins nothing, leaves PATH alone and prints this seam's line once, naming the
-# check; the caller adds nothing to it.
+# THE ROOT IS ABSOLUTE OR IT IS REFUSED (T69). A relative root is a path from `.`, so a walk of it would judge the cwd and
+# what lies below it and never the cwd's ancestors, while PATH carries the pin's absolute physical path through every one
+# of them. It is refused, `<root> is not an absolute path`, before any walk, and never repaired with $PWD: that would
+# judge a path the caller never named. The same rule is why `cd` below never consults CDPATH: it does so only for a
+# path that is not absolute. A root carrying a control character (a newline in TMPDIR) is refused before that, as
+# the first check, `<root> carries a control character` (T73), and every line this file prints shows such a
+# character as `?`: one refusal is one line.
+# THE PIN'S WHOLE PATH IS JUDGED, FROM `/` DOWN, BY ONE PREDICATE (AC-10.6; provenance below). Whoever can write a
+# directory that holds one of the path's components renames it away and puts their own in its place, between this
+# check and a child's `bash`, so the walk judges each component's HOLDER, link or not, and stops at the first
+# one that is open. That per-user root is a predictable name, and under a shared /tmp anyone can plant it first.
+# "Open" is _bionic_pin_open, and a directory is open when ANY of these holds:
+#   - group or others can write it by MODE and the sticky bit is not set (sticky is what keeps a shared /tmp
+#     safe; the root and the pin are judged with `any`, which drops that exemption);
+#   - its ACL lets anyone but its owner change what it holds. macOS `ls -lde`: an `allow` entry carrying
+#     add_file, add_subdirectory, delete_child, write, delete, append, writesecurity or chown (the last two
+#     let the holder grant itself the rest); a deny-only, read-only, the owner's own or `only_inherit` entry
+#     does not count. Linux `getfacl -p`: a NAMED user or group entry, the owner's own excepted, whose effective
+#     rights include `w`. The base entries (`user::`, `group::`, `other::`, `mask::`) repeat the mode and are
+#     skipped, and so are `default:` entries (what children inherit: the root and the pin are judged after
+#     they are made, where an inherited entry is an ordinary one, the macOS `only_inherit` rule);
+#   - its owner is not trusted, by _bionic_pin_trusted, the one rule: this user, root, or the owner of the
+#     filesystem root `/`. The owner can rename what it holds whatever its mode says. In an unprivileged Linux
+#     user namespace every uid with no mapping, root's included, reads as the overflow uid, `/` too, so what
+#     `/` reads as is the root of that world and the directories that share it are judged by mode and ACL; a
+#     directory owned by a MAPPED other uid is still refused. An owner that cannot be read refuses;
+#   - it does not exist. A parent that is absent when the walk judges it can be made by another user before
+#     the mkdir and would never be judged again, so a missing path is refused where the walk meets it, as
+#     `<path> is not a directory`: a missing TMPDIR reads that way.
+# A LINK on the path is also refused when its OWN owner (read without following it) is not trusted: `stat -L`
+# reads where a link leads, and whoever owns the link may repoint it. Its target is then walked the same way,
+# to 16 links, so a chain of links, and a holder that is itself a link, are covered.
+# The root and the pin go through one function, _bionic_pin_hold: made if nothing is there (a mkdir that fails is
+# refused, `cannot make <path>`), then the entry's OWN owner is read without following it (_bionic_pin_entry: this
+# user's, and an entry that is not there is refused, `<path> does not exist`), then the `-L` test, then the judge.
+# Every reader after the `-L` test follows links, so an entry another user planted and swapped for a link between
+# the two would pass the judge through where it leads, and an entry that vanished before the owner read would pass
+# it too. Once the owner read has found this user's own entry, no one else can rename, unlink or replace it in a
+# sticky or 0700 holder, so every later reader that follows reads this user's own object. And PATH carries the
+# pin's PHYSICAL path, so no link on it is followed when a child runs `bash`. It is taken by `cd -P` and `pwd -P`
+# (T73): a `cd` without -P is LOGICAL, it removes `<component>/..` as text before it calls chdir, while the walk,
+# the mkdir, the hold and the judge hand `..` to the kernel, which resolves it through the link. `/tmp/lnk/../r`
+# was judged and built under lnk's target and PATH took `/tmp/r`, a directory nobody judged.
+# The owner is read by _bionic_pin_owner, which prints the raw uid and is the one place a test stubs `stat`. The
+# root and the pin must be owned by THIS user (`-O`, the effective uid, a second reader of the owner and
+# stricter than the rule above): they are made here, so nothing else is expected. A refusal returns
+# non-zero, pins nothing, leaves PATH alone and prints this seam's line once, naming the check; the caller
+# adds nothing to it. The reason is also left in _BIONIC_PIN_WHY (empty when the pin was built), for the
+# hand-run path below, which prints its own line instead. A root made here is mode 0700.
+# Provenance, one line each: T87 (wave-27, pass 75) the root and the pin are judged as paths, never by what a
+# link points at (-O and -d follow one); T36 (Chris "D3: 1") the parent is judged too, a shared /tmp safe
+# through its sticky bit; T54 the parent is read through a symlink (`ls -ldL`); T56 every link on the path is
+# judged by the directory that holds it; T57, T59 the walk judges every directory, with ACLs and owners;
+# T61 the owner of `/` is trusted; T63 a missing path is refused, never "not open"; T65 the root's and the pin's
+# own entries are read without following, and PATH carries the physical path; T67 an entry that is absent at the
+# owner read, and a mkdir that fails, are refused; one function for the root and the pin; T69 a relative root is refused; T73 the pin's `cd`
+# is physical, and a root with a control character is refused first.
+# Never judged: where PATH's other entries lead, and what `bash -> /bin/bash` points at (/bin/bash is the
+# system's own, replaceable only by root).
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can
   if [ ! -d "$1" ]; then echo "$1 is not a directory"
   elif [ ! -O "$1" ]; then echo "$1 is not owned by this user"
-  else
-    case "$(ls -ld "$1" 2>/dev/null)" in
-      ?????w*|????????w*) echo "$1 is writable by group or others" ;;
-    esac
+  elif _bionic_pin_open "$1" any; then echo "$1 $_BIONIC_PIN_OPEN"
   fi
 }
+_bionic_pin_acl_ls() {  # _bionic_pin_acl_ls <`ls -ldLe` output> — macOS: prints "<principal> <rights>" for the first entry that lets anyone but the directory's owner change what it holds
+  local owner line who rights tok got
+  owner="$(printf '%s\n' "$1" | sed 1q | awk '{print $3}')"
+  printf '%s\n' "$1" | sed 1d | while IFS= read -r line; do
+    case "$line" in *" allow "*) ;; *) continue ;; esac
+    who="${line#*: }"; rights="${who#* allow }"; who="${who%% allow *}"; who="${who% inherited}"
+    [ "$who" != "user:$owner" ] || continue
+    case ",$rights," in *,only_inherit,*) continue ;; esac
+    got=""
+    for tok in add_file add_subdirectory delete_child write delete append writesecurity chown; do
+      case ",$rights," in *",$tok,"*) got="${got:+$got,}$tok" ;; esac
+    done
+    [ -z "$got" ] || { echo "$who $got"; break; }
+  done
+}
+_bionic_pin_acl_getfacl() {  # _bionic_pin_acl_getfacl <dir> — prints "<principal> write" for the first named user or group, other than the owner, whose effective rights include w
+  local line kind rest name perm owner=""
+  getfacl -p "$1" 2>/dev/null | while IFS= read -r line; do
+    case "$line" in "# owner: "*) owner="${line#\# owner: }"; continue ;; "#"*|""|default:*) continue ;; esac
+    kind="${line%%:*}"; rest="${line#*:}"; name="${rest%%:*}"; perm="${rest#*:}"
+    [ -n "$name" ] || continue  # user:: group:: other:: mask:: repeat the mode, which the caller read
+    [ "$kind:$name" != "user:$owner" ] || continue
+    perm="${perm%%[ 	]*}"
+    case "$line" in *"#effective:"*) perm="${line##*#effective:}" ;; esac
+    case "$perm" in ?w*) ;; *) continue ;; esac
+    echo "$kind${name:+:$name} write"
+    break
+  done
+}
+_bionic_pin_owner() {  # _bionic_pin_owner <path> [nofollow] — prints the uid that owns <path>, read through links unless `nofollow`; nothing when it cannot be read
+  local follow="-L"
+  [ "${2:-}" != nofollow ] || follow=""
+  stat $follow -c %u "$1" 2>/dev/null || stat $follow -f %u "$1" 2>/dev/null
+}
+_BIONIC_PIN_TRUSTED_WHO="you, root or the owner of /"  # _bionic_pin_trusted's list in words: the one wording its refusals use
+_bionic_pin_trusted() {  # _bionic_pin_trusted <uid> — succeeds when <uid> may own a directory or link on the pin's path: this user, root, or the owner of `/`
+  [ -n "$1" ] || return 1  # an owner that could not be read
+  case "$1" in 0|"$UID") return 0 ;; esac
+  [ "$1" = "$(_bionic_pin_owner /)" ]  # in a user namespace root reads as the overflow uid, and so does `/` and every unmapped directory
+}
+_BIONIC_PIN_ACL=""
+_bionic_pin_acl() {  # _bionic_pin_acl <dir> <`ls -ldLe` output of <dir>> — leaves the first ACL entry that lets anyone but the owner change what <dir> holds in _BIONIC_PIN_ACL
+  local nl=$'\n'
+  _BIONIC_PIN_ACL=""
+  case "$2" in *"$nl"*) _BIONIC_PIN_ACL="$(_bionic_pin_acl_ls "$2")" ;; esac  # entries follow the mode line: macOS only
+  [ -n "$_BIONIC_PIN_ACL" ] || ! command -v getfacl >/dev/null 2>&1 || _BIONIC_PIN_ACL="$(_bionic_pin_acl_getfacl "$1")"
+}
+_bionic_pin_open() {  # _bionic_pin_open <dir> [any] — succeeds when another user can replace what <dir> holds, leaving the clause that says why in _BIONIC_PIN_OPEN; `any` drops the sticky exemption
+  local out mode owner sticky="" nl=$'\n'
+  _BIONIC_PIN_OPEN=""
+  [ -e "$1" ] || { _BIONIC_PIN_OPEN="is not a directory"; return 0; }  # a path that does not exist is refused where the walk meets it: another user may make it before the mkdir, and nothing judges it again
+  out="$(ls -ldLe "$1" 2>/dev/null)"
+  [ -n "$out" ] || out="$(ls -ldL "$1" 2>/dev/null)"  # where ls has no -e
+  mode="${out%%$nl*}"
+  case "$mode" in
+    ?????????[tT]*) sticky=1 ;;
+  esac
+  case "$mode" in
+    ?????w*|????????w*)
+      if [ "${2:-}" = any ]; then _BIONIC_PIN_OPEN="is writable by group or others"; return 0
+      elif [ -z "$sticky" ]; then _BIONIC_PIN_OPEN="is writable by group or others and has no sticky bit"; return 0
+      fi ;;
+  esac
+  _bionic_pin_acl "$1" "$out"
+  [ -z "$_BIONIC_PIN_ACL" ] || { _BIONIC_PIN_OPEN="carries an ACL letting $_BIONIC_PIN_ACL"; return 0; }
+  owner="$(_bionic_pin_owner "$1")"
+  _bionic_pin_trusted "$owner" || { _BIONIC_PIN_OPEN="is owned by uid ${owner:-unknown}, who is not $_BIONIC_PIN_TRUSTED_WHO"; return 0; }
+  return 1
+}
+# The walk takes an absolute path only: bionic_interpreter_pin refuses a relative root before it calls it (T69), and a
+# link's target is made absolute below. Handed a relative path anyway it walks it from `/`, as if it began there; it has
+# no rule for `.`, and none is needed (the no-absolute-test mutant of the suite, 7.86, is handed one and builds).
+_bionic_pin_links() {  # _bionic_pin_links <path> <depth> [<top>] — prints why a component of <path> can be replaced; nothing when none can
+  local rest="$1" cur="" holder part target linkowner why=""
+  [ "$2" -le 16 ] || { echo "${3:-$1} leads through more than 16 links"; return; }
+  while [ -n "$rest" ] && [ -z "$why" ]; do
+    part="${rest%%/*}"
+    if [ "$part" = "$rest" ]; then rest=""; else rest="${rest#*/}"; fi
+    [ -n "$part" ] || { [ -z "$cur" ] || cur="$cur/"; continue; }  # a doubled slash stays as the caller spelled it
+    holder="${cur:-/}"
+    cur="$cur/$part"
+    if _bionic_pin_open "$holder"; then
+      if [ -L "$cur" ]; then why="$cur is a symlink held in $holder, which $_BIONIC_PIN_OPEN"
+      else why="$holder $_BIONIC_PIN_OPEN"
+      fi
+    elif [ -L "$cur" ]; then
+      linkowner="$(_bionic_pin_owner "$cur" nofollow)"  # the link's own owner repoints it, whatever it leads to
+      _bionic_pin_trusted "$linkowner" || why="$cur is a symlink owned by uid ${linkowner:-unknown}, who is not $_BIONIC_PIN_TRUSTED_WHO"
+      if [ -z "$why" ]; then
+        target="$(readlink "$cur")"
+        case "$target" in /*) ;; *) target="$holder/$target" ;; esac
+        why="$(_bionic_pin_links "$target" $(($2 + 1)) "${3:-$1}")"
+      fi
+    fi
+  done
+  [ -z "$why" ] || echo "$why"
+}
+_bionic_pin_parent() {  # _bionic_pin_parent <root> — prints why <root>'s parent is open; nothing when it is not
+  local parent="${1%/*}" why=""
+  [ -n "$parent" ] || parent="/"
+  why="$(_bionic_pin_links "$parent" 0)"
+  if [ -n "$why" ]; then echo "$why"
+  elif _bionic_pin_open "$parent"; then echo "$parent $_BIONIC_PIN_OPEN"
+  fi
+}
+_bionic_pin_entry() {  # _bionic_pin_entry <path> — prints why <path>'s OWN entry is not this user's, read without following it; nothing when it is. An entry that is not there is refused: the owner of nothing is no one's
+  local owner
+  [ -e "$1" ] || [ -L "$1" ] || { echo "$1 does not exist"; return 0; }
+  owner="$(_bionic_pin_owner "$1" nofollow)"
+  [ "$owner" = "$UID" ] || echo "$1 is owned by uid ${owner:-unknown}, who is not you"
+}
+_bionic_pin_unmade() {  # _bionic_pin_unmade <path> <root|pin> — the mkdir of <path> failed: leaves the reason in _BIONIC_PIN_STEP and its class in _BIONIC_PIN_CLASS
+  _BIONIC_PIN_STEP="cannot make $1"; _BIONIC_PIN_CLASS="make-$2"
+  [ ! -e "$1" ] && [ ! -L "$1" ] || _BIONIC_PIN_CLASS=race  # something is there now: a run of this user's made it first, and it is in use
+}
+_bionic_pin_hold() {  # _bionic_pin_hold <path> <root|pin> — makes <path> when nothing is there, then leaves in _BIONIC_PIN_STEP why it cannot hold the pin (empty when it can), in _BIONIC_PIN_MADE whether this call made it and in _BIONIC_PIN_CLASS the reason's class: race and make-<root|pin> (_bionic_pin_unmade), entry (the ROOT's own entry is not this user's), else empty
+  _BIONIC_PIN_STEP=""; _BIONIC_PIN_MADE=""; _BIONIC_PIN_CLASS=""
+  if [ ! -e "$1" ] && [ ! -L "$1" ]; then
+    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _bionic_pin_unmade "$1" "$2"; return 0; }
+  fi
+  _BIONIC_PIN_STEP="$(_bionic_pin_entry "$1")"
+  [ -z "$_BIONIC_PIN_STEP" ] || { [ "$2" != root ] || _BIONIC_PIN_CLASS=entry; return 0; }
+  [ ! -L "$1" ] || { _BIONIC_PIN_STEP="$1 is a symlink"; return 0; }
+  _BIONIC_PIN_STEP="$(_bionic_pin_judge "$1")"
+}
+_BIONIC_PIN_WHY=""
+_BIONIC_PIN_CLASS=""
 bionic_interpreter_pin() {
-  local root="${1:-}" dir why=""
+  local root="${1:-}" dir phys why="" made_root="" made_dir=""
+  local shown="${root//[[:cntrl:]]/?}"  # what a line may print of the root: a control character is never printed raw (T73)
+  _BIONIC_PIN_CLASS=""
   [ -n "$root" ] || why="no root was given"
+  [ -n "$why" ] || case "$root" in *[[:cntrl:]]*) why="$shown carries a control character" ;; /*) ;; *) why="$root is not an absolute path" ;; esac
+  [ -n "$why" ] || why="$(_bionic_pin_parent "$root")"
+  [ -z "$why" ] || [ -z "$root" ] || _BIONIC_PIN_CLASS=path
   dir="$root/pin"
-  [ -n "$why" ] || [ -e "$root" ] || [ -L "$root" ] || mkdir -m 0700 "$root" 2>/dev/null
-  [ ! -L "$root" ] || why="$root is a symlink"
-  [ -n "$why" ] || why="$(_bionic_pin_judge "$root")"
-  [ -n "$why" ] || [ -e "$dir" ] || [ -L "$dir" ] || mkdir -m 0700 "$dir" 2>/dev/null
-  [ -n "$why" ] || [ ! -L "$dir" ] || why="$dir is a symlink"
-  [ -n "$why" ] || why="$(_bionic_pin_judge "$dir")"
+  [ -n "$why" ] || { _bionic_pin_hold "$root" root; why="$_BIONIC_PIN_STEP"; made_root="$_BIONIC_PIN_MADE"; }
+  [ -n "$why" ] || { _bionic_pin_hold "$dir" pin; why="$_BIONIC_PIN_STEP"; made_dir="$_BIONIC_PIN_MADE"; }
   [ -n "$why" ] || [ -L "$dir/bash" ] || ln -s /bin/bash "$dir/bash" 2>/dev/null
   [ -n "$why" ] || [ "$(readlink "$dir/bash" 2>/dev/null)" = "/bin/bash" ] \
     || why="$dir/bash is not a link to /bin/bash"
+  [ -n "$why" ] || phys="$(cd -P -- "$dir" 2>/dev/null && pwd -P)" || why="$dir is not a directory"
+  _BIONIC_PIN_WHY="$why"
   if [ -n "$why" ]; then
-    echo "resolve-roots.sh: cannot build the interpreter pin under $root — $why, so nothing is pinned" >&2
+    [ -z "$made_dir" ] || rmdir "$dir" 2>/dev/null
+    [ -z "$made_root" ] || { rmdir "$root" 2>/dev/null && _BIONIC_PIN_CLASS=entry; }  # a root made here and taken down again is nothing to remove
+    echo "resolve-roots.sh: cannot build the interpreter pin under $shown — $why, so nothing is pinned" >&2
     return 1
   fi
-  PATH="$dir:$PATH"
+  PATH="$phys:$PATH"  # the physical path: no link on it is followed when a child runs `bash`
   export PATH
   BIONIC_TEST_INTERPRETER_PINNED=1
   export BIONIC_TEST_INTERPRETER_PINNED
 }
 
-# THE HAND-RUN PATH. The seam calls the function right after its re-exec — in the /bin/bash copy,
+# THE REMEDY, BY THE REASON'S CLASS (_BIONIC_PIN_CLASS, left by the function and by _bionic_pin_hold): the one place the
+# hand run's remedy is chosen. Removing the root helps only when this user owns it (another user's cannot be removed
+# from a sticky /tmp), the path to it was not the refusal, and no run of this user's is using it.
+_bionic_pin_remedy() {  # _bionic_pin_remedy <root> — prints what to do about the refusal whose class is in _BIONIC_PIN_CLASS
+  case "$_BIONIC_PIN_CLASS" in
+    path|make-root|entry) echo "set TMPDIR to an absolute directory only you can write, then run again" ;;  # the way to the root, or the root, is not this user's to use: nothing there to remove
+    race) echo "run again" ;;  # a run of this user's made it first and is using it (T69)
+    *) echo "remove $1 or set TMPDIR, then run again" ;;  # make-pin, and every refusal of what this user's own root holds (T73)
+  esac
+}
+# THE HAND-RUN PATH. A relative TMPDIR makes a relative root, which the function refuses by name. The seam calls the function right after its re-exec — in the /bin/bash copy,
 # or in a suite started under /bin/bash in the first place — unless the first PATH entry is
 # already a pin (a suite tests/run.sh launched, or one this seam already pinned). The test is
 # the directory, not the marker, for the reason the re-exec's test is the interpreter (K-4).
+#
+# A REFUSED PIN STOPS THE RUN, AS THE RUNNER STOPS (wave-28 T36; AC-10.5; wave-27 review pass 75).
+# This path used to end `|| :`, so a refused pin printed its line and the suite ran on unpinned —
+# the world a full run never gives it, which is the whole thing the pin exists to prevent. Now
+# the suite runs no check: it prints one line naming the pin's path and the reason, unsets the
+# marker (nothing was pinned) and exits 2, the runner's own code for "nothing was run".
 if [ "${0##*/}" != "run.sh" ] \
    && [ -x "/bin/bash" ] \
    && [ -f "$0" ] && [ -r "$0" ]; then
@@ -167,12 +362,17 @@ if [ "${0##*/}" != "run.sh" ] \
     fi
   elif [ "$(readlink "${PATH%%:*}/bash" 2>/dev/null)" != "/bin/bash" ]; then
     _bionic_pin_root="${TMPDIR:-/tmp}"
-    bionic_interpreter_pin "${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}" || :
+    _bionic_pin_root="${_bionic_pin_root%/}/bionic-interpreter-pin.${UID}"
+    if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then
+      echo "resolve-roots.sh: no interpreter pin at ${_bionic_pin_root//[[:cntrl:]]/?} — ${_BIONIC_PIN_WHY}; $(_bionic_pin_remedy "$_bionic_pin_root")" >&2
+      unset BIONIC_TEST_INTERPRETER_PINNED
+      exit 2
+    fi
     unset _bionic_pin_root
   fi
 fi
 
-_bionic_seam_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || {
+_bionic_seam_repo="$(unset CDPATH; cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || {
   echo "resolve-roots.sh: cannot resolve repo root from ${BASH_SOURCE[0]}" >&2
   # shellcheck disable=SC2317  # reached when this file is executed, not sourced
   return 1 2>/dev/null || exit 1

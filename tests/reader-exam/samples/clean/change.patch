@@ -41,7 +41,7 @@ index 0000000..8b140ce
 +```
 diff --git a/tests/branch-name.test.sh b/tests/branch-name.test.sh
 new file mode 100644
-index 0000000..a5f110c
+index 0000000..0dc7ad7
 --- /dev/null
 +++ b/tests/branch-name.test.sh
 @@ -0,0 +1,19 @@
@@ -52,7 +52,7 @@ index 0000000..a5f110c
 +
 +title='Fix the Stamp reader'
 +check "1: a task's branch name" "wt/T7-fix-the-stamp-reader" "$(bash "$name" T7 "$title")"
-+check "2: its slug is slug_of's" "wt/T7-$(slug_of "$title")" "$(bash "$name" T7 "$title")"
++check "2: its slug is slug_of's" "wt/T7-$(slug_of '(v2: notes!)')" "$(bash "$name" T7 '(v2: notes!)')"
 +
 +refused() {  # <row> <what> <id> <title>
 +  local out rc

@@ -940,7 +940,11 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
                     { sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
 
   case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
-  [ "$(_bf_fm_get "$plan_text" rigor)" = "audited" ] || return 0
+  # THE HIGHEST LEVEL, in either vocabulary (lib/run.sh `rigor_level`; wave-28 T44). This
+  # function is also sourced on its own (the plan-write hook, a suite), so the one definition
+  # is loaded from beside this file when the caller has not loaded it.
+  declare -F rigor_level >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/run.sh" >/dev/null 2>&1
+  [ "$(rigor_level "$(_bf_fm_get "$plan_text" rigor)")" = "high" ] || return 0
   [ "$(_bf_fm_get "$plan_text" multi_agent)" = "true" ] || return 0
 
   # (a) THE PRE-14 TABLE. `units_validate` is the one reader of `## Tasks` and already
@@ -1521,6 +1525,31 @@ eg_commit_outside_root() {
   _eg_commit_cwd
   _eg_commit_count
   [ "$_EG_COMMITS" -eq 1 ] && _eg_placed && _eg_outside_root "$_EG_CWD"
+}
+
+# THE STEP FROM WHICH THE GATE READS A RUN'S READINGS AND VERDICTS, named once (wave-28 T72; D33, D19).
+# eg_step_reads_readings <current> -> 0 when the declared `current:` is a numbered step of 6 or more (a
+# sub-step letter binds as its step), 1 otherwise: `_eg_verdicts_owed` asks it of the run's own word, and
+# the collector in hooks/bash-walls.sh asks it (through `eg_plan_reads_readings`) before it derives the
+# readings' results at all, because the wall reads them from here and not below. The wall's `case` at
+# its last call (steps 6 to 9) is the same rule at the steps the lifecycle has.
+eg_step_reads_readings() {
+  local _c="${1%[ab]}"
+  case "$_c" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_c" -ge 6 ]
+}
+
+# eg_plan_reads_readings <plan> -> 0 when <plan>'s declared `current:` is such a step: the first
+# `current:` line of the unfenced `## SDLC State`, line endings translated and white space stripped, as the
+# gate's own `CURRENT` reads it. FILE SCOPE, for the collector, which asks before the wall's body has run.
+eg_plan_reads_readings() {
+  [ -f "${1:-}" ] || return 1
+  eg_step_reads_readings "$(normalize_newlines "$1" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## SDLC State/ { flag = 1; next }
+    /^## / { flag = 0 }
+    flag && /^[[:space:]]*current[[:space:]]*:/ { sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit }')"
 }
 
 # The plan is read off disk when the CALL starts (PLAN is resolved at :245
@@ -2183,40 +2212,36 @@ BIONIC_FINDING_CHANNEL="evidence-gate"
 BIONIC_FINDING_SUBJECT="$PLAN"
 bionic_finding_root() { audit_root; }
 
-# Normalize a task row's rigor cell to its effective rigor lane. Whole-value
-# `case` equality against the rigor enum (bash-3.2 safe — no associative arrays,
-# same idiom as is_r7_key below): a cell already naming a lane passes through; a
-# non-empty cell outside the enum is INVALID; an empty cell inherits the
-# plan-level RIGOR when that itself names a lane, else defaults to `tested` (the
-# floor — see plan Assumption A3). Defined ahead of validate_task_ledger (which
+# Normalize a task row's rigor cell to its effective rigor LEVEL — `low`, `medium` or `high`,
+# lib/run.sh `rigor_level`'s answer, so a cell in either vocabulary resolves to the same level
+# (wave-28 T44; REQ-16, D35): a cell naming a level, in the old word or the new, resolves to it; a
+# non-empty cell outside both is INVALID; an empty cell inherits the plan-level RIGOR's level
+# when that names one, else defaults to `low` (the floor — see plan Assumption A3). Defined ahead of validate_task_ledger (which
 # runs at the `current: T<n>` branch, before is_r7_key is defined below) so the
 # validator can call it — same placement rationale as is_placeholder_value.
 effective_row_rigor() {  # $1 = row's rigor cell
   local cell
   cell=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-  case "$cell" in
-    tested|peer-reviewed|audited) echo "$cell"; return ;;
-    "") : ;;
-    *) echo "INVALID"; return ;;
-  esac
-  case "$RIGOR" in
-    tested|peer-reviewed|audited) echo "$RIGOR" ;;
-    *) echo "tested" ;;
-  esac
+  if [ -n "$cell" ]; then
+    rigor_level "$cell" || echo "INVALID"
+    return
+  fi
+  rigor_level "$RIGOR" || echo "low"
 }
 
-# Total order over the rigor enum, for the per-row FLOOR check (task 4/8).
-# tested < peer-reviewed < audited. An empty/unknown value maps to 0 (the tested
-# floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
+# Total order over the rigor levels, for the per-row FLOOR check (task 4/8).
+# low < medium < high, on `rigor_level`'s answer, so either vocabulary ranks alike. An
+# empty/unknown value maps to 0 (the low floor) so an unset frontmatter rigor never
+# manufactures a phantom downgrade.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-# Mirrors the governing-skill hook's ord map at its rigor check (kept in sync by
-# hand, not imported — the two hooks share no source). bash-3.2 safe whole-value
-# `case`, same idiom as effective_row_rigor above.
-rigor_ord() {  # $1 = a rigor lane name (or empty)
-  case "$1" in
-    peer-reviewed) echo 1 ;;
-    audited)       echo 2 ;;
-    *)             echo 0 ;;  # tested, empty, or unknown → the floor
+# The governing-skill hook ranks the same levels (`rigor_rank`); both read the word through
+# the one definition (wave-28 T44), and tests/cross-gate-agreement.test.sh §RIGOR holds the
+# two ranks equal on all six words.
+rigor_ord() {  # $1 = a rigor word, in either vocabulary (or empty)
+  case "$(rigor_level "$1")" in
+    medium) echo 1 ;;
+    high)   echo 2 ;;
+    *)      echo 0 ;;  # low, empty, or unknown → the floor
   esac
 }
 
@@ -2246,9 +2271,9 @@ rigor_ord() {  # $1 = a rigor lane name (or empty)
 # demand there — the matrix carries no per-row rigor cell to raise.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_auditor_required() {
-  case "$RIGOR" in
-    tested) return 1 ;;
-    *)      return 0 ;;  # peer-reviewed, audited, and anything unrecognized
+  case "$(rigor_level "$RIGOR")" in
+    low) return 1 ;;
+    *)   return 0 ;;  # medium, high, and anything unrecognized
   esac
 }
 
@@ -2313,17 +2338,15 @@ is_proof_shaped() {  # $1 = evidence value
 # answers is "has the run reached the step that produces verdicts", which no
 # per-commit subject can move.
 _eg_verdicts_owed() {
-  local _c="${_EG_DECLARED_CURRENT%[ab]}"
-  case "$_c" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$_c" -ge 6 ]
+  eg_step_reads_readings "$_EG_DECLARED_CURRENT"
 }
 
 apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
   local id="$1" status="$2" eff="$3" ev="$4"
   case "$eff" in
-    peer-reviewed|audited)
+    medium|high)
       if ! is_proof_shaped "$ev"; then
-        _eg_detail="canonical-sdlc task ${id} evidence must show a command + counts, not prose, at rigor '${eff}' ('${ev}').
+        _eg_detail="canonical-sdlc task ${id} evidence must show a command + counts, not prose, at review rigor ${eff} ('${ev}').
 Plan: $PLAN
 Fix: replace the '- ${id}:' evidence with the actual command invocation and result counts (e.g. 'bash test.sh 12/12 green')."
         refuse exit2 commit "that task's evidence is prose" "record the command and counts" "$_eg_detail"
@@ -2373,10 +2396,21 @@ _eg_reading_gaps() {
   fi
   qs="$(facts_owed "$1" task 2>/dev/null | awk -F'\t' '$1 == "review" { printf "%s ", $2 }')"
   [ -n "$qs" ] || qs="$PROOF_QUESTIONS"
-  printf '%s\n' "$SECTION" | awk -v qs="$qs" "$(proof_awk)"'
-    function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
+  # THE RESULT IS THE ONE THE JUDGE DERIVES (wave-28 T60; D33, AC-8.6): a reading a `check:` line
+  # re-rated is judged on its derived result, handed here by the collector (hooks/bash-walls.sh,
+  # `BIONIC_READINGS`, read for `BIONIC_DEBTS_PLAN` as the debts are) and keyed by evidence and
+  # written result; a reading it names no line for keeps the result its proof line wrote.
+  local der="" handed=0
+  # THE HANDED FACTS ARE FOR ONE PLAN, asked once here for the readings and the debts alike (wave-28
+  # T72): lines the collector read for another plan than the one judged are not this plan's.
+  [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1
+  [ "$handed" = 0 ] || der="${BIONIC_READINGS:-}"
+  printf '%s\n' "$SECTION" | BIONIC_DERIVED="$der" awk -v qs="$qs" "$(proof_awk)"'
+    BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
+            for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = PROOF_RESULT; e[PROOF_QUESTION] = evid($0)
+      ev = PROOF_EVIDENCE
+      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT; e[PROOF_QUESTION] = ev
       next
     }
     /^waived:[ \t]/ {
@@ -2396,7 +2430,7 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
-  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "${BIONIC_DEBTS_PLAN:-}" = "$PLAN" ] \
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] \
      && declare -F proof_debts_open >/dev/null 2>&1; then
     printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
@@ -2424,7 +2458,7 @@ Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <n
   _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
   [ -z "$_eg_debts" ] || lines="${lines}
 ${_eg_debts}"
-  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at rigor '${2}' needs a reading whose newest is not result=fail, or a newer waiver:
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a reading whose newest is not result=fail, or a newer waiver:
 ${lines}
 Plan: $PLAN
 Fix: register each reading with 'session-poker.sh proof-add review <record> --question <q> --reader <name>', or record the waiver the user gives with 'session-poker.sh waive <q> <reply>'."
@@ -2459,9 +2493,9 @@ enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
   if grep -Ewq 'waiver' <<< "$ev"; then
     return 0  # recorded downgrade — proceed at the lower cell lane
   fi
-  _eg_detail="canonical-sdlc task ${id} lowers rigor from '${RIGOR}' to '${eff}', below the plan's floor.
+  _eg_detail="canonical-sdlc task ${id} lowers rigor from $(rigor_level "$RIGOR") to ${eff}, below the plan's floor.
 Plan: $PLAN
-Fix: raise the cell to at least '${RIGOR}', or record a downgrade: add 'waiver: <user> <date> <reason>' to the '- ${id}:' evidence line (Waiver Protocol)."
+Fix: raise the cell to at least $(rigor_level "$RIGOR"), or record a downgrade: add 'waiver: <user> <date> <reason>' to the '- ${id}:' evidence line (Waiver Protocol)."
   refuse exit2 commit "that task lowers rigor below the floor" "raise the rigor, or waive it" "$_eg_detail"
 }
 
@@ -2480,10 +2514,10 @@ ledger_shape_fail() {  # <fact> <fix> <observation>
   # into a hard block. The policy sentence the frame used to print as its Fix is about
   # audited rigor, not about repairing the row, so under D-1 it becomes `detail` and the
   # caller supplies a real repair (F-P7).
-  if [ "$RIGOR" = audited ]; then
+  if [ "$(rigor_level "$RIGOR")" = high ]; then
     refuse exit2 commit "$1" "$2" "canonical-sdlc task-ledger: $3
 Plan: $PLAN
-Audited rigor makes the ledger-shape checks blocking; a non-audited plan would log this as a finding instead."
+High review rigor makes the ledger-shape checks blocking; a plan below high would log this as a finding instead."
   fi
   log_finding task-ledger "$3"
 }
@@ -2666,10 +2700,10 @@ validate_task_ledger() {
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     eff=$(effective_row_rigor "$rigor_cell")
     if [ "$eff" = "INVALID" ]; then
-      _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited).
+      _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want low, medium or high).
 Plan: $PLAN
-Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing."
-      refuse exit2 commit "that task's rigor value is not valid" "use tested, peer-reviewed or audited" "$_eg_detail"
+Fix: set the '${id}' row's rigor cell to one of low, medium or high before committing."
+      refuse exit2 commit "that task's rigor value is not valid" "use low, medium or high" "$_eg_detail"
     fi
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -3736,7 +3770,7 @@ resolve_requirements_path() {  # $1 = raw requirements: value
 validate_requirements_pointer() {
   local current_num b1 raw abs
   case "$SCALE" in wave|epic) : ;; *) return 0 ;; esac
-  [ "$RIGOR" = "audited" ] || return 0
+  [ "$(rigor_level "$RIGOR")" = high ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
@@ -4885,7 +4919,7 @@ validate_intent_evidence() {
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   [ "$SCALE" = "wave" ] || return 0
-  [ "$RIGOR" = "audited" ] || return 0
+  [ "$(rigor_level "$RIGOR")" = high ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
   local tasks rows id ev violations findings _eg_ph
@@ -5200,7 +5234,6 @@ deny_reason() {  # $1=class $2=role
   # THE FIRST FIX IS THE SHORT ONE (wave-26 T9, D14), unless the call was already short and
   # something else kept the shim from stopping it at the limit; then that is the fix.
   case "$_FO_SHORT_WHY" in
-    held)       lead="drop the BIONIC_SLOT_HELD=1 prefix, which keeps this short call out of the shim that stops it at its limit" ;;
     background) lead="run it in the foreground, without the trailing &: a command the shell backgrounds escapes the shim that stops a short call at its limit" ;;
     tooshort)   lead="give this Bash call a timeout of $_FO_SHORT_FLOOR_MS to $_FO_SHORT_MS ms; under $_FO_SHORT_FLOOR_MS ms the command could not be stopped, and say why, before the harness's own timeout" ;;
     *) [ "$_FO_SHORT_MS" -eq 0 ] ||
@@ -5472,9 +5505,10 @@ return 0
 #
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
-# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `proof-add` and
+# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
 # `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
-# T34, D24); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
+# gate reads); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5490,10 +5524,15 @@ return 0
 # is not text any reader of the command can resolve. This arm guards a writer against
 # granting itself a wider budget by habit, not an adversary; the same residual stands for
 # every argv reader here.
-_WALL_POKER_VERB=""
+#
+# A SECOND NAME, THE SAME ARM (wave-28 T3; REQ-5 AC-5.2, D9). `spawn-worktree.sh land … --by-hand`,
+# the --by-hand flag anywhere among land's words, is the person's landing: it publishes a row past
+# the line and writes its plan row, so it is the orchestrator's as the plan verbs are. It sets
+# `_WALL_POKER_VERB` to `land`; `_WALL_POKER_SHOWN` is the call as the detail names it.
+_WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""
 _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKER_VERB) · 1 not
   local _line _oldifs _hadf _w _i _script _next
-  _WALL_POKER_VERB=""
+  _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _git_argv_skip "$_line"
@@ -5520,12 +5559,21 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         [ $# -gt 0 ] && _script="$1" ;;
       *) _script="$1" ;;
     esac
-    [ "${_script##*/}" = "session-poker.sh" ] || continue
-    shift
-    _next="${1:-}"
-    case "$_next" in
-      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check|decline|budget)
-        _WALL_POKER_VERB="$_next"; return 0 ;;
+    case "${_script##*/}" in
+      session-poker.sh)
+        shift
+        _next="${1:-}"
+        case "$_next" in
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|finding-move|decline|budget|share)
+            _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
+        esac ;;
+      spawn-worktree.sh)
+        shift
+        [ "${1:-}" = land ] || continue
+        for _next in "$@"; do
+          [ "$_next" = --by-hand ] || continue
+          _WALL_POKER_VERB=land; _WALL_POKER_SHOWN="spawn-worktree.sh land --by-hand"; return 0
+        done ;;
     esac
   done <<< "$(git_argv_expand "$1")"
   return 1
@@ -5554,11 +5602,14 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # bash: CLAUDE_CODE_SHELL, else SHELL, each only as an absolute path to bash or zsh (the two
 # shells the harness runs); otherwise no --shell, which is the shim's own `bash -c`.
 #
-# LEFT ALONE: a command that is already the shim; a suite segment carrying
-# `BIONIC_SLOT_HELD=1` in its own prefix — the opt-out for a command that needs a snapshot
-# alias or function, or a `cd` that outlives the call; a command the shell itself
-# backgrounds (the shim would stamp rc=0 the instant the job detached); a plugin with no
-# shim on disk.
+# LEFT ALONE: a command that is already the shim; a command the shell itself backgrounds
+# (the shim would stamp rc=0 the instant the job detached); a plugin with no shim on disk.
+# `BIONIC_SLOT_HELD=1` in a suite segment's prefix is no opt-out any more (wave-28 T12, D13):
+# it left the suite unwrapped and so unadmitted, and now the suite asks the gate like any other.
+#
+# --agent: WHO ASKS (wave-28 T12; T2's A-T2.6). The gate records `who=<session>:<agent>`, and a
+# shell does not know its agent, so the wrap names it: the roster row's `name=` the budget arm
+# already read, else the payload's `agent_id`; a main-thread call names none (the gate's `main`).
 #
 # --quiet: a suite segment carrying `BIONIC_QUIET=1` in its prefix, or a suite file whose
 # first 30 lines hold `# runner: solo` (tests/run.sh's `_is_solo_suite` rule, read the same
@@ -5694,6 +5745,27 @@ _bsg_cd_walk() {
   return 0
 }
 
+# _door_in_tree — sets _DOOR_HERE to yes when THE PROJECT THE RUN IS IN HAS THE RUNNER'S DOOR, else no
+# (wave-28 T54, D27; A-orch-124/125). The one predicate behind both halves of the door: the arm that
+# refuses a bare run, and the wrap that tells the shim `--runner`. The project is the tree the shim
+# asks from (booked.sh's `tree=`: `--stamp-dir`, else a leading `cd <dir>`, else the payload's cwd):
+# `_bsg_cd_walk`'s `_BSG_STAMP_DIR` when the walk is sure of a `cd`, else the payload's cwd
+# (`_BSG_CWD`), the same expression `_bsg_suites` roots its stamp names at; so the caller has walked
+# the command first. A walk that is not sure falls back to the cwd, as the shim does when it reads no
+# `cd` it can trust. Its checkout's tests/run.sh must say `--only`: a project with
+# suites and no runner, or a runner of its own that takes no flag, has no door to point an agent at.
+# A tree the walk cannot name (no cwd in the payload, a `cd` into nothing) has no runner to find;
+# `git -C ""` would read the hook's own directory instead, so it is not asked.
+_DOOR_HERE=no
+_door_in_tree() {
+  local _top _dir="${_BSG_STAMP_DIR:-$_BSG_CWD}"
+  _DOOR_HERE=no
+  [ -n "$_dir" ] && [ -d "$_dir" ] || return 0
+  _top="$(git -C "$_dir" rev-parse --show-toplevel 2>/dev/null)" || _top="$_dir"
+  [ -f "$_top/tests/run.sh" ] || return 0
+  ! grep -qF -- '--only' "$_top/tests/run.sh" 2>/dev/null || _DOOR_HERE=yes
+}
+
 # _BSG_TARGETS — the command's suite claims, cmd-class.sh's `targets` reading: one
 # `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61):
 # the solo check and the suite names below both read it, so naming the suites costs no fork.
@@ -5742,15 +5814,28 @@ _bsg_solo_target() {
 #
 # A name never carries `|`, `,`, `=`, a space or a newline, so the field stays one field; the shim
 # filters it again (booked.sh).
+#
+# THE DOOR'S CLAIMS (wave-28 T36; D27): an `only` claim is a suite `tests/run.sh --only` names, and
+# it is named like a file claim. _BSG_RUNNER is 1 when there is one and every claim is the runner's
+# (`only`, or the full tree's `run.sh`): the shim then gets `--runner` and asks nothing, since each
+# suite the runner starts asks for itself.
 _BSG_SUITES=""
+_BSG_RUNNER=0
 _BSG_NAME_MAX=100
 _bsg_suites() {
-  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}"
-  _BSG_SUITES=""
+  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}" _only=0 _other=0 _asked=0
+  _BSG_SUITES=""; _BSG_RUNNER=0
   while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] || continue
     if [ "$_k" = split ]; then _BSG_SUITES='?'; return 0; fi
-    if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
+    # NO DOOR IN THIS PROJECT, NO RUNNER CLAIM (wave-28 T54, A-orch-125): its `tests/run.sh --only`
+    # is the full tree under its own name, as at 903c971b, and the shim is not told it is the runner.
+    if [ "$_k" = only ]; then
+      [ "$_asked" = 1 ] || { _door_in_tree; _asked=1; }
+      if [ "$_DOOR_HERE" != yes ]; then _k=file; _b=run.sh; _p="${_p%/*}/run.sh"; fi
+    fi
+    case "$_k:$_b" in only:*) _only=1 ;; file:run.sh) : ;; *) _other=1 ;; esac
+    if { [ "$_k" != file ] && [ "$_k" != only ]; } || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
       _b='?'
       case "$_r" in
         ''|*'$'*|*'`'*) : ;;
@@ -5762,6 +5847,7 @@ _bsg_suites() {
     _BSG_SUITES="${_BSG_SUITES:+$_BSG_SUITES,}$_b"
   done <<< "$_BSG_TARGETS"
   [ -n "$_BSG_SUITES" ] || _BSG_SUITES='?'
+  [ "$_only" = 0 ] || [ "$_other" = 1 ] || _BSG_RUNNER=1
 }
 
 # wall_booked_argv <command> <quiet: 0|1> [<shim option>...] — sets WALL_BOOKED_ARGV to the
@@ -5784,7 +5870,7 @@ wall_booked_argv() {
 
 # _bsg_wrap_text <suite already established: yes|no> — sets _BSG_WRAP_TEXT to the wrapped
 # command; rc 1 when this command is left alone (see the header above for which), naming
-# why in _BSG_WRAP_WHY: shim, class, background, held or noshim.
+# why in _BSG_WRAP_WHY: shim, class, background or noshim.
 #
 # A SHORT CALL (wave-26 T9, D14; T44): when farm-out-reminder has set WALL_SHORT_KILL_AFTER,
 # the shim also gets `--kill-after <s>`. Nothing else changes: only a suite is wrapped, short
@@ -5807,6 +5893,17 @@ _bsg_wait_s() {
   _t=$((10#$_t / 1000 - 10))
   [ "$_t" -ge 1 ] || _t=1
   _BSG_WAIT_S="$_t"
+}
+# _bsg_agent — sets _BSG_AGENT to the name the gate's request records for this call (T12): the
+# roster row's `name=`, which the budget arm read into _BUDGET_ROW_NAME when it ran, else the
+# payload's `agent_id` (bionic_jq's cached field); empty on the main thread. No roster read here.
+_BSG_AGENT=""
+_bsg_agent() {
+  local _id
+  _BSG_AGENT=""
+  _id="$(bionic_jq .agent_id)"
+  [ -n "$_id" ] || return 0
+  _BSG_AGENT="${_BUDGET_ROW_NAME:-$_id}"
 }
 _bsg_wrap_text() {
   local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
@@ -5834,7 +5931,6 @@ _bsg_wrap_text() {
   _wall_class_read "$COMMAND"; _lines="$_WALL_CLASS_LINES"
   while IFS=$'\t' read -r _cls _seg; do
     [ "$_cls" = suite ] || continue
-    ! _wall_prefix_sets "$_seg" BIONIC_SLOT_HELD 1 || { _BSG_WRAP_WHY=held; return 1; }
     ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
   done <<< "$_lines"
   # ONE WALK, TWO READERS (T56): where the leading `cd` segments lead is the solo reader's base
@@ -5845,9 +5941,12 @@ _bsg_wrap_text() {
   _bsg_suites
   [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
-  if [ -n "$_k" ]; then set -- --kill-after "$_k"; else _bsg_wait_s; set -- --max-wait "$_BSG_WAIT_S"; fi
+  _bsg_agent
+  [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
+  if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else _bsg_wait_s; set -- "$@" --max-wait "$_BSG_WAIT_S"; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
+  [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
@@ -6038,13 +6137,14 @@ the tree as it is and send the report; the orchestrator lands the work."
   #
   # THE SCREEN is the literal name with quotes and backslashes removed, as `_wall_mentions_git`
   # screens git; a hit runs the argv reader (`_wall_poker_contract_verb`, above), which decides.
+  # `spawn-worktree` is its second name (wave-28 T3): `land --by-hand` is the person's landing.
   _wall_screen "$COMMAND"
   case "$_WALL_STRIPPED" in
-    *session-poker*)
+    *session-poker*|*spawn-worktree*)
       if _wall_poker_contract_verb "$COMMAND"; then
         fold_block exit2 "$_WALL_POKER_VERB" \
           "a subagent may not change a contract or the plan" "ask orchestrator" \
-          "\`session-poker.sh $_WALL_POKER_VERB\` changes a roster contract or the bound plan, and
+          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the bound plan, and
 only the orchestrator does that: a dispatched agent that could would widen its own budget or
 schedule its own work. Send the orchestrator what you need — the files, suites or runs to
 add and why, or the row to add — and it runs the verb."
@@ -6197,7 +6297,7 @@ fi
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
 local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -6494,7 +6594,7 @@ ${_loop_lines}"
         _spell="From this text no literal list can be derived: a command substitution, a glob or
 a prefix assignment names no words, and a loop whose body reassigns its variable runs something
 other than the words of its header, so no line is printed for it.
-Write the literal lines you mean, one call each: bash tests/<name>.test.sh"
+Write the literal names you mean, through the one door: tests/run.sh --only <name>.test.sh"
       fi
       fold_block exit2 suite-run \
         "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
@@ -6597,6 +6697,18 @@ _CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT")
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
 
+  # ---------- THE PROJECT'S DOOR, ASKED ONCE FOR THIS CLAIM (wave-28 T54, D27; A-orch-124/125) ----------
+  #
+  # The door below, and the runner claim, exist only where the project the run is in has the
+  # runner's door (`_door_in_tree`). Where it has none, a `tests/run.sh --only <suite>` call is not a
+  # door claim: it is the `file` claim for `run.sh` that the classifier made of it at 903c971b, judged
+  # by the full-tree arm just below, and a bare suite run goes on to the budget.
+  _DOOR_HERE=no
+  if [ "$_kind" = "file" ] || [ "$_kind" = "only" ]; then
+    _wall_class_read "$COMMAND"; _bsg_cd_walk "$_WALL_CLASS_LINES"; _door_in_tree
+    if [ "$_kind" = "only" ] && [ "$_DOOR_HERE" != yes ]; then _kind="file"; _target="run.sh"; fi
+  fi
+
   # ---------- THE FULL TREE, FIRST AND FAIL-CLOSED ----------
   #
   # AHEAD OF THE DECLARED RUNS, and that order is the whole of the full-run rule. The
@@ -6627,8 +6739,8 @@ full run from a writer row costs forty minutes and proves a head nobody is relea
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
-Run the suites your brief named instead, one call each, by the suite file itself:
-    bash tests/${_ft_first:-<suite>.test.sh}
+Run the suites your brief named instead, through the one door (wave-28 T36):
+    tests/run.sh --only ${_ft_first:-<suite>.test.sh}
 \`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
 queue only the runner itself builds, and it is the full-tree runner as far as this budget
 is concerned. If the change cannot be bounded — a merge from outside the run, or a file the
@@ -6636,6 +6748,41 @@ map answers with every suite or with none — say so in your report: the orchest
 dispatches the runner, and the dispatch wall admits it only then."
     return 2
   fi
+  # ---- BEGIN THE ONE DOOR (wave-28 T36; D27, REQ-10 AC-10.1) ----
+  #
+  # A DISPATCHED AGENT RUNS A SUITE THROUGH THE RUNNER, NEVER BARE. `bash tests/x.test.sh`, typed
+  # by an agent, runs the suite in whatever world the agent's shell happens to give it: the
+  # runner's interpreter pin, its environment, its adoption wall and its one gate ask per suite
+  # are all the runner's, and a bare run gets none of them. `tests/run.sh --only x.test.sh` gets
+  # them all (tests/run.sh, THE DOOR). So every bare form the classifier reads — the literal
+  # path, a loop, a variable (wave-28 T11's forms) — is a `file` claim and is refused here, with
+  # one line naming the door; the door's own claims are `only` and go on to the budget below. The
+  # main thread never reaches this loop (the partition above), so a person's bare run is not
+  # refused and keeps the seam's pin. This arm holds the runner's world, not the queue (D9).
+  #
+  # ONLY WHERE THE PROJECT HAS THE DOOR (wave-28 T54, D27; A-orch-124): `_DOOR_HERE`, read above. Without
+  # the door a `file` claim goes on to the budget below as it did before T36, and an off-budget bare
+  # run is refused there as it always was.
+  if [ "$_kind" = "file" ] && [ "$_DOOR_HERE" = yes ]; then
+    _door_name="$_target"
+    case "$_door_name" in *'$'*|*'`'*|'') _door_name='<suite>' ;; esac
+    _door_fact="use tests/run.sh --only $_door_name"
+    [ $(( $(bionic_cols "bionic: suite-run refused — $_door_fact (one door)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
+      || _door_fact="use tests/run.sh --only <suite>"
+    fold_block exit2 suite-run "$_door_fact" "one door" \
+      "A dispatched agent runs a suite through the runner, never by the suite file alone. The
+runner gives the suite its world: the interpreter pin (bash -> /bin/bash first on PATH), its
+environment, the adoption wall, and one gate ask per suite. A bare run gets none of them.
+
+You ran: $_run
+
+Run it through the one door instead, one call, naming each suite by its file name:
+    tests/run.sh --only ${_door_name}
+Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
+    return 2
+  fi
+  # ---- END THE ONE DOOR ----
+
   # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------
   #
   # `re_executes=` is a DECLARATION the dispatch wall already admitted, so a command that
@@ -6660,7 +6807,7 @@ dispatches the runner, and the dispatch wall admits it only then."
   # NO STATEMENT IS REFUSED, NAMING WHY (wave-27 T5, D15). A row with NEITHER statement — no
   # `suites_allowed=` key and no declared runs — or no row at all used to pass a named run in
   # silence; see `budget_unrecorded`.
-  if [ "$_kind" != "file" ]; then
+  if [ "$_kind" != "file" ] && [ "$_kind" != "only" ]; then
     [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_run"; return 2; }
     # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
     # are the half of the budget that can answer it.

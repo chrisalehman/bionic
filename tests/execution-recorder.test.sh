@@ -1727,14 +1727,14 @@ expect_contains "12f engaged with no plan on disk: the row is still confirmed" \
   "status=confirmed" "$(cat "$E2_REPO/.bionic/tmp/roster-${SID_A}.state")"
 
 # ============================================================
-section "Section 13: THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15)"
+section "Section 13: NO PRESSURE SAMPLE (wave-28 T13, D14; was wave-roster-lifecycle S9, AC-15)"
 # ============================================================
 #
-# One `pressure_sample` call after the engagement check, on every engaged Bash
-# PostToolUse payload — not tied to whether that payload carries a stop-check
-# machine line, and not fired on the Agent or SubagentStart arms. Isolated with
-# its own ring (BIONIC_PRESSURE_RING) and clock (BIONIC_NOW_EPOCH) so this suite
-# never touches the real machine-scoped ring.
+# The recorder used to take one `pressure_sample` on every engaged Bash call, for the rung's
+# median. No width reads the ring any more (the gate reads the machine when it decides), so the
+# sampler went with the rung: an engaged Bash call writes nothing to the ring. Isolated with its
+# own ring (BIONIC_PRESSURE_RING) and clock (BIONIC_NOW_EPOCH) so this suite never touches the
+# real machine-scoped ring.
 
 P_RING="$SANDBOX/pressure/p13.ring"
 P_NOW=1700000000
@@ -1750,34 +1750,23 @@ run_rec_pressure() {  # <payload-json> — like run_rec, with the pressure fixtu
 
 IFS='|' read -r P_REPO P_TR P_SUB P_CFG <<< "$(make_world pressure yes)"
 
-# (a) an engaged Bash call carrying NO stop-check machine line still samples.
-# A plain, unremarkable command — the overwhelming majority of Bash calls in a
-# session — is exactly the case the old early exit on empty MLINES used to skip
-# before it ever reached the engagement check or this sample.
-rm -f "$P_RING"
-run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo hi" "hi")"
-expect_status "13a an ordinary Bash call still exits 0" "0" "$REC_ST"
-expect_file   "13a …and one ring line was appended" "$P_RING"
-expect_eq     "13a …exactly one" "1" "$(wc -l < "$P_RING" | tr -d ' ')"
-
-# (b) a second engaged Bash call samples again — the ring grows, it is not
-# replaced (pressure_sample's own append-then-prune, not this hook's business).
-run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo two" "two")"
-expect_eq "13b a second engaged call appends a second line" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
-
-# (c) UNENGAGED: the marker removed, the same shape of call samples nothing.
-rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo three" "three")"
-expect_status "13c unengaged: still exits 0" "0" "$REC_ST"
-expect_eq     "13c …and the ring is untouched" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
-: > "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-
-# (d) the Agent arm (a dispatch confirming) does not sample — only Bash does.
+# (a) an engaged Bash call writes nothing to the ring. The extractor (the ring's line count) is
+# proved first on a sample the library itself takes under the same pins.
 P_ROSTER="$P_REPO/.bionic/tmp/roster-${SID_A}.state"
-seed_roster "$P_REPO" "$SID_A" "w99-pressure" "toolu_01PRESSUREAGENT"
-run_rec_pressure "$(mk_agent_post "$SID_A" "$P_TR" "$P_REPO" "w99-pressure" "apressure-2222222222222222" "toolu_01PRESSUREAGENT")"
-expect_contains "13d the Agent call still confirms its roster row" "status=confirmed" "$(cat "$P_ROSTER")"
-expect_eq       "13d …but appends nothing to the ring" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
+P_LIB_RES="$(cd "$(dirname "$REC")/../payload/scripts/lib" 2>/dev/null && pwd -P)/resources.sh"
+[ -r "$P_LIB_RES" ] || P_LIB_RES="$(cd "$(dirname "$REC")/../scripts/lib" 2>/dev/null && pwd -P)/resources.sh"
+rm -f "$P_RING"
+( export BIONIC_PRESSURE_RING="$P_RING" BIONIC_NOW_EPOCH="$P_NOW" BIONIC_PROBE_FREE_PCT=44 \
+    BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6
+  . "$P_LIB_RES" >/dev/null 2>&1; pressure_sample 8 ) >/dev/null 2>&1
+expect_eq "13a0 the ring's line count reads a sample the library takes (the extractor reads)" "1" \
+  "$(wc -l < "$P_RING" 2>/dev/null | tr -d ' ')"
+run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo hi" "hi")"
+expect_status "13a an ordinary engaged Bash call exits 0" "0" "$REC_ST"
+expect_eq     "13a2 …and appends nothing to the ring: the sampler went with the rung" "1" \
+  "$(wc -l < "$P_RING" | tr -d ' ')"
+expect_eq     "13a3 the hook carries no pressure_sample call" "0" \
+  "$(/usr/bin/grep -c 'pressure_sample' "$REC" || true)"
 
 # (e) FAILURE-TOLERANT: an unwritable ring path does not crash the hook or block
 # the rest of its work — pressure_sample's own failure (return 2, a stderr line)
@@ -1835,7 +1824,7 @@ run_rec_counted() {  # <payload-json> — run_rec_pressure with a counting jq on
 : > "$P_JQC"
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo four" "four")"
 expect_status "13f an ordinary Bash call still exits 0" "0" "$REC_ST"
-expect_eq "13f …and the sample still landed on it" "3" "$(wc -l < "$P_RING" | tr -d ' ')"
+expect_eq "13f …and nothing landed on the ring" "1" "$(wc -l < "$P_RING" | tr -d ' ')"
 # THE CONSTANT HAS MOVED TWICE, and each move made the hot path cheaper rather than changing
 # what this row is for. 4 -> 3 at epic-23 wave-12-fixit-171 T11: `bionic_context` stopped
 # spending two `jq` processes on the payload and spends one on the whole field roster
@@ -2998,7 +2987,7 @@ expect_eq "SJ-a5 …and the launch's correlation key" "toolu_01SJA" "$(sj_field 
 sj_walls "$SJA_REPO" 'bash tests/run.sh' "$SJ_AID"
 expect_eq "SJ-a6 after the start, bash-walls admits the runner's full run" "0" "$SJ_ST"
 expect_regex "SJ-a7 …wrapped in the booking shim and stamped run.sh" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --max-wait [0-9]+)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)?( --max-wait [0-9]+)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
 
 # THE LAUNCH CALL'S RETURN STAYS THE SECOND WRITER OF THE SAME VALUE (the sync shape, capture D).
 run_rec "$(jq -n --arg s "$SID_A" --arg t "$SJA_TR" --arg c "$SJA_REPO" --arg a "$SJ_AID" \
@@ -3195,14 +3184,14 @@ pc_run() {  # <plugin root> <command> <payload> -> PC_OUT PC_ERR PC_ST
 pc_start() {  # <plugin root> <payload> [key...] — one start: every registration (or the keys named), in manifest order
   local root="$1" payload="$2" cmd k
   shift 2
-  for k in terms evidence adversarial structure; do
+  for k in terms evidence adversarial structure severity; do
     printf -v "PC_OUT_$k" '%s' ""; printf -v "PC_ERR_$k" '%s' ""; printf -v "PC_ST_$k" '%s' "-"
   done
   while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
     k=$(pc_key "$cmd")
     if [ "$#" -gt 0 ]; then case " $* " in *" $k "*) : ;; *) continue ;; esac; fi
-    case "$k" in terms|evidence|adversarial|structure) : ;; *) continue ;; esac
+    case "$k" in terms|evidence|adversarial|structure|severity) : ;; *) continue ;; esac
     pc_run "$root" "$cmd" "$payload"
     printf -v "PC_OUT_$k" '%s' "$PC_OUT"; printf -v "PC_ERR_$k" '%s' "$PC_ERR"; printf -v "PC_ST_$k" '%s' "$PC_ST"
   done <<< "$(pc_cmds)"
@@ -3275,7 +3264,7 @@ ck_plugin() {  # <dir> — a plugin-shaped copy of the hook, its library and the
   cp "$REC" "$1/hooks/execution-recorder.sh"
   cp -R "$(dirname "$HERE")/payload/scripts/lib" "$1/scripts/lib"
   cp "$CK_CTX/survival.md" "$CK_CTX/checks-evidence.md" "$CK_CTX/checks-adversarial.md" \
-    "$CK_CTX/checks-structure.md" "$1/context/"
+    "$CK_CTX/checks-structure.md" "$CK_CTX/severity.md" "$1/context/"
 }
 CKD_PLUG="$SANDBOX/ck-plugin"
 ck_plugin "$CKD_PLUG"
@@ -3383,7 +3372,7 @@ section "Section 20: §PUSH-CAP — every string the start pushes fits what the 
 # THE ROW THAT WOULD HAVE CAUGHT THE DEFECT: every role, rigor and scale `facts_owed` deals a
 # reading to, the reader's row as the dispatch wall writes it, the REAL hook driven once per
 # registration as hooks/hooks.json registers it, against the shipped context and against a copy
-# whose three checks files sit exactly at their 4,500-byte cap. It replaces CK-b1's former
+# whose three checks files sit exactly at their 4,650-byte cap. It replaces CK-b1's former
 # expectation of one 12,679-character string.
 #
 # FIXTURE FIDELITY: the dealing is the production `facts_owed` (payload/scripts/lib/proof.sh),
@@ -3452,19 +3441,20 @@ expect_ne "PC-a0 every deal was driven and its strings counted (not vacuous)" "0
 expect_empty "PC-a1 shipped context: every dealt string is one line, its own file, at most ${PC_MAX} and under 10,000 characters" "$PC_BAD"
 printf '  shipped context, characters per string:%s\n' "$PC_TABLE"
 
-# THE 4,500-BYTE FIXTURE: the cap D5 sets on a checks file, every checks file exactly at it.
-PC4_PLUG="$SANDBOX/pc-4500"
+# THE 4,650-BYTE FIXTURE: the cap on a checks file (D5's 4,500, raised by wave-28 T48, A-orch-43; the
+# docs-pins W27_CAP), every checks file exactly at it.
+PC4_PLUG="$SANDBOX/pc-cap"
 ck_plugin "$PC4_PLUG"
 for _q in evidence adversarial structure; do
   _sz=$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')
-  [ "$_sz" -lt 4500 ] && head -c "$((4500 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
-  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,500 bytes" "4500" \
+  [ "$_sz" -lt 4650 ] && head -c "$((4650 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
+  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,650 bytes" "4650" \
     "$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')"
 done
 pc_every_deal "$PC4_PLUG" "$PC4_PLUG/context" f
 expect_ne "PC-b1 every deal was driven against the fixture (not vacuous)" "0" "$PC_N"
-expect_empty "PC-b2 4,500-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
-printf '  4,500-byte checks files, characters per string:%s\n' "$PC_TABLE"
+expect_empty "PC-b2 4,650-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
+printf '  4,650-byte checks files, characters per string:%s\n' "$PC_TABLE"
 
 # OVER THE CAP: a checks file grown to 9,600 characters, a tested critic (all three questions).
 PO_PLUG="$SANDBOX/pc-over"
@@ -3707,7 +3697,9 @@ WN_IMP=bionic:implementor
 wn_world() {  # <label> -> "<repo>|<transcript>|<config dir>", its tests/ holding three suites
   local repo tr sub cfg
   IFS='|' read -r repo tr sub cfg <<< "$(make_world "$1" yes)"
-  mkdir -p "$repo/tests"
+  # THE PROJECT HAS THE RUNNER'S DOOR (wave-28 T54): the one door fires only where tests/run.sh says --only,
+  # so this world plants the same runner as tests/bash-walls.test.sh's bw_door, committed with the seed.
+  mkdir -p "$repo/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$repo/tests/run.sh"
   for _wn_s in alpha beta gamma; do printf '#!/bin/bash\n' > "$repo/tests/${_wn_s}.test.sh"; done
   printf '%s|%s|%s' "$repo" "$tr" "$cfg"
 }
@@ -3743,7 +3735,7 @@ for _wn in 301 3600; do
   sj_intended "$WNA_REPO" "w$_wn" "toolu_01WNA$_wn" "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago "$_wn")"
   run_rec "$(mk_subagent_start "$SID_A" "$WNA_TR" "$WNA_REPO" "$WN_IMP" "a00000000wna$_wn")"
   expect_eq "WN-a1 ($_wn s) a lone launch outside the window is joined" "w$_wn:a00000000wna$_wn" "$(sj_e_joined "$WNA_REPO")"
-  wn_walls "$WNA_REPO" 'bash tests/alpha.test.sh' "a00000000wna$_wn" "$WN_IMP"
+  wn_walls "$WNA_REPO" 'tests/run.sh --only alpha.test.sh' "a00000000wna$_wn" "$WN_IMP"
   expect_eq "WN-a2 ($_wn s) …and the writer's suite is admitted" "0" "$SJ_ST"
   expect_nonempty "WN-a3 ($_wn s) …wrapped in the booking shim" "$(sj_wrap)"
 done
@@ -3828,17 +3820,17 @@ run_rec "$(mk_subagent_start "$SID_A" "$WNH_TR" "$WNH_REPO" "$WN_IMP" "$WNH_A")"
 expect_eq "WN-f precondition: the start was placed on neither launch" "0 identified rows" "$(sj_e_joined "$WNH_REPO")"
 wn_amend "$WNH_REPO" "$WNH_TR" "$WNH_CFG" "$WNH_A" gamma.test.sh
 expect_contains "WN-f precondition: amend by id recorded the set (rc=$WN_POKE_ST)" "poker: amended — $WNH_A" "$WN_POKE_OUT"
-wn_walls "$WNH_REPO" 'bash tests/gamma.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only gamma.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f precondition: …and gamma runs" "0" "$SJ_ST"
 wn_return "$WNH_REPO" "$WNH_TR" toolu_01WNHL1 "$WNH_A" "$WN_IMP" wL1
 WNH_LAST=$(wn_last_for_id "$WNH_REPO" "$WNH_A")
 expect_eq "WN-f1 the launch call's return places the agent: the last row for its id is the confirmed one" \
   "confirmed:wL1" "$(sj_field "$WNH_LAST" status):$(sj_field "$WNH_LAST" name)"
-wn_walls "$WNH_REPO" 'bash tests/gamma.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only gamma.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f2 …and the suite the amend recorded is still admitted" "0" "$SJ_ST"
-wn_walls "$WNH_REPO" 'bash tests/alpha.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only alpha.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f3 …beside the launch's own set" "0" "$SJ_ST"
-wn_walls "$WNH_REPO" 'bash tests/beta.test.sh' "$WNH_A" "$WN_IMP"
+wn_walls "$WNH_REPO" 'tests/run.sh --only beta.test.sh' "$WNH_A" "$WN_IMP"
 expect_eq "WN-f4 …while the other launch's suite is still refused" "2" "$SJ_ST"
 
 IFS='|' read -r WNI_REPO WNI_TR WNI_CFG <<< "$(wn_world wnamendstart)"
@@ -3854,9 +3846,9 @@ run_rec "$(mk_subagent_start "$SID_A" "$WNI_TR" "$WNI_REPO" "$WN_IMP" "$WNI_A")"
 WNI_LAST=$(wn_last_for_id "$WNI_REPO" "$WNI_A")
 expect_eq "WN-g1 a later start places the agent: the last row for its id is the identified one" \
   "identified:wM1" "$(sj_field "$WNI_LAST" status):$(sj_field "$WNI_LAST" name)"
-wn_walls "$WNI_REPO" 'bash tests/gamma.test.sh' "$WNI_A" "$WN_IMP"
+wn_walls "$WNI_REPO" 'tests/run.sh --only gamma.test.sh' "$WNI_A" "$WN_IMP"
 expect_eq "WN-g2 …and the suite the amend recorded is still admitted" "0" "$SJ_ST"
-wn_walls "$WNI_REPO" 'bash tests/alpha.test.sh' "$WNI_A" "$WN_IMP"
+wn_walls "$WNI_REPO" 'tests/run.sh --only alpha.test.sh' "$WNI_A" "$WN_IMP"
 expect_eq "WN-g3 …beside the launch's own set" "0" "$SJ_ST"
 
 # ============================================================
@@ -3899,9 +3891,9 @@ expect_contains "GR-a2 …A is told what a start among several fresh launches is
   "2 launches of $WN_IMP on this session roster have no id and the start names none of them; agent a00000000graaaa is left to the return of its launch call" "$GRA_ERR_A"
 expect_contains "GR-a3 …and so is B" \
   "2 launches of $WN_IMP on this session roster have no id and the start names none of them; agent a00000000grabbb is left to the return of its launch call" "$REC_ERR"
-wn_walls "$GRA_REPO" 'bash tests/beta.test.sh' a00000000graaaa "$WN_IMP"
+wn_walls "$GRA_REPO" 'tests/run.sh --only beta.test.sh' a00000000graaaa "$WN_IMP"
 expect_eq "GR-a4 A cannot run B's suite" "2" "$SJ_ST"
-wn_walls "$GRA_REPO" 'bash tests/alpha.test.sh' a00000000graaaa "$WN_IMP"
+wn_walls "$GRA_REPO" 'tests/run.sh --only alpha.test.sh' a00000000graaaa "$WN_IMP"
 expect_eq "GR-a5 A's own suite is refused while it is unplaced" "2" "$SJ_ST"
 GRA_FIX=$(printf '%s\n' "$SJ_ERR" | grep -F 'widen it: ' | head -1)
 GRA_CMD="${GRA_FIX#*widen it: }"; GRA_CMD="${GRA_CMD% (main runs it)}"
@@ -3913,7 +3905,7 @@ if [ -n "$GRA_FIX" ]; then
     CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_PROJECT_DIR= bash -c "$GRA_CMD" 2>&1 ); GRA_RC=$?
 else GRA_OUT="no remedy line was printed"; GRA_RC=1; fi
 expect_eq "GR-a7 the line, run as printed by the orchestrator, exits 0 ($GRA_OUT)" "0" "$GRA_RC"
-wn_walls "$GRA_REPO" 'bash tests/alpha.test.sh' a00000000graaaa "$WN_IMP"
+wn_walls "$GRA_REPO" 'tests/run.sh --only alpha.test.sh' a00000000graaaa "$WN_IMP"
 expect_eq "GR-a8 …and A's own suite is then admitted" "0" "$SJ_ST"
 
 # ---- GR-b: the same, the two starts at once, ten pairs: no agent on the other's launch (B1) ----
@@ -4044,5 +4036,134 @@ run_rec "$(mk_subagent_start "$SID_A" "$GRH2_TR" "$GRH2_REPO" "$WN_IMP" a0000000
 expect_eq "GR-h4 a placed start is joined (the positive)" "placed:a0000000grhpl" "$(sj_e_joined "$GRH2_REPO")"
 expect_eq "GR-h5 …and leaves no clock file behind" "0" \
   "$(find "$GRH2_REPO/.bionic/tmp" -maxdepth 1 -name 'start-clock-*' | grep -c .)"
+
+
+# ============================================================
+section "Section 24: §CHECKS-S — the severity scale rides beside both code questions, at every rigor (wave-28 T16; REQ-8 AC-8.2, D20)"
+# ============================================================
+#
+# `context/severity.md` is pushed by a registration of its own (argument `severity`) to a reader
+# whose row carries `adversarial` or `structure`: once, however many of the two it holds, and to
+# no other agent. The terms registration writes what the question registrations push on the row
+# it identifies, `pushed=<name>[,<name>]` by file name without `.md`, so `proof-add review` can
+# tell a reader that was handed the scale from one dispatched under 1.12.0.
+#
+# FIXTURE FIDELITY: each row is the dispatch wall's launch shape (`sj_intended` → `roster_row`),
+# joined by name as a teammate is; the registrations are read from hooks/hooks.json; the deal at
+# each rigor is SKILL.md's rigor table: tested, the critic holds all three; peer-reviewed, the
+# auditor `evidence` and the critic the two code questions; audited, one reader per question.
+# The wants are the shipped files' own bytes.
+#
+# fails-when: a code reader starts without the scale; the evidence reader or a writer is pushed
+# it; a reader holding both code questions is pushed it twice; `pushed=` names a file the start
+# did not push, or is missing from a reader's row.
+cks_sev_want() { printf 'bionic severity scale\n'; cat "$CK_CTX/severity.md" 2>/dev/null; }
+expect_nonempty "CKS0 the shipped severity.md is non-empty (a non-vacuous byte pin)" \
+  "$(cat "$CK_CTX/severity.md" 2>/dev/null)"
+expect_eq "CKS0b hooks/hooks.json registers the severity push on SubagentStart exactly once" "1" \
+  "$(while IFS= read -r _c; do [ -n "$_c" ] && pc_key "$_c" && echo; done <<< "$PC_CMDS" | grep -cx severity)"
+CKS_ROW=""
+cks_reader() {  # <plugin root> <world> <name> <role> <questions> <agent id> — one start; sets CKS_ROW, its identified row
+  local _repo _tr
+  IFS='|' read -r _repo _tr _ _ <<< "$(make_world "$2" yes)"
+  sj_intended "$_repo" "$3" "toolu_01$6" "bionic:$4" suites_allowed=none ${5:+"questions=$5"}
+  pc_start "$1" "$(mk_subagent_start "$SID_A" "$_tr" "$_repo" "$3" "$6")"
+  CKS_ROW=$(grep 'status=identified' "$_repo/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+}
+
+# ---- tested: one critic holds all three ----
+cks_reader "$PC_REPO_ROOT" cksone w-one critic evidence,adversarial,structure a00000000cksone1
+expect_eq "CKS-t1 tested: the critic holding all three is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-t2 …as one string" "1" "$(pc_lines severity)"
+expect_eq "CKS-t3 …beside its three checks files" "$(ck_want "$CK_CTX" structure)" "$(pc_ctx structure)"
+expect_eq "CKS-t4 …and its row says what was pushed, in the deal's order" \
+  "checks-evidence,checks-adversarial,checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- peer-reviewed: the auditor holds evidence, the critic the two code questions ----
+cks_reader "$PC_REPO_ROOT" ckspraud w-aud auditor evidence a00000000cksaud2
+expect_eq "CKS-p1 peer-reviewed: the auditor is pushed its checks (the positive)" \
+  "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
+expect_empty "CKS-p2 …and not the scale" "$PC_OUT_severity"
+expect_eq "CKS-p3 …its severity registration exits 0" "0" "$PC_ST_severity"
+expect_eq "CKS-p4 …and its row names its checks alone" "checks-evidence" "$(sj_field "$CKS_ROW" pushed)"
+cks_reader "$PC_REPO_ROOT" cksprcrit2 w-crit critic adversarial,structure a00000000ckscrt3
+expect_eq "CKS-p5 …the critic holding both code questions is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-p6 …once" "1" "$(pc_lines severity)"
+expect_eq "CKS-p7 …and its row says so" "checks-adversarial,checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- audited: one reader per question ----
+cks_reader "$PC_REPO_ROOT" cksaucrit w-crit critic adversarial a00000000ckscrt4
+expect_eq "CKS-a1 audited: the critic holding adversarial is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-a2 …and its row says so" "checks-adversarial,severity" "$(sj_field "$CKS_ROW" pushed)"
+cks_reader "$PC_REPO_ROOT" cksaurev w-rev reviewer structure a00000000cksrev4
+expect_eq "CKS-a3 …the reviewer holding structure is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-a4 …and its row says so" "checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- a writer: no questions, no scale, no key ----
+cks_reader "$PC_REPO_ROOT" ckswriter w-imp implementor "" a00000000ckswrt5
+expect_eq "CKS-w1 a writer is joined (the positive on its row)" "w-imp" "$(sj_field "$CKS_ROW" name)"
+expect_empty "CKS-w2 …is pushed no scale" "$PC_OUT_severity"
+expect_absent "CKS-w3 …and its row carries no pushed=" "|pushed=" "$CKS_ROW"
+
+# ---- the file missing from the plugin: nothing pushed, and the row does not claim it ----
+CKS_PLUG="$SANDBOX/cks-plugin"
+ck_plugin "$CKS_PLUG"
+expect_true "CKS-m0 precondition: the plugin copy carries the scale before it is withheld" test -s "$CKS_PLUG/context/severity.md"
+rm -f "$CKS_PLUG/context/severity.md"
+cks_reader "$CKS_PLUG" cksmissing w-crit critic adversarial a00000000cksmis6
+expect_eq "CKS-m1 a missing scale stops nothing: its registration exits 0" "0" "$PC_ST_severity"
+expect_empty "CKS-m2 …and prints nothing" "$PC_OUT_severity"
+expect_contains "CKS-m3 …and the missing file is logged, by name" "severity.md" "$PC_ERR_severity"
+expect_eq "CKS-m4 …and the row names only what was pushed" "checks-adversarial" "$(sj_field "$CKS_ROW" pushed)"
+
+# ---- a start that cannot be placed, its candidates agreeing ----
+IFS='|' read -r CKSE_REPO CKSE_TR _ _ <<< "$(make_world cksunplaced yes)"
+sj_intended "$CKSE_REPO" E1 toolu_01CKSE1 bionic:critic suites_allowed=none questions=structure
+sj_intended "$CKSE_REPO" E2 toolu_01CKSE2 bionic:critic suites_allowed=none questions=structure
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKSE_TR" "$CKSE_REPO" bionic:critic a00000000cksunp7)"
+expect_eq "CKS-u1 an unplaced start whose candidates agree on structure is pushed the scale" \
+  "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-u2 …and placed on no row" "0" "$(grep -c 'status=identified' "$CKSE_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# ---- the launch call's return places it (ARM 2, wave-28 T48; read-adversarial-p7 finding 2) ----
+# The confirmed row ARM 2 appends becomes the id's last row, the one a reader's record is held
+# to, so it says what the start pushed, through the same helper the identified row uses.
+# fails-when: the confirmed row of a reader pushed the scale carries no `pushed=`, or a writer's
+# confirmed row carries one.
+CKSE_ROSTER="$CKSE_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_agent_post "$SID_A" "$CKSE_TR" "$CKSE_REPO" E1 a00000000cksunp7 toolu_01CKSE1)"
+CKSE_CONF=$(grep 'status=confirmed' "$CKSE_ROSTER" | tail -1)
+expect_eq "CKS-c1 ARM 2 places the unplaced start on its launch (the positive on its row)" \
+  "a00000000cksunp7" "$(sj_field "$CKSE_CONF" agent_id)"
+expect_eq "CKS-c2 …and the placed row says what the start pushed" \
+  "checks-structure,severity" "$(sj_field "$CKSE_CONF" pushed)"
+cks_reader "$PC_REPO_ROOT" cksconfrev w-rev reviewer structure a00000000cksrev8
+CKSC_REPO="$SANDBOX/cksconfrev/repo"; CKSC_TR="$SANDBOX/cksconfrev/home/.claude/projects/p-cksconfrev/$SID_A.jsonl"
+run_rec "$(mk_agent_post "$SID_A" "$CKSC_TR" "$CKSC_REPO" w-rev a00000000cksrev8 toolu_01a00000000cksrev8)"
+CKSC_CONF=$(grep 'status=confirmed' "$CKSC_REPO/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+expect_eq "CKS-c3 a call that returns after the start keeps the identified row's pushed= on the id's last row" \
+  "$(sj_field "$CKS_ROW" pushed)" "$(sj_field "$CKSC_CONF" pushed)"
+cks_reader "$PC_REPO_ROOT" cksconfwrt w-imp implementor "" a00000000ckswrt9
+CKSW_REPO="$SANDBOX/cksconfwrt/repo"; CKSW_TR="$SANDBOX/cksconfwrt/home/.claude/projects/p-cksconfwrt/$SID_A.jsonl"
+run_rec "$(mk_agent_post "$SID_A" "$CKSW_TR" "$CKSW_REPO" w-imp a00000000ckswrt9 toolu_01a00000000ckswrt9)"
+CKSW_CONF=$(grep 'status=confirmed' "$CKSW_REPO/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+expect_eq "CKS-c4 a writer's launch is confirmed (the positive on its row)" "w-imp" "$(sj_field "$CKSW_CONF" name)"
+expect_absent "CKS-c5 …and its confirmed row carries no pushed=" "|pushed=" "$CKSW_CONF"
+# The mutation: the same placing with ARM 2's pushed= write cut from a copy of the hook.
+CKSM_PLUG="$SANDBOX/cks-arm2-mutant"
+ck_plugin "$CKSM_PLUG"
+CKSM_HOOK="$CKSM_PLUG/hooks/execution-recorder.sh"
+CKSM_CUT='  COMPLETED=$(pushed_onto "$COMPLETED")'
+expect_eq "CKS-cm precondition: the hook carries ARM 2's pushed= write once" "1" "$(grep -cxF -- "$CKSM_CUT" "$CKSM_HOOK")"
+grep -vxF -- "$CKSM_CUT" "$REC" > "$CKSM_HOOK"
+IFS='|' read -r CKSM_REPO CKSM_TR _ _ <<< "$(make_world cksarm2mut yes)"
+sj_intended "$CKSM_REPO" M1 toolu_01CKSM1 bionic:critic suites_allowed=none questions=structure
+sj_intended "$CKSM_REPO" M2 toolu_01CKSM2 bionic:critic suites_allowed=none questions=structure
+pc_start "$CKSM_PLUG" "$(mk_subagent_start "$SID_A" "$CKSM_TR" "$CKSM_REPO" bionic:critic a00000000cksmut1)"
+REC="$CKSM_HOOK" run_rec "$(mk_agent_post "$SID_A" "$CKSM_TR" "$CKSM_REPO" M1 a00000000cksmut1 toolu_01CKSM1)"
+CKSM_CONF=$(grep 'status=confirmed' "$CKSM_REPO/.bionic/tmp/roster-${SID_A}.state" | tail -1)
+expect_eq "CKS-cm1 precondition: the mutant still places the start" "a00000000cksmut1" "$(sj_field "$CKSM_CONF" agent_id)"
+expect_absent "CKS-cm2 …and without the write its placed row says nothing was pushed: CKS-c2 is what catches it" \
+  "|pushed=" "$CKSM_CONF"
 
 finish

@@ -73,6 +73,13 @@ so_said() {  # <repo> <name> -> the marker path, the marker written
   mkdir -p "$1/.bionic/tmp"; : > "$1/.bionic/tmp/$2.done"; printf '%s/.bionic/tmp/%s.done' "$1" "$2"
 }
 
+# THE LANDING'S MARK (wave-28 T6; D7): what `line_publish` writes on a landed row's roster line,
+# by the library's one marker (`roster_mark_landed`), never a fixture's own spelling of it.
+so_mark() {  # <repo> <name> <landed commit> — the name's roster line marked landed
+  bash -c '. "$1" && roster_mark_landed "$2" "$3" "$4" 2026-10-07T03:30:00Z' _ \
+    "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" "$1/.bionic/tmp/roster-$SID.state" "$2" "$3"
+}
+
 # A BOUND PLAN (wave-20 T8, REQ-1, D1). standdown lands a tree onto the session's bound
 # plan's `working-branch:` and nowhere else, so every fixture that expects a LANDED line binds
 # this session to a plan naming the branch its checkout holds. The marker is binding.sh's shape.
@@ -353,244 +360,64 @@ expect_contains "…still names the open row through the worktree cwd" "live-wor
 git -C "$R7" worktree remove --force "$R7WT" >/dev/null 2>&1
 
 # ============================================================
-section "Section 6: standdown LANDS the trees it stands down (AC-28, C1)"
+section "Section 6: standdown LANDS NOTHING; a row is stoppable by its roster mark (wave-28 T6; REQ-3, D7)"
 # ============================================================
 #
-# C1: a worktree is a leased slot bound to its ledger row, and standing an agent
-# down is where the lease ends. standdown does not stop anybody — stopping is
-# the harness's — but the tree is disk, and giving it back is this script's to
-# do. The act itself is payload/scripts/lib/worktree.sh's `worktree_land`; what
-# is asserted here is that standdown calls it once per DISCHARGED row and
-# reports every answer, refusals included.
+# THE LANDING IS THE LINE'S (wave-28 T6; D7). Until 1.13.0 standdown merged each discharged row's
+# tree (bionic 1.4.0, AC-28, C1) through `worktree_land_for_session`. A row now lands through `ready`
+# (the line's one publish), which marks its roster line `landed=<40-hex> landed_at=<ISO-UTC>`, and
+# the writer's tree goes at `stopped <name>` (Section 10). So standdown merges nothing, removes
+# nothing and moves no ref: it reports each tree as it stands. A row carrying the mark is stoppable
+# whatever its deliverable says: the mark is the landing's own fact.
 #
 # A row is matched to its tree by the convention the whole repo uses: a row
 # named `<x>` (or `W-<X>`) holds `.worktrees/<x>`.
 
-R8="$(make_repo standdown-lands)"
+R8="$(make_repo standdown-lands-nothing)"
+R8_REAL="$(cd "$R8" && pwd -P)"
 echo seed > "$R8/README.md"
 git -C "$R8" add README.md >/dev/null 2>&1
 git -C "$R8" commit -qm seed >/dev/null 2>&1
-
-# Three trees, each a branch with a commit of its own so there is something to
-# land; the third is left dirty so its landing must refuse.
-for t in land-a land-b land-c; do
+# Three trees, each a branch with a commit of its own, so a merge would have something to merge.
+for t in land-a land-b mark-c; do
   git -C "$R8" worktree add -q -b "$t" "$R8/.worktrees/$t" >/dev/null 2>&1
   echo "$t" > "$R8/.worktrees/$t/$t.txt"
   git -C "$R8/.worktrees/$t" add -A >/dev/null 2>&1
   git -C "$R8/.worktrees/$t" commit -qm "$t work" >/dev/null 2>&1
 done
-echo "unsaved" >> "$R8/.worktrees/land-c/land-c.txt"
-
-# A fourth row that is NOT discharged, holding a tree that must survive: the
-# point of the operation is that it touches only what has landed.
-# It carries a commit of its own on purpose: a branch with nothing beyond the
-# main checkout is "merged" trivially, and the not-merged assertion below would
-# pass without proving anything.
 git -C "$R8" worktree add -q -b still-working "$R8/.worktrees/still-working" >/dev/null 2>&1
 echo working > "$R8/.worktrees/still-working/wip.txt"
 git -C "$R8/.worktrees/still-working" add -A >/dev/null 2>&1
 git -C "$R8/.worktrees/still-working" commit -qm "wip" >/dev/null 2>&1
-
-for n in land-a land-b land-c; do
+for n in land-a land-b; do
   echo "$n" > "$R8/.bionic/docs/record/$n.md"
   so_roster_row "$R8" "$n" ".bionic/docs/record/$n.md" "" "$n@session-6c85684c"
 done
 so_roster_row "$R8" "still-working" ".bionic/docs/record/nothing.md" "" "still-working@session-6c85684c"
+# mark-c's deliverable is never written (UNMET), but the line landed it: its roster line carries the mark.
+so_roster_row "$R8" "mark-c" ".bionic/docs/record/never.md" "" "mark-c@session-6c85684c"
+R8_MC="$(git -C "$R8" rev-parse mark-c)"
+so_mark "$R8" mark-c "$R8_MC"
 so_bind_plan "$R8" wave/fixture >/dev/null
+R8_REFS0="$(git -C "$R8" for-each-ref --format='%(refname) %(objectname)')"
 
 run_orders "$R8" standdown
 expect_status "standdown with trees exits clean" 0 "$ST"
-
-expect_contains "the first discharged row's tree is reported LANDED" \
-  "LANDED branch=land-a" "$OUT"
-expect_contains "…and so is the second" "LANDED branch=land-b" "$OUT"
-expect_contains "the LANDED line names the plan's working branch as its target (AC-1.3)" \
-  "LANDED branch=land-a onto=wave/fixture checkout=" "$OUT"
-expect_contains "the dirty tree is reported REFUSED, naming why" \
-  "REFUSED reason=dirty-tree" "$OUT"
-expect_contains "…and the refusal is attributable to its row" "land-c" "$OUT"
-
-# READ BACK FROM DISK, not from the report: a line claiming a landing is not a
-# landing.
-if [ ! -d "$R8/.worktrees/land-a" ]; then ok "the landed tree is gone"; else no "the landed tree is gone"; fi
-if [ ! -d "$R8/.worktrees/land-b" ]; then ok "…and so is the second"; else no "…and so is the second"; fi
-if [ -d "$R8/.worktrees/land-c" ]; then ok "the refused tree is still there"; else no "the refused tree is still there"; fi
-if [ -d "$R8/.worktrees/still-working" ]; then
-  ok "the tree of a row that has NOT landed is untouched"
-else
-  no "the tree of a row that has NOT landed is untouched"
-fi
-if git -C "$R8" rev-list --count "HEAD..land-a" 2>/dev/null | grep -qx 0; then
-  ok "land-a's work is merged into the main checkout"
-else
-  no "land-a's work is merged into the main checkout"
-fi
-if git -C "$R8" show-ref --verify --quiet refs/heads/land-a; then
-  ok "and its BRANCH survives the landing"
-else
-  no "and its BRANCH survives the landing"
-fi
-if git -C "$R8" rev-list --count "HEAD..still-working" 2>/dev/null | grep -qx 0; then
-  no "the unlanded row's branch was merged" "standdown merged a row it should have left alone"
-else
-  ok "the unlanded row's branch was NOT merged"
-fi
-
-# A REFUSAL THE OPERATOR MUST SEE. `land` refuses to merge into a protected
-# branch (security F1), and standdown reports that refusal the way it reports a
-# dirty tree — it is not a special case here, and the tree stays standing.
-R9="$(make_repo standdown-protected)"
-echo seed > "$R9/README.md"
-git -C "$R9" add README.md >/dev/null 2>&1
-git -C "$R9" commit -qm seed >/dev/null 2>&1
-git -C "$R9" worktree add -q -b land-p "$R9/.worktrees/land-p" >/dev/null 2>&1
-echo p > "$R9/.worktrees/land-p/land-p.txt"
-git -C "$R9/.worktrees/land-p" add -A >/dev/null 2>&1
-git -C "$R9/.worktrees/land-p" commit -qm "land-p work" >/dev/null 2>&1
-git -C "$R9" checkout -q -b main
-echo land-p > "$R9/.bionic/docs/record/land-p.md"
-so_roster_row "$R9" "land-p" ".bionic/docs/record/land-p.md" "" "land-p@session-6c85684c"
-so_bind_plan "$R9" main >/dev/null
-
-run_orders "$R9" standdown
-expect_status "standdown on a protected checkout still exits clean" 0 "$ST"
-expect_contains "the land onto main is reported REFUSED, naming the branch" \
-  "REFUSED reason=protected-branch branch=main" "$OUT"
-if [ -d "$R9/.worktrees/land-p" ]; then ok "the tree of the refused land is still there"; else no "the tree of the refused land is still there"; fi
-if git -C "$R9" rev-list --count "HEAD..land-p" 2>/dev/null | grep -qx 0; then
-  no "main was merged into" "standdown merged unreviewed work into main"
-else
-  ok "main was NOT merged into"
-fi
-
-# THE TWO-CHECKOUT TOPOLOGY THROUGH STANDDOWN (wave-20 T8, REQ-1, AC-1.1/AC-1.3). The main
-# checkout sits on a feature branch; the plan's working branch is checked out in its own tree
-# under .worktrees/. standdown lands through worktree_land_for_session — the path
-# `spawn-worktree.sh land` takes too — so the merge goes into the wave checkout and the
-# feature branch does not move.
-R8B="$(make_repo standdown-topology)"
-R8B_REAL="$(cd "$R8B" && pwd -P)"
-echo seed > "$R8B/README.md"
-git -C "$R8B" add README.md >/dev/null 2>&1
-git -C "$R8B" commit -qm seed >/dev/null 2>&1
-git -C "$R8B" worktree add -q -b wave/20-demo "$R8B/.worktrees/20-demo" >/dev/null 2>&1
-git -C "$R8B" checkout -q -b feature/human
-git -C "$R8B" worktree add -q -b topo-a "$R8B/.worktrees/topo-a" wave/20-demo >/dev/null 2>&1
-echo topo > "$R8B/.worktrees/topo-a/topo-a.txt"
-git -C "$R8B/.worktrees/topo-a" add -A >/dev/null 2>&1
-git -C "$R8B/.worktrees/topo-a" commit -qm "topo-a work" >/dev/null 2>&1
-echo topo-a > "$R8B/.bionic/docs/record/topo-a.md"
-so_roster_row "$R8B" "topo-a" ".bionic/docs/record/topo-a.md" "" "topo-a@session-6c85684c"
-so_bind_plan "$R8B" wave/20-demo >/dev/null
-R8B_FEAT0="$(git -C "$R8B" rev-parse feature/human)"
-
-run_orders "$R8B" standdown
-expect_status "standdown in the two-checkout topology exits clean" 0 "$ST"
-expect_contains "the tree lands onto the working branch, in the checkout that holds it" \
-  "LANDED branch=topo-a onto=wave/20-demo checkout=$R8B_REAL/.worktrees/20-demo merge=" "$OUT"
-expect_eq "the feature branch the main checkout sits on did not move" \
-  "$R8B_FEAT0" "$(git -C "$R8B" rev-parse feature/human)"
-expect_eq "topo-a's work is in the wave branch" "0" \
-  "$(git -C "$R8B" rev-list --count wave/20-demo..topo-a 2>/dev/null)"
-expect_eq "topo-a's work is NOT in the feature branch" "1" \
-  "$(git -C "$R8B" rev-list --count feature/human..topo-a 2>/dev/null)"
-
-# D1 THROUGH STANDDOWN (wave-20 T8c; review R2-1; critic C2-1). standdown passes its own
-# SESSION_ID to worktree_land_for_session, and that id picks the target branch and nothing
-# else. A `tests/run.sh` working in the wave checkout, the orchestrator's own floor, refuses
-# the land whoever started it; one working in ANOTHER repository does not (T12 F3). The
-# runner is a stand-in that only sleeps, never the real runner.
-SO_RUNNER_PID=""
-so_start_runner() {  # <cwd> <script as invoked>
-  ( cd "$1" && exec bash "$2" ) >/dev/null 2>&1 &
-  SO_RUNNER_PID=$!
-  local i=0
-  while [ $i -lt 100 ]; do
-    case "$(ps -o command= -p "$SO_RUNNER_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
-    i=$((i+1)); sleep 0.05
-  done
-  return 1
-}
-so_stop_runner() {
-  [ -n "$SO_RUNNER_PID" ] || return 0
-  kill "$SO_RUNNER_PID" 2>/dev/null; wait "$SO_RUNNER_PID" 2>/dev/null
-  SO_RUNNER_PID=""
-}
-trap 'so_stop_runner; rm -rf "$SANDBOX"' EXIT
-so_topology() {  # <name> <row> -> repo path; wave/20-demo in .worktrees/20-demo, <row>'s tree beside it
-  local r
-  r="$(make_repo "$1")"
-  echo seed > "$r/README.md"
-  git -C "$r" add README.md >/dev/null 2>&1
-  git -C "$r" commit -qm seed >/dev/null 2>&1
-  git -C "$r" worktree add -q -b wave/20-demo "$r/.worktrees/20-demo" >/dev/null 2>&1
-  git -C "$r" worktree add -q -b "$2" "$r/.worktrees/$2" wave/20-demo >/dev/null 2>&1
-  echo "$2" > "$r/.worktrees/$2/$2.txt"
-  git -C "$r/.worktrees/$2" add -A >/dev/null 2>&1
-  git -C "$r/.worktrees/$2" commit -qm "$2 work" >/dev/null 2>&1
-  echo "$2" > "$r/.bionic/docs/record/$2.md"
-  so_roster_row "$r" "$2" ".bionic/docs/record/$2.md" "" "$2@session-6c85684c"
-  so_bind_plan "$r" wave/20-demo >/dev/null
-  printf '%s\n' "$r"
-}
-SO_OTHER="$(make_repo standdown-d1-other-repo)"
-mkdir -p "$SO_OTHER/tests"
-printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$SO_OTHER/tests/run.sh"; chmod +x "$SO_OTHER/tests/run.sh"
-
-R8D="$(so_topology standdown-d1-floor floor-a)"
-R8D_REAL="$(cd "$R8D" && pwd -P)"
-mkdir -p "$R8D/.worktrees/20-demo/tests"
-printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$R8D/.worktrees/20-demo/tests/run.sh"
-chmod +x "$R8D/.worktrees/20-demo/tests/run.sh"
-R8D_WAVE0="$(git -C "$R8D" rev-parse wave/20-demo)"
-if so_start_runner "$R8D_REAL/.worktrees/20-demo" "$R8D_REAL/.worktrees/20-demo/tests/run.sh"; then
-  ok "a stand-in floor started in the wave checkout"
-else
-  no "a stand-in floor started in the wave checkout"
-fi
-run_orders "$R8D" standdown
-so_stop_runner
-expect_status "standdown under a floor in the wave checkout exits clean" 0 "$ST"
-expect_contains "the land is REFUSED, naming the running suite's script" \
-  "REFUSED reason=suite-running pid=" "$OUT"
-expect_contains "…in the wave checkout" "script=$R8D_REAL/.worktrees/20-demo/tests/run.sh" "$OUT"
-expect_absent "…and no LANDED line claims it" "LANDED branch=floor-a" "$OUT"
-if [ -d "$R8D/.worktrees/floor-a" ]; then ok "the tree under the floor still stands"; else no "the tree under the floor still stands"; fi
-expect_eq "the wave branch did not move" "$R8D_WAVE0" "$(git -C "$R8D" rev-parse wave/20-demo)"
-
-R8E="$(so_topology standdown-d1-elsewhere floor-b)"
-if so_start_runner "$SO_OTHER" "tests/run.sh"; then
-  ok "a stand-in runner started in another repository"
-else
-  no "a stand-in runner started in another repository"
-fi
-run_orders "$R8E" standdown
-so_stop_runner
-expect_status "standdown with a runner in another repository exits clean" 0 "$ST"
-expect_contains "the land goes through: another repository's suite is not this merge's (T12 F3)" \
-  "LANDED branch=floor-b onto=wave/20-demo" "$OUT"
-
-# AN UNBOUND SESSION LANDS NOTHING (AC-1.2 through standdown). The same shape with no binding:
-# the row is MET and stood down, and its lease is REFUSED naming why — tree and refs stay.
-R8C="$(make_repo standdown-unbound)"
-echo seed > "$R8C/README.md"
-git -C "$R8C" add README.md >/dev/null 2>&1
-git -C "$R8C" commit -qm seed >/dev/null 2>&1
-git -C "$R8C" worktree add -q -b unbound-a "$R8C/.worktrees/unbound-a" >/dev/null 2>&1
-echo u > "$R8C/.worktrees/unbound-a/u.txt"
-git -C "$R8C/.worktrees/unbound-a" add -A >/dev/null 2>&1
-git -C "$R8C/.worktrees/unbound-a" commit -qm "unbound-a work" >/dev/null 2>&1
-echo unbound-a > "$R8C/.bionic/docs/record/unbound-a.md"
-so_roster_row "$R8C" "unbound-a" ".bionic/docs/record/unbound-a.md" "" "unbound-a@session-6c85684c"
-R8C_REFS0="$(git -C "$R8C" for-each-ref --format='%(refname) %(objectname)')"
-
-run_orders "$R8C" standdown
-expect_status "standdown from an unbound session exits clean" 0 "$ST"
-expect_contains "the lease is REFUSED, naming the missing binding, attributable to its row" \
-  "REFUSED reason=no-bound-plan state=none" "$OUT"
-expect_absent "…and no LANDED line claims it" "LANDED branch=unbound-a" "$OUT"
-if [ -d "$R8C/.worktrees/unbound-a" ]; then ok "the unbound session's tree still stands"; else no "the unbound session's tree still stands"; fi
-expect_eq "no ref moved" "$R8C_REFS0" "$(git -C "$R8C" for-each-ref --format='%(refname) %(objectname)')"
+expect_contains "the discharged rows are listed to stop (precondition: land-a is READY)" \
+  "land-a@session-6c85684c   (met — land-a)" "$OUT"
+expect_contains "a row carrying the roster mark is stoppable by it, though its deliverable is absent" \
+  "mark-c@session-6c85684c   (landed ${R8_MC:0:12} — mark-c)" "$OUT"
+expect_absent "no tree is landed: no LANDED line" "LANDED branch=" "$OUT"
+expect_eq "no ref moved: nothing merged, nothing deleted" "$R8_REFS0" \
+  "$(git -C "$R8" for-each-ref --format='%(refname) %(objectname)')"
+for t in land-a land-b mark-c still-working; do
+  if [ -d "$R8/.worktrees/$t" ]; then ok "the tree of $t stands"; else no "the tree of $t stands"; fi
+done
+expect_contains "the marked row's tree is reported standing until its stop" \
+  "landed ${R8_MC:0:12} — tree stands until stopped mark-c: $R8_REAL/.worktrees/mark-c   (mark-c)" "$OUT"
+expect_contains "an unmarked discharged row's tree is reported not landed, with the two ways to land it" \
+  "not landed — tree stands: $R8_REAL/.worktrees/land-a (branch land-a); its writer says ready from it, or a person lands it with land <tree> --by-hand --reason '<why>'   (land-a)" "$OUT"
+expect_absent "…and the held row is not listed to stop" "still-working@session-6c85684c   (" "$OUT"
 
 # A roster with no trees at all must behave exactly as it did before this
 # feature: the landing report is additive, never a precondition.
@@ -928,20 +755,18 @@ expect_status "standdown over an acked-and-gone row with a tree exits clean" 0 "
 R11_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
 expect_absent "the acked-and-gone row is kept out of READY (AC-1.3 unchanged by R2)" \
   "acked-gone-lease" "$R11_SD"
-expect_contains "…but its lease still ends, reported under LEASES, onto the plan's working branch" \
-  "LANDED branch=acked-gone-lease onto=wave/fixture" "$OUT"
-expect_contains "…attributable to its row by name" \
-  "(acked-gone-lease)" "$OUT"
-if [ ! -d "$R11/.worktrees/acked-gone-lease" ]; then
-  ok "the acked-and-gone row's tree is actually landed, not just reported"
+# STANDDOWN LANDS NOTHING (wave-28 T6; D7): the row lands through `ready`, and its tree goes at
+# `stopped` once its roster line carries the mark. Its tree is reported, as it stands.
+expect_contains "…its tree is reported under LEASES, standing and not landed" \
+  "not landed — tree stands: $(cd "$R11" && pwd -P)/.worktrees/acked-gone-lease (branch acked-gone-lease)" "$OUT"
+expect_absent "…and no LANDED line claims it" "LANDED branch=acked-gone-lease" "$OUT"
+if [ -d "$R11/.worktrees/acked-gone-lease" ]; then
+  ok "the acked-and-gone row's tree stands: standdown removes nothing"
 else
-  no "the acked-and-gone row's tree is actually landed, not just reported"
+  no "the acked-and-gone row's tree stands: standdown removes nothing"
 fi
-if git -C "$R11" rev-list --count "HEAD..acked-gone-lease" 2>/dev/null | grep -qx 0; then
-  ok "…its work is merged into the main checkout"
-else
-  no "…its work is merged into the main checkout"
-fi
+expect_eq "…and its work is NOT merged: standdown merges nothing" "1" \
+  "$(git -C "$R11" rev-list --count "HEAD..acked-gone-lease" 2>/dev/null)"
 
 # ============================================================
 # AN ABANDONED ROW'S TREE STANDS (wave-19 T1f, review R2-1). T1b made standdown land the tree
@@ -1249,12 +1074,129 @@ r16_orders standdown
 expect_status "9b-d: standdown after a follow-up to a stopped row exits clean" 0 "$ST"
 expect_absent "9b-e: …the row is not LEFT ALONE waiting for a reply that cannot come" "fu-closed   (FOLLOW-UP" "$OUT"
 expect_absent "9b-f: …nothing is left alone at all" "LEFT ALONE" "$OUT"
-expect_contains "9b-g: …its lease ends: the tree is landed onto the plan's working branch" \
-  "LANDED branch=fu-closed onto=wave/fixture" "$OUT"
-if [ ! -d "$R16/.worktrees/fu-closed" ]; then
-  ok "9b-h: …and the tree is actually gone, not just reported"
+expect_contains "9b-g: …its tree is reported standing, not landed: standdown lands nothing (wave-28 T6)" \
+  "not landed — tree stands: $(cd "$R16" && pwd -P)/.worktrees/fu-closed (branch fu-closed)" "$OUT"
+if [ -d "$R16/.worktrees/fu-closed" ]; then
+  ok "9b-h: …and the tree stands"
 else
-  no "9b-h: …and the tree is actually gone, not just reported"
+  no "9b-h: …and the tree stands"
 fi
+
+# ============================================================
+section "Section 10: stopped removes the writer's tree, and only for a row carrying the roster mark (wave-28 T6; REQ-3 AC-3.2, AC-3.7, D7)"
+# ============================================================
+#
+# THE TREE GOES AT THE STOP, NOT AT THE LANDING (D7). `ready` publishes the row and marks its roster
+# line `landed=<40-hex> landed_at=<ISO-UTC>`; the writer is still in its tree when it prints the owed
+# line. `stopped <name>`, run beside the stop once the agent is gone, closes the row and then removes
+# the tree the name holds — only when the row carries the mark, only when the tree's head is in the
+# landed commit (nothing the writer committed after the landing is dropped from disk), and never the
+# branch. A row with no mark (abandoned, or read-only) keeps its tree, as before.
+R17="$(make_repo stopped-removes-marked)"
+R17_REAL="$(cd "$R17" && pwd -P)"
+echo seed > "$R17/README.md"
+git -C "$R17" add README.md >/dev/null 2>&1
+git -C "$R17" commit -qm seed >/dev/null 2>&1
+for t in mk-a mk-b mk-c mk-d; do
+  git -C "$R17" worktree add -q -b "$t" "$R17/.worktrees/$t" >/dev/null 2>&1
+  echo "$t" > "$R17/.worktrees/$t/$t.txt"
+  git -C "$R17/.worktrees/$t" add -A >/dev/null 2>&1
+  git -C "$R17/.worktrees/$t" commit -qm "$t work" >/dev/null 2>&1
+done
+# mk-a, mk-c and mk-d land as the line lands a row: merged onto the working branch, the merge the landed commit.
+for t in mk-a mk-c mk-d; do git -C "$R17" merge -q --no-ff -m "merge $t (land)" "$t" >/dev/null 2>&1; done
+R17_L="$(git -C "$R17" rev-parse HEAD)"
+R17SLUG=$(printf '%s' "$R17" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R17SLUG"
+R17TR="$R8CFG/projects/$R17SLUG/$SID.jsonl"
+echo done > "$R17/.bionic/docs/record/mk-a.md"
+so_roster_row "$R17" mk-a ".bionic/docs/record/mk-a.md" "" "mk-a@session-6c85684c" "" "" "" "$(so_said "$R17" mk-a)"
+echo done > "$R17/.bionic/docs/record/mk-b.md"
+so_roster_row "$R17" mk-b ".bionic/docs/record/mk-b.md" "" "mk-b@session-6c85684c" "" "" "" "$(so_said "$R17" mk-b)"
+so_roster_row "$R17" mk-c ".bionic/docs/record/never.md" "" "mk-c@session-6c85684c"
+echo done > "$R17/.bionic/docs/record/mk-d.md"
+so_roster_row "$R17" mk-d ".bionic/docs/record/mk-d.md" "" "mk-d@session-6c85684c" "" "" "" "$(so_said "$R17" mk-d)"
+so_mark "$R17" mk-a "$R17_L"
+so_mark "$R17" mk-c "$R17_L"
+so_mark "$R17" mk-d "$R17_L"
+# mk-d's writer committed again after its landing: that commit is in no landed commit.
+echo later > "$R17/.worktrees/mk-d/later.txt"
+git -C "$R17/.worktrees/mk-d" add -A >/dev/null 2>&1
+git -C "$R17/.worktrees/mk-d" commit -qm "mk-d after landing" >/dev/null 2>&1
+so_bind_plan "$R17" wave/fixture >/dev/null
+expect_contains "10-pre: mk-a's roster line carries the mark" "|landed=${R17_L}|landed_at=2026-10-07T03:30:00Z" \
+  "$(grep '|name=mk-a|' "$R17/.bionic/tmp/roster-$SID.state" | tail -1)"
+plant_live "$R17TR" fresh
+R17_REFS0="$(git -C "$R17" for-each-ref --format='%(refname) %(objectname)')"
+
+run_orders_cfg "$R17" stopped mk-a
+expect_status "10a: stopped on a marked row whose agent is gone exits 0" 0 "$ST"
+expect_contains "10a2: …the row is closed, reason landed" "reason landed" "$OUT"
+expect_contains "10a3: …and its tree is removed, said so with the landed commit" \
+  "stopped: mk-a — its tree is removed: $R17_REAL/.worktrees/mk-a (branch mk-a stays; landed ${R17_L:0:12})" "$OUT"
+if [ ! -d "$R17/.worktrees/mk-a" ]; then ok "10a4: …the tree is gone from disk"; else no "10a4: …the tree is gone from disk"; fi
+expect_eq "10a5: …and no ref moved: the branch survives" "$R17_REFS0" \
+  "$(git -C "$R17" for-each-ref --format='%(refname) %(objectname)')"
+
+run_orders_cfg "$R17" stopped mk-b
+expect_status "10b: stopped on an unmarked MET row exits 0" 0 "$ST"
+expect_contains "10b2: …the row is closed" "stopped: mk-b — its row is closed" "$OUT"
+if [ -d "$R17/.worktrees/mk-b" ]; then ok "10b3: …and its tree stands: no mark, no removal"; else no "10b3: …and its tree stands: no mark, no removal"; fi
+expect_absent "10b4: …nothing claims a removal" "its tree is removed" "$OUT"
+
+run_orders_cfg "$R17" stopped mk-c
+expect_status "10c: a marked row whose deliverable is absent (UNMET) exits 0" 0 "$ST"
+expect_contains "10c2: …closed as landed: the mark is the landing's fact" "reason landed" "$OUT"
+if [ ! -d "$R17/.worktrees/mk-c" ]; then ok "10c3: …and its tree is removed"; else no "10c3: …and its tree is removed"; fi
+
+run_orders_cfg "$R17" stopped mk-d
+expect_status "10d: a marked row whose tree moved on since the landing exits 0" 0 "$ST"
+expect_contains "10d2: …its tree stands, saying why" \
+  "stopped: mk-d — its tree stands: $R17_REAL/.worktrees/mk-d; its head" "$OUT"
+if [ -f "$R17/.worktrees/mk-d/later.txt" ]; then ok "10d3: …the later commit's tree is still on disk"; else no "10d3: …the later commit's tree is still on disk"; fi
+
+# THE MARK, NOT THE ACK, IS THE LICENCE FOR THE TREE (wave-28 T21; A-orch-105 #1). The Patrol tick acks a
+# landed row it finds MET and gone; `stopped` refused every acked row, so that row's tree could never be
+# removed and standdown pointed at the refused command. A marked row the tick already acked now has its tree
+# removed by `stopped`, with no second ack; an acked row with NO mark is refused as ever.
+R18="$(make_repo stopped-acked-marked)"
+R18_REAL="$(cd "$R18" && pwd -P)"
+echo seed > "$R18/README.md"
+git -C "$R18" add README.md >/dev/null 2>&1
+git -C "$R18" commit -qm seed >/dev/null 2>&1
+for t in mk-e mk-f; do
+  git -C "$R18" worktree add -q -b "$t" "$R18/.worktrees/$t" >/dev/null 2>&1
+  echo "$t" > "$R18/.worktrees/$t/$t.txt"
+  git -C "$R18/.worktrees/$t" add -A >/dev/null 2>&1
+  git -C "$R18/.worktrees/$t" commit -qm "$t work" >/dev/null 2>&1
+done
+for t in mk-e mk-f; do git -C "$R18" merge -q --no-ff -m "merge $t (land)" "$t" >/dev/null 2>&1; done
+R18_L="$(git -C "$R18" rev-parse HEAD)"
+R18SLUG=$(printf '%s' "$R18" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R18SLUG"
+R18TR="$R8CFG/projects/$R18SLUG/$SID.jsonl"
+for t in mk-e mk-f; do
+  echo done > "$R18/.bionic/docs/record/$t.md"
+  so_roster_row "$R18" "$t" ".bionic/docs/record/$t.md" "" "$t@session-6c85684c" "" "" "" "$(so_said "$R18" "$t")"
+done
+so_mark "$R18" mk-e "$R18_L"
+so_bind_plan "$R18" wave/fixture >/dev/null
+plant_live "$R18TR" fresh
+for t in mk-e mk-f; do
+  ( cd "$R18" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack "$t" --by patrol --reason moot-and-gone ) >/dev/null 2>&1
+done
+R18_LEDGER="$(cat "$R18/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
+expect_contains "10e-pre: the Patrol's ack of mk-e is on the ledger" "|name=mk-e|by=patrol|" "$R18_LEDGER"
+expect_contains "10e-pre: …and mk-f's" "|name=mk-f|by=patrol|" "$R18_LEDGER"
+run_orders_cfg "$R18" stopped mk-e
+expect_status "10e: stopped on a marked row the Patrol already acked exits 0" 0 "$ST"
+expect_contains "10e2: …its tree is removed, said so with the landed commit" \
+  "stopped: mk-e — its tree is removed: $R18_REAL/.worktrees/mk-e (branch mk-e stays; landed ${R18_L:0:12})" "$OUT"
+if [ ! -d "$R18/.worktrees/mk-e" ]; then ok "10e3: …the tree is gone from disk"; else no "10e3: …the tree is gone from disk"; fi
+expect_eq "10e4: …and no second ack is written" "1" \
+  "$(grep -c '|event=ack|.*|name=mk-e|' "$R18/.bionic/tmp/sweeper-$SID.state" | tr -d ' ')"
+run_orders_cfg "$R18" stopped mk-f
+expect_status "10f: stopped on an acked row with no mark is refused, exit 2" 2 "$ST"
+if [ -d "$R18/.worktrees/mk-f" ]; then ok "10f2: …and its tree stands"; else no "10f2: …and its tree stands"; fi
 
 finish

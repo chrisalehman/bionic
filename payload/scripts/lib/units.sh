@@ -878,7 +878,10 @@ _units_floor_kept() {
   return 0
 }
 
-# _units_files_awk -> the awk functions `in_docs(entry)` and `writes_head(cell)`. `in_docs` is 1
+# _units_files_awk -> the awk functions `in_docs(entry)`, `writes_head(cell)`, and (wave-28 T8, A-orch-159) the
+# Files matcher `isglob`, `glob_re`, `covers(entry, path)` and `cell_covers(cell, path)`, lifted here out of the
+# scheduler's program so a verb that asks "which rows write this path" asks the matcher the scheduler asks.
+# `in_docs` is 1
 # when a `Files` path entry is the record, not the tracked tree: under `.bionic/`, or spelled from
 # the docs root as `record/…` (the spelling proof lines and older plans use; review 10 F4).
 # `writes_head` is 1 when a `Files` cell names a path that is not, the tracked tree a writer
@@ -898,6 +901,41 @@ _units_files_awk() {
         e = a[k]; sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e); sub(/^\.\//, "", e)
         if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
         if (!in_docs(e)) return 1
+      }
+      return 0
+    }
+    function isglob(e) { return (index(e, "*") > 0 || index(e, "?") > 0) }
+    # glob_re(g): the glob as an anchored ERE, built once per entry. The grammar globs with * and
+    # ? only, so a bracket is a character like any other: `[` is escaped with the rest, and a
+    # `Files` entry carrying one can never become a broken regex that stops every verb (T35 F5;
+    # `units_validate` refuses the entry, naming its row). A `]` outside a class is literal already.
+    function glob_re(g,   o) {
+      if (g in gre) return gre[g]
+      o = g
+      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\[/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
+      gre[o] = "^" g "$"
+      return gre[o]
+    }
+    # covers(e, p): the Files entry e covers the path p (brief.sh `in_files`, one pair).
+    function covers(e, p,   ls, lp) {
+      if (e == p) return 1
+      if (isglob(e)) return (p ~ glob_re(e))
+      if (substr(e, length(e)) == "/" && index(p, e) == 1) return 1
+      if (index(p, e "/") == 1) return 1
+      ls = length(e); lp = length(p)
+      if (ls > lp && substr(e, ls - lp) == "/" p) return 1
+      if (lp > ls && substr(p, lp - ls) == "/" e) return 1
+      return 0
+    }
+    # cell_covers(cell, p): some entry of the Files cell (comma-separated; a backtick, a leading ./ and the
+    # white space around an entry are not part of it) covers the path p. THE ONE MATCHER OF THE DISPATCH GRAMMAR
+    # for a shell caller: the scheduler overlap test and the finding-check code writer ask covers through it.
+    function cell_covers(cell, p,   a, m, k, e) {
+      sub(/^\.\//, "", p)
+      m = split(cell, a, /[ \t]*,[ \t]*/)
+      for (k = 1; k <= m; k++) {
+        e = a[k]; gsub(/`/, "", e); sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e); sub(/^\.\//, "", e)
+        if (e != "" && covers(e, p)) return 1
       }
       return 0
     }
@@ -972,29 +1010,6 @@ _units_sched_awk() {
 
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     function isopen(j) { return (st[j] == "pending" || st[j] == "active") }
-    function isglob(e) { return (index(e, "*") > 0 || index(e, "?") > 0) }
-    # glob_re(g): the glob as an anchored ERE, built once per entry. The grammar globs with * and
-    # ? only, so a bracket is a character like any other: `[` is escaped with the rest, and a
-    # `Files` entry carrying one can never become a broken regex that stops every verb (T35 F5;
-    # `units_validate` refuses the entry, naming its row). A `]` outside a class is literal already.
-    function glob_re(g,   o) {
-      if (g in gre) return gre[g]
-      o = g
-      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\[/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
-      gre[o] = "^" g "$"
-      return gre[o]
-    }
-    # covers(e, p): the Files entry e covers the path p (brief.sh `in_files`, one pair).
-    function covers(e, p,   ls, lp) {
-      if (e == p) return 1
-      if (isglob(e)) return (p ~ glob_re(e))
-      if (substr(e, length(e)) == "/" && index(p, e) == 1) return 1
-      if (index(p, e "/") == 1) return 1
-      ls = length(e); lp = length(p)
-      if (ls > lp && substr(e, ls - lp) == "/" p) return 1
-      if (lp > ls && substr(p, lp - ls) == "/" e) return 1
-      return 0
-    }
     # overlap(a, b): either covers the other; two globs overlap when one literal prefix is a
     # prefix of the other (the fail-safe reading: a pair that might collide is held).
     function overlap(a, b,   pa, pb) {
@@ -2242,6 +2257,27 @@ units_step_line() {
     }' "$plan"
 }
 
+# units_step_text <plan> <N|T<n>> -> the text of that line of `## SDLC State`, found exactly as
+#   `units_step_line` finds the line it writes (its pattern, fences skipped, the first one in the
+#   section), blanks trimmed; nothing when the line is absent (wave-28 T6: `row-landed` adds to the
+#   text a row's line already has). Exit 1 no `## SDLC State`.
+units_step_text() {
+  local plan="${1:-}" key="${2:-}"
+  [ -n "$plan" ] && [ -f "$plan" ] || return 1
+  US_KEY="$key" awk '
+    BEGIN {
+      key = ENVIRON["US_KEY"]; kq = key; gsub(/[.]/, "[.]", kq)
+      pat = (key !~ /^T/) ? ("^[ \t]*-?[ \t]*Step[ \t]+" kq "[ \t]*:") : ("^[ \t]*-?[ \t]*" kq "[ \t]*:")
+    }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { if (sdlc == 1) sdlc = 2; if (!seen && $0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }; next }
+    sdlc == 1 && !found && match($0, pat) {
+      r = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", r); print r; found = 1
+    }
+    END { if (!seen) exit 1 }' "$plan"
+}
+
 # units_set_current <plan> <value> -> the whole plan with the first `current:` line of
 #   `## SDLC State` reading `current: <value>`. Exit 1 when the section or the line is absent.
 #   Which values are legal is the caller's (the poker refuses 9, close-out's alone); this only
@@ -2260,17 +2296,25 @@ units_set_current() {
     END { if (!done) exit 1 }' "$plan"
 }
 
-# units_step_fields <plan> <N> <key=value>… -> the whole plan with each named field written as
+# units_step_fields [--replace] <plan> <N> <key=value>… -> the whole plan with each named field written as
 #   an indented `  key: value` line under `- Step N:` — after the block's last line — when the
-#   block does not carry that key already. A key the block has is left as written: this fills
-#   what is missing and never rewrites what is there. Exit 1 no `Step N:` line in
-#   `## SDLC State` · 4 a value with a line break.
+#   block does not carry that key already. WITHOUT THE FLAG a key the block has is left as written: this
+#   fills what is missing and never rewrites what is there (`current 4` fills the Step-4 block so).
+#   `--replace` (wave-28 T8; REQ-3 AC-3.5, D17) is the mode `session-poker.sh step-field` writes through: a
+#   key the block has is REPLACED where it stands, its place kept, and a second line of the same key in the
+#   block goes (the gate reads the first, so a stale second could only mislead); a key the block lacks is
+#   written after the block's last line as above. The rest of the plan is the same bytes.
+#   Exit 1 no `Step N:` line in `## SDLC State` · 3 an operand with no `=` · 4 a value with a line break ·
+#   5 (`--replace` only) a key the step line itself carries: the gate reads that text before any indented
+#   line, so a line written beside it could not win, and rewriting the step line is `step-line`'s.
 #
 # THE BLOCK IS THE GATE'S: the indented lines under the step line, up to the next line that is
 # not indented (walls.sh `extract_continuation`), blank lines skipped; a key is present when a
 # line of it starts `key:` (walls.sh `block_has`).
 units_step_fields() {
-  local plan="${1:-}" n="${2:-}" pairs="" kv
+  local mode=fill plan n pairs="" kv
+  if [ "${1:-}" = --replace ]; then mode=replace; shift; fi
+  plan="${1:-}"; n="${2:-}"
   [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$n" ] || return 1
   shift 2
   for kv in "$@"; do
@@ -2278,9 +2322,10 @@ units_step_fields() {
     case "$kv" in *$'\n'*|*$'\r'*) return 4 ;; esac
     pairs="${pairs}${kv%%=*}"$'\t'"${kv#*=}"$'\n'
   done
-  UF_N="$n" UF_PAIRS="$pairs" awk '
+  UF_N="$n" UF_PAIRS="$pairs" UF_MODE="$mode" awk '
     BEGIN {
       pat = "^[ \t]*-?[ \t]*Step[ \t]+" ENVIRON["UF_N"] "[ \t]*:"
+      replace = (ENVIRON["UF_MODE"] == "replace")
       np = split(ENVIRON["UF_PAIRS"], pl, "\n")
       for (p = 1; p <= np; p++) {
         if (pl[p] == "") continue
@@ -2304,7 +2349,7 @@ units_step_fields() {
           if (match(line, pat)) {
             at = i; endb = i; inb = 1
             rest = substr(line, RLENGTH + 1); sub(/^[ \t]+/, "", rest)
-            for (p = 1; p <= nk; p++) if (rest ~ ("^" key[p] "[ \t]*:")) has[p] = 1
+            for (p = 1; p <= nk; p++) if (rest ~ ("^" key[p] "[ \t]*:")) { has[p] = 1; onstep[p] = 1 }
           }
           continue
         }
@@ -2312,11 +2357,18 @@ units_step_fields() {
         if (line ~ /^[ \t]*$/) continue
         if (line ~ /^[^ \t]/ || line ~ /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/) { inb = 0; continue }
         endb = i
-        for (p = 1; p <= nk; p++) if (index(line, key[p]) && line ~ ("^[ \t]*" key[p] "[ \t]*:")) has[p] = 1
+        for (p = 1; p <= nk; p++) if (index(line, key[p]) && line ~ ("^[ \t]*" key[p] "[ \t]*:")) {
+          if (has[p] && !onstep[p]) drop[i] = 1
+          else if (!has[p]) hit[p] = i
+          has[p] = 1
+        }
       }
       if (!at) exit 1
+      if (replace) for (p = 1; p <= nk; p++) if (onstep[p]) exit 5
+      for (p = 1; p <= nk; p++) if (hit[p]) at_line[hit[p]] = p
       for (i = 1; i <= nl; i++) {
-        print L[i]
+        if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]
+        else if (!(replace && drop[i])) print L[i]
         if (i == endb) for (p = 1; p <= nk; p++) if (!has[p]) print "  " key[p] ": " val[p]
       }
     }' "$plan"

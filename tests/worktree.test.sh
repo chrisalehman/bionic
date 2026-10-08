@@ -122,6 +122,12 @@ trees_of() { git -C "$1" worktree list --porcelain | grep -v '^HEAD '; }
 
 # shellcheck source=/dev/null
 . "$LIB" 2>/dev/null || { echo "FAIL: the library does not source ($LIB)"; exit 1; }
+# The landing line (wave-28 T3): `land --by-hand` and §LAND-BIONIC's drive. Sourced when present, so
+# a tree without it reads every row that needs it red rather than stopping here.
+LINE_LIB="${REPO}/payload/scripts/lib/line.sh"
+# shellcheck source=/dev/null
+[ -r "$LINE_LIB" ] && . "$LINE_LIB" 2>/dev/null
+export BIONIC_GATE_DIR="$TMP/gate"
 
 section "Group 1: the library exists and parses"
 
@@ -675,6 +681,133 @@ expect_match "a runner path that resolves to no file does not refuse" \
 stop_runner
 rmdir "$S/empty/tests" "$S/empty"
 
+section "§LAND-BUSY-GATE: the busy check reads the gate's requests (wave-28 T12; D10)"
+#
+# A RUN THE GATE ADMITTED IS A RUN (T12). Every suite now asks the gate, the runner's included,
+# each for itself, and the request records the tree it runs in (`tree=`, git's toplevel where
+# it asked). So the land refuses while an admitted, unfinished request whose holder is alive
+# names the project's main checkout or the land's target checkout as its tree. A request in a
+# writer's own tree does not refuse (a writer's suite would otherwise refuse every land of the
+# wave, the reason D1 once counted only the runner); a waiting request has run nothing; an
+# ended or killed one runs nothing. The store is this suite's own.
+export BIONIC_GATE_DIR="$TMP/gate"
+GB="$(new_repo "$TMP/busy-gate")"
+GB_HOLD=""
+gb_holder() {  # -> GB_HOLD, a live process that is not this shell's child (no zombie)
+  GB_HOLD="$( ( sleep 60 >/dev/null 2>&1 & printf '%s' "$!" ) )"
+}
+gb_plant() {  # <id> <tree> <holder pid> [admitted|waiting|ended] — one request file
+  local st
+  st="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$3" 2>/dev/null | awk '{ $1 = $1; print }')"
+  mkdir -p "$BIONIC_GATE_DIR/requests"
+  { printf 'key=x.test.sh\nkind=work\nwho=fixture:w\ntree=%s\nasked=1000\nholder=%s:%s\n' "$2" "$3" "$st"
+    case "${4:-admitted}" in
+      admitted) printf 'admitted=1001\npromise=1:0.5:10\n' ;;
+      ended) printf 'admitted=1001\npromise=1:0.5:10\nended=1002\nrc=0\n' ;;
+    esac
+  } > "$BIONIC_GATE_DIR/requests/$1"
+}
+gb_clear() { rm -rf "$BIONIC_GATE_DIR"; [ -z "$GB_HOLD" ] || kill "$GB_HOLD" 2>/dev/null; GB_HOLD=""; }
+trap 'gb_clear; stop_runner; stop_mention; rm -rf "$TMP"' EXIT
+
+GBT1="$(new_tree "$GB" gate-root)"
+gb_holder; gb_plant 7 "$GB" "$GB_HOLD"
+GBREFS0="$(refs_of "$GB")"
+OUTG1="$(worktree_land "$GBT1" wave/fixture)"; RCG1=$?
+expect_match "an admitted run in the main checkout refuses the land" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$OUTG1"
+expect_match "…naming the request, its key and its tree" "*request=7 key=x.test.sh tree=${GB} *" "$OUTG1"
+expect_match "…and its holder" "*holder=${GB_HOLD}*" "$OUTG1"
+expect_eq    "the refusal exits 2" "2" "$RCG1"
+expect_eq    "no ref moved" "$GBREFS0" "$(refs_of "$GB")"
+gb_plant 7 "$GB" "$GB_HOLD" waiting
+expect_match "a request that is only waiting has run nothing: the land goes through" \
+  "spawn-worktree: LANDED branch=gate-root *" "$(worktree_land "$GBT1" wave/fixture)"
+gb_clear
+
+GBT2="$(new_tree "$GB" gate-ended)"
+gb_holder; gb_plant 8 "$GB" "$GB_HOLD" ended
+expect_match "an ended request does not refuse" \
+  "spawn-worktree: LANDED branch=gate-ended *" "$(worktree_land "$GBT2" wave/fixture)"
+gb_clear
+
+GBT3="$(new_tree "$GB" gate-dead)"
+gb_holder; gb_plant 9 "$GB" "$GB_HOLD"; kill "$GB_HOLD" 2>/dev/null
+i=0; while kill -0 "$GB_HOLD" 2>/dev/null && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+GB_HOLD=""
+expect_match "an admitted request whose holder is dead (killed) does not refuse" \
+  "spawn-worktree: LANDED branch=gate-dead *" "$(worktree_land "$GBT3" wave/fixture)"
+gb_clear
+
+GBT4="$(new_tree "$GB" gate-writer)"
+GBW="$(new_tree "$GB" gate-writers-own)"
+gb_holder; gb_plant 10 "$GBW" "$GB_HOLD"
+expect_match "a run in a writer's own tree does not refuse another tree's land" \
+  "spawn-worktree: LANDED branch=gate-writer *" "$(worktree_land "$GBT4" wave/fixture)"
+gb_clear
+
+GBO="$(new_repo "$TMP/busy-gate-other")"
+GBT5="$(new_tree "$GB" gate-other)"
+gb_holder; gb_plant 11 "$GBO" "$GB_HOLD"
+expect_match "a run in another repository does not refuse" \
+  "spawn-worktree: LANDED branch=gate-other *" "$(worktree_land "$GBT5" wave/fixture)"
+gb_clear
+
+GBWAVE="$TMP/busy-gate-outside-wave"
+git -C "$GB" worktree add --quiet -b wave/gout "$GBWAVE" wave/fixture >/dev/null 2>&1
+GBWAVE="$(cd "$GBWAVE" && pwd -P)"
+GBT6="$(new_tree "$GB" gate-into-outside)"
+gb_holder; gb_plant 12 "$GBWAVE" "$GB_HOLD"
+OUTG6="$(worktree_land "$GBT6" wave/gout)"; RCG6=$?
+expect_match "an admitted run in the TARGET checkout, outside the root, refuses" \
+  "spawn-worktree: REFUSED reason=suite-running request=12 *tree=${GBWAVE} *" "$OUTG6"
+expect_eq    "that refusal exits 2" "2" "$RCG6"
+gb_clear
+expect_match "the same land goes through once that run is gone" \
+  "spawn-worktree: LANDED branch=gate-into-outside onto=wave/gout *" "$(worktree_land "$GBT6" wave/gout)"
+
+# THE REAL SHIM, NOT A PLANTED FILE (wave-28 T36; ruling A-orch-55/56). The rows above write their
+# request files by hand, which is how no suite saw the shim name its own cwd as the tree: the
+# doctrine's `cd <row tree> || exit 1; bash tests/x.test.sh`, wrapped from the main checkout with
+# `--stamp-dir <row tree>`, wrote `tree=<main checkout>` and refused every land as suite-running.
+# These rows drive payload/scripts/booked.sh itself, from the main checkout, holding mid-run.
+GB_SHIM="${REPO}/payload/scripts/booked.sh"
+gb_shim_bg() {  # <stamp dir or ""> <command> — the real shim, started in the main checkout; GB_SHIM_PID
+  ( cd "$GB" && BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_BUSY_CORES_5M=0 \
+      BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_GATE_POLL=0.1 \
+      bash "$GB_SHIM" --agent w-own --max-wait 60 ${1:+--stamp-dir "$1"} --suites x.test.sh -- "$2" \
+      >/dev/null 2>&1 ) &
+  GB_SHIM_PID=$!
+}
+gb_admitted() {  # rc 0 once a request in the store carries an admitted line
+  local i=0
+  while [ "$i" -lt 200 ]; do
+    grep -qs '^admitted=' "$BIONIC_GATE_DIR"/requests/* && return 0
+    i=$((i + 1)); sleep 0.05
+  done
+  return 1
+}
+gb_shim_end() {  # <go file> — let the held command end, and wait for the shim
+  touch "$1"; wait "$GB_SHIM_PID" 2>/dev/null; GB_SHIM_PID=""
+}
+GBW7="$(new_tree "$GB" gate-shim-own)"
+GBT7="$(new_tree "$GB" gate-shim-land)"
+gb_clear
+gb_shim_bg "" "while [ ! -f '$TMP/gb7a.go' ]; do sleep 0.05; done"
+expect_true "the real shim, run in the main checkout, is admitted" gb_admitted
+expect_match "…and its run makes the main checkout busy: the land refuses (the positive for the row below)" \
+  "spawn-worktree: REFUSED reason=suite-running request=* tree=${GB} *" "$(worktree_land "$GBT7" wave/fixture)"
+gb_shim_end "$TMP/gb7a.go"
+gb_clear
+gb_shim_bg "$GBW7" "cd '$GBW7' || exit 1; while [ ! -f '$TMP/gb7b.go' ]; do sleep 0.05; done"
+expect_true "a writer's suite run from the main checkout (cd <tree>, --stamp-dir <tree>) is admitted" gb_admitted
+expect_eq "…its request names the writer's tree, the stamp's tree" "$(cd "$GBW7" && pwd -P)" \
+  "$(sed -n 's/^tree=//p' "$BIONIC_GATE_DIR"/requests/* 2>/dev/null | tail -n 1)"
+expect_match "…and it does not make the main checkout busy: another tree lands" \
+  "spawn-worktree: LANDED branch=gate-shim-land *" "$(worktree_land "$GBT7" wave/fixture)"
+gb_shim_end "$TMP/gb7b.go"
+gb_clear
+
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
 G="$(new_repo "$TMP/land-legacy")"
@@ -690,10 +823,11 @@ expect_true  "the state directory the link pointed at is intact" \
 expect_eq "no stale administrative entry survives the landing" "0" \
   "$(ls "${G}/.git/worktrees" 2>/dev/null | grep -c .)"
 
-section "Group 7: the land VERB — spawn-worktree.sh land <path>"
+section "Group 7: the land VERB — spawn-worktree.sh land <path> --by-hand --reason <why>"
 #
 # The verb is a call site, not a second implementation: what is asserted here
-# is the wiring and the exit codes a caller reads.
+# is the wiring and the exit codes a caller reads. Since wave-28 T3 (D9) a person lands a row with
+# `--by-hand --reason`, through the line's one publish; a bare `land` refuses (§BY-HAND).
 
 # THE VERB NAMES NO TARGET (T8, D1): the session's bound plan does, through
 # worktree_land_for_session — the one path standdown calls too. So the verb runs with a
@@ -702,34 +836,34 @@ V="$(new_repo "$TMP/verb")"
 VSID="verb-session-0001"
 bind_plan "$V" "$VSID" wave/fixture >/dev/null
 VT="$(new_tree "$V" verb-arm)"
-OUTV="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VT" 2>/dev/null )"
+OUTV="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VT" --by-hand --reason r 2>/dev/null )"
 expect_match "the verb lands onto the bound plan's working branch, naming it" \
   "spawn-worktree: LANDED branch=verb-arm onto=wave/fixture checkout=${V} *" "$OUTV"
 expect_false "the tree is gone" test -d "$VT"
 
 VD="$(new_tree "$V" verb-dirty)"
 echo x >> "${VD}/file.txt"
-RCV="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" >/dev/null 2>&1; echo $? )"
+RCV="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" --by-hand --reason r >/dev/null 2>&1; echo $? )"
 expect_eq "a refused land exits 2" "2" "$RCV"
 expect_match "land with no path is refused" "spawn-worktree: REFUSED *" \
-  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land 2>/dev/null )"
+  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land --by-hand --reason r 2>/dev/null )"
 
 # No session id at all: there is no binding to read, so there is no target.
 git -C "$VD" checkout --quiet -- file.txt
 VBEFORE="$(refs_of "$V")"
-OUTVN="$( cd "$V" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" land "$VD" 2>/dev/null )"; RCVN=$?
+OUTVN="$( cd "$V" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" land "$VD" --by-hand --reason r 2>/dev/null )"; RCVN=$?
 expect_match "the verb with no session id is refused, naming why" \
   "spawn-worktree: REFUSED reason=no-session*" "$OUTVN"
 expect_eq   "that refusal exits 2" "2" "$RCVN"
 expect_eq   "no ref moved" "$VBEFORE" "$(refs_of "$V")"
 # A session that is not bound: the root's newest open run is somebody's, not this one's.
-OUTVU="$( cd "$V" && CLAUDE_CODE_SESSION_ID="verb-unbound-0002" bash "$SPAWN" land "$VD" 2>/dev/null )"
+OUTVU="$( cd "$V" && CLAUDE_CODE_SESSION_ID="verb-unbound-0002" bash "$SPAWN" land "$VD" --by-hand --reason r 2>/dev/null )"
 expect_match "the verb from an unbound session is refused, naming the fallback" \
   "spawn-worktree: REFUSED reason=no-bound-plan state=fallback*" "$OUTVU"
 expect_eq   "no ref moved" "$VBEFORE" "$(refs_of "$V")"
 expect_match "the same tree lands from the bound session (the arm discriminates)" \
   "spawn-worktree: LANDED branch=verb-dirty onto=wave/fixture *" \
-  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" 2>/dev/null )"
+  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" --by-hand --reason r 2>/dev/null )"
 expect_true "the usage text names the land verb" \
   grep -q 'spawn-worktree.sh land' "$SPAWN"
 
@@ -745,9 +879,9 @@ printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"self"}\n' 
 expect_true "a stand-in runner started (cwd the verb's target checkout)" \
   start_runner "$V" "$VELSE/tests/run.sh"
 VREFS0="$(refs_of "$V")"
-OUTVS="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" 2>/dev/null )"; RCVS=$?
-expect_match "(T8c: was \"the verb's own busy suite does not refuse its own land\") the verb's own session's floor in the target checkout refuses its own land" \
-  "spawn-worktree: REFUSED reason=suite-running*cwd=${V} *" "$OUTVS"
+OUTVS="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" --by-hand --reason r 2>/dev/null )"; RCVS=$?
+expect_match "(T8c: was \"the verb's own busy suite does not refuse its own land\") the verb's own session's floor in the target checkout holds its own landing (wave-28 T3: HELD, D6)" \
+  "*HELD verb-self-busy — pid=*cwd=${V} *" "$OUTVS"
 expect_eq   "that refusal exits 2" "2" "$RCVS"
 expect_eq   "no ref moved" "$VREFS0" "$(refs_of "$V")"
 stop_runner
@@ -757,18 +891,77 @@ expect_true "a stand-in runner started (relative, in another repository)" \
   start_runner "$VOTHERREPO" "tests/run.sh"
 expect_match "a runner in another repository does not refuse the verb's land" \
   "spawn-worktree: LANDED branch=verb-self-busy onto=wave/fixture *" \
-  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" 2>/dev/null )"
+  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" --by-hand --reason r 2>/dev/null )"
 stop_runner
 
 # A runner in this root with NO session file at all (a human's terminal): still refused.
 rm -f "$CLAUDE_HOME/sessions/$$.json"
 VOTHER="$(new_tree "$V" verb-other-busy)"
 expect_true "a stand-in runner started (cwd the root)" start_runner "$V" "$VELSE/tests/run.sh"
-OUTVB="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VOTHER" 2>/dev/null )"; RCVB=$?
-expect_match "a suite in this root with no session file at all still refuses" \
-  "spawn-worktree: REFUSED reason=suite-running*" "$OUTVB"
+OUTVB="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VOTHER" --by-hand --reason r 2>/dev/null )"; RCVB=$?
+expect_match "a suite in the checkout that holds the branch, with no session file at all, still holds it" \
+  "*HELD verb-other-busy — pid=*" "$OUTVB"
 expect_eq   "that refusal exits 2" "2" "$RCVB"
 stop_runner
+
+section "§BY-HAND: a hand landing records who, when and why; a bare land names both ways (wave-28 T3; REQ-5 AC-5.1, D9)"
+#
+# `land <tree> --by-hand --reason '<why>'` builds the candidate, runs nothing, and publishes under the
+# line's one lock (lib/line.sh `line_land_by_hand`). The `published kind=hand` event carries the git
+# user, the time and the reason, and the row's `- T<n>:` line gains the same, written through the
+# plan's one transaction. No reason is refused before anything is read; a bare `land` refuses with
+# the line naming both ways.
+BH="$(new_repo "$TMP/by-hand")"; git -C "$BH" config user.name "Hand Lander"
+BHSID="by-hand-session-01"
+BHT="$(new_tree "$BH" wt/bh-T1)"
+BHP="$BH/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${BHP%/*}" "$BH/.bionic/tmp"
+cat > "$BHP" <<'BHPLAN'
+---
+working-branch: wave/fixture
+canonical_sdlc_version: 14
+---
+# fixture plan (§BY-HAND)
+
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-04T00:00Z "approved"
+- Step 4: started
+- T1: active
+
+## Tasks
+
+| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | row one | bh-T1 | — | | 10 | REQ-1 | bh-T1.txt | .worktrees/bh-T1 | | active |
+BHPLAN
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$BHP" > "$BH/.bionic/tmp/engaged-${BHSID}.state"
+BHREC="$BH/.bionic/docs/record/wave-x/landing-proofs.log"
+BH_REFS0="$(refs_of "$BH")"
+bh_land() { ( cd "$BH" && CLAUDE_CODE_SESSION_ID="$BHSID" bash "$SPAWN" land "$@" 2>&1 ); }
+OUTBH0="$(bh_land "$BHT" --by-hand)"; RCBH0=$?
+expect_eq    "(h1) a hand landing with no --reason is refused (exit 2)" "2" "$RCBH0"
+expect_match "(h1) …naming why" "spawn-worktree: REFUSED reason=no-reason *" "$OUTBH0"
+OUTBH1="$(bh_land "$BHT" --by-hand --reason '')"; RCBH1=$?
+expect_eq    "(h1) …and with an empty one" "2" "$RCBH1"
+expect_eq    "(h1) …no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
+expect_false "(h1) …and nothing is recorded" test -e "$BHREC"
+OUTBHB="$(bh_land "$BHT")"; RCBHB=$?
+expect_ne    "(h2) a bare land exits non-zero" "0" "$RCBHB"
+expect_eq    "(h2) …printing the line that names both ways, exactly" \
+  "land: the line lands a row with \"ready\"; a person lands one with \"land <tree> --by-hand --reason '<why>'\"" "$OUTBHB"
+expect_eq    "(h2) …and no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
+BHC="$(git -C "$BHT" rev-parse HEAD)"
+OUTBH="$(bh_land "$BHT" --by-hand --reason "the person's why")"; RCBH=$?
+expect_eq    "(h3) a hand landing with a reason exits 0" "0" "$RCBH"
+expect_match "(h3) …on land's own LANDED line" "*spawn-worktree: LANDED branch=wt/bh-T1 onto=wave/fixture checkout=${BH} merge=* removed=${BHT} proofs=${BHREC}*" "$OUTBH"
+expect_true  "(h3) the row's commit is on the working branch" git -C "$BH" merge-base --is-ancestor "$BHC" wave/fixture
+BH_PUB="$(grep '^line/v1|ev=published|' "$BHREC" 2>/dev/null)"
+expect_regex "(h4) the record's published line carries the user, the time and the reason" \
+  "^line/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
+BH_AT="${BH_PUB##*|at=}"
+expect_eq    "(h5) the row's - T1: line gains who, when and why" \
+  "- T1: active landed-by-hand: Hand Lander ${BH_AT} \"the person's why\"" "$(grep '^- T1:' "$BHP")"
 
 section "Group 8: worktree_lease_overruns — a tree outliving its row"
 #
@@ -1934,12 +2127,11 @@ expect_true "after onto-checkout-dirty, the link still resolves" link_ok "$KO"
 git -C "$LK" checkout --quiet -- file.txt
 
 KS="$(keep_tree keep-suite)"
-make_runner "$LK"
-expect_true "a stand-in runner started in the keep fixture" start_runner "$LK" "tests/run.sh"
+gb_holder; gb_plant 31 "$LK" "$GB_HOLD"
 expect_true "suite-running arm: the link resolves before the land" link_ok "$KS"
 expect_match "suite-running is refused" "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$KS" wave/fixture)"
 expect_true "after suite-running, the link still resolves" link_ok "$KS"
-stop_runner
+gb_clear
 
 # Every refused tree above lands once its cause is gone, and only then is its link dropped.
 # None of them changed a file another landing touched, so each lands on its own green run
@@ -1994,7 +2186,7 @@ section "§LAND-SHIM: the real wall and the real shim, from the main checkout, i
 # trailing `echo "rc=$?"`) stamps rc=0 and is NOT pinned here: it lands, which is a limit
 # recorded in the T56 record, not a behaviour to keep.
 #
-# BOUNDED: a private slots store, a suite that exits at once, a fake HOME, no plugins dir.
+# BOUNDED: a private gate store, a suite that exits at once, a fake HOME, no plugins dir.
 LS="$(new_repo "$TMP/land-shim")"
 LS_SID="t56shim-0000-0000-0000-000000000000"
 LS_HOOK="${REPO}/hooks/bash-walls.sh"
@@ -2013,8 +2205,9 @@ ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = 
 }
 ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
   local q="'\\''" s; s="${1//\'/$q}"
-  ( cd "$LS" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
-      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N="${LS_SLOTS_N:-2}" BIONIC_SLOTS_MAX_WAIT="${LS_MAX_WAIT:-20}" BIONIC_SLOTS_POLL=0.1 \
+  ( cd "$LS" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET -u BIONIC_NOW_EPOCH \
+      BIONIC_GATE_DIR="$TMP/land-shim-gate" BIONIC_GATE_POLL=0.1 BIONIC_PROBE_BUSY_CORES=0 \
+      BIONIC_PROBE_USED_PCT="${LS_USED:-10}" BIONIC_NOW_FILE="${LS_NOW_FILE:-}" \
       /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
 }
 ls_tree() {  # <branch> <suite exit code> -> the tree, its suite committed, nothing else in it
@@ -2031,7 +2224,7 @@ ls_case() {  # <label> <branch> <suite rc> <command after the cd guard> <cd targ
   c="cd $5 || exit 1; $4"
   w="$(ls_wrap "$c")"
   expect_match "$1: the wall wraps it in the shim with the tree as the stamp dir" \
-    "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $t --suites a.test.sh -- *" "$w"
+    "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $t --suites a.test.sh -- *" "$w"
   ls_harness "$w"
   expect_match "$1: the shim stamped the TREE's git dir, at its head, with the suite's own code" \
     "stamp/v1|head=$(git -C "$t" rev-parse HEAD)|dirty=0|rc=$3|*" "$(tail -n 1 "$(stamp_file "$t")" 2>/dev/null)"
@@ -2106,7 +2299,7 @@ echo 0 > "$LSU_RC/su-typed-two-ways.a"
 LSU_WRAP="$(ls_wrap "cd .worktrees/su-typed-two-ways || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc")"
 ls_harness "$LSU_WRAP"
 expect_match "(c) the capture shape is wrapped with the tree and the one suite name" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
 expect_eq "(c) both stamps name a.test.sh" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSC")"
 expect_match "(c) a red typed plainly, then a green in the capture shape, LANDS" \
   "spawn-worktree: LANDED branch=su-typed-two-ways onto=wave/fixture *" "$(worktree_land "$LSC" wave/fixture)"
@@ -2139,7 +2332,7 @@ LSH="$(lsu_tree su-two-in-one)"
 echo 0 > "$LSU_RC/su-two-in-one.a"
 lsu_run "$LSH" b 1 'bash tests/a.test.sh && bash tests/b.test.sh'
 expect_match "(h) the two-suite command is wrapped naming both" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSH" a 0
 expect_eq "(h) one line names both, red; then a alone, green" \
   "a.test.sh,b.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSH")"
@@ -2149,19 +2342,28 @@ lsu_run "$LSH" b 0
 expect_match "(h) …and once b runs green alone the tree LANDS" \
   "spawn-worktree: LANDED branch=su-two-in-one onto=wave/fixture *" "$(worktree_land "$LSH" wave/fixture)"
 
-# (i) A SUITE THAT NEVER GOT A PLACE (critic 3 S5). a runs green; b waits for the one place, which
-# another run holds, and gives up (69). Its line names b, so the land refuses on it; once b runs
-# green the tree lands.
+# (i) A SUITE THE GATE NEVER ADMITTED (critic 3 S5; the gate since wave-28 T12). a runs green; b
+# asks the gate on a machine planted over the share, and its call's limit runs out on a planted
+# clock that jumps past it (75, nothing ran). Its line names b, so the land refuses on it; once b
+# runs green the tree lands.
+ls_waits() {  # <run function> <tree> <suite or runner> — one run the gate does not admit in time
+  local tk i=0
+  printf '1000\n' > "$TMP/ls-clock"
+  # The clock moves a thousand seconds a second, so the call's limit runs out whenever it began.
+  ( while [ "$i" -lt 60 ]; do i=$((i + 1)); sleep 1
+      printf '%s\n' "$((1000 + i * 1000))" > "$TMP/ls-clock.tmp" && mv -f "$TMP/ls-clock.tmp" "$TMP/ls-clock"
+    done ) &
+  tk=$!
+  LS_USED=95 LS_NOW_FILE="$TMP/ls-clock" "$@"
+  kill "$tk" 2>/dev/null; wait "$tk" 2>/dev/null
+}
 LSI="$(lsu_tree su-b-no-place)"
 lsu_run "$LSI" a 0
-sleep 60 & LSI_H=$!
-mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSI_H" > "$TMP/land-shim-slots/place.1/pid"
-export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsu_run "$LSI" b 0; unset LS_SLOTS_N LS_MAX_WAIT
-kill "$LSI_H" 2>/dev/null; wait "$LSI_H" 2>/dev/null
-expect_eq "(i) a green, then b's no-place end stamped with its suite and 69" \
-  "a.test.sh:0 b.test.sh:69" "$(lsu_stamps "$LSI")"
-expect_match "(i) a green then b out of places at one head is REFUSED, naming b" \
-  "spawn-worktree: REFUSED reason=stale-proof why=red rc=69 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
+ls_waits lsu_run "$LSI" b 0
+expect_eq "(i) a green, then b's unadmitted end stamped with its suite and 75" \
+  "a.test.sh:0 b.test.sh:75" "$(lsu_stamps "$LSI")"
+expect_match "(i) a green then b never admitted at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=75 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
 lsu_run "$LSI" b 0
 expect_match "(i) …and once b runs green the tree LANDS" \
   "spawn-worktree: LANDED branch=su-b-no-place onto=wave/fixture *" "$(worktree_land "$LSI" wave/fixture)"
@@ -2223,7 +2425,7 @@ lsn_run() {  # <tree> <runner> <rc> [<command after the cd guard>] — the runne
 LSN1="$(lsu_tree sn-npm-retry)"
 lsn_run "$LSN1" npm 1
 expect_match "(n1) npm test is wrapped naming its own text" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
 lsn_run "$LSN1" npm 0
 expect_eq "(n1) two stamps of npm_test, red then green" "npm_test:1 npm_test:0" "$(lsu_stamps "$LSN1")"
 expect_match "(n1) npm test red then npm test green at one head LANDS" \
@@ -2237,15 +2439,12 @@ OUTLSN2="$(worktree_land "$LSN2" wave/fixture)"
 expect_match "(n2) npm test red then pytest green at one head is REFUSED, naming npm_test" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=npm_test head=$(git -C "$LSN2" rev-parse HEAD) — make the suites green, *" "$OUTLSN2"
 
-# (n3) A runner that never got a place, then the same runner green.
+# (n3) A runner the gate never admitted, then the same runner green.
 LSN3="$(lsu_tree sn-npm-no-place)"
-sleep 60 & LSN3_H=$!
-mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSN3_H" > "$TMP/land-shim-slots/place.1/pid"
-export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsn_run "$LSN3" npm 0; unset LS_SLOTS_N LS_MAX_WAIT
-kill "$LSN3_H" 2>/dev/null; wait "$LSN3_H" 2>/dev/null
+ls_waits lsn_run "$LSN3" npm 0
 lsn_run "$LSN3" npm 0
-expect_eq "(n3) npm_test out of places (69), then npm_test green" "npm_test:69 npm_test:0" "$(lsu_stamps "$LSN3")"
-expect_match "(n3) a runner that never got a place, then the same runner green, LANDS" \
+expect_eq "(n3) npm_test never admitted (75), then npm_test green" "npm_test:75 npm_test:0" "$(lsu_stamps "$LSN3")"
+expect_match "(n3) a runner the gate never admitted, then the same runner green, LANDS" \
   "spawn-worktree: LANDED branch=sn-npm-no-place onto=wave/fixture *" "$(worktree_land "$LSN3" wave/fixture)"
 
 # (n4) A TRUE `?` STILL STICKS: a runner whose text the reading cannot resolve (a `$`).
@@ -2280,7 +2479,7 @@ LSN6="$(lsu_tree sn-one-file)"
 lsu_run "$LSN6" a 1
 lsu_run "$LSN6" a 1 "bash $LSN6/tests/a.test.sh"
 expect_match "(n6) the absolute path behind the cd is wrapped as a.test.sh" \
-  "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSN6" a 1 'bash ./tests/a.test.sh'
 lsu_run "$LSN6" a 0 "set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc"
 expect_eq "(n6) four stamps, one name" "a.test.sh:1 a.test.sh:1 a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSN6")"
@@ -2293,7 +2492,7 @@ LSN7="$(lsu_tree sn-or-short)"
 lsu_run "$LSN7" b 1
 echo 0 > "$LSU_RC/sn-or-short.a"
 lsu_run "$LSN7" b 1 'bash tests/a.test.sh || bash tests/b.test.sh'
-expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --max-wait 590 --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
+expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
 expect_eq "(n7) b red, then the a || b line green as ?" "b.test.sh:1 ?:0" "$(lsu_stamps "$LSN7")"
 expect_match "(n7) b red then a || b green at one head is REFUSED, naming b" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSN7" wave/fixture)"
@@ -2842,88 +3041,177 @@ LJ2="$(lr_tree wt/27-J2 27-J2 w27-J2)"; lr_stamp "$LJ2" 0 widget.test.sh
 expect_match "(j-none) …and a land with no bound plan lands as today, whatever a plan on disk says" \
   "spawn-worktree: LANDED branch=wt/27-J2 onto=wave/fixture * proofs=none" "$(worktree_land "$LJ2" wave/fixture)"
 lj_current 4
-section "§LAND-DEBT: land writes the declared debt to the landing record before the merge (wave-27 T67; review pass 46 B3, B4; A-orch-120)"
+section "§LAND-DEBT: ready writes the declared debt to the landing record before the fast-forward (wave-27 T67, re-pointed at ready by wave-28 T5; REQ-9 AC-9.4; D8; A-orch-120)"
 #
-# A debt is owed because `land` WROTE it: for a declared-red landing, one line
-# `debt: id=<id> row=<row|—> branch=<b> head=<40-hex> suite=<s> token=<t> at=<the landing's time>`
-# is appended to the landing record, by the one write a block is, BEFORE `git merge`. A line that cannot be written
-# refuses the landing with nothing merged; a merge that then fails is followed by
-# `void: id=<id> …`; a void that cannot be written leaves the debt standing, and the refusal says so.
-# No declaration lands the full-suite runner red. FIXTURE FIDELITY: §LAND-RED's repository, bound
-# plan, launch rows and stamps; the merge is made to fail by a pre-merge-commit hook, git's own.
-LD_REC="$LR/.bionic/docs/record/wave-lr/landing-proofs.log"
-LD_DECL=("lands_red=widget.test.sh until ext:vendor-key" "red_evidence=.bionic/docs/record/wave-lr/T9-red.md")
-ld_tree() {  # <n> -> a tree declared red on widget, its stamps and evidence at its head
-  local t; t="$(lr_tree "wt/27-D$1" "27-D$1" "w27-D$1")"
-  lr_launch "w27-D$1" "${LD_DECL[@]}"
-  lr_stamp "$t" 1 widget.test.sh; lr_stamp "$t" 0 other.test.sh
-  printf 'head: %s\n' "$(git -C "$t" rev-parse HEAD)" > "$LR_EV"
-  printf '%s' "$t"
+# A debt is owed because the landing WROTE it: for a row whose launch line declares `lands_red=<suite>
+# until <token>`, a red on exactly that suite publishes, and `line_publish` appends one line
+# `debt: id=<id> row=<row> branch=<b> head=<the row's 40-hex> suite=<s> token=<t> at=<the publish's time>`
+# to the landing record, by the one write a block is, inside the publish lock and BEFORE the
+# fast-forward. The red is the tool's own run on the candidate (no stamp, no evidence file). A line that
+# cannot be written refuses the publish with nothing published; a fast-forward that then fails is
+# followed by `void: id=<id> … why=publish-failed`; a void that cannot be written leaves the debt
+# standing, and the refusal says so. A red on the debt suite and on another suite returns the row; the
+# full-suite runner is never a declared debt.
+# Re-pointed from `land` (wave-27's §LAND-DEBT: 21 rows) at `ready` (wave-28 T5), keeping every check.
+# FIXTURE FIDELITY: the model world (tests/lib/world.sh): a real repository whose root checkout holds
+# the working branch `wave/x`, a bound plan, the row tree T1, its launch line on the session's roster as
+# the dispatch wall writes one (`roster_row_fixture` plus `row=`/`lands_on=`, the keys T7 lifts from
+# the brief), suites run through the real gate on a planted machine. `ready` runs in a driver process
+# of its own (`ld_ready`), the verb's own call; a failing writer is a stand-in defined in that process
+# only, and the fast-forward is made to fail by git's own index lock, planted at the publish's pause
+# seam, after the debt was written.
+LD_GATE_WAS="${BIONIC_GATE_DIR:-}"
+. "$(dirname "$0")/lib/world.sh"
+LD_HOME="$WORLD_ROOT/home"; mkdir -p "$LD_HOME/bionic"; printf '80\n' > "$LD_HOME/bionic/share"
+world_machine 8 8192 40 0.5
+world_clock 1000
+world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
+LD_RD="$WORLD_ROOT/ld-driver.sh"
+cat > "$LD_RD" <<'RD'
+#!/bin/bash
+# <lib dir>: `ready` as spawn-worktree.sh calls it, in a process of its own. LD_STANDIN=debt-write
+# stands a failing writer in for the debt's one writer; LL_MUTANT is a sed over LL_MUTANT_FN.
+. "$1/worktree.sh" && . "$1/session.sh" && . "$1/line.sh" || exit 99
+if [ "${LD_STANDIN:-}" = debt-write ]; then _wt_debt_write() { return 1; }; fi
+if [ -n "${LL_MUTANT:-}" ]; then eval "$(declare -f "$LL_MUTANT_FN" | sed "$LL_MUTANT")"; fi
+tree="$(git rev-parse --show-toplevel)"
+line_ready "$tree" "$(worktree_root "$tree")" "$(session_id)" "" "again"
+RD
+ld_world() {  # <lands_on> <lands_red> [<suite> red]... -> a world root; T1's launch line declares the red
+  local r l="$1" d="$2"
+  shift 2
+  # The world binds its plan through the production `bind_plan` (lib/binding.sh), which this suite
+  # shadows with a fixture of its own (above): the world is made where the production one is back.
+  r="$( . "${REPO}/payload/scripts/lib/run.sh" && . "${REPO}/payload/scripts/lib/binding.sh" && world_repo )" || return 1
+  [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
+  printf '%s|row=T1|lands_on=%s\n' "$(roster_row_fixture status=intended session="$WORLD_SID" name=wx-T1 agent_id=b00T1 \
+    plan="$r/.bionic/docs/plans/epic-x/wave-x.plan.md" "lands_red=$d" "red_evidence=record/wave-x/T1-red.md")" "$l" \
+    >> "$r/.bionic/tmp/roster-$WORLD_SID.state"
+  while [ "$#" -ge 2 ]; do
+    ( cd "$r/.worktrees/T1" && world_suite "$1" "$2" >/dev/null ) || return 1
+    shift 2
+  done
+  git -C "$r/.worktrees/T1" commit -qam "T1: its suites as planted" || return 1
+  printf '%s' "$r"
 }
-# (d1) THE WORKED ANSWER: the debt line, at the LANDED line's landed-red-at=, ahead of the landing's header.
-LD1="$(ld_tree 1)"; LD1_H="$(git -C "$LD1" rev-parse HEAD)"
-OUTLD1="$(worktree_land_for_session "$LD1" "$LR" "$LR_SID")"
-LD1_AT="$(printf '%s' "$OUTLD1" | sed -n 's/.* landed-red-at=\([^ ]*\) .*/\1/p')"
-expect_match "(d1) precondition: the declared red lands, landed-red= as before" "spawn-worktree: LANDED branch=wt/27-D1 * landed-red=widget.test.sh landed-red-at=* proofs=*" "$OUTLD1"
-expect_match "(d1a) B3 land wrote the debt: suite, token, the landing's branch, head and time" \
-  "debt: id=?* row=— branch=wt/27-D1 head=${LD1_H} suite=widget.test.sh token=ext:vendor-key at=${LD1_AT}" \
-  "$(grep '^debt: .* branch=wt/27-D1 ' "$LD_REC" 2>/dev/null)"
-expect_eq "(d1b) …one line, written before the landing's header" "1 before" \
-  "$(awk '/^debt: .* branch=wt\/27-D1 / { n++; d = NR } /^landed: .* branch=wt\/27-D1 / { h = NR } END { print n + 0, (d && h && d < h ? "before" : "after") }' "$LD_REC" 2>/dev/null)"
-expect_eq "(d1c) …and no void line names it" "" "$(grep '^void: ' "$LD_REC" 2>/dev/null)"
-# (d2) THE DEBT CANNOT BE WRITTEN: refused before the merge, nothing merged, the tree and its stamps
-# kept, no debt line. The record's directory read-only is refused by the writability proof; the
-# writer itself failing, after that proof, is driven through a stand-in for the one writer (no
-# act of a landing reaches that branch on demand), the real writer put back after.
-LD2="$(ld_tree 2)"; LD2_ST="$(cat "$(stamp_file "$LD2")")"; LD2_RECB="$(cat "$LD_REC")"
-chmod 555 "${LD_REC%/*}"
-lr_refused "(d2r) the record's directory read-only: refused before the merge" "$LD2" \
-  "spawn-worktree: REFUSED reason=record-unwritable why=proofs-unwritable * — *nothing is merged*"
-chmod 755 "${LD_REC%/*}"
-LD_SAVED="$(declare -f _wt_debt_write)"
-_wt_debt_write() { return 1; }
-lr_refused "(d2) B3 a debt the writer cannot write refuses the landing, before the merge" "$LD2" \
-  "spawn-worktree: REFUSED reason=debt-unwritten why=proofs-unwritable suite=widget.test.sh * — *nothing is merged*"
-eval "$LD_SAVED"
-expect_eq "(d2b) …the stamps kept and the record as it was" "$LD2_ST|$LD2_RECB" "$(cat "$(stamp_file "$LD2")")|$(cat "$LD_REC")"
-expect_match "(d2c) control: the same tree, the real writer back, lands red" \
-  "spawn-worktree: LANDED branch=wt/27-D2 * landed-red=widget.test.sh *" "$(worktree_land_for_session "$LD2" "$LR" "$LR_SID")"
-# (d3) THE MERGE FAILS AFTER THE DEBT WAS WRITTEN: a void line naming its id follows it.
-LD_HOOKS="$TMP/ld-hooks"; mkdir -p "$LD_HOOKS"
-printf '#!/bin/sh\nexit 1\n' > "$LD_HOOKS/pre-merge-commit"; chmod +x "$LD_HOOKS/pre-merge-commit"
-git -C "$LR" config core.hooksPath "$LD_HOOKS"
-LD3="$(ld_tree 3)"
-lr_refused "(d3) a merge that fails after the debt was written is refused merge-failed" "$LD3" \
-  "spawn-worktree: REFUSED reason=merge-failed branch=wt/27-D3 *"
-LD3_ID="$(sed -n 's/^debt: id=\([^ ]*\) .* branch=wt\/27-D3 .*/\1/p' "$LD_REC")"
+ld_ready() {  # <root> [VAR=value]... -> LD_OUT, LD_RC: ready from T1's tree
+  local r="$1"
+  shift
+  LD_OUT="$( cd "$r/.worktrees/T1" && env CLAUDE_CONFIG_DIR="$LD_HOME" CLAUDE_CODE_SESSION_ID="$WORLD_SID" \
+    BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 "$@" bash "$LD_RD" "${LIB%/*}" 2>&1 )"; LD_RC=$?
+}
+ld_ready_bg() {  # <root> <out file> [VAR=value]... — the same, in the background; rc in <out>.rc
+  local r="$1" o="$2"
+  shift 2
+  ( cd "$r/.worktrees/T1" && env CLAUDE_CONFIG_DIR="$LD_HOME" CLAUDE_CODE_SESSION_ID="$WORLD_SID" \
+    BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2 "$@" bash "$LD_RD" "${LIB%/*}" > "$o" 2>&1; echo $? > "$o.rc" ) &
+}
+ld_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
+ld_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }
+ld_wait() {  # <file> -> 0 once it exists (30 s at most)
+  local i=0
+  while [ "$i" -lt 300 ]; do [ -e "$1" ] && return 0; i=$((i + 1)); sleep 0.1; done
+  return 1
+}
+ld_refused() {  # <label> <root> <want, a glob> — exit 2, nothing published, the tree stands
+  local before; before="$(ld_head "$2")"
+  expect_match "$1" "$3" "$LD_OUT"
+  expect_eq "$1 — …exit 2, nothing published, the tree stands" "2 yes yes" \
+    "$LD_RC $([ "$(ld_head "$2")" = "$before" ] && [ -z "$(grep '^line/v1|ev=published|' "$(ld_rec "$2")" 2>/dev/null)" ] && echo yes || echo no) $([ -d "$2/.worktrees/T1" ] && echo yes || echo no)"
+}
+LD_DECL="a.test.sh until ext:vendor-key"
+
+# (d1) THE WORKED ANSWER: a red on the declared suite alone publishes, the debt line written before the
+# `published` event, at the publish's own instant.
+LD1="$(ld_world a,b "$LD_DECL" a red)"; LD1_H="$(git -C "$LD1/.worktrees/T1" rev-parse HEAD)"
+ld_ready "$LD1"
+LD1_PUB="$(grep '^line/v1|ev=published|row=T1|' "$(ld_rec "$LD1")" 2>/dev/null)"
+LD1_AT="$(printf '%s' "$LD1_PUB" | sed -n 's/.*|at=\([^|]*\)$/\1/p')"
+expect_match "(d1) precondition: the declared red publishes (exit 0), saying it lands red and owes the debt" \
+  "0|DEBT T1 a.test.sh — published red*LANDED T1 $(ld_head "$LD1")*" "$LD_RC|$LD_OUT"
+expect_match "(d1a) B3 the publish wrote the debt: the row, its branch and head, the suite, the token, the publish's time" \
+  "debt: id=?* row=T1 branch=wt/T1 head=${LD1_H} suite=a.test.sh token=ext:vendor-key at=${LD1_AT}" \
+  "$(grep '^debt: ' "$(ld_rec "$LD1")" 2>/dev/null)"
+expect_eq "(d1b) …one line, written before the published event" "1 before" \
+  "$(awk '/^debt: / { n++; d = NR } /^line\/v1\|ev=published\|/ { h = NR } END { print n + 0, (d && h && d < h ? "before" : "after") }' "$(ld_rec "$LD1")" 2>/dev/null)"
+expect_eq "(d1c) …and no void line names it" "" "$(grep '^void: ' "$(ld_rec "$LD1")" 2>/dev/null)"
+# (d2r) THE RECORD CANNOT BE WRITTEN: its directory read-only is refused before anything is appended.
+LD2="$(ld_world a,b "$LD_DECL" a red)"
+mkdir -p "$(dirname "$(ld_rec "$LD2")")"; chmod 555 "$(dirname "$(ld_rec "$LD2")")"
+ld_ready "$LD2"
+ld_refused "(d2r) the record's directory read-only: refused, nothing published" "$LD2" \
+  "spawn-worktree: REFUSED reason=record-unwritable why=proofs-unwritable * — *nothing is published*"
+chmod 755 "$(dirname "$(ld_rec "$LD2")")"
+# (d2) THE DEBT CANNOT BE WRITTEN: the writer itself failing, after the record proved writable, is
+# driven through a stand-in for the one writer, in the driver's process only.
+ld_ready "$LD2" LD_STANDIN=debt-write
+ld_refused "(d2) B3 a debt the writer cannot write refuses the publish, before the fast-forward" "$LD2" \
+  "spawn-worktree: REFUSED reason=debt-unwritten why=proofs-unwritable suite=a.test.sh * — *nothing is published*"
+expect_eq "(d2b) …the record holds the row's red verdict and no debt line" "1 0" \
+  "$(grep -c '^line/v1|ev=verdict|row=T1|.*|suite=a.test.sh|result=red|' "$(ld_rec "$LD2")") $(grep -c '^debt: ' "$(ld_rec "$LD2")")"
+ld_ready "$LD2"
+expect_match "(d2c) control: the same tree, the real writer back, publishes red" "0|*DEBT T1 a.test.sh *LANDED T1 *" "$LD_RC|$LD_OUT"
+# (d3) THE FAST-FORWARD FAILS AFTER THE DEBT WAS WRITTEN: a void line naming its id follows it.
+LD_PAUSE="$WORLD_ROOT/ld-pause"; mkdir -p "$LD_PAUSE"
+LD3="$(ld_world a,b "$LD_DECL" a red)"; LD3_HB="$(ld_head "$LD3")"
+ld_ready_bg "$LD3" "$WORLD_ROOT/ld3.out" BIONIC_LINE_PAUSE_BEFORE_PUBLISH="$LD_PAUSE"
+ld_wait "$LD_PAUSE/T1.at-publish"
+expect_eq "(d3-pre) at the fast-forward the debt is written and the branch has not moved" "1 $LD3_HB" \
+  "$(grep -c '^debt: ' "$(ld_rec "$LD3")" 2>/dev/null) $(ld_head "$LD3")"
+: > "$LD3/.git/index.lock"; touch "$LD_PAUSE/T1.go"
+ld_wait "$WORLD_ROOT/ld3.out.rc"; rm -f "$LD3/.git/index.lock" "$LD_PAUSE/T1.go" "$LD_PAUSE/T1.at-publish"
+LD_OUT="$(cat "$WORLD_ROOT/ld3.out" 2>/dev/null)"; LD_RC="$(cat "$WORLD_ROOT/ld3.out.rc" 2>/dev/null)"
+ld_refused "(d3) a fast-forward that fails after the debt was written is refused publish-failed" "$LD3" \
+  "spawn-worktree: REFUSED reason=publish-failed row=T1 branch=wave/x *"
+LD3_ID="$(sed -n 's/^debt: id=\([^ ]*\) .*/\1/p' "$(ld_rec "$LD3")")"
 expect_regex "(d3a) …the debt line was written first" '^[^ ]+$' "$LD3_ID"
-expect_match "(d3b) …and a void line names its id" "void: id=${LD3_ID} branch=wt/27-D3 at=* why=merge-failed" \
-  "$(grep "^void: id=${LD3_ID} " "$LD_REC" 2>/dev/null)"
-# (d4) THE VOID CANNOT BE WRITTEN: the hook puts a directory at the record's path as the merge
-# fails, so the void's append answers unwritten. The debt stands, and the refusal says it was written
-# and not voided, and what clears it. The record is put back after.
-printf '#!/bin/sh\nmv "%s" "%s.aside" && mkdir "%s"\nexit 1\n' "$LD_REC" "$LD_REC" "$LD_REC" > "$LD_HOOKS/pre-merge-commit"
-LD4="$(ld_tree 4)"
-lr_refused "(d4) a void that cannot be written: the debt stands, and the refusal says so and how to clear it" "$LD4" \
-  "spawn-worktree: REFUSED reason=merge-failed branch=wt/27-D4 * debt=unvoided * — *was written and not voided*green run of widget.test.sh*"
-rmdir "$LD_REC" 2>/dev/null; mv "${LD_REC}.aside" "$LD_REC" 2>/dev/null
-LD4_ID="$(sed -n 's/^debt: id=\([^ ]*\) .* branch=wt\/27-D4 .*/\1/p' "$LD_REC")"
+expect_match "(d3b) …and a void line names its id" "void: id=${LD3_ID} branch=wt/T1 at=* why=publish-failed" \
+  "$(grep "^void: id=${LD3_ID} " "$(ld_rec "$LD3")" 2>/dev/null)"
+# (d4) THE VOID CANNOT BE WRITTEN: at the pause a directory takes the record's path and the index is
+# locked, so the fast-forward fails and the void's append answers unwritten. The debt stands, and the
+# refusal says it was written and not voided, and what clears it. The record is put back after.
+LD4="$(ld_world a,b "$LD_DECL" a red)"; LD4_REC="$(ld_rec "$LD4")"
+ld_ready_bg "$LD4" "$WORLD_ROOT/ld4.out" BIONIC_LINE_PAUSE_BEFORE_PUBLISH="$LD_PAUSE"
+ld_wait "$LD_PAUSE/T1.at-publish"
+mv "$LD4_REC" "$LD4_REC.aside" && mkdir "$LD4_REC"; : > "$LD4/.git/index.lock"; touch "$LD_PAUSE/T1.go"
+ld_wait "$WORLD_ROOT/ld4.out.rc"; rm -f "$LD4/.git/index.lock" "$LD_PAUSE/T1.go" "$LD_PAUSE/T1.at-publish"
+rmdir "$LD4_REC" 2>/dev/null; mv "$LD4_REC.aside" "$LD4_REC" 2>/dev/null
+LD_OUT="$(cat "$WORLD_ROOT/ld4.out" 2>/dev/null)"; LD_RC="$(cat "$WORLD_ROOT/ld4.out.rc" 2>/dev/null)"
+ld_refused "(d4) a void that cannot be written: the debt stands, and the refusal says so and how to clear it" "$LD4" \
+  "spawn-worktree: REFUSED reason=publish-failed row=T1 * debt=unvoided * — *was written and not voided*green run of a.test.sh*"
+LD4_ID="$(sed -n 's/^debt: id=\([^ ]*\) .*/\1/p' "$LD4_REC")"
 expect_eq "(d4b) …the debt line is there and no void names it" "1|0" \
-  "$([ -n "$LD4_ID" ] && echo 1 || echo 0)|$(grep -c "^void: id=${LD4_ID:-none} " "$LD_REC")"
-git -C "$LR" config --unset core.hooksPath
-# (d5) B4 THE RUNNER IS NEVER A DECLARED RED: a doctored launch row naming run.sh, a red run.sh stamp.
-LD5="$(lr_tree wt/27-D5 27-D5 w27-D5)"; LD5_H="$(git -C "$LD5" rev-parse HEAD)"
-lr_launch w27-D5 "lands_red=run.sh until ext:x" "red_evidence=.bionic/docs/record/wave-lr/T9-red.md"
-lr_stamp "$LD5" 1 run.sh; printf 'head: %s\n' "$LD5_H" > "$LR_EV"
-lr_refused "(d5) B4 a red stamp of the full-suite runner handed to land as a declared red is refused as a red" "$LD5" \
-  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=run.sh head=${LD5_H} — *"
+  "$([ -n "$LD4_ID" ] && echo 1 || echo 0)|$(grep -c "^void: id=${LD4_ID:-none} " "$LD4_REC")"
+# (d5) B4 THE RUNNER IS NEVER A DECLARED RED: a launch line naming run.sh carries no debt, and a red is
+# the row's.
+LD5="$(ld_world a "run.sh until ext:x" a red)"
+ld_ready "$LD5"
+expect_eq "(d5) B4 the full-suite runner handed to ready as the declared red: no debt on the entry, the red returns the row (exit 1)" \
+  "1|-|RED T1 a.test.sh" \
+  "$LD_RC|$(grep '^line/v1|ev=ready|' "$(ld_rec "$LD5")" | sed -n 's/.*|debt=\([^|]*\)|.*/\1/p')|$(printf '%s\n' "$LD_OUT" | cut -d' ' -f1-3)"
+expect_eq "(d5b) …and no debt line is written" "0" "$(grep -c '^debt: ' "$(ld_rec "$LD5")")"
 # (d6) NO BOUND PLAN, NO RECORD: a declared red with nowhere to write its debt is refused.
-LD6="$(ld_tree 6)"; LD6_H="$(git -C "$LD6" rev-parse HEAD)"
-LD6_B="$(refs_of "$LR")"
-OUTLD6="$(worktree_land "$LD6" wave/fixture "" "widget.test.sh until ext:vendor-key" "$LR_EV")"; RCLD6=$?
-expect_match "(d6) a declared red with no bound plan is refused: its debt has no record to go in" \
-  "spawn-worktree: REFUSED reason=debt-unwritten why=no-bound-plan suite=widget.test.sh * — *nothing is merged*" "$OUTLD6"
-expect_eq "(d6b) …exit 2, no ref moved" "2 yes" "$RCLD6 $([ "$(refs_of "$LR")" = "$LD6_B" ] && echo yes || echo no)"
+LD6="$(ld_world a "$LD_DECL" a red)"
+ld_ready "$LD6" CLAUDE_CODE_SESSION_ID=no-such-session
+ld_refused "(d6) a declared red with no bound plan is refused: its debt has no record to go in" "$LD6" \
+  "spawn-worktree: REFUSED reason=no-bound-plan *"
+# (d7) A RED ON THE DEBT SUITE AND ON ANOTHER returns the row: nothing published, no debt written.
+LD7="$(ld_world a,b "$LD_DECL" a red b red)"; LD7_HB="$(ld_head "$LD7")"
+ld_ready "$LD7"
+expect_match "(d7) AC-9.4 the declared suite red and a second suite red: the row returns on the second (exit 1)" \
+  "1|RED T1 b.test.sh *" "$LD_RC|$LD_OUT"
+expect_eq "(d7b) …returned why=red, nothing published, no debt line" "1|$LD7_HB|0" \
+  "$(grep -c '^line/v1|ev=returned|row=T1|why=red|' "$(ld_rec "$LD7")")|$(ld_head "$LD7")|$(grep -c '^debt: ' "$(ld_rec "$LD7")")"
+# (d8m) MUTANT: the debt write skipped. The declared red publishes with no debt line.
+LD8="$(ld_world a,b "$LD_DECL" a red)"
+ld_ready "$LD8" LL_MUTANT='s/_line_debt_write "\$rec"/true "$rec"/' LL_MUTANT_FN=line_publish
+expect_eq "(d8m-pre) the mutant ran: the row is published" "0" "$LD_RC"
+expect_eq "(d8m) MUTANT debt write skipped: published with no debt line (the rows can fail)" "0" "$(grep -c '^debt: ' "$(ld_rec "$LD8")")"
+# The world's machine and clock pins end with the section; the suite's own gate store comes back.
+unset BIONIC_PROBE_CORES BIONIC_PROBE_TOTAL_MB BIONIC_PROBE_USED_PCT BIONIC_PROBE_BUSY_CORES BIONIC_PROBE_FREE_PCT \
+  BIONIC_PROBE_FREE_MB BIONIC_PROBE_LOAD_1M BIONIC_PROBE_SWAP_PCT BIONIC_NOW_FILE
+[ -z "$LD_GATE_WAS" ] || export BIONIC_GATE_DIR="$LD_GATE_WAS"
+
 section "§LAND-RECORD-HARDENING: the record is appended by one write and read as a regular file (wave-27 T50, T69; review pass 27 S1, N1, N2, N4; review pass 48)"
 #
 # S1, as T69 rebuilt it. A landing's block is written whole to a private file beside the record and
@@ -3468,10 +3756,27 @@ lb_repo() {  # <dir> -> physical path, on wave/fixture, its .bionic a real untra
   echo "plan" > "$d/.bionic/docs/plans/w.plan.md"
   echo "record" > "$d/.bionic/docs/record/r.md"
   echo "marker" > "$d/.bionic/tmp/engaged-x.state"
+  bind_plan "$d" "$LB_SID" wave/fixture >/dev/null
   ( cd "$d" && pwd -P )
 }
+# The project's own files under .bionic: the landing's own record directory (`record/wave-x/`, the
+# bound plan's: the line's events and the publish lock) and its landing trees (`tmp/landing/`) are
+# the tool's writes, not the project's, and are left out (wave-28 T3, A-T3.6).
 lb_sums() {  # <repo> -> one checksum line per file under its .bionic, sorted
-  ( cd "$1/.bionic" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "$f"; cksum < "$f"; done )
+  ( cd "$1/.bionic" && find . -type f -not -path './tmp/landing/*' -not -path './docs/record/wave-x/*' \
+      | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "$f"; cksum < "$f"; done )
+}
+# THE DRIVE IS THE HAND LANDING (wave-28 T3; REQ-14 AC-14.1, D31): every row of this section once
+# called `worktree_land` (or the stand-down's `worktree_land_for_session`); each now lands through
+# `line_land_by_hand`, the library `spawn-worktree.sh land --by-hand` calls, in this shell so the
+# rows' mutants (a function redefined in a subshell) still reach it. The repository's session is
+# bound by lb_repo, so the working branch is read off the plan as the verb reads it; (b0) drives the
+# verb itself.
+LB_SID="land-bionic-hand-01"
+lb_land() {  # <tree> -> the hand landing's lines, as `land <tree> --by-hand` prints them
+  local r
+  r="$(worktree_root "$1" 2>/dev/null)" || r=""
+  WORKTREE_CONTRACT_PROG=spawn-worktree line_land_by_hand "$1" "$r" "$LB_SID" "a section-LAND-BIONIC drive"
 }
 lb_tree() {  # <repo> <branch> -> a tree a commit ahead, then a second commit adding its link with add -f
   local r="$1" t; t="$(new_tree "$r" "$2")"
@@ -3489,14 +3794,15 @@ expect_eq   "(fixture) the tree's branch tracks the link" "120000" \
 expect_true "(fixture) the project's .bionic holds its plan" test -f "$LB/.bionic/docs/plans/w.plan.md"
 LB_SUMS="$(lb_sums "$LB")"; LB_REFS="$(refs_of "$LB")"; LB_STAMPS="$(cat "$(stamp_file "$LBT")")"
 expect_true "(fixture) the checksum reader reads the directory" test -n "$LB_SUMS"
-OUTLB="$(worktree_land "$LBT" wave/fixture)"; RCLB=$?
+OUTLB="$(lb_land "$LBT")"; RCLB=$?
 LB_LINE="$(lb_first "$OUTLB")"
 expect_match "(b1) a range that commits .bionic is refused on land's contract line: the path, the commit that added it, the remedy" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LBC:0:12} branch=wt/linked onto=wave/fixture fix='git -C ${LBT} rm -r --cached .bionic, commit, run the suites, land again' — *" "$LB_LINE"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LBC:0:12} branch=wt/linked onto=wave/fixture fix='git -C ${LBT} rm -r --cached .bionic, commit, say ready again' — *" "$LB_LINE"
 expect_eq   "(b1) …exit 2" "2" "$RCLB"
 expect_eq   "(b1) …one line, as its siblings print" "1" "$(printf '%s\n' "$OUTLB" | awk 'END { print NR }')"
-expect_contains "(b1) …saying nothing is merged and the tree and its stamps are kept" \
-  "nothing is merged, the tree and its stamps are kept" "$LB_LINE"
+expect_contains "(b1) …saying nothing is merged and the tree is kept, and nothing of stamps" \
+  "nothing is merged, the tree is kept" "$LB_LINE"
+expect_absent   "(b1) …and nothing of stamps" "stamps" "$LB_LINE"
 expect_true  "(b1) the project's .bionic is still a directory" test -d "$LB/.bionic"
 expect_false "(b1) …and not a link" test -L "$LB/.bionic"
 expect_eq    "(b1) …its files byte for byte" "$LB_SUMS" "$(lb_sums "$LB")"
@@ -3511,7 +3817,7 @@ LBD_P=".bionic/docs/record/$(printf 'very-long-directory-name-%s/' 1 2 3 4 5 6)$
 mkdir -p "$LBD/${LBD_P%/*}"; echo deep > "$LBD/$LBD_P"
 git -C "$LBD" add -f "$LBD_P" && git -C "$LBD" commit --quiet -m "deep path"; green_stamp "$LBD"
 LBD_C="$(git -C "$LBD" rev-parse HEAD)"
-OUTLBD="$(worktree_land "$LBD" wave/fixture)"
+OUTLBD="$(lb_land "$LBD")"
 expect_match "(b2) a deep path under .bionic is refused, naming that path and its commit" \
   "spawn-worktree: REFUSED reason=bionic-committed path=${LBD_P} commit=${LBD_C:0:12} branch=wt/deep *" "$(lb_first "$OUTLBD")"
 expect_eq    "(b2) …the project's .bionic files byte for byte" "$LB_SUMS" "$(lb_sums "$LB")"
@@ -3520,7 +3826,7 @@ expect_eq    "(b2) …the project's .bionic files byte for byte" "$LB_SUMS" "$(l
 git -C "$LBT" rm -r --cached --quiet .bionic && git -C "$LBT" commit --quiet -m "the link out of the index"
 green_stamp "$LBT"
 expect_match "(b3) after git rm -r --cached .bionic and a commit, the tree lands" \
-  "spawn-worktree: LANDED branch=wt/linked onto=wave/fixture *" "$(worktree_land "$LBT" wave/fixture)"
+  "spawn-worktree: LANDED branch=wt/linked onto=wave/fixture *" "$(lb_land "$LBT")"
 expect_false "(b3) …the project's .bionic is not a link" test -L "$LB/.bionic"
 expect_eq    "(b3) …and its files byte for byte" "$LB_SUMS" "$(lb_sums "$LB")"
 
@@ -3529,7 +3835,7 @@ LBS_SID="land-bionic-session-01"
 bind_plan "$LB" "$LBS_SID" wave/fixture >/dev/null
 LBS="$(lb_tree "$LB" wt/standdown)"; LBS_C="$(git -C "$LBS" rev-parse HEAD)"
 LBS_SUMS="$(lb_sums "$LB")"; LBS_REFS="$(refs_of "$LB")"
-OUTLBS="$(worktree_land_for_session "$LBS" "$LB" "$LBS_SID")"; RCLBS=$?
+OUTLBS="$(lb_land "$LBS")"; RCLBS=$?
 expect_match "(b4) the stand-down path refuses the same range on the same line" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LBS_C:0:12} branch=wt/standdown onto=wave/fixture *" "$(lb_first "$OUTLBS")"
 expect_eq   "(b4) …exit 2" "2" "$RCLBS"
@@ -3539,7 +3845,7 @@ expect_true "(b4) …the tree is kept" test -d "$LBS"
 git -C "$LBS" rm -r --cached --quiet .bionic && git -C "$LBS" commit --quiet -m "the link out of the index"
 green_stamp "$LBS"
 expect_match "(b4) …and lands through it once the remedy is taken" \
-  "spawn-worktree: LANDED branch=wt/standdown onto=wave/fixture *" "$(worktree_land_for_session "$LBS" "$LB" "$LBS_SID")"
+  "spawn-worktree: LANDED branch=wt/standdown onto=wave/fixture *" "$(lb_land "$LBS")"
 expect_false "(b4) …the project's .bionic is not a link" test -L "$LB/.bionic"
 
 # THE ONE EXCEPTION: a target that already tracks something at .bionic lands a change under it as before.
@@ -3552,7 +3858,7 @@ git -C "$LET" commit --quiet -am "a change under the tracked .bionic"; green_sta
 expect_eq    "(b5-pre) the range's difference names a path under .bionic" ".bionic/docs/tracked.md" \
   "$(git -C "$LE" diff --name-only wave/fixture wt/tracked -- .bionic)"
 expect_match "(b5) a target that tracks .bionic lands a change under it as before" \
-  "spawn-worktree: LANDED branch=wt/tracked onto=wave/fixture *" "$(worktree_land "$LET" wave/fixture)"
+  "spawn-worktree: LANDED branch=wt/tracked onto=wave/fixture *" "$(lb_land "$LET")"
 expect_eq    "(b5) …and the change is in the target checkout" "changed on the branch" "$(cat "$LE/.bionic/docs/tracked.md")"
 expect_true  "(b5) …whose .bionic is still a directory" test -f "$LE/.bionic/docs/plans/w.plan.md"
 
@@ -3608,9 +3914,9 @@ expect_eq   "(b6-pre) …and the range's first commit under .bionic is the one b
   "$LKT_C1" "$(git -C "$LK" log --reverse --format=%H wave/fixture..wt/kind-link -- .bionic | sed -n 1p)"
 expect_true "(b6-pre) the project's .bionic holds its tracked file" test -f "$LK/.bionic/keep.md"
 LK_SUMS="$(lb_sums "$LK")"; LK_REFS="$(refs_of "$LK")"; LK_STAMPS="$(cat "$(stamp_file "$LKT")")"
-OUTLK="$(worktree_land "$LKT" wave/fixture)"; RCLK=$?
+OUTLK="$(lb_land "$LKT")"; RCLK=$?
 expect_match "(b6) a target tracking .bionic as a directory refuses a range that makes it a link, naming the commit that changed its kind" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LKT_C:0:12} branch=wt/kind-link onto=wave/fixture fix='git -C ${LKT} rm -r --cached .bionic, commit, run the suites, land again' — *" "$(lb_first "$OUTLK")"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LKT_C:0:12} branch=wt/kind-link onto=wave/fixture fix='git -C ${LKT} rm -r --cached .bionic, commit, say ready again' — *" "$(lb_first "$OUTLK")"
 expect_eq    "(b6) …exit 2" "2" "$RCLK"
 expect_true  "(b6) the project's .bionic is still a directory" test -d "$LK/.bionic"
 expect_false "(b6) …and not a link" test -L "$LK/.bionic"
@@ -3624,7 +3930,7 @@ LKF="$(lk_repo "$TMP/land-kind-file")"
 LKFT="$(lk_replace "$LKF" wt/kind-file file)"; LKFT_C="$(git -C "$LKFT" rev-parse HEAD)"
 expect_eq "(b7-pre) the tree's branch a regular file at .bionic" "100644" "$(lk_kind "$LKFT" HEAD)"
 LKF_SUMS="$(lb_sums "$LKF")"; LKF_REFS="$(refs_of "$LKF")"
-OUTLKF="$(worktree_land "$LKFT" wave/fixture)"; RCLKF=$?
+OUTLKF="$(lb_land "$LKFT")"; RCLKF=$?
 expect_match "(b7) …and a range that makes it a regular file, on the same line" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LKFT_C:0:12} branch=wt/kind-file onto=wave/fixture *" "$(lb_first "$OUTLKF")"
 expect_eq   "(b7) …exit 2" "2" "$RCLKF"
@@ -3639,7 +3945,7 @@ LC="$(lk_repo "$TMP/land-kind-content")"
 LCT="$(new_tree "$LC" wt/kind-change)"; echo "changed on the branch" > "$LCT/.bionic/keep.md"
 lk_commit "$LCT" "a change under the tracked .bionic" .bionic/keep.md
 expect_match "(b8) a range that changes a file under the tracked .bionic directory lands" \
-  "spawn-worktree: LANDED branch=wt/kind-change onto=wave/fixture *" "$(worktree_land "$LCT" wave/fixture)"
+  "spawn-worktree: LANDED branch=wt/kind-change onto=wave/fixture *" "$(lb_land "$LCT")"
 expect_eq    "(b8) …the change is in the target checkout" "changed on the branch" "$(cat "$LC/.bionic/keep.md")"
 expect_eq    "(b8) …which still tracks .bionic as a directory" "040000" "$(lk_kind "$LC" wave/fixture)"
 expect_true  "(b8) …and holds its plan" test -f "$LC/.bionic/docs/plans/w.plan.md"
@@ -3647,13 +3953,13 @@ LCM="$(new_tree "$LC" wt/kind-more)"; echo "more" > "$LCM/.bionic/more.md"
 lk_commit "$LCM" "a file added under the tracked .bionic" .bionic/more.md; LCM_C="$(git -C "$LCM" rev-parse HEAD)"
 LC_SUMS="$(lb_sums "$LC")"
 expect_match "(b8b) a range that ADDS a file under the tracked directory is refused, naming that path (A-orch-227)" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/more.md commit=${LCM_C:0:12} branch=wt/kind-more onto=wave/fixture fix='git -C ${LCM} rm --cached .bionic/more.md, move .bionic/more.md out of the tree, commit, run the suites, land again' — *" \
-  "$(lb_first "$(worktree_land "$LCM" wave/fixture)")"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/more.md commit=${LCM_C:0:12} branch=wt/kind-more onto=wave/fixture fix='git -C ${LCM} rm --cached .bionic/more.md, move .bionic/more.md out of the tree, commit, say ready again' — *" \
+  "$(lb_first "$(lb_land "$LCM")")"
 expect_eq    "(b8b) …the project's .bionic files byte for byte" "$LC_SUMS" "$(lb_sums "$LC")"
 LCK="$(new_tree "$LC" wt/kind-rm-keep)"; git -C "$LCK" rm --quiet .bionic/keep.md
 lk_commit "$LCK" "keep.md removed, the directory left"
 expect_match "(b8c) a range that removes one file and leaves the directory lands" \
-  "spawn-worktree: LANDED branch=wt/kind-rm-keep onto=wave/fixture *" "$(worktree_land "$LCK" wave/fixture)"
+  "spawn-worktree: LANDED branch=wt/kind-rm-keep onto=wave/fixture *" "$(lb_land "$LCK")"
 expect_true  "(b8c) …its sibling is still in the target checkout" test -f "$LC/.bionic/also.md"
 expect_false "(b8c) …and the removed file is not" test -e "$LC/.bionic/keep.md"
 
@@ -3662,7 +3968,7 @@ LCR="$(new_tree "$LC" wt/kind-rm-all)"; git -C "$LCR" rm -r --quiet .bionic
 lk_commit "$LCR" "the tracked .bionic removed"
 expect_eq    "(b9-pre) the tree's branch has nothing at .bionic" "" "$(lk_kind "$LCR" HEAD)"
 expect_match "(b9) a range that removes the tracked .bionic entirely lands" \
-  "spawn-worktree: LANDED branch=wt/kind-rm-all onto=wave/fixture *" "$(worktree_land "$LCR" wave/fixture)"
+  "spawn-worktree: LANDED branch=wt/kind-rm-all onto=wave/fixture *" "$(lb_land "$LCR")"
 expect_true  "(b9) …the project's .bionic is still a directory holding its plan" test -f "$LC/.bionic/docs/plans/w.plan.md"
 expect_false "(b9) …and not a link" test -L "$LC/.bionic"
 
@@ -3682,7 +3988,7 @@ LLT="$(new_tree "$LL" wt/kind-keep-link)"; green_stamp "$LLT"; LLT_H="$(git -C "
 # (`worktree-remove-refused … merged=`): land drops the tree's `.bionic` link before `git worktree
 # remove`, and in a project that tracks that link the drop leaves the tree dirty. That removal is
 # older than the guard and not this row's (record A-T84.2), so the row reads the merge, not the word.
-OUTLLT="$(worktree_land "$LLT" wave/fixture)"
+OUTLLT="$(lb_land "$LLT")"
 expect_match "(b10) a range that keeps the target's link is merged" "spawn-worktree: * merge*=*" "$(lb_first "$OUTLLT")"
 expect_true  "(b10) …the tree's head is on the target" git -C "$LL" merge-base --is-ancestor "$LLT_H" refs/heads/wave/fixture
 expect_true  "(b10) …the target's .bionic is still its link" test -L "$LL/.bionic"
@@ -3694,7 +4000,7 @@ expect_eq    "(b10b-pre) the tree's branch a directory at .bionic" "040000" "$(l
 LLD_C="$(git -C "$LLD" rev-parse HEAD)"; LL_REFS="$(refs_of "$LL")"
 expect_match "(b10b) a range that replaces the target's link with a directory is refused: the kind changed (A-orch-227)" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LLD_C:0:12} branch=wt/kind-link-dir onto=wave/fixture *" \
-  "$(lb_first "$(worktree_land "$LLD" wave/fixture)")"
+  "$(lb_first "$(lb_land "$LLD")")"
 expect_eq    "(b10b) …no ref moved" "$LL_REFS" "$(refs_of "$LL")"
 expect_true  "(b10b) …the target's .bionic is still its link" test -L "$LL/.bionic"
 expect_true  "(b10b) …and the directory the link reaches keeps its plan" test -f "$LL/.bionic-state/docs/plans/w.plan.md"
@@ -3706,9 +4012,9 @@ LAT="$(new_tree "$LA" wt/kind-add)"; mkdir -p "$LAT/.bionic/docs/plans"; echo "t
 lk_commit "$LAT" "a file added where the project keeps its plan" .bionic/docs/plans/w.plan.md; LAT_C="$(git -C "$LAT" rev-parse HEAD)"
 expect_eq    "(b14-pre) the main checkout holds an untracked plan at that path" "plan" "$(cat "$LA/.bionic/docs/plans/w.plan.md")"
 LA_SUMS="$(lb_sums "$LA")"; LA_REFS="$(refs_of "$LA")"
-OUTLA="$(worktree_land "$LAT" wave/fixture)"; RCLA=$?
+OUTLA="$(lb_land "$LAT")"; RCLA=$?
 expect_match "(b14) a range that adds a file over the project's untracked plan is refused, naming the added path" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/docs/plans/w.plan.md commit=${LAT_C:0:12} branch=wt/kind-add onto=wave/fixture fix='git -C ${LAT} rm --cached .bionic/docs/plans/w.plan.md, move .bionic/docs/plans/w.plan.md out of the tree, commit, run the suites, land again' — *" "$(lb_first "$OUTLA")"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/docs/plans/w.plan.md commit=${LAT_C:0:12} branch=wt/kind-add onto=wave/fixture fix='git -C ${LAT} rm --cached .bionic/docs/plans/w.plan.md, move .bionic/docs/plans/w.plan.md out of the tree, commit, say ready again' — *" "$(lb_first "$OUTLA")"
 expect_eq    "(b14) …exit 2" "2" "$RCLA"
 expect_eq    "(b14) …the untracked plan byte for byte, and every file beside it" "$LA_SUMS" "$(lb_sums "$LA")"
 expect_eq    "(b14) …no ref moved" "$LA_REFS" "$(refs_of "$LA")"
@@ -3721,7 +4027,7 @@ mv "$LAT/.bionic/docs/plans/w.plan.md" "$TMP/kind-add-moved.md"
 git -C "$LAT" commit --quiet -m "the added plan out of the index"
 green_stamp "$LAT"
 expect_match "(b14r) following the line's own remedy, the tree lands" \
-  "spawn-worktree: LANDED branch=wt/kind-add onto=wave/fixture *" "$(lb_first "$(worktree_land "$LAT" wave/fixture)")"
+  "spawn-worktree: LANDED branch=wt/kind-add onto=wave/fixture *" "$(lb_first "$(lb_land "$LAT")")"
 expect_eq    "(b14r) …keep.md is still tracked by the target" "100644" "$(git -C "$LA" ls-tree wave/fixture .bionic/keep.md | awk '{ print $1 }')"
 expect_eq    "(b14r) …and intact in the checkout" "keep" "$(cat "$LA/.bionic/keep.md")"
 expect_eq    "(b14r) …and the project's plan untouched" "plan" "$(cat "$LA/.bionic/docs/plans/w.plan.md")"
@@ -3730,7 +4036,7 @@ expect_eq    "(b14r) …and the writer's file kept where it was moved" "the bran
 LAK="$(new_tree "$LA" wt/kind-add-change)"; echo "changed" > "$LAK/.bionic/keep.md"
 lk_commit "$LAK" "a change to the tracked keep.md" .bionic/keep.md
 expect_match "(b14b) …while a change to a path it tracks lands" \
-  "spawn-worktree: LANDED branch=wt/kind-add-change onto=wave/fixture *" "$(worktree_land "$LAK" wave/fixture)"
+  "spawn-worktree: LANDED branch=wt/kind-add-change onto=wave/fixture *" "$(lb_land "$LAK")"
 expect_eq    "(b14b) …and the untracked plan is untouched" "plan" "$(cat "$LA/.bionic/docs/plans/w.plan.md")"
 
 # (b15) A TARGET THAT STOPPED TRACKING .bionic after the tree branched (A-orch-227 P2-2, a known
@@ -3740,15 +4046,15 @@ LP="$(lk_repo "$TMP/land-kind-stopped")"
 LPT="$(new_tree "$LP" wt/kind-stopped)"; green_stamp "$LPT"; LPT_H="$(git -C "$LPT" rev-parse HEAD)"
 git -C "$LP" rm -r --quiet --cached .bionic/keep.md .bionic/also.md && git -C "$LP" commit --quiet -m "the target stops tracking .bionic"
 expect_match "(b15) a tree branched before its target stopped tracking .bionic is refused, naming the tree's head" \
-  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/also.md commit=${LPT_H:0:12} branch=wt/kind-stopped onto=wave/fixture fix='git -C ${LPT} merge wave/fixture, run the suites, land again' — *" \
-  "$(lb_first "$(worktree_land "$LPT" wave/fixture)")"
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/also.md commit=${LPT_H:0:12} branch=wt/kind-stopped onto=wave/fixture fix='git -C ${LPT} merge wave/fixture, say ready again' — *" \
+  "$(lb_first "$(lb_land "$LPT")")"
 
 # (b11) THE STAND-DOWN PATH reaches the same verdicts: b6's range refused, b8's landed.
 LS="$(lk_repo "$TMP/land-kind-standdown")"; LS_SID="land-kind-session-01"
 bind_plan "$LS" "$LS_SID" wave/fixture >/dev/null
 LST="$(lk_replace "$LS" wt/kind-sd-link link)"; LST_C="$(git -C "$LST" rev-parse HEAD)"
 LS_SUMS="$(lb_sums "$LS")"; LS_REFS="$(refs_of "$LS")"
-OUTLS="$(worktree_land_for_session "$LST" "$LS" "$LS_SID")"; RCLS=$?
+OUTLS="$(lb_land "$LST")"; RCLS=$?
 expect_match "(b11) the stand-down path refuses a link in place of the tracked directory on the same line" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LST_C:0:12} branch=wt/kind-sd-link onto=wave/fixture *" "$(lb_first "$OUTLS")"
 expect_eq    "(b11) …exit 2" "2" "$RCLS"
@@ -3759,7 +4065,7 @@ expect_true  "(b11) …the tree is kept" test -d "$LST"
 LSC="$(new_tree "$LS" wt/kind-sd-change)"; echo "changed through the stand-down" > "$LSC/.bionic/keep.md"
 lk_commit "$LSC" "a change under the tracked .bionic" .bionic/keep.md
 expect_match "(b11b) …and lands a change under the tracked directory" \
-  "spawn-worktree: LANDED branch=wt/kind-sd-change onto=wave/fixture *" "$(worktree_land_for_session "$LSC" "$LS" "$LS_SID")"
+  "spawn-worktree: LANDED branch=wt/kind-sd-change onto=wave/fixture *" "$(lb_land "$LSC")"
 expect_eq    "(b11b) …the change is in the target checkout" "changed through the stand-down" "$(cat "$LS/.bionic/keep.md")"
 
 # (b12) A TARGET WITH NOTHING AT .bionic refuses a regular file there, as it refuses the link (b1).
@@ -3769,7 +4075,7 @@ lk_commit "$LN0T" "a regular file at .bionic" .bionic; LN0T_C="$(git -C "$LN0T" 
 LN0_SUMS="$(lb_sums "$LN0")"
 expect_match "(b12) a target with nothing at .bionic refuses a range that puts a regular file there" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.bionic commit=${LN0T_C:0:12} branch=wt/kind-absent-file onto=wave/fixture *" \
-  "$(lb_first "$(worktree_land "$LN0T" wave/fixture)")"
+  "$(lb_first "$(lb_land "$LN0T")")"
 expect_eq    "(b12) …the project's .bionic files byte for byte" "$LN0_SUMS" "$(lb_sums "$LN0")"
 
 # (b13) THE MUTANT: the kind test cut out (stubbed to answer "no change"), b6's range is merged and
@@ -3781,7 +4087,7 @@ expect_false "(b13-pre) …and the project's .bionic is a directory, not a link"
 expect_true  "(b13-pre) …holding its plan" test -f "$LM/.bionic/docs/plans/w.plan.md"
 expect_match "(b13) with the kind test cut out, a link in place of the tracked directory is merged" \
   "spawn-worktree: * merge*=*" \
-  "$( _wt_bionic_kind_changed() { return 1; }; worktree_land "$LMT" wave/fixture 2>/dev/null | sed -n 1p )"
+  "$( _wt_bionic_kind_changed() { return 1; }; lb_land "$LMT" 2>/dev/null | sed -n 1p )"
 expect_true  "(b13) …and the project's .bionic is a link: the loss b6 refuses" test -L "$LM/.bionic"
 
 # THE GUARD READS GIT, NEVER QUOTED TEXT (wave-27 T86; review pass 71). The guard read one spelling
@@ -3819,7 +4125,7 @@ cs_link_as() {  # <repo> <branch> <spelling> [rm] -> a tree committing create's 
   green_stamp "$t"; printf '%s' "$t"
 }
 cs_roots() { git -C "$1" ls-tree --name-only "$2" | grep -i '^\.bionic$' | tr '\n' ' '; }  # <repo> <rev> -> its root entries folding to .bionic
-cs_fix() { printf "fix='git -C %s %s, commit, run the suites, land again' — " "$1" "$2"; }  # <tree> <remedy> -> the line's fix field
+cs_fix() { printf "fix='git -C %s %s, commit, say ready again' — " "$1" "$2"; }  # <tree> <remedy> -> the line's fix field
 
 # (c1) NOTHING TRACKED AT .bionic; THE LINK COMMITTED AS .BIONIC (pass 71's G2a: the W2 loss through a second spelling).
 CA="$(lb_repo "$TMP/land-case-link")"
@@ -3827,7 +4133,7 @@ CAT="$(cs_link_as "$CA" wt/case-link .BIONIC)"; CAT_C="$(git -C "$CAT" rev-parse
 expect_eq   "(c1-pre) the tree's head holds the link at .BIONIC and nothing at .bionic" ".BIONIC " "$(cs_roots "$CAT" HEAD)"
 expect_eq   "(c1-pre) …a link" "120000" "$(git -C "$CAT" ls-tree HEAD .BIONIC | awk '{ print $1 }')"
 CA_SUMS="$(lb_sums "$CA")"; CA_REFS="$(refs_of "$CA")"; CA_STAMPS="$(cat "$(stamp_file "$CAT")")"
-OUTCA="$(worktree_land "$CAT" wave/fixture)"; RCCA=$?
+OUTCA="$(lb_land "$CAT")"; RCCA=$?
 expect_match "(c1) a range that commits the link as .BIONIC is refused, naming the range's spelling" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CAT_C:0:12} branch=wt/case-link onto=wave/fixture $(cs_fix "$CAT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" "$(lb_first "$OUTCA")"
 expect_eq    "(c1) …exit 2" "2" "$RCCA"
@@ -3843,7 +4149,7 @@ CK="$(lk_repo "$TMP/land-case-kind")"
 CKT="$(cs_link_as "$CK" wt/case-kind .BIONIC rm)"; CKT_C="$(git -C "$CKT" rev-parse HEAD)"
 expect_eq   "(c2-pre) the tree's head holds the link at .BIONIC alone" ".BIONIC " "$(cs_roots "$CKT" HEAD)"
 CK_SUMS="$(lb_sums "$CK")"; CK_REFS="$(refs_of "$CK")"; CK_STAMPS="$(cat "$(stamp_file "$CKT")")"
-OUTCK="$(worktree_land "$CKT" wave/fixture)"; RCCK=$?
+OUTCK="$(lb_land "$CKT")"; RCCK=$?
 expect_match "(c2) a range that makes the tracked directory a link at .BIONIC is refused as a change of kind" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CKT_C:0:12} branch=wt/case-kind onto=wave/fixture $(cs_fix "$CKT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" "$(lb_first "$OUTCK")"
 expect_eq    "(c2) …exit 2" "2" "$RCCK"
@@ -3859,7 +4165,7 @@ CFT="$(new_tree "$CF" wt/case-file)"; echo "a file" > "$CFT/.Bionic"
 lk_commit "$CFT" "a regular file at .Bionic" .Bionic; CFT_C="$(git -C "$CFT" rev-parse HEAD)"
 expect_eq   "(c3-pre) the tree's head holds a file at .Bionic" "100644" "$(git -C "$CFT" ls-tree HEAD .Bionic | awk '{ print $1 }')"
 CF_SUMS="$(lb_sums "$CF")"; CF_REFS="$(refs_of "$CF")"
-OUTCF="$(worktree_land "$CFT" wave/fixture)"; RCCF=$?
+OUTCF="$(lb_land "$CFT")"; RCCF=$?
 expect_match "(c3) a range that puts a regular file at .Bionic is refused, naming .Bionic" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.Bionic commit=${CFT_C:0:12} branch=wt/case-file onto=wave/fixture $(cs_fix "$CFT" "rm -r --cached .Bionic, move .Bionic out of the tree")*" "$(lb_first "$OUTCF")"
 expect_eq    "(c3) …exit 2" "2" "$RCCF"
@@ -3873,7 +4179,7 @@ CDT="$(new_tree "$CD" wt/case-dir)"; mkdir -p "$CDT/.Bionic/docs"; echo "the wri
 lk_commit "$CDT" "a directory at .Bionic" .Bionic/docs/x.md; CDT_C="$(git -C "$CDT" rev-parse HEAD)"
 expect_eq   "(c4-pre) the tree's head holds a directory at .Bionic" "040000" "$(git -C "$CDT" ls-tree HEAD .Bionic | awk '{ print $1 }')"
 CD_SUMS="$(lb_sums "$CD")"; CD_REFS="$(refs_of "$CD")"
-OUTCD="$(worktree_land "$CDT" wave/fixture)"; RCCD=$?
+OUTCD="$(lb_land "$CDT")"; RCCD=$?
 expect_match "(c4) a range that adds a directory at .Bionic is refused, naming its first path and the entry's remedy" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.Bionic/docs/x.md commit=${CDT_C:0:12} branch=wt/case-dir onto=wave/fixture $(cs_fix "$CDT" "rm -r --cached .Bionic, move .Bionic out of the tree")*" "$(lb_first "$OUTCD")"
 expect_eq    "(c4) …exit 2" "2" "$RCCD"
@@ -3888,7 +4194,7 @@ lk_commit "$CUT" "x.md added as .BIONIC/x.md"; CUT_C="$(git -C "$CUT" rev-parse 
 expect_eq   "(c5-pre) the tree's head holds both spellings at the root" ".BIONIC .bionic " "$(cs_roots "$CUT" HEAD)"
 expect_eq   "(c5-pre) …and the tree is clean" "" "$(git -C "$CUT" status --porcelain)"
 CU_SUMS="$(lb_sums "$CU")"; CU_REFS="$(refs_of "$CU")"
-OUTCU="$(worktree_land "$CUT" wave/fixture)"; RCCU=$?
+OUTCU="$(lb_land "$CUT")"; RCCU=$?
 expect_match "(c5) a range that adds .BIONIC/x.md under the tracked .bionic is refused, naming the added path" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC/x.md commit=${CUT_C:0:12} branch=wt/case-add onto=wave/fixture $(cs_fix "$CUT" "rm --cached .BIONIC/x.md, move .BIONIC/x.md out of the tree")*" "$(lb_first "$OUTCU")"
 expect_eq    "(c5) …exit 2" "2" "$RCCU"
@@ -3903,7 +4209,7 @@ expect_eq   "(c6-pre) the target tracks .BIONIC as a directory, and nothing spel
 CVC="$(new_tree "$CV" wt/case-upper-change)"; echo "changed on the branch" > "$CVC/.BIONIC/keep.md"
 lk_commit "$CVC" "a change to the tracked .BIONIC/keep.md" .BIONIC/keep.md
 expect_match "(c6a) a range that changes the tracked .BIONIC/keep.md lands" \
-  "spawn-worktree: LANDED branch=wt/case-upper-change onto=wave/fixture *" "$(lb_first "$(worktree_land "$CVC" wave/fixture)")"
+  "spawn-worktree: LANDED branch=wt/case-upper-change onto=wave/fixture *" "$(lb_first "$(lb_land "$CVC")")"
 expect_eq    "(c6a) …the change is in the target checkout" "changed on the branch" "$(cat "$CV/.BIONIC/keep.md")"
 expect_true  "(c6a) …whose .bionic still holds its plan" test -f "$CV/.bionic/docs/plans/w.plan.md"
 CVA="$(new_tree "$CV" wt/case-upper-add)"; cs_stage "$CVA" .bionic/new.md "the writer's"
@@ -3912,7 +4218,7 @@ expect_eq   "(c6b-pre) the tree's head holds both spellings at the root" ".BIONI
 CV_SUMS="$(lb_sums "$CV")"; CV_REFS="$(refs_of "$CV")"
 expect_match "(c6b) …and refuses a range that adds .bionic/new.md: an add under the folded path, the path alone out" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/new.md commit=${CVA_C:0:12} branch=wt/case-upper-add onto=wave/fixture $(cs_fix "$CVA" "rm --cached .bionic/new.md, move .bionic/new.md out of the tree")*" \
-  "$(lb_first "$(worktree_land "$CVA" wave/fixture)")"
+  "$(lb_first "$(lb_land "$CVA")")"
 expect_eq    "(c6b) …the project's .bionic files byte for byte" "$CV_SUMS" "$(lb_sums "$CV")"
 expect_eq    "(c6b) …no ref moved" "$CV_REFS" "$(refs_of "$CV")"
 
@@ -3930,7 +4236,7 @@ expect_eq   "(c13-pre) …and the tree reads clean" "" "$(git -C "$CBT" status -
 CB_REFS="$(refs_of "$CB")"
 expect_match "(c13) a file at .BIONIC beside the tracked link is refused as a change of kind, in its spelling" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CBT_C:0:12} branch=wt/case-beside onto=wave/fixture $(cs_fix "$CBT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" \
-  "$(lb_first "$(worktree_land "$CBT" wave/fixture)")"
+  "$(lb_first "$(lb_land "$CBT")")"
 expect_eq    "(c13) …no ref moved" "$CB_REFS" "$(refs_of "$CB")"
 expect_true  "(c13) …the target's .bionic is still its link" test -L "$CB/.bionic"
 
@@ -3938,6 +4244,7 @@ expect_true  "(c13) …the target's .bionic is still its link" test -L "$CB/.bio
 # of that name (pass 71's G1b). The quoted form is git's own (c7-pre, the oracle).
 CQ_N1='.bionic/"quoted".md'; CQ_N2='.bionic/back\slash.md'; CQ_N3=$'.bionic/tab\tname.md'
 CQ_Q1='".bionic/\"quoted\".md"'; CQ_Q2='".bionic/back\\slash.md"'; CQ_Q3='".bionic/tab\tname.md"'
+CQ_S1="'.bionic/\"quoted\".md'"  # the first name quoted for the shell, as the remedy prints it (wave-28 T39)
 cq_own() { local f; for f in "$CQ_N1" "$CQ_N2" "$CQ_N3"; do echo "the project's own" > "$1/$f"; done; }  # <repo>
 cq_tree() {  # <repo> <branch> <name>... -> a tree whose one commit adds each name under .bionic
   local r="$1" b="$2" t f; shift 2; t="$(new_tree "$r" "$b")"; [ -n "$t" ] || return 1
@@ -3952,11 +4259,11 @@ expect_eq   "(c7-pre) git prints the three added names C-quoted, so" "${CQ_Q1}|$
 CQ_SUMS="$(lb_sums "$CQ")"; CQ_REFS="$(refs_of "$CQ")"
 expect_true "(c7-pre) the project holds its own file at each of the three paths" \
   test -f "$CQ/$CQ_N1" -a -f "$CQ/$CQ_N2" -a -f "$CQ/$CQ_N3"
-OUTCQ="$(worktree_land "$CQT" wave/fixture)"; RCCQ=$?
+OUTCQ="$(lb_land "$CQT")"; RCCQ=$?
 expect_match "(c7) a range adding three names git quotes under the tracked .bionic is refused" \
   "spawn-worktree: REFUSED reason=bionic-committed path=*" "$(lb_first "$OUTCQ")"
-expect_contains "(c7) …naming the first added path as git quotes it, and the same spelling in the remedy" \
-  "path=${CQ_Q1} commit=${CQT_C:0:12} branch=wt/quoted onto=wave/fixture $(cs_fix "$CQT" "rm --cached ${CQ_Q1}, move ${CQ_Q1} out of the tree")" "$OUTCQ"
+expect_contains "(c7) …naming the first added path as git quotes it, and in the remedy quoted for the shell (T39)" \
+  "path=${CQ_Q1} commit=${CQT_C:0:12} branch=wt/quoted onto=wave/fixture $(cs_fix "$CQT" "rm --cached ${CQ_S1}, move ${CQ_S1} out of the tree")" "$OUTCQ"
 expect_eq    "(c7) …exit 2" "2" "$RCCQ"
 expect_eq    "(c7) …on one line" "1" "$(printf '%s\n' "$OUTCQ" | awk 'END { print NR }')"
 expect_eq    "(c7) …the project's three untracked files byte for byte, and every file beside them" "$CQ_SUMS" "$(lb_sums "$CQ")"
@@ -3965,11 +4272,11 @@ expect_true  "(c7) …the tree is kept" test -d "$CQT"
 CQ2="$(lk_repo "$TMP/land-quoted-back")"; cq_own "$CQ2"
 CQB="$(cq_tree "$CQ2" wt/quoted-back "$CQ_N2")"; CQB_C="$(git -C "$CQB" rev-parse HEAD)"; CQ2_SUMS="$(lb_sums "$CQ2")"
 expect_contains "(c7b) a range adding only the backslash name is refused, naming it as git quotes it" \
-  "REFUSED reason=bionic-committed path=${CQ_Q2} commit=${CQB_C:0:12} branch=wt/quoted-back " "$(worktree_land "$CQB" wave/fixture)"
+  "REFUSED reason=bionic-committed path=${CQ_Q2} commit=${CQB_C:0:12} branch=wt/quoted-back " "$(lb_land "$CQB")"
 expect_eq    "(c7b) …the project's .bionic files byte for byte" "$CQ2_SUMS" "$(lb_sums "$CQ2")"
 CQ3="$(lk_repo "$TMP/land-quoted-tab")"; cq_own "$CQ3"
 CQC="$(cq_tree "$CQ3" wt/quoted-tab "$CQ_N3")"; CQC_C="$(git -C "$CQC" rev-parse HEAD)"; CQ3_SUMS="$(lb_sums "$CQ3")"
-OUTCQC="$(worktree_land "$CQC" wave/fixture)"
+OUTCQC="$(lb_land "$CQC")"
 expect_contains "(c7c) a range adding only the name holding a tab is refused, naming it as git quotes it" \
   "REFUSED reason=bionic-committed path=${CQ_Q3} commit=${CQC_C:0:12} branch=wt/quoted-tab " "$OUTCQC"
 expect_eq    "(c7c) …on one line" "1" "$(printf '%s\n' "$OUTCQC" | awk 'END { print NR }')"
@@ -3979,7 +4286,7 @@ expect_eq    "(c7c) …the project's .bionic files byte for byte" "$CQ3_SUMS" "$
 CN="$(lb_repo "$TMP/land-quoted-none")"; cq_own "$CN"
 CNT="$(cq_tree "$CN" wt/quoted-none "$CQ_N1" "$CQ_N2" "$CQ_N3")"; CNT_C="$(git -C "$CNT" rev-parse HEAD)"
 CN_SUMS="$(lb_sums "$CN")"; CN_REFS="$(refs_of "$CN")"
-OUTCN="$(worktree_land "$CNT" wave/fixture)"; RCCN=$?
+OUTCN="$(lb_land "$CNT")"; RCCN=$?
 expect_contains "(c8) a project tracking nothing at .bionic refuses the same adds, the whole entry out" \
   "REFUSED reason=bionic-committed path=${CQ_Q1} commit=${CNT_C:0:12} branch=wt/quoted-none onto=wave/fixture $(cs_fix "$CNT" "rm -r --cached .bionic, move .bionic out of the tree")" "$OUTCN"
 expect_eq    "(c8) …exit 2" "2" "$RCCN"
@@ -3991,7 +4298,7 @@ CS="$(lk_repo "$TMP/land-case-standdown")"; CS_SID="land-case-session-01"
 bind_plan "$CS" "$CS_SID" wave/fixture >/dev/null
 CST="$(cs_link_as "$CS" wt/case-sd-link .BIONIC rm)"; CST_C="$(git -C "$CST" rev-parse HEAD)"
 CS_SUMS="$(lb_sums "$CS")"; CS_REFS="$(refs_of "$CS")"
-OUTCS="$(worktree_land_for_session "$CST" "$CS" "$CS_SID")"; RCCS=$?
+OUTCS="$(lb_land "$CST")"; RCCS=$?
 expect_match "(c9) the stand-down path refuses the link committed as .BIONIC on the same line" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CST_C:0:12} branch=wt/case-sd-link onto=wave/fixture *" "$(lb_first "$OUTCS")"
 expect_eq    "(c9) …exit 2" "2" "$RCCS"
@@ -4002,7 +4309,7 @@ CR="$(lk_repo "$TMP/land-quoted-standdown")"; CR_SID="land-quoted-session-01"
 bind_plan "$CR" "$CR_SID" wave/fixture >/dev/null; cq_own "$CR"
 CSQ="$(cq_tree "$CR" wt/case-sd-quoted "$CQ_N1")"; CSQ_C="$(git -C "$CSQ" rev-parse HEAD)"
 CR_SUMS="$(lb_sums "$CR")"; CR_REFS="$(refs_of "$CR")"
-OUTCSQ="$(worktree_land_for_session "$CSQ" "$CR" "$CR_SID")"; RCCSQ=$?
+OUTCSQ="$(lb_land "$CSQ")"; RCCSQ=$?
 expect_contains "(c10) …and the quoted add, naming it as git quotes it" \
   "REFUSED reason=bionic-committed path=${CQ_Q1} commit=${CSQ_C:0:12} branch=wt/case-sd-quoted onto=wave/fixture " "$OUTCSQ"
 expect_eq    "(c10) …exit 2" "2" "$RCCSQ"
@@ -4019,7 +4326,7 @@ expect_eq   "(c14-pre) …a link, as the target's" "120000 120000" "$(git -C "$C
 CL_REFS="$(refs_of "$CL")"
 expect_match "(c14) a range that renames the target's tracked link to .BIONIC is refused, in its spelling" \
   "spawn-worktree: REFUSED reason=bionic-committed path=.BIONIC commit=${CLT_C:0:12} branch=wt/case-rename onto=wave/fixture $(cs_fix "$CLT" "rm -r --cached .BIONIC, move .BIONIC out of the tree")*" \
-  "$(lb_first "$(worktree_land "$CLT" wave/fixture)")"
+  "$(lb_first "$(lb_land "$CLT")")"
 expect_eq    "(c14) …no ref moved" "$CL_REFS" "$(refs_of "$CL")"
 expect_true  "(c14) …the target's .bionic is still its link" test -L "$CL/.bionic"
 
@@ -4027,29 +4334,42 @@ expect_true  "(c14) …the target's .bionic is still its link" test -L "$CL/.bio
 # The whole-path remedy left the entry in the tree, untracked; where nothing ignores it (no exclude
 # line, not the record link land passes over) the next land was refused dirty-tree. The fix now also
 # says to move the entry out of the tree. Each row follows the line it was given, word for word:
-# the git command it names, the move it names (into $TMP, kept), a commit, the suites, land again.
+# the git command it names, the move it names (into $TMP, kept), a commit, and ready again (here, the hand landing).
 lb_follow() {  # <tree> <refusal line> -> 0 once the line's fix is followed as printed, nothing added
-  local t="$1" fix cmd mv=""
-  fix="$(printf '%s\n' "$2" | sed -n "s/.* fix='git -C [^ ]* \([^']*\), run the suites, land again' .*/\1/p")"
-  case "$fix" in
-    "merge "*) git -C "$t" $fix >/dev/null 2>&1 || return 1; green_stamp "$t"; return 0 ;;  # SC2086: the fix's own words
-    *", commit") fix="${fix%, commit}" ;;
+  # As a shell would (wave-28 T39, D31): the fix's text is read into words by the shell itself, so a
+  # path printed quoted for it reaches git and mv as one name. The first clause, up to the word that
+  # ends in a comma, is the git command, run as printed (its own `git -C <tree>`); a `move <path> out
+  # of the tree` clause moves that path (into $TMP, kept); a closing `commit` commits.
+  local t="$1" fix w cmd=() mv="" clause=cmd
+  fix="${2#*" fix='"}"; fix="${fix%%", say ready again' — "*}"
+  [ "$fix" != "$2" ] || return 1
+  eval "set -- $fix" || return 1
+  for w in "$@"; do
+    case "$clause" in
+      cmd) case "$w" in *,) cmd+=("${w%,}"); clause=next ;; *) cmd+=("$w") ;; esac ;;
+      next) case "$w" in move) clause=move ;; commit) clause=commit ;; *) return 1 ;; esac ;;
+      move) mv="$w"; clause=out ;;
+      out) case "$w" in tree,) clause=next ;; out|of|the) : ;; *) return 1 ;; esac ;;
+      *) return 1 ;;
+    esac
+  done
+  [ "${cmd[0]:-}" = git ] || return 1
+  "${cmd[@]}" >/dev/null 2>&1 || return 1
+  case "$clause" in
+    cmd) [ "${cmd[3]:-}" = merge ] || return 1; green_stamp "$t"; return 0 ;;
+    commit) : ;;
     *) return 1 ;;
   esac
-  cmd="${fix%%, move *}"
-  case "$fix" in *", move "*" out of the tree") mv="${fix#*, move }"; mv="${mv% out of the tree}" ;; esac
-  # shellcheck disable=SC2086  # the fix's own words, as a writer would type them
-  git -C "$t" $cmd --quiet || return 1
   if [ -n "$mv" ]; then mv "$t/$mv" "$TMP/followed-${t##*/}" || return 1; fi
   git -C "$t" commit --quiet -m "the printed fix, followed"; green_stamp "$t"
 }
 # (r1) THE KIND CHANGED TO A REGULAR FILE where the target tracks a directory (pass 71's A2).
 RF="$(lk_repo "$TMP/land-follow-file")"; RFT="$(lk_replace "$RF" wt/follow-file file)"
-RF_LINE="$(lb_first "$(worktree_land "$RFT" wave/fixture)")"
+RF_LINE="$(lb_first "$(lb_land "$RFT")")"
 expect_contains "(r1-pre) the range is refused, naming .bionic" "REFUSED reason=bionic-committed path=.bionic " "$RF_LINE"
 expect_true  "(r1) its printed fix can be followed as printed" lb_follow "$RFT" "$RF_LINE"
 expect_match "(r1) …and the tree then lands" "spawn-worktree: LANDED branch=wt/follow-file onto=wave/fixture *" \
-  "$(lb_first "$(worktree_land "$RFT" wave/fixture)")"
+  "$(lb_first "$(lb_land "$RFT")")"
 expect_false "(r1) …the project's .bionic is not a file or a link" test -L "$RF/.bionic"
 expect_eq    "(r1) …and holds its plan and record" "plan|record" "$(cat "$RF/.bionic/docs/plans/w.plan.md")|$(cat "$RF/.bionic/docs/record/r.md")"
 expect_eq    "(r1) …and the writer's file is kept where the fix moved it" "a file" "$(cat "$TMP/followed-follow-file")"
@@ -4058,34 +4378,132 @@ expect_eq    "(r1) …and the writer's file is kept where the fix moved it" "a f
 # have both sides delete them, which land refuses not-current.
 RL="$(lk_repo "$TMP/land-follow-stopped")"; RLT="$(new_tree "$RL" wt/follow-stopped)"; green_stamp "$RLT"
 git -C "$RL" rm -r --quiet --cached .bionic/keep.md .bionic/also.md && git -C "$RL" commit --quiet -m "the target stops tracking .bionic"
-RL_LINE="$(lb_first "$(worktree_land "$RLT" wave/fixture)")"
+RL_LINE="$(lb_first "$(lb_land "$RLT")")"
 expect_contains "(r2-pre) the tree is refused, naming a path the target no longer tracks, and the merge" \
-  "REFUSED reason=bionic-committed path=.bionic/also.md commit=$(git -C "$RLT" rev-parse --short=12 HEAD) branch=wt/follow-stopped onto=wave/fixture fix='git -C ${RLT} merge wave/fixture, run the suites, land again' — " "$RL_LINE"
+  "REFUSED reason=bionic-committed path=.bionic/also.md commit=$(git -C "$RLT" rev-parse --short=12 HEAD) branch=wt/follow-stopped onto=wave/fixture fix='git -C ${RLT} merge wave/fixture, say ready again' — " "$RL_LINE"
 expect_true  "(r2) its printed fix can be followed as printed" lb_follow "$RLT" "$RL_LINE"
 expect_match "(r2) …and the tree then lands" "spawn-worktree: LANDED branch=wt/follow-stopped onto=wave/fixture *" \
-  "$(lb_first "$(worktree_land "$RLT" wave/fixture)")"
+  "$(lb_first "$(lb_land "$RLT")")"
 expect_eq    "(r2) …the project's own keep.md, also.md and plan are untouched" "keep|also|plan" \
   "$(cat "$RL/.bionic/keep.md")|$(cat "$RL/.bionic/also.md")|$(cat "$RL/.bionic/docs/plans/w.plan.md")"
 # (r3) THE LINK COMMITTED AS .BIONIC, nothing tracked (c1's shape).
 RC="$(lb_repo "$TMP/land-follow-case")"; RCT="$(cs_link_as "$RC" wt/follow-case .BIONIC)"
-RC_LINE="$(lb_first "$(worktree_land "$RCT" wave/fixture)")"
+RC_LINE="$(lb_first "$(lb_land "$RCT")")"
 expect_contains "(r3-pre) the range is refused, naming .BIONIC" "REFUSED reason=bionic-committed path=.BIONIC " "$RC_LINE"
 expect_true  "(r3) its printed fix can be followed as printed" lb_follow "$RCT" "$RC_LINE"
 expect_match "(r3) …and the tree then lands" "spawn-worktree: LANDED branch=wt/follow-case onto=wave/fixture *" \
-  "$(lb_first "$(worktree_land "$RCT" wave/fixture)")"
+  "$(lb_first "$(lb_land "$RCT")")"
 expect_true  "(r3) …the project's .bionic is a directory, not a link" test -d "$RC/.bionic" -a ! -L "$RC/.bionic"
 expect_eq    "(r3) …holding its plan and record" "plan|record" "$(cat "$RC/.bionic/docs/plans/w.plan.md")|$(cat "$RC/.bionic/docs/record/r.md")"
+
+# (s1) A SUBMODULE LINK UNDER THE TRACKED .bionic, UNDER A CONFIG THAT HIDES SUBMODULES (wave-28 T39, D31,
+# AC-14.2; wave-27 critic P3-1). `diff.ignoreSubmodules=all`, which a user may set in any config, took
+# a gitlink out of `git diff`'s answer, so the add test saw nothing and the range landed a gitlink at
+# `.bionic/docs` over the project's untracked plan directory. The guard's difference call now carries
+# `--ignore-submodules=none`: its answer is git's own, whatever the configuration. The link names a
+# commit of another repository, absent here, as a real submodule's does.
+SM="$(lk_repo "$TMP/land-submodule")"; git -C "$SM" config diff.ignoreSubmodules all
+SMT="$(new_tree "$SM" wt/submodule)"; mkdir -p "$SMT/.bionic/docs"
+git -C "$SMT" update-index --add --cacheinfo "160000,1234567890123456789012345678901234567890,.bionic/docs"
+lk_commit "$SMT" "a submodule link at .bionic/docs"; SMT_C="$(git -C "$SMT" rev-parse HEAD)"
+expect_eq   "(s1-pre) the tree's head holds a gitlink at .bionic/docs" "160000" "$(git -C "$SMT" ls-tree HEAD .bionic/docs | awk '{ print $1 }')"
+expect_eq   "(s1-pre) …which the fixture's config hides from git diff" "" \
+  "$(git -C "$SM" diff --no-renames --diff-filter=A --name-only wave/fixture wt/submodule -- .bionic)"
+expect_eq   "(s1-pre) …and the tree reads clean" "" "$(git -C "$SMT" status --porcelain)"
+SM_SUMS="$(lb_sums "$SM")"; SM_REFS="$(refs_of "$SM")"
+OUTSM="$(lb_land "$SMT")"; RCSM=$?
+expect_contains "(s1) a submodule link added under the tracked .bionic is refused under diff.ignoreSubmodules=all, naming it" \
+  "spawn-worktree: REFUSED reason=bionic-committed path=.bionic/docs commit=${SMT_C:0:12} branch=wt/submodule onto=wave/fixture " "$(lb_first "$OUTSM")"
+expect_eq    "(s1) …exit 2" "2" "$RCSM"
+expect_eq    "(s1) …the project's .bionic files byte for byte" "$SM_SUMS" "$(lb_sums "$SM")"
+expect_eq    "(s1) …no ref moved" "$SM_REFS" "$(refs_of "$SM")"
+expect_true  "(s1) …the project's plan directory is still a directory" test -f "$SM/.bionic/docs/plans/w.plan.md"
+# (s1) FOLLOWED (wave-28 T3, ruling A-orch-14): a submodule link names a commit of another repository,
+# so the guard's commit lookup asks for the tree ENTRY (`rev-parse --verify <c>:<path>`), never the
+# object. Asked for the object, it found no commit adding the link, named the range's head as a path
+# the target dropped, and printed `merge wave/fixture`: a merge that changes nothing, the refusal standing.
+SM_LINE="$(lb_first "$OUTSM")"
+expect_contains "(s1) …its fix takes the link out of the index, never a merge" \
+  "fix='git -C ${SMT} rm --cached .bionic/docs, move .bionic/docs out of the tree, commit, say ready again' — " "$SM_LINE"
+expect_true  "(s1) its printed fix can be followed as printed" lb_follow "$SMT" "$SM_LINE"
+expect_match "(s1) …and the guard is then satisfied: the tree lands" "spawn-worktree: LANDED branch=wt/submodule onto=wave/fixture *" \
+  "$(lb_first "$(lb_land "$SMT")")"
+expect_true  "(s1) …the project's plan directory is still a directory" test -f "$SM/.bionic/docs/plans/w.plan.md"
+# (s1b) THE LOOKUP'S OTHER SHAPES ARE UNCHANGED: an ordinary file and a directory added under .bionic
+# are named by the commit that added them, as before the lookup asked for the entry.
+SF="$(lk_repo "$TMP/land-added-by")"; SFT="$(new_tree "$SF" wt/added-by)"
+mkdir -p "$SFT/.bionic/sub"; echo f > "$SFT/.bionic/sub/f.md"; echo p > "$SFT/.bionic/plain.md"
+lk_commit "$SFT" "a file and a directory under .bionic" .bionic/sub/f.md .bionic/plain.md; SF_C="$(git -C "$SFT" rev-parse HEAD)"
+echo later > "$SFT/later.txt"; lk_commit "$SFT" "a later commit" later.txt
+expect_eq "(s1b) an ordinary file is named by the commit that added it" "$SF_C" \
+  "$(_wt_bionic_added_by "$SF" wave/fixture wt/added-by .bionic/plain.md)"
+expect_eq "(s1b) …and a directory too" "$SF_C" "$(_wt_bionic_added_by "$SF" wave/fixture wt/added-by .bionic/sub)"
+
+# (q1-q5) THE PRINTED FIX IS QUOTED FOR THE SHELL (wave-28 T39, D31, AC-14.3; review pass 74's P2-1). The
+# per-path remedy printed the name bare or C-quoted, so a space split it, a tab or a line break reached
+# git as a backslash and a letter, and a glob character un-tracked the target's own file beside it.
+# Each row adds one such name under the tracked .bionic, over the project's own untracked file there,
+# follows the printed fix as a shell reads it (lb_follow), and lands: the name alone left the index.
+# `.bionic/k*.md` is a glob that matches the target's tracked keep.md, so the row sees a fix that
+# reaches another path.
+lq_row() {  # <label> <tree base> <name> <expected remedy> — one row, the name over the project's own file
+  local id="$1" r t c line
+  r="$(lk_repo "$TMP/land-shq-$2")"; echo "the project's own" > "$r/$3"
+  t="$(cq_tree "$r" "wt/shq-$2" "$3")"; c="$(git -C "$t" rev-parse HEAD)"
+  line="$(lb_first "$(lb_land "$t")")"
+  expect_contains "($id) a range adding $2 under the tracked .bionic is refused, its remedy quoted for the shell" \
+    "REFUSED reason=bionic-committed path=$(_wt_cquote "$3") commit=${c:0:12} branch=wt/shq-$2 onto=wave/fixture $(cs_fix "$t" "$4")" "$line"
+  expect_eq    "($id) …on one line" "1" "$(printf '%s\n' "$line" | awk 'END { print NR }')"
+  expect_true  "($id) …its printed fix can be followed as printed" lb_follow "$t" "$line"
+  expect_match "($id) …and the tree then lands" "spawn-worktree: LANDED branch=wt/shq-$2 onto=wave/fixture *" \
+    "$(lb_first "$(lb_land "$t")")"
+  expect_eq    "($id) …the fix acted on that path alone: the landed branch tracks keep.md and also.md, and not the name" \
+    ".bionic/also.md|.bionic/keep.md|" "$(git -C "$r" ls-tree -r --name-only "wt/shq-$2" -- .bionic | LC_ALL=C sort | tr '\n' '|')"
+  expect_eq    "($id) …and so does the target, once landed" \
+    ".bionic/also.md|.bionic/keep.md|" "$(git -C "$r" ls-files -- .bionic | LC_ALL=C sort | tr '\n' '|')"
+  expect_eq    "($id) …and the project's own file at the name is untouched" "the project's own" "$(cat "$r/$3")"
+  expect_eq    "($id) …and the writer's file is kept where the fix moved it" "the writer's" "$(cat "$TMP/followed-shq-$2")"
+}
+lq_row q1 space ".bionic/my notes.md" "rm --cached '.bionic/my notes.md', move '.bionic/my notes.md' out of the tree"
+lq_row q2 tab $'.bionic/a\tb.md' "rm --cached \$'.bionic/a\\tb.md', move \$'.bionic/a\\tb.md' out of the tree"
+lq_row q3 newline $'.bionic/new\nline.md' "rm --cached \$'.bionic/new\\nline.md', move \$'.bionic/new\\nline.md' out of the tree"
+lq_row q4 glob '.bionic/k*.md' "rm --cached ':(literal).bionic/k*.md', move '.bionic/k*.md' out of the tree"
+lq_row q5 quote ".bionic/it's.md" "rm --cached \$'.bionic/it\\'s.md', move \$'.bionic/it\\'s.md' out of the tree"
+
+# (q6) THE TREE'S OWN PATH is a path the fix prints too: a project under a directory holding a space.
+QT="$(lk_repo "$TMP/land shq root")"; QTT="$(lk_replace "$QT" wt/shq-root file)"
+QT_LINE="$(lb_first "$(lb_land "$QTT")")"
+expect_contains "(q6) a tree whose path holds a space is named in the fix quoted for the shell" \
+  "fix='git -C '${QTT}' rm -r --cached .bionic, move .bionic out of the tree, commit, say ready again' — " "$QT_LINE"
+expect_true  "(q6) …its printed fix can be followed as printed" lb_follow "$QTT" "$QT_LINE"
+expect_match "(q6) …and the tree then lands" "spawn-worktree: LANDED branch=wt/shq-root onto=wave/fixture *" \
+  "$(lb_first "$(lb_land "$QTT")")"
+
+# (q7, s2) THE MUTANTS. The quoting cut out (the name printed bare): q1's fix splits the name and cannot
+# be followed. The flag cut out of the difference call: s1's submodule link is merged.
+expect_true  "(q7-pre) the library defines the shell quoting" declare -F _wt_shquote
+QM="$(lk_repo "$TMP/land-shq-mutant")"; QMT="$(cq_tree "$QM" wt/shq-mutant ".bionic/my notes.md")"
+QM_LINE="$( _wt_shquote() { printf '%s' "$1"; }; lb_land "$QMT" 2>/dev/null | sed -n 1p )"
+expect_contains "(q7-pre) …the mutant still refuses, printing the name bare" "rm --cached .bionic/my notes.md, " "$QM_LINE"
+expect_false "(q7) with the quoting cut out, the printed fix cannot be followed" lb_follow "$QMT" "$QM_LINE"
+SN="$(lk_repo "$TMP/land-submodule-mutant")"; git -C "$SN" config diff.ignoreSubmodules all
+SNT="$(new_tree "$SN" wt/submodule-mutant)"; mkdir -p "$SNT/.bionic/docs"
+git -C "$SNT" update-index --add --cacheinfo "160000,1234567890123456789012345678901234567890,.bionic/docs"
+lk_commit "$SNT" "a submodule link at .bionic/docs"
+expect_match "(s2) with the flag cut out of the difference call, the submodule link is merged" "spawn-worktree: * merge*=*" \
+  "$( _wt_bionic_adds() { git -C "$1" diff --no-renames --diff-filter=A --name-only -z "$2" "$3" 2>/dev/null; }
+      lb_land "$SNT" 2>/dev/null | sed -n 1p )"
 
 # (c11, c12) THE MUTANTS. The fold cut out (a root entry is `.bionic` only byte for byte): c1's range
 # is merged. The NUL stream cut out (the adds read as git's text lines): c7's quoted add is merged.
 expect_true  "(c11-pre) the library defines the fold and the add stream" declare -F _wt_bionic_named _wt_bionic_adds
 CM="$(lb_repo "$TMP/land-case-mutant")"; CMT="$(cs_link_as "$CM" wt/case-mutant .BIONIC)"
 expect_match "(c11) with the fold cut out, the link committed as .BIONIC is merged" "spawn-worktree: * merge*=*" \
-  "$( _wt_bionic_named() { [ "$1" = .bionic ]; }; worktree_land "$CMT" wave/fixture 2>/dev/null | sed -n 1p )"
+  "$( _wt_bionic_named() { [ "$1" = .bionic ]; }; lb_land "$CMT" 2>/dev/null | sed -n 1p )"
 CZ="$(lk_repo "$TMP/land-quoted-mutant")"; cq_own "$CZ"; CZT="$(cq_tree "$CZ" wt/quoted-mutant "$CQ_N1")"
 expect_match "(c12) with the NUL stream cut out, the quoted add is merged" "spawn-worktree: * merge*=*" \
   "$( _wt_bionic_adds() { git -C "$1" diff --no-renames --diff-filter=A --name-only "$2" "$3" | tr '\n' '\0'; }
-      worktree_land "$CZT" wave/fixture 2>/dev/null | sed -n 1p )"
+      lb_land "$CZT" 2>/dev/null | sed -n 1p )"
 expect_eq    "(c12) …and the project's untracked file is overwritten: the loss c7 refuses" "the writer's" "$(cat "$CZ/$CQ_N1")"
 
 finish

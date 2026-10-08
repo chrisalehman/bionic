@@ -1178,4 +1178,153 @@ done
 expect_eq "INV the tracked inventory exists and every site has a fix line or a reason" "" \
   "$(inv_check "$INV_FILE")"
 
+# THE WAVE ADDS NO WALL (wave-28 T3; REQ-5 AC-5.4, D9). The landing line is a verb's work, never a
+# wall's: no shipped hook gains an arm that enforces the queue. Read as a CEILING on the four wall
+# files' refusal sites: 1.12.0 held 122 (walls.sh 60, stop.sh 13, dispatch-preflight.sh 40,
+# stop-guard.sh 9, by `inv_sites` over `git show v1.12.0:<file>`), and the wave's one new non-verb
+# line is REQ-10's door, whose bullet names it. The hand landing joins ARM A's existing site (its
+# first line unchanged), so it adds none. And `hooks/hooks.json` registers no new blocking hook: every
+# registration on an event that can refuse is one 1.12.0 shipped.
+INV_W28_BASE=122
+inv_w28_sites() {  # <root> -> the four wall files' refusal sites, counted
+  local r="$1" f n=0 c
+  for f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+    c="$(inv_sites "$r/$f" | awk 'NF { c++ } END { print c + 0 }')"; n=$((n + c))
+  done
+  printf '%s' "$n"
+}
+# AND T7's FOUR (wave-28 T7; D4, D17; ruling A-orch-88): the brief check inside the dispatch wall gains
+# four refusals, a writer binding a row with no Lands-on: line, none with no reason, a suite outside the
+# row's set, and a Row: naming no plan row. They are brief-check refusals, not a wall that enforces the
+# queue, so they ride on top of the ceiling as the door does: one per inventory bullet tagged
+# `(wave-28 T7`, at most four. A fifth site with no tagged bullet still fails the pin.
+INV_W28_T7_MAX=4
+# AND T55's ONE (wave-28 T55; D4): the dispatch wall refuses a Row: that names a row other than the one
+# the agent's name matches. It is a brief-check refusal beside T7's, not a wall that enforces the queue,
+# so it rides on top as T7's four do: one per inventory bullet tagged `(wave-28 T55`, at most one.
+INV_W28_T55_MAX=1
+# AND T58's ONE (wave-28 T58; D8): the dispatch wall refuses a name that matches more than one plan row
+# when the brief has no Row: to say which. A brief-check refusal beside T55's, one per inventory bullet
+# tagged `(wave-28 T58`, at most one.
+INV_W28_T58_MAX=1
+# AND T70's SIX (wave-28 T70; REQ-5, REQ-6, D8; A-orch-231): the dispatch wall and the stop guard stop
+# admitting what they could not record or judge. The dispatch wall refuses a launch whose roster path is a
+# link, whose row did not build, or whose roster cannot be written, and refuses first when its own
+# deadline passes (four sites); the stop guard refuses first when its own deadline passes and refuses a
+# recorded unrostered stop it cannot write onto the roster (two). Each is a refusal beside T58's, one per
+# inventory bullet tagged `(wave-28 T70`, at most six.
+INV_W28_T70_MAX=6
+# THE ALLOWANCE IS ONE TABLE (wave-28 T58, read-structure-p31 #4): `<inventory tag>|<most bullets that
+# many sites may carry>`, read by `inv_w28_ceiling`. A new row adds its constant and one line here.
+INV_W28_TAGGED="REQ-10's door|1
+(wave-28 T7|$INV_W28_T7_MAX
+(wave-28 T55|$INV_W28_T55_MAX
+(wave-28 T58|$INV_W28_T58_MAX
+(wave-28 T70|$INV_W28_T70_MAX"
+# A TAG ENDING IN A DIGIT IS NOT THE PREFIX OF A LONGER NUMBER (wave-28 T70; A-orch-230 b): `(wave-28 T7`
+# is counted in a bullet tagged `(wave-28 T7)` or `(wave-28 T7;`, never in one tagged `(wave-28 T70)`, which
+# a plain substring match counted under T7 and turned this pin red the day a row with a longer id landed.
+# A bullet is counted once, however many times it carries the tag.
+inv_tag_count() {  # <tag> <inventory> -> the bullets carrying the tag
+  awk -v tag="$1" '
+    { line = $0; ld = (substr(tag, length(tag)) ~ /[0-9]/)
+      while ((i = index(line, tag)) > 0) {
+        nx = substr(line, i + length(tag), 1)
+        if (!(ld && nx ~ /[0-9]/)) { c++; break }
+        line = substr(line, i + length(tag))
+      }
+    }
+    END { print c + 0 }' "$2" 2>/dev/null
+}
+inv_w28_ceiling() {  # <inventory> -> 1.12.0's sites, plus each tagged row's, as the inventory tags them
+  local n=0 tag max c
+  while IFS='|' read -r tag max; do
+    c="$(inv_tag_count "$tag" "$1")"; [ "${c:-0}" -le "$max" ] || c="$max"
+    n=$((n + ${c:-0}))
+  done <<EOF
+$INV_W28_TAGGED
+EOF
+  printf '%s' $((INV_W28_BASE + n))
+}
+inv_w28_excess() {  # <root> <inventory> -> a line when the sites pass 1.12.0's but for the door's one and T7's
+  local n c
+  n="$(inv_w28_sites "$1")"; c="$(inv_w28_ceiling "$2")"
+  [ "$n" -le "$c" ] || printf 'sites=%s over %s: 1.12.0 %s plus the door, T7, T55, T58 and T70, as tagged\n' "$n" "$c" "$INV_W28_BASE"
+}
+INV_W28_N="$(inv_w28_sites "$REPO_ROOT")"
+expect_true "INV-W28a precondition: the four wall files' sites are read (${INV_W28_N})" test "$INV_W28_N" -gt 0
+expect_eq "INV-W28t7 precondition: the inventory carries T7's four tagged bullets" "4" \
+  "$(inv_tag_count '(wave-28 T7' "$INV_FILE")"
+expect_eq "INV-W28t55 precondition: the inventory carries T55's one tagged bullet" "1" \
+  "$(inv_tag_count '(wave-28 T55' "$INV_FILE")"
+expect_eq "INV-W28t58 precondition: the inventory carries T58's one tagged bullet" "1" \
+  "$(inv_tag_count '(wave-28 T58' "$INV_FILE")"
+expect_eq "INV-W28t70 precondition: the inventory carries T70's six tagged bullets" "6" \
+  "$(inv_tag_count '(wave-28 T70' "$INV_FILE")"
+expect_eq "INV-W28t7b the tag count reads a tag as a whole number: T7's four bullets, not T70's beside them" "4" \
+  "$(inv_tag_count '(wave-28 T7' "$INV_FILE")"
+expect_eq "INV-W28a no wall file gains a refusal site beyond 1.12.0's, but REQ-10's door, T7's four, T55's one, T58's one and T70's six" "" \
+  "$(inv_w28_excess "$REPO_ROOT" "$INV_FILE")"
+INV_W28_SYN="$(mktemp -d)"
+for _f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+  mkdir -p "$INV_W28_SYN/${_f%/*}"; cp "$REPO_ROOT/$_f" "$INV_W28_SYN/$_f"
+done
+# AS MANY ARMS AS PASS THE CEILING FROM WHERE THE TREE STANDS (wave-28 T9): a row that removes
+# refusal sites (T9 took out two) leaves the tree under 1.12.0's count, so a fixed two would not
+# reach past it. One arm more than the room left under the ceiling, the door's, T7's, T55's and T58's included (the
+# ceiling is read from the inventory as inv_w28_excess reads it, so the two cannot part).
+_inv_w28_k=$(( $(inv_w28_ceiling "$INV_FILE") + 1 - INV_W28_N )); [ "$_inv_w28_k" -ge 1 ] || _inv_w28_k=1
+while [ "$_inv_w28_k" -gt 0 ]; do
+  printf '%s\n' "  fold_block exit2 queue \"planted arm ${_inv_w28_k}\" \"say ready\" \"planted\"" >> "$INV_W28_SYN/payload/scripts/lib/walls.sh"
+  _inv_w28_k=$((_inv_w28_k - 1))
+done
+expect_contains "INV-W28b a planted queue arm past the ceiling is reported, so the check can fail" "sites=" \
+  "$(inv_w28_excess "$INV_W28_SYN" "$INV_FILE")"
+rm -rf "$INV_W28_SYN"
+# THE TASK-ENTRY DUTY IS THE DUTY WALL'S OWN (wave-28 T38; REQ-13 AC-13.2, D30). A dispatch turn's
+# task entries are a second trigger of the task-list duty, refused through its existing forwarder:
+# lib/stop.sh gains no refusal site over 1.12.0's 13 (`inv_sites` over `git show v1.12.0:<file>`),
+# and the duty's first line is a FACT the forwarder carries, never a site of its own, so the
+# inventory's `lib/stop.sh` section gains no line. fails-when: lib/stop.sh passes 13 sites, or the
+# entry duty's fact is spelled on a site.
+INV_T38_BASE=13
+INV_T38_STOP="$REPO_ROOT/payload/scripts/lib/stop.sh"
+INV_T38_SITES="$(inv_sites "$INV_T38_STOP")"
+INV_T38_N="$(printf '%s\n' "$INV_T38_SITES" | awk 'NF { c++ } END { print c + 0 }')"
+expect_true "INV-T38a precondition: lib/stop.sh's refusal sites are read (${INV_T38_N})" test "$INV_T38_N" -gt 0
+expect_true "INV-T38a lib/stop.sh gains no refusal site over 1.12.0's ${INV_T38_BASE}" test "$INV_T38_N" -le "$INV_T38_BASE"
+expect_contains "INV-T38b precondition: the duty wall's forwarder is one of its sites" \
+  'fold_block block stop "$FACT" "$FIX" "$REASON"' "$INV_T38_SITES"
+expect_contains "INV-T38b the entry duty's fact is a FACT the forwarder carries" \
+  "FACT=\"a dispatched row's entry is not in progress\"" "$(cat "$INV_T38_STOP")"
+expect_absent "INV-T38c …and no refusal site spells it" "entry is not in progress" "$INV_T38_SITES"
+INV_T38_SYN="$(mktemp -d)"
+cp "$INV_T38_STOP" "$INV_T38_SYN/stop.sh"
+printf '%s\n' "  fold_block block stop \"a dispatched row's entry is not in progress\" \"TaskUpdate each to in_progress\" \"x\"" \
+  >> "$INV_T38_SYN/stop.sh"
+INV_T38_SYN_SITES="$(inv_sites "$INV_T38_SYN/stop.sh")"
+expect_contains "INV-T38d a planted entry site is read by the extractor, so INV-T38c can fail" \
+  "entry is not in progress" "$INV_T38_SYN_SITES"
+expect_true "INV-T38d …and it puts lib/stop.sh one site past what it was, so INV-T38a can fail" \
+  test "$(printf '%s\n' "$INV_T38_SYN_SITES" | awk 'NF { c++ } END { print c + 0 }')" -eq $((INV_T38_N + 1))
+rm -rf "$INV_T38_SYN"
+# The events a hook can refuse on, and every registration 1.12.0 shipped on them.
+INV_W28_HOOKS='PermissionRequest - ${CLAUDE_PLUGIN_ROOT}/hooks/permission-answer.sh
+PreToolUse Agent ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh
+PreToolUse Bash ${CLAUDE_PLUGIN_ROOT}/hooks/bash-walls.sh
+PreToolUse Skill ${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh
+PreToolUse TaskStop ${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh
+PreToolUse Write|Edit ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
+Stop - ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh
+SubagentStop - ${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh
+UserPromptExpansion - ${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh'
+inv_w28_blocking() {  # <hooks.json> -> each registration on an event that can refuse, sorted
+  jq -r '.hooks | to_entries[] | select(.key | test("^(PreToolUse|PermissionRequest|Stop|SubagentStop|UserPromptSubmit|UserPromptExpansion)$"))
+    | .key as $e | .value[] | (.matcher // "-") as $m | .hooks[] | "\($e) \($m) \(.command)"' "$1" 2>/dev/null | LC_ALL=C sort
+}
+INV_W28_REG="$(inv_w28_blocking "$REPO_ROOT/hooks/hooks.json")"
+expect_contains "INV-W28c precondition: the blocking registrations are read" "PreToolUse Bash" "$INV_W28_REG"
+expect_eq "INV-W28c hooks.json registers no blocking hook 1.12.0 did not" "" \
+  "$(comm -23 <(printf '%s\n' "$INV_W28_REG") <(printf '%s\n' "$INV_W28_HOOKS" | LC_ALL=C sort))"
+
 finish

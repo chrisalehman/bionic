@@ -281,6 +281,10 @@ done
 . "${DOCTOR_LIB}/run.sh"
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/resources.sh"
+# THE GATE (wave-28 T13; D14): RESOURCES reports the machine's share and the gate's state. Sourced
+# softly, so a payload without it still diagnoses everything else.
+# shellcheck source=/dev/null
+[ -r "${DOCTOR_LIB}/gate.sh" ] && . "${DOCTOR_LIB}/gate.sh"
 # checks.sh, THE TABLE OF CHECKS — one row per fact bionic needs true on a
 # machine, and for each row the label this page prints, the party that repairs it
 # and the hint that names that party. setup.sh renders its roster from the same
@@ -1898,6 +1902,28 @@ else
   _res_add "$(_doctor_item "$DOCTOR_NIL" "machine" "unknown — the resources probe did not answer")"
 fi
 
+# THE SHARE AND THE GATE (wave-28 T13; D14, D16). The share is the one number a person sets for
+# this machine; the gate line is what it holds now. A store nothing has asked yet is not made
+# here — doctor creates nothing — so the line says so instead of reading it.
+if declare -F gate_share >/dev/null 2>&1; then
+  _g_share="$(gate_share)"
+  # THE SOURCE IS detect.sh's (wave-28 T10): `state=file` when the share file is there, `default` when the
+  # gate's 80 stands. The file is the one `session-poker.sh share <n>` and setup's share step write.
+  case "$(detect_share)" in *"state=file "*) _g_from="set in bionic/share" ;; *) _g_from="the default; no share file" ;; esac
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "share" "${_g_share}% of this machine (${_g_from})")"
+  if [ -d "$(gate_dir)/requests" ]; then
+    _g_st="$(gate_state 2>/dev/null)"
+    _g_f() { printf '%s' "$_g_st" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
+    if [ -n "$_g_st" ]; then
+      _res_add "$(_doctor_item "$DOCTOR_NIL" "gate" "used $(_g_f used)% · admitted $(_g_f admitted) · waiting $(_g_f waiting) · load $(_g_f load) · promised $(_g_f promised)")"
+    else
+      _res_add "$(_doctor_item "$DOCTOR_NIL" "gate" "unreadable — its lock could not be had")"
+    fi
+  else
+    _res_add "$(_doctor_item "$DOCTOR_NIL" "gate" "no store yet — nothing has asked the gate")"
+  fi
+fi
+
 # THE SET IS THE FILES IN THIS PROJECT, NOT THE MACHINE'S LIVE SESSIONS
 # (FIX-DOCTOR/3, T3 finding 2). This loop was keyed on `patrol_live_sessions` —
 # every live CLI process anywhere on the machine — and asked of each whether an
@@ -2495,6 +2521,34 @@ echo ""
 echo "THIRD PARTY — tools and plugins bionic depends on"
 _doctor_third_row " " "name" "version" "source" "state"
 printf '%s' "$THIRD_ROWS"
+
+# ─── The install record (wave-28 T40, D29) ───────────────────────────────────
+#
+# WHAT `remove` MAY ACT ON, AND NOTHING ELSE. `install_dep` writes a line for each
+# tool it installs; `remove` offers to take a tool off only when this record names
+# it, and names every other tool it finds with the command to remove it by hand.
+# The one other thing it takes off is a native plugin the CLI's own registry holds
+# as bionic's (`remove_dep`'s native arm, which never reaches `install_dep` and so
+# has no line here), and the heading says both (wave-28 T10, T40's offer).
+# So the page shows the record itself: one row per name, read from its newest
+# line. A name bionic's table no longer holds is printed `unknown`, because no
+# door acts on it — the table is what says how to remove a thing.
+echo ""
+echo "INSTALL RECORD — what bionic installed; remove acts on these and on registry-proven plugins"
+INSTALL_RECORD_ROWS="$(dep_record_rows)"
+if [ -z "$INSTALL_RECORD_ROWS" ]; then
+  echo "  none recorded"
+else
+  while IFS=$'\t' read -r _rec_name _rec_kind _rec_at _rec_ver; do
+    [ -n "$_rec_name" ] || continue
+    if dep_row "$_rec_name" >/dev/null 2>&1; then
+      printf '  %s %-19s %s  bionic %s\n' "$(_doctor_cell "$_rec_name" 21)" "$_rec_kind" "$_rec_at" "$_rec_ver"
+    else
+      printf '  %s unknown — bionic'\''s table no longer holds it; remove never acts on it\n' \
+        "$(_doctor_cell "$_rec_name" 21)"
+    fi
+  done <<< "$INSTALL_RECORD_ROWS"
+fi
 
 # ─── Table 3 — the environment this machine runs bionic in ───────────────────
 #

@@ -973,7 +973,7 @@ Fix: prepend:
   wave: wave-NN-<slug>   # omit for epic-level and continuation
   canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}
   intent: <build|bugfix|refactor|tune|spike|incident-response>
-  rigor: <tested|peer-reviewed|audited>
+  rigor: <low|medium|high>
   scale: <task|wave|epic>
   ---"
   refuse exit2 write "this artifact has no frontmatter block" "prepend a frontmatter block" "$_gs_detail"
@@ -1046,8 +1046,11 @@ Path: $FILE_PATH"
 INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
 [ -n "$INTENT" ] || block "this artifact declares no intent:" "add an intent: line" \
   "requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
+# THE SET IS PRINTED BY ITS NEW WORDS, each with what it means (wave-28 T44; AC-16.2): the
+# printed form is lib/run.sh `rigor_print`'s, so a refusal and a card say a level the same way.
+RIGOR_SET="$(printf '\n  %s' "$(rigor_print low)" "$(rigor_print medium)" "$(rigor_print high)")"
 [ -n "$RIGOR" ]  || block "this artifact declares no rigor:" "add a rigor: line" \
-  "requires rigor: (tested|peer-reviewed|audited)"
+  "requires rigor: low, medium or high:${RIGOR_SET}"
 [ -n "$SCALE" ]  || block "this artifact declares no scale:" "add a scale: line" \
   "requires scale: (task|wave|epic)"
 case "$INTENT" in
@@ -1055,11 +1058,10 @@ case "$INTENT" in
   *) block "that intent is not one of the six" "pick an allowed intent" \
   "invalid intent: '$INTENT' — allowed: build|bugfix|refactor|tune|spike|incident-response" ;;
 esac
-case "$RIGOR" in
-  tested|peer-reviewed|audited) ;;
-  *) block "that rigor is not one of the three" "pick an allowed rigor" \
-  "invalid rigor: '$RIGOR' — allowed: tested|peer-reviewed|audited" ;;
-esac
+# THE CLOSED SET IS rigor_level's (lib/run.sh; wave-28 T44, REQ-16, D35): either vocabulary is
+# one of the three levels, and an old word is read as it is, never rewritten.
+rigor_level "$RIGOR" >/dev/null || block "that rigor is not one of the three" "pick an allowed rigor" \
+  "invalid rigor: '$RIGOR' — allowed: low, medium or high:${RIGOR_SET}"
 case "$SCALE" in
   task|wave|epic) ;;
   *) block "that scale is not task, wave or epic" "pick an allowed scale" \
@@ -1096,12 +1098,13 @@ fi
 # name differs); a shared hooks-lib extraction is deliberately deferred.
 # [INSTRUMENT]
 #
-# Rigor ordering (normative): tested(0) < peer-reviewed(1) < audited(2).
+# Rigor ordering (normative): low(0) < medium(1) < high(2), on the LEVEL `rigor_level` reads
+# (lib/run.sh; wave-28 T44), so a floor and a plan written in different vocabularies compare.
 rigor_rank() {
-  case "$1" in
-    tested) echo 0 ;;
-    peer-reviewed) echo 1 ;;
-    audited) echo 2 ;;
+  case "$(rigor_level "$1")" in
+    low) echo 0 ;;
+    medium) echo 1 ;;
+    high) echo 2 ;;
     *) echo -1 ;;
   esac
 }
@@ -1128,11 +1131,13 @@ log_floor_finding() {  # $1=check-id $2=violation-detail
 }
 
 RR=$(rigor_rank "$RIGOR")
+# A finding names a level by its new word, whichever word the file carries (AC-16.2).
+RL=$(rigor_level "$RIGOR")
 # Intent floor / spike cap (derivable from intent + rigor).
 [ "$INTENT" = "incident-response" ] && [ "$RR" -lt 2 ] \
-  && log_floor_finding intent-floor "incident-response floors at audited, declared $RIGOR"
+  && log_floor_finding intent-floor "incident-response floors at high, declared $RL"
 [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
-  && log_floor_finding spike-cap "spike is capped at tested, declared $RIGOR"
+  && log_floor_finding spike-cap "spike is capped at low, declared $RL"
 
 # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
 # an unparseable/invalid value is its own finding, never a block).
@@ -1144,7 +1149,7 @@ if [ -n "$PF" ]; then
   if [ "$PR" -lt 0 ]; then
     log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml"
   elif [ "$RR" -lt "$PR" ]; then
-    log_floor_finding project-floor "project floor $PF, declared $RIGOR"
+    log_floor_finding project-floor "project floor $(rigor_level "$PF"), declared $RL"
   fi
 fi
 
@@ -1158,7 +1163,7 @@ if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
     [ "$ER" -ge 0 ] && [ "$RR" -lt "$ER" ] \
-      && log_floor_finding epic-floor "epic floor $EF (from $EPIC), declared $RIGOR"
+      && log_floor_finding epic-floor "epic floor $(rigor_level "$EF") (from $EPIC), declared $RL"
   fi
 fi
 
@@ -1239,27 +1244,13 @@ may write there — this refusal is the main thread's alone."
     ;;
 esac
 
-# ---------- `parallel-budget:` is a MEASUREMENT Step 0 writes; a plan without it does not write ----------
-# (wave-19 REQ-3, D5; ADR-035, which reverses spec AC-26 and assumption WALLS/5.)
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-#
-# Step 0 probes the machine — `resources_probe`, then `resources_budget` over what it
-# printed — and writes the result into plan frontmatter as one string,
-# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe|override`,
-# byte-identical to the `budget=` value the preflight attestation records. It is a recorded
-# measurement, not a ceiling a run opts into: the tick, the stop wall and the dispatch wall
-# all size the run from it, and a plan without it left each of them a silent branch — a hole
-# a consumer fell through (wave-18 A-T11.3). So the invariant is enforced ONCE, here, at the
-# write that creates the plan: a `*.plan.md` whose frontmatter carries no `parallel-budget:`
-# line with a `writers=<digits>` field is refused, naming the key and Step 0's derivation.
-# A machine the probe cannot read gets the line by hand (`source=override`); the header has
-# always accepted any `writers=N`, so no new surface exists.
-#
-# ONLY `writers=` IS READ. It is the one field the fill invariant consumes; `suites=`,
-# `worktrees=`, `test_jobs=` and `source=` stay accepted and unparsed here, and their one
-# reader is still the dispatch wall's budget arm. No plan is exempt by state: a closed or
-# abandoned plan that is re-written gets the key brought forward, like
-# `canonical_sdlc_version`, rather than an exemption this arm would have to keep forever.
+# ---------- `parallel-budget:` is not required (wave-28 T9; D15, REQ-2 AC-2.9) ----------
+# Until wave-28 a `*.plan.md` Write whose frontmatter carried no `parallel-budget:` line with a
+# `writers=<digits>` field was refused here (wave-19 REQ-3, ADR-035): the line was a measurement
+# Step 0 copied from the machine probe, and every width reader sized the run from it. The width
+# is the gate's now, so no plan needs the line: a line caps a run only when a person wrote it
+# (`budget_cap` in lib/run.sh, `source=user` or `source=override`), and this hook neither
+# requires nor reads it.
 
 # ---------- required frontmatter flags + model_plan ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
@@ -1289,39 +1280,6 @@ Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}
 Required:                     model_plan"
   refuse exit2 write "this plan is missing frontmatter flags" "run Step 0 to set them" "$_gs_detail"
 fi
-
-# ---------- the budget key, a plan's alone (REQ-3 AC-3.1; the docblock above) ----------
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-#
-# Present means a `parallel-budget:` line whose value carries `writers=` followed by digits
-# as its own field, READ BY THE ONE BUDGET READER every other reader calls: run.sh's
-# `budget_line_of` (exactly `parallel-budget:` at column 0, colon immediately after the key)
-# over the text being written — this hook has no file yet — and `budget_field` (one whole
-# field, a decimal integer; epic-23 wave-20 T2, D10). Before wave-19-fixit-186 C5 this hook
-# admitted `  parallel-budget:` and `parallel-budget :` too, spellings every other reader
-# treats as no line; until wave-20 it cut `writers=` at its first SUBSTRING, so
-# `max_writers=9 writers=3` read 9 here and 3 to the tick. A header this admits now is a
-# header every reader sizes identically, and a header it refuses is one none of them could.
-case "$BASENAME" in
-  *.plan.md)
-    _gs_budget=$(budget_line_of "$FRONTMATTER")
-    _gs_writers=$(budget_field "$_gs_budget" writers)
-    if [ -z "$_gs_writers" ]; then
-      _gs_detail="canonical-sdlc plan '$BASENAME' carries no parallel-budget: line with a writers=<digits> field.
-Path: $FILE_PATH
-Found:   ${_gs_budget:-(no parallel-budget: line)}
-Why:     the budget is a measurement Step 0 writes, not a ceiling a run opts into — the tick,
-         the stop wall and the dispatch wall all size the run from writers=, and a plan without
-         it would leave each of them nothing to read (ADR-035).
-Fix:     run Step 0's derivation — resources_probe prints cores= mem_gb= disk_free_gb=, and
-         resources_budget <cores> <mem_gb> <disk_free_gb> yields the line — then write it
-         verbatim into this plan's frontmatter:
-           parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe
-         A machine the probe cannot read takes the line by hand, with source=override."
-      refuse exit2 write "this plan carries no parallel-budget: writers=" "run Step 0's resource probe" "$_gs_detail"
-    fi
-    ;;
-esac
 
 # ---------- pre-registered Verification Matrix required at Step 3+ ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]

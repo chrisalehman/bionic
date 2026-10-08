@@ -148,9 +148,8 @@ elif [ "$TOOL_NAME" = "Bash" ]; then
   # A BASH CALL HAS NOTHING TO READ ANY MORE (REQ-2). This branch used to pull the tool's
   # whole stdout through jq and grep it for the observation's machine line, on EVERY Bash
   # call in the session, so that the line could become a record a later stop spent. The stop
-  # gate takes its own look now and the record is deleted; what a Bash payload is still here
-  # for is the pressure sample below, which is a fact about the call having happened. No
-  # read, no grep, and the arm exits immediately after the sample.
+  # gate takes its own look now and the record is deleted, and the pressure sample that
+  # outlived it went with the rung (wave-28 T13). No read, no grep, and the arm exits.
   : 
   # THE RESIDUAL, stated rather than claimed away: stdout is not a trusted
   # channel — a command that PRINTS a well-formed machine line produces a record
@@ -351,21 +350,11 @@ bionic_context 2>/dev/null || exit 0
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
 [ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
-# ---------- THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15, R4) ----------
+# ---------- NO PRESSURE SAMPLE (wave-28 T13; D14) ----------
 #
-# One sample per engaged Bash call, appended to the ring resources.sh owns. The
-# consumers sample (D3 amendment): plugin hooks were not observed firing inside
-# subagents, so this arm cannot be the ONLY sampler — but it IS reliable for the
-# orchestrator's own calls, which is what this gives the ring: frequent readings
-# between the sparser ones tests/run.sh and the Patrol tick take. Bash-only —
-# ARM 2 (a dispatch confirming) and ARM 3 (an agent starting) are not "time
-# passed at the machine", and sampling on those too would count a dispatch
-# twice against the calls that produced it. FAILURE-TOLERANT like every write in
-# this file: a lost sample costs `pressure_level`'s median one input, never a
-# hook failure, so its result is discarded and its failure swallowed.
-if [ "$TOOL_NAME" = "Bash" ]; then
-  pressure_sample >/dev/null 2>&1 || :
-fi
+# Each engaged Bash call used to append one reading to the pressure ring for `pressure_level`'s
+# median. No width is read off the ring any more: the gate (lib/gate.sh) reads the machine at
+# the moment it decides, so the sample went with the rung it fed.
 
 # ---------- THE EARLY EXIT, NOW UNCONDITIONAL FOR BASH (Step-6 review P-2; REQ-2) ----------
 #
@@ -536,6 +525,47 @@ unplaced_carry() {  # <the placing row> <agent id> -> that row, carrying the id'
     }'
 }
 # ---- END an amend by id survives the placing ----
+
+# ---- BEGIN what a start pushes (wave-28 T16, T48) ----
+START_CONTEXT_DIR=$(cd "$BIONIC_LIB/../../context" 2>/dev/null && pwd) \
+  || START_CONTEXT_DIR="$BIONIC_LIB/../../context"
+# WHAT A START PUSHES, ONE ANSWER (wave-28 T16; REQ-8, D20). For a question set, the context files
+# its registrations push, by file name without `.md`, in the deal's order: `checks-<q>` for each
+# question the set holds, then `severity` when it holds a code question. A registration pushes
+# its file only when this names it; the terms registration writes it on the row it identifies as
+# `pushed=`, asking `on-disk` so a file the plugin lacks (logged by its registration, pushed by
+# none) is not named. `proof-add review` reads `severity` there to know the reader had the scale.
+# Here, above both arms, because both placing writes ask it (wave-28 T48): the start's identified
+# row and the launch call's confirmed row, either of which can be the id's last row.
+start_pushed() {  # <questions, comma-joined> [on-disk] -> the names, comma-joined; nothing for none
+  local _sp_n _sp_out=""
+  for _sp_n in checks-evidence checks-adversarial checks-structure severity; do
+    case "$_sp_n" in
+      severity) case ",$1," in *,adversarial,*|*,structure,*) : ;; *) continue ;; esac ;;
+      *)        case ",$1," in *",${_sp_n#checks-},"*) : ;; *) continue ;; esac ;;
+    esac
+    [ "${2-}" != on-disk ] || [ -r "$START_CONTEXT_DIR/$_sp_n.md" ] || continue
+    _sp_out="${_sp_out:+$_sp_out,}$_sp_n"
+  done
+  printf '%s' "$_sp_out"
+}
+# THE ONE WRITER OF THE KEY. A placing row (ARM 2's `confirmed`, ARM 3's `identified`) gets
+# `pushed=` from its own `questions=`, substituted when present and appended when absent, since
+# every reader takes the FIRST match for a key; a row whose questions push nothing is unchanged.
+pushed_onto() {  # <a placing row> -> that row, carrying `pushed=`
+  local _po_pu
+  _po_pu=$(start_pushed "$(line_field "$1" questions)" on-disk)
+  [ -n "$_po_pu" ] || { printf '%s' "$1"; return 0; }
+  printf '%s' "$1" | awk -v pu="$_po_pu" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0 }
+    {
+      f = $0
+      if (f ~ /^pushed=/) { f = "pushed=" pu; seen = 1 }
+      printf "%s%s", (NR > 1 ? "|" : ""), f
+    }
+    END { if (!seen) printf "|pushed=%s", pu }'
+}
+# ---- END what a start pushes ----
 
 # ============================================================
 # THE PLAN ROW MOVES WITH THE LAUNCH (wave-26 T12, D4, AC-1.4; T32).
@@ -722,6 +752,9 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     END { if (tid != "" && !seen) printf "|teammate_id=%s", tid }')
   # The set an amend by id recorded for this agent rides the placing row (T59; `unplaced_carry`).
   [ -n "$ROW_AGENT_ID" ] && COMPLETED=$(unplaced_carry "$COMPLETED" "$ROW_AGENT_ID")
+  # What the start pushed rides it too, from the one writer (T48): placed here, by the call's
+  # return, a reader's row is the id's last, the one its record is held to.
+  COMPLETED=$(pushed_onto "$COMPLETED")
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null || exit 0
 
   # THE PLAN ROW MOVES WITH THE CONFIRMATION (wave-26 T12, D4), only once the roster row is
@@ -846,7 +879,9 @@ if [ -n "$IS_START" ]; then
   # row existing: the `agent_type` test here is first and unchanged.
   #
   # A READER'S CHECKS ARE PUSHED AT START (wave-27 T15; REQ-5, D5): `context/checks-<q>.md` for
-  # each question on the reader's roster row (`questions=`, written by the dispatch wall).
+  # each question on the reader's roster row (`questions=`, written by the dispatch wall), and
+  # `context/severity.md`, the scale every finding is rated by, beside either code question
+  # (wave-28 T16; REQ-8, D20), by a registration of its own so a reader holding both gets it once.
   #
   # ---- BEGIN one string per file (wave-27 T30; review pass 24's blocker, A-orch-77) ----
   # THE HARNESS HANDS A HOOK'S additionalContext TO THE MODEL WHOLE ONLY UP TO 10,000 CHARACTERS,
@@ -856,18 +891,18 @@ if [ -n "$IS_START" ]; then
   # went over: those readers started without their checks and with part of the terms. So the push
   # is split, one string per file, one registration per string (hooks/hooks.json):
   #   - the bare registration pushes survival.md, and it alone joins, writes `agent_id`,
-  #     `terms-delivered` and the duplicate-start row, so four hooks on one start are one start;
+  #     `terms-delivered` and the duplicate-start row, so five hooks on one start are one start;
   #   - one registration per question (`$START_QUESTION`, its argument) pushes `bionic checks: <q>`
-  #     and that question's file when the agent's row carries the question, and nothing otherwise.
-  #     It reads the roster and writes nothing. The four may run at once and in any order, and no
-  #     string depends on another having arrived: each checks string names itself on line one.
+  #     and that question's file when the agent's row carries the question, and nothing otherwise;
+  #     the `severity` registration pushes `bionic severity scale` and severity.md the same way,
+  #     when the row carries a code question (`start_pushed`, below, is the one answer).
+  #     It reads the roster and writes nothing. The five may run at once and in any order, and no
+  #     string depends on another having arrived: each string names itself on line one.
   # THE CAP. Every string is counted here, in UTF-16 code units (what the harness's string length
   # counts; a multi-byte character is one, never its bytes), and one over BIONIC_START_PUSH_MAX is
   # NOT printed: in its place goes one line naming the file to read, and stderr says so. The agent
   # starts either way: a SubagentStart hook cannot block, and this one never tries.
   BIONIC_START_PUSH_MAX=9500
-  START_CONTEXT_DIR=$(cd "$BIONIC_LIB/../../context" 2>/dev/null && pwd) \
-    || START_CONTEXT_DIR="$BIONIC_LIB/../../context"
   push_string() {  # <the file the string came from> — the string on stdin; prints one line
     local _ps_json _ps_n
     _ps_json=$(jq -Rsc --argjson max "$BIONIC_START_PUSH_MAX" '
@@ -884,13 +919,13 @@ if [ -n "$IS_START" ]; then
       *) printf '%s\n' "$_ps_json" ;;
     esac
   }
-  deliver_checks() {  # <question>
-    local _dc_f="$START_CONTEXT_DIR/checks-$1.md"
+  deliver_context() {  # <name> <its naming line> <what it is, for the log>
+    local _dc_f="$START_CONTEXT_DIR/$1.md"
     if [ ! -r "$_dc_f" ]; then
-      echo "execution-recorder: checks file not found at $_dc_f — nothing pushed for $1" >&2
+      echo "execution-recorder: $3 not found at $_dc_f — nothing pushed for $1" >&2
       return 0
     fi
-    { printf 'bionic checks: %s\n' "$1"; cat "$_dc_f"; } | push_string "$_dc_f"
+    { printf '%s\n' "$2"; cat "$_dc_f"; } | push_string "$_dc_f"
   }
   # THE JOINS, ONE COPY EACH, asked by the terms registration (which writes what they find) and by
   # a question registration (which only reads it), so the two cannot place one start on two rows.
@@ -1112,7 +1147,7 @@ if [ -n "$IS_START" ]; then
   }
   # ---- END a stale launch is no candidate ----
 
-  # A QUESTION REGISTRATION: read the agent's row, push one checks file or nothing, write nothing.
+  # A QUESTION REGISTRATION: read the agent's row, push its one file or nothing, write nothing.
   # THE ROW, in this order, which is why it agrees with the terms registration whichever ran first:
   #   1. the last row of this session carrying this agent's id, whatever its status. After the
   #      terms registration has joined, that is its `identified` row, a copy of the joined row with
@@ -1125,7 +1160,12 @@ if [ -n "$IS_START" ]; then
   # candidate carries the same `questions=` that set is pushed; when they differ nothing is, and a
   # registration whose question one of them carries says so, naming the candidates.
   if [ -n "$START_QUESTION" ]; then
-    case "$START_QUESTION" in evidence|adversarial|structure) : ;; *) exit 0 ;; esac
+    case "$START_QUESTION" in
+      evidence|adversarial|structure)
+        START_NAME="checks-$START_QUESTION"; START_LINE="bionic checks: $START_QUESTION"; START_WHAT="checks file" ;;
+      severity) START_NAME=severity; START_LINE="bionic severity scale"; START_WHAT="severity scale" ;;
+      *) exit 0 ;;
+    esac
     [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ] || exit 0
     START_ID=$(sanitize "$START_ID" 200)
     START_TYPE=$(sanitize "$START_TYPE" 200)
@@ -1152,17 +1192,18 @@ if [ -n "$IS_START" ]; then
             if [ "$(printf '%s\n' "$Q_SETS" | grep -c '')" = 1 ]; then
               Q_SET="$Q_SETS"
             else
-              case ",$(printf '%s' "$Q_SETS" | tr '\n' ','),"  in
-                *",$START_QUESTION,"*)
+              Q_ANY=$(while IFS= read -r _q_l; do start_pushed "$_q_l"; printf ','; done <<< "$Q_SETS")
+              case ",$Q_ANY," in
+                *",$START_NAME,"*)
                   Q_NAMES=$(while IFS= read -r _q_l; do printf ' %s=%s' "$(line_field "$_q_l" name)" "$(line_field "$_q_l" questions)"; done <<< "$Q_CANDS")
-                  echo "execution-recorder: agent $START_ID cannot be placed on one of the $Q_N launches of $START_TYPE, and they carry different questions= (name=questions:$Q_NAMES) — checks-$START_QUESTION.md not pushed" >&2 ;;
+                  echo "execution-recorder: agent $START_ID cannot be placed on one of the $Q_N launches of $START_TYPE, and they carry different questions= (name=questions:$Q_NAMES) — $START_NAME.md not pushed" >&2 ;;
               esac
             fi
           fi
           ;;
       esac
     fi
-    case ",$Q_SET," in *",$START_QUESTION,"*) deliver_checks "$START_QUESTION" ;; esac
+    case ",$(start_pushed "$Q_SET")," in *",$START_NAME,"*) deliver_context "$START_NAME" "$START_LINE" "$START_WHAT" ;; esac
     exit 0
   fi
   # ---- END one string per file ----
@@ -1528,6 +1569,8 @@ if [ -n "$IS_START" ]; then
   # `restarted_at` follows the same substitute-or-append rule, and only on a restart: the
   # joined row is an intended/confirmed row, which no writer stamps with one, so on every
   # other identification the row is byte-identical to before T20b.
+  # `pushed=` (wave-28 T16) is written after it by `pushed_onto`, the key's one writer: what this
+  # start's question registrations push for the row's `questions=`; a row with none gets none.
   IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" -v td="$TERMS_AT" '
     BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0; tseen = 0 }
     {
@@ -1542,6 +1585,7 @@ if [ -n "$IS_START" ]; then
     END { if (!seen) printf "|agent_id=%s", id
           if (ra != "" && !rseen) printf "|restarted_at=%s", ra
           if (td != "" && !tseen) printf "|terms-delivered=%s", td }')
+  IDENTIFIED=$(pushed_onto "$IDENTIFIED")
   printf '%s\n' "$IDENTIFIED" >> "$ROSTER_FILE" 2>/dev/null
   # Placed, so its clock file has done its work (T68): the start's question registrations read
   # the row above by its id.
@@ -1566,7 +1610,6 @@ fi
 # payload/scripts/lib/observe.sh, so there is nothing left for this script to record: one
 # writer of a state nobody reads is a state that should not exist.
 #
-# WHAT STAYS ON THIS CHANNEL. The pressure sample above, which is a fact about a Bash call
-# having happened rather than about what it printed. A Bash payload reaches this line with
-# its sample already taken and nothing to do.
+# WHAT STAYS ON THIS CHANNEL. Nothing for a Bash payload: it reaches this line with nothing
+# to do.
 exit 0

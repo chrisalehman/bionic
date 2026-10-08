@@ -1106,4 +1106,119 @@ expect_contains "80b.5: …under both pages' headings" "baseline ✗ rows:" "$S8
 expect_eq "80b.6: …the shared row printed once per page, so twice" "2" \
   "$(printf '%s\n' "$S80B_BAD" | grep -c '✗ alpha-row')"
 
+section "§RECORD: doctor prints the install record, one row per recorded tool (wave-28 T40, AC-12.3)"
+
+# The record is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/installed`, so each run here names its own
+# CLAUDE_CONFIG_DIR under this suite's root rather than inheriting the runner's. Four lines: two tools,
+# one of them twice (the newest line is the one read), and a name the table does not hold.
+REC_CCD="${TMP}/rec-config"
+mkdir -p "${REC_CCD}/bionic"
+printf '%s\t%s\t%s\t%s\n' \
+  ccstatusline statusline 2026-10-01T10:00:00Z 1.12.0 \
+  @pencil.dev/cli npm-global 2026-10-01T11:00:00Z 1.12.0 \
+  retired-tool npm-global 2026-09-01T09:00:00Z 1.9.0 \
+  @pencil.dev/cli npm-global 2026-10-02T12:00:00Z 1.13.0 > "${REC_CCD}/bionic/installed"
+REC_EMPTY="${TMP}/rec-config-empty"
+mkdir -p "$REC_EMPTY"
+
+rec_section() {  # <report> -> the INSTALL RECORD section: its heading to the first blank line
+  printf '%s\n' "$1" | awk 'index($0, "INSTALL RECORD") == 1 { on = 1 } on && $0 == "" { exit } on { print }'
+}
+rec_row() {  # <section> <name> -> the section's rows for <name>
+  printf '%s\n' "$1" | awk -v n="$2" '$1 == n { print }'
+}
+
+OUT_REC="$(run_doctor CLAUDE_CONFIG_DIR="$REC_CCD")"
+SEC_REC="$(rec_section "$OUT_REC")"
+expect_nonempty "REC.1: the page carries an INSTALL RECORD section (the section extractor reads)" "$SEC_REC"
+ROW_CCS="$(rec_row "$SEC_REC" ccstatusline)"
+expect_nonempty "REC.2: the recorded ccstatusline has its row" "$ROW_CCS"
+expect_contains "REC.3: …with its kind" " statusline " "$ROW_CCS"
+expect_contains "REC.4: …the time it was installed" "2026-10-01T10:00:00Z" "$ROW_CCS"
+expect_contains "REC.5: …and the bionic that installed it" "bionic 1.12.0" "$ROW_CCS"
+ROW_PEN="$(rec_row "$SEC_REC" @pencil.dev/cli)"
+expect_eq "REC.6: a tool recorded twice has one row" "1" "$(printf '%s\n' "$ROW_PEN" | grep -c .)"
+expect_contains "REC.7: …read from its newest line" "2026-10-02T12:00:00Z  bionic 1.13.0" "$ROW_PEN"
+ROW_RET="$(rec_row "$SEC_REC" retired-tool)"
+expect_nonempty "REC.8: a name the table no longer holds has its row" "$ROW_RET"
+expect_contains "REC.9: …which says unknown" " unknown " "$ROW_RET"
+expect_contains "REC.10: …and that remove never acts on it" "remove never acts on it" "$ROW_RET"
+expect_match "REC.11: the unrecorded rg is on the page (the THIRD PARTY table names it)" "* rg *" "$OUT_REC"
+expect_eq "REC.12: …and has no row in the record's section" "" "$(rec_row "$SEC_REC" rg)"
+expect_eq "REC.13: every row of the section fits 100 columns" "" "$(too_wide "$SEC_REC")"
+
+OUT_REC0="$(run_doctor CLAUDE_CONFIG_DIR="$REC_EMPTY")"
+SEC_REC0="$(rec_section "$OUT_REC0")"
+expect_contains "REC.16: the heading says remove also acts on a native plugin the CLI registry proves (wave-28 T10)" \
+  "INSTALL RECORD — what bionic installed; remove acts on these and on registry-proven plugins" "$SEC_REC"
+expect_eq "REC.17: …and the heading fits 100 columns" "" "$(too_wide "$(printf '%s\n' "$SEC_REC" | head -1)")"
+expect_contains "REC.14: with no record the section says so" "none recorded" "$SEC_REC0"
+expect_eq "REC.15: …and has no ccstatusline row (the row extractor read one above)" "" "$(rec_row "$SEC_REC0" ccstatusline)"
+
+section "§GATE: RESOURCES reports the machine's share and the gate's state (wave-28 T13, D14)"
+
+# A share file of 70 and a gate store nothing has asked yet, under a CLAUDE_CONFIG_DIR of this
+# suite's own; the machine is planted by the readers' pins, so the line is the gate's, not this host's.
+G_CCD="${TMP}/gate-config"
+mkdir -p "${G_CCD}/bionic/gate/requests" "${G_CCD}/bionic/gate/cost"
+printf '70\n' > "${G_CCD}/bionic/share"
+res_section() {  # <report> -> the RESOURCES section: its heading to the first blank line
+  printf '%s\n' "$1" | awk '$0 == "RESOURCES" { on = 1 } on && $0 == "" { exit } on { print }'
+}
+OUT_G="$(run_doctor CLAUDE_CONFIG_DIR="$G_CCD" BIONIC_PROBE_USED_PCT=40 BIONIC_PROBE_BUSY_CORES=1.5 \
+  BIONIC_PROBE_BUSY_CORES_5M=2.5 BIONIC_PROBE_CORES=8)"
+SEC_G="$(res_section "$OUT_G")"
+expect_nonempty "G.1: the page carries a RESOURCES section (the section extractor reads)" "$SEC_G"
+expect_contains "G.2: the share row reads the share file" "share" "$(printf '%s\n' "$SEC_G" | grep ' share ')"
+expect_contains "G.3: …its 70%, set in the file" "70% of this machine (set in bionic/share)" "$SEC_G"
+expect_contains "G.4: the gate row reads the store: used, admitted, waiting, the loads, the promises" \
+  "used 40% · admitted 0 · waiting 0 · load 1.5/2.5 · promised 0" "$SEC_G"
+expect_eq "G.5: every row of the section fits 100 columns" "" "$(too_wide "$SEC_G")"
+
+G_CCD0="${TMP}/gate-config-empty"
+mkdir -p "$G_CCD0"
+SEC_G0="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$G_CCD0")")"
+expect_contains "G.6: with no share file the row says 80, the default" "80% of this machine (the default; no share file)" "$SEC_G0"
+expect_contains "G.7: with no store the gate row says nothing has asked" "no store yet — nothing has asked the gate" "$SEC_G0"
+expect_false "G.8: …and doctor made no store (the store above was read, G.4)" test -e "${G_CCD0}/bionic/gate"
+
+section "§SHARE-DOCTOR: doctor reports the share the verb wrote, and its source (wave-28 T10, D16)"
+
+# The share row is T13's; this section drives the verb that sets the file and reads the row after it. The verb runs
+# under a CLAUDE_CONFIG_DIR of this section's own and a HOME that holds nothing.
+SD_CCD="${TMP}/share-doc-config"
+mkdir -p "$SD_CCD"
+share_set() {  # <args...> -> the verb's exit code, its output in SD_OUT
+  SD_OUT="$( cd "$TMP" && env HOME="${TMP}/no-home" CLAUDE_CONFIG_DIR="$SD_CCD" BIONIC_PLUGINS_DIR="${TMP}/no-plugins" \
+    bash "${REPO}/hooks/session-poker.sh" share "$@" 2>&1 )"
+}
+SD_SEC0="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_contains "SD.1: before the verb, the share row says the default and that no file is there" \
+  "80% of this machine (the default; no share file)" "$SD_SEC0"
+share_set 65; SD_RC=$?
+expect_eq "SD.2: the verb sets 65 (exit 0)" "0" "$SD_RC"
+SD_SEC1="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_contains "SD.3: after it, the row says 65 and that the file set it" "65% of this machine (set in bionic/share)" "$SD_SEC1"
+expect_eq "SD.4: …and the section has one share row, not two" "1" "$(printf '%s\n' "$SD_SEC1" | grep -c ' share ')"
+expect_eq "SD.5: …every row of it fits 100 columns" "" "$(too_wide "$SD_SEC1")"
+share_set 101; SD_RC2=$?
+SD_SEC2="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_eq "SD.6: a refused value exits 1 and the row still says 65, the refusal having written nothing" "1" "$SD_RC2"
+expect_contains "SD.6b: …the row is as it was" "65% of this machine (set in bionic/share)" "$SD_SEC2"
+share_set 100
+SD_SEC3="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+expect_contains "SD.7: share 100 is reported as 100" "100% of this machine (set in bionic/share)" "$SD_SEC3"
+expect_eq "SD.8: …and every row fits 100 columns at the widest share" "" "$(too_wide "$SD_SEC3")"
+
+# the source is judged by the VALUE, as gate_share judges it (read-structure-p19 #5): a file the gate would refuse is the default
+for SD_JUNK in abc 0 101 1234 ""; do
+  printf '%s\n' "$SD_JUNK" > "${SD_CCD}/bionic/share"
+  SD_SECJ="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+  expect_contains "SD.9 a share file holding '$SD_JUNK' reads 80, the default, as the gate does" \
+    "80% of this machine (the default; no share file)" "$SD_SECJ"
+done
+printf '65\n' > "${SD_CCD}/bionic/share"
+expect_contains "SD.10 control: a valid value in the same file reads as set" "65% of this machine (set in bionic/share)" \
+  "$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+
 finish

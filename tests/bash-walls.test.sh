@@ -98,7 +98,21 @@ mk_repo() {
   git -C "$repo" checkout -q -b feature/t23 2>/dev/null
   printf 'generic fixture proof\n' > "$repo/.bionic/docs/record/generic-evidence.md"
   [ "${2:-yes}" = yes ] && : > "$repo/.bionic/tmp/engaged-$SID.state"
+  bw_door "$repo" "${3:-with}"
   printf '%s' "$repo"
+}
+
+# bw_door <dir> [with|noonly|none] — what <dir>'s tests/run.sh is (wave-28 T54, D27). THE ONE DOOR
+# fires only in a project whose runner takes `--only`, so a world is built WITH one by default (the
+# project this suite's agent rows stand in is bionic's own shape); `noonly` is a runner of the
+# project's own that takes no flag, and `none` is a project with suites and no runner at all.
+bw_door() {
+  mkdir -p "$1/tests"
+  case "${2:-with}" in
+    none)   rm -f "$1/tests/run.sh" ;;
+    noonly) printf '#!/bin/bash\n# the project'"'"'s own runner: every suite, in order, no flags\nfor s in tests/*.test.sh; do bash "$s" || exit 1; done\n' > "$1/tests/run.sh" ;;
+    *)      printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$1/tests/run.sh" ;;
+  esac
 }
 
 # bw_bind <repo> — an ENGAGED session in <repo> is bound to the plan the case just wrote at
@@ -1015,11 +1029,11 @@ bw_dispatched "$R_REPAIR" t14repair suites_allowed=x.test.sh suites_source=decla
 
 # (a) no `timeout` at all — the harness's own default (two minutes) is what kills a real
 # suite, and this is the shape a dispatched worker's Bash call carries when it names none.
-run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
+run_hook "$(mk_payload "$R_REPAIR" 'tests/run.sh --only x.test.sh' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14a: a subagent suite call with no timeout is not refused" 0 "$ST"
 expect_eq "14b: …updatedInput.timeout is raised to the harness maximum" "600000" "$(updated_timeout_of)"
-expect_contains "14c: …command and tool_name ride through unchanged" "bash tests/x.test.sh" \
+expect_contains "14c: …command and tool_name ride through unchanged" "tests/run.sh --only x.test.sh" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
 expect_contains "14d: …the repair is logged, naming the agent" \
   "canonical-sdlc [suite-timeout]: repaired from=absent to=600000 agent=$ACTOR" "$ERR"
@@ -1034,12 +1048,12 @@ expect_eq "14e0: …and stderr is EXACTLY that one log line — no stray shell e
 # then rewrites `command` on the SAME object, so neither change overwrites the other.
 expect_eq "14e1: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14e2: …whose command is the booking wrap around the original" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites x\\.test\\.sh --runner -- 'tests/run\\.sh --only x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14e3: …beside the repaired timeout" "600000" "$(updated_timeout_of)"
 
 # (b) a timeout BELOW the maximum — raised, not left alone.
-run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 3000)" \
+run_hook "$(mk_payload "$R_REPAIR" 'tests/run.sh --only x.test.sh' "$ACTOR" omit Bash test-runner 3000)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_eq "14e: a timeout below the maximum is raised to it" "600000" "$(updated_timeout_of)"
 expect_contains "14f: …logged with the ORIGINAL value, not the repaired one" \
@@ -1047,7 +1061,7 @@ expect_contains "14f: …logged with the ORIGINAL value, not the repaired one" \
 
 # (c) a timeout AT the maximum — nothing to repair, and ARM 2's budget arm decides the call
 # instead (x.test.sh is on the row's budget, so it passes in silence).
-run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
+run_hook "$(mk_payload "$R_REPAIR" 'tests/run.sh --only x.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14g: a suite call already at the harness maximum is not refused" 0 "$ST"
 # THE WRAP RIDES EVERY ALLOWED SUITE CALL (wave-26 T7, D8), so updatedInput is present here
@@ -1055,13 +1069,13 @@ expect_status "14g: a suite call already at the harness maximum is not refused" 
 expect_eq "14h: …its timeout is left as the caller set it — there is nothing to repair" \
   "600000" "$(updated_timeout_of)"
 expect_regex "14h2: …and the only rewrite is the booking wrap around the original command" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites x\\.test\\.sh --runner -- 'tests/run\\.sh --only x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_empty "14i: …no repair logged either" "$ERR"
 
 # (d) ARM 1 UNCHANGED — a backgrounded suite is still refused, and the repair arm (which
 # sits textually after ARM 1) never gets a chance to speak for it.
-run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" true Bash test-runner)" \
+run_hook "$(mk_payload "$R_REPAIR" 'tests/run.sh --only x.test.sh' "$ACTOR" true Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14j: a backgrounded suite is still refused — ARM 1's own verdict, unchanged" 2 "$ST"
 expect_contains "14k: …in ARM 1's own words" "a backgrounded suite's result is never read" "$ERR"
@@ -1082,7 +1096,7 @@ run_hook "$(mk_payload "$R_ADV" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600
 expect_status "14m1: an advisory main-thread suite call is allowed" 0 "$ST"
 expect_eq "14m2: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14m3: …carrying the booking wrap" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait [0-9]+ --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait [0-9]+ --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14m4: …and no timeout repair on the main thread" "" "$(updated_timeout_of)"
 expect_nonempty "14m4: …(the reader works: the wrap's command is non-empty on the same object)" \
@@ -1098,7 +1112,7 @@ expect_empty "14p: …and nothing on either stream" "$OUT$ERR"
 
 # (g) THE CEILING ITSELF MOVES — bionic setup's 30-minute ceiling, not the 600000 stock
 # default, is what a repair on an armed machine raises to.
-run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
+run_hook "$(mk_payload "$R_REPAIR" 'tests/run.sh --only x.test.sh' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=1800000
 expect_eq "14q: a wider harness ceiling (bionic setup's 30 minutes) is the value repaired to" \
   "1800000" "$(updated_timeout_of)"
@@ -1109,7 +1123,7 @@ expect_eq "14q: a wider harness ceiling (bionic setup's 30 minutes) is the value
 # reads "absent" rather than the unusable text.
 NONNUM_PAYLOAD=$(jq -n --arg s "$SID" --arg c "$R_REPAIR" --arg a "$ACTOR" \
   '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
-    tool_input:{command:"bash tests/x.test.sh", timeout:"soon"},
+    tool_input:{command:"tests/run.sh --only x.test.sh", timeout:"soon"},
     tool_use_id:"toolu_01t23nonnum", agent_id:$a, agent_type:"test-runner"}')
 run_hook "$NONNUM_PAYLOAD" BASH_MAX_TIMEOUT_MS=600000
 expect_eq "14r: a non-numeric timeout repairs the same as an absent one" "600000" \
@@ -1137,7 +1151,7 @@ R_ORDER="$(mk_repo armorder)"
 bw_dispatched "$R_ORDER" t13writer \
   suites_allowed=alpha.test.sh suites_source=declared files=
 
-run_hook "$(mk_payload "$R_ORDER" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner)" \
+run_hook "$(mk_payload "$R_ORDER" 'tests/run.sh --only gamma.test.sh' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14t: off-budget + NO timeout: refused — the budget arm runs before the repair" \
   2 "$ST"
@@ -1155,7 +1169,7 @@ expect_eq "14w: …and no updatedInput on stdout either" "no" "$(has_updated_inp
 # (j) ITS PAIR — the same payload shape ON the budget is still repaired exactly as T3
 # shipped it. Without this row, 14t-14w are satisfied by a wall that simply stopped
 # repairing anything.
-run_hook "$(mk_payload "$R_ORDER" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner)" \
+run_hook "$(mk_payload "$R_ORDER" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14x: on-budget + no timeout: allowed — reaching the repair arm at all proves the budget arm passed it" 0 "$ST"
 expect_eq "14y: …updatedInput.timeout still raised to the harness maximum" "600000" \
@@ -1192,7 +1206,7 @@ WIRE_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 
 # (a) the ordinary per-suite refusal — the primary AC-5.2 site (walls.sh's own line
 # number for "On the budget:" cited by the wave plan).
-run_hook "$(mk_payload "$R15" 'bash tests/close-out.test.sh' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15" 'tests/run.sh --only close-out.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15a: an off-budget suite is still refused" 2 "$ST"
 expect_contains "15a2: …and the DEFAULT (non-verbose) exit-2 stderr carries the FIRST allowed token" \
   "archive.test.sh" "$ERR"
@@ -1285,7 +1299,7 @@ expect_eq "15a24: a fitting declared run keeps the verdict line byte-for-byte" \
 R15Q="$(mk_repo budgetwirequote)"
 bw_dispatched "$R15Q" "w budget;rm" \
   "suites_allowed=archive.test.sh" suites_source=derived files=
-run_hook "$(mk_payload "$R15Q" 'bash tests/close-out.test.sh' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15Q" 'tests/run.sh --only close-out.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15a13: an off-budget suite for a row with an unsafe name is refused" 2 "$ST"
 expect_contains "15a14: …and the remedy names the row as the roster carries it, quoted" \
   "amend 'w budget;rm' --suites+ close-out.test.sh" "$ERR"
@@ -1310,7 +1324,7 @@ fi
 # THE BODY REASSIGNS THE VARIABLE (wave-24 T13, A-orch-15). Since T5 a loop over a literal
 # word list resolves to its suites and meets the ORDINARY refusal, so the fixture that drives
 # THIS arm is the one the classifier still cannot resolve: `s=c` in the body.
-run_hook "$(mk_payload "$R15" 'for s in a b; do s=c; bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15" 'for s in a b; do s=c; tests/run.sh --only "$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15b: an unexpanded suite name is still refused" 2 "$ST"
 expect_contains "15b2: …and the recorded budget is on the DEFAULT stderr too" \
   "archive.test.sh" "$ERR"
@@ -1324,25 +1338,25 @@ expect_contains "15b4: …saying no literal list can be derived from a body that
   "no literal list can be derived" "$ERR"
 expect_contains "15b5: …naming the reassignment as the reason" "reassigns its variable" "$ERR"
 expect_contains "15b5b: …and asking for the literal lines the agent means" \
-  "Write the literal lines you mean, one call each: bash tests/<name>.test.sh" "$ERR"
-expect_absent "15b6: …never the header's words as a line to run" "bash tests/a.test.sh" "$ERR"
+  "Write the literal names you mean, through the one door: tests/run.sh --only <name>.test.sh" "$ERR"
+expect_absent "15b6: …never the header's words as a line to run" "tests/run.sh --only a.test.sh" "$ERR"
 expect_absent "15b6b: …never the canned alpha example the arm used to print" "alpha.test.sh" "$ERR"
 # THE FIX IS THE LOOP'S OWN WORDS when the body leaves the variable alone (wave-24 T13, D10,
 # AC-6.3): an `eval` keeps the classifier from expanding the command, and the lines the loop
 # would have run are read off `cmd_suite_loop_lines` — never a canned example.
-run_hook "$(mk_payload "$R15" 'for s in a b; do bash "tests/$s.test.sh"; done; eval :' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15" 'for s in a b; do tests/run.sh --only "$s.test.sh"; done; eval :' "$ACTOR" omit Bash test-runner)"
 expect_status "15b10: a loop the classifier will not expand is refused as unexpanded" 2 "$ST"
 expect_contains "15b11: …by the unexpanded-name arm" \
   "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "15b12: …printing the loop's first word as the literal line to run" \
-  "    bash tests/a.test.sh" "$ERR"
-expect_contains "15b13: …and its second" "    bash tests/b.test.sh" "$ERR"
+  "    tests/run.sh --only a.test.sh" "$ERR"
+expect_contains "15b13: …and its second" "    tests/run.sh --only b.test.sh" "$ERR"
 # A `$` THE TEXT GIVES NO WORDS FOR still refuses, and says why it has no line to print.
-run_hook "$(mk_payload "$R15" 'for s in $(ls tests); do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15" 'for s in $(ls tests); do tests/run.sh --only "$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15b7: a loop over a command substitution is refused as unexpanded" 2 "$ST"
 expect_contains "15b8: …and says the text gives no literal list to print" \
   "no literal list" "$ERR"
-expect_absent "15b9: …printing no line it cannot know" "bash tests/a.test.sh" "$ERR"
+expect_absent "15b9: …printing no line it cannot know" "tests/run.sh --only a.test.sh" "$ERR"
 
 # (c) the full-tree case (`tests/run.sh`, not on this row's budget). A FRESH row: R15's
 # own set literally contains the token "run.sh" as one of its two allowed SUITE NAMES,
@@ -1361,7 +1375,7 @@ expect_contains "15c2: …and the recorded budget is on the DEFAULT stderr" \
 R15N="$(mk_repo budgetwirenone)"
 bw_dispatched "$R15N" t15none \
   suites_allowed=none suites_source=declared files=
-run_hook "$(mk_payload "$R15N" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15N" 'tests/run.sh --only gamma.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15d: a Suites: none row still refuses" 2 "$ST"
 expect_contains "15d2: …and the DEFAULT stderr says so honestly — 'none' on the wire" \
   "none" "$ERR"
@@ -1381,7 +1395,7 @@ for i in $(seq 1 38); do WIDE_SET="$WIDE_SET s${i}.test.sh"; done
 WIDE_SET="${WIDE_SET# }"
 bw_dispatched "$R15W" t15wide \
   "suites_allowed=$WIDE_SET" suites_source=derived files=
-run_hook "$(mk_payload "$R15W" 'bash tests/zzz-off-budget.test.sh' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15W" 'tests/run.sh --only zzz-off-budget.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15e: an off-budget suite against a 38-suite row is refused" 2 "$ST"
 expect_eq "15e2: …still exactly one VERDICT line" "1" \
   "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
@@ -1399,14 +1413,14 @@ expect_contains "15e5: …with an honest count of what did not fit" "more" "$ERR
 # pinned to the SAME value this call sets `BASH_MAX_TIMEOUT_MS` to keeps ARM R's
 # repair-and-log silent too (section 14c: "a timeout AT the maximum — nothing to
 # repair"), regardless of whatever ceiling the calling shell happens to have exported.
-run_hook "$(mk_payload "$R15" 'bash tests/archive.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
+run_hook "$(mk_payload "$R15" 'tests/run.sh --only archive.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
 # THE ONLY STDOUT IS THE BOOKING WRAP (wave-26 T7, D8), which every allowed suite call
 # carries: no nudge, no refusal, and nothing on stderr.
 expect_empty "15f2: …stderr stays empty" "$ERR"
 expect_regex "15f3: …and stdout is the booking wrap alone" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites archive\\.test\\.sh --runner -- 'tests/run\\.sh --only archive\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "15f4: …with no other channel beside it" '["hookEventName","updatedInput"]' \
   "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
@@ -1426,7 +1440,7 @@ R15L="$(mk_repo budgetwirelong)"
 LONG_SUITE="tests/a-suite-name-far-too-long-to-fit-even-bare-on-one-refusal-line.test.sh"
 bw_dispatched "$R15L" t15long \
   "suites_allowed=$LONG_SUITE" suites_source=derived files=
-run_hook "$(mk_payload "$R15L" 'for s in a b; do s=c; bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15L" 'for s in a b; do s=c; tests/run.sh --only "$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15g1: an unexpanded name against a too-long single suite is still refused" 2 "$ST"
 expect_contains "15g1: …through the unexpanded-name arm this fallback is named for" \
   "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
@@ -1922,7 +1936,7 @@ t4_eight() {  # <kind label> <repo> <bare command>
 # --- AC-7.1, the three budget kinds ---
 R7S="$(mk_repo t4shell)"
 t4_row "$R7S" t4shell suites_allowed=alpha.test.sh suites_source=declared files=
-t4_eight "shell suite" "$R7S" 'bash tests/alpha.test.sh'
+t4_eight "shell suite" "$R7S" 'tests/run.sh --only alpha.test.sh'
 
 R7N="$(mk_repo t4runner)"
 t4_row "$R7N" t4runner suites_allowed=alpha.test.sh suites_source=declared files= \
@@ -1931,15 +1945,15 @@ t4_eight "non-shell runner" "$R7N" "npx jest --testPathPatterns 'x'"
 
 R7R="$(mk_repo t4reonly)"
 t4_row "$R7R" t4reonly suites_allowed=none suites_source=declared files= \
-  "re_executes=${T4_BT}bash tests/gamma.test.sh${T4_BT}"
-t4_eight "Re-executes-only budget" "$R7R" 'bash tests/gamma.test.sh'
+  "re_executes=${T4_BT}tests/run.sh --only gamma.test.sh${T4_BT}"
+t4_eight "Re-executes-only budget" "$R7R" 'tests/run.sh --only gamma.test.sh'
 
 # THE NEGATIVE CONTROLS: normalising cannot widen the budget. A run that is not the declared
 # one is still refused however it is redirected, and so is a suite neither channel names.
 t4_refused "REQ7 control: the whole-tree jest, redirected, is still REFUSED against a narrower declaration" \
   "$R7N" "npx jest 2>&1 | tee $T4_LOG"
 t4_refused "REQ7 control: an undeclared shell suite, redirected, is still REFUSED on a Re-executes-only row" \
-  "$R7R" "bash tests/delta.test.sh > $T4_LOG 2>&1"
+  "$R7R" "tests/run.sh --only delta.test.sh > $T4_LOG 2>&1"
 
 # THE DECLARED SIDE IS NORMALISED AT ITS ONE DECODE. A row written before the lift refused
 # redirections (or by hand) carries one inside its marks; the rule is written once and held
@@ -1955,9 +1969,9 @@ t4_admitted "REQ7 decode: …and its tee spelling" \
 # --- AC-7.3 (1): the full-tree refusal names the single-suite spelling, and it runs ---
 t4_refused "REQ7 remedy 1: bash tests/run.sh --one is refused as the full tree" \
   "$R7S" 'bash tests/run.sh --one alpha.test.sh'
-T4_R1=$(printf '%s\n' "$ERR" | grep -o 'bash tests/[A-Za-z0-9._-]*\.test\.sh' | head -1)
-expect_eq "REQ7 remedy 1: …and the refusal names the per-suite spelling from the budget" \
-  "bash tests/alpha.test.sh" "$T4_R1"
+T4_R1=$(printf '%s\n' "$ERR" | grep -o 'tests/run.sh --only [A-Za-z0-9._-]*\.test\.sh' | head -1)
+expect_eq "REQ7 remedy 1: …and the refusal names the per-suite spelling from the budget (the door, wave-28 T36)" \
+  "tests/run.sh --only alpha.test.sh" "$T4_R1"
 expect_contains "REQ7 remedy 1: …and says --one is the runner's internal worker mode" "--one" "$ERR"
 t4_admitted "REQ7 remedy 1: …and that spelling, run, is admitted" "$R7S" "${T4_R1:-$T4_NONE}"
 
@@ -1971,9 +1985,9 @@ t4_remedy_bg() {  # <label> <repo> <backgrounded command>
   fix="${fix//<evidence log>/$T4_LOG}"
   t4_admitted "$label: …and the suggestion, run as printed, is admitted" "$r" "${fix:-$T4_NONE}"
 }
-t4_remedy_bg "REQ7 remedy 2a shell suite &" "$R7S" 'bash tests/alpha.test.sh &'
+t4_remedy_bg "REQ7 remedy 2a shell suite &" "$R7S" 'tests/run.sh --only alpha.test.sh &'
 t4_remedy_bg "REQ7 remedy 2b runner &" "$R7N" "npx jest --testPathPatterns 'x' &"
-t4_remedy_bg "REQ7 remedy 2c nohup, redirected, &" "$R7S" "nohup bash tests/alpha.test.sh > $T4_LOG 2>&1 &"
+t4_remedy_bg "REQ7 remedy 2c nohup, redirected, &" "$R7S" "nohup tests/run.sh --only alpha.test.sh > $T4_LOG 2>&1 &"
 # THE TOOL-FLAG CASE: the text is already foreground, so the remedy is the flag.
 t4_drive "$R7S" 'bash tests/alpha.test.sh' true
 expect_status "REQ7 remedy 2d: run_in_background true on a suite is refused" 2 "$ST"
@@ -2071,6 +2085,45 @@ am_refused "19v2: bash session-poker.sh waive" "bash $AM_POKER waive adversarial
 # §ARM-A (release-check) — wave-27 T16, D12, A-orch-44: the verb writes the release's check fact,
 # so an agent that could run it could record the release check of its own head.
 am_refused "19v3: bash session-poker.sh release-check" "bash $AM_POKER release-check"
+# §ARM-A (finding-stated) — wave-28 T17, REQ-8 AC-8.7, D21: the sentence a deferral is stated by is
+# what the release check reads against the changelog, so an agent that could write one could state
+# its own deferral. The verb joins the existing arm's list; there is no second arm.
+am_refused "19v4: bash session-poker.sh finding-stated" \
+  "bash $AM_POKER finding-stated 'record/wave-01/r.md#1' 'a sentence'"
+# §ARM-A (row-landed) — wave-28 T6, REQ-3 AC-3.2, D7, A-orch-81: the verb writes a row's status
+# `landed`, its step line and its ledger line in one transaction, so an agent that could run it could
+# mark its own row landed. `ready` runs it as a command, after the publish; a subagent never does.
+am_refused "19v5: bash session-poker.sh row-landed" \
+  "bash $AM_POKER row-landed T2 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z"
+# §ARM-A (share) — wave-28 T10, REQ-2 AC-2.1 surfaces, D16: the share is the one number that bounds every heavy command on
+# the machine, so an agent that could set it could widen its own room. Both forms are the main thread's: the arm reads the
+# verb, not its operands. The verb joins the existing arm's list; there is no second arm.
+am_refused "19v6: bash session-poker.sh share <n>" "bash $AM_POKER share 90"
+am_refused "19v7: bash session-poker.sh share, the bare form" "bash $AM_POKER share"
+# §ARM-A (finding-check) — wave-28 T41, REQ-8 AC-8.6, D33: a settlement re-rates a finding its reader
+# could not settle, so an agent that could write one could settle the check on its own code. The verb
+# joins the existing arm's list; there is no second arm.
+am_refused "19v8: bash session-poker.sh finding-check" \
+  "bash $AM_POKER finding-check 'record/wave-01/r.md#1' refuted record/wave-01/c.md"
+# §ARM-A (finding-move) — wave-28 T42, REQ-8 AC-8.9, D34: a move carries a finding across the line on the
+# user's word, so an agent that could run it could defer a finding against its own code. The verb joins the
+# existing arm's list; there is no second arm.
+am_refused "19v9: bash session-poker.sh finding-move" \
+  "bash $AM_POKER finding-move 'record/wave-01/r.md#1' defer 'later' 'the docs pass'"
+# §ARM-A (step-field) — wave-28 T8, REQ-3 AC-3.5, D17: the verb writes the fields the evidence gate reads (`head:`,
+# `pass:`, `total:`), so an agent that could run it could write the evidence of its own step. The verb joins the
+# existing arm's list; there is no second arm.
+am_refused "19v10: bash session-poker.sh step-field" "bash $AM_POKER step-field 5 head=0123456"
+# §ARM-A (land --by-hand) — wave-28 T3, REQ-5 AC-5.2, D9: the hand landing publishes a row past the
+# line, so only the main thread may call it. The arm gains a second script name, not a second arm.
+AM_SW="/opt/plugin/scripts/spawn-worktree.sh"
+am_refused "19w: bash spawn-worktree.sh land --by-hand" "bash $AM_SW land .worktrees/x --by-hand --reason 'why'"
+am_refused "19w1: behind cd … &&, the flag after the reason" "cd $R_AM && bash $AM_SW land .worktrees/x --reason r --by-hand"
+run_hook "$(mk_payload "$R_AM" "bash $AM_SW land .worktrees/x --by-hand --reason 'why'" "$AM_ID" omit Bash w20-sub)"
+expect_contains "19w2: …the detail names the script and the verb" "spawn-worktree.sh land --by-hand" "$ERR"
+am_admitted "19w3: land --by-hand from the main thread" "bash $AM_SW land .worktrees/x --by-hand --reason 'why'" ""
+am_admitted "19w4: a subagent's spawn-worktree.sh remove passes this arm" "bash $AM_SW remove .worktrees/x"
+am_admitted "19w5: a subagent's quoted mention of the hand landing is not a call" "echo 'spawn-worktree.sh land x --by-hand'"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
@@ -2085,6 +2138,16 @@ am_admitted "19j5: proof-add from the main thread" \
 am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19j7: waive from the main thread" "bash $AM_POKER waive adversarial 'ship it'" ""
 am_admitted "19j8: release-check from the main thread" "bash $AM_POKER release-check" ""
+am_admitted "19j9: finding-stated from the main thread" \
+  "bash $AM_POKER finding-stated 'record/wave-01/r.md#1' 'a sentence'" ""
+am_admitted "19j10: row-landed from the main thread" \
+  "bash $AM_POKER row-landed T2 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z" ""
+am_admitted "19j11: share <n> from the main thread" "bash $AM_POKER share 90" ""
+am_admitted "19j12: share from the main thread" "bash $AM_POKER share" ""
+am_admitted "19j13: finding-check from the main thread" \
+  "bash $AM_POKER finding-check 'record/wave-01/r.md#1' refuted record/wave-01/c.md" ""
+am_admitted "19j14: finding-move from the main thread" \
+  "bash $AM_POKER finding-move 'record/wave-01/r.md#1' defer 'later' 'the docs pass'" ""
 
 # EVERY VERB ON THE LIST, READ FROM THE LIST (wave-27 T16; team-lead ruling). The refusal line is
 # `bionic: <verb> refused — <fact> (<fix>)`, capped at 100 columns by refuse.sh, and a verb long
@@ -2097,6 +2160,11 @@ AM_VERBS="$(awk '/^_wall_poker_contract_verb\(\)/ { f = 1 } f && /^}/ { exit }
   "$WALLS_LIB/walls.sh")"
 expect_contains "19x0 precondition: the verb list is read from walls.sh's case arm (it names amend)" "amend" "$AM_VERBS"
 expect_contains "19x0b …and the last verb added, release-check" "release-check" "$AM_VERBS"
+expect_contains "19x0c …and the verb T17 added, finding-stated" "finding-stated" "$AM_VERBS"
+expect_contains "19x0d …and the verb T6 added, row-landed" "row-landed" "$AM_VERBS"
+expect_contains "19x0e …and the verb T10 added, share" " share " " $AM_VERBS "
+expect_contains "19x0f …and the verb T41 added, finding-check" "finding-check" "$AM_VERBS"
+expect_contains "19x0g …and the verb T42 added, finding-move" "finding-move" "$AM_VERBS"
 for _am_v in $AM_VERBS; do
   am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
 done
@@ -2398,23 +2466,24 @@ expect_eq "§CDT an uppercase word that is not git ends nothing" "/b|" "$(cdt_of
 
 section "§WAIT-CEIL — the wrapped command never waits for a place longer than its call lasts (wave-27 T6, AC-8.3)"
 #
-# Critic 3 S2 (wave 26). The shim's wait defaults to 1200 s (lib/slots.sh _slots_max_wait), and
-# ARM R raises a suite call to BASH_MAX_TIMEOUT_MS, 600 000 ms on an install without tier 2: a
-# writer on a full machine waited past its own call, which the harness then moved to the
-# background, where its result is not evidence. The wrap now passes the staged timeout in
-# seconds, less a ten-second margin, as `--max-wait`; the shim uses the smaller of that and its
-# default (tests/slots.test.sh §MAX-WAIT). A short call carries `--kill-after` instead, which
-# already bounds the wait inside the call, so it gets no `--max-wait`.
+# Critic 3 S2 (wave 26). A shim with no bound of its own waits for as long as the machine is
+# full (since wave-28 T12 the gate waits until it admits), and ARM R raises a suite call to
+# BASH_MAX_TIMEOUT_MS, 600 000 ms on an install without tier 2: a writer on a full machine
+# waited past its own call, which the harness then moved to the background, where its result
+# is not evidence. The wrap passes the staged timeout in seconds, less a ten-second margin, as
+# `--max-wait`; the shim hands it to the gate as the ask's --within, and a wait that reaches it
+# ends 75 having run nothing (tests/gate.test.sh §WRAP). A short call carries `--kill-after`
+# instead, which already bounds the wait inside the call, so it gets no `--max-wait`.
 wait_ceiling_of() {  # the staged wrap's --max-wait value, or empty
   updated_command_of | awk '{ for (i = 1; i < NF; i++) if ($i == "--max-wait") { print $(i + 1); exit } }'
 }
-# The shim's default when the wrap names none: 1200 s unless BIONIC_SLOTS_MAX_WAIT says otherwise.
-WC_DEFAULT=1200
+# A wrap that named no ceiling would leave the wait unbounded: read as more than any call lasts.
+WC_DEFAULT=999999
 R_WC="$(mk_repo waitceil)"
 # ON THE BUDGET (wave-27 T5, D15): an agent suite with no recorded set is refused, never wrapped.
 bw_dispatched "$R_WC" twaitceil suites_allowed=x.test.sh suites_source=declared files=
 # (a) the eval: an agent's suite call with no timeout, raised by ARM R to 600 000 ms.
-run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
+run_hook "$(mk_payload "$R_WC" 'tests/run.sh --only x.test.sh' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_eq "WC1: an agent's suite call is staged at the harness maximum" "600000" "$(updated_timeout_of)"
 expect_contains "WC2: …and wrapped (the reader works on this output)" "/scripts/booked.sh" "$(updated_command_of)"
@@ -2423,10 +2492,10 @@ expect_true "WC3: …with a wait ceiling at most the call's timeout (${WC_S:-non
   test "${WC_S:-$WC_DEFAULT}" -le 600
 expect_eq "WC4: …which is the staged timeout in seconds less ten" "590" "$WC_S"
 expect_regex "WC5: …named before --suites, the original command intact after --" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --agent [^ ]+)? --max-wait 590 --suites x\\.test\\.sh --runner -- 'tests/run\\.sh --only x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 # (b) under the tier-2 ceiling the margin follows the staged value.
-run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 1800000)" \
+run_hook "$(mk_payload "$R_WC" 'tests/run.sh --only x.test.sh' "$ACTOR" omit Bash test-runner 1800000)" \
   BASH_MAX_TIMEOUT_MS=1800000
 expect_eq "WC6: a call staged at 1 800 000 ms carries --max-wait 1790 (the shim keeps its smaller default)" \
   "1790" "$(wait_ceiling_of)"
@@ -2446,7 +2515,7 @@ run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' '' omit Bash '' 60000)" BA
 expect_contains "WC11: a short call is wrapped with its kill limit" "--kill-after 55" "$(updated_command_of)"
 expect_eq "WC12: …and no --max-wait beside it (beside WC4 on the same reader)" "" "$(wait_ceiling_of)"
 # (f) a staged timeout too small to leave the margin still hands the shim a valid ceiling: 1 s.
-run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" BASH_MAX_TIMEOUT_MS=5000
+run_hook "$(mk_payload "$R_WC" 'tests/run.sh --only x.test.sh' "$ACTOR" omit Bash test-runner)" BASH_MAX_TIMEOUT_MS=5000
 expect_eq "WC13: a call staged at 5000 ms carries --max-wait 1, never 0 or less" "1" "$(wait_ceiling_of)"
 
 
@@ -2803,7 +2872,7 @@ jq -n --arg s "$SID" --arg c "$RU" --arg a "$ACTOR" \
       CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$REC_HOOK" >/dev/null 2>&1
 expect_absent "UP0 precondition: the start was placed on neither launch" "agent_id=$ACTOR" "$(cat "$RU/.bionic/tmp/roster-$SID.state")"
 expect_contains "UP0 precondition: …both launches are on the roster" "|name=u-two|" "$(cat "$RU/.bionic/tmp/roster-$SID.state")"
-run_hook "$(mk_payload "$RU" 'bash tests/alpha.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)" BIONIC_WALL_VERBOSE=1
+run_hook "$(mk_payload "$RU" 'tests/run.sh --only alpha.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)" BIONIC_WALL_VERBOSE=1
 expect_status "UP1 the unplaced agent's suite is refused" 2 "$ST"
 expect_contains "UP2 …because no row carries its id" "no roster row carries your agent id $ACTOR" "$ERR"
 expect_absent "UP3 …a bionic type is not told its type is the reason" "is not a bionic: role" "$ERR"
@@ -2822,10 +2891,10 @@ else
 fi
 expect_status "UP5 the line, run as printed by the orchestrator, exits 0" 0 "$UP_RC"
 expect_contains "UP6 …and says it recorded the set" "poker: amended — $ACTOR" "$UP_OUT"
-run_hook "$(mk_payload "$RU" 'bash tests/alpha.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)"
+run_hook "$(mk_payload "$RU" 'tests/run.sh --only alpha.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)"
 expect_status "UP7 …and the agent's next call runs the suite" 0 "$ST"
 expect_contains "UP8 …wrapped and stamped with that suite" "--suites alpha.test.sh" "$(updated_command_of)"
-run_hook "$(mk_payload "$RU" 'bash tests/beta.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)"
+run_hook "$(mk_payload "$RU" 'tests/run.sh --only beta.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)"
 expect_status "UP9 a suite the line did not name is still refused (beta is the other launch's)" 2 "$ST"
 # The row amend wrote names no role (none is known for an agent no launch was joined to), so the
 # read-only arm answers from the payload's own type, as for an agent with no row: a test-runner
@@ -2833,5 +2902,616 @@ expect_status "UP9 a suite the line did not name is still refused (beta is the o
 run_hook "$(mk_payload "$RU" 'git commit -m "x"' "$ACTOR" omit Bash bionic:test-runner)"
 expect_contains "UP10 the unplaced test-runner's commit is refused by its own type" \
   "bionic:test-runner: a read-only role never commits" "$ERR"
+
+section "§LOOPVAR — a suite run through a glob loop or a bare variable is refused from a subagent (wave-28 T11, D13)"
+# ============================================================
+#
+# Wave-27 review pass 8 F5: the walk's hand-copied loop `{ for s in tests/*.test.sh; do if bash
+# "$s"; … } | tee` read class none, so a budgeted agent ran every suite in the tree unrefused. The
+# classifier now claims the variable (tests/cmd-class.test.sh §LOOP T11), and the budget's
+# unexpanded-name arm refuses it in one line inside 100 columns (the suites run with
+# BIONIC_REFUSE_STRICT=1, so a longer first line refuses its own call). Beside it, a loop over
+# files that are plainly no suite passes, on the same agent and row.
+#
+# fails-when: the glob loop or the bare variable passes; the refusal is not the unexpanded arm.
+R_LV="$(mk_repo loopvar)"
+bw_dispatched "$R_LV" t11writer "suites_allowed=archive.test.sh" suites_source=declared files=
+for _lv in '{ for s in tests/*.test.sh; do if bash "$s"; then :; fi; done; } | tee log' 'bash "$SUITE"'; do
+  run_hook "$(mk_payload "$R_LV" "$_lv" "$ACTOR" omit Bash test-runner)"
+  expect_status "LV1 [$_lv] is refused" 2 "$ST"
+  LV_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+  # Since wave-28 T36 the one door answers first: a bare form from an agent is refused naming
+  # `tests/run.sh --only`, before the budget's unexpanded-name arm is reached.
+  expect_contains "LV2 …by the door's line (wave-28 T36), ahead of the unexpanded-name arm" "use tests/run.sh --only " "$LV_LINE"
+  expect_eq "LV3 …in one line of at most 100 columns" "yes" "$([ -n "$LV_LINE" ] && [ "${#LV_LINE}" -le 100 ] && echo yes || echo no)"
+done
+run_hook "$(mk_payload "$R_LV" 'for f in docs/*.md; do bash "$f"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "LV4 a loop over files that are plainly no suite passes" 0 "$ST"
+expect_absent "LV4 …with no suite refusal" "unexpanded name" "$ERR"
+
+section "§DOOR — a dispatched agent runs a suite through tests/run.sh --only, never bare (wave-28 T36; D27, AC-10.1, AC-10.3)"
+# ============================================================
+#
+# THE ONE DOOR. A bare suite command typed by a dispatched agent runs in whatever world the
+# agent's shell gives it; `tests/run.sh --only <suite>` runs it in the runner's (the interpreter
+# pin, the environment, the adoption wall, one gate ask per suite). So the wall refuses every bare
+# form the classifier reads — the literal path, the rule-5 evidence shape, a script at argv[0], a
+# literal loop, a glob loop, a bare variable — in one line of at most 100 columns that names the
+# door; the door form itself goes on to the budget like a suite file, and is never the full tree.
+# The main thread is not refused: a person's bare run keeps the seam's pin
+# (tests/interpreter-pin.test.sh §2 drives that pin on a hand run).
+#
+# fails-when: an agent's bare run passes, or its refusal omits `tests/run.sh --only`; the door
+# form is refused on its own budget or read as the full tree; the main thread's bare run is refused.
+R_DR="$(mk_repo door)"
+bw_dispatched "$R_DR" t36writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+dr_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
+dr_fits() { local l; l="$(dr_line)"; [ -n "$l" ] && [ "${#l}" -le 100 ] && echo yes || echo no; }
+for _dr in 'bash tests/alpha.test.sh' \
+           "cd '$R_DR' || exit 1; LOG=x.log; set -o pipefail; bash tests/alpha.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" \
+           './tests/alpha.test.sh' 'bash -x tests/alpha.test.sh'; do
+  run_hook "$(mk_payload "$R_DR" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.1 [$_dr] an on-budget bare run from an agent is refused" 2 "$ST"
+  expect_contains "DOOR.2 [$_dr] …with one line naming the door and the suite" \
+    "use tests/run.sh --only alpha.test.sh" "$(dr_line)"
+  expect_eq "DOOR.3 [$_dr] …of at most 100 columns" "yes" "$(dr_fits)"
+done
+for _dr in 'for s in alpha beta; do bash "tests/$s.test.sh"; done' \
+           'for s in tests/*.test.sh; do bash "$s"; done' 'bash "$SUITE"' \
+           'while read -r s; do bash "$s"; done < list'; do
+  run_hook "$(mk_payload "$R_DR" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.4 [$_dr] a loop or variable form from an agent is refused" 2 "$ST"
+  expect_contains "DOOR.5 [$_dr] …by the door's line" "use tests/run.sh --only " "$(dr_line)"
+  expect_eq "DOOR.6 [$_dr] …of at most 100 columns" "yes" "$(dr_fits)"
+done
+run_hook "$(mk_payload "$R_DR" 'bash tests/canonical-sdlc-governing-skill.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_contains "DOOR.7 a suite name too long for the line still names the door, by placeholder" \
+  "use tests/run.sh --only <suite>" "$(dr_line)"
+expect_eq "DOOR.7b …and stays inside 100 columns" "yes" "$(dr_fits)"
+expect_contains "DOOR.7c …while the detail carries the suite's own command" \
+  "tests/run.sh --only canonical-sdlc-governing-skill.test.sh" "$ERR"
+
+# The door itself: on the budget it passes, wrapped for the runner; off it, the budget refuses.
+run_hook "$(mk_payload "$R_DR" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_ne "DOOR.8 the door form on the budget is not refused" "2" "$ST"
+expect_absent "DOOR.8b …with no refusal line" "refused" "$ERR"
+expect_regex "DOOR.9 …it is wrapped, its suite named, and the shim told it is the runner" \
+  "booked\\.sh.* --suites alpha\\.test\\.sh --runner -- " "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+run_hook "$(mk_payload "$R_DR" "cd '$R_DR' || exit 1; LOG=x.log; set -o pipefail; bash tests/run.sh --only alpha.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" "$ACTOR" omit Bash test-runner 1800000)"
+expect_ne "DOOR.10 the door in the evidence shape passes on the budget" "2" "$ST"
+run_hook "$(mk_payload "$R_DR" 'tests/run.sh --only beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.11 the door form naming a suite off the budget is refused" 2 "$ST"
+expect_contains "DOOR.12 …by the budget arm, naming the budget" "allowed: alpha.test.sh" "$(dr_line)"
+expect_absent "DOOR.13 …and never as the full tree" "full tree" "$ERR"
+run_hook "$(mk_payload "$R_DR" 'tests/run.sh --only alpha.test.sh beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.14 one off-budget name among several refuses the call" 2 "$ST"
+
+# The main thread: the door's arm never speaks there. Engaged, in farm-out's advisory mode (as
+# WC7 drives it), so the one wall that may refuse a main-thread suite stands aside.
+R_DRM="$(mk_repo door-main)"
+printf 'farm-out-mode: advisory\n' > "$R_DRM/.bionic/config.yaml"
+bw_dispatched "$R_DRM" t36main "suites_allowed=beta.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_DRM" 'bash tests/alpha.test.sh' "" omit Bash "" 1800000)"
+expect_ne "DOOR.15 the main thread's bare run is not refused" "2" "$ST"
+expect_absent "DOOR.16 …and the door's line is not printed" "tests/run.sh --only" "$ERR"
+expect_regex "DOOR.17 …it is wrapped as it always was, so the suite it runs gets the seam's pin" \
+  "booked\\.sh.* --suites alpha\\.test\\.sh -- " "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+
+# THE DOOR FIRES ONLY WHERE THE PROJECT HAS IT (wave-28 T54, D27; A-orch-124). bionic bears on
+# other projects: one with suites under tests/ and no tests/run.sh, or a tests/run.sh of its own
+# that takes no `--only`, has no door to be pointed at, so an agent's ON-BUDGET bare run there goes
+# on to the budget as it did before T36 (the verdict and the rewrite of 903c971b). The project is
+# the tree the shim asks from (`cd <dir>` or the payload's cwd, read by `_bsg_cd_walk`), not the
+# repository the hook's root names. The budget arm itself is untouched: an off-budget bare run in
+# a project without the door is refused by it, so the door's absence widens nothing.
+#
+# fails-when: a project without the door has its on-budget bare run refused; a project with the
+# door has it passed; an off-budget run passes without the door; the tree read is the root's and
+# not the command's.
+R_NR="$(mk_repo door-norunner yes none)"
+R_NO="$(mk_repo door-noonly yes noonly)"
+bw_dispatched "$R_NR" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+expect_eq "DOOR.21a the no-runner world has no tests/run.sh" "absent" "$([ -e "$R_NR/tests/run.sh" ] && echo present || echo absent)"
+expect_eq "DOOR.21a2 the no-flag world has a tests/run.sh that never says --only" "present/0" \
+  "$([ -f "$R_NO/tests/run.sh" ] && echo present || echo absent)/$(grep -cF -e '--only' "$R_NO/tests/run.sh")"
+expect_eq "DOOR.21a3 the door world's tests/run.sh says --only" "yes" "$(grep -qF -e '--only' "$R_DR/tests/run.sh" && echo yes || echo no)"
+for _wd in "$R_NR" "$R_NO"; do
+  bw_dispatched "$_wd" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+  for _dr in 'bash tests/alpha.test.sh' './tests/alpha.test.sh' \
+             "cd '$_wd' || exit 1; LOG=x.log; set -o pipefail; bash tests/alpha.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc"; do
+    run_hook "$(mk_payload "$_wd" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
+    expect_status "DOOR.21 [${_wd##*/}] [$_dr] an on-budget bare run passes where the project has no door" 0 "$ST"
+    expect_absent "DOOR.21b …with no refusal line" "refused" "$ERR"
+    expect_regex "DOOR.21c …it is wrapped for the shim exactly as before the door: its suite named, no --runner" \
+      "booked\\.sh.* --agent t54writer .*--max-wait 1790 .*--suites alpha\\.test\\.sh -- " "$(updated_command_of)"
+    expect_absent "DOOR.21d …and the shim is not told it is the runner" " --runner" "$(updated_command_of)"
+  done
+  run_hook "$(mk_payload "$_wd" 'bash tests/beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.22 [${_wd##*/}] an OFF-budget bare run is still refused without the door" 2 "$ST"
+  expect_contains "DOOR.22b …by the budget arm, naming the budget" "allowed: alpha.test.sh" "$(dr_line)"
+  expect_absent "DOOR.22c …and not by the door, which has nothing to point at" "use tests/run.sh --only" "$ERR"
+  expect_eq "DOOR.22d …in a line of at most 100 columns" "yes" "$(dr_fits)"
+done
+# The same extractor and the same call in a project WITH the door: refused, the line exactly as T36 printed it.
+run_hook "$(mk_payload "$R_DR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.23 a project whose tests/run.sh takes --only still refuses the on-budget bare run" 2 "$ST"
+expect_eq "DOOR.23b …with the door's line, text unchanged" \
+  "bionic: suite-run refused — use tests/run.sh --only alpha.test.sh (one door)" "$(dr_line)"
+
+# THE RUNNER HALF (A-orch-125): the same predicate governs the call that NAMES the door. Where the
+# project has none, `tests/run.sh --only <suite>` is the full tree under the project's own runner,
+# judged as at 903c971b (the budget names the full tree, never the shim's `--runner`), so a runner
+# that ignores the flag cannot be handed an admission it never asks for.
+bw_dispatched "$R_NO" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.29 a runner without --only, called with --only, is the full tree: refused" 2 "$ST"
+expect_contains "DOOR.29b …by the full-tree arm, as at 903c971b" "full tree refused; allowed: alpha.test.sh" "$(dr_line)"
+expect_absent "DOOR.29c …and the door has no say" "(one door)" "$(dr_line)"
+bw_dispatched "$R_NO" t54full "suites_allowed=run.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.30 …and passes on a row that carries the full tree" 0 "$ST"
+expect_regex "DOOR.30b …wrapped for the shim" "booked\\.sh.* --suites [^ ]+ -- " "$(updated_command_of)"
+expect_absent "DOOR.30c …with no --runner, so the gate is asked for the run" " --runner" "$(updated_command_of)"
+bw_dispatched "$R_NO" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+R_NOM="$(mk_repo door-main-noonly yes noonly)"
+printf 'farm-out-mode: advisory\n' > "$R_NOM/.bionic/config.yaml"
+bw_dispatched "$R_NOM" t54main "suites_allowed=beta.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NOM" 'tests/run.sh --only alpha.test.sh' "" omit Bash "" 1800000)"
+expect_status "DOOR.31 the main thread, no door: the call passes" 0 "$ST"
+expect_regex "DOOR.31b …wrapped, the shim named" "booked\\.sh.* --suites [^ ]+ -- " "$(updated_command_of)"
+expect_absent "DOOR.31c …and not told it is the runner" " --runner" "$(updated_command_of)"
+run_hook "$(mk_payload "$R_DRM" 'tests/run.sh --only alpha.test.sh' "" omit Bash "" 1800000)"
+expect_regex "DOOR.31d control: the same call where the project has the door IS the runner's" \
+  "booked\\.sh.* --suites alpha\\.test\\.sh --runner -- " "$(updated_command_of)"
+
+# THE TREE IS THE COMMAND'S: a leading `cd <tree>` moves the project the door is looked for in,
+# the way it moves the shim's --stamp-dir. The checkout the hook's root names is not asked.
+DR_WT_DOOR="$R_NR/.worktrees/door"; DR_WT_NONE="$R_DR/.worktrees/nodoor"
+git -C "$R_NR" worktree add -q -b wt-door "$DR_WT_DOOR" 2>/dev/null
+git -C "$R_DR" worktree add -q -b wt-nodoor "$DR_WT_NONE" 2>/dev/null
+bw_door "$DR_WT_DOOR" with; bw_door "$DR_WT_NONE" none
+expect_eq "DOOR.24a the two trees are real worktrees of their own" "$DR_WT_DOOR/$DR_WT_NONE" \
+  "$(git -C "$DR_WT_DOOR" rev-parse --show-toplevel)/$(git -C "$DR_WT_NONE" rev-parse --show-toplevel)"
+bw_dispatched "$R_NR" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_NR" "cd '$DR_WT_DOOR' || exit 1; bash tests/alpha.test.sh" "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.24 a root with no runner, a cd into a tree that has the door: refused" 2 "$ST"
+expect_eq "DOOR.24b …by the door's line" "bionic: suite-run refused — use tests/run.sh --only alpha.test.sh (one door)" "$(dr_line)"
+bw_dispatched "$R_DR" t54writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+run_hook "$(mk_payload "$R_DR" "cd '$DR_WT_NONE' || exit 1; bash tests/alpha.test.sh" "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.25 a root with the door, a cd into a tree that has none: passes" 0 "$ST"
+expect_regex "DOOR.25b …wrapped, stamping the tree it ran in" "--stamp-dir [^ ]*/nodoor .*--suites alpha\\.test\\.sh -- " "$(updated_command_of)"
+# A cwd inside the project is still the project: the runner is looked for at the checkout's top.
+mkdir -p "$R_DR/sub"
+for _dr in "bash $R_DR/tests/alpha.test.sh" 'bash "$PWD/../tests/alpha.test.sh"'; do
+  run_hook "$(mk_payload "$R_DR/sub" "$_dr" "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.25c [$_dr] standing in a subdirectory of the project with the door: refused" 2 "$ST"
+  expect_contains "DOOR.25d …by the door's line" "use tests/run.sh --only " "$(dr_line)"
+done
+bw_dispatched "$R_DR" t36writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+
+# THE MUTANTS of the predicate, on doctored copies of the library: with it removed the door fires
+# in every project (the defect), with it inverted it fires only where there is none, and with the
+# `--only` read dropped a runner of the project's own is taken for the door. Each runs before its
+# absence is read: the mutant parses, and still refuses an off-budget run.
+DRP_FN='^_door_in_tree\(\) \{'
+DRP_READ='grep -qF -- '"'--only'"
+mk_door_mutant() {  # <dir> <shell text appended to walls.sh: a later definition wins>
+  rm -rf "$1"; mkdir -p "$1/hooks"
+  cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$1/scripts"
+  cp "$HOOK" "$1/hooks/bash-walls.sh"
+  case "$2" in
+    UNREAD) sed -e "s/! grep -qF -- '--only' .*|| _DOOR_HERE=yes/_DOOR_HERE=yes/" "$1/scripts/lib/walls.sh" > "$1/walls.tmp" && mv "$1/walls.tmp" "$1/scripts/lib/walls.sh" ;;
+    *) printf '\n%s\n' "$2" >> "$1/scripts/lib/walls.sh" ;;
+  esac
+}
+anchor -E "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_FN" 1
+anchor "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_READ" 1
+DRP_KEEP="$HOOK"
+for _m in removed inverted unread; do
+  DRP_DIR="$SANDBOX/door-pred-$_m"
+  case "$_m" in
+    removed)  mk_door_mutant "$DRP_DIR" '_door_in_tree() { _DOOR_HERE=yes; }' ;;
+    inverted) mk_door_mutant "$DRP_DIR" 'eval "$(declare -f _door_in_tree | sed "1s/_door_in_tree/_door_in_tree_real/")"
+_door_in_tree() { _door_in_tree_real; if [ "$_DOOR_HERE" = yes ]; then _DOOR_HERE=no; else _DOOR_HERE=yes; fi; }' ;;
+    unread)   mk_door_mutant "$DRP_DIR" UNREAD ;;
+  esac
+  expect_eq "DOOR.26 [$_m] the mutant library parses" "0" "$(bash -n "$DRP_DIR/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
+  expect_eq "DOOR.26b [$_m] and differs from the shipped library" "differs" "$(diff -q "$DRP_DIR/scripts/lib/walls.sh" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" >/dev/null 2>&1 && echo same || echo differs)"
+  HOOK="$DRP_DIR/hooks/bash-walls.sh"
+  run_hook "$(mk_payload "$R_NR" 'bash tests/beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.26c [$_m] the mutant still refuses an off-budget run (it runs, not vacuous)" 2 "$ST"
+  run_hook "$(mk_payload "$R_NR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  # The shipped library answers 0 to both calls (DOOR.21). Removed and inverted fire the door at both;
+  # the unread one takes the no-flag runner for the door and still finds no runner at all in R_NR.
+  case "$_m" in unread) _want_nr=0 ;; *) _want_nr=2 ;; esac
+  expect_status "DOOR.27 [$_m] the no-runner project's on-budget bare run reads $_want_nr under the mutant" "$_want_nr" "$ST"
+  run_hook "$(mk_payload "$R_NO" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.28 [$_m] the no-flag runner project's run is refused under the mutant (red against DOOR.21)" 2 "$ST"
+  run_hook "$(mk_payload "$R_NO" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  expect_status "DOOR.28b [$_m] the no-flag runner's --only call passes as a door claim under the mutant (red against DOOR.29)" 0 "$ST"
+  run_hook "$(mk_payload "$R_DR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+  case "$_m" in inverted) _want_dr=0 ;; *) _want_dr=2 ;; esac
+  expect_status "DOOR.28c [$_m] the project with the door reads $_want_dr (the shipped library: 2)" "$_want_dr" "$ST"
+  HOOK="$DRP_KEEP"
+done
+
+# THE MUTANT: the door's block cut from a copy of the library. The bare on-budget run must then
+# pass, which is what DOOR.1 exists to refuse. The copy is a plugin tree of its own (hooks/ beside
+# scripts/), so the hook's loader finds the doctored library first.
+DR_MUT="$SANDBOX/door-mutant"
+mkdir -p "$DR_MUT/hooks"
+cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$DR_MUT/scripts"
+cp "$HOOK" "$DR_MUT/hooks/bash-walls.sh"
+anchor "$DR_MUT/scripts/lib/walls.sh" '# ---- BEGIN THE ONE DOOR' 1
+awk '/# ---- BEGIN THE ONE DOOR/ { skip = 1 } !skip { print } /# ---- END THE ONE DOOR ----/ { skip = 0 }' \
+  "$DR_MUT/scripts/lib/walls.sh" > "$DR_MUT/walls.tmp" && mv "$DR_MUT/walls.tmp" "$DR_MUT/scripts/lib/walls.sh"
+expect_eq "DOOR.18 the mutant library parses" "0" "$(bash -n "$DR_MUT/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
+DR_HOOK_KEEP="$HOOK"; HOOK="$DR_MUT/hooks/bash-walls.sh"
+run_hook "$(mk_payload "$R_DR" 'bash tests/beta.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "DOOR.19 the mutant still refuses an off-budget run (it runs, not vacuous)" 2 "$ST"
+run_hook "$(mk_payload "$R_DR" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_ne "DOOR.20 under the mutant an agent's bare on-budget run passes (the defect DOOR.1 guards)" "2" "$ST"
+HOOK="$DR_HOOK_KEEP"
+
+# ---------------------------------------------------------------------------
+section "§EG-DERIVE — the commit wall reads a reading's result as the judge derives it (wave-28 T60; REQ-8 AC-8.6, AC-8.7; D33; A-orch-161)"
+# ---------------------------------------------------------------------------
+# A reading a `check:` line re-rates (refuted, or settled to another rating) has a result its findings
+# derive at their effective ratings, which the judge reads (lib/proof.sh `_proof_reading_result`). The
+# wall used to read the `result=` the review registered, so after a refutation the judge admitted
+# `current 8` and the release commits were refused (§EG-6's promise, the wall and the judge never answer
+# a section two ways, was false for it). The collector (hooks/bash-walls.sh) now hands the wall the
+# derived result for the plan it judges. FIXTURE FIDELITY: §EG-6's repository, plan writer and gate drive;
+# the records are in the shape the producing verb reads (`reviewed:`, `findings:`, `finding:`, `unsure:`),
+# the judge half is `facts_state` over the same plan text.
+EGD_REC="$R_EG6/.bionic/docs/record/w28t60"
+mkdir -p "$EGD_REC"
+egd_rec() {  # <file> <result> <finding line> -> a one-finding adversarial reading record with an unsure line
+  { printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: %s\nscope: piece\nfindings: 1\n' "${H_EG6:0:10}" "$H_EG6" "$2"
+    printf '%s\nunsure: 1 needs a second machine\n\nwhat the reader found\n' "$3"; } > "$EGD_REC/$1.md"
+}
+egd_rec adv fail "finding: 1 S1 on x.sh:9 - data lost on a second run"
+egd_rec flag flag "finding: 1 S3 off x.sh:9 - a message the reader could not rate"
+printf 'written-by: egd-agent\n' > "$EGD_REC/chk.md"
+EGD_REFUTED='check: record/w28t60/adv.md#1 S1 on "data lost on a second run" refuted by=record/w28t60/chk.md'
+EGD_SETTLED='check: record/w28t60/flag.md#1 S3 off "a message the reader could not rate" settled=S1:on by=record/w28t60/chk.md'
+egd_judge() {  # <question> -> the judge's state of its piece line, over the plan eg6_gate wrote last
+  bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$R_EG6/.bionic/docs/plans/active.md" "$H_EG6" 2>/dev/null \
+    | awk -F'\t' -v q="$1" '$1 == "review" && $2 == q && $4 == "piece" { print $5 }'
+}
+egd_lib() {  # <plan> <evidence> <written> -> the result the judge derives
+  bash -c '. "$1" && _proof_reading_result "$2" "$3" "$4" "$5"' _ "$EG6_LIB" "$1" "$R_EG6/.bionic/docs" "$2" "$3" 2>/dev/null
+}
+
+# ---------- a refuted finding: the reading written result=fail is derived to pass ----------
+EGD_BASE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" adversarial fail record/w28t60/adv.md)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_status "EGD-1 the newest adversarial reading is result=fail and no check names it: the commit is refused (the control)" 2 "$ST"
+expect_contains "EGD-1b …naming the failing reading and its evidence" \
+  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/adv.md)" "$ERR"
+expect_eq "EGD-1c …and the judge reads that piece line as failing, on the same text" "failing" "$(egd_judge adversarial)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_eq "EGD-2c precondition: the judge derives pass for the reading its proof line writes as fail (its only finding refuted)" \
+  "pass|covered" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
+expect_status "EGD-2 §EG-6 AC-8.6 the only finding refuted by a check: line, the Step-6 commit is admitted" 0 "$ST"
+expect_absent "EGD-2b …and no reading question is named unanswered" "a reading question is unanswered" "$ERR"
+
+# ---------- a finding settled to fix on a reading written flag ----------
+EGD_FLAGBASE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" adversarial flag record/w28t60/flag.md)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE")"
+expect_status "EGD-3 the reading written result=flag and no check settling it: the commit is admitted (the control)" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE
+$EGD_SETTLED")"
+expect_eq "EGD-4 precondition: the judge derives fail for the reading its proof line writes as flag, and holds the piece line failing" \
+  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/flag.md flag)|$(egd_judge adversarial)"
+expect_status "EGD-4b §EG-6 AC-8.6 its finding settled to S1 on, the commit is refused" 2 "$ST"
+expect_contains "EGD-4c …naming the reading failing at its derived result" \
+  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/flag.md)" "$ERR"
+
+# ---------- a moved finding: the reading written flag is derived to fail at the moved priority ----------
+{ printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: flag\nscope: piece\nfindings: 1\n' "${H_EG6:0:10}" "$H_EG6"
+  printf 'finding: 1 S2 off x.sh:9 - a side path still wrong\n\nwhat the reader found\n'; } > "$EGD_REC/mv.md"
+EGD_MOVED='moved: record/w28t60/mv.md#1 to=fix by=Dana at=2026-10-07T12:00:00Z words="fix it before the release" why="the user ruled it"'
+EGD_MVBASE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" adversarial flag record/w28t60/mv.md)"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE")"
+expect_status "EGD-5 a reading written flag whose one finding is a deferral, no move: the commit is admitted (the control)" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
+$EGD_MOVED")"
+expect_eq "EGD-6 precondition: the judge derives fail for it once a moved: line sends the finding to fix, and holds the piece line failing" \
+  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
+expect_status "EGD-6b §EG-6 AC-8.6 the moved priority is the one the wall reads: the commit is refused" 2 "$ST"
+expect_contains "EGD-6c …naming the reading failing at its derived result" \
+  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/mv.md)" "$ERR"
+
+# ---------- the mutation arm: the wall back on the written result= ----------
+EGD_MUT="$SANDBOX/derive-mutant"
+mkdir -p "$EGD_MUT/hooks"
+cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$EGD_MUT/scripts"
+cp "$HOOK" "$EGD_MUT/hooks/bash-walls.sh"
+EGD_NEEDLE='r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
+anchor "$EGD_MUT/scripts/lib/walls.sh" "$EGD_NEEDLE" 1
+EGD_N="$EGD_NEEDLE" awk 'BEGIN { n = ENVIRON["EGD_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "r[PROOF_QUESTION] = PROOF_RESULT;" substr($0, i + length(n)); print }' \
+  "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" > "$EGD_MUT/scripts/lib/walls.sh"
+expect_eq "EGD-mut0 the mutant library differs from the shipped one in one line" "1" \
+  "$(diff "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$EGD_MUT/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
+expect_eq "EGD-mut0b …and parses" "0" "$(bash -n "$EGD_MUT/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
+EGD_HOOK_KEEP="$HOOK"; HOOK="$EGD_MUT/hooks/bash-walls.sh"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_status "EGD-mut1 the mutant runs: it refuses the failing reading no check names, as the shipped wall does (EGD-1)" 2 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_status "EGD-mut2 …and refuses the refuted one the shipped wall admits: EGD-2 goes red" 2 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE
+$EGD_SETTLED")"
+expect_status "EGD-mut3 …and admits the one settled to fix the shipped wall refuses: EGD-4b goes red" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
+$EGD_MOVED")"
+expect_status "EGD-mut4 …and admits the moved one the shipped wall refuses: EGD-6b goes red" 0 "$ST"
+HOOK="$EGD_HOOK_KEEP"
+
+# ---------------------------------------------------------------------------
+section "§EG-DERIVE (T72) — the collector derives only where the gate reads, in one pass (wave-28 T72; REQ-8 AC-8.6, AC-8.7; D33; A-orch-213)"
+# ---------------------------------------------------------------------------
+# T60's collector ran `proof_readings_derived` on every commit in a bound root at every step, one awk
+# over the plan per reading and more per `check:` line, while the wall reads `BIONIC_READINGS` only from
+# `current: 6` (measured on a copy of this wave's plan: 13 s with 88 check lines, against the hook's 10 s
+# clock, past which the CLI lets the commit through). The collector now derives only when the plan's
+# declared `current:` is a step the wall reads (lib/walls.sh `eg_plan_reads_readings`, the wall's own
+# step rule `eg_step_reads_readings`), only when a `check:`, `deferred:` or `moved:` line binds a pass,
+# and in one pass over the plan. FIXTURE FIDELITY: §EG-DERIVE's repository, plan writer and gate drive;
+# 88 readings in the producing verb's line shape, each with a record of one finding and a `check:` line;
+# the collector's hand-over is read through a COPY of the hook that writes `BIONIC_READINGS` out just
+# before the verdict is folded (the copy changes nothing else).
+EGD_NOBS="$SANDBOX/egd-readings-seen"
+egd_ms() { perl -MTime::HiRes=time -e 'printf "%d", time * 1000'; }
+egd_hook() {  # <name> <scripts dir> <code> -> a copy of the hook that runs <code> just before it folds the verdict
+  local d="$SANDBOX/egd-hook-$1"
+  mkdir -p "$d/hooks"; ln -s "$2" "$d/scripts" 2>/dev/null
+  EGD_CODE="$3" awk 'BEGIN { c = ENVIRON["EGD_CODE"] } index($0, "bionic_fold \"$EVENT\"") == 1 { print c } { print }' \
+    "$EGD_HOOK_KEEP" > "$d/hooks/bash-walls.sh"
+  printf '%s' "$d/hooks/bash-walls.sh"
+}
+egd_seen() {  # -> `seen|<lines handed>` once the copy has run, `unseen|` before
+  if [ -f "$EGD_NOBS" ]; then printf 'seen|%s' "$(grep -c . "$EGD_NOBS")"; else printf 'unseen|'; fi
+}
+egd_within() {  # <ms> <bound ms> -> `ok`, or `slow (<ms> ms)`
+  if [ "$1" -lt "$2" ] 2>/dev/null; then printf ok; else printf 'slow (%s ms)' "$1"; fi
+}
+EGD_SCRIPTS="$BIONIC_SCRIPTS_DIR/payload/scripts"
+EGD_N=88
+EGD88=""; EGD88_CHECKS=""
+for _egd_i in $(seq 1 "$EGD_N"); do
+  egd_rec "w88-$_egd_i" fail "finding: 1 S1 on x.sh:9 - data lost on a second run"
+  EGD88="${EGD88:+$EGD88
+}$(eg6_reading "$H_EG6" adversarial fail "record/w28t60/w88-$_egd_i.md")"
+  EGD88_CHECKS="${EGD88_CHECKS:+$EGD88_CHECKS
+}check: record/w28t60/w88-$_egd_i.md#1 S1 on \"data lost on a second run\" refuted by=record/w28t60/chk.md"
+done
+EGD88_PLAN_BODY="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)
+$EGD88
+$EGD88_CHECKS"
+EGD_PROBE="$(egd_hook probe "$EGD_SCRIPTS" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'")"
+HOOK="$EGD_PROBE"
+
+# ---------- the gate: a commit below the step that reads is not derived for ----------
+rm -f "$EGD_NOBS"
+EGD_T0="$(egd_ms)"; eg6_gate "$(eg6_plan 4 wave "$EGD88_PLAN_BODY")"; EGD_MS4=$(( $(egd_ms) - EGD_T0 ))
+expect_eq "EGD-7 precondition: the plan holds $EGD_N reading lines of the adversarial question and $EGD_N check: lines" \
+  "$EGD_N|$EGD_N" "$(grep -c '^proved: .*question=adversarial' "$R_EG6/.bionic/docs/plans/active.md")|$(grep -c '^check: ' "$R_EG6/.bionic/docs/plans/active.md")"
+expect_eq "EGD-7a §EG-DERIVE (T72) at current: 4 the hook ran (the copy wrote its file) and handed the wall no readings" "seen|0" "$(egd_seen)"
+expect_eq "EGD-7b …and the commit took well under the hook's 10 s clock (under 3000 ms)" "ok" "$(egd_within "$EGD_MS4" 3000)"
+rm -f "$EGD_NOBS"
+EGD_T0="$(egd_ms)"; eg6_gate "$(eg6_plan 6 wave "$EGD88_PLAN_BODY")"; EGD_MS6=$(( $(egd_ms) - EGD_T0 ))
+expect_eq "EGD-7c the same plan at current: 6: the collector handed the wall a derived result for each reading it read" \
+  "seen|$((EGD_N + 2))" "$(egd_seen)"
+expect_eq "EGD-7d …$EGD_N of them written fail and derived pass (every finding refuted)" "$EGD_N" \
+  "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$EGD_NOBS" | grep -c .)"
+expect_status "EGD-7e …and the wall read them: the commit is admitted, though every reading was written result=fail" 0 "$ST"
+expect_eq "EGD-7f …in well under the hook's 10 s clock (under 3000 ms)" "ok" "$(egd_within "$EGD_MS6" 3000)"
+# the derivation alone, over a plan the size of this wave's: one pass
+EGD_TPLAN="$SANDBOX/egd-time.plan.md"
+{ cat "$R_EG6/.bionic/docs/plans/active.md"; printf '\n## Notes\n\n'; for _egd_i in $(seq 1 3000); do printf 'prose line %s of the plan body\n' "$_egd_i"; done; } > "$EGD_TPLAN"
+egd_derive_ms() {  # <scripts dir> -> ms one `proof_readings_derived` takes over $EGD_TPLAN (the records are the fixture's)
+  local t0 t1
+  t0="$(egd_ms)"
+  bash -c '. "$1/lib/roots.sh" 2>/dev/null; . "$1/lib/proof.sh" && proof_readings_derived "$2" "$3"' _ "$1" "$EGD_TPLAN" "$R_EG6" >"$SANDBOX/egd-derived.out" 2>/dev/null
+  t1="$(egd_ms)"; printf '%s' "$((t1 - t0))"
+}
+# THE BOUND IS 1200 ms (wave-28 T8; A-orch-243): a wall-clock bound in a suite that is not solo (the `# runner: solo`
+# marker holds a whole SUITE out of the parallel batch, never one row) measured the library at 605 to 742 ms at load ~6
+# on an 8-core machine, against the 1000 ms first set; 1200 ms clears that and the per-reading mutant (1377 ms) still
+# fails it. A red here is a timing row: it is re-run once alone before it counts.
+EGD_BOUND_MS=1200
+EGD_DMS="$(egd_derive_ms "$EGD_SCRIPTS")"  # the quickest of three: a spike of load on a shared machine is not the library's
+for _egd_i in 2 3; do EGD_D2="$(egd_derive_ms "$EGD_SCRIPTS")"; [ "$EGD_D2" -ge "$EGD_DMS" ] || EGD_DMS="$EGD_D2"; done
+expect_eq "EGD-8 §EG-DERIVE (T72) one pass: $EGD_N check lines over a $(wc -l < "$EGD_TPLAN" | tr -d ' ')-line plan are derived in under $EGD_BOUND_MS ms (took $EGD_DMS ms; 13 s before)" "ok" "$(egd_within "$EGD_DMS" "$EGD_BOUND_MS")"
+expect_eq "EGD-8b …and the lines are there to be read (the extractor returns real output): $EGD_N written fail, derived pass" "$EGD_N" \
+  "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
+
+# ---------- no line binds a pass: nothing to derive, the written results stand ----------
+rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_eq "EGD-9 §EG-DERIVE (T72) readings and no check:, deferred: or moved: line, at current: 6: the collector handed the wall nothing" "seen|0" "$(egd_seen)"
+expect_status "EGD-9b …and the wall's verdict is the written result's: the failing reading is refused (EGD-1)" 2 "$ST"
+rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_eq "EGD-9c …while the same readings with one check: line are derived (the extractor does return lines)" "seen|3" "$(egd_seen)"
+expect_status "EGD-9d …and the refuted reading is admitted (EGD-2)" 0 "$ST"
+
+# ---------- the facts are for one plan: BIONIC_DEBTS_PLAN other than the plan judged ----------
+EGD_OTHER="$(egd_hook other "$EGD_SCRIPTS" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'; BIONIC_DEBTS_PLAN=/nonexistent/other.plan.md")"
+HOOK="$EGD_OTHER"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_eq "EGD-10 §EG-DERIVE (T72) the collector derived the lines (the extractor returns real output)…" "seen|3" "$(egd_seen)"
+expect_status "EGD-10b …but handed for another plan than the one judged they are ignored: the failing reading is refused, as written" 2 "$ST"
+HOOK="$EGD_PROBE"
+
+# ---------- the mutation arms ----------
+# (1) the step gate removed from the collector: the commit at current 4 is derived for
+EGD_GATE=' && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"'
+anchor "$EGD_HOOK_KEEP" "$EGD_GATE" 1
+EGD_MG="$SANDBOX/egd-mut-gate"; mkdir -p "$EGD_MG/hooks"; ln -s "$EGD_SCRIPTS" "$EGD_MG/scripts"
+EGD_N_="$EGD_GATE" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) substr($0, i + length(n)); print }' \
+  "$EGD_PROBE" > "$EGD_MG/hooks/bash-walls.sh"
+expect_eq "EGD-mut0 the gate-removed copy differs from the probe copy in one line" "1" "$(diff "$EGD_PROBE" "$EGD_MG/hooks/bash-walls.sh" | grep -c '^>')"
+HOOK="$EGD_MG/hooks/bash-walls.sh"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 4 wave "$EGD88_PLAN_BODY")"
+expect_eq "EGD-mut1 the mutant derives at current: 4 and hands the wall $((EGD_N + 2)) lines: EGD-7a goes red" "seen|$((EGD_N + 2))" "$(egd_seen)"
+# (2) one pass back to one per reading: the old function appended to a copy of the library
+EGD_MP="$SANDBOX/egd-mut-pass"; rm -rf "$EGD_MP"; cp -R "$EGD_SCRIPTS" "$EGD_MP"
+cat >> "$EGD_MP/lib/proof.sh" <<'EGD_OLD_FN'
+
+proof_readings_derived() {
+  local plan="${1:-}" tree="${2:-}" droot="" ev res lines
+  [ -f "$plan" ] || return 0
+  droot="$(docs_root "$tree" 2>/dev/null)"
+  lines="$(awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      m = split($0, f, /[ \t]+/); ev = ""
+      for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) ev = substr(f[i], 10)
+      if (ev != "" && !((ev SUBSEP PROOF_RESULT) in seen)) { seen[ev SUBSEP PROOF_RESULT] = 1; print ev "\t" PROOF_RESULT }
+    }' "$plan")"
+  while IFS='	' read -r ev res; do
+    [ -n "$ev" ] || continue
+    printf '%s\t%s\t%s\n' "$ev" "$res" "$(_proof_reading_result "$plan" "$droot" "$ev" "$res")"
+  done <<PROOF_READINGS
+$lines
+PROOF_READINGS
+}
+EGD_OLD_FN
+expect_eq "EGD-mut2 the per-reading copy of the library parses" "0" "$(bash -n "$EGD_MP/lib/proof.sh" >/dev/null 2>&1; echo $?)"
+EGD_MDMS="$(egd_derive_ms "$EGD_MP")"
+expect_eq "EGD-mut3 the per-reading copy derives the same lines (the extractor returns real output)…" "$EGD_N" \
+  "$(awk -F'\t' '$2 == "fail" && $3 == "pass"' "$SANDBOX/egd-derived.out" | grep -c .)"
+expect_eq "EGD-mut4 …but not in under $EGD_BOUND_MS ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" "$EGD_BOUND_MS" | cut -c1-4)"
+# (3) nothing binds, yet the collector hands the lines over: the no-binding-line exit removed
+EGD_NB='if (!nbind) exit'
+anchor "$EGD_SCRIPTS/lib/proof.sh" "$EGD_NB" 1
+EGD_MB="$SANDBOX/egd-mut-bind"; rm -rf "$EGD_MB"; cp -R "$EGD_SCRIPTS" "$EGD_MB"
+EGD_N_="$EGD_NB" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if (0) exit" substr($0, i + length(n)); print }' \
+  "$EGD_SCRIPTS/lib/proof.sh" > "$EGD_MB/lib/proof.sh"
+expect_eq "EGD-mut5 the copy without the no-binding exit differs from the library in one line" "1" \
+  "$(diff "$EGD_SCRIPTS/lib/proof.sh" "$EGD_MB/lib/proof.sh" | grep -c '^>')"
+HOOK="$(egd_hook mutbind "$EGD_MB" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'")"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
+expect_eq "EGD-mut6 the mutant hands the wall the readings' written results as derived lines: EGD-9 goes red" "seen|3" "$(egd_seen)"
+# (4) the plan guard removed from the wall: lines handed for another plan are read
+EGD_GUARD='[ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1'
+anchor "$EGD_SCRIPTS/lib/walls.sh" "$EGD_GUARD" 1
+EGD_MW="$SANDBOX/egd-mut-guard"; rm -rf "$EGD_MW"; cp -R "$EGD_SCRIPTS" "$EGD_MW"
+EGD_N_="$EGD_GUARD" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "handed=1" substr($0, i + length(n)); print }' \
+  "$EGD_SCRIPTS/lib/walls.sh" > "$EGD_MW/lib/walls.sh"
+expect_eq "EGD-mut7 the guard-removed copy differs from the library in one line" "1" \
+  "$(diff "$EGD_SCRIPTS/lib/walls.sh" "$EGD_MW/lib/walls.sh" | grep -c '^>')"
+HOOK="$(egd_hook mutguard "$EGD_MW" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'; BIONIC_DEBTS_PLAN=/nonexistent/other.plan.md")"; rm -f "$EGD_NOBS"
+eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
+$EGD_REFUTED")"
+expect_status "EGD-mut8 the mutant reads the lines handed for another plan and admits the refuted reading: EGD-10b goes red" 0 "$ST"
+HOOK="$EGD_HOOK_KEEP"
+
+# ---------------------------------------------------------------------------
+section "§EG-STEPFIELD — the evidence gate reads each field the step-field verb wrote, at its step (wave-28 T8; REQ-3 AC-3.5; D17)"
+# ---------------------------------------------------------------------------
+# `session-poker.sh step-field <N> <key>=<value>` writes or replaces the indented `<key>: <value>` line under
+# `- Step N:` in the grammar the gate reads (walls.sh `extract_continuation`, `block_get`). FIXTURE FIDELITY: §EG-6's
+# repository and plan writer (a plan the gate admits bar the field under test); the VERB is the real one, run in this
+# repository under the session the gate judges, writing the bound plan through its own dry commit; the next
+# `git commit` is judged by the real gate. Each row below is a field the gate reads: absent, the commit is refused
+# naming it; written by the verb, admitted; replaced by the verb with a value the gate rejects, refused again.
+SFE_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+SFE_HEAD="$H_EG6"
+sfe_verb() {  # <args...> -> SFE_RC, SFE_OUT of the verb, run in R_EG6 under the gate's session
+  SFE_OUT="$( cd "$R_EG6" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+    bash "$SFE_POKER" "$@" 2>&1 )"
+  SFE_RC=$?
+}
+sfe_commit() { run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"; }
+sfe_plan() {  # <current> <scale> <body lines for steps 5.. > -> a plan the gate admits at <current> bar what <body> leaves out
+  eg6_plan "$1" "$2" "$3" "${4:-}" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
+}
+sfe_set() { printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"; bw_bind "$R_EG6"; }
+
+# Step 5: cmd, pass, total, output, head
+sfe_set "$(sfe_plan 5 wave "")"
+sfe_commit
+expect_status "SFE-0 control: the Step-5 block without cmd, pass, total, output and head is refused by the gate" 2 "$ST"
+expect_contains "SFE-0b …naming the fields it lacks" "cmd pass total output" "$ERR"
+sfe_verb step-field 5 cmd="bash tests/run.sh"
+expect_eq "SFE-1 step-field 5 cmd= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_verb step-field 5 pass=3
+sfe_verb step-field 5 total=3
+sfe_verb step-field 5 output=record/generic-evidence.md
+sfe_commit
+expect_status "SFE-2 cmd, pass, total and output written by the verb, the head still absent: refused" 2 "$ST"
+expect_contains "SFE-2b …on the head alone" "carries no 'head:'" "$ERR"
+sfe_verb step-field 5 head="$SFE_HEAD"
+expect_eq "SFE-3 step-field 5 head= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-4 the five fields the verb wrote are read by the gate: admitted" 0 "$ST"
+sfe_verb step-field 5 pass=2
+expect_eq "SFE-5 step-field 5 pass=2 replaces the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-5b the gate reads the pass the verb wrote: pass 2 of total 3 is refused" 2 "$ST"
+expect_contains "SFE-5c …in the gate's words" "pass=2 but total=3" "$ERR"
+expect_eq "SFE-5d …and the block holds one pass: line" "1" "$(awk '/^- Step 5:/ { f = 1; next } /^- Step 6:|^## / { f = 0 } f && /^  pass:/ { n++ } END { print n + 0 }' "$R_EG6/.bionic/docs/plans/active.md")"
+sfe_verb step-field 5 pass=3
+sfe_verb step-field 5 head=feedfacecafe
+sfe_commit
+expect_status "SFE-6 a head the verb replaced with a hash that is no commit here: refused" 2 "$ST"
+expect_contains "SFE-6b …in the gate's words" "is not a commit in the repository" "$ERR"
+sfe_verb step-field 5 head="$SFE_HEAD"
+sfe_commit
+expect_status "SFE-7 the head replaced by the verb with the commit: admitted again" 0 "$ST"
+
+# Step 7: adr
+sfe_set "$(sfe_plan 7 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+- Step 7: documenting")"
+sfe_commit
+expect_status "SFE-8 control: the Step-7 block with no adr, rca or n/a is refused" 2 "$ST"
+expect_contains "SFE-8b …naming them" "adr: <path>" "$ERR"
+sfe_verb step-field 7 adr=docs/adr-0001.md
+expect_eq "SFE-9 step-field 7 adr= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-9b the gate reads the adr the verb wrote: admitted" 0 "$ST"
+
+# Step 8: merge, worktree-removed (cleanup: n/a is the block's own line)
+sfe_set "$(sfe_plan 8 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+- Step 8: integrating
+  cleanup: n/a")"
+sfe_commit
+expect_status "SFE-10 control: the Step-8 block without merge and worktree-removed is refused" 2 "$ST"
+expect_contains "SFE-10b …naming both" "merge worktree-removed" "$ERR"
+sfe_verb step-field 8 merge=0123456789abcdef0123456789abcdef01234567
+sfe_commit
+expect_status "SFE-11 merge written by the verb, worktree-removed still absent: refused, on that field alone" 2 "$ST"
+expect_contains "SFE-11b …naming worktree-removed" "worktree-removed" "$ERR"
+sfe_verb step-field 8 worktree-removed=yes
+sfe_commit
+expect_status "SFE-12 both fields the verb wrote are read by the gate: admitted" 0 "$ST"
+
+# Step 4: share (no rule of the gate's reads it; the block stays admitted and the line is the gate's own grammar)
+sfe_set "$(sfe_plan 4 wave "")"
+sfe_commit
+expect_status "SFE-13 control: the Step-4 block, as the gate admits it" 0 "$ST"
+sfe_verb step-field 4 share=55
+expect_eq "SFE-14 step-field 4 share= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-14b …and the block with the share line is admitted" 0 "$ST"
+expect_eq "SFE-14c …the line is the indented one, under the Step 4 line, before Step 5" "  share: 55|- Step 5: floor run" \
+  "$(awk '/^- Step 4:/ { f = 1; next } f && /^  share:/ { l = $0; getline n; print l "|" n; exit }' "$R_EG6/.bionic/docs/plans/active.md")"
+sfe_set "$(sfe_plan 5 wave "")"
 
 finish

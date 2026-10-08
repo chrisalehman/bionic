@@ -32,6 +32,7 @@
 #   bash tests/run.sh              width from the machine's own pressure rung
 #   bash tests/run.sh --serial     one at a time, in roster order
 #   bash tests/run.sh --dry-run    print the job width and exit, run nothing
+#   bash tests/run.sh --only a.test.sh [b.test.sh …]   the named suites only (see THE DOOR)
 #   BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh   the ceiling the rung reads against
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
 #   BIONIC_TEST_PROGRESS=p.tsv bash tests/run.sh also append <UTC>TAB<label>TAB<rc>
@@ -107,6 +108,52 @@ SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
+# ── THE GATE, ASKED PER SUITE (wave-28 T12; D10, D13, AC-2.12) ────────────────
+#
+# Every suite this runner starts asks the machine's one gate (payload/scripts/lib/gate.sh) for
+# itself, keyed by its file name, and runs with BIONIC_GATE_ADMIT naming its own request; the
+# runner itself holds nothing. Before wave-28 a run started through the Bash tool held ONE
+# booking for the whole run and handed it to every worker, so up to eight suites ran on one
+# place and every shim nested in them booked nothing. Now `xargs -P` is an upper bound, and the
+# gate decides how many of those workers run at once.
+#
+# NESTING. A suite that drives a nested runner hands that runner its admission in
+# BIONIC_GATE_ADMIT, and the gate believes it only for a descendant of the request's holder,
+# so a nested run's suites run under the suite that started them and never wait on it. Such
+# a suite asked nothing of its own, so it ends nothing (_GATE_OWN is 0).
+#
+# A TREE WITHOUT THE LIBRARY (a scratch copy of this runner) runs its suites without asking,
+# as before; a store that cannot be written runs them unadmitted, the gate's own line saying so.
+_GATE_LOADED=""; _GATE_ID=""; _GATE_OWN=0
+_gate_load() {  # rc 0 once lib/gate.sh is loaded
+  if [ -z "$_GATE_LOADED" ]; then
+    _GATE_LOADED=no
+    if [ -r "$REPO/payload/scripts/lib/gate.sh" ]; then
+      # shellcheck source=/dev/null
+      . "$REPO/payload/scripts/lib/gate.sh" && declare -F gate_ask >/dev/null 2>&1 && _GATE_LOADED=yes
+    fi
+  fi
+  [ "$_GATE_LOADED" = yes ]
+}
+# _gate_ask_for <work|whole> <suite label> — asks and waits until admitted; sets _GATE_ID (empty
+# when nothing was asked) and _GATE_OWN (1 when this shell holds the request, 0 when the gate
+# believed an ancestor's admission). Its `$$` is the holder: call it from the shell that stays
+# alive for the suite, and end the request from the same one.
+_gate_ask_for() {
+  _GATE_ID=""; _GATE_OWN=0
+  _gate_load || return 0
+  _GATE_ID="$(gate_ask "$1" "$2")" || { _GATE_ID=""; return 0; }
+  case "$(sed -n 's/^holder=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" in
+    "$$:"*) _GATE_OWN=1 ;;
+  esac
+  return 0
+}
+_gate_end_for() {  # <rc> — the request this shell holds is over
+  [ "$_GATE_OWN" -eq 1 ] || return 0
+  _GATE_OWN=0
+  gate_end "$_GATE_ID" "$1" >/dev/null
+}
+
 # ── one suite, in its own process ────────────────────────────────────────────
 # `run.sh --one <label>` is not a mode anyone types: it is what xargs forks for
 # each queued suite. It looks its command up in the queue by label, captures the
@@ -122,12 +169,17 @@ if [ "${1:-}" = "--one" ]; then
   _one_queue="${BIONIC_TEST_QUEUE:?run.sh --one is an internal mode}"
   _one_work="${BIONIC_TEST_WORK:?run.sh --one is an internal mode}"
   _one_cmd="$(awk -F'\t' -v l="$_one_label" '$1 == l { print $2; exit }' "$_one_queue")"
+  # THE ASK (T12): this worker asks for its own suite and holds the admission while it runs.
+  # A solo suite's worker inherits the runner's whole admission, which the gate believes.
+  _gate_ask_for work "$_one_label"
+  [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
   _one_start="$(date +%s)"
   # Deliberately unquoted. The queued string is a roster line's own words
   # (`bash tests/foo.test.sh`), written in this file — never outside input.
   # shellcheck disable=SC2086
   $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
   _one_rc=$?
+  _gate_end_for "$_one_rc"
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
   # THE PROGRESS LINE, WHERE THE VERDICT FIRST EXISTS. This is the only writer
   # during a default run and it covers both drains — the parallel batch and the
@@ -185,16 +237,39 @@ unset BIONIC_TEST_TIMING
 # Refused, not ignored. Before this task the runner read no argv at all, so
 # `bash tests/run.sh --serial` ran the whole roster and looked like it had
 # honoured a flag it had never heard of.
+#
+# THE DOOR: `--only <suite>[ <suite>…]` (wave-28 T36; D27, AC-10.2). A dispatched agent runs a
+# suite through this runner and never by `bash tests/<suite>.test.sh`, which the Bash wall
+# refuses it, so the suite gets the world a full run gives it: the interpreter pin, the
+# environment, the roster wall, the adoption wall and one gate ask per suite (`--one`). The
+# names are file names (`a.test.sh`), read until the next option; the roster below is narrowed
+# to them, in roster order. A name the roster does not hold, or a path, refuses the whole call
+# before anything runs: a run that quietly skipped a name would read as that suite's proof.
 SERIAL=0
 DRY_RUN=0
+ONLY=0; _only_names=()
+_usage="usage: bash tests/run.sh [--serial] [--dry-run] [--only <suite> [<suite>…]]"
 while [ $# -gt 0 ]; do
   case "$1" in
     --serial) SERIAL=1 ;;
     --dry-run) DRY_RUN=1 ;;
+    --only)
+      ONLY=1
+      while [ $# -gt 1 ]; do
+        case "$2" in -*) break ;; esac
+        _only_names+=("$2"); shift
+      done
+      if [ "${#_only_names[@]}" -eq 0 ]; then
+        echo "tests/run.sh: --only needs at least one suite file name" >&2
+        echo "$_usage" >&2
+        exit 2
+      fi
+      ;;
     -h|--help)
-      echo "usage: bash tests/run.sh [--serial] [--dry-run]"
+      echo "$_usage"
       echo "  --serial            one suite at a time, in roster order"
       echo "  --dry-run           print the job width and exit; run nothing"
+      echo "  --only <suite>…     run only the named suites (file names, e.g. a.test.sh)"
       echo "  BIONIC_TEST_JOBS_CEILING  the ceiling the pressure rung reads against (default 8)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
       echo "  BIONIC_TEST_PROGRESS  a file to append to, one <UTC>TAB<label>TAB<rc>"
@@ -203,7 +278,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "tests/run.sh: unknown option: $1" >&2
-      echo "usage: bash tests/run.sh [--serial] [--dry-run]" >&2
+      echo "$_usage" >&2
       exit 2
       ;;
   esac
@@ -313,6 +388,34 @@ if [ -n "$_roster_refusals" ]; then
   printf '%s' "$_roster_refusals" >&2
   echo "tests/run.sh: nothing was run. Every gating suite is a regular file named in [A-Za-z0-9._-], starts with #!/bin/bash and sources tests/lib/assert.sh; a protocol meant to be run by hand belongs in .bionic/tests/." >&2
   exit 2
+fi
+
+# THE DOOR NARROWS THE ROSTER, AFTER THE WALL (T36). The wall above has judged the whole
+# directory, as for a full run; the named suites are then the roster, in roster order, each
+# once. Every name is checked before anything is narrowed, so one bad name runs nothing.
+if [ "$ONLY" -eq 1 ]; then
+  _only_bad=""
+  for _only_name in "${_only_names[@]}"; do
+    case "$_only_name" in
+      */*) _only_bad="${_only_bad}tests/run.sh: --only names ${_only_name}, a path — name a suite by its file name (a.test.sh)"$'\n'; continue ;;
+    esac
+    _only_hit=0
+    for _roster_file in "$@"; do [ "${_roster_file##*/}" = "$_only_name" ] && _only_hit=1; done
+    [ "$_only_hit" -eq 1 ] || \
+      _only_bad="${_only_bad}tests/run.sh: --only names ${_only_name}, which is not a suite under tests/"$'\n'
+  done
+  if [ -n "$_only_bad" ]; then
+    printf '%s' "$_only_bad" >&2
+    echo "tests/run.sh: nothing was run." >&2
+    exit 2
+  fi
+  _only_files=()
+  for _roster_file in "$@"; do
+    for _only_name in "${_only_names[@]}"; do
+      if [ "${_roster_file##*/}" = "$_only_name" ]; then _only_files+=("$_roster_file"); break; fi
+    done
+  done
+  set -- ${_only_files+"${_only_files[@]}"}
 fi
 
 # ── TIMING-BOUND SUITES RUN SOLO (T20, A-orch-28; why-session-start-slow.md) ──
@@ -636,7 +739,14 @@ run() {  # run <label> <cmd...>   — gating
     local start rc
     _label "$label"
     start="$(date +%s)"
-    "$@" >"$TMP/${label}.out" 2>&1
+    # Asked per suite here too (T12), in a subshell: its `$$` is this runner's, which stays
+    # alive for the suite, and its `times` hold that suite's children only, for gate_end.
+    ( _gate_ask_for work "$label"
+      [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
+      "$@" >"$TMP/${label}.out" 2>&1
+      _sr=$?
+      _gate_end_for "$_sr"
+      exit "$_sr" )
     rc=$?
     _timing "$label" "$(( $(date +%s) - start ))"
     _verdict "$label" "$rc" "$TMP/${label}.out"
@@ -688,42 +798,40 @@ if [ "$SERIAL" -eq 0 ]; then
   # Its stdin is /dev/null, as under xargs: the loop below reads its labels from
   # stdin, and a suite that read stdin would eat the labels after its own.
   #
-  # AND ON THE WHOLE MACHINE (wave-26 T8; D8, REQ-6 AC-6.4). Held out of this run's
-  # batch was only half of it: another run on the machine — another session's,
-  # another agent's — still shared a solo suite's drive. So before each solo suite
-  # the runner takes the whole machine through payload/scripts/lib/slots.sh: the
-  # marker, which stops new places being handed out, then every place, waiting for
-  # the held ones to drain, then a settled load (`resources_settled`: the load now,
-  # not the ring's median). The hold is this process's, given back after the suite.
+  # AND ON THE WHOLE MACHINE (wave-26 T8; D8, REQ-6 AC-6.4; the gate since wave-28 T12, D10).
+  # Held out of this run's batch was only half of it: another run on the machine — another
+  # session's, another agent's — still shared a solo suite's drive. So before each solo suite
+  # the runner asks the gate for the whole machine (`gate_ask whole <suite>`: admitted only
+  # while nothing else admitted is unfinished, and nothing else is admitted while it holds),
+  # then waits for a settled load (`resources_settled`: the load now, not the ring's median).
+  # The admission is this runner's, ended after the suite with its code.
   #
   # VOID, NOT FAILED. The load is read again after the suite, less the suite's own share
   # of it (`resources_own_load`, from the CPU its worker used; wave-26 T26, review 4 F4).
   # If what is left rose above the settled line, something else disturbed the drive and
-  # its timing rows measured that: the suite runs again, up to SOLO_RETRIES more times,
-  # and if every try was disturbed it is reported VOID (see _verdict). A take or a settle
-  # that gave up at the ceiling is a disturbance too; the suite still runs once, so its
-  # output is there to read, but it is not retried — waiting the whole ceiling again
-  # would only say the same thing. Each try rewrites the suite's .rc and .out, so its
-  # verdict is its last run's; a void only marks how that run was timed, and a last run
-  # that failed is a failure of the run (T43).
+  # its timing rows measured that: the suite settles and runs again under the same admission,
+  # up to SOLO_RETRIES more times, and if every try was disturbed it is reported VOID (see
+  # _verdict). A settle that gave up at the ceiling is a disturbance too; the suite still
+  # runs once, so its output is there to read, but it is not retried — waiting the whole
+  # ceiling again would only say the same thing. Each try rewrites the suite's .rc and .out,
+  # so its verdict is its last run's; a void only marks how that run was timed, and a last
+  # run that failed is a failure of the run (T43).
   #
-  # ONE CEILING PER SUITE (wave-26 T26, review 4 F3). The take, the settle and every
-  # retry of one solo suite give up at one deadline, SLOTS_DEADLINE, set once before its
-  # first take, as payload/scripts/booked.sh sets it: slots_take_all reads it, and so does
-  # _solo_settle. A retry the ceiling has no room for is not started, and the suite is not
-  # run again unbooked either — its disturbed run already left its output.
+  # ONE CEILING PER SUITE (wave-26 T26, review 4 F3). The settle and every retry of one solo
+  # suite give up at one deadline, BIONIC_SETTLE_MAX_WAIT seconds (1200 unless set) from its
+  # admission. The wait at the gate before it has none: a wait never ends a run (AC-2.6). A
+  # retry the ceiling has no room for is not started, and the suite is not run again either —
+  # its disturbed run already left its output.
   #
-  # A STORE THAT CANNOT BE WRITTEN (review 4 F5) refuses a whole-machine take at once
-  # (slots_take_all returns 2 and names the store); the suite runs once, unbooked, and its
-  # VOID says that, not that some place did not drain.
+  # A STORE THAT CANNOT BE WRITTEN (review 4 F5): the gate refuses at once; the suite runs
+  # once, unadmitted, and its VOID says that the store could not be written.
   #
-  # NESTING (the lending rule, lib/slots.sh). A run started inside a booked command
-  # inherits BIONIC_SLOT_HELD=1 and its parent's place: the whole-machine take then
-  # waits for the OTHER places only and lends the parent's while it queues, so it
-  # never waits on its own parent. A run nested inside a solo suite (four suites
-  # drive a nested runner) inherits the quiet mark set on the solo launch below: it
-  # takes nothing, settles nothing and voids nothing, because the hold it runs in is
-  # already the whole machine and this run reads the load for it.
+  # NESTING. A run started inside a solo suite inherits that suite's whole admission, which
+  # the gate believes: its solo suites run at once and settle and void nothing, because the
+  # hold they run in is already the whole machine and the outer run reads the load for it.
+  # A run started inside an ordinary suite inherits a work admission: its solo suites run
+  # under it (asking for the whole machine from inside an admission would wait for the
+  # admission to end, which waits for them), and settle and void as usual.
   #
   # NOT THROUGH booked.sh. The shim stamps the tree's git directory with its
   # command's rc, and a worker always exits 0 (its verdict is the .rc file), so a
@@ -731,16 +839,18 @@ if [ "$SERIAL" -eq 0 ]; then
   # the library the shim calls.
   #
   # A TREE WITHOUT THE LIBRARY (a scratch copy of this runner) runs its solo suites
-  # unbooked, as before, and says so once.
+  # without the whole machine, as before, and says so once.
   SOLO_RETRIES=2
-  _solo_settle() {  # <cores> — wait for a settled load, until the suite's one ceiling
-    local deadline
-    deadline="$(_slots_deadline "$(_slots_max_wait)")"
-    _SLOTS_NOTED=-1
+  case "${BIONIC_SETTLE_MAX_WAIT:-}" in ''|*[!0-9]*) SOLO_MAX=1200 ;; *) SOLO_MAX=$BIONIC_SETTLE_MAX_WAIT ;; esac
+  _solo_settle() {  # <cores> <deadline> — wait for a settled load, until the suite's one ceiling
+    local noted=0
     while ! resources_settled "$1"; do
-      [ "$SECONDS" -lt "$deadline" ] || return 1
-      _slots_note "holding the whole machine, waiting for the load ($(_res_load_now)) to settle at or below $(resources_settled_line "$1")"
-      sleep "$(_slots_poll)"
+      [ "$SECONDS" -lt "$2" ] || return 1
+      if [ "$noted" -eq 0 ]; then
+        echo "tests/run.sh: holding the whole machine, waiting for the load ($(_res_load_now)) to settle at or below $(resources_settled_line "$1")" >&2
+        noted=1
+      fi
+      sleep "${BIONIC_GATE_POLL:-2}"
     done
   }
   # _solo_cpu — sets _SOLO_CPU to the CPU seconds this shell's finished children have used:
@@ -756,22 +866,6 @@ if [ "$SERIAL" -eq 0 ]; then
       NR == 2 { printf "%.3f\n", sec($1) + sec($2) }' "$TMP/solo.times" 2>/dev/null)"
     [ -n "$_SOLO_CPU" ] || _SOLO_CPU=0
   }
-  # HELD TRAVELS WITH ITS PLACE (wave-26 T8, booking review). The lending rule reads
-  # BIONIC_SLOT_PLACE to know which place is the caller's own; HELD without it makes a nested
-  # whole-machine take guess, and two runs that each reach their solo drain could then wait on
-  # each other until the maximum wait. So the solo launch names a place this hold covers: the
-  # one this run was booked into, when it was, or else the first place it holds itself.
-  _solo_place() {  # -> the place path to hand the solo suite as BIONIC_SLOT_PLACE
-    local f
-    if [ "${BIONIC_SLOT_HELD:-}" = 1 ] && [ -n "${BIONIC_SLOT_PLACE:-}" ] && [ -d "$BIONIC_SLOT_PLACE" ]; then
-      printf '%s' "$BIONIC_SLOT_PLACE"
-      return 0
-    fi
-    for f in "$(slots_dir)"/place.*; do
-      [ "$(_slots_pid_of "$f")" = "$$" ] && { printf '%s' "$f"; return 0; }
-    done
-    return 0
-  }
   # A TRY THAT WRITES NOTHING READS AS NOTHING (wave-26 T49; review 12 F1). A worker writes
   # <label>.rc and <label>.sec only after its suite ends, so a worker killed before that leaves
   # the files of the try before it, and the report walk judged the retry by them: a pass
@@ -783,78 +877,81 @@ if [ "$SERIAL" -eq 0 ]; then
   _solo_clear() {  # <label> — forget the previous try's result
     rm -f "$TMP/${1}.rc" "$TMP/${1}.sec" "$TMP/${1}.out"
   }
-  _solo_run() {  # <label> — one solo suite; leaves <label>.void when it was never measured
-    local label="$1" tries=0 why last="" cores max take cpu0 t0 own
+  _solo_one() {  # <label> — one try, its worker handed this run's admission
+    _solo_clear "$1"
+    BIONIC_GATE_ADMIT="${_GATE_ID:-${BIONIC_GATE_ADMIT:-}}" bash "$SELF" --one "$1" </dev/null
+  }
+  # _solo_run <label> — one solo suite; leaves <label>.void when it was never measured. RUN IN A
+  # SUBSHELL: its `$$` is still this runner's (the holder), and its `times`, which gate_end reads,
+  # hold this suite's tries only, not the parallel batch's.
+  _solo_run() {
+    local label="$1" tries=0 why last="" cores deadline cpu0 t0 own
     rm -f "$TMP/${label}.void"
     if [ "$_SOLO_BOOK" != yes ]; then
-      _solo_clear "$label"
-      bash "$SELF" --one "$label" </dev/null
+      _solo_one "$label"
       return 0
     fi
-    cores="$(_res_cores)"; max="$(_slots_max_wait)"
-    SLOTS_DEADLINE=$((SECONDS + max))
+    _gate_ask_for whole "$label"
+    if [ -z "$_GATE_ID" ]; then
+      why="the store $(gate_dir) could not be written, so the whole machine was not had"
+      _solo_one "$label"
+      printf '%s\n' "$why" >"$TMP/${label}.void"
+      echo "tests/run.sh: void — ${label}: ${why}; it ran unadmitted and is not retried" >&2
+      return 0
+    fi
+    if [ "$_GATE_OWN" -eq 0 ] &&
+       [ "$(sed -n 's/^kind=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" = whole ]; then
+      _solo_one "$label"      # inside a whole admission already (NESTING, above)
+      return 0
+    fi
+    cores="$(_res_cores)"
+    deadline=$((SECONDS + SOLO_MAX))
     while :; do
       why=""
-      slots_take_all "$$" "tests/run.sh solo ${label}" >/dev/null; take=$?
-      case "$take" in
-        0) _solo_settle "$cores" || \
-             why="the load ($(_res_load_now)) never settled at or below $(resources_settled_line "$cores") within the ceiling of ${max}s" ;;
-        2) why="the store $(slots_dir) could not be written, so the whole machine was not taken" ;;
-        *) why="the other places did not drain within the ceiling of ${max}s" ;;
-      esac
+      _solo_settle "$cores" "$deadline" || \
+        why="the load ($(_res_load_now)) never settled at or below $(resources_settled_line "$cores") within the ceiling of ${SOLO_MAX}s"
       if [ -n "$why" ]; then
-        slots_release "$$"
         if [ "$tries" -gt 0 ]; then
           # Its disturbed run already left its output; there is no room for another.
-          [ "$take" = 2 ] || why="the ceiling of ${max}s ran out before a retry could start"
+          why="the ceiling of ${SOLO_MAX}s ran out before a retry could start"
           printf '%s; %s\n' "$last" "$why" >"$TMP/${label}.void"
           echo "tests/run.sh: void — ${label}: ${last}; ${why}" >&2
-          return 0
+          break
         fi
-        _solo_clear "$label"
-        bash "$SELF" --one "$label" </dev/null
+        _solo_one "$label"
         printf '%s\n' "$why" >"$TMP/${label}.void"
-        echo "tests/run.sh: void — ${label}: ${why}; it ran unbooked and is not retried" >&2
-        return 0
+        echo "tests/run.sh: void — ${label}: ${why}; it ran once and is not retried" >&2
+        break
       fi
-      _solo_clear "$label"
       _solo_cpu; cpu0=$_SOLO_CPU; t0=$SECONDS
-      BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1 BIONIC_SLOT_PLACE="$(_solo_place)" \
-        bash "$SELF" --one "$label" </dev/null
+      _solo_one "$label"
       _solo_cpu
       own="$(resources_own_load "$(awk -v a="$cpu0" -v b="$_SOLO_CPU" 'BEGIN { d = b - a; printf "%.3f\n", (d > 0 ? d : 0) }')" "$((SECONDS - t0))")"
       [ -n "$own" ] || own=0
       resources_undisturbed "$cores" "$own" || \
         why="the load rose to $(_res_load_now) during the run (about ${own} of it the suite's own), above the settled line $(resources_settled_line "$cores")"
-      slots_release "$$"
-      [ -n "$why" ] || return 0
+      [ -n "$why" ] || break
       last="$why"
       tries=$((tries + 1))
       if [ "$tries" -gt "$SOLO_RETRIES" ]; then
         printf '%s, on every try\n' "$why" >"$TMP/${label}.void"
         echo "tests/run.sh: void — ${label}: ${why}; no retry left" >&2
-        return 0
+        break
       fi
       echo "tests/run.sh: void — ${label}: ${why}; retrying (${tries} of ${SOLO_RETRIES})" >&2
     done
+    _gate_end_for "$(cat "$TMP/${label}.rc" 2>/dev/null || echo 1)"
   }
   if [ -s "$SOLO" ]; then
     _SOLO_BOOK=no
-    if [ "${BIONIC_SLOT_QUIET:-}" = 1 ]; then
-      _SOLO_BOOK=inside
-    elif [ -r "$REPO/payload/scripts/lib/slots.sh" ]; then
-      # shellcheck source=/dev/null
-      . "$REPO/payload/scripts/lib/slots.sh"
-      declare -F slots_take_all >/dev/null 2>&1 && _SOLO_BOOK=yes
-    fi
-    if [ "$_SOLO_BOOK" = yes ]; then
-      trap 'slots_release "$$"; rm -rf "$TMP"' EXIT
-    elif [ "$_SOLO_BOOK" = no ]; then
-      echo "tests/run.sh: no payload/scripts/lib/slots.sh — the solo suites run without taking the whole machine" >&2
+    if _gate_load; then
+      _SOLO_BOOK=yes
+    else
+      echo "tests/run.sh: no payload/scripts/lib/gate.sh — the solo suites run without the whole machine" >&2
     fi
     while IFS= read -r _solo_label; do
       [ -n "$_solo_label" ] || continue
-      _solo_run "$_solo_label"
+      ( _solo_run "$_solo_label" )
     done <"$SOLO"
   fi
   while IFS="$(printf '\t')" read -r label _queued_cmd; do

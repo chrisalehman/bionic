@@ -1,16 +1,19 @@
 #!/bin/bash
-# booked.sh — RUN A COMMAND INSIDE A MACHINE-WIDE PLACE: stamp, book, run, record rc,
-# release (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1).
+# booked.sh — RUN A COMMAND THE GATE ADMITTED: stamp, ask, run, end, record rc
+# (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1; the gate from
+# wave-28-finished-work-lands T12, D10, D13; REQ-2 AC-2.6, AC-2.12, AC-2.13).
 #
-#   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--max-wait <seconds>] [--quiet]
-#                                        [--shell <path>] [--stamp-dir <dir>] [--suites <names>]
+#   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
+#                                        [--max-wait <seconds>] [--quiet] [--shell <path>]
+#                                        [--stamp-dir <dir>] [--suites <names>] [--runner]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
-# books one of N places (lib/slots.sh) before it starts and waits when none is free. The
-# command is ONE word after `--`, the whole command line, run exactly as given. Several words
-# are refused (exit 2): joined, they would be parsed again as shell, so a literal `;` in an
-# argument would run as a command (T36, review 4 F6). Quote the whole command as one word.
+# asks the machine's one gate (lib/gate.sh) before it starts and waits its turn there when the
+# machine has no room. The command is ONE word after `--`, the whole command line, run exactly
+# as given. Several words are refused (exit 2): joined, they would be parsed again as shell, so
+# a literal `;` in an argument would run as a command (T36, review 4 F6). Quote the whole
+# command as one word.
 #
 # --shell <path>: THE HARNESS'S OWN SHELL (wave-26 T7, A-T7.1). The harness runs a Bash call
 # as `<its shell> -c '… eval <command> < /dev/null'`, and under a zsh harness `bash -c` would
@@ -28,8 +31,10 @@
 #     command on PATH runs the PATH command instead, in silence, and the snapshot's shell
 #     options are zsh's or bash's defaults, also in silence.
 # This is why the wall wraps only a suite, short or not (the lead's ruling at T44): a suite's
-# `cd` rarely needs to outlive it, and the booking is worth the loss. A suite that needs any of
-# these opts out with `BIONIC_SLOT_HELD=1` in its own prefix and runs exactly as typed.
+# `cd` rarely needs to outlive it, and the gate is worth the loss. There is no opt-out (wave-28
+# T12, D13): `BIONIC_SLOT_HELD=1` in a suite's prefix used to leave it unwrapped and unbooked,
+# and now it is wrapped like any other, so a suite that needs a `cd` or a snapshot name sets it
+# up inside its own command text.
 #
 # THE ORDER, AND WHY THE STAMP IS READ FIRST. Before booking, the head (`git rev-parse HEAD`)
 # and the dirty count (`git status --porcelain | wc -l`) of the tree the shim stands in are
@@ -46,16 +51,17 @@
 # tree, or in one with no commit, there is no stamp and no error. worktree_land reads it.
 #
 # EVERY END STAMPS (wave-26 T61, critic 3 S5), except a usage error (exit 2), which never got as far
-# as reading the tree. A command that never got its place (69, or 124 under --kill-after) and a
-# shim signalled while it waited (128+n) stamp the code they ended on, with the same `suites=`, though
-# nothing ran: otherwise "suite a green, suite b never ran" at one head leaves only a's line, and
-# the land reads a's proof as the tree's.
+# as reading the tree. A command the gate did not admit in time (75), a whole-machine run on a
+# store it cannot write (69) and a shim signalled while it waited (128+n) stamp the code they
+# ended on, with the same `suites=`, though nothing ran: otherwise "suite a green, suite b never
+# ran" at one head leaves only a's line, and the land reads a's proof as the tree's.
 #
 # --stamp-dir <dir>: THE TREE THE SUITE RUNS IN, WHEN THAT IS NOT WHERE THE SHIM STANDS (wave-26
 # T56, final review B1). The wall wraps the WHOLE command, so `cd <tree> || exit 1; bash tests/x`
 # typed from the main checkout starts the shim in the main checkout; the wall reads the leading
 # literal `cd` and passes where it leads. Head and dirty are then read in <dir> (relative to the
-# shim's own directory) and the stamp goes to <dir>'s git dir; the command itself still runs where
+# shim's own directory) and the stamp goes to <dir>'s git dir, and the gate's request names <dir>
+# as its tree (`tree=`, which the landing's busy check reads); the command itself still runs where
 # the shim stands, and its own `cd` moves it. A <dir> that does not exist or is in no work tree
 # is "outside a git tree": no stamp, no error, never a stamp in the shim's own tree instead.
 #
@@ -67,48 +73,82 @@
 # `cmd=`, as handed. Any character outside a name's set (letters, digits, `.`, `_`, `+`, `-`, the
 # `,` and `?`) becomes `?`, so the field is always one field of one line. Handed nothing, the
 # shim writes the line without the field, as before; a reader that stops at `cmd=` and ignores a
-# key it does not know reads both. An empty value is usage.
+# key it does not know reads both. An empty value is usage. One name, with no `,` or `?`, is also
+# the gate's command key (THE ASK, below).
 #
-# NESTING. When `BIONIC_SLOT_HELD=1` is already set the command is inside a place, so it
-# books nothing and runs (a nested run must never wait on its own parent). Otherwise the
-# shim takes a place, exports `BIONIC_SLOT_HELD=1` and `BIONIC_SLOT_PLACE`, and releases on
-# every exit path, a signal included. A shim killed with SIGKILL runs no trap; its place is
-# reclaimed by the next taker because its pid is gone.
+# --agent <name>: WHO ASKS (wave-28 T12; T2's A-T2.6). The gate's request records
+# `who=<session id>:<agent name>`, and a shell does not know which agent it runs for, so the
+# wall, which reads the calling agent's roster row, passes its name (or, with no row, its agent
+# id) and the shim exports it as BIONIC_GATE_AGENT. Without it the gate reads `main`. Any
+# character outside letters, digits, `.`, `_`, `+` and `-` becomes `_`; an empty value is usage.
 #
-# A STORE THAT CANNOT BE WRITTEN (T36, review 4 F5). Booking manages throughput; it is not a
-# guard. So an ordinary command runs UNBOOKED at once, with one stderr line that names the
-# store and says so. A whole-machine take does not run (exit 69, the lib's line names the
-# store): a timing result taken without the machine is worth nothing.
+# THE ASK (wave-28 T12; D10, D13, AC-2.6, AC-2.13). Before the command starts the shim asks the
+# gate (lib/gate.sh): `gate_ask work <key> --within <the call's limit>`, the key being the one
+# suite file `--suites` names, otherwise the command's first 60 characters, and the limit the
+# smaller of --kill-after and --max-wait (none given: it waits until admitted). Admitted, it
+# exports `BIONIC_GATE_ADMIT=<request id>`, runs the command, and ends the request with the
+# command's own code (`gate_end`), so the gate learns what the command cost. While the command
+# runs the shim reads `gate_state` every BIONIC_GATE_POLL seconds (2 unless set), the one call
+# that samples a run nothing else polls (T2's sampling note), so its peak is the request's. Not
+# admitted in time, it prints one line naming the command to run again, stamps 75 and exits 75:
+# NOTHING RAN, and the request keeps its turn, so the same command asked again by the same agent
+# resumes its number and is served before every later one. A wait never ends in a kill, under
+# --kill-after either.
 #
-# --quiet, OR BIONIC_QUIET=1: THE WHOLE MACHINE. Take every place (slots_take_all: block new
-# takes, wait for the held ones to drain), wait for `resources_settled`, run, then read the
-# load again. If it rose above the settled line by more than the run's own share (from the
-# CPU its children used, `times`; resources_own_load) the run is VOID: print `void`, release,
-# and go again, at most twice more. Its own load is not a disturbance (T36, review 4 F4).
-# A TAKE OR A SETTLE THAT GIVES UP ON THE FIRST TRY RUNS THE COMMAND ONCE, UNBOOKED, AND VOID
-# (wave-27 T6, critic 3 S4): the runner's rule (tests/run.sh _solo_run), so a timing suite on a
-# machine that never settles has output to read whoever runs it. It prints `void` and why, and
-# ends with the command's code, or 75 over a pass. A store it cannot write still refuses (69,
-# below), and a give-up at --kill-after still ends 124: the wait spent the call there.
-# Inside a whole-machine hold (`BIONIC_SLOT_QUIET=1`) a nested shim, quiet or not, books
-# nothing and runs.
+# NESTING. A shim inside an admitted command inherits BIONIC_GATE_ADMIT, and the gate believes
+# it only while that request is admitted, unfinished and held by an ancestor of the asker (its
+# holder is the outer shim): the nested shim then runs at once under its parent's admission,
+# takes no number, and ends nothing. A typed BIONIC_GATE_ADMIT held by no ancestor is not
+# believed and the shim asks as usual; BIONIC_SLOT_HELD is not read at all.
+#
+# THE RUNNER HOLDS NOTHING (D13). A command whose only suite is `run.sh` (the wall's name for a
+# runner) is not asked for: each of its suites asks for itself (tests/run.sh --one), so one
+# admission never stands for a whole run. It is still stamped.
+#
+# --runner: THE DOOR'S RUNNER HOLDS NOTHING EITHER (wave-28 T36; D27, AC-10.2). `tests/run.sh
+# --only a.test.sh b.test.sh` is the runner, but its --suites names the suites it runs, so the
+# stamp says which ones the run proved; the wall passes --runner beside them, when every suite the
+# command runs is run by the runner, and the shim then asks nothing, as for `run.sh`.
+#
+# THE TREE THE ASK NAMES (wave-28 T36; ruling A-orch-55/56). The gate's request records the tree
+# the command runs in (`tree=`, git's toplevel where the ask is made), and the landing's busy
+# check reads it. That is the tree the stamp goes to: the checkout --stamp-dir resolves inside,
+# else the directory a literal `cd <dir>` opening the command names, else where the shim stands.
+# The shim makes its ask from there and comes straight back, so the command still runs where the
+# shim stands. It used to ask from its own cwd only, so a doctrine call made from the main
+# checkout named the main checkout and every writer's suite read as a run there.
+#
+# A STORE THAT CANNOT BE WRITTEN (T36, review 4 F5). The gate manages throughput; it is not a
+# guard. So an ordinary command runs UNADMITTED at once, with one stderr line that names the
+# store and says so. A whole-machine run does not run (exit 69, the line names the store): a
+# timing result taken without the machine is worth nothing.
+#
+# --quiet, OR BIONIC_QUIET=1: THE WHOLE MACHINE. Ask `whole` (admitted only alone, nothing else
+# admitted unfinished), wait for `resources_settled`, run, then read the load again. If it rose
+# above the settled line by more than the run's own share (from the CPU its children used,
+# `times`; resources_own_load) the run is VOID: print `void`, settle again and run again, under
+# the same admission, at most twice more. Its own load is not a disturbance (T36, review 4 F4).
+# A SETTLE THAT GIVES UP ON THE FIRST TRY RUNS THE COMMAND ONCE, AND VOID (wave-27 T6, critic 3
+# S4): the runner's rule (tests/run.sh _solo_run), so a timing suite on a machine that never
+# settles has output to read whoever runs it. It prints `void` and why, and ends with the
+# command's code, or 75 over a pass. A whole run nested inside a whole admission runs at once
+# and voids nothing: the hold it runs in is already the whole machine, and its owner reads the
+# load. One nested inside a work admission settles and voids as usual.
 #
 # --kill-after <s>: once MORE than <s> seconds have passed since the shim started, the command's
 # whole process group is killed, one line says it is over the short limit and belongs in a
 # subagent, and the shim exits 124. The clock is `$SECONDS`, whole seconds, so the kill lands
 # up to a second past <s> and never before it (review 12 F4, A-T50.3). THE LIMIT COVERS THE WAIT
-# FOR A PLACE (T44, review 8 F2): every wait gives up by the same rule, and the kill is timed
-# from the shim's start, not the run's, so the call ends inside the harness's own timeout
-# whatever the machine is doing. A command that never got its place prints the lib's give-up
-# line (naming the holders), then the same short-limit line, and exits 124; it ran nothing, and it
-# still stamps 124 (see EVERY END STAMPS). A void --quiet run's retry gets only what is left.
+# AT THE GATE (T44, review 8 F2): the ask's --within is the limit and the kill is timed from the
+# shim's start, so the call ends inside the harness's own timeout whatever the machine is doing.
+# A command the gate did not admit within it ends 75, not 124 (AC-2.6): it ran nothing and keeps
+# its number. A void --quiet run's retry gets only what is left.
 #
 # --max-wait <s>: THE CALL'S OWN BOUND ON THE WAIT (wave-27 T6, critic 3 S2). The wall passes the
-# Bash call's staged timeout, in seconds, less ten; the ceiling of every wait is then the smaller
-# of <s> and BIONIC_SLOTS_MAX_WAIT, so a wait for a place gives up inside the call instead of
-# outliving it into the background. It never raises the ceiling, and it kills nothing: a command
-# that got its place runs as long as it runs. The wall leaves it out beside --kill-after, whose
-# limit already bounds the wait.
+# Bash call's staged timeout, in seconds, less ten; it is the ask's --within, so a wait at the
+# gate ends inside the call instead of outliving it into the background, and it bounds the
+# settle and every void retry of a --quiet run. It kills nothing: an admitted command runs as
+# long as it runs. The wall leaves it out beside --kill-after, whose limit already bounds the wait.
 #
 # EVERY COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; T44, review 8 F3).
 # Without job control bash starts a background command with SIGINT and SIGQUIT ignored, and every
@@ -124,33 +164,33 @@
 #
 # EXIT CODES. The command's own, except:
 #   2    usage: no `--`, no command, more than one word after `--` (with or without
-#        --kill-after), a bad --kill-after, or an option the shim does not know
-#   69   no place within the ceiling (BIONIC_SLOTS_MAX_WAIT, or --max-wait when smaller; the
-#        line names the holders), or a whole-machine take on a store it cannot write; the
-#        command never ran
-#   75   void over a PASSING run: the load rose during the run on the first run and both
-#        retries, the ceiling ran out before a retry could start, or the whole machine was not
-#        had on the first try and the one run was unbooked. A failing run keeps its
-#        own code and still prints the void line (review 12 F2, A-T50.1; the runner's rule)
-#   124  --kill-after fired, during the run or during the wait for a place
+#        --kill-after), a bad --kill-after or --max-wait, an empty --agent, or an option the
+#        shim does not know
+#   69   a whole-machine run on a gate store it cannot write; the command never ran
+#   75   the gate did not admit the command within the call's limit (the line says to run it
+#        again; the command never ran), or void over a PASSING run: the load rose during the
+#        run on the first run and both retries, the limit ran out before a retry could start,
+#        or the load never settled on the first try. A failing run keeps its own code and still
+#        prints the void line (review 12 F2, A-T50.1; the runner's rule)
+#   124  --kill-after fired during the run
 #   128+n  the shim itself was stopped by signal n (its command is killed with it)
-# 75 is EX_TEMPFAIL, "try again later", which is what a void timing check of a green run means;
-# over a red one it would hide the failure behind a reason to re-run. A command can exit 69,
-# 75 or 124 itself; the shim's own always comes after a `booked:` or `slots:` line on stderr,
-# and the stamp of either is never proof of a green run. The stamp's `rc=` is the exit code;
-# it has no field for the void, so a void failure's stamp reads as the failure it is.
+# 75 is EX_TEMPFAIL, "try again later", which is what both a wait that ran out and a void timing
+# check of a green run mean; over a red run it would hide the failure behind a reason to re-run.
+# A command can exit 69, 75 or 124 itself; the shim's own always comes after a `booked:` or
+# `gate:` line on stderr, and the stamp of either is never proof of a green run. The stamp's
+# `rc=` is the exit code; it has no field for the void, so a void failure's stamp reads as the
+# failure it is.
 #
-# THE WAITS. Every wait polls every BIONIC_SLOTS_POLL seconds, printing a line at the start
-# and every BIONIC_SLOTS_NOTE_S (lib/slots.sh). BIONIC_SLOTS_MAX_WAIT is the total: the place
-# or the marker, the drain, the settle and every void retry give up together at one ceiling
-# taken as the shim starts (SLOTS_DEADLINE; T36, review 4 F3), and under --kill-after that
-# ceiling is the limit when the limit is shorter (T44), and --max-wait when it is (wave-27
-# T6). The store and count follow
-# BIONIC_SLOTS_DIR and BIONIC_SLOTS_N; the load follows BIONIC_LOAD_NOW_FILE (lib/resources.sh).
+# THE WAITS. The gate's wait polls every BIONIC_GATE_POLL seconds (lib/gate.sh) and prints one
+# line when it starts. A --quiet run's settle and its void retries give up together at one
+# ceiling taken as the shim starts: the call's limit (--max-wait or --kill-after), or
+# BIONIC_SETTLE_MAX_WAIT seconds (1200 unless set) when the call names none. The store follows
+# BIONIC_GATE_DIR; the load follows BIONIC_LOAD_NOW_FILE (lib/resources.sh).
 #
 # BASH 3.2.
 #
 # [WALL: tests/slots.test.sh]
+# [WALL: tests/gate.test.sh]
 
 BOOKED_SELF_DIR="$(cd "${BASH_SOURCE[0]%/*}" 2>/dev/null && pwd -P)"
 case "${BASH_SOURCE[0]}" in */*) : ;; *) BOOKED_SELF_DIR="$(pwd -P)" ;; esac
@@ -159,22 +199,26 @@ case "${BASH_SOURCE[0]}" in */*) : ;; *) BOOKED_SELF_DIR="$(pwd -P)" ;; esac
 . "$BOOKED_SELF_DIR/lib/roots.sh" 2>/dev/null
 # shellcheck disable=SC1091
 . "$BOOKED_SELF_DIR/lib/resources.sh" || exit 2
+# gate.sh brings the liveness rule (slots.sh) with it.
 # shellcheck disable=SC1091
-. "$BOOKED_SELF_DIR/lib/slots.sh" || exit 2
+. "$BOOKED_SELF_DIR/lib/gate.sh" || exit 2
 
-BOOKED_NOPLACE_RC=69
+BOOKED_NOSTORE_RC=69
+BOOKED_WAITED_RC=75
 BOOKED_VOID_RC=75
 BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; max_wait=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""
+kill_after=""; max_wait=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
+    --agent=*)      agent="${1#--agent=}"; [ -n "$agent" ] || booked_usage; shift ;;
     --kill-after)   [ "$#" -ge 2 ] || booked_usage; kill_after="$2"; shift 2 ;;
     --kill-after=*) kill_after="${1#--kill-after=}"; shift ;;
     --max-wait)     [ "$#" -ge 2 ] || booked_usage; max_wait="$2"; shift 2 ;;
@@ -186,6 +230,7 @@ while [ "$#" -gt 0 ]; do
     --stamp-dir=*)  stamp_dir="${1#--stamp-dir=}"; [ -n "$stamp_dir" ] || booked_usage; shift ;;
     --suites)       [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; suites="$2"; shift 2 ;;
     --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
+    --runner)       runner=1; shift ;;
     --)             sep=1; shift; break ;;
     *)              booked_usage ;;
   esac
@@ -203,6 +248,7 @@ for _n in "$kill_after" "$max_wait"; do
 done
 [ "${BIONIC_QUIET:-}" = 1 ] && quiet=1
 cmd="$*"
+[ -z "$agent" ] || export BIONIC_GATE_AGENT="${agent//[!A-Za-z0-9._+-]/_}"
 
 # ── the stamp, read before anything runs ─────────────────────────────────────
 stamp_file=""; stamp_head=""; stamp_dirty=""
@@ -243,6 +289,9 @@ booked_stamp() {  # <rc>
 
 # ── running the command ──────────────────────────────────────────────────────
 CHILD=""; RUN_RC=0
+# The request this shim asked for: its id, and whether this shim holds it (1) or runs under an
+# ancestor's admission the gate believed (0). Only a holder samples and ends it.
+BOOKED_ID=""; BOOKED_OWN=0; BOOKED_SAMPLE_TICKS=10; BOOKED_IDF=""
 
 booked_tree() {  # <pid> — the pid and its descendants, each stopped so none can fork
   local c
@@ -271,13 +320,13 @@ booked_kill_tree() {  # <pid> — TERM the whole tree, then KILL whatever outliv
   return 0
 }
 
-booked_over_limit() {  # the one line a command stopped at its short limit gets, run or not
+booked_over_limit() {  # the one line a command stopped at its short limit gets
   printf 'booked: stopped after %ss — over the short limit; a longer command belongs in a subagent: dispatch it with the Agent tool, do not raise the timeout\n' \
     "$kill_after" >&2
 }
 
 booked_run() {  # runs $cmd; sets RUN_RC
-  local killed=0 q
+  local killed=0 q tick=0
   # THE COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; see the header):
   # it starts with the signal dispositions it would have had unwrapped, and the kill reaches
   # every process it started, an orphan included. The group is never the shim's own, so the
@@ -302,17 +351,30 @@ booked_run() {  # runs $cmd; sets RUN_RC
   CHILD=$!
   set +m
   exec 2>&9 9>&-
-  if [ -n "$kill_after" ]; then
-    # Timed from the shim's start (BOOKED_T0), so the wait for a place spends the limit too.
-    # `$SECONDS` counts whole seconds of the wall clock, so a difference of N is anywhere in
-    # (N-1, N+1) seconds: only "more than N" is never early (review 12 F4, A-T50.3). It fires
-    # up to a second late, which the five seconds the wall leaves before the harness's own
-    # timeout absorb with the kill's grace.
+  if [ -n "$kill_after" ] || [ "$BOOKED_OWN" -eq 1 ]; then
+    # One loop watches both clocks. The kill is timed from the shim's start (BOOKED_T0), so the
+    # wait at the gate spends the limit too. `$SECONDS` counts whole seconds of the wall clock,
+    # so a difference of N is anywhere in (N-1, N+1) seconds: only "more than N" is never early
+    # (review 12 F4, A-T50.3). It fires up to a second late, which the five seconds the wall
+    # leaves before the harness's own timeout absorb with the kill's grace. THE SAMPLE (T12; T2's
+    # sampling note): a request's peak rises only on a locked gate read, so a holder reads
+    # `gate_state` every BIONIC_GATE_POLL seconds while its command runs; its own output is
+    # nothing the command's reader sees. IN A SUBSHELL: a trap runs between two commands of a
+    # function, so a signal taken inside `gate_state` here would run booked_end while this very
+    # shell held the gate's lock, and gate_end would wait out the lock it holds itself. A
+    # subshell is one foreground command: the trap waits for it, and the lock it took is its own.
     while kill -0 "$CHILD" 2>/dev/null; do
-      if [ $((SECONDS - BOOKED_T0)) -gt "$kill_after" ]; then
+      if [ -n "$kill_after" ] && [ $((SECONDS - BOOKED_T0)) -gt "$kill_after" ]; then
         booked_kill_tree "$CHILD"
         killed=1
         break
+      fi
+      if [ "$BOOKED_OWN" -eq 1 ]; then
+        tick=$((tick + 1))
+        if [ "$tick" -ge "$BOOKED_SAMPLE_TICKS" ]; then
+          ( gate_state ) >/dev/null 2>&1
+          tick=0
+        fi
       fi
       sleep 0.2
     done
@@ -327,6 +389,12 @@ booked_run() {  # runs $cmd; sets RUN_RC
   fi
 }
 
+booked_end() {  # the request this shim holds is over: the gate records it with the run's code
+  [ "$BOOKED_OWN" -eq 1 ] || return 0
+  BOOKED_OWN=0
+  gate_end "$BOOKED_ID" "$RUN_RC" >/dev/null
+}
+
 booked_on_signal() {  # <signal number>
   local i=0
   if [ -n "$CHILD" ]; then
@@ -339,6 +407,9 @@ booked_on_signal() {  # <signal number>
   fi
   CHILD=""
   RUN_RC=$((128 + $1))
+  # An admitted run ends at the gate with the signal's code; a shim stopped while it waited
+  # leaves its request to the gate, which serves no request whose holder is gone.
+  booked_end
   # Stamped whether or not the command had started: a signal during the wait is an end too.
   booked_stamp "$RUN_RC"
   exit "$RUN_RC"
@@ -347,20 +418,87 @@ trap 'booked_on_signal 1' HUP
 trap 'booked_on_signal 2' INT
 trap 'booked_on_signal 3' QUIT
 trap 'booked_on_signal 15' TERM
-trap 'slots_release "$$"; [ -z "${BOOKED_TIMES:-}" ] || rm -f "$BOOKED_TIMES"' EXIT
+trap 'rm -f ${BOOKED_TIMES:+"$BOOKED_TIMES"} ${BOOKED_IDF:+"$BOOKED_IDF"}' EXIT
 
-booked_settle() {  # wait for resources_settled under the shim's one ceiling (SLOTS_DEADLINE)
-  local cores start max poll line deadline
-  cores="$(_res_cores)"; max="$BOOKED_MAX_WAIT"; poll="$(_slots_poll)"
+# booked_req_field <id> <field> — the request's last <field>= line (lib/gate.sh's request file).
+booked_req_field() {
+  sed -n "s/^$2=//p" "$(gate_dir)/requests/$1" 2>/dev/null | tail -n 1
+}
+
+booked_not_admitted() {  # the gate did not admit the command within the call's limit; nothing ran
+  printf 'booked: the gate did not admit this command within %ss; request %s keeps its turn — run again: %s\n' \
+    "$BOOKED_WITHIN" "${BOOKED_ID:-?}" "$cmd" >&2
+  booked_stamp "$BOOKED_WAITED_RC"
+  exit "$BOOKED_WAITED_RC"
+}
+
+# booked_cd_dir — the directory a literal `cd <dir>` opening the command names, or nothing. A
+# plain word only: a quote, an expansion, a glob or a `~` is not read, and the ask then names
+# where the shim stands.
+booked_cd_dir() {
+  local c="${cmd#"${cmd%%[![:space:]]*}"}" d
+  case "$c" in cd[[:space:]]*) : ;; *) return 0 ;; esac
+  d="${c#cd}"; d="${d#"${d%%[![:space:]]*}"}"; d="${d%%[[:space:];&|]*}"
+  case "$d" in ''|-*|*[\'\"\$\`\\~*?\[]*) return 0 ;; esac
+  printf '%s' "$d"
+}
+BOOKED_ASK_DIR="$stamp_dir"
+[ -n "$BOOKED_ASK_DIR" ] || BOOKED_ASK_DIR="$(booked_cd_dir)"
+
+# booked_ask <work|whole> — asks the gate in this shell (never in `$( )`: a signal must reach
+# the trap while it waits, and the holder is this process). Sets BOOKED_ID and BOOKED_OWN and
+# exports BIONIC_GATE_ADMIT; ends the shim itself on a wait that ran out (75) and on a store it
+# cannot write for a whole run (69). An ordinary run on such a store goes on unadmitted.
+booked_ask() {
+  local rc here="$PWD" moved=0
+  BOOKED_IDF="$(mktemp "${TMPDIR:-/tmp}/booked-id.XXXXXX" 2>/dev/null)"
+  # Asked from the stamp's tree (THE TREE THE ASK NAMES), in this shell, then straight back.
+  if [ -n "$BOOKED_ASK_DIR" ] && cd "$BOOKED_ASK_DIR" 2>/dev/null; then moved=1; fi
+  if [ -n "$BOOKED_IDF" ]; then
+    gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} > "$BOOKED_IDF"; rc=$?
+    { read -r BOOKED_ID < "$BOOKED_IDF"; } 2>/dev/null
+    rm -f "$BOOKED_IDF"; BOOKED_IDF=""
+  else
+    BOOKED_ID="$(gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"})"; rc=$?
+  fi
+  [ "$moved" -eq 0 ] || cd "$here" 2>/dev/null
+  case "$rc" in
+    0)
+      # Held by this process, or by an ancestor whose admission the gate believed (nested).
+      case "$(booked_req_field "$BOOKED_ID" holder)" in
+        "$$:"*) BOOKED_OWN=1 ;;
+        *) BOOKED_OWN=0 ;;
+      esac
+      export BIONIC_GATE_ADMIT="$BOOKED_ID" ;;
+    75) booked_not_admitted ;;
+    *)
+      BOOKED_ID=""
+      if [ "$1" = whole ]; then
+        printf 'booked: cannot write the gate'\''s store %s, so the whole machine cannot be had and a timing result would mean nothing — fix: make it writable, or point BIONIC_GATE_DIR at a directory you can write\n' \
+          "$(gate_dir)" >&2
+        booked_stamp "$BOOKED_NOSTORE_RC"
+        exit "$BOOKED_NOSTORE_RC"
+      fi
+      printf 'booked: cannot write the gate'\''s store %s — this command runs unadmitted, beside whatever else runs; fix: make it writable, or point BIONIC_GATE_DIR at a directory you can write\n' \
+        "$(gate_dir)" >&2 ;;
+  esac
+}
+
+booked_settle() {  # wait for resources_settled, until the shim's one ceiling (BOOKED_DEADLINE)
+  local cores poll line noted=0
+  cores="$(_res_cores)"; poll="${BIONIC_GATE_POLL:-2}"
   line="$(resources_settled_line "$cores")"
-  deadline="$(_slots_deadline "$max")"; start=$((deadline - max)); _SLOTS_NOTED=-1
   while ! resources_settled "$cores"; do
-    if [ "$SECONDS" -ge "$deadline" ]; then
+    if [ "$SECONDS" -ge "$BOOKED_DEADLINE" ]; then
       printf 'booked: gave up after %ss — the load (%s) never settled at or below %s\n' \
-        "$((SECONDS - start))" "$(_res_load_now)" "$line" >&2
+        "$((SECONDS - BOOKED_T0))" "$(_res_load_now)" "$line" >&2
       return 1
     fi
-    _slots_note "holding the whole machine, waiting for the load ($(_res_load_now)) to settle at or below $line"
+    if [ "$noted" -eq 0 ]; then
+      printf 'booked: holding the whole machine, waiting for the load (%s) to settle at or below %s\n' \
+        "$(_res_load_now)" "$line" >&2
+      noted=1
+    fi
     sleep "$poll"
   done
   return 0
@@ -379,31 +517,6 @@ booked_times() {
   [ -n "$BOOKED_CPU" ] || BOOKED_CPU=0
 }
 
-# ── main ─────────────────────────────────────────────────────────────────────
-what="$(booked_one_line "$cmd" 60)"
-# One ceiling for every wait below: the place or marker, the drain, the settle, the retries.
-# It is --max-wait when that is shorter (wave-27 T6). Under --kill-after it is the limit when
-# that is shorter still, and the kill counts from here (T44).
-BOOKED_T0=$SECONDS
-BOOKED_MAX_WAIT="$(_slots_max_wait)"; BOOKED_CUT=0
-if [ -n "$max_wait" ] && [ "$max_wait" -lt "$BOOKED_MAX_WAIT" ]; then BOOKED_MAX_WAIT=$max_wait; fi
-if [ -n "$kill_after" ] && [ "$kill_after" -le "$BOOKED_MAX_WAIT" ]; then
-  BOOKED_MAX_WAIT=$kill_after; BOOKED_CUT=1
-fi
-# Every wait gives up at "$SECONDS >= deadline", so the cut limit gets one second more: the
-# wait then gives up past the limit, never before it, by the kill's own rule (A-T50.3).
-SLOTS_DEADLINE=$((BOOKED_T0 + BOOKED_MAX_WAIT + BOOKED_CUT))
-
-booked_no_place() {  # the wait ran out before the command could start; it ran nothing
-  # At the short limit it is the same end as a run stopped there: its line, 124 (A-T44.3).
-  # At the ordinary ceiling it is the lib's line and 69, as without --kill-after. Either way it
-  # stamps that code (EVERY END STAMPS): the suite did not run, and the land must hear so.
-  [ "$BOOKED_CUT" -eq 1 ] || { booked_stamp "$BOOKED_NOPLACE_RC"; exit "$BOOKED_NOPLACE_RC"; }
-  booked_over_limit
-  booked_stamp "$BOOKED_KILLED_RC"
-  exit "$BOOKED_KILLED_RC"
-}
-
 booked_void() {  # <why> — a whole-machine run that was not measured: `void`, why, and 75 over a pass
   # A failing run keeps its own code (review 12 F2, A-T50.1): 75 over it would hide the failure
   # behind a reason to re-run.
@@ -412,68 +525,81 @@ booked_void() {  # <why> — a whole-machine run that was not measured: `void`, 
   [ "$RUN_RC" -ne 0 ] || RUN_RC=$BOOKED_VOID_RC
 }
 
-# The lib reads its ceiling from BIONIC_SLOTS_MAX_WAIT; each take is handed the shim's own for
-# that call only, so the command never sees the cut value.
-if [ "${BIONIC_SLOT_QUIET:-}" = 1 ] ||
-   { [ "$quiet" -eq 0 ] && [ "${BIONIC_SLOT_HELD:-}" = 1 ]; }; then
+# ── main ─────────────────────────────────────────────────────────────────────
+BOOKED_T0=$SECONDS
+# THE CALL'S LIMIT: the smaller of --kill-after and --max-wait; the ask's --within, and the one
+# ceiling of a --quiet run's settle and retries. With neither, the gate waits until it admits,
+# and the settle's ceiling is BIONIC_SETTLE_MAX_WAIT.
+BOOKED_WITHIN="$kill_after"
+if [ -n "$max_wait" ] && { [ -z "$BOOKED_WITHIN" ] || [ "$max_wait" -lt "$BOOKED_WITHIN" ]; }; then
+  BOOKED_WITHIN="$max_wait"
+fi
+case "${BIONIC_SETTLE_MAX_WAIT:-}" in ''|*[!0-9]*) BOOKED_SETTLE_MAX=1200 ;; *) BOOKED_SETTLE_MAX=$BIONIC_SETTLE_MAX_WAIT ;; esac
+# The settle gives up at "$SECONDS >= deadline", so a kill limit gets one second more: the
+# settle then gives up past the limit, never before it, by the kill's own rule (A-T50.3).
+if [ -n "$BOOKED_WITHIN" ]; then
+  BOOKED_CUT=0; [ "$BOOKED_WITHIN" != "$kill_after" ] || BOOKED_CUT=1
+  BOOKED_DEADLINE=$((BOOKED_T0 + BOOKED_WITHIN + BOOKED_CUT))
+else
+  BOOKED_DEADLINE=$((BOOKED_T0 + BOOKED_SETTLE_MAX))
+fi
+# THE COMMAND KEY: the one suite file --suites names, else the command's first 60 characters.
+case "$suites" in
+  ''|*,*|*'?'*) BOOKED_KEY="$(booked_one_line "$cmd" 60)" ;;
+  *) BOOKED_KEY="${suites//[!A-Za-z0-9._+-]/?}" ;;
+esac
+# The sample's cadence, in the run loop's 0.2 s ticks: the gate's own poll, at least one tick.
+BOOKED_SAMPLE_TICKS="$(awk -v p="${BIONIC_GATE_POLL:-2}" 'BEGIN { t = int(p / 0.2 + 0.5); print (t >= 1 ? t : 1) }' 2>/dev/null)"
+case "$BOOKED_SAMPLE_TICKS" in ''|*[!0-9]*|0) BOOKED_SAMPLE_TICKS=10 ;; esac
+
+if [ "$quiet" -eq 0 ]; then
+  # THE RUNNER HOLDS NOTHING (D13): each of its suites asks for itself.
+  if [ "$suites" != run.sh ] && [ "$runner" -eq 0 ]; then
+    booked_ask work
+  fi
   booked_run
-elif [ "$quiet" -eq 0 ]; then
-  BIONIC_SLOTS_MAX_WAIT=$BOOKED_MAX_WAIT slots_take "$$" "$what" >/dev/null; take_rc=$?
-  case "$take_rc" in
-    0) export BIONIC_SLOT_HELD=1 BIONIC_SLOT_PLACE="$SLOTS_TAKEN" ;;
-    2) printf 'booked: cannot write the store %s — this command runs unbooked, beside whatever else runs; fix: make it writable, or point BIONIC_SLOTS_DIR at a directory you can write\n' \
-         "$(slots_dir)" >&2 ;;
-    *) booked_no_place ;;
-  esac
+  booked_end
+elif booked_ask whole && [ "$BOOKED_OWN" -eq 0 ] && [ -n "$BOOKED_ID" ] &&
+     [ "$(booked_req_field "$BOOKED_ID" kind)" = whole ]; then
+  # Inside a whole admission already: the hold is the whole machine, and its owner reads the load.
   booked_run
 else
-  # A whole-machine take from inside a held place reads BIONIC_SLOT_HELD to know it is
-  # nested, so each retry must see the value this shim was started with.
-  outer_held="${BIONIC_SLOT_HELD:-}"
   tries=0
   BOOKED_TIMES="$(mktemp "${TMPDIR:-/tmp}/booked-times.XXXXXX" 2>/dev/null)"
-  while :; do
-    BIONIC_SLOTS_MAX_WAIT=$BOOKED_MAX_WAIT slots_take_all "$$" "$what" >/dev/null; take_rc=$?
-    [ "$take_rc" -ne 0 ] || booked_settle || take_rc=1
-    if [ "$take_rc" -ne 0 ] && [ "$tries" -eq 0 ]; then
-      # A store it cannot write refuses (69), and a give-up at the short limit ends 124.
-      [ "$take_rc" -ne 2 ] && [ "$BOOKED_CUT" -eq 0 ] || booked_no_place
-      # THE RUNNER'S RULE (tests/run.sh _solo_run; wave-27 T6): the whole machine was not had
-      # within the ceiling, so the command runs once, unbooked, and the run is void. No retry:
-      # waiting the whole ceiling again would only say the same thing.
-      slots_release "$$"
-      booked_run
-      booked_void "the whole machine was not had within the ceiling of ${BOOKED_MAX_WAIT}s; it ran unbooked and is not retried"
-      break
-    fi
-    if [ "$take_rc" -ne 0 ]; then
-      # A run already happened and was void; the ceiling ran out before another could start.
-      booked_void "the ceiling of ${BOOKED_MAX_WAIT}s ran out before a retry could start; a timing result from this machine now would not mean anything"
-      break
-    fi
-    export BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1
-    booked_times; cpu0=$BOOKED_CPU; t0=$SECONDS
+  if ! booked_settle; then
+    # THE RUNNER'S RULE (tests/run.sh _solo_run; wave-27 T6): the load never settled within the
+    # ceiling, so the command runs once and the run is void. No retry: waiting the whole ceiling
+    # again would only say the same thing.
     booked_run
-    booked_times; cpu1=$BOOKED_CPU; wall=$((SECONDS - t0))
-    [ "$RUN_RC" -ne "$BOOKED_KILLED_RC" ] || break
-    cores="$(_res_cores)"
-    # The run's own share of the load is not a disturbance (review 4 F4): take it off.
-    own="$(resources_own_load "$(awk -v a="$cpu0" -v b="$cpu1" 'BEGIN { d = b - a; printf "%.3f\n", (d > 0 ? d : 0) }')" "$wall")"
-    [ -n "$own" ] || own=0
-    resources_undisturbed "$cores" "$own" && break
-    rose="$(_res_load_now)"; line="$(resources_settled_line "$cores")"
-    slots_release "$$"
-    unset BIONIC_SLOT_QUIET
-    if [ -n "$outer_held" ]; then export BIONIC_SLOT_HELD="$outer_held"; else unset BIONIC_SLOT_HELD; fi
-    tries=$((tries + 1))
-    if [ "$tries" -gt "$BOOKED_RETRIES" ]; then
-      booked_void "the load rose above $line during every run (last $rose, about $own of it the run's own); a timing result from this machine now would not mean anything"
-      break
-    fi
-    printf 'void\n' >&2
-    printf 'booked: void — the load rose to %s during the run (about %s of it the run'\''s own), above the settled line %s; retrying (%s of %s)\n' \
-      "$rose" "$own" "$line" "$tries" "$BOOKED_RETRIES" >&2
-  done
+    booked_void "the load never settled within the ceiling of $((BOOKED_DEADLINE - BOOKED_T0))s; it ran once and is not retried"
+  else
+    while :; do
+      booked_times; cpu0=$BOOKED_CPU; t0=$SECONDS
+      booked_run
+      booked_times; cpu1=$BOOKED_CPU; wall=$((SECONDS - t0))
+      [ "$RUN_RC" -ne "$BOOKED_KILLED_RC" ] || break
+      cores="$(_res_cores)"
+      # The run's own share of the load is not a disturbance (review 4 F4): take it off.
+      own="$(resources_own_load "$(awk -v a="$cpu0" -v b="$cpu1" 'BEGIN { d = b - a; printf "%.3f\n", (d > 0 ? d : 0) }')" "$wall")"
+      [ -n "$own" ] || own=0
+      resources_undisturbed "$cores" "$own" && break
+      rose="$(_res_load_now)"; line="$(resources_settled_line "$cores")"
+      tries=$((tries + 1))
+      if [ "$tries" -gt "$BOOKED_RETRIES" ]; then
+        booked_void "the load rose above $line during every run (last $rose, about $own of it the run's own); a timing result from this machine now would not mean anything"
+        break
+      fi
+      printf 'void\n' >&2
+      printf 'booked: void — the load rose to %s during the run (about %s of it the run'\''s own), above the settled line %s; retrying (%s of %s)\n' \
+        "$rose" "$own" "$line" "$tries" "$BOOKED_RETRIES" >&2
+      # The retry keeps the admission and settles again under the same ceiling.
+      if ! booked_settle; then
+        booked_void "the ceiling of $((BOOKED_DEADLINE - BOOKED_T0))s ran out before a retry could start; a timing result from this machine now would not mean anything"
+        break
+      fi
+    done
+  fi
+  booked_end
 fi
 
 booked_stamp "$RUN_RC"
