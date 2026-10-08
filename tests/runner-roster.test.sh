@@ -1860,4 +1860,135 @@ RO_DIR="$TOM" ro_drive --only only-a.test.sh
 expect_eq "ONLY.32 …and still runs the named suite (not vacuous)" "yes" "$(ro_ran only-a)"
 expect_eq "ONLY.33 under the mutant the unnamed suite runs (the defect ONLY.3 guards)" "yes" "$(ro_ran only-b)"
 
+# ============================================================
+section "§ORDER the roster runs longest-first from tests/timing.tsv; a full run rewrites it (wave-30 T10; D8a, AC-5.2)"
+# ============================================================
+#
+# WHAT IT COVERS. tests/timing.tsv is `<label>TAB<seconds>`, committed, read by the runner at
+# <repo>/tests/timing.tsv — in a scratch tree, that tree's own. The runner orders what it
+# LAUNCHES by it: suites the table knows, longest first (ties by label), then the suites it
+# does not know in roster order; solo suites keep their own drain after the batch and are
+# ordered the same way inside it. `--dry-run` prints that order, `<label>TAB<seconds|->` per
+# line. A full run that completes rewrites the table from its own measurements; `--only` never.
+#
+# NOT VACUOUS. The fixture table orders three suites AGAINST alphabetical order (a=100, b=900,
+# c=500), so a runner that ignored the table, or sorted by name, prints a different order than
+# the one asserted. ord_lines is proved non-empty on the fixture before any row reads through it.
+
+TOR="$TMPROOT/order"
+rr_tree "$TOR"
+for _n in a b c d; do rr_stub "$TOR" "ord-$_n"; done
+{ printf '#!/bin/bash\n# runner: solo\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\n'
+  printf ': > "$RR_MARKS/ord-z.ran"\nsection "z"\nexpect_eq "z ran" "x" "x"\nfinish\n'; } > "$TOR/tests/ord-z.test.sh"
+printf 'ord-a.test.sh\t100\nord-b.test.sh\t900\nord-c.test.sh\t500\nord-z.test.sh\t950\n' > "$TOR/tests/timing.tsv"
+# ord_lines <output> — the order lines of a dry run, in print order (label TAB seconds-or-dash).
+ord_lines() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' 'NF == 2 && $1 ~ /^ord-[a-z]\.test\.sh$/ { print $1 ":" $2 }'; }
+# ord_labels <output> — the suite labels a run printed, in print order (no sort).
+ord_labels() { printf '%s\n' "$1" | sed -n 's/^  \(ord-[a-z]*\.test\.sh\) .*/\1/p'; }
+
+rr_drive "$TOR" "--dry-run"
+expect_eq "ORDER.1 --dry-run exits 0" "0" "$RR_RC"
+expect_contains "ORDER.2 …and still prints the width line first" "JOBS=2" "$RR_OUT"
+expect_eq "ORDER.3 the batch is longest-first by the table, the unknown suite after the known ones, then the solo drain" \
+  "ord-b.test.sh:900
+ord-c.test.sh:500
+ord-a.test.sh:100
+ord-d.test.sh:-
+ord-z.test.sh:950" "$(ord_lines "$RR_OUT")"
+expect_contains "ORDER.4 …the solo suite is still named as solo" "solo: ord-z.test.sh" "$RR_OUT"
+expect_eq "ORDER.5 …and nothing ran" "no no" "$([ -f "$RR_MARKS/ord-a.ran" ] && echo yes || echo no) $([ -f "$RR_MARKS/ord-z.ran" ] && echo yes || echo no)"
+
+# Ties order by label, and a table row that is not an integer is no row at all.
+TORT="$TMPROOT/order-tie"
+rr_tree "$TORT"
+for _n in a b c d; do rr_stub "$TORT" "ord-$_n"; done
+printf 'ord-c.test.sh\t40\nord-a.test.sh\t40\nord-b.test.sh\tfast\n' > "$TORT/tests/timing.tsv"
+rr_drive "$TORT" "--dry-run"
+expect_eq "ORDER.6 a tie orders by label; a non-integer row is unknown and keeps roster order" \
+  "ord-a.test.sh:40
+ord-c.test.sh:40
+ord-b.test.sh:-
+ord-d.test.sh:-" "$(ord_lines "$RR_OUT")"
+# A tree with no table at all: every suite unknown, roster order, and the run still goes.
+TORN="$TMPROOT/order-none"
+rr_tree "$TORN"
+for _n in a b c; do rr_stub "$TORN" "ord-$_n"; done
+rr_drive "$TORN" "--dry-run"
+expect_eq "ORDER.7 no table: every suite is unknown, in roster order, with a dash" \
+  "ord-a.test.sh:-
+ord-b.test.sh:-
+ord-c.test.sh:-" "$(ord_lines "$RR_OUT")"
+
+# --serial runs in the same order as the dry run says (solo in place: serial has one sequence).
+rr_drive "$TOR" "--serial"
+expect_eq "ORDER.8 --serial runs green" "0" "$RR_RC"
+expect_eq "ORDER.9 …in table order, longest first, the unknown suite after the known ones" \
+  "ord-z.test.sh
+ord-b.test.sh
+ord-c.test.sh
+ord-a.test.sh
+ord-d.test.sh" "$(ord_labels "$RR_OUT")"
+# The default mode launches by the table but still REPORTS in roster order (A-T10.1).
+rr_drive "$TOR"
+expect_eq "ORDER.10 the default mode is green" "0" "$RR_RC"
+expect_eq "ORDER.11 …and reports in roster order, whatever order it launched in" \
+  "ord-a.test.sh
+ord-b.test.sh
+ord-c.test.sh
+ord-d.test.sh
+ord-z.test.sh" "$(ord_labels "$RR_OUT")"
+
+# THE REWRITE. A fresh tree: a table with a stale row (gone) and a suite that will fail (f).
+TORW="$TMPROOT/order-write"
+rr_tree "$TORW"
+for _n in a b c; do rr_stub "$TORW" "ord-$_n"; done
+{ printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\n'
+  printf 'section "f"\nexpect_eq "f fails" "1" "2"\nfinish\n'; } > "$TORW/tests/ord-f.test.sh"
+printf 'ord-a.test.sh\t100\nord-b.test.sh\t900\nord-c.test.sh\t500\nord-f.test.sh\t77\nord-gone.test.sh\t999\n' > "$TORW/tests/timing.tsv"
+cp "$TORW/tests/timing.tsv" "$TMPROOT/order-write.before"
+rr_drive "$TORW"
+expect_eq "ORDER.12 the full run with a failing suite fails (the rewrite is not tied to a green run)" "1" "$RR_RC"
+ORW_NEW="$(cat "$TORW/tests/timing.tsv")"
+expect_eq "ORDER.13 the table was rewritten with measured integers for the suites that passed" "3" \
+  "$(printf '%s\n' "$ORW_NEW" | grep -cE '^ord-[abc]\.test\.sh	[0-9]+$')"
+expect_eq "ORDER.14 …the seeded 100/900/500 are gone (the extractor sees the new numbers)" "0" \
+  "$(printf '%s\n' "$ORW_NEW" | awk -F'\t' '$1 ~ /^ord-[abc]\.test\.sh$/ && ($2 == 100 || $2 == 900 || $2 == 500)' | wc -l | tr -d ' ')"
+expect_eq "ORDER.15 …the failing suite keeps its old row, not a measurement of its early exit" "ord-f.test.sh	77" \
+  "$(printf '%s\n' "$ORW_NEW" | grep '^ord-f\.test\.sh	')"
+expect_eq "ORDER.16 …a row whose suite is no longer in the roster is dropped" "0" \
+  "$(printf '%s\n' "$ORW_NEW" | grep -c '^ord-gone')"
+expect_eq "ORDER.17 …and the file is sorted by label, one tab-separated pair per line, no temp file left" "yes 0" \
+  "$([ "$(printf '%s\n' "$ORW_NEW" | cut -f1)" = "$(printf '%s\n' "$ORW_NEW" | cut -f1 | LC_ALL=C sort)" ] && echo yes || echo no) $(ls "$TORW"/tests | grep -c 'timing.tsv.')"
+
+# --only never writes it: restore the seeded table, run one suite by name, compare bytes.
+cp "$TMPROOT/order-write.before" "$TORW/tests/timing.tsv"
+RR_OUT="$( cd "$TORW" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/ring" BIONIC_NOW_EPOCH="$RR_NOW" \
+  BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+  env "${RR_GATE_ENV[@]}" bash tests/run.sh --only ord-a.test.sh 2>&1 )"; RR_RC=$?
+expect_eq "ORDER.18 --only runs the named suite (paired positive for the row below)" "0 ord-a.test.sh" "$RR_RC $(ord_labels "$RR_OUT")"
+expect_eq "ORDER.19 …and leaves the table byte for byte as it was" "yes" \
+  "$(cmp -s "$TMPROOT/order-write.before" "$TORW/tests/timing.tsv" && echo yes || echo no)"
+# A dry run writes nothing either.
+rr_drive "$TORW" "--dry-run"
+expect_eq "ORDER.20 --dry-run leaves the table byte for byte as it was" "yes" \
+  "$(cmp -s "$TMPROOT/order-write.before" "$TORW/tests/timing.tsv" && echo yes || echo no)"
+
+# THE MUTANT: a runner that never reads the table (the order function returns the roster as is)
+# must move ORDER.3 — otherwise the pins above would pass on an unordered runner.
+TORM="$TMPROOT/order-mut"
+rr_tree "$TORM"
+for _n in a b c d; do rr_stub "$TORM" "ord-$_n"; done
+cp "$TOR/tests/ord-z.test.sh" "$TORM/tests/"; cp "$TOR/tests/timing.tsv" "$TORM/tests/"
+sed 's|^TIMING_TABLE=.*|TIMING_TABLE=/nonexistent/timing.tsv|' "$RUNNER" > "$TORM/tests/run.sh"
+expect_eq "ORDER.21 the mutant runner parses and differs from the shipped one" "0 no" \
+  "$(bash -n "$TORM/tests/run.sh" >/dev/null 2>&1; echo $?) $(cmp -s "$RUNNER" "$TORM/tests/run.sh" && echo yes || echo no)"
+rr_drive "$TORM" "--dry-run"
+expect_eq "ORDER.22 under the mutant the batch is roster order (the defect ORDER.3 guards)" \
+  "ord-a.test.sh:-
+ord-b.test.sh:-
+ord-c.test.sh:-
+ord-d.test.sh:-
+ord-z.test.sh:-" "$(ord_lines "$RR_OUT")"
+
+
 finish
