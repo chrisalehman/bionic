@@ -5946,17 +5946,47 @@ expect_contains "W28-71y: a project declares its floor (D36)" \
   'A project declares its floor with `floor: <command>` in `.bionic/config.yaml`; `floor-run` runs it and `proof-add floor` accepts its log; `floor-attestation: user` accepts the user'"'"'s attestation record; a project with neither keeps the `tests/run.sh` rule.' "$W28_71_J"
 expect_contains "W28-71y2: …floor-run refuses a project that declares no floor, with the line it prints" \
   'poker: REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run.' "$W28_71_J"
-# W28-71t: each refusal the entry quotes carries a fix the code at this head prints. W27-R5's extractor
-# reads any entry's "Newly refused" part; the code spells a fix in double quotes or, in lib/stop.sh, in
-# single quotes (FIX='…'), so this gap reader accepts either.
-# w28_71_fix_gaps <entry text> -> each quoted fix no shipped script prints as a quoted literal.
+# W28-71t: each refusal the entry quotes is a line the code at this head prints, read WHOLE. The entry's
+# "Newly refused" part quotes a refusal in a backticked span of five words or more (a verb, a flag or a
+# key is shorter). The code composes a first line from pieces, so a quote is cut into the literal runs
+# the code spells and each run must appear in a shipped script:
+#   - the printer's own prefix is dropped: `spawn-worktree: REFUSED reason=` or `FAIL reason=` (the
+#     worktree library adds it), `poker: ` (its `die` adds it) with its `REFUSED — ` and its closing
+#     `. The plan is unchanged.`, `stop-orders: `, `card.sh: `, `resolve-roots.sh: `, and for
+#     `bionic: <verb> refused — <fact> (<fix>)` the prefix, with the fact and the fix cut apart;
+#   - a `<placeholder>` or an `…` is where the code puts a value, so the run before it and the run after
+#     it are matched on their own, each whole (a quote after a placeholder is pinned too);
+#   - a number between spaces (`in 7 s`) is a value the code takes from a variable, cut the same way; a
+#     digit glued to a letter (`Step 9a`) is a name and stays in its run.
+# A run is matched as written or with its double quotes escaped (`\"`), as the code writes them.
+# w28_71_quotes <entry text> -> `<bullet number><TAB><quote>` for each quote in the "Newly refused" part.
+w28_71_quotes() {
+  printf '%s\n' "$1" | awk '/^Newly refused/{ p = 1; next } p && /^[A-Z][^ ]*[^:]*:$/{ exit } p && /^- /{ n++ }
+    p && n { k = split($0, f, "`"); for (i = 2; i <= k; i += 2) if (split(f[i], w, " ") >= 5) print n "\t" f[i] }'
+}
+# w28_71_runs <quote> -> the literal runs of one quote, one per line.
+w28_71_runs() {
+  printf '%s\n' "$1" | awk '{ s = $0
+    if (sub(/^spawn-worktree: (REFUSED|FAIL) reason=/, "", s)) { }
+    else if (sub(/^bionic: [a-z-]+ refused — /, "", s)) { sub(/\)$/, "", s); sub(/ \(/, "\n", s) }
+    else sub(/^(poker|stop-orders|card\.sh|resolve-roots\.sh): /, "", s)
+    sub(/^REFUSED — /, "", s); sub(/\. The plan is unchanged\.$/, "", s)
+    gsub(/<[^<>]*<[^<>]*>>/, "\n", s); gsub(/<[^<>]*>/, "\n", s); gsub(/…/, "\n", s); gsub(/ [0-9]+ /, "\n", s)
+    print s }'
+}
+# w28_71_fix_gaps <entry text> -> each run of each quote no shipped script prints, one per line. The
+# interpreter pin's refusal is printed by tests/lib/resolve-roots.sh, which the pin's users run by hand.
 w28_71_fix_gaps() {
-  local fix needle
-  w27r_fixes "$1" | while IFS= read -r fix; do
-    case "$fix" in *"<"*) needle="${fix%%<*}" ;; *) needle="$fix" ;; esac
-    { /usr/bin/grep -rqF -- "\"$needle" "${REPO}/hooks" "${REPO}/payload/scripts" \
-      || /usr/bin/grep -rqF -- "'$needle" "${REPO}/hooks" "${REPO}/payload/scripts"; } \
-      || echo "not printed by the code: $fix"
+  local n quote run esc tab
+  tab="$(printf '\t')"
+  w28_71_quotes "$1" | while IFS="$tab" read -r n quote; do
+    w28_71_runs "$quote" | while IFS= read -r run; do
+      [ -n "$run" ] || continue
+      esc="$(printf '%s' "$run" | sed 's/"/\\"/g')"
+      { /usr/bin/grep -rqF -- "$run" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib" \
+        || /usr/bin/grep -rqF -- "$esc" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib"; } \
+        || echo "not printed by the code: $run (bullet $n)"
+    done
   done
 }
 expect_nonempty "W28-71t precondition: the entry quotes refusal first lines with their fixes" "$(w27r_fixes "$W28_71_E")"
@@ -5964,6 +5994,17 @@ expect_eq "W28-71t: every quoted fix is one the code at this head prints" "" "$(
 W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed 's/(add Row: <id>)`/(add a row line)`/')"
 expect_contains "W28-71tm: …and a quoted fix the code does not print is caught" \
   "not printed by the code: add a row line" "$(w28_71_fix_gaps "$W28_71_DOC")"
+# …the whole quote is read, so a run after a placeholder and a name that differs by one letter are caught too.
+W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed "s/ready reads the row's suites off the roster row the walls read/ready reads the row's suites off its launch line/")"
+expect_contains "W28-71tm2: …a run after a placeholder is pinned (a quote the code stopped printing)" \
+  "not printed by the code:  — ready reads the row's suites off its launch line (bullet 3)" "$(w28_71_fix_gaps "$W28_71_DOC")"
+W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed 's/the Step 9 block/the Step 9a block/')"
+expect_contains "W28-71tm3: …and a name that is one letter off is caught" \
+  "not printed by the code: the Step 9a block is close-out's to write (scripts/close-out.sh). (bullet 18)" "$(w28_71_fix_gaps "$W28_71_DOC")"
+W28_71_NB="$(printf '%s\n' "$W28_71_E" | awk '/^Newly refused/{ p = 1; next } p && /^[A-Z][^ ]*[^:]*:$/{ exit } p && /^- /{ n++ } END { print n + 0 }')"
+W28_71_NQ="$(w28_71_quotes "$W28_71_E" | cut -f1 | sort -u | wc -l | tr -d ' ')"
+expect_regex "W28-71t0 precondition: the part has bullets" '^[1-9][0-9]*$' "$W28_71_NB"
+expect_eq "W28-71t0: every bullet of the part quotes a refusal, so every bullet is read" "$W28_71_NB" "$W28_71_NQ"
 # W28-71u: no run row, ruling id, review pass or grade in a user's release notes.
 W28_71_WORDS='(^|[^A-Za-z0-9])(T[0-9]{1,2}|P[0-3])([^A-Za-z0-9]|$)|A-orch|review pass'
 expect_no_regex "W28-71u: the entry names no run row, ruling id, review pass or grade" "$W28_71_WORDS" "$W28_71_E"
@@ -6003,6 +6044,10 @@ for _w2871 in \
   'the gate'"'"'s request files are never pruned'; do
   expect_absent "W28-71x: the entry does not state the closed limit: ${_w2871:0:60}…" "$_w2871" "$W28_71_LIM"
 done
+# …limit 57 names the shapes that move the stamp's tree, and no limit sends a writer to a rule number.
+expect_contains 'W28-71x2: the stamp limit names the shapes between the cd and the suite that move the stamp' \
+  'Known limit: a suite call that carries a `$( )`, a pipe, a `&`, a backquote or a subshell between its `cd` and the suite may be stamped against the main checkout' "$W28_71_LIM"
+expect_absent "W28-71x3: no limit sends a writer to a rule number no shipped file numbers" "rule 5" "$W28_71_LIM"
 
 # ============================================================
 # §W28-152 — five limits 1.12.0 left unstated or misstated (wave-28 T23; REQ-15 AC-15.2, D32)
