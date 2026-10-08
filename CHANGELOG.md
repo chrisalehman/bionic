@@ -142,15 +142,17 @@ What you will notice:
   `bash tests/<suite>.test.sh`, in any form, is refused with one line naming it. The classifier now reads
   a suite run through a `for` or `while` loop, a variable or a binding. A suite run by hand whose
   interpreter pin cannot be built stops with exit 2, naming the pin's path and the reason, where it used
-  to run unpinned.
+  to run unpinned. The door is the shape from 1.13.0 on: a 1.12.0 wall reads `tests/run.sh --only` as the
+  full tree, so until the new plugin is installed a project runs a suite by its file path.
 - **The interpreter pin is judged along its whole path.** The pin is refused under a directory another
   user can write, replace or add entries to (including by a macOS or Linux ACL), under a parent
   that group or others can write and that has no sticky bit, through a directory owned by another user,
   or at a pin root another user planted, even one swapped for a link while it was built. A temp
   directory or any directory on the path that does not exist, a relative root or a relative
   `TMPDIR` is refused; the refusal says to set `TMPDIR`. The pin builds again inside an unprivileged
-  user namespace, a root that vanished between two checks is refused, and the pin's entry on `PATH` is
-  physical.
+  user namespace (bubblewrap, a Nix sandbox, `unshare -U`), where a host `/tmp` bound into the sandbox is
+  still refused because the sandbox's tmpfs root reads as the user. A root that vanished between two
+  checks is refused, and the pin's entry on `PATH` is physical.
 - **A brief names its row and its suites.** The brief scaffold carries `Row: <id>` and
   `Lands-on: <suite>[, <suite>]` (or `Lands-on: none <reason>`), and `Expected artifact:` takes a bare
   file name. A dispatch is bound to one row: the row its `Row:` names, else the row its agent name
@@ -170,11 +172,14 @@ What you will notice:
   and only for a name no roster of the project (this session's, a predecessor's, a dead session's)
   holds. A read-only role launched from inside an agent prints
   `bionic: dispatch admitted without a roster row — …`: it never had a row, and now says so.
-- **A project declares its own floor.** `floor: <command>` and `floor-attestation: user` in
-  `.bionic/config.yaml` declare what the project's floor is. `session-poker.sh floor-run` runs the
-  declared floor and logs it, and `proof-add floor` judges that log by its head, its dirty count and its
-  return code alone, or takes the user's attestation; the tool checks the contract, not the runner's
-  output. A project that declares neither key is judged as in 1.12.0.
+- **A project declares its own floor.** A project declares its floor with `floor: <command>` in
+  `.bionic/config.yaml`; `floor-run` runs it and `proof-add floor` accepts its log; `floor-attestation: user`
+  accepts the user's attestation record; a project with neither keeps the `tests/run.sh` rule. The log
+  `floor-run` writes opens with `head=<40-hex> dirty=<n> rc=<n>`, and `proof-add floor` judges it by that
+  line alone: the head is the working head, the tree was clean, the floor passed. An attestation record is
+  any file under `record/` holding a flush-left `head=<40-hex> dirty=0` line naming the working head and a
+  `floor-attested-by: <who> <when> <what ran>` line. The tool checks the contract, not the runner's output.
+  `floor-run` writes no plan and no proof, so a dispatched writer may run it.
 - **Step evidence is written by a verb.** `session-poker.sh step-field <N> <key>=<value>` writes or
   replaces one field of a step's evidence block (`head`, `cmd`, `pass`, `total`, `output`, `merge`,
   `worktree-removed`, `adr`, `share`) through the plan transaction, and `current 4` on a wave plan
@@ -199,6 +204,10 @@ What you will notice:
   drives the rows run, recorded with their numbers for the next release.
 
 Newly refused:
+
+The refusals of the poker's, the stop script's and the worktree script's verbs name a path, a head or a
+record, and run past 100 columns; the walls, the Stop wall, the dispatch wall and the stop guard keep
+the first line of a refusal to 100.
 
 - `spawn-worktree.sh land <tree>` on its own:
   `land: the line lands a row with "ready"; a person lands one with "land <tree> --by-hand --reason '<why>'"`.
@@ -268,6 +277,15 @@ Newly refused:
   `REFUSED — the words "<words>" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged.`
   and a quote too short to be a decision:
   `poker: REFUSED — the words "<words>" are too short to be the user's decision; quote at least 3 of their words, or their whole prompt. The plan is unchanged.`
+- `session-poker.sh floor-run` for a project that declares no `floor:`, for a plan whose working branch no
+  checkout holds, and for a floor that moved the working checkout while it ran; `proof-add floor` for a log
+  whose head is not the working head, whose tree was dirty, whose floor did not pass, or whose first line
+  is not the line `floor-run` writes, for an attestation that names no head or no `floor-attested-by:`
+  line, and for a `floor-attestation:` value other than `user`:
+  `poker: REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run.`,
+  `poker: REFUSED — the floor (<cmd>) moved the working checkout <co> while it ran (head <a> to <b>, dirty=<x> to dirty=<y>); no log was written. Put back what it changed and run floor-run again.`,
+  `poker: REFUSED — the run in <ev> read head <sha12>, but the working branch is at <head12>; run it again on <head12> and cite that log. The plan is unchanged.`,
+  `poker: REFUSED — the floor in <ev> did not pass (rc=<n>); fix it, run floor-run again and cite that log. The plan is unchanged.`
 - `session-poker.sh step-field` for a value with a line break, a key outside the nine, a step with no line, a
   Step 9 block, or a step line that itself carries the key:
   `poker: REFUSED — a step field is one line, and the value has a line break; the plan is unchanged.`,
@@ -379,13 +397,6 @@ Known limits, carried to the next release:
   `Node.js`, or a file the brief only mentions — as a second deliverable and refuse the dispatch as naming
   several paths; write the deliverable as the one path and keep such words off the `Expected artifact:`
   line.
-- Known limit: in a project whose `tests/run.sh` takes no `--only`, the Bash wall's full-tree refusal
-  still names `tests/run.sh --only <suite>` as the fix, and that call is itself refused as the full tree;
-  the admissible form there is the row's suite by its file, `bash tests/<suite>.test.sh`, which neither
-  refusal names.
-- Known limit: in a project whose `tests/run.sh` takes no `--only`, a dispatched agent's
-  `tests/run.sh --only <suite>` call is wrapped as the runner (`--suites run.sh`) and the shim asks the
-  gate nothing for it, as it does for bionic's own runner; a foreign runner by that name runs unmetered.
 - Known limit: the interpreter pin's ACL reader on Linux (`getfacl -p`) is proved through a stub only; on
   a real Linux host it is unverified.
 - Known limit: a successor instance with no `row=` label and no ledger or Tasks cell naming it is not
@@ -424,6 +435,13 @@ Known limits, carried to the next release:
 - Known limit: a hook that outruns its timeout under load is cancelled by the harness and the action is
   admitted unjudged; the dispatch wall and the stop guard now refuse at a deadline instead, the other
   hooks do not yet.
+- Known limit: the deadline of the dispatch wall and of the stop guard is a trap that bash runs only after a
+  running `$( … )` returns, so a slow substitution can outlast the registration and be cancelled and
+  admitted as before.
+- Known limit: when the dispatch wall's deadline fires while it waits on a project's impact command, the
+  command keeps running with no bound and leaves its temp file in `TMPDIR`.
+- Known limit: a request number is reused after the gate prunes a gone request, so an orphaned waiter may
+  admit a newcomer's request, which then waits for ever; interrupt the waiter.
 - Known limit: a declared debt (`Lands-red:`) survives `adopt` but not a later `hold` or `amend` of the
   adopted row; re-declare it by `amend` after such a copy.
 - Known limit: when a project's impact command hangs, the dispatch wall may report its own deadline
@@ -449,6 +467,20 @@ Known limits, carried to the next release:
   resolves to the same directory by another Unicode fold is not recognised. On the APFS volume probed,
   the ASCII case variants were the only spellings that resolved to the same directory, so the limit
   matters on a filesystem that folds more.
+- Known limit: a row whose Files cell marks a path unmergeable (`path!`) is not found as that path's
+  writer by `finding-check`; a check it writes on its own code is admitted — the orchestrator refuses such a
+  check by hand.
+- Known limit: `floor-run`'s refusal for a session bound to no run borrows the plan verbs' wording and says
+  it "writes the plan"; `floor-run` writes no plan.
+- Known limit: a floor command that exits 2 shares the poker's usage-error code; the log's `rc=` is the
+  fact.
+- Known limit: a floor declared with `floor:` or attested with `floor-attestation: user` proves the floor as
+  a whole; a `Lands-red:` debt a row declared for one suite is cleared by it although that suite never ran.
+- Known limit: the attestation record is the user's own word: the tool checks its two lines and the head,
+  never who wrote `floor-attested-by:`.
+- Known limit: `config_value` reads a `floor:` key wherever it stands in `.bionic/config.yaml`, an indented
+  one under another mapping included, and keeps a trailing `# comment` in the value — write the key
+  flush-left with no comment.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
