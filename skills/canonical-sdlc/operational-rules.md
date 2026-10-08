@@ -647,3 +647,15 @@ Each line below was cut from a capped file and kept here, verbatim or reworded i
 - **dispatch.md, backgrounding (wave 28).** Declaring `claims=` is what lets the verdict call a mid-flight row STILL-LIVE instead of UNMET; nothing watches it between decisions.
 
 - **dispatch.md, the non-response procedure (wave 28).** Rationale, failure model, and use cases for the starting standard, the stopping standard, and the non-response procedure: `design/orchestrator-subagent-coordination.md`.
+
+- **dispatch.md, command discipline (wave 28 release).** A writer's last act on its tree is `ready`; it touches nothing after it. (The paragraph "One line lands a row" says the same.)
+
+- **dispatch.md, the Patrol (wave 28 release).** Never an OS cron, never a resident process — the job is session-scoped, dies with the session, and the roster on disk is the record that survives it; its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm.
+
+- **dispatch.md, the Patrol (wave 28 release).** The stamp is the only record on disk that a Patrol is running here, so a `CronDelete` without the `disarm` leaves a deliberate stop that reads exactly like a Patrol a plugin update killed — and `hooks/patrol-revive.sh`, which cannot tell the two apart, then reports the stop you chose as a death on every remaining turn of the session.
+
+- **dispatch.md, phase-gated dispatch (wave 28 release).** A redirect sent mid-phase is read at the gate, bounding the steering race instead of pretending mail delivery is instant.
+
+- **dispatch.md, normative values (wave 28 release).** After correcting any such value, grep every artifact that restates it: decision records drift independently of the prose they record, and single-document review sweeps miss them.
+
+- **dispatch.md, when a report is lost (wave 28 release).** A read-only dispatch whose findings live only in a transcript is one cleanup away from having produced nothing.
