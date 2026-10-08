@@ -493,6 +493,12 @@ Known limits, carried to the next release:
   range that holds the fix.
 - Known limit: under `claude -p` the prompt's transcript entry carries no `origin`, so `user_said` finds
   no words the user typed and `finding-move` is refused; make a move in an interactive session.
+- Known limit: a writer dispatched in the foreground cannot land through `ready` while it runs — its
+  roster launch row is written when it returns, so `ready` finds no row and refuses `no-launch-row`;
+  dispatch writers in the background, as the doctrine says.
+- Known limit: after a foreground writer's landing, the owed `TaskStop` finds the agent already
+  completed, so the stop guard never fires and the tick keeps its row open (`stand-down deferred`) until
+  the roster is swept; a background writer is stopped as the owed line says.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
