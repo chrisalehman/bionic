@@ -1184,7 +1184,7 @@ SDA_STAMP="$(tail -n 1 "$(git -C "$SDA_T1" rev-parse --absolute-git-dir)/bionic-
 expect_match "SD.3 the detached side stamped T1's own git dir at its head, clean, green, its suite" \
   "stamp/v1|head=${SDA_HEAD}|dirty=0|rc=0|at=*|suites=a.test.sh|cmd=bash tests/a.test.sh" "$SDA_STAMP"
 SDA_PROOF="$(bash -c '. "$1" 2>/dev/null; _wt_stale_proof "$2" "$3"; echo "rc=$?"' _ "${REPO}/payload/scripts/lib/worktree.sh" "$SDA_T1" "$SDA_HEAD" 2>&1)"
-expect_eq "SD.4 the stamp reader ready uses judges it proof (rc 1), printing that very line" \
+expect_eq "SD.4 the stamp reader (_wt_stale_proof) judges it proof (rc 1), printing that very line" \
   "$(printf '%s\nrc=1' "$SDA_STAMP")" "$SDA_PROOF"
 rd_ready "$SDA_T1" --within 900
 expect_eq "SD.5 ready accepts it: LANDED (exit 0)" "0" "$RD_RC"
