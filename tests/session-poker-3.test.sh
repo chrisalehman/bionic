@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 3 of 4: Sections 56 through 70.
+# Tests for hooks/session-poker.sh — shard 3 of 4: Sections 56 through 71.
 #
 # THE SUITE IS FOUR SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its
 # hermetic posture and its clock discipline are written once, in tests/session-poker.test.sh's
@@ -1775,14 +1775,14 @@ expect_eq "63e0b precondition: gone is not on the history of the working head" "
 S63_NEEDLE_ANC='git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1'
 S63_NEEDLE_REN='--no-renames --name-only --format= "$lh..$hh"'
 S63_NEEDLE_MRG='--first-parent -m --no-renames'
-S63_NEEDLE_ALL='NF && index($0, p) != 1 { bad = 1; exit } END { exit bad }'
+S63_NEEDLE_ALL='[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1'
 for s63n in "$S63_NEEDLE_ANC" "$S63_NEEDLE_REN" "$S63_NEEDLE_MRG" "$S63_NEEDLE_ALL"; do
   expect_eq "63e0c precondition: the mutation site is one line of the shipped proof.sh: $s63n" "1" "$(/usr/bin/grep -cF -- "$s63n" "$S57_LIB")"
 done
 S63_M_ANC="$(s63_mut anc "$S63_NEEDLE_ANC" ':')"
 S63_M_REN="$(s63_mut ren "$S63_NEEDLE_REN" '--name-only --format= "$lh..$hh"')"
 S63_M_MRG="$(s63_mut mrg "$S63_NEEDLE_MRG" '--first-parent --diff-merges=off --no-renames')"
-S63_M_ALL="$(s63_mut all "$S63_NEEDLE_ALL" 'NF { if (index($0, p) != 1) bad = 1; exit } END { exit bad }')"
+S63_M_ALL="$(s63_mut all "$S63_NEEDLE_ALL" '[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1; return 0')"
 # A merge, counted as what it brought in.
 s63_edge_plan "$S63E_H0"
 expect_eq "63e control: asked at the readings' own head, covered" "covered" "$(s63_adv_with "$S57_LIB" "$S63E_H0")"
@@ -3188,6 +3188,89 @@ for s70p in audited:high peer-reviewed:medium tested:low; do
 done
 s61_reset
 POKE_BOUND="$S70_BOUND_WAS"
+
+# ============================================================
+section "Section 71 §FACTS-DOCS: a docs-only landing owes no reading (wave-30 T6; REQ-2 AC-2.4; design-ledger Δ12, D12; A-orch-309)"
+# ============================================================
+#
+# `facts_state` asked piece coverage of every commit past a reading, so a landing of three
+# CHANGELOG bullets cost two readers (wave-28). A commit whose whole diff lies in the docs set
+# (CHANGELOG.md, README.md, CLAUDE.md, anything under .bionic/ or .claude/rules/) is covered by
+# the reading that covered its parent. The set is `_proof_docs_path`'s one list. Never `skills/`
+# or `agents/` prose, which agents execute, and never a `payload/` file; a commit that mixes a
+# docs file with any other file is not docs-only. Each arm commits atop the same read head H0 in
+# a worktree of its own repository and asks the judge about the new head, reading only the
+# review lines (the floor is proof_state's, and is no part of this rule).
+S71_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R71="$(make_repo s71-docs)"; ( cd "$R71" && git commit -q --allow-empty -m init )
+git -C "$R71" config user.name "Dana Fixture"
+S71_B="$(git -C "$R71" rev-parse HEAD)"
+P71="$(s42_plan "$R71" 4 "  worktree: .worktrees/71-fixture
+  base-sha: ${S71_B:0:8}
+  branch: wave/71-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/71-fixture"; d = 1 }' "$P71" > "$P71.tmp" && mv "$P71.tmp" "$P71"
+( cd "$R71" && git add -f "$P71" && git commit -qm wb \
+  && git worktree add -q -b wave/71-fixture "$R71/.worktrees/71-fixture" "$S71_B" ) >/dev/null 2>&1
+S71_WT="$R71/.worktrees/71-fixture"
+S71_H0="$(s57_commit "$S71_WT" lib/a.sh H0)"
+expect_regex "71a0 precondition: the read head H0 is a 40-hex commit" '^[0-9a-f]{40}$' "$S71_H0"
+for s71q in evidence adversarial structure; do s57_fact "$s71q" "$S71_H0" pass piece "$P71"; done
+cp "$P71" "$TMPROOT/s71-clean"
+# s71_arm <label> <path>... -> S71_HEAD: one commit atop H0 touching every path given; the judge
+# is asked about it and its answer for the evidence question is S71_EVI.
+s71_arm() {
+  local p
+  shift
+  git -C "$S71_WT" reset -q --hard "$S71_H0"
+  for p in "$@"; do mkdir -p "$S71_WT/$(dirname "$p")"; printf 'x\n' >> "$S71_WT/$p"; done
+  ( cd "$S71_WT" && git add -f -- "$@" && git commit -qm "$*" ) >/dev/null 2>&1
+  S71_HEAD="$(git -C "$S71_WT" rev-parse HEAD)"
+  cp "$TMPROOT/s71-clean" "$P71"
+  s57_state "$P71" "$S71_HEAD"
+  S71_EVI="$(s57_of "$S57_EV")"
+}
+s71_arm a CHANGELOG.md
+expect_regex "71a0b precondition: arm (a) committed a head past H0" '^[0-9a-f]{40}$' "$S71_HEAD"
+expect_eq "71a0c precondition: …touching CHANGELOG.md alone" "CHANGELOG.md" "$(git -C "$S71_WT" show --name-only --format= "$S71_HEAD")"
+expect_eq "71a a docs-only commit (CHANGELOG.md) atop a read head owes no reading: covered" "covered" "$S71_EVI"
+expect_eq "71a2 …for every piece question" "covered covered" \
+  "$(s57_of "$S57_AD") $(s57_of "$S57_ST")"
+s71_arm b CHANGELOG.md payload/scripts/x.sh
+expect_eq "71b a commit touching CHANGELOG.md and a payload file is not docs-only: uncovered, naming the range" \
+  "uncovered	${S71_H0}..${S71_HEAD}" "$S71_EVI"
+s71_arm c skills/canonical-sdlc/SKILL.md
+expect_eq "71c a commit touching only a skill's prose is not docs (agents execute it): uncovered" \
+  "uncovered	${S71_H0}..${S71_HEAD}" "$S71_EVI"
+s71_arm c2 agents/implementor.md
+expect_eq "71c2 …nor is an agent role file" "uncovered	${S71_H0}..${S71_HEAD}" "$S71_EVI"
+s71_arm c3 payload/README.md
+expect_eq "71c3 …nor a README under payload/ (only the root README.md is in the set)" \
+  "uncovered	${S71_H0}..${S71_HEAD}" "$S71_EVI"
+s71_arm d .bionic/docs/record/wave-01-fixture/note.md
+expect_eq "71d a commit under .bionic/docs/record/ alone: covered" "covered" "$S71_EVI"
+s71_arm d2 .bionic/notes/plan.md
+expect_eq "71d2 a commit under .bionic/ outside the docs root: covered (the set is .bionic/**)" "covered" "$S71_EVI"
+s71_arm e README.md CLAUDE.md
+expect_eq "71e README.md and CLAUDE.md together: covered" "covered" "$S71_EVI"
+s71_arm f .claude/rules/hook-authoring.md
+expect_eq "71f a commit under .claude/rules/: covered" "covered" "$S71_EVI"
+s71_arm g .claude/settings.json
+expect_eq "71g …but .claude/ outside rules/ is not docs: uncovered" "uncovered	${S71_H0}..${S71_HEAD}" "$S71_EVI"
+# a docs commit and then a code commit: the range holds code, so it is uncovered (the earlier docs
+# commit does not launder the later code)
+s71_arm h CHANGELOG.md
+S71_HD="$S71_HEAD"
+S71_HEAD="$(s57_commit "$S71_WT" lib/b.sh code)"
+s57_state "$P71" "$S71_HEAD"
+expect_eq "71h a docs commit followed by a code commit is uncovered from H0" "uncovered	${S71_H0}..${S71_HEAD}" "$(s57_of "$S57_EV")"
+# a code commit then a docs commit: still uncovered from H0
+git -C "$S71_WT" reset -q --hard "$S71_H0"
+s57_commit "$S71_WT" lib/b.sh code >/dev/null
+S71_HEAD="$(s57_commit "$S71_WT" CHANGELOG.md bullets)"
+s57_state "$P71" "$S71_HEAD"
+expect_eq "71i a code commit then a docs commit is uncovered from H0" "uncovered	${S71_H0}..${S71_HEAD}" "$(s57_of "$S57_EV")"
+cp "$TMPROOT/s71-clean" "$P71"
+POKE_BOUND="$S71_BOUND_WAS"
 
 
 finish
