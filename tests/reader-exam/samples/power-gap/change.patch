@@ -1,0 +1,95 @@
+diff --git a/docs/plan.md b/docs/plan.md
+index e2095e5..0af3ded 100644
+--- a/docs/plan.md
++++ b/docs/plan.md
+@@ -3,6 +3,7 @@
+ | task | what | state |
+ |---|---|---|
+ | T1 | lib/reap.sh and bin/reap.sh (D1) | landed |
++| T2 | the idle rule in lib/reap.sh (D2) | landed |
+ 
+ ## Verification Matrix
+ 
+@@ -10,3 +11,6 @@
+ |---|---|---|---|
+ | AC-1.1 | T1 | `bash tests/reap.test.sh` → `ok - a landed clean checkout idle 3 days is listed` | T2: the real function, table rows as input |
+ | AC-1.2 | T1 | `bash tests/reap.test.sh` → `ok - a dirty landed checkout is not listed` | T2: the real function, table rows as input |
++| AC-1.3 | T2 | `bash tests/reap.test.sh` → `ok - a checkout idle 45 days is listed`, `ok - a checkout idle 5 days is not listed` (RED before the change, green after) | T2: the real function, table rows as input |
++
++AC-1.2 stays covered by T1's test, which the change leaves green: the eval covers it.
+diff --git a/docs/record/T2.md b/docs/record/T2.md
+new file mode 100644
+index 0000000..0d9663a
+--- /dev/null
++++ b/docs/record/T2.md
+@@ -0,0 +1,21 @@
++# T2 — the idle rule
++
++reuse: searched lib/ and bin/ for another reader of idle days: none. The rule is one line in
++the existing decision.
++
++RED, before the change: `bash tests/reap.test.sh` → rc=1
++```
++not ok - a checkout idle 45 days is listed: expected 'e', got ''
++```
++
++AC-1.3, GREEN after the change: `bash tests/reap.test.sh` → rc=0
++```
++ok - a landed clean checkout idle 3 days is listed
++ok - a dirty landed checkout is not listed
++ok - a landed checkout idle less than a day is not listed
++ok - a checkout that has not landed is not listed
++ok - a checkout idle 45 days is listed
++ok - a checkout idle 5 days is not listed
++```
++
++AC-1.1 and AC-1.2: the same run; T1's tests are unchanged and stay green.
+diff --git a/docs/spec.md b/docs/spec.md
+index 4dddefd..8c929bb 100644
+--- a/docs/spec.md
++++ b/docs/spec.md
+@@ -8,8 +8,13 @@
+   Fails when: such a checkout is left out.
+ - **AC-1.2.** A checkout with uncommitted changes is never listed, whatever its age or state.
+   Fails when: a checkout with uncommitted changes is listed.
++- **AC-1.3.** A checkout that has not landed, has no uncommitted changes, and has been idle
++  `REAP_IDLE_DAYS` days (30 unless set) or more is listed. Fails when: such a checkout is left
++  out, or one idle fewer days is listed.
+ 
+ ## Design
+ 
+ - **D1.** `lib/reap.sh` decides each checkout from its idle days, its uncommitted flag and its
+   landed flag. `bin/reap.sh` reads the table and prints the names. (REQ-1)
++- **D2.** A checkout idle `REAP_IDLE_DAYS` days or more is listed whether or not it landed.
++  (REQ-1)
+diff --git a/lib/reap.sh b/lib/reap.sh
+index 60c0c64..e08db5d 100644
+--- a/lib/reap.sh
++++ b/lib/reap.sh
+@@ -1,10 +1,13 @@
+ #!/bin/bash
+ # lib/reap.sh — which task checkouts may be removed.
+ 
++REAP_IDLE_DAYS="${REAP_IDLE_DAYS:-30}"
++
+ # Whether a checkout may be listed for removal, from its idle days, its uncommitted flag and its
+ # landed flag: 0 when it may.
+ reap_listed() {
+   local idle="$1" dirty="$2" landed="$3"
++  [ "$idle" -ge "$REAP_IDLE_DAYS" ] && return 0
+   [ "$dirty" -eq 0 ] || return 1
+   [ "$landed" -eq 1 ] && [ "$idle" -ge 1 ]
+ }
+diff --git a/tests/reap.test.sh b/tests/reap.test.sh
+index 632cd87..d9c68f8 100644
+--- a/tests/reap.test.sh
++++ b/tests/reap.test.sh
+@@ -12,4 +12,8 @@ printf 'c 0 0 1\n' > "$tbl"
+ check "a landed checkout idle less than a day is not listed" "" "$(reap_scan "$tbl")"
+ printf 'd 5 0 0\n' > "$tbl"
+ check "a checkout that has not landed is not listed" "" "$(reap_scan "$tbl")"
++printf 'e 45 0 0\n' > "$tbl"
++check "a checkout idle 45 days is listed" "e" "$(reap_scan "$tbl")"
++printf 'f 5 0 0\n' > "$tbl"
++check "a checkout idle 5 days is not listed" "" "$(reap_scan "$tbl")"
+ done_testing
