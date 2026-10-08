@@ -96,14 +96,14 @@ run_hook() {
 # row that read "silent" for this wall reads exactly this instead: no deny and no advisory on
 # stdout (the object holds nothing but the event name and updatedInput), and the updated
 # command is the shim around the ORIGINAL command, byte for byte.
-expect_wrap_only() {  # <label> <command> [<options regex after --max-wait; default none>] [<suites; default run\.sh>]
-  # Every wrap without a kill limit carries --max-wait (wave-27 T6, AC-8.3), after --quiet.
+expect_wrap_only() {  # <label> <command> [<options regex after --detach; default none>] [<suites; default run\.sh>]
+  # Every wrap without a kill limit carries --detach (wave-30 T12, A-orch-7; it was wave-27 T6's --max-wait), after --quiet.
   local _cmd _s _r="'\\''" _o="${3-} --suites ${4-run\\.sh}"
   expect_eq "$1: …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1: …the updated command runs the booking shim" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --max-wait [0-9]+${_o} -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --detach${_o} -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1: …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
 }

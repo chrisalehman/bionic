@@ -442,13 +442,13 @@ done
 # --- behaviour the library must not have changed ---
 # THE OVERRIDE SILENCES FARM-OUT'S DENY, NOT THE BOOKING (wave-26 T7, D8): the allowed call
 # comes back as the booking wrap alone — no deny, no advisory — around the original command.
-expect_wrap_only() {  # <label> <original command> <the shim options after --shell/--quiet/--max-wait, as a regex> — reads $OUT
+expect_wrap_only() {  # <label> <original command> <the shim options after --shell/--quiet/--detach, as a regex> — reads $OUT
   local _cmd _s _r="'\\''"
   expect_eq "$1 (no deny and no advisory beside the booking wrap)" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1 (the updated command runs the booking shim)" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --max-wait [0-9]+$3 -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --detach$3 -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1 (around the original command, byte for byte)" "'$_s'" "${_cmd#* -- }"
 }
