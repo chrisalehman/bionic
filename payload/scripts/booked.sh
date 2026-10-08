@@ -710,6 +710,12 @@ booked_follow() {
     }
     total="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
     case "$total" in ''|*[!0-9]*) total=$done_n ;; esac
+    # A LAST LINE `rc=<n>` IS HELD BACK until a line follows it or the end is known: it may be the
+    # shim's own rc line, written just before `<log>.rc`, which is never copied.
+    if [ "$total" -gt "$done_n" ]; then
+      prog="$(sed -n "${total}p" "$log")"
+      case "$prog" in rc=[0-9]*) case "${prog#rc=}" in *[!0-9]*) : ;; *) total=$((total - 1)) ;; esac ;; esac
+    fi
     if [ "$total" -gt "$done_n" ]; then sed -n "$((done_n + 1)),${total}p" "$log"; done_n=$total; fi
     prog="$(tail -n 1 "$log.progress.tsv" 2>/dev/null)"
     if [ -n "$prog" ] && [ "$prog" != "$last_prog" ]; then
@@ -719,6 +725,9 @@ booked_follow() {
     # THE PID DIED: one more read of `<log>.rc` (the run may have ended between the two reads),
     # then LOST.
     if [ "$dead" -eq 1 ]; then
+      total="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
+      case "$total" in ''|*[!0-9]*) total=$done_n ;; esac
+      [ "$total" -le "$done_n" ] || sed -n "$((done_n + 1)),${total}p" "$log"
       printf 'booked: LOST run=%s last-written=%s\n' "$id" "$(booked_mtime_utc "$log")" >&2
       exit 70
     fi
