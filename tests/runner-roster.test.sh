@@ -693,8 +693,14 @@ rr9_shaped() {
     END { print n+0 }' "$1" 2>/dev/null
 }
 
-# rr9_prog_labels <file> — the labels the progress file recorded, sorted.
-rr9_prog_labels() { LC_ALL=C awk -F'\t' '{ print $2 }' "$1" 2>/dev/null | sort -u; }
+# rr9_ends <file> — the file's SUITE-END lines only, `<UTC>TAB<label>TAB<rc>`. Since T8 (wave-30,
+# Δ5a) a suite's own `section()` also appends `<UTC>TAB<label>TAB§<section>` to the same file while
+# it runs (§PROGRESS below); the claims of this section are about the end lines, which still name
+# only suites that finished.
+rr9_ends() { LC_ALL=C awk -F'\t' '$3 ~ /^[0-9]+$/' "$1" 2>/dev/null; }
+
+# rr9_prog_labels <file> — the labels the progress file's end lines recorded, sorted.
+rr9_prog_labels() { rr9_ends "$1" | LC_ALL=C awk -F'\t' '{ print $2 }' | sort -u; }
 
 # rr_labels_ordered <output> — the labels the runner printed, IN PRINTED ORDER.
 # rr_labels sorts, which is what makes §1.4 and §8.6 set comparisons; the roster
@@ -714,8 +720,8 @@ rr9_drive "$T9" "$P9"
 expect_eq "9.1 the run is green over the three suites" "0" "$RR9_RC"
 expect_eq "9.2 the knob created the progress file" "yes" \
   "$([ -f "$P9" ] && echo yes || echo no)"
-expect_eq "9.3 it holds one line per suite, no more" "3" \
-  "$(LC_ALL=C awk 'END { print NR+0 }' "$P9")"
+expect_eq "9.3 it holds one end line per suite, no more" "3" \
+  "$(rr9_ends "$P9" | LC_ALL=C awk 'END { print NR+0 }')"
 expect_eq "9.4 …and every one of those lines carries the pinned shape" "3" \
   "$(rr9_shaped "$P9")"
 expect_eq "9.5 …naming exactly the suites in the glob, as a set" \
@@ -776,10 +782,10 @@ expect_contains "9.13 the runner reports the suite whose worker died as KILLED" 
 expect_eq "9.14 …and the run is red, as it must be" "1" "$RR9_RC"
 expect_eq "9.15 the progress file names the two suites that DID land" \
   "$(printf 'k-one.test.sh\nk-two.test.sh\n')" "$(rr9_prog_labels "$P9K")"
-expect_absent "9.16 …and never names the one that never finished" \
-  "zzz-killed.test.sh" "$(cat "$P9K")"
-expect_eq "9.17 …so the file holds two lines, not three" "2" \
-  "$(LC_ALL=C awk 'END { print NR+0 }' "$P9K")"
+expect_absent "9.16 …and never names the one that never finished in an end line" \
+  "zzz-killed.test.sh" "$(rr9_ends "$P9K")"
+expect_eq "9.17 …so the file holds two end lines, not three" "2" \
+  "$(rr9_ends "$P9K" | LC_ALL=C awk 'END { print NR+0 }')"
 # PAIRED: the killed suite IS in the report, so 9.16 is a missing progress line
 # and not a suite the roster never carried.
 expect_contains "9.18 …while the report still carries it, in roster order" \
@@ -818,8 +824,8 @@ expect_eq "9.21 the outer file names the outer tree's two suites" \
   "$(printf 'n-outer.test.sh\nn-plain.test.sh\n')" "$(rr9_prog_labels "$P9N")"
 expect_absent "9.22 …and carries no label from the nested tree" \
   "zin-inner.test.sh" "$(cat "$P9N")"
-expect_eq "9.23 …so it holds two lines, not three" "2" \
-  "$(LC_ALL=C awk 'END { print NR+0 }' "$P9N")"
+expect_eq "9.23 …so it holds two end lines, not three" "2" \
+  "$(rr9_ends "$P9N" | LC_ALL=C awk 'END { print NR+0 }')"
 
 # ---- the report is in ROSTER order, and now that is falsifiable ------------
 #
@@ -847,10 +853,73 @@ expect_eq "9.24 the run is green over the three" "0" "$RR9_RC"
 expect_eq "9.25 the report prints the roster's ORDER, not a sorted set of it" \
   "$(rr_glob "$T9O")" "$(rr_labels_ordered "$RR9_OUT")"
 expect_eq "9.26 …and completion order really did disagree: the slow suite landed LAST" \
-  "aaa-slow.test.sh" "$(LC_ALL=C awk -F'\t' 'END { print $2 }' "$P9O")"
+  "aaa-slow.test.sh" "$(rr9_ends "$P9O" | LC_ALL=C awk -F'\t' 'END { print $2 }')"
 expect_eq "9.27 …while the report printed that same suite FIRST" \
   "aaa-slow.test.sh" "$(rr_labels_ordered "$RR9_OUT" | sed -n '1p')"
 
+
+# ============================================================
+section "§PROGRESS a section boundary inside a running suite writes a line (wave-30 T8; Δ5a, AC-3.8)"
+# ============================================================
+#
+# WHAT IT COVERS. The runner captures each suite's output and prints it at the suite's end, so a
+# run's log is silent for the length of its longest suite. The progress file is how a run is seen
+# while it runs: with the knob set, `tests/lib/assert.sh` `section()` appends
+# `<UTC>TAB<suite>TAB§<section>` to the file the runner hands its workers, AS the section opens.
+# The probe suite opens a section, marks it, holds on a go-file, then opens a second one; the
+# rows read the file WHILE it holds, so the line is proved to come before the suite's end, not
+# merely before the file's.
+#
+# ANTI-VACUITY. PR.3, the absence of the probe's end line while it holds, sits beside PR.2, the
+# §one line read from the same file at the same moment. PR.8 is the control: the same probe with
+# the knob unset writes no file.
+PRT="$TMPROOT/tpr"
+rr_tree "$PRT"
+rr_stub "$PRT" "pr-plain"
+cat > "$PRT/tests/pr-probe.test.sh" <<'PR_PROBE'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "one"
+expect_eq "the first section ran" "x" "x"
+: > "$RR_MARKS/pr-probe.one"
+i=0; while [ ! -f "$RR_MARKS/pr-probe.go" ] && [ "$i" -lt 300 ]; do i=$((i+1)); sleep 0.05; done
+section "two"
+expect_eq "the second section ran" "x" "x"
+finish
+PR_PROBE
+PRP="$TMPROOT/tpr.progress.tsv"
+rm -f "$PRP" "$RR_MARKS/pr-probe.one" "$RR_MARKS/pr-probe.go"
+printf '%s|44|0|0.1|2\n' "$RR_NOW" > "$RR9_RING"
+( cd "$PRT" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$RR9_RING" BIONIC_NOW_EPOCH="$RR_NOW" \
+    BIONIC_TEST_JOBS_CEILING="2" BIONIC_PROBE_FREE_PCT="44" BIONIC_PROBE_SWAP_PCT="0" \
+    BIONIC_PROBE_LOAD_1M="0.1" BIONIC_TEST_PROGRESS="$PRP" \
+    env "${RR_GATE_ENV[@]}" bash tests/run.sh > "$TMPROOT/tpr.out" 2>&1; echo "$?" > "$TMPROOT/tpr.rc" ) &
+PR_BG=$!
+pr_i=0
+while [ ! -f "$RR_MARKS/pr-probe.one" ] && [ "$pr_i" -lt 200 ]; do pr_i=$((pr_i + 1)); sleep 0.05; done
+expect_true "PR.1 (fixture) the probe suite reached its first section and holds" test -f "$RR_MARKS/pr-probe.one"
+PR_MID="$(cat "$PRP" 2>/dev/null)"
+expect_regex "PR.2 while the suite runs, the file already holds its first section's line" \
+  "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z	pr-probe[.]test[.]sh	§one\$" "$PR_MID"
+expect_no_regex "PR.3 …and no end line for it yet" "	pr-probe[.]test[.]sh	[0-9]+\$" "$PR_MID"
+: > "$RR_MARKS/pr-probe.go"
+wait "$PR_BG"
+expect_eq "PR.4 the run is green" "0" "$(cat "$TMPROOT/tpr.rc" 2>/dev/null)"
+expect_eq "PR.5 the probe's lines, in order: §one, §two, then its end line" \
+  "$(printf '§one\n§two\n0')" \
+  "$(LC_ALL=C awk -F'\t' '$2 == "pr-probe.test.sh" { print $3 }' "$PRP" 2>/dev/null)"
+expect_eq "PR.6 the other suite's section line names it, by its own file" "§pr-plain" \
+  "$(LC_ALL=C awk -F'\t' '$2 == "pr-plain.test.sh" && $3 !~ /^[0-9]+$/ { print $3 }' "$PRP" 2>/dev/null)"
+expect_absent "PR.7 the report itself is unchanged by the knob: no section line printed" \
+  "	§one" "$(cat "$TMPROOT/tpr.out" 2>/dev/null)"
+rm -f "$RR_MARKS/pr-probe.one"; : > "$RR_MARKS/pr-probe.go"
+PRU="$TMPROOT/tpr-unset.progress.tsv"; rm -f "$PRU"
+( cd "$PRT" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$RR9_RING" BIONIC_NOW_EPOCH="$RR_NOW" \
+    BIONIC_TEST_JOBS_CEILING="2" BIONIC_PROBE_FREE_PCT="44" BIONIC_PROBE_SWAP_PCT="0" \
+    BIONIC_PROBE_LOAD_1M="0.1" env "${RR_GATE_ENV[@]}" bash tests/run.sh >/dev/null 2>&1 )
+expect_true "PR.8a (control) the probe ran again with the knob unset" test -f "$RR_MARKS/pr-probe.one"
+expect_false "PR.8 …and with the knob unset section() writes no file" test -e "$PRU"
 
 # ============================================================
 section "§10 the header names the head and the dirt of the tree under test (wave-26 T4; D5)"

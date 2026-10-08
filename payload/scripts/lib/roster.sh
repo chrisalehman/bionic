@@ -100,6 +100,14 @@
 # LAST, after `pushed=` and T7's `row=`/`lands_on=`: an unmarked row is byte-identical to the rows
 # before them.
 #
+# THE RUN RECORD (wave-30 T8; REQ-3, D6). `run_pid= run_log= run_head= run_cmd= run_started_at=` are
+# written by `roster_mark_run` (below) when `booked.sh --detach` starts a run for the name, and
+# `run_rc= run_ended_at=` when that run ends: the run's detached process, its log (whose last line is
+# `rc=<n>` once it ends), the head it ran on, its command (first 120 characters) and when. A row
+# carries at most one run, its name's latest. Present-if-passed, in that order, after `lands_on=` and
+# BEFORE `landed=`/`landed_at=`, which stay last: a row with no run is byte-identical to the rows
+# before them.
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
@@ -292,6 +300,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
   local held="" done_marker="" questions="" lands_red="" red_evidence="" pushed="" row="" lands_on="" reason=""
   local landed="" landed_at="" has_landed=0 has_landed_at=0
+  local run_pid="" run_log="" run_head="" run_cmd="" run_started_at="" run_rc="" run_ended_at=""
+  local has_run_pid=0 has_run_log=0 has_run_head=0 has_run_cmd=0 has_run_started_at=0 has_run_rc=0 has_run_ended_at=0
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
   local has_reason=0
   local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0 has_pushed=0
@@ -350,6 +360,13 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       lands_on)      lands_on="$val";     has_lands_on=1 ;;
       landed)        landed="$val";       has_landed=1 ;;
       landed_at)     landed_at="$val";    has_landed_at=1 ;;
+      run_pid)        run_pid="$val";        has_run_pid=1 ;;
+      run_log)        run_log="$val";        has_run_log=1 ;;
+      run_head)       run_head="$val";       has_run_head=1 ;;
+      run_cmd)        run_cmd="$val";        has_run_cmd=1 ;;
+      run_started_at) run_started_at="$val"; has_run_started_at=1 ;;
+      run_rc)         run_rc="$val";         has_run_rc=1 ;;
+      run_ended_at)   run_ended_at="$val";   has_run_ended_at=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -382,6 +399,13 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_pushed" -eq 1 ]; then out="$out|pushed=$pushed"; fi
   if [ "$has_row" -eq 1 ]; then      out="$out|row=$row"; fi
   if [ "$has_lands_on" -eq 1 ]; then out="$out|lands_on=$lands_on"; fi
+  if [ "$has_run_pid" -eq 1 ]; then        out="$out|run_pid=$run_pid"; fi
+  if [ "$has_run_log" -eq 1 ]; then        out="$out|run_log=$run_log"; fi
+  if [ "$has_run_head" -eq 1 ]; then       out="$out|run_head=$run_head"; fi
+  if [ "$has_run_cmd" -eq 1 ]; then        out="$out|run_cmd=$run_cmd"; fi
+  if [ "$has_run_started_at" -eq 1 ]; then out="$out|run_started_at=$run_started_at"; fi
+  if [ "$has_run_rc" -eq 1 ]; then         out="$out|run_rc=$run_rc"; fi
+  if [ "$has_run_ended_at" -eq 1 ]; then   out="$out|run_ended_at=$run_ended_at"; fi
   if [ "$has_landed" -eq 1 ]; then out="$out|landed=$landed"; fi
   if [ "$has_landed_at" -eq 1 ]; then out="$out|landed_at=$landed_at"; fi
   printf '%s\n' "$out"
@@ -700,6 +724,71 @@ roster_mark_landed() {  # <roster> <name> <40-hex commit> <ISO-UTC> -> 0 · 1 ·
   case "${last}|" in *"|landed=${c}|"*) return 0 ;; esac
   last="$(printf '%s\n' "$last" | awk -F'|' '{ o = $1; for (i = 2; i <= NF; i++) if (index($i, "landed=") != 1 && index($i, "landed_at=") != 1) o = o "|" $i; print o }')"
   printf '%s|landed=%s|landed_at=%s\n' "$last" "$c" "$at" >> "$f"
+}
+
+# THE RUN RECORD'S ONE WRITER (wave-30 T8; REQ-3, D6). `booked.sh --detach` marks the name's row
+# when a run starts and again when it ends, by the append idiom `roster_mark_landed` keeps: the name's
+# LATEST row, copied, its run fields replaced, appended by one `printf` of one line. The copy keeps
+# every other field where it was, the run fields go where `roster_row` puts them (after the rest,
+# before `landed=`/`landed_at=`, which are moved back to the end), so a by-key reader of the latest row
+# sees the contract and the run together.
+#
+#   roster_mark_run <roster> <name> <run_log> run_<key>=<value>...
+#
+# A START names `run_pid=`: the row's old run fields are dropped and the given ones written. AN END
+# names no `run_pid=`: the row must still name <run_log> as its run (a later start by the same name
+# supersedes this one, and an end must never overwrite that newer record), and the given fields are
+# added to the ones it has. A value is folded as `roster_row` folds one (`|`, line breaks and tabs
+# become spaces). rc 0 marked · 1 no row of that name, or (an end) its run is another one · 2 refused:
+# an unknown key, a bare word, a name or log that cannot be one field.
+_ROSTER_RUN_KEYS="run_pid run_log run_head run_cmd run_started_at run_rc run_ended_at"
+roster_mark_run() {  # <roster> <name> <run_log> run_<key>=<value>... -> 0 · 1 · 2
+  local f="${1:-}" name="${2:-}" log="${3:-}" last arg key val start=0 given="" k cur
+  case "$name" in ''|*'|'*|*$'\n'*) return 2 ;; esac
+  case "$log" in ''|*'|'*|*$'\n'*) return 2 ;; esac
+  shift 3 2>/dev/null || return 2
+  for arg in "$@"; do
+    case "$arg" in *=*) : ;; *) return 2 ;; esac
+    key="${arg%%=*}"
+    case " $_ROSTER_RUN_KEYS " in *" $key "*) : ;; *) return 2 ;; esac
+    [ "$key" != run_pid ] || start=1
+  done
+  { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ]; } || return 1
+  last="$(awk -v k="|name=${name}|" 'index($0, "roster-state/") == 1 && index($0 "|", k) { l = $0 } END { print l }' "$f" 2>/dev/null)"
+  [ -n "$last" ] || return 1
+  if [ "$start" -eq 0 ]; then
+    case "${last}|" in *"|run_log=${log}|"*) : ;; *) return 1 ;; esac
+  fi
+  # The given fields, folded, as one `key=value` per line; on an end, the row's own run fields first,
+  # so a given one replaces them by coming later.
+  if [ "$start" -eq 0 ]; then
+    given="$(printf '%s\n' "$last" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "run_") == 1) print $i }')"
+  fi
+  given="${given:+$given
+}run_log=${log}"
+  for arg in "$@"; do
+    val="${arg#*=}"; val="${val//|/ }"; val="${val//$'\n'/ }"; val="${val//$'\r'/ }"; val="${val//$'\t'/ }"
+    given="$given
+${arg%%=*}=$val"
+  done
+  # The row without its run fields and its landing's mark; then the run fields in their order (the
+  # last value given for a key wins); then the mark, as it was.
+  printf '%s\n' "$last" | ROSTER_RUN_GIVEN="$given" ROSTER_RUN_KEYS="$_ROSTER_RUN_KEYS" awk -F'|' '
+    BEGIN {
+      n = split(ENVIRON["ROSTER_RUN_GIVEN"], g, "\n")
+      for (i = 1; i <= n; i++) { p = index(g[i], "="); if (p > 1) v[substr(g[i], 1, p - 1)] = substr(g[i], p + 1) }
+      nk = split(ENVIRON["ROSTER_RUN_KEYS"], keys, " ")
+    }
+    {
+      o = $1; m = ""
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "run_") == 1) continue
+        if (index($i, "landed=") == 1 || index($i, "landed_at=") == 1) { m = m "|" $i; continue }
+        o = o "|" $i
+      }
+      for (j = 1; j <= nk; j++) if (keys[j] in v) o = o "|" keys[j] "=" v[keys[j]]
+      print o m
+    }' >> "$f"
 }
 
 # The mark of <name>'s CURRENT work: `<commit><TAB><at>` from the latest row carrying `landed=` since
