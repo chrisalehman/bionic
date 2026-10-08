@@ -67,6 +67,11 @@ ORDER_CMD="bash ${HOOK_DIR}/stop-orders.sh order"
 # places an order either side of this boundary and asks this gate about it. See the
 # discharge block below for why an instruction gets a clock when evidence never does.
 ORDER_TTL_SECONDS=1800
+# THE TWO RECORDS THIS GATE READS FROM THE ORDERS FILE, each spelled once and held equal to its WRITER's
+# constant (`hooks/stop-orders.sh` ORDER_SCHEMA and UNROSTERED_SCHEMA) by tests/stop-guard.test.sh UP7:
+# the human's `order`, and the orchestrator's `unrostered` (wave-28 T70, T77).
+ORDER_SCHEMA="stop-order/v1"
+UNROSTERED_SCHEMA="stop-unrostered/v1"
 
 BIONIC_INPUT=$(cat)
 _jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
@@ -311,6 +316,55 @@ bionic_context 2>/dev/null || exit 0
 bionic_context 2>/dev/null || exit 0
 [ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
+# ---------- THE GUARD'S OWN DEADLINE (wave-28 T70; A-orch-231 3) ----------
+#
+# THE HARNESS CANCELS A HOOK AT ITS REGISTRATION'S TIMEOUT (hooks.json: 10 s) AND ADMITS THE CALL.
+# One session's transcript shows about thirty `hook_cancelled` at 10 s on `PreToolUse:TaskStop`: thirty
+# stops this guard never judged, and a live writer with an unmet contract can be killed by a slow
+# guard, which is the harm the guard exists to refuse. So the guard refuses first: a timer signals
+# this shell at SG_DEADLINE_S, 3 s under the registration (bounds.sh's rule for every inner bound),
+# and the handler DENIES the stop — a stop the guard cannot judge is refused, never admitted.
+#
+# A RECORDED HUMAN ORDER IS READ FIRST and is never refused by the deadline: `SG_ORDER_HONOURED` is
+# set the moment `order_current` answers, before the verdict read that follows it (the slow step of
+# that branch), and the handler then lets the stop through with the order's own sentence. The limit
+# is bash's: a trap runs between commands, so one foreground command that itself outlasts the
+# registration is not interrupted. The slow step, if one stands out, is T32's to find (the verdict
+# read and the observation are the two this guard spends time in).
+SG_DEADLINE_S=7
+SG_DEADLINE_LIVE=0
+SG_DEADLINE_PID=""
+SG_ORDER_HONOURED=""
+sg_deadline_hit() {
+  [ "$SG_DEADLINE_LIVE" = 1 ] || return 0
+  SG_DEADLINE_LIVE=0
+  if [ -n "$SG_ORDER_HONOURED" ]; then
+    echo "STOP ORDERED (by ${ORDER_BY:-human}) — executing. The contract verdict was not read in time." >&2
+    exit 0
+  fi
+  refuse exit2 stop "the stop guard did not finish in ${SG_DEADLINE_S} s" "stop again" \
+"The stop guard had not judged this stop ${SG_DEADLINE_S} s after it began. The harness cancels a hook at its
+registration's timeout and admits the call, so the guard refuses first: a stop it cannot judge is not made.
+
+Nothing was stopped.
+
+Fix: stop again. If a human ordered this stop, record the order and it executes without the look:
+     ${ORDER_CMD} <the agent>"
+}
+sg_deadline_stop() {
+  [ -z "$SG_DEADLINE_PID" ] || kill "$SG_DEADLINE_PID" 2>/dev/null
+  return 0
+}
+trap sg_deadline_hit ALRM
+trap sg_deadline_stop EXIT
+SG_DEADLINE_LIVE=1
+( trap 'kill "$_sg_sp" 2>/dev/null; exit 0' TERM
+  sleep "$SG_DEADLINE_S" & _sg_sp=$!
+  wait "$_sg_sp" && kill -ALRM $$ 2>/dev/null
+) >/dev/null 2>&1 </dev/null &
+SG_DEADLINE_PID=$!
+disown "$SG_DEADLINE_PID" 2>/dev/null || :
+
 # ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
 #
 # It used to take the run predicate here — `PLAN=$(active_run <repo>)`, exit 0 on false —
@@ -441,28 +495,34 @@ ROSTER_UNREADABLE=""
 # reading both facts off it: preferring the row WITH the id loses a contract recorded after
 # it, and preferring the last row loses the id.
 roster_walk() {  # <key-name>
-  local key="$1" rline rid rname
+  local key="$1" rows
   ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
   [ -f "$ROSTER_FILE" ] || return 0
   [ -L "$ROSTER_FILE" ] && return 0
   # Not read, rather than read and failing: an unopenable file would put the shell's own
   # "Permission denied" on the gate's stderr, where every byte is a refusal a reader parses.
   [ -r "$ROSTER_FILE" ] || return 0
-  while IFS= read -r rline; do
-    case "$rline" in '#'*|'') continue ;; esac
-    case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    rid=$(line_field "$rline" agent_id)
-    rname=$(line_field "$rline" name)
-    # `confirmed` or `identified`, never `intended` (Step-6 review C-2): the id on an
-    # unconfirmed row is a claim about a launch nothing has observed.
-    case "$(line_field "$rline" status)" in
-      confirmed|identified)
-        [ -n "$rid" ] && [ "$rid" = "$key" ] && ROW_BY_ID="$rline"
-        [ -n "$rid" ] && [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_WITH_ID="$rline"
-        ;;
-    esac
-    [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_BY_NAME="$rline"
-  done < "$ROSTER_FILE"
+  # ONE AWK PASS, NOT THREE FORKS A ROW (wave-28 T80). The roster is append-only and unbounded,
+  # and this walk used to read each row's three fields through `$(line_field …)`, a subshell and
+  # four processes apiece: 262 rows took 3 s, and with the observation's walk the guard ran past
+  # its own 7 s deadline and refused every stop of a long session for time. `_roster_kv` is
+  # roster.sh's by-key read and gives the FIRST value of a key, as `line_field` did. The three
+  # rows come back one per line (a row holds no newline): by id, by name, by name with an id.
+  # `confirmed` or `identified`, never `intended` (Step-6 review C-2): the id on an
+  # unconfirmed row is a claim about a launch nothing has observed.
+  rows="$(SG_WK="$key" SG_WV="roster-state/${ROSTER_VERSION}|" awk "$_ROSTER_OPEN_AWK"'
+    index($0, ENVIRON["SG_WV"]) != 1 { next }
+    {
+      k = ENVIRON["SG_WK"]
+      id = _roster_kv($0, "agent_id"); nm = _roster_kv($0, "name"); st = _roster_kv($0, "status")
+      if (st == "confirmed" || st == "identified") {
+        if (id != "" && id == k) by_id = $0
+        if (id != "" && nm != "" && nm == k) with_id = $0
+      }
+      if (nm != "" && nm == k) by_name = $0
+    }
+    END { print by_id; print by_name; print with_id }' "$ROSTER_FILE" 2>/dev/null)"
+  { IFS= read -r ROW_BY_ID; IFS= read -r ROW_BY_NAME; IFS= read -r ROW_WITH_ID; } <<< "$rows"
   return 0
 }
 roster_walk "$BASE"
@@ -581,35 +641,48 @@ take_verdict() {
 # as well as by a person, and a reader owed "executing" is also owed "on whose word". Absent
 # on a line written before 1.8.0, which reads back as the default the writer had then.
 ORDER_BY=""
-order_current() {
-  local f="$ORDERS_FILE" line t e now delta
-  ORDER_BY=""
+# THE ONE READER OF THE ORDERS FILE (wave-28 T77; it was two copies, one per record). The first line of
+# <schema> whose target is one of the names given and whose epoch is current, in ORDER_LINE; 1 when none.
+# The clock, the link refusal and the future-dating tolerance are the same for both records.
+ORDER_LINE=""
+orders_current() {  # <schema> <name>... -> 0 and ORDER_LINE set · 1
+  local schema="$1" f="$ORDERS_FILE" line t e now delta n ok
+  shift
+  ORDER_LINE=""
   [ -L "$f" ] && return 1
   [ -f "$f" ] || return 1
   now=$(date -u +%s)
   while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in "stop-order/v1|"*) : ;; *) continue ;; esac
+    case "$line" in "${schema}|"*) : ;; *) continue ;; esac
     t=$(line_field "$line" target)
     [ -n "$t" ] || continue
-    # The order may name what the operator typed, the agent's name, or its id: all three
-    # are things a human says out loud, and an order that resolved to none of them would be
-    # a wall built out of spelling.
-    [ "$t" = "$RAW" ] || [ "$t" = "$AGENT_NAME" ] || [ "$t" = "$AGENT_ID" ] || continue
+    # The record may name what the operator typed, the agent's name, or its id: all three are things a
+    # human says out loud, and a record that resolved to none of them would be a wall built out of spelling.
+    ok=0
+    for n in "$@"; do [ -n "$n" ] && [ "$t" = "$n" ] && { ok=1; break; }; done
+    [ "$ok" -eq 1 ] || continue
     e=$(line_field "$line" epoch)
     case "$e" in ''|*[!0-9]*) continue ;; esac
     delta=$((now - e))
-    # A future-dated order is a skewed clock or a hand-edited file; a small tolerance
+    # A future-dated record is a skewed clock or a hand-edited file; a small tolerance
     # absorbs the first and nothing here honours the second indefinitely.
     if [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ]; then
-      ORDER_BY=$(line_field "$line" by)
-      case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
+      ORDER_LINE="$line"
       return 0
     fi
   done < "$f"
   return 1
 }
+order_current() {
+  ORDER_BY=""
+  orders_current "$ORDER_SCHEMA" "$RAW" "$AGENT_NAME" "$AGENT_ID" || return 1
+  ORDER_BY=$(line_field "$ORDER_LINE" by)
+  case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
+  return 0
+}
 
 if order_current; then
+  SG_ORDER_HONOURED=1
   take_verdict
   # ONE LINE, and it is information rather than a verdict on the operator. R3: a
   # user-ordered stop executes at once; what an unmet contract earns is a sentence naming
@@ -621,6 +694,53 @@ if order_current; then
   else
     echo "STOP ORDERED (by ${ORDER_BY}) — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
   fi
+  exit 0
+fi
+
+# THE ORCHESTRATOR'S RECORDED STOP OF AN AGENT THE ROSTER NEVER SAW (wave-28 T70; A-orch-205 to 208).
+# `stop-orders.sh unrostered <name> '<why>'` checked, when it recorded, that this session's roster
+# carried no row of the name and that a fresh panel listed it. This gate honours that line ONCE:
+# only for a name this roster STILL has no row of (so a name the roster has seen — alive, with an
+# unmet contract — is never laundered through it: the look decides, as ever), only within the
+# order TTL, and only over a roster it can read and write. It is spent by its own act: the stop is
+# written onto the roster as a CLOSED row carrying `reason=<why>` (NOT `waiver=`, which the sweeper reads as a
+# waived contract and would discharge the name's next stop; NOT `source=`, which says where a deliverable's
+# path came from), the name then has a row, and a second stop of it meets the ordinary refusal. It is the orchestrator's
+# word, `by=orchestrator`, and is not an `order`: the human's reader above never sees it.
+UNROSTERED_WHY=""
+unrostered_current() {
+  orders_current "$UNROSTERED_SCHEMA" "$RAW" "$BASE" || return 1
+  UNROSTERED_WHY=$(line_field "$ORDER_LINE" why)
+  return 0
+}
+# THE RECORD IS HONOURED ONLY WHILE NO ROSTER OF THE PROJECT HOLDS THE NAME (wave-28 T77; A-orch-239): this
+# session's, a predecessor's, a dead session's. The verb asked the same question when it recorded; a row that
+# appeared since (an `adopt`, a predecessor's roster that was not read) withdraws the record, and the stop meets
+# the ordinary refusal below. A name that reads as no rostered name is the only one that gets this far.
+unrostered_anywhere() {  # -> 0 when no roster of the project has a row of the name
+  [ -z "$(roster_sessions_with_name "$STATE_DIR" "$BASE")" ]
+}
+if [ -z "$ROW_BY_NAME" ] && [ -z "$ROSTER_UNREADABLE" ] && [ -z "$TYPED_AS_ID" ] && unrostered_current && unrostered_anywhere; then
+  SG_DEADLINE_LIVE=0
+  UR_ROW=$(roster_row status=closed "session=${BIONIC_SID}" "name=${BASE}" agent_id= \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "reason=${UNROSTERED_WHY}" plan=none) || UR_ROW=""
+  UR_WROTE=0
+  if [ -n "$UR_ROW" ]; then
+    if [ ! -e "$ROSTER_FILE" ]; then
+      { roster_header >> "$ROSTER_FILE"; } 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
+    fi
+    { printf '%s\n' "$UR_ROW" >> "$ROSTER_FILE"; } 2>/dev/null && UR_WROTE=1
+  fi
+  if [ "$UR_WROTE" -ne 1 ]; then
+    refuse exit2 stop "the stop could not be recorded" "make the roster writable" \
+"Target '${RAW}' is recorded as an unrostered stop, but the roster could not take the row for it:
+    ${ROSTER_FILE}
+The stop is the roster's to carry (the sweeper and the Patrol read the row), so it is not made while
+the row cannot be written. Nothing was stopped.
+
+Fix: make ${STATE_DIR} and the roster writable by this user, then stop again."
+  fi
+  echo "STOP RECORDED (unrostered, by the orchestrator) — executing. Reason: ${UNROSTERED_WHY}" >&2
   exit 0
 fi
 
@@ -690,15 +810,12 @@ is_bash_task_shaped() {  # <typed> -> 0 if it is a recorded background-shell id 
 # primitive takes. It is the one spelling this gate prints and the one it accepts (Section R),
 # and it is built from the roster FILENAME because that is the session that wrote the row.
 accepted_addresses() {  # -> "    <name>@session-xxxxxxxx" per launcher, newline separated
-  local f b out=""
-  for f in "$STATE_DIR"/roster-*.state; do
-    [ -f "$f" ] || continue
-    [ -L "$f" ] && continue
-    grep -qF "|name=${BASE}|" "$f" || continue
-    b="${f##*/roster-}"; b="${b%.state}"
-    out="${out}    ${BASE}@session-$(printf '%s' "$b" | cut -c1-8)
+  local sid out=""
+  while IFS='|' read -r sid _; do
+    [ -n "$sid" ] || continue
+    out="${out}    ${BASE}@session-$(printf '%s' "$sid" | cut -c1-8)
 "
-  done
+  done <<< "$(roster_sessions_with_name "$STATE_DIR" "$BASE")"
   printf '%s' "$out"
 }
 

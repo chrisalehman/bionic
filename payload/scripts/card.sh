@@ -45,6 +45,8 @@
 # USAGE
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
+#     bash card.sh rigor <word>                         (the Step 0 card's rigor line)
+#     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -77,6 +79,11 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/roots.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/fill.sh"
+# THE ONE READING OF A RIGOR WORD (wave-28 T44; REQ-16 AC-16.2, D35). A card prints a level by
+# its new word with its label and meaning, `rigor_print`, whichever vocabulary the plan carries.
+# And `budget_cap`, the one reader of a person's writer cap (wave-28 T9; D15).
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/run.sh"
 
 # THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The
 # `## Tasks` ledger has two shapes — the wave's eleven columns and the task run's six,
@@ -90,7 +97,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>, or card.sh inherited <requirements file>\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -778,9 +785,6 @@ fm == 1 {
   else if (k == "requirements") REQSF = v
   else if (k == "spec") SPECF = v
   else if (k == "design") DPTR = v
-  else if (k == "parallel-budget") {
-    if (match(v, /writers=[0-9]+/)) WRITERS = substr(v, RSTART + 8, RLENGTH - 8)
-  }
   next
 }
 /^## / {
@@ -956,7 +960,6 @@ END {
   print "META" OFS "ledger" OFS LEDGER
   print "META" OFS "reqs" OFS REQSF
   print "META" OFS "approach" OFS APPROACH
-  print "META" OFS "writers" OFS WRITERS
   print "META" OFS "firstb" OFS FIRSTB
   print "META" OFS "mrows" OFS mrows
   print "META" OFS "spec" OFS SPECF
@@ -1001,7 +1004,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
           ledger) WCARD_LEDGER="$v" ;;   reqs) WCARD_REQS="$v" ;;
           approach) WCARD_APPROACH="$v" ;;
           scale) WCARD_SCALE="$v" ;;     design) WCARD_DESIGN="$v" ;;
-          writers) WCARD_WRITERS="$v" ;; firstb) WCARD_FIRSTB="$v" ;;
+          firstb) WCARD_FIRSTB="$v" ;;
           mrows) WCARD_MROWS="$v" ;;
           spec) WCARD_SPEC="$v" ;;       dptr) WCARD_DPTR="$v" ;;
         esac ;;
@@ -1017,6 +1020,12 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
             WCARD_ADRV[${#WCARD_ADRV[@]}]="${rest#*"$CARD_TAB"}" ;;
     esac
   done < <(printf '%s\n' "$out")
+  # THE WRITERS ARE A PERSON'S CAP, READ BY FIELD (wave-28 T9; D15): `budget_cap` (lib/run.sh)
+  # answers from a `parallel-budget:` line whose `source=` is `user` or `override`, one whole
+  # `writers=` field. The card's own awk used to cut the first SUBSTRING `writers=`, so
+  # `max_writers=9 writers=3` read 9 here and 3 to every other reader, and it took a probe's
+  # number for a ceiling. With no cap the card says the writers are not declared.
+  WCARD_WRITERS="$(budget_cap "$2")"; WCARD_WRITERS="${WCARD_WRITERS#writers=}"
   # THE ONE ASSIGNMENT OF THE SCALE, made before any row is spec'd: `_card_spec task`
   # reads it, and a whole card is the only caller that can know it.
   case "$WCARD_SCALE" in
@@ -1442,7 +1451,94 @@ _card_chain_block() {  # <plan>
   _card_batch_widths "$plan" "$WCARD_WRITERS" "$CARD_SCALE" || :
 }
 
-_card_step1() {  # <artifact path>
+# ── INHERITED DEFERRALS (epic-23 wave-28 T43; REQ-8 AC-8.10, D21, A-orch-64) ─────────────
+#
+# A DEFERRAL IS FACED AGAIN. Close-out writes every open deferral under `## Deferrals` of the run's
+# continuation, `record/<wave slug>/continuation.md` under the docs root (a tree `archive_run`
+# never moves), one line each:
+#
+#     deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>
+#
+# The next wave's Step 1 card lists every one until the requirements file's `## Inherited
+# deferrals` section disposes of it with exactly one of three lines, `<id>` being `<record>#<n>`:
+#
+#     adopted: <id> as REQ-<n>   ·   again: <id>   ·   closed: <id> <reason>
+#
+# Any other line there disposes of nothing, so its deferral stays on the card. A disposal naming an
+# id the continuation does not carry disposed of nothing either, and the card refuses rather than
+# let the user believe a debt was settled.
+#
+# THE PREDECESSOR IS THE NEWEST CONTINUATION under the docs root, by mtime ("the next wave's Step 1
+# card reads the newest continuation", D21), and never the run's own. A requirements file is named
+# `<wave slug>.requirements.md`, so the run's own continuation is `record/<that slug>/continuation.md`;
+# it is skipped however new it is, because close-out reads through this same function and the
+# run's own continuation may already be written when it does.
+#
+# ONE READER, TWO CALLERS. `step1` prints the `open` lines; close-out calls `card.sh inherited
+# <requirements file>` and carries the `again` and `open` ones into the new continuation. The card
+# and the carry cannot disagree about what was left open, because they are one reading.
+_card_predecessor() {  # <docs root> <own wave slug> -> the newest other continuation, or nothing
+  local f best=""
+  for f in "$1"/record/*/continuation.md; do
+    [ -f "$f" ] || continue
+    [ "$f" != "$1/record/$2/continuation.md" ] || continue
+    if [ -z "$best" ] || [ "$f" -nt "$best" ]; then best="$f"; fi
+  done
+  printf '%s' "$best"
+}
+
+_card_disposals() {  # <requirements file> -> `<adopted|again|closed>\t<id>\t<line>` per disposal
+  [ -f "$1" ] && [ -r "$1" ] || return 0
+  awk '
+    { sub(/\r$/, ""); sub(/[ \t]+$/, "") }
+    /^## / { s = ($0 == "## Inherited deferrals"); next }
+    !s { next }
+    /^adopted:[ \t]+[^ \t]+#[0-9]+[ \t]+as[ \t]+REQ-[0-9]+$/ { split($0, f, /[ \t]+/); print "adopted\t" f[2] "\t" $0; next }
+    /^again:[ \t]+[^ \t]+#[0-9]+$/ { split($0, f, /[ \t]+/); print "again\t" f[2] "\t" $0; next }
+    /^closed:[ \t]+[^ \t]+#[0-9]+[ \t]+[^ \t]/ { split($0, f, /[ \t]+/); print "closed\t" f[2] "\t" $0 }' "$1"
+}
+
+# _card_inherited <requirements file> -> one `<open|adopted|again|closed>\t<deferred line>` per line of
+# the predecessor's `## Deferrals`, in its order and as written, then one `unknown\t<disposal line>`
+# per disposal naming none of them. The first disposal of an id is the one that counts.
+_card_inherited() {
+  local root cont slug
+  root="$(_card_plan_root "$1")"
+  [ -n "$root" ] || return 0
+  slug="${1##*/}"; slug="${slug%.requirements.md}"
+  cont="$(_card_predecessor "$(docs_root "$root")" "$slug")"
+  [ -n "$cont" ] || cont=/dev/null
+  CARD_DISPOSALS="$(_card_disposals "$1")" awk '
+    BEGIN {
+      n = split(ENVIRON["CARD_DISPOSALS"], d, "\n")
+      for (i = 1; i <= n; i++) {
+        if (split(d[i], p, "\t") < 3 || (p[2] in kind)) continue
+        kind[p[2]] = p[1]; said[p[2]] = p[3]; ord[++m] = p[2]
+      }
+    }
+    { sub(/\r$/, "") }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { s = ($0 ~ /^## Deferrals[ \t]*$/); next }
+    s && /^deferred:[ \t]/ {
+      split($0, f, /[ \t]+/); seen[f[2]] = 1
+      print ((f[2] in kind) ? kind[f[2]] : "open") "\t" $0
+    }
+    END { for (i = 1; i <= m; i++) if (!(ord[i] in seen)) print "unknown\t" said[ord[i]] }' "$cont"
+}
+
+# THE REFUSAL IS EXIT 2 WITH NOTHING ON STDOUT: the disposal is checked before the card's first line.
+_card_inherit_refuse() {  # <the disposal line>
+  printf 'card.sh: step1 refused — a disposal names a deferral the newest continuation does not carry\n  %s\n' \
+    "$1" >&2
+  exit 2
+}
+
+_card_step1() {  # <citation path> <artifact path as given>
+  local inh l
+  inh="$(_card_inherited "$2")"
+  l="$(printf '%s\n' "$inh" | sed -n "s/^unknown${CARD_TAB}//p" | head -1)"
+  [ -z "$l" ] || _card_inherit_refuse "$l"
   printf 'Step 1 · Requirements\n\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
   printf '\n'
@@ -1453,6 +1549,13 @@ _card_step1() {  # <artifact path>
   printf '\n  Not Doing\n'
   local b
   for b in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do _card_fold_at 4 "$b"; done
+  # Each open line as written, folded only where the budget makes it (its next line starts at the
+  # same indent, and only a line's first fold starts `deferred:`).
+  printf '\n  Inherited deferrals\n'
+  while IFS= read -r l; do
+    [ "${l%%"$CARD_TAB"*}" = open ] || continue
+    _card_fold_at 4 "${l#*"$CARD_TAB"}"
+  done <<< "$inh"
   printf '\n  Artifacts\n    requirements  %s\n\n' "$1"
   printf 'Do you approve these requirements? Reply "approved" to approve it.\n'
   printf 'explain <requirement>\n'
@@ -1703,6 +1806,7 @@ _card_step3() {  # <citation path> <artifact path as given>
   _card_branches
   printf '\n'
   CARD_ROWS=( ${WCARD_TROW[@]+"${WCARD_TROW[@]}"} )
+  [ "$CARD_SCALE" != "task" ] || _card_rigor_cells
   _card_render_batch task
   printf '\n'
   if [ "$CARD_SCALE" = "task" ]; then
@@ -1714,12 +1818,37 @@ _card_step3() {  # <citation path> <artifact path as given>
   else
     _card_chain_block "$2"
   fi
-  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s · auditor %s\n' \
-    "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "${WCARD_RIGOR:-not declared}"
+  # THE RIGOR HAS A LINE OF ITS OWN: its label and meaning do not fit beside a configured floor
+  # inside the line budget, and the level is what the approval reads at a glance.
+  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s\n    %s\n' \
+    "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "$(_card_rigor_line "$WCARD_RIGOR")"
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
   printf '\nDo you approve this plan? Reply "approved" to approve it.\n'
   printf 'show evals <req> · show task <n> · explain <decision>\n'
+}
+
+# ── THE REVIEW RIGOR, PRINTED (wave-28 T44; AC-16.2) ─────────────────────────
+#
+# A level prints as `review rigor: <level> (<n> independent reader[s])` and never by an old word.
+# A plan that declares no rigor, or a word that is no level, says so in place of the level; a
+# task-scale row's rigor cell prints the level's word alone (the column is headed `rigor`, and the
+# meaning is the Verification line's), and a cell that names no level prints as it is written.
+_card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification block's rigor phrase
+  [ -n "${1:-}" ] || { printf 'review rigor: not declared'; return 0; }
+  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (low, medium or high)" "$1"
+}
+_card_rigor_cells() {  # rewrites CARD_ROWS' third cell (a task row's rigor) to its level
+  local i row id rest cell tail lvl
+  for i in ${CARD_ROWS[@]+"${!CARD_ROWS[@]}"}; do
+    row="${CARD_ROWS[$i]}"
+    id="${row%%"$CARD_TAB"*}"; rest="${row#*"$CARD_TAB"}"
+    [ "$rest" != "$row" ] || continue
+    tail="${rest#*"$CARD_TAB"}"; [ "$tail" != "$rest" ] || continue
+    cell="${tail%%"$CARD_TAB"*}"
+    lvl="$(rigor_level "$cell")" || continue
+    CARD_ROWS[$i]="${id}${CARD_TAB}${rest%%"$CARD_TAB"*}${CARD_TAB}${lvl}${tail#"$cell"}"
+  done
 }
 
 # ── ONE BATCH, RENDERED ──────────────────────────────────────────────────────
@@ -1757,6 +1886,17 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
 [ "$#" -ge 1 ] || _card_usage "no row kind"
 
 case "$1" in
+  rigor)
+    [ "$#" -eq 2 ] || _card_usage "rigor takes exactly one word (got $(( $# - 1 )))"
+    rigor_print "$2" && exit 0
+    printf "card.sh: '%s' is no review rigor — use low, medium or high\n" "$2" >&2
+    exit 1 ;;
+  inherited)
+    # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that
+    # names no file disposes of nothing; its name still says whose run it is.
+    [ "$#" -eq 2 ] || _card_usage "inherited takes exactly one requirements file path (got $(( $# - 1 )))"
+    _card_inherited "$2" | /usr/bin/grep -v "^unknown${CARD_TAB}"
+    exit 0 ;;
   step1|step2|step3)
     if [ "$1" = step2 ]; then
       [ "$#" -ge 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
@@ -1772,7 +1912,7 @@ case "$1" in
     fi
     _card_art="$(_card_artifact_rel "$2")"
     case "$1" in
-      step1) _card_step1 "$_card_art" ;;
+      step1) _card_step1 "$_card_art" "$2" ;;
       step2) _card_step2 "$_card_art" ;;
       step3) _card_step3 "$_card_art" "$2" ;;
     esac

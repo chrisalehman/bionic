@@ -90,7 +90,8 @@
 # Usage:
 #   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
 #   spawn-worktree.sh remove <worktree-path>
-#   spawn-worktree.sh land   <worktree-path>
+#   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
+#   spawn-worktree.sh ready  [--within <seconds>]
 
 set -uo pipefail
 
@@ -135,7 +136,8 @@ usage() {
 Usage:
   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
   spawn-worktree.sh remove <worktree-path>
-  spawn-worktree.sh land   <worktree-path>
+  spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
+  spawn-worktree.sh ready  [--within <seconds>]
 
 create  makes the branch AND the worktree at exactly <base-sha>, verifies
         both, plants <worktree>/.bionic -> <main-root>/.bionic (D7; unless the
@@ -150,31 +152,37 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
         --for <name>, also appends one workspace/v1 line for that agent to
         <main-root>/.bionic/tmp/workspaces-<session>.state (session from
         CLAUDE_CODE_SESSION_ID); refused, before anything is made, with no
-        session or when the record could not be written.
+        session or when the record could not be written. Refused when the
+        project's volume has less free space than the largest tree already
+        there (disk-low, naming both figures in KB).
 remove  removes the worktree and KEEPS the branch, deleting the
         <worktree>/.bionic link first (the one create planted, or a legacy
         one an older bionic left).
-land    ends the lease in one act: merges the tree's branch --no-ff into the
-        session's bound plan's working-branch, in the checkout that holds
-        it, removes the tree, prunes. Keeps the branch. Reads the session
-        from CLAUDE_CODE_SESSION_ID. Refuses — naming why — with no session
-        or no bound plan, when the plan names no branch or a branch no one
-        checkout holds, on a dirty tree, on nothing to land, or while a
-        suite is running. The landing rule refuses not-current (work
-        landed since touches a file the tree changed), stale-proof (some
-        suite run at the tree's head was last red or dirty, or no run is at
-        the head, naming the suite), and, after the
-        merge and undoing it, onto-moved (the branch moved after the last
-        check), branch-moved (the tree's branch gained a commit) and
-        onto-switched (the checkout was on another branch when it merged;
-        the merge is undone there). A land undoes only a merge it made
-        itself: when git merge made none, or none the land can prove its
-        own, it refuses merge-unproven, and a merge made on a detached HEAD
-        is refused onto-detached; neither undoes anything, and each line
-        says where the checkout stood. An undo that could not finish says
-        undo=failed and the step to take by hand, which never moves another
-        branch; a commit made in the checkout during the undo is named as
-        arrived=<sha>, since it may carry the task's changes unjudged.
+land    a person's landing (the line lands a row with ready). With
+        --by-hand --reason '<why>' it enters the row in the landing line,
+        merges the tree's branch --no-ff onto what is ahead of it in a
+        landing tree the tool owns, runs nothing, and fast-forwards the
+        session's bound plan's working-branch to it under the line's one
+        publish lock; then removes the tree, prunes, keeps the branch. The
+        record's published line and the row's - T<n>: line carry the git
+        user, the time and the reason. Reads the session from
+        CLAUDE_CODE_SESSION_ID. Refuses, naming why, with no reason, no
+        session or no bound plan, on a dirty or detached tree, on nothing
+        to land, on a range that commits .bionic, and on a conflict; holds
+        (HELD) while a run is live in the checkout that holds the branch,
+        and stops (MOVED) when a real checkout moved. A bare land prints
+        the two ways and exits 2.
+ready   the writer's landing, run from the row's own tree. Refuses a tree
+        that is dirty, detached or not ahead, and a range that commits
+        .bionic (GUARD, exit 1), before any landing tree is taken. Enters
+        the row in the line with the suites its launch line names
+        (lands_on=), builds the candidate on what is ahead of it, runs each
+        suite there through the gate, and publishes when every suite is
+        green and the row is first in line: LANDED and the acts still owed
+        (exit 0). A red suite returns the row, printing RED and its log; a
+        conflict with the accepted head prints CONFLICT (exit 1). With
+        --within, a suite whose promised seconds exceed the time left is
+        not started: WAITING and the same command to run again (exit 75).
 USAGE
 }
 
@@ -275,6 +283,34 @@ exclude_lines() {  # <main-root> <line or empty>... — appends each line the ex
   return 0
 }
 
+# THE DISK, BEFORE A TREE (wave-28 T9; D15, REQ-2). The dispatch wall's worktrees ceiling went
+# with the probe's budget line: it counted trees against a figure Step 0 derived from free disk
+# once. What it stood for is asked here, of the disk as it is, at the one place a tree is made:
+# a new tree needs at least as much free space on the project's volume as the largest tree
+# already there. Both figures are in KB: free from `df -Pk` at the main root, each tree's from
+# `du -sk` (which does not follow the planted `.bionic` link). A figure this cannot read
+# refuses nothing, as no reading is not a bad reading. BIONIC_PROBE_DISK_FREE_KB and
+# BIONIC_PROBE_TREE_KB plant the two figures, the BIONIC_PROBE_* idiom of lib/resources.sh.
+disk_room_refusal() {  # <main-root> -> `disk-low free_kb=<n> largest_tree_kb=<n>`, or nothing
+  local root="$1" free largest="${BIONIC_PROBE_TREE_KB:-}" p sz
+  free="${BIONIC_PROBE_DISK_FREE_KB:-$(df -Pk "$root" 2>/dev/null | awk 'NR == 2 { print $4 }')}"
+  case "$free" in ''|*[!0-9]*) return 0 ;; esac
+  if [ -z "$largest" ]; then
+    largest=0
+    while IFS= read -r p; do
+      [ -d "$p" ] || continue
+      sz="$(du -sk "$p" 2>/dev/null | awk '{ print $1; exit }')"
+      case "$sz" in ''|*[!0-9]*) continue ;; esac
+      [ "$sz" -gt "$largest" ] && largest="$sz"
+    done <<EOF
+$(git -C "$root" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | tail -n +2)
+EOF
+  fi
+  case "$largest" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$free" -lt "$largest" ] && printf 'disk-low free_kb=%s largest_tree_kb=%s' "$free" "$largest"
+  return 0
+}
+
 cmd_create() {
   local base="" parent="" name="" named=0 n=0 sid="" why=""
   branch=""
@@ -321,6 +357,9 @@ cmd_create() {
   if git -C "$main_root" show-ref --verify --quiet "refs/heads/${branch}"; then
     _wt_refuse branch-exists
   fi
+
+  why="$(disk_room_refusal "$main_root")"
+  [ -z "$why" ] || _wt_refuse "$why"
 
   # `..` as a path COMPONENT only: a directory whose name merely contains dots
   # is nobody's escape attempt.
@@ -429,10 +468,27 @@ cmd_remove() {
 
 # THE SESSION IS THE TARGET'S SOURCE (wave-20 T8, D1): `session_id` (lib/session.sh)
 # reads CLAUDE_CODE_SESSION_ID, the root is the main checkout the tree belongs to — or the
-# cwd's, when the path names no directory and the land will refuse it anyway — and
-# `worktree_land_for_session` reads the working branch off that session's bound plan.
+# cwd's, when the path names no directory and the land will refuse it anyway — and the
+# working branch is read off that session's bound plan.
+# THE LINE LANDS A ROW; A PERSON LANDS ONE BY HAND (wave-28 T3, D9; REQ-5). `ready` is the
+# writer's landing. `land <tree> --by-hand --reason '<why>'` is the person's: the same publish,
+# under the same lock (lib/line.sh `line_land_by_hand`), recorded with who, when and why. Only the
+# main thread may run it: the Bash wall's arm that keeps subagents off the plan verbs names it.
+# A bare `land` refuses with the line that names both, before anything is read.
 cmd_land() {
-  local target="${1:-}" lib_session sid root
+  local target="" by_hand=0 why="" lib_session sid root
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --by-hand) by_hand=1; shift ;;
+      --reason) why="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+      --reason=*) why="${1#--reason=}"; shift ;;
+      *) [ -n "$target" ] || target="$1"; shift ;;
+    esac
+  done
+  if [ "$by_hand" != 1 ]; then
+    printf '%s\n' "land: the line lands a row with \"ready\"; a person lands one with \"land <tree> --by-hand --reason '<why>'\""
+    exit 2
+  fi
   if [ ! -f "$LIB_WORKTREE" ]; then
     contract "REFUSED reason=library-missing path=${LIB_WORKTREE}"
     exit 2
@@ -442,9 +498,44 @@ cmd_land() {
   lib_session="${LIB_WORKTREE%/*}/session.sh"
   # shellcheck source=/dev/null
   . "$lib_session" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${lib_session}"; exit 2; }
+  # shellcheck source=/dev/null
+  . "${LIB_WORKTREE%/*}/line.sh" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${LIB_WORKTREE%/*}/line.sh"; exit 2; }
   sid="$(session_id 2>/dev/null)" || sid=""
   root="$(worktree_root "${target:-.}" 2>/dev/null)" || root="$(worktree_root 2>/dev/null)" || root=""
-  WORKTREE_CONTRACT_PROG="$PROG" worktree_land_for_session "$target" "$root" "$sid"
+  WORKTREE_CONTRACT_PROG="$PROG" line_land_by_hand "$target" "$root" "$sid" "$why"
+  exit $?
+}
+
+# THE WRITER'S LANDING IS `ready` (wave-28 T4, D3): run from the row's own tree, it judges the tree
+# once, enters the row in the line and carries it: the candidate built, each suite the row lands on
+# run through the gate, published when green and first in line (lib/line.sh `line_ready`). Exit 0
+# `LANDED <row> <commit>` and the owed line; 1 `RED`, `CONFLICT` or `GUARD`; 75 `WAITING` with the
+# same command to run again; 2 a refusal. `--within <seconds>` bounds it: no suite starts whose
+# promised seconds exceed the time left.
+cmd_ready() {
+  local within="" has_within=0 lib sid root tree self again
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --within) has_within=1; within="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+      --within=*) has_within=1; within="${1#--within=}"; shift ;;
+      *) contract "REFUSED reason=usage arg=${1} — spawn-worktree.sh ready [--within <seconds>]"; exit 2 ;;
+    esac
+  done
+  case "$has_within:$within" in
+    1:|1:*[!0-9]*) contract "REFUSED reason=usage within=${within:-<none>} — --within takes whole seconds"; exit 2 ;;
+  esac
+  for lib in "$LIB_WORKTREE" "${LIB_WORKTREE%/*}/session.sh" "${LIB_WORKTREE%/*}/line.sh"; do
+    [ -f "$lib" ] || { contract "REFUSED reason=library-missing path=${lib}"; exit 2; }
+    # shellcheck source=/dev/null
+    . "$lib" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${lib}"; exit 2; }
+  done
+  tree="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || { contract "REFUSED reason=not-a-tree path=$(pwd -P) — run ready from the row's own tree"; exit 2; }
+  sid="$(session_id 2>/dev/null)" || sid=""
+  root="$(worktree_root "$tree" 2>/dev/null)" || root=""
+  self="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)/$(basename "$0")"
+  again="bash $(_wt_shquote "$self") ready${within:+ --within ${within}}"
+  WORKTREE_CONTRACT_PROG="$PROG" line_ready "$tree" "$root" "$sid" "$within" "$again"
   exit $?
 }
 
@@ -452,6 +543,7 @@ case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   remove) shift; cmd_remove "$@" ;;
   land)   shift; cmd_land "$@" ;;
+  ready)  shift; cmd_ready "$@" ;;
   -h|--help|help) usage; exit 0 ;;
   "") usage >&2; _wt_refuse usage ;;
   *) usage >&2; _wt_refuse unknown-verb ;;

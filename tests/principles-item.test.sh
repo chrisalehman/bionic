@@ -983,4 +983,418 @@ expect_nonempty "FIFO: doctor prints a fix line for it" "$FF_FIX"
 expect_contains "FIFO: doctor's fix line says it is not a regular file" "not a regular file" "$FF_FIX"
 expect_absent "FIFO: …and does not say it twice" "not a regular file, not a file" "$FF_FIX"
 
+# ===========================================================================
+# THE INSTALL RECORD — wave-28 T40 (spec D29, REQ-12, AC-12.1, AC-12.2).
+#
+# `install_dep` appends one tab-separated line to
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/installed` after an install's
+# command exits 0, and `remove` acts on a `remove-on-consent` row only when that
+# file names it. These rows live in this suite because it is the one that already
+# drives setup, remove and doctor over a throwaway home.
+#
+# EVERY DOOR RUNS BEHIND STUBS (wave-28 rule 13; wave-27 lost a real global tool to
+# an unstubbed `remove --all`). The environment is emptied (`env -i`) and PATH is
+# the stub directory first, then /usr/bin and /bin only; each drive checks, inside
+# the same command, that `npm` resolves to the stub before running anything. The
+# stubs log their argv and exit 0; `npm` keeps a list of what it "installed" so
+# its `list` answers presence, `npx … install chromium` writes the browser marker
+# the probe reads, and `REC_FAIL=<tool>` makes that one stub exit 1 (`<tool> <sub>`,
+# that one subcommand of it). No `--all`
+# drive here is answered anything but `n`.
+# ===========================================================================
+
+REC_STUBS="$TMP/rec-stubs"
+mkdir -p "$REC_STUBS"
+cat > "$REC_STUBS/_stub" <<'STUB'
+#!/bin/bash
+t="${0##*/}"
+echo "$t $*" >> "$REC_LOG"
+case ",${REC_FAIL:-}," in *",${t},"*|*",${t} ${1:-},"*) exit 1 ;; esac
+mkdir -p "$REC_STATE"
+case "$t" in
+  npm)
+    last=""; for a in "$@"; do case "$a" in -*) ;; *) last="$a" ;; esac; done
+    case "${1:-}" in
+      list) grep -qxF -- "$last" "$REC_STATE/npm" 2>/dev/null; exit $? ;;
+      install) printf '%s\n' "$last" >> "$REC_STATE/npm" ;;
+      uninstall) grep -vxF -- "$last" "$REC_STATE/npm" > "$REC_STATE/npm.t" 2>/dev/null
+                 mv "$REC_STATE/npm.t" "$REC_STATE/npm" ;;
+    esac ;;
+  npx)
+    for a in "$@"; do
+      [ "$a" = chromium ] && mkdir -p "$BIONIC_PLAYWRIGHT_CACHE/chromium-1" \
+        && : > "$BIONIC_PLAYWRIGHT_CACHE/chromium-1/INSTALLATION_COMPLETE"
+    done ;;
+  claude)
+    case "$*" in
+      "plugin list --json") echo '[]' ;;
+      "mcp get "*) exit 1 ;;
+    esac ;;
+esac
+exit 0
+STUB
+chmod +x "$REC_STUBS/_stub"
+for _t in npm npx pnpm bun uv uvx pip pip3 brew claude; do ln -s _stub "$REC_STUBS/$_t"; done
+
+rec_home() {  # -> a fresh throwaway home with an empty ~/.claude
+  local h
+  h="$(mktemp -d "$TMP/rec-XXXXXX")"
+  mkdir -p "$h/.claude" "$h/.tmp" "$h/state"
+  : > "$h/calls.log"
+  printf '%s' "$h"
+}
+
+# <home> <command...> — the one environment every record drive gets. The stub
+# check runs in the same process as the command it guards; status 99 means the
+# check failed and nothing ran.
+rec_env() {
+  local h="$1"; shift
+  env -i HOME="$h" ZDOTDIR="$h" SHELL=/bin/zsh PATH="$REC_STUBS:/usr/bin:/bin" TMPDIR="$h/.tmp" TERM=dumb \
+    CLAUDE_CONFIG_DIR="$h/.claude" BIONIC_CLAUDE_HOME="$h/.claude" \
+    BIONIC_PLUGIN_ROOT="${REC_PAYLOAD:-$PAYLOAD}" CLAUDE_PLUGIN_ROOT="${REC_PAYLOAD:-$PAYLOAD}" \
+    REC_LOG="$h/calls.log" REC_STATE="$h/state" REC_FAIL="${REC_FAIL:-}" \
+    BIONIC_PLAYWRIGHT_CACHE="$h/pw-cache" BIONIC_PNPM_STORE="$h/pnpm-store" \
+    BIONIC_INSTALL_LOG="$h/.tmp/install.log" BIONIC_DOCTOR_PROBE_SECONDS=15 \
+    bash -c '[ "$(command -v npm)" = "$1/npm" ] || { echo "rec: npm is not the stub" >&2; exit 99; }; shift; "$@"' \
+      _ "$REC_STUBS" "$@"
+}
+rec_setup() {  # <home> <item> <answer>
+  printf '%s\n' "$3" | rec_env "$1" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only "$2" 2>&1
+}
+rec_remove() {  # <home> <item> <answer>
+  printf '%s\n' "$3" | rec_env "$1" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/remove.sh" --only "$2" 2>&1
+}
+rec_jit() {  # <home> <name> <answer> — the mid-session offer, as a route makes it
+  printf '%s\n' "$3" | rec_env "$1" bash -c '. "$1"; jit_offer "$2" a-route "a capability" "it degrades"' _ \
+    "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/jit.sh" "$2" 2>&1
+}
+rec_lib() {  # <home> <snippet> — deps.sh sourced in the record environment
+  rec_env "$1" bash -c '. "$1"; eval "$2"' _ "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/deps.sh" "$2" 2>&1
+}
+
+rec_file() { printf '%s/.claude/bionic/installed' "$1"; }
+rec_lines() {  # <home> <name> -> the record's lines for <name>, verbatim
+  local f line
+  f="$(rec_file "$1")"
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "${line%%$'\t'*}" = "$2" ] && printf '%s\n' "$line"
+  done < "$f"
+  return 0
+}
+rec_count() {  # <home> <name> -> how many record lines name <name>
+  local n=0 line
+  while IFS= read -r line; do [ -n "$line" ] && n=$((n + 1)); done <<< "$(rec_lines "$1" "$2")"
+  printf '%s' "$n"
+}
+rec_calls() { cat "$1/calls.log" 2>/dev/null; return 0; }
+rec_asks() { grep -cF "Remove ${2} now?" <<< "$1"; return 0; }
+
+REC_VERSION="$(jq -r '.version' "$PAYLOAD/.claude-plugin/plugin.json" 2>/dev/null)"
+REC_TOOL='@pencil.dev/cli'
+
+# ---------------------------------------------------------------------------
+section "§RECORD: an install appends its line; a decline, a failure or a plugin appends none (AC-12.1)"
+# ---------------------------------------------------------------------------
+
+expect_ne "RECORD: the payload's version reads out of plugin.json (the version extractor reads)" "" "$REC_VERSION"
+
+# The stub check bites: a PATH whose first npm is not the stub stops the drive.
+REC_H0="$(rec_home)"
+REC_GUARD="$(env -i PATH=/usr/bin:/bin bash -c '[ "$(command -v npm)" = "$1/npm" ] || exit 99' _ "$REC_STUBS"; echo "rc=$?")"
+expect_eq "RECORD: the stub check refuses a PATH whose npm is not the stub" "rc=99" "$REC_GUARD"
+expect_eq "RECORD: …and passes the record environment" "rc=0" \
+  "$(rec_env "$REC_H0" true; echo "rc=$?")"
+
+# Setup, answered yes.
+REC_H1="$(rec_home)"
+REC_S1="$(rec_setup "$REC_H1" "tool:${REC_TOOL}" y)"
+expect_contains "RECORD setup yes: the install reached the npm stub" "npm install -g ${REC_TOOL}" "$(rec_calls "$REC_H1")"
+expect_eq "RECORD setup yes: the record holds one line for the tool" "1" "$(rec_count "$REC_H1" "$REC_TOOL")"
+REC_L1="$(rec_lines "$REC_H1" "$REC_TOOL")"
+IFS=$'\t' read -r REC_F1 REC_F2 REC_F3 REC_F4 REC_F5 <<< "$REC_L1"
+expect_eq "RECORD setup yes: field 1 is the row name" "$REC_TOOL" "$REC_F1"
+expect_eq "RECORD setup yes: field 2 is the row's kind" "npm-global" "$REC_F2"
+expect_regex "RECORD setup yes: field 3 is an ISO-UTC time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$REC_F3"
+expect_eq "RECORD setup yes: field 4 is bionic's version" "$REC_VERSION" "$REC_F4"
+expect_eq "RECORD setup yes: …and there is no fifth field" "" "$REC_F5"
+expect_eq "RECORD setup yes: the record is at \${CLAUDE_CONFIG_DIR}/bionic/installed" "yes" \
+  "$(path_exists "$REC_H1/.claude/bionic/installed")"
+
+# Setup, answered no: the same extractor, nothing on it.
+REC_H2="$(rec_home)"
+REC_S2="$(rec_setup "$REC_H2" "tool:${REC_TOOL}" n)"
+expect_contains "RECORD setup no: the question was put and declined" "declined — ${REC_TOOL} stays absent." "$REC_S2"
+expect_absent "RECORD setup no: …nothing was installed" "npm install" "$(rec_calls "$REC_H2")"
+expect_eq "RECORD setup no: …and nothing was recorded" "0" "$(rec_count "$REC_H2" "$REC_TOOL")"
+
+# Setup, answered yes, the install's command failing.
+REC_H3="$(rec_home)"
+REC_S3="$(REC_FAIL=npm rec_setup "$REC_H3" "tool:${REC_TOOL}" y)"
+expect_contains "RECORD failed install: the install was tried" "npm install -g ${REC_TOOL}" "$(rec_calls "$REC_H3")"
+expect_eq "RECORD failed install: …and nothing was recorded" "0" "$(rec_count "$REC_H3" "$REC_TOOL")"
+
+# The mid-session offer, answered yes and answered no.
+REC_H4="$(rec_home)"
+REC_J4="$(rec_jit "$REC_H4" "$REC_TOOL" y)"
+expect_contains "RECORD offer yes: the offer reached the npm stub" "npm install -g ${REC_TOOL}" "$(rec_calls "$REC_H4")"
+expect_eq "RECORD offer yes: the record holds the line" "1" "$(rec_count "$REC_H4" "$REC_TOOL")"
+expect_match "RECORD offer yes: …the same shape setup writes" "${REC_TOOL}"$'\t'"npm-global"$'\t'"*"$'\t'"${REC_VERSION}" \
+  "$(rec_lines "$REC_H4" "$REC_TOOL")"
+REC_H5="$(rec_home)"
+REC_J5="$(rec_jit "$REC_H5" "$REC_TOOL" n)"
+expect_contains "RECORD offer no: the offer was declined" "declined — ${REC_TOOL} stays absent." "$REC_J5"
+expect_eq "RECORD offer no: …and nothing was recorded" "0" "$(rec_count "$REC_H5" "$REC_TOOL")"
+
+# A native plugin: the CLI installs it and its own registry proves it, so no line.
+REC_H6="$(rec_home)"
+REC_J6="$(rec_jit "$REC_H6" impeccable y)"
+expect_contains "RECORD native offer: the plugin install reached the claude stub" "plugin install impeccable@" \
+  "$(rec_calls "$REC_H6")"
+expect_eq "RECORD native offer: …and no line was written for it" "0" "$(rec_count "$REC_H6" impeccable)"
+REC_H7="$(rec_home)"
+REC_S7="$(rec_setup "$REC_H7" tool:document-skills y)"
+expect_contains "RECORD native setup: the plugin install reached the claude stub" "plugin install document-skills@" \
+  "$(rec_calls "$REC_H7")"
+expect_eq "RECORD native setup: …and no line was written for it" "0" "$(rec_count "$REC_H7" document-skills)"
+
+# The newest line for a name is the one read.
+REC_H8="$(rec_home)"
+mkdir -p "$REC_H8/.claude/bionic"
+printf '%s\t%s\t%s\t%s\n' "$REC_TOOL" uv-tool 2026-01-01T00:00:00Z 1.0.0 context7 mcp-server 2026-01-02T00:00:00Z 1.0.0 \
+  "$REC_TOOL" npm-global 2026-01-03T00:00:00Z 1.1.0 > "$(rec_file "$REC_H8")"
+expect_eq "RECORD newest: the kind read for a name is its newest line's" "npm-global" \
+  "$(rec_lib "$REC_H8" "dep_record_kind '${REC_TOOL}'")"
+expect_eq "RECORD newest: a name with no line reads nothing, status 1" "rc=1" \
+  "$(rec_lib "$REC_H8" "dep_record_kind humanizer; echo rc=\$?")"
+
+# ---------------------------------------------------------------------------
+section "§RECORD-REMOVE: remove acts on a recorded tool and on nothing else (AC-12.2)"
+# ---------------------------------------------------------------------------
+
+rec_installed_home() {  # -> a home where setup installed the tool, so the record names it
+  local h; h="$(rec_home)"
+  rec_setup "$h" "tool:${REC_TOOL}" y >/dev/null 2>&1
+  : > "$h/calls.log"
+  printf '%s' "$h"
+}
+
+# Recorded, answered yes: offered, removed through the stub, its line gone.
+REC_R1="$(rec_installed_home)"
+expect_eq "RECORD-REMOVE yes: precondition — the record names the tool" "1" "$(rec_count "$REC_R1" "$REC_TOOL")"
+REC_R1_OUT="$(rec_remove "$REC_R1" "tool:${REC_TOOL}" y)"
+expect_eq "RECORD-REMOVE yes: it is offered — one question" "1" "$(rec_asks "$REC_R1_OUT" "$REC_TOOL")"
+expect_contains "RECORD-REMOVE yes: …the removal ran against the stub" "npm uninstall -g ${REC_TOOL}" "$(rec_calls "$REC_R1")"
+expect_eq "RECORD-REMOVE yes: …the stub no longer lists it" "1" \
+  "$(grep -qxF -- "$REC_TOOL" "$REC_R1/state/npm"; echo $?)"
+expect_eq "RECORD-REMOVE yes: …and its line is gone from the record" "0" "$(rec_count "$REC_R1" "$REC_TOOL")"
+expect_absent "RECORD-REMOVE yes: …and it is not named for removal by hand" "no record that it installed it" "$REC_R1_OUT"
+
+# Recorded, answered no: nothing runs, the line stays.
+REC_R2="$(rec_installed_home)"
+REC_R2_OUT="$(rec_remove "$REC_R2" "tool:${REC_TOOL}" n)"
+expect_eq "RECORD-REMOVE no: it is offered" "1" "$(rec_asks "$REC_R2_OUT" "$REC_TOOL")"
+expect_absent "RECORD-REMOVE no: …nothing was removed" "npm uninstall" "$(rec_calls "$REC_R2")"
+expect_eq "RECORD-REMOVE no: …and the line stays" "1" "$(rec_count "$REC_R2" "$REC_TOOL")"
+
+# Recorded, answered yes, the removal failing: the line stays.
+REC_R3="$(rec_installed_home)"
+REC_R3_OUT="$(REC_FAIL="npm uninstall" rec_remove "$REC_R3" "tool:${REC_TOOL}" y)"
+expect_contains "RECORD-REMOVE failed: the removal was tried" "npm uninstall -g ${REC_TOOL}" "$(rec_calls "$REC_R3")"
+expect_contains "RECORD-REMOVE failed: …the run says it failed" "the removal failed — ${REC_TOOL}" "$REC_R3_OUT"
+expect_eq "RECORD-REMOVE failed: …and the line stays" "1" "$(rec_count "$REC_R3" "$REC_TOOL")"
+
+# Present, with a record that names something else: named, never acted on.
+rec_unrecorded_home() {  # -> the tool on the stub's list, the record naming only context7
+  local h; h="$(rec_home)"
+  printf '%s\n' "$REC_TOOL" > "$h/state/npm"
+  mkdir -p "$h/.claude/bionic"
+  printf '%s\t%s\t%s\t%s\n' context7 mcp-server 2026-01-02T00:00:00Z "$REC_VERSION" > "$(rec_file "$h")"
+  printf '%s' "$h"
+}
+REC_R4="$(rec_unrecorded_home)"
+REC_R4_OUT="$(rec_remove "$REC_R4" "tool:${REC_TOOL}" y)"
+expect_contains "RECORD-REMOVE unrecorded: named, with T82's sentence" \
+  "${REC_TOOL}: present — bionic has no record that it installed it, so it is left in place." "$REC_R4_OUT"
+expect_contains "RECORD-REMOVE unrecorded: …and its by-hand command" \
+  "remove it by hand with: npm uninstall -g ${REC_TOOL}" "$REC_R4_OUT"
+expect_eq "RECORD-REMOVE unrecorded: …nothing asks to remove it" "0" "$(rec_asks "$REC_R4_OUT" "$REC_TOOL")"
+expect_contains "RECORD-REMOVE unrecorded: the stub log reads (the presence probe is on it)" "npm list" "$(rec_calls "$REC_R4")"
+expect_absent "RECORD-REMOVE unrecorded: …and no removal ran" "npm uninstall" "$(rec_calls "$REC_R4")"
+expect_eq "RECORD-REMOVE unrecorded: …and the stub still lists it" "0" \
+  "$(grep -qxF -- "$REC_TOOL" "$REC_R4/state/npm"; echo $?)"
+
+# The mutant: a record read that names every row. The unrecorded tool is then
+# acted on, so the rows above are a measurement of the record, not a constant.
+REC_MUT="$TMP/payload-rec-mutant"
+rm -rf "$REC_MUT"; cp -R "$PAYLOAD" "$REC_MUT"
+printf '%s\n' 'dep_record_kind() { dep_field "${1:-}" kind; }' >> "$REC_MUT/scripts/lib/deps.sh"
+expect_true "RECORD-REMOVE mutant: the doctored library still parses" bash -n "$REC_MUT/scripts/lib/deps.sh"
+REC_R5="$(rec_unrecorded_home)"
+REC_R5_OUT="$(REC_PAYLOAD="$REC_MUT" rec_remove "$REC_R5" "tool:${REC_TOOL}" y)"
+expect_eq "RECORD-REMOVE mutant: the mutant offers the unrecorded tool" "1" "$(rec_asks "$REC_R5_OUT" "$REC_TOOL")"
+expect_contains "RECORD-REMOVE mutant: …and the act-call extractor sees its removal" "npm uninstall -g ${REC_TOOL}" \
+  "$(rec_calls "$REC_R5")"
+
+# The two shared caches: recorded by their installs, named, never acted on.
+REC_R6="$(rec_home)"
+rec_setup "$REC_R6" tool:playwright-chromium y >/dev/null 2>&1
+rec_setup "$REC_R6" tool:motion y >/dev/null 2>&1
+expect_contains "RECORD-REMOVE caches: the browser install reached the npx stub" "install chromium" "$(rec_calls "$REC_R6")"
+expect_contains "RECORD-REMOVE caches: the store install reached the pnpm stub" "pnpm store add motion@latest" "$(rec_calls "$REC_R6")"
+expect_match "RECORD-REMOVE caches: the browser is recorded with its kind" "playwright-chromium"$'\t'"playwright-browser"$'\t'"*" \
+  "$(rec_lines "$REC_R6" playwright-chromium)"
+expect_match "RECORD-REMOVE caches: the store entry is recorded with its kind" "motion"$'\t'"pnpm-store"$'\t'"*" \
+  "$(rec_lines "$REC_R6" motion)"
+mkdir -p "$REC_R6/pnpm-store"; printf 'x\nmotion@12.0.0\ny\n' > "$REC_R6/pnpm-store/index.db"
+: > "$REC_R6/calls.log"
+REC_R6_PW="$(rec_remove "$REC_R6" tool:playwright-chromium y)"
+REC_R6_MO="$(rec_remove "$REC_R6" tool:motion y)"
+for _n in playwright-chromium motion; do
+  case "$_n" in playwright-chromium) _o="$REC_R6_PW" ;; *) _o="$REC_R6_MO" ;; esac
+  expect_contains "RECORD-REMOVE ${_n}: named as bionic's, in a cache other projects share" \
+    "${_n}: bionic installed it, but it lives in a cache your other projects share, so it is left in place." "$_o"
+  expect_contains "RECORD-REMOVE ${_n}: …with its by-hand command" "remove it by hand with: " "$_o"
+  expect_eq "RECORD-REMOVE ${_n}: …nothing asks to remove it" "0" "$(rec_asks "$_o" "$_n")"
+  expect_eq "RECORD-REMOVE ${_n}: …and its line stays" "1" "$(rec_count "$REC_R6" "$_n")"
+done
+expect_absent "RECORD-REMOVE caches: the Playwright cache's path is printed by neither door" "pw-cache" "${REC_R6_PW}${REC_R6_MO}"
+expect_eq "RECORD-REMOVE caches: no removal reached npx or pnpm" "" \
+  "$(grep -E '^(npx .*uninstall|pnpm (store prune|remove|rm))' "$REC_R6/calls.log")"
+expect_eq "RECORD-REMOVE caches: …and the browser marker is still there" "yes" \
+  "$(path_exists "$REC_R6/pw-cache/chromium-1/INSTALLATION_COMPLETE")"
+
+# The `--all` page, answered no: the recorded tool is on it, and nothing runs.
+REC_R7="$(rec_installed_home)"
+REC_R7_OUT="$(printf 'n\n' | rec_env "$REC_R7" bash "$PAYLOAD/scripts/remove.sh" --all 2>&1)"
+REC_R7_PAGE="${REC_R7_OUT%%Do all of the above?*}"
+expect_ne "RECORD-REMOVE --all: the page is on the output, ahead of its question" "$REC_R7_OUT" "$REC_R7_PAGE"
+expect_contains "RECORD-REMOVE --all: the recorded tool is on the page" "• remove ${REC_TOOL}" "$REC_R7_PAGE"
+expect_absent "RECORD-REMOVE --all: …the page answered no removes nothing" "npm uninstall" "$(rec_calls "$REC_R7")"
+expect_eq "RECORD-REMOVE --all: …and the line stays" "1" "$(rec_count "$REC_R7" "$REC_TOOL")"
+
+# ===========================================================================
+# THE SHARE — wave-28 T10 (spec D16, REQ-2 AC-2.1 surfaces).
+#
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share` holds one integer, 1 to 100; absent means 80. Setup offers
+# to write it by the principles item's pattern: a yes writes the default share, a no leaves it unset and the
+# default stands, a share already there is never asked about or overwritten. `remove` takes the file out on a yes.
+# Every drive is behind the record section's stubs, a throwaway home and CLAUDE_CONFIG_DIR (rule 13); no `--all`
+# drive is answered anything but `n`.
+# ===========================================================================
+
+sh_file() { printf '%s/.claude/bionic/share' "$1"; }
+sh_value() {  # <home> -> the first line of the home's share file, nothing when there is none
+  local v=""
+  { read -r v < "$(sh_file "$1")"; } 2>/dev/null
+  printf '%s' "$v"
+}
+sh_has() { [ -e "$(sh_file "$1")" ] && echo yes || echo no; }
+sh_pending() {  # <home> -> 0|1: the checks table's answer for the share item, asked in the record environment
+  rec_env "$1" bash -c '. "$1" >/dev/null 2>&1 || exit 9; bionic_check_item_pending share; echo $?' _ \
+    "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/checks.sh"
+}
+
+# ---------------------------------------------------------------------------
+section "§SHARE-ITEM: setup offers the share, a yes writes it, a no leaves the default, a share already there is kept"
+# ---------------------------------------------------------------------------
+
+SH_A="$(rec_home)"
+expect_eq "SHARE-ITEM precondition: a fresh home has no share file" "no" "$(sh_has "$SH_A")"
+expect_eq "SHARE-ITEM: the checks table fires the share item on it (0)" "0" "$(sh_pending "$SH_A")"
+SH_A_OUT="$(rec_setup "$SH_A" share y)"
+expect_eq "SHARE-ITEM yes: the file is written, the default, one integer" "80" "$(sh_value "$SH_A")"
+expect_eq "SHARE-ITEM yes: …and it is the one line" "1" "$(wc -l < "$(sh_file "$SH_A")" | tr -d ' ')"
+expect_contains "SHARE-ITEM yes: the item says it wrote it" "✓ share" "$SH_A_OUT"
+expect_contains "SHARE-ITEM yes: …naming the file" "bionic/share" "$SH_A_OUT"
+expect_contains "SHARE-ITEM yes: …and how to change it" "session-poker.sh share <n>" "$SH_A_OUT"
+expect_eq "SHARE-ITEM yes: the checks table no longer fires it (1)" "1" "$(sh_pending "$SH_A")"
+expect_contains "SHARE-ITEM yes: a narrowed run's summary is clean" "nothing left to do for share." "$SH_A_OUT"
+
+# idempotent: asked again, it is not asked, and the file is as it was
+SH_A_AGAIN="$(rec_setup "$SH_A" share n)"
+expect_contains "SHARE-ITEM again: the item says there is nothing to do" "nothing to do" "$SH_A_AGAIN"
+expect_absent "SHARE-ITEM again: …and asks nothing (no decline line)" "declined" "$SH_A_AGAIN"
+expect_eq "SHARE-ITEM again: …the file is as it was (80)" "80" "$(sh_value "$SH_A")"
+
+# a share the user set is theirs: never overwritten by the offer, and the item is not pending
+SH_B="$(rec_home)"; mkdir -p "$SH_B/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_B")"
+SH_B_OUT="$(rec_setup "$SH_B" share y)"
+expect_eq "SHARE-ITEM set: a share of 65 is kept through a yes (65)" "65" "$(sh_value "$SH_B")"
+expect_contains "SHARE-ITEM set: …said as already set" "nothing to do" "$SH_B_OUT"
+expect_eq "SHARE-ITEM set: …and the item is not pending (1)" "1" "$(sh_pending "$SH_B")"
+
+# a no leaves the default: nothing written, the item pending, the gate reads 80
+SH_C="$(rec_home)"
+SH_C_OUT="$(rec_setup "$SH_C" share n)"
+expect_eq "SHARE-ITEM no: nothing is written (the yes above wrote)" "no" "$(sh_has "$SH_C")"
+expect_contains "SHARE-ITEM no: the item says declined" "declined" "$SH_C_OUT"
+expect_contains "SHARE-ITEM no: …names the default that stands" "80%" "$SH_C_OUT"
+expect_contains "SHARE-ITEM no: …and the line that would answer yes" "--only share" "$SH_C_OUT"
+expect_eq "SHARE-ITEM no: the gate's share is the default (80)" "80" \
+  "$(rec_env "$SH_C" bash -c '. "$1" 2>/dev/null; gate_share' _ "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/gate.sh")"
+expect_eq "SHARE-ITEM no: …and the item is still pending (0)" "0" "$(sh_pending "$SH_C")"
+
+# the write goes where the gate reads, not to BIONIC_CLAUDE_HOME's directory
+SH_D="$(rec_home)"; mkdir -p "$SH_D/other"
+rec_env "$SH_D" env BIONIC_CLAUDE_HOME="$SH_D/other" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only share <<< 'y' >/dev/null 2>&1
+expect_eq "SHARE-ITEM home: with BIONIC_CLAUDE_HOME set the share is written under CLAUDE_CONFIG_DIR (80)" "80" "$(sh_value "$SH_D")"
+expect_eq "SHARE-ITEM home: …and not under BIONIC_CLAUDE_HOME" "no" "$([ -e "$SH_D/other/bionic/share" ] && echo yes || echo no)"
+
+# a file the gate would refuse reads as the default, so setup offers a share over it (the value judges, as gate_share does)
+SH_J="$(rec_home)"; mkdir -p "$SH_J/.claude/bionic"; printf 'abc\n' > "$(sh_file "$SH_J")"
+expect_eq "SHARE-ITEM junk: a file holding abc fires the share item (0)" "0" "$(sh_pending "$SH_J")"
+rec_setup "$SH_J" share y >/dev/null 2>&1
+expect_eq "SHARE-ITEM junk: a yes replaces it with the default (80)" "80" "$(sh_value "$SH_J")"
+
+# the roster and the plan page name it
+SH_E="$(rec_home)"
+SH_E_LIST="$(rec_env "$SH_E" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --list 2>&1)"
+expect_contains "SHARE-ITEM roster: setup --list names the share item" "share" "$SH_E_LIST"
+SH_E_ALL="$(printf 'n\n' | rec_env "$SH_E" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --all 2>&1)"
+SH_E_PAGE="${SH_E_ALL%%Do all of the above?*}"
+expect_ne "SHARE-ITEM page: the --all page is on the output ahead of its question" "$SH_E_ALL" "$SH_E_PAGE"
+expect_contains "SHARE-ITEM page: it names the share and the file it would write" "write bionic's share of this machine, 80%, to " "$SH_E_PAGE"
+expect_eq "SHARE-ITEM page: answered no, nothing is written" "no" "$(sh_has "$SH_E")"
+
+# ---------------------------------------------------------------------------
+section "§SHARE-REMOVE: remove takes the share file out on a yes, and only that file"
+# ---------------------------------------------------------------------------
+
+SH_R="$(rec_home)"
+rec_setup "$SH_R" share y >/dev/null 2>&1
+mkdir -p "$SH_R/.claude/bionic"
+printf 'ccstatusline\tstatusline\t2026-10-01T10:00:00Z\t1.12.0\n' > "$(rec_file "$SH_R")"
+expect_eq "SHARE-REMOVE precondition: setup wrote the share (80)" "80" "$(sh_value "$SH_R")"
+SH_R_NO="$(rec_remove "$SH_R" share n)"
+expect_eq "SHARE-REMOVE no: the file stays" "80" "$(sh_value "$SH_R")"
+expect_contains "SHARE-REMOVE no: the item says declined, and the file is left in place" "declined — bionic's share file" "$SH_R_NO"
+SH_R_YES="$(rec_remove "$SH_R" share y)"
+expect_eq "SHARE-REMOVE yes: the share file is gone" "no" "$(sh_has "$SH_R")"
+expect_contains "SHARE-REMOVE yes: the item says removed" "✓ bionic's share file" "$SH_R_YES"
+expect_contains "SHARE-REMOVE yes: …naming the file" "bionic/share" "$SH_R_YES"
+expect_eq "SHARE-REMOVE yes: the install record beside it is untouched (1 line)" "1" "$(rec_count "$SH_R" ccstatusline)"
+expect_eq "SHARE-REMOVE yes: …and the directory stays" "yes" "$([ -d "$SH_R/.claude/bionic" ] && echo yes || echo no)"
+SH_R_AGAIN="$(rec_remove "$SH_R" share y)"
+expect_contains "SHARE-REMOVE again: with no file the item is already clean" "already clean" "$SH_R_AGAIN"
+
+# a share a user set by hand is bionic's file too (the verb writes the same one)
+SH_R2="$(rec_home)"; mkdir -p "$SH_R2/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_R2")"
+rec_remove "$SH_R2" share y >/dev/null 2>&1
+expect_eq "SHARE-REMOVE set: a share set by the verb is removed on a yes as well" "no" "$(sh_has "$SH_R2")"
+
+# a share that is not a regular file is named and left alone
+SH_R3="$(rec_home)"; mkdir -p "$SH_R3/.claude/bionic/share"
+SH_R3_OUT="$(rec_remove "$SH_R3" share y)"
+expect_eq "SHARE-REMOVE not-a-file: a directory at the share's path is left (still there)" "yes" "$([ -d "$SH_R3/.claude/bionic/share" ] && echo yes || echo no)"
+expect_absent "SHARE-REMOVE not-a-file: …and nothing is reported removed" "✓ bionic's share file" "$SH_R3_OUT"
+
+# the --all page names it, answered no
+SH_R4="$(rec_home)"; mkdir -p "$SH_R4/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_R4")"
+SH_R4_OUT="$(printf 'n\n' | rec_env "$SH_R4" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/remove.sh" --all 2>&1)"
+SH_R4_PAGE="${SH_R4_OUT%%Do all of the above?*}"
+expect_ne "SHARE-REMOVE --all: the page is on the output, ahead of its question" "$SH_R4_OUT" "$SH_R4_PAGE"
+expect_contains "SHARE-REMOVE --all: the share file is on it" "• delete bionic's share file " "$SH_R4_PAGE"
+expect_eq "SHARE-REMOVE --all: answered no, the file stays (65)" "65" "$(sh_value "$SH_R4")"
+
 finish

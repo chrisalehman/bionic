@@ -24,11 +24,23 @@
 #                                      and silent whenever the ledger is not live or the
 #                                      table carries no ready row.
 #   fill_readonly_ids <plan>           the ids of the rows that take no writer slot.
+#   fill_gate_width <open> <owed> <ready writers> [<cap>]
+#                                      the writer width the gate gives: <open> plus one row
+#                                      for each `gate_room` that answers yes, asked once per
+#                                      ready writer row with the rows already offered counted
+#                                      as owed, stopping at the first no or at <cap>.
+#   fill_gate_owed <roster> <session id>
+#                                      of the open names on stdin, the writers that have not
+#                                      asked the gate for a run yet.
+#   fill_cap <plan>                    a person's cap on writers, or nothing.
 #   fill_name <roster> <task id>       the agent NAME to dispatch that id under, which is the
 #                                      id itself until this session has already spent it.
 #   fill_row_launched <task id> <names>
 #                                      0 when one of <names> (comma-joined Agent names) is a
 #                                      dispatch name for that id — the inverse of fill_name.
+#   fill_launched_rows <roster> <sid> <names>
+#                                      the same names, each replaced by the `row=` its latest
+#                                      row in that session carries (wave-28 T7, D17).
 #
 # WHY A LIBRARY AT ALL (D2). Both of these lived inside `hooks/session-poker.sh` — the ready
 # set inline in the `tick` verb, reading five shell variables the tick had built, and
@@ -45,10 +57,9 @@
 # measure them differently and both are right: the tick counts open rows off the roster it
 # is already walking, trimmed by transcript liveness, while the stop wall counts the same
 # roster's rows minus acks (wave-19 REQ-5; the wall's count is never below the tick's); both take the
-# width from the same reading — `pressure_level` against the budget's declared ceiling, the
-# ceiling itself only when the rung will not parse (wave-18 review R1: a wall that measured
-# against the ceiling refused turns naming rows the tick had withheld). What may not differ
-# is the READY SET, and that is what lives here.
+# width from the same function, `fill_gate_width` below, which asks the gate (wave-28 T13, D14;
+# wave-18 review R1: a wall that measured against another width refused turns naming rows the
+# tick had withheld). What may not differ is the READY SET, and that is what lives here.
 #
 # TWO TABLE SHAPES, ONE READER. `payload/scripts/lib/units.sh` is the one parser of
 # `## Tasks` at either scale, and `units_ready` grew the task-scale arm in the same wave
@@ -84,6 +95,13 @@ _FILL_LIB_DIR="$(cd "$(_fill_self_dir)" && pwd -P)"
 if ! declare -F units_ready >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_FILL_LIB_DIR/units.sh"
+fi
+# THE GATE, SOURCED THE SAME WAY (wave-28 T13): `fill_gate_width` asks `gate_room`. A copy of
+# this file whose directory holds no gate.sh leaves it undefined, and the width is then the
+# open count alone: no room is offered on a gate nobody can read.
+if ! declare -F gate_room >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/gate.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_FILL_LIB_DIR/gate.sh"
 fi
 
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
@@ -322,6 +340,68 @@ FILL_READY_ROWS
   return 0
 }
 
+# ── THE WIDTH, FROM THE GATE (wave-28 T13; D14, AC-2.5, AC-2.8) ──────────────
+#
+# fill_gate_width <open> <owed> <ready writers> [<cap>] -> the writer width: <open> plus the
+# rows the gate offers. ONE ROW TO A YES. Each ready writer row is a `gate_room --owed <n>`, <n>
+# being <owed> (the live writers not yet showing) plus the rows already offered on this reading,
+# so two rows are never offered on a reading with room for one; the first no ends it. A
+# person's cap (<cap>, `budget_cap`'s writers) caps the open plus the offered. The tick and the
+# stop wall both size their fill here, so the two give one answer on one reading.
+fill_gate_width() {  # <open> <owed> <ready writers> [<cap>]
+  local open="${1:-0}" owed="${2:-0}" want="${3:-0}" cap="${4:-}" k=0
+  case "$open" in ''|*[!0-9]*) open=0 ;; esac
+  case "$owed" in ''|*[!0-9]*) owed=0 ;; esac
+  case "$want" in ''|*[!0-9]*) want=0 ;; esac
+  case "$cap" in *[!0-9]*) cap="" ;; esac
+  if declare -F gate_room >/dev/null 2>&1; then
+    while [ "$k" -lt "$want" ]; do
+      if [ -n "$cap" ] && [ $((open + k)) -ge "$cap" ]; then break; fi
+      gate_room --owed $((owed + k)) >/dev/null 2>&1 || break
+      k=$((k + 1))
+    done
+  fi
+  printf '%s' "$((open + k))"
+}
+
+# fill_cap <plan> -> a person's cap on writers, or nothing (D15; ruling A-orch-30). `budget_cap`
+# (lib/run.sh, row T9) answers only from a line a person wrote; until that function exists the
+# plan's `writers=` is read as it always was, so the cap behaves as before and T9 flips this one
+# place. The tick and the stop wall both read the cap here.
+fill_cap() {  # <plan>
+  local c=''
+  if declare -F budget_cap >/dev/null 2>&1; then
+    c="$(budget_cap "${1:-}" 2>/dev/null)"; c="${c#writers=}"
+  elif declare -F budget_field >/dev/null 2>&1 && declare -F plan_budget_line >/dev/null 2>&1; then
+    c="$(budget_field "$(plan_budget_line "${1:-}")" writers)"
+  fi
+  case "$c" in ''|*[!0-9]*) c="" ;; esac
+  printf '%s' "$c"
+}
+
+# fill_gate_owed <roster> <session id> -> how many of the open names on stdin are writers whose
+# agent has no open request at the gate (`gate_asked`, one call over every name, matched on the
+# request's `who` = `<session>:<name>`). A writer that has asked and is running is showing — in
+# the load, or in an admitted promise — and is owed no longer; one that has not, or whose request
+# has ended, is counted at the largest promise on record. A read-only role is no writer
+# (`budget_open_writers`, lib/roster.sh), as the open count it rides beside.
+fill_gate_owed() {  # <roster> <session id>; stdin: the open names, one per line
+  local f="${1:-}" sid="${2:-}" nm n=0 whos='' shown=0
+  while IFS= read -r nm; do
+    [ -n "$nm" ] || continue
+    if declare -F budget_open_writers >/dev/null 2>&1; then
+      [ "$(printf '%s\n' "$nm" | budget_open_writers "$f")" = 1 ] || continue
+    fi
+    n=$((n + 1))
+    whos="${whos}${sid}:${nm}
+"
+  done
+  if [ "$n" -gt 0 ] && declare -F gate_asked >/dev/null 2>&1; then
+    shown="$(printf '%s' "$whos" | gate_asked | wc -l | tr -d ' ')"
+  fi
+  printf '%s' "$((n - shown))"
+}
+
 # fill_ready_tagged <plan> -> every ready id, untrimmed, as `<id><TAB>w` (takes a writer slot) or
 # `<id><TAB>r` (does not), table order. The stop wall's reading: it trims the writers to its own
 # free slots and owes every read-only row, from the one parse `_fill_ready_rows` takes.
@@ -418,6 +498,34 @@ fill_row_launched() {  # <task id> <names, comma-joined> -> 0 launched · 1 not
     case "$base" in *"-$id") return 0 ;; esac
   done
   return 1
+}
+
+# ── THE ROW LABEL BEFORE THE NAME (wave-28 T7; REQ-3, D17) ────────────────────
+#
+# A brief's `Row: <id>` binds its dispatch to a row whatever the agent is called, and the dispatch
+# wall writes it on the launch row as `row=`. So a reader of "which rows did these launches start"
+# asks the roster first: each name whose latest row in this session carries `row=` stands for that
+# id, and `fill_row_launched` then matches it as the id itself; a name with none stays a name and
+# is matched by the rule above. No roster, a symlink, or no names: the names as given.
+fill_launched_rows() {  # <roster> <session id> <names, comma-joined> -> the names, row= first
+  local roster="${1:-}" sid="${2:-}" names="${3:-}"
+  [ -n "$names" ] && [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] \
+    || { printf '%s' "$names"; return 0; }
+  awk -F'|' -v sid="$sid" -v names="$names" '
+    $1 == "roster-state/v1" {
+      split("", kv)
+      for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1) { k = substr($i, 1, e - 1); if (!(k in kv)) kv[k] = substr($i, e + 1) } }
+      if (kv["name"] == "" || (kv["session"] != "" && kv["session"] != sid)) next
+      row[kv["name"]] = kv["row"]
+    }
+    END {
+      n = split(names, nm, ","); out = ""
+      for (i = 1; i <= n; i++) {
+        v = ((nm[i] in row) && row[nm[i]] != "") ? row[nm[i]] : nm[i]
+        out = out (i > 1 ? "," : "") v
+      }
+      printf "%s", out
+    }' "$roster" 2>/dev/null || printf '%s' "$names"
 }
 
 # ── THE STANDING FILL DECLINE (wave-24 T8, T27; D2, AC-4.7) ──────────────────

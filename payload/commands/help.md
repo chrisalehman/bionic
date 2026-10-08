@@ -29,7 +29,7 @@ Presentation contract — what the user sees from this command:
 Render the page below in full, verbatim, every time this command runs — even if it was
 shown earlier in this session; never summarize it or refer back to an earlier rendering.
 
-bionic 1.12.0 (installed)
+bionic 1.13.0 (installed)
 
 # bionic
 
@@ -68,7 +68,7 @@ The roles canonical-sdlc dispatches by step. The model and effort each one runs 
 | `researcher` | opus · high | Read-only codebase/docs exploration returning structured summaries with file:line citations |
 | `reviewer` | opus · high | Independent structure reviewer — holds the code to the structure checks it is handed and answers every one |
 | `senior-implementor` | opus · high | DISCRETIONARY task execution under TDD discipline — judgment and taste licensed within task scope, every resolution logged to the wave's `record/<wave>/assumptions.md` before commit |
-| `test-runner` | haiku · medium | Mechanical test-suite execution and full result reporting |
+| `test-runner` | sonnet · medium | Mechanical test-suite execution and full result reporting |
 
 ## Installed by setup (third party)
 

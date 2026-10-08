@@ -6,10 +6,11 @@
 #
 # This is NOT a hook. Like hooks/session-sweeper.sh and hooks/stop-check.sh it lives in
 # hooks/ for test-harness pairing and to ride the payload's hooks/ directory into the
-# mounted plugin; it is registered on NO channel. Three verbs, one invocation each:
+# mounted plugin; it is registered on NO channel. Four verbs, one invocation each:
 #
 #     bash ~/.claude/hooks/stop-orders.sh order <target> [--at <epoch>]
 #     bash ~/.claude/hooks/stop-orders.sh stopped <name>
+#     bash ~/.claude/hooks/stop-orders.sh unrostered <name> '<why>' [--at <epoch>]
 #     bash ~/.claude/hooks/stop-orders.sh standdown
 #
 # STOPPED closes the row of an agent that has been stopped, through the sweeper's own ack
@@ -57,6 +58,18 @@
 #   sweeper-<session>.state      read-only input, owned by hooks/session-sweeper.sh
 #   stop-orders-<session>.state  the orders this script owns (append-only)
 #
+# UNROSTERED records the ORCHESTRATOR's word (never a human's) that an agent the harness lists is
+# one the session roster never saw (wave-28 T70; A-orch-205 to 208): a dispatch the wall admitted
+# and did not journal. The stop guard refuses such a stop by name and by id, and its one escape,
+# `order`, is a record that a HUMAN asked, which the orchestrator may not claim. This verb is the
+# orchestrator's own: `unrostered <name> '<why>' [--at <epoch>]` checks that NO roster of the project
+# (this session's, a predecessor's, a dead session's: `roster_sessions_with_name`) carries a row of the name and
+# that a fresh panel reading lists it, and that the reason is one plain line (no `|`, newline or carriage
+# return), then records
+# `stop-unrostered/v1|…|by=orchestrator|why=…|target=<name>`. The guard honours that line ONCE,
+# within the order TTL, writes the stop onto the roster as a closed row, and a second stop of the
+# name is refused again. It is not an `order`: the guard's human-order reader never sees it.
+#
 # Exit codes:
 #   0 — the order was recorded / the row was acked / the stand-down was computed
 #   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable; a
@@ -78,6 +91,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
 ORDER_SCHEMA="stop-order/v1"
+UNROSTERED_SCHEMA="stop-unrostered/v1"
 ROSTER_VERSION="v1"
 
 # HOW LONG AN ORDER IS CURRENT, in seconds. Duplicated as a literal in
@@ -96,6 +110,8 @@ usage() {  # [message]
   die "        record a stop order and print what stopping gives up"
   die "  bash ${HOOK_DIR}/stop-orders.sh stopped <name>"
   die "        close the row of an agent you have stopped (the sweeper's ack, reason landed or abandoned)"
+  die "  bash ${HOOK_DIR}/stop-orders.sh unrostered <name> '<why>' [--at <epoch>]"
+  die "        record the orchestrator's word that a listed agent is one the roster never saw"
   die "  bash ${HOOK_DIR}/stop-orders.sh standdown"
   die "        list every landed row with an address you can stop it by"
   exit 2
@@ -105,6 +121,7 @@ usage() {  # [message]
 VERB="$1"; shift
 
 ORDER_TARGET=""
+ORDER_WHY=""
 ORDER_AT=""
 # WHO SAID STOP (bionic 1.8.0, REQ-1 D1). An order used to mean exactly one thing — a human
 # said stop — and that is still the default, because a caller that names no author is a
@@ -148,6 +165,20 @@ case "$VERB" in
     case "$1" in -*) usage "the target comes first: '$1' is an option, not a target." ;; esac
     ORDER_TARGET="$1"; shift
     [ $# -eq 0 ] || usage "stopped takes one target and no options; got $1."
+    ;;
+  unrostered)
+    [ $# -ge 2 ] || usage "unrostered needs a name and a reason: unrostered <name> '<why>'."
+    case "$1" in -*) usage "the target comes first: '$1' is an option, not a target." ;; esac
+    ORDER_TARGET="$1"; ORDER_WHY="$2"; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --at)
+          [ $# -ge 2 ] || usage "--at needs an epoch."
+          case "$2" in ''|*[!0-9]*) usage "--at takes epoch seconds; got '$2'." ;; esac
+          ORDER_AT="$2"; shift 2 ;;
+        *) usage "unknown argument: $1" ;;
+      esac
+    done
     ;;
   standdown)
     [ $# -eq 0 ] || usage "standdown takes no arguments; got $#."
@@ -594,9 +625,20 @@ case "$VERB" in
       die "REFUSED — no contract row named $_target on this session's roster; nothing was acked."
       exit 2
     fi
+    # THE MARK, NOT THE ACK, IS THE LICENCE FOR THE TREE (wave-28 T21; A-orch-105 #1). A landed row the Patrol
+    # already acked (MET and gone) still has its tree: `stopped` writes no second ack for it, and removes the
+    # tree below, behind the same fresh-panel check as any other. An acked row with no mark is refused as ever.
+    _mark=""
+    # shellcheck source=/dev/null
+    { declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null \
+      && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
+    _acked=0
     if [ "$(line_field "$_line" acked)" = "yes" ]; then
-      die "REFUSED — $_target is already acked; a second ack would say nothing new."
-      exit 2
+      if [ -z "$_mark" ]; then
+        die "REFUSED — $_target is already acked; a second ack would say nothing new."
+        exit 2
+      fi
+      _acked=1
     fi
     # THE REASON FOLLOWS THE VERDICT (wave-19 T1e, audit V-1; REQ-1 AC-1.2). A landed row
     # (MET or WAIVED) closes `landed`. An UNMET row whose agent is gone closes `abandoned`:
@@ -629,10 +671,17 @@ case "$VERB" in
       UNMET)        _reason=abandoned ;;
       STILL-LIVE)   _reason=abandoned; _still_live=1 ;;
       *)
-        die "REFUSED — $_target's contract is $_state, not landed; nothing was acked."
-        exit 2
+        if [ "$_acked" -eq 1 ]; then _reason=landed; else
+          die "REFUSED — $_target's contract is $_state, not landed; nothing was acked."
+          exit 2
+        fi
         ;;
     esac
+    [ "$_acked" -eq 0 ] || _still_live=0
+    # THE LANDING'S MARK DECIDES (wave-28 T6; D7). A row the line published carries
+    # `landed=<40-hex> landed_at=<ISO-UTC>` on its roster line (lib/roster.sh `roster_landed`): it
+    # closes `landed` whatever its deliverable says, and its tree goes once the row is closed (below).
+    [ -z "$_mark" ] || _reason=landed
     # THE FRESH PANEL, through the one shared read above (`read_panel` / `_is_live`, the same
     # predicate standdown uses). C4 holds for every state: no fresh answer, or the name still
     # on it, is a refusal that names the verdict. A verb that cannot see does not ack, and an
@@ -672,14 +721,104 @@ case "$VERB" in
       _cad=$(printf '%s' "$_detail" | grep -oE '\([0-9]+s\)' | tr -d '()s')
       say "panel-gone overrides STILL-LIVE (progress ${_age:-?}s old, cadence ${_cad:-?}s)"
     fi
-    if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                 CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                 bash "$SWEEPER" ack "$_target" --by human --reason "$_reason" 2>&1 ); then
-      die "REFUSED — the sweeper could not ack $_target: $(printf '%s' "$_ack" | head -1)"
+    if [ "$_acked" -eq 1 ]; then
+      say "stopped: $_target — its row was already closed (acked)."
+    else
+      if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                   CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                   bash "$SWEEPER" ack "$_target" --by human --reason "$_reason" 2>&1 ); then
+        die "REFUSED — the sweeper could not ack $_target: $(printf '%s' "$_ack" | head -1)"
+        exit 2
+      fi
+      [ -n "$_ack" ] && printf '%s\n' "$_ack"
+      say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
+    fi
+    # THE TREE GOES AT THE STOP (wave-28 T6; D7, AC-3.2). Only for a row carrying the mark: the tree
+    # recorded for the name (`workspace_for_name`), else the convention's, removed by
+    # lib/worktree.sh `worktree_remove_landed` — never the branch, never a tree whose head is not in the
+    # landed commit. A row with no mark (abandoned, read-only) keeps its tree, as it always has.
+    if [ -n "$_mark" ]; then
+      _wt_lib="${HOOK_DIR}/../payload/scripts/lib/worktree.sh"
+      [ -f "$_wt_lib" ] || _wt_lib="${HOOK_DIR}/../scripts/lib/worktree.sh"
+      # shellcheck source=/dev/null
+      [ -f "$_wt_lib" ] && . "$_wt_lib"
+      if declare -f worktree_remove_landed >/dev/null 2>&1; then
+        _tree="$(workspace_for_name "$REPO_REAL" "$SESSION_ID" "$_target" 2>/dev/null)" \
+          || _tree="$(worktree_for_row "$REPO_REAL" "$_target")"
+        _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+        _c="${_mark%%$'\t'*}"
+        _kept="$(worktree_remove_landed "$REPO_REAL" "$_tree" "$_c")"
+        case $? in
+          0) say "stopped: $_target — its tree is removed: $_tree (branch ${_tbr:-unknown} stays; landed ${_c:0:12})" ;;
+          2) say "stopped: $_target — its tree stands: $_tree; $_kept" ;;
+        esac
+      fi
+    fi
+    exit 0
+    ;;
+
+  unrostered)
+    # THE ORCHESTRATOR'S WORD FOR THE ONE CASE `order` cannot serve (wave-28 T70). Two facts are
+    # checked before anything is written, both from state the system wrote itself: this session's
+    # roster has NO row of the name (a name it has seen belongs to the ordinary stop, with its
+    # look), and a FRESH panel reading lists the name (an agent nothing lists is no agent of this
+    # session's to stop). A verb that cannot see does not record, as `stopped` does not ack.
+    # THE REASON IS ONE PLAIN LINE, judged BEFORE `clean` folds it. The roster splits a row on `|` and the
+    # orders file a record on a line, so a reason carrying either could forge a field or a record; folding
+    # it to a space would record a sentence its author did not write. It is refused instead (wave-28 T77).
+    case "$ORDER_WHY" in
+      *'|'*|*$'\n'*|*$'\r'*)
+        die "REFUSED — the reason holds a | or a line break; say it in one plain line."
+        exit 2
+        ;;
+    esac
+    _target="$(clean "$ORDER_TARGET")"
+    _why="$(clean "$ORDER_WHY")"
+    [ -n "$_target" ] || usage "unrostered needs a non-empty target."
+    [ -n "$_why" ] || usage "unrostered needs a reason: say why the roster never saw $_target."
+    fold_roster
+    if [ -n "$(roster_row_for "$_target")" ]; then
+      die "REFUSED — this session's roster carries a row of $_target; stop it as any rostered agent."
       exit 2
     fi
-    [ -n "$_ack" ] && printf '%s\n' "$_ack"
-    say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
+    # ... and NO ROSTER OF THE PROJECT does (wave-28 T77; A-orch-239). The question "the roster never saw this
+    # agent" is asked of every `roster-*.state` under the state directory, a predecessor's and a dead
+    # session's included: a writer a predecessor's roster still holds, its contract unmet, is exactly what a
+    # `/clear` leaves until `adopt` copies the rows, and recording it as unrostered would pass its stop.
+    declare -F roster_sessions_with_name >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    _held="$(roster_sessions_with_name "$STATE_DIR" "$_target")"
+    if [ -n "$_held" ]; then
+      while IFS='|' read -r _hsid _hstat; do
+        [ -n "$_hsid" ] || continue
+        die "REFUSED — $_target is on roster ${_hsid:0:8}'s row ${_hstat:-with no status}."
+      done <<< "$_held"
+      die "adopt it, or stop it by its own session's rules; nothing was recorded."
+      exit 2
+    fi
+    read_panel
+    if [ "$_live_ok" -ne 1 ]; then
+      die "REFUSED — no fresh panel reading; a verb that cannot see does not record a stop for $_target."
+      exit 2
+    fi
+    if ! _is_live "$_target"; then
+      die "REFUSED — $_target is not listed by the fresh panel; nothing was recorded."
+      exit 2
+    fi
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    if [ ! -d "$STATE_DIR" ]; then
+      die "REFUSED — the state directory could not be created ($STATE_DIR)."
+      exit 2
+    fi
+    _at="${ORDER_AT:-$(now_epoch)}"
+    [ -f "$ORDERS_FILE" ] || printf '# bionic stop orders — schema %s — machine-local, safe to delete\n' \
+      "$ORDER_SCHEMA" >> "$ORDERS_FILE" 2>/dev/null
+    if ! printf '%s|at=%s|epoch=%s|session=%s|by=orchestrator|why=%s|target=%s\n' \
+         "$UNROSTERED_SCHEMA" "$(iso_now)" "$_at" "$SESSION_ID" "$_why" "$_target" >> "$ORDERS_FILE" 2>/dev/null; then
+      die "REFUSED — the record could not be written to $ORDERS_FILE."
+      exit 2
+    fi
+    say "unrostered stop recorded: $_target — reason: $_why"
+    say "the gate passes the next stop of it, once, for $((ORDER_TTL_SECONDS / 60)) minutes, and writes the stop onto the roster."
     exit 0
     ;;
 
@@ -704,21 +843,20 @@ case "$VERB" in
     # or empty verdict costs nothing at all.
     fold_roster
 
-    # THE LEASE ENDS HERE (bionic 1.4.0, spec AC-28, design ledger C1). A
-    # discharged row's worktree is a leased slot nobody holds any more, and
-    # standing the agent down is the moment to give the disk back. The act — a
-    # --no-ff merge into the bound plan's working branch, a removal, a prune,
-    # and the refusals around them — belongs to payload/scripts/lib/worktree.sh,
-    # whose `worktree_land_for_session` spawn-worktree.sh's `land` verb calls
-    # too (wave-20 T8, REQ-1, D1); this is a call site and not a second copy of
-    # the judgment. The Patrol tick lands nothing. Two spellings of the library path because
-    # the repo ships payload/hooks as a symlink to hooks/ and `$0` is textual.
-    # A missing library costs nothing: the stand-down report is what this verb
-    # owes, and the landing is additive to it.
+    # STANDDOWN LANDS NOTHING (wave-28 T6; D7). Until 1.13.0 the lease ended here: each discharged
+    # row's tree was merged onto the bound plan's working branch and removed (bionic 1.4.0, AC-28).
+    # A row now lands through `ready` (lib/line.sh, the line's one publish), which marks its roster
+    # line `landed=<40-hex> landed_at=<ISO-UTC>`, and its tree goes at `stopped <name>`. So this pass
+    # merges nothing, removes nothing and moves no ref; it reports each tree as it stands, and a row
+    # carrying the mark is stoppable by it. The worktree library is read for the name-to-tree mapping
+    # alone (`worktree_for_row`); the roster library for the mark (`roster_landed`).
     _wt_lib="${HOOK_DIR}/../payload/scripts/lib/worktree.sh"
     [ -f "$_wt_lib" ] || _wt_lib="${HOOK_DIR}/../scripts/lib/worktree.sh"
     # shellcheck source=/dev/null
     [ -f "$_wt_lib" ] && . "$_wt_lib"
+    # shellcheck source=/dev/null
+    declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    _mark_of() { declare -F roster_landed >/dev/null 2>&1 && roster_landed "$ROSTER_FILE" "$1" 2>/dev/null; }   # <name>
 
     # THE LIVE SET, read ONCE for the whole batch through the shared `read_panel` above the
     # verbs: it decides whether an acked row is gone and annotates LEFT ALONE rows. A stale or
@@ -727,31 +865,27 @@ case "$VERB" in
     # than none.
     read_panel
 
-    # ONE CALL SITE for ending a row's lease, shared by the READY branch (a MET/WAIVED/still-
-    # listed-acked row) and the acked-and-gone branch, which needs the exact same landing but
-    # never enters READY. Appends one line to _landed for every tree it finds, so the operator
-    # sees every tree this pass touched, whichever branch found it.
-    #
-    # ONLY A LANDED ROW IS MERGED (wave-19 T1f, review R2-1). The land is a --no-ff merge into
-    # this session's bound plan's working branch. An ack closes a name whatever its
-    # reason (A-T1.11), and since T1e `stopped` acks an UNMET-and-gone row `abandoned` — so
-    # "acked" is not "landed", and merging on the ack alone put an abandoned agent's partial
-    # work into the target branch (masked on main/master by the protected-branch refusal,
-    # live on any other). The VERDICT decides, never the ack's reason: the reason is a label,
-    # the verdict is the fact. MET or WAIVED lands. Anything else leaves tree and branch in
-    # place — no merge and no removal, since a human salvages what the agent left — and says
-    # so on the same LEASES report.
+    # ONE CALL SITE for reporting a row's tree, shared by the READY branch and the acked-and-gone
+    # branch. Appends one line to _landed for every tree it finds. A marked row's tree stands until
+    # its stop; a MET or WAIVED row with no mark has not landed (its writer says ready, or a person
+    # lands it by hand); any other row's tree is left for a human to salvage, as before.
     _land_row_tree() {  # <name> <verdict state>
-      declare -f worktree_land_for_session >/dev/null 2>&1 || return 0
+      declare -f worktree_for_row >/dev/null 2>&1 || return 0
       _tree="$(worktree_for_row "$REPO_REAL" "$1")"
       [ -d "$_tree" ] || return 0
+      _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+      _tmark="$(_mark_of "$1")"
+      if [ -n "$_tmark" ]; then
+        _landed="${_landed}  landed $(printf '%.12s' "$_tmark") — tree stands until stopped $1: $_tree   ($1)
+"
+        return 0
+      fi
       case "$2" in
         MET|WAIVED)
-          _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land_for_session "$_tree" "$REPO_REAL" "$SESSION_ID")   ($1)
+          _landed="${_landed}  not landed — tree stands: $_tree (branch ${_tbr:-unknown}); its writer says ready from it, or a person lands it with land <tree> --by-hand --reason '<why>'   ($1)
 "
           ;;
         *)
-          _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
           _tword="abandoned"; [ "$2" = "UNMET" ] || _tword="unlanded ($2)"
           _landed="${_landed}  ${_tword} — tree stands: $_tree (branch ${_tbr:-unknown}); remove or salvage by hand   ($1)
 "
@@ -804,6 +938,9 @@ case "$VERB" in
           continue
         fi
         _why="acked"
+      elif _rmark="$(_mark_of "$_name")" && [ -n "$_rmark" ]; then
+        # STOPPABLE BY ITS ROSTER MARK (wave-28 T6; D7): the line published it.
+        _why="landed $(printf '%.12s' "$_rmark")"
       elif [ "$_state" = "WAIVED" ]; then
         _why="waived"
       elif [ "$_state" = "MET" ] && [ -n "$_deliv" ]; then
@@ -843,7 +980,7 @@ EOF
       say "nothing has landed; there is nobody to stand down."
     fi
     if [ -n "$_landed" ]; then
-      say "LEASES — the worktree of each row this pass found, landed, refused, or left standing:"
+      say "LEASES — the worktree of each row this pass found, as it stands (standdown lands nothing):"
       printf '%s' "$_landed"
     fi
     if [ "$_nheld" -gt 0 ]; then

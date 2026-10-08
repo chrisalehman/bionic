@@ -83,8 +83,9 @@ fi
 
 # RESOURCES.SH IS SOURCED THE SAME WAY (wave-18 T2b, R1): `hooks/stop.sh`'s own
 # `BIONIC_LIB_WANT` does not name it, and this row's Files: declaration is this file
-# alone, so the dependency is met here rather than by widening the hook's want-list.
-if ! declare -F pressure_level >/dev/null 2>&1; then
+# alone, so the dependency is met here rather than by widening the hook's want-list. The gate
+# (lib/gate.sh, which the fill duty asks through fill.sh) reads its readers.
+if ! declare -F _res_used_pct >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_STOP_LIB_DIR/resources.sh"
 fi
@@ -1577,6 +1578,7 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
   local _LS_OUT _LS_RC LAUNCH_REASON=""
+  local ENTRY_REASON _TE_IDS _TE_N _TE_ID
   local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1811,6 +1813,38 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
   }
 ')
 
+# ---------- THE TASK LIST'S SECOND TRIGGER: a dispatch turn sets its entries in progress ----------
+#
+# (wave-28 T38; REQ-13, D30.) The refresh above is owed to a tick; this is owed to a DISPATCH, tick
+# or no tick. A turn that launched an agent bound to a plan row owes as many TaskUpdate calls
+# setting `in_progress` as rows it dispatched (`_ST_ENTERED`, folded in `stop_turn_facts`). A hook
+# cannot write the task list, so a refusal is the only enforcement there is, and it is this duty's:
+# no new site. Alone, the verdict `entry` goes to the forwarder below; beside another duty it rides
+# in that duty's detail, as the launch and marker reasons do. It refuses once, through the same
+# `stop_hook_active` guard as every duty here. The wall counts; it cannot tell which entry belongs
+# to which row, so the predicate is a count, never a match.
+#
+# BOUND IS THE FILL DUTY'S OWN LAUNCHED SET: a plan row a turn launched is a row `fill_row_launched`
+# finds in `_ST_LAUNCHED`, the one computation of the turn's launches the ledger also records (a
+# refused dispatch left out). Every row of the bound plan's table counts, whatever its status: the
+# launch recorder sets a dispatched row `active` before this Stop reads it. A launch that binds no
+# row (a helper, a researcher) owes nothing, and a row launched twice is one row.
+ENTRY_REASON=""
+if [ -n "$_ST_LAUNCHED" ] && [ -n "$_ST_PLAN" ]; then
+  _TE_IDS=""; _TE_N=0
+  while IFS=$'\t' read -r _TE_ID _; do
+    case "$_TE_ID" in ''|*[!A-Za-z0-9_.-]*) continue ;; esac
+    fill_row_launched "$_TE_ID" "$_ST_LAUNCHED" || continue
+    case " $_TE_IDS " in *" $_TE_ID "*) continue ;; esac
+    _TE_IDS="${_TE_IDS}${_TE_IDS:+ }${_TE_ID}"; _TE_N=$((_TE_N + 1))
+  done <<TE_ROWS
+$(units_rows "$_ST_PLAN" 2>/dev/null)
+TE_ROWS
+  if [ "$_TE_N" -gt 0 ] && [ "${_ST_ENTERED:-0}" -lt "$_TE_N" ]; then
+    ENTRY_REASON="tasks: dispatched ${_TE_IDS} this turn, ${_ST_ENTERED:-0} of ${_TE_N} task entries set in progress — set each dispatched row's entry in progress"
+  fi
+fi
+
 # ---------- THE THIRD DUTY: no turn ends on a fillable gap (AC-29; wave-20 REQ-5, Δ7) ----
 #
 # WHY THIS IS A WALL AND NOT A LINE IN THE PROMPT. The tick can compute the gap between the
@@ -1828,14 +1862,14 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 #   - the READY SET is the plan's (`fill_ready_set`, T10's prerequisite graph), untrimmed;
 #   - the OCCUPANCY is the roster's (`roster_open_names`), which a dispatch joins at launch,
 #     so it already counts this turn's launches when the Stop fires;
-#   - the PRESSURE STATE is `resources_pressure`'s, the reading the tick's HOLD and EMERGENCY
-#     come from, taken here rather than read back out of the tick's words;
+#   - the WIDTH is the gate's (`fill_gate_width`, lib/fill.sh; wave-28 T13, D14), asked here
+#     the way the tick asks it rather than read back out of the tick's words;
 #   - the only transcript fact is a DECLINE, and only the model's own: a main-thread assistant
 #     `text` block, `fill-declined: <reason>` at the start of a line.
 # JUDGED BY COUNT: after the turn's launches, `missed = min(free writer slots, ready writer rows
 # this turn did not launch) + the ready read-only rows it did not launch` (a verify or review row
-# takes no writer slot; wave-26 T13, D9), and a turn with `missed > 0` on a machine that reads
-# `ok` and no decline is refused once, naming those rows. No id is ever matched against a
+# takes no writer slot; wave-26 T13, D9), and a turn with `missed > 0`, a gate that gave room
+# and no decline is refused once, naming those rows. No id is ever matched against a
 # dispatch's PROMPT words. A dispatched row leaves the plan's ready set when the launch recorder
 # (hooks/execution-recorder.sh, wave-26 T12) sets it `active`, and until then the turn that
 # launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
@@ -1851,26 +1885,18 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # `_ST_GAP`, the rows neither launched nor answered by the standing decline, and the refusal
 # names only those. The predicate is "a row is unanswered", never "a decline exists".
 #
-# THE BUDGET IS A MEASUREMENT THE PLAN CARRIES (wave-19 REQ-3, D5; ADR-035). Step 0 writes
-# `parallel-budget: writers=N …` and the governing-skill hook refuses a plan Write without it,
-# so a live ledger reaching this wall without a readable `writers=` is a plan that slipped past
-# that wall, and the turn is refused once, naming the key — exactly where the missing width
-# would have hidden a fillable row (at least one row ready at width one). `stop_turn_facts`
-# computes that too.
+# NO PLAN OWES A BUDGET LINE (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a live ledger whose
+# plan carried no readable `writers=` was refused once here, naming the key Step 0 wrote from
+# the machine probe. A line caps a run only when a person wrote it (`budget_cap`, lib/run.sh),
+# so a plan with none is an ordinary plan and this wall says nothing about it.
 FILL_SRC=""
 FILL_MISSING=""
-if [ "$_ST_NO_BUDGET" = 1 ]; then
-  FILL_SRC="BUDGET"
-elif [ "${_ST_GAP:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_DECLINED" ]; then
+if [ "${_ST_GAP:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_DECLINED" ]; then
   FILL_SRC="GAP"
   FILL_MISSING="$_ST_NAMED"
 fi
 
-if [ "$FILL_SRC" = "BUDGET" ]; then
-  FILL_REASON="Fill budget unreadable: the run's ledger is live past Step 3, and its plan (${PLAN_NAME}) carries no parallel-budget: line with a writers=<digits> field, so no turn can be judged for a fillable gap. The budget is a measurement Step 0 writes — resources_probe, then resources_budget over what it printed — verbatim into the plan's frontmatter as parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe (source=override when the probe cannot read the machine). Add it, then stop again — this gate blocks once."
-  FILL_FACT="the plan carries no parallel-budget: writers="
-  FILL_FIX="add Step 0's budget line"
-elif [ "$FILL_SRC" = "GAP" ]; then
+if [ "$FILL_SRC" = "GAP" ]; then
   # THE INVARIANT'S OWN WORDING, and the only one left: what is true of every refused turn is
   # the state — the ledger is live, these rows are ready, slots are free after this turn's
   # launches — whether or not a tick fired in it.
@@ -2088,6 +2114,15 @@ TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
 [ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
 [ -n "$LAUNCH_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${LAUNCH_REASON}"
+# THE TASK ENTRIES (wave-28 T38) ride beside any other duty, in its detail and under its line; alone,
+# they are the verdict, refused through the forwarder below.
+if [ -n "$ENTRY_REASON" ]; then
+  if [ -z "$TELL_REASON" ] && [ "$VERDICT" != tasklist ]; then
+    VERDICT=entry
+  else
+    TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${ENTRY_REASON}"
+  fi
+fi
 
 # The two folds are judged TOGETHER, so a turn that skipped a duty AND left a FILL
 # unanswered is told both things once. Blocking on one and staying silent about the other
@@ -2098,15 +2133,11 @@ if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
     # always had. Both halves are budgeted: `bionic: stop refused — <fact> (<fix>)` is capped
     # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
     # these read as tightly as they do.
-    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ] && [ "$FILL_SRC" = "BUDGET" ]; then
-      fold_block block stop "no parallel-budget: key, and a STANDDOWN unanswered" \
-        "add the key; stop or decline" "$TELL_REASON"
-    elif [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
+    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
       fold_block block stop "a FILL and a STANDDOWN went unanswered" \
         "dispatch, stop, or decline" "$TELL_REASON"
     elif [ -n "$FILL_REASON" ]; then
-      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the budget backstop or the
-      # computed gap.
+      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap.
       fold_block block stop "$FILL_FACT" "$FILL_FIX" \
         "$TELL_REASON"
     elif [ -n "$STANDDOWN_REASON" ]; then
@@ -2137,7 +2168,8 @@ fi
 # value and no path is interpolated into them. The fill clause is the one
 # exception and it carries task ids read out of the transcript — filtered in the
 # fold above to `[A-Za-z0-9_.-]+` and handed to jq through `--arg`, so neither a
-# shell nor a JSON quoting surface is opened by them.
+# shell nor a JSON quoting surface is opened by them. The task-entry clause carries
+# plan row ids under the same filter, and two counts.
 # THE FACT AND THE FIX COME FROM THE VERDICT, one row per duty missed (table rows
 # 111-113); the existing paragraph stays whole as `detail`.
 case "$VERDICT" in
@@ -2156,6 +2188,10 @@ case "$VERDICT" in
       grew)  FIX='TaskList, rebuild it, then stop again'
              REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the ## Tasks table grew (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete the pending entries after the new row and recreate them. Do it, then stop again — this gate blocks once.' ;;
     esac ;;
+  entry)
+    # THE DISPATCH TURN'S ENTRIES, alone (wave-28 T38): the fix names the act the wall counts.
+    FACT="a dispatched row's entry is not in progress"; FIX='TaskUpdate each to in_progress'
+    REASON="$ENTRY_REASON" ;;
   *)
     return "$_adv" ;;
 esac
@@ -2190,8 +2226,12 @@ return 2
 #   _ST_TURN        the turn key: the prompt record's uuid, else its timestamp, else empty
 #   _ST_MARK_TS     the prompt record's timestamp, or empty
 #   _ST_LAUNCHED    comma-joined names of this turn's main-thread Agent calls, less the ones
-#                   whose result was an error (a dispatch the preflight refused)
+#                   whose result was an error (a dispatch the preflight refused); once the
+#                   roster is read, each name whose row carries `row=` is that id (wave-28 T7)
 #   _ST_DECLINED    the turn's last `fill-declined:` reason, from the model's own text only
+#   _ST_ENTERED     how many task entries the turn set `in_progress`: distinct task numbers of
+#                   its main-thread TaskUpdate calls with that status, less the ones whose result
+#                   was an error — the task-entry duty's count (wave-28 T38, D30)
 #   _ST_CURRENT _ST_STATE _ST_CEILING _ST_WIDTH _ST_OPEN _ST_FREE   the ledger's numbers
 #   _ST_READY       every ready id, space-joined, untrimmed — the plan's set, launches included
 #   _ST_READY_N     how many ids _ST_READY holds
@@ -2204,7 +2244,6 @@ return 2
 #   _ST_GAP         min(free, |ready not launched and not answered by the standing decline|) —
 #                   what the wall refuses on; _ST_MISSED when nothing stands
 #   _ST_NAMED       the first _ST_GAP of those ids, the ones a refusal names
-#   _ST_NO_BUDGET   1 when a live ledger has no readable writers= and a row is ready
 #   _ST_TICK_DUTY   on a tick turn, `none` when the tick's digest file says `duty=none`, else
 #                   `owed` — the task-list duty's one input from the tick (wave-24 T8, D5)
 #   _ST_RECONCILE   on a tick turn with a fresh digest, its `reconcile=` (`step4` or `grew`): the
@@ -2236,6 +2275,9 @@ return 2
 #                                    which writes no roster row and launched nothing — or a
 #                                    refused TaskStop, which stopped nothing (any tool's error)
 #   STOP <task id words> <tool_use id>  a main-thread TaskStop tool_use — the stand-down's answer
+#   TASKUP <task number> <status> <tool_use id>  a main-thread TaskUpdate tool_use — the
+#                                    task-entry duty's evidence (wave-28 T38, D30). The harness
+#                                    writes `input:{taskId,status}`; nothing else of it is read
 #   DECLINE <reason>                 `fill-declined: <reason>` at a LINE START of a main-thread
 #                                    assistant TEXT block — never thinking, never a tool_use
 #                                    input, never a tool result (AC-5.4: prose quoting, a file
@@ -2266,10 +2308,10 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_STREAM=""; _ST_PLAN=""; _ST_LIVE=0; _ST_TICK=0; _ST_TURN=""; _ST_MARK_TS=""
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
-  _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
+  _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
-  _ST_RECONCILE=""
-  local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
+  _ST_RECONCILE=""; _ST_ENTERED=0
+  local tr fold mark rest ready count want cap owed FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at rvat led standing gap rcount rgap slot
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
@@ -2345,6 +2387,11 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
                 "STOP\t" + (([.input.task_id?, .input.name?, .input.shell_id?]
                               | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
                 + "\t" + ((.id // "") | tostring)
+              else empty end ),
+            ( if .name == "TaskUpdate" then
+                "TASKUP\t" + (((.input.taskId // "") | tostring) | gsub("[\n\t\r]"; " "))
+                + "\t" + (((.input.status // "") | tostring) | gsub("[\n\t\r]"; " "))
+                + "\t" + ((.id // "") | tostring)
               else empty end )
         else empty
         end
@@ -2361,22 +2408,30 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       t = $2; sub(/^[ \t]+/, "", t)
       tick = (index(t, mark) == 1)
       ts = $3; key = ($4 != "" ? $4 : $3)
-      n = 0; decl = ""
+      n = 0; decl = ""; u = 0
       next
     }
     $1 == "AGENT"    { n++; an[n] = $2; aid[n] = $3; next }
     $1 == "AGENTERR" { if ($2 != "") err[$2] = 1; next }
     $1 == "DECLINE"  { decl = $2; next }
+    $1 == "TASKUP"   { if ($3 == "in_progress" && $2 != "") { u++; ut[u] = $2; uid[u] = $4 } next }
     END {
       launched = ""
       for (i = 1; i <= n; i++) {
         if (aid[i] != "" && (aid[i] in err)) continue
         launched = launched (launched == "" ? "" : ",") an[i]
       }
-      printf "%d\037%s\037%s\037%s\037%s\n", tick + 0, key, ts, launched, decl
+      entered = 0; seen = " "
+      for (i = 1; i <= u; i++) {
+        if (uid[i] != "" && (uid[i] in err)) continue
+        if (index(seen, " " ut[i] " ") > 0) continue
+        seen = seen ut[i] " "; entered++
+      }
+      printf "%d\037%s\037%s\037%s\037%s\037%d\n", tick + 0, key, ts, launched, decl, entered
     }')"
-  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED <<< "$fold"
+  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED _ST_ENTERED <<< "$fold"
   case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
+  case "$_ST_ENTERED" in ''|*[!0-9]*) _ST_ENTERED=0 ;; esac
 
   # THE TICK'S DUTY LINE (wave-24 T8; D5, AC-4.13). The tick writes `duty=none` beside its
   # digest when it printed `unchanged`, or owed no reconcile
@@ -2455,23 +2510,19 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   [ -n "$_ST_PLAN" ] && fill_ledger_live "$_ST_PLAN" || return 0
   _ST_LIVE=1
   _ST_CURRENT="$(_fill_current_field "$_ST_PLAN")"
-  # THE ONE BUDGET READER (wave-20 T2, D10): run.sh's strict line and whole-field integer.
-  _ST_CEILING="$(budget_field "$(plan_budget_line "$_ST_PLAN")" writers)"
+  # A PERSON'S CAP, OR NONE (wave-28 T9; D15), read ONCE: `fill_cap` (lib/fill.sh) calls
+  # `budget_cap` (lib/run.sh), which answers only from a line whose `source=` is `user` or
+  # `override`. The width below and the ledger's `ceiling=` both take this one value, so a probe's
+  # number caps neither.
+  _ST_CEILING="$(fill_cap "$_ST_PLAN")"
 
-  # THE PRESSURE STATE, MEASURED HERE (Δ7): `resources_pressure`, the reading the tick's HOLD
-  # and EMERGENCY come from. An unreadable reading is `ok` — the tick's own fallback — which
-  # is the direction that refuses more, never less.
-  cores="$(_res_cores 2>/dev/null)"
-  case "$cores" in ''|*[!0-9]*|0) cores=1 ;; esac
-  pressure="$(resources_pressure "$cores" 2>/dev/null)" || pressure=""
-  _ST_STATE="${pressure#state=}"; _ST_STATE="${_ST_STATE%% *}"
-  case "$_ST_STATE" in ok|hold|emergency) : ;; *) _ST_STATE=ok ;; esac
+  # THE STATE IS THE GATE'S (wave-28 T13; D14): `hold` when it gives no room for one ready
+  # writer row, read below beside the width; `ok` otherwise. A gate that will not answer is
+  # `ok` with no room, so a turn is never refused on a width nobody could read.
+  _ST_STATE=ok
 
-  if [ -z "$_ST_CEILING" ]; then
-    # "AT LEAST ONE ROW READY AT THE UNIT" IS THE READY SET AT WIDTH ONE (wave-19 REQ-6, D7).
-    [ -n "$(fill_ready_set "$_ST_PLAN" 1 0 2>/dev/null)" ] && _ST_NO_BUDGET=1
-    return 0
-  fi
+  # NO CAP IS NOT A FAULT (D15): with none, the width below is the gate's alone. Until wave-28 a
+  # live ledger with no readable `writers=` refused the turn once here, naming the key.
 
   # THE OCCUPANCY IS THE ONE CLOSE PREDICATE'S OPEN SET (wave-20 T2, D10): this session's
   # roster rows not closed by a later ack. A roster or ledger that is a symlink is not read,
@@ -2481,20 +2532,18 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   if [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
     return 0
   fi
-  # THE RUNG, FALLING BACK TO THE CEILING — the width the tick names (Step-6 review R1,
-  # wave-18 T2b): `pressure_level` over the declared `writers=`, bound to the tick's own
-  # `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"` by patrol-duties-gate 69 and session-poker 12l2.
-  rung="$(pressure_level "$_ST_CEILING" 2>/dev/null)" || rung=""
-  case "$rung" in ''|*[!0-9]*) rung="" ;; esac
-  _ST_WIDTH="${rung:-$_ST_CEILING}"
+  # THE ROW LABEL FIRST (wave-28 T7; D17): a launch whose roster row carries `row=` counts as that
+  # row's, by the id itself; only a launch with none is matched by its name. The ledger records the
+  # same list, so the standing decline reads the launches as this count did.
+  if declare -F fill_launched_rows >/dev/null 2>&1; then
+    _ST_LAUNCHED="$(fill_launched_rows "$FILL_ROSTER" "$BIONIC_SID" "$_ST_LAUNCHED")"
+  fi
   # THE WRITERS AMONG THEM (wave-24 T13, D11): `budget_open_writers` (lib/roster.sh) leaves a
   # read-only role out, as the dispatch wall and the tick's `TICK_OCCUPIED` do, so the three
   # readers of the open set count the same slots.
   FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | budget_open_writers "$FILL_ROSTER")"
   case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
   _ST_OPEN="$FILL_OPEN"
-  _ST_FREE=$(( _ST_WIDTH - _ST_OPEN ))
-  [ "$_ST_FREE" -ge 0 ] || _ST_FREE=0
 
   # EVERY READY ROW, UNTRIMMED, in one parse of the table (wave-19 REQ-6, D7): the width passed
   # is wide enough that `fill_ready_set`'s own trim never bites, and the trim to the free
@@ -2525,6 +2574,33 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # counted and named in full. A row that waits for a read is not in this set at all, so it is
   # never demanded.
   ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" UNITS_FACTS_STATE="$_ST_FACTS" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
+
+  # THE WIDTH, ASKED AS THE TICK ASKS IT (wave-28 T13; D14, AC-2.8): the ready writer rows this
+  # turn did not launch, offered one `gate_room` at a time (`fill_gate_width`), the open writers
+  # not yet showing counted as owed (`fill_gate_owed`), and a person's cap obeyed. The tick and
+  # this wall size their fill by the one function, so on one reading they name the same rows: the
+  # rows a standing decline answered stay in the count, as they stay in `missed` (the ledger
+  # charges their idle time to the decline), and the loop below names only the others, up to the
+  # free slots. A gate that gives no row when a row waits and no cap holds it is the HOLD the
+  # ledger records: a machine fact the plan cannot hold. Counted in this shell, never inside
+  # `$( )`: bash 3.2 reads a `case` pattern's `)` there as the substitution's end.
+  want=0
+  while IFS=$'\t' read -r rest slot; do
+    [ "$slot" = w ] || continue
+    fill_row_launched "$rest" "$_ST_LAUNCHED" && continue
+    want=$((want + 1))
+  done <<ST_WANT
+$ready
+ST_WANT
+  cap="$_ST_CEILING"
+  owed="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | fill_gate_owed "$FILL_ROSTER" "$BIONIC_SID")"
+  _ST_WIDTH="$(fill_gate_width "$_ST_OPEN" "$owed" "$want" "$cap")"
+  case "$_ST_WIDTH" in ''|*[!0-9]*) _ST_WIDTH="$_ST_OPEN" ;; esac
+  _ST_FREE=$(( _ST_WIDTH - _ST_OPEN ))
+  [ "$_ST_FREE" -ge 0 ] || _ST_FREE=0
+  if [ "$want" -gt 0 ] && [ "$_ST_FREE" -eq 0 ] && { [ -z "$cap" ] || [ "$_ST_OPEN" -lt "$cap" ]; }; then
+    _ST_STATE=hold
+  fi
   count=0; gap=0; rcount=0; rgap=0; _ST_READY=""; _ST_NAMED=""
   while IFS=$'\t' read -r rest slot; do
     [ -n "$rest" ] || continue
