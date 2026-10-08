@@ -2934,6 +2934,40 @@ dp_refuse_findings
 # The poker path goes in as ONE shell word (wave-24 T29, critic I2): the amend line prints it
 # verbatim, and a plugin root with a space split in two when pasted.
 _dp_adv_all=$(brief_body_advisories "$(_jq '.tool_input.prompt')" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$(refuse_shell_word "$HOOK_DIR/session-poker.sh")")
+# THE DEBT ARM (wave-30 T22; D2, P2, AC-11.3). Debt is burned by the next row whose Files touch its
+# concept, so an allowed brief whose `Files:` covers a site of an unburned item of the run's ledger
+# (lib/proof.sh `proof_debt_hits`: the path, a directory above it, or a glob over it) carries the item,
+# and the item's touches go up by one through the ledger's one writer, `session-poker.sh debt touched`,
+# whose answer is the count printed. A touch the verb cannot write is still advised, at the count the
+# ledger holds. Below the spend for the reason the body advisory is: a refused dispatch touches nothing.
+_dp_debt=""
+if [ -n "$PLAN" ] && [ -n "$C_FILES" ]; then
+  if ! declare -F proof_debt_hits >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$BIONIC_LIB/proof.sh"
+  fi
+  if declare -F proof_debt_hits >/dev/null 2>&1; then
+    _dp_debt_hits="$(proof_debt_hits "$(proof_debt_ledger_path "$BIONIC_ROOT" "$PLAN" 2>/dev/null)" "$C_FILES" 2>/dev/null | awk -F'\t' '$6 == "-"')"
+    _dp_dseen=" "; _dp_dall=""
+    while IFS='	' read -r _dp_dc _dp_dk _ _ _dp_dn _; do
+      [ -n "$_dp_dc" ] || continue
+      # One call per concept: the verb touches every unburned item of it, whatever its kind.
+      case "$_dp_dseen" in *" $_dp_dc "*) : ;; *)
+        _dp_dseen="$_dp_dseen$_dp_dc "
+        _dp_dall="$_dp_dall
+$(cd "$BIONIC_ROOT" 2>/dev/null && bash "$HOOK_DIR/session-poker.sh" debt touched "$_dp_dc" "$PLAN" 2>/dev/null)" ;;
+      esac
+      _dp_dsaid="$(printf '%s\n' "$_dp_dall" | awk -v c="$_dp_dc" -v k="$_dp_dk" \
+        '$1 == "poker:" && $2 == "debt" && $3 == "touched" && $5 == c && $6 == k && $7 == "touches" && $8 ~ /^[0-9]+$/ { print $8; exit }')"
+      _dp_debt="${_dp_debt:+$_dp_debt
+}debt: $_dp_dc $_dp_dk touches ${_dp_dsaid:-$_dp_dn} — burn it in this row or say why not"
+    done <<DP_DEBT_EOF
+$_dp_debt_hits
+DP_DEBT_EOF
+  fi
+fi
+[ -z "$_dp_debt" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
+}$_dp_debt"
 if [ -n "$_dp_adv_all" ]; then
   _dp_adv_ctx="brief advisory (the dispatch is allowed; nothing was refused):
 $_dp_adv_all"
