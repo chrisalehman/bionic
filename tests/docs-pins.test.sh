@@ -6403,4 +6403,30 @@ expect_nonempty "W28-46cm2: …and a wall library doctored to branch on the repo
 expect_eq "W28-46d: a local named _asked= is no request time (the extractor's boundary)" "" \
   "$(w28_46_reads "$(w26_doctor "${REPO}/hooks/stop-guard.sh" 'local _asked=0 _q_admitted=""')")"
 
+
+
+section "§W28-FLOOR (wave-28 T75; REQ-17 AC-17.3, D36): the knob table names floor: and floor-attestation: beside the declared check"
+# ============================================================
+# WHAT THIS OWNS. operational-rules.md's table of approvals and proofs carries the declared check's row
+# (pinned by W26-14c); a project's own floor is two rows beside it, in the same shape: `declared floor`
+# (`floor: <command>`, the `floor-run` verb, its log's first line) and `floor attestation`
+# (`floor-attestation: user`, the record's two lines). A copy with the floor row cut is caught.
+W28F_ROW='| declared floor | `floor: <command>` in `.bionic/config.yaml`'
+expect_nonempty "W28-F0 precondition: the extractor reads the table's declared check row" \
+  "$(w26_hits '| declared check | `release-check: <command>` in `.bionic/config.yaml`' "$OPRULES")"
+for _w28f in \
+  "$W28F_ROW" \
+  '`session-poker.sh floor-run`' \
+  '`record/<wave>/floor-run-<head>.log`, its first line `head=<40-hex> dirty=<n> rc=<n>`, then `command: <cmd>`' \
+  '`proof-add floor` stays the one writer of the proof line' \
+  '| floor attestation | `floor-attestation: user` in `.bionic/config.yaml` (any other value is refused)' \
+  'a line `head=<40-hex> dirty=0` naming the working head and a line `floor-attested-by: <who> <when> <what ran>`'; do
+  expect_nonempty "W28-F1: AC-17.3 operational-rules.md documents: ${_w28f:0:72}" "$(w26_hits "$_w28f" "$OPRULES")"
+done
+W28F_CUT="$TMP/w28f-no-floor-row.md"
+/usr/bin/grep -vF -- "$W28F_ROW" "$OPRULES" > "$W28F_CUT" 2>/dev/null
+expect_nonempty "W28-F2m precondition: the cut copy keeps the declared check row" \
+  "$(w26_hits '| declared check |' "$W28F_CUT")"
+expect_eq "W28-F2m: …and a table missing the declared floor row is caught" "" "$(w26_hits "$W28F_ROW" "$W28F_CUT")"
+
 finish
