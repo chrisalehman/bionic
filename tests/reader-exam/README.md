@@ -61,7 +61,7 @@ effect, which the scale rates S4 and the table notes.
 | sample | question | key (each also declares a finding on its file, rated `S1 on`, `S1 off` or `S2 on`) | rebuilt from |
 |---|---|---|---|
 | `dup-counter` | structure | `fail`, `check: reuse FAIL` or `check: one-site FAIL`, names `tree_dirty_count`, file `bin/stamp.sh` | `review.md` (final review): the duplication FLAG, "three dirty-tree counters", and its ownership row for the run stamp, where the stamp writer computed the dirty count again instead of using the one the land reads, and computed it differently |
-| `admit-not-require` | evidence | `fail`, `REFUTED`, names `land.sh`, file `bin/land.sh` or `lib/fullrun.sh` | `auditor.md` §1b item 1, AC-3.4 REFUTED: the requirement said a full run "is required", the design and its test only showed one is admitted, and the land took the tree with none |
+| `admit-not-require` | evidence | `fail`, `REFUTED`, names `land.sh`, file `bin/land.sh`, `lib/fullrun.sh` or `docs/plan.md` | `auditor.md` §1b item 1, AC-3.4 REFUTED: the requirement said a full run "is required", the design and its test only showed one is admitted, and the land took the tree with none |
 | `red-then-green` | adversarial | `fail`, `land_check`, names `tail -n 1`, `tail -n1` or `tail -1`, file `lib/landcheck.sh` | `critic.md` F1: the landing check read only the last stamp, while the doctrine makes one call per suite, so a red suite followed by a green one at the same head landed |
 | `clean` | all three | not `fail`, `branch-name` | no defect: a small change that reuses what exists, with its spec, design table, matrix and evidence in order |
 

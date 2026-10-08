@@ -202,6 +202,9 @@ What you will notice:
 - **The test runner runs on the latest Sonnet.** The `test-runner` role runs on the latest Sonnet
   (it was Haiku), effort unchanged. Its reports are relied on for the floor, and Haiku's were not
   reliable enough.
+- **The evidence checks ask for finding lines.** The evidence checks file asks for finding lines and
+  grades `result` by the severity scale when the scale is pushed with the checks, as the other two
+  checks files do.
 - **For contributors.** The three slowest suites were timed alone and one cut landed, about 2% of the
   slowest; the target of a third off each missed, and the measured costs lie in the hook and door
   drives the rows run, recorded with their numbers for the next release.
@@ -266,18 +269,18 @@ the first line of a refusal to 100.
   `finding:` lines, rates a finding outside S1 to S4 or a reach other than `on` or `off`, names no
   `<path>:<line>` or `-`, sends a finding to fix without a `shown:` command or an `unsure:` line, writes
   a `priority:` the table does not give, or says a `result:` its findings do not derive; each line
-  begins `REFUSED — the reading <record> …` and says what to write. For `structure`, a `check:` that answers
+  begins `poker: REFUSED — the reading <record> …` and says what to write. For `structure`, a `check:` that answers
   FAIL beside no finding to fix, and a finding to fix beside no FAIL check, are refused the same way.
   A record path registered again for another pass:
   `poker: REFUSED — <record> is already registered at <12 hex>, not <12 hex>: write the pass to a new record path. The plan is unchanged.`
 - `session-poker.sh finding-check`: refused, with the plan unchanged, for a check the plan does not owe, a
   check already settled, a check record that is missing, a link, outside the record directory, with no
   `written-by:` or written by the finding's reviewer or the code's writer; and `current 8`:
-  `REFUSED — current: 8 waits on each check a finding owes; these check: lines are open (no settled=, no refuted):`.
+  `poker: REFUSED — current: 8 waits on each check a finding owes; these check: lines are open (no settled=, no refuted):`.
 - `session-poker.sh finding-move`: refused, with the plan unchanged, for a finding the plan does not register,
   a finding its check refuted, an S1 moved to defer, a repository with no `git user.name`, a session whose
   transcript cannot be read, and words that stand in no prompt the user typed in this session:
-  `REFUSED — the words "<words>" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged.`
+  `poker: REFUSED — the words "<words>" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged.`
   and a quote too short to be a decision:
   `poker: REFUSED — the words "<words>" are too short to be the user's decision; quote at least 3 of their words, or their whole prompt. The plan is unchanged.`
 - `session-poker.sh floor-run` for a project that declares no `floor:`, for a plan whose working branch no
@@ -327,6 +330,8 @@ Fixes:
   longer makes the main checkout look busy to `land`.
 - The interpreter pin no longer refuses a shared sticky `/tmp` on a Linux host with `getfacl`, where
   every hand-run suite and `tests/run.sh` exited 2.
+- The stop guard reads a long roster in one pass; on a roster of hundreds of rows it used to run past its
+  own deadline and refuse every stop with `stop again`.
 
 Known limits, carried to the next release:
 
@@ -385,10 +390,11 @@ Known limits, carried to the next release:
   where the registering verb derives it from the findings.
 - Known limit: a sitting marked `stale:` is pinned as it stands, including any `missed` line it
   carried.
-- Known limit: the admit-not-require sample admits a finding on two files only; a finding placed on the
-  evidence, the test or `-` scores missed.
-- Known limit: the exam's briefs ask a reader to read the shipped scale and checks files from the plugin
-  copy by path; a session that cannot read outside its project needs them inlined.
+- Known limit: the admit-not-require sample's key admits a finding on the defect's two files or on the
+  matrix row the verdict refutes; a finding placed on the evidence file, the test or `-` scores missed.
+- Known limit: the exam's briefs ask a reader to read the scale and checks files from the plugin copy by
+  path, outside its project; a session that cannot read outside its project needs them inlined — at
+  wave-28's sitting every headless reader could.
 - Known limit: a suite run by `source tests/<suite>.test.sh` or `. tests/<suite>.test.sh` from a
   dispatched agent passes the Bash wall with no refusal, wrap or stamp; only the spellings the classifier
   reads meet the door.
@@ -462,8 +468,10 @@ Known limits, carried to the next release:
 - Known limit: quote the user's words without the typographic quotes that surround them; a `’` inside a
   word (`don’t`) is fine.
 - Known limit: a suite call that carries a `$( )`, a pipe, a `&`, a backquote or a subshell between its
-  `cd` and the suite may be stamped against the main checkout; keep the call in the doctrine's suite-call
-  form (`cd <tree> || exit 1; LOG=…; bash tests/run.sh --only <suite> > "$LOG" 2>&1`) and read the stamp.
+  `cd` and the suite may be stamped against the main checkout, and so may the `> "$LOG"` redirect form, a
+  `cd "$VAR"`, a `cd` behind `||`, and a variable assigned in the call and used in the suite segment; keep
+  the call in the doctrine's suite-call form
+  (`cd <tree> || exit 1; LOG=…; bash tests/run.sh --only <suite> 2>&1 | tee "$LOG"`) and read the stamp.
 - Known limit: under `claude -p` in auto mode the CLI's own classifier can deny the Patrol's recurring
   `CronCreate` as unauthorized persistence, so no clock is armed until you approve the job; the session
   reports that the Patrol is not running and asks you to.
@@ -495,11 +503,13 @@ Known limits, carried to the next release:
 - Known limit: under `claude -p` the prompt's transcript entry carries no `origin`, so `user_said` finds
   no words the user typed and `finding-move` is refused; make a move in an interactive session.
 - Known limit: a writer dispatched in the foreground cannot land through `ready` while it runs — its
-  roster launch row is written when it returns, so `ready` finds no row and refuses `no-launch-row`;
-  dispatch writers in the background, as the doctrine says.
+  plan row's worktree cell is filled only when the dispatch call returns, so `ready` falls back to the
+  branch name; dispatch writers in the background, as the doctrine says.
 - Known limit: after a foreground writer's landing, the owed `TaskStop` finds the agent already
   completed, so the stop guard never fires and the tick keeps its row open (`stand-down deferred`) until
   the roster is swept; a background writer is stopped as the owed line says.
+- Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not the
+  scale; readers holding a code question, and the exam's readers, grade by the scale.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
