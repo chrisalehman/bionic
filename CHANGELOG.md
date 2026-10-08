@@ -484,6 +484,15 @@ Known limits, carried to the next release:
 - Known limit: `config_value` reads a `floor:` key wherever it stands in `.bionic/config.yaml`, an indented
   one under another mapping included, and keeps a trailing `# comment` in the value — write the key
   flush-left with no comment.
+- Known limit: a plain `git merge` of a row is counted as a `published kind=git` landing only when the
+  next `ready` runs, and its landed time is that act's time, not the merge's; a hand landing by
+  `row-landed --by-hand` is counted at once.
+- Known limit: a `fail` reading holds the step advance from `current 6` on, not at `current 5`; and a
+  later `pass` reading registered over an empty range (the same commit at both ends) releases the hold
+  although it covers no fix — the orchestrator, who registers readings, must register the pass over the
+  range that holds the fix.
+- Known limit: under `claude -p` the prompt's transcript entry carries no `origin`, so `user_said` finds
+  no words the user typed and `finding-move` is refused; make a move in an interactive session.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
