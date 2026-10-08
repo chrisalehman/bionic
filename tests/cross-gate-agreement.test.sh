@@ -1868,6 +1868,13 @@ sleep 1
 printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
 expect_eq "the D-6 staleness wall still refuses past the old cap (critic F-1)" "2" "$ST"
+# THE EXIT CODE ALONE CANNOT TELL A JUDGED STOP FROM AN UNJUDGED ONE (wave-28 T80). Since T70 the
+# guard refuses with exit 2 when it runs past its own deadline, and on this long roster it did:
+# every row here passed on a stop the guard never judged. The reason is what says it judged.
+expect_contains "…on the target's own state: it is still working" \
+  "it is still working, nothing delivered" "$OUT"
+expect_absent "…and not because the guard ran out of time on the long roster" \
+  "did not finish in" "$OUT"
 
 # WHO IS STOPPING NO LONGER CHANGES THE ANSWER (epic-23 wave-15, REQ-2; ADR-028). D-3 asked
 # whether the recorded look was the STOPPER'S OWN: any record for the target used to discharge
@@ -1883,6 +1890,11 @@ F3_SUB=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
 expect_eq "a subagent's stop and the orchestrator's reach the same verdict" "$F3_OST" "$F3_SST"
 expect_eq "…and it is the same line, word for word" "$F3_ORCH" "$F3_SUB"
 expect_eq "…which is the refusal this target's own state earns" "2" "$F3_OST"
+# Two deadline refusals are also the same line, word for word, and exit 2 (T80): the reason
+# is what proves both actors' stops were judged.
+expect_contains "…and its reason is the target's state, for both actors" \
+  "it is still working, nothing delivered" "$F3_ORCH"
+expect_absent "…not the guard's deadline" "did not finish in" "$F3_ORCH"
 
 # The field NAMES themselves, stated as the agreement they are — so a rename
 # breaks this suite with a legible reason rather than turning a wall inert.
@@ -6988,10 +7000,17 @@ ra2_code_hits() {  # <file> <extended regex> -> matching lines, whole-line comme
   LC_ALL=C grep -nE -- "$2" "$1" 2>/dev/null | LC_ALL=C grep -v ':[[:space:]]*#' | wc -l | tr -d ' '
 }
 RA2_BUILT_ROW='roster-state/[^|]*\|status=[a-z]+\|session='
+# A CALL, NOT A MENTION (wave-28 T80). Since T70 the hook's "the launch row did not build"
+# refusal names the function in its prose (`Reason:  roster_row (payload/…) refused …`), and a
+# bare `roster_row ` counted that sentence as a second call site. A call is the name followed
+# by an argument; the prose has the name followed by `(`.
+RA2_CALL='roster_row[[:space:]]+[^([:space:]]'
 RA2_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 RA2_PK="$BIONIC_HOOKS_DIR/session-poker.sh"
 expect_eq "dispatch-preflight builds its row by calling roster_row, and holds no row literal" \
-  "1 0" "$(ra2_code_hits "$RA2_DP" 'roster_row ') $(ra2_code_hits "$RA2_DP" "$RA2_BUILT_ROW")"
+  "1 0" "$(ra2_code_hits "$RA2_DP" "$RA2_CALL") $(ra2_code_hits "$RA2_DP" "$RA2_BUILT_ROW")"
+expect_eq "…and the refusal that names roster_row in prose is a mention, not a call" \
+  "1 0" "$(ra2_code_hits "$RA2_DP" 'Reason:  roster_row \(') $(ra2_code_hits "$RA2_DP" "Reason:  $RA2_CALL")"
 # THE POKER CALLS THE BUILDER TWICE, AND ONE BUILDER IS STILL ONE SHAPE (re-authored at
 # epic-23 wave-16, REQ-1 AC-1.1's adopt half). `adopt_write_row` passes the new trailing
 # `re_executes=` field to `roster_row` and, for as long as the library's key table does not
@@ -6999,7 +7018,7 @@ expect_eq "dispatch-preflight builds its row by calling roster_row, and holds no
 # ONE builder. What this row exists to hold is that no hook hand-writes a row: that is the
 # second number, and it stays 0. A call count of exactly one was never the property; a
 # LITERAL is, so the reading is "at least one call, and no literal".
-RA2_PK_CALLS="$(ra2_code_hits "$RA2_PK" 'roster_row ')"
+RA2_PK_CALLS="$(ra2_code_hits "$RA2_PK" "$RA2_CALL")"
 expect_eq "session-poker's adopt holds no row literal — the shape is the library's" \
   "0" "$(ra2_code_hits "$RA2_PK" "$RA2_BUILT_ROW")"
 if [ "${RA2_PK_CALLS:-0}" -ge 1 ] 2>/dev/null; then
