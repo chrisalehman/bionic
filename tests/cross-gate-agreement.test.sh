@@ -6988,10 +6988,17 @@ ra2_code_hits() {  # <file> <extended regex> -> matching lines, whole-line comme
   LC_ALL=C grep -nE -- "$2" "$1" 2>/dev/null | LC_ALL=C grep -v ':[[:space:]]*#' | wc -l | tr -d ' '
 }
 RA2_BUILT_ROW='roster-state/[^|]*\|status=[a-z]+\|session='
+# A CALL, NOT A MENTION (wave-28 T80). Since T70 the hook's "the launch row did not build"
+# refusal names the function in its prose (`Reason:  roster_row (payload/…) refused …`), and a
+# bare `roster_row ` counted that sentence as a second call site. A call is the name followed
+# by an argument; the prose has the name followed by `(`.
+RA2_CALL='roster_row[[:space:]]+[^([:space:]]'
 RA2_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 RA2_PK="$BIONIC_HOOKS_DIR/session-poker.sh"
 expect_eq "dispatch-preflight builds its row by calling roster_row, and holds no row literal" \
-  "1 0" "$(ra2_code_hits "$RA2_DP" 'roster_row ') $(ra2_code_hits "$RA2_DP" "$RA2_BUILT_ROW")"
+  "1 0" "$(ra2_code_hits "$RA2_DP" "$RA2_CALL") $(ra2_code_hits "$RA2_DP" "$RA2_BUILT_ROW")"
+expect_eq "…and the refusal that names roster_row in prose is a mention, not a call" \
+  "1 0" "$(ra2_code_hits "$RA2_DP" 'Reason:  roster_row \(') $(ra2_code_hits "$RA2_DP" "Reason:  $RA2_CALL")"
 # THE POKER CALLS THE BUILDER TWICE, AND ONE BUILDER IS STILL ONE SHAPE (re-authored at
 # epic-23 wave-16, REQ-1 AC-1.1's adopt half). `adopt_write_row` passes the new trailing
 # `re_executes=` field to `roster_row` and, for as long as the library's key table does not
@@ -6999,7 +7006,7 @@ expect_eq "dispatch-preflight builds its row by calling roster_row, and holds no
 # ONE builder. What this row exists to hold is that no hook hand-writes a row: that is the
 # second number, and it stays 0. A call count of exactly one was never the property; a
 # LITERAL is, so the reading is "at least one call, and no literal".
-RA2_PK_CALLS="$(ra2_code_hits "$RA2_PK" 'roster_row ')"
+RA2_PK_CALLS="$(ra2_code_hits "$RA2_PK" "$RA2_CALL")"
 expect_eq "session-poker's adopt holds no row literal — the shape is the library's" \
   "0" "$(ra2_code_hits "$RA2_PK" "$RA2_BUILT_ROW")"
 if [ "${RA2_PK_CALLS:-0}" -ge 1 ] 2>/dev/null; then
