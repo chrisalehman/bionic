@@ -1,0 +1,6 @@
+question: adversarial
+result: fail
+token: Known limit
+names: suite_verdict
+finding-file: bin/run-suite.sh | lib/verdict.sh
+finding-rating: S1 on | S2 on
