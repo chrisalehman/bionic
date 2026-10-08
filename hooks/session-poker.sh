@@ -32,6 +32,9 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its group, then KILL (signals, may write its end)
+#     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -458,6 +461,9 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row"
+  die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
+  die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end"
+  die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
@@ -835,6 +841,38 @@ case "$VERB" in
         *) [ -z "$LR_ARG" ] || usage "landing-report takes one flag, --rows, and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
+    ;;
+  # THE RUN VERBS (wave-30 T12; D6, D7d). `wait` and `stop-run` take ONE operand: a roster row's name,
+  # a run id (`run=` as the shim printed it), or a run's log path. `wait` takes `--for <seconds>`, a
+  # bound on this call (75 when it runs out, the run untouched); `stop-run` takes `--report-only`, the
+  # promise that word makes on adopt and sweep. `regression-runs` takes `--write` only.
+  wait)
+    WT_ARG=""; WT_FOR=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --for) [ $# -ge 2 ] || usage "wait --for takes a number of seconds."; WT_FOR="$2"; shift 2 ;;
+        -*) usage "wait takes one name and at most --for <seconds>." ;;
+        *) [ -z "$WT_ARG" ] || usage "wait takes one name."; WT_ARG="$1"; shift ;;
+      esac
+    done
+    [ -n "$WT_ARG" ] || usage "wait takes the name of a roster row (or a run id) whose run to wait on."
+    case "$WT_FOR" in '') : ;; *[!0-9]*) usage "wait --for takes whole seconds." ;; esac
+    ;;
+  stop-run)
+    SR_ARG=""; SR_REPORT_ONLY=no
+    for _sr_a in "$@"; do
+      case "$_sr_a" in
+        --report-only) SR_REPORT_ONLY=yes ;;
+        -*) usage "stop-run takes one name and at most --report-only." ;;
+        *) [ -z "$SR_ARG" ] || usage "stop-run takes one name."; SR_ARG="$_sr_a" ;;
+      esac
+    done
+    [ -n "$SR_ARG" ] || usage "stop-run takes the name of a roster row (or a run id) whose run to stop."
+    ;;
+  regression-runs)
+    RR_WRITE=no
+    if [ $# -eq 1 ] && [ "$1" = --write ]; then RR_WRITE=yes
+    elif [ $# -ne 0 ]; then usage "regression-runs takes at most one flag: --write."; fi
     ;;
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). A subcommand, its operands, and at most one
   # plan last, which names the run as landing-report's does; without it, the session's bound run.
@@ -2117,6 +2155,166 @@ tick_plan_memoised() {
 # THIS SESSION'S OWN ROWS ARE NEVER ADOPTED. They are not lost — the running session still
 # holds them — and printing them would invite the successor to re-ledger work it is already
 # tracking, which is the double-counting the roster exists to prevent.
+
+# ---------------------------------------------------------------- the runs (wave-30 T12; D6, D7d)
+#
+# A RUN IS AN OBJECT, MADE AT THE SHIM (payload/scripts/booked.sh --detach, wave-30 T8). Its files
+# sit side by side under `<project>/.bionic/tmp/runs`: `<id>.log` (its output, last line `rc=<n>`),
+# `<id>.log.pid` (the detached shim's pid, the session leader of everything the run started),
+# `<id>.log.rc` (its code, written last, by the detached side alone) and `<id>.log.progress.tsv`
+# (a line per suite and per section as it opens). With --agent naming a row, the row carries the
+# record too: `run_pid= run_log= run_head= run_cmd= run_started_at=` at the start, `run_rc=
+# run_ended_at=` at the end (lib/roster.sh `roster_mark_run`). These readers serve `wait`,
+# `stop-run`, `adopt`, the tick's RUNNING lines and `regression-runs`, one reading for all five.
+#
+# THREE STATES, AND NO FOURTH. FINISHED: the row carries `run_rc`, or `<log>.rc` holds a code.
+# RUNNING: neither, and the pid is alive AND is still that run's detached shim (`ps` names
+# booked.sh with `--run-log <log>`; a pid the system gave to someone else is not the run). LOST:
+# neither, and the pid is dead or is no longer the run's — reported with the time its log was
+# last written. A LOST run is never called a timeout: nothing here knows a limit was reached.
+RUN_LOG=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
+RUN_STATE=""; RUN_RC=""; RUN_ID=""; RUN_LAST_WRITTEN=""; RUN_PROGRESS=""; RUN_ELAPSED=""
+
+run_live() {  # <pid> <log> -> 0 when <pid> is alive and is still <log>'s detached shim
+  local c
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  c="$(ps -ww -o command= -p "$1" 2>/dev/null)" || return 1
+  case "$c" in *booked.sh*"--run-log $2"*) return 0 ;; esac
+  return 1
+}
+
+# run_row_of <roster file> <name> -> the name's latest row on that roster carrying a run record
+run_row_of() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  awk -v k="|name=$2|" 'index($0 "|", k) && index($0, "|run_log=") { l = $0 } END { if (l != "") print l }' "$1" 2>/dev/null
+}
+
+# run_load_row <row> <roster file> -> RUN_* from a roster row's run record; 1 when it carries none
+run_load_row() {
+  RUN_LOG="$(line_field "$1" run_log)"
+  [ -n "$RUN_LOG" ] || return 1
+  RUN_PID="$(line_field "$1" run_pid)"
+  RUN_NAME="$(line_field "$1" name)"
+  RUN_ROW_RC="$(line_field "$1" run_rc)"
+  RUN_STARTED="$(line_field "$1" run_started_at)"
+  RUN_ROSTER="$2"
+  return 0
+}
+
+# run_find <project root> <name | run id | log path> -> RUN_* for the run that operand names; 1 when
+# none. A NAME is looked up on every roster of the project (this session's and a predecessor's: a
+# run outlives the session that started it), and the newest start wins. A RUN ID (the `run=` the
+# shim printed, `<agent>-<suites>[-<n>]`) or a log path is read off the runs directory, for a run no
+# row records (the main thread's).
+run_find() {
+  local repo="$1" arg="$2" rf row best="" bestrf="" s bs=""
+  RUN_LOG=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
+  [ -n "$arg" ] || return 1
+  case "$arg" in
+    /*.log)
+      [ -f "$arg" ] || return 1
+      RUN_LOG="$arg"; RUN_NAME="$(basename "$arg" .log)" ;;
+    *)
+      for rf in "$repo/.bionic/tmp"/roster-*.state; do
+        row="$(run_row_of "$rf" "$arg")" || continue
+        [ -n "$row" ] || continue
+        s="$(line_field "$row" run_started_at)"
+        if [ -z "$best" ] || [ "$s" \> "$bs" ]; then best="$row"; bestrf="$rf"; bs="$s"; fi
+      done
+      if [ -n "$best" ]; then
+        run_load_row "$best" "$bestrf" || return 1
+      else
+        case "$arg" in */*|.*) return 1 ;; esac
+        [ -f "$repo/.bionic/tmp/runs/$arg.log" ] || return 1
+        RUN_LOG="$repo/.bionic/tmp/runs/$arg.log"; RUN_NAME="$arg"
+      fi ;;
+  esac
+  [ -n "$RUN_PID" ] || { read -r RUN_PID < "$RUN_LOG.pid"; } 2>/dev/null
+  return 0
+}
+
+# run_read -> RUN_STATE (RUNNING | FINISHED | LOST), RUN_RC, RUN_ID, RUN_LAST_WRITTEN, RUN_PROGRESS
+# (the progress file's last line, tabs as spaces) and RUN_ELAPSED (seconds since the start: the
+# row's run_started_at, else the pid file's birth), for the run run_find loaded.
+run_read() {
+  local rc="" t0=""
+  RUN_ID="${RUN_LOG##*/}"; RUN_ID="${RUN_ID%.log}"
+  RUN_RC=""; RUN_LAST_WRITTEN=""; RUN_ELAPSED=""
+  RUN_PROGRESS="$(tail -n 1 "$RUN_LOG.progress.tsv" 2>/dev/null)"; RUN_PROGRESS="${RUN_PROGRESS//$'\t'/ }"
+  case "$RUN_ROW_RC" in ''|*[!0-9]*) { read -r rc < "$RUN_LOG.rc"; } 2>/dev/null ;; *) rc="$RUN_ROW_RC" ;; esac
+  case "$rc" in
+    ''|*[!0-9]*) : ;;
+    *) RUN_STATE=FINISHED; RUN_RC="$rc"; return 0 ;;
+  esac
+  if run_live "$RUN_PID" "$RUN_LOG"; then
+    RUN_STATE=RUNNING
+    [ -z "$RUN_STARTED" ] || t0="$(iso_epoch "$RUN_STARTED")"
+    [ -n "$t0" ] || t0="$(file_mtime "$RUN_LOG.pid")"
+    case "$t0" in ''|*[!0-9]*|0) RUN_ELAPSED="" ;; *) RUN_ELAPSED=$(( $(now_epoch) - t0 )) ;; esac
+    return 0
+  fi
+  RUN_STATE=LOST
+  RUN_LAST_WRITTEN="$(epoch_iso "$(file_mtime "$RUN_LOG")")"
+  [ -n "$RUN_LAST_WRITTEN" ] || RUN_LAST_WRITTEN=unknown
+  return 0
+}
+
+# run_state_words -> the state as adopt and the tick print it, after run_read
+run_state_words() {
+  case "$RUN_STATE" in
+    RUNNING)  printf 'RUNNING pid=%s elapsed=%ss run=%s' "$RUN_PID" "${RUN_ELAPSED:-?}" "$RUN_ID" ;;
+    FINISHED) printf 'FINISHED rc=%s run=%s' "$RUN_RC" "$RUN_ID" ;;
+    *)        printf 'LOST last-written=%s run=%s' "$RUN_LAST_WRITTEN" "$RUN_ID" ;;
+  esac
+}
+
+# run_groups <pid> -> the process groups of <pid> and every process below it, one per line. The
+# detached shim leads its own session and group, and runs its command in a group of its own (set -m),
+# so stopping the run's group alone could leave the command running.
+run_groups() {
+  ps -ax -o pid= -o ppid= -o pgid= 2>/dev/null | awk -v root="$1" '
+    { pp[$1] = $2; pg[$1] = $3; n[NR] = $1 }
+    END {
+      keep[root] = 1; changed = 1
+      while (changed) { changed = 0
+        for (i in n) { p = n[i]; if (!(p in keep) && (pp[p] in keep)) { keep[p] = 1; changed = 1 } } }
+      for (p in keep) if (p in pg) g[pg[p]] = 1
+      for (x in g) print x
+    }'
+}
+
+# regression_runs_count <project root> -> the number of full-runner runs the project's rosters
+# record as ended (Δ6d; REQ-4 AC-4.6). One run is one `run_log`, however many rows copy it. A run
+# is the FULL runner when the shim named its suites `run.sh` (the wall's reading of `tests/run.sh`
+# with no --only), or named none and its command runs tests/run.sh; and never when the command
+# carries `--only` or `--dry-run`.
+regression_runs_count() {
+  local rf files=""
+  for rf in "$1/.bionic/tmp"/roster-*.state; do
+    [ -f "$rf" ] && [ ! -L "$rf" ] || continue
+    files="${files}${rf}
+"
+  done
+  [ -n "$files" ] || { printf '0'; return 0; }
+  printf '%s' "$files" | while IFS= read -r rf; do [ -n "$rf" ] && cat "$rf"; done 2>/dev/null | awk -F'|' '
+    {
+      lg = ""; rc = ""; cmd = ""
+      for (i = 1; i <= NF; i++) {
+        if (index($i, "run_log=") == 1) lg = substr($i, 9)
+        else if (index($i, "run_rc=") == 1) rc = substr($i, 8)
+        else if (index($i, "run_cmd=") == 1) cmd = substr($i, 9)
+      }
+      if (lg == "" || rc !~ /^[0-9]+$/) next
+      if (cmd ~ /--only/ || cmd ~ /--dry-run/) next
+      id = lg; sub(/^.*\//, "", id); sub(/\.log$/, "", id); sub(/-[0-9]+$/, "", id)
+      full = 0
+      if (id ~ /-run\.sh$/) full = 1
+      else if (id ~ /-cmd$/ && cmd ~ /(^|[ \/;&|(])tests\/run\.sh([ ;&|)]|$)/) full = 1
+      if (full) seen[lg] = 1
+    }
+    END { n = 0; for (k in seen) n++; printf "%d", n }'
+}
 
 # `<config>/projects/<slug>/<sid>/subagents` — the same walk session_transcript does, one
 # level deeper, and keyed on the DIRECTORY rather than the session's own `.jsonl`: an old
@@ -4928,6 +5126,15 @@ case "$VERB" in
           printf '                dispatching, or the same thing happens again.\n'
         fi
         printf '  launched    : %s\n' "${RLAUNCH:-unknown}"
+        # THE ROW'S RUN (wave-30 T12; REQ-3 AC-3.5). A row whose agent started a detached suite run
+        # (booked.sh --detach) carries its record; the run outlives the session that started it, so
+        # the successor is told what it is doing: RUNNING with its pid and age, FINISHED with its
+        # code, or LOST with the time its log was last written. `wait <name>` waits on it, and
+        # `stop-run <name>` stops it. A row with no run record prints no line.
+        if run_load_row "$(run_row_of "$ADOPT_RF" "$RNAME")" "$ADOPT_RF"; then
+          run_read
+          printf '  run         : %s\n' "$(run_state_words)"
+        fi
         # THE BUDGET, BESIDE THE LAUNCH (T6, REQ-5, AC-5.1). A resumed orchestrator needs the
         # row's allowance to widen it, and a row can carry only declared RUNS: its suites cell
         # is then empty, so the line names both cells rather than reading as no budget.
@@ -7762,6 +7969,137 @@ RC_TAGS
     exit "$LS_RC"
     ;;
 
+  # ---------- wait: THE RE-ENTRANT WAIT ON A DETACHED RUN (wave-30 T12; D6; AC-3.2, AC-3.3, AC-3.8) ----------
+  #
+  # The attach half of `booked.sh --detach`, by name, for a caller that is gone (a /clear, a stopped
+  # agent, a call the harness moved to the background). It reads the run's record and never starts
+  # anything, so two waits on one run are one run. It polls every BIONIC_RUN_POLL seconds (1 unless
+  # set), never one long call, and prints a RUNNING line with the run's last progress line on the
+  # first poll, whenever that line changes, and at least every 30 seconds. It exits with the run's
+  # code once the run has one; 70 when the run is LOST (its pid gone, no end written: a kill, never a
+  # timeout); 75 when `--for` ran out first, the run untouched. No session key is needed.
+  wait)
+    REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
+    if ! run_find "$REPO_REAL" "$WT_ARG"; then
+      die "wait — no run named $WT_ARG: no roster row of this project carries a run for it, and there is no $REPO_REAL/.bionic/tmp/runs/$WT_ARG.log"
+      exit 2
+    fi
+    WT_POLL="${BIONIC_RUN_POLL:-1}"
+    case "$WT_POLL" in ''|*[!0-9.]*|.|*.*.*) WT_POLL=1 ;; esac
+    WT_T0="$(now_epoch)"; WT_SAID=""; WT_SAID_AT=0
+    while :; do
+      run_read
+      case "$RUN_STATE" in
+        FINISHED) say "FINISHED $RUN_NAME run=$RUN_ID rc=$RUN_RC log=$RUN_LOG"; exit "$RUN_RC" ;;
+        LOST)     say "LOST $RUN_NAME run=$RUN_ID last-written=$RUN_LAST_WRITTEN — its pid is gone and it wrote no end; log $RUN_LOG"; exit 70 ;;
+      esac
+      WT_NOW="$(now_epoch)"
+      if [ "$WT_SAID_AT" = 0 ] || [ "$RUN_PROGRESS" != "$WT_SAID" ] || [ $((WT_NOW - WT_SAID_AT)) -ge 30 ]; then
+        say "RUNNING $RUN_NAME run=$RUN_ID pid=$RUN_PID elapsed=${RUN_ELAPSED:-?}s progress: ${RUN_PROGRESS:-none yet}"
+        WT_SAID="$RUN_PROGRESS"; WT_SAID_AT="$WT_NOW"
+      fi
+      if [ -n "$WT_FOR" ] && [ $((WT_NOW - WT_T0)) -ge "$WT_FOR" ]; then
+        say "still RUNNING after ${WT_FOR}s — the run goes on; wait again: bash ${POKER_WORD} wait $RUN_NAME"
+        exit 75
+      fi
+      sleep "$WT_POLL"
+    done
+    ;;
+
+  # ---------- stop-run: STOPPING A DETACHED RUN ON PURPOSE (wave-30 T12; D6) ----------
+  #
+  # A detached run is in nobody's process group, so TaskStop and a killed caller cannot reach it; this
+  # verb can. It sends TERM to the run's group (the shim's own traps then stop its command, end its
+  # place at the gate, stamp and write its end), waits up to five seconds, and KILLs every process
+  # group at or below the run's pid that is still there. When the run wrote no end (a KILL runs no
+  # trap) it records one: `rc=137` on the log, `<log>.rc`, and the roster row's `run_rc=` through
+  # `roster_mark_run`, so the run reads FINISHED rc=137, a stop, and not LOST. A run already ended or
+  # LOST is reported and left alone. `--report-only` sends nothing.
+  stop-run)
+    REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
+    if ! run_find "$REPO_REAL" "$SR_ARG"; then
+      die "stop-run — no run named $SR_ARG: no roster row of this project carries a run for it, and there is no $REPO_REAL/.bionic/tmp/runs/$SR_ARG.log"
+      exit 2
+    fi
+    run_read
+    case "$RUN_STATE" in
+      FINISHED) say "stop-run $RUN_NAME run=$RUN_ID — FINISHED rc=$RUN_RC; nothing to stop"; exit 0 ;;
+      LOST)     say "stop-run $RUN_NAME run=$RUN_ID — LOST last-written=$RUN_LAST_WRITTEN; no process of it is left to stop"; exit 0 ;;
+    esac
+    if [ "$SR_REPORT_ONLY" = yes ]; then
+      say "stop-run $RUN_NAME run=$RUN_ID pid=$RUN_PID — RUNNING; would TERM its process group, then KILL every group below it still alive after 5 s (report-only: nothing was sent)"
+      exit 0
+    fi
+    # NEVER THIS CALL'S OWN GROUP: whoever runs the verb (a test, close-out, the operator's shell) is
+    # not the run, whatever a pid table says about who started whom.
+    SR_SELF="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
+    SR_GROUPS="$(run_groups "$RUN_PID")"
+    kill -TERM -- "-$RUN_PID" 2>/dev/null || kill -TERM "$RUN_PID" 2>/dev/null
+    _sr_i=0
+    while [ "$_sr_i" -lt 50 ] && run_live "$RUN_PID" "$RUN_LOG"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
+    SR_HOW="TERM"
+    if run_live "$RUN_PID" "$RUN_LOG"; then
+      SR_GROUPS="$SR_GROUPS
+$(run_groups "$RUN_PID")"
+      for _sr_g in $(printf '%s\n' "$SR_GROUPS" | sort -u); do
+        case "$_sr_g" in ''|0|1|*[!0-9]*) continue ;; esac
+        [ "$_sr_g" != "$SR_SELF" ] || continue
+        kill -KILL -- "-$_sr_g" 2>/dev/null
+      done
+      kill -KILL "$RUN_PID" 2>/dev/null
+      SR_HOW="TERM, then KILL"
+    fi
+    _sr_i=0
+    while [ "$_sr_i" -lt 30 ] && [ ! -s "$RUN_LOG.rc" ]; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
+    SR_RC=""; { read -r SR_RC < "$RUN_LOG.rc"; } 2>/dev/null
+    case "$SR_RC" in
+      ''|*[!0-9]*)
+        [ -z "$(tail -c 1 "$RUN_LOG" 2>/dev/null)" ] || printf '\n' >> "$RUN_LOG"
+        printf 'rc=137\n' >> "$RUN_LOG"
+        printf '137\n' > "$RUN_LOG.rc"
+        if [ -n "$RUN_ROSTER" ] && [ -z "$RUN_ROW_RC" ]; then
+          roster_mark_run "$RUN_ROSTER" "$RUN_NAME" "$RUN_LOG" run_rc=137 "run_ended_at=$(iso_now)" 2>/dev/null || :
+        fi
+        say "stop-run $RUN_NAME run=$RUN_ID pid=$RUN_PID — stopped ($SR_HOW); it wrote no end, so rc=137 was recorded for it" ;;
+      *)
+        say "stop-run $RUN_NAME run=$RUN_ID pid=$RUN_PID — stopped ($SR_HOW); the run wrote its own end, rc=$SR_RC" ;;
+    esac
+    exit 0
+    ;;
+
+  # ---------- regression-runs: THE FULL RUNS, COUNTED FROM THE RECORDS (wave-30 T12; D7d, Δ6d; AC-4.6) ----------
+  #
+  # The count is `regression_runs_count`'s: every ended run on this project's rosters whose command
+  # is the full runner. Bare, it prints `poker: regression-runs=<n>` and needs no session. `--write`
+  # puts the count in the bound plan's `regression-runs:` header through the plan-verb transaction,
+  # and only when the plan carries the field and holds another value: a hand-typed number does not
+  # survive it. The tick runs `--write` when its own reading of the header differs from the count,
+  # so the value is the landing's, never a hand's. The one change is a number in one header line, so
+  # the copy is judged here and needs no dry commit.
+  regression-runs)
+    REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
+    RR_N="$(regression_runs_count "$REPO_REAL")"
+    if [ "$RR_WRITE" = no ]; then say "regression-runs=$RR_N"; exit 0; fi
+    plan_verb_open regression-runs
+    RR_HAVE="$(plan_frontmatter_get "$PV_PLAN" regression-runs)"
+    [ -n "$RR_HAVE" ] && [ "$RR_HAVE" != "$RR_N" ] || exit 0
+    if ! RR_N="$RR_N" awk '
+      NR == 1 && $0 == "---" { f = 1; print; next }
+      f && $0 == "---" { f = 0; print; next }
+      f && !done && /^[[:space:]]*regression-runs[[:space:]]*:/ { print "regression-runs: " ENVIRON["RR_N"]; done = 1; next }
+      { print }
+      END { if (!done) exit 1 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN has no regression-runs: line in its leading frontmatter; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap regression-runs "regression-runs: $RR_N" judged
+    say "regression-runs — the plan header read $RR_HAVE and the run records count $RR_N: $RR_N written to $PV_PLAN"
+    exit 0
+    ;;
+
   tick)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -7830,7 +8168,7 @@ RC_TAGS
     [ -z "$TICK_BUF" ] || _UNITS_MEMO_FLOOR="$TICK_BUF.floor"
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
     TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""
-    TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""; TICK_LANDINGS=""
+    TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""; TICK_LANDINGS=""; TICK_RUNS_LINES=""; TICK_RUNS_KEY=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
     TICK_REARM=""
@@ -7853,6 +8191,7 @@ RC_TAGS
         # and never after. A landing moves no decision (RP4), so it never makes a tick changed: the line shows on the
         # ticks that print in full for another reason, and an `unchanged` tick stays the one line the Patrol ends on.
         [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"
+        [ -z "${TICK_RUNS_LINES:-}" ] || printf '%s\n' "$TICK_RUNS_LINES"
         cat "$TICK_BUF" 2>/dev/null
         # A START IS TOLD BY THE TICK THAT PRINTED ITS LINE (wave-27 T37; review pass 36 S1).
         [ -z "${US_TOLD_PENDING:-}" ] || printf '%s' "$US_TOLD_PENDING" >> "$ROSTER_FILE" 2>/dev/null
@@ -7941,6 +8280,8 @@ RC_TAGS
             "${NOTIFY_ROWS:-}" "${SCHED_FILL:-}" "${LEASE_TREES:-}"
           printf 'room=%s|current=%s\n' "${SCHED_GATE_ROOM:-}" "$cur"
           [ -z "$TICK_GATE_KEYS" ] || printf 'gate=%s\n' "$TICK_GATE_KEYS"
+          # THE RUNS (wave-30 T12): the full-run count and each live run of this roster, by name and id.
+          [ -z "${TICK_RUNS_KEY:-}" ] || printf '%s\n' "$TICK_RUNS_KEY"
           printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
             $1 == "landing-verdict/v1" {
               n = ""; st = ""; ak = ""
@@ -8089,6 +8430,38 @@ RC_TAGS
     # with its logs; the event line then goes into `.bionic/tmp/line-told-<sid>.state` and is never
     # printed again. A note enters the decision's hash, so the tick that tells one prints in full.
     resolve_run "$REPO_REAL" "$SESSION_ID"
+
+    # ---------- THE RUNS: regression-runs AND EVERY LIVE RUN OF THIS ROSTER (wave-30 T12; D6, D7d) ----------
+    #
+    # `poker: regression-runs=<n>` is the count of full-runner runs the project's rosters record
+    # (REQ-4 AC-4.6, `regression_runs_count`), and a `poker: RUNNING <name> run=<id> pid=<pid>
+    # elapsed=<s>s progress: <line>` line names each row of this roster whose detached run is alive,
+    # with the run's last progress line (AC-3.8). Both print above the buffer on every tick that
+    # prints in full, as the landing line does, and both enter the decision's hash (TICK_RUNS_KEY): a
+    # new full run, or a run starting or ending, is news, so the tick after it prints in full, and an
+    # unchanged tick stays the one line it is (AC-4.9 of wave-24). THE HEADER: when the bound plan's
+    # `regression-runs:` holds another number, the tick runs `regression-runs --write`, the
+    # transaction, in a child as it runs launch-sync: a hand-typed value does not outlive the tick.
+    TICK_RR="$(regression_runs_count "$REPO_REAL")"
+    TICK_RUNS_LINES="poker: regression-runs=$TICK_RR"
+    TICK_RUNS_KEY="regression-runs=$TICK_RR"
+    if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
+      for TR_NAME in $(awk -F'|' '/[|]run_log=/ { for (i = 1; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6) }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
+        run_load_row "$(run_row_of "$ROSTER_FILE" "$TR_NAME")" "$ROSTER_FILE" || continue
+        run_read
+        [ "$RUN_STATE" = RUNNING ] || continue
+        TICK_RUNS_LINES="$TICK_RUNS_LINES
+poker: RUNNING $TR_NAME run=$RUN_ID pid=$RUN_PID elapsed=${RUN_ELAPSED:-?}s progress: ${RUN_PROGRESS:-none yet}"
+        TICK_RUNS_KEY="$TICK_RUNS_KEY
+RUNNING $TR_NAME $RUN_ID"
+      done
+    fi
+    if [ "$POKER_RUN_OPEN" = yes ] && [ -f "$POKER_RUN_PLAN" ]; then
+      TICK_RR_HAVE="$(plan_frontmatter_get "$POKER_RUN_PLAN" regression-runs)"
+      if [ -n "$TICK_RR_HAVE" ] && [ "$TICK_RR_HAVE" != "$TICK_RR" ]; then
+        ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" regression-runs --write 2>&1 ) || :
+      fi
+    fi
     LT_TOLD="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state"
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \

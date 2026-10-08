@@ -256,7 +256,7 @@ run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
   return 0
 }
 
-# expect_wrap_only <label> <original command> <the shim options after --shell/--quiet/--max-wait, as a regex> — stdout is the booking wrap ALONE (wave-26 T7,
+# expect_wrap_only <label> <original command> <the shim options after --shell/--quiet/--detach, as a regex> — stdout is the booking wrap ALONE (wave-26 T7,
 # D8). An allowed suite command through hooks/bash-walls.sh now comes back rewritten into
 # payload/scripts/booked.sh, so a G9 cell that read "silent" reads exactly this instead: no
 # deny and no advisory (the object holds nothing but the event name and updatedInput), and
@@ -269,7 +269,7 @@ expect_wrap_only() {
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1 …the updated command runs the booking shim" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)? --max-wait [0-9]+$3 -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)? --detach$3 -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1 …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
 }
