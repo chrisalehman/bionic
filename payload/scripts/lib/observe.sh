@@ -45,6 +45,19 @@
 # The roster schema this library reads. A row it cannot read is a row it does not guess at.
 OBSERVE_ROSTER_VERSION="v1"
 
+# roster.sh, THE SOFT SOURCE (wave-28 T80) — the idiom lib/refuse.sh uses for lib/width.sh. The
+# roster walk below reads rows with roster.sh's `_roster_kv`, and stop-check.sh does not name
+# roster.sh in its BIONIC_LIB_WANT. roster.sh defines constants and functions and prints nothing.
+if [ -z "${_ROSTER_OPEN_AWK:-}" ]; then
+  case "${BASH_SOURCE[0]}" in
+    */*) _obs_self_dir="${BASH_SOURCE[0]%/*}" ;;
+    *)   _obs_self_dir="." ;;
+  esac
+  # shellcheck source=/dev/null
+  . "$(cd "$_obs_self_dir" && pwd -P)/roster.sh"
+  unset _obs_self_dir
+fi
+
 # The machine line's schema token, printed by `observe_machine_line`. Versioned so a reader
 # can refuse a shape it does not read rather than guess at it.
 OBSERVE_MACHINE_SCHEMA="stop-check-observation/v1"
@@ -206,7 +219,7 @@ observe_abs_path() {  # <path, as the contract spells it> -> absolute
 # about a launch nothing has observed (Step-6 review C-2).
 OBS_ROW_BY_ID=""; OBS_ROW_BY_NAME=""; OBS_ROW_WITH_ID=""
 observe_roster_walk() {  # <key>
-  local key="$1" rline rid rname f="$OBSERVE_ROSTER"
+  local key="$1" rows f="$OBSERVE_ROSTER"
   OBS_ROW_BY_ID=""; OBS_ROW_BY_NAME=""; OBS_ROW_WITH_ID=""
   [ -n "$f" ] || return 0
   [ -f "$f" ] || return 0
@@ -214,19 +227,25 @@ observe_roster_walk() {  # <key>
   # Not read, rather than read and failing: an unopenable file would put the shell's own
   # "Permission denied" on a gate's stderr, where every byte is a refusal a reader parses.
   [ -r "$f" ] || return 0
-  while IFS= read -r rline; do
-    case "$rline" in '#'*|'') continue ;; esac
-    case "$rline" in "roster-state/${OBSERVE_ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    rid=$(line_field "$rline" agent_id)
-    rname=$(line_field "$rline" name)
-    case "$(line_field "$rline" status)" in
-      confirmed|identified)
-        [ -n "$rid" ] && [ "$rid" = "$key" ] && OBS_ROW_BY_ID="$rline"
-        [ -n "$rid" ] && [ -n "$rname" ] && [ "$rname" = "$key" ] && OBS_ROW_WITH_ID="$rline"
-        ;;
-    esac
-    [ -n "$rname" ] && [ "$rname" = "$key" ] && OBS_ROW_BY_NAME="$rline"
-  done < "$f"
+  # ONE AWK PASS, NOT THREE FORKS A ROW (wave-28 T80). The roster is append-only and unbounded;
+  # reading each row's three fields through `$(line_field …)` cost 3 s over 262 rows, and the stop
+  # guard, which walks twice through here, ran past its own 7 s deadline. `_roster_kv` gives the
+  # FIRST value of a key, as `line_field` did. The three rows come back one per line (a row
+  # holds no newline): by id, by name, by name with an id. hooks/stop-guard.sh's `roster_walk`
+  # is the same pass over the same rule, kept in the hook so a copied hook carries it.
+  rows="$(OBS_WK="$key" OBS_WV="roster-state/${OBSERVE_ROSTER_VERSION}|" awk "$_ROSTER_OPEN_AWK"'
+    index($0, ENVIRON["OBS_WV"]) != 1 { next }
+    {
+      k = ENVIRON["OBS_WK"]
+      id = _roster_kv($0, "agent_id"); nm = _roster_kv($0, "name"); st = _roster_kv($0, "status")
+      if (st == "confirmed" || st == "identified") {
+        if (id != "" && id == k) by_id = $0
+        if (id != "" && nm != "" && nm == k) with_id = $0
+      }
+      if (nm != "" && nm == k) by_name = $0
+    }
+    END { print by_id; print by_name; print with_id }' "$f" 2>/dev/null)"
+  { IFS= read -r OBS_ROW_BY_ID; IFS= read -r OBS_ROW_BY_NAME; IFS= read -r OBS_ROW_WITH_ID; } <<< "$rows"
   return 0
 }
 

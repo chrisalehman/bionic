@@ -495,28 +495,34 @@ ROSTER_UNREADABLE=""
 # reading both facts off it: preferring the row WITH the id loses a contract recorded after
 # it, and preferring the last row loses the id.
 roster_walk() {  # <key-name>
-  local key="$1" rline rid rname
+  local key="$1" rows
   ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
   [ -f "$ROSTER_FILE" ] || return 0
   [ -L "$ROSTER_FILE" ] && return 0
   # Not read, rather than read and failing: an unopenable file would put the shell's own
   # "Permission denied" on the gate's stderr, where every byte is a refusal a reader parses.
   [ -r "$ROSTER_FILE" ] || return 0
-  while IFS= read -r rline; do
-    case "$rline" in '#'*|'') continue ;; esac
-    case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    rid=$(line_field "$rline" agent_id)
-    rname=$(line_field "$rline" name)
-    # `confirmed` or `identified`, never `intended` (Step-6 review C-2): the id on an
-    # unconfirmed row is a claim about a launch nothing has observed.
-    case "$(line_field "$rline" status)" in
-      confirmed|identified)
-        [ -n "$rid" ] && [ "$rid" = "$key" ] && ROW_BY_ID="$rline"
-        [ -n "$rid" ] && [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_WITH_ID="$rline"
-        ;;
-    esac
-    [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_BY_NAME="$rline"
-  done < "$ROSTER_FILE"
+  # ONE AWK PASS, NOT THREE FORKS A ROW (wave-28 T80). The roster is append-only and unbounded,
+  # and this walk used to read each row's three fields through `$(line_field …)`, a subshell and
+  # four processes apiece: 262 rows took 3 s, and with the observation's walk the guard ran past
+  # its own 7 s deadline and refused every stop of a long session for time. `_roster_kv` is
+  # roster.sh's by-key read and gives the FIRST value of a key, as `line_field` did. The three
+  # rows come back one per line (a row holds no newline): by id, by name, by name with an id.
+  # `confirmed` or `identified`, never `intended` (Step-6 review C-2): the id on an
+  # unconfirmed row is a claim about a launch nothing has observed.
+  rows="$(SG_WK="$key" SG_WV="roster-state/${ROSTER_VERSION}|" awk "$_ROSTER_OPEN_AWK"'
+    index($0, ENVIRON["SG_WV"]) != 1 { next }
+    {
+      k = ENVIRON["SG_WK"]
+      id = _roster_kv($0, "agent_id"); nm = _roster_kv($0, "name"); st = _roster_kv($0, "status")
+      if (st == "confirmed" || st == "identified") {
+        if (id != "" && id == k) by_id = $0
+        if (id != "" && nm != "" && nm == k) with_id = $0
+      }
+      if (nm != "" && nm == k) by_name = $0
+    }
+    END { print by_id; print by_name; print with_id }' "$ROSTER_FILE" 2>/dev/null)"
+  { IFS= read -r ROW_BY_ID; IFS= read -r ROW_BY_NAME; IFS= read -r ROW_WITH_ID; } <<< "$rows"
   return 0
 }
 roster_walk "$BASE"
