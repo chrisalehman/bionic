@@ -2087,4 +2087,45 @@ expect_eq "LAND-mut4 the doctored run still closes and fences the line (two fenc
   "$LAND_UMRC|$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLV/$CONT_REL" | wc -l | tr -d ' ')"
 rm -rf "$LAND_UMUT"
 
+
+# ============================================================
+section "§FLOOR-DECLARED (wave-28 T75; REQ-17 AC-17.1, D36): close-out proceeds on a declared floor's log"
+# ============================================================
+# A project with no tests/*.test.sh roster declares its floor (`floor: true`, a command that passes). The
+# floor fact plant_facts wrote is taken out, and the real verbs write it again from the declared floor's own
+# run: `floor-run` logs it, `proof-add floor` cites the log, `current 8` moves the plan on the facts, and
+# `close-out.sh run` delivers. The fixture's working head holds no tests/ directory (mk_fixture's shape).
+PFL="$(mk_fixture floor-declared)"
+FL_SID="closeout-floor-1"
+sed '/^proved: kind=floor /d' "$PFL/$PLAN_REL" > "$PFL/$PLAN_REL.n" && mv "$PFL/$PLAN_REL.n" "$PFL/$PLAN_REL"
+printf 'floor: true\n' >> "$PFL/.bionic/config.yaml"
+( in_fixture "$PFL" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFL" "$FL_SID" "$PFL/$PLAN_REL" )
+fl_poke() {  # <verb> [<arg>...] -> FL_RC, FL_OUT: the real poker verb, in the fixture, as this session
+  ( in_fixture "$PFL" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      CLAUDE_CODE_SESSION_ID="$FL_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) > "$SANDBOX/fl-poker" 2>&1
+  FL_RC=$?; FL_OUT="$(cat "$SANDBOX/fl-poker")"
+}
+FL_H="$(fixture_git "$PFL" rev-parse wave/01-fixture)"
+expect_eq "FL0 precondition: the plan carries no floor fact, and the working head no tests/ directory" "0|0" \
+  "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFL/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFL" ls-tree --name-only "$FL_H" tests/ | wc -l | tr -d ' ')"
+fl_poke floor-run
+expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 rc=0" \
+  "0|head=$FL_H dirty=0 rc=0" "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
+# THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
+# with the project root, as proof-add calls it, attests the declared log, and proof_add_line places the line.
+# proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
+# Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
+FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
+  h="$(proof_attested floor "$2/record/wave-01-fixture/floor-run-$3.log" "$4" "" "" "$5")" || { printf "%s" "$h"; exit 1; }
+  proof_add_line "$6" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/floor-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
+  _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
+expect_eq "FL2 the judge attests the declared floor's log at the working head, and the floor fact is written from it" "$FL_H|1" \
+  "$FL_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
+fl_poke current 8
+expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed -n 's/^current: //p' "$PFL/$PLAN_REL")"
+run_close "$PFL" run
+expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc 0), the plan closed" "0|1" \
+  "$CO_RC|$(run_open_rc "$PFL/$PLAN_REL")"
+
 finish

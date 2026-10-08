@@ -543,13 +543,17 @@ proof_head() {
   git -C "$wt" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null
 }
 
-# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] -> the 40-hex head the evidence attests, exit
-# 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
+# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] [<root>] -> the 40-hex head the evidence
+# attests, exit 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
 #   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
 #          prints before any suite, so the last run in the log is the one judged (T52). <sha>
 #          must be the checkout's HEAD and <n> 0; the runner's verdict after it must read
 #          `Gating: <n> passed, 0 failed`, outside any suite's captured output; and the run must
 #          be WHOLE: <n> passed plus the suites its `Void:` line lists equal the suites at <sha>.
+#          UNLESS THE PROJECT DECLARES ITS FLOOR (wave-28 T75; REQ-17, D36): with a <root> whose
+#          `.bionic/config.yaml` names `floor:` or `floor-attestation:`, the evidence is judged by
+#          `_proof_floor_declared` instead, and neither the verdict nor the roster is read. With
+#          neither key, or no <root>, this rule stands as it was.
 #   review a review: its first `reviewed: <a>..<b>` line. <b> must resolve to a commit that is
 #          the checkout's HEAD or an ancestor of it; the proof names that commit — a review of an
 #          older head is a true proof of that older head, and what landed since is unread.
@@ -569,9 +573,14 @@ proof_head() {
 #          command passed, and <sha> must be the checkout's HEAD: the command ran in that checkout
 #          at that head.
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
+  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster fl fa
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
+  if [ "$kind" = floor ] && [ -n "$root" ]; then
+    _proof_roots_load
+    fl="$(config_value "$root" floor "" 2>/dev/null)"; fa="$(config_value "$root" floor-attestation "" 2>/dev/null)"
+    [ -z "$fl$fa" ] || { _proof_floor_declared "$ev" "$head" "$fl" "$fa"; return $?; }
+  fi
   if [ "$kind" = check ]; then
     sha="$(awk '/^check-changed: / { next } { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
     if [ "${#sha}" -ne 40 ]; then
@@ -595,13 +604,8 @@ proof_attested() {
     if [ "$sha" = none ]; then
       printf 'the run in %s read no repository (head=none); run it in the working branch checkout and cite that log' "$ev"; return 1
     fi
-    if [ "$sha" != "$head" ]; then
-      printf 'the run in %s read head %s, but the working branch is at %s; run it again on %s and cite that log' \
-        "$ev" "$(printf '%s' "$sha" | cut -c1-12)" "$(printf '%s' "$head" | cut -c1-12)" "$(printf '%s' "$head" | cut -c1-12)"; return 1
-    fi
-    if [ "$dirty" != 0 ]; then
-      printf 'the run in %s read a dirty tree (dirty=%s); commit, run it again and cite that log' "$ev" "$dirty"; return 1
-    fi
+    [ "$sha" = "$head" ] || { _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; }
+    [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
     # THE RUN MUST ALSO HAVE PASSED (wave-26 T5; review 10 F1). A header says which head a run
     # read, not how it ended: a red run, or a note that quotes the header, attests the head all
     # the same, and the full-run wall reads a proved head as needing no run. So the runner's own
@@ -705,6 +709,56 @@ proof_attested() {
     *) printf 'the evidence %s carries neither a head=<sha> dirty=<n> run header nor a reviewed: <a>..<b> line; cite a run log or a review' "$ev" ;;
   esac
   return 1
+}
+
+# The two sentences a run header that read the wrong tree is refused with: another head, a dirty tree.
+# One spelling each, for the runner's log and for a declared floor's evidence alike.
+_proof_read_elsewhere() {  # <evidence> <sha it read> <the working head>
+  printf 'the run in %s read head %s, but the working branch is at %s; run it again on %s and cite that log' \
+    "$1" "$(printf '%s' "$2" | cut -c1-12)" "$(printf '%s' "$3" | cut -c1-12)" "$(printf '%s' "$3" | cut -c1-12)"
+}
+_proof_read_dirty() {  # <evidence> <dirty count>
+  printf 'the run in %s read a dirty tree (dirty=%s); commit, run it again and cite that log' "$1" "$2"
+}
+
+# _proof_floor_declared <evidence> <working head> <floor: command> <floor-attestation: value> -> the head,
+# exit 0; or exit 1 with the refusal's sentence (wave-28 T75; REQ-17, D36). WHAT A PROJECT'S FLOOR IS
+# BELONGS TO THE PROJECT: the judge asks only that a floor was declared, ran at a clean working head and
+# passed, never what its runner printed. Two shapes, either key alone enough:
+#   floor: <command>         the log `floor-run` writes, whose FIRST line is `head=<40-hex> dirty=<n>
+#                            rc=<n>`: the head the working head, dirty 0, rc 0. No Gating: verdict, no roster.
+#   floor-attestation: user  the user's record: a `head=<40-hex> dirty=0` line (the last one) naming the
+#                            working head, and a `floor-attested-by: <who> <when> <what ran>` line, three
+#                            words or more after the key. A missing line is refused by its name.
+# With both keys the declared shape is tried first: a first line in its shape is judged as one, so a red
+# run is refused as red and never read again as an attestation. Any value of floor-attestation: but
+# `user` is refused, whatever else the configuration says (fail closed).
+_proof_floor_declared() {
+  local ev="$1" head="$2" fl="$3" fa="$4" hdr sha dirty rc who
+  case "$fa" in
+    ''|user) : ;;
+    *) printf 'the floor-attestation: in .bionic/config.yaml is %s, and the one value it takes is user; write floor-attestation: user or remove the line' "$fa"; return 1 ;;
+  esac
+  if [ -n "$fl" ]; then
+    hdr="$(awk 'NR == 1 { if ($0 ~ /^head=[0-9a-f]+ dirty=[0-9]+ rc=[0-9]+$/) { gsub(/(head|dirty|rc)=/, ""); print } exit }' "$ev" 2>/dev/null)"
+    sha="${hdr%% *}"
+    if [ "${#sha}" -eq 40 ]; then
+      dirty="${hdr#* }"; rc="${dirty#* }"; dirty="${dirty%% *}"
+      [ "$sha" = "$head" ] || { _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; }
+      [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
+      [ "$rc" = 0 ] || { printf 'the floor in %s did not pass (rc=%s); fix it, run floor-run again and cite that log' "$ev" "$rc"; return 1; }
+      printf '%s' "$head"; return 0
+    fi
+    if [ -z "$fa" ]; then
+      printf 'the evidence %s does not open with head=<40-hex> dirty=<n> rc=<n>, the line floor-run writes; run floor-run and cite its log' "$ev"; return 1
+    fi
+  fi
+  sha="$(awk '/^head=[0-9a-f]+ dirty=0$/ { s = $1 } END { sub(/^head=/, "", s); print s }' "$ev" 2>/dev/null)"
+  who="$(awk '/^floor-attested-by:[ \t]/ { sub(/^floor-attested-by:[ \t]+/, ""); sub(/[ \t]+$/, ""); if (split($0, w, /[ \t]+/) >= 3) { print; exit } }' "$ev" 2>/dev/null)"
+  [ "${#sha}" -eq 40 ] || { printf 'the attestation %s carries no head=<40-hex> dirty=0 line naming the working head' "$ev"; return 1; }
+  [ -n "$who" ] || { printf 'the attestation %s carries no floor-attested-by: <who> <when> <what ran> line' "$ev"; return 1; }
+  [ "$sha" = "$head" ] || { _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; }
+  printf '%s' "$head"
 }
 
 # proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places
