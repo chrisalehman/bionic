@@ -10,6 +10,10 @@
 
 For each function, file, type or configuration key the change adds, trace from user input to it: one no caller reaches is a finding. You cannot rerun a walk; if a walk record is in your range, say whether it shows that code reached. On an `incident-response` run only, also ask whether the fix masks a deeper cause, and whether the monitoring-gap analysis is honest.
 
+**Security and trust boundaries.** Ask of every change: what untrusted input reaches it, what permission it exercises or gates, what it can expose, and whether it fails closed. Ask too what happens when a dependency is missing, and whether install, upgrade and remove leave consistent state.
+
+**Known limits.** Read the project's Known limits where it keeps them, such as its changelog. A change that reopens a listed limit, or meets one without saying so, is a finding.
+
 ## A whole read
 
 When the range is the whole run (`scope: whole`), read only how the pieces interact; this is not a second read of each piece. Each piece was read as it landed. Look for what no single piece can show: a contract one piece changed and another still assumes, an ordering that holds inside each piece and breaks across them. What the pieces duplicate is the structure reader's.
