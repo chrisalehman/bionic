@@ -176,8 +176,12 @@ if [ "${1:-}" = "--one" ]; then
   _one_start="$(date +%s)"
   # Deliberately unquoted. The queued string is a roster line's own words
   # (`bash tests/foo.test.sh`), written in this file — never outside input.
+  # THE SCRUB (wave-30 T9; AC-4.2): this worker keeps BIONIC_GATE_DIR for its own ask and end above and
+  # below, but the SUITE PROCESS runs without it. A suite that read the run's store through the
+  # inherited variable (the doctor-reads checks did) read a store it did not make; a suite that
+  # wants one makes its own fixture. The --serial path below scrubs at its own exec the same way.
   # shellcheck disable=SC2086
-  $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  env -u BIONIC_GATE_DIR $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
   _one_rc=$?
   _gate_end_for "$_one_rc"
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
@@ -743,7 +747,7 @@ run() {  # run <label> <cmd...>   — gating
     # alive for the suite, and its `times` hold that suite's children only, for gate_end.
     ( _gate_ask_for work "$label"
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
-      "$@" >"$TMP/${label}.out" 2>&1
+      env -u BIONIC_GATE_DIR "$@" >"$TMP/${label}.out" 2>&1   # the scrub (T9): the ask above keeps the store, the suite does not
       _sr=$?
       _gate_end_for "$_sr"
       exit "$_sr" )
