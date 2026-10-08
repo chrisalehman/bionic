@@ -496,6 +496,56 @@ poke "$RSEV" debt touched
 expect_eq "DEBT-L9b debt touched with no concept is a usage error (exit 2)" "2" "$RC"
 rm -f "$DBT_LEDGER"
 
+# ---------- §DEBT-ADOPT (AC-11.2's read-back, wave-30 T32): the next run's ledger takes the carried debt lines ----------
+# Close-out wrote `debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave>` under the
+# continuation's `## Deferrals`; `debt adopt <continuation>` writes each into the bound run's ledger, its
+# touches and raised-by kept, its last cell open, idempotent on concept and kind as `add` is (A-T22.5).
+DBT_CONT="$TMPROOT/dbt-cont.md"
+DBT_CL1='debt: tree_count duplicate "lib/b.sh:2, lib/c.sh:5" touches=4 raised-by=record/wave-00-prior/critic-structure.md from=wave-00-prior'
+DBT_CL2='debt: log_shim one-case-abstraction "lib/a.sh:4" touches=2 raised-by=record/wave-00-prior/dbt-rec.md from=wave-00-prior'
+printf '%s\n' "# continuation — wave-00-prior" "" "## Deferrals" "" \
+  'deferred: record/wave-00-prior/rev.md#1 S3 on "a deferral" stated="-" from=wave-00-prior' "$DBT_CL1" "$DBT_CL2" "" \
+  "## Resume instruction" "" 'debt: not_in_section duplicate "x.sh:1" touches=9 raised-by=record/x.md from=wave-00-prior' > "$DBT_CONT"
+DBT_AL1='tree_count | duplicate | lib/b.sh:2, lib/c.sh:5 | raised-by record/wave-00-prior/critic-structure.md | touches 4 | —'
+DBT_AL2='log_shim | one-case-abstraction | lib/a.sh:4 | raised-by record/wave-00-prior/dbt-rec.md | touches 2 | —'
+expect_false "DEBT-A0 precondition: the run has no ledger yet" test -e "$DBT_LEDGER"
+poke "$RSEV" debt adopt "$DBT_CONT"
+expect_eq "DEBT-A1 §DEBT-ADOPT debt adopt over the session's bound run exits 0, saying what it adopted" \
+  "0|poker: debt adopt — 2 adopted, 0 already there: record/$DBT_SLUG/debt.md" "$RC|$OUT"
+expect_eq "DEBT-A1b …the ledger holds the header and the two carried items, touches and raised-by kept, none burned, the line outside ## Deferrals left out" \
+  "$DBT_HEAD|$DBT_AL1|$DBT_AL2" "$(paste -sd'|' - < "$DBT_LEDGER" 2>/dev/null)"
+expect_eq "DEBT-A1c …and debt list reads both back" "0|$DBT_AL1|$DBT_AL2" "$(poke "$RSEV" debt list "$PSEV"; printf '%s|%s' "$RC" "$(printf '%s\n' "$OUT" | paste -sd'|' -)")"
+cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+poke "$RSEV" debt adopt "$DBT_CONT" "$PSEV"
+expect_eq "DEBT-A2 a second adopt, the plan named: 0 adopted, 2 already there" \
+  "0|poker: debt adopt — 0 adopted, 2 already there: record/$DBT_SLUG/debt.md" "$RC|$OUT"
+expect_true "DEBT-A2b …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+poke "$RSEV" debt touched tree_count "$PSEV"
+poke "$RSEV" debt adopt "$DBT_CONT" "$PSEV"
+expect_eq "DEBT-A3 an item the run has already worked keeps its own touches when the continuation is adopted again" \
+  "$DBT_HEAD|${DBT_AL1% | touches 4 | —} | touches 5 | —|$DBT_AL2" "$(paste -sd'|' - < "$DBT_LEDGER")"
+cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+poke "$RSEV" debt adopt "$TMPROOT/no-such-continuation.md" "$PSEV"
+expect_eq "DEBT-A4 a path that is no file is refused (exit 2)" "2" "$RC"
+expect_contains "DEBT-A4b …naming the path" "$TMPROOT/no-such-continuation.md" "$OUT"
+poke "$RSEV" debt adopt "$TMPROOT" "$PSEV"
+expect_eq "DEBT-A4c a directory is refused as well (exit 2)" "2" "$RC"
+expect_contains "DEBT-A4c2 …naming it" "no readable continuation at $TMPROOT" "$OUT"
+expect_true "DEBT-A4d …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+printf '%s\n' "## Deferrals" "" "$DBT_CL1" 'debt: widget_parse duplicate "lib/w.sh:1" touches=3 from=wave-00-prior' > "$TMPROOT/dbt-cont-bad.md"
+poke "$RSEV" debt adopt "$TMPROOT/dbt-cont-bad.md" "$PSEV"
+expect_eq "DEBT-A5 a debt: line that does not parse is refused (exit 1)" "1" "$RC"
+expect_contains "DEBT-A5a …naming the line" 'debt: widget_parse duplicate "lib/w.sh:1" touches=3 from=wave-00-prior' "$OUT"
+expect_true "DEBT-A5b …and the ledger is byte-identical, the good line before it not adopted either" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+printf '%s\n' "## Deferrals" "" 'deferred: record/wave-00-prior/rev.md#1 S3 on "a deferral" stated="-" from=wave-00-prior' > "$TMPROOT/dbt-cont-none.md"
+poke "$RSEV" debt adopt "$TMPROOT/dbt-cont-none.md" "$PSEV"
+expect_eq "DEBT-A6 a continuation with no debt: line adopts nothing and exits 0" "0" "$RC"
+expect_contains "DEBT-A6b …and says so" "carries no debt: line; nothing adopted" "$OUT"
+expect_true "DEBT-A6c …the ledger byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+poke "$RSEV" debt adopt
+expect_eq "DEBT-A7 debt adopt with no continuation is a usage error (exit 2)" "2" "$RC"
+rm -f "$DBT_LEDGER"
+
 # ============================================================
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
 # ============================================================

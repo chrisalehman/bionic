@@ -1949,7 +1949,7 @@ inh_block() {
   printf '%s\n' "$1" | awk '
     /^  Inherited deferrals$/ { s = 1; next }
     s && !/^    / { exit }
-    s { t = substr($0, 5); if (t ~ /^deferred: /) { if (cur != "") print cur; cur = t } else cur = cur " " t }
+    s { t = substr($0, 5); if (t ~ /^(deferred|debt): /) { if (cur != "") print cur; cur = t } else cur = cur " " t }
     END { if (cur != "") print cur }'
 }
 inh_heads() { printf '%s\n' "$1" | /usr/bin/grep -cx '  Inherited deferrals' | tr -d ' '; }
@@ -2056,6 +2056,31 @@ inh_cont wave-1-a 202602010000 "## Notes" "" '```' "## Deferrals" "" "$INH_LOLD"
 whole_card step1 "$INH_R0"
 expect_eq "INHERIT-17a …and with the real heading after the fence, only the real line is listed" "0|$INH_L1" \
   "$WC_RC|$(inh_block "$WC_OUT")"
+inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_L2"
+
+# THE CARRIED DEBT LINE (wave-30 T32; REQ-11 AC-11.2, A-T22.9). Close-out writes each unburned debt item
+# under `## Deferrals` after the deferred: lines, `debt: <concept> <kind> "<sites>" touches=<N>
+# raised-by=<record> from=<wave>`. The Step 1 card lists it beside the deferred: ones, as open. Nothing
+# disposes of it (it names no id); it is faced by `session-poker.sh debt adopt`, which moves it to the new
+# run's ledger. `card.sh inherited` is close-out's carry-from reading and does not print it: the carry of a
+# debt is the ledger's, so the same line read from here would be written twice (A-T32.2).
+INH_D1="debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-1-a/critic-structure.md from=wave-1-a"
+INH_DBAD="debt: tree_count duplicate \"lib/a.sh:1\" touches=4 from=wave-1-a"
+inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_D1"
+whole_card step1 "$INH_R0"
+expect_eq "INHERIT-18 §T32 a carried debt: line is listed under Inherited deferrals beside the deferred: one" \
+  "0|$INH_L1
+$INH_D1" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-18a …card.sh inherited prints the deferred line and withholds the debt line (close-out's carry is the ledger's)" \
+  "open	$INH_L1" "$(bash "$CARD_SH" inherited "$INH_R0" 2>/dev/null 0<&-)"
+inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_DBAD" "$INH_L2"
+whole_card step1 "$INH_R0"
+expect_eq "INHERIT-18b a debt: line that does not parse refuses the card (exit 2, nothing on stdout)" "2|" "$WC_RC|$WC_OUT"
+expect_contains "INHERIT-18c …naming the line and that it is a debt line" "carries a debt: line that does not parse" "$WC_ERR"
+expect_contains "INHERIT-18d …and quoting it" "$INH_DBAD" "$WC_ERR"
+expect_eq "INHERIT-18e …while card.sh inherited still prints the deferred lines, the bad one withheld" \
+  "open	$INH_L1
+open	$INH_L2" "$(bash "$CARD_SH" inherited "$INH_R0" 2>/dev/null 0<&-)"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_L2"
 
 # the mutation arm: a doctored copy of card.sh whose disposal filter lets every line through
