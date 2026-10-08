@@ -1080,4 +1080,153 @@ expect_contains "sample-lib: the real payload/scripts/lib/l7.sh still reaches s7
 expect_eq "sample-lib: a sample's lib/l7.sh, same name, pulls no suite" \
   "" "$(BIONIC_IMPACT_CACHE_DIR="" suites "$SAMPLE_ROOT" tests/reader-exam/samples/s/tree/lib/l7.sh)"
 
+# ── §LOCATES locating is not reading (wave-30 T7, AC-4.5, design-ledger Δ4/D5) ──
+# THE SEAM NAMES ROOTS, IT DOES NOT READ THEM. tests/lib/resolve-roots.sh sets
+# BIONIC_HOOKS_DIR and BIONIC_SKILLS_DIR, and every suite sources it, so while the
+# map expanded those two lines like any directory edge every hook and every skill
+# file answered the whole roster. Those lines carry `# impact: locates` now, and a
+# located directory is an edge on the directory ITSELF, never on the files beneath
+# it. Narrowing a sound map is safe only if every real reader is still seen, so the
+# fixture holds each way a suite was measured reading a hook in the real tree
+# without the seam: naming it through the seam variable, globbing the directory,
+# spelling it root-relative after a command substitution (session-start.test.sh:304),
+# running a hook that runs it, and naming it as the sibling of a variable that a
+# one-line `SAVED="$H"; H=…` swap once left unparseable (stop.test.sh:624).
+section "§LOCATES locating is not reading"
+
+mk_locates_root() { # mk_locates_root <dir>
+  local r="$1"
+  mkdir -p "$r/tests/lib" "$r/hooks"
+  printf '#!/bin/bash\n_r="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"\nBIONIC_HOOKS_DIR="${BIONIC_HOOKS_DIR:-${_r}/hooks}" # impact: locates\nexport BIONIC_HOOKS_DIR\n' \
+    >"$r/tests/lib/resolve-roots.sh"
+  printf '#!/bin/bash\necho h1\n' >"$r/hooks/h1.sh"
+  printf '#!/bin/bash\nbash "$(dirname "$0")/h1.sh"\n' >"$r/hooks/h2.sh"
+  printf '#!/bin/bash\necho h3\n' >"$r/hooks/h3.sh"
+  printf '#!/bin/bash\necho nobody-names-me\n' >"$r/hooks/h9.sh"
+  local pre='#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\n'
+  printf "$pre"'bash "$BIONIC_HOOKS_DIR/h1.sh"\n' >"$r/tests/lreader.test.sh"
+  printf "$pre"'echo only the seam\n' >"$r/tests/lseam.test.sh"
+  printf "$pre"'for f in "$BIONIC_HOOKS_DIR"/*.sh; do bash -n "$f"; done\n' >"$r/tests/lglob.test.sh"
+  printf "$pre"'HK="$BIONIC_HOOKS_DIR/h1.sh"\nH3="$(cd "$(dirname "$HK")/.." && pwd -P)/hooks/h3.sh"\nbash "$H3"\n' >"$r/tests/lsubst.test.sh"
+  printf "$pre"'bash "$BIONIC_HOOKS_DIR/h2.sh"\n' >"$r/tests/lrunner.test.sh"
+  printf "$pre"'H="$BIONIC_HOOKS_DIR/h2.sh"\nSAVED="$H"; H="$TMP/other/h2.sh"\nH="$SAVED"\nbash "$(dirname "$H")/h3.sh"\n' >"$r/tests/lswap.test.sh"
+}
+LROOT="$TMP/locates"
+mk_locates_root "$LROOT"
+# has_suite <suite> <root> <file>... → 1 when the map names that suite, 0 when not
+has_suite() { local w="$1"; shift; BIONIC_IMPACT_CACHE_DIR="" suites "$@" | grep -cx "$w"; }
+
+expect_eq "locates: a suite that runs the hook through the seam variable reads it" \
+  "1" "$(has_suite lreader.test.sh "$LROOT" hooks/h1.sh)"
+expect_eq "locates: …a suite that only sources the seam does not" \
+  "0" "$(has_suite lseam.test.sh "$LROOT" hooks/h1.sh)"
+expect_eq "locates: …and its edge is on the directory itself, so moving hooks/ still reaches it" \
+  "1" "$(has_suite lseam.test.sh "$LROOT" hooks)"
+expect_eq "locates: …with the reason locates" \
+  "locates" "$(BIONIC_IMPACT_CACHE_DIR="" reason_for "$LROOT" lseam.test.sh hooks | cut -d: -f1)"
+expect_eq "locates: a suite that globs the hooks directory itself still reads every hook" \
+  "1" "$(has_suite lglob.test.sh "$LROOT" hooks/h3.sh)"
+expect_eq "locates: a root-relative spelling after a command substitution is a read" \
+  "1" "$(has_suite lsubst.test.sh "$LROOT" hooks/h3.sh)"
+expect_eq "locates: a suite that runs a hook reads the hook that hook runs" \
+  "1" "$(has_suite lrunner.test.sh "$LROOT" hooks/h1.sh)"
+expect_eq "locates: …and not a hook it never runs" \
+  "0" "$(has_suite lrunner.test.sh "$LROOT" hooks/h3.sh)"
+expect_eq "locates: a one-line SAVED=…; H=… swap leaves H a path, so its sibling is read" \
+  "1" "$(has_suite lswap.test.sh "$LROOT" hooks/h3.sh)"
+expect_eq "locates: a hook beneath a located root that nothing names answers no suite" \
+  "" "$(BIONIC_IMPACT_CACHE_DIR="" suites "$LROOT" hooks/h9.sh | grep -v '^lglob\.test\.sh$')"
+expect_eq "locates: …except the suite that globs the whole directory" \
+  "lglob.test.sh" "$(BIONIC_IMPACT_CACHE_DIR="" suites "$LROOT" hooks/h9.sh)"
+
+# The real seam carries the annotation on both root lines, and the real hook
+# answers the suites that read it, not the roster.
+expect_eq "locates (real): resolve-roots.sh annotates its hooks and skills root lines" \
+  "2" "$(grep -cE '^BIONIC_(HOOKS|SKILLS)_DIR=.*# impact: locates$' "$REPO/tests/lib/resolve-roots.sh")"
+LR_POKER="$(suites "$REPO" hooks/session-poker.sh)"
+LR_N="$(printf '%s\n' "$LR_POKER" | grep -c .)"
+if [ "$LR_N" -gt 0 ] && [ "$LR_N" -lt "$RT_ROSTER" ]; then
+  ok "locates (real): hooks/session-poker.sh answers $LR_N of $RT_ROSTER suites, not the roster"
+else
+  no "locates (real): hooks/session-poker.sh answers fewer than the roster" "$LR_N of $RT_ROSTER"
+fi
+for s in docs-pins.test.sh session-start.test.sh roster.test.sh patrol-stale.test.sh; do
+  expect_eq "locates (real): $s, which names session-poker.sh, is still answered" \
+    "1" "$(printf '%s\n' "$LR_POKER" | grep -cx "$s")"
+done
+expect_eq "locates (real): stop.test.sh reads stop-orders.sh as the sibling of its HOOK" \
+  "1" "$(suites "$REPO" hooks/stop-orders.sh | grep -cx stop.test.sh)"
+# The release-shaped files stay bounded: answered, and short of the roster.
+for f in payload/.claude-plugin/plugin.json CHANGELOG.md payload/integrity/rendered.sha256 payload/commands/help.md; do
+  n="$(suites "$REPO" "$f" | grep -c .)"
+  if [ "$n" -gt 0 ] && [ "$n" -lt "$RT_ROSTER" ]; then
+    ok "locates (real): $f stays bounded ($n of $RT_ROSTER)"
+  else
+    no "locates (real): $f stays bounded" "$n of $RT_ROSTER"
+  fi
+done
+
+# ── §SWEEP a planted edit in every hook and skill file is reached ───────────
+# THE GUARD ON THE NARROWING (D5). With the seam no longer an edge on every file,
+# a hook or skill file is answered only by suites that name, copy, glob, pin or
+# source it. The residual risk is a reader the map cannot see. This sweep lists
+# every file under hooks/ and skills/ at test time, plants an edit in each one in a
+# scratch copy of the tree, and asks the map about each planted file there, on the
+# tree a change would actually present. Every plant must be reached by a suite the
+# map names, and a hook must be reached short of the whole roster, and by at least
+# one suite that reads that hook itself rather than only copying or globbing its
+# directory.
+#
+# WHY STRUCTURAL AND NOT A RUN PER FILE. AC-19's §F runs real suites against the
+# whole complement, and is opt-in for its cost. One witness run per planted file
+# was measured at authoring time and its green control alone overran thirty minutes
+# (T7-locates.md), so the gating form asks the map, not the suites. A file the map
+# answers with no suite is not a silent pass: proof_state reads "no suite" as a
+# full run (payload/scripts/lib/proof.sh, "the map answers %s with no suite").
+section "§SWEEP every hook and skill file is reached"
+
+SW_ROOT="$TMP/sweep"
+mkdir -p "$SW_ROOT"
+( cd "$REPO" && tar cf - --exclude=.git --exclude=.worktrees --exclude=.bionic . ) \
+  | ( cd "$SW_ROOT" && tar xf - )
+( cd "$SW_ROOT" && find hooks skills -type f | LC_ALL=C sort ) >"$TMP/sweep.files"
+SW_N="$(grep -c . "$TMP/sweep.files")"
+expect_eq "sweep: the file listing holds hooks/session-poker.sh" \
+  "1" "$(grep -cx hooks/session-poker.sh "$TMP/sweep.files")"
+expect_eq "sweep: …and skills/canonical-sdlc/SKILL.md" \
+  "1" "$(grep -cx skills/canonical-sdlc/SKILL.md "$TMP/sweep.files")"
+while IFS= read -r f; do
+  printf '\n# BIONIC_IMPACT_SWEEP_PLANT\n' >>"$SW_ROOT/$f"
+done <"$TMP/sweep.files"
+expect_eq "sweep: an edit is planted in every listed file ($SW_N)" \
+  "$SW_N" "$( ( cd "$SW_ROOT" && grep -l BIONIC_IMPACT_SWEEP_PLANT $(cat "$TMP/sweep.files") ) | grep -c .)"
+
+SW_CACHE="$TMP/sweep-cache"
+while IFS= read -r f; do
+  ans="$(BIONIC_IMPACT_ROOT="$SW_ROOT" BIONIC_IMPACT_CACHE_DIR="$SW_CACHE" bash "$IMPACT" "$f" 2>/dev/null)"
+  n="$(printf '%s\n' "$ans" | grep -c .)"
+  if [ "$n" -gt 0 ]; then
+    ok "sweep: the plant in $f is reached by $n named suite(s)"
+  else
+    no "sweep: the plant in $f is reached by a named suite" "the map names no suite"
+  fi
+  case "$f" in
+    hooks/*)
+      if [ "$n" -lt "$RT_ROSTER" ]; then
+        ok "sweep: $f answers short of the roster ($n of $RT_ROSTER)"
+      else
+        no "sweep: $f answers short of the roster" "$n of $RT_ROSTER — the seam is still read as every hook"
+      fi
+      own="$(printf '%s\n' "$ans" | awk -F'\t' '{ k = $2; sub(/:.*/, "", k) }
+        k != "payload-copy" && k != "dir-ref" && k != "locates" && k != "" { print $1 }' | head -1)"
+      if [ -n "$own" ]; then
+        ok "sweep: $f is read by a suite that reads the hook itself ($own)"
+      else
+        no "sweep: $f is read by a suite that reads the hook itself" \
+          "only whole-directory readers answer it"
+      fi
+      ;;
+  esac
+done <"$TMP/sweep.files"
+
 finish

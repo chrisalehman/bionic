@@ -378,8 +378,12 @@ _bionic_seam_repo="$(unset CDPATH; cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." 
   return 1 2>/dev/null || exit 1
 }
 
-BIONIC_HOOKS_DIR="${BIONIC_HOOKS_DIR:-${_bionic_seam_repo}/hooks}"
-BIONIC_SKILLS_DIR="${BIONIC_SKILLS_DIR:-${_bionic_seam_repo}/skills}"
+# LOCATING IS NOT READING (wave-30 T7, design-ledger Δ4). Every suite sources this file, so
+# tests/lib/impact.sh would read these two directory names as every suite reading every hook
+# and every skill file. They name where the roots are; a suite reads a file under them only
+# where it names, globs, copies or runs it. The trailing annotation tells the map so.
+BIONIC_HOOKS_DIR="${BIONIC_HOOKS_DIR:-${_bionic_seam_repo}/hooks}" # impact: locates
+BIONIC_SKILLS_DIR="${BIONIC_SKILLS_DIR:-${_bionic_seam_repo}/skills}" # impact: locates
 BIONIC_SCRIPTS_DIR="${BIONIC_SCRIPTS_DIR:-${_bionic_seam_repo}}"
 export BIONIC_HOOKS_DIR BIONIC_SKILLS_DIR BIONIC_SCRIPTS_DIR
 
