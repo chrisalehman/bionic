@@ -19,7 +19,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
-#     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | current | ledger-add | ledger-set …
+#     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
@@ -440,6 +440,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr or share"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N|T<n>>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
@@ -663,6 +664,23 @@ case "$VERB" in
       *) usage "step-line: '$1' is neither a step number (0-9, 4a) nor a task id (T<n>)." ;;
     esac
     PV_KEY="$1"; PV_TEXT="$2"
+    ;;
+  # THE STEP-FIELD VERB (wave-28 T8; REQ-3 AC-3.5, D17): a step and one `<key>=<value>`. The shapes are the
+  # usage error's (2); the key set, the line break, a step with no line and Step 9 are the verb's own refusals (1).
+  step-field)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+      usage "step-field takes <N> <key>=<value>: a step number and one field."
+    fi
+    case "$1" in
+      [0-9]|[0-9][ab]) : ;;
+      *) usage "step-field: '$(printf '%s' "${1:0:12}" | tr -d '[:cntrl:]')' is not a step number (0-9, 4a)." ;;
+    esac
+    case "$2" in
+      [!=]*=*) : ;;
+      *) usage "step-field: '$(printf '%s' "${2:0:24}" | tr -d '[:cntrl:]')' is not <key>=<value>." ;;
+    esac
+    [ -n "${2#*=}" ] || usage "step-field: the value of '$(printf '%s' "${2%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is empty."
+    PV_KEY="$1"; PV_FKEY="${2%%=*}"; PV_FVAL="${2#*=}"
     ;;
   current)
     [ $# -eq 1 ] && [ -n "$1" ] || usage "current takes one argument: the step number (0-8) or the task id (T<n>) to move to."
@@ -3238,6 +3256,44 @@ cur8_checks() {
   printf '%s\n' "$open" | awk '{ id = $1; s = $2; r = $3; t = $0; sub(/^[^"]*/, "", t); print "- " id " " s " " r " " t }' >&2
   die "Settle each with finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>, a record written by an agent that is neither the finding's reviewer nor the code's writer; the plan is unchanged."
   exit 1
+}
+
+# fc_code_writers <plan> <repo> <path> -> " <name> <name> … " (padded with a space each side; empty when no row
+# writes the path): every agent that has carried a `## Tasks` row whose Files cover <path> (wave-28 T8; A-orch-159,
+# A-orch-161; `finding-check`'s test of "the code's writer"). THE ROW IS FOUND BY THE DISPATCH GRAMMAR'S MATCHER
+# (lib/units.sh `cell_covers`: an exact path, a directory, a glob, a path suffix), the one the scheduler asks, and
+# the agents are every one the row has carried, since a row's second instance replaces the first in its Tasks cell
+# and the code it landed may be the first's: (1) the row's Tasks `agent` cell, (2) the name in its dispatch-ledger
+# agent cell (`<role> (<name>)`; without the parentheses the first word), (3) each roster row of the project, any
+# session's, labelled `row=<id>` (the `Row:` a brief carries, lib/roster.sh), by its `name=`.
+fc_code_writers() {
+  local plan="$1" repo="$2" path="$3" rows ids names rf
+  rows="$(units_rows "$plan" 2>/dev/null | awk -F'\t' -v p="$path" "$(_units_files_awk)"'
+    $1 != "" && cell_covers($9, p) { a = $5; sub(/[ (].*$/, "", a); print $1 "\t" a }')"
+  [ -n "$rows" ] || return 0
+  ids="$(printf '%s\n' "$rows" | cut -f1 | tr '\n' ' ')"
+  names="$(printf '%s\n' "$rows" | awk -F'\t' '$2 != "" && $2 != "—" { print $2 }')"
+  names="$names
+$(IDS="$ids" awk '
+    BEGIN { n = split(ENVIRON["IDS"], a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { inled = ($0 ~ /^##[[:space:]]+Dispatch ledger/); next }
+    inled && /^\|/ {
+      split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
+      if (!(id in want)) next
+      cell = c[3]; gsub(/^[ \t]+|[ \t]+$/, "", cell)
+      if (match(cell, /\([^)]*\)/)) { cell = substr(cell, RSTART + 1, RLENGTH - 2); m = split(cell, w, /[ ,]+/); for (i = 1; i <= m; i++) if (w[i] != "") print w[i] }
+      else { sub(/[ \t].*$/, "", cell); if (cell != "" && cell != "—") print cell }
+    }' "$plan")"
+  for rf in "$repo/.bionic/tmp"/roster-*.state; do
+    [ -f "$rf" ] && [ ! -L "$rf" ] || continue
+    names="$names
+$(IDS="$ids" awk "$_ROSTER_OPEN_AWK"'
+      BEGIN { n = split(ENVIRON["IDS"], a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
+      index($0, "roster-state/") == 1 { r = _roster_kv($0, "row"); if (r != "" && (r in want)) print _roster_kv($0, "name") }' "$rf" 2>/dev/null)"
+  done
+  printf ' %s ' "$(printf '%s\n' "$names" | /usr/bin/grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')"
 }
 
 # A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
@@ -6314,6 +6370,52 @@ EOF
     exit 0
     ;;
 
+  # THE STEP-FIELD VERB (wave-28 T8; REQ-3 AC-3.5, D17). A `- Step N:` block is the evidence the gate reads, and
+  # the fields it reads were hand edits: `units_step_fields --replace` writes one `  <key>: <value>` line under
+  # the step line, after the block last line, or replaces the line where it stands (the gate reads the first
+  # line of a key, so a second could not win); the rest of the plan is the same bytes. Nine keys, the ones the
+  # gate reads at Steps 4, 5, 7 and 8: head cmd pass total output (the floor run), merge worktree-removed (the
+  # integration), adr (the document step), share (the Step-4 fact). It takes the plan transaction every row verb
+  # takes (copy, dry commit through the real gate, checksum, swap), so a plan the gate would refuse is not
+  # written. REFUSED (1), the plan unchanged: a key outside the nine, a value with a line break, a step with no
+  # line (step-line writes it), a key the step line itself carries (step-line owns that text), and Step 9
+  # (close-out writes that block). The refusals are this verb family die lines, not refuse.sh refusals.
+  step-field)
+    case "$PV_KEY" in
+      9|9a|9b)
+        die "REFUSED — the Step 9 block is close-out's to write (scripts/close-out.sh)."
+        exit 1 ;;
+    esac
+    case "$PV_FKEY" in
+      head|cmd|pass|total|output|merge|worktree-removed|adr|share) : ;;
+      *)
+        die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field; the plan is unchanged."
+        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, adr, share."
+        exit 1 ;;
+    esac
+    case "$PV_FVAL" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — a step field is one line, and the value has a line break; the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open step-field
+    PV_RC=0
+    units_step_fields --replace "$PV_PLAN" "$PV_KEY" "$PV_FKEY=$PV_FVAL" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      1) die "REFUSED — the plan has no Step $PV_KEY line; step-line writes it first. The plan is unchanged."
+         exit 1 ;;
+      5) die "REFUSED — the Step $PV_KEY line itself carries '$PV_FKEY:'; step-line writes that text."
+         die "The plan is unchanged."
+         exit 1 ;;
+      *) die "REFUSED — the field cannot be written (units_step_fields exit $PV_RC); the plan is unchanged."
+         exit 1 ;;
+    esac
+    plan_verb_swap step-field "Step $PV_KEY $PV_FKEY" writer
+    say "step-field — Step $PV_KEY $PV_FKEY: written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
   # THE STEP MOVE (wave-24 T15; REQ-9 AC-9.5, D14; A-orch-8). `current:` moves through
   # `units_set_current`, and the copy is judged AT the step it moves to — the advance is the
   # commit the gate is asked about, so a step whose block is not written yet is refused here,
@@ -6325,6 +6427,7 @@ EOF
   # writer starts from, and the checkout holding it is the worktree. Each field the block lacks
   # is filled from those (`units_step_fields`); a field already written is never rewritten, and
   # a fact that cannot be read is not guessed — the field stays absent and the gate says so.
+  # At wave scale the block also gains `share: <n>`, D16's plan fact (wave-28 T8, below).
   current)
     case "$PV_KEY" in
       9|9a|9b)
@@ -6360,6 +6463,13 @@ EOF
         PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
         [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
         PV_FIELDS+=("branch=$PV_WB")
+        # D16's PLAN FACT (wave-28 T8; A-orch-140): at wave scale the block also records the machine share the
+        # run started under, `gate_share`'s value, through the same writer; a block already carrying the line
+        # keeps it (the fill never rewrites), and a plan of another scale gets none.
+        if [ "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" = wave ] && declare -F gate_share >/dev/null 2>&1; then
+          PV_SHARE="$(gate_share 2>/dev/null)"
+          [ -z "$PV_SHARE" ] || PV_FIELDS+=("share=$PV_SHARE")
+        fi
         if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
           cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
           mv -f "$PV_NEW.2" "$PV_NEW"
@@ -6985,9 +7095,7 @@ $PF_PLANL"
     FC_PATH="$(proof_findings "$FC_DOCS/$FC_RECD" 2>/dev/null | awk -F'\t' -v n="$FC_N" '$1 == n { print $4; exit }')"
     FC_PATH="${FC_PATH%:*}"; [ "$FC_PATH" != - ] || FC_PATH=""
     FC_WRITERS=""
-    [ -z "$FC_PATH" ] || FC_WRITERS=" $(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v p="$FC_PATH" '
-      { a = $5; sub(/[ (].*$/, "", a); if (a == "" || a == "—") next
-        m = split($9, fs, /[ ,]+/); for (i = 1; i <= m; i++) { gsub(/`/, "", fs[i]); if (fs[i] == p) { print a; break } } }' | tr '\n' ' ')"
+    [ -z "$FC_PATH" ] || FC_WRITERS="$(fc_code_writers "$PV_PLAN" "$PV_REPO" "$FC_PATH")"
     if [ -n "$FC_READER" ] && [ "$FC_BY" = "$FC_READER" ]; then
       die "REFUSED — the check record $(clean "$FC_REL") was written by $(clean "$FC_BY"), the reader of $(clean "$FC_RECD"); a check is written by an agent that is neither the finding's reviewer nor the code's writer. The plan is unchanged."
       exit 1
