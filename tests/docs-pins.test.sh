@@ -5808,7 +5808,10 @@ w27r_fix_gaps() {
 }
 W27R_E="$(w27r_entry "${REPO}/CHANGELOG.md")"
 expect_nonempty "W27-R1 precondition: CHANGELOG.md carries a 1.12.0 entry" "$W27R_E"
-expect_eq "W27-R1: …and it is the newest entry" "1.12.0" "$(changelog_head_version "${REPO}/CHANGELOG.md")"
+# (wave-28 T23: the entry is no longer the newest, so the row holds wherever it sits: one heading, and
+# the entry's body is the part this section reads.)
+expect_eq "W27-R1: …and its heading stands once, wherever the entry sits" "1" \
+  "$(/usr/bin/grep -c '^## 1\.12\.0 ' "${REPO}/CHANGELOG.md")"
 W27R_HEAD="$(/usr/bin/grep -m1 '^## 1\.12\.0 ' "${REPO}/CHANGELOG.md")"
 expect_nonempty "W27-R1d precondition: the 1.12.0 heading line reads" "$W27R_HEAD"
 expect_eq "W27-R1d: the 1.12.0 entry is dated the day it is cut" "## 1.12.0 — 2026-10-06" "$W27R_HEAD"
@@ -5842,23 +5845,26 @@ expect_contains "W27-R7b: …it names each one with the command to remove it by 
   "with the command to remove it by hand, and leaves it in place, from the plugin, per item and under \`--all\`: bionic keeps no record yet of what it installed, and it removes nothing it cannot prove is its own" \
   "$W27R_NOTICE"
 expect_contains "W27-R7c precondition: the known-limits part reads (it holds the rc limit)" "No door removes a line of your rc" "$W27R_LIMITS"
-expect_contains "W27-R7c: a known limit says every declared tool present is listed until the record exists" \
-  "Until bionic keeps a record of what it installed (a later release), remove lists every declared tool present, whether or not bionic installed it, and still offers the native plugins bionic's own catalog installed." \
+# (wave-28 T23, D32: wave-28 T40 landed the install record, so the limit is retired in place, with a pointer.)
+expect_contains "W27-R7c: the install-record limit is retired in place, with a pointer to the 1.13.0 entry" \
+  "Retired in 1.13.0: bionic now keeps a record of what it installed, and remove acts on it (see that entry). A tool installed before that release has no line and is named for removal by hand." \
   "$W27R_LIMITS"
+expect_absent "W27-R7c2: …and the old sentence, which said no record exists, is gone" \
+  "Until bionic keeps a record of what it installed" "$W27R_LIMITS"
 expect_contains "W27-R7d: a known limit says what a SHELL that is neither zsh nor bash does to the claude() block" \
   "When SHELL is neither zsh nor bash, the plugin's remove asks about bionic's claude() block and then cannot rewrite the rc, while the standalone remove removes it; no line is lost either way." \
   "$W27R_LIMITS"
 expect_contains "W27-R7f: a known limit says the standalone remove and a declined --all name no tool, and where the list is" \
-  "The standalone remove (the script run alone, with no \`lib/\` beside it) cannot read the tool table: its \`--all\` calls a machine with tools on it \"already clean\", and an \`--all\` you decline names no tool. Run \`/bionic:remove\` from the plugin and answer per item to see the by-hand list." \
+  "The standalone remove (the script run alone, with no \`lib/\` beside it) cannot read the tool table: its \`--all\`, when nothing else of bionic's is left, calls a machine with tools on it \"already clean\", and an \`--all\` you decline names no tool. Run \`/bionic:remove\` from the plugin and answer per item to see the by-hand list." \
   "$W27R_LIMITS"
 expect_contains "W27-R7g: a known limit says a read-only rc holding the env block is booked skipped by --all with nothing asked" \
-  "A read-only rc that holds bionic's retired environment block, with a declared tool present, makes \`--all\` count \"1 skipped by you\" for a question nobody could answer; nothing is lost, and the block is yours to delete by hand." \
+  "A read-only rc that holds bionic's retired environment block, with a declared tool present and nothing else of bionic's left, makes \`--all\` count \"1 skipped by you\" for a question nobody could answer; nothing is lost, and the block is yours to delete by hand." \
   "$W27R_LIMITS"
 expect_contains "W27-R7h: a known limit says a lone excalidraw lock hash reads already clean while it stays, and names the rm line" \
   "A lone \`excalidraw-venv.lock.sha256\` with no venv beside it, which is what deleting the venv by hand leaves, reads \"(not installed) — already clean\" while the file stays; delete it with \`rm ~/.local/share/bionic/excalidraw-venv.lock.sha256\` (under \`\$XDG_DATA_HOME\` if you set it)." \
   "$W27R_LIMITS"
-expect_contains "W27-R7i: the alias sentence says a block whose first line is still bionic's is not the case" \
-  "every shell start keeps printing the error until you do, unless the block's first line is still bionic's \`unalias\` line." \
+expect_contains "W27-R7i: the alias sentence says the error stays unless the block still holds bionic's unalias line above its claude() line" \
+  "every shell start keeps printing the error until you do, unless the block still holds bionic's \`unalias\` line above its \`claude()\` line." \
   "$W27R_LIMITS"
 W27R_JOINED="$(printf '%s' "$W27R_E" | tr '\n' ' ' | tr -s ' ')"
 expect_contains "W27-R7e: the upgrade note counts six ways in 1.11.0, and fixes all six" \
@@ -5875,6 +5881,206 @@ expect_true "W27-R8b: …and the code prints that tail" \
 expect_contains "W27-R8c: the per-path fix the entry quotes ends the same way" \
   "move <path> out of the tree, commit, say ready again'\`" "$W27R_JOINED"
 expect_no_regex "W27-R8d: …and the entry no longer quotes the old tail" "run the suites, land again" "$W27R_JOINED"
+
+# ============================================================
+# §W28-71 — the 1.13.0 release entry (wave-28 T23; REQ-7 AC-7.1, D26)
+# ============================================================
+# Relations, not the 1.12.0 pattern: W27-R6 is written for the 1.12.0 entry alone. The entry is read
+# by its own extractor, is the newest and the manifest's version (SEMVER-6), is a minor release that
+# keeps the contract version, says a run open at upgrade continues and that the landing line has not
+# met a real burst, names what AC-7.1 lists, quotes each refusal by a first line whose fix the code
+# at this head still prints, states the deferrals it carries as sentences, and names no run row,
+# ruling id, review pass or grade. The version itself is SEMVER-6's.
+# w28_71_entry <changelog> -> the body of the 1.13.0 entry, heading excluded.
+w28_71_entry() { awk '/^## 1\.13\.0 /{ p = 1; next } p && /^## [0-9]/{ exit } p' "$1" 2>/dev/null; }
+W28_71_E="$(w28_71_entry "${REPO}/CHANGELOG.md")"
+W28_71_J="$(printf '%s' "$W28_71_E" | tr '\n' ' ' | tr -s ' ')"
+W28_71_HEAD="$(/usr/bin/grep -m1 '^## 1\.13\.0 ' "${REPO}/CHANGELOG.md")"
+expect_nonempty "W28-71 precondition: CHANGELOG.md carries a 1.13.0 entry" "$W28_71_E"
+expect_nonempty "W28-71 precondition: the 1.13.0 heading line reads" "$W28_71_HEAD"
+expect_regex "W28-71a: the 1.13.0 entry is dated (the day it is cut)" \
+  '^## 1\.13\.0 — 20[0-9]{2}-[0-9]{2}-[0-9]{2}$' "$W28_71_HEAD"
+expect_eq "W28-71b: …and it is the newest entry" "1.13.0" "$(changelog_head_version "${REPO}/CHANGELOG.md")"
+expect_contains "W28-71c: the entry says it is a minor release" "This is a minor release" "$W28_71_J"
+expect_contains "W28-71c2: …and that the contract version stays 14" '`canonical_sdlc_version` stays 14' "$W28_71_J"
+expect_contains "W28-71d: a run open at upgrade continues on its 1.12.0 plan with no edit (D26)" \
+  "A run open at upgrade continues on its 1.12.0 plan with no edit." "$W28_71_J"
+expect_contains "W28-71e: …and the landing line has not met a real burst before release (D26)" \
+  "The landing line has not met a real burst before this release." "$W28_71_J"
+for _w2871 in 'What you will notice:' 'Newly refused:' 'Upgrade, for a plan already in flight:' 'Fixes:' 'Known limits, carried to the next release:'; do
+  expect_contains "W28-71f: the entry carries the part \"$_w2871\"" "$_w2871" "$W28_71_E"
+done
+# AC-7.1: each change a user meets.
+expect_contains "W28-71g: the ready verb, with the owed line it prints" \
+  "owed: complete task <row>, then stop <name>" "$W28_71_J"
+expect_contains "W28-71g2: …STALLED by name" '`STALLED <row> <logs>`' "$W28_71_J"
+expect_contains "W28-71g3: …DEBT" 'printing `DEBT …`' "$W28_71_J"
+expect_contains "W28-71g4: …PLAN-UNWRITTEN" '`PLAN-UNWRITTEN <row> — published <commit>' "$W28_71_J"
+expect_contains "W28-71g5: …and standdown reports and lands nothing" \
+  "reports each open row's tree as it stands and lands nothing" "$W28_71_J"
+expect_contains "W28-71h: the hand landing, with its reason" \
+  "\`land <tree> --by-hand --reason '<why>'\`" "$W28_71_J"
+expect_contains "W28-71i: the share, with its default and where it is set" \
+  '`share <n>` sets it, 1 to 100; 80 is the default. Setup offers to write it' "$W28_71_J"
+expect_contains "W28-71j: the plan line no longer required, and the probe's number capping nothing" \
+  'A plan no longer needs a `parallel-budget:` line, and the probe'"'"'s number caps nothing.' "$W28_71_J"
+expect_contains "W28-71j2: …a line caps only when marked source=user or source=override" \
+  'caps writers only when marked `source=user` or `source=override`' "$W28_71_J"
+expect_contains "W28-71k: the severity scale and its rule" \
+  "Every review finding is rated, and the rating is a rule." "$W28_71_J"
+expect_contains "W28-71k2: …the table decides what is fixed, deferred and noted" \
+  "are fixed; an S2 a user does not meet, and an S3 a user meets, are deferred; an S3 a user does not meet, and an S4, are noted." "$W28_71_J"
+expect_contains "W28-71l: width from the gate" "**Width comes from the gate.**" "$W28_71_J"
+expect_contains "W28-71l2: …every heavy command asks it" "**Every heavy command asks the gate.**" "$W28_71_J"
+expect_contains "W28-71l3: …the Stop wall's owed count" "**The Stop wall's owed count reads the gate store once.**" "$W28_71_J"
+expect_contains "W28-71m: the rigor words" '`low` is `tested`, `medium` is `peer-reviewed`' "$W28_71_J"
+expect_contains "W28-71n: the one door" "**A dispatched agent runs a suite through one door.**" "$W28_71_J"
+expect_contains "W28-71o: the labels" '`Lands-on: <suite>[, <suite>]`' "$W28_71_J"
+expect_contains "W28-71p: the task-entry duty" "**A dispatching turn keeps the task list honest.**" "$W28_71_J"
+expect_contains "W28-71q: the install record" "~/.claude/bionic/installed" "$W28_71_J"
+expect_contains "W28-71r: the hazards lint" '`tests/shell-lint.test.sh`' "$W28_71_J"
+expect_contains "W28-71s: the guard's fix now ends say ready again" 'ends "say ready again"' "$W28_71_J"
+expect_contains "W28-71z: the door is the shape from 1.13.0 on, and a 1.12.0 wall reads it as the full tree" \
+  'The door is the shape from 1.13.0 on: a 1.12.0 wall reads `tests/run.sh --only` as the full tree' "$W28_71_J"
+expect_contains "W28-71y: a project declares its floor (D36)" \
+  'A project declares its floor with `floor: <command>` in `.bionic/config.yaml`; `floor-run` runs it and `proof-add floor` accepts its log; `floor-attestation: user` accepts the user'"'"'s attestation record; a project with neither keeps the `tests/run.sh` rule.' "$W28_71_J"
+expect_contains "W28-71y2: …floor-run refuses a project that declares no floor, with the line it prints" \
+  'poker: REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run.' "$W28_71_J"
+# W28-71t: each refusal the entry quotes carries a fix the code at this head prints. W27-R5's extractor
+# reads any entry's "Newly refused" part; the code spells a fix in double quotes or, in lib/stop.sh, in
+# single quotes (FIX='…'), so this gap reader accepts either.
+# w28_71_fix_gaps <entry text> -> each quoted fix no shipped script prints as a quoted literal.
+w28_71_fix_gaps() {
+  local fix needle
+  w27r_fixes "$1" | while IFS= read -r fix; do
+    case "$fix" in *"<"*) needle="${fix%%<*}" ;; *) needle="$fix" ;; esac
+    { /usr/bin/grep -rqF -- "\"$needle" "${REPO}/hooks" "${REPO}/payload/scripts" \
+      || /usr/bin/grep -rqF -- "'$needle" "${REPO}/hooks" "${REPO}/payload/scripts"; } \
+      || echo "not printed by the code: $fix"
+  done
+}
+expect_nonempty "W28-71t precondition: the entry quotes refusal first lines with their fixes" "$(w27r_fixes "$W28_71_E")"
+expect_eq "W28-71t: every quoted fix is one the code at this head prints" "" "$(w28_71_fix_gaps "$W28_71_E")"
+W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed 's/(add Row: <id>)`/(add a row line)`/')"
+expect_contains "W28-71tm: …and a quoted fix the code does not print is caught" \
+  "not printed by the code: add a row line" "$(w28_71_fix_gaps "$W28_71_DOC")"
+# W28-71u: no run row, ruling id, review pass or grade in a user's release notes.
+W28_71_WORDS='(^|[^A-Za-z0-9])(T[0-9]{1,2}|P[0-3])([^A-Za-z0-9]|$)|A-orch|review pass'
+expect_no_regex "W28-71u: the entry names no run row, ruling id, review pass or grade" "$W28_71_WORDS" "$W28_71_E"
+expect_regex "W28-71um: …and the same pattern finds a row id planted in the entry" "$W28_71_WORDS" "$W28_71_E (T19)"
+# W28-71v: the known limits. Each deferral the run carried is a bullet that opens "Known limit:".
+w28_71_limits() { printf '%s\n' "$1" | awk '/^Known limits, carried to the next release:/{ p = 1; next } p'; }
+W28_71_LIM="$(w28_71_limits "$W28_71_E" | tr '\n' ' ' | tr -s ' ')"
+W28_71_NLIM="$(w28_71_limits "$W28_71_E" | /usr/bin/grep -c '^- Known limit: ')"
+expect_nonempty "W28-71v precondition: the known-limits part reads" "$W28_71_LIM"
+expect_true "W28-71v: …and it holds at least fifty bullets that open \"Known limit:\" (read: $W28_71_NLIM)" \
+  test "${W28_71_NLIM:-0}" -ge 50
+for _w2871 in \
+  '`lib/gate.sh` and `close-out.sh` each define a function named `gate_ask` with different arguments' \
+  'a whole-machine run asked of the gate is passed by every later ask while anything is admitted' \
+  'a hook that outruns its timeout under load is cancelled by the harness and the action is admitted unjudged' \
+  'a successor instance with no `row=` label and no ledger or Tasks cell naming it is not counted as the code'"'"'s writer' \
+  'the landings figures count only landings the line recorded as events' \
+  'the landings line'"'"'s gate figures count requests still in the store' \
+  'a pasted block containing a `</pasted_content …>` close inside its text is cut at that inner close' \
+  'a row whose Files cell marks a path unmergeable (`path!`) is not found as that path'"'"'s writer by `finding-check`' \
+  'a floor declared with `floor:` or attested with `floor-attestation: user` proves the floor as a whole' \
+  'the attestation record is the user'"'"'s own word: the tool checks its two lines and the head, never who wrote `floor-attested-by:`' \
+  '`config_value` reads a `floor:` key wherever it stands in `.bionic/config.yaml`' \
+  'a request number is reused after the gate prunes a gone request, so an orphaned waiter may admit a newcomer'"'"'s request' \
+  'the deadline of the dispatch wall and of the stop guard is a trap that bash runs only after a running'; do
+  expect_contains "W28-71w: the entry states the limit: ${_w2871:0:60}…" "Known limit: $_w2871" "$W28_71_LIM"
+done
+# …and a limit a row closed in the wave is not written.
+for _w2871 in \
+  'a stalled row at the head of the line holds the rows behind it' \
+  '`card.sh rigor <word>` prints the rigor line the Step 0 card is meant to carry' \
+  'a symlink on the interpreter pin'"'"'s parent path is judged by the mode of the directory that holds it' \
+  'once a run has one landing, the Patrol'"'"'s tick prints a `poker: landings:` line on every tick' \
+  'D16'"'"'s Step-4 fact `share: <n>` is not written on the plan by any verb' \
+  '`finding-check` decides whether a check record'"'"'s writer is the code'"'"'s writer by exact match' \
+  'in a project whose `tests/run.sh` takes no `--only`' \
+  'the gate'"'"'s request files are never pruned'; do
+  expect_absent "W28-71x: the entry does not state the closed limit: ${_w2871:0:60}…" "$_w2871" "$W28_71_LIM"
+done
+
+# ============================================================
+# §W28-152 — five limits 1.12.0 left unstated or misstated (wave-28 T23; REQ-15 AC-15.2, D32)
+# ============================================================
+# The sweep's consequence, the --all trigger in both sentences and the unalias clause are corrected in
+# the 1.12.0 entry in place; the Patrol's clock under `claude -p` in auto mode and the guard's ASCII-only
+# fold are stated new in the 1.13.0 entry. Each is a whole sentence, read beside a positive on the same
+# extractor, and the old wording is gone.
+W28_152_OLD="$(w27r_part "$(w27r_entry "${REPO}/CHANGELOG.md")" 'Known limits, carried to the next release:')"
+expect_contains "W28-152 precondition: the 1.12.0 limits part reads (it holds the rc limit)" \
+  "No door removes a line of your rc" "$W28_152_OLD"
+expect_contains "W28-152a: the sweep's limit names what the cost leads to" \
+  "The sweep stops at 10 seconds, which is also the SessionStart hook's timeout, so a sweep that reaches its bound takes the whole hook past the CLI's limit: the session loses its start page rather than starting late." \
+  "$W28_152_OLD"
+expect_contains "W28-152b: the standalone-remove sentence names its trigger" \
+  'its `--all`, when nothing else of bionic'"'"'s is left, calls a machine with tools on it' "$W28_152_OLD"
+expect_contains "W28-152b2: the read-only-rc sentence names its trigger" \
+  'with a declared tool present and nothing else of bionic'"'"'s left, makes `--all` count' "$W28_152_OLD"
+expect_contains "W28-152c: the unalias clause names the line that clears the alias, not the block's first line" \
+  'unless the block still holds bionic'"'"'s `unalias` line above its `claude()` line.' "$W28_152_OLD"
+expect_absent "W28-152c2: …and the old clause is gone" "unless the block's first line is still bionic's" "$W28_152_OLD"
+expect_contains "W28-152d: the Patrol's clock under claude -p in auto mode is a stated limit" \
+  'Known limit: under `claude -p` in auto mode the CLI'"'"'s own classifier can deny the Patrol'"'"'s recurring `CronCreate` as unauthorized persistence' "$W28_71_LIM"
+expect_contains "W28-152e: the landing guard folds ASCII case only, and says so" \
+  'Known limit: the `.bionic` landing guard folds ASCII case only;' "$W28_71_LIM"
+
+# ============================================================
+# §W28-71D — the doctrine touches the release carries (wave-28 T23; A-orch-142/146/238/254)
+# ============================================================
+# Each sentence is read by w26_hits (flattened text) beside a positive on the same file, and the
+# two that replace older wording have a doctored copy that restores the old wording and is caught.
+W28_71D_OPS="${SKILL_DIR}/operational-rules.md"
+W28_71D_SURV="${REPO}/payload/context/survival.md"
+W28_71D_BIND='A dispatch is bound to one row, found one way: the row its `Row:` names, else the row its agent name matches'
+W28_71D_OLDBIND="so a brief whose \`Row:\` names one row under another row's name meets the approval wall as the name's row"
+expect_nonempty "W28-71D precondition: the extractor finds the Files paragraph in dispatch.md" "$(w26_hits 'The brief declares the FILES the task will touch' "$DISPATCH_MD")"
+expect_nonempty "W28-71D1: dispatch.md binds a dispatch to one row, found one way" "$(w26_hits "$W28_71D_BIND" "$DISPATCH_MD")"
+expect_nonempty "W28-71D1b: …a Row: naming another row than the name matches is refused, as is a name matching several rows" \
+  "$(w26_hits 'A `Row:` naming another row than the name matches is refused, and so is a name matching several rows with no `Row:` (add `Row: <id>`)' "$DISPATCH_MD")"
+expect_eq "W28-71D1c: …and the qualified sentence it replaces is gone" "" "$(w26_hits "$W28_71D_OLDBIND" "$DISPATCH_MD")"
+W28_71D_DOCB="$(w26_doctor "$DISPATCH_MD" "$W28_71D_OLDBIND")"
+expect_nonempty "W28-71D1m: …and a dispatch.md that keeps the old sentence is caught" "$(w26_hits "$W28_71D_OLDBIND" "$W28_71D_DOCB")"
+expect_nonempty "W28-71D2: the evidence recipe in survival.md carries the door's condition" \
+  "$(w26_hits 'In a project whose `tests/run.sh` takes `--only`: `cd <TREE> || exit 1;' "$W28_71D_SURV")"
+W28_71D_RULE5='cd <TREE> || exit 1; LOG=<path>; set -o pipefail; tests/run.sh --only <suite>.test.sh 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc'
+expect_nonempty "W28-71D2b: …and still shows the door form beside it" "$(w26_hits "$W28_71D_RULE5" "$W28_71D_SURV")"
+expect_nonempty "W28-71D2c: …and says what to run where there is no such runner, and for a build or a drill" \
+  "$(w26_hits 'with no such runner, or for a build or a drill, the same shape with that command' "$W28_71D_SURV")"
+expect_nonempty "W28-71D3: the liveness paragraph names the claimed process before it speaks of it" \
+  "$(w26_hits 'While a process the brief claims (`claims=`, below) exists, quiescence is irrelevant' "$DISPATCH_MD")"
+expect_nonempty "W28-71D4: the dispatch paragraph tells the orchestrator to run launch-sync after every dispatch and read it" \
+  "$(w26_hits 'Run `session-poker.sh launch-sync` after every dispatch and read it' "$DISPATCH_MD")"
+expect_nonempty "W28-71D4b: …a launch the roster cannot carry is refused, and the wall and the guard refuse at a deadline" \
+  "$(w26_hits 'A launch the roster cannot carry is refused; the dispatch wall and the stop guard each refuse at a deadline 3 s under their registration.' "$DISPATCH_MD")"
+expect_nonempty "W28-71D5: an agent no roster holds is stopped as unrostered, once, and a predecessor's live writer is refused" \
+  "$(w26_hits "stop-orders.sh unrostered <name> '<why>'\`, once; a predecessor's live writer is refused (adopt it), and \`order\` stays the human's." "$DISPATCH_MD")"
+expect_nonempty "W28-71D6: the plan-verb list carries step-field, and current 4 records the share" \
+  "$(w26_hits '`step-field <N> <key>=<value>`, `current <N>` (at 4 on a wave it records `share: <n>`)' "$DISPATCH_MD")"
+expect_nonempty "W28-71D6b: …and floor-run, which writes no plan" \
+  "$(w26_hits '`floor-run` runs the declared floor and writes no plan.' "$DISPATCH_MD")"
+expect_nonempty "W28-71D10: steps/5.md teaches the declared floor's log and the attestation record" \
+  "$(w26_hits 'runs it with `session-poker.sh floor-run` and records that log the same way: it opens `head=<40-hex> dirty=<n> rc=<n>` and is judged by that line alone.' "${SKILL_DIR}/steps/5.md")"
+expect_nonempty "W28-71D10b: …and the attestation file's two lines" \
+  "$(w26_hits 'a `head=<40-hex> dirty=0` line and a `floor-attested-by: <who> <when> <what ran>` line.' "${SKILL_DIR}/steps/5.md")"
+expect_nonempty "W28-71D11: SKILL.md's artifact layout names the floor keys beside the config file" \
+  "$(w26_hits '`release-check:`, and `floor: <command>` or `floor-attestation: user` # when a project'"'"'s floor is not tests/run.sh' "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-71D7: the tick's landings line sits above the decision line" \
+  "$(w26_hits 'a changed tick prints `poker: landings: …` above the decision line' "$DISPATCH_MD")"
+expect_nonempty "W28-71D8: steps/6.md teaches the check, the move and the one-pass rule" \
+  "$(w26_hits 'A record path registers one pass; the `check:`, `deferred:` and `moved:` lines that bind a finding belong to that pass' "${SKILL_DIR}/steps/6.md")"
+expect_nonempty "W28-71D8b: …finding-check and finding-move by name" \
+  "$(w26_hits '`session-poker.sh finding-move <record>#<n> <defer|fix>' "${SKILL_DIR}/steps/6.md")"
+expect_nonempty "W28-71D12: operational-rules states the marker-but-no-open-run rule under the engagement section" \
+  "$(w26_hits 'It still enforces whatever it can enforce without one' "$W28_71D_OPS")"
+expect_nonempty "W28-71D9: operational-rules keeps the sentences the release cut from dispatch.md" \
+  "$(w26_hits 'its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm' "$W28_71D_OPS")"
+expect_eq "W28-71D9b: …and dispatch.md no longer carries the one it cut" "" \
+  "$(w26_hits 'its 7-day auto-expiry is the forgotten-disarm backstop' "$DISPATCH_MD")"
 
 
 # ── §W28-S (wave-28 T16; REQ-8 AC-8.2, D20) ──

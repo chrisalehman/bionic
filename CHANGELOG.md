@@ -10,6 +10,481 @@ Versioning follows semver from 1.9.0 on:
   or an upgrade step.
 - **PATCH** for a fix within existing behaviour.
 
+## 1.13.0 — 2026-10-07
+
+A row of work now lands by one line, `spawn-worktree.sh ready`, and a person lands one by hand with
+`land <tree> --by-hand --reason '<why>'`. Width follows the machine's own load, read at one gate and
+bounded by a share you can set. Every review finding is rated by a written scale, and the rating
+decides whether it is fixed, deferred or noted. A project can declare its own floor. This is a minor
+release: it adds verbs, configuration keys and plan facts, and refuses actions that were not refused
+before. Nothing a project already relies on is removed, and `canonical_sdlc_version` stays 14. A run
+open at upgrade continues on its 1.12.0 plan with no edit. The landing line has not met a real burst
+before this release.
+
+What you will notice:
+
+- **One line lands a row.** `spawn-worktree.sh ready`, said from a row's own tree, builds the row on
+  the working branch and on the rows ahead of it, runs the suites the row lands on through the
+  gate, and publishes when they are green and the row is first in line. It prints
+  `LANDED <row> <commit>`, then the acts still owed, in the order to do them:
+  `landed <row> <commit> — owed: complete task <row>, then stop <name>` (exit 0). A red suite returns
+  the row, `RED <row> <suite> <log>`, and moves nothing; the log is kept under the record
+  directory's `line/`. A row that conflicts with a row ahead is returned with `CONFLICT <row> <files>`,
+  a row whose range commits `.bionic` with `GUARD <row> <path> <commit>`, and a row that waits
+  for the gate with `WAITING <row> — run again: <the same command>` (exit 75), its place kept.
+  `ready --within <seconds>` never starts a suite whose usual time is more than the time left. A
+  row proved on the candidate of a row ahead is stopped, rebuilt and proved again when that row is
+  returned, so a refused row never holds up or leaks into the rows behind it. No writer runs a
+  proof for the landing; `ready` makes its own.
+- **A red means what the line can prove.** A suite killed by a signal, unable to start, or ending
+  with no verdict line is run again, and a second such run stops `ready` with
+  `STALLED <row> <logs>` (exit 70). A red whose failing lines all fail at the accepted head too,
+  line for line and counted, is the branch's, not the row's: the row lands, and the tick says
+  `standing … at <head>` once. A row that declared `Lands-red: <suite>` lands red on that suite
+  alone, printing `DEBT …`; its debt is written before the fast-forward and voided if the
+  fast-forward fails. The tick prints each standing red and each stalled entry once, with its logs.
+  `ready --within 08` means eight seconds, and a `BIONIC_LINE_POLL` that is no number falls back to
+  one second.
+- **A hand landing is a person's act, and it is recorded.** `spawn-worktree.sh land <tree>` on its own
+  refuses and names both ways to land. `land <tree> --by-hand --reason '<why>'` publishes through
+  the line's one lock and records the git user, the time and the reason on the landing record and on
+  the row's `- T<n>:` line. A subagent's hand landing is refused by the Bash wall. A plain `git merge`
+  of a row's branch into the working branch is counted: the next read of the line marks the row landed
+  by git, and a row tree with no commit of its own is not counted as landed by a merge. A publish waits
+  (`HELD`) while a suite runs in the checkout that holds the working branch, and stops (`MOVED`) when a
+  real checkout moved during the run.
+- **The landing writes its own plan row.** A landing sets the row `landed`, adds its step-line text and
+  its ledger line, and marks the agent's roster row, in one write of the plan. If the plan changed
+  under that write, `ready` prints `PLAN-UNWRITTEN <row> — published <commit>; the plan row is not
+  written: run row-landed <row> <commit> <at> from the main thread`. `stop-orders.sh standdown` now
+  reports each open row's tree as it stands and lands nothing; `stop-orders.sh stopped <name>`
+  closes a landed row and removes its tree when its head is in the landed commit.
+- **The share.** `session-poker.sh share` prints the machine's share of its own resources and
+  `share <n>` sets it, 1 to 100; 80 is the default. Setup offers to write it, `/bionic:remove` takes
+  the file out on a yes, and `/bionic:doctor` reports the share, whether it came from the file or the
+  default, and the gate's own row.
+- **A plan no longer needs a `parallel-budget:` line, and the probe's number caps nothing.** Step 0's
+  probe is an estimate. A `parallel-budget:` line caps writers only when marked `source=user` or
+  `source=override`; `session-poker.sh budget writers=<n> '<reply>'` on a plan with no line writes
+  `parallel-budget: writers=<n> source=user`. The dispatch wall no longer counts worktrees and no
+  longer warns about a plan with no budget line, and the Step 3 card reads writers only from a
+  person's cap and says "writers not declared" otherwise. `spawn-worktree.sh create` refuses when free
+  disk is under the largest tree.
+- **Width comes from the gate.** The Patrol's tick prints one gate line,
+  `poker: gate share=<n> used=<n>% load=<1m>/<5m> of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no>`,
+  and, while memory is over the share, `poker: over share — used=<n>% admitted: <keys>`. The fill asks
+  the gate once per ready writer row and stops at its first no; the only cap is a person's. The rung,
+  the two holds, the emergency block and the kill floor are gone.
+- **Every heavy command asks the gate.** The Bash wall wraps a suite, a build or a drill in
+  `booked.sh`, which asks the gate before it runs; a command the gate does not admit in its time
+  exits 75 with the line to run again, nothing run, never a kill. A timing check
+  (`BIONIC_QUIET=1` or a `# runner: solo` marker) takes the whole machine, and a disturbed passing run
+  reports `void`. Doctor shows the gate's row.
+- **The Stop wall's owed count reads the gate store once.** It no longer forks a grep per request file
+  per writer, so it stays under the Stop hook's timeout however many requests have piled up. Ended
+  gate requests older than `BIONIC_GATE_KEEP` seconds (default one day) are removed. A request whose
+  holder is gone is no longer counted as running, and the check reads a store of any size.
+- **The run prints its own numbers.** `session-poker.sh landing-report [--rows] [<plan>]` prints the
+  run's landings by kind, the minutes from each row's first `ready` to its landing (median, p75, max),
+  its suite runs by outcome, how long runs waited for the gate and how many were killed. A row's
+  runs are counted by the commits that row built, so a row that waited behind another does not show
+  the accepted head's run as its own. The tick prints the line above its decision line, on every tick
+  that is not `unchanged`; a passing `release-check` prints it with one line per landed row; the
+  continuation close-out writes carries a `## Landings` section. A run whose record predates the
+  line reads `unmeasured`, not zero. Nothing decides on any of it.
+- **Every review finding is rated, and the rating is a rule.** A reader dealt the scale
+  (`payload/context/severity.md`, pushed beside the code questions' checks) rates each finding
+  S1 to S4 and `on` or `off` by whether a user who follows what the run ships meets it. The table
+  decides: an S1, and an S2 a user meets, are fixed; an S2 a user does not meet, and an S3 a user
+  meets, are deferred; an S3 a user does not meet, and an S4, are noted. A
+  review pushed the scale is registered only when it states `findings: <n>` and one
+  `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>` per finding; its `result:` is the one its
+  findings derive, and a written `priority:` that differs from the table is refused. Registering a rated
+  review writes a `deferred:` line for each finding the table defers and a `check:` line for each
+  finding the reader could not settle; the tick prints `poker: FINDING <record>#<n> <S> <reach>
+  <priority> "<title>"` for each. A review from a reader that was not pushed the scale registers as
+  in 1.12.0.
+- **A deferral is held to its debts.** `session-poker.sh finding-stated '<record>#<n>' '<sentence>'`
+  writes a deferred finding's one changelog sentence onto its plan line, and `release-check` prints each
+  deferral as `stated` or `unstated` against `CHANGELOG.md`, refusing nothing for it. Close-out carries
+  the run's own and inherited deferrals into the continuation under `## Deferrals`, including a
+  continuation that already has that section, and the next Step 1 card lists every deferral of the
+  newest continuation until the requirements file's `## Inherited deferrals` section disposes of each:
+  `adopted: <id> as REQ-<n>`, `again: <id>` or `closed: <id> <reason>`.
+- **A finding the reader cannot settle owes a check, and a move is the user's word.**
+  `session-poker.sh finding-check <record>#<n> settled <S> <reach> | refuted | unsettled <check record>`
+  settles the check an `unsure:` finding owes. A check record sits under the record directory, names
+  its writer with `written-by:`, and is refused when that writer is the finding's reviewer or the
+  code's writer. `current 8` waits on every open check. A settled check re-rates its finding at every
+  read, and the commit wall reads a review's result the way `current 8` does.
+  `session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'` moves a
+  finding across the line, on the main thread only, and only on words the user typed in this session,
+  as whole words in a prompt: a pasted block, a tool's result, a teammate's or another session's
+  message, a hook's context and the orchestrator's own text are not the user's. A quote is at least
+  three words, or the user's whole prompt (a slash command's arguments, for a slash command). An S1
+  is never moved to defer.
+- **A record path registers one pass.** `proof-add review` refuses a record path a second time for
+  another pass, once a check, a deferral or a move is written on it; a second pass is written to a
+  new record path. The commit wall derives a reading's result only from Step 6 on and in one pass, so
+  a commit at Step 4 no longer pays for every reading (17 seconds with 88 checks before; 0.7 seconds
+  now).
+- **The reader exam passes a sample only on a declared finding the table sends to fix.** A reader's
+  answer to a defect sample must carry a `finding:` line for the key's file at a rating the key
+  admits; a description alone is `missed`. A stale sitting is marked `stale:` and a re-sit is owed.
+- **Review rigor is `low`, `medium` and `high`.** `low` is `tested`, `medium` is `peer-reviewed`
+  and `high` is `audited`: the tool reads either word as the same level, and a file carrying an old word
+  is read as it is and never rewritten. A run is announced as `<intent> · <level> rigor · <scale>`
+  (for example `build · high rigor · wave`), followed by the line `card.sh rigor` prints, such as
+  `review rigor: high (three independent readers)`.
+- **A dispatched agent runs a suite through one door.** In a project whose `tests/run.sh` takes
+  `--only`, `tests/run.sh --only <suite>[ <suite>…]` runs just the named suites with the full run's
+  interpreter pin, environment, walls and one gate ask each, and a dispatched agent's bare
+  `bash tests/<suite>.test.sh`, in any form, is refused with one line naming it. The classifier now reads
+  a suite run through a `for` or `while` loop, a variable or a binding. A suite run by hand whose
+  interpreter pin cannot be built stops with exit 2, naming the pin's path and the reason, where it used
+  to run unpinned. The door is the shape from 1.13.0 on: a 1.12.0 wall reads `tests/run.sh --only` as the
+  full tree, so until the new plugin is installed a project runs a suite by its file path.
+- **The interpreter pin is judged along its whole path.** The pin is refused under a directory another
+  user can write, replace or add entries to (including by a macOS or Linux ACL), under a parent
+  that group or others can write and that has no sticky bit, through a directory owned by another user,
+  or at a pin root another user planted, even one swapped for a link while it was built. A temp
+  directory or any directory on the path that does not exist, a relative root or a relative
+  `TMPDIR` is refused; the refusal says to set `TMPDIR`. The pin builds again inside an unprivileged
+  user namespace (bubblewrap, a Nix sandbox, `unshare -U`), where a host `/tmp` bound into the sandbox is
+  still refused because the sandbox's tmpfs root reads as the user. A root that vanished between two
+  checks is refused, and the pin's entry on `PATH` is physical.
+- **A brief names its row and its suites.** The brief scaffold carries `Row: <id>` and
+  `Lands-on: <suite>[, <suite>]` (or `Lands-on: none <reason>`), and `Expected artifact:` takes a bare
+  file name. A dispatch is bound to one row: the row its `Row:` names, else the row its agent name
+  matches; a `Row:` that names a different row than the name matches is refused, and so is a name that
+  matches more than one row with no `Row:` to say which. `ready` proves a row on the suites the walls
+  read for it, so a row widened by `amend` lands on the widened set and a run adopted after `/clear`
+  lands by `ready`; `run.sh` in a suite list is refused naming its key.
+- **A dispatching turn keeps the task list honest.** A turn that dispatches plan rows must set each
+  dispatched row's task entry in progress before it ends; the turn-end wall counts those updates
+  against the rows the turn launched and refuses the turn once when there are fewer.
+- **A dispatch the roster cannot record is refused, and an agent the roster never saw can be stopped.**
+  An unwritable roster, a roster path that is a link, a launch row that does not build, and a
+  dispatch wall that has not finished 3 seconds before the harness would cancel it each refuse the
+  dispatch instead of admitting it; the stop guard refuses a stop it has not finished judging 3
+  seconds before its own timeout. `stop-orders.sh unrostered <name> '<why>'` is the orchestrator's one
+  word for a listed agent the roster never saw: honoured once, written to the roster as a closed row,
+  and only for a name no roster of the project (this session's, a predecessor's, a dead session's)
+  holds. A read-only role launched from inside an agent prints
+  `bionic: dispatch admitted without a roster row — …`: it never had a row, and now says so.
+- **A project declares its own floor.** A project declares its floor with `floor: <command>` in
+  `.bionic/config.yaml`; `floor-run` runs it and `proof-add floor` accepts its log; `floor-attestation: user`
+  accepts the user's attestation record; a project with neither keeps the `tests/run.sh` rule. The log
+  `floor-run` writes opens with `head=<40-hex> dirty=<n> rc=<n>`, and `proof-add floor` judges it by that
+  line alone: the head is the working head, the tree was clean, the floor passed. An attestation record is
+  any file under `record/` holding a flush-left `head=<40-hex> dirty=0` line naming the working head and a
+  `floor-attested-by: <who> <when> <what ran>` line. The tool checks the contract, not the runner's output.
+  `floor-run` writes no plan and no proof, so a dispatched writer may run it.
+- **Step evidence is written by a verb.** `session-poker.sh step-field <N> <key>=<value>` writes or
+  replaces one field of a step's evidence block (`head`, `cmd`, `pass`, `total`, `output`, `merge`,
+  `worktree-removed`, `adr`, `share`) through the plan transaction, and `current 4` on a wave plan
+  records `share: <n>`. `finding-check` finds the code's writer by the `Files:` matcher and counts
+  every agent the row carried.
+- **Setup and remove keep a record of what they install.** Setup, and a route's mid-session offer,
+  write each tool they install to `~/.claude/bionic/installed` (name, kind, time, bionic version).
+  `/bionic:remove` offers to remove a tool that record names and removes it on a yes; a tool with no
+  line is still named with its by-hand command and left alone. A recorded Playwright browser or pnpm
+  store entry is named as bionic's but left in place, because other projects share the cache.
+  `/bionic:doctor` has an INSTALL RECORD section listing what bionic installed; a name bionic no
+  longer knows reads `unknown`. This retires the limit 1.12.0 listed on the missing record: a tool
+  installed before this release has no line, so remove keeps naming it for removal by hand.
+- **Guards.** The `.bionic` landing guard's fix now ends "say ready again" and says nothing of
+  stamps; for a submodule link under `.bionic` it names the commit that added the link, and its fix
+  takes the link out of the index. A shell script's `case` arm with no opening paren inside `$( … )`
+  and bash 3.2's two heredoc hazards are found by a new suite, `tests/shell-lint.test.sh`, which also
+  loads every library under `/bin/bash`. The doctrine is rewritten for one landing line, one gate and
+  one door.
+- **For contributors.** The three slowest suites were timed alone and one cut landed, about 2% of the
+  slowest; the target of a third off each missed, and the measured costs lie in the hook and door
+  drives the rows run, recorded with their numbers for the next release.
+
+Newly refused:
+
+The refusals of the poker's, the stop script's and the worktree script's verbs name a path, a head or a
+record, and run past 100 columns; the walls, the Stop wall, the dispatch wall and the stop guard keep
+the first line of a refusal to 100.
+
+- `spawn-worktree.sh land <tree>` on its own:
+  `land: the line lands a row with "ready"; a person lands one with "land <tree> --by-hand --reason '<why>'"`.
+- A hand landing with no reason, or a reason holding a `|` or a line break:
+  `spawn-worktree: REFUSED reason=no-reason path=<tree> — a hand landing says why: land <tree> --by-hand --reason '<why>'`,
+  `spawn-worktree: REFUSED reason=reason-unwritable path=<tree> — the reason holds a | or a line break; say it on one line without |`.
+- `ready` from a place that is not a row's tree, on a detached head, or for a row with no launch line or no
+  suites to run:
+  `spawn-worktree: REFUSED reason=not-a-tree path=<cwd> — run ready from the row's own tree`,
+  `spawn-worktree: REFUSED reason=no-launch-row row=<row> roster=<path> — ready reads the row's suites off its launch line`,
+  `spawn-worktree: REFUSED reason=no-lands-on row=<row> name=<name> <key>=<value> — no suite to run; land <tree> --by-hand --reason '<why>'`.
+- A landing that cannot be recorded, or whose fast-forward fails:
+  `spawn-worktree: REFUSED reason=record-unwritable why=proofs-unwritable path=<rec> branch=<b> — the landing record cannot be written, so nothing is published; make it writable, say ready again`,
+  `spawn-worktree: REFUSED reason=publish-failed row=<r> branch=<b> candidate=<c> checkout=<co|<none>> — the fast-forward did not go through and nothing is published; say ready again`,
+  and, for a declared red's debt that cannot be written,
+  `spawn-worktree: REFUSED reason=debt-unwritten why=proofs-unwritable suite=<s> path=<rec> row=<row> — the declared red's debt cannot be written to the landing record (<saw>), so nothing is published; make it writable, say ready again`.
+- A row that does not merge onto what is ahead of it, or that left the line:
+  `spawn-worktree: REFUSED reason=conflict branch=<b> onto=<o> files=<f,…> — the row does not merge onto what is ahead of it; merge <onto> into the tree, land again`,
+  `spawn-worktree: REFUSED reason=not-in-line branch=<b> — the row left the line before its publish (git log <onto>)`.
+- A landing whose range adds `.bionic`:
+  `spawn-worktree: REFUSED reason=bionic-committed path=<p> commit=<12-hex> branch=<b> onto=<o> fix='git -C <tree> <remedy>, say ready again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree is kept`.
+- `spawn-worktree.sh create` when free disk is under the largest tree:
+  `spawn-worktree: FAIL reason=disk-low free_kb=<n> largest_tree_kb=<n>`.
+- A writer dispatch that binds a plan row and names no suites to land on, a `Lands-on:` with no reason,
+  a suite outside `Suites:`, or a `Row:` naming no plan row:
+  `bionic: dispatch refused — the brief has no Lands-on: line (add Lands-on: <suites> or none <why>)`,
+  `bionic: dispatch refused — Lands-on: none gives no reason (write the reason after none)`,
+  `bionic: dispatch refused — Lands-on: <suite> is outside Suites: (name a suite the row runs)`,
+  `bionic: dispatch refused — Row: <id> names no plan row (name a ## Tasks row id)`.
+- A `Row:` that names another row than the agent's name matches, and a name that matches more than one row
+  with no `Row:`:
+  `bionic: dispatch refused — Row: <id> is not the name's row <id> (rename or drop Row:)`,
+  `bionic: dispatch refused — the name matches rows <id>, <id> (add Row: <id>)`.
+- A dispatch the roster cannot carry:
+  `bionic: dispatch refused — the roster cannot be written (make it writable)`,
+  `bionic: dispatch refused — the roster path is a symbolic link (remove the link)`,
+  `bionic: dispatch refused — the launch row did not build (run /bionic:doctor)`,
+  `bionic: dispatch refused — the wall ran out of time (dispatch again)`.
+- A stop the guard cannot finish or record:
+  `bionic: stop refused — the stop guard did not finish in 7 s (stop again)`,
+  `bionic: stop refused — the stop could not be recorded (make the roster writable)`;
+  `stop-orders.sh unrostered` for a name some roster of the project holds, or a reason carrying a `|` or
+  a line break:
+  `stop-orders: REFUSED — <name> is on roster <id>'s row <status>.`,
+  `stop-orders: REFUSED — the reason holds a | or a line break; say it in one plain line.`
+- A dispatched agent's bare suite run, in a project whose `tests/run.sh` takes `--only`:
+  `bionic: suite-run refused — use tests/run.sh --only <suite file> (one door)`; and the interpreter pin,
+  by hand: `resolve-roots.sh: no interpreter pin at <root> — <why>; remove <root> or set TMPDIR, then run again`.
+- The end of a turn that dispatched plan rows while fewer of their task entries were set in progress:
+  `bionic: stop refused — a dispatched row's entry is not in progress (TaskUpdate each to in_progress)`.
+- A review pushed the severity scale, registered with `proof-add review`: the reading is refused, and the
+  plan unchanged, when it carries no `findings:` line, gives a count that is not the number of
+  `finding:` lines, rates a finding outside S1 to S4 or a reach other than `on` or `off`, names no
+  `<path>:<line>` or `-`, sends a finding to fix without a `shown:` command or an `unsure:` line, writes
+  a `priority:` the table does not give, or says a `result:` its findings do not derive; each line
+  begins `REFUSED — the reading <record> …` and says what to write. For `structure`, a `check:` that answers
+  FAIL beside no finding to fix, and a finding to fix beside no FAIL check, are refused the same way.
+  A record path registered again for another pass:
+  `poker: REFUSED — <record> is already registered at <12 hex>, not <12 hex>: write the pass to a new record path. The plan is unchanged.`
+- `session-poker.sh finding-check`: refused, with the plan unchanged, for a check the plan does not owe, a
+  check already settled, a check record that is missing, a link, outside the record directory, with no
+  `written-by:` or written by the finding's reviewer or the code's writer; and `current 8`:
+  `REFUSED — current: 8 waits on each check a finding owes; these check: lines are open (no settled=, no refuted):`.
+- `session-poker.sh finding-move`: refused, with the plan unchanged, for a finding the plan does not register,
+  a finding its check refuted, an S1 moved to defer, a repository with no `git user.name`, a session whose
+  transcript cannot be read, and words that stand in no prompt the user typed in this session:
+  `REFUSED — the words "<words>" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged.`
+  and a quote too short to be a decision:
+  `poker: REFUSED — the words "<words>" are too short to be the user's decision; quote at least 3 of their words, or their whole prompt. The plan is unchanged.`
+- `session-poker.sh floor-run` for a project that declares no `floor:`, for a plan whose working branch no
+  checkout holds, and for a floor that moved the working checkout while it ran; `proof-add floor` for a log
+  whose head is not the working head, whose tree was dirty, whose floor did not pass, or whose first line
+  is not the line `floor-run` writes, for an attestation that names no head or no `floor-attested-by:`
+  line, and for a `floor-attestation:` value other than `user`:
+  `poker: REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run.`,
+  `poker: REFUSED — the floor (<cmd>) moved the working checkout <co> while it ran (head <a> to <b>, dirty=<x> to dirty=<y>); no log was written. Put back what it changed and run floor-run again.`,
+  `poker: REFUSED — the run in <ev> read head <sha12>, but the working branch is at <head12>; run it again on <head12> and cite that log. The plan is unchanged.`,
+  `poker: REFUSED — the floor in <ev> did not pass (rc=<n>); fix it, run floor-run again and cite that log. The plan is unchanged.`
+- `session-poker.sh step-field` for a value with a line break, a key outside the nine, a step with no line, a
+  Step 9 block, or a step line that itself carries the key:
+  `poker: REFUSED — a step field is one line, and the value has a line break; the plan is unchanged.`,
+  `poker: REFUSED — '<key>' is not a step field; the plan is unchanged.`,
+  `poker: REFUSED — the plan has no Step <N> line; step-line writes it first. The plan is unchanged.`,
+  `poker: REFUSED — the Step 9a block is close-out's to write (scripts/close-out.sh).`
+- `session-poker.sh share` with a value that is not a whole number from 1 to 100:
+  `poker: REFUSED — share <value> is not a whole number from 1 to 100; the share is unchanged.`
+- `session-poker.sh finding-stated` with a sentence that is blank or a `<record>#<n>` that is not one is a
+  usage error; `close-out` over a continuation whose inherited deferrals cannot be read:
+  `could not read the deferrals this run inherited (card.sh inherited) — no continuation written`.
+- `card.sh step1` when a disposal names a deferral the newest continuation does not carry:
+  `card.sh: step1 refused — a disposal names a deferral the newest continuation does not carry`.
+
+Upgrade, for a plan already in flight:
+
+- Upgrade the plugin and keep working. A run open at upgrade keeps its plan as written: nothing is
+  edited, a tree holding a stamp is landed by `ready`, which ignores stamps, and the plan's bytes
+  outside a row's own lines are unchanged by `ready`, a tick or a hand landing.
+- A row dispatched under 1.12.0 carries no `lands_on=` on its launch line. `ready` for it refuses
+  `no-lands-on`, naming the hand landing, and the dispatch wall refuses the next unlabelled writer brief
+  that binds a row, naming the line to add: its next writer dispatch that binds a row needs a
+  `Lands-on:` line.
+- A plan written under 1.12.0 with a `source=probe` budget line keeps working; the line caps nothing,
+  and a `source=user` or `source=override` line still does.
+- The Patrol prompt stays at version 6; there is nothing to re-arm.
+- You may set a share (`session-poker.sh share <n>`) and declare a floor in `.bionic/config.yaml`.
+
+Fixes:
+
+- A request the gate lists as `killed` includes one that ended on a signal exit over 128 (such as the
+  143 of a rollover kill), matching what the landing report counts.
+- A red whose failing lines all fail at the accepted head is compared line for line and counted, not
+  as a set.
+- A suite run from the main checkout as `cd <tree> || exit 1; …` records the tree it runs in, so it no
+  longer makes the main checkout look busy to `land`.
+- The interpreter pin no longer refuses a shared sticky `/tmp` on a Linux host with `getfacl`, where
+  every hand-run suite and `tests/run.sh` exited 2.
+
+Known limits, carried to the next release:
+
+- Known limit: `lib/gate.sh` and `close-out.sh` each define a function named `gate_ask` with different
+  arguments; no shipped path loads both in one shell, and the next wave renames one.
+- Known limit: a whole-machine run asked of the gate is passed by every later ask while anything is
+  admitted, so on a busy machine it may wait a long time; the previous quiet marker drained the machine
+  first.
+- Known limit: a hand landing that waits behind another row rebuilds its candidate every fifth of a
+  second and records each rebuild; a long wait writes many lines.
+- Known limit: when no landing tree is free, a publish runs the project's release check in the main
+  checkout rather than in a tree pointed at the accepted head.
+- Known limit: after a timed-out ask, an agent that asks again for the same command may resume the newer
+  of two waiting places and leave the older one behind.
+- Known limit: when two sessions dispatch a reader of the same name, the registration may read the other
+  session's roster row to decide whether finding lines are required.
+- Known limit: a structure record with a doubt (FLAG) and no finding meets two refusals that disagree on
+  the result to write; write `pass` and no FLAG, or a finding for the doubt.
+- Known limit: when a reader's start could not be matched to one roster row and the plugin lacked one of
+  its context files, the roster row may record that file as pushed although it was not.
+- Known limit: a structure reader whose finding to fix sits under no check's failing case is refused at
+  registration; answer FAIL on the nearest check.
+- Known limit: a structure check the text itself answers FLAG, with no finding written, is refused at
+  registration; write the doubt as a finding.
+- Known limit: a row proved on top of an unaccepted row ahead is returned red when the row ahead's own
+  change caused the failure.
+- Known limit: the `WAITING` line's run-again command must be run from the row's own tree.
+- Known limit: a suite killed by `--kill-after` or a signal is recorded as that suite's cost — the
+  truncated run's seconds, not a full run's — until the next complete run replaces it.
+- Known limit: `release-check` prints its deferral stated/unstated lines only when the project declares a
+  `release-check:` command; a project without one sees no line.
+- Known limit: the Step 1 card tells the run's own continuation from its predecessor's by the
+  requirements file's name (`<wave slug>.requirements.md`); a requirements file named otherwise can make
+  the card read the run's own continuation as the predecessor and list no inherited deferral.
+- Known limit: the Step 1 card takes the newest continuation under `record/` as the predecessor even when
+  it carries no `## Deferrals` section — a continuation written before its run's close-out, or left by an
+  abandoned run — and then lists no inherited deferral.
+- Known limit: the tick's told memory for standing reds and stalled entries
+  (`.bionic/tmp/line-told-<session>.state`) is not among the session-state classes the Patrol's sweep and
+  dead-session walk know, so it is never swept.
+- Known limit: when close-out cannot read the deferrals a run inherited, `run` refuses after its worktrees
+  are removed and its tmp wiped, and `check` exits 2 instead of reporting the refusal it would make.
+- Known limit: `/bionic:doctor`'s gate row samples the gate, which takes the gate's lock and may write
+  the store (an idle marker, or the end of a dead holder's request) — the same writes the next gate call
+  would make.
+- Known limit: the writers a session has launched but not yet asked the gate for are counted by that
+  session alone; two sessions on one machine can each offer into the same room.
+- Known limit: `standdown` reports a landed row's tree as standing only when the tree is at the
+  conventional path (`.worktrees/<lower-cased name>`); a tree at another path is still found and removed
+  by `stopped`.
+- Known limit: the `PLAN-UNWRITTEN` line after a hand landing names the `row-landed` call without its
+  `--by-hand <who> <why>` part; add it by hand so the plan keeps the hand landing's text.
+- Known limit: when the plan changes under `row-landed`'s write, the write is refused once and not
+  retried; `ready` prints `PLAN-UNWRITTEN` and the `row-landed` call to run from the main thread.
+- Known limit: the reader exam's scorer reads a record's `result:` line as written on a clean sample,
+  where the registering verb derives it from the findings.
+- Known limit: a sitting marked `stale:` is pinned as it stands, including any `missed` line it
+  carried.
+- Known limit: the admit-not-require sample admits a finding on two files only; a finding placed on the
+  evidence, the test or `-` scores missed.
+- Known limit: the exam's briefs ask a reader to read the shipped scale and checks files from the plugin
+  copy by path; a session that cannot read outside its project needs them inlined.
+- Known limit: a suite run by `source tests/<suite>.test.sh` or `. tests/<suite>.test.sh` from a
+  dispatched agent passes the Bash wall with no refusal, wrap or stamp; only the spellings the classifier
+  reads meet the door.
+- Known limit: the suite shim decides the gate request's tree and the stamp's tree separately — a command
+  that opens with `cd <row tree>` and passes no `--stamp-dir` records the request against the row tree
+  and the stamp against the tree it was started from; the doctrine's form always passes `--stamp-dir`, so
+  a writer following rule 5 never meets it.
+- Known limit: the brief's bare-file-name rule can read a word of prose with a dot — `i.e.`, `e.g.`,
+  `Node.js`, or a file the brief only mentions — as a second deliverable and refuse the dispatch as naming
+  several paths; write the deliverable as the one path and keep such words off the `Expected artifact:`
+  line.
+- Known limit: the interpreter pin's ACL reader on Linux (`getfacl -p`) is proved through a stub only; on
+  a real Linux host it is unverified.
+- Known limit: a successor instance with no `row=` label and no ledger or Tasks cell naming it is not
+  counted as the code's writer.
+- Known limit: the task list's dispatch-turn duty counts only a main-thread `TaskUpdate` set to
+  in_progress; a session without the task tools is refused once on every turn that dispatches a plan row,
+  and the plan-ledger write the refresh duty accepts as its fallback does not satisfy the dispatch duty —
+  stop again to proceed.
+- Known limit: the suites that drive the real runner (`runner-width` §2b, `interpreter-pin`, `framework`)
+  ask the machine's real gate store, leaving test requests and test-only cost keys in
+  `~/.claude/bionic/gate/`; after a run, a command the gate has never seen may read a near-zero cost from
+  those keys instead of running alone — delete the store's `cost/` test keys, or run the suites with
+  `BIONIC_GATE_DIR` pointed at a throwaway store.
+- Known limit: a `moved:` line written by hand on the plan, with words nobody typed, is honoured by every
+  read exactly as a line the verb wrote; the proof of the user's word is made when `finding-move` writes
+  the line, not when the line is read.
+- Known limit: the landings figures count only landings the line recorded as events; a run whose record
+  predates the line, or straddles it, prints its later landings as the run's.
+- Known limit: the landings line's `red-then-green` figure counts a flake the line does not yet record — a
+  red re-run green on the same candidate — and reads 0 until the line records one (a red is judged, not
+  re-run); the figure's definition or removal is the next wave's.
+- Known limit: when a hand `git merge` of a row is counted while the row's own suite is still running, the
+  landings line counts the accepted head's run too (red=2 where the truth is 1).
+- Known limit: the landings line's gate figures count requests still in the store; a run longer than
+  `BIONIC_GATE_KEEP` (default one day) prints the last day's.
+- Known limit: a reused agent name whose earlier instance is still listed can be read by `ready` as the
+  current row; give each instance its own name (`<name>-b`), as the dispatch doctrine says.
+- Known limit: the move's proof counts words as space-separated runs of letters, digits, `_`, `-` and
+  apostrophes; in a script written without spaces, quote the whole prompt — a script-aware count is the
+  next wave's.
+- Known limit: a request file edited by hand to a non-decimal `admitted=` aborts `gate_end` with the lock
+  held; the gate never writes one — the next wave reads it through `_gate_num`.
+- Known limit: the dispatch wall and the launch record match an agent name by two rules that agree on
+  every name the Agent tool accepts; a name with a comma or a leading `-`, which the tool refuses, would be
+  read differently by the two.
+- Known limit: a hook that outruns its timeout under load is cancelled by the harness and the action is
+  admitted unjudged; the dispatch wall and the stop guard now refuse at a deadline instead, the other
+  hooks do not yet.
+- Known limit: the deadline of the dispatch wall and of the stop guard is a trap that bash runs only after a
+  running `$( … )` returns, so a slow substitution can outlast the registration and be cancelled and
+  admitted as before.
+- Known limit: when the dispatch wall's deadline fires while it waits on a project's impact command, the
+  command keeps running with no bound and leaves its temp file in `TMPDIR`.
+- Known limit: a request number is reused after the gate prunes a gone request, so an orphaned waiter may
+  admit a newcomer's request, which then waits for ever; interrupt the waiter.
+- Known limit: a declared debt (`Lands-red:`) survives `adopt` but not a later `hold` or `amend` of the
+  adopted row; re-declare it by `amend` after such a copy.
+- Known limit: when a project's impact command hangs, the dispatch wall may report its own deadline
+  instead of the impact command's; declare `Suites:` to bypass the command.
+- Known limit: an agent whose only roster row sits in a symlinked or unreadable roster file can be
+  stopped as unrostered.
+- Known limit: a name that a swept-not-yet roster holds as closed cannot be stopped as unrostered; use
+  `stop-orders.sh order` or wait for the sweep.
+- Known limit: a pin root carrying a C1 control byte (0x80–0x9f) is printed raw in the seam's reason line;
+  it is refused all the same.
+- Known limit: a pasted block that never closes leaves its text counted as the user's words.
+- Known limit: `deferral_fold` returns nothing without jq.
+- Known limit: a pasted block containing a `</pasted_content …>` close inside its text is cut at that
+  inner close; the remainder counts as typed.
+- Known limit: quote the user's words without the typographic quotes that surround them; a `’` inside a
+  word (`don’t`) is fine.
+- Known limit: a suite call that carries any command between its `cd` and the suite may be stamped
+  against the main checkout; keep the call in rule 5's bare shape and read the stamp.
+- Known limit: under `claude -p` in auto mode the CLI's own classifier can deny the Patrol's recurring
+  `CronCreate` as unauthorized persistence, so no clock is armed until you approve the job; the session
+  reports that the Patrol is not running and asks you to.
+- Known limit: the `.bionic` landing guard folds ASCII case only; a spelling of the name that a disk
+  resolves to the same directory by another Unicode fold is not recognised. On the APFS volume probed,
+  the ASCII case variants were the only spellings that resolved to the same directory, so the limit
+  matters on a filesystem that folds more.
+- Known limit: a row whose Files cell marks a path unmergeable (`path!`) is not found as that path's
+  writer by `finding-check`; a check it writes on its own code is admitted — the orchestrator refuses such a
+  check by hand.
+- Known limit: `floor-run`'s refusal for a session bound to no run borrows the plan verbs' wording and says
+  it "writes the plan"; `floor-run` writes no plan.
+- Known limit: a floor command that exits 2 shares the poker's usage-error code; the log's `rc=` is the
+  fact.
+- Known limit: a floor declared with `floor:` or attested with `floor-attestation: user` proves the floor as
+  a whole; a `Lands-red:` debt a row declared for one suite is cleared by it although that suite never ran.
+- Known limit: the attestation record is the user's own word: the tool checks its two lines and the head,
+  never who wrote `floor-attested-by:`.
+- Known limit: `config_value` reads a `floor:` key wherever it stands in `.bionic/config.yaml`, an indented
+  one under another mapping included, and keeps a trailing `# comment` in the value — write the key
+  flush-left with no comment.
+
+One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
+by hand and says why.
+
 ## 1.12.0 — 2026-10-06
 
 **Upgrade before you run `/bionic:setup` or `/bionic:remove` again.** In 1.11.0, setup and
@@ -263,20 +738,20 @@ Known limits, carried to the next release:
   function: the start-up error stays, as it did with the old body.
 - A `claude()` block you changed is removed by no door: it is yours to edit by hand. While an
   alias named `claude` stands above it, every shell start keeps printing the error until you do,
-  unless the block's first line is still bionic's `unalias` line.
+  unless the block still holds bionic's `unalias` line above its `claude()` line.
 - Nothing judges a `git merge` you type by hand into the integration branch. The documented
   merge comes after `current 8` has asked the judge, and close-out asks it again after any merge.
 - An rc whose every line ends in CRLF is read as holding no block, and setup appends a second one;
   convert the file to LF line ends first. This is older than this release.
-- Until bionic keeps a record of what it installed (a later release), remove lists every declared
-  tool present, whether or not bionic installed it, and still offers the native plugins bionic's
-  own catalog installed.
+- Retired in 1.13.0: bionic now keeps a record of what it installed, and remove acts on it (see that
+  entry). A tool installed before that release has no line and is named for removal by hand.
 - The standalone remove (the script run alone, with no `lib/` beside it) cannot read the tool
-  table: its `--all` calls a machine with tools on it "already clean", and an `--all` you decline
-  names no tool. Run `/bionic:remove` from the plugin and answer per item to see the by-hand list.
-- A read-only rc that holds bionic's retired environment block, with a declared tool present, makes
-  `--all` count "1 skipped by you" for a question nobody could answer; nothing is lost, and the
-  block is yours to delete by hand.
+  table: its `--all`, when nothing else of bionic's is left, calls a machine with tools on it
+  "already clean", and an `--all` you decline names no tool. Run `/bionic:remove` from the plugin
+  and answer per item to see the by-hand list.
+- A read-only rc that holds bionic's retired environment block, with a declared tool present and
+  nothing else of bionic's left, makes `--all` count "1 skipped by you" for a question nobody could
+  answer; nothing is lost, and the block is yours to delete by hand.
 - A lone `excalidraw-venv.lock.sha256` with no venv beside it, which is what deleting the venv by
   hand leaves, reads "(not installed) — already clean" while the file stays; delete it with
   `rm ~/.local/share/bionic/excalidraw-venv.lock.sha256` (under `$XDG_DATA_HOME` if you set it).
@@ -297,7 +772,9 @@ Known limits, carried to the next release:
 - A tree branched before its target stopped tracking `.bionic` is refused until it merges the
   target, as the refusal's fix says.
 - Session start's sweep of dead sessions slows when many of them each left start files behind
-  (the sweep matches those files per session); a later release indexes them once.
+  (the sweep matches those files per session); a later release indexes them once. The sweep stops at
+  10 seconds, which is also the SessionStart hook's timeout, so a sweep that reaches its bound takes
+  the whole hook past the CLI's limit: the session loses its start page rather than starting late.
 - The dispatch wall can count as a reader's record a path the fact verb then refuses: a path at
   the system's length limit, one that holds a space, or one that opens with two slashes. The verb's
   refusal names it.

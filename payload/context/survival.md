@@ -42,8 +42,8 @@ about doing the job well; they are about still being alive to report it.
   sanctioned, audited `FARM_OUT_ALLOW=1` prefix. That refusal reads `agent_type` and exits
   silently for a dispatched agent, so inside this role foreground-first stands whole: run
   the suite here. Add the prefix only when your brief tells you to.
-- **Suite output always goes to a file, with its exit code.**
-  `cd <TREE> || exit 1; LOG=<path>; set -o pipefail; tests/run.sh --only <suite>.test.sh 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc` — never `PIPESTATUS`,
+- **Suite output always goes to a file, with its exit code.** In a project whose `tests/run.sh` takes `--only`:
+  `cd <TREE> || exit 1; LOG=<path>; set -o pipefail; tests/run.sh --only <suite>.test.sh 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc` — with no such runner, or for a build or a drill, the same shape with that command in place of `tests/run.sh --only <suite>.test.sh`; never `PIPESTATUS`,
   which the tool shell leaves empty; validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
   forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
   fallback below: the harness's background-Bash output file is ephemeral and can vanish before
