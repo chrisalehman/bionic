@@ -49,6 +49,9 @@ PROOF_CODE_QUESTIONS="adversarial structure"
 PROOF_SEVERITIES="S1 S2 S3 S4"
 PROOF_REACHES="on off"
 PROOF_PRIORITY="S1:on=fix S1:off=fix S2:on=fix S2:off=defer S3:on=defer S3:off=note S4:on=note S4:off=note"
+# THE DEBT TABLE'S KINDS (wave-30 T22; D2, AC-11.1): the kinds a `debt:` line names, in the order the
+# table in payload/context/severity.md lists them (tests/docs-pins.test.sh holds the two to one list).
+PROOF_DEBT_KINDS="duplicate unpinned-pair one-case-abstraction"
 
 # proof_kind_ok <kind> -> 0 when <kind> is one of PROOF_KINDS.
 proof_kind_ok() {
@@ -195,6 +198,14 @@ proof_word_in() {
 #     finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>
 #     shown: <n> <command>             for a finding the table sends to fix
 #     unsure: <n> <what is not known>  for a finding that owes a check
+#     debt: <kind> <concept> <path>:<line>[, <path>:<line>...]   a debt finding (wave-30 T22)
+#
+# A DEBT LINE IS A FINDING OF ITS OWN CLASS (wave-30 T22; D2, AC-11.1; A-orch-8). It names a kind of
+# the debt table (PROOF_DEBT_KINDS), one concept and its sites, never a severity or a reach, and it is
+# not counted in `findings:`. It reads as flag-class: it gives `flag` when no finding gives `fail`. A
+# debt line carrying a severity or a reach word, a kind outside the table, or a site that is not a
+# `<path>:<line>`, is refused, naming the line. The orchestrator writes the run's ledger from these
+# lines (`session-poker.sh debt add`); the table defers nothing to the plan for them.
 #
 # The record writes no priority: the table gives it (`proof_priority`), and a `priority: <n> <word>`
 # line that differs from the table is refused. The result follows from the priorities
@@ -233,6 +244,12 @@ _proof_priority_var() {
 #
 #     <n> <S> <reach> <path:line|-> <fix|defer|note> <shown 1|0> <unsure 1|0> <title>
 #
+# then one line per `debt:` line, in the order written, five fields, its first `debt` (never a finding's
+# number) and its fifth `burn` (the debt table's disposition, burn-when-touched), so a reader of the
+# fifth field reads it as a finding that is not to fix, and a reader of eight fields skips it:
+#
+#     debt <kind> <concept> <sites, joined by ", "> burn
+#
 # exit 0 (nothing printed for `findings: 0`); or exit 1 with one sentence saying what the findings
 # lack and what to write (the verb's refusal). The rules: a `findings: <n>` line, given once; that
 # many `finding:` lines, each number once, each severity and reach from its set, a `<path>:<line>`
@@ -249,13 +266,14 @@ proof_findings() {
 # _proof_findings_span <record> <its pass> -> proof_findings' answer for a pass already cut.
 _proof_findings_span() {
   local out
-  out="$(PROOF_REC="$1" PROOF_PRI="$PROOF_PRIORITY" PROOF_SEV="$PROOF_SEVERITIES" PROOF_REACH="$PROOF_REACHES" awk '
+  out="$(PROOF_REC="$1" PROOF_PRI="$PROOF_PRIORITY" PROOF_SEV="$PROOF_SEVERITIES" PROOF_REACH="$PROOF_REACHES" PROOF_DK="$PROOF_DEBT_KINDS" awk '
     BEGIN {
       rec = ENVIRON["PROOF_REC"]
       n = split(ENVIRON["PROOF_PRI"], c, " ")
       for (i = 1; i <= n; i++) { k = c[i]; sub(/=.*$/, "", k); v = c[i]; sub(/^[^=]*=/, "", v); pri[k] = v }
       n = split(ENVIRON["PROOF_SEV"], c, " "); for (i = 1; i <= n; i++) sev[c[i]] = 1
       n = split(ENVIRON["PROOF_REACH"], c, " "); for (i = 1; i <= n; i++) rch[c[i]] = 1
+      n = split(ENVIRON["PROOF_DK"], c, " "); for (i = 1; i <= n; i++) dk[c[i]] = 1
     }
     function bad(m) { if (err == "") err = "the reading " rec " " m }
     function rest(s, k,   i) { for (i = 0; i < k; i++) sub(/^[^ \t]+[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -284,6 +302,19 @@ _proof_findings_span() {
       named[f[2]] = k; next
     }
     /^priority:/ { m = split($0, f, /[ \t]+/); wp[f[2]] = f[3]; named[f[2]] = "priority"; next }
+    /^debt:/ {
+      line = $0; sub(/[ \t]+$/, "", line); m = split(line, f, /[ \t,]+/)
+      for (i = 2; i <= m; i++) if ((f[i] in sev) || (f[i] in rch)) {
+        bad("rates its debt line (" line ") with '"'"'" f[i] "'"'"', and debt is rated by kind and concept, never by severity or reach; write debt: <kind> <concept> <path>:<line>[, <path>:<line>]"); next }
+      if (!(f[2] in dk)) { bad("has a debt line (" line ") whose kind '"'"'" f[2] "'"'"' is not one of duplicate, unpinned-pair or one-case-abstraction; name the kind on the debt table in severity.md"); next }
+      if (m < 4) { bad("has a debt line (" line ") with no site; write the concept, then each <path>:<line> it lives at"); next }
+      k = split(rest(line, 3), st, /[ \t]*,[ \t]*/); ss = ""; ok = 1
+      for (i = 1; i <= k && ok; i++) if (st[i] !~ /^[^ \t]+:[0-9]+$/) {
+        bad("has a debt line (" line ") naming '"'"'" st[i] "'"'"' where a site takes <path>:<line>; write each site as the file and line at the reviewed head"); ok = 0 }
+      else ss = ss (i > 1 ? ", " : "") st[i]
+      if (ok) { dn++; DK[dn] = f[2]; DC[dn] = f[3]; DS[dn] = ss }
+      next
+    }
     END {
       if (err == "" && !hf) err = "the reading " rec " carries no findings: <n> line, and its reader was pushed the severity scale; write findings: <n> and one finding: line per finding (findings: 0 when it found none)"
       if (err == "" && cnt != want + 0) bad("says findings: " want " but holds " cnt " finding: lines; write one finding: line per finding, and the count they make")
@@ -295,6 +326,7 @@ _proof_findings_span() {
       }
       if (err != "") { print "!" err; exit }
       for (i = 1; i <= cnt; i++) { id = ord[i]; printf "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n", id, S[id], R[id], W[id], pri[S[id] ":" R[id]], (id in sh), (id in un), T[id] }
+      for (i = 1; i <= dn; i++) printf "debt\t%s\t%s\t%s\tburn\n", DK[i], DC[i], DS[i]
     }' <<< "$2")"
   case "$out" in '!'*) printf '%s' "${out#!}"; return 1 ;; esac
   [ -z "$out" ] || printf '%s\n' "$out"
@@ -482,6 +514,9 @@ _proof_reading_derive() {
   got="$(proof_findings "$droot/$ev" 2>/dev/null)" || return 0
   while IFS='	' read -r n s r w _; do
     [ -n "$n" ] || continue
+    # A debt row is flag-class whatever the plan binds (no binding line names it): kept as it is.
+    [ "$n" != debt ] || { out="$out$n	$s	$r	$w	burn
+"; continue; }
     st=""; mv=""
     case "$tab" in
       *"$nl$ev#$n$tb"*)
@@ -1693,4 +1728,80 @@ _proof_map() {
     sleep 0.1
   done
   wait "$pid" 2>/dev/null
+}
+
+# ---------- THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3, AC-11.4) ----------
+#
+# `<docs-root>/record/<the plan's name less .plan.md>/debt.md`, derived as the landing record's path is
+# (`_wt_proofs_path`, lib/worktree.sh): PROOF_DEBT_HEADER, then one line per item, six cells joined by
+# ` | `:
+#
+#     <concept> | <kind> | <sites> | raised-by <record> | touches <N> | —            (not yet burned)
+#     <concept> | <kind> | <sites> | raised-by <record> | touches <N> | burned <row>
+#
+# ONE WRITER, `session-poker.sh debt` (add, touched, burn), under a lock beside the file. These are its
+# readers: the dispatch wall's advisory (`proof_debt_hits`), `ready`'s landing report
+# (`proof_debt_row_counts`) and close-out's card and carry (`proof_debt_counts`, `proof_debt_items`). The
+# last cell is read with index(), never by comparing the `—` glyph (macOS awk and multibyte `==`).
+PROOF_DEBT_HEADER='# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —'
+
+# proof_debt_ledger_path <root> <plan> -> the run's ledger path.
+proof_debt_ledger_path() {
+  local slug="${2##*/}"
+  slug="${slug%.plan.md}"
+  [ -n "${1:-}" ] && [ -n "$slug" ] || return 1
+  printf '%s/record/%s/debt.md\n' "$(docs_root "$1")" "$slug"
+}
+
+# proof_debt_items <ledger> -> one tab-separated line per item, in ledger order:
+# `<concept> <kind> <sites> <record> <touches> <burned row, or ->`. A line of another shape is not an item.
+proof_debt_items() {
+  [ -f "${1:-}" ] || return 0
+  awk '
+    /^#/ || NF == 0 { next }
+    {
+      if (split($0, c, / \| /) != 6) next
+      if (index(c[4], "raised-by ") != 1 || c[5] !~ /^touches [0-9]+$/) next
+      printf "%s\t%s\t%s\t%s\t%s\t%s\n", c[1], c[2], c[3], substr(c[4], 11), substr(c[5], 9), (index(c[6], "burned ") == 1 ? substr(c[6], 8) : "-")
+    }' "$1"
+}
+
+# proof_debt_hits <ledger> <Files cell> -> the items (as proof_debt_items prints them, burned ones too)
+# one of whose sites the cell covers: the path itself, a directory above it, or a glob over it, by
+# lib/units.sh `cell_covers`, the dispatch grammar's one matcher.
+proof_debt_hits() {
+  local items
+  items="$(proof_debt_items "${1:-}")"
+  [ -n "$items" ] && [ -n "${2:-}" ] || return 0
+  _proof_units_load || return 0
+  printf '%s\n' "$items" | PROOF_CELL="$2" awk -F'\t' "$(_units_files_awk)"'
+    {
+      n = split($3, s, /[ \t]*,[ \t]*/)
+      for (i = 1; i <= n; i++) { p = s[i]; sub(/:[0-9]+$/, "", p); if (p != "" && cell_covers(ENVIRON["PROOF_CELL"], p)) { print; next } }
+    }'
+}
+
+# proof_debt_counts <ledger> -> `<touched> <burned>` for the run: the touches summed over every item,
+# and the items burned. Never the ledger's length (AC-11.4).
+proof_debt_counts() {
+  proof_debt_items "${1:-}" | awk -F'\t' '{ t += $5; if ($6 != "-") b++ } END { printf "%d %d\n", t, b }'
+}
+
+# proof_debt_row_counts <ledger> <row> <Files cell> -> `<burned> <touched>` for one row: the items whose
+# last cell says `burned <row>`, and the items one of whose sites the row's Files cover.
+proof_debt_row_counts() {
+  local b t
+  b="$(proof_debt_items "${1:-}" | awk -F'\t' -v r="${2:-}" 'r != "" && $6 == r { n++ } END { print n + 0 }')"
+  t="$(proof_debt_hits "${1:-}" "${3:-}" | awk 'NF { n++ } END { print n + 0 }')"
+  printf '%s %s\n' "$b" "$t"
+}
+
+# _proof_units_load -> 0 once lib/units.sh's Files matcher is defined, sourced from beside this file.
+_proof_units_load() {
+  local d
+  declare -F _units_files_awk >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  # shellcheck source=/dev/null
+  [ -n "$d" ] && [ -r "$d/units.sh" ] && . "$d/units.sh" 2>/dev/null
+  declare -F _units_files_awk >/dev/null 2>&1
 }

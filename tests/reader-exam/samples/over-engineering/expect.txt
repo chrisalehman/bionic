@@ -1,0 +1,6 @@
+question: structure
+result: flag
+token: over-engineering | one-case-abstraction
+names: name_by_scheme | NAME_SCHEMES | scheme_task
+finding-file: lib/naming.sh
+finding-kind: one-case-abstraction
