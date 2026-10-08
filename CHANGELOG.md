@@ -199,6 +199,9 @@ What you will notice:
   and bash 3.2's two heredoc hazards are found by a new suite, `tests/shell-lint.test.sh`, which also
   loads every library under `/bin/bash`. The doctrine is rewritten for one landing line, one gate and
   one door.
+- **The test runner runs on the latest Sonnet.** The `test-runner` role runs on the latest Sonnet
+  (it was Haiku), effort unchanged. Its reports are relied on for the floor, and Haiku's were not
+  reliable enough.
 - **For contributors.** The three slowest suites were timed alone and one cut landed, about 2% of the
   slowest; the target of a third off each missed, and the measured costs lie in the hook and door
   drives the rows run, recorded with their numbers for the next release.
