@@ -31,7 +31,7 @@
 #
 #   bash tests/run.sh              width from the machine's own pressure rung
 #   bash tests/run.sh --serial     one at a time, in roster order
-#   bash tests/run.sh --dry-run    print the job width and exit, run nothing
+#   bash tests/run.sh --dry-run    print the job width and the order it would run in, run nothing
 #   bash tests/run.sh --only a.test.sh [b.test.sh …]   the named suites only (see THE DOOR)
 #   BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh   the ceiling the rung reads against
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
@@ -176,8 +176,12 @@ if [ "${1:-}" = "--one" ]; then
   _one_start="$(date +%s)"
   # Deliberately unquoted. The queued string is a roster line's own words
   # (`bash tests/foo.test.sh`), written in this file — never outside input.
+  # THE SCRUB (wave-30 T9; AC-4.2): this worker keeps BIONIC_GATE_DIR for its own ask and end above and
+  # below, but the SUITE PROCESS runs without it. A suite that read the run's store through the
+  # inherited variable (the doctor-reads checks did) read a store it did not make; a suite that
+  # wants one makes its own fixture. The --serial path below scrubs at its own exec the same way.
   # shellcheck disable=SC2086
-  $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  env -u BIONIC_GATE_DIR $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
   _one_rc=$?
   _gate_end_for "$_one_rc"
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
@@ -268,7 +272,7 @@ while [ $# -gt 0 ]; do
     -h|--help)
       echo "$_usage"
       echo "  --serial            one suite at a time, in roster order"
-      echo "  --dry-run           print the job width and exit; run nothing"
+      echo "  --dry-run           print the job width and the run order (tests/timing.tsv); run nothing"
       echo "  --only <suite>…     run only the named suites (file names, e.g. a.test.sh)"
       echo "  BIONIC_TEST_JOBS_CEILING  the ceiling the pressure rung reads against (default 8)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
@@ -483,13 +487,59 @@ JOBS="$(pressure_level "${BIONIC_TEST_JOBS_CEILING:-8}")"
 # which is still printed, and is the explanation for this fallback.
 case "$JOBS" in ''|*[!0-9]*) JOBS=8 ;; esac
 
+# ── THE ROSTER RUNS LONGEST-FIRST (wave-30 T10; D8a, REQ-5 AC-5.2) ───────────
+#
+# `tests/timing.tsv` — committed, `<label>TAB<integer seconds>`, one line per suite, sorted by
+# label — says how long each suite took the last time a FULL run measured it. The critical path
+# of a parallel drain is its longest suite, so that one is launched first: suites the table
+# knows, longest first (ties by label), then the suites it does not know, in roster order. A
+# row that is not a label and an integer is no row, so a suite added since the last full run
+# is simply unknown and runs after the known ones until the next full run measures it.
+#
+# THE ORDER IS A LAUNCH ORDER AND NOTHING ELSE. The report still walks the queue in label order
+# (a reader comparing two runs compares rosters, not schedules), the solo suites still wait for
+# the batch to drain (T20), and `--serial` — which prints as it runs — runs in table order. The
+# table is read here and nowhere else; a tree without one orders nothing and says nothing.
+#
+# THE REWRITE (end of this file) is a SEPARATE act from BIONIC_TEST_TIMING above. That knob
+# names a file a caller wants rows appended to and stays opt-in so a gating run's output does
+# not change; the table is this run's own scheduling state, rewritten unconditionally by a run
+# that is full (no `--only`) and completes.
+TIMING_TABLE="$REPO/tests/timing.tsv"
+TAB="$(printf '\t')"
+_order_labels() {  # stdin: labels, one per line -> stdout: <label>TAB<seconds|-> in run order
+  local in; in="$(cat)"
+  [ -n "$in" ] || return 0
+  printf '%s\n' "$in" | LC_ALL=C awk -F'\t' -v tbl="$TIMING_TABLE" '
+    BEGIN { while ((getline row < tbl) > 0) { split(row, f, "\t"); if (f[1] != "" && f[2] ~ /^[0-9]+$/) sec[f[1]] = f[2] } }
+    $1 != "" && ($1 in sec) { print $1 "\t" sec[$1] }' | LC_ALL=C sort -t"$TAB" -k2,2nr -k1,1
+  printf '%s\n' "$in" | LC_ALL=C awk -F'\t' -v tbl="$TIMING_TABLE" '
+    BEGIN { while ((getline row < tbl) > 0) { split(row, f, "\t"); if (f[1] != "" && f[2] ~ /^[0-9]+$/) sec[f[1]] = f[2] } }
+    $1 != "" && !($1 in sec) { print $1 "\t-" }'
+}
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "JOBS=$JOBS"
   # A DRY RUN LISTS SOLO SUITES AS SUCH (T20) — the width line alone would fold a
   # timing-bound suite silently into the parallel count it is in fact held out of.
+  _dry_batch=""; _dry_solo=""; _dry_all=""
   for _dry_file in "$@"; do
-    _is_solo_suite "$_dry_file" && echo "solo: ${_dry_file##*/}"
+    _dry_all="${_dry_all}${_dry_file##*/}"$'\n'
+    if _is_solo_suite "$_dry_file"; then
+      echo "solo: ${_dry_file##*/}"
+      _dry_solo="${_dry_solo}${_dry_file##*/}"$'\n'
+    else
+      _dry_batch="${_dry_batch}${_dry_file##*/}"$'\n'
+    fi
   done
+  # THEN THE ORDER IT WOULD RUN IN (T10): the parallel batch, then the solo drain, each
+  # longest-first. With --serial there is one sequence.
+  if [ "$SERIAL" -eq 1 ]; then
+    printf '%s' "$_dry_all" | _order_labels
+  else
+    printf '%s' "$_dry_batch" | _order_labels
+    printf '%s' "$_dry_solo" | _order_labels
+  fi
   exit 0
 fi
 
@@ -632,7 +682,9 @@ void=0; voided=""
 # finding (c) had to answer "which suite is the long pole" with a line-count
 # proxy), and a gating run's output must not change just because someone wanted
 # the numbers.
-_timing() {  # _timing <label> <seconds> — to the file the knob named (read at the top)
+_timing() {  # _timing <label> <seconds> [<rc>] — to the file the knob named (read at the top)
+  # A suite that exited 0 is also a MEASUREMENT for the committed table (below), knob or no knob.
+  [ "${3:-}" = "0" ] && printf '%s\t%s\n' "$1" "$2" >>"$TMP/measured"
   [ -n "$_TEST_TIMING_FILE" ] || return 0
   printf '%s\t%s\n' "$1" "$2" >>"$_TEST_TIMING_FILE"
 }
@@ -743,12 +795,12 @@ run() {  # run <label> <cmd...>   — gating
     # alive for the suite, and its `times` hold that suite's children only, for gate_end.
     ( _gate_ask_for work "$label"
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
-      "$@" >"$TMP/${label}.out" 2>&1
+      env -u BIONIC_GATE_DIR "$@" >"$TMP/${label}.out" 2>&1   # the scrub (T9): the ask above keeps the store, the suite does not
       _sr=$?
       _gate_end_for "$_sr"
       exit "$_sr" )
     rc=$?
-    _timing "$label" "$(( $(date +%s) - start ))"
+    _timing "$label" "$(( $(date +%s) - start ))" "$rc"
     _verdict "$label" "$rc" "$TMP/${label}.out"
   else
     printf '%s\t%s\n' "$label" "$*" >>"$QUEUE"
@@ -769,8 +821,20 @@ echo "Gating suites:"
 # twice before.
 for _suite_file in "$@"; do
   _suite="${_suite_file##*/}"
-  run "$_suite" bash "tests/$_suite"
+  printf '%s\n' "$_suite" >>"$TMP/roster.labels"
 done
+if [ "$SERIAL" -eq 1 ]; then
+  # --serial prints as it runs, so it runs in the table's order (T10).
+  _run_order="$(_order_labels <"$TMP/roster.labels" | cut -f1)"
+else
+  _run_order="$(cat "$TMP/roster.labels")"
+fi
+while IFS= read -r _suite; do
+  [ -n "$_suite" ] || continue
+  run "$_suite" bash "tests/$_suite"
+done <<EOF_ORDER
+$_run_order
+EOF_ORDER
 
 # ── drain the queue, then report in roster order ─────────────────────────────
 # Nothing above printed a result in the default mode; every `run` line enqueued.
@@ -790,6 +854,9 @@ if [ "$SERIAL" -eq 0 ]; then
     grep -qxF "$label" "$SOLO" 2>/dev/null && continue
     printf '%s\n' "$label" >>"$LAUNCH"
   done <"$QUEUE"
+  # LAUNCHED LONGEST-FIRST (T10), and the solo drain the same way; the queue stays in label order.
+  _order_labels <"$LAUNCH" | cut -f1 >"$LAUNCH.ordered" && mv "$LAUNCH.ordered" "$LAUNCH"
+  _order_labels <"$SOLO" | cut -f1 >"$SOLO.ordered" && mv "$SOLO.ordered" "$SOLO"
   [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
   # THEN THE SOLO SUITES, ONE AT A TIME, ON THE NOW-IDLE RUNNER (T20, A-orch-28).
   # Reuses the exact `--one` worker every parallel suite already runs through —
@@ -961,9 +1028,33 @@ if [ "$SERIAL" -eq 0 ]; then
     [ -f "$TMP/${label}.rc" ] && rc="$(cat "$TMP/${label}.rc")"
     # A void suite's seconds are disturbed ones (T48; review 11 N1): the file holds measurements
     # only, and a row has no field to say otherwise, so a void suite gets no row at all.
-    [ -f "$TMP/${label}.sec" ] && [ ! -f "$TMP/${label}.void" ] && _timing "$label" "$(cat "$TMP/${label}.sec")"
+    [ -f "$TMP/${label}.sec" ] && [ ! -f "$TMP/${label}.void" ] && _timing "$label" "$(cat "$TMP/${label}.sec")" "$rc"
     _verdict "$label" "$rc" "$TMP/${label}.out"
   done <"$QUEUE"
+fi
+
+# ── THE TABLE, REWRITTEN (T10; D8a) ──────────────────────────────────────────
+# A FULL run that got here rewrites tests/timing.tsv from the seconds it measured: one line per
+# suite of this roster, sorted by label, written to a temp file beside it and moved into place.
+# A row comes only from a suite that exited 0 and was timed. A suite without one (it failed, it
+# was void, it was killed) keeps its old row, and a row whose suite is no longer in the roster
+# goes. `--only` never gets here with a full roster and does not write; the BIONIC_TEST_TIMING
+# knob is a different act and is untouched. A table that cannot be written is said once on
+# stderr and changes no verdict.
+if [ "$ONLY" -eq 0 ] && [ -s "$TMP/measured" ]; then
+  _tt_tmp="${TIMING_TABLE}.tmp.$$"; _tt_old="$TIMING_TABLE"
+  [ -r "$_tt_old" ] || _tt_old=/dev/null
+  if LC_ALL=C awk -F'\t' '
+       FILENAME == ARGV[1] { if ($1 != "") roster[$1] = 1; next }
+       ($1 in roster) && $2 ~ /^[0-9]+$/ { val[$1] = $2 }
+       END { for (k in val) printf "%s\t%s\n", k, val[k] }
+     ' "$TMP/roster.labels" "$_tt_old" "$TMP/measured" 2>/dev/null | LC_ALL=C sort >"$_tt_tmp" 2>/dev/null \
+     && [ -s "$_tt_tmp" ] && mv -f "$_tt_tmp" "$TIMING_TABLE" 2>/dev/null; then
+    :
+  else
+    rm -f "$_tt_tmp" 2>/dev/null
+    echo "tests/run.sh: the timing table ${TIMING_TABLE} could not be rewritten; it is left as it was" >&2
+  fi
 fi
 
 # ── THE ADVISORY TALLY (T7; REQ-10) ──────────────────────────────────────────
