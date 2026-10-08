@@ -1377,8 +1377,9 @@ proof_debts_open() {
 # held, and it exits 2, for every dealing owes a reading. <head> must resolve to a commit, or it exits
 # 2, and each line's head is compared with the commit it resolves to, never as a string (F10). The
 # chain holds at <head> when its newest link is no failing reading and that link's head is
-# <head>, or every commit past it touches only the docs root (covered code is every tracked path
-# outside it). A waiver covers its question up to its own head.
+# <head>, or every commit past it touches only documentation: the docs root, or the files
+# `_proof_docs_path` lists (wave-30 T6; D12), so a docs-only landing owes no reading. Covered code is
+# every tracked path outside both. A waiver covers its question up to its own head.
 # Every line of the question counts, failing ones included: a later reading may start at a failing
 # reading's head, so the chain is not rebuilt by skipping them, and only the newest decides failing.
 # THE WHOLE READ (D10), owed once per code question at wave scale, is covered by a non-failing
@@ -1614,21 +1615,40 @@ PROOF_LATER
   printf 'absent'
 }
 
+# _proof_docs_path <path> -> 0 when <path> (relative to the repository root) is a documentation file
+# whose landing owes no reading (wave-30 T6; design-ledger Δ12, D12; A-orch-309): CHANGELOG.md,
+# README.md, CLAUDE.md, anything under .bionic/ and anything under .claude/rules/. THIS CASE IS THE
+# ONE LIST. It is never skills/ or agents/ prose, which agents execute, and never a payload/ file; a
+# README or CHANGELOG deeper than the root is not in it either.
+_proof_docs_path() {
+  case "$1" in
+    CHANGELOG.md|README.md|CLAUDE.md|.bionic/*|.claude/rules/*) return 0 ;;
+  esac
+  return 1
+}
+
 # _facts_holds <tree> <docs prefix> <last head> <head> -> 0 when <head> is <last head>, or <last
 # head> is on its history and every commit past it on <head>'s first-parent line (a merge as what it
-# brought in) touches only paths under <docs prefix>, a rename as both its paths. 1 otherwise, and
-# whenever git cannot answer: uncovered is the safe direction. Both heads are compared as the
-# commits they resolve to, never as strings (T45; review pass 13 F10).
+# brought in) touches only documentation: a path under <docs prefix>, or one `_proof_docs_path`
+# names, a rename as both its paths. A commit that mixes a docs file with any other file is not
+# docs-only, so one path outside both fails the range. 1 otherwise, and whenever git cannot answer:
+# uncovered is the safe direction. Both heads are compared as the commits they resolve to, never as
+# strings (T45; review pass 13 F10).
 _facts_holds() {
-  local tree="$1" pfx="$2" lh hh files
+  local tree="$1" pfx="$2" lh hh files f
   [ -n "$tree" ] || return 1
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
   hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
   [ "$lh" != "$hh" ] || return 0
-  [ -n "$pfx" ] || return 1
   git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1
   files="$(git -C "$tree" log --first-parent -m --no-renames --name-only --format= "$lh..$hh" 2>/dev/null)" || return 1
-  printf '%s\n' "$files" | awk -v p="$pfx" 'NF && index($0, p) != 1 { bad = 1; exit } END { exit bad }'
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1
+  done <<PROOF_DOCS_FILES
+$files
+PROOF_DOCS_FILES
+  return 0
 }
 
 # _proof_named <roster file> <answer file> -> each file the answer names on a line for a suite
