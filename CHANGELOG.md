@@ -199,6 +199,9 @@ What you will notice:
   and bash 3.2's two heredoc hazards are found by a new suite, `tests/shell-lint.test.sh`, which also
   loads every library under `/bin/bash`. The doctrine is rewritten for one landing line, one gate and
   one door.
+- **The test runner runs on the latest Sonnet.** The `test-runner` role runs on the latest Sonnet
+  (it was Haiku), effort unchanged. Its reports are relied on for the floor, and Haiku's were not
+  reliable enough.
 - **For contributors.** The three slowest suites were timed alone and one cut landed, about 2% of the
   slowest; the target of a third off each missed, and the measured costs lie in the hook and door
   drives the rows run, recorded with their numbers for the next release.
@@ -217,7 +220,7 @@ the first line of a refusal to 100.
 - `ready` from a place that is not a row's tree, on a detached head, or for a row with no launch line or no
   suites to run:
   `spawn-worktree: REFUSED reason=not-a-tree path=<cwd> — run ready from the row's own tree`,
-  `spawn-worktree: REFUSED reason=no-launch-row row=<row> roster=<path> — ready reads the row's suites off its launch line`,
+  `spawn-worktree: REFUSED reason=no-launch-row row=<row> roster=<path> — ready reads the row's suites off the roster row the walls read`,
   `spawn-worktree: REFUSED reason=no-lands-on row=<row> name=<name> <key>=<value> — no suite to run; land <tree> --by-hand --reason '<why>'`.
 - A landing that cannot be recorded, or whose fast-forward fails:
   `spawn-worktree: REFUSED reason=record-unwritable why=proofs-unwritable path=<rec> branch=<b> — the landing record cannot be written, so nothing is published; make it writable, say ready again`,
@@ -283,7 +286,7 @@ the first line of a refusal to 100.
   is not the line `floor-run` writes, for an attestation that names no head or no `floor-attested-by:`
   line, and for a `floor-attestation:` value other than `user`:
   `poker: REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run.`,
-  `poker: REFUSED — the floor (<cmd>) moved the working checkout <co> while it ran (head <a> to <b>, dirty=<x> to dirty=<y>); no log was written. Put back what it changed and run floor-run again.`,
+  `poker: REFUSED — the floor (<cmd>) moved the working checkout <co> while it ran (<what moved>); no log was written. Put back what it changed and run floor-run again.`,
   `poker: REFUSED — the run in <ev> read head <sha12>, but the working branch is at <head12>; run it again on <head12> and cite that log. The plan is unchanged.`,
   `poker: REFUSED — the floor in <ev> did not pass (rc=<n>); fix it, run floor-run again and cite that log. The plan is unchanged.`
 - `session-poker.sh step-field` for a value with a line break, a key outside the nine, a step with no line, a
@@ -291,7 +294,7 @@ the first line of a refusal to 100.
   `poker: REFUSED — a step field is one line, and the value has a line break; the plan is unchanged.`,
   `poker: REFUSED — '<key>' is not a step field; the plan is unchanged.`,
   `poker: REFUSED — the plan has no Step <N> line; step-line writes it first. The plan is unchanged.`,
-  `poker: REFUSED — the Step 9a block is close-out's to write (scripts/close-out.sh).`
+  `poker: REFUSED — the Step 9 block is close-out's to write (scripts/close-out.sh).`
 - `session-poker.sh share` with a value that is not a whole number from 1 to 100:
   `poker: REFUSED — share <value> is not a whole number from 1 to 100; the share is unchanged.`
 - `session-poker.sh finding-stated` with a sentence that is blank or a `<record>#<n>` that is not one is a
@@ -392,7 +395,7 @@ Known limits, carried to the next release:
 - Known limit: the suite shim decides the gate request's tree and the stamp's tree separately — a command
   that opens with `cd <row tree>` and passes no `--stamp-dir` records the request against the row tree
   and the stamp against the tree it was started from; the doctrine's form always passes `--stamp-dir`, so
-  a writer following rule 5 never meets it.
+  a writer following the doctrine's suite-call form never meets it.
 - Known limit: the brief's bare-file-name rule can read a word of prose with a dot — `i.e.`, `e.g.`,
   `Node.js`, or a file the brief only mentions — as a second deliverable and refuse the dispatch as naming
   several paths; write the deliverable as the one path and keep such words off the `Expected artifact:`
@@ -458,8 +461,9 @@ Known limits, carried to the next release:
   inner close; the remainder counts as typed.
 - Known limit: quote the user's words without the typographic quotes that surround them; a `’` inside a
   word (`don’t`) is fine.
-- Known limit: a suite call that carries any command between its `cd` and the suite may be stamped
-  against the main checkout; keep the call in rule 5's bare shape and read the stamp.
+- Known limit: a suite call that carries a `$( )`, a pipe, a `&`, a backquote or a subshell between its
+  `cd` and the suite may be stamped against the main checkout; keep the call in the doctrine's suite-call
+  form (`cd <tree> || exit 1; LOG=…; bash tests/run.sh --only <suite> > "$LOG" 2>&1`) and read the stamp.
 - Known limit: under `claude -p` in auto mode the CLI's own classifier can deny the Patrol's recurring
   `CronCreate` as unauthorized persistence, so no clock is armed until you approve the job; the session
   reports that the Patrol is not running and asks you to.
@@ -481,6 +485,21 @@ Known limits, carried to the next release:
 - Known limit: `config_value` reads a `floor:` key wherever it stands in `.bionic/config.yaml`, an indented
   one under another mapping included, and keeps a trailing `# comment` in the value — write the key
   flush-left with no comment.
+- Known limit: a plain `git merge` of a row is counted as a `published kind=git` landing only when the
+  next `ready` runs, and its landed time is that act's time, not the merge's; a hand landing by
+  `row-landed --by-hand` is counted at once.
+- Known limit: a `fail` reading holds the step advance from `current 6` on, not at `current 5`; and a
+  later `pass` reading registered over an empty range (the same commit at both ends) releases the hold
+  although it covers no fix — the orchestrator, who registers readings, must register the pass over the
+  range that holds the fix.
+- Known limit: under `claude -p` the prompt's transcript entry carries no `origin`, so `user_said` finds
+  no words the user typed and `finding-move` is refused; make a move in an interactive session.
+- Known limit: a writer dispatched in the foreground cannot land through `ready` while it runs — its
+  roster launch row is written when it returns, so `ready` finds no row and refuses `no-launch-row`;
+  dispatch writers in the background, as the doctrine says.
+- Known limit: after a foreground writer's landing, the owed `TaskStop` finds the agent already
+  completed, so the stop guard never fires and the tick keeps its row open (`stand-down deferred`) until
+  the roster is swept; a background writer is stopped as the owed line says.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
