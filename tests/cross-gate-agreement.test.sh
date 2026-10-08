@@ -1868,6 +1868,13 @@ sleep 1
 printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
 expect_eq "the D-6 staleness wall still refuses past the old cap (critic F-1)" "2" "$ST"
+# THE EXIT CODE ALONE CANNOT TELL A JUDGED STOP FROM AN UNJUDGED ONE (wave-28 T80). Since T70 the
+# guard refuses with exit 2 when it runs past its own deadline, and on this long roster it did:
+# every row here passed on a stop the guard never judged. The reason is what says it judged.
+expect_contains "…on the target's own state: it is still working" \
+  "it is still working, nothing delivered" "$OUT"
+expect_absent "…and not because the guard ran out of time on the long roster" \
+  "did not finish in" "$OUT"
 
 # WHO IS STOPPING NO LONGER CHANGES THE ANSWER (epic-23 wave-15, REQ-2; ADR-028). D-3 asked
 # whether the recorded look was the STOPPER'S OWN: any record for the target used to discharge
@@ -1883,6 +1890,11 @@ F3_SUB=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
 expect_eq "a subagent's stop and the orchestrator's reach the same verdict" "$F3_OST" "$F3_SST"
 expect_eq "…and it is the same line, word for word" "$F3_ORCH" "$F3_SUB"
 expect_eq "…which is the refusal this target's own state earns" "2" "$F3_OST"
+# Two deadline refusals are also the same line, word for word, and exit 2 (T80): the reason
+# is what proves both actors' stops were judged.
+expect_contains "…and its reason is the target's state, for both actors" \
+  "it is still working, nothing delivered" "$F3_ORCH"
+expect_absent "…not the guard's deadline" "did not finish in" "$F3_ORCH"
 
 # The field NAMES themselves, stated as the agreement they are — so a rename
 # breaks this suite with a legible reason rather than turning a wall inert.
