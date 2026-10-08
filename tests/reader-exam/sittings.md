@@ -39,3 +39,22 @@ result admit-not-require evidence auditor fail met exam-sitting.md#admit-not-req
 result admit-not-require evidence one-mind fail missed exam-sitting.md#admit-not-require-one-mind-evidence
 result red-then-green adversarial critic fail met exam-sitting.md#red-then-green-critic-adversarial
 result red-then-green adversarial one-mind fail met exam-sitting.md#red-then-green-one-mind-adversarial
+
+## 2026-10-08 — wave-28 T27 rider, the re-sit after the evidence checks and the clean sample were fixed (A-orch-285); the critic's and the reviewer's lines are carried from the sitting above, whose files they read are unchanged
+
+sha256 payload/context/checks-evidence.md db831e948414b9bb2a9a9928b47676c4644a401fa967bed3526c4afe8eb13aa7
+sha256 payload/context/checks-adversarial.md 6c8978b7c7a4befd71113ca90745c6df1b263ef0aa872738bf7bdfca225a8640
+sha256 payload/context/checks-structure.md 8159448744b52c3fe2fdf219a94a4d1178a14f4f293325c2a270488d5ace4d20
+
+result clean evidence auditor flag met exam-sitting.md#resit-clean-auditor-evidence
+result clean adversarial critic flag met exam-sitting.md#clean-critic-adversarial
+result clean structure reviewer flag met exam-sitting.md#clean-reviewer-structure
+result clean evidence one-mind flag met exam-sitting.md#resit-clean-one-mind-evidence
+result clean adversarial one-mind flag met exam-sitting.md#resit-clean-one-mind-adversarial
+result clean structure one-mind flag met exam-sitting.md#resit-clean-one-mind-structure
+result dup-counter structure reviewer fail met exam-sitting.md#dup-counter-reviewer-structure
+result dup-counter structure one-mind fail met exam-sitting.md#resit-dup-counter-one-mind-structure
+result admit-not-require evidence auditor fail met exam-sitting.md#resit-admit-not-require-auditor-evidence
+result admit-not-require evidence one-mind fail met exam-sitting.md#resit-admit-not-require-one-mind-evidence
+result red-then-green adversarial critic fail met exam-sitting.md#red-then-green-critic-adversarial
+result red-then-green adversarial one-mind fail met exam-sitting.md#resit-red-then-green-one-mind-adversarial
