@@ -6635,17 +6635,6 @@ expect_nonempty "W30-D4: AC-11.1 — the structure checks rate reuse and one-sit
   "$(w26_hits "$W30D_STRUCT" "${REPO}/payload/context/checks-structure.md")"
 
 # ============================================================
-# A suite killed on a full machine exits 137 well inside its limit; reported as a timeout, it sends
-# the orchestrator after a slow suite that was never slow. The role's Bounds say so, in the template
-# and in the rendered role a session loads.
-W30X_SENT='Exit 137 is a kill, not a timeout, unless elapsed time reached the declared limit: report it killed, with elapsed time against the limit.'
-expect_contains "X137.1: AC-3.3 — agents/test-runner.md carries the exit-137 sentence" "$W30X_SENT" \
-  "$(cat "${REPO}/agents/test-runner.md" 2>/dev/null)"
-expect_contains "X137.2: …under its ## Bounds" "$W30X_SENT" \
-  "$(awk '/^## Bounds/ { on = 1; next } /^## / { on = 0 } on' "${REPO}/agents/test-runner.md" 2>/dev/null)"
-expect_contains "X137.3: …written in its template, so a render keeps it" "$W30X_SENT" \
-  "$(cat "${REPO}/agents-src/templates/test-runner.md.tmpl" 2>/dev/null)"
-=======
 section "§W30-SCRUB (wave-30 T9; REQ-4 AC-4.2, D8): dispatch.md says the runner hands a suite no gate store"
 # ============================================================
 # WHAT THIS OWNS. The rendered dispatch doctrine carries the sentence for AC-4.2's static half: the runner hands every
@@ -6666,5 +6655,16 @@ expect_eq "W30-S2m: …and a dispatch.md with the sentence's paragraph cut is ca
 
 # ============================================================
 section "§EXIT-137 — the test-runner never infers a timeout from exit 137 (wave-30 T12; REQ-3 AC-3.3)"
-# =====================================================
+# ============================================================
+# A suite killed on a full machine exits 137 well inside its limit; reported as a timeout, it sends
+# the orchestrator after a slow suite that was never slow. The role's Bounds say so, in the template
+# and in the rendered role a session loads.
+W30X_SENT='Exit 137 is a kill, not a timeout, unless elapsed time reached the declared limit: report it killed, with elapsed time against the limit.'
+expect_contains "X137.1: AC-3.3 — agents/test-runner.md carries the exit-137 sentence" "$W30X_SENT" \
+  "$(cat "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.2: …under its ## Bounds" "$W30X_SENT" \
+  "$(awk '/^## Bounds/ { on = 1; next } /^## / { on = 0 } on' "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.3: …written in its template, so a render keeps it" "$W30X_SENT" \
+  "$(cat "${REPO}/agents-src/templates/test-runner.md.tmpl" 2>/dev/null)"
+
 finish
