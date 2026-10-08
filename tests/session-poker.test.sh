@@ -15306,8 +15306,13 @@ for _fdm in no-arm no-rc no-by; do
   expect_eq "FD-m-$_fdm the mutant differs from the judge in one line and parses" "1|0" \
     "$(diff "$S46_LIB" "$FD_MUT/$_fdm.sh" | /usr/bin/grep -c '^<' | tr -d ' ')|$(bash -n "$FD_MUT/$_fdm.sh" 2>/dev/null; echo $?)"
 done
+_fdm1="$(fd_attest "$FD_MUT/no-arm.sh" "$FD_LOG")"
+case "$_fdm1" in
+  *'carries no head=<sha> dirty=<n> line'*) _fdm1_yes=yes ;;
+  *) _fdm1_yes=no ;;
+esac
 expect_eq "FD-m1 the declared arm removed: the mutant runs (a tests/run.sh-shaped refusal) and refuses the green declared log, so FD-a6 goes red under it" \
-  "1|yes" "$(r="$(fd_attest "$FD_MUT/no-arm.sh" "$FD_LOG")"; printf '%s|%s' "${r%%|*}" "$(case "$r" in (*'carries no head=<sha> dirty=<n> line'*) echo yes ;; (*) echo no ;; esac)")"
+  "1|yes" "${_fdm1%%|*}|$_fdm1_yes"
 expect_eq "FD-m2 the rc test dropped: the mutant admits the rc=1 log, so FD-r3 goes red under it" "0|$FD_W" "$(fd_attest "$FD_MUT/no-rc.sh" "$FD_REC/fd-red.log")"
 expect_eq "FD-m3 the floor-attested-by: test dropped: the mutant admits the unattested record, so FD-t3 goes red under it" \
   "0|$FD_W" "$(fd_attest "$FD_MUT/no-by.sh" "$FD_REC/fd-att-noby.md")"
