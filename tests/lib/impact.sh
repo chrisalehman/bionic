@@ -41,7 +41,10 @@
 #   transitive-doctor  payload/scripts/doctor.sh sources the file and the suite
 #                      reads doctor.sh
 #   transitive-script  the same, for the other payload/scripts/*.sh
-#   transitive-hook    a hook the suite runs sources the file
+#   transitive-hook    a hook the suite runs sources the file, or names a file
+#                      under a located root (a hook running a hook, at any depth)
+#   locates            the suite sources a seam line marked `# impact: locates`:
+#                      an edge on that DIRECTORY only, never on the files in it
 #
 # The reason column reports the STRONGEST kind found, in the order listed above.
 # It is diagnosis, not gating: a consumer that only needs the set does `cut -f1`.
@@ -62,6 +65,22 @@
 # suites read nothing". A directory reference therefore covers every path beneath
 # it, INCLUDING what its symlinks reach: `payload` covers `hooks/…`, because
 # `payload/hooks` is `hooks`.
+#
+# EXCEPT WHERE A LINE ONLY LOCATES (wave-30 T7, design-ledger Δ4/D5). The seam,
+# tests/lib/resolve-roots.sh, sets BIONIC_HOOKS_DIR and BIONIC_SKILLS_DIR and every
+# suite sources it, so the rule above made every hook and every skill file answer the
+# whole roster. A line ending `# impact: locates` names a root without reading it: its
+# edge is kept on the directory itself (`locates`, matched by equality, so a query for
+# the directory still reaches every suite) and is never expanded. Narrowing a sound
+# map is safe only if each real reader is still seen, so two rules stand in for the
+# expansion they replace. A ROOT-RELATIVE SPELLING of a file under a located root, on
+# any line of any owner, is a path-ref: `$(cd …)/hooks/x.sh` resolves no variable but
+# names the file (tests/session-start.test.sh:304). And a hook or payload script that
+# names a file under a located root reads it, so a suite that runs the one reads the
+# other, followed to a fixpoint because hooks run hooks. A file nothing names now
+# answers no suite, and proof_state reads that as a full run (payload/scripts/lib/
+# proof.sh, "the map answers %s with no suite"). tests/impact.test.sh §LOCATES holds
+# each reading in a fixture; §SWEEP asks about a planted edit in every real file.
 #
 # AND SO DOES A DIRECTORY ARGUMENT (review-a A-3). The rule above is about what a
 # SUITE names. It was not applied to what the CALLER asks about, so a query for a
@@ -386,6 +405,7 @@ _impact_answer() {
       if (k == "transitive-script") return 8
       if (k == "transitive-hook") return 9
       if (k == "payload-copy") return 10
+      if (k == "locates") return 12
       return 11
     }
     function better(suite, k, q,   r) {
@@ -507,7 +527,7 @@ CACHE_FILE=""
 if [ -n "$CACHE_DIR" ] && [ -n "$HASH_CMD" ]; then
   # shellcheck disable=SC2086  # both are deliberate word splits
   CACHE_KEY="$( {
-      printf 'impact-graph/v1\n'
+      printf 'impact-graph/v2\n'
       printf 'head\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)"
       find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" -o -path "$ROOT/.bionic" \) \
         -prune -o -print 2>/dev/null \
@@ -539,6 +559,11 @@ function resolve(tok,   v, rest, p) {
   if (!match(tok, /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/)) return ""
   v = substr(tok, 1, RLENGTH)
   rest = substr(tok, RLENGTH + 1)
+  # A PATH ENDS WHERE PATH CHARACTERS END. An assignment's value is cut at its
+  # closing quote only when the quote ends the line, so `S="$H"; H="$X/y"`
+  # (stop.test.sh:624) once stored `hooks/stop.sh"; H="…` as S, and the later
+  # `H="$S"` turned H into garbage. Rule (4) tokens are already this shape.
+  if (match(rest, /^[A-Za-z0-9_.@\/-]*/)) rest = substr(rest, 1, RLENGTH)
   gsub(/[$}{]/, "", v)
   if (!(v in VAR)) return ""
   p = VAR[v] rest
@@ -588,6 +613,8 @@ FNR == 1 {
   else if (line ~ /grep[[:space:]]+-[a-zA-Z]*q|has_pin/) kind = "pin"
   else kind = "path-ref"
   if (issrc) kind = "source"
+  # LOCATING IS NOT READING (wave-30 T7): see the file header.
+  if (line ~ /#[[:space:]]*impact:[[:space:]]*locates[[:space:]]*$/) kind = "locates"
 
   # (3) the sourcing candidate. Both `. "$(dirname "$0")/lib/x.sh"` in a suite
   #     and `. "${DOCTOR_LIB}/x.sh"` in doctor.sh source a sibling library, but
@@ -719,6 +746,43 @@ done >>"$WORK/edges"
 awk -F'\t' 'NF == 3' "$WORK/canon" >>"$WORK/edges"
 sort -u "$WORK/edges" -o "$WORK/edges"
 
+# ── located roots: named files stand in for the expansion (wave-30 T7) ──────
+# $WORK/located lists every file beneath a directory some line only locates. A
+# root-relative spelling of one, on any non-comment line of any owner, is a
+# path-ref; a token whose last component names a file in the owner's OWN located
+# directory is one too (`"$(dirname "$0")/x.sh"` in a hook names its sibling).
+awk -F'\t' '$2 == "locates" { print $3 }' "$WORK/edges" | sort -u >"$WORK/located_dirs"
+while IFS= read -r _ld; do
+  [ -n "$_ld" ] && [ -d "$ROOT/$_ld" ] || continue
+  find "$ROOT/$_ld" -type f 2>/dev/null | sed "s|^$ROOT/||"
+done <"$WORK/located_dirs" | sort -u >"$WORK/located"
+if [ -s "$WORK/located" ]; then
+  # shellcheck disable=SC2086  # deliberate split of the file list
+  awk -v ROOTRE="$ROOT" -v LF="$WORK/located" '
+    BEGIN { while ((getline l < LF) > 0) LOC[l] = 1 }
+    FNR == 1 {
+      OWNER = FILENAME; sub("^" ROOTRE "/", "", OWNER)
+      OWNERDIR = OWNER; sub(/\/[^\/]*$/, "", OWNERDIR)
+    }
+    /^[[:space:]]*#/ { next }
+    {
+      s = $0
+      while (match(s, /[A-Za-z0-9_.@\/-]+/)) {
+        tok = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+        if (index(tok, "/") == 0) continue
+        t = tok
+        while (t != "") {
+          if ((t in LOC) && t != OWNER) print OWNER "\tpath-ref\t" t
+          if (!sub(/^[^\/]*\//, "", t)) break
+        }
+        b = tok; sub(/^.*\//, "", b)
+        if (b != "" && ((OWNERDIR "/" b) in LOC) && (OWNERDIR "/" b) != OWNER)
+          print OWNER "\tpath-ref\t" OWNERDIR "/" b
+      }
+    }' $EXTRACT_FILES 2>/dev/null >>"$WORK/edges" || :
+  sort -u "$WORK/edges" -o "$WORK/edges"
+fi
+
 # ── directory edges expand ───────────────────────────────────────────────────
 # A reference to a directory is a reference to everything under it. What "under
 # it" means is the directory PLUS every path its symlinks reach, so `payload`
@@ -754,7 +818,7 @@ done <"$WORK/suites" >>"$WORK/all"
 _emit_for() {
   local suite="$1" kind="$2" owner="$3"
   awk -F'\t' -v o="$owner" -v s="$suite" -v k="$kind" '
-    $1 == o { print s "\t" (k == "" ? $2 : k) "\t" $3 }' "$WORK/edges"
+    $1 == o { print s "\t" (k == "" || $2 == "locates" ? $2 : k) "\t" $3 }' "$WORK/edges"
 }
 
 # direct edges — the suite's own lines.
@@ -778,6 +842,37 @@ for hop in 1 2; do
 done
 rm -f "$WORK/suite_libs.next" "$WORK/all.prev"
 
+# through a runner to a located file, at any depth (wave-30 T7). A hook or a
+# payload script that names a file under a located root reads it — hooks run
+# hooks — so a suite that runs the one reads everything the chain reaches. The
+# located dir-ref covered this before; the closure stands in for it. The lines
+# land in $WORK/all BEFORE the block below, so a hook reached this way has its own
+# sourced libraries followed there too.
+if [ -s "$WORK/located" ]; then
+  awk -F'\t' 'FILENAME == LF { loc[$1] = 1; next }
+    ($1 ~ /^hooks\/[^\/]*$/ || $1 ~ /^payload\/scripts\/[^\/]*\.sh$/) && ($3 in loc) && $1 != $3 {
+      print $1 "\t" $3 }' LF="$WORK/located" "$WORK/located" "$WORK/edges" \
+    | sort -u >"$WORK/runner_reads"
+  awk -F'\t' '
+    FILENAME == RF { n[$1]++; ADJ[$1, n[$1]] = $2; next }
+    $3 ~ /^payload\/scripts\/[^\/]*\.sh$/ || $3 ~ /^hooks\/[^\/]*$/ {
+      suite = $1; start = $3
+      k = (start ~ /^hooks\//) ? "transitive-hook" : \
+          (start == "payload/scripts/doctor.sh" ? "transitive-doctor" : "transitive-script")
+      split("", SEEN); qh = 1; qt = 0; Q[++qt] = start; SEEN[start] = 1
+      while (qh <= qt) {
+        x = Q[qh++]
+        for (i = 1; i <= n[x]; i++) {
+          y = ADJ[x, i]
+          if (y in SEEN) continue
+          SEEN[y] = 1; Q[++qt] = y
+          print suite "\t" k "\t" y
+        }
+      }
+    }' RF="$WORK/runner_reads" "$WORK/runner_reads" "$WORK/all" | sort -u >"$WORK/all.runner"
+  cat "$WORK/all.runner" >>"$WORK/all"
+fi
+
 # transitive through a payload script — ten suites execute doctor.sh, which
 # sources eight libraries none of them names (code map §3.5).
 awk -F'\t' '$3 ~ /^payload\/scripts\/[^\/]*\.sh$/ || $3 ~ /^hooks\/[^\/]*\.sh$/ {
@@ -800,6 +895,7 @@ awk -F'\t' -v OFS='\t' '
   FILENAME == CF { COV[$1] = ($1 in COV ? COV[$1] "\n" : "") $2; next }
   {
     if ($3 ~ /^F:/) { print; next }
+    if ($2 == "locates") { print $1, $2, "F:" $3; next }
     if ($3 in COV) {
       n = split(COV[$3], C, "\n")
       for (i = 1; i <= n; i++)
