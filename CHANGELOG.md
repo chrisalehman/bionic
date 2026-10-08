@@ -199,6 +199,9 @@ What you will notice:
   and bash 3.2's two heredoc hazards are found by a new suite, `tests/shell-lint.test.sh`, which also
   loads every library under `/bin/bash`. The doctrine is rewritten for one landing line, one gate and
   one door.
+- **The test runner runs on the latest Sonnet.** The `test-runner` role runs on the latest Sonnet
+  (it was Haiku), effort unchanged. Its reports are relied on for the floor, and Haiku's were not
+  reliable enough.
 - **For contributors.** The three slowest suites were timed alone and one cut landed, about 2% of the
   slowest; the target of a third off each missed, and the measured costs lie in the hook and door
   drives the rows run, recorded with their numbers for the next release.
@@ -482,6 +485,21 @@ Known limits, carried to the next release:
 - Known limit: `config_value` reads a `floor:` key wherever it stands in `.bionic/config.yaml`, an indented
   one under another mapping included, and keeps a trailing `# comment` in the value — write the key
   flush-left with no comment.
+- Known limit: a plain `git merge` of a row is counted as a `published kind=git` landing only when the
+  next `ready` runs, and its landed time is that act's time, not the merge's; a hand landing by
+  `row-landed --by-hand` is counted at once.
+- Known limit: a `fail` reading holds the step advance from `current 6` on, not at `current 5`; and a
+  later `pass` reading registered over an empty range (the same commit at both ends) releases the hold
+  although it covers no fix — the orchestrator, who registers readings, must register the pass over the
+  range that holds the fix.
+- Known limit: under `claude -p` the prompt's transcript entry carries no `origin`, so `user_said` finds
+  no words the user typed and `finding-move` is refused; make a move in an interactive session.
+- Known limit: a writer dispatched in the foreground cannot land through `ready` while it runs — its
+  roster launch row is written when it returns, so `ready` finds no row and refuses `no-launch-row`;
+  dispatch writers in the background, as the doctrine says.
+- Known limit: after a foreground writer's landing, the owed `TaskStop` finds the agent already
+  completed, so the stop guard never fires and the tick keeps its row open (`stand-down deferred`) until
+  the roster is swept; a background writer is stopped as the owed line says.
 
 One rule for landing: a row lands by `ready`, which proves it on the line itself; a person lands one
 by hand and says why.
