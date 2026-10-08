@@ -437,6 +437,51 @@ act_worktrees() {
   WT_LINE="${removed:-none}"
 }
 
+# ─── Before act 3: the orphan sweep and the run's count of full runs (wave-30 T12; D6, D7d) ──
+#
+# A RUN IS AN OBJECT THAT OUTLIVES ITS CALLER (booked.sh --detach, wave-30 T8), so a closing run can
+# leave one behind: a detached suite run whose pid is alive and that wrote no end (`<log>.rc`) under
+# `<tmp>/runs`. Nobody is waiting on it and the wipe is about to take its files, so `run` stops each
+# one through `session-poker.sh stop-run` (TERM to its group, KILL to what is left, rc=137 recorded
+# when it wrote no end) and names it with its last progress line; `check` names it and sends nothing.
+# A run already ended, or LOST, is no process and gets no line. Nothing is refused by the sweep.
+#
+# `regression-runs: <n>` is the release card's count of full-runner runs (REQ-4 AC-4.6, Δ6d):
+# session-poker's `regression-runs`, read off the run records on the rosters BEFORE the wipe takes
+# them. When the records cannot be counted, the plan header's value is printed, and says so.
+co_poker() { printf '%s/hooks/session-poker.sh' "$(plugin_root)"; }
+RR_LINE=""
+co_regression_runs() {  # -> sets RR_LINE
+  local out n
+  out="$(cd "$ROOT" && bash "$(co_poker)" regression-runs 2>/dev/null)" || out=""
+  n="${out#poker: regression-runs=}"
+  case "$n" in
+    ''|*[!0-9]*)
+      n="$(plan_frontmatter_get "$PLAN" regression-runs)"
+      RR_LINE="${n:-unknown} (the plan header's; the run records could not be counted)" ;;
+    *) RR_LINE="$n" ;;
+  esac
+}
+co_orphans() {  # <run|check> -> one `orphan:` line per live detached run under $TMP_DIR/runs
+  local log out id prog
+  [ -d "$TMP_DIR/runs" ] || return 0
+  for log in "$TMP_DIR/runs"/*.log; do
+    [ -f "$log" ] && [ -f "$log.pid" ] || continue
+    [ ! -s "$log.rc" ] || continue
+    id="${log##*/}"; id="${id%.log}"
+    prog="$(tail -n 1 "$log.progress.tsv" 2>/dev/null | tr '\t' ' ')"
+    if [ "$1" = check ]; then
+      out="$(cd "$ROOT" && bash "$(co_poker)" stop-run "$log" --report-only 2>/dev/null)"
+    else
+      out="$(cd "$ROOT" && bash "$(co_poker)" stop-run "$log" 2>/dev/null)"
+    fi
+    case "$out" in
+      *" — RUNNING; would TERM"*|*" — stopped ("*) say "orphan: $id — ${out#* — }; last progress: ${prog:-none}" ;;
+    esac
+  done
+  return 0
+}
+
 # ─── Act 3: the tmp wipe ─────────────────────────────────────────────────────
 #
 # ITS OWN STATE, DEAD SESSIONS' STATE, AND THE EPHEMERA — NEVER A LIVE NEIGHBOUR'S
@@ -1264,6 +1309,9 @@ do_check() {
     say "worktree-removed: ${wt_desc}"
   fi
 
+  co_orphans check
+  co_regression_runs
+  say "regression-runs: $RR_LINE"
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
@@ -1354,6 +1402,8 @@ do_run() {
                     say "preflight: the commit gate allows the plan this run will write"
   act_merge;        say "merge: $MERGE_LINE"
   act_worktrees;    say "worktree-removed: $WT_LINE"
+  co_orphans run
+  co_regression_runs; say "regression-runs: $RR_LINE"
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
   act_continuation; say "continuation: $CONT_LINE"

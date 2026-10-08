@@ -2664,4 +2664,227 @@ expect_eq "RPf2 …and the digest keeps what it read (current 5, two rows)" "pla
   "$(/usr/bin/grep -E '^plan_(current|rows)=' "$(digest_of "$RRP")" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 
 
+# ============================================================
+section "Section 56 §WAIT §LOST §ADOPT-RUN §RUNS: the run's verbs (wave-30 T12; REQ-3 AC-3.2, AC-3.3, AC-3.5, AC-3.8; REQ-4 AC-4.6; D6, D7d)"
+# ============================================================
+#
+# A RUN IS AN OBJECT (D6): `booked.sh --detach` starts it in a session of its own and records it on
+# the roster row its --agent names (wave-30 T8). These rows start REAL detached runs through the
+# shipped shim, kill the caller's group as a /clear would, and read them back through the verbs:
+# `wait` (re-entrant: a second wait finds the same run and never starts it again), `stop-run`, the
+# word LOST for a run whose pid died with no end (never a timeout), `adopt`'s run line, the tick's
+# RUNNING line with the run's progress, and `regression-runs`, counted from the records and written
+# into the bound plan's header by the tick.
+#
+# FIXTURE FIDELITY: the runs are the real shim under the real perl setsid, asking this suite's
+# sandboxed gate; the rows are written by mkrow and the run records by the shim itself. SYNTHESIZED:
+# the commands (a counter, a progress line, a hold on a go-file), and in §RUNS the run records of
+# finished runs, written as the shim writes them (run_log, run_rc, run_cmd with each `|` a space,
+# booked.sh `booked_one_line`), and one fake shim
+# (§STOP-KILL) that ignores TERM, which no real shim does, to drive the KILL arm.
+export BIONIC_RUN_POLL=0.1 BIONIC_GATE_POLL=0.1
+S56_BOOKED="$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh"
+s56_until() {  # <seconds> <test...> — polls every 0.1 s; rc 1 when time runs out
+  local n=$(( $1 * 10 )) i=0; shift
+  while ! "$@" 2>/dev/null; do i=$((i + 1)); [ "$i" -lt "$n" ] || return 1; sleep 0.1; done
+}
+S56_PID=""; S56_LOG=""; S56_RUN=""; S56_N=0
+s56_start() {  # <repo> <session> <agent> <suites> <command> — a real detached run; its caller's group then SIGKILLed
+  local out pg
+  S56_N=$((S56_N + 1)); out="$TMPROOT/s56-start-$S56_N.out"
+  set -m
+  ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$2" bash "$S56_BOOKED" --detach --agent "$3" --suites "$4" -- "$5"; sleep 60 ) > "$out" 2>&1 &
+  pg=$!
+  set +m
+  s56_until 15 grep -q '^booked: started ' "$out"
+  S56_PID="$(sed -n 's/^booked: started pid=\([0-9]*\) .*/\1/p' "$out" | head -n 1)"
+  S56_LOG="$(sed -n 's/^booked: started .* log=\([^ ]*\) .*/\1/p' "$out" | head -n 1)"
+  S56_RUN="$(sed -n 's/^booked: started .* run=\([^ ]*\)$/\1/p' "$out" | head -n 1)"
+  kill -KILL -- "-$pg" 2>/dev/null; wait "$pg" 2>/dev/null
+}
+s56_hold() {  # <go-file> -> shell text: wait for it, at most 60 s
+  printf "i=0; while [ ! -f '%s' ] && [ \$i -lt 1200 ]; do i=\$((i+1)); sleep 0.05; done" "$1"
+}
+s56_prog() {  # <section> -> shell text: one section line on the run's progress file
+  printf "printf '%%s\\\\t%%s\\\\t§%%s\\\\n' 2026-10-08T00:00:01Z wt.test.sh %s >> \"\$BIONIC_TEST_PROGRESS\"" "$1"
+}
+s56_poker() {  # <repo> <out file> <args...> — the poker in the background; sets S56_BG
+  local repo="$1" out="$2"; shift 2
+  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) > "$out" 2>&1 &
+  S56_BG=$!
+}
+
+# ---------- §WAIT: re-entrant, one run, polls in short intervals (AC-3.2, AC-3.8) ----------
+R56="$(make_repo s56-runs)"; new_roster "$R56"
+add_row "$R56" name=w-run status=identified agent_id=a56run00000000000 duration="4 hours" \
+  launched_at="$(iso_ago 60)" deliverable="$R56/never.md"
+S56_CMD="echo run >> '$R56/count'; $(s56_hold "$R56/go1"); $(s56_prog sec-one); $(s56_hold "$R56/go2"); exit 3"
+s56_start "$R56" "$SID" w-run wt.test.sh "$S56_CMD"
+expect_nonempty "56a precondition: the detached run started under w-run (the shim printed its pid)" "$S56_PID"
+s56_until 10 grep -qF "|run_pid=$S56_PID|" "$(roster_of "$R56")"
+expect_contains "56a2 precondition: …and recorded it on w-run's row" "|run_pid=$S56_PID|" \
+  "$(grep -F '|name=w-run|' "$(roster_of "$R56")" | tail -n 1)|"
+s56_poker "$R56" "$TMPROOT/s56-w1.out" wait w-run; S56_W1=$S56_BG
+s56_until 10 grep -q '^poker: RUNNING w-run ' "$TMPROOT/s56-w1.out"
+kill -KILL "$S56_W1" 2>/dev/null; wait "$S56_W1" 2>/dev/null
+expect_contains "56b AC-3.2 a first wait finds the run by its row's name: RUNNING, its id and pid" \
+  "poker: RUNNING w-run run=$S56_RUN pid=$S56_PID elapsed=" "$(cat "$TMPROOT/s56-w1.out" 2>/dev/null)"
+s56_poker "$R56" "$TMPROOT/s56-w2.out" wait w-run; S56_W2=$S56_BG
+s56_until 10 grep -q '^poker: RUNNING w-run ' "$TMPROOT/s56-w2.out"
+touch "$R56/go1"
+s56_until 10 grep -q 'sec-one' "$TMPROOT/s56-w2.out"
+expect_contains "56c AC-3.8 a second wait, the first killed, prints the run's progress line while it runs" \
+  "progress: 2026-10-08T00:00:01Z wt.test.sh §sec-one" "$(cat "$TMPROOT/s56-w2.out" 2>/dev/null)"
+expect_contains "56d AC-3.2 …and found the same run: the same pid" "run=$S56_RUN pid=$S56_PID " \
+  "$(cat "$TMPROOT/s56-w2.out" 2>/dev/null)"
+touch "$R56/go2"
+wait "$S56_W2"; S56_W2_RC=$?
+expect_eq "56e the second wait exits with the run's own code" "3" "$S56_W2_RC"
+expect_contains "56f …and says FINISHED, with the code and the log" "poker: FINISHED w-run run=$S56_RUN rc=3 log=$S56_LOG" \
+  "$(cat "$TMPROOT/s56-w2.out" 2>/dev/null)"
+expect_eq "56g AC-3.2 two waits, one run: the command ran once" "1" "$(wc -l < "$R56/count" | tr -d ' ')"
+expect_true "56h the run's log is there" test -f "$S56_LOG"
+expect_false "56h2 …and no second attempt was claimed beside it" test -e "${S56_LOG%.log}-2.log"
+expect_true "56i AC-3.2 the wait polled: two RUNNING lines before the end (its start, and the progress that moved)" \
+  test "$(grep -c '^poker: RUNNING w-run ' "$TMPROOT/s56-w2.out" 2>/dev/null)" -ge 2
+poke "$R56" wait w-run
+expect_eq "56j a wait on an ended run answers at once from its record, with its code" "3|poker: FINISHED w-run run=$S56_RUN rc=3 log=$S56_LOG" "$RC|$OUT"
+poke "$R56" wait "$S56_RUN"
+expect_eq "56j2 …and by its run id too (the main thread's runs have no row)" "3" "$RC"
+poke "$R56" wait w-nobody
+expect_eq "56j3 a name with no run is a usage error, exit 2, naming it" "2|yes" \
+  "$RC|$(printf '%s' "$OUT" | grep -q 'no run named w-nobody' && echo yes || echo no)"
+
+# ---------- §LOST: a dead pid with no end is LOST, never a timeout (AC-3.3) ----------
+add_row "$R56" name=w-lost status=identified agent_id=a56lost0000000000 duration="4 hours" \
+  launched_at="$(iso_ago 60)" deliverable="$R56/never.md"
+s56_start "$R56" "$SID" w-lost lost.test.sh "$(s56_hold "$R56/go3")"
+S56_LOST_PID="$S56_PID"; S56_LOST_RUN="$S56_RUN"
+poke "$R56" wait w-lost --for 1
+expect_eq "56k wait --for bounds the call: 75 while the run goes on" "75" "$RC"
+expect_contains "56k2 …and says to wait again" "still RUNNING after 1s — the run goes on; wait again: " "$OUT"
+kill -KILL "$S56_LOST_PID" 2>/dev/null
+s56_until 5 bash -c "! kill -0 $S56_LOST_PID"
+poke "$R56" wait w-lost
+expect_eq "56l AC-3.3 a wait on a run whose pid died with no end exits 70" "70" "$RC"
+expect_regex "56m …and says LOST, with the time its log was last written" \
+  "^poker: LOST w-lost run=$S56_LOST_RUN last-written=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z " "$OUT"
+expect_eq "56n AC-3.3 …and never the word timeout (beside 56m on the same output)" "0" \
+  "$(printf '%s\n' "$OUT" | grep -ci 'timeout')"
+touch "$R56/go3"
+
+# ---------- the tick's RUNNING line, and stop-run (AC-3.8; D6 "stop-run reaches the group") ----------
+add_row "$R56" name=w-stop status=identified agent_id=a56stop0000000000 duration="4 hours" \
+  launched_at="$(iso_ago 60)" deliverable="$R56/never.md"
+s56_start "$R56" "$SID" w-stop stop.test.sh "$(s56_prog sec-stop); $(s56_hold "$R56/never-go")"
+S56_STOP_PID="$S56_PID"; S56_STOP_RUN="$S56_RUN"
+s56_until 10 grep -q 'sec-stop' "$S56_LOG.progress.tsv"
+poke "$R56" tick
+expect_contains "56o AC-3.8 the tick's RUNNING line names the live run, its pid and its progress line" \
+  "poker: RUNNING w-stop run=$S56_STOP_RUN pid=$S56_STOP_PID elapsed=" "$OUT"
+expect_contains "56o2 …ending in the run's last progress line" "progress: 2026-10-08T00:00:01Z wt.test.sh §sec-stop" \
+  "$(printf '%s\n' "$OUT" | grep '^poker: RUNNING w-stop ')"
+poke "$R56" stop-run w-stop --report-only
+expect_contains "56p stop-run --report-only says what it would do" \
+  "poker: stop-run w-stop run=$S56_STOP_RUN pid=$S56_STOP_PID — RUNNING; would TERM its process group" "$OUT"
+expect_true "56p2 …and sends nothing: the run is alive" kill -0 "$S56_STOP_PID"
+poke "$R56" stop-run w-stop
+expect_contains "56q stop-run stops the run through its own trap (TERM), which writes its end" \
+  "poker: stop-run w-stop run=$S56_STOP_RUN pid=$S56_STOP_PID — stopped (TERM); the run wrote its own end, rc=143" "$OUT"
+expect_true "56q2 …and the run is gone" s56_until 5 bash -c "! kill -0 $S56_STOP_PID"
+expect_contains "56q3 …its row records the end" "|run_rc=143|" "$(grep -F '|name=w-stop|' "$(roster_of "$R56")" | tail -n 1)|"
+poke "$R56" wait w-stop
+expect_eq "56q4 …so a wait reads it FINISHED rc=143, a stop, never LOST" "143" "$RC"
+
+# §STOP-KILL: a shim that ignores TERM is KILLed, and the end it never wrote is recorded as 137.
+mkdir -p "$TMPROOT/s56-fake"
+printf '#!/bin/bash\ntrap "" TERM\nwhile :; do sleep 0.2; done\n' > "$TMPROOT/s56-fake/booked.sh"
+S56_KLOG="$R56/.bionic/tmp/runs/w-kill-k.test.sh.log"; : > "$S56_KLOG"
+perl -MPOSIX -e 'my $l = shift; my $p = fork; exit 0 if $p; POSIX::setsid(); open(my $f, ">", "$l.pid"); print $f "$$\n"; close $f; open(STDIN, "<", "/dev/null"); open(STDOUT, ">>", $l); open(STDERR, ">&", \*STDOUT); exec @ARGV' \
+  "$S56_KLOG" bash "$TMPROOT/s56-fake/booked.sh" --run-log "$S56_KLOG"
+s56_until 5 test -s "$S56_KLOG.pid"
+S56_KPID="$(cat "$S56_KLOG.pid" 2>/dev/null)"
+printf '%s|run_pid=%s|run_log=%s|run_started_at=%s\n' \
+  "$(mkrow name=w-kill status=identified agent_id=a56kill0000000000 duration='4 hours' launched_at="$(iso_ago 60)" deliverable="$R56/never.md")" \
+  "$S56_KPID" "$S56_KLOG" "$(iso_ago 5)" >> "$(roster_of "$R56")"
+poke "$R56" stop-run w-kill
+expect_contains "56r stop-run KILLs a run that outlives its TERM, and records rc=137 for the end it never wrote" \
+  "poker: stop-run w-kill run=w-kill-k.test.sh pid=$S56_KPID — stopped (TERM, then KILL); it wrote no end, so rc=137 was recorded for it" "$OUT"
+expect_eq "56r2 …the log ends rc=137 and <log>.rc holds it" "rc=137|137" "$(tail -n 1 "$S56_KLOG")|$(cat "$S56_KLOG.rc" 2>/dev/null)"
+expect_contains "56r3 …and the row records it through roster_mark_run" "|run_rc=137|" \
+  "$(grep -F '|name=w-kill|' "$(roster_of "$R56")" | tail -n 1)|"
+expect_false "56r4 …and the process is gone" kill -0 "$S56_KPID"
+
+# ---------- §ADOPT-RUN: adopt prints each adopted row's run state (AC-3.5) ----------
+PRED_56="d6d6d6d6-1111-4bbb-8ccc-000000000056"
+S56_CFG="$(fake_config_dir s56-adopt)"
+R56A="$(make_repo s56-adopt)"; new_roster "$R56A"
+add_row_to "$R56A" "$PRED_56" name=p-run status=identified agent_id=ap56run0000000000 \
+  subagent_type=bionic:implementor deliverable="$R56A/never.md" duration="4 hours" cadence="10 minutes" \
+  launched_at="$(iso_ago 60)"
+s56_start "$R56A" "$PRED_56" p-run prun.test.sh "$(s56_hold "$R56A/go")"
+S56_A_PID="$S56_PID"; S56_A_RUN="$S56_RUN"
+S56_A_RF="$(roster_of "$R56A" "$PRED_56")"
+printf '%s|run_log=%s/.bionic/tmp/runs/p-fin-f.test.sh.log|run_rc=0|run_ended_at=%s\n' \
+  "$(mkrow session="$PRED_56" name=p-fin status=identified agent_id=ap56fin0000000000 subagent_type=bionic:implementor deliverable="$R56A/never.md" duration='4 hours' cadence='10 minutes' launched_at="$(iso_ago 60)")" \
+  "$R56A" "$(iso_ago 10)" >> "$S56_A_RF"
+S56_DEAD_PID="$(sh -c 'echo $$')"
+: > "$R56A/.bionic/tmp/runs/p-lost-l.test.sh.log"
+printf '%s|run_pid=%s|run_log=%s/.bionic/tmp/runs/p-lost-l.test.sh.log|run_started_at=%s\n' \
+  "$(mkrow session="$PRED_56" name=p-lost status=identified agent_id=ap56lost000000000 subagent_type=bionic:implementor deliverable="$R56A/never.md" duration='4 hours' cadence='10 minutes' launched_at="$(iso_ago 60)")" \
+  "$S56_DEAD_PID" "$R56A" "$(iso_ago 30)" >> "$S56_A_RF"
+add_row_to "$R56A" "$PRED_56" name=p-none status=identified agent_id=ap56none000000000 \
+  subagent_type=bionic:implementor deliverable="$R56A/never.md" duration="4 hours" cadence="10 minutes" \
+  launched_at="$(iso_ago 60)"
+CLAUDE_CONFIG_DIR="$S56_CFG" poke "$R56A" adopt --report-only
+s56_block() { printf '%s\n' "$OUT" | awk -v h="poker: $1 (" 'index($0, h) == 1 { on = 1 } on && $0 == "" { exit } on'; }
+expect_regex "56s AC-3.5 adopt prints a RUNNING row's run: its pid and its age" \
+  "^  run         : RUNNING pid=$S56_A_PID elapsed=[0-9]+s run=$S56_A_RUN\$" "$(s56_block p-run | grep '^  run ')"
+expect_eq "56t AC-3.5 …a FINISHED row's, with its code" "  run         : FINISHED rc=0 run=p-fin-f.test.sh" \
+  "$(s56_block p-fin | grep '^  run ')"
+expect_regex "56u AC-3.5 …a LOST row's, with the time its log was last written" \
+  '^  run         : LOST last-written=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z run=p-lost-l\.test\.sh$' \
+  "$(s56_block p-lost | grep '^  run ')"
+expect_contains "56v …a row with no run record is still printed (its launch line)" "  launched    : " "$(s56_block p-none)"
+expect_eq "56v2 …and prints no run line (beside 56s–56u on the same reader)" "" "$(s56_block p-none | grep '^  run ')"
+expect_eq "56w AC-3.3 adopt never prints the word timeout" "0" "$(printf '%s\n' "$OUT" | grep -ci 'timeout')"
+touch "$R56A/go"
+
+# ---------- §RUNS: regression-runs, counted from the run records (AC-4.6; Δ6d) ----------
+R56R="$(make_repo s56-regruns)"; new_roster "$R56R"
+S56_RR_PLAN="$(plan_at "$R56R" epic-99-fixture/wave-56-runs.plan.md "$(printf -- '---\nregression-runs: 5\n---\n'; plan_body 4)")"
+S56_RD="$R56R/.bionic/tmp/runs"
+s56_rec() {  # <roster file> <name> <run fields>... — a roster row with a run record, as the shim leaves it
+  local f="$1" n="$2" row kv
+  shift 2
+  row="$(mkrow name="$n" status=identified agent_id="a56$n" duration='4 hours' launched_at="$(iso_ago 600)" deliverable="$R56R/never.md")"
+  for kv in "$@"; do row="$row|$kv"; done
+  printf '%s\n' "$row" >> "$f"
+}
+S56_OWN="$(roster_of "$R56R")"
+s56_rec "$S56_OWN" w-a "run_log=$S56_RD/w-a-run.sh.log" "run_cmd=tests/run.sh" "run_rc=0"
+s56_rec "$S56_OWN" w-a "run_log=$S56_RD/w-a-run.sh.log" "run_cmd=tests/run.sh" "run_rc=0"
+s56_rec "$S56_OWN" w-b "run_log=$S56_RD/w-b-x.test.sh.log" "run_cmd=tests/run.sh --only x.test.sh" "run_rc=0"
+s56_rec "$S56_OWN" w-c "run_log=$S56_RD/w-c-run.sh.log" "run_cmd=tests/run.sh" "run_pid=1"
+S56_PRED_RF="$(roster_of "$R56R" "$PRED_56")"; roster_header > "$S56_PRED_RF"
+s56_rec "$S56_PRED_RF" w-d "run_log=$S56_RD/w-d-cmd.log" "run_cmd=cd /x    exit 1; bash tests/run.sh 2>&1   tee x.log" "run_rc=1"
+s56_rec "$S56_PRED_RF" w-e "run_log=$S56_RD/w-e-run.sh-2.log" "run_cmd=bash tests/run.sh --dry-run" "run_rc=0"
+poke "$R56R" regression-runs
+expect_eq "56x AC-4.6 regression-runs counts the ended full-runner runs on every roster, each once" \
+  "0|poker: regression-runs=2" "$RC|$OUT"
+poke "$R56R" tick
+expect_contains "56y AC-4.6 the tick prints the count" "poker: regression-runs=2" "$OUT"
+expect_eq "56z AC-4.6 …and the hand-typed header value did not survive the tick: the header reads the count" \
+  "2" "$(sed -n 's/^regression-runs: *//p' "$S56_RR_PLAN" | head -n 1)"
+expect_contains "56z2 …through the verb's transaction, which says what it wrote" \
+  "poker: regression-runs — the plan header read 5 and the run records count 2: 2 written to " "$OUT"
+s56_rec "$S56_OWN" w-f "run_log=$S56_RD/w-f-run.sh.log" "run_cmd=tests/run.sh" "run_rc=0"
+poke "$R56R" tick
+expect_contains "56z3 a new full run is news: the next tick prints in full, with the new count" "poker: regression-runs=3" "$OUT"
+expect_eq "56z4 …and the header follows it" "3" "$(sed -n 's/^regression-runs: *//p' "$S56_RR_PLAN" | head -n 1)"
+poke "$R56R" tick
+expect_regex "56z5 nothing new: the tick is the one unchanged line (wave-24 AC-4.9 kept)" \
+  "^poker: unchanged since [0-9TZ:-]+ — decision=[A-Z]+\$" "$OUT"
+
+
 finish

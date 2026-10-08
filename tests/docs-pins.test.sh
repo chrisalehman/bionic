@@ -2246,8 +2246,14 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # rather than drop the label from a role file the AC names, or touch a template outside T3's
 # declared Files to trim further; logged as A-T3.3 in record/wave-16-fixit-183/assumptions.md.
 
+#
+# ROLE_TOTAL_CAP RAISED 26,400 -> 26,520 (epic-23 wave-30 T12, A-T12.12, REQ-3 AC-3.3): the
+# test-runner's Bounds gain one sentence the AC names in that role file ("Exit 137 is a kill, not a
+# timeout, …"), 139 B rendered at its shortest; the measured total is 26,517 B against 21 B of
+# headroom the last raise left. Same ratchet, same reason: the sentence belongs to the role.
+
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=26400
+ROLE_TOTAL_CAP=26520
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -6624,5 +6630,19 @@ expect_nonempty "W30-D3m precondition: the cut copy keeps the harm table" "$(mar
 expect_eq "W30-D3m: a scale with the debt table's header cut is caught" "" "$(w30d_rows "$W30D_DOC3")"
 expect_nonempty "W30-D4: AC-11.1 — the structure checks rate reuse and one-site on the debt table, by kind" \
   "$(w26_hits "$W30D_STRUCT" "${REPO}/payload/context/checks-structure.md")"
+
+# ============================================================
+section "§EXIT-137 — the test-runner never infers a timeout from exit 137 (wave-30 T12; REQ-3 AC-3.3)"
+# ============================================================
+# A suite killed on a full machine exits 137 well inside its limit; reported as a timeout, it sends
+# the orchestrator after a slow suite that was never slow. The role's Bounds say so, in the template
+# and in the rendered role a session loads.
+W30X_SENT='Exit 137 is a kill, not a timeout, unless elapsed time reached the declared limit: report it killed, with elapsed time against the limit.'
+expect_contains "X137.1: AC-3.3 — agents/test-runner.md carries the exit-137 sentence" "$W30X_SENT" \
+  "$(cat "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.2: …under its ## Bounds" "$W30X_SENT" \
+  "$(awk '/^## Bounds/ { on = 1; next } /^## / { on = 0 } on' "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.3: …written in its template, so a render keeps it" "$W30X_SENT" \
+  "$(cat "${REPO}/agents-src/templates/test-runner.md.tmpl" 2>/dev/null)"
 
 finish
