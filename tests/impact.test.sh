@@ -1229,4 +1229,93 @@ while IFS= read -r f; do
   esac
 done <"$TMP/sweep.files"
 
+
+# ── §PRELUDE a suite's sibling prelude is a hop, like a tests/lib helper ────
+# THE SHARDED SUITES (wave-30 T1; ruling A-orch-23). A long suite is split into
+# shards that each source `tests/<suite>.prelude.sh`, which holds the fixtures,
+# the code-under-test paths and the helpers the shards share. A shard reads every
+# file its prelude names, so the map follows a `tests/*.prelude.sh` a suite
+# sources exactly as it follows a tests/lib helper. The prelude stays OUTSIDE
+# tests/lib on purpose: an edit to it reaches its own shards and no more, where an
+# edit under tests/lib owes a full run (payload/scripts/lib/proof.sh, R2).
+#
+# fails-when: a shard is not answered for a file only its prelude names (the gate
+# its prelude runs, or a library that gate sources); a suite that never sources
+# the prelude is answered through it; a prelude is named as a suite; a prelude
+# edit reaches beyond the suites that source it.
+section "§PRELUDE a sibling prelude a suite sources is followed"
+
+mk_prelude_root() { # mk_prelude_root <dir> <shard-2 sources the prelude: 1|0>
+  local r="$1" src2="$2"
+  mkdir -p "$r/tests/lib" "$r/hooks" "$r/payload/scripts/lib"
+  printf '#!/bin/bash\n_r="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"\nBIONIC_HOOKS_DIR="${BIONIC_HOOKS_DIR:-${_r}/hooks}" # impact: locates\nexport BIONIC_HOOKS_DIR\n' \
+    >"$r/tests/lib/resolve-roots.sh"
+  printf '#!/bin/bash\nBIONIC_LIB="$(dirname "$0")/../payload/scripts/lib"\n. "$BIONIC_LIB/pl.sh"\necho h1\n' >"$r/hooks/h1.sh"
+  printf '#!/bin/bash\npl() { :; }\n' >"$r/payload/scripts/lib/pl.sh"
+  printf '#!/bin/bash\necho h2\n' >"$r/hooks/h2.sh"
+  printf '# sourced by the s shards\nP_GATE="$BIONIC_HOOKS_DIR/h1.sh"\nrun_p() { bash "$P_GATE"; }\n' >"$r/tests/s.prelude.sh"
+  local pre='#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\n'
+  printf "$pre"'. "$(dirname "$0")/s.prelude.sh"\nrun_p\n' >"$r/tests/s.test.sh"
+  if [ "$src2" = 1 ]; then
+    printf "$pre"'. "$(dirname "$0")/s.prelude.sh"\nrun_p\n' >"$r/tests/s-2.test.sh"
+  else
+    printf "$pre"'run_p\n' >"$r/tests/s-2.test.sh"
+  fi
+  printf "$pre"'bash "$BIONIC_HOOKS_DIR/h2.sh"\n' >"$r/tests/q.test.sh"
+}
+PROOT="$TMP/prelude"
+mk_prelude_root "$PROOT" 1
+P_H1="$(BIONIC_IMPACT_CACHE_DIR="" suites "$PROOT" hooks/h1.sh)"
+expect_eq "prelude: the gate only the prelude names answers the shard that sources it" \
+  "1" "$(printf '%s\n' "$P_H1" | grep -cx s.test.sh)"
+expect_eq "prelude: …and the second shard" "1" "$(printf '%s\n' "$P_H1" | grep -cx s-2.test.sh)"
+expect_eq "prelude: …and not the suite that never sources it" \
+  "0" "$(printf '%s\n' "$P_H1" | grep -cx q.test.sh)"
+expect_eq "prelude: …and never names the prelude itself as a suite" \
+  "0" "$(printf '%s\n' "$P_H1" | grep -c 'prelude')"
+expect_eq "prelude: the reason is the transitive hop, as for a tests/lib helper" \
+  "transitive-lib" "$(BIONIC_IMPACT_CACHE_DIR="" reason_for "$PROOT" s.test.sh hooks/h1.sh | cut -d: -f1)"
+P_PL="$(BIONIC_IMPACT_CACHE_DIR="" suites "$PROOT" payload/scripts/lib/pl.sh)"
+expect_eq "prelude: a library the prelude's gate sources answers the shard too" \
+  "1" "$(printf '%s\n' "$P_PL" | grep -cx s.test.sh)"
+expect_eq "prelude: …and not the suite that never sources the prelude" \
+  "0" "$(printf '%s\n' "$P_PL" | grep -cx q.test.sh)"
+P_H2="$(BIONIC_IMPACT_CACHE_DIR="" suites "$PROOT" hooks/h2.sh)"
+expect_eq "prelude: a hook the other suite names answers that suite" \
+  "1" "$(printf '%s\n' "$P_H2" | grep -cx q.test.sh)"
+expect_eq "prelude: …and not a shard whose prelude never names it" \
+  "0" "$(printf '%s\n' "$P_H2" | grep -cx s.test.sh)"
+expect_eq "prelude: an edit to the prelude reaches its shards and no more" \
+  "s-2.test.sh s.test.sh" "$(BIONIC_IMPACT_CACHE_DIR="" suites "$PROOT" tests/s.prelude.sh | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+
+# THE HOP IS THE EDGE: the same tree with the second shard's source line removed
+# loses that shard, and only that one.
+PROOT_M="$TMP/prelude-mut"
+mk_prelude_root "$PROOT_M" 0
+anchor "$PROOT_M/tests/s-2.test.sh" 'run_p' 1
+P_H1_M="$(BIONIC_IMPACT_CACHE_DIR="" suites "$PROOT_M" hooks/h1.sh)"
+expect_eq "prelude (mutant): the shard that still sources the prelude is still answered" \
+  "1" "$(printf '%s\n' "$P_H1_M" | grep -cx s.test.sh)"
+expect_eq "prelude (mutant): …the shard that stopped sourcing it is not" \
+  "0" "$(printf '%s\n' "$P_H1_M" | grep -cx s-2.test.sh)"
+
+# THE REAL TREE. The gate the dispatch-preflight prelude names is read by each of
+# its four shards, by a kind stronger than a whole-directory read, and the
+# libraries the unsplit suite reached only through its prelude reach the shard
+# that holds S1 … S22.
+P_DP="$(suites "$REPO" hooks/dispatch-preflight.sh)"
+P_DP_R="$(BIONIC_IMPACT_ROOT="$REPO" bash "$IMPACT" hooks/dispatch-preflight.sh 2>/dev/null)"
+for s in dispatch-preflight.test.sh dispatch-preflight-2.test.sh dispatch-preflight-3.test.sh dispatch-preflight-4.test.sh; do
+  expect_eq "prelude (real): hooks/dispatch-preflight.sh answers $s" \
+    "1" "$(printf '%s\n' "$P_DP" | grep -cx "$s")"
+  k="$(printf '%s\n' "$P_DP_R" | awk -F'\t' -v w="$s" '$1 == w { k = $2; sub(/:.*/, "", k); print k }')"
+  expect_true "prelude (real): …by a read of the gate itself, not a directory (${k:-none})" \
+    test -n "$k" -a "$k" != dir-ref -a "$k" != payload-copy -a "$k" != locates
+done
+for f in payload/scripts/lib/width.sh payload/scripts/lib/bounds.sh payload/scripts/lib/roots.sh \
+         payload/scripts/lib/walls.sh payload/scripts/lib/git-argv.sh; do
+  expect_eq "prelude (real): $f answers dispatch-preflight-2.test.sh" \
+    "1" "$(suites "$REPO" "$f" | grep -cx dispatch-preflight-2.test.sh)"
+done
+
 finish
