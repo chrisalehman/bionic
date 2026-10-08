@@ -327,6 +327,8 @@ Fixes:
   longer makes the main checkout look busy to `land`.
 - The interpreter pin no longer refuses a shared sticky `/tmp` on a Linux host with `getfacl`, where
   every hand-run suite and `tests/run.sh` exited 2.
+- The stop guard reads a long roster in one pass; on a roster of hundreds of rows it used to run past its
+  own deadline and refuse every stop with `stop again`.
 
 Known limits, carried to the next release:
 
