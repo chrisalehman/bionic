@@ -13,6 +13,9 @@
 #            place is held by the detached pid until the end; the stamp, the end and the roster
 #            record are written with nobody waiting; the progress file is exported.
 #   §LOG2    AC-3.4 — a second attempt writes `…-2.log` and never truncates the first.
+#   §WAIT-CALLER  (T12; A-orch-7) the caller waits on its run: the log's lines on stdout, the progress
+#            line on stderr, the run's own code; a re-run of a live run attaches; LOST exits 70.
+#   §WALL    AC-3.1 end to end — the Bash wall's wrap carries --detach and outlives its caller.
 #
 # The gate (gate.test.sh, slots.test.sh) owns the foreground shim; nothing here re-proves it.
 #
@@ -111,8 +114,10 @@ bk_wait 10 bk_grep '^booked: started ' "$D/dt.out"
 DT_PID="$(bk_started dt pid)"; DT_LOG="$(bk_started dt log)"; DT_RUN="$(bk_started dt run)"
 expect_regex "DT.1 the caller prints one started line naming the pid, the log and the run" \
   '^booked: started pid=[0-9]+ log=/.+\.log run=[^ ]+$' "$(grep '^booked: started ' "$D/dt.out" 2>/dev/null)"
-expect_eq "DT.2 …and exits 0 at once, while the run is still going" "caller-rc=0" \
-  "$(grep '^caller-rc=' "$D/dt.out" 2>/dev/null)"
+# DETACH AND WAIT (A-orch-7, T12): the caller does not leave; it waits on the run from inside the
+# caller's group, so the kill below lands on a caller that is still there.
+expect_nonempty "DT.2 …and does not exit: the caller is still waiting on the run in the caller's group" \
+  "$(pgrep -g "$BK_PG" -f 'booked\.sh' 2>/dev/null)"
 expect_true "DT.3 the command started" bk_wait 10 test -e "$D/dt.ran"
 expect_eq "DT.4 a .pid file was written at start, holding the started pid" "${DT_PID:-<none>}" \
   "$(cat "$DT_LOG.pid" 2>/dev/null)"
@@ -196,5 +201,115 @@ bk_wait 20 bk_last_rc "$L3_LOG"
 expect_eq "L2.6 a third attempt writes …-3.log" "${DT_LOG%.log}-3.log" "$L3_LOG"
 expect_eq "L2.7 …and the roster's latest wx-T1 row names that third run" "${L3_LOG:-<none>}" \
   "$(grep '|name=wx-T1|' "$ROSTER" | tail -n 1 | tr '|' '\n' | sed -n 's/^run_log=//p')"
+
+# =====================================================================================
+section "§WAIT-CALLER — the caller waits on its run, streams it, and a re-run attaches (T12; A-orch-7; AC-3.2, AC-3.3, AC-3.8)"
+# =====================================================================================
+#
+# DETACH AND WAIT. The caller of --detach polls the run's log every BIONIC_RUN_POLL seconds until
+# its last line is `rc=<n>`, copies each new whole line of the log to its stdout, prints the run's
+# last progress line on stderr when it changes, and exits with the run's own code. A caller that
+# finds a LIVE run of the same id, tree and command attaches to it and never starts a second.
+export BIONIC_RUN_POLL=0.1
+AW_CMD="echo aw-body; printf '%s\\t%s\\t§%s\\n' 2026-10-08T00:00:00Z aw.test.sh one >> \"\$BIONIC_TEST_PROGRESS\"; sleep 0.6; echo aw-last; exit 4"
+AW_OUT="$(cd "$T1" && bash "$BOOKED" --detach --agent wx-T2 --suites aw.test.sh -- "$AW_CMD" 2>"$D/aw.err")"; AW_RC=$?
+expect_eq "AW.1 a caller left alone exits with the run's own code" "4" "$AW_RC"
+expect_contains "AW.2 …its stdout carries the command's output, read from the log" "aw-body" "$AW_OUT"
+expect_eq "AW.3 …up to the command's last line, and not the log's rc line after it" "aw-last" \
+  "$(printf '%s\n' "$AW_OUT" | tail -n 1)"
+expect_contains "AW.4 …and the run's progress line was printed on stderr while it ran" \
+  "booked: progress 2026-10-08T00:00:00Z aw.test.sh §one" "$(cat "$D/aw.err" 2>/dev/null)"
+
+# A COMMAND WHOSE OWN LAST LINE IS `rc=<n>` (a door command's `echo "rc=$rc"`) is not the run's end:
+# the caller waits for the shim's own end and exits with the run's code.
+RL_OUT="$(cd "$T1" && bash "$BOOKED" --detach --agent wx-T2 --suites rl.test.sh -- 'echo rc=3; sleep 0.4; exit 0' 2>/dev/null)"; RL_RC=$?
+expect_eq "AW.5 a command that prints rc=3 and exits 0: the caller exits 0, the run's own code" "0" "$RL_RC"
+expect_eq "AW.6 …and the command's rc=3 line is output, printed as its last line" "rc=3" \
+  "$(printf '%s\n' "$RL_OUT" | tail -n 1)"
+
+# THE ATTACH: a held run, its first caller's group killed, then the same command again.
+AT_CMD="echo x >> '$D/at.count'; i=0; while [ ! -f '$D/at.go' ] && [ \$i -lt 300 ]; do i=\$((i+1)); sleep 0.05; done; echo at-body; exit 5"
+bk_caller at1 "$T1" --detach --agent wx-T2 --suites at.test.sh -- "$AT_CMD"
+bk_wait 10 bk_grep '^booked: started ' "$D/at1.out"
+AT_PID="$(bk_started at1 pid)"; AT_LOG="$(bk_started at1 log)"
+bk_wait 10 test -s "$D/at.count"
+bk_kill_group "$BK_PG"
+( cd "$T1" && bash "$BOOKED" --detach --agent wx-T2 --suites at.test.sh -- "$AT_CMD" > "$D/at2.out" 2>&1; echo "rc=$?" > "$D/at2.rc" ) &
+AT2=$!
+bk_wait 10 bk_grep '^booked: attached ' "$D/at2.out"
+expect_eq "AT.1 a second caller of the same live run attaches: one line naming the same pid and log" \
+  "booked: attached pid=${AT_PID:-<none>} log=${AT_LOG:-<none>} run=$(basename "${AT_LOG:-x}" .log)" \
+  "$(grep '^booked: attached ' "$D/at2.out" 2>/dev/null)"
+touch "$D/at.go"
+wait "$AT2"
+expect_eq "AT.2 …it exits with the run's own code" "rc=5" "$(cat "$D/at2.rc" 2>/dev/null)"
+expect_eq "AT.3 …and the command ran once" "1" "$(wc -l < "$D/at.count" | tr -d ' ')"
+expect_true "AT.4a the run's own log is there" test -f "$AT_LOG"
+expect_false "AT.4 …and no second log was claimed for it" test -e "${AT_LOG%.log}-2.log"
+expect_contains "AT.5 the attached caller streamed the run's output" "at-body" "$(cat "$D/at2.out" 2>/dev/null)"
+
+# A DIFFERENT COMMAND UNDER THE SAME ID never attaches: it is a run of its own.
+AD_CMD="i=0; while [ ! -f '$D/ad.go' ] && [ \$i -lt 300 ]; do i=\$((i+1)); sleep 0.05; done; exit 0"
+bk_caller ad1 "$T1" --detach --agent wx-T2 --suites ad.test.sh -- "$AD_CMD"
+bk_wait 10 bk_grep '^booked: started ' "$D/ad1.out"
+AD_LOG="$(bk_started ad1 log)"
+bk_caller ad2 "$T1" --detach --agent wx-T2 --suites ad.test.sh -- "echo other-command"
+bk_wait 10 bk_grep '^booked: ' "$D/ad2.out"
+expect_eq "AT.6 a different command under a live id starts a run of its own, on the next log" \
+  "${AD_LOG%.log}-2.log" "$(bk_started ad2 log)"
+touch "$D/ad.go"
+bk_kill_group "$BK_PG"
+
+# LOST: the detached side itself SIGKILLed (no trap, no rc line) while a caller waits on it.
+LS_CMD="i=0; while [ ! -f '$D/ls.go' ] && [ \$i -lt 300 ]; do i=\$((i+1)); sleep 0.05; done; exit 0"
+( cd "$T1" && bash "$BOOKED" --detach --agent wx-T2 --suites ls.test.sh -- "$LS_CMD" > "$D/ls.out" 2>&1; echo "rc=$?" > "$D/ls.rc" ) &
+LS_W=$!
+bk_wait 10 bk_grep '^booked: started ' "$D/ls.out"
+LS_PID="$(bk_started ls pid)"
+kill -KILL "${LS_PID:-0}" 2>/dev/null
+wait "$LS_W"
+touch "$D/ls.go"
+expect_eq "LS.1 a waiting caller whose run's pid died with no rc line exits 70" "rc=70" "$(cat "$D/ls.rc" 2>/dev/null)"
+expect_regex "LS.2 …with one LOST line naming the run and when its log was last written" \
+  '^booked: LOST run=[^ ]+ last-written=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' \
+  "$(grep '^booked: LOST ' "$D/ls.out" 2>/dev/null)"
+expect_eq "LS.3 …and never the word timeout (beside LS.2 on the same output)" "0" \
+  "$(grep -ci 'timeout' "$D/ls.out" 2>/dev/null)"
+
+# =====================================================================================
+section "§WALL — the Bash wall wraps a suite call in --detach, and the run outlives its caller (T12; A-orch-7; AC-3.1)"
+# =====================================================================================
+#
+# END TO END ONCE: the real hooks/bash-walls.sh rewrites a main-thread suite call (advisory mode,
+# so the call is allowed and booked), and the rewritten text, run in a caller's group that is then
+# SIGKILLed, still ends its run's log with an rc line. §DETACH proved the shim half; this proves the
+# wall passes the flag.
+mkdir -p "$D/home" "$T1/tests"
+printf 'farm-out-mode: advisory\n' >> "$WR/.bionic/config.yaml"
+: > "$WR/.bionic/tmp/engaged-$WORLD_SID.state"
+printf '#!/bin/bash\necho wall-run >> "%s/wl.count"\ni=0; while [ ! -f "%s/wl.go" ] && [ $i -lt 300 ]; do i=$((i+1)); sleep 0.05; done\necho wall-body\n' "$D" "$D" \
+  > "$T1/tests/hold.test.sh"
+WL_WRAP="$(jq -n --arg s "$WORLD_SID" --arg c "$T1" \
+    '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:"bash tests/hold.test.sh"}, tool_use_id:"toolu_01bookedwall"}' \
+  | ( cd "$T1" && env HOME="$D/home" BIONIC_PLUGINS_DIR="$D/no-plugins" CLAUDE_PROJECT_DIR= \
+        bash "$BIONIC_HOOKS_DIR/bash-walls.sh" 2>/dev/null ) \
+  | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)"
+expect_regex "WL.1 the wall rewrites the suite call into the shim with --detach" \
+  "^bash [^ ]+/booked\\.sh( [^ ]+)* --detach( |\$)" "$WL_WRAP"
+expect_no_regex "WL.2 …and with no --max-wait (beside WL.1 on the same text)" " --max-wait " "$WL_WRAP"
+set -m
+( cd "$T1" && eval "$WL_WRAP"; echo "caller-rc=$?"; sleep 60 ) > "$D/wl.out" 2>&1 &
+WL_PG=$!
+set +m
+bk_wait 10 bk_grep '^booked: started ' "$D/wl.out"
+WL_LOG="$(bk_started wl log)"
+bk_wait 10 test -s "$D/wl.count"
+bk_kill_group "$WL_PG"
+touch "$D/wl.go"
+expect_true "WL.3 the caller's group SIGKILLed mid-run, the run still ends its log with an rc line" \
+  bk_wait 20 bk_last_rc "${WL_LOG:-$D/none}"
+expect_eq "WL.4 …and that line is the suite's own rc=0" "rc=0" "$(tail -n 1 "${WL_LOG:-$D/none}" 2>/dev/null)"
+expect_eq "WL.5 …and the suite ran once" "1" "$(wc -l < "$D/wl.count" 2>/dev/null | tr -d ' ')"
 
 finish
