@@ -1947,7 +1947,9 @@ section "§ORDER the roster runs longest-first from tests/timing.tsv; a full run
 # LAUNCHES by it: suites the table knows, longest first (ties by label), then the suites it
 # does not know in roster order; solo suites keep their own drain after the batch and are
 # ordered the same way inside it. `--dry-run` prints that order, `<label>TAB<seconds|->` per
-# line. A full run that completes rewrites the table from its own measurements; `--only` never.
+# line. A full run given `--write-timing` rewrites the table from its own measurements; a
+# default full run, `--only` and `--dry-run` never (T31: the proof reads the run's stamp for
+# dirty=0, so a default run must leave the tree it proved clean).
 #
 # NOT VACUOUS. The fixture table orders three suites AGAINST alphabetical order (a=100, b=900,
 # c=500), so a runner that ignored the table, or sorted by name, prints a different order than
@@ -2024,8 +2026,8 @@ for _n in a b c; do rr_stub "$TORW" "ord-$_n"; done
   printf 'section "f"\nexpect_eq "f fails" "1" "2"\nfinish\n'; } > "$TORW/tests/ord-f.test.sh"
 printf 'ord-a.test.sh\t100\nord-b.test.sh\t900\nord-c.test.sh\t500\nord-f.test.sh\t77\nord-gone.test.sh\t999\n' > "$TORW/tests/timing.tsv"
 cp "$TORW/tests/timing.tsv" "$TMPROOT/order-write.before"
-rr_drive "$TORW"
-expect_eq "ORDER.12 the full run with a failing suite fails (the rewrite is not tied to a green run)" "1" "$RR_RC"
+rr_drive "$TORW" "--write-timing"
+expect_eq "ORDER.12 the --write-timing full run with a failing suite fails (the rewrite is not tied to a green run)" "1" "$RR_RC"
 ORW_NEW="$(cat "$TORW/tests/timing.tsv")"
 expect_eq "ORDER.13 the table was rewritten with measured integers for the suites that passed" "3" \
   "$(printf '%s\n' "$ORW_NEW" | grep -cE '^ord-[abc]\.test\.sh	[0-9]+$')"
@@ -2050,6 +2052,41 @@ expect_eq "ORDER.19 …and leaves the table byte for byte as it was" "yes" \
 rr_drive "$TORW" "--dry-run"
 expect_eq "ORDER.20 --dry-run leaves the table byte for byte as it was" "yes" \
   "$(cmp -s "$TMPROOT/order-write.before" "$TORW/tests/timing.tsv" && echo yes || echo no)"
+
+# THE DEFAULT ARM (T31). A git fixture: the table committed, a default full run, and the tree
+# is clean and the table byte for byte. The positive on the same extractor comes first: the
+# run is green and ran both suites, and the SAME fixture with --write-timing changes the
+# table and dirties the tree, so an empty `git status` below is not an extractor that says
+# nothing.
+TORD="$TMPROOT/order-default"
+rr_tree "$TORD"
+for _n in a b; do rr_stub "$TORD" "ord-$_n"; done
+printf 'ord-a.test.sh\t100\nord-b.test.sh\t900\n' > "$TORD/tests/timing.tsv"
+cp "$TORD/tests/timing.tsv" "$TMPROOT/order-default.before"
+( cd "$TORD" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -q -m fixture ) >/dev/null 2>&1
+ord_dirty() { git -C "$TORD" status --porcelain 2>/dev/null; }
+expect_eq "ORDER.23 the fixture tree starts clean (git status --porcelain is empty and git answered)" "0 0" \
+  "$(git -C "$TORD" rev-parse --verify -q HEAD >/dev/null 2>&1; echo $?) $(ord_dirty | wc -l | tr -d ' ')"
+rr_drive "$TORD"
+expect_eq "ORDER.24 a default full run is green and ran both suites" "0 ord-a.test.sh ord-b.test.sh" \
+  "$RR_RC $(ord_labels "$RR_OUT" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "ORDER.25 …and leaves the table byte for byte as it was" "yes" \
+  "$(cmp -s "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv" && echo yes || echo no)"
+expect_eq "ORDER.26 …and leaves the tree clean (git status --porcelain is empty)" "0" "$(ord_dirty | wc -l | tr -d ' ')"
+rr_drive "$TORD" "--write-timing"
+expect_eq "ORDER.27 the same fixture with --write-timing is green and rewrites the table (the positive for ORDER.25–26)" "0 no" \
+  "$RR_RC $(cmp -s "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv" && echo yes || echo no)"
+expect_eq "ORDER.28 …and the tree reads dirty by exactly that file" " M tests/timing.tsv" "$(ord_dirty)"
+# A partial run must not rewrite a whole-roster table: refused with one line, nothing runs.
+cp "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv"
+RR_OUT="$( cd "$TORD" && env "${RR_GATE_ENV[@]}" bash tests/run.sh --write-timing --only ord-a.test.sh 2>&1 )"; RR_RC=$?
+expect_eq "ORDER.29 --write-timing with --only is refused with one line, rc 2, nothing ran" \
+  "2 tests/run.sh: --write-timing needs a full run; it is refused with --only and with --dry-run" "$RR_RC $RR_OUT"
+RR_OUT="$( cd "$TORD" && env "${RR_GATE_ENV[@]}" bash tests/run.sh --dry-run --write-timing 2>&1 )"; RR_RC=$?
+expect_eq "ORDER.30 --write-timing with --dry-run is refused the same way" \
+  "2 tests/run.sh: --write-timing needs a full run; it is refused with --only and with --dry-run" "$RR_RC $RR_OUT"
+expect_eq "ORDER.31 …and the table is as it was" "yes" \
+  "$(cmp -s "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv" && echo yes || echo no)"
 
 # THE MUTANT: a runner that never reads the table (the order function returns the roster as is)
 # must move ORDER.3 — otherwise the pins above would pass on an unordered runner.
