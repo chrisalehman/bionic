@@ -202,6 +202,9 @@ What you will notice:
 - **The test runner runs on the latest Sonnet.** The `test-runner` role runs on the latest Sonnet
   (it was Haiku), effort unchanged. Its reports are relied on for the floor, and Haiku's were not
   reliable enough.
+- **The evidence checks ask for finding lines.** The evidence checks file asks for finding lines and
+  grades `result` by the severity scale when the scale is pushed with the checks, as the other two
+  checks files do.
 - **For contributors.** The three slowest suites were timed alone and one cut landed, about 2% of the
   slowest; the target of a third off each missed, and the measured costs lie in the hook and door
   drives the rows run, recorded with their numbers for the next release.
@@ -387,10 +390,11 @@ Known limits, carried to the next release:
   where the registering verb derives it from the findings.
 - Known limit: a sitting marked `stale:` is pinned as it stands, including any `missed` line it
   carried.
-- Known limit: the admit-not-require sample admits a finding on two files only; a finding placed on the
-  evidence, the test or `-` scores missed.
-- Known limit: the exam's briefs ask a reader to read the shipped scale and checks files from the plugin
-  copy by path; a session that cannot read outside its project needs them inlined.
+- Known limit: the admit-not-require sample's key admits a finding on the defect's two files or on the
+  matrix row the verdict refutes; a finding placed on the evidence file, the test or `-` scores missed.
+- Known limit: the exam's briefs ask a reader to read the scale and checks files from the plugin copy by
+  path, outside its project; a session that cannot read outside its project needs them inlined — at
+  wave-28's sitting every headless reader could.
 - Known limit: a suite run by `source tests/<suite>.test.sh` or `. tests/<suite>.test.sh` from a
   dispatched agent passes the Bash wall with no refusal, wrap or stamp; only the spellings the classifier
   reads meet the door.
