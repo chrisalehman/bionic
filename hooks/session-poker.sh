@@ -461,6 +461,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   write each debt: line the continuation carries under ## Deferrals into the run's ledger, its touches and raised-by kept"
   die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debt ledger, one line per item"
   exit 2
 }
@@ -848,11 +849,13 @@ case "$VERB" in
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
       burn)    { [ $# -ge 2 ] && [ $# -le 3 ]; } || usage "debt burn takes a concept, a row and at most one plan."
                DEBT_A="$1"; DEBT_B="$2"; DEBT_PLAN_ARG="${3:-}" ;;
+      adopt)   { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt adopt takes a continuation and at most one plan."
+               DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
       list)    [ $# -le 1 ] || usage "debt list takes at most one plan."
                DEBT_PLAN_ARG="${1:-}" ;;
-      *) usage "debt takes add, touched, burn or list." ;;
+      *) usage "debt takes add, adopt, touched, burn or list." ;;
     esac
-    [ "$DEBT_SUB" = add ] || case "$DEBT_A$DEBT_B" in *'|'*|*' '*|*'	'*) usage "a debt concept or row is one word, with no | in it." ;; esac
+    [ "$DEBT_SUB" = add ] || [ "$DEBT_SUB" = adopt ] || case "$DEBT_A$DEBT_B" in *'|'*|*' '*|*'	'*) usage "a debt concept or row is one word, with no | in it." ;; esac
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -7512,7 +7515,9 @@ RC_TAGS
   # a lock beside the file (`launch_sync_lock`, the plan writer's own). `add` reads the reading's
   # `debt:` lines through `proof_findings`, the registering verb's reader, and writes a line per concept
   # and kind it does not hold yet; `touched` adds one to the touches of every unburned item of the
-  # concept (the dispatch wall's advisory calls it); `burn` writes `burned <row>` in their last cell.
+  # concept (the dispatch wall's advisory calls it); `burn` writes `burned <row>` in their last cell; `adopt`
+  # reads the `debt:` lines close-out carried under `## Deferrals` of a continuation (AC-11.2's read-back,
+  # wave-30 T32) and writes each as an item with its touches and raised-by kept, none burned.
   # Exit 0 done; 1 refused, the ledger unchanged; 2 the run or the record cannot be found; 75 another
   # writer held the lock for the whole wait.
   debt)
@@ -7587,7 +7592,43 @@ RC_TAGS
       fi
       mkdir -p "${DEBT_FILE%/*}" 2>/dev/null
     fi
-    if [ ! -d "${DEBT_FILE%/*}" ] || { [ "$DEBT_SUB" != add ] && [ ! -f "$DEBT_FILE" ]; }; then
+    if [ "$DEBT_SUB" = adopt ]; then
+      case "$DEBT_A" in
+        /*) DEBT_REC="$DEBT_A" ;;
+        *)  DEBT_REC="$DEBT_DOCS/$DEBT_A"
+            [ -f "$DEBT_REC" ] || DEBT_REC="$REPO_REAL/$DEBT_A"
+            [ -f "$DEBT_REC" ] || DEBT_REC="$PWD/$DEBT_A" ;;
+      esac
+      if [ ! -f "$DEBT_REC" ] || [ ! -r "$DEBT_REC" ]; then
+        die "REFUSED — no readable continuation at $DEBT_A; name the file whose ## Deferrals carry the debt."
+        exit 2
+      fi
+      # The carry shape (close-out's co_debts), read under the first `## Deferrals` outside a fence. A
+      # `debt:` line there that is not of the shape is a BAD row, and one BAD row refuses the lot.
+      DEBT_ROWS="$(awk '
+        { sub(/\r$/, "") }
+        /^[ \t]*```/ { fence = !fence; next }
+        fence { next }
+        /^## / { s = ($0 ~ /^## Deferrals[ \t]*$/); next }
+        s && /^debt:[ \t]/ {
+          if ($0 !~ /^debt:[ \t]+[^ \t|]+[ \t]+[^ \t|]+[ \t]+"[^"|]*"[ \t]+touches=[0-9]+[ \t]+raised-by=[^ \t|]+[ \t]+from=[^ \t]+[ \t]*$/) { print "BAD\t" $0; next }
+          split($0, w, /[ \t]+/)
+          q = index($0, "\""); r = substr($0, q + 1); e = index(r, "\""); sites = substr(r, 1, e - 1)
+          split(substr(r, e + 1), t, /[ \t]+/)
+          printf "debt\t%s\t%s\t%s\t%s\t%s\n", w[3], w[2], sites, substr(t[2], 9), substr(t[3], 11)
+        }' "$DEBT_REC")"
+      DEBT_BAD="$(printf '%s\n' "$DEBT_ROWS" | awk -F'\t' '$1 == "BAD" { print $2; exit }')"
+      if [ -n "$DEBT_BAD" ]; then
+        die "REFUSED — $DEBT_A carries a debt: line that does not parse; nothing adopted: $DEBT_BAD"
+        exit 1
+      fi
+      if [ -z "$DEBT_ROWS" ]; then
+        say "debt adopt — the continuation $DEBT_A carries no debt: line; nothing adopted"
+        exit 0
+      fi
+      mkdir -p "${DEBT_FILE%/*}" 2>/dev/null
+    fi
+    if [ ! -d "${DEBT_FILE%/*}" ] || { [ "$DEBT_SUB" != add ] && [ "$DEBT_SUB" != adopt ] && [ ! -f "$DEBT_FILE" ]; }; then
       die "REFUSED — no debt ledger at $DEBT_REL; debt add writes it from a reading's debt: lines."
       exit 1
     fi
@@ -7614,6 +7655,22 @@ RC_TAGS
         printf '%s\n' "$DEBT_SAID" | while IFS= read -r _dl; do
           case "$_dl" in *' added, '*' already there') say "debt add — $_dl: $DEBT_REL" ;; *) say "debt add — $_dl" ;; esac
         done
+        exit 0
+        ;;
+      adopt)
+        # Rows are `debt <kind> <concept> <sites> <touches> <raised-by>`. The ledger keeps what it holds:
+        # an item on concept and kind is there already and is not rewritten (A-T22.5), its touches its own.
+        DEBT_SAID="$(PROOF_HAVE="$(proof_debt_items "$DEBT_FILE")" awk -F'\t' -v out="$DEBT_NEW" '
+          BEGIN { n = split(ENVIRON["PROOF_HAVE"], h, "\n"); for (i = 1; i <= n; i++) { split(h[i], c, "\t"); have[c[1] "\t" c[2]] = 1 } }
+          { k = $3 "\t" $2
+            if (k in have) { there++; next }
+            have[k] = 1; added++
+            line[added] = $3 " | " $2 " | " $4 " | raised-by " $6 " | touches " $5 " | —" }
+          END { for (i = 1; i <= added; i++) print line[i] > out; printf "%d adopted, %d already there", added, there }' <<< "$DEBT_ROWS")"
+        if [ -f "$DEBT_FILE" ]; then cat "$DEBT_FILE"; else printf '%s\n' "$PROOF_DEBT_HEADER"; fi > "$DEBT_NEW.all" 2>/dev/null \
+          && { [ ! -f "$DEBT_NEW" ] || cat "$DEBT_NEW" >> "$DEBT_NEW.all"; } && mv "$DEBT_NEW.all" "$DEBT_FILE" 2>/dev/null \
+          || { rm -f "$DEBT_NEW.all"; die "REFUSED — the debt ledger at $DEBT_REL cannot be written."; exit 1; }
+        say "debt adopt — $DEBT_SAID: $DEBT_REL"
         exit 0
         ;;
       touched|burn)
