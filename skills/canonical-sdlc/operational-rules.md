@@ -118,7 +118,7 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
   |---|---|
   | reads cell | comma-separated: a path in the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>`; a live read is `live:<artifact>`; empty takes the kind default |
   | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head`, and at Step 7 or later an `approval:` read written out (`approval:release` for the release) · integrate `proof:floor, proof:review, head` · close the integrate row's merge |
-  | read row | a `review` row whose `reads` carries `live:head:<q>[+<q>]`, each `<q>` one of `evidence` · `adversarial` · `structure`; exclusivity, range and return-to-pending are per question: only a row sharing a question holds it, its range (the tick's `RANGE` line) starts at the oldest last reading among its questions, and `proof-add review --question <q>` returns the active row carrying `<q>`. A bare `live:head` keeps one range from the last review proof of any question |
+  | read row | a `review` row whose `reads` carries `live:head:<q>[+<q>]`, each `<q>` one of `evidence` · `adversarial` · `structure`; exclusivity, range and return-to-pending are per question: only a row sharing a question holds it, its range (the tick's `RANGE` line) starts at the oldest last reading among its questions, and `proof-add review --question <q>` returns the active row carrying `<q>`. A bare `live:head` keeps one range from the last review proof of any question Under one sitting a plan's read row reads the settled whole: `reads: approval:plan, head`, ready once the last build row lands (`steps/6.md`) |
 
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.
@@ -486,6 +486,7 @@ the continuation's `## Deferrals`, after the `deferred:` lines, one line each:
 `debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>`. A burned item
 is not carried. Into a continuation that already exists the lines are merged as the deferrals are,
 each once.
+The next run's Step 1 adopts them: right after its card it runs `session-poker.sh debt adopt <newest continuation>`.
 
 **Archiving a closed run (epic-22 wave-01, REQ-C; ADR-003).** Two config keys in
 `.bionic/config.yaml`, read by `payload/scripts/lib/roots.sh` and `archive.sh`, sit beside
@@ -505,6 +506,43 @@ never used for the release. It stays on `attested-by: close-out.sh <version>`, w
 tool that performed the tail. Close-out also writes the Step 9 line: a plan reaches Step 8
 with no `- Step 9:` line, and the close adds one under the Step-8 block before replacing it with
 `delivered:`.
+
+## Review rigor (wave-30)
+
+Rigor is the count of independent minds, `single` or `double`, and a level sets four things: the readers, `review-cadence:`, `fix-policy:` and `fix-cap:`. Step 0 writes the last three beside `rigor:` (`steps/0.md`), each the user's to set. The table is the one `SKILL.md` gives:
+
+| | `single` | `double` |
+|---|---|---|
+| readers | one: the critic holds every question | two: the auditor takes `evidence` |
+| when (`review-cadence:`) | once, at Step 6, on the settled whole | once, at Step 6 |
+| becomes a row unasked (`fix-policy:`) | S1 + S2-on, in-diff | S1 + S2-on, in-diff |
+| cap on review-born rows (`fix-cap:`) | 2 | 10% of the plan |
+
+Review is one sitting at Step 6 on the settled whole (`steps/6.md`): the moment of a check is set by its cost model, so machine checks run at every landing and mind checks run once. A plan's read row is `reads: approval:plan, head`.
+
+## Debt ledger
+
+Debt is paid by the next change that touches it, not by a user, so it is kept as a ledger and burned when touched. Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt is a second copy of a concept, an unpinned shared pair or a one-case abstraction; it is rated by its kind and the concept it names on the debt table of `payload/context/severity.md`, never by severity.
+
+**The file.** `<docs-root>/record/<run>/debt.md` holds one line per item, and the records table's `debt ledger` row gives its header and its one writer:
+
+```
+concept | kind | sites | raised-by <record> | touches N | burned <row> | —
+```
+
+The last cell is `—` while the item is open and `burned <row>` once a row has burned it.
+
+**Burn when touched.** A debt finding's disposition is burn-when-touched, never fix now and never note. The orchestrator records it at the Step-6 sitting, and the next row whose `Files:` touch the item's concept burns it inside its own work, or says why not.
+
+**The touch counter.** A brief whose `Files:` touch an item's concept adds one to its `touches`; the item with the highest count burns first. An item nobody touches costs nothing and stays at zero, so the release card prints touches and burns, never the ledger's length: `debt: touched N · burned M`.
+
+**The verbs.** `session-poker.sh debt` is the ledger's one writer, and each subcommand takes the plan last, or the session's bound run:
+
+- `session-poker.sh debt add <reading record>` writes a line per debt line of a reading, each concept and kind once.
+- `debt touched <concept>` adds one to the touches of each unburned item of the concept; the dispatch wall runs it when a brief's `Files:` cover the item.
+- `debt burn <concept> <row>` writes `burned <row>`.
+- `debt list` prints the items.
+- `debt adopt <continuation>` writes each `debt:` line a previous run's continuation carries into this run's ledger, once, with its touches and `raised-by` kept. Step 1 runs it on the newest continuation right after its card.
 
 ## Permission answers (1.10.0)
 

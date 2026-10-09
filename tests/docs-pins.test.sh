@@ -2252,8 +2252,11 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # timeout, …"), 139 B rendered at its shortest; the measured total is 26,517 B against 21 B of
 # headroom the last raise left. Same ratchet, same reason: the sentence belongs to the role.
 
+# ROLE_TOTAL_CAP RAISED 26,520 -> 27,000 (epic-23 wave-30 T19, A-T19.10, A-orch-56): the critic's role file gains the
+# three stop rules AC-2.2 names in `agents/critic.md` and its dealing (366 B), the auditor's one sentence (68 B); the
+# measured total is 26,951 B. The reviewer's file leaves with T20, which frees about 3 KB of this total.
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=26520
+ROLE_TOTAL_CAP=27000
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -2558,6 +2561,10 @@ le_cap "113: AC-1b.3 — the dispatch reference is at or under its cap (fails-wh
 le_cap "114: AC-1b.2 — steps/4.md is a pointer, not a step file (fails-when: Step-4 prose is authored into it)" \
   "${SPLIT_SKILL_DIR}/steps/4.md" 1024
 
+# Raised 110,000 -> 114,100 B at wave-30 T19 (A-T19.1, A-orch-56; Chris 2026-10-09: a byte cap never prevents a strong
+# rule from being memorialized). Measured total at the raise: 112,502 B (core 22,060 + dispatch 35,226 + steps 55,216).
+# Reason: doctrine added by design, the sitting and the three stop rules in steps/6, the three header fields in steps/0,
+# the debt adoption in steps/1, the classes and the rigor paragraph in SKILL.md. The 1,500 B above the measure is T23's.
 # The total the model is told to read. operational-rules.md is excluded by AC-1b.4's own
 # wording — nothing tells the model to read it, and it is not part of this budget.
 SPLIT_TOTAL=0
@@ -2573,12 +2580,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 110000 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B ($SPLIT_TOTAL B ≤ 110000 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 114,100 B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 114100 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 114,100 B ($SPLIT_TOTAL B ≤ 114100 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110000)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 114,100 B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 114100)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -5544,8 +5551,10 @@ for _r in auditor critic reviewer; do
   expect_nonempty "W27-T17-6: dispatch.md's roles sentence names the reader \`${_r}\`" \
     "$(w26_hits "\`${_r}\`" "$DISPATCH_MD")"
 done
-expect_nonempty "W27-T17-6b: Review follows the build names a read row per question" \
-  "$(w26_hits 'live:head:<q>' "$DISPATCH_MD")"
+# RE-POINTED (wave-30 T19, P1): review is one sitting, so the paragraph names one read row per reader,
+# `reads: approval:plan, head`, in place of a row per question reading each landed difference.
+expect_nonempty "W27-T17-6b: Review follows the build names a read row per reader, ready at the settled head" \
+  "$(w26_hits 'one read row per reader the rigor deals, `reads: approval:plan, head`' "$DISPATCH_MD")"
 # Item 8 (A-orch-13): the commit gate's hook is bash-walls.sh; the deleted name is gone.
 expect_nonempty "W27-T17-8 precondition: the operational rules name the commit gate's hook" \
   "$(w26_hits 'bash-walls.sh' "$W27D_OPS")"
@@ -6154,7 +6163,7 @@ expect_eq "W28-71D9b: …and dispatch.md no longer carries the one it cut" "" \
 # extractor, and a doctored copy proves each arm goes red. HERMETIC: committed finals by path.
 W28S_BLOCK="${BLOCK_DIR}/severity.md"
 W28S_FILE="${REPO}/payload/context/severity.md"
-W28S_CAP=3700  # 2,700 until wave-30 T4 (A-T4.2): the debt table sits beside the harm table
+W28S_CAP=4200  # 2,700 until wave-30 T4 (A-T4.2): the debt table sits beside the harm table; 3,700 until wave-30 T19 (A-T19.2, A-orch-56): only-readers-rate and the three stop rules, measured 4,141 B
 W28S_POINTER='Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.'
 W28S_AGE='Age does not lower a rating. Say "older than the reviewed range" beside it.'
 W28S_SPEC=""
@@ -6425,31 +6434,34 @@ expect_eq "W28-104am: a role file that drops the door is caught" "" "$(w28_104_d
 
 section "§W28-R (wave-28 T22; REQ-16 AC-16.3, D35): the doctrine teaches the levels by the new words only"
 # ============================================================
-# WHAT THIS OWNS. Rigor is taught as low, medium and high. The old words appear in one mapping
-# sentence, once, in SKILL.md, and nowhere else in a rendered skill, step or role file. A run is
-# announced as `<intent> · <level> rigor · <scale>`, for example `build · high rigor · wave`, and
+# WHAT THIS OWNS. Rigor is taught as single and double (wave-30 T19: the mapping sentence that named
+# the six old words is deleted, AC-1.4; the CHANGELOG's migration line is where they appear). A run is
+# announced as `<intent> · <level> rigor · <scale>`, for example `build · double rigor · wave`, and
 # the announcement prints `card.sh rigor`'s line (A-orch-98: the verb's caller). The field in files
 # stays `rigor:`. Each absence sits beside a positive on the same extractor; doctored copies prove it.
 W28R_MAP='`low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads either word as the same level, and a file carrying an old word is read as it is and never rewritten.'
 W28R_FILES="$(ls "${SKILL_DIR}"/SKILL.md "${SKILL_DIR}"/dispatch.md "${SKILL_DIR}"/steps/*.md "${REPO}"/agents/*.md 2>/dev/null)"
-# w28r_old <file>… -> `<file>:<word>` for each old level word outside the mapping sentence.
+# w28r_old <file>… -> `<file>:<word>` for each old level word (wave-30 T19: no mapping sentence is excused now).
 w28r_old() {
   local f
   for f in "$@"; do
-    _flatten "$f" | awk -v m="$W28R_MAP" '{ while ((i = index($0, m)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(m)); print }' \
-      | /usr/bin/grep -owE '(tested|peer-reviewed|audited)' | sed "s|^|${f#"$REPO"/}:|"
+    _flatten "$f" | /usr/bin/grep -owE '(tested|peer-reviewed|audited)' | sed "s|^|${f#"$REPO"/}:|"
   done
 }
 # shellcheck disable=SC2086
-expect_eq "W28-R1: the mapping sentence is said once across the rendered skill, step and role files" "1" \
+# RE-POINTED (wave-30 T19, AC-1.4): the mapping sentence is gone from every rendered skill, step and role
+# file, and SKILL.md says the two levels where it said the six words.
+expect_eq "W28-R1: the mapping sentence is said nowhere across the rendered skill, step and role files" "0" \
   "$(for _w28r in $W28R_FILES; do _flatten "$_w28r" | /usr/bin/grep -oF -- "$W28R_MAP"; done | /usr/bin/grep -c .)"
-expect_nonempty "W28-R1b: …and SKILL.md is where it is said" "$(w26_hits "$W28R_MAP" "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-R1b: …and SKILL.md says the rigor is single (one) or double (two)" \
+  "$(w26_hits '`single` (one) or `double` (two)' "${SKILL_DIR}/SKILL.md")"
 # shellcheck disable=SC2086
-expect_eq "W28-R2: outside it, no rendered skill, step or role file names a level by an old word" "" "$(w28r_old $W28R_FILES)"
+expect_eq "W28-R2: no rendered skill, step or role file names a level by an old word" "" "$(w28r_old $W28R_FILES)"
 W28R_DOC="$(w26_doctor "${SKILL_DIR}/steps/5.md" 'At `audited` the reviewer holds structure.')"
 expect_eq "W28-R2m: a step file that teaches a level by an old word is caught" "${W28R_DOC#"$REPO"/}:audited" "$(w28r_old "$W28R_DOC")"
 W28R_DOC2="$(w26_doctor "${SKILL_DIR}/SKILL.md" "$W28R_MAP")"
-expect_eq "W28-R2m2: a second mapping sentence is not mistaken for a level taught" "" "$(w28r_old "$W28R_DOC2")"
+expect_eq "W28-R2m2: a mapping sentence put back is caught (its three old words are found)" "3" \
+  "$(w28r_old "$W28R_DOC2" | awk 'END { print NR }')"
 W28R_ROWS="$(/usr/bin/grep -m1 -E '^\| \| `[a-z]+` \|' "${SKILL_DIR}/SKILL.md" | /usr/bin/grep -oE '`[a-z]+`' | tr -d '`' | tr '\n' ' ')"
 expect_eq "W28-R3: SKILL.md's rigor table columns are single and double (wave-30 T11, REQ-1)" "single double " "$W28R_ROWS"
 expect_nonempty "W28-R4: SKILL.md announces a run as <intent> · <level> rigor · <scale>" \
@@ -6747,5 +6759,158 @@ expect_contains "W30-H3: …inside the Handoff paragraph (positive control for H
   "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
 expect_absent "W30-H4: …and the paragraph no longer says nothing writes it" "Nothing writes or checks it" \
   "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+
+# ============================================================
+section "§W30-T19 (wave-30 T19; REQ-1 AC-1.2/1.3, REQ-2 AC-2.1/2.2, REQ-10 AC-10.4, REQ-11 AC-11.2; D1, D2, D4, P1-P3): the doctrine says the sitting"
+# ============================================================
+# WHAT THIS OWNS. The words a session reads once review is one decision: the three header fields Step 0
+# writes (§STEP0-FIELDS), the sitting and its four sentences (§SITTING), the three stop rules in the step,
+# the severity scale and the critic's role file (§STOP-RULES), only readers rate (§ONLY-READERS-RATE), the
+# classes of finding and the review-follows-the-build paragraph (§P3), and the debt ledger section and its
+# adoption at Step 1 (§DEBT-LEDGER). Each is an `expect_nonempty` of a sentence shipped verbatim, read from
+# the rendered final the session loads; each group's last arm doctors a copy and proves the pin goes red.
+# HERMETIC: committed finals by path; doctored copies under $TMP.
+W30T_SEV_BLOCK="${BLOCK_DIR}/severity.md"
+W30T_SEV="${REPO}/payload/context/severity.md"
+W30T_CRITIC="${REPO}/agents/critic.md"
+W30T_AUDITOR="${REPO}/agents/auditor.md"
+# w30t_pin <label> <needle> <file>… : the needle is in every file, flattened as _flatten reads them.
+w30t_pin() {
+  local _l="$1" _n="$2" _f; shift 2
+  for _f in "$@"; do
+    expect_nonempty "${_l} (${_f#"$REPO"/})" "$(w26_hits "$_n" "$_f")"
+  done
+}
+# w30t_cut <file> <needle> -> a copy of the file, flattened, with the needle removed; its path on stdout.
+w30t_cut() {
+  local out; out="$TMP/w30t-$(printf '%s' "$1$2" | cksum | tr -cd '0-9').md"
+  _flatten "$1" | awk -v n="$2" '{ while ((i = index($0, n)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(n)); print }' > "$out" 2>/dev/null
+  printf '%s' "$out"
+}
+
+# --- §STEP0-FIELDS (AC-1.2) ---
+W30T_F0='**The review fields.** Step 0 writes `review-cadence:`, `fix-policy:` and `fix-cap:` into the plan header beside `rigor:`, each with the value its rigor sets (the table in `SKILL.md`): `single` writes `once`, `S1,S2-on` and `2`; `double` writes `once`, `S1,S2-on` and `10%` of the plan'"'"'s rows.'
+W30T_F1='Each is the user'"'"'s to set with the Override DSL: `set fix-policy=<ratings>` takes `S1 S1-on S1-off S2 S2-on S2-off S3 S4`, comma-joined, `set fix-cap=<n>` takes a number, and `set review-cadence=once` names the one cadence there is.'
+W30T_F2='A value the user sets is read verbatim and never widened by an agent.'
+w30t_pin "STEP0-FIELDS-1: AC-1.2 — steps/0.md says Step 0 writes the three fields beside rigor with their per-rigor values" "$W30T_F0" "$STEP0_MD"
+w30t_pin "STEP0-FIELDS-2: …and that each is the user's to set, with the vocabulary" "$W30T_F1" "$STEP0_MD"
+w30t_pin "STEP0-FIELDS-3: …read verbatim, never widened" "$W30T_F2" "$STEP0_MD"
+for _w30f in 'review-cadence:' 'fix-policy:' 'fix-cap:'; do
+  expect_nonempty "STEP0-FIELDS-4: …the field name ${_w30f} is in the rendered steps/0.md" "$(w26_hits "\`${_w30f}\`" "$STEP0_MD")"
+done
+W30T_CARD="$(step0_card "$STEP0_MD")"
+expect_nonempty "STEP0-FIELDS-5 precondition: the card extractor reads the Run block's rigor line" "$(printf '%s\n' "$W30T_CARD" | /usr/bin/grep -F '    rigor           <')"
+for _w30c in '    review-cadence  <once>' '    fix-policy      <ratings>' '    fix-cap         <n'; do
+  expect_nonempty "STEP0-FIELDS-5: AC-1.2 — the Step-0 card prints under Run: ${_w30c# }" "$(printf '%s\n' "$W30T_CARD" | /usr/bin/grep -F -- "$_w30c")"
+done
+expect_eq "STEP0-FIELDS-6: …between the rigor line and the scale line, in the Run block" "rigor review-cadence fix-policy fix-cap scale" \
+  "$(printf '%s\n' "$W30T_CARD" | awk '/^  Run$/ { on = 1; next } /^  Branches/ { on = 0 } on && NF { if ($1 ~ /^(rigor|review-cadence|fix-policy|fix-cap|scale)$/) printf "%s%s", (n++ ? " " : ""), $1 }')"
+w30t_pin "STEP0-FIELDS-7: the override example is in the new words" 'double gives `evidence` its own reader; without it, one critic holds every question' "$STEP0_MD"
+expect_eq "STEP0-FIELDS-7b: …and no longer 'high gives'" "" "$(w26_hits 'high gives' "$STEP0_MD")"
+expect_eq "STEP0-FIELDS-7c: …and the Models block lists no reviewer (the role is retired)" "" "$(printf '%s\n' "$W30T_CARD" | /usr/bin/grep -F '    reviewer ')"
+W30T_NOCARD="$TMP/w30t-step0-nocard.md"
+/usr/bin/grep -vF -e '    review-cadence  <' -e '    fix-policy      <' -e '    fix-cap         <' "$STEP0_MD" > "$W30T_NOCARD" 2>/dev/null
+expect_nonempty "STEP0-FIELDS-5m precondition: the doctored steps/0.md keeps its rigor line" "$(step0_card "$W30T_NOCARD" | /usr/bin/grep -F '    rigor           <')"
+expect_eq "STEP0-FIELDS-5m: …and a card missing the three lines is caught" "" "$(step0_card "$W30T_NOCARD" | /usr/bin/grep -F -e '    review-cadence  <' -e '    fix-policy      <' -e '    fix-cap         <')"
+
+# --- §SITTING (AC-2.1) ---
+W30T_P1='The moment of a check is set by its cost model: machine checks run early and often, mind checks run once, on the settled whole.'
+W30T_SIT1='The orchestrator brings every finding to the user with its severity and a recommendation: fix now, Known limit or next wave.'
+W30T_SIT2='The user rules the set.'
+W30T_SIT3='A row exists only from that ruling, recorded on the row with the user'"'"'s attribution.'
+W30T_SIT4='The one row the orchestrator may make alone is an in-diff finding inside `fix-policy:` and under `fix-cap:`, marked `born: review S<n> <reach>`, and the sitting says so.'
+W30T_TRIAGE='A finding is a triage item, never a task.'
+w30t_pin "SITTING-0: P1 — steps/6.md opens on the cost-model sentence" "$W30T_P1" "$STEP6_MD"
+expect_eq "SITTING-0b: …as the first sentence under the heading" "$W30T_P1" \
+  "$(awk '/^### Step 6/ { on = 1; next } on && NF { print; exit }' "$STEP6_MD" | sed 's/^\(.\{0,'"${#W30T_P1}"'\}\).*/\1/')"
+w30t_pin "SITTING-1: AC-2.1 — the orchestrator brings every finding with severity and a recommendation" "$W30T_SIT1" "$STEP6_MD"
+w30t_pin "SITTING-2: …the user rules the set" "$W30T_SIT2" "$STEP6_MD"
+w30t_pin "SITTING-3: …a row exists only from that ruling" "$W30T_SIT3" "$STEP6_MD"
+w30t_pin "SITTING-4: …the one row the orchestrator may make alone, and that it says so" "$W30T_SIT4" "$STEP6_MD"
+w30t_pin "SITTING-5: …a finding is a triage item, never a task" "$W30T_TRIAGE" "$STEP6_MD"
+W30T_DEAL1='at `single` the critic holds `evidence`, `adversarial` and `structure`; at `double` the auditor holds `evidence` and the critic the other two.'
+w30t_pin "SITTING-6: the two levels' dealing is said in the step" "$W30T_DEAL1" "$STEP6_MD"
+w30t_pin "SITTING-7: …and that structure is a question the critic holds, its reuse and one-site findings rated on the debt table" 'There is no third reader: `structure` is a question the critic holds, and its `reuse` and `one-site` findings are rated on the debt table.' "$STEP6_MD"
+for _w30g in 'Each landing is read' 'The read after a fix' 'Three questions are read at every rigor' 'live:head:<q>' 'reviewer'; do
+  expect_eq "SITTING-8: …and steps/6.md no longer carries '${_w30g}'" "" "$(w26_hits "$_w30g" "$STEP6_MD")"
+done
+w30t_pin "SITTING-9 precondition: the record-and-fact paragraph and the waiver are kept beside the absences" '**The waiver is the user'"'"'s.**' "$STEP6_MD"
+w30t_pin "SITTING-10: a debt finding is recorded at the sitting, not ruled on" 'A debt finding is not brought for a ruling: its disposition is burn-when-touched, and the orchestrator records it at the sitting with `session-poker.sh debt add <record>` (`## Debt ledger` in `operational-rules.md`).' "$STEP6_MD"
+expect_eq "SITTING-1m: a steps/6.md without the sitting's first sentence is caught" "" "$(w26_hits "$W30T_SIT1" "$(w30t_cut "$STEP6_MD" "$W30T_SIT1")")"
+expect_nonempty "SITTING-1m precondition: …the doctored copy keeps the next sentence" "$(w26_hits "$W30T_SIT2" "$(w30t_cut "$STEP6_MD" "$W30T_SIT1")")"
+
+# --- §STOP-RULES (AC-2.2) and §ONLY-READERS-RATE (AC-10.4) ---
+W30T_SR1='In-diff only: a finding in code the run did not change is a next-wave item unless it is S1.'
+W30T_SR2='Three fixes on one component stop the run.'
+W30T_SR3='A fix row is never re-read by a fresh pass.'
+W30T_ORR='Only readers rate: a finding'"'"'s severity and reach are written by the reader that found it, and no agent, the orchestrator included, moves a rating in either direction; a user'"'"'s re-rating is recorded with attribution.'
+for _w30s in "$W30T_SR1" "$W30T_SR2" "$W30T_SR3"; do
+  w30t_pin "STOP-RULES-1: AC-2.2 — '${_w30s:0:30}…'" "$_w30s" "$STEP6_MD" "$W30T_CRITIC" "$W30T_SEV" "$W30T_SEV_BLOCK"
+done
+w30t_pin "ONLY-READERS-RATE-1: AC-10.4 — the sentence" "$W30T_ORR" "$STEP6_MD" "$W30T_SEV" "$W30T_SEV_BLOCK"
+expect_nonempty "ONLY-READERS-RATE-2: …and the scale still carries its rule that a brief never re-rates" "$(w26_hits 'A brief never re-rates' "$W30T_SEV")"
+expect_eq "STOP-RULES-1m: a critic role file missing the first rule is caught" "" "$(w26_hits "$W30T_SR1" "$(w30t_cut "$W30T_CRITIC" "$W30T_SR1")")"
+expect_nonempty "STOP-RULES-1m precondition: …the doctored copy keeps the second rule" "$(w26_hits "$W30T_SR2" "$(w30t_cut "$W30T_CRITIC" "$W30T_SR1")")"
+expect_eq "ONLY-READERS-RATE-1m: a severity scale missing the sentence is caught" "" "$(w26_hits "$W30T_ORR" "$(w30t_cut "$W30T_SEV" "$W30T_ORR")")"
+expect_nonempty "ONLY-READERS-RATE-1m precondition: …the doctored copy keeps the scale" "$(w26_hits 'S1 Critical' "$(w30t_cut "$W30T_SEV" "$W30T_ORR")")"
+
+# --- the role files (AC-1.3) ---
+W30T_CR='`adversarial` and `structure` at both rigors, and `evidence` too at `single`. You read once, at Step 6, the settled whole.'
+W30T_AU='Dealt `evidence` at `double` only; at `single` the critic holds it.'
+w30t_pin "ROLES-1: AC-1.3 — the critic is dealt adversarial and structure at both rigors, evidence too at single, and reads once" "$W30T_CR" "$W30T_CRITIC"
+w30t_pin "ROLES-2: …the auditor is dealt evidence at double only" "$W30T_AU" "$W30T_AUDITOR"
+for _w30r in 'at every rigor' 'others too at lower rigor'; do
+  expect_eq "ROLES-3: …and the critic no longer says '${_w30r}'" "" "$(w26_hits "$_w30r" "$W30T_CRITIC")"
+done
+w30t_pin "ROLES-4: …the critic's description follows" 'Dealt `adversarial` and `structure` at both rigors, `evidence` too at `single`; reads once, at Step 6;' "$W30T_CRITIC" "${REPO}/agents-src/templates/critic.md.tmpl"
+w30t_pin "ROLES-5: …written in the templates, so a render keeps it" "$W30T_CR" "${REPO}/agents-src/templates/critic.md.tmpl"
+w30t_pin "ROLES-6: …the auditor's too" "$W30T_AU" "${REPO}/agents-src/templates/auditor.md.tmpl"
+# operational-rules.md says the same table SKILL.md does (AC-1.3).
+w30t_table() { /usr/bin/grep -E '^\| (readers|when \(`review-cadence:`\)|becomes a row unasked \(`fix-policy:`\)|cap on review-born rows \(`fix-cap:`\)) \|' "$1" 2>/dev/null; }
+expect_eq "ROLES-7 precondition: SKILL.md's rigor table yields its four rows" "4" "$(w30t_table "$SKILL_MD" | awk 'END { print NR }')"
+expect_eq "ROLES-7: AC-1.3 — operational-rules.md says the same table, row for row" "$(w30t_table "$SKILL_MD")" "$(w30t_table "$OPRULES")"
+sed 's/| 10% of the plan |/| 20% of the plan |/' "$OPRULES" > "$TMP/w30t-ops-drift.md" 2>/dev/null
+expect_ne "ROLES-7m: an operational-rules.md whose cap row drifts is caught" "$(w30t_table "$SKILL_MD")" "$(w30t_table "$TMP/w30t-ops-drift.md")"
+
+# --- §P3: the classes, the matrix sentence, the Step-4 fields, the handoff, the review-follows-the-build paragraph ---
+W30T_P3='Findings are classed by payment date, not by reader: harm (the user, now), evidence (the claim, now), debt (the next change). The reader roster follows from the classes, not the other way round.'
+w30t_pin "P3-1: P3 — SKILL.md says findings are classed by payment date, and the roster follows" "$W30T_P3" "$SKILL_MD"
+w30t_pin "P3-2: D4 — the rigor paragraph says what a level sets, each the user's to set at Step 0" '`single` (one) or `double` (two). A level sets four things, each the user'"'"'s to set at Step 0: the readers, `review-cadence:`, `fix-policy:` and `fix-cap:`.' "$SKILL_MD"
+w30t_pin "P3-3: A-orch-49 — the matrix sentence is where a reader of Step 3 meets it" 'Step 3 renders the matrix (`matrix-render`); Step 5 fills values.' "$SKILL_MD"
+w30t_pin "P3-4: A-orch-9 — the Step-4 fields are owed at every scale" 'pointer, plus `worktree:`/`base-sha:`/`branch:`, owed at every scale and whatever `use_worktree:` says; `current 4` fills them at wave scale' "$SKILL_MD"
+expect_eq "P3-4b: …and no longer 'when use_worktree: true'" "" "$(w26_hits 'when `use_worktree: true`' "$SKILL_MD")"
+w30t_pin "P3-5: A-orch-52 — the first handoff run keeps only the five human lines" 'The first run over a hand-written section keeps only its five human lines.' "$SKILL_MD"
+w30t_pin "P3-6: the rigor floors are in the new words" 'at `task`, `bugfix`→`single` and `build`/`refactor`/`tune`→`double`; at `wave` and above, `double`' "$SKILL_MD"
+W30T_DISP='**Review follows the build:** the plan carries one read row per reader the rigor deals, `reads: approval:plan, head`, ready once the last build row lands; it reads the settled whole once, `proof-add review` registers it, and its findings go to the sitting (`steps/6.md`). A whole read with a settled head covers cross-piece problems.'
+w30t_pin "P3-7: P1 — dispatch.md's Review follows the build is one read row per reader on the settled whole" "$W30T_DISP" "$DISPATCH_MD" "${BLOCK_DIR}/orchestrator-dispatch.md"
+for _w30d in 'a read row per reader' 'for every landed difference'; do
+  expect_eq "P3-7b: …and no longer '${_w30d}'" "" "$(w26_hits "$_w30d" "$DISPATCH_MD")"
+done
+# The old words are not taught as levels in the files this row owns. The six: three the mapping sentence
+# named and three it renamed; the pin reads backticked words and the 'rigor' phrases, not the English adjectives.
+W30T_OLD_RE='`(low|medium|high)`|(low|medium|high) rigor|(tested|peer-reviewed|audited)'
+for _w30o in "$SKILL_MD" "$STEP0_MD" "$STEP6_MD" "$W30T_CRITIC" "$W30T_AUDITOR"; do
+  expect_eq "P3-8: AC-1.4 — no old level word in ${_w30o#"$REPO"/}" "" "$(_flatten "$_w30o" | /usr/bin/grep -oE "$W30T_OLD_RE" | sort -u | tr '\n' ' ')"
+done
+expect_nonempty "P3-8 precondition: the same extractor finds a level word in a doctored copy" "$(_flatten "$(w26_doctor "$SKILL_MD" 'At `high` rigor the reviewer holds structure.')" | /usr/bin/grep -oE "$W30T_OLD_RE")"
+
+# --- §DEBT-LEDGER (AC-11.2; P2, P3) ---
+W30T_OPS_SEC="$(awk '/^## Debt ledger$/ { on = 1; next } /^## / { on = 0 } on' "$OPRULES" 2>/dev/null)"
+expect_nonempty "DEBT-LEDGER-1: AC-11 — operational-rules.md carries a ## Debt ledger section" "$W30T_OPS_SEC"
+W30T_SHAPE='concept | kind | sites | raised-by <record> | touches N | burned <row> | —'
+expect_contains "DEBT-LEDGER-2: …with the file shape" "$W30T_SHAPE" "$W30T_OPS_SEC"
+expect_contains "DEBT-LEDGER-2b: …at record/<run>/debt.md" '<docs-root>/record/<run>/debt.md' "$W30T_OPS_SEC"
+for _w30l in 'harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change)' 'burn-when-touched' 'touches' '`session-poker.sh debt add <reading record>`' '`debt touched <concept>`' '`debt burn <concept> <row>`' '`debt list`' '`debt adopt <continuation>`' 'debt: touched N · burned M'; do
+  expect_contains "DEBT-LEDGER-3: …and says ${_w30l}" "$_w30l" "$W30T_OPS_SEC"
+done
+expect_contains "DEBT-LEDGER-4: …the touch counter's rule" 'A brief whose `Files:` touch an item'"'"'s concept adds one to its `touches`; the item with the highest count burns first.' "$(_flatten <(printf '%s\n' "$W30T_OPS_SEC"))"
+W30T_ADOPT_CO='The next run'"'"'s Step 1 adopts them: right after its card it runs `session-poker.sh debt adopt <newest continuation>`.'
+W30T_ADOPT_S1='Right after the card, run `session-poker.sh debt adopt <newest continuation>`: it writes each carried `debt:` item into this run'"'"'s ledger, once, with its touches kept.'
+w30t_pin "DEBT-LEDGER-5: A-orch-44 — operational-rules' close-out section says Step 1 adopts the carried debt" "$W30T_ADOPT_CO" "$OPRULES"
+w30t_pin "DEBT-LEDGER-6: …and steps/1.md says to run adopt right after the card" "$W30T_ADOPT_S1" "$STEP1_MD"
+sed 's/^## Debt ledger$/## Debts/' "$OPRULES" > "$TMP/w30t-ops-nosec.md" 2>/dev/null
+expect_eq "DEBT-LEDGER-1m: an operational-rules.md without the heading is caught" "" "$(awk '/^## Debt ledger$/ { on = 1; next } /^## / { on = 0 } on' "$TMP/w30t-ops-nosec.md")"
+expect_nonempty "DEBT-LEDGER-1m precondition: …the doctored copy keeps the debt ledger row" "$(w30l_row "$TMP/w30t-ops-nosec.md")"
+
 
 finish
