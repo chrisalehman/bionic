@@ -37,6 +37,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each key its tier owes as pending (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof, date -u (writes the plan)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -468,6 +469,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, and each key the row's tier owes as pending; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
+  die "  bash ${HOOK_DIR}/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place: written: (date -u), the working and integration heads, the open rows, the live agents and the last proof, with the five human lines carried; never written by hand"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
@@ -883,6 +885,9 @@ case "$VERB" in
   # verb has; discharge takes the one criterion id, spelled as the matrix table spells it.
   matrix-render)
     [ $# -eq 0 ] || usage "matrix-render takes no argument: it renders the bound plan's matrix from its ## Eval design."
+    ;;
+  handoff)
+    [ $# -eq 0 ] || usage "handoff takes no argument: it rewrites the bound plan's ## Handoff from the plan and the machine."
     ;;
   discharge)
     { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "discharge takes exactly one argument: the criterion (AC-<n>.<m>) whose auditor cell becomes CONFIRMED."
@@ -6907,6 +6912,144 @@ EOF
     esac
     plan_verb_swap discharge "$DS_AC's auditor cell CONFIRMED" writer
     say "discharge — $DS_AC: auditor CONFIRMED, written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE HANDOFF (wave-30 T15; REQ-7 AC-7.2, D11). A plan that spans sessions carries `## Handoff`, and this verb is its
+  # one writer: the section is rewritten in place (between its heading and the next `## `; created before `## Not
+  # Doing` when the plan has none) from five facts the machine holds, and never typed. Its first line is
+  # `written: <date -u>`. Then, one bullet each: the HEADS of the plan's working and integration branches (git, in
+  # the checkout the plan is bound in); the OPEN ROWS, every `## Tasks` row that is active or pending with a
+  # worktree (the cells `units_rows` reads: id, agent, worktree, status) and the newest `landed` line of
+  # `## SDLC State` by its time; the LIVE AGENTS, the open rows of this session's roster (`roster_open_names`, the
+  # close predicate of every other reader) each with the run state the tick prints (`run_state_words`: RUNNING pid=
+  # elapsed=, FINISHED rc=, LOST, or `no run`), read by the tick's own readers; and the LAST PROOF, the newest
+  # `proved:` line (kind, head, at) or `none yet`. The five lines only a person can know (decisions approved this
+  # session, tried and rejected, surprises, open blockers, resume instruction) are CARRIED: each is copied verbatim,
+  # with its indented continuation lines, from the section it replaces, and is a stub `(to fill)` where it had none.
+  # Every other line of the old section is replaced: the machine lines are rewritten, not appended.
+  # It takes the plan transaction every plan verb takes (copy, dry commit through the real gate, checksum, swap).
+  # REFUSED (1), the plan unchanged: no `## Tasks`, no `## SDLC State`.
+  handoff)
+    plan_verb_open handoff
+    if ! /usr/bin/grep -qE '^##[[:space:]]+Tasks([[:space:]]|$)' "$PV_PLAN"; then
+      die "REFUSED — the plan has no ## Tasks section, so there are no open rows to hand off; the plan is unchanged."
+      exit 1
+    fi
+    if ! /usr/bin/grep -qE '^##[[:space:]]+SDLC State([[:space:]]|$)' "$PV_PLAN"; then
+      die "REFUSED — the plan has no ## SDLC State section, so there is no landing or proof to hand off; the plan is unchanged."
+      exit 1
+    fi
+    if ! { declare -F proof_working_branch >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_awk >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    HO_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    HO_WB="$(proof_working_branch "$PV_PLAN")"
+    HO_IB="$(plan_frontmatter_get "$PV_PLAN" integration-branch)"
+    [ -n "$HO_IB" ] || HO_IB="$(awk '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && /^[[:space:]]*integration-branch[[:space:]]*:/ { v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v); print v; exit }' "$PV_PLAN")"
+    HO_HEADS=""
+    for HO_B in "$HO_WB" "$HO_IB"; do
+      HO_H=""
+      [ -z "$HO_B" ] || HO_H="$(git -C "$PV_REPO" rev-parse --verify -q "refs/heads/$HO_B^{commit}" 2>/dev/null)" || HO_H=""
+      HO_HEADS="${HO_HEADS:+$HO_HEADS · }$([ -n "$HO_B" ] && printf '%s' "$(clean "$HO_B")" || printf '(none named)') @ ${HO_H:-(no such branch)}"
+    done
+    HO_ROWS="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '
+      { st = $10; wt = $11; ag = $5
+        if (ag == "") ag = "—"
+        has = (wt != "" && wt != "—" && wt != "-")
+        if (st == "active" || (st == "pending" && has)) print $1 " · " ag " · " (has ? wt : "—") " · " st }')"
+    HO_N_ROWS=0; [ -z "$HO_ROWS" ] || HO_N_ROWS="$(printf '%s\n' "$HO_ROWS" | wc -l | tr -d ' ')"
+    HO_LANDED="$(awk '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && /^- T[0-9]+:/ && match($0, /landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z/) {
+        split(substr($0, RSTART, RLENGTH), f, " "); id = $2; sub(/:$/, "", id)
+        if (length(f[2]) >= 7 && (best == "" || f[3] >= bat)) { best = id " " f[2] " " f[3]; bat = f[3] } }
+      END { print best }' "$PV_PLAN")"
+    HO_PROOF="$(awk "$(proof_awk)"'
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && proof_fields($0) {
+        at = ""; if (match($0, /[ \t]at=[^ \t]+/)) at = substr($0, RSTART + 4, RLENGTH - 4)
+        last = "kind=" PROOF_KIND " head=" PROOF_HEAD (at != "" ? " at=" at : "") }
+      END { print last }' "$PV_PLAN")"
+    HO_RF="$PV_REPO/.bionic/tmp/roster-$(session_id).state"
+    HO_AGENTS=""; HO_N_AG=0
+    while IFS= read -r HO_NAME; do
+      [ -n "$HO_NAME" ] || continue
+      HO_ST="no run"
+      if run_load_row "$(run_row_of "$HO_RF" "$HO_NAME")" "$HO_RF"; then run_read; HO_ST="$(run_state_words)"; fi
+      HO_AGENTS="${HO_AGENTS:+$HO_AGENTS
+}  - $(clean "$HO_NAME") · $HO_ST"
+      HO_N_AG=$((HO_N_AG + 1))
+    done <<< "$(roster_open_names "$HO_RF" "$PV_REPO/.bionic/tmp/sweeper-$(session_id).state" "$(session_id)")"
+    HO_BLOCK="written: $HO_NOW
+- heads: $HO_HEADS
+- open rows ($HO_N_ROWS):"
+    if [ -n "$HO_ROWS" ]; then HO_BLOCK="$HO_BLOCK
+$(printf '%s\n' "$HO_ROWS" | sed 's/^/  - /')"; fi
+    HO_BLOCK="$HO_BLOCK
+- last landed: ${HO_LANDED:-none yet}
+- live agents ($HO_N_AG):"
+    if [ -n "$HO_AGENTS" ]; then HO_BLOCK="$HO_BLOCK
+$HO_AGENTS"; fi
+    HO_BLOCK="$HO_BLOCK
+- last proof: ${HO_PROOF:-none yet}"
+    PV_RC=0
+    HO_BLOCK="$HO_BLOCK" awk '
+      function carry_one(key,   j, l, t, found) {
+        found = 0
+        for (j = 1; j <= n; j++) {
+          l = old[j]
+          if (found) { if (l ~ /^[ \t]+[^ \t]/) { print l; continue } break }
+          if (ofence[j]) continue
+          t = l; sub(/^[ \t]*([-*][ \t]+)?/, "", t)
+          if (index(t, key ":") == 1) { found = 1; print l }
+        }
+        if (!found) print "- " key ": (to fill)"
+      }
+      function emit(   i) {
+        print ""; print ENVIRON["HO_BLOCK"]
+        for (i = 1; i <= nk; i++) carry_one(K[i])
+        print ""
+      }
+      BEGIN { nk = split("decisions approved this session|tried and rejected|surprises|open blockers|resume instruction", K, "|") }
+      FNR == NR {
+        if ($0 ~ /^[ \t]*```/) { f1 = !f1; next }
+        if (f1) next
+        if ($0 ~ /^##[ \t]+Handoff[ \t]*$/) have = 1
+        if ($0 ~ /^##[ \t]+Not Doing/) nd = 1
+        next
+      }
+      {
+        isfence = ($0 ~ /^[ \t]*```/)
+        if (inho) {
+          if (!isfence && !fence && $0 ~ /^##[ \t]/) { emit(); inho = 0 }
+          else { n++; old[n] = $0; ofence[n] = (isfence || fence); if (isfence) fence = !fence; next }
+        }
+        if (isfence) { fence = !fence; print; next }
+        if (fence) { print; next }
+        if ($0 ~ /^##[ \t]+Handoff[ \t]*$/ && !wrote) { print; inho = 1; wrote = 1; n = 0; next }
+        if (!have && !wrote && ((nd && $0 ~ /^##[ \t]+Not Doing/) || (!nd && $0 ~ /^##[ \t]+SDLC State/))) {
+          print "## Handoff"; emit(); wrote = 1
+        }
+        print
+      }
+      END { if (inho) emit() }' "$PV_PLAN" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    if [ "$PV_RC" -ne 0 ]; then
+      die "REFUSED — the handoff cannot be written (awk exit $PV_RC); the plan is unchanged."
+      exit 2
+    fi
+    plan_verb_swap handoff "the handoff rewritten at $HO_NOW" writer
+    say "handoff — ## Handoff rewritten at $HO_NOW ($HO_N_ROWS open rows, $HO_N_AG live agents); written to $PV_PLAN, dry-committed first."
     exit 0
     ;;
 
