@@ -1274,18 +1274,18 @@ expect_absent "157: AC-4.2 — a task-scale card never says the first batch is u
 expect_contains "157a: …it names the pending rows" "first batch T1, T2" "$T10_PW"
 expect_absent "157b: …and never the row that is already done" "T3" "$T10_PW"
 
-# ── AC-4.3: the floor is the configured impact command, or an em dash ────────
+# ── AC-4.3: the regression is the configured impact command, or an em dash (the word: wave-30 T23) ──
 T10_V="$(printf '%s\n' "$T10_S3" | grep -m1 'matrix rows')"
-expect_contains "158: AC-4.3 — the floor is the root's own impact-command" \
-  "floor bash tests/lib/impact.sh" "$T10_V"
+expect_contains "158: AC-4.3 — the regression is the root's own impact-command" \
+  "regression bash tests/lib/impact.sh" "$T10_V"
 expect_absent "158a: …and never the literal that was in the format string" \
-  "floor tests/run.sh" "$T10_S3"
+  "regression tests/run.sh" "$T10_S3"
 whole_card step3 "$T10_TASK_PLAN_BARE"; T10_S3_BARE="$WC_OUT"
 T10_V_BARE="$(printf '%s\n' "$T10_S3_BARE" | grep -m1 'matrix rows')"
 expect_contains "158b: AC-4.3 — a root with no impact-command renders an em dash" \
-  "floor —" "$T10_V_BARE"
+  "regression —" "$T10_V_BARE"
 expect_absent "158c: …and still never the literal tests/run.sh" \
-  "floor tests/run.sh" "$T10_S3_BARE"
+  "regression tests/run.sh" "$T10_S3_BARE"
 
 # ── AC-4.4: step2 accepts a task-scale plan and renders its design paragraph ──
 whole_card step2 "$T10_TASK_PLAN"; T10_S2="$WC_OUT"

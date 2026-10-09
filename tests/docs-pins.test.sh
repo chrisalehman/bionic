@@ -2252,12 +2252,21 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # timeout, …"), 139 B rendered at its shortest; the measured total is 26,517 B against 21 B of
 # headroom the last raise left. Same ratchet, same reason: the sentence belongs to the role.
 
+#
+# ROLE_TOTAL_CAP RAISED 26,520 -> 27,000 (wave-30 T23, A-T23.5; A-orch-57, Chris 2026-10-09: a byte cap
+# never prevents a strong rule from being memorialized): the implementor and senior-implementor roles
+# gain the writer's side of the inbox, one bullet of implementor-mechanics (240 B rendered in each);
+# the measured total is 26,997 B. Same ratchet, same reason: the sentence belongs to the writer roles.
+
 # ROLE_TOTAL_CAP RAISED 26,520 -> 27,000 (epic-23 wave-30 T19, A-T19.10, A-orch-56): the critic's role file gains the
 # three stop rules AC-2.2 names in `agents/critic.md` and its dealing (366 B), the auditor's one sentence (68 B); the
 # measured total is 26,951 B. The reviewer's file leaves with T20, which frees about 3 KB of this total.
+# MERGED (wave-30 T23 over T19, A-T23.17): the two raises were each measured without the other; with both rows'
+# sentences the measured total was 27,431 B, so the cap was 27,500 B until T20's deletion freed the reviewer's file.
 #
-# ROLE_TOTAL_CAP LOWERED 27,000 -> 26,520 (epic-23 wave-30 T20, A-T20.6, A-orch-63): the reviewer role file is deleted
-# (AC-1.6), and the six role files measure 23,813 B, so the T19 raise is taken back to the cap before it.
+# ROLE_TOTAL_CAP LOWERED 27,500 -> 26,520 (epic-23 wave-30 T20, A-T20.6, A-orch-63): the reviewer role file is deleted
+# (AC-1.6); the six role files measure 24,293 B with T19's and T23's sentences both in, so the raises are taken back to
+# the cap before them.
 ROLE_CAP=5500
 ROLE_TOTAL_CAP=26520
 ROLE_OVER=""
@@ -2572,6 +2581,13 @@ le_cap "114: AC-1b.2 — steps/4.md is a pointer, not a step file (fails-when: S
 # wording — nothing tells the model to read it, and it is not part of this budget.
 SPLIT_TOTAL=0
 SPLIT_TOTAL_MISSING=""
+# RAISED 110,000 -> 113,420 B (wave-30 T23, A-T23.5; A-orch-56, Chris 2026-10-09: a byte cap never prevents a
+# strong rule from being memorialized). The regression word is twice floor's length, and steps/5.md now names
+# the Verify step's verbs (matrix-render, discharge, wait, stop-run, regression-runs, the bounded head) and
+# dispatch.md the writer inbox. Measured total at T23's render: 111,420 B; plus 2,000 B left for T19.
+# MERGED (wave-30 T23 over T19, A-T23.17): the larger cap stands, T19's 114,100 B; the measured total with both
+# rows' text is 113,944 B.
+SPLIT_TOTAL_CAP=114100
 for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
           "${SPLIT_SKILL_DIR}"/steps/0.md "${SPLIT_SKILL_DIR}"/steps/1.md \
           "${SPLIT_SKILL_DIR}"/steps/2.md "${SPLIT_SKILL_DIR}"/steps/3.md \
@@ -2583,12 +2599,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 114,100 B" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 114100 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 114,100 B ($SPLIT_TOTAL B ≤ 114100 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under ${SPLIT_TOTAL_CAP} B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le "$SPLIT_TOTAL_CAP" ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under ${SPLIT_TOTAL_CAP} B ($SPLIT_TOTAL B ≤ ${SPLIT_TOTAL_CAP} B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 114,100 B" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 114100)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under ${SPLIT_TOTAL_CAP} B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - SPLIT_TOTAL_CAP)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -6006,8 +6022,13 @@ w28_71_fix_gaps() {
     w28_71_runs "$quote" | while IFS= read -r run; do
       [ -n "$run" ] || continue
       esc="$(printf '%s' "$run" | sed 's/"/\\"/g')"
+      # THE REGRESSION WORD (wave-30 T23; D10): 1.14.0 renamed "floor" meaning the full run to
+      # "regression" in the messages, so a 1.13.0 quote saying "the floor …" or "its floor is …" is
+      # matched by that one word renamed, and nothing else in it.
+      ren="$(printf '%s' "$run" | sed -E 's/(^|[^A-Za-z])(the|its) floor /\1\2 regression /g')"
       { /usr/bin/grep -rqF -- "$run" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib" \
-        || /usr/bin/grep -rqF -- "$esc" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib"; } \
+        || /usr/bin/grep -rqF -- "$esc" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib" \
+        || /usr/bin/grep -rqF -- "$ren" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib"; } \
         || echo "not printed by the code: $run (bullet $n)"
     done
   done
@@ -6024,6 +6045,10 @@ expect_contains "W28-71tm2: …a run after a placeholder is pinned (a quote the 
 W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed 's/the Step 9 block/the Step 9a block/')"
 expect_contains "W28-71tm3: …and a name that is one letter off is caught" \
   "not printed by the code: the Step 9a block is close-out's to write (scripts/close-out.sh). (bullet 18)" "$(w28_71_fix_gaps "$W28_71_DOC")"
+W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed 's/its floor is tests\/run.sh, whose log/its floor is tests\/run.sh, whose own log/')"
+expect_contains "W28-71tm4: …and the renamed-word fold matches that word only, so a quote off by another word is caught" \
+  "not printed by the code: this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose own log proof-add floor reads. Nothing was run." \
+  "$(w28_71_fix_gaps "$W28_71_DOC")"
 W28_71_NB="$(printf '%s\n' "$W28_71_E" | awk '/^Newly refused/{ p = 1; next } p && /^[A-Z][^ ]*[^:]*:$/{ exit } p && /^- /{ n++ } END { print n + 0 }')"
 W28_71_NQ="$(w28_71_quotes "$W28_71_E" | cut -f1 | sort -u | wc -l | tr -d ' ')"
 expect_regex "W28-71t0 precondition: the part has bullets" '^[1-9][0-9]*$' "$W28_71_NB"
@@ -6130,13 +6155,13 @@ expect_nonempty "W28-71D5: an agent no roster holds is stopped as unrostered, on
 expect_nonempty "W28-71D6: the plan-verb list carries step-field, and current 4 records the share" \
   "$(w26_hits '`step-field <N> <key>=<value>`, `current <N>` (at 4 on a wave it records `share: <n>`)' "$DISPATCH_MD")"
 expect_nonempty "W28-71D6b: …and floor-run, which writes no plan" \
-  "$(w26_hits '`floor-run` runs the declared floor and writes no plan.' "$DISPATCH_MD")"
+  "$(w26_hits '`floor-run` runs the declared regression and writes no plan.' "$DISPATCH_MD")"
 expect_nonempty "W28-71D10: steps/5.md teaches the declared floor's log and the attestation record" \
   "$(w26_hits 'runs it with `session-poker.sh floor-run` and records that log the same way: it opens `head=<40-hex> dirty=<n> rc=<n>` and is judged by that line alone.' "${SKILL_DIR}/steps/5.md")"
 expect_nonempty "W28-71D10b: …and the attestation file's two lines" \
   "$(w26_hits 'a `head=<40-hex> dirty=0` line and a `floor-attested-by: <who> <when> <what ran>` line.' "${SKILL_DIR}/steps/5.md")"
 expect_nonempty "W28-71D11: SKILL.md's artifact layout names the floor keys beside the config file" \
-  "$(w26_hits '`release-check:`, and `floor: <command>` or `floor-attestation: user` # when a project'"'"'s floor is not tests/run.sh' "${SKILL_DIR}/SKILL.md")"
+  "$(w26_hits '`release-check:`, and `floor: <command>` or `floor-attestation: user` # when a project'"'"'s regression is not tests/run.sh' "${SKILL_DIR}/SKILL.md")"
 expect_nonempty "W28-71D7: the tick's landings line sits above the decision line" \
   "$(w26_hits 'a changed tick prints `poker: landings: …` above the decision line' "$DISPATCH_MD")"
 expect_nonempty "W28-71D8: steps/6.md teaches the check, the move and the one-pass rule" \
@@ -6543,7 +6568,7 @@ section "§W28-FLOOR (wave-28 T75; REQ-17 AC-17.3, D36): the knob table names fl
 # (pinned by W26-14c); a project's own floor is two rows beside it, in the same shape: `declared floor`
 # (`floor: <command>`, the `floor-run` verb, its log's first line) and `floor attestation`
 # (`floor-attestation: user`, the record's two lines). A copy with the floor row cut is caught.
-W28F_ROW='| declared floor | `floor: <command>` in `.bionic/config.yaml`'
+W28F_ROW='| declared regression | `floor: <command>` in `.bionic/config.yaml`'
 expect_nonempty "W28-F0 precondition: the extractor reads the table's declared check row" \
   "$(w26_hits '| declared check | `release-check: <command>` in `.bionic/config.yaml`' "$OPRULES")"
 for _w28f in \
@@ -6551,7 +6576,7 @@ for _w28f in \
   '`session-poker.sh floor-run`' \
   '`record/<wave>/floor-run-<head>.log`, its first line `head=<40-hex> dirty=<n> rc=<n>`, then `command: <cmd>`' \
   '`proof-add floor` stays the one writer of the proof line' \
-  '| floor attestation | `floor-attestation: user` in `.bionic/config.yaml` (any other value is refused)' \
+  '| regression attestation | `floor-attestation: user` in `.bionic/config.yaml` (any other value is refused)' \
   'a line `head=<40-hex> dirty=0` naming the working head and a line `floor-attested-by: <who> <when> <what ran>`'; do
   expect_nonempty "W28-F1: AC-17.3 operational-rules.md documents: ${_w28f:0:72}" "$(w26_hits "$_w28f" "$OPRULES")"
 done
@@ -6792,6 +6817,77 @@ expect_contains "W30-H3: …inside the Handoff paragraph (positive control for H
   "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
 expect_absent "W30-H4: …and the paragraph no longer says nothing writes it" "Nothing writes or checks it" \
   "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+
+# ============================================================
+section "§REGRESSION-WORD (wave-30 T23; REQ-4 AC-4.7, D10): the doctrine says regression, and the verbs and keys still spell floor"
+# ============================================================
+# WHAT THIS OWNS. "floor" meaning the full test run is renamed "regression" in the doctrine a session
+# reads: SKILL.md, steps/5.md, dispatch.md, operational-rules.md and the role files. The verbs and keys
+# keep their spelling until bionic2 (`proof-add floor`, `floor-run`, `floor:`, `floor-attestation:`),
+# said once by the alias sentence beside the config.yaml layout. The word in its other sense stays: a
+# rigor floor (`rigor-floor:`, the intent and flag floors, a floor the user overrides). The grep reads a
+# sentence at a time. It drops the alias sentence and the verb and key spellings, skips a hyphen
+# compound (floor-run, rigor-floor, tested-floor), and allows a sentence that names rigor, the flag or an
+# override. Every other sentence saying "floor" is printed and refused. HERMETIC: rendered finals by path.
+W30R_ALIAS='The regression'"'"'s verbs and keys still spell it `floor` (`proof-add floor`, `floor-run`, `floor:`, `floor-attestation:`) until bionic2.'
+# w30r_hits <file>... -> `<file>:<line>: <sentence>` for each sentence saying floor in the full-run sense.
+w30r_hits() {
+  awk '{
+    line = $0
+    i = index(line, alias); if (i) line = substr(line, 1, i - 1) " " substr(line, i + length(alias))
+    gsub(/proof-add floor|proof:floor|kind=<?floor|<floor[|\\]|`floor:/, " ", line)
+    n = split(line, s, /\.( |\*|$)|; |\|/)
+    for (k = 1; k <= n; k++) {
+      t = " " s[k] " "
+      if (t !~ /[^A-Za-z_-][Ff]loor[^A-Za-z_-]/) continue
+      if (t ~ /[Rr]igor|flag|overrid/) continue
+      sub(/^ +/, "", s[k]); print FILENAME ":" FNR ": " substr(s[k], 1, 120)
+    }
+  }' alias="$W30R_ALIAS" "$@" 2>/dev/null
+}
+W30R_FILES="${SKILL_DIR}/SKILL.md ${SKILL_DIR}/steps/5.md ${DISPATCH_MD} ${OPRULES} $(ls "${REPO}"/agents/*.md 2>/dev/null | tr '\n' ' ')"
+# The extractor is proved on planted lines first: it finds the full-run sense and passes the others.
+W30R_PLANT="$TMP/w30r-plant.md"
+printf '%s\n' 'Run the tests floor once, on the release head.' \
+  'Record it with `session-poker.sh proof-add floor <log>`; `floor-run` runs `floor: <cmd>` and `floor-attestation: user` attests.' \
+  'Effective rigor is the MAX of four floors, and the intent floor is one.' \
+  "$W30R_ALIAS" > "$W30R_PLANT"
+expect_eq "RW-0: the grep refuses a planted full-run sentence and passes the verb, key, rigor and alias lines" \
+  "${W30R_PLANT}:1: Run the tests floor once, on the release head" "$(w30r_hits "$W30R_PLANT")"
+# shellcheck disable=SC2086
+expect_eq "RW-1: AC-4.7 — no rendered doctrine file says floor in the full-run sense outside the alias sentence" \
+  "" "$(w30r_hits $W30R_FILES)"
+W30R_DOC="$TMP/w30r-step5.md"
+{ cat "${SKILL_DIR}/steps/5.md"; printf '%s\n' 'This is a claim about where the tests floor ran.'; } > "$W30R_DOC" 2>/dev/null
+expect_nonempty "RW-1m: …and a steps/5.md with the old word put back is caught" "$(w30r_hits "$W30R_DOC")"
+expect_contains "RW-2: AC-4.7 — SKILL.md carries the one alias sentence" "$W30R_ALIAS" "$(cat "${SKILL_DIR}/SKILL.md" 2>/dev/null)"
+expect_contains "RW-2b: …written in its template, so a render keeps it" "$W30R_ALIAS" \
+  "$(cat "${REPO}/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl" 2>/dev/null)"
+expect_eq "RW-2c: …once, in all the doctrine the grep reads" "1" \
+  "$(cat $W30R_FILES 2>/dev/null | /usr/bin/grep -cF -- "$W30R_ALIAS" | tr -d ' ')"
+# The verbs and keys are NOT renamed (AC-4.7's second fails-when).
+expect_contains "RW-3: proof-add still takes the kind floor" " floor " " $(bash -c '. "$1" && printf "%s" "$PROOF_KINDS"' _ "${REPO}/payload/scripts/lib/proof.sh" 2>/dev/null) "
+expect_nonempty "RW-3b: …the floor-run verb is still an arm of session-poker.sh" \
+  "$(/usr/bin/grep -nE '^  floor-run\)' "${REPO}/hooks/session-poker.sh" 2>/dev/null)"
+expect_nonempty "RW-3c: …and lib/proof.sh still reads the floor: and floor-attestation: keys" \
+  "$(/usr/bin/grep -F 'config_value "$root" floor-attestation' "${REPO}/payload/scripts/lib/proof.sh" 2>/dev/null | /usr/bin/grep -F 'config_value "$root" floor ')"
+# steps/5.md names the verbs the Verify step uses (A-orch-49; T12, T13, T14).
+for _w30r in '`session-poker.sh matrix-render`' '`discharge <AC-id>` writes a row'"'"'s auditor cell as the bare `CONFIRMED`' \
+  'are refused at `current: 5` once no row is `pending` or `blocked`, and at every step from 6' \
+  '`session-poker.sh wait <name|run id>` follows it to its end' '`stop-run <name|run id>` stops it' \
+  'is `LOST` (exit 70), never green' '`regression-runs` counts the full runs' \
+  'A run at an ancestor of the working head still proves it when the map bounds the change since and every suite it names has a green run stamped at the working head'; do
+  expect_nonempty "RW-4: steps/5.md says: ${_w30r:0:72}" "$(w26_hits "$_w30r" "${SKILL_DIR}/steps/5.md")"
+done
+# The writer inbox (A-orch-54, A-orch-57): the orchestrator's side in dispatch.md, the writer's in its role.
+W30R_INBOX='A writer receives a message only when it is idle: a blocking question ends the writer'"'"'s turn and the reply resumes it, a non-blocking one is read at its next idle, and the orchestrator resends once on the idle notice.'
+expect_nonempty "RW-5: dispatch.md names the inbox property and the protocol" "$(w26_hits "$W30R_INBOX" "$DISPATCH_MD")"
+expect_nonempty "RW-5b: …inside the Why-writers-are-never-pinged paragraph" \
+  "$(/usr/bin/grep -F '**Why writers are never pinged.**' "$DISPATCH_MD" 2>/dev/null | /usr/bin/grep -F "$W30R_INBOX")"
+W30R_WRITER='**A message reaches you only when you are idle.**'
+for _w30r in implementor senior-implementor; do
+  expect_nonempty "RW-5c: agents/${_w30r}.md says the writer's side of the inbox" "$(w26_hits "$W30R_WRITER" "${REPO}/agents/${_w30r}.md")"
+done
 
 # ============================================================
 section "§W30-T19 (wave-30 T19; REQ-1 AC-1.2/1.3, REQ-2 AC-2.1/2.2, REQ-10 AC-10.4, REQ-11 AC-11.2; D1, D2, D4, P1-P3): the doctrine says the sitting"
