@@ -5,7 +5,7 @@
 # tests/reader-exam/), and no hermetic suite can. What this suite owns is what a machine can
 # hold the exam to: the checks files the readers were examined on are the ones that ship, and
 # the latest sitting had readers behind it who met every sample, and the recipe a sitter follows
-# is in the tree. Nine sections:
+# is in the tree. Ten sections:
 #
 #   §PIN      `exam_pin` on planted sittings: the latest sitting, by file order, has the
 #             three `sha256` lines equal to the files' digests, a `result` line for every
@@ -59,6 +59,10 @@
 #             claude and refuse any entry that is not absolute, decide "inside" by identity,
 #             resolve each path once and use that, refuse a failed lookup of their worktrees,
 #             and keep a destination and an output file out of every worktree.
+#   §GRAMMAR  (T36) every concrete example `finding:` and `debt:` line in the shipped severity.md
+#             (and steps/6.md, if it carries one) is accepted by proof.sh's `proof_findings`, the
+#             parser score.sh calls; the doctrine must carry an example of each shape, and the
+#             two forms the T25 sitting's readers wrote are refused by the same parser.
 #   §SHIPPED  the shipped `sittings.md` against the shipped checks files.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN runs
@@ -1859,6 +1863,79 @@ expect_contains "HT1: …and its readback is live: a caller that runs is seen, w
 expect_eq "HT1: every caller meets its answer ($lines lines)" "$want" "$got"
 [ "$want" = "$got" ] || diff <(printf '%s' "$want") <(printf '%s' "$got") | sed 's/^/      /'
 rm -f "$TMP/t73-before" "$TMP/t73-after"
+
+section "§GRAMMAR — the doctrine's example finding and debt lines parse as the scorer's reader takes them (T36; A-orch-78)"
+
+# WHAT THIS OWNS. One grammar, two readers: severity.md (and steps/6.md, when it carries one) tell a
+# reader how to write a `finding:` and a `debt:` line, and proof.sh's `proof_findings` (the parser
+# score.sh calls, called here and never copied) is what reads them. The sitting of wave-30 T25 had two
+# records refused because the doctrine's form was copied whole (`lib/reap.sh:10|-`, a free-text label
+# ahead of a debt line's first site). So every concrete example line the doctrine carries, a flush-left
+# `finding:` or `debt:` line with no `<placeholder>` in it, is fed to that parser and must be accepted.
+# HERMETIC: the shipped files by path, a planted record per line under $TMP.
+GR_SEV="$REPO/payload/context/severity.md"
+GR_STEP6="$REPO/skills/canonical-sdlc/steps/6.md"
+# gr_examples <file> -> each concrete example line of the file, one per line: flush-left, `finding: `
+# or `debt: `, and no `<` (a form line holds placeholders; an example holds none).
+gr_examples() { /usr/bin/grep -E '^(finding|debt): ' "$1" 2>/dev/null | /usr/bin/grep -vF '<'; }
+# gr_parse <line> -> GR_RC and GR_OUT: proof_findings' answer on a pass holding just that line. A finding
+# is renumbered 1 and given an `unsure:` line, so that a finding the table sends to fix is not refused for
+# the line the example leaves out; a debt line stands beside `findings: 0`.
+gr_parse() {
+  local line="$1" rec="$TMP/gr-rec"
+  case "$line" in
+    finding:*)
+      line="$(printf '%s\n' "$line" | sed 's/^finding: [0-9]* /finding: 1 /')"
+      printf 'reviewed: a..b\nfindings: 1\n%s\nunsure: 1 not known\n' "$line" > "$rec" ;;
+    *) printf 'reviewed: a..b\nfindings: 0\n%s\n' "$line" > "$rec" ;;
+  esac
+  GR_OUT="$(proof_findings "$rec" 2>&1)"; GR_RC=$?
+}
+GR_SEV_EX="$(gr_examples "$GR_SEV")"
+expect_true "GR0: severity.md is shipped and non-empty (the extractor reads it)" test -s "$GR_SEV"
+# The three shapes the doctrine must show, each counted on its own so a missing one is loud.
+GR_N_PATH="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^finding: [0-9]+ S[1-4] (on|off) [^ ]+:[0-9]+ ')"
+GR_N_DASH="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^finding: [0-9]+ S[1-4] (on|off) - ')"
+GR_N_DEBT1="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^debt: [a-z-]+ [^ ,]+ [^ ,]+:[0-9]+$')"
+GR_N_DEBT2="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^debt: [a-z-]+ [^ ,]+ [^ ,]+:[0-9]+, [^ ,]+:[0-9]+$')"
+expect_true "GR1: severity.md carries an example finding line with a <path>:<line> site (no example found: $GR_N_PATH)" test "$GR_N_PATH" -ge 1
+expect_true "GR1b: …an example finding line with the lone - site (no example found: $GR_N_DASH)" test "$GR_N_DASH" -ge 1
+expect_true "GR1c: …an example debt line with one site (no example found: $GR_N_DEBT1)" test "$GR_N_DEBT1" -ge 1
+expect_true "GR1d: …an example debt line with two sites (no example found: $GR_N_DEBT2)" test "$GR_N_DEBT2" -ge 1
+# Every example, of either file, is accepted by the parser, and what it reads is what was written.
+for gr_f in "$GR_SEV" "$GR_STEP6"; do
+  while IFS= read -r gr_ex; do
+    [ -n "$gr_ex" ] || continue
+    gr_parse "$gr_ex"
+    expect_status "GR2: $(basename "$gr_f") example is accepted by proof_findings: $gr_ex" 0 "$GR_RC"
+    expect_nonempty "GR2b: …and the parser reads a row from it: $gr_ex" "$GR_OUT"
+    case "$gr_ex" in
+      finding:*)
+        gr_site="$(printf '%s\n' "$gr_ex" | awk '{ print $5 }')"
+        expect_eq "GR2c: …its site is the one written ($gr_site)" "$gr_site" "$(printf '%s\n' "$GR_OUT" | awk -F'\t' 'NR == 1 { print $4 }')" ;;
+      debt:*)
+        gr_sites="$(printf '%s\n' "$gr_ex" | sed 's/^debt: [^ ]* [^ ]* //')"
+        expect_eq "GR2c: …its sites are the ones written ($gr_sites)" "$gr_sites" "$(printf '%s\n' "$GR_OUT" | awk -F'\t' '$1 == "debt" { print $4 }')" ;;
+    esac
+  done <<GR_LINES
+$(gr_examples "$gr_f")
+GR_LINES
+done
+# The arm can go red: the two forms the T25 sitting's readers wrote are refused by the same parser,
+# beside a neighbour one edit away that it takes.
+gr_parse 'finding: 1 S2 on lib/reap.sh:10 the reaper admits a dead pid'
+expect_status "GR3: a finding with its site written <path>:<line> is accepted" 0 "$GR_RC"
+gr_parse 'finding: 1 S2 on lib/reap.sh:10|- the reaper admits a dead pid'
+expect_status "GR3b: …and the alternation copied whole into the site is refused" 1 "$GR_RC"
+expect_contains "GR3c: …naming the site it could not read" "lib/reap.sh:10|-" "$GR_OUT"
+gr_parse 'debt: one-case-abstraction registry lib/naming.sh:6'
+expect_status "GR3d: a debt line with the concept then the first site is accepted" 0 "$GR_RC"
+gr_parse 'debt: one-case-abstraction the registry lib/naming.sh:6'
+expect_status "GR3e: …and a free-text label ahead of the first site is refused" 1 "$GR_RC"
+expect_contains "GR3f: …naming the site it could not read" "registry lib/naming.sh:6" "$GR_OUT"
+gr_parse 'finding: 1 S2 on lib/reap.sh:10 the reaper admits a dead pid'
+GR_GOOD="$GR_OUT"
+expect_nonempty "GR3g precondition: a doctored example's neighbour reads a row, so a refusal above is the parser's" "$GR_GOOD"
 
 section "§SHIPPED — the shipped sittings against the shipped checks files"
 
