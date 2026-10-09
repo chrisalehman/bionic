@@ -4327,4 +4327,42 @@ T4${TAB}T1${TAB}suspect: T4 reads T1, shares no file${TAB}task-set T4 deps='ext:
 expect_eq "SU-9 a plan with no table answers nothing, exit 0" "0|" \
   "$(call_rc units_suspect "$SANDBOX/no-such-plan.md")|$(call units_suspect "$SANDBOX/no-such-plan.md")"
 
+
+# ============================================================
+section "§BORN-READ — wave-30 T21: units_born reads the review-born rows off their ## SDLC State lines (REQ-10 AC-10.2, REQ-2 AC-2.3; D4)"
+# ============================================================
+# A row task-add --born made carries ` born: review S<n> <reach>` on its `- <id>:` line (the one place the count
+# reads). units_born prints `<id>\t<S<n> <reach>>\t<Files cell>` per such line, table order of the lines, the line
+# found as the gate finds it (the first `- <id>:` of the section, fences skipped). Nothing, exit 0, when none.
+cat > "$SANDBOX/born.md" <<'BORN_EOF'
+## SDLC State
+
+current: 4
+
+- T1: landed abc 2026-10-09T00:00:00Z
+- T2: pending dispatch — added by task-add at 2026-10-09T01:00:00Z born: review S2 on landed def 2026-10-09T02:00:00Z
+- T3: pending dispatch — added by task-add at 2026-10-09T01:10:00Z
+- T4: pending dispatch — added by task-add at 2026-10-09T01:20:00Z born: review S1 off
+
+```
+- T9: an example born: review S1 on
+```
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | one | w-T1 | — | 30 | REQ-x | payload/a.sh | landed |
+| T2 | 4 | build | two · born: review | w-T2 | — | 30 | REQ-x | payload/a.sh, payload/b.sh | landed |
+| T3 | 4 | build | three | w-T3 | — | 30 | REQ-x | payload/c.sh | pending |
+| T4 | 4 | build | four · born: review | w-T4 | — | 30 | REQ-x | payload/a.sh | pending |
+BORN_EOF
+expect_eq "BR-1 the two review-born rows, each with its rating and its Files cell; the fenced example is not one" \
+  "T2${TAB}S2 on${TAB}payload/a.sh, payload/b.sh
+T4${TAB}S1 off${TAB}payload/a.sh" "$(call units_born "$SANDBOX/born.md")"
+expect_eq "BR-1b …exit 0" "0" "$(call_rc units_born "$SANDBOX/born.md")"
+sed '/born: review S/s/ born: review S[0-9] o[nf]*//' "$SANDBOX/born.md" > "$SANDBOX/born-none.md"
+expect_eq "BR-2 the same plan with the markers taken off has no review-born row (BR-1 read two from it), exit 0" "|0" \
+  "$(call units_born "$SANDBOX/born-none.md")|$(call_rc units_born "$SANDBOX/born-none.md")"
+
 finish

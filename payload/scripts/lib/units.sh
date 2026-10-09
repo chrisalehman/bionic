@@ -41,9 +41,13 @@
 #                              if any line was printed, else 0.
 #   units_unlined <plan>       the T-ids with no non-empty `- <id>:` line under
 #                              `## SDLC State`, whatever their status (wave-21 T5).
-#   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]
+#   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [<born>]
 #                              the WHOLE plan with one row added, on stdout; the file is
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
+#   units_born <plan>          `<id>\t<S<n> <reach>>\t<Files>` per review-born row, read off its
+#                              `- <id>:` line's ` born: review` marker (wave-30 T21, AC-10.2).
+#   units_fix_cap <plan>       the plan's fix-cap: rendered as a number, the level's default when
+#                              absent (wave-30 T21, AC-2.3); needs lib/run.sh loaded.
 #
 # THE CALLERS (D3), all re-pointed by T8: the evidence gate's two ledger checks and its
 # prototype check, the tick's FILL, the governing-skill's Step-3 wall, and any report. No
@@ -2132,7 +2136,7 @@ _units_ledger() {
     }'
 }
 
-# units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]
+# units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [<born>]
 #   -> the WHOLE plan with one `## Tasks` row added, on stdout; exit 1 and silent when the plan
 #      carries no `## Tasks` table or no `## SDLC State` section. Nothing is written.
 #
@@ -2150,7 +2154,10 @@ _units_ledger() {
 #   2. ITS `- <id>:` LINE under `## SDLC State`, after the last `- T<n>:` line and that line's
 #      indented continuation — or at the end of the section when the plan carries none yet.
 #      `pending dispatch — added by task-add at <iso>` is not a placeholder to the evidence
-#      gate (`is_placeholder_value` refuses only the bare words).
+#      gate (`is_placeholder_value` refuses only the bare words). With a twelfth operand
+#      `<born>` (`review S<n> <reach>`, wave-30 T21; AC-10.2) the line ends ` born: <born>`:
+#      the review-born marker `units_born` reads and the landing report counts. The line's
+#      later writers (`row-landed`) append to its text, so the marker stays.
 #
 # NO OTHER ROW IS EDITED IN A TABLE WITH reads (wave-26 T2; D2): its rows wait on what they read,
 # the regression on `head`, so a new row changes nothing but itself and its line. A TABLE WITHOUT THE
@@ -2174,12 +2181,12 @@ units_add_row() {
   # rule roster.sh's docblock already states for file paths.
   UA_NID="$nid" UA_NSTEP="$nstep" UA_NKIND="${4:-}" UA_NTASK="${5:-}" UA_NAGENT="${6:-}" \
   UA_NDEPS="${7:-}" UA_NSIZE="${8:-}" UA_NSERVES="${9:-}" UA_NFILES="${10:-}" UA_NREADS="${11:-}" \
-  UA_NOW="$now" awk '
+  UA_NBORN="${12:-}" UA_NOW="$now" awk '
     BEGIN {
       nid = ENVIRON["UA_NID"]; nstep = ENVIRON["UA_NSTEP"]; nkind = ENVIRON["UA_NKIND"]
       ntask = ENVIRON["UA_NTASK"]; nagent = ENVIRON["UA_NAGENT"]; ndeps = ENVIRON["UA_NDEPS"]
       nsize = ENVIRON["UA_NSIZE"]; nserves = ENVIRON["UA_NSERVES"]; nfiles = ENVIRON["UA_NFILES"]
-      nreads = ENVIRON["UA_NREADS"]; now = ENVIRON["UA_NOW"]
+      nreads = ENVIRON["UA_NREADS"]; now = ENVIRON["UA_NOW"]; nborn = ENVIRON["UA_NBORN"]
     }
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     # A VALUE BECOMES A CELL: tabs and line breaks to spaces, every RAW `|` escaped by
@@ -2289,7 +2296,7 @@ units_add_row() {
       at = (tline ? tline : sdlc_last)
       for (i = 1; i <= nl; i++) {
         print L[i]
-        if (i == at) printf "- %s: pending dispatch — added by task-add at %s\n", nid, now
+        if (i == at) printf "- %s: pending dispatch — added by task-add at %s%s\n", nid, now, (nborn != "" ? " born: " nborn : "")
         if (i == lastrow) print row
       }
     }' "$plan"
@@ -2831,4 +2838,56 @@ units_chain() {
       }
       printf "chain\t%s\t%d\nwidth\t%d\n", path, f[start], peak
     }'
+}
+
+# ── THE REVIEW-BORN ROWS AND THE CAP ON THEM (wave-30 T21; REQ-10 AC-10.2, REQ-2 AC-2.3; D4) ──────
+#
+# units_born <plan> -> `<id>\t<S<n> <reach>>\t<Files cell>`, one line per `## SDLC State` line
+#   carrying ` born: review S<n> <on|off>`, in the section's order; nothing, exit 0, when none; exit 1
+#   when the plan cannot be read.
+#
+# THE LEDGER LINE IS THE ONE PLACE THE COUNT READS. `task-add --born` writes the marker there, and the
+# task cell's ` · born: review` is for a person reading the table; a hand edit of the cell counts
+# nothing. The line is found as the gate finds it (`_units_ledger`): fences skipped, the first
+# `- <id>:` line of the section per id. The Files cell is the row's own (`units_rows`), empty for a
+# line whose row the table does not carry. Readers: the poker's `task-add --born` (the cap and the
+# fourth fix on one component) and the landing line's `review-born rows:`.
+units_born() {
+  local plan="${1:-}" rows
+  [ -n "$plan" ] && [ -r "$plan" ] || return 1
+  rows="$(units_rows "$plan" 2>/dev/null)" || rows=""
+  {
+    printf '\034rows\n'; [ -z "$rows" ] || printf '%s\n' "$rows"
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
+  } | awk -F'\t' '
+    $0 == SUBSEP "rows" { part = 1; next }
+    $0 == SUBSEP "plan" { part = 2; next }
+    part == 1 { if ($1 != "" && !($1 in files)) files[$1] = $9; next }
+    part == 2 {
+      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
+      if (fence) next
+      if ($0 ~ /^## SDLC State/) { insec = 1; next }
+      if ($0 ~ /^## /) insec = 0
+      if (!insec) next
+      l = $0; sub(/^[[:space:]]*-?[[:space:]]*/, "", l)
+      c = index(l, ":"); if (c == 0) next
+      k = substr(l, 1, c - 1); sub(/[[:space:]]+$/, "", k)
+      if (k !~ /^T[0-9]/ || (k in seen)) next
+      seen[k] = 1
+      if (!match(l, / born: review S[0-9]+ (on|off)( |$)/)) next
+      r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r)
+      printf "%s\t%s\t%s\n", k, r, files[k]
+    }'
+}
+
+# units_fix_cap <plan> -> the plan's `fix-cap:` as a number (lib/run.sh `fix_cap_render`): the field,
+#   or the `rigor:` level's default when it is absent, a percent taken of the `## Tasks` rows, every
+#   row whatever its status, rounded up. Nothing and rc 1 when the field is no count, when there is
+#   neither field nor level, or when lib/run.sh is not loaded beside this file.
+units_fix_cap() {
+  local plan="${1:-}" n
+  declare -F fix_cap_render >/dev/null 2>&1 && declare -F plan_frontmatter_get >/dev/null 2>&1 || return 1
+  [ -n "$plan" ] && [ -r "$plan" ] || return 1
+  n="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$1 != "" { n++ } END { print n + 0 }')"
+  fix_cap_render "$(plan_frontmatter_get "$plan" fix-cap)" "$(plan_frontmatter_get "$plan" rigor)" "$n"
 }

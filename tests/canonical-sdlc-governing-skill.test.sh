@@ -3813,4 +3813,114 @@ assert_eq "§RIGOR.9 epic floor audited, plan double: admitted" 0 "$HOOK_EXIT"
 assert_contains "§RIGOR.9 …and logs the epic-floor invalid-value finding, naming the two" \
   "invalid rigor-floor value 'audited' in epic-01-demo's epic plan — allowed: single or double" "$(read_audit "$project")"
 
+
+section "§FIX-POLICY — review-cadence:, fix-policy: and fix-cap: are read with their vocabulary and the level's defaults (wave-30 T21: REQ-10 AC-10.1, REQ-1, D4, Δ3)"
+# ============================================================
+# Three header fields the user owns, beside `rigor:` (D4). lib/run.sh holds their vocabulary and
+# their per-level defaults once, beside `rigor_level`; this hook and the poker call it:
+#   review-cadence:  once (both levels)
+#   fix-policy:      a comma-joined set over S1 S1-on S1-off S2 S2-on S2-off S3 S4; default S1,S2-on
+#   fix-cap:         a whole number, or a percent of the plan's ## Tasks rows; default 2 at single,
+#                    10% at double, rendered as the number (rounded up)
+# A plan carrying none of the three is read with the defaults, never refused for them (A-T21.2).
+GS_FP_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+gs_fp_plan() {  # <rigor> [header line]... -> build_plan's artifact with the lines after rigor:
+  local rg="$1"; shift
+  build_plan rigor="$rg" | GS_FP_EXTRA="$(printf '%s\n' "$@")" awk '
+    { print } /^rigor: / && ENVIRON["GS_FP_EXTRA"] != "" { print ENVIRON["GS_FP_EXTRA"] }'
+}
+gs_fp_lib() {  # <shell text over run.sh and units.sh> [args] -> its stdout
+  local body="$1"; shift
+  bash -c '. "$1/run.sh" && . "$1/units.sh" && shift && eval "$0"' "$body" "$GS_FP_LIB" "$@" 2>/dev/null
+}
+# Positive control on the fixture builder: the lines reach the frontmatter, after rigor:.
+expect_eq "§FIX-POLICY.0 the fixture carries the three lines after rigor: (the builder's own read)" \
+  "rigor: single|review-cadence: once|fix-policy: S1,S2-on|fix-cap: 2" \
+  "$(gs_fp_plan single 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 2' \
+      | /usr/bin/grep -E '^(rigor|review-cadence|fix-policy|fix-cap):' | paste -sd'|' -)"
+
+# THE TABLE'S VALUES ARE ADMITTED, at both levels; THIS run's own header (once · S1,S2-on · 2) is one of them.
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-single.plan.md" \
+  "$(gs_fp_plan single 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 2')"
+assert_eq "§FIX-POLICY.1 single with once · S1,S2-on · 2 (this run's own header) is admitted" 0 "$HOOK_EXIT"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-double.plan.md" \
+  "$(gs_fp_plan double 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 10%')"
+assert_eq "§FIX-POLICY.1b double with once · S1,S2-on · 10% is admitted" 0 "$HOOK_EXIT"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-wide.plan.md" \
+  "$(gs_fp_plan double 'fix-policy: S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4' 'fix-cap: 0')"
+assert_eq "§FIX-POLICY.1c every word of the vocabulary, and a cap of 0, are admitted (the user's to set)" 0 "$HOOK_EXIT"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-none.plan.md" "$(gs_fp_plan single)"
+assert_eq "§FIX-POLICY.2 a plan with rigor: and none of the three is admitted (read with the defaults)" 0 "$HOOK_EXIT"
+
+# THE DEFAULTS ARE THE TABLE'S (REQ-1, Δ3), read from the one place that holds them.
+expect_eq "§FIX-POLICY.3 the defaults: cadence · policy · cap at single · cap at double" \
+  "once|S1,S2-on|2|10%" \
+  "$(gs_fp_lib 'printf "%s|%s|%s|%s" "$REVIEW_CADENCE_DEFAULT" "$FIX_POLICY_DEFAULT" "$(fix_cap_default single)" "$(fix_cap_default double)"')"
+expect_eq "§FIX-POLICY.3b the vocabulary the hook parses" "S1 S1-on S1-off S2 S2-on S2-off S3 S4" \
+  "$(gs_fp_lib 'printf "%s" "$FIX_POLICY_VOCAB"')"
+
+# A WORD OUTSIDE THE VOCABULARY IS REFUSED, naming the word and the vocabulary; so is an empty set.
+for gs_fp_pair in 'S5|S5' 'S2-maybe|S2-maybe' 'S1,S5,S2-on|S5' 'S1,,S2|'; do
+  gs_fp_v="${gs_fp_pair%%|*}"; gs_fp_w="${gs_fp_pair#*|}"
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/fp-bad.plan.md" "$(gs_fp_plan double "fix-policy: $gs_fp_v")"
+  assert_eq "§FIX-POLICY.4 fix-policy: $gs_fp_v is refused" 2 "$HOOK_EXIT"
+  assert_contains "§FIX-POLICY.4 …the line names the vocabulary" \
+    "a fix-policy word is no rating (S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4)" "$HOOK_STDERR"
+  assert_contains "§FIX-POLICY.4 …and the detail names the word" \
+    "invalid fix-policy: '$gs_fp_v' — '$gs_fp_w' is no rating; allowed, comma-joined: S1 S1-on S1-off S2 S2-on S2-off S3 S4" "$HOOK_VSTDERR"
+done
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-empty.plan.md" "$(gs_fp_plan double 'fix-policy:')"
+assert_eq "§FIX-POLICY.5 an empty fix-policy: is refused" 2 "$HOOK_EXIT"
+assert_contains "§FIX-POLICY.5 …as a set naming no rating, with the vocabulary" \
+  "this fix-policy names no rating (S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4)" "$HOOK_STDERR"
+
+# review-cadence: has one word.
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-weekly.plan.md" "$(gs_fp_plan single 'review-cadence: weekly')"
+assert_eq "§FIX-POLICY.6 review-cadence: weekly is refused" 2 "$HOOK_EXIT"
+assert_contains "§FIX-POLICY.6 …the line" "that review-cadence is not once (use once)" "$HOOK_STDERR"
+assert_contains "§FIX-POLICY.6 …and the detail" "invalid review-cadence: 'weekly' — allowed: once" "$HOOK_VSTDERR"
+
+# fix-cap: is a count or a percent.
+for gs_fp_c in lots -1 '10 %' 2.5; do
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/fp-cap.plan.md" "$(gs_fp_plan single "fix-cap: $gs_fp_c")"
+  assert_eq "§FIX-POLICY.7 fix-cap: $gs_fp_c is refused" 2 "$HOOK_EXIT"
+  assert_contains "§FIX-POLICY.7 …the line" "that fix-cap is no count (a whole number, or a percent)" "$HOOK_STDERR"
+  assert_contains "§FIX-POLICY.7 …and the detail names it" "invalid fix-cap: '$gs_fp_c'" "$HOOK_VSTDERR"
+done
+
+# THE RENDERED CAP: 10% of a 23-row plan at double is 3 (2.3 rounded up); absent, the level's default.
+gs_fp_rows() {  # <n> -> a ## Tasks table of n build rows
+  local i=1
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|\n'
+  while [ "$i" -le "$1" ]; do
+    printf '| T%s | 4 | build | row %s | implementor | — | 30 | REQ-1 | f%s.sh | pending |\n' "$i" "$i" "$i"; i=$((i + 1))
+  done
+}
+project=$(make_project)
+gs_fp_p="$project/.bionic/docs/plans/epic-01-demo/fp-23.plan.md"
+printf '%s\n%s' "$(gs_fp_plan double 'fix-cap: 10%')" "$(gs_fp_rows 23)" > "$gs_fp_p"
+run_write "$gs_fp_p" "$(cat "$gs_fp_p")"
+assert_eq "§FIX-POLICY.8 a 23-row double plan with fix-cap: 10% is admitted" 0 "$HOOK_EXIT"
+expect_eq "§FIX-POLICY.8b …its table reads 23 rows (the count the cap renders from)" "23" \
+  "$(gs_fp_lib 'units_rows "$1" | /usr/bin/grep -c .' "$gs_fp_p")"
+expect_eq "§FIX-POLICY.8c …and its cap renders as 3" "3" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan double)" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8d with no fix-cap: the double default (10%) renders 3 too" "3" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan single)" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8e …and the single default renders 2" "2" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan single 'fix-cap: 5')" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8f …and a number the user set is read verbatim" "5" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan OMIT)" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8g …and nothing, rc 1, with no fix-cap: and no rigor: to default it from" "|1" \
+  "$(gs_fp_lib 'units_fix_cap "$1"; printf "|%s" "$?"' "$gs_fp_p")"
+
 finish

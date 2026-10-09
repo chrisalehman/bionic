@@ -605,9 +605,23 @@ case "$VERB" in
   # THE TENTH, `<reads>`, IS THE ONE OPTIONAL CELL (wave-26 T59; REQ-5 AC-5.4): the reads column
   # a table may carry (wave-26 T2), from which the row's edges are computed. Left off, the row
   # is written exactly as the nine-operand form always wrote it.
+  # `--born '<rating>'` (wave-30 T21; REQ-10 AC-10.2, D4) marks a row review made unasked: it comes
+  # last, after the operands, as `decline`'s `--on` does, and its value is `review S<n> <on|off>`, the
+  # rating the reader wrote. A missing or malformed value is the usage error; whether the rating may
+  # become a row (fix-policy:, fix-cap:, the fourth fix on a component) is the verb's refusal (1).
   task-add)
+    TA_BORN=""
+    case "${*: -1}" in --born) usage "task-add: --born takes a value: 'review S<n> <on|off>', the reader's rating." ;; esac
+    if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
+      TA_BORN="${*: -1}"
+      case "$TA_BORN" in
+        'review S'[1-4]' on'|'review S'[1-4]' off') : ;;
+        *) usage "task-add: --born '$TA_BORN' is no rating; write 'review S<n> <on|off>', n 1 to 4." ;;
+      esac
+      set -- "${@:1:$(($# - 2))}"
+    fi
     if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none)."
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born 'review S<n> <on|off>'."
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
@@ -6683,8 +6697,53 @@ EOF
         ;;
     esac
 
-    if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+    # A ROW REVIEW MADE UNASKED (wave-30 T21; REQ-10 AC-10.1, AC-10.2; D4, Δ3). Three guards, whatever the
+    # policy says, each a refusal with the plan byte-identical: (1) the rating is inside the plan's
+    # fix-policy:, read verbatim (lib/run.sh `fix_policy_covers`; S1,S2-on when absent); (2) the row is
+    # under fix-cap: (lib/units.sh `units_fix_cap`, the level's default when absent), counted off the
+    # ledger lines' born: markers (`units_born`, the one place the count reads); (3) no Files path outside
+    # the record already carries three review-born rows: the fourth fix on one component stops the run.
+    # In-diff is the orchestrator's judgment and "never re-read" the proof's; neither is this verb's.
+    TA_CELL_TASK="$TA_TASK"
+    if [ -n "$TA_BORN" ]; then
+      TA_RATING="${TA_BORN#review }"
+      TA_POL="$(plan_frontmatter_get "$TA_PLAN" fix-policy)"
+      if [ -z "$TA_POL" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$TA_PLAN" 2>/dev/null; then
+        TA_POL="$FIX_POLICY_DEFAULT"
+      fi
+      if ! fix_policy_covers "$TA_POL" "${TA_RATING% *}" "${TA_RATING#* }"; then
+        die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the sitting (AC-10.3)."
+        exit 1
+      fi
+      if ! TA_CAP="$(units_fix_cap "$TA_PLAN")"; then
+        die "task-add refused — born: $TA_BORN has no cap to count against: fix-cap: '$(plan_frontmatter_get "$TA_PLAN" fix-cap)' is no count, or the plan names no rigor: to default it from; the plan is unchanged."
+        exit 1
+      fi
+      TA_BORN_ROWS="$(units_born "$TA_PLAN")"
+      TA_NBORN="$(printf '%s' "$TA_BORN_ROWS" | awk 'NF { n++ } END { print n + 0 }')"
+      if [ "$TA_NBORN" -ge "$TA_CAP" ]; then
+        die "task-add refused — review-born rows: $TA_NBORN of cap $TA_CAP; this finding goes to the sitting (AC-10.3)."
+        exit 1
+      fi
+      while IFS= read -r TA_PATH; do
+        [ -n "$TA_PATH" ] || continue
+        case "$TA_PATH" in .bionic/*|record/*) continue ;; esac
+        TA_FIXERS="$(printf '%s\n' "$TA_BORN_ROWS" | while IFS=$'\t' read -r TA_BID _ TA_BFILES; do
+            [ -n "$TA_BID" ] || continue
+            _units_split_tokens "$TA_BFILES" | grep -Fx -- "$TA_PATH" >/dev/null && printf '%s\n' "$TA_BID"
+          done)"
+        if [ "$(printf '%s' "$TA_FIXERS" | awk 'NF { n++ } END { print n + 0 }')" -ge 3 ]; then
+          die "task-add refused — a fourth fix on $TA_PATH: $(printf '%s' "$TA_FIXERS" | paste -sd, - | sed 's/,/, /g') already fix it; stop the run (AC-10.2)"
+          exit 1
+        fi
+      done <<EOF
+$(_units_split_tokens "$TA_FILES")
+EOF
+      TA_CELL_TASK="$TA_TASK · born: review"
+    fi
+
+    if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "$TA_BORN" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -6698,6 +6757,7 @@ EOF
 
     plan_verb_swap task-add "$TA_ID added" writer
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
+    [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the sitting (AC-10.2)."
     # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
     # that shares no file with its holder is named, with the line that would loosen it, never run.
     suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
