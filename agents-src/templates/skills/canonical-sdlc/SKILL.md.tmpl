@@ -84,7 +84,7 @@ Rigor follows one principle: the moment of a check is set by its cost model; mac
 | becomes a row unasked (`fix-policy:`) | S1 + S2-on, in-diff | S1 + S2-on, in-diff |
 | cap on review-born rows (`fix-cap:`) | 2 | 10% of the plan |
 
-At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` holds the sitting and turns a reading into a fact.
+At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` holds the review findings disposition and turns a reading into a fact.
 
 **scale** — the decomposition unit.
 

@@ -2575,7 +2575,7 @@ le_cap "114: AC-1b.2 — steps/4.md is a pointer, not a step file (fails-when: S
 
 # Raised 110,000 -> 114,100 B at wave-30 T19 (A-T19.1, A-orch-56; Chris 2026-10-09: a byte cap never prevents a strong
 # rule from being memorialized). Measured total at the raise: 112,502 B (core 22,060 + dispatch 35,226 + steps 55,216).
-# Reason: doctrine added by design, the sitting and the three stop rules in steps/6, the three header fields in steps/0,
+# Reason: doctrine added by design, the review findings disposition and the three stop rules in steps/6, the three header fields in steps/0,
 # the debt adoption in steps/1, the classes and the rigor paragraph in SKILL.md. The 1,500 B above the measure is T23's.
 # The total the model is told to read. operational-rules.md is excluded by AC-1b.4's own
 # wording — nothing tells the model to read it, and it is not part of this budget.
@@ -2587,7 +2587,10 @@ SPLIT_TOTAL_MISSING=""
 # dispatch.md the writer inbox. Measured total at T23's render: 111,420 B; plus 2,000 B left for T19.
 # MERGED (wave-30 T23 over T19, A-T23.17): the larger cap stands, T19's 114,100 B; the measured total with both
 # rows' text is 113,944 B.
-SPLIT_TOTAL_CAP=114100
+# RAISED 114,100 -> 114,200 B (wave-30 T38, A-T38.1; A-orch-14 precedent): the Step-6 event is renamed from the one-word 'sitting'
+# to 'review findings disposition' (A-orch-84, Chris 2026-10-09), full name once per document, 'the disposition' after. The
+# rename adds 87 B across SKILL.md, dispatch.md and steps/6.md (114,024 -> 114,111 B); doctrine is never shortened to fit.
+SPLIT_TOTAL_CAP=114200
 for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
           "${SPLIT_SKILL_DIR}"/steps/0.md "${SPLIT_SKILL_DIR}"/steps/1.md \
           "${SPLIT_SKILL_DIR}"/steps/2.md "${SPLIT_SKILL_DIR}"/steps/3.md \
@@ -3472,7 +3475,7 @@ expect_eq "155: AC-3.1 — dispatch.md carries no 'TaskCreate fresh copies' text
 # (a render that dropped the prose but re-added equal bytes elsewhere would not be a cut).
 DISPATCH_BYTES_156="$(wc -c < "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
 # WAVE-30 T9 (A-T9.8): the ceiling moved 34,993 -> 35,500 B for the one no-store paragraph (248 B, REQ-4 AC-4.2);
-# a sitting item beside A-orch-14 (2). The brake it still is: dispatch.md may not grow past 35,500 B.
+# a disposition item beside A-orch-14 (2). The brake it still is: dispatch.md may not grow past 35,500 B.
 if [ -n "$DISPATCH_BYTES_156" ] && [ "$DISPATCH_BYTES_156" -lt 35500 ] 2>/dev/null; then
   ok "156: AC-3.1 — dispatch.md is smaller than its 35,500 B ceiling (wave-30 T9; was 34,993 B) ($DISPATCH_BYTES_156 B < 35500 B)"
 else
@@ -5570,7 +5573,7 @@ for _r in auditor critic; do
   expect_nonempty "W27-T17-6: dispatch.md's roles sentence names the reader \`${_r}\`" \
     "$(w26_hits "\`${_r}\`" "$DISPATCH_MD")"
 done
-# RE-POINTED (wave-30 T19, P1): review is one sitting, so the paragraph names one read row per reader,
+# RE-POINTED (wave-30 T19, P1): review is one review findings disposition, so the paragraph names one read row per reader,
 # `reads: approval:plan, head`, in place of a row per question reading each landed difference.
 expect_nonempty "W27-T17-6b: Review follows the build names a read row per reader, ready at the settled head" \
   "$(w26_hits 'one read row per reader the rigor deals, `reads: approval:plan, head`' "$DISPATCH_MD")"
@@ -6692,7 +6695,7 @@ section "§W30-DEBT-TABLE (wave-30 T4; REQ-11 AC-11.1, D2, P2): severity.md rate
 W30D_HEAD='| Kind | What it is | Disposition |'
 W30D_RULE='A debt finding names its concept and its sites, never a severity'
 W30D_LINE='`debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`'
-W30D_BURN='Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it in `record/<run>/debt.md` at the sitting, and the next row whose Files touch the concept burns it inside its own work.'
+W30D_BURN='Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it in `record/<run>/debt.md` at the review findings disposition, and the next row whose Files touch the concept burns it inside its own work.'
 W30D_STRUCT='a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity'
 # w30d_rows <file> -> the debt table's rows inside the scale's span, one per line.
 w30d_rows() {
@@ -6910,10 +6913,10 @@ for _w30r in implementor senior-implementor; do
 done
 
 # ============================================================
-section "§W30-T19 (wave-30 T19; REQ-1 AC-1.2/1.3, REQ-2 AC-2.1/2.2, REQ-10 AC-10.4, REQ-11 AC-11.2; D1, D2, D4, P1-P3): the doctrine says the sitting"
+section "§W30-T19 (wave-30 T19; REQ-1 AC-1.2/1.3, REQ-2 AC-2.1/2.2, REQ-10 AC-10.4, REQ-11 AC-11.2; D1, D2, D4, P1-P3): the doctrine says the review findings disposition"
 # ============================================================
 # WHAT THIS OWNS. The words a session reads once review is one decision: the three header fields Step 0
-# writes (§STEP0-FIELDS), the sitting and its four sentences (§SITTING), the three stop rules in the step,
+# writes (§STEP0-FIELDS), the review findings disposition and its four sentences (§DISPOSITION), the three stop rules in the step,
 # the severity scale and the critic's role file (§STOP-RULES), only readers rate (§ONLY-READERS-RATE), the
 # classes of finding and the review-follows-the-build paragraph (§P3), and the debt ledger section and its
 # adoption at Step 1 (§DEBT-LEDGER). Each is an `expect_nonempty` of a sentence shipped verbatim, read from
@@ -6962,31 +6965,31 @@ W30T_NOCARD="$TMP/w30t-step0-nocard.md"
 expect_nonempty "STEP0-FIELDS-5m precondition: the doctored steps/0.md keeps its rigor line" "$(step0_card "$W30T_NOCARD" | /usr/bin/grep -F '    rigor           <')"
 expect_eq "STEP0-FIELDS-5m: …and a card missing the three lines is caught" "" "$(step0_card "$W30T_NOCARD" | /usr/bin/grep -F -e '    review-cadence  <' -e '    fix-policy      <' -e '    fix-cap         <')"
 
-# --- §SITTING (AC-2.1) ---
+# --- §DISPOSITION (AC-2.1) ---
 W30T_P1='The moment of a check is set by its cost model: machine checks run early and often, mind checks run once, on the settled whole.'
-W30T_SIT1='The orchestrator brings every finding to the user with its severity and a recommendation: fix now, Known limit or next wave.'
-W30T_SIT2='The user rules the set.'
-W30T_SIT3='A row exists only from that ruling, recorded on the row with the user'"'"'s attribution.'
-W30T_SIT4='The one row the orchestrator may make alone is an in-diff finding inside `fix-policy:` and under `fix-cap:`, marked `born: review S<n> <reach>`, and the sitting says so.'
+W30T_FD1='The orchestrator brings every finding to the user with its severity and a recommendation: fix now, Known limit or next wave.'
+W30T_FD2='The user rules the set.'
+W30T_FD3='A row exists only from that ruling, recorded on the row with the user'"'"'s attribution.'
+W30T_FD4='The one row the orchestrator may make alone is an in-diff finding inside `fix-policy:` and under `fix-cap:`, marked `born: review S<n> <reach>`, and the disposition says so.'
 W30T_TRIAGE='A finding is a triage item, never a task.'
-w30t_pin "SITTING-0: P1 — steps/6.md opens on the cost-model sentence" "$W30T_P1" "$STEP6_MD"
-expect_eq "SITTING-0b: …as the first sentence under the heading" "$W30T_P1" \
+w30t_pin "DISPOSITION-0: P1 — steps/6.md opens on the cost-model sentence" "$W30T_P1" "$STEP6_MD"
+expect_eq "DISPOSITION-0b: …as the first sentence under the heading" "$W30T_P1" \
   "$(awk '/^### Step 6/ { on = 1; next } on && NF { print; exit }' "$STEP6_MD" | sed 's/^\(.\{0,'"${#W30T_P1}"'\}\).*/\1/')"
-w30t_pin "SITTING-1: AC-2.1 — the orchestrator brings every finding with severity and a recommendation" "$W30T_SIT1" "$STEP6_MD"
-w30t_pin "SITTING-2: …the user rules the set" "$W30T_SIT2" "$STEP6_MD"
-w30t_pin "SITTING-3: …a row exists only from that ruling" "$W30T_SIT3" "$STEP6_MD"
-w30t_pin "SITTING-4: …the one row the orchestrator may make alone, and that it says so" "$W30T_SIT4" "$STEP6_MD"
-w30t_pin "SITTING-5: …a finding is a triage item, never a task" "$W30T_TRIAGE" "$STEP6_MD"
+w30t_pin "DISPOSITION-1: AC-2.1 — the orchestrator brings every finding with severity and a recommendation" "$W30T_FD1" "$STEP6_MD"
+w30t_pin "DISPOSITION-2: …the user rules the set" "$W30T_FD2" "$STEP6_MD"
+w30t_pin "DISPOSITION-3: …a row exists only from that ruling" "$W30T_FD3" "$STEP6_MD"
+w30t_pin "DISPOSITION-4: …the one row the orchestrator may make alone, and that it says so" "$W30T_FD4" "$STEP6_MD"
+w30t_pin "DISPOSITION-5: …a finding is a triage item, never a task" "$W30T_TRIAGE" "$STEP6_MD"
 W30T_DEAL1='at `single` the critic holds `evidence`, `adversarial` and `structure`; at `double` the auditor holds `evidence` and the critic the other two.'
-w30t_pin "SITTING-6: the two levels' dealing is said in the step" "$W30T_DEAL1" "$STEP6_MD"
-w30t_pin "SITTING-7: …and that structure is a question the critic holds, its reuse and one-site findings rated on the debt table" 'There is no third reader: `structure` is a question the critic holds, and its `reuse` and `one-site` findings are rated on the debt table.' "$STEP6_MD"
+w30t_pin "DISPOSITION-6: the two levels' dealing is said in the step" "$W30T_DEAL1" "$STEP6_MD"
+w30t_pin "DISPOSITION-7: …and that structure is a question the critic holds, its reuse and one-site findings rated on the debt table" 'There is no third reader: `structure` is a question the critic holds, and its `reuse` and `one-site` findings are rated on the debt table.' "$STEP6_MD"
 for _w30g in 'Each landing is read' 'The read after a fix' 'Three questions are read at every rigor' 'live:head:<q>' 'reviewer'; do
-  expect_eq "SITTING-8: …and steps/6.md no longer carries '${_w30g}'" "" "$(w26_hits "$_w30g" "$STEP6_MD")"
+  expect_eq "DISPOSITION-8: …and steps/6.md no longer carries '${_w30g}'" "" "$(w26_hits "$_w30g" "$STEP6_MD")"
 done
-w30t_pin "SITTING-9 precondition: the record-and-fact paragraph and the waiver are kept beside the absences" '**The waiver is the user'"'"'s.**' "$STEP6_MD"
-w30t_pin "SITTING-10: a debt finding is recorded at the sitting, not ruled on" 'A debt finding is not brought for a ruling: its disposition is burn-when-touched, and the orchestrator records it at the sitting with `session-poker.sh debt add <record>` (`## Debt ledger` in `operational-rules.md`).' "$STEP6_MD"
-expect_eq "SITTING-1m: a steps/6.md without the sitting's first sentence is caught" "" "$(w26_hits "$W30T_SIT1" "$(w30t_cut "$STEP6_MD" "$W30T_SIT1")")"
-expect_nonempty "SITTING-1m precondition: …the doctored copy keeps the next sentence" "$(w26_hits "$W30T_SIT2" "$(w30t_cut "$STEP6_MD" "$W30T_SIT1")")"
+w30t_pin "DISPOSITION-9 precondition: the record-and-fact paragraph and the waiver are kept beside the absences" '**The waiver is the user'"'"'s.**' "$STEP6_MD"
+w30t_pin "DISPOSITION-10: a debt finding is recorded at the disposition, not ruled on" 'A debt finding is not brought for a ruling: its disposition is burn-when-touched, and the orchestrator records it at the disposition with `session-poker.sh debt add <record>` (`## Debt ledger` in `operational-rules.md`).' "$STEP6_MD"
+expect_eq "DISPOSITION-1m: a steps/6.md without the disposition's first sentence is caught" "" "$(w26_hits "$W30T_FD1" "$(w30t_cut "$STEP6_MD" "$W30T_FD1")")"
+expect_nonempty "DISPOSITION-1m precondition: …the doctored copy keeps the next sentence" "$(w26_hits "$W30T_FD2" "$(w30t_cut "$STEP6_MD" "$W30T_FD1")")"
 
 # --- §STOP-RULES (AC-2.2) and §ONLY-READERS-RATE (AC-10.4) ---
 W30T_SR1='In-diff only: a finding in code the run did not change is a next-wave item unless it is S1.'
@@ -7030,7 +7033,7 @@ w30t_pin "P3-4: A-orch-9 — the Step-4 fields are owed at every scale" 'pointer
 expect_eq "P3-4b: …and no longer 'when use_worktree: true'" "" "$(w26_hits 'when `use_worktree: true`' "$SKILL_MD")"
 w30t_pin "P3-5: A-orch-52 — the first handoff run keeps only the five human lines" 'The first run over a hand-written section keeps only its five human lines.' "$SKILL_MD"
 w30t_pin "P3-6: the rigor floors are in the new words" 'at `task`, `bugfix`→`single` and `build`/`refactor`/`tune`→`double`; at `wave` and above, `double`' "$SKILL_MD"
-W30T_DISP='**Review follows the build:** the plan carries one read row per reader the rigor deals, `reads: approval:plan, head`, ready once the last build row lands; it reads the settled whole once, `proof-add review` registers it, and its findings go to the sitting (`steps/6.md`). A whole read with a settled head covers cross-piece problems.'
+W30T_DISP='**Review follows the build:** the plan carries one read row per reader the rigor deals, `reads: approval:plan, head`, ready once the last build row lands; it reads the settled whole once, `proof-add review` registers it, and its findings go to the review findings disposition (`steps/6.md`). A whole read with a settled head covers cross-piece problems.'
 w30t_pin "P3-7: P1 — dispatch.md's Review follows the build is one read row per reader on the settled whole" "$W30T_DISP" "$DISPATCH_MD" "${BLOCK_DIR}/orchestrator-dispatch.md"
 for _w30d in 'a read row per reader' 'for every landed difference'; do
   expect_eq "P3-7b: …and no longer '${_w30d}'" "" "$(w26_hits "$_w30d" "$DISPATCH_MD")"

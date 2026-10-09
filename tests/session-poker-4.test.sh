@@ -3358,7 +3358,7 @@ expect_regex "BN-4b …marked" '^- T8: pending dispatch — added by task-add at
 s42_snap "$RBN" "$PBN"
 poke "$RBN" task-add T9 4 build 'one fix too many' implementor '—' 30 REQ-1 'f.sh' --born 'review S1 on'
 s42_unchanged "BN-5 AC-10.2 the third review-born row under fix-cap: 2" 1 "$PBN"
-expect_contains "BN-5b …naming the count and the cap" "task-add refused — review-born rows: 2 of cap 2; this finding goes to the sitting (AC-10.3)" "$OUT"
+expect_contains "BN-5b …naming the count and the cap" "task-add refused — review-born rows: 2 of cap 2; this finding goes to the review findings disposition (AC-10.3)" "$OUT"
 
 for bn_bad in 'review S5 on' 'review S2 maybe' 'S2 on' 'review S2-on'; do
   poke "$RBN" task-add T9 4 build 'a bad rating' implementor '—' 30 REQ-1 'f.sh' --born "$bn_bad"

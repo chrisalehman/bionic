@@ -6712,7 +6712,7 @@ EOF
         TA_POL="$FIX_POLICY_DEFAULT"
       fi
       if ! fix_policy_covers "$TA_POL" "${TA_RATING% *}" "${TA_RATING#* }"; then
-        die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the sitting (AC-10.3)."
+        die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3)."
         exit 1
       fi
       if ! TA_CAP="$(units_fix_cap "$TA_PLAN")"; then
@@ -6722,7 +6722,7 @@ EOF
       TA_BORN_ROWS="$(units_born "$TA_PLAN")"
       TA_NBORN="$(printf '%s' "$TA_BORN_ROWS" | awk 'NF { n++ } END { print n + 0 }')"
       if [ "$TA_NBORN" -ge "$TA_CAP" ]; then
-        die "task-add refused — review-born rows: $TA_NBORN of cap $TA_CAP; this finding goes to the sitting (AC-10.3)."
+        die "task-add refused — review-born rows: $TA_NBORN of cap $TA_CAP; this finding goes to the review findings disposition (AC-10.3)."
         exit 1
       fi
       while IFS= read -r TA_PATH; do
@@ -6757,7 +6757,7 @@ EOF
 
     plan_verb_swap task-add "$TA_ID added" writer
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
-    [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the sitting (AC-10.2)."
+    [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
     # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
     # that shares no file with its holder is named, with the line that would loosen it, never run.
     suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
