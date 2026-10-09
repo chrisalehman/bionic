@@ -10,6 +10,12 @@ Versioning follows semver from 1.9.0 on:
   or an upgrade step.
 - **PATCH** for a fix within existing behaviour.
 
+## 1.14.0 — 2026-10-09
+
+1.14.0 — efficiency: the regression is the backstop; rigor is single and double; the review findings disposition
+
+<!-- T28 fills this entry: migration, regression notice, Known limits, the debt line -->
+
 ## 1.13.0 — 2026-10-07
 
 A row of work now lands by one line, `spawn-worktree.sh ready`, and a person lands one by hand with
