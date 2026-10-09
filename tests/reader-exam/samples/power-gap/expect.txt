@@ -1,6 +1,6 @@
 question: evidence
 result: fail
 token: REFUTED
-names: reap_listed
+names: reap_listed | REAP_IDLE_DAYS
 finding-file: lib/reap.sh | docs/plan.md
 finding-rating: S1 on | S2 on
