@@ -1740,7 +1740,7 @@ expect_status "16lc …and the declared run is the budget on the row" \
 REPO=$(make_repo r16ld1 yes)
 write_attestation "$REPO" "$SID_A"
 # THE STUB DERIVATION, not the real tool: the impact command is not under test in this
-# section, and the real one over the real tree runs 11-17 s against a 10 s bound under
+# section, and the real one over the real tree runs 11-17 s against the then-10 s bound under
 # wave-scale machine load (measured 2026-09-19), which would make these rows report the
 # derivation bound instead of the fault they exist for.
 s27_impact "$REPO" widget.test.sh
@@ -1755,7 +1755,7 @@ expect_contains "16ld1 …naming the token it saw" "\$JEST x" "$GATE_VERR"
 REPO=$(make_repo r16ld2 yes)
 write_attestation "$REPO" "$SID_A"
 # THE STUB DERIVATION, not the real tool: the impact command is not under test in this
-# section, and the real one over the real tree runs 11-17 s against a 10 s bound under
+# section, and the real one over the real tree runs 11-17 s against the then-10 s bound under
 # wave-scale machine load (measured 2026-09-19), which would make these rows report the
 # derivation bound instead of the fault they exist for.
 s27_impact "$REPO" widget.test.sh
@@ -2078,7 +2078,7 @@ expect_contains "16le-txt …and its fix tells the auditor three" "at most three
 REPO=$(make_repo r16lf yes)
 write_attestation "$REPO" "$SID_A"
 # THE STUB DERIVATION, not the real tool: the impact command is not under test in this
-# section, and the real one over the real tree runs 11-17 s against a 10 s bound under
+# section, and the real one over the real tree runs 11-17 s against the then-10 s bound under
 # wave-scale machine load (measured 2026-09-19), which would make these rows report the
 # derivation bound instead of the fault they exist for.
 s27_impact "$REPO" widget.test.sh
