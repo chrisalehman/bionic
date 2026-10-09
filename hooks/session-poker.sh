@@ -965,8 +965,10 @@ clean() {  # <value> [<field name>]
   # the cut for the reason they do — a declared run is a command, and a command cut at 400
   # characters is a budget entry nothing can ever equal — and because a cut landing inside
   # an escape would decode into garbage.
+  # AND `sentence`, A LIBRARY'S OWN REFUSAL (wave-30 T13): `proof-add floor` names the suites a later
+  # change owes, a list like `suites_allowed=`, and the cut would drop the very suites it names.
   case "${2:-}" in
-    suites_allowed|files) printf '%s' "$out" ;;
+    suites_allowed|files|sentence) printf '%s' "$out" ;;
     re_executes)
       out="${out//\%7C/|}"
       printf '%s' "${out//\%25/%}" ;;
@@ -1840,7 +1842,11 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   case "$rc" in
     0) UNITS_FACTS_STATE=covered ;;
     2) UNITS_FACTS_STATE="the plan's rigor and scale cannot be dealt" ;;
-    *) UNITS_FACTS_STATE="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered" { $1 = $1; printf "%s%s", (n++ ? "; " : ""), $0 }' OFS=' ')" ;;
+    # A FLOOR LINE NAMING SUITES is said in words (wave-30 T13; AC-4.4): the map bounds the change and
+    # those suites have no green run at the head, so they are what is owed, never a full run.
+    *) UNITS_FACTS_STATE="$( { printf '%s\n' "$out" | proof_floor_words "$head"
+         printf '%s\n' "$out" | awk -F'\t' '$NF != "covered" && !($1 == "floor" && $2 == "uncovered" && $3 != "" && index($3, "..") == 0)'; } \
+         | awk -F'\t' '{ $1 = $1; printf "%s%s", (n++ ? "; " : ""), $0 }' OFS=' ')" ;;
   esac
   return 0
 }
@@ -3456,6 +3462,8 @@ cur8_judge() {
   fi
   die "REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
   printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
+  # The floor line that names suites, in words (wave-30 T13): those suites run green at the head prove it.
+  printf '%s\n' "$out" | proof_floor_words "$PV_HEAD8" >&2
   die "Take the reading or the floor run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
 }
@@ -7031,7 +7039,7 @@ PF_OTHER_LIST
     # The project root goes too: a project that declares its floor has it judged by its own contract (T75; D36).
     PF_CO="$(proof_checkout "$PV_REPO" "$PF_WB")"
     if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PF_CO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO")"; then
-      die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
+      die "REFUSED — $(clean "$PF_HEAD" sentence). The plan is unchanged."
       exit 1
     fi
     # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `check:`, `deferred:` or `moved:`
