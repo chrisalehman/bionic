@@ -35,6 +35,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its group, then KILL (signals, may write its end)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
+#     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each key its tier owes as pending (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -464,6 +466,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
+  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, and each key the row's tier owes as pending; adds only what is missing"
+  die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
@@ -874,6 +878,19 @@ case "$VERB" in
     RR_WRITE=no
     if [ $# -eq 1 ] && [ "$1" = --write ]; then RR_WRITE=yes
     elif [ $# -ne 0 ]; then usage "regression-runs takes at most one flag: --write."; fi
+    ;;
+  # THE MATRIX VERBS (wave-30 T14; D9). matrix-render takes nothing — the bound plan is the operand every plan
+  # verb has; discharge takes the one criterion id, spelled as the matrix table spells it.
+  matrix-render)
+    [ $# -eq 0 ] || usage "matrix-render takes no argument: it renders the bound plan's matrix from its ## Eval design."
+    ;;
+  discharge)
+    { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "discharge takes exactly one argument: the criterion (AC-<n>.<m>) whose auditor cell becomes CONFIRMED."
+    case "$1" in
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
+        usage "discharge: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
+    esac
+    DS_AC="$1"
     ;;
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). A subcommand, its operands, and at most one
   # plan last, which names the run as landing-report's does; without it, the session's bound run.
@@ -3518,6 +3535,151 @@ $(IDS="$ids" awk "$_ROSTER_OPEN_AWK"'
   done
   printf ' %s ' "$(printf '%s\n' "$names" | /usr/bin/grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')"
 }
+
+# mr_tier_keys -> one `<tier><TAB><keys>` line for each of T0..T4, the keys walls.sh `keys_for_tier` names (wave-30
+# T14; D9). The list is the gate's own, read by sourcing walls.sh in a subshell, so the stubs matrix-render writes and
+# the keys the Verify gate demands cannot drift apart; nothing walls.sh defines outlives the subshell. rc 1 when the
+# library or the function cannot be had.
+mr_tier_keys() {
+  [ -f "$BIONIC_LIB/walls.sh" ] || return 1
+  ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 || exit 1
+    declare -F keys_for_tier >/dev/null 2>&1 || exit 1
+    for _mr_t in T0 T1 T2 T3 T4; do printf '%s\t%s\n' "$_mr_t" "$(keys_for_tier "$_mr_t")"; done )
+}
+
+# MR_AWK — matrix-render's one pass over the plan (wave-30 T14; D9). ENVIRON: MR_KEYS (mr_tier_keys), MR_TASKS
+# (`<id><TAB><serves>` per ## Tasks row), MR_WALK (the frontmatter walk: value), MR_COUNT (the side file: on success
+# `<blocks written><TAB><keys added><TAB><blocks unchanged>`, on a refusal `<why><TAB><ids>`). Prints the rendered
+# plan; exits 3 no Eval design criteria, 4 no matrix table, 5 a criterion with no matrix row, 6 a tier with no keys.
+# The reads follow the gate's: fences skipped, a table cell trimmed, an AC block a flush-left `AC-<id>:` (a list
+# bullet tolerated) and the indented lines under it until the next flush-left line (walls.sh `matrix_block`).
+MR_AWK='
+function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
+function cells(line, out,    n, i, t) {
+  gsub(/\\\|/, "\001", line)
+  n = split(line, t, "|")
+  for (i = 2; i < n; i++) { out[i - 1] = trim(t[i]); gsub(/\001/, "|", out[i - 1]) }
+  return n - 2
+}
+function taskof(cr,    t, n, id) {
+  n = 0
+  for (t = 1; t <= nt; t++)
+    if (((t, cr) in serves) || (ereq[cr] != "" && ((t, ereq[cr]) in serves))) { n++; id = tid[t] }
+  return (n == 1) ? id : "pending"
+}
+function val(cr, k,    r) {
+  if (k == "provenance") { r = ereq[cr]; if ((r in prov) && prov[r] != "") return prov[r]; return (eapp[cr] != "") ? eapp[cr] : "pending" }
+  if (k == "fails-when") return (efw[cr] != "") ? efw[cr] : "pending"
+  if (k == "eval") return tier[cr] " — " ((eev[cr] != "") ? eev[cr] : "pending")
+  if (k == "task") return taskof(cr)
+  return "pending"
+}
+BEGIN {
+  nk = split(ENVIRON["MR_KEYS"], kl, "\n")
+  for (i = 1; i <= nk; i++) { split(kl[i], kv, "\t"); if (kv[1] != "") keys[kv[1]] = kv[2] }
+  n0 = split(ENVIRON["MR_TASKS"], tl, "\n"); nt = 0
+  for (i = 1; i <= n0; i++) {
+    split(tl[i], tv, "\t"); if (tv[1] == "") continue
+    nt++; tid[nt] = tv[1]; ns = split(tv[2], sv, /[ ,;]+/)
+    for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
+  }
+  walk = tolower(ENVIRON["MR_WALK"]); cf = ENVIRON["MR_COUNT"]
+}
+{ raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
+END {
+  for (i = 1; i <= NR; i++) {
+    line = L[i]
+    if (line ~ /^[ \t]*```/) { fence = !fence; continue }
+    if (fence) continue
+    if (line ~ /^## /) {
+      inm = 0; reqh = ""; evh = 0
+      inev = (line ~ /^## Eval design[ \t]*$/); if (inev) sawev = 1
+      if (line ~ /^## Verification Matrix/) { inm = 1; sawm = 1; mhead = i; mlast = i; cur = "" }
+      continue
+    }
+    if (line ~ /^### /) {
+      reqh = ""
+      if (match(line, /^###[ \t]+REQ-[0-9A-Za-z.]+/)) { reqh = substr(line, RSTART, RLENGTH); sub(/^###[ \t]+/, "", reqh) }
+      continue
+    }
+    if (reqh != "" && !inm && !inev && line ~ /^provenance[ \t]*:/ && !(reqh in prov)) {
+      v = line; sub(/^provenance[ \t]*:[ \t]*/, "", v); prov[reqh] = trim(v)
+    }
+    if (inev && line ~ /^[ \t]*\|/) {
+      if (line ~ /^[ \t]*\|[-|: \t]*$/) continue
+      nc = cells(line, c)
+      if (!evh) { evh = 1; delete col; for (j = 1; j <= nc; j++) col[tolower(c[j])] = j; continue }
+      cr = ("criterion" in col) ? c[col["criterion"]] : ""
+      if (cr == "" || (cr in eseen)) continue
+      eseen[cr] = 1; ne++; ec[ne] = cr
+      ereq[cr] = ("requirement" in col) ? c[col["requirement"]] : ""
+      eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
+      eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
+      efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
+      continue
+    }
+    if (!inm) continue
+    if (line !~ /^[ \t]*$/) mlast = i
+    if (line ~ /^[ \t]*\|/) {
+      cur = ""
+      if (line ~ /^[ \t]*\|[-|: \t]*$/) continue
+      nc = cells(line, c)
+      if (c[1] == "AC" || c[1] == "") continue
+      mrows++; if (!(c[1] in tier)) tier[c[1]] = c[2]
+      continue
+    }
+    if (line ~ /^[ \t]*stack-health[ \t]*:/ && !hassh) hassh = i
+    if (line ~ /^[ \t]*walk-artifact[ \t]*:/ && !haswa) haswa = i
+    if (line ~ /^[^ \t]/) {
+      cur = ""; hdr = line; sub(/^[-*+][ \t]+/, "", hdr)
+      if (match(hdr, /^AC-[^ \t:]+:/)) {
+        cur = substr(hdr, 1, RLENGTH - 1)
+        if (cur in bstart) cur = ""; else { bstart[cur] = i; bend[cur] = i }
+      }
+      continue
+    }
+    if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
+      bend[cur] = i; k = line; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); has[cur, k] = 1
+    }
+  }
+  if (!sawev || ne == 0) { printf "noeval\t\n" > cf; exit 3 }
+  if (!sawm || mrows == 0) { printf "notable\t\n" > cf; exit 4 }
+  miss = ""; badt = ""
+  for (e = 1; e <= ne; e++) {
+    cr = ec[e]
+    if (!(cr in tier)) miss = miss ((miss == "") ? "" : ", ") cr
+    else if (!(tier[cr] in keys) || keys[tier[cr]] == "") badt = badt ((badt == "") ? "" : ", ") cr " (" tier[cr] ")"
+  }
+  if (miss != "") { printf "norow\t%s\n", miss > cf; exit 5 }
+  if (badt != "") { printf "badtier\t%s\n", badt > cf; exit 6 }
+  written = 0; added = 0; same = 0; nb = ""
+  heads = ""
+  if (!hassh) { heads = heads "stack-health: pending\n"; added++ }
+  if (walk != "exempt" && !haswa) { heads = heads "walk-artifact: pending\n"; added++ }
+  if (heads != "") { if (hassh) ins[hassh] = ins[hassh] heads; else ins[mhead] = ins[mhead] "\n" heads }
+  for (e = 1; e <= ne; e++) {
+    cr = ec[e]; owed = "provenance fails-when eval task evidence"
+    nw = split(keys[tier[cr]], tk, " ")
+    for (w = 1; w <= nw; w++) if (tk[w] != "evidence") owed = owed " " tk[w]
+    no = split(owed, ok, " ")
+    if (cr in bstart) {
+      got = 0
+      for (w = 1; w <= no; w++) if (!((cr, ok[w]) in has)) { ins[bend[cr]] = ins[bend[cr]] "  " ok[w] ": " val(cr, ok[w]) "\n"; added++; got++ }
+      if (!got) same++
+    } else {
+      nb = nb cr ":\n"
+      for (w = 1; w <= no; w++) nb = nb "  " ok[w] ": " val(cr, ok[w]) "\n"
+      written++
+    }
+  }
+  if (nb != "" && L[mlast] !~ /^[ \t]+[^ \t]/) nb = "\n" nb
+  for (i = 1; i <= NR; i++) {
+    print raw[i]
+    if (i in ins) printf "%s", ins[i]
+    if (i == mlast && nb != "") printf "%s", nb
+  }
+  printf "%d\t%d\t%d\n", written, added, same > cf
+}'
 
 # A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
 plan_verb_value_ok() {
@@ -6645,6 +6807,98 @@ EOF
     esac
     plan_verb_swap step-field "Step $PV_KEY $PV_FKEY" writer
     say "step-field — Step $PV_KEY $PV_FKEY: written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE MATRIX RENDER (wave-30 T14; REQ-6 AC-6.1, D9, Δ12a). Step 3 writes the matrix and Step 5 fills it: the
+  # verb reads the bound plan's `## Eval design` table and writes, under `## Verification Matrix`, one AC block per
+  # criterion, in the shape the gate reads — `provenance:` (the requirement's own `provenance:` line under its
+  # `### REQ-<n>` heading, else the row's Approach), `fails-when:` and `eval:` (`<tier> — <Eval>`) from the table,
+  # `task:` (the one `## Tasks` row whose serves cell names the criterion or its requirement, else `pending`), then
+  # `evidence:` and every other key walls.sh `keys_for_tier` names for the tier the matrix table gives the
+  # criterion, each `pending`. The matrix head gains `stack-health: pending`, and `walk-artifact: pending` unless the
+  # plan is `walk: exempt`, where it has none. `pending` is the stub token (Δ12a): the gate refuses it wherever it
+  # judges evidence and reads nothing of it before Step 5.
+  #
+  # ADDITIVE, SO IT CAN BE RUN AGAIN. A block that exists gains only the keys it lacks, after its last line; a key
+  # that is there is never rewritten, whatever it says. The one line it prints counts the three outcomes: new
+  # blocks, keys added (to existing blocks and the matrix head), and blocks left as they were. When there is nothing
+  # to add it writes nothing. It takes the transaction every plan verb takes (copy, dry commit, checksum, swap).
+  # REFUSED (1), the plan unchanged: no `## Eval design` with criteria, no matrix table, a criterion with no matrix
+  # row (its tier is unknown, and a guessed tier owes the wrong keys), a tier walls.sh does not know.
+  matrix-render)
+    plan_verb_open matrix-render
+    MR_KEYS="$(mr_tier_keys)" || MR_KEYS=""
+    if [ -z "$MR_KEYS" ]; then
+      die "REFUSED — the per-tier keys are walls.sh keys_for_tier's, and $BIONIC_LIB/walls.sh cannot be loaded; the plan is unchanged."
+      exit 2
+    fi
+    MR_TASKS="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 }')"
+    PV_RC=0
+    MR_KEYS="$MR_KEYS" MR_TASKS="$MR_TASKS" MR_WALK="$(plan_frontmatter_get "$PV_PLAN" walk)" MR_COUNT="$PV_NEW.2" \
+      awk "$MR_AWK" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    MR_WHY="$(cut -f2 "$PV_NEW.2" 2>/dev/null)"
+    case "$PV_RC" in
+      0) : ;;
+      3) die "REFUSED — the plan has no ## Eval design table with a Criterion column and rows; matrix-render reads the criteria from it. The plan is unchanged."
+         exit 1 ;;
+      4) die "REFUSED — the plan's ## Verification Matrix has no AC tier table (| AC | tier | status | evidence | auditor |); each criterion's tier is read from it. The plan is unchanged."
+         exit 1 ;;
+      5) die "REFUSED — the matrix table has no row for $MR_WHY, so the tier and the keys it owes are unknown; add the row, then render. The plan is unchanged."
+         exit 1 ;;
+      6) die "REFUSED — no tier walls.sh knows for $MR_WHY: the tier cell is T0 to T4. The plan is unchanged."
+         exit 1 ;;
+      *) die "REFUSED — the matrix cannot be rendered (awk exit $PV_RC); the plan is unchanged."
+         exit 2 ;;
+    esac
+    IFS="$(printf '\t')" read -r MR_N MR_M MR_K < "$PV_NEW.2"
+    MR_LINE="matrix-render — ${MR_N:-0} blocks written, ${MR_M:-0} keys added, ${MR_K:-0} unchanged"
+    if [ "$(( ${MR_N:-0} + ${MR_M:-0} ))" -eq 0 ]; then
+      say "$MR_LINE; the plan already reads so, nothing was written."
+      exit 0
+    fi
+    plan_verb_swap matrix-render "the matrix rendered" writer
+    say "$MR_LINE; written to $PV_PLAN, dry-committed first."
+    exit 0
+    ;;
+
+  # THE AUDITOR CELL'S ONE WRITER (wave-30 T14; REQ-6 AC-6.2, D9). The gate compares the matrix `auditor` cell with
+  # the bare token `CONFIRMED` past the Verify gate and refuses anything after it; wave-28's scratch scripts wrote
+  # `CONFIRMED <date>` there by hand. This verb sets the row's fifth cell to exactly `CONFIRMED` — whatever it held,
+  # a dated token among them — and leaves every other byte of the plan as it was; the audit's own path belongs in the
+  # row's `evidence:` key, not in this cell. A row already CONFIRMED is nothing to write. REFUSED (1), the plan
+  # unchanged: an AC id the matrix table has no row for (the id is compared whole, so AC-1 is not AC-1.1), a row
+  # that does not have five cells. The plan transaction, as every plan verb.
+  discharge)
+    plan_verb_open discharge
+    PV_RC=0
+    DS_AC="$DS_AC" awk '
+      BEGIN { a = ENVIRON["DS_AC"] }
+      /^[ \t]*```/ { fence = !fence; print; next }
+      fence { print; next }
+      /^## / { inm = ($0 ~ /^## Verification Matrix/); print; next }
+      inm && !done && /^[ \t]*\|/ {
+        n = split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
+        if (id == a) {
+          if (n != 7) { bad = 1; exit }
+          c[6] = " CONFIRMED "; out = c[1]
+          for (j = 2; j <= n; j++) out = out "|" c[j]
+          print out; done = 1; next
+        }
+      }
+      { print }
+      END { if (bad) exit 4; if (!done) exit 3 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      3) die "REFUSED — the matrix table has no row $DS_AC; the plan is unchanged."
+         exit 1 ;;
+      4) die "REFUSED — the matrix row $DS_AC does not have five cells, so its auditor cell cannot be found; the plan is unchanged."
+         exit 1 ;;
+      *) die "REFUSED — the auditor cell cannot be written (awk exit $PV_RC); the plan is unchanged."
+         exit 2 ;;
+    esac
+    plan_verb_swap discharge "$DS_AC's auditor cell CONFIRMED" writer
+    say "discharge — $DS_AC: auditor CONFIRMED, written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
 
