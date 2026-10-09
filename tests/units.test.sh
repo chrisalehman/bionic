@@ -4142,4 +4142,127 @@ expect_eq "RH-8 precondition: the landed copy differs from the refused one in T2
 expect_eq "RH-8b …and a landed verify row that dropped head is not refused" "0" \
   "$(call_rc units_validate "$SANDBOX/rh-landed.md")"
 
+# ============================================================
+section "§TASK-SPLIT — wave-30 T17: a split is one projection, its children a partition of the parent's Files (REQ-12 AC-12.6; D14d-3, Δ11)"
+# ============================================================
+#
+# THREE PURE READERS UNDER `session-poker.sh task-split`. `units_split_check` judges the child specs'
+# Files against the parent's: each child's entries are the parent's, and together they name every
+# one (a path left out, or one the parent never declared, is a line naming it). `units_split_dependents`
+# names every row that waits on the parent: an edge from it (a read it satisfies) or a deps token
+# naming it. `units_split_row` prints the whole plan with the split written: the parent `dropped`
+# with ` · split-into: <ids>` on its task, each deps token naming it replaced by every child, the
+# children added by `units_add_row` (the parent's step, kind, deps, serves and reads; their own task,
+# size and Files), and the lines under `## SDLC State`. It writes nothing; the instant is an operand.
+cat > "$SANDBOX/split-nr.md" <<'SPNR_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+- Step 4: opened
+- T1: landed at record/T1.md
+- T2: dispatched to w-T2
+- T6: pending dispatch — added by task-add at 2026-10-08T00:00:00Z
+- T7: pending dispatch
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30 | REQ-x | a.sh | — | — | landed |
+| T2 | 4 | build | in flight | implementor | — | 30 | REQ-x | b.sh | 01-T2 | abc1234 | active |
+| T6 | 4 | build | the big one | w01-T6 | T1 | 90 | REQ-5 | lib/c.sh, lib/d.sh, .bionic/docs/record/w/T6-iface.md | — | — | pending |
+| T7 | 4 | build | after the big one | implementor | T6 | 30 | REQ-x | lib/e.sh | — | — | pending |
+| T5 | 5 | verify | the floor | test-runner | T1, T2, T6, T7 | 30 | REQ-x | — | — | — | pending |
+SPNR_EOF
+SP_IFACE=".bionic/docs/record/w/T6-iface.md"
+SP_PF="lib/c.sh, lib/d.sh, $SP_IFACE"
+
+# ---------- the partition: subset and cover ----------
+expect_eq "SPLIT-1 a partition of the parent's Files passes the check (exit 0, nothing printed)" "0|" \
+  "$(call_rc units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh")|$(call units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh")"
+expect_eq "SPLIT-1b …spelled ./ or marked ! it is the same entry" "0" \
+  "$(call_rc units_split_check T6 "$SP_PF" T8 "./$SP_IFACE, lib/c.sh!" T9 "lib/d.sh")"
+expect_eq "SPLIT-2 a child naming a path the parent does not declare is refused, naming the child and the path" \
+  "T9: Files entry lib/x.sh is not one of T6's Files" \
+  "$(call units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh, lib/x.sh")"
+expect_eq "SPLIT-2b …exit 1" "1" "$(call_rc units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh, lib/x.sh")"
+expect_eq "SPLIT-3 a partition that leaves a parent path out is refused, naming the path" \
+  "T6: Files entry lib/d.sh is in no child's Files" \
+  "$(call units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/c.sh")"
+expect_eq "SPLIT-3b …exit 1" "1" "$(call_rc units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/c.sh")"
+expect_eq "SPLIT-3c a parent with no Files splits into children with none" "0" "$(call_rc units_split_check T6 "—" T8 "—" T9 "—")"
+
+# ---------- the dependents ----------
+expect_eq "SPLIT-4 the rows waiting on T6 in a table without reads: T7 and T5, by deps (table order)" "T7 T5" \
+  "$(call units_split_dependents "$SANDBOX/split-nr.md" T6 | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- the projection, a table without reads ----------
+SP_SUM="$(cksum < "$SANDBOX/split-nr.md")"
+SP_OUT="$(call units_split_row "$SANDBOX/split-nr.md" T6 2026-10-09T00:00:00Z \
+  T8 'the interface' 20 "$SP_IFACE, lib/c.sh" T9 'the rest' 70 'lib/d.sh')"
+SP_RC="$CALL_RC"
+printf '%s\n' "$SP_OUT" > "$SANDBOX/split-nr-out.md"
+expect_eq "SPLIT-5 the projector exits 0" "0" "$SP_RC"
+expect_eq "SPLIT-5b …and writes nothing: the plan is byte-identical" "$SP_SUM" "$(cksum < "$SANDBOX/split-nr.md")"
+expect_contains "SPLIT-6 the parent is dropped, its task naming the children" \
+  "| T6 | 4 | build | the big one · split-into: T8, T9 | w01-T6 | T1 | 90 | REQ-5 | $SP_PF | — | — | dropped |" "$SP_OUT"
+expect_contains "SPLIT-7 the first child: the parent's step, kind, deps and serves, its own task, size and Files, the agent renamed" \
+  "| T8 | 4 | build | the interface | w01-T8 | T1 | 20 | REQ-5 | $SP_IFACE, lib/c.sh | — | — | pending |" "$SP_OUT"
+expect_contains "SPLIT-7b …and the second" \
+  "| T9 | 4 | build | the rest | w01-T9 | T1 | 70 | REQ-5 | lib/d.sh | — | — | pending |" "$SP_OUT"
+expect_contains "SPLIT-8 a deps dependent waits on every child in the parent's place" \
+  "| T7 | 4 | build | after the big one | implementor | T8, T9 |" "$SP_OUT"
+expect_contains "SPLIT-8b …and the floor too, the token replaced where it stood and nothing threaded twice" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T8, T9, T7 |" "$SP_OUT"
+expect_eq "SPLIT-8c …no deps cell names the dropped parent: no row waits on it" "" \
+  "$(call units_split_dependents "$SANDBOX/split-nr-out.md" T6)"
+expect_contains "SPLIT-9 the ledger line: - T6: split into the children at the instant" \
+  "- T6: split into T8, T9 at 2026-10-09T00:00:00Z" "$SP_OUT"
+expect_contains "SPLIT-9b …each child's own line" "- T8: pending dispatch — split from T6 at 2026-10-09T00:00:00Z" "$SP_OUT"
+expect_contains "SPLIT-9c …and the second's" "- T9: pending dispatch — split from T6 at 2026-10-09T00:00:00Z" "$SP_OUT"
+expect_eq "SPLIT-10 the projection validates clean" "0|" \
+  "$(call_rc units_validate "$SANDBOX/split-nr-out.md")|$(call units_validate "$SANDBOX/split-nr-out.md")"
+expect_eq "SPLIT-11 an active parent is not projected (exit 3), nothing printed" "3|" \
+  "$(call_rc units_split_row "$SANDBOX/split-nr.md" T2 2026-10-09T00:00:00Z T8 a 10 b.sh T9 b 10 b.sh)|$(call units_split_row "$SANDBOX/split-nr.md" T2 2026-10-09T00:00:00Z T8 a 10 b.sh T9 b 10 b.sh)"
+expect_eq "SPLIT-11b …nor an id the table does not carry (exit 2)" "2" \
+  "$(call_rc units_split_row "$SANDBOX/split-nr.md" T44 2026-10-09T00:00:00Z T8 a 10 b.sh T9 b 10 b.sh)"
+
+# ---------- a table with reads: the reader is re-pointed by the path it reads ----------
+cat > "$SANDBOX/split-r.md" <<'SPR_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+- T1: landed at record/T1.md
+- T6: pending dispatch
+- T7: pending dispatch
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30 | REQ-x | a.sh | — | — | landed | — |
+| T6 | 4 | build | the big one | w01-T6 | — | 90 | REQ-5 | lib/c.sh, lib/d.sh, .bionic/docs/record/w/T6-iface.md | — | — | pending | approval:plan |
+| T7 | 4 | build | reads the interface | implementor | — | 30 | REQ-x | lib/e.sh | — | — | pending | .bionic/docs/record/w/T6-iface.md |
+| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | — | — | — | pending | approval:plan, head |
+SPR_EOF
+expect_eq "SPLIT-12 precondition: the reads table validates" "0" "$(call_rc units_validate "$SANDBOX/split-r.md")"
+expect_eq "SPLIT-12b the rows waiting on T6 by what they read: T7 (its record) and T5 (head)" "T7 T5" \
+  "$(call units_split_dependents "$SANDBOX/split-r.md" T6 | tr '\n' ' ' | sed 's/ $//')"
+call units_split_row "$SANDBOX/split-r.md" T6 2026-10-09T00:00:00Z \
+  T8 'the interface' 20 "$SP_IFACE" T9 'the rest' 70 'lib/c.sh, lib/d.sh' > "$SANDBOX/split-r-out.md"
+expect_eq "SPLIT-13 the projector exits 0 on a reads table" "0" "$CALL_RC"
+expect_contains "SPLIT-13b …the children carry the parent's reads" \
+  "| T8 | 4 | build | the interface | w01-T8 | — | 20 | REQ-5 | $SP_IFACE | — | — | pending | approval:plan |" "$(cat "$SANDBOX/split-r-out.md")"
+SP_EDGES="$(bash -c '. "$1" && units_edges "$2"' _ "$LIB" "$SANDBOX/split-r-out.md" 2>/dev/null)"
+expect_contains "SPLIT-14 the reader of the record now waits on the child that writes it, T8" \
+  "$(printf 'T8\tT7\t%s' "$SP_IFACE")" "$SP_EDGES"
+expect_absent "SPLIT-14b …and not on T9, which does not" "$(printf 'T9\tT7\t')" "$SP_EDGES"
+expect_absent "SPLIT-14c …no edge leaves the dropped parent" "$(printf 'T6\t')" "$SP_EDGES"
+expect_eq "SPLIT-14d …and no row waits on it" "" "$(call units_split_dependents "$SANDBOX/split-r-out.md" T6)"
+expect_eq "SPLIT-15 the reads projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/split-r-out.md")"
+
 finish
