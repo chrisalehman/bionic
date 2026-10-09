@@ -12,9 +12,223 @@ Versioning follows semver from 1.9.0 on:
 
 ## 1.14.0 — 2026-10-09
 
-1.14.0 — efficiency: the regression is the backstop; rigor is single and double; the review findings disposition
+Review is now one decision. Rigor is the count of independent readers, `single` or `double`, and it
+sets who reads, when, which findings become fix rows without asking, and how many rows review may
+make on its own. Step 6 ends in one review findings disposition, where you rule the set of findings
+the readers rated. The full regression runs once per release head, in a process a `/clear` cannot
+kill, and a later head is accepted when the impact map bounds the change. Landings by `ready` took a
+median of 9 minutes from the first `ready` to the landing, and the one full regression took 46 minutes
+at width 8, against a target of 25 that this release does not meet. This is a minor release: the repository's own rule would read a renamed axis
+that a plan must migrate as a major one, and the release is cut as 1.14.0 on the maintainer's ruling.
+The migration is one edit per plan, below. `canonical_sdlc_version` stays 14. A plan open at upgrade is
+refused on its next write until its `rigor:` line is edited. The detached run and the shorter landing
+proof have met no project but this repository's own release.
 
-<!-- T28 fills this entry: migration, regression notice, Known limits, the debt line -->
+**Migration (rigor and the structure reader).** `rigor:` takes `single` or `double`: `low` and `tested` become `single`; `medium`, `high`, `peer-reviewed` and `audited` become `double`. `bionic:reviewer` is retired: a brief that names it is refused, and structure is read by `bionic:critic`, which holds `structure` at both levels. Open plans migrate by editing the `rigor:` line and the rigor cells of the ledger.
+
+What you will notice:
+
+- **Rigor is `single` or `double`, and it sets four things.** `single` is one independent reader: the
+  critic holds `evidence`, `adversarial` and `structure`. `double` is two: the auditor takes `evidence`
+  and the critic the other two. Step 0 writes three header fields beside `rigor:` and prints them under
+  Run: `review-cadence:` (`once`), `fix-policy:` (`S1,S2-on`) and `fix-cap:` (2 at `single`, 10% of the
+  plan's rows at `double`). Each is the user's to set, and a plan that carries none of them takes the
+  level's default. The card prints `review rigor: single (one independent mind)` or
+  `review rigor: double (two independent minds)`, and `rigor-floor:` in `.bionic/config.yaml` takes the
+  same two words. The six older words are removed, with no alias, from the enum, the doctrine, the role
+  files and the tests. The reason is in
+  `.bionic/docs/adrs/epic-23-bionic-tech-debt/adr-049-review-is-a-decision.md`.
+- **The structure reader is retired as a role.** The role file and its template are gone, and the
+  roster in `/bionic:help` and the README no longer lists it. The critic holds `structure`. In
+  `checks-structure.md`, `reuse` and `one-site` stay checks that must be answered; `single-job`,
+  `open-closed`, `substitution`, `narrow-interface` and `dependency-direction` become findings the reader
+  may raise, beside a new one for an abstraction, parameter or indirection with one case or one caller.
+- **A finding is classed by when it is paid for.** Harm is paid by the user now and is rated S1 to S4 as
+  before. Evidence is paid by the claim now. Debt is paid by the next change that touches it, and is
+  rated by kind (`duplicate`, `unpinned-pair` or `one-case-abstraction`) and the concept it names, never
+  by severity: `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`. A debt finding is never fixed now
+  and never merely noted; its disposition is burn-when-touched.
+- **Review is one reading and one disposition.** The readers are dispatched once, when the last build
+  row has landed and the regression and the walk are on disk, and each reads the settled whole. The
+  orchestrator brings every finding to you with its rating and a recommendation (fix now, Known limit or
+  next wave), and you rule the set. A row exists only from that ruling, recorded on the row with your
+  attribution. The one row the orchestrator may make alone is an in-diff finding inside `fix-policy:` and
+  under `fix-cap:`, marked `born: review S<n> <reach>`, and it says so in the disposition. Three stop
+  rules hold whatever the policy says: a finding in code the run did not change is a next-wave item unless
+  it is S1; three fixes on one component stop the run; a fix row is never re-read by a fresh pass. Only
+  the reader that found a finding rates it: no agent, the orchestrator included, moves a rating in either
+  direction, and your re-rating is recorded with your name. The landing report prints
+  `review-born rows: <n> of cap <m>`. This closes the open question in ADR-047 decision 5, and ADR-047
+  carries the amendment.
+- **The checks files gained four clauses, and the reader exam four samples.** `checks-adversarial.md`
+  asks what untrusted input reaches the change, what it can expose, whether it fails closed and what a
+  missing dependency or an inconsistent install leaves behind, and points at the project's Known limits.
+  `checks-evidence.md` asks, per row, whether a changed condition has a test that fails when it is wrong.
+  The exam gained one sample for each of those clauses and one for over-engineering; the dealing is the
+  critic on all three questions and the auditor on `evidence`. The exam's own sittings keep that name.
+- **A docs-only landing owes no reading.** A commit whose diff touches only `CHANGELOG.md`, `README.md`,
+  `CLAUDE.md`, `.bionic/` or `.claude/rules/` is not asked for piece coverage. A commit that mixes one of
+  those with any other file still is, and `skills/` and `agents/` prose is never docs-only because agents
+  execute it.
+- **A run is an object, and it survives a `/clear`.** The Bash wall starts a suite-class command through
+  `booked.sh --detach`, which forks the whole run into a session of its own. It prints
+  `booked: started pid=<pid> log=<abs path>.log run=<id>`, writes `<log>.pid`, and ends the log with
+  `rc=<n>` on every exit. A second attempt writes `…-2.log` and never truncates the first.
+  `session-poker.sh wait <name|run id> [--for <s>]` waits on a run and exits with its code; it is
+  re-entrant, so a second wait after the first was killed finds the same run and never starts it again.
+  `stop-run <name|run id> [--report-only]` sends TERM to the run's process group and KILL to any group
+  below it still alive after five seconds. A run whose pid is gone and which wrote no end is `LOST`
+  (exit 70), never a timeout, and the test-runner role reads exit 137 as a kill unless the elapsed time
+  reached the declared limit. `adopt` prints each adopted row's run as `RUNNING pid=… elapsed=…`,
+  `FINISHED rc=…` or `LOST`. A run shows its progress while it runs: `tests/lib/assert.sh` appends one
+  line per section to `<log>.progress.tsv`, `wait` prints the last one at each poll, and the tick's
+  `RUNNING` line carries it. Close-out reports a detached run still alive as `orphan:`, and stops it
+  when it writes.
+- **The regression runs once.** `regression-runs: <n>` in the plan header is counted from the run
+  records whose command is the full runner, never typed; `session-poker.sh regression-runs [--write]`
+  prints the count and writes it, and the tick and the release card print it. A verify or test row may
+  not drop `head` from its `reads` cell, so the regression waits for every open row that writes code. The
+  timing checks that must run alone moved to a suite marked `# runner: solo`, and `tests/run.sh` hands
+  each suite an environment without `BIONIC_GATE_DIR`, so a suite no longer inherits the store of the
+  runner that started it.
+- **A proof is a fact about code.** `proof-add floor` accepts a run whose head is an ancestor of the
+  working head when the map bounds the change since, and when every suite the map names has a green stamp
+  at the working head with `rc=0` and `dirty=0`. A change the map cannot bound, or answers with the whole
+  roster, owes a full run on the new head; a moved head alone does not.
+- **Locating is not reading.** The two lines in `tests/lib/resolve-roots.sh` that locate the hooks and
+  skills directories carry `# impact: locates`, and the impact map no longer expands them to every file
+  beneath. `hooks/session-poker.sh` now answers the suites that source, copy, pin or name it (54 of the
+  85 suites then in the roster) where it answered all of them. A file nothing names answers none, and none is read as a full run. A planted-edit sweep in
+  `tests/impact.test.sh` plants one edit in every file under `hooks/` and `skills/` and requires a suite
+  the map names to go red.
+- **A landing proves in minutes.** `dispatch-preflight`, `session-poker` and
+  `canonical-sdlc-evidence-gate` are each split by section into suites with a sibling prelude, with no
+  check lost. `tests/run.sh` orders the roster longest first from `tests/timing.tsv`; a full run rewrites
+  that table only with `--write-timing`, so a default full run leaves the tree clean and its stamp reads
+  `dirty=0`. After a landing moves a checkout, `ready` warms the project's impact cache in the
+  background, so the first dispatch after a landing does not pay for a cold derivation.
+- **Step 3 renders the matrix, and Step 5 fills values.** `session-poker.sh matrix-render` writes the
+  plan's acceptance blocks from `## Eval design`, each key its tier owes set to `pending`, and adds the
+  keys a block lacks without rewriting a value. `stack-health:` and the matrix-level `walk-artifact:` lose
+  their exemption: a placeholder is refused at Step 5 once no row is open. `session-poker.sh discharge
+  <AC-id>` writes the auditor cell as the bare token `CONFIRMED`.
+- **The handoff is written by a verb.** `session-poker.sh handoff` rewrites `## Handoff` in place from the
+  plan and the machine (the heads, the open rows, the live agents with their run state, the last proof and
+  `date -u`), carrying the lines a person wrote by hand. It is never appended and never written by hand.
+- **A dependency is doubted where it is written, and a row can be split.** `task-add` and `task-set`
+  print `suspect: <id> reads <dep>, shares no file — loosen it: … task-set <id> reads=…` for a
+  declaration whose rows share no file, and accept the row; the tick's `WAIT` line carries the same
+  clause. The `CHAIN` line names the best row to split as `SPLIT? <id> — <n> min, <k> files, <m> rows wait
+  on it`. `session-poker.sh task-split <id> -- <id>:<task>:<size>:<Files>…` drops a pending row with
+  `split-into:`, adds its children with a partition of its Files, re-points every row that waited on it,
+  and writes the ledger line, as one validated transaction. `decline <ids> '<reason>' --on <row|file>`
+  records what a hand hold waits on and prints the `task-set` line that makes it a table fact.
+- **Debt is a ledger, burned when touched.** `session-poker.sh debt add <reading record>` writes each
+  debt line of a reading into `record/<run>/debt.md`, one line per item:
+  `concept | kind | sites | raised-by <record> | touches N | burned <row> | —`. `debt touched`, `debt burn`
+  and `debt list` keep it, and `debt adopt <continuation>` writes a previous run's carried items into this
+  run's ledger with their touches kept. When a writer's `Files:` covers a site of an unburned item, the
+  dispatch wall prints `debt: <concept> <kind> touches <N> — burn it in this row or say why not` and
+  counts the touch. `ready` prints `debt: burned <n>, touched <m>` between `LANDED` and the owed line,
+  and the release card prints `debt: touched <n> · burned <m>`, never the length of the ledger. Close-out
+  carries each unburned item into the continuation as
+  `debt: <concept> <kind> "<sites>" touches=<n> raised-by=<record> from=<wave>`, and the next run's Step 1
+  card lists it under Inherited deferrals.
+- **"Floor" is now "regression" in what bionic says.** The doctrine (SKILL.md, steps/5.md, dispatch.md, operational-rules.md, the role files, browser-verify), the tick's and the walls' messages, the Step-3 card and the continuation template call the full test run the regression. The verbs and keys keep their spelling until bionic2: `proof-add floor`, `floor-run`, `floor:` and `floor-attestation:` in `.bionic/config.yaml`, and `proof:floor` in a reads cell. Nothing a user types or a file carries changes.
+
+  Newly worded (no new refusal): `poker: WAIT <id> — proof:floor: the head moved past the regression proof at <head> …`; the evidence gate's `bionic: commit refused — the release head does not contain head: (run the regression on that head)`; the dispatch wall's `head <sha> is already proved (keep the regression proof; run nothing)`.
+
+  Known limit: a few code comments outside the shipped doctrine still say floor for the full run (lib/worktree.sh, lib/fill.sh, lib/brief.sh, scripts/spawn-worktree.sh); no message does.
+- **For contributors.** The execution recorder's two stale pins follow the wall's `--detach` arm and the
+  cap the context files now carry. The shard suites keep their check counts, and the roster has 94 suites.
+
+Newly refused:
+
+- A plan or spec whose `rigor:` is any of the six older words, or any other word:
+  `bionic: write refused — that rigor is not single or double (pick an allowed rigor)`.
+- A header field outside its vocabulary:
+  `bionic: write refused — a fix-policy word is no rating (S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4)`,
+  `bionic: write refused — this fix-policy names no rating (S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4)`,
+  `bionic: write refused — that review-cadence is not once (use once)`,
+  `bionic: write refused — that fix-cap is no count (a whole number, or a percent)`.
+- A brief that names the retired role:
+  `bionic: dispatch refused — bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)`.
+- A fourth fix on one component, and a review-born row outside the fix policy or over the cap, which
+  `task-add --born 'review S<n> <on|off>'` refuses with the plan unchanged:
+  `poker: task-add refused — a fourth fix on <path>: <rows> already fix it; stop the run (AC-10.2)`.
+- A verify or test row whose `reads` cell drops `head`, refused by the evidence gate's ledger check:
+  `<id>: reads <cell> drops head; a <verify|test> row must read head (its default approval:plan, head waits on every open row that writes code)`.
+- `proof-add floor` for a run whose head is an ancestor of the working head when the change since is
+  bounded but a suite the map names has no green run at the working head:
+  `the run in <ev> read head <sha12>, and <n commits> landed since, to the working head <sha12>; the map bounds the change to <suites>, and no green run at <sha12> is recorded for: <suites>. Run each of those suites on <sha12>, then proof-add floor again`.
+- `task-split` on a row that is not pending:
+  `poker: REFUSED — <id> is <status>; task-split rewrites a pending row only. The plan is unchanged.`
+- A reading's debt line that carries a severity or reach, a kind off the table, no site, or a site that is
+  not `<path>:<line>`: `the reading <record> rates its debt line (<line>) with '<token>', and debt is rated by kind and concept, never by severity or reach; write debt: <kind> <concept> <path>:<line>[, <path>:<line>]`.
+- Step 1 over a newest continuation whose `debt:` line does not parse:
+  `card.sh: step1 refused — the newest continuation carries a debt: line that does not parse`.
+- `tests/run.sh --write-timing` with `--only` or `--dry-run`:
+  `tests/run.sh: --write-timing needs a full run; it is refused with --only and with --dry-run`.
+
+Upgrade, for a plan already in flight:
+
+- Edit the plan's `rigor:` line to `single` or `double` by the migration above, and its ledger rigor
+  cells with it. A plan without `review-cadence:`, `fix-policy:` or `fix-cap:` is admitted and takes the
+  level's defaults. `regression-runs --write` refuses a plan with no `regression-runs:` line in its header, so add
+  `regression-runs: 0` first.
+- A brief written for `bionic:reviewer` names `bionic:critic` instead, and its `Questions:` line is the
+  set the plan's rigor deals the critic.
+- Nothing is renamed in a file you carry: `floor:` and `floor-attestation:` in `.bionic/config.yaml`,
+  `proof-add floor` and `floor-run` keep their spelling.
+- The Patrol prompt stays at version 6; there is nothing to re-arm.
+
+Fixes:
+
+- The first dispatch after a landing is no longer refused for a cold derivation. The dispatch wall's
+  bound on the project's impact command is 20 seconds, its registration 25 and its own deadline 22 (they
+  were 10, 15 and 12), because a cold derivation took 8.5 to 10.3 seconds on an idle machine and more
+  under load; `ready` also warms the cache after a landing moves a checkout.
+- `proof-add floor`'s refusal is no longer cut at 400 characters, which had dropped the list of suites it
+  asks you to run.
+- A suite run by `tests/run.sh` no longer inherits `BIONIC_GATE_DIR`, so a runner started under a leaked
+  store no longer reports a stale timing bound as a failure.
+- A full run leaves `tests/timing.tsv` as it found it unless `--write-timing` is given, so its stamp
+  reads `dirty=0` and `proof-add floor` accepts it.
+- The finding and debt line grammars in `payload/context/severity.md` and `steps/6.md` state the
+  `<path>:<line>|-` alternation as a choice with an example. A reader that copied it whole wrote a line
+  the parser refused, and the exam scored that as a miss.
+
+Known limits, carried to the next release:
+
+- Known limit: the 1.13.0 limits that this entry does not restate stand as written there.
+- Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not
+  the scale; readers holding a code question, and the exam's readers, grade by the scale (Known limit 71
+  of 1.13.0, restated).
+- Known limit: `ready` holds a `landing` admission while it proves a row but does not export it as
+  `BIONIC_GATE_ADMIT`, so a suite that drives the real runner under `ready` asks the gate again, and that
+  nested ask has no bound (Known limit 72 of 1.13.0, its workaround corrected). Pointing the gate store at
+  a throwaway directory does not work around it: in an empty store the nested ask waits on the unfinished
+  landing admission, which waits on it, and exits 75. Land such a row by hand with
+  `land <tree> --by-hand --reason '<why>'`, or prove it with `BIONIC_GATE_ADMIT` exported from the landing
+  admission or one seeded cost record in the store.
+- Known limit: an evidence verdict's `result` moves with rigor (Known limit 74 of 1.13.0, with its missing
+  clause). At `single` the critic holds `evidence` with the severity scale: a REFUTED rated S3 or S4
+  registers `flag`, and so does an S2-off REFUTED. At `double` the auditor holds `evidence` without the
+  scale, so the same REFUTED registers `fail`; the auditor limit above is the reason.
+- Known limit: `tests/impact.test.sh` §F, which is opt-in and outside the gating roster, proves nothing
+  at this release. Its roster read matches no line of `tests/run.sh` because the runner derives its roster
+  from the tests directory, so it reports `roster: 0 suites` and its complement never runs for any file
+  class. Its plant of `tests/run.sh` also fails, because the witness it names stays green. The gating
+  sweep in the same suite is the proof of the map; §F is not.
+- Known limit: a detached run whose command waits on a gate that never admits has no ceiling of its own.
+  The caller's timeout, `wait --for` and `stop-run` are the bounds.
+- Known limit: the background warm that `ready` starts after a landing has no ceiling, so a hung impact
+  command leaves a background process behind; and it is live only once the installed plugin carries it, so
+  the landing that ships it does not warm.
+- Known limit: the tick does not name a starved queue (pending rows, room at the gate and nothing ready
+  for two ticks) and does not require an answer per held row. One earlier run's record showed no such turn
+  in 573 turn ends, so it was not built; a held row is answered by `task-set`, `task-split` or
+  `decline --on`.
 
 ## 1.13.0 — 2026-10-07
 

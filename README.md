@@ -102,6 +102,13 @@ list, a design interview run one question per turn, and a single approval coveri
 design, the plan and the verification matrix together. Steps 4 onward run unattended and stop
 at anything only you can decide.
 
+Review is one decision, made at Step 6. The readers read the settled whole once and rate every
+finding, and the orchestrator brings the set to you in the review findings disposition, where
+you rule each finding: fix now, Known limit or next wave. The orchestrator makes a fix row on
+its own only for a finding inside the plan's `fix-policy:` (by default an S1, or an S2 a user
+meets) in code the run changed, and only up to `fix-cap:` rows. A finding that is debt, such as
+a second copy of a concept, goes to a ledger and is burned when a later task touches it.
+
 Use it when the change is large enough that you would want a spec, a plan, and a record of
 what was verified. Chores and documentation stay out — and so do document and research
 deliverables like writeups and research reports, which plain plan mode serves better than any
