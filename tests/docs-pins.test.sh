@@ -2071,7 +2071,7 @@ card3_shape() {  # <card text on stdin> -> each section heading's first word, ar
        pw && /^    batch / { print "batch" }'
 }
 SHAPE_PLAN="$TMP/wave-97-shape.plan.md"
-printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: audited' \
+printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: double' \
   'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' \
   'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' \
   'spec: specs/epic-97/wave-97-shape.spec.md' '---' '' \
@@ -2246,8 +2246,29 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # rather than drop the label from a role file the AC names, or touch a template outside T3's
 # declared Files to trim further; logged as A-T3.3 in record/wave-16-fixit-183/assumptions.md.
 
+#
+# ROLE_TOTAL_CAP RAISED 26,400 -> 26,520 (epic-23 wave-30 T12, A-T12.12, REQ-3 AC-3.3): the
+# test-runner's Bounds gain one sentence the AC names in that role file ("Exit 137 is a kill, not a
+# timeout, …"), 139 B rendered at its shortest; the measured total is 26,517 B against 21 B of
+# headroom the last raise left. Same ratchet, same reason: the sentence belongs to the role.
+
+#
+# ROLE_TOTAL_CAP RAISED 26,520 -> 27,000 (wave-30 T23, A-T23.5; A-orch-57, Chris 2026-10-09: a byte cap
+# never prevents a strong rule from being memorialized): the implementor and senior-implementor roles
+# gain the writer's side of the inbox, one bullet of implementor-mechanics (240 B rendered in each);
+# the measured total is 26,997 B. Same ratchet, same reason: the sentence belongs to the writer roles.
+
+# ROLE_TOTAL_CAP RAISED 26,520 -> 27,000 (epic-23 wave-30 T19, A-T19.10, A-orch-56): the critic's role file gains the
+# three stop rules AC-2.2 names in `agents/critic.md` and its dealing (366 B), the auditor's one sentence (68 B); the
+# measured total is 26,951 B. The reviewer's file leaves with T20, which frees about 3 KB of this total.
+# MERGED (wave-30 T23 over T19, A-T23.17): the two raises were each measured without the other; with both rows'
+# sentences the measured total was 27,431 B, so the cap was 27,500 B until T20's deletion freed the reviewer's file.
+#
+# ROLE_TOTAL_CAP LOWERED 27,500 -> 26,520 (epic-23 wave-30 T20, A-T20.6, A-orch-63): the reviewer role file is deleted
+# (AC-1.6); the six role files measure 24,293 B with T19's and T23's sentences both in, so the raises are taken back to
+# the cap before them.
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=26400
+ROLE_TOTAL_CAP=26520
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -2543,18 +2564,33 @@ for _n in 0 1 2 3 4 5 6 7 8 9; do
     "${SPLIT_SKILL_DIR}/steps/${_n}.md" 14000
 done
 
+# Raised 35,000 -> 35,500 B at wave-30 T9 (A-T9.8): the one no-store paragraph (248 B, REQ-4 AC-4.2) left 17 B of headroom.
 le_cap "113: AC-1b.3 — the dispatch reference is at or under its cap (fails-when: the dispatch body grows back)" \
-  "$SPLIT_DISPATCH" 35000
+  "$SPLIT_DISPATCH" 35500
 
 # steps/4.md's own cap — the no-new-Step-4-prose wall (REQ-1b: "No new Step-4 prose is
 # authored: the dispatch reference serves Step 4").
 le_cap "114: AC-1b.2 — steps/4.md is a pointer, not a step file (fails-when: Step-4 prose is authored into it)" \
   "${SPLIT_SKILL_DIR}/steps/4.md" 1024
 
+# Raised 110,000 -> 114,100 B at wave-30 T19 (A-T19.1, A-orch-56; Chris 2026-10-09: a byte cap never prevents a strong
+# rule from being memorialized). Measured total at the raise: 112,502 B (core 22,060 + dispatch 35,226 + steps 55,216).
+# Reason: doctrine added by design, the review findings disposition and the three stop rules in steps/6, the three header fields in steps/0,
+# the debt adoption in steps/1, the classes and the rigor paragraph in SKILL.md. The 1,500 B above the measure is T23's.
 # The total the model is told to read. operational-rules.md is excluded by AC-1b.4's own
 # wording — nothing tells the model to read it, and it is not part of this budget.
 SPLIT_TOTAL=0
 SPLIT_TOTAL_MISSING=""
+# RAISED 110,000 -> 113,420 B (wave-30 T23, A-T23.5; A-orch-56, Chris 2026-10-09: a byte cap never prevents a
+# strong rule from being memorialized). The regression word is twice floor's length, and steps/5.md now names
+# the Verify step's verbs (matrix-render, discharge, wait, stop-run, regression-runs, the bounded head) and
+# dispatch.md the writer inbox. Measured total at T23's render: 111,420 B; plus 2,000 B left for T19.
+# MERGED (wave-30 T23 over T19, A-T23.17): the larger cap stands, T19's 114,100 B; the measured total with both
+# rows' text is 113,944 B.
+# RAISED 114,100 -> 114,200 B (wave-30 T38, A-T38.1; A-orch-14 precedent): the Step-6 event is renamed from the one-word 'sitting'
+# to 'review findings disposition' (A-orch-84, Chris 2026-10-09), full name once per document, 'the disposition' after. The
+# rename adds 87 B across SKILL.md, dispatch.md and steps/6.md (114,024 -> 114,111 B); doctrine is never shortened to fit.
+SPLIT_TOTAL_CAP=114200
 for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
           "${SPLIT_SKILL_DIR}"/steps/0.md "${SPLIT_SKILL_DIR}"/steps/1.md \
           "${SPLIT_SKILL_DIR}"/steps/2.md "${SPLIT_SKILL_DIR}"/steps/3.md \
@@ -2566,12 +2602,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 110000 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B ($SPLIT_TOTAL B ≤ 110000 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under ${SPLIT_TOTAL_CAP} B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le "$SPLIT_TOTAL_CAP" ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under ${SPLIT_TOTAL_CAP} B ($SPLIT_TOTAL B ≤ ${SPLIT_TOTAL_CAP} B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110000)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under ${SPLIT_TOTAL_CAP} B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - SPLIT_TOTAL_CAP)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -3438,10 +3474,12 @@ expect_eq "155: AC-3.1 — dispatch.md carries no 'TaskCreate fresh copies' text
 # rises above 34,993", so strictly-under is the passing direction and equal-to is a miss
 # (a render that dropped the prose but re-added equal bytes elsewhere would not be a cut).
 DISPATCH_BYTES_156="$(wc -c < "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
-if [ -n "$DISPATCH_BYTES_156" ] && [ "$DISPATCH_BYTES_156" -lt 34993 ] 2>/dev/null; then
-  ok "156: AC-3.1 — dispatch.md is smaller than its 34,993 B pre-cut baseline ($DISPATCH_BYTES_156 B < 34993 B)"
+# WAVE-30 T9 (A-T9.8): the ceiling moved 34,993 -> 35,500 B for the one no-store paragraph (248 B, REQ-4 AC-4.2);
+# a disposition item beside A-orch-14 (2). The brake it still is: dispatch.md may not grow past 35,500 B.
+if [ -n "$DISPATCH_BYTES_156" ] && [ "$DISPATCH_BYTES_156" -lt 35500 ] 2>/dev/null; then
+  ok "156: AC-3.1 — dispatch.md is smaller than its 35,500 B ceiling (wave-30 T9; was 34,993 B) ($DISPATCH_BYTES_156 B < 35500 B)"
 else
-  no "156: AC-3.1 — dispatch.md is smaller than its 34,993 B pre-cut baseline" \
+  no "156: AC-3.1 — dispatch.md is smaller than its 35,500 B ceiling (wave-30 T9; was 34,993 B)" \
      "${DISPATCH_BYTES_156:-unreadable} B"
 fi
 
@@ -4865,7 +4903,7 @@ W26_LINE="$(/usr/bin/grep -o '`- T[0-9][0-9]*: [^`]*`' "$W26_STEP4" 2>/dev/null 
 expect_nonempty "W26-10: AC-4.2 — steps/4.md carries a one-line \`- T<n>:\` example" "$W26_LINE"
 expect_true "W26-10a: …of 80 characters or fewer" test "${#W26_LINE}" -le 80 -a "${#W26_LINE}" -gt 0
 expect_eq "W26-10b: …that the commit gate's shape check accepts" "yes" "$(w26_shaped "${W26_LINE#*: }")"
-expect_true "W26-10c: …and that names the auditor verdict a done row owes at peer-reviewed rigor" \
+expect_true "W26-10c: …and that names the auditor verdict a done row owes at double rigor" \
   /usr/bin/grep -Ewq 'auditor' <<< "$W26_LINE"
 expect_eq "W26-10m: a prose line is refused by the same check (the check discriminates)" "no" \
   "$(w26_shaped 'done, all green')"
@@ -5017,16 +5055,18 @@ expect_nonempty "W27-42mp precondition: the doctored copy still carries the owne
 W27_CHECKS_DIR="${REPO}/payload/context"
 W27_STRUCT="${W27_CHECKS_DIR}/checks-structure.md"
 W27_QUESTIONS="evidence adversarial structure"
-W27_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction"
-W27_CAP=4650  # 4,500 until wave-28 T48 (A-orch-43): the structure checks say when a check is FAIL
+W27_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction over-engineering"
+W27_CAP=5000  # 4,500 until wave-28 T48 (A-orch-43); 4,650 until wave-30 T4 (A-T4.1): the security
+              # clause, the per-row power line and the may-raise section with over-engineering
 W27_WHOLE='this is not a second read of each piece'
 # w27_ids_in <file> -> the structure check ids the file names as whole words, one per line.
 w27_ids_in() {
   local id
   for id in $W27_IDS; do _flatten "$1" | grep -qwF -- "$id" && printf '%s\n' "$id"; done
 }
-# w27_check_line <file> <id> -> the file's check line for the id, in the interface form.
-w27_check_line() { grep -F -- "- **$2** — " "$1" 2>/dev/null | head -1; }
+# w27_check_line <file> <id> -> the file's check line for the id, in the interface form: `- **<id>** — `
+# for a check that must be answered, `- `<id>` — ` for one the reader may raise (wave-30 T4).
+w27_check_line() { grep -F -e "- **$2** — " -e "- \`$2\` — " "$1" 2>/dev/null | head -1; }
 # w27_cap_verdict <file> -> "within" when the file is at most the cap, "over" when past it or unreadable.
 w27_cap_verdict() {
   local n; n="$(wc -c < "$1" 2>/dev/null | tr -cd '0-9')"
@@ -5058,13 +5098,13 @@ for _q in $W27_QUESTIONS; do
   expect_eq "W27-T8d: …and the file ends with the record form, every line in order" \
     "$(w27_form_want "$_q")" "$(w27_record_form "$_f")"
 done
-# W27-T8bm: the cap verdict T8b reads, at the boundary. The sizes are the Interfaces table's
-# 4,650 bytes typed here, not read from W27_CAP, so a raised cap or a removed check goes red.
+# W27-T8bm: the cap verdict T8b reads, at the boundary. The sizes are the cap's 5,000 bytes
+# (wave-30 T4, A-T4.1) typed here, not read from W27_CAP, so a raised cap or a removed check goes red.
 W27_AT_CAP="$TMP/w27-at-cap.md"; W27_PAST_CAP="$TMP/w27-past-cap.md"
-head -c 4650 /dev/zero | tr '\0' 'x' > "$W27_AT_CAP"
-head -c 4651 /dev/zero | tr '\0' 'x' > "$W27_PAST_CAP"
-expect_eq "W27-T8bm precondition: a file of exactly 4,650 bytes reads within the cap" "within" "$(w27_cap_verdict "$W27_AT_CAP")"
-expect_eq "W27-T8bm: a file of 4,651 bytes, one past the cap, is caught" "over" "$(w27_cap_verdict "$W27_PAST_CAP")"
+head -c 5000 /dev/zero | tr '\0' 'x' > "$W27_AT_CAP"
+head -c 5001 /dev/zero | tr '\0' 'x' > "$W27_PAST_CAP"
+expect_eq "W27-T8bm precondition: a file of exactly 5,000 bytes reads within the cap" "within" "$(w27_cap_verdict "$W27_AT_CAP")"
+expect_eq "W27-T8bm: a file of 5,001 bytes, one past the cap, is caught" "over" "$(w27_cap_verdict "$W27_PAST_CAP")"
 # W27-T8dm: the record form cut, reordered, or followed by another section is caught.
 W27_FORM_CUT="$TMP/w27-form-cut.md"; W27_FORM_SWAP="$TMP/w27-form-swap.md"; W27_FORM_TAIL="$TMP/w27-form-tail.md"
 anchor "$W27_STRUCT" 'scope: <piece|whole>' 1
@@ -5085,8 +5125,8 @@ for _id in $W27_IDS; do
   expect_contains "W27-T8f: …and its line names the case it fails on" "Fails when " "$_line"
 done
 W27_NOFAIL="$TMP/w27-nofail.md"
-anchor "$W27_STRUCT" '- **single-job** — ' 1
-sed '/^- \*\*single-job\*\* — /s/Fails when /Wrong when /' "$W27_STRUCT" > "$W27_NOFAIL" 2>/dev/null
+anchor "$W27_STRUCT" '- `single-job` — ' 1
+sed '/^- `single-job` — /s/Fails when /Wrong when /' "$W27_STRUCT" > "$W27_NOFAIL" 2>/dev/null
 expect_nonempty "W27-T8fm precondition: the doctored copy still has the single-job line" \
   "$(w27_check_line "$W27_NOFAIL" single-job)"
 expect_absent "W27-T8fm: a single-job line with no failing case is caught" \
@@ -5156,7 +5196,7 @@ expect_nonempty "W27-T8k2m: a checks-adversarial.md that hands over the notes ag
 # none of their text (the role-file half of §W27-32); each injects the three shared reader blocks
 # and disallows Write, Edit, NotebookEdit and Agent. The absence sits beside the pointer on the
 # same file, and a real render of a critic template that injects a checks block again goes red.
-W27_READERS="auditor critic reviewer"
+W27_READERS="auditor critic"
 W27_POINTER='Checks: payload/context/checks-<question>.md'
 # w27_check_text_in <file> -> what of a check list the file carries, one item per line: a checks
 # or critic-template marker, a checks file's opening sentence, or a structure check line.
@@ -5406,10 +5446,10 @@ section "Section W27-T17: wave-27 T17 — the doctrine says the dealing, inside 
 W27D_SKILL="${SPLIT_CORE}"
 # w27d_rigor_intro <SKILL.md> -> the text from the `**rigor**` line to the table's header, flattened
 w27d_rigor_intro() {
-  awk '/^\*\*rigor\*\*/ { on = 1 } on && /^\| Rigor \|/ { exit } on { printf "%s ", $0 }' "$1" 2>/dev/null
+  awk '/^\*\*rigor\*\*/ { on = 1 } on && /^\| \| `single` \|/ { exit } on { printf "%s ", $0 }' "$1" 2>/dev/null
 }
-# w27d_rigor_header <SKILL.md> -> the rigor table's header line
-w27d_rigor_header() { /usr/bin/grep -m1 '^| Rigor |' "$1" 2>/dev/null; }
+# w27d_rigor_header <SKILL.md> -> the rigor table's header line (levels as columns, wave-30 T11)
+w27d_rigor_header() { /usr/bin/grep -m1 '^| | `single` |' "$1" 2>/dev/null; }
 
 # §W27-1 (AC-1.1): four questions, rigor by readers.
 W27D_INTRO="$(w27d_rigor_intro "$W27D_SKILL")"
@@ -5417,8 +5457,8 @@ expect_nonempty "W27-1 precondition: the extractor reads SKILL.md's rigor paragr
 for _q in 'does it do what was asked' '`evidence`' '`adversarial`' '`structure`'; do
   expect_contains "W27-1: AC-1.1 — the rigor table is preceded by the question ${_q}" "$_q" "$W27D_INTRO"
 done
-expect_eq "W27-1b: …and its columns are the readers and who holds which question" \
-  '| Rigor | Independent readers | Who holds which question |' "$(w27d_rigor_header "$W27D_SKILL")"
+expect_eq "W27-1b: …and its columns are the two levels (wave-30 T11, REQ-1)" \
+  '| | `single` | `double` |' "$(w27d_rigor_header "$W27D_SKILL")"
 expect_absent "W27-1c: …with no skipped column" 'skip' "$(w27d_rigor_header "$W27D_SKILL")"
 expect_eq "W27-1d: steps/6.md orders no review by axis" "" \
   "$(w26_hits 'axis' "$STEP6_MD"; w26_hits 'Axis' "$STEP6_MD")"
@@ -5492,7 +5532,7 @@ expect_nonempty "W27-102m: an operational-rules.md that still says the critic ca
 # Item 1 (A-orch-43): a reader writes one file, its record; the tool ban stays (§W27-T11c).
 # Corrected by the review of T11 (F2): one record per question dealt, since the verb reads one
 # `question:` per record.
-for _r in auditor critic reviewer; do
+for _r in auditor critic; do
   expect_nonempty "W27-T17-1: agents/${_r}.md says the reader writes one record per question" \
     "$(w26_hits 'You write one record per question you are dealt, through the shell, and no other file' "${REPO}/agents/${_r}.md")"
   expect_eq "W27-T17-1b: …and no longer that it writes no files, or one file" "" \
@@ -5529,12 +5569,14 @@ expect_nonempty "W27-T17-5: dispatch.md says a Files: line is a comma-separated 
 expect_nonempty "W27-T17-5b: …an extensionless root file as ./NAME, a note after a trailing #, none alone" \
   "$(w26_hits 'spell a root file with no extension as `./Makefile`, put any note after a trailing `#`, and write `none` alone for no files' "$DISPATCH_MD")"
 # The roles sentence and the read rows: the three readers and one read row per question.
-for _r in auditor critic reviewer; do
+for _r in auditor critic; do
   expect_nonempty "W27-T17-6: dispatch.md's roles sentence names the reader \`${_r}\`" \
     "$(w26_hits "\`${_r}\`" "$DISPATCH_MD")"
 done
-expect_nonempty "W27-T17-6b: Review follows the build names a read row per question" \
-  "$(w26_hits 'live:head:<q>' "$DISPATCH_MD")"
+# RE-POINTED (wave-30 T19, P1): review is one review findings disposition, so the paragraph names one read row per reader,
+# `reads: approval:plan, head`, in place of a row per question reading each landed difference.
+expect_nonempty "W27-T17-6b: Review follows the build names a read row per reader, ready at the settled head" \
+  "$(w26_hits 'one read row per reader the rigor deals, `reads: approval:plan, head`' "$DISPATCH_MD")"
 # Item 8 (A-orch-13): the commit gate's hook is bash-walls.sh; the deleted name is gone.
 expect_nonempty "W27-T17-8 precondition: the operational rules name the commit gate's hook" \
   "$(w26_hits 'bash-walls.sh' "$W27D_OPS")"
@@ -5639,7 +5681,7 @@ case "$W27T53_N" in 6) W27T53_W=six ;; 7) W27T53_W=seven ;; 8) W27T53_W=eight ;;
 expect_nonempty "W27-T53-S4 precondition: agents/ holds role files" "$([ "$W27T53_N" -gt 0 ] && echo yes)"
 expect_nonempty "W27-T53-S4: README names as many subagent roles as agents/ holds ($W27T53_W)" \
   "$(w26_hits "$W27T53_W subagent roles" "${REPO}/README.md")"
-for _r in auditor critic reviewer; do
+for _r in auditor critic; do
   _row="$(/usr/bin/grep -m1 "^| \`${_r}\` |" "${REPO}/README.md")"
   expect_contains "W27-T53-S4b: README's ${_r} row says it writes its own record" \
     'Read-only on tracked files; writes its own record through the shell.' "$_row"
@@ -5748,15 +5790,15 @@ expect_nonempty "W27-T60-S1 precondition: hooks.json registers more than one tim
 expect_eq "W27-T60-S1: hook-chain.svg's header says each timeout hooks.json registers" "" \
   "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJ")"
 W27T60_HCT="$TMP/w27t60-timeout.svg"
-sed 's/; <tspan[^>]*>dispatch-preflight\.sh<\/tspan> runs with <tspan[^>]*>timeout: 15<\/tspan>//' "$W27T53_HC" > "$W27T60_HCT" 2>/dev/null
+sed 's/; <tspan[^>]*>dispatch-preflight\.sh<\/tspan> runs with <tspan[^>]*>timeout: 25<\/tspan>//' "$W27T53_HC" > "$W27T60_HCT" 2>/dev/null
 expect_nonempty "W27-T60-S1m precondition: the doctored header still reads" \
   "$(/usr/bin/grep -m1 'Every entry is rooted at' "$W27T60_HCT")"
 expect_contains "W27-T60-S1m: …and a header that says every entry runs with 10 is caught" \
-  "dispatch-preflight.sh timeout 15 not said" "$(w27t60_timeout_gaps "$W27T60_HCT" "$W27T60_HJ")"
+  "dispatch-preflight.sh timeout 25 not said" "$(w27t60_timeout_gaps "$W27T60_HCT" "$W27T60_HJ")"
 W27T60_HJD="$TMP/w27t60-hooks.json"
 jq '(.hooks[][] | .hooks[] | select(.command | test("dispatch-preflight")) | .timeout) |= 10' "$W27T60_HJ" > "$W27T60_HJD" 2>/dev/null
-expect_contains "W27-T60-S1n: …and so is a hooks.json that no longer registers the 15 the header says" \
-  "timeout 15 said, none registered" "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJD")"
+expect_contains "W27-T60-S1n: …and so is a hooks.json that no longer registers the 25 the header says" \
+  "timeout 25 said, none registered" "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJD")"
 # S2: the commit wall reads no head (walls.sh _eg_reading_gaps); which head a fact covers is
 # current 8's to judge. It refuses a newest failing reading and an open declared red too
 # (walls.sh, the two Step-6 refusals; review pass 51 S1).
@@ -5900,7 +5942,16 @@ expect_nonempty "W28-71 precondition: CHANGELOG.md carries a 1.13.0 entry" "$W28
 expect_nonempty "W28-71 precondition: the 1.13.0 heading line reads" "$W28_71_HEAD"
 expect_regex "W28-71a: the 1.13.0 entry is dated (the day it is cut)" \
   '^## 1\.13\.0 — 20[0-9]{2}-[0-9]{2}-[0-9]{2}$' "$W28_71_HEAD"
-expect_eq "W28-71b: …and it is the newest entry" "1.13.0" "$(changelog_head_version "${REPO}/CHANGELOG.md")"
+# W28-71b reads the 1.13.0 entry against the newest heading without naming the newest: a later release
+# cut above it must not turn this red, and SEMVER-6 already owns "newest == plugin.json's version".
+# w28_71_head_ok <newest> -> true when <newest> is 1.13.0 or a later x.y.z (numeric, field by field).
+w28_71_head_ok() { awk -v h="$1" 'BEGIN { n = split(h, a, "."); if (n != 3) exit 1;
+  split("1.13.0", b, "."); for (i = 1; i <= 3; i++) { if (a[i] + 0 > b[i] + 0) exit 0; if (a[i] + 0 < b[i] + 0) exit 1 } exit 0 }'; }
+W28_71_NEWEST="$(changelog_head_version "${REPO}/CHANGELOG.md")"
+expect_true "W28-71b: …and it is the newest entry or a later release has been cut above it" w28_71_head_ok "$W28_71_NEWEST"
+expect_true "W28-71b2: …and a later head (1.14.0) still reads as ok (the pin does not name the newest)" \
+  w28_71_head_ok "1.14.0"
+expect_false "W28-71b2m: …and a head older than 1.13.0 is caught (pin discriminates)" w28_71_head_ok "1.12.9"
 expect_contains "W28-71c: the entry says it is a minor release" "This is a minor release" "$W28_71_J"
 expect_contains "W28-71c2: …and that the contract version stays 14" '`canonical_sdlc_version` stays 14' "$W28_71_J"
 expect_contains "W28-71d: a run open at upgrade continues on its 1.12.0 plan with no edit (D26)" \
@@ -5983,8 +6034,13 @@ w28_71_fix_gaps() {
     w28_71_runs "$quote" | while IFS= read -r run; do
       [ -n "$run" ] || continue
       esc="$(printf '%s' "$run" | sed 's/"/\\"/g')"
+      # THE REGRESSION WORD (wave-30 T23; D10): 1.14.0 renamed "floor" meaning the full run to
+      # "regression" in the messages, so a 1.13.0 quote saying "the floor …" or "its floor is …" is
+      # matched by that one word renamed, and nothing else in it.
+      ren="$(printf '%s' "$run" | sed -E 's/(^|[^A-Za-z])(the|its) floor /\1\2 regression /g')"
       { /usr/bin/grep -rqF -- "$run" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib" \
-        || /usr/bin/grep -rqF -- "$esc" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib"; } \
+        || /usr/bin/grep -rqF -- "$esc" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib" \
+        || /usr/bin/grep -rqF -- "$ren" "${REPO}/hooks" "${REPO}/payload/scripts" "${REPO}/tests/lib"; } \
         || echo "not printed by the code: $run (bullet $n)"
     done
   done
@@ -6001,6 +6057,10 @@ expect_contains "W28-71tm2: …a run after a placeholder is pinned (a quote the 
 W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed 's/the Step 9 block/the Step 9a block/')"
 expect_contains "W28-71tm3: …and a name that is one letter off is caught" \
   "not printed by the code: the Step 9a block is close-out's to write (scripts/close-out.sh). (bullet 18)" "$(w28_71_fix_gaps "$W28_71_DOC")"
+W28_71_DOC="$(printf '%s\n' "$W28_71_E" | sed 's/its floor is tests\/run.sh, whose log/its floor is tests\/run.sh, whose own log/')"
+expect_contains "W28-71tm4: …and the renamed-word fold matches that word only, so a quote off by another word is caught" \
+  "not printed by the code: this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose own log proof-add floor reads. Nothing was run." \
+  "$(w28_71_fix_gaps "$W28_71_DOC")"
 W28_71_NB="$(printf '%s\n' "$W28_71_E" | awk '/^Newly refused/{ p = 1; next } p && /^[A-Z][^ ]*[^:]*:$/{ exit } p && /^- /{ n++ } END { print n + 0 }')"
 W28_71_NQ="$(w28_71_quotes "$W28_71_E" | cut -f1 | sort -u | wc -l | tr -d ' ')"
 expect_regex "W28-71t0 precondition: the part has bullets" '^[1-9][0-9]*$' "$W28_71_NB"
@@ -6107,13 +6167,13 @@ expect_nonempty "W28-71D5: an agent no roster holds is stopped as unrostered, on
 expect_nonempty "W28-71D6: the plan-verb list carries step-field, and current 4 records the share" \
   "$(w26_hits '`step-field <N> <key>=<value>`, `current <N>` (at 4 on a wave it records `share: <n>`)' "$DISPATCH_MD")"
 expect_nonempty "W28-71D6b: …and floor-run, which writes no plan" \
-  "$(w26_hits '`floor-run` runs the declared floor and writes no plan.' "$DISPATCH_MD")"
+  "$(w26_hits '`floor-run` runs the declared regression and writes no plan.' "$DISPATCH_MD")"
 expect_nonempty "W28-71D10: steps/5.md teaches the declared floor's log and the attestation record" \
   "$(w26_hits 'runs it with `session-poker.sh floor-run` and records that log the same way: it opens `head=<40-hex> dirty=<n> rc=<n>` and is judged by that line alone.' "${SKILL_DIR}/steps/5.md")"
 expect_nonempty "W28-71D10b: …and the attestation file's two lines" \
   "$(w26_hits 'a `head=<40-hex> dirty=0` line and a `floor-attested-by: <who> <when> <what ran>` line.' "${SKILL_DIR}/steps/5.md")"
 expect_nonempty "W28-71D11: SKILL.md's artifact layout names the floor keys beside the config file" \
-  "$(w26_hits '`release-check:`, and `floor: <command>` or `floor-attestation: user` # when a project'"'"'s floor is not tests/run.sh' "${SKILL_DIR}/SKILL.md")"
+  "$(w26_hits '`release-check:`, and `floor: <command>` or `floor-attestation: user` # when a project'"'"'s regression is not tests/run.sh' "${SKILL_DIR}/SKILL.md")"
 expect_nonempty "W28-71D7: the tick's landings line sits above the decision line" \
   "$(w26_hits 'a changed tick prints `poker: landings: …` above the decision line' "$DISPATCH_MD")"
 expect_nonempty "W28-71D8: steps/6.md teaches the check, the move and the one-pass rule" \
@@ -6143,7 +6203,7 @@ expect_eq "W28-71D9b: …and dispatch.md no longer carries the one it cut" "" \
 # extractor, and a doctored copy proves each arm goes red. HERMETIC: committed finals by path.
 W28S_BLOCK="${BLOCK_DIR}/severity.md"
 W28S_FILE="${REPO}/payload/context/severity.md"
-W28S_CAP=2700
+W28S_CAP=5100  # 4,200 until wave-30 T36 (A-T36.1, A-orch-78): the finding line in two site forms and the debt line in two, each with an example, measured 5,027 B; 2,700 until wave-30 T4 (A-T4.2): the debt table sits beside the harm table; 3,700 until wave-30 T19 (A-T19.2, A-orch-56): only-readers-rate and the three stop rules, measured 4,141 B
 W28S_POINTER='Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.'
 W28S_AGE='Age does not lower a rating. Say "older than the reviewed range" beside it.'
 W28S_SPEC=""
@@ -6191,12 +6251,17 @@ w28s_finding_form() {
 }
 
 expect_true "W28-S0: payload/context/severity.md is rendered and non-empty" test -s "$W28S_FILE"
-expect_eq "W28-S1: AC-8.2 — the scale's block is the spec's \"The severity scale\", word for word" \
-  "$W28S_SPEC" "$(cat "$W28S_BLOCK" 2>/dev/null)"
+# RE-POINTED (wave-30 T4; AC-11.1, A-T4.2): the block OPENS with the spec's scale, word for word,
+# and the debt table follows it (§W30-DEBT-TABLE); w28s_harm reads the opening as many lines as the
+# spec has.
+W28S_SPEC_LINES="$(printf '%s\n' "$W28S_SPEC" | awk 'END { print NR }')"
+w28s_harm() { head -n "$W28S_SPEC_LINES" "$1" 2>/dev/null; }
+expect_eq "W28-S1: AC-8.2 — the scale's block opens with the spec's \"The severity scale\", word for word" \
+  "$W28S_SPEC" "$(w28s_harm "$W28S_BLOCK")"
 W28S_DOC1="$TMP/w28s-reworded.md"
 sed 's/the tables decide/the brief decides/' "$W28S_BLOCK" > "$W28S_DOC1" 2>/dev/null
 expect_contains "W28-S1m precondition: the doctored copy keeps the rest of the scale" "S1 Critical" "$(cat "$W28S_DOC1")"
-expect_ne "W28-S1m: a scale with one rule reworded is caught" "$W28S_SPEC" "$(cat "$W28S_DOC1")"
+expect_ne "W28-S1m: a scale with one rule reworded is caught" "$W28S_SPEC" "$(w28s_harm "$W28S_DOC1")"
 same_everywhere "W28-S2" "the scale is one text in the block and the rendered file" "$W28S_BLOCK" SEVERITY "$W28S_FILE"
 W28S_BYTES="$(wc -c < "$W28S_FILE" 2>/dev/null | tr -cd '0-9')"
 expect_true "W28-S3: …and fits the ${W28S_CAP}-byte cap (${W28S_BYTES:-missing} B)" test "${W28S_BYTES:-99999}" -le "$W28S_CAP"
@@ -6235,16 +6300,36 @@ expect_eq "W28-S8b: …and no longer say old code never fails a check" "" \
 
 # The finding lines: the scale's record form and steps/6.md's give the same four forms, in order.
 W28S_FORM="$(w28s_finding_form "$W28S_FILE")"
-expect_eq "W28-S9: the scale gives the four finding-line forms of the interface" \
-  "$(printf '%s\n' 'findings: <n>' 'finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>' 'shown: <n> <command>' 'unsure: <n> <what is not known>')" \
+# RE-WORDED (wave-30 T36; A-orch-78): the finding's site is two forms, never the `<path>:<line>|-`
+# alternation a reader copied whole into a record at the T25 sitting.
+expect_eq "W28-S9: the scale gives the finding-line forms of the interface: the finding's two site forms, then the rest" \
+  "$(printf '%s\n' 'findings: <n>' 'finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line> <title>' 'finding: <n> <S1|S2|S3|S4> <on|off> - <title>' 'shown: <n> <command>' 'unsure: <n> <what is not known>')" \
   "$W28S_FORM"
-expect_eq "W28-S9b: steps/6.md's record form gives the same four" "$W28S_FORM" "$(w28s_finding_form "$STEP6_MD")"
+expect_eq "W28-S9b: steps/6.md's record form gives the same five" "$W28S_FORM" "$(w28s_finding_form "$STEP6_MD")"
 expect_nonempty "W28-S9c: …and says when they are owed: the reader's row carries severity in pushed=" \
   "$(w26_hits 'carries `severity` in `pushed=`' "$STEP6_MD")"
 W28S_DOC9="$TMP/w28s-step6.md"
 sed 's/<what is not known>/<what is unknown>/' "$STEP6_MD" > "$W28S_DOC9" 2>/dev/null
 expect_nonempty "W28-S9m precondition: the doctored steps/6.md still gives finding lines" "$(w28s_finding_form "$W28S_DOC9")"
 expect_ne "W28-S9m: a steps/6.md whose unsure: form drifts is caught" "$W28S_FORM" "$(w28s_finding_form "$W28S_DOC9")"
+# The alternation is gone from what a reader reads, and the two-form wording is there (T36): each absence
+# sits beside the positive the same grep finds in the same file.
+for w28s_t36_f in "$W28S_FILE" "$STEP6_MD"; do
+  expect_nonempty "W28-S9n: $(basename "$w28s_t36_f") gives the site as <path>:<line> in a form of its own" \
+    "$(/usr/bin/grep -F -e '<on|off> <path>:<line> <title>' "$w28s_t36_f")"
+  expect_nonempty "W28-S9n2: …and the lone - in another" "$(/usr/bin/grep -F -e '<on|off> - <title>' "$w28s_t36_f")"
+  expect_empty "W28-S9n3: …and never the alternation a reader can copy whole" "$(/usr/bin/grep -F -e '<path>:<line>|-' "$w28s_t36_f")"
+done
+W28S_DOC9N="$TMP/w28s-alt.md"
+sed 's/<on|off> <path>:<line> <title>/<on|off> <path>:<line>|- <title>/' "$W28S_FILE" > "$W28S_DOC9N" 2>/dev/null
+expect_nonempty "W28-S9o: a scale that writes the site as the alternation again is caught" "$(/usr/bin/grep -F -e '<path>:<line>|-' "$W28S_DOC9N")"
+# The wording around the forms (T36): the site is a choice, the debt concept one token and the first site at once.
+W28S_SITE='Choose one, never both joined.'
+W28S_CONCEPT='`<concept>` is a single token with no space'
+W28S_FIRST='and the first site follows it at once'
+expect_contains "W28-S9p: the scale says the finding's site is a choice of one" "$W28S_SITE" "$(cat "$W28S_FILE")"
+expect_contains "W28-S9q: …that the debt concept is a single token" "$W28S_CONCEPT" "$(cat "$W28S_FILE")"
+expect_contains "W28-S9r: …and that the first site follows it at once" "$W28S_FIRST" "$(cat "$W28S_FILE")"
 
 # ============================================================
 section "§W28-T15 (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.6, AC-8.8; D19): the reading record's grammar row names the finding lines"
@@ -6281,7 +6366,9 @@ section "§W28-C (wave-28 T48; REQ-8, D19, D20): the structure checks say a chec
 # its case holds. Structure only (A-orch-43): the adversarial reader writes no `check:` line.
 # Each absence sits beside a positive on the same extractor, and a doctored copy proves each arm
 # goes red. HERMETIC: committed finals by path.
-W28C_SENTENCE='A check answers FAIL only when its failing case holds for a finding the table in `severity.md` sends to fix, FLAG when it holds for a finding that table defers or notes, or on a doubt you write as a finding, and PASS otherwise.'
+# RE-POINTED (wave-30 T4; AC-9.5, AC-11.1, A-T4.3): `reuse` and `one-site` are rated on the debt
+# table, so FLAG is a debt finding and FAIL only a harm finding the table sends to fix.
+W28C_SENTENCE='A check answers FLAG when its failing case holds, a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity; FAIL only when copies already disagree where a user meets it, a finding the harm table sends to fix; PASS otherwise.'
 W28C_OLD='FAIL (its failing case holds; name the file and line)'
 # w28c_count <file> -> how many times the file's flattened text carries the sentence.
 w28c_count() { _flatten "$1" | /usr/bin/grep -oF -- "$W28C_SENTENCE" | /usr/bin/grep -c .; }
@@ -6291,7 +6378,7 @@ expect_eq "W28-C2: …and its block says it once" "1" "$(w28c_count "${BLOCK_DIR
 W28C_DOC2="$(w26_doctor "${BLOCK_DIR}/checks-structure.md" "$W28C_SENTENCE")"
 expect_eq "W28-C2m: a block that says it twice is caught" "2" "$(w28c_count "$W28C_DOC2")"
 W28C_DOC1="$TMP/w28c-cut.md"
-sed 's/A check answers FAIL only/A check is FAIL only/' "${REPO}/payload/context/checks-structure.md" > "$W28C_DOC1" 2>/dev/null
+sed 's/A check answers FLAG when/A check is FLAG when/' "${REPO}/payload/context/checks-structure.md" > "$W28C_DOC1" 2>/dev/null
 expect_contains "W28-C1m precondition: the reworded copy keeps the rest of the file" "## The record" "$(cat "$W28C_DOC1")"
 expect_eq "W28-C1m: a structure file with the sentence reworded is caught" "" "$(w26_hits "$W28C_SENTENCE" "$W28C_DOC1")"
 expect_eq "W28-C3: the structure checks no longer say FAIL whenever the case holds" "" \
@@ -6407,42 +6494,75 @@ expect_eq "W28-104am: a role file that drops the door is caught" "" "$(w28_104_d
 
 section "§W28-R (wave-28 T22; REQ-16 AC-16.3, D35): the doctrine teaches the levels by the new words only"
 # ============================================================
-# WHAT THIS OWNS. Rigor is taught as low, medium and high. The old words appear in one mapping
-# sentence, once, in SKILL.md, and nowhere else in a rendered skill, step or role file. A run is
-# announced as `<intent> · <level> rigor · <scale>`, for example `build · high rigor · wave`, and
+# WHAT THIS OWNS. Rigor is taught as single and double (wave-30 T19: the mapping sentence that named
+# the six old words is deleted, AC-1.4; the CHANGELOG's migration line is where they appear). A run is
+# announced as `<intent> · <level> rigor · <scale>`, for example `build · double rigor · wave`, and
 # the announcement prints `card.sh rigor`'s line (A-orch-98: the verb's caller). The field in files
 # stays `rigor:`. Each absence sits beside a positive on the same extractor; doctored copies prove it.
 W28R_MAP='`low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads either word as the same level, and a file carrying an old word is read as it is and never rewritten.'
 W28R_FILES="$(ls "${SKILL_DIR}"/SKILL.md "${SKILL_DIR}"/dispatch.md "${SKILL_DIR}"/steps/*.md "${REPO}"/agents/*.md 2>/dev/null)"
-# w28r_old <file>… -> `<file>:<word>` for each old level word outside the mapping sentence.
+# w28r_old <file>… -> `<file>:<word>` for each old level word (wave-30 T19: no mapping sentence is excused now).
 w28r_old() {
   local f
   for f in "$@"; do
-    _flatten "$f" | awk -v m="$W28R_MAP" '{ while ((i = index($0, m)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(m)); print }' \
-      | /usr/bin/grep -owE '(tested|peer-reviewed|audited)' | sed "s|^|${f#"$REPO"/}:|"
+    _flatten "$f" | /usr/bin/grep -owE '(tested|peer-reviewed|audited)' | sed "s|^|${f#"$REPO"/}:|"
   done
 }
 # shellcheck disable=SC2086
-expect_eq "W28-R1: the mapping sentence is said once across the rendered skill, step and role files" "1" \
+# RE-POINTED (wave-30 T19, AC-1.4): the mapping sentence is gone from every rendered skill, step and role
+# file, and SKILL.md says the two levels where it said the six words.
+expect_eq "W28-R1: the mapping sentence is said nowhere across the rendered skill, step and role files" "0" \
   "$(for _w28r in $W28R_FILES; do _flatten "$_w28r" | /usr/bin/grep -oF -- "$W28R_MAP"; done | /usr/bin/grep -c .)"
-expect_nonempty "W28-R1b: …and SKILL.md is where it is said" "$(w26_hits "$W28R_MAP" "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-R1b: …and SKILL.md says the rigor is single (one) or double (two)" \
+  "$(w26_hits '`single` (one) or `double` (two)' "${SKILL_DIR}/SKILL.md")"
 # shellcheck disable=SC2086
-expect_eq "W28-R2: outside it, no rendered skill, step or role file names a level by an old word" "" "$(w28r_old $W28R_FILES)"
-W28R_DOC="$(w26_doctor "${SKILL_DIR}/steps/5.md" 'At `audited` the reviewer holds structure.')"
+expect_eq "W28-R2: no rendered skill, step or role file names a level by an old word" "" "$(w28r_old $W28R_FILES)"
+W28R_DOC="$(w26_doctor "${SKILL_DIR}/steps/5.md" 'At `audited` the critic holds structure.')"
 expect_eq "W28-R2m: a step file that teaches a level by an old word is caught" "${W28R_DOC#"$REPO"/}:audited" "$(w28r_old "$W28R_DOC")"
 W28R_DOC2="$(w26_doctor "${SKILL_DIR}/SKILL.md" "$W28R_MAP")"
-expect_eq "W28-R2m2: a second mapping sentence is not mistaken for a level taught" "" "$(w28r_old "$W28R_DOC2")"
-W28R_ROWS="$(/usr/bin/grep -oE '^\| `(low|medium|high)` \|' "${SKILL_DIR}/SKILL.md" | tr -d '|` ' | tr '\n' ' ')"
-expect_eq "W28-R3: SKILL.md's rigor table rows are low, medium and high" "low medium high " "$W28R_ROWS"
+expect_eq "W28-R2m2: a mapping sentence put back is caught (its three old words are found)" "3" \
+  "$(w28r_old "$W28R_DOC2" | awk 'END { print NR }')"
+W28R_ROWS="$(/usr/bin/grep -m1 -E '^\| \| `[a-z]+` \|' "${SKILL_DIR}/SKILL.md" | /usr/bin/grep -oE '`[a-z]+`' | tr -d '`' | tr '\n' ' ')"
+expect_eq "W28-R3: SKILL.md's rigor table columns are single and double (wave-30 T11, REQ-1)" "single double " "$W28R_ROWS"
 expect_nonempty "W28-R4: SKILL.md announces a run as <intent> · <level> rigor · <scale>" \
   "$(w26_hits '`<intent> · <level> rigor · <scale>`' "${SKILL_DIR}/SKILL.md")"
-expect_nonempty "W28-R4b: …for example build · high rigor · wave" "$(w26_hits '`build · high rigor · wave`' "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-R4b: …for example build · double rigor · wave" "$(w26_hits '`build · double rigor · wave`' "${SKILL_DIR}/SKILL.md")"
 expect_nonempty "W28-R5: the announcement prints card.sh rigor's line (the verb's caller)" \
   "$(w26_hits 'bash <plugin-root>/scripts/card.sh rigor <rigor>' "${SKILL_DIR}/SKILL.md")"
-W28R_CARD="$(bash "${REPO}/payload/scripts/card.sh" rigor audited 2>/dev/null)"
-expect_eq "W28-R5b: …and the line the announcement quotes is the one card.sh prints" "review rigor: high (three independent readers)" "$W28R_CARD"
+W28R_CARD="$(bash "${REPO}/payload/scripts/card.sh" rigor double 2>/dev/null)"
+expect_eq "W28-R5b: …and the line the announcement quotes is the one card.sh prints" "review rigor: double (two independent minds)" "$W28R_CARD"
 expect_nonempty "W28-R5c: …quoted in SKILL.md as printed" "$(w26_hits "\`${W28R_CARD:-<none>}\`" "${SKILL_DIR}/SKILL.md")"
-expect_nonempty "W28-R6: the reviewer role is dealt structure at high rigor" "$(w26_hits 'Dealt `structure` at high rigor' "${REPO}/agents/reviewer.md")"
+# RE-POINTED (wave-30 T20, AC-1.6): the reviewer role is retired, so the file that said it was dealt `structure` at
+# high rigor is gone; the critic's file, which holds `structure` at both levels, stays (render.test.sh §13 pins the six).
+expect_true "W28-R6: the reviewer role file is gone and the critic's stays" \
+  bash -c '[ ! -e "$1/agents/reviewer.md" ] && [ -f "$1/agents/critic.md" ]' _ "$REPO"
+# T20-1 (AC-1.6): no rendered surface lists the reviewer as a role. The extractor names the role by its three
+# spellings (`reviewer` in backticks, bionic:reviewer, a reviewer row of a roster table); the plain English word
+# for whoever reads a change is not the role and is not looked for. Each absence sits beside a positive on the
+# same extractor: the doctored copy of the dispatch paragraph is caught.
+T20_SURFACES="$(ls "${SKILL_DIR}"/SKILL.md "${SKILL_DIR}"/dispatch.md "${SKILL_DIR}"/steps/*.md "${REPO}"/agents/*.md "${REPO}/payload/commands/help.md" "${REPO}/README.md" 2>/dev/null)"
+t20_role_hits() {  # <file>… -> `<file>:<spelling>` for each spelling of the retired role found
+  local f
+  for f in "$@"; do
+    _flatten "$f" | /usr/bin/grep -oE '`reviewer`|bionic:reviewer|\| `reviewer` \|' | sed "s|^|${f#"$REPO"/}:|"
+  done
+}
+expect_nonempty "T20-1 precondition: the surfaces are found" "$T20_SURFACES"
+# shellcheck disable=SC2086
+expect_eq "T20-1: no skill, step, role, help or README surface lists the reviewer as a role" "" "$(t20_role_hits $T20_SURFACES)"
+T20_DOC="$(w26_doctor "${SKILL_DIR}/dispatch.md" '`auditor`, `critic` and `reviewer` for the readings the rigor deals')"
+expect_nonempty "T20-1m: a dispatch.md that lists the reviewer again is caught" "$(t20_role_hits "$T20_DOC")"
+T20_ORCH="$(cat "${REPO}/agents-src/blocks/orchestrator-dispatch.md")"
+expect_contains "T20-2: the dispatch block names the auditor and the critic for the readings" '`auditor` and `critic` for the readings the rigor deals' "$T20_ORCH"
+expect_absent "T20-2b: …and not a third" 'and `reviewer`' "$T20_ORCH"
+# T20-3 (AC-1.6): the exam README deals no question to the reviewer: the next sitting's dealing is the auditor on
+# `evidence` and the critic on `adversarial` and `structure`. Sentences about past sittings may still name the role.
+T20_EXAM="$(_flatten "${REPO}/tests/reader-exam/README.md")"
+expect_contains "T20-3: the exam README deals evidence to the auditor and adversarial and structure to the critic" \
+  'the auditor for `evidence`, the critic for `adversarial` and `structure`' "$T20_EXAM"
+for _t20x in 'the reviewer for `structure`' '`structure` for the reviewer' 'the auditor, the critic, the reviewer' 'critic and `bionic:reviewer`'; do
+  expect_absent "T20-3: …and no longer says '${_t20x}'" "$_t20x" "$T20_EXAM"
+done
 
 
 section "§W28-46 (wave-28 T14; REQ-4 AC-4.6, D18): no number blocks — no hook and no wall library reads the report or the gate's request times"
@@ -6480,7 +6600,7 @@ section "§W28-FLOOR (wave-28 T75; REQ-17 AC-17.3, D36): the knob table names fl
 # (pinned by W26-14c); a project's own floor is two rows beside it, in the same shape: `declared floor`
 # (`floor: <command>`, the `floor-run` verb, its log's first line) and `floor attestation`
 # (`floor-attestation: user`, the record's two lines). A copy with the floor row cut is caught.
-W28F_ROW='| declared floor | `floor: <command>` in `.bionic/config.yaml`'
+W28F_ROW='| declared regression | `floor: <command>` in `.bionic/config.yaml`'
 expect_nonempty "W28-F0 precondition: the extractor reads the table's declared check row" \
   "$(w26_hits '| declared check | `release-check: <command>` in `.bionic/config.yaml`' "$OPRULES")"
 for _w28f in \
@@ -6488,7 +6608,7 @@ for _w28f in \
   '`session-poker.sh floor-run`' \
   '`record/<wave>/floor-run-<head>.log`, its first line `head=<40-hex> dirty=<n> rc=<n>`, then `command: <cmd>`' \
   '`proof-add floor` stays the one writer of the proof line' \
-  '| floor attestation | `floor-attestation: user` in `.bionic/config.yaml` (any other value is refused)' \
+  '| regression attestation | `floor-attestation: user` in `.bionic/config.yaml` (any other value is refused)' \
   'a line `head=<40-hex> dirty=0` naming the working head and a line `floor-attested-by: <who> <when> <what ran>`'; do
   expect_nonempty "W28-F1: AC-17.3 operational-rules.md documents: ${_w28f:0:72}" "$(w26_hits "$_w28f" "$OPRULES")"
 done
@@ -6497,5 +6617,461 @@ W28F_CUT="$TMP/w28f-no-floor-row.md"
 expect_nonempty "W28-F2m precondition: the cut copy keeps the declared check row" \
   "$(w26_hits '| declared check |' "$W28F_CUT")"
 expect_eq "W28-F2m: …and a table missing the declared floor row is caught" "" "$(w26_hits "$W28F_ROW" "$W28F_CUT")"
+
+
+# ============================================================
+section "§W30-CHECKS-CLAUSES (wave-30 T4; REQ-9 AC-9.5, D2, D3): the checks files carry the rulings"
+# ============================================================
+# WHAT THIS OWNS. The four clauses Step 2 ruled into the checks files (design-ledger Δ2): a named
+# security / trust-boundary clause and a Known-limits pointer in the adversarial checks; the per-row
+# test-power question in the evidence checks, beside the whole-change revert-and-watch; and in the
+# structure checks, `reuse` and `one-site` as the only checks that must be answered, the five SOLID
+# checks and over-engineering as findings the reader may raise. "Must be answered" is what
+# `proof_reading` (lib/proof.sh) reads: the ids it owes a `check:` line for are the file's
+# `- **<id>**` items, so the pin runs that function on the shipped file. Each absence sits beside a
+# positive on the same extractor, and a doctored copy proves each arm goes red. HERMETIC: committed
+# finals by path; records and doctored copies under $TMP.
+W30C_ADV="${REPO}/payload/context/checks-adversarial.md"
+W30C_EVID="${REPO}/payload/context/checks-evidence.md"
+W30C_STRUCT="${REPO}/payload/context/checks-structure.md"
+W30C_LIB="${REPO}/payload/scripts/lib/proof.sh"
+W30C_SEC='**Security and trust boundaries.** Ask of every change: what untrusted input reaches it, what permission it exercises or gates, what it can expose, and whether it fails closed.'
+W30C_OPS='Ask too what happens when a dependency is missing, and whether install, upgrade and remove leave consistent state.'
+W30C_KL="**Known limits.** Read the project's Known limits where it keeps them, such as its changelog. A change that reopens a listed limit, or meets one without saying so, is a finding."
+W30C_POWER='Per row, also ask: does a changed condition have a test that fails when it is wrong?'
+W30C_BESIDE='leaves its row without power. Once per wave, go one step past judgment with a revert-and-watch demonstration'
+W30C_MAY='You may raise these as findings when their case holds. They are not checks: write no `check:` line for them.'
+W30C_OVER='- `over-engineering` — Does each abstraction earn its place? Fails when the change adds an abstraction, parameter or indirection with one case or one caller.'
+W30C_MAYIDS="single-job open-closed substitution narrow-interface dependency-direction over-engineering"
+
+for _w30c in "$W30C_SEC" "$W30C_OPS" "$W30C_KL"; do
+  expect_nonempty "W30-C1: AC-9.5 — checks-adversarial.md carries: ${_w30c:0:70}" "$(w26_hits "$_w30c" "$W30C_ADV")"
+done
+W30C_ADV_CUT="$TMP/w30c-adv-cut.md"
+anchor "$W30C_ADV" '**Security and trust boundaries.**' 1
+/usr/bin/grep -vF -- '**Security and trust boundaries.**' "$W30C_ADV" > "$W30C_ADV_CUT" 2>/dev/null
+expect_nonempty "W30-C1m precondition: the cut copy keeps the Known-limits pointer" "$(w26_hits "$W30C_KL" "$W30C_ADV_CUT")"
+expect_eq "W30-C1m: an adversarial file with the security clause cut is caught" "" "$(w26_hits "$W30C_SEC" "$W30C_ADV_CUT")"
+
+expect_nonempty "W30-C2: AC-9.5 — checks-evidence.md asks the per-row power question" "$(w26_hits "$W30C_POWER" "$W30C_EVID")"
+expect_nonempty "W30-C2b: …beside the whole-change revert-and-watch" "$(w26_hits "$W30C_BESIDE" "$W30C_EVID")"
+W30C_EVID_CUT="$TMP/w30c-evid-cut.md"
+sed 's/ Per row, also ask: does a changed condition have a test that fails when it is wrong?//' "$W30C_EVID" > "$W30C_EVID_CUT" 2>/dev/null
+expect_nonempty "W30-C2m precondition: the cut copy keeps the revert-and-watch" "$(w26_hits 'revert-and-watch demonstration' "$W30C_EVID_CUT")"
+expect_eq "W30-C2m: an evidence file with the per-row question cut is caught" "" "$(w26_hits "$W30C_POWER" "$W30C_EVID_CUT")"
+
+expect_nonempty "W30-C3: AC-9.5 — checks-structure.md says the may-raise checks owe no check: line" "$(w26_hits "$W30C_MAY" "$W30C_STRUCT")"
+expect_nonempty "W30-C3b: …and adds over-engineering in the may-raise class" "$(w26_hits "$W30C_OVER" "$W30C_STRUCT")"
+# w30c_section <file> <heading> -> the lines of the `## <heading>` section.
+w30c_section() { awk -v h="## $2" '/^## / { p = ($0 == h); next } p' "$1" 2>/dev/null; }
+expect_nonempty "W30-C3c precondition: the structure file has a What you may raise section" \
+  "$(w30c_section "$W30C_STRUCT" 'What you may raise')"
+for _id in $W30C_MAYIDS; do
+  expect_nonempty "W30-C3c: \`${_id}\` is listed under What you may raise" \
+    "$(w30c_section "$W30C_STRUCT" 'What you may raise' | /usr/bin/grep -F -- "- \`${_id}\` — ")"
+done
+
+# The ids proof_reading owes a check: line for, read by the function the verb runs. A record that
+# answers reuse and one-site alone registers; one that leaves one-site out is refused; and a copy
+# of the file that makes single-job a `- **<id>**` item again refuses the two-line record.
+W30C_REC="$TMP/w30c-rec"; mkdir -p "$W30C_REC"
+w30c_rec() {  # <file> <check line>… -> a structure reading answering the given checks
+  local f="$1"; shift
+  { printf 'reviewed: aaaaaaaaaa..bbbbbbbbbb\nquestion: structure\nresult: pass\nscope: piece\n'
+    for _l in "$@"; do printf '%s\n' "$_l"; done; } > "$f"
+}
+w30c_read() { bash -c '. "$1" && proof_reading "$2" structure "$3"' _ "$W30C_LIB" "$1" "$2" 2>/dev/null; }
+w30c_rec "$W30C_REC/two.md" 'check: reuse PASS compared with lib/' 'check: one-site PASS compared with lib/'
+w30c_rec "$W30C_REC/one.md" 'check: reuse PASS compared with lib/'
+expect_eq "W30-C4: AC-9.5 — the shipped structure checks accept a record answering reuse and one-site alone" \
+  "pass piece aaaaaaaaaa" "$(w30c_read "$W30C_REC/two.md" "$W30C_STRUCT")"
+expect_contains "W30-C4b: …and still refuse one that leaves one-site unanswered" "leaves one-site unanswered" \
+  "$(w30c_read "$W30C_REC/one.md" "$W30C_STRUCT")"
+W30C_DEMAND="$(w26_doctor "$W30C_STRUCT" '- **single-job** — Does each unit have one reason to change?')"
+expect_contains "W30-C4m: a structure file that demands single-job again is caught" "leaves single-job unanswered" \
+  "$(w30c_read "$W30C_REC/two.md" "$W30C_DEMAND")"
+
+# ============================================================
+section "§W30-DEBT-TABLE (wave-30 T4; REQ-11 AC-11.1, D2, P2): severity.md rates debt by kind beside the harm table"
+# ============================================================
+# WHAT THIS OWNS. A finding is classed by who pays and when (design-ledger P3): harm on the
+# severity tables, debt on a table of its own. Pinned here: the rendered scale carries the debt
+# table after the harm tables, inside the scale's span; each of its three kinds has disposition
+# burn-when-touched and no severity; the rule says a debt finding names its concept and sites and
+# where the orchestrator records it; and the structure checks rate `reuse` and `one-site` on that
+# table. Each absence sits beside a positive on the same extractor, and a doctored copy proves each
+# arm goes red. HERMETIC: committed finals by path.
+W30D_HEAD='| Kind | What it is | Disposition |'
+W30D_RULE='A debt finding names its concept and its sites, never a severity'
+W30D_LINE='`debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`'
+W30D_BURN='Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it in `record/<run>/debt.md` at the review findings disposition, and the next row whose Files touch the concept burns it inside its own work.'
+W30D_STRUCT='a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity'
+# w30d_rows <file> -> the debt table's rows inside the scale's span, one per line.
+w30d_rows() {
+  marker_span "$1" SEVERITY | awk -v h="$W30D_HEAD" '$0 == h { p = 1; next } p && /^\|---/ { next } p && /^\|/ { print; next } p { exit }'
+}
+expect_nonempty "W30-D1: AC-11.1 — the rendered severity.md carries the debt table's header in the scale" \
+  "$(marker_span "$W28S_FILE" SEVERITY | /usr/bin/grep -xF -- "$W30D_HEAD")"
+expect_eq "W30-D1b: …after the harm table's last row" "1" \
+  "$(marker_span "$W28S_FILE" SEVERITY | awk -v h="$W30D_HEAD" '/^\| S4 \| note \| note \|$/ { s = NR } $0 == h && s && NR > s { print 1; exit }')"
+W30D_ROWS="$(w30d_rows "$W28S_FILE")"
+for _k in duplicate unpinned-pair one-case-abstraction; do
+  expect_contains "W30-D2: the debt table rates \`${_k}\` burn-when-touched" "burn-when-touched: \`<concept>\`" \
+    "$(printf '%s\n' "$W30D_ROWS" | /usr/bin/grep -F -- "| ${_k} |")"
+done
+expect_eq "W30-D2b: …in three rows" "3" "$(printf '%s\n' "$W30D_ROWS" | /usr/bin/grep -c '^|')"
+expect_eq "W30-D2c: …none of which names a severity level" "" "$(printf '%s\n' "$W30D_ROWS" | /usr/bin/grep -E 'S[1-4]')"
+W30D_DOC2="$TMP/w30d-sev-row.md"
+sed 's/^| duplicate | \(.*\) | burn-when-touched: `<concept>` |$/| duplicate | \1 | S3 |/' "$W28S_FILE" > "$W30D_DOC2" 2>/dev/null
+expect_nonempty "W30-D2m precondition: the doctored copy keeps its duplicate row" "$(w30d_rows "$W30D_DOC2" | /usr/bin/grep -F '| duplicate |')"
+expect_nonempty "W30-D2m: a debt row rated by a severity is caught" "$(w30d_rows "$W30D_DOC2" | /usr/bin/grep -E 'S[1-4]')"
+for _w30d in "$W30D_RULE" "$W30D_LINE" "$W30D_BURN"; do
+  expect_nonempty "W30-D3: AC-11.1 — severity.md says: ${_w30d:0:70}" "$(w26_hits "$_w30d" "$W28S_FILE")"
+done
+W30D_DOC3="$TMP/w30d-no-table.md"
+anchor "$W28S_FILE" "$W30D_HEAD" 1
+/usr/bin/grep -vxF -- "$W30D_HEAD" "$W28S_FILE" > "$W30D_DOC3" 2>/dev/null
+expect_nonempty "W30-D3m precondition: the cut copy keeps the harm table" "$(marker_span "$W30D_DOC3" SEVERITY | /usr/bin/grep -F '| S1 Critical |')"
+expect_eq "W30-D3m: a scale with the debt table's header cut is caught" "" "$(w30d_rows "$W30D_DOC3")"
+expect_nonempty "W30-D4: AC-11.1 — the structure checks rate reuse and one-site on the debt table, by kind" \
+  "$(w26_hits "$W30D_STRUCT" "${REPO}/payload/context/checks-structure.md")"
+
+# ============================================================
+section "§W30-SCRUB (wave-30 T9; REQ-4 AC-4.2, D8): dispatch.md says the runner hands a suite no gate store"
+# ============================================================
+# WHAT THIS OWNS. The rendered dispatch doctrine carries the sentence for AC-4.2's static half: the runner hands every
+# suite an environment with no gate store, `tests/run.sh` strips `BIONIC_GATE_DIR` from each worker's suite process, a
+# runner exports none itself, and a suite that needs a store makes its own fixture. The behaviour is proved in
+# runner-roster §SCRUB; this pins the words a runner reads. The test-runner role's own sentence is T12's.
+W30S_HAND='The runner hands every suite an environment with no gate store'
+W30S_STRIP='`tests/run.sh` strips `BIONIC_GATE_DIR` from each worker'"'"'s suite process, and a runner exports none itself'
+W30S_OWN='A suite that needs a store makes its own fixture.'
+for _w30s in "$W30S_HAND" "$W30S_STRIP" "$W30S_OWN"; do
+  expect_nonempty "W30-S1: AC-4.2 dispatch.md says: ${_w30s:0:72}" "$(w26_hits "$_w30s" "$DISPATCH_MD")"
+done
+W30S_CUT="$TMP/w30s-no-sentence.md"
+/usr/bin/grep -vF -- 'No store in a suite.' "$DISPATCH_MD" > "$W30S_CUT" 2>/dev/null
+expect_nonempty "W30-S2m precondition: the cut copy keeps the surrounding doctrine (the One gate paragraph)" \
+  "$(w26_hits '**One gate.**' "$W30S_CUT")"
+expect_eq "W30-S2m: …and a dispatch.md with the sentence's paragraph cut is caught" "" "$(w26_hits "$W30S_HAND" "$W30S_CUT")"
+
+# ============================================================
+section "§W30-SPLIT (wave-30 T17; REQ-12 AC-12.6, D14d-3, design-ledger Δ11): the interface-first recipe beside the tick's SPLIT? line"
+# ============================================================
+# WHAT THIS OWNS. steps/4.md carries the recipe for a split the tick's SPLIT? line names: the cut is the
+# orchestrator's, on a pending row, interface-first, and `task-split` writes it as one transaction. It lives
+# in steps/4.md alone (A-T17.11): check 115's read budget had 303 B of headroom at 43590bdc, and a second
+# copy or pointer in dispatch.md did not fit beside it. The verb itself is proved in session-poker-3
+# §TASK-SPLIT and units §TASK-SPLIT. HERMETIC: the committed rendered finals by path.
+W30P_STEP4="${SKILL_DIR}/steps/4.md"
+W30P_CAND='`SPLIT? <id>` names a candidate; you decide.'
+W30P_CUT='Cut a pending row interface-first: first a short child making what the waiters read.'
+W30P_VERB='`task-split <id> -- <child spec>…` writes it in one validated transaction.'
+for _w30p in "$W30P_CAND" "$W30P_CUT" "$W30P_VERB"; do
+  expect_nonempty "W30-P1: AC-12.6 steps/4.md says: ${_w30p:0:72}" "$(w26_hits "$_w30p" "$W30P_STEP4")"
+done
+W30P_CUTF="$TMP/w30p-no-recipe.md"
+/usr/bin/grep -vF -- '**Splitting a row.**' "$W30P_STEP4" > "$W30P_CUTF" 2>/dev/null
+expect_nonempty "W30-P3m precondition: the cut copy keeps the pointer to dispatch.md" "$(w26_hits 'Its rules are `dispatch.md`' "$W30P_CUTF")"
+expect_eq "W30-P3m: …and a steps/4.md with the recipe's paragraph cut is caught" "" "$(w26_hits "$W30P_CUT" "$W30P_CUTF")"
+
+# ============================================================
+section "§W30-DEBT-LEDGER (wave-30 T22; REQ-11 AC-11.2, AC-11.4, D2, P2): operational-rules documents the run's debt ledger, its printed lines and its carry"
+# ============================================================
+# WHAT THIS OWNS. The records table of operational-rules.md carries a `debt ledger` row: the path, the
+# header and the item line exactly as lib/proof.sh's PROOF_DEBT_HEADER spells them (one shape, two
+# places, held together here), the verb that writes it, and the three lines the tools print from it
+# (the dispatch advisory, ready's landing line, the release card's). The close-out section names the
+# continuation's `debt:` line in the form close-out.sh writes. The parser's kinds (PROOF_DEBT_KINDS) are
+# the debt table's kinds of severity.md, in its order. HERMETIC: committed files by path.
+W30L_PROOF="${REPO}/payload/scripts/lib/proof.sh"
+W30L_CO="${REPO}/payload/scripts/close-out.sh"
+W30L_OPEN='| debt ledger | `<docs-root>/record/<the bound plan'"'"'s name less .plan.md>/debt.md`'
+W30L_HDR="$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_HEADER"' _ "$W30L_PROOF" 2>/dev/null)"
+expect_nonempty "W30-L0 precondition: lib/proof.sh defines the ledger's header" "$W30L_HDR"
+# w30l_row <file> -> the records table's debt ledger row, or nothing.
+w30l_row() { /usr/bin/grep -F -- "$W30L_OPEN" "$1" 2>/dev/null | head -n 1; }
+W30L_ROW="$(w30l_row "$OPRULES")"
+expect_nonempty "W30-L1: AC-11.2 — operational-rules.md's records table carries the debt ledger row" "$W30L_ROW"
+expect_contains "W30-L2: …its header, as lib/proof.sh writes it (each | escaped for the table)" \
+  "\`${W30L_HDR//|/\\|}\`" "$W30L_ROW"
+for _w30l in '`<concept> \| <kind> \| <sites> \| raised-by <record> \| touches <N> \| —`' '`burned <row>`' \
+  '`session-poker.sh debt add <reading record> [<plan>]`' '`debt touched <concept> [<plan>]`' '`debt burn <concept> <row> [<plan>]`' \
+  '`debt: <concept> <kind> touches <N> — burn it in this row or say why not`' '`debt: burned <N>, touched <M>`' '`debt: touched <N> · burned <M>`'; do
+  expect_contains "W30-L3: …and says ${_w30l:0:60}" "$_w30l" "$W30L_ROW"
+done
+W30L_CARRY='debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>'
+expect_nonempty "W30-L4: AC-11.2 — the close-out section names the continuation's debt line" "$(w26_hits "\`$W30L_CARRY\`" "$OPRULES")"
+expect_nonempty "W30-L4b: …in the form close-out.sh prints it" \
+  "$(/usr/bin/grep -F -- 'debt: %s %s \"%s\" touches=%s raised-by=%s from=%s' "$W30L_CO")"
+W30L_CUT="$TMP/w30l-no-row.md"
+/usr/bin/grep -vF -- "$W30L_OPEN" "$OPRULES" > "$W30L_CUT" 2>/dev/null
+expect_nonempty "W30-L1m precondition: the cut copy keeps the declared debt row beside it" "$(/usr/bin/grep -F '| declared debt |' "$W30L_CUT")"
+expect_eq "W30-L1m: …and an operational-rules.md with the row cut is caught" "" "$(w30l_row "$W30L_CUT")"
+# The parser's kinds are the table's, in its order (an unpinned pair otherwise).
+w30l_kinds() { w30d_rows "$1" | awk -F'|' '{ k = $2; gsub(/^ +| +$/, "", k); printf "%s%s", (n++ ? " " : ""), k }'; }
+W30L_TABLE="$(w30l_kinds "$W28S_FILE")"
+expect_nonempty "W30-L5 precondition: severity.md's debt table yields its kinds" "$W30L_TABLE"
+expect_eq "W30-L5: lib/proof.sh PROOF_DEBT_KINDS is the debt table's kinds, in its order" "$W30L_TABLE" \
+  "$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_KINDS"' _ "$W30L_PROOF" 2>/dev/null)"
+W30L_DOC="$TMP/w30l-sev.md"
+/usr/bin/grep -vF -- '| unpinned-pair |' "$W28S_FILE" > "$W30L_DOC" 2>/dev/null
+expect_ne "W30-L5m: a table that lost a kind no longer equals the parser's list" \
+  "$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_KINDS"' _ "$W30L_PROOF" 2>/dev/null)" "$(w30l_kinds "$W30L_DOC")"
+
+# ============================================================
+section "§EXIT-137 — the test-runner never infers a timeout from exit 137 (wave-30 T12; REQ-3 AC-3.3)"
+# ============================================================
+# A suite killed on a full machine exits 137 well inside its limit; reported as a timeout, it sends
+# the orchestrator after a slow suite that was never slow. The role's Bounds say so, in the template
+# and in the rendered role a session loads.
+W30X_SENT='Exit 137 is a kill, not a timeout, unless elapsed time reached the declared limit: report it killed, with elapsed time against the limit.'
+expect_contains "X137.1: AC-3.3 — agents/test-runner.md carries the exit-137 sentence" "$W30X_SENT" \
+  "$(cat "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.2: …under its ## Bounds" "$W30X_SENT" \
+  "$(awk '/^## Bounds/ { on = 1; next } /^## / { on = 0 } on' "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.3: …written in its template, so a render keeps it" "$W30X_SENT" \
+  "$(cat "${REPO}/agents-src/templates/test-runner.md.tmpl" 2>/dev/null)"
+
+# ============================================================
+section "§W30-HANDOFF (wave-30 T15; REQ-7 AC-7.2, D11): the governing skill says a verb writes ## Handoff"
+# ============================================================
+# The Handoff paragraph used to end "Nothing writes or checks it." The verb now writes it, so the paragraph says
+# so: `session-poker.sh handoff` rewrites the section in place from the plan and the machine and carries the human
+# lines. The behaviour is proved in session-poker-4 §HANDOFF; this pins the words the orchestrator reads, in the
+# rendered skill and in the template a render keeps.
+W30H_SENT='Rewritten in place, never appended, and never by hand: `session-poker.sh handoff` writes it from the plan and the machine (heads, open rows, live agents, last proof, the clock) and carries the human lines.'
+expect_contains "W30-H1: AC-7.2 — skills/canonical-sdlc/SKILL.md says a verb writes the handoff" "$W30H_SENT" \
+  "$(cat "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+expect_contains "W30-H2: …written in its template, so a render keeps it" "$W30H_SENT" \
+  "$(cat "${REPO}/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl" 2>/dev/null)"
+expect_contains "W30-H3: …inside the Handoff paragraph (positive control for H4)" "**Handoff.** A plan spanning sessions carries a" \
+  "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+expect_absent "W30-H4: …and the paragraph no longer says nothing writes it" "Nothing writes or checks it" \
+  "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+
+# ============================================================
+section "§REGRESSION-WORD (wave-30 T23; REQ-4 AC-4.7, D10): the doctrine says regression, and the verbs and keys still spell floor"
+# ============================================================
+# WHAT THIS OWNS. "floor" meaning the full test run is renamed "regression" in the doctrine a session
+# reads: SKILL.md, steps/5.md, dispatch.md, operational-rules.md and the role files. The verbs and keys
+# keep their spelling until bionic2 (`proof-add floor`, `floor-run`, `floor:`, `floor-attestation:`),
+# said once by the alias sentence beside the config.yaml layout. The word in its other sense stays: a
+# rigor floor (`rigor-floor:`, the intent and flag floors, a floor the user overrides). The grep reads a
+# sentence at a time. It drops the alias sentence and the verb and key spellings, skips a hyphen
+# compound (floor-run, rigor-floor, tested-floor), and allows a sentence that names rigor, the flag or an
+# override. Every other sentence saying "floor" is printed and refused. HERMETIC: rendered finals by path.
+W30R_ALIAS='The regression'"'"'s verbs and keys still spell it `floor` (`proof-add floor`, `floor-run`, `floor:`, `floor-attestation:`) until bionic2.'
+# w30r_hits <file>... -> `<file>:<line>: <sentence>` for each sentence saying floor in the full-run sense.
+w30r_hits() {
+  awk '{
+    line = $0
+    i = index(line, alias); if (i) line = substr(line, 1, i - 1) " " substr(line, i + length(alias))
+    gsub(/proof-add floor|proof:floor|kind=<?floor|<floor[|\\]|`floor:/, " ", line)
+    n = split(line, s, /\.( |\*|$)|; |\|/)
+    for (k = 1; k <= n; k++) {
+      t = " " s[k] " "
+      if (t !~ /[^A-Za-z_-][Ff]loor[^A-Za-z_-]/) continue
+      if (t ~ /[Rr]igor|flag|overrid/) continue
+      sub(/^ +/, "", s[k]); print FILENAME ":" FNR ": " substr(s[k], 1, 120)
+    }
+  }' alias="$W30R_ALIAS" "$@" 2>/dev/null
+}
+W30R_FILES="${SKILL_DIR}/SKILL.md ${SKILL_DIR}/steps/5.md ${DISPATCH_MD} ${OPRULES} $(ls "${REPO}"/agents/*.md 2>/dev/null | tr '\n' ' ')"
+# The extractor is proved on planted lines first: it finds the full-run sense and passes the others.
+W30R_PLANT="$TMP/w30r-plant.md"
+printf '%s\n' 'Run the tests floor once, on the release head.' \
+  'Record it with `session-poker.sh proof-add floor <log>`; `floor-run` runs `floor: <cmd>` and `floor-attestation: user` attests.' \
+  'Effective rigor is the MAX of four floors, and the intent floor is one.' \
+  "$W30R_ALIAS" > "$W30R_PLANT"
+expect_eq "RW-0: the grep refuses a planted full-run sentence and passes the verb, key, rigor and alias lines" \
+  "${W30R_PLANT}:1: Run the tests floor once, on the release head" "$(w30r_hits "$W30R_PLANT")"
+# shellcheck disable=SC2086
+expect_eq "RW-1: AC-4.7 — no rendered doctrine file says floor in the full-run sense outside the alias sentence" \
+  "" "$(w30r_hits $W30R_FILES)"
+W30R_DOC="$TMP/w30r-step5.md"
+{ cat "${SKILL_DIR}/steps/5.md"; printf '%s\n' 'This is a claim about where the tests floor ran.'; } > "$W30R_DOC" 2>/dev/null
+expect_nonempty "RW-1m: …and a steps/5.md with the old word put back is caught" "$(w30r_hits "$W30R_DOC")"
+expect_contains "RW-2: AC-4.7 — SKILL.md carries the one alias sentence" "$W30R_ALIAS" "$(cat "${SKILL_DIR}/SKILL.md" 2>/dev/null)"
+expect_contains "RW-2b: …written in its template, so a render keeps it" "$W30R_ALIAS" \
+  "$(cat "${REPO}/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl" 2>/dev/null)"
+expect_eq "RW-2c: …once, in all the doctrine the grep reads" "1" \
+  "$(cat $W30R_FILES 2>/dev/null | /usr/bin/grep -cF -- "$W30R_ALIAS" | tr -d ' ')"
+# The verbs and keys are NOT renamed (AC-4.7's second fails-when).
+expect_contains "RW-3: proof-add still takes the kind floor" " floor " " $(bash -c '. "$1" && printf "%s" "$PROOF_KINDS"' _ "${REPO}/payload/scripts/lib/proof.sh" 2>/dev/null) "
+expect_nonempty "RW-3b: …the floor-run verb is still an arm of session-poker.sh" \
+  "$(/usr/bin/grep -nE '^  floor-run\)' "${REPO}/hooks/session-poker.sh" 2>/dev/null)"
+expect_nonempty "RW-3c: …and lib/proof.sh still reads the floor: and floor-attestation: keys" \
+  "$(/usr/bin/grep -F 'config_value "$root" floor-attestation' "${REPO}/payload/scripts/lib/proof.sh" 2>/dev/null | /usr/bin/grep -F 'config_value "$root" floor ')"
+# steps/5.md names the verbs the Verify step uses (A-orch-49; T12, T13, T14).
+for _w30r in '`session-poker.sh matrix-render`' '`discharge <AC-id>` writes a row'"'"'s auditor cell as the bare `CONFIRMED`' \
+  'are refused at `current: 5` once no row is `pending` or `blocked`, and at every step from 6' \
+  '`session-poker.sh wait <name|run id>` follows it to its end' '`stop-run <name|run id>` stops it' \
+  'is `LOST` (exit 70), never green' '`regression-runs` counts the full runs' \
+  'A run at an ancestor of the working head still proves it when the map bounds the change since and every suite it names has a green run stamped at the working head'; do
+  expect_nonempty "RW-4: steps/5.md says: ${_w30r:0:72}" "$(w26_hits "$_w30r" "${SKILL_DIR}/steps/5.md")"
+done
+# The writer inbox (A-orch-54, A-orch-57): the orchestrator's side in dispatch.md, the writer's in its role.
+W30R_INBOX='A writer receives a message only when it is idle: a blocking question ends the writer'"'"'s turn and the reply resumes it, a non-blocking one is read at its next idle, and the orchestrator resends once on the idle notice.'
+expect_nonempty "RW-5: dispatch.md names the inbox property and the protocol" "$(w26_hits "$W30R_INBOX" "$DISPATCH_MD")"
+expect_nonempty "RW-5b: …inside the Why-writers-are-never-pinged paragraph" \
+  "$(/usr/bin/grep -F '**Why writers are never pinged.**' "$DISPATCH_MD" 2>/dev/null | /usr/bin/grep -F "$W30R_INBOX")"
+W30R_WRITER='**A message reaches you only when you are idle.**'
+for _w30r in implementor senior-implementor; do
+  expect_nonempty "RW-5c: agents/${_w30r}.md says the writer's side of the inbox" "$(w26_hits "$W30R_WRITER" "${REPO}/agents/${_w30r}.md")"
+done
+
+# ============================================================
+section "§W30-T19 (wave-30 T19; REQ-1 AC-1.2/1.3, REQ-2 AC-2.1/2.2, REQ-10 AC-10.4, REQ-11 AC-11.2; D1, D2, D4, P1-P3): the doctrine says the review findings disposition"
+# ============================================================
+# WHAT THIS OWNS. The words a session reads once review is one decision: the three header fields Step 0
+# writes (§STEP0-FIELDS), the review findings disposition and its four sentences (§DISPOSITION), the three stop rules in the step,
+# the severity scale and the critic's role file (§STOP-RULES), only readers rate (§ONLY-READERS-RATE), the
+# classes of finding and the review-follows-the-build paragraph (§P3), and the debt ledger section and its
+# adoption at Step 1 (§DEBT-LEDGER). Each is an `expect_nonempty` of a sentence shipped verbatim, read from
+# the rendered final the session loads; each group's last arm doctors a copy and proves the pin goes red.
+# HERMETIC: committed finals by path; doctored copies under $TMP.
+W30T_SEV_BLOCK="${BLOCK_DIR}/severity.md"
+W30T_SEV="${REPO}/payload/context/severity.md"
+W30T_CRITIC="${REPO}/agents/critic.md"
+W30T_AUDITOR="${REPO}/agents/auditor.md"
+# w30t_pin <label> <needle> <file>… : the needle is in every file, flattened as _flatten reads them.
+w30t_pin() {
+  local _l="$1" _n="$2" _f; shift 2
+  for _f in "$@"; do
+    expect_nonempty "${_l} (${_f#"$REPO"/})" "$(w26_hits "$_n" "$_f")"
+  done
+}
+# w30t_cut <file> <needle> -> a copy of the file, flattened, with the needle removed; its path on stdout.
+w30t_cut() {
+  local out; out="$TMP/w30t-$(printf '%s' "$1$2" | cksum | tr -cd '0-9').md"
+  _flatten "$1" | awk -v n="$2" '{ while ((i = index($0, n)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(n)); print }' > "$out" 2>/dev/null
+  printf '%s' "$out"
+}
+
+# --- §STEP0-FIELDS (AC-1.2) ---
+W30T_F0='**The review fields.** Step 0 writes `review-cadence:`, `fix-policy:` and `fix-cap:` into the plan header beside `rigor:`, each with the value its rigor sets (the table in `SKILL.md`): `single` writes `once`, `S1,S2-on` and `2`; `double` writes `once`, `S1,S2-on` and `10%` of the plan'"'"'s rows.'
+W30T_F1='Each is the user'"'"'s to set with the Override DSL: `set fix-policy=<ratings>` takes `S1 S1-on S1-off S2 S2-on S2-off S3 S4`, comma-joined, `set fix-cap=<n>` takes a number, and `set review-cadence=once` names the one cadence there is.'
+W30T_F2='A value the user sets is read verbatim and never widened by an agent.'
+w30t_pin "STEP0-FIELDS-1: AC-1.2 — steps/0.md says Step 0 writes the three fields beside rigor with their per-rigor values" "$W30T_F0" "$STEP0_MD"
+w30t_pin "STEP0-FIELDS-2: …and that each is the user's to set, with the vocabulary" "$W30T_F1" "$STEP0_MD"
+w30t_pin "STEP0-FIELDS-3: …read verbatim, never widened" "$W30T_F2" "$STEP0_MD"
+for _w30f in 'review-cadence:' 'fix-policy:' 'fix-cap:'; do
+  expect_nonempty "STEP0-FIELDS-4: …the field name ${_w30f} is in the rendered steps/0.md" "$(w26_hits "\`${_w30f}\`" "$STEP0_MD")"
+done
+W30T_CARD="$(step0_card "$STEP0_MD")"
+expect_nonempty "STEP0-FIELDS-5 precondition: the card extractor reads the Run block's rigor line" "$(printf '%s\n' "$W30T_CARD" | /usr/bin/grep -F '    rigor           <')"
+for _w30c in '    review-cadence  <once>' '    fix-policy      <ratings>' '    fix-cap         <n'; do
+  expect_nonempty "STEP0-FIELDS-5: AC-1.2 — the Step-0 card prints under Run: ${_w30c# }" "$(printf '%s\n' "$W30T_CARD" | /usr/bin/grep -F -- "$_w30c")"
+done
+expect_eq "STEP0-FIELDS-6: …between the rigor line and the scale line, in the Run block" "rigor review-cadence fix-policy fix-cap scale" \
+  "$(printf '%s\n' "$W30T_CARD" | awk '/^  Run$/ { on = 1; next } /^  Branches/ { on = 0 } on && NF { if ($1 ~ /^(rigor|review-cadence|fix-policy|fix-cap|scale)$/) printf "%s%s", (n++ ? " " : ""), $1 }')"
+w30t_pin "STEP0-FIELDS-7: the override example is in the new words" 'double gives `evidence` its own reader; without it, one critic holds every question' "$STEP0_MD"
+expect_eq "STEP0-FIELDS-7b: …and no longer 'high gives'" "" "$(w26_hits 'high gives' "$STEP0_MD")"
+expect_eq "STEP0-FIELDS-7c: …and the Models block lists no reviewer (the role is retired)" "" "$(printf '%s\n' "$W30T_CARD" | /usr/bin/grep -F '    reviewer ')"
+W30T_NOCARD="$TMP/w30t-step0-nocard.md"
+/usr/bin/grep -vF -e '    review-cadence  <' -e '    fix-policy      <' -e '    fix-cap         <' "$STEP0_MD" > "$W30T_NOCARD" 2>/dev/null
+expect_nonempty "STEP0-FIELDS-5m precondition: the doctored steps/0.md keeps its rigor line" "$(step0_card "$W30T_NOCARD" | /usr/bin/grep -F '    rigor           <')"
+expect_eq "STEP0-FIELDS-5m: …and a card missing the three lines is caught" "" "$(step0_card "$W30T_NOCARD" | /usr/bin/grep -F -e '    review-cadence  <' -e '    fix-policy      <' -e '    fix-cap         <')"
+
+# --- §DISPOSITION (AC-2.1) ---
+W30T_P1='The moment of a check is set by its cost model: machine checks run early and often, mind checks run once, on the settled whole.'
+W30T_FD1='The orchestrator brings every finding to the user with its severity and a recommendation: fix now, Known limit or next wave.'
+W30T_FD2='The user rules the set.'
+W30T_FD3='A row exists only from that ruling, recorded on the row with the user'"'"'s attribution.'
+W30T_FD4='The one row the orchestrator may make alone is an in-diff finding inside `fix-policy:` and under `fix-cap:`, marked `born: review S<n> <reach>`, and the disposition says so.'
+W30T_TRIAGE='A finding is a triage item, never a task.'
+w30t_pin "DISPOSITION-0: P1 — steps/6.md opens on the cost-model sentence" "$W30T_P1" "$STEP6_MD"
+expect_eq "DISPOSITION-0b: …as the first sentence under the heading" "$W30T_P1" \
+  "$(awk '/^### Step 6/ { on = 1; next } on && NF { print; exit }' "$STEP6_MD" | sed 's/^\(.\{0,'"${#W30T_P1}"'\}\).*/\1/')"
+w30t_pin "DISPOSITION-1: AC-2.1 — the orchestrator brings every finding with severity and a recommendation" "$W30T_FD1" "$STEP6_MD"
+w30t_pin "DISPOSITION-2: …the user rules the set" "$W30T_FD2" "$STEP6_MD"
+w30t_pin "DISPOSITION-3: …a row exists only from that ruling" "$W30T_FD3" "$STEP6_MD"
+w30t_pin "DISPOSITION-4: …the one row the orchestrator may make alone, and that it says so" "$W30T_FD4" "$STEP6_MD"
+w30t_pin "DISPOSITION-5: …a finding is a triage item, never a task" "$W30T_TRIAGE" "$STEP6_MD"
+W30T_DEAL1='at `single` the critic holds `evidence`, `adversarial` and `structure`; at `double` the auditor holds `evidence` and the critic the other two.'
+w30t_pin "DISPOSITION-6: the two levels' dealing is said in the step" "$W30T_DEAL1" "$STEP6_MD"
+w30t_pin "DISPOSITION-7: …and that structure is a question the critic holds, its reuse and one-site findings rated on the debt table" 'There is no third reader: `structure` is a question the critic holds, and its `reuse` and `one-site` findings are rated on the debt table.' "$STEP6_MD"
+for _w30g in 'Each landing is read' 'The read after a fix' 'Three questions are read at every rigor' 'live:head:<q>' 'reviewer'; do
+  expect_eq "DISPOSITION-8: …and steps/6.md no longer carries '${_w30g}'" "" "$(w26_hits "$_w30g" "$STEP6_MD")"
+done
+w30t_pin "DISPOSITION-9 precondition: the record-and-fact paragraph and the waiver are kept beside the absences" '**The waiver is the user'"'"'s.**' "$STEP6_MD"
+w30t_pin "DISPOSITION-10: a debt finding is recorded at the disposition, not ruled on" 'A debt finding is not brought for a ruling: its disposition is burn-when-touched, and the orchestrator records it at the disposition with `session-poker.sh debt add <record>` (`## Debt ledger` in `operational-rules.md`).' "$STEP6_MD"
+expect_eq "DISPOSITION-1m: a steps/6.md without the disposition's first sentence is caught" "" "$(w26_hits "$W30T_FD1" "$(w30t_cut "$STEP6_MD" "$W30T_FD1")")"
+expect_nonempty "DISPOSITION-1m precondition: …the doctored copy keeps the next sentence" "$(w26_hits "$W30T_FD2" "$(w30t_cut "$STEP6_MD" "$W30T_FD1")")"
+
+# --- §STOP-RULES (AC-2.2) and §ONLY-READERS-RATE (AC-10.4) ---
+W30T_SR1='In-diff only: a finding in code the run did not change is a next-wave item unless it is S1.'
+W30T_SR2='Three fixes on one component stop the run.'
+W30T_SR3='A fix row is never re-read by a fresh pass.'
+W30T_ORR='Only readers rate: a finding'"'"'s severity and reach are written by the reader that found it, and no agent, the orchestrator included, moves a rating in either direction; a user'"'"'s re-rating is recorded with attribution.'
+for _w30s in "$W30T_SR1" "$W30T_SR2" "$W30T_SR3"; do
+  w30t_pin "STOP-RULES-1: AC-2.2 — '${_w30s:0:30}…'" "$_w30s" "$STEP6_MD" "$W30T_CRITIC" "$W30T_SEV" "$W30T_SEV_BLOCK"
+done
+w30t_pin "ONLY-READERS-RATE-1: AC-10.4 — the sentence" "$W30T_ORR" "$STEP6_MD" "$W30T_SEV" "$W30T_SEV_BLOCK"
+expect_nonempty "ONLY-READERS-RATE-2: …and the scale still carries its rule that a brief never re-rates" "$(w26_hits 'A brief never re-rates' "$W30T_SEV")"
+expect_eq "STOP-RULES-1m: a critic role file missing the first rule is caught" "" "$(w26_hits "$W30T_SR1" "$(w30t_cut "$W30T_CRITIC" "$W30T_SR1")")"
+expect_nonempty "STOP-RULES-1m precondition: …the doctored copy keeps the second rule" "$(w26_hits "$W30T_SR2" "$(w30t_cut "$W30T_CRITIC" "$W30T_SR1")")"
+expect_eq "ONLY-READERS-RATE-1m: a severity scale missing the sentence is caught" "" "$(w26_hits "$W30T_ORR" "$(w30t_cut "$W30T_SEV" "$W30T_ORR")")"
+expect_nonempty "ONLY-READERS-RATE-1m precondition: …the doctored copy keeps the scale" "$(w26_hits 'S1 Critical' "$(w30t_cut "$W30T_SEV" "$W30T_ORR")")"
+
+# --- the role files (AC-1.3) ---
+W30T_CR='`adversarial` and `structure` at both rigors, and `evidence` too at `single`. You read once, at Step 6, the settled whole.'
+W30T_AU='Dealt `evidence` at `double` only; at `single` the critic holds it.'
+w30t_pin "ROLES-1: AC-1.3 — the critic is dealt adversarial and structure at both rigors, evidence too at single, and reads once" "$W30T_CR" "$W30T_CRITIC"
+w30t_pin "ROLES-2: …the auditor is dealt evidence at double only" "$W30T_AU" "$W30T_AUDITOR"
+for _w30r in 'at every rigor' 'others too at lower rigor'; do
+  expect_eq "ROLES-3: …and the critic no longer says '${_w30r}'" "" "$(w26_hits "$_w30r" "$W30T_CRITIC")"
+done
+w30t_pin "ROLES-4: …the critic's description follows" 'Dealt `adversarial` and `structure` at both rigors, `evidence` too at `single`; reads once, at Step 6;' "$W30T_CRITIC" "${REPO}/agents-src/templates/critic.md.tmpl"
+w30t_pin "ROLES-5: …written in the templates, so a render keeps it" "$W30T_CR" "${REPO}/agents-src/templates/critic.md.tmpl"
+w30t_pin "ROLES-6: …the auditor's too" "$W30T_AU" "${REPO}/agents-src/templates/auditor.md.tmpl"
+# operational-rules.md says the same table SKILL.md does (AC-1.3).
+w30t_table() { /usr/bin/grep -E '^\| (readers|when \(`review-cadence:`\)|becomes a row unasked \(`fix-policy:`\)|cap on review-born rows \(`fix-cap:`\)) \|' "$1" 2>/dev/null; }
+expect_eq "ROLES-7 precondition: SKILL.md's rigor table yields its four rows" "4" "$(w30t_table "$SKILL_MD" | awk 'END { print NR }')"
+expect_eq "ROLES-7: AC-1.3 — operational-rules.md says the same table, row for row" "$(w30t_table "$SKILL_MD")" "$(w30t_table "$OPRULES")"
+sed 's/| 10% of the plan |/| 20% of the plan |/' "$OPRULES" > "$TMP/w30t-ops-drift.md" 2>/dev/null
+expect_ne "ROLES-7m: an operational-rules.md whose cap row drifts is caught" "$(w30t_table "$SKILL_MD")" "$(w30t_table "$TMP/w30t-ops-drift.md")"
+
+# --- §P3: the classes, the matrix sentence, the Step-4 fields, the handoff, the review-follows-the-build paragraph ---
+W30T_P3='Findings are classed by payment date, not by reader: harm (the user, now), evidence (the claim, now), debt (the next change). The reader roster follows from the classes, not the other way round.'
+w30t_pin "P3-1: P3 — SKILL.md says findings are classed by payment date, and the roster follows" "$W30T_P3" "$SKILL_MD"
+w30t_pin "P3-2: D4 — the rigor paragraph says what a level sets, each the user's to set at Step 0" '`single` (one) or `double` (two). A level sets four things, each the user'"'"'s to set at Step 0: the readers, `review-cadence:`, `fix-policy:` and `fix-cap:`.' "$SKILL_MD"
+w30t_pin "P3-3: A-orch-49 — the matrix sentence is where a reader of Step 3 meets it" 'Step 3 renders the matrix (`matrix-render`); Step 5 fills values.' "$SKILL_MD"
+w30t_pin "P3-4: A-orch-9 — the Step-4 fields are owed at every scale" 'pointer, plus `worktree:`/`base-sha:`/`branch:`, owed at every scale and whatever `use_worktree:` says; `current 4` fills them at wave scale' "$SKILL_MD"
+expect_eq "P3-4b: …and no longer 'when use_worktree: true'" "" "$(w26_hits 'when `use_worktree: true`' "$SKILL_MD")"
+w30t_pin "P3-5: A-orch-52 — the first handoff run keeps only the five human lines" 'The first run over a hand-written section keeps only its five human lines.' "$SKILL_MD"
+w30t_pin "P3-6: the rigor floors are in the new words" 'at `task`, `bugfix`→`single` and `build`/`refactor`/`tune`→`double`; at `wave` and above, `double`' "$SKILL_MD"
+W30T_DISP='**Review follows the build:** the plan carries one read row per reader the rigor deals, `reads: approval:plan, head`, ready once the last build row lands; it reads the settled whole once, `proof-add review` registers it, and its findings go to the review findings disposition (`steps/6.md`). A whole read with a settled head covers cross-piece problems.'
+w30t_pin "P3-7: P1 — dispatch.md's Review follows the build is one read row per reader on the settled whole" "$W30T_DISP" "$DISPATCH_MD" "${BLOCK_DIR}/orchestrator-dispatch.md"
+for _w30d in 'a read row per reader' 'for every landed difference'; do
+  expect_eq "P3-7b: …and no longer '${_w30d}'" "" "$(w26_hits "$_w30d" "$DISPATCH_MD")"
+done
+# The old words are not taught as levels in the files this row owns. The six: three the mapping sentence
+# named and three it renamed; the pin reads backticked words and the 'rigor' phrases, not the English adjectives.
+W30T_OLD_RE='`(low|medium|high)`|(low|medium|high) rigor|(tested|peer-reviewed|audited)'
+for _w30o in "$SKILL_MD" "$STEP0_MD" "$STEP6_MD" "$W30T_CRITIC" "$W30T_AUDITOR"; do
+  expect_eq "P3-8: AC-1.4 — no old level word in ${_w30o#"$REPO"/}" "" "$(_flatten "$_w30o" | /usr/bin/grep -oE "$W30T_OLD_RE" | sort -u | tr '\n' ' ')"
+done
+expect_nonempty "P3-8 precondition: the same extractor finds a level word in a doctored copy" "$(_flatten "$(w26_doctor "$SKILL_MD" 'At `high` rigor the critic holds structure.')" | /usr/bin/grep -oE "$W30T_OLD_RE")"
+
+# --- §DEBT-LEDGER (AC-11.2; P2, P3) ---
+W30T_OPS_SEC="$(awk '/^## Debt ledger$/ { on = 1; next } /^## / { on = 0 } on' "$OPRULES" 2>/dev/null)"
+expect_nonempty "DEBT-LEDGER-1: AC-11 — operational-rules.md carries a ## Debt ledger section" "$W30T_OPS_SEC"
+W30T_SHAPE='concept | kind | sites | raised-by <record> | touches N | burned <row> | —'
+expect_contains "DEBT-LEDGER-2: …with the file shape" "$W30T_SHAPE" "$W30T_OPS_SEC"
+expect_contains "DEBT-LEDGER-2b: …at record/<run>/debt.md" '<docs-root>/record/<run>/debt.md' "$W30T_OPS_SEC"
+for _w30l in 'harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change)' 'burn-when-touched' 'touches' '`session-poker.sh debt add <reading record>`' '`debt touched <concept>`' '`debt burn <concept> <row>`' '`debt list`' '`debt adopt <continuation>`' 'debt: touched N · burned M'; do
+  expect_contains "DEBT-LEDGER-3: …and says ${_w30l}" "$_w30l" "$W30T_OPS_SEC"
+done
+expect_contains "DEBT-LEDGER-4: …the touch counter's rule" 'A brief whose `Files:` touch an item'"'"'s concept adds one to its `touches`; the item with the highest count burns first.' "$(_flatten <(printf '%s\n' "$W30T_OPS_SEC"))"
+W30T_ADOPT_CO='The next run'"'"'s Step 1 adopts them: right after its card it runs `session-poker.sh debt adopt <newest continuation>`.'
+W30T_ADOPT_S1='Right after the card, run `session-poker.sh debt adopt <newest continuation>`: it writes each carried `debt:` item into this run'"'"'s ledger, once, with its touches kept.'
+w30t_pin "DEBT-LEDGER-5: A-orch-44 — operational-rules' close-out section says Step 1 adopts the carried debt" "$W30T_ADOPT_CO" "$OPRULES"
+w30t_pin "DEBT-LEDGER-6: …and steps/1.md says to run adopt right after the card" "$W30T_ADOPT_S1" "$STEP1_MD"
+sed 's/^## Debt ledger$/## Debts/' "$OPRULES" > "$TMP/w30t-ops-nosec.md" 2>/dev/null
+expect_eq "DEBT-LEDGER-1m: an operational-rules.md without the heading is caught" "" "$(awk '/^## Debt ledger$/ { on = 1; next } /^## / { on = 0 } on' "$TMP/w30t-ops-nosec.md")"
+expect_nonempty "DEBT-LEDGER-1m precondition: …the doctored copy keeps the debt ledger row" "$(w30l_row "$TMP/w30t-ops-nosec.md")"
+
 
 finish

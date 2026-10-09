@@ -28,7 +28,7 @@
 #
 # EVERY INNER BOUND SITS STRICTLY UNDER ITS HOOK'S REGISTRATION, MARGIN NAMED.
 #
-#   IMPACT_BOUND_S    = 10   under hooks/dispatch-preflight.sh's  15   margin 5
+#   IMPACT_BOUND_S    = 20   under hooks/dispatch-preflight.sh's  25   margin 5
 #   LG_IMPACT_BOUND_S =  6   under hooks/stop.sh's  "timeout": 10       margin 4
 #
 # The registrations are hooks/hooks.json's, one per hook, and the margin is what
@@ -69,20 +69,43 @@
 # that never returns. The wait has to end on OUR terms, before the CLI ends it on
 # its own; the only question is where, and the answer differs by host.
 #
-# ── IMPACT_BOUND_S = 10 — THE DISPATCH WALL'S, UNDER A 15 s REGISTRATION ─────
+# ── IMPACT_BOUND_S = 20 — THE DISPATCH WALL'S, UNDER A 25 s REGISTRATION ─────
 #
 # hooks/dispatch-preflight.sh is a PreToolUse hook, and what it is guarding
 # against is a dispatch that proceeds with no roster row and therefore no budget
 # at all (dispatch-preflight.sh's own note).
 #
-# IT DOES NOT HAVE ROOM TO WAIT AS LONG AS IT LIKES, which is what this paragraph
-# used to say. It has exactly its registration, and the shipped 20 s sat above
-# it: on the machine the CLI killed the hook at 10 s, the refusal became a pass,
-# and the wall was defeated by the cost of the wall — the precise failure the
-# bound was written to prevent. Both numbers moved to close that (D1): the
-# registration to 15 s, because a wedged session's patience will carry it, and
-# the bound to 10 s, which is far above any derivation that is merely slow and
-# five seconds clear of the kill.
+# IT DOES NOT HAVE ROOM TO WAIT AS LONG AS IT LIKES. It has exactly its
+# registration: a shipped 20 s once sat above a 10 s registration, the CLI killed
+# the hook first, the refusal became a pass, and the wall was defeated by the cost
+# of the wall (wave-14 D1, which moved the pair to 10 under 15).
+#
+# WHY IT MOVED AGAIN, TO 20 UNDER 25 (wave-30 T35, A-orch-78/79). The cache makes
+# every derivation after the first at one tree state cheap; the FIRST is the cold
+# build, and the tree grew into the bound. Measured on an idle machine: 8.5 s, and
+# 10.34 s for the orchestrator's own reading (warm: 0.16-0.20 s); the wall's whole
+# drive over a brief naming one absent suite took 9.23 s against 10. So at idle the
+# cold build sat within a second of the bound, and under a wave's load it went past.
+#
+# WHAT HAPPENS PAST IT IS ALREADY RIGHT, AND STAYS SO: the wall fails closed. The
+# overrun is a REFUSAL ("the impact command timed out after N s"), no roster row is
+# written, and a refused dispatch is never an admitted one with an empty set
+# (tests/dispatch-preflight.test.sh §29a at this number; dispatch-preflight-3 §33f
+# on the absent-suite brief, whose §33e reads the verdict, not the exit status).
+#
+# THE STRUCTURAL FIX IS THE WARM, NOT THIS NUMBER. A landing changes the tree state
+# and so invalidates the graph; lib/line.sh's publish now runs the impact command
+# once in the checkout it moved, in the background, so the first dispatch after a
+# landing finds the graph built. What 20 buys is HEADROOM for the cold builds the
+# warm cannot reach (a tree state no landing made: a by-hand edit, a merge from
+# outside the line) — about twice the measured cold time, still a hang guard.
+#
+# THE WALL HAS A DEADLINE OF ITS OWN, AND THIS SITS UNDER IT. DP_DEADLINE_S in
+# hooks/dispatch-preflight.sh bounds the whole hook, 3 s under the registration
+# (22 under 25); its ALRM trap runs between commands, and this bound's poll is a
+# run of them, so a deadline at or under this number would refuse first and the
+# headroom would buy nothing. The order is bound < deadline < registration, all
+# three read and pinned at tests/cross-gate-agreement.test.sh §L.4c.
 #
 # ── LG_IMPACT_BOUND_S = 6 — THE LANDING GATE'S, AND WHY IT IS SHORTER ────────
 #
@@ -115,5 +138,5 @@
 # [WALL: tests/dispatch-preflight.test.sh]
 # [WALL: tests/cross-gate-agreement.test.sh §L.4c]
 
-IMPACT_BOUND_S=10
+IMPACT_BOUND_S=20
 LG_IMPACT_BOUND_S=6

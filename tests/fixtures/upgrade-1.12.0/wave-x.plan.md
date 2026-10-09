@@ -3,7 +3,7 @@ governing-skill: superpowers:writing-plans
 sdlc-step: 3
 epic: epic-x
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 canonical_sdlc_version: 14
 surface_type: cli-plugin
@@ -39,7 +39,7 @@ integration-branch: main
 working-branch: wave/x
 base: main @ 0000000
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 approved-by: fixture 2026-01-01T00:00Z "approved"
 current: 4

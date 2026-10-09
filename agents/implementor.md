@@ -38,6 +38,9 @@ Zero discretion. Ambiguity, a missing interface, or a plan contradiction means S
   the pattern and the paths searched, so a reader can re-run the search:
   `reuse: searched '<pattern>' in <paths> · reused <site>` or
   `reuse: searched '<pattern>' in <paths> · none fits: <why>`.
+- **A message reaches you only when you are idle.** A blocking question goes to the orchestrator
+  by SendMessage, then end your turn: the reply resumes you. Send a non-blocking one and keep
+  working; its answer is read at your next idle.
 <!-- IMPLEMENTOR-MECHANICS-END -->
 
 ## Shared core

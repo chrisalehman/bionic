@@ -2,4 +2,6 @@
 
 <!-- INJECT: orchestrator-dispatch -->
 
+**No store in a suite.** The runner hands every suite an environment with no gate store: `tests/run.sh` strips `BIONIC_GATE_DIR` from each worker's suite process, and a runner exports none itself. A suite that needs a store makes its own fixture.
+
 <!-- INJECT: brief-scaffold -->

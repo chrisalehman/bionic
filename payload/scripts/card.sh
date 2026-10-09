@@ -47,6 +47,7 @@
 #     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (the Step 0 card's rigor line)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
+#     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -70,7 +71,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/root.sh"
 # THE TWO LIBRARIES THE STEP-3 CARD ASKS ITS LAST TWO QUESTIONS OF (epic-23
 # wave-18-fixit-185, T10; REQ-4 D9, REQ-3 AC-3.4). `roots.sh` owns the ONE reading of
-# `.bionic/config.yaml`, so the floor line names what the dispatch wall and the landing
+# `.bionic/config.yaml`, so the regression line names what the dispatch wall and the landing
 # gate name; `fill.sh` owns the ONE computation of "which rows may run now", so a
 # per-batch width on the approval card is the same answer the tick will give when the
 # batch comes up. Neither is re-implemented here: a card that counted rows its own way
@@ -79,8 +80,8 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/roots.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/fill.sh"
-# THE ONE READING OF A RIGOR WORD (wave-28 T44; REQ-16 AC-16.2, D35). A card prints a level by
-# its new word with its label and meaning, `rigor_print`, whichever vocabulary the plan carries.
+# THE ONE READING OF A RIGOR WORD (wave-28 T44; wave-30 T11, D1). A card prints a level with its
+# meaning, `rigor_print`; a word that is no level is printed as such, never read as one.
 # And `budget_cap`, the one reader of a person's writer cap (wave-28 T9; D15).
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/run.sh"
@@ -97,7 +98,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>, or card.sh inherited <requirements file>\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -1119,10 +1120,10 @@ _card_branches() {
   _card_rstrip "    $(_card_pad integration 14)$(_card_pad "$ib" 22)(Step 8 merges here)"; printf '\n'
 }
 
-# ── THE FLOOR, WHICH IS CONFIGURED AND NOT ASSUMED (D9, AC-4.3) ──────────────
+# ── THE REGRESSION, WHICH IS CONFIGURED AND NOT ASSUMED (D9, AC-4.3) ─────────
 #
 # THE LINE USED TO BE A LITERAL. `floor tests/run.sh` was typed into the Verification
-# line's format string, over a skill picture that says `floor <suite>` — so the card
+# line's format string, over a skill picture that said `floor <suite>` — so the card
 # asserted a fact about a project it had never asked, at the one gate whose entire job
 # is to be true, and it asserted the same one in a project that has no `tests/run.sh`.
 # The configured answer is `impact-command:` in `.bionic/config.yaml`, which is what
@@ -1130,11 +1131,11 @@ _card_branches() {
 # read, through the SAME `config_value` this calls — one reading of one file.
 #
 # UNDER THE PLAN'S ROOT, NOT THE RENDERER'S. A card is often rendered from a worktree
-# or from an orchestrator standing somewhere else entirely, and the floor that governs
+# or from an orchestrator standing somewhere else entirely, and the regression that governs
 # a plan is the one configured where the plan LIVES.
 #
 # AN UNCONFIGURED ROOT PRINTS AN EM DASH, the card's own spelling for "declared
-# nothing" (`_card_branches`'s "not declared", the ledger's `—`), because a floor this
+# nothing" (`_card_branches`'s "not declared", the ledger's `—`), because a regression this
 # file invented is exactly the defect being closed.
 _card_plan_root() {  # <plan path> -> the project root it resolves under, or ""
   local d
@@ -1143,7 +1144,8 @@ _card_plan_root() {  # <plan path> -> the project root it resolves under, or ""
   project_root "$d" 2>/dev/null
 }
 
-_card_floor() {  # <plan path> -> the configured impact command, or an em dash
+_card_floor() {  # <plan path> -> the configured impact command, or an em dash (the regression line's;
+  # the name keeps the word floor, an identifier, wave-30 T23)
   local root floor=""
   root="$(_card_plan_root "${1:-}")"
   [ -n "$root" ] && floor="$(config_value "$root" "impact-command" "")"
@@ -1501,6 +1503,11 @@ _card_disposals() {  # <requirements file> -> `<adopted|again|closed>\t<id>\t<li
 # _card_inherited <requirements file> -> one `<open|adopted|again|closed>\t<deferred line>` per line of
 # the predecessor's `## Deferrals`, in its order and as written, then one `unknown\t<disposal line>`
 # per disposal naming none of them. The first disposal of an id is the one that counts.
+#
+# A CARRIED DEBT LINE (wave-30 T32; REQ-11 AC-11.2) is read beside them: `debt: <concept> <kind> "<sites>"
+# touches=<N> raised-by=<record> from=<wave>`, close-out's co_debts form, prints `open\t<line>`, so the
+# Step 1 card lists it. One that does not parse prints `unknown\t<line>`. No disposal reaches it: it names
+# no id, and it is faced by `session-poker.sh debt adopt`, which writes it into the run's ledger.
 _card_inherited() {
   local root cont slug
   root="$(_card_plan_root "$1")"
@@ -1524,6 +1531,9 @@ _card_inherited() {
       split($0, f, /[ \t]+/); seen[f[2]] = 1
       print ((f[2] in kind) ? kind[f[2]] : "open") "\t" $0
     }
+    s && /^debt:[ \t]/ {
+      print (($0 ~ /^debt:[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]+"[^"]*"[ \t]+touches=[0-9]+[ \t]+raised-by=[^ \t]+[ \t]+from=[^ \t]+[ \t]*$/) ? "open" : "unknown") "\t" $0
+    }
     END { for (i = 1; i <= m; i++) if (!(ord[i] in seen)) print "unknown\t" said[ord[i]] }' "$cont"
 }
 
@@ -1534,11 +1544,21 @@ _card_inherit_refuse() {  # <the disposal line>
   exit 2
 }
 
+_card_debt_refuse() {  # <the debt line>
+  printf 'card.sh: step1 refused — the newest continuation carries a debt: line that does not parse\n  %s\n' \
+    "$1" >&2
+  exit 2
+}
+
 _card_step1() {  # <citation path> <artifact path as given>
   local inh l
   inh="$(_card_inherited "$2")"
   l="$(printf '%s\n' "$inh" | sed -n "s/^unknown${CARD_TAB}//p" | head -1)"
-  [ -z "$l" ] || _card_inherit_refuse "$l"
+  case "$l" in
+    '') ;;
+    debt:*) _card_debt_refuse "$l" ;;
+    *) _card_inherit_refuse "$l" ;;
+  esac
   printf 'Step 1 · Requirements\n\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
   printf '\n'
@@ -1569,7 +1589,7 @@ _card_step1() {  # <citation path> <artifact path as given>
 # no eval design to count: the card shows the paragraph, names the artifact, and asks
 # its question. It does NOT offer `show evals` or `explain <decision>`, because a card
 # that offers an affordance over content it is not carrying is the same lying surface
-# the floor line was.
+# the regression line was.
 _card_step2_task() {  # <citation path>
   local d="$WCARD_DESIGN"
   [ -n "$d" ] || d="$WCARD_GOAL"
@@ -1785,7 +1805,7 @@ _card_step2_view() {  # <artifact path as given> <args...>
 
 # TWO PATHS, AND THEY ARE NOT THE SAME PATH. `$1` is the CITATION — the
 # project-root-relative spelling the Artifacts block prints — and `$2` is the path as
-# the caller gave it, which is what the floor and the batch widths must be read from:
+# the caller gave it, which is what the regression and the batch widths must be read from:
 # a citation is for a reader to open, and `.bionic/docs/plans/…` resolves against the
 # renderer's own cwd rather than against the plan.
 #
@@ -1806,7 +1826,6 @@ _card_step3() {  # <citation path> <artifact path as given>
   _card_branches
   printf '\n'
   CARD_ROWS=( ${WCARD_TROW[@]+"${WCARD_TROW[@]}"} )
-  [ "$CARD_SCALE" != "task" ] || _card_rigor_cells
   _card_render_batch task
   printf '\n'
   if [ "$CARD_SCALE" = "task" ]; then
@@ -1818,9 +1837,9 @@ _card_step3() {  # <citation path> <artifact path as given>
   else
     _card_chain_block "$2"
   fi
-  # THE RIGOR HAS A LINE OF ITS OWN: its label and meaning do not fit beside a configured floor
+  # THE RIGOR HAS A LINE OF ITS OWN: its label and meaning do not fit beside a configured regression
   # inside the line budget, and the level is what the approval reads at a glance.
-  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s\n    %s\n' \
+  printf '\n  Verification\n    %s matrix rows · regression %s · walk %s\n    %s\n' \
     "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "$(_card_rigor_line "$WCARD_RIGOR")"
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
@@ -1830,25 +1849,13 @@ _card_step3() {  # <citation path> <artifact path as given>
 
 # ── THE REVIEW RIGOR, PRINTED (wave-28 T44; AC-16.2) ─────────────────────────
 #
-# A level prints as `review rigor: <level> (<n> independent reader[s])` and never by an old word.
-# A plan that declares no rigor, or a word that is no level, says so in place of the level; a
-# task-scale row's rigor cell prints the level's word alone (the column is headed `rigor`, and the
-# meaning is the Verification line's), and a cell that names no level prints as it is written.
+# A level prints as `review rigor: <level> (<one|two> independent mind[s])`, `single` or `double`.
+# A plan that declares no rigor, or a word that is no level (a word before 1.14.0 among them), says
+# so in place of the level. A task-scale row's rigor cell prints as it is written: a level is
+# already its own word, and the evidence gate refuses a cell that names none.
 _card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification block's rigor phrase
   [ -n "${1:-}" ] || { printf 'review rigor: not declared'; return 0; }
-  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (low, medium or high)" "$1"
-}
-_card_rigor_cells() {  # rewrites CARD_ROWS' third cell (a task row's rigor) to its level
-  local i row id rest cell tail lvl
-  for i in ${CARD_ROWS[@]+"${!CARD_ROWS[@]}"}; do
-    row="${CARD_ROWS[$i]}"
-    id="${row%%"$CARD_TAB"*}"; rest="${row#*"$CARD_TAB"}"
-    [ "$rest" != "$row" ] || continue
-    tail="${rest#*"$CARD_TAB"}"; [ "$tail" != "$rest" ] || continue
-    cell="${tail%%"$CARD_TAB"*}"
-    lvl="$(rigor_level "$cell")" || continue
-    CARD_ROWS[$i]="${id}${CARD_TAB}${rest%%"$CARD_TAB"*}${CARD_TAB}${lvl}${tail#"$cell"}"
-  done
+  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (single or double)" "$1"
 }
 
 # ── ONE BATCH, RENDERED ──────────────────────────────────────────────────────
@@ -1889,13 +1896,23 @@ case "$1" in
   rigor)
     [ "$#" -eq 2 ] || _card_usage "rigor takes exactly one word (got $(( $# - 1 )))"
     rigor_print "$2" && exit 0
-    printf "card.sh: '%s' is no review rigor — use low, medium or high\n" "$2" >&2
+    printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2
     exit 1 ;;
   inherited)
     # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that
     # names no file disposes of nothing; its name still says whose run it is.
     [ "$#" -eq 2 ] || _card_usage "inherited takes exactly one requirements file path (got $(( $# - 1 )))"
-    _card_inherited "$2" | /usr/bin/grep -v "^unknown${CARD_TAB}"
+    # The carry of a debt is the ledger's (close-out's co_debts), so a debt line read from here would be
+    # carried twice: the card lists it, this reading withholds it (A-T32.2).
+    _card_inherited "$2" | /usr/bin/grep -v -e "^unknown${CARD_TAB}" -e "^open${CARD_TAB}debt: "
+    exit 0 ;;
+  inherited-debt)
+    # THE DEBT LINES THE READING ABOVE WITHHOLDS (wave-30 T23; A-orch-44): `card.sh inherited-debt
+    # <requirements file>` prints each open `debt:` line of the newest continuation, as written. An item
+    # nobody ran `debt adopt` on is in no ledger, so close-out re-carries it from here unless its run's
+    # ledger holds the concept and kind; withheld above, it was dropped at the next close-out.
+    [ "$#" -eq 2 ] || _card_usage "inherited-debt takes exactly one requirements file path (got $(( $# - 1 )))"
+    _card_inherited "$2" | awk -F '\t' '$1 == "open" && index($2, "debt: ") == 1 { print substr($0, 6) }'
     exit 0 ;;
   step1|step2|step3)
     if [ "$1" = step2 ]; then

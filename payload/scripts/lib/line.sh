@@ -495,7 +495,35 @@ EOF
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
+  # 11. THE WARM (wave-30 T35): the impact cache of the checkout just moved, in the background.
+  _line_warm "$root" "$co" "$rec" "$row" "$cand"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
+  return 0
+}
+
+# THE WARM (wave-30 T35; A-orch-79). The dispatch wall derives a brief's suite set with the project's
+# `impact-command:`, bounded under its hook's registration (lib/bounds.sh), and tests/lib/impact.sh
+# caches the graph it builds per tree state. A landing changes the tree state, so the first dispatch
+# after it paid the cold build, measured 8.5-10.3 s on an idle machine: within a second of the
+# bound, and past it under a wave's load, where the wall refuses. This asks the command once, over
+# tests/run.sh, in the checkout the fast-forward moved, so that dispatch finds the graph built.
+#
+# IN THE BACKGROUND, AS A FRESH PROCESS. The publish is read through `$(line_publish … 2>&1)` by its
+# carriers, and a child holding that pipe holds the landing until it ends. Redirecting 0-2 is not
+# enough: bash 3.2 keeps the caller's fd 2 on a saved high descriptor for the length of a redirected
+# function call, and a `( … ) &` subshell inherits it (measured: the carrier waited out a 60 s warm).
+# The saved descriptor is close-on-exec, so the warm is an exec'd `bash -c`, never a subshell of
+# this one. Its output goes to a log under the record's line/ directory, ending `rc=<n>`.
+# NOTHING IS WARMED WHEN NO CHECKOUT MOVED (an update-ref publish changes no working tree, so no
+# cache it keys went stale) or when no impact command is configured. It is a cost saving, never a gate: its failure is the log's alone.
+_line_warm() {  # <root> <checkout or empty> <record> <row> <commit>
+  local cmd log
+  [ -n "$2" ] || return 0
+  cmd="$(config_value "$1" impact-command "" 2>/dev/null)"
+  [ -n "$cmd" ] || return 0
+  log="$(_line_suite_log "$3" "$4" impact-warm "$5")"
+  # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
+  bash -c 'cd "$1" || exit 1; shift; "$@"; echo "rc=$?"' _ "$2" $cmd tests/run.sh </dev/null >"$log" 2>&1 &
   return 0
 }
 
@@ -727,6 +755,42 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
 }
 
 _line_owed() { printf 'landed %s %s — owed: complete task %s, then stop %s\n' "$1" "$2" "$1" "$3"; }   # <row> <commit> <name>
+# THE ROW'S DEBT (wave-30 T22; D2, P2, AC-11.3): `debt: burned <N>, touched <M>` for <row>, when the run
+# keeps a debt ledger (lib/proof.sh `proof_debt_row_counts`): N the items whose last cell says `burned
+# <row>`, M the items one of whose sites the row's `Files` cell covers. Printed between LANDED and the
+# owed line, so the owed line stays the last line of ready's output. Nothing when there is no ledger.
+_line_debt() {  # <plan> <row>
+  local root led cell="" rec
+  if ! declare -F proof_debt_row_counts >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
+    declare -F proof_debt_row_counts >/dev/null 2>&1 || return 0
+  fi
+  root="$(_line_root "${1:-}")" || return 0
+  led="$(proof_debt_ledger_path "$root" "$1")" && [ -f "$led" ] || return 0
+  _wt_units_load || return 0
+  while IFS= read -r rec; do
+    [ "$(units_field "$rec" id)" = "$2" ] || continue
+    cell="$(units_field "$rec" Files)"; break
+  done <<LINE_DEBT_ROWS
+$(units_rows "$1" 2>/dev/null)
+LINE_DEBT_ROWS
+  # shellcheck disable=SC2046
+  set -- $(proof_debt_row_counts "$led" "$2" "$cell")
+  printf 'debt: burned %s, touched %s\n' "${1:-0}" "${2:-0}"
+}
+# THE REVIEW-BORN COUNT (wave-30 T21; REQ-2 AC-2.3, D4): `review-born rows: <N> of cap <M>`, N the plan's
+# `## SDLC State` lines carrying `born: review` (lib/units.sh `units_born`, the one place the count reads),
+# M its fix-cap: rendered (`units_fix_cap`; the rigor: level's default when the field is absent). Printed
+# after the debt line, so the owed line stays last. Nothing when the plan has neither field nor level.
+_line_review_born() {  # <plan>
+  local cap n
+  _line_load_run && _wt_units_load || return 0
+  declare -F units_fix_cap >/dev/null 2>&1 || return 0
+  cap="$(units_fix_cap "${1:-}")" && [ -n "$cap" ] || return 0
+  n="$(units_born "$1" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
+  printf 'review-born rows: %s of cap %s\n' "$n" "$cap"
+}
 _line_waiting() { printf 'WAITING %s — run again: %s\n' "$1" "$2"; }   # <row> <the same command>
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 
@@ -748,7 +812,7 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
     all="$(_line_entries "$rec" "$head")"
     first="$(printf '%s\n' "$all" | awk -F'\t' '$4 == "yes" && $7 != "stalled" { print $1; exit }')"
     ent="$(printf '%s\n' "$all" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')"
-    [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name"; return $?; }
+    [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name" "$plan"; return $?; }
     IFS=$'\t' read -r _ _ _ _ base cand _ _ _ cbase _ _ _ <<EOF
 $ent
 EOF
@@ -838,7 +902,7 @@ EOF
     said="$(line_publish "$plan" "$row" 2>&1)"; rc=$?
     case $rc in
       0) [ -z "$said" ] || printf '%s\n' "$said"
-         printf 'LANDED %s %s\n' "$row" "$cand"; _line_owed "$row" "$cand" "$name"; return 0 ;;
+         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_review_born "$plan"; _line_owed "$row" "$cand" "$name"; return 0 ;;
       3|75) : ;;
       4) [ -n "$held" ] || printf '%s\n' "$said"; held=1 ;;
       6) c="$(_wt_bionic_committed "$root" "$head" "$cand")"; c="${c%/}"
@@ -860,13 +924,13 @@ _line_ahead_open() {  # <entries> <row> <candidate>
 
 # The entry left the fold while its carrier ran: a person's own git merge carried it (published
 # kind=git), or something else closed it.
-_line_closed() {  # <rec> <row> <name>
+_line_closed() {  # <rec> <row> <name> [<plan>]
   local last
   last="$(awk -F'|' -v r="row=$2" '$3 == r && ($2 == "ev=published" || $2 == "ev=returned") { l = $0 } END { print l }' "$1" 2>/dev/null)"
   case "$last" in
     *'|ev=published|'*)
       last="${last#*|commit=}"; last="${last%%|*}"
-      printf 'LANDED %s %s\n' "$2" "$last"; _line_owed "$2" "$last" "$3"; return 0 ;;
+      printf 'LANDED %s %s\n' "$2" "$last"; [ -z "${4:-}" ] || { _line_debt "$4" "$2"; _line_review_born "$4"; }; _line_owed "$2" "$last" "$3"; return 0 ;;
   esac
   printf '%s\n' "${last:-RETURNED ${2}}"; return 1
 }

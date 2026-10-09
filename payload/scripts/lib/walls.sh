@@ -845,7 +845,7 @@ evidence_line_field() {  # <text> <key> -> the value, or empty
 # the arm that explains what an approval is. This is the summary for the case where a
 # reader needs the SHAPE of the job, not the next line of it.
 #
-# THE LANE GUARD IS validate_dispatch_ledger's, verbatim (D7): wave|epic + `rigor: audited`
+# THE LANE GUARD IS validate_dispatch_ledger's, verbatim (D7): wave|epic + `rigor: double`
 # + `multi_agent: true`. Below it the checks this function folds are themselves inert, so
 # firing there would invent enforcement rather than summarise it.
 #
@@ -940,11 +940,11 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
                     { sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
 
   case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
-  # THE HIGHEST LEVEL, in either vocabulary (lib/run.sh `rigor_level`; wave-28 T44). This
-  # function is also sourced on its own (the plan-write hook, a suite), so the one definition
-  # is loaded from beside this file when the caller has not loaded it.
+  # THE DOUBLE LEVEL (lib/run.sh `rigor_level`; wave-28 T44; wave-30 T11, D1). This function is
+  # also sourced on its own (the plan-write hook, a suite), so the one definition is loaded from
+  # beside this file when the caller has not loaded it.
   declare -F rigor_level >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/run.sh" >/dev/null 2>&1
-  [ "$(rigor_level "$(_bf_fm_get "$plan_text" rigor)")" = "high" ] || return 0
+  [ "$(rigor_level "$(_bf_fm_get "$plan_text" rigor)")" = "double" ] || return 0
   [ "$(_bf_fm_get "$plan_text" multi_agent)" = "true" ] || return 0
 
   # (a) THE PRE-14 TABLE. `units_validate` is the one reader of `## Tasks` and already
@@ -1669,11 +1669,35 @@ printed a reason above this line, that is the cause. The commit is still refused
   return 0
 }
 
+# Per-tier required evidence keys — MIRROR of the canonical table in
+# skills/canonical-sdlc/steps/5.md ("Per-tier required keys"). Change THAT
+# table first; this function follows it. (R27)
+#
+# `evidence` (1a, D5) is the one SHARED key every tier owes on top of its own
+# — the AC block's record/ proof path — and it is listed LAST in every arm so
+# the loop that walks this list still blocks on a tier-specific key first when
+# one is missing (see the 'evidence' branch inside validate_matrix's loop).
+#
+# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT (wave-30 T14; REQ-6 AC-6.1, D9).
+# `session-poker.sh matrix-render` writes each AC block's stubs from this list, sourcing this
+# file in a subshell to read it, so the keys Step 3 renders and the keys the Verify gate
+# demands are one list and cannot drift. Its name collides with nothing the two sourcing
+# hooks define.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+keys_for_tier() {
+  case "$1" in
+    T0|T1) echo "tier-run readback evidence" ;;
+    T2)    echo "tier-run readback fixture-fidelity evidence" ;;
+    T3)    echo "tier-run fresh cold-client contact readback evidence" ;;
+    T4)    echo "user-confirmed evidence" ;;
+  esac
+}
+
 # ── the hook's body, carried whole ───────────────────────────────────────────
 #
 # EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
-# LINE TO ITS LAST `exit 0`, with ONE deletion: the `audit_path` copy, which is at file
-# scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
+# LINE TO ITS LAST `exit 0`, with TWO deletions: the `audit_path` copy and `keys_for_tier` (wave-30 T14),
+# both at file scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
 # note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
 # and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
 _eg_body() {
@@ -2138,6 +2162,18 @@ Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}' — the only suppor
   refuse exit2 commit "this plan declares an unsupported sdlc version" "set the supported version" "$_eg_detail"
 fi
 
+# THE PLAN'S RIGOR IS A LEVEL OR ABSENT (wave-30 T11; REQ-1 AC-1.4, D1). A `rigor:` that names no
+# level — a word before 1.14.0 among them — is refused here as the plan-write hook refuses it, so a
+# plan that predates the two levels cannot run under a guessed one. An absent key is the
+# plan-write hook's concern, not this gate's.
+# [WALL: tests/canonical-sdlc-evidence-gate-2.test.sh]
+if [ -n "$RIGOR" ] && ! rigor_level "$RIGOR" >/dev/null 2>&1; then
+  _eg_detail="canonical-sdlc evidence-gate: plan declares rigor: '$RIGOR', which is no review rigor (want single or double).
+Plan: $PLAN
+Fix: set 'rigor:' to single or double."
+  refuse exit2 commit "this plan's rigor is not single or double" "use single or double" "$_eg_detail"
+fi
+
 # Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
 # then require whole-value EQUALITY against the known token set. A token that
 # merely appears as a substring of a longer value ("resolved TODOs",
@@ -2212,11 +2248,11 @@ BIONIC_FINDING_CHANNEL="evidence-gate"
 BIONIC_FINDING_SUBJECT="$PLAN"
 bionic_finding_root() { audit_root; }
 
-# Normalize a task row's rigor cell to its effective rigor LEVEL — `low`, `medium` or `high`,
-# lib/run.sh `rigor_level`'s answer, so a cell in either vocabulary resolves to the same level
-# (wave-28 T44; REQ-16, D35): a cell naming a level, in the old word or the new, resolves to it; a
-# non-empty cell outside both is INVALID; an empty cell inherits the plan-level RIGOR's level
-# when that names one, else defaults to `low` (the floor — see plan Assumption A3). Defined ahead of validate_task_ledger (which
+# Normalize a task row's rigor cell to its effective rigor LEVEL — `single` or `double`, lib/run.sh
+# `rigor_level`'s answer (wave-28 T44; wave-30 T11, D1): a cell naming a level resolves to it; a
+# non-empty cell naming none (a word before 1.14.0 among them) is INVALID; an empty cell inherits
+# the plan-level RIGOR's level when that names one, else defaults to `single` (the floor — see plan
+# Assumption A3). Defined ahead of validate_task_ledger (which
 # runs at the `current: T<n>` branch, before is_r7_key is defined below) so the
 # validator can call it — same placement rationale as is_placeholder_value.
 effective_row_rigor() {  # $1 = row's rigor cell
@@ -2226,43 +2262,40 @@ effective_row_rigor() {  # $1 = row's rigor cell
     rigor_level "$cell" || echo "INVALID"
     return
   fi
-  rigor_level "$RIGOR" || echo "low"
+  rigor_level "$RIGOR" || echo "single"
 }
 
 # Total order over the rigor levels, for the per-row FLOOR check (task 4/8).
-# low < medium < high, on `rigor_level`'s answer, so either vocabulary ranks alike. An
-# empty/unknown value maps to 0 (the low floor) so an unset frontmatter rigor never
-# manufactures a phantom downgrade.
+# single < double, on `rigor_level`'s answer. An empty/unknown value maps to 0 (the single
+# floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 # The governing-skill hook ranks the same levels (`rigor_rank`); both read the word through
 # the one definition (wave-28 T44), and tests/cross-gate-agreement.test.sh §RIGOR holds the
-# two ranks equal on all six words.
-rigor_ord() {  # $1 = a rigor word, in either vocabulary (or empty)
+# two ranks equal on both levels.
+rigor_ord() {  # $1 = a rigor word (or empty)
   case "$(rigor_level "$1")" in
-    medium) echo 1 ;;
-    high)   echo 2 ;;
-    *)      echo 0 ;;  # low, empty, or unknown → the floor
+    double) echo 1 ;;
+    *)      echo 0 ;;  # single, empty, or unknown → the floor
   esac
 }
 
 # Is the independent auditor's verdict a WALL on this run? (B-10 / R-11.)
-# SKILL.md's rigor table: `tested` = "Both independent assurance roles.
-# Self-review only." — no auditor is ever sent, so demanding an auditor
-# CONFIRMED on every matrix row (and an `auditor:` pointer in the Step-5 block)
-# refused a `tested` run for the absence of a verdict its own rigor says nobody
-# was commissioned to write. B-10's repro: a bugfix · tested · task run refused
-# at current: 9 on "matrix row 'AC-1' auditor verdict is 'empty'".
+# SKILL.md's rigor table: at `single` the critic holds every question and no
+# auditor is ever sent, so demanding an auditor CONFIRMED on every matrix row
+# (and an `auditor:` pointer in the Step-5 block) refused a `single` run for
+# the absence of a verdict its own rigor says nobody was commissioned to write.
+# B-10's repro: a bugfix · single · task run refused at current: 9 on "matrix
+# row 'AC-1' auditor verdict is 'empty'".
 #
-# At `tested` the matrix's auditor column is NOT READ — any value, empty
-# included, passes — and the Step-5 pointer is not demanded. At
-# `peer-reviewed` (which adds the auditor) and `audited` both walls stand
-# unchanged.
+# At `single` the matrix's auditor column is NOT READ — any value, empty
+# included, passes — and the Step-5 pointer is not demanded. At `double`
+# (which adds the auditor) both walls stand unchanged.
 #
 # FAIL-CLOSED on an unknown or missing value: a plan that does not say what
 # rigor it runs at has not bought the relaxation, and a typo must not become a
 # bypass (same rationale as walk_mode's off-enum arm). This is deliberately
 # ASYMMETRIC with effective_row_rigor, which resolves an unknown frontmatter
-# rigor DOWN to the tested floor: there, the fallback picks a lane for a row
+# rigor DOWN to the single floor: there, the fallback picks a lane for a row
 # that must run in one; here, the fallback decides whether a wall stands.
 #
 # Scope: the MATRIX wall and the Step-5 pointer only. The task-ledger lanes
@@ -2272,8 +2305,8 @@ rigor_ord() {  # $1 = a rigor word, in either vocabulary (or empty)
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_auditor_required() {
   case "$(rigor_level "$RIGOR")" in
-    low) return 1 ;;
-    *)   return 0 ;;  # medium, high, and anything unrecognized
+    single) return 1 ;;
+    *)      return 0 ;;  # double, and anything unrecognized
   esac
 }
 
@@ -2308,12 +2341,10 @@ is_proof_shaped() {  # $1 = evidence value
 # invokes this once those upstream 4/1 presence/placeholder checks (and, for
 # the addressed row, the rigor-enum check) have already passed. BLOCKS
 # (exit 2) on any lane breach:
-#   - effective rigor peer-reviewed or audited: evidence must be proof-shaped.
-#   - status done AND effective rigor >= peer-reviewed AND the run has
-#     reached Step 6: evidence must name an `auditor` verdict.
-#   - status done AND effective rigor audited AND the run has reached Step 6:
-#     evidence must ALSO name a `critic` verdict.
-# The `tested` floor carries none of these demands — 4/1's presence +
+#   - effective rigor double: evidence must be proof-shaped.
+#   - status done AND the run has reached Step 6: the row owes the readings its
+#     effective rigor deals (`_eg_refuse_readings`).
+# The `single` floor carries no proof-shape demand — 4/1's presence +
 # placeholder checks are its entire contract (plan Assumption A4: the literal
 # substrings are sufficient tokens, no pointer-format sub-schema).
 #
@@ -2344,7 +2375,7 @@ _eg_verdicts_owed() {
 apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
   local id="$1" status="$2" eff="$3" ev="$4"
   case "$eff" in
-    medium|high)
+    double)
       if ! is_proof_shaped "$ev"; then
         _eg_detail="canonical-sdlc task ${id} evidence must show a command + counts, not prose, at review rigor ${eff} ('${ev}').
 Plan: $PLAN
@@ -2448,14 +2479,14 @@ _eg_refuse_readings() {
     $1 == "failing"    { print "- " $2 ": the newest reading is result=fail (evidence=" $3 "), and no waiver is newer" }')"
   # A DECLARED DEBT ALONE is not a reading (wave-27 T31; D23): its own fact and fix.
   if [ -z "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 != "debt"')" ]; then
-    lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+    lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
     _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and a suite a row landed red by declaration is still owed a green run taken after its blocker cleared:
 ${lines}
 Plan: $PLAN
 Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add floor <log>'."
     refuse exit2 commit "a declared red is still owed" "record a green run once cleared" "$_eg_detail"
   fi
-  _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+  _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
   [ -z "$_eg_debts" ] || lines="${lines}
 ${_eg_debts}"
   _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a reading whose newest is not result=fail, or a newer waiver:
@@ -2479,7 +2510,7 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
 # status) and non-addressed `done` rows with real evidence — AFTER their
 # presence/placeholder checks and the per-row INVALID guard, and BEFORE
 # apply_rigor_lanes. Ordering rationale: a missing/placeholder evidence block
-# (addressed unit, or audited non-addressed via ledger_shape_fail) and the
+# (addressed unit, or a double plan's non-addressed row via ledger_shape_fail) and the
 # INVALID-cell block both fire upstream of this, so they still win — a row with
 # no evidence line never reaches here (there is no line to hold a waiver, and its
 # absence already blocks or logs). `eff` is the RESOLVED effective rigor: an
@@ -2500,7 +2531,7 @@ Fix: raise the cell to at least $(rigor_level "$RIGOR"), or record a downgrade: 
 }
 
 # Router for the previously-log-only NON-addressed-row ledger-shape checks
-# (D-task 4/3, task scale). On a frontmatter `rigor: audited` plan these
+# (D-task 4/3, task scale). On a frontmatter `rigor: double` plan these
 # promote to BLOCKING (exit 2); at any other rigor they stay log-only findings
 # (D14, unchanged). The detail string is authored once by the caller and used
 # verbatim in whichever channel fires. The addressed-unit floor (4/1) and the
@@ -2508,16 +2539,16 @@ Fix: raise the cell to at least $(rigor_level "$RIGOR"), or record a downgrade: 
 # unconditionally where they should.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 ledger_shape_fail() {  # <fact> <fix> <observation>
-  # TWO EXITS AND ONLY ONE IS A REFUSAL (F-P2). At `rigor: audited` this blocks; at any
-  # other rigor it logs a finding and RETURNS. `refuse` always exits, so it goes INSIDE
-  # the audited branch — a frame-level substitution would turn every log-only finding
-  # into a hard block. The policy sentence the frame used to print as its Fix is about
-  # audited rigor, not about repairing the row, so under D-1 it becomes `detail` and the
-  # caller supplies a real repair (F-P7).
-  if [ "$(rigor_level "$RIGOR")" = high ]; then
+  # TWO EXITS AND ONLY ONE IS A REFUSAL (F-P2). At `rigor: double` this blocks; at `single`
+  # it logs a finding and RETURNS. `refuse` always exits, so it goes INSIDE the double
+  # branch — a frame-level substitution would turn every log-only finding into a hard
+  # block. The policy sentence the frame used to print as its Fix is about double rigor,
+  # not about repairing the row, so under D-1 it becomes `detail` and the caller supplies
+  # a real repair (F-P7).
+  if [ "$(rigor_level "$RIGOR")" = double ]; then
     refuse exit2 commit "$1" "$2" "canonical-sdlc task-ledger: $3
 Plan: $PLAN
-High review rigor makes the ledger-shape checks blocking; a plan below high would log this as a finding instead."
+Double review rigor makes the ledger-shape checks blocking; a single plan would log this as a finding instead."
   fi
   log_finding task-ledger "$3"
 }
@@ -2528,7 +2559,7 @@ High review rigor makes the ledger-shape checks blocking; a plan below high woul
 #
 # Two lanes (task 4/1), plus rigor-keyed lanes on top (task 4/2):
 #   - THE ADDRESSED UNIT — the `T<n>` named by `current: T<n>` — is BLOCKING at
-#     the tested floor: its row must exist in `## Tasks`, carry a non-placeholder
+#     the single floor: its row must exist in `## Tasks`, carry a non-placeholder
 #     `- T<n>:` evidence line, and have a rigor cell that resolves (its cell
 #     names a lane, or is empty; a non-empty cell outside the enum is INVALID).
 #     Any breach emits a 3-line block message and exit 2. Once past the floor,
@@ -2543,7 +2574,7 @@ High review rigor makes the ledger-shape checks blocking; a plan below high woul
 #     entirely is also log-only here. A `done` row that DOES have a non-empty,
 #     non-placeholder evidence line resolves its effective rigor and is
 #     additionally passed through apply_rigor_lanes (4/2) — BLOCKING, since a
-#     done claim at peer-reviewed+ rigor without real evidence is a false-done
+#     done claim at double rigor without real evidence is a false-done
 #     claim, not a bookkeeping gap. A malformed (off-enum) rigor cell on ANY row
 #     — addressed or not, at ANY status (done, active, pending, dropped) — is
 #     caught earlier by the per-row INVALID guard (4/7), which resolves the cell
@@ -2561,7 +2592,7 @@ High review rigor makes the ledger-shape checks blocking; a plan below high woul
 #
 # THE TRIGGER DOES NOT MOVE. At task scale the arm still fires on the ADDRESSED unit's
 # missing line — a non-addressed `active|done` row short of one is a different refusal
-# (ledger_shape_fail, blocking only at audited rigor) and stays that way. What changed is
+# (ledger_shape_fail, blocking only at double rigor) and stays that way. What changed is
 # what the refusal then says.
 #
 # THE LOOKUP IS THE READER'S (wave-21 T5; D4, ADR-037 decision 3). It lived here as
@@ -2677,7 +2708,7 @@ validate_task_ledger() {
     case "$id" in T[0-9]*) : ;; *) continue ;; esac
     status=$(units_field "$line" status)
     rigor_cell=$(units_field "$line" rigor)
-    # status enum — routed through ledger_shape_fail (4/3): blocking on audited
+    # status enum — routed through ledger_shape_fail (4/3): blocking on double
     # plans, log-only otherwise (was unconditionally log-only in D12).
     if _eg_finding "$findings" status "$id"; then
       ledger_shape_fail "task ${id}'s status is unknown" "use pending, active, done or dropped" \
@@ -2689,7 +2720,7 @@ validate_task_ledger() {
     # status-enum check above (both are whole-value enum equality on a single
     # cell, validated per-row REGARDLESS of the row's status). So it blocks
     # UNIFORMLY: on ANY row (addressed or not; done, active, pending, dropped)
-    # and at ANY frontmatter rigor — NOT routed through the audited-only
+    # and at ANY frontmatter rigor — NOT routed through the double-only
     # ledger_shape_fail. Placed here, before the evidence extraction and the
     # addressed-vs-other branching, so this ONE guard covers every row —
     # consolidating the former per-branch INVALID checks (4/1 addressed unit,
@@ -2700,17 +2731,17 @@ validate_task_ledger() {
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     eff=$(effective_row_rigor "$rigor_cell")
     if [ "$eff" = "INVALID" ]; then
-      _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want low, medium or high).
+      _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want single or double).
 Plan: $PLAN
-Fix: set the '${id}' row's rigor cell to one of low, medium or high before committing."
-      refuse exit2 commit "that task's rigor value is not valid" "use low, medium or high" "$_eg_detail"
+Fix: set the '${id}' row's rigor cell to single or double before committing."
+      refuse exit2 commit "that task's rigor value is not valid" "use single or double" "$_eg_detail"
     fi
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
     if [ "$id" = "$CURRENT" ]; then
-      # THE ADDRESSED UNIT: the tested floor is BLOCKING (task 4/1).
+      # THE ADDRESSED UNIT: the single floor is BLOCKING (task 4/1).
       addressed_found=1
       if [ -z "$ev" ]; then
         # The addressed unit is short, which is what fires the arm; the refusal then
@@ -2727,7 +2758,7 @@ Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before
       # blocks unless the evidence line records a waiver. Runs after the
       # presence/placeholder blocks above (so those win) and before the lanes.
       enforce_rigor_floor "$id" "$eff" "$ev"
-      # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the tested
+      # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the single
       # floor above. `eff` was resolved and INVALID-guarded at the per-row guard
       # (4/7); it names a valid lane here. Applies regardless of this row's own
       # status — the addressed unit is always in scope.
@@ -2735,7 +2766,7 @@ Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before
       apply_rigor_lanes "$id" "$status" "$eff" "$ev"
     else
       # Every OTHER row's presence/placeholder checks route through
-      # ledger_shape_fail (4/3): blocking on audited plans, log-only otherwise.
+      # ledger_shape_fail (4/3): blocking on double plans, log-only otherwise.
       #
       # LAUNCHED IS WHAT THE ROSTER SAYS (wave-21 T5; REQ-4, AC-4.3; D4, ADR-037 decision 3).
       # A `done` row owes its line; an `active` row owes one only when the reader says so — an
@@ -2756,7 +2787,7 @@ Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before
           elif [ "$status" = "done" ]; then
             # 4/2: a done row WITH real evidence is in scope for the
             # rigor-keyed lanes (BLOCKING) — a false-done claim at
-            # peer-reviewed+ rigor, not a bookkeeping gap. A done row with
+            # double rigor, not a bookkeeping gap. A done row with
             # NO evidence line stays log-only above (4/3 territory). `eff` was
             # resolved and INVALID-guarded at the per-row guard (4/7 — was a
             # done-only guard under 4/6; now uniform across statuses), so it
@@ -3332,7 +3363,7 @@ _eg_row_for_worktree() {
   _rows="$(units_rows "$PLAN")" || return 1
   [ -n "$_rows" ] || return 0
   # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14; both sides
-  # T50, T47's floor RED): that function folds both sides and this one now does too, for
+  # T50, T47's regression RED): that function folds both sides and this one now does too, for
   # the reason case-folding always needs both sides folded — `$_want` is the literal
   # basename git gave the tree, and that basename carries the tree's REAL case (a real
   # dispatch tree is always `<NN>-T<n>`, capital T), while the cell is authored text that
@@ -3431,7 +3462,7 @@ elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
     # OUTSIDE THE RUN, NOT BEHIND IT (wave-17 REQ-4, T1; bug 7). Git placed this tree in
     # another repository, so nothing in THIS plan describes the work it holds: its `## Tasks`
     # register cannot name the tree, its `current:` is not the step that commit is part of,
-    # and its Step-5 floor is a floor that commit has no part in producing. Until this line
+    # and its Step-5 regression is a regression that commit has no part in producing. Until this line
     # the gate said all of that out loud — the announce below has named the boundary since
     # wave-14 — and then judged the commit at `current:` anyway, refusing another
     # repository's work for this run's evidence. A wall that has just admitted it cannot
@@ -3501,7 +3532,7 @@ if [ -n "$_EG_WT" ]; then
         # description | status | worktree`: there is no `step` column to read, so every row
         # arrived here with an empty cell, this arm decided nothing, and a commit from a
         # row's own tree was judged by the RUN's numbered-step block — a fixup writer at
-        # `current: 5` refused for a Verify floor its own task exists to produce, which a
+        # `current: 5` refused for a Verify regression its own task exists to produce, which a
         # consumer answered by hand-writing a mid-discharge Step-5 block. ADR-031's rule is
         # not wave-only: a row's tree is judged by its row at task scale too. The arms are
         # the SAME four the `current: T<n>` early exit runs above, reached by naming the row
@@ -3581,7 +3612,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # exactly where the run stands, so there is no step to substitute — and that is
           # the case the whole catch-22 lived in: a writer dispatched at Step 5, whose row
           # therefore reads 5, was judged by the run's Verify arm and refused for the green
-          # floor that writer's own task exists to produce (bug 2; carry-over 1; three D10
+          # regression that writer's own task exists to produce (bug 2; carry-over 1; three D10
           # `current:` regressions in wave-16). The row's `status` is what resolves it: this
           # tree has a writer in it, so this commit discharges the TASK's obligations, and
           # the arms it owes are the task arms.
@@ -3591,7 +3622,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # branch`, and the matrix `fails-when:` presence arm runs for every commit at
           # step ≥ 4 regardless. Step 4 IS the arm set a task owes, so naming it is the
           # whole implementation — a parallel dispatcher would be a second place to keep in
-          # step with the first. The run's arms (the floor block, the walk artifact, the
+          # step with the first. The run's arms (the regression block, the walk artifact, the
           # auditor cell, the ADR, the merge, the ship) all hang off steps 5 and up and are
           # simply never reached.
           #
@@ -3737,13 +3768,13 @@ done <<< "$BLOCK"
 # Inert at current: 1 — Step 1 is still being written, and POINTER_STEPS below is what
 # governs Step 1's own commit.
 #
-# SCOPE: rigor:audited + multi_agent:true + scale wave|epic — the same guard
+# SCOPE: rigor:double + multi_agent:true + scale wave|epic — the same guard
 # validate_dispatch_ledger uses (D7) to keep wave-lane machinery that predates a new
 # requirement out of the way of fixtures that are not about it. This suite's shared FM
-# (rigor: tested) and frontmatter() (no multi_agent: line, so MULTI_AGENT reads empty)
+# (rigor: single) and frontmatter() (no multi_agent: line, so MULTI_AGENT reads empty)
 # are both guaranteed no-ops under this guard by the same construction the D7 comment
 # documents; only a fixture that opts in — this wave's own plan among them (rigor:
-# audited, multi_agent: true) — exercises it. Judgment call recorded because AC-K5.2's
+# double, multi_agent: true) — exercises it. Judgment call recorded because AC-K5.2's
 # text names no such guard; the alternative (firing on every wave/epic plan regardless of
 # rigor) blocked 170/316 of this suite's pre-existing cases on first RED and is not what
 # "touch only your own span" can mean here.
@@ -3770,7 +3801,7 @@ resolve_requirements_path() {  # $1 = raw requirements: value
 validate_requirements_pointer() {
   local current_num b1 raw abs
   case "$SCALE" in wave|epic) : ;; *) return 0 ;; esac
-  [ "$(rigor_level "$RIGOR")" = high ] || return 0
+  [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
@@ -3920,7 +3951,7 @@ Fix: do not commit step ${step} until pass equals total."
 # no `head:` at all; a value that is not a commit in the repository the commit is made in (a
 # hex id, abbreviated or full — a symbolic `HEAD` would name whatever is checked out at commit
 # time, which is no record); and a commit the RELEASE HEAD does not contain. The release head
-# is the tip of the plan's `working-branch:` when it names one that resolves — the floor runs
+# is the tip of the plan's `working-branch:` when it names one that resolves — the regression runs
 # on that branch, and the plan verbs' dry commit and a main-root commit at Step 5 are made
 # from the main checkout, whose own HEAD never holds a wave head before Step 8. A plan that
 # names no such branch is judged against the HEAD of the directory the commit is made in.
@@ -3930,7 +3961,7 @@ validate_tests_head() {
   local prefix="$1" head dir wb tip
   head=$(block_get head)
   if [ -z "$head" ]; then
-    _eg_detail="${prefix} evidence carries no 'head:' — the commit its tests floor ran on.
+    _eg_detail="${prefix} evidence carries no 'head:' — the commit its regression ran on.
 Plan: $PLAN
 Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as 'head=<sha>' in its header."
     refuse exit2 commit "this step's evidence names no head" "add head: <sha the run read>" "$_eg_detail"
@@ -3943,7 +3974,7 @@ Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as '
      || ! git -C "$dir" cat-file -e "${head}^{commit}" 2>/dev/null; then
     _eg_detail="${prefix} 'head: ${head}' is not a commit in the repository at ${dir}.
 Plan: $PLAN
-Fix: record the hex sha the tests floor ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
+Fix: record the hex sha the regression ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
     refuse exit2 commit "the Step-5 head: is not a commit here" "record the sha the run read" "$_eg_detail"
   fi
   wb=$(echo "$SECTION" | grep -E '^[[:space:]]*working-branch[[:space:]]*:' | head -1 \
@@ -3956,8 +3987,8 @@ Fix: record the hex sha the tests floor ran on (tests/run.sh's 'head=' header li
     if [ -n "$wb" ]; then wb="working-branch $wb"; else wb="HEAD of $dir"; fi
     _eg_detail="${prefix} 'head: ${head}' is not contained in the release head ${tip:-(none)} (${wb}).
 Plan: $PLAN
-Fix: run the tests floor on the release head, or on a commit it contains, and record that run's head."
-    refuse exit2 commit "the release head does not contain head:" "re-run the floor on release head" "$_eg_detail"
+Fix: run the regression on the release head, or on a commit it contains, and record that run's head."
+    refuse exit2 commit "the release head does not contain head:" "run the regression on that head" "$_eg_detail"
   fi
 }
 
@@ -4052,9 +4083,9 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # Mid-discharge commits: at current: 5, rows with status
 # pending/blocked skip the per-tier key check, and the Step-5 `auditor:`
 # pointer is required only when no such row remains. The full contract —
-# per-tier keys, plus (at peer-reviewed/audited rigor) CONFIRMED on every
+# per-tier keys, plus (at double rigor) CONFIRMED on every
 # non-waived row — bites on the 5→6 advance via the 6..9 prefix check. At
-# `tested` rigor the auditor column is not a wall at all: see
+# `single` rigor the auditor column is not a wall at all: see
 # matrix_auditor_required. The status cell is enum-checked
 # (pending|blocked|discharged|waived) since the relaxation makes it
 # load-bearing.
@@ -4068,23 +4099,8 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # anything. See the tag's own note inside validate_matrix.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
-# Per-tier required evidence keys — MIRROR of the canonical table in
-# skills/canonical-sdlc/steps/5.md ("Per-tier required keys"). Change THAT
-# table first; this function follows it. (R27)
-#
-# `evidence` (1a, D5) is the one SHARED key every tier owes on top of its own
-# — the AC block's record/ proof path — and it is listed LAST in every arm so
-# the loop that walks this list still blocks on a tier-specific key first when
-# one is missing (see the 'evidence' branch inside validate_matrix's loop).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-keys_for_tier() {
-  case "$1" in
-    T0|T1) echo "tier-run readback evidence" ;;
-    T2)    echo "tier-run readback fixture-fidelity evidence" ;;
-    T3)    echo "tier-run fresh cold-client contact readback evidence" ;;
-    T4)    echo "user-confirmed evidence" ;;
-  esac
-}
+# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body` since
+# wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
 
 # THE THREE STEP-4 ARMS (epic-22 K2, K4, K2.5): `matrix_section`, `matrix_block`,
 # `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
@@ -4165,7 +4181,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs hk hv hf
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -4178,7 +4194,8 @@ validate_matrix() {
       "add the '## Verification Matrix' section: a stack-health line, the AC tier table, and one per-AC evidence block. See canonical-sdlc/SKILL.md Step 5."
   fi
 
-  # stack-health: non-empty proof, or `n/a: <reason>` with a reason.
+  # stack-health: non-empty proof, or `n/a: <reason>` with a reason. A placeholder value (the
+  # `pending` stub Step 3 renders) is judged after the row loop, where UNDISCHARGED is known.
   # A HERE-STRING, NOT A PIPE — see the header. $MATRIX is a whole plan section and
   # routinely exceeds the pipe buffer; `echo "$MATRIX" | grep -q` turned a present
   # stack-health line into a refusal of every commit (T37).
@@ -4435,7 +4452,7 @@ validate_matrix() {
       done
     fi
     # Once past the Verify gate, every non-waived row must be CONFIRMED —
-    # at peer-reviewed and audited rigor. At `tested` no auditor was ever
+    # at double rigor. At `single` no auditor was ever
     # commissioned (SKILL.md's rigor table), so this whole arm stands down;
     # matrix_auditor_required is the predicate and carries the reasoning.
     #
@@ -4509,6 +4526,35 @@ validate_matrix() {
       fi
     fi
   done <<< "$rows"
+
+  # THE MATRIX HEAD'S STUBS ARE PLACEHOLDERS TOO (wave-30 T14; REQ-6 AC-6.1, D9, Δ12a). Step 3
+  # renders `stack-health: pending` (and `walk-artifact: pending` on a walked plan) above the
+  # table, beside the per-AC key stubs (`session-poker.sh matrix-render`). `stack-health:` was
+  # exempt from the placeholder ban — any value but an empty one or a bare `n/a` passed, so the
+  # stub sailed through the Verify gate unfilled — and a matrix-level `walk-artifact:` line was
+  # read by nothing. Both are now judged as a tier key is: unread before Step 5, unread at
+  # current: 5 while any row is still pending or blocked (the same mid-walk relaxation the key
+  # loop above takes, so entering Step 5 never needs an "after" snapshot that cannot exist
+  # yet), and refused once the walk is done and at every step after it. AFTER the row loop on
+  # purpose: UNDISCHARGED is what the loop found. A filled value is not judged here — the
+  # stack-health arm above and the walk gate own those; an absent walk-artifact: line is legal.
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  if [ "$UNDISCHARGED" = "0" ]; then
+    for hk in stack-health walk-artifact; do
+      hv=$(grep -E "^[[:space:]]*${hk}[[:space:]]*:" <<< "$MATRIX" | head -1 \
+           | sed -E "s/^[[:space:]]*${hk}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+      [ -n "$hv" ] || continue
+      if is_placeholder_value "$hv"; then
+        case "$hk" in
+          stack-health) hf="fill it, or n/a: <reason>" ;;
+          *)            hf="name its record, or drop it" ;;
+        esac
+        block_matrix "the ${hk}: line is still a stub" "$hf" \
+          "'${hk}:' is still a placeholder ('${hv}') with no row pending or blocked." \
+          "replace the '${hk}:' stub above the table with the real value before the Verify gate closes — the stub Step 3 rendered is a reminder, not evidence."
+      fi
+    done
+  fi
 }
 
 # ---------- walk-first artifact arm (epic-14 W1) ----------
@@ -4642,7 +4688,7 @@ validate_walk_artifact() {
 
 # S3 (AC-4, AC-23; wave-01-verification-cannot-lie, D-S1b): environments —
 # declared, covered, fog. Frontmatter `environments:` is one line naming the
-# set this wave's Step-5 tests floor claims to run on, entries joined by
+# set this wave's Step-5 regression claims to run on, entries joined by
 # " · ", each `<name> (covered...)` or `<name> (fog — cure: <text>)`. A plan
 # that never mentions the key makes no environment claim at all: the arm
 # no-ops. Most plans never declare it (this repo's own wave-01 plan is the
@@ -4656,7 +4702,7 @@ validate_walk_artifact() {
 # AC-23: this arm reads only the DECLARATION and the Step-5
 # `environments-covered:` line — never a derived suite set. It is
 # independent of validate_tests_block, which is what actually requires the
-# unconditional whole-suite floor run; nothing here substitutes for that,
+# unconditional whole-suite regression; nothing here substitutes for that,
 # and nothing here is consulted by it.
 #
 # Fires at current: 5..9, the same durable-prefix span as
@@ -4755,7 +4801,7 @@ validate_environments() {
     if [ -n "$missing" ]; then
       block_matrix "a declared environment went uncovered" "cover it, or mark it fog" \
         "environments-covered '${covered_line}' omits declared environment(s): ${missing} (declared covered set: ${covered_names}; fog: ${fog_names:-none})." \
-        "run the Step-5 tests floor on every declared non-fog environment and list it in 'environments-covered:', or move it to a fog entry naming its cure."
+        "run the Step-5 regression on every declared non-fog environment and list it in 'environments-covered:', or move it to a fog entry naming its cure."
     fi
 
     # THE OTHER DIRECTION — OVER-CLAIMING (critic K-5). The loop above walks the DECLARED
@@ -4778,7 +4824,7 @@ validate_environments() {
     if [ -n "$claimed_fog" ]; then
       block_matrix "a fog environment is claimed as covered" "drop it, or test it there" \
         "environments-covered '${covered_line}' claims coverage of environment(s) this plan declares as FOG: ${claimed_fog} (fog: ${fog_names:-none})." \
-        "a fog entry means NOT covered — either drop the name from 'environments-covered:', or run the Step-5 tests floor there and move it out of fog in the frontmatter."
+        "a fog entry means NOT covered — either drop the name from 'environments-covered:', or run the Step-5 regression there and move it out of fog in the frontmatter."
     fi
     if [ -n "$claimed_undeclared" ]; then
       block_matrix "the covered list names an undeclared environment" "declare it, or drop it" \
@@ -4789,9 +4835,9 @@ validate_environments() {
   return 0
 }
 
-# Verify gate: tests floor, the Verification Matrix, and — at peer-reviewed or
-# audited rigor, once no row is still pending — a non-empty `auditor:` pointer.
-# At `tested` that pointer is not demanded (matrix_auditor_required).
+# Verify gate: regression, the Verification Matrix, and — at double rigor,
+# once no row is still pending — a non-empty `auditor:` pointer.
+# At `single` that pointer is not demanded (matrix_auditor_required).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_verify_step() {
   local aud
@@ -4803,7 +4849,7 @@ validate_verify_step() {
   # The auditor is the Step-5 exit gate — it cannot have run while
   # rows are still pending/blocked, so the pointer is required only once
   # every row is discharged or waived, and only where an auditor exists at
-  # all (matrix_auditor_required: never at `tested`).
+  # all (matrix_auditor_required: never at `single`).
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   if [ "$UNDISCHARGED" -eq 0 ] && matrix_auditor_required; then
     if ! block_has auditor; then
@@ -4894,7 +4940,7 @@ validate_intent_evidence() {
 }
 
 # Wave-scale D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to
-# scale:wave + frontmatter rigor:audited + multi_agent:true plans; for
+# scale:wave + frontmatter rigor:double + multi_agent:true plans; for
 # every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
 # epic plans legitimately dispatch research, not task-shaped units, so demanding
 # a dispatched-task ledger there would false-block scoping runs (plan Assumption
@@ -4905,7 +4951,7 @@ validate_intent_evidence() {
 # TESTED-FLOOR SHAPE ONLY (plan Assumption A2): the wave's own Step-5 auditor /
 # Step-6 critic are the assurance roles at wave scale, so per-row auditor/critic
 # tokens (task-scale machinery) are NOT demanded here.
-#   1. `## Tasks` section ABSENT OR EMPTY -> exit 2 (the audited multi_agent wave
+#   1. `## Tasks` section ABSENT OR EMPTY -> exit 2 (the double multi_agent wave
 #      must carry its dispatched-task ledger home).
 #   2. NO TABLE, OR A TABLE WITH ZERO DATA ROWS -> SATISFIED (a human
 #      `none dispatched` prose line is documentation, not required by the
@@ -4919,7 +4965,7 @@ validate_intent_evidence() {
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   [ "$SCALE" = "wave" ] || return 0
-  [ "$(rigor_level "$RIGOR")" = high ] || return 0
+  [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
   local tasks rows id ev violations findings _eg_ph
@@ -4945,7 +4991,7 @@ validate_dispatch_ledger() {
   # `units_rows` instead moved the basis: that reader exits 1 for a section carrying
   # PROSE and no header row, a shape the docblock above calls SATISFIED and this
   # refusal's own Fix text advertises ("a header plus a 'none dispatched' line is
-  # fine"). The next audited multi_agent wave that wrote it would have been unable
+  # fine"). The next double multi_agent wave that wrote it would have been unable
   # to commit. Same extractor as validate_task_ledger, and the same one the pre-wave
   # hook carried at 84da6b5.
   tasks=$(normalize_newlines "$PLAN" | awk '
@@ -4955,7 +5001,7 @@ validate_dispatch_ledger() {
     /^## / { f=0 }
     f')
   if [ -z "$tasks" ]; then
-    _eg_detail="canonical-sdlc audited multi_agent wave plan has no '## Tasks' dispatched-task ledger section.
+    _eg_detail="canonical-sdlc double multi_agent wave plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
@@ -4968,7 +5014,7 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   violations="$(units_validate "$PLAN")" || true
   if [ -n "$violations" ]; then
-    _eg_detail="canonical-sdlc audited multi_agent wave plan's '## Tasks' table breaks the Task invariants:
+    _eg_detail="canonical-sdlc double multi_agent wave plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
 Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
@@ -5508,7 +5554,9 @@ return 0
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
 # `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
 # T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
-# gate reads); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# gate reads; `matrix-render` and `discharge` — wave-30 T14, D9, the matrix's stubs and its auditor cell; `handoff` —
+# wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children); 1 otherwise
+# (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5564,7 +5612,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         shift
         _next="${1:-}"
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|finding-move|decline|budget|share)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|finding-move|decline|budget|share|matrix-render|discharge|handoff|task-split)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
         esac ;;
       spawn-worktree.sh)
@@ -5584,7 +5632,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
-#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--kill-after <s> | --max-wait <s>]
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--kill-after <s> | --detach]
 #                                          [--stamp-dir <dir>] [--suites <names>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
@@ -5625,12 +5673,13 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
 # the one the solo check reads too.
 #
-# --max-wait: THE CALL'S OWN BOUND ON THE WAIT (wave-27 T6, critic 3 S2). The staged timeout in
-# seconds, less a ten-second margin, so a wait for a place gives up inside the call rather than
-# outliving it into the background: ARM R's raised value when it repairs the call, else the
-# call's own `timeout`, else the harness default (BASH_DEFAULT_TIMEOUT_MS, two minutes unset).
-# The shim takes the smaller of it and its own default. A short call carries --kill-after
-# instead, whose limit already bounds the wait, so it gets none.
+# --detach: THE RUN OUTLIVES THE CALL (wave-30 T12; D6, A-orch-7; REQ-3 AC-3.1). The shim runs the
+# whole run, the wait at the gate included, in a session of its own and waits on it from the call:
+# the call still prints the run's output and exits with its code, but a killed call (a /clear, a
+# stopped agent, the harness's own timeout) no longer takes the run with it, and the same command
+# typed again attaches to the live run instead of starting a second. It replaced `--max-wait`
+# (wave-27 T6), the call's bound on its wait at the gate: a detached run's wait is inside no call.
+# A short call carries --kill-after instead and stays in the foreground: its limit is the point.
 #
 # THE SEAM FOR T9 is `wall_booked_argv`: the one function that builds the shim's argument
 # list. An option such as `--kill-after <s>` goes in as an extra argument there.
@@ -5878,22 +5927,6 @@ wall_booked_argv() {
 # pass as typed.
 _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
 WALL_SHORT_KILL_AFTER=""
-_BSG_STAGED_MS=""
-# _bsg_wait_s — sets _BSG_WAIT_S to the shim's --max-wait for this call: the staged timeout
-# (_BSG_STAGED_MS, set by _bsg_stage_input when ARM R raises it), else the call's own, else the
-# harness default; in seconds, less ten, never under 1. A variable, not a `$( )`, so the wrap
-# forks nothing more than the timeout read. The number reading is _fo_short_pass's.
-_BSG_WAIT_S=""
-_bsg_wait_s() {
-  local _t="${_BSG_STAGED_MS:-}"
-  [ -n "$_t" ] || _t="$(bionic_jq .tool_input.timeout)"
-  [ -n "$_t" ] || _t="${BASH_DEFAULT_TIMEOUT_MS:-120000}"
-  case "$_t" in ''|*[!0-9]*) _t=120000 ;; esac
-  [ "${#_t}" -le 9 ] || _t=999999999
-  _t=$((10#$_t / 1000 - 10))
-  [ "$_t" -ge 1 ] || _t=1
-  _BSG_WAIT_S="$_t"
-}
 # _bsg_agent — sets _BSG_AGENT to the name the gate's request records for this call (T12): the
 # roster row's `name=`, which the budget arm read into _BUDGET_ROW_NAME when it ran, else the
 # payload's `agent_id` (bionic_jq's cached field); empty on the main thread. No roster read here.
@@ -5943,7 +5976,7 @@ _bsg_wrap_text() {
   set --
   _bsg_agent
   [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
-  if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else _bsg_wait_s; set -- "$@" --max-wait "$_BSG_WAIT_S"; fi
+  if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else set -- "$@" --detach; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
   [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
@@ -5961,9 +5994,7 @@ _bsg_wrap_text() {
 # rc 0 when something was staged, 1 when there was nothing to stage.
 _bsg_stage_input() {
   local _t="${2:-}" _upd
-  _BSG_STAGED_MS="$_t"
   _bsg_wrap_text "$1" || _BSG_WRAP_TEXT=""
-  _BSG_STAGED_MS=""
   [ -n "$_t" ] || [ -n "$_BSG_WRAP_TEXT" ] || return 1
   _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg t "$_t" --arg c "$_BSG_WRAP_TEXT" \
     '.tool_input + (if $t == "" then {} else {timeout: ($t | tonumber)} end)
@@ -6713,7 +6744,7 @@ while IFS=$'\t' read -r _kind _target _run; do
   #
   # AHEAD OF THE DECLARED RUNS, and that order is the whole of the full-run rule. The
   # dispatch wall judges `tests/run.sh` by the `run.sh` token in `suites_allowed=` and nothing
-  # else, asking the proof record whether the change since the last floor proof can be bounded
+  # else, asking the proof record whether the change since the last regression proof can be bounded
   # (hooks/dispatch-preflight.sh, the full-run wall) — so a brief that declared the full tree
   # under `Re-executes:` instead would be unjudged there AND admitted here, and one spelling
   # would spend a run the proof record says is not owed. The full tree goes on a row that NAMES
@@ -6845,7 +6876,7 @@ done <<< "$_CLAIMS"
 # stages a rewrite — so a subagent suite call carrying no `timeout` never reached the budget
 # arm at all, and an OFF-BUDGET suite was repaired and allowed instead of refused. A-T3.1
 # named the interaction and did not close it; `tests/agent-context-guard.test.sh` §G9 caught
-# it at this wave's Step-5 floor.
+# it at this wave's Step-5 regression.
 #
 # ORDER, NOT A FLAG, IS WHAT ENFORCES IT. `fold.sh` already drops a staged `updatedInput`
 # whenever anything blocked (`bionic_fold`'s `BIONIC_FOLD_BLOCKS -eq 0` branch is its only

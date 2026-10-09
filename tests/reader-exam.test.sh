@@ -5,7 +5,7 @@
 # tests/reader-exam/), and no hermetic suite can. What this suite owns is what a machine can
 # hold the exam to: the checks files the readers were examined on are the ones that ship, and
 # the latest sitting had readers behind it who met every sample, and the recipe a sitter follows
-# is in the tree. Nine sections:
+# is in the tree. Ten sections:
 #
 #   §PIN      `exam_pin` on planted sittings: the latest sitting, by file order, has the
 #             three `sha256` lines equal to the files' digests, a `result` line for every
@@ -21,7 +21,8 @@
 #   §KEY      `exam_key` on planted keys: three lines for `clean`, six for every other
 #             sample: a `names:` line, whose alternatives are separated by ` | `, then a
 #             `finding-file:` line and a `finding-rating:` line whose every rating the priority
-#             table sends to fix (wave-28 T18, D22).
+#             table sends to fix (wave-28 T18, D22), or, on a debt sample, a `finding-kind:` line
+#             naming a kind of the debt table (wave-30 T22, D2).
 #   §SCORE    `exam_score` (tests/reader-exam/score.sh, README step 5) on the real keys: a
 #             record is met only on the key's question, with the key's result, one of its
 #             tokens and one of its `names:` alternatives, and a declared `finding:` line on
@@ -58,6 +59,10 @@
 #             claude and refuse any entry that is not absolute, decide "inside" by identity,
 #             resolve each path once and use that, refuse a failed lookup of their worktrees,
 #             and keep a destination and an output file out of every worktree.
+#   §GRAMMAR  (T36) every concrete example `finding:` and `debt:` line in the shipped severity.md
+#             (and steps/6.md, if it carries one) is accepted by proof.sh's `proof_findings`, the
+#             parser score.sh calls; the doctrine must carry an example of each shape, and the
+#             two forms the T25 sitting's readers wrote are refused by the same parser.
 #   §SHIPPED  the shipped `sittings.md` against the shipped checks files.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN runs
@@ -93,7 +98,7 @@ REPO="${BIONIC_SCRIPTS_DIR}"
 EXAM="${REPO}/tests/reader-exam"
 # The digest: the one sha256 reader the payload already carries (reuse, not a fourth copy).
 . "${REPO}/payload/scripts/lib/detect.sh"
-# The dealing: which role the audited rigor deals each question to (`facts_owed`, README step 4),
+# The dealing: which role the double rigor deals each question to (`facts_owed`, README step 4),
 # read from the one table and not restated here.
 . "${REPO}/payload/scripts/lib/proof.sh"
 # The scorer: README step 5, the one a sitting sources (tests/reader-exam/score.sh).
@@ -117,10 +122,10 @@ exam_samples() {
   (cd "$1/tests/reader-exam/samples" 2>/dev/null && for d in */; do [ -d "$d" ] && printf '%s\n' "${d%/}"; done)
 }
 
-# exam_dealt_role <question> — the role the audited dealing gives <question> (`auditor`,
-# `critic` or `reviewer`), from the dealing `facts_owed` holds; nothing when it deals none.
+# exam_dealt_role <question> — the role the double dealing gives <question> (`auditor`,
+# or `critic`, wave-30 T11), from the dealing `facts_owed` holds; nothing when it deals none.
 exam_dealt_role() {
-  facts_owed audited wave 2>/dev/null | awk -F'\t' -v q="$1" \
+  facts_owed double wave 2>/dev/null | awk -F'\t' -v q="$1" \
     '$1 == "review" && $2 == q && $4 == "piece" { sub(/^bionic:/, "", $3); print $3; exit }'
 }
 
@@ -128,7 +133,7 @@ exam_dealt_role() {
 #   pinned                 the latest sitting names each checks file under <root> once, with
 #                          its digest, has a `result` line for every sample under <root> and
 #                          none for any other, a line on each question its sample's key names
-#                          from the role the audited dealing gives that question and from
+#                          from the role the double dealing gives that question and from
 #                          `one-mind` (the critic holding all three), and none on a question
 #                          the key does not name or from a role that is neither `one-mind` nor
 #                          the one dealt its own question, no two lines for one sample and question
@@ -206,7 +211,7 @@ exam_pin() {
     dealt=""
     for q in evidence adversarial structure; do
       r="$(exam_dealt_role "$q")"
-      [ -n "$r" ] || { echo "red: the audited dealing gives $q to no role"; return 1; }
+      [ -n "$r" ] || { echo "red: the double dealing gives $q to no role"; return 1; }
       dealt="${dealt:+$dealt,}$q=$r"
     done
     bad="$(printf '%s\n' "$results" | awk -v s="$s" -v dt="$dealt" '
@@ -271,6 +276,13 @@ exam_key() {
     sed -n 5p "$key" | grep -Eq '^finding-file: [^ ]' || { echo "red: $name's key has no finding-file: line"; return 1; }
     ! sed -n 5p "$key" | sed 's/^finding-file: //' | awk -F ' [|] ' '{ for (i = 1; i <= NF; i++) if ($i ~ /^[[:blank:]]*$/ || $i ~ /[[:blank:]]/) e = 1 } END { exit !e }' \
       || { echo "red: $name's finding-file: line has an empty alternative or one holding a blank"; return 1; }
+    # A DEBT SAMPLE (wave-30 T22; D2) is keyed by the debt table's kind, never a rating: its sixth line is
+    # `finding-kind: <kind>`, one of lib/proof.sh PROOF_DEBT_KINDS.
+    if sed -n 6p "$key" | grep -q '^finding-kind:'; then
+      alt="$(sed -n 6p "$key" | sed 's/^finding-kind: //')"
+      proof_word_in "$alt" "$PROOF_DEBT_KINDS" \
+        || { echo "red: $name's finding-kind: '$alt' is not a kind on the debt table"; return 1; }
+    else
     sed -n 6p "$key" | grep -Eq '^finding-rating: [^ ]' || { echo "red: $name's key has no finding-rating: line"; return 1; }
     while IFS= read -r alt; do
       # shellcheck disable=SC2086
@@ -279,6 +291,7 @@ exam_key() {
     done <<ALTS
 $(sed -n 6p "$key" | sed 's/^finding-rating: //' | awk -F ' [|] ' '{ for (i = 1; i <= NF; i++) print $i }')
 ALTS
+    fi
   fi
   n="$(awk 'END { print NR }' "$key")"
   [ "$n" = "$want" ] || { echo "red: $name's key has $n lines, not $want"; return 1; }
@@ -288,7 +301,7 @@ ALTS
 # exam_record_paths <file> — the lines of <file> that spell a reader's record path: a path
 # under `docs/record/`, or a `<label>-<role>-<question>.md` name.
 exam_record_paths() {
-  grep -E 'docs/record/|-(auditor|critic|reviewer|one-mind)-(evidence|adversarial|structure)\.md' "$1"
+  grep -E 'docs/record/|-(auditor|critic|one-mind)-(evidence|adversarial|structure)\.md' "$1"
 }
 
 # exam_named_path <file> <root> — the first record-path line of <file> that holds the name of
@@ -329,9 +342,9 @@ printf 'question: structure\nresult: fail\ntoken: check: reuse FAIL\nnames: some
 printf 'question: evidence, adversarial, structure\nresult: pass\ntoken: some-change\n' \
   > "$ROOT/tests/reader-exam/samples/clean/expect.txt"
 
-# fixture_role <question> — the role the audited dealing gives that question, spelled here by
+# fixture_role <question> — the role the double dealing gives that question, spelled here by
 # the fixture (PF0 holds it to the dealing exam_pin reads).
-fixture_role() { case "$1" in evidence) echo auditor ;; adversarial) echo critic ;; structure) echo reviewer ;; esac; }
+fixture_role() { case "$1" in evidence) echo auditor ;; adversarial|structure) echo critic ;; esac; }
 # sitting_block <date> [<question> <wrong hash>] — a sitting section for $ROOT, the hash of
 # checks-<question>.md optionally replaced, and, for each sample and each question its key
 # names, a `met` result line from the role dealt that question and one from the one-mind
@@ -437,15 +450,15 @@ expect_eq "P8: the latest sitting, by file order: the last block governs though 
 
 # Each result line against its sample's key. The fixture's lines reach their keys' results.
 expect_eq "P9: the fixture sitting's dup-counter line reaches its key's fail" \
-  "result dup-counter structure reviewer fail met exam-sitting.md#dup-counter-reviewer-structure" \
-  "$(grep '^result dup-counter structure reviewer ' "$TMP/right.md")"
+  "result dup-counter structure critic fail met exam-sitting.md#dup-counter-critic-structure" \
+  "$(grep '^result dup-counter structure critic ' "$TMP/right.md")"
 expect_eq "P9: the fixture sitting's clean line reaches its key's pass" \
   "result clean evidence auditor pass met exam-sitting.md#clean-auditor-evidence" \
   "$(grep '^result clean evidence auditor ' "$TMP/right.md")"
-sed 's/^result dup-counter structure reviewer fail met/result dup-counter structure reviewer pass met/' "$TMP/right.md" > "$TMP/contra.md"
+sed 's/^result dup-counter structure critic fail met/result dup-counter structure critic pass met/' "$TMP/right.md" > "$TMP/contra.md"
 pin_call "$TMP/contra.md" "$ROOT"
 expect_eq "P9: a met line whose reached pass the key's fail does not admit is red and names the line" \
-  "red: the latest sitting's line 'result dup-counter structure reviewer pass met exam-sitting.md#dup-counter-reviewer-structure' reads met, and dup-counter's key says fail" "$PIN_OUT"
+  "red: the latest sitting's line 'result dup-counter structure critic pass met exam-sitting.md#dup-counter-critic-structure' reads met, and dup-counter's key says fail" "$PIN_OUT"
 expect_status "P9: rc 1" 1 "$PIN_RC"
 sed 's/^result clean evidence auditor pass met/result clean evidence auditor flag met/' "$TMP/right.md" > "$TMP/clean-flag.md"
 pin_call "$TMP/clean-flag.md" "$ROOT"
@@ -454,7 +467,7 @@ sed 's/^result clean evidence auditor pass met/result clean evidence auditor fai
 pin_call "$TMP/clean-fail.md" "$ROOT"
 expect_contains "P9: a met fail on clean is red" "reads met, and clean's key says pass" "$PIN_OUT"
 
-{ cat "$TMP/right.md"; printf 'result no-such-sample structure reviewer fail met h\n'; } > "$TMP/ghost.md"
+{ cat "$TMP/right.md"; printf 'result no-such-sample structure critic fail met h\n'; } > "$TMP/ghost.md"
 pin_call "$TMP/ghost.md" "$ROOT"
 expect_eq "P10: a result line for a sample that does not exist is red and names it" \
   "red: the latest sitting has a result line for no-such-sample, and no such sample is under $ROOT" "$PIN_OUT"
@@ -472,12 +485,12 @@ expect_status "P11: rc 1" 1 "$PIN_RC"
 { cat "$TMP/right.md"; sed 's/^## 2026-10-05/## 2026-10-06 — sat again after an edit/' "$TMP/right.md"; } > "$TMP/titled.md"
 pin_call "$TMP/titled.md" "$ROOT"
 expect_eq "P12: a sitting header with its title after the date is a header" "pinned" "$PIN_OUT"
-{ cat "$TMP/unsat.md"; printf '##2026-10-06\n\nresult clean evidence reviewer pass met h\n'; } > "$TMP/malformed-fill.md"
+{ cat "$TMP/unsat.md"; printf '##2026-10-06\n\nresult clean evidence auditor pass met h\n'; } > "$TMP/malformed-fill.md"
 pin_call "$TMP/malformed-fill.md" "$ROOT"
 expect_contains "P12: a block under a malformed header belongs to no sitting and is red" \
   "red: line $(grep -n '^##2026' "$TMP/malformed-fill.md" | cut -d: -f1), '##2026-10-06', is not a sitting header" "$PIN_OUT"
 expect_status "P12: rc 1" 1 "$PIN_RC"
-{ cat "$TMP/right.md"; printf '## 2026-1-6 sat again\n\nresult clean evidence reviewer pass met h\n'; } > "$TMP/malformed-date.md"
+{ cat "$TMP/right.md"; printf '## 2026-1-6 sat again\n\nresult clean evidence auditor pass met h\n'; } > "$TMP/malformed-date.md"
 pin_call "$TMP/malformed-date.md" "$ROOT"
 expect_contains "P12: a header whose date is not YYYY-MM-DD is red" "'## 2026-1-6 sat again', is not a sitting header" "$PIN_OUT"
 
@@ -486,7 +499,7 @@ expect_contains "P12: a header whose date is not YYYY-MM-DD is red" "'## 2026-1-
 # that question are the role dealt it and the one-mind critic (`one-mind`), and a sitting holds
 # a line from each of them, on that question and no other. right.md is the green one edit away.
 for q in evidence adversarial structure; do
-  expect_eq "P13: the fixture's role for $q is the role the audited dealing gives it" \
+  expect_eq "P13: the fixture's role for $q is the role the double dealing gives it" \
     "$(fixture_role "$q")" "$(exam_dealt_role "$q")"
 done
 { cat "$TMP/right.md"; printf 'result dup-counter evidence auditor fail met h\n'; } > "$TMP/unkeyed.md"
@@ -498,20 +511,20 @@ expect_status "P14: rc 1" 1 "$PIN_RC"
 pin_call "$TMP/unkeyed-missed.md" "$ROOT"
 expect_eq "P14: …a line for an unkeyed question that reads missed is red for the question, not scored" \
   "red: the latest sitting's line 'result dup-counter adversarial one-mind pass missed h' is for a question dup-counter's key does not name (structure)" "$PIN_OUT"
-grep -v '^result dup-counter structure reviewer ' "$TMP/right.md" > "$TMP/onemind-only.md"
-expect_eq "P15: the fixture sitting with the reviewer's line left off holds dup-counter's one-mind line alone" "1" \
+grep -v '^result dup-counter structure critic ' "$TMP/right.md" > "$TMP/onemind-only.md"
+expect_eq "P15: the fixture sitting with the dealt critic's line left off holds dup-counter's one-mind line alone" "1" \
   "$(grep -c '^result dup-counter ' "$TMP/onemind-only.md")"
 pin_call "$TMP/onemind-only.md" "$ROOT"
 expect_eq "P15: a sample holding only the one-mind critic's line is red, naming the sample and the role missing" \
-  "red: the latest sitting has no line for dup-counter from the reviewer on structure" "$PIN_OUT"
+  "red: the latest sitting has no line for dup-counter from the critic on structure" "$PIN_OUT"
 expect_status "P15: rc 1" 1 "$PIN_RC"
 grep -v '^result dup-counter structure one-mind ' "$TMP/right.md" > "$TMP/dealt-only.md"
 pin_call "$TMP/dealt-only.md" "$ROOT"
 expect_eq "P15: …and the dealt reader's line alone is red, naming the one-mind critic" \
   "red: the latest sitting has no line for dup-counter from the one-mind on structure" "$PIN_OUT"
-for role_q in auditor:evidence critic:adversarial reviewer:structure one-mind:evidence; do
+for role_q in auditor:evidence critic:adversarial critic:structure one-mind:evidence; do
   role="${role_q%%:*}"
-  grep -v "^result clean [a-z]* $role " "$TMP/right.md" > "$TMP/clean-no-$role.md"
+  grep -v "^result clean ${role_q#*:} $role " "$TMP/right.md" > "$TMP/clean-no-$role.md"
   expect_eq "P16: clean without its $role lines has fewer lines than the fixture sitting" "true" \
     "$([ "$(grep -c '^result clean ' "$TMP/clean-no-$role.md")" -lt "$(grep -c '^result clean ' "$TMP/right.md")" ] && echo true || echo false)"
   pin_call "$TMP/clean-no-$role.md" "$ROOT"
@@ -523,19 +536,19 @@ pin_call "$TMP/clean-one-mind-q.md" "$ROOT"
 expect_eq "P16: a clean sample whose one-mind critic left a question off is red, naming the question" \
   "red: the latest sitting has no line for clean from the one-mind on adversarial" "$PIN_OUT"
 
-# A role field is one of auditor, critic, reviewer or one-mind, and a dealt role is on the
+# A role field is one of auditor, critic or one-mind (the reviewer is retired, wave-30 T20), and a dealt role is on the
 # question it is dealt: a line from any other role, or from a role on a question that is not its
 # own, is red. A line from the one-mind critic is on any keyed question.
 { cat "$TMP/right.md"; printf 'result dup-counter structure nobody fail met h\n'; } > "$TMP/stray-role.md"
 pin_call "$TMP/stray-role.md" "$ROOT"
-expect_eq "P17: a line whose role is outside auditor, critic, reviewer and one-mind is red and names the line" \
-  "red: the latest sitting's line 'result dup-counter structure nobody fail met h' is from a role that is neither the reviewer dealt structure nor one-mind" "$PIN_OUT"
+expect_eq "P17: a line whose role is outside auditor, critic and one-mind is red and names the line" \
+  "red: the latest sitting's line 'result dup-counter structure nobody fail met h' is from a role that is neither the critic dealt structure nor one-mind" "$PIN_OUT"
 expect_status "P17: rc 1" 1 "$PIN_RC"
-{ cat "$TMP/right.md"; printf 'result dup-counter structure critic fail met h\n'; } > "$TMP/mismatch-role.md"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure auditor fail met h\n'; } > "$TMP/mismatch-role.md"
 pin_call "$TMP/mismatch-role.md" "$ROOT"
 expect_eq "P17: a dealt role on a question that is not its own is red and names the line" \
-  "red: the latest sitting's line 'result dup-counter structure critic fail met h' is from a role that is neither the reviewer dealt structure nor one-mind" "$PIN_OUT"
-{ cat "$TMP/right.md"; printf 'result dup-counter structure reviewer fail met h\n'; } > "$TMP/second-reviewer.md"
+  "red: the latest sitting's line 'result dup-counter structure auditor fail met h' is from a role that is neither the critic dealt structure nor one-mind" "$PIN_OUT"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure critic fail met h\n'; } > "$TMP/second-reviewer.md"
 pin_call "$TMP/second-reviewer.md" "$ROOT"
 expect_eq "P17: a second line from the dealt role on its own question is pinned" "pinned" "$PIN_OUT"
 
@@ -604,10 +617,10 @@ cp "$TMP/adv.orig" "$ROOT/payload/context/checks-adversarial.md"
 pin_call "$TMP/stale-ok.md" "$ROOT"
 expect_eq "P21: the checks file put back, the stale sitting is pinned again by its mark" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
 # a marked sitting is history: a result line for a sample since retired does not turn it red
-{ cat "$TMP/stale-ok.md"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-retired.md"
+{ cat "$TMP/stale-ok.md"; printf 'result retired-sample structure critic fail met exam-sitting.md#retired\n'; } > "$TMP/stale-retired.md"
 pin_call "$TMP/stale-retired.md" "$ROOT"
 expect_eq "P22: a stale sitting's result line for a retired sample stays as history, pinned" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
-{ sitting_block 2026-10-05; stale_line "$SL_S"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-nodrift.md"
+{ sitting_block 2026-10-05; stale_line "$SL_S"; printf 'result retired-sample structure critic fail met exam-sitting.md#retired\n'; } > "$TMP/stale-nodrift.md"
 pin_call "$TMP/stale-nodrift.md" "$ROOT"
 expect_contains "P22: …while a sitting whose hashes all match is read whole, whatever its stale: line says" \
   "red: the latest sitting has a result line for retired-sample" "$PIN_OUT"
@@ -663,6 +676,12 @@ done
 sed 's/^finding-rating: .*/finding-rating: S2 on | S3 on/' "$K/defect.txt" > "$K/defect-rating.txt"
 expect_eq "K9: one alternative the table defers makes the line red, and the red names it" \
   "red: planted's finding-rating: 'S3 on' is not a rating the table sends to fix" "$(exam_key planted "$K/defect-rating.txt")"
+# wave-30 T22 (D2): a debt sample's sixth line is the debt table's kind, in place of the ratings.
+sed 's/^finding-rating: .*/finding-kind: one-case-abstraction/' "$K/defect.txt" > "$K/defect-kind.txt"
+expect_eq "K11: a defect key whose sixth line is finding-kind: one-case-abstraction is in shape" "key" "$(exam_key planted "$K/defect-kind.txt")"
+sed 's/^finding-rating: .*/finding-kind: smell/' "$K/defect.txt" > "$K/defect-badkind.txt"
+expect_eq "K11b: a finding-kind: outside the debt table is red, naming it" \
+  "red: planted's finding-kind: 'smell' is not a kind on the debt table" "$(exam_key planted "$K/defect-badkind.txt")"
 { cat "$K/clean.txt"; printf 'finding-file: bin/some.sh\n'; } > "$K/clean-declared.txt"
 expect_eq "K10: clean's key with a finding-file: line is red" \
   "red: clean's key has a finding- line, and clean has no defect to declare" "$(exam_key clean "$K/clean-declared.txt")"
@@ -798,6 +817,8 @@ ifs_rows "an empty IFS" ""
 for s in $(exam_samples "$REPO"); do
   [ "$s" = clean ] && continue
   key="$EXAM/samples/$s/expect.txt"
+  # A debt key has no rating to declare at: §SCORE's DK rows hold it (wave-30 T22, A-T22.10).
+  [ -z "$(sed -n 's/^finding-kind: //p' "$key")" ] || continue
   q="$(sed -n 's/^question: //p' "$key")"
   idents="$(sed -n 's/^names: //p' "$key")"
   tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
@@ -842,6 +863,7 @@ done
 for s in $(exam_samples "$REPO"); do
   [ "$s" = clean ] && continue
   key="$EXAM/samples/$s/expect.txt"
+  [ -z "$(sed -n 's/^finding-kind: //p' "$key")" ] || continue
   q="$(sed -n 's/^question: //p' "$key")"; res="$(sed -n 's/^result: //p' "$key")"
   tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
   ident="$(sed -n 's/^names: //p' "$key")"; ident="${ident%% | *}"
@@ -933,6 +955,66 @@ expect_eq "SD8: the mutant restores the described-only pass: the record that onl
   "$(sd_mut "$DCK" "$R/sd7-described.md")"
 expect_eq "SD8: …which the real scorer fails on the same record" "missed: described only" \
   "$(exam_score "$DCK" "$R/sd7-described.md")"
+
+# DEBT KEYS (wave-30 T22; D2, AC-9.3; A-orch-19). A debt sample is passed only on a `debt:` line of the
+# key's kind naming one of its files, read by proof_findings as the verb reads it; no severity, no
+# reach. The harm loops above skip a debt key (their SD4/SD6 plant an `S2 on` finding, which a debt key
+# reads as the rating miss DK5 pins). The same record, one edit apart, as SD does.
+# drec <file> <question> <result> <kind> <path> <line>... — a planted record declaring one debt finding.
+drec() {
+  local f="$1" q="$2" res="$3" kind="$4" path="$5"
+  shift 5
+  { printf '%s\n' "reviewed: aaa..bbb" "question: $q" "result: $res" "findings: 0" "debt: $kind planted_concept $path:7"; printf '%s\n' "$@"; } > "$f"
+}
+DK_N=0
+for s in $(exam_samples "$REPO"); do
+  key="$EXAM/samples/$s/expect.txt"
+  kind="$(sed -n 's/^finding-kind: //p' "$key")"
+  [ -n "$kind" ] || continue
+  DK_N=$((DK_N + 1))
+  q="$(sed -n 's/^question: //p' "$key")"; res="$(sed -n 's/^result: //p' "$key")"
+  tok="$(sed -n 's/^token: //p' "$key")"; tok="${tok%% | *}"
+  idents="$(sed -n 's/^names: //p' "$key")"; ident="${idents%% | *}"
+  ff_all="$(sed -n 's/^finding-file: //p' "$key")"; ff="${ff_all%% | *}"
+  expect_eq "DK0 $s: a debt key asks result: flag (debt never gives fail)" "flag" "$res"
+  n=0; ia="$idents"
+  while [ -n "$ia" ]; do
+    i1="${ia%% | *}"; [ "$i1" = "$ia" ] && ia="" || ia="${ia#* | }"
+    n=$((n + 1))
+    drec "$R/$s-dk1-$n.md" "$q" "$res" "$kind" "$ff" "$tok" "$i1"
+    expect_eq "DK1 $s: a debt line of kind $kind on $ff, with the token and names: '$i1', is met" "met: declared" "$(exam_score "$key" "$R/$s-dk1-$n.md")"
+  done
+  drec "$R/$s-dk1b.md" "$q" "$res" "$kind" "$ff" "$tok"
+  expect_eq "DK1b $s: the same record without the identifier is missed" "missed" "$(exam_score "$key" "$R/$s-dk1b.md")"
+  drec "$R/$s-dk1c.md" "$([ "$q" = evidence ] && echo adversarial || echo evidence)" "$res" "$kind" "$ff" "$tok" "$ident"
+  expect_eq "DK1c $s: the named record on a question the key does not name is missed" "missed" "$(exam_score "$key" "$R/$s-dk1c.md")"
+  grep -vE '^(findings|debt):' "$R/$s-dk1-1.md" > "$R/$s-dk2.md"
+  expect_true "DK2 $s: the described-only record still names the defect" grep -qF -- "$ident" "$R/$s-dk2.md"
+  expect_eq "DK2 $s: a record that only describes it fails, and the line says so" "missed: described only" "$(exam_score "$key" "$R/$s-dk2.md")"
+  { cat "$R/$s-dk2.md"; printf 'findings: 0\n'; } > "$R/$s-dk2b.md"
+  expect_eq "DK2b $s: findings: 0 and no debt line is described only too" "missed: described only" "$(exam_score "$key" "$R/$s-dk2b.md")"
+  other=""; for k in $PROOF_DEBT_KINDS; do [ "$k" = "$kind" ] || { other="$k"; break; }; done
+  drec "$R/$s-dk3.md" "$q" "$res" "$other" "$ff" "$tok" "$ident"
+  expect_eq "DK3 $s: a debt line of another kind ($other) on $ff is missed, naming the kind" \
+    "missed: declared as debt $other: not the kind this key asks" "$(exam_score "$key" "$R/$s-dk3.md")"
+  drec "$R/$s-dk4.md" "$q" "$res" "$kind" docs/elsewhere.md "$tok" "$ident"
+  expect_eq "DK4 $s: a debt line on another file is missed, naming the file asked for" \
+    "missed: no debt line names ${ff_all// | / or }" "$(exam_score "$key" "$R/$s-dk4.md")"
+  # The SD4/SD6 plant on a debt key: a harm-rated finding on the file is a rating miss (A-T22.10).
+  frec "$R/$s-dk5.md" "$q" "$res" S2 on "$ff" "$tok" "$ident"
+  expect_eq "DK5 $s: an S2 on finding on $ff, with no debt line, is missed as a rating a debt key does not take" \
+    "missed: declared at S2 on: a debt key asks a debt: line of kind $kind" "$(exam_score "$key" "$R/$s-dk5.md")"
+  sed "s/^debt: $kind /debt: $kind S3 /" "$R/$s-dk1-1.md" > "$R/$s-dk6.md"
+  expect_contains "DK6 $s: a debt line carrying a severity is one the verb refuses" \
+    "missed: finding lines refused: " "$(exam_score "$key" "$R/$s-dk6.md")"
+  drec "$R/$s-dk7.md" "$q" pass "$kind" "$ff" "$tok" "$ident"
+  expect_eq "DK7 $s: a declared debt line beside result: pass is missed on the result" "missed" "$(exam_score "$key" "$R/$s-dk7.md")"
+done
+expect_eq "DK-n: the exam holds one debt key, and the DK rows read it" "1" "$DK_N"
+# A harm key is not passed by a debt line on its file: the table sends no debt to fix.
+drec "$R/dk9.md" structure fail duplicate bin/stamp.sh "check: reuse FAIL bin/stamp.sh counts dirt again beside $DC_NAMES"
+expect_eq "DK9: dup-counter (a harm key): a debt line on its file is missed, naming the kind" \
+  "missed: declared as debt duplicate: not a rating this key admits" "$(exam_score "$DC" "$R/dk9.md")"
 
 CL="$EXAM/samples/clean/expect.txt"
 CL_TOK="$(sed -n 's/^token: //p' "$CL")"
@@ -1210,13 +1292,13 @@ expect_false "R5: …and nothing is written" test -e "$RV/out2.json"
 # gen-prompt.sh: a prompt for made-up briefs. Its words are the instruction's own; what a brief
 # says is the brief's.
 printf 'subagent_type: bionic:critic\nQuestions: structure\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-critic-structure.md\n\nRead /tmp/q/s1 over a..b.\n' > "$RV/brief-1.txt"
-printf 'subagent_type: bionic:reviewer\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-reviewer-evidence.md\nno final newline' > "$RV/brief-2.txt"
+printf 'subagent_type: bionic:auditor\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-auditor-evidence.md\nno final newline' > "$RV/brief-2.txt"
 PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" > "$RV/prompt-1.txt"; rc=$?
 P="$(cat "$RV/prompt-1.txt")"
 expect_status "R7: gen-prompt.sh writes a prompt for two briefs" 0 "$rc"
 expect_eq "R7: the prompt opens with /bionic:canonical-sdlc" "/bionic:canonical-sdlc" "$(head -n 1 "$RV/prompt-1.txt" | cut -d ' ' -f 1)"
 expect_contains "R7: each brief goes to the agent type its first line names" "=== Brief 1 — subagent_type: bionic:critic ===" "$P"
-expect_contains "R7: …the second to its own" "=== Brief 2 — subagent_type: bionic:reviewer ===" "$P"
+expect_contains "R7: …the second to its own" "=== Brief 2 — subagent_type: bionic:auditor ===" "$P"
 # read_block <plugin copy> <question>... — the lines gen-prompt.sh ends a brief with (wave-28 T18,
 # D22): the files the recorder pushes a reader, by path in the plugin copy and never pasted: its
 # checks file for each question it is dealt, in the order evidence, adversarial, structure, then the
@@ -1781,6 +1863,79 @@ expect_contains "HT1: …and its readback is live: a caller that runs is seen, w
 expect_eq "HT1: every caller meets its answer ($lines lines)" "$want" "$got"
 [ "$want" = "$got" ] || diff <(printf '%s' "$want") <(printf '%s' "$got") | sed 's/^/      /'
 rm -f "$TMP/t73-before" "$TMP/t73-after"
+
+section "§GRAMMAR — the doctrine's example finding and debt lines parse as the scorer's reader takes them (T36; A-orch-78)"
+
+# WHAT THIS OWNS. One grammar, two readers: severity.md (and steps/6.md, when it carries one) tell a
+# reader how to write a `finding:` and a `debt:` line, and proof.sh's `proof_findings` (the parser
+# score.sh calls, called here and never copied) is what reads them. The sitting of wave-30 T25 had two
+# records refused because the doctrine's form was copied whole (`lib/reap.sh:10|-`, a free-text label
+# ahead of a debt line's first site). So every concrete example line the doctrine carries, a flush-left
+# `finding:` or `debt:` line with no `<placeholder>` in it, is fed to that parser and must be accepted.
+# HERMETIC: the shipped files by path, a planted record per line under $TMP.
+GR_SEV="$REPO/payload/context/severity.md"
+GR_STEP6="$REPO/skills/canonical-sdlc/steps/6.md"
+# gr_examples <file> -> each concrete example line of the file, one per line: flush-left, `finding: `
+# or `debt: `, and no `<` (a form line holds placeholders; an example holds none).
+gr_examples() { /usr/bin/grep -E '^(finding|debt): ' "$1" 2>/dev/null | /usr/bin/grep -vF '<'; }
+# gr_parse <line> -> GR_RC and GR_OUT: proof_findings' answer on a pass holding just that line. A finding
+# is renumbered 1 and given an `unsure:` line, so that a finding the table sends to fix is not refused for
+# the line the example leaves out; a debt line stands beside `findings: 0`.
+gr_parse() {
+  local line="$1" rec="$TMP/gr-rec"
+  case "$line" in
+    finding:*)
+      line="$(printf '%s\n' "$line" | sed 's/^finding: [0-9]* /finding: 1 /')"
+      printf 'reviewed: a..b\nfindings: 1\n%s\nunsure: 1 not known\n' "$line" > "$rec" ;;
+    *) printf 'reviewed: a..b\nfindings: 0\n%s\n' "$line" > "$rec" ;;
+  esac
+  GR_OUT="$(proof_findings "$rec" 2>&1)"; GR_RC=$?
+}
+GR_SEV_EX="$(gr_examples "$GR_SEV")"
+expect_true "GR0: severity.md is shipped and non-empty (the extractor reads it)" test -s "$GR_SEV"
+# The three shapes the doctrine must show, each counted on its own so a missing one is loud.
+GR_N_PATH="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^finding: [0-9]+ S[1-4] (on|off) [^ ]+:[0-9]+ ')"
+GR_N_DASH="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^finding: [0-9]+ S[1-4] (on|off) - ')"
+GR_N_DEBT1="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^debt: [a-z-]+ [^ ,]+ [^ ,]+:[0-9]+$')"
+GR_N_DEBT2="$(printf '%s\n' "$GR_SEV_EX" | /usr/bin/grep -cE '^debt: [a-z-]+ [^ ,]+ [^ ,]+:[0-9]+, [^ ,]+:[0-9]+$')"
+expect_true "GR1: severity.md carries an example finding line with a <path>:<line> site (no example found: $GR_N_PATH)" test "$GR_N_PATH" -ge 1
+expect_true "GR1b: …an example finding line with the lone - site (no example found: $GR_N_DASH)" test "$GR_N_DASH" -ge 1
+expect_true "GR1c: …an example debt line with one site (no example found: $GR_N_DEBT1)" test "$GR_N_DEBT1" -ge 1
+expect_true "GR1d: …an example debt line with two sites (no example found: $GR_N_DEBT2)" test "$GR_N_DEBT2" -ge 1
+# Every example, of either file, is accepted by the parser, and what it reads is what was written.
+for gr_f in "$GR_SEV" "$GR_STEP6"; do
+  while IFS= read -r gr_ex; do
+    [ -n "$gr_ex" ] || continue
+    gr_parse "$gr_ex"
+    expect_status "GR2: $(basename "$gr_f") example is accepted by proof_findings: $gr_ex" 0 "$GR_RC"
+    expect_nonempty "GR2b: …and the parser reads a row from it: $gr_ex" "$GR_OUT"
+    case "$gr_ex" in
+      finding:*)
+        gr_site="$(printf '%s\n' "$gr_ex" | awk '{ print $5 }')"
+        expect_eq "GR2c: …its site is the one written ($gr_site)" "$gr_site" "$(printf '%s\n' "$GR_OUT" | awk -F'\t' 'NR == 1 { print $4 }')" ;;
+      debt:*)
+        gr_sites="$(printf '%s\n' "$gr_ex" | sed 's/^debt: [^ ]* [^ ]* //')"
+        expect_eq "GR2c: …its sites are the ones written ($gr_sites)" "$gr_sites" "$(printf '%s\n' "$GR_OUT" | awk -F'\t' '$1 == "debt" { print $4 }')" ;;
+    esac
+  done <<GR_LINES
+$(gr_examples "$gr_f")
+GR_LINES
+done
+# The arm can go red: the two forms the T25 sitting's readers wrote are refused by the same parser,
+# beside a neighbour one edit away that it takes.
+gr_parse 'finding: 1 S2 on lib/reap.sh:10 the reaper admits a dead pid'
+expect_status "GR3: a finding with its site written <path>:<line> is accepted" 0 "$GR_RC"
+gr_parse 'finding: 1 S2 on lib/reap.sh:10|- the reaper admits a dead pid'
+expect_status "GR3b: …and the alternation copied whole into the site is refused" 1 "$GR_RC"
+expect_contains "GR3c: …naming the site it could not read" "lib/reap.sh:10|-" "$GR_OUT"
+gr_parse 'debt: one-case-abstraction registry lib/naming.sh:6'
+expect_status "GR3d: a debt line with the concept then the first site is accepted" 0 "$GR_RC"
+gr_parse 'debt: one-case-abstraction the registry lib/naming.sh:6'
+expect_status "GR3e: …and a free-text label ahead of the first site is refused" 1 "$GR_RC"
+expect_contains "GR3f: …naming the site it could not read" "registry lib/naming.sh:6" "$GR_OUT"
+gr_parse 'finding: 1 S2 on lib/reap.sh:10 the reaper admits a dead pid'
+GR_GOOD="$GR_OUT"
+expect_nonempty "GR3g precondition: a doctored example's neighbour reads a row, so a refusal above is the parser's" "$GR_GOOD"
 
 section "§SHIPPED — the shipped sittings against the shipped checks files"
 

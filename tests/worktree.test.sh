@@ -2204,9 +2204,14 @@ ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = 
     jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null
 }
 ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
-  local q="'\\''" s; s="${1//\'/$q}"
+  # LS_SHORT=1: the wall's wrap as a SHORT call, its --kill-after arm, which stays in the foreground
+  # (wave-30 T12, A-T12.11): a detached wrap waits at the gate until admitted, so a run the gate never
+  # admits in time is a short call's.
+  local q="'\\''" s="$1"
+  [ "${LS_SHORT:-}" != 1 ] || s="${s/ --detach / --kill-after 30 }"
+  s="${s//\'/$q}"
   ( cd "$LS" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET -u BIONIC_NOW_EPOCH \
-      BIONIC_GATE_DIR="$TMP/land-shim-gate" BIONIC_GATE_POLL=0.1 BIONIC_PROBE_BUSY_CORES=0 \
+      BIONIC_GATE_DIR="$TMP/land-shim-gate" BIONIC_GATE_POLL=0.1 BIONIC_RUN_POLL=0.1 BIONIC_PROBE_BUSY_CORES=0 \
       BIONIC_PROBE_USED_PCT="${LS_USED:-10}" BIONIC_NOW_FILE="${LS_NOW_FILE:-}" \
       /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
 }
@@ -2224,7 +2229,7 @@ ls_case() {  # <label> <branch> <suite rc> <command after the cd guard> <cd targ
   c="cd $5 || exit 1; $4"
   w="$(ls_wrap "$c")"
   expect_match "$1: the wall wraps it in the shim with the tree as the stamp dir" \
-    "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $t --suites a.test.sh -- *" "$w"
+    "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --detach --stamp-dir $t --suites a.test.sh -- *" "$w"
   ls_harness "$w"
   expect_match "$1: the shim stamped the TREE's git dir, at its head, with the suite's own code" \
     "stamp/v1|head=$(git -C "$t" rev-parse HEAD)|dirty=0|rc=$3|*" "$(tail -n 1 "$(stamp_file "$t")" 2>/dev/null)"
@@ -2299,7 +2304,7 @@ echo 0 > "$LSU_RC/su-typed-two-ways.a"
 LSU_WRAP="$(ls_wrap "cd .worktrees/su-typed-two-ways || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc")"
 ls_harness "$LSU_WRAP"
 expect_match "(c) the capture shape is wrapped with the tree and the one suite name" \
-  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --detach --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
 expect_eq "(c) both stamps name a.test.sh" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSC")"
 expect_match "(c) a red typed plainly, then a green in the capture shape, LANDS" \
   "spawn-worktree: LANDED branch=su-typed-two-ways onto=wave/fixture *" "$(worktree_land "$LSC" wave/fixture)"
@@ -2332,7 +2337,7 @@ LSH="$(lsu_tree su-two-in-one)"
 echo 0 > "$LSU_RC/su-two-in-one.a"
 lsu_run "$LSH" b 1 'bash tests/a.test.sh && bash tests/b.test.sh'
 expect_match "(h) the two-suite command is wrapped naming both" \
-  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --detach --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSH" a 0
 expect_eq "(h) one line names both, red; then a alone, green" \
   "a.test.sh,b.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSH")"
@@ -2345,7 +2350,9 @@ expect_match "(h) …and once b runs green alone the tree LANDS" \
 # (i) A SUITE THE GATE NEVER ADMITTED (critic 3 S5; the gate since wave-28 T12). a runs green; b
 # asks the gate on a machine planted over the share, and its call's limit runs out on a planted
 # clock that jumps past it (75, nothing ran). Its line names b, so the land refuses on it; once b
-# runs green the tree lands.
+# runs green the tree lands. Since wave-30 T12 the wall's wrap is detached and its run waits at the
+# gate until admitted, so ls_waits runs the wall's own wrap as a SHORT call (--kill-after, LS_SHORT),
+# the arm that still ends 75 when the gate does not admit it within its limit.
 ls_waits() {  # <run function> <tree> <suite or runner> — one run the gate does not admit in time
   local tk i=0
   printf '1000\n' > "$TMP/ls-clock"
@@ -2354,7 +2361,7 @@ ls_waits() {  # <run function> <tree> <suite or runner> — one run the gate doe
       printf '%s\n' "$((1000 + i * 1000))" > "$TMP/ls-clock.tmp" && mv -f "$TMP/ls-clock.tmp" "$TMP/ls-clock"
     done ) &
   tk=$!
-  LS_USED=95 LS_NOW_FILE="$TMP/ls-clock" "$@"
+  LS_SHORT=1 LS_USED=95 LS_NOW_FILE="$TMP/ls-clock" "$@"
   kill "$tk" 2>/dev/null; wait "$tk" 2>/dev/null
 }
 LSI="$(lsu_tree su-b-no-place)"
@@ -2425,7 +2432,7 @@ lsn_run() {  # <tree> <runner> <rc> [<command after the cd guard>] — the runne
 LSN1="$(lsu_tree sn-npm-retry)"
 lsn_run "$LSN1" npm 1
 expect_match "(n1) npm test is wrapped naming its own text" \
-  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --detach --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
 lsn_run "$LSN1" npm 0
 expect_eq "(n1) two stamps of npm_test, red then green" "npm_test:1 npm_test:0" "$(lsu_stamps "$LSN1")"
 expect_match "(n1) npm test red then npm test green at one head LANDS" \
@@ -2479,7 +2486,7 @@ LSN6="$(lsu_tree sn-one-file)"
 lsu_run "$LSN6" a 1
 lsu_run "$LSN6" a 1 "bash $LSN6/tests/a.test.sh"
 expect_match "(n6) the absolute path behind the cd is wrapped as a.test.sh" \
-  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
+  "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --detach --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
 lsu_run "$LSN6" a 1 'bash ./tests/a.test.sh'
 lsu_run "$LSN6" a 0 "set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc"
 expect_eq "(n6) four stamps, one name" "a.test.sh:1 a.test.sh:1 a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSN6")"
@@ -2492,7 +2499,7 @@ LSN7="$(lsu_tree sn-or-short)"
 lsu_run "$LSN7" b 1
 echo 0 > "$LSU_RC/sn-or-short.a"
 lsu_run "$LSN7" b 1 'bash tests/a.test.sh || bash tests/b.test.sh'
-expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --max-wait 590 --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
+expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --agent at56shim-0123456789abcdef --detach --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
 expect_eq "(n7) b red, then the a || b line green as ?" "b.test.sh:1 ?:0" "$(lsu_stamps "$LSN7")"
 expect_match "(n7) b red then a || b green at one head is REFUSED, naming b" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSN7" wave/fixture)"

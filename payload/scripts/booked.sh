@@ -6,6 +6,7 @@
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--quiet] [--shell <path>]
 #                                        [--stamp-dir <dir>] [--suites <names>] [--runner]
+#                                        [--detach]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -150,6 +151,61 @@
 # settle and every void retry of a --quiet run. It kills nothing: an admitted command runs as
 # long as it runs. The wall leaves it out beside --kill-after, whose limit already bounds the wait.
 #
+# --detach: A RUN IS AN OBJECT, MADE HERE (wave-30 T8; D6, Δ5, Δ5a; REQ-3). The shim's whole tail,
+# ask → run → end → stamp, runs in a session of its own, so nothing that kills the calling Bash call
+# (a /clear, a stopped agent, the caller's process group taken down by SIGKILL) takes the run with
+# it. The caller claims the run's log, starts the detached side, checks it is alive (or already
+# ended) and prints ONE line, then WAITS on it (T12; A-orch-7, "detach means detach AND wait"):
+#
+#   booked: started pid=<pid> log=<path> run=<id>
+#   booked: attached pid=<pid> log=<path> run=<id>     (a live run of the same id, tree and command)
+#   booked: progress <UTC> <suite> <rc|§section>       (stderr, each time the run's last progress line changes)
+#   booked: LOST run=<id> last-written=<UTC>           (stderr, the pid is dead and the run wrote no end)
+#
+# THE WAIT polls the log every BIONIC_RUN_POLL seconds (1 unless set; a fraction is allowed), copies
+# each new WHOLE line of it to stdout, and exits with the run's code once `<log>.rc` holds it (the
+# log's last line is then `rc=<n>`, which it does not copy): so a caller left alone keeps the foreground contract (the command's
+# output, the command's own code), and the only difference is that killing the caller no longer
+# kills the run. ATTACH: before claiming a log, the caller looks for a LIVE run of the same id (the
+# id and every `-<n>` attempt) whose `<log>.key` (the tree and the command, written by the caller
+# that started it) is its own; it attaches to that run, printing the `attached` line, and starts
+# nothing. A run whose pid is alive is "live" only while that pid is still this run's detached shim
+# (`ps` names booked.sh and its --run-log), so a recycled pid is never waited on. LOST is never a
+# timeout: a dead pid with no `<log>.rc` is reported with the time the log was last written, and the
+# caller exits 70. `session-poker.sh wait <name>` is the same wait, by name, after the caller is gone.
+#
+# THE LOG is `<runs>/<id>.log`, `<runs>` being the project's
+# `.bionic/tmp/runs` (the project is the checkout git's common dir belongs to, so a row tree's run
+# logs land in the main checkout's state, never in the tree; with no `.bionic` there,
+# `${TMPDIR:-/tmp}/bionic-runs`). THE ID is `<agent>-<suites>`: --agent (or `main`), then --suites
+# with `,` written `+` and `?` written `_` (or `cmd` when none is named), every other character
+# outside letters, digits, `.`, `_`, `+` and `-` written `_`. A SECOND ATTEMPT NEVER TRUNCATES THE
+# FIRST: the log is claimed with noclobber, and a taken name moves on to `<id>-2.log`, `<id>-3.log`
+# and so on. Beside the log, written by the caller that claimed it:
+#   <log>.key           the caller's tree (`pwd -P`) and the command, the attach's comparison;
+# and by the detached side:
+#   <log>.pid           its pid, written before anything else runs (the place, the stamp and the
+#                       roster record are all that pid's);
+#   <log>.rc            the run's code, written last, after the log's rc line: the end a waiter
+#                       reads (the log's last line alone is not, since a command may print `rc=`);
+#   <log>.progress.tsv  the run's progress file (Δ5a): the detached side exports
+#                       BIONIC_TEST_PROGRESS=<it>, so tests/run.sh appends a line per suite as it
+#                       lands and tests/lib/assert.sh `section()` one per section as it opens.
+# The log holds everything the run printed, the shim's own lines included, and its LAST line is
+# `rc=<n>`, the run's exit code, written on every exit the detached side takes (a usage or start
+# failure aside); a log with no `rc=` line and a dead pid is a run that was LOST. THE RUN RECORD:
+# with --agent naming a row of this session's roster (`<project>/.bionic/tmp/roster-
+# <CLAUDE_CODE_SESSION_ID>.state`), that row gets `run_pid= run_log= run_head= run_cmd=
+# run_started_at=` when the run starts and `run_rc= run_ended_at=` when it ends
+# (lib/roster.sh `roster_mark_run`); with no such row the run still runs, recorded by its log alone.
+# THE PLACE is the detached side's: it asks the gate itself, so the request's holder is its pid and
+# the place stays booked until it ends the request, whatever became of the caller. --kill-after is
+# the run's own ceiling, as before. --max-wait does not reach a detached run: it was the Bash call's
+# bound on a wait inside that call, and a detached run's wait is inside no call, so it waits at the
+# gate until admitted. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
+# macOS ships no `setsid`, and perl is the one tool a stock machine has for it. No perl, or a
+# detached side that is neither alive nor ended once its pid file is read, exits 71 with one line.
+#
 # EVERY COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; T44, review 8 F3).
 # Without job control bash starts a background command with SIGINT and SIGQUIT ignored, and every
 # process below it inherits that, so a suite that traps or relies on an interrupt behaved
@@ -161,11 +217,21 @@
 # command directly, only through the shim's trap, so a SIGKILL to that group (which runs no
 # trap) leaves the command running; and with a controlling terminal the command is a
 # background group, so a read from that terminal stops it (a harness Bash call has none, A-T9.4).
+# Everything above is the FOREGROUND shim's. Under --detach the caller has handed the run off before
+# any signal can matter: the detached side is in a session of its own, with no terminal and nobody's
+# process group, so the caller's death (its group SIGKILLed, a HUP, a /clear) reaches neither it nor
+# its command; the detached side's own traps still pass a signal sent to IT on to the command's group,
+# end the request, stamp and write the rc line. Stopping a detached run on purpose signals its pid
+# (T12's verb); a SIGKILL to the detached side itself runs no trap and leaves the run LOST.
 #
 # EXIT CODES. The command's own, except:
+#   (--detach: the caller exits with the run's own code, the log's last line `rc=<n>`)
 #   2    usage: no `--`, no command, more than one word after `--` (with or without
 #        --kill-after), a bad --kill-after or --max-wait, an empty --agent, or an option the
 #        shim does not know
+#   71   --detach: the detached run could not be started (no perl, no log, or a detached side
+#        neither alive nor ended); one line says which
+#   70   --detach: the run was LOST — its pid died and it wrote no `<log>.rc` (never a timeout)
 #   69   a whole-machine run on a gate store it cannot write; the command never ran
 #   75   the gate did not admit the command within the call's limit (the line says to run it
 #        again; the command never ran), or void over a PASSING run: the load rose during the
@@ -210,11 +276,12 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--detach] -- <command>\n' >&2
   exit 2
 }
 
 kill_after=""; max_wait=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0
+detach=0; run_log=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
@@ -231,6 +298,10 @@ while [ "$#" -gt 0 ]; do
     --suites)       [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; suites="$2"; shift 2 ;;
     --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
     --runner)       runner=1; shift ;;
+    --detach)       detach=1; shift ;;
+    # THE DETACHED SIDE (internal): the caller of --detach starts this shim again with the log it
+    # claimed; nobody types it.
+    --run-log)      [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_log="$2"; shift 2 ;;
     --)             sep=1; shift; break ;;
     *)              booked_usage ;;
   esac
@@ -525,7 +596,253 @@ booked_void() {  # <why> — a whole-machine run that was not measured: `void`, 
   [ "$RUN_RC" -ne 0 ] || RUN_RC=$BOOKED_VOID_RC
 }
 
+# ── --detach: the caller hands the run off (wave-30 T8; D6) ──────────────────
+# booked_project_root — the checkout git's common dir belongs to, from the tree the ask names: a row
+# tree's project is the main checkout. Nothing outside git.
+booked_project_root() {
+  local d="${BOOKED_ASK_DIR:-.}" c
+  c="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  case "$c" in
+    */.git) printf '%s' "${c%/.git}" ;;
+    *) git -C "$d" rev-parse --show-toplevel 2>/dev/null ;;
+  esac
+}
+
+booked_runs_dir() {  # where a detached run's log goes (the header's THE LOG)
+  local r
+  r="$(booked_project_root)"
+  if [ -n "$r" ] && [ -d "$r/.bionic" ]; then
+    printf '%s/.bionic/tmp/runs' "$r"
+  else
+    printf '%s/bionic-runs' "${TMPDIR:-/tmp}"
+  fi
+}
+
+booked_run_id() {  # <agent>-<suites>, one plain word (the header's THE ID)
+  local s="${suites:-cmd}" w
+  s="${s//,/+}"; s="${s//\?/_}"
+  w="${agent:-main}-$s"
+  w="${w//[!A-Za-z0-9._+-]/_}"
+  printf '%s' "${w:0:120}"
+}
+
+# booked_claim_log <dir> <id> — sets BOOKED_CLAIM to a log no attempt has used: <id>.log, else
+# <id>-2.log, -3.log, …, each claimed with noclobber, so two starts never share one and a second
+# never truncates the first. rc 1 when none can be made.
+BOOKED_CLAIM=""
+booked_claim_log() {
+  local n=1 p
+  while [ "$n" -le 999 ]; do
+    if [ "$n" -eq 1 ]; then p="$1/$2.log"; else p="$1/$2-$n.log"; fi
+    if ( set -C; : > "$p" ) 2>/dev/null; then BOOKED_CLAIM="$p"; return 0; fi
+    [ -e "$p" ] || return 1
+    n=$((n + 1))
+  done
+  return 1
+}
+
+# booked_live <pid> <log> — rc 0 when <pid> is alive AND is still the detached shim of <log>: `ps`
+# names booked.sh with that --run-log. A pid the system gave to another process is not this run.
+booked_live() {
+  local c
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  c="$(ps -ww -o command= -p "$1" 2>/dev/null)" || return 1
+  case "$c" in *booked.sh*"--run-log $2"*) return 0 ;; esac
+  return 1
+}
+
+# booked_rc_of <log> — the run's code, from `<log>.rc`, which only the detached side writes, after
+# the log's own rc line; rc 1 while there is none. Never from the log's last line alone: a command
+# whose own last output is `rc=<n>` (a door command's `echo "rc=$rc"`) would read as ended.
+booked_rc_of() {
+  local l=""
+  { read -r l < "$1.rc"; } 2>/dev/null
+  case "$l" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$l"
+}
+
+booked_key() {  # the attach's comparison: this caller's tree and its command
+  printf '%s\n%s' "$(pwd -P)" "$cmd"
+}
+
+# booked_find_live <dir> <id> — sets BOOKED_CLAIM and BOOKED_LIVE_PID to the newest attempt of <id>
+# whose pid is this run's and alive, which has not ended (no `<log>.rc`), and whose key is this caller's; rc 1
+# when none is.
+BOOKED_LIVE_PID=""
+booked_find_live() {
+  local n=1 p pid key found="" fpid=""
+  key="$(booked_key)"
+  while [ "$n" -le 999 ]; do
+    if [ "$n" -eq 1 ]; then p="$1/$2.log"; else p="$1/$2-$n.log"; fi
+    [ -e "$p" ] || break
+    pid=""; { read -r pid < "$p.pid"; } 2>/dev/null
+    if [ -n "$pid" ] && ! booked_rc_of "$p" >/dev/null && booked_live "$pid" "$p" \
+       && [ "$(cat "$p.key" 2>/dev/null)" = "$key" ]; then
+      found="$p"; fpid="$pid"
+    fi
+    n=$((n + 1))
+  done
+  [ -n "$found" ] || return 1
+  BOOKED_CLAIM="$found"; BOOKED_LIVE_PID="$fpid"
+}
+
+booked_mtime_utc() {  # <file> — its last write, UTC ISO-8601
+  local m
+  m="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
+  [ -n "$m" ] || { printf 'unknown'; return 0; }
+  date -u -r "$m" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$m" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown'
+}
+
+# booked_follow <log> <pid> — THE WAIT: every BIONIC_RUN_POLL seconds, the log's new whole lines to
+# stdout and the run's last progress line to stderr when it changed; exits with the run's code from
+# `<log>.rc` (the log's rc line is not printed), or 70 when the pid is dead and no end came (LOST,
+# never a timeout).
+booked_follow() {
+  local log="$1" pid="$2" poll="${BIONIC_RUN_POLL:-1}" done_n=0 total rc prog last_prog="" id dead=0
+  case "$poll" in ''|*[!0-9.]*|.|*.*.*) poll=1 ;; esac
+  id="${log##*/}"; id="${id%.log}"
+  while :; do
+    rc="$(booked_rc_of "$log")" && {
+      total="$(wc -l < "$log" | tr -d ' ')"
+      [ "$((total - 1))" -le "$done_n" ] || sed -n "$((done_n + 1)),$((total - 1))p" "$log"
+      exit "$rc"
+    }
+    total="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
+    case "$total" in ''|*[!0-9]*) total=$done_n ;; esac
+    # A LAST LINE `rc=<n>` IS HELD BACK until a line follows it or the end is known: it may be the
+    # shim's own rc line, written just before `<log>.rc`, which is never copied.
+    if [ "$total" -gt "$done_n" ]; then
+      prog="$(sed -n "${total}p" "$log")"
+      case "$prog" in rc=[0-9]*) case "${prog#rc=}" in *[!0-9]*) : ;; *) total=$((total - 1)) ;; esac ;; esac
+    fi
+    if [ "$total" -gt "$done_n" ]; then sed -n "$((done_n + 1)),${total}p" "$log"; done_n=$total; fi
+    prog="$(tail -n 1 "$log.progress.tsv" 2>/dev/null)"
+    if [ -n "$prog" ] && [ "$prog" != "$last_prog" ]; then
+      printf 'booked: progress %s\n' "${prog//$'\t'/ }" >&2
+      last_prog="$prog"
+    fi
+    # THE PID DIED: one more read of `<log>.rc` (the run may have ended between the two reads),
+    # then LOST.
+    if [ "$dead" -eq 1 ]; then
+      total="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
+      case "$total" in ''|*[!0-9]*) total=$done_n ;; esac
+      [ "$total" -le "$done_n" ] || sed -n "$((done_n + 1)),${total}p" "$log"
+      printf 'booked: LOST run=%s last-written=%s\n' "$id" "$(booked_mtime_utc "$log")" >&2
+      exit 70
+    fi
+    booked_live "$pid" "$log" || { dead=1; continue; }
+    sleep "$poll"
+  done
+}
+
+booked_detach() {  # the caller's whole part: attach or claim and start, report, then wait
+  local runs child i=0 pid="" id
+  # The caller stamps nothing and ends nothing: a signal here leaves no run behind to speak for.
+  trap - HUP INT QUIT TERM
+  if ! command -v perl >/dev/null 2>&1; then
+    printf 'booked: --detach needs perl (POSIX::setsid) and none is on PATH — the run was not started\n' >&2
+    exit 71
+  fi
+  runs="$(booked_runs_dir)"
+  mkdir -p "$runs" 2>/dev/null
+  # ATTACH, NEVER A SECOND START: a live run of this id, tree and command is waited on as it stands.
+  if booked_find_live "$runs" "$(booked_run_id)"; then
+    id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
+    printf 'booked: attached pid=%s log=%s run=%s\n' "$BOOKED_LIVE_PID" "$BOOKED_CLAIM" "$id"
+    booked_follow "$BOOKED_CLAIM" "$BOOKED_LIVE_PID"
+  fi
+  if ! booked_claim_log "$runs" "$(booked_run_id)"; then
+    printf 'booked: cannot claim a run log under %s — the run was not started\n' "$runs" >&2
+    exit 71
+  fi
+  booked_key > "$BOOKED_CLAIM.key" 2>/dev/null
+  # THE DETACHED SIDE is this shim again, with the log it is to write and the caller's options but
+  # --max-wait (a detached run's wait is inside no call; see the header).
+  child=(bash "$BOOKED_SELF_DIR/booked.sh" --run-log "$BOOKED_CLAIM")
+  [ -z "$agent" ] || child+=(--agent "$agent")
+  [ -z "$kill_after" ] || child+=(--kill-after "$kill_after")
+  [ "$quiet" -eq 0 ] || child+=(--quiet)
+  [ -z "$run_shell" ] || child+=(--shell "$run_shell")
+  [ -z "$stamp_dir" ] || child+=(--stamp-dir "$stamp_dir")
+  [ -z "$suites" ] || child+=(--suites "$suites")
+  [ "$runner" -eq 0 ] || child+=(--runner)
+  child+=(-- "$cmd")
+  # fork; the parent returns at once; the child leaves the caller's session (setsid), takes the log
+  # as stdout and stderr and /dev/null as stdin, closes every other descriptor it inherited (one held
+  # open would keep the harness waiting on the call), writes its pid, and becomes the shim. The pid
+  # file's handle is declared before it is opened, and the pid is checked below before any start is
+  # reported: the two silent failures of the prototype (ideas/runs-outlive-a-rollover.md).
+  # shellcheck disable=SC2016  # perl's own variables, not the shell's
+  perl -MPOSIX -e '
+    my $log = shift @ARGV;
+    my $pid = fork;
+    exit 1 unless defined $pid;
+    exit 0 if $pid;
+    POSIX::setsid() or POSIX::_exit(3);
+    open(STDIN, "<", "/dev/null") or POSIX::_exit(4);
+    open(STDOUT, ">>", $log) or POSIX::_exit(4);
+    open(STDERR, ">&", \*STDOUT) or POSIX::_exit(4);
+    POSIX::close($_) for 3 .. 255;
+    my $p;
+    open($p, ">", "$log.pid") or POSIX::_exit(5);
+    print $p "$$\n";
+    close($p);
+    exec { $ARGV[0] } @ARGV;
+    POSIX::_exit(6);
+  ' "$BOOKED_CLAIM" "${child[@]}" < /dev/null > /dev/null 2>&1
+  while [ "$i" -lt 100 ]; do
+    pid=""
+    { read -r pid < "$BOOKED_CLAIM.pid"; } 2>/dev/null
+    case "$pid" in ''|*[!0-9]*) pid="" ;; *) break ;; esac
+    i=$((i + 1)); sleep 0.1
+  done
+  if [ -z "$pid" ] || { ! kill -0 "$pid" 2>/dev/null && ! booked_rc_of "$BOOKED_CLAIM" >/dev/null; }; then
+    printf 'booked: the detached run did not start (pid %s) — see %s\n' "${pid:-none}" "$BOOKED_CLAIM" >&2
+    exit 71
+  fi
+  id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
+  printf 'booked: started pid=%s log=%s run=%s\n' "$pid" "$BOOKED_CLAIM" "$id"
+  booked_follow "$BOOKED_CLAIM" "$pid"
+}
+
+# ── the detached side's own acts (wave-30 T8): the progress file, the run record, the rc line ──
+BOOKED_ROSTER=""
+booked_run_open() {  # at the start of the tail, in the detached side
+  local r sid="${CLAUDE_CODE_SESSION_ID:-}"
+  export BIONIC_TEST_PROGRESS="$run_log.progress.tsv"
+  : >> "$BIONIC_TEST_PROGRESS" 2>/dev/null
+  # THE RC LINE IS THE LOG'S LAST, ON EVERY EXIT: the exit trap takes over the temp-file cleanup.
+  trap 'booked_run_close $?' EXIT
+  [ -n "$agent" ] || return 0
+  case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
+  r="$(booked_project_root)"
+  [ -n "$r" ] || return 0
+  BOOKED_ROSTER="$r/.bionic/tmp/roster-$sid.state"
+  if [ ! -f "$BOOKED_ROSTER" ] || [ -L "$BOOKED_ROSTER" ]; then BOOKED_ROSTER=""; return 0; fi
+  # shellcheck disable=SC1091
+  . "$BOOKED_SELF_DIR/lib/roster.sh" 2>/dev/null || { BOOKED_ROSTER=""; return 0; }
+  roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_pid=$$" "run_head=$stamp_head" \
+    "run_cmd=$(booked_one_line "$cmd" 120)" "run_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" || BOOKED_ROSTER=""
+}
+
+booked_run_close() {  # <rc> — the exit trap of the detached side
+  rm -f ${BOOKED_TIMES:+"$BOOKED_TIMES"} ${BOOKED_IDF:+"$BOOKED_IDF"}
+  if [ -n "$BOOKED_ROSTER" ]; then
+    roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_rc=$1" \
+      "run_ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null
+  fi
+  # THE RC LINE IS A LINE OF ITS OWN: a command whose output ends without a newline would glue it.
+  [ -z "$(tail -c 1 "$run_log" 2>/dev/null)" ] || printf '\n' >> "$run_log"
+  printf 'rc=%s\n' "$1" >> "$run_log"
+  # THE END, FOR A READER: `<log>.rc`, written after the log's rc line and by nothing else, so a
+  # waiter never mistakes a command's own `rc=<n>` output for the run's end.
+  printf '%s\n' "$1" > "$run_log.rc"
+}
+
 # ── main ─────────────────────────────────────────────────────────────────────
+[ "$detach" -eq 0 ] || [ -n "$run_log" ] || booked_detach
+[ -z "$run_log" ] || booked_run_open
 BOOKED_T0=$SECONDS
 # THE CALL'S LIMIT: the smaller of --kill-after and --max-wait; the ask's --within, and the one
 # ceiling of a --quiet run's settle and retries. With neither, the gate waits until it admits,

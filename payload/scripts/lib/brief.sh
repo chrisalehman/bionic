@@ -187,8 +187,8 @@ QUOTE_CHARS="\`\"$(printf '\047')"
 # `Suites:`, so the two spellings of one statement share one ceiling and no new number exists.
 #
 # THE QUESTION DECIDES, NOT THE ROLE (wave-27 T15; review pass 15, F4). The rule was keyed to
-# `bionic:auditor`, and at `tested` the dealing gives `evidence` to the critic, which escaped it.
-# A reader role (auditor, critic, reviewer) whose brief's `Questions:` holds `evidence` is held
+# `bionic:auditor`, and at `single` the dealing gives `evidence` to the critic, which escaped it.
+# A reader role (auditor, critic) whose brief's `Questions:` holds `evidence` is held
 # to it, and so is the auditor whatever its line says: with no bound plan the dealing is not
 # checked, and an auditor brief keeps today's rule there. The role is matched whole, in the
 # prefixed name the harness sends and the bare word a hand-written brief uses.
@@ -235,14 +235,14 @@ dp_counted_runs() {
 dp_reads_evidence() {  # <subagent_type> [<questions, comma-joined>] -> 0 when the cap of three binds
   case "${1-}" in
     bionic:auditor|auditor) return 0 ;;
-    bionic:critic|critic|bionic:reviewer|reviewer)
+    bionic:critic|critic)
       case ",${2-}," in *,evidence,*) return 0 ;; esac ;;
   esac
   return 1
 }
-# dp_is_reader <subagent_type> -> 0 for the three reader roles, prefixed or bare (wave-27 T57).
+# dp_is_reader <subagent_type> -> 0 for the two reader roles, prefixed or bare (wave-27 T57; wave-30 T20).
 dp_is_reader() {
-  case "${1-}" in bionic:auditor|auditor|bionic:critic|critic|bionic:reviewer|reviewer) return 0 ;; esac
+  case "${1-}" in bionic:auditor|auditor|bionic:critic|critic) return 0 ;; esac
   return 1
 }
 dp_runs_cap() {  # <subagent_type> [<questions>] -> how many suite runs that brief's Re-executes: may declare
@@ -1928,7 +1928,7 @@ Then retry the dispatch."
   # labelled span and its lift is one value, the waiver or the list, never both.
   #
   # KEYED TO THE EVIDENCE QUESTION (wave-27 T15; review pass 15, F4): `dp_reads_evidence`, the
-  # predicate the cap of three reads, so a critic dealt `evidence` at `tested` is held here as an
+  # predicate the cap of three reads, so a critic dealt `evidence` at `single` is held here as an
   # auditor is. The auditor keeps its own words; another reader is named by its role.
   if dp_reads_evidence "$role" "$questions"; then
       # THE PREDICATE IS NOW "NO SUITES AND NO DECLARED RUNS" (epic-23 wave-16, REQ-1 AC-1.2,

@@ -300,7 +300,7 @@ section "6: the derivation bound has ONE owner (REQ-7, AC-7.4)"
 # BUT A HANG GUARD IS ONLY AS LONG AS ITS HOST WILL WAIT, and the two legs have
 # different hosts. THE RULE IS THE SAME FOR BOTH (wave-14 D2, ratified): every
 # inner bound sits strictly under its own hook's registration, margin named —
-# the wall's 10 s under dispatch-preflight.sh's 15 s registration, the sweep's
+# the wall's 20 s under dispatch-preflight.sh's 25 s registration, the sweep's
 # 6 s under hooks/stop.sh's `"timeout": 10` on Stop and SubagentStop. A bound at
 # or above its registration is never reached, because the CLI kills the hook at
 # the registration and a hook killed on the harness's timeout does NOT exit 2:
@@ -330,7 +330,7 @@ expect_true "6b: …and parses under bash -n" bash -n "$BOUNDS_SH"
 
 # THE VALUES ARE READ BY SOURCING, not by grepping literals back out of the file:
 # what a consumer gets is what sourcing gives it.
-expect_eq "6c: sourcing it defines IMPACT_BOUND_S=10, the dispatch wall's guard, under its own 15s registration" "10" \
+expect_eq "6c: sourcing it defines IMPACT_BOUND_S=20, the dispatch wall's guard, under its own 25s registration" "20" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
 expect_eq "6d: …and LG_IMPACT_BOUND_S=6, the landing gate's, inside a 10s hook" "6" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
@@ -354,9 +354,9 @@ fi
 # NOT VACUOUS: the rows above read the file rather than agreeing with constants
 # typed into this suite, and a copy carrying different numbers proves it.
 B_MUTD="$(mktemp -d)"
-anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=10$' 1
+anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=20$' 1
 anchor -E "$BOUNDS_SH" '^LG_IMPACT_BOUND_S=6$' 1
-sed -e 's/^IMPACT_BOUND_S=10$/IMPACT_BOUND_S=3/' \
+sed -e 's/^IMPACT_BOUND_S=20$/IMPACT_BOUND_S=3/' \
     -e 's/^LG_IMPACT_BOUND_S=6$/LG_IMPACT_BOUND_S=4/' "$BOUNDS_SH" >"$B_MUTD/bounds.sh"
 expect_eq "6g: …and a copy carrying 3 answers 3, so 6c read the file" "3" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
@@ -1075,7 +1075,7 @@ section "DECLINE: a decline stands until the set it answered changes (wave-26 T1
 # again. Now a fill decline stands until the READY SET gains a row it did not answer. A
 # stand-down decline is written to the roster as `hold` writes it, so it stands until the
 # agent's launch, deliverable or messages move. The tick reads that check (hold_fingerprint).
-# The end-to-end proof, through the real tick, is tests/session-poker.test.sh §41 DECLINE-tick.
+# The end-to-end proof, through the real tick, is tests/session-poker-2.test.sh §41 DECLINE-tick.
 export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
 
 # D1/D2: the fill decline. Turn one declines ready {T7}. `current:` moves and the ready set does
@@ -1245,7 +1245,7 @@ unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 section "BUDGET-USER: a user's writer cap is a fact in the header the wall already reads (wave-27 T34; REQ-15 AC-15.4; D24)"
 
 # `session-poker.sh budget writers=<n> '<reply>'` rewrites the header's `writers=` with
-# `source=user` and adds `budget-override:` (tests/session-poker.test.sh §BUDGET-USER drives the
+# `source=user` and adds `budget-override:` (tests/session-poker-3.test.sh §BUDGET-USER drives the
 # verb). The wall reads the header it always read: with the user's cap reached it asks for
 # nothing, and no decline is recorded or written. The control is the probe's header over the same
 # roster, which owes the ready row.
@@ -1451,7 +1451,7 @@ section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floo
 # THE INTEGRATE ROW'S proof:review IS THE JUDGE'S (wave-27 T14; T43, A-orch-82). It is met only
 # when lib/proof.sh `facts_state` answers covered. The tick writes that answer into its digest
 # (`facts_state=`), and the wall hands it to the same ready set. So the plan declares a rigor and
-# a scale the dealing knows (`tested`, `wave`: the floor, and the critic's three piece reads and
+# a scale the dealing knows (`single`, `wave`: the floor, and the critic's three piece reads and
 # two whole reads) and a real base-sha:. The readings are written at the new head by the same
 # writer pair. With one reading missing (FL1b), neither the tick nor the wall offers integrate.
 fl_git() { git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid "${@:2}"; }
@@ -1470,7 +1470,7 @@ fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   fl_git "$d" init -q 2>/dev/null; fl_git "$d" checkout -q -b wave/99-fl 2>/dev/null
   printf '.bionic/\n' > "$d/.gitignore"; fl_git "$d" add .gitignore; fl_git "$d" commit -qm base
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\nrigor: tested\nscale: wave\nbase-sha: %s\n' "$(fl_git "$d" rev-parse HEAD)"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\nrigor: single\nscale: wave\nbase-sha: %s\n' "$(fl_git "$d" rev-parse HEAD)"
     printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 8\nworking-branch: wave/99-fl\n'
     printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 8: in progress\n\n'
@@ -1495,7 +1495,7 @@ export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
 FL_TX="$(mktemp)"
 FL_D="$(fl_fixture)"
 expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
-  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at" "$(fo_tick "$FL_D")"
+  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at" "$(fo_tick "$FL_D")"
 sd_turn "$FL_TX" u-fl-1
 s7_fire "$FL_D" "$FL_TX"
 expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
@@ -1550,7 +1550,7 @@ ls_world() {  # -> project dir; T3 and T4 pending build rows, T2 active, the ses
   p="$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
     printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\n'
@@ -1903,7 +1903,7 @@ expect_status "FR5 …and the stop is admitted" "0" "$STOP_RC"
 section "RW: the reconcile refusal says the plan moved when that is why it is owed (wave-27 T37; review pass 8 F2)"
 
 # The tick writes `reconcile=step4` or `reconcile=grew` beside `duty=owed` when the reconcile is
-# owed because the plan moved (tests/session-poker.test.sh §RECON-WHY). A tick turn with no
+# owed because the plan moved (tests/session-poker-3.test.sh §RECON-WHY). A tick turn with no
 # task-list refresh is refused as before; the refusal now gives that cause and names the rebuild,
 # and with no cause in the digest, or a digest older than the turn's tick, it is today's words.
 # The fixture is LH's at the proof's own head, so no fill is owed, and its transcript is s7's

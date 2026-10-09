@@ -1,0 +1,95 @@
+diff --git a/bin/run-suite.sh b/bin/run-suite.sh
+index d9371b8..fd516d0 100755
+--- a/bin/run-suite.sh
++++ b/bin/run-suite.sh
+@@ -1,14 +1,13 @@
+ #!/bin/bash
+ # bin/run-suite.sh <suite> — runs one suite in the current checkout and appends its stamp:
+ #   stamp head=<sha> rc=<exit code> suite=<suite>
++# The suite's output is kept in trellis-logs/<suite file>.log.
+ set -uo pipefail
+ [ "$#" -eq 1 ] || { echo "usage: run-suite.sh <suite>" >&2; exit 2; }
+-. "$(dirname "$0")/../lib/verdict.sh"
+ gitdir="$(git rev-parse --absolute-git-dir)" || exit 2
+ head="$(git rev-parse --verify -q 'HEAD^{commit}')" || exit 2
+-out="$(bash "$1" 2>&1)"
+-ran=$?
+-rc="$(suite_verdict "$ran" "$out")"
+-printf '%s\n' "$out"
++mkdir -p "$gitdir/trellis-logs" || exit 2
++bash "$1" 2>&1 | tee "$gitdir/trellis-logs/${1##*/}.log"
++rc="${PIPESTATUS[0]}"
+ printf 'stamp head=%s rc=%s suite=%s\n' "$head" "$rc" "$1" >> "$gitdir/trellis-stamps"
+ exit "$rc"
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index 548d804..da5ab57 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -1,9 +1,9 @@
+ # Changelog
+ 
+-## 0.3.0
++## 0.4.0
+ 
+-- `bin/run-suite.sh` stamps a suite that exits 0 after printing a line that starts with `not ok`
+-  as `rc=1`, so the landing check refuses it.
++- `bin/run-suite.sh` keeps a suite's output in `trellis-logs/<suite file>.log` in the checkout's
++  git directory.
+ 
+ Known limits:
+ 
+@@ -11,6 +11,11 @@ Known limits:
+   stamped green. `bin/run-suite.sh` guards the `not ok` form by reading the suite's output, so
+   only a suite with another format must exit non-zero itself.
+ 
++## 0.3.0
++
++- `bin/run-suite.sh` stamps a suite that exits 0 after printing a line that starts with `not ok`
++  as `rc=1`, so the landing check refuses it.
++
+ ## 0.2.0
+ 
+ - `bin/run-suite.sh` stamps each run with the head it saw.
+diff --git a/docs/plan.md b/docs/plan.md
+index cee8787..d422816 100644
+--- a/docs/plan.md
++++ b/docs/plan.md
+@@ -3,7 +3,7 @@
+ | task | what | state |
+ |---|---|---|
+ | T1 | bin/run-suite.sh stamps the run | landed |
+-| T2 | REQ-2: keep the output | for this change |
++| T2 | REQ-2: keep the output | landed |
+ 
+ ## Verification Matrix
+ 
+diff --git a/docs/record/T2.md b/docs/record/T2.md
+new file mode 100644
+index 0000000..c65289d
+--- /dev/null
++++ b/docs/record/T2.md
+@@ -0,0 +1,12 @@
++# T2 — keep the output
++
++reuse: searched lib/ and bin/ for another place that writes under the git directory: only the
++stamp line in bin/run-suite.sh. The log sits beside it.
++
++AC-1.1, AC-2.1: `bash tests/run-suite.test.sh` → rc=0
++```
++ok - the suite's exit code is passed on
++ok - a red run is stamped
++ok - the output is kept in the log
++```
++RED before the change: the last check printed `not ok` (no log was written).
+diff --git a/tests/run-suite.test.sh b/tests/run-suite.test.sh
+index 2135087..a9cd648 100644
+--- a/tests/run-suite.test.sh
++++ b/tests/run-suite.test.sh
+@@ -8,4 +8,7 @@ printf 'exit 1\n' > "$SCRATCH/red.test.sh"
+ ( cd "$r" && bash "$run" "$SCRATCH/red.test.sh" )
+ check "the suite's exit code is passed on" "1" "$?"
+ check "a red run is stamped" "stamp head=$head rc=1 suite=$SCRATCH/red.test.sh" "$(cat "$r/.git/trellis-stamps")"
++printf 'echo hello\n' > "$SCRATCH/say.test.sh"
++( cd "$r" && bash "$run" "$SCRATCH/say.test.sh" >/dev/null )
++check "the output is kept in the log" "hello" "$(cat "$r/.git/trellis-logs/say.test.sh.log")"
+ done_testing

@@ -221,7 +221,7 @@ assert_contains() { expect_contains "$1" "$2" "$3"; }
 
 # Builds a valid canonical-sdlc artifact. All config via KEY=VALUE args
 # (bash-3.2 arg parse):
-#   intent/rigor/scale — triple values (default build/audited/wave);
+#   intent/rigor/scale — triple values (default build/double/wave);
 #     value OMIT drops the line entirely (missing-field cases).
 #   step    — sdlc-step (default 3).
 #   version — canonical_sdlc_version (default 14); OMIT drops the line.
@@ -238,7 +238,7 @@ assert_contains() { expect_contains "$1" "$2" "$3"; }
 #             about design must satisfy that arm to keep testing its own
 #             subject. Plan-targeting cases never set it.
 build_plan() {
-  local intent=build rigor=audited scale=wave step=3 version=14 mode="OMIT" omit=" " matrix=yes
+  local intent=build rigor=double scale=wave step=3 version=14 mode="OMIT" omit=" " matrix=yes
   local skill="superpowers:writing-plans"
   local walk="OMIT" override="OMIT" waived="OMIT"
   # goal: yes (default) | no | empty — K5.4. "yes" injects a real '## Goal' paragraph as
@@ -434,7 +434,7 @@ assert_eq "absent version blocks" 2 "$HOOK_EXIT"
 # wave/epic plans.
 #
 # Enums: intent ∈ {build,bugfix,refactor,tune,spike,incident-response};
-#        rigor ∈ {tested,peer-reviewed,audited}; scale ∈ {task,wave,epic}.
+#        rigor ∈ {single,double,double}; scale ∈ {task,wave,epic}.
 #
 # No intent × scale cell is barred (T9, epic-18-w1): every combination that
 # clears the enum + flag + matrix checks writes cleanly, including the three
@@ -629,7 +629,7 @@ assert_eq "cr_only_enum exit 2" 2 "$HOOK_EXIT"
 # $HOME/.claude/logs/<project-slug>/sdlc-audit.md — outside every consuming
 # project tree (incident 0001) — AND echoes it to stderr, then exits 0 —
 # findings NEVER block (R3/D14).
-# Floors: incident-response floors at audited; spike is capped at tested;
+# Floors: incident-response floors at double; spike is capped at single;
 # `rigor-floor:` in .bionic/config.yaml (invalid value = its own finding);
 # `rigor-floor:` in the epic plan's frontmatter (fail-open on missing plan).
 # Fixtures build temp project roots; the hook derives PROJECT_ROOT from the
@@ -644,67 +644,67 @@ read_audit() {
   if [ -f "$f" ]; then cat "$f"; else echo ""; fi
 }
 
-echo "intent-floor: incident-response + rigor tested → log intent-floor, exit 0"
+echo "intent-floor: incident-response + rigor single → log intent-floor, exit 0"
 project=$(make_project)
-run_write "$project/.bionic/docs/plans/epic-01-demo/incident-floor.plan.md" "$(build_plan intent=incident-response rigor=tested)"
-assert_eq "floor_incident_below_audited_logs exit 0" 0 "$HOOK_EXIT"
+run_write "$project/.bionic/docs/plans/epic-01-demo/incident-floor.plan.md" "$(build_plan intent=incident-response rigor=single)"
+assert_eq "floor_incident_below_double_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_incident stderr names intent-floor" "intent-floor" "$HOOK_STDERR"
 assert_contains "floor_incident audit line names intent-floor" "intent-floor" "$(read_audit "$project")"
 assert_contains "floor_incident audit line carries artifact path" "incident-floor.plan.md" "$(read_audit "$project")"
 
-echo "spike-cap: spike + rigor audited → log spike-cap, exit 0"
+echo "spike-cap: spike + rigor double → log spike-cap, exit 0"
 project=$(make_project)
-run_write "$project/.bionic/docs/plans/epic-01-demo/spike-cap.plan.md" "$(build_plan intent=spike rigor=audited)"
-assert_eq "floor_spike_above_tested_logs exit 0" 0 "$HOOK_EXIT"
+run_write "$project/.bionic/docs/plans/epic-01-demo/spike-cap.plan.md" "$(build_plan intent=spike rigor=double)"
+assert_eq "floor_spike_above_single_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_spike stderr names spike-cap" "spike-cap" "$HOOK_STDERR"
 assert_contains "floor_spike audit names spike-cap" "spike-cap" "$(read_audit "$project")"
 
-echo "project-floor: config rigor-floor audited + plan rigor tested → log project-floor"
+echo "project-floor: config rigor-floor double + plan rigor single → log project-floor"
 project=$(make_project)
-printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
-run_write "$project/.bionic/docs/plans/epic-01-demo/proj-floor.plan.md" "$(build_plan intent=build rigor=tested)"
+printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/proj-floor.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_project_violation_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_project stderr names project-floor" "project-floor" "$HOOK_STDERR"
 assert_contains "floor_project audit names project-floor" "project-floor" "$(read_audit "$project")"
 
-echo "project-floor satisfied: rigor audited meets floor → silent (no audit, no stderr)"
+echo "project-floor satisfied: rigor double meets floor → silent (no audit, no stderr)"
 project=$(make_project)
-printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
-run_write "$project/.bionic/docs/plans/epic-01-demo/proj-ok.plan.md" "$(build_plan intent=build rigor=audited)"
+printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/proj-ok.plan.md" "$(build_plan intent=build rigor=double)"
 assert_eq "floor_project_satisfied_silent exit 0" 0 "$HOOK_EXIT"
 
 echo "project-floor invalid value: rigor-floor: extreme → invalid-value finding, exit 0"
 project=$(make_project)
 printf 'rigor-floor: extreme\n' > "$project/.bionic/config.yaml"
-run_write "$project/.bionic/docs/plans/epic-01-demo/proj-invalid.plan.md" "$(build_plan intent=build rigor=audited)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/proj-invalid.plan.md" "$(build_plan intent=build rigor=double)"
 assert_eq "floor_project_invalid_value_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_project_invalid stderr names project-floor" "project-floor" "$HOOK_STDERR"
 assert_contains "floor_project_invalid audit says invalid" "invalid rigor-floor" "$(read_audit "$project")"
 
-echo "epic-floor: epic.plan.md rigor-floor audited + plan rigor tested → log epic-floor"
+echo "epic-floor: epic.plan.md rigor-floor double + plan rigor single → log epic-floor"
 project=$(make_project)
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
-rigor-floor: audited
+rigor-floor: double
 ---
 
 # Epic
 EOF
-run_write "$project/.bionic/docs/plans/epic-01-demo/epic-floor.plan.md" "$(build_plan intent=build rigor=tested)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/epic-floor.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_epic_violation_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_epic stderr names epic-floor" "epic-floor" "$HOOK_STDERR"
 assert_contains "floor_epic audit names epic-floor" "epic-floor" "$(read_audit "$project")"
 
 echo "epic-floor: epic names a plan that doesn't exist → silent (fail-open)"
 project=$(make_project)
-run_write "$project/.bionic/docs/plans/epic-01-demo/epic-missing.plan.md" "$(build_plan intent=build rigor=tested)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/epic-missing.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_epic_plan_missing_silent exit 0" 0 "$HOOK_EXIT"
 
 echo "audit file + parent dir created on first finding"
 project=$(make_project)
-run_write "$project/.bionic/docs/plans/epic-01-demo/audit-create.plan.md" "$(build_plan intent=spike rigor=audited)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/audit-create.plan.md" "$(build_plan intent=spike rigor=double)"
 assert_eq "floor_audit_file_created exit 0" 0 "$HOOK_EXIT"
 if [ -f "$(audit_file_for "$project")" ]; then
   ok "floor_audit_file_created (file + dir created)"
@@ -718,17 +718,17 @@ fi
 
 echo "all-violations fixture (intent + project + epic floors) → still exit 0, all three logged"
 project=$(make_project)
-printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
+printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
-rigor-floor: audited
+rigor-floor: double
 ---
 
 # Epic
 EOF
-run_write "$project/.bionic/docs/plans/epic-01-demo/all-violations.plan.md" "$(build_plan intent=incident-response rigor=tested)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/all-violations.plan.md" "$(build_plan intent=incident-response rigor=single)"
 assert_eq "floor_never_blocks exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_never_blocks logs intent-floor" "intent-floor" "$(read_audit "$project")"
 assert_contains "floor_never_blocks logs project-floor" "project-floor" "$(read_audit "$project")"
@@ -748,13 +748,13 @@ assert_contains "floor_never_blocks logs epic-floor" "epic-floor" "$(read_audit 
 echo
 section "rigor-override: marker (epic-14 AC-10, AC-11)"
 
-RIGOR_OVERRIDE_LINE='rigor-override: chris 2026-08-01 derived=audited chosen=tested'
+RIGOR_OVERRIDE_LINE='rigor-override: chris 2026-08-01 derived=double chosen=single'
 
 echo "project-floor violated + rigor-override marker → writes cleanly, logs user-overridden, not the violation"
 project=$(make_project)
-printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
+printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
 run_write "$project/.bionic/docs/plans/epic-01-demo/override-present.plan.md" \
-  "$(build_plan intent=build rigor=tested override="$RIGOR_OVERRIDE_LINE")"
+  "$(build_plan intent=build rigor=single override="$RIGOR_OVERRIDE_LINE")"
 assert_eq "rigor_override_present exit 0" 0 "$HOOK_EXIT"
 assert_contains "rigor_override_present stderr says user-overridden" "user-overridden" "$HOOK_STDERR"
 assert_contains "rigor_override_present audit says user-overridden" "user-overridden" "$(read_audit "$project")"
@@ -763,9 +763,9 @@ expect_absent "rigor_override_present audit does not name the violation text" "p
 
 echo "project-floor violated, NO marker → existing violation log unchanged"
 project2=$(make_project)
-printf 'rigor-floor: audited\n' > "$project2/.bionic/config.yaml"
+printf 'rigor-floor: double\n' > "$project2/.bionic/config.yaml"
 run_write "$project2/.bionic/docs/plans/epic-01-demo/override-absent.plan.md" \
-  "$(build_plan intent=build rigor=tested)"
+  "$(build_plan intent=build rigor=single)"
 assert_eq "rigor_override_absent exit 0" 0 "$HOOK_EXIT"
 expect_absent "rigor_override_absent audit does not say user-overridden" "user-overridden" "$(read_audit "$project2")"
 
@@ -894,11 +894,11 @@ run_write "$ac10_nb/.bionic/docs/plans/epic-01-demo/never-existed.plan.md" "$MIS
 # DOES produce main's audit file; alone, the absence arm would pass if the
 # hook had written nothing at all.
 echo "e2e: floor-violating plan under a worktree-local .bionic/ → blocks as misplaced, naming main's tree"
-run_write "$ac10_wt/.bionic/docs/plans/epic-01-demo/wt-floor.plan.md" "$(build_plan intent=spike rigor=audited)"
+run_write "$ac10_wt/.bionic/docs/plans/epic-01-demo/wt-floor.plan.md" "$(build_plan intent=spike rigor=double)"
 assert_eq "ac10_e2e_worktree exit 2 (misplaced)" 2 "$HOOK_EXIT"
 assert_contains "ac10_e2e_worktree names the parent repo's docs root" \
   "$ac10_main/.bionic/docs/plans/" "$HOOK_VSTDERR"
-run_write "$ac10_main/.bionic/docs/plans/epic-01-demo/main-floor.plan.md" "$(build_plan intent=spike rigor=audited)"
+run_write "$ac10_main/.bionic/docs/plans/epic-01-demo/main-floor.plan.md" "$(build_plan intent=spike rigor=double)"
 assert_eq "ac10_e2e_worktree_pair exit 0" 0 "$HOOK_EXIT"
 assert_contains "ac10_e2e_worktree_pair finding keyed on the main repo" "spike-cap" "$(read_audit "$ac10_main")"
 
@@ -1359,7 +1359,7 @@ sdlc-step: '"$step"'
 epic: epic-01-demo
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: '"$scale"'
 '
   [ "$design" = OMIT ] || out+="design: $design"$'\n'
@@ -1846,7 +1846,7 @@ assert_eq "ac13_nested_pair exit 0" 0 "$HOOK_EXIT"
 
 echo "ac13-5: canonical (frontmatter-declaring) misplacement is still the AC-10 arm, unchanged — this wall is additive"
 run_write "$ac13_wt/.bionic/docs/plans/epic-01-demo/w2-s8-ac13-canon.plan.md" \
-  "$(build_plan intent=spike rigor=audited)"
+  "$(build_plan intent=spike rigor=double)"
 assert_eq "ac13_canonical_still_ac10_arm exit 2" 2 "$HOOK_EXIT"
 assert_contains "ac13_canonical_still_ac10_arm names the pinned docs root, AC-10's shape" \
   "$ac13_main/.bionic/docs/plans/" "$HOOK_VSTDERR"
@@ -2671,7 +2671,7 @@ K5_EXEMPLAR_FRONTMATTER='---
 governing-skill: agent-skills:idea-refine
 sdlc-step: 1
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 canonical_sdlc_version: 14
 surface_type: cli-plugin
@@ -2807,7 +2807,7 @@ K54_SPEC_EXEMPLAR='---
 governing-skill: agent-skills:spec-driven-development
 sdlc-step: 2
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 canonical_sdlc_version: 14
 surface_type: cli-plugin
@@ -2850,7 +2850,7 @@ K54_PLAN_EXEMPLAR='---
 governing-skill: superpowers:writing-plans
 sdlc-step: 3
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 canonical_sdlc_version: 14
 surface_type: cli-plugin
@@ -3277,7 +3277,7 @@ Step 5: cmd bash tests/run.sh; pass 9; total 9
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | the dispatched unit | done |
+| T1 | build | double | the dispatched unit | done |
 '
 gs_r3_plan="$(build_plan step=5 goal=no)"
 gs_r3_plan="${gs_r3_plan/multi_agent: false/multi_agent: true}"
@@ -3352,7 +3352,7 @@ Step 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirement
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | the dispatched unit | pending |
+| T1 | build | double | the dispatched unit | pending |
 '
 gs_r3_stamp_plan="$(build_plan step=3)"
 gs_r3_stamp_plan="${gs_r3_stamp_plan/multi_agent: false/multi_agent: true}"
@@ -3719,74 +3719,208 @@ mem_drive Write "$FAKE_HOME/.claude/projects/-x/memory/MEMORY.md" "$MEM_PROJ" BI
 expect_status "§MEM.9 ~/.claude's store while BIONIC_CLAUDE_HOME names another root: admitted" 0 "$HOOK_EXIT"
 
 # ============================================================
-section "§RIGOR — a plan in either vocabulary passes the same checks, and the refusals name low, medium and high (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35)"
+section "§RIGOR — a plan is single or double, every other word is refused naming the two, and the floors rank the two (wave-28 T44; wave-30 T11: REQ-1 AC-1.4, D1)"
 # ============================================================
-# The plan-write hook reads `rigor:` through lib/run.sh `rigor_level`: `tested`/`low`,
-# `peer-reviewed`/`medium` and `audited`/`high` are the same three levels, a plan carrying an old
-# word is read as it is, and every refusal that lists the set lists the new words in the printed
-# form, `review rigor: <level> (<n> independent reader[s])`. The floors rank levels, so a plan and
-# a floor written in different vocabularies still compare.
-for gs_rv_w in tested low peer-reviewed medium audited high; do
+# The plan-write hook reads `rigor:` through lib/run.sh `rigor_level`, whose closed set is
+# `single` and `double`. The six words before 1.14.0 (low/tested, medium/peer-reviewed,
+# high/audited) are no level: a plan carrying one is refused as any other bad value is, and every
+# refusal that lists the set lists the two in the printed form,
+# `review rigor: <level> (<one|two> independent mind[s])`. The floors rank the two levels, and a
+# `rigor-floor:` carrying another word is the floor's own invalid-value finding, naming the two.
+for gs_rv_w in single double; do
   project=$(make_project)
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-$gs_rv_w.plan.md" "$(build_plan rigor="$gs_rv_w")"
   assert_eq "§RIGOR.1 a plan written rigor: $gs_rv_w is admitted" 0 "$HOOK_EXIT"
 done
+for gs_rv_w in low tested medium peer-reviewed high audited; do
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-$gs_rv_w.plan.md" "$(build_plan rigor="$gs_rv_w")"
+  assert_eq "§RIGOR.1x a plan written rigor: $gs_rv_w (a word before 1.14.0) is refused" 2 "$HOOK_EXIT"
+  assert_contains "§RIGOR.1x …on its rigor, naming the two" "invalid rigor: '$gs_rv_w' — allowed: single or double" "$HOOK_VSTDERR"
+done
 
 project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/rv-standard.plan.md" "$(build_plan rigor=standard)"
-assert_eq "§RIGOR.2 a seventh word (standard) is refused" 2 "$HOOK_EXIT"
-assert_contains "§RIGOR.2 …on its rigor" "that rigor is not one of the three" "$HOOK_STDERR"
-assert_contains "§RIGOR.2 …and the refusal names low in the printed form" \
-  "review rigor: low (one independent reader)" "$HOOK_VSTDERR"
-assert_contains "§RIGOR.2 …medium" "review rigor: medium (two independent readers)" "$HOOK_VSTDERR"
-assert_contains "§RIGOR.2 …and high" "review rigor: high (three independent readers)" "$HOOK_VSTDERR"
-for gs_rv_old in tested peer-reviewed audited; do
-  expect_absent "§RIGOR.2 …and never prints the old word $gs_rv_old" "$gs_rv_old" "$HOOK_VSTDERR"
+assert_eq "§RIGOR.2 a word that is no level (standard) is refused" 2 "$HOOK_EXIT"
+assert_contains "§RIGOR.2 …on its rigor" "that rigor is not single or double" "$HOOK_STDERR"
+assert_contains "§RIGOR.2 …and the refusal names single in the printed form" \
+  "review rigor: single (one independent mind)" "$HOOK_VSTDERR"
+assert_contains "§RIGOR.2 …and double" "review rigor: double (two independent minds)" "$HOOK_VSTDERR"
+assert_contains "§RIGOR.2 …and the allowed set is the two" "allowed: single or double:" "$HOOK_VSTDERR"
+for gs_rv_old in "independent reader)" "independent readers)" "three independent"; do
+  expect_absent "§RIGOR.2 …and never prints the old form '$gs_rv_old'" "$gs_rv_old" "$HOOK_VSTDERR"
 done
 
 project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/rv-none.plan.md" "$(build_plan rigor=OMIT)"
 assert_eq "§RIGOR.3 a plan with no rigor: is refused" 2 "$HOOK_EXIT"
-assert_contains "§RIGOR.3 …and the refusal names the three levels" \
-  "review rigor: high (three independent readers)" "$HOOK_VSTDERR"
-expect_absent "§RIGOR.3 …by the new words only" "audited" "$HOOK_VSTDERR"
+assert_contains "§RIGOR.3 …and the refusal names the two levels" \
+  "requires rigor: single or double:" "$HOOK_VSTDERR"
+expect_absent "§RIGOR.3 …and no third" "three independent" "$HOOK_VSTDERR"
 
 project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/rv-nofm.plan.md" "$MISSING_FM"
 assert_eq "§RIGOR.4 a plan with no frontmatter is refused" 2 "$HOOK_EXIT"
-assert_contains "§RIGOR.4 …and the template it prints offers the new words" "rigor: <low|medium|high>" "$HOOK_VSTDERR"
-expect_absent "§RIGOR.4 …only" "peer-reviewed" "$HOOK_VSTDERR"
+assert_contains "§RIGOR.4 …and the template it prints offers the two words" "rigor: <single|double>" "$HOOK_VSTDERR"
+expect_absent "§RIGOR.4 …only" "medium" "$HOOK_VSTDERR"
 
-# THE FLOORS RANK LEVELS. Each pair is one level in the old word and in the new; the finding fires
-# (or stays silent) the same way for both, and across the two vocabularies.
-for gs_rv_w in audited high; do
+# THE FLOORS RANK THE TWO LEVELS. The spike cap and the incident-response floor fire on the
+# level, with or without a project floor beside them.
+for gs_rv_pf in none single; do
   project=$(make_project)
-  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-spike-$gs_rv_w.plan.md" "$(build_plan intent=spike rigor="$gs_rv_w")"
-  assert_eq "§RIGOR.5 spike at $gs_rv_w is admitted" 0 "$HOOK_EXIT"
-  assert_contains "§RIGOR.5 …and logs spike-cap" "spike-cap" "$HOOK_STDERR"
+  [ "$gs_rv_pf" = none ] || printf 'rigor-floor: %s\n' "$gs_rv_pf" > "$project/.bionic/config.yaml"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-spike-$gs_rv_pf.plan.md" "$(build_plan intent=spike rigor=double)"
+  assert_eq "§RIGOR.5 spike at double (project floor $gs_rv_pf) is admitted" 0 "$HOOK_EXIT"
+  assert_contains "§RIGOR.5 …and logs spike-cap, naming the cap by its word" "spike is capped at single, declared double" "$HOOK_STDERR"
 done
-for gs_rv_w in tested low; do
+for gs_rv_pf in none single; do
   project=$(make_project)
-  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ir-$gs_rv_w.plan.md" "$(build_plan intent=incident-response rigor="$gs_rv_w")"
-  assert_eq "§RIGOR.6 incident-response at $gs_rv_w is admitted" 0 "$HOOK_EXIT"
+  [ "$gs_rv_pf" = none ] || printf 'rigor-floor: %s\n' "$gs_rv_pf" > "$project/.bionic/config.yaml"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ir-$gs_rv_pf.plan.md" "$(build_plan intent=incident-response rigor=single)"
+  assert_eq "§RIGOR.6 incident-response at single (project floor $gs_rv_pf) is admitted" 0 "$HOOK_EXIT"
   assert_contains "§RIGOR.6 …and logs intent-floor" "intent-floor" "$HOOK_STDERR"
-  assert_contains "§RIGOR.6 …naming the floor by its new word" "floors at high" "$HOOK_STDERR"
+  assert_contains "§RIGOR.6 …naming the floor by its word" "floors at double, declared single" "$HOOK_STDERR"
 done
-for gs_rv_pair in audited:low high:tested high:low; do
+# A floor above the plan logs; a floor written in a word before 1.14.0 is the invalid-value finding.
+for gs_rv_pair in double:single:"project floor double, declared single" \
+                  high:single:"invalid rigor-floor value 'high' in config.yaml — allowed: single or double" \
+                  tested:double:"invalid rigor-floor value 'tested' in config.yaml — allowed: single or double"; do
+  gs_rv_f="${gs_rv_pair%%:*}"; gs_rv_rest="${gs_rv_pair#*:}"; gs_rv_p="${gs_rv_rest%%:*}"; gs_rv_want="${gs_rv_rest#*:}"
+  project=$(make_project)
+  printf 'rigor-floor: %s\n' "$gs_rv_f" > "$project/.bionic/config.yaml"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=build rigor="$gs_rv_p")"
+  assert_eq "§RIGOR.7 project floor $gs_rv_f, plan $gs_rv_p: admitted" 0 "$HOOK_EXIT"
+  assert_contains "§RIGOR.7 …and logs the project-floor finding: $gs_rv_want" "$gs_rv_want" "$(read_audit "$project")"
+done
+# A floor the plan meets is silent, on both levels and on the epic's floor as on the project's.
+for gs_rv_pair in double:double single:single single:double; do  # <project floor>:<epic floor>
   project=$(make_project)
   printf 'rigor-floor: %s\n' "${gs_rv_pair%%:*}" > "$project/.bionic/config.yaml"
-  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=build rigor="${gs_rv_pair#*:}")"
-  assert_eq "§RIGOR.7 project floor ${gs_rv_pair%%:*}, plan ${gs_rv_pair#*:}: admitted" 0 "$HOOK_EXIT"
-  assert_contains "§RIGOR.7 …and logs project-floor" "project-floor" "$(read_audit "$project")"
-done
-for gs_rv_pair in audited:high high:audited high:high; do
-  project=$(make_project)
-  printf 'rigor-floor: %s\n' "${gs_rv_pair%%:*}" > "$project/.bionic/config.yaml"
-  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=spike rigor="${gs_rv_pair#*:}")"
-  assert_eq "§RIGOR.8 project floor ${gs_rv_pair%%:*}, spike plan ${gs_rv_pair#*:}: admitted" 0 "$HOOK_EXIT"
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-floor: %s\n---\n\n# Epic\n' \
+    "${gs_rv_pair#*:}" > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=spike rigor=double)"
+  assert_eq "§RIGOR.8 project floor ${gs_rv_pair%%:*}, epic floor ${gs_rv_pair#*:}, spike plan double: admitted" 0 "$HOOK_EXIT"
   assert_contains "§RIGOR.8 …logging the spike cap, so the findings were read" "spike-cap" "$HOOK_STDERR"
-  expect_absent "§RIGOR.8 …with no floor finding (the floor is met)" "project-floor" "$HOOK_STDERR"
-  expect_absent "§RIGOR.8 …nor an invalid-floor one" "invalid rigor-floor" "$HOOK_STDERR"
+  expect_absent "§RIGOR.8 …with no project-floor finding (the floor is met)" "project-floor" "$HOOK_STDERR"
+  expect_absent "§RIGOR.8 …nor an epic-floor one" "epic-floor" "$HOOK_STDERR"
 done
+# §RIGOR: an epic floor written in a word before 1.14.0 is the epic's invalid-value finding.
+project=$(make_project)
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-floor: audited\n---\n\n# Epic\n' \
+  > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
+run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ef.plan.md" "$(build_plan intent=build rigor=double)"
+assert_eq "§RIGOR.9 epic floor audited, plan double: admitted" 0 "$HOOK_EXIT"
+assert_contains "§RIGOR.9 …and logs the epic-floor invalid-value finding, naming the two" \
+  "invalid rigor-floor value 'audited' in epic-01-demo's epic plan — allowed: single or double" "$(read_audit "$project")"
+
+
+section "§FIX-POLICY — review-cadence:, fix-policy: and fix-cap: are read with their vocabulary and the level's defaults (wave-30 T21: REQ-10 AC-10.1, REQ-1, D4, Δ3)"
+# ============================================================
+# Three header fields the user owns, beside `rigor:` (D4). lib/run.sh holds their vocabulary and
+# their per-level defaults once, beside `rigor_level`; this hook and the poker call it:
+#   review-cadence:  once (both levels)
+#   fix-policy:      a comma-joined set over S1 S1-on S1-off S2 S2-on S2-off S3 S4; default S1,S2-on
+#   fix-cap:         a whole number, or a percent of the plan's ## Tasks rows; default 2 at single,
+#                    10% at double, rendered as the number (rounded up)
+# A plan carrying none of the three is read with the defaults, never refused for them (A-T21.2).
+GS_FP_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+gs_fp_plan() {  # <rigor> [header line]... -> build_plan's artifact with the lines after rigor:
+  local rg="$1"; shift
+  build_plan rigor="$rg" | GS_FP_EXTRA="$(printf '%s\n' "$@")" awk '
+    { print } /^rigor: / && ENVIRON["GS_FP_EXTRA"] != "" { print ENVIRON["GS_FP_EXTRA"] }'
+}
+gs_fp_lib() {  # <shell text over run.sh and units.sh> [args] -> its stdout
+  local body="$1"; shift
+  bash -c '. "$1/run.sh" && . "$1/units.sh" && shift && eval "$0"' "$body" "$GS_FP_LIB" "$@" 2>/dev/null
+}
+# Positive control on the fixture builder: the lines reach the frontmatter, after rigor:.
+expect_eq "§FIX-POLICY.0 the fixture carries the three lines after rigor: (the builder's own read)" \
+  "rigor: single|review-cadence: once|fix-policy: S1,S2-on|fix-cap: 2" \
+  "$(gs_fp_plan single 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 2' \
+      | /usr/bin/grep -E '^(rigor|review-cadence|fix-policy|fix-cap):' | paste -sd'|' -)"
+
+# THE TABLE'S VALUES ARE ADMITTED, at both levels; THIS run's own header (once · S1,S2-on · 2) is one of them.
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-single.plan.md" \
+  "$(gs_fp_plan single 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 2')"
+assert_eq "§FIX-POLICY.1 single with once · S1,S2-on · 2 (this run's own header) is admitted" 0 "$HOOK_EXIT"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-double.plan.md" \
+  "$(gs_fp_plan double 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 10%')"
+assert_eq "§FIX-POLICY.1b double with once · S1,S2-on · 10% is admitted" 0 "$HOOK_EXIT"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-wide.plan.md" \
+  "$(gs_fp_plan double 'fix-policy: S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4' 'fix-cap: 0')"
+assert_eq "§FIX-POLICY.1c every word of the vocabulary, and a cap of 0, are admitted (the user's to set)" 0 "$HOOK_EXIT"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-none.plan.md" "$(gs_fp_plan single)"
+assert_eq "§FIX-POLICY.2 a plan with rigor: and none of the three is admitted (read with the defaults)" 0 "$HOOK_EXIT"
+
+# THE DEFAULTS ARE THE TABLE'S (REQ-1, Δ3), read from the one place that holds them.
+expect_eq "§FIX-POLICY.3 the defaults: cadence · policy · cap at single · cap at double" \
+  "once|S1,S2-on|2|10%" \
+  "$(gs_fp_lib 'printf "%s|%s|%s|%s" "$REVIEW_CADENCE_DEFAULT" "$FIX_POLICY_DEFAULT" "$(fix_cap_default single)" "$(fix_cap_default double)"')"
+expect_eq "§FIX-POLICY.3b the vocabulary the hook parses" "S1 S1-on S1-off S2 S2-on S2-off S3 S4" \
+  "$(gs_fp_lib 'printf "%s" "$FIX_POLICY_VOCAB"')"
+
+# A WORD OUTSIDE THE VOCABULARY IS REFUSED, naming the word and the vocabulary; so is an empty set.
+for gs_fp_pair in 'S5|S5' 'S2-maybe|S2-maybe' 'S1,S5,S2-on|S5' 'S1,,S2|'; do
+  gs_fp_v="${gs_fp_pair%%|*}"; gs_fp_w="${gs_fp_pair#*|}"
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/fp-bad.plan.md" "$(gs_fp_plan double "fix-policy: $gs_fp_v")"
+  assert_eq "§FIX-POLICY.4 fix-policy: $gs_fp_v is refused" 2 "$HOOK_EXIT"
+  assert_contains "§FIX-POLICY.4 …the line names the vocabulary" \
+    "a fix-policy word is no rating (S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4)" "$HOOK_STDERR"
+  assert_contains "§FIX-POLICY.4 …and the detail names the word" \
+    "invalid fix-policy: '$gs_fp_v' — '$gs_fp_w' is no rating; allowed, comma-joined: S1 S1-on S1-off S2 S2-on S2-off S3 S4" "$HOOK_VSTDERR"
+done
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-empty.plan.md" "$(gs_fp_plan double 'fix-policy:')"
+assert_eq "§FIX-POLICY.5 an empty fix-policy: is refused" 2 "$HOOK_EXIT"
+assert_contains "§FIX-POLICY.5 …as a set naming no rating, with the vocabulary" \
+  "this fix-policy names no rating (S1,S1-on,S1-off,S2,S2-on,S2-off,S3,S4)" "$HOOK_STDERR"
+
+# review-cadence: has one word.
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/fp-weekly.plan.md" "$(gs_fp_plan single 'review-cadence: weekly')"
+assert_eq "§FIX-POLICY.6 review-cadence: weekly is refused" 2 "$HOOK_EXIT"
+assert_contains "§FIX-POLICY.6 …the line" "that review-cadence is not once (use once)" "$HOOK_STDERR"
+assert_contains "§FIX-POLICY.6 …and the detail" "invalid review-cadence: 'weekly' — allowed: once" "$HOOK_VSTDERR"
+
+# fix-cap: is a count or a percent.
+for gs_fp_c in lots -1 '10 %' 2.5; do
+  project=$(make_project)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/fp-cap.plan.md" "$(gs_fp_plan single "fix-cap: $gs_fp_c")"
+  assert_eq "§FIX-POLICY.7 fix-cap: $gs_fp_c is refused" 2 "$HOOK_EXIT"
+  assert_contains "§FIX-POLICY.7 …the line" "that fix-cap is no count (a whole number, or a percent)" "$HOOK_STDERR"
+  assert_contains "§FIX-POLICY.7 …and the detail names it" "invalid fix-cap: '$gs_fp_c'" "$HOOK_VSTDERR"
+done
+
+# THE RENDERED CAP: 10% of a 23-row plan at double is 3 (2.3 rounded up); absent, the level's default.
+gs_fp_rows() {  # <n> -> a ## Tasks table of n build rows
+  local i=1
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|\n'
+  while [ "$i" -le "$1" ]; do
+    printf '| T%s | 4 | build | row %s | implementor | — | 30 | REQ-1 | f%s.sh | pending |\n' "$i" "$i" "$i"; i=$((i + 1))
+  done
+}
+project=$(make_project)
+gs_fp_p="$project/.bionic/docs/plans/epic-01-demo/fp-23.plan.md"
+printf '%s\n%s' "$(gs_fp_plan double 'fix-cap: 10%')" "$(gs_fp_rows 23)" > "$gs_fp_p"
+run_write "$gs_fp_p" "$(cat "$gs_fp_p")"
+assert_eq "§FIX-POLICY.8 a 23-row double plan with fix-cap: 10% is admitted" 0 "$HOOK_EXIT"
+expect_eq "§FIX-POLICY.8b …its table reads 23 rows (the count the cap renders from)" "23" \
+  "$(gs_fp_lib 'units_rows "$1" | /usr/bin/grep -c .' "$gs_fp_p")"
+expect_eq "§FIX-POLICY.8c …and its cap renders as 3" "3" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan double)" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8d with no fix-cap: the double default (10%) renders 3 too" "3" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan single)" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8e …and the single default renders 2" "2" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan single 'fix-cap: 5')" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8f …and a number the user set is read verbatim" "5" "$(gs_fp_lib 'units_fix_cap "$1"' "$gs_fp_p")"
+printf '%s\n%s' "$(gs_fp_plan OMIT)" "$(gs_fp_rows 23)" > "$gs_fp_p"
+expect_eq "§FIX-POLICY.8g …and nothing, rc 1, with no fix-cap: and no rigor: to default it from" "|1" \
+  "$(gs_fp_lib 'units_fix_cap "$1"; printf "|%s" "$?"' "$gs_fp_p")"
 
 finish
