@@ -4142,4 +4142,66 @@ expect_eq "RH-8 precondition: the landed copy differs from the refused one in T2
 expect_eq "RH-8b …and a landed verify row that dropped head is not refused" "0" \
   "$(call_rc units_validate "$SANDBOX/rh-landed.md")"
 
+section "§SUSPECT — wave-30 T16: a dependency that shares no file with its holder is named, never loosened (REQ-12 AC-12.2; D14a, Δ8)"
+# A ROW THAT WAITS ON ANOTHER ONLY FOR ITS RECORD, AND WRITES NOTHING IT WRITES, IS A SUSPECT. Wave-28
+# held T2 50 minutes, T18 255 and T20 49 on a declared read whose landed diffs shared no file
+# (research-waits-w28.md §Were the declared waits real?). `units_suspect` names each such pair, with
+# the `task-set` line that would loosen it, and changes no cell: a dependency may be runtime state or
+# an order no file test sees, so the mind decides. Judged: an open row of a writing kind, against an
+# open holder it names by id (deps) or by a path the holder's Files cover (reads). Not suspect: the
+# two rows share a path outside the record, or the row reads a path outside the record the holder writes.
+cat > "$SANDBOX/suspect.md" <<'SUSPECT_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-08T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status | reads |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the holder | w-T1 | — | 30 | REQ-x | payload/a.sh, .bionic/docs/record/w/T1-a.md | active | — |
+| T2 | 4 | build | reads only the holder's record and shares nothing | w-T2 | — | 20 | REQ-x | payload/b.sh, .bionic/docs/record/w/T2-b.md | pending | .bionic/docs/record/w/T1-a.md |
+| T3 | 4 | build | reads the record and shares a.sh | w-T3 | — | 20 | REQ-x | payload/a.sh, .bionic/docs/record/w/T3.md | pending | .bionic/docs/record/w/T1-a.md |
+| T4 | 4 | build | reads the code the holder writes | w-T4 | — | 20 | REQ-x | payload/c.sh | pending | payload/a.sh, approval:plan |
+| T5 | 4 | build | reads the record beside the approval | w-T5 | — | 20 | REQ-x | payload/d.sh | pending | approval:plan, .bionic/docs/record/w/T1-a.md |
+| T6 | 5 | verify | the walk reads the record | w-T6 | — | 20 | REQ-x | .bionic/docs/record/w/walk.md | pending | approval:plan, head, .bionic/docs/record/w/T1-a.md |
+| T7 | 4 | build | reads a landed row's record | w-T7 | — | 20 | REQ-x | payload/e.sh | pending | .bionic/docs/record/w/T0.md |
+| T0 | 4 | build | landed | w-T0 | — | 20 | REQ-x | payload/f.sh, .bionic/docs/record/w/T0.md | landed | — |
+SUSPECT_EOF
+expect_eq "SU-0 precondition: the fixture reads as eight rows (the extractor reads real input)" "8" \
+  "$(nlines "$(call units_rows "$SANDBOX/suspect.md")")"
+SU_CK="$(cksum < "$SANDBOX/suspect.md")"
+expect_eq "SU-1 AC-12.2 the suspects are T2 and T5 on T1, each with its clause and the task-set line that loosens it" \
+  "T2${TAB}T1${TAB}suspect: T2 reads T1, shares no file${TAB}task-set T2 reads=—
+T5${TAB}T1${TAB}suspect: T5 reads T1, shares no file${TAB}task-set T5 reads='approval:plan'" \
+  "$(call units_suspect "$SANDBOX/suspect.md")"
+expect_eq "SU-1b …and it exits 0" "0" "$(call_rc units_suspect "$SANDBOX/suspect.md")"
+expect_eq "SU-2 asked of one row, it answers for that row alone" \
+  "T2${TAB}T1${TAB}suspect: T2 reads T1, shares no file${TAB}task-set T2 reads=—" \
+  "$(call units_suspect "$SANDBOX/suspect.md" T2)"
+expect_eq "SU-3 a row sharing a path outside the record with its holder is not suspect (beside SU-2, same fixture)" "" \
+  "$(call units_suspect "$SANDBOX/suspect.md" T3)"
+expect_eq "SU-4 a row reading code its holder writes is not suspect" "" "$(call units_suspect "$SANDBOX/suspect.md" T4)"
+expect_eq "SU-5 a verify row is not judged: reading records is its work" "" "$(call units_suspect "$SANDBOX/suspect.md" T6)"
+expect_eq "SU-6 a landed holder holds nothing, so nothing is suspect" "" "$(call units_suspect "$SANDBOX/suspect.md" T7)"
+expect_eq "SU-7 AC-12.2 the machine never rewrites a declaration: the plan is byte-identical" "$SU_CK" "$(cksum < "$SANDBOX/suspect.md")"
+# A TABLE WITHOUT A reads COLUMN: a deps id is the dependency, and the loosening line is deps=.
+cat > "$SANDBOX/suspect-deps.md" <<'SUSPECT_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the holder | w-T1 | — | 30 | REQ-x | payload/a.sh | active |
+| T2 | 4 | build | deps on T1, disjoint | w-T2 | T1 | 20 | REQ-x | payload/b.sh | pending |
+| T3 | 4 | build | deps on T1, shares a.sh | w-T3 | T1 | 20 | REQ-x | payload/a.sh | pending |
+| T4 | 4 | build | deps on T1 and the world | w-T4 | T1, ext:ci | 20 | REQ-x | payload/c.sh | pending |
+SUSPECT_EOF
+expect_eq "SU-8 in a deps table the suspects are T2 and T4, loosened through deps" \
+  "T2${TAB}T1${TAB}suspect: T2 reads T1, shares no file${TAB}task-set T2 deps=—
+T4${TAB}T1${TAB}suspect: T4 reads T1, shares no file${TAB}task-set T4 deps='ext:ci'" \
+  "$(call units_suspect "$SANDBOX/suspect-deps.md")"
+expect_eq "SU-9 a plan with no table answers nothing, exit 0" "0|" \
+  "$(call_rc units_suspect "$SANDBOX/no-such-plan.md")|$(call units_suspect "$SANDBOX/no-such-plan.md")"
+
 finish

@@ -439,7 +439,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
-  die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>'   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready"
+  die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row|file>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names what they wait on (declined-on=)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind)"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
@@ -566,9 +566,16 @@ case "$VERB" in
   # THE FILL'S ANSWER, AS HOLD IS THE STAND-DOWN'S (wave-27 T34; REQ-15, D24). Two operands: the
   # ready rows, comma-joined, and the reason. No ids is the usage error, never "every row": a
   # decline names what it answers. A blank reason is no reason, as for hold.
+  # `--on <row|file>` (wave-30 T16; REQ-12 AC-12.7, Δ13) names what the hold waits on; it changes
+  # what the verb prints and the ledger's `declined-on=`, never whether it records. `--on` with no
+  # value is the usage error, as a missing reason is.
   decline)
+    DC_ON=""
+    if [ $# -eq 4 ] && [ "$3" = "--on" ] && [ -n "${4//[[:space:]]/}" ]; then
+      DC_ON="$4"; set -- "$1" "$2"
+    fi
     if [ $# -ne 2 ] || [ -z "${1//[[:space:],]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "decline takes exactly two arguments: the ready row ids, comma-joined, and the reason. There is no form that declines every row."
+      usage "decline takes two arguments, the ready row ids, comma-joined, and the reason, then optionally --on <row|file>, what they wait on. There is no form that declines every row."
     fi
     DC_IDS="$1"
     DC_REASON="$2"
@@ -2032,24 +2039,43 @@ EOF
 # A chain `units_chain` refuses (a cycle) is printed as unknown with its reason, never dropped.
 # Called inside the scheduler's one parse of the table (`tick_plan_memoised`), so the rows, the
 # waiting reads, the edges and the ready set are one reading.
+#
+# A WAIT ON A SUSPECT HOLDER SAYS SO (wave-30 T16; REQ-12 AC-12.2, D14a). When `units_suspect` (the
+# one suspect test, lib/units.sh) names the row and a holder its WAIT reason names, the line carries
+# ` · suspect: <id> reads <holder>, shares no file — loosen it: bash <hook> task-set <id> reads=…`,
+# the loosening printed and never run. The reason keeps `clean`'s 400-character cut; the clause is
+# cleaned on its own and kept whole, because a cut `task-set` line is no command.
+# THE CHAIN NAMES ITS SPLIT CANDIDATE (wave-30 T16; REQ-12 AC-12.4, D14d): ` · SPLIT? <id> — <size> min,
+# <n> files, <k> rows wait on it`, the pending row of the chain `units_split_candidate` scores
+# highest by fan-in × size × files; absent when every pending row on it scores 0. Nothing is split.
+suspect_lines() {  # <plan> [<id>] -> `<id><TAB><holder><TAB><clause — loosen it: bash <hook> task-set …>`, one per suspect; the one wording the WAIT line, task-add and task-set print
+  units_suspect "$@" 2>/dev/null | awk -F'\t' -v hook="${HOOK_DIR}/session-poker.sh" \
+    'NF >= 4 { printf "%s\t%s\t%s — loosen it: bash %s %s\n", $1, $2, $3, hook, $4 }'
+}
+
 tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
-  local rows waiting all offered line chain ids mins
+  local rows waiting all offered line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
   waiting="$(units_waiting "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
+  susp="$(suspect_lines "$SCHED_PLAN")"
   all="${SCHED_READY_ALL:-}"
   offered="$(printf '%s' "${SCHED_READY:-}" | tr '\n' ' ')"
   SCHED_BEHIND=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    case "$line" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${line%% *}" ;; esac
-    say "WAIT $(clean "$line")"
+    base="${line%%$'\037'*}"; sfx=""
+    [ "$base" = "$line" ] || sfx="${line#*$'\037'}"
+    case "$base" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}" ;; esac
+    say "WAIT $(clean "$base")${sfx:+ · $(clean "$sfx" sentence)}"
   done <<TICK_WAIT
-$(printf '\034rows\n%s\n\034wait\n%s\n' "$rows" "$waiting" | awk -F'\t' \
+$(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n' "$rows" "$waiting" "$susp" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
   $0 == SUBSEP "rows" { part = 1; next }
   $0 == SUBSEP "wait" { part = 2; next }
+  $0 == SUBSEP "susp" { part = 3; next }
+  part == 3 && $1 != "" { sus[$1, $2] = $3; next }
   part == 1 && $1 != "" { n++; id[n] = $1; knd[$1] = $3; st[$1] = $10; next }
   part == 2 && $1 != "" {
     key = $1 SUBSEP $2
@@ -2077,6 +2103,15 @@ $(printf '\034rows\n%s\n\034wait\n%s\n' "$rows" "$waiting" | awk -F'\t' \
           }
           reason = reason (reason == "" ? "" : "; ") t
         }
+        sfx = ""; split("", said)
+        for (m = 1; m <= nr[i]; m++) {
+          key = i SUBSEP rd[i, m]
+          for (w = 1; w <= nw[key]; w++) {
+            h = wid[key, w]
+            if (((i, h) in sus) && !(h in said)) { said[h] = 1; sfx = sfx (sfx == "" ? "" : " · ") sus[i, h] }
+          }
+        }
+        if (sfx != "") reason = reason "\037" sfx
       } else if (index(all, " " i " ")) {
         if (index(declined, " " i " ")) reason = "ready; answered by the standing fill-declined"
         else reason = "ready; no writer slot free (gap " gap ")"
@@ -2085,10 +2120,11 @@ $(printf '\034rows\n%s\n\034wait\n%s\n' "$rows" "$waiting" | awk -F'\t' \
     }
   }')
 TICK_WAIT
+  edges="$(units_edges "$SCHED_PLAN" 2>/dev/null)"
   chain="$( { printf '%s\n' "$rows" | awk -F'\t' '$10 == "pending" || $10 == "active" {
                 m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH)
                 printf "N\t%s\t%d\n", $1, m }'
-              units_edges "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
+              printf '%s\n' "$edges" | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
             } | units_chain "${SCHED_WRITERS:-$(printf '%s\n' "$rows" | grep -c .)}" 2>&1 )" || {
     say "CHAIN unknown — $(clean "$chain")"
     return 0
@@ -2096,7 +2132,10 @@ TICK_WAIT
   line="$(printf '%s\n' "$chain" | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }')"
   ids="${line%%$'\t'*}"; mins="${line##*$'\t'}"
   [ -n "$ids" ] || return 0
-  say "CHAIN ${ids//,/→} (${mins} min)"
+  split="$(units_split_candidate "$SCHED_PLAN" "$ids" "$edges" 2>/dev/null)"
+  sp_id=""
+  [ -z "$split" ] || IFS=$'\t' read -r sp_id sp_sz sp_nf sp_k <<< "$split"
+  say "CHAIN ${ids//,/→} (${mins} min)${sp_id:+ · SPLIT? $(clean "$sp_id") — ${sp_sz} min, ${sp_nf} files, ${sp_k} rows wait on it}"
 }
 
 # THE PRIORITY A RECORD NEVER STATES (wave-28 T15; D19, AC-8.3). A rated reading writes the plan's
@@ -6106,15 +6145,51 @@ EOF
       die "REFUSED — the run's fill ledger (${DC_LED:-no path}) cannot be written; nothing was recorded."
       exit 2
     fi
+    # WHAT THE HOLD WAITS ON (wave-30 T16; REQ-12 AC-12.7, Δ13; F11: 23.4% of wave-28's build
+    # wait-minutes were order holds written only in decline reasons). A row of the plan is a holder
+    # the table can carry: for each declined row the `task-set` line that writes the wait as a read,
+    # which the tick then judges once (`units_hold_read`). A path is a shared file, and a shared file
+    # is no dependency: `ready` reconciles it on the line. Anything else, or nothing, is a hand-hold
+    # the tick cannot judge, and the verb says so. Never a refusal: the line is recorded either way,
+    # with `declined-on=` the row, the file, or `-`.
+    DC_ON_AS=-
+    if [ -n "$DC_ON" ]; then
+      DC_ON="$(clean "$DC_ON")"
+      case "$DC_ROWS" in
+        *" $DC_ON "*) DC_ON_AS=row ;;
+        *) case "$DC_ON" in */*|*.*) DC_ON_AS=file ;; esac ;;
+      esac
+    fi
     DC_CUR="$(_fill_current_field "$SCHED_PLAN")"
     DC_LINE="fill-ledger/v1|at=$(iso_now)|session=${SESSION_ID}|turn=|current=${DC_CUR//|/ }|state=decline"
     DC_LINE="${DC_LINE}|ceiling=${SCHED_WRITERS}|width=|open=|free=|ready=${DC_ALL// /,}|launched="
     DC_LINE="${DC_LINE}|declined=${DC_WHY}|missed=0|idle=|room=|named=${DC_NAMED// /,}"
+    DC_LINE="${DC_LINE}|declined-on=$([ "$DC_ON_AS" = - ] && printf -- - || printf '%s' "$DC_ON")"
     if ! printf '%s\n' "$DC_LINE" >> "$DC_LED" 2>/dev/null; then
       die "REFUSED — could not write to $DC_LED; nothing was recorded."
       exit 2
     fi
     say "decline — ${DC_NAMED// /,}: recorded in $DC_LED; it stands for those rows until a row it did not name is ready."
+    DC_UNREC="unrecorded as a dependency: this hold is a hand-hold the tick cannot judge; it stands only in the decline's reason"
+    case "$DC_ON_AS" in
+      row)
+        for DC_ID in $DC_NAMED; do
+          DC_PAIR="$(units_hold_read "$SCHED_PLAN" "$DC_ID" "$DC_ON" 2>/dev/null)" || DC_PAIR=""
+          if [ -n "$DC_PAIR" ]; then
+            say "decline — $DC_ID waits on $DC_ON: make it a table fact the tick judges once: bash ${HOOK_DIR}/session-poker.sh task-set $DC_ID $(clean "$DC_PAIR" sentence)"
+          else
+            say "decline — $DC_ID waits on $DC_ON, which writes no path to read: $DC_UNREC."
+          fi
+        done ;;
+      file)
+        say "decline — on $DC_ON: a shared file is no dependency; \`ready\` reconciles $DC_ON on the line: a CONFLICT returns the row to merge." ;;
+      *)
+        if [ -n "$DC_ON" ]; then
+          say "decline — --on $DC_ON names no row of $SCHED_PLAN and no file: $DC_UNREC."
+        else
+          say "decline — $DC_UNREC; name what it waits on with --on <row|file>."
+        fi ;;
+    esac
     exit 0
     ;;
 
@@ -6588,6 +6663,9 @@ EOF
 
     plan_verb_swap task-add "$TA_ID added" writer
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
+    # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
+    # that shares no file with its holder is named, with the line that would loosen it, never run.
+    suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean "$TA_SUSPECT" sentence)"; done
     exit 0
     ;;
 
@@ -6670,6 +6748,10 @@ EOF
     [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
     plan_verb_swap "$VERB" "$PV_WHAT" writer
     say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
+    # THE SUSPECT TEST AT EVERY RE-AUTHORING (wave-30 T16; AC-12.2): task-set prints it as task-add does.
+    if [ "$VERB" = task-set ]; then
+      suspect_lines "$PV_PLAN" "$PV_ID" | while IFS=$'\t' read -r _ _ PV_SUSPECT; do say "$(clean "$PV_SUSPECT" sentence)"; done
+    fi
     exit 0
     ;;
 
