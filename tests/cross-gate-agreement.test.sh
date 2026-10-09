@@ -592,7 +592,7 @@ write_plan() {  # <path> <state-body>
   {
     printf -- '---\n'
     printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: audited\nscale: wave\n'
+    printf 'intent: build\nrigor: double\nscale: wave\n'
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf '%s\n' "$2"
     case "$2" in *approved-by:*) ;; *) printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n' ;; esac
@@ -2063,7 +2063,7 @@ section "H — the LIVENESS fields: writer lifts them, the observation displays 
 # writer could not produce. Here the row is the one the real start gate wrote from
 # a real brief, and the real observation is run over it.
 
-H_BRIEF='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · audited · wave.
+H_BRIEF='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · double · wave.
 Expected artifact: .bionic/docs/record/w99-live.txt
 Expected duration: ~45 minutes. Progress: .bionic/tmp/w99-live.progress, cadence ~7m.
 Subprocess claim: `w99-suite-marker` → .bionic/tmp/w99-live.log
@@ -2681,7 +2681,7 @@ KID="aw16chain-1234567890abcdef"
   printf 'session_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID_A" "$KREPO"
 } > "$KREPO/.bionic/tmp/preflight-$SID_A.state"
 
-K_BRIEF='Canonical-sdlc Step 4, task 6 of epic-16 wave-01; build · audited · wave.
+K_BRIEF='Canonical-sdlc Step 4, task 6 of epic-16 wave-01; build · double · wave.
 Expected artifact: .bionic/docs/record/w16-chain.md
 Expected duration: ~30 minutes. Progress artifact: .bionic/tmp/w16-chain.progress, cadence ~7m.
 Subprocess claim: `w16-chain-marker` → .bionic/tmp/w16-chain.log
@@ -5939,7 +5939,7 @@ S_R3=$(new_repo "s-fenced-only")
 mkdir -p "$S_R3/.bionic/docs/plans/epic-99"
 {
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf -- 'intent: build\nrigor: audited\nscale: wave\n---\n\n# a document ABOUT plans\n\n'
+  printf -- 'intent: build\nrigor: double\nscale: wave\n---\n\n# a document ABOUT plans\n\n'
   printf '```\n## SDLC State\ncurrent: 4\n```\n'
 } > "$S_R3/.bionic/docs/plans/epic-99/schema-notes.md"
 S_EG=$(s_eg_read "$S_R3"); S_PK=$(s_pk_read "$S_R3")
@@ -6031,7 +6031,7 @@ s4_plan() {  # <path> <current> [writers]
   {
     printf -- '---\n'
     printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: audited\nscale: wave\n'
+    printf 'intent: build\nrigor: double\nscale: wave\n'
     # INSIDE THE LEADING FRONTMATTER, which is the only place hooks/dispatch-preflight.sh
     # looks for it. A `parallel-budget:` appended after the body parses as prose and the
     # ceiling reads as absent, which makes the budget wall inert — and an inert wall is not
@@ -7894,7 +7894,7 @@ mkdir -p "$(dirname "$RG_PLAN")"
 {
   printf -- '---\n'
   printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf 'intent: build\nrigor: audited\nscale: wave\n'
+  printf 'intent: build\nrigor: double\nscale: wave\n'
   printf 'parallel-budget: writers=%s test_jobs=%s model=opus source=user\n' "$RG_CEIL" "$RG_CEIL"
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
   printf 'current: 4\n\n- Step 3: prior evidence\n'
@@ -11679,7 +11679,7 @@ cgc_plan() {  # <path> <budget line, verbatim, or empty> <ready rows>
   mkdir -p "$(dirname "$1")"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: audited\nscale: wave\n'
+    printf 'intent: build\nrigor: double\nscale: wave\n'
     [ -z "$2" ] || printf '%s\n' "$2"
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf 'current: 4\napproved-by: fixture\n\n- Step 3: prior evidence\n\n'
@@ -12290,7 +12290,7 @@ governing-skill: superpowers:writing-plans
 sdlc-step: 1
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 cleanup_on_finish: true
 use_worktree: false
@@ -12934,7 +12934,7 @@ cgl_case() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 multi_agent: true
 use_worktree: true
@@ -14098,7 +14098,7 @@ FCHK_D="$PRF_D/fchk"; mkdir -p "$FCHK_D"
 git -C "$FCHK_D" init -q 2>/dev/null; git -C "$FCHK_D" -c user.name=f -c user.email=f@x commit -q --allow-empty -m init 2>/dev/null
 FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
 {
-  printf -- '---\nrigor: audited\nscale: task\nbase-sha: %s\nworking-branch: main\n---\n# fact-check fixture\n\n## SDLC State\n\ncurrent: 7\n' "$FCHK_H"
+  printf -- '---\nrigor: double\nscale: task\nbase-sha: %s\nworking-branch: main\n---\n# fact-check fixture\n\n## SDLC State\n\ncurrent: 7\n' "$FCHK_H"
   printf 'check: record/w/a.md#1 S3 off "open, no settlement"\n'
   printf 'check: record/w/a.md#2 S1 on "settled" settled=S2:off by=record/w/c.md\n'
   printf 'check: record/w/a.md#3 S2 on "refuted" refuted by=record/w/c.md\n'
@@ -14133,13 +14133,13 @@ section "DEAL — the dealing: at every rigor each reading question has exactly 
 # ONE FUNCTION SAYS WHAT A RUN OWES. proof.sh `facts_owed <rigor> <scale>` prints the floor and one
 # `review<TAB><question><TAB><role><TAB><scope>` line per owed reading; the judge (`facts_state`)
 # and, from row T15, the dispatch wall both read it, so the dealing has one site. Pinned here: at
-# each rigor and scale each question is dealt to exactly one role; the table is the Interfaces
-# table's (`tested` the critic holds all three; `peer-reviewed` the auditor evidence and the critic
-# the other two; `audited` the auditor, the critic and the reviewer, one each); every dealt role is
-# one of PROOF_READER_ROLES, the set the fact verb admits a reader under, and every such role is
-# dealt somewhere; at wave scale each code question owes a whole read by the same role. The
-# rendered rigor table's half of AC-1.2 is row T17's (the doctrine rewrite). A doctored copy whose
-# `audited` dealing hands structure to the critic must split from the table.
+# each rigor and scale each question is dealt to exactly one role; the table is REQ-1's (wave-30
+# T11, D1: `single` the critic holds all three; `double` the auditor evidence and the critic the
+# other two), and no third level exists; every dealt role is one of PROOF_READER_ROLES, the set
+# the fact verb admits a reader under, and every such role but the retiring reviewer (row T20) is
+# dealt somewhere; at wave scale each code question owes a whole read by the same role. The six
+# words before 1.14.0 deal nothing. A doctored copy whose `double` dealing hands evidence to the
+# critic must split from the table.
 DEAL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
 deal() {  # <rigor> <scale> [<proof.sh>] -> facts_owed's lines
   bash -c '. "$1" && facts_owed "$2" "$3"' _ "${3:-$DEAL_LIB}" "$1" "$2" 2>/dev/null
@@ -14150,7 +14150,7 @@ deal_roles() {  # <rigor> <scale> [<proof.sh>] -> `<question>=<role>` per piece 
 DEAL_QS="$(bash -c '. "$1" && printf "%s" "$PROOF_QUESTIONS"' _ "$DEAL_LIB")"
 DEAL_ROLES="$(bash -c '. "$1" && printf "%s" "$PROOF_READER_ROLES"' _ "$DEAL_LIB")"
 expect_eq "DEAL precondition: the questions are the Interfaces table's three" "evidence adversarial structure" "$DEAL_QS"
-for deal_r in tested peer-reviewed audited; do
+for deal_r in single double; do
   for deal_s in task wave; do
     for deal_q in $DEAL_QS; do
       expect_eq "DEAL $deal_r $deal_s: $deal_q is dealt to exactly one role" "1" \
@@ -14161,21 +14161,28 @@ for deal_r in tested peer-reviewed audited; do
       "$(deal "$deal_r" "$deal_s" | ROLES="$DEAL_ROLES" awk -F'\t' '$1 == "review" && index(" " ENVIRON["ROLES"] " ", " " $3 " ") == 0 { print $3 }')"
   done
 done
-expect_eq "DEAL tested: the critic holds all three" \
-  "evidence=bionic:critic adversarial=bionic:critic structure=bionic:critic" "$(deal_roles tested task)"
-expect_eq "DEAL peer-reviewed: the auditor evidence, the critic adversarial and structure" \
-  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles peer-reviewed task)"
-expect_eq "DEAL audited: the auditor evidence, the critic adversarial, the reviewer structure" \
-  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task)"
-for deal_r in tested peer-reviewed audited; do
+expect_eq "DEAL single: the critic holds all three" \
+  "evidence=bionic:critic adversarial=bionic:critic structure=bionic:critic" "$(deal_roles single task)"
+expect_eq "DEAL double: the auditor evidence, the critic adversarial and structure" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles double task)"
+expect_eq "DEAL the two levels deal the auditor and the critic, and no third role" "bionic:auditor bionic:critic" \
+  "$(for deal_r in single double; do deal "$deal_r" task; done | awk -F'\t' '$1 == "review" { print $3 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+# §RIGOR: THE SIX WORDS BEFORE 1.14.0 ARE NO LEVEL, so each deals nothing and says so by its exit.
+for deal_old in low tested medium peer-reviewed high audited; do
+  expect_eq "DEAL §RIGOR $deal_old (a word before 1.14.0) deals nothing" "" "$(deal "$deal_old" task)"
+  expect_ne "DEAL §RIGOR …and says so by its exit" "0" \
+    "$(bash -c '. "$1" && facts_owed "$2" task >/dev/null 2>&1; echo $?' _ "$DEAL_LIB" "$deal_old")"
+done
+for deal_r in single double; do
   expect_eq "DEAL $deal_r: the dealing does not change with scale" "$(deal_roles "$deal_r" task)" "$(deal_roles "$deal_r" wave)"
   expect_eq "DEAL $deal_r wave: each code question owes one whole read, by its piece reader; evidence none" \
     "$(deal_roles "$deal_r" wave | tr ' ' '\n' | /usr/bin/grep -v '^evidence=' | tr '\n' ' ' | sed 's/ $//')" \
     "$(deal "$deal_r" wave | awk -F'\t' '$1 == "review" && $4 == "whole" { printf "%s%s=%s", (n++ ? " " : ""), $2, $3 }')"
   expect_eq "DEAL $deal_r task: no whole read is owed" "0" "$(deal "$deal_r" task | /usr/bin/grep -c 'whole$')"
 done
-expect_eq "DEAL every reader role is dealt a question at some rigor" "$DEAL_ROLES" \
-  "$(for deal_r in tested peer-reviewed audited; do deal "$deal_r" task; done | awk -F'\t' '$1 == "review" { print $3 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "DEAL every reader role but the retiring reviewer is dealt a question at some rigor" \
+  "$(printf '%s\n' $DEAL_ROLES | /usr/bin/grep -vx bionic:reviewer | sort | tr '\n' ' ' | sed 's/ $//')" \
+  "$(for deal_r in single double; do deal "$deal_r" task; done | awk -F'\t' '$1 == "review" { print $3 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
 # THE READER ROLES ARE READ-ONLY ROLES (wave-27 T45; review pass 13 F8). PROOF_READER_ROLES is the
 # set the fact verb admits a reader under; roster.sh's ROLE_READONLY_SET is the set the walls run
 # as readers. A reader role outside it would be dealt a question and walled as a writer, so every
@@ -14193,55 +14200,63 @@ anchor "$DEAL_ROSTER" 'bionic:critic bionic:reviewer Explore' 1
 sed 's/bionic:critic bionic:reviewer Explore/bionic:critic Explore/' "$DEAL_ROSTER" > "$DEAL_RO_MUT"
 expect_eq "DEAL roles mutation: a roster.sh whose read-only set lacks bionic:reviewer splits from the reader roles" \
   "bionic:reviewer" "$(deal_outside "$DEAL_RO_MUT")"
-expect_eq "DEAL a rigor outside the three deals nothing" "" "$(deal standard task)"
+expect_eq "DEAL a rigor outside the two deals nothing" "" "$(deal standard task)"
 expect_ne "DEAL …and says so by its exit" "0" "$(bash -c '. "$1" && facts_owed standard task >/dev/null 2>&1; echo $?' _ "$DEAL_LIB")"
-# THE DOCTORED SITE: a copy whose audited dealing gives structure to the critic.
-DEAL_NEEDLE='audited=bionic:auditor,bionic:critic,bionic:reviewer'
+# THE DOCTORED SITE: a copy whose double dealing gives evidence to the critic.
+DEAL_NEEDLE='double=bionic:auditor,bionic:critic,bionic:critic'
 DEAL_MUT="$SANDBOX/fx/deal-proof.sh.mut"; mkdir -p "$SANDBOX/fx"
 anchor "$DEAL_LIB" "$DEAL_NEEDLE" 1
 DEAL_N="$DEAL_NEEDLE" awk '
-  BEGIN { n = ENVIRON["DEAL_N"]; r = "audited=bionic:auditor,bionic:critic,bionic:critic" }
+  BEGIN { n = ENVIRON["DEAL_N"]; r = "double=bionic:critic,bionic:critic,bionic:critic" }
   { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$DEAL_LIB" > "$DEAL_MUT"
 expect_eq "DEAL mutation: the doctored copy still deals one role per question (it runs)" "3" \
-  "$(deal audited task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
-expect_ne "DEAL mutation: …and splits from the table, so the audited row goes red" \
-  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task "$DEAL_MUT")"
+  "$(deal double task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
+expect_ne "DEAL mutation: …and splits from the table, so the double row goes red" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles double task "$DEAL_MUT")"
 
-# THE RENDERED TABLE IS THE DEALING (wave-27 T17; AC-1.2 rendered half, A-T9.17). SKILL.md's rigor
-# table names, per rigor, who holds which question, in the Interfaces table's words: `<role> holds
-# all three`, or `<role> \`<q>\`[ and \`<q>\`]` joined by `, `. Each row must read back as exactly
-# what `facts_owed` deals that rigor, so the table and the code cannot drift. A doctored copy whose
-# audited row hands structure to the critic must split from the dealing.
+# THE RENDERED TABLE IS THE DEALING (wave-27 T17; wave-30 T11, REQ-1, A-orch-37). SKILL.md's rigor
+# table puts the levels in columns (`| | \`single\` | \`double\` |`) and its `readers` row says who
+# holds which question: `the <role> holds every question`, or `the <role> takes \`<q>\`[ and
+# \`<q>\`]`, the questions it does not take staying with the critic, which is dealt at every level.
+# Each level's cell must read back as exactly what `facts_owed` deals that level, so the table and
+# the code cannot drift. A doctored copy whose double cell hands structure to the auditor too must
+# split from the dealing.
 DEAL_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-deal_table() {  # <rigor> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
+deal_levels() {  # [<SKILL.md>] -> the rigor table's level columns, in order, space-joined
+  awk -F'|' '/^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); printf "%s%s", (n++ ? " " : ""), c }; exit }' \
+    "${1:-$DEAL_SKILL}" 2>/dev/null
+}
+deal_table() {  # <level> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
   QS="$DEAL_QS" awk -F'|' -v r="$1" '
-    $2 ~ "^ *`" r "` *$" {
-      nq = split(ENVIRON["QS"], qs, " "); nseg = split($4, seg, ", ")
-      for (i = 1; i <= nseg; i++) {
-        s = seg[i]; sub(/^ +/, "", s); role = s; sub(/ .*/, "", role)
-        if (s ~ /holds all three/) { for (j = 1; j <= nq; j++) held[qs[j]] = role; continue }
+    /^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); if (c == r) col = i }; next }
+    col && $2 ~ /^ *readers *$/ {
+      nq = split(ENVIRON["QS"], qs, " "); s = $col
+      for (j = 1; j <= nq; j++) held[qs[j]] = "critic"
+      if (match(s, /the [a-z]+ holds every question/)) {
+        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role)
+        for (j = 1; j <= nq; j++) held[qs[j]] = role
+      } else if (match(s, /the [a-z]+ takes/)) {
+        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role); s = substr(s, RSTART + RLENGTH)
         while (match(s, /`[a-z]+`/)) { held[substr(s, RSTART + 1, RLENGTH - 2)] = role; s = substr(s, RSTART + RLENGTH) }
-      }
-      for (j = 1; j <= nq; j++) if (held[qs[j]] != "") printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
+      } else exit
+      for (j = 1; j <= nq; j++) printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
       exit
     }' "${2:-$DEAL_SKILL}" 2>/dev/null
 }
-# RE-POINTED (wave-28 T22, AC-16.3): the rendered table names each level by its new word; the
-# dealing still reads the plan's word, old or new, through rigor_level, so each level's row is held
-# to what facts_owed deals its old-word twin.
-for deal_p in low:tested medium:peer-reviewed high:audited; do
-  deal_r="${deal_p#*:}"; deal_l="${deal_p%%:*}"
-  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_l row the reader parses" \
+expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a level header the reader parses" "$(deal_levels)"
+expect_eq "DEAL table: its level columns are single and double, and no third" "single double" "$(deal_levels)"
+for deal_l in single double; do
+  expect_nonempty "DEAL table precondition: SKILL.md's readers row has a $deal_l cell the reader parses" \
     "$(deal_table "$deal_l")"
-  expect_eq "DEAL table $deal_l: the rendered row equals what facts_owed deals $deal_r" \
-    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_l")"
+  expect_eq "DEAL table $deal_l: the rendered cell equals what facts_owed deals $deal_l" \
+    "$(deal_roles "$deal_l" task)" "$(deal_table "$deal_l")"
 done
 DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
-anchor "$DEAL_SKILL" 'reviewer `structure`' 1
-sed 's/reviewer `structure`/critic `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
-expect_nonempty "DEAL table mutation: the doctored high row still parses" "$(deal_table high "$DEAL_SKILL_MUT")"
-expect_ne "DEAL table mutation: …and splits from the dealing, so the row goes red" \
-  "$(deal_roles audited task)" "$(deal_table high "$DEAL_SKILL_MUT")"
+anchor "$DEAL_SKILL" 'two: the auditor takes `evidence`' 1
+sed 's/two: the auditor takes `evidence`/two: the auditor takes `evidence` and `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
+expect_nonempty "DEAL table mutation: the doctored double cell still parses" "$(deal_table double "$DEAL_SKILL_MUT")"
+expect_ne "DEAL table mutation: …and splits from the dealing, so the cell goes red" \
+  "$(deal_roles double task)" "$(deal_table double "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
@@ -14335,19 +14350,20 @@ expect_eq "NM mutation: …which names other/a.test.sh by its basename, so the a
 
 
 # ============================================================
-section "RIGOR — six words, three levels: the plan-write hook and every wall site judge an old word and its new word alike, and refuse a seventh (wave-28 T44; REQ-16 AC-16.1; D35)"
+section "RIGOR — two levels, single and double: the plan-write hook and every wall site give each its answer, and judge the six words before 1.14.0 as any other bad value (wave-28 T44; wave-30 T11: REQ-1 AC-1.4, D1)"
 # ============================================================
-# ONE FUNCTION SAYS WHAT A RIGOR WORD MEANS. lib/run.sh `rigor_level <word>` prints `low`, `medium`
-# or `high` for `low|tested`, `medium|peer-reviewed`, `high|audited`, and returns 1 for any other
-# word. Every site that tests the word calls it: the plan-write hook's closed set and its floor
-# rank (`rigor_rank`), and in lib/walls.sh the task-row check (`effective_row_rigor`), the floor
-# rank (`rigor_ord`), the auditor relaxation (`matrix_auditor_required`) and each arm that asks
-# for the highest level (`ledger_shape_fail`, `validate_requirements_pointer`,
-# `validate_dispatch_ledger`, `plan_bring_forward`). Pinned here, for each of the three pairs:
-# every site gives the level's answer, and the old word and the new word get the same one; a
-# seventh word is refused by the closed sets. A census holds the site count at zero (no line in
-# hooks/ or payload/scripts/ tests an old word itself), and a doctored walls.sh whose auditor arm
-# tests `tested` directly splits the pair, so the agreement rows go red on it.
+# ONE FUNCTION SAYS WHAT A RIGOR WORD MEANS. lib/run.sh `rigor_level <word>` prints `single` or
+# `double` for that word and returns 1 for any other. Every site that tests the word calls it: the
+# plan-write hook's closed set and its floor rank (`rigor_rank`), and in lib/walls.sh the task-row
+# check (`effective_row_rigor`), the floor rank (`rigor_ord`), the auditor relaxation
+# (`matrix_auditor_required`) and each arm that asks for the double level (`ledger_shape_fail`,
+# `validate_requirements_pointer`, `validate_dispatch_ledger`, `plan_bring_forward`). Pinned here:
+# every site gives each level its answer; each of the six words before 1.14.0 (low/tested,
+# medium/peer-reviewed, high/audited) gets exactly the answer a word that is no level gets — the
+# closed sets refuse it, a row cell is INVALID, the auditor arm stays closed, and no double arm
+# fires on it. A census holds the site count at zero (no line in hooks/ or payload/scripts/ tests
+# an old word itself), and a doctored walls.sh whose auditor arm tests `low` directly reads an old
+# word as a level, so the old-word rows go red on it.
 RV_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 RV_HOOK="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
 RV_D="$SANDBOX/rigor"; mkdir -p "$RV_D"
@@ -14356,13 +14372,13 @@ rv_level() {  # <word> -> `<level> rc=<n>`, rigor_level's answer
   bash -c '. "$1/run.sh" >/dev/null 2>&1; out="$(rigor_level "$2")"; printf "%s rc=%s" "$out" "$?"' _ "$RV_LIB" "$1" 2>/dev/null
 }
 # A wave plan at the word, multi_agent, at current 4 with a pre-14 `## Tasks` table and none of the
-# version-14 keys: `plan_bring_forward` fires on it at the highest level and admits it below. A plan with no `## Tasks` section: the
-# dispatch ledger refuses it at the highest level and passes it below.
+# version-14 keys: `plan_bring_forward` fires on it at double and admits it otherwise. A plan with no `## Tasks` section: the
+# dispatch ledger refuses it at double and passes it otherwise.
 rv_bf_plan() {
   printf -- '---\nrigor: %s\nscale: wave\nmulti_agent: true\n---\n\n## SDLC State\ncurrent: 4\n\n## Tasks\n\n' "$1"
   printf -- '| id | task | status |\n|---|---|---|\n| T1 | a | pending |\n'
 }
-printf -- '---\nrigor: high\n---\n\n## SDLC State\ncurrent: 3\n' > "$RV_D/no-tasks.plan.md"
+printf -- '---\nrigor: double\n---\n\n## SDLC State\ncurrent: 3\n' > "$RV_D/no-tasks.plan.md"
 # THE GATE'S HELPERS ARE DEFINED INSIDE ITS BODY (`_eg_body`), so sourcing walls.sh defines none of
 # them: each is lifted out by its own definition, flush-left from `name() {` to its `}`, and a row
 # below holds every one of them defined, so no answer here is a missing function's silence.
@@ -14408,28 +14424,32 @@ rv_closed() {  # <word> -> `refused` when the hook refuses the word as a rigor, 
   in="$(jq -n --arg p "$RV_PROJ/.bionic/docs/specs/epic-01-demo/x.spec.md" --arg c "$c" --arg s "$RV_SID" \
     '{session_id: $s, tool_name: "Write", tool_input: {file_path: $p, content: $c}}')"
   err="$(HOME="$RV_D" CLAUDE_CODE_SESSION_ID="$RV_SID" bash "$RV_HOOK" <<< "$in" 2>&1 >/dev/null)"
-  case "$err" in *"that rigor is not one of the three"*) echo refused ;; *) echo admitted ;; esac
+  case "$err" in *"that rigor is not single or double"*) echo refused ;; *) echo admitted ;; esac
 }
 RV_WALLS="$RV_LIB/walls.sh"
 expect_eq "RIGOR precondition: every wall site this section asks is defined from walls.sh" "defined" \
-  "$(rv_site "$RV_WALLS" high defined)"
-for rv_pair in tested:low:0:relaxed:logged:passed:admitted \
-               peer-reviewed:medium:1:owed:logged:passed:admitted \
-               audited:high:2:owed:refused:refused:fired; do
-  IFS=: read -r rv_old rv_new rv_ord rv_aud rv_ledger rv_arm rv_bf <<< "$rv_pair"
-  for rv_w in "$rv_old" "$rv_new"; do
-    expect_eq "RIGOR $rv_w: rigor_level reads it as $rv_new" "$rv_new rc=0" "$(rv_level "$rv_w")"
-    expect_eq "RIGOR $rv_w: the hook's closed set admits it" "admitted" "$(rv_closed "$rv_w")"
-    expect_eq "RIGOR $rv_w: the hook's floor rank is $rv_ord" "$rv_ord" "$(rv_rank "$rv_w")"
-    expect_eq "RIGOR $rv_w: the wall's floor rank is $rv_ord" "$rv_ord" "$(rv_site "$RV_WALLS" "$rv_w" ord)"
-    expect_eq "RIGOR $rv_w: a task row's cell resolves to $rv_new" "$rv_new" "$(rv_site "$RV_WALLS" "$rv_w" row)"
-    expect_eq "RIGOR $rv_w: an empty cell inherits $rv_new from the plan" "$rv_new" "$(rv_site "$RV_WALLS" "$rv_w" inherit)"
-    expect_eq "RIGOR $rv_w: the matrix auditor is $rv_aud" "$rv_aud" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
-    expect_eq "RIGOR $rv_w: a ledger-shape fault is $rv_ledger" "$rv_ledger" "$(rv_site "$RV_WALLS" "$rv_w" ledger)"
-    expect_eq "RIGOR $rv_w: the requirements-pointer arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" pointer)"
-    expect_eq "RIGOR $rv_w: the dispatch-ledger arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" dispatch)"
-    expect_eq "RIGOR $rv_w: the bring-forward arm $rv_bf" "$rv_bf" "$(rv_site "$RV_WALLS" "$rv_w" forward)"
-  done
+  "$(rv_site "$RV_WALLS" double defined)"
+# <word>:<rigor_level's answer>:<closed set>:<rank>:<ord>:<row>:<inherit>:<auditor>:<ledger>:<arm>:<forward>
+for rv_pair in "single:single rc=0:admitted:0:0:single:single:relaxed:logged:passed:admitted" \
+               "double:double rc=0:admitted:1:1:double:double:owed:refused:refused:fired" \
+               "low: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
+               "tested: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
+               "medium: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
+               "peer-reviewed: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
+               "high: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
+               "audited: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted"; do
+  IFS=: read -r rv_w rv_lvl rv_cl rv_rk rv_ord rv_row rv_inh rv_aud rv_ledger rv_arm rv_bf <<< "$rv_pair"
+  expect_eq "RIGOR $rv_w: rigor_level answers '$rv_lvl'" "$rv_lvl" "$(rv_level "$rv_w")"
+  expect_eq "RIGOR $rv_w: the hook's closed set: $rv_cl" "$rv_cl" "$(rv_closed "$rv_w")"
+  expect_eq "RIGOR $rv_w: the hook's floor rank is $rv_rk" "$rv_rk" "$(rv_rank "$rv_w")"
+  expect_eq "RIGOR $rv_w: the wall's floor rank is $rv_ord" "$rv_ord" "$(rv_site "$RV_WALLS" "$rv_w" ord)"
+  expect_eq "RIGOR $rv_w: a task row's cell resolves to $rv_row" "$rv_row" "$(rv_site "$RV_WALLS" "$rv_w" row)"
+  expect_eq "RIGOR $rv_w: an empty cell under this plan word resolves to $rv_inh" "$rv_inh" "$(rv_site "$RV_WALLS" "$rv_w" inherit)"
+  expect_eq "RIGOR $rv_w: the matrix auditor is $rv_aud" "$rv_aud" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
+  expect_eq "RIGOR $rv_w: a ledger-shape fault is $rv_ledger" "$rv_ledger" "$(rv_site "$RV_WALLS" "$rv_w" ledger)"
+  expect_eq "RIGOR $rv_w: the requirements-pointer arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" pointer)"
+  expect_eq "RIGOR $rv_w: the dispatch-ledger arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" dispatch)"
+  expect_eq "RIGOR $rv_w: the bring-forward arm $rv_bf" "$rv_bf" "$(rv_site "$RV_WALLS" "$rv_w" forward)"
 done
 for rv_w in standard High ""; do
   expect_eq "RIGOR seventh word '$rv_w': rigor_level refuses it" " rc=1" "$(rv_level "$rv_w")"
@@ -14440,31 +14460,34 @@ for rv_w in standard High; do
   expect_eq "RIGOR seventh word '$rv_w': the task-row check reads it INVALID" "INVALID" "$(rv_site "$RV_WALLS" "$rv_w" row)"
   expect_eq "RIGOR seventh word '$rv_w': the auditor arm stays closed on it" "owed" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
 done
-# THE CENSUS: no line outside rigor_level's own three arms tests, ranks or lists an old word. A
-# case arm (`audited)`, `tested|…`) or an equality (`= audited`, `= "audited"`) is a second
-# definition. Comments are not sites.
-RV_CENSUS_RE='(^|[^a-z-])(tested|peer-reviewed|audited)[[:space:]]*[|)]|[!=]=?[[:space:]]*"?(tested|peer-reviewed|audited)("|[[:space:]]|\]|$)'
-rv_census() {  # <dir>… -> every line in the .sh files directly under them that tests an old word
-  local d
-  for d in "$@"; do /usr/bin/grep -nE "$RV_CENSUS_RE" "$d"/*.sh 2>/dev/null; done \
-    | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' \
-    | /usr/bin/grep -vE '/run\.sh:[0-9]+:[[:space:]]*(low|medium|high)\|(tested|peer-reviewed|audited)\)'
+# THE CENSUS: no line in hooks/ or payload/scripts/ tests, ranks or lists a word before 1.14.0. A case
+# arm (`low)`, `tested|…`) or an equality (`= high`, `= "audited"`) is a site that would read one as
+# a level. Comments are not sites. The same reader, asked for the two words, finds rigor_level's and
+# rigor_print's own arms in run.sh, so the reader reads real lines.
+rv_census_re() {  # <alternation> -> the census pattern for those words
+  printf '(^|[^a-z-])(%s)[[:space:]]*[|)]|[!=]=?[[:space:]]*"?(%s)("|[[:space:]]|\\]|$)' "$1" "$1"
 }
-expect_eq "RIGOR census precondition: the census reads rigor_level's own three arms" "3" \
-  "$(/usr/bin/grep -cE '^[[:space:]]*(low|medium|high)\|(tested|peer-reviewed|audited)\)' "$RV_LIB/run.sh")"
-expect_eq "RIGOR census: no site in hooks/ or payload/scripts/ tests an old word itself" "" \
-  "$(rv_census "$BIONIC_HOOKS_DIR" "$RV_LIB/.." "$RV_LIB")"
-# THE DOCTORED SITE: a walls.sh whose auditor arm tests the old word `tested` itself.
+RV_OLD='low|tested|medium|peer-reviewed|high|audited'
+rv_census() {  # <alternation> <dir>… -> every non-comment line in the .sh files directly under them testing a word
+  local d re; re="$(rv_census_re "$1")"; shift
+  for d in "$@"; do /usr/bin/grep -nE "$re" "$d"/*.sh 2>/dev/null; done \
+    | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'
+}
+expect_eq "RIGOR census precondition: the census reads rigor_level's and rigor_print's two arms each" "4" \
+  "$(rv_census 'single|double' "$RV_LIB" | /usr/bin/grep -c '/run\.sh:')"
+expect_eq "RIGOR census: no site in hooks/ or payload/scripts/ tests a word before 1.14.0" "" \
+  "$(rv_census "$RV_OLD" "$BIONIC_HOOKS_DIR" "$RV_LIB/.." "$RV_LIB")"
+# THE DOCTORED SITE: a walls.sh whose auditor arm tests the old word `low` itself.
 RV_MUT="$RV_D/mut/walls.sh"; mkdir -p "$RV_D/mut"
 anchor "$RV_WALLS" 'matrix_auditor_required() {' 1
 awk '/^matrix_auditor_required\(\) *\{/ { f = 1 }
      f && /case / { sub(/case .* in/, "case \"$RIGOR\" in") }
-     f && /low\) return 1/ { sub(/low\)/, "tested)") }
+     f && /single\) return 1/ { sub(/single\)/, "low)") }
      f && /^}/ { f = 0 } { print }' "$RV_WALLS" > "$RV_MUT"
-expect_eq "RIGOR mutation: the doctored copy tests 'tested' in exactly one arm, and the census finds it" "1" \
-  "$(rv_census "$RV_D/mut" | /usr/bin/grep -c 'tested) return 1')"
-expect_eq "RIGOR mutation: …and still runs, relaxing the auditor at 'tested'" "relaxed" "$(rv_site "$RV_MUT" tested auditor)"
-expect_ne "RIGOR mutation: …but not at 'low', so the low/tested agreement goes red" \
-  "$(rv_site "$RV_MUT" tested auditor)" "$(rv_site "$RV_MUT" low auditor)"
+expect_eq "RIGOR mutation: the doctored copy tests 'low' in exactly one arm, and the census finds it" "1" \
+  "$(rv_census "$RV_OLD" "$RV_D/mut" | /usr/bin/grep -c 'low) return 1')"
+expect_eq "RIGOR mutation: …and still runs, relaxing the auditor at 'low'" "relaxed" "$(rv_site "$RV_MUT" low auditor)"
+expect_ne "RIGOR mutation: …so it reads an old word as a level, and the low row goes red" \
+  "$(rv_site "$RV_WALLS" low auditor)" "$(rv_site "$RV_MUT" low auditor)"
 
 finish

@@ -5984,7 +5984,7 @@ section "Section 34: task-add — a schedule change is a transaction (wave-20 RE
 # writer commit is refused for a dependency the verb should have written, or a refused add
 # changes the plan".
 #
-# THE FIXTURE IS A PLAN THE REAL GATE ADMITS: audited, multi_agent, use_worktree, a Step-4
+# THE FIXTURE IS A PLAN THE REAL GATE ADMITS: double, multi_agent, use_worktree, a Step-4
 # block with its three fields, a `- T<n>:` line per row, and a matrix whose row carries its
 # `fails-when:`. S34_GATE drives the same gate on a plan exactly as a session bound to it
 # would, so the hand-edited control below is judged by the wall the verb dry-runs.

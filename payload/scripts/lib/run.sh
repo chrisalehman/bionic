@@ -914,37 +914,34 @@ session_working_branch() {
   printf '%s\n' "$wb"
 }
 
-# ─── THE REVIEW RIGOR LEVEL (wave-28 T44; REQ-16, D35) ───────────────────────
+# ─── THE REVIEW RIGOR LEVEL (wave-28 T44; wave-30 T11: REQ-1, D1) ──────────────
 #
-# rigor_level <word> -> `low`, `medium` or `high` for `low|tested`, `medium|peer-reviewed` and
-#                       `high|audited`; nothing and rc 1 for any other word, the empty one included.
-# rigor_print <word> -> `review rigor: <level> (<one|two|three> independent reader[s])`, the one
-#                       printed form of a level; nothing and rc 1 where rigor_level refuses.
+# rigor_level <word> -> `single` or `double` for that word; nothing and rc 1 for any other word,
+#                       the empty one included.
+# rigor_print <word> -> `review rigor: <level> (<one|two> independent mind[s])`, the one printed
+#                       form of a level; nothing and rc 1 where rigor_level refuses.
+#
+# A LEVEL IS THE COUNT OF INDEPENDENT MINDS that read the run: `single`, the critic holds every
+# question; `double`, the auditor takes `evidence` and the critic the rest (lib/proof.sh
+# PROOF_DEALING). There is no third level and no alias: a word before 1.14.0 is refused like any
+# other bad value, and a project migrates its files by the CHANGELOG's one line.
 #
 # ONE DEFINITION, AND EVERY SITE THAT TESTS THE WORD CALLS IT: the plan-write hook's closed set
-# and floor rank, and in lib/walls.sh the task-row check, the floor rank and each arm that asks
-# for the highest level. A site that matched `audited` itself would read a plan written `high` as
-# a lower rigor than it declared, which is the drift this function exists to make impossible
-# (tests/cross-gate-agreement.test.sh §RIGOR counts the sites).
-#
-# AN OLD WORD IS READ AND NEVER REWRITTEN. `tested`, `peer-reviewed` and `audited` are what every
-# file written before 1.13.0 carries, and the field keeps its name, `rigor:`. A level is printed
-# by its new word only. The count of readers is what the level deals: one role holds all three
-# questions at low, two roles at medium, three at high (lib/proof.sh PROOF_DEALING).
+# and floor rank, card.sh, lib/proof.sh's dealing, and in lib/walls.sh the task-row check, the
+# floor rank and each arm that asks for the double level (tests/cross-gate-agreement.test.sh
+# §RIGOR counts the sites).
 rigor_level() {
   case "${1:-}" in
-    low|tested)           echo low ;;
-    medium|peer-reviewed) echo medium ;;
-    high|audited)         echo high ;;
-    *)                    return 1 ;;
+    single) echo single ;;
+    double) echo double ;;
+    *)      return 1 ;;
   esac
 }
 
 rigor_print() {
   case "$(rigor_level "${1:-}")" in
-    low)    echo "review rigor: low (one independent reader)" ;;
-    medium) echo "review rigor: medium (two independent readers)" ;;
-    high)   echo "review rigor: high (three independent readers)" ;;
+    single) echo "review rigor: single (one independent mind)" ;;
+    double) echo "review rigor: double (two independent minds)" ;;
     *)      return 1 ;;
   esac
 }

@@ -36,10 +36,12 @@ PROOF_CHECK_ANSWERS="PASS FLAG FAIL n/a"
 # The roles a reading may be registered for: a reader's roster row carries one of these as its
 # `subagent_type=`, never a writer's (D7).
 PROOF_READER_ROLES="bionic:auditor bionic:critic bionic:reviewer"
-# THE DEALING (wave-27 T9; D2, D6): the reader role that answers each question at each rigor, one
-# role per question, in PROOF_QUESTIONS' order, `<rigor>=<evidence>,<adversarial>,<structure>`.
-# `facts_owed` is its one reader.
-PROOF_DEALING="tested=bionic:critic,bionic:critic,bionic:critic peer-reviewed=bionic:auditor,bionic:critic,bionic:critic audited=bionic:auditor,bionic:critic,bionic:reviewer"
+# THE DEALING (wave-27 T9; D2, D6; wave-30 T11, D1): the reader role that answers each question at
+# each rigor, one role per question, in PROOF_QUESTIONS' order,
+# `<rigor>=<evidence>,<adversarial>,<structure>`. Two levels, keyed by lib/run.sh `rigor_level`'s
+# words: `single`, the critic holds every question; `double`, the auditor takes `evidence` and the
+# critic the rest. Nothing deals `bionic:reviewer`. `facts_owed` is its one reader.
+PROOF_DEALING="single=bionic:critic,bionic:critic,bionic:critic double=bionic:auditor,bionic:critic,bionic:critic"
 # The questions that read the code; at wave scale each also owes one read of the whole (D10).
 PROOF_CODE_QUESTIONS="adversarial structure"
 # THE SEVERITY SCALE'S TWO CLOSED SETS AND ITS TABLE (wave-28 T15; D19, AC-8.1, AC-8.3): a finding's
@@ -1381,17 +1383,16 @@ PROOF_FILES
 # the rigor's: it is owed only when the caller names the project root whose configuration declares
 # it, as facts_state does, so the dealing of a rigor alone is the same in every project.
 facts_owed() {
-  local owed d lvl k r=""
-  # THE WORD IS READ AS ITS LEVEL (wave-28 T44; REQ-16, D35, A-orch-7). The dealing stays keyed by
-  # the words it was written in; the plan's word and each key are both read through lib/run.sh
-  # `rigor_level`, so `high` is dealt what `audited` is, and a word that is no level deals nothing.
-  # A copy of this file read where run.sh is not beside it (a suite's doctored copy) reads the word
-  # as written, which is what every caller got before the levels existed.
+  local owed r=""
+  # THE WORD IS READ AS ITS LEVEL (wave-28 T44; wave-30 T11, D1). The dealing is keyed by the level
+  # words themselves, so the plan's word is read through lib/run.sh `rigor_level` and a word that is
+  # no level deals nothing. A copy of this file read where run.sh is not beside it (a suite's
+  # doctored copy) reads the word as written.
   declare -F rigor_level >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/run.sh" >/dev/null 2>&1
   if ! declare -F rigor_level >/dev/null 2>&1; then
     r="${1:-}"
-  elif lvl="$(rigor_level "${1:-}" 2>/dev/null)"; then
-    for k in $PROOF_DEALING; do [ "$(rigor_level "${k%%=*}" 2>/dev/null)" = "$lvl" ] && r="${k%%=*}"; done
+  else
+    r="$(rigor_level "${1:-}" 2>/dev/null)" || r=""
   fi
   owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v s="${2:-}" '
     BEGIN {

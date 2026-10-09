@@ -304,7 +304,7 @@ cat > "$PROJ/alt/plans/epic-99/wave-01.plan.md" <<'PLAN'
 ---
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 ---
 
@@ -438,7 +438,7 @@ canonical_sdlc_version: 14
 governing-skill: agent-skills:spec-driven-development
 sdlc-step: 1
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 surface_type: cli-plugin
 language: bash

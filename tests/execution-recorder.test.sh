@@ -180,7 +180,7 @@ make_world() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 ---
 
@@ -2121,7 +2121,7 @@ section "Section 17: §ACTIVE — a confirmed launch moves its plan row (wave-26
 # text stays the commit gate's source. The id-to-name rule is `fill_row_launched`'s.
 #
 # THE FIXTURE IS A PLAN THE REAL GATE ADMITS, the shape tests/session-poker.test.sh §34 builds:
-# audited, multi_agent, use_worktree, a Step-4 block, a `- T<n>:` line per row and a matrix row
+# double, multi_agent, use_worktree, a Step-4 block, a `- T<n>:` line per row and a matrix row
 # with its `fails-when:`. Precondition 17a drives that gate on it, so every refusal below is
 # about the change, not the fixture.
 #
@@ -2143,7 +2143,7 @@ act_world() {  # <label> <current> [bind: yes|no] [extra pending build rows] -> 
   p="$r/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
     printf '# fixture wave\n\n## SDLC State\n\ncurrent: %s\n' "$cur"
@@ -3391,13 +3391,16 @@ PC_DEAL_AWK='$1 == "review" && $4 == "piece" {
 }
 END { for (i = 1; i <= n; i++) print r "|" s "|" o[i] "|" q[o[i]] }'
 PC_DEALS=$(bash -c '. "$1/payload/scripts/lib/proof.sh" || exit 1
-  for r in tested peer-reviewed audited; do for s in task wave epic; do
+  for r in single double; do for s in task wave epic; do
     facts_owed "$r" "$s" | awk -F"\t" -v r="$r" -v s="$s" "$2"
   done; done' _ "$PC_REPO_ROOT" "$PC_DEAL_AWK")
 expect_nonempty "PC0 facts_owed deals readings (the deal list is not empty)" "$PC_DEALS"
-for _r in tested peer-reviewed audited; do
+for _r in single double; do
   expect_contains "PC0 …at ${_r}" "${_r}|" "$PC_DEALS"
 done
+# §RIGOR (wave-30 T11, D1): a word before 1.14.0 is no level, so the dealing has nothing for it.
+expect_eq "PC0 …and nothing at audited, a word before 1.14.0" "" \
+  "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && facts_owed audited wave' _ "$PC_REPO_ROOT" 2>/dev/null)"
 
 # pc_every_deal <plugin root> <context dir> <label> — drives every deal; sets PC_BAD, PC_N, PC_TABLE.
 pc_every_deal() {
@@ -3456,7 +3459,7 @@ expect_ne "PC-b1 every deal was driven against the fixture (not vacuous)" "0" "$
 expect_empty "PC-b2 4,650-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
 printf '  4,650-byte checks files, characters per string:%s\n' "$PC_TABLE"
 
-# OVER THE CAP: a checks file grown to 9,600 characters, a tested critic (all three questions).
+# OVER THE CAP: a checks file grown to 9,600 characters, a single critic (all three questions).
 PO_PLUG="$SANDBOX/pc-over"
 ck_plugin "$PO_PLUG"
 awk 'BEGIN { for (i = 0; i < 96; i++) { for (j = 0; j < 99; j++) printf "y"; printf "\n" } }' \
@@ -4050,8 +4053,9 @@ section "Section 24: §CHECKS-S — the severity scale rides beside both code qu
 #
 # FIXTURE FIDELITY: each row is the dispatch wall's launch shape (`sj_intended` → `roster_row`),
 # joined by name as a teammate is; the registrations are read from hooks/hooks.json; the deal at
-# each rigor is SKILL.md's rigor table: tested, the critic holds all three; peer-reviewed, the
-# auditor `evidence` and the critic the two code questions; audited, one reader per question.
+# each rigor is SKILL.md's rigor table: single, the critic holds all three; double, the
+# auditor `evidence` and the critic the two code questions (wave-30 T11, D1). A row split one
+# question per reader, which no level deals, still shows the push follows the row's questions.
 # The wants are the shipped files' own bytes.
 #
 # fails-when: a code reader starts without the scale; the evidence reader or a writer is pushed
@@ -4071,17 +4075,17 @@ cks_reader() {  # <plugin root> <world> <name> <role> <questions> <agent id> —
   CKS_ROW=$(grep 'status=identified' "$_repo/.bionic/tmp/roster-${SID_A}.state" | tail -1)
 }
 
-# ---- tested: one critic holds all three ----
+# ---- single: one critic holds all three ----
 cks_reader "$PC_REPO_ROOT" cksone w-one critic evidence,adversarial,structure a00000000cksone1
-expect_eq "CKS-t1 tested: the critic holding all three is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-t1 single: the critic holding all three is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
 expect_eq "CKS-t2 …as one string" "1" "$(pc_lines severity)"
 expect_eq "CKS-t3 …beside its three checks files" "$(ck_want "$CK_CTX" structure)" "$(pc_ctx structure)"
 expect_eq "CKS-t4 …and its row says what was pushed, in the deal's order" \
   "checks-evidence,checks-adversarial,checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
 
-# ---- peer-reviewed: the auditor holds evidence, the critic the two code questions ----
+# ---- double: the auditor holds evidence, the critic the two code questions ----
 cks_reader "$PC_REPO_ROOT" ckspraud w-aud auditor evidence a00000000cksaud2
-expect_eq "CKS-p1 peer-reviewed: the auditor is pushed its checks (the positive)" \
+expect_eq "CKS-p1 double: the auditor is pushed its checks (the positive)" \
   "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
 expect_empty "CKS-p2 …and not the scale" "$PC_OUT_severity"
 expect_eq "CKS-p3 …its severity registration exits 0" "0" "$PC_ST_severity"
@@ -4091,12 +4095,12 @@ expect_eq "CKS-p5 …the critic holding both code questions is pushed the scale"
 expect_eq "CKS-p6 …once" "1" "$(pc_lines severity)"
 expect_eq "CKS-p7 …and its row says so" "checks-adversarial,checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
 
-# ---- audited: one reader per question ----
+# ---- a split row: one code question per reader (no level deals it; the push follows the row) ----
 cks_reader "$PC_REPO_ROOT" cksaucrit w-crit critic adversarial a00000000ckscrt4
-expect_eq "CKS-a1 audited: the critic holding adversarial is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+expect_eq "CKS-a1 split: the critic holding adversarial alone is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
 expect_eq "CKS-a2 …and its row says so" "checks-adversarial,severity" "$(sj_field "$CKS_ROW" pushed)"
-cks_reader "$PC_REPO_ROOT" cksaurev w-rev reviewer structure a00000000cksrev4
-expect_eq "CKS-a3 …the reviewer holding structure is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
+cks_reader "$PC_REPO_ROOT" cksaurev w-str critic structure a00000000cksrev4
+expect_eq "CKS-a3 …a critic holding structure alone is pushed the scale" "$(cks_sev_want)" "$(pc_ctx severity)"
 expect_eq "CKS-a4 …and its row says so" "checks-structure,severity" "$(sj_field "$CKS_ROW" pushed)"
 
 # ---- a writer: no questions, no scale, no key ----

@@ -437,7 +437,7 @@ mk_root() {
 ---
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 ---
 
@@ -447,7 +447,7 @@ scale: wave
 
 integration-branch: main
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 current: $cur
 

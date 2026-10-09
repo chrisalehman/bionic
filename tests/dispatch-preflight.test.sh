@@ -1495,7 +1495,7 @@ expect_status "27f …non-vacuity: an impact command WAS configured for this rep
 REPO=$(make_repo r27new yes)
 write_attestation "$REPO" "$SID_A"
 s27_impact "$REPO" archive.test.sh run.sh
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4, task 4/4 of epic-23 wave-13; build · audited · wave.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4, task 4/4 of epic-23 wave-13; build · double · wave.
 Your task: the close-out script (D5, D6).
 Expected artifact: .bionic/docs/record/wave-13-fixit-180/T4-close-out.md
 Expected duration: ~120 minutes.
@@ -2582,7 +2582,7 @@ k2_write_plan() {  # <repo> <current> <approved-by line, or "">
   mkdir -p "$dir"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf -- 'intent: build\nrigor: audited\nscale: wave\n---\n\n'
+    printf -- 'intent: build\nrigor: double\nscale: wave\n---\n\n'
     printf -- '# Test wave plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n' "$cur"
     [ -n "$approved" ] && printf -- '%s\n' "$approved"
     printf -- '\n- Step %s: tasks in flight\n' "$cur"
@@ -2591,16 +2591,14 @@ k2_write_plan() {  # <repo> <current> <approved-by line, or "">
 
 K2_APPROVED_LINE='approved-by: dana 2026-09-07T19:05Z "Ok, amazing! Approved."'
 
-# k2_questions <role> <rigor> -> a newline and the `Questions:` line that rigor deals the role (the
-# Interfaces table, wave-27 T15), or nothing for a role the line does not apply to. A reader brief
+# k2_questions <role> <rigor> -> a newline and the `Questions:` line that rigor deals the role (REQ-1's
+# table, wave-30 T11), or nothing for a role the line does not apply to. A reader brief
 # without its dealt line is refused by the dispatch wall (§Q), whatever this section is testing.
 k2_questions() {
   case "$2:$1" in
-    audited:bionic:auditor|peer-reviewed:bionic:auditor) printf '\nQuestions: evidence' ;;
-    audited:bionic:critic)       printf '\nQuestions: adversarial' ;;
-    audited:bionic:reviewer)     printf '\nQuestions: structure' ;;
-    peer-reviewed:bionic:critic) printf '\nQuestions: adversarial, structure' ;;
-    tested:bionic:critic)        printf '\nQuestions: evidence, adversarial, structure' ;;
+    double:bionic:auditor) printf '\nQuestions: evidence' ;;
+    double:bionic:critic)  printf '\nQuestions: adversarial, structure' ;;
+    single:bionic:critic)  printf '\nQuestions: evidence, adversarial, structure' ;;
   esac
   return 0
 }
@@ -2691,11 +2689,15 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30d" "claude-sonne
 expect_eq "30d an empty approved-by: value is not an approval" "deny" "$GATE_VERDICT"
 
 # --- 30e: the reading roles pass through the same refused plan ---
-for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer; do
+# The reviewer is not here: no level deals it a question (wave-30 T11, D1); Explore reads in its place.
+for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore; do
   REPO=$(make_repo "r30e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_plan "$REPO" 4 ""
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" audited)" "w30e" "claude-sonnet-5" \
+  # A double critic is dealt two questions, so it names two records (wave-27 T49's rule).
+  _e30=""; [ "$_role" = bionic:critic ] && _e30="
+Files: .bionic/docs/record/w99-widget.txt, .bionic/docs/record/w99-adv.md"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" double)$_e30" "w30e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
   # REBUILT (wave-27 T31; A-orch-43): a deny exits 0 too, so the exit said nothing. The verdict
   # and the row the wall recorded do.
@@ -2753,10 +2755,10 @@ k2_write_task_plan() {
   mkdir -p "$dir"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf -- 'intent: build\nrigor: tested\nscale: task\n---\n\n'
+    printf -- 'intent: build\nrigor: single\nscale: task\n---\n\n'
     printf -- '# Test task-scale plan\n\n## Tasks\n\n'
     printf -- '| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
-    printf -- '| %s | build | tested | wire the K2.5 arms | active |\n\n' "$cur"
+    printf -- '| %s | build | single | wire the K2.5 arms | active |\n\n' "$cur"
     printf -- '## SDLC State\n\nscale: task\ncurrent: %s\n' "$cur"
     [ -n "$approved" ] && printf -- '%s\n' "$approved"
     printf -- '\n- %s: bash tests/dispatch-preflight.test.sh green\n' "$cur"
@@ -2797,17 +2799,17 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w31d" "claude-sonne
 expect_eq "31d an empty approved-by: value is not an approval, at task scale" "deny" "$GATE_VERDICT"
 
 # --- 31e: the reading roles pass through the same refused task-scale plan ---
-# THE AUDITOR AND THE REVIEWER ARE NOT HERE (wave-27 T15): this plan is `rigor: tested`, which deals
+# THE AUDITOR AND THE REVIEWER ARE NOT HERE (wave-27 T15): this plan is `rigor: single`, which deals
 # both of them no question, so the dispatch wall refuses them on their Questions: line (§Q Q5, Q8n)
 # whatever the approval says. The critic carries all three.
 for _role in bionic:researcher bionic:test-runner bionic:critic; do
   REPO=$(make_repo "r31e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_task_plan "$REPO" T1 ""
-  # A tested critic is dealt three questions, so it names three records (wave-27 T49's rule).
+  # A single critic is dealt three questions, so it names three records (wave-27 T49's rule).
   _e31=""; [ "$_role" = bionic:critic ] && _e31="
 Files: .bionic/docs/record/w99-widget.txt, .bionic/docs/record/w99-adv.md, .bionic/docs/record/w99-str.md"
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)$_e31" "w31e" "claude-sonnet-5" \
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" single)$_e31" "w31e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
   # REBUILT (wave-27 T31; A-orch-43), as 30e: the verdict and the recorded row, not the exit.
   expect_eq "31e a ${_role} dispatch against the SAME unapproved task-scale plan is admitted" "allow" "$GATE_VERDICT"
@@ -2875,17 +2877,28 @@ for _role in fork general-purpose claude acme:helper "" researcher bionic:implem
 done
 
 # --- rc2: before approval, the read-only set dispatches ---
-for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer Explore Plan; do
+for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan; do
   REPO=$(make_repo "rrc2-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_plan "$REPO" 2 ""
-  _rc_brief="$BRIEF_FULL$(k2_questions "$_role" audited)"
+  _rc_brief="$BRIEF_FULL$(k2_questions "$_role" double)"
+  # A double critic is dealt two questions, so it names two records (wave-27 T49's rule).
+  [ "$_role" = bionic:critic ] && _rc_brief="$_rc_brief
+Files: .bionic/docs/record/w99-widget.txt, .bionic/docs/record/w99-adv.md"
   # S33: an auditor brief may not waive Suites:, and BRIEF_FULL declares one — no change.
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_rc_brief" "wrc2" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
   expect_status "rc2 '${_role}' at current: 2 with no approved-by is admitted" "0" "$GATE_ST"
   expect_eq "rc2 …on no deny verdict" "allow" "$GATE_VERDICT"
 done
+# …and the reviewer, which no level deals a question (wave-30 T11, D1), is refused on its Questions: line.
+REPO=$(make_repo "rrc2-reviewer" yes)
+write_attestation "$REPO" "$SID_A"
+k2_write_plan "$REPO" 2 ""
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL
+Questions: structure" "wrc2" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" bionic:reviewer)"
+expect_eq "rc2 'bionic:reviewer' at current: 2 is refused: double deals it nothing" "deny" "$GATE_VERDICT"
+expect_contains "rc2 …saying so" "double rigor deals reviewer: nothing" "$GATE_ERR"
 
 # --- rc3: THE CONTROL — approval admits the writer at the same step ---
 REPO=$(make_repo rrc3 yes)
