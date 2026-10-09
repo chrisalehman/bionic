@@ -6654,6 +6654,26 @@ expect_nonempty "W30-S2m precondition: the cut copy keeps the surrounding doctri
 expect_eq "W30-S2m: …and a dispatch.md with the sentence's paragraph cut is caught" "" "$(w26_hits "$W30S_HAND" "$W30S_CUT")"
 
 # ============================================================
+section "§W30-SPLIT (wave-30 T17; REQ-12 AC-12.6, D14d-3, design-ledger Δ11): the interface-first recipe beside the tick's SPLIT? line"
+# ============================================================
+# WHAT THIS OWNS. steps/4.md carries the recipe for a split the tick's SPLIT? line names: the cut is the
+# orchestrator's, on a pending row, interface-first, and `task-split` writes it as one transaction. It lives
+# in steps/4.md alone (A-T17.11): check 115's read budget had 303 B of headroom at 43590bdc, and a second
+# copy or pointer in dispatch.md did not fit beside it. The verb itself is proved in session-poker-3
+# §TASK-SPLIT and units §TASK-SPLIT. HERMETIC: the committed rendered finals by path.
+W30P_STEP4="${SKILL_DIR}/steps/4.md"
+W30P_CAND='`SPLIT? <id>` names a candidate; you decide.'
+W30P_CUT='Cut a pending row interface-first: first a short child making what the waiters read.'
+W30P_VERB='`task-split <id> -- <child spec>…` writes it in one validated transaction.'
+for _w30p in "$W30P_CAND" "$W30P_CUT" "$W30P_VERB"; do
+  expect_nonempty "W30-P1: AC-12.6 steps/4.md says: ${_w30p:0:72}" "$(w26_hits "$_w30p" "$W30P_STEP4")"
+done
+W30P_CUTF="$TMP/w30p-no-recipe.md"
+/usr/bin/grep -vF -- '**Splitting a row.**' "$W30P_STEP4" > "$W30P_CUTF" 2>/dev/null
+expect_nonempty "W30-P3m precondition: the cut copy keeps the pointer to dispatch.md" "$(w26_hits 'Its rules are `dispatch.md`' "$W30P_CUTF")"
+expect_eq "W30-P3m: …and a steps/4.md with the recipe's paragraph cut is caught" "" "$(w26_hits "$W30P_CUT" "$W30P_CUTF")"
+
+# ============================================================
 section "§W30-DEBT-LEDGER (wave-30 T22; REQ-11 AC-11.2, AC-11.4, D2, P2): operational-rules documents the run's debt ledger, its printed lines and its carry"
 # ============================================================
 # WHAT THIS OWNS. The records table of operational-rules.md carries a `debt ledger` row: the path, the
