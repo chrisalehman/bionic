@@ -5787,15 +5787,15 @@ expect_nonempty "W27-T60-S1 precondition: hooks.json registers more than one tim
 expect_eq "W27-T60-S1: hook-chain.svg's header says each timeout hooks.json registers" "" \
   "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJ")"
 W27T60_HCT="$TMP/w27t60-timeout.svg"
-sed 's/; <tspan[^>]*>dispatch-preflight\.sh<\/tspan> runs with <tspan[^>]*>timeout: 15<\/tspan>//' "$W27T53_HC" > "$W27T60_HCT" 2>/dev/null
+sed 's/; <tspan[^>]*>dispatch-preflight\.sh<\/tspan> runs with <tspan[^>]*>timeout: 25<\/tspan>//' "$W27T53_HC" > "$W27T60_HCT" 2>/dev/null
 expect_nonempty "W27-T60-S1m precondition: the doctored header still reads" \
   "$(/usr/bin/grep -m1 'Every entry is rooted at' "$W27T60_HCT")"
 expect_contains "W27-T60-S1m: …and a header that says every entry runs with 10 is caught" \
-  "dispatch-preflight.sh timeout 15 not said" "$(w27t60_timeout_gaps "$W27T60_HCT" "$W27T60_HJ")"
+  "dispatch-preflight.sh timeout 25 not said" "$(w27t60_timeout_gaps "$W27T60_HCT" "$W27T60_HJ")"
 W27T60_HJD="$TMP/w27t60-hooks.json"
 jq '(.hooks[][] | .hooks[] | select(.command | test("dispatch-preflight")) | .timeout) |= 10' "$W27T60_HJ" > "$W27T60_HJD" 2>/dev/null
-expect_contains "W27-T60-S1n: …and so is a hooks.json that no longer registers the 15 the header says" \
-  "timeout 15 said, none registered" "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJD")"
+expect_contains "W27-T60-S1n: …and so is a hooks.json that no longer registers the 25 the header says" \
+  "timeout 25 said, none registered" "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJD")"
 # S2: the commit wall reads no head (walls.sh _eg_reading_gaps); which head a fact covers is
 # current 8's to judge. It refuses a newest failing reading and an open declared red too
 # (walls.sh, the two Step-6 refusals; review pass 51 S1).
@@ -5939,7 +5939,16 @@ expect_nonempty "W28-71 precondition: CHANGELOG.md carries a 1.13.0 entry" "$W28
 expect_nonempty "W28-71 precondition: the 1.13.0 heading line reads" "$W28_71_HEAD"
 expect_regex "W28-71a: the 1.13.0 entry is dated (the day it is cut)" \
   '^## 1\.13\.0 — 20[0-9]{2}-[0-9]{2}-[0-9]{2}$' "$W28_71_HEAD"
-expect_eq "W28-71b: …and it is the newest entry" "1.13.0" "$(changelog_head_version "${REPO}/CHANGELOG.md")"
+# W28-71b reads the 1.13.0 entry against the newest heading without naming the newest: a later release
+# cut above it must not turn this red, and SEMVER-6 already owns "newest == plugin.json's version".
+# w28_71_head_ok <newest> -> true when <newest> is 1.13.0 or a later x.y.z (numeric, field by field).
+w28_71_head_ok() { awk -v h="$1" 'BEGIN { n = split(h, a, "."); if (n != 3) exit 1;
+  split("1.13.0", b, "."); for (i = 1; i <= 3; i++) { if (a[i] + 0 > b[i] + 0) exit 0; if (a[i] + 0 < b[i] + 0) exit 1 } exit 0 }'; }
+W28_71_NEWEST="$(changelog_head_version "${REPO}/CHANGELOG.md")"
+expect_true "W28-71b: …and it is the newest entry or a later release has been cut above it" w28_71_head_ok "$W28_71_NEWEST"
+expect_true "W28-71b2: …and a later head (1.14.0) still reads as ok (the pin does not name the newest)" \
+  w28_71_head_ok "1.14.0"
+expect_false "W28-71b2m: …and a head older than 1.13.0 is caught (pin discriminates)" w28_71_head_ok "1.12.9"
 expect_contains "W28-71c: the entry says it is a minor release" "This is a minor release" "$W28_71_J"
 expect_contains "W28-71c2: …and that the contract version stays 14" '`canonical_sdlc_version` stays 14' "$W28_71_J"
 expect_contains "W28-71d: a run open at upgrade continues on its 1.12.0 plan with no edit (D26)" \
