@@ -14473,7 +14473,7 @@ rv_census() {  # <alternation> <dir>… -> every non-comment line in the .sh fil
   for d in "$@"; do /usr/bin/grep -nE "$re" "$d"/*.sh 2>/dev/null; done \
     | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'
 }
-expect_eq "RIGOR census precondition: the census reads rigor_level's and rigor_print's two arms each" "4" \
+expect_eq "RIGOR census precondition: the census reads the two arms each of rigor_level, rigor_print and fix_cap_default (T21)" "6" \
   "$(rv_census 'single|double' "$RV_LIB" | /usr/bin/grep -c '/run\.sh:')"
 expect_eq "RIGOR census: no site in hooks/ or payload/scripts/ tests a word before 1.14.0" "" \
   "$(rv_census "$RV_OLD" "$BIONIC_HOOKS_DIR" "$RV_LIB/.." "$RV_LIB")"
