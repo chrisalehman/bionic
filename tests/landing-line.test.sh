@@ -1303,4 +1303,33 @@ expect_nonempty "(db1-pre) a candidate was built" "$KDB"
 expect_eq "(db2) …printing LANDED, the row's debt line, and the owed line last, exactly" \
   "$(printf 'LANDED T1 %s\ndebt: burned 1, touched 2\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$KDB" "$KDB")" "$LL_OUT"
 
+
+section "§REVIEW-BORN: ready's landing report counts the review-born rows against the plan's fix-cap: (wave-30 T21; REQ-2 AC-2.3; D4)"
+# `ready` prints `review-born rows: <N> of cap <M>` between LANDED and the owed line: N the plan's `## SDLC State`
+# lines carrying `born: review` (task-add --born writes it), M the plan's fix-cap: rendered (lib/run.sh
+# `fix_cap_render`; the level's default when the field is absent). Nothing when the plan has neither fix-cap: nor
+# rigor: — the world plan above, whose exact outputs (r1, db2) carry no such line.
+# fails-when: a plan with fix-cap: 2 and two review-born rows lands without `review-born rows: 2 of cap 2`, or another count.
+ll_born_plan() {  # <root> <ledger suffix for T1> <ledger suffix for T2> -> fix-cap: 2 and the two lines' suffixes
+  local p; p="$(ll_plan "$1")"
+  awk -v a="$2" -v b="$3" '/^working-branch: / { print; print "fix-cap: 2"; next }
+    /^- T1: active$/ { print $0 a; next } /^- T2: active$/ { print $0 b; next } { print }' "$p" > "$p.n" && mv "$p.n" "$p"
+}
+RRB="$(ll_rworld)"
+ll_born_plan "$RRB" ' born: review S2 on' ' born: review S1 off'
+expect_eq "(rb0) precondition: the plan carries fix-cap: 2 and two ledger lines born of review" "1|2" \
+  "$(/usr/bin/grep -c '^fix-cap: 2$' "$(ll_plan "$RRB")")|$(/usr/bin/grep -cE '^- T[12]: active born: review S[12] (on|off)$' "$(ll_plan "$RRB")")"
+ll_verb "$RRB" T1
+KRB="$(ll_ev "$RRB" candidate | head -1)"; KRB="$(ll_field "$KRB" commit)"
+expect_eq "(rb1) ready over the plan exits 0" "0" "$LL_RC"
+expect_nonempty "(rb1-pre) a candidate was built" "$KRB"
+expect_eq "(rb2) AC-2.3 …printing LANDED, review-born rows: 2 of cap 2, and the owed line last, exactly" \
+  "$(printf 'LANDED T1 %s\nreview-born rows: 2 of cap 2\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$KRB" "$KRB")" "$LL_OUT"
+RRB0="$(ll_rworld)"
+ll_born_plan "$RRB0" '' ''
+ll_verb "$RRB0" T1
+KRB0="$(ll_ev "$RRB0" candidate | head -1)"; KRB0="$(ll_field "$KRB0" commit)"
+expect_eq "(rb3) a plan with fix-cap: 2 and no review-born row lands with review-born rows: 0 of cap 2" \
+  "$(printf 'LANDED T1 %s\nreview-born rows: 0 of cap 2\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$KRB0" "$KRB0")" "$LL_OUT"
+
 finish
