@@ -66,7 +66,6 @@ The roles canonical-sdlc dispatches by step. The model and effort each one runs 
 | `critic` | opus · high | Independent Step-6 adversarial critic — falsifies the code and the claim it is ready to merge |
 | `implementor` | sonnet · high | MECHANICAL task execution under TDD discipline — the plan is literal, tests define done, ambiguity means stop and surface |
 | `researcher` | opus · high | Read-only codebase/docs exploration returning structured summaries with file:line citations |
-| `reviewer` | opus · high | Independent structure reviewer — holds the code to the structure checks it is handed and answers every one |
 | `senior-implementor` | opus · high | DISCRETIONARY task execution under TDD discipline — judgment and taste licensed within task scope, every resolution logged to the wave's `record/<wave>/assumptions.md` before commit |
 | `test-runner` | sonnet · medium | Mechanical test-suite execution and full result reporting |
 

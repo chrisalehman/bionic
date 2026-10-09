@@ -387,7 +387,7 @@ rt_disallowed() {
                 fm && /^disallowedTools:/ { sub(/^disallowedTools:[ \t]*/, ""); print }' "$1" \
     | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | /usr/bin/grep -v '^$'
 }
-for _rt_role in researcher test-runner auditor critic reviewer; do
+for _rt_role in researcher test-runner auditor critic; do
   _rt_f="$REPO/agents/${_rt_role}.md"
   _rt_d=$(rt_disallowed "$_rt_f")
   expect_true "10a: agents/${_rt_role}.md disallows Agent" \
@@ -447,12 +447,35 @@ _dr_src="$REPO/agents-src/blocks/dispatch-rules.md"
 expect_true "12a: the block source exists" test -f "$_dr_src"
 expect_true "12b: …and is at most 600 bytes" \
   bash -c '[ "$(wc -c < "$1")" -gt 0 ] && [ "$(wc -c < "$1")" -le 600 ]' _ "$_dr_src"
-for _dr_role in auditor critic implementor researcher reviewer senior-implementor test-runner; do
+for _dr_role in auditor critic implementor researcher senior-implementor test-runner; do
   _dr_body=$(cat "$REPO/agents/$_dr_role.md" 2>/dev/null)
   expect_true "12c: agents/$_dr_role.md carries the DISPATCH-RULES markers" \
     bash -c 'case "$1" in *"<!-- DISPATCH-RULES-BEGIN -->"*"<!-- DISPATCH-RULES-END -->"*) exit 0 ;; esac; exit 1' _ "$_dr_body"
   expect_true "12d: …and the block's own words, so an empty injection cannot pass" \
     bash -c 'case "$1" in *"\`tests/run.sh --only <name>.test.sh\`, one call each"*"ever end your turn"*) exit 0 ;; esac; exit 1' _ "$_dr_body"
 done
+
+section "Section 13: the reviewer role is retired (wave-30 T20; REQ-1 AC-1.6, D2)"
+# The structure reader is no role: the critic holds `structure`. fails-when: a template, a role
+# file, the ROLES list, the help roster, the checksum manifest or the README roster still names
+# the reviewer, or a role the roster must keep went with it. Each absence is read beside the
+# presence of a sibling in the SAME file, so an unreadable file cannot pass for a clean one.
+expect_true "13a: agents-src/templates/reviewer.md.tmpl is deleted" test ! -e "$REPO/agents-src/templates/reviewer.md.tmpl"
+expect_true "13b: agents/reviewer.md is deleted" test ! -e "$REPO/agents/reviewer.md"
+expect_eq "13c: agents/ holds the six role files" \
+  "auditor.md critic.md implementor.md researcher.md senior-implementor.md test-runner.md" \
+  "$(cd "$REPO/agents" && ls *.md | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "13d: render.sh's ROLES list is the six roles" \
+  'ROLES="auditor critic implementor researcher senior-implementor test-runner"' \
+  "$(/usr/bin/grep -E '^ROLES=' "$REPO/agents-src/render.sh")"
+_rv_help="$(cat "$REPO/payload/commands/help.md")"
+expect_contains "13e: the help roster lists the critic row" '| `critic` |' "$_rv_help"
+expect_absent "13f: …and no reviewer row" '| `reviewer` |' "$_rv_help"
+_rv_man="$(cat "$REPO/payload/integrity/rendered.sha256")"
+expect_contains "13g: the manifest lists agents/critic.md" 'agents/critic.md' "$_rv_man"
+expect_absent "13h: …and not agents/reviewer.md" 'agents/reviewer.md' "$_rv_man"
+_rv_readme="$(cat "$REPO/README.md")"
+expect_contains "13i: the README roster lists the critic row" '| `critic` |' "$_rv_readme"
+expect_absent "13j: …and no reviewer row" '| `reviewer` |' "$_rv_readme"
 
 finish

@@ -22,7 +22,7 @@
 #                to write its findings as finding lines (wave-28 T18, D22), the one that is dealt
 #                `evidence` alone included.
 #   STEP_ZERO=1  before any dispatch, the session lists the Agent tool's descriptions of
-#                bionic:reviewer and bionic:critic, quoted exactly as the tool gives them.
+#                bionic:auditor and bionic:critic, quoted exactly as the tool gives them.
 #
 # The prompt says nothing about the project: everything the session knows comes from the briefs.
 set -euo pipefail
@@ -55,7 +55,7 @@ done
 
 printf '%s\n\n' "/bionic:canonical-sdlc This session starts no run: do not carry out any step of the skill, write no plan, and change no file of this repository outside .bionic/docs/record/. Do only the following."
 if [ "${STEP_ZERO:-}" = 1 ]; then
-  printf '%s\n\n' "0. Before any dispatch, list every agent type the Agent tool offers whose name is bionic:reviewer or bionic:critic, quoting each one's description exactly as the tool gives it."
+  printf '%s\n\n' "0. Before any dispatch, list every agent type the Agent tool offers whose name is bionic:auditor or bionic:critic, quoting each one's description exactly as the tool gives it."
 fi
 n=$#
 if [ "$n" -gt 1 ]; then

@@ -882,6 +882,26 @@ fi
 # happened.
 # [WALL: tests/dispatch-preflight.test.sh]
 DP_SUBAGENT=$(_jq '.tool_input.subagent_type')
+# THE STRUCTURE READER IS RETIRED (wave-30 T20; REQ-1 AC-1.6, D2). `bionic:reviewer` had no role file
+# left to be dispatched as, and no rigor deals it a question: `structure` is the critic's. A brief
+# that still names it is refused here, with the role to dispatch on the line, so a brief written
+# before 1.14.0 is told where its question went instead of being read as an unknown role.
+# `facts_owed` never deals the type, so no reader arm can answer it. It sits before the approval
+# arm, which would otherwise read the retired type as an unknown writer and report the plan as
+# unapproved first: the first finding is the one a one-fault refusal prints. Only the plugin-qualified
+# spelling is the retired role; a bare `reviewer` may be a consumer's own agent and is not judged.
+case "$DP_SUBAGENT" in
+  bionic:reviewer)
+    dp_finding "bionic:reviewer is retired (1.14.0)" "dispatch bionic:critic" \
+      "The structure reader is not a role any more, so a brief cannot name it:
+    Role: ${DP_SUBAGENT}
+
+Fix: structure is the critic's question; dispatch bionic:critic. Its Questions: line is the
+set the plan's rigor deals it, and its checks (reuse and one site per concept among them) are
+pushed to it at start.
+
+Then retry the dispatch." ;;
+esac
 if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
   # `approved-by:` IS READ BY THE FILL'S OWN READER (wave-26 T5; review 10 F2): `fill_plan_approved`
   # (lib/fill.sh), fence-aware and taking a bulleted `- approved-by:`, so the tick that FILLs a
@@ -2133,8 +2153,8 @@ fi
 
 # ======================================== A READER'S QUESTIONS (wave-27 T15; REQ-5, REQ-1, D5)
 #
-# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor`, `bionic:critic` and
-# `bionic:reviewer` answer the reading questions `evidence`, `adversarial` and `structure`, and
+# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor` and `bionic:critic` answer the
+# reading questions `evidence`, `adversarial` and `structure`, and
 # the plan's rigor deals each question to one of them (`facts_owed`, lib/proof.sh). A reader's
 # brief names its own on a `Questions: <q>[, <q>]` line, which `lift_contract_fields` reads as a
 # set. This arm refuses a reader brief with no such line, a word outside the three, and a set
@@ -2150,9 +2170,10 @@ fi
 #
 # EVERY OTHER ROLE IS UNTOUCHED: the line is not required, and if present it is neither judged
 # nor recorded, so nothing is pushed to that agent.
+#
 DP_QUESTIONS=""
 case "$DP_SUBAGENT" in
-  bionic:auditor|bionic:critic|bionic:reviewer)
+  bionic:auditor|bionic:critic)
     _q_set="$(brief_field "$LIFTED" questions)"
     _q_bad="$(brief_field "$LIFTED" questions_bad)"
     _q_dup="$(brief_field "$LIFTED" questions_dup)"

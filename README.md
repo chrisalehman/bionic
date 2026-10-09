@@ -1,7 +1,7 @@
 # bionic
 
 Bionic is a Claude Code plugin that brings one engineering lifecycle into every project you
-open. It ships a governed SDLC skill, two technique skills, seven subagent roles Claude hands
+open. It ships a governed SDLC skill, two technique skills, six subagent roles Claude hands
 work to, and a small set of walls that refuse commands you would have regretted. It travels
 with you rather than with a repository: install it once and the same discipline applies
 wherever you open Claude Code.
@@ -86,13 +86,11 @@ and what it leaves behind.
 
 - `intent` is what the deliverable is: `build`, `bugfix`, `refactor`, `tune`, `spike`, or
   `incident-response`.
-- `rigor` is how hard the evidence has to try to lie: `low`, `medium` or `high`. `low` means
-  test-driven, red before green, with one independent critic reading the evidence, the code
-  and its structure. `medium` adds a separate spec and gives the evidence to an independent
-  auditor. `high` gives the structure to an independent reviewer. Each level contains the one
-  below it. `low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads
-  either word as the same level, and a file carrying an old word is read as it is and never
-  rewritten.
+- `rigor` is how hard the evidence has to try to lie: `single` or `double`. `single` means
+  test-driven, red before green, with one independent critic reading the evidence, the code and
+  its structure. `double` gives the evidence to a separate auditor and leaves the critic the
+  code and its structure. A plan written before 1.14.0 carries one of six older words, which map
+  to these two; edit its `rigor:` line to migrate it.
 - `scale` is the unit of decomposition: `task` for several small pieces inside one session,
   `wave` for a change with its own spec, plan and branch, `epic` for work that carves waves
   and runs only the first four steps itself.
@@ -221,7 +219,6 @@ own standing duties and model:
 | `senior-implementor` | Opus | Executes slices that need judgment, and root-cause debugging. Logs every call it made. |
 | `auditor` | Opus | At the verify gate and, at the rigors that deal it `evidence`, at Step 6, tries to falsify the evidence, never the code. Read-only on tracked files; writes its own record through the shell. |
 | `critic` | Opus | At the review gate, tries to falsify the code and the claim it is ready to merge. Read-only on tracked files; writes its own record through the shell. |
-| `reviewer` | Opus | Holds the code to the structure checks (reuse, one site per concept, shape) and answers each one. Read-only on tracked files; writes its own record through the shell. |
 
 Each of them owes a report where every factual claim carries the command that proves it or
 the word `unverified`.

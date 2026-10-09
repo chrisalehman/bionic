@@ -2262,9 +2262,13 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # three stop rules AC-2.2 names in `agents/critic.md` and its dealing (366 B), the auditor's one sentence (68 B); the
 # measured total is 26,951 B. The reviewer's file leaves with T20, which frees about 3 KB of this total.
 # MERGED (wave-30 T23 over T19, A-T23.17): the two raises were each measured without the other; with both rows'
-# sentences the measured total is 27,431 B, so the cap is 27,500 B until T20's deletion frees the reviewer's file.
+# sentences the measured total was 27,431 B, so the cap was 27,500 B until T20's deletion freed the reviewer's file.
+#
+# ROLE_TOTAL_CAP LOWERED 27,500 -> 26,520 (epic-23 wave-30 T20, A-T20.6, A-orch-63): the reviewer role file is deleted
+# (AC-1.6); the six role files measure 24,293 B with T19's and T23's sentences both in, so the raises are taken back to
+# the cap before them.
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=27500
+ROLE_TOTAL_CAP=26520
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -5189,7 +5193,7 @@ expect_nonempty "W27-T8k2m: a checks-adversarial.md that hands over the notes ag
 # none of their text (the role-file half of §W27-32); each injects the three shared reader blocks
 # and disallows Write, Edit, NotebookEdit and Agent. The absence sits beside the pointer on the
 # same file, and a real render of a critic template that injects a checks block again goes red.
-W27_READERS="auditor critic reviewer"
+W27_READERS="auditor critic"
 W27_POINTER='Checks: payload/context/checks-<question>.md'
 # w27_check_text_in <file> -> what of a check list the file carries, one item per line: a checks
 # or critic-template marker, a checks file's opening sentence, or a structure check line.
@@ -5525,7 +5529,7 @@ expect_nonempty "W27-102m: an operational-rules.md that still says the critic ca
 # Item 1 (A-orch-43): a reader writes one file, its record; the tool ban stays (§W27-T11c).
 # Corrected by the review of T11 (F2): one record per question dealt, since the verb reads one
 # `question:` per record.
-for _r in auditor critic reviewer; do
+for _r in auditor critic; do
   expect_nonempty "W27-T17-1: agents/${_r}.md says the reader writes one record per question" \
     "$(w26_hits 'You write one record per question you are dealt, through the shell, and no other file' "${REPO}/agents/${_r}.md")"
   expect_eq "W27-T17-1b: …and no longer that it writes no files, or one file" "" \
@@ -5562,7 +5566,7 @@ expect_nonempty "W27-T17-5: dispatch.md says a Files: line is a comma-separated 
 expect_nonempty "W27-T17-5b: …an extensionless root file as ./NAME, a note after a trailing #, none alone" \
   "$(w26_hits 'spell a root file with no extension as `./Makefile`, put any note after a trailing `#`, and write `none` alone for no files' "$DISPATCH_MD")"
 # The roles sentence and the read rows: the three readers and one read row per question.
-for _r in auditor critic reviewer; do
+for _r in auditor critic; do
   expect_nonempty "W27-T17-6: dispatch.md's roles sentence names the reader \`${_r}\`" \
     "$(w26_hits "\`${_r}\`" "$DISPATCH_MD")"
 done
@@ -5674,7 +5678,7 @@ case "$W27T53_N" in 6) W27T53_W=six ;; 7) W27T53_W=seven ;; 8) W27T53_W=eight ;;
 expect_nonempty "W27-T53-S4 precondition: agents/ holds role files" "$([ "$W27T53_N" -gt 0 ] && echo yes)"
 expect_nonempty "W27-T53-S4: README names as many subagent roles as agents/ holds ($W27T53_W)" \
   "$(w26_hits "$W27T53_W subagent roles" "${REPO}/README.md")"
-for _r in auditor critic reviewer; do
+for _r in auditor critic; do
   _row="$(/usr/bin/grep -m1 "^| \`${_r}\` |" "${REPO}/README.md")"
   expect_contains "W27-T53-S4b: README's ${_r} row says it writes its own record" \
     'Read-only on tracked files; writes its own record through the shell.' "$_row"
@@ -6481,7 +6485,7 @@ expect_nonempty "W28-R1b: …and SKILL.md says the rigor is single (one) or doub
   "$(w26_hits '`single` (one) or `double` (two)' "${SKILL_DIR}/SKILL.md")"
 # shellcheck disable=SC2086
 expect_eq "W28-R2: no rendered skill, step or role file names a level by an old word" "" "$(w28r_old $W28R_FILES)"
-W28R_DOC="$(w26_doctor "${SKILL_DIR}/steps/5.md" 'At `audited` the reviewer holds structure.')"
+W28R_DOC="$(w26_doctor "${SKILL_DIR}/steps/5.md" 'At `audited` the critic holds structure.')"
 expect_eq "W28-R2m: a step file that teaches a level by an old word is caught" "${W28R_DOC#"$REPO"/}:audited" "$(w28r_old "$W28R_DOC")"
 W28R_DOC2="$(w26_doctor "${SKILL_DIR}/SKILL.md" "$W28R_MAP")"
 expect_eq "W28-R2m2: a mapping sentence put back is caught (its three old words are found)" "3" \
@@ -6496,7 +6500,37 @@ expect_nonempty "W28-R5: the announcement prints card.sh rigor's line (the verb'
 W28R_CARD="$(bash "${REPO}/payload/scripts/card.sh" rigor double 2>/dev/null)"
 expect_eq "W28-R5b: …and the line the announcement quotes is the one card.sh prints" "review rigor: double (two independent minds)" "$W28R_CARD"
 expect_nonempty "W28-R5c: …quoted in SKILL.md as printed" "$(w26_hits "\`${W28R_CARD:-<none>}\`" "${SKILL_DIR}/SKILL.md")"
-expect_nonempty "W28-R6: the reviewer role is dealt structure at high rigor" "$(w26_hits 'Dealt `structure` at high rigor' "${REPO}/agents/reviewer.md")"
+# RE-POINTED (wave-30 T20, AC-1.6): the reviewer role is retired, so the file that said it was dealt `structure` at
+# high rigor is gone; the critic's file, which holds `structure` at both levels, stays (render.test.sh §13 pins the six).
+expect_true "W28-R6: the reviewer role file is gone and the critic's stays" \
+  bash -c '[ ! -e "$1/agents/reviewer.md" ] && [ -f "$1/agents/critic.md" ]' _ "$REPO"
+# T20-1 (AC-1.6): no rendered surface lists the reviewer as a role. The extractor names the role by its three
+# spellings (`reviewer` in backticks, bionic:reviewer, a reviewer row of a roster table); the plain English word
+# for whoever reads a change is not the role and is not looked for. Each absence sits beside a positive on the
+# same extractor: the doctored copy of the dispatch paragraph is caught.
+T20_SURFACES="$(ls "${SKILL_DIR}"/SKILL.md "${SKILL_DIR}"/dispatch.md "${SKILL_DIR}"/steps/*.md "${REPO}"/agents/*.md "${REPO}/payload/commands/help.md" "${REPO}/README.md" 2>/dev/null)"
+t20_role_hits() {  # <file>… -> `<file>:<spelling>` for each spelling of the retired role found
+  local f
+  for f in "$@"; do
+    _flatten "$f" | /usr/bin/grep -oE '`reviewer`|bionic:reviewer|\| `reviewer` \|' | sed "s|^|${f#"$REPO"/}:|"
+  done
+}
+expect_nonempty "T20-1 precondition: the surfaces are found" "$T20_SURFACES"
+# shellcheck disable=SC2086
+expect_eq "T20-1: no skill, step, role, help or README surface lists the reviewer as a role" "" "$(t20_role_hits $T20_SURFACES)"
+T20_DOC="$(w26_doctor "${SKILL_DIR}/dispatch.md" '`auditor`, `critic` and `reviewer` for the readings the rigor deals')"
+expect_nonempty "T20-1m: a dispatch.md that lists the reviewer again is caught" "$(t20_role_hits "$T20_DOC")"
+T20_ORCH="$(cat "${REPO}/agents-src/blocks/orchestrator-dispatch.md")"
+expect_contains "T20-2: the dispatch block names the auditor and the critic for the readings" '`auditor` and `critic` for the readings the rigor deals' "$T20_ORCH"
+expect_absent "T20-2b: …and not a third" 'and `reviewer`' "$T20_ORCH"
+# T20-3 (AC-1.6): the exam README deals no question to the reviewer: the next sitting's dealing is the auditor on
+# `evidence` and the critic on `adversarial` and `structure`. Sentences about past sittings may still name the role.
+T20_EXAM="$(_flatten "${REPO}/tests/reader-exam/README.md")"
+expect_contains "T20-3: the exam README deals evidence to the auditor and adversarial and structure to the critic" \
+  'the auditor for `evidence`, the critic for `adversarial` and `structure`' "$T20_EXAM"
+for _t20x in 'the reviewer for `structure`' '`structure` for the reviewer' 'the auditor, the critic, the reviewer' 'critic and `bionic:reviewer`'; do
+  expect_absent "T20-3: …and no longer says '${_t20x}'" "$_t20x" "$T20_EXAM"
+done
 
 
 section "§W28-46 (wave-28 T14; REQ-4 AC-4.6, D18): no number blocks — no hook and no wall library reads the report or the gate's request times"
@@ -6987,7 +7021,7 @@ W30T_OLD_RE='`(low|medium|high)`|(low|medium|high) rigor|(tested|peer-reviewed|a
 for _w30o in "$SKILL_MD" "$STEP0_MD" "$STEP6_MD" "$W30T_CRITIC" "$W30T_AUDITOR"; do
   expect_eq "P3-8: AC-1.4 — no old level word in ${_w30o#"$REPO"/}" "" "$(_flatten "$_w30o" | /usr/bin/grep -oE "$W30T_OLD_RE" | sort -u | tr '\n' ' ')"
 done
-expect_nonempty "P3-8 precondition: the same extractor finds a level word in a doctored copy" "$(_flatten "$(w26_doctor "$SKILL_MD" 'At `high` rigor the reviewer holds structure.')" | /usr/bin/grep -oE "$W30T_OLD_RE")"
+expect_nonempty "P3-8 precondition: the same extractor finds a level word in a doctored copy" "$(_flatten "$(w26_doctor "$SKILL_MD" 'At `high` rigor the critic holds structure.')" | /usr/bin/grep -oE "$W30T_OLD_RE")"
 
 # --- §DEBT-LEDGER (AC-11.2; P2, P3) ---
 W30T_OPS_SEC="$(awk '/^## Debt ledger$/ { on = 1; next } /^## / { on = 0 } on' "$OPRULES" 2>/dev/null)"
