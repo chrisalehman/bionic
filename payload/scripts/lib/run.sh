@@ -945,3 +945,84 @@ rigor_print() {
     *)      return 1 ;;
   esac
 }
+
+# ─── WHAT REVIEW MAY DO UNASKED (wave-30 T21; REQ-10 AC-10.1, REQ-1, D4, Δ3) ─────────────────────
+#
+# THREE HEADER FIELDS THE USER OWNS, written by Step 0 beside `rigor:`. Their vocabulary and their
+# per-level defaults are held HERE, once, beside `rigor_level`, because the defaults are the
+# level's; the plan-write hook (the closed sets), the poker's `task-add --born` (the policy and the
+# cap) and the landing line (the cap) all call these:
+#
+#   review-cadence:  once                                       both levels
+#   fix-policy:      a comma-joined set over FIX_POLICY_VOCAB    S1,S2-on at both levels
+#   fix-cap:         a whole number, or <n>% of the ## Tasks rows  2 at single, 10% at double
+#
+# A plan with `rigor:` and none of the three is read with these defaults and never refused for
+# them. The field is read verbatim and never widened: `S1` names both reaches, `S1-on` one; an
+# agent has no verb that writes the field.
+#
+# review_cadence_level <word>  -> `once`; nothing and rc 1 for any other word.
+# fix_policy_bad <set>         -> nothing, rc 0, when every comma-joined word (blanks around a comma
+#                                 trimmed) is in the vocabulary and there is at least one; else rc 1,
+#                                 printing the first word outside it (empty for an empty word or set).
+# fix_policy_covers <set> <S<n>> <on|off> -> rc 0 when the set names the severity whole or at that reach.
+# fix_cap_default <level>      -> `2` at single, `10%` at double; rc 1 for no level.
+# fix_cap_render <field> <level> <rows> -> the cap as a number: the field's number, or its percent of
+#                                 <rows> rounded up; the level's default when the field is empty.
+#                                 Nothing and rc 1 for a field that is no count, or no field and no level.
+REVIEW_CADENCE_DEFAULT="once"
+FIX_POLICY_VOCAB="S1 S1-on S1-off S2 S2-on S2-off S3 S4"
+FIX_POLICY_DEFAULT="S1,S2-on"
+
+review_cadence_level() {
+  case "${1:-}" in
+    once) echo once ;;
+    *)    return 1 ;;
+  esac
+}
+
+fix_policy_bad() {
+  local set="${1:-}" w rest
+  case "$set" in *[![:space:]]*) : ;; *) echo ""; return 1 ;; esac
+  rest="$set,"
+  while [ -n "$rest" ]; do
+    w="${rest%%,*}"; rest="${rest#*,}"
+    w="${w#"${w%%[![:space:]]*}"}"; w="${w%"${w##*[![:space:]]}"}"
+    case " $FIX_POLICY_VOCAB " in
+      *" $w "*) [ -n "$w" ] && continue ;;
+    esac
+    printf '%s\n' "$w"; return 1
+  done
+  return 0
+}
+
+fix_policy_covers() {
+  local set="${1:-}" sev="${2:-}" reach="${3:-}" w rest
+  fix_policy_bad "$set" >/dev/null || return 1
+  rest="$set,"
+  while [ -n "$rest" ]; do
+    w="${rest%%,*}"; rest="${rest#*,}"
+    w="${w#"${w%%[![:space:]]*}"}"; w="${w%"${w##*[![:space:]]}"}"
+    [ "$w" = "$sev" ] || [ "$w" = "$sev-$reach" ] && return 0
+  done
+  return 1
+}
+
+fix_cap_default() {
+  case "$(rigor_level "${1:-}")" in
+    single) echo 2 ;;
+    double) echo 10% ;;
+    *)      return 1 ;;
+  esac
+}
+
+fix_cap_render() {
+  local field="${1:-}" level="${2:-}" rows="${3:-0}" n
+  [ -n "$field" ] || field="$(fix_cap_default "$level")" || return 1
+  case "$rows" in ''|*[!0-9]*) rows=0 ;; esac
+  case "$field" in
+    *[!0-9%]*|''|%*|*%?*) return 1 ;;
+    *%) n="${field%\%}"; echo $(( (10#$n * 10#$rows + 99) / 100 )) ;;
+    *)  echo $(( 10#$field )) ;;
+  esac
+}
