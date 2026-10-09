@@ -1499,7 +1499,9 @@ _units_sched_awk() {
 # each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
 # review|task|check>` (`check` wave-27 T16), `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
 # path; on a review row, `live:head:<q>[+<q>]` too, each question one of lib/proof.sh
-# PROOF_QUESTIONS (wave-27 T10; D4).
+# PROOF_QUESTIONS (wave-27 T10; D4). And an open verify or test row whose written cell holds no
+# bare `head` is refused, naming the row and the token (wave-30 T13; AC-4.3, D7): the default
+# `approval:plan, head` is the structural readiness of a full run, and the cell may not drop it.
 #
 # NO ORDERING RULE (wave-26 T2; D2). Through 1.10 a Step-N row with N ≥ 5 had to depend,
 # transitively, on every Step-4 row, and a mid-run build row re-barriered every later row
@@ -1667,7 +1669,7 @@ units_validate() {
           # A READ NAMES SOMETHING (wave-26 T2; D1): a path in the Files grammar, a named
           # artifact, `ext:<slug>`, or `live:` before an artifact or a path. A token naming
           # none of them is refused here, and the readiness program never reads it satisfied.
-          ap = 0
+          ap = 0; hh = 0
           r = rd[i]
           if (hasreads && r ~ /[A-Za-z0-9]/) {
             m = split(r, a, ",")
@@ -1675,6 +1677,7 @@ units_validate() {
               gsub(/^[ \t]+|[ \t]+$/, "", a[j])
               if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
               t = a[j]
+              if (t == "head") hh = 1
               if (t ~ extre) continue
               # A READ ROW NAMES ITS QUESTIONS (wave-27 T10; D4): `live:head:<q>[+<q>]`, each one
               # of lib/proof.sh PROOF_QUESTIONS, on a review row and nowhere else.
@@ -1694,6 +1697,18 @@ units_validate() {
                 continue
               }
               printf "%s: read %s names no artifact\n", id[i], a[j]
+            }
+            # A VERIFY OR TEST ROW READS head (wave-30 T13; REQ-4 AC-4.3; D7, Delta-6a). Its kind default,
+            # approval:plan, head, waits on every open row that writes code, so a full run is never
+            # ready beside an open build; wave-28 overrode the cell with a record path and ran it
+            # early. A cell that is written and holds no bare head is refused, naming the row and the
+            # token. live:head is not head: it waits on no open writer. An empty cell takes the
+            # default; a doc row is not held (its Files are not code); and only an OPEN row, since a
+            # landed or dropped one schedules nothing and a plan carrying one must still commit
+            # (A-T13.1).
+            if ((knd[i] == "verify" || knd[i] == "test") && !hh && (sta[i] == "pending" || sta[i] == "active")) {
+              rc0 = r; gsub(/^[ \t]+|[ \t]+$/, "", rc0)
+              printf "%s: reads %s drops head; a %s row must read head (its default approval:plan, head waits on every open row that writes code)\n", id[i], rc0, knd[i]
             }
           }
 
