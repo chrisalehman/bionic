@@ -297,7 +297,7 @@ ALTS
 # exam_record_paths <file> — the lines of <file> that spell a reader's record path: a path
 # under `docs/record/`, or a `<label>-<role>-<question>.md` name.
 exam_record_paths() {
-  grep -E 'docs/record/|-(auditor|critic|reviewer|one-mind)-(evidence|adversarial|structure)\.md' "$1"
+  grep -E 'docs/record/|-(auditor|critic|one-mind)-(evidence|adversarial|structure)\.md' "$1"
 }
 
 # exam_named_path <file> <root> — the first record-path line of <file> that holds the name of
@@ -463,7 +463,7 @@ sed 's/^result clean evidence auditor pass met/result clean evidence auditor fai
 pin_call "$TMP/clean-fail.md" "$ROOT"
 expect_contains "P9: a met fail on clean is red" "reads met, and clean's key says pass" "$PIN_OUT"
 
-{ cat "$TMP/right.md"; printf 'result no-such-sample structure reviewer fail met h\n'; } > "$TMP/ghost.md"
+{ cat "$TMP/right.md"; printf 'result no-such-sample structure critic fail met h\n'; } > "$TMP/ghost.md"
 pin_call "$TMP/ghost.md" "$ROOT"
 expect_eq "P10: a result line for a sample that does not exist is red and names it" \
   "red: the latest sitting has a result line for no-such-sample, and no such sample is under $ROOT" "$PIN_OUT"
@@ -481,12 +481,12 @@ expect_status "P11: rc 1" 1 "$PIN_RC"
 { cat "$TMP/right.md"; sed 's/^## 2026-10-05/## 2026-10-06 — sat again after an edit/' "$TMP/right.md"; } > "$TMP/titled.md"
 pin_call "$TMP/titled.md" "$ROOT"
 expect_eq "P12: a sitting header with its title after the date is a header" "pinned" "$PIN_OUT"
-{ cat "$TMP/unsat.md"; printf '##2026-10-06\n\nresult clean evidence reviewer pass met h\n'; } > "$TMP/malformed-fill.md"
+{ cat "$TMP/unsat.md"; printf '##2026-10-06\n\nresult clean evidence auditor pass met h\n'; } > "$TMP/malformed-fill.md"
 pin_call "$TMP/malformed-fill.md" "$ROOT"
 expect_contains "P12: a block under a malformed header belongs to no sitting and is red" \
   "red: line $(grep -n '^##2026' "$TMP/malformed-fill.md" | cut -d: -f1), '##2026-10-06', is not a sitting header" "$PIN_OUT"
 expect_status "P12: rc 1" 1 "$PIN_RC"
-{ cat "$TMP/right.md"; printf '## 2026-1-6 sat again\n\nresult clean evidence reviewer pass met h\n'; } > "$TMP/malformed-date.md"
+{ cat "$TMP/right.md"; printf '## 2026-1-6 sat again\n\nresult clean evidence auditor pass met h\n'; } > "$TMP/malformed-date.md"
 pin_call "$TMP/malformed-date.md" "$ROOT"
 expect_contains "P12: a header whose date is not YYYY-MM-DD is red" "'## 2026-1-6 sat again', is not a sitting header" "$PIN_OUT"
 
@@ -532,12 +532,12 @@ pin_call "$TMP/clean-one-mind-q.md" "$ROOT"
 expect_eq "P16: a clean sample whose one-mind critic left a question off is red, naming the question" \
   "red: the latest sitting has no line for clean from the one-mind on adversarial" "$PIN_OUT"
 
-# A role field is one of auditor, critic, reviewer or one-mind, and a dealt role is on the
+# A role field is one of auditor, critic or one-mind (the reviewer is retired, wave-30 T20), and a dealt role is on the
 # question it is dealt: a line from any other role, or from a role on a question that is not its
 # own, is red. A line from the one-mind critic is on any keyed question.
 { cat "$TMP/right.md"; printf 'result dup-counter structure nobody fail met h\n'; } > "$TMP/stray-role.md"
 pin_call "$TMP/stray-role.md" "$ROOT"
-expect_eq "P17: a line whose role is outside auditor, critic, reviewer and one-mind is red and names the line" \
+expect_eq "P17: a line whose role is outside auditor, critic and one-mind is red and names the line" \
   "red: the latest sitting's line 'result dup-counter structure nobody fail met h' is from a role that is neither the critic dealt structure nor one-mind" "$PIN_OUT"
 expect_status "P17: rc 1" 1 "$PIN_RC"
 { cat "$TMP/right.md"; printf 'result dup-counter structure auditor fail met h\n'; } > "$TMP/mismatch-role.md"
@@ -613,10 +613,10 @@ cp "$TMP/adv.orig" "$ROOT/payload/context/checks-adversarial.md"
 pin_call "$TMP/stale-ok.md" "$ROOT"
 expect_eq "P21: the checks file put back, the stale sitting is pinned again by its mark" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
 # a marked sitting is history: a result line for a sample since retired does not turn it red
-{ cat "$TMP/stale-ok.md"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-retired.md"
+{ cat "$TMP/stale-ok.md"; printf 'result retired-sample structure critic fail met exam-sitting.md#retired\n'; } > "$TMP/stale-retired.md"
 pin_call "$TMP/stale-retired.md" "$ROOT"
 expect_eq "P22: a stale sitting's result line for a retired sample stays as history, pinned" "pinned (stale: the re-sit is owed)" "$PIN_OUT"
-{ sitting_block 2026-10-05; stale_line "$SL_S"; printf 'result retired-sample structure reviewer fail met exam-sitting.md#retired\n'; } > "$TMP/stale-nodrift.md"
+{ sitting_block 2026-10-05; stale_line "$SL_S"; printf 'result retired-sample structure critic fail met exam-sitting.md#retired\n'; } > "$TMP/stale-nodrift.md"
 pin_call "$TMP/stale-nodrift.md" "$ROOT"
 expect_contains "P22: …while a sitting whose hashes all match is read whole, whatever its stale: line says" \
   "red: the latest sitting has a result line for retired-sample" "$PIN_OUT"
@@ -1288,13 +1288,13 @@ expect_false "R5: …and nothing is written" test -e "$RV/out2.json"
 # gen-prompt.sh: a prompt for made-up briefs. Its words are the instruction's own; what a brief
 # says is the brief's.
 printf 'subagent_type: bionic:critic\nQuestions: structure\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-critic-structure.md\n\nRead /tmp/q/s1 over a..b.\n' > "$RV/brief-1.txt"
-printf 'subagent_type: bionic:reviewer\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-reviewer-evidence.md\nno final newline' > "$RV/brief-2.txt"
+printf 'subagent_type: bionic:auditor\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-auditor-evidence.md\nno final newline' > "$RV/brief-2.txt"
 PLUGIN="$RV/plugin" bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" > "$RV/prompt-1.txt"; rc=$?
 P="$(cat "$RV/prompt-1.txt")"
 expect_status "R7: gen-prompt.sh writes a prompt for two briefs" 0 "$rc"
 expect_eq "R7: the prompt opens with /bionic:canonical-sdlc" "/bionic:canonical-sdlc" "$(head -n 1 "$RV/prompt-1.txt" | cut -d ' ' -f 1)"
 expect_contains "R7: each brief goes to the agent type its first line names" "=== Brief 1 — subagent_type: bionic:critic ===" "$P"
-expect_contains "R7: …the second to its own" "=== Brief 2 — subagent_type: bionic:reviewer ===" "$P"
+expect_contains "R7: …the second to its own" "=== Brief 2 — subagent_type: bionic:auditor ===" "$P"
 # read_block <plugin copy> <question>... — the lines gen-prompt.sh ends a brief with (wave-28 T18,
 # D22): the files the recorder pushes a reader, by path in the plugin copy and never pasted: its
 # checks file for each question it is dealt, in the order evidence, adversarial, structure, then the
