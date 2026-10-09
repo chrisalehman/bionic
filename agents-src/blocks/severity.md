@@ -39,3 +39,13 @@ by severity.
 - Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it
   in `record/<run>/debt.md` at the sitting, and the next row whose Files touch the concept burns
   it inside its own work.
+
+Only readers rate: a finding's severity and reach are written by the reader that found it, and no
+agent, the orchestrator included, moves a rating in either direction; a user's re-rating is
+recorded with attribution.
+
+Three stop rules bound what a finding becomes:
+
+- In-diff only: a finding in code the run did not change is a next-wave item unless it is S1.
+- Three fixes on one component stop the run.
+- A fix row is never re-read by a fresh pass.
