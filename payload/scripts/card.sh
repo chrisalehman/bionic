@@ -1501,6 +1501,11 @@ _card_disposals() {  # <requirements file> -> `<adopted|again|closed>\t<id>\t<li
 # _card_inherited <requirements file> -> one `<open|adopted|again|closed>\t<deferred line>` per line of
 # the predecessor's `## Deferrals`, in its order and as written, then one `unknown\t<disposal line>`
 # per disposal naming none of them. The first disposal of an id is the one that counts.
+#
+# A CARRIED DEBT LINE (wave-30 T32; REQ-11 AC-11.2) is read beside them: `debt: <concept> <kind> "<sites>"
+# touches=<N> raised-by=<record> from=<wave>`, close-out's co_debts form, prints `open\t<line>`, so the
+# Step 1 card lists it. One that does not parse prints `unknown\t<line>`. No disposal reaches it: it names
+# no id, and it is faced by `session-poker.sh debt adopt`, which writes it into the run's ledger.
 _card_inherited() {
   local root cont slug
   root="$(_card_plan_root "$1")"
@@ -1524,6 +1529,9 @@ _card_inherited() {
       split($0, f, /[ \t]+/); seen[f[2]] = 1
       print ((f[2] in kind) ? kind[f[2]] : "open") "\t" $0
     }
+    s && /^debt:[ \t]/ {
+      print (($0 ~ /^debt:[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]+"[^"]*"[ \t]+touches=[0-9]+[ \t]+raised-by=[^ \t]+[ \t]+from=[^ \t]+[ \t]*$/) ? "open" : "unknown") "\t" $0
+    }
     END { for (i = 1; i <= m; i++) if (!(ord[i] in seen)) print "unknown\t" said[ord[i]] }' "$cont"
 }
 
@@ -1534,11 +1542,21 @@ _card_inherit_refuse() {  # <the disposal line>
   exit 2
 }
 
+_card_debt_refuse() {  # <the debt line>
+  printf 'card.sh: step1 refused — the newest continuation carries a debt: line that does not parse\n  %s\n' \
+    "$1" >&2
+  exit 2
+}
+
 _card_step1() {  # <citation path> <artifact path as given>
   local inh l
   inh="$(_card_inherited "$2")"
   l="$(printf '%s\n' "$inh" | sed -n "s/^unknown${CARD_TAB}//p" | head -1)"
-  [ -z "$l" ] || _card_inherit_refuse "$l"
+  case "$l" in
+    '') ;;
+    debt:*) _card_debt_refuse "$l" ;;
+    *) _card_inherit_refuse "$l" ;;
+  esac
   printf 'Step 1 · Requirements\n\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
   printf '\n'
@@ -1882,7 +1900,9 @@ case "$1" in
     # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that
     # names no file disposes of nothing; its name still says whose run it is.
     [ "$#" -eq 2 ] || _card_usage "inherited takes exactly one requirements file path (got $(( $# - 1 )))"
-    _card_inherited "$2" | /usr/bin/grep -v "^unknown${CARD_TAB}"
+    # The carry of a debt is the ledger's (close-out's co_debts), so a debt line read from here would be
+    # carried twice: the card lists it, this reading withholds it (A-T32.2).
+    _card_inherited "$2" | /usr/bin/grep -v -e "^unknown${CARD_TAB}" -e "^open${CARD_TAB}debt: "
     exit 0 ;;
   step1|step2|step3)
     if [ "$1" = step2 ]; then

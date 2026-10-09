@@ -727,6 +727,30 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
 }
 
 _line_owed() { printf 'landed %s %s — owed: complete task %s, then stop %s\n' "$1" "$2" "$1" "$3"; }   # <row> <commit> <name>
+# THE ROW'S DEBT (wave-30 T22; D2, P2, AC-11.3): `debt: burned <N>, touched <M>` for <row>, when the run
+# keeps a debt ledger (lib/proof.sh `proof_debt_row_counts`): N the items whose last cell says `burned
+# <row>`, M the items one of whose sites the row's `Files` cell covers. Printed between LANDED and the
+# owed line, so the owed line stays the last line of ready's output. Nothing when there is no ledger.
+_line_debt() {  # <plan> <row>
+  local root led cell="" rec
+  if ! declare -F proof_debt_row_counts >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
+    declare -F proof_debt_row_counts >/dev/null 2>&1 || return 0
+  fi
+  root="$(_line_root "${1:-}")" || return 0
+  led="$(proof_debt_ledger_path "$root" "$1")" && [ -f "$led" ] || return 0
+  _wt_units_load || return 0
+  while IFS= read -r rec; do
+    [ "$(units_field "$rec" id)" = "$2" ] || continue
+    cell="$(units_field "$rec" Files)"; break
+  done <<LINE_DEBT_ROWS
+$(units_rows "$1" 2>/dev/null)
+LINE_DEBT_ROWS
+  # shellcheck disable=SC2046
+  set -- $(proof_debt_row_counts "$led" "$2" "$cell")
+  printf 'debt: burned %s, touched %s\n' "${1:-0}" "${2:-0}"
+}
 _line_waiting() { printf 'WAITING %s — run again: %s\n' "$1" "$2"; }   # <row> <the same command>
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 
@@ -748,7 +772,7 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
     all="$(_line_entries "$rec" "$head")"
     first="$(printf '%s\n' "$all" | awk -F'\t' '$4 == "yes" && $7 != "stalled" { print $1; exit }')"
     ent="$(printf '%s\n' "$all" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')"
-    [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name"; return $?; }
+    [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name" "$plan"; return $?; }
     IFS=$'\t' read -r _ _ _ _ base cand _ _ _ cbase _ _ _ <<EOF
 $ent
 EOF
@@ -838,7 +862,7 @@ EOF
     said="$(line_publish "$plan" "$row" 2>&1)"; rc=$?
     case $rc in
       0) [ -z "$said" ] || printf '%s\n' "$said"
-         printf 'LANDED %s %s\n' "$row" "$cand"; _line_owed "$row" "$cand" "$name"; return 0 ;;
+         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_owed "$row" "$cand" "$name"; return 0 ;;
       3|75) : ;;
       4) [ -n "$held" ] || printf '%s\n' "$said"; held=1 ;;
       6) c="$(_wt_bionic_committed "$root" "$head" "$cand")"; c="${c%/}"
@@ -860,13 +884,13 @@ _line_ahead_open() {  # <entries> <row> <candidate>
 
 # The entry left the fold while its carrier ran: a person's own git merge carried it (published
 # kind=git), or something else closed it.
-_line_closed() {  # <rec> <row> <name>
+_line_closed() {  # <rec> <row> <name> [<plan>]
   local last
   last="$(awk -F'|' -v r="row=$2" '$3 == r && ($2 == "ev=published" || $2 == "ev=returned") { l = $0 } END { print l }' "$1" 2>/dev/null)"
   case "$last" in
     *'|ev=published|'*)
       last="${last#*|commit=}"; last="${last%%|*}"
-      printf 'LANDED %s %s\n' "$2" "$last"; _line_owed "$2" "$last" "$3"; return 0 ;;
+      printf 'LANDED %s %s\n' "$2" "$last"; [ -z "${4:-}" ] || _line_debt "$4" "$2"; _line_owed "$2" "$last" "$3"; return 0 ;;
   esac
   printf '%s\n' "${last:-RETURNED ${2}}"; return 1
 }
