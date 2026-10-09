@@ -1391,13 +1391,13 @@ for _s47 in T2 T3 T4 T5 T6; do
 done
 expect_absent "47g2 …and the active row is on neither (it is not pending)" "WAIT T1 " "$(s47_lines WAIT)"
 expect_absent "47h the bulk sentence is gone" "none has all its dependencies landed" "$OUT"
-expect_eq "47i AC-6.6 the CHAIN line is the fixture's longest chain, by hand: 30 + 20 + 60" \
-  "poker: CHAIN T1→T2→T6 (110 min)" "$(s47_lines CHAIN)"
+expect_eq "47i AC-6.6 the CHAIN line is the fixture's longest chain, by hand: 30 + 20 + 60; its split candidate T2 (wave-30 T16, AC-12.4: T6 waits on it, 1 × 20 min × 1 file; T6 writes no code)" \
+  "poker: CHAIN T1→T2→T6 (110 min) · SPLIT? T2 — 20 min, 1 files, 1 rows wait on it" "$(s47_lines CHAIN)"
 # THE DIFFERENTIAL: land T1 and the chain moves to the next heaviest path, so 47i reads the
 # graph and not a constant.
 sed -i.bak 's/| payload\/x.sh | active |/| payload\/x.sh | landed |/' "$R47/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 poke_pressure "$R47" 8192 1.0 tick
-expect_eq "47j with T1 landed the chain is T5 → T6 (40 + 60)" "poker: CHAIN T5→T6 (100 min)" "$(s47_lines CHAIN)"
+expect_eq "47j with T1 landed the chain is T5 → T6 (40 + 60), its candidate T5" "poker: CHAIN T5→T6 (100 min) · SPLIT? T5 — 40 min, 1 files, 1 rows wait on it" "$(s47_lines CHAIN)"
 expect_contains "47j2 …and T2, its read now landed, is filled beside T5" "poker: FILL T2 T5" "$OUT"
 
 # ============================================================
@@ -1455,14 +1455,15 @@ R47A="$(make_repo s46-approve)"; ( cd "$R47A" && git commit -q --allow-empty -m 
 git -C "$R47A" config user.name "Dana Fixture"
 P47A="$(s42_plan "$R47A" 4)"
 # A READS TABLE (wave-26 T46; review 10 F6): approve records only a name some row reads, so the
-# fixture's open rows read two — T5 `approval:release`, the active T2 `live:approval:ship`; the
+# fixture's open rows read two — T5 `approval:release` (beside head: a verify row may not drop it,
+# wave-30 T13, AC-4.3), the active T2 `live:approval:ship`; the
 # landed T1 reads `live:approval:landedonly`, which satisfies nothing (wave-26 T52; review 14 N4).
 awk '
   /^\| id \| step \|/ { print $0 " reads |"; next }
   /^\|---\|/ { print $0 "---|"; next }
   /^\| T1 \|/ { print $0 " live:approval:landedonly |"; next }
   /^\| T2 \|/ { print $0 " live:approval:ship |"; next }
-  /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
+  /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release, head |"; next }
   /^\| T[0-9]+ \|/ { print $0 "  |"; next }
   { print }' "$P47A" > "$P47A.tmp" && mv "$P47A.tmp" "$P47A"
 s42_snap "$R47A" "$P47A"
@@ -1622,22 +1623,25 @@ expect_eq "46b2 …one line added" "1 0;" "$(s42_numstat "$R46")"
 expect_contains "46b3 …naming the evidence under record/" \
   "proved: kind=review head=${W46_HEAD2} " "$(s46_proved "$P46")"
 expect_contains "46b4 …docs-root relative" "evidence=record/wave-01-fixture/review.md" "$(s46_proved "$P46" | tail -1)"
-# REVIEW 7 F1: THE SAME FLOOR LOG AFTER A LANDING PROVES NOTHING NEW. The log read W46_HEAD; the
-# branch has moved to W46_HEAD2 with no run, so re-citing it is refused and the floor proof
-# stays at the head the run read. A log of a run at W46_HEAD2 proves W46_HEAD2.
+# THE PROOF IS A FACT ABOUT CODE (wave-30 T13; AC-4.4, D7b; it reverses review 7 F1's refusal here).
+# The log read W46_HEAD; the branch has moved to W46_HEAD2 by a commit that changes no file, so the
+# change since is the empty change, bounded with nothing owed, and the run still stands for the
+# head: proof-add accepts it, and the proof names W46_HEAD, the head the run read. A change the map
+# cannot bound is still refused, naming why (session-poker-3 Section 72). A log of a run at
+# W46_HEAD2 proves W46_HEAD2.
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
-s42_unchanged "46b5 F1 the floor log of the old head, after a landing" 1 "$P46"
-expect_contains "46b5b …naming both heads and the fix" \
-  "read head ${W46_HEAD:0:12}, but the working branch is at ${W46_HEAD2:0:12}; run it again on ${W46_HEAD2:0:12}" "$OUT"
-expect_eq "46b6 F1 proof_last floor still reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
+expect_eq "46b5 the floor log of an ancestor head, after a landing that changed no file, is accepted (exit 0)" "0" "$RC"
+expect_eq "46b5 …and one line is added" "1 0;" "$(s42_numstat "$R46")"
+expect_contains "46b5b …naming the head the run read, not the working head" "proof-add — kind=floor head=${W46_HEAD} " "$OUT"
+expect_eq "46b6 proof_last floor reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
 expect_eq "46b6c …and proof_last floor reads the new head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
 expect_eq "46b7 …and the review head is its own, resolved from the review's reviewed: line" "$W46_HEAD2" "$(s46_last "$P46" review)"
-expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor" \
+expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor floor" \
   "$(s46_proved "$P46" | sed -E 's/^proved: kind=([a-z]+) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 
 # ---------- F1: what the evidence must attest, each refusal naming its fix ----------
@@ -2489,11 +2493,21 @@ s54_tick
 expect_contains "54b5 …and the tick offers the merge" "poker: FILL T3" "$OUT"
 
 # ---------- AC-3.3 still holds: a bounded change after a full pass is proved by its suites ----------
+# FROM wave-30 T13 (AC-4.4, D7c) "proved by its suites" is a fact: each suite the map names must
+# have a green run stamped at the working head, never bounded taken on no evidence. The landing ran
+# no suite, so integrate waits naming them; the real shim runs them in the working checkout.
 s54_land T8 lib/one.sh 'one, changed'
 expect_contains "54c0 precondition: the bounded change LANDED" "spawn-worktree: LANDED branch=wt/01-T8" "$S54_LAND"
+S54_W2="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
-expect_contains "54c AC-3.3 a change the map bounds leaves the pass standing: the merge is offered" "poker: FILL T3" "$OUT"
-expect_eq "54c2 …with no WAIT line for it" "" "$(s54_wait)"
+expect_contains "54c AC-4.4 a change the map bounds, no suite run at the head: integrate WAITS naming the suites" \
+  "proof:review: the facts the run owes do not hold (facts_state): floor: no green run at ${S54_W2:0:12} for a.test.sh b.test.sh" "$(s54_wait)"
+for s54s in a b; do
+  ( cd "$S54_WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
+      bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$s54s.test.sh" -- "bash tests/$s54s.test.sh" ) >/dev/null 2>&1
+done
+s54_tick
+expect_contains "54c2 AC-3.3 …with a and b green at the head (the real shim's stamps), the pass stands: the merge is offered" "poker: FILL T3" "$OUT"
 
 # ---------- a change the map answers with every suite ----------
 s54_land T9 lib/every.sh 'every, changed'
@@ -2886,5 +2900,166 @@ poke "$R56R" tick
 expect_regex "56z5 nothing new: the tick is the one unchanged line (wave-24 AC-4.9 kept)" \
   "^poker: unchanged since [0-9TZ:-]+ — decision=[A-Z]+\$" "$OUT"
 
+
+# ============================================================
+section "§SUSPECT: a dependency that shares no file is named at authoring and at the tick, never loosened (wave-30 T16; REQ-12 AC-12.2; D14a, Δ8)"
+# ============================================================
+#
+# ONE TEST, THREE PRINTERS (D14). lib/units.sh `units_suspect` names a row whose Files share no path
+# outside the record with a holder it reads, and that reads nothing of the holder's but its record.
+# `task-add` and `task-set` print its clause after their own line and keep the row; the tick's WAIT
+# line on such a holder carries the clause and the `task-set` line that would loosen it. Printed,
+# never run: a dependency may be runtime state or an order no file test sees.
+T16_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+T16_REC=".bionic/docs/record/wave-01-fixture"
+T16_HOOK="$(cd "$(dirname "$POKER")" && pwd)/session-poker.sh"   # the path the hook prints itself by (its HOOK_DIR)
+t16_rows() { /usr/bin/grep '^| T[0-9]' "$1"; }  # <plan> -> its task rows
+R16S="$(make_repo t16-suspect-tick)"; new_roster "$R16S"
+P16S="$(s47_plan "$R16S" 4 \
+  "| T1 | 4 | build | the holder | implementor | — | 30 | REQ-x | payload/a.sh, $T16_REC/T1.md | active | |" \
+  "| T2 | 4 | build | reads only the holder's record | implementor | — | 20 | REQ-x | payload/b.sh | pending | $T16_REC/T1.md |" \
+  "| T3 | 4 | build | reads the holder's code | implementor | — | 20 | REQ-x | payload/c.sh | pending | payload/a.sh |")"
+T16S_ROWS="$(t16_rows "$P16S")"
+poke_pressure "$R16S" 8192 1.0 tick
+expect_nonempty "16s1 precondition: the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
+T16S_W2="$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T2 ')"
+expect_contains "16s2 AC-12.2 the WAIT line on a suspect holder keeps its reason" \
+  "poker: WAIT T2 — reads $T16_REC/T1.md, written by T1 (active)" "$T16S_W2"
+expect_contains "16s3 …and carries the clause" " · suspect: T2 reads T1, shares no file — loosen it: bash " "$T16S_W2"
+expect_contains "16s4 …and the task-set line that loosens it, printed" "session-poker.sh task-set T2 reads=—" "$T16S_W2"
+expect_eq "16s4b …the whole line, verbatim" \
+  "poker: WAIT T2 — reads $T16_REC/T1.md, written by T1 (active) · suspect: T2 reads T1, shares no file — loosen it: bash $T16_HOOK task-set T2 reads=—" "$T16S_W2"
+T16S_W3="$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
+expect_contains "16s5 a row reading the holder's code waits as before" "poker: WAIT T3 — reads payload/a.sh, written by T1 (active)" "$T16S_W3"
+expect_absent "16s6 …with no suspect clause (beside 16s3, same tick)" "suspect:" "$T16S_W3"
+expect_eq "16s7 AC-12.2 the tick rewrote no declaration" "$T16S_ROWS" "$(t16_rows "$P16S")"
+# AT AUTHORING: §51's admitted reads-table plan, the real commit gate behind every verb.
+R16A="$(make_repo t16-suspect-add)"; ( cd "$R16A" && git commit -q --allow-empty -m init )
+P16A="$(s51_plan "$R16A")"
+poke "$R16A" task-add T6 4 build 'the holder' bionic:implementor '—' 30 REQ-5 "lib/c.sh, $T16_REC/T6.md" '—'
+expect_eq "16s8 precondition: the holder is added (exit 0)" "0" "$RC"
+expect_absent "16s8b …and, reading nothing, is suspect of nothing" "suspect:" "$OUT"
+poke "$R16A" task-add T7 4 build 'reads the holder record only' bionic:implementor '—' 20 REQ-5 'lib/d.sh' "$T16_REC/T6.md"
+expect_eq "16s9 AC-12.2 task-add accepts the suspect row (exit 0)" "0" "$RC"
+expect_contains "16s9b …prints its own line" "poker: task-add — T7 added to " "$OUT"
+expect_contains "16s9c …and then the clause" "poker: suspect: T7 reads T6, shares no file — loosen it: bash " "$OUT"
+expect_contains "16s9d …with the line that would loosen it" "session-poker.sh task-set T7 reads=—" "$OUT"
+expect_eq "16s9f …the clause line, verbatim" \
+  "poker: suspect: T7 reads T6, shares no file — loosen it: bash $T16_HOOK task-set T7 reads=—" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: suspect: ')"
+expect_contains "16s9e …and the row is written as declared, never loosened" \
+  "| T7 | 4 | build | reads the holder record only | bionic:implementor | — | 20 | REQ-5 | lib/d.sh | — | — | pending | $T16_REC/T6.md |" "$(cat "$P16A")"
+poke "$R16A" task-set T7 "reads=approval:plan, $T16_REC/T6.md"
+expect_eq "16s10 task-set on the suspect row exits 0" "0" "$RC"
+expect_contains "16s10b AC-12.2 …and prints the clause, with the cell less the holder's record" \
+  "session-poker.sh task-set T7 reads='approval:plan'" "$OUT"
+expect_contains "16s10c …after its own line" "poker: task-set — T7 reads=approval:plan, $T16_REC/T6.md: written to " "$OUT"
+poke "$R16A" task-set T7 'reads=lib/c.sh'
+expect_eq "16s11 task-set to a read of the holder's code exits 0" "0" "$RC"
+expect_contains "16s11b …prints its line" "poker: task-set — T7 reads=lib/c.sh" "$OUT"
+expect_absent "16s11c …and no clause (beside 16s10b, same row)" "suspect:" "$OUT"
+
+# ============================================================
+section "§SPLIT-CANDIDATE: the CHAIN line names the pending row to split, by fan-in × size × files (wave-30 T16; REQ-12 AC-12.4; D14d, Δ11)"
+# ============================================================
+#
+# The chain T1 (30) → T2 (20) → T3 (60) → T5 (10) = 120 min. Scores of its pending rows, by hand:
+# T2 = 2 rows wait (T3, T4) × 20 min × 2 files = 80; T3 = 1 (T5) × 60 × 1 = 60; T5 = 0. T1 is
+# active, so it is no candidate. T3 is the longest row and still loses to T2: the score, not the size.
+R16P="$(make_repo t16-split)"; new_roster "$R16P"
+t16_split_plan() {  # <repo> <T3's Files cell>
+  s47_plan "$1" 4 \
+    "| T1 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/a.sh | active | |" \
+    "| T2 | 4 | build | two files two readers | implementor | — | 20 | REQ-x | payload/b.sh, payload/b2.sh | pending | payload/a.sh |" \
+    "| T3 | 4 | build | the longest row | implementor | — | 60 | REQ-x | $2 | pending | payload/b.sh |" \
+    "| T4 | 4 | build | a side reader | implementor | — | 10 | REQ-x | payload/d.sh | pending | payload/b2.sh |" \
+    "| T5 | 4 | build | the chain's end | implementor | — | 10 | REQ-x | payload/e.sh | pending | payload/c.sh |"
+}
+P16P="$(t16_split_plan "$R16P" 'payload/c.sh')"
+T16P_ROWS="$(t16_rows "$P16P")"
+poke_pressure "$R16P" 8192 1.0 tick
+expect_nonempty "16p1 precondition: the tick prints a CHAIN line" "$(s47_lines CHAIN)"
+expect_eq "16p2 AC-12.4 the CHAIN line names the highest-scoring pending row with its three numbers" \
+  "poker: CHAIN T1→T2→T3→T5 (120 min) · SPLIT? T2 — 20 min, 2 files, 2 rows wait on it" "$(s47_lines CHAIN)"
+expect_eq "16p3 AC-12.4 the machine never splits: every row as written" "$T16P_ROWS" "$(t16_rows "$P16P")"
+# THE DIFFERENTIAL: a second file on T3 makes its score 1 × 60 × 2 = 120, above T2's 80. A fresh
+# repository: the same decision on the same repository is the one-line unchanged tick (§DIGEST).
+R16P2="$(make_repo t16-split-2)"; new_roster "$R16P2"
+t16_split_plan "$R16P2" 'payload/c.sh, payload/c2.sh' >/dev/null
+poke_pressure "$R16P2" 8192 1.0 tick
+expect_eq "16p4 with T3 at 120 the candidate moves to T3" \
+  "poker: CHAIN T1→T2→T3→T5 (120 min) · SPLIT? T3 — 60 min, 2 files, 1 rows wait on it" "$(s47_lines CHAIN)"
+# NOBODY WAITS ON THE CHAIN: a lone pending row scores 0, and a split of it frees no row.
+R16Q="$(make_repo t16-split-none)"; new_roster "$R16Q"
+s47_plan "$R16Q" 4 "| T1 | 4 | build | alone | implementor | — | 30 | REQ-x | payload/a.sh | pending | |" >/dev/null
+poke_pressure "$R16Q" 8192 1.0 tick
+expect_eq "16p5 a chain no row waits on prints its CHAIN line" "poker: CHAIN T1 (30 min)" "$(s47_lines CHAIN)"
+expect_absent "16p6 …with no candidate (beside 16p5, same line)" "SPLIT?" "$(s47_lines CHAIN)"
+
+# ============================================================
+section "§LIVE-READY: readiness is derived from the live table on every tick (wave-30 T16; REQ-12 AC-12.5; Δ8)"
+# ============================================================
+#
+# A row added by task-add after the first tick is FILLed on the next tick its reads are met: no
+# reading of the table outlives a tick. §51's plan: T1 landed (a.sh), T2 active (b.sh).
+R16L="$(make_repo t16-live)"; ( cd "$R16L" && git commit -q --allow-empty -m init ); new_roster "$R16L"
+P16L="$(s51_plan "$R16L")"
+poke_pressure "$R16L" 8192 1.0 tick
+expect_eq "16l1 precondition: the first tick exits 0" "0" "$RC"
+expect_absent "16l2 …and fills nothing: T5 waits for the head" "poker: FILL T" "$OUT"
+poke "$R16L" task-add T6 4 build 'reads what landed' bionic:implementor '—' 30 REQ-5 'lib/c.sh' 'a.sh'
+expect_eq "16l3 precondition: T6 is added after the first tick, reading a.sh, which T1 landed" "0" "$RC"
+poke "$R16L" task-add T7 4 build 'reads what is in flight' bionic:implementor '—' 30 REQ-5 'lib/d.sh' 'b.sh'
+expect_eq "16l4 precondition: T7 is added too, reading b.sh, which T2 has in flight" "0" "$RC"
+poke_pressure "$R16L" 8192 1.0 tick
+expect_contains "16l5 AC-12.5 the next tick fills the added row whose read is met" "poker: FILL T6" "$OUT"
+expect_contains "16l6 …and names the other on a WAIT line, its read unmet" "poker: WAIT T7 — reads b.sh, written by T2 (active)" "$OUT"
+sed -i.bak 's/| b.sh | 01-T2 | abc1234 | active |/| b.sh | 01-T2 | abc1234 | landed |/' "$P16L"
+expect_eq "16l7 precondition: T2 is landed in the table, by hand" "1" "$(/usr/bin/grep -c '| b.sh | 01-T2 | abc1234 | landed |' "$P16L")"
+poke_pressure "$R16L" 8192 1.0 tick
+expect_contains "16l8 AC-12.5 the tick after its read is met fills T7" "T7" "$(s47_lines FILL)"
+
+# ============================================================
+section "§DECLINE-ON: a decline names what it waits on (wave-30 T16; REQ-12 AC-12.7; Δ13)"
+# ============================================================
+#
+# 23.4% of wave-28's build wait-minutes were order holds written only in decline reasons. `decline
+# <ids> '<reason>' --on <row|file>` keeps the decline legal and makes the hold visible: with a row it
+# prints the task-set line that makes it a table fact, with a file the reconcile `ready` performs,
+# and with neither that the hold is unrecorded. The fill-ledger line gains `declined-on=`.
+R16D="$(make_repo t16-decline-on)"; new_roster "$R16D"
+P16D="$(s47_plan "$R16D" 4 \
+  "| T1 | 4 | build | the holder | implementor | — | 30 | REQ-x | payload/a.sh, $T16_REC/T1.md | pending | |" \
+  "| T2 | 4 | build | held behind T1 | implementor | — | 20 | REQ-x | payload/b.sh | pending | |" \
+  "| T3 | 4 | build | shares a file | implementor | — | 20 | REQ-x | payload/c.sh | pending | approval:plan |" \
+  "| T4 | 4 | build | held by hand | implementor | — | 20 | REQ-x | payload/d.sh | pending | |")"
+t16_led_last() { tail -n 1 "$R16D/$T16_REC/fill-ledger.log" 2>/dev/null; }
+t16_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'; }
+poke_pressure "$R16D" 8192 1.0 tick
+expect_contains "16d1 precondition: the tick fills the four ready rows" "poker: FILL T1 T2 T3 T4" "$OUT"
+poke "$R16D" decline T2 'T2 builds on what T1 writes' --on T1
+expect_eq "16d2 AC-12.7 a decline on a row is recorded (exit 0)" "0" "$RC"
+expect_contains "16d3 …and prints the task-set line that makes the hold a table fact" \
+  "session-poker.sh task-set T2 reads='approval:plan, $T16_REC/T1.md'" "$OUT"
+expect_eq "16d3b …the line, verbatim" \
+  "poker: decline — T2 waits on T1: make it a table fact the tick judges once: bash $T16_HOOK task-set T2 reads='approval:plan, $T16_REC/T1.md'" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: decline — T2 waits on ')"
+expect_nonempty "16d4 precondition: the ledger line is read back" "$(t16_led_last)"
+expect_eq "16d5 AC-12.7 the ledger line records declined-on= the row" "T1" "$(t16_field "$(t16_led_last)" declined-on)"
+expect_eq "16d5b …beside its reason" "T2 builds on what T1 writes" "$(t16_field "$(t16_led_last)" declined)"
+poke "$R16D" decline T3 'both touch payload/a.sh' --on payload/a.sh
+expect_eq "16d6 a decline on a file is recorded (exit 0)" "0" "$RC"
+expect_contains "16d7 …naming the reconcile ready performs" \
+  "\`ready\` reconciles payload/a.sh on the line: a CONFLICT returns the row to merge" "$OUT"
+expect_absent "16d7b …and printing no task-set line (beside 16d3)" "task-set" "$OUT"
+expect_eq "16d8 …declined-on= the file" "payload/a.sh" "$(t16_field "$(t16_led_last)" declined-on)"
+poke "$R16D" decline T4 'held by hand'
+expect_eq "16d9 a decline naming neither is never refused (exit 0)" "0" "$RC"
+expect_contains "16d10 …and says the hold is unrecorded as a dependency" \
+  "unrecorded as a dependency: this hold is a hand-hold the tick cannot judge" "$OUT"
+expect_eq "16d11 …declined-on=-" "-" "$(t16_field "$(t16_led_last)" declined-on)"
+poke "$R16D" decline T4 'held by hand' --on
+expect_eq "16d12 --on with no value is the usage error (exit 2)" "2" "$RC"
+POKE_BOUND="$T16_BOUND_WAS"
 
 finish

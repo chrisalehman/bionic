@@ -544,6 +544,194 @@ units_waiting() { _units_sched waiting "$@"; }
 # remains — the shape `units_chain` takes.
 units_edges() { _units_sched edges "${1:-}" ""; }
 
+# ── DEPENDENCY TRUTH (wave-30 T16; REQ-12, D14, Δ8 Δ11 Δ13) ─────────────────────
+#
+# A `reads`/`deps` declaration is written once, at `task-add`, and the tick schedules by it from
+# then on. Wave-28 held three build rows 354 minutes on declared reads whose landed diffs shared
+# no file with the holder's (record/wave-30-efficiency/research-waits-w28.md). The three verbs
+# below DOUBT a declaration and never change one: each prints, and the mind decides. Rejected:
+# loosening by machine — a dependency may be runtime state or an order no file test can see.
+
+# units_suspect <plan> [<id>] -> `<id><TAB><holder><TAB><clause><TAB><task-set line>`, one line per
+# suspect dependency, table order; for <id> alone when one is given. Nothing, exit 0, for a plan
+# with no table or no suspect.
+#
+# THE ONE SUSPECT TEST (D14a): `task-add` and `task-set` print its clause after their own line, and
+# the tick's WAIT line on such a holder carries the clause and the loosening line. A dependency of
+# row R on row D — a `deps` or `reads` token that is D's id, or a path token D's Files cover — is
+# SUSPECT when
+#   - R's Files and D's Files share no path outside the record (the record is where every row
+#     writes its own report, so sharing it says nothing about the code), and
+#   - R reads no path outside the record that D's Files cover (reading what D builds is real).
+# Judged only where both rows are open (a landed or dropped holder holds nothing) and R is of a
+# kind that writes: a verify, test, review, doc, integrate or close row reads records by nature.
+# The clause is `suspect: <R> reads <D>, shares no file`; the line is `task-set <R> reads=<the cell
+# less every token naming D>` (`deps=` for a deps token), the cell `—` when nothing is left, so the
+# row takes its kind's default.
+units_suspect() {
+  local plan="${1:-}" want="${2:-}" rows hasreads=0
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 0
+  [ -n "$rows" ] || return 0
+  units_has_column "$plan" reads && hasreads=1
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v hasreads="$hasreads" \
+    "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
+    { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (want != "" && id[i] != want) continue
+        if (!isopen(i) || knd[i] ~ /^(verify|test|review|doc|integrate|close)$/) continue
+        holders(i)
+        for (h = 1; h <= nh; h++) {
+          j = hj[h]
+          if (!isopen(j) || prod[j] || share(i, j)) continue
+          pr = ""
+          if (hasreads) { c = less(rd[i], j); if (c != rd[i]) pr = "reads=" cellq(c) }
+          c = less(dep[i], j); if (c != dep[i]) pr = pr (pr == "" ? "" : " ") "deps=" cellq(c)
+          printf "%s\t%s\tsuspect: %s reads %s, shares no file\ttask-set %s %s\n", id[i], id[j], id[i], id[j], id[i], pr
+        }
+      }
+    }'
+}
+
+# _units_dep_awk -> the awk functions the dependency verbs share, over the arrays id/knd/dep/fil/st/rd/at
+# the caller fills: `isopen(j)`; `tokens(cell)` into tk[1..ntk]; `paths(j)` into pe[1..npe], row j's Files
+# entries (a backtick, a leading ./ and a trailing ! dropped); `holders(i)`, the rows row i names, in
+# hj[1..nh], with prod[j] set when i reads a path outside the record that j writes; `share(i, j)`, a
+# Files path outside the record in both; `less(cell, j)`, the cell without the tokens that name j.
+_units_dep_awk() {
+  printf '%s' '
+    function isopen(j) { return (st[j] == "pending" || st[j] == "active") }
+    function dtrim(v) { gsub(/`/, "", v); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); sub(/^\.\//, "", v); return v }
+    function ispath(t) { return (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) }
+    function tokens(cell,   a, m, k, t) {
+      ntk = 0; m = split(cell, a, ",")
+      for (k = 1; k <= m; k++) { t = dtrim(a[k]); if (t ~ /[A-Za-z0-9]/) tk[++ntk] = t }
+    }
+    function paths(j,   a, m, k, e) {
+      npe = 0; m = split(fil[j], a, ",")
+      for (k = 1; k <= m; k++) {
+        e = dtrim(a[k]); if (substr(e, length(e)) == "!") e = substr(e, 1, length(e) - 1)
+        if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
+        pe[++npe] = e
+      }
+    }
+    function names(t, j,   k) {
+      if (t == id[j]) return 1
+      if (!ispath(t)) return 0
+      paths(j)
+      for (k = 1; k <= npe; k++) if (overlap(pe[k], t)) return 1
+      return 0
+    }
+    function holders(i,   c, k, t, j) {
+      nh = 0; split("", seen); split("", prod)
+      for (c = 1; c <= 2; c++) {
+        tokens(c == 1 ? rd[i] : dep[i])
+        for (k = 1; k <= ntk; k++) {
+          t = tk[k]
+          for (j = 1; j <= n; j++) {
+            if (j == i || !names(t, j)) continue
+            if (!(j in seen)) { seen[j] = 1; hj[++nh] = j }
+            if (ispath(t) && !in_docs(t)) prod[j] = 1
+          }
+        }
+      }
+    }
+    function share(i, j,   a, b, na, k, l) {
+      paths(i); na = npe; for (k = 1; k <= na; k++) a[k] = pe[k]
+      paths(j)
+      for (k = 1; k <= na; k++) {
+        if (in_docs(a[k])) continue
+        for (l = 1; l <= npe; l++) if (!in_docs(pe[l]) && overlap(a[k], pe[l])) return 1
+      }
+      return 0
+    }
+    function less(cell, j,   k, o, keep) {
+      tokens(cell); o = ""; keep = 0
+      for (k = 1; k <= ntk; k++) { if (names(tk[k], j)) continue; o = o (o == "" ? "" : ", ") tk[k] }
+      for (k = 1; k <= ntk; k++) if (names(tk[k], j)) keep = 1
+      return keep ? o : cell
+    }
+'
+}
+
+# units_split_candidate <plan> <id>[,<id>…] [<edges>] -> `<id><TAB><size><TAB><files><TAB><k>` for the pending
+# row of that chain with the highest fan-in × size × file count, or nothing when every one scores 0
+# (no row waits on it, or it writes no path outside the record: a split of it frees nothing).
+#
+# THE MACHINE FINDS THE SPLIT, THE MIND DECIDES IT (D14d, Δ11). The tick appends it to its CHAIN line
+# as `SPLIT? <id> — <size> min, <files> files, <k> rows wait on it`; `task-split` (T17) performs one.
+# Fan-in is the open rows waiting on it, from `units_edges` — the edges the chain itself is drawn
+# from; size the `size` cell's leading digits (minutes); files its Files paths outside the record,
+# the part a split partitions. Ties go to the earlier row on the chain. Nothing is written. A caller
+# holding `units_edges`' answer already (the tick drew the chain from it) hands it in as <edges>.
+units_split_candidate() {
+  local plan="${1:-}" chain="${2:-}" rows edges
+  [ -n "$chain" ] || return 0
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 0
+  [ -n "$rows" ] || return 0
+  if [ $# -ge 3 ]; then edges="$3"; else edges="$(units_edges "$plan" 2>/dev/null)"; fi
+  printf '\034rows\n%s\n\034edges\n%s\n' "$rows" "$edges" \
+    | awk -F'\t' -v chain="$chain" "$(_units_files_awk)"'
+    $0 == SUBSEP "rows" { part = 1; next }
+    $0 == SUBSEP "edges" { part = 2; next }
+    part == 1 && $1 != "" {
+      st[$1] = $10; sz[$1] = 0; if (match($7, /^[0-9]+/)) sz[$1] = substr($7, RSTART, RLENGTH) + 0
+      m = split($9, a, ","); nf[$1] = 0
+      for (k = 1; k <= m; k++) {
+        e = a[k]; gsub(/`/, "", e); sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e); sub(/^\.\//, "", e)
+        if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/ || in_docs(e)) continue
+        nf[$1]++
+      }
+      next
+    }
+    part == 2 && NF >= 2 && !(($1 SUBSEP $2) in seen) { seen[$1, $2] = 1; fan[$1]++ }
+    END {
+      m = split(chain, c, ","); best = 0; bid = ""
+      for (k = 1; k <= m; k++) {
+        i = c[k]; if (st[i] != "pending") continue
+        s = fan[i] * sz[i] * nf[i]
+        if (s > best) { best = s; bid = i }
+      }
+      if (bid != "") printf "%s\t%d\t%d\t%d\n", bid, sz[bid], nf[bid], fan[bid]
+    }'
+}
+
+# units_hold_read <plan> <id> <holder id> -> the `task-set` operand that makes "<id> waits on
+# <holder>" a table fact: `reads=<id's cell, its kind default when empty, then the holder's record
+# path>` in a table with a reads column, `deps=<id's deps, then the holder>` in one without. Exit 1,
+# nothing printed, when either id is no row, or the holder writes no path to read.
+#
+# A DECLINE NAMES WHAT IT WAITS ON (Δ13; REQ-12 AC-12.7). `decline <ids> '<reason>' --on <row>` prints
+# `task-set <id> <this>`: the hand-hold, written where the tick judges it once instead of in a reason
+# it re-reads every turn. The holder's record is its first Files path in the record; a holder with
+# none is read by its first path. A cell already naming that path is printed as it stands.
+units_hold_read() {
+  local plan="${1:-}" want="${2:-}" holder="${3:-}" rows hasreads=0
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 1
+  [ -n "$rows" ] || return 1
+  units_has_column "$plan" reads && hasreads=1
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v holder="$holder" -v hasreads="$hasreads" \
+    "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
+    { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
+    END {
+      if (!(want in at) || !(holder in at) || want == holder) exit 1
+      i = at[want]; j = at[holder]
+      if (!hasreads) {
+        tokens(dep[i]); o = ""
+        for (k = 1; k <= ntk; k++) { if (tk[k] == holder) { print "deps=" cellq(dep[i]); exit 0 } o = o (o == "" ? "" : ", ") tk[k] }
+        print "deps=" cellq(o (o == "" ? "" : ", ") holder); exit 0
+      }
+      paths(j); p = ""
+      for (k = 1; k <= npe; k++) if (in_docs(pe[k])) { p = pe[k]; break }
+      if (p == "" && npe > 0) p = pe[1]
+      if (p == "") exit 1
+      c = rd[i]; if (c !~ /[A-Za-z0-9]/) c = kdef(knd[i])
+      tokens(c); o = ""
+      for (k = 1; k <= ntk; k++) { if (tk[k] == p) { print "reads=" cellq(c); exit 0 } o = o (o == "" ? "" : ", ") tk[k] }
+      print "reads=" cellq(o (o == "" ? "" : ", ") p)
+    }'
+}
+
 # units_live_range <plan> [<row id>] -> `<last review proof head>..<UNITS_LIVE_HEAD>`, the
 # difference a `live:head` review reads (wave-26 T14; AC-6.5): only what landed past the last
 # review, never the whole diff again. Nothing when the plan has no review proof yet (the first
@@ -841,7 +1029,7 @@ _units_sched_run() {
   } | _UNITS_FLOOR_ST="$7" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" \
-      -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_sched_awk)"
+      -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_sched_awk)"
 }
 
 # _units_floor_state <plan> -> what lib/proof.sh `proof_state` says of the change since the plan's
@@ -927,6 +1115,17 @@ _units_files_awk() {
       if (lp > ls && substr(p, lp - ls) == "/" e) return 1
       return 0
     }
+    # overlap(a, b): either covers the other (wave-30 T16: lifted here from the scheduler, so the suspect
+    # test asks the pair question the scheduler asks); two globs overlap when one literal prefix is a
+    # prefix of the other (the fail-safe reading: a pair that might collide is held).
+    function overlap(a, b,   pa, pb) {
+      if (covers(a, b) || covers(b, a)) return 1
+      if (isglob(a) && isglob(b)) {
+        pa = a; sub(/[*?].*$/, "", pa); pb = b; sub(/[*?].*$/, "", pb)
+        return (index(pa, pb) == 1 || index(pb, pa) == 1)
+      }
+      return 0
+    }
     # cell_covers(cell, p): some entry of the Files cell (comma-separated; a backtick, a leading ./ and the
     # white space around an entry are not part of it) covers the path p. THE ONE MATCHER OF THE DISPATCH GRAMMAR
     # for a shell caller: the scheduler overlap test and the finding-check code writer ask covers through it.
@@ -939,6 +1138,25 @@ _units_files_awk() {
       }
       return 0
     }
+'
+}
+
+# _units_cell_awk -> the awk functions `kdef(kind)`, the reads a row of that kind takes when its cell is
+# empty (units_ready above), and `cellq(v)`, a cell value as a `task-set` operand prints it: `—` for
+# nothing, else the value in single quotes. ONE DEFAULT, THREE READERS (wave-30 T16): the scheduler
+# reads an empty cell through it, and the suspect test and the decline line write a cell back
+# through it, so a printed `task-set` line keeps the default the row was scheduled by. NO APOSTROPHE
+# inside it: cellq builds its quotes with sprintf.
+_units_cell_awk() {
+  printf '%s' '
+    function kdef(k) {
+      if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
+      if (k == "review") return "approval:plan, live:head"
+      if (k == "integrate") return "proof:floor, proof:review, head"
+      if (k == "close") return "merge"
+      return "approval:plan"
+    }
+    function cellq(v) { return (v == "") ? "\342\200\224" : sprintf("%c%s%c", 39, v, 39) }
 '
 }
 
@@ -1010,16 +1228,6 @@ _units_sched_awk() {
 
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     function isopen(j) { return (st[j] == "pending" || st[j] == "active") }
-    # overlap(a, b): either covers the other; two globs overlap when one literal prefix is a
-    # prefix of the other (the fail-safe reading: a pair that might collide is held).
-    function overlap(a, b,   pa, pb) {
-      if (covers(a, b) || covers(b, a)) return 1
-      if (isglob(a) && isglob(b)) {
-        pa = a; sub(/[*?].*$/, "", pa); pb = b; sub(/[*?].*$/, "", pb)
-        return (index(pa, pb) == 1 || index(pb, pa) == 1)
-      }
-      return 0
-    }
     function writes(j, p,   k) {
       for (k = 1; k <= nfe[j]; k++) if (overlap(fe[j, k], p)) return 1
       return 0
@@ -1091,13 +1299,6 @@ _units_sched_awk() {
         owc[t] = s
       }
       now = split(owc[t], ow, " ")
-    }
-    function kdef(k) {
-      if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
-      if (k == "review") return "approval:plan, live:head"
-      if (k == "integrate") return "proof:floor, proof:review, head"
-      if (k == "close") return "merge"
-      return "approval:plan"
     }
     function addtok(i, t) {
       t = trim(t)
@@ -1499,7 +1700,9 @@ _units_sched_awk() {
 # each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
 # review|task|check>` (`check` wave-27 T16), `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
 # path; on a review row, `live:head:<q>[+<q>]` too, each question one of lib/proof.sh
-# PROOF_QUESTIONS (wave-27 T10; D4).
+# PROOF_QUESTIONS (wave-27 T10; D4). And an open verify or test row whose written cell holds no
+# bare `head` is refused, naming the row and the token (wave-30 T13; AC-4.3, D7): the default
+# `approval:plan, head` is the structural readiness of a full run, and the cell may not drop it.
 #
 # NO ORDERING RULE (wave-26 T2; D2). Through 1.10 a Step-N row with N ≥ 5 had to depend,
 # transitively, on every Step-4 row, and a mid-run build row re-barriered every later row
@@ -1667,7 +1870,7 @@ units_validate() {
           # A READ NAMES SOMETHING (wave-26 T2; D1): a path in the Files grammar, a named
           # artifact, `ext:<slug>`, or `live:` before an artifact or a path. A token naming
           # none of them is refused here, and the readiness program never reads it satisfied.
-          ap = 0
+          ap = 0; hh = 0
           r = rd[i]
           if (hasreads && r ~ /[A-Za-z0-9]/) {
             m = split(r, a, ",")
@@ -1675,6 +1878,7 @@ units_validate() {
               gsub(/^[ \t]+|[ \t]+$/, "", a[j])
               if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
               t = a[j]
+              if (t == "head") hh = 1
               if (t ~ extre) continue
               # A READ ROW NAMES ITS QUESTIONS (wave-27 T10; D4): `live:head:<q>[+<q>]`, each one
               # of lib/proof.sh PROOF_QUESTIONS, on a review row and nowhere else.
@@ -1694,6 +1898,18 @@ units_validate() {
                 continue
               }
               printf "%s: read %s names no artifact\n", id[i], a[j]
+            }
+            # A VERIFY OR TEST ROW READS head (wave-30 T13; REQ-4 AC-4.3; D7, Delta-6a). Its kind default,
+            # approval:plan, head, waits on every open row that writes code, so a full run is never
+            # ready beside an open build; wave-28 overrode the cell with a record path and ran it
+            # early. A cell that is written and holds no bare head is refused, naming the row and the
+            # token. live:head is not head: it waits on no open writer. An empty cell takes the
+            # default; a doc row is not held (its Files are not code); and only an OPEN row, since a
+            # landed or dropped one schedules nothing and a plan carrying one must still commit
+            # (A-T13.1).
+            if ((knd[i] == "verify" || knd[i] == "test") && !hh && (sta[i] == "pending" || sta[i] == "active")) {
+              rc0 = r; gsub(/^[ \t]+|[ \t]+$/, "", rc0)
+              printf "%s: reads %s drops head; a %s row must read head (its default approval:plan, head waits on every open row that writes code)\n", id[i], rc0, knd[i]
             }
           }
 
@@ -2276,6 +2492,154 @@ units_step_text() {
       r = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", r); print r; found = 1
     }
     END { if (!seen) exit 1 }' "$plan"
+}
+
+# ── THE SPLIT (wave-30 T17; REQ-12 AC-12.6, D14d-3, Δ11) ──────────────────────
+#
+# Three readers under `session-poker.sh task-split`, the verb that rewrites one pending row as its
+# children. The machine records a split; which row to split and where to cut it are the
+# orchestrator's (steps/4.md, "Splitting a row"), so nothing here chooses either.
+#
+# units_split_check <parent id> <parent Files> <child id> <child Files> [<child id> <child Files>…]
+#   -> one line per fault, exit 1 if any, else 0. THE CHILDREN ARE A COVER OF THE PARENT'S FILES:
+#   each child entry is one of the parent's (`<child>: Files entry <path> is not one of <parent>'s
+#   Files`), and each parent entry is some child's (`<parent>: Files entry <path> is in no child's
+#   Files`). Entries are compared as the readiness program reads a Files cell: comma-split, blanks
+#   trimmed, a leading `./` and the unmergeable `!` mark set aside, and an entry with no letter or
+#   digit (`—`) declaring nothing. Two children may name one entry: a test file both halves edit
+#   is ordinary, and the orchestrator orders them by their reads.
+_units_split_tokens() {  # <Files cell> -> one entry per line, as compared
+  printf '%s\n' "${1:-}" | tr ',' '\n' \
+    | awk '{ gsub(/^[ \t]+|[ \t]+$/, ""); sub(/^\.\//, ""); sub(/!$/, ""); if ($0 ~ /[A-Za-z0-9]/) print }'
+}
+units_split_check() {
+  local pid="${1:-}" ptok all="" cid t found=0
+  ptok="$(_units_split_tokens "${2:-}")"
+  shift 2 2>/dev/null || return 1
+  while [ $# -ge 2 ]; do
+    cid="$1"
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      all="${all}${t}"$'\n'
+      printf '%s\n' "$ptok" | grep -Fxq -- "$t" && continue
+      printf "%s: Files entry %s is not one of %s's Files\n" "$cid" "$t" "$pid"; found=1
+    done <<EOF
+$(_units_split_tokens "$2")
+EOF
+    shift 2
+  done
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    printf '%s' "$all" | grep -Fxq -- "$t" && continue
+    printf "%s: Files entry %s is in no child's Files\n" "$pid" "$t"; found=1
+  done <<EOF
+$ptok
+EOF
+  [ "$found" -eq 0 ]
+}
+
+# units_split_dependents <plan> <id> -> the ids of the rows that wait on <id>, table order, one per
+#   line: an edge from it (`units_edges`: a read it satisfies, `head` among them, or an unmergeable
+#   hold), or a deps token naming it, whatever the row's status. Exit 1 when there is no table.
+units_split_dependents() {
+  local plan="${1:-}" pid="${2:-}" rows
+  rows="$(units_rows "$plan")" || return 1
+  { units_edges "$plan" 2>/dev/null | awk -F'\t' -v p="$pid" '$1 == p { print "\034\t" $2 }'
+    printf '%s\n' "$rows"; } | awk -F'\t' -v p="$pid" '
+    $1 == "\034" { w[$2] = 1; next }
+    $1 == "" || $1 == p { next }
+    {
+      n = split($6, d, ",")
+      for (k = 1; k <= n; k++) { t = d[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); if (t == p) w[$1] = 1 }
+      if (($1 in w) && !($1 in out)) { out[$1] = 1; print $1 }
+    }'
+}
+
+# units_split_row <plan> <parent> <instant> <id> <task> <size> <Files> [<id> <task> <size> <Files>…]
+#   -> the whole plan with <parent> split into the children, on stdout; the file is not written.
+#   Exit 1 no table or no `## SDLC State` · 2 no row <parent> · 3 the parent is not `pending` ·
+#   4 fewer than two children, a short spec, or a value no cell can hold · 5 more than one row
+#   <parent>. Silent on every refusal; `units_split_check` is the caller's, before this.
+#
+# THE EXISTING PROJECTORS, IN ORDER, ON ONE COPY: (1) every deps cell naming the parent has that
+# token replaced by each child the cell does not already name (`units_table_cells`) — a row that
+# waited on the whole of the parent still does; (2) the parent's status `dropped` and its task
+# ` · split-into: <ids>`; (3) each child by `units_add_row`, carrying the parent's step, kind,
+# deps, serves and reads, its own task, size and Files, and the parent's agent with the parent's
+# id at its end renamed to the child's (`w30-T17` -> `w30-T33`; any other agent kept); (4) each
+# child's line `- <id>: pending dispatch — split from <parent> at <instant>` and the parent's
+# `- <parent>: split into <ids> at <instant>` (`units_step_line`). The deps are re-pointed BEFORE
+# the children are added, so `units_add_row`'s threading (a table without reads) finds the frontier
+# already reaching each child and threads nothing twice. A reader in a reads table needs no edit:
+# it names the path, and the child whose Files hold that path is now its writer.
+units_split_row() {
+  local plan="${1:-}" pid="${2:-}" now="${3:-}" wd cur nxt rec n i ids="" cid
+  local step kind task agent deps serves reads pre cagent rid rdeps nd seen lst t c rc=0
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$pid" ] || return 1
+  shift 3 2>/dev/null || return 4
+  [ $# -ge 8 ] && [ $(( $# % 4 )) -eq 0 ] || return 4
+  _units_table "$plan" >/dev/null 2>&1 || return 1
+  rec="$(units_rows "$plan" | awk -F'\t' -v p="$pid" '$1 == p')"
+  n="$(printf '%s' "$rec" | grep -c .)"
+  [ "$n" -ge 1 ] || return 2
+  [ "$n" -eq 1 ] || return 5
+  [ "$(units_field "$rec" status)" = pending ] || return 3
+  step="$(units_field "$rec" step)"; kind="$(units_field "$rec" kind)"; task="$(units_field "$rec" task)"
+  agent="$(units_field "$rec" agent)"; deps="$(units_field "$rec" deps)"; serves="$(units_field "$rec" serves)"
+  reads="$(units_field "$rec" reads)"
+  i=1
+  for c in "$@"; do
+    [ $(( i % 4 )) -eq 1 ] && ids="${ids:+$ids, }$c"
+    i=$((i + 1))
+  done
+  wd="$(mktemp -d "${TMPDIR:-/tmp}/units-split.XXXXXX")" || return 1
+  cur="$wd/plan"; nxt="$wd/next"
+  cp "$plan" "$cur" || { rm -rf "$wd"; return 1; }
+  # (1) the deps cells that name the parent; `seen` keeps the cell free of a repeated token
+  while IFS="$(printf '\037')" read -r rid rdeps; do
+    [ -n "$rid" ] && [ "$rid" != "$pid" ] || continue
+    nd=""; seen=","; c=0
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      if [ "$t" = "$pid" ]; then c=1; lst="$(printf '%s' "$ids" | tr -d ',')"; else lst="$t"; fi
+      for t in $lst; do
+        case "$seen" in *",$t,"*) continue ;; esac
+        seen="$seen$t,"; nd="${nd:+$nd, }$t"
+      done
+    done <<EOF
+$(printf '%s\n' "$rdeps" | tr ',' '\n' | awk '{ gsub(/^[ \t]+|[ \t]+$/, ""); print }')
+EOF
+    [ "$c" -eq 1 ] || continue
+    units_table_cells "$cur" set tasks "$rid" "deps=$nd" > "$nxt" || { rc=$?; break; }
+    mv "$nxt" "$cur"
+  done <<EOF
+$(units_rows "$plan" | awk -F'\t' '{ print $1 "\037" $6 }')
+EOF
+  # (2) the parent
+  if [ "$rc" -eq 0 ]; then
+    if units_table_cells "$cur" set tasks "$pid" status=dropped "task=$task · split-into: $ids" > "$nxt"; then
+      mv "$nxt" "$cur"
+    else rc=$?; fi
+  fi
+  # (3) the children, (4) their lines
+  while [ "$rc" -eq 0 ] && [ $# -ge 4 ]; do
+    cid="$1"
+    pre="${agent%"$pid"}"; cagent="$agent"
+    if [ "$pre" != "$agent" ]; then
+      case "$pre" in ''|*[!A-Za-z0-9]) cagent="$pre$cid" ;; esac
+    fi
+    if units_add_row "$cur" "$cid" "$step" "$kind" "$2" "$cagent" "$deps" "$3" "$serves" "$4" "$reads" > "$nxt" \
+       && [ -s "$nxt" ] && mv "$nxt" "$cur" \
+       && units_step_line "$cur" "$cid" "pending dispatch — split from $pid at $now" > "$nxt" && mv "$nxt" "$cur"; then
+      shift 4
+    else rc=4; fi
+  done
+  if [ "$rc" -eq 0 ]; then
+    units_step_line "$cur" "$pid" "split into $ids at $now" > "$nxt" && mv "$nxt" "$cur" || rc=4
+  fi
+  [ "$rc" -eq 0 ] && cat "$cur"
+  rm -rf "$wd"
+  case "$rc" in 0) return 0 ;; 1) return 1 ;; 2|5) return 5 ;; *) return 4 ;; esac
 }
 
 # units_set_current <plan> <value> -> the whole plan with the first `current:` line of

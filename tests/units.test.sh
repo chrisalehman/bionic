@@ -4095,4 +4095,236 @@ expect_eq "SF-mut2 …but its Step 5 block holds two pass: lines (the old one ke
 expect_eq "SF-mut3 …and the library's own replacement holds one (the same extractor on the same plan)" "1" \
   "$(call units_step_fields --replace "$SF_PLAN" 5 pass=4 | awk '/^- Step 5:/ { f = 1; next } /^- Step 6:/ { exit } f && /^  pass:/ { n++ } END { print n + 0 }')"
 
+section "§READS-HEAD — wave-30 T13: a verify or test row that drops head from its reads is refused (REQ-4 AC-4.3; D7, Δ6a)"
+# THE REGRESSION ROW'S READINESS IS STRUCTURAL. Its kind default, approval:plan, head, waits on every
+# open row that writes code (READS.5). Wave-28's T28 overrode the cell with a record path and ran its
+# full run while build rows were still open; the validator now refuses that cell, naming the row and
+# the token it dropped. The fixture is READS' own table with its verify row's cell rewritten.
+rh_cell() {  # <T2's reads cell> <file> — reads.md with the verify row T2 reading <cell>
+  sed "s#^| T2 | 5 | verify | the walk, reads empty | researcher | — | 30 | REQ-x | .bionic/docs/record/w/walk.md | — | pending |#| T2 | 5 | verify | the walk | researcher | — | 30 | REQ-x | .bionic/docs/record/w/walk.md | $1 | pending |#" \
+    "$SANDBOX/reads.md" > "$2"
+}
+rh_cell ".bionic/docs/record/w/build-log.md" "$SANDBOX/rh-record.md"
+expect_eq "RH-0 precondition: the fixture's T2 reads the record path" "1" \
+  "$(grep -c '^| T2 | 5 | verify | the walk | researcher | — | 30 | REQ-x | .bionic/docs/record/w/walk.md | .bionic/docs/record/w/build-log.md | pending |$' "$SANDBOX/rh-record.md")"
+RH_V="$(call units_validate "$SANDBOX/rh-record.md")"
+expect_contains "RH-1 a verify row reading a record path instead of head is refused, naming the row and the token" \
+  "T2: reads .bionic/docs/record/w/build-log.md drops head; a verify row must read head" "$RH_V"
+expect_eq "RH-1b …and the verb exits 1" "1" "$(call_rc units_validate "$SANDBOX/rh-record.md")"
+rh_cell "approval:plan, head" "$SANDBOX/rh-default.md"
+expect_eq "RH-2 the same row reading approval:plan, head validates (the default, written out)" "0|" \
+  "$(call_rc units_validate "$SANDBOX/rh-default.md")|$(call units_validate "$SANDBOX/rh-default.md")"
+expect_eq "RH-2b …and that row waits for T1, the open build row (the structural readiness)" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/rh-default.md" 4)" "T2${TAB}head${TAB}T1${TAB}pending")"
+rh_cell "approval:plan, .bionic/docs/record/w/build-log.md, head" "$SANDBOX/rh-both.md"
+expect_eq "RH-3 a record path beside head is admitted: head is what is asked for" "0" \
+  "$(call_rc units_validate "$SANDBOX/rh-both.md")"
+rh_cell "approval:plan" "$SANDBOX/rh-approval.md"
+expect_contains "RH-4 approval alone drops head too" \
+  "T2: reads approval:plan drops head; a verify row must read head" "$(call units_validate "$SANDBOX/rh-approval.md")"
+rh_cell "live:head" "$SANDBOX/rh-live.md"
+expect_contains "RH-5 live:head is not head: it waits on no open writer, so it is refused on a verify row" \
+  "T2: reads live:head drops head; a verify row must read head" "$(call units_validate "$SANDBOX/rh-live.md")"
+# A test row is held to the same rule; a doc row is not (its Files are not code).
+sed 's#^| T5 | 4 | build | reads a file no open row writes |#| T5 | 4 | test | reads a file no open row writes |#' \
+  "$SANDBOX/reads.md" > "$SANDBOX/rh-test.md"
+expect_contains "RH-6 a test row reading lib/old.sh, approval:plan is refused, named as a test row" \
+  "T5: reads lib/old.sh, approval:plan drops head; a test row must read head" "$(call units_validate "$SANDBOX/rh-test.md")"
+sed 's#^| T5 | 4 | build | reads a file no open row writes |#| T5 | 4 | doc | reads a file no open row writes |#' \
+  "$SANDBOX/reads.md" > "$SANDBOX/rh-doc.md"
+expect_eq "RH-7 a doc row reading the same cell validates: a doc row is not held to head" "0|" \
+  "$(call_rc units_validate "$SANDBOX/rh-doc.md")|$(call units_validate "$SANDBOX/rh-doc.md")"
+# ONLY AN OPEN ROW (A-T13.1): a landed or dropped row's reads schedule nothing, and a plan already
+# carrying one from before this rule must still commit.
+sed 's#| .bionic/docs/record/w/build-log.md | pending |$#| .bionic/docs/record/w/build-log.md | landed |#' \
+  "$SANDBOX/rh-record.md" > "$SANDBOX/rh-landed.md"
+expect_eq "RH-8 precondition: the landed copy differs from the refused one in T2's status alone" "1" \
+  "$(diff "$SANDBOX/rh-record.md" "$SANDBOX/rh-landed.md" | grep -c '^>')"
+expect_eq "RH-8b …and a landed verify row that dropped head is not refused" "0" \
+  "$(call_rc units_validate "$SANDBOX/rh-landed.md")"
+
+# ============================================================
+section "§TASK-SPLIT — wave-30 T17: a split is one projection, its children a partition of the parent's Files (REQ-12 AC-12.6; D14d-3, Δ11)"
+# ============================================================
+#
+# THREE PURE READERS UNDER `session-poker.sh task-split`. `units_split_check` judges the child specs'
+# Files against the parent's: each child's entries are the parent's, and together they name every
+# one (a path left out, or one the parent never declared, is a line naming it). `units_split_dependents`
+# names every row that waits on the parent: an edge from it (a read it satisfies) or a deps token
+# naming it. `units_split_row` prints the whole plan with the split written: the parent `dropped`
+# with ` · split-into: <ids>` on its task, each deps token naming it replaced by every child, the
+# children added by `units_add_row` (the parent's step, kind, deps, serves and reads; their own task,
+# size and Files), and the lines under `## SDLC State`. It writes nothing; the instant is an operand.
+cat > "$SANDBOX/split-nr.md" <<'SPNR_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+- Step 4: opened
+- T1: landed at record/T1.md
+- T2: dispatched to w-T2
+- T6: pending dispatch — added by task-add at 2026-10-08T00:00:00Z
+- T7: pending dispatch
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30 | REQ-x | a.sh | — | — | landed |
+| T2 | 4 | build | in flight | implementor | — | 30 | REQ-x | b.sh | 01-T2 | abc1234 | active |
+| T6 | 4 | build | the big one | w01-T6 | T1 | 90 | REQ-5 | lib/c.sh, lib/d.sh, .bionic/docs/record/w/T6-iface.md | — | — | pending |
+| T7 | 4 | build | after the big one | implementor | T6 | 30 | REQ-x | lib/e.sh | — | — | pending |
+| T5 | 5 | verify | the floor | test-runner | T1, T2, T6, T7 | 30 | REQ-x | — | — | — | pending |
+SPNR_EOF
+SP_IFACE=".bionic/docs/record/w/T6-iface.md"
+SP_PF="lib/c.sh, lib/d.sh, $SP_IFACE"
+
+# ---------- the partition: subset and cover ----------
+expect_eq "SPLIT-1 a partition of the parent's Files passes the check (exit 0, nothing printed)" "0|" \
+  "$(call_rc units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh")|$(call units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh")"
+expect_eq "SPLIT-1b …spelled ./ or marked ! it is the same entry" "0" \
+  "$(call_rc units_split_check T6 "$SP_PF" T8 "./$SP_IFACE, lib/c.sh!" T9 "lib/d.sh")"
+expect_eq "SPLIT-2 a child naming a path the parent does not declare is refused, naming the child and the path" \
+  "T9: Files entry lib/x.sh is not one of T6's Files" \
+  "$(call units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh, lib/x.sh")"
+expect_eq "SPLIT-2b …exit 1" "1" "$(call_rc units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/d.sh, lib/x.sh")"
+expect_eq "SPLIT-3 a partition that leaves a parent path out is refused, naming the path" \
+  "T6: Files entry lib/d.sh is in no child's Files" \
+  "$(call units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/c.sh")"
+expect_eq "SPLIT-3b …exit 1" "1" "$(call_rc units_split_check T6 "$SP_PF" T8 "$SP_IFACE, lib/c.sh" T9 "lib/c.sh")"
+expect_eq "SPLIT-3c a parent with no Files splits into children with none" "0" "$(call_rc units_split_check T6 "—" T8 "—" T9 "—")"
+
+# ---------- the dependents ----------
+expect_eq "SPLIT-4 the rows waiting on T6 in a table without reads: T7 and T5, by deps (table order)" "T7 T5" \
+  "$(call units_split_dependents "$SANDBOX/split-nr.md" T6 | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- the projection, a table without reads ----------
+SP_SUM="$(cksum < "$SANDBOX/split-nr.md")"
+SP_OUT="$(call units_split_row "$SANDBOX/split-nr.md" T6 2026-10-09T00:00:00Z \
+  T8 'the interface' 20 "$SP_IFACE, lib/c.sh" T9 'the rest' 70 'lib/d.sh')"
+SP_RC="$CALL_RC"
+printf '%s\n' "$SP_OUT" > "$SANDBOX/split-nr-out.md"
+expect_eq "SPLIT-5 the projector exits 0" "0" "$SP_RC"
+expect_eq "SPLIT-5b …and writes nothing: the plan is byte-identical" "$SP_SUM" "$(cksum < "$SANDBOX/split-nr.md")"
+expect_contains "SPLIT-6 the parent is dropped, its task naming the children" \
+  "| T6 | 4 | build | the big one · split-into: T8, T9 | w01-T6 | T1 | 90 | REQ-5 | $SP_PF | — | — | dropped |" "$SP_OUT"
+expect_contains "SPLIT-7 the first child: the parent's step, kind, deps and serves, its own task, size and Files, the agent renamed" \
+  "| T8 | 4 | build | the interface | w01-T8 | T1 | 20 | REQ-5 | $SP_IFACE, lib/c.sh | — | — | pending |" "$SP_OUT"
+expect_contains "SPLIT-7b …and the second" \
+  "| T9 | 4 | build | the rest | w01-T9 | T1 | 70 | REQ-5 | lib/d.sh | — | — | pending |" "$SP_OUT"
+expect_contains "SPLIT-8 a deps dependent waits on every child in the parent's place" \
+  "| T7 | 4 | build | after the big one | implementor | T8, T9 |" "$SP_OUT"
+expect_contains "SPLIT-8b …and the floor too, the token replaced where it stood and nothing threaded twice" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T8, T9, T7 |" "$SP_OUT"
+expect_eq "SPLIT-8c …no deps cell names the dropped parent: no row waits on it" "" \
+  "$(call units_split_dependents "$SANDBOX/split-nr-out.md" T6)"
+expect_contains "SPLIT-9 the ledger line: - T6: split into the children at the instant" \
+  "- T6: split into T8, T9 at 2026-10-09T00:00:00Z" "$SP_OUT"
+expect_contains "SPLIT-9b …each child's own line" "- T8: pending dispatch — split from T6 at 2026-10-09T00:00:00Z" "$SP_OUT"
+expect_contains "SPLIT-9c …and the second's" "- T9: pending dispatch — split from T6 at 2026-10-09T00:00:00Z" "$SP_OUT"
+expect_eq "SPLIT-10 the projection validates clean" "0|" \
+  "$(call_rc units_validate "$SANDBOX/split-nr-out.md")|$(call units_validate "$SANDBOX/split-nr-out.md")"
+expect_eq "SPLIT-11 an active parent is not projected (exit 3), nothing printed" "3|" \
+  "$(call_rc units_split_row "$SANDBOX/split-nr.md" T2 2026-10-09T00:00:00Z T8 a 10 b.sh T9 b 10 b.sh)|$(call units_split_row "$SANDBOX/split-nr.md" T2 2026-10-09T00:00:00Z T8 a 10 b.sh T9 b 10 b.sh)"
+expect_eq "SPLIT-11b …nor an id the table does not carry (exit 2)" "2" \
+  "$(call_rc units_split_row "$SANDBOX/split-nr.md" T44 2026-10-09T00:00:00Z T8 a 10 b.sh T9 b 10 b.sh)"
+
+# ---------- a table with reads: the reader is re-pointed by the path it reads ----------
+cat > "$SANDBOX/split-r.md" <<'SPR_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+- T1: landed at record/T1.md
+- T6: pending dispatch
+- T7: pending dispatch
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30 | REQ-x | a.sh | — | — | landed | — |
+| T6 | 4 | build | the big one | w01-T6 | — | 90 | REQ-5 | lib/c.sh, lib/d.sh, .bionic/docs/record/w/T6-iface.md | — | — | pending | approval:plan |
+| T7 | 4 | build | reads the interface | implementor | — | 30 | REQ-x | lib/e.sh | — | — | pending | .bionic/docs/record/w/T6-iface.md |
+| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | — | — | — | pending | approval:plan, head |
+SPR_EOF
+expect_eq "SPLIT-12 precondition: the reads table validates" "0" "$(call_rc units_validate "$SANDBOX/split-r.md")"
+expect_eq "SPLIT-12b the rows waiting on T6 by what they read: T7 (its record) and T5 (head)" "T7 T5" \
+  "$(call units_split_dependents "$SANDBOX/split-r.md" T6 | tr '\n' ' ' | sed 's/ $//')"
+call units_split_row "$SANDBOX/split-r.md" T6 2026-10-09T00:00:00Z \
+  T8 'the interface' 20 "$SP_IFACE" T9 'the rest' 70 'lib/c.sh, lib/d.sh' > "$SANDBOX/split-r-out.md"
+expect_eq "SPLIT-13 the projector exits 0 on a reads table" "0" "$CALL_RC"
+expect_contains "SPLIT-13b …the children carry the parent's reads" \
+  "| T8 | 4 | build | the interface | w01-T8 | — | 20 | REQ-5 | $SP_IFACE | — | — | pending | approval:plan |" "$(cat "$SANDBOX/split-r-out.md")"
+SP_EDGES="$(bash -c '. "$1" && units_edges "$2"' _ "$LIB" "$SANDBOX/split-r-out.md" 2>/dev/null)"
+expect_contains "SPLIT-14 the reader of the record now waits on the child that writes it, T8" \
+  "$(printf 'T8\tT7\t%s' "$SP_IFACE")" "$SP_EDGES"
+expect_absent "SPLIT-14b …and not on T9, which does not" "$(printf 'T9\tT7\t')" "$SP_EDGES"
+expect_absent "SPLIT-14c …no edge leaves the dropped parent" "$(printf 'T6\t')" "$SP_EDGES"
+expect_eq "SPLIT-14d …and no row waits on it" "" "$(call units_split_dependents "$SANDBOX/split-r-out.md" T6)"
+expect_eq "SPLIT-15 the reads projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/split-r-out.md")"
+section "§SUSPECT — wave-30 T16: a dependency that shares no file with its holder is named, never loosened (REQ-12 AC-12.2; D14a, Δ8)"
+# A ROW THAT WAITS ON ANOTHER ONLY FOR ITS RECORD, AND WRITES NOTHING IT WRITES, IS A SUSPECT. Wave-28
+# held T2 50 minutes, T18 255 and T20 49 on a declared read whose landed diffs shared no file
+# (research-waits-w28.md §Were the declared waits real?). `units_suspect` names each such pair, with
+# the `task-set` line that would loosen it, and changes no cell: a dependency may be runtime state or
+# an order no file test sees, so the mind decides. Judged: an open row of a writing kind, against an
+# open holder it names by id (deps) or by a path the holder's Files cover (reads). Not suspect: the
+# two rows share a path outside the record, or the row reads a path outside the record the holder writes.
+cat > "$SANDBOX/suspect.md" <<'SUSPECT_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-08T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status | reads |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the holder | w-T1 | — | 30 | REQ-x | payload/a.sh, .bionic/docs/record/w/T1-a.md | active | — |
+| T2 | 4 | build | reads only the holder's record and shares nothing | w-T2 | — | 20 | REQ-x | payload/b.sh, .bionic/docs/record/w/T2-b.md | pending | .bionic/docs/record/w/T1-a.md |
+| T3 | 4 | build | reads the record and shares a.sh | w-T3 | — | 20 | REQ-x | payload/a.sh, .bionic/docs/record/w/T3.md | pending | .bionic/docs/record/w/T1-a.md |
+| T4 | 4 | build | reads the code the holder writes | w-T4 | — | 20 | REQ-x | payload/c.sh | pending | payload/a.sh, approval:plan |
+| T5 | 4 | build | reads the record beside the approval | w-T5 | — | 20 | REQ-x | payload/d.sh | pending | approval:plan, .bionic/docs/record/w/T1-a.md |
+| T6 | 5 | verify | the walk reads the record | w-T6 | — | 20 | REQ-x | .bionic/docs/record/w/walk.md | pending | approval:plan, head, .bionic/docs/record/w/T1-a.md |
+| T7 | 4 | build | reads a landed row's record | w-T7 | — | 20 | REQ-x | payload/e.sh | pending | .bionic/docs/record/w/T0.md |
+| T0 | 4 | build | landed | w-T0 | — | 20 | REQ-x | payload/f.sh, .bionic/docs/record/w/T0.md | landed | — |
+SUSPECT_EOF
+expect_eq "SU-0 precondition: the fixture reads as eight rows (the extractor reads real input)" "8" \
+  "$(nlines "$(call units_rows "$SANDBOX/suspect.md")")"
+SU_CK="$(cksum < "$SANDBOX/suspect.md")"
+expect_eq "SU-1 AC-12.2 the suspects are T2 and T5 on T1, each with its clause and the task-set line that loosens it" \
+  "T2${TAB}T1${TAB}suspect: T2 reads T1, shares no file${TAB}task-set T2 reads=—
+T5${TAB}T1${TAB}suspect: T5 reads T1, shares no file${TAB}task-set T5 reads='approval:plan'" \
+  "$(call units_suspect "$SANDBOX/suspect.md")"
+expect_eq "SU-1b …and it exits 0" "0" "$(call_rc units_suspect "$SANDBOX/suspect.md")"
+expect_eq "SU-2 asked of one row, it answers for that row alone" \
+  "T2${TAB}T1${TAB}suspect: T2 reads T1, shares no file${TAB}task-set T2 reads=—" \
+  "$(call units_suspect "$SANDBOX/suspect.md" T2)"
+expect_eq "SU-3 a row sharing a path outside the record with its holder is not suspect (beside SU-2, same fixture)" "" \
+  "$(call units_suspect "$SANDBOX/suspect.md" T3)"
+expect_eq "SU-4 a row reading code its holder writes is not suspect" "" "$(call units_suspect "$SANDBOX/suspect.md" T4)"
+expect_eq "SU-5 a verify row is not judged: reading records is its work" "" "$(call units_suspect "$SANDBOX/suspect.md" T6)"
+expect_eq "SU-6 a landed holder holds nothing, so nothing is suspect" "" "$(call units_suspect "$SANDBOX/suspect.md" T7)"
+expect_eq "SU-7 AC-12.2 the machine never rewrites a declaration: the plan is byte-identical" "$SU_CK" "$(cksum < "$SANDBOX/suspect.md")"
+# A TABLE WITHOUT A reads COLUMN: a deps id is the dependency, and the loosening line is deps=.
+cat > "$SANDBOX/suspect-deps.md" <<'SUSPECT_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the holder | w-T1 | — | 30 | REQ-x | payload/a.sh | active |
+| T2 | 4 | build | deps on T1, disjoint | w-T2 | T1 | 20 | REQ-x | payload/b.sh | pending |
+| T3 | 4 | build | deps on T1, shares a.sh | w-T3 | T1 | 20 | REQ-x | payload/a.sh | pending |
+| T4 | 4 | build | deps on T1 and the world | w-T4 | T1, ext:ci | 20 | REQ-x | payload/c.sh | pending |
+SUSPECT_EOF
+expect_eq "SU-8 in a deps table the suspects are T2 and T4, loosened through deps" \
+  "T2${TAB}T1${TAB}suspect: T2 reads T1, shares no file${TAB}task-set T2 deps=—
+T4${TAB}T1${TAB}suspect: T4 reads T1, shares no file${TAB}task-set T4 deps='ext:ci'" \
+  "$(call units_suspect "$SANDBOX/suspect-deps.md")"
+expect_eq "SU-9 a plan with no table answers nothing, exit 0" "0|" \
+  "$(call_rc units_suspect "$SANDBOX/no-such-plan.md")|$(call units_suspect "$SANDBOX/no-such-plan.md")"
+
 finish

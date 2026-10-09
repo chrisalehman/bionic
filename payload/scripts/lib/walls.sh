@@ -1669,11 +1669,35 @@ printed a reason above this line, that is the cause. The commit is still refused
   return 0
 }
 
+# Per-tier required evidence keys — MIRROR of the canonical table in
+# skills/canonical-sdlc/steps/5.md ("Per-tier required keys"). Change THAT
+# table first; this function follows it. (R27)
+#
+# `evidence` (1a, D5) is the one SHARED key every tier owes on top of its own
+# — the AC block's record/ proof path — and it is listed LAST in every arm so
+# the loop that walks this list still blocks on a tier-specific key first when
+# one is missing (see the 'evidence' branch inside validate_matrix's loop).
+#
+# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT (wave-30 T14; REQ-6 AC-6.1, D9).
+# `session-poker.sh matrix-render` writes each AC block's stubs from this list, sourcing this
+# file in a subshell to read it, so the keys Step 3 renders and the keys the Verify gate
+# demands are one list and cannot drift. Its name collides with nothing the two sourcing
+# hooks define.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+keys_for_tier() {
+  case "$1" in
+    T0|T1) echo "tier-run readback evidence" ;;
+    T2)    echo "tier-run readback fixture-fidelity evidence" ;;
+    T3)    echo "tier-run fresh cold-client contact readback evidence" ;;
+    T4)    echo "user-confirmed evidence" ;;
+  esac
+}
+
 # ── the hook's body, carried whole ───────────────────────────────────────────
 #
 # EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
-# LINE TO ITS LAST `exit 0`, with ONE deletion: the `audit_path` copy, which is at file
-# scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
+# LINE TO ITS LAST `exit 0`, with TWO deletions: the `audit_path` copy and `keys_for_tier` (wave-30 T14),
+# both at file scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
 # note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
 # and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
 _eg_body() {
@@ -4075,23 +4099,8 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # anything. See the tag's own note inside validate_matrix.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
-# Per-tier required evidence keys — MIRROR of the canonical table in
-# skills/canonical-sdlc/steps/5.md ("Per-tier required keys"). Change THAT
-# table first; this function follows it. (R27)
-#
-# `evidence` (1a, D5) is the one SHARED key every tier owes on top of its own
-# — the AC block's record/ proof path — and it is listed LAST in every arm so
-# the loop that walks this list still blocks on a tier-specific key first when
-# one is missing (see the 'evidence' branch inside validate_matrix's loop).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-keys_for_tier() {
-  case "$1" in
-    T0|T1) echo "tier-run readback evidence" ;;
-    T2)    echo "tier-run readback fixture-fidelity evidence" ;;
-    T3)    echo "tier-run fresh cold-client contact readback evidence" ;;
-    T4)    echo "user-confirmed evidence" ;;
-  esac
-}
+# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body` since
+# wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
 
 # THE THREE STEP-4 ARMS (epic-22 K2, K4, K2.5): `matrix_section`, `matrix_block`,
 # `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
@@ -4172,7 +4181,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs hk hv hf
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -4185,7 +4194,8 @@ validate_matrix() {
       "add the '## Verification Matrix' section: a stack-health line, the AC tier table, and one per-AC evidence block. See canonical-sdlc/SKILL.md Step 5."
   fi
 
-  # stack-health: non-empty proof, or `n/a: <reason>` with a reason.
+  # stack-health: non-empty proof, or `n/a: <reason>` with a reason. A placeholder value (the
+  # `pending` stub Step 3 renders) is judged after the row loop, where UNDISCHARGED is known.
   # A HERE-STRING, NOT A PIPE — see the header. $MATRIX is a whole plan section and
   # routinely exceeds the pipe buffer; `echo "$MATRIX" | grep -q` turned a present
   # stack-health line into a refusal of every commit (T37).
@@ -4516,6 +4526,35 @@ validate_matrix() {
       fi
     fi
   done <<< "$rows"
+
+  # THE MATRIX HEAD'S STUBS ARE PLACEHOLDERS TOO (wave-30 T14; REQ-6 AC-6.1, D9, Δ12a). Step 3
+  # renders `stack-health: pending` (and `walk-artifact: pending` on a walked plan) above the
+  # table, beside the per-AC key stubs (`session-poker.sh matrix-render`). `stack-health:` was
+  # exempt from the placeholder ban — any value but an empty one or a bare `n/a` passed, so the
+  # stub sailed through the Verify gate unfilled — and a matrix-level `walk-artifact:` line was
+  # read by nothing. Both are now judged as a tier key is: unread before Step 5, unread at
+  # current: 5 while any row is still pending or blocked (the same mid-walk relaxation the key
+  # loop above takes, so entering Step 5 never needs an "after" snapshot that cannot exist
+  # yet), and refused once the walk is done and at every step after it. AFTER the row loop on
+  # purpose: UNDISCHARGED is what the loop found. A filled value is not judged here — the
+  # stack-health arm above and the walk gate own those; an absent walk-artifact: line is legal.
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  if [ "$UNDISCHARGED" = "0" ]; then
+    for hk in stack-health walk-artifact; do
+      hv=$(grep -E "^[[:space:]]*${hk}[[:space:]]*:" <<< "$MATRIX" | head -1 \
+           | sed -E "s/^[[:space:]]*${hk}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+      [ -n "$hv" ] || continue
+      if is_placeholder_value "$hv"; then
+        case "$hk" in
+          stack-health) hf="fill it, or n/a: <reason>" ;;
+          *)            hf="name its record, or drop it" ;;
+        esac
+        block_matrix "the ${hk}: line is still a stub" "$hf" \
+          "'${hk}:' is still a placeholder ('${hv}') with no row pending or blocked." \
+          "replace the '${hk}:' stub above the table with the real value before the Verify gate closes — the stub Step 3 rendered is a reminder, not evidence."
+      fi
+    done
+  fi
 }
 
 # ---------- walk-first artifact arm (epic-14 W1) ----------
@@ -5515,7 +5554,9 @@ return 0
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
 # `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
 # T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
-# gate reads); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# gate reads; `matrix-render` and `discharge` — wave-30 T14, D9, the matrix's stubs and its auditor cell; `handoff` —
+# wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children); 1 otherwise
+# (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5571,7 +5612,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         shift
         _next="${1:-}"
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|finding-move|decline|budget|share)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|finding-move|decline|budget|share|matrix-render|discharge|handoff|task-split)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
         esac ;;
       spawn-worktree.sh)

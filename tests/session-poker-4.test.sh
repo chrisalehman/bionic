@@ -2938,4 +2938,366 @@ expect_eq "FD-m3 the floor-attested-by: test dropped: the mutant admits the unat
 rm -rf "$FD_MUT"
 POKE_BOUND="$FD_BOUND_WAS"
 
+
+# ============================================================
+section "§MATRIX-RENDER: matrix-render writes, from ## Eval design, one AC block per criterion with the keys its tier owes set to pending, adds only what is missing, and never overwrites a value (wave-30 T14; REQ-6 AC-6.1; D9, Δ12a)"
+# ============================================================
+#
+#   matrix-render      the bound plan's ## Verification Matrix gains, for each ## Eval design criterion, a block:
+#                      provenance (the requirement's own provenance: line, else the row's Approach), fails-when and
+#                      eval (`<tier> — <Eval>`) from the table, task (the one ## Tasks row serving it, else pending),
+#                      then evidence and every other key walls.sh keys_for_tier names for the row's tier, each
+#                      `pending`; and stack-health: pending (walk-artifact: pending too unless walk: exempt) where
+#                      the matrix has none. It prints `matrix-render — <n> blocks written, <m> keys added, <k> unchanged`.
+#
+# It takes the plan transaction every row verb takes (copy, dry commit through the real gate, checksum, swap), so a
+# render the gate would refuse is not written. REFUSED (1), plan byte-identical: no ## Eval design table, no matrix
+# table, a criterion the matrix table has no row (no tier) for; an operand is the usage error (2).
+# FIXTURE FIDELITY: §42's repository and plan writer (a plan the real gate admits) at current: 3, given a
+# ## Requirements section, a four-row ## Eval design and four matrix rows of four tiers; the real verb; the evidence is
+# the plan's own bytes and the real gate's verdict on them.
+MR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+mr_fixture() {  # <plan> -> T5 serves REQ-2; Requirements and Eval design ahead of the matrix; AC-1.2, 2.1, 2.2 rows
+  awk '
+    /^\| T5 \| 5 \| verify \|/ { sub(/\| REQ-1 \|/, "| REQ-2 |") }
+    /^## Verification Matrix/ {
+      print "## Requirements\n\n### REQ-1 — the first\n\nprovenance: spec §1 (fixture)\n\n### REQ-2 — the second\n\n- AC-2.1 the second criterion\n"
+      print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+      print "| REQ-1 | first approach | AC-1.1 | hermetic | `--only a.test.sh` (§A) | a is wrong |"
+      print "| REQ-1 | second approach | AC-1.2 | static | docs-pins §B | b is wrong |"
+      print "| REQ-2 | live approach | AC-2.1 | live | walk W1 → narrated | c is wrong |"
+      print "| REQ-2 | user approach | AC-2.2 | live | the user confirms | d is wrong |\n"
+    }
+    /^\| AC-1\.1 \| T2 \|/ { print; print "| AC-1.2 | T0 | pending | — | — |\n| AC-2.1 | T3 | pending | — | — |\n| AC-2.2 | T4 | pending | — | — |"; next }
+    { print }' "$1" > "$1.mr" && mv "$1.mr" "$1"
+}
+mr_block() {  # <plan> <AC> -> the block: its header line and the indented lines under it
+  awk -v k="$2:" 'index($0, k) == 1 { f = 1; print; next } f && /^  / { print; next } f { exit }' "$1"
+}
+mr_heads() {  # <plan> -> the matrix-level stack-health/walk-artifact keys, in order, |-joined
+  awk '/^## / { m = ($0 ~ /^## Verification Matrix/); next } m && /^(stack-health|walk-artifact):/ { sub(/:.*/, ""); print }' "$1" | paste -sd'|' -
+}
+mr_cell() {  # <plan> <AC> <field n> -> that cell of the matrix row, trimmed
+  awk -F'|' -v a="$2" -v n="$3" '/^## / { m = ($0 ~ /^## Verification Matrix/); next }
+    m && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { v = $n; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
+}
+RMR="$(make_repo mr-render)"; ( cd "$RMR" && git commit -q --allow-empty -m init )
+PMR="$(s42_plan "$RMR" 3)"
+mr_fixture "$PMR"
+s42_snap "$RMR" "$PMR"
+s34_gate "$RMR"
+expect_eq "MR-0 precondition: the fixture plan at current: 3, four criteria and one AC block, is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "MR-0b …the block extractor reads the one block the fixture carries (positive, before any render)" \
+  "AC-1.1:|  provenance: fixture|  fails-when: the fixture is wrong" "$(mr_block "$PMR" AC-1.1 | paste -sd'|' -)"
+expect_eq "MR-0c …the cell extractor reads a row's tier" "T3" "$(mr_cell "$PMR" AC-2.1 3)"
+expect_eq "MR-0d …and the matrix carries no stack-health: line yet (the heads extractor, before; MR-4 is its positive)" "" "$(mr_heads "$PMR")"
+
+poke "$RMR" matrix-render
+expect_eq "MR-1 matrix-render exits 0" "0" "$RC"
+expect_contains "MR-1b …and counts what it did: three new blocks, seven keys added to the one block and the matrix head" \
+  "matrix-render — 3 blocks written, 7 keys added, 0 unchanged" "$OUT"
+MR_W12='AC-1.2:
+  provenance: spec §1 (fixture)
+  fails-when: b is wrong
+  eval: T0 — docs-pins §B
+  task: pending
+  evidence: pending
+  tier-run: pending
+  readback: pending'
+expect_eq "MR-2 a T0 criterion: provenance from its requirement, fails-when and eval from the table, task pending (T1 and T2 both serve REQ-1), then tier-run and readback" \
+  "$MR_W12" "$(mr_block "$PMR" AC-1.2)"
+MR_W21='AC-2.1:
+  provenance: live approach
+  fails-when: c is wrong
+  eval: T3 — walk W1 → narrated
+  task: T5
+  evidence: pending
+  tier-run: pending
+  fresh: pending
+  cold-client: pending
+  contact: pending
+  readback: pending'
+expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so the Approach; task T5, the one row serving REQ-2; the five T3 keys" \
+  "$MR_W21" "$(mr_block "$PMR" AC-2.1)"
+MR_W22='AC-2.2:
+  provenance: user approach
+  fails-when: d is wrong
+  eval: T4 — the user confirms
+  task: T5
+  evidence: pending
+  user-confirmed: pending'
+expect_eq "MR-3b a T4 criterion: user-confirmed" "$MR_W22" "$(mr_block "$PMR" AC-2.2)"
+MR_W11='AC-1.1:
+  provenance: fixture
+  fails-when: the fixture is wrong
+  eval: T2 — `--only a.test.sh` (§A)
+  task: pending
+  evidence: pending
+  tier-run: pending
+  readback: pending
+  fixture-fidelity: pending'
+expect_eq "MR-3c the existing T2 block keeps its two lines as written (the table's 'a is wrong' does not replace them) and gains the six it lacked, fixture-fidelity among them" \
+  "$MR_W11" "$(mr_block "$PMR" AC-1.1)"
+expect_eq "MR-4 the matrix head gains stack-health: and no walk-artifact: line, the fixture being walk: exempt" "stack-health" "$(mr_heads "$PMR")"
+expect_eq "MR-4b …and the stack-health: line reads pending" "1" "$(/usr/bin/grep -cx 'stack-health: pending' "$PMR")"
+s34_gate "$RMR"
+expect_eq "MR-5 the rendered plan, pending stubs and all, is admitted by the real gate at current: 3" "0" "$GATE_RC"
+cp "$PMR" "$TMPROOT/mr-keep"
+sed 's/^current: 3$/current: 4/' "$TMPROOT/mr-keep" > "$PMR"
+s34_gate "$RMR"
+expect_eq "MR-5b …and at current: 4" "0" "$GATE_RC"
+cp "$TMPROOT/mr-keep" "$PMR"
+
+s42_snap "$RMR" "$PMR"
+poke "$RMR" matrix-render
+expect_eq "MR-6 a second render exits 0" "0" "$RC"
+expect_contains "MR-6b …writes nothing and says so in the same line" "matrix-render — 0 blocks written, 0 keys added, 4 unchanged" "$OUT"
+expect_true "MR-6c …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PMR"
+
+awk '/^AC-1\.1:/ { b = 1 } /^AC-1\.2:/ { b = 2 } /^AC-2\.1:/ { b = 0 }
+     b == 1 && /^  tier-run: / { print "  tier-run: bash a.test.sh"; next }
+     b == 2 && /^  readback: / { next } { print }' "$TMPROOT/mr-keep" > "$PMR"
+s42_snap "$RMR" "$PMR"
+poke "$RMR" matrix-render
+expect_eq "MR-7 a render over a filled value and a dropped key exits 0" "0" "$RC"
+expect_contains "MR-7b …adds the one missing key and leaves the other three blocks as they are" "matrix-render — 0 blocks written, 1 keys added, 3 unchanged" "$OUT"
+expect_eq "MR-7c …the filled tier-run: stands, nothing written over it" "1|0" \
+  "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: bash a.test.sh')|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
+expect_eq "MR-7d …and the dropped readback: is back, as the block's last line" "  readback: pending" "$(mr_block "$PMR" AC-1.2 | tail -1)"
+expect_eq "MR-7e …one line added, none removed (git diff --numstat)" "1 0;" "$(s42_numstat "$RMR")"
+cp "$TMPROOT/mr-keep" "$PMR"
+
+# ---------- walk: required renders the walk-artifact: stub too ----------
+RMRW="$(make_repo mr-walk)"; ( cd "$RMRW" && git commit -q --allow-empty -m init )
+PMRW="$(s42_plan "$RMRW" 3)"
+mr_fixture "$PMRW"
+sed 's/^walk: exempt$/walk: required/' "$PMRW" > "$PMRW.w" && mv "$PMRW.w" "$PMRW"
+s42_snap "$RMRW" "$PMRW"
+poke "$RMRW" matrix-render
+expect_eq "MR-8 on a walk: required plan the head gains stack-health: and walk-artifact:, both pending" "0|stack-health|walk-artifact|1" \
+  "$RC|$(mr_heads "$PMRW")|$(/usr/bin/grep -cx 'walk-artifact: pending' "$PMRW")"
+expect_contains "MR-8b …counted with the keys added" "matrix-render — 3 blocks written, 8 keys added, 0 unchanged" "$OUT"
+
+# ---------- the refusals: plan byte-identical ----------
+mr_refused() {  # <label> <want rc> <want text> <plan content file> [operands…]
+  local label="$1" rc="$2" want="$3" src="$4"; shift 4
+  cp "$src" "$PMR"; s42_snap "$RMR" "$PMR"; poke "$RMR" matrix-render "$@"
+  s42_unchanged "$label" "$rc" "$PMR"
+  expect_contains "$label …saying why" "$want" "$OUT"
+}
+awk '/^## Eval design/ { skip = 1; next } skip && /^## / { skip = 0 } !skip' "$TMPROOT/mr-keep" > "$TMPROOT/mr-noeval"
+mr_refused "MR-9 a plan with no ## Eval design" 1 "no ## Eval design" "$TMPROOT/mr-noeval"
+awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^\|/ { next } { print }' "$TMPROOT/mr-keep" > "$TMPROOT/mr-notable"
+mr_refused "MR-10 a matrix with no AC tier table" 1 "no AC tier table" "$TMPROOT/mr-notable"
+awk '{ print } /^\| REQ-2 \| user approach/ { print "| REQ-3 | late approach | AC-3.1 | hermetic | x | e is wrong |" }' "$TMPROOT/mr-keep" > "$TMPROOT/mr-norow"
+mr_refused "MR-11 a criterion the matrix table has no row for (its tier unknown)" 1 "AC-3.1" "$TMPROOT/mr-norow"
+mr_refused "MR-12 an operand is the usage error" 2 "takes no argument" "$TMPROOT/mr-keep" "$PMR"
+cp "$TMPROOT/mr-keep" "$PMR"
+
+# ---------- the mutation arm: the key list taken from walls.sh, not typed twice ----------
+# A copy of the library whose keys_for_tier drops fixture-fidelity from T2, behind a copy of the hook that reads it:
+# the same render on the same plan writes AC-1.1 without the key, so MR-3c goes red under it.
+MRM_NEEDLE='T2)    echo "tier-run readback fixture-fidelity evidence" ;;'
+MRM_WALLS="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/walls.sh"
+anchor "$MRM_WALLS" "$MRM_NEEDLE" 1
+MRM_DIR="$TMPROOT/poker-mr-mut"; rm -rf "$MRM_DIR"; mkdir -p "$MRM_DIR/hooks" "$MRM_DIR/scripts"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MRM_DIR/scripts/lib"
+for _mr_f in "$(dirname "$POKER")"/*; do [ "${_mr_f##*/}" = session-poker.sh ] || ln -s "$_mr_f" "$MRM_DIR/hooks/${_mr_f##*/}"; done
+cp "$POKER" "$MRM_DIR/hooks/session-poker.sh"
+MR_N="$MRM_NEEDLE" awk 'BEGIN { n = ENVIRON["MR_N"] } index($0, n) { sub(/ fixture-fidelity/, "") } { print }' "$MRM_WALLS" > "$MRM_DIR/scripts/lib/walls.sh"
+expect_eq "MR-mut0 the copy of the library differs from it in one line" "1" "$(diff "$MRM_WALLS" "$MRM_DIR/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
+awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^  (eval|task|evidence|tier-run|readback|fixture-fidelity): / { next } m && /^stack-health:/ { next } { print }' \
+  "$TMPROOT/mr-keep" > "$PMR"
+s42_snap "$RMR" "$PMR"
+MRM_POKER="$POKER"; POKER="$MRM_DIR/hooks/session-poker.sh"
+poke "$RMR" matrix-render
+POKER="$MRM_POKER"
+expect_eq "MR-mut1 the mutant runs and renders (exit 0, AC-1.1 gains its tier-run:)" "0|1" "$RC|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
+expect_eq "MR-mut2 …but writes no fixture-fidelity:, where MR-3c found one" "0" "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -c '^  fixture-fidelity: ')"
+cp "$TMPROOT/mr-keep" "$PMR"
+POKE_BOUND="$MR_BOUND_WAS"
+
+# ============================================================
+section "§DISCHARGE: discharge <AC> writes the matrix row's auditor cell as the bare token CONFIRMED, nothing after it (wave-30 T14; REQ-6 AC-6.2; D9)"
+# ============================================================
+#
+#   discharge <AC-id>   the one writer of the auditor cell: the row's fifth cell becomes `CONFIRMED`, every other byte
+#                       of the plan as it was. wave-28's scratch scripts wrote `CONFIRMED <date>`, which the gate refuses
+#                       past Step 5 as not the bare token; this verb is why that cannot recur.
+#
+# The plan transaction again. REFUSED (1), plan byte-identical: an AC the table has no row for; a call that finds the
+# cell already CONFIRMED writes nothing and says so (exit 0). Not exactly one operand is the usage error (2).
+# FIXTURE FIDELITY: §MATRIX-RENDER's rendered plan, the real verb, the cell read back from the plan's bytes.
+DC_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+cp "$TMPROOT/mr-keep" "$PMR"
+s42_snap "$RMR" "$PMR"
+expect_eq "DC-0 precondition: the auditor cell of AC-1.2 reads — (the extractor, positive on the fixture)" "—" "$(mr_cell "$PMR" AC-1.2 6)"
+poke "$RMR" discharge AC-1.2
+expect_eq "DC-1 discharge AC-1.2 exits 0" "0" "$RC"
+expect_eq "DC-1b …the auditor cell is exactly CONFIRMED" "CONFIRMED" "$(mr_cell "$PMR" AC-1.2 6)"
+expect_eq "DC-1c …the row is otherwise as it was" "1" "$(/usr/bin/grep -cxF '| AC-1.2 | T0 | pending | — | CONFIRMED |' "$PMR")"
+expect_eq "DC-1d …one line replaced, none added (git diff --numstat)" "1 1;" "$(s42_numstat "$RMR")"
+expect_contains "DC-1e …and it says what it did" "discharge — AC-1.2: auditor CONFIRMED" "$OUT"
+s42_snap "$RMR" "$PMR"
+poke "$RMR" discharge AC-1.2
+expect_eq "DC-2 a second discharge of the same row exits 0" "0" "$RC"
+expect_true "DC-2b …and writes nothing (cmp)" cmp -s "$TMPROOT/s42-before" "$PMR"
+expect_contains "DC-2c …saying the plan already reads so" "already reads so" "$OUT"
+sed 's/^| AC-2\.1 | T3 | pending | — | — |$/| AC-2.1 | T3 | pending | — | CONFIRMED 2026-10-01 |/' "$PMR" > "$PMR.dc" && mv "$PMR.dc" "$PMR"
+s42_snap "$RMR" "$PMR"
+expect_eq "DC-3 precondition: AC-2.1 carries wave-28's dated cell" "CONFIRMED 2026-10-01" "$(mr_cell "$PMR" AC-2.1 6)"
+poke "$RMR" discharge AC-2.1
+expect_eq "DC-3b discharge over it writes the bare token, the date gone" "0|CONFIRMED" "$RC|$(mr_cell "$PMR" AC-2.1 6)"
+s34_gate "$RMR"
+expect_eq "DC-4 the plan with discharged cells is admitted by the real gate" "0" "$GATE_RC"
+dc_refused() {  # <label> <want rc> <want text> <operands…>
+  local label="$1" rc="$2" want="$3"; shift 3
+  s42_snap "$RMR" "$PMR"; poke "$RMR" discharge "$@"
+  s42_unchanged "$label" "$rc" "$PMR"
+  [ -z "$want" ] || expect_contains "$label …saying why" "$want" "$OUT"
+}
+dc_refused "DC-5 an AC the matrix table has no row for" 1 "no row AC-9.9" AC-9.9
+dc_refused "DC-5b …a prefix of a real id is not that id" 1 "no row AC-1" AC-1
+dc_refused "DC-6 usage: no operand" 2 ""
+dc_refused "DC-6b usage: two operands" 2 "" AC-1.1 AC-1.2
+cp "$TMPROOT/mr-keep" "$PMR"
+POKE_BOUND="$DC_BOUND_WAS"
+
+# ============================================================
+section "§HANDOFF: handoff rewrites ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof and date -u; the human lines are carried (wave-30 T15; REQ-7 AC-7.2; D11)"
+# ============================================================
+#
+#   handoff      the bound plan's `## Handoff` section is rewritten in place (created before `## Not Doing` when the
+#                plan has none). `written: <date -u>` is its first line; then the five machine facts: the heads of the
+#                working and integration branches; the open `## Tasks` rows (active, or pending with a worktree) and
+#                the last landed row; the roster's open rows with the run state the tick prints; the newest proof line;
+#                then five human lines carried verbatim from the old section, or a stub when it had none.
+#
+# It takes the plan transaction every plan verb takes (copy, dry commit through the real gate, checksum, swap). REFUSED
+# (1), the plan byte-identical: a plan with no ## Tasks or no ## SDLC State. An operand is the usage error (2).
+# FIXTURE FIDELITY: §42's repository and plan writer (a plan the real gate admits) at current: 4, given the frontmatter
+# branch keys over real branches with real commits, a landed line and a proof line in ## SDLC State in the shapes
+# their writers use, a second active row and a pending row with a worktree, and roster rows from the production writer
+# (`roster_row_fixture`); the real verb; the evidence is the plan's own bytes read back by section.
+HO_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+ho_body() {  # <plan> -> the lines of ## Handoff, the heading excluded
+  awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next } h { print }' "$1"
+}
+ho_written() {  # <plan> -> the first non-blank line of ## Handoff
+  ho_body "$1" | awk 'NF { print; exit }'
+}
+ho_epoch() {  # <ISO-UTC> -> epoch seconds
+  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null || date -u -d "$1" +%s
+}
+RHO="$(make_repo ho-fix)"; ( cd "$RHO" && git commit -q --allow-empty -m init )
+git -C "$RHO" config user.name "Dana Fixture"
+git -C "$RHO" branch -f trunk HEAD
+git -C "$RHO" commit -q --allow-empty -m "work"
+git -C "$RHO" branch -f wave/01-fixture HEAD
+HO_INT="$(git -C "$RHO" rev-parse trunk)"
+HO_WORK="$(git -C "$RHO" rev-parse wave/01-fixture)"
+PHO="$(s42_plan "$RHO" 4)"
+HO_LANDED="1111111111111111111111111111111111111111"
+HO_LANDED2="2222222222222222222222222222222222222222"
+awk -v l1="$HO_LANDED" -v l2="$HO_LANDED2" -v w="$HO_WORK" '
+  NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; print "integration-branch: trunk"; next }
+  /^approved-by:/ { print; print "proved: kind=floor head=" w " at=2026-10-08T11:00:00Z evidence=record/old-floor.log"
+                    print "proved: kind=review head=" w " at=2026-10-08T12:30:00Z evidence=record/last-review.md"; next }
+  /^- T5: pending dispatch/ { print "- T4: landed " l2 " 2026-10-08T10:30:00Z"; print "- T3: landed " l1 " 2026-10-08T09:00:00Z"; print; next }
+  /^\| T2 \| 4 \| build \|/ { sub(/\| implementor \|/, "| w-T2 |"); print; print "| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | abc1234 | active |"
+                             print "| T6 | 4 | build | the sixth build | — | — | 30 | REQ-1 | d.sh | .worktrees/01-T6 | abc1234 | pending |"; next }
+  { print }
+  END { print "\n## Not Doing\n\n- nothing, in this fixture" }' "$PHO" > "$PHO.ho" && mv "$PHO.ho" "$PHO"
+HO_RD="$RHO/.bionic/tmp/runs"; mkdir -p "$HO_RD"; : > "$HO_RD/w-T2-x.test.sh.log"
+roster_row_fixture session="$SID" name=w-T2 agent_id=a-w-T2 subagent_type=implementor \
+  run_log="$HO_RD/w-T2-x.test.sh.log" run_cmd='tests/run.sh --only x.test.sh' run_rc=0 >> "$(roster_of "$RHO")"
+s42_snap "$RHO" "$PHO"
+s34_gate "$RHO"
+expect_eq "HO-0 precondition: the fixture plan (branch keys, landed, proof, active and pending rows, no Handoff, a Not Doing) is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "HO-0b …the section extractor is empty before the first run (positive control: HO-1b reads it non-empty)" "" "$(ho_body "$PHO")"
+expect_eq "HO-0c …both branch heads resolve and differ (the heads the section must carry)" "1" "$([ -n "$HO_INT" ] && [ -n "$HO_WORK" ] && [ "$HO_INT" != "$HO_WORK" ] && echo 1 || echo 0)"
+
+HO_T0="$(date -u +%s)"
+poke "$RHO" handoff
+HO_T1="$(date -u +%s)"
+expect_eq "HO-1 handoff exits 0" "0" "$RC"
+HO_BODY="$(ho_body "$PHO")"
+expect_true "HO-1b …a plan with no ## Handoff gains one (the extractor now reads it non-empty)" test -n "$HO_BODY"
+expect_eq "HO-1c …placed immediately before ## Not Doing" "## Not Doing" "$(awk '/^## Handoff[ \t]*$/ { f = 1; next } f && /^## / { print; exit }' "$PHO")"
+HO_FIRST="$(ho_written "$PHO")"
+case "$HO_FIRST" in
+  'written: '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) HO_AT="${HO_FIRST#written: }" ;;
+  *) HO_AT="" ;;
+esac
+expect_true "HO-2 the section's first line is written: <ISO-UTC> ($HO_FIRST)" test -n "$HO_AT"
+HO_E="$([ -n "$HO_AT" ] && ho_epoch "$HO_AT" || echo 0)"
+expect_eq "HO-2b …and it is within 60 s of the clock around the run" "1" "$([ "$HO_E" -ge $((HO_T0 - 60)) ] && [ "$HO_E" -le $((HO_T1 + 60)) ] && echo 1 || echo 0)"
+expect_contains "HO-3 the working branch and its head" "wave/01-fixture @ $HO_WORK" "$HO_BODY"
+expect_contains "HO-3b …the integration branch and its head" "trunk @ $HO_INT" "$HO_BODY"
+expect_contains "HO-4 the active row T2 with its agent, worktree and status" "T2 · w-T2 · 01-T2 · active" "$HO_BODY"
+expect_contains "HO-4b …the second active row T3" "T3 · — · .worktrees/01-T3 · active" "$HO_BODY"
+expect_contains "HO-4c …a pending row that has a worktree" "T6 · — · .worktrees/01-T6 · pending" "$HO_BODY"
+expect_absent "HO-4d …but not a pending row with none (T5)" "T5 ·" "$HO_BODY"
+expect_absent "HO-4e …nor a landed row (T1)" "T1 ·" "$HO_BODY"
+expect_contains "HO-5 the last landed row and its commit (by its time, not its place)" "T4 $HO_LANDED2 2026-10-08T10:30:00Z" "$HO_BODY"
+expect_contains "HO-6 the one live agent and the state the tick prints" "w-T2 · FINISHED rc=0 run=w-T2-x.test.sh" "$HO_BODY"
+expect_contains "HO-7 the last proof line (the newest, any kind)" "kind=review head=$HO_WORK at=2026-10-08T12:30:00Z" "$HO_BODY"
+expect_absent "HO-7b …and not the older one" "old-floor" "$HO_BODY"
+expect_contains "HO-8 a stub for each human line the old section did not have" "- resume instruction: (to fill)" "$HO_BODY"
+expect_eq "HO-8b …five of them" "5" "$(printf '%s\n' "$HO_BODY" | /usr/bin/grep -c -E '^- (decisions approved this session|tried and rejected|surprises|open blockers|resume instruction):')"
+expect_contains "HO-9 it says what it did" "handoff — ## Handoff rewritten at $HO_AT (3 open rows, 1 live agents); written to $(cd "${PHO%/*}" && pwd -P)/${PHO##*/}, dry-committed first." "$OUT"
+s34_gate "$RHO"
+expect_eq "HO-9b the plan with the section is admitted by the real gate" "0" "$GATE_RC"
+
+# A second run carries a human line edited by hand, refreshes written:, and does not grow the section.
+sed 's/^- surprises: .*/- surprises: the fixture was edited by hand\n  and it runs over two lines/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
+sed 's/^- resume instruction: .*/- resume instruction: run T6 next/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
+s42_snap "$RHO" "$PHO"
+HO_N1="$(ho_body "$PHO" | wc -l | tr -d ' ')"
+sleep 2
+poke "$RHO" handoff
+expect_eq "HO-10 a second handoff exits 0" "0" "$RC"
+HO_BODY2="$(ho_body "$PHO")"
+expect_contains "HO-10b …keeps the hand-edited line" "- surprises: the fixture was edited by hand" "$HO_BODY2"
+expect_contains "HO-10c …and its continuation line" "  and it runs over two lines" "$HO_BODY2"
+expect_contains "HO-10d …and the other edited line" "- resume instruction: run T6 next" "$HO_BODY2"
+expect_absent "HO-10e …the stub it replaced is gone" "- resume instruction: (to fill)" "$HO_BODY2"
+HO_AT2="$(ho_written "$PHO")"; HO_AT2="${HO_AT2#written: }"
+expect_eq "HO-10f …written: is refreshed (it differs from the first run's)" "1" "$([ -n "$HO_AT2" ] && [ "$HO_AT2" != "$HO_AT" ] && echo 1 || echo 0)"
+expect_eq "HO-10g …the section is the size it was, continuation line included (rewritten, never appended)" "$HO_N1" "$(ho_body "$PHO" | wc -l | tr -d ' ')"
+expect_eq "HO-10h …one ## Handoff heading in the plan" "1" "$(/usr/bin/grep -c '^## Handoff' "$PHO")"
+expect_eq "HO-10i …and the rest of the plan is as it was (outside ## Handoff, cmp of the two reads)" \
+  "$(awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/) } !h { print }' "$TMPROOT/s42-before")" \
+  "$(awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/) } !h { print }' "$PHO")"
+
+# The run state words: a LOST run (its pid is gone, it wrote no end) and a row that started none.
+: > "$HO_RD/w-T3-y.test.sh.log"
+roster_row_fixture session="$SID" name=w-T3 agent_id=a-w-T3 subagent_type=implementor \
+  run_log="$HO_RD/w-T3-y.test.sh.log" run_pid=999999 run_cmd='tests/run.sh --only y.test.sh' >> "$(roster_of "$RHO")"
+roster_row_fixture session="$SID" name=w-T6 agent_id=a-w-T6 subagent_type=implementor >> "$(roster_of "$RHO")"
+poke "$RHO" handoff
+HO_BODY3="$(ho_body "$PHO")"
+expect_eq "HO-11 three live agents: handoff exits 0" "0" "$RC"
+expect_contains "HO-11b …a run whose pid is gone and wrote no end reads LOST" "w-T3 · LOST last-written=" "$HO_BODY3"
+expect_contains "HO-11c …a row with no run record reads no run" "w-T6 · no run" "$HO_BODY3"
+expect_contains "HO-11d …and the verb counts them" "3 live agents" "$OUT"
+
+# Refusals: the plan stays byte-identical.
+sed 's/^## Tasks$/## Rows/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
+s42_snap "$RHO" "$PHO"
+poke "$RHO" handoff
+s42_unchanged "HO-12 a plan with no ## Tasks" 1 "$PHO"
+expect_contains "HO-12b …saying so" "no ## Tasks" "$OUT"
+sed 's/^## Rows$/## Tasks/; s/^## SDLC State$/## State/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
+s42_snap "$RHO" "$PHO"
+poke "$RHO" handoff
+s42_unchanged "HO-12c a plan with no ## SDLC State" 1 "$PHO"
+expect_contains "HO-12d …saying so" "no ## SDLC State" "$OUT"
+sed 's/^## State$/## SDLC State/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
+s42_snap "$RHO" "$PHO"
+poke "$RHO" handoff now
+expect_eq "HO-13 an operand is the usage error" "2" "$RC"
+expect_true "HO-13b …and the plan is untouched (cmp)" cmp -s "$TMPROOT/s42-before" "$PHO"
+POKE_BOUND="$HO_BOUND_WAS"
+
 finish
