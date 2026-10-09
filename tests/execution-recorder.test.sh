@@ -3503,8 +3503,8 @@ awk 'BEGIN { for (i = 0; i < 40; i++) { for (j = 0; j < 100; j++) printf "\342\2
 expect_ne "PC-e0 the multi-byte file is over the cap in bytes" "0" \
   "$([ "$(wc -c < "$PM_PLUG/context/checks-structure.md" | tr -d ' ')" -gt 9500 ] && echo 1 || echo 0)"
 IFS='|' read -r PM_REPO PM_TR PM_SUB PM_CFG <<< "$(make_world pcmulti yes)"
-sj_intended "$PM_REPO" pm-rev toolu_01PM bionic:reviewer suites_allowed=none questions=structure
-pc_start "$PM_PLUG" "$(mk_subagent_start "$SID_A" "$PM_TR" "$PM_REPO" bionic:reviewer "a0000000000pcmlt")"
+sj_intended "$PM_REPO" pm-rev toolu_01PM bionic:critic suites_allowed=none questions=structure
+pc_start "$PM_PLUG" "$(mk_subagent_start "$SID_A" "$PM_TR" "$PM_REPO" bionic:critic "a0000000000pcmlt")"
 expect_eq "PC-e1 a multi-byte file under the cap in characters is pushed whole" \
   "$(ck_want "$PM_PLUG/context" structure)" "$(pc_ctx structure)"
 expect_empty "PC-e2 …and nothing is logged for it" "$PC_ERR_structure"
@@ -4141,7 +4141,7 @@ expect_eq "CKS-c1 ARM 2 places the unplaced start on its launch (the positive on
   "a00000000cksunp7" "$(sj_field "$CKSE_CONF" agent_id)"
 expect_eq "CKS-c2 …and the placed row says what the start pushed" \
   "checks-structure,severity" "$(sj_field "$CKSE_CONF" pushed)"
-cks_reader "$PC_REPO_ROOT" cksconfrev w-rev reviewer structure a00000000cksrev8
+cks_reader "$PC_REPO_ROOT" cksconfrev w-rev critic structure a00000000cksrev8
 CKSC_REPO="$SANDBOX/cksconfrev/repo"; CKSC_TR="$SANDBOX/cksconfrev/home/.claude/projects/p-cksconfrev/$SID_A.jsonl"
 run_rec "$(mk_agent_post "$SID_A" "$CKSC_TR" "$CKSC_REPO" w-rev a00000000cksrev8 toolu_01a00000000cksrev8)"
 CKSC_CONF=$(grep 'status=confirmed' "$CKSC_REPO/.bionic/tmp/roster-${SID_A}.state" | tail -1)

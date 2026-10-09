@@ -163,7 +163,7 @@ ROSTER_SCHEMA_VERSION="v1"
 #
 # A CONSTANT, NOT A READ OF agents/*.md: ARM C runs on every Bash call in an agent context,
 # and a file read there would be paid by every command (research D3-7).
-ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer Explore Plan"
+ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan"
 
 # A WHOLE-WORD MATCH WITHOUT WORD SPLITTING: the callers include walls.sh, which moves IFS
 # around its argv readers, so a `for r in $SET` loop here would answer by whatever IFS it

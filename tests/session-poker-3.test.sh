@@ -104,7 +104,7 @@ s56_row "$S56_RS" implementor implementor
 s56_row "$S56_RS" w-aud bionic:auditor evidence \
   "$(s56_files ev1 no-reviewed no-question no-result no-scope fine partial other-q ev-fail ev-narrow ev2)"
 s56_row "$S56_RS" w-crit bionic:critic adversarial,structure "$(s56_files adv-late adv1 st-crit)"
-s56_row "$S56_RS" w-rev bionic:reviewer structure "$(s56_files st-all st-no-single st-maybe st-bare)"
+s56_row "$S56_RS" w-rev bionic:critic structure "$(s56_files st-all st-no-single st-maybe st-bare)"
 s56_row "$S56_RS" w-impl bionic:implementor evidence
 s56_row "$S56_RS" w-noq bionic:auditor
 s56_row "$S56_RO" w-old bionic:critic adversarial "$(s56_files adv2)"
@@ -282,7 +282,7 @@ s42_unchanged "56g7 a checks file that names no check id" 1 "$P56"
 POKER="$TMPROOT/s56-tree/hooks/session-poker.sh"
 poke "$R56" proof-add review record/wave-01-fixture/st-all.md --question structure --reader w-rev
 expect_eq "56g8 a structure record answering all seven registers (exit 0)" "0" "$RC"
-expect_contains "56g9 …as a structure reading by the reviewer" "question=structure reader=w-rev result=pass scope=whole" \
+expect_contains "56g9 …as a structure reading by a critic dealt structure alone" "question=structure reader=w-rev result=pass scope=whole" \
   "$(s46_proved "$P56" | tail -1)"
 s56_rec st-crit.md "$S56_C4" "$S56_C4" structure flag piece "$S56_ALL"
 poke "$R56" proof-add review record/wave-01-fixture/st-crit.md --question structure --reader w-crit
@@ -628,7 +628,7 @@ S58_REV_FILES="$(s58_files stack.md rc-pass-flag.md rc-pass-fail.md rc-flag-fail
 S58_CRIT_FILES="$(s58_files stack-ok.md stack-one.md w-tail.md w-base.md w-anc.md w-piece-tail.md)"
 S58_AUD_FILES="$(s58_files above.md v-pipe.md v-two.md v-scope.md aud-files.md)"
 for s58st in intended confirmed; do
-  s58_row r-rev bionic:reviewer "$s58st" structure "$S58_REC/rev.md" "$S58_REV_FILES"
+  s58_row r-rev bionic:critic "$s58st" structure "$S58_REC/rev.md" "$S58_REV_FILES"
   s58_row r-crit bionic:critic "$s58st" adversarial "$S58_REL/crit.md" "$S58_CRIT_FILES"
   s58_row r-aud bionic:auditor "$s58st" evidence "$S58_REL/aud.md" "$S58_AUD_FILES"
 done
@@ -838,7 +838,7 @@ s59_row() {  # <name> <type> <status> <questions> <deliverable> <files> -> one r
 for s59st in intended confirmed; do
   s59_row w-aud bionic:auditor "$s59st" evidence "$S59_REL/ev.md" ""
   s59_row w-crit bionic:critic "$s59st" adversarial,structure "$S59_REL/adv.md" "$S59_REL/adv-2.md,$S59_REL/str-2.md"
-  s59_row w-rev bionic:reviewer "$s59st" structure "$S59_REL/str-rev.md" ""
+  s59_row w-rev bionic:critic "$s59st" structure "$S59_REL/str-rev.md" ""
 done
 P59="$(s42_plan "$R59" 4)"
 ( cd "$R59" && git worktree add -q -b wave/01-fixture "$R59/.worktrees/01-fixture" \
@@ -1824,7 +1824,7 @@ expect_eq "63v3 …so the judge covers adversarial and leaves structure absent" 
 # On section 58's repository and plan: its reader rows, its planted checks tree, its commits. New
 # rows are planted for new names, each naming the records its cases register (the shape T41 holds).
 s58_row r-dup bionic:auditor confirmed evidence "$S58_REL/dup-r.md" "$(s58_files dup-q.md dup-s.md dup-ok.md)"
-s58_row r-dupc bionic:reviewer confirmed structure "$S58_REL/dup-c.md" "$(s58_files multi.md)"
+s58_row r-dupc bionic:critic confirmed structure "$S58_REL/dup-c.md" "$(s58_files multi.md)"
 s58_row r-sh1 bionic:auditor confirmed evidence "$S58_REL/shared.md" "$(s58_files solo.md)"
 s58_row r-sh2 bionic:auditor confirmed evidence "" "$(s58_files shared.md)"
 s58_rec dup-r.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "result: fail" "scope: piece"
@@ -2517,10 +2517,10 @@ s67_unchecked "$R67N" ac67-6700000000000001 bionic:critic H1,H2
 poke_pressure "$R67N" 8192 1.0 tick
 expect_contains "67c0 precondition: the first reader is named" \
   "poker: NOTIFY — a bionic:critic started without its checks: candidates H1, H2" "$OUT"
-s67_unchecked "$R67N" ar67-6700000000000002 bionic:reviewer H3,H4
+s67_unchecked "$R67N" ar67-6700000000000002 bionic:auditor H3,H4
 poke_pressure "$R67N" 8192 1.0 tick
 expect_contains "67c1 §NOTIFY-WHOLE a second reader on a later tick is named" \
-  "poker: NOTIFY — a bionic:reviewer started without its checks: candidates H3, H4" "$OUT"
+  "poker: NOTIFY — a bionic:auditor started without its checks: candidates H3, H4" "$OUT"
 expect_eq "67c2 …once, and the first is not named again" "1" "$(count_lines_matching 'started without its checks' "$OUT")"
 expect_eq "67c3 …and it is marked told once, by the tick that printed it" "1" "$(s67_told "$R67N" ar67-6700000000000002)"
 s67_unchecked "$R67N" ac67-6700000000000003 bionic:critic H1,H2
@@ -2565,7 +2565,7 @@ expect_eq "67d6 …and no second unplaced row was written" "1" \
 unset CLAUDE_CONFIG_DIR
 
 # §AMEND-CAP (left open by T49; A-orch-96). The amend door counted the added runs with no
-# `Questions:` line, so a critic or reviewer holding `evidence` got the writer's cap of 200. An
+# `Questions:` line, so a critic holding `evidence` got the writer's cap of 200. An
 # amend on a row whose `questions=` holds `evidence` is now held to the dispatch wall's cap of
 # three, counted over the row's runs after the amend, housekeeping excepted, and a fourth is
 # refused naming the cap. The rows are the dispatch wall's shape (`roster_row_fixture`). The
@@ -2587,7 +2587,7 @@ s67_runs() {  # <repo> <name> -> the marked runs on the name's last row that are
 s67_sum() { cksum < "$(roster_of "$1")"; }
 require_helpers s67_reader s67_runs s67_sum
 s67_reader "$R67Q" crit bionic:critic evidence
-s67_reader "$R67Q" rev bionic:reviewer adversarial
+s67_reader "$R67Q" rev bionic:critic adversarial
 s67_reader "$R67Q" wri bionic:implementor ""
 expect_eq "67e0 precondition: each row declares two counted runs" "2 2 2" \
   "$(s67_runs "$R67Q" crit) $(s67_runs "$R67Q" rev) $(s67_runs "$R67Q" wri)"
@@ -2617,7 +2617,7 @@ poke "$R67Q" amend crs --suites+ tests/d.test.sh --reason 'a fourth suite'
 expect_eq "67e13 a fourth by --suites+ beside three suites is refused (exit 1; T57's count of suites and runs)" "1" "$RC"
 expect_eq "67e14 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
 poke "$R67Q" amend rev --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
-expect_eq "67e9 a reviewer not dealt evidence takes a fourth, as today (exit 0)" "0" "$RC"
+expect_eq "67e9 a critic not dealt evidence takes a fourth, as today (exit 0)" "0" "$RC"
 expect_eq "67e10 …and holds four" "4" "$(s67_runs "$R67Q" rev)"
 poke "$R67Q" amend wri --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
 expect_eq "67e11 a writer's row takes a fourth, as today (exit 0)" "0" "$RC"
@@ -2702,18 +2702,19 @@ s74_unplaced() {  # <repo> <type> <tag> <questions of one launch> <questions of 
 s74_start() { s66_start "$1" "$2" "$3"; s66_ran "$3"; }  # <repo> <type> <agent id>
 s74_line() { /usr/bin/grep -F "start-unchecked/v1|event=start|" "$(roster_of "$1")" | /usr/bin/grep -F "|agent_id=$2|"; }
 require_helpers s74_total s74_unplaced s74_start s74_line
-for s74_role in critic auditor reviewer; do
+for s74_role in critic auditor critic-noev; do
+  s74_type="${s74_role%-noev}"
   case "$s74_role" in
     critic)   s74_q1=evidence,adversarial,structure; s74_q2=adversarial ;;
     auditor)  s74_q1=evidence; s74_q2=evidence,structure ;;
-    reviewer) s74_q1=structure; s74_q2=adversarial ;;   # dealt no evidence: the strict side holds it all the same
+    critic-noev) s74_q1=structure; s74_q2=adversarial ;;   # a critic dealt no evidence: the strict side holds it all the same
   esac
   R74="$(make_repo "s74-$s74_role")"; new_roster "$R74"
-  s74_unplaced "$R74" "bionic:$s74_role" "u$s74_role" "$s74_q1" "$s74_q2"
+  s74_unplaced "$R74" "bionic:$s74_type" "u$s74_role" "$s74_q1" "$s74_q2"
   S74_ID="a74-${s74_role}-000000000001"
-  s74_start "$R74" "bionic:$s74_role" "$S74_ID"
+  s74_start "$R74" "bionic:$s74_type" "$S74_ID"
   expect_contains "74a0 ($s74_role) precondition: the start is recorded unplaced, with its role" \
-    "|role=bionic:$s74_role|" "$(s74_line "$R74" "$S74_ID")"
+    "|role=bionic:$s74_type|" "$(s74_line "$R74" "$S74_ID")"
   expect_empty "74a0b ($s74_role) precondition: …and no row carries its id" "$(s66_pick "$R74" "$S74_ID")"
   S74_RCS=""
   for s74_n in n1 n2 n3; do
@@ -2733,9 +2734,9 @@ for s74_role in critic auditor reviewer; do
   expect_eq "74a7 ($s74_role) a fourth hidden as rm -rf x & pytest is refused (exit 1)" "1" "$RC"
   expect_eq "74a8 ($s74_role) …and the row still holds three" "3" "$(s74_total "$R74" "$S74_ID")"
   S74_ID2="a74-${s74_role}-000000000002"
-  s74_start "$R74" "bionic:$s74_role" "$S74_ID2"
+  s74_start "$R74" "bionic:$s74_type" "$S74_ID2"
   expect_contains "74b0 ($s74_role) precondition: a second unplaced start is recorded with its role" \
-    "|role=bionic:$s74_role|" "$(s74_line "$R74" "$S74_ID2")"
+    "|role=bionic:$s74_type|" "$(s74_line "$R74" "$S74_ID2")"
   S74_SUM="$(cksum < "$(roster_of "$R74")")"
   poke "$R74" amend "$S74_ID2" --suites+ tests/n1.test.sh --suites+ tests/n2.test.sh \
     --suites+ tests/n3.test.sh --suites+ tests/n4.test.sh --reason 'four at once'
