@@ -28,14 +28,19 @@ be sat again before the tree is green.
     named the planted defect and did not reach the result for another reason),
     `finding-file: <path>` (the file the record's `finding:` line must name: the planted defect's,
     or the owner it bypasses) and `finding-rating: <S> <reach>` (the ratings that pass it, each
-    one the table sends to fix). A `token:`, `names:`, `finding-file:` or `finding-rating:` line
+    one the table sends to fix). A debt sample (wave-30 T22) carries `finding-kind: <kind>` in place of
+    `finding-rating:`, a kind of the debt table in `severity.md`: its record must carry a `debt:` line
+    of that kind naming one of the key's files, with no severity and no reach, and its `result:` is
+    `flag`. A `token:`, `names:`, `finding-file:` or `finding-rating:` line
     may hold alternatives separated by ` | `, any one of which meets it: the spellings a finder
     writes for the same thing.
 - `score.sh`: `exam_score <expect.txt> <record>` prints `met: declared` (the record declares the
   planted defect; `clean` asks no declaration and prints `met`), or `missed`, which says why when
   the miss is the declaration: `missed: described only`, `missed: declared at <S> <reach>:
   deferred` (or `noted`), `missed: no finding names <file>`, `missed: finding lines refused:
-  <why>`. It reads the `finding:` lines through `proof_findings` of
+  <why>`; on a debt key, `missed: no debt line names <file>`, `missed: declared as debt <kind>: not the
+  kind this key asks`, or `missed: declared at <S> <reach>: a debt key asks a debt: line of kind
+  <kind>`. It reads the `finding:` and `debt:` lines through `proof_findings` of
   `payload/scripts/lib/proof.sh`, the reader the registering verb uses. Sourced, it defines its
   functions and runs nothing. It is step 5 below, and the suite holds the real keys to it.
 - `materialize.sh <sample dir> <dest>`: builds the repository a reader is given, with an empty
@@ -58,7 +63,7 @@ workaround, `S2 on`); a defect the table would defer or note at any honest ratin
 retired for that reason at wave-28 T18: a duplicate that agrees with its owner has no functional
 effect, which the scale rates S4 and the table notes.
 
-| sample | question | key (each also declares a finding on its file, rated `S1 on`, `S1 off` or `S2 on`) | rebuilt from |
+| sample | question | key (each harm sample also declares a finding on its file, rated `S1 on`, `S1 off` or `S2 on`; the debt sample a `debt:` line) | rebuilt from |
 |---|---|---|---|
 | `dup-counter` | structure | `fail`, `check: reuse FAIL` or `check: one-site FAIL`, names `tree_dirty_count`, file `bin/stamp.sh` | `review.md` (final review): the duplication FLAG, "three dirty-tree counters", and its ownership row for the run stamp, where the stamp writer computed the dirty count again instead of using the one the land reads, and computed it differently |
 | `admit-not-require` | evidence | `fail`, `REFUTED`, names `land.sh`, file `bin/land.sh`, `lib/fullrun.sh` or `docs/plan.md` | `auditor.md` §1b item 1, AC-3.4 REFUTED: the requirement said a full run "is required", the design and its test only showed one is admitted, and the land took the tree with none |
@@ -66,6 +71,7 @@ effect, which the scale rates S4 and the table notes.
 | `trust-boundary` | adversarial | `fail`, `archive_branch`, names `eval`, file `lib/archive.sh` or `lib/gitrun.sh`, rated `S1 on` or `S2 on` | the Security and trust boundaries clause of `checks-adversarial.md` (wave-30 T4): what untrusted input reaches the change, what it exercises, whether it fails closed. A branch name from an outside contributor is spliced into a command string that is run through the shell, when the owner `git_run` already passes it as an argument |
 | `power-gap` | evidence | `fail`, `REFUTED`, names `reap_listed`, file `lib/reap.sh` or `docs/plan.md`, rated `S1 on` or `S2 on` | the per-row line of `checks-evidence.md` (wave-30 T4): does a changed condition have a test that fails when it is wrong. The change reorders a guard, the row for the guard cites an old test that never reaches the new order, and the guard is wrong on the branch no test enters |
 | `known-limit-regression` | adversarial | `fail`, `Known limit`, names `suite_verdict`, file `bin/run-suite.sh` or `lib/verdict.sh`, rated `S1 on` or `S2 on` | the Known limits clause of `checks-adversarial.md` (wave-30 T4): the changelog lists a limit with the path that handles it, and the change takes that path out of the one entry point that ran it |
+| `over-engineering` | structure | `flag`, `over-engineering` or `one-case-abstraction`, names `name_by_scheme`, `NAME_SCHEMES` or `scheme_task`, file `lib/naming.sh`, declared as a `debt:` line of kind `one-case-abstraction` (no rating) | the over-engineering item of `checks-structure.md` (wave-30 T4), a debt finding on the debt table of `severity.md`: the change routes the one branch-name format through a registry of naming schemes that holds one scheme and has one caller |
 | `clean` | all three | not `fail`, `branch-name` | no defect: a small change that reuses what exists, with its spec, design table, matrix and evidence in order |
 
 ## Sitting the exam

@@ -1040,6 +1040,83 @@ ask-b.test.sh work 0
 ask-c.test.sh work 0" "$(ra_reqs)"
 
 # ============================================================
+section "§SCRUB a suite never sees the runner's store; the timing-bound suite is solo (wave-30 T9; REQ-4 AC-4.1, AC-4.2; D8)"
+# ============================================================
+#
+# THE CLAIM. A runner and its workers keep BIONIC_GATE_DIR for their own ask and end, but the SUITE
+# PROCESS a worker starts loses it: a suite that reads the gate through the inherited variable read
+# the run's store (the doctor-reads checks did), and a suite that wants a store makes its own fixture.
+# Driven on a scratch tree carrying the shipped runner: a probe suite prints what it sees of the
+# variable, in the parallel batch, as a solo suite and under --serial, while the gate store the run
+# named still holds the probe's own request (the ask is not scrubbed). The second half is the timing
+# marker: the real roster's dry run lists the §EG-DERIVE suite as solo, and no suite that carries
+# the 1200 ms derivation bound is anything else.
+TS="$TMPROOT/scrub"; RS_GATE="$TMPROOT/scrub-gate"
+rr_tree "$TS"
+rs_probe() {  # <name> <solo yes|no> — a green suite that records the gate variable it sees
+  { printf '#!/bin/bash\n'
+    [ "$2" = yes ] && printf '# runner: solo\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf 'printf "%%s\\n" "BIONIC_GATE_DIR=${BIONIC_GATE_DIR:-unset}" > "$RR_MARKS/%s.seen"\n' "$1"
+    printf 'section "%s"\n' "$1"
+    printf 'expect_eq "%s ran" "x" "x"\n' "$1"
+    printf 'finish\n'
+  } > "$TS/tests/$1.test.sh"
+}
+rs_probe probe-a no
+rs_probe aaa-probe-solo yes
+rs_drive() {  # [mode] — the scratch runner started under a store of this section's own; RR_OUT, RR_RC
+  RR_OUT="$( cd "$TS" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/scrub-ring" \
+    BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 \
+    BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+    env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RS_GATE" bash tests/run.sh ${1:+"$1"} 2>&1 )"
+  RR_RC=$?
+}
+rs_keys() {  # the keys of the requests in the store, each with its code, sorted
+  local f
+  for f in "$RS_GATE"/requests/[0-9]*; do
+    [ -f "$f" ] || continue
+    printf '%s %s\n' "$(sed -n 's/^key=//p' "$f" | tail -n 1)" "$(sed -n 's/^rc=//p' "$f" | tail -n 1)"
+  done | sort
+}
+rm -rf "$RS_GATE"; rm -f "$RR_MARKS"/*.seen
+rs_drive
+expect_eq "SCRUB.1 the run is green" "0" "$RR_RC"
+expect_eq "SCRUB.2 the probe in the batch saw no BIONIC_GATE_DIR, though the run was started under one" \
+  "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
+expect_eq "SCRUB.3 …and so did the solo probe" "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/aaa-probe-solo.seen" 2>/dev/null)"
+expect_eq "SCRUB.4 …while the worker's own ask landed in the run's store, each ended with its code (the ask is not scrubbed)" \
+  "aaa-probe-solo.test.sh 0
+probe-a.test.sh 0" "$(rs_keys)"
+rm -rf "$RS_GATE"; rm -f "$RR_MARKS"/*.seen
+rs_drive --serial
+expect_eq "SCRUB.5 --serial is green" "0" "$RR_RC"
+expect_eq "SCRUB.6 …and its probe saw no BIONIC_GATE_DIR either" "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
+expect_eq "SCRUB.7 …with the ask in the run's store as well" \
+  "aaa-probe-solo.test.sh 0
+probe-a.test.sh 0" "$(rs_keys)"
+# PAIRED CONTROL: the probe does print the variable when it is set (the readback is real output, not silence).
+rm -f "$RR_MARKS/probe-a.seen"
+BIONIC_GATE_DIR=control-store RR_MARKS="$RR_MARKS" bash "$TS/tests/probe-a.test.sh" >/dev/null 2>&1
+expect_eq "SCRUB.8 the probe run by hand under a store reads it back" "BIONIC_GATE_DIR=control-store" \
+  "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
+
+# AC-4.1 — the timing-bound suite is solo, on the real roster.
+RS_DRY="$( cd "$REPO" && BIONIC_PRESSURE_RING="$TMPROOT/scrub-dry-ring" BIONIC_NOW_EPOCH="$RR_NOW" \
+  BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+  env "${RR_GATE_ENV[@]}" bash tests/run.sh --dry-run 2>&1 )"
+expect_contains "SCRUB.9 the shipped roster's dry run lists the §EG-DERIVE suite as solo" \
+  "solo: bash-walls-egd.test.sh" "$RS_DRY"
+expect_absent "SCRUB.10 …and the composition suite, which carries no clock, is not listed as solo" \
+  "solo: bash-walls.test.sh" "$RS_DRY"
+RS_BOUNDED="$( cd "$REPO" && for _rs in tests/*.test.sh; do
+  /usr/bin/grep -q '^EGD_BOUND_MS=' "$_rs" || continue
+  if head -n 30 "$_rs" | /usr/bin/grep -qE '^# runner: solo[[:space:]]*$'; then echo "${_rs##*/} solo"; else echo "${_rs##*/} NOT-SOLO"; fi
+done )"
+expect_eq "SCRUB.11 the only suite carrying the 1200 ms derivation bound is the solo one" "bash-walls-egd.test.sh solo" "$RS_BOUNDED"
+
+# ============================================================
 section "§11 NESTED — a solo suite asks for the whole machine; a nested run never waits on its parent (wave-26 T8, AC-6.4; the gate since wave-28 T12)"
 # ============================================================
 #
@@ -1116,17 +1193,18 @@ rrn_suite "$TNI/tests/aaa-inner.test.sh" yes aaa-inner "RRN_WHO=\"inner-\$RRN_TA
 $RRN_RECORD"
 
 # The outer tree: a solo suite that records its hold and drives the inner run, and a batch
-# suite that drives the inner run too.
+# suite that drives the inner run too. The runner hands a suite no BIONIC_GATE_DIR (§SCRUB), so
+# each suite names the section's store for the nested run itself: it is the store the nesting is about.
 rrn_outer_tree() {  # <dir>
   rr_tree "$1"
   rrn_suite "$1/tests/aaa-nest.test.sh" yes aaa-nest "RRN_WHO=outer
 $RRN_RECORD
 printf '99\n' > \"\$RRN_LOAD\"
-( cd \"\$RRN_INNER\" && RRN_TAG=solo bash tests/run.sh ) > \"\$RRN_MARKS/inner-solo.out\" 2>&1
+( cd \"\$RRN_INNER\" && RRN_TAG=solo BIONIC_GATE_DIR=\"\$RRN_GATE\" bash tests/run.sh ) > \"\$RRN_MARKS/inner-solo.out\" 2>&1
 printf '%s\n' \"\$?\" > \"\$RRN_MARKS/inner-solo.rc\"
 printf '0\n' > \"\$RRN_LOAD\""
   rrn_suite "$1/tests/n-batch.test.sh" no n-batch \
-"( cd \"\$RRN_INNER\" && RRN_TAG=batch bash tests/run.sh ) > \"\$RRN_MARKS/inner-batch.out\" 2>&1
+"( cd \"\$RRN_INNER\" && RRN_TAG=batch BIONIC_GATE_DIR=\"\$RRN_GATE\" bash tests/run.sh ) > \"\$RRN_MARKS/inner-batch.out\" 2>&1
 printf '%s\n' \"\$?\" > \"\$RRN_MARKS/inner-batch.rc\""
 }
 TNO="$RRN/outer"
@@ -1703,7 +1781,7 @@ cat > "$TT/tests/t-outer.test.sh" <<'RRT_NESTED'
 set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 section "t-outer"
-( cd "$RRT_INNER" && bash tests/run.sh >/dev/null 2>&1 )
+( cd "$RRT_INNER" && BIONIC_GATE_DIR="$RRT_GATE" bash tests/run.sh >/dev/null 2>&1 )
 expect_eq "the nested run over the inner tree is green" "0" "$?"
 finish
 RRT_NESTED
@@ -1711,7 +1789,7 @@ RRT_NESTED
 rrt_drive() {  # <dir> <timing-file> [mode] — leaves RR_OUT and RR_RC
   local dir="$1" tf="$2" mode="${3:-}"
   RR_OUT="$( cd "$dir" && \
-    RR_MARKS="$RR_MARKS" RRT_INNER="$TT_INNER" \
+    RR_MARKS="$RR_MARKS" RRT_INNER="$TT_INNER" RRT_GATE="$TMPROOT/gate" \
     BIONIC_PRESSURE_RING="$TMPROOT/ring" \
     BIONIC_NOW_EPOCH="$RR_NOW" \
     BIONIC_TEST_JOBS_CEILING="2" \
@@ -1869,7 +1947,9 @@ section "§ORDER the roster runs longest-first from tests/timing.tsv; a full run
 # LAUNCHES by it: suites the table knows, longest first (ties by label), then the suites it
 # does not know in roster order; solo suites keep their own drain after the batch and are
 # ordered the same way inside it. `--dry-run` prints that order, `<label>TAB<seconds|->` per
-# line. A full run that completes rewrites the table from its own measurements; `--only` never.
+# line. A full run given `--write-timing` rewrites the table from its own measurements; a
+# default full run, `--only` and `--dry-run` never (T31: the proof reads the run's stamp for
+# dirty=0, so a default run must leave the tree it proved clean).
 #
 # NOT VACUOUS. The fixture table orders three suites AGAINST alphabetical order (a=100, b=900,
 # c=500), so a runner that ignored the table, or sorted by name, prints a different order than
@@ -1946,8 +2026,8 @@ for _n in a b c; do rr_stub "$TORW" "ord-$_n"; done
   printf 'section "f"\nexpect_eq "f fails" "1" "2"\nfinish\n'; } > "$TORW/tests/ord-f.test.sh"
 printf 'ord-a.test.sh\t100\nord-b.test.sh\t900\nord-c.test.sh\t500\nord-f.test.sh\t77\nord-gone.test.sh\t999\n' > "$TORW/tests/timing.tsv"
 cp "$TORW/tests/timing.tsv" "$TMPROOT/order-write.before"
-rr_drive "$TORW"
-expect_eq "ORDER.12 the full run with a failing suite fails (the rewrite is not tied to a green run)" "1" "$RR_RC"
+rr_drive "$TORW" "--write-timing"
+expect_eq "ORDER.12 the --write-timing full run with a failing suite fails (the rewrite is not tied to a green run)" "1" "$RR_RC"
 ORW_NEW="$(cat "$TORW/tests/timing.tsv")"
 expect_eq "ORDER.13 the table was rewritten with measured integers for the suites that passed" "3" \
   "$(printf '%s\n' "$ORW_NEW" | grep -cE '^ord-[abc]\.test\.sh	[0-9]+$')"
@@ -1972,6 +2052,41 @@ expect_eq "ORDER.19 …and leaves the table byte for byte as it was" "yes" \
 rr_drive "$TORW" "--dry-run"
 expect_eq "ORDER.20 --dry-run leaves the table byte for byte as it was" "yes" \
   "$(cmp -s "$TMPROOT/order-write.before" "$TORW/tests/timing.tsv" && echo yes || echo no)"
+
+# THE DEFAULT ARM (T31). A git fixture: the table committed, a default full run, and the tree
+# is clean and the table byte for byte. The positive on the same extractor comes first: the
+# run is green and ran both suites, and the SAME fixture with --write-timing changes the
+# table and dirties the tree, so an empty `git status` below is not an extractor that says
+# nothing.
+TORD="$TMPROOT/order-default"
+rr_tree "$TORD"
+for _n in a b; do rr_stub "$TORD" "ord-$_n"; done
+printf 'ord-a.test.sh\t100\nord-b.test.sh\t900\n' > "$TORD/tests/timing.tsv"
+cp "$TORD/tests/timing.tsv" "$TMPROOT/order-default.before"
+( cd "$TORD" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -q -m fixture ) >/dev/null 2>&1
+ord_dirty() { git -C "$TORD" status --porcelain 2>/dev/null; }
+expect_eq "ORDER.23 the fixture tree starts clean (git status --porcelain is empty and git answered)" "0 0" \
+  "$(git -C "$TORD" rev-parse --verify -q HEAD >/dev/null 2>&1; echo $?) $(ord_dirty | wc -l | tr -d ' ')"
+rr_drive "$TORD"
+expect_eq "ORDER.24 a default full run is green and ran both suites" "0 ord-a.test.sh ord-b.test.sh" \
+  "$RR_RC $(ord_labels "$RR_OUT" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "ORDER.25 …and leaves the table byte for byte as it was" "yes" \
+  "$(cmp -s "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv" && echo yes || echo no)"
+expect_eq "ORDER.26 …and leaves the tree clean (git status --porcelain is empty)" "0" "$(ord_dirty | wc -l | tr -d ' ')"
+rr_drive "$TORD" "--write-timing"
+expect_eq "ORDER.27 the same fixture with --write-timing is green and rewrites the table (the positive for ORDER.25–26)" "0 no" \
+  "$RR_RC $(cmp -s "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv" && echo yes || echo no)"
+expect_eq "ORDER.28 …and the tree reads dirty by exactly that file" " M tests/timing.tsv" "$(ord_dirty)"
+# A partial run must not rewrite a whole-roster table: refused with one line, nothing runs.
+cp "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv"
+RR_OUT="$( cd "$TORD" && env "${RR_GATE_ENV[@]}" bash tests/run.sh --write-timing --only ord-a.test.sh 2>&1 )"; RR_RC=$?
+expect_eq "ORDER.29 --write-timing with --only is refused with one line, rc 2, nothing ran" \
+  "2 tests/run.sh: --write-timing needs a full run; it is refused with --only and with --dry-run" "$RR_RC $RR_OUT"
+RR_OUT="$( cd "$TORD" && env "${RR_GATE_ENV[@]}" bash tests/run.sh --dry-run --write-timing 2>&1 )"; RR_RC=$?
+expect_eq "ORDER.30 --write-timing with --dry-run is refused the same way" \
+  "2 tests/run.sh: --write-timing needs a full run; it is refused with --only and with --dry-run" "$RR_RC $RR_OUT"
+expect_eq "ORDER.31 …and the table is as it was" "yes" \
+  "$(cmp -s "$TMPROOT/order-default.before" "$TORD/tests/timing.tsv" && echo yes || echo no)"
 
 # THE MUTANT: a runner that never reads the table (the order function returns the roster as is)
 # must move ORDER.3 — otherwise the pins above would pass on an unordered runner.

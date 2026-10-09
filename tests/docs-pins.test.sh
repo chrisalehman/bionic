@@ -2246,8 +2246,14 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # rather than drop the label from a role file the AC names, or touch a template outside T3's
 # declared Files to trim further; logged as A-T3.3 in record/wave-16-fixit-183/assumptions.md.
 
+#
+# ROLE_TOTAL_CAP RAISED 26,400 -> 26,520 (epic-23 wave-30 T12, A-T12.12, REQ-3 AC-3.3): the
+# test-runner's Bounds gain one sentence the AC names in that role file ("Exit 137 is a kill, not a
+# timeout, …"), 139 B rendered at its shortest; the measured total is 26,517 B against 21 B of
+# headroom the last raise left. Same ratchet, same reason: the sentence belongs to the role.
+
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=26400
+ROLE_TOTAL_CAP=26520
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -2543,8 +2549,9 @@ for _n in 0 1 2 3 4 5 6 7 8 9; do
     "${SPLIT_SKILL_DIR}/steps/${_n}.md" 14000
 done
 
+# Raised 35,000 -> 35,500 B at wave-30 T9 (A-T9.8): the one no-store paragraph (248 B, REQ-4 AC-4.2) left 17 B of headroom.
 le_cap "113: AC-1b.3 — the dispatch reference is at or under its cap (fails-when: the dispatch body grows back)" \
-  "$SPLIT_DISPATCH" 35000
+  "$SPLIT_DISPATCH" 35500
 
 # steps/4.md's own cap — the no-new-Step-4-prose wall (REQ-1b: "No new Step-4 prose is
 # authored: the dispatch reference serves Step 4").
@@ -3438,10 +3445,12 @@ expect_eq "155: AC-3.1 — dispatch.md carries no 'TaskCreate fresh copies' text
 # rises above 34,993", so strictly-under is the passing direction and equal-to is a miss
 # (a render that dropped the prose but re-added equal bytes elsewhere would not be a cut).
 DISPATCH_BYTES_156="$(wc -c < "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
-if [ -n "$DISPATCH_BYTES_156" ] && [ "$DISPATCH_BYTES_156" -lt 34993 ] 2>/dev/null; then
-  ok "156: AC-3.1 — dispatch.md is smaller than its 34,993 B pre-cut baseline ($DISPATCH_BYTES_156 B < 34993 B)"
+# WAVE-30 T9 (A-T9.8): the ceiling moved 34,993 -> 35,500 B for the one no-store paragraph (248 B, REQ-4 AC-4.2);
+# a sitting item beside A-orch-14 (2). The brake it still is: dispatch.md may not grow past 35,500 B.
+if [ -n "$DISPATCH_BYTES_156" ] && [ "$DISPATCH_BYTES_156" -lt 35500 ] 2>/dev/null; then
+  ok "156: AC-3.1 — dispatch.md is smaller than its 35,500 B ceiling (wave-30 T9; was 34,993 B) ($DISPATCH_BYTES_156 B < 35500 B)"
 else
-  no "156: AC-3.1 — dispatch.md is smaller than its 34,993 B pre-cut baseline" \
+  no "156: AC-3.1 — dispatch.md is smaller than its 35,500 B ceiling (wave-30 T9; was 34,993 B)" \
      "${DISPATCH_BYTES_156:-unreadable} B"
 fi
 
@@ -6624,5 +6633,82 @@ expect_nonempty "W30-D3m precondition: the cut copy keeps the harm table" "$(mar
 expect_eq "W30-D3m: a scale with the debt table's header cut is caught" "" "$(w30d_rows "$W30D_DOC3")"
 expect_nonempty "W30-D4: AC-11.1 — the structure checks rate reuse and one-site on the debt table, by kind" \
   "$(w26_hits "$W30D_STRUCT" "${REPO}/payload/context/checks-structure.md")"
+
+# ============================================================
+section "§W30-SCRUB (wave-30 T9; REQ-4 AC-4.2, D8): dispatch.md says the runner hands a suite no gate store"
+# ============================================================
+# WHAT THIS OWNS. The rendered dispatch doctrine carries the sentence for AC-4.2's static half: the runner hands every
+# suite an environment with no gate store, `tests/run.sh` strips `BIONIC_GATE_DIR` from each worker's suite process, a
+# runner exports none itself, and a suite that needs a store makes its own fixture. The behaviour is proved in
+# runner-roster §SCRUB; this pins the words a runner reads. The test-runner role's own sentence is T12's.
+W30S_HAND='The runner hands every suite an environment with no gate store'
+W30S_STRIP='`tests/run.sh` strips `BIONIC_GATE_DIR` from each worker'"'"'s suite process, and a runner exports none itself'
+W30S_OWN='A suite that needs a store makes its own fixture.'
+for _w30s in "$W30S_HAND" "$W30S_STRIP" "$W30S_OWN"; do
+  expect_nonempty "W30-S1: AC-4.2 dispatch.md says: ${_w30s:0:72}" "$(w26_hits "$_w30s" "$DISPATCH_MD")"
+done
+W30S_CUT="$TMP/w30s-no-sentence.md"
+/usr/bin/grep -vF -- 'No store in a suite.' "$DISPATCH_MD" > "$W30S_CUT" 2>/dev/null
+expect_nonempty "W30-S2m precondition: the cut copy keeps the surrounding doctrine (the One gate paragraph)" \
+  "$(w26_hits '**One gate.**' "$W30S_CUT")"
+expect_eq "W30-S2m: …and a dispatch.md with the sentence's paragraph cut is caught" "" "$(w26_hits "$W30S_HAND" "$W30S_CUT")"
+
+# ============================================================
+section "§W30-DEBT-LEDGER (wave-30 T22; REQ-11 AC-11.2, AC-11.4, D2, P2): operational-rules documents the run's debt ledger, its printed lines and its carry"
+# ============================================================
+# WHAT THIS OWNS. The records table of operational-rules.md carries a `debt ledger` row: the path, the
+# header and the item line exactly as lib/proof.sh's PROOF_DEBT_HEADER spells them (one shape, two
+# places, held together here), the verb that writes it, and the three lines the tools print from it
+# (the dispatch advisory, ready's landing line, the release card's). The close-out section names the
+# continuation's `debt:` line in the form close-out.sh writes. The parser's kinds (PROOF_DEBT_KINDS) are
+# the debt table's kinds of severity.md, in its order. HERMETIC: committed files by path.
+W30L_PROOF="${REPO}/payload/scripts/lib/proof.sh"
+W30L_CO="${REPO}/payload/scripts/close-out.sh"
+W30L_OPEN='| debt ledger | `<docs-root>/record/<the bound plan'"'"'s name less .plan.md>/debt.md`'
+W30L_HDR="$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_HEADER"' _ "$W30L_PROOF" 2>/dev/null)"
+expect_nonempty "W30-L0 precondition: lib/proof.sh defines the ledger's header" "$W30L_HDR"
+# w30l_row <file> -> the records table's debt ledger row, or nothing.
+w30l_row() { /usr/bin/grep -F -- "$W30L_OPEN" "$1" 2>/dev/null | head -n 1; }
+W30L_ROW="$(w30l_row "$OPRULES")"
+expect_nonempty "W30-L1: AC-11.2 — operational-rules.md's records table carries the debt ledger row" "$W30L_ROW"
+expect_contains "W30-L2: …its header, as lib/proof.sh writes it (each | escaped for the table)" \
+  "\`${W30L_HDR//|/\\|}\`" "$W30L_ROW"
+for _w30l in '`<concept> \| <kind> \| <sites> \| raised-by <record> \| touches <N> \| —`' '`burned <row>`' \
+  '`session-poker.sh debt add <reading record> [<plan>]`' '`debt touched <concept> [<plan>]`' '`debt burn <concept> <row> [<plan>]`' \
+  '`debt: <concept> <kind> touches <N> — burn it in this row or say why not`' '`debt: burned <N>, touched <M>`' '`debt: touched <N> · burned <M>`'; do
+  expect_contains "W30-L3: …and says ${_w30l:0:60}" "$_w30l" "$W30L_ROW"
+done
+W30L_CARRY='debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>'
+expect_nonempty "W30-L4: AC-11.2 — the close-out section names the continuation's debt line" "$(w26_hits "\`$W30L_CARRY\`" "$OPRULES")"
+expect_nonempty "W30-L4b: …in the form close-out.sh prints it" \
+  "$(/usr/bin/grep -F -- 'debt: %s %s \"%s\" touches=%s raised-by=%s from=%s' "$W30L_CO")"
+W30L_CUT="$TMP/w30l-no-row.md"
+/usr/bin/grep -vF -- "$W30L_OPEN" "$OPRULES" > "$W30L_CUT" 2>/dev/null
+expect_nonempty "W30-L1m precondition: the cut copy keeps the declared debt row beside it" "$(/usr/bin/grep -F '| declared debt |' "$W30L_CUT")"
+expect_eq "W30-L1m: …and an operational-rules.md with the row cut is caught" "" "$(w30l_row "$W30L_CUT")"
+# The parser's kinds are the table's, in its order (an unpinned pair otherwise).
+w30l_kinds() { w30d_rows "$1" | awk -F'|' '{ k = $2; gsub(/^ +| +$/, "", k); printf "%s%s", (n++ ? " " : ""), k }'; }
+W30L_TABLE="$(w30l_kinds "$W28S_FILE")"
+expect_nonempty "W30-L5 precondition: severity.md's debt table yields its kinds" "$W30L_TABLE"
+expect_eq "W30-L5: lib/proof.sh PROOF_DEBT_KINDS is the debt table's kinds, in its order" "$W30L_TABLE" \
+  "$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_KINDS"' _ "$W30L_PROOF" 2>/dev/null)"
+W30L_DOC="$TMP/w30l-sev.md"
+/usr/bin/grep -vF -- '| unpinned-pair |' "$W28S_FILE" > "$W30L_DOC" 2>/dev/null
+expect_ne "W30-L5m: a table that lost a kind no longer equals the parser's list" \
+  "$(bash -c '. "$1" && printf "%s" "$PROOF_DEBT_KINDS"' _ "$W30L_PROOF" 2>/dev/null)" "$(w30l_kinds "$W30L_DOC")"
+
+# ============================================================
+section "§EXIT-137 — the test-runner never infers a timeout from exit 137 (wave-30 T12; REQ-3 AC-3.3)"
+# ============================================================
+# A suite killed on a full machine exits 137 well inside its limit; reported as a timeout, it sends
+# the orchestrator after a slow suite that was never slow. The role's Bounds say so, in the template
+# and in the rendered role a session loads.
+W30X_SENT='Exit 137 is a kill, not a timeout, unless elapsed time reached the declared limit: report it killed, with elapsed time against the limit.'
+expect_contains "X137.1: AC-3.3 — agents/test-runner.md carries the exit-137 sentence" "$W30X_SENT" \
+  "$(cat "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.2: …under its ## Bounds" "$W30X_SENT" \
+  "$(awk '/^## Bounds/ { on = 1; next } /^## / { on = 0 } on' "${REPO}/agents/test-runner.md" 2>/dev/null)"
+expect_contains "X137.3: …written in its template, so a render keeps it" "$W30X_SENT" \
+  "$(cat "${REPO}/agents-src/templates/test-runner.md.tmpl" 2>/dev/null)"
 
 finish

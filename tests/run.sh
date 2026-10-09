@@ -176,8 +176,12 @@ if [ "${1:-}" = "--one" ]; then
   _one_start="$(date +%s)"
   # Deliberately unquoted. The queued string is a roster line's own words
   # (`bash tests/foo.test.sh`), written in this file — never outside input.
+  # THE SCRUB (wave-30 T9; AC-4.2): this worker keeps BIONIC_GATE_DIR for its own ask and end above and
+  # below, but the SUITE PROCESS runs without it. A suite that read the run's store through the
+  # inherited variable (the doctor-reads checks did) read a store it did not make; a suite that
+  # wants one makes its own fixture. The --serial path below scrubs at its own exec the same way.
   # shellcheck disable=SC2086
-  $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  env -u BIONIC_GATE_DIR $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
   _one_rc=$?
   _gate_end_for "$_one_rc"
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
@@ -248,11 +252,13 @@ unset BIONIC_TEST_TIMING
 SERIAL=0
 DRY_RUN=0
 ONLY=0; _only_names=()
-_usage="usage: bash tests/run.sh [--serial] [--dry-run] [--only <suite> [<suite>…]]"
+WRITE_TIMING=0
+_usage="usage: bash tests/run.sh [--serial] [--dry-run] [--write-timing] [--only <suite> [<suite>…]]"
 while [ $# -gt 0 ]; do
   case "$1" in
     --serial) SERIAL=1 ;;
     --dry-run) DRY_RUN=1 ;;
+    --write-timing) WRITE_TIMING=1 ;;
     --only)
       ONLY=1
       while [ $# -gt 1 ]; do
@@ -269,6 +275,8 @@ while [ $# -gt 0 ]; do
       echo "$_usage"
       echo "  --serial            one suite at a time, in roster order"
       echo "  --dry-run           print the job width and the run order (tests/timing.tsv); run nothing"
+      echo "  --write-timing      after a full run, rewrite tests/timing.tsv from the seconds it measured"
+      echo "                      (off by default: the run leaves the tree clean; refused with --only or --dry-run)"
       echo "  --only <suite>…     run only the named suites (file names, e.g. a.test.sh)"
       echo "  BIONIC_TEST_JOBS_CEILING  the ceiling the pressure rung reads against (default 8)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
@@ -284,6 +292,12 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# A partial run must not rewrite a whole-roster table (T31).
+if [ "$WRITE_TIMING" -eq 1 ] && { [ "$ONLY" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; }; then
+  echo "tests/run.sh: --write-timing needs a full run; it is refused with --only and with --dry-run" >&2
+  exit 2
+fi
 
 # ── THE ROSTER IS THE DIRECTORY (fixit 1.5.1; design D-1, AC-3/AC-4/AC-5) ────
 #
@@ -497,10 +511,12 @@ case "$JOBS" in ''|*[!0-9]*) JOBS=8 ;; esac
 # the batch to drain (T20), and `--serial` — which prints as it runs — runs in table order. The
 # table is read here and nowhere else; a tree without one orders nothing and says nothing.
 #
-# THE REWRITE (end of this file) is a SEPARATE act from BIONIC_TEST_TIMING above. That knob
-# names a file a caller wants rows appended to and stays opt-in so a gating run's output does
-# not change; the table is this run's own scheduling state, rewritten unconditionally by a run
-# that is full (no `--only`) and completes.
+# THE REWRITE (end of this file) is a SEPARATE act from BIONIC_TEST_TIMING above, and it is
+# OPT-IN: `--write-timing` on a full run (T31). A default run writes nothing into the tree, so
+# the `head=<sha> dirty=<n>` stamp it leaves reads dirty=0 and a proof of that run is accepted
+# (the proof reads the stamp's dirty= and refuses a dirty tree). The regression names
+# `BIONIC_TEST_TIMING=<record path>` for its measurements, and a committing row carries the new
+# table into tests/timing.tsv.
 TIMING_TABLE="$REPO/tests/timing.tsv"
 TAB="$(printf '\t')"
 _order_labels() {  # stdin: labels, one per line -> stdout: <label>TAB<seconds|-> in run order
@@ -791,7 +807,7 @@ run() {  # run <label> <cmd...>   — gating
     # alive for the suite, and its `times` hold that suite's children only, for gate_end.
     ( _gate_ask_for work "$label"
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
-      "$@" >"$TMP/${label}.out" 2>&1
+      env -u BIONIC_GATE_DIR "$@" >"$TMP/${label}.out" 2>&1   # the scrub (T9): the ask above keeps the store, the suite does not
       _sr=$?
       _gate_end_for "$_sr"
       exit "$_sr" )
@@ -1030,14 +1046,15 @@ if [ "$SERIAL" -eq 0 ]; then
 fi
 
 # ── THE TABLE, REWRITTEN (T10; D8a) ──────────────────────────────────────────
-# A FULL run that got here rewrites tests/timing.tsv from the seconds it measured: one line per
+# A FULL run given `--write-timing` that got here rewrites tests/timing.tsv from the seconds it
+# measured; a default run leaves the tree clean for its stamp (dirty=0) and writes nothing. One line per
 # suite of this roster, sorted by label, written to a temp file beside it and moved into place.
 # A row comes only from a suite that exited 0 and was timed. A suite without one (it failed, it
 # was void, it was killed) keeps its old row, and a row whose suite is no longer in the roster
 # goes. `--only` never gets here with a full roster and does not write; the BIONIC_TEST_TIMING
 # knob is a different act and is untouched. A table that cannot be written is said once on
 # stderr and changes no verdict.
-if [ "$ONLY" -eq 0 ] && [ -s "$TMP/measured" ]; then
+if [ "$WRITE_TIMING" -eq 1 ] && [ "$ONLY" -eq 0 ] && [ -s "$TMP/measured" ]; then
   _tt_tmp="${TIMING_TABLE}.tmp.$$"; _tt_old="$TIMING_TABLE"
   [ -r "$_tt_old" ] || _tt_old=/dev/null
   if LC_ALL=C awk -F'\t' '

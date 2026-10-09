@@ -1,0 +1,91 @@
+diff --git a/bin/branch-name.sh b/bin/branch-name.sh
+new file mode 100755
+index 0000000..c16c142
+--- /dev/null
++++ b/bin/branch-name.sh
+@@ -0,0 +1,11 @@
++#!/bin/bash
++# bin/branch-name.sh <task id> <title> — prints the task's branch name: wt/<id>-<slug of title>.
++# Refuses, with exit 2 and nothing on stdout, an id not shaped T<n> or a title with no letter
++# or digit.
++set -uo pipefail
++. "$(dirname "$0")/../lib/naming.sh"
++
++[ "$#" -eq 2 ] || { echo "usage: branch-name.sh <task id> <title>" >&2; exit 2; }
++[[ "$1" =~ ^T[0-9]+$ ]] || { echo "branch-name: '$1' is not a task id (T<n>)" >&2; exit 2; }
++[ -n "$(slug_of "$2")" ] || { echo "branch-name: the title has no letter or digit" >&2; exit 2; }
++name_by_scheme task "$1" "$2"
+diff --git a/docs/record/T1.md b/docs/record/T1.md
+new file mode 100644
+index 0000000..8b140ce
+--- /dev/null
++++ b/docs/record/T1.md
+@@ -0,0 +1,17 @@
++# T1 — task branch names
++
++reuse: slug_of (lib/names.sh) makes the slug; branch-name.sh does not compute one. Searched
++bin/ and lib/ for anything that already builds a branch name or checks a task id: nothing
++does, so bin/branch-name.sh is new.
++
++AC-1.1, AC-1.2 evidence, tier T2 (the real script and library): `bash tests/branch-name.test.sh` → rc=0
++```
++ok - 1: a task's branch name
++ok - 2: its slug is slug_of's
++ok - 3-4: an empty title is refused with exit 2
++ok - 3-4: an empty title prints no name
++ok - 5-6: a title with no letter or digit is refused with exit 2
++ok - 5-6: a title with no letter or digit prints no name
++ok - 7-8: an id not shaped T<n> is refused with exit 2
++ok - 7-8: an id not shaped T<n> prints no name
++```
+diff --git a/lib/naming.sh b/lib/naming.sh
+new file mode 100644
+index 0000000..eee8d9e
+--- /dev/null
++++ b/lib/naming.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++# lib/naming.sh — names built by a scheme. A scheme is a function `scheme_<name>` that takes the
++# scheme's fields and prints the name; NAME_SCHEMES lists the schemes there are.
++. "$(dirname "${BASH_SOURCE[0]}")/names.sh"
++
++NAME_SCHEMES="task"
++
++# scheme_task <id> <title> — wt/<id>-<slug of title>
++scheme_task() { printf 'wt/%s-%s\n' "$1" "$(slug_of "$2")"; }
++
++# name_by_scheme <scheme> <field>... — the name <scheme> builds from the fields; exit 2, and
++# nothing on stdout, for a scheme NAME_SCHEMES does not list.
++name_by_scheme() {
++  local scheme="$1"
++  shift
++  case " $NAME_SCHEMES " in
++    *" $scheme "*) "scheme_$scheme" "$@" ;;
++    *) echo "naming: no scheme '$scheme'" >&2; return 2 ;;
++  esac
++}
+diff --git a/tests/branch-name.test.sh b/tests/branch-name.test.sh
+new file mode 100644
+index 0000000..0dc7ad7
+--- /dev/null
++++ b/tests/branch-name.test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++. "$(dirname "$0")/lib.sh"
++. "$(dirname "$0")/../lib/names.sh"
++name="$(cd "$(dirname "$0")/.." && pwd)/bin/branch-name.sh"
++
++title='Fix the Stamp reader'
++check "1: a task's branch name" "wt/T7-fix-the-stamp-reader" "$(bash "$name" T7 "$title")"
++check "2: its slug is slug_of's" "wt/T7-$(slug_of '(v2: notes!)')" "$(bash "$name" T7 '(v2: notes!)')"
++
++refused() {  # <row> <what> <id> <title>
++  local out rc
++  out="$(bash "$name" "$3" "$4" 2>/dev/null)"; rc=$?
++  check "$1: $2 is refused with exit 2" "2" "$rc"
++  check "$1: $2 prints no name" "" "$out"
++}
++refused "3-4" "an empty title" T7 ""
++refused "5-6" "a title with no letter or digit" T7 "?! --"
++refused "7-8" "an id not shaped T<n>" 7 "$title"
++done_testing
