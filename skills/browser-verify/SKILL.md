@@ -208,7 +208,7 @@ Everything read from the browser — DOM, console messages, network responses, `
 
 Write interim artifacts (screenshots, logs) to `.bionic/tmp/` (gitignored) and point at them from the row field they support.
 
-**At `scale: wave` or `epic`.** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the tests/build floor (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
+**At `scale: wave` or `epic`.** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the regression (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
 
 ```
 AC-1:
@@ -223,4 +223,4 @@ A T2 row carries `tier-run`, `readback`, and the `fixture-fidelity` provenance l
 
 **`scale: task` plans carry no matrix and no Step-5 block** — the governing-skill hook skips the matrix requirement at task scale, and evidence is the one-line `- T<n>:` ledger entry. Cite the browser evidence inline there.
 
-For non-UI waves, the browser modality is `n/a: <reason>` (the tests floor still applies). The end-to-end closure floor lives in the T3(d) readback condition: for a user-visible AC the readback traces user input → new code, and `n/a: substrate-only` is a red flag needing justification.
+For non-UI waves, the browser modality is `n/a: <reason>` (the regression still applies). The end-to-end closure floor lives in the T3(d) readback condition: for a user-visible AC the readback traces user input → new code, and `n/a: substrate-only` is a red flag needing justification.

@@ -2786,7 +2786,7 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" floor-run
 s42_unchanged "FD-n1 §FLOOR-DECLARED floor-run with no floor: key" 1 "$PFD"
 expect_contains "FD-n2 …saying so, and that nothing was run" \
-  "REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run." "$OUT"
+  "REFUSED — this project declares no floor: in .bionic/config.yaml; its regression is tests/run.sh, whose log proof-add floor reads. Nothing was run." "$OUT"
 expect_eq "FD-n3 …and the declared command never ran (the stub's log is empty)" "0" "$(fd_runs)"
 fd_config "floor-attestation: user"
 poke "$RFD" floor-run
@@ -2827,8 +2827,8 @@ s42_unchanged "FD-r2 …that read a dirty tree" 1 "$PFD"
 expect_contains "FD-r2b …with today's dirty sentence" "read a dirty tree (dirty=2); commit, run it again and cite that log" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-red.log
 s42_unchanged "FD-r3 …whose command exited 1" 1 "$PFD"
-expect_contains "FD-r3b …saying it did not pass" \
-  "fd-red.log did not pass (rc=1); fix it, run floor-run again and cite that log" "$OUT"
+expect_regex "FD-r3b …saying the regression did not pass (wave-30 T23: the word)" \
+  'the regression in [^ ]*fd-red\.log did not pass \(rc=1\); fix it, run floor-run again and cite that log' "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-r4 …and a log in the old tests/run.sh shape, green at the head" 1 "$PFD"
 expect_contains "FD-r4b …saying what the first line must be" \
@@ -2848,7 +2848,8 @@ s42_unchanged "FD-f4 …whose log proof-add floor refuses" 1 "$PFD"
 echo stray > "$FD_MODE"
 poke "$RFD" floor-run
 expect_eq "FD-s1 a command that leaves the tree dirtier than it found it is refused (exit 1)" "1" "$RC"
-expect_contains "FD-s2 …naming the move and that no log was written" "while it ran (dirty=0 to dirty=1); no log was written" "$OUT"
+expect_regex "FD-s2 …naming the regression, the move and that no log was written (wave-30 T23: the word)" \
+  'REFUSED — the regression \(.*\) moved the working checkout .* while it ran \(dirty=0 to dirty=1\); no log was written' "$OUT"
 expect_false "FD-s3 …and no third log exists" test -e "$FD_REC/floor-run-$FD_W-3.log"
 echo pass > "$FD_MODE"
 poke "$RFD" floor-run
@@ -2915,7 +2916,7 @@ expect_eq "FD-m0 the judge itself, positive: the green declared log attests the 
 expect_eq "FD-m0b …a red one is refused" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-red.log" | cut -d'|' -f1)"
 expect_eq "FD-m0c …and an unattested record is refused" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-att-noby.md" | cut -d'|' -f1)"
 FD_M1='[ -z "$fl$fa" ] || { _proof_floor_declared'
-FD_M2='[ "$rc" = 0 ] || { printf '"'"'the floor in'
+FD_M2='[ "$rc" = 0 ] || { printf '"'"'the regression in'
 FD_M3='[ -n "$who" ] || { printf'
 anchor "$S46_LIB" "$FD_M1" 1; anchor "$S46_LIB" "$FD_M2" 1; anchor "$S46_LIB" "$FD_M3" 1
 /usr/bin/grep -vF -- "$FD_M1" "$S46_LIB" > "$FD_MUT/no-arm.sh"
@@ -2963,7 +2964,7 @@ mr_fixture() {  # <plan> -> T5 serves REQ-2; Requirements and Eval design ahead 
     /^## Verification Matrix/ {
       print "## Requirements\n\n### REQ-1 — the first\n\nprovenance: spec §1 (fixture)\n\n### REQ-2 — the second\n\n- AC-2.1 the second criterion\n"
       print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
-      print "| REQ-1 | first approach | AC-1.1 | hermetic | `--only a.test.sh` (§A) | a is wrong |"
+      print "| REQ-1 | first approach | AC-1.1 | hermetic | \140--only a.test.sh\140 (§A) | a is wrong |"
       print "| REQ-1 | second approach | AC-1.2 | static | docs-pins §B | b is wrong |"
       print "| REQ-2 | live approach | AC-2.1 | live | walk W1 → narrated | c is wrong |"
       print "| REQ-2 | user approach | AC-2.2 | live | the user confirms | d is wrong |\n"

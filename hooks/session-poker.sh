@@ -25,7 +25,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's declared floor in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
+#     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's declared regression in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
 #     bash <plugin-root>/hooks/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle a check a finding owes, on its check: line (writes the plan)
@@ -377,7 +377,7 @@ PATROL_DIGEST_SCHEMA="patrol-digest/v1"
 # THE HOLD'S REASON, AS EVERY FIX LINE PRINTS IT (wave-24 T27; critic I4): a quoted
 # placeholder, so a line pasted as printed is one argument and never a redirect from a file
 # named `reason`. The stop wall's stand-down refusal prints the same words
-# (payload/scripts/lib/stop.sh `STANDDOWN_HOLDS`); tests/session-poker.test.sh §HOLD-fix pins
+# (payload/scripts/lib/stop.sh `STANDDOWN_HOLDS`); tests/session-poker-2.test.sh §HOLD-fix pins
 # the three sites.
 HOLD_REASON_SLOT="'why it stays up'"
 # THE DECLINE'S REASON, the same kind of placeholder (wave-27 T34; D24): the prompt's FILL answer and
@@ -1036,16 +1036,21 @@ clean() {  # <value> [<field name>]
   # the cut for the reason they do — a declared run is a command, and a command cut at 400
   # characters is a budget entry nothing can ever equal — and because a cut landing inside
   # an escape would decode into garbage.
-  # AND `sentence`, A LIBRARY'S OWN REFUSAL (wave-30 T13): `proof-add floor` names the suites a later
-  # change owes, a list like `suites_allowed=`, and the cut would drop the very suites it names.
   case "${2:-}" in
-    suites_allowed|files|sentence) printf '%s' "$out" ;;
+    suites_allowed|files) printf '%s' "$out" ;;
     re_executes)
       out="${out//\%7C/|}"
       printf '%s' "${out//\%25/%}" ;;
     *) printf '%s' "$out" | cut -c 1-400 ;;
   esac
 }
+
+# clean_whole <value> -> clean's fold with no 400-character cut. A LIBRARY'S OWN REFUSAL or a sentence
+# naming a list (wave-30 T13: `proof-add floor` names the suites a later change owes) is list-valued
+# like `files=`, and the cut would drop the very suites it names. clean() itself stays the sweeper's
+# copy, code for code (tests/cross-gate-agreement.test.sh §O; wave-30 T23), so this asks the uncut
+# arm clean already has for list fields rather than adding a field name only this copy knows.
+clean_whole() { clean "$1" files; }
 
 # The prose duration/cadence parser. Deliberate limits, each a refusal rather than a guess —
 # see hooks/session-sweeper.sh's copy for the full rationale (its own comments there are
@@ -1880,7 +1885,7 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
 # it is handed the head: `covered`, or the owed lines that do not hold, `; `-joined. It is asked
 # only when the plan carries an open integrate row (no other read turns on it), and once per tick
 # (`gate_report` reads the budget a second time). Unset, the integrate row waits, saying so.
-# THE FLOOR IS ASKED FIRST, FROM THE TICK'S OWN MEMO (`_units_floor_state`, the one proof_state run
+# THE REGRESSION IS ASKED FIRST, FROM THE TICK'S OWN MEMO (`_units_floor_state`, the one proof_state run
 # the schedule spends anyway): while it does not hold, integrate waits on proof:floor whatever the
 # readings say, so the judge, which would run proof_state again, is not asked.
 sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
@@ -1894,7 +1899,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   fst="$(_units_floor_state "$SCHED_PLAN" 2>/dev/null)"
   case "$fst" in
     covered*|bounded*) : ;;
-    *) UNITS_FACTS_STATE="the readings are judged once the floor holds"; return 0 ;;
+    *) UNITS_FACTS_STATE="the readings are judged once the regression holds"; return 0 ;;
   esac
   if ! declare -F facts_state >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
@@ -1913,7 +1918,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   case "$rc" in
     0) UNITS_FACTS_STATE=covered ;;
     2) UNITS_FACTS_STATE="the plan's rigor and scale cannot be dealt" ;;
-    # A FLOOR LINE NAMING SUITES is said in words (wave-30 T13; AC-4.4): the map bounds the change and
+    # A REGRESSION LINE NAMING SUITES is said in words (wave-30 T13; AC-4.4): the map bounds the change and
     # those suites have no green run at the head, so they are what is owed, never a full run.
     *) UNITS_FACTS_STATE="$( { printf '%s\n' "$out" | proof_floor_words "$head"
          printf '%s\n' "$out" | awk -F'\t' '$NF != "covered" && !($1 == "floor" && $2 == "uncovered" && $3 != "" && index($3, "..") == 0)'; } \
@@ -2112,7 +2117,7 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
     base="${line%%$'\037'*}"; sfx=""
     [ "$base" = "$line" ] || sfx="${line#*$'\037'}"
     case "$base" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}" ;; esac
-    say "WAIT $(clean "$base")${sfx:+ · $(clean "$sfx" sentence)}"
+    say "WAIT $(clean "$base")${sfx:+ · $(clean_whole "$sfx")}"
   done <<TICK_WAIT
 $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n' "$rows" "$waiting" "$susp" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
@@ -3565,9 +3570,9 @@ cur8_judge() {
   fi
   die "REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
   printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
-  # The floor line that names suites, in words (wave-30 T13): those suites run green at the head prove it.
+  # The regression's line that names suites, in words (wave-30 T13): those suites run green at the head prove it.
   printf '%s\n' "$out" | proof_floor_words "$PV_HEAD8" >&2
-  die "Take the reading or the floor run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
+  die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
 }
 
@@ -6220,7 +6225,7 @@ EOF
         for DC_ID in $DC_NAMED; do
           DC_PAIR="$(units_hold_read "$SCHED_PLAN" "$DC_ID" "$DC_ON" 2>/dev/null)" || DC_PAIR=""
           if [ -n "$DC_PAIR" ]; then
-            say "decline — $DC_ID waits on $DC_ON: make it a table fact the tick judges once: bash ${HOOK_DIR}/session-poker.sh task-set $DC_ID $(clean "$DC_PAIR" sentence)"
+            say "decline — $DC_ID waits on $DC_ON: make it a table fact the tick judges once: bash ${HOOK_DIR}/session-poker.sh task-set $DC_ID $(clean_whole "$DC_PAIR")"
           else
             say "decline — $DC_ID waits on $DC_ON, which writes no path to read: $DC_UNREC."
           fi
@@ -6755,7 +6760,7 @@ EOF
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the sitting (AC-10.2)."
     # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
     # that shares no file with its holder is named, with the line that would loosen it, never run.
-    suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean "$TA_SUSPECT" sentence)"; done
+    suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
     exit 0
     ;;
 
@@ -6840,7 +6845,7 @@ EOF
     say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
     # THE SUSPECT TEST AT EVERY RE-AUTHORING (wave-30 T16; AC-12.2): task-set prints it as task-add does.
     if [ "$VERB" = task-set ]; then
-      suspect_lines "$PV_PLAN" "$PV_ID" | while IFS=$'\t' read -r _ _ PV_SUSPECT; do say "$(clean "$PV_SUSPECT" sentence)"; done
+      suspect_lines "$PV_PLAN" "$PV_ID" | while IFS=$'\t' read -r _ _ PV_SUSPECT; do say "$(clean_whole "$PV_SUSPECT")"; done
     fi
     exit 0
     ;;
@@ -6948,7 +6953,7 @@ EOF
   # the fields it reads were hand edits: `units_step_fields --replace` writes one `  <key>: <value>` line under
   # the step line, after the block last line, or replaces the line where it stands (the gate reads the first
   # line of a key, so a second could not win); the rest of the plan is the same bytes. Nine keys, the ones the
-  # gate reads at Steps 4, 5, 7 and 8: head cmd pass total output (the floor run), merge worktree-removed (the
+  # gate reads at Steps 4, 5, 7 and 8: head cmd pass total output (the regression run), merge worktree-removed (the
   # integration), adr (the document step), share (the Step-4 fact). It takes the plan transaction every row verb
   # takes (copy, dry commit through the real gate, checksum, swap), so a plan the gate would refuse is not
   # written. REFUSED (1), the plan unchanged: a key outside the nine, a value with a line break, a step with no
@@ -7275,7 +7280,7 @@ $HO_AGENTS"; fi
     TS_EDGES="$(units_edges "$PV_NEW" 2>/dev/null)"
     TS_OPEN="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$10 == "pending" || $10 == "active" { print $1 }')"
     for _ts_w in $TS_WAITERS; do
-      printf '%s\n' "$TS_OPEN" | /usr/bin/grep -Fxq -- "$_ts_w" || continue
+      /usr/bin/grep -Fxq -- "$_ts_w" <<<"$TS_OPEN" || continue
       printf '%s\n' "$TS_EDGES" | awk -F'\t' -v w="$_ts_w" -v k=", $TS_IDS," '$2 == w && index(k, ", " $1 ",") { f = 1 } END { exit !f }' \
         || TS_LEFT="${TS_LEFT:+$TS_LEFT }$_ts_w"
     done
@@ -7354,7 +7359,7 @@ $HO_AGENTS"; fi
     # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its
     # tools alone could never take this step. 8 is exempt from it as 9 is from this verb, and is
     # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
-    # working head: the floor, and each reading its rigor and scale deal. Each line that does not
+    # working head: the regression, and each reading its rigor and scale deal. Each line that does not
     # hold is printed as the judge gave it.
     # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
     PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
@@ -7672,10 +7677,10 @@ PF_OTHER_LIST
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
     # The plan goes too: a review's range must start at or before its last review proof (T62).
     # A reading's range starts at or before the last proof of its own question (wave-27 T2; D1).
-    # The project root goes too: a project that declares its floor has it judged by its own contract (T75; D36).
+    # The project root goes too: a project that declares its regression has it judged by its own contract (T75; D36).
     PF_CO="$(proof_checkout "$PV_REPO" "$PF_WB")"
     if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PF_CO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO")"; then
-      die "REFUSED — $(clean "$PF_HEAD" sentence). The plan is unchanged."
+      die "REFUSED — $(clean_whole "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
     # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `check:`, `deferred:` or `moved:`
@@ -8275,7 +8280,7 @@ RC_TAGS
     exit 0
     ;;
 
-  # THE DECLARED FLOOR'S RUN (wave-28 T75; REQ-17 AC-17.1, D36). A project whose floor is not tests/run.sh
+  # THE DECLARED REGRESSION'S RUN (wave-28 T75; REQ-17 AC-17.1, D36). A project whose regression is not tests/run.sh
   # names it in `.bionic/config.yaml` under `floor:`, split on blanks with globbing off as `release-check:`
   # is. This verb runs it in the checkout of the plan's working branch, reading the head and the dirty
   # count (`_wt_piece_dirt`, land's reading: untracked files count, the record link does not) before the
@@ -8284,12 +8289,12 @@ RC_TAGS
   # n-th at one head `floor-run-<head>-<n>.log`, opening `head=<40-hex> dirty=<n> rc=<n>`, then
   # `command: <cmd>`, then the output, and the verb exits with the command's code.
   # IT RUNS AND LOGS; IT WRITES NO PROOF. `release-check` writes its own fact because a check is a run the
-  # verb owns; a floor is evidence the run cites, and `proof-add floor` stays the one writer of its line
+  # verb owns; a regression is evidence the run cites, and `proof-add floor` stays the one writer of its line
   # (lib/proof.sh `_proof_floor_declared` judges the log there). With no key it refuses and runs nothing.
   floor-run)
     FR_CMD="$(config_value "$(project_root "$PWD")" floor "" 2>/dev/null)"
     if [ -z "$FR_CMD" ]; then
-      die "REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run."
+      die "REFUSED — this project declares no floor: in .bionic/config.yaml; its regression is tests/run.sh, whose log proof-add floor reads. Nothing was run."
       exit 1
     fi
     if ! { declare -F proof_checkout >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -8304,12 +8309,12 @@ RC_TAGS
     case "$FR_HEAD" in
       [0-9a-f]*) : ;;
       *)
-        die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${FR_WB:-(none named)} checked out, so there is no head to run the floor at; nothing was run."
+        die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${FR_WB:-(none named)} checked out, so there is no head to run the regression at; nothing was run."
         exit 1 ;;
     esac
     FR_DIRTY="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"
     FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-floor-run.XXXXXX")" || {
-      die "REFUSED — no scratch file for the floor's output can be made under ${TMPDIR:-/tmp}; nothing was run."
+      die "REFUSED — no scratch file for the regression's output can be made under ${TMPDIR:-/tmp}; nothing was run."
       exit 1
     }
     ( cd "$FR_CO" 2>/dev/null || exit 1
@@ -8324,7 +8329,7 @@ RC_TAGS
     [ "$FR_DIRTY2" = "$FR_DIRTY" ] || FR_MOVED="${FR_MOVED:+$FR_MOVED, }dirty=$FR_DIRTY to dirty=$FR_DIRTY2"
     if [ -n "$FR_MOVED" ]; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "REFUSED — the floor ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run floor-run again."
+      die "REFUSED — the regression ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run floor-run again."
       exit 1
     fi
     FR_WAVE="${PV_PLAN##*/}"; FR_WAVE="${FR_WAVE%.plan.md}"
@@ -8335,12 +8340,12 @@ RC_TAGS
     if ! mkdir -p "${FR_LOG%/*}" 2>/dev/null \
        || ! { printf 'head=%s dirty=%s rc=%s\ncommand: %s\n' "$FR_HEAD" "$FR_DIRTY" "$FR_RC" "$FR_CMD"; cat "$FR_TMP"; } > "$FR_LOG" 2>/dev/null; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "REFUSED — the floor exited $FR_RC, but its log $FR_LOG cannot be written."
+      die "REFUSED — the regression exited $FR_RC, but its log $FR_LOG cannot be written."
       exit 1
     fi
     if [ "$FR_RC" -ne 0 ]; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "floor-run — the floor ($(clean "$FR_CMD")) exited $FR_RC at ${FR_HEAD:0:12}; its log is $FR_REL. Fix what it names, commit, and run floor-run again."
+      die "floor-run — the regression ($(clean "$FR_CMD")) exited $FR_RC at ${FR_HEAD:0:12}; its log is $FR_REL. Fix what it names, commit, and run floor-run again."
       exit "$FR_RC"
     fi
     rm -f "$FR_TMP"
@@ -8860,9 +8865,9 @@ $(run_groups "$RUN_PID")"
     # THE PROMPT VERSION rides the same file: `arm` records the version its prompt carried, and a
     # tick that finds none, or an older one, prints one re-arm line above everything else.
     TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
-    # ONE FLOOR STATE PER TICK (wave-26 T64). The schedule and the change fingerprint below each
+    # ONE REGRESSION STATE PER TICK (wave-26 T64). The schedule and the change fingerprint below each
     # parse the table under their own `units_memoised`; this names the one file both keep the
-    # floor state in (lib/units.sh `_units_floor_state`), so a tick runs `proof_state` once.
+    # regression state in (lib/units.sh `_units_floor_state`), so a tick runs `proof_state` once.
     [ -z "$TICK_BUF" ] || _UNITS_MEMO_FLOOR="$TICK_BUF.floor"
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
     TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""
