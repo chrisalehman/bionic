@@ -616,7 +616,7 @@ proof_attested() {
   if [ "$kind" = floor ] && [ -n "$root" ]; then
     _proof_roots_load
     fl="$(config_value "$root" floor "" 2>/dev/null)"; fa="$(config_value "$root" floor-attestation "" 2>/dev/null)"
-    [ -z "$fl$fa" ] || { _proof_floor_declared "$ev" "$head" "$fl" "$fa"; return $?; }
+    [ -z "$fl$fa" ] || { _proof_floor_declared "$ev" "$head" "$fl" "$fa" "$co" "$plan" "$root"; return $?; }
   fi
   if [ "$kind" = check ]; then
     sha="$(awk '/^check-changed: / { next } { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
@@ -641,7 +641,10 @@ proof_attested() {
     if [ "$sha" = none ]; then
       printf 'the run in %s read no repository (head=none); run it in the working branch checkout and cite that log' "$ev"; return 1
     fi
-    [ "$sha" = "$head" ] || { _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; }
+    if [ "$sha" != "$head" ]; then
+      if [ "$kind" = floor ]; then _proof_floor_since "$ev" "$sha" "$head" "$co" "$plan" "$root" || return 1
+      else _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; fi
+    fi
     [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
     # THE RUN MUST ALSO HAVE PASSED (wave-26 T5; review 10 F1). A header says which head a run
     # read, not how it ended: a red run, or a note that quotes the header, attests the head all
@@ -680,14 +683,14 @@ proof_attested() {
     # passed plus void equals the suites at the head the run read: one git call, here in the
     # verb, never in a wall. A clean tree (dirty=0, checked above) holds no untracked suite.
     if [ "$kind" = floor ]; then
-      roster="$(git -C "$co" ls-tree --name-only "$head" tests/ 2>/dev/null \
+      roster="$(git -C "$co" ls-tree --name-only "$sha" tests/ 2>/dev/null \
         | awk '/^tests\/[^\/]+\.test\.sh$/ { n++ } END { print n + 0 }')"
       if [ "$(($1 + $3))" -ne "${roster:-0}" ]; then
         printf 'the run in %s is not a whole run (%s passed and %s void of %s suites at its head); cite the log of a full run' \
           "$ev" "$1" "$3" "${roster:-0}"; return 1
       fi
     fi
-    printf '%s' "$head"; return 0
+    printf '%s' "$sha"; return 0
   fi
   if [ -n "$rng" ]; then
     case "$rng" in
@@ -749,13 +752,152 @@ proof_attested() {
 }
 
 # The two sentences a run header that read the wrong tree is refused with: another head, a dirty tree.
-# One spelling each, for the runner's log and for a declared floor's evidence alike.
+# One spelling each, for the runner's log and for a declared floor's evidence alike. A FLOOR at another
+# head is judged by `_proof_floor_since`, which opens with the first sentence only when a full run on
+# the working head is owed, and then says why after a colon (wave-30 T13); a task proof keeps it bare.
 _proof_read_elsewhere() {  # <evidence> <sha it read> <the working head>
   printf 'the run in %s read head %s, but the working branch is at %s; run it again on %s and cite that log' \
     "$1" "$(printf '%s' "$2" | cut -c1-12)" "$(printf '%s' "$3" | cut -c1-12)" "$(printf '%s' "$3" | cut -c1-12)"
 }
 _proof_read_dirty() {  # <evidence> <dirty count>
   printf 'the run in %s read a dirty tree (dirty=%s); commit, run it again and cite that log' "$1" "$2"
+}
+
+# _proof_floor_since <evidence> <sha it read> <the working head> <checkout> <plan> <root> [<attestation>]
+# -> exit 0 when a floor run at <sha> stands for the working head; or exit 1 with the refusal's
+# sentence (wave-30 T13; REQ-4 AC-4.4; D7, design-ledger Delta-6b, A-orch-16).
+#
+# THE PROOF IS A FACT ABOUT CODE. A full run at F proves F; what landed between F and the working
+# head H is proved the way any later landing is: the map bounds F..H (`proof_state <plan> <root> F`)
+# and every suite it names has its proof at H. So "the head moved before the bookkeeping" and "a
+# later landing" are one case, and the proof line names F, the head the run read. The proof of a
+# named suite at H is a `booked.sh` stamp in <checkout>'s git dir, green on a clean tree
+# (`proof_stamps_lacking`); for an attestation (floor-attestation: user) that carries a
+# `later-changes:` block, that block instead (`_proof_later_lacking`), which the user's attestation
+# covers. With no block the stamps are the proof there too.
+#
+# A FULL RUN ON H IS OWED ONLY WHEN F..H CANNOT BE BOUNDED: F is no commit here, or not in H's
+# history, or the map answers the change with every suite or with none, or proof_state cannot say.
+# Each refusal says which: the commits since F and the reason, or the suites the map names that have
+# no proof at H, never a bare "run it again" (A-orch-16 (2)).
+_proof_floor_since() {
+  local ev="$1" sha="$2" head="$3" co="$4" plan="$5" root="$6" att="${7:-}" base n since st suites lack
+  base="$(_proof_read_elsewhere "$ev" "$sha" "$head")"
+  if ! git -C "$co" rev-parse --verify -q "$sha^{commit}" >/dev/null 2>&1; then
+    printf '%s: %.12s is no commit here, so the change since it cannot be bounded' "$base" "$sha"; return 1
+  fi
+  if ! git -C "$co" merge-base --is-ancestor "$sha" "$head" 2>/dev/null; then
+    printf '%s: %.12s is not in the history of the working branch, so the change since it cannot be bounded' "$base" "$sha"; return 1
+  fi
+  n="$(git -C "$co" rev-list --count "$sha..$head" 2>/dev/null)"
+  case "$n" in 1) since="1 commit" ;; ''|*[!0-9]*) since="the commits" ;; *) since="$n commits" ;; esac
+  if [ -z "$plan" ] || [ -z "$root" ]; then
+    printf '%s: %s landed since %.12s, and with no plan and project root the change cannot be mapped' "$base" "$since" "$sha"; return 1
+  fi
+  st="$(proof_state "$plan" "$root" "$sha" 2>/dev/null | awk 'NR == 1')"
+  case "$st" in
+    covered*) return 0 ;;
+    bounded"	"*) suites="${st#bounded	}" ;;
+    *)
+      st="${st#*	}"
+      printf '%s: %s landed since %.12s, and the change cannot be bounded (%s)' "$base" "$since" "$sha" "${st:-the proof state could not be computed}"
+      return 1 ;;
+  esac
+  # shellcheck disable=SC2086  # suite names are words of one closed alphabet
+  if [ -n "$att" ] && /usr/bin/grep -q '^later-changes:[[:space:]]*$' "$att" 2>/dev/null; then
+    lack="$(_proof_later_lacking "$att" "$head" $suites)" && return 0
+    printf 'the run in %s read head %.12s, and %s landed since, to the working head %.12s; the map bounds the change to %s, and the later-changes: block names no passing run at %.12s for: %s. Run each of those suites on %.12s and add its line to the block, then proof-add floor again' \
+      "$ev" "$sha" "$since" "$head" "$suites" "$head" "$lack" "$head"
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  lack="$(proof_stamps_lacking "$co" "$head" $suites)" && return 0
+  printf 'the run in %s read head %.12s, and %s landed since, to the working head %.12s; the map bounds the change to %s, and no green run at %.12s is recorded for: %s. Run each of those suites on %.12s, then proof-add floor again' \
+    "$ev" "$sha" "$since" "$head" "$suites" "$head" "$lack" "$head"
+  return 1
+}
+
+# proof_stamps_lacking <checkout> <head> <suite>... -> exit 0, printing nothing, when every <suite> has
+# a green run at <head> in <checkout>'s stamps; exit 1 printing the suites that lack one, space-joined
+# (wave-30 T13; AC-4.4, D7c). THE READER IS THE LANDING'S, CALLED, NEVER COPIED: lib/worktree.sh
+# `_wt_stale_proof` judges every suite stamped at <head> by its newest line, rc 0 on a clean tree, and
+# on a pass prints the stamp lines it judged, whose `suites=` fields name the suites proved. On a
+# refusal it names one suite, the first red or dirty one, and that suite is printed (whether or not
+# the map named it: a red run at the head is a head not proved, A-T13.3); with no stamp at <head>, or
+# none readable, every <suite> lacks one. A stamp naming no suite (`suites=` absent or `?`) proves
+# none by name.
+proof_stamps_lacking() {
+  local co="$1" head="$2" v rc green="" s lack=""
+  shift 2
+  [ "$#" -gt 0 ] || return 0
+  _proof_wt_load || { printf '%s\n' "$*"; return 1; }
+  v="$(_wt_stale_proof "$co" "$head" 2>/dev/null)"; rc=$?
+  if [ "$rc" -eq 1 ]; then
+    green=" $(printf '%s\n' "$v" | awk '
+      substr($0, 1, 9) != "stamp/v1|" { next }
+      { n = split($0, f, "|")
+        for (i = 2; i <= n; i++) {
+          if (substr(f[i], 1, 4) == "cmd=") break
+          if (substr(f[i], 1, 7) == "suites=") { m = split(substr(f[i], 8), a, ","); for (j = 1; j <= m; j++) if (a[j] != "" && a[j] != "?") print a[j] }
+        } }' | tr '\n' ' ')"
+  else
+    case "$v" in
+      why=red\ *|why=dirty\ *)
+        s="${v#* suite=}"; s="${s%% *}"
+        if [ -n "$s" ] && [ "$s" != "?" ]; then printf '%s\n' "$s"; return 1; fi ;;
+    esac
+  fi
+  for s in "$@"; do
+    case "$green" in *" $s "*) ;; *) lack="${lack:+$lack }$s" ;; esac
+  done
+  [ -n "$lack" ] || return 0
+  printf '%s\n' "$lack"; return 1
+}
+# proof_floor_words <head> -> reads facts_state's lines on stdin and prints, for a floor line that names
+# suites (`floor<TAB>uncovered<TAB><suite>…`), `floor: no green run at <head, 12> for <suite>…`: the
+# words the tick and `current 8` say for it, spelled once here (wave-30 T13; AC-4.4). A floor line with
+# a range (a full run owed) prints nothing.
+proof_floor_words() {
+  awk -F'\t' -v h="${1:-}" '$1 == "floor" && $2 == "uncovered" && $3 != "" && index($3, "..") == 0 {
+    print "floor: no green run at " substr(h, 1, 12) " for " $3 }'
+}
+_proof_wt_load() {
+  declare -F _wt_stale_proof >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/worktree.sh" >/dev/null 2>&1
+  declare -F _wt_stale_proof >/dev/null 2>&1
+}
+
+# _proof_later_lacking <attestation> <head> <suite>... -> exit 0 when the attestation's `later-changes:`
+# block holds, for every <suite>, a line that ran it at <head> and passed; exit 1 printing the suites
+# with none (wave-30 T13; A-orch-16 (3)). The block is the line `later-changes:` and the indented lines
+# under it, one per suite: `- <suite> head=<40-hex> pass=<p>/<t> log=<path> cmd=<command>`, the
+# leading `- ` optional and `cmd=` last, free text. A line passes when its head is <head>, p equals t
+# and t is above 0, and its log= and cmd= are not empty.
+_proof_later_lacking() {
+  local att="$1" head="$2" ok s lack=""
+  shift 2
+  ok=" $(awk -v want="$head" '
+    /^later-changes:[ \t]*$/ { inb = 1; next }
+    inb && !/^[ \t]/ { inb = 0 }
+    !inb { next }
+    { l = $0; sub(/^[ \t]+/, "", l); sub(/^- +/, "", l)
+      c = index(l, " cmd="); if (c == 0) next
+      cmd = substr(l, c + 5); l = substr(l, 1, c - 1)
+      n = split(l, w, /[ \t]+/); h = p = lg = ""
+      for (i = 2; i <= n; i++) {
+        if (substr(w[i], 1, 5) == "head=") h = substr(w[i], 6)
+        else if (substr(w[i], 1, 5) == "pass=") p = substr(w[i], 6)
+        else if (substr(w[i], 1, 4) == "log=") lg = substr(w[i], 5)
+      }
+      if (h != want || lg == "" || cmd !~ /[^ \t]/ || p !~ /^[0-9]+\/[0-9]+$/) next
+      split(p, pt, "/"); if (pt[1] + 0 != pt[2] + 0 || pt[2] + 0 == 0) next
+      print w[1] }' "$att" 2>/dev/null | tr '\n' ' ')"
+  for s in "$@"; do
+    case "$ok" in *" $s "*) ;; *) lack="${lack:+$lack }$s" ;; esac
+  done
+  [ -n "$lack" ] || return 0
+  printf '%s\n' "$lack"; return 1
 }
 
 # _proof_floor_declared <evidence> <working head> <floor: command> <floor-attestation: value> -> the head,
@@ -771,7 +913,7 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 # run is refused as red and never read again as an attestation. Any value of floor-attestation: but
 # `user` is refused, whatever else the configuration says (fail closed).
 _proof_floor_declared() {
-  local ev="$1" head="$2" fl="$3" fa="$4" hdr sha dirty rc who
+  local ev="$1" head="$2" fl="$3" fa="$4" co="${5:-}" plan="${6:-}" root="${7:-}" hdr sha dirty rc who
   case "$fa" in
     ''|user) : ;;
     *) printf 'the floor-attestation: in .bionic/config.yaml is %s, and the one value it takes is user; write floor-attestation: user or remove the line' "$fa"; return 1 ;;
@@ -781,10 +923,10 @@ _proof_floor_declared() {
     sha="${hdr%% *}"
     if [ "${#sha}" -eq 40 ]; then
       dirty="${hdr#* }"; rc="${dirty#* }"; dirty="${dirty%% *}"
-      [ "$sha" = "$head" ] || { _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; }
+      [ "$sha" = "$head" ] || _proof_floor_since "$ev" "$sha" "$head" "$co" "$plan" "$root" || return 1
       [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
       [ "$rc" = 0 ] || { printf 'the floor in %s did not pass (rc=%s); fix it, run floor-run again and cite that log' "$ev" "$rc"; return 1; }
-      printf '%s' "$head"; return 0
+      printf '%s' "$sha"; return 0
     fi
     if [ -z "$fa" ]; then
       printf 'the evidence %s does not open with head=<40-hex> dirty=<n> rc=<n>, the line floor-run writes; run floor-run and cite its log' "$ev"; return 1
@@ -794,8 +936,8 @@ _proof_floor_declared() {
   who="$(awk '/^floor-attested-by:[ \t]/ { sub(/^floor-attested-by:[ \t]+/, ""); sub(/[ \t]+$/, ""); if (split($0, w, /[ \t]+/) >= 3) { print; exit } }' "$ev" 2>/dev/null)"
   [ "${#sha}" -eq 40 ] || { printf 'the attestation %s carries no head=<40-hex> dirty=0 line naming the working head' "$ev"; return 1; }
   [ -n "$who" ] || { printf 'the attestation %s carries no floor-attested-by: <who> <when> <what ran> line' "$ev"; return 1; }
-  [ "$sha" = "$head" ] || { _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; }
-  printf '%s' "$head"
+  [ "$sha" = "$head" ] || _proof_floor_since "$ev" "$sha" "$head" "$co" "$plan" "$root" "$ev" || return 1
+  printf '%s' "$sha"
 }
 
 # proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places
@@ -1050,7 +1192,9 @@ _proof_roots_load() {
   return 0
 }
 
-# proof_state <plan> <tree> -> what the change since the last floor proof needs, one line:
+# proof_state <plan> <tree> [<from>] -> what the change since the last floor proof needs, one line
+# (with <from>, the change since that commit instead: `proof-add floor` asks it of a run at an
+# ancestor of the working head, wave-30 T13):
 #
 #     covered<TAB><head>               the working branch's head is the one the proof names, or
 #                                      no file changed since it; <head> is the working head
@@ -1094,10 +1238,15 @@ _proof_roots_load() {
 # suites another changed file claims is named by no line. Such a file is asked again alone,
 # inside the same bound, and only a file whose own answer is empty is "answered with no suite".
 # A suite the working checkout does not hold is never named, and never counts as an answer.
+#
+# BOUNDED IS THE MAP'S ANSWER, NOT A PROOF (wave-30 T13; AC-4.4, D7c). The dispatch wall reads it as
+# "no second full run is owed", which it is; whether the suites it names ran green at the working
+# head is `proof_stamps_lacking`'s question, which the judge (`facts_state`) and `proof-add floor`
+# ask beside it.
 proof_state() {
-  local plan="$1" tree="$2" h c wb wt files nn total rest cmd tmp lst roster ans f s rc nog
+  local plan="$1" tree="$2" h="${3:-}" c wb wt files nn total rest cmd tmp lst roster ans f s rc nog
   local d
-  h="$(proof_last "$plan" floor)"
+  [ -n "$h" ] || h="$(proof_last "$plan" floor)"
   [ -n "$h" ] || { printf 'unbounded\tno floor proof on this plan yet\n'; return 0; }
   wb="$(proof_working_branch "$plan")"
   [ -n "$wb" ] || { printf 'unbounded\tthe plan names no working-branch\n'; return 0; }
@@ -1389,6 +1538,8 @@ proof_debts_open() {
 #
 #     covered                  the fact holds at <head>
 #     uncovered<TAB><a>..<b>   code landed past <a>, the last head the fact reached, to <b> = <head>
+#     uncovered<TAB><suite>…   the floor only: the map bounds the change, and these suites have no
+#                              green run at <head> (wave-30 T13)
 #     failing<TAB><evidence>   the question's newest fact is result=fail, and no waiver is newer
 #     absent                   no fact of that kind, and no waiver
 #
@@ -1423,8 +1574,11 @@ proof_debts_open() {
 # piece chain's to cover, so a whole line is covered, failing or absent, never uncovered. A proof
 # line carries no range start, so what a whole reading read is the verb's to hold: it refuses one
 # whose range starts after the plan's base-sha (row T41), and the judge takes the line as written.
-# THE FLOOR is proof_state's answer, unchanged: `covered` or `bounded` is covered; with no floor
-# proof it is absent; anything else is uncovered from the floor proof's head. proof_state judges
+# THE FLOOR is proof_state's answer: `covered` is covered; `bounded` is covered only when every suite
+# it names has a green run at the working head, a stamp `proof_stamps_lacking` reads, and otherwise
+# `uncovered<TAB><suite> <suite>…`, the suites with none (wave-30 T13; AC-4.4, D7c: through 1.13.0
+# bounded was covered on no evidence); with no floor proof it is absent; anything else is uncovered
+# from the floor proof's head, the range, for a full run is owed. proof_state judges
 # the working checkout's head, so for any other <head> the floor is uncovered from the floor proof's
 # head, never covered (T45; review pass 13 F3).
 # An owed line this judge has no rule for answers absent (the safe direction).
@@ -1435,7 +1589,7 @@ proof_debts_open() {
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
   local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot pfx chains fact kind q role scope st rc=0
-  local x pt pr ph pe wt wr we
+  local x pt pr ph pe wt wr we lk
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   if ! declare -F plan_frontmatter_get >/dev/null 2>&1; then
@@ -1502,9 +1656,14 @@ review	"*)
         elif [ "$(proof_head "$tree" "$(proof_working_branch "$plan")" 2>/dev/null)" != "$head" ]; then
           st="uncovered	$x..$head"
         else
-          st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1 { print $1 }')"
+          st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1')"
           case "$st" in
-            covered|bounded) st=covered ;;
+            covered*) st=covered ;;
+            bounded"	"*)
+              # shellcheck disable=SC2086  # suite names are words of one closed alphabet
+              if lk="$(proof_stamps_lacking "$(proof_checkout "$tree" "$(proof_working_branch "$plan")")" "$head" ${st#bounded	})"; then
+                st=covered
+              else st="uncovered	$lk"; fi ;;
             *) st="uncovered	$x..$head" ;;
           esac
         fi ;;

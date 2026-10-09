@@ -5198,6 +5198,88 @@ expect_block "28h '  - AC-1:' (indented) → block (pinned boundary: strip is fl
   "$h28h" 'git commit -m "x"' "missing evidence key"
 
 
+section "§UNFILLED: the stubs Step 3 renders carry 'pending', which the gate accepts before the Verify gate and refuses at it — stack-health: and walk-artifact: included (wave-30 T14; REQ-6 AC-6.1; D9, Δ12a)"
+
+# fails-when: a plan rendered at Step 3 is refused at current: 3 or 4 on its 'pending' stubs, or a
+# 'pending' stub (a tier key, stack-health:, walk-artifact:) passes the Verify gate once no row is
+# still pending, or at current: 6.
+#
+# THE TOKEN IS 'pending' (Δ12a): already in is_placeholder_value's set, so a tier key reading
+# 'pending' was refused wherever the key loop judges it; what T14 adds is the two matrix-level
+# lines, which the key loop never reads. stack-health: lost its exemption (any non-empty value but
+# a bare n/a used to pass), and a walk-artifact: line in the matrix — the stub the render verb
+# writes beside it — is held to the same rule. Both bite exactly where a tier key does: at
+# current: 5 once no row is pending or blocked (the mid-walk relaxation the key loop has), and at
+# every step after. FIXTURE FIDELITY: the matrix below is the shape `session-poker.sh
+# matrix-render` writes (session-poker-4 §MATRIX-RENDER pins the writer); the gate is the real one.
+
+# $1 stack-health value · $2 walk-artifact value ("" = no line) · $3 row status · $4 auditor
+# cell · $5 keys: pending | filled
+unf_matrix() {
+  local sh="$1" wa="$2" st="$3" aud="$4" keys="$5" ev tr rb ff
+  if [ "$keys" = pending ]; then
+    ev=pending; tr=pending; rb=pending; ff=pending
+  else
+    ev=record/generic-evidence.md; tr="bash test.sh — unit suite"; rb="40/40 asserted"
+    ff="the fixture plants the defect the eval must go red on"
+  fi
+  printf '## Verification Matrix\n\nstack-health: %s\n' "$sh"
+  [ -z "$wa" ] || printf 'walk-artifact: %s\n' "$wa"
+  printf '\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1 | T2 | %s | see AC-1 | %s |\n| AC-2 | T1 | %s | see AC-2 | %s |\n\n' "$st" "$aud" "$st" "$aud"
+  printf 'AC-1:\n  provenance: spec section 1\n  fails-when: the planted defect this eval must go red on\n'
+  printf '  eval: T2 — bash test.sh\n  task: T1\n  evidence: %s\n  tier-run: %s\n  readback: %s\n  fixture-fidelity: %s\n' "$ev" "$tr" "$rb" "$ff"
+  printf 'AC-2:\n  provenance: spec section 2\n  fails-when: the second planted defect\n'
+  printf '  eval: T1 — bash test.sh\n  task: pending\n  evidence: %s\n  tier-run: %s\n  readback: %s\n' "$ev" "$tr" "$rb"
+}
+unf_body="  plan-doc: .bionic/docs/plans/wave-01.plan.md"
+
+# --- before the Verify gate: the rendered stubs commit ---------------------------------------
+hUF1=$(make_home)
+write_plan "$hUF1" "$(plan 3 "$unf_body" "$(unf_matrix pending pending pending '' pending)")" > /dev/null
+expect_allow "UF-1 the rendered stubs (every key, stack-health: and walk-artifact: 'pending') at current: 3 → allow" \
+  "$hUF1" 'git commit -m "x"'
+hUF2=$(make_home)
+write_plan "$hUF2" "$(plan 4 "$unf_body" "$(unf_matrix pending pending pending '' pending)")" > /dev/null
+expect_allow "UF-2 …and at current: 4 → allow" "$hUF2" 'git commit -m "x"'
+hUF3=$(make_home)
+write_plan "$hUF3" "$(plan 5 "$step5_base" "$(unf_matrix pending pending pending '' pending)")" > /dev/null
+expect_allow "UF-3 …and at current: 5 while every row is still pending (the mid-walk relaxation) → allow" \
+  "$hUF3" 'git commit -m "x"'
+
+# --- at the Verify gate: each stub is refused, by name, beside its filled twin -------------------
+hUF4=$(make_home)
+write_plan "$hUF4" "$(plan 5 "$step5_base" "$(unf_matrix 'restarts 0 → 0' '' discharged CONFIRMED pending)")" > /dev/null
+expect_block "UF-4 a discharged row whose tier keys read 'pending' at current: 5 → block, naming the key" \
+  "$hUF4" 'git commit -m "x"' "evidence key 'tier-run' is a placeholder"
+hUF4b=$(make_home)
+write_plan "$hUF4b" "$(plan 5 "$step5_base" "$(unf_matrix 'restarts 0 → 0' '' discharged CONFIRMED filled)")" > /dev/null
+expect_allow "UF-4b …the same matrix with the keys filled → allow (the control)" "$hUF4b" 'git commit -m "x"'
+hUF5=$(make_home)
+write_plan "$hUF5" "$(plan 5 "$step5_base" "$(unf_matrix pending '' discharged CONFIRMED filled)")" > /dev/null
+expect_block "UF-5 stack-health: pending at current: 5, no row pending → block (the exemption is gone)" \
+  "$hUF5" 'git commit -m "x"' "'stack-health:' is still a placeholder"
+hUF5b=$(make_home)
+write_plan "$hUF5b" "$(plan 5 "$step5_base" "$(unf_matrix TBD '' discharged CONFIRMED filled)")" > /dev/null
+expect_block "UF-5b …any placeholder token, 'TBD' as well → block" \
+  "$hUF5b" 'git commit -m "x"' "'stack-health:' is still a placeholder"
+hUF6=$(make_home)
+write_plan "$hUF6" "$(plan 5 "$step5_base" "$(unf_matrix 'restarts 0 → 0' pending discharged CONFIRMED filled)")" > /dev/null
+expect_block "UF-6 walk-artifact: pending in the matrix at current: 5, no row pending → block" \
+  "$hUF6" 'git commit -m "x"' "'walk-artifact:' is still a placeholder"
+hUF6b=$(make_home)
+write_plan "$hUF6b" "$(plan 5 "$step5_base" "$(unf_matrix 'restarts 0 → 0' record/walk.md discharged CONFIRMED filled)")" > /dev/null
+expect_allow "UF-6b …the same line naming the walk record → allow (the control)" "$hUF6b" 'git commit -m "x"'
+
+# --- after the Verify gate: no relaxation ------------------------------------------------------
+hUF7=$(make_home)
+write_plan "$hUF7" "$(plan 6 "$step6_body" "$(unf_matrix pending '' discharged CONFIRMED filled)")" > /dev/null
+expect_block "UF-7 stack-health: pending at current: 6 → block" \
+  "$hUF7" 'git commit -m "x"' "'stack-health:' is still a placeholder"
+hUF7b=$(make_home)
+write_plan "$hUF7b" "$(plan 6 "$step6_body" "$(unf_matrix 'restarts 0 → 0' '' discharged CONFIRMED filled)")" > /dev/null
+expect_allow "UF-7b …the same plan with stack-health filled → allow (the control)" "$hUF7b" 'git commit -m "x"'
+
 # ============================================================
 # Two sections moved here from after Section 40 when the suite was sharded (wave-30 T3).
 # AC-E1.3/E1.5: its first row counts the refusals the run saw (eg_e1_check, called by every

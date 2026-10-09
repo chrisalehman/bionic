@@ -3445,4 +3445,27 @@ for eg_rv_old in "low, medium or high" "medium" "three"; do
   expect_absent "§RIGOR …and not the set before 1.14.0 ('$eg_rv_old'), on its line or in its detail" "$eg_rv_old" "$HOOK_VSTDERR"
 done
 
+section "§READS-HEAD — the evidence gate refuses a commit while the regression row's reads drop head (wave-30 T13; REQ-4 AC-4.3; D7, Δ6a)"
+# ============================================================
+# The gate's ledger check is units_validate's (22e2, R2): a verify row whose reads cell drops head
+# breaks a Task invariant, so every commit on that plan is refused naming the row and the token.
+# The control is the same plan with the row reading its default written out.
+eg_rh_tasks() {  # <T2's reads cell> -> a reads-column ## Tasks table: T1 landed build, T2 the regression row
+  printf '%s\n' "## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | reads | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh |  | landed |
+| T2 | 5 | verify | the one regression | test-runner | — | 30m | REQ-x | .bionic/docs/record/w/regression.md | $1 | pending |"
+}
+h_rh=$(make_home)
+write_plan "$h_rh" "$(d7_wave_plan "$(eg_rh_tasks ".bionic/docs/record/w/build-log.md")" "- T1: bash suite 9/9 green")" > /dev/null
+expect_block "§READS-HEAD rh1 a regression row reading a record path instead of head → block, naming the row and the token" \
+  "$h_rh" 'git commit -m "x"' "T2: reads .bionic/docs/record/w/build-log.md drops head; a verify row must read head"
+expect_contains "§READS-HEAD rh1b …under the ledger's verdict line" \
+  "bionic: commit refused — that dispatched task's row is invalid" "$HOOK_STDERR"
+h_rh2=$(make_home)
+write_plan "$h_rh2" "$(d7_wave_plan "$(eg_rh_tasks "approval:plan, head")" "- T1: bash suite 9/9 green")" > /dev/null
+expect_allow "§READS-HEAD rh2 the same plan with T2 reading approval:plan, head → allow" "$h_rh2" 'git commit -m "x"'
+
 finish
