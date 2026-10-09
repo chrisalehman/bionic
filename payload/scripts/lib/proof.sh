@@ -35,12 +35,13 @@ PROOF_SCOPES="piece whole"
 PROOF_CHECK_ANSWERS="PASS FLAG FAIL n/a"
 # The roles a reading may be registered for: a reader's roster row carries one of these as its
 # `subagent_type=`, never a writer's (D7).
-PROOF_READER_ROLES="bionic:auditor bionic:critic bionic:reviewer"
+PROOF_READER_ROLES="bionic:auditor bionic:critic"
 # THE DEALING (wave-27 T9; D2, D6; wave-30 T11, D1): the reader role that answers each question at
 # each rigor, one role per question, in PROOF_QUESTIONS' order,
 # `<rigor>=<evidence>,<adversarial>,<structure>`. Two levels, keyed by lib/run.sh `rigor_level`'s
 # words: `single`, the critic holds every question; `double`, the auditor takes `evidence` and the
-# critic the rest. Nothing deals `bionic:reviewer`. `facts_owed` is its one reader.
+# critic the rest. The structure reader `bionic:reviewer` is retired (wave-30 T20) and is no
+# role. `facts_owed` is its one reader.
 PROOF_DEALING="single=bionic:critic,bionic:critic,bionic:critic double=bionic:auditor,bionic:critic,bionic:critic"
 # The questions that read the code; at wave scale each also owes one read of the whole (D10).
 PROOF_CODE_QUESTIONS="adversarial structure"

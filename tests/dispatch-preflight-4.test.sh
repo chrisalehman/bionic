@@ -60,8 +60,8 @@ expect_status "the symlink target is not appended to" "untouched" "$(cat "$DECOY
 section "§Q — a reader's brief names its questions, held to the dealing (wave-27 T15; REQ-5 AC-5.1, REQ-1 AC-1.3, D5)"
 # ============================================================================
 #
-# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor`, `bionic:critic` and `bionic:reviewer`
-# carry a `Questions: <q>[, <q>]` line; the wall refuses a reader brief without one, refuses a set
+# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor` and `bionic:critic` (the structure
+# reader `bionic:reviewer` is retired, wave-30 T20, and is refused at §RET) carry a `Questions: <q>[, <q>]` line; the wall refuses a reader brief without one, refuses a set
 # that is not exactly what `facts_owed <rigor> <scale>` (lib/proof.sh) deals that role at the bound
 # plan's rigor, refuses a word outside the three questions, and records the set on the row as
 # `questions=` in the order evidence, adversarial, structure. With no bound plan the line is still
@@ -183,8 +183,8 @@ for _q_deal in "single bionic:critic evidence,adversarial,structure" \
   expect_eq "Q8 $1 deals $2 $3: admitted" "allow" "$GATE_VERDICT"
   expect_eq "Q8 …recorded as dealt" "$3" "$(roster_field "$(q_row "$REPO")" questions)"
 done
-for _q_none in "single bionic:reviewer structure" "double bionic:reviewer structure" \
-               "single bionic:auditor evidence"; do
+# The retired reviewer is refused as retired, not as dealt nothing: §RET holds it, both levels.
+for _q_none in "single bionic:auditor evidence"; do
   set -- $_q_none
   REPO=$(make_repo "rq8n-$1-${2#bionic:}" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$1"
   q_gate "$REPO" "q8n-$1-${2#bionic:}" "$2" "$(q_brief q8n "Questions: $3")"
@@ -302,7 +302,7 @@ q_lift() {  # <role> <span> <field> -> that field of the lift, as the row stores
   bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "$3" "$2")" "$4"' _ "$Q_LIB" "$1" "$2" "$3" 2>&1
 }
 Q49_PY=(); for _q49 in a b c d e f; do Q49_PY+=("python -m pytest tests/$_q49"); done
-for Q49_ROLE in bionic:auditor bionic:critic bionic:reviewer; do
+for Q49_ROLE in bionic:auditor bionic:critic; do
   V=$(q_lib_verdict "$Q49_ROLE" "$(q_span evidence none "${Q49_PY[@]}")")
   expect_contains "T49-Q1 $Q49_ROLE: six python -m pytest runs are refused on the cap of three" \
     "finding: the total of 6 runs exceeds the 3-run cap" "$V"
@@ -367,7 +367,7 @@ q49_gate c4 bionic:auditor double "$Q49_HEAD
 Questions: evidence
 Questions: structure"
 expect_contains "T49-Q8 …two different sets are refused the same" "has 2 Questions: lines" "$R"
-for Q49_C in "bionic:reviewer double structure" "bionic:critic single evidence,adversarial,structure"; do
+for Q49_C in "bionic:auditor double evidence" "bionic:critic single evidence,adversarial,structure"; do
   set -- $Q49_C
   q49_gate "c5-${1#bionic:}" "$1" "$2" "$Q49_HEAD
 Questions: ${3//,/, }
@@ -2051,11 +2051,11 @@ expect_contains "T49-B1 …saying so" "dealt 2 questions, names 1 record" "$GATE
 REPO=$(q_unbound rb1i)
 q_gate "$REPO" b1i bionic:critic "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: $B1_STR")"
 expect_eq "T49-B1 …and with a Files: record for the second it is admitted" "allow" "$GATE_VERDICT"
-# the longest role and three questions: the first line fits the budget
+# the longest role and three questions: the first line fits the budget (the auditor, since the reviewer is retired)
 REPO=$(q_unbound rb1j)
-q_gate "$REPO" b1j bionic:reviewer "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure')"
+q_gate "$REPO" b1j bionic:auditor "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure')"
 B1_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
-expect_contains "T49-B1 bionic:reviewer with three questions and one record is refused" "dealt 3 questions, names 1 record" "$B1_LINE"
+expect_contains "T49-B1 bionic:auditor with three questions and one record is refused" "dealt 3 questions, names 1 record" "$B1_LINE"
 expect_eq "T49-B1 …its first line fits 100 columns" "ok" "$([ "$(bionic_cols "$B1_LINE")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$B1_LINE")")"
 # every other role is untouched
 REPO=$(make_repo rb1k yes); write_attestation "$REPO" "$SID_A"
@@ -2144,13 +2144,13 @@ V=$(q_lib_verdict implementor "$(q_span evidence 'tests/a.test.sh, tests/b.test.
 expect_contains "T57 a writer is untouched by every rule here: four suites and four runs are admitted" "rc=0" "$V"
 expect_absent "T57 …with no finding" "finding:" "$V"
 REPO=$(q_unbound rt57w)
-q_gate "$REPO" t57w bionic:reviewer "Your task: re-run.
+q_gate "$REPO" t57w bionic:auditor "Your task: re-run.
 Expected artifact: .bionic/docs/record/w/e.md
 Expected duration: ~30 minutes.
 Questions: evidence
 Suites: tests/a.test.sh, tests/b.test.sh, tests/c.test.sh, tests/d.test.sh"
 T57_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
-expect_contains "T57-N4 at the wall: a reviewer reading evidence with four suites is refused on the total" "the total of 4 runs exceeds the 3-run cap" "$T57_LINE"
+expect_contains "T57-N4 at the wall: an auditor reading evidence with four suites is refused on the total" "the total of 4 runs exceeds the 3-run cap" "$T57_LINE"
 # each further digit of the total is one column: 94 at one digit leaves room for a total of seven
 expect_eq "T57-N4 …its first line fits with room for six more digits" "ok" "$([ "$(bionic_cols "$T57_LINE")" -le 94 ] && echo ok || echo "wide:$(bionic_cols "$T57_LINE")")"
 
@@ -2166,7 +2166,7 @@ expect_contains "T57-N7 a critic holding evidence is held the same" "finding: th
 V=$(q_lib_verdict bionic:auditor "Questions: evidence
 Re-executes: ${RL_BT}pytest${RL_BT}")
 expect_contains "T57-N7 …while one run and no Suites: line admit it (the positive)" "rc=0" "$V"
-V=$(q_lib_verdict bionic:reviewer "$(q_span structure none)")
+V=$(q_lib_verdict bionic:critic "$(q_span structure none)")
 expect_contains "T57-N7 a reader not dealt evidence with Suites: none and no runs is untouched" "rc=0" "$V"
 expect_absent "T57-N7 …with no finding" "finding:" "$V"
 V=$(q_lib_verdict implementor "$(q_span evidence none 'rm -rf dist')")
@@ -2180,13 +2180,13 @@ Re-executes: ${RL_BT}rm -rf dist${RL_BT}"
 expect_eq "T57-N7 at the wall: the auditor with no Suites: line and only rm -rf dist is refused" "deny" "$GATE_VERDICT"
 expect_contains "T57-N7 …saying it declares nothing to re-execute" "the auditor declares nothing to re-execute" "$GATE_ERR"
 REPO=$(q_unbound rt57m)
-q_gate "$REPO" t57m bionic:reviewer "Your task: re-run.
+q_gate "$REPO" t57m bionic:auditor "Your task: re-run.
 Expected artifact: .bionic/docs/record/w/e.md
 Expected duration: ~30 minutes.
 Questions: evidence
 Suites: none"
 T57_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
-expect_contains "T57-N7 the longest role: a reviewer reading evidence with nothing to re-execute" "the reviewer declares nothing to re-execute" "$T57_LINE"
+expect_contains "T57-N7 the longest role: an auditor reading evidence with nothing to re-execute" "the auditor declares nothing to re-execute" "$T57_LINE"
 expect_eq "T57-N7 …its first line fits 100 columns" "ok" "$([ "$(bionic_cols "$T57_LINE")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$T57_LINE")")"
 REPO=$(make_repo rt57r yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" t57r bionic:critic "Your task: read.
@@ -2239,9 +2239,9 @@ Suites: none"
 for _t57 in $(seq 1 12); do T57_DUP="$T57_DUP
 Questions: structure"; done
 REPO=$(q_unbound rt57q)
-q_gate "$REPO" t57q bionic:reviewer "$T57_DUP"
+q_gate "$REPO" t57q bionic:critic "$T57_DUP"
 T57_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
-expect_contains "T57-N2 twelve Questions: lines: the first line says twelve" "bionic:reviewer has 12 Questions: lines" "$T57_LINE"
+expect_contains "T57-N2 twelve Questions: lines: the first line says twelve" "bionic:critic has 12 Questions: lines" "$T57_LINE"
 T57_NUMS=$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 'on lines ' | sed 's/.*on lines //; s/:$//')
 expect_contains "T57-N2 …the detail lists the line numbers from the first" "105, 106" "$T57_NUMS"
 T57_BAD=""
@@ -2398,7 +2398,7 @@ t72_gate() {  # <repo> <tag> <role> <brief> -> R: allow:<suites_allowed>|<suites
 }
 T72_N=0
 for T72_IMP in on off; do
-  for T72_K in "aud bionic:auditor auditor" "crit bionic:critic critic" "rev bionic:reviewer reviewer"; do
+  for T72_K in "aud bionic:auditor auditor" "crit bionic:critic critic"; do
     set -- $T72_K; T72_KEY=$1; T72_ROLE=$2; T72_WORD=$3
     T72_R=$(t72_repo "$T72_KEY" "$T72_IMP")
     for T72_L in cmt hash; do
@@ -2911,6 +2911,7 @@ rv_gate() {  # <tag> <rigor> <role> <questions line or empty> [<scale>] -> GATE_
   fi
   q_gate "$REPO" "rv-$1" "$3" "$(q_brief "rv-$1" "$4")"
 }
+# The reviewer row is the retired role (wave-30 T20): still refused, now as retired (§RET reads the line).
 for rv_case in "single|bionic:auditor|Questions: evidence|deny" \
                "single|bionic:critic|Questions: evidence, adversarial, structure|allow" \
                "double|bionic:auditor|Questions: evidence|allow" \
@@ -2954,28 +2955,53 @@ for rv_s in wave task; do
 done
 
 # THE LONGEST VALUES, UNDER THE STRICT WIDTH (A-orch-17). Each refusal is driven at the widest value
-# it can carry: single deals the critic all three questions, and double deals the reviewer nothing.
+# it can carry: single deals the critic all three questions, and the retired reviewer is refused as retired.
 # Under BIONIC_REFUSE_STRICT=1 an over-wide line refuses its own call, so a whole line here is the
 # proof it fits.
-rv_cols() { printf '%s' "$1" | LC_ALL=en_US.UTF-8 awk '{ print length($0) }'; }
+rv_cols() { bionic_cols "$1"; }
 expect_eq "RV5 precondition: this suite runs with the strict refusal width" "1" "${BIONIC_REFUSE_STRICT:-}"
 rv_gate w single bionic:critic 'Questions: evidence'
 expect_eq "RV5 single: a critic naming one of its three questions is refused" "deny" "$GATE_VERDICT"
 RV5_LINE="bionic: dispatch refused — single rigor deals critic: evidence,adversarial,structure (use that set)"
 expect_contains "RV5 …on its own line, the whole set kept" "$RV5_LINE" "$GATE_ERR"
-# MEASURED, NOT BLESSED (A-T11.9): `single` is three columns wider than `low`, so this line, 98 columns
-# before 1.14.0, is now 101, one over the 100 budget; the wall's dp_finding does not cut or refuse it.
-# The line is hooks/dispatch-preflight.sh's (row T20); this row pins the width so a fix moves it.
-expect_eq "RV5 …which is 101 columns, one over the line budget (flagged, A-T11.9)" "101" "$(rv_cols "$RV5_LINE")"
+# MEASURED IN COLUMNS (wave-30 T20, A-T20.2): A-T11.9 read this line as 101 columns, one over the budget,
+# from an awk `length` that counts the em dash as three bytes under macOS awk; the line is 99 columns, and
+# `bionic_cols` (lib/width.sh, the measure the refusal library and §T49 use) says so. rv_cols is that measure.
+expect_eq "RV5 …which is 99 columns, inside the 100 budget" "99" "$(rv_cols "$RV5_LINE")"
+expect_eq "RV5 …and the line the wall printed is no wider than 100" "ok" \
+  "$([ "$(rv_cols "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')")" -le 100 ] && echo ok || echo wide)"
 expect_contains "RV5 …the detail names the role as typed" "Role:  bionic:critic" "$GATE_VERR"
 expect_contains "RV5 …and the level in the printed form" "review rigor: single (one independent mind)" "$GATE_VERR"
-rv_gate w double bionic:reviewer 'Questions: structure'
-expect_eq "RV6 double: a reviewer is dealt nothing and refused" "deny" "$GATE_VERDICT"
-RV6_LINE="bionic: dispatch refused — double rigor deals reviewer: nothing (dispatch its holder)"
-expect_contains "RV6 …on its own line" "$RV6_LINE" "$GATE_ERR"
-expect_eq "RV6 …which is 87 columns" "87" "$(rv_cols "$RV6_LINE")"
-expect_contains "RV6 …the detail names the role as typed" "Role:  bionic:reviewer" "$GATE_VERR"
-expect_contains "RV6 …and the level in the printed form" "review rigor: double (two independent minds)" "$GATE_VERR"
+# ============================================================================
+section "§RET — the structure reader is retired: a brief naming bionic:reviewer is refused, and says where structure went (wave-30 T20; REQ-1 AC-1.6, D2)"
+# ============================================================================
+# fails-when: the wall admits `subagent_type: bionic:reviewer` at either level or with no bound plan,
+# the refusal does not name the retirement and the role that holds `structure`, or its first line is
+# wider than 100 columns. Each refusal is read beside the critic admitted on the same plan, so a wall
+# that refuses everything cannot pass.
+RET_LINE="bionic: dispatch refused — bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)"
+for ret_l in single double; do
+  rv_gate ret-$ret_l "$ret_l" bionic:reviewer 'Questions: structure'
+  expect_eq "RET $ret_l: bionic:reviewer is refused" "deny" "$GATE_VERDICT"
+  expect_contains "RET …on its own line, naming the retirement and the role to dispatch" "$RET_LINE" "$GATE_ERR"
+  expect_contains "RET …the detail says structure is the critic's question" "structure is the critic's question" "$GATE_VERR"
+  expect_contains "RET …and names the role as typed" "bionic:reviewer" "$GATE_VERR"
+  expect_absent "RET …and is not the old 'rigor deals reviewer' refusal" "deals reviewer" "$GATE_ERR"
+  rv_gate ret-c-$ret_l "$ret_l" bionic:critic "$([ "$ret_l" = single ] && echo 'Questions: evidence, adversarial, structure' || echo 'Questions: adversarial, structure')"
+  expect_eq "RET $ret_l: …while bionic:critic is admitted on the same plan (the positive beside it)" "allow" "$GATE_VERDICT"
+done
+expect_eq "RET the retirement line is 87 columns, inside the 100 budget" "87" "$(rv_cols "$RET_LINE")"
+REPO=$(q_unbound rret-unbound)
+q_gate "$REPO" ret-unbound bionic:reviewer "$(q_brief ret-unbound 'Questions: structure')"
+expect_eq "RET with no bound plan: bionic:reviewer is refused too" "deny" "$GATE_VERDICT"
+expect_contains "RET …on the same line" "$RET_LINE" "$GATE_ERR"
+REPO=$(q_unbound rret-nq)
+q_gate "$REPO" ret-nq bionic:reviewer "$(q_brief ret-nq '')"
+expect_contains "RET a reviewer brief with no Questions: line is refused as retired as well" "$RET_LINE" "$GATE_ERR"
+# A bare `reviewer` is not the plugin's role (a consumer's own agent of that name may exist): untouched.
+REPO=$(make_repo rret-bare yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" ret-bare reviewer "$(q_brief ret-bare '')"
+expect_absent "RET a bare 'reviewer' is not the retired plugin role" "is retired" "$GATE_ERR"
 
 # ============================================================================
 
