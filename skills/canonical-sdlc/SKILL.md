@@ -47,7 +47,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 First user-facing action:
 
-> **Canonical SDLC engaged — `<intent> · <level> rigor · <scale>`** (for example `build · high rigor · wave`), then the line `bash <plugin-root>/scripts/card.sh rigor <rigor>` prints, which says what that rigor buys: `review rigor: high (three independent readers)`.
+> **Canonical SDLC engaged — `<intent> · <level> rigor · <scale>`** (for example `build · double rigor · wave`), then the line `bash <plugin-root>/scripts/card.sh rigor <rigor>` prints, which says what that rigor buys: `review rigor: double (two independent minds)`.
 
 Triple not yet declared → say so and list the axes. Invoked as `help` → render the axis tables and stop.
 
@@ -62,24 +62,29 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 | `refactor` | Change structure, preserve behavior. Covers upgrades, migrations, removals/deprecations. | `behavior-preservation:` in the Step-5 block; migrations add `compat-matrix:`/`revert-plan:` (or `n/a: not a migration`). Log-only. |
 | `tune` | Move a NAMED measurement toward a target. If you cannot name the measurement, it is not tune. | `baseline:`/`target:`/`re-measure:` in the Step-5 block, all three. Log-only. |
 | `spike` | Timeboxed research. **Ships no code at any rigor.** | Writeup only at `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md`. No plan file, no spec, no ADR, no commits to the integration branch. |
-| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `high`. Monitoring-gap closure is part of Close-out. |
+| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `double`. Monitoring-gap closure is part of Close-out. |
 
 **Document and research deliverables — writeups, research reports — don't belong here.** Plain
 plan mode serves them better than any row in this table, `spike` included: it ships no code at
 any rigor, but its writeup is a timeboxed research artifact, not a general document-production
 mode.
 
-**rigor** — how many independent minds answer the questions: `low`, `medium` or `high`. Cumulative. `low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads either word as the same level, and a file carrying an old word is read as it is and never rewritten.
+**rigor** — how many independent minds answer the questions: `single` (one) or `double` (two). A level sets four things, each the user's to set at Step 0: the readers, `review-cadence:`, `fix-policy:` and `fix-cap:`.
 
-Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the tests floor `pass == total`. `evidence`: is the proof honest. `adversarial`: what is wrong that nobody asked about. `structure`: is it built from what exists, and shaped well. Rigor sets how many independent readers hold the last three.
+Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the regression `pass == total`. The other three are read by independent minds: `evidence`, is the proof honest; `adversarial`, what is wrong that nobody asked about; `structure`, is it built from what exists, and shaped well.
 
-| Rigor | Independent readers | Who holds which question |
+Findings are classed by payment date, not by reader: harm (the user, now), evidence (the claim, now), debt (the next change). The reader roster follows from the classes, not the other way round.
+
+Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole.
+
+| | `single` | `double` |
 |---|---|---|
-| `low` | one | critic holds all three |
-| `medium` | two; + a separate spec, and at `scale: task` a proof-shaped ledger row | auditor `evidence`, critic `adversarial` and `structure` |
-| `high` | three; + per-step checkpoint commits, expanded stop-and-wake, and at `scale: wave` a `## Tasks` section in a multi-agent plan | auditor `evidence`, critic `adversarial`, reviewer `structure` |
+| readers | one: the critic holds every question | two: the auditor takes `evidence` |
+| when (`review-cadence:`) | once, at Step 6, on the settled whole | once, at Step 6 |
+| becomes a row unasked (`fix-policy:`) | S1 + S2-on, in-diff | S1 + S2-on, in-diff |
+| cap on review-born rows (`fix-cap:`) | 2 | 10% of the plan |
 
-At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` turns a reading into a fact.
+At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` holds the review findings disposition and turns a reading into a fact.
 
 **scale** — the decomposition unit.
 
@@ -89,7 +94,7 @@ At `scale: wave` each code question (`adversarial`, `structure`) also owes `scop
 | `wave` | Full set (0–9). Default. | One wave spec + plan; tasks inside Step 4. | Wave branch off the epic integration branch; merges back at Step 8. |
 | `epic` | 0–3 only. | `epic.spec.md` + `epic.plan.md`; carves waves. Does NOT run 4–9. | Owns `epic/NN-<slug>`; merges to mainline once, at close. |
 
-**Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→low and `build`/`refactor`/`tune`→medium; at `wave` and above, `high`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `high`, `spike` is CAPPED at `low`), flag (security-touching or privacy/vulnerable-population work floors at `high`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). One adjacent check does block, and it is not a floor: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a floor the user has overridden.
+**Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→`single` and `build`/`refactor`/`tune`→`double`; at `wave` and above, `double`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `double`, `spike` is CAPPED at `single`), flag (security-touching or privacy/vulnerable-population work floors at `double`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). One adjacent check does block, and it is not a floor: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a floor the user has overridden.
 
 Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. The wave that owns the integration point carries the flag floor.
 
@@ -112,8 +117,10 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
                                   # keeps the whole tree out of git, not the project .gitignore
 .bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default;
                                   # `release-check:`, and `floor: <command>` or `floor-attestation: user`
-                                  # when a project's floor is not tests/run.sh
+                                  # when a project's regression is not tests/run.sh
 ```
+
+The regression's verbs and keys still spell it `floor` (`proof-add floor`, `floor-run`, `floor:`, `floor-attestation:`) until bionic2.
 
 The first five are lifecycle artifacts and are gated: the governing-skill hook enforces
 frontmatter on them and blocks a canonical artifact written anywhere else. `record/` and
@@ -153,7 +160,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 2 Design | `steps/2.md` | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design; writes `wave-NN-<slug>.spec.md` — the technical design, ownership table, and the Eval design table |
 | 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — tasks, sequencing, and the verification matrix rendered from Step 2's Eval design |
 | 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every task RED before GREEN; assumptions logged |
-| 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
+| 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; the regression green; every matrix row discharged at tier or waived; auditor CONFIRMED |
 | 6 Review | `steps/6.md` | `canonical-sdlc` | One fact per owed question at the head, or its waiver |
 | 7 Document | `steps/7.md` | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `steps/8.md` | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp ephemera wiped |
@@ -198,16 +205,18 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 |---|---|
 | 0 | `prereqs: ok` |
 | 1, 2, 3 | pointer (presence only) |
-| 4 | pointer; plus `worktree:`/`base-sha:`/`branch:` when `use_worktree: true`, which `current 4` fills at wave scale |
+| 4 | pointer, plus `worktree:`/`base-sha:`/`branch:`, owed at every scale and whatever `use_worktree:` says; `current 4` fills them at wave scale |
 | 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
 | 6 | one fact per owed question (`proved: kind=review`), or its `waived:` line; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
 | 9 | `delivered:` always, ON the `Step 9:` line itself — the run-closure predicate (`lib/run.sh`) greps that one line, so a `delivered:` written on a continuation line leaves the run open forever; `archived:` always, naming what `archive_run` moved or why nothing moved; plus `deployed:`, `verified:`, `monitored:` exactly when `deploy_target` names a live surface |
 
+**The matrix.** Step 3 renders the matrix (`matrix-render`); Step 5 fills values.
+
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 
-**Handoff.** A plan spanning sessions carries a `## Handoff` section — resume point (step, sub-task, branch, last commit), decisions approved this session (reset each time), tried-and-rejected and discovered surprises (persist), open blockers, uncommitted work, and a literal resume instruction. Rewritten in place, never appended. Nothing writes or checks it. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
+**Handoff.** A plan spanning sessions carries a `## Handoff` section — resume point (step, sub-task, branch, last commit), decisions approved this session (reset each time), tried-and-rejected and discovered surprises (persist), open blockers, uncommitted work, and a literal resume instruction. Rewritten in place, never appended, and never by hand: `session-poker.sh handoff` writes it from the plan and the machine (heads, open rows, live agents, last proof, the clock) and carries the human lines. The first run over a hand-written section keeps only its five human lines. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
 
 ## Hooks
 

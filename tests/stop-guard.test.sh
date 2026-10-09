@@ -187,7 +187,7 @@ make_world() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 ---
 

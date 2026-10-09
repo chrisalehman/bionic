@@ -36,6 +36,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
@@ -114,7 +115,7 @@ fixture_git() {
 # ---------- the fixture ----------
 
 # fixture_plan_text <archive-root> <current> -> a plan the evidence gate reads clean at
-# current: 9: frontmatter (walk exempt, tested rigor, no named deploy target), a
+# current: 9: frontmatter (walk exempt, single rigor, no named deploy target), a
 # `## SDLC State` naming both branches, and a complete `## Verification Matrix` whose
 # one T1 row owes tier-run/readback/evidence and has them.
 #
@@ -130,7 +131,7 @@ fixture_plan_text() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: n/a
 use_worktree: false
@@ -148,7 +149,7 @@ integration-branch: main
 working-branch: wave/01-fixture
 base: main @ fixture
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 current: ${current}
 approved-by: fixture 2026-09-14T00:00Z "approved"
@@ -346,7 +347,7 @@ mk_census_fixture() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: n/a
 use_worktree: false
@@ -364,7 +365,7 @@ integration-branch: main
 working-branch: ${working}
 base: main @ fixture
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 current: 7
 approved-by: fixture 2026-09-14T00:00Z "approved"
@@ -420,7 +421,7 @@ mk_census_fixture_nowt() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: n/a
 use_worktree: false
@@ -438,7 +439,7 @@ integration-branch: main
 working-branch: ${working}
 base: main @ fixture
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 current: 7
 approved-by: fixture 2026-09-14T00:00Z "approved"
@@ -1322,14 +1323,14 @@ section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with n
 # RE-AUTHORED BY wave-27 T14 from T4's pin of the refusal (A-T4.1). The verb no longer
 # dry-commits the plan at Step 8, where the gate asked for the Step-8 block only close-out
 # writes; it asks lib/proof.sh `facts_state` at the working head instead (D3). `mk_fixture`
-# holds what a run at Step 7 owes there (`plant_facts`: at `rigor: tested`, `scale: wave`, the
+# holds what a run at Step 7 owes there (`plant_facts`: at `rigor: single`, `scale: wave`, the
 # floor and the critic's three questions at piece scope and two at whole scope), so `current 8`
 # moves the plan and `close-out.sh run` then delivers, with no hand edit.
 PE="$(mk_fixture e2e)"
 E2E_SID="closeout-e2e-1"
 expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 8 block written and no Step 9 line" "7/0" \
   "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")/$(step_lines "$PE/$PLAN_REL" 9)"
-expect_eq "E2E0b: precondition: it carries the six facts the tested wave run owes" "6" \
+expect_eq "E2E0b: precondition: it carries the six facts the single wave run owes" "6" \
   "$(/usr/bin/grep -c '^proved: ' "$PE/$PLAN_REL" | tr -d ' ')"
 expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before the readings' head" "yes" \
   "$(b="$(sed -n 's/^base-sha: //p' "$PE/$PLAN_REL")"; [ -n "$b" ] && fixture_git "$PE" merge-base --is-ancestor "$b" wave/01-fixture && echo yes || echo no)"
@@ -2127,5 +2128,154 @@ expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed 
 run_close "$PFL" run
 expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc 0), the plan closed" "0|1" \
   "$CO_RC|$(run_open_rc "$PFL/$PLAN_REL")"
+
+section "DEBT-CARD — wave-30 T22 (AC-11.4, AC-11.2; D2, P2): the release card says the run's touches and burns; the continuation carries each unburned item"
+# ============================================================
+# The run's ledger is `record/<run>/debt.md` (lib/proof.sh `proof_debt_ledger_path`). close-out prints
+# `debt: touched <N> · burned <M>`: N the touches summed over every item, M the items burned, never the
+# ledger's length. The continuation's ## Deferrals carries one line per unburned item, after the
+# deferred: lines, in the form
+#
+#   debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>
+#
+# fails-when: the card omits the line or prints a count of items; the continuation omits an unburned item.
+# FIXTURE FIDELITY: the ledger is planted in the line shape `session-poker.sh debt` writes (session-poker-4
+# §DEBT-LEDGER pins the shape against the verb).
+debt_plant() {  # <project> -> the ledger: three items, five touches, one burned
+  local d="$1/.bionic/docs/record/wave-01-fixture"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "debt_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  mkdir -p "$d"
+  printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
+    'tree_count | duplicate | lib/a.sh:1, lib/b.sh:2 | raised-by record/wave-01-fixture/critic-structure.md | touches 4 | —' \
+    'log_shim | one-case-abstraction | lib/c.sh:3 | raised-by record/wave-01-fixture/critic-structure.md | touches 1 | burned T3' \
+    'pair_x | unpinned-pair | lib/d.sh:9 | raised-by record/wave-01-fixture/critic-adversarial.md | touches 0 | —' > "$d/debt.md"
+}
+PDB="$(mk_fixture debtcard1)"; advance_to "$PDB" 8
+debt_plant "$PDB"
+run_close "$PDB" check
+expect_eq "DEBT-CARD-1 check exits 0 over a run that keeps a debt ledger" "0" "$CO_RC"
+expect_eq "DEBT-CARD-2 …and its card prints the run's touches and burns: 4+1+0 touched, one burned" \
+  "debt: touched 5 · burned 1" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^debt: ')"
+run_close "$PDB" run
+expect_eq "DEBT-CARD-3 run exits 0" "0" "$CO_RC"
+expect_eq "DEBT-CARD-4 …and prints the same line once (AC-11.4), not the ledger's three items" \
+  "debt: touched 5 · burned 1" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^debt: ')"
+expect_nonempty "DEBT-CARD-5 precondition: the extractor finds lines under ## Deferrals" "$(carry_section "$PDB/$CONT_REL")"
+expect_eq "DEBT-CARD-6 the continuation carries each unburned item, in ledger order, and not the burned one (AC-11.2)" \
+"debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W" \
+  "$(carry_section "$PDB/$CONT_REL" | /usr/bin/grep '^debt: ')"
+expect_absent "DEBT-CARD-7 …the burned item is not carried" "log_shim" "$(carry_section "$PDB/$CONT_REL")"
+
+# no ledger: the card still says it, at zero (the line is never omitted)
+PDN="$(mk_fixture debtcard2)"; advance_to "$PDN" 8
+run_close "$PDN" run
+expect_eq "DEBT-CARD-8 a run with no ledger exits 0 and its card prints touched 0 · burned 0" \
+  "0|debt: touched 0 · burned 0" "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^debt: ')"
+expect_nonempty "DEBT-CARD-9 precondition: its continuation has a Deferrals heading to read" "$(/usr/bin/grep '^## Deferrals$' "$PDN/$CONT_REL")"
+expect_absent "DEBT-CARD-9b …and carries no debt line" "debt: " "$(carry_section "$PDN/$CONT_REL")"
+
+# an existing continuation with the heading: an unburned item not under it yet is merged in, each once
+PDE="$(mk_fixture debtcard3)"; advance_to "$PDE" 8
+debt_plant "$PDE"
+mkdir -p "$PDE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\nnone, said the person\n' > "$PDE/$CONT_REL"
+run_close "$PDE" run
+expect_eq "DEBT-CARD-10 run over a written continuation exits 0" "0" "$CO_RC"
+expect_eq "DEBT-CARD-11 …the person's line kept, both unburned items added under the heading" \
+"none, said the person
+debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W" \
+  "$(carry_section "$PDE/$CONT_REL")"
+
+# ============================================================
+section "DEBT-RECARRY — wave-30 T23 (A-orch-44; AC-11.2): an inherited debt line the run's ledger does not hold is carried again"
+# ============================================================
+# A continuation's `debt:` lines reach the next run's ledger only through `debt adopt` (wave-30 T32), and
+# `card.sh inherited` withholds them so an adopted item is not written twice (A-T32.2). So an item nobody
+# adopted was dropped at the next close-out. Now close-out carries each inherited debt line as written,
+# its from= kept, unless the run's ledger holds its concept and kind: then the ledger's own line carries
+# it (unburned) or nothing does (burned). fails-when: an unadopted item is dropped, or an adopted one is
+# carried twice. FIXTURE FIDELITY: the predecessor's lines are in close-out's own carry shape (the printf
+# docs-pins W30-L4b holds), and the ledger is debt_plant's, the shape `session-poker.sh debt` writes.
+RC_FROM="from=$CARRY_PREV"
+RC_HELD="debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=2 raised-by=record/$CARRY_PREV/critic-structure.md $RC_FROM"
+RC_PAID="debt: log_shim one-case-abstraction \"lib/c.sh:3\" touches=1 raised-by=record/$CARRY_PREV/critic-structure.md $RC_FROM"
+RC_LOOSE="debt: orphan_x duplicate \"lib/z.sh:7\" touches=3 raised-by=record/$CARRY_PREV/critic-structure.md $RC_FROM"
+PRC="$(mk_fixture debtrecarry1)"; advance_to "$PRC" 8
+debt_plant "$PRC"
+mkdir -p "$PRC/.bionic/docs/record/$CARRY_PREV"
+printf '%s\n' "# continuation — $CARRY_PREV" "" "## Deferrals" "" "$RC_HELD" "$RC_PAID" "$RC_LOOSE" \
+  "" "## Resume instruction" "" "nothing" > "$PRC/.bionic/docs/record/$CARRY_PREV/continuation.md"
+expect_eq "DEBT-RECARRY-0 precondition: card.sh inherited-debt reads the predecessor's three debt lines, as written" \
+"$RC_HELD
+$RC_PAID
+$RC_LOOSE" "$(bash "$REPO_ROOT/payload/scripts/card.sh" inherited-debt "$PRC/.bionic/docs/plans/epic-fx/wave-01-fixture.requirements.md" 2>/dev/null)"
+run_close "$PRC" run
+expect_eq "DEBT-RECARRY-1 run exits 0 over a run that inherited three debt lines and keeps a ledger" "0" "$CO_RC"
+expect_eq "DEBT-RECARRY-2 the ledger's unburned items, then the inherited line no ledger holds, as written with its from=" \
+"debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W
+$RC_LOOSE" "$(carry_section "$PRC/$CONT_REL" | /usr/bin/grep '^debt: ')"
+expect_absent "DEBT-RECARRY-3 …the inherited line whose concept and kind the ledger holds is not carried twice" \
+  "touches=2 raised-by=record/$CARRY_PREV/critic-structure.md" "$(carry_section "$PRC/$CONT_REL")"
+expect_absent "DEBT-RECARRY-4 …nor the one the ledger burned" "log_shim" "$(carry_section "$PRC/$CONT_REL")"
+# THE RECORD TEMPLATE SAYS REGRESSION (wave-30 T23; AC-4.7, D10): the continuation close-out writes asks the
+# orchestrator for the regression's result, in the word the doctrine uses.
+expect_contains "REG-1 AC-4.7 the continuation's template asks for the regression result" "<fill: regression result>" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+expect_absent "REG-1b …and no longer for the floor's" "<fill: floor result>" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+# no ledger at all: every inherited debt line is carried, in its order
+PRN="$(mk_fixture debtrecarry2)"; advance_to "$PRN" 8
+mkdir -p "$PRN/.bionic/docs/record/$CARRY_PREV"
+printf '%s\n' "# continuation — $CARRY_PREV" "" "## Deferrals" "" "$RC_HELD" "$RC_LOOSE" \
+  "" "## Resume instruction" "" "nothing" > "$PRN/.bionic/docs/record/$CARRY_PREV/continuation.md"
+run_close "$PRN" run
+expect_eq "DEBT-RECARRY-5 a run with no ledger exits 0 and carries both inherited debt lines, as written" \
+  "0|$RC_HELD
+$RC_LOOSE" "$CO_RC|$(carry_section "$PRN/$CONT_REL" | /usr/bin/grep '^debt: ')"
+
+# ============================================================
+section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"
+# ============================================================
+#
+# THE COUNT IS READ BEFORE THE WIPE TAKES THE ROSTERS: `regression-runs: <n>` is session-poker's
+# `regression-runs`, the full-runner runs the rosters record as ended. THE SWEEP: a detached run
+# (booked.sh --detach) whose pid is alive and that wrote no end, left by a closing run, is an orphan;
+# `run` stops it through `session-poker.sh stop-run` and names it with its last progress line, then
+# the wipe takes its files; `check` names it and sends nothing. FIXTURE FIDELITY: the roster row is a
+# run record in the shim's shape; the orphan is a stand-in shim (a loop that dies on TERM, under the
+# real perl setsid, its pid file and progress line beside its log), because a closing run's orphan is
+# a process nobody is waiting on and the sweep reads nothing else of it.
+PR="$(mk_fixture pruns)"; advance_to "$PR" 8
+PR_RUNS="$PR/.bionic/tmp/runs"; mkdir -p "$PR_RUNS" "$SANDBOX/fake-shim"
+roster_row_fixture status=identified session=fixture name=w-reg agent_id=areg \
+  "run_log=$PR_RUNS/w-reg-run.sh.log" run_cmd=tests/run.sh run_rc=0 >> "$PR/.bionic/tmp/roster-fixture.state"
+printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$SANDBOX/fake-shim/booked.sh"
+PR_LOG="$PR_RUNS/w-orph-o.test.sh.log"; : > "$PR_LOG"
+printf '2026-10-08T00:00:02Z\to.test.sh\t§sec-orph\n' > "$PR_LOG.progress.tsv"
+perl -MPOSIX -e 'my $l = shift; my $p = fork; exit 0 if $p; POSIX::setsid(); open(my $f, ">", "$l.pid"); print $f "$$\n"; close $f; open(STDIN, "<", "/dev/null"); open(STDOUT, ">>", $l); open(STDERR, ">&", \*STDOUT); exec @ARGV' \
+  "$PR_LOG" bash "$SANDBOX/fake-shim/booked.sh" --run-log "$PR_LOG"
+i=0; while [ ! -s "$PR_LOG.pid" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+PR_PID="$(cat "$PR_LOG.pid" 2>/dev/null)"
+TS_LIVE_PIDS="$TS_LIVE_PIDS ${PR_PID:-}"
+expect_true "RUNS.0 precondition: the orphan's shim is alive" kill -0 "${PR_PID:-0}"
+
+run_close "$PR" check
+expect_eq "RUNS.1 AC-4.6 check prints the release card's count of full runs, from the run records" "yes" \
+  "$(contains "$CO_OUT" "regression-runs: 1")"
+expect_eq "RUNS.2 check names the orphan, what stop-run would do, and its last progress line" "yes" \
+  "$(contains "$CO_OUT" "orphan: w-orph-o.test.sh — RUNNING; would TERM its process group")"
+expect_eq "RUNS.2b …ending in the run's last progress line" "yes" \
+  "$(contains "$(printf '%s\n' "$CO_OUT" | grep '^orphan: ')" "; last progress: 2026-10-08T00:00:02Z o.test.sh §sec-orph")"
+expect_true "RUNS.3 …and sends nothing: the orphan is still alive" kill -0 "${PR_PID:-0}"
+
+run_close "$PR" run
+expect_eq "RUNS.4 run exits 0" "0" "$CO_RC"
+expect_eq "RUNS.5 AC-4.6 run prints the count on the card too" "yes" "$(contains "$CO_OUT" "regression-runs: 1")"
+expect_eq "RUNS.6 run stops the orphan and says so, with its last progress line" "yes" \
+  "$(contains "$CO_OUT" "orphan: w-orph-o.test.sh — stopped (TERM); it wrote no end, so rc=137 was recorded for it; last progress: 2026-10-08T00:00:02Z o.test.sh §sec-orph")"
+expect_false "RUNS.7 …and the orphan's process is gone" kill -0 "${PR_PID:-0}"
+expect_eq "RUNS.8 …and the wipe took its files with the rest of .bionic/tmp" "0" "$(tmp_entries "$PR")"
+expect_eq "RUNS.9 one orphan, one line" "1" "$(printf '%s\n' "$CO_OUT" | grep -c '^orphan: ')"
 
 finish

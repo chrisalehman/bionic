@@ -26,7 +26,7 @@
 
   <!-- ============================ header ============================ -->
   <text x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Hook chain — what runs, what it stops, and what makes it inert</text>
-  <text x="40" y="78" font-size="14" fill="#626b76">Ten scripts, every one registered in hooks/hooks.json. Every entry is rooted at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">${CLAUDE_PLUGIN_ROOT}</tspan> and runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 10</tspan>; <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">dispatch-preflight.sh</tspan> runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 15</tspan>.</text>
+  <text x="40" y="78" font-size="14" fill="#626b76">Ten scripts, every one registered in hooks/hooks.json. Every entry is rooted at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">${CLAUDE_PLUGIN_ROOT}</tspan> and runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 10</tspan>; <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">dispatch-preflight.sh</tspan> runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 25</tspan>.</text>
   <line x1="40" y1="96" x2="1360" y2="96" stroke="#dde1e6" stroke-width="1"/>
 
   <!-- ============================ the grouping criterion ============================ -->

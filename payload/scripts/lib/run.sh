@@ -914,37 +914,115 @@ session_working_branch() {
   printf '%s\n' "$wb"
 }
 
-# ─── THE REVIEW RIGOR LEVEL (wave-28 T44; REQ-16, D35) ───────────────────────
+# ─── THE REVIEW RIGOR LEVEL (wave-28 T44; wave-30 T11: REQ-1, D1) ──────────────
 #
-# rigor_level <word> -> `low`, `medium` or `high` for `low|tested`, `medium|peer-reviewed` and
-#                       `high|audited`; nothing and rc 1 for any other word, the empty one included.
-# rigor_print <word> -> `review rigor: <level> (<one|two|three> independent reader[s])`, the one
-#                       printed form of a level; nothing and rc 1 where rigor_level refuses.
+# rigor_level <word> -> `single` or `double` for that word; nothing and rc 1 for any other word,
+#                       the empty one included.
+# rigor_print <word> -> `review rigor: <level> (<one|two> independent mind[s])`, the one printed
+#                       form of a level; nothing and rc 1 where rigor_level refuses.
+#
+# A LEVEL IS THE COUNT OF INDEPENDENT MINDS that read the run: `single`, the critic holds every
+# question; `double`, the auditor takes `evidence` and the critic the rest (lib/proof.sh
+# PROOF_DEALING). There is no third level and no alias: a word before 1.14.0 is refused like any
+# other bad value, and a project migrates its files by the CHANGELOG's one line.
 #
 # ONE DEFINITION, AND EVERY SITE THAT TESTS THE WORD CALLS IT: the plan-write hook's closed set
-# and floor rank, and in lib/walls.sh the task-row check, the floor rank and each arm that asks
-# for the highest level. A site that matched `audited` itself would read a plan written `high` as
-# a lower rigor than it declared, which is the drift this function exists to make impossible
-# (tests/cross-gate-agreement.test.sh §RIGOR counts the sites).
-#
-# AN OLD WORD IS READ AND NEVER REWRITTEN. `tested`, `peer-reviewed` and `audited` are what every
-# file written before 1.13.0 carries, and the field keeps its name, `rigor:`. A level is printed
-# by its new word only. The count of readers is what the level deals: one role holds all three
-# questions at low, two roles at medium, three at high (lib/proof.sh PROOF_DEALING).
+# and floor rank, card.sh, lib/proof.sh's dealing, and in lib/walls.sh the task-row check, the
+# floor rank and each arm that asks for the double level (tests/cross-gate-agreement.test.sh
+# §RIGOR counts the sites).
 rigor_level() {
   case "${1:-}" in
-    low|tested)           echo low ;;
-    medium|peer-reviewed) echo medium ;;
-    high|audited)         echo high ;;
-    *)                    return 1 ;;
+    single) echo single ;;
+    double) echo double ;;
+    *)      return 1 ;;
   esac
 }
 
 rigor_print() {
   case "$(rigor_level "${1:-}")" in
-    low)    echo "review rigor: low (one independent reader)" ;;
-    medium) echo "review rigor: medium (two independent readers)" ;;
-    high)   echo "review rigor: high (three independent readers)" ;;
+    single) echo "review rigor: single (one independent mind)" ;;
+    double) echo "review rigor: double (two independent minds)" ;;
     *)      return 1 ;;
+  esac
+}
+
+# ─── WHAT REVIEW MAY DO UNASKED (wave-30 T21; REQ-10 AC-10.1, REQ-1, D4, Δ3) ─────────────────────
+#
+# THREE HEADER FIELDS THE USER OWNS, written by Step 0 beside `rigor:`. Their vocabulary and their
+# per-level defaults are held HERE, once, beside `rigor_level`, because the defaults are the
+# level's; the plan-write hook (the closed sets), the poker's `task-add --born` (the policy and the
+# cap) and the landing line (the cap) all call these:
+#
+#   review-cadence:  once                                       both levels
+#   fix-policy:      a comma-joined set over FIX_POLICY_VOCAB    S1,S2-on at both levels
+#   fix-cap:         a whole number, or <n>% of the ## Tasks rows  2 at single, 10% at double
+#
+# A plan with `rigor:` and none of the three is read with these defaults and never refused for
+# them. The field is read verbatim and never widened: `S1` names both reaches, `S1-on` one; an
+# agent has no verb that writes the field.
+#
+# review_cadence_level <word>  -> `once`; nothing and rc 1 for any other word.
+# fix_policy_bad <set>         -> nothing, rc 0, when every comma-joined word (blanks around a comma
+#                                 trimmed) is in the vocabulary and there is at least one; else rc 1,
+#                                 printing the first word outside it (empty for an empty word or set).
+# fix_policy_covers <set> <S<n>> <on|off> -> rc 0 when the set names the severity whole or at that reach.
+# fix_cap_default <level>      -> `2` at single, `10%` at double; rc 1 for no level.
+# fix_cap_render <field> <level> <rows> -> the cap as a number: the field's number, or its percent of
+#                                 <rows> rounded up; the level's default when the field is empty.
+#                                 Nothing and rc 1 for a field that is no count, or no field and no level.
+REVIEW_CADENCE_DEFAULT="once"
+FIX_POLICY_VOCAB="S1 S1-on S1-off S2 S2-on S2-off S3 S4"
+FIX_POLICY_DEFAULT="S1,S2-on"
+
+review_cadence_level() {
+  case "${1:-}" in
+    once) echo once ;;
+    *)    return 1 ;;
+  esac
+}
+
+fix_policy_bad() {
+  local set="${1:-}" w rest
+  case "$set" in *[![:space:]]*) : ;; *) echo ""; return 1 ;; esac
+  rest="$set,"
+  while [ -n "$rest" ]; do
+    w="${rest%%,*}"; rest="${rest#*,}"
+    w="${w#"${w%%[![:space:]]*}"}"; w="${w%"${w##*[![:space:]]}"}"
+    case " $FIX_POLICY_VOCAB " in
+      *" $w "*) [ -n "$w" ] && continue ;;
+    esac
+    printf '%s\n' "$w"; return 1
+  done
+  return 0
+}
+
+fix_policy_covers() {
+  local set="${1:-}" sev="${2:-}" reach="${3:-}" w rest
+  fix_policy_bad "$set" >/dev/null || return 1
+  rest="$set,"
+  while [ -n "$rest" ]; do
+    w="${rest%%,*}"; rest="${rest#*,}"
+    w="${w#"${w%%[![:space:]]*}"}"; w="${w%"${w##*[![:space:]]}"}"
+    [ "$w" = "$sev" ] || [ "$w" = "$sev-$reach" ] && return 0
+  done
+  return 1
+}
+
+fix_cap_default() {
+  case "$(rigor_level "${1:-}")" in
+    single) echo 2 ;;
+    double) echo 10% ;;
+    *)      return 1 ;;
+  esac
+}
+
+fix_cap_render() {
+  local field="${1:-}" level="${2:-}" rows="${3:-0}" n
+  [ -n "$field" ] || field="$(fix_cap_default "$level")" || return 1
+  case "$rows" in ''|*[!0-9]*) rows=0 ;; esac
+  case "$field" in
+    *[!0-9%]*|''|%*|*%?*) return 1 ;;
+    *%) n="${field%\%}"; echo $(( (10#$n * 10#$rows + 99) / 100 )) ;;
+    *)  echo $(( 10#$field )) ;;
   esac
 }

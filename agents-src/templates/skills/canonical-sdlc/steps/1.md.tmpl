@@ -44,5 +44,7 @@ Card: `bash <plugin-root>/scripts/card.sh step1 <requirements.md>` renders it wh
 
 Step 1's card lists, under Inherited deferrals, every `deferred:` line of the newest continuation, and each stays listed until the requirements file's `## Inherited deferrals` section disposes of it with exactly one of `adopted: <id> as REQ-<n>`, `again: <id>` (close-out carries it into this run's continuation) or `closed: <id> <reason>`; a disposal naming an id the continuation does not carry refuses the card.
 
+Right after the card, run `session-poker.sh debt adopt <newest continuation>`: it writes each carried `debt:` item into this run's ledger, once, with its touches kept.
+
 **Evidence:** `Step 1: requirements: <path>; <how the scope was approved>`
 

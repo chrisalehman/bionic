@@ -58,3 +58,58 @@ result admit-not-require evidence auditor fail met exam-sitting.md#resit-admit-n
 result admit-not-require evidence one-mind fail met exam-sitting.md#resit-admit-not-require-one-mind-evidence
 result red-then-green adversarial critic fail met exam-sitting.md#red-then-green-critic-adversarial
 result red-then-green adversarial one-mind fail met exam-sitting.md#resit-red-then-green-one-mind-adversarial
+stale: checks-evidence db831e94… → cf938731…, checks-adversarial 6c8978b7… → f7cf47a0…, checks-structure 81594487… → e779b863… (T4); re-sit owed: T25
+
+## 2026-10-09 — wave-30 T25, the re-sit the stale mark owed: the checks files of T4 (and the four new samples) at ad87fe26
+
+sha256 payload/context/checks-evidence.md cf9387310b3ebe34af36f2cca3a7d1ef1f17e8a173fcce4d057edfbfb889a37d
+sha256 payload/context/checks-adversarial.md f7cf47a0daad3d523fbab91d04598d4e85da1e9f72cf98c9bf34bb778ea6cfae
+sha256 payload/context/checks-structure.md e779b863486b34b1e743a3a296ce5ac2eaca90ff81b19eb0340ec7a351e20ff1
+
+result clean evidence auditor flag met exam-sitting.md#clean-auditor-evidence
+result clean adversarial critic flag met exam-sitting.md#clean-critic-adversarial
+result clean structure critic flag met exam-sitting.md#clean-critic-structure
+result clean evidence one-mind flag met exam-sitting.md#clean-one-mind-evidence
+result clean adversarial one-mind flag met exam-sitting.md#clean-one-mind-adversarial
+result clean structure one-mind flag met exam-sitting.md#clean-one-mind-structure
+result admit-not-require evidence auditor fail met exam-sitting.md#admit-not-require-auditor-evidence
+result admit-not-require evidence one-mind fail met exam-sitting.md#admit-not-require-one-mind-evidence
+result power-gap evidence auditor fail met exam-sitting.md#power-gap-auditor-evidence
+result power-gap evidence one-mind fail missed exam-sitting.md#power-gap-one-mind-evidence
+result dup-counter structure critic fail met exam-sitting.md#dup-counter-critic-structure
+result dup-counter structure one-mind fail met exam-sitting.md#dup-counter-one-mind-structure
+result red-then-green adversarial critic fail met exam-sitting.md#red-then-green-critic-adversarial
+result red-then-green adversarial one-mind fail met exam-sitting.md#red-then-green-one-mind-adversarial
+result trust-boundary adversarial critic fail met exam-sitting.md#trust-boundary-critic-adversarial
+result trust-boundary adversarial one-mind fail met exam-sitting.md#trust-boundary-one-mind-adversarial
+result known-limit-regression adversarial critic fail met exam-sitting.md#known-limit-regression-critic-adversarial
+result known-limit-regression adversarial one-mind fail met exam-sitting.md#known-limit-regression-one-mind-adversarial
+result over-engineering structure critic flag missed exam-sitting.md#over-engineering-critic-structure
+result over-engineering structure one-mind flag met exam-sitting.md#over-engineering-one-mind-structure
+
+## 2026-10-09 — wave-30 T25 rider, the two refused records sat again on the severity scale of 2f583de7 (ruling B1, A-orch-78); the other eighteen lines are carried from the sitting above, whose checks files are unchanged
+
+sha256 payload/context/checks-evidence.md cf9387310b3ebe34af36f2cca3a7d1ef1f17e8a173fcce4d057edfbfb889a37d
+sha256 payload/context/checks-adversarial.md f7cf47a0daad3d523fbab91d04598d4e85da1e9f72cf98c9bf34bb778ea6cfae
+sha256 payload/context/checks-structure.md e779b863486b34b1e743a3a296ce5ac2eaca90ff81b19eb0340ec7a351e20ff1
+
+result clean evidence auditor flag met exam-sitting.md#clean-auditor-evidence
+result clean adversarial critic flag met exam-sitting.md#clean-critic-adversarial
+result clean structure critic flag met exam-sitting.md#clean-critic-structure
+result clean evidence one-mind flag met exam-sitting.md#clean-one-mind-evidence
+result clean adversarial one-mind flag met exam-sitting.md#clean-one-mind-adversarial
+result clean structure one-mind flag met exam-sitting.md#clean-one-mind-structure
+result admit-not-require evidence auditor fail met exam-sitting.md#admit-not-require-auditor-evidence
+result admit-not-require evidence one-mind fail met exam-sitting.md#admit-not-require-one-mind-evidence
+result power-gap evidence auditor fail met exam-sitting.md#power-gap-auditor-evidence
+result power-gap evidence one-mind fail met exam-sitting.md#resit-power-gap-one-mind-evidence
+result dup-counter structure critic fail met exam-sitting.md#dup-counter-critic-structure
+result dup-counter structure one-mind fail met exam-sitting.md#dup-counter-one-mind-structure
+result red-then-green adversarial critic fail met exam-sitting.md#red-then-green-critic-adversarial
+result red-then-green adversarial one-mind fail met exam-sitting.md#red-then-green-one-mind-adversarial
+result trust-boundary adversarial critic fail met exam-sitting.md#trust-boundary-critic-adversarial
+result trust-boundary adversarial one-mind fail met exam-sitting.md#trust-boundary-one-mind-adversarial
+result known-limit-regression adversarial critic fail met exam-sitting.md#known-limit-regression-critic-adversarial
+result known-limit-regression adversarial one-mind fail met exam-sitting.md#known-limit-regression-one-mind-adversarial
+result over-engineering structure critic flag met exam-sitting.md#resit-over-engineering-critic-structure
+result over-engineering structure one-mind flag met exam-sitting.md#over-engineering-one-mind-structure

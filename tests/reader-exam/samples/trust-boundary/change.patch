@@ -1,0 +1,77 @@
+diff --git a/bin/archive.sh b/bin/archive.sh
+new file mode 100755
+index 0000000..85e8e57
+--- /dev/null
++++ b/bin/archive.sh
+@@ -0,0 +1,6 @@
++#!/bin/bash
++# bin/archive.sh <branch> — archives <branch> of the current checkout into dist/.
++set -uo pipefail
++[ "$#" -eq 1 ] || { echo "usage: archive.sh <branch>" >&2; exit 2; }
++. "$(dirname "$0")/../lib/archive.sh"
++archive_branch . "$1" dist && echo "ARCHIVED $1"
+diff --git a/docs/plan.md b/docs/plan.md
+index 2fa1ee3..85112dc 100644
+--- a/docs/plan.md
++++ b/docs/plan.md
+@@ -2,7 +2,7 @@
+ 
+ | task | what | state |
+ |---|---|---|
+-| T1 | lib/archive.sh and bin/archive.sh (D1) | for this change |
++| T1 | lib/archive.sh and bin/archive.sh (D1) | landed |
+ 
+ ## Verification Matrix
+ 
+diff --git a/docs/record/T1.md b/docs/record/T1.md
+new file mode 100644
+index 0000000..a260da6
+--- /dev/null
++++ b/docs/record/T1.md
+@@ -0,0 +1,10 @@
++# T1 — archiving a landed branch
++
++reuse: searched lib/ and bin/ for another archive writer: none.
++
++AC-1.1, AC-1.2: `bash tests/archive.test.sh` → rc=0
++```
++ok - a branch is archived
++ok - the tarball holds the tip's file
++ok - a name with a slash makes one flat file
++```
+diff --git a/lib/archive.sh b/lib/archive.sh
+new file mode 100644
+index 0000000..2411788
+--- /dev/null
++++ b/lib/archive.sh
+@@ -0,0 +1,10 @@
++#!/bin/bash
++# lib/archive.sh — a landed branch's tip as a tarball (spec D1).
++
++# archive_branch <repo> <branch> <outdir> — writes <outdir>/<branch>.tar, a `/` in the name as `-`.
++archive_branch() {
++  local repo="$1" branch="$2" outdir="$3" cmd
++  mkdir -p "$outdir" || return 1
++  cmd="git -C $repo archive --format=tar -o $outdir/${branch//\//-}.tar $branch"
++  eval "$cmd"
++}
+diff --git a/tests/archive.test.sh b/tests/archive.test.sh
+new file mode 100644
+index 0000000..56ab002
+--- /dev/null
++++ b/tests/archive.test.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++. "$(dirname "$0")/lib.sh"
++cd "$(dirname "$0")/.." || exit 1
++. lib/archive.sh
++
++r="$(scratch_repo)"
++git -C "$r" checkout -q -b task/a
++printf 'x\n' > "$r/a.txt"
++git -C "$r" add a.txt && git -C "$r" commit -q -m a
++archive_branch "$r" task/a "$SCRATCH/dist"
++check "a branch is archived" "0" "$?"
++check "the tarball holds the tip's file" "a.txt" "$(tar -tf "$SCRATCH/dist/task-a.tar")"
++check "a name with a slash makes one flat file" "task-a.tar" "$(ls "$SCRATCH/dist")"
++done_testing

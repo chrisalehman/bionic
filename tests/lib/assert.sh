@@ -313,8 +313,24 @@ _tf_close_section() {
   _TF_SECTION_ROWS=0
 }
 
+# _tf_progress <name> — THE RUN SEEN WHILE IT RUNS (wave-30 T8; Δ5a, AC-3.8). When tests/run.sh
+# hands its workers a progress file (`_BIONIC_TEST_PROGRESS_FILE`, the private name it trades
+# BIONIC_TEST_PROGRESS for, so a nested run never writes to it), each section boundary appends one
+# line, `<UTC>TAB<suite file>TAB§<section>`, AS the section opens: a suite whose output the runner
+# prints only at its end is visible section by section. One short printf, one write(2), as the
+# runner's own suite-end line (`<UTC>TAB<suite>TAB<rc>`) is, so concurrent suites do not interleave.
+# Unset, it does nothing; a suite run outside the runner writes no line.
+_tf_progress() {
+  [ -n "${_BIONIC_TEST_PROGRESS_FILE:-}" ] || return 0
+  local n="$1"
+  n="${n//$'\t'/ }"; n="${n//$'\n'/ }"
+  printf '%s\t%s\t§%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${0##*/}" "$n" >> "$_BIONIC_TEST_PROGRESS_FILE" 2>/dev/null
+  return 0
+}
+
 # section <name> — opens a section that must record at least one assertion.
 section() {
+  _tf_progress "$1"
   _tf_close_section
   _TF_SECTION="$1"
   _TF_SECTION_KIND="assert"
@@ -328,6 +344,7 @@ section() {
 # no-section-without-an-assertion rule. It is exempt because it is named: a
 # section that asserts nothing and does not say so is the defect.
 setup_section() {
+  _tf_progress "$1"
   _tf_close_section
   _TF_SECTION="$1"
   _TF_SECTION_KIND="setup"

@@ -207,7 +207,7 @@ printf '%s\n' '---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: none
 use_worktree: false
@@ -237,7 +237,7 @@ epic: epic-01-demo
 wave: wave-01-x
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 cleanup_on_finish: true
 use_worktree: false
@@ -722,7 +722,7 @@ python3 - "$VERB_PLAN" <<'PY'
 import sys
 plan = sys.argv[1]
 out = ["---", "governing-skill: canonical-sdlc", "canonical_sdlc_version: 14", "intent: bugfix",
-       "rigor: audited", "scale: wave", "multi_agent: true", "use_worktree: true", "has_ui: false",
+       "rigor: double", "scale: wave", "multi_agent: true", "use_worktree: true", "has_ui: false",
        "walk: exempt", "deploy_target: n/a",
        "parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe", "---", "",
        "# fixture wave", "", "## SDLC State", "", "current: 3", "working-branch: feature/t4",

@@ -169,7 +169,7 @@ agents-src/templates/context|payload/context
 agents-src/templates/skills/canonical-sdlc/steps|skills/canonical-sdlc/steps
 "
 
-ROLES="auditor critic implementor researcher reviewer senior-implementor test-runner"
+ROLES="auditor critic implementor researcher senior-implementor test-runner"
 
 # THE CHECKSUM MANIFEST (epic-17 W4 S5, spec AC-4; widened at wave-02 S2a, spec AC-8).
 # /bionic:doctor compares a user's installed rendered files against this file and reports
@@ -285,7 +285,6 @@ generated_header() {
     agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl | \
     agents-src/templates/auditor.md.tmpl | agents-src/templates/critic.md.tmpl | \
     agents-src/templates/implementor.md.tmpl | agents-src/templates/researcher.md.tmpl | \
-    agents-src/templates/reviewer.md.tmpl | \
     agents-src/templates/senior-implementor.md.tmpl | agents-src/templates/test-runner.md.tmpl)
       # ONE LINE across the whole split-skill surface — core, dispatch reference and the
       # ten step files alike — and the reason is the budget the split exists to serve.

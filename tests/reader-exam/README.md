@@ -1,6 +1,6 @@
 # The reader exam
 
-Readers (the auditor, the critic, the reviewer) are held to the checks files they are handed
+Readers (the auditor and the critic) are held to the checks files they are handed
 at start: `payload/context/checks-evidence.md`, `checks-adversarial.md` and
 `checks-structure.md`. The exam asks whether a reader holding those files catches defects
 that really got past a reader, and does not fail a change that has none (spec D11 of
@@ -28,14 +28,19 @@ be sat again before the tree is green.
     named the planted defect and did not reach the result for another reason),
     `finding-file: <path>` (the file the record's `finding:` line must name: the planted defect's,
     or the owner it bypasses) and `finding-rating: <S> <reach>` (the ratings that pass it, each
-    one the table sends to fix). A `token:`, `names:`, `finding-file:` or `finding-rating:` line
+    one the table sends to fix). A debt sample (wave-30 T22) carries `finding-kind: <kind>` in place of
+    `finding-rating:`, a kind of the debt table in `severity.md`: its record must carry a `debt:` line
+    of that kind naming one of the key's files, with no severity and no reach, and its `result:` is
+    `flag`. A `token:`, `names:`, `finding-file:` or `finding-rating:` line
     may hold alternatives separated by ` | `, any one of which meets it: the spellings a finder
     writes for the same thing.
 - `score.sh`: `exam_score <expect.txt> <record>` prints `met: declared` (the record declares the
   planted defect; `clean` asks no declaration and prints `met`), or `missed`, which says why when
   the miss is the declaration: `missed: described only`, `missed: declared at <S> <reach>:
   deferred` (or `noted`), `missed: no finding names <file>`, `missed: finding lines refused:
-  <why>`. It reads the `finding:` lines through `proof_findings` of
+  <why>`; on a debt key, `missed: no debt line names <file>`, `missed: declared as debt <kind>: not the
+  kind this key asks`, or `missed: declared at <S> <reach>: a debt key asks a debt: line of kind
+  <kind>`. It reads the `finding:` and `debt:` lines through `proof_findings` of
   `payload/scripts/lib/proof.sh`, the reader the registering verb uses. Sourced, it defines its
   functions and runs nothing. It is step 5 below, and the suite holds the real keys to it.
 - `materialize.sh <sample dir> <dest>`: builds the repository a reader is given, with an empty
@@ -58,11 +63,15 @@ workaround, `S2 on`); a defect the table would defer or note at any honest ratin
 retired for that reason at wave-28 T18: a duplicate that agrees with its owner has no functional
 effect, which the scale rates S4 and the table notes.
 
-| sample | question | key (each also declares a finding on its file, rated `S1 on`, `S1 off` or `S2 on`) | rebuilt from |
+| sample | question | key (each harm sample also declares a finding on its file, rated `S1 on`, `S1 off` or `S2 on`; the debt sample a `debt:` line) | rebuilt from |
 |---|---|---|---|
 | `dup-counter` | structure | `fail`, `check: reuse FAIL` or `check: one-site FAIL`, names `tree_dirty_count`, file `bin/stamp.sh` | `review.md` (final review): the duplication FLAG, "three dirty-tree counters", and its ownership row for the run stamp, where the stamp writer computed the dirty count again instead of using the one the land reads, and computed it differently |
 | `admit-not-require` | evidence | `fail`, `REFUTED`, names `land.sh`, file `bin/land.sh`, `lib/fullrun.sh` or `docs/plan.md` | `auditor.md` §1b item 1, AC-3.4 REFUTED: the requirement said a full run "is required", the design and its test only showed one is admitted, and the land took the tree with none |
 | `red-then-green` | adversarial | `fail`, `land_check`, names `tail -n 1`, `tail -n1` or `tail -1`, file `lib/landcheck.sh` | `critic.md` F1: the landing check read only the last stamp, while the doctrine makes one call per suite, so a red suite followed by a green one at the same head landed |
+| `trust-boundary` | adversarial | `fail`, `archive_branch`, names `eval`, file `lib/archive.sh` or `lib/gitrun.sh`, rated `S1 on` or `S2 on` | the Security and trust boundaries clause of `checks-adversarial.md` (wave-30 T4): what untrusted input reaches the change, what it exercises, whether it fails closed. A branch name from an outside contributor is spliced into a command string that is run through the shell, when the owner `git_run` already passes it as an argument |
+| `power-gap` | evidence | `fail`, `REFUTED`, names `reap_listed`, file `lib/reap.sh` or `docs/plan.md`, rated `S1 on` or `S2 on` | the per-row line of `checks-evidence.md` (wave-30 T4): does a changed condition have a test that fails when it is wrong. The change reorders a guard, the row for the guard cites an old test that never reaches the new order, and the guard is wrong on the branch no test enters |
+| `known-limit-regression` | adversarial | `fail`, `Known limit`, names `suite_verdict`, file `bin/run-suite.sh` or `lib/verdict.sh`, rated `S1 on` or `S2 on` | the Known limits clause of `checks-adversarial.md` (wave-30 T4): the changelog lists a limit with the path that handles it, and the change takes that path out of the one entry point that ran it |
+| `over-engineering` | structure | `flag`, `over-engineering` or `one-case-abstraction`, names `name_by_scheme`, `NAME_SCHEMES` or `scheme_task`, file `lib/naming.sh`, declared as a `debt:` line of kind `one-case-abstraction` (no rating) | the over-engineering item of `checks-structure.md` (wave-30 T4), a debt finding on the debt table of `severity.md`: the change routes the one branch-name format through a registry of naming schemes that holds one scheme and has one caller |
 | `clean` | all three | not `fail`, `branch-name` | no defect: a small change that reuses what exists, with its spec, design table, matrix and evidence in order |
 
 ## Sitting the exam
@@ -97,15 +106,17 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    ground. Keep the printed range, and note which `<dest>` holds which sample: the readers
    see only `<dest>`.
 
-   Two readers of the same agent type never share a build. On a sample keyed `adversarial`,
-   and on `clean`, the critic dealt `adversarial` and the one-mind critic are both
+   Two readers of the same agent type never share a build. On a sample keyed `adversarial` or
+   `structure`, and on `clean`, the critic dealt the question and the one-mind critic are both
    `bionic:critic`. Started together, two critics with different question sets cannot be told
    apart at start, and neither is pushed a checks file. Started one after the other, the second
    reads the first's record in its own tree. So each of the two gets a build and a session of
    its own. Readers of different types share their sample's build and are dispatched
-   together. That makes six builds: `clean` twice (the auditor, the critic and the
-   reviewer, then the one-mind critic), `red-then-green` twice, and one for each other sample.
-   The first sitting used eight, because step 3's proof took a `clean` build for one reviewer.
+   together. So a sample keyed `evidence` takes one build, where the auditor and the one-mind
+   critic differ in type, and a sample keyed `adversarial` or `structure`, and `clean`, takes two:
+   `clean` first with the auditor and the critic, then with the one-mind critic. (Before 1.14.0 a
+   reviewer held `structure`, so a `structure` sample took one build and the first sitting's
+   `clean` build took a reviewer.)
 3. **Open an engaged session on the built sample.** `cd <dest> && claude --plugin-dir
    "$PLUGIN"`, or, headless as the first sitting ran it, `PLUGIN="$PLUGIN" bash
    tests/reader-exam/gen-prompt.sh <brief file>... > <prompt file>` and then `bash tests/reader-exam/run-session.sh <dest>
@@ -154,9 +165,10 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      session only dispatches: the dispatch wall writes each reader's row, with its
      `questions=`, to `<dest>/.bionic/tmp/roster-<session>.state`, and the start push reads
      that row. To show the roles are the copy's, ask the session before its first dispatch to
-     quote the Agent tool's description of `bionic:critic` and `bionic:reviewer`. Each must be
+     quote the Agent tool's description of `bionic:auditor` and `bionic:critic`. Each must be
      listed once, with the `description:` line of `$PLUGIN/agents/<role>.md`. (At the first
-     sitting the installed 1.11.0 plugin had no reviewer and another critic description.) Then
+     sitting, before 1.14.0, the installed 1.11.0 plugin had no reviewer and another critic
+     description.) Then
      read each reader's transcript,
      `~/.claude/projects/<name>/<session>/subagents/agent-<id>.jsonl`. `<name>` is the
      session's physical working directory (`cd <dest> && pwd -P`, which on macOS turns `/var`
@@ -171,24 +183,25 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      `hooks/hooks.json` carries.
 4. **Dispatch the readers** in that session, through the ordinary dispatch path, one dispatch
    per sample and question:
-   - the role the audited dealing gives the sample's question (`facts_owed audited wave` in
+   - the role the double dealing gives the sample's question (`facts_owed double wave` in
      `payload/scripts/lib/proof.sh`): the auditor for `evidence`, the critic for
-     `adversarial`, the reviewer for `structure`;
+     `adversarial` and `structure`. The critic is the role that holds `structure`: the reviewer
+     that held it before 1.14.0 is retired and the wall refuses `bionic:reviewer`;
    - and the one-mind case, the critic holding all three questions, on every sample. It is
      named `one-mind` wherever a reader's role is written below (record paths, headings, result
      lines), so it is never taken for the critic the dealing gives `adversarial`. The agent
      dispatched is still `bionic:critic`: `one-mind` is only how the sitting names that dispatch.
 
-   For `clean`, each of the three roles takes its own question, and the one-mind critic takes
-   all three.
+   For `clean`, the auditor takes `evidence`, the critic takes `adversarial` and `structure` in
+   one dispatch with a record for each, and the one-mind critic takes all three.
 
    The sitting's session binds no plan: the built sample's `docs/plan.md` is read by the
    readers and is not a plan the session has registered. The dispatch wall therefore requires
    each reader's `Questions:` line and does not hold it to a dealing, so it would not refuse a
    set that no rigor deals that role. The orchestrator checks that by hand before each dispatch:
    the brief's set is the one this step names for that role (`evidence` for the auditor,
-   `adversarial` for the critic, `structure` for the reviewer, all three for the one-mind
-   critic).
+   `adversarial` or `structure` for the critic, as the sample's key names it, both for the critic
+   on `clean`, all three for the one-mind critic).
 
    The brief says nothing about an exam, the sample's name, or what to look for. It carries:
    - `Questions: <q>` on a line of its own (`Questions: evidence, adversarial, structure` for
@@ -226,11 +239,11 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      first line and hash the rest; the hash must equal step 1's hash for that file:
      `jq -j 'select(.attachment.type=="hook_additional_context") | .attachment.content[<k>]'
      <agent>.jsonl | tail -n +2 | shasum -a 256`. A reader also holds no checks string for a
-     question it was not dealt. At the first sitting each of the twelve readers held exactly
-     the files dealt it, each whole. The model receives each string raw: the reviewer's
-     `structure` string is 4,497 characters, and its hook printed it as 4,627 characters of
+     question it was not dealt. At the first sitting (before 1.14.0) each of the twelve readers held exactly
+     the files dealt it, each whole. The model receives each string raw: the reviewer's (a role
+     since retired) `structure` string is 4,497 characters, and its hook printed it as 4,627 characters of
      JSON. The strings of one start are joined into one system `<system-reminder>` (10,978
-     characters for a reviewer, 17,565 for the one-mind critic), and none was cut to a
+     characters for that reviewer, 17,565 for the one-mind critic), and none was cut to a
      preview. The harness's 10,000-character limit is therefore applied to each hook's string,
      not to the joined text. Whether that limit counts the raw string or its JSON form is not
      shown, because every string here is under 10,000 either way.
@@ -268,10 +281,10 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    ```
 
    one `result` line per sample, per question its key names, per role dealt that question:
-   `<sample>` is the sample's name and `<role>` is `auditor`, `critic` or `reviewer` (the role
-   the audited dealing gives the question) or `one-mind`. A defect sample holds two lines, the
+   `<sample>` is the sample's name and `<role>` is `auditor` or `critic` (the role
+   the double dealing gives the question) or `one-mind`; a `reviewer` line in a sitting before 1.14.0 stays as history. A defect sample holds two lines, the
    dealt role's and the one-mind critic's, both on its keyed question; `clean` holds six, the
-   three roles each on their own question and the one-mind critic on each of the three. The
+   auditor on `evidence`, the critic on `adversarial` and on `structure`, and the one-mind critic on each of the three. The
    record heading names the record's section in `exam-sitting.md`. The `sha256` lines are the
    hashes from step 1. A line opening with `##` that is not a header of that form is red
    wherever it is in the file. The suite reads the last section, by file order: it is red

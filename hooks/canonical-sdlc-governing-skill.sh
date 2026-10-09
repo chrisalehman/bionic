@@ -27,7 +27,7 @@
 #   wave: wave-01-checkout-refactor
 #   canonical_sdlc_version: <SUPPORTED_SDLC_VERSION, bound near the top of this file>
 #   intent: build
-#   rigor: audited
+#   rigor: double
 #   scale: wave
 #   ---
 #
@@ -973,7 +973,7 @@ Fix: prepend:
   wave: wave-NN-<slug>   # omit for epic-level and continuation
   canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}
   intent: <build|bugfix|refactor|tune|spike|incident-response>
-  rigor: <low|medium|high>
+  rigor: <single|double>
   scale: <task|wave|epic>
   ---"
   refuse exit2 write "this artifact has no frontmatter block" "prepend a frontmatter block" "$_gs_detail"
@@ -1046,11 +1046,11 @@ Path: $FILE_PATH"
 INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
 [ -n "$INTENT" ] || block "this artifact declares no intent:" "add an intent: line" \
   "requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
-# THE SET IS PRINTED BY ITS NEW WORDS, each with what it means (wave-28 T44; AC-16.2): the
+# THE SET IS PRINTED BY ITS TWO WORDS, each with what it means (wave-28 T44; wave-30 T11, D1): the
 # printed form is lib/run.sh `rigor_print`'s, so a refusal and a card say a level the same way.
-RIGOR_SET="$(printf '\n  %s' "$(rigor_print low)" "$(rigor_print medium)" "$(rigor_print high)")"
+RIGOR_SET="$(printf '\n  %s' "$(rigor_print single)" "$(rigor_print double)")"
 [ -n "$RIGOR" ]  || block "this artifact declares no rigor:" "add a rigor: line" \
-  "requires rigor: low, medium or high:${RIGOR_SET}"
+  "requires rigor: single or double:${RIGOR_SET}"
 [ -n "$SCALE" ]  || block "this artifact declares no scale:" "add a scale: line" \
   "requires scale: (task|wave|epic)"
 case "$INTENT" in
@@ -1058,15 +1058,49 @@ case "$INTENT" in
   *) block "that intent is not one of the six" "pick an allowed intent" \
   "invalid intent: '$INTENT' — allowed: build|bugfix|refactor|tune|spike|incident-response" ;;
 esac
-# THE CLOSED SET IS rigor_level's (lib/run.sh; wave-28 T44, REQ-16, D35): either vocabulary is
-# one of the three levels, and an old word is read as it is, never rewritten.
-rigor_level "$RIGOR" >/dev/null || block "that rigor is not one of the three" "pick an allowed rigor" \
-  "invalid rigor: '$RIGOR' — allowed: low, medium or high:${RIGOR_SET}"
+# THE CLOSED SET IS rigor_level's (lib/run.sh; wave-28 T44; wave-30 T11, D1): `single` or
+# `double`. A word before 1.14.0 is refused here like any other word that is no level.
+rigor_level "$RIGOR" >/dev/null || block "that rigor is not single or double" "pick an allowed rigor" \
+  "invalid rigor: '$RIGOR' — allowed: single or double:${RIGOR_SET}"
 case "$SCALE" in
   task|wave|epic) ;;
   *) block "that scale is not task, wave or epic" "pick an allowed scale" \
   "invalid scale: '$SCALE' — allowed: task|wave|epic" ;;
 esac
+
+# ---------- review-cadence:, fix-policy:, fix-cap: (wave-30 T21; REQ-10 AC-10.1, D4, Δ3) ----------
+#
+# THREE FIELDS THE USER OWNS, beside rigor:. Their vocabulary and their per-level defaults are
+# lib/run.sh's (`review_cadence_level`, `fix_policy_bad`, `fix_cap_render`, beside `rigor_level`),
+# so this wall, `task-add --born` and the landing line read one table. Each is judged only when
+# its key is present: a plan with none of the three is read with the level's defaults (once ·
+# S1,S2-on · 2 at single, 10% at double), never refused for them. A present key is blocking on a
+# value outside its vocabulary, the empty fix-policy: included (a set naming no rating). The fix
+# names the vocabulary as one comma-joined word, the field's own syntax: refuse.sh allows six words.
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+gs_has_key() { grep -qE "^[[:space:]]*${1}[[:space:]]*:" <<< "$FRONTMATTER"; }
+if gs_has_key review-cadence; then
+  RCAD=$(yaml_get review-cadence)
+  review_cadence_level "$RCAD" >/dev/null || block "that review-cadence is not once" "use once" \
+    "invalid review-cadence: '$RCAD' — allowed: once"
+fi
+if gs_has_key fix-policy; then
+  FPOL=$(yaml_get fix-policy)
+  if FPOL_BAD=$(fix_policy_bad "$FPOL"); then :
+  elif [ -z "${FPOL//[[:space:]]/}" ]; then
+    block "this fix-policy names no rating" "${FIX_POLICY_VOCAB// /,}" \
+      "invalid fix-policy: '' — it names no rating; allowed, comma-joined: $FIX_POLICY_VOCAB"
+  else
+    block "a fix-policy word is no rating" "${FIX_POLICY_VOCAB// /,}" \
+      "invalid fix-policy: '$FPOL' — '$FPOL_BAD' is no rating; allowed, comma-joined: $FIX_POLICY_VOCAB"
+  fi
+fi
+if gs_has_key fix-cap; then
+  FCAP=$(yaml_get fix-cap)
+  { [ -n "$FCAP" ] && fix_cap_render "$FCAP" "$RIGOR" 0 >/dev/null; } \
+    || block "that fix-cap is no count" "a whole number, or a percent" \
+      "invalid fix-cap: '$FCAP' — allowed: a whole number (2) or a percent of the plan's ## Tasks rows (10%)"
+fi
 
 # ---------- walk: enum (epic-14 AC-3) ----------
 #
@@ -1098,13 +1132,12 @@ fi
 # name differs); a shared hooks-lib extraction is deliberately deferred.
 # [INSTRUMENT]
 #
-# Rigor ordering (normative): low(0) < medium(1) < high(2), on the LEVEL `rigor_level` reads
-# (lib/run.sh; wave-28 T44), so a floor and a plan written in different vocabularies compare.
+# Rigor ordering (normative): single(0) < double(1), on the LEVEL `rigor_level` reads (lib/run.sh;
+# wave-30 T11, D1); a word that is no level ranks -1.
 rigor_rank() {
   case "$(rigor_level "$1")" in
-    low) echo 0 ;;
-    medium) echo 1 ;;
-    high) echo 2 ;;
+    single) echo 0 ;;
+    double) echo 1 ;;
     *) echo -1 ;;
   esac
 }
@@ -1131,13 +1164,13 @@ log_floor_finding() {  # $1=check-id $2=violation-detail
 }
 
 RR=$(rigor_rank "$RIGOR")
-# A finding names a level by its new word, whichever word the file carries (AC-16.2).
+# A finding names a level by its word (AC-16.2).
 RL=$(rigor_level "$RIGOR")
 # Intent floor / spike cap (derivable from intent + rigor).
-[ "$INTENT" = "incident-response" ] && [ "$RR" -lt 2 ] \
-  && log_floor_finding intent-floor "incident-response floors at high, declared $RL"
+[ "$INTENT" = "incident-response" ] && [ "$RR" -lt 1 ] \
+  && log_floor_finding intent-floor "incident-response floors at double, declared $RL"
 [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
-  && log_floor_finding spike-cap "spike is capped at low, declared $RL"
+  && log_floor_finding spike-cap "spike is capped at single, declared $RL"
 
 # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
 # an unparseable/invalid value is its own finding, never a block).
@@ -1147,7 +1180,7 @@ PF=$(grep -E '^rigor-floor:' "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/de
 if [ -n "$PF" ]; then
   PR=$(rigor_rank "$PF")
   if [ "$PR" -lt 0 ]; then
-    log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml"
+    log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml — allowed: single or double"
   elif [ "$RR" -lt "$PR" ]; then
     log_floor_finding project-floor "project floor $(rigor_level "$PF"), declared $RL"
   fi
@@ -1162,8 +1195,13 @@ if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
     | grep -E '^rigor-floor:' | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
-    [ "$ER" -ge 0 ] && [ "$RR" -lt "$ER" ] \
-      && log_floor_finding epic-floor "epic floor $(rigor_level "$EF") (from $EPIC), declared $RL"
+    # A word that is no level is the epic's own data-quality finding, as the project floor's is
+    # (wave-30 T11): a floor written before 1.14.0 says so rather than going silent.
+    if [ "$ER" -lt 0 ]; then
+      log_finding epic-floor "invalid rigor-floor value '$EF' in $EPIC's epic plan — allowed: single or double"
+    elif [ "$RR" -lt "$ER" ]; then
+      log_floor_finding epic-floor "epic floor $(rigor_level "$EF") (from $EPIC), declared $RL"
+    fi
   fi
 fi
 

@@ -1,0 +1,6 @@
+question: adversarial
+result: fail
+token: archive_branch
+names: eval
+finding-file: lib/archive.sh | lib/gitrun.sh
+finding-rating: S1 on | S2 on
