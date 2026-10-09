@@ -1374,45 +1374,45 @@ expect_allow "19c2 wave plan Step 4 pointer → allow" \
 # 19d — valid task ledger, current: T2 accepted → allow, no finding (BLOCKING-
 # grade correctness: a false block here would be a defect).
 h19d=$(make_home)
-write_plan "$h19d" "$(task_plan_rigor tested "$ledger_valid")" > /dev/null
+write_plan "$h19d" "$(task_plan_rigor single "$ledger_valid")" > /dev/null
 expect_allow "19d task plan current: T2 valid ledger → allow (T-format accepted)" \
   "$h19d" 'git commit -m "x"'
 
-# 19e — no ## Tasks section on a NON-audited plan → exit 0 + task-ledger finding
+# 19e — no ## Tasks section on a single plan → exit 0 + task-ledger finding
 # (log-only). Task 4/3 promotes this check to BLOCKING under frontmatter
-# rigor: audited (pinned by 22c5); a peer-reviewed plan keeps logging.
+# rigor: double (pinned by 22c5); a double plan keeps logging.
 ledger_no_tasks="## SDLC State
 
 intent: build
-rigor: peer-reviewed
+rigor: single
 scale: task
 current: T2
 approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T2: some evidence"
 h19e=$(make_home)
-write_plan "$h19e" "$(task_plan_rigor peer-reviewed "$ledger_no_tasks")" > /dev/null
-expect_finding "19e missing ## Tasks section (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19e" "$(task_plan_rigor single "$ledger_no_tasks")" > /dev/null
+expect_finding "19e missing ## Tasks section (single) → exit 0 + task-ledger finding" \
   "$h19e" 'git commit -m "x"' "task-ledger"
 
 # 19e2 — the finding is written to the durable audit file with the D14 format.
 h19e2=$(make_home)
-write_plan "$h19e2" "$(task_plan_rigor peer-reviewed "$ledger_no_tasks")" > /dev/null
+write_plan "$h19e2" "$(task_plan_rigor single "$ledger_no_tasks")" > /dev/null
 expect_audit_line "19e2 missing ## Tasks → audit file line (evidence-gate task-ledger)" \
   "$h19e2" 'git commit -m "x"' "evidence-gate task-ledger:"
 
-# 19f — status outside the enum (doing) on a NON-audited plan → exit 0 + finding
-# (log-only). Task 4/3 blocks this under rigor: audited (pinned by 22c1).
+# 19f — status outside the enum (doing) on a single plan → exit 0 + finding
+# (log-only). Task 4/3 blocks this under rigor: double (pinned by 22c1).
 h19f=$(make_home)
-write_plan "$h19f" "$(task_plan_rigor tested "$ledger_bad_status")" > /dev/null
-expect_finding "19f invalid status 'doing' (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19f" "$(task_plan_rigor single "$ledger_bad_status")" > /dev/null
+expect_finding "19f invalid status 'doing' (single) → exit 0 + task-ledger finding" \
   "$h19f" 'git commit -m "x"' "task-ledger"
 
 # 19g — the ADDRESSED active task (T2, current: T2) with no `- T2:` evidence
-# line → BLOCK. Task 4/1 made the addressed-unit tested floor blocking; this
+# line → BLOCK. Task 4/1 made the addressed-unit single floor blocking; this
 # case previously logged a finding (see Section 22 for the full lane coverage).
 h19g=$(make_home)
-write_plan "$h19g" "$(task_plan_rigor tested "$ledger_active_no_line")" > /dev/null
+write_plan "$h19g" "$(task_plan_rigor single "$ledger_active_no_line")" > /dev/null
 expect_block "19g addressed active task without evidence line → block" \
   "$h19g" 'git commit -m "x"' "evidence line"
 
@@ -1420,17 +1420,17 @@ expect_block "19g addressed active task without evidence line → block" \
 # (`- T2: TBD`) → BLOCK (task 4/1 blocking floor; previously a finding).
 ledger_active_placeholder="${ledger_valid/- T2: bash extract-helper.sh 4 cases green, commit def456/- T2: TBD}"
 h19h=$(make_home)
-write_plan "$h19h" "$(task_plan_rigor tested "$ledger_active_placeholder")" > /dev/null
+write_plan "$h19h" "$(task_plan_rigor single "$ledger_active_placeholder")" > /dev/null
 expect_block "19h addressed active task placeholder evidence → block" \
   "$h19h" 'git commit -m "x"' "placeholder"
 
 # 19i — done non-addressed task (T1) with an empty evidence line (`- T1:`) on a
-# NON-audited plan → finding (log-only). Task 4/3 blocks this under rigor:
-# audited (pinned by 22c3).
+# single plan → finding (log-only). Task 4/3 blocks this under rigor:
+# double (pinned by 22c3).
 ledger_done_empty="${ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
 h19i=$(make_home)
-write_plan "$h19i" "$(task_plan_rigor peer-reviewed "$ledger_done_empty")" > /dev/null
-expect_finding "19i done task missing evidence (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19i" "$(task_plan_rigor single "$ledger_done_empty")" > /dev/null
+expect_finding "19i done task missing evidence (single) → exit 0 + task-ledger finding" \
   "$h19i" 'git commit -m "x"' "task-ledger"
 
 # --- (2) task-scale CRLF -------------------------------------------------
@@ -1439,7 +1439,7 @@ expect_finding "19i done task missing evidence (non-audited) → exit 0 + task-l
 # (every parse path — frontmatter scale, current, ## Tasks, evidence lines —
 # strips \r).
 h19j=$(make_home)
-write_plan "$h19j" "$(to_crlf "$(task_plan_rigor tested "$ledger_valid")")" > /dev/null
+write_plan "$h19j" "$(to_crlf "$(task_plan_rigor single "$ledger_valid")")" > /dev/null
 expect_allow "19j CRLF task ledger → allow, no false finding" \
   "$h19j" 'git commit -m "x"'
 
@@ -1452,14 +1452,14 @@ expect_allow "19j CRLF task ledger → allow, no false finding" \
 # parsed → no finding at all (RED). After the fix the ledger validates and
 # the bad status is caught.
 h19jcr1=$(make_home)
-write_plan "$h19jcr1" "$(to_cr "$(task_plan_rigor tested "$ledger_bad_status")")" > /dev/null
-expect_finding "19j-cr1 CR-only bad-status ledger (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19jcr1" "$(to_cr "$(task_plan_rigor single "$ledger_bad_status")")" > /dev/null
+expect_finding "19j-cr1 CR-only bad-status ledger (single) → exit 0 + task-ledger finding" \
   "$h19jcr1" 'git commit -m "x"' "task-ledger"
 
 # 19j-cr2 — a valid ledger under CR-only → allow, no false finding (guard
 # against over-flagging once CR-only parses correctly).
 h19jcr2=$(make_home)
-write_plan "$h19jcr2" "$(to_cr "$(task_plan_rigor tested "$ledger_valid")")" > /dev/null
+write_plan "$h19jcr2" "$(to_cr "$(task_plan_rigor single "$ledger_valid")")" > /dev/null
 expect_allow "19j-cr2 CR-only valid task ledger → allow, no false finding" \
   "$h19jcr2" 'git commit -m "x"'
 
@@ -1471,7 +1471,7 @@ make_epic_project() {
   local proj
   proj=$(make_project)
   mkdir -p "$proj/.bionic/docs/plans/epic-fix"
-  printf -- '---\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
+  printf -- '---\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
     "$branch" > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md"
   touch -t 202001010000 "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || \
     touch -d "2020-01-01" "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || true
@@ -1554,10 +1554,10 @@ v11_fenced_tasks_shadow='```
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T9 | bugfix | tested | example row | doing |
+| T9 | bugfix | single | example row | doing |
 ```'
 h19p=$(make_home)
-write_plan "$h19p" "$(task_frontmatter_rigor tested)
+write_plan "$h19p" "$(task_frontmatter_rigor single)
 
 Example ledger:
 
@@ -1597,7 +1597,7 @@ make_epic_project_fenced() {
 ---
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: epic
 ---
 # Epic plan
@@ -1671,7 +1671,7 @@ r7_frontmatter() {
   printf -- 'governing-skill: canonical-sdlc\n'
   printf -- 'canonical_sdlc_version: 14\n'
   printf -- 'intent: %s\n' "$intent"
-  printf -- 'rigor: audited\n'
+  printf -- 'rigor: double\n'
   printf -- 'scale: %s\n' "$scale"
   printf -- 'deploy_target: none\n'
   printf -- 'use_worktree: false\n'
@@ -1920,7 +1920,7 @@ h21c=$(make_home)
 printf '%s\n' "$(r7_wave_plan tune 5 "${step5_base/$EG_HEAD/$(git -C "$ac10_main" rev-parse HEAD)}" "$matrix_complete")" \
   > "$ac10_main/.bionic/docs/plans/active.md"
 touch "$ac10_main/.bionic/docs/plans/active.md"
-printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-07T00:00Z approved\nStep 5: TODO\n' \
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: single\nscale: wave\n---\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-07T00:00Z approved\nStep 5: TODO\n' \
   > "$ac10_wt/.bionic/docs/plans/decoy.md"
 touch "$ac10_wt/.bionic/docs/plans/decoy.md"
 run_hook_with_project "$h21c" "$ac10_wt" 'git commit -m "x"'
@@ -1938,23 +1938,23 @@ fi
 # Section 22: rigor-keyed ledger lanes
 # ============================================================
 #
-# Task 4/1 makes the task-ledger tested floor BLOCKING for THE ADDRESSED
+# Task 4/1 makes the task-ledger single floor BLOCKING for THE ADDRESSED
 # UNIT ONLY (the T<n> named by `current: T<n>`). For that one task the gate now
 # exits 2 when: its row is absent from `## Tasks`; its `- T<n>:` evidence line
 # is missing or a placeholder; or its rigor cell fails `effective_row_rigor`
-# (a non-empty cell outside tested|peer-reviewed|audited → INVALID). Every OTHER
+# (a non-empty cell outside single|double|double → INVALID). Every OTHER
 # row keeps its log-only handling (D14) at this task — 22a6 pins that scope.
 
 section "Section 22: rigor-keyed ledger lanes"
 
-# --- 22a: blocking tested floor on the addressed ledger unit --------------
+# --- 22a: blocking single floor on the addressed ledger unit --------------
 
 # 22a1 — ## Tasks has no row for the addressed unit (T2) → block.
 v22_no_t2_row="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T1 | bugfix | single | fix the frontmatter parser | done |
 
 ## SDLC State
 
@@ -1964,7 +1964,7 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: fixed in commit abc123, suite 5/5 green"
 h22a1=$(make_home)
-write_plan "$h22a1" "$(task_plan_rigor tested "$v22_no_t2_row")" > /dev/null
+write_plan "$h22a1" "$(task_plan_rigor single "$v22_no_t2_row")" > /dev/null
 expect_block "22a1 addressed unit T2 has no ## Tasks row → block" \
   "$h22a1" 'git commit -m "x"' "no row"
 
@@ -1973,8 +1973,8 @@ v22_t2_no_line="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -1984,7 +1984,7 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: fixed in commit abc123, suite 5/5 green"
 h22a2=$(make_home)
-write_plan "$h22a2" "$(task_plan_rigor tested "$v22_t2_no_line")" > /dev/null
+write_plan "$h22a2" "$(task_plan_rigor single "$v22_t2_no_line")" > /dev/null
 expect_block "22a2 addressed unit T2 missing evidence line → block" \
   "$h22a2" 'git commit -m "x"' "evidence line"
 
@@ -1993,8 +1993,8 @@ v22_t2_placeholder="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2005,7 +2005,7 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: pending"
 h22a3=$(make_home)
-write_plan "$h22a3" "$(task_plan_rigor tested "$v22_t2_placeholder")" > /dev/null
+write_plan "$h22a3" "$(task_plan_rigor single "$v22_t2_placeholder")" > /dev/null
 expect_block "22a3 addressed unit T2 placeholder evidence → block" \
   "$h22a3" 'git commit -m "x"' "placeholder"
 
@@ -2014,8 +2014,8 @@ v22_t2_valid="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2026,7 +2026,7 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: fixed enum check, bash suite 12/12"
 h22a4=$(make_home)
-write_plan "$h22a4" "$(task_plan_rigor tested "$v22_t2_valid")" > /dev/null
+write_plan "$h22a4" "$(task_plan_rigor single "$v22_t2_valid")" > /dev/null
 expect_allow "22a4 honest addressed unit T2 → allow" \
   "$h22a4" 'git commit -m "x"'
 
@@ -2035,7 +2035,7 @@ v22_t2_bad_rigor="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T1 | bugfix | single | fix the frontmatter parser | done |
 | T2 | bugfix | rigorous | fix enum | active |
 
 ## SDLC State
@@ -2047,26 +2047,26 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: fixed enum check, bash suite 12/12"
 h22a5=$(make_home)
-write_plan "$h22a5" "$(task_plan_rigor tested "$v22_t2_bad_rigor")" > /dev/null
+write_plan "$h22a5" "$(task_plan_rigor single "$v22_t2_bad_rigor")" > /dev/null
 expect_block "22a5 addressed unit T2 invalid rigor cell → block" \
   "$h22a5" 'git commit -m "x"' "invalid rigor"
 
 # 22a6 (regression pin) — a broken NON-addressed row (T1 done, no evidence line)
-# while the addressed unit T2 is honest → NO block on a NON-audited plan. The
+# while the addressed unit T2 is honest → NO block on a single plan. The
 # non-addressed row keeps its log-only handling (this exits 0 with a task-ledger
 # finding, not a block), pinning the addressed-unit-only scope of the 4/1
 # blocking floor. NB: task 4/3 makes this same NON-addressed check BLOCKING
-# under frontmatter rigor: audited (pinned by 22c3), so this fixture is
-# deliberately NON-audited (tested) to keep exercising the surviving log-only
-# lane. Tested also keeps every cell at the floor so the 4/8 downgrade gate
+# under frontmatter rigor: double (pinned by 22c3), so this fixture is
+# deliberately single to keep exercising the surviving log-only
+# lane. Single also keeps every cell at the floor so the 4/8 downgrade gate
 # stays silent — the subject here is the missing-evidence log-only path, not a
 # downgrade.
 v22_nonaddressed_broken="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2076,31 +2076,31 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T2: fixed enum check, bash suite 12/12"
 h22a6=$(make_home)
-write_plan "$h22a6" "$(task_plan_rigor tested "$v22_nonaddressed_broken")" > /dev/null
-expect_finding "22a6 broken non-addressed row (T1) + honest T2 (non-audited) → no block, log-only finding" \
+write_plan "$h22a6" "$(task_plan_rigor single "$v22_nonaddressed_broken")" > /dev/null
+expect_finding "22a6 broken non-addressed row (T1) + honest T2 (single) → no block, log-only finding" \
   "$h22a6" 'git commit -m "x"' "task-ledger"
 
 # --- 22b: proof-shape + auditor/critic lanes (task 4/2) ------------------
 #
 # Lane scope (D-task 4/2): the addressed row (any status) AND every OTHER
-# row with status `done` are subject to — effective rigor peer-reviewed OR
-# audited: evidence must be proof-shaped (is_proof_shaped); done AND rigor
-# >= peer-reviewed: evidence must contain "auditor"; done AND rigor audited:
-# evidence must ALSO contain "critic". The `tested` floor carries none of
+# row with status `done` are subject to — effective rigor double OR
+# double: evidence must be proof-shaped (is_proof_shaped); done AND rigor
+# >= double: evidence must contain "auditor"; done AND rigor double:
+# evidence must ALSO contain "critic". The `single` floor carries none of
 # this — presence + placeholder (4/1) is its whole contract.
 #
-# These fixtures run at frontmatter rigor: tested (task_plan_rigor tested),
-# so each heavier cell (peer-reviewed/audited) is a RAISE above the floor — the
+# These fixtures run at frontmatter rigor: single (task_plan_rigor single),
+# so each heavier cell (double/double) is a RAISE above the floor — the
 # CELL drives the lane, and the 4/8 downgrade gate never fires (raises are always
 # free). This isolates the lane behavior from the floor check. (Was
-# task_plan / audited before task 4/8, where a tested/peer-reviewed cell
+# task_plan / double before task 4/8, where a single/double cell
 # would now be a blocking downgrade and mask the lane under test.)
 
-# 22b1 — addressed row (peer-reviewed, active) with prose evidence (no digit,
+# 22b1 — addressed row (double, active) with prose evidence (no digit,
 # no command token) → block (not proof-shaped).
 h22b1=$(make_home)
-write_plan "$h22b1" "$(task_plan_rigor tested "$v22b_t2_prose")" > /dev/null
-expect_block "22b1 addressed row peer-reviewed active prose evidence → block (not proof-shaped)" \
+write_plan "$h22b1" "$(task_plan_rigor single "$v22b_t2_prose")" > /dev/null
+expect_block "22b1 addressed row double active prose evidence → block (not proof-shaped)" \
   "$h22b1" 'git commit -m "x"' "not prose"
 
 # 22b2 — same row, evidence is a command + counts → allow (proof-shaped).
@@ -2108,8 +2108,8 @@ v22b_t2_proof="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | peer-reviewed | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | double | fix enum | active |
 
 ## SDLC State
 
@@ -2120,11 +2120,11 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: bash test.sh 232/232 green"
 h22b2=$(make_home)
-write_plan "$h22b2" "$(task_plan_rigor tested "$v22b_t2_proof")" > /dev/null
-expect_allow "22b2 addressed row peer-reviewed active proof-shaped evidence → allow" \
+write_plan "$h22b2" "$(task_plan_rigor single "$v22b_t2_proof")" > /dev/null
+expect_allow "22b2 addressed row double active proof-shaped evidence → allow" \
   "$h22b2" 'git commit -m "x"'
 
-# 22b3 — a DONE non-addressed row (T1, peer-reviewed) with proof-shaped evidence and no
+# 22b3 — a DONE non-addressed row (T1, double) with proof-shaped evidence and no
 # 'auditor' token, while the run sits at `current: T2` → ALLOW (ADR-033, wave-18 REQ-1). The
 # verdict lanes are STEP-GATED: Step 5 produces the auditor verdict and Step 6 the critic, so
 # at `current: T<n>` no honest row can carry either, and demanding them is what left a
@@ -2136,8 +2136,8 @@ v22b_t1_no_auditor="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | double | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2148,8 +2148,8 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash suite 12/12
 - T2: fixed enum check, bash suite 12/12"
 h22b3=$(make_home)
-write_plan "$h22b3" "$(task_plan_rigor tested "$v22b_t1_no_auditor")" > /dev/null
-expect_allow "22b3 done row peer-reviewed, no auditor token, at current: T2 → allow (step-gated; 25gT(i) owns the demand)" \
+write_plan "$h22b3" "$(task_plan_rigor single "$v22b_t1_no_auditor")" > /dev/null
+expect_allow "22b3 done row double, no auditor token, at current: T2 → allow (step-gated; 25gT(i) owns the demand)" \
   "$h22b3" 'git commit -m "x"' 
 
 # 22b4 — same row with an 'auditor' token in the evidence → allow.
@@ -2157,8 +2157,8 @@ v22b_t1_auditor="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | double | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2169,19 +2169,19 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 12/12, auditor CONFIRMED
 - T2: fixed enum check, bash suite 12/12"
 h22b4=$(make_home)
-write_plan "$h22b4" "$(task_plan_rigor tested "$v22b_t1_auditor")" > /dev/null
-expect_allow "22b4 done row peer-reviewed with auditor token → allow" \
+write_plan "$h22b4" "$(task_plan_rigor single "$v22b_t1_auditor")" > /dev/null
+expect_allow "22b4 done row double with auditor token → allow" \
   "$h22b4" 'git commit -m "x"'
 
-# 22b5 — a DONE row at audited rigor with 'auditor' but no 'critic', at `current: T2` →
+# 22b5 — a DONE row at double rigor with 'auditor' but no 'critic', at `current: T2` →
 # ALLOW, for 22b3's reason: the critic verdict is Step 6's and this run has not reached it
-# (ADR-033). 25gT(k) carries the audited lane's critic demand, at current: 6.
+# (ADR-033). 25gT(k) carries the double lane's critic demand, at current: 6.
 v22b_t1_audited_no_critic="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | double | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2192,8 +2192,8 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 12/12 auditor CONFIRMED
 - T2: fixed enum check, bash suite 12/12"
 h22b5=$(make_home)
-write_plan "$h22b5" "$(task_plan_rigor tested "$v22b_t1_audited_no_critic")" > /dev/null
-expect_allow "22b5 done row audited with auditor but no critic, at current: T2 → allow (step-gated; 25gT(k) owns the demand)" \
+write_plan "$h22b5" "$(task_plan_rigor single "$v22b_t1_audited_no_critic")" > /dev/null
+expect_allow "22b5 done row double with auditor but no critic, at current: T2 → allow (step-gated; 25gT(k) owns the demand)" \
   "$h22b5" 'git commit -m "x"' 
 
 # 22b6 — same row with both 'auditor' and 'critic' tokens → allow.
@@ -2201,8 +2201,8 @@ v22b_t1_audited_complete="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | double | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2213,16 +2213,16 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking
 - T2: fixed enum check, bash suite 12/12"
 h22b6=$(make_home)
-write_plan "$h22b6" "$(task_plan_rigor tested "$v22b_t1_audited_complete")" > /dev/null
-expect_allow "22b6 done row audited with auditor and critic → allow" \
+write_plan "$h22b6" "$(task_plan_rigor single "$v22b_t1_audited_complete")" > /dev/null
+expect_allow "22b6 done row double with auditor and critic → allow" \
   "$h22b6" 'git commit -m "x"'
 
-# 22b7 — addressed row at the tested floor (active), plain prose evidence →
-# allow (tested demands no proof-shape/auditor/critic; presence+placeholder
+# 22b7 — addressed row at the single floor (active), plain prose evidence →
+# allow (single demands no proof-shape/auditor/critic; presence+placeholder
 # from 4/1 is its whole contract).
 h22b7=$(make_home)
-write_plan "$h22b7" "$(task_plan_rigor tested "$v22b_t2_tested_prose")" > /dev/null
-expect_allow "22b7 addressed row tested floor prose evidence → allow (no proof-shape demand)" \
+write_plan "$h22b7" "$(task_plan_rigor single "$v22b_t2_tested_prose")" > /dev/null
+expect_allow "22b7 addressed row single floor prose evidence → allow (no proof-shape demand)" \
   "$h22b7" 'git commit -m "x"'
 
 # 22b8 — proof-shape unit pin: a command word alone (no digit) is not
@@ -2233,8 +2233,8 @@ v22b_t2_no_digit="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | peer-reviewed | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | double | fix enum | active |
 
 ## SDLC State
 
@@ -2245,7 +2245,7 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: bash test.sh all green"
 h22b8a=$(make_home)
-write_plan "$h22b8a" "$(task_plan_rigor tested "$v22b_t2_no_digit")" > /dev/null
+write_plan "$h22b8a" "$(task_plan_rigor single "$v22b_t2_no_digit")" > /dev/null
 expect_block "22b8a proof-shape pin: command word, no digit → block" \
   "$h22b8a" 'git commit -m "x"' "not prose"
 
@@ -2253,8 +2253,8 @@ v22b_t2_no_command="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | peer-reviewed | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | double | fix enum | active |
 
 ## SDLC State
 
@@ -2265,42 +2265,42 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: fixed 3 cases by hand"
 h22b8b=$(make_home)
-write_plan "$h22b8b" "$(task_plan_rigor tested "$v22b_t2_no_command")" > /dev/null
+write_plan "$h22b8b" "$(task_plan_rigor single "$v22b_t2_no_command")" > /dev/null
 expect_block "22b8b proof-shape pin: digit, no command token → block" \
   "$h22b8b" 'git commit -m "x"' "not prose"
 
-# --- 22c: audited plan-level strictness + wave D7 dispatch-ledger (task 4/3) -
+# --- 22c: double plan-level strictness + wave D7 dispatch-ledger (task 4/3) -
 #
 # Part A (task scale): the previously log-only NON-addressed-row ledger-shape
 # checks (missing ## Tasks, bad status enum, active/done row missing/placeholder
-# evidence) BLOCK under frontmatter rigor: audited and stay log-only otherwise
+# evidence) BLOCK under frontmatter rigor: double and stay log-only otherwise
 # (ledger_shape_fail router). Part B (wave scale): validate_dispatch_ledger
 # demands a `## Tasks` dispatched-task ledger section on scale:wave +
-# rigor:audited + multi_agent:true plans (absent → block; empty/none-dispatched
-# → allow; rows validate at TESTED-FLOOR shape only — enum + evidence-line
+# rigor:double + multi_agent:true plans (absent → block; empty/none-dispatched
+# → allow; rows validate at SINGLE-FLOOR shape only — enum + evidence-line
 # presence, NO per-row auditor/critic, plan Assumption A2). Every other plan is
 # a guard no-op.
 
-section "Section 22c: audited strictness + D7 dispatch-ledger presence"
+section "Section 22c: double strictness + D7 dispatch-ledger presence"
 
-# ---- Part A: task-scale audited plan-level strictness --------------------
+# ---- Part A: task-scale double plan-level strictness --------------------
 
-# 22c1 — audited task plan, addressed T1 clean + proof-shaped, a second
-# (non-addressed) row T2 with status 'wip' (bad enum) → BLOCK (audited promotes
+# 22c1 — double task plan, addressed T1 clean + proof-shaped, a second
+# (non-addressed) row T2 with status 'wip' (bad enum) → BLOCK (double promotes
 # the enum check). Isolated: the addressed unit T1 is clean so the block is the
-# enum promotion, not the addressed floor. T1's cell is `audited` (= the
+# enum promotion, not the addressed floor. T1's cell is `double` (= the
 # frontmatter floor) so it is not itself a 4/8 downgrade — the subject is T2's
-# status promotion. T1's evidence is proof-shaped for the audited-active lane.
+# status promotion. T1's evidence is proof-shaped for the double-active lane.
 h22c1=$(make_home)
 write_plan "$h22c1" "$(task_plan "$v22c_bad_enum")" > /dev/null
-expect_block "22c1 audited task plan, non-addressed row bad status enum → block" \
+expect_block "22c1 double task plan, non-addressed row bad status enum → block" \
   "$h22c1" 'git commit -m "x"' "invalid status"
 
-# 22c2 — same fixture at frontmatter rigor peer-reviewed → log-only finding, NOT
-# a block (the router stays log-only off audited).
+# 22c2 — same fixture at frontmatter rigor single → log-only finding, NOT
+# a block (the router stays log-only off double).
 h22c2=$(make_home)
-write_plan "$h22c2" "$(task_plan_rigor peer-reviewed "$v22c_bad_enum")" > /dev/null
-expect_finding "22c2 same fixture at peer-reviewed → finding (still log-only)" \
+write_plan "$h22c2" "$(task_plan_rigor single "$v22c_bad_enum")" > /dev/null
+expect_finding "22c2 same fixture at single → finding (still log-only)" \
   "$h22c2" 'git commit -m "x"' "task-ledger"
 
 # ---- 22c-t: the six-column task ledger, and the STEP-GATED verdict lanes ----
@@ -2327,7 +2327,7 @@ expect_allow "22c-t1 AC-1.2 a done row with '—' and no verdicts commits at cur
   "$h22ct1" 'git commit -m "x"'
 
 # 22c-t2 — THE ENUM IS UNTOUCHED (AC-1.1). The same six-column shape with `wip` in the
-# status cell is refused on an audited plan and the refusal names the enum, exactly as the
+# status cell is refused on an double plan and the refusal names the enum, exactly as the
 # five-column 22c1 pins it. Step-gating the lanes widened no word.
 h22ct2=$(make_home)
 write_plan "$h22ct2" "$(task_plan "$v22ct_bad_enum")" > /dev/null
@@ -2335,7 +2335,7 @@ expect_block "22c-t2 AC-1.1 'wip' on the six-column table is still refused, nami
   "$h22ct2" 'git commit -m "x"' "want pending|active|done|dropped"
 
 # 22c-t3 — the ONE thing a `done` row still owes at `current: T<n>`: its `- T<n>:` line.
-# Drop it and the audited router blocks, naming the row. Without this row 22c-t1 would be
+# Drop it and the double router blocks, naming the row. Without this row 22c-t1 would be
 # indistinguishable from "a done row owes nothing here".
 v22ct_done_no_line="${v22ct_done_no_verdicts/
 - T1: bash tests\/run.sh 31\/31 green/}"
@@ -2344,17 +2344,17 @@ write_plan "$h22ct3" "$(task_plan "$v22ct_done_no_line")" > /dev/null
 expect_block "22c-t3 AC-1.2 the same done row WITHOUT its '- T1:' line is refused, naming T1" \
   "$h22ct3" 'git commit -m "x"' "T1"
 
-# 22c3 — audited task plan, addressed T1 clean, non-addressed T2 status done with
-# NO `- T2:` evidence line → BLOCK (audited promotes the missing-evidence check).
-# T1's cell is `audited` (= the frontmatter floor) so it is not itself a 4/8
-# downgrade; its evidence is proof-shaped for the audited-active lane. The
+# 22c3 — double task plan, addressed T1 clean, non-addressed T2 status done with
+# NO `- T2:` evidence line → BLOCK (double promotes the missing-evidence check).
+# T1's cell is `double` (= the frontmatter floor) so it is not itself a 4/8
+# downgrade; its evidence is proof-shaped for the double-active lane. The
 # subject is T2's promoted missing-evidence block.
 v22c_done_no_ev="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | do the thing | active |
-| T2 | build | tested | second thing | done |
+| T1 | build | double | do the thing | active |
+| T2 | build | single | second thing | done |
 
 ## SDLC State
 
@@ -2365,23 +2365,23 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash suite 12/12 green"
 h22c3=$(make_home)
 write_plan "$h22c3" "$(task_plan "$v22c_done_no_ev")" > /dev/null
-expect_block "22c3 audited task plan, non-addressed done row missing evidence line → block" \
+expect_block "22c3 double task plan, non-addressed done row missing evidence line → block" \
   "$h22c3" 'git commit -m "x"' "no evidence"
 
-# 22c4 — same fixture at frontmatter rigor tested → log-only finding, NOT a block.
+# 22c4 — same fixture at frontmatter rigor single → log-only finding, NOT a block.
 h22c4=$(make_home)
-write_plan "$h22c4" "$(task_plan_rigor tested "$v22c_done_no_ev")" > /dev/null
-expect_finding "22c4 same fixture at tested → finding (still log-only)" \
+write_plan "$h22c4" "$(task_plan_rigor single "$v22c_done_no_ev")" > /dev/null
+expect_finding "22c4 same fixture at single → finding (still log-only)" \
   "$h22c4" 'git commit -m "x"' "task-ledger"
 
 # ---- Part B: wave-scale D7 dispatched-task ledger presence ---------------
 
 
 
-# 22c5 — audited multi_agent wave with NO ## Tasks section → block (D7 presence).
+# 22c5 — double multi_agent wave with NO ## Tasks section → block (D7 presence).
 h22c5=$(make_home)
 write_plan "$h22c5" "$(d7_wave_plan "" "")" > /dev/null
-expect_block "22c5 audited multi_agent wave with no ## Tasks → block (D7 presence)" \
+expect_block "22c5 double multi_agent wave with no ## Tasks → block (D7 presence)" \
   "$h22c5" 'git commit -m "x"' "dispatched-task ledger"
 
 # 22c6 — WITH a ## Tasks section, header-only + a `none dispatched` line, zero
@@ -2396,41 +2396,41 @@ tasks_none="## Tasks
 none dispatched — the orchestrator appends one row per dispatched task-shaped unit."
 h22c6=$(make_home)
 write_plan "$h22c6" "$(d7_wave_plan "$tasks_none" "")" > /dev/null
-expect_allow "22c6 audited multi_agent wave with none-dispatched ## Tasks → allow" \
+expect_allow "22c6 double multi_agent wave with none-dispatched ## Tasks → allow" \
   "$h22c6" 'git commit -m "x"'
 
 # 22c7 — ## Tasks with one dispatched row (done) AND a matching `- T1:` evidence
 # line in ## SDLC State → allow. NOTE: the line carries NO auditor/critic token
-# yet it passes — tested-floor shape only at wave scale (pins Assumption A2).
+# yet it passes — single-floor shape only at wave scale (pins Assumption A2).
 h22c7=$(make_home)
 write_plan "$h22c7" "$(d7_wave_plan "$tasks_one_done" "- T1: bash suite 9/9 green")" > /dev/null
-expect_allow "22c7 audited multi_agent wave dispatched T1 + evidence line → allow (tested-floor shape, no auditor/critic)" \
+expect_allow "22c7 double multi_agent wave dispatched T1 + evidence line → allow (single-floor shape, no auditor/critic)" \
   "$h22c7" 'git commit -m "x"'
 
 # 22c8 — ## Tasks with a dispatched row (done) but NO `- T1:` evidence line
 # anywhere in ## SDLC State → block.
 h22c8=$(make_home)
 write_plan "$h22c8" "$(d7_wave_plan "$tasks_one_done" "")" > /dev/null
-expect_block "22c8 audited multi_agent wave dispatched T1 with no evidence line → block" \
+expect_block "22c8 double multi_agent wave dispatched T1 with no evidence line → block" \
   "$h22c8" 'git commit -m "x"' "evidence line"
 
-# 22c9 — NON-audited wave (rigor peer-reviewed) with NO ## Tasks → allow (the
-# guard excludes non-audited plans).
+# 22c9 — single wave with NO ## Tasks → allow (the
+# guard excludes single plans).
 h22c9=$(make_home)
-write_plan "$h22c9" "$(d7_wave_plan "" "" peer-reviewed true)" > /dev/null
-expect_allow "22c9 non-audited (peer-reviewed) wave with no ## Tasks → allow (guard excludes)" \
+write_plan "$h22c9" "$(d7_wave_plan "" "" single true)" > /dev/null
+expect_allow "22c9 single wave with no ## Tasks → allow (guard excludes)" \
   "$h22c9" 'git commit -m "x"'
 
-# 22c10 — audited wave with multi_agent: false and NO ## Tasks → allow (the guard
+# 22c10 — double wave with multi_agent: false and NO ## Tasks → allow (the guard
 # excludes single-agent plans).
 h22c10=$(make_home)
-write_plan "$h22c10" "$(d7_wave_plan "" "" audited false)" > /dev/null
-expect_allow "22c10 audited wave with multi_agent:false, no ## Tasks → allow (guard excludes)" \
+write_plan "$h22c10" "$(d7_wave_plan "" "" double false)" > /dev/null
+expect_allow "22c10 double wave with multi_agent:false, no ## Tasks → allow (guard excludes)" \
   "$h22c10" 'git commit -m "x"'
 
 # 22c11 (self-reference pin) — reproduce THIS wave-05 plan's exact ## Tasks shape
 # (header + `|---|` separator + blank + a `none dispatched — ...` prose line,
-# zero T-rows) on an audited multi_agent wave fixture → allow. This is the shape
+# zero T-rows) on an double multi_agent wave fixture → allow. This is the shape
 # the deployed NEW hook must accept when wave-05 itself advances past the pointer
 # steps into the dispatcher.
 tasks_selfref="## Tasks
@@ -2457,7 +2457,7 @@ tasks_prose_only="## Tasks
 none dispatched — no task-shaped unit has been dispatched on this wave yet."
 h22c12=$(make_home)
 write_plan "$h22c12" "$(d7_wave_plan "$tasks_prose_only" "")" > /dev/null
-expect_allow "22c12 audited multi_agent wave, ## Tasks prose with NO header row → allow (presence is the section, not the table)" \
+expect_allow "22c12 double multi_agent wave, ## Tasks prose with NO header row → allow (presence is the section, not the table)" \
   "$h22c12" 'git commit -m "x"'
 
 # 22c13 — a `## Tasks` heading with an EMPTY section (nothing between it and the
@@ -2465,7 +2465,7 @@ expect_allow "22c12 audited multi_agent wave, ## Tasks prose with NO header row 
 # section with content is. 22c5 pins the ABSENT half.
 h22c13=$(make_home)
 write_plan "$h22c13" "$(d7_wave_plan "## Tasks" "")" > /dev/null
-expect_block "22c13 audited multi_agent wave, ## Tasks heading with an empty section → block (D7 presence)" \
+expect_block "22c13 double multi_agent wave, ## Tasks heading with an empty section → block (D7 presence)" \
   "$h22c13" 'git commit -m "x"' "dispatched-task ledger"
 
 # ---- 22e: the wave's TEN-column ## Tasks table (REQ-1e, AC-1e.3) ----------
@@ -2479,7 +2479,7 @@ expect_block "22c13 audited multi_agent wave, ## Tasks heading with an empty sec
 # table fails the status enum, on this wave's own plan, at its own next commit.
 #
 # The table below is wave-11-lean-spine's OWN `## Tasks` section, copied
-# verbatim, on an audited multi_agent wave fixture at current: 5 — the exact
+# verbatim, on an double multi_agent wave fixture at current: 5 — the exact
 # triple that arms validate_dispatch_ledger. It carries `landed`, the status the
 # widened schema uses and the old enum (pending|active|done|dropped) does not.
 IFS= read -r -d '' tasks_ten_column <<'TEN_COLUMN_EOF' || true
@@ -2502,9 +2502,9 @@ IFS= read -r -d '' tasks_ten_column <<'TEN_COLUMN_EOF' || true
 | T13 | 5 | verify | Walk: an agent that has not read the ACs drives the candidate by plugin-dir in a throwaway project and narrates; record/wave-11-lean-spine/walk.md | researcher | T2, T4, T5, T6, T8, T12, T22 | 30m | all | record/wave-11-lean-spine/walk.md | pending |
 | T14 | 5 | test | Tests floor: bash tests/run.sh in the wave worktree; census commands re-run; evidence/floor.md | test-runner | T2, T4, T5, T6, T8, T12, T22 | 40m | all | record/wave-11-lean-spine/evidence/floor.md | pending |
 | T15 | 5 | verify | Discharge the matrix: 22 static pins, 12 hermetic rows, 6 live drives; one evidence file per AC | orchestrator | T13, T14 | 90m | all | record/wave-11-lean-spine/evidence/ | pending |
-| T16 | 5 | verify | Auditor on the REQ-1e and REQ-1f rows (audited) and the wave verdict | auditor | T15 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/auditor.md | pending |
+| T16 | 5 | verify | Auditor on the REQ-1e and REQ-1f rows (double) and the wave verdict | auditor | T15 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/auditor.md | pending |
 | T17 | 6 | review | Six-axis self-review, one reviewer per axis in parallel at exec-complex | orchestrator | T16 | 45m | all | record/wave-11-lean-spine/review/ | pending |
-| T18 | 6 | review | Critic on T7–T12 (audited rows) | critic | T17 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/critic.md | pending |
+| T18 | 6 | review | Critic on T7–T12 (double rows) | critic | T17 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/critic.md | pending |
 | T19 | 7 | doc | ADRs 001–004; spec adrs: pointer | orchestrator | T18 | 30m | D1, D3, D4, D5 | adrs/epic-23-bionic-tech-debt/ | pending |
 | T20 | 8 | integrate | Wake Note, then attended no-ff merge to main; writer worktrees and the wave worktree removed; tmp ephemera wiped | orchestrator | T19 | 20m | all | none | pending |
 | T22 | 4 | build | 1g: fix the doctor/setup agreement on the `motion` row so DS.2a/2c/9/11 pass on this machine; honour the 2026-08-22 ruling | senior-implementor | T1 | 60m | REQ-1g | payload/scripts/lib/deps.sh, payload/scripts/doctor.sh, payload/scripts/setup.sh, tests/cross-gate-agreement.test.sh | landed |
@@ -2536,7 +2536,7 @@ IFS= read -r -d '' ten_column_evidence <<'TEN_COLUMN_EV_EOF' || true
 TEN_COLUMN_EV_EOF
 h22e1=$(make_home)
 write_plan "$h22e1" "$(d7_wave_plan "$tasks_ten_column" "$ten_column_evidence")" > /dev/null
-expect_allow "22e1 AC-1e.3 — the ten-column ## Tasks table on an audited multi_agent wave → allow" \
+expect_allow "22e1 AC-1e.3 — the ten-column ## Tasks table on an double multi_agent wave → allow" \
   "$h22e1" 'git commit -m "x"'
 
 # 22e2 — THE DELEGATION IS LIVE, not decorative: the invariants this check used to
@@ -2603,50 +2603,50 @@ expect_block "22e5b …and the same line carries the repair" \
 # effective_row_rigor resolves cell-first: a non-empty, enum-valid cell wins
 # outright — it does NOT blend with, or get overridden by, the frontmatter
 # rigor. Frontmatter rigor only supplies the fallback when the cell is empty
-# (and 'tested' is the final fallback under an unset/invalid frontmatter
+# (and 'single' is the final fallback under an unset/invalid frontmatter
 # rigor). 22d1/22d2 pin cell-wins-over-frontmatter in both directions
 # (lighter cell overrides heavier frontmatter, and vice versa). 22d3/22d4 pin
 # the empty-cell inheritance path. 22d5 pins that the cell alone drives the
-# audited lane (auditor+critic), independent of frontmatter. 22d6 is a
+# double lane (auditor+critic), independent of frontmatter. 22d6 is a
 # confirmation-vs-actual probe on a NON-addressed row's off-enum rigor cell —
 # see its comment for the finding.
 
 section "Section 22d: per-row rigor resolution (R4)"
 
-# 22d1 — frontmatter rigor tested, addressed row cell peer-reviewed (heavier),
+# 22d1 — frontmatter rigor single, addressed row cell double (heavier),
 # weak prose evidence → block. The row CELL overrides the lighter frontmatter:
-# proof-shape is demanded because the cell says peer-reviewed, not because of
+# proof-shape is demanded because the cell says double, not because of
 # the (lighter) frontmatter.
 h22d1=$(make_home)
-write_plan "$h22d1" "$(task_plan_rigor tested "$v22d1_body")" > /dev/null
-expect_block "22d1 frontmatter tested, cell peer-reviewed (heavier), prose evidence → block (cell wins)" \
+write_plan "$h22d1" "$(task_plan_rigor single "$v22d1_body")" > /dev/null
+expect_block "22d1 frontmatter single, cell double (heavier), prose evidence → block (cell wins)" \
   "$h22d1" 'git commit -m "x"' "not prose"
 
-# 22d2 — frontmatter rigor audited (task_plan hardcodes it), addressed row
-# cell tested (lighter than the frontmatter floor), plain honest one-line
+# 22d2 — frontmatter rigor double (task_plan hardcodes it), addressed row
+# cell single (lighter than the frontmatter floor), plain honest one-line
 # evidence → this is a DOWNGRADE (A15: the per-row cell is a FLOOR; a cell
 # below the frontmatter rigor must be waived). WITHOUT a waiver marker on the
-# `- T1:` line it BLOCKS; WITH one it runs at the (lower) tested lane, so the
+# `- T1:` line it BLOCKS; WITH one it runs at the (lower) single lane, so the
 # plain evidence is fine and it allows. (Was expect_allow under the pre-A15
 # "cell wins freely downward" model; task 4/8 makes downward a recorded
 # decision. 22d2/22d2b are the split; 22f1/22f2 restate the same contract
 # in the dedicated floor block.)
 h22d2=$(make_home)
 write_plan "$h22d2" "$(task_plan "$v22d2_body")" > /dev/null
-expect_block "22d2 frontmatter audited, cell tested (downgrade), no waiver → block (floor)" \
+expect_block "22d2 frontmatter double, cell single (downgrade), no waiver → block (floor)" \
   "$h22d2" 'git commit -m "x"' "lowers rigor"
 
 # 22d2b — same fixture with a Waiver-Protocol marker on the `- T1:` line → allow.
-# The recorded downgrade runs at the cell's tested lane, so the plain one-line
-# evidence satisfies the (tested) contract.
+# The recorded downgrade runs at the cell's single lane, so the plain one-line
+# evidence satisfies the (single) contract.
 h22d2b=$(make_home)
 write_plan "$h22d2b" "$(task_plan "$v22d2b_body")" > /dev/null
-expect_allow "22d2b frontmatter audited, cell tested (downgrade), WITH waiver → allow (recorded, runs at tested lane)" \
+expect_allow "22d2b frontmatter double, cell single (downgrade), WITH waiver → allow (recorded, runs at single lane)" \
   "$h22d2b" 'git commit -m "x"'
 
-# 22d3 — frontmatter rigor peer-reviewed, addressed row cell EMPTY (missing
+# 22d3 — frontmatter rigor double, addressed row cell EMPTY (missing
 # field-4 value), weak prose evidence → block. An empty cell inherits the
-# frontmatter rigor (peer-reviewed), so proof-shape is demanded.
+# frontmatter rigor (double), so proof-shape is demanded.
 v22d3_body="## Tasks
 
 | id | intent | rigor | description | status |
@@ -2661,12 +2661,12 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: fixed it manually"
 h22d3=$(make_home)
-write_plan "$h22d3" "$(task_plan_rigor peer-reviewed "$v22d3_body")" > /dev/null
-expect_block "22d3 frontmatter peer-reviewed, cell empty, prose evidence → block (inherits frontmatter)" \
+write_plan "$h22d3" "$(task_plan_rigor double "$v22d3_body")" > /dev/null
+expect_block "22d3 frontmatter double, cell empty, prose evidence → block (inherits frontmatter)" \
   "$h22d3" 'git commit -m "x"' "not prose"
 
-# 22d4 — frontmatter rigor tested, addressed row cell EMPTY, weak prose
-# evidence → allow. An empty cell inherits tested, the floor.
+# 22d4 — frontmatter rigor single, addressed row cell EMPTY, weak prose
+# evidence → allow. An empty cell inherits single, the floor.
 v22d4_body="## Tasks
 
 | id | intent | rigor | description | status |
@@ -2681,19 +2681,19 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: fixed it manually"
 h22d4=$(make_home)
-write_plan "$h22d4" "$(task_plan_rigor tested "$v22d4_body")" > /dev/null
-expect_allow "22d4 frontmatter tested, cell empty, prose evidence → allow (inherits tested floor)" \
+write_plan "$h22d4" "$(task_plan_rigor single "$v22d4_body")" > /dev/null
+expect_allow "22d4 frontmatter single, cell empty, prose evidence → allow (inherits single floor)" \
   "$h22d4" 'git commit -m "x"'
 
-# 22d5 — frontmatter rigor tested (lighter), addressed row cell audited
+# 22d5 — frontmatter rigor single (lighter), addressed row cell double
 # (heavier), status done: proof-shaped evidence + auditor + critic tokens →
 # allow; drop the critic token (same frontmatter, same cell) → block. Pins
-# that the CELL alone drives the audited lane, independent of frontmatter.
+# that the CELL alone drives the double lane, independent of frontmatter.
 v22d5_body_complete="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix enum | done |
+| T1 | bugfix | double | fix enum | done |
 
 ## SDLC State
 
@@ -2703,15 +2703,15 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking"
 h22d5a=$(make_home)
-write_plan "$h22d5a" "$(task_plan_rigor tested "$v22d5_body_complete")" > /dev/null
-expect_allow "22d5a frontmatter tested, cell audited, done, proof+auditor+critic → allow (cell drives lane)" \
+write_plan "$h22d5a" "$(task_plan_rigor single "$v22d5_body_complete")" > /dev/null
+expect_allow "22d5a frontmatter single, cell double, done, proof+auditor+critic → allow (cell drives lane)" \
   "$h22d5a" 'git commit -m "x"'
 
 v22d5_body_no_critic="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix enum | done |
+| T1 | bugfix | double | fix enum | done |
 
 ## SDLC State
 
@@ -2721,10 +2721,10 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: bash test.sh 12/12 auditor CONFIRMED"
 h22d5b=$(make_home)
-write_plan "$h22d5b" "$(task_plan_rigor tested "$v22d5_body_no_critic")" > /dev/null
-# ADR-033: at `current: T1` the cell's audited lane demands the proof shape and the evidence
+write_plan "$h22d5b" "$(task_plan_rigor single "$v22d5_body_no_critic")" > /dev/null
+# ADR-033: at `current: T1` the cell's double lane demands the proof shape and the evidence
 # line, not a verdict Step 6 has not produced. 25gT(k) drives this same discrimination — a
-# tested plan, a cell raised to audited, no standalone critic — at current: 6.
+# single plan, a cell raised to double, no standalone critic — at current: 6.
 expect_allow "22d5b same, drop critic token → allow at current: T1 (step-gated; 25gT(k) owns the demand)" \
   "$h22d5b" 'git commit -m "x"' 
 
@@ -2734,7 +2734,7 @@ expect_allow "22d5b same, drop critic token → allow at current: T1 (step-gated
 # only ever explicitly checked on the ADDRESSED unit's own row (4/1's
 # `if [ "$eff" = "INVALID" ]` block), so the non-addressed done-row path called
 # apply_rigor_lanes(id, status, "INVALID", ev) directly and its case arms —
-# matching only tested|peer-reviewed|audited — fell through as a silent no-op:
+# matching only single|double|double — fell through as a silent no-op:
 # no block, and (unlike the ledger_shape_fail-routed defects) no log-only
 # finding either.
 #
@@ -2743,8 +2743,8 @@ expect_allow "22d5b same, drop critic token → allow at current: T1 (step-gated
 # 4/1 INVALID block. A malformed rigor cell makes the row's lane indeterminate
 # — you cannot resolve which evidence contract applies — so it is a hard
 # STRUCTURAL error that blocks UNCONDITIONALLY at ANY frontmatter rigor, NOT
-# routed through the audited-only ledger_shape_fail. 22d6a/b/c pin the block at
-# audited / tested / peer-reviewed frontmatter respectively (proving "at any
+# routed through the double-only ledger_shape_fail. 22d6a/b/c pin the block at
+# double / single / double frontmatter respectively (proving "at any
 # rigor"); 22d6d/e are controls proving ONLY the INVALID sentinel blocks — a
 # valid enum cell and an empty (inherits-frontmatter) cell both still allow.
 v22d6_body="## Tasks
@@ -2752,7 +2752,7 @@ v22d6_body="## Tasks
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
 | T1 | bugfix | reviewed | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2764,32 +2764,32 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T2: fixed enum check, bash suite 12/12"
 h22d6a=$(make_home)
 write_plan "$h22d6a" "$(task_plan "$v22d6_body")" > /dev/null
-expect_block "22d6a frontmatter audited, non-addressed off-enum rigor cell → block (INVALID lane is a hard structural error)" \
+expect_block "22d6a frontmatter double, non-addressed off-enum rigor cell → block (INVALID lane is a hard structural error)" \
   "$h22d6a" 'git commit -m "x"' "invalid rigor"
 
 h22d6b=$(make_home)
-write_plan "$h22d6b" "$(task_plan_rigor tested "$v22d6_body")" > /dev/null
-expect_block "22d6b frontmatter tested, non-addressed off-enum rigor cell → block (blocks at any rigor, not just audited)" \
+write_plan "$h22d6b" "$(task_plan_rigor single "$v22d6_body")" > /dev/null
+expect_block "22d6b frontmatter single, non-addressed off-enum rigor cell → block (blocks at any rigor, not just double)" \
   "$h22d6b" 'git commit -m "x"' "invalid rigor"
 
-# 22d6c — same off-enum cell, frontmatter peer-reviewed → block. Third rigor
+# 22d6c — same off-enum cell, frontmatter double → block. Third rigor
 # level, proving the INVALID guard fires UNCONDITIONALLY (a, b, c together
-# cover audited / tested / peer-reviewed).
+# cover double / single / double).
 h22d6c=$(make_home)
-write_plan "$h22d6c" "$(task_plan_rigor peer-reviewed "$v22d6_body")" > /dev/null
-expect_block "22d6c frontmatter peer-reviewed, non-addressed off-enum rigor cell → block (blocks at any rigor)" \
+write_plan "$h22d6c" "$(task_plan_rigor double "$v22d6_body")" > /dev/null
+expect_block "22d6c frontmatter double, non-addressed off-enum rigor cell → block (blocks at any rigor)" \
   "$h22d6c" 'git commit -m "x"' "invalid rigor"
 
-# 22d6d — negative control: a VALID enum cell (peer-reviewed) on a non-addressed
-# done row, with proof-shaped + auditor evidence, frontmatter tested → allow.
+# 22d6d — negative control: a VALID enum cell (double) on a non-addressed
+# done row, with proof-shaped + auditor evidence, frontmatter single → allow.
 # The fix targets ONLY the INVALID sentinel; a well-formed heavier cell resolves
 # its lane and (evidence being proof-shaped + auditor-named) passes cleanly.
 v22d6d_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | double | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2800,12 +2800,12 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 12/12 auditor CONFIRMED
 - T2: fixed enum check, bash suite 12/12"
 h22d6d=$(make_home)
-write_plan "$h22d6d" "$(task_plan_rigor tested "$v22d6d_body")" > /dev/null
-expect_allow "22d6d control: valid peer-reviewed cell on non-addressed done row, proof+auditor evidence → allow (only INVALID blocks)" \
+write_plan "$h22d6d" "$(task_plan_rigor single "$v22d6d_body")" > /dev/null
+expect_allow "22d6d control: valid double cell on non-addressed done row, proof+auditor evidence → allow (only INVALID blocks)" \
   "$h22d6d" 'git commit -m "x"'
 
 # 22d6e — empty-cell control: an EMPTY rigor cell on a non-addressed done row
-# inherits the frontmatter rigor (tested, the floor), with honest one-line
+# inherits the frontmatter rigor (single, the floor), with honest one-line
 # evidence → allow. Empty ≠ INVALID: the empty cell resolves via inheritance,
 # not the malformation sentinel, so no structural block fires.
 v22d6e_body="## Tasks
@@ -2813,7 +2813,7 @@ v22d6e_body="## Tasks
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
 | T1 | bugfix |  | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2824,8 +2824,8 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: reproduced and fixed the boundary case
 - T2: fixed enum check, bash suite 12/12"
 h22d6e=$(make_home)
-write_plan "$h22d6e" "$(task_plan_rigor tested "$v22d6e_body")" > /dev/null
-expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
+write_plan "$h22d6e" "$(task_plan_rigor single "$v22d6e_body")" > /dev/null
+expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits single floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6e" 'git commit -m "x"'
 
 # 22d6f/g/h — task 4/7 closes the residual left by 4/6: an off-enum rigor cell
@@ -2844,14 +2844,14 @@ expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits
 # done claim are not over-blocked).
 
 # 22d6f — non-addressed ACTIVE row with an off-enum rigor cell 'reviewed',
-# frontmatter tested, addressed unit T2 honest → block. Pre-4/7 this passed
+# frontmatter single, addressed unit T2 honest → block. Pre-4/7 this passed
 # silently (the active branch never resolves the cell).
 v22d6f_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
 | T1 | bugfix | reviewed | fix the frontmatter parser | active |
-| T2 | bugfix | tested | fix enum | active |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2862,12 +2862,12 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: reworking the parser
 - T2: fixed enum check, bash suite 12/12"
 h22d6f=$(make_home)
-write_plan "$h22d6f" "$(task_plan_rigor tested "$v22d6f_body")" > /dev/null
-expect_block "22d6f frontmatter tested, non-addressed ACTIVE off-enum rigor cell → block (INVALID blocks regardless of status)" \
+write_plan "$h22d6f" "$(task_plan_rigor single "$v22d6f_body")" > /dev/null
+expect_block "22d6f frontmatter single, non-addressed ACTIVE off-enum rigor cell → block (INVALID blocks regardless of status)" \
   "$h22d6f" 'git commit -m "x"' "invalid rigor"
 
 # 22d6g — non-addressed PENDING row with an off-enum rigor cell, frontmatter
-# peer-reviewed, addressed unit T2 honest → block. Pending rows carry no
+# double, addressed unit T2 honest → block. Pending rows carry no
 # evidence line, so pre-4/7 the whole row was skipped and the bad cell never
 # surfaced.
 v22d6g_body="## Tasks
@@ -2875,7 +2875,7 @@ v22d6g_body="## Tasks
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
 | T1 | bugfix | reviewed | fix the frontmatter parser | pending |
-| T2 | bugfix | tested | fix enum | active |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2885,20 +2885,20 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T2: fixed enum check, bash suite 12/12"
 h22d6g=$(make_home)
-write_plan "$h22d6g" "$(task_plan_rigor peer-reviewed "$v22d6g_body")" > /dev/null
-expect_block "22d6g frontmatter peer-reviewed, non-addressed PENDING off-enum rigor cell → block (INVALID blocks even on a pending row)" \
+write_plan "$h22d6g" "$(task_plan_rigor double "$v22d6g_body")" > /dev/null
+expect_block "22d6g frontmatter double, non-addressed PENDING off-enum rigor cell → block (INVALID blocks even on a pending row)" \
   "$h22d6g" 'git commit -m "x"' "invalid rigor"
 
 # 22d6h — negative control: non-addressed ACTIVE row with an EMPTY rigor cell,
-# honest evidence, frontmatter tested → allow. The empty cell inherits the
-# frontmatter (tested, the floor); empty ≠ INVALID, so the per-row guard does
+# honest evidence, frontmatter single → allow. The empty cell inherits the
+# frontmatter (single, the floor); empty ≠ INVALID, so the per-row guard does
 # not fire and an active row without a done claim is not over-blocked.
 v22d6h_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
 | T1 | bugfix |  | fix the frontmatter parser | active |
-| T2 | bugfix | tested | fix enum | active |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2909,8 +2909,8 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: reworking the parser
 - T2: fixed enum check, bash suite 12/12"
 h22d6h=$(make_home)
-write_plan "$h22d6h" "$(task_plan_rigor tested "$v22d6h_body")" > /dev/null
-expect_allow "22d6h control: empty rigor cell on non-addressed active row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
+write_plan "$h22d6h" "$(task_plan_rigor single "$v22d6h_body")" > /dev/null
+expect_allow "22d6h control: empty rigor cell on non-addressed active row inherits single floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6h" 'git commit -m "x"'
 
 # ---- 22f: row rigor is a FLOOR — downgrade blocks unless waived (task 4/8) --
@@ -2929,15 +2929,15 @@ expect_allow "22d6h control: empty rigor cell on non-addressed active row inheri
 
 section "Section 22f: row rigor is a floor — downgrade blocks unless waived"
 
-# 22f1 — frontmatter audited, ADDRESSED row cell tested (downgrade), real
+# 22f1 — frontmatter double, ADDRESSED row cell single (downgrade), real
 # non-placeholder prose evidence, NO waiver → block. This is the critic's F1
-# repro: under the pre-A15 model the tested cell "won" downward and this
+# repro: under the pre-A15 model the single cell "won" downward and this
 # allowed; the floor rule flips it to a block.
 v22f1_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2948,16 +2948,16 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: reproduced and fixed the boundary case"
 h22f1=$(make_home)
 write_plan "$h22f1" "$(task_plan "$v22f1_body")" > /dev/null
-expect_block "22f1 audited frontmatter, addressed tested cell (downgrade), no waiver → block" \
+expect_block "22f1 double frontmatter, addressed single cell (downgrade), no waiver → block" \
   "$h22f1" 'git commit -m "x"' "lowers rigor"
 
 # 22f2 — same, but the `- T1:` line carries a Waiver-Protocol marker → allow
-# (recorded downgrade; runs at the tested lane so the prose evidence is fine).
+# (recorded downgrade; runs at the single lane so the prose evidence is fine).
 v22f2_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -2968,17 +2968,17 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: reproduced and fixed the boundary case, waiver: dana 2026-07-19 genuine bugfix"
 h22f2=$(make_home)
 write_plan "$h22f2" "$(task_plan "$v22f2_body")" > /dev/null
-expect_allow "22f2 audited frontmatter, addressed tested cell + waiver → allow (recorded downgrade)" \
+expect_allow "22f2 double frontmatter, addressed single cell + waiver → allow (recorded downgrade)" \
   "$h22f2" 'git commit -m "x"'
 
-# 22f3 — frontmatter tested, addressed row cell audited (RAISE), done, evidence
+# 22f3 — frontmatter single, addressed row cell double (RAISE), done, evidence
 # proof-shaped + auditor + critic → allow. Raising above the floor is always
-# free; the cell drives the heavier (audited) lane.
+# free; the cell drives the heavier (double) lane.
 v22f3_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix enum | done |
+| T1 | bugfix | double | fix enum | done |
 
 ## SDLC State
 
@@ -2988,17 +2988,17 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking"
 h22f3=$(make_home)
-write_plan "$h22f3" "$(task_plan_rigor tested "$v22f3_body")" > /dev/null
-expect_allow "22f3 tested frontmatter, addressed audited cell (raise), proof+auditor+critic → allow" \
+write_plan "$h22f3" "$(task_plan_rigor single "$v22f3_body")" > /dev/null
+expect_allow "22f3 single frontmatter, addressed double cell (raise), proof+auditor+critic → allow" \
   "$h22f3" 'git commit -m "x"'
 
-# 22f4 — frontmatter peer-reviewed, addressed row cell tested (downgrade). No
-# waiver → block; with waiver → allow (runs at the tested lane).
+# 22f4 — frontmatter double, addressed row cell single (downgrade). No
+# waiver → block; with waiver → allow (runs at the single lane).
 v22f4_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -3008,15 +3008,15 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: fixed it by hand"
 h22f4a=$(make_home)
-write_plan "$h22f4a" "$(task_plan_rigor peer-reviewed "$v22f4_body")" > /dev/null
-expect_block "22f4a peer-reviewed frontmatter, addressed tested cell (downgrade), no waiver → block" \
+write_plan "$h22f4a" "$(task_plan_rigor double "$v22f4_body")" > /dev/null
+expect_block "22f4a double frontmatter, addressed single cell (downgrade), no waiver → block" \
   "$h22f4a" 'git commit -m "x"' "lowers rigor"
 
 v22f4b_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -3026,18 +3026,18 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 - T1: fixed it by hand, waiver: dana 2026-07-19 quick bugfix"
 h22f4b=$(make_home)
-write_plan "$h22f4b" "$(task_plan_rigor peer-reviewed "$v22f4b_body")" > /dev/null
-expect_allow "22f4b peer-reviewed frontmatter, addressed tested cell + waiver → allow" \
+write_plan "$h22f4b" "$(task_plan_rigor double "$v22f4b_body")" > /dev/null
+expect_allow "22f4b double frontmatter, addressed single cell + waiver → allow" \
   "$h22f4b" 'git commit -m "x"'
 
-# 22f5 — frontmatter audited, addressed row cell audited (EQUAL, no downgrade),
+# 22f5 — frontmatter double, addressed row cell double (EQUAL, no downgrade),
 # done, proper evidence → allow. The floor comparison is strict-less-than, so an
 # equal cell is never a downgrade.
 v22f5_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix enum | done |
+| T1 | bugfix | double | fix enum | done |
 
 ## SDLC State
 
@@ -3048,19 +3048,19 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking"
 h22f5=$(make_home)
 write_plan "$h22f5" "$(task_plan "$v22f5_body")" > /dev/null
-expect_allow "22f5 audited frontmatter, addressed audited cell (equal) → allow (no downgrade)" \
+expect_allow "22f5 double frontmatter, addressed double cell (equal) → allow (no downgrade)" \
   "$h22f5" 'git commit -m "x"'
 
-# 22f6 — NON-addressed done row (T1) at frontmatter audited with cell
-# peer-reviewed (downgrade). Addressed unit T2 is honest and non-downgrade
-# (cell audited). No waiver on T1 → block; with a waiver on T1 → allow (T1 runs
-# at the peer-reviewed lane, so its proof-shaped + auditor evidence suffices).
+# 22f6 — NON-addressed done row (T1) at frontmatter double with cell
+# single (downgrade). Addressed unit T2 is honest and non-downgrade
+# (cell double). No waiver on T1 → block; with a waiver on T1 → allow (T1 runs
+# at the single lane, so its evidence suffices).
 v22f6_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | peer-reviewed | fix the parser | done |
-| T2 | build | audited | fix enum | active |
+| T1 | bugfix | single | fix the parser | done |
+| T2 | build | double | fix enum | active |
 
 ## SDLC State
 
@@ -3072,15 +3072,15 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T2: bash suite 12/12 green"
 h22f6a=$(make_home)
 write_plan "$h22f6a" "$(task_plan "$v22f6_body")" > /dev/null
-expect_block "22f6a audited frontmatter, non-addressed done peer-reviewed cell (downgrade), no waiver → block" \
+expect_block "22f6a double frontmatter, non-addressed done single cell (downgrade), no waiver → block" \
   "$h22f6a" 'git commit -m "x"' "lowers rigor"
 
 v22f6b_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | peer-reviewed | fix the parser | done |
-| T2 | build | audited | fix enum | active |
+| T1 | bugfix | single | fix the parser | done |
+| T2 | build | double | fix enum | active |
 
 ## SDLC State
 
@@ -3088,14 +3088,14 @@ scale: task
 current: T2
 approved-by: fixture 2026-09-07T00:00Z "approved"
 
-- T1: bash test.sh 9/9 auditor CONFIRMED, waiver: dana 2026-07-19 scoped down to peer-reviewed
+- T1: bash test.sh 9/9 auditor CONFIRMED, waiver: dana 2026-07-19 scoped down to single
 - T2: bash suite 12/12 green"
 h22f6b=$(make_home)
 write_plan "$h22f6b" "$(task_plan "$v22f6b_body")" > /dev/null
-expect_allow "22f6b same, waiver on the non-addressed done row → allow (runs at peer-reviewed lane)" \
+expect_allow "22f6b same, waiver on the non-addressed done row → allow (runs at single lane)" \
   "$h22f6b" 'git commit -m "x"'
 
-# 22f7 (F3 word-boundary) — audited addressed done row whose evidence contains
+# 22f7 (F3 word-boundary) — double addressed done row whose evidence contains
 # `critical` (which embeds the substring `critic`) and `auditor CONFIRMED` but
 # NO standalone `critic` token → block on the critic lane. Under the pre-fix
 # unanchored `grep -q "critic"` the `critical` substring satisfied the lane and
@@ -3105,7 +3105,7 @@ v22f7a_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix the parser | done |
+| T1 | bugfix | double | fix the parser | done |
 
 ## SDLC State
 
@@ -3118,14 +3118,14 @@ h22f7a=$(make_home)
 write_plan "$h22f7a" "$(task_plan "$v22f7a_body")" > /dev/null
 # ADR-033 moved the word-boundary pin to 25gT(k), which runs this same `critical` evidence at
 # `current: 6`; at `current: T1` there is no verdict yet for a word to be matched in.
-expect_allow "22f7a audited done row, 'critical', at current: T1 → allow (step-gated; 25gT(k) is the word-boundary pin)" \
+expect_allow "22f7a double done row, 'critical', at current: T1 → allow (step-gated; 25gT(k) is the word-boundary pin)" \
   "$h22f7a" 'git commit -m "x"' 
 
 v22f7b_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | audited | fix the parser | done |
+| T1 | bugfix | double | fix the parser | done |
 
 ## SDLC State
 
@@ -3158,7 +3158,7 @@ versioned_plan() {  # $1 = the canonical_sdlc_version value to declare
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
   printf -- 'canonical_sdlc_version: %s\n' "$1"
-  printf -- 'intent: build\nrigor: tested\nscale: wave\n'
+  printf -- 'intent: build\nrigor: single\nscale: wave\n'
   printf -- '---\n'
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
@@ -3176,7 +3176,7 @@ h23none=$(make_home)
 write_plan "$h23none" "---
 governing-skill: canonical-sdlc
 intent: build
-rigor: tested
+rigor: single
 scale: wave
 ---
 ## SDLC State
@@ -3410,7 +3410,7 @@ section "Section 25: one root per repo across both hooks (worktrees)"
 
 s25_plan() {  # a canonical plan whose current step evidence is a placeholder
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf -- 'intent: build\nrigor: tested\nscale: wave\n'
+  printf -- 'intent: build\nrigor: single\nscale: wave\n'
   printf -- 'deploy_target: none\nuse_worktree: true\nhas_ui: false\n---\n'
   printf -- '## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-07T00:00Z approved\nStep 5: TODO\n'
 }
@@ -3459,7 +3459,7 @@ s25_wt2="$s25_tmp2/wt"
 engage "$s25_main2"
 s25_marked_plan_body() {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: single\nscale: wave\n---\n'
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 s25_marked_plan_body > "$s25_main2/notes/rogue.plan.md"
@@ -3510,7 +3510,7 @@ epic: epic-01-demo
 wave: wave-01-x
 canonical_sdlc_version: 14
 intent: build
-rigor: tested
+rigor: single
 scale: wave
 cleanup_on_finish: true
 use_worktree: true
@@ -4532,19 +4532,19 @@ git -C "$s25t_main" worktree add -q "$s25t_main/.worktrees/18-T1" -b s25t-t1 2>/
 s25t_wt="$s25t_main/.worktrees/18-T1"
 
 # $1 current:  $2 T1's status  $3 T1's evidence (empty => the `- T1:` line is OMITTED)
-# $4 T1's rigor CELL (default audited)  $5 the FRONTMATTER rigor (default audited).
+# $4 T1's rigor CELL (default double)  $5 the FRONTMATTER rigor (default double).
 # The Step-5 block is deliberately NOT green (331 of 332), so a main-root commit at
 # `current: 5` is still refused by the run's own Verify arm — 25gT(c) is that control, and
 # it is what makes 25gT(b) a discrimination rather than a fixture that admits everything.
 # The two rigor parameters are what let 25gT(i)-(l) carry the lane discriminations that used
 # to live at `current: T<n>` (22b3/22b5, 22d5b, 22f7a, 32k) to the step where the lanes fire.
 s25t_plan() {
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: %s\nscale: task\ndeploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n' "${5:-audited}"
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: %s\nscale: task\ndeploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n' "${5:-double}"
   printf '# plan\n\n## Tasks\n\n'
   printf '| id | intent | rigor | description | status | worktree |\n'
   printf '|---|---|---|---|---|---|\n'
-  printf '| T1 | build | %s | the row that owns the tree | %s | 18-T1 |\n' "${4:-audited}" "$2"
-  printf '| T2 | build | audited | the row after it | pending | — |\n\n'
+  printf '| T1 | build | %s | the row that owns the tree | %s | 18-T1 |\n' "${4:-double}" "$2"
+  printf '| T2 | build | double | the row after it | pending | — |\n\n'
   printf '## SDLC State\n\ncurrent: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
   printf 'Step 5:\n  cmd: bash tests/run.sh\n  pass: 331\n  total: 332\n  output: .bionic/docs/plans/task-01-x.plan.md#step-5\n  auditor: 1 row CONFIRMED — report .bionic/tmp/audit.md\n'
   if [ -n "${3:-}" ]; then printf -- '\n- T1: %s\n' "$3"; fi
@@ -4625,7 +4625,7 @@ else
 fi
 
 # --- 25gT(g) / AC-1.3: with a reading of each question the same commit is admitted ----------
-s25t_write 6 done 'bash tests/run.sh 31/31 green' audited audited "$S25T_READ"
+s25t_write 6 done 'bash tests/run.sh 31/31 green' double double "$S25T_READ"
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] \
    && [ "$HOOK_STDERR" = "evidence-gate: judged by row T1's task arms (run at current: 6)" ]; then
@@ -4647,25 +4647,25 @@ fi
 
 # --- 25gT(i)-(l), REWRITTEN BY wave-27 T14 (D3): THE LANE AT THE ROW'S EFFECTIVE RIGOR -------
 #
-# What these pinned before wave-27 (a peer-reviewed lane owes an auditor word, an audited lane a
+# What these pinned before wave-27 (a two-reader lane owes an auditor word, a three-reader lane a
 # critic word, `critical` is not `critic`) went with the word match. What stands is that the lane
 # is keyed to the row's EFFECTIVE rigor and judged on readings: the refusal names that rigor, a
 # reading of each question admits, and the newest reading decides, a later waiver over it.
 
-# (i) THE CELL DRIVES THE LANE, NOT THE FRONTMATTER (22b3, 32k): a `tested` plan whose row
-# RAISES itself to peer-reviewed is judged at peer-reviewed.
-s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED' peer-reviewed tested
+# (i) THE CELL DRIVES THE LANE, NOT THE FRONTMATTER (22b3, 32k): a `single` plan whose row
+# RAISES itself to double is judged at double.
+s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED' double single
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-# The refusal names the level by its new word since wave-28 T44 (AC-16.2): peer-reviewed is medium.
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "at review rigor medium" <<<"$HOOK_VSTDERR"; then
-  ok "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6"
+# The refusal names the level by its word (wave-28 T44; wave-30 T11): double.
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "at review rigor double" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(i) a single plan's row RAISED to double is judged at double, and with no reading refused at current: 6"
 else
-  no "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6" \
-    "expected a block naming peer-reviewed; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25gT(i) a single plan's row RAISED to double is judged at double, and with no reading refused at current: 6" \
+    "expected a block naming double; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # (j) …and with a reading of each question it is admitted.
-s25t_write 6 done 'bash tests/run.sh 31/31 green' peer-reviewed tested "$S25T_READ"
+s25t_write 6 done 'bash tests/run.sh 31/31 green' double single "$S25T_READ"
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ]; then
   ok "25gT(j) …and with a reading of each question it is admitted"
@@ -4676,20 +4676,20 @@ fi
 
 # (k) THE NEWEST READING DECIDES: a structure reading that fails after one that flagged refuses,
 # naming structure and the failing line's evidence.
-s25t_write 6 done 'bash tests/run.sh 31/31 green' audited tested "$S25T_READ
+s25t_write 6 done 'bash tests/run.sh 31/31 green' double single "$S25T_READ
 $(s25t_reading structure fail)"
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] \
    && grep -q -- "- structure: the newest reading is result=fail (evidence=record/w27/structure-fail.md)" <<<"$HOOK_VSTDERR"; then
-  ok "25gT(k) the newest structure reading is result=fail: the audited cell's lane refuses at current: 6, naming it"
+  ok "25gT(k) the newest structure reading is result=fail: the double cell's lane refuses at current: 6, naming it"
 else
-  no "25gT(k) the newest structure reading is result=fail: the audited cell's lane refuses at current: 6, naming it" \
+  no "25gT(k) the newest structure reading is result=fail: the double cell's lane refuses at current: 6, naming it" \
     "expected a block naming structure; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # (l) …and a waiver later than it admits, so (k) is the order and not a fixture that refuses
 # everything.
-s25t_write 6 done 'bash tests/run.sh 31/31 green' audited tested "$S25T_READ
+s25t_write 6 done 'bash tests/run.sh 31/31 green' double single "$S25T_READ
 $(s25t_reading structure fail)
 waived: question=structure head=$s25t_head by fixture 2026-10-04T13:00:00Z \"ship it\""
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
@@ -4724,13 +4724,13 @@ fi
 section "Section 26: walk-artifact arm"
 
 # $1 = a full `walk:` frontmatter line, or empty for THE KEY IS ABSENT (the
-# fail-closed case). Otherwise the Section-17 shape: audited wave, no
+# fail-closed case). Otherwise the Section-17 shape: double wave, no
 # multi_agent key, so the dispatch-ledger machinery stays out of the way.
 walk_frontmatter() {
   local walk_line="${1:-}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf -- 'intent: build\nrigor: audited\nscale: wave\n'
+  printf -- 'intent: build\nrigor: double\nscale: wave\n'
   printf -- 'deploy_target: none\nuse_worktree: false\nhas_ui: true\n'
   if [ -n "$walk_line" ]; then
     printf -- '%s\n' "$walk_line"

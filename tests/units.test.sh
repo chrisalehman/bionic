@@ -101,9 +101,9 @@ cat > "$SANDBOX/tasks-table.md" <<'TASKS_TABLE_EOF'
 | T13 | 5 | verify | Walk: an agent that has not read the ACs drives the candidate by plugin-dir in a throwaway project and narrates; record/wave-11-lean-spine/walk.md | researcher | T2, T4, T5, T6, T8, T12, T22 | 30m | all | record/wave-11-lean-spine/walk.md | pending |
 | T14 | 5 | test | Tests floor: bash tests/run.sh in the wave worktree; census commands re-run; evidence/floor.md | test-runner | T2, T4, T5, T6, T8, T12, T22 | 40m | all | record/wave-11-lean-spine/evidence/floor.md | pending |
 | T15 | 5 | verify | Discharge the matrix: 22 static pins, 12 hermetic rows, 6 live drives; one evidence file per AC | orchestrator | T13, T14 | 90m | all | record/wave-11-lean-spine/evidence/ | pending |
-| T16 | 5 | verify | Auditor on the REQ-1e and REQ-1f rows (audited) and the wave verdict | auditor | T15 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/auditor.md | pending |
+| T16 | 5 | verify | Auditor on the REQ-1e and REQ-1f rows (double) and the wave verdict | auditor | T15 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/auditor.md | pending |
 | T17 | 6 | review | Six-axis self-review, one reviewer per axis in parallel at exec-complex | orchestrator | T16 | 45m | all | record/wave-11-lean-spine/review/ | pending |
-| T18 | 6 | review | Critic on T7–T12 (audited rows) | critic | T17 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/critic.md | pending |
+| T18 | 6 | review | Critic on T7–T12 (double rows) | critic | T17 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/critic.md | pending |
 | T19 | 7 | doc | ADRs 001–004; spec adrs: pointer | orchestrator | T18 | 30m | D1, D3, D4, D5 | adrs/epic-23-bionic-tech-debt/ | pending |
 | T20 | 8 | integrate | Wake Note, then attended no-ff merge to main; writer worktrees and the wave worktree removed; tmp ephemera wiped | orchestrator | T19 | 20m | all | none | pending |
 | T22 | 4 | build | 1g: fix the doctor/setup agreement on the `motion` row so DS.2a/2c/9/11 pass on this machine; honour the 2026-08-22 ruling | senior-implementor | T1 | 60m | REQ-1g | payload/scripts/lib/deps.sh, payload/scripts/doctor.sh, payload/scripts/setup.sh, tests/cross-gate-agreement.test.sh | landed |
@@ -348,8 +348,8 @@ current: T2
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | refactor | peer-reviewed | extract the ledger helper | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | refactor | double | extract the ledger helper | active |
 | T3 | refactor |  | inherits the frontmatter rigor | pending |
 TASK_SCALE_EOF
 
@@ -361,9 +361,9 @@ T2 active
 T3 pending" \
   "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ print $1, $10 }')"
 expect_eq "…and the rigor cell reaches slot 3, which the wave schema calls kind" \
-  "[tested][peer-reviewed][]" \
+  "[single][double][]" \
   "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ printf "[%s]", $3 }')"
-expect_eq "units_field takes that cell by either name" "peer-reviewed peer-reviewed" \
+expect_eq "units_field takes that cell by either name" "double double" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
      row="$(units_rows "$2" | sed -n 2p)"
      printf "%s %s" "$(units_field "$row" rigor)" "$(units_field "$row" kind)"' \
@@ -1453,7 +1453,7 @@ cat > "$SANDBOX/task-scale.md" <<'TASK_SCALE_EOF'
 |---|---|---|---|---|---|
 | T1 | bugfix | standard | the first unit | done | — |
 | T2 | bugfix | standard | the second unit | pending | — |
-| T3 | bugfix | audited | the third unit | pending | — |
+| T3 | bugfix | double | the third unit | pending | — |
 | T4 | bugfix | standard | a unit already in flight | active | 18-T4 |
 | T5 | bugfix | standard | a dropped unit | dropped | — |
 TASK_SCALE_EOF
@@ -2088,10 +2088,10 @@ cat > "$SANDBOX/ledger-task.md" <<'LEDGERT_EOF'
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | tested | done with its line | done |
-| T2 | build | tested | done, no line | done |
-| T3 | build | tested | landed is not a task-scale word | landed |
-| T4 | build | tested | active, self-owned | active |
+| T1 | build | single | done with its line | done |
+| T2 | build | single | done, no line | done |
+| T3 | build | single | landed is not a task-scale word | landed |
+| T4 | build | single | active, self-owned | active |
 
 ## SDLC State
 
@@ -2704,8 +2704,9 @@ section "LIVE-Q — wave-27 T10: a chain per question; each read row is offered 
 # range and its return to pending are per question: the last proof it compares against is the
 # last reading of each of ITS questions (`question=<q>` on the proof line), and its range starts
 # at the oldest of those. A plan carries one read row per reader the rigor deals — one at
-# `tested` (the critic holds all three), two at `peer-reviewed`, three at `audited` — and AC-1.5
-# asks that the timing be the same at each: one landing makes every dealt row ready.
+# `single` (the critic holds all three), two at `double` (wave-30 T11, D1) — and AC-1.5 asks that
+# the timing be the same at each: one landing makes every dealt row ready. A third plan splits
+# every question to its own row, which no level deals but a plan may carry: the mechanics hold.
 # FIXTURE FIDELITY: SYNTHESIZED tables and proof lines in the shape lib/proof.sh `proof_line`
 # writes (wave-27 T2); the heads are fixed hex and the head now is handed in, as the tick does.
 #
@@ -2763,89 +2764,89 @@ expect_eq "LIVEQ.CTL5 a bare live row waits while any review row is active, a re
   "$(printf '%s %s' "$(has_line "$(live_call "$LQ_B" units_ready "$LQR/lq-ctl-busy.md" 4)" T3)" \
      "$(has_line "$(live_call "$LQ_B" units_waiting "$LQR/lq-ctl-busy.md" 4)" "T3${TAB}live:head: review T5 is open (active)${TAB}-${TAB}-")")"
 
-# THE THREE DEALINGS. `tested`: T3 reads all three. `peer-reviewed`: T3 evidence (the auditor),
-# T4 adversarial and structure (the critic). `audited`: T3, T4, T5, one question each.
-LQ_TESTED="$(lq_row T3 'the critic, all three' 'approval:plan, live:head:evidence+adversarial+structure')"
-LQ_PEER_E="$(lq_row T3 'the auditor' 'approval:plan, live:head:evidence')"
-LQ_PEER_AS="$(lq_row T4 'the critic' 'approval:plan, live:head:adversarial+structure')"
-LQ_AUD_A="$(lq_row T4 'the critic' 'approval:plan, live:head:adversarial')"
-LQ_AUD_S="$(lq_row T5 'the reviewer' 'approval:plan, live:head:structure')"
+# THE TWO DEALINGS AND A SPLIT. `single`: T3 reads all three. `double`: T3 evidence (the
+# auditor), T4 adversarial and structure (the critic). The split: T3, T4, T5, one question each.
+LQ_SINGLE="$(lq_row T3 'the critic, all three' 'approval:plan, live:head:evidence+adversarial+structure')"
+LQ_DOUBLE_E="$(lq_row T3 'the auditor' 'approval:plan, live:head:evidence')"
+LQ_DOUBLE_AS="$(lq_row T4 'the critic' 'approval:plan, live:head:adversarial+structure')"
+LQ_SPLIT_A="$(lq_row T4 'the critic' 'approval:plan, live:head:adversarial')"
+LQ_SPLIT_S="$(lq_row T5 'the critic, structure alone' 'approval:plan, live:head:structure')"
 # PHASE 1: every question last read at C, in the order adversarial, structure, evidence.
 LQ_P1="$(lq_read adversarial "$LQ_C" 01)
 $(lq_read structure "$LQ_C" 02)
 $(lq_read evidence "$LQ_C" 03)"
-lv_plan "$LQR/lq-tested.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_TESTED"
-lv_plan "$LQR/lq-peer.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_PEER_E" "$LQ_PEER_AS"
-lv_plan "$LQR/lq-aud.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_PEER_E" "$LQ_AUD_A" "$LQ_AUD_S"
+lv_plan "$LQR/lq-single.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_SINGLE"
+lv_plan "$LQR/lq-double.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "$LQ_DOUBLE_AS"
+lv_plan "$LQR/lq-split.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "$LQ_SPLIT_A" "$LQ_SPLIT_S"
 expect_eq "LIVEQ.0 precondition: the three fixtures are valid plans" "||" \
-  "$(call units_validate "$LQR/lq-tested.md")|$(call units_validate "$LQR/lq-peer.md")|$(call units_validate "$LQR/lq-aud.md")"
+  "$(call units_validate "$LQR/lq-single.md")|$(call units_validate "$LQR/lq-double.md")|$(call units_validate "$LQR/lq-split.md")"
 # lq_ready_ids <head> <plan> -> the ready read rows, space-joined
 lq_ready_ids() { live_call "$1" units_ready "$2" 4 | awk '/^T[345]$/' | tr '\n' ' ' | sed 's/ $//'; }
-expect_eq "LIVEQ.1 AC-1.5 at the head every question was read at, no read row is ready — tested, peer-reviewed, audited" "||" \
-  "$(lq_ready_ids "$LQ_C" "$LQR/lq-tested.md")|$(lq_ready_ids "$LQ_C" "$LQR/lq-peer.md")|$(lq_ready_ids "$LQ_C" "$LQR/lq-aud.md")"
+expect_eq "LIVEQ.1 AC-1.5 at the head every question was read at, no read row is ready — single, double, split" "||" \
+  "$(lq_ready_ids "$LQ_C" "$LQR/lq-single.md")|$(lq_ready_ids "$LQ_C" "$LQR/lq-double.md")|$(lq_ready_ids "$LQ_C" "$LQR/lq-split.md")"
 expect_eq "LIVEQ.1b …and each waits naming its own questions and the head" "yes yes yes" \
-  "$(W="$(live_call "$LQ_C" units_waiting "$LQR/lq-aud.md" 4)"; printf '%s %s %s' \
+  "$(W="$(live_call "$LQ_C" units_waiting "$LQR/lq-split.md" 4)"; printf '%s %s %s' \
      "$(has_line "$W" "T3${TAB}live:head:evidence: nothing landed past the evidence review proof at ${LQ_C:0:12}${TAB}-${TAB}-")" \
      "$(has_line "$W" "T4${TAB}live:head:adversarial: nothing landed past the adversarial review proof at ${LQ_C:0:12}${TAB}-${TAB}-")" \
      "$(has_line "$W" "T5${TAB}live:head:structure: nothing landed past the structure review proof at ${LQ_C:0:12}${TAB}-${TAB}-")")"
-expect_eq "LIVEQ.2 AC-1.5 one landing (head D) makes every dealt read row ready at once — tested, peer-reviewed, audited" "T3|T3 T4|T3 T4 T5" \
-  "$(lq_ready_ids "$LQ_D" "$LQR/lq-tested.md")|$(lq_ready_ids "$LQ_D" "$LQR/lq-peer.md")|$(lq_ready_ids "$LQ_D" "$LQR/lq-aud.md")"
+expect_eq "LIVEQ.2 AC-1.5 one landing (head D) makes every dealt read row ready at once — single, double, split" "T3|T3 T4|T3 T4 T5" \
+  "$(lq_ready_ids "$LQ_D" "$LQR/lq-single.md")|$(lq_ready_ids "$LQ_D" "$LQR/lq-double.md")|$(lq_ready_ids "$LQ_D" "$LQR/lq-split.md")"
 expect_eq "LIVEQ.2b …each with its own range, C..D" "${LQ_C}..${LQ_D}|${LQ_C}..${LQ_D} ${LQ_C}..${LQ_D}|${LQ_C}..${LQ_D} ${LQ_C}..${LQ_D} ${LQ_C}..${LQ_D}" \
-  "$(lq_range "$LQ_D" "$LQR/lq-tested.md" T3)|$(lq_range "$LQ_D" "$LQR/lq-peer.md" T3) $(lq_range "$LQ_D" "$LQR/lq-peer.md" T4)|$(lq_range "$LQ_D" "$LQR/lq-aud.md" T3) $(lq_range "$LQ_D" "$LQR/lq-aud.md" T4) $(lq_range "$LQ_D" "$LQR/lq-aud.md" T5)"
+  "$(lq_range "$LQ_D" "$LQR/lq-single.md" T3)|$(lq_range "$LQ_D" "$LQR/lq-double.md" T3) $(lq_range "$LQ_D" "$LQR/lq-double.md" T4)|$(lq_range "$LQ_D" "$LQR/lq-split.md" T3) $(lq_range "$LQ_D" "$LQR/lq-split.md" T4) $(lq_range "$LQ_D" "$LQR/lq-split.md" T5)"
 
 # PHASE 2: the questions were last read at different heads — adversarial at A, structure at B,
 # evidence at C — so each row's range starts at the OLDEST last head among its own questions.
 LQ_P2="$(lq_read adversarial "$LQ_A" 01)
 $(lq_read structure "$LQ_B" 02)
 $(lq_read evidence "$LQ_C" 03)"
-lv_plan "$LQR/lq2-tested.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_TESTED"
-lv_plan "$LQR/lq2-peer.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_PEER_E" "$LQ_PEER_AS"
-lv_plan "$LQR/lq2-aud.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_PEER_E" "$LQ_AUD_A" "$LQ_AUD_S"
-expect_eq "LIVEQ.3 each row's range starts at the oldest last head among its questions (tested: A; peer: C, A; audited: C, A, B)" \
+lv_plan "$LQR/lq2-single.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_SINGLE"
+lv_plan "$LQR/lq2-double.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "$LQ_DOUBLE_AS"
+lv_plan "$LQR/lq2-split.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "$LQ_SPLIT_A" "$LQ_SPLIT_S"
+expect_eq "LIVEQ.3 each row's range starts at the oldest last head among its questions (single: A; double: C, A; split: C, A, B)" \
   "${LQ_A}..${LQ_D}|${LQ_C}..${LQ_D} ${LQ_A}..${LQ_D}|${LQ_C}..${LQ_D} ${LQ_A}..${LQ_D} ${LQ_B}..${LQ_D}" \
-  "$(lq_range "$LQ_D" "$LQR/lq2-tested.md" T3)|$(lq_range "$LQ_D" "$LQR/lq2-peer.md" T3) $(lq_range "$LQ_D" "$LQR/lq2-peer.md" T4)|$(lq_range "$LQ_D" "$LQR/lq2-aud.md" T3) $(lq_range "$LQ_D" "$LQR/lq2-aud.md" T4) $(lq_range "$LQ_D" "$LQR/lq2-aud.md" T5)"
+  "$(lq_range "$LQ_D" "$LQR/lq2-single.md" T3)|$(lq_range "$LQ_D" "$LQR/lq2-double.md" T3) $(lq_range "$LQ_D" "$LQR/lq2-double.md" T4)|$(lq_range "$LQ_D" "$LQR/lq2-split.md" T3) $(lq_range "$LQ_D" "$LQR/lq2-split.md" T4) $(lq_range "$LQ_D" "$LQR/lq2-split.md" T5)"
 expect_eq "LIVEQ.3b at head C only the rows with a question read before C are ready, each from its own start" \
   "T3|T4 ${LQ_A}..${LQ_C}|T4 T5 ${LQ_A}..${LQ_C} ${LQ_B}..${LQ_C}" \
-  "$(lq_ready_ids "$LQ_C" "$LQR/lq2-tested.md")|$(lq_ready_ids "$LQ_C" "$LQR/lq2-peer.md") $(lq_range "$LQ_C" "$LQR/lq2-peer.md" T4)|$(lq_ready_ids "$LQ_C" "$LQR/lq2-aud.md") $(lq_range "$LQ_C" "$LQR/lq2-aud.md" T4) $(lq_range "$LQ_C" "$LQR/lq2-aud.md" T5)"
-expect_eq "LIVEQ.3c …and the idle evidence row prints no range at C" "" "$(lq_range "$LQ_C" "$LQR/lq2-aud.md" T3)"
+  "$(lq_ready_ids "$LQ_C" "$LQR/lq2-single.md")|$(lq_ready_ids "$LQ_C" "$LQR/lq2-double.md") $(lq_range "$LQ_C" "$LQR/lq2-double.md" T4)|$(lq_ready_ids "$LQ_C" "$LQR/lq2-split.md") $(lq_range "$LQ_C" "$LQR/lq2-split.md" T4) $(lq_range "$LQ_C" "$LQR/lq2-split.md" T5)"
+expect_eq "LIVEQ.3c …and the idle evidence row prints no range at C" "" "$(lq_range "$LQ_C" "$LQR/lq2-split.md" T3)"
 expect_eq "LIVEQ.3d units_live_range with no row id keeps 1.11.0's one range, from the newest review line of any question" \
-  "${LQ_C}..${LQ_D}" "$(live_call "$LQ_D" units_live_range "$LQR/lq2-aud.md")"
+  "${LQ_C}..${LQ_D}" "$(live_call "$LQ_D" units_live_range "$LQR/lq2-split.md")"
 
 # STRICT KEYING (T2's A-T2.4): a 1.11.0 line carries no question and is no question's last proof.
 # A question never read starts at the base: its row is ready once a code row has landed, its
 # range prints nothing (the reader reads from the wave's base), and the head is not needed.
 lv_plan "$LQR/lq-first.md" "$(lv_proof "$LQ_A")
-$(lq_read adversarial "$LQ_B" 02)" "$LV_BUILD_LANDED" "$LQ_PEER_E" "$LQ_AUD_A"
+$(lq_read adversarial "$LQ_B" 02)" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "$LQ_SPLIT_A"
 expect_eq "LIVEQ.4 a question with no reading of its own (only a 1.11.0 line): ready at any head, no range" "yes yes |" \
   "$(has_line "$(live_call "$LQ_B" units_ready "$LQR/lq-first.md" 4)" T3) $(has_line "$(live_call "" units_ready "$LQR/lq-first.md" 4)" T3) |$(lq_range "$LQ_C" "$LQR/lq-first.md" T3)"
 expect_eq "LIVEQ.4b …beside the adversarial row on the same plan, idle at its own reading's head and ready past it" "no yes ${LQ_B}..${LQ_C}" \
   "$(has_line "$(live_call "$LQ_B" units_ready "$LQR/lq-first.md" 4)" T4) $(has_line "$(live_call "$LQ_C" units_ready "$LQR/lq-first.md" 4)" T4) $(lq_range "$LQ_C" "$LQR/lq-first.md" T4)"
-lv_plan "$LQR/lq-first-none.md" "" "${LV_BUILD_LANDED/| landed |/| pending |}" "$LQ_PEER_E"
+lv_plan "$LQR/lq-first-none.md" "" "${LV_BUILD_LANDED/| landed |/| pending |}" "$LQ_DOUBLE_E"
 expect_eq "LIVEQ.4c …and with nothing landed it waits, saying so" "no yes" \
   "$(has_line "$(call units_ready "$LQR/lq-first-none.md" 4)" T3) $(has_line "$(call units_waiting "$LQR/lq-first-none.md" 4)" "T3${TAB}live:head:evidence: nothing has landed yet${TAB}-${TAB}-")"
 expect_eq "LIVEQ.5 a reading and no head handed in: not ready, the wait names the question's unknown head" "no yes" \
-  "$(has_line "$(live_call "" units_ready "$LQR/lq-aud.md" 4)" T4) $(has_line "$(live_call "" units_waiting "$LQR/lq-aud.md" 4)" "T4${TAB}live:head:adversarial: the head past the adversarial review proof at ${LQ_C:0:12} is not known here${TAB}-${TAB}-")"
+  "$(has_line "$(live_call "" units_ready "$LQR/lq-split.md" 4)" T4) $(has_line "$(live_call "" units_waiting "$LQR/lq-split.md" 4)" "T4${TAB}live:head:adversarial: the head past the adversarial review proof at ${LQ_C:0:12} is not known here${TAB}-${TAB}-")"
 
 # EXCLUSIVITY IS PER QUESTION: an active read row holds a row that shares a question with it, and
 # not one that does not. Of two pending rows sharing a question, the higher goes first.
-lv_plan "$LQR/lq-busy.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_PEER_E" "${LQ_AUD_A/| pending |/| active |}" "$LQ_AUD_S" \
+lv_plan "$LQR/lq-busy.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "${LQ_SPLIT_A/| pending |/| active |}" "$LQ_SPLIT_S" \
   "$(lq_row T6 'a second adversarial read' 'approval:plan, live:head:adversarial+structure')"
 expect_eq "LIVEQ.6 an active adversarial row holds the row sharing it and leaves the evidence and structure rows ready" "T3 T5|no" \
   "$(lq_ready_ids "$LQ_D" "$LQR/lq-busy.md")|$(has_line "$(live_call "$LQ_D" units_ready "$LQR/lq-busy.md" 4)" T6)"
 expect_eq "LIVEQ.6b …the wait names the open row" "yes" \
   "$(has_line "$(live_call "$LQ_D" units_waiting "$LQR/lq-busy.md" 4)" "T6${TAB}live:head:adversarial+structure: review T4 is open (active)${TAB}-${TAB}-")"
-lv_plan "$LQR/lq-two.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_PEER_E" "$LQ_AUD_S" \
+lv_plan "$LQR/lq-two.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "$LQ_SPLIT_S" \
   "$(lq_row T6 'a second structure read' 'approval:plan, live:head:adversarial+structure')"
 expect_eq "LIVEQ.6c two pending rows sharing structure: the higher is ready, the lower goes after it" "T3 T5|no yes" \
   "$(lq_ready_ids "$LQ_D" "$LQR/lq-two.md")|$(has_line "$(live_call "$LQ_D" units_ready "$LQR/lq-two.md" 4)" T6) $(has_line "$(live_call "$LQ_D" units_waiting "$LQR/lq-two.md" 4)" "T6${TAB}live:head:adversarial+structure: review T5 goes first${TAB}-${TAB}-")"
-lv_plan "$LQR/lq-bare-busy.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_PEER_E" \
+lv_plan "$LQR/lq-bare-busy.md" "$LQ_P1" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" \
   "| T7 | 6 | review | a 1.11.0 pass in flight | critic | — | 30 | REQ-x | .bionic/docs/record/w/r7.md |  | active |"
 expect_eq "LIVEQ.6d an active review row with no question (bare or settled) holds every read row: the cautious direction" "no yes" \
   "$(has_line "$(live_call "$LQ_D" units_ready "$LQR/lq-bare-busy.md" 4)" T3) $(has_line "$(live_call "$LQ_D" units_waiting "$LQR/lq-bare-busy.md" 4)" "T3${TAB}live:head:evidence: review T7 is open (active)${TAB}-${TAB}-")"
 
 # THE proof:review WRITER SET COUNTS OPEN READ ROWS PER QUESTION: a pending read row whose every
 # question was read at the head writes no newer proof; one with a question past its reading does.
-lv_plan "$LQR/lq-int.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_PEER_E" "$LQ_AUD_A" "$LQ_AUD_S" \
+lv_plan "$LQR/lq-int.md" "$LQ_P2" "$LV_BUILD_LANDED" "$LQ_DOUBLE_E" "$LQ_SPLIT_A" "$LQ_SPLIT_S" \
   "| T9 | 8 | integrate | merge | integrator | — | 30 | REQ-x | — | proof:review | pending |"
 LQ_INT_W="$(live_call "$LQ_C" units_waiting "$LQR/lq-int.md" 8 | awk -F'\t' '$1 == "T9" && $2 == "proof:review" { print $3 }' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "LIVEQ.7 at head C the evidence row is idle and no writer; the adversarial and structure rows are" "T4 T5" "$LQ_INT_W"

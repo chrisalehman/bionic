@@ -364,9 +364,9 @@ s57_of() {  # <owed line> -> the state facts_state gave that line (what follows 
 }
 S57_EV="$(printf 'review\tevidence\tbionic:auditor\tpiece')"
 S57_AD="$(printf 'review\tadversarial\tbionic:critic\tpiece')"
-S57_ST="$(printf 'review\tstructure\tbionic:reviewer\tpiece')"
+S57_ST="$(printf 'review\tstructure\tbionic:critic\tpiece')"
 S57_ADW="$(printf 'review\tadversarial\tbionic:critic\twhole')"
-S57_STW="$(printf 'review\tstructure\tbionic:reviewer\twhole')"
+S57_STW="$(printf 'review\tstructure\tbionic:critic\twhole')"
 s57_all() {  # <state>... -> the six owed lines of this plan, each with the next state
   printf 'floor\t%s\n%s\t%s\n%s\t%s\n%s\t%s\n%s\t%s\n%s\t%s' "$1" "$S57_EV" "$2" "$S57_AD" "$3" "$S57_ST" "$4" "$S57_ADW" "$5" "$S57_STW" "$6"
 }
@@ -374,9 +374,9 @@ expect_regex "57a0 precondition: the working branch's head is C4, a 40-hex commi
 expect_eq "57a0b precondition: C3 touches the docs root alone" ".bionic/docs/record/wave-01-fixture/note.md" \
   "$(git -C "$S57_WT" show --name-only --format= "$S57_C3")"
 expect_eq "57a0c precondition: …and C4 a tracked path outside it" "lib/b.sh" "$(git -C "$S57_WT" show --name-only --format= "$S57_C4")"
-expect_eq "57a0d precondition: the dealing for this plan (audited, wave): the floor, three piece reads, two whole reads" \
+expect_eq "57a0d precondition: the dealing for this plan (double, wave): the floor, three piece reads, two whole reads" \
   "$(printf 'floor\n%s\n%s\n%s\n%s\n%s' "$S57_EV" "$S57_AD" "$S57_ST" "$S57_ADW" "$S57_STW")" \
-  "$(bash -c '. "$1" && facts_owed audited wave' _ "$S57_LIB")"
+  "$(bash -c '. "$1" && facts_owed double wave' _ "$S57_LIB")"
 
 # ---------- §JUDGE (AC-2.3): covered, uncovered naming its range, a docs-only tail ----------
 s57_reset; s57_floor "$S57_C4"
@@ -485,7 +485,7 @@ s57_state "$P57" "$S57_C4"
 expect_eq "57w8 a planted scope=whole line, whatever range its record read, is taken as written: the whole read and the piece chain both covered at its head" \
   "covered covered" "$(s57_of "$S57_STW") $(s57_of "$S57_ST")"
 expect_eq "57w7 a task-scale dealing owes no whole read" "" \
-  "$(bash -c '. "$1" && facts_owed audited task' _ "$S57_LIB" | /usr/bin/grep -F whole)"
+  "$(bash -c '. "$1" && facts_owed double task' _ "$S57_LIB" | /usr/bin/grep -F whole)"
 
 # ---------- §WAIVE: the verb, through the plan transaction ----------
 s57_reset; s42_snap "$R57" "$P57"
@@ -526,7 +526,7 @@ P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
 mkdir -p "$(dirname "$P57T")"
 {
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-  printf 'rigor: tested\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
+  printf 'rigor: single\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
   printf 'walk: exempt\ndeploy_target: n/a\n'
   # A task-scale plan carries its base in the frontmatter (T45, A-orch-56): with none, a first
   # reading is refused and the judge exits 2 (section 63 pins that twin).
@@ -535,7 +535,7 @@ mkdir -p "$(dirname "$P57T")"
   printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
   printf -- '- T1: the fix, in .worktrees/01-task\n\n'
   printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
-  printf '| T1 | bugfix | tested | the fix | active |\n\n'
+  printf '| T1 | bugfix | single | the fix | active |\n\n'
   printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
   printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
 } > "$P57T"
@@ -565,7 +565,7 @@ expect_eq "57t2 …three reading lines, at the task branch's head" "3" \
   "$(/usr/bin/grep -cE "^proved: kind=review head=${S57T_C1} .* reader=w-tcrit result=pass scope=piece$" "$P57T")"
 s57_floor "$S57T_C1" "$P57T"
 s57_state "$P57T" "$S57T_C1"
-expect_eq "57t3 …and facts_state judges it by facts_owed tested task: the floor and one critic's three questions, covered" \
+expect_eq "57t3 …and facts_state judges it by facts_owed single task: the floor and one critic's three questions, covered" \
   "$(printf 'floor\tcovered\nreview\tevidence\tbionic:critic\tpiece\tcovered\nreview\tadversarial\tbionic:critic\tpiece\tcovered\nreview\tstructure\tbionic:critic\tpiece\tcovered')" \
   "$S57_OUT"
 expect_eq "57t4 …rc 0" "0" "$S57_RC"
@@ -813,7 +813,7 @@ POKE_BOUND="$S58_BOUND_WAS"
 section "Section 59 §RANGE-Q: the tick offers each read row its own range, and a reading returns the row carrying its question (wave-27 T10; REQ-1 AC-1.5, REQ-2 AC-2.3; D4)"
 # ============================================================
 #
-# A peer-reviewed plan carries two read rows: T3 reads `live:head:evidence` (the auditor), T4
+# A double plan carries two read rows: T3 reads `live:head:evidence` (the auditor), T4
 # `live:head:adversarial+structure` (the critic). The plan already holds three readings, planted
 # in the shape proof_line writes: adversarial at A, structure at B, evidence at B; the working
 # branch is at C. The tick offers both rows and prints a RANGE line for each, from the oldest last
@@ -1165,7 +1165,7 @@ s42_unchanged "61b §CUR8 AC-2.3 a commit to a tracked file past the last advers
 expect_contains "61b2 …naming the adversarial range nobody read" \
   "$(printf 'review\tadversarial\tbionic:critic\tpiece\tuncovered\t%s..%s' "$S61_C1" "$S61_C2")" "$OUT"
 expect_contains "61b3 …and the structure range" \
-  "$(printf 'review\tstructure\tbionic:reviewer\tpiece\tuncovered\t%s..%s' "$S61_C1" "$S61_C2")" "$OUT"
+  "$(printf 'review\tstructure\tbionic:critic\tpiece\tuncovered\t%s..%s' "$S61_C1" "$S61_C2")" "$OUT"
 expect_contains "61b4 …saying it is the judge's answer at the working head" \
   "holds at the working head $S61_C2, and these do not (facts_state)" "$OUT"
 expect_absent "61b5 …and printing no line that holds (beside 61b2 on the same output)" "	covered" "$OUT"
@@ -1179,7 +1179,7 @@ s42_snap "$R61" "$P61"
 poke "$R61" current 8
 s42_unchanged "61c §CUR8-fail AC-2.4 the newest structure reading is result=fail" 1 "$P61"
 expect_contains "61c2 …naming it failing, with its evidence" \
-  "$(printf 'review\tstructure\tbionic:reviewer\tpiece\tfailing\trecord/wave-01-fixture/structure-fail-piece.md')" "$OUT"
+  "$(printf 'review\tstructure\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/structure-fail-piece.md')" "$OUT"
 s61_fact structure "$S61_C2" pass piece
 poke "$R61" current 8
 expect_eq "61c3 …a later pass over the fix admits it" "0" "$RC"
@@ -1194,7 +1194,7 @@ expect_contains "61c6 …naming the whole line" \
   "$(printf 'review\tadversarial\tbionic:critic\twhole\tfailing\trecord/wave-01-fixture/adversarial-fail-whole.md')" "$OUT"
 
 # ---------- §CUR8-rigor (AC-3.1): the critic at every rigor ----------
-for s61r in tested peer-reviewed audited; do
+for s61r in single double double; do
   s61_reset; s61_rigor "$s61r"; s61_owed "$S61_C2" adversarial
   s42_snap "$R61" "$P61"
   poke "$R61" current 8
@@ -1300,8 +1300,8 @@ exit "\$rc"
 S62_EOF
 s62_seen() { [ -f "$S62_SEEN" ] && tail -n 1 "$S62_SEEN"; }
 s62_runs() { [ -f "$S62_SEEN" ] && awk 'END { print NR + 0 }' "$S62_SEEN" || echo 0; }
-s62_owed() {  # [<tree>] -> what facts_owed audited wave deals, with the tree given or not
-  bash -c '. "$1" && facts_owed audited wave ${2:+"$2"}' _ "$S57_LIB" "${1:-}"
+s62_owed() {  # [<tree>] -> what facts_owed double wave deals, with the tree given or not
+  bash -c '. "$1" && facts_owed double wave ${2:+"$2"}' _ "$S57_LIB" "${1:-}"
 }
 s62_covered_but_check() {  # <head> -> the floor and every reading planted at <head>
   s57_floor "$1" "$P62"
@@ -1546,13 +1546,13 @@ s63_task_plan() {  # <repo> <plan> -> a scale: task plan as 57t writes it, with 
   mkdir -p "$(dirname "$2")"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: tested\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
+    printf 'rigor: single\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
     printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
     printf -- '- T1: the fix, in .worktrees/01-task\n\n'
     printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
-    printf '| T1 | bugfix | tested | the fix | active |\n\n'
+    printf '| T1 | bugfix | single | the fix | active |\n\n'
     printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
   } > "$2"
@@ -1561,7 +1561,7 @@ s63_base() {  # <plan> <sha> -> the plan with `base-sha: <sha>` in its frontmatt
   B="$2" awk '{ print } /^scale: / && !d { print "base-sha: " ENVIRON["B"]; d = 1 }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 S63_TAD="$(printf 'review\tadversarial\tbionic:critic\tpiece')"
-s63_task_all() {  # <floor state> <review state> -> the four owed lines of a tested task plan
+s63_task_all() {  # <floor state> <review state> -> the four owed lines of a single task plan
   printf 'floor\t%s\nreview\tevidence\tbionic:critic\tpiece\t%s\nreview\tadversarial\tbionic:critic\tpiece\t%s\nreview\tstructure\tbionic:critic\tpiece\t%s' \
     "$1" "$2" "$2" "$2"
 }
@@ -1741,8 +1741,8 @@ R63E="$TMPROOT/s63-edges"; mkdir -p "$R63E"
   && echo a > src/a && git add -A && git commit -qm base ) >/dev/null 2>&1
 S63E_B="$(git -C "$R63E" rev-parse HEAD)"
 P63E="$R63E/.bionic/docs/plans/e.plan.md"
-s63_edge_plan() {  # <reading head> -> P63E: tested, task, with a base, the three questions read at that head
-  printf -- '---\nrigor: tested\nscale: task\nbase-sha: %s\n---\n# edges\n\n## SDLC State\n\nworking-branch: wave/1-x\n' "$S63E_B" > "$P63E"
+s63_edge_plan() {  # <reading head> -> P63E: single, task, with a base, the three questions read at that head
+  printf -- '---\nrigor: single\nscale: task\nbase-sha: %s\n---\n# edges\n\n## SDLC State\n\nworking-branch: wave/1-x\n' "$S63E_B" > "$P63E"
   for s63q in evidence adversarial structure; do s57_fact "$s63q" "$1" pass piece "$P63E"; done
 }
 s63_adv_with() {  # <proof.sh> <head> -> the adversarial line's state under that library, on P63E
@@ -2083,9 +2083,9 @@ S64_DEBT="$(printf 'debt\twidget.test.sh\tapproval:release')"
 
 # ---------- the dealing ----------
 expect_eq "64a §DEBT facts_owed with the plan deals one debt line per debt land wrote to the landing record" "$S64_DEBT" \
-  "$(bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt')"
+  "$(bash -c '. "$1" && facts_owed double wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt')"
 expect_eq "64a2 …and the dealing of a rigor alone carries none (the positive above is the same function)" "" \
-  "$(bash -c '. "$1" && facts_owed audited wave "$2"' _ "$S61_LIB" "$R64" | /usr/bin/grep '^debt')"
+  "$(bash -c '. "$1" && facts_owed double wave "$2"' _ "$S61_LIB" "$R64" | /usr/bin/grep '^debt')"
 
 # ---------- open: absent, and current 8 refused ----------
 s57_state "$P64" "$S64_H"
@@ -2591,7 +2591,7 @@ s67_reader "$R67Q" wri bionic:implementor ""
 expect_eq "67e0 precondition: each row declares two counted runs" "2 2 2" \
   "$(s67_runs "$R67Q" crit) $(s67_runs "$R67Q" rev) $(s67_runs "$R67Q" wri)"
 poke "$R67Q" amend crit --reexec+ 'pytest tests/c' --reason 'a third'
-expect_eq "67e1 §AMEND-CAP a tested critic dealt evidence amended to a third run: admitted (exit 0)" "0" "$RC"
+expect_eq "67e1 §AMEND-CAP a single critic dealt evidence amended to a third run: admitted (exit 0)" "0" "$RC"
 expect_eq "67e2 …and the row holds three" "3" "$(s67_runs "$R67Q" crit)"
 S67Q_SUM="$(s67_sum "$R67Q")"
 poke "$R67Q" amend crit --reexec+ 'pytest tests/d' --reason 'a fourth'
@@ -2877,7 +2877,7 @@ S68_AP="$(printf 'debt\twidget.test.sh\tapproval:design')"
 S68_EXT="$(printf 'debt\twidget.test.sh\text:vendor-key')"
 s68_plan() { cp "$TMPROOT/s64-clean" "$P64"; s64_debt_reset; }
 s68_approve() { s64_add "approved: $1 by Dana Fixture $2 \"ok\""; }
-s68_owed() { bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt'; }
+s68_owed() { bash -c '. "$1" && facts_owed double wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt'; }
 s68_cell() {  # <the T2 deps cell> -> P64's T2 row holding it
   S68_C="$1" awk '/^\| T2 \|/ { sub(/\| — \| 30 \|/, "| " ENVIRON["S68_C"] " | 30 |") } { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
 }
@@ -3001,7 +3001,7 @@ section "Section 69 §DRY-DEBT: a dry commit is judged on the plan it was copied
 # in the caller's working directory is written or removed.
 #
 # FIXTURE FIDELITY. The review's probe (r59 `cur6-probe.sh`): a project on a feature branch, an
-# audited wave plan bound to this session that the real gate admits at Steps 6 and 7 bar its debts,
+# double wave plan bound to this session that the real gate admits at Steps 6 and 7 bar its debts,
 # every reading in the production writer's shape, each debt written by `land`'s own writer
 # (lib/worktree.sh `_wt_debt_write`) and each void by `_wt_debt_void`, into the record `land` names
 # for this plan. Every move is the real verb; every real commit is the real hook (§34's `s34_gate`).
@@ -3024,7 +3024,7 @@ $(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/structure.md structur
 s69_plan() {  # <current> <extra lines> [<step lines through>] -> P69, bound to this session
   local through="${3:-$1}"
   {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: wave\n'
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
     printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\nworking-branch: feature/t23\n---\n# plan\n\n## SDLC State\n\n'
     printf 'current: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
     printf -- '- Step 4: dispatched, record/w27/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: feature/t23\n' "$S69_H"
@@ -3157,34 +3157,43 @@ expect_eq "69g8 …while the plan's own directory holds no copy left behind" "wa
 POKE_BOUND="$S69_BOUND_WAS"
 
 # ============================================================
-section "Section 70 §RIGOR: a plan carrying high advances where one carrying audited does, and is dealt the same set (wave-28 T44; REQ-16 AC-16.1; D35, A-orch-7)"
+section "Section 70 §RIGOR: a plan at single or double advances on the set it is dealt, and one carrying a word before 1.14.0 is not dealt at all (wave-28 T44; wave-30 T11: REQ-1 AC-1.4, D1)"
 # ============================================================
-# The judge reads the rigor word through lib/run.sh `rigor_level` (proof.sh `facts_owed`), so a
-# plan in the new words is dealt the readers the old word deals it: the same roles hold the same
-# questions, `current 8` is refused on the same missing fact and admitted on the same set. §61's
-# fixture, unchanged, with only its `rigor:` line set to each word of a pair.
+# The judge reads the rigor word through lib/run.sh `rigor_level` (proof.sh `facts_owed`): a plan
+# at a level is dealt its readers, `current 8` is refused on the missing fact and admitted on the
+# set; a plan still carrying one of the six words before 1.14.0 names no level, so the judge cannot
+# deal it and `current 8` is refused saying so, the fact or no fact. §61's fixture, unchanged, with
+# only its `rigor:` line set to each word of a pair.
 S70_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 S70_H="$(git -C "$S61_WT" rev-parse HEAD 2>/dev/null)"
 expect_regex "70a0 precondition: §61's working branch still has a head" '^[0-9a-f]{40}$' "$S70_H"
 s70_deal() {  # <rigor> -> facts_owed's review lines at wave scale, one per line
   bash -c '. "$1" && facts_owed "$2" wave' _ "$S61_LIB" "$1" 2>/dev/null | /usr/bin/grep '^review'
 }
-for s70p in audited:high peer-reviewed:medium tested:low; do
-  s70o="${s70p%%:*}"; s70n="${s70p#*:}"
-  expect_nonempty "70a $s70o is dealt readings (the extractor reads real output)" "$(s70_deal "$s70o")"
-  expect_eq "70b $s70n is dealt exactly what $s70o is" "$(s70_deal "$s70o")" "$(s70_deal "$s70n")"
-  for s70w in "$s70o" "$s70n"; do
-    s61_reset; s61_rigor "$s70w"; s61_owed "$S70_H" structure
-    s42_snap "$R61" "$P61"
-    poke "$R61" current 8
-    s42_unchanged "70c at $s70w, current 8 with no structure fact" 1 "$P61"
-    expect_contains "70c2 …at $s70w, naming the structure question's holder absent" \
-      "$(printf 'review\tstructure\t%s\tpiece\tabsent' "$(s70_deal "$s70o" | awk -F'\t' '$2 == "structure" { print $3; exit }')")" "$OUT"
-    s61_fact structure "$S70_H" pass piece; s61_fact structure "$S70_H" pass whole
-    poke "$R61" current 8
-    expect_eq "70d …at $s70w, the same plan with it advances (exit 0)" "0" "$RC"
-    expect_eq "70d2 …and reads current: 8" "8" "$(s61_cur)"
-  done
+for s70p in double:high double:medium single:low; do
+  s70l="${s70p%%:*}"; s70o="${s70p#*:}"
+  expect_nonempty "70a $s70l is dealt readings (the extractor reads real output)" "$(s70_deal "$s70l")"
+  expect_eq "70b $s70o, a word before 1.14.0, is dealt nothing" "" "$(s70_deal "$s70o")"
+  s61_reset; s61_rigor "$s70l"; s61_owed "$S70_H" structure
+  s42_snap "$R61" "$P61"
+  poke "$R61" current 8
+  s42_unchanged "70c at $s70l, current 8 with no structure fact" 1 "$P61"
+  expect_contains "70c2 …at $s70l, naming the structure question's holder absent" \
+    "$(printf 'review\tstructure\t%s\tpiece\tabsent' "$(s70_deal "$s70l" | awk -F'\t' '$2 == "structure" { print $3; exit }')")" "$OUT"
+  s61_fact structure "$S70_H" pass piece; s61_fact structure "$S70_H" pass whole
+  poke "$R61" current 8
+  expect_eq "70d …at $s70l, the same plan with it advances (exit 0)" "0" "$RC"
+  expect_eq "70d2 …and reads current: 8" "8" "$(s61_cur)"
+  s61_reset; s61_rigor "$s70o"; s61_owed "$S70_H" structure
+  s42_snap "$R61" "$P61"
+  poke "$R61" current 8
+  s42_unchanged "70x at $s70o, current 8 is refused: the judge cannot deal the plan" 1 "$P61"
+  expect_contains "70x2 …saying the plan's rigor is no level the dealing knows" \
+    "declares no rigor and scale the dealing knows (rigor: $s70o, scale: wave)" "$OUT"
+  s61_fact structure "$S70_H" pass piece; s61_fact structure "$S70_H" pass whole
+  poke "$R61" current 8
+  expect_eq "70y …at $s70o, the same plan with every fact is still refused (exit 1)" "1" "$RC"
+  expect_eq "70y2 …and still reads current: 7" "7" "$(s61_cur)"
 done
 s61_reset
 POKE_BOUND="$S70_BOUND_WAS"

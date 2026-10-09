@@ -457,7 +457,7 @@ section "S10b — the compact one-line label grammar is lifted too (AC-1)"
 # second label into the first's value; the span must end at the NEXT LABEL, not
 # at the newline.
 
-BRIEF_COMPACT='Task 4/4 of epic-99 wave-01; build · audited · wave.
+BRIEF_COMPACT='Task 4/4 of epic-99 wave-01; build · double · wave.
 Deliverables: (1) one commit `feat(x): thing (epic-99 w1 task 4/4)`; (2) record/w99-two.txt, verbatim.
 Expected duration: ~35 minutes. Progress: append to .bionic/tmp/w99-two.progress per stage.
 Exit: both deliverables exist.
@@ -647,7 +647,7 @@ section "S10L — the LIVENESS fields are lifted: cadence + the subprocess claim
 # marks one, else the text up to the first comma or arrow; the output file half
 # is the path the same span carries.
 
-BRIEF_LIVENESS='Canonical-sdlc Step 4, task 4/10 of epic-99 wave-01; build · audited · wave.
+BRIEF_LIVENESS='Canonical-sdlc Step 4, task 4/10 of epic-99 wave-01; build · double · wave.
 Your task: the widget, behind the existing seam.
 Expected artifact: .bionic/docs/record/w99-live.txt
 Expected duration: ~50 minutes. Progress: .bionic/tmp/w99-live.progress, cadence ~6m.
@@ -689,7 +689,7 @@ expect_status "the duration is unharmed by the new labels" \
 # already inside the value. Bounded extraction stops at the first clause
 # boundary (comma / closing bracket / newline), the same restraint claimpat()
 # already applies to the subprocess pattern.
-BRIEF_CADENCE_RUNON='Canonical-sdlc Step 4, task 4/12 of epic-99 wave-01; build · audited · wave.
+BRIEF_CADENCE_RUNON='Canonical-sdlc Step 4, task 4/12 of epic-99 wave-01; build · double · wave.
 Your task: the widget behind the seam.
 Expected artifact: .bionic/docs/record/w99-runon.txt
 Expected duration: ~50 minutes.
@@ -1539,7 +1539,7 @@ section "S15 — the ship-day corners now pass BY DECLARING, not by guessing (R1
 # came from. Each corner is driven BOTH ways — refused as-written, accepted once declared.
 
 # ---- corner 1: the MID-STRING slot in prose. As-written -> REFUSE ----
-BRIEF_CORNER1='Canonical-sdlc Step 4, task S4 of epic-99 wave-02; build · audited · wave.
+BRIEF_CORNER1='Canonical-sdlc Step 4, task S4 of epic-99 wave-02; build · double · wave.
 Your task: reconcile the label grammar with the declared parse.
 Write your findings to .bionic/docs/record/w2-<task>-notes.md when the suite is green.
 Expected duration: ~20 minutes.
@@ -1554,7 +1554,7 @@ expect_status "AC-3 corner 1: …and no roster row is written" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
 # corner 1, DECLARED: adding a canonical label with a concrete name is the whole fix.
-BRIEF_CORNER1_FIXED='Canonical-sdlc Step 4, task S4 of epic-99 wave-02; build · audited · wave.
+BRIEF_CORNER1_FIXED='Canonical-sdlc Step 4, task S4 of epic-99 wave-02; build · double · wave.
 Your task: reconcile the label grammar with the declared parse.
 Expected artifact: .bionic/docs/record/w2-s4-notes.md
 Expected duration: ~20 minutes.
