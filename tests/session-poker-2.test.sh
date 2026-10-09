@@ -1455,14 +1455,15 @@ R47A="$(make_repo s46-approve)"; ( cd "$R47A" && git commit -q --allow-empty -m 
 git -C "$R47A" config user.name "Dana Fixture"
 P47A="$(s42_plan "$R47A" 4)"
 # A READS TABLE (wave-26 T46; review 10 F6): approve records only a name some row reads, so the
-# fixture's open rows read two — T5 `approval:release`, the active T2 `live:approval:ship`; the
+# fixture's open rows read two — T5 `approval:release` (beside head: a verify row may not drop it,
+# wave-30 T13, AC-4.3), the active T2 `live:approval:ship`; the
 # landed T1 reads `live:approval:landedonly`, which satisfies nothing (wave-26 T52; review 14 N4).
 awk '
   /^\| id \| step \|/ { print $0 " reads |"; next }
   /^\|---\|/ { print $0 "---|"; next }
   /^\| T1 \|/ { print $0 " live:approval:landedonly |"; next }
   /^\| T2 \|/ { print $0 " live:approval:ship |"; next }
-  /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
+  /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release, head |"; next }
   /^\| T[0-9]+ \|/ { print $0 "  |"; next }
   { print }' "$P47A" > "$P47A.tmp" && mv "$P47A.tmp" "$P47A"
 s42_snap "$R47A" "$P47A"
@@ -1622,22 +1623,25 @@ expect_eq "46b2 …one line added" "1 0;" "$(s42_numstat "$R46")"
 expect_contains "46b3 …naming the evidence under record/" \
   "proved: kind=review head=${W46_HEAD2} " "$(s46_proved "$P46")"
 expect_contains "46b4 …docs-root relative" "evidence=record/wave-01-fixture/review.md" "$(s46_proved "$P46" | tail -1)"
-# REVIEW 7 F1: THE SAME FLOOR LOG AFTER A LANDING PROVES NOTHING NEW. The log read W46_HEAD; the
-# branch has moved to W46_HEAD2 with no run, so re-citing it is refused and the floor proof
-# stays at the head the run read. A log of a run at W46_HEAD2 proves W46_HEAD2.
+# THE PROOF IS A FACT ABOUT CODE (wave-30 T13; AC-4.4, D7b; it reverses review 7 F1's refusal here).
+# The log read W46_HEAD; the branch has moved to W46_HEAD2 by a commit that changes no file, so the
+# change since is the empty change, bounded with nothing owed, and the run still stands for the
+# head: proof-add accepts it, and the proof names W46_HEAD, the head the run read. A change the map
+# cannot bound is still refused, naming why (session-poker-3 Section 72). A log of a run at
+# W46_HEAD2 proves W46_HEAD2.
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
-s42_unchanged "46b5 F1 the floor log of the old head, after a landing" 1 "$P46"
-expect_contains "46b5b …naming both heads and the fix" \
-  "read head ${W46_HEAD:0:12}, but the working branch is at ${W46_HEAD2:0:12}; run it again on ${W46_HEAD2:0:12}" "$OUT"
-expect_eq "46b6 F1 proof_last floor still reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
+expect_eq "46b5 the floor log of an ancestor head, after a landing that changed no file, is accepted (exit 0)" "0" "$RC"
+expect_eq "46b5 …and one line is added" "1 0;" "$(s42_numstat "$R46")"
+expect_contains "46b5b …naming the head the run read, not the working head" "proof-add — kind=floor head=${W46_HEAD} " "$OUT"
+expect_eq "46b6 proof_last floor reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
 expect_eq "46b6c …and proof_last floor reads the new head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
 expect_eq "46b7 …and the review head is its own, resolved from the review's reviewed: line" "$W46_HEAD2" "$(s46_last "$P46" review)"
-expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor" \
+expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor floor" \
   "$(s46_proved "$P46" | sed -E 's/^proved: kind=([a-z]+) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 
 # ---------- F1: what the evidence must attest, each refusal naming its fix ----------
@@ -2489,11 +2493,21 @@ s54_tick
 expect_contains "54b5 …and the tick offers the merge" "poker: FILL T3" "$OUT"
 
 # ---------- AC-3.3 still holds: a bounded change after a full pass is proved by its suites ----------
+# FROM wave-30 T13 (AC-4.4, D7c) "proved by its suites" is a fact: each suite the map names must
+# have a green run stamped at the working head, never bounded taken on no evidence. The landing ran
+# no suite, so integrate waits naming them; the real shim runs them in the working checkout.
 s54_land T8 lib/one.sh 'one, changed'
 expect_contains "54c0 precondition: the bounded change LANDED" "spawn-worktree: LANDED branch=wt/01-T8" "$S54_LAND"
+S54_W2="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
-expect_contains "54c AC-3.3 a change the map bounds leaves the pass standing: the merge is offered" "poker: FILL T3" "$OUT"
-expect_eq "54c2 …with no WAIT line for it" "" "$(s54_wait)"
+expect_contains "54c AC-4.4 a change the map bounds, no suite run at the head: integrate WAITS naming the suites" \
+  "proof:review: the facts the run owes do not hold (facts_state): floor: no green run at ${S54_W2:0:12} for a.test.sh b.test.sh" "$(s54_wait)"
+for s54s in a b; do
+  ( cd "$S54_WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
+      bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$s54s.test.sh" -- "bash tests/$s54s.test.sh" ) >/dev/null 2>&1
+done
+s54_tick
+expect_contains "54c2 AC-3.3 …with a and b green at the head (the real shim's stamps), the pass stands: the merge is offered" "poker: FILL T3" "$OUT"
 
 # ---------- a change the map answers with every suite ----------
 s54_land T9 lib/every.sh 'every, changed'

@@ -3103,12 +3103,13 @@ expect_regex "69e2 …and the floor proof line is written at the fixture's head"
 s34_gate "$R69"
 expect_eq "69e3 …after which the real commit is admitted: the line covers the debt" "admitted" "$(s69_verdict "$GATE_RC" "$GATE_ERR")"
 # Each writer verb hands plan_verb_swap the `writer` mode, so its copy is judged at `current: 4`;
-# `current` alone dry-commits at the step it judges. A verb that changes its mode turns this red.
+# `current` alone dry-commits at the step it judges, and `regression-runs` (wave-30 T12, eee53f90)
+# writes the plan header, not a row, so it hands `judged`. A verb that changes its mode turns this red.
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
-S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
+S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print ($2 == "regression-runs" ? $2 "=" $NF : $NF) }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add release-check row-landed step-field step-line task-add waive ' "$S69_SWAPS"
-expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
+  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add regression-runs release-check row-landed step-field step-line task-add waive ' "$S69_SWAPS"
+expect_eq "69e5 …and every one but current and regression-runs names the writer mode; regression-runs names judged" "regression-runs=judged writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
 for s69n in 6 7; do
