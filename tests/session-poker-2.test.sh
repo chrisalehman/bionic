@@ -2249,7 +2249,7 @@ s52_plan() {  # <repo> <T6 status> -> the plan path
     "| T6 | 6 | build | late fix from the review | implementor | — | 20 | REQ-x | payload/x.sh | $2 | |" \
     "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — | pending | |")"
   awk -v h="$h" -v b="$b" '
-    /^governing-skill: / && !fm { print; print "rigor: tested"; print "scale: wave"; fm = 1; next }
+    /^governing-skill: / && !fm { print; print "rigor: single"; print "scale: wave"; fm = 1; next }
     /^current: / { print "current: 8"; print "working-branch: " b; print "base-sha: " h; next }
     { print }
     /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
@@ -2273,7 +2273,7 @@ owed_readings() {  # <plan> <head> -> the readings appended to the plan
 }
 R52="$(make_repo s52-open-build)"; new_roster "$R52"; S52_P="$(s52_plan "$R52" active)"
 owed_readings "$S52_P" "$(git -C "$R52" rev-parse HEAD)"
-expect_eq "52a0 precondition: the plan (tested, wave) holds its five readings at the head: facts_state reads each covered" "5" \
+expect_eq "52a0 precondition: the plan (single, wave) holds its five readings at the head: facts_state reads each covered" "5" \
   "$(bash -c '. "$1/proof.sh" && facts_state "$2" "$3"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$S52_P" "$(git -C "$R52" rev-parse HEAD)" 2>/dev/null \
      | awk -F'\t' '$1 == "review" && $NF == "covered"' | wc -l | tr -d ' ')"
 add_row "$R52" name=w-T6 deliverable=T6.md duration="1 hour" launched_at="$(iso_ago 10)"

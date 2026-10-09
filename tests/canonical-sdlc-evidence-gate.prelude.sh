@@ -426,13 +426,13 @@ expect_block_p() {
 }
 
 # Minimal valid frontmatter for fixtures whose subject is NOT the frontmatter.
-# scale: wave + rigor: tested keeps the wave-lane machinery (dispatch ledger,
+# scale: wave + rigor: single keeps the wave-lane machinery (dispatch ledger,
 # rigor lanes) out of the way so each fixture isolates the behavior under test.
 FM='---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: none
 use_worktree: false
@@ -457,7 +457,7 @@ matrix_frontmatter() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 deploy_target: ${deploy}
 use_worktree: ${use_wt}
@@ -567,7 +567,7 @@ frontmatter() {
   printf -- 'governing-skill: canonical-sdlc\n'
   printf -- 'canonical_sdlc_version: 14\n'
   printf -- 'intent: build\n'
-  printf -- 'rigor: audited\n'
+  printf -- 'rigor: double\n'
   printf -- 'scale: %s\n' "$scale"
   printf -- 'deploy_target: %s\n' "$deploy"
   printf -- 'use_worktree: %s\n' "$use_wt"
@@ -591,9 +591,9 @@ task_plan() {
 }
 
 # A task-scale plan at a caller-chosen frontmatter rigor (frontmatter
-# hardcodes audited). $1 rigor, $2 body. Used to pin the log-only ledger-shape
+# hardcodes double). $1 rigor, $2 body. Used to pin the log-only ledger-shape
 # path that task 4/3 promotes to BLOCKING only under frontmatter rigor:
-# audited — a non-audited plan keeps logging findings.
+# double — a single plan keeps logging findings.
 task_frontmatter_rigor() {  # $1 rigor
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
@@ -616,14 +616,14 @@ ledger_valid="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | refactor | peer-reviewed | extract the ledger helper | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | refactor | double | extract the ledger helper | active |
 
 ## SDLC State
 
 integration-branch: main
 intent: build
-rigor: peer-reviewed
+rigor: double
 scale: task
 current: T2
 approved-by: fixture 2026-09-07T00:00Z "approved"
@@ -631,14 +631,14 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: bash extract-helper.sh 4 cases green, commit def456"
 
-ledger_bad_status="${ledger_valid/| T2 | refactor | peer-reviewed | extract the ledger helper | active |/| T2 | refactor | peer-reviewed | extract the ledger helper | doing |}"
+ledger_bad_status="${ledger_valid/| T2 | refactor | double | extract the ledger helper | active |/| T2 | refactor | double | extract the ledger helper | doing |}"
 
 ledger_active_no_line="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | refactor | peer-reviewed | extract the ledger helper | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | refactor | double | extract the ledger helper | active |
 
 ## SDLC State
 
@@ -652,8 +652,8 @@ v22b_t2_prose="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | peer-reviewed | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | double | fix enum | active |
 
 ## SDLC State
 
@@ -668,8 +668,8 @@ v22b_t2_tested_prose="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -684,8 +684,8 @@ v22c_bad_enum="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | do the thing | active |
-| T2 | build | tested | second thing | wip |
+| T1 | build | double | do the thing | active |
+| T2 | build | single | second thing | wip |
 
 ## SDLC State
 
@@ -699,8 +699,8 @@ v22ct_done_no_verdicts="## Tasks
 
 | id | intent | rigor | description | status | worktree |
 |---|---|---|---|---|---|
-| T1 | build | audited | the finished work, its tree released | done | — |
-| T2 | build | audited | the addressed work | active | 18-T2 |
+| T1 | build | double | the finished work, its tree released | done | — |
+| T2 | build | double | the addressed work | active | 18-T2 |
 
 ## SDLC State
 
@@ -711,15 +711,15 @@ approved-by: fixture 2026-09-22T00:00Z "approved"
 - T1: bash tests/run.sh 31/31 green
 - T2: bash tests/run.sh 31/31 green"
 
-v22ct_bad_enum="${v22ct_done_no_verdicts/| T1 | build | audited | the finished work, its tree released | done | — |/| T1 | build | audited | the finished work, its tree released | wip | — |}"
+v22ct_bad_enum="${v22ct_done_no_verdicts/| T1 | build | double | the finished work, its tree released | done | — |/| T1 | build | double | the finished work, its tree released | wip | — |}"
 
 # A WAVE frontmatter carrying an explicit multi_agent field — the D7
-# dispatch-ledger guard fires ONLY on audited + multi_agent:true + wave.
+# dispatch-ledger guard fires ONLY on double + multi_agent:true + wave.
 # frontmatter sets NO multi_agent, so every prior wave fixture (19a/b/c,
-# 19r, Section 20) is a guaranteed guard no-op. $1 rigor (default audited),
+# 19r, Section 20) is a guaranteed guard no-op. $1 rigor (default double),
 # $2 multi_agent (default true).
 d7_wave_frontmatter() {
-  local rigor="${1:-audited}" multi="${2:-true}"
+  local rigor="${1:-double}" multi="${2:-true}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
   printf -- 'canonical_sdlc_version: 14\n'
@@ -739,12 +739,12 @@ d7_wave_frontmatter() {
 # dispatched-task ledger; validate_dispatch_ledger runs at the top of
 # dispatch_modern, before the matrix machinery). $1 = ## Tasks section text
 # (empty omits it); $2 = extra ## SDLC State lines, e.g. a `- T<n>:` evidence
-# line (empty omits); $3 rigor (default audited); $4 multi_agent (default true).
+# line (empty omits); $3 rigor (default double); $4 multi_agent (default true).
 d7_wave_plan() {
-  local tasks="$1" extra_state="$2" rigor="${3:-audited}" multi="${4:-true}"
+  local tasks="$1" extra_state="$2" rigor="${3:-double}" multi="${4:-true}"
   printf '%s\n' "$(d7_wave_frontmatter "$rigor" "$multi")"
   [ -n "$tasks" ] && printf '%s\n\n' "$tasks"
-  # Both K5 (this task) and K2 (task 16) scope-match this fixture (rigor:audited +
+  # Both K5 (this task) and K2 (task 16) scope-match this fixture (rigor:double +
   # multi_agent:true + wave, at current: 5 >= 4): K5/AC-K5.2 needs the Step-1
   # requirements: pointer (resolves to the plan file itself — project-relative; this
   # fixture's own subject is D7, not K5, so a real file is all the arm demands, not a
@@ -764,7 +764,7 @@ v22d1_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | peer-reviewed | fix enum | active |
+| T1 | bugfix | double | fix enum | active |
 
 ## SDLC State
 
@@ -778,7 +778,7 @@ v22d2_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -792,7 +792,7 @@ v22d2b_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -804,7 +804,7 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 
 s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: single\nscale: wave\n---\n'
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 

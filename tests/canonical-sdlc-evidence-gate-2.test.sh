@@ -93,7 +93,7 @@ write_plan "$h29e2" "---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 use_worktree: false
 has_ui: false
@@ -386,17 +386,17 @@ expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent
 # Section 32: the auditor wall is rigor-keyed (B-10 / R-11)
 # ============================================================
 #
-# SKILL.md's rigor table says `tested` skips BOTH independent assurance roles
+# SKILL.md's rigor table says `single` skips BOTH independent assurance roles
 # — "Self-review only." The gate read the matrix's auditor column
-# unconditionally, so a `tested` run met a CONFIRMED wall for a verdict its own
-# rigor says nobody was ever sent to write. B-10's repro: a bugfix · tested ·
+# unconditionally, so a `single` run met a CONFIRMED wall for a verdict its own
+# rigor says nobody was ever sent to write. B-10's repro: a bugfix · single ·
 # task run refused at `current: 9` on "matrix row 'AC-1' auditor verdict is
 # 'empty', not CONFIRMED".
 #
-# The rule: at `tested` the matrix's auditor column is not read (any value —
+# The rule: at `single` the matrix's auditor column is not read (any value —
 # empty included — passes the post-Verify CONFIRMED arm at every step 6..9) and
 # the Step-5 `auditor:` pointer is not demanded once the rows are discharged.
-# At `peer-reviewed` and `audited` both walls are exactly as they were. An
+# At `double` and `double` both walls are exactly as they were. An
 # unknown or missing frontmatter `rigor:` takes the STRICT reading — fail
 # closed, since a plan that does not say what rigor it runs at has not bought
 # the relaxation.
@@ -448,13 +448,13 @@ AC-2:
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
-# The same matrix carrying a STANDING REFUTED verdict. At tested the column is
+# The same matrix carrying a STANDING REFUTED verdict. At single the column is
 # not read at all, so this passes too — the relaxation is "the column is not a
 # gate", not "an empty cell is tolerated".
 m32_refuted="${m32_empty_aud/| AC-1 | T1 | discharged | see AC-1 |  |/| AC-1 | T1 | discharged | see AC-1 | REFUTED |}"
 
 # The same matrix with AC-2's `readback:` key removed. The rest of the matrix
-# contract is untouched by B-10, so this must still block at tested — the
+# contract is untouched by B-10, so this must still block at single — the
 # discrimination control for every 32a..32d allow.
 m32_missing_key="${m32_empty_aud/  readback: 332\/332 asserted/  fixture-fidelity: n\/a}"
 
@@ -465,44 +465,44 @@ step5_noaud="  cmd: bash test.sh
   head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5"
 
-# ---- AC-26: at `tested` the wall is not there ------------------------------
+# ---- AC-26: at `single` the wall is not there ------------------------------
 
 # 32a..32d — the post-Verify CONFIRMED arm is a prefix contract at 6, 7, 8 and
 # 9 (dispatch()); B-10's own repro was at 9, so all four steps are pinned. The
 # 7/8/9 step bodies are Section 17r's, which their own validators pin already.
 h32a=$(make_home)
-write_plan "$h32a" "$(plan_rigor tested 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-expect_allow "32a rigor tested, rows discharged, auditor cells empty, current 6 → allow" \
+write_plan "$h32a" "$(plan_rigor single 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_allow "32a rigor single, rows discharged, auditor cells empty, current 6 → allow" \
   "$h32a" 'git commit -m "x"'
 
 h32b=$(make_home)
-write_plan "$h32b" "$(plan_rigor tested 7 "$v9_step7_body" "$m32_empty_aud")" > /dev/null
+write_plan "$h32b" "$(plan_rigor single 7 "$v9_step7_body" "$m32_empty_aud")" > /dev/null
 expect_allow "32b same at current 7 → allow" "$h32b" 'git commit -m "x"'
 
 h32c=$(make_home)
-write_plan "$h32c" "$(plan_rigor tested 8 "$v9_step8_body" "$m32_empty_aud")" > /dev/null
+write_plan "$h32c" "$(plan_rigor single 8 "$v9_step8_body" "$m32_empty_aud")" > /dev/null
 expect_allow "32c same at current 8 → allow" "$h32c" 'git commit -m "x"'
 
 h32d=$(make_home)
-write_plan "$h32d" "$(plan_rigor tested 9 "$v9_step9_body" "$m32_empty_aud")" > /dev/null
+write_plan "$h32d" "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")" > /dev/null
 expect_allow "32d same at current 9 → allow (B-10's own repro step)" \
   "$h32d" 'git commit -m "x"'
 
 # 32e — the Step-5 `auditor:` pointer is the same wall one step earlier: it is
-# demanded once no row is pending. At tested there is no auditor to point at.
+# demanded once no row is pending. At single there is no auditor to point at.
 h32e=$(make_home)
-write_plan "$h32e" "$(plan_rigor tested 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_allow "32e rigor tested, all rows discharged, no Step-5 auditor: pointer → allow" \
+write_plan "$h32e" "$(plan_rigor single 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
+expect_allow "32e rigor single, all rows discharged, no Step-5 auditor: pointer → allow" \
   "$h32e" 'git commit -m "x"'
 
-# 32f — the task-ledger mirror (AC-26, second half): a `done` row at tested
+# 32f — the task-ledger mirror (AC-26, second half): a `done` row at single
 # whose evidence names no auditor verdict commits.
 v32f_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | tested | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | single | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -513,61 +513,61 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: reproduced and fixed the boundary case
 - T2: fixed enum check, bash suite 12/12"
 h32f=$(make_home)
-write_plan "$h32f" "$(task_plan_rigor tested "$v32f_body")" > /dev/null
-expect_allow "32f task scale: done row at tested with no auditor verdict → allow" \
+write_plan "$h32f" "$(task_plan_rigor single "$v32f_body")" > /dev/null
+expect_allow "32f task scale: done row at single with no auditor verdict → allow" \
   "$h32f" 'git commit -m "x"'
 
-# 32n — the column is not READ at tested, not merely tolerated when empty: a
+# 32n — the column is not READ at single, not merely tolerated when empty: a
 # standing REFUTED verdict passes too. Pinned deliberately (it is the sharpest
 # statement of the rule, and the case a narrower fix would get wrong).
 h32n=$(make_home)
-write_plan "$h32n" "$(plan_rigor tested 6 "$step6_body" "$m32_refuted")" > /dev/null
-expect_allow "32n rigor tested, a REFUTED auditor cell at current 6 → allow (column unread)" \
+write_plan "$h32n" "$(plan_rigor single 6 "$step6_body" "$m32_refuted")" > /dev/null
+expect_allow "32n rigor single, a REFUTED auditor cell at current 6 → allow (column unread)" \
   "$h32n" 'git commit -m "x"'
 
 # 32o — discrimination control: everything ELSE the matrix demands still bites
-# at tested. AC-2 (T1) is missing its `readback:` key on the same fixture family
+# at single. AC-2 (T1) is missing its `readback:` key on the same fixture family
 # and at the same step, so 32a..32d are the auditor arm standing down and not
 # the matrix going quiet.
 h32o=$(make_home)
-write_plan "$h32o" "$(plan_rigor tested 6 "$step6_body" "$m32_missing_key")" > /dev/null
-expect_block "32o control: tested plan missing a per-tier key still blocks at current 6" \
+write_plan "$h32o" "$(plan_rigor single 6 "$step6_body" "$m32_missing_key")" > /dev/null
+expect_block "32o control: single plan missing a per-tier key still blocks at current 6" \
   "$h32o" 'git commit -m "x"' "readback"
 
-# ---- AC-27: at peer-reviewed and audited the wall is unchanged -------------
+# ---- AC-27: at double and double the wall is unchanged -------------
 
 h32g=$(make_home)
-write_plan "$h32g" "$(plan_rigor audited 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-expect_block "32g the same fixture at rigor audited, current 6 → block (CONFIRMED)" \
+write_plan "$h32g" "$(plan_rigor double 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_block "32g the same fixture at rigor double, current 6 → block (CONFIRMED)" \
   "$h32g" 'git commit -m "x"' "auditor verdict is 'empty', not CONFIRMED"
 
 h32h=$(make_home)
-write_plan "$h32h" "$(plan_rigor peer-reviewed 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-expect_block "32h the same fixture at rigor peer-reviewed, current 6 → block (CONFIRMED)" \
+write_plan "$h32h" "$(plan_rigor double 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_block "32h the same fixture at rigor double, current 6 → block (CONFIRMED)" \
   "$h32h" 'git commit -m "x"' "auditor verdict is 'empty', not CONFIRMED"
 
 # 32i/32j — the Step-5 pointer half of AC-27.
 h32i=$(make_home)
-write_plan "$h32i" "$(plan_rigor audited 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32i rigor audited, discharged rows, no Step-5 auditor: pointer → block" \
+write_plan "$h32i" "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
+expect_block "32i rigor double, discharged rows, no Step-5 auditor: pointer → block" \
   "$h32i" 'git commit -m "x"' "requires 'auditor:"
 
 h32j=$(make_home)
-write_plan "$h32j" "$(plan_rigor peer-reviewed 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32j rigor peer-reviewed, discharged rows, no Step-5 auditor: pointer → block" \
+write_plan "$h32j" "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
+expect_block "32j rigor double, discharged rows, no Step-5 auditor: pointer → block" \
   "$h32j" 'git commit -m "x"' "requires 'auditor:"
 
 # 32k — a row whose OWN rigor cell RAISES it above the plan's frontmatter
-# follows the row's rigor (the floor model, task 4/8): a tested plan, one
-# `done` row raised to peer-reviewed, proof-shaped evidence naming no auditor →
+# follows the row's rigor (the floor model, task 4/8): a single plan, one
+# `done` row raised to double, proof-shaped evidence naming no auditor →
 # that row still demands the verdict. The relaxation is keyed to effective
 # rigor, never to the frontmatter alone.
 v32k_body="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
-| T2 | bugfix | tested | fix enum | active |
+| T1 | bugfix | double | fix the frontmatter parser | done |
+| T2 | bugfix | single | fix enum | active |
 
 ## SDLC State
 
@@ -578,10 +578,10 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 12/12 green
 - T2: fixed enum check, bash suite 12/12"
 h32k=$(make_home)
-write_plan "$h32k" "$(task_plan_rigor tested "$v32k_body")" > /dev/null
+write_plan "$h32k" "$(task_plan_rigor single "$v32k_body")" > /dev/null
 # ADR-033: the RAISE still drives the lane — at current: 6, where 25gT(i) pins it. Here the
 # run is at `current: T2`, so the row owes its line and its proof shape and no verdict.
-expect_allow "32k task scale: tested plan, one row raised to peer-reviewed, no auditor, at current: T2 → allow (step-gated; 25gT(i) owns the demand)" \
+expect_allow "32k task scale: single plan, one row raised to double, no auditor, at current: T2 → allow (step-gated; 25gT(i) owns the demand)" \
   "$h32k" 'git commit -m "x"' 
 
 # ---- fail-closed on an unknown or missing rigor ----------------------------
@@ -593,12 +593,12 @@ write_plan "$h32l" "$(plan_rigor "" 6 "$step6_body" "$m32_empty_aud")" > /dev/nu
 expect_block "32l frontmatter with NO rigor key at current 6 → block (fail closed)" \
   "$h32l" 'git commit -m "x"' "not CONFIRMED"
 
-# 32m — an off-enum value reads the same way; a typo must not become a bypass
-# (same rationale as walk_mode's off-enum arm).
+# 32m — an off-enum value is no bypass: since wave-30 T11 the gate refuses a rigor that names no
+# level before any arm reads it, so a typo is refused on its rigor, ahead of the matrix.
 h32m=$(make_home)
 write_plan "$h32m" "$(plan_rigor reviewed 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-expect_block "32m off-enum rigor 'reviewed' at current 6 → block (a typo is not a bypass)" \
-  "$h32m" 'git commit -m "x"' "not CONFIRMED"
+expect_block "32m off-enum rigor 'reviewed' at current 6 → block on its rigor (a typo is not a bypass)" \
+  "$h32m" 'git commit -m "x"' "this plan's rigor is not single or double"
 
 # 32m2 — and the Step-5 pointer half fails closed too.
 h32m2=$(make_home)
@@ -756,7 +756,7 @@ expect_refused "34a control: the same commit, marker restored, is REFUSED"
 # plan that lies is a defect in every state. That refusal is owed to an ENGAGED session
 # and to nobody else.
 h34b=$(make_home)
-printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n\n## SDLC State\ncurrent: banana\n' \
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: single\nscale: wave\n---\n\n## SDLC State\ncurrent: banana\n' \
   > "$h34b/.bionic/docs/plans/active.md"
 touch "$h34b/.bionic/docs/plans/active.md"
 unengage "$h34b"
@@ -1197,7 +1197,7 @@ env_frontmatter() {
   local env_line="${1:-}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf -- 'intent: build\nrigor: audited\nscale: wave\n'
+  printf -- 'intent: build\nrigor: double\nscale: wave\n'
   printf -- 'deploy_target: none\nuse_worktree: false\nhas_ui: true\n'
   printf -- 'walk: exempt\n'
   if [ -n "$env_line" ]; then
@@ -1359,8 +1359,8 @@ section "Section 37: K5/AC-K5.2 — Step-1 'requirements:' pointer"
 # K5 (design ledger K5; ADR-001): Step 1 authors wave-NN-<slug>.requirements.md; the
 # Step-1 evidence line records its path once and this arm reads it back at every commit
 # from current: 2 onward — durable, like the Step-5 walk artifact (A5). Scoped to
-# rigor:audited + multi_agent:true + scale wave|epic (mirrors D7's own guard, above) so
-# the suite's FM (rigor: tested) and frontmatter() (no multi_agent:) fixtures stay
+# rigor:double + multi_agent:true + scale wave|epic (mirrors D7's own guard, above) so
+# the suite's FM (rigor: single) and frontmatter() (no multi_agent:) fixtures stay
 # no-ops — proven directly in 37g below.
 
 # $1 current  $2 raw Step-1 line content (no "Step 1: " prefix)  $3 the CURRENT step's
@@ -1412,16 +1412,16 @@ write_project_plan "$k5g_p" "$(k5_plan 2 "requirements: specs/../../../etc/passw
 expect_block_p "37f '..' component → block, never resolved" \
   "$k5g_h" "$k5g_p" 'git commit -m "x"' "climbs out with a '..' component"
 
-echo "-- 37g: scope guard — rigor: tested (this suite's FM/frontmatter() default) is a no-op --"
+echo "-- 37g: scope guard — rigor: single (this suite's FM/frontmatter() default) is a no-op --"
 # Same current: 2, same missing field, same project — the only variable is rigor. If the
 # guard were not real this would block exactly like 37b.
-k5g_tested="$(d7_wave_frontmatter tested true)
+k5g_tested="$(d7_wave_frontmatter single true)
 ## SDLC State
 current: 2
 Step 1: in progress
 Step 2: .bionic/docs/specs/epic-01-demo/wave-01-x.spec.md"
 write_project_plan "$k5g_p" "$k5g_tested" > /dev/null
-expect_allow_p "37g rigor: tested → allow (scope guard makes the arm inert)" \
+expect_allow_p "37g rigor: single → allow (scope guard makes the arm inert)" \
   "$k5g_h" "$k5g_p" 'git commit -m "x"'
 
 
@@ -1637,8 +1637,8 @@ k2t_plan() {
   local approved_line=""
   [ -n "$1" ] && approved_line="$1
 "
-  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n| T1 | build | tested | wire the K2.5 arms | active |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n- T1: bash tests/canonical-sdlc-evidence-gate.test.sh 328/328 green\n\n%s\n' \
-    "$(task_frontmatter_rigor tested)" "$approved_line" "${2:-}"
+  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n| T1 | build | single | wire the K2.5 arms | active |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n- T1: bash tests/canonical-sdlc-evidence-gate.test.sh 328/328 green\n\n%s\n' \
+    "$(task_frontmatter_rigor single)" "$approved_line" "${2:-}"
 }
 
 # 38a — current: T1, an honest ledger, a matrix present, NO approved-by →
@@ -1673,8 +1673,8 @@ k2t2_plan() {
   local approved_line=""
   [ -n "$1" ] && approved_line="$1
 "
-  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n| T3 | build | tested | wire the K2.5 arms | active |\n\n## SDLC State\n\nscale: task\ncurrent: T3\n%s\n- T3: bash tests/canonical-sdlc-evidence-gate.test.sh 328/328 green\n\n%s\n' \
-    "$(task_frontmatter_rigor tested)" "$approved_line" "${2:-}"
+  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n| T3 | build | single | wire the K2.5 arms | active |\n\n## SDLC State\n\nscale: task\ncurrent: T3\n%s\n- T3: bash tests/canonical-sdlc-evidence-gate.test.sh 328/328 green\n\n%s\n' \
+    "$(task_frontmatter_rigor single)" "$approved_line" "${2:-}"
 }
 h38e=$(make_home)
 write_plan "$h38e" "$(k2t2_plan "" "$k2_matrix_full")" > /dev/null
@@ -1703,7 +1703,7 @@ done
 # A plan authored at Step 3 carries one `- T<n>:` line per `## Tasks` row BEFORE any writer
 # runs, because the first writer's commit moves `current:` to `T<n>` and the gate then
 # demands the addressed row's line (wave-18: eight writers refused at once for the lack of
-# it). At `rigor: audited` that line must also be proof-shaped — a digit plus a `/` or a
+# it). At `rigor: double` that line must also be proof-shaped — a digit plus a `/` or a
 # backtick — so the charter's bare `pending dispatch` is refused as prose one lane below the
 # placeholder ban. The spelling is READ FROM THE RENDERED steps/3.md, not restated here: the
 # rows below pin that what the text tells a planner to write is what the gate admits.
@@ -1718,17 +1718,17 @@ s38s_stub() {  # <n> -> the text's stub for row T<n> of wave 19
   printf '%s' "$S38S_TPL" | sed -e "s/<n>/$1/g" -e 's/<wave>/19/g'
 }
 
-# s38s_plan <T1 evidence> <T2 evidence> -> an audited task-scale plan at current: T1,
+# s38s_plan <T1 evidence> <T2 evidence> -> an double task-scale plan at current: T1,
 # approved, every AC naming a fails-when, both rows still pending — the first writer's commit.
 s38s_plan() {
-  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n| T1 | build | audited | the first row dispatched | pending | .worktrees/19-T1 |\n| T2 | build | audited | a row not yet dispatched | pending | .worktrees/19-T2 |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n\n- T1: %s\n- T2: %s\n\n%s\n' \
-    "$(task_frontmatter_rigor audited)" "$K2_APPROVED" "$1" "$2" "$k2_matrix_full"
+  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n| T1 | build | double | the first row dispatched | pending | .worktrees/19-T1 |\n| T2 | build | double | a row not yet dispatched | pending | .worktrees/19-T2 |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n\n- T1: %s\n- T2: %s\n\n%s\n' \
+    "$(task_frontmatter_rigor double)" "$K2_APPROVED" "$1" "$2" "$k2_matrix_full"
 }
 
 # 38s1 — only the stubs, spelled as the text spells them → admitted.
 h38s1=$(make_home)
 write_plan "$h38s1" "$(s38s_plan "$(s38s_stub 1)" "$(s38s_stub 2)")" > /dev/null
-expect_allow "38s1 AC-12.1 — audited plan at current: T1 carrying only the text's stubs → allow" \
+expect_allow "38s1 AC-12.1 — double plan at current: T1 carrying only the text's stubs → allow" \
   "$h38s1" 'git commit -m "x"'
 
 # 38s2 — the addressed row's stub is a bare `pending` → refused (the placeholder ban).
@@ -1737,11 +1737,11 @@ write_plan "$h38s2" "$(s38s_plan "pending" "$(s38s_stub 2)")" > /dev/null
 expect_block "38s2 AC-12.1 — …and a bare 'pending' stub on the addressed row → block" \
   "$h38s2" 'git commit -m "x"' "task T1 evidence line is a placeholder"
 
-# 38s3 — the stub without its worktree path is prose at audited → refused. This is why the
-# text's spelling carries the path: the path is the digit and the '/' the audited lane reads.
+# 38s3 — the stub without its worktree path is prose at double → refused. This is why the
+# text's spelling carries the path: the path is the digit and the '/' the double lane reads.
 h38s3=$(make_home)
 write_plan "$h38s3" "$(s38s_plan "pending dispatch" "$(s38s_stub 2)")" > /dev/null
-expect_block "38s3 AC-12.1 — …and 'pending dispatch' with no path is refused as prose at audited" \
+expect_block "38s3 AC-12.1 — …and 'pending dispatch' with no path is refused as prose at double" \
   "$h38s3" 'git commit -m "x"' "task T1 evidence must show a command + counts, not prose"
 
 # ============================================================
@@ -2073,14 +2073,14 @@ r3_pre14_tasks="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | the dispatched unit | done |"
+| T1 | build | double | the dispatched unit | done |"
 
 r3_pre14_plan() {
   # d7_wave_frontmatter, not matrix_frontmatter: the requirements and fails-when arms are
-  # guarded to `rigor: audited` + `multi_agent: true` + wave|epic (walls.sh's D7 guard), and
+  # guarded to `rigor: double` + `multi_agent: true` + wave|epic (walls.sh's D7 guard), and
   # matrix_frontmatter writes no `multi_agent:` line at all — a fixture built on it would
   # exercise only the two unguarded halves and call that the whole list.
-  printf '%s\n' "$(d7_wave_frontmatter audited true)"
+  printf '%s\n' "$(d7_wave_frontmatter double true)"
   printf '## Overview\n\nA plan written to the pre-14 contract.\n\n'
   printf '## SDLC State\ncurrent: 5\nStep 1: opened 2026-09-19T22:00Z; research record/w16/r.md\nStep 5:\n%s\n- T1: bash suite 9/9 green\n\n' "$step5_base"
   printf '%s\n\n' "$r3_pre14_tasks"
@@ -2133,7 +2133,7 @@ expect_absent "R3e AC-3.2 the worktree lead-in does not print when the table has
 # column, and no row naming this tree, still prints the lead-in — so R3e read a suppression
 # and not a hook that stopped printing lead-ins.
 r3_wt_plan() {
-  printf '%s\n' "$(d7_wave_frontmatter audited true)"
+  printf '%s\n' "$(d7_wave_frontmatter double true)"
   printf '## Goal\n\nThe control.\n\n'
   printf '## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-19T00:00Z "approved"\nStep 1: requirements: record/w16/r.md\nStep 5:\n%s\n- T1: bash suite 9/9 green\n\n' "$step5_base"
   printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
@@ -2180,10 +2180,10 @@ r3_pre14_tasks_pending="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | the dispatched unit | pending |"
+| T1 | build | double | the dispatched unit | pending |"
 
 r3s_frontmatter() {  # d7_wave_frontmatter + the misleading Step-0 stamp, inserted in place
-  d7_wave_frontmatter audited true | awk '/^---$/ && ++n == 2 { print "sdlc-step: 3" } { print }'
+  d7_wave_frontmatter double true | awk '/^---$/ && ++n == 2 { print "sdlc-step: 3" } { print }'
 }
 r3s_plan() {
   printf '%s\n' "$(r3s_frontmatter)"
@@ -2220,7 +2220,7 @@ expect_contains "R3s3(1) …the pre-14 table that arms the predicate" \
 expect_contains "R3s3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3s3(3) …the second" \
-  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3s3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3s3(5) …and the matrix's fails-when, owed from the same step" \
@@ -2276,7 +2276,7 @@ expect_contains "R3t3(1) …the pre-14 table that arms the predicate" \
 expect_contains "R3t3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3t3(3) …the second" \
-  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3t3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3t3(5) …and the matrix's fails-when, owed from the same step" \
@@ -2326,7 +2326,7 @@ expect_contains "R3u3(1) …the pre-14 table that arms the predicate" \
 expect_contains "R3u3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3u3(3) …the second" \
-  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3u3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3u3(5) …and the matrix's fails-when, owed from the same step" \
@@ -2362,7 +2362,7 @@ expect_contains "R3v3(1) …the pre-14 table that arms the predicate" \
 expect_contains "R3v3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3v3(3) …the second" \
-  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3v3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3v3(5) …and the matrix's fails-when, owed from the same step" \
@@ -2412,7 +2412,7 @@ section "R3 — AC-3.3: 'requirements:' is read anywhere on the Step-1 line (see
 # fails-when: the B11 line is refused, or a line with NO requirements pointer is admitted.
 # [REQ-3 POINTER-TOLERANCE SECTION: BEGIN]
 r3b11_plan() {  # $1 = the Step-1 line's text after "Step 1: "
-  printf '%s\n' "$(d7_wave_frontmatter audited true)"
+  printf '%s\n' "$(d7_wave_frontmatter double true)"
   printf '## Goal\n\nThe B11 fixture.\n\n'
   printf '## SDLC State\ncurrent: 4\napproved-by: fixture 2026-09-19T00:00Z "approved"\n- Step 1: %s\nStep 4: opened; evidence record/generic-evidence.md\n\n' "$1"
   printf '%s\n\n' "$tasks_one_done"
@@ -2511,9 +2511,9 @@ v17t_task_none="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | first | pending |
-| T2 | build | audited | the addressed unit | active |
-| T3 | build | audited | third | pending |
+| T1 | build | double | first | pending |
+| T2 | build | double | the addressed unit | active |
+| T3 | build | double | third | pending |
 
 ## SDLC State
 
@@ -2537,8 +2537,8 @@ v17t_task_one="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | first | pending |
-| T2 | build | audited | the addressed unit | active |
+| T1 | build | double | first | pending |
+| T2 | build | double | the addressed unit | active |
 
 ## SDLC State
 
@@ -2555,7 +2555,7 @@ expect_eq "17t2b …and the verdict agrees with itself in number" \
   "bionic: commit refused — 1 task has no evidence line (add one '- T<id>:' per row)" \
   "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
 
-# THE SAME WORDING AT THE OTHER ARM. validate_dispatch_ledger walks every row of an audited
+# THE SAME WORDING AT THE OTHER ARM. validate_dispatch_ledger walks every row of an double
 # multi_agent wave's table; it used to refuse at the FIRST id it found short.
 tasks_three_rows="## Tasks
 
@@ -3137,7 +3137,7 @@ t12_expect_no_note "T12-c missing-fields arm, plain commit → refused, no note"
 
 # 32d/32e — dispatch-ledger arm.
 h32d=$(make_home)
-p32d=$(write_plan "$h32d" "$(task_plan_rigor tested "$ledger_active_no_line")")
+p32d=$(write_plan "$h32d" "$(task_plan_rigor single "$ledger_active_no_line")")
 t12_expect_note_first "T12-d ledger arm, absolute plan path → note is detail line 1" \
   "$h32d" "sed -i 's/x/y/' $p32d && git commit -q -m m"
 t12_expect_note_first "T12-e ledger arm, root-relative plan path → note is detail line 1" \
@@ -3228,14 +3228,14 @@ hD4f=$(make_home)
 write_plan "$hD4f" "$(d7_wave_plan "$(sD4_tasks w21-T2 pending)" "- T1: bash suite 9/9 green")" > /dev/null
 expect_allow "D4f a pending row with no line commits" "$hD4f" 'git commit -m "x"'
 
-# D4g — TASK SCALE: a non-addressed `active` row with no line, on an audited plan. The table
+# D4g — TASK SCALE: a non-addressed `active` row with no line, on an double plan. The table
 # has no agent column, so the row is self-owned; with no roster at all it commits.
 vD4g="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
-| T1 | build | audited | do the thing | active |
-| T2 | build | tested | second thing, in flight | active |
+| T1 | build | double | do the thing | active |
+| T2 | build | single | second thing, in flight | active |
 
 ## SDLC State
 
@@ -3271,7 +3271,7 @@ write_plan "$hD4h3" "$(task_plan "$v22ct_bad_enum")" > /dev/null
 expect_block "D4h3 22c-t2's six-column fixture is still refused, naming the enum" "$hD4h3" 'git commit -m "x"' \
   "task T1 has invalid status 'wip' (want pending|active|done|dropped)"
 hD4h4=$(make_home)
-write_plan "$hD4h4" "$(task_plan_rigor tested "$ledger_bad_status")" > /dev/null
+write_plan "$hD4h4" "$(task_plan_rigor single "$ledger_bad_status")" > /dev/null
 run_hook "$hD4h4" 'git commit -m "x"'
 expect_eq "D4h4 19f's fixture: exit 0" "0" "$HOOK_EXIT"
 expect_contains "D4h5 …and the finding line byte for byte" \
@@ -3377,16 +3377,15 @@ expect_block "HEADd3 …and a head the working branch does not hold → block" \
   "$hHd" 'git commit -m "x"' "does not contain head:"
 
 # ============================================================
-section "§RIGOR — a plan in either vocabulary is judged alike by the evidence gate (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35)"
+section "§RIGOR — the evidence gate judges single and double, and refuses a plan or a cell carrying any other word, naming the two (wave-28 T44; wave-30 T11: REQ-1 AC-1.4, D1)"
 # ============================================================
-# Each fixture below is one this suite already pins in the old words. Its twin is the same plan
-# with every rigor word (the frontmatter `rigor:` and each `## Tasks` rigor cell) written in the new
-# vocabulary: tested → low, peer-reviewed → medium, audited → high. The gate must give the twin the
-# verdict it gives the original, word for word on the user's line. The fixtures themselves are not
+# Each fixture below is one this suite already pins, written in the two levels. Its twin is the
+# same plan with its frontmatter `rigor:` written in a word before 1.14.0 (single → low, double →
+# high): the gate refuses the twin on its rigor, whatever the plan's own verdict, because a plan
+# whose rigor names no level cannot run under a guessed one. The fixtures themselves are not
 # changed; a twin is derived from them here.
-eg_rv_twin() {  # <plan text> -> the same plan in the new words
-  sed -E 's/^rigor: tested$/rigor: low/; s/^rigor: peer-reviewed$/rigor: medium/; s/^rigor: audited$/rigor: high/
-          s/\| tested \|/| low |/g; s/\| peer-reviewed \|/| medium |/g; s/\| audited \|/| high |/g'
+eg_rv_twin() {  # <plan text> -> the same plan with its rigor written in a word before 1.14.0
+  sed -E 's/^rigor: single$/rigor: low/; s/^rigor: double$/rigor: high/'
 }
 eg_rv_verdict() {  # <plan text> -> `exit=<n> <the user line>`, the home's path made neutral
   local h; h=$(make_home)
@@ -3394,47 +3393,56 @@ eg_rv_verdict() {  # <plan text> -> `exit=<n> <the user line>`, the home's path 
   run_hook "$h" 'git commit -m "x"'
   printf 'exit=%s %s' "$HOOK_EXIT" "$(printf '%s\n' "$HOOK_STDERR" | head -1 | sed "s#$h#HOME#g")"
 }
+EG_RV_REFUSED="exit=2 bionic: commit refused — this plan's rigor is not single or double (use single or double)"
 eg_rv_pair() {  # <label> <want exit> <plan text>
   local tw old new
   tw="$(printf '%s\n' "$3" | eg_rv_twin)"
-  expect_ne "§RIGOR $1: the twin carries the new words" "$3" "$tw"
-  old="$(eg_rv_verdict "$3")"; new="$(eg_rv_verdict "$tw")"
-  expect_eq "§RIGOR $1: the old-word plan exits $2" "exit=$2" "${old%% *}"
-  expect_eq "§RIGOR $1: the new-word twin gets the same verdict" "$old" "$new"
+  expect_ne "§RIGOR $1: the twin carries a word before 1.14.0" "$3" "$tw"
+  new="$(eg_rv_verdict "$3")"; old="$(eg_rv_verdict "$tw")"
+  expect_eq "§RIGOR $1: the plan exits $2" "exit=$2" "${new%% *}"
+  expect_eq "§RIGOR $1: the twin is refused on its rigor, naming the two" "$EG_RV_REFUSED" "$old"
 }
-eg_rv_pair "22b1 medium cell, prose evidence" 2 "$(task_plan_rigor tested "$v22b_t2_prose")"
-eg_rv_pair "22b7 low cell, prose evidence" 0 "$(task_plan_rigor tested "$v22b_t2_tested_prose")"
-eg_rv_pair "22c1 high plan, bad status" 2 "$(task_plan "$v22c_bad_enum")"
-eg_rv_pair "22c2 medium plan, bad status" 0 "$(task_plan_rigor peer-reviewed "$v22c_bad_enum")"
-eg_rv_pair "22d1 low plan, medium cell" 2 "$(task_plan_rigor tested "$v22d1_body")"
-eg_rv_pair "22d2 high plan, low cell, no waiver" 2 "$(task_plan "$v22d2_body")"
-eg_rv_pair "22d2b high plan, low cell, waiver" 0 "$(task_plan "$v22d2b_body")"
-eg_rv_pair "22c5 high multi_agent wave, no ## Tasks" 2 "$(d7_wave_plan "" "")"
-eg_rv_pair "22c9 medium multi_agent wave, no ## Tasks" 0 "$(d7_wave_plan "" "" peer-reviewed true)"
-eg_rv_pair "32a low wave at 6, auditor cells empty" 0 "$(plan_rigor tested 6 "$step6_body" "$m32_empty_aud")"
-eg_rv_pair "32e low wave at 5, no auditor pointer" 0 "$(plan_rigor tested 5 "$step5_noaud" "$m32_empty_aud")"
-eg_rv_pair "32 high wave at 5, no auditor pointer" 2 "$(plan_rigor audited 5 "$step5_noaud" "$m32_empty_aud")"
+eg_rv_pair "22b1 double cell, prose evidence" 2 "$(task_plan_rigor single "$v22b_t2_prose")"
+eg_rv_pair "22b7 single cell, prose evidence" 0 "$(task_plan_rigor single "$v22b_t2_tested_prose")"
+eg_rv_pair "22c1 double plan, bad status" 2 "$(task_plan "$v22c_bad_enum")"
+eg_rv_pair "22c2 single plan, bad status" 0 "$(task_plan_rigor single "$v22c_bad_enum")"
+eg_rv_pair "22d1 single plan, double cell" 2 "$(task_plan_rigor single "$v22d1_body")"
+eg_rv_pair "22d2 double plan, single cell, no waiver" 2 "$(task_plan "$v22d2_body")"
+eg_rv_pair "22d2b double plan, single cell, waiver" 0 "$(task_plan "$v22d2b_body")"
+eg_rv_pair "22c5 double multi_agent wave, no ## Tasks" 2 "$(d7_wave_plan "" "")"
+eg_rv_pair "22c9 single multi_agent wave, no ## Tasks" 0 "$(d7_wave_plan "" "" single true)"
+eg_rv_pair "32a single wave at 6, auditor cells empty" 0 "$(plan_rigor single 6 "$step6_body" "$m32_empty_aud")"
+eg_rv_pair "32e single wave at 5, no auditor pointer" 0 "$(plan_rigor single 5 "$step5_noaud" "$m32_empty_aud")"
+eg_rv_pair "32 double wave at 5, no auditor pointer" 2 "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")"
 
-# ACROSS THE VOCABULARIES: a floor and a cell in different words still compare as levels.
+# A FLOOR AND A CELL COMPARE AS LEVELS, and a cell in a word before 1.14.0 is no level at all.
 eg_rv_mixed() {  # <label> <frontmatter word> <cell word> <want exit>
   local body
-  body="$(printf '%s\n' "$v22d2_body" | sed -E "s/\\| tested \\|/| $3 |/")"
+  body="$(printf '%s\n' "$v22d2_body" | sed -E "s/\\| single \\|/| $3 |/")"
   h=$(make_home); write_plan "$h" "$(task_plan_rigor "$2" "$body")" > /dev/null
   run_hook "$h" 'git commit -m "x"'
   expect_eq "§RIGOR mixed $1" "$4" "$HOOK_EXIT"
 }
-eg_rv_mixed "plan high, cell tested: a downgrade" high tested 2
-eg_rv_mixed "plan audited, cell low: a downgrade" audited low 2
-eg_rv_mixed "plan low, cell tested: the same level" low tested 0
-eg_rv_mixed "plan tested, cell low: the same level" tested low 0
+eg_rv_mixed "plan double, cell single: a downgrade" double single 2
+eg_rv_mixed "plan double, cell audited: no level, refused" double audited 2
+eg_rv_mixed "plan single, cell single: the same level" single single 0
+eg_rv_mixed "plan single, cell tested: no level, refused" single tested 2
 
-# A SEVENTH WORD IN A CELL is refused, and the refusal names the three levels by their new words.
+# EACH WORD BEFORE 1.14.0 IN A CELL is refused as `standard` is, naming the two levels.
+for eg_rv_old in low tested medium peer-reviewed high audited; do
+  h=$(make_home)
+  write_plan "$h" "$(task_plan_rigor single "$(printf '%s\n' "$v22b_t2_tested_prose" | sed -E "s/\\| single \\| fix/| $eg_rv_old | fix/")")" > /dev/null
+  expect_block "§RIGOR a '$eg_rv_old' cell is refused" "$h" 'git commit -m "x"' "invalid rigor '$eg_rv_old'"
+  expect_contains "§RIGOR …naming the two levels" "(want single or double)" "$HOOK_VSTDERR"
+done
+
+# A WORD THAT IS NO LEVEL IN A CELL is refused, and the refusal names the two levels.
 h=$(make_home)
-write_plan "$h" "$(task_plan_rigor low "$(printf '%s\n' "$v22b_t2_tested_prose" | sed -E 's/\| tested \| fix/| standard | fix/')")" > /dev/null
-expect_block "§RIGOR seventh word: a 'standard' cell is refused" "$h" 'git commit -m "x"' "invalid rigor 'standard'"
-expect_contains "§RIGOR seventh word: …naming low, medium and high" "low, medium or high" "$HOOK_VSTDERR"
-for eg_rv_old in tested peer-reviewed audited; do
-  expect_absent "§RIGOR seventh word: …and not the old word $eg_rv_old, on its line or in its detail" "$eg_rv_old" "$HOOK_VSTDERR"
+write_plan "$h" "$(task_plan_rigor single "$(printf '%s\n' "$v22b_t2_tested_prose" | sed -E 's/\| single \| fix/| standard | fix/')")" > /dev/null
+expect_block "§RIGOR a 'standard' cell is refused" "$h" 'git commit -m "x"' "invalid rigor 'standard'"
+expect_contains "§RIGOR …naming single and double" "single or double" "$HOOK_VSTDERR"
+for eg_rv_old in "low, medium or high" "medium" "three"; do
+  expect_absent "§RIGOR …and not the set before 1.14.0 ('$eg_rv_old'), on its line or in its detail" "$eg_rv_old" "$HOOK_VSTDERR"
 done
 
 finish

@@ -589,7 +589,7 @@ cat > "$PLAN_FIX" <<'FIXEOF'
 ---
 sdlc-step: 3
 walk: required
-rigor: peer-reviewed
+rigor: double
 parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 working-branch: wave/99-fixture
 integration-branch: main
@@ -722,7 +722,7 @@ expect_contains "59a: …and T1's kind, depends and agent cells" "implementor" "
 expect_contains "59b: …and T2, whose depends cell is T1" "T2" "$S3"
 expect_contains "60: Parallel width reads the plan's own writer budget" "8 writers" "$S3"
 expect_contains "61: Verification counts the matrix rows" "3 matrix rows" "$S3"
-expect_contains "61a: …and names the walk and the review rigor" "review rigor: medium (two independent readers)" "$S3"
+expect_contains "61a: …and names the walk and the review rigor" "review rigor: double (two independent minds)" "$S3"
 expect_contains "62: the Step-3 card ends at its own approval question" \
   'Do you approve this plan? Reply "approved" to approve it.' "$S3"
 
@@ -928,7 +928,7 @@ T11	REQ-10 (D12): card.sh step1 <requirements.md>, step2 <spec.md>, step3 <plan.
 T16	FOLD-IN (A-T11.5, A-orch-20; REQ-9 AC-9.4 line-width invariant vs AC-9.5 per-batch widening): card.sh never emits a line wider than BIONIC_LINE_WIDTH.	build	T11	senior-implementor
 T12	Step-5 floor, ONCE at the integration head: FARM_OUT_ALLOW=1 BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh in a detached worktree at the head after T1–T11 and T16 land, output to record/wave-15-fixit-182/floor-<sha>.txt; plus the AC-1.1 live read (patrol_verdict against this session's real stamp and transcript → busy) and the AC-10.1 human read (card.sh step1 over this wave's requirements file, shown to Chris) recorded in the walk artifact.	test	T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T16	test-runner
 T13	Step-5 independent auditor over the 45-row matrix at the floored head: falsify each row's evidence at its tier; verdict per row (CONFIRMED / REFUTED / UNVERIFIABLE) to record/wave-15-fixit-182/audit-<sha>.md; Suites: every suite named in the matrix.	verify	T12	auditor
-T14	Step-6 six-axis review (correctness, readability, architecture, security, performance, duplication) at the audited head to record/wave-15-fixit-182/review-summary-<sha>.md; critic only on rows raised to audited (none at approval).	review	T13	senior-implementor
+T14	Step-6 six-axis review (correctness, readability, architecture, security, performance, duplication) at the reviewed head to record/wave-15-fixit-182/review-summary-<sha>.md; critic only on rows raised to double (none at approval).	review	T13	senior-implementor
 T15	Version bump 1.8.2 (plugin manifest, help/version examples, rendered manifest) judged at current: 7; ADR-028 status → Accepted with the ratification note.	build	T14	implementor
 TASKEOF
 TASK_W15="${TASK_W15%$'\n'}"
@@ -1187,7 +1187,7 @@ cat > "$T10_TASK_PLAN" <<'FIXEOF'
 sdlc-step: 3
 scale: task
 walk: exempt
-rigor: audited
+rigor: double
 parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 ---
 
@@ -1213,8 +1213,8 @@ current: T1
 
 | id | intent | rigor | description | status | worktree |
 |---|---|---|---|---|---|
-| T1 | build | audited | The first unit in one line. It has a second sentence the card does not show. | pending | .worktrees/18-T1 |
-| T2 | test | peer-reviewed | The second unit in one line. | pending | .worktrees/18-T2 |
+| T1 | build | double | The first unit in one line. It has a second sentence the card does not show. | pending | .worktrees/18-T1 |
+| T2 | test | single | The second unit in one line. | pending | .worktrees/18-T2 |
 | T3 | doc | self-verified | The third unit, already landed. | done | — |
 
 ## Verification Matrix
@@ -1259,9 +1259,9 @@ expect_eq "156: AC-4.1 — T1's worktree cell starts at the worktree heading's c
 expect_eq "156a: …and T1's status cell at the status heading's column" \
   "$(col_of "$T10_HDR" "status")" "$(col_of "$T10_ROW1" "pending")"
 expect_eq "156b: …and T1's rigor cell at the rigor heading's column" \
-  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW1" "high")"
+  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW1" "double")"
 expect_eq "156c: …and T2's rigor cell too, so the batch width holds for both rows" \
-  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW2" "medium")"
+  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW2" "single")"
 expect_contains "156d: …and the description column carries the unit's first sentence" \
   "The first unit in one line." "$T10_ROW1"
 expect_absent "156e: …and not the rest of the description cell" \
@@ -1314,7 +1314,7 @@ cat > "$T10_WAVE_2B" <<'FIXEOF'
 sdlc-step: 3
 scale: wave
 walk: required
-rigor: audited
+rigor: double
 parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 working-branch: wave/98-twobatch
 integration-branch: main
@@ -1708,7 +1708,7 @@ expect_eq "S3-SHAPE 6: Branches, Tasks, Chain and width, Verification, Artifacts
 # are 0 (five rows), 1 (T2, T5) and 2 (T3) — a card that walked the deps cell would see one batch.
 S3C_PLAN="${T10_ROOT_CFG}/wave-97-chain.plan.md"
 {
-  printf '%s\n' '---' 'sdlc-step: 3' 'scale: wave' 'walk: required' 'rigor: peer-reviewed' \
+  printf '%s\n' '---' 'sdlc-step: 3' 'scale: wave' 'walk: required' 'rigor: double' \
     'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' \
     'working-branch: wave/97-chain' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
     '# fixture wave 97 · plan' '' '## Goal' '' 'Run eight tasks whose chain and width are known.' '' \
@@ -1871,44 +1871,56 @@ expect_eq "W27-42j: …and prints exactly what it printed before the column exis
     "    second thing owner lib/second.sh  surfaces the fixture card       test tests/second.test.sh")" \
   "$W27_OWN_OLD"
 
-section "Section W28-44: T44 — §RIGOR-PRINT, a level prints with its label and its meaning (AC-16.2; D35)"
-# A level prints as `review rigor: <level> (<one|two|three> independent reader[s])`, from lib/run.sh
-# `rigor_print`, and never by an old word, whichever word the plan carries. `card.sh rigor <word>`
-# is the Step 0 card's rigor line; the Step-3 card's Verification block and a task-scale card's
-# rigor column print the level. The plans here are the fixtures above, unchanged: one carries
-# `rigor: peer-reviewed`, the task-scale one `rigor: audited` with `audited` and `peer-reviewed` cells.
-for rp_pair in tested:"review rigor: low (one independent reader)" \
-               low:"review rigor: low (one independent reader)" \
-               peer-reviewed:"review rigor: medium (two independent readers)" \
-               medium:"review rigor: medium (two independent readers)" \
-               audited:"review rigor: high (three independent readers)" \
-               high:"review rigor: high (three independent readers)"; do
+section "Section W28-44: T44 — §RIGOR-PRINT, a level prints with its meaning; §RIGOR, the two levels and no other word (AC-16.2; wave-30 T11: AC-1.4, D1)"
+# A level prints as `review rigor: <level> (<one|two> independent mind[s])`, from lib/run.sh
+# `rigor_print`, and only `single` and `double` are levels: a word before 1.14.0 is refused like
+# any other word. `card.sh rigor <word>` is the Step 0 card's rigor line; the Step-3 card's
+# Verification block prints the plan's level, and a task-scale card's rigor column prints each
+# cell as written. The plans here are the fixtures above: one carries `rigor: double`, the
+# task-scale one `rigor: double` with a `double` and a `single` cell.
+for rp_pair in single:"review rigor: single (one independent mind)" \
+               double:"review rigor: double (two independent minds)"; do
   whole_card rigor "${rp_pair%%:*}"
   expect_eq "RP1 the Step 0 rigor line of a plan carrying ${rp_pair%%:*}" "${rp_pair#*:}" "$WC_OUT"
   expect_eq "RP1 …exits 0" "0" "$WC_RC"
 done
+# §RIGOR: THE SIX WORDS BEFORE 1.14.0 ARE NO LEVEL. Each is refused as `standard` is, naming the two.
+for rp_old in low tested medium peer-reviewed high audited; do
+  whole_card rigor "$rp_old"
+  expect_eq "RP1x §RIGOR the word $rp_old is no level: exit 1" "1" "$WC_RC"
+  expect_contains "RP1x …and stderr names the two levels" "use single or double" "$WC_ERR"
+done
 whole_card rigor standard
-expect_eq "RP2 a seventh word is no level: exit 1" "1" "$WC_RC"
-expect_contains "RP2 …and stderr names the three levels" "low, medium or high" "$WC_ERR"
+expect_eq "RP2 a word that is no level: exit 1" "1" "$WC_RC"
+expect_contains "RP2 …and stderr names the two levels" "use single or double" "$WC_ERR"
 
 whole_card step3 "$T10_TASK_PLAN"; RP_TASK="$WC_OUT"
-expect_contains "RP3 the Step 3 card of a plan carrying audited prints its level, label and meaning" \
-  "review rigor: high (three independent readers)" "$RP_TASK"
+expect_contains "RP3 the Step 3 card of a plan carrying double prints its level and meaning" \
+  "review rigor: double (two independent minds)" "$RP_TASK"
 RP_ROW1="$(printf '%s\n' "$RP_TASK" | grep -m1 '^    T1 ')"
 RP_ROW2="$(printf '%s\n' "$RP_TASK" | grep -m1 '^    T2 ')"
 RP_HDR="$(printf '%s\n' "$RP_TASK" | grep -m1 '^  Tasks')"
-expect_eq "RP4 T1's audited cell prints as high, under the rigor heading" \
-  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW1" "high")"
-expect_eq "RP4 …and T2's peer-reviewed cell as medium" \
-  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW2" "medium")"
+expect_eq "RP4 T1's double cell prints as double, under the rigor heading" \
+  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW1" "double")"
+expect_eq "RP4 …and T2's single cell as single" \
+  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW2" "single")"
 expect_contains "RP4 …and a cell that names no level prints as written" "self-verified" "$RP_TASK"
-for rp_old in tested peer-reviewed audited; do
-  expect_absent "RP5 the task-scale card never prints the old word $rp_old" "$rp_old" "$RP_TASK"
+# The printed form before 1.14.0 counted readers, up to three; RP3 is the positive on this card.
+for rp_old in "independent reader)" "independent readers)" "three independent"; do
+  expect_absent "RP5 the task-scale card never prints the old form '$rp_old'" "$rp_old" "$RP_TASK"
 done
 whole_card step3 "$PLAN_FIX"; RP_WAVE="$WC_OUT"
-expect_contains "RP6 the Step 3 card of a plan carrying peer-reviewed prints medium, labelled" \
-  "review rigor: medium (two independent readers)" "$RP_WAVE"
-expect_absent "RP6 …and not the old word" "peer-reviewed" "$RP_WAVE"
+expect_contains "RP6 the Step 3 card of a plan carrying double prints double, with its meaning" \
+  "review rigor: double (two independent minds)" "$RP_WAVE"
+expect_absent "RP6 …and not the old printed form" "independent readers" "$RP_WAVE"
+# §RIGOR: a plan still carrying a word before 1.14.0 is shown as no level, naming the two.
+RP_OLD_PLAN="$(dirname "$PLAN_FIX")/rp-old-word.plan.md"
+sed 's/^rigor: double$/rigor: audited/' "$PLAN_FIX" > "$RP_OLD_PLAN"
+expect_contains "RP7 §RIGOR precondition: the doctored plan carries the old word" "rigor: audited" "$(cat "$RP_OLD_PLAN")"
+whole_card step3 "$RP_OLD_PLAN"
+expect_contains "RP7 §RIGOR a plan carrying audited is shown as no level, naming the two" \
+  "review rigor: 'audited' is no level (single or double)" "$WC_OUT"
+rm -f "$RP_OLD_PLAN"
 
 section "INHERIT — wave-28 T43 (AC-8.10, D21): the Step 1 card lists every deferral the newest continuation left open"
 # A deferral is faced again. Close-out writes each open deferral under `## Deferrals` of the run's

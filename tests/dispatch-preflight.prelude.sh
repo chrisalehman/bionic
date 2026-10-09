@@ -122,7 +122,7 @@ SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 # pre-task-4/3 pass case silently exercise the absence path instead
 # (.claude/rules/test-harness.md, "Fixture fidelity"). The absence path gets its
 # own bare-brief fixture in S10c, and both directions are asserted.
-BRIEF_FULL='Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · audited · wave.
+BRIEF_FULL='Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
 Your task: implement the widget behind the existing seam.
 Scope constraint: touch only lib/widget.sh and its paired suite.
 Expected artifact: .bionic/docs/record/w99-widget.txt
@@ -510,7 +510,7 @@ make_repo() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 ---
 
@@ -809,7 +809,7 @@ s27_impact() {
   printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$repo" > "$repo/.bionic/config.yaml"
 }
 
-BRIEF_FILES='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · audited · wave.
+BRIEF_FILES='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · double · wave.
 Your task: build the widget.
 Expected artifact: .bionic/docs/record/w99-files.md
 Expected duration: ~20 minutes.
@@ -873,7 +873,7 @@ pf_plan() {
   local repo="$1" head="$2" row; shift 2
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: audited\nscale: wave\n---\n\n# Test wave plan\n\n'
+    printf 'intent: build\nrigor: double\nscale: wave\n---\n\n# Test wave plan\n\n'
     printf '## SDLC State\n\n'
     printf 'integration-branch: main\nworking-branch: wave/99-test\ncurrent: 5\n'
     printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n\n'

@@ -576,7 +576,7 @@ s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2
     printf '|---|---|---|---|---|---|\n'
     printf '| T1 | bugfix | standard | the unit in flight | active | 18-T1 |\n'
     printf '| T2 | bugfix | standard | the next unit | pending | — |\n'
-    printf '| T3 | bugfix | audited | the unit after that | pending | — |\n'
+    printf '| T3 | bugfix | double | the unit after that | pending | — |\n'
   } > "$f"
   touch "$f"
   printf '%s' "$f"
@@ -617,7 +617,7 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
   branch: wave/01-fixture'
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
     printf '# fixture wave\n\n## SDLC State\n\ncurrent: %s\n' "$cur"
