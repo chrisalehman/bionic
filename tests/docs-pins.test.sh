@@ -6786,7 +6786,6 @@ expect_absent "W30-H4: …and the paragraph no longer says nothing writes it" "N
 
 # ============================================================
 section "§REGRESSION-WORD (wave-30 T23; REQ-4 AC-4.7, D10): the doctrine says regression, and the verbs and keys still spell floor"
-# =====================================================
 # ============================================================
 # WHAT THIS OWNS. "floor" meaning the full test run is renamed "regression" in the doctrine a session
 # reads: SKILL.md, steps/5.md, dispatch.md, operational-rules.md and the role files. The verbs and keys
@@ -6855,7 +6854,8 @@ W30R_WRITER='**A message reaches you only when you are idle.**'
 for _w30r in implementor senior-implementor; do
   expect_nonempty "RW-5c: agents/${_w30r}.md says the writer's side of the inbox" "$(w26_hits "$W30R_WRITER" "${REPO}/agents/${_w30r}.md")"
 done
-=======
+
+# ============================================================
 section "§W30-T19 (wave-30 T19; REQ-1 AC-1.2/1.3, REQ-2 AC-2.1/2.2, REQ-10 AC-10.4, REQ-11 AC-11.2; D1, D2, D4, P1-P3): the doctrine says the sitting"
 # ============================================================
 # WHAT THIS OWNS. The words a session reads once review is one decision: the three header fields Step 0
