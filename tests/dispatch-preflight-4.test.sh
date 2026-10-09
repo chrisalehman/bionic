@@ -3026,8 +3026,9 @@ rc_repo() {  # <tag> -> REPO, attested, bound to the fixture wave
 rc_rows() { roster_rows "$(roster_path "$REPO" "$SID_A")"; }
 # rc_plant <root> <plain|unbuilt|slow> -> the path of a copy of the hook beside a library whose roster.sh
 # is the shipped one with `roster_row` replaced: unbuilt returns 2 (the row does not build); slow waits
-# 14 s and then builds the real row, so a wall with no deadline admits it with a row and a wall with one
-# refuses it with none.
+# two seconds past the hook's own DP_DEADLINE_S (read from the hook, wave-30 T35) and then builds the
+# real row, so a wall with no deadline admits it with a row and a wall with one refuses it with none.
+RC_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GATE" | head -1)"
 rc_plant() {
   local root="$1" mode="$2" lib f
   lib="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
@@ -3040,7 +3041,7 @@ rc_plant() {
   case "$mode" in
     unbuilt) printf '%s\n' 'roster_row() { return 2; }' >> "$root/scripts/lib/roster.sh" ;;
     slow)    printf '%s\n' '_rc_f="$(declare -f roster_row)"; eval "_rc_orig_${_rc_f}"' \
-                           'roster_row() { sleep 14; _rc_orig_roster_row "$@"; }' >> "$root/scripts/lib/roster.sh" ;;
+                           "roster_row() { sleep $(( ${RC_DEADLINE:-12} + 2 )); _rc_orig_roster_row \"\$@\"; }" >> "$root/scripts/lib/roster.sh" ;;
   esac
   cp "$GATE" "$root/hooks/dispatch-preflight.sh"
   printf '%s' "$root/hooks/dispatch-preflight.sh"
@@ -3101,7 +3102,7 @@ expect_eq "RC4 …saying so on one line (A-orch-231 2), on a roster path a main-
 expect_eq "RC4 …which is 126 columns, a notice and not a refusal" "126" "$(bionic_cols "$RC4_LINE")"
 expect_status "RC4 …and the decoy was not appended to" "untouched" "$(cat "$DECOY_ROSTER")"
 
-# --- RC5: THE DEADLINE. The wall waits 14 s inside the row's build, past the deadline.
+# --- RC5: THE DEADLINE. The wall waits two seconds past its deadline inside the row's build.
 RC5_GATE="$(rc_plant "$RC_ROOT/slow" slow)"
 rc_repo c5
 GATE="$RC5_GATE"
@@ -3112,7 +3113,7 @@ RC5_LINE="bionic: dispatch refused — the wall ran out of time (dispatch again)
 expect_eq "RC5 …on its own line" "$RC5_LINE" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_eq "RC5 …which is 68 columns" "68" "$(bionic_cols "$RC5_LINE")"
 expect_eq "RC5 …and no row was journalled for the refused launch" "0" "$(rc_rows)"
-expect_true "RC5 …after the deadline, not before it (waited at least 11 s)" test "$GATE_TIME" -ge 11
+expect_true "RC5 …after the deadline, not before it (waited at least $(( ${RC_DEADLINE:-12} - 1 )) s)" test "$GATE_TIME" -ge $(( ${RC_DEADLINE:-12} - 1 ))
 expect_contains "RC5 …the detail names the roster the row would have gone to" "roster-${SID_A}.state" "$GATE_VERR"
 
 # --- RC6: THE DEADLINE IS UNDER THE REGISTRATION. Both numbers are read, not transcribed.

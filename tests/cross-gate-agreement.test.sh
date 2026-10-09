@@ -3088,7 +3088,7 @@ HOOKS_JSON_ROWS=$(jq -r '
 L2_EXPECTED='
 PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/bash-walls.sh|10
 PreToolUse|TaskStop|${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10
-PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|15
+PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|25
 PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Bash|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
@@ -3150,8 +3150,8 @@ L4_HJ_TOTAL=$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$HOOK
 L4_HJ_TIMED=$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(has("timeout"))] | length' "$HOOKS_JSON_SRC")
 expect_eq "the manifest: EVERY hook entry carries a timeout key — none unbounded" \
   "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
-# TEN IS THE CEILING FOR EVERY HOOK BUT ONE (wave-14 T35, ledger D1). The dispatch wall
-# is registered at 15 because its own inner bound is 10 and an inner bound must sit
+# TEN IS THE CEILING FOR EVERY HOOK BUT ONE (wave-14 T35, ledger D1; wave-30 T35). The dispatch
+# wall is registered at 25 because its own inner bound is 20 and an inner bound must sit
 # STRICTLY under its registration or it can never fire (§L.4c below, which pins that pair
 # against lib/bounds.sh). The exception is named here by the hook it belongs to rather
 # than counted away, so a SECOND hook drifting off the ceiling fails this row.
@@ -3159,7 +3159,7 @@ expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10, the di
   "$(jq '[.hooks | to_entries[] | .value[] | .hooks[]
          | select(.timeout != 10)
          | select((.command | test("/dispatch-preflight\\.sh( |$)")) | not)] | length' "$HOOKS_JSON_SRC")"
-expect_eq "…and the one exception is the dispatch wall, at 15, so its 10s bound can fire before the CLI kills the hook" "15" \
+expect_eq "…and the one exception is the dispatch wall, at 25, so its 20s bound can fire before the CLI kills the hook" "25" \
   "$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[]
             | select(.command | test("/dispatch-preflight\\.sh( |$)")) | .timeout] | unique | .[]' "$HOOKS_JSON_SRC")"
 
@@ -3178,7 +3178,7 @@ expect_eq "…and the one exception is the dispatch wall, at 15, so its 10s boun
 L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u \
   | tr '\n' ' ' | sed 's/ $//')
 expect_eq "the manifest renders exactly the two timeout values the fleet has, read as the LAST field" \
-  "10 15" "$L4B_HJ_VALUES"
+  "10 25" "$L4B_HJ_VALUES"
 
 # --- L.4c EVERY INNER BOUND SITS STRICTLY UNDER ITS HOOK'S REGISTRATION ---
 #
@@ -3250,6 +3250,19 @@ for _l4c_pair in "dispatch-preflight.sh|IMPACT_BOUND_S|the dispatch wall" \
   expect_eq "L.4c ${_l4c_who}: ${_l4c_var}=${_l4c_val}s sits strictly under ${_l4c_hook}'s ${_l4c_reg}s registration, margin $(( ${_l4c_reg:-0} - ${_l4c_val:-0} ))s" \
     "under" "$(l4c_verdict "$L4C_BOUNDS" "$_l4c_var" "$_l4c_reg")"
 done
+
+# THE DERIVATION BOUND ALSO SITS UNDER THE WALL'S OWN DEADLINE (wave-30 T35). The dispatch wall
+# carries a whole-hook deadline, DP_DEADLINE_S in hooks/dispatch-preflight.sh, strictly under the
+# same registration; its ALRM trap runs between commands, and the derivation's poll is a run of
+# commands, so a deadline at or under IMPACT_BOUND_S refuses "the wall ran out of time" before the
+# bound can — the bound raised alone (10 -> 20 under a deadline of 12) would buy nothing. Both read.
+L4C_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "${BIONIC_HOOKS_DIR}/dispatch-preflight.sh" | head -1)"
+L4C_IMPACT="$(l4c_bound "$L4C_BOUNDS" IMPACT_BOUND_S)"
+expect_nonempty "L.4c the dispatch wall names its own deadline (not vacuous: read from the hook)" "$L4C_DEADLINE"
+expect_eq "L.4c the derivation bound (${L4C_IMPACT:-?}s) sits strictly under the wall's own deadline (${L4C_DEADLINE:-?}s)" \
+  "under" "$([ -n "$L4C_IMPACT" ] && [ -n "$L4C_DEADLINE" ] && [ "$L4C_IMPACT" -lt "$L4C_DEADLINE" ] 2>/dev/null && echo under || echo 'NOT under')"
+expect_eq "L.4c …and the deadline strictly under the registration ($(l4c_registration dispatch-preflight.sh | head -1)s)" \
+  "under" "$([ -n "$L4C_DEADLINE" ] && [ "$L4C_DEADLINE" -lt "$(l4c_registration dispatch-preflight.sh | head -1)" ] 2>/dev/null && echo under || echo 'NOT under')"
 
 # NOT VACUOUS: a bounds.sh whose inner numbers sit exactly AT their registrations must be
 # judged `NOT under` by the same derivation the rows above ran. At the registration is the
