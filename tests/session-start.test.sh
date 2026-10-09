@@ -150,7 +150,7 @@ write_open_plan() {  # <project> [name] -> plan path on stdout
   {
     printf -- '---\n'
     printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: bugfix\nrigor: tested\nscale: task\n'
+    printf 'intent: bugfix\nrigor: single\nscale: task\n'
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\ncurrent: 3\n'
   } > "$f"
   printf '%s' "$f"
@@ -167,7 +167,7 @@ write_delivered_plan() {  # <project> [name] -> plan path on stdout
   {
     printf -- '---\n'
     printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: bugfix\nrigor: tested\nscale: task\n'
+    printf 'intent: bugfix\nrigor: single\nscale: task\n'
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: 2026-09-02\n'
   } > "$f"
   printf '%s' "$f"

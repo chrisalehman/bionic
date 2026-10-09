@@ -75,7 +75,7 @@ make_repo() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 ---
 
@@ -146,7 +146,7 @@ Exit condition: the paired suite is green.'
 # is refused there, which would have made every LEDGER case below measure that wall
 # instead of the partition it means to measure. The DECLARED spelling, because these
 # fixture repos configure no `impact-command:`.
-BRIEF_OK='Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · audited · wave.
+BRIEF_OK='Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
 Your task: implement the widget behind the existing seam.
 Expected artifact: .bionic/docs/record/w99-widget.txt
 Expected duration: ~25 minutes.

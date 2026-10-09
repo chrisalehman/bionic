@@ -87,7 +87,7 @@ write_plan() {  # <path> <current-line>
   mkdir -p "$(dirname "$1")"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: audited\nscale: wave\n'
+    printf 'intent: build\nrigor: double\nscale: wave\n'
     # A LIVE PLAN CARRIES A MEASURED BUDGET (epic-23 wave-20 T2, REQ-10, D10; ADR-035).
     # `budget_line_of`/`plan_budget_line` (payload/scripts/lib/run.sh) read this line, at
     # column 0 with the colon directly after the key, out of the LEADING frontmatter block
