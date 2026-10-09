@@ -114,7 +114,7 @@ fixture_git() {
 # ---------- the fixture ----------
 
 # fixture_plan_text <archive-root> <current> -> a plan the evidence gate reads clean at
-# current: 9: frontmatter (walk exempt, tested rigor, no named deploy target), a
+# current: 9: frontmatter (walk exempt, single rigor, no named deploy target), a
 # `## SDLC State` naming both branches, and a complete `## Verification Matrix` whose
 # one T1 row owes tier-run/readback/evidence and has them.
 #
@@ -130,7 +130,7 @@ fixture_plan_text() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: n/a
 use_worktree: false
@@ -148,7 +148,7 @@ integration-branch: main
 working-branch: wave/01-fixture
 base: main @ fixture
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 current: ${current}
 approved-by: fixture 2026-09-14T00:00Z "approved"
@@ -346,7 +346,7 @@ mk_census_fixture() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: n/a
 use_worktree: false
@@ -364,7 +364,7 @@ integration-branch: main
 working-branch: ${working}
 base: main @ fixture
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 current: 7
 approved-by: fixture 2026-09-14T00:00Z "approved"
@@ -420,7 +420,7 @@ mk_census_fixture_nowt() {
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: n/a
 use_worktree: false
@@ -438,7 +438,7 @@ integration-branch: main
 working-branch: ${working}
 base: main @ fixture
 intent: bugfix
-rigor: tested
+rigor: single
 scale: wave
 current: 7
 approved-by: fixture 2026-09-14T00:00Z "approved"
@@ -1322,14 +1322,14 @@ section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with n
 # RE-AUTHORED BY wave-27 T14 from T4's pin of the refusal (A-T4.1). The verb no longer
 # dry-commits the plan at Step 8, where the gate asked for the Step-8 block only close-out
 # writes; it asks lib/proof.sh `facts_state` at the working head instead (D3). `mk_fixture`
-# holds what a run at Step 7 owes there (`plant_facts`: at `rigor: tested`, `scale: wave`, the
+# holds what a run at Step 7 owes there (`plant_facts`: at `rigor: single`, `scale: wave`, the
 # floor and the critic's three questions at piece scope and two at whole scope), so `current 8`
 # moves the plan and `close-out.sh run` then delivers, with no hand edit.
 PE="$(mk_fixture e2e)"
 E2E_SID="closeout-e2e-1"
 expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 8 block written and no Step 9 line" "7/0" \
   "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")/$(step_lines "$PE/$PLAN_REL" 9)"
-expect_eq "E2E0b: precondition: it carries the six facts the tested wave run owes" "6" \
+expect_eq "E2E0b: precondition: it carries the six facts the single wave run owes" "6" \
   "$(/usr/bin/grep -c '^proved: ' "$PE/$PLAN_REL" | tr -d ' ')"
 expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before the readings' head" "yes" \
   "$(b="$(sed -n 's/^base-sha: //p' "$PE/$PLAN_REL")"; [ -n "$b" ] && fixture_git "$PE" merge-base --is-ancestor "$b" wave/01-fixture && echo yes || echo no)"

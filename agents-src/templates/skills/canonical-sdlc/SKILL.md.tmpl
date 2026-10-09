@@ -47,7 +47,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 First user-facing action:
 
-> **Canonical SDLC engaged — `<intent> · <level> rigor · <scale>`** (for example `build · high rigor · wave`), then the line `bash <plugin-root>/scripts/card.sh rigor <rigor>` prints, which says what that rigor buys: `review rigor: high (three independent readers)`.
+> **Canonical SDLC engaged — `<intent> · <level> rigor · <scale>`** (for example `build · double rigor · wave`), then the line `bash <plugin-root>/scripts/card.sh rigor <rigor>` prints, which says what that rigor buys: `review rigor: double (two independent minds)`.
 
 Triple not yet declared → say so and list the axes. Invoked as `help` → render the axis tables and stop.
 
@@ -73,11 +73,14 @@ mode.
 
 Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the tests floor `pass == total`. `evidence`: is the proof honest. `adversarial`: what is wrong that nobody asked about. `structure`: is it built from what exists, and shaped well. Rigor sets how many independent readers hold the last three.
 
-| Rigor | Independent readers | Who holds which question |
+Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole.
+
+| | `single` | `double` |
 |---|---|---|
-| `low` | one | critic holds all three |
-| `medium` | two; + a separate spec, and at `scale: task` a proof-shaped ledger row | auditor `evidence`, critic `adversarial` and `structure` |
-| `high` | three; + per-step checkpoint commits, expanded stop-and-wake, and at `scale: wave` a `## Tasks` section in a multi-agent plan | auditor `evidence`, critic `adversarial`, reviewer `structure` |
+| readers | one: the critic holds every question | two: the auditor takes `evidence` |
+| when (`review-cadence:`) | once, at Step 6, on the settled whole | once, at Step 6 |
+| becomes a row unasked (`fix-policy:`) | S1 + S2-on, in-diff | S1 + S2-on, in-diff |
+| cap on review-born rows (`fix-cap:`) | 2 | 10% of the plan |
 
 At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` turns a reading into a fact.
 

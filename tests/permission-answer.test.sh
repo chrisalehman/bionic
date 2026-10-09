@@ -98,7 +98,7 @@ make_project() {
 ---
 canonical_sdlc_version: 14
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 working-branch: $BRANCH
 spec: specs/epic-99/$PLAN_BASE.spec.md
@@ -111,7 +111,7 @@ requirements: specs/epic-99/$PLAN_BASE.requirements.md
 
 integration-branch: main
 intent: build
-rigor: audited
+rigor: double
 scale: wave
 current: 4
 

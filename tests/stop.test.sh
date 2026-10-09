@@ -1451,7 +1451,7 @@ section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floo
 # THE INTEGRATE ROW'S proof:review IS THE JUDGE'S (wave-27 T14; T43, A-orch-82). It is met only
 # when lib/proof.sh `facts_state` answers covered. The tick writes that answer into its digest
 # (`facts_state=`), and the wall hands it to the same ready set. So the plan declares a rigor and
-# a scale the dealing knows (`tested`, `wave`: the floor, and the critic's three piece reads and
+# a scale the dealing knows (`single`, `wave`: the floor, and the critic's three piece reads and
 # two whole reads) and a real base-sha:. The readings are written at the new head by the same
 # writer pair. With one reading missing (FL1b), neither the tick nor the wall offers integrate.
 fl_git() { git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid "${@:2}"; }
@@ -1470,7 +1470,7 @@ fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   fl_git "$d" init -q 2>/dev/null; fl_git "$d" checkout -q -b wave/99-fl 2>/dev/null
   printf '.bionic/\n' > "$d/.gitignore"; fl_git "$d" add .gitignore; fl_git "$d" commit -qm base
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\nrigor: tested\nscale: wave\nbase-sha: %s\n' "$(fl_git "$d" rev-parse HEAD)"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\nrigor: single\nscale: wave\nbase-sha: %s\n' "$(fl_git "$d" rev-parse HEAD)"
     printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 8\nworking-branch: wave/99-fl\n'
     printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 8: in progress\n\n'
@@ -1550,7 +1550,7 @@ ls_world() {  # -> project dir; T3 and T4 pending build rows, T2 active, the ses
   p="$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
     printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\n'

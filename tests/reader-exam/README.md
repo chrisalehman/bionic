@@ -180,7 +180,7 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      `hooks/hooks.json` carries.
 4. **Dispatch the readers** in that session, through the ordinary dispatch path, one dispatch
    per sample and question:
-   - the role the audited dealing gives the sample's question (`facts_owed audited wave` in
+   - the role the double dealing gives the sample's question (`facts_owed double wave` in
      `payload/scripts/lib/proof.sh`): the auditor for `evidence`, the critic for
      `adversarial`, the reviewer for `structure`;
    - and the one-mind case, the critic holding all three questions, on every sample. It is
@@ -278,7 +278,7 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
 
    one `result` line per sample, per question its key names, per role dealt that question:
    `<sample>` is the sample's name and `<role>` is `auditor`, `critic` or `reviewer` (the role
-   the audited dealing gives the question) or `one-mind`. A defect sample holds two lines, the
+   the double dealing gives the question) or `one-mind`. A defect sample holds two lines, the
    dealt role's and the one-mind critic's, both on its keyed question; `clean` holds six, the
    three roles each on their own question and the one-mind critic on each of the three. The
    record heading names the record's section in `exam-sitting.md`. The `sha256` lines are the

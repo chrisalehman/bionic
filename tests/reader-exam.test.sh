@@ -94,7 +94,7 @@ REPO="${BIONIC_SCRIPTS_DIR}"
 EXAM="${REPO}/tests/reader-exam"
 # The digest: the one sha256 reader the payload already carries (reuse, not a fourth copy).
 . "${REPO}/payload/scripts/lib/detect.sh"
-# The dealing: which role the audited rigor deals each question to (`facts_owed`, README step 4),
+# The dealing: which role the double rigor deals each question to (`facts_owed`, README step 4),
 # read from the one table and not restated here.
 . "${REPO}/payload/scripts/lib/proof.sh"
 # The scorer: README step 5, the one a sitting sources (tests/reader-exam/score.sh).
@@ -118,10 +118,10 @@ exam_samples() {
   (cd "$1/tests/reader-exam/samples" 2>/dev/null && for d in */; do [ -d "$d" ] && printf '%s\n' "${d%/}"; done)
 }
 
-# exam_dealt_role <question> — the role the audited dealing gives <question> (`auditor`,
-# `critic` or `reviewer`), from the dealing `facts_owed` holds; nothing when it deals none.
+# exam_dealt_role <question> — the role the double dealing gives <question> (`auditor`,
+# or `critic`, wave-30 T11), from the dealing `facts_owed` holds; nothing when it deals none.
 exam_dealt_role() {
-  facts_owed audited wave 2>/dev/null | awk -F'\t' -v q="$1" \
+  facts_owed double wave 2>/dev/null | awk -F'\t' -v q="$1" \
     '$1 == "review" && $2 == q && $4 == "piece" { sub(/^bionic:/, "", $3); print $3; exit }'
 }
 
@@ -129,7 +129,7 @@ exam_dealt_role() {
 #   pinned                 the latest sitting names each checks file under <root> once, with
 #                          its digest, has a `result` line for every sample under <root> and
 #                          none for any other, a line on each question its sample's key names
-#                          from the role the audited dealing gives that question and from
+#                          from the role the double dealing gives that question and from
 #                          `one-mind` (the critic holding all three), and none on a question
 #                          the key does not name or from a role that is neither `one-mind` nor
 #                          the one dealt its own question, no two lines for one sample and question
@@ -207,7 +207,7 @@ exam_pin() {
     dealt=""
     for q in evidence adversarial structure; do
       r="$(exam_dealt_role "$q")"
-      [ -n "$r" ] || { echo "red: the audited dealing gives $q to no role"; return 1; }
+      [ -n "$r" ] || { echo "red: the double dealing gives $q to no role"; return 1; }
       dealt="${dealt:+$dealt,}$q=$r"
     done
     bad="$(printf '%s\n' "$results" | awk -v s="$s" -v dt="$dealt" '
@@ -338,9 +338,9 @@ printf 'question: structure\nresult: fail\ntoken: check: reuse FAIL\nnames: some
 printf 'question: evidence, adversarial, structure\nresult: pass\ntoken: some-change\n' \
   > "$ROOT/tests/reader-exam/samples/clean/expect.txt"
 
-# fixture_role <question> — the role the audited dealing gives that question, spelled here by
+# fixture_role <question> — the role the double dealing gives that question, spelled here by
 # the fixture (PF0 holds it to the dealing exam_pin reads).
-fixture_role() { case "$1" in evidence) echo auditor ;; adversarial) echo critic ;; structure) echo reviewer ;; esac; }
+fixture_role() { case "$1" in evidence) echo auditor ;; adversarial|structure) echo critic ;; esac; }
 # sitting_block <date> [<question> <wrong hash>] — a sitting section for $ROOT, the hash of
 # checks-<question>.md optionally replaced, and, for each sample and each question its key
 # names, a `met` result line from the role dealt that question and one from the one-mind
@@ -446,15 +446,15 @@ expect_eq "P8: the latest sitting, by file order: the last block governs though 
 
 # Each result line against its sample's key. The fixture's lines reach their keys' results.
 expect_eq "P9: the fixture sitting's dup-counter line reaches its key's fail" \
-  "result dup-counter structure reviewer fail met exam-sitting.md#dup-counter-reviewer-structure" \
-  "$(grep '^result dup-counter structure reviewer ' "$TMP/right.md")"
+  "result dup-counter structure critic fail met exam-sitting.md#dup-counter-critic-structure" \
+  "$(grep '^result dup-counter structure critic ' "$TMP/right.md")"
 expect_eq "P9: the fixture sitting's clean line reaches its key's pass" \
   "result clean evidence auditor pass met exam-sitting.md#clean-auditor-evidence" \
   "$(grep '^result clean evidence auditor ' "$TMP/right.md")"
-sed 's/^result dup-counter structure reviewer fail met/result dup-counter structure reviewer pass met/' "$TMP/right.md" > "$TMP/contra.md"
+sed 's/^result dup-counter structure critic fail met/result dup-counter structure critic pass met/' "$TMP/right.md" > "$TMP/contra.md"
 pin_call "$TMP/contra.md" "$ROOT"
 expect_eq "P9: a met line whose reached pass the key's fail does not admit is red and names the line" \
-  "red: the latest sitting's line 'result dup-counter structure reviewer pass met exam-sitting.md#dup-counter-reviewer-structure' reads met, and dup-counter's key says fail" "$PIN_OUT"
+  "red: the latest sitting's line 'result dup-counter structure critic pass met exam-sitting.md#dup-counter-critic-structure' reads met, and dup-counter's key says fail" "$PIN_OUT"
 expect_status "P9: rc 1" 1 "$PIN_RC"
 sed 's/^result clean evidence auditor pass met/result clean evidence auditor flag met/' "$TMP/right.md" > "$TMP/clean-flag.md"
 pin_call "$TMP/clean-flag.md" "$ROOT"
@@ -495,7 +495,7 @@ expect_contains "P12: a header whose date is not YYYY-MM-DD is red" "'## 2026-1-
 # that question are the role dealt it and the one-mind critic (`one-mind`), and a sitting holds
 # a line from each of them, on that question and no other. right.md is the green one edit away.
 for q in evidence adversarial structure; do
-  expect_eq "P13: the fixture's role for $q is the role the audited dealing gives it" \
+  expect_eq "P13: the fixture's role for $q is the role the double dealing gives it" \
     "$(fixture_role "$q")" "$(exam_dealt_role "$q")"
 done
 { cat "$TMP/right.md"; printf 'result dup-counter evidence auditor fail met h\n'; } > "$TMP/unkeyed.md"
@@ -507,20 +507,20 @@ expect_status "P14: rc 1" 1 "$PIN_RC"
 pin_call "$TMP/unkeyed-missed.md" "$ROOT"
 expect_eq "P14: …a line for an unkeyed question that reads missed is red for the question, not scored" \
   "red: the latest sitting's line 'result dup-counter adversarial one-mind pass missed h' is for a question dup-counter's key does not name (structure)" "$PIN_OUT"
-grep -v '^result dup-counter structure reviewer ' "$TMP/right.md" > "$TMP/onemind-only.md"
-expect_eq "P15: the fixture sitting with the reviewer's line left off holds dup-counter's one-mind line alone" "1" \
+grep -v '^result dup-counter structure critic ' "$TMP/right.md" > "$TMP/onemind-only.md"
+expect_eq "P15: the fixture sitting with the dealt critic's line left off holds dup-counter's one-mind line alone" "1" \
   "$(grep -c '^result dup-counter ' "$TMP/onemind-only.md")"
 pin_call "$TMP/onemind-only.md" "$ROOT"
 expect_eq "P15: a sample holding only the one-mind critic's line is red, naming the sample and the role missing" \
-  "red: the latest sitting has no line for dup-counter from the reviewer on structure" "$PIN_OUT"
+  "red: the latest sitting has no line for dup-counter from the critic on structure" "$PIN_OUT"
 expect_status "P15: rc 1" 1 "$PIN_RC"
 grep -v '^result dup-counter structure one-mind ' "$TMP/right.md" > "$TMP/dealt-only.md"
 pin_call "$TMP/dealt-only.md" "$ROOT"
 expect_eq "P15: …and the dealt reader's line alone is red, naming the one-mind critic" \
   "red: the latest sitting has no line for dup-counter from the one-mind on structure" "$PIN_OUT"
-for role_q in auditor:evidence critic:adversarial reviewer:structure one-mind:evidence; do
+for role_q in auditor:evidence critic:adversarial critic:structure one-mind:evidence; do
   role="${role_q%%:*}"
-  grep -v "^result clean [a-z]* $role " "$TMP/right.md" > "$TMP/clean-no-$role.md"
+  grep -v "^result clean ${role_q#*:} $role " "$TMP/right.md" > "$TMP/clean-no-$role.md"
   expect_eq "P16: clean without its $role lines has fewer lines than the fixture sitting" "true" \
     "$([ "$(grep -c '^result clean ' "$TMP/clean-no-$role.md")" -lt "$(grep -c '^result clean ' "$TMP/right.md")" ] && echo true || echo false)"
   pin_call "$TMP/clean-no-$role.md" "$ROOT"
@@ -538,13 +538,13 @@ expect_eq "P16: a clean sample whose one-mind critic left a question off is red,
 { cat "$TMP/right.md"; printf 'result dup-counter structure nobody fail met h\n'; } > "$TMP/stray-role.md"
 pin_call "$TMP/stray-role.md" "$ROOT"
 expect_eq "P17: a line whose role is outside auditor, critic, reviewer and one-mind is red and names the line" \
-  "red: the latest sitting's line 'result dup-counter structure nobody fail met h' is from a role that is neither the reviewer dealt structure nor one-mind" "$PIN_OUT"
+  "red: the latest sitting's line 'result dup-counter structure nobody fail met h' is from a role that is neither the critic dealt structure nor one-mind" "$PIN_OUT"
 expect_status "P17: rc 1" 1 "$PIN_RC"
-{ cat "$TMP/right.md"; printf 'result dup-counter structure critic fail met h\n'; } > "$TMP/mismatch-role.md"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure auditor fail met h\n'; } > "$TMP/mismatch-role.md"
 pin_call "$TMP/mismatch-role.md" "$ROOT"
 expect_eq "P17: a dealt role on a question that is not its own is red and names the line" \
-  "red: the latest sitting's line 'result dup-counter structure critic fail met h' is from a role that is neither the reviewer dealt structure nor one-mind" "$PIN_OUT"
-{ cat "$TMP/right.md"; printf 'result dup-counter structure reviewer fail met h\n'; } > "$TMP/second-reviewer.md"
+  "red: the latest sitting's line 'result dup-counter structure auditor fail met h' is from a role that is neither the critic dealt structure nor one-mind" "$PIN_OUT"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure critic fail met h\n'; } > "$TMP/second-reviewer.md"
 pin_call "$TMP/second-reviewer.md" "$ROOT"
 expect_eq "P17: a second line from the dealt role on its own question is pinned" "pinned" "$PIN_OUT"
 

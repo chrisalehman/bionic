@@ -14214,41 +14214,49 @@ expect_eq "DEAL mutation: the doctored copy still deals one role per question (i
 expect_ne "DEAL mutation: …and splits from the table, so the double row goes red" \
   "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles double task "$DEAL_MUT")"
 
-# THE RENDERED TABLE IS THE DEALING (wave-27 T17; AC-1.2 rendered half, A-T9.17). SKILL.md's rigor
-# table names, per rigor, who holds which question, in the Interfaces table's words: `<role> holds
-# all three`, or `<role> \`<q>\`[ and \`<q>\`]` joined by `, `. Each row must read back as exactly
-# what `facts_owed` deals that rigor, so the table and the code cannot drift. A doctored copy whose
-# double row hands structure to the critic must split from the dealing.
+# THE RENDERED TABLE IS THE DEALING (wave-27 T17; wave-30 T11, REQ-1, A-orch-37). SKILL.md's rigor
+# table puts the levels in columns (`| | \`single\` | \`double\` |`) and its `readers` row says who
+# holds which question: `the <role> holds every question`, or `the <role> takes \`<q>\`[ and
+# \`<q>\`]`, the questions it does not take staying with the critic, which is dealt at every level.
+# Each level's cell must read back as exactly what `facts_owed` deals that level, so the table and
+# the code cannot drift. A doctored copy whose double cell hands structure to the auditor too must
+# split from the dealing.
 DEAL_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-deal_table() {  # <rigor> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
+deal_levels() {  # [<SKILL.md>] -> the rigor table's level columns, in order, space-joined
+  awk -F'|' '/^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); printf "%s%s", (n++ ? " " : ""), c }; exit }' \
+    "${1:-$DEAL_SKILL}" 2>/dev/null
+}
+deal_table() {  # <level> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
   QS="$DEAL_QS" awk -F'|' -v r="$1" '
-    $2 ~ "^ *`" r "` *$" {
-      nq = split(ENVIRON["QS"], qs, " "); nseg = split($4, seg, ", ")
-      for (i = 1; i <= nseg; i++) {
-        s = seg[i]; sub(/^ +/, "", s); role = s; sub(/ .*/, "", role)
-        if (s ~ /holds all three/) { for (j = 1; j <= nq; j++) held[qs[j]] = role; continue }
+    /^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); if (c == r) col = i }; next }
+    col && $2 ~ /^ *readers *$/ {
+      nq = split(ENVIRON["QS"], qs, " "); s = $col
+      for (j = 1; j <= nq; j++) held[qs[j]] = "critic"
+      if (match(s, /the [a-z]+ holds every question/)) {
+        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role)
+        for (j = 1; j <= nq; j++) held[qs[j]] = role
+      } else if (match(s, /the [a-z]+ takes/)) {
+        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role); s = substr(s, RSTART + RLENGTH)
         while (match(s, /`[a-z]+`/)) { held[substr(s, RSTART + 1, RLENGTH - 2)] = role; s = substr(s, RSTART + RLENGTH) }
-      }
-      for (j = 1; j <= nq; j++) if (held[qs[j]] != "") printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
+      } else exit
+      for (j = 1; j <= nq; j++) printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
       exit
     }' "${2:-$DEAL_SKILL}" 2>/dev/null
 }
-# RE-POINTED (wave-28 T22, AC-16.3): the rendered table names each level by its new word; the
-# dealing still reads the plan's word, old or new, through rigor_level, so each level's row is held
-# to what facts_owed deals its old-word twin.
-for deal_p in low:single medium:double high:double; do
-  deal_r="${deal_p#*:}"; deal_l="${deal_p%%:*}"
-  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_l row the reader parses" \
+expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a level header the reader parses" "$(deal_levels)"
+expect_eq "DEAL table: its level columns are single and double, and no third" "single double" "$(deal_levels)"
+for deal_l in single double; do
+  expect_nonempty "DEAL table precondition: SKILL.md's readers row has a $deal_l cell the reader parses" \
     "$(deal_table "$deal_l")"
-  expect_eq "DEAL table $deal_l: the rendered row equals what facts_owed deals $deal_r" \
-    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_l")"
+  expect_eq "DEAL table $deal_l: the rendered cell equals what facts_owed deals $deal_l" \
+    "$(deal_roles "$deal_l" task)" "$(deal_table "$deal_l")"
 done
 DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
-anchor "$DEAL_SKILL" 'reviewer `structure`' 1
-sed 's/reviewer `structure`/critic `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
-expect_nonempty "DEAL table mutation: the doctored high row still parses" "$(deal_table high "$DEAL_SKILL_MUT")"
-expect_ne "DEAL table mutation: …and splits from the dealing, so the row goes red" \
-  "$(deal_roles double task)" "$(deal_table high "$DEAL_SKILL_MUT")"
+anchor "$DEAL_SKILL" 'two: the auditor takes `evidence`' 1
+sed 's/two: the auditor takes `evidence`/two: the auditor takes `evidence` and `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
+expect_nonempty "DEAL table mutation: the doctored double cell still parses" "$(deal_table double "$DEAL_SKILL_MUT")"
+expect_ne "DEAL table mutation: …and splits from the dealing, so the cell goes red" \
+  "$(deal_roles double task)" "$(deal_table double "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
