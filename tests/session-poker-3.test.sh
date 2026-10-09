@@ -3494,7 +3494,7 @@ poke "$S72R" current 8
 s42_unchanged "73g current 8 with every reading at H2 and the bounded floor unstamped" 1 "$S72P"
 expect_contains "73g2 …prints the judge's floor line" "$(printf 'floor\tuncovered\ta.test.sh b.test.sh c.test.sh')" "$OUT"
 expect_contains "73g3 …and says which suites lack a green run at the head" \
-  "floor: no green run at ${S73H2:0:12} for a.test.sh b.test.sh c.test.sh" "$OUT"
+  "regression: no green run at ${S73H2:0:12} for a.test.sh b.test.sh c.test.sh" "$OUT"
 for s73s in a b c; do s72_run "$s73s.test.sh" "bash tests/$s73s.test.sh"; done
 poke "$S72R" current 8
 expect_eq "73h …with a, b and c green at H2, current 8 is admitted" "0" "$RC"

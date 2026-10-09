@@ -3874,7 +3874,7 @@ expect_eq "FS.2c …and no wait is told for it" "" "$(fs_why)"
 fs_commit newdir/x.sh 'new'
 expect_eq "FS.3 AC-3.4 a new file under a directory no suite names: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.3b …and its wait says the head moved past the proof, gives proof_state's reason, and names the way out" \
-  "proof:floor: the head moved past the floor proof at ${FS_H0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
+  "proof:floor: the head moved past the regression proof at ${FS_H0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
   "$(fs_why)"
 expect_eq "FS.3c …while the extractor reads a real line: the review proof is no wait (paired positive)" "" \
   "$(call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:review") == 1')"

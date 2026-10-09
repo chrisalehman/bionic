@@ -587,7 +587,7 @@ proof_head() {
 #          must be the checkout's HEAD and <n> 0; the runner's verdict after it must read
 #          `Gating: <n> passed, 0 failed`, outside any suite's captured output; and the run must
 #          be WHOLE: <n> passed plus the suites its `Void:` line lists equal the suites at <sha>.
-#          UNLESS THE PROJECT DECLARES ITS FLOOR (wave-28 T75; REQ-17, D36): with a <root> whose
+#          UNLESS THE PROJECT DECLARES ITS REGRESSION (wave-28 T75; REQ-17, D36): with a <root> whose
 #          `.bionic/config.yaml` names `floor:` or `floor-attestation:`, the evidence is judged by
 #          `_proof_floor_declared` instead, and neither the verdict nor the roster is read. With
 #          neither key, or no <root>, this rule stands as it was.
@@ -677,9 +677,9 @@ proof_attested() {
     if [ "$2" != 0 ] || [ "$1" = 0 ]; then
       printf 'the run in %s did not pass (Gating: %s passed, %s failed); fix it, run it again and cite that log' "$ev" "$1" "$2"; return 1
     fi
-    # A FLOOR IS A WHOLE RUN (T52; review 14 N1). The runner's roster is every tests/*.test.sh
+    # A REGRESSION IS A WHOLE RUN (T52; review 14 N1). The runner's roster is every tests/*.test.sh
     # in the tree, with no skip list and no subset mode (a match that is not a suite stops the
-    # run before any verdict), and every suite on it ends passed, failed or void. So a floor's
+    # run before any verdict), and every suite on it ends passed, failed or void. So a regression's
     # passed plus void equals the suites at the head the run read: one git call, here in the
     # verb, never in a wall. A clean tree (dirty=0, checked above) holds no untracked suite.
     if [ "$kind" = floor ]; then
@@ -744,7 +744,7 @@ proof_attested() {
     printf '%s' "$bh"; return 0
   fi
   case "$kind" in
-    floor) printf 'the evidence %s carries no head=<sha> dirty=<n> line; a floor proof cites the log of a full run, whose header prints it' "$ev" ;;
+    floor) printf 'the evidence %s carries no head=<sha> dirty=<n> line; a regression proof cites the log of a full run, whose header prints it' "$ev" ;;
     review) printf 'the evidence %s carries no reviewed: <a>..<b> line; a review proof cites a review whose header names the range it read' "$ev" ;;
     *) printf 'the evidence %s carries neither a head=<sha> dirty=<n> run header nor a reviewed: <a>..<b> line; cite a run log or a review' "$ev" ;;
   esac
@@ -752,7 +752,7 @@ proof_attested() {
 }
 
 # The two sentences a run header that read the wrong tree is refused with: another head, a dirty tree.
-# One spelling each, for the runner's log and for a declared floor's evidence alike. A FLOOR at another
+# One spelling each, for the runner's log and for a declared regression's evidence alike. A REGRESSION at another
 # head is judged by `_proof_floor_since`, which opens with the first sentence only when a full run on
 # the working head is owed, and then says why after a colon (wave-30 T13); a task proof keeps it bare.
 _proof_read_elsewhere() {  # <evidence> <sha it read> <the working head>
@@ -764,7 +764,7 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 }
 
 # _proof_floor_since <evidence> <sha it read> <the working head> <checkout> <plan> <root> [<attestation>]
-# -> exit 0 when a floor run at <sha> stands for the working head; or exit 1 with the refusal's
+# -> exit 0 when a regression run at <sha> stands for the working head; or exit 1 with the refusal's
 # sentence (wave-30 T13; REQ-4 AC-4.4; D7, design-ledger Delta-6b, A-orch-16).
 #
 # THE PROOF IS A FACT ABOUT CODE. A full run at F proves F; what landed between F and the working
@@ -853,13 +853,13 @@ proof_stamps_lacking() {
   [ -n "$lack" ] || return 0
   printf '%s\n' "$lack"; return 1
 }
-# proof_floor_words <head> -> reads facts_state's lines on stdin and prints, for a floor line that names
-# suites (`floor<TAB>uncovered<TAB><suite>…`), `floor: no green run at <head, 12> for <suite>…`: the
-# words the tick and `current 8` say for it, spelled once here (wave-30 T13; AC-4.4). A floor line with
-# a range (a full run owed) prints nothing.
+# proof_floor_words <head> -> reads facts_state's lines on stdin and prints, for a regression line that
+# names suites (`floor<TAB>uncovered<TAB><suite>…`, the fact keeps its key), `regression: no green run at
+# <head, 12> for <suite>…`: the words the tick and `current 8` say for it, spelled once here (wave-30 T13;
+# AC-4.4; the word is wave-30 T23's). A regression line with a range (a full run owed) prints nothing.
 proof_floor_words() {
   awk -F'\t' -v h="${1:-}" '$1 == "floor" && $2 == "uncovered" && $3 != "" && index($3, "..") == 0 {
-    print "floor: no green run at " substr(h, 1, 12) " for " $3 }'
+    print "regression: no green run at " substr(h, 1, 12) " for " $3 }'
 }
 _proof_wt_load() {
   declare -F _wt_stale_proof >/dev/null 2>&1 && return 0
@@ -901,8 +901,8 @@ _proof_later_lacking() {
 }
 
 # _proof_floor_declared <evidence> <working head> <floor: command> <floor-attestation: value> -> the head,
-# exit 0; or exit 1 with the refusal's sentence (wave-28 T75; REQ-17, D36). WHAT A PROJECT'S FLOOR IS
-# BELONGS TO THE PROJECT: the judge asks only that a floor was declared, ran at a clean working head and
+# exit 0; or exit 1 with the refusal's sentence (wave-28 T75; REQ-17, D36). WHAT A PROJECT'S REGRESSION IS
+# BELONGS TO THE PROJECT: the judge asks only that a regression was declared, ran at a clean working head and
 # passed, never what its runner printed. Two shapes, either key alone enough:
 #   floor: <command>         the log `floor-run` writes, whose FIRST line is `head=<40-hex> dirty=<n>
 #                            rc=<n>`: the head the working head, dirty 0, rc 0. No Gating: verdict, no roster.
@@ -925,7 +925,7 @@ _proof_floor_declared() {
       dirty="${hdr#* }"; rc="${dirty#* }"; dirty="${dirty%% *}"
       [ "$sha" = "$head" ] || _proof_floor_since "$ev" "$sha" "$head" "$co" "$plan" "$root" || return 1
       [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
-      [ "$rc" = 0 ] || { printf 'the floor in %s did not pass (rc=%s); fix it, run floor-run again and cite that log' "$ev" "$rc"; return 1; }
+      [ "$rc" = 0 ] || { printf 'the regression in %s did not pass (rc=%s); fix it, run floor-run again and cite that log' "$ev" "$rc"; return 1; }
       printf '%s' "$sha"; return 0
     fi
     if [ -z "$fa" ]; then
@@ -1192,7 +1192,7 @@ _proof_roots_load() {
   return 0
 }
 
-# proof_state <plan> <tree> [<from>] -> what the change since the last floor proof needs, one line
+# proof_state <plan> <tree> [<from>] -> what the change since the last regression proof needs, one line
 # (with <from>, the change since that commit instead: `proof-add floor` asks it of a run at an
 # ancestor of the working head, wave-30 T13):
 #
@@ -1247,7 +1247,7 @@ proof_state() {
   local plan="$1" tree="$2" h="${3:-}" c wb wt files nn total rest cmd tmp lst roster ans f s rc nog
   local d
   [ -n "$h" ] || h="$(proof_last "$plan" floor)"
-  [ -n "$h" ] || { printf 'unbounded\tno floor proof on this plan yet\n'; return 0; }
+  [ -n "$h" ] || { printf 'unbounded\tno regression proof on this plan yet\n'; return 0; }
   wb="$(proof_working_branch "$plan")"
   [ -n "$wb" ] || { printf 'unbounded\tthe plan names no working-branch\n'; return 0; }
   wt="$(proof_checkout "$tree" "$wb")" \
@@ -1538,7 +1538,7 @@ proof_debts_open() {
 #
 #     covered                  the fact holds at <head>
 #     uncovered<TAB><a>..<b>   code landed past <a>, the last head the fact reached, to <b> = <head>
-#     uncovered<TAB><suite>…   the floor only: the map bounds the change, and these suites have no
+#     uncovered<TAB><suite>…   the regression only: the map bounds the change, and these suites have no
 #                              green run at <head> (wave-30 T13)
 #     failing<TAB><evidence>   the question's newest fact is result=fail, and no waiver is newer
 #     absent                   no fact of that kind, and no waiver
@@ -1551,7 +1551,7 @@ proof_debts_open() {
 # run at a head, so a docs-only tail does not carry it.
 # A DECLARED DEBT (wave-27 T31, T67; D23 as amended), one per suite and token the run's landing record
 # owes (`proof_debts`: what `land` wrote, never a plan line), is covered by a green run of that suite,
-# or a floor proof, dated after the red landing and after the token cleared, and absent otherwise
+# or a regression proof, dated after the red landing and after the token cleared, and absent otherwise
 # (`_facts_debt`); so `current 8`, close-out and the tick's integrate row, which all ask this judge,
 # refuse while a debt is open.
 #
@@ -1574,12 +1574,12 @@ proof_debts_open() {
 # piece chain's to cover, so a whole line is covered, failing or absent, never uncovered. A proof
 # line carries no range start, so what a whole reading read is the verb's to hold: it refuses one
 # whose range starts after the plan's base-sha (row T41), and the judge takes the line as written.
-# THE FLOOR is proof_state's answer: `covered` is covered; `bounded` is covered only when every suite
+# THE REGRESSION is proof_state's answer: `covered` is covered; `bounded` is covered only when every suite
 # it names has a green run at the working head, a stamp `proof_stamps_lacking` reads, and otherwise
 # `uncovered<TAB><suite> <suite>…`, the suites with none (wave-30 T13; AC-4.4, D7c: through 1.13.0
-# bounded was covered on no evidence); with no floor proof it is absent; anything else is uncovered
-# from the floor proof's head, the range, for a full run is owed. proof_state judges
-# the working checkout's head, so for any other <head> the floor is uncovered from the floor proof's
+# bounded was covered on no evidence); with no regression proof it is absent; anything else is uncovered
+# from the regression proof's head, the range, for a full run is owed. proof_state judges
+# the working checkout's head, so for any other <head> the regression is uncovered from its proof's
 # head, never covered (T45; review pass 13 F3).
 # An owed line this judge has no rule for answers absent (the safe direction).
 # A FINDING RE-RATED BY ITS CHECK (wave-28 T41; D33): a reading's result is the one its findings give
@@ -1727,7 +1727,7 @@ PROOF_FACTS
 }
 
 # _facts_debt <plan> <tree> <suite> <token> -> `covered`, or `absent` with any reason after a tab, for
-# one declared debt (wave-27 T31, T67; D23; A-orch-85, A-orch-120). Covered only when a floor proof, or
+# one declared debt (wave-27 T31, T67; D23; A-orch-85, A-orch-120). Covered only when a regression proof, or
 # a task proof whose log shows <suite> green, carries an `at=` STRICTLY later than the debt's
 # threshold, which is never earlier than the red landing (the newest debt line's `at=` in the
 # landing record, `proof_debts_read`):

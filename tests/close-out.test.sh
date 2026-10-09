@@ -36,6 +36,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
@@ -2188,6 +2189,52 @@ debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fix
   "$(carry_section "$PDE/$CONT_REL")"
 
 # ============================================================
+section "DEBT-RECARRY — wave-30 T23 (A-orch-44; AC-11.2): an inherited debt line the run's ledger does not hold is carried again"
+# ============================================================
+# A continuation's `debt:` lines reach the next run's ledger only through `debt adopt` (wave-30 T32), and
+# `card.sh inherited` withholds them so an adopted item is not written twice (A-T32.2). So an item nobody
+# adopted was dropped at the next close-out. Now close-out carries each inherited debt line as written,
+# its from= kept, unless the run's ledger holds its concept and kind: then the ledger's own line carries
+# it (unburned) or nothing does (burned). fails-when: an unadopted item is dropped, or an adopted one is
+# carried twice. FIXTURE FIDELITY: the predecessor's lines are in close-out's own carry shape (the printf
+# docs-pins W30-L4b holds), and the ledger is debt_plant's, the shape `session-poker.sh debt` writes.
+RC_FROM="from=$CARRY_PREV"
+RC_HELD="debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=2 raised-by=record/$CARRY_PREV/critic-structure.md $RC_FROM"
+RC_PAID="debt: log_shim one-case-abstraction \"lib/c.sh:3\" touches=1 raised-by=record/$CARRY_PREV/critic-structure.md $RC_FROM"
+RC_LOOSE="debt: orphan_x duplicate \"lib/z.sh:7\" touches=3 raised-by=record/$CARRY_PREV/critic-structure.md $RC_FROM"
+PRC="$(mk_fixture debtrecarry1)"; advance_to "$PRC" 8
+debt_plant "$PRC"
+mkdir -p "$PRC/.bionic/docs/record/$CARRY_PREV"
+printf '%s\n' "# continuation — $CARRY_PREV" "" "## Deferrals" "" "$RC_HELD" "$RC_PAID" "$RC_LOOSE" \
+  "" "## Resume instruction" "" "nothing" > "$PRC/.bionic/docs/record/$CARRY_PREV/continuation.md"
+expect_eq "DEBT-RECARRY-0 precondition: card.sh inherited-debt reads the predecessor's three debt lines, as written" \
+"$RC_HELD
+$RC_PAID
+$RC_LOOSE" "$(bash "$REPO_ROOT/payload/scripts/card.sh" inherited-debt "$PRC/.bionic/docs/plans/epic-fx/wave-01-fixture.requirements.md" 2>/dev/null)"
+run_close "$PRC" run
+expect_eq "DEBT-RECARRY-1 run exits 0 over a run that inherited three debt lines and keeps a ledger" "0" "$CO_RC"
+expect_eq "DEBT-RECARRY-2 the ledger's unburned items, then the inherited line no ledger holds, as written with its from=" \
+"debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W
+$RC_LOOSE" "$(carry_section "$PRC/$CONT_REL" | /usr/bin/grep '^debt: ')"
+expect_absent "DEBT-RECARRY-3 …the inherited line whose concept and kind the ledger holds is not carried twice" \
+  "touches=2 raised-by=record/$CARRY_PREV/critic-structure.md" "$(carry_section "$PRC/$CONT_REL")"
+expect_absent "DEBT-RECARRY-4 …nor the one the ledger burned" "log_shim" "$(carry_section "$PRC/$CONT_REL")"
+# THE RECORD TEMPLATE SAYS REGRESSION (wave-30 T23; AC-4.7, D10): the continuation close-out writes asks the
+# orchestrator for the regression's result, in the word the doctrine uses.
+expect_contains "REG-1 AC-4.7 the continuation's template asks for the regression result" "<fill: regression result>" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+expect_absent "REG-1b …and no longer for the floor's" "<fill: floor result>" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+# no ledger at all: every inherited debt line is carried, in its order
+PRN="$(mk_fixture debtrecarry2)"; advance_to "$PRN" 8
+mkdir -p "$PRN/.bionic/docs/record/$CARRY_PREV"
+printf '%s\n' "# continuation — $CARRY_PREV" "" "## Deferrals" "" "$RC_HELD" "$RC_LOOSE" \
+  "" "## Resume instruction" "" "nothing" > "$PRN/.bionic/docs/record/$CARRY_PREV/continuation.md"
+run_close "$PRN" run
+expect_eq "DEBT-RECARRY-5 a run with no ledger exits 0 and carries both inherited debt lines, as written" \
+  "0|$RC_HELD
+$RC_LOOSE" "$CO_RC|$(carry_section "$PRN/$CONT_REL" | /usr/bin/grep '^debt: ')"
+
+# ============================================================
 section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"
 # ============================================================
 #
@@ -2201,8 +2248,8 @@ section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regressio
 # a process nobody is waiting on and the sweep reads nothing else of it.
 PR="$(mk_fixture pruns)"; advance_to "$PR" 8
 PR_RUNS="$PR/.bionic/tmp/runs"; mkdir -p "$PR_RUNS" "$SANDBOX/fake-shim"
-printf 'roster-state/v1|status=identified|session=fixture|name=w-reg|agent_id=areg|run_log=%s|run_cmd=tests/run.sh|run_rc=0\n' \
-  "$PR_RUNS/w-reg-run.sh.log" >> "$PR/.bionic/tmp/roster-fixture.state"
+roster_row_fixture status=identified session=fixture name=w-reg agent_id=areg \
+  "run_log=$PR_RUNS/w-reg-run.sh.log" run_cmd=tests/run.sh run_rc=0 >> "$PR/.bionic/tmp/roster-fixture.state"
 printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$SANDBOX/fake-shim/booked.sh"
 PR_LOG="$PR_RUNS/w-orph-o.test.sh.log"; : > "$PR_LOG"
 printf '2026-10-08T00:00:02Z\to.test.sh\t§sec-orph\n' > "$PR_LOG.progress.tsv"

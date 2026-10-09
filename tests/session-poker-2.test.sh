@@ -2473,8 +2473,8 @@ expect_false "54b0b precondition: …and no suite ever stamped it" \
 S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
-expect_eq "54b AC-3.4 integrate WAITS: the head moved past the floor proof in a way the map cannot bound, and the line names the way out" \
-  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the floor holds" \
+expect_eq "54b AC-3.4 integrate WAITS: the head moved past the regression proof in a way the map cannot bound, and the line names the way out" \
+  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
   "$(s54_wait)"
 expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 # THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
@@ -2501,7 +2501,7 @@ expect_contains "54c0 precondition: the bounded change LANDED" "spawn-worktree: 
 S54_W2="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_contains "54c AC-4.4 a change the map bounds, no suite run at the head: integrate WAITS naming the suites" \
-  "proof:review: the facts the run owes do not hold (facts_state): floor: no green run at ${S54_W2:0:12} for a.test.sh b.test.sh" "$(s54_wait)"
+  "proof:review: the facts the run owes do not hold (facts_state): regression: no green run at ${S54_W2:0:12} for a.test.sh b.test.sh" "$(s54_wait)"
 for s54s in a b; do
   ( cd "$S54_WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
       bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$s54s.test.sh" -- "bash tests/$s54s.test.sh" ) >/dev/null 2>&1
@@ -2514,7 +2514,7 @@ s54_land T9 lib/every.sh 'every, changed'
 expect_contains "54d0 precondition: the every-suite change LANDED" "spawn-worktree: LANDED branch=wt/01-T9" "$S54_LAND"
 s54_tick
 expect_contains "54d a change the map answers with every suite: integrate WAITS, saying so" \
-  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W1:0:12} in a way the map cannot bound (the map answers the change with every suite (3 of 3))" \
+  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at ${S54_W1:0:12} in a way the map cannot bound (the map answers the change with every suite (3 of 3))" \
   "$OUT"
 expect_absent "54d2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 s54_floor floor-3.log
@@ -2530,7 +2530,7 @@ expect_true "54e0 precondition: the outside commit is on the working branch" \
   git -C "$S54_WT" merge-base --is-ancestor other-work wave/01-fixture
 s54_tick
 expect_contains "54e a merge from outside the run: integrate WAITS, saying another branch carries it" \
-  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W3:0:12} in a way the map cannot bound (1 of 2 commits since ${S54_W3:0:7} are on another branch than wave/01-fixture" \
+  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at ${S54_W3:0:12} in a way the map cannot bound (1 of 2 commits since ${S54_W3:0:7} are on another branch than wave/01-fixture" \
   "$OUT"
 expect_absent "54e2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 s54_floor floor-4.log

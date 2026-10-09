@@ -223,4 +223,4 @@ A T2 row carries `tier-run`, `readback`, and the `fixture-fidelity` provenance l
 
 **`scale: task` plans carry no matrix and no Step-5 block** — the governing-skill hook skips the matrix requirement at task scale, and evidence is the one-line `- T<n>:` ledger entry. Cite the browser evidence inline there.
 
-For non-UI waves, the browser modality is `n/a: <reason>` (the tests floor still applies). The end-to-end closure floor lives in the T3(d) readback condition: for a user-visible AC the readback traces user input → new code, and `n/a: substrate-only` is a red flag needing justification.
+For non-UI waves, the browser modality is `n/a: <reason>` (the regression still applies). The end-to-end closure floor lives in the T3(d) readback condition: for a user-visible AC the readback traces user input → new code, and `n/a: substrate-only` is a red flag needing justification.
