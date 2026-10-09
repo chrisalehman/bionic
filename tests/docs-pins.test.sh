@@ -6191,7 +6191,7 @@ expect_eq "W28-71D9b: …and dispatch.md no longer carries the one it cut" "" \
 # extractor, and a doctored copy proves each arm goes red. HERMETIC: committed finals by path.
 W28S_BLOCK="${BLOCK_DIR}/severity.md"
 W28S_FILE="${REPO}/payload/context/severity.md"
-W28S_CAP=4200  # 2,700 until wave-30 T4 (A-T4.2): the debt table sits beside the harm table; 3,700 until wave-30 T19 (A-T19.2, A-orch-56): only-readers-rate and the three stop rules, measured 4,141 B
+W28S_CAP=5100  # 4,200 until wave-30 T36 (A-T36.1, A-orch-78): the finding line in two site forms and the debt line in two, each with an example, measured 5,027 B; 2,700 until wave-30 T4 (A-T4.2): the debt table sits beside the harm table; 3,700 until wave-30 T19 (A-T19.2, A-orch-56): only-readers-rate and the three stop rules, measured 4,141 B
 W28S_POINTER='Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.'
 W28S_AGE='Age does not lower a rating. Say "older than the reviewed range" beside it.'
 W28S_SPEC=""
@@ -6288,16 +6288,36 @@ expect_eq "W28-S8b: …and no longer say old code never fails a check" "" \
 
 # The finding lines: the scale's record form and steps/6.md's give the same four forms, in order.
 W28S_FORM="$(w28s_finding_form "$W28S_FILE")"
-expect_eq "W28-S9: the scale gives the four finding-line forms of the interface" \
-  "$(printf '%s\n' 'findings: <n>' 'finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>' 'shown: <n> <command>' 'unsure: <n> <what is not known>')" \
+# RE-WORDED (wave-30 T36; A-orch-78): the finding's site is two forms, never the `<path>:<line>|-`
+# alternation a reader copied whole into a record at the T25 sitting.
+expect_eq "W28-S9: the scale gives the finding-line forms of the interface: the finding's two site forms, then the rest" \
+  "$(printf '%s\n' 'findings: <n>' 'finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line> <title>' 'finding: <n> <S1|S2|S3|S4> <on|off> - <title>' 'shown: <n> <command>' 'unsure: <n> <what is not known>')" \
   "$W28S_FORM"
-expect_eq "W28-S9b: steps/6.md's record form gives the same four" "$W28S_FORM" "$(w28s_finding_form "$STEP6_MD")"
+expect_eq "W28-S9b: steps/6.md's record form gives the same five" "$W28S_FORM" "$(w28s_finding_form "$STEP6_MD")"
 expect_nonempty "W28-S9c: …and says when they are owed: the reader's row carries severity in pushed=" \
   "$(w26_hits 'carries `severity` in `pushed=`' "$STEP6_MD")"
 W28S_DOC9="$TMP/w28s-step6.md"
 sed 's/<what is not known>/<what is unknown>/' "$STEP6_MD" > "$W28S_DOC9" 2>/dev/null
 expect_nonempty "W28-S9m precondition: the doctored steps/6.md still gives finding lines" "$(w28s_finding_form "$W28S_DOC9")"
 expect_ne "W28-S9m: a steps/6.md whose unsure: form drifts is caught" "$W28S_FORM" "$(w28s_finding_form "$W28S_DOC9")"
+# The alternation is gone from what a reader reads, and the two-form wording is there (T36): each absence
+# sits beside the positive the same grep finds in the same file.
+for w28s_t36_f in "$W28S_FILE" "$STEP6_MD"; do
+  expect_nonempty "W28-S9n: $(basename "$w28s_t36_f") gives the site as <path>:<line> in a form of its own" \
+    "$(/usr/bin/grep -F -e '<on|off> <path>:<line> <title>' "$w28s_t36_f")"
+  expect_nonempty "W28-S9n2: …and the lone - in another" "$(/usr/bin/grep -F -e '<on|off> - <title>' "$w28s_t36_f")"
+  expect_empty "W28-S9n3: …and never the alternation a reader can copy whole" "$(/usr/bin/grep -F -e '<path>:<line>|-' "$w28s_t36_f")"
+done
+W28S_DOC9N="$TMP/w28s-alt.md"
+sed 's/<on|off> <path>:<line> <title>/<on|off> <path>:<line>|- <title>/' "$W28S_FILE" > "$W28S_DOC9N" 2>/dev/null
+expect_nonempty "W28-S9o: a scale that writes the site as the alternation again is caught" "$(/usr/bin/grep -F -e '<path>:<line>|-' "$W28S_DOC9N")"
+# The wording around the forms (T36): the site is a choice, the debt concept one token and the first site at once.
+W28S_SITE='Choose one, never both joined.'
+W28S_CONCEPT='`<concept>` is a single token with no space'
+W28S_FIRST='and the first site follows it at once'
+expect_contains "W28-S9p: the scale says the finding's site is a choice of one" "$W28S_SITE" "$(cat "$W28S_FILE")"
+expect_contains "W28-S9q: …that the debt concept is a single token" "$W28S_CONCEPT" "$(cat "$W28S_FILE")"
+expect_contains "W28-S9r: …and that the first site follows it at once" "$W28S_FIRST" "$(cat "$W28S_FILE")"
 
 # ============================================================
 section "§W28-T15 (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.6, AC-8.8; D19): the reading record's grammar row names the finding lines"
