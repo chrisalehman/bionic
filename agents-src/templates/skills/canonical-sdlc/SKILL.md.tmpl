@@ -71,7 +71,7 @@ mode.
 
 **rigor** — how many independent minds answer the questions: `low`, `medium` or `high`. Cumulative. `low` is `tested`, `medium` is `peer-reviewed`, `high` is `audited`: the tool reads either word as the same level, and a file carrying an old word is read as it is and never rewritten.
 
-Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the tests floor `pass == total`. `evidence`: is the proof honest. `adversarial`: what is wrong that nobody asked about. `structure`: is it built from what exists, and shaped well. Rigor sets how many independent readers hold the last three.
+Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the regression `pass == total`. `evidence`: is the proof honest. `adversarial`: what is wrong that nobody asked about. `structure`: is it built from what exists, and shaped well. Rigor sets how many independent readers hold the last three.
 
 Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole.
 
@@ -115,8 +115,10 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
                                   # keeps the whole tree out of git, not the project .gitignore
 .bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default;
                                   # `release-check:`, and `floor: <command>` or `floor-attestation: user`
-                                  # when a project's floor is not tests/run.sh
+                                  # when a project's regression is not tests/run.sh
 ```
+
+The regression's verbs and keys still spell it `floor` (`proof-add floor`, `floor-run`, `floor:`, `floor-attestation:`) until bionic2.
 
 The first five are lifecycle artifacts and are gated: the governing-skill hook enforces
 frontmatter on them and blocks a canonical artifact written anywhere else. `record/` and
@@ -156,7 +158,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 2 Design | `steps/2.md` | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design; writes `wave-NN-<slug>.spec.md` — the technical design, ownership table, and the Eval design table |
 | 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — tasks, sequencing, and the verification matrix rendered from Step 2's Eval design |
 | 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every task RED before GREEN; assumptions logged |
-| 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
+| 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; the regression green; every matrix row discharged at tier or waived; auditor CONFIRMED |
 | 6 Review | `steps/6.md` | `canonical-sdlc` | One fact per owed question at the head, or its waiver |
 | 7 Document | `steps/7.md` | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `steps/8.md` | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp ephemera wiped |
