@@ -102,7 +102,7 @@ result clean structure one-mind flag met exam-sitting.md#clean-one-mind-structur
 result admit-not-require evidence auditor fail met exam-sitting.md#admit-not-require-auditor-evidence
 result admit-not-require evidence one-mind fail met exam-sitting.md#admit-not-require-one-mind-evidence
 result power-gap evidence auditor fail met exam-sitting.md#power-gap-auditor-evidence
-result power-gap evidence one-mind fail missed exam-sitting.md#resit-power-gap-one-mind-evidence
+result power-gap evidence one-mind fail met exam-sitting.md#resit-power-gap-one-mind-evidence
 result dup-counter structure critic fail met exam-sitting.md#dup-counter-critic-structure
 result dup-counter structure one-mind fail met exam-sitting.md#dup-counter-one-mind-structure
 result red-then-green adversarial critic fail met exam-sitting.md#red-then-green-critic-adversarial
