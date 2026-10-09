@@ -35,7 +35,7 @@ FM='---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: none
 use_worktree: false
@@ -187,8 +187,8 @@ eg6_reading() {  # <head> <question> <result> [<evidence>] -> one reading line
 eg6_waiver() {  # <head> <question>
   bash -c '. "$1" && proof_waiver_line "$2" "$3" "T" 2026-10-04T12:00:00Z "ship it"' _ "$EG6_LIB" "$2" "$1"
 }
-eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> an audited plan the gate admits at Step 6 bar the readings
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: %s\n' "$2"
+eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> a double plan the gate admits at Step 6 bar the readings
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: %s\n' "$2"
   printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
   printf 'current: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
   printf -- '- Step 4: dispatched, record/w27/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: feature/t23\n' "$H_EG6"

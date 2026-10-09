@@ -68,11 +68,11 @@ section "§Q — a reader's brief names its questions, held to the dealing (wave
 # required and the dealing is not checked. Every other role is untouched.
 #
 # THE TWO EVIDENCE RULES FOLLOW THE QUESTION (review pass 15, F4). The three-run cap and the
-# refusal of a brief that names no suite and no run used to key on the auditor; `tested` deals
+# refusal of a brief that names no suite and no run used to key on the auditor; `single` deals
 # `evidence` to the critic, which escaped both. And the cap counts every declared run but file
 # housekeeping (wave-27 T49): a cleanup beside three runs is recorded and does not count.
 #
-# FIXTURES: make_repo's plan is `rigor: audited`, `scale: wave`, approved and bound; `q_rigor`
+# FIXTURES: make_repo's plan is `rigor: double`, `scale: wave`, approved and bound; `q_rigor`
 # rewrites its rigor line. The briefs are SYNTHESIZED and write their own `Questions:` line.
 #
 # fails-when: a reader brief with no line, a wrong set or an unknown word is admitted; an admitted
@@ -104,49 +104,49 @@ q_gate() {  # <repo> <tag> <role> <brief>
 }
 
 REPO=$(make_repo rq0 yes)
-q_rigor "$REPO" tested
-expect_eq "Q0 precondition: q_rigor rewrites the bound plan's rigor line" "rigor: tested" \
+q_rigor "$REPO" single
+expect_eq "Q0 precondition: q_rigor rewrites the bound plan's rigor line" "rigor: single" \
   "$(grep '^rigor:' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
 
-# ---- the worked answers on an audited plan ----
+# ---- the worked answers on a double plan ----
 REPO=$(make_repo rq1 yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" q1 bionic:auditor "$(q_brief q1 'Questions: evidence')"
-expect_eq "Q1 audited: an auditor with Questions: evidence is admitted" "allow" "$GATE_VERDICT"
+expect_eq "Q1 double: an auditor with Questions: evidence is admitted" "allow" "$GATE_VERDICT"
 expect_eq "Q1 …and its row carries questions=evidence" "evidence" "$(roster_field "$(q_row "$REPO")" questions)"
 
 REPO=$(make_repo rq2 yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" q2 bionic:auditor "$(q_brief q2 'Questions: evidence, structure')"
-expect_eq "Q2 audited: an auditor with Questions: evidence, structure is refused" "deny" "$GATE_VERDICT"
+expect_eq "Q2 double: an auditor with Questions: evidence, structure is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q2 …the line names the rigor, the role and the set it deals" \
-  "high rigor deals auditor: evidence" "$GATE_ERR"
+  "double rigor deals auditor: evidence" "$GATE_ERR"
 expect_contains "Q2 …the detail names the set the brief gave" "evidence, structure" "$GATE_VERR"
 expect_contains "Q2 …and the line to write" "    Questions: evidence" "$GATE_VERR"
 
 REPO=$(make_repo rq3 yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" q3 bionic:auditor "$(q_brief q3)"
-expect_eq "Q3 audited: an auditor brief with no Questions: line is refused" "deny" "$GATE_VERDICT"
+expect_eq "Q3 double: an auditor brief with no Questions: line is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q3 …the line names the role and the missing label" \
   "bionic:auditor names no Questions: line" "$GATE_ERR"
 expect_contains "Q3 …the detail names the line to add, the dealt set filled in" \
   "    Questions: evidence" "$GATE_VERR"
 
 # ---- a set: order and spacing do not matter; the row is written in the table's order ----
-REPO=$(make_repo rq4 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" peer-reviewed
+REPO=$(make_repo rq4 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" double
 q_gate "$REPO" q4 bionic:critic "$(q_brief q4 'Questions: structure, adversarial')"
-expect_eq "Q4 peer-reviewed: a critic with Questions: structure, adversarial is admitted" "allow" "$GATE_VERDICT"
+expect_eq "Q4 double: a critic with Questions: structure, adversarial is admitted" "allow" "$GATE_VERDICT"
 expect_eq "Q4 …its row carries questions=adversarial,structure" "adversarial,structure" \
   "$(roster_field "$(q_row "$REPO")" questions)"
-REPO=$(make_repo rq4b yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" peer-reviewed
+REPO=$(make_repo rq4b yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" double
 q_gate "$REPO" q4b bionic:critic "$(q_brief q4b 'Questions:adversarial,structure')"
 expect_eq "Q4b …and so is the same set written with no spaces" "adversarial,structure" \
   "$(roster_field "$(q_row "$REPO")" questions)"
 
-# ---- tested deals the auditor nothing ----
-REPO=$(make_repo rq5 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" tested
+# ---- single deals the auditor nothing ----
+REPO=$(make_repo rq5 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" single
 q_gate "$REPO" q5 bionic:auditor "$(q_brief q5 'Questions: evidence')"
-expect_eq "Q5 tested: an auditor with Questions: evidence is refused" "deny" "$GATE_VERDICT"
+expect_eq "Q5 single: an auditor with Questions: evidence is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q5 …the line says that rigor deals the auditor nothing" \
-  "low rigor deals auditor: nothing" "$GATE_ERR"
+  "single rigor deals auditor: nothing" "$GATE_ERR"
 expect_contains "Q5 …and the detail names the role that holds the question" \
   "evidence is dealt to bionic:critic" "$GATE_VERR"
 
@@ -174,26 +174,30 @@ q_gate "$REPO" q7b bionic:auditor "$(q_brief q7b)"
 expect_eq "Q7b no bound plan: a reader brief without the line is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q7b …naming the missing label" "bionic:auditor names no Questions: line" "$GATE_ERR"
 
-# ---- the three legal deals, from the Interfaces table; a role dealt nothing is refused ----
-for _q_deal in "tested bionic:critic evidence,adversarial,structure" \
-               "peer-reviewed bionic:auditor evidence" "peer-reviewed bionic:critic adversarial,structure" \
-               "audited bionic:auditor evidence" "audited bionic:critic adversarial" \
-               "audited bionic:reviewer structure"; do
+# ---- the three legal deals, from REQ-1's table (wave-30 T11, D1); a role dealt nothing is refused ----
+for _q_deal in "single bionic:critic evidence,adversarial,structure" \
+               "double bionic:auditor evidence" "double bionic:critic adversarial,structure"; do
   set -- $_q_deal
   REPO=$(make_repo "rq8-$1-${2#bionic:}" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$1"
   q_gate "$REPO" "q8-$1-${2#bionic:}" "$2" "$(q_brief q8 "Questions: ${3//,/, }")"
   expect_eq "Q8 $1 deals $2 $3: admitted" "allow" "$GATE_VERDICT"
   expect_eq "Q8 …recorded as dealt" "$3" "$(roster_field "$(q_row "$REPO")" questions)"
 done
-for _q_none in "tested bionic:reviewer structure" "peer-reviewed bionic:reviewer structure"; do
+for _q_none in "single bionic:reviewer structure" "double bionic:reviewer structure" \
+               "single bionic:auditor evidence"; do
   set -- $_q_none
-  REPO=$(make_repo "rq8n-$1" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$1"
-  q_gate "$REPO" "q8n-$1" "$2" "$(q_brief q8n "Questions: $3")"
+  REPO=$(make_repo "rq8n-$1-${2#bionic:}" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$1"
+  q_gate "$REPO" "q8n-$1-${2#bionic:}" "$2" "$(q_brief q8n "Questions: $3")"
   expect_eq "Q8n $1 deals $2 nothing: refused" "deny" "$GATE_VERDICT"
   # The line names the level by its new word and the role by its short name (wave-28 T44, A-orch-17).
   expect_contains "Q8n …saying so" "$(bash -c '. "$1" && rigor_level "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh" "$1") rigor deals ${2#bionic:}: nothing" "$GATE_ERR"
 done
 set --
+# A part of a dealt set is not the set: at double the critic holds adversarial AND structure.
+REPO=$(make_repo rq8p yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" double
+q_gate "$REPO" q8p bionic:critic "$(q_brief q8p 'Questions: adversarial')"
+expect_eq "Q8p double deals the critic adversarial and structure: adversarial alone is refused" "deny" "$GATE_VERDICT"
+expect_contains "Q8p …naming the set it deals" "double rigor deals critic: adversarial,structure" "$GATE_ERR"
 
 # ---- every other role is untouched ----
 REPO=$(make_repo rq9 yes); write_attestation "$REPO" "$SID_A"
@@ -210,33 +214,34 @@ Q_FOUR="Re-executes: ${RL_JEST}
 Re-executes: ${RL_PYTEST}
 Re-executes: ${RL_GO}
 Re-executes: ${RL_NPM}"
-REPO=$(make_repo rq10 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" tested
+REPO=$(make_repo rq10 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" single
 q_gate "$REPO" q10 bionic:critic "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q10.md
 Expected duration: ~30 minutes.
 Questions: evidence, adversarial, structure
 Files: .bionic/docs/record/wq-q10.md, .bionic/docs/record/wq-q10-2.md, .bionic/docs/record/wq-q10-3.md
 ${Q_FOUR}"
-expect_eq "Q10 tested: a critic holding evidence with four suite runs is refused" "deny" "$GATE_VERDICT"
+expect_eq "Q10 single: a critic holding evidence with four suite runs is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q10 …on the cap of three, as an auditor's is" "exceeds the 3-run cap" "$GATE_ERR"
 
-REPO=$(make_repo rq11 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" tested
+REPO=$(make_repo rq11 yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" single
 q_gate "$REPO" q11 bionic:critic "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q11.md
 Expected duration: ~30 minutes.
 Questions: evidence, adversarial, structure
 Files: .bionic/docs/record/wq-q11.md, .bionic/docs/record/wq-q11-2.md, .bionic/docs/record/wq-q11-3.md
 Suites: none"
-expect_eq "Q11 tested: the same critic waiving every suite with no run is refused" "deny" "$GATE_VERDICT"
+expect_eq "Q11 single: the same critic waiving every suite with no run is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q11 …as an auditor's is: it declares nothing to re-execute" "declares nothing to re-execute" "$GATE_ERR"
 
 REPO=$(make_repo rq12 yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" q12 bionic:critic "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q12.md
 Expected duration: ~30 minutes.
-Questions: adversarial
+Questions: adversarial, structure
+Files: .bionic/docs/record/wq-q12.md, .bionic/docs/record/wq-q12-2.md
 Suites: none"
-expect_eq "Q12 audited: a critic with Questions: adversarial and Suites: none is admitted" "allow" "$GATE_VERDICT"
+expect_eq "Q12 double: a critic with Questions: adversarial, structure and Suites: none is admitted" "allow" "$GATE_VERDICT"
 
 # ---- the cap counts every run but housekeeping; a cleanup is recorded and does not count ----
 REPO=$(make_repo rq13 yes); write_attestation "$REPO" "$SID_A"
@@ -344,25 +349,25 @@ Q49_HEAD='Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q49.md
 Expected duration: ~30 minutes.
 Suites: tests/widget.test.sh'
-q49_gate c1 bionic:auditor audited "$Q49_HEAD
+q49_gate c1 bionic:auditor double "$Q49_HEAD
 Questions: evidence  # the auditor's"
 expect_eq "T49-Q7 a trailing comment is stripped: Questions: evidence  # the auditor's is evidence" "allow:evidence" "$R"
-q49_gate c2 bionic:critic peer-reviewed "$Q49_HEAD
+q49_gate c2 bionic:critic double "$Q49_HEAD
 Questions: structure, adversarial # both
 Files: .bionic/docs/record/wq-q49.md, .bionic/docs/record/wq-q49-2.md"
 expect_eq "T49-Q7 …a comment after a set, too" "allow:adversarial,structure" "$R"
-q49_gate c3 bionic:auditor audited "$Q49_HEAD
+q49_gate c3 bionic:auditor double "$Q49_HEAD
 Questions: evidence
 Questions: evidence"
 expect_contains "T49-Q8 two Questions: lines, even with the same set, are refused" "deny:" "$R"
 expect_contains "T49-Q8 …the first line naming the count" "bionic:auditor has 2 Questions: lines" "$R"
 Q49_REFUSAL=$(printf '%s\n' "$GATE_VERR")
 expect_contains "T49-Q8 …and the detail naming both lines by number" "lines 5 and 6" "$Q49_REFUSAL"
-q49_gate c4 bionic:auditor audited "$Q49_HEAD
+q49_gate c4 bionic:auditor double "$Q49_HEAD
 Questions: evidence
 Questions: structure"
 expect_contains "T49-Q8 …two different sets are refused the same" "has 2 Questions: lines" "$R"
-for Q49_C in "bionic:reviewer audited structure" "bionic:critic tested evidence,adversarial,structure"; do
+for Q49_C in "bionic:reviewer double structure" "bionic:critic single evidence,adversarial,structure"; do
   set -- $Q49_C
   q49_gate "c5-${1#bionic:}" "$1" "$2" "$Q49_HEAD
 Questions: ${3//,/, }
@@ -372,7 +377,7 @@ Questions: ${3//,/, }"
   expect_eq "T49-Q8 …its first line fits the 100-column budget" "ok" "$([ "$(bionic_cols "$Q49_LINE")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$Q49_LINE")")"
 done
 set --
-q49_gate c6 bionic:auditor audited "Your task: read the wave-99 change.
+q49_gate c6 bionic:auditor double "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q49.md
 Expected duration: ~30 minutes.
 Suites: tests/widget.test.sh
@@ -381,7 +386,7 @@ Questions: structure, adversarial
 ${RL_BT}${RL_BT}${RL_BT}
 Questions: evidence"
 expect_eq "T49-Q9 a Questions: line inside a fenced block is an example: the real line below it is the label" "allow:evidence" "$R"
-q49_gate c7 bionic:auditor audited "Your task: read the wave-99 change.
+q49_gate c7 bionic:auditor double "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q49.md
 Expected duration: ~30 minutes.
 Suites: tests/widget.test.sh
@@ -408,7 +413,7 @@ section "§scaffold-walk — a reader filled from the shipped scaffold is admitt
 # `base-sha:` and `working-branch:` a reading needs, and one commit past the base for the range.
 #
 # fails-when: the shipped scaffold, filled as the text says, is refused; a record it lists is
-# refused at registration; or a `tested` critic brief that declares no run is admitted.
+# refused at registration; or a `single` critic brief that declares no run is admitted.
 walk_fill() {  # <questions> <records, ", "-joined> <suites value|none> -> a reader brief
   local qs="$1" recs="$2" suites="$3" line value
   printf 'Your task: read T3 for the questions below.\n'
@@ -468,16 +473,16 @@ walk_register() {  # <repo> <record path> <question> <reader> [old] -> writes th
 }
 WALK_REC=".bionic/docs/record/wave-01-test"
 
-# ---- peer-reviewed: the critic dealt adversarial and structure ----
+# ---- double: the critic dealt adversarial and structure ----
 WALK_PR="$(walk_fill "adversarial, structure" "$WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" none)"
 expect_contains "§scaffold-walk precondition: the filled Questions: line keeps the shipped comment" \
   "Questions: adversarial, structure  # reader roles only" "$WALK_PR"
 expect_contains "§scaffold-walk precondition: …and Files: lists both records" \
   "Files: $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" "$WALK_PR"
 expect_absent "§scaffold-walk precondition: …and no placeholder is left" "<" "$WALK_PR"
-REPO=$(walk_repo rwalk1 peer-reviewed)
+REPO=$(walk_repo rwalk1 double)
 q_gate "$REPO" walk1 bionic:critic "$WALK_PR"
-expect_eq "§scaffold-walk peer-reviewed: the critic's brief, filled from the shipped scaffold, is ADMITTED" \
+expect_eq "§scaffold-walk double: the critic's brief, filled from the shipped scaffold, is ADMITTED" \
   "allow" "$GATE_VERDICT"
 expect_eq "§scaffold-walk …its row carries both records" \
   "$WALK_REC/T3-adversarial.md,$WALK_REC/T3-structure.md" "$(roster_field "$(q_row "$REPO")" files)"
@@ -494,7 +499,7 @@ expect_contains "§scaffold-walk …as a reading of structure" "question=structu
 # ---- the discriminator: the brief as the old text had it, one artifact and no Files: ----
 # Either the wall refuses it (T49: fewer paths than questions) or its second record is refused
 # at registration; the walk never completes. The first record's acceptance is the positive.
-REPO=$(walk_repo rwalk2 peer-reviewed)
+REPO=$(walk_repo rwalk2 double)
 q_gate "$REPO" walk2 bionic:critic "$(printf '%s\n' "$WALK_PR" | /usr/bin/grep -v '^Files:')"
 WALK_OLD="refused-at-dispatch"
 if [ "$GATE_VERDICT" = allow ]; then
@@ -508,14 +513,14 @@ fi
 expect_ne "§scaffold-walk …a brief with one artifact and no Files: never gets both records registered" \
   "registered rc=0" "$WALK_OLD"
 
-# ---- tested: the critic holds all three questions, evidence among them ----
+# ---- single: the critic holds all three questions, evidence among them ----
 WALK_T="$(walk_fill "evidence, adversarial, structure" \
   "$WALK_REC/T3-evidence.md, $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" tests/widget.test.sh)"
-expect_contains "§scaffold-walk precondition: the tested brief names its suite, the comment kept" \
+expect_contains "§scaffold-walk precondition: the single brief names its suite, the comment kept" \
   "Suites: tests/widget.test.sh  # " "$WALK_T"
-REPO=$(walk_repo rwalk3 tested)
+REPO=$(walk_repo rwalk3 single)
 q_gate "$REPO" walk3 bionic:critic "$WALK_T"
-expect_eq "§scaffold-walk tested: the critic dealt evidence, naming its run, is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "§scaffold-walk single: the critic dealt evidence, naming its run, is ADMITTED" "allow" "$GATE_VERDICT"
 expect_eq "§scaffold-walk …its row carries the three records" \
   "$WALK_REC/T3-evidence.md,$WALK_REC/T3-adversarial.md,$WALK_REC/T3-structure.md" \
   "$(roster_field "$(q_row "$REPO")" files)"
@@ -524,7 +529,7 @@ for _wq in evidence adversarial structure; do
   walk_register "$REPO" "$WALK_REC/T3-${_wq}.md" "$_wq" wq-walk3
   expect_eq "§scaffold-walk …the ${_wq} record registers" "0" "$WALK_RC"
 done
-REPO=$(walk_repo rwalk4 tested)
+REPO=$(walk_repo rwalk4 single)
 q_gate "$REPO" walk4 bionic:critic "$(walk_fill "evidence, adversarial, structure" \
   "$WALK_REC/T3-evidence.md, $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" none)"
 expect_eq "§scaffold-walk …the SAME brief with Suites: none and no Re-executes: is refused" "deny" "$GATE_VERDICT"
@@ -568,38 +573,38 @@ expect_eq "§scaffold-walk precondition: …and shape B carries no line that beg
 # of the word anywhere in the brief counts it and this row, which reads line starts, does not.
 expect_contains "§scaffold-walk precondition: …while shape B still carries the word in a comment (what the negative can miss)" \
   "within Suites:" "$WALK_ERB"
-REPO=$(walk_repo rwalk5 audited)
+REPO=$(walk_repo rwalk5 double)
 expect_nonempty "§scaffold-walk precondition: the walk repo's .bionic holds its bound plan" \
-  "$(/usr/bin/grep -rls '^rigor: audited' "$REPO/.bionic")"
+  "$(/usr/bin/grep -rls '^rigor: double' "$REPO/.bionic")"
 expect_eq "§scaffold-walk precondition: …and configures no impact command anywhere" "" \
   "$(/usr/bin/grep -rls 'impact-command' "$REPO/.bionic")"
 q_gate "$REPO" walk5 bionic:auditor "$WALK_ER"
-expect_eq "§scaffold-walk audited: the auditor, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "§scaffold-walk double: the auditor, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
 expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
 expect_eq "§scaffold-walk …and its record" "$WALK_REC/T3-evidence.md" "$(roster_field "$(q_row "$REPO")" files)"
 walk_start "$REPO" wq-walk5
 walk_register "$REPO" "$WALK_REC/T3-evidence.md" evidence wq-walk5 old
 expect_eq "§scaffold-walk …and the evidence record registers" "0" "$WALK_RC"
-REPO=$(walk_repo rwalk6 audited)
+REPO=$(walk_repo rwalk6 double)
 # walk_verdict -> the gate's verdict, and on a refusal its reason, so a red row says why.
 walk_verdict() { [ "$GATE_VERDICT" = allow ] && printf allow || printf '%s: %s' "$GATE_VERDICT" "${GATE_REASON:0:240}"; }
 q_gate "$REPO" walk6 bionic:auditor "$WALK_ERB"
-expect_eq "§scaffold-walk audited: the auditor with no Suites: line and its pytest run is ADMITTED (needs T57)" \
+expect_eq "§scaffold-walk double: the auditor with no Suites: line and its pytest run is ADMITTED (needs T57)" \
   "allow" "$(walk_verdict)"
 expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
 WALK_TRECS="$WALK_REC/T3-evidence.md, $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md"
-REPO=$(walk_repo rwalk7 tested)
+REPO=$(walk_repo rwalk7 single)
 q_gate "$REPO" walk7 bionic:critic "$(walk_fill_re "evidence, adversarial, structure" "$WALK_TRECS" A)"
-expect_eq "§scaffold-walk tested: the critic, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "§scaffold-walk single: the critic, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
 expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
 walk_start "$REPO" wq-walk7
 for _wq in evidence adversarial structure; do
   walk_register "$REPO" "$WALK_REC/T3-${_wq}.md" "$_wq" wq-walk7
   expect_eq "§scaffold-walk …the ${_wq} record registers" "0" "$WALK_RC"
 done
-REPO=$(walk_repo rwalk8 tested)
+REPO=$(walk_repo rwalk8 single)
 q_gate "$REPO" walk8 bionic:critic "$(walk_fill_re "evidence, adversarial, structure" "$WALK_TRECS" B)"
-expect_eq "§scaffold-walk tested: the critic with no Suites: line and its pytest run is ADMITTED (needs T57)" \
+expect_eq "§scaffold-walk single: the critic with no Suites: line and its pytest run is ADMITTED (needs T57)" \
   "allow" "$(walk_verdict)"
 expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
 
@@ -1042,7 +1047,7 @@ section "§ADV — the brief body is read for a run or a write the contract neve
 # the verdict, or the declared suite beside it is advised about as well.
 
 adv_brief() {  # <body lines> -> BRIEF_FULL's contract with the given body lines before Suites:
-  printf 'Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · audited · wave.
+  printf 'Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
 Your task: implement the widget behind the existing seam.
 %s
 Expected artifact: .bionic/docs/record/w99-widget.txt
@@ -1466,7 +1471,7 @@ gates_plan() {  # <repo> <SDLC lines, newline-joined, may be empty>
   local f="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf -- 'intent: build\nrigor: audited\nscale: wave\n---\n\n'
+    printf -- 'intent: build\nrigor: double\nscale: wave\n---\n\n'
     printf -- '# Test wave plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
     [ -n "$2" ] && printf -- '%s\n' "$2"
     printf -- '\n- Step 4: tasks in flight\n\n## Tasks\n\n'
@@ -2016,27 +2021,27 @@ b1_brief() {  # <artifact> <questions> [<files line>] -> a read-only reader brie
   [ -n "${3:-}" ] && printf '\n%s' "$3"
   return 0
 }
-q49_gate b1a bionic:auditor audited "$(b1_brief "$B1_EVI" evidence)"
-expect_eq "T49-B1 audited: an auditor with one question and one Expected artifact, no Files:, is admitted" "allow:evidence" "$R"
-q49_gate b1b bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure')"
-expect_contains "T49-B1 peer-reviewed: a critic dealt two questions with one record and no Files: is refused" "deny:" "$R"
+q49_gate b1a bionic:auditor double "$(b1_brief "$B1_EVI" evidence)"
+expect_eq "T49-B1 double: an auditor with one question and one Expected artifact, no Files:, is admitted" "allow:evidence" "$R"
+q49_gate b1b bionic:critic double "$(b1_brief "$B1_ADV" 'adversarial, structure')"
+expect_contains "T49-B1 double: a critic dealt two questions with one record and no Files: is refused" "deny:" "$R"
 expect_contains "T49-B1 …the first line says it is dealt 2 questions and names 1 record" "dealt 2 questions, names 1 record" "$R"
 expect_contains "T49-B1 …and its fix lists one record per question under Files:" "one Files: record per question" "$R"
 B1_DETAIL="$GATE_VERR"
 expect_contains "T49-B1 …the detail says a reader writes one record per question" "one record per question" "$B1_DETAIL"
 expect_contains "T49-B1 …and that the fact verb takes a record only from the reader's own row" "proof-add" "$B1_DETAIL"
-q49_gate b1c bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: $B1_ADV, $B1_STR")"
+q49_gate b1c bionic:critic double "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: $B1_ADV, $B1_STR")"
 expect_eq "T49-B1 …the same with Files: naming both records (the artifact repeated counts once) is admitted" "allow:adversarial,structure" "$R"
 expect_eq "T49-B1 …and the row records deliverable= and files= as today" "$B1_ADV|$B1_ADV,$B1_STR" \
   "$(roster_field "$(q_row "$REPO")" deliverable)|$(roster_field "$(q_row "$REPO")" files)"
-q49_gate b1d bionic:critic tested "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure' "Files: $B1_ADV, $B1_STR, $B1_EVI")"
-expect_eq "T49-B1 tested: three questions and three distinct record paths are admitted" "allow:evidence,adversarial,structure" "$R"
-q49_gate b1e bionic:critic tested "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure' "Files: $B1_ADV, $B1_STR")"
+q49_gate b1d bionic:critic single "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure' "Files: $B1_ADV, $B1_STR, $B1_EVI")"
+expect_eq "T49-B1 single: three questions and three distinct record paths are admitted" "allow:evidence,adversarial,structure" "$R"
+q49_gate b1e bionic:critic single "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure' "Files: $B1_ADV, $B1_STR")"
 expect_contains "T49-B1 …two of three is refused" "dealt 3 questions, names 2 records" "$R"
-q49_gate b1f bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: \"$B1_ADV\", [$B1_STR]")"
+q49_gate b1f bionic:critic double "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: \"$B1_ADV\", [$B1_STR]")"
 expect_eq "T49-B1 a quoted and a bracketed path count as their stripped forms" "allow:adversarial,structure" "$R"
 expect_eq "T49-B1 …and the row holds the stripped paths" "$B1_ADV,$B1_STR" "$(roster_field "$(q_row "$REPO")" files)"
-q49_gate b1g bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: ./$B1_ADV")"
+q49_gate b1g bionic:critic double "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: ./$B1_ADV")"
 expect_contains "T49-B1 the artifact repeated with a leading ./ is the same path: refused" "dealt 2 questions, names 1 record" "$R"
 # no bound plan: the label is required and the set is not checked, but the count needs no dealing
 REPO=$(q_unbound rb1h)
@@ -2058,10 +2063,10 @@ q_gate "$REPO" b1k bionic:implementor "$(b1_brief "$B1_ADV" 'adversarial, struct
 expect_eq "T49-B1 a writer carrying two questions and one record is not judged by the count" "allow" "$GATE_VERDICT"
 # a Files: line on a read-only role changes nothing else: no writer slot, no worktree demand, no derivation
 REPO=$(ro_budget_repo rb1l "writers=1 suites=9 worktrees=9 test_jobs=4 source=user")
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(B1_SUITES=none b1_brief "$B1_ADV" 'adversarial' "Files: $B1_ADV")" "b1l-r" "claude-sonnet-5" "$RO_NONE" "bionic:critic")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(B1_SUITES=none b1_brief "$B1_ADV" 'adversarial, structure' "Files: $B1_ADV, $B1_STR")" "b1l-r" "claude-sonnet-5" "$RO_NONE" "bionic:critic")"
 expect_eq "T49-B1 a critic with a Files: line is admitted" "allow" "$GATE_VERDICT"
 B1_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_eq "T49-B1 …its row holds the record in files=" "$B1_ADV" "$(roster_field "$B1_ROW" files)"
+expect_eq "T49-B1 …its row holds both records in files=" "$B1_ADV,$B1_STR" "$(roster_field "$B1_ROW" files)"
 expect_eq "T49-B1 …and a waived budget, nothing derived from Files:" "none" "$(roster_field "$B1_ROW" suites_allowed)"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "b1l-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "T49-B1 …it holds no writer slot: a writer is admitted beside it at writers=1" "allow" "$GATE_VERDICT"
@@ -2109,14 +2114,14 @@ t57_brief() {  # <questions> <fourth run> [<extra line>]
   [ -n "${3:-}" ] && printf '\n%s' "$3"
   return 0
 }
-q49_gate t57a bionic:auditor audited "$(t57_brief evidence 'rm -rf dist & pytest')"
-expect_contains "T57-B1 audited auditor, fourth run rm -rf dist & pytest: refused at the wall" "deny:" "$R"
+q49_gate t57a bionic:auditor double "$(t57_brief evidence 'rm -rf dist & pytest')"
+expect_contains "T57-B1 double auditor, fourth run rm -rf dist & pytest: refused at the wall" "deny:" "$R"
 expect_contains "T57-B1 …on the cap, naming the total" "the total of 4 runs exceeds the 3-run cap" "$R"
-q49_gate t57b bionic:auditor peer-reviewed "$(t57_brief evidence 'mkdir -p x & bash tests/run.sh')"
-expect_contains "T57-B1 peer-reviewed auditor, fourth run mkdir -p x & bash tests/run.sh: refused on the cap" "exceeds the 3-run cap" "$R"
-q49_gate t57c bionic:critic tested "$(t57_brief 'evidence, adversarial, structure' 'cp a b & npm test' 'Files: .bionic/docs/record/w/e.md, .bionic/docs/record/w/f.md, .bionic/docs/record/w/g.md')"
-expect_contains "T57-B1 tested critic holding evidence, fourth run cp a b & npm test: refused on the cap" "exceeds the 3-run cap" "$R"
-q49_gate t57d bionic:auditor audited "$(t57_brief evidence 'pytest')"
+q49_gate t57b bionic:auditor double "$(t57_brief evidence 'mkdir -p x & bash tests/run.sh')"
+expect_contains "T57-B1 double auditor, fourth run mkdir -p x & bash tests/run.sh: refused on the cap" "exceeds the 3-run cap" "$R"
+q49_gate t57c bionic:critic single "$(t57_brief 'evidence, adversarial, structure' 'cp a b & npm test' 'Files: .bionic/docs/record/w/e.md, .bionic/docs/record/w/f.md, .bionic/docs/record/w/g.md')"
+expect_contains "T57-B1 single critic holding evidence, fourth run cp a b & npm test: refused on the cap" "exceeds the 3-run cap" "$R"
+q49_gate t57d bionic:auditor double "$(t57_brief evidence 'pytest')"
 expect_contains "T57-B1 …the control: a plain fourth run is refused the same way" "the total of 4 runs exceeds the 3-run cap" "$R"
 
 # N4: the total. Suites: names count toward the three.
@@ -2184,38 +2189,39 @@ T57_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refus
 expect_contains "T57-N7 the longest role: a reviewer reading evidence with nothing to re-execute" "the reviewer declares nothing to re-execute" "$T57_LINE"
 expect_eq "T57-N7 …its first line fits 100 columns" "ok" "$([ "$(bionic_cols "$T57_LINE")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$T57_LINE")")"
 REPO=$(make_repo rt57r yes); write_attestation "$REPO" "$SID_A"
-q_gate "$REPO" t57r bionic:reviewer "Your task: read.
+q_gate "$REPO" t57r bionic:critic "Your task: read.
 Expected artifact: .bionic/docs/record/w/e.md
 Expected duration: ~30 minutes.
-Questions: structure
+Questions: adversarial, structure
+Files: .bionic/docs/record/w/e.md, .bionic/docs/record/w/f.md
 Suites: none"
-expect_eq "T57-N7 at the wall: a reviewer at audited (not dealt evidence) with Suites: none is admitted" "allow" "$GATE_VERDICT"
+expect_eq "T57-N7 at the wall: a critic at double (not dealt evidence) with Suites: none is admitted" "allow" "$GATE_VERDICT"
 
 # N1: a record is a path under the record root, in resolved form
 T57_D=.bionic/docs/record/w
 for T57_F in .bionic/tmp/scratch/x/progress.md hooks/a.sh "$T57_D/" ../elsewhere/b.md /tmp/b.md "$T57_D/x/../a.md" .bionic//docs/record/w/a.md; do
-  q49_gate "t57-n1-$(printf '%s' "$T57_F" | tr -c 'a-z0-9' '_')" bionic:critic peer-reviewed "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_F")"
+  q49_gate "t57-n1-$(printf '%s' "$T57_F" | tr -c 'a-z0-9' '_')" bionic:critic double "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_F")"
   expect_contains "T57-N1 Files: $T57_F beside the artifact leaves one record: refused" "dealt 2 questions, names 1 record" "$R"
 done
-q49_gate t57-n1-real bionic:critic peer-reviewed "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_D/b.md")"
+q49_gate t57-n1-real bionic:critic double "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_D/b.md")"
 expect_eq "T57-N1 Files: naming a second record under the root: two, admitted" "allow:adversarial,structure" "$R"
-q49_gate t57-n1-scr bionic:critic peer-reviewed "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_D/b.md, .bionic/tmp/scratch/x/progress.md")"
+q49_gate t57-n1-scr bionic:critic double "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_D/b.md, .bionic/tmp/scratch/x/progress.md")"
 expect_eq "T57-N1 a scratch file beside two real records is admitted" "allow:adversarial,structure" "$R"
 expect_eq "T57-N1 …and stays on the row's files=" "$T57_D/b.md,.bionic/tmp/scratch/x/progress.md" "$(roster_field "$(q_row "$REPO")" files)"
-q49_gate t57-n1-one bionic:auditor audited "$(b1_brief hooks/out.md evidence)"
+q49_gate t57-n1-one bionic:auditor double "$(b1_brief hooks/out.md evidence)"
 expect_contains "T57-N1 an artifact outside the record root is no record: one question, none named" "dealt 1 question, names 0 records" "$R"
 
 # S1, S2: two rows that could not fail
-q49_gate t57-s1 bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: \"$B1_ADV\"")"
+q49_gate t57-s1 bionic:critic double "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: \"$B1_ADV\"")"
 expect_contains "T57-S1 the artifact repeated in quotes as the only Files: entry is one record: refused" "dealt 2 questions, names 1 record" "$R"
-q49_gate t57-s2 bionic:auditor audited "Your task: read the wave-99 change.
+q49_gate t57-s2 bionic:auditor double "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-s2.md
 Expected duration: ~30 minutes.
 Suites: tests/widget.test.sh
 
     Questions: evidence"
 expect_eq "T57-S2 an indented Questions: line after a blank line is the label" "allow:evidence" "$R"
-q49_gate t57-s2b bionic:auditor audited "    Your task: read the wave-99 change.
+q49_gate t57-s2b bionic:auditor double "    Your task: read the wave-99 change.
     Expected artifact: .bionic/docs/record/wq-s2b.md
     Expected duration: ~30 minutes.
     Suites: tests/widget.test.sh
@@ -2281,20 +2287,20 @@ ${5//@R@/$repo}"
   if [ "$GATE_VERDICT" = allow ]; then R="allow:$(roster_field "$(q_row "$repo")" questions)"
   else R="deny:$(printf "%s\n" "$GATE_ERR" | /usr/bin/grep -m1 "bionic: dispatch refused")"; fi
 }
-t57_abs_gate abs1 bionic:auditor audited "@R@/.bionic/docs/record/w/a.md"
+t57_abs_gate abs1 bionic:auditor double "@R@/.bionic/docs/record/w/a.md"
 expect_eq "T57-N1 the exam's shape: a record by its absolute path as the shell spells the project is counted" "allow:evidence" "$R"
-T57_QS='adversarial, structure' t57_abs_gate abs2 bionic:critic peer-reviewed "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/w/b.md"
+T57_QS='adversarial, structure' t57_abs_gate abs2 bionic:critic double "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/w/b.md"
 expect_eq "T57-N1 …and two such records are two" "allow:adversarial,structure" "$R"
-T57_QS='adversarial, structure' t57_abs_gate abs3 bionic:critic peer-reviewed "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/w/out/b.md"
+T57_QS='adversarial, structure' t57_abs_gate abs3 bionic:critic double "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/w/out/b.md"
 expect_contains "T57-N1 an absolute path through a symlinked directory that lands outside the record root is no record" "dealt 2 questions, names 1 record" "$R"
-T57_QS='adversarial, structure' t57_abs_gate abs4 bionic:critic peer-reviewed "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/new/deep/b.md"
+T57_QS='adversarial, structure' t57_abs_gate abs4 bionic:critic double "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/new/deep/b.md"
 expect_eq "T57-N1 a path whose directories do not exist yet under a real record root is counted" "allow:adversarial,structure" "$R"
 expect_eq "T57-N1 …and the fixture really has no such directory" "absent" "$([ -e "$REPO/.bionic/docs/record/new" ] && echo present || echo absent)"
 # one rule for every path (A-T57.11 ruling): a RELATIVE path is anchored at the project root and
 # then placed as an absolute one is, so the wall never counts a record the fact verb would refuse
-T57_QS='adversarial, structure' t57_abs_gate rel1 bionic:critic peer-reviewed ".bionic/docs/record/w/a.md" "Files: .bionic/docs/record/w/out/b.md"
+T57_QS='adversarial, structure' t57_abs_gate rel1 bionic:critic double ".bionic/docs/record/w/a.md" "Files: .bionic/docs/record/w/out/b.md"
 expect_contains "T57-N1 a relative path through a symlinked directory that lands outside the record root is no record" "dealt 2 questions, names 1 record" "$R"
-T57_QS='adversarial, structure' t57_abs_gate rel2 bionic:critic peer-reviewed ".bionic/docs/record/w/a.md" "Files: .bionic/docs/record/w/real/b.md"
+T57_QS='adversarial, structure' t57_abs_gate rel2 bionic:critic double ".bionic/docs/record/w/a.md" "Files: .bionic/docs/record/w/real/b.md"
 expect_eq "T57-N1 …while the same path through a real directory is counted (the control)" "allow:adversarial,structure" "$R"
 
 # a reader's Files: asks for no derivation (review pass 38 B1, A-orch-105). These fixtures have no
@@ -2307,18 +2313,18 @@ t57_rd() {  # <questions> <files line> [<suites line>] [<runs line>] -> a reader
   return 0
 }
 T57_PY="Re-executes: ${RL_BT}pytest tests/${RL_BT}"
-q49_gate t57-d1 bionic:auditor audited "$(t57_rd evidence "Files: $T57_REC/e.md" '' "$T57_PY")"
+q49_gate t57-d1 bionic:auditor double "$(t57_rd evidence "Files: $T57_REC/e.md" '' "$T57_PY")"
 expect_eq "T57-D an auditor with Files: naming its record, no Suites: line and a pytest run is admitted" "allow:evidence" "$R"
 expect_eq "T57-D …its row reads the waiver: suites_allowed=none" "none" "$(roster_field "$(q_row "$REPO")" suites_allowed)"
-q49_gate t57-d2 bionic:critic tested "$(t57_rd 'evidence, adversarial, structure' "Files: $T57_REC/e.md, $T57_REC/f.md, $T57_REC/g.md" '' "$T57_PY")"
-expect_eq "T57-D a tested critic with its three records on Files: and a pytest run is admitted" "allow:evidence,adversarial,structure" "$R"
-q49_gate t57-d3 bionic:auditor audited "$(t57_rd evidence "Files: $T57_REC/e.md" 'Suites: none' "$T57_PY")"
+q49_gate t57-d2 bionic:critic single "$(t57_rd 'evidence, adversarial, structure' "Files: $T57_REC/e.md, $T57_REC/f.md, $T57_REC/g.md" '' "$T57_PY")"
+expect_eq "T57-D a single critic with its three records on Files: and a pytest run is admitted" "allow:evidence,adversarial,structure" "$R"
+q49_gate t57-d3 bionic:auditor double "$(t57_rd evidence "Files: $T57_REC/e.md" 'Suites: none' "$T57_PY")"
 expect_eq "T57-D …the same with Suites: none beside the run, as today" "allow:evidence" "$R"
-q49_gate t57-d4 bionic:auditor audited "$(t57_rd evidence "Files: $T57_REC/e.md")"
+q49_gate t57-d4 bionic:auditor double "$(t57_rd evidence "Files: $T57_REC/e.md")"
 expect_contains "T57-D an auditor with Files: and no Suites: line and no run is refused: nothing to re-execute" "the auditor declares nothing to re-execute" "$R"
 expect_absent "T57-D …never the impact-command refusal" "no impact command" "$R"
-q49_gate t57-d5 bionic:reviewer audited "$(t57_rd structure "Files: $T57_REC/e.md")"
-expect_eq "T57-D a reviewer not dealt evidence with its record on Files: and no Suites: line is admitted" "allow:structure" "$R"
+q49_gate t57-d5 bionic:critic double "$(t57_rd 'adversarial, structure' "Files: $T57_REC/e.md, $T57_REC/f.md")"
+expect_eq "T57-D a critic not dealt evidence with its records on Files: and no Suites: line is admitted" "allow:adversarial,structure" "$R"
 REPO=$(make_repo rt57d6 yes); write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: write it.
 Expected artifact: $T57_REC/w.md
@@ -2364,7 +2370,7 @@ t72_repo() {  # <role key: aud|crit|rev|wr> <on|off> -> the repo that role is di
   case "$1" in
     rev) repo=$(q_unbound "rt72-$1-$2") ;;
     *)   repo=$(make_repo "rt72-$1-$2" yes); write_attestation "$repo" "$SID_A"
-         [ "$1" = crit ] && q_rigor "$repo" tested ;;
+         [ "$1" = crit ] && q_rigor "$repo" single ;;
   esac
   [ "$2" = on ] && t72_impact "$repo"
   printf '%s' "$repo"
@@ -2446,7 +2452,7 @@ done
 # test can make: a directory named without its slash, a symlink, a FIFO, a path under a directory
 # of mode 000. A device needs root to make under record/, and a name holding a comma is two
 # Files: entries before the wall sees it, so neither is a row here.
-T72_D=$(walk_repo rt72-diff audited)
+T72_D=$(walk_repo rt72-diff double)
 T72_OUT="$SANDBOX/t72-outside"; mkdir -p "$T72_OUT/sub"
 T72_LNK="$SANDBOX/t72-link"; ln -s "$SANDBOX" "$T72_LNK"
 T72_DR="$T72_D/$T72_REC"
@@ -2888,80 +2894,88 @@ expect_contains "BARE2b …it still names no deliverable" "this brief names no d
 t7_gate bare3 '' w99-bare implementor "$(t7_bare 'version 1.12.0 of the notes')"
 expect_contains "BARE3 a version number is no file name: still no deliverable" "this brief names no deliverable" "$(t7_first)"
 
-section "§RIGOR — the dealing reads a plan in either vocabulary alike, and prints the level by its new word (wave-28 T44; REQ-16 AC-16.1, AC-16.2; D35, A-orch-7)"
+section "§RIGOR — the dealing is single or double, the same at either scale, and a refusal prints the level by its word (wave-28 T44; wave-30 T11: REQ-1 AC-1.4, D1)"
 # ============================================================================
 # The wall asks lib/proof.sh `facts_owed`, which reads the plan's word through lib/run.sh
-# `rigor_level`: a plan written `high` deals each reader what one written `audited` does, and a
-# refusal names the level as `rigor_print` prints it, never by the old word. §Q's fixtures and
-# helpers, the plan's rigor line set to each word of a pair.
+# `rigor_level`: `single` deals the critic every question, `double` the auditor evidence and the
+# critic the rest, at task scale as at wave scale, and a refusal names the level as `rigor_print`
+# prints it. §Q's fixtures and helpers, the plan's rigor line (and scale line) set per case.
 RV_N=0
-rv_gate() {  # <tag> <rigor> <role> <questions line or empty> -> GATE_* for that dispatch
+rv_gate() {  # <tag> <rigor> <role> <questions line or empty> [<scale>] -> GATE_* for that dispatch
   # The repository is named by a counter, never by the rigor word, so no path in a refusal carries it.
   RV_N=$((RV_N + 1))
   REPO=$(make_repo "rv-$1-$RV_N" yes); write_attestation "$REPO" "$SID_A"; q_rigor "$REPO" "$2"
+  if [ -n "${5:-}" ]; then
+    local p="$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+    sed "s/^scale: .*/scale: $5/" "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  fi
   q_gate "$REPO" "rv-$1" "$3" "$(q_brief "rv-$1" "$4")"
 }
-for rv_case in "tested|low|bionic:auditor|Questions: evidence|deny" \
-               "tested|low|bionic:critic|Questions: evidence, adversarial, structure|allow" \
-               "peer-reviewed|medium|bionic:critic|Questions: adversarial, structure|allow" \
-               "peer-reviewed|medium|bionic:reviewer|Questions: structure|deny" \
-               "audited|high|bionic:reviewer|Questions: structure|allow" \
-               "audited|high|bionic:auditor|Questions: evidence, structure|deny"; do
-  IFS='|' read -r rv_o rv_n rv_role rv_q rv_want <<< "$rv_case"
-  rv_gate o "$rv_o" "$rv_role" "$rv_q"; rv_ov="$GATE_VERDICT"; rv_oq="$(roster_field "$(q_row "$REPO")" questions)"
-  rv_gate n "$rv_n" "$rv_role" "$rv_q"
-  expect_eq "RV1 $rv_o, $rv_role, '$rv_q': $rv_want" "$rv_want" "$rv_ov"
-  expect_eq "RV1 …and $rv_n gives the same verdict" "$rv_ov" "$GATE_VERDICT"
-  [ "$rv_want" = allow ] && expect_eq "RV1 …and records the same set" "$rv_oq" "$(roster_field "$(q_row "$REPO")" questions)"
+for rv_case in "single|bionic:auditor|Questions: evidence|deny" \
+               "single|bionic:critic|Questions: evidence, adversarial, structure|allow" \
+               "double|bionic:auditor|Questions: evidence|allow" \
+               "double|bionic:critic|Questions: adversarial, structure|allow" \
+               "double|bionic:reviewer|Questions: structure|deny" \
+               "double|bionic:critic|Questions: adversarial|deny" \
+               "double|bionic:auditor|Questions: evidence, structure|deny"; do
+  IFS='|' read -r rv_l rv_role rv_q rv_want <<< "$rv_case"
+  rv_gate w "$rv_l" "$rv_role" "$rv_q"; rv_wv="$GATE_VERDICT"; rv_wq="$(roster_field "$(q_row "$REPO")" questions)"
+  rv_gate t "$rv_l" "$rv_role" "$rv_q" task
+  expect_eq "RV1 $rv_l, $rv_role, '$rv_q': $rv_want" "$rv_want" "$rv_wv"
+  expect_eq "RV1 …and a task-scale plan gives the same verdict" "$rv_wv" "$GATE_VERDICT"
+  [ "$rv_want" = allow ] && expect_eq "RV1 …and records the same set" "$rv_wq" "$(roster_field "$(q_row "$REPO")" questions)"
 done
 
-# THE PRINTED FORM, in each vocabulary: the role dealt nothing, and the set the rigor deals.
-for rv_w in tested low; do
-  rv_gate p "$rv_w" bionic:auditor 'Questions: evidence'
-  expect_eq "RV2 $rv_w: an auditor is dealt nothing and refused" "deny" "$GATE_VERDICT"
-  expect_contains "RV2 …the detail names the level, labelled" \
-    "Dealt: nothing at review rigor: low (one independent reader), scale wave" "$GATE_VERR"
-  for rv_old in tested peer-reviewed audited; do
-    expect_absent "RV2 …at $rv_w the refusal never prints the old word $rv_old" "$rv_old" "$GATE_VERR"
+# THE PRINTED FORM: the role dealt nothing, and the set the rigor deals, each with its level.
+for rv_s in wave task; do
+  rv_gate p single bionic:auditor 'Questions: evidence' "$rv_s"
+  expect_eq "RV2 single ($rv_s): an auditor is dealt nothing and refused" "deny" "$GATE_VERDICT"
+  expect_contains "RV2 …the detail names the level, with its meaning" \
+    "Dealt: nothing at review rigor: single (one independent mind), scale $rv_s" "$GATE_VERR"
+  for rv_old in "independent reader)" "independent readers)" "three independent"; do
+    expect_absent "RV2 …and never the printed form before 1.14.0 ('$rv_old')" "$rv_old" "$GATE_VERR"
   done
 done
-for rv_w in audited high; do
-  rv_gate s "$rv_w" bionic:auditor 'Questions: evidence, structure'
-  expect_eq "RV3 $rv_w: an auditor naming more than it is dealt is refused" "deny" "$GATE_VERDICT"
-  expect_contains "RV3 …the detail names the dealt set and the level, labelled" \
-    "Dealt: evidence (review rigor: high (three independent readers), scale wave)" "$GATE_VERR"
-  for rv_old in tested peer-reviewed audited; do
-    expect_absent "RV3 …at $rv_w the refusal never prints the old word $rv_old" "$rv_old" "$GATE_VERR"
+for rv_s in wave task; do
+  rv_gate s double bionic:auditor 'Questions: evidence, structure' "$rv_s"
+  expect_eq "RV3 double ($rv_s): an auditor naming more than it is dealt is refused" "deny" "$GATE_VERDICT"
+  expect_contains "RV3 …the detail names the dealt set and the level, with its meaning" \
+    "Dealt: evidence (review rigor: double (two independent minds), scale $rv_s)" "$GATE_VERR"
+  for rv_old in "independent reader)" "independent readers)" "three independent"; do
+    expect_absent "RV3 …and never the printed form before 1.14.0 ('$rv_old')" "$rv_old" "$GATE_VERR"
   done
 done
-for rv_w in peer-reviewed medium; do
-  rv_gate m "$rv_w" bionic:critic ''
-  expect_eq "RV4 $rv_w: a critic with no Questions: line is refused" "deny" "$GATE_VERDICT"
-  expect_contains "RV4 …the detail names the level the set is dealt at, labelled" \
-    "review rigor: medium (two independent readers)" "$GATE_VERR"
-  expect_absent "RV4 …at $rv_w the refusal never prints the old word peer-reviewed" "peer-reviewed" "$GATE_VERR"
+for rv_s in wave task; do
+  rv_gate m double bionic:critic '' "$rv_s"
+  expect_eq "RV4 double ($rv_s): a critic with no Questions: line is refused" "deny" "$GATE_VERDICT"
+  expect_contains "RV4 …the detail names the level the set is dealt at, with its meaning" \
+    "review rigor: double (two independent minds)" "$GATE_VERR"
+  expect_absent "RV4 …and never the printed form before 1.14.0" "independent readers" "$GATE_VERR"
 done
 
 # THE LONGEST VALUES, UNDER THE STRICT WIDTH (A-orch-17). Each refusal is driven at the widest value
-# it can carry: low deals the critic all three questions, and medium deals the reviewer nothing.
+# it can carry: single deals the critic all three questions, and double deals the reviewer nothing.
 # Under BIONIC_REFUSE_STRICT=1 an over-wide line refuses its own call, so a whole line here is the
-# proof it fits. No suite drove this case before; the old line was 102 columns at its widest.
+# proof it fits.
 rv_cols() { printf '%s' "$1" | LC_ALL=en_US.UTF-8 awk '{ print length($0) }'; }
 expect_eq "RV5 precondition: this suite runs with the strict refusal width" "1" "${BIONIC_REFUSE_STRICT:-}"
-rv_gate w low bionic:critic 'Questions: evidence'
-expect_eq "RV5 low: a critic naming one of its three questions is refused" "deny" "$GATE_VERDICT"
-RV5_LINE="bionic: dispatch refused — low rigor deals critic: evidence,adversarial,structure (use that set)"
+rv_gate w single bionic:critic 'Questions: evidence'
+expect_eq "RV5 single: a critic naming one of its three questions is refused" "deny" "$GATE_VERDICT"
+RV5_LINE="bionic: dispatch refused — single rigor deals critic: evidence,adversarial,structure (use that set)"
 expect_contains "RV5 …on its own line, the whole set kept" "$RV5_LINE" "$GATE_ERR"
-expect_eq "RV5 …which is 98 columns, inside the 100" "98" "$(rv_cols "$RV5_LINE")"
+# MEASURED, NOT BLESSED (A-T11.9): `single` is three columns wider than `low`, so this line, 98 columns
+# before 1.14.0, is now 101, one over the 100 budget; the wall's dp_finding does not cut or refuse it.
+# The line is hooks/dispatch-preflight.sh's (row T20); this row pins the width so a fix moves it.
+expect_eq "RV5 …which is 101 columns, one over the line budget (flagged, A-T11.9)" "101" "$(rv_cols "$RV5_LINE")"
 expect_contains "RV5 …the detail names the role as typed" "Role:  bionic:critic" "$GATE_VERR"
-expect_contains "RV5 …and the level in the printed form" "review rigor: low (one independent reader)" "$GATE_VERR"
-rv_gate w medium bionic:reviewer 'Questions: structure'
-expect_eq "RV6 medium: a reviewer is dealt nothing and refused" "deny" "$GATE_VERDICT"
-RV6_LINE="bionic: dispatch refused — medium rigor deals reviewer: nothing (dispatch its holder)"
+expect_contains "RV5 …and the level in the printed form" "review rigor: single (one independent mind)" "$GATE_VERR"
+rv_gate w double bionic:reviewer 'Questions: structure'
+expect_eq "RV6 double: a reviewer is dealt nothing and refused" "deny" "$GATE_VERDICT"
+RV6_LINE="bionic: dispatch refused — double rigor deals reviewer: nothing (dispatch its holder)"
 expect_contains "RV6 …on its own line" "$RV6_LINE" "$GATE_ERR"
 expect_eq "RV6 …which is 87 columns" "87" "$(rv_cols "$RV6_LINE")"
 expect_contains "RV6 …the detail names the role as typed" "Role:  bionic:reviewer" "$GATE_VERR"
-expect_contains "RV6 …and the level in the printed form" "review rigor: medium (two independent readers)" "$GATE_VERR"
+expect_contains "RV6 …and the level in the printed form" "review rigor: double (two independent minds)" "$GATE_VERR"
 
 # ============================================================================
 

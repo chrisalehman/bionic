@@ -707,7 +707,7 @@ FM='---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
 intent: build
-rigor: tested
+rigor: single
 scale: wave
 deploy_target: none
 use_worktree: false

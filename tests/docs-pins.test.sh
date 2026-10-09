@@ -2071,7 +2071,7 @@ card3_shape() {  # <card text on stdin> -> each section heading's first word, ar
        pw && /^    batch / { print "batch" }'
 }
 SHAPE_PLAN="$TMP/wave-97-shape.plan.md"
-printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: audited' \
+printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: double' \
   'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user' \
   'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' \
   'spec: specs/epic-97/wave-97-shape.spec.md' '---' '' \
@@ -4874,7 +4874,7 @@ W26_LINE="$(/usr/bin/grep -o '`- T[0-9][0-9]*: [^`]*`' "$W26_STEP4" 2>/dev/null 
 expect_nonempty "W26-10: AC-4.2 — steps/4.md carries a one-line \`- T<n>:\` example" "$W26_LINE"
 expect_true "W26-10a: …of 80 characters or fewer" test "${#W26_LINE}" -le 80 -a "${#W26_LINE}" -gt 0
 expect_eq "W26-10b: …that the commit gate's shape check accepts" "yes" "$(w26_shaped "${W26_LINE#*: }")"
-expect_true "W26-10c: …and that names the auditor verdict a done row owes at peer-reviewed rigor" \
+expect_true "W26-10c: …and that names the auditor verdict a done row owes at double rigor" \
   /usr/bin/grep -Ewq 'auditor' <<< "$W26_LINE"
 expect_eq "W26-10m: a prose line is refused by the same check (the check discriminates)" "no" \
   "$(w26_shaped 'done, all green')"
@@ -5417,10 +5417,10 @@ section "Section W27-T17: wave-27 T17 — the doctrine says the dealing, inside 
 W27D_SKILL="${SPLIT_CORE}"
 # w27d_rigor_intro <SKILL.md> -> the text from the `**rigor**` line to the table's header, flattened
 w27d_rigor_intro() {
-  awk '/^\*\*rigor\*\*/ { on = 1 } on && /^\| Rigor \|/ { exit } on { printf "%s ", $0 }' "$1" 2>/dev/null
+  awk '/^\*\*rigor\*\*/ { on = 1 } on && /^\| \| `single` \|/ { exit } on { printf "%s ", $0 }' "$1" 2>/dev/null
 }
-# w27d_rigor_header <SKILL.md> -> the rigor table's header line
-w27d_rigor_header() { /usr/bin/grep -m1 '^| Rigor |' "$1" 2>/dev/null; }
+# w27d_rigor_header <SKILL.md> -> the rigor table's header line (levels as columns, wave-30 T11)
+w27d_rigor_header() { /usr/bin/grep -m1 '^| | `single` |' "$1" 2>/dev/null; }
 
 # §W27-1 (AC-1.1): four questions, rigor by readers.
 W27D_INTRO="$(w27d_rigor_intro "$W27D_SKILL")"
@@ -5428,8 +5428,8 @@ expect_nonempty "W27-1 precondition: the extractor reads SKILL.md's rigor paragr
 for _q in 'does it do what was asked' '`evidence`' '`adversarial`' '`structure`'; do
   expect_contains "W27-1: AC-1.1 — the rigor table is preceded by the question ${_q}" "$_q" "$W27D_INTRO"
 done
-expect_eq "W27-1b: …and its columns are the readers and who holds which question" \
-  '| Rigor | Independent readers | Who holds which question |' "$(w27d_rigor_header "$W27D_SKILL")"
+expect_eq "W27-1b: …and its columns are the two levels (wave-30 T11, REQ-1)" \
+  '| | `single` | `double` |' "$(w27d_rigor_header "$W27D_SKILL")"
 expect_absent "W27-1c: …with no skipped column" 'skip' "$(w27d_rigor_header "$W27D_SKILL")"
 expect_eq "W27-1d: steps/6.md orders no review by axis" "" \
   "$(w26_hits 'axis' "$STEP6_MD"; w26_hits 'Axis' "$STEP6_MD")"
@@ -6450,15 +6450,15 @@ W28R_DOC="$(w26_doctor "${SKILL_DIR}/steps/5.md" 'At `audited` the reviewer hold
 expect_eq "W28-R2m: a step file that teaches a level by an old word is caught" "${W28R_DOC#"$REPO"/}:audited" "$(w28r_old "$W28R_DOC")"
 W28R_DOC2="$(w26_doctor "${SKILL_DIR}/SKILL.md" "$W28R_MAP")"
 expect_eq "W28-R2m2: a second mapping sentence is not mistaken for a level taught" "" "$(w28r_old "$W28R_DOC2")"
-W28R_ROWS="$(/usr/bin/grep -oE '^\| `(low|medium|high)` \|' "${SKILL_DIR}/SKILL.md" | tr -d '|` ' | tr '\n' ' ')"
-expect_eq "W28-R3: SKILL.md's rigor table rows are low, medium and high" "low medium high " "$W28R_ROWS"
+W28R_ROWS="$(/usr/bin/grep -m1 -E '^\| \| `[a-z]+` \|' "${SKILL_DIR}/SKILL.md" | /usr/bin/grep -oE '`[a-z]+`' | tr -d '`' | tr '\n' ' ')"
+expect_eq "W28-R3: SKILL.md's rigor table columns are single and double (wave-30 T11, REQ-1)" "single double " "$W28R_ROWS"
 expect_nonempty "W28-R4: SKILL.md announces a run as <intent> · <level> rigor · <scale>" \
   "$(w26_hits '`<intent> · <level> rigor · <scale>`' "${SKILL_DIR}/SKILL.md")"
-expect_nonempty "W28-R4b: …for example build · high rigor · wave" "$(w26_hits '`build · high rigor · wave`' "${SKILL_DIR}/SKILL.md")"
+expect_nonempty "W28-R4b: …for example build · double rigor · wave" "$(w26_hits '`build · double rigor · wave`' "${SKILL_DIR}/SKILL.md")"
 expect_nonempty "W28-R5: the announcement prints card.sh rigor's line (the verb's caller)" \
   "$(w26_hits 'bash <plugin-root>/scripts/card.sh rigor <rigor>' "${SKILL_DIR}/SKILL.md")"
-W28R_CARD="$(bash "${REPO}/payload/scripts/card.sh" rigor audited 2>/dev/null)"
-expect_eq "W28-R5b: …and the line the announcement quotes is the one card.sh prints" "review rigor: high (three independent readers)" "$W28R_CARD"
+W28R_CARD="$(bash "${REPO}/payload/scripts/card.sh" rigor double 2>/dev/null)"
+expect_eq "W28-R5b: …and the line the announcement quotes is the one card.sh prints" "review rigor: double (two independent minds)" "$W28R_CARD"
 expect_nonempty "W28-R5c: …quoted in SKILL.md as printed" "$(w26_hits "\`${W28R_CARD:-<none>}\`" "${SKILL_DIR}/SKILL.md")"
 expect_nonempty "W28-R6: the reviewer role is dealt structure at high rigor" "$(w26_hits 'Dealt `structure` at high rigor' "${REPO}/agents/reviewer.md")"
 

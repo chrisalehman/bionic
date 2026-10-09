@@ -785,7 +785,7 @@ mkdir -p "$R8/.bionic/docs/plans/epic-99"
 {
   printf -- '---\n'
   printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf 'intent: build\nrigor: audited\nscale: wave\n'
+  printf 'intent: build\nrigor: double\nscale: wave\n'
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
   # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
   printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
@@ -810,7 +810,7 @@ echo "progress line" > "$R8/prog-g.progress"
 # spec AC-20): the start gate refuses a brief that declares neither `Files:` nor `Suites:`,
 # and this case needs the dispatch to actually JOURNAL a row. The DECLARED spelling,
 # because this fixture repo configures no `impact-command:`.
-BRIEF_G="Canonical-sdlc Step 4, task 4/12 of epic-99 wave-01; build · audited · wave.
+BRIEF_G="Canonical-sdlc Step 4, task 4/12 of epic-99 wave-01; build · double · wave.
 Expected artifact: $R8/deliv-a.md
 Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
 Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
