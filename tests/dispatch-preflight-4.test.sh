@@ -2913,6 +2913,7 @@ rv_gate() {  # <tag> <rigor> <role> <questions line or empty> [<scale>] -> GATE_
 }
 for rv_case in "single|bionic:auditor|Questions: evidence|deny" \
                "single|bionic:critic|Questions: evidence, adversarial, structure|allow" \
+               "double|bionic:auditor|Questions: evidence|allow" \
                "double|bionic:critic|Questions: adversarial, structure|allow" \
                "double|bionic:reviewer|Questions: structure|deny" \
                "double|bionic:critic|Questions: adversarial|deny" \
