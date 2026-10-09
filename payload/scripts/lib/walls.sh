@@ -2479,14 +2479,14 @@ _eg_refuse_readings() {
     $1 == "failing"    { print "- " $2 ": the newest reading is result=fail (evidence=" $3 "), and no waiver is newer" }')"
   # A DECLARED DEBT ALONE is not a reading (wave-27 T31; D23): its own fact and fix.
   if [ -z "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 != "debt"')" ]; then
-    lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+    lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
     _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and a suite a row landed red by declaration is still owed a green run taken after its blocker cleared:
 ${lines}
 Plan: $PLAN
 Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add floor <log>'."
     refuse exit2 commit "a declared red is still owed" "record a green run once cleared" "$_eg_detail"
   fi
-  _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+  _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
   [ -z "$_eg_debts" ] || lines="${lines}
 ${_eg_debts}"
   _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a reading whose newest is not result=fail, or a newer waiver:
@@ -3363,7 +3363,7 @@ _eg_row_for_worktree() {
   _rows="$(units_rows "$PLAN")" || return 1
   [ -n "$_rows" ] || return 0
   # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14; both sides
-  # T50, T47's floor RED): that function folds both sides and this one now does too, for
+  # T50, T47's regression RED): that function folds both sides and this one now does too, for
   # the reason case-folding always needs both sides folded — `$_want` is the literal
   # basename git gave the tree, and that basename carries the tree's REAL case (a real
   # dispatch tree is always `<NN>-T<n>`, capital T), while the cell is authored text that
@@ -3462,7 +3462,7 @@ elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
     # OUTSIDE THE RUN, NOT BEHIND IT (wave-17 REQ-4, T1; bug 7). Git placed this tree in
     # another repository, so nothing in THIS plan describes the work it holds: its `## Tasks`
     # register cannot name the tree, its `current:` is not the step that commit is part of,
-    # and its Step-5 floor is a floor that commit has no part in producing. Until this line
+    # and its Step-5 regression is a regression that commit has no part in producing. Until this line
     # the gate said all of that out loud — the announce below has named the boundary since
     # wave-14 — and then judged the commit at `current:` anyway, refusing another
     # repository's work for this run's evidence. A wall that has just admitted it cannot
@@ -3532,7 +3532,7 @@ if [ -n "$_EG_WT" ]; then
         # description | status | worktree`: there is no `step` column to read, so every row
         # arrived here with an empty cell, this arm decided nothing, and a commit from a
         # row's own tree was judged by the RUN's numbered-step block — a fixup writer at
-        # `current: 5` refused for a Verify floor its own task exists to produce, which a
+        # `current: 5` refused for a Verify regression its own task exists to produce, which a
         # consumer answered by hand-writing a mid-discharge Step-5 block. ADR-031's rule is
         # not wave-only: a row's tree is judged by its row at task scale too. The arms are
         # the SAME four the `current: T<n>` early exit runs above, reached by naming the row
@@ -3612,7 +3612,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # exactly where the run stands, so there is no step to substitute — and that is
           # the case the whole catch-22 lived in: a writer dispatched at Step 5, whose row
           # therefore reads 5, was judged by the run's Verify arm and refused for the green
-          # floor that writer's own task exists to produce (bug 2; carry-over 1; three D10
+          # regression that writer's own task exists to produce (bug 2; carry-over 1; three D10
           # `current:` regressions in wave-16). The row's `status` is what resolves it: this
           # tree has a writer in it, so this commit discharges the TASK's obligations, and
           # the arms it owes are the task arms.
@@ -3622,7 +3622,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # branch`, and the matrix `fails-when:` presence arm runs for every commit at
           # step ≥ 4 regardless. Step 4 IS the arm set a task owes, so naming it is the
           # whole implementation — a parallel dispatcher would be a second place to keep in
-          # step with the first. The run's arms (the floor block, the walk artifact, the
+          # step with the first. The run's arms (the regression block, the walk artifact, the
           # auditor cell, the ADR, the merge, the ship) all hang off steps 5 and up and are
           # simply never reached.
           #
@@ -3951,7 +3951,7 @@ Fix: do not commit step ${step} until pass equals total."
 # no `head:` at all; a value that is not a commit in the repository the commit is made in (a
 # hex id, abbreviated or full — a symbolic `HEAD` would name whatever is checked out at commit
 # time, which is no record); and a commit the RELEASE HEAD does not contain. The release head
-# is the tip of the plan's `working-branch:` when it names one that resolves — the floor runs
+# is the tip of the plan's `working-branch:` when it names one that resolves — the regression runs
 # on that branch, and the plan verbs' dry commit and a main-root commit at Step 5 are made
 # from the main checkout, whose own HEAD never holds a wave head before Step 8. A plan that
 # names no such branch is judged against the HEAD of the directory the commit is made in.
@@ -3961,7 +3961,7 @@ validate_tests_head() {
   local prefix="$1" head dir wb tip
   head=$(block_get head)
   if [ -z "$head" ]; then
-    _eg_detail="${prefix} evidence carries no 'head:' — the commit its tests floor ran on.
+    _eg_detail="${prefix} evidence carries no 'head:' — the commit its regression ran on.
 Plan: $PLAN
 Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as 'head=<sha>' in its header."
     refuse exit2 commit "this step's evidence names no head" "add head: <sha the run read>" "$_eg_detail"
@@ -3974,7 +3974,7 @@ Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as '
      || ! git -C "$dir" cat-file -e "${head}^{commit}" 2>/dev/null; then
     _eg_detail="${prefix} 'head: ${head}' is not a commit in the repository at ${dir}.
 Plan: $PLAN
-Fix: record the hex sha the tests floor ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
+Fix: record the hex sha the regression ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
     refuse exit2 commit "the Step-5 head: is not a commit here" "record the sha the run read" "$_eg_detail"
   fi
   wb=$(echo "$SECTION" | grep -E '^[[:space:]]*working-branch[[:space:]]*:' | head -1 \
@@ -3987,8 +3987,8 @@ Fix: record the hex sha the tests floor ran on (tests/run.sh's 'head=' header li
     if [ -n "$wb" ]; then wb="working-branch $wb"; else wb="HEAD of $dir"; fi
     _eg_detail="${prefix} 'head: ${head}' is not contained in the release head ${tip:-(none)} (${wb}).
 Plan: $PLAN
-Fix: run the tests floor on the release head, or on a commit it contains, and record that run's head."
-    refuse exit2 commit "the release head does not contain head:" "re-run the floor on release head" "$_eg_detail"
+Fix: run the regression on the release head, or on a commit it contains, and record that run's head."
+    refuse exit2 commit "the release head does not contain head:" "run the regression on that head" "$_eg_detail"
   fi
 }
 
@@ -4688,7 +4688,7 @@ validate_walk_artifact() {
 
 # S3 (AC-4, AC-23; wave-01-verification-cannot-lie, D-S1b): environments —
 # declared, covered, fog. Frontmatter `environments:` is one line naming the
-# set this wave's Step-5 tests floor claims to run on, entries joined by
+# set this wave's Step-5 regression claims to run on, entries joined by
 # " · ", each `<name> (covered...)` or `<name> (fog — cure: <text>)`. A plan
 # that never mentions the key makes no environment claim at all: the arm
 # no-ops. Most plans never declare it (this repo's own wave-01 plan is the
@@ -4702,7 +4702,7 @@ validate_walk_artifact() {
 # AC-23: this arm reads only the DECLARATION and the Step-5
 # `environments-covered:` line — never a derived suite set. It is
 # independent of validate_tests_block, which is what actually requires the
-# unconditional whole-suite floor run; nothing here substitutes for that,
+# unconditional whole-suite regression; nothing here substitutes for that,
 # and nothing here is consulted by it.
 #
 # Fires at current: 5..9, the same durable-prefix span as
@@ -4801,7 +4801,7 @@ validate_environments() {
     if [ -n "$missing" ]; then
       block_matrix "a declared environment went uncovered" "cover it, or mark it fog" \
         "environments-covered '${covered_line}' omits declared environment(s): ${missing} (declared covered set: ${covered_names}; fog: ${fog_names:-none})." \
-        "run the Step-5 tests floor on every declared non-fog environment and list it in 'environments-covered:', or move it to a fog entry naming its cure."
+        "run the Step-5 regression on every declared non-fog environment and list it in 'environments-covered:', or move it to a fog entry naming its cure."
     fi
 
     # THE OTHER DIRECTION — OVER-CLAIMING (critic K-5). The loop above walks the DECLARED
@@ -4824,7 +4824,7 @@ validate_environments() {
     if [ -n "$claimed_fog" ]; then
       block_matrix "a fog environment is claimed as covered" "drop it, or test it there" \
         "environments-covered '${covered_line}' claims coverage of environment(s) this plan declares as FOG: ${claimed_fog} (fog: ${fog_names:-none})." \
-        "a fog entry means NOT covered — either drop the name from 'environments-covered:', or run the Step-5 tests floor there and move it out of fog in the frontmatter."
+        "a fog entry means NOT covered — either drop the name from 'environments-covered:', or run the Step-5 regression there and move it out of fog in the frontmatter."
     fi
     if [ -n "$claimed_undeclared" ]; then
       block_matrix "the covered list names an undeclared environment" "declare it, or drop it" \
@@ -4835,7 +4835,7 @@ validate_environments() {
   return 0
 }
 
-# Verify gate: tests floor, the Verification Matrix, and — at double rigor,
+# Verify gate: regression, the Verification Matrix, and — at double rigor,
 # once no row is still pending — a non-empty `auditor:` pointer.
 # At `single` that pointer is not demanded (matrix_auditor_required).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -6744,7 +6744,7 @@ while IFS=$'\t' read -r _kind _target _run; do
   #
   # AHEAD OF THE DECLARED RUNS, and that order is the whole of the full-run rule. The
   # dispatch wall judges `tests/run.sh` by the `run.sh` token in `suites_allowed=` and nothing
-  # else, asking the proof record whether the change since the last floor proof can be bounded
+  # else, asking the proof record whether the change since the last regression proof can be bounded
   # (hooks/dispatch-preflight.sh, the full-run wall) — so a brief that declared the full tree
   # under `Re-executes:` instead would be unjudged there AND admitted here, and one spelling
   # would spend a run the proof record says is not owed. The full tree goes on a row that NAMES
@@ -6876,7 +6876,7 @@ done <<< "$_CLAIMS"
 # stages a rewrite — so a subagent suite call carrying no `timeout` never reached the budget
 # arm at all, and an OFF-BUDGET suite was repaired and allowed instead of refused. A-T3.1
 # named the interaction and did not close it; `tests/agent-context-guard.test.sh` §G9 caught
-# it at this wave's Step-5 floor.
+# it at this wave's Step-5 regression.
 #
 # ORDER, NOT A FLAG, IS WHAT ENFORCES IT. `fold.sh` already drops a staged `updatedInput`
 # whenever anything blocked (`bionic_fold`'s `BIONIC_FOLD_BLOCKS -eq 0` branch is its only
