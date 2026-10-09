@@ -751,6 +751,18 @@ LINE_DEBT_ROWS
   set -- $(proof_debt_row_counts "$led" "$2" "$cell")
   printf 'debt: burned %s, touched %s\n' "${1:-0}" "${2:-0}"
 }
+# THE REVIEW-BORN COUNT (wave-30 T21; REQ-2 AC-2.3, D4): `review-born rows: <N> of cap <M>`, N the plan's
+# `## SDLC State` lines carrying `born: review` (lib/units.sh `units_born`, the one place the count reads),
+# M its fix-cap: rendered (`units_fix_cap`; the rigor: level's default when the field is absent). Printed
+# after the debt line, so the owed line stays last. Nothing when the plan has neither field nor level.
+_line_review_born() {  # <plan>
+  local cap n
+  _line_load_run && _wt_units_load || return 0
+  declare -F units_fix_cap >/dev/null 2>&1 || return 0
+  cap="$(units_fix_cap "${1:-}")" && [ -n "$cap" ] || return 0
+  n="$(units_born "$1" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
+  printf 'review-born rows: %s of cap %s\n' "$n" "$cap"
+}
 _line_waiting() { printf 'WAITING %s — run again: %s\n' "$1" "$2"; }   # <row> <the same command>
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 
@@ -862,7 +874,7 @@ EOF
     said="$(line_publish "$plan" "$row" 2>&1)"; rc=$?
     case $rc in
       0) [ -z "$said" ] || printf '%s\n' "$said"
-         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_owed "$row" "$cand" "$name"; return 0 ;;
+         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_review_born "$plan"; _line_owed "$row" "$cand" "$name"; return 0 ;;
       3|75) : ;;
       4) [ -n "$held" ] || printf '%s\n' "$said"; held=1 ;;
       6) c="$(_wt_bionic_committed "$root" "$head" "$cand")"; c="${c%/}"
@@ -890,7 +902,7 @@ _line_closed() {  # <rec> <row> <name> [<plan>]
   case "$last" in
     *'|ev=published|'*)
       last="${last#*|commit=}"; last="${last%%|*}"
-      printf 'LANDED %s %s\n' "$2" "$last"; [ -z "${4:-}" ] || _line_debt "$4" "$2"; _line_owed "$2" "$last" "$3"; return 0 ;;
+      printf 'LANDED %s %s\n' "$2" "$last"; [ -z "${4:-}" ] || { _line_debt "$4" "$2"; _line_review_born "$4"; }; _line_owed "$2" "$last" "$3"; return 0 ;;
   esac
   printf '%s\n' "${last:-RETURNED ${2}}"; return 1
 }
