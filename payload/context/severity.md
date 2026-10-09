@@ -45,7 +45,7 @@ by severity.
   `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`. It is not a `finding:` line, and it
   sets `result` to `flag` when no finding sets it higher.
 - Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it
-  in `record/<run>/debt.md` at the sitting, and the next row whose Files touch the concept burns
+  in `record/<run>/debt.md` at the review findings disposition, and the next row whose Files touch the concept burns
   it inside its own work.
 
 Only readers rate: a finding's severity and reach are written by the reader that found it, and no
