@@ -2689,7 +2689,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30d" "claude-sonne
 expect_eq "30d an empty approved-by: value is not an approval" "deny" "$GATE_VERDICT"
 
 # --- 30e: the reading roles pass through the same refused plan ---
-# The reviewer is not here: no level deals it a question (wave-30 T11, D1); Explore reads in its place.
+# The reviewer is not here: the role is retired (wave-30 T20, AC-1.6); Explore reads in its place.
 for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore; do
   REPO=$(make_repo "r30e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
@@ -2891,14 +2891,14 @@ Files: .bionic/docs/record/w99-widget.txt, .bionic/docs/record/w99-adv.md"
   expect_status "rc2 '${_role}' at current: 2 with no approved-by is admitted" "0" "$GATE_ST"
   expect_eq "rc2 …on no deny verdict" "allow" "$GATE_VERDICT"
 done
-# …and the reviewer, which no level deals a question (wave-30 T11, D1), is refused on its Questions: line.
+# …and the reviewer, a retired role (wave-30 T20, AC-1.6), is refused as retired at current: 2 as at any step.
 REPO=$(make_repo "rrc2-reviewer" yes)
 write_attestation "$REPO" "$SID_A"
 k2_write_plan "$REPO" 2 ""
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL
 Questions: structure" "wrc2" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" bionic:reviewer)"
-expect_eq "rc2 'bionic:reviewer' at current: 2 is refused: double deals it nothing" "deny" "$GATE_VERDICT"
-expect_contains "rc2 …saying so" "double rigor deals reviewer: nothing" "$GATE_ERR"
+expect_eq "rc2 'bionic:reviewer' at current: 2 is refused: the role is retired" "deny" "$GATE_VERDICT"
+expect_contains "rc2 …saying so, and naming the role that holds structure" "bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)" "$GATE_ERR"
 
 # --- rc3: THE CONTROL — approval admits the writer at the same step ---
 REPO=$(make_repo rrc3 yes)
