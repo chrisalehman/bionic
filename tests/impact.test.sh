@@ -49,7 +49,8 @@
 # its authoring-time output is committed as the durable record at
 # .bionic/docs/record/wave-verification-cannot-lie/s12-planted-edits.log
 # (RED evidence is perishable: the red counts die at green, the mutation-and-restore
-# log does not).
+# log does not). The roster it runs is the directory (tests/*.test.sh, as tests/run.sh
+# derives it); a roster that reads 0 suites FAILS the section (T39, A-orch-96).
 #
 # Usage: bash tests/impact.test.sh
 #   BIONIC_IMPACT_PLANTED=1 bash tests/impact.test.sh    # + the §F proof
@@ -576,9 +577,26 @@ else
   ( cd "$REPO" && tar cf - --exclude=.git --exclude=.worktrees --exclude=.bionic . ) \
     | ( cd "$SCRATCH" && tar xf - )
 
-  ROSTER="$(/usr/bin/grep -oE '^run "[^"]+"' "$SCRATCH/tests/run.sh" | sed 's/^run "//; s/"$//' | sort)"
-  printf '%s\n' "$ROSTER" >"$TMP/roster"
-  echo "roster:      $(grep -c . "$TMP/roster") suites" >>"$PLOG"
+  # THE ROSTER IS THE DIRECTORY — read the way tests/run.sh reads it (`set --
+  # "$REPO"/tests/*.test.sh`, with its no-match guard), not from run.sh's text.
+  # This read used to grep run.sh for `run "…"` lines; the runner stopped carrying
+  # them when its roster became the directory (fixit 1.5.1), the grep matched 0
+  # lines, and every class below ran a complement of nothing and reported a clean
+  # superset (T24's walk; A-orch-96). So an empty roster is a FAILURE here, said
+  # loudly, and the planted classes do not run on it: a proof over no suites is
+  # the lie this section exists to catch.
+  : >"$TMP/roster"
+  set -- "$SCRATCH"/tests/*.test.sh
+  if [ "$#" -eq 1 ] && [ ! -e "$1" ]; then set --; fi
+  for _rf in "$@"; do printf '%s\n' "${_rf##*/}"; done | sort >"$TMP/roster"
+  ROSTER_N="$(grep -c . "$TMP/roster")"
+  echo "roster:      $ROSTER_N suites" >>"$PLOG"
+  if [ "$ROSTER_N" -gt 0 ]; then
+    ok "planted roster: read $ROSTER_N suites from tests/*.test.sh, as tests/run.sh derives it"
+  else
+    no "planted roster: read at least one suite from tests/*.test.sh" \
+      "roster read 0 suites — a proof over no suites is vacuous, so no class below is run"
+  fi
 
   # the parallel arm — one label in, one <label>.rc out. §F's own suite is
   # skipped inside the scratch tree: it would recurse into another whole proof.
@@ -648,7 +666,8 @@ PROBE
   fi
 
   # the control. Anything red here is red for its own reasons.
-  BASE_RED="$(list_run "$TMP/res-base" "$TMP/roster")"
+  BASE_RED=""
+  [ "$ROSTER_N" -gt 0 ] && BASE_RED="$(list_run "$TMP/res-base" "$TMP/roster")"
   {
     echo
     echo "CONTROL (no edit planted)"
@@ -713,6 +732,26 @@ PROBE
       echo "red OUTSIDE the derived set, control discounted: ${outside:-none}"
     } >>"$PLOG"
 
+    local n_roster n_derived n_comp n_ran
+    n_roster="$(grep -c . "$TMP/roster")"
+    n_derived="$(grep -c . "$TMP/derived")"
+    n_comp="$(grep -c . "$TMP/complement")"
+    n_ran="$(find "$TMP/res-comp" -name '*.rc' 2>/dev/null | grep -c .)"
+    {
+      echo "SUMMARY [$class]: roster=$n_roster named=$n_derived complement=$n_comp ran=$n_ran" \
+        "witness=$wit witness_red=${wit_red:+yes}${wit_red:-no}" \
+        "red_outside=$n_out superset=$([ "$n_out" -eq 0 ] && echo holds || echo BROKEN)"
+      echo "  impact.test.sh in the complement (skipped by the arm, recursion): $(grep -qx impact.test.sh "$TMP/complement" && echo yes || echo no)"
+    } >>"$PLOG"
+
+    # the complement is the only place a counterexample can live, so it has to
+    # be non-empty and every member of it has to have actually produced a verdict.
+    if [ "$n_comp" -gt 0 ] && [ "$n_ran" -eq "$n_comp" ]; then
+      ok "planted [$class]: the complement ran in full — $n_ran of $n_comp suites outside the $n_derived named"
+    else
+      no "planted [$class]: the complement ran in full" \
+        "complement $n_comp suite(s), $n_ran verdict(s) — a superset claim over a short complement is not a proof"
+    fi
     if [ -n "$witness" ]; then
       ok "planted [$class]: the edit really bites — $witness went red"
     else
@@ -727,14 +766,22 @@ PROBE
     fi
   }
 
-  # The five classes AC-19 names, each with the suite whose whole subject is the
-  # mutated file, and a maximal edit: a small edit makes a small red set and a
-  # correspondingly weak superset claim.
+  # The five classes AC-19 names, plus a skill (T39, A-orch-96), each with the suite
+  # whose whole subject is the mutated file, and a maximal edit: a small edit makes
+  # a small red set and a correspondingly weak superset claim. The tests/run.sh
+  # witness is runner-roster.test.sh, whose subject is the runner's roster
+  # derivation: version-compare.test.sh named no part of the runner and stayed
+  # green on the plant (A-T24.4).
+  if [ "$ROSTER_N" -gt 0 ]; then
   plant "a hook"                      "hooks/bash-walls.sh"           early-exit bash-walls.test.sh
   plant "a lib the doctor sources"    "payload/scripts/lib/width.sh"  early-exit width.test.sh
   plant "a tests/lib helper"          "tests/lib/bound-marker.sh"     wipe       session-start.test.sh
-  plant "tests/run.sh"                "tests/run.sh"                  wipe       version-compare.test.sh
+  plant "tests/run.sh"                "tests/run.sh"                  wipe       runner-roster.test.sh
   plant "a whole-payload-copied file" "payload/scripts/lib/patrol.sh" wipe       patrol-marker.test.sh
+  # a skill: read as text by the suites that pin its anchors (jit.test.sh pins the
+  # two names steps/5.md carries), so only losing its content breaks them.
+  plant "a skill"                     "skills/canonical-sdlc/steps/5.md" wipe       jit.test.sh
+  fi
 
   echo
   echo "planted-edit log: $PLOG"
