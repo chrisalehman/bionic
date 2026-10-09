@@ -680,7 +680,7 @@ expect_eq "6q5 …thirteen lines each: the twelve kept plus the one count line" 
 # --- (d) THE SPLIT IS UNCHANGED FOR THE MODEL-ONLY CHANNELS. `deny` and `block` keep
 # their `detail_to_user=no` cell, so the reader still gets one line there, and their
 # model wire still carries the whole list — the property wave-12 T17's combined refusal
-# depends on (tests/fold.test.sh 13i, tests/dispatch-preflight.test.sh §combined-deny). ---
+# depends on (tests/fold.test.sh 13i, tests/dispatch-preflight-3.test.sh §combined-deny). ---
 drive "$LIB" deny "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_D30"
 expect_eq "6r deny: the user stream is still exactly one line — the flip is exit2's alone" \
   "1" "$DRV_ERR_LINES"

@@ -585,7 +585,7 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 # ─── Act 5: the continuation ─────────────────────────────────────────────────
 #
 # `<fill>` MARKS WHAT ONLY THE ORCHESTRATOR KNOWS, and marks it rather than guessing it.
-# The task count, the floor result, the rulings, the carry-overs and the next wave's ideas
+# The task count, the regression result, the rulings, the carry-overs and the next wave's ideas
 # file are facts about the run, not about the tree; a template that invented plausible
 # values for them would produce a continuation that read true and was not. The shape is
 # wave-12-fixit-171's, heading for heading.
@@ -672,10 +672,27 @@ co_requirements() {  # -> the run's requirements file, or the path naming none
   [ -n "$r" ] && [ -f "$r" ] || r="$PLANS_DIR/$WAVE_SLUG.requirements.md"
   printf '%s\n' "$r"
 }
-co_carried() {  # -> every inherited deferred: line deferred again or left undisposed, as written
+co_carried() {  # -> every inherited deferred: line deferred again or left undisposed, as written,
+  # then every inherited debt: line the run's ledger does not hold (co_carried_debts)
   local out
   out="$(bash "$CO_SCRIPTS/card.sh" inherited "$(co_requirements)" 2>/dev/null)" || return 1
   printf '%s\n' "$out" | awk -F '\t' '$1 == "again" || $1 == "open" { print substr($0, length($1) + 2) }'
+  co_carried_debts
+}
+# AN INHERITED DEBT NOBODY ADOPTED IS CARRIED AGAIN (wave-30 T23; A-orch-44). `debt adopt` writes a
+# continuation's `debt:` lines into the run's ledger (wave-30 T32), and co_debts carries the ledger's
+# unburned items; an item adopted and burned is paid. A line nobody adopted is in no ledger, so it is
+# carried as the old continuation wrote it, its `from=` kept, unless the ledger holds its concept and
+# kind, whose own line (or burn) is the answer. Before this it was dropped at the next close-out.
+co_carried_debts() {  # -> the inherited debt: lines whose concept and kind the run's ledger lacks
+  local led="" have="" out
+  out="$(bash "$CO_SCRIPTS/card.sh" inherited-debt "$(co_requirements)" 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 0
+  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || led=""
+  [ -z "$led" ] || [ ! -f "$led" ] || have="$(proof_debt_items "$led" 2>/dev/null | awk -F '\t' '{ print $1 "\t" $2 }')"
+  printf '%s\n' "$out" | CO_HAVE="$have" awk '
+    BEGIN { n = split(ENVIRON["CO_HAVE"], h, "\n"); for (i = 1; i <= n; i++) if (h[i] != "") held[h[i]] = 1 }
+    $1 == "debt:" && !(($2 "\t" $3) in held) { print }'
 }
 # co_cont_has_deferrals -> 0 when the existing continuation carries the heading outside a code fence
 # (a pasted example of the form is not the section; read-adversarial-p15 #4)
@@ -765,7 +782,7 @@ continuation_template() {
 # continuation — $WAVE_SLUG${RELEASE:+ ($RELEASE)}
 
 Closed $NOW. $INTEGRATION at ${sha:-<fill: SHA>}. Wave branch \`$WORKING\` merged into
-\`$INTEGRATION\`: <fill: task count> tasks, every one RED→GREEN; <fill: floor result>.
+\`$INTEGRATION\`: <fill: task count> tasks, every one RED→GREEN; <fill: regression result>.
 <fill: reviews, audits, ADRs>.
 
 ## Chris decides (one decision each)
