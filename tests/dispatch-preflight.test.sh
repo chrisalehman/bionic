@@ -2449,7 +2449,8 @@ expect_contains "29a …and saying why an unbounded one would be worse" "no rost
 # was 20 under a registration of 10, so on the machine the CLI killed this hook before its
 # own bound could fire, and a hook killed on the CLI timeout does not exit 2 — the exact
 # failure the bound exists to prevent, invisible here because a suite has no CLI timeout.
-# Both numbers moved: the registration to 15, the bound to 10, five seconds clear. What
+# Both numbers moved: the registration to 15, the bound to 10, five seconds clear (and again at
+# wave-30 T35, to 25 and 20, the same five: headroom over a cold derivation measured at 8.5-10.3 s). What
 # this file discharges is AC-7.2, that the wait ends when the bound says so; that the bound
 # sits strictly UNDER its registration is a two-file claim neither file can make alone, and
 # tests/cross-gate-agreement.test.sh §L.4c is where it is pinned.

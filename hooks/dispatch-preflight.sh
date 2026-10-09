@@ -284,7 +284,7 @@ bionic_context 2>/dev/null || exit 0
 
 # ---------- THE WALL'S OWN DEADLINE (wave-28 T70; A-orch-205 to 212, A-orch-231) ----------
 #
-# THE HARNESS CANCELS A HOOK AT ITS REGISTRATION'S TIMEOUT (hooks.json: 15 s) AND ADMITS THE CALL.
+# THE HARNESS CANCELS A HOOK AT ITS REGISTRATION'S TIMEOUT (hooks.json: 25 s) AND ADMITS THE CALL.
 # The roster append is this hook's last step, so a wall that overran left a writer running with no
 # row for any later wall to judge: the suite wall refused its runs, `amend` and the Patrol could not
 # see it, and the stop guard would not stop it. The session transcript shows it twice, as
@@ -301,7 +301,12 @@ bionic_context 2>/dev/null || exit 0
 # command that itself outlasts the registration is not interrupted; the waits in this hook are
 # bounded (the impact derivation polls at IMPACT_BOUND_S), which is why the cumulative overrun is
 # the case this catches.
-DP_DEADLINE_S=12
+#
+# BOUND < DEADLINE < REGISTRATION (wave-30 T35). The deadline was 12 under 15; it moved to 22 with
+# the registration's 25, and it must stay above IMPACT_BOUND_S (20, lib/bounds.sh): the trap fires
+# inside the derivation's poll, so a deadline at or under the bound refuses before the bound can.
+# tests/cross-gate-agreement.test.sh §L.4c reads all three.
+DP_DEADLINE_S=22
 DP_DEADLINE_LIVE=0
 DP_DEADLINE_PID=""
 dp_deadline_hit() {
@@ -2331,7 +2336,7 @@ Then retry the dispatch."
     # LINEAR IN THE PATH (wave-27 T72; review pass 49 S2). The walk goes forward from `/` and stops
     # at the first segment that is not a directory, since no longer prefix can be one, so a missing
     # segment costs nothing: walking back from the end cost a test and a copy per missing segment,
-    # and twenty paths of 2,500 took a reader's dispatch to 17 s, past this hook's 15 s
+    # and twenty paths of 2,500 took a reader's dispatch to 17 s, past this hook's then-15 s
     # registration. A directory the wall cannot enter places nothing, and the path is no record.
     _dp_rec_place() {  # <path> -> the path anchored at the root, its longest existing directory physical
       local p="$1" d="" rest seg phys
