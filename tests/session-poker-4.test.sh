@@ -2938,4 +2938,229 @@ expect_eq "FD-m3 the floor-attested-by: test dropped: the mutant admits the unat
 rm -rf "$FD_MUT"
 POKE_BOUND="$FD_BOUND_WAS"
 
+
+# ============================================================
+section "§MATRIX-RENDER: matrix-render writes, from ## Eval design, one AC block per criterion with the keys its tier owes set to pending, adds only what is missing, and never overwrites a value (wave-30 T14; REQ-6 AC-6.1; D9, Δ12a)"
+# ============================================================
+#
+#   matrix-render      the bound plan's ## Verification Matrix gains, for each ## Eval design criterion, a block:
+#                      provenance (the requirement's own provenance: line, else the row's Approach), fails-when and
+#                      eval (`<tier> — <Eval>`) from the table, task (the one ## Tasks row serving it, else pending),
+#                      then evidence and every other key walls.sh keys_for_tier names for the row's tier, each
+#                      `pending`; and stack-health: pending (walk-artifact: pending too unless walk: exempt) where
+#                      the matrix has none. It prints `matrix-render — <n> blocks written, <m> keys added, <k> unchanged`.
+#
+# It takes the plan transaction every row verb takes (copy, dry commit through the real gate, checksum, swap), so a
+# render the gate would refuse is not written. REFUSED (1), plan byte-identical: no ## Eval design table, no matrix
+# table, a criterion the matrix table has no row (no tier) for; an operand is the usage error (2).
+# FIXTURE FIDELITY: §42's repository and plan writer (a plan the real gate admits) at current: 3, given a
+# ## Requirements section, a four-row ## Eval design and four matrix rows of four tiers; the real verb; the evidence is
+# the plan's own bytes and the real gate's verdict on them.
+MR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+mr_fixture() {  # <plan> -> T5 serves REQ-2; Requirements and Eval design ahead of the matrix; AC-1.2, 2.1, 2.2 rows
+  awk '
+    /^\| T5 \| 5 \| verify \|/ { sub(/\| REQ-1 \|/, "| REQ-2 |") }
+    /^## Verification Matrix/ {
+      print "## Requirements\n\n### REQ-1 — the first\n\nprovenance: spec §1 (fixture)\n\n### REQ-2 — the second\n\n- AC-2.1 the second criterion\n"
+      print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+      print "| REQ-1 | first approach | AC-1.1 | hermetic | `--only a.test.sh` (§A) | a is wrong |"
+      print "| REQ-1 | second approach | AC-1.2 | static | docs-pins §B | b is wrong |"
+      print "| REQ-2 | live approach | AC-2.1 | live | walk W1 → narrated | c is wrong |"
+      print "| REQ-2 | user approach | AC-2.2 | live | the user confirms | d is wrong |\n"
+    }
+    /^\| AC-1\.1 \| T2 \|/ { print; print "| AC-1.2 | T0 | pending | — | — |\n| AC-2.1 | T3 | pending | — | — |\n| AC-2.2 | T4 | pending | — | — |"; next }
+    { print }' "$1" > "$1.mr" && mv "$1.mr" "$1"
+}
+mr_block() {  # <plan> <AC> -> the block: its header line and the indented lines under it
+  awk -v k="$2:" 'index($0, k) == 1 { f = 1; print; next } f && /^  / { print; next } f { exit }' "$1"
+}
+mr_heads() {  # <plan> -> the matrix-level stack-health/walk-artifact keys, in order, |-joined
+  awk '/^## / { m = ($0 ~ /^## Verification Matrix/); next } m && /^(stack-health|walk-artifact):/ { sub(/:.*/, ""); print }' "$1" | paste -sd'|' -
+}
+mr_cell() {  # <plan> <AC> <field n> -> that cell of the matrix row, trimmed
+  awk -F'|' -v a="$2" -v n="$3" '/^## / { m = ($0 ~ /^## Verification Matrix/); next }
+    m && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { v = $n; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
+}
+RMR="$(make_repo mr-render)"; ( cd "$RMR" && git commit -q --allow-empty -m init )
+PMR="$(s42_plan "$RMR" 3)"
+mr_fixture "$PMR"
+s42_snap "$RMR" "$PMR"
+s34_gate "$RMR"
+expect_eq "MR-0 precondition: the fixture plan at current: 3, four criteria and one AC block, is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "MR-0b …the block extractor reads the one block the fixture carries (positive, before any render)" \
+  "AC-1.1:|  provenance: fixture|  fails-when: the fixture is wrong" "$(mr_block "$PMR" AC-1.1 | paste -sd'|' -)"
+expect_eq "MR-0c …the cell extractor reads a row's tier" "T3" "$(mr_cell "$PMR" AC-2.1 3)"
+expect_eq "MR-0d …and the matrix carries no stack-health: line yet (the heads extractor, before; MR-4 is its positive)" "" "$(mr_heads "$PMR")"
+
+poke "$RMR" matrix-render
+expect_eq "MR-1 matrix-render exits 0" "0" "$RC"
+expect_contains "MR-1b …and counts what it did: three new blocks, seven keys added to the one block and the matrix head" \
+  "matrix-render — 3 blocks written, 7 keys added, 0 unchanged" "$OUT"
+MR_W12='AC-1.2:
+  provenance: spec §1 (fixture)
+  fails-when: b is wrong
+  eval: T0 — docs-pins §B
+  task: pending
+  evidence: pending
+  tier-run: pending
+  readback: pending'
+expect_eq "MR-2 a T0 criterion: provenance from its requirement, fails-when and eval from the table, task pending (T1 and T2 both serve REQ-1), then tier-run and readback" \
+  "$MR_W12" "$(mr_block "$PMR" AC-1.2)"
+MR_W21='AC-2.1:
+  provenance: live approach
+  fails-when: c is wrong
+  eval: T3 — walk W1 → narrated
+  task: T5
+  evidence: pending
+  tier-run: pending
+  fresh: pending
+  cold-client: pending
+  contact: pending
+  readback: pending'
+expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so the Approach; task T5, the one row serving REQ-2; the five T3 keys" \
+  "$MR_W21" "$(mr_block "$PMR" AC-2.1)"
+MR_W22='AC-2.2:
+  provenance: user approach
+  fails-when: d is wrong
+  eval: T4 — the user confirms
+  task: T5
+  evidence: pending
+  user-confirmed: pending'
+expect_eq "MR-3b a T4 criterion: user-confirmed" "$MR_W22" "$(mr_block "$PMR" AC-2.2)"
+MR_W11='AC-1.1:
+  provenance: fixture
+  fails-when: the fixture is wrong
+  eval: T2 — `--only a.test.sh` (§A)
+  task: pending
+  evidence: pending
+  tier-run: pending
+  readback: pending
+  fixture-fidelity: pending'
+expect_eq "MR-3c the existing T2 block keeps its two lines as written (the table's 'a is wrong' does not replace them) and gains the six it lacked, fixture-fidelity among them" \
+  "$MR_W11" "$(mr_block "$PMR" AC-1.1)"
+expect_eq "MR-4 the matrix head gains stack-health: and no walk-artifact: line, the fixture being walk: exempt" "stack-health" "$(mr_heads "$PMR")"
+expect_eq "MR-4b …and the stack-health: line reads pending" "1" "$(/usr/bin/grep -cx 'stack-health: pending' "$PMR")"
+s34_gate "$RMR"
+expect_eq "MR-5 the rendered plan, pending stubs and all, is admitted by the real gate at current: 3" "0" "$GATE_RC"
+cp "$PMR" "$TMPROOT/mr-keep"
+sed 's/^current: 3$/current: 4/' "$TMPROOT/mr-keep" > "$PMR"
+s34_gate "$RMR"
+expect_eq "MR-5b …and at current: 4" "0" "$GATE_RC"
+cp "$TMPROOT/mr-keep" "$PMR"
+
+s42_snap "$RMR" "$PMR"
+poke "$RMR" matrix-render
+expect_eq "MR-6 a second render exits 0" "0" "$RC"
+expect_contains "MR-6b …writes nothing and says so in the same line" "matrix-render — 0 blocks written, 0 keys added, 4 unchanged" "$OUT"
+expect_true "MR-6c …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PMR"
+
+awk '/^AC-1\.1:/ { b = 1 } /^AC-1\.2:/ { b = 2 } /^AC-2\.1:/ { b = 0 }
+     b == 1 && /^  tier-run: / { print "  tier-run: bash a.test.sh"; next }
+     b == 2 && /^  readback: / { next } { print }' "$TMPROOT/mr-keep" > "$PMR"
+s42_snap "$RMR" "$PMR"
+poke "$RMR" matrix-render
+expect_eq "MR-7 a render over a filled value and a dropped key exits 0" "0" "$RC"
+expect_contains "MR-7b …adds the one missing key and leaves the other three blocks as they are" "matrix-render — 0 blocks written, 1 keys added, 3 unchanged" "$OUT"
+expect_eq "MR-7c …the filled tier-run: stands, nothing written over it" "1|0" \
+  "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: bash a.test.sh')|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
+expect_eq "MR-7d …and the dropped readback: is back, as the block's last line" "  readback: pending" "$(mr_block "$PMR" AC-1.2 | tail -1)"
+expect_eq "MR-7e …one line added, none removed (git diff --numstat)" "1 0;" "$(s42_numstat "$RMR")"
+cp "$TMPROOT/mr-keep" "$PMR"
+
+# ---------- walk: required renders the walk-artifact: stub too ----------
+RMRW="$(make_repo mr-walk)"; ( cd "$RMRW" && git commit -q --allow-empty -m init )
+PMRW="$(s42_plan "$RMRW" 3)"
+mr_fixture "$PMRW"
+sed 's/^walk: exempt$/walk: required/' "$PMRW" > "$PMRW.w" && mv "$PMRW.w" "$PMRW"
+s42_snap "$RMRW" "$PMRW"
+poke "$RMRW" matrix-render
+expect_eq "MR-8 on a walk: required plan the head gains stack-health: and walk-artifact:, both pending" "0|stack-health|walk-artifact|1" \
+  "$RC|$(mr_heads "$PMRW")|$(/usr/bin/grep -cx 'walk-artifact: pending' "$PMRW")"
+expect_contains "MR-8b …counted with the keys added" "matrix-render — 3 blocks written, 8 keys added, 0 unchanged" "$OUT"
+
+# ---------- the refusals: plan byte-identical ----------
+mr_refused() {  # <label> <want rc> <want text> <plan content file> [operands…]
+  local label="$1" rc="$2" want="$3" src="$4"; shift 4
+  cp "$src" "$PMR"; s42_snap "$RMR" "$PMR"; poke "$RMR" matrix-render "$@"
+  s42_unchanged "$label" "$rc" "$PMR"
+  expect_contains "$label …saying why" "$want" "$OUT"
+}
+awk '/^## Eval design/ { skip = 1; next } skip && /^## / { skip = 0 } !skip' "$TMPROOT/mr-keep" > "$TMPROOT/mr-noeval"
+mr_refused "MR-9 a plan with no ## Eval design" 1 "no ## Eval design" "$TMPROOT/mr-noeval"
+awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^\|/ { next } { print }' "$TMPROOT/mr-keep" > "$TMPROOT/mr-notable"
+mr_refused "MR-10 a matrix with no AC tier table" 1 "no AC tier table" "$TMPROOT/mr-notable"
+awk '{ print } /^\| REQ-2 \| user approach/ { print "| REQ-3 | late approach | AC-3.1 | hermetic | x | e is wrong |" }' "$TMPROOT/mr-keep" > "$TMPROOT/mr-norow"
+mr_refused "MR-11 a criterion the matrix table has no row for (its tier unknown)" 1 "AC-3.1" "$TMPROOT/mr-norow"
+mr_refused "MR-12 an operand is the usage error" 2 "takes no argument" "$TMPROOT/mr-keep" "$PMR"
+cp "$TMPROOT/mr-keep" "$PMR"
+
+# ---------- the mutation arm: the key list taken from walls.sh, not typed twice ----------
+# A copy of the library whose keys_for_tier drops fixture-fidelity from T2, behind a copy of the hook that reads it:
+# the same render on the same plan writes AC-1.1 without the key, so MR-3c goes red under it.
+MRM_NEEDLE='T2)    echo "tier-run readback fixture-fidelity evidence" ;;'
+MRM_WALLS="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/walls.sh"
+anchor "$MRM_WALLS" "$MRM_NEEDLE" 1
+MRM_DIR="$TMPROOT/poker-mr-mut"; rm -rf "$MRM_DIR"; mkdir -p "$MRM_DIR/hooks" "$MRM_DIR/scripts"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MRM_DIR/scripts/lib"
+for _mr_f in "$(dirname "$POKER")"/*; do [ "${_mr_f##*/}" = session-poker.sh ] || ln -s "$_mr_f" "$MRM_DIR/hooks/${_mr_f##*/}"; done
+cp "$POKER" "$MRM_DIR/hooks/session-poker.sh"
+MR_N="$MRM_NEEDLE" awk 'BEGIN { n = ENVIRON["MR_N"] } index($0, n) { sub(/ fixture-fidelity/, "") } { print }' "$MRM_WALLS" > "$MRM_DIR/scripts/lib/walls.sh"
+expect_eq "MR-mut0 the copy of the library differs from it in one line" "1" "$(diff "$MRM_WALLS" "$MRM_DIR/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
+awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^  (eval|task|evidence|tier-run|readback|fixture-fidelity): / { next } m && /^stack-health:/ { next } { print }' \
+  "$TMPROOT/mr-keep" > "$PMR"
+s42_snap "$RMR" "$PMR"
+MRM_POKER="$POKER"; POKER="$MRM_DIR/hooks/session-poker.sh"
+poke "$RMR" matrix-render
+POKER="$MRM_POKER"
+expect_eq "MR-mut1 the mutant runs and renders (exit 0, AC-1.1 gains its tier-run:)" "0|1" "$RC|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
+expect_eq "MR-mut2 …but writes no fixture-fidelity:, where MR-3c found one" "0" "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -c '^  fixture-fidelity: ')"
+cp "$TMPROOT/mr-keep" "$PMR"
+POKE_BOUND="$MR_BOUND_WAS"
+
+# ============================================================
+section "§DISCHARGE: discharge <AC> writes the matrix row's auditor cell as the bare token CONFIRMED, nothing after it (wave-30 T14; REQ-6 AC-6.2; D9)"
+# ============================================================
+#
+#   discharge <AC-id>   the one writer of the auditor cell: the row's fifth cell becomes `CONFIRMED`, every other byte
+#                       of the plan as it was. wave-28's scratch scripts wrote `CONFIRMED <date>`, which the gate refuses
+#                       past Step 5 as not the bare token; this verb is why that cannot recur.
+#
+# The plan transaction again. REFUSED (1), plan byte-identical: an AC the table has no row for; a call that finds the
+# cell already CONFIRMED writes nothing and says so (exit 0). Not exactly one operand is the usage error (2).
+# FIXTURE FIDELITY: §MATRIX-RENDER's rendered plan, the real verb, the cell read back from the plan's bytes.
+DC_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+cp "$TMPROOT/mr-keep" "$PMR"
+s42_snap "$RMR" "$PMR"
+expect_eq "DC-0 precondition: the auditor cell of AC-1.2 reads — (the extractor, positive on the fixture)" "—" "$(mr_cell "$PMR" AC-1.2 6)"
+poke "$RMR" discharge AC-1.2
+expect_eq "DC-1 discharge AC-1.2 exits 0" "0" "$RC"
+expect_eq "DC-1b …the auditor cell is exactly CONFIRMED" "CONFIRMED" "$(mr_cell "$PMR" AC-1.2 6)"
+expect_eq "DC-1c …the row is otherwise as it was" "1" "$(/usr/bin/grep -cxF '| AC-1.2 | T0 | pending | — | CONFIRMED |' "$PMR")"
+expect_eq "DC-1d …one line replaced, none added (git diff --numstat)" "1 1;" "$(s42_numstat "$RMR")"
+expect_contains "DC-1e …and it says what it did" "discharge — AC-1.2: auditor CONFIRMED" "$OUT"
+s42_snap "$RMR" "$PMR"
+poke "$RMR" discharge AC-1.2
+expect_eq "DC-2 a second discharge of the same row exits 0" "0" "$RC"
+expect_true "DC-2b …and writes nothing (cmp)" cmp -s "$TMPROOT/s42-before" "$PMR"
+expect_contains "DC-2c …saying the plan already reads so" "already reads so" "$OUT"
+sed 's/^| AC-2\.1 | T3 | pending | — | — |$/| AC-2.1 | T3 | pending | — | CONFIRMED 2026-10-01 |/' "$PMR" > "$PMR.dc" && mv "$PMR.dc" "$PMR"
+s42_snap "$RMR" "$PMR"
+expect_eq "DC-3 precondition: AC-2.1 carries wave-28's dated cell" "CONFIRMED 2026-10-01" "$(mr_cell "$PMR" AC-2.1 6)"
+poke "$RMR" discharge AC-2.1
+expect_eq "DC-3b discharge over it writes the bare token, the date gone" "0|CONFIRMED" "$RC|$(mr_cell "$PMR" AC-2.1 6)"
+s34_gate "$RMR"
+expect_eq "DC-4 the plan with discharged cells is admitted by the real gate" "0" "$GATE_RC"
+dc_refused() {  # <label> <want rc> <want text> <operands…>
+  local label="$1" rc="$2" want="$3"; shift 3
+  s42_snap "$RMR" "$PMR"; poke "$RMR" discharge "$@"
+  s42_unchanged "$label" "$rc" "$PMR"
+  [ -z "$want" ] || expect_contains "$label …saying why" "$want" "$OUT"
+}
+dc_refused "DC-5 an AC the matrix table has no row for" 1 "no row AC-9.9" AC-9.9
+dc_refused "DC-5b …a prefix of a real id is not that id" 1 "no row AC-1" AC-1
+dc_refused "DC-6 usage: no operand" 2 ""
+dc_refused "DC-6b usage: two operands" 2 "" AC-1.1 AC-1.2
+cp "$TMPROOT/mr-keep" "$PMR"
+POKE_BOUND="$DC_BOUND_WAS"
+
 finish
