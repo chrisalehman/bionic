@@ -200,6 +200,16 @@ Fixes:
 
 Known limits, carried to the next release:
 
+- Known limit: the impact map is measured unsound. The planted-edit proof (tests/impact.test.sh §F,
+  made real in this release) reddened suites the map never named on every class it reached before
+  the release: 2 for a hook, 15 for a payload library, 2 for a tests/lib helper
+  (record/wave-30-efficiency/T39-planted-edits.log). Until the map's edges are fixed (1.14.1), a
+  bounded proof on the map is not to be relied on: the release floor is the full run, and a writer's
+  landing proves only the suites it ran. The map still widens a writer's budget.
+- Known limit: task-scale plans (`current: T<n>`, the `id | intent | rigor | description | status |
+  worktree` ledger) are not recorded by `launch-sync`, refused by `task-set` and `ledger-add`, and
+  misread by the tick's ready set; the hand workaround and the fix are in
+  ideas/task-scale-launch-sync-and-ledger.md (1.14.1).
 - Known limit: the 1.13.0 limits that this entry does not restate stand as written there.
 - Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not
   the scale; readers holding a code question, and the exam's readers, grade by the scale (Known limit 71
