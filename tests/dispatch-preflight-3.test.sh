@@ -1585,7 +1585,11 @@ REPO=$(make_repo r33e yes)
 write_attestation "$REPO" "$SID_A"
 s33_real_impact "$REPO"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_NEWSUITE_BRIEF" "w33-newsuite")"
-expect_status "33e a Files: tests/brand-new.test.sh (absent) brief is ADMITTED" "0" "$GATE_ST"
+# THE VERDICT, NOT THE EXIT STATUS (wave-30 T35; A-orch-79). A refusal is exit 0 with a deny on
+# stdout, so `GATE_ST` reads 0 for a refused dispatch. This check read `GATE_ST` and passed a
+# cold derivation that overran the bound under the regression's load as "ADMITTED", leaving the
+# three row checks below red with empty cells, which looked like an admit with an empty set.
+expect_eq "33e a Files: tests/brand-new.test.sh (absent) brief is ADMITTED" "allow" "$GATE_VERDICT"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_contains "33e …and the roster row's suites_allowed carries the new suite's self edge" \
   "brand-new.test.sh" "$(roster_field "$ROW" suites_allowed)"
@@ -1603,6 +1607,24 @@ expect_status "33e …the derived set is exactly the real tree's answer" \
   "$S33E_WANT" "$(roster_field "$ROW" suites_allowed)"
 expect_status "33e …and the row says the set was DERIVED, not declared" \
   "derived" "$(roster_field "$ROW" suites_source)"
+
+# ---- 33f: the same brief, its derivation forced over the bound, is REFUSED (wave-30 T35) ----
+# The pair to 33e's verdict check: what a blown bound looks like on this brief's shape, so the
+# two read apart. The stub sleeps past a bound forced to 1 s (the override the §slow-impact arm
+# above proves reaches the arm); §29a in tests/dispatch-preflight.test.sh drives the shipped bound.
+REPO=$(make_repo r33f yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 5
+_S33F_GATE_ENV_SAVE="$GATE_ENV"
+GATE_ENV="$GATE_ENV IMPACT_BOUND_S=1"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_NEWSUITE_BRIEF" "w33f-overrun")"
+GATE_ENV="$_S33F_GATE_ENV_SAVE"
+expect_eq "33f the same brief, its derivation over the bound, is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "33f …its refusal names the timeout" \
+  "the impact command timed out after 1 s" "$GATE_ERR"
+expect_contains "33f …and names the forced bound on the detail" "bound:   1s" "$GATE_VERR"
+expect_status "33f …and journalled no row at all" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
 section "§runs-lift — a brief declares what it will RUN, in any runner (REQ-1, D1, D3, ADR-029)"
 # ============================================================================
