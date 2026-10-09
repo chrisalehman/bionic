@@ -3108,7 +3108,7 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print ($2 == "regression-runs" ? $2 "=" $NF : $NF) }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current finding-check finding-move finding-stated launch-sync proof-add regression-runs release-check row-landed step-field step-line task-add waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current discharge finding-check finding-move finding-stated handoff launch-sync matrix-render proof-add regression-runs release-check row-landed step-field step-line task-add task-split waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current and regression-runs names the writer mode; regression-runs names judged" "regression-runs=judged writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -3494,5 +3494,114 @@ S73H3="$(s57_commit "$S72WT" lib/every.sh H3)"
 expect_eq "73i an unbounded change: uncovered from F, the range, as before" "$(printf 'uncovered\t%s..%s' "$S72F" "$S73H3")" "$(s73_floor "$S73H3")"
 POKE_BOUND="$S73_BOUND_WAS"
 
+
+# ============================================================
+section "Section 74 §TASK-SPLIT: task-split rewrites one pending row as its children in one validated transaction (wave-30 T17; REQ-12 AC-12.6; D14d-3, design-ledger Δ11)"
+# ============================================================
+#
+# `task-split <id> -- <child spec>…`, each spec `<id>:<task>:<size>:<Files>` (the task may hold a
+# colon; the id is before the first, the Files after the last). On a copy of the bound plan, through
+# `units_split_row` and judged by `units_validate` and a dry commit through the real gate, as task-add
+# is: the parent `dropped` with ` · split-into: <ids>`, the children added with the parent's step,
+# kind, deps, serves and reads, every row that waited on the parent waiting on a child, and
+# `- <parent>: split into <ids> at <instant>` under ## SDLC State. Refused, the plan byte-identical, on
+# a parent that is not pending, on child Files that are not a cover of the parent's, and on a result
+# the validator refuses. FIXTURE FIDELITY: §34's gate-admitted plan; the rows to split and their
+# dependents added by the production verb, task-add. Two plans, because a reads table carries no task
+# id in deps: the reader by its read is pinned on the reads table, the reader by deps on §42's.
+S74_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S74_UNITS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh"
+S74_IFACE=".bionic/docs/record/wave-01-fixture/T6-iface.md"
+s74_reads_plan() {  # <repo> -> the plan path; s34_plan's, with a reads column (§51's widening)
+  local p; p="$(s34_plan "$1" 4)"
+  awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
+       t && /^\| id / { print $0 " reads |"; next }
+       t && /^\|---/ { print $0 "---|"; next }
+       t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
+       { print }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  printf '%s' "$p"
+}
+s74_edges() { bash -c '. "$1" && units_edges "$2"' _ "$S74_UNITS" "$1" 2>/dev/null; }  # <plan>
+s74_valid() { bash -c '. "$1" && units_validate "$2"' _ "$S74_UNITS" "$1" 2>&1; printf 'rc=%s' "$?"; }  # <plan>
+
+# ---------- the reads table: a reader of the interface and the floor ----------
+R74="$(make_repo s74-split-reads)"; ( cd "$R74" && git commit -q --allow-empty -m init )
+P74="$(s74_reads_plan "$R74")"
+poke "$R74" task-add T6 4 build 'the big one' w01-T6 '—' 90 REQ-5 "lib/c.sh, lib/d.sh, $S74_IFACE" 'approval:plan'
+expect_eq "74a0 precondition: task-add of the row to split (exit 0)" "0" "$RC"
+poke "$R74" task-add T7 4 build 'reads the interface' implementor '—' 30 REQ-5 'lib/e.sh' "$S74_IFACE"
+expect_eq "74a0b precondition: task-add of its reader (exit 0)" "0" "$RC"
+expect_contains "74a0c precondition: T7 waits on T6 for the interface" "$(printf 'T6\tT7\t%s' "$S74_IFACE")" "$(s74_edges "$P74")"
+s34_gate "$R74"
+expect_eq "74a0d precondition: the real commit gate admits the plan" "0" "$GATE_RC"
+poke "$R74" task-split T6 -- "T8:the interface: its shape:20:$S74_IFACE, lib/c.sh" 'T9:the rest:70:lib/d.sh'
+expect_eq "74a AC-12.6 task-split of a pending row exits 0" "0" "$RC"
+expect_contains "74a2 …and says what it did, in one line" \
+  "poker: task-split — T6 → T8, T9; 2 dependent(s) re-pointed; written to $(cd "${P74%/*}" && pwd -P)/${P74##*/}, dry-committed first." "$OUT"
+expect_contains "74b the parent is dropped, its task naming the children" \
+  "| T6 | 4 | build | the big one · split-into: T8, T9 | w01-T6 | — | 90 | REQ-5 | lib/c.sh, lib/d.sh, $S74_IFACE | — | — | dropped | approval:plan |" "$(cat "$P74")"
+expect_contains "74c the first child carries the parent's step, kind, serves and reads; its task keeps its colon" \
+  "| T8 | 4 | build | the interface: its shape | w01-T8 | — | 20 | REQ-5 | $S74_IFACE, lib/c.sh | — | — | pending | approval:plan |" "$(cat "$P74")"
+expect_contains "74c2 …and the second its share of the Files" \
+  "| T9 | 4 | build | the rest | w01-T9 | — | 70 | REQ-5 | lib/d.sh | — | — | pending | approval:plan |" "$(cat "$P74")"
+S74_EDGES="$(s74_edges "$P74")"
+expect_contains "74d the reader of the interface waits on the child that writes it" "$(printf 'T8\tT7\t%s' "$S74_IFACE")" "$S74_EDGES"
+expect_contains "74d2 …and the floor on both children, by head" "$(printf 'T9\tT5\thead')" "$S74_EDGES"
+expect_absent "74d3 …and nothing waits on the dropped parent" "$(printf 'T6\t')" "$S74_EDGES"
+expect_regex "74e the ledger line under ## SDLC State" '^- T6: split into T8, T9 at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$' \
+  "$(/usr/bin/grep '^- T6:' "$P74")"
+expect_regex "74e2 …and each child's line" '^- T8: pending dispatch — split from T6 at ' "$(/usr/bin/grep '^- T8:' "$P74")"
+expect_eq "74f the plan passes its own validator" "rc=0" "$(s74_valid "$P74")"
+s34_gate "$R74"
+expect_eq "74f2 …and the real commit gate admits it" "0" "$GATE_RC"
+
+# ---------- the table without reads: a reader by deps; the refusals ----------
+R74N="$(make_repo s74-split-deps)"; ( cd "$R74N" && git commit -q --allow-empty -m init )
+P74N="$(s42_plan "$R74N" 4)"
+poke "$R74N" task-add T6 4 build 'the big one' bionic:implementor '—' 90 REQ-5 'lib/c.sh, lib/d.sh'
+expect_eq "74g0 precondition: task-add of the row to split (exit 0)" "0" "$RC"
+poke "$R74N" task-add T7 4 build 'after the big one' bionic:implementor 'T6' 30 REQ-5 'lib/e.sh'
+expect_eq "74g0b precondition: task-add of a row whose deps name it (exit 0)" "0" "$RC"
+expect_contains "74g0c precondition: task-add threaded both into the floor's deps" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6, T7 |" "$(cat "$P74N")"
+s42_snap "$R74N" "$P74N"
+poke "$R74N" task-split T2 -- 'T8:a:10:b.sh' 'T9:b:10:b.sh'
+s42_unchanged "74h AC-12.6 an active parent" 1 "$P74N"
+expect_contains "74h2 …naming its status" "T2 is active" "$OUT"
+poke "$R74N" task-split T1 -- 'T8:a:10:a.sh' 'T9:b:10:a.sh'
+s42_unchanged "74h3 a landed parent" 1 "$P74N"
+expect_contains "74h4 …naming its status" "T1 is landed" "$OUT"
+poke "$R74N" task-split T6 -- 'T8:a:10:lib/c.sh' 'T9:b:10:lib/d.sh, lib/x.sh'
+s42_unchanged "74i a child's Files outside the parent's" 1 "$P74N"
+expect_contains "74i2 …naming the child and the path" "T9: Files entry lib/x.sh is not one of T6's Files" "$OUT"
+poke "$R74N" task-split T6 -- 'T8:a:10:lib/c.sh' 'T9:b:10:lib/c.sh'
+s42_unchanged "74j a partition that leaves a parent path out" 1 "$P74N"
+expect_contains "74j2 …naming the path" "T6: Files entry lib/d.sh is in no child's Files" "$OUT"
+poke "$R74N" task-split T6 -- 'T8a:a:10:lib/c.sh' 'T9:b:10:lib/d.sh'
+s42_unchanged "74k a result the validator refuses (a child id off ^T[0-9]+\$)" 1 "$P74N"
+expect_contains "74k2 …in the validator's words" "T8a: id does not match" "$OUT"
+poke "$R74N" task-split T6 'T8:a:10:lib/c.sh' 'T9:b:10:lib/d.sh'
+s42_unchanged "74l no -- is the usage error" 2 "$P74N"
+poke "$R74N" task-split T6 -- 'T8:a:10:lib/c.sh, lib/d.sh'
+s42_unchanged "74l2 one child is the usage error" 2 "$P74N"
+poke "$R74N" task-split T6 -- 'T8:a:lib/c.sh' 'T9:b:10:lib/d.sh'
+s42_unchanged "74l3 a spec short of <id>:<task>:<size>:<Files> is the usage error" 2 "$P74N"
+poke "$R74N" task-split T6 -- 'T8:the half that is first:30:lib/c.sh' 'T9:the second half:60:lib/d.sh'
+expect_eq "74m the split of the pending row exits 0" "0" "$RC"
+expect_contains "74m2 …two rows waited on it, by deps" "2 dependent(s) re-pointed" "$OUT"
+expect_contains "74n the reader by deps waits on every child in its place" \
+  "| T7 | 4 | build | after the big one | bionic:implementor | T8, T9 |" "$(cat "$P74N")"
+expect_contains "74n2 …the floor too, the token replaced where it stood, nothing threaded twice" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T8, T9, T7 |" "$(cat "$P74N")"
+expect_contains "74n3 …the children carry the parent's deps and its agent" \
+  "| T8 | 4 | build | the half that is first | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P74N")"
+expect_eq "74o0 precondition: before the split the same reader finds two deps cells naming T6" "2" \
+  "$(awk -F'|' '/^\| T[0-9]+ \|/ && $7 ~ /(^|[ ,])T6([ ,]|$)/' "$TMPROOT/s42-before" | /usr/bin/grep -c .)"
+expect_eq "74o no deps cell names the dropped parent" "0" \
+  "$(awk -F'|' '/^\| T[0-9]+ \|/ && $7 ~ /(^|[ ,])T6([ ,]|$)/' "$P74N" | /usr/bin/grep -c .)"
+expect_eq "74o2 …and the plan passes its own validator" "rc=0" "$(s74_valid "$P74N")"
+s34_gate "$R74N"
+expect_eq "74o3 …and the real commit gate admits it" "0" "$GATE_RC"
+POKE_BOUND="$S74_BOUND_WAS"
 
 finish
