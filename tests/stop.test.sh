@@ -300,7 +300,7 @@ section "6: the derivation bound has ONE owner (REQ-7, AC-7.4)"
 # BUT A HANG GUARD IS ONLY AS LONG AS ITS HOST WILL WAIT, and the two legs have
 # different hosts. THE RULE IS THE SAME FOR BOTH (wave-14 D2, ratified): every
 # inner bound sits strictly under its own hook's registration, margin named —
-# the wall's 10 s under dispatch-preflight.sh's 15 s registration, the sweep's
+# the wall's 20 s under dispatch-preflight.sh's 25 s registration, the sweep's
 # 6 s under hooks/stop.sh's `"timeout": 10` on Stop and SubagentStop. A bound at
 # or above its registration is never reached, because the CLI kills the hook at
 # the registration and a hook killed on the harness's timeout does NOT exit 2:
@@ -330,7 +330,7 @@ expect_true "6b: …and parses under bash -n" bash -n "$BOUNDS_SH"
 
 # THE VALUES ARE READ BY SOURCING, not by grepping literals back out of the file:
 # what a consumer gets is what sourcing gives it.
-expect_eq "6c: sourcing it defines IMPACT_BOUND_S=10, the dispatch wall's guard, under its own 15s registration" "10" \
+expect_eq "6c: sourcing it defines IMPACT_BOUND_S=20, the dispatch wall's guard, under its own 25s registration" "20" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
 expect_eq "6d: …and LG_IMPACT_BOUND_S=6, the landing gate's, inside a 10s hook" "6" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
@@ -354,9 +354,9 @@ fi
 # NOT VACUOUS: the rows above read the file rather than agreeing with constants
 # typed into this suite, and a copy carrying different numbers proves it.
 B_MUTD="$(mktemp -d)"
-anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=10$' 1
+anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=20$' 1
 anchor -E "$BOUNDS_SH" '^LG_IMPACT_BOUND_S=6$' 1
-sed -e 's/^IMPACT_BOUND_S=10$/IMPACT_BOUND_S=3/' \
+sed -e 's/^IMPACT_BOUND_S=20$/IMPACT_BOUND_S=3/' \
     -e 's/^LG_IMPACT_BOUND_S=6$/LG_IMPACT_BOUND_S=4/' "$BOUNDS_SH" >"$B_MUTD/bounds.sh"
 expect_eq "6g: …and a copy carrying 3 answers 3, so 6c read the file" "3" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
