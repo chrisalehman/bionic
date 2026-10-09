@@ -1955,6 +1955,9 @@ am_refused "19v9: bash session-poker.sh finding-move" \
 # `pass:`, `total:`), so an agent that could run it could write the evidence of its own step. The verb joins the
 # existing arm's list; there is no second arm.
 am_refused "19v10: bash session-poker.sh step-field" "bash $AM_POKER step-field 5 head=0123456"
+am_refused "19v11: bash session-poker.sh task-split, with its children" \
+  "bash $AM_POKER task-split T6 -- 'T8:the interface:20:lib/c.sh' 'T9:the rest:70:lib/d.sh'"
+am_refused "19v12: bash session-poker.sh handoff" "bash $AM_POKER handoff"
 # §ARM-A (land --by-hand) — wave-28 T3, REQ-5 AC-5.2, D9: the hand landing publishes a row past the
 # line, so only the main thread may call it. The arm gains a second script name, not a second arm.
 AM_SW="/opt/plugin/scripts/spawn-worktree.sh"
@@ -1989,6 +1992,8 @@ am_admitted "19j13: finding-check from the main thread" \
   "bash $AM_POKER finding-check 'record/wave-01/r.md#1' refuted record/wave-01/c.md" ""
 am_admitted "19j14: finding-move from the main thread" \
   "bash $AM_POKER finding-move 'record/wave-01/r.md#1' defer 'later' 'the docs pass'" ""
+am_admitted "19j15: task-split from the main thread" \
+  "bash $AM_POKER task-split T6 -- 'T8:the interface:20:lib/c.sh' 'T9:the rest:70:lib/d.sh'" ""
 
 # EVERY VERB ON THE LIST, READ FROM THE LIST (wave-27 T16; team-lead ruling). The refusal line is
 # `bionic: <verb> refused — <fact> (<fix>)`, capped at 100 columns by refuse.sh, and a verb long
@@ -2006,6 +2011,12 @@ expect_contains "19x0d …and the verb T6 added, row-landed" "row-landed" "$AM_V
 expect_contains "19x0e …and the verb T10 added, share" " share " " $AM_VERBS "
 expect_contains "19x0f …and the verb T41 added, finding-check" "finding-check" "$AM_VERBS"
 expect_contains "19x0g …and the verb T42 added, finding-move" "finding-move" "$AM_VERBS"
+# THE PLAN VERBS WAVE-30 ADDED (T14 matrix-render and discharge, T15 handoff, T17 task-split; A-orch-50,
+# A-orch-52): each writes the bound plan, so each is the main thread's. Their refusal lines measure 99, 95,
+# 93 and 96 columns (printf | wc -m, A-T14.10's measure), inside refuse.sh's 100.
+for _am_v in matrix-render discharge handoff task-split; do
+  expect_contains "19x0h …and the plan verb wave-30 added, $_am_v" " $_am_v " " $AM_VERBS "
+done
 for _am_v in $AM_VERBS; do
   am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
 done

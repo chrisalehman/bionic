@@ -2494,6 +2494,154 @@ units_step_text() {
     END { if (!seen) exit 1 }' "$plan"
 }
 
+# ── THE SPLIT (wave-30 T17; REQ-12 AC-12.6, D14d-3, Δ11) ──────────────────────
+#
+# Three readers under `session-poker.sh task-split`, the verb that rewrites one pending row as its
+# children. The machine records a split; which row to split and where to cut it are the
+# orchestrator's (steps/4.md, "Splitting a row"), so nothing here chooses either.
+#
+# units_split_check <parent id> <parent Files> <child id> <child Files> [<child id> <child Files>…]
+#   -> one line per fault, exit 1 if any, else 0. THE CHILDREN ARE A COVER OF THE PARENT'S FILES:
+#   each child entry is one of the parent's (`<child>: Files entry <path> is not one of <parent>'s
+#   Files`), and each parent entry is some child's (`<parent>: Files entry <path> is in no child's
+#   Files`). Entries are compared as the readiness program reads a Files cell: comma-split, blanks
+#   trimmed, a leading `./` and the unmergeable `!` mark set aside, and an entry with no letter or
+#   digit (`—`) declaring nothing. Two children may name one entry: a test file both halves edit
+#   is ordinary, and the orchestrator orders them by their reads.
+_units_split_tokens() {  # <Files cell> -> one entry per line, as compared
+  printf '%s\n' "${1:-}" | tr ',' '\n' \
+    | awk '{ gsub(/^[ \t]+|[ \t]+$/, ""); sub(/^\.\//, ""); sub(/!$/, ""); if ($0 ~ /[A-Za-z0-9]/) print }'
+}
+units_split_check() {
+  local pid="${1:-}" ptok all="" cid t found=0
+  ptok="$(_units_split_tokens "${2:-}")"
+  shift 2 2>/dev/null || return 1
+  while [ $# -ge 2 ]; do
+    cid="$1"
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      all="${all}${t}"$'\n'
+      printf '%s\n' "$ptok" | grep -Fxq -- "$t" && continue
+      printf "%s: Files entry %s is not one of %s's Files\n" "$cid" "$t" "$pid"; found=1
+    done <<EOF
+$(_units_split_tokens "$2")
+EOF
+    shift 2
+  done
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    printf '%s' "$all" | grep -Fxq -- "$t" && continue
+    printf "%s: Files entry %s is in no child's Files\n" "$pid" "$t"; found=1
+  done <<EOF
+$ptok
+EOF
+  [ "$found" -eq 0 ]
+}
+
+# units_split_dependents <plan> <id> -> the ids of the rows that wait on <id>, table order, one per
+#   line: an edge from it (`units_edges`: a read it satisfies, `head` among them, or an unmergeable
+#   hold), or a deps token naming it, whatever the row's status. Exit 1 when there is no table.
+units_split_dependents() {
+  local plan="${1:-}" pid="${2:-}" rows
+  rows="$(units_rows "$plan")" || return 1
+  { units_edges "$plan" 2>/dev/null | awk -F'\t' -v p="$pid" '$1 == p { print "\034\t" $2 }'
+    printf '%s\n' "$rows"; } | awk -F'\t' -v p="$pid" '
+    $1 == "\034" { w[$2] = 1; next }
+    $1 == "" || $1 == p { next }
+    {
+      n = split($6, d, ",")
+      for (k = 1; k <= n; k++) { t = d[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); if (t == p) w[$1] = 1 }
+      if (($1 in w) && !($1 in out)) { out[$1] = 1; print $1 }
+    }'
+}
+
+# units_split_row <plan> <parent> <instant> <id> <task> <size> <Files> [<id> <task> <size> <Files>…]
+#   -> the whole plan with <parent> split into the children, on stdout; the file is not written.
+#   Exit 1 no table or no `## SDLC State` · 2 no row <parent> · 3 the parent is not `pending` ·
+#   4 fewer than two children, a short spec, or a value no cell can hold · 5 more than one row
+#   <parent>. Silent on every refusal; `units_split_check` is the caller's, before this.
+#
+# THE EXISTING PROJECTORS, IN ORDER, ON ONE COPY: (1) every deps cell naming the parent has that
+# token replaced by each child the cell does not already name (`units_table_cells`) — a row that
+# waited on the whole of the parent still does; (2) the parent's status `dropped` and its task
+# ` · split-into: <ids>`; (3) each child by `units_add_row`, carrying the parent's step, kind,
+# deps, serves and reads, its own task, size and Files, and the parent's agent with the parent's
+# id at its end renamed to the child's (`w30-T17` -> `w30-T33`; any other agent kept); (4) each
+# child's line `- <id>: pending dispatch — split from <parent> at <instant>` and the parent's
+# `- <parent>: split into <ids> at <instant>` (`units_step_line`). The deps are re-pointed BEFORE
+# the children are added, so `units_add_row`'s threading (a table without reads) finds the frontier
+# already reaching each child and threads nothing twice. A reader in a reads table needs no edit:
+# it names the path, and the child whose Files hold that path is now its writer.
+units_split_row() {
+  local plan="${1:-}" pid="${2:-}" now="${3:-}" wd cur nxt rec n i ids="" cid
+  local step kind task agent deps serves reads pre cagent rid rdeps nd seen lst t c rc=0
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$pid" ] || return 1
+  shift 3 2>/dev/null || return 4
+  [ $# -ge 8 ] && [ $(( $# % 4 )) -eq 0 ] || return 4
+  _units_table "$plan" >/dev/null 2>&1 || return 1
+  rec="$(units_rows "$plan" | awk -F'\t' -v p="$pid" '$1 == p')"
+  n="$(printf '%s' "$rec" | grep -c .)"
+  [ "$n" -ge 1 ] || return 2
+  [ "$n" -eq 1 ] || return 5
+  [ "$(units_field "$rec" status)" = pending ] || return 3
+  step="$(units_field "$rec" step)"; kind="$(units_field "$rec" kind)"; task="$(units_field "$rec" task)"
+  agent="$(units_field "$rec" agent)"; deps="$(units_field "$rec" deps)"; serves="$(units_field "$rec" serves)"
+  reads="$(units_field "$rec" reads)"
+  i=1
+  for c in "$@"; do
+    [ $(( i % 4 )) -eq 1 ] && ids="${ids:+$ids, }$c"
+    i=$((i + 1))
+  done
+  wd="$(mktemp -d "${TMPDIR:-/tmp}/units-split.XXXXXX")" || return 1
+  cur="$wd/plan"; nxt="$wd/next"
+  cp "$plan" "$cur" || { rm -rf "$wd"; return 1; }
+  # (1) the deps cells that name the parent; `seen` keeps the cell free of a repeated token
+  while IFS="$(printf '\037')" read -r rid rdeps; do
+    [ -n "$rid" ] && [ "$rid" != "$pid" ] || continue
+    nd=""; seen=","; c=0
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      if [ "$t" = "$pid" ]; then c=1; lst="$(printf '%s' "$ids" | tr -d ',')"; else lst="$t"; fi
+      for t in $lst; do
+        case "$seen" in *",$t,"*) continue ;; esac
+        seen="$seen$t,"; nd="${nd:+$nd, }$t"
+      done
+    done <<EOF
+$(printf '%s\n' "$rdeps" | tr ',' '\n' | awk '{ gsub(/^[ \t]+|[ \t]+$/, ""); print }')
+EOF
+    [ "$c" -eq 1 ] || continue
+    units_table_cells "$cur" set tasks "$rid" "deps=$nd" > "$nxt" || { rc=$?; break; }
+    mv "$nxt" "$cur"
+  done <<EOF
+$(units_rows "$plan" | awk -F'\t' '{ print $1 "\037" $6 }')
+EOF
+  # (2) the parent
+  if [ "$rc" -eq 0 ]; then
+    if units_table_cells "$cur" set tasks "$pid" status=dropped "task=$task · split-into: $ids" > "$nxt"; then
+      mv "$nxt" "$cur"
+    else rc=$?; fi
+  fi
+  # (3) the children, (4) their lines
+  while [ "$rc" -eq 0 ] && [ $# -ge 4 ]; do
+    cid="$1"
+    pre="${agent%"$pid"}"; cagent="$agent"
+    if [ "$pre" != "$agent" ]; then
+      case "$pre" in ''|*[!A-Za-z0-9]) cagent="$pre$cid" ;; esac
+    fi
+    if units_add_row "$cur" "$cid" "$step" "$kind" "$2" "$cagent" "$deps" "$3" "$serves" "$4" "$reads" > "$nxt" \
+       && [ -s "$nxt" ] && mv "$nxt" "$cur" \
+       && units_step_line "$cur" "$cid" "pending dispatch — split from $pid at $now" > "$nxt" && mv "$nxt" "$cur"; then
+      shift 4
+    else rc=4; fi
+  done
+  if [ "$rc" -eq 0 ]; then
+    units_step_line "$cur" "$pid" "split into $ids at $now" > "$nxt" && mv "$nxt" "$cur" || rc=4
+  fi
+  [ "$rc" -eq 0 ] && cat "$cur"
+  rm -rf "$wd"
+  case "$rc" in 0) return 0 ;; 1) return 1 ;; 2|5) return 5 ;; *) return 4 ;; esac
+}
+
 # units_set_current <plan> <value> -> the whole plan with the first `current:` line of
 #   `## SDLC State` reading `current: <value>`. Exit 1 when the section or the line is absent.
 #   Which values are legal is the caller's (the poker refuses 9, close-out's alone); this only
