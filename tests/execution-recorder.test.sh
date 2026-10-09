@@ -2987,7 +2987,7 @@ expect_eq "SJ-a5 …and the launch's correlation key" "toolu_01SJA" "$(sj_field 
 sj_walls "$SJA_REPO" 'bash tests/run.sh' "$SJ_AID"
 expect_eq "SJ-a6 after the start, bash-walls admits the runner's full run" "0" "$SJ_ST"
 expect_regex "SJ-a7 …wrapped in the booking shim and stamped run.sh" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)?( --max-wait [0-9]+)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --agent [^ ]+)?( --max-wait [0-9]+)?( --kill-after [0-9]+)?( --detach)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
 
 # THE LAUNCH CALL'S RETURN STAYS THE SECOND WRITER OF THE SAME VALUE (the sync shape, capture D).
 run_rec "$(jq -n --arg s "$SID_A" --arg t "$SJA_TR" --arg c "$SJA_REPO" --arg a "$SJ_AID" \
@@ -3444,20 +3444,21 @@ expect_ne "PC-a0 every deal was driven and its strings counted (not vacuous)" "0
 expect_empty "PC-a1 shipped context: every dealt string is one line, its own file, at most ${PC_MAX} and under 10,000 characters" "$PC_BAD"
 printf '  shipped context, characters per string:%s\n' "$PC_TABLE"
 
-# THE 4,650-BYTE FIXTURE: the cap on a checks file (D5's 4,500, raised by wave-28 T48, A-orch-43; the
-# docs-pins W27_CAP), every checks file exactly at it.
+# THE 5,000-BYTE FIXTURE: the cap on a checks file (D5's 4,500, raised to 4,650 by wave-28 T48,
+# A-orch-43, and to 5,000 by wave-30 T4, A-T4.1; the docs-pins W27_CAP), every checks file exactly
+# at it. The number is typed here on purpose, so a raised cap goes red here.
 PC4_PLUG="$SANDBOX/pc-cap"
 ck_plugin "$PC4_PLUG"
 for _q in evidence adversarial structure; do
   _sz=$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')
-  [ "$_sz" -lt 4650 ] && head -c "$((4650 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
-  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 4,650 bytes" "4650" \
+  [ "$_sz" -lt 5000 ] && head -c "$((5000 - _sz))" /dev/zero | tr '\0' 'x' >> "$PC4_PLUG/context/checks-$_q.md"
+  expect_eq "PC-b0 the fixture's checks-${_q}.md is exactly 5,000 bytes" "5000" \
     "$(wc -c < "$PC4_PLUG/context/checks-$_q.md" | tr -d ' ')"
 done
 pc_every_deal "$PC4_PLUG" "$PC4_PLUG/context" f
 expect_ne "PC-b1 every deal was driven against the fixture (not vacuous)" "0" "$PC_N"
-expect_empty "PC-b2 4,650-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
-printf '  4,650-byte checks files, characters per string:%s\n' "$PC_TABLE"
+expect_empty "PC-b2 5,000-byte checks files: every dealt string is still one line, its own file, under both caps" "$PC_BAD"
+printf '  5,000-byte checks files, characters per string:%s\n' "$PC_TABLE"
 
 # OVER THE CAP: a checks file grown to 9,600 characters, a single critic (all three questions).
 PO_PLUG="$SANDBOX/pc-over"
