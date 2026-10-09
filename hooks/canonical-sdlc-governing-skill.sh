@@ -1068,6 +1068,40 @@ case "$SCALE" in
   "invalid scale: '$SCALE' — allowed: task|wave|epic" ;;
 esac
 
+# ---------- review-cadence:, fix-policy:, fix-cap: (wave-30 T21; REQ-10 AC-10.1, D4, Δ3) ----------
+#
+# THREE FIELDS THE USER OWNS, beside rigor:. Their vocabulary and their per-level defaults are
+# lib/run.sh's (`review_cadence_level`, `fix_policy_bad`, `fix_cap_render`, beside `rigor_level`),
+# so this wall, `task-add --born` and the landing line read one table. Each is judged only when
+# its key is present: a plan with none of the three is read with the level's defaults (once ·
+# S1,S2-on · 2 at single, 10% at double), never refused for them. A present key is blocking on a
+# value outside its vocabulary, the empty fix-policy: included (a set naming no rating). The fix
+# names the vocabulary as one comma-joined word, the field's own syntax: refuse.sh allows six words.
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+gs_has_key() { grep -qE "^[[:space:]]*${1}[[:space:]]*:" <<< "$FRONTMATTER"; }
+if gs_has_key review-cadence; then
+  RCAD=$(yaml_get review-cadence)
+  review_cadence_level "$RCAD" >/dev/null || block "that review-cadence is not once" "use once" \
+    "invalid review-cadence: '$RCAD' — allowed: once"
+fi
+if gs_has_key fix-policy; then
+  FPOL=$(yaml_get fix-policy)
+  if FPOL_BAD=$(fix_policy_bad "$FPOL"); then :
+  elif [ -z "${FPOL//[[:space:]]/}" ]; then
+    block "this fix-policy names no rating" "${FIX_POLICY_VOCAB// /,}" \
+      "invalid fix-policy: '' — it names no rating; allowed, comma-joined: $FIX_POLICY_VOCAB"
+  else
+    block "a fix-policy word is no rating" "${FIX_POLICY_VOCAB// /,}" \
+      "invalid fix-policy: '$FPOL' — '$FPOL_BAD' is no rating; allowed, comma-joined: $FIX_POLICY_VOCAB"
+  fi
+fi
+if gs_has_key fix-cap; then
+  FCAP=$(yaml_get fix-cap)
+  { [ -n "$FCAP" ] && fix_cap_render "$FCAP" "$RIGOR" 0 >/dev/null; } \
+    || block "that fix-cap is no count" "a whole number, or a percent" \
+      "invalid fix-cap: '$FCAP' — allowed: a whole number (2) or a percent of the plan's ## Tasks rows (10%)"
+fi
+
 # ---------- walk: enum (epic-14 AC-3) ----------
 #
 # `walk:` is optional at THIS hook — an absent key is not this hook's
