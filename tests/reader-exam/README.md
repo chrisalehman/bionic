@@ -1,6 +1,6 @@
 # The reader exam
 
-Readers (the auditor, the critic, the reviewer) are held to the checks files they are handed
+Readers (the auditor and the critic) are held to the checks files they are handed
 at start: `payload/context/checks-evidence.md`, `checks-adversarial.md` and
 `checks-structure.md`. The exam asks whether a reader holding those files catches defects
 that really got past a reader, and does not fail a change that has none (spec D11 of
@@ -106,15 +106,17 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    ground. Keep the printed range, and note which `<dest>` holds which sample: the readers
    see only `<dest>`.
 
-   Two readers of the same agent type never share a build. On a sample keyed `adversarial`,
-   and on `clean`, the critic dealt `adversarial` and the one-mind critic are both
+   Two readers of the same agent type never share a build. On a sample keyed `adversarial` or
+   `structure`, and on `clean`, the critic dealt the question and the one-mind critic are both
    `bionic:critic`. Started together, two critics with different question sets cannot be told
    apart at start, and neither is pushed a checks file. Started one after the other, the second
    reads the first's record in its own tree. So each of the two gets a build and a session of
    its own. Readers of different types share their sample's build and are dispatched
-   together. That makes six builds: `clean` twice (the auditor, the critic and the
-   reviewer, then the one-mind critic), `red-then-green` twice, and one for each other sample.
-   The first sitting used eight, because step 3's proof took a `clean` build for one reviewer.
+   together. So a sample keyed `evidence` takes one build, where the auditor and the one-mind
+   critic differ in type, and a sample keyed `adversarial` or `structure`, and `clean`, takes two:
+   `clean` first with the auditor and the critic, then with the one-mind critic. (Before 1.14.0 a
+   reviewer held `structure`, so a `structure` sample took one build and the first sitting's
+   `clean` build took a reviewer.)
 3. **Open an engaged session on the built sample.** `cd <dest> && claude --plugin-dir
    "$PLUGIN"`, or, headless as the first sitting ran it, `PLUGIN="$PLUGIN" bash
    tests/reader-exam/gen-prompt.sh <brief file>... > <prompt file>` and then `bash tests/reader-exam/run-session.sh <dest>
@@ -163,9 +165,10 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      session only dispatches: the dispatch wall writes each reader's row, with its
      `questions=`, to `<dest>/.bionic/tmp/roster-<session>.state`, and the start push reads
      that row. To show the roles are the copy's, ask the session before its first dispatch to
-     quote the Agent tool's description of `bionic:critic` and `bionic:reviewer`. Each must be
+     quote the Agent tool's description of `bionic:auditor` and `bionic:critic`. Each must be
      listed once, with the `description:` line of `$PLUGIN/agents/<role>.md`. (At the first
-     sitting the installed 1.11.0 plugin had no reviewer and another critic description.) Then
+     sitting, before 1.14.0, the installed 1.11.0 plugin had no reviewer and another critic
+     description.) Then
      read each reader's transcript,
      `~/.claude/projects/<name>/<session>/subagents/agent-<id>.jsonl`. `<name>` is the
      session's physical working directory (`cd <dest> && pwd -P`, which on macOS turns `/var`
@@ -182,22 +185,23 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    per sample and question:
    - the role the double dealing gives the sample's question (`facts_owed double wave` in
      `payload/scripts/lib/proof.sh`): the auditor for `evidence`, the critic for
-     `adversarial`, the reviewer for `structure`;
+     `adversarial` and `structure`. The critic is the role that holds `structure`: the reviewer
+     that held it before 1.14.0 is retired and the wall refuses `bionic:reviewer`;
    - and the one-mind case, the critic holding all three questions, on every sample. It is
      named `one-mind` wherever a reader's role is written below (record paths, headings, result
      lines), so it is never taken for the critic the dealing gives `adversarial`. The agent
      dispatched is still `bionic:critic`: `one-mind` is only how the sitting names that dispatch.
 
-   For `clean`, each of the three roles takes its own question, and the one-mind critic takes
-   all three.
+   For `clean`, the auditor takes `evidence`, the critic takes `adversarial` and `structure` in
+   one dispatch with a record for each, and the one-mind critic takes all three.
 
    The sitting's session binds no plan: the built sample's `docs/plan.md` is read by the
    readers and is not a plan the session has registered. The dispatch wall therefore requires
    each reader's `Questions:` line and does not hold it to a dealing, so it would not refuse a
    set that no rigor deals that role. The orchestrator checks that by hand before each dispatch:
    the brief's set is the one this step names for that role (`evidence` for the auditor,
-   `adversarial` for the critic, `structure` for the reviewer, all three for the one-mind
-   critic).
+   `adversarial` or `structure` for the critic, as the sample's key names it, both for the critic
+   on `clean`, all three for the one-mind critic).
 
    The brief says nothing about an exam, the sample's name, or what to look for. It carries:
    - `Questions: <q>` on a line of its own (`Questions: evidence, adversarial, structure` for
@@ -235,11 +239,11 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      first line and hash the rest; the hash must equal step 1's hash for that file:
      `jq -j 'select(.attachment.type=="hook_additional_context") | .attachment.content[<k>]'
      <agent>.jsonl | tail -n +2 | shasum -a 256`. A reader also holds no checks string for a
-     question it was not dealt. At the first sitting each of the twelve readers held exactly
-     the files dealt it, each whole. The model receives each string raw: the reviewer's
-     `structure` string is 4,497 characters, and its hook printed it as 4,627 characters of
+     question it was not dealt. At the first sitting (before 1.14.0) each of the twelve readers held exactly
+     the files dealt it, each whole. The model receives each string raw: the reviewer's (a role
+     since retired) `structure` string is 4,497 characters, and its hook printed it as 4,627 characters of
      JSON. The strings of one start are joined into one system `<system-reminder>` (10,978
-     characters for a reviewer, 17,565 for the one-mind critic), and none was cut to a
+     characters for that reviewer, 17,565 for the one-mind critic), and none was cut to a
      preview. The harness's 10,000-character limit is therefore applied to each hook's string,
      not to the joined text. Whether that limit counts the raw string or its JSON form is not
      shown, because every string here is under 10,000 either way.
@@ -277,10 +281,10 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    ```
 
    one `result` line per sample, per question its key names, per role dealt that question:
-   `<sample>` is the sample's name and `<role>` is `auditor`, `critic` or `reviewer` (the role
-   the double dealing gives the question) or `one-mind`. A defect sample holds two lines, the
+   `<sample>` is the sample's name and `<role>` is `auditor` or `critic` (the role
+   the double dealing gives the question) or `one-mind`; a `reviewer` line in a sitting before 1.14.0 stays as history. A defect sample holds two lines, the
    dealt role's and the one-mind critic's, both on its keyed question; `clean` holds six, the
-   three roles each on their own question and the one-mind critic on each of the three. The
+   auditor on `evidence`, the critic on `adversarial` and on `structure`, and the one-mind critic on each of the three. The
    record heading names the record's section in `exam-sitting.md`. The `sha256` lines are the
    hashes from step 1. A line opening with `##` that is not a header of that form is red
    wherever it is in the file. The suite reads the last section, by file order: it is red
