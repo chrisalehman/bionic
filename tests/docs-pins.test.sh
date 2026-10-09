@@ -6711,4 +6711,21 @@ expect_contains "X137.2: …under its ## Bounds" "$W30X_SENT" \
 expect_contains "X137.3: …written in its template, so a render keeps it" "$W30X_SENT" \
   "$(cat "${REPO}/agents-src/templates/test-runner.md.tmpl" 2>/dev/null)"
 
+# ============================================================
+section "§W30-HANDOFF (wave-30 T15; REQ-7 AC-7.2, D11): the governing skill says a verb writes ## Handoff"
+# ============================================================
+# The Handoff paragraph used to end "Nothing writes or checks it." The verb now writes it, so the paragraph says
+# so: `session-poker.sh handoff` rewrites the section in place from the plan and the machine and carries the human
+# lines. The behaviour is proved in session-poker-4 §HANDOFF; this pins the words the orchestrator reads, in the
+# rendered skill and in the template a render keeps.
+W30H_SENT='Rewritten in place, never appended, and never by hand: `session-poker.sh handoff` writes it from the plan and the machine (heads, open rows, live agents, last proof, the clock) and carries the human lines.'
+expect_contains "W30-H1: AC-7.2 — skills/canonical-sdlc/SKILL.md says a verb writes the handoff" "$W30H_SENT" \
+  "$(cat "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+expect_contains "W30-H2: …written in its template, so a render keeps it" "$W30H_SENT" \
+  "$(cat "${REPO}/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl" 2>/dev/null)"
+expect_contains "W30-H3: …inside the Handoff paragraph (positive control for H4)" "**Handoff.** A plan spanning sessions carries a" \
+  "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+expect_absent "W30-H4: …and the paragraph no longer says nothing writes it" "Nothing writes or checks it" \
+  "$(/usr/bin/grep -F '**Handoff.**' "${REPO}/skills/canonical-sdlc/SKILL.md" 2>/dev/null)"
+
 finish
