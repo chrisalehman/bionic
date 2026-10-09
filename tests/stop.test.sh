@@ -1075,7 +1075,7 @@ section "DECLINE: a decline stands until the set it answered changes (wave-26 T1
 # again. Now a fill decline stands until the READY SET gains a row it did not answer. A
 # stand-down decline is written to the roster as `hold` writes it, so it stands until the
 # agent's launch, deliverable or messages move. The tick reads that check (hold_fingerprint).
-# The end-to-end proof, through the real tick, is tests/session-poker.test.sh §41 DECLINE-tick.
+# The end-to-end proof, through the real tick, is tests/session-poker-2.test.sh §41 DECLINE-tick.
 export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
 
 # D1/D2: the fill decline. Turn one declines ready {T7}. `current:` moves and the ready set does
@@ -1245,7 +1245,7 @@ unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 section "BUDGET-USER: a user's writer cap is a fact in the header the wall already reads (wave-27 T34; REQ-15 AC-15.4; D24)"
 
 # `session-poker.sh budget writers=<n> '<reply>'` rewrites the header's `writers=` with
-# `source=user` and adds `budget-override:` (tests/session-poker.test.sh §BUDGET-USER drives the
+# `source=user` and adds `budget-override:` (tests/session-poker-3.test.sh §BUDGET-USER drives the
 # verb). The wall reads the header it always read: with the user's cap reached it asks for
 # nothing, and no decline is recorded or written. The control is the probe's header over the same
 # roster, which owes the ready row.
@@ -1495,7 +1495,7 @@ export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
 FL_TX="$(mktemp)"
 FL_D="$(fl_fixture)"
 expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
-  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at" "$(fo_tick "$FL_D")"
+  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at" "$(fo_tick "$FL_D")"
 sd_turn "$FL_TX" u-fl-1
 s7_fire "$FL_D" "$FL_TX"
 expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
@@ -1903,7 +1903,7 @@ expect_status "FR5 …and the stop is admitted" "0" "$STOP_RC"
 section "RW: the reconcile refusal says the plan moved when that is why it is owed (wave-27 T37; review pass 8 F2)"
 
 # The tick writes `reconcile=step4` or `reconcile=grew` beside `duty=owed` when the reconcile is
-# owed because the plan moved (tests/session-poker.test.sh §RECON-WHY). A tick turn with no
+# owed because the plan moved (tests/session-poker-3.test.sh §RECON-WHY). A tick turn with no
 # task-list refresh is refused as before; the refusal now gives that cause and names the rebuild,
 # and with no cause in the digest, or a digest older than the turn's tick, it is today's words.
 # The fixture is LH's at the proof's own head, so no fill is owed, and its transcript is s7's

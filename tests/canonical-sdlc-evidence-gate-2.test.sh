@@ -3343,7 +3343,7 @@ write_plan "$hHc" "$(plan 5 "$(step5_head "$HC_SIDE")" "$matrix_complete")" > /d
 expect_block "HEADc a head: on another line of history than the commit → block" \
   "$hHc" 'git commit -m "x"' "does not contain head:"
 expect_eq "HEADc2 …in one line that names the fix" \
-  "bionic: commit refused — the release head does not contain head: (re-run the floor on release head)" \
+  "bionic: commit refused — the release head does not contain head: (run the regression on that head)" \
   "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
 # An older head the commit DOES contain is a contained head: staleness is proof_state's
 # question (T5), not this one's.

@@ -2399,7 +2399,7 @@ expect_eq "MP-fill4 positive, the same extractor: with nothing parked the senten
 MP_HROOT="$(mktemp -d "$TMPROOT/mp-hook.XXXXXX")"; mkdir -p "$MP_HROOT/hooks" "$MP_HROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MP_HROOT/scripts/lib"
 for _sib in "$(dirname "$POKER")"/*; do _sibn="$(basename "$_sib")"; [ "$_sibn" = "session-poker.sh" ] || ln -s "$_sib" "$MP_HROOT/hooks/$_sibn"; done
-MP_HOOK_NEEDLE='SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${line%% *}"'
+MP_HOOK_NEEDLE='SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}"'
 anchor "$POKER" "$MP_HOOK_NEEDLE" 1
 MP_N="$MP_HOOK_NEEDLE" awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) ":" substr($0, i + length(n)); print }' \
   "$POKER" > "$MP_HROOT/hooks/session-poker.sh"
@@ -2786,7 +2786,7 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" floor-run
 s42_unchanged "FD-n1 §FLOOR-DECLARED floor-run with no floor: key" 1 "$PFD"
 expect_contains "FD-n2 …saying so, and that nothing was run" \
-  "REFUSED — this project declares no floor: in .bionic/config.yaml; its floor is tests/run.sh, whose log proof-add floor reads. Nothing was run." "$OUT"
+  "REFUSED — this project declares no floor: in .bionic/config.yaml; its regression is tests/run.sh, whose log proof-add floor reads. Nothing was run." "$OUT"
 expect_eq "FD-n3 …and the declared command never ran (the stub's log is empty)" "0" "$(fd_runs)"
 fd_config "floor-attestation: user"
 poke "$RFD" floor-run
@@ -2827,8 +2827,8 @@ s42_unchanged "FD-r2 …that read a dirty tree" 1 "$PFD"
 expect_contains "FD-r2b …with today's dirty sentence" "read a dirty tree (dirty=2); commit, run it again and cite that log" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-red.log
 s42_unchanged "FD-r3 …whose command exited 1" 1 "$PFD"
-expect_contains "FD-r3b …saying it did not pass" \
-  "fd-red.log did not pass (rc=1); fix it, run floor-run again and cite that log" "$OUT"
+expect_regex "FD-r3b …saying the regression did not pass (wave-30 T23: the word)" \
+  'the regression in [^ ]*fd-red\.log did not pass \(rc=1\); fix it, run floor-run again and cite that log' "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-r4 …and a log in the old tests/run.sh shape, green at the head" 1 "$PFD"
 expect_contains "FD-r4b …saying what the first line must be" \
@@ -2848,7 +2848,8 @@ s42_unchanged "FD-f4 …whose log proof-add floor refuses" 1 "$PFD"
 echo stray > "$FD_MODE"
 poke "$RFD" floor-run
 expect_eq "FD-s1 a command that leaves the tree dirtier than it found it is refused (exit 1)" "1" "$RC"
-expect_contains "FD-s2 …naming the move and that no log was written" "while it ran (dirty=0 to dirty=1); no log was written" "$OUT"
+expect_regex "FD-s2 …naming the regression, the move and that no log was written (wave-30 T23: the word)" \
+  'REFUSED — the regression \(.*\) moved the working checkout .* while it ran \(dirty=0 to dirty=1\); no log was written' "$OUT"
 expect_false "FD-s3 …and no third log exists" test -e "$FD_REC/floor-run-$FD_W-3.log"
 echo pass > "$FD_MODE"
 poke "$RFD" floor-run
@@ -2915,7 +2916,7 @@ expect_eq "FD-m0 the judge itself, positive: the green declared log attests the 
 expect_eq "FD-m0b …a red one is refused" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-red.log" | cut -d'|' -f1)"
 expect_eq "FD-m0c …and an unattested record is refused" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-att-noby.md" | cut -d'|' -f1)"
 FD_M1='[ -z "$fl$fa" ] || { _proof_floor_declared'
-FD_M2='[ "$rc" = 0 ] || { printf '"'"'the floor in'
+FD_M2='[ "$rc" = 0 ] || { printf '"'"'the regression in'
 FD_M3='[ -n "$who" ] || { printf'
 anchor "$S46_LIB" "$FD_M1" 1; anchor "$S46_LIB" "$FD_M2" 1; anchor "$S46_LIB" "$FD_M3" 1
 /usr/bin/grep -vF -- "$FD_M1" "$S46_LIB" > "$FD_MUT/no-arm.sh"
@@ -2963,7 +2964,7 @@ mr_fixture() {  # <plan> -> T5 serves REQ-2; Requirements and Eval design ahead 
     /^## Verification Matrix/ {
       print "## Requirements\n\n### REQ-1 — the first\n\nprovenance: spec §1 (fixture)\n\n### REQ-2 — the second\n\n- AC-2.1 the second criterion\n"
       print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
-      print "| REQ-1 | first approach | AC-1.1 | hermetic | `--only a.test.sh` (§A) | a is wrong |"
+      print "| REQ-1 | first approach | AC-1.1 | hermetic | \140--only a.test.sh\140 (§A) | a is wrong |"
       print "| REQ-1 | second approach | AC-1.2 | static | docs-pins §B | b is wrong |"
       print "| REQ-2 | live approach | AC-2.1 | live | walk W1 → narrated | c is wrong |"
       print "| REQ-2 | user approach | AC-2.2 | live | the user confirms | d is wrong |\n"
@@ -3299,5 +3300,106 @@ poke "$RHO" handoff now
 expect_eq "HO-13 an operand is the usage error" "2" "$RC"
 expect_true "HO-13b …and the plan is untouched (cmp)" cmp -s "$TMPROOT/s42-before" "$PHO"
 POKE_BOUND="$HO_BOUND_WAS"
+
+
+# ============================================================
+section "§BORN: task-add --born marks a review-made row on its ledger line and holds it to fix-policy:, fix-cap: and three fixes per component (wave-30 T21; REQ-10 AC-10.1, AC-10.2; D4, Δ3)"
+# ============================================================
+#
+#   task-add <id> … <Files> [<reads>] --born 'review S<n> <on|off>'
+#                the row's `- <id>:` line under ## SDLC State ends ` born: review S<n> <reach>` (the one place the
+#                review-born count reads), and its task cell ends ` · born: review`. REFUSED (1), the plan
+#                byte-identical: a rating outside the plan's fix-policy: (default S1,S2-on); a row that would be
+#                review-born row cap+1 (fix-cap:, default 2 at single, 10% of the rows at double); a fourth review-born
+#                row on one Files path outside the record. A malformed --born is the usage error (2).
+# In-diff is the orchestrator's judgment and "never re-read" the proof's: neither is the verb's.
+# FIXTURE FIDELITY: §42's repository and plan writer (a plan the real gate admits) at current: 4, the three header
+# fields written as Step 0 writes them; the real verb; the evidence is the plan's own bytes.
+BN_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+BN_REC=".bionic/docs/record/wave-01-fixture"
+bn_hdr() {  # <plan> <header line>... -> the lines written after rigor:
+  local p="$1"; shift
+  BN_EXTRA="$(printf '%s\n' "$@")" awk '{ print } /^rigor: / && ENVIRON["BN_EXTRA"] != "" { print ENVIRON["BN_EXTRA"] }' "$p" > "$p.bn" && mv "$p.bn" "$p"
+}
+bn_line() { awk -v id="$2" '/^```/ { f = !f } !f && /^## / { s = ($0 ~ /^## SDLC State/) } s && index($0, "- " id ":") == 1 { print; exit }' "$1"; }
+RBN="$(make_repo bn-fix)"; ( cd "$RBN" && git commit -q --allow-empty -m init )
+PBN="$(s42_plan "$RBN" 4)"
+bn_hdr "$PBN" 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 2'
+s42_snap "$RBN" "$PBN"
+s34_gate "$RBN"
+expect_eq "BN-0 precondition: the fixture plan carrying the three header fields is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "BN-0b …the ledger-line extractor reads an existing line (positive control)" "- T1: landed at record/T1.md" "$(bn_line "$PBN" T1)"
+
+poke "$RBN" task-add T6 4 build 'fix the c reader' implementor '—' 30 REQ-1 'c.sh' --born 'review S2 on'
+expect_eq "BN-1 task-add --born 'review S2 on' inside fix-policy: S1,S2-on exits 0" "0" "$RC"
+expect_regex "BN-1b …its ledger line carries born: review S2 on after the timestamp" \
+  '^- T6: pending dispatch — added by task-add at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z born: review S2 on$' "$(bn_line "$PBN" T6)"
+expect_eq "BN-1c …and its task cell ends · born: review" "fix the c reader · born: review" "$(s48_row "$PBN" T6 | cut -d'|' -f4)"
+expect_contains "BN-1d …and the verb says what it marked" "task-add — T6 is review-born (review S2 on): review-born rows: 1 of cap 2" "$OUT"
+
+poke "$RBN" task-add T7 4 build 'an ordinary row' implementor '—' 30 REQ-1 'd.sh'
+expect_eq "BN-2 a row added without --born exits 0" "0" "$RC"
+expect_regex "BN-2b …its ledger line ends at the timestamp: no born: marker (BN-1b read one through the same extractor)" \
+  '^- T7: pending dispatch — added by task-add at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(bn_line "$PBN" T7)"
+expect_eq "BN-2c …and its task cell is as typed" "an ordinary row" "$(s48_row "$PBN" T7 | cut -d'|' -f4)"
+
+s42_snap "$RBN" "$PBN"
+poke "$RBN" task-add T8 4 build 'a structure fix' implementor '—' 30 REQ-1 'e.sh' --born 'review S3 off'
+s42_unchanged "BN-3 AC-10.1 a --born rating outside fix-policy: (S3 off)" 1 "$PBN"
+expect_contains "BN-3b …naming the rating and the set" "task-add refused — born: review S3 off is outside fix-policy: S1,S2-on" "$OUT"
+poke "$RBN" task-add T8 4 build 'a reach fix' implementor '—' 30 REQ-1 'e.sh' --born 'review S2 off'
+s42_unchanged "BN-3c S2 off is outside S1,S2-on too (the table's defer cell)" 1 "$PBN"
+expect_contains "BN-3d …naming it" "task-add refused — born: review S2 off is outside fix-policy: S1,S2-on" "$OUT"
+
+poke "$RBN" task-add T8 4 build 'an S1 off fix' implementor '—' 30 REQ-1 'e.sh' --born 'review S1 off'
+expect_eq "BN-4 S1 off is inside S1,S2-on (S1 names both reaches): exits 0, review-born row 2 of cap 2" "0" "$RC"
+expect_regex "BN-4b …marked" '^- T8: pending dispatch — added by task-add at [0-9TZ:-]+ born: review S1 off$' "$(bn_line "$PBN" T8)"
+
+s42_snap "$RBN" "$PBN"
+poke "$RBN" task-add T9 4 build 'one fix too many' implementor '—' 30 REQ-1 'f.sh' --born 'review S1 on'
+s42_unchanged "BN-5 AC-10.2 the third review-born row under fix-cap: 2" 1 "$PBN"
+expect_contains "BN-5b …naming the count and the cap" "task-add refused — review-born rows: 2 of cap 2; this finding goes to the sitting (AC-10.3)" "$OUT"
+
+for bn_bad in 'review S5 on' 'review S2 maybe' 'S2 on' 'review S2-on'; do
+  poke "$RBN" task-add T9 4 build 'a bad rating' implementor '—' 30 REQ-1 'f.sh' --born "$bn_bad"
+  s42_unchanged "BN-6 --born '$bn_bad' is the usage error" 2 "$PBN"
+done
+poke "$RBN" task-add T9 4 build 'no rating' implementor '—' 30 REQ-1 'f.sh' --born
+s42_unchanged "BN-6b --born with no value is the usage error" 2 "$PBN"
+
+# THE FOURTH FIX ON ONE COMPONENT (AC-10.2). A component is a Files path outside the record; three review-born rows
+# already carrying it refuse a fourth, naming the path and the three. A record path the rows share is not one.
+RBF="$(make_repo bn-four)"; ( cd "$RBF" && git commit -q --allow-empty -m init )
+PBF="$(s42_plan "$RBF" 4)"
+bn_hdr "$PBF" 'fix-policy: S1,S2' 'fix-cap: 9'
+s42_snap "$RBF" "$PBF"
+for bn_id in T6 T7 T8; do
+  poke "$RBF" task-add "$bn_id" 4 build "fix $bn_id" implementor '—' 30 REQ-1 "lib/x.sh, $BN_REC/assumptions.md" --born 'review S2 off'
+  expect_eq "BN-7 fix $bn_id on lib/x.sh (fix-policy: S1,S2 covers S2 off) exits 0" "0" "$RC"
+done
+s42_snap "$RBF" "$PBF"
+poke "$RBF" task-add T9 4 build 'the fourth fix' implementor '—' 30 REQ-1 "c.sh, lib/x.sh" --born 'review S1 on'
+s42_unchanged "BN-8 AC-10.2 a fourth review-born row on lib/x.sh" 1 "$PBF"
+expect_contains "BN-8b …naming the path and the three rows" \
+  "task-add refused — a fourth fix on lib/x.sh: T6, T7, T8 already fix it; stop the run (AC-10.2)" "$OUT"
+poke "$RBF" task-add T9 4 build 'a fix elsewhere' implementor '—' 30 REQ-1 "lib/y.sh, $BN_REC/assumptions.md" --born 'review S1 on'
+expect_eq "BN-8c …while a fourth review-born row sharing only the record path with the three exits 0" "0" "$RC"
+
+# THE DEFAULTS: a plan with rigor: double and none of the three fields reads S1,S2-on and 10% of its rows (3 → 1).
+RBD="$(make_repo bn-default)"; ( cd "$RBD" && git commit -q --allow-empty -m init )
+PBD="$(s42_plan "$RBD" 4)"
+expect_eq "BN-9 precondition: the default fixture carries rigor: double and none of the three fields" "1|0" \
+  "$(/usr/bin/grep -c '^rigor: double$' "$PBD")|$(/usr/bin/grep -cE '^(review-cadence|fix-policy|fix-cap):' "$PBD")"
+s42_snap "$RBD" "$PBD"
+poke "$RBD" task-add T6 4 build 'an S2 off fix' implementor '—' 30 REQ-1 'c.sh' --born 'review S2 off'
+s42_unchanged "BN-9b with no fix-policy: the default S1,S2-on refuses S2 off" 1 "$PBD"
+expect_contains "BN-9c …naming the default set" "task-add refused — born: review S2 off is outside fix-policy: S1,S2-on" "$OUT"
+poke "$RBD" task-add T6 4 build 'an S1 fix' implementor '—' 30 REQ-1 'c.sh' --born 'review S1 on'
+expect_eq "BN-9d …and admits S1 on, row 1 of the default cap" "0" "$RC"
+s42_snap "$RBD" "$PBD"
+poke "$RBD" task-add T7 4 build 'an S2 fix' implementor '—' 30 REQ-1 'd.sh' --born 'review S2 on'
+s42_unchanged "BN-9e with no fix-cap: double renders 10% of 3 rows as 1, so a second review-born row" 1 "$PBD"
+expect_contains "BN-9f …naming 1 of cap 1" "review-born rows: 1 of cap 1" "$OUT"
+POKE_BOUND="$BN_BOUND_WAS"
 
 finish

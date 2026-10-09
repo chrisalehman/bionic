@@ -2120,8 +2120,8 @@ REPO=$(pf_repo rpu4)
 write_attestation "$REPO" "$SID_A"
 pf_plan "$REPO" ""
 PF_S=$(pf_state "$REPO")
-expect_eq "PU.4 proof_state: a plan with no floor proof is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.4 …saying so" "no floor proof" "$PF_S"
+expect_eq "PU.4 proof_state: a plan with no regression proof is unbounded" "unbounded" "${PF_S%%$'\t'*}"
+expect_contains "PU.4 …saying so" "no regression proof on this plan yet" "$PF_S"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu4-full")"
 expect_eq "PU.4 …and the plan's first full run is ADMITTED" "allow" "$GATE_VERDICT"
 
@@ -2147,7 +2147,7 @@ awk '{ print } /^approved-by:/ { print "proved: kind=review head='"$PF_H"' at=20
 } > "$(pf_plan_path "$REPO")"
 PF_W64="$( . "$PF_LIB_DIR/units.sh" >/dev/null 2>&1; units_waiting "$(pf_plan_path "$REPO")" 8 2>/dev/null)"
 expect_contains "PU.64 precondition: integrate waits for a full run on this head (the ready set's own wait)" \
-  "proof:floor: the head moved past the floor proof at ${PF_H:0:12} in a way the map cannot bound (the map answers newdir/zz.sh with no suite)" \
+  "proof:floor: the head moved past the regression proof at ${PF_H:0:12} in a way the map cannot bound (the map answers newdir/zz.sh with no suite)" \
   "$PF_W64"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu64-full")"
 expect_eq "PU.64 …and the full run it waits for is ADMITTED (the wait and the wall do not deadlock)" "allow" "$GATE_VERDICT"

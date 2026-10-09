@@ -41,9 +41,13 @@
 #                              if any line was printed, else 0.
 #   units_unlined <plan>       the T-ids with no non-empty `- <id>:` line under
 #                              `## SDLC State`, whatever their status (wave-21 T5).
-#   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]
+#   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [<born>]
 #                              the WHOLE plan with one row added, on stdout; the file is
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
+#   units_born <plan>          `<id>\t<S<n> <reach>>\t<Files>` per review-born row, read off its
+#                              `- <id>:` line's ` born: review` marker (wave-30 T21, AC-10.2).
+#   units_fix_cap <plan>       the plan's fix-cap: rendered as a number, the level's default when
+#                              absent (wave-30 T21, AC-2.3); needs lib/run.sh loaded.
 #
 # THE CALLERS (D3), all re-pointed by T8: the evidence gate's two ledger checks and its
 # prototype check, the tick's FILL, the governing-skill's Step-3 wall, and any report. No
@@ -277,7 +281,7 @@ _units_table() {
 # reading the table a second time. The outer command is still running, so the answer is the
 # same read the outer command already holds.
 #
-# THE FLOOR STATE IS THE COMMAND'S TOO (wave-26 T64). `_UNITS_MEMO_FLOOR` names a file, written
+# THE REGRESSION STATE IS THE COMMAND'S TOO (wave-26 T64). `_UNITS_MEMO_FLOOR` names a file, written
 # the first time a question inside the command needs `proof_state` and read by every later one,
 # subshells included; it is removed when the command returns. A command that never needs the
 # state never writes it. A caller that already names one (the tick, for its whole run) keeps it,
@@ -421,11 +425,11 @@ units_rows() {
 #     `review` — are named as its writers. A pending row whose `live:head` waits because
 #     nothing landed past the review proof writes no newer proof, so it is not one (wave-26
 #     T62; K2-F4): the last review of a run returns its row to pending, and integrate would
-#     otherwise wait on it for ever. A FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64;
+#     otherwise wait on it for ever. A REGRESSION PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64;
 #     REQ-3 AC-3.4): with no open writer, `proof:floor` is satisfied when lib/proof.sh
 #     `proof_state` answers `covered` or `bounded`, and waits on `unbounded` — a merge from
 #     outside the run, a change the map answers with every suite or a file it answers with none,
-#     or a state that cannot be computed — saying `proof:floor: the head moved past the floor
+#     or a state that cannot be computed — saying `proof:floor: the head moved past the regression
 #     proof at <12 hex> in a way the map cannot bound (<its reason>); take the full run on this
 #     head and record it with proof-add floor`. The state is asked only when a pending row's
 #     answer turns on it, a row held for its step is judged without it, and inside
@@ -920,11 +924,11 @@ _units_landed() {
 }
 
 # units_floor_holds <plan> [<id>] -> `<id><TAB><step><TAB><status>`, table order, for each row the
-# FLOOR waits on that has not landed (or been dropped) and writes a tracked file (wave-26 T52;
-# review 14 B1, ruling R1). The floor is row <id>; with no id, every open verify or test row, the
+# REGRESSION waits on that has not landed (or been dropped) and writes a tracked file (wave-26 T52;
+# review 14 B1, ruling R1). The regression is row <id>; with no id, every open verify or test row, the
 # rows `proof:floor` names as its writers. "Waits on" is the ready set's own judgment of each of
-# the floor's reads and deps (`judge` below), so a row downstream of the floor — the release,
-# which waits FOR the floor — never holds it; "writes a tracked file" is `writes_head`, so a row
+# the regression's reads and deps (`judge` below), so a row downstream of the regression — the release,
+# which waits FOR the regression — never holds it; "writes a tracked file" is `writes_head`, so a row
 # whose Files are all record paths never does. The dispatch wall asks this before it admits a
 # full run: a run now proves a head these rows are about to move.
 units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
@@ -985,7 +989,7 @@ _units_proof_awk() {
 # AND ONE ANSWER (wave-27 T14; D3): UNITS_FACTS_STATE, `covered` when lib/proof.sh `facts_state`
 # holds the plan at that head, else the lines that do not hold; `proof:review` is met only by
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
-# `holds` (units_floor_holds) takes the floor row's id, or nothing, in the <step> slot.
+# `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ]; then
@@ -1006,7 +1010,7 @@ _units_sched() {
   for i in 1 2 3; do ctl="${ctl#*$'\t'}"; done
   ctl="${ctl%%$'\t'*}"
   case " $ctl " in *" reads "*) hasreads=1 ;; esac
-  # THE FLOOR STATE IS ASKED ONLY WHEN AN ANSWER TURNS ON IT (wave-26 T64; REQ-3 AC-3.4). The
+  # THE REGRESSION STATE IS ASKED ONLY WHEN AN ANSWER TURNS ON IT (wave-26 T64; REQ-3 AC-3.4). The
   # program runs without it; when a pending row it judges reads a `proof:floor` that a proof line
   # and no open writer would satisfy, it prints nothing and exits 3, and only then is
   # `proof_state` run (once per memoised command, `_units_floor_state`) and the program run again
@@ -1020,8 +1024,8 @@ _units_sched() {
   return "$rc"
 }
 
-# _units_sched_run <mode> <plan> <step> <scale> <hasreads> <rows> <floor state> -> the program's
-# answer and its status: 3, with nothing printed, when the answer needs a floor state not handed in.
+# _units_sched_run <mode> <plan> <step> <scale> <hasreads> <rows> <regression state> -> the program's
+# answer and its status: 3, with nothing printed, when the answer needs a regression state not handed in.
 _units_sched_run() {
   {
     printf '\034rows\n'; printf '%s\n' "$6"
@@ -1033,13 +1037,13 @@ _units_sched_run() {
 }
 
 # _units_floor_state <plan> -> what lib/proof.sh `proof_state` says of the change since the plan's
-# last floor proof: `covered…`, `bounded…` or `unbounded<TAB><reason>`, one line. The tree it asks
+# last regression proof: `covered…`, `bounded…` or `unbounded<TAB><reason>`, one line. The tree it asks
 # is the project root the plan sits under (`<root>/.bionic/…`), or the plan's own directory, whose
 # repository git finds. Inside `units_memoised` the answer is kept in a file for the rest of the
 # command, so the tick's three questions and its ready set run `proof_state` once between them.
 # WHEN THE STATE CANNOT BE COMPUTED, THE READ IS NOT SATISFIED (the fail direction): proof.sh not
 # loadable, no git, no checkout, a map that fails or overruns all answer `unbounded` with the
-# reason, and a floor proof at the head is always the way out, because `covered` asks no map.
+# reason, and a regression proof at the head is always the way out, because `covered` asks no map.
 _units_floor_state() {
   local plan="${1:-}" tree st=""
   st="$(_units_floor_kept "$plan")"
@@ -1076,7 +1080,7 @@ _units_floor_kept() {
 # commits to the head; 0 when every path entry is the record, or the cell names no path at all (a
 # bare word or a dash declares nothing).
 # ONE PREDICATE, THREE READERS (wave-26 T32, T46): the scheduler asks it which rows write the head
-# a floor proves and which landed rows a first live review reads, `units_validate` which active
+# a regression proves and which landed rows a first live review reads, `units_validate` which active
 # rows owe a tree of their own, and fill.sh `fill_readonly_ids` which verify or review rows take
 # no writer slot; the scheduler asks `in_docs` which rows write what a `record` read waits on.
 # Prepended to each program; NO APOSTROPHE inside it (it is single-quoted).
@@ -1426,8 +1430,8 @@ _units_sched_awk() {
       if (t ~ extre) return 0
       if (substr(t, 1, 9) == "approval:") return (substr(t, 10) in appr)
       if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6))
-      # A PROOF IS SETTLED ONLY WHEN NOTHING OPEN WILL WRITE A NEWER ONE (T35 F2): a re-floor row
-      # added after the floor was proved makes that line stale, so the open writers are asked
+      # A PROOF IS SETTLED ONLY WHEN NOTHING OPEN WILL WRITE A NEWER ONE (T35 F2): a second regression row
+      # added after the regression was proved makes that line stale, so the open writers are asked
       # first and the line counts only when there are none.
       if (substr(t, 1, 6) == "proof:") {
         a = substr(t, 7)
@@ -1439,7 +1443,7 @@ _units_sched_awk() {
         # THE REVIEW IS MET BY THE JUDGE, NOT BY A LINE (wave-27 T14; D3, D4). A `proved: kind=review`
         # line was enough here, a `result=fail` reading among them (A-orch-40). Now the read is met
         # only when lib/proof.sh `facts_state` answered covered for the plan at the working head:
-        # the tick asks it once and hands the answer in (factsst), as it hands the floor state in.
+        # the tick asks it once and hands the answer in (factsst), as it hands the regression state in.
         # Not handed in, it is not known here, and the row waits saying so (the cautious direction).
         if (a == "review") {
           if (nw) return 0
@@ -1448,7 +1452,7 @@ _units_sched_awk() {
           else lwhy = "the facts the run owes do not hold (facts_state): " factsst
           return 0
         }
-        # THE FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
+        # THE REGRESSION PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
         # with no open writer satisfies the read when the change since its head is covered or
         # bounded; unbounded, or a state that could not be computed, is a wait naming the way
         # out. Unknown here (floorst empty) is reported through needfloor, and the shell runs
@@ -1458,7 +1462,7 @@ _units_sched_awk() {
           else if (floorst !~ /^(covered|bounded)/) {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
-            lwhy = "the head moved past the floor proof at " substr(prvh["floor"], 1, 12) \
+            lwhy = "the head moved past the regression proof at " substr(prvh["floor"], 1, 12) \
               " in a way the map cannot bound (" fr "); take the full run on this head and record it with proof-add floor"
             return 0
           }
@@ -1468,7 +1472,7 @@ _units_sched_awk() {
       # A ROW THAT READS THE SETTLED head STILL WRITES IT FOR A ROW AT A LATER STEP (T35 F1). The
       # exception A-T2.4 made is kept between equals and toward earlier steps — the walk does not
       # wait for the release — but a test, doc or build row at Step 4 that reads head and writes
-      # code holds the Step-5 floor. `record` takes the same rule over record paths.
+      # code holds the Step-5 regression. `record` takes the same rule over record paths.
       if (t == "head" || t == "record") {
         for (j = 1; j <= n; j++) {
           if (j == i || !isopen(j)) continue
@@ -1558,7 +1562,7 @@ _units_sched_awk() {
         if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
         # THE RELEASE READS ITS APPROVAL (wave-26 T62; K2-F3; D3). A doc row at Step 7 or later
         # whose own cell names no approval (the kind default names only the plan) would be ready
-        # beside the floor; the validator refuses it, and a plan that got past the validator
+        # beside the regression; the validator refuses it, and a plan that got past the validator
         # still never offers it before approved: release.
         if (hasreads && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && rd[i] !~ /(^|[ \t,:])approval:[A-Za-z0-9]/) addtok(i, "approval:release")
         m = split(dep[i], a, ",")
@@ -1611,9 +1615,9 @@ _units_sched_awk() {
         }
         exit
       }
-      # THE FLOOR HOLDS (T52; review 14 B1, R1): every writer the floor row (want, or each open
+      # THE REGRESSION HOLDS (T52; review 14 B1, R1): every writer the regression row (want, or each open
       # verify or test row when want is empty) waits on through judge, kept when it has not
-      # landed and writes the tracked tree. judge never names a row downstream of the floor.
+      # landed and writes the tracked tree. judge never names a row downstream of the regression.
       if (mode == "holds") {
         for (i = 1; i <= n; i++) {
           if (want != "") { if (id[i] != want) continue }
@@ -1629,7 +1633,7 @@ _units_sched_awk() {
         for (j = 1; j <= n; j++) if (j in hold) printf "%s\t%s\t%s\n", id[j], stp[j], st[j]
         exit
       }
-      # THE FLOOR STATE, ASKED BEFORE ANYTHING IS PRINTED (wave-26 T64). A pending row this answer
+      # THE REGRESSION STATE, ASKED BEFORE ANYTHING IS PRINTED (wave-26 T64). A pending row this answer
       # judges, not held for its step, whose proof:floor read a proof line and no open writer would
       # satisfy needs the state; without it the program prints nothing and exits 3 (_units_sched).
       if ((mode == "ready" || mode == "held" || mode == "waiting") && floorst == "") {
@@ -1915,7 +1919,7 @@ units_validate() {
 
           # THE RELEASE READS ITS APPROVAL (wave-26 T62; critic 2 K2-F3; D3). A doc row at Step 7
           # or later is the release, the row the hold of a table without the column names so; on
-          # its kind default it would be ready beside the floor with no approval at all. An open
+          # its kind default it would be ready beside the regression with no approval at all. An open
           # one names the approval it waits for, approval:release, or approval:plan for a
           # document that needs no release.
           if (hasreads && !ap && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && (sta[i] == "pending" || sta[i] == "active"))
@@ -2132,7 +2136,7 @@ _units_ledger() {
     }'
 }
 
-# units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]
+# units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [<born>]
 #   -> the WHOLE plan with one `## Tasks` row added, on stdout; exit 1 and silent when the plan
 #      carries no `## Tasks` table or no `## SDLC State` section. Nothing is written.
 #
@@ -2150,14 +2154,17 @@ _units_ledger() {
 #   2. ITS `- <id>:` LINE under `## SDLC State`, after the last `- T<n>:` line and that line's
 #      indented continuation — or at the end of the section when the plan carries none yet.
 #      `pending dispatch — added by task-add at <iso>` is not a placeholder to the evidence
-#      gate (`is_placeholder_value` refuses only the bare words).
+#      gate (`is_placeholder_value` refuses only the bare words). With a twelfth operand
+#      `<born>` (`review S<n> <reach>`, wave-30 T21; AC-10.2) the line ends ` born: <born>`:
+#      the review-born marker `units_born` reads and the landing report counts. The line's
+#      later writers (`row-landed`) append to its text, so the marker stays.
 #
 # NO OTHER ROW IS EDITED IN A TABLE WITH reads (wave-26 T2; D2): its rows wait on what they read,
-# the floor on `head`, so a new row changes nothing but itself and its line. A TABLE WITHOUT THE
+# the regression on `head`, so a new row changes nothing but itself and its line. A TABLE WITHOUT THE
 # COLUMN KEEPS 1.10's THREADING (wave-26 T62; critic 2 K2-F1): there the deps are the only thing
-# that holds the floor, so a Step-4 id is appended to the deps of every open Step-5+ row on the
+# that holds the regression, so a Step-4 id is appended to the deps of every open Step-5+ row on the
 # frontier — those that do not reach it, less any that reaches another of them which does not
-# reach it back. The validator no longer demands the edge; the floor needs it.
+# reach it back. The validator no longer demands the edge; the regression needs it.
 #
 # PURE, AS EVERY VERB HERE IS: it prints and never writes, so `task-add` can judge the
 # projection (the validator, then a dry commit through the real gate) before anything is
@@ -2174,12 +2181,12 @@ units_add_row() {
   # rule roster.sh's docblock already states for file paths.
   UA_NID="$nid" UA_NSTEP="$nstep" UA_NKIND="${4:-}" UA_NTASK="${5:-}" UA_NAGENT="${6:-}" \
   UA_NDEPS="${7:-}" UA_NSIZE="${8:-}" UA_NSERVES="${9:-}" UA_NFILES="${10:-}" UA_NREADS="${11:-}" \
-  UA_NOW="$now" awk '
+  UA_NBORN="${12:-}" UA_NOW="$now" awk '
     BEGIN {
       nid = ENVIRON["UA_NID"]; nstep = ENVIRON["UA_NSTEP"]; nkind = ENVIRON["UA_NKIND"]
       ntask = ENVIRON["UA_NTASK"]; nagent = ENVIRON["UA_NAGENT"]; ndeps = ENVIRON["UA_NDEPS"]
       nsize = ENVIRON["UA_NSIZE"]; nserves = ENVIRON["UA_NSERVES"]; nfiles = ENVIRON["UA_NFILES"]
-      nreads = ENVIRON["UA_NREADS"]; now = ENVIRON["UA_NOW"]
+      nreads = ENVIRON["UA_NREADS"]; now = ENVIRON["UA_NOW"]; nborn = ENVIRON["UA_NBORN"]
     }
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     # A VALUE BECOMES A CELL: tabs and line breaks to spaces, every RAW `|` escaped by
@@ -2257,7 +2264,7 @@ units_add_row() {
       }
       if (!lastrow || !seensdlc) exit 1
       # A TABLE WITHOUT reads KEEPS 1.10 THREADING (wave-26 T62; critic 2 K2-F1). With no head
-      # read, a mid-run Step-4 row holds the floor only through deps, so its id goes into every
+      # read, a mid-run Step-4 row holds the regression only through deps, so its id goes into every
       # open Step-5+ row that does not reach it, except one that reaches another such row that
       # does not reach it back: that row repairs it (the frontier of c81d865e units_add_row).
       if (nr) {
@@ -2289,7 +2296,7 @@ units_add_row() {
       at = (tline ? tline : sdlc_last)
       for (i = 1; i <= nl; i++) {
         print L[i]
-        if (i == at) printf "- %s: pending dispatch — added by task-add at %s\n", nid, now
+        if (i == at) printf "- %s: pending dispatch — added by task-add at %s%s\n", nid, now, (nborn != "" ? " born: " nborn : "")
         if (i == lastrow) print row
       }
     }' "$plan"
@@ -2521,7 +2528,7 @@ units_split_check() {
     while IFS= read -r t; do
       [ -n "$t" ] || continue
       all="${all}${t}"$'\n'
-      printf '%s\n' "$ptok" | grep -Fxq -- "$t" && continue
+      grep -Fxq -- "$t" <<<"$ptok" && continue
       printf "%s: Files entry %s is not one of %s's Files\n" "$cid" "$t" "$pid"; found=1
     done <<EOF
 $(_units_split_tokens "$2")
@@ -2530,7 +2537,7 @@ EOF
   done
   while IFS= read -r t; do
     [ -n "$t" ] || continue
-    printf '%s' "$all" | grep -Fxq -- "$t" && continue
+    grep -Fxq -- "$t" <<<"$all" && continue
     printf "%s: Files entry %s is in no child's Files\n" "$pid" "$t"; found=1
   done <<EOF
 $ptok
@@ -2831,4 +2838,56 @@ units_chain() {
       }
       printf "chain\t%s\t%d\nwidth\t%d\n", path, f[start], peak
     }'
+}
+
+# ── THE REVIEW-BORN ROWS AND THE CAP ON THEM (wave-30 T21; REQ-10 AC-10.2, REQ-2 AC-2.3; D4) ──────
+#
+# units_born <plan> -> `<id>\t<S<n> <reach>>\t<Files cell>`, one line per `## SDLC State` line
+#   carrying ` born: review S<n> <on|off>`, in the section's order; nothing, exit 0, when none; exit 1
+#   when the plan cannot be read.
+#
+# THE LEDGER LINE IS THE ONE PLACE THE COUNT READS. `task-add --born` writes the marker there, and the
+# task cell's ` · born: review` is for a person reading the table; a hand edit of the cell counts
+# nothing. The line is found as the gate finds it (`_units_ledger`): fences skipped, the first
+# `- <id>:` line of the section per id. The Files cell is the row's own (`units_rows`), empty for a
+# line whose row the table does not carry. Readers: the poker's `task-add --born` (the cap and the
+# fourth fix on one component) and the landing line's `review-born rows:`.
+units_born() {
+  local plan="${1:-}" rows
+  [ -n "$plan" ] && [ -r "$plan" ] || return 1
+  rows="$(units_rows "$plan" 2>/dev/null)" || rows=""
+  {
+    printf '\034rows\n'; [ -z "$rows" ] || printf '%s\n' "$rows"
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
+  } | awk -F'\t' '
+    $0 == SUBSEP "rows" { part = 1; next }
+    $0 == SUBSEP "plan" { part = 2; next }
+    part == 1 { if ($1 != "" && !($1 in files)) files[$1] = $9; next }
+    part == 2 {
+      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
+      if (fence) next
+      if ($0 ~ /^## SDLC State/) { insec = 1; next }
+      if ($0 ~ /^## /) insec = 0
+      if (!insec) next
+      l = $0; sub(/^[[:space:]]*-?[[:space:]]*/, "", l)
+      c = index(l, ":"); if (c == 0) next
+      k = substr(l, 1, c - 1); sub(/[[:space:]]+$/, "", k)
+      if (k !~ /^T[0-9]/ || (k in seen)) next
+      seen[k] = 1
+      if (!match(l, / born: review S[0-9]+ (on|off)( |$)/)) next
+      r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r)
+      printf "%s\t%s\t%s\n", k, r, files[k]
+    }'
+}
+
+# units_fix_cap <plan> -> the plan's `fix-cap:` as a number (lib/run.sh `fix_cap_render`): the field,
+#   or the `rigor:` level's default when it is absent, a percent taken of the `## Tasks` rows, every
+#   row whatever its status, rounded up. Nothing and rc 1 when the field is no count, when there is
+#   neither field nor level, or when lib/run.sh is not loaded beside this file.
+units_fix_cap() {
+  local plan="${1:-}" n
+  declare -F fix_cap_render >/dev/null 2>&1 && declare -F plan_frontmatter_get >/dev/null 2>&1 || return 1
+  [ -n "$plan" ] && [ -r "$plan" ] || return 1
+  n="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$1 != "" { n++ } END { print n + 0 }')"
+  fix_cap_render "$(plan_frontmatter_get "$plan" fix-cap)" "$(plan_frontmatter_get "$plan" rigor)" "$n"
 }
