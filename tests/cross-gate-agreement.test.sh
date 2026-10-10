@@ -13734,7 +13734,7 @@ FSEV_D="$PRF_D/sev"; mkdir -p "$FSEV_D"
 FSEV_CELLS="S1:on S1:off S2:on S2:off S3:on S3:off S4:on S4:off"
 fsev_lib() { . "$PRF_LIB/proof.sh" && proof_priority "$1" "$2"; }
 fsev_parsed() {  # <S> <reach> -> the findings parser's priority column for a one-finding record
-  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 1\nfinding: 1 %s %s - a cell\nunsure: 1 placeholder\n' "$1" "$2" > "$FSEV_D/rec.md"
+  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 1\nfinding: 1 %s %s x.sh:1 a cell\nshown: 1 bash x.sh\n' "$1" "$2" > "$FSEV_D/rec.md"
   ( . "$PRF_LIB/proof.sh" && proof_findings "$FSEV_D/rec.md" ) | awk -F'\t' '{ print $5 }'
 }
 fsev_scale() {  # <scale file> <S> <reach> -> the cell the scale's table states, as fix, defer or note
@@ -13763,15 +13763,12 @@ expect_eq "FACT-SEV mutation: the doctored scale still reads (S1 on is fix)" "fi
 expect_ne "FACT-SEV mutation: …and its S2 off is no longer the library's, so the agreement row goes red" \
   "$(fsev_lib S2 off)" "$(fsev_scale "$FSEV_D/severity.mut.md" S2 off)"
 
-# §FACT-CHECK (wave-28 T41; REQ-8 AC-8.6, D33). AN OPEN CHECK HOLDS THE STEP, AND EVERY READER ASKS ONE
-# READER WHICH CHECKS ARE OPEN. A `check:` line is open while it carries neither ` settled=` nor
-# ` refuted` after its quoted title; lib/proof.sh `proof_checks_open` is the one reader (the owed lines
-# whose priority is `check`, rated through `proof_finding_rating`). The step's two readers ask it: the
-# judge (`facts_state`, which the tick's integrate row and close-out read too) holds each as a
-# `finding-check<TAB><record>#<n><TAB>open` line, and `current 8` (session-poker.sh) refuses naming
-# each. Pinned here: on one plan the judge holds exactly the open set the reader gives (a settled, a
-# refuted and a fenced line are not open; a title holding the words is); `current 8`'s refusal reads it
-# by that name; and a doctored judge that no longer asks the reader splits from it.
+# §FACT-FINAL (wave-31 T32; REQ-6 AC-6.3, D6; was §FACT-CHECK, wave-28 T41). A READER'S RATING IS
+# FINAL, AND NO READER OF A STEP ASKS ABOUT A CHECK. Wave-28 T41 held the step on each open `check:`
+# line through one reader, `proof_checks_open`, asked by the judge (`facts_state`) and by `current 8`.
+# T32 deleted the reader and both of its callers. Pinned here: on a plan carrying open, settled, refuted
+# and fenced `check:` lines, the judge answers each fact it owes and prints no `finding-check` line;
+# the library defines no reader of checks; and `current 8`'s code names none.
 FCHK_D="$PRF_D/fchk"; mkdir -p "$FCHK_D"
 git -C "$FCHK_D" init -q 2>/dev/null; git -C "$FCHK_D" -c user.name=f -c user.email=f@x commit -q --allow-empty -m init 2>/dev/null
 FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
@@ -13780,30 +13777,19 @@ FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
   printf 'check: record/w/a.md#1 S3 off "open, no settlement"\n'
   printf 'check: record/w/a.md#2 S1 on "settled" settled=S2:off by=record/w/c.md\n'
   printf 'check: record/w/a.md#3 S2 on "refuted" refuted by=record/w/c.md\n'
-  printf 'check: record/w/a.md#4 S4 on "a title that says refuted and settled=S1:on"\n'
   printf '\n```\ncheck: record/w/a.md#5 S1 on "fenced"\n```\n'
 } > "$FCHK_D/plan.md"
-fchk_open() { bash -c '. "$1" && proof_checks_open "$2"' _ "${2:-$PRF_LIB/proof.sh}" "$1" 2>/dev/null | awk '{ printf "%s%s", (n++ ? " " : ""), $1 }'; }
-fchk_judge() { bash -c '. "$1" && facts_state "$2" "$3"' _ "${2:-$PRF_LIB/proof.sh}" "$1" "$FCHK_H" 2>/dev/null \
-  | awk -F'\t' '$1 == "finding-check" && $NF == "open" { printf "%s%s", (n++ ? " " : ""), $2 }'; }
-expect_regex "FACT-CHECK precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
-expect_eq "FACT-CHECK the one reader gives the open checks: no settlement, and a title holding the words" \
-  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md")"
-expect_eq "FACT-CHECK the judge holds exactly that set" "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md")"
-expect_eq "FACT-CHECK …and says so by its exit" "1" \
-  "$(bash -c '. "$1" && facts_state "$2" "$3" >/dev/null 2>&1; echo $?' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H")"
-expect_eq "FACT-CHECK current 8's refusal asks the same reader, by name" "1" \
-  "$(/usr/bin/grep -c 'proof_checks_open "\$PV_PLAN"' "$PRF_POKER")"
-FCHK_NEEDLE='done < <(proof_checks_open "$plan" 2>/dev/null)'
-FCHK_MUT="$FCHK_D/proof.sh.mut"
-anchor "$PRF_LIB/proof.sh" "$FCHK_NEEDLE" 1
-FCHK_N="$FCHK_NEEDLE" awk 'BEGIN { n = ENVIRON["FCHK_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "done < /dev/null" substr($0, i + length(n)); print }' \
-  "$PRF_LIB/proof.sh" > "$FCHK_MUT"
-cp "$PRF_LIB/run.sh" "$PRF_LIB/roots.sh" "$FCHK_D/" 2>/dev/null
-expect_eq "FACT-CHECK mutation: the doctored judge still gives the reader's set through its own reader (it runs)" \
-  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md" "$FCHK_MUT")"
-expect_ne "FACT-CHECK mutation: …and, no longer asking it, holds nothing, so the agreement row goes red" \
-  "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md" "$FCHK_MUT")"
+FCHK_OUT="$(bash -c '. "$1" && facts_state "$2" "$3"' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H" 2>/dev/null)"
+expect_regex "FACT-FINAL precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
+expect_contains "FACT-FINAL the judge answers the facts the plan owes (the extractor reads real output: the floor line)" \
+  "floor" "$FCHK_OUT"
+expect_absent "FACT-FINAL …and holds no check, open or not: no finding-check line" "finding-check" "$FCHK_OUT"
+expect_eq "FACT-FINAL the library defines the judge, and no reader of checks (proof_checks_open, _proof_check_state)" "1|0|0" \
+  "$(bash -c '. "$1"; declare -F facts_state >/dev/null && printf 1 || printf 0; printf "|"; declare -F proof_checks_open >/dev/null && printf 1 || printf 0; printf "|"; declare -F _proof_check_state >/dev/null && printf 1 || printf 0' _ "$PRF_LIB/proof.sh" 2>/dev/null)"
+expect_eq "FACT-FINAL current 8's code asks the judge (the extractor reads the verb's file)…" "1" \
+  "$(/usr/bin/grep -c '^cur8_judge() {' "$PRF_POKER")"
+expect_eq "FACT-FINAL …and no reader of checks, by name" "0" \
+  "$(/usr/bin/grep -c 'proof_checks_open\|cur8_checks' "$PRF_POKER")"
 
 # ============================================================
 section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"
