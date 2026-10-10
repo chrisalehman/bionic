@@ -1796,7 +1796,8 @@ F_GATE=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
   | env BIONIC_WALL_VERBOSE=1 bash "$PARTY_SG" 2>&1 >/dev/null); F_GST=$?
 expect_contains "the gate reads the same contracted progress path off the same row" \
   ".bionic/tmp/w99.progress" "$F_GATE"
-expect_eq "…and refuses the stop, because that artifact just moved" "2" "$F_GST"
+expect_eq "…and judges the target alive, because that artifact just moved (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$F_GST"
+expect_contains "…saying so on the look" "is ALIVE and its contract is undelivered" "$F_GATE"
 
 # …and a write to THAT path — the one the writer named, the producer resolved and
 # the recorder stored — is what the gate calls stale. A disagreement anywhere in
@@ -1807,7 +1808,8 @@ mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-im
 sleep 1
 printf 'stage 2\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "a write to the roster-contracted progress path stales the look" "2" "$ST"
+expect_eq "a write to the roster-contracted progress path is what the look reads as alive (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…the verdict naming it" "is ALIVE and its contract is undelivered" "$OUT"
 
 # THE SAME CHAIN, WITH THE ROSTER LONG (Step-6 critic F-1). The shipped
 # performance remediation capped the roster at 200 rows and evicted by RECENCY,
@@ -1874,12 +1876,14 @@ mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-im
 sleep 1
 printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "the D-6 staleness wall still refuses past the old cap (critic F-1)" "2" "$ST"
+# THE GUARD RECORDS ITS VERDICT AND DENIES NOTHING (wave-31 T32; D6, AC-6.5): the stop of a working
+# agent is allowed and the look's verdict written on its row as reason=.
+expect_eq "the guard still judges the target past the old cap (critic F-1), and allows the stop (wave-31 T32)" "0" "$ST"
 # THE EXIT CODE ALONE CANNOT TELL A JUDGED STOP FROM AN UNJUDGED ONE (wave-28 T80). Since T70 the
 # guard refuses with exit 2 when it runs past its own deadline, and on this long roster it did:
 # every row here passed on a stop the guard never judged. The reason is what says it judged.
-expect_contains "…on the target's own state: it is still working" \
-  "it is still working, nothing delivered" "$OUT"
+expect_contains "…on the target's own state: it is alive, its contract undelivered" \
+  "is ALIVE and its contract is undelivered" "$OUT"
 expect_absent "…and not because the guard ran out of time on the long roster" \
   "did not finish in" "$OUT"
 
@@ -1896,11 +1900,11 @@ F3_SUB=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
   | bash "$PARTY_SG" 2>&1 >/dev/null); F3_SST=$?
 expect_eq "a subagent's stop and the orchestrator's reach the same verdict" "$F3_OST" "$F3_SST"
 expect_eq "…and it is the same line, word for word" "$F3_ORCH" "$F3_SUB"
-expect_eq "…which is the refusal this target's own state earns" "2" "$F3_OST"
+expect_eq "…which is the allowed stop this target's own state earns, its verdict recorded (wave-31 T32)" "0" "$F3_OST"
 # Two deadline refusals are also the same line, word for word, and exit 2 (T80): the reason
 # is what proves both actors' stops were judged.
 expect_contains "…and its reason is the target's state, for both actors" \
-  "it is still working, nothing delivered" "$F3_ORCH"
+  "is ALIVE and its contract is undelivered" "$F3_ORCH"
 expect_absent "…not the guard's deadline" "did not finish in" "$F3_ORCH"
 
 # The field NAMES themselves, stated as the agreement they are — so a rename
@@ -2017,6 +2021,7 @@ g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
     # that the gate got as far as having an opinion about the AGENT at all.
     *"No observation"*)      echo identified ;;
     *"still working"*)       echo identified ;;
+    *"STOP ALLOWED"*)        echo identified ;;
     *"STOP PERMITTED"*)      echo identified ;;
     # T22, then D8 (T5): with the roster gone the gate has no standing over a bare name at
     # all — the register is what makes a target ours. Through 1.7.1 that was a passthrough
@@ -2739,9 +2744,10 @@ expect_eq "the chain is three rows for one name, in order" "intended confirmed i
 # for naming nothing. Compared generically, so a field added later is covered by this
 # test the day it is added rather than the day someone remembers to list it.
 k_contract_fields() {  # <row> -> the fields that must not change, one per line
+  # The stop guard's verdict (`reason=`, wave-31 T32) rides a copied row and is not a contract field.
   printf '%s' "$1" | tr '|' '\n' \
     | grep -v '^roster-state/' | grep -v '^status=' | grep -v '^agent_id=' \
-    | grep -v '^teammate_id='
+    | grep -v '^teammate_id=' | grep -v '^reason='
 }
 expect_eq "every contract field survives intended → confirmed" \
   "$(k_contract_fields "$K_INTENDED")" "$(k_contract_fields "$K_CONFIRMED")"
@@ -2823,8 +2829,9 @@ printf 'stage 2\n' >> "$KREPO/.bionic/tmp/w16-chain.progress"
 # roster, same gate; the only thing that varies is the one fact that decides.
 mv "$KREPO/.bionic/docs/record/w16-chain.md" "$SANDBOX/k-chain-artifact.md"
 K_SG_OUT=$(mk_stop_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" | bash "$PARTY_SG" 2>&1); K_SG_ST=$?
-expect_eq "the stop gate refuses a stop whose contracted channel moved under the look" \
-  "2" "$K_SG_ST"
+expect_eq "the stop gate judges alive a target whose contracted channel moved under the look (wave-31 T32: allowed, its verdict recorded as reason=)" \
+  "0" "$K_SG_ST"
+expect_contains "…saying so" "is ALIVE and its contract is undelivered" "$K_SG_OUT"
 
 # THE OTHER DIRECTION, one fact apart: the artifact comes back, the verdict says MET, and
 # the identical stop — same stale observation, same moved progress channel — passes with no
@@ -2852,8 +2859,10 @@ K_IDENT2=$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | 
 # the id it joined on, the original dispatch tool_use_id and every contract field — and the
 # row that used to prove it is the duplicate row itself.
 K_DUP=$(grep 'status=duplicate-start|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
+# The stop guard's verdict above appended a copy of the identified row carrying reason= (wave-31
+# T32), which is the guard's journal, not the recorder's: the count is of the recorder's rows.
 expect_eq "a second start does NOT write a second identified row" \
-  "1" "$(grep -c 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
+  "1" "$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | grep -vc '|reason=' | tr -d ' ')"
 expect_eq "…it journals the duplicate start instead" \
   "1" "$(grep -c 'status=duplicate-start|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
 K_IDENT2="$K_DUP"
@@ -3395,7 +3404,8 @@ m_vline() {  # -> the verdict machine line all three consumers read for this fix
 expect_contains "before the ack: the one line all three read says acked=no" \
   "|acked=no|" "$(m_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "before the ack: the stop gate refuses" "2" "$ST"
+expect_eq "before the ack: the stop gate judges the row open, the look taken (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "before the ack: …its verdict on the look" "STOP ALLOWED" "$OUT"
 OUT=$(m_sweep "$LG_M"); ST=$?
 expect_eq "before the ack: the landing gate refuses" "2" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
@@ -3416,6 +3426,7 @@ expect_contains "…while the contract itself is still UNMET, computed from the 
 
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "after the ack: the stop gate passes" "0" "$ST"
+expect_absent "after the ack: …discharged before any look, so no verdict is written" "STOP ALLOWED" "$OUT"
 OUT=$(m_sweep "$LG_M"); ST=$?
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
 expect_contains "after the ack: the stand-down puts it in the batch" "1 row(s) have landed" "$OUT"
@@ -3444,7 +3455,8 @@ awk '{ if (index($0, "row_acked \"$_pname\"") > 0) $0 = "    _acked=no"
 expect_contains "the mutated owner reports the acked row as unacked" "|acked=no|" \
   "$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/session-sweeper.sh" verdict finished 2>/dev/null )"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$MMUT/stop-guard.sh" 2>&1); ST=$?
-expect_eq "…and the stop gate refuses the stop it passed a moment ago" "2" "$ST"
+expect_eq "…and the stop gate takes the look again on the stop it passed a moment ago (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…its verdict back on the look" "STOP ALLOWED" "$OUT"
 OUT=$(m_sweep "$MMUT/stop.sh"); ST=$?
 expect_eq "…and the landing gate refuses it too" "2" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/stop-orders.sh" standdown 2>&1 )
@@ -3484,7 +3496,9 @@ expect_eq "an order inside the shared window discharges the stop" "0" "$ST"
 IFS='|' read -r EX_REPO EX_TR <<< "$(mk_order_world "order-expiry" "expired" "aexpired-2222222222222222")"
 ( cd "$EX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order expired --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
 OUT=$(mk_stop_payload "$SID_A" "$EX_TR" "$EX_REPO" "expired" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "an order just outside it does not — the ceremony is where it was" "2" "$ST"
+expect_eq "an order just outside it does not — the look decides, as it did (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…the look's verdict" "STOP ALLOWED" "$OUT"
+expect_absent "…never the order's line" "STOP ORDERED" "$OUT"
 
 # --- M.4b the order's AUTHOR crosses the same seam (AC-1.1; T1, D1) ---
 #
@@ -3507,7 +3521,9 @@ expect_contains "…and the gate reports the author it read, not one it assumed"
 IFS='|' read -r PX_REPO PX_TR <<< "$(mk_order_world "order-patrol-expiry" "patrol-expired" "apatrolx-4444444444444444")"
 ( cd "$PX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order patrol-expired --by patrol --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
 OUT=$(mk_stop_payload "$SID_A" "$PX_TR" "$PX_REPO" "patrol-expired" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "…and an expired one does not, whoever wrote it" "2" "$ST"
+expect_eq "…and an expired one does not, whoever wrote it (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…the look's verdict, not the order's" "STOP ALLOWED" "$OUT"
+expect_absent "…never the order's line" "STOP ORDERED" "$OUT"
 
 # --- M.6 the ack's AUTHOR crosses it too (AC-1.3; T1, D2) ---
 #
@@ -3540,7 +3556,8 @@ a_vline() {
 expect_contains "before the patrol ack: the one line all three read says acked=no" \
   "|acked=no|" "$(a_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "before the patrol ack: the stop gate refuses" "2" "$ST"
+expect_eq "before the patrol ack: the stop gate judges the row open, the look taken (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "before the patrol ack: …its verdict on the look" "STOP ALLOWED" "$OUT"
 
 ( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" ack moot --by patrol --reason moot-and-gone ) >/dev/null 2>&1
 expect_contains "the one owner wrote the author and the evidence onto its own line" \
@@ -3552,6 +3569,7 @@ expect_contains "…while the contract itself is still UNMET, computed from the 
   "|state=UNMET|" "$(a_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "after the patrol ack: the stop gate passes, as it does for a human's" "0" "$ST"
+expect_absent "after the patrol ack: …discharged before any look" "STOP ALLOWED" "$OUT"
 OUT=$( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
 expect_contains "…and the stand-down puts it in the batch, as it does for a human's" \
   "1 row(s) have landed" "$OUT"
@@ -5567,7 +5585,8 @@ expect_contains "…and reads the working log filed under that session" \
 # paired negative first: resolution succeeding is not the ceremony being skipped.
 R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_AD_ADDR" \
               | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
-expect_eq "before any discharge the stop gate still refuses" "2" "$R_AD_ST"
+expect_eq "before any discharge the stop gate still takes its look (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$R_AD_ST"
+expect_contains "…and says what it saw" "STOP ALLOWED" "$R_AD_ST_OUT"
 expect_absent "…and never with the unresolved refusal the field hit" \
   "no agent in THIS session's metadata" "$R_AD_ST_OUT"
 
@@ -5576,6 +5595,7 @@ R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_
               | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
 expect_eq "the stop gate accepts the address adopt printed, discharged by the ack" \
   "0" "$R_AD_ST"
+expect_absent "…before any look" "STOP ALLOWED" "$R_AD_ST_OUT"
 
 # THE CONSTRUCTION ITSELF, at all three sites: eight characters of a session id, cut the
 # same way. A site that starts spelling it differently — a full uuid, a different width —
@@ -7276,10 +7296,10 @@ expect_absent "…and does not report it as absent from the live set" "not live"
 # set is one it has standing to guard, so it BLOCKS the stop and names the observation to
 # take; a target it does not find is not this gate's business and PASSES THROUGH. Those two
 # words ARE the resolution, and they are what moves when the parser does.
-expect_contains "the stop guard has standing over the same target: it blocks the stop" \
-  "bionic: " "$LA_G0"
-expect_contains "…naming that very target in the observation it asks for" \
-  "stop-check.sh la-target" "$LA_G0"
+expect_contains "the stop guard has standing over the same target: it takes its look and allows the stop, its verdict recorded (wave-31 T32)" \
+  "STOP ALLOWED — 'la-target' (" "$LA_G0"
+expect_contains "…naming the working log its look read" \
+  "working log:" "$LA_G0"
 expect_absent "…rather than passing it through as no agent of this session" \
   "PASSTHROUGH" "$LA_G0"
 # THE LIVE READING IS A SENTENCE IN THE REFUSAL, and it is the half that moves. Standing is
@@ -7355,8 +7375,8 @@ la_norm_m() {
 }
 expect_eq "mutated parser: the stop guard's whole channel is unchanged — it reads no parser" \
   "$(la_norm_m "$LA_G0")" "$(la_norm_m "$LA_G1")"
-expect_contains "…and that channel is a real refusal, not an empty string (not vacuous)" \
-  "bionic: " "$LA_G1"
+expect_contains "…and that channel is a real verdict, not an empty string (not vacuous)" \
+  "STOP ALLOWED" "$LA_G1"
 
 # --- LA.4 restored: the shipped tree answers as it did before the mutation ------
 # The observation prints an AGE, which moves by a second between two runs of the same
@@ -7392,7 +7412,7 @@ LA_G5=$(la_guard la-target)
 expect_absent "idle open seat: the dispatch wall stops counting it" "open=1" "$LA_B5"
 expect_absent "…and prints no writers refusal at all" "writers:" "$LA_B5"
 expect_contains "…while the SAME answer still gives the stop guard standing over its target" \
-  "bionic: " "$LA_G5"
+  "STOP ALLOWED" "$LA_G5"
 expect_absent "…which it does not call absent from the recorded answer" "is not live" "$LA_G5"
 
 # MUTATION A — the parser writes `running` into every row. The status the BUDGET reads is
@@ -7430,10 +7450,10 @@ la_norm() {
 }
 expect_eq "…while the guard's whole channel is otherwise unchanged — presence never moved" \
   "$(la_norm "$LA_G5")" "$(la_norm "$LA_G5A")"
-expect_contains "…and the normaliser really did rewrite that path (not comparing raw text)" \
-  "TREE/stop-check.sh" "$(la_norm "$LA_G5")"
-expect_contains "…and that channel is a real refusal, not an empty string (not vacuous)" \
-  "bionic: " "$LA_G5A"
+expect_contains "…and the normaliser really did fold the age (not comparing raw text)" \
+  "last write: AGE" "$(la_norm "$LA_G5")"
+expect_contains "…and that channel is a real verdict, not an empty string (not vacuous)" \
+  "STOP ALLOWED" "$LA_G5A"
 
 # MUTATION B — the parser drops every row that is not `running`. This is the WRONG place to
 # put S16's rule: filtering in the reader rather than in the budget. Now the GUARD moves and
@@ -7477,7 +7497,7 @@ LA_TREE="$BIONIC_HOOKS_DIR/.."
 # cannot reach it — which is the same finding stated as an immunity rather than a loss.
 expect_absent "mutation B: the guard does not lose the finished agent it exists to stop" \
   "names no teammate 'la-target'" "$LA_G5B"
-expect_contains "…it still has standing and still refuses on the evidence" "bionic: " "$LA_G5B"
+expect_contains "…it still has standing and still judges on the evidence" "STOP ALLOWED" "$LA_G5B"
 expect_absent "…a sentence the shipped parser never said of the same target" \
   "names no teammate" "$LA_G5"
 expect_absent "mutation B: the wall's count is unchanged — it read idle as closed already" \
@@ -12348,13 +12368,12 @@ jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidec
 cgt_agent toolu_01CGTA1 W-R1
 CGT_OUT="$(cgt_stop false)"
 expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
-# THE TWO DUTIES READ ONE LAUNCHED SET (wave-28 T38; REQ-13, D30). The task-entry duty binds a launch
-# to a plan row through the fill duty's own `_ST_LAUNCHED`, the set the recorder writes as `launched=`:
-# the same Stop's ledger line and its entry clause name the same launch. fails-when: they disagree.
+# THE LAUNCHED SET IS THE RECORDER'S (wave-28 T38; REQ-13, D30). The task-entry duty that also read it
+# went at wave-31 T32 (D6, AC-6.5): the Stop the recorder's line names is refused for the fill alone.
 expect_contains "CG-entry the recorder's line for turn A's first Stop records the launch W-R1" "|launched=W-R1|" \
   "$(head -n 1 "$CGT_R/.bionic/docs/record/cgturn/fill-ledger.log" 2>/dev/null)"
-expect_contains "CG-entry …and the same Stop's entry duty owes that launch's row, R1, folded into the fill's detail" \
-  "tasks: dispatched R1 this turn, 0 of 1 task entries set in progress" "$CGT_OUT"
+expect_absent "CG-entry …and the same Stop owes no task entry for it (the refusal above is the fill's)" \
+  "task entries set in progress" "$CGT_OUT"
 jq -nc '{type:"user",isMeta:true,uuid:"u-cgt-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$CGT_TR"
 cgt_agent toolu_01CGTA2 W-R2
 cgt_stop true >/dev/null
@@ -12907,7 +12926,7 @@ expect_contains "AM4 …reads the contract from the roster, by the id" "Contract
 expect_contains "AM4 …and publishes a non-empty target on its machine line" "|target=$AM_ID|" "$AM_OBS"
 expect_contains "AM4 …sourcing the deliverable from the roster" "|deliverable_source=roster|" "$AM_OBS"
 AM_SG=$(mk_stop_payload "$AM_SID" "$AM_TR4" "$AM_R4" "$AM_ID" | bash "$PARTY_SG" 2>&1); AM_SG_RC=$?
-expect_eq "AM4 the stop wall typed by the id refuses a stop of a working agent" "2" "$AM_SG_RC"
+expect_eq "AM4 the stop wall typed by the id allows a stop of a working agent, its verdict recorded (wave-31 T32)" "0" "$AM_SG_RC"
 expect_contains "AM4 …naming the agent by its non-empty id" "'$AM_ID' ($AM_ID) is ALIVE" "$AM_SG"
 expect_contains "AM4 …and printing the roster's contract for it" "deliverable:  pending — $AM_R4/never-yet.md" "$AM_SG"
 # THE TICK, over the same roster with the agent's log aged past its cadence. Its reading is
@@ -13196,13 +13215,13 @@ printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(ub_iso 1)" "$SID_A" > "
 } > "$UB3/tick.jsonl"
 ub_mode "$UB3" "$SID_A" "$UB3_P" fallback
 ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
-expect_eq "UB.3 duties gate, fallback: a write naming <p> discharges nothing — held as under none" \
-  "block" "$(ub_decision)"
-expect_contains "UB.3 …for the task-list refresh" "task-list refresh" "$UB_OUT"
+# The tick turn owes no task-list refresh under any mode (wave-31 T32; D6, AC-6.5): fallback, the
+# turn ends and the advisory is printed once (ub_collect); bound-open, it ends as well.
+expect_eq "UB.3 duties gate, fallback: the tick turn is not refused, as under none" "" "$(ub_decision)"
 ub_collect duties-gate "$UB_ERR" "$UB3_P"
 ub_mode "$UB3" "$SID_A" "$UB3_P" bound
 ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
-expect_eq "UB.3 duties gate, bound-open (control): the same write discharges the refresh" "" "$(ub_decision)"
+expect_eq "UB.3 duties gate, bound-open (control): the same turn ends" "" "$(ub_decision)"
 
 # ---- UB.4 fill gate ----------------------------------------------------------
 UB4=$(new_repo "ub-fill"); UB4_P="$UB4/.bionic/docs/plans/epic-99/run.md"
@@ -13734,7 +13753,7 @@ FSEV_D="$PRF_D/sev"; mkdir -p "$FSEV_D"
 FSEV_CELLS="S1:on S1:off S2:on S2:off S3:on S3:off S4:on S4:off"
 fsev_lib() { . "$PRF_LIB/proof.sh" && proof_priority "$1" "$2"; }
 fsev_parsed() {  # <S> <reach> -> the findings parser's priority column for a one-finding record
-  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 1\nfinding: 1 %s %s - a cell\nunsure: 1 placeholder\n' "$1" "$2" > "$FSEV_D/rec.md"
+  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 1\nfinding: 1 %s %s x.sh:1 a cell\nshown: 1 bash x.sh\n' "$1" "$2" > "$FSEV_D/rec.md"
   ( . "$PRF_LIB/proof.sh" && proof_findings "$FSEV_D/rec.md" ) | awk -F'\t' '{ print $5 }'
 }
 fsev_scale() {  # <scale file> <S> <reach> -> the cell the scale's table states, as fix, defer or note
@@ -13763,15 +13782,12 @@ expect_eq "FACT-SEV mutation: the doctored scale still reads (S1 on is fix)" "fi
 expect_ne "FACT-SEV mutation: …and its S2 off is no longer the library's, so the agreement row goes red" \
   "$(fsev_lib S2 off)" "$(fsev_scale "$FSEV_D/severity.mut.md" S2 off)"
 
-# §FACT-CHECK (wave-28 T41; REQ-8 AC-8.6, D33). AN OPEN CHECK HOLDS THE STEP, AND EVERY READER ASKS ONE
-# READER WHICH CHECKS ARE OPEN. A `check:` line is open while it carries neither ` settled=` nor
-# ` refuted` after its quoted title; lib/proof.sh `proof_checks_open` is the one reader (the owed lines
-# whose priority is `check`, rated through `proof_finding_rating`). The step's two readers ask it: the
-# judge (`facts_state`, which the tick's integrate row and close-out read too) holds each as a
-# `finding-check<TAB><record>#<n><TAB>open` line, and `current 8` (session-poker.sh) refuses naming
-# each. Pinned here: on one plan the judge holds exactly the open set the reader gives (a settled, a
-# refuted and a fenced line are not open; a title holding the words is); `current 8`'s refusal reads it
-# by that name; and a doctored judge that no longer asks the reader splits from it.
+# §FACT-FINAL (wave-31 T32; REQ-6 AC-6.3, D6; was §FACT-CHECK, wave-28 T41). A READER'S RATING IS
+# FINAL, AND NO READER OF A STEP ASKS ABOUT A CHECK. Wave-28 T41 held the step on each open `check:`
+# line through one reader, `proof_checks_open`, asked by the judge (`facts_state`) and by `current 8`.
+# T32 deleted the reader and both of its callers. Pinned here: on a plan carrying open, settled, refuted
+# and fenced `check:` lines, the judge answers each fact it owes and prints no `finding-check` line;
+# the library defines no reader of checks; and `current 8`'s code names none.
 FCHK_D="$PRF_D/fchk"; mkdir -p "$FCHK_D"
 git -C "$FCHK_D" init -q 2>/dev/null; git -C "$FCHK_D" -c user.name=f -c user.email=f@x commit -q --allow-empty -m init 2>/dev/null
 FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
@@ -13780,30 +13796,19 @@ FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
   printf 'check: record/w/a.md#1 S3 off "open, no settlement"\n'
   printf 'check: record/w/a.md#2 S1 on "settled" settled=S2:off by=record/w/c.md\n'
   printf 'check: record/w/a.md#3 S2 on "refuted" refuted by=record/w/c.md\n'
-  printf 'check: record/w/a.md#4 S4 on "a title that says refuted and settled=S1:on"\n'
   printf '\n```\ncheck: record/w/a.md#5 S1 on "fenced"\n```\n'
 } > "$FCHK_D/plan.md"
-fchk_open() { bash -c '. "$1" && proof_checks_open "$2"' _ "${2:-$PRF_LIB/proof.sh}" "$1" 2>/dev/null | awk '{ printf "%s%s", (n++ ? " " : ""), $1 }'; }
-fchk_judge() { bash -c '. "$1" && facts_state "$2" "$3"' _ "${2:-$PRF_LIB/proof.sh}" "$1" "$FCHK_H" 2>/dev/null \
-  | awk -F'\t' '$1 == "finding-check" && $NF == "open" { printf "%s%s", (n++ ? " " : ""), $2 }'; }
-expect_regex "FACT-CHECK precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
-expect_eq "FACT-CHECK the one reader gives the open checks: no settlement, and a title holding the words" \
-  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md")"
-expect_eq "FACT-CHECK the judge holds exactly that set" "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md")"
-expect_eq "FACT-CHECK …and says so by its exit" "1" \
-  "$(bash -c '. "$1" && facts_state "$2" "$3" >/dev/null 2>&1; echo $?' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H")"
-expect_eq "FACT-CHECK current 8's refusal asks the same reader, by name" "1" \
-  "$(/usr/bin/grep -c 'proof_checks_open "\$PV_PLAN"' "$PRF_POKER")"
-FCHK_NEEDLE='done < <(proof_checks_open "$plan" 2>/dev/null)'
-FCHK_MUT="$FCHK_D/proof.sh.mut"
-anchor "$PRF_LIB/proof.sh" "$FCHK_NEEDLE" 1
-FCHK_N="$FCHK_NEEDLE" awk 'BEGIN { n = ENVIRON["FCHK_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "done < /dev/null" substr($0, i + length(n)); print }' \
-  "$PRF_LIB/proof.sh" > "$FCHK_MUT"
-cp "$PRF_LIB/run.sh" "$PRF_LIB/roots.sh" "$FCHK_D/" 2>/dev/null
-expect_eq "FACT-CHECK mutation: the doctored judge still gives the reader's set through its own reader (it runs)" \
-  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md" "$FCHK_MUT")"
-expect_ne "FACT-CHECK mutation: …and, no longer asking it, holds nothing, so the agreement row goes red" \
-  "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md" "$FCHK_MUT")"
+FCHK_OUT="$(bash -c '. "$1" && facts_state "$2" "$3"' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H" 2>/dev/null)"
+expect_regex "FACT-FINAL precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
+expect_contains "FACT-FINAL the judge answers the facts the plan owes (the extractor reads real output: the floor line)" \
+  "floor" "$FCHK_OUT"
+expect_absent "FACT-FINAL …and holds no check, open or not: no finding-check line" "finding-check" "$FCHK_OUT"
+expect_eq "FACT-FINAL the library defines the judge, and no reader of checks (proof_checks_open, _proof_check_state)" "1|0|0" \
+  "$(bash -c '. "$1"; declare -F facts_state >/dev/null && printf 1 || printf 0; printf "|"; declare -F proof_checks_open >/dev/null && printf 1 || printf 0; printf "|"; declare -F _proof_check_state >/dev/null && printf 1 || printf 0' _ "$PRF_LIB/proof.sh" 2>/dev/null)"
+expect_eq "FACT-FINAL current 8's code asks the judge (the extractor reads the verb's file)…" "1" \
+  "$(/usr/bin/grep -c '^cur8_judge() {' "$PRF_POKER")"
+expect_eq "FACT-FINAL …and no reader of checks, by name" "0" \
+  "$(/usr/bin/grep -c 'proof_checks_open\|cur8_checks' "$PRF_POKER")"
 
 # ============================================================
 section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"

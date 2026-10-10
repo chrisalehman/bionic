@@ -562,8 +562,8 @@ S9_D="$(s9_fixture)"
 roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000001 deliverable= \
   >> "$S9_D/.bionic/tmp/roster-$SID.state"
 S9_TX="$(mktemp)"; s9_transcript "$S9_TX" w9-T13
-# THE TURN SETS ITS ENTRY IN PROGRESS (wave-28 T38, A-T38.5): otherwise the task-entry clause
-# names T13 as dispatched in this refusal's detail, and 9e reads every T13 as "named as missed".
+# THE TURN SETS ITS ENTRY IN PROGRESS, as the doctrine's dispatch turn does (wave-28 T38, A-T38.5).
+# Since wave-31 T32 (D6) no wall counts it; the record is kept so the transcript stays that turn.
 jq -nc '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-09-19T00:00:05Z",
   message:{role:"assistant",content:[{type:"tool_use",id:"toolu_s9up",name:"TaskUpdate",input:{taskId:"1",status:"in_progress"}}]}}' >> "$S9_TX"
 s7_fire "$S9_D" "$S9_TX"
@@ -1273,9 +1273,11 @@ section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floo
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # THE WALL'S READY SET IS THE TICK'S (lib/units.sh), so the rule that integrate's `proof:floor`
-# stands only while proof_state answers covered or bounded reaches the turn end too. The fixture
-# is a git repository on `wave/99-fl` with no `impact-command:`, so any change past the floor
-# proof is unbounded; writers=1 and no writer open, so a ready integrate row is a fillable gap.
+# stands only while proof_state answers covered reaches the turn end too. The floor is a record of
+# runs (wave-31 T25; D3): one whole run at the proof's head, and every later commit proved by a run
+# recorded at it. The fixture is a git repository on `wave/99-fl` with no run recorded past the
+# proof, so a change landed after it is uncovered; writers=1 and no writer open, so a ready
+# integrate row is a fillable gap.
 # Each proof line is written by lib/proof.sh's own writer pair at the head the checkout is at.
 # A new file lands past the proof: the wall demands nothing, while the tick says why the row
 # waits. The differential records a floor proof at the new head: the same wall refuses the turn,
@@ -1327,10 +1329,10 @@ export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
 FL_TX="$(mktemp)"
 FL_D="$(fl_fixture)"
 expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
-  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at" "$(fo_tick "$FL_D")"
+  "poker: WAIT T3 — proof:floor: the floor is one whole run plus each later commit proved; past the proof at" "$(fo_tick "$FL_D")"
 sd_turn "$FL_TX" u-fl-1
 s7_fire "$FL_D" "$FL_TX"
-expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
+expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is uncovered" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
 fl_prove "$FL_D" floor
 fl_read "$FL_D" adversarial piece; fl_read "$FL_D" structure piece
@@ -1731,207 +1733,9 @@ fire "$D"
 expect_absent "FR5 …and the same diff now lands: no landing refusal" "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
 expect_status "FR5 …and the stop is admitted" "0" "$STOP_RC"
 
-# ─────────────────────────────────────────────────────────────────────────────
-section "RW: the reconcile refusal says the plan moved when that is why it is owed (wave-27 T37; review pass 8 F2)"
-
-# The tick writes `reconcile=step4` or `reconcile=grew` beside `duty=owed` when the reconcile is
-# owed because the plan moved (tests/session-poker-3.test.sh §RECON-WHY). A tick turn with no
-# task-list refresh is refused as before; the refusal now gives that cause and names the rebuild,
-# and with no cause in the digest, or a digest older than the turn's tick, it is today's words.
-# The fixture is LH's at the proof's own head, so no fill is owed, and its transcript is s7's
-# tick turn with the TaskList call taken out. SYNTHESIZED, as LH.
-rw_digest() {  # <project> <reconcile cause or ""> [at]
-  { printf 'patrol-digest/v1\nprompt_version=5\ndigest=1-1\nsince=2026-10-04T00:00:00Z\ndecision=QUIET\nduty=owed\nat=%s\nhead=%s\n' \
-      "${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$LH_A"
-    [ -z "$2" ] || printf 'reconcile=%s\n' "$2"
-  } > "$1/.bionic/tmp/tick-digest-$SID.state"
-}
-require_helpers rw_digest
-RW_D="$(lh_fixture)"
-RW_TX="$(mktemp)"
-s7_transcript "$RW_TX" "poker: RECONCILE"
-/usr/bin/grep -v '"name":"TaskList"' "$RW_TX" > "$RW_TX.n" && mv "$RW_TX.n" "$RW_TX"
-expect_eq "RW0 precondition: the turn holds no TaskList call" "0" "$(/usr/bin/grep -c '"TaskList"' "$RW_TX" | tr -d ' ')"
-rw_digest "$RW_D" ""
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW1 control: with no cause the refusal is today's" \
-  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
-rw_digest "$RW_D" step4
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW2 the plan moved into Step 4: the refusal says so" "the plan moved from approval into Step 4" "$(reason_of)"
-expect_contains "RW2b …and names the rebuild" "rebuild the task list in execution order: delete every pending entry and recreate them" "$(reason_of)"
-expect_absent "RW2c …and not the status-changed cause" "when a ## Tasks status or the ready set changed" "$(reason_of)"
-rw_digest "$RW_D" grew
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW3 the table grew: the refusal says so" "the ## Tasks table grew" "$(reason_of)"
-expect_contains "RW3b …and names the rebuild" "delete the pending entries after the new row and recreate them" "$(reason_of)"
-rw_digest "$RW_D" step4 2026-09-18T00:00:00Z
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW4 a digest older than the turn's tick gives no cause: the refusal is today's" \
-  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
-
-# THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1). The wall's predicate is a
-# TaskList call or a write naming the plan; the delete-and-recreate it asked for (TaskUpdate,
-# TaskCreate) is never counted, so the fix read `rebuild it` and dropped the one act that
-# discharges it. Now the fix names TaskList first and the detail keeps "or a plan-ledger write",
-# the fallback where the task tools are absent. The first line keeps to 100 columns.
-# fails-when: a plan-moved refusal's fix leaves out TaskList, or its detail the plan-ledger write.
-rw_first() { reason_of | head -1; }
-require_helpers rw_first
-for rw_cause in step4 grew; do
-  rw_digest "$RW_D" "$rw_cause"
-  s7_fire "$RW_D" "$RW_TX"
-  expect_contains "RW5 ($rw_cause) the first line's fix names TaskList first" \
-    "no task-list refresh since this tick (TaskList, rebuild it, then stop again)" "$(rw_first)"
-  expect_contains "RW5b ($rw_cause) …the detail keeps the plan-ledger write" "or a plan-ledger write" "$(reason_of)"
-  expect_true "RW5c ($rw_cause) …and the first line keeps to 100 columns" \
-    test "$(rw_first | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
-done
-
-# ─────────────────────────────────────────────────────────────────────────────
-section "TASK-ENTRY: a turn that dispatched a row sets its task entry in progress (wave-28 T38; REQ-13 AC-13.1, AC-13.3; D30)"
-
-# The task-list duty gains a second trigger: a turn that launched an agent bound to a plan row owes
-# as many task updates setting `in_progress` as rows it dispatched. Fewer refuses once, under the
-# duty wall's existing refusal; a turn that dispatched no row owes nothing, tick or no tick. The
-# wall counts; it cannot tell which entry belongs to which row.
-# THE RECORDS ARE THE HARNESS'S SHAPES, copied off a real session's transcript (2026-10-06): an
-# Agent tool_use with `input:{description,name,prompt,subagent_type}`, a TaskUpdate tool_use with
-# `input:{taskId,status}` on an assistant record carrying `agentId:null`, and its result record
-# `"Updated task #<n> status"` with `toolUseResult.statusChange`. FIXTURE: §9's plan with both rows
-# `active` (the launch recorder's mark), so no fill is owed and the duty is measured alone.
-# fails-when: a turn that dispatched two rows and set one entry in progress ends unrefused, or a
-# turn with no row dispatch is refused.
-te_fixture() {  # [pending] -> project dir; §9's plan, T13 and T14 active unless `pending`
-  local d
-  d="$(s9_fixture)"
-  [ "${1:-}" = pending ] || sed -i.bak 's/| pending | — |$/| active | — |/' \
-    "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
-  printf '%s' "$d"
-}
-te_transcript() {  # <file> <plain|tick> <item>... — A:<name> launch · U:<n>:<status> update · UE:<n> refused update · L TaskList
-  local f="$1" kind="$2" it n s; shift 2
-  if [ "$kind" = tick ]; then
-    jq -nc --arg t "bionic-patrol session=${SID:0:8} — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row." \
-      '{type:"user",isMeta:true,isSidechain:false,userType:"external",uuid:"u-te",timestamp:"2026-10-06T00:00:00Z",message:{role:"user",content:$t}}' > "$f"
-  else
-    jq -nc '{type:"user",isSidechain:false,userType:"external",uuid:"u-te",timestamp:"2026-10-06T00:00:00Z",message:{role:"user",content:"dispatch what is ready"}}' > "$f"
-  fi
-  for it in "$@"; do
-    case "$it" in
-      A:*) n="${it#A:}"
-        jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:01Z",
-          message:{role:"assistant",content:[{type:"tool_use",id:("toolu_" + $n),name:"Agent",
-            input:{description:"task",name:$n,prompt:("Task " + $n),subagent_type:"bionic:implementor"}}]}}' >> "$f"
-        jq -nc --arg n "$n" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:02Z",
-          message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_" + $n),content:[{type:"text",text:"Spawned successfully."}]}]},
-          toolUseResult:{status:"teammate_spawned"}}' >> "$f" ;;
-      U:*|UE:*) n="${it#*:}"; s="${n#*:}"; n="${n%%:*}"; [ "$s" != "$n" ] || s=in_progress
-        jq -nc --arg n "$n" --arg s "$s" '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:03Z",
-          message:{role:"assistant",content:[{type:"tool_use",id:("toolu_up" + $n + $s),name:"TaskUpdate",input:{taskId:$n,status:$s}}]}}' >> "$f"
-        if [ "${it%%:*}" = UE ]; then
-          jq -nc --arg n "$n" --arg s "$s" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:04Z",
-            message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_up" + $n + $s),is_error:true,content:("Task #" + $n + " not found")}]}}' >> "$f"
-        else
-          jq -nc --arg n "$n" --arg s "$s" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:04Z",
-            message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_up" + $n + $s),content:("Updated task #" + $n + " status")}]},
-            toolUseResult:{success:true,taskId:$n,updatedFields:["status"],statusChange:{from:"pending",to:$s}}}' >> "$f"
-        fi ;;
-      L) jq -nc '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:05Z",
-           message:{role:"assistant",content:[{type:"tool_use",id:"toolu_tl",name:"TaskList",input:{}}]}}' >> "$f" ;;
-    esac
-  done
-}
-te_roster() {  # <project> <name>... — the intended rows the dispatch wall writes at launch
-  local d="$1" n; shift
-  for n in "$@"; do
-    roster_row_fixture status=intended session="$SID" name="$n" agent_id="ate${n//[^A-Za-z0-9]/}0000000001" deliverable= \
-      tool_use_id="toolu_$n" >> "$d/.bionic/tmp/roster-$SID.state"
-  done
-}
-te_turn() {  # <project> <plain|tick> <stop_hook_active> <item>... -> fires the Stop
-  local d="$1" kind="$2" sha="$3" tx; shift 3
-  tx="$(mktemp)"; te_transcript "$tx" "$kind" "$@"
-  fire "$d" Stop "$sha" "$(jq -nc --arg t "$tx" '{transcript_path:$t}')"
-}
-te_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
-te_first() { printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' || true; }
-require_helpers te_fixture te_transcript te_roster te_turn te_decision te_first
-TE_TEXT2="tasks: dispatched T13 T14 this turn, 1 of 2 task entries set in progress — set each dispatched row's entry in progress"
-TE_LINE="bionic: stop refused — a dispatched row's entry is not in progress (TaskUpdate each to in_progress)"
-TE_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$TE_RING"
-export BIONIC_PRESSURE_RING="$TE_RING" BIONIC_NOW_EPOCH=1700000000
-
-TE_TX="$(mktemp)"; te_transcript "$TE_TX" plain A:w9-T13 A:w9-T14 U:1:in_progress
-expect_eq "TE0 precondition: the planted turn holds two Agent launches" "2" \
-  "$(jq -r 'select(.type=="assistant") | .message.content[] | select(.name=="Agent") | .id' "$TE_TX" | wc -l | tr -d ' ')"
-expect_eq "TE0b precondition: …and one TaskUpdate setting in_progress, as the harness writes it" "1:in_progress" \
-  "$(jq -r 'select(.type=="assistant") | .message.content[] | select(.name=="TaskUpdate") | "\(.input.taskId):\(.input.status)"' "$TE_TX")"
-
-# AC-13.1: dispatched 2, entered 1 -> refused once, with the interface's text; entered 2 -> ends.
-TE_D="$(te_fixture)"; te_roster "$TE_D" w9-T13 w9-T14
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress
-expect_eq "TE1 dispatched two rows, set one entry in progress: the turn is refused" "block" "$(te_decision)"
-expect_contains "TE1b …with the interface's text, naming the rows and the act" "$TE_TEXT2" "$(reason_of)"
-expect_eq "TE1c …under the duty wall's refusal line, the only one" "$TE_LINE" "$(te_first)"
-expect_eq "TE1d …one refusal, not two" "1" "$(refusal_lines)"
-expect_true "TE1e …and the line keeps to 100 columns" test "$(printf '%s' "$(te_first)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
-te_turn "$TE_D" plain true A:w9-T13 A:w9-T14 U:1:in_progress
-expect_eq "TE2 refused ONCE: the re-entered Stop of the same turn ends" "" "$(te_decision)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:2:in_progress
-expect_eq "TE3 dispatched two, set two in progress: the turn ends" "" "$(te_decision)"
-expect_absent "TE3b …and no refusal names the task entries" "tasks: dispatched" "$(reason_of)$STOP_ERR"
-
-# What counts as an entry: a task number, once; the in_progress status; an update that took.
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:1:in_progress
-expect_contains "TE4 the same task set twice is one entry: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:2:completed
-expect_contains "TE5 an update to completed is no entry set in progress: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress UE:2
-expect_contains "TE6 a TaskUpdate the harness refused set nothing: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T13-r2 U:1:in_progress
-expect_eq "TE7 two launches of one row are one row dispatched: one entry answers it" "" "$(te_decision)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T13-r2
-expect_contains "TE7b …and with none set it is refused, naming the row once" \
-  "tasks: dispatched T13 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
-
-# AC-13.3: a turn that dispatched no row owes nothing — no launch, or a launch bound to no row.
-te_roster "$TE_D" researcher-a
-te_turn "$TE_D" plain false A:researcher-a
-expect_eq "TE8 a launch whose name binds no plan row owes nothing" "" "$(te_decision)"
-te_turn "$TE_D" plain false A:researcher-a A:w9-T14
-expect_contains "TE8b …beside a bound launch, only the bound row is owed" \
-  "tasks: dispatched T14 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
-te_turn "$TE_D" plain false
-expect_eq "TE9 a turn with no launch owes nothing" "" "$(te_decision)"
-
-# With a tick in the turn: the tick's refresh duty and the entry duty are one wall, one refusal.
-te_turn "$TE_D" tick false L
-expect_eq "TE10 a tick turn that refreshed and dispatched nothing ends" "" "$(te_decision)"
-te_turn "$TE_D" tick false L A:w9-T13 A:w9-T14
-expect_eq "TE11 a tick turn that refreshed and dispatched two rows with no entry set is refused" "block" "$(te_decision)"
-expect_eq "TE11b …under the entry duty's line" "$TE_LINE" "$(te_first)"
-expect_contains "TE11c …0 of 2" "tasks: dispatched T13 T14 this turn, 0 of 2 task entries set in progress" "$(reason_of)"
-te_turn "$TE_D" tick false L A:w9-T13 A:w9-T14 U:7:in_progress U:8:in_progress
-expect_eq "TE12 a tick turn that refreshed and set both entries ends" "" "$(te_decision)"
-te_turn "$TE_D" tick false A:w9-T13 A:w9-T14
-expect_contains "TE13 a tick turn missing both duties is refused once, the refresh's line first" \
-  "no task-list refresh since this tick" "$(te_first)"
-expect_eq "TE13b …one refusal" "1" "$(refusal_lines)"
-expect_contains "TE13c …its detail keeps the refresh paragraph" "Patrol duties incomplete: no task-list refresh" "$(reason_of)"
-expect_contains "TE13d …and adds the entries" "tasks: dispatched T13 T14 this turn, 0 of 2 task entries set in progress" "$(reason_of)"
-te_turn "$TE_D" tick false
-expect_contains "TE14 a tick turn with no refresh and no launch is refused as before" \
-  "no task-list refresh since this tick" "$(te_first)"
-expect_absent "TE14b …and owes no entries" "tasks: dispatched" "$(reason_of)"
-
-# Beside the fill: the FILL keeps its line, the entries ride in its detail.
-TE_DP="$(te_fixture pending)"; te_roster "$TE_DP" w9-T13
-te_turn "$TE_DP" plain false A:w9-T13
-expect_contains "TE15 a half-filled gap keeps the fill's line" "launched 1 of 2" "$(te_first)"
-expect_contains "TE15b …and its detail names the entry owed" \
-  "tasks: dispatched T13 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
-unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+# THE RW AND TASK-ENTRY SECTIONS WENT AT WAVE-31 T32 (D6, REQ-6 AC-6.5). They pinned the task-list
+# refresh a tick turn owed and the task entry a dispatch turn owed; both duties are deleted, and
+# tests/patrol-duties-gate.test.sh drives the turns that no longer owe them.
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "§LAUNCHED: a launch whose row carries row= counts as that row's launch (wave-28 T7; REQ-3 AC-3.4, D17)"

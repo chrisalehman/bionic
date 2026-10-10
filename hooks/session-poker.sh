@@ -28,7 +28,6 @@
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's declared regression in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
-#     bash <plugin-root>/hooks/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle a check a finding owes, on its check: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
@@ -368,8 +367,9 @@ PATROL_ARMED_SUFFIX=".armed"
 
 # THE TICK DIGEST AND THE PROMPT VERSION (wave-24 T7, REQ-4; D4, D5; ADR-041). The digest file
 # holds what one tick carries to the next: a hash of what the tick decided (no timestamp enters
-# it), when that answer was first given, the decision band, whether the turn owes the task-list
-# duty (`duty=owed|none`, read by the stop wall's collector), and the Patrol prompt version
+# it), when that answer was first given, the decision band, whether the turn's task list is behind
+# (`duty=owed|none`: advice since wave-31 T32, D6, which deleted the stop wall's task-list duty;
+# no wall reads it), and the Patrol prompt version
 # `arm` recorded. A tick whose hash matches the file's prints one line. The prompt version is
 # bumped whenever the prompt's wording changes what a tick turn is asked to do, so a Patrol armed
 # under an older one is told to re-arm.
@@ -460,7 +460,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run .bionic/config.yaml's floor: command in the working branch's checkout; write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>   settle the check an unsure finding owes, on its check: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
@@ -801,25 +800,6 @@ case "$VERB" in
     esac
     case "${1##*#}" in *[!0123456789]*) usage "finding-stated: '$1' is not <record>#<n>." ;; esac
     FS_ID="$1"; FS_RAW="$2"
-    ;;
-  # THREE FORMS (wave-28 T41; D33): the finding, as its check: line names it (`<record>#<n>`), how the
-  # check came out — `settled <S> <reach>`, `refuted` or `unsettled` — and the check record. A fourth
-  # form, a missing operand or an id of another shape is the usage error; whether the rating is on the
-  # scale, the line exists and the record is a third agent's are the verb's own refusals (1).
-  finding-check)
-    FC_USAGE="finding-check takes <record>#<n> (as its check: line names it), then settled <S> <reach>, refuted or unsettled, then the check record."
-    case "${2:-}" in
-      settled) [ $# -eq 5 ] || usage "$FC_USAGE"; FC_S="$3"; FC_R="$4"; FC_REC="$5" ;;
-      refuted|unsettled) [ $# -eq 3 ] || usage "$FC_USAGE"; FC_S=""; FC_R=""; FC_REC="$3" ;;
-      *) usage "$FC_USAGE" ;;
-    esac
-    case "$1" in
-      *?#[0123456789]*) : ;;
-      *) usage "finding-check: '$1' is not <record>#<n>." ;;
-    esac
-    case "${1##*#}" in *[!0123456789]*) usage "finding-check: '$1' is not <record>#<n>." ;; esac
-    [ -n "$FC_REC" ] || usage "$FC_USAGE"
-    FC_ID="$1"; FC_HOW="$2"
     ;;
   # FOUR OPERANDS (wave-28 T42; D34): the finding (`<record>#<n>`), where it goes (defer or fix), the
   # user's words as typed and why. A missing or blank operand, another direction or an id of another
@@ -2192,7 +2172,7 @@ TICK_WAIT
 }
 
 # THE PRIORITY A RECORD NEVER STATES (wave-28 T15; D19, AC-8.3). A rated reading writes the plan's
-# `deferred:` and `check:` lines at registration; the tick prints each such finding once, with the
+# `deferred:` lines at registration; the tick prints each such finding once, with the
 # priority the table gives its rating (lib/proof.sh `proof_findings_owed`, which `release-check`
 # prints too):
 #
@@ -3576,62 +3556,6 @@ cur8_judge() {
   printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
-}
-
-# cur8_checks -> returns when no check a finding owes is open on the bound plan; otherwise refuses
-# `current 8`, exit 1, the plan unchanged, naming each open check (wave-28 T41; REQ-8 AC-8.6, D33).
-# The open set is lib/proof.sh `proof_checks_open`'s, the one reader the judge (`facts_state`) asks too.
-cur8_checks() {
-  local open
-  if ! { declare -F proof_checks_open >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F proof_checks_open >/dev/null 2>&1; then
-    die "REFUSED — current: 8 is admitted only when no check a finding owes is open, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-    exit 2
-  fi
-  open="$(proof_checks_open "$PV_PLAN" 2>/dev/null)"
-  [ -n "$open" ] || return 0
-  die "REFUSED — current: 8 waits on each check a finding owes; these check: lines are open (no settled=, no refuted):"
-  printf '%s\n' "$open" | awk '{ id = $1; s = $2; r = $3; t = $0; sub(/^[^"]*/, "", t); print "- " id " " s " " r " " t }' >&2
-  die "Settle each with finding-check <record>#<n> <settled <S> <reach>|refuted|unsettled> <check record>, a record written by an agent that is neither the finding's reviewer nor the code's writer; the plan is unchanged."
-  exit 1
-}
-
-# fc_code_writers <plan> <repo> <path> -> " <name> <name> … " (padded with a space each side; empty when no row
-# writes the path): every agent that has carried a `## Tasks` row whose Files cover <path> (wave-28 T8; A-orch-159,
-# A-orch-161; `finding-check`'s test of "the code's writer"). THE ROW IS FOUND BY THE DISPATCH GRAMMAR'S MATCHER
-# (lib/units.sh `cell_covers`: an exact path, a directory, a glob, a path suffix), the one the scheduler asks, and
-# the agents are every one the row has carried, since a row's second instance replaces the first in its Tasks cell
-# and the code it landed may be the first's: (1) the row's Tasks `agent` cell, (2) the name in its dispatch-ledger
-# agent cell (`<role> (<name>)`; without the parentheses the first word), (3) each roster row of the project, any
-# session's, labelled `row=<id>` (the `Row:` a brief carries, lib/roster.sh), by its `name=`.
-fc_code_writers() {
-  local plan="$1" repo="$2" path="$3" rows ids names rf
-  rows="$(units_rows "$plan" 2>/dev/null | awk -F'\t' -v p="$path" "$(_units_files_awk)"'
-    $1 != "" && cell_covers($9, p) { a = $5; sub(/[ (].*$/, "", a); print $1 "\t" a }')"
-  [ -n "$rows" ] || return 0
-  ids="$(printf '%s\n' "$rows" | cut -f1 | tr '\n' ' ')"
-  names="$(printf '%s\n' "$rows" | awk -F'\t' '$2 != "" && $2 != "—" { print $2 }')"
-  names="$names
-$(IDS="$ids" awk '
-    BEGIN { n = split(ENVIRON["IDS"], a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { inled = ($0 ~ /^##[[:space:]]+Dispatch ledger/); next }
-    inled && /^\|/ {
-      split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
-      if (!(id in want)) next
-      cell = c[3]; gsub(/^[ \t]+|[ \t]+$/, "", cell)
-      if (match(cell, /\([^)]*\)/)) { cell = substr(cell, RSTART + 1, RLENGTH - 2); m = split(cell, w, /[ ,]+/); for (i = 1; i <= m; i++) if (w[i] != "") print w[i] }
-      else { sub(/[ \t].*$/, "", cell); if (cell != "" && cell != "—") print cell }
-    }' "$plan")"
-  for rf in "$repo/.bionic/tmp"/roster-*.state; do
-    [ -f "$rf" ] && [ ! -L "$rf" ] || continue
-    names="$names
-$(IDS="$ids" awk "$_ROSTER_OPEN_AWK"'
-      BEGIN { n = split(ENVIRON["IDS"], a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
-      index($0, "roster-state/") == 1 { r = _roster_kv($0, "row"); if (r != "" && (r in want)) print _roster_kv($0, "name") }' "$rf" 2>/dev/null)"
-  done
-  printf ' %s ' "$(printf '%s\n' "$names" | /usr/bin/grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')"
 }
 
 # mr_tier_keys -> one `<tier><TAB><keys>` line for each of T0..T4, the keys walls.sh `keys_for_tier` names (wave-30
@@ -7540,7 +7464,6 @@ $HO_AGENTS"; fi
     PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
     case "$PV_KEY" in
       8|8a|8b)
-        cur8_checks
         cur8_judge
         PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     esac
@@ -7858,13 +7781,12 @@ PF_OTHER_LIST
       die "REFUSED — $(clean_whole "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
-    # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `check:`, `deferred:` or `moved:`
-    # line is keyed `<record>#<n>`, so a second pass registered on the path of a first would inherit its
-    # settlement (a refuted #1 drops the new pass's S1) or its move. A reading's path whose proof line
-    # names another head is refused, and so is one such a line already names (lib/proof.sh
-    # `proof_bind_awk` is the one predicate, T72); a relaunched reader re-registering an unsettled record
-    # (the same head, no such line) is admitted as before. The key stays unique by construction, so
-    # `_proof_check_state` is unchanged.
+    # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A `deferred:` or `moved:` line is
+    # keyed `<record>#<n>`, so a second pass registered on the path of a first would inherit its deferral
+    # or its move (a #1 moved to defer defers the new pass's fix). A reading's path whose proof line names
+    # another head is refused, and so is one such a line already names (lib/proof.sh `proof_bind_awk` is
+    # the one predicate, T72); a relaunched reader re-registering a record no such line names (the same
+    # head) is admitted as before. A `check:` line binds nothing (wave-31 T32; D6).
     if [ -n "$PF_QUESTION" ]; then
       PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"
       case "$PF_PASS" in
@@ -7872,7 +7794,7 @@ PF_OTHER_LIST
           die "REFUSED — $(clean "$PF_REL") is already registered at $(clean "${PF_PASS#head }" | cut -c1-12), not ${PF_HEAD:0:12}: write the pass to a new record path. The plan is unchanged."
           exit 1 ;;
         settled\ *)
-          die "REFUSED — $(clean "$PF_REL") at ${PF_HEAD:0:12} already has a check:, deferred: or moved: line: write the pass to a new record path. The plan is unchanged."
+          die "REFUSED — $(clean "$PF_REL") at ${PF_HEAD:0:12} already has a deferred: or moved: line: write the pass to a new record path. The plan is unchanged."
           exit 1 ;;
       esac
     fi
@@ -7911,9 +7833,9 @@ PF_OTHER_LIST
       fi
     fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
-    # A RATED READING WRITES ITS PLAN LINES (wave-28 T15; D19, D21, D33): one `deferred:` line per
-    # finding the table defers and one `check:` line per unsure finding, right after its proof line,
-    # in the same write (lib/proof.sh `proof_finding_lines`).
+    # A RATED READING WRITES ITS PLAN LINES (wave-28 T15; D19, D21): one `deferred:` line per finding
+    # the table defers, right after its proof line, in the same write (lib/proof.sh
+    # `proof_finding_lines`). No `check:` line: a reader's rating is final (wave-31 T32; D6).
     PF_PLANL=""
     [ "$PF_SEV" = 1 ] && PF_PLANL="$(proof_finding_lines "$PF_REL" "$(proof_findings "$PF_REAL")")"
     [ -z "$PF_PLANL" ] || PF_LINE="$PF_LINE
@@ -8067,128 +7989,6 @@ $PF_PLANL"
     exit 0
     ;;
 
-  # THE CHECK A FINDING OWES, SETTLED (wave-28 T41; REQ-8 AC-8.6, D33). An `unsure:` finding wrote
-  # `check: <record>#<n> <S> <reach> "<title>"` at registration (lib/proof.sh `proof_finding_lines`);
-  # this appends how its check came out to that line, in place, through the plan transaction:
-  #
-  #   settled <S> <reach>   ` settled=<S>:<reach> by=<check record>`    the rating every read now takes
-  #   refuted               ` refuted by=<check record>`                 every read drops the finding
-  #   unsettled             ` settled=<its own S>:<reach> by=<…>`        the rating it was registered at stands
-  #
-  # A settlement the table defers writes the finding's `deferred:` line as well (placed by
-  # `proof_add_line`), unless the plan already holds one. THE CHECK IS A THIRD AGENT'S: the check record
-  # is a file under record/ of the docs root, as a proof's evidence is, and its flush-left
-  # `written-by: <name>` line names who wrote it — never the reader on the finding's proof line, nor the
-  # agent of a `## Tasks` row whose Files hold the file the finding names. A check is settled once.
-  finding-check)
-    if ! { declare -F proof_findings_owed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F _proof_check_state >/dev/null 2>&1; then
-      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-      exit 2
-    fi
-    if [ "$FC_HOW" = settled ] && ! proof_priority "$FC_S" "$FC_R" >/dev/null; then
-      die "REFUSED — '$(clean "$FC_S $FC_R")' is no rating on the severity scale: write <S1|S2|S3|S4> <on|off>. The plan is unchanged."
-      exit 1
-    fi
-    plan_verb_open finding-check
-    FC_LINE="$(awk -v id="$FC_ID" '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && /^check:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { print; exit } }' "$PV_PLAN")"
-    if [ -z "$FC_LINE" ]; then
-      die "REFUSED — $PV_PLAN carries no check: line for $(clean "$FC_ID") under ## SDLC State, and only a check a finding owes is settled; the plan is unchanged."
-      exit 1
-    fi
-    FC_ST="$(_proof_check_state "$PV_PLAN" "$FC_ID")"
-    if [ "$FC_ST" != open ]; then
-      die "REFUSED — the check of $(clean "$FC_ID") is already $FC_ST on its check: line, and a check is settled once; the plan is unchanged."
-      exit 1
-    fi
-    FC_DOCS="$(docs_root "$PV_REPO")"
-    FC_DOCS="$(cd "$FC_DOCS" 2>/dev/null && pwd -P)"
-    case "$FC_REC" in
-      *[[:space:]]*|*'|'*)
-        die "REFUSED — the check record '$(clean "$FC_REC")' carries a space, a tab, a line break or a |, which the check: line cannot hold; rename the file. The plan is unchanged."
-        exit 1 ;;
-    esac
-    case "$FC_REC" in /*) FC_ABS="$FC_REC" ;; *) FC_ABS="$FC_DOCS/$FC_REC" ;; esac
-    if [ -L "$FC_ABS" ]; then
-      die "REFUSED — the check record $(clean "$FC_REC") is a symbolic link, and what it points at can change after the settlement; copy it into the record. The plan is unchanged."
-      exit 1
-    fi
-    FC_REAL=""
-    [ -n "$FC_DOCS" ] && [ -f "$FC_ABS" ] && FC_REAL="$(cd "$(dirname "$FC_ABS")" 2>/dev/null && pwd -P)/$(basename "$FC_ABS")"
-    if [ -z "$FC_REAL" ]; then
-      die "REFUSED — the check record $(clean "$FC_REC") does not exist (read as $(clean "$FC_ABS")); write the check's record first, then settle it. The plan is unchanged."
-      exit 1
-    fi
-    case "$FC_REAL" in
-      "$FC_DOCS"/record/*) FC_REL="${FC_REAL#"$FC_DOCS"/}" ;;
-      *)
-        die "REFUSED — the check record $(clean "$FC_REC") is not under record/ of the docs root ($FC_DOCS/record/); a check is settled by a record. The plan is unchanged."
-        exit 1 ;;
-    esac
-    FC_BY="$(awk '/^written-by:[ \t]/ { v = $0; sub(/^written-by:[ \t]+/, "", v); sub(/[ \t].*$/, "", v); print v; exit }' "$FC_REAL" 2>/dev/null)"
-    if [ -z "$FC_BY" ]; then
-      die "REFUSED — the check record $(clean "$FC_REL") does not say who wrote it; write written-by: <the checking agent's roster name> in it, an agent that is neither the finding's reviewer nor the code's writer. The plan is unchanged."
-      exit 1
-    fi
-    # The reviewer: the reader its proof line names (the last one citing the record). The writers: the
-    # agent of each `## Tasks` row whose Files hold the file the finding names (`-` names none).
-    FC_RECD="${FC_ID%#*}"; FC_N="${FC_ID##*#}"
-    FC_READER="$(awk -v ev="$FC_RECD" '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && /^proved:[ \t]/ { e = ""; r = ""; m = split($0, f, /[ \t]+/)
-        for (i = 2; i <= m; i++) { if (f[i] == "evidence=" ev) e = 1; else if (f[i] ~ /^reader=/) r = substr(f[i], 8) }
-        if (e) who = r }
-      END { print who }' "$PV_PLAN")"
-    FC_PATH="$(proof_findings "$FC_DOCS/$FC_RECD" 2>/dev/null | awk -F'\t' -v n="$FC_N" '$1 == n { print $4; exit }')"
-    FC_PATH="${FC_PATH%:*}"; [ "$FC_PATH" != - ] || FC_PATH=""
-    FC_WRITERS=""
-    [ -z "$FC_PATH" ] || FC_WRITERS="$(fc_code_writers "$PV_PLAN" "$PV_REPO" "$FC_PATH")"
-    if [ -n "$FC_READER" ] && [ "$FC_BY" = "$FC_READER" ]; then
-      die "REFUSED — the check record $(clean "$FC_REL") was written by $(clean "$FC_BY"), the reader of $(clean "$FC_RECD"); a check is written by an agent that is neither the finding's reviewer nor the code's writer. The plan is unchanged."
-      exit 1
-    fi
-    case "$FC_WRITERS" in
-      *" $FC_BY "*)
-        die "REFUSED — the check record $(clean "$FC_REL") was written by $(clean "$FC_BY"), the agent of the ## Tasks row whose Files hold $(clean "$FC_PATH"); a check is written by an agent that is neither the finding's reviewer nor the code's writer. The plan is unchanged."
-        exit 1 ;;
-    esac
-    case "$FC_HOW" in
-      unsettled)
-        FC_S="$(printf '%s\n' "$FC_LINE" | awk '{ print $3 }')"; FC_R="$(printf '%s\n' "$FC_LINE" | awk '{ print $4 }')"
-        FC_TAIL=" settled=$FC_S:$FC_R by=$FC_REL" ;;
-      settled)   FC_TAIL=" settled=$FC_S:$FC_R by=$FC_REL" ;;
-      refuted)   FC_TAIL=" refuted by=$FC_REL" ;;
-    esac
-    FC_TAIL="$FC_TAIL" awk -v id="$FC_ID" '
-      /^[[:space:]]*```/ { fence = !fence; print; next }
-      fence { print; next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
-      insdlc && !done && /^check:[ \t]/ {
-        split($0, f, /[ \t]+/)
-        if (f[2] == id) { done = 1; l = $0; sub(/[ \t]+$/, "", l); print l ENVIRON["FC_TAIL"]; next }
-      }
-      { print }' "$PV_PLAN" > "$PV_NEW"
-    FC_DEF=""
-    if [ "$FC_HOW" != refuted ] && [ "$(proof_priority "$FC_S" "$FC_R")" = defer ] && ! deferral_line "$PV_PLAN" "$FC_ID" >/dev/null; then
-      FC_DEF="deferred: $FC_ID $FC_S $FC_R $(printf '%s\n' "$FC_LINE" | awk '{ if (match($0, /"[^"]*"/)) print substr($0, RSTART, RLENGTH); else print "\"\"" }')"
-      if ! proof_add_line "$PV_NEW" "$FC_DEF" > "$PV_NEW.2" 2>/dev/null || [ ! -s "$PV_NEW.2" ]; then
-        die "REFUSED — the deferred: line for $(clean "$FC_ID") could not be placed under ## SDLC State; the plan is unchanged."
-        exit 1
-      fi
-      mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    plan_verb_swap finding-check "the check of $FC_ID" writer
-    say "finding-check — $(clean "$FC_ID"):$(clean "$FC_TAIL") on its check: line of $PV_PLAN; dry-committed first."
-    [ -z "$FC_DEF" ] || say "finding-check — $(clean "$FC_DEF")"
-    exit 0
-    ;;
-
   # A MOVE IS THE USER'S PROVEN WORD (wave-28 T42; REQ-8 AC-8.9, D34). A registered finding — one whose
   # record a `proved:` line names as its evidence — is moved across the line, to defer or to fix, only
   # on words lib/said.sh `user_said` finds in a prompt the user typed in this session's transcript (a
@@ -8236,14 +8036,10 @@ $PF_PLANL"
       die "REFUSED — the reading $(clean "$FM_REC") holds no finding $FM_N (read as $(clean "$FM_DOCS/$FM_REC")); the plan is unchanged."
       exit 1
     fi
-    IFS='	' read -r _ FM_S FM_R _ _ _ _ FM_TITLE <<FM_FINDING
+    IFS='	' read -r _ FM_S FM_R _ _ _ FM_TITLE <<FM_FINDING
 $FM_F
 FM_FINDING
     set -- $(proof_finding_rating "$PV_PLAN" "$FM_ID" "$FM_S" "$FM_R")
-    if [ $# -lt 3 ]; then
-      die "REFUSED — $(clean "$FM_ID") was refuted by its check, so there is no finding to move; the plan is unchanged."
-      exit 1
-    fi
     FM_S="$1"; FM_R="$2"
     if [ "$FM_TO" = defer ] && [ "$FM_S" = S1 ]; then
       die "REFUSED — $(clean "$FM_ID") is rated S1 $FM_R, and an S1 is never deferred, whoever asks; the plan is unchanged."
@@ -9136,12 +8932,12 @@ $(run_groups "$RUN_PID")"
       printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     }
     # THE TASK LIST IS REBUILT AT PLAN APPROVAL (wave-27 T13; D20; steps/3.md). No hook reads a
-    # task list, so this line is the only wall the rule has: the duty is also owed when the
+    # task list, so this line is all the rule has (advice: no wall reads it since wave-31 T32): it is also owed when the
     # plan's `current:` was 3 at the last digest and is 4 now, or its row count has grown, and
     # it is owed on a QUIET tick too (a plan at approval has nothing open yet).
     # WHICH MOVE IT WAS (wave-27 T37; review pass 8 F2) is TICK_RECONCILE, `step4` or `grew`: the
-    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` so
-    # the turn-end wall's refusal gives the same cause. A move into Step 4 is named first when
+    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` (read by
+    # no wall since wave-31 T32; D6: the line is advice). A move into Step 4 is named first when
     # the table also grew: the rebuild it asks for covers the new rows.
     TICK_RECONCILE=""
     tick_plan_moved() {  # -> 0 when the digest's last reading of the plan is behind this one

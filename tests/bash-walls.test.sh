@@ -1941,10 +1941,10 @@ am_refused "19v5: bash session-poker.sh row-landed" \
 # verb, not its operands. The verb joins the existing arm's list; there is no second arm.
 am_refused "19v6: bash session-poker.sh share <n>" "bash $AM_POKER share 90"
 am_refused "19v7: bash session-poker.sh share, the bare form" "bash $AM_POKER share"
-# §ARM-A (finding-check) — wave-28 T41, REQ-8 AC-8.6, D33: a settlement re-rates a finding its reader
-# could not settle, so an agent that could write one could settle the check on its own code. The verb
-# joins the existing arm's list; there is no second arm.
-am_refused "19v8: bash session-poker.sh finding-check" \
+# §ARM-A (finding-check) — wave-28 T41 put the settle verb on the arm's list; wave-31 T32 (D6, AC-6.3)
+# deleted the verb, so its one token left the list: session-poker.sh answers it as an unknown verb, and
+# this arm has nothing of it to refuse.
+am_admitted "19v8: a subagent's bash session-poker.sh finding-check passes this arm: the verb is gone (T32)" \
   "bash $AM_POKER finding-check 'record/wave-01/r.md#1' refuted record/wave-01/c.md"
 # §ARM-A (finding-move) — wave-28 T42, REQ-8 AC-8.9, D34: a move carries a finding across the line on the
 # user's word, so an agent that could run it could defer a finding against its own code. The verb joins the
@@ -1988,8 +1988,6 @@ am_admitted "19j10: row-landed from the main thread" \
   "bash $AM_POKER row-landed T2 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z" ""
 am_admitted "19j11: share <n> from the main thread" "bash $AM_POKER share 90" ""
 am_admitted "19j12: share from the main thread" "bash $AM_POKER share" ""
-am_admitted "19j13: finding-check from the main thread" \
-  "bash $AM_POKER finding-check 'record/wave-01/r.md#1' refuted record/wave-01/c.md" ""
 am_admitted "19j14: finding-move from the main thread" \
   "bash $AM_POKER finding-move 'record/wave-01/r.md#1' defer 'later' 'the docs pass'" ""
 am_admitted "19j15: task-split from the main thread" \
@@ -2009,7 +2007,7 @@ expect_contains "19x0b …and the last verb added, release-check" "release-check
 expect_contains "19x0c …and the verb T17 added, finding-stated" "finding-stated" "$AM_VERBS"
 expect_contains "19x0d …and the verb T6 added, row-landed" "row-landed" "$AM_VERBS"
 expect_contains "19x0e …and the verb T10 added, share" " share " " $AM_VERBS "
-expect_contains "19x0f …and the verb T41 added, finding-check" "finding-check" "$AM_VERBS"
+expect_absent "19x0f …and not the verb T41 added and wave-31 T32 deleted, finding-check" "finding-check" "$AM_VERBS"
 expect_contains "19x0g …and the verb T42 added, finding-move" "finding-move" "$AM_VERBS"
 # THE PLAN VERBS WAVE-30 ADDED (T14 matrix-render and discharge, T15 handoff, T17 task-split; A-orch-50,
 # A-orch-52): each writes the bound plan, so each is the main thread's. Their refusal lines measure 99, 95,
