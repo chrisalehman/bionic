@@ -3472,4 +3472,36 @@ poke "$RRS2" regression no 'CI runs it'
 expect_eq "RS-4g a session with no bound plan is refused (exit 1)" "1" "$RC"
 expect_contains "RS-4h …saying it has no bound open run" "has no bound open run" "$OUT"
 
+# ============================================================
+section "§WAIT-CEILING: wait on a detached run the gate did not admit prints the shim's one line, then FINISHED rc=75 (wave-31 T12; REQ-9 AC-9.4; D10, A-orch-51)"
+# ============================================================
+#
+# A detached run not admitted inside its bound ends 75 (tests/booked.test.sh §DETACH-CEILING proves the
+# shim writes the log, `<log>.rc` and the roster row's run_rc this reads). `wait` reports it: the log's
+# last `booked: the gate did not admit…` line first, so the caller reads the wait and the command to run
+# again, then the FINISHED line, whose text is the one session-poker-2's 56f and 56j pin. A run that
+# ended any other way prints no such line.
+#
+# FIXTURE FIDELITY. The run record is planted in the shape the shim leaves (log, `.rc`, the row's
+# run_log= and run_rc=, from the production roster writer); the shim is not run here, its half is
+# booked.test.sh's. The log of the control run carries the same words as OUTPUT of a command that ended 3,
+# so a reader that took any line holding the words, and not the run's own, would print it.
+RWC="$(make_repo wait-ceiling)"; new_roster "$RWC"
+WC_RD="$RWC/.bionic/tmp/runs"; mkdir -p "$WC_RD"
+WC_LINE='booked: the gate did not admit this command within 3s; request 7 keeps its turn — run again: bash tests/k.test.sh'
+printf '%s\n' "$WC_LINE" 'rc=75' > "$WC_RD/w-ceil-k.test.sh.log"; printf '75\n' > "$WC_RD/w-ceil-k.test.sh.log.rc"
+printf 'earlier output\n%s\nrc=3\n' "$WC_LINE" > "$WC_RD/w-other-k.test.sh.log"; printf '3\n' > "$WC_RD/w-other-k.test.sh.log.rc"
+roster_row_fixture session="$SID" name=w-ceil agent_id=a-w-ceil subagent_type=implementor \
+  run_log="$WC_RD/w-ceil-k.test.sh.log" run_cmd='bash tests/k.test.sh' run_rc=75 >> "$(roster_of "$RWC")"
+roster_row_fixture session="$SID" name=w-other agent_id=a-w-other subagent_type=implementor \
+  run_log="$WC_RD/w-other-k.test.sh.log" run_cmd='bash tests/k.test.sh' run_rc=3 >> "$(roster_of "$RWC")"
+poke "$RWC" wait w-ceil
+expect_eq "WC-1 wait on a run that ended 75 exits 75" "75" "$RC"
+expect_eq "WC-1b …printing the shim's line, then the FINISHED line, in that order and nothing else" \
+  "poker: $WC_LINE|poker: FINISHED w-ceil run=w-ceil-k.test.sh rc=75 log=$WC_RD/w-ceil-k.test.sh.log" \
+  "$(printf '%s' "$OUT" | tr '\n' '|' | sed 's/|$//')"
+poke "$RWC" wait w-other
+expect_eq "WC-2 a run that ended 3, whose output holds the same words, prints only its FINISHED line (beside WC-1b)" \
+  "3|poker: FINISHED w-other run=w-other-k.test.sh rc=3 log=$WC_RD/w-other-k.test.sh.log" "$RC|$OUT"
+
 finish
