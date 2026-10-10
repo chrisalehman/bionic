@@ -522,6 +522,9 @@ section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest,
 # beside its `held w-1` count, and its Stop pass beside §41b's Stop refusal on the same drive.
 
 S41_CFG="$(fake_config_dir s41-quiet)"
+# THE SHARE IS FIXTURE DATA (wave-31 T36; A-T36-3). 41h drives a 90% reading against the share, and the
+# gate's default is now 92 (D8), so the section pins 80 as §40 does and as the prelude's dir does.
+mkdir -p "$S41_CFG/bionic"; printf '80\n' > "$S41_CFG/bionic/share"
 export CLAUDE_CONFIG_DIR="$S41_CFG"
 S41_TR="$S41_CFG/projects/-fixture-project/$SID.jsonl"
 orders_of() { printf '%s/.bionic/tmp/stop-orders-%s.state' "$1" "${2:-$SID}"; }
