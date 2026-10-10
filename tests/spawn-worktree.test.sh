@@ -1147,67 +1147,6 @@ landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
 expect_eq "…and the working branch moved to the landed commit" \
   "$(git -C "$RDB" rev-parse wave/x)" "$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
 
-section "§WARM: a landing warms the impact cache of the checkout it moved, in the background (wave-30 T35; A-orch-79)"
-#
-# The dispatch wall derives the suite set with the project's impact command, under a bound; the
-# graph that command builds is cached per tree state (tests/lib/impact.sh, "the cache: one graph per
-# tree state"), and a landing changes the tree state, so the first dispatch after it paid the cold
-# build — within a second of the bound at idle, past it under load. The publish now runs the impact
-# command once over tests/run.sh in the checkout it fast-forwarded, in the background, its output
-# under the record's line/ directory. The real impact.sh is pointed at the world (BIONIC_IMPACT_ROOT)
-# with its cache in the world's .bionic/tmp, so the key the pin reads is the one impact.sh computes.
-rd_warm_log() {  # <world> -> the warm's log, waiting up to 60 s for its rc= line
-  local w="$1" f="" i=0
-  while [ "$i" -lt 300 ]; do
-    f="$(ls "$w"/.bionic/docs/record/wave-x/line/T1-impact-warm-*.log 2>/dev/null | head -1)"
-    [ -n "$f" ] && /usr/bin/grep -q '^rc=' "$f" 2>/dev/null && break
-    i=$((i + 1)); sleep 0.2
-  done
-  printf '%s' "$f"
-}
-rd_cache_n() { ls "$1/.bionic/tmp/impact-cache" 2>/dev/null | /usr/bin/grep -vc '^\.tmp\.' ; }
-RDW="$(rd_world)"
-RDW_IMPACT="env BIONIC_IMPACT_ROOT=$RDW BIONIC_IMPACT_CACHE_DIR=$RDW/.bionic/tmp/impact-cache bash ${REPO}/tests/lib/impact.sh"
-printf 'impact-command: %s\n' "$RDW_IMPACT" > "$RDW/.bionic/config.yaml"
-world_cost a.test.sh 5 0.5 1
-expect_eq "WM.0 precondition: no graph is cached before the landing" "0" "$(rd_cache_n "$RDW")"
-rd_ready "$RDW/.worktrees/T1" --within 900
-expect_eq "WM.1 a landing with an impact command configured: LANDED (exit 0)" "0" "$RD_RC"
-expect_match "WM.1 …printing LANDED" "LANDED T1 *" "$RD_OUT"
-RDW_LOG="$(rd_warm_log "$RDW")"
-expect_nonempty "WM.2 the warm left its log under the record's line/ directory" "$RDW_LOG"
-expect_contains "WM.2 …and the impact command answered (rc=0)" "rc=0" "$(cat "$RDW_LOG" 2>/dev/null)"
-expect_eq "WM.3 one graph is cached after the landing" "1" "$(rd_cache_n "$RDW")"
-# KEYED TO THE LANDED STATE: the same command asked again at the head the landing made answers from
-# that graph — a hit copies the cached file and writes nothing, a miss would mv a fresh one into
-# place, so the file's inode is the witness.
-RDW_KEY="$(ls "$RDW/.bionic/tmp/impact-cache" | /usr/bin/grep -v '^\.tmp\.' | head -1)"
-RDW_INO="$(ls -i "$RDW/.bionic/tmp/impact-cache/$RDW_KEY" 2>/dev/null | awk '{print $1}')"
-expect_nonempty "WM.4 (the cached graph's inode is readable)" "$RDW_INO"
-( cd "$RDW" && $RDW_IMPACT tests/run.sh >/dev/null 2>&1 )
-expect_eq "WM.4 the next ask at the landed head is a cache HIT (the graph is the landed state's)" \
-  "$RDW_INO" "$(ls -i "$RDW/.bionic/tmp/impact-cache/$RDW_KEY" 2>/dev/null | awk '{print $1}')"
-expect_eq "WM.4 …and wrote no second key" "1" "$(rd_cache_n "$RDW")"
-# THE WITNESS CAN SEE A MISS: a tree state the warm never saw keys a second graph.
-printf 'later\n' > "$RDW/later.txt"
-( cd "$RDW" && $RDW_IMPACT tests/run.sh >/dev/null 2>&1 )
-expect_eq "WM.5 control: a tree state after the warm misses and keys a second graph" "2" "$(rd_cache_n "$RDW")"
-rm -f "$RDW/later.txt"
-
-# NEVER BLOCKING THE LANDING: an impact command that takes a minute does not hold `ready`.
-RDS="$(rd_world)"
-printf '#!/bin/bash\necho $$ > "%s/.bionic/tmp/warm.pid"\nsleep 60\ntouch "%s/.bionic/tmp/warm.done"\n' \
-  "$RDS" "$RDS" > "$RDS/.bionic/slow-impact.sh"
-printf 'impact-command: bash %s/.bionic/slow-impact.sh\n' "$RDS" > "$RDS/.bionic/config.yaml"
-rd_ready "$RDS/.worktrees/T1" --within 900
-expect_eq "WM.6 a landing whose impact command takes 60 s: LANDED (exit 0)" "0" "$RD_RC"
-RDS_I=0; while [ ! -s "$RDS/.bionic/tmp/warm.pid" ] && [ "$RDS_I" -lt 50 ]; do RDS_I=$((RDS_I + 1)); sleep 0.2; done
-expect_nonempty "WM.6 …the warm was started" "$(cat "$RDS/.bionic/tmp/warm.pid" 2>/dev/null)"
-expect_eq "WM.6 …and ready returned without waiting for it" "absent" \
-  "$([ -e "$RDS/.bionic/tmp/warm.done" ] && echo present || echo absent)"
-RDS_PID="$(cat "$RDS/.bionic/tmp/warm.pid" 2>/dev/null)"
-[ -z "$RDS_PID" ] || { pkill -P "$RDS_PID" 2>/dev/null; kill "$RDS_PID" 2>/dev/null; }
-
 section "§STAMP-DETACHED: a detached run's stamp, written with nobody waiting, is accepted by the stamp reader and ready lands over it (wave-30 T8; D6, AC-3.6)"
 #
 # `booked.sh --detach` runs ask → run → end → stamp in a session of its own, so the stamp is

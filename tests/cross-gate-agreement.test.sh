@@ -3152,8 +3152,8 @@ expect_eq "the manifest: EVERY hook entry carries a timeout key — none unbound
   "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
 # TEN IS THE CEILING FOR EVERY HOOK BUT ONE (wave-14 T35, ledger D1; wave-30 T35). The dispatch
 # wall is registered at 25 because its own inner bound is 20 and an inner bound must sit
-# STRICTLY under its registration or it can never fire (§L.4c below, which pins that pair
-# against lib/bounds.sh). The exception is named here by the hook it belongs to rather
+# STRICTLY under its registration or it can never fire (§L.4c below, which pins its deadline
+# against the registration). The exception is named here by the hook it belongs to rather
 # than counted away, so a SECOND hook drifting off the ceiling fails this row.
 expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10, the dispatch wall excepted" "0" \
   "$(jq '[.hooks | to_entries[] | .value[] | .hooks[]
@@ -3187,68 +3187,27 @@ expect_eq "the manifest renders exactly the two timeout values the fleet has, re
 # and refuses on its own terms. The manifest above registers that same hook at an OUTER
 # timeout. If the inner bound is not STRICTLY under the outer registration it can never
 # fire — the CLI kills the hook first, a killed hook exits 124 rather than the 2 a refusal
-# spells, and the refusal that was in flight silently becomes a PASS. That is the one
-# failure both of bionic's bounded gates exist to prevent.
+# spells, and the refusal that was in flight silently becomes a PASS.
 #
 # AND IT IS INVISIBLE TO EVERY SUITE THAT DRIVES A GATE DIRECTLY. A suite has no CLI
 # timeout, so the two numbers can disagree for a whole release while each side's own
-# section stays green: tests/dispatch-preflight.test.sh drove a 20 s bound to a refusal
-# hundreds of times under a 10 s registration that would have killed it on the machine
-# (A-T6.5, four reviewers). The gap is only visible where the two FILES meet, which is
-# here.
+# section stays green. The gap is only visible where the two FILES meet, which is here.
+# The landing sweep's derivation bound went with the map (wave-31 T23, REQ-4 AC-4.2): the
+# sweep waits on nothing now, so the dispatch wall's deadline is the one inner bound left.
 #
 # BOTH SIDES ARE READ, NEITHER IS TRANSCRIBED. The registration comes out of
 # hooks/hooks.json by the hook's own COMMAND PATH — never by array index, because the
 # order of entries in a JSON array is nobody's contract and an index silently reads a
-# different hook the moment one is inserted above it. The bound comes out of
-# payload/scripts/lib/bounds.sh by SOURCING it, because what a consumer gets is what
-# sourcing gives it. A wave that moves either number without the other turns this red.
-L4C_BOUNDS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
+# different hook the moment one is inserted above it.
 
 # l4c_registration <hook filename> -> the timeout(s) hooks.json registers that command at,
 # one per line, de-duplicated. Matched on the path segment so `stop.sh` cannot match
-# `stop-guard.sh`, and every entry naming the hook is read — the landing sweep is
-# registered twice (Stop straight, SubagentStop behind the guard) and BOTH registrations
-# bound the same inner number, so a wave that moved one of them alone must fail here.
+# `stop-guard.sh`, and every entry naming the hook is read.
 l4c_registration() {
   jq -r --arg h "$1" '[.hooks | to_entries[] | .value[] | .hooks[]
       | select(.command | test("/" + ($h | gsub("\\."; "\\.")) + "( |$)"))
       | .timeout] | unique | .[]' "$HOOKS_JSON_SRC" 2>/dev/null
 }
-
-# l4c_bound <bounds file> <variable> -> the value sourcing that file gives that name.
-l4c_bound() {
-  bash -c '. "$1" 2>/dev/null; eval "printf %s \"\${$2:-}\""' _ "$1" "$2" 2>/dev/null
-}
-
-# l4c_verdict <bounds file> <variable> <registration> -> `under` or `NOT under`.
-# STRICTLY under: a bound EQUAL to the registration is the failure, not the boundary case.
-# The hook needs the difference to spend on everything it does that is not waiting.
-l4c_verdict() {
-  local _v; _v="$(l4c_bound "$1" "$2")"
-  if [ -n "$_v" ] && [ -n "$3" ] && [ "$_v" -lt "$3" ] 2>/dev/null; then
-    printf 'under'
-  else
-    printf 'NOT under'
-  fi
-}
-
-for _l4c_pair in "stop.sh|LG_IMPACT_BOUND_S|the landing sweep"; do
-  _l4c_hook="${_l4c_pair%%|*}"
-  _l4c_rest="${_l4c_pair#*|}"
-  _l4c_var="${_l4c_rest%%|*}"
-  _l4c_who="${_l4c_rest#*|}"
-  _l4c_regs="$(l4c_registration "$_l4c_hook")"
-  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | /usr/bin/grep -c .)"
-  expect_eq "L.4c hooks/hooks.json registers ${_l4c_hook} at ONE timeout value, however many events name it" \
-    "1" "$_l4c_reg"
-  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | head -1)"
-  _l4c_val="$(l4c_bound "$L4C_BOUNDS" "$_l4c_var")"
-  expect_nonempty "L.4c …and lib/bounds.sh answers for ${_l4c_var} (not vacuous: both sides were read)" \
-    "$_l4c_val"
-  expect_eq "L.4c ${_l4c_who}: ${_l4c_var}=${_l4c_val}s sits strictly under ${_l4c_hook}'s ${_l4c_reg}s registration, margin $(( ${_l4c_reg:-0} - ${_l4c_val:-0} ))s" \
-    "under" "$(l4c_verdict "$L4C_BOUNDS" "$_l4c_var" "$_l4c_reg")"
-done
 
 # THE DISPATCH WALL'S OWN DEADLINE (wave-30 T35). DP_DEADLINE_S in hooks/dispatch-preflight.sh
 # bounds the whole hook, strictly under its registration; the derivation bound that once sat
@@ -3257,17 +3216,6 @@ L4C_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "${BIONIC_HOOKS
 expect_nonempty "L.4c the dispatch wall names its own deadline (not vacuous: read from the hook)" "$L4C_DEADLINE"
 expect_eq "L.4c …and the deadline strictly under the registration ($(l4c_registration dispatch-preflight.sh | head -1)s)" \
   "under" "$([ -n "$L4C_DEADLINE" ] && [ "$L4C_DEADLINE" -lt "$(l4c_registration dispatch-preflight.sh | head -1)" ] 2>/dev/null && echo under || echo 'NOT under')"
-
-# NOT VACUOUS: a bounds.sh whose inner numbers sit exactly AT their registrations must be
-# judged `NOT under` by the same derivation the rows above ran. At the registration is the
-# real shape of the defect — a bound of 20 under a registration of 10 is only its loudest
-# form — so that is what the mutant carries.
-anchor -E "$L4C_BOUNDS" '^LG_IMPACT_BOUND_S=[0-9]+$' 1
-DOCTORED_L4C="$SANDBOX/bounds-at-the-registration.sh"
-sed -e "s/^LG_IMPACT_BOUND_S=[0-9]*$/LG_IMPACT_BOUND_S=$(l4c_registration stop.sh | head -1)/" \
-    "$L4C_BOUNDS" > "$DOCTORED_L4C"
-expect_eq "L.4c …and a bounds.sh carrying the sweep's bound AT its registration reads NOT under, so the row above discriminates" \
-  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" LG_IMPACT_BOUND_S "$(l4c_registration stop.sh | head -1)")"
 
 # hooks/agent-context-guard.sh runs the wall behind it only for a payload carrying a
 # top-level agent_id in a session that has a roster on disk. It fronted four entries,
@@ -9722,11 +9670,11 @@ expect_eq "S13.5 the guard reads the key the wall writes" "0" \
 # --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
 #
 # ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
-# row -> worktree mapping (never re-derived). The dispatch side reads no `impact-command` key
-# any more (wave-31 T2, REQ-4 AC-4.2): S18.3 pins that half.
-# The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff, the
-# shared mapping and the impact-command read all moved into payload/scripts/lib/stop.sh
-# with the rest of the sweep. One owner still, at a new address.
+# row -> worktree mapping (never re-derived). Neither side reads an `impact-command` key any
+# more (wave-31 T2 the dispatch side, T23 the landing side; REQ-4 AC-4.2): S18.3 pins both.
+# The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff and the
+# shared mapping moved into payload/scripts/lib/stop.sh with the rest of the sweep. One owner
+# still, at a new address.
 S18_LG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 
@@ -9827,30 +9775,22 @@ expect_nonempty "S18.2 hooks/stop.sh declares a BIONIC_LIB_WANT line at all" "$S
 expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
   "$(printf '%s' " $S18_WANT " | /usr/bin/grep -c ' worktree\.sh ')"
 
-# --- §S18.3 the dispatch side reads no impact-command key (wave-31 T2, REQ-4 AC-4.2) ---
-# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The root variable is `BIONIC_ROOT` in
-# both hooks now, and a byte-exact literal naming the OLD one is a pin that breaks on a
-# rename while saying nothing about the property. The property is that the two hooks ask
-# ONE key through ONE call shape, so each hook's own call line is derived and the two are
-# compared to each other — which is a stronger statement than either literal was, and one
-# no rename can falsify.
-#
-# THE DISPATCH SIDE'S CALL IS IN THE CONTRACT GRAMMAR NOW (wave-20 T6; REQ-4, Δ10), where it is
-# asked of the root the door passes in rather than of the hook's `BIONIC_ROOT`. The root is
-# which tree, not which key, so both lines are compared with the root argument read as `<root>`:
-# the property is still one key, one default, one call shape.
-s18_impact_call() {  # <file> -> the impact-command call, root argument abstracted
-  /usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$1" \
-    | sed 's/^config_value "[^"]*"/config_value <root>/' | sort -u
+# --- §S18.3 no reader of the map's key, on either side (wave-31 T2, T23; REQ-4 AC-4.2) ---
+# The map is deleted: a brief names its suites, so neither the dispatch wall nor the landing
+# path asks `impact-command:` for any. ONE EXTRACTOR, a `config_value` read of a named key in
+# either spelling (quoted or bare), proved on a read that stays — the landing's release-check —
+# before it is asked for the deleted key's reads. proof.sh's floor read is T25's (D3) and is
+# not counted here.
+s18_config_reads() {  # <file> <key> -> how many lines read that key through config_value
+  /usr/bin/grep -cE "config_value .*[[:space:]]\"?$2\"?[[:space:]]+\"\"" "$1" 2>/dev/null | tr -d ' '
 }
-S18_LG_IMPACT=$(s18_impact_call "$S18_LG")
-expect_eq "S18.3 lib/stop.sh reads impact-command exactly once" "1" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | tr -d ' ')"
-expect_nonempty "S18.3 …and the call is findable at all (the pin is not comparing air)" "$S18_LG_IMPACT"
-expect_eq "S18.3 the contract grammar the dispatch wall calls reads it nowhere" "0" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_HOOK" | tr -d ' ')"
-expect_eq "S18.3 …and neither does the dispatch wall itself" "0" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | tr -d ' ')"
+expect_eq "S18.3 the extractor finds the landing's release-check read (not comparing air)" "1" \
+  "$(s18_config_reads "${S18_WT_LIB_DIR}/worktree.sh" release-check)"
+for _s18_f in "$S18_LG" "${S18_WT_LIB_DIR}/line.sh" "${S18_WT_LIB_DIR}/worktree.sh" \
+              "$BIONIC_HOOKS_DIR/session-poker.sh" "$S13_HOOK" "$S13_DP"; do
+  expect_eq "S18.3 …and ${_s18_f##*/} reads impact-command nowhere" "0" \
+    "$(s18_config_reads "$_s18_f" impact-command)"
+done
 # ============================================================
 section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7, D7)"
 # ============================================================
