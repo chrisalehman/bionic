@@ -6662,9 +6662,9 @@ EOF
     # dispatch wall will read it: a cell the lift reads as no path — a template slot, a bare
     # word — is refused now, in the grammar's words, rather than forty minutes later at the
     # dispatch of a row nobody can fix from the table. `—` is the table's "none" and declares
-    # nothing to judge. TWO FACTS ARE THE REPOSITORY'S, NOT THE CELL'S: no configured impact
-    # command, and one that overran its bound. A dispatch answers either with a `Suites:`
-    # line, which the plan row has no column for, so here they are notes and the row goes in.
+    # nothing to judge. ONE FACT IS THE BRIEF'S, NOT THE CELL'S: a `Files:` line alone names
+    # no suite. A dispatch answers it with a `Suites:` or `Re-executes:` line, which the plan
+    # row has no column for, so here it is a note and the row goes in.
     case "$TA_FILES" in
       ''|'—'|'-') : ;;
       *)
@@ -6679,8 +6679,8 @@ EOF
         while IFS= read -r TA_FACT; do
           [ -n "$TA_FACT" ] || continue
           case "$TA_FACT" in
-            'no impact command is configured here'|'the impact command did not answer')
-              note "$TA_FACT — a dispatch of $TA_ID whose brief carries only this Files: line will need a Suites: line" ;;
+            'Files: alone names no suite')
+              note "$TA_FACT — a dispatch of $TA_ID will need a Suites: or Re-executes: line" ;;
             *) TA_CELL_FACTS="${TA_CELL_FACTS}${TA_FACT}"$'\n' ;;
           esac
         done <<EOF
