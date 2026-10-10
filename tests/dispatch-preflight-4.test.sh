@@ -2988,8 +2988,8 @@ section "§RECORDER — a dispatch the roster cannot carry is refused, and a slo
 # hook's last step, so a wall that overran left a writer running with no row for any later wall to judge.
 # The three paths the plan listed (a symlinked roster, an unwritable one, a row that did not build) were
 # warnings or silent exits; none was what happened, and all three are refusals now. The fourth is the
-# overrun: the wall carries a deadline of its own, strictly under the registration (the rule bounds.sh
-# states for every inner bound), and refuses when the deadline passes before the row is journalled.
+# overrun: the wall carries a deadline of its own, strictly under the registration (the rule for every
+# inner bound, pinned by cross-gate-agreement §L.4c), and refuses when the deadline passes before the row is journalled.
 #
 # fails-when: an unwritable, symlinked or unbuilt roster ADMITS the dispatch; a wall that has not finished by
 # the deadline lets the dispatch through; the deadline sits at or over the registration's timeout; or the

@@ -3754,7 +3754,7 @@ fs_why() {  # -> integrate's proof:floor wait reason, or nothing
   call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:floor") == 1 { print $2 }'
 }
 FS_LEAD="proof:floor: the floor is one whole run plus each later commit proved; past the proof at"
-FS_OUT="; run what it lacks, or a whole run on this head, and proof-add floor"
+FS_OUT="; run suites its row named, proof-add floor; a second run: approve regression-2"
 # THE REVIEW HALF IS HANDED IN COVERED (wave-27 T14; D3). integrate's proof:review is met only by
 # the facts state the tick hands in (UNITS_FACTS_STATE); every row here is about the floor, so the
 # state is the one the tick hands when the readings hold. §INTEGRATE-JUDGE drives the others.

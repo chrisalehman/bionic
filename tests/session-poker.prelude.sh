@@ -55,6 +55,19 @@ SP_GATE_DIR="$TMPROOT/gate"
 export BIONIC_GATE_DIR="$SP_GATE_DIR"
 mkdir -p "$SP_GATE_DIR/requests" "$SP_GATE_DIR/cost"
 printf '5:0.1:30:1000\n' > "$SP_GATE_DIR/cost/fixture.test.sh"
+# THE SHARE IS FIXTURE DATA TOO (wave-31 T13; A-orch-38). The gate reads the share from
+# ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share and the default is 92, so a suite that left the dir
+# unset read this machine's file or the default. 80 is the value §11 is written against ("the five-minute
+# load over 6.4 cores" is 8 cores x 0.80) and the one §40 pins for itself. Sections that name their own
+# dir through `fake_config_dir` override this one per call and keep working.
+#
+# THE PIN HAS A NAME, BECAUSE SECTIONS LEAVE IT. A section that points CLAUDE_CONFIG_DIR at its own
+# `fake_config_dir` ends by putting it back with `CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"`, never `unset`: an
+# unset hands the read to `$HOME/.claude`, this machine's own share (92). HOME is not pinned.
+SP_CONFIG_DIR="$TMPROOT/config"
+mkdir -p "$SP_CONFIG_DIR/bionic"
+printf '80\n' > "$SP_CONFIG_DIR/bionic/share"
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT

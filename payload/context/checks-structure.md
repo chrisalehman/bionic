@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered by agents-src/render.sh from agents-src/templates/context/checks-structure.md.tmpl and the shared
      blocks in agents-src/blocks/. Edit those, then re-run `bash agents-src/render.sh`.
-     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+     tests/render.test.sh goes red whenever this file and its sources disagree. -->
 
 <!-- CHECKS-STRUCTURE-BEGIN -->
 Is the change built from what already exists, and shaped well? Read the code in the range. You are shown no other reader's verdict. Answer `reuse` and `one-site` each on its own `check:` line: PASS, FLAG, FAIL, or `n/a` with the reason it cannot apply to this range. An unanswered one makes the verb refuse the record. A check answers FLAG when its failing case holds, a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity; FAIL only when copies already disagree where a user meets it, a finding the harm table sends to fix; PASS otherwise. "Looks clean" is not an answer: a PASS names what you compared it against. Age does not lower a rating. Say "older than the reviewed range" beside it.
