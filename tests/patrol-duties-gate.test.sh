@@ -293,6 +293,26 @@ expect_block_unnamed() {  # <label> <id the refusal's row list must not hold>
   esac
   ok "$1"
 }
+# THE SAME READ FOR A ROW THAT NAMES ONE ID AND NOT ANOTHER (wave-31 T34; A-orch-53 (1)). 60c, 60e, 71c and
+# L8a asked `expect_block ... "T3" "T2"`, whose must-not is a substring of the WHOLE reason, and the reason
+# prints the checkout's path (`bash <hooks dir>/session-poker.sh decline ...` and the scratch path in the
+# note), so a tree under `.worktrees/31-T24` held `T2` and all four read red. Both ids are read off the
+# refusal's decline operand instead, as whole words, and the list must be non-empty.
+expect_block_rows() {  # <label> <id the row list must hold> <id it must not hold>
+  local d rows; d=$(decision_of); rows=$(refusal_rows)
+  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
+    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
+  fi
+  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
+  case " $rows " in
+    *" $2 "*) ;;
+    *) no "$1" "the row list <$rows> does not name <$2>"; return ;;
+  esac
+  case " $rows " in
+    *" $3 "*) no "$1" "the row list <$rows> names <$3>"; return ;;
+  esac
+  ok "$1"
+}
 
 LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
@@ -1100,7 +1120,7 @@ ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first one"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_taskup "$d" 2
-fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
+fire "$d"; expect_block_rows "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
 
 # 60d: A ROW THIS TURN LAUNCHED IS NEVER NAMED AS MISSED (T11b; review R4, T12 F7). Two agents
 # launched and rostered while both plan rows still read `pending`. The launch already holds a
@@ -1121,7 +1141,7 @@ ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_taskup "$d" 2
-fire "$d"; expect_block "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
+fire "$d"; expect_block_rows "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
 
 # 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
 # the same table at `current: 3` is a schedule nobody has ratified, and dispatching into it
@@ -1591,7 +1611,7 @@ fire "$d"; expect_block "71b: …the same row with the token removed is a gap, r
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD" "$LEDGER_READY_3")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 u_prompt "$d" "how is CI looking?"
-fire "$d"; expect_block "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
+fire "$d"; expect_block_rows "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
 
 # ============================================================
 section "Section 5d: nothing quoted plants a verdict (wave-20 REQ-5, AC-5.4; Δ7)"
@@ -1811,7 +1831,7 @@ led_user "$d" "u-turn-0008" "2026-09-23T12:00:00.000Z" "dispatch the batch"
 led_agent "$d" "toolu_B1" "W-T2" "2026-09-23T12:00:05.000Z"
 led_result "$d" "toolu_B1" "2026-09-23T12:00:06.000Z" false "Spawned W-T2"
 a_taskup "$d" 2
-fire "$d"; expect_block "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
+fire "$d"; expect_block_rows "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
 expect_eq "L8b: …its line names the launch" "W-T2" "$(led_field "$(led_line "$d" 1)" launched)"
 led_feedback "$d" "u-fb-0008" "2026-09-23T12:00:10.000Z"
 led_agent "$d" "toolu_B2" "W-T3" "2026-09-23T12:00:20.000Z"
