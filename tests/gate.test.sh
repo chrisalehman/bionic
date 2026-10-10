@@ -6,7 +6,7 @@
 # WHAT IS UNDER TEST. One section per eval the spec names:
 #
 #   §SHARE     AC-2.1  asks from two fixture projects read one share file; a project's own
-#                      config or plan line changes neither; absent or unreadable is 85
+#                      config or plan line changes neither; absent or unreadable is 92
 #   §HARD      AC-2.2  memory planted over the share is not admitted; a busy processor with
 #                      nothing admitted is; an unknown command or an unknown reading waits for
 #                      an idle gate. Mutation: the share's ceiling lifted admits at 85%
@@ -229,10 +229,10 @@ section "§SHARE — one share per machine (AC-2.1)"
 fresh share
 world_machine 8 8192 55 1.0
 rm -f "$CLAUDE_CONFIG_DIR/bionic/share"
-expect_eq "S.1 no share file: gate_share prints 85, the default" "85" "$( . "$GATE_LIB" 2>/dev/null; gate_share )"
+expect_eq "S.1 no share file: gate_share prints 92, the default" "92" "$( . "$GATE_LIB" 2>/dev/null; gate_share )"
 for bad in abc 0 101 "" 1234; do
   printf '%s\n' "$bad" > "$CLAUDE_CONFIG_DIR/bionic/share"
-  expect_eq "S.2 an unreadable share '$bad' is 85, the default" "85" "$( . "$GATE_LIB" 2>/dev/null; gate_share )"
+  expect_eq "S.2 an unreadable share '$bad' is 92, the default" "92" "$( . "$GATE_LIB" 2>/dev/null; gate_share )"
 done
 # A share file the user (or `session-poker.sh share <n>`) wrote wins over the default.
 printf '70\n' > "$CLAUDE_CONFIG_DIR/bionic/share"

@@ -1178,7 +1178,7 @@ expect_eq "G.5: every row of the section fits 100 columns" "" "$(too_wide "$SEC_
 G_CCD0="${TMP}/gate-config-empty"
 mkdir -p "$G_CCD0"
 SEC_G0="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$G_CCD0")")"
-expect_contains "G.6: with no share file the row says 85, the default" "85% of this machine (the default; no share file)" "$SEC_G0"
+expect_contains "G.6: with no share file the row says 92, the default" "92% of this machine (the default; no share file)" "$SEC_G0"
 expect_contains "G.7: with no store the gate row says nothing has asked" "no store yet — nothing has asked the gate" "$SEC_G0"
 expect_false "G.8: …and doctor made no store (the store above was read, G.4)" test -e "${G_CCD0}/bionic/gate"
 
@@ -1194,7 +1194,7 @@ share_set() {  # <args...> -> the verb's exit code, its output in SD_OUT
 }
 SD_SEC0="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
 expect_contains "SD.1: before the verb, the share row says the default and that no file is there" \
-  "85% of this machine (the default; no share file)" "$SD_SEC0"
+  "92% of this machine (the default; no share file)" "$SD_SEC0"
 share_set 65; SD_RC=$?
 expect_eq "SD.2: the verb sets 65 (exit 0)" "0" "$SD_RC"
 SD_SEC1="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
@@ -1214,8 +1214,8 @@ expect_eq "SD.8: …and every row fits 100 columns at the widest share" "" "$(to
 for SD_JUNK in abc 0 101 1234 ""; do
   printf '%s\n' "$SD_JUNK" > "${SD_CCD}/bionic/share"
   SD_SECJ="$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
-  expect_contains "SD.9 a share file holding '$SD_JUNK' reads 85, the default, as the gate does" \
-    "85% of this machine (the default; no share file)" "$SD_SECJ"
+  expect_contains "SD.9 a share file holding '$SD_JUNK' reads 92, the default, as the gate does" \
+    "92% of this machine (the default; no share file)" "$SD_SECJ"
 done
 printf '65\n' > "${SD_CCD}/bionic/share"
 expect_contains "SD.10 control: a valid value in the same file reads as set" "65% of this machine (set in bionic/share)" \
