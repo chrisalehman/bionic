@@ -293,8 +293,8 @@ bionic_context 2>/dev/null || exit 0
 # 21 MB transcript ran in 1 to 2 s) — this bounds a cause nobody has seen.
 #
 # SO THE WALL REFUSES FIRST. A timer started here signals this shell at DP_DEADLINE_S, 3 s under
-# the registration (the rule payload/scripts/lib/bounds.sh states for every inner bound: strictly
-# under, margin named), and the handler denies the dispatch in the wall's own shape. It is armed
+# the registration (the rule for every inner bound: strictly under, margin named; pinned by
+# tests/cross-gate-agreement.test.sh §L.4c), and the handler denies the dispatch in the wall's own shape. It is armed
 # only for an engaged session (everything above is a bystander's silent exit), and it is disarmed
 # the moment the row is built, before the first byte of the roster is written, so a refusal never
 # leaves a row behind. THE LIMIT, STATED: bash runs a trap between commands, so a single foreground
