@@ -526,12 +526,12 @@ S57T_B="$(git -C "$R57T" rev-parse HEAD)"
 P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
 # THE ONE TABLE AT TASK SCALE (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
 # `scale: task`, `current: 4`, one row in flight. Its base is the Step-4 block's `base-sha:`, where
-# the one shape carries it at either scale (A-T24-8); with none, a first reading is refused and the
-# judge exits 2 (section 63 pins that twin).
-s57t_task_plan() {  # <plan> <Step-4 base-sha value> -> the plan, with the run's branch and the row's line
+# the one shape carries it at either scale (A-T24-12); with none, a first reading is refused and the
+# judge exits 2 (section 63 pins that twin, its Step-4 key empty).
+s57t_task_plan() {  # <plan> <Step-4 base-sha value, or "" for the key alone> -> the plan, with the run's branch and the row's line
   plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
   S57T_BASE="$2" awk '
-    /^  base-sha: / { print "  base-sha: " ENVIRON["S57T_BASE"]; next }
+    /^  base-sha: / { print "  base-sha:" (ENVIRON["S57T_BASE"] != "" ? " " ENVIRON["S57T_BASE"] : ""); next }
     { print }
     /^approved-by: / { print "working-branch: task/01-fixture"; print "- T1: the fix, in .worktrees/01-task" }' \
     "$1" > "$1.tmp" && mv "$1.tmp" "$1"
@@ -1534,22 +1534,23 @@ section "Section 63 §BASE §HEAD §FLOOR-HEAD §WHOLE-TIME §EDGES: the judge h
 # copy of proof.sh that turns its row red. A waiver's question and head survive a reply and a git
 # user name that spell ` by question=… head=…` (F6).
 #
-# FIXTURE FIDELITY. §BASE is section 57t's task-scale plan, written the same way, with a
-# `base-sha:` that names no commit id (review pass 13's exp6.sh: commits init → unread code → read
-# code), then with the base in its Step-4 block, where the one ledger shape carries it at either
-# scale (wave-31 T24; A-orch-56 put it in the frontmatter of the retired task shape). Readings register through the
+# FIXTURE FIDELITY. §BASE is section 57t's task-scale plan, written the same way, with no base: its
+# Step-4 `base-sha:` key is empty, which the gate admits at `current: 4` and the judge passes over
+# (review pass 13's exp6.sh: commits init → unread code → read code; wave-31 T24, A-T24-12). Then
+# the base goes in its frontmatter, where A-orch-56 puts it, the place the judge reads after the
+# Step-4 block. Readings register through the
 # verb under the 57t roster row shape (s56_row, `questions=` SYNTHESIZED until T15). The judge's
 # planted copies are written by the production writers (`proof_line`, `proof_add_line`). §WHOLE-TIME
 # is §42's wave plan, admitted by the real commit gate, with its own `## Tasks` rows. §EDGES is
 # exp3.sh's repository: real merges and real `git mv` renames. Each mutant is a copy of the whole
 # lib directory with one line of proof.sh changed, run beside the shipped one.
 S63_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-s63_task_plan() {  # <repo> <plan> -> 57t's task-scale plan, its one base-sha: naming no commit id
+s63_task_plan() {  # <repo> <plan> -> 57t's task-scale plan, its Step-4 `base-sha:` key empty
   mkdir -p "$(dirname "$2")"
-  s57t_task_plan "$2" none
+  s57t_task_plan "$2" ""
 }
-s63_base() {  # <plan> <sha> -> the plan with its Step-4 `base-sha:` naming <sha>
-  B="$2" awk '/^  base-sha: / { print "  base-sha: " ENVIRON["B"]; next } { print }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+s63_base() {  # <plan> <sha> -> the plan with `base-sha: <sha>` in its frontmatter, after scale:
+  B="$2" awk '{ print } /^scale: / && !d { print "base-sha: " ENVIRON["B"]; d = 1 }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 S63_TAD="$(printf 'review\tadversarial\tbionic:critic\tpiece')"
 s63_task_all() {  # <floor state> <review state> -> the four owed lines of a single task plan
@@ -1579,7 +1580,7 @@ for s63q in evidence adversarial structure; do
 done
 expect_eq "63a0 precondition: unread code is the parent of read code, and init its parent" "$S63_I $S63_U" \
   "$(git -C "$S63_WT" rev-parse "$S63_H~2" "$S63_H~1" | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "63a0b precondition: the plan's one base-sha: names no commit id" "  base-sha: none" "$(/usr/bin/grep 'base-sha' "$P63")"
+expect_eq "63a0b precondition: the plan's one base-sha: is the Step-4 key, empty" "  base-sha:" "$(/usr/bin/grep 'base-sha' "$P63")"
 s34_gate "$R63"
 expect_eq "63a0c precondition: the task-scale plan with no base is admitted by the real commit gate" "0" "$GATE_RC"
 s42_snap "$R63" "$P63"
@@ -1611,7 +1612,7 @@ s57_state "$R63/.bionic/tmp/badbase.plan.md" "$S63_H"
 expect_eq "63b2b with base-sha: deadbeef, which is no commit, the judge exits 2 and prints nothing" "2 " "$S57_RC $S57_OUT"
 s63_base "$S63_PP" "$S63_I"
 s57_state "$S63_PP" "$S63_H"
-expect_eq "63b3 control: the same planted lines with the base in the Step-4 block are judged, every line covered" \
+expect_eq "63b3 control: the same planted lines with the base in the frontmatter are judged, every line covered" \
   "$(s63_task_all covered covered)" "$S57_OUT"
 expect_eq "63b4 …rc 0" "0" "$S57_RC"
 # The same plan with its base: the tail is refused as a start past the base, the whole branch registers.
