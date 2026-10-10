@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/reader-exam/score.sh — README step 5 as code. Sourced, it defines four functions
 # (exam_meets, exam_field, exam_declared, exam_score) and does nothing else:
-# tests/reader-exam.test.sh holds the real keys to them, and a sitting scores its records with them.
+# tests/exam/reader-exam.sh holds the real keys to them, and a sitting scores its records with them.
 #
 #   . tests/reader-exam/score.sh
 #   exam_score tests/reader-exam/samples/<name>/expect.txt <record>

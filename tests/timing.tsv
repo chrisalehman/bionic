@@ -59,7 +59,6 @@ principles-item.test.sh	136
 protect-database.test.sh	13
 protect-main.test.sh	44
 rc-item.test.sh	1102
-reader-exam.test.sh	70
 refuse.test.sh	1078
 render.test.sh	34
 resources.test.sh	31
