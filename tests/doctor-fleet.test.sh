@@ -131,7 +131,7 @@ write_attestation_v1() {  # <session-id>
 _TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
 sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
 sleep dirname basename realpath id ps df sysctl vm_stat git strings cksum"
-_TOOLS_STUB="node pnpm gh rg uv docker aws"
+_TOOLS_STUB="node pnpm gh rg uv docker aws perl"
 
 make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT find
   local d="$1" want="$2" t p missing=""
