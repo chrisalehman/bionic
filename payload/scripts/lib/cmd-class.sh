@@ -2465,6 +2465,30 @@ cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suit
   return 0
 }
 
+cmd_whole_run() {  # <command> [<repo root>] -> rc 0 when the command is a whole run of the runner, 1 otherwise
+  # THE ONE JUDGMENT "THIS COMMAND IS A WHOLE RUN" (wave-31 T21; D3, REQ-2; A-orch-51.2): rc 0
+  # exactly when `cmd_suite_targets` prints `run.sh`, the token a bare `tests/run.sh` (or
+  # `bash tests/run.sh`) claims. `--only <names>` claims each name it carries and `--dry-run`,
+  # `-h`, `--help` and `--list` claim nothing, by `cmd_suite_targets`' own arms, so none of the four
+  # is a whole run here, and nothing in this function reads a flag.
+  #
+  # TWO READERS ARE SERVED, AND THEY ASK DIFFERENT THINGS OF THE SAME TOKEN. The regression-runs
+  # counter (hooks/session-poker.sh `regression_runs_count`) asks of the command a finished run
+  # ran, and calls this. The full-run wall's `fr_whole_run` (hooks/dispatch-preflight.sh) counts
+  # LAUNCHES, before any command exists, from the `suites_allowed=` a brief declared, whose
+  # `run.sh` is the very token `payload/scripts/lib/brief.sh` emits for the path-qualified runner,
+  # so it does not call this. One word, `run.sh`, names a whole run in both.
+  #
+  # With a root the script a shell runs is opened and read for what it runs (`bash red.sh`, wave-31
+  # T11), as `cmd_suite_claims` does; without one nothing is opened.
+  case "
+$(cmd_suite_targets "${1-}" "${2-}")
+" in
+    *$'\n'run.sh$'\n'*) return 0 ;;
+  esac
+  return 1
+}
+
 cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority
   # FIVE FORKS LESS THAN IT USED TO COST (epic-23 wave-14 REQ-4; research R3 §3
   # measured 6.4 ms of `classify_tier1`'s 13.1 on this function alone). The reading

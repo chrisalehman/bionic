@@ -2398,18 +2398,34 @@ run_groups() {
 
 # regression_runs_count <project root> -> the number of full-runner runs the project's rosters
 # record as ended (Δ6d; REQ-4 AC-4.6). One run is one `run_log`, however many rows copy it. A run
-# is the FULL runner when the shim named its suites `run.sh` (the wall's reading of `tests/run.sh`
-# with no --only), or named none and its command runs tests/run.sh; and never when the command
-# carries `--only` or `--dry-run`.
+# is the FULL runner when the command it ran is a whole run (wave-31 T21; REQ-2, D3): the command
+# is `<log>.key`'s lines 2 and on, as the shim wrote them with the tree on line 1, else the row's
+# `run_cmd=` (booked.sh `booked_one_line`, the lossy front of the same command), and
+# `cmd_whole_run` (payload/scripts/lib/cmd-class.sh) is the one judgment on it. The log's own name
+# is never read: the wave-30 id `w30-T26-tests_run.sh` is the full runner, and an id ending
+# `-run.sh` need not be. The root the classifier reads a script against is the key's tree, else the
+# project's own.
 regression_runs_count() {
-  local rf files=""
+  local rf files="" lg cmd key tree n=0
   for rf in "$1/.bionic/tmp"/roster-*.state; do
     [ -f "$rf" ] && [ ! -L "$rf" ] || continue
     files="${files}${rf}
 "
   done
   [ -n "$files" ] || { printf '0'; return 0; }
-  printf '%s' "$files" | while IFS= read -r rf; do [ -n "$rf" ] && cat "$rf"; done 2>/dev/null | awk -F'|' '
+  poker_cmdclass_load || { printf '0'; return 0; }
+  while IFS=$'\t' read -r lg cmd; do
+    [ -n "$lg" ] || continue
+    tree="$1"
+    if [ -f "$lg.key" ] && [ ! -L "$lg.key" ]; then
+      key="$(cat "$lg.key" 2>/dev/null)"
+      case "$key" in
+        *$'\n'*) tree="${key%%$'\n'*}"; cmd="${key#*$'\n'}" ;;
+      esac
+    fi
+    cmd_whole_run "$cmd" "$tree" && n=$((n + 1))
+  done <<EOF_RUNS
+$(printf '%s' "$files" | while IFS= read -r rf; do [ -n "$rf" ] && cat "$rf"; done 2>/dev/null | awk -F'|' '
     {
       lg = ""; rc = ""; cmd = ""
       for (i = 1; i <= NF; i++) {
@@ -2417,15 +2433,23 @@ regression_runs_count() {
         else if (index($i, "run_rc=") == 1) rc = substr($i, 8)
         else if (index($i, "run_cmd=") == 1) cmd = substr($i, 9)
       }
-      if (lg == "" || rc !~ /^[0-9]+$/) next
-      if (cmd ~ /--only/ || cmd ~ /--dry-run/) next
-      id = lg; sub(/^.*\//, "", id); sub(/\.log$/, "", id); sub(/-[0-9]+$/, "", id)
-      full = 0
-      if (id ~ /-run\.sh$/) full = 1
-      else if (id ~ /-cmd$/ && cmd ~ /(^|[ \/;&|(])tests\/run\.sh([ ;&|)]|$)/) full = 1
-      if (full) seen[lg] = 1
-    }
-    END { n = 0; for (k in seen) n++; printf "%d", n }'
+      if (lg == "" || rc !~ /^[0-9]+$/ || lg in seen) next
+      seen[lg] = 1
+      print lg "\t" cmd
+    }')
+EOF_RUNS
+  printf '%d' "$n"
+}
+
+# The classifier `regression_runs_count` asks, loaded on first use and never at the top: the tick
+# runs every Patrol interval and counts at most a few runs, and a hook copied outside the repo
+# resolves its libraries from a checkout that may not carry cmd-class.sh (the count is then 0).
+poker_cmdclass_load() {
+  declare -F cmd_whole_run >/dev/null 2>&1 && return 0
+  [ -f "$BIONIC_LIB/cmd-class.sh" ] || return 1
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/cmd-class.sh"
+  declare -F cmd_whole_run >/dev/null 2>&1
 }
 
 # `<config>/projects/<slug>/<sid>/subagents` — the same walk session_transcript does, one
