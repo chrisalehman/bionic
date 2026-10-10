@@ -430,7 +430,7 @@ _setup_item_verb() {  # <name>
       # writing — so the page says so. An edited span is bionic's own and step 13
       # replaces it without a question, so the page says that instead.
       case "$(principles_state)" in
-        edited) say "replace the working-principles span in $(principles_file) with bionic's current text (the span between bionic's markers is bionic's; nothing else in the file is touched)" ;;
+        edited) say "update bionic's working principles span without asking, in $(principles_file)" ;;
         *)      say "show bionic's working principles and ask again before adding them to $(principles_file)" ;;
       esac ;;
     *)                  return 1 ;;

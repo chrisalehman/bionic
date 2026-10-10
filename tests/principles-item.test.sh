@@ -415,7 +415,7 @@ expect_same_bytes "EDITED: a closed input replaces the edit as well" "$TMP/shipp
 cp "$SB_E/.claude/CLAUDE.md" "$TMP/e-equal.md"
 E_EQ_OUT="$(setup_run "$SB_E" $'y\n')"
 expect_same_bytes "EDITED: a span equal to the shipped text is not rewritten" "$TMP/e-equal.md" "$SB_E/.claude/CLAUDE.md"
-expect_contains "EDITED: …and the run says there is nothing to do" "nothing to do" "$E_EQ_OUT"
+expect_contains "EDITED: …and the run says it is already there (the item line is clipped to the page width, so the tail is not asserted)" "already in" "$E_EQ_OUT"
 expect_absent "EDITED: …and does not claim an update" "updated" "$E_EQ_OUT"
 
 # ---------------------------------------------------------------------------
@@ -636,7 +636,7 @@ PLAN_E="$(setup_plan "$SB_DE")"
 PLAN_A="$(setup_plan "$SB_DA")"
 expect_contains "EDITED-STATE: the --all page offers the principles on an absent block" "working principles" "$PLAN_A"
 expect_contains "EDITED-STATE: the --all page names the update of an edited span" "working principles" "$PLAN_E"
-expect_contains "EDITED-STATE: …saying it replaces the span and asks nothing more" "replace" "$(report_row "$PLAN_E" "working principles")"
+expect_contains "EDITED-STATE: …saying it updates the span without asking" "update bionic's working principles span without asking" "$(report_row "$PLAN_E" "working principles")"
 
 # ---------------------------------------------------------------------------
 section "§CONSENT: the path and the full text are on screen before the question"
@@ -1404,7 +1404,7 @@ expect_contains "SPAN sweep: the summary says updated" "updated" "$(summary_of "
 
 SP_OUT2="$(rec_env "$SP_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" </dev/null 2>&1)"
 SP_S13b="$(section_of "$SP_OUT2")"; SP_S13b="${SP_S13b%%Summary*}"
-expect_contains "SPAN equal: a second sweep says there is nothing to do" "nothing to do" "$SP_S13b"
+expect_contains "SPAN equal: a second sweep says the span is already there" "already in" "$SP_S13b"
 expect_absent "SPAN equal: …claims no update" "updated" "$SP_S13b"
 expect_absent "SPAN equal: …and the summary claims none" "updated" "$(summary_of "$SP_OUT2")"
 block_to "$SP_F" "$TMP/sp-block2"
