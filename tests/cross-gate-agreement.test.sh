@@ -3233,8 +3233,7 @@ l4c_verdict() {
   fi
 }
 
-for _l4c_pair in "dispatch-preflight.sh|IMPACT_BOUND_S|the dispatch wall" \
-                 "stop.sh|LG_IMPACT_BOUND_S|the landing sweep"; do
+for _l4c_pair in "stop.sh|LG_IMPACT_BOUND_S|the landing sweep"; do
   _l4c_hook="${_l4c_pair%%|*}"
   _l4c_rest="${_l4c_pair#*|}"
   _l4c_var="${_l4c_rest%%|*}"
@@ -3251,16 +3250,11 @@ for _l4c_pair in "dispatch-preflight.sh|IMPACT_BOUND_S|the dispatch wall" \
     "under" "$(l4c_verdict "$L4C_BOUNDS" "$_l4c_var" "$_l4c_reg")"
 done
 
-# THE DERIVATION BOUND ALSO SITS UNDER THE WALL'S OWN DEADLINE (wave-30 T35). The dispatch wall
-# carries a whole-hook deadline, DP_DEADLINE_S in hooks/dispatch-preflight.sh, strictly under the
-# same registration; its ALRM trap runs between commands, and the derivation's poll is a run of
-# commands, so a deadline at or under IMPACT_BOUND_S refuses "the wall ran out of time" before the
-# bound can — the bound raised alone (10 -> 20 under a deadline of 12) would buy nothing. Both read.
+# THE DISPATCH WALL'S OWN DEADLINE (wave-30 T35). DP_DEADLINE_S in hooks/dispatch-preflight.sh
+# bounds the whole hook, strictly under its registration; the derivation bound that once sat
+# under it is deleted with the map (wave-31 T2, REQ-4 AC-4.2).
 L4C_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "${BIONIC_HOOKS_DIR}/dispatch-preflight.sh" | head -1)"
-L4C_IMPACT="$(l4c_bound "$L4C_BOUNDS" IMPACT_BOUND_S)"
 expect_nonempty "L.4c the dispatch wall names its own deadline (not vacuous: read from the hook)" "$L4C_DEADLINE"
-expect_eq "L.4c the derivation bound (${L4C_IMPACT:-?}s) sits strictly under the wall's own deadline (${L4C_DEADLINE:-?}s)" \
-  "under" "$([ -n "$L4C_IMPACT" ] && [ -n "$L4C_DEADLINE" ] && [ "$L4C_IMPACT" -lt "$L4C_DEADLINE" ] 2>/dev/null && echo under || echo 'NOT under')"
 expect_eq "L.4c …and the deadline strictly under the registration ($(l4c_registration dispatch-preflight.sh | head -1)s)" \
   "under" "$([ -n "$L4C_DEADLINE" ] && [ "$L4C_DEADLINE" -lt "$(l4c_registration dispatch-preflight.sh | head -1)" ] 2>/dev/null && echo under || echo 'NOT under')"
 
@@ -3268,15 +3262,11 @@ expect_eq "L.4c …and the deadline strictly under the registration ($(l4c_regis
 # judged `NOT under` by the same derivation the rows above ran. At the registration is the
 # real shape of the defect — a bound of 20 under a registration of 10 is only its loudest
 # form — so that is what the mutant carries.
-anchor -E "$L4C_BOUNDS" '^IMPACT_BOUND_S=[0-9]+$' 1
 anchor -E "$L4C_BOUNDS" '^LG_IMPACT_BOUND_S=[0-9]+$' 1
 DOCTORED_L4C="$SANDBOX/bounds-at-the-registration.sh"
-sed -e "s/^IMPACT_BOUND_S=[0-9]*$/IMPACT_BOUND_S=$(l4c_registration dispatch-preflight.sh | head -1)/" \
-    -e "s/^LG_IMPACT_BOUND_S=[0-9]*$/LG_IMPACT_BOUND_S=$(l4c_registration stop.sh | head -1)/" \
+sed -e "s/^LG_IMPACT_BOUND_S=[0-9]*$/LG_IMPACT_BOUND_S=$(l4c_registration stop.sh | head -1)/" \
     "$L4C_BOUNDS" > "$DOCTORED_L4C"
-expect_eq "L.4c …and a bounds.sh carrying the wall's bound AT its registration reads NOT under" \
-  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" IMPACT_BOUND_S "$(l4c_registration dispatch-preflight.sh | head -1)")"
-expect_eq "L.4c …and the same for the sweep's, so both rows above discriminate" \
+expect_eq "L.4c …and a bounds.sh carrying the sweep's bound AT its registration reads NOT under, so the row above discriminates" \
   "NOT under" "$(l4c_verdict "$DOCTORED_L4C" LG_IMPACT_BOUND_S "$(l4c_registration stop.sh | head -1)")"
 
 # hooks/agent-context-guard.sh runs the wall behind it only for a payload carrying a
@@ -9580,23 +9570,21 @@ expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_mar
   "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
 
 # ============================================================
-section "S13 — the suite budget: one derivation, one row writer, one alphabet"
+section "S13 — the suite budget: the brief's own set, one row writer, one alphabet"
 # ============================================================
 #
-# (wave-01 verification-cannot-lie, S13; spec AC-20/AC-21; design ledger D2.)
+# (wave-01 verification-cannot-lie, S13; spec AC-20/AC-21; design ledger D2. The derivation
+# side is gone: wave-31 T2, REQ-4 AC-4.2 deleted the file-to-suite map, and the budget is the
+# set the brief names.)
 #
-# THREE FILES HAVE TO AGREE ABOUT ONE SET, and none of them can see the other two:
+# TWO FILES HAVE TO AGREE ABOUT ONE SET, and neither can see the other:
 #
-#   tests/lib/impact.sh                 PRODUCES it, as `suite<TAB>reason` lines (S12)
-#   hooks/dispatch-preflight.sh         RECORDS it, as `suites_allowed=` on the roster row
-#   hooks/background-suite-guard.sh     ENFORCES it, against basenames read out of a command
+#   payload/scripts/lib/brief.sh        RECORDS it, the brief's `Suites:` tokens as basenames
+#   payload/scripts/lib/walls.sh        ENFORCES it, against basenames read out of a command
 #
-# Each has its own suite, and each of those suites builds its own fixture — so all three
-# can pass while the wall records a spelling the derivation never prints and the guard
-# never matches. What is pinned here is the SEAM: the real derivation, driven over a real
-# file, answering in the alphabet the guard compares in.
+# What is pinned here is the SEAM: the grammar's own lift, driven over a `Suites:` line in
+# every spelling a brief uses, answering in the alphabet the guard compares in.
 
-S13_IMPACT="$REPO_ROOT/tests/lib/impact.sh"
 S13_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 # THE BUDGET ARM'S READER IS IN THE LIBRARY NOW (T23) — `wall_background_suite_guard` in
 # payload/scripts/lib/walls.sh, at column zero like the rest of the carried bodies, so the
@@ -9607,80 +9595,41 @@ S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
 [ -r "$S13_ROSTER_LIB" ] || S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
 S13_CMDCLASS="$BIONIC_HOOKS_DIR/../payload/scripts/lib/cmd-class.sh"
 [ -r "$S13_CMDCLASS" ] || S13_CMDCLASS="$BIONIC_HOOKS_DIR/../scripts/lib/cmd-class.sh"
-
-# --- §S13.1 the derivation's output shape is the one the wall consumes ---
-#
-# Driven over a REAL file of this tree, so the answer is the derivation's own rather than a
-# fixture's idea of it. `payload/scripts/lib/cmd-class.sh` is chosen because its own suite
-# is on the answer by construction (`self`/`path-ref`), which gives the assertion below a
-# value it can name without hardcoding the whole set.
-S13_RAW=$(cd "$REPO_ROOT" && bash "$S13_IMPACT" payload/scripts/lib/cmd-class.sh 2>/dev/null)
-expect_eq "S13.1 the derivation answers at all (non-vacuity)" "0" \
-  "$([ -n "$S13_RAW" ] && echo 0 || echo 1)"
-expect_eq "S13.1 every line is exactly two TAB-separated fields" "0" \
-  "$(printf '%s\n' "$S13_RAW" | awk -F'\t' 'NF != 2 { n++ } END { print n + 0 }')"
-expect_eq "S13.1 the first field is a suite BASENAME, never a path" "0" \
-  "$(printf '%s\n' "$S13_RAW" | awk -F'\t' '$1 ~ /\// || $1 !~ /\.test\.sh$/ { n++ } END { print n + 0 }')"
-expect_contains "S13.1 …and the suite that owns that file is in the answer" \
-  "cmd-class.test.sh" "$(printf '%s\n' "$S13_RAW" | cut -f1 | tr '\n' ' ')"
-
-# --- §S13.2 the wall's OWN reduction, lifted out of the hook and run here ---
-#
-# WHAT THIS USED TO BE, and why it changed (review-b B-6's sibling, B-3). The section was
-# titled as an agreement and asserted nothing about the wall: it re-typed the reduction, ran
-# it, and checked its own output for a colon, a tab and a duplicate. A self-check on this
-# test's own pipeline reads as the agreement pin for the derived set, so a future reader
-# weakening the real coverage would believe this still held the line.
-#
-# It is an agreement now. The two lines that build `suites_allowed=` are lifted OUT of
-# payload/scripts/lib/brief.sh by text and run here over the same raw output, so a
-# change to the hook's spelling — a third column kept, a different sort, the trailing-space
-# trim dropped — is red HERE. The end-to-end coverage (a real dispatch, a real row) is
-# tests/dispatch-preflight.test.sh S27a and its mutation arm S27a2; this section is the
-# alphabet check that sits under it.
-# THE REDUCTION LIVES IN THE CONTRACT GRAMMAR NOW (wave-20 T6; REQ-4, Δ10): the dispatch wall,
-# `amend` and `task-add` all record the set `brief_validate_fields` builds, so that is the
-# spelling this pin reads. The variable keeps its name; it names the file that holds the rule.
+# THE CONTRACT GRAMMAR (wave-20 T6; REQ-4, Δ10): the dispatch wall, `amend` and `task-add` all
+# record the set `brief_validate_fields` builds, so that is the file this pin drives.
 S13_HOOK="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
 [ -r "$S13_HOOK" ] || S13_HOOK="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
 expect_eq "S13.2 the library this section reads is present" "yes" \
   "$([ -r "$S13_HOOK" ] && echo yes || echo no)"
-# THE PRECONDITION OF THE LIFT (AC-29): the two lines are still there, exactly once each.
-anchor -E "$S13_HOOK" '^[[:space:]]*BRIEF_SUITES_ALLOWED=\$\(printf' 1
-anchor -E "$S13_HOOK" '^[[:space:]]*BRIEF_SUITES_ALLOWED="\$\{BRIEF_SUITES_ALLOWED% \}"' 1
-S13_REDUCTION=$(awk '/^[[:space:]]*BRIEF_SUITES_ALLOWED=\$\(printf/,/^[[:space:]]*BRIEF_SUITES_ALLOWED="\$\{BRIEF_SUITES_ALLOWED% \}"/' "$S13_HOOK")
-expect_eq "S13.2 the lift took exactly the two assignment lines" "2" \
-  "$(printf '%s\n' "$S13_REDUCTION" | grep -c 'SUITES_ALLOWED=')"
-expect_eq "S13.2 …and nothing else came with them" "0" \
-  "$(printf '%s\n' "$S13_REDUCTION" | grep -vc 'SUITES_ALLOWED=')"
 
-# The hook's own reduction, over the derivation's own output.
-S13_HOOK_SET=$(_impact_out="$S13_RAW"; eval "$S13_REDUCTION"; printf '%s' "$BRIEF_SUITES_ALLOWED")
-# This test's reading of the same rule, spelled independently.
-S13_SET=$(printf '%s\n' "$S13_RAW" | cut -f1 | sort -u | tr '\n' ' ')
-S13_SET="${S13_SET% }"
-
-expect_nonempty "S13.2 the hook's reduction answered something (non-vacuity)" "$S13_HOOK_SET"
-expect_eq "S13.2 the wall's own reduction and this test's agree, to the byte" \
-  "$S13_SET" "$S13_HOOK_SET"
-# THE MUTATION: doctor the raw output the way a derivation that grew a column would, and the
-# two sides must part. Without this the row above could be two spellings of `true`.
-S13_RAW_MUT="$(printf '%s\n' "$S13_RAW" | sed 's/^/x-/')"
-S13_HOOK_SET_MUT=$(_impact_out="$S13_RAW_MUT"; eval "$S13_REDUCTION"; printf '%s' "$BRIEF_SUITES_ALLOWED")
-expect_ne "S13.2 …and the comparison discriminates on a doctored raw output" \
-  "$S13_SET" "$S13_HOOK_SET_MUT"
-
-expect_eq "S13.2 the reduced set carries no reason column" "0" \
-  "$(printf '%s' "$S13_HOOK_SET" | grep -c ':')"
-expect_eq "S13.2 …and no tab survived the reduction" "0" \
-  "$(printf '%s' "$S13_HOOK_SET" | tr -cd '\t' | wc -c | tr -d ' ')"
-expect_eq "S13.2 …and holds no duplicate" "0" \
-  "$(printf '%s\n' "$S13_HOOK_SET" | tr ' ' '\n' | sort | uniq -d | grep -c .)"
+# --- §S13.2 the set the row records is the brief's own tokens, as basenames ---
+#
+# Driven through the grammar the dispatch wall calls, over one `Suites:` line carrying the
+# three spellings a brief uses for a suite (path-relative, `./`-prefixed, absolute). The set
+# `brief_validate_fields` hands the row writer is the lift's, once each, as basenames.
+s13_set() {  # <Suites: span> -> "<BRIEF_SUITES_ALLOWED>|<BRIEF_SUITES_SOURCE>"
+  bash -c '
+    . "$1" || exit 9
+    sink() { :; }
+    brief_validate_fields "$(lift_contract_fields "Suites: $2" implementor)" implementor "$3" sink >/dev/null 2>&1
+    printf "%s|%s" "${BRIEF_SUITES_ALLOWED-}" "${BRIEF_SUITES_SOURCE-}"
+  ' _ "$S13_HOOK" "$1" "$SANDBOX" 2>/dev/null
+}
+S13_GOT="$(s13_set "tests/cmd-class.test.sh, ./tests/walls.test.sh, $REPO_ROOT/tests/brief-x.test.sh, tests/cmd-class.test.sh")"
+expect_eq "S13.2 the recorded set is the brief's tokens as basenames, once each, declared" \
+  "cmd-class.test.sh walls.test.sh brief-x.test.sh|declared" "$S13_GOT"
+S13_SET="${S13_GOT%%|*}"
+expect_eq "S13.2 …carrying no path, no tab and no duplicate" "0" \
+  "$(printf '%s\n' "$S13_SET" | tr ' ' '\n' | awk '/\// || /\t/ { n++ } END { print n + 0 }')"
+# THE MUTATION: a different Suites: line lands a different set, so the row above is the brief's
+# answer and not a constant.
+expect_eq "S13.2 …and a different Suites: line records a different set" \
+  "gamma.test.sh|declared" "$(s13_set "tests/gamma.test.sh")"
 
 # --- §S13.3 the guard compares in that same alphabet ---
 #
-# `cmd_suite_targets` is the reader on the enforcement side. Every basename the derivation
-# just produced must be a name it can produce too, from the command a writer would type —
+# `cmd_suite_targets` is the reader on the enforcement side. Every basename the grammar
+# just recorded must be a name it can produce too, from the command a writer would type —
 # otherwise a suite on the budget is refused by the wall that granted it.
 S13_TARGETS_OK=0
 for _s13_b in $S13_SET; do
@@ -9691,7 +9640,7 @@ for _s13_b in $S13_SET; do
   ' _ "$S13_CMDCLASS" "$_s13_b" 2>/dev/null)
   [ "$_s13_got" = "$_s13_b" ] || S13_TARGETS_OK=$((S13_TARGETS_OK + 1))
 done
-expect_eq "S13.3 every derived basename round-trips through cmd_suite_targets" "0" "$S13_TARGETS_OK"
+expect_eq "S13.3 every recorded basename round-trips through cmd_suite_targets" "0" "$S13_TARGETS_OK"
 # NON-VACUITY: the loop really ran over a non-empty set.
 expect_eq "S13.3 …over a set with something in it" "0" \
   "$([ -n "$S13_SET" ] && echo 0 || echo 1)"
@@ -9789,13 +9738,9 @@ expect_eq "S13.5 the guard reads the key the wall writes" "0" \
 # ============================================================
 # --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
 #
-# THE OWNERSHIP-TABLE ROW THIS TASK ADDS. "Impact of a change" (the spec's ## Design
-# ownership table) already has one owner — `tests/lib/impact.sh` — rendered at three
-# surfaces: `suites_allowed=` on the roster row, the brief's `Files:`, and now the landing
-# verdict. This section pins that third rendering the way §S13.4/§S13.5 pin the first two:
 # ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
-# row -> worktree mapping (never re-derived), and ONE re-ask of the SAME `impact-command`
-# key S13's dispatch wall already reads — never a second config key or a second derivation.
+# row -> worktree mapping (never re-derived). The dispatch side reads no `impact-command` key
+# any more (wave-31 T2, REQ-4 AC-4.2): S18.3 pins that half.
 # The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff, the
 # shared mapping and the impact-command read all moved into payload/scripts/lib/stop.sh
 # with the rest of the sweep. One owner still, at a new address.
@@ -9899,8 +9844,7 @@ expect_nonempty "S18.2 hooks/stop.sh declares a BIONIC_LIB_WANT line at all" "$S
 expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
   "$(printf '%s' " $S18_WANT " | /usr/bin/grep -c ' worktree\.sh ')"
 
-# --- §S18.3 the reconciliation re-asks the SAME impact-command key S13's dispatch wall
-# reads — never a second config key, never a second derivation command ---
+# --- §S18.3 the dispatch side reads no impact-command key (wave-31 T2, REQ-4 AC-4.2) ---
 # RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The root variable is `BIONIC_ROOT` in
 # both hooks now, and a byte-exact literal naming the OLD one is a pin that breaks on a
 # rename while saying nothing about the property. The property is that the two hooks ask
@@ -9917,15 +9861,13 @@ s18_impact_call() {  # <file> -> the impact-command call, root argument abstract
     | sed 's/^config_value "[^"]*"/config_value <root>/' | sort -u
 }
 S18_LG_IMPACT=$(s18_impact_call "$S18_LG")
-S13_DP_IMPACT=$(s18_impact_call "$S13_HOOK")
 expect_eq "S18.3 lib/stop.sh reads impact-command exactly once" "1" \
   "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | tr -d ' ')"
-expect_eq "S18.3 …and so does the contract grammar the dispatch wall calls" "1" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_HOOK" | tr -d ' ')"
-expect_eq "S18.3 …and the dispatch wall no longer reads it itself" "0" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | tr -d ' ')"
 expect_nonempty "S18.3 …and the call is findable at all (the pin is not comparing air)" "$S18_LG_IMPACT"
-expect_eq "S18.3 …the same call shape the dispatch wall's grammar uses" "$S18_LG_IMPACT" "$S13_DP_IMPACT"
+expect_eq "S18.3 the contract grammar the dispatch wall calls reads it nowhere" "0" \
+  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_HOOK" | tr -d ' ')"
+expect_eq "S18.3 …and neither does the dispatch wall itself" "0" \
+  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | tr -d ' ')"
 # ============================================================
 section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7, D7)"
 # ============================================================
