@@ -5366,8 +5366,24 @@ poke "$R30W" amend w1 --suites+ tests/d.test.sh --reason 'now it runs one'
 expect_eq "30g amend onto a waived budget exits 0" "0" "$RC"
 expect_eq "30g2 …none is replaced by the added set" "d.test.sh" "$(s30_field "$(s30_last "$R30W")" suites_allowed)"
 poke "$R30W" amend w1 --files+ hooks/q.sh --reason 'files only'
-expect_eq "30g3 a files-only amend of a declared budget needs no impact command (exit 0)" "0" "$RC"
+expect_eq "30g3 a files-only amend of a declared budget is admitted (exit 0)" "0" "$RC"
 expect_eq "30g4 …and keeps the declared set" "d.test.sh" "$(s30_field "$(s30_last "$R30W")" suites_allowed)"
+
+# ---------- 30i: A DERIVED ROW'S SET STANDS AS NAMED (wave-31 T23, REQ-4 AC-4.2; D3) ----------
+# A row 1.14.0's map derived still carries `suites_source=derived`. Nothing re-derives it now: its
+# old set is carried as if the brief had named it, an added suite joins it, an added file adds no
+# suite, and the row keeps the label it had.
+R30D="$(make_repo s30-derived)"; new_roster "$R30D"
+s30_row "$R30D" files=hooks/a.sh,hooks/b.sh suites_source=derived
+poke "$R30D" amend w1 --suites+ tests/c.test.sh --reason 'one more suite'
+expect_eq "30i a derived row takes a suite (exit 0)" "0" "$RC"
+expect_eq "30i2 …its old set stands beside the added one" "a.test.sh c.test.sh" \
+  "$(s30_field "$(s30_last "$R30D")" suites_allowed)"
+expect_eq "30i3 …and the row keeps its label" "derived" "$(s30_field "$(s30_last "$R30D")" suites_source)"
+poke "$R30D" amend w1 --files+ lib/q.sh --reason 'one more file'
+expect_eq "30i4 a files-only amend of a derived row is admitted (exit 0)" "0" "$RC"
+expect_eq "30i5 …and adds no suite" "a.test.sh c.test.sh" "$(s30_field "$(s30_last "$R30D")" suites_allowed)"
+expect_eq "30i6 …the file is on the row" "hooks/a.sh,hooks/b.sh,lib/q.sh" "$(s30_field "$(s30_last "$R30D")" files)"
 
 # ---------- 30h: the arg shape ----------
 poke "$R30" amend
