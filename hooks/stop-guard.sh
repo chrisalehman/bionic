@@ -1,14 +1,17 @@
 #!/bin/bash
 # THE STOP GATE — epic-15 wave-01R; re-founded at epic-23 wave-15-fixit-182 (REQ-2, D2).
-# ONE registration, PreToolUse|TaskStop. A stop during an active wave is refused when, and
-# only when, THIS GATE CAN SEE that the target is still working and has delivered nothing.
+# ONE registration, PreToolUse|TaskStop. A stop during an active wave is judged on what THIS
+# GATE CAN SEE of the target. Since wave-31 T32 (D6, REQ-6 AC-6.5) a target still working with
+# nothing delivered is no longer refused: the stop is allowed and the guard's verdict is written
+# on its roster row as `reason=` (the alive arm, below). The refusals that remain are the ones
+# about the target's identity and the gate's own read: no id, an ambiguity, an unreadable roster.
 #
 # THE LOOK IS THE GATE'S OWN (ADR-028). It reads the target's working log, its contracted
 # progress artifact and its contracted deliverables at the instant of the stop, through
 # `observe_agent` in payload/scripts/lib/observe.sh — the same function hooks/stop-check.sh
-# prints. What it refuses is one observed state: `alive` (a channel moved inside the row's
-# declared cadence) with the contract undelivered. `idle`, `delivered` and a landed row all
-# pass, with the look on stderr.
+# prints. It refused one observed state, `alive` (a channel moved inside the row's declared
+# cadence) with the contract undelivered, until wave-31 T32; that state is now allowed and
+# recorded. `idle`, `delivered` and a landed row all pass, with the look on stderr.
 #
 # WHAT THIS REPLACES, AND WHY. Until 1.8.1 this gate admitted a stop only against a RECORD of
 # an earlier look — written by hooks/execution-recorder.sh from the verb's machine line,
@@ -1085,20 +1088,55 @@ observe_agent "$AGENT_ID"
 LOOK="$(observe_look_line)"
 
 if [ "$OBS_CLASS" = "alive" ]; then
-  # THE ONE CASE THIS WALL EXISTS FOR. The target wrote inside the window its own dispatch
-  # declared, and the artifact that dispatch exists for is not on disk — so a stop here ends
-  # work that has not landed anywhere. The refusal prints the four facts it was made of
-  # (ADR-028: a wall that asserts only what it observes must be able to say what it observed),
-  # and the human order below it is the way past a verdict the operator disagrees with.
-  deny "it is still working, nothing delivered" "let it finish, or order it" \
-       "'${RAW}' (${AGENT_ID}) is ALIVE and its contract is undelivered." \
-       "    working log:  ${OBS_LOG}" \
-       "    last write:   $(fmt_age "$OBS_LOG_AGE") ago, inside the declared cadence of ${OBS_CADENCE_S}s (${OBS_CADENCE_SOURCE})" \
-       "    progress:     ${OBS_PROGRESS_STATE}${OBS_PROGRESS:+ — ${OBS_PROGRESS}}" \
-       "    deliverable:  ${OBS_DELIV_STATE}${OBS_DELIV_PATHS:+ — ${OBS_DELIV_PATHS}}" \
-       "This is what this gate can see at the moment of the stop, and it is the whole of what" \
-       "it refuses on: an agent that has gone quiet past its own cadence, or that has landed" \
-       "its artifact, is stoppable."
+  # THE GUARD RECORDS ITS VERDICT AND DENIES NOTHING (wave-31 T32; D6, REQ-6 AC-6.5; A-orch-41
+  # ruling 4). The target wrote inside the window its own dispatch declared, and the artifact that
+  # dispatch exists for is not on disk. Until wave-31 this was the one state the gate refused ("it is
+  # still working, nothing delivered"), a process check the orchestrator answered by waiting or by
+  # asking the human for an order. Now the stop is allowed, and what the look saw is written on the
+  # agent's roster row as `reason=`, the key the unrostered branch above already writes. A TaskStop
+  # carries only its target (`task_id`), so the reason is the guard's own verdict, never a word the
+  # caller supplied.
+  #
+  # THE ROW IS THE NAME'S LATEST, COPIED WHOLE (the append idiom lib/roster.sh `roster_mark_landed`
+  # keeps: one `printf` of one line, no lock, no rewrite), with any `reason=` it carried dropped and
+  # the new one placed where `roster_row` writes it, just before `tool_use_id=`. Every by-key reader of
+  # the latest row then sees the contract and the verdict together. The value carries no clock time,
+  # so two stops of one target in one second say the same thing. A roster that cannot take the row
+  # does not bring the refusal back: the stop is allowed and stderr says the verdict was not written.
+  # The deadline is spent before the write, as the unrostered branch spends it, so a late alarm
+  # cannot refuse a stop whose row is already on disk.
+  SG_DEADLINE_LIVE=0
+  SG_WHY="unmet: deliverable ${OBS_DELIV_STATE}${OBS_DELIV_PATHS:+ — ${OBS_DELIV_PATHS}}; progress ${OBS_PROGRESS_STATE}"
+  SG_WHY="${SG_WHY//|/ }"; SG_WHY="${SG_WHY//$'\n'/ }"; SG_WHY="${SG_WHY//$'\r'/ }"; SG_WHY="${SG_WHY//$'\t'/ }"
+  SG_ROW=""; SG_WROTE=0
+  if [ -z "$ROSTER_UNREADABLE" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ] && [ -w "$ROSTER_FILE" ]; then
+    SG_ROW="$(roster_row_for_id "$ROSTER_FILE" "$AGENT_ID" 2>/dev/null)" || SG_ROW=""
+  fi
+  if [ -n "$SG_ROW" ]; then
+    SG_ROW="$(printf '%s\n' "$SG_ROW" | SG_WHY="$SG_WHY" awk -F'|' '
+      { o = $1; put = 0
+        for (i = 2; i <= NF; i++) {
+          if (index($i, "reason=") == 1) continue
+          if (!put && index($i, "tool_use_id=") == 1) { o = o "|reason=" ENVIRON["SG_WHY"]; put = 1 }
+          o = o "|" $i
+        }
+        if (!put) o = o "|reason=" ENVIRON["SG_WHY"]
+        print o }')"
+    if [ -n "$SG_ROW" ] && { printf '%s\n' "$SG_ROW" >> "$ROSTER_FILE"; } 2>/dev/null; then SG_WROTE=1; fi
+  fi
+  if [ "$SG_WROTE" = 1 ]; then
+    SG_SAID="its roster row records the verdict as reason=: ${SG_WHY}"
+  else
+    SG_SAID="the verdict could not be written to ${ROSTER_FILE}: ${SG_WHY}"
+  fi
+  {
+    echo "STOP ALLOWED — '${RAW}' (${AGENT_ID}) is ALIVE and its contract is undelivered; ${SG_SAID}."
+    echo "    working log:  ${OBS_LOG}"
+    echo "    last write:   $(fmt_age "$OBS_LOG_AGE") ago, inside the declared cadence of ${OBS_CADENCE_S}s (${OBS_CADENCE_SOURCE})"
+    echo "    progress:     ${OBS_PROGRESS_STATE}${OBS_PROGRESS:+ — ${OBS_PROGRESS}}"
+    echo "    deliverable:  ${OBS_DELIV_STATE}${OBS_DELIV_PATHS:+ — ${OBS_DELIV_PATHS}}"
+  } >&2
+  exit 0
 fi
 
 # PERMITTED, AND THE LOOK GOES WITH IT. The operator no longer runs the verb before a stop,
