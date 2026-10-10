@@ -367,8 +367,9 @@ PATROL_ARMED_SUFFIX=".armed"
 
 # THE TICK DIGEST AND THE PROMPT VERSION (wave-24 T7, REQ-4; D4, D5; ADR-041). The digest file
 # holds what one tick carries to the next: a hash of what the tick decided (no timestamp enters
-# it), when that answer was first given, the decision band, whether the turn owes the task-list
-# duty (`duty=owed|none`, read by the stop wall's collector), and the Patrol prompt version
+# it), when that answer was first given, the decision band, whether the turn's task list is behind
+# (`duty=owed|none`: advice since wave-31 T32, D6, which deleted the stop wall's task-list duty;
+# no wall reads it), and the Patrol prompt version
 # `arm` recorded. A tick whose hash matches the file's prints one line. The prompt version is
 # bumped whenever the prompt's wording changes what a tick turn is asked to do, so a Patrol armed
 # under an older one is told to re-arm.
@@ -8807,12 +8808,12 @@ $(run_groups "$RUN_PID")"
       printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     }
     # THE TASK LIST IS REBUILT AT PLAN APPROVAL (wave-27 T13; D20; steps/3.md). No hook reads a
-    # task list, so this line is the only wall the rule has: the duty is also owed when the
+    # task list, so this line is all the rule has (advice: no wall reads it since wave-31 T32): it is also owed when the
     # plan's `current:` was 3 at the last digest and is 4 now, or its row count has grown, and
     # it is owed on a QUIET tick too (a plan at approval has nothing open yet).
     # WHICH MOVE IT WAS (wave-27 T37; review pass 8 F2) is TICK_RECONCILE, `step4` or `grew`: the
-    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` so
-    # the turn-end wall's refusal gives the same cause. A move into Step 4 is named first when
+    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` (read by
+    # no wall since wave-31 T32; D6: the line is advice). A move into Step 4 is named first when
     # the table also grew: the rebuild it asks for covers the new rows.
     TICK_RECONCILE=""
     tick_plan_moved() {  # -> 0 when the digest's last reading of the plan is behind this one

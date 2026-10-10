@@ -456,7 +456,8 @@ sg_roster_row "$P_REPO" "$SID_A" "idle" "aidle-4444444444444444"
 sed -i.bak 's/^current: 4$/current: pending/' "$P_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
 rm -f "$P_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md.bak"
 run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_status "an engaged session is policed whatever the plan's step says: REFUSED" 2 "$GUARD_ST"
+expect_status "an engaged session is policed whatever the plan's step says: the look is taken (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…and the guard says what it saw, the stop allowed" "STOP ALLOWED" "$GUARD_ERR"
 P_REFUSAL="$GUARD_ERR"
 
 rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
@@ -501,7 +502,8 @@ plant_agent "$W4_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
 sg_roster_row "$W4_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdeadbeef"
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "quiet-reviewer")"
-expect_status "active wave + a target still working: REFUSED" 2 "$GUARD_ST"
+expect_status "active wave + a target still working (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…and the guard says it judged the target" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # §7's stop=closed row, and since task-engaged-session it has to be driven on the channel
 # that actually carries identity. The gate asks `engaged_session` first, keyed to the
@@ -513,7 +515,8 @@ W4_NOKEY=$(jq -n --arg c "$W4_REPO" --arg t "$W4_TR" \
   '{transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"TaskStop", tool_input:{task_id:"quiet-reviewer"}}')
 GUARD_OUT=$(printf '%s' "$W4_NOKEY" | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
 GUARD_ERR=$(cat "$SANDBOX/.err")
-expect_status "active wave + payload missing its session key: REFUSED (closed)" 2 "$GUARD_ST"
+expect_status "active wave + payload missing its session key: the environment's key resolves it, and the working target is judged (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…on the look, keyed to the environment's session" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # AND THE ROW BELOW IT, new with the switch: a payload with no key AND no key in the
 # environment cannot be shown to belong to an engaged session at all. Engagement is
@@ -553,7 +556,8 @@ sg_roster_row "$CR_REPO" "$SID_A" "crlf" "acrlf-0123456789abcdef"
 CR_PLAN="$CR_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
 tr '\n' '\r' < "$CR_PLAN" > "$CR_PLAN.cr" && mv "$CR_PLAN.cr" "$CR_PLAN"
 run_guard "$(mk_stop_payload "$SID_A" "$CR_TR" "$CR_REPO" "crlf")"
-expect_status "a CR-only plan is still read: the wave is still detected" 2 "$GUARD_ST"
+expect_status "a CR-only plan is still read: the wave is still detected (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…the look taken, as the wave being detected requires" "STOP ALLOWED" "$GUARD_ERR"
 
 # The positive pair — a wall that refuses everything is equally broken (§9). The SAME world,
 # the SAME target, one fact changed: the agent has gone quiet past its cadence.
@@ -614,7 +618,8 @@ expect_status "a named transcript-form target with no metadata: still REFUSED" 2
 plant_agent "$W4_SUB" "ahushed-reviewer-7777777777777777" "hushed-reviewer"
 sg_roster_row "$W4_REPO" "$SID_A" "hushed-reviewer" "ahushed-reviewer-7777777777777777"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "hushed-reviewer")"
-expect_status "a supervised named target still engages the full guard path: REFUSED, it is working" 2 "$GUARD_ST"
+expect_status "a supervised named target still engages the full guard path: it is working (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…the look taken" "STOP ALLOWED" "$GUARD_ERR"
 expect_absent "…and this is NOT the passthrough branch" "PASSTHROUGH" "$GUARD_ERR"
 
 section "§BID — a background shell id is the one the TRANSCRIPT recorded, else a 9-character [bt] id (wave-24 T10; REQ-7 AC-7.4; D12, research R4 §3)"
@@ -647,12 +652,14 @@ expect_status "bid2c a prefix of a recorded id: REFUSED" 2 "$GUARD_ST"
 plant_agent "$W4_SUB" "abootstrap1-8888888888888888" "bootstrap1"
 sg_roster_row "$W4_REPO" "$SID_A" "bootstrap1" "abootstrap1-8888888888888888"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "bootstrap1")"
-expect_status "bid3 a ROSTERED 9-character b-name (bootstrap1): still guarded, REFUSED" 2 "$GUARD_ST"
+expect_status "bid3 a ROSTERED 9-character b-name (bootstrap1): still guarded, the look taken (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "bid3 …the guarded path's own line" "STOP ALLOWED" "$GUARD_ERR"
 expect_absent "bid3 …and this is NOT the passthrough branch" "PASSTHROUGH" "$GUARD_ERR"
 # …even when the transcript records that very string as a background id.
 printf '%s\n' '{"toolUseResult":{"backgroundTaskId":"bootstrap1"}}' >> "$W4_TR"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "bootstrap1")"
-expect_status "bid3b …and a transcript record of it does not take it out of the guard" 2 "$GUARD_ST"
+expect_status "bid3b …and a transcript record of it does not take it out of the guard" 0 "$GUARD_ST"
+expect_contains "bid3b …the guarded path's own line" "STOP ALLOWED" "$GUARD_ERR"
 expect_absent "bid3b …nor reach the passthrough" "PASSTHROUGH" "$GUARD_ERR"
 
 # bid4 — an unrostered name that is a name and not an id: refused (a hyphen is no id).
@@ -710,17 +717,17 @@ sg_roster_row "$A22_REPO" "$SID_A" "busy" "abusy-1212121212121212" ".bionic/tmp/
   "confirmed" ".bionic/docs/record/busy.md" "" "" "" "300 seconds"
 wake_log "$A22_SUB" "abusy-1212121212121212"
 run_guard "$(mk_stop_payload "$SID_A" "$A22_TR" "$A22_REPO" "busy")"
-expect_status "AC-2.2 alive inside its cadence, deliverable absent: REFUSED" 2 "$GUARD_ST"
+expect_status "AC-2.2 alive inside its cadence, deliverable absent (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
 expect_contains "AC-2.2 …and the one line names what was observed" \
-  "it is still working, nothing delivered" "$GUARD_ERR"
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 expect_contains "AC-2.2 fact 1 — the working log's path" \
-  "agent-abusy-1212121212121212.jsonl" "$GUARD_VERR"
+  "agent-abusy-1212121212121212.jsonl" "$GUARD_ERR"
 expect_regex "AC-2.2 fact 2 — its age, against the cadence the row declared" \
-  'last write:.*inside the declared cadence of 300s' "$GUARD_VERR"
+  'last write:.*inside the declared cadence of 300s' "$GUARD_ERR"
 expect_regex "AC-2.2 fact 3 — the progress artifact's state" \
-  'progress: +present' "$GUARD_VERR"
+  'progress: +present' "$GUARD_ERR"
 expect_contains "AC-2.2 fact 4 — the deliverable it has not written" \
-  ".bionic/docs/record/busy.md" "$GUARD_VERR"
+  ".bionic/docs/record/busy.md" "$GUARD_ERR"
 
 # THE CADENCE IS THE ROW'S OWN, and that is what makes "alive" a fact rather than a clock.
 # The identical world with a cadence of five seconds reads the same log as IDLE, and the stop
@@ -785,8 +792,9 @@ sg_roster_row "$A23_REPO" "$SID_A" "empty-one" "aempty-2424242424242424" "" \
   "confirmed" ".bionic/docs/record/empty.md" "" "" "" "5 min"
 wake_log "$A23_SUB" "aempty-2424242424242424"
 run_guard "$(mk_stop_payload "$SID_A" "$A23_TR" "$A23_REPO" "empty-one")"
-expect_status "AC-2.3 (d) a zero-byte artifact leaves the contract undelivered: REFUSED" \
-  2 "$GUARD_ST"
+expect_status "AC-2.3 (d) a zero-byte artifact leaves the contract undelivered (wave-31 T32: allowed, its verdict recorded as reason=)" \
+  0 "$GUARD_ST"
+expect_contains "AC-2.3 (d) …judged undelivered, not delivered" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # (e) THE PROGRESS ARTIFACT IS THE SECOND CHANNEL, and it is the one that keeps an agent
 # inside a forty-minute tool call from reading as idle. The working log is ancient; the
@@ -798,10 +806,10 @@ sg_roster_row "$A23_REPO" "$SID_A" "long-call" "alongcall-2525252525252525" \
   ".bionic/tmp/long.progress" "confirmed" ".bionic/docs/record/long.md" "" "" "" "5 min"
 age_log "$A23_SUB" "alongcall-2525252525252525"
 run_guard "$(mk_stop_payload "$SID_A" "$A23_TR" "$A23_REPO" "long-call")"
-expect_status "AC-2.3 (e) a silent log but a moving progress artifact is ALIVE: REFUSED" \
-  2 "$GUARD_ST"
-expect_regex "AC-2.3 (e) …and the refusal names the channel it read" \
-  'progress: +present' "$GUARD_VERR"
+expect_status "AC-2.3 (e) a silent log but a moving progress artifact is ALIVE (wave-31 T32: allowed, its verdict recorded as reason=)" \
+  0 "$GUARD_ST"
+expect_regex "AC-2.3 (e) …and the verdict names the channel it read" \
+  'progress: +present' "$GUARD_ERR"
 
 # …and its pair: the same world with the progress artifact as old as the log.
 touch -t 202601010000 "$A23_REPO/.bionic/tmp/long.progress"
@@ -819,9 +827,11 @@ section "Section 6a: the refusal's Fix line is runnable AS PRINTED (R2)"
 # absent deliverables (R2) — a refusal that teaches the reader something false.
 IFS='|' read -r R2_REPO R2_TR R2_SUB <<< "$(make_world r2 yes)"
 plant_agent "$R2_SUB" "ablocked-aaaaaaaaaaaaaaaa" "blocked"
-sg_roster_row "$R2_REPO" "$SID_A" "blocked" "ablocked-aaaaaaaaaaaaaaaa"
+# THE REFUSAL IS ONE THAT REMAINS (wave-31 T32): the stop of a working target is allowed now, so the
+# Fix line is read off the refusal of a target whose row carries no agent id (`intended`).
+sg_roster_row "$R2_REPO" "$SID_A" "blocked" "" "" "intended"
 run_guard "$(mk_stop_payload "$SID_A" "$R2_TR" "$R2_REPO" "blocked")"
-expect_status "the stop of a working target is refused (setup for R2)" 2 "$GUARD_ST"
+expect_status "the stop of a target the roster holds no id for is refused (setup for R2)" 2 "$GUARD_ST"
 # THE PASTEABLE FIX LINE IS IN THE DETAIL NOW (task 13, D-1): the user line names the
 # repair in six words and the runnable command is what the knob carries, so this is read
 # off the verbose stream. That it still EXECUTES is what the three arms below prove.
@@ -1014,9 +1024,9 @@ cp "$LV_SUB/agent-aw2-rc-e0886335875ba2d2.jsonl"     "$LV_SUB_B/agent-aw2-rc-e08
 sg_roster_row "$LV_REPO" "$SID_A" "w2-rc" "aw2-rc-e0886335875ba2d2" "" "confirmed" \
   ".bionic/docs/record/w2-rc.md" "" "" "$SID_B"
 run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "w2-rc")"
-expect_status "the same double file, contract UNMET and the agent working: REFUSED" 2 "$GUARD_ST"
+expect_status "the same double file, contract UNMET and the agent working (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
 expect_contains "…and it is the target's own liveness, not an ambiguity" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 expect_absent "…nothing calls the double file ambiguous" "ambiguous" "$GUARD_ERR"
 
 # (b) A NAME THE ANSWER DOES NOT CARRY is not live, and the refusal says so. `ghost` is on
@@ -1050,14 +1060,14 @@ sg_roster_row "$TW_REPO" "$SID_A" "twin" "atwin-1111111111111111"
 # ceremony.
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin")"
 expect_status "a name the live set carries twice resolves on the ROSTER: the look, not an ambiguity" \
-  2 "$GUARD_ST"
-expect_contains "…and the refusal is the target's liveness" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+  0 "$GUARD_ST"
+expect_contains "…and the verdict is the target's liveness" \
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 expect_absent "…nothing calls it ambiguous any more" "ambiguous" "$GUARD_ERR"
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin@session-${SID_A:0:8}")"
-expect_status "…and the alias spelling resolves the same way" 2 "$GUARD_ST"
-expect_contains "…to the same liveness refusal" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+expect_status "…and the alias spelling resolves the same way" 0 "$GUARD_ST"
+expect_contains "…to the same liveness verdict" \
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # (c3) TWO LIVE ROWS, ONE BARE NAME — THE AMBIGUITY TRANSLATED TO THE REGISTER (T29).
 #
@@ -1103,9 +1113,9 @@ expect_regex "…with the same fault, not the alias rule" 'more than one live ro
 # agent id is unambiguous against the register by construction: exactly one row carries it.
 # Without this row the arm above is equally green on a gate that refuses every spelling.
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "atwin-2222222222222222")"
-expect_status "…while the full agent id resolves and meets the ordinary look" 2 "$GUARD_ST"
+expect_status "…while the full agent id resolves and meets the ordinary look" 0 "$GUARD_ST"
 expect_contains "…which is the target's liveness, not an ambiguity" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 expect_absent "…nothing calls the id ambiguous" "more than one live row" "$GUARD_ERR"
 
 # (c5) THE ID THE AMBIGUITY REFUSAL PRESCRIBES REACHES THE ROW IT NAMES (T31; delta review D1).
@@ -1132,15 +1142,15 @@ sg_roster_row "$TI_REPO" "$SID_A" "twin" "atwin-2222222222222222" "" "identified
 age_log "$TI_SUB" "atwin-2222222222222222"
 
 run_guard "$(mk_stop_payload "$SID_A" "$TI_TR" "$TI_REPO" "atwin-1111111111111111")"
-expect_status "the id of the WORKING twin: REFUSED, never let through by its twin's quiet" \
-  2 "$GUARD_ST"
+expect_status "the id of the WORKING twin: judged on its own look, never on its twin's quiet (wave-31 T32: allowed, its verdict recorded as reason=)" \
+  0 "$GUARD_ST"
 # The id inside the parentheses is what the gate RESOLVED. Printing the typed id back beside
 # itself is the whole claim: before T31 this line read `(atwin-2222222222222222)`, naming the
 # row whose facts were read while permitting a stop of the other one.
-expect_contains "…and the refusal names the id that was typed, resolved to itself" \
-  "'atwin-1111111111111111' (atwin-1111111111111111) is ALIVE" "$GUARD_VERR"
-expect_absent "…and the other row's id is nowhere in the refusal" \
-  "atwin-2222222222222222" "$GUARD_VERR"
+expect_contains "…and the verdict names the id that was typed, resolved to itself" \
+  "'atwin-1111111111111111' (atwin-1111111111111111) is ALIVE" "$GUARD_ERR"
+expect_absent "…and the other row's id is nowhere in the verdict" \
+  "atwin-2222222222222222" "$GUARD_ERR"
 
 # THE PAIRED CONTROL, and what makes the arm above a RESOLUTION rule rather than a ban on
 # ids: the id that IS quiet is stoppable. A gate that refused every id on an ambiguous roster
@@ -1182,12 +1192,12 @@ expect_contains "(c4) meta: the sweeper's ack verb journalled the first run's ac
 plant_agent "$RL_SUB" "abystander-3333333333333333" "bystander"
 sg_roster_row "$RL_REPO" "$SID_A" "bystander" "abystander-3333333333333333"
 run_guard "$(mk_stop_payload "$SID_A" "$RL_TR" "$RL_REPO" "rerun")"
-expect_status "a landed row beside the re-run's live row: NOT ambiguous — the live row answers" \
-  2 "$GUARD_ST"
+expect_status "a landed row beside the re-run's live row: NOT ambiguous — the live row answers (wave-31 T32: allowed, its verdict recorded as reason=)" \
+  0 "$GUARD_ST"
 expect_absent "…nothing calls the re-run ambiguous (T17: the first run is now closed by an ack, not a MET marker)" "more than one live row" "$GUARD_ERR"
 expect_contains "…and resolution lands on the LIVE row's id" \
-  "arerun-2222222222222222" "$GUARD_VERR"
-expect_absent "…never on the id the ack discharged (T17: was '…the id the MET marker closed')" "arerun-1111111111111111" "$GUARD_VERR"
+  "arerun-2222222222222222" "$GUARD_ERR"
+expect_absent "…never on the id the ack discharged (T17: was '…the id the MET marker closed')" "arerun-1111111111111111" "$GUARD_ERR"
 
 # (c6) A RESTARTED ID PLUS A FRESH RE-DISPATCH OF ONE NAME: STILL AMBIGUOUS (epic-23 wave-20
 # T20d, review R3-1). `live_ids_of_name` — this arm's own predicate — used to discharge an id
@@ -1240,9 +1250,9 @@ sg_roster_row "$RX_REPO" "$SID_A" "a.b" "arxa-1111111111111111"
 # compares by FIELD EQUALITY exactly as the retired listing did — `a.b` resolves to the row
 # named `a.b` and never to the bystander `axb`.
 run_guard "$(mk_stop_payload "$SID_A" "$RX_TR" "$RX_REPO" "a.b")"
-expect_status "a name with a regex metacharacter resolves on the roster: the look" 2 "$GUARD_ST"
-expect_contains "…and the refusal is the target's liveness" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+expect_status "a name with a regex metacharacter resolves on the roster: the look (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…and the verdict is the target's liveness" \
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 expect_absent "…never widened to the bystander name the dot happens to match" \
   "axb" "$GUARD_ERR"
 
@@ -1317,9 +1327,9 @@ plant_agent "$F_SUB" "aslacker-2222222222222222" "slacker"
 sg_roster_row "$F_REPO" "$SID_A" "slacker" "aslacker-2222222222222222" "" "confirmed" \
   ".bionic/docs/record/slacker.md"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "slacker")"
-expect_status "UNMET contract and the agent still writing: REFUSED" 2 "$GUARD_ST"
+expect_status "UNMET contract and the agent still writing (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
 expect_contains "…on the look, not on the landing verdict" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # --- WAIVED: an explicit designation discharges as surely as an artifact ---
 plant_agent "$F_SUB" "awaived-3333333333333333" "waived-one"
@@ -1350,7 +1360,8 @@ plant_agent "$F_SUB" "aacked-5555555555555555" "acked-one-more"
 sg_roster_row "$F_REPO" "$SID_A" "acked-one-more" "aacked-5555555555555555" "" "confirmed" \
   ".bionic/docs/record/never-written-2.md"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "acked-one-more")"
-expect_status "a neighbouring ack does not discharge this row: REFUSED, it is working" 2 "$GUARD_ST"
+expect_status "a neighbouring ack does not discharge this row: it is working, judged on the look (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…the look, not the ack" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # --- the VACUOUS MET keeps its ceremony ---
 #
@@ -1361,7 +1372,8 @@ expect_status "a neighbouring ack does not discharge this row: REFUSED, it is wo
 plant_agent "$F_SUB" "anothing-6666666666666666" "declares-nothing"
 sg_roster_row "$F_REPO" "$SID_A" "declares-nothing" "anothing-6666666666666666"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "declares-nothing")"
-expect_status "a row that declared NOTHING is not discharged by its vacuous MET" 2 "$GUARD_ST"
+expect_status "a row that declared NOTHING is not discharged by its vacuous MET: judged on the look (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…the look, not the vacuous MET" "STOP ALLOWED" "$GUARD_ERR"
 # …and the paired positive, which is what keeps the row above from being "everything is
 # refused": the same contract-less row, quiet, is stoppable.
 age_log "$F_SUB" "anothing-6666666666666666"
@@ -1435,7 +1447,8 @@ sg_roster_row "$O_REPO" "$SID_A" "ordered" "aordered-1111111111111111" "" "confi
 
 # Precondition: without the order this is the ordinary live+unmet refusal.
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "ordered")"
-expect_status "precondition — unmet and unordered: REFUSED" 2 "$GUARD_ST"
+expect_status "precondition — unmet and unordered: judged on the look (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "precondition — …the guard's own verdict, not an order" "STOP ALLOWED" "$GUARD_ERR"
 
 order_stop "$O_REPO" "$SID_A" "ordered"
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "ordered")"
@@ -1461,7 +1474,9 @@ plant_agent "$O_SUB" "aunordered-22222222222" "unordered"
 sg_roster_row "$O_REPO" "$SID_A" "unordered" "aunordered-22222222222" "" "confirmed" \
   ".bionic/docs/record/unordered.md"
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "unordered")"
-expect_status "an order for another target discharges nothing here: REFUSED" 2 "$GUARD_ST"
+expect_status "an order for another target discharges nothing here: judged on the look (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…the guard's own verdict" "STOP ALLOWED" "$GUARD_ERR"
+expect_absent "…never the order's line" "STOP ORDERED" "$GUARD_ERR"
 
 # AN ORDER IS A LIVE INSTRUCTION, NOT A STANDING ONE. It is bounded in time on
 # purpose — the one place in this gate where a clock is right, because what is
@@ -1472,7 +1487,9 @@ sg_roster_row "$O_REPO" "$SID_A" "stale-order" "astale-333333333333333" "" "conf
   ".bionic/docs/record/stale-order.md"
 order_stop "$O_REPO" "$SID_A" "stale-order" --at $(( $(date -u +%s) - 86400 ))
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "stale-order")"
-expect_status "an EXPIRED order does not discharge: REFUSED" 2 "$GUARD_ST"
+expect_status "an EXPIRED order does not discharge: judged on the look (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…the guard's own verdict" "STOP ALLOWED" "$GUARD_ERR"
+expect_absent "…never the order's line" "STOP ORDERED" "$GUARD_ERR"
 
 section "Section 12b: the order is read BEFORE roster standing (D14, REQ-6; AC-6.1/AC-6.2)"
 #
@@ -1582,17 +1599,17 @@ expect_contains "…and the look names the log under the session that launched i
 run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee@session-${SID_B:0:8}")"
 expect_status "…and so does the address adopt prints for it" 0 "$GUARD_ST"
 
-# THE GUARD IS UNCHANGED FOR A WORKING AGENT: a second adopted agent, still writing to the
-# log filed under its launcher, is refused — and for its own liveness, which is the half a
-# status assertion alone cannot tell from the defect.
+# THE GUARD JUDGES A WORKING AGENT AS IT JUDGES ANY: a second adopted agent, still writing to the
+# log filed under its launcher, is judged alive on its own log (wave-31 T32: the stop is allowed and
+# the verdict recorded), which is the half a status assertion alone cannot tell from the defect.
 plant_agent "$AD_SUB_B" "aadoptee-2222222222222222" "adoptee2"
 plant_live "$AD_TR" fresh "adoptee" "adoptee2"
 sg_roster_row "$AD_REPO" "$SID_A" "adoptee2" "aadoptee-2222222222222222" "" "identified" "" "" \
   "adoptee2@session-${SID_B:0:8}" "$SID_B"
 run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee2")"
-expect_status "a WORKING adopted agent is still refused" 2 "$GUARD_ST"
-expect_contains "…and the refusal is its liveness, not an unresolved address" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+expect_status "a WORKING adopted agent is judged on its own liveness (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "…and the verdict is its liveness, not an unresolved address" \
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # THE DISCRIMINATOR. An agent sitting in the predecessor's directory that this session's
 # live set does not name stays invisible — the scope is the harness's statement, not the
@@ -1733,9 +1750,9 @@ expect_contains "…and the look says what is being given up" "deliverable pendi
 # deciding passes the row above and fails this one.
 wake_log "$I_SUB" "aidle-8888888888888888"
 run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "idle-slacker")"
-expect_status "…while the same agent WRITING with the same unmet contract: REFUSED" 2 "$GUARD_ST"
+expect_status "…while the same agent WRITING with the same unmet contract is judged alive (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
 expect_contains "…naming what it observed, not a missing record" \
-  "is ALIVE and its contract is undelivered" "$GUARD_VERR"
+  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 section "Section T22: the roster is the identity register (AC-4.4, A-orch-33)"
 #
@@ -1955,11 +1972,11 @@ sg_roster_row "$AL17_REPO" "$SID_A" "adoptee" "$AID17" "" "identified" "" "" \
   "adoptee@session-${SID_B:0:8}" "$SID_B"
 
 run_guard "$(mk_stop_payload "$SID_A" "$AL17_TR" "$AL17_REPO" "adoptee")"
-expect_status "alive under the INTERMEDIATE adopter's fresh copy: still refused" 2 "$GUARD_ST"
+expect_status "alive under the INTERMEDIATE adopter's fresh copy: judged alive (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
 expect_contains "…and the working log named is the intermediate adopter's own path" \
-  "$AL17_PROJ/$SID_C/subagents/agent-${AID17}.jsonl" "$GUARD_VERR"
+  "$AL17_PROJ/$SID_C/subagents/agent-${AID17}.jsonl" "$GUARD_ERR"
 expect_absent "…never the launcher's stale path" \
-  "$AL17_SUB_B/agent-${AID17}.jsonl" "$GUARD_VERR"
+  "$AL17_SUB_B/agent-${AID17}.jsonl" "$GUARD_ERR"
 
 section "§UNROSTERED — a listed agent the roster never saw is stopped on the orchestrator's recorded reason, once (wave-28 T70; REQ-6, D8)"
 #
@@ -2077,8 +2094,9 @@ mkdir -p "$UR_REPO/.bionic/tmp"
 printf 'stop-unrostered/v1|at=2026-10-07T00:00:00Z|epoch=%s|session=%s|by=orchestrator|why=planted|target=ghost\n' \
   "$(date -u +%s)" "$SID_A" >> "$(ur_orders)"
 run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "ghost")"
-expect_status "UR8 a rostered, alive agent with a planted record is still REFUSED" 2 "$GUARD_ST"
-expect_contains "UR8 …on the gate's own look" "it is still working" "$GUARD_ERR"
+expect_status "UR8 a rostered, alive agent with a planted record is judged on the look, not the record (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
+expect_contains "UR8 …on the gate's own look" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
+expect_absent "UR8 …never the unrostered record's line" "STOP RECORDED (unrostered" "$GUARD_ERR"
 
 # (9) THE ROSTER IS NOT READ OR WRITTEN THROUGH A LINK, and a stop that cannot be recorded is not made.
 ur_world f
