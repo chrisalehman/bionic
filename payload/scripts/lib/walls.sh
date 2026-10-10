@@ -4526,9 +4526,12 @@ validate_intent_evidence() {
   return 0
 }
 
-# Wave-scale D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to
-# scale:wave + frontmatter rigor:double + multi_agent:true plans; for
-# every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
+# D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to scale wave or task +
+# frontmatter rigor:double + multi_agent:true plans; for every other plan it is a no-op
+# (return 0). ONE LEDGER SHAPE (wave-31 T24; REQ-1, D2): a task-scale plan carries the same
+# `## Tasks` table, so this is its ledger arm too — the second arm that judged a task
+# table by its own enum is gone, and a guard that read only `wave` would leave the one
+# table unread at task scale (A-T24-6). scale:epic is intentionally OUT —
 # epic plans legitimately dispatch research, not task-shaped units, so demanding
 # a dispatched-task ledger there would false-block scoping runs (plan Assumption
 # A8). Called from dispatch_modern, so it runs at EVERY step that reaches the
@@ -4551,7 +4554,7 @@ validate_intent_evidence() {
 #      there must not be a placeholder, else exit 2.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
-  [ "$SCALE" = "wave" ] || return 0
+  case "$SCALE" in wave|task) : ;; *) return 0 ;; esac
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
@@ -4587,7 +4590,7 @@ validate_dispatch_ledger() {
     /^## / { f=0 }
     f')
   if [ -z "$tasks" ]; then
-    _eg_detail="canonical-sdlc double multi_agent wave plan has no '## Tasks' dispatched-task ledger section.
+    _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
@@ -4600,7 +4603,7 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   violations="$(units_validate "$PLAN")" || true
   if [ -n "$violations" ]; then
-    _eg_detail="canonical-sdlc double multi_agent wave plan's '## Tasks' table breaks the Task invariants:
+    _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
 Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
