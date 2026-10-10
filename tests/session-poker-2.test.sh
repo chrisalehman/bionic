@@ -394,6 +394,13 @@ section "Section 40: HELD and LEDGER print in EVERY tick state — no roster, no
 # before the state split, never a second time inside an arm. Sections 38/39 pin the probes to
 # a healthy machine; these pin them to the states those sections never reach.
 s40_count() { printf '%s\n' "$OUT" | /usr/bin/grep -c "^$1" 2>/dev/null; }
+# THE SHARE IS FIXTURE DATA (wave-31 T25; A-T25-7). "A 90% load is over the share" holds only
+# against a share below 90, and the gate reads it from ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share
+# (lib/gate.sh `gate_share`): left unpinned, this section read the machine's file and went red the
+# day it was set to 92. So the section runs under a config dir of its own holding share 80, as
+# tests/gate.test.sh's `fresh()` plants it, and gives the environment back after 40e.
+S40_CFG="$(fake_config_dir s40)"; mkdir -p "$S40_CFG/bionic"; printf '80\n' > "$S40_CFG/bionic/share"
+export CLAUDE_CONFIG_DIR="$S40_CFG"
 
 # 40a — THE FIRST TICK: armed, nothing dispatched, no roster file. With no roster the reader
 # takes its no-roster rule, the gate's: an agent-named active row with no line is an
@@ -491,6 +498,8 @@ S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: 
 S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_DISARM="$(s38_line_no 'poker: DISARM')"
 expect_true "40e5 …after the gate line and before the DISARM line (gate=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER disarm=$S40_DISARM)" \
   test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_DISARM" -gt "$S40_LEDGER"
+expect_contains "40f the section read its own share, never the machine's (the gate line names 80)" "poker: gate share=80" "$OUT"
+unset CLAUDE_CONFIG_DIR
 # ============================================================
 section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest, version (wave-24 T7; REQ-4 AC-4.1–4.6, 4.9, 4.11; D1, D4, D5; ADR-041)"
 # ============================================================
