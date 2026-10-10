@@ -87,12 +87,12 @@
 # green one from the same function on a fixture one edit away; the digest function is proved
 # to return a 64-hex digest on every shipped checks file before any comparison reads it.
 #
-# Usage: bash tests/reader-exam.test.sh
+# Usage: bash tests/exam/reader-exam.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/../lib/resolve-roots.sh"
+. "$(dirname "$0")/../lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 EXAM="${REPO}/tests/reader-exam"
