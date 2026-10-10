@@ -1669,14 +1669,11 @@ printed a reason above this line, that is the cause. The commit is still refused
   return 0
 }
 
-# Per-tier required evidence keys — MIRROR of the canonical table in
-# skills/canonical-sdlc/steps/5.md ("Per-tier required keys"). Change THAT
-# table first; this function follows it. (R27)
-#
-# `evidence` (1a, D5) is the one SHARED key every tier owes on top of its own
-# — the AC block's record/ proof path — and it is listed LAST in every arm so
-# the loop that walks this list still blocks on a tier-specific key first when
-# one is missing (see the 'evidence' branch inside validate_matrix's loop).
+# Per-tier required evidence keys — ONE POINTER PER MATRIX ROW (wave-31 T6; REQ-5, D5). Every tier owes
+# `evidence:`, the AC block's proof path under record/; a T4 row owes `user-confirmed:` as well, the one thing
+# only a user can write. The per-tier readings that used to ride beside the pointer were written by the agent that
+# ran the eval, copied from the record file the pointer already names, and read by nothing but this loop: a key
+# read by nothing is ceremony. The record file is where the run is shown, and the pointer is checked to name one.
 #
 # AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT (wave-30 T14; REQ-6 AC-6.1, D9).
 # `session-poker.sh matrix-render` writes each AC block's stubs from this list, sourcing this
@@ -1686,10 +1683,8 @@ printed a reason above this line, that is the cause. The commit is still refused
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 keys_for_tier() {
   case "$1" in
-    T0|T1) echo "tier-run readback evidence" ;;
-    T2)    echo "tier-run readback fixture-fidelity evidence" ;;
-    T3)    echo "tier-run fresh cold-client contact readback evidence" ;;
-    T4)    echo "user-confirmed evidence" ;;
+    T0|T1|T2|T3) echo "evidence" ;;
+    T4)          echo "user-confirmed evidence" ;;
   esac
 }
 
@@ -4101,6 +4096,7 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 
 # Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body` since
 # wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
+# It names `evidence` for every tier and `user-confirmed` for T4 and nothing else (wave-31 T6).
 
 # THE THREE STEP-4 ARMS (epic-22 K2, K4, K2.5): `matrix_section`, `matrix_block`,
 # `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
@@ -4399,9 +4395,9 @@ validate_matrix() {
         # (record/<file> against the docs root, a bare path against the project
         # root, absolute as written) and the walk arm's '..' refusal — one
         # resolution rule for both citations, rather than a second copy of it.
-        # It sits LAST in keys_for_tier()'s per-tier list (R27's table), so a
-        # block that is missing some OTHER required key still blocks on that
-        # key first; this branch only bites a block that was otherwise complete.
+        # It sits LAST in keys_for_tier()'s list, so a T4 block that is missing
+        # `user-confirmed` still blocks on that key first; this branch only bites
+        # a block that was otherwise complete.
         # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
         if [ "$key" = "evidence" ]; then
           # THE CELL MAY CARRY A TRAILING NOTE (wave-18 REQ-9, D13, AC-9.1). Split on the
