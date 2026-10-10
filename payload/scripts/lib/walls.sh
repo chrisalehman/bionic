@@ -1688,6 +1688,47 @@ keys_for_tier() {
   esac
 }
 
+# THE LOADED SET, NAMED ONCE (wave-31 T30; REQ-14 AC-14.1, D13). The doctrine a session or a
+# dispatch loads: the rendered outputs and the hand-kept operational rules, never the sources they
+# are rendered from. One member per line, a repository-root path in which `*` stands for one path
+# segment. The net-zero arm (`validate_net_zero`, in the body below) sums these files' bytes, and
+# the release counts them by sourcing this file; a second list anywhere is the drift AC-14.1 fails on.
+#
+# AT FILE SCOPE, OUTSIDE `_eg_body`, for the reason `keys_for_tier` is: a subshell that sources
+# this file reads the list without running the gate.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+loaded_set() {
+  printf '%s\n' \
+    'skills/canonical-sdlc/SKILL.md' \
+    'skills/canonical-sdlc/steps/*.md' \
+    'skills/canonical-sdlc/dispatch.md' \
+    'skills/canonical-sdlc/operational-rules.md' \
+    'agents/*.md' \
+    'payload/context/*.md'
+}
+
+# loaded_set_sizes <repository dir> HEAD|index -> "<bytes>\t<path>" for each file of the set, as the
+# commit at HEAD holds it or as the index stages it. Blob sizes, read from git and never from the
+# work tree: the index is what the commit about to run will hold. ONE MATCHER FOR BOTH SIDES — each
+# member becomes an anchored pattern whose `*` matches inside one segment — and git is asked only
+# for the members' directories (`ls-tree` takes no wildcard). A stage other than 0 (a conflicted
+# merge) is not a size the commit can take, so it is left out. Prints nothing when git cannot answer.
+loaded_set_sizes() {
+  local dir="$1" side="$2" re _ls_d
+  local -a dirs=()
+  re="$(loaded_set | awk '{ g = $0; gsub(/[.]/, "[.]", g); gsub(/[*]/, "[^/]*", g); r = r (r == "" ? "" : "|") g }
+    END { print "^(" r ")$" }')"
+  while IFS= read -r _ls_d; do dirs+=("$_ls_d"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
+  if [ "$side" = HEAD ]; then
+    git -C "$dir" ls-tree -r -l HEAD -- "${dirs[@]}" 2>/dev/null \
+      | awk -F'\t' -v re="$re" '{ split($1, m, " ") } m[2] == "blob" && $2 ~ re { print m[4] "\t" $2 }'
+  else
+    git -C "$dir" ls-files -s -- "${dirs[@]}" 2>/dev/null \
+      | awk -F'\t' -v re="$re" '{ split($1, m, " ") } m[3] == "0" && $2 ~ re { print m[2] " " $2 }' \
+      | git -C "$dir" cat-file --batch-check=$'%(objectsize)\t%(rest)' 2>/dev/null
+  fi
+}
+
 # ── the hook's body, carried whole ───────────────────────────────────────────
 #
 # EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
@@ -2703,6 +2744,114 @@ Fix: remove the '${ac}:' block, or repoint its 'task:' to the build task that ci
   return 0
 }
 
+# The repository a commit is made in: the directory the commit runs in when git places it in one,
+# else the engaged root's — the plan's own repository. Assigns `_EG_REPO`. Read by
+# `validate_tests_head` (whether `head:` is a commit here) and `validate_net_zero` (whose index).
+_eg_commit_repo() {
+  _EG_REPO="${_EG_CWD:-}"
+  { [ -d "$_EG_REPO" ] && git -C "$_EG_REPO" rev-parse --git-dir >/dev/null 2>&1; } || _EG_REPO="$BIONIC_ROOT"
+}
+
+# ---------- the net-zero arm (wave-31 T30; REQ-14 AC-14.2, D13) ----------
+#
+# THE DOCTRINE NEVER GROWS WITHOUT THE USER'S WORD. The loaded set (`loaded_set`, at file scope
+# above) is summed twice: the blob sizes at HEAD and the blob sizes the index stages for the commit
+# about to run. After ≤ before passes without a word, whichever files moved, so growth paid for
+# elsewhere in the set is no growth. After > before is refused, naming the bytes added and each
+# file that grew, unless all three hold: the committing tree's `## Tasks` row (`_EG_RID`, set by the
+# worktree fork above) is open, its reads cell holds `approval:doctrine-growth`, and `## SDLC State`
+# carries the `approved: doctrine-growth …` line `session-poker.sh approve` writes. A commit no row
+# owns (the main checkout) has no row to read, so its growth is always refused.
+#
+# NO STEP GUARD, AND THAT IS THE POINT. The rule holds at every numeric `current:`, so the arm sits
+# with the three that run before the pointer-step exit; a writer's commit reaches it through the
+# fork's substituted `CURRENT`. A closed run is never judged, because the run predicate exits first.
+#
+# THE INDEX READ IS A NEW REACH, AND THE RULED EXCEPTION TO THE FREEZE (.claude/rules/hook-authoring.md:
+# a wall never fetches its own facts). No payload field says what a commit will hold, and D13 is
+# approved ("option 2"); this gate already asks git about the commit's repository
+# (`validate_tests_head`). The common case costs one `git diff --cached --quiet` over the set's
+# directories; the sums are taken only when something there is staged.
+#
+# A RESIDUAL, NAMED AND NOT CLOSED: `git commit -a` and `git commit <pathspec>` stage at commit time,
+# after this PreToolUse wall has read the index, so a growth committed that way passes here.
+# Refusing those spellings is a different wall's job.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+validate_net_zero() {
+  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a reads="" tok row_reads=0 lacks="" fix_id fix_cell
+  local -a dirs=() toks=()
+  _eg_commit_repo; dir="$_EG_REPO"
+  while IFS= read -r line; do dirs+=("$line"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
+  # rc 0: nothing staged under the set; rc 1: something is; anything else (no HEAD, no repository)
+  # leaves nothing to compare against, and the arm is silent.
+  git -C "$dir" diff --cached --quiet HEAD -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 1 ] || return 0
+
+  sums="$( { loaded_set_sizes "$dir" HEAD | awk '{ print "b\t" $0 }'
+             loaded_set_sizes "$dir" index | awk '{ print "a\t" $0 }'; } \
+    | awk -F'\t' '$2 !~ /^[0-9]+$/ { next }
+        { p[$3] = 1 }
+        $1 == "b" { b[$3] = $2; tb += $2; next }
+        { a[$3] = $2; ta += $2 }
+        END {
+          printf "0\t%d\t%d\t%d\n", ta - tb, tb, ta
+          for (f in p) if (a[f] + 0 > b[f] + 0) printf "1\t%s\t%d\t%d\n", f, b[f], a[f]
+        }' | sort)"
+  line="${sums%%$'\n'*}"
+  IFS=$'\t' read -r _ delta before after <<< "$line"
+  [ "${delta:-0}" -gt 0 ] 2>/dev/null || return 0
+  while IFS=$'\t' read -r _ path b a; do
+    [ -n "$path" ] || continue
+    files="${files:+$files, }$path"; n=$((n + 1))
+    line="${path%/*}"; short="${short:+$short, }${line##*/}/${path##*/}"
+    grown="${grown}
+  ${path}: ${b} B → ${a} B (+$((a - b)) B)"
+  done < <(printf '%s\n' "$sums" | awk -F'\t' '$1 == "1"')
+
+  # THE APPROVAL: the row, its read, and the line. Each missing part is named.
+  if [ -n "${_EG_RID:-}" ]; then
+    while IFS= read -r line; do
+      [ "${line%%$'\t'*}" = "$_EG_RID" ] || continue
+      reads="$(units_field "$line" reads)"; break
+    done < <(units_rows "$PLAN" 2>/dev/null)
+    if [ -n "$reads" ]; then
+      IFS=',' read -ra toks <<< "$reads"
+      for tok in "${toks[@]}"; do
+        tok="${tok#"${tok%%[![:space:]]*}"}"; tok="${tok%"${tok##*[![:space:]]}"}"; tok="${tok#live:}"
+        [ "$tok" = "approval:doctrine-growth" ] && row_reads=1
+      done
+    fi
+    case "${_EG_RSTATUS:-}" in
+      pending|active) [ "$row_reads" = 1 ] || lacks="row ${_EG_RID} does not read approval:doctrine-growth" ;;
+      *) lacks="row ${_EG_RID} is ${_EG_RSTATUS:-without a status}, not open" ;;
+    esac
+  else
+    lacks="no '## Tasks' row owns the tree this commit is made in, so no row can read the approval"
+  fi
+  if ! printf '%s\n' "$SECTION" | awk '{ l = $0; sub(/^[ \t]*-?[ \t]*/, "", l) }
+      l ~ /^approved[ \t]*:/ { v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
+                               if (aw[1] == "doctrine-growth") f = 1 }
+      END { exit !f }'; then
+    lacks="${lacks:+$lacks; }'## SDLC State' carries no 'approved: doctrine-growth' line"
+  fi
+  [ -n "$lacks" ] || return 0
+
+  fix_id="${_EG_RID:-<id>}"; fix_cell="<cell>"
+  [ -n "${_EG_RID:-}" ] && [ -n "$reads" ] && [ "$reads" != "—" ] && fix_cell="$reads"
+  # THE ONE LINE HOLDS 100 COLUMNS (lib/refuse.sh): the delta and each grown file's last two path
+  # segments when they fit, else the delta and the count; the detail names every path in full.
+  fact="loaded set grows +${delta} B: ${short}"
+  [ "${#fact}" -le 39 ] || fact="loaded set grows +${delta} B, ${n} files"
+  _eg_detail="canonical-sdlc — the staged change grows the loaded set by +${delta} B (${before} B at HEAD, ${after} B staged) in ${files}; the doctrine is net zero.
+Not admitted: ${lacks}.
+Fix: pay for it with a removal in the set, or, on the user's word, commit it from a row's tree whose row reads the approval:
+  session-poker.sh task-set ${fix_id} reads=${fix_cell}, approval:doctrine-growth
+  session-poker.sh approve doctrine-growth '<reply>'
+Plan: $PLAN
+Grew:${grown}"
+  refuse exit2 commit "$fact" "approve doctrine-growth or shrink" "$_eg_detail"
+}
+
 # Parse current step. Accepts integers (1-13) and the 8b adversarial
 # critic step.
 CURRENT=$(echo "$SECTION" \
@@ -3557,8 +3706,7 @@ Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as '
   fi
   # The repository the commit is made in; when the commit's directory is in none, the engaged
   # root's — the plan's own repository, the one place left that can hold the commit.
-  dir="${_EG_CWD:-}"
-  { [ -d "$dir" ] && git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; } || dir="$BIONIC_ROOT"
+  _eg_commit_repo; dir="$_EG_REPO"
   if ! grep -qE '^[0-9a-f]{7,40}$' <<< "$head" \
      || ! git -C "$dir" cat-file -e "${head}^{commit}" 2>/dev/null; then
     _eg_detail="${prefix} 'head: ${head}' is not a commit in the repository at ${dir}.
@@ -3695,11 +3843,13 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # THE THREE STEP-4 ARMS (epic-22 K2, K4): `matrix_section`, `matrix_block`,
 # `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
 # `validate_prototype_no_matrix_row` are defined just before `CURRENT` is parsed, above.
-# This is their call, right before the pointer-step exit below.
+# This is their call, right before the pointer-step exit below. The net-zero arm
+# (`validate_net_zero`, wave-31 T30) is defined beside them and called after them, at every step.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_approved_by
 validate_fails_when
 validate_prototype_no_matrix_row
+validate_net_zero
 
 # THE POINTER-STEP EXIT, relocated from above (epic-22 K2). A pointer step records a
 # link or a path rather than shaped fields; having passed the presence and placeholder
