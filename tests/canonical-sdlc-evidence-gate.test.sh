@@ -5308,6 +5308,138 @@ expect_eq "KX-4c …so no tier names a retired key (0 matches over all five)" "0
   "$(for kx_t in T0 T1 T2 T3 T4; do kx_keys "$kx_t"; done | /usr/bin/grep -c 'tier-run\|readback\|fixture-fidelity\|fresh\|cold-client\|contact' || true)"
 
 # ============================================================
+# §REGRESSION-NO: the regression is a Step-0 setting, and the Step-5 arm reads it (wave-31 T27; REQ-12 AC-12.2; D4)
+# ============================================================
+section "§REGRESSION-NO: at 'regression: no' the Step-5 block carries 'regression: no (Step 0, <user>) — <where it runs>' in place of cmd/pass/total/output/head; at yes, or with the key absent, the floor is owed (wave-31 T27; REQ-12 AC-12.2; D4)"
+
+# fails-when: a `no` plan is blocked at Step 5 for a missing floor, or a `yes` plan passes without one.
+#
+# THE KEY IS THE PLAN'S FRONTMATTER `regression: yes|no`, written at Step 0 by `session-poker.sh
+# regression` (session-poker-4 §REGRESSION-SET). AN ABSENT KEY READS `yes`, fail-closed as an absent
+# `walk:` reads `required` (Section 26e): every plan written before the key keeps being asked for
+# `pass == total`. Only the exact value `no` relaxes the arm. `regression-override:` is the record of
+# who chose against the scale default; its presence changes nothing here and it is never parsed.
+#
+# The fixture is Section 26's: double wave, a complete matrix, `walk: exempt` so the walk arm stays
+# out of the way, and the auditor pointer the finished matrix owes at double.
+# $1 the frontmatter lines after `walk: exempt` (newline-joined; empty for none) · $2 the Step-5 body.
+rn_plan() { walk_plan5 "walk: exempt${1:+
+$1}" "$2" "$matrix_complete"; }
+RN_AUD="  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md"
+RN_LINE="  regression: no (Step 0, Chris) — CI on main runs the whole suite on merge"
+RN_FLOOR="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  head: ${EG_HEAD}
+  output: .bionic/docs/plans/wave-01.plan.md#step-5"
+RN_RED="  cmd: bash test.sh
+  pass: 331
+  total: 332
+  head: ${EG_HEAD}
+  output: .bionic/docs/plans/wave-01.plan.md#step-5"
+
+# (i) AC-12.2's three cases.
+hRN1=$(make_home)
+write_plan "$hRN1" "$(rn_plan 'regression: no' "$RN_LINE
+$RN_AUD")" > /dev/null
+expect_allow "RN-1 AC-12.2 regression: no + the Step-0 line, no cmd/pass/total/output/head → admitted at current: 5 with no floor" \
+  "$hRN1" 'git commit -m "x"'
+hRN2=$(make_home)
+write_plan "$hRN2" "$(rn_plan 'regression: no' "$RN_AUD")" > /dev/null
+expect_block "RN-2 AC-12.2 regression: no, the same block without the line → blocked, naming the line to add" \
+  "$hRN2" 'git commit -m "x"' "regression: no (Step 0, <user>) — <where it runs>"
+hRN3=$(make_home)
+write_plan "$hRN3" "$(rn_plan 'regression: yes' "$RN_LINE
+$RN_AUD")" > /dev/null
+expect_block "RN-3 AC-12.2 regression: yes without a floor (the line instead of cmd/pass/total) → blocked for the fields" \
+  "$hRN3" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+hRN3b=$(make_home)
+write_plan "$hRN3b" "$(rn_plan 'regression: yes' "$RN_RED
+$RN_LINE
+$RN_AUD")" > /dev/null
+expect_block "RN-3b regression: yes with pass != total → blocked: the line does not stand in for a green run" \
+  "$hRN3b" 'git commit -m "x"' "the suite is not fully green"
+hRN3c=$(make_home)
+write_plan "$hRN3c" "$(rn_plan 'regression: yes' "$RN_FLOOR
+$RN_AUD")" > /dev/null
+expect_allow "RN-3c regression: yes with a green floor → admitted (the arm at yes is the arm it was)" \
+  "$hRN3c" 'git commit -m "x"'
+
+# (ii) an absent key is yes.
+hRN4=$(make_home)
+write_plan "$hRN4" "$(rn_plan '' "$RN_LINE
+$RN_AUD")" > /dev/null
+expect_block "RN-4 no regression: key, the line and no floor → blocked: an absent key reads yes (fail-closed)" \
+  "$hRN4" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+hRN4b=$(make_home)
+write_plan "$hRN4b" "$(rn_plan '' "$RN_FLOOR
+$RN_AUD")" > /dev/null
+expect_allow "RN-4b …and the same plan with a green floor is admitted" "$hRN4b" 'git commit -m "x"'
+hRN4c=$(make_home)
+write_plan "$hRN4c" "$(rn_plan 'regression: off' "$RN_LINE
+$RN_AUD")" > /dev/null
+expect_block "RN-4c regression: off (a value that is not no) reads yes → blocked for the fields" \
+  "$hRN4c" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+
+# (iii) the override line is presence-only, never parsed.
+hRN5=$(make_home)
+write_plan "$hRN5" "$(rn_plan 'regression: no
+regression-override: ??? not a record at all' "$RN_LINE
+$RN_AUD")" > /dev/null
+expect_allow "RN-5 regression: no beside a regression-override: line that parses as nothing → admitted (the line is not read)" \
+  "$hRN5" 'git commit -m "x"'
+hRN5b=$(make_home)
+write_plan "$hRN5b" "$(rn_plan 'regression: yes
+regression-override: Dana Fixture 2026-10-09 derived=no chosen=no' "$RN_LINE
+$RN_AUD")" > /dev/null
+expect_block "RN-5b regression: yes beside an override saying chosen=no → blocked: the key decides, the override is not parsed" \
+  "$hRN5b" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+
+# (iv) the line's grammar: `no (Step 0, <user>) — <where it runs>`, each part non-empty.
+rn_bad() {  # <label> <line>
+  local h; h=$(make_home)
+  write_plan "$h" "$(rn_plan 'regression: no' "$2
+$RN_AUD")" > /dev/null
+  expect_block "$1" "$h" 'git commit -m "x"' "regression: no (Step 0, <user>) — <where it runs>"
+}
+rn_bad "RN-6 a line with no user → blocked" "  regression: no (Step 0, ) — CI on main"
+rn_bad "RN-6b a line with no em dash and no place → blocked" "  regression: no (Step 0, Chris)"
+rn_bad "RN-6c a line naming no place after the em dash → blocked" "  regression: no (Step 0, Chris) —   "
+rn_bad "RN-6d a line saying yes on a no plan → blocked" "  regression: yes (Step 0, Chris) — CI on main"
+rn_bad "RN-6e a line that is not Step 0's → blocked" "  regression: no (Step 3, Chris) — CI on main"
+hRN6f=$(make_home)
+write_plan "$hRN6f" "$(rn_plan 'regression: no' "  regression: no (Step 0, Dana Fixture) — the release pipeline, job full-suite
+$RN_AUD")" > /dev/null
+expect_allow "RN-6f …and a well-formed line with a two-word user and a long place → admitted" "$hRN6f" 'git commit -m "x"'
+
+# (v) THE FLOOR AT `no`, BEYOND STEP 5 (research-T4-T26-sites §3): `current 8` asks lib/proof.sh
+# `facts_state`, which asks `facts_owed`; and the integrate row's kind default reads `proof:floor`
+# (lib/units.sh `kdef`). At `no` neither deals the floor, or the plan clears Step 5 and is refused
+# at Step 8. Read through the libraries themselves, as KX-4 reads keys_for_tier.
+RN_DIR="$(mktemp -d)"; cleanup_dirs+=("$RN_DIR")
+rn_units_plan() {  # <frontmatter line or empty> <file>
+  printf -- '---\nscale: wave\nrigor: single\n%s---\n## SDLC State\n\ncurrent: 8\napproved-by: fixture 2026-10-04T10:00:00Z "approved"\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |\n| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-1 | — | — | — | pending | — |\n' \
+    "${1:+$1
+}" > "$2"
+}
+rn_units_plan 'regression: no' "$RN_DIR/no.md"
+rn_units_plan 'regression: yes' "$RN_DIR/yes.md"
+rn_units_plan '' "$RN_DIR/absent.md"
+rn_lib() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" >/dev/null 2>&1; "$@" ) 2>/dev/null; }
+rn_owed() { rn_lib facts_owed single wave "" "$1" | cut -f1 | sort -u | tr '\n' ' ' | sed 's/ $//'; }
+expect_eq "RN-7 facts_owed deals the floor at regression: yes (positive, before the absence row)" "floor review" "$(rn_owed "$RN_DIR/yes.md")"
+expect_eq "RN-7b …and with the key absent" "floor review" "$(rn_owed "$RN_DIR/absent.md")"
+expect_eq "RN-7c …and not at regression: no: the readings are still owed, the floor is not" "review" "$(rn_owed "$RN_DIR/no.md")"
+rn_waits() { rn_lib units_waiting "$1" 8 | awk -F'\t' '$1 == "T3" { sub(/: .*/, "", $2); print $2 }' | sort -u | tr '\n' ' ' | sed 's/ $//'; }
+expect_eq "RN-8 the integrate row's default reads wait on proof:floor at regression: yes (positive)" "proof:floor proof:review" "$(rn_waits "$RN_DIR/yes.md")"
+expect_eq "RN-8b …and with the key absent" "proof:floor proof:review" "$(rn_waits "$RN_DIR/absent.md")"
+expect_eq "RN-8c …and at regression: no the default drops proof:floor, still waiting on proof:review" "proof:review" "$(rn_waits "$RN_DIR/no.md")"
+expect_eq "RN-8d the decline line's read-back of the default drops it too at no" "reads='proof:review, head, lib/a.sh'" \
+  "$(rn_lib units_hold_read "$RN_DIR/no.md" T3 T1)"
+expect_eq "RN-8e …and keeps it at yes" "reads='proof:floor, proof:review, head, lib/a.sh'" \
+  "$(rn_lib units_hold_read "$RN_DIR/yes.md" T3 T1)"
+
+# ============================================================
 # Two sections moved here from after Section 40 when the suite was sharded (wave-30 T3).
 # AC-E1.3/E1.5: its first row counts the refusals the run saw (eg_e1_check, called by every
 # expect_block and expect_block_p). The sweep is this shard's; the second shard's refusals are
