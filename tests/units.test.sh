@@ -4291,8 +4291,8 @@ section "§ONE-SHAPE — wave-31 T5: a plan in the retired task-scale shape is r
 . "$(dirname "$0")/lib/plan-fixture.sh"
 OS_SID="5e7a9c10-31a5-4b2e-9d0f-0a1b2c3d4e5f"
 OS_POKER="$REPO_ROOT/hooks/session-poker.sh"
-os_world() {  # <label> <current> -> the repo; a bound task-scale plan, w-T1 launched on the roster
-  local r="$SANDBOX/$1" p tree
+os_world() {  # <label> <current> [intended|none] -> the repo; a bound task-scale plan, w-T1 on the roster
+  local r="$SANDBOX/$1" p tree st="${3:-confirmed}"
   mkdir -p "$r/.bionic/tmp"
   ( cd "$r" && git init -q . && git commit -q --allow-empty -m init ) >/dev/null 2>&1
   : > "$r/.bionic/tmp/engaged-$OS_SID.state"
@@ -4301,8 +4301,8 @@ os_world() {  # <label> <current> -> the repo; a bound task-scale plan, w-T1 lau
     "| T2 | 4 | build | the next unit | implementor | — | a.sh | 30 | REQ-1 | b.sh | — | — | pending |")"
   bound_marker "$r" "$OS_SID" "$p"
   ( cd "$r" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
-  { roster_header
-    roster_row_fixture status=confirmed session="$OS_SID" name=w-T1 agent_id=a-w-T1 \
+  [ "$st" = none ] || { roster_header
+    roster_row_fixture status="$st" session="$OS_SID" name=w-T1 agent_id=a-w-T1 \
       launched_at=2026-10-04T03:30:00Z deliverable=t1.md 'duration=45 minutes' subagent_type=bionic:implementor
   } > "$r/.bionic/tmp/roster-$OS_SID.state"
   tree="$(cd "$r" && pwd -P)/.worktrees/01-T1"
@@ -4332,6 +4332,23 @@ expect_eq "OS-2 AC-1.2 a plan at current: T1 is refused by launch-sync (exit 1)"
 expect_eq "OS-2b …with exactly the refusal line, on stderr" \
   "NOT-RECORDED — current: T1 is not numeric; a plan in the retired task-scale shape is refused, not skipped" "$OS_ERR"
 expect_true "OS-2c …and the plan is byte-identical (cmp)" cmp -s "$SANDBOX/os-before.md" "$OS_RT/$OS_PLAN_REL"
+# BEFORE THE FIRST LAUNCH (wave-31 T43; critic-evidence #2, AC-1.2): the field is read before the
+# roster, so a session that has confirmed no launch, or has no roster yet, is told too. The control:
+# the same no-launch roster at current: 4 has nothing to apply and stays silent.
+OS_RN="$(os_world one-shape-4-nolaunch 4 intended)"
+os_sync "$OS_RN"
+expect_eq "OS-4 control: at current: 4 with no confirmed launch, launch-sync exits 0" "0" "$OS_RC"
+expect_eq "OS-4b …and says nothing" "" "$OS_OUT$OS_ERR"
+OS_RI="$(os_world one-shape-t1-intended T1 intended)"
+os_sync "$OS_RI"
+expect_eq "OS-4c AC-1.2 current: T1 with no confirmed launch on the roster is refused (exit 1)" "1" "$OS_RC"
+expect_eq "OS-4d …with the refusal line" \
+  "NOT-RECORDED — current: T1 is not numeric; a plan in the retired task-scale shape is refused, not skipped" "$OS_ERR"
+OS_R0="$(os_world one-shape-t1-noroster T1 none)"
+os_sync "$OS_R0"
+expect_eq "OS-4e AC-1.2 current: T1 with no roster file at all is refused (exit 1)" "1" "$OS_RC"
+expect_eq "OS-4f …with the refusal line" \
+  "NOT-RECORDED — current: T1 is not numeric; a plan in the retired task-scale shape is refused, not skipped" "$OS_ERR"
 # THE ONE TABLE VALIDATES AT TASK SCALE: clean, beside the same table with one row broken, which names it.
 expect_eq "OS-3 AC-1.3 units_validate on the one table under scale: task is clean" "" \
   "$(call units_validate "$OS_R4/$OS_PLAN_REL")"

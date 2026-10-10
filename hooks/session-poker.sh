@@ -431,7 +431,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
-  die "  bash ${HOOK_DIR}/session-poker.sh share [<n>]   print the machine's share, 1 to 100 (80 when none is set); with <n>, set it: one integer in the user-level share file the gate reads"
+  die "  bash ${HOOK_DIR}/session-poker.sh share [<n>]   print the machine's share, 1 to 100 (92 when none is set); with <n>, set it: one integer in the user-level share file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh window     the instant this session's roster begins, UTC ISO-8601 (empty when it cannot be dated)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
@@ -4608,7 +4608,7 @@ case "$VERB" in
     ;;
 
   # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). The share is one integer, 1 to 100, in
-  # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share`; with no file the gate's share is 80. Printing it asks
+  # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share`; with no file the gate's share is 92. Printing it asks
   # `gate_share`, the one reader, so what this prints is what the gate decides on. Setting it writes that
   # file by the SAME path expression `gate_share` reads (not `claude_home`, which BIONIC_CLAUDE_HOME moves),
   # through a staged copy and a rename so a reader never sees half a number. It is the machine's and not a
@@ -8616,14 +8616,10 @@ RC_TAGS
     engaged_session "$LS_ROOT" "$SESSION_ID" || exit 0
     LS_RUN="$(session_run "$LS_ROOT" "$SESSION_ID" 2>/dev/null)" || LS_RUN=""
     case "$LS_RUN" in 'bound-open '*) LS_PLAN="${LS_RUN#bound-open }" ;; *) exit 0 ;; esac
-    # THE ROSTER FIRST: a session that has confirmed no launch has nothing to apply, and the
-    # turn-end wall runs this on every Stop, so the plan is not read for it (patrol-duties-gate 70).
-    LS_ROSTER="$LS_ROOT/.bionic/tmp/roster-${SESSION_ID}.state"
-    [ -f "$LS_ROSTER" ] && [ ! -L "$LS_ROSTER" ] || exit 0
-    grep -qE '\|status=(confirmed|identified)\|' "$LS_ROSTER" 2>/dev/null || exit 0
     # ONE LEDGER SHAPE (wave-31 T5; REQ-1 AC-1.2, D2): `current:` is a step number at every scale.
     # A value that is not one — the retired task-scale `T<n>` above all — is refused aloud, exit 1,
-    # never skipped: the turn-end wall passes 0 and 75 only, so the plan's author is told.
+    # never skipped: the turn-end wall passes 0 and 75 only, so the plan's author is told. It is read
+    # BEFORE the roster (wave-31 T43; A-orch-76), so a session with no confirmed launch is told too.
     LS_RAW="$(_fill_current_field "$LS_PLAN")"; LS_CUR="${LS_RAW%[ab]}"
     case "$LS_CUR" in
       '') exit 0 ;;
@@ -8633,6 +8629,10 @@ RC_TAGS
         exit 1 ;;
     esac
     [ "$LS_CUR" -ge 4 ] || exit 0
+    # A session that has confirmed no launch has nothing to apply.
+    LS_ROSTER="$LS_ROOT/.bionic/tmp/roster-${SESSION_ID}.state"
+    [ -f "$LS_ROSTER" ] && [ ! -L "$LS_ROSTER" ] || exit 0
+    grep -qE '\|status=(confirmed|identified)\|' "$LS_ROSTER" 2>/dev/null || exit 0
     tmp_dir_ok "$LS_ROOT/.bionic/tmp" || exit 0
     # A LOCK THAT CANNOT BE MADE IS NOT A LOCK ANOTHER WRITER HOLDS (wave-26 T51; review 13 F1):
     # held, the holder writes the launches and this call says nothing; not makeable, no caller

@@ -25,8 +25,8 @@ what the run ships meets it. Rate both; the table gives the consequence.
 
 - Rate by the tables, not by how hard the finding was to find.
 - A finding to fix names the file and line at the reviewed head and the command that shows it.
-- When you cannot run a finding, or cannot choose between two ratings, write the higher rating
-  and an `unsure:` line saying what is not known. It owes a check; it is never rated down.
+- When you cannot run a finding, or cannot choose between two ratings, write the higher rating.
+  It is final.
 - Age does not lower a rating. Say "older than the reviewed range" beside it.
 - A brief never re-rates, and no agent moves a finding across the line. If a brief and these
   tables disagree, the tables decide.
@@ -68,10 +68,9 @@ findings: <n>
 finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line> <title>
 finding: <n> <S1|S2|S3|S4> <on|off> - <title>
 shown: <n> <command>
-unsure: <n> <what is not known>
 ```
 
-`findings:` counts the `finding:` lines, one per finding, and is `findings: 0` when there are none. Write each finding in one of its two forms: with `<path>:<line>` as its site, or with a lone `-` when it has no file and line. Choose one, never both joined. A finding the table sends to fix has a `shown:` line, naming the command that shows it, or an `unsure:` line; `<n>` is the number of its `finding:` line. Write no priority: the table gives it. `result` is `fail` when the table sends a finding to fix, `flag` when there are findings and none to fix, otherwise `pass`.
+`findings:` counts the `finding:` lines, one per finding, and is `findings: 0` when there are none. Write each finding in one of its two forms: with `<path>:<line>` as its site, or with a lone `-` when it has no file and line. Choose one, never both joined. A finding the table sends to fix has a `shown:` line, naming the command that shows it; `<n>` is the number of its `finding:` line. Write no priority: the table gives it. `result` is `fail` when the table sends a finding to fix, `flag` when there are findings and none to fix, otherwise `pass`.
 
 ```
 findings: 2

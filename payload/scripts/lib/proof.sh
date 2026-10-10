@@ -53,7 +53,7 @@ PROOF_SEVERITIES="S1 S2 S3 S4"
 PROOF_REACHES="on off"
 PROOF_PRIORITY="S1:on=fix S1:off=fix S2:on=fix S2:off=defer S3:on=defer S3:off=note S4:on=note S4:off=note"
 # THE DEBT TABLE'S KINDS (wave-30 T22; D2, AC-11.1): the kinds a `debt:` line names, in the order the
-# table in payload/context/severity.md lists them (tests/docs-pins.test.sh holds the two to one list).
+# table in payload/context/severity.md lists them. No test holds the two to one list (debt: unpinned-pair).
 PROOF_DEBT_KINDS="duplicate unpinned-pair one-case-abstraction"
 
 # proof_kind_ok <kind> -> 0 when <kind> is one of PROOF_KINDS.
