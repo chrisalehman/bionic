@@ -130,7 +130,7 @@ mkdir -p "$BIN" "$SHIMSRC" "$STATE" "$TMPDIR_FIX"
 # every writer resolves a symlinked target before staging, and a PATH without it
 # would measure the degradation rather than the behaviour.
 for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc \
-            jq mktemp find xargs shasum uname date touch diff cmp printf true false sleep; do
+            jq mktemp find xargs shasum uname date touch diff cmp printf true false sleep dirname; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
 done
 
@@ -1262,35 +1262,40 @@ expect_no_match "4c setup --all: does not offer to install ccstatusline again" \
   '*install ccstatusline*' "$(cat "$SETUP_OUT_C")"
 
 # ---------------------------------------------------------------------------
-# Group 4d — an edited principles block is the user's (wave-27 D16, AC-9.4; T40).
-#
-# An edited block is a state, not something left to do: `--all` neither lists it
-# nor shows its difference, even fed nothing but yes, and the edit survives it.
-# The difference and the question that could replace the block come only when
-# the item is asked for by name — and there a no keeps it and a yes replaces it.
-# Same machine as Group 5, which then removes a present block.
+# Group 4d — the principles span is bionic's: setup replaces an edited one without asking
+# (wave-31 T10, AC-7.2; D8; rewritten by T34, A-orch-58). It was wave-27 D16's rule that an edited
+# block is the user's and `--all` leaves it alone; D8 retired that. The span carries a marker line
+# saying bionic replaces it on every setup and the user's own text belongs outside the markers, so
+# `--all` and `--only` both bring it up to date, ask nothing about it, and say "updated" in the
+# summary. Same machine as Group 5, which then removes a present block.
 # ---------------------------------------------------------------------------
 
-section "Group 4d: --all leaves an edited principles block alone; --only asks before replacing it"
+section "Group 4d: an edited principles span is bionic's — setup replaces it and asks nothing"
 
-{ printf '%s\n' "$PRINCIPLES_START_LIT"; cat "$TMP/principles-body"; printf '%s\n' '- my own rule'
-  printf '%s\n' "$PRINCIPLES_END_LIT"; } > "$GLOBAL_MEMORY"
+plant_edited_span() {
+  { printf '%s\n' "$PRINCIPLES_START_LIT"; cat "$TMP/principles-body"; printf '%s\n' '- my own rule'
+    printf '%s\n' "$PRINCIPLES_END_LIT"; } > "$GLOBAL_MEMORY"
+}
+plant_edited_span
 cp "$GLOBAL_MEMORY" "$TMP/principles-edited.md"
 expect_false "4d precondition: the edited block is not the shipped one" \
   cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
 SETUP_OUT_D="$TMP/setup-edited-all.txt"
 printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT_D" 2>&1
-expect_true "4d: setup --all fed only yes keeps the edit, byte for byte" \
-  cmp -s "$TMP/principles-edited.md" "$GLOBAL_MEMORY"
+expect_true "4d: setup --all replaces the edited span with the shipped text" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
+expect_match "4d: …and the summary says the span was updated" '*updated*' "$(cat "$SETUP_OUT_D")"
 expect_no_match "4d: …and shows no difference for it" '*my own rule*' "$(cat "$SETUP_OUT_D")"
+plant_edited_span
 SETUP_OUT_DN="$TMP/setup-edited-only-no.txt"
 printf 'n\n' | run_payload "$SETUP_SH" --only working-principles > "$SETUP_OUT_DN" 2>&1
-expect_match "4d: asked for by name, setup prints the difference, the user's line included" \
-  '*my own rule*' "$(cat "$SETUP_OUT_DN")"
-expect_true "4d: a no at that question keeps the edit, byte for byte" \
-  cmp -s "$TMP/principles-edited.md" "$GLOBAL_MEMORY"
+expect_true "4d: asked for by name with an n on the input, the edit is replaced anyway" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
+expect_match "4d: …and the run says the span was updated" '*updated*' "$(cat "$SETUP_OUT_DN")"
+expect_no_match "4d: …and asked nothing about it" '*\[y/N\]*' "$(cat "$SETUP_OUT_DN")"
+plant_edited_span
 printf 'y\n' | run_payload "$SETUP_SH" --only working-principles > "$TMP/setup-edited-yes.txt" 2>&1
-expect_true "4d: a yes at the same question replaces the block with the shipped text" \
+expect_true "4d: a y on the input replaces it with the same text" \
   cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
 
 # ---------------------------------------------------------------------------
