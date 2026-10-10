@@ -3328,4 +3328,53 @@ expect_absent "FR-3b …and its output names no check" "check:" "$OUT"
 sev_cur 4
 POKE_BOUND="$FR_BOUND_WAS"
 
+# ============================================================
+section "§AMEND-BACKTICK: amend --reexec+ takes a run as the brief marks it — one level of backticks comes off at the parse, one entry, no empty one, and a repeat changes nothing (wave-31 T11; REQ-8 AC-8.1; D9)"
+# ============================================================
+#
+# A run is written in a brief between backticks, so `amend n --reexec+ '`cmd`'` is how a reader
+# pastes one. The parse kept the marks, the span wrapped the value in a second pair, and the row
+# got ``cmd`` — an empty entry either side of the run, and a repeat of the same run read as new.
+# The parse now strips one matched pair, so the marked and the bare spelling are one addition.
+# FIXTURE FIDELITY: a live writer row of the dispatch wall's shape (`roster_row_fixture`, as
+# session-poker-3's §AMEND-CAP builds), amended by the real verb.
+# fails-when: "changes nothing" on the first amend, or an empty or `,` entry on the row.
+RAB="$(make_repo sAB-amend-backtick)"; new_roster "$RAB"
+roster_row_fixture status=identified "session=$SID" name=wab "agent_id=aAB-wab-0000000000001" \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" subagent_type=bionic:implementor tool_use_id=toolu_wab \
+  files= suites_allowed=none suites_source=declared 're_executes=`pytest tests/a`' >> "$(roster_of "$RAB")"
+ab_runs() {  # <repo> -> the name wab's last row's re_executes field, as stored
+  s30_field "$(grep -F '|name=wab|' "$(roster_of "$1")" | tail -1)" re_executes
+}
+ab_sum() { cksum < "$(roster_of "$1")"; }
+require_helpers ab_runs ab_sum
+expect_eq "AB-0 precondition: the extractor reads the row's one declared run" '`pytest tests/a`' "$(ab_runs "$RAB")"
+poke "$RAB" amend wab --reexec+ '`npx jest a`' --reason 'the marked spelling'
+expect_eq "AB-1 §AMEND-BACKTICK AC-8.1 a marked --reexec+ value is admitted (exit 0)" "0" "$RC"
+expect_absent "AB-1b …and is not read as changing nothing" "changes nothing" "$OUT"
+expect_eq "AB-2 …the row holds the old run and the one new run, each marked once" '`pytest tests/a` `npx jest a`' "$(ab_runs "$RAB")"
+expect_absent "AB-2b …no empty entry (a doubled mark) is on the row" '``' "$(ab_runs "$RAB")"
+AB_SUM="$(ab_sum "$RAB")"
+poke "$RAB" amend wab --reexec+ '`npx jest a`' --reason 'the same run again'
+expect_eq "AB-3 a repeat of the marked run is refused (exit 1)" "1" "$RC"
+expect_contains "AB-3b …as a change the row already carries" "changes nothing" "$OUT"
+expect_eq "AB-3c …and nothing is written" "$AB_SUM" "$(ab_sum "$RAB")"
+poke "$RAB" amend wab --reexec+ 'npx jest a' --reason 'the bare spelling of the same run'
+expect_eq "AB-4 the bare spelling of the same run is the same addition: refused as no change (exit 1)" "1|$AB_SUM" "$RC|$(ab_sum "$RAB")"
+
+# §AMEND-BY (wave-31 T11; REQ-8 AC-8.3, D9; A-orch-46.2): `--by writer` is the flag the Bash wall
+# stages on a writer's own-row Files amend; the verb takes that one value and records it in the
+# amended= field (no new roster key, A-orch-41.6). Any other value is the usage error.
+ab_amended() { s30_field "$(grep -F '|name=wab|' "$(roster_of "$RAB")" | tail -1)" amended; }
+poke "$RAB" amend wab --files+ hooks/z.sh --reason 'the fix reaches z' --by writer
+expect_eq "AB-5 §AMEND-BY amend … --by writer is admitted (exit 0)" "0" "$RC"
+expect_regex "AB-5b …and the row's amended= reads <iso> widened-by: writer <reason>" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z widened-by: writer the fix reaches z$' "$(ab_amended)"
+poke "$RAB" amend wab --files+ hooks/y.sh --reason 'main widens y'
+expect_regex "AB-6 without --by the amended= field is the reason alone, as before" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z main widens y$' "$(ab_amended)"
+AB_SUM="$(ab_sum "$RAB")"
+poke "$RAB" amend wab --files+ hooks/w.sh --reason r --by someone
+expect_eq "AB-7 --by takes only writer: any other value is the usage error, nothing written" "2|$AB_SUM" "$RC|$(ab_sum "$RAB")"
+
 finish
