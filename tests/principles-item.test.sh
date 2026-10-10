@@ -377,29 +377,46 @@ expect_eq "REMOVE: …while the standalone door leaves it in place, emptied" "ye
 expect_eq "REMOVE: the claude home itself survives" "yes" "$(path_exists "$SB_RB/.claude")"
 
 # ---------------------------------------------------------------------------
-section "§EDITED: an edit is never discarded silently (AC-9.4)"
+section "§EDITED: an edited span is bionic's — setup replaces it and asks nothing (AC-7.2)"
 # ---------------------------------------------------------------------------
+# WAVE-31 T10 REWROTE THIS SECTION. It pinned wave-27 T40 finding 5, "an edited block is
+# the user's": setup kept it, showed a unified diff, and replaced it only on a live yes.
+# The user's ruling (2026-10-09) reverses that: the span between the markers is bionic's.
+# Deleted with the behaviour: "setup prints the difference as a unified diff", "the
+# difference names the user's own line", "the yes arm also showed the difference before
+# asking". Inverted: "a no keeps the edit" and "a closed input keeps the edit" now say the
+# span is replaced whatever the input holds. Kept: a replacement is the shipped text and
+# leaves every line outside the markers as it was.
 
 SB_E="$(new_home)"
 setup_run "$SB_E" $'y\n' >/dev/null 2>&1
 edit_block "$SB_E/.claude/CLAUDE.md" '- my own rule'
 cp "$SB_E/.claude/CLAUDE.md" "$TMP/edited.md"
 expect_diff_bytes "EDITED: the fixture really is edited" "$TMP/idem-before.md" "$TMP/edited.md"
+expect_eq "EDITED: …and detect reads it as edited" "env:working-principles state=edited" "$(detect_run "$SB_E")"
 
+# an n on the input is never read: nothing is asked, so nothing is declined
 E_NO_OUT="$(setup_run "$SB_E" $'n\n')"
-expect_contains "EDITED: setup prints the difference as a unified diff" "@@" "$E_NO_OUT"
-expect_contains "EDITED: the difference names the user's own line" "my own rule" "$E_NO_OUT"
-expect_same_bytes "EDITED: a no keeps the edit, byte for byte" "$TMP/edited.md" "$SB_E/.claude/CLAUDE.md"
-
-setup_closed "$SB_E" >/dev/null 2>&1
-expect_same_bytes "EDITED: a closed input keeps the edit" "$TMP/edited.md" "$SB_E/.claude/CLAUDE.md"
-
-E_YES_OUT="$(setup_run "$SB_E" $'y\n')"
-expect_contains "EDITED: the yes arm also showed the difference before asking" "my own rule" "$E_YES_OUT"
 block_to "$SB_E/.claude/CLAUDE.md" "$TMP/e-block"
-expect_same_bytes "EDITED: a yes replaces the block with the shipped text" "$TMP/shipped-block" "$TMP/e-block"
+expect_same_bytes "EDITED: an n on the input does not keep the edit — the span is the shipped text" "$TMP/shipped-block" "$TMP/e-block"
+expect_absent "EDITED: …and nothing was asked" "[y/N]" "$E_NO_OUT"
+expect_absent "EDITED: …nor declined" "declined" "$E_NO_OUT"
+expect_contains "EDITED: …and the run says it updated the span" "updated" "$E_NO_OUT"
 nonblock_to "$SB_E/.claude/CLAUDE.md" "$TMP/e-outside"
 expect_same_bytes "EDITED: …and leaves every line outside it as it was" "$TMP/planted.md" "$TMP/e-outside"
+
+# a closed input replaces it too
+cp "$TMP/edited.md" "$SB_E/.claude/CLAUDE.md"
+setup_closed "$SB_E" >/dev/null 2>&1
+block_to "$SB_E/.claude/CLAUDE.md" "$TMP/e-block2"
+expect_same_bytes "EDITED: a closed input replaces the edit as well" "$TMP/shipped-block" "$TMP/e-block2"
+
+# an equal span is left alone, and says so
+cp "$SB_E/.claude/CLAUDE.md" "$TMP/e-equal.md"
+E_EQ_OUT="$(setup_run "$SB_E" $'y\n')"
+expect_same_bytes "EDITED: a span equal to the shipped text is not rewritten" "$TMP/e-equal.md" "$SB_E/.claude/CLAUDE.md"
+expect_contains "EDITED: …and the run says it is already there (the item line is clipped to the page width, so the tail is not asserted)" "already in" "$E_EQ_OUT"
+expect_absent "EDITED: …and does not claim an update" "updated" "$E_EQ_OUT"
 
 # ---------------------------------------------------------------------------
 section "§CUT-SHORT: a write that fails partway changes nothing (wave-27 T40)"
@@ -606,15 +623,20 @@ expect_contains "READ-ONLY: …and says why" "read-only" "$RO_RM"
 chmod 644 "$SB_RO/.claude/CLAUDE.md"
 
 # ---------------------------------------------------------------------------
-section "§EDITED-IS-THE-USER'S: an edit is a state, not a finding"
+section "§EDITED-STATE: an edited span is a state, not a finding — and the --all page names its update"
 # ---------------------------------------------------------------------------
+# Inverted at wave-31 T10: the --all page used to leave an edited block off ("an edited
+# block is the user's"); bionic's span is now replaced by setup, so the page names it.
 
 expect_absent "EDITED-STATE: doctor's edited row is not a fault" "✗" "$ROW_E"
 expect_absent "EDITED-STATE: doctor's edited row does not call the difference the user's own edit" "your own edit" "$ROW_E"
+expect_contains "EDITED-STATE: doctor's edited row says setup brings it up to date" "setup" "$ROW_E"
+expect_absent "EDITED-STATE: …and no longer says the block is kept" "kept as it is" "$ROW_E"
 PLAN_E="$(setup_plan "$SB_DE")"
 PLAN_A="$(setup_plan "$SB_DA")"
 expect_contains "EDITED-STATE: the --all page offers the principles on an absent block" "working principles" "$PLAN_A"
-expect_absent "EDITED-STATE: the --all page leaves an edited block off" "working principles" "$PLAN_E"
+expect_contains "EDITED-STATE: the --all page names the update of an edited span" "working principles" "$PLAN_E"
+expect_contains "EDITED-STATE: …saying it updates the span without asking" "update bionic's working principles span without asking" "$(report_row "$PLAN_E" "working principles")"
 
 # ---------------------------------------------------------------------------
 section "§CONSENT: the path and the full text are on screen before the question"
@@ -1290,82 +1312,136 @@ sh_value() {  # <home> -> the first line of the home's share file, nothing when 
   printf '%s' "$v"
 }
 sh_has() { [ -e "$(sh_file "$1")" ] && echo yes || echo no; }
-sh_pending() {  # <home> -> 0|1: the checks table's answer for the share item, asked in the record environment
-  rec_env "$1" bash -c '. "$1" >/dev/null 2>&1 || exit 9; bionic_check_item_pending share; echo $?' _ \
-    "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/checks.sh"
+
+# ---------------------------------------------------------------------------
+section "§NO-SHARE-ITEM: setup no longer offers the share (AC-7.1)"
+# ---------------------------------------------------------------------------
+# WAVE-31 T10 DELETED §SHARE-ITEM, a test of the deleted item (setup's step 14 wrote 80 to
+# ~/.claude/bionic/share on a yes). The share stays settable by `session-poker.sh share <n>`
+# and by hand; doctor's row and remove's share-file step are pinned elsewhere (§SHARE-REMOVE,
+# doctor-reads.test.sh). A machine with nothing else to do cannot be built hermetically (every
+# dependency is missing here), so the summary arm asserts the share contributes no line to it.
+
+section_of() {  # <text> -> the lines from "13. Working principles" down, "" when there is no such header
+  local line on=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "13. Working principles"*) on=1 ;; esac
+    [ "$on" = "1" ] && printf '%s\n' "$line"
+  done <<< "$1"
+  return 0
 }
 
+NS_A="$(rec_home)"
+NS_OUT="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" </dev/null 2>&1)"
+NS_TAIL="$(section_of "$NS_OUT")"
+expect_nonempty "NO-SHARE-ITEM: the first run reaches step 13 (the extractor reads)" "$NS_TAIL"
+expect_contains "NO-SHARE-ITEM: …and prints a Summary after it" "Summary" "$NS_TAIL"
+expect_absent "NO-SHARE-ITEM: no 14. header" "14. " "$NS_OUT"
+expect_absent "NO-SHARE-ITEM: no share question" "Machine share" "$NS_OUT"
+expect_absent "NO-SHARE-ITEM: …nor a share line in the summary" "answer yes to share" "$NS_OUT"
+expect_eq "NO-SHARE-ITEM: …and nothing wrote the share file" "no" "$(sh_has "$NS_A")"
+
+NS_LIST="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --list 2>&1)"
+expect_contains "NO-SHARE-ITEM: --list still names working-principles (the extractor reads)" "working-principles" "$NS_LIST"
+expect_absent "NO-SHARE-ITEM: --list does not name share" "share" "$NS_LIST"
+
+NS_ONLY="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only share 2>&1 </dev/null)"; NS_ONLY_RC=$?
+expect_eq "NO-SHARE-ITEM: --only share is refused (exit 2)" "2" "$NS_ONLY_RC"
+expect_contains "NO-SHARE-ITEM: …as an unknown item" "there is nothing called share to set up" "$NS_ONLY"
+NS_ONLY_OK="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles 2>&1 </dev/null)"; NS_ONLY_OK_RC=$?
+expect_eq "NO-SHARE-ITEM: --only on a real item is not refused (the twin)" "0" "$NS_ONLY_OK_RC"
+
+NS_ALL="$(printf 'n\n' | rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --all 2>&1)"
+NS_PAGE="${NS_ALL%%Do all of the above?*}"
+expect_ne "NO-SHARE-ITEM: the --all page is on the output ahead of its question" "$NS_ALL" "$NS_PAGE"
+expect_contains "NO-SHARE-ITEM: …and names the working principles (the twin)" "working principles" "$NS_PAGE"
+expect_absent "NO-SHARE-ITEM: …and not the share" "share of this machine" "$NS_PAGE"
+
 # ---------------------------------------------------------------------------
-section "§SHARE-ITEM: setup offers the share, a yes writes it, a no leaves the default, a share already there is kept"
+section "§SPAN-IS-BIONICS: the span between the markers is replaced on every setup, asking nothing (AC-7.2)"
 # ---------------------------------------------------------------------------
 
-SH_A="$(rec_home)"
-expect_eq "SHARE-ITEM precondition: a fresh home has no share file" "no" "$(sh_has "$SH_A")"
-expect_eq "SHARE-ITEM: the checks table fires the share item on it (0)" "0" "$(sh_pending "$SH_A")"
-SH_A_OUT="$(rec_setup "$SH_A" share y)"
-expect_eq "SHARE-ITEM yes: the file is written, the default, one integer" "80" "$(sh_value "$SH_A")"
-expect_eq "SHARE-ITEM yes: …and it is the one line" "1" "$(wc -l < "$(sh_file "$SH_A")" | tr -d ' ')"
-expect_contains "SHARE-ITEM yes: the item says it wrote it" "✓ share" "$SH_A_OUT"
-expect_contains "SHARE-ITEM yes: …naming the file" "bionic/share" "$SH_A_OUT"
-expect_contains "SHARE-ITEM yes: …and how to change it" "session-poker.sh share <n>" "$SH_A_OUT"
-expect_eq "SHARE-ITEM yes: the checks table no longer fires it (1)" "1" "$(sh_pending "$SH_A")"
-expect_contains "SHARE-ITEM yes: a narrowed run's summary is clean" "nothing left to do for share." "$SH_A_OUT"
+SPAN_COMMENT='<!-- bionic replaces this span on every setup; your own text belongs outside the markers -->'
+SPAN_OPENING='bionic setup — every change below is asked for first, one item at a time; the one exception is bionic'"'"'s own working-principles span, which setup brings up to date without asking.'
+{ IFS= read -r SPAN_FIRST; } < "$TMP/shipped-block"
+expect_eq "SPAN: the shipped span's first line is the replacement notice, verbatim" "$SPAN_COMMENT" "$SPAN_FIRST"
+expect_contains "SPAN: setup's opening line names the one exception, verbatim" "$SPAN_OPENING" "$NS_OUT"
 
-# idempotent: asked again, it is not asked, and the file is as it was
-SH_A_AGAIN="$(rec_setup "$SH_A" share n)"
-expect_contains "SHARE-ITEM again: the item says there is nothing to do" "nothing to do" "$SH_A_AGAIN"
-expect_absent "SHARE-ITEM again: …and asks nothing (no decline line)" "declined" "$SH_A_AGAIN"
-expect_eq "SHARE-ITEM again: …the file is as it was (80)" "80" "$(sh_value "$SH_A")"
+# 1.14.0's span: the shipped text without the notice (the span as an earlier setup wrote it)
+span_old_home() {  # -> a rec home whose CLAUDE.md carries the planted file and the OLD span
+  local h f line
+  h="$(rec_home)"; f="$h/.claude/CLAUDE.md"
+  plant_memory "$f"
+  { printf '%s\n' "$START_LIT"
+    while IFS= read -r line || [ -n "$line" ]; do [ "$line" = "$SPAN_COMMENT" ] || printf '%s\n' "$line"; done < "$TMP/shipped-block"
+    printf '%s\n' "$END_LIT"; } >> "$f"
+  printf '%s' "$h"
+}
+summary_of() {  # <text> -> the lines after the "Summary" line
+  local line on=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$on" = "1" ] && printf '%s\n' "$line"
+    [ "$line" = "Summary" ] && on=1
+  done <<< "$1"
+  return 0
+}
 
-# a share the user set is theirs: never overwritten by the offer, and the item is not pending
-SH_B="$(rec_home)"; mkdir -p "$SH_B/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_B")"
-SH_B_OUT="$(rec_setup "$SH_B" share y)"
-expect_eq "SHARE-ITEM set: a share of 65 is kept through a yes (65)" "65" "$(sh_value "$SH_B")"
-expect_contains "SHARE-ITEM set: …said as already set" "nothing to do" "$SH_B_OUT"
-expect_eq "SHARE-ITEM set: …and the item is not pending (1)" "1" "$(sh_pending "$SH_B")"
+SP_A="$(span_old_home)"
+SP_F="$SP_A/.claude/CLAUDE.md"
+expect_eq "SPAN sweep precondition: the fixture reads as edited" "env:working-principles state=edited" "$(detect_run "$SP_A")"
+nonblock_to "$SP_F" "$TMP/sp-outside-before"
+SP_OUT="$(rec_env "$SP_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" </dev/null 2>&1)"
+block_to "$SP_F" "$TMP/sp-block"
+expect_same_bytes "SPAN sweep: the span is now the shipped text" "$TMP/shipped-block" "$TMP/sp-block"
+nonblock_to "$SP_F" "$TMP/sp-outside-after"
+expect_same_bytes "SPAN sweep: …every line outside the markers as it was" "$TMP/sp-outside-before" "$TMP/sp-outside-after"
+expect_eq "SPAN sweep: …one start marker" "1" "$(count_lines_equal "$SP_F" "$START_LIT")"
+SP_S13="$(section_of "$SP_OUT")"; SP_S13="${SP_S13%%Summary*}"
+expect_nonempty "SPAN sweep: step 13 printed (the extractor reads)" "$SP_S13"
+expect_contains "SPAN sweep: step 13 says updated" "updated" "$SP_S13"
+expect_absent "SPAN sweep: …and asked nothing" "[y/N]" "$SP_S13"
+expect_contains "SPAN sweep: the summary says updated" "updated" "$(summary_of "$SP_OUT")"
 
-# a no leaves the default: nothing written, the item pending, the gate reads 80
-SH_C="$(rec_home)"
-SH_C_OUT="$(rec_setup "$SH_C" share n)"
-expect_eq "SHARE-ITEM no: nothing is written (the yes above wrote)" "no" "$(sh_has "$SH_C")"
-expect_contains "SHARE-ITEM no: the item says declined" "declined" "$SH_C_OUT"
-expect_contains "SHARE-ITEM no: …names the default that stands" "80%" "$SH_C_OUT"
-expect_contains "SHARE-ITEM no: …and the line that would answer yes" "--only share" "$SH_C_OUT"
-expect_eq "SHARE-ITEM no: the gate's share is the default (80)" "80" \
-  "$(rec_env "$SH_C" bash -c '. "$1" 2>/dev/null; gate_share' _ "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/gate.sh")"
-expect_eq "SHARE-ITEM no: …and the item is still pending (0)" "0" "$(sh_pending "$SH_C")"
+SP_OUT2="$(rec_env "$SP_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" </dev/null 2>&1)"
+SP_S13b="$(section_of "$SP_OUT2")"; SP_S13b="${SP_S13b%%Summary*}"
+expect_contains "SPAN equal: a second sweep says the span is already there" "already in" "$SP_S13b"
+expect_absent "SPAN equal: …claims no update" "updated" "$SP_S13b"
+expect_absent "SPAN equal: …and the summary claims none" "updated" "$(summary_of "$SP_OUT2")"
+block_to "$SP_F" "$TMP/sp-block2"
+expect_same_bytes "SPAN equal: …and the span is as it was" "$TMP/shipped-block" "$TMP/sp-block2"
 
-# the write goes where the gate reads, not to BIONIC_CLAUDE_HOME's directory
-SH_D="$(rec_home)"; mkdir -p "$SH_D/other"
-rec_env "$SH_D" env BIONIC_CLAUDE_HOME="$SH_D/other" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only share <<< 'y' >/dev/null 2>&1
-expect_eq "SHARE-ITEM home: with BIONIC_CLAUDE_HOME set the share is written under CLAUDE_CONFIG_DIR (80)" "80" "$(sh_value "$SH_D")"
-expect_eq "SHARE-ITEM home: …and not under BIONIC_CLAUDE_HOME" "no" "$([ -e "$SH_D/other/bionic/share" ] && echo yes || echo no)"
+# --only reaches the same end
+SP_B="$(span_old_home)"
+SP_B_OUT="$(rec_env "$SP_B" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles 2>&1 </dev/null)"
+block_to "$SP_B/.claude/CLAUDE.md" "$TMP/sp-block3"
+expect_same_bytes "SPAN --only: the span is the shipped text" "$TMP/shipped-block" "$TMP/sp-block3"
+expect_contains "SPAN --only: the run says updated" "updated" "$SP_B_OUT"
+expect_absent "SPAN --only: …and asked nothing" "[y/N]" "$SP_B_OUT"
+expect_contains "SPAN --only: …the summary says updated" "updated" "$(summary_of "$SP_B_OUT")"
 
-# a file the gate would refuse reads as the default, so setup offers a share over it (the value judges, as gate_share does)
-SH_J="$(rec_home)"; mkdir -p "$SH_J/.claude/bionic"; printf 'abc\n' > "$(sh_file "$SH_J")"
-expect_eq "SHARE-ITEM junk: a file holding abc fires the share item (0)" "0" "$(sh_pending "$SH_J")"
-rec_setup "$SH_J" share y >/dev/null 2>&1
-expect_eq "SHARE-ITEM junk: a yes replaces it with the default (80)" "80" "$(sh_value "$SH_J")"
+# a hand edit inside the span goes the same way
+SP_C="$(span_old_home)"; edit_block "$SP_C/.claude/CLAUDE.md" '- my own rule'
+rec_env "$SP_C" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles >/dev/null 2>&1 </dev/null
+block_to "$SP_C/.claude/CLAUDE.md" "$TMP/sp-block4"
+expect_same_bytes "SPAN edit: a line added inside the span is replaced with it" "$TMP/shipped-block" "$TMP/sp-block4"
 
-# the roster and the plan page name it
-SH_E="$(rec_home)"
-SH_E_LIST="$(rec_env "$SH_E" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --list 2>&1)"
-expect_contains "SHARE-ITEM roster: setup --list names the share item" "share" "$SH_E_LIST"
-SH_E_ALL="$(printf 'n\n' | rec_env "$SH_E" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --all 2>&1)"
-SH_E_PAGE="${SH_E_ALL%%Do all of the above?*}"
-expect_ne "SHARE-ITEM page: the --all page is on the output ahead of its question" "$SH_E_ALL" "$SH_E_PAGE"
-expect_contains "SHARE-ITEM page: it names the share and the file it would write" "write bionic's share of this machine, 80%, to " "$SH_E_PAGE"
-expect_eq "SHARE-ITEM page: answered no, nothing is written" "no" "$(sh_has "$SH_E")"
+# a read-only file is still left alone, with its message (the twin of the replacements above)
+SP_D="$(span_old_home)"; cp "$SP_D/.claude/CLAUDE.md" "$TMP/sp-ro-before.md"; chmod 444 "$SP_D/.claude/CLAUDE.md"
+SP_D_OUT="$(rec_env "$SP_D" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles 2>&1 </dev/null)"
+expect_same_bytes "SPAN read-only: the file is left byte-identical" "$TMP/sp-ro-before.md" "$SP_D/.claude/CLAUDE.md"
+expect_contains "SPAN read-only: …and says why" "read-only" "$SP_D_OUT"
+expect_absent "SPAN read-only: …and claims no update" "updated" "$(summary_of "$SP_D_OUT")"
+chmod 644 "$SP_D/.claude/CLAUDE.md"
 
 # ---------------------------------------------------------------------------
 section "§SHARE-REMOVE: remove takes the share file out on a yes, and only that file"
 # ---------------------------------------------------------------------------
 
 SH_R="$(rec_home)"
-rec_setup "$SH_R" share y >/dev/null 2>&1
 mkdir -p "$SH_R/.claude/bionic"
+printf '80\n' > "$(sh_file "$SH_R")"
 printf 'ccstatusline\tstatusline\t2026-10-01T10:00:00Z\t1.12.0\n' > "$(rec_file "$SH_R")"
-expect_eq "SHARE-REMOVE precondition: setup wrote the share (80)" "80" "$(sh_value "$SH_R")"
+expect_eq "SHARE-REMOVE precondition: the share file is there (80)" "80" "$(sh_value "$SH_R")"
 SH_R_NO="$(rec_remove "$SH_R" share n)"
 expect_eq "SHARE-REMOVE no: the file stays" "80" "$(sh_value "$SH_R")"
 expect_contains "SHARE-REMOVE no: the item says declined, and the file is left in place" "declined — bionic's share file" "$SH_R_NO"
