@@ -2786,6 +2786,10 @@ validate_net_zero() {
   # leaves nothing to compare against, and the arm is silent.
   git -C "$dir" diff --cached --quiet HEAD -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
   [ "$rc" -eq 1 ] || return 0
+  # The doctrine is bionic's (D13): only bionic's own source tree, named by the manifest HEAD holds, is
+  # held to net zero; a user project's agents/*.md and skills/ files are its own (wave-31 T42).
+  [ "$(git -C "$dir" show HEAD:payload/.claude-plugin/plugin.json 2>/dev/null \
+        | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || return 0
 
   sums="$( { loaded_set_sizes "$dir" HEAD | awk '{ print "b\t" $0 }'
              loaded_set_sizes "$dir" index | awk '{ print "a\t" $0 }'; } \
