@@ -647,10 +647,10 @@ case "$VERB" in
       usage "amend takes a name, then --files+/--suites+/--reexec+ additions and --reason."
     fi
     AMEND_NAME="$1"; shift
-    AMEND_FILES=""; AMEND_SUITES=""; AMEND_RUNS=""; AMEND_REASON=""
+    AMEND_FILES=""; AMEND_SUITES=""; AMEND_RUNS=""; AMEND_REASON=""; AMEND_BY=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --files+|--suites+|--reexec+|--reason)
+        --files+|--suites+|--reexec+|--reason|--by)
           if [ $# -lt 2 ] || [ -z "$2" ]; then usage "amend: $1 takes a value."; fi
           case "$2" in --*) usage "amend: $1 takes a value, and got the flag $2." ;; esac
           case "$1" in
@@ -666,6 +666,12 @@ case "$VERB" in
               case "$_am_r" in \`?*\`) _am_r="${_am_r#\`}"; _am_r="${_am_r%\`}" ;; esac
               AMEND_RUNS="${AMEND_RUNS}${_am_r}"$'\n' ;;
             --reason)  AMEND_REASON="$2" ;;
+            # WHO WIDENED IT (wave-31 T11; REQ-8 AC-8.3, D9, A-orch-46.2). The Bash wall's arm A
+            # admits a writer's Files amend of its own roster row and stages the call with
+            # `--by writer`; this verb cannot see its caller, so the flag is how the row says who.
+            --by)
+              [ "$2" = writer ] || usage "amend: --by takes only writer, and got $2."
+              AMEND_BY="$2" ;;
           esac
           shift 2 ;;
         *) usage "unknown argument for amend: $1" ;;
@@ -6663,7 +6669,7 @@ EOF
       [ -n "$AM_SRC" ] && AM_ARGS+=("suites_source=$AM_SRC")
     fi
     { [ -n "$AM_NEW_RUNS" ] || row_has_key "$AM_ROW" re_executes; } && AM_ARGS+=("re_executes=$AM_NEW_RUNS")
-    AM_ARGS+=("amended=$(iso_now) $(clean "$AMEND_REASON")")
+    AM_ARGS+=("amended=$(iso_now) ${AMEND_BY:+widened-by: $AMEND_BY }$(clean "$AMEND_REASON")")
     AM_NEW_ROW="$(roster_row "${AM_ARGS[@]}")" || AM_NEW_ROW=""
     if [ -z "$AM_NEW_ROW" ]; then
       die "REFUSED — could not build the amended row for $AMEND_NAME."
