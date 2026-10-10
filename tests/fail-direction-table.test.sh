@@ -13,6 +13,10 @@
 # (`payload missing its session key`) adjacent so that start=open and stop=closed
 # are one artefact.
 #
+# T32 (wave-31, D6; A-orch-61) RETIRED THE STOP GATE'S CLOSED SIDE for a live writer: stop-guard
+# records reason=unmet and allows, so the keyless pair no longer differs and A10 is retired for
+# the stop gate. The stop rows that reached that deny are the allowed-with-reason case below.
+#
 # HERMETIC: throwaway git repos under a mktemp'd sandbox, redirected HOME.
 #
 # Usage: bash tests/fail-direction-table.test.sh
@@ -715,25 +719,21 @@ else
 fi
 
 # ============================================================
-section "the asymmetry itself: ONE missing field, TWO directions"
+section "the missing session key: the start gate stays open (the stop gate's closed side is retired)"
 # ============================================================
 #
-# Checklist A10's defect was not a wrong direction — it was that no test asserted
-# the two directions were different ON PURPOSE. The same absent `session_id`, the
-# same active wave, adjacent:
+# Checklist A10's defect was that no test asserted the two directions differed ON PURPOSE:
+# the same absent `session_id`, start open, stop closed. THE ASYMMETRY DIED WITH THE DENY ARM
+# (wave-31 T32, D6; A-orch-61). The stop gate's closed answer to a keyless payload in a live
+# writer's world was the "still working, nothing delivered" deny, which stop-guard no longer
+# makes: it reads the session from the environment, allows the stop and records
+# reason=unmet on the roster row (the stop|no-session-key row above). A10 of the known-failure
+# checklist is retired for the stop gate. What is left to pin here is the start side.
 
 drive start:no-session-key
 S_START=$DRV_ST; S_START_ERR=$DRV_ERR
-drive stop:no-session-key
-S_STOP=$DRV_ST; S_STOP_ERR=$DRV_ERR
 
 expect_eq "a keyless payload at the START gate passes (open)"   "0" "$S_START"
-expect_eq "a keyless payload at the STOP gate is refused (closed)" "2" "$S_STOP"
-if [ "$S_START" != "$S_STOP" ]; then
-  ok "the directions differ — recorded inconsistency, accepted by §7, not an accident"
-else
-  no "the directions differ" "both gates answered $S_START"
-fi
 expect_eq "the open side stays silent about it" "" "$S_START_ERR"
 
 # ============================================================
