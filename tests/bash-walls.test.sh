@@ -2017,6 +2017,10 @@ expect_contains "19x0g …and the verb T42 added, finding-move" "finding-move" "
 for _am_v in matrix-render discharge handoff task-split; do
   expect_contains "19x0h …and the plan verb wave-30 added, $_am_v" " $_am_v " " $AM_VERBS "
 done
+# THE PLAN VERB WAVE-31 ADDED (T27 regression; A-orch-40): it writes the bound plan's regression: key, and
+# a dispatched writer running `regression no` would switch its own run's floor off.
+expect_contains "19x0i …and the plan verb wave-31 added, regression" " regression " " $AM_VERBS "
+am_refused "19x0j: bash session-poker.sh regression no" "bash $AM_POKER regression no 'CI runs it'"
 for _am_v in $AM_VERBS; do
   am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
 done
