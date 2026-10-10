@@ -65,15 +65,15 @@ run_check() {
   [ "$#" -gt 0 ] || set -- "$LIST"
   OUT="$(cd "$repo" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD bash "$CHECK" "$@" 2>&1)"; RC=$?
 }
-# lines_of <text> — the number of non-empty lines
-lines_of() { printf '%s\n' "$1" | awk 'NF { n++ } END { print n + 0 }'; }
+# lines_of <text> — the number of lines the check itself printed (its `release-check:` lines);
+# the name scan's own output, which rides along on stdout, is not counted
+lines_of() { printf '%s\n' "$1" | awk '/^release-check:/ { n++ } END { print n + 0 }'; }
 
 section "§VERSION-PAIR — the newest CHANGELOG heading equals plugin.json's version, read from the HEAD tree"
 
 R="$TMP/agree"; fx_repo "$R" 2.3.4 2.3.4
 run_check "$R"
 expect_status "(i) an agreeing pair, a clean scan: the check passes" 0 "$RC"
-AGREE_OUT="$OUT"
 
 R="$TMP/chg"; fx_repo "$R" 2.3.4 2.3.4
 fx_changelog 2.3.5 > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "doctor the heading"
@@ -93,13 +93,16 @@ expect_eq "(iii) …in one line" "1" "$(lines_of "$OUT")"
 
 # (iv) the HEAD tree, not the working file: the working CHANGELOG disagrees, nothing is committed.
 R="$TMP/dirty"; fx_repo "$R" 2.3.4 2.3.4
+run_check "$R"
+expect_status "(iv) setup: the clean repository passes" 0 "$RC"
+CLEAN_OUT="$OUT"
 fx_changelog 7.7.7 > "$R/CHANGELOG.md"
 expect_contains "(iv) setup: the working CHANGELOG really does disagree with the committed one" \
   "7.7.7" "$(cat "$R/CHANGELOG.md")"
 expect_nonempty "(iv) setup: the repository really is dirty" "$(git -C "$R" status --porcelain)"
 run_check "$R"
 expect_status "(iv) a working CHANGELOG edited and not committed: the check still passes (HEAD is read)" 0 "$RC"
-expect_eq "(iv) …and prints what the agreeing run prints" "$AGREE_OUT" "$OUT"
+expect_eq "(iv) …and prints what the clean run of the same repository printed" "$CLEAN_OUT" "$OUT"
 
 # BIONIC_CHECK_HEAD picks the tree: the bad commit is HEAD, the good one is HEAD~1.
 R="$TMP/pick"; fx_repo "$R" 2.3.4 2.3.4
