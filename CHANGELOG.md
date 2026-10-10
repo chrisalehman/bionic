@@ -8,6 +8,148 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.14.1 — 2026-10-10
+
+The floor is now a record of runs, and the regression is a setting. A release's floor is one whole green
+run at a commit on the branch plus every later commit proved by the suites its row ran, read from the
+records the runs left; nothing predicts a suite set any more. The file-to-suite map that 1.14.0 shipped
+is deleted, because it was measured unsound. A plan has one ledger shape: the task-scale shape is
+refused. Step 0 asks whether the plan owes a regression at all. Five process checks, the pin suite, the
+repository's own CLAUDE.md and 73,883 bytes of the loaded doctrine are gone. This is a patch release by the
+policy above: each removal deletes a check or verb that was itself the defect, and the one new rule, the
+net-zero doctrine, only subtracts. `canonical_sdlc_version` stays 14. The detached run's ceiling, the
+landing's evidence cells and the walk as use have met no project but this repository's own release.
+
+**Migration (one ledger shape).** A plan in the retired task-scale shape (`current: T<n>`, the
+`id | intent | rigor | description | status | worktree` ledger) is refused on its next `launch-sync`, not
+skipped: rewrite it in the one ledger shape the wave and epic plans use, with a numeric `current:` step.
+A `later-changes:` block in a plan is no longer read; delete it. A plan with no `regression:` key reads
+`regression: yes`. An `impact-command:` line in `.bionic/config.yaml` is no longer read; delete it. A
+matrix block that still carries the five retired keys beside `evidence:` is admitted, not refused.
+
+What you will notice:
+
+- **One ledger shape, and a refusal for the old one.** `current:` is a step number at every scale. A plan
+  in the task-scale shape now meets this line on stderr, with exit 1, where 1.14.0 skipped it in silence:
+
+  ```
+  NOT-RECORDED — current: <value> is not numeric; a plan in the retired task-scale shape is refused, not skipped
+  ```
+
+  An empty `current:` stays silent. The task-scale arms are deleted from the ledger writer, the
+  ready set, the card and the evidence gate (the task-scale validator and its three rigor lanes among
+  them). A plan open at `current: T<n>` stays open, so the launch-sync, the stop wall and the tick name
+  it and refuse it. The reason is in
+  `.bionic/docs/adrs/epic-23-bionic-tech-debt/adr-050-the-floor-is-a-record-of-runs-and-the-regression-is-a-setting.md`.
+  Records: `T5-one-shape.md`, `T24-one-shape-gate.md`.
+- **The floor is a record of runs.** A build row runs the suites its brief names. After the last build
+  row lands, one whole run, when the plan's `regression:` is `yes`. A fix row runs the red suites plus its
+  own. The floor is one whole green run at a commit on the branch plus every later commit proved by the
+  suites its row named, and a second whole run needs the user's word:
+  `session-poker.sh approve regression-2`. A run at an ancestor of the working head proves the floor when every later commit on the
+  branch is proved by a record of the suites it owed, and `proof-add floor` otherwise names the first
+  commit it cannot prove and the suites it lacks there. The `later-changes:` attestation block and the
+  full-run-owed rules are removed with the bounded arm they served. The dispatch wall refuses a whole run
+  in four cases: the plan declares `regression: no`, a row the regression waits on still writes tracked
+  files, the head is already proved, and a whole run was already launched on the plan without the second-run
+  approval. Records: `T3-floor.md`, `T26-floor-wall.md`.
+- **The regression is a Step-0 setting.** Step 0 prints a `regression` line beside rigor and scale, with
+  the scale's default (`yes` at wave, `no` at task and epic), and
+  `session-poker.sh regression <yes|no> '<reply>'` writes `regression:` and, when it differs from the default, `regression-override:`. At
+  `regression: no` the Step-5 block carries one line,
+  `regression: no (Step 0, <user>) — <where it runs>`, in place of `cmd`, `pass`, `total`, `output` and `head`, and no run is owed. An absent key, or
+  any value but `no`, reads `yes`. Records: `T4-regression-setting.md`, `T28-regression-card.md`.
+- **The impact map is deleted.** `tests/lib/impact.sh`, `tests/impact.test.sh`, the `impact-command:`
+  read, the derivation and its time bound, the landing's background warm and the amend verb's derived arm
+  are gone. A writer's budget is the suites its brief names, and a brief that names only `Files:` is
+  refused with `add Suites: or Re-executes:`. The 1.14.0 entry said the planted-edit proof reddened 2
+  suites the map never named for a change to a tests/lib helper; the measured number is 29
+  (`record/wave-30-efficiency/T39-planted-edits.log:59`, `red_outside=29`). Records: `T2-map-deleted.md`,
+  `T23-map-landing-side.md`.
+- **The regression counter reads the command.** `session-poker.sh regression-runs` counts a finished run
+  as whole when the command it ran is a whole run of the runner, by one classifier shared with the budget,
+  and no longer by the basename of a log. Record: `T21-counter.md`.
+- **A landing writes its criteria's evidence.** When `row-landed` records a row, each acceptance
+  criterion the row serves gets an `evidence:` pointer to the green log of the suite its `eval:` names, under
+  `record/<plan>/line/`, in the same swap, and the poker says `evidence: <n> cell(s) written by landing`.
+  A hand landing has no verdict and writes nothing. Record: `T22-landing-evidence.md`.
+- **The budget reads what runs.** `amend --reexec+` takes a command quoted in backticks without keeping
+  the backticks. A script a shell runs is read for the commands in it, so `bash red.sh` that runs `jest` is
+  refused naming `jest`, and a script whose text cannot say what runs is refused as unverified. A writer
+  may widen its own row with `amend --files+`. Record: `T11-budget.md`.
+- **A detached run has a ceiling.** A detached run the gate has not admitted within
+  `BIONIC_SETTLE_MAX_WAIT` (1200 s unless set) ends with exit 75 and the line `booked: the gate did not
+  admit this command within <n>s`, and `session-poker.sh wait` prints that line. Record:
+  `T12-detach-ceiling.md`.
+- **Setup asks only what changes something.** The default share is 92, and setup no longer asks about it.
+  Setup brings bionic's working-principles span up to date without asking, names the update in its
+  summary, and leaves your own text outside the markers. Record: `T10-setup.md`.
+- **One pointer per matrix row.** A matrix row owes `evidence:` and nothing else, and a T4 row adds
+  `user-confirmed:`. The five older keys are no longer demanded. Record: `T6-matrix-keys.md`.
+- **Five process checks are gone, and the stop guard records instead of denying.** The `unsure:` finding
+  line (a fix finding needs `shown:`), the SDLC-State `check:` line with the `finding-check` verb (now the
+  usage error `unknown verb`), the Step-8 `cur8_checks`, and the Patrol's `tasklist` and `entry` duties
+  are removed. A reader's rating is final. The stop guard no longer denies a stop of a live writer: it
+  records `reason=unmet: …` on the writer's roster row and allows it. Revert-and-watch is removed from the
+  evidence checks, the test-runner role and Step 5. The reader exam is `tests/exam/reader-exam.sh`, run by
+  name, and is no longer a suite of `tests/run.sh`. Records: `T7-process-checks.md`,
+  `T31-exam-move.md`, `T33-exam-harness.md`, `T35-exam-table.md`.
+- **The walk is use.** Before any row discharges, an agent that has not read the criteria spends about
+  fifteen minutes using the shipped plugin as a user would. A process fact, that a step was walked or a
+  reader dispatched, is never a T4 row. Record: `T8-walk.md`.
+- **No pins.** `tests/docs-pins.test.sh` (7,077 lines) is deleted, and so is the repository's `CLAUDE.md`,
+  whose rulings are now in `skills/canonical-sdlc/operational-rules.md`. The release check is the name scan
+  plus one contract that no other suite held: the newest heading of this file equals the plugin's
+  `.version`. Record: `T1-no-pins.md`.
+- **The doctrine is net zero, and the loaded set shrank.** The loaded set is `SKILL.md`, `steps/*.md`,
+  `dispatch.md`, `operational-rules.md`, `agents/*.md` and `payload/context/*.md`. A commit that grows it
+  is refused, naming the delta and the files, unless the committing row reads `approval:doctrine-growth`
+  and the plan carries `approved: doctrine-growth`; a shrink passes silently. The loaded set is 186,087 B
+  in 25 files, from 259,970 B at 1.14.0 (by `wc -c` and by the wall's own reader, which agree).
+  `operational-rules.md` is 23,759 B, from 95,285 B. The version history it carried is this
+  file's. Records: `T9-net-zero.md`, `T30-net-zero-wall.md`,
+  `T14-prune.md`.
+- **Leftovers.** `perl` is a listed dependency (README and the dependency list), the finding line reads
+  `<path>:<line>`, and the floor wait text speaks the floor rule's words. The doctor suites stub `perl`.
+  Records: `T13-leftovers.md`, `T34-doctor-perl.md`.
+- **Wall time.** Before this release the pin suite's row was 196 s of the run
+  (`eeca80e1:tests/timing.tsv:24`; the row left the tree with the suite), and the one full regression took
+  46 minutes at width 8 (1.14.0's entry). after: <written at Step 7>
+
+Five limits listed under 1.14.0 are retired and do not carry: the impact map's unsoundness, the
+task-scale plans, the opt-in planted-edit section, the detached run's missing ceiling and the landing's
+background warm.
+
+Known limits, carried to the next release:
+
+- Known limit: the 1.13.0 limits that this entry does not restate stand as written there.
+- Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not
+  the scale; readers holding a code question, and the exam's readers, grade by the scale (Known limit 71
+  of 1.13.0, restated).
+- Known limit: `ready` holds a `landing` admission while it proves a row but does not export it as
+  `BIONIC_GATE_ADMIT`, so a suite that drives the real runner under `ready` asks the gate again, and that
+  nested ask has no bound (Known limit 72 of 1.13.0). Pointing the gate store at a throwaway directory
+  does not work around it: in an empty store the nested ask waits on the unfinished landing admission,
+  which waits on it, and exits 75. Land such a row by hand with `land <tree> --by-hand --reason '<why>'`,
+  or prove it with `BIONIC_GATE_ADMIT` exported from the landing admission or one seeded cost record in
+  the store.
+- Known limit: an evidence verdict's `result` moves with rigor (Known limit 74 of 1.13.0). At `single` the
+  critic holds `evidence` with the severity scale: a REFUTED rated S3 or S4 registers `flag`, and so does
+  an S2-off REFUTED. At `double` the auditor holds `evidence` without the scale, so the same REFUTED
+  registers `fail`; the auditor limit above is the reason.
+- Known limit: the tick does not name a starved queue (pending rows, room at the gate and nothing ready
+  for two ticks) and does not require an answer per held row. A held row is answered by `task-set`,
+  `task-split` or `decline --on`.
+- Known limit: a dead session's roster is pruned, so a whole run it launched stops counting toward the
+  second-run rule. The durable twin is the `proved:` line of kind `floor` for a green run; a red whole run
+  by a dead session is the case lost (a 1.15.0 note).
+- Known limit: the gate's cost accounting reads the shell's cumulative `times` at run end and promises
+  each owed writer the largest cost on record, so one-to-five-second suites claimed 10 to 27 cores and
+  held the fill at two or three writers on an 8-core machine. Records were pruned by hand and re-measure
+  on their next run (a 1.15.0 fix, beside a per-key promise for a brief's own suites).
+- Known limit: `units_unlined` has no caller in code and keeps one test pin (`tests/units.test.sh`
+  17d.15); it is dead code to delete in 1.15.0.
+
 ## 1.14.0 — 2026-10-09
 
 Review is now one decision. Rigor is the count of independent readers, `single` or `double`, and it
