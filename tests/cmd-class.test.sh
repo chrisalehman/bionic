@@ -2391,6 +2391,112 @@ expect_eq "§ONLY the targets reading carries the path in the runner's directory
   "only	a.test.sh	tests/a.test.sh|only	b.test.sh	tests/b.test.sh" \
   "$(printf '%s' 'tests/run.sh --only a.test.sh b.test.sh' | bash -c '. "$1" || exit 9; _cmd_class_awk targets' _ "$LIB" 2>&1 | awk -F'\t' '{ print $1 "\t" $2 "\t" $4 }' | paste -sd'|' -)"
 
+section "§SCRIPT-TEXT — wave-31 T11 (D9, AC-8.2; A-orch-41.5, A-orch-46.1): the budget reads the script a shell runs"
+# `bash red.sh`, where red.sh runs jest, read as none: the reading took the operand's basename
+# alone, so a writer's wrapper script carried any suite past the budget. With a repo root (the
+# budget's own reading), a script operand that is no suite name and not the runner is OPENED
+# when its file is in the tree, and its text is read as a command: a suite it runs is claimed
+# as kind `run`, target the run inside, the claim's run column the command as typed, so the
+# refusal can name both. A line whose command word, or whose script operand, is built from `$`
+# or a backtick, a script that is not there, and a script path that is itself built from a
+# variable are kind `unverified`, target the script. FIXTURE FIDELITY: real files under a temp
+# root, as an agent's tree holds them; the root is the budget's `$BIONIC_ROOT`, the cwd its
+# payload `.cwd`.
+ST="$SANDBOX/st"; ST_ELSE="$SANDBOX/st-else"
+mkdir -p "$ST/tests" "$ST/sub" "$ST_ELSE"
+printf '#!/bin/bash\nset -e\n# jest runs below\necho starting\njest\n' > "$ST/red.sh"
+printf '#!/bin/bash\njest\n' > "$ST/red2.sh"
+printf '#!/bin/bash\nset -e\nRUNNER=jest\n"$RUNNER" --ci\n' > "$ST/var.sh"
+printf '#!/bin/bash\nfor s in a b; do bash "$s"; done\n' > "$ST/varop.sh"
+printf '#!/bin/bash\necho plain\nls -la\ngit status --short\n' > "$ST/plain.sh"
+printf '#!/bin/bash\ncat > notes.md <<'"'"'EOF'"'"'\njest\nEOF\necho done\n' > "$ST/hd.sh"
+printf '#!/bin/bash\nbash tests/a.test.sh\n' > "$ST/bare.sh"
+printf '#!/bin/bash\ntests/run.sh\n' > "$ST/full.sh"
+printf '#!/bin/bash\nbash red.sh\n' > "$ST/outer.sh"
+printf '#!/bin/bash\njest\n' > "$ST/sub/inner.sh"
+printf '#!/bin/bash\njest\n' > "$ST_ELSE/red.sh"
+st_rows() {  # <command> [<cwd>] -> the claims under root $ST as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$4"' _ "$LIB" "$1" "$ST" "${2-$ST}" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+st_full() {  # <command> -> the claims under root $ST, all three columns, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$ST" 2>&1 | paste -sd'|' -
+}
+expect_eq "§SCRIPT-TEXT AC-8.2 bash red.sh, red.sh running jest: one claim, run jest" "run:jest" "$(st_rows 'bash red.sh')"
+expect_eq "§SCRIPT-TEXT …the claim's run is the command as typed, naming the script" "run	jest	bash red.sh" \
+  "$(st_full 'bash red.sh')"
+expect_eq "§SCRIPT-TEXT …the evidence shape reads the same script" "run:jest" \
+  "$(st_rows 'set -o pipefail; bash red.sh 2>&1 | tee log; rc=$?; exit $rc')"
+expect_eq "§SCRIPT-TEXT an absolute path in the tree is read alike" "run:jest" "$(st_rows "bash $ST/red.sh")"
+expect_eq "§SCRIPT-TEXT a literal cd decides the directory the script is found in" "run:jest" \
+  "$(st_rows "cd $ST/sub && bash inner.sh" "$ST_ELSE")"
+expect_eq "§SCRIPT-TEXT sh and zsh are read like bash" "run:jest|run:jest" "$(st_rows 'sh red.sh; zsh red2.sh')"
+expect_eq "§SCRIPT-TEXT two scripts, two claims, each with its own run" "run	jest	bash red.sh|run	jest	bash red2.sh" \
+  "$(st_full 'bash red.sh && bash red2.sh')"
+expect_eq "§SCRIPT-TEXT a script calling a script is read through it (depth 2)" "run:jest" "$(st_rows 'bash outer.sh')"
+expect_eq "§SCRIPT-TEXT a --dry-run after a script is the script's argument, not the runner's mode" "run:jest" \
+  "$(st_rows 'bash red.sh --dry-run')"
+expect_eq "§SCRIPT-TEXT a script running a suite file bare claims that run" "run:bash tests/a.test.sh" "$(st_rows 'bash bare.sh')"
+expect_eq "§SCRIPT-TEXT a script running the full tree is the full-tree claim" "file:run.sh" "$(st_rows 'bash full.sh')"
+expect_eq "§SCRIPT-TEXT AC-8.2 a command word built from a variable is unverified, naming the script" "unverified:var.sh" \
+  "$(st_rows 'bash var.sh')"
+expect_eq "§SCRIPT-TEXT …and the unverified claim's run is the command as typed" "unverified	var.sh	bash var.sh" \
+  "$(st_full 'bash var.sh')"
+expect_eq "§SCRIPT-TEXT a script operand built from a variable inside the script is unverified" "unverified:varop.sh" \
+  "$(st_rows 'bash varop.sh')"
+expect_eq "§SCRIPT-TEXT AC-8.2 a script that is not there is unverified" "unverified:missing.sh" "$(st_rows 'bash missing.sh')"
+expect_eq "§SCRIPT-TEXT a script path built from a variable is unverified" 'unverified:$D/red.sh' \
+  "$(st_rows 'bash "$D/red.sh"')"
+expect_eq "§SCRIPT-TEXT a script that runs no suite claims nothing (red.sh above is the positive)" "" "$(st_rows 'bash plain.sh')"
+expect_eq "§SCRIPT-TEXT a heredoc body in a script is never a command (red.sh above is the positive)" "" "$(st_rows 'bash hd.sh')"
+expect_eq "§SCRIPT-TEXT a script outside the tree is not this budget's (the same text inside is claimed above)" "" \
+  "$(st_rows "bash $ST_ELSE/red.sh")"
+expect_eq "§SCRIPT-TEXT without a root nothing is opened: the shape reading claims nothing" "" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_claims "$2"' _ "$LIB" "bash $ST/red.sh" 2>&1)"
+expect_eq "§SCRIPT-TEXT …while the same call with the root claims it (the positive)" "run:jest" "$(st_rows "bash $ST/red.sh")"
+case_is none "bash $ST/red.sh" "§SCRIPT-TEXT the class reading is unchanged: it opens no file"
+expect_eq "§SCRIPT-TEXT bash -c runs its string, not a script: the string is read as before" "run:jest" "$(st_rows "bash -c 'jest'")"
+expect_eq "§SCRIPT-TEXT bash -n names a script it will not run: nothing is opened" "" "$(st_rows 'bash -n red.sh')"
+# THE FULL RULE IS FOR THE WRITER'S OWN WRAPPER (A-orch-62). The scripts above are untracked (no
+# repository), so each met the full rule. In a repository, a script tracked at HEAD and unchanged is
+# the project's own tool: read for its literal text, its `$` lines claim nothing; a modified or an
+# untracked one gets the full rule. Over 2,000 lines a tracked script is not opened and claims nothing,
+# an untracked one reads `unverified`. FIXTURE FIDELITY: a real git repository, committed, then edited.
+GT="$SANDBOX/gt"; mkdir -p "$GT"
+git -C "$GT" init -q
+printf '#!/bin/bash\nX=jest\n"$X" --ci\necho ok\n' > "$GT/tvar.sh"
+printf '#!/bin/bash\njest\n' > "$GT/tjest.sh"
+printf '#!/bin/bash\ntests/run.sh --only a.test.sh\n' > "$GT/tdoor.sh"
+printf '#!/bin/bash\ntests/run.sh\n' > "$GT/tfull.sh"
+printf '#!/bin/bash\necho a\n' > "$GT/red.sh"
+printf '#!/bin/bash\necho a\n' > "$GT/mvar.sh"
+printf '#!/bin/bash\nbash "$Z/x.sh"\nbash red.sh\n' > "$GT/tcall.sh"
+awk 'BEGIN { for (i = 0; i < 2100; i++) print "echo x"; print "jest" }' > "$GT/big.sh"
+git -C "$GT" add tvar.sh tjest.sh tdoor.sh tfull.sh red.sh mvar.sh tcall.sh big.sh
+git -C "$GT" -c user.email=t@example.com -c user.name=T -c commit.gpgsign=false commit -qm seed
+cp "$GT/big.sh" "$GT/ubig.sh"
+printf '#!/bin/bash\njest\n' > "$GT/red.sh"
+printf '#!/bin/bash\n"$R" --ci\n' > "$GT/mvar.sh"
+gt_rows() {  # <command> -> the claims under root $GT as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$GT" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§SCRIPT-TEXT tracked: the fixture is committed and two scripts are edited after it" " M mvar.sh| M red.sh|?? ubig.sh" \
+  "$(git -C "$GT" status --porcelain | sort | paste -sd'|' -)"
+expect_eq "§SCRIPT-TEXT tracked and unchanged, a literal jest in it: claimed, run jest" "run:jest" "$(gt_rows 'bash tjest.sh')"
+expect_eq "§SCRIPT-TEXT tracked and unchanged, its \$ lines claim nothing (tjest.sh beside it is the positive)" "" "$(gt_rows 'bash tvar.sh')"
+expect_eq "§SCRIPT-TEXT tracked, a literal door run in it: claimed as run" "run:tests/run.sh --only a.test.sh" "$(gt_rows 'bash tdoor.sh')"
+expect_eq "§SCRIPT-TEXT tracked, a literal tests/run.sh in it: the full-tree claim (A-T11-9)" "file:run.sh" "$(gt_rows 'bash tfull.sh')"
+expect_eq "§SCRIPT-TEXT modified red.sh running jest: run jest" "run:jest" "$(gt_rows 'bash red.sh')"
+expect_eq "§SCRIPT-TEXT modified, a \$ command word: unverified" "unverified:mvar.sh" "$(gt_rows 'bash mvar.sh')"
+expect_eq "§SCRIPT-TEXT tracked and over 2,000 lines: not opened, no claim (ubig.sh is the same text untracked)" "" "$(gt_rows 'bash big.sh')"
+expect_eq "§SCRIPT-TEXT untracked and over 2,000 lines: unverified" "unverified:ubig.sh" "$(gt_rows 'bash ubig.sh')"
+expect_eq "§SCRIPT-TEXT a tracked script skips its own \$ line and still reads the modified script it runs" "run:jest" \
+  "$(gt_rows 'bash tcall.sh')"
+expect_eq "§SCRIPT-TEXT a missing script in a repository is unverified either way" "unverified:gone.sh" "$(gt_rows 'bash gone.sh')"
+expect_eq "§SCRIPT-TEXT a variable-built path in a repository is unverified either way" 'unverified:$D/tjest.sh' \
+  "$(gt_rows 'bash "$D/tjest.sh"')"
+
 section "§NAME — wave-28 T36 (read-structure-p20 #1): one predicate says what a suite name is"
 # The script-operand arm, the argv[0] arm and could_suite each spelled the suite-name rule, and
 # could_suite had drifted from the runner rule: `scripts/*run.sh` was claimed though

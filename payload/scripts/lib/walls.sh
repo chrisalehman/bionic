@@ -5317,10 +5317,14 @@ return 0
 # the --by-hand flag anywhere among land's words, is the person's landing: it publishes a row past
 # the line and writes its plan row, so it is the orchestrator's as the plan verbs are. It sets
 # `_WALL_POKER_VERB` to `land`; `_WALL_POKER_SHOWN` is the call as the detail names it.
-_WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""
+#
+# THE ARGV COMES BACK TOO (wave-31 T11; REQ-8 AC-8.3, D9): `_WALL_POKER_CALL` is the matched
+# segment's words from argv[0] on and `_WALL_POKER_ARGS` the words after the verb, each list joined
+# by `GIT_ARGV_US`, so arm A can read an `amend`'s target and flags and rebuild the call it admits.
+_WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
 _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKER_VERB) · 1 not
   local _line _oldifs _hadf _w _i _script _next
-  _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""
+  _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _git_argv_skip "$_line"
@@ -5353,7 +5357,10 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         _next="${1:-}"
         case "$_next" in
           amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split)
-            _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
+            _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
+            _WALL_POKER_CALL="$GIT_ARGV_REST"
+            _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
+            return 0 ;;
         esac ;;
       spawn-worktree.sh)
         shift
@@ -5752,6 +5759,71 @@ _bsg_wrap_only() {
   return 0
 }
 
+# _bsg_own_amend — is the matched `session-poker.sh amend` (`_WALL_POKER_ARGS`) a writer's Files
+# amend of its OWN roster row (wave-31 T11; REQ-8 AC-8.3, D9; A-orch-41.6, A-orch-46.2)? rc 0 with
+# `_BSG_AM_UPD` the tool_input to stage: the call rebuilt from the words the wall read, each one
+# shell-quoted, and ` --by writer` after them. rc 1 otherwise. Either way `_BSG_AM_OWN` is the
+# caller's row name (empty when no row carries its id) and `_BSG_AM_TARGET` the row amended, for
+# the refusal's detail.
+#
+# THE OWN ROW IS THE BUDGET'S OWN PICK, `roster_row_for_id` on the payload's agent_id, the same
+# read ARM C and ARM 2 make — never a name the command supplies. ONE CALL ONLY: a chain, a `cd`
+# before it or a `bash -c` around it is more than the verb the wall read, so it is not rebuilt.
+# THE ADDITIONS ARE FILES ONLY: `--files+ <path>` once or more and one `--reason`. `--suites+` and
+# `--reexec+` spend the suite budget, which stays the orchestrator's, and a `--by` the writer typed
+# is the wall's to add. The verb cannot see its caller (in-process teammates share the session's
+# environment), so the staged flag is how the row says a writer widened it.
+_BSG_AM_OWN=""; _BSG_AM_TARGET=""; _BSG_AM_UPD=""
+_bsg_own_amend() {
+  local _pick _seg _segs _l _n=0 _oldifs _hadf _files=0 _reason=0 _cmd="" _w
+  _BSG_AM_UPD=""
+  wall_libs background-suite-guard roster.sh || return 1
+  if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
+    IFS='|' read -r -a _segs <<< "$_pick"
+    for _seg in "${_segs[@]}"; do
+      case "$_seg" in name=*) _BSG_AM_OWN="${_seg#name=}"; break ;; esac
+    done
+  fi
+  _oldifs="$IFS"; _hadf=0
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS="$GIT_ARGV_US"
+  # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+  set -- $_WALL_POKER_ARGS
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
+  _BSG_AM_TARGET="${1:-}"
+  [ -n "$_BSG_AM_OWN" ] && [ "$_BSG_AM_TARGET" = "$_BSG_AM_OWN" ] || return 1
+  shift
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] && [ -n "$2" ] || return 1
+    case "$2" in --*) return 1 ;; esac
+    case "$1" in
+      --files+) _files=$((_files + 1)) ;;
+      --reason) _reason=$((_reason + 1)) ;;
+      *) return 1 ;;
+    esac
+    shift 2
+  done
+  [ "$_files" -ge 1 ] && [ "$_reason" -eq 1 ] || return 1
+  while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
+  [ "$_n" -eq 1 ] || return 1
+  _hadf=0
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS="$GIT_ARGV_US"
+  # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+  set -- $_WALL_POKER_CALL
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
+  for _w in "$@"; do
+    _wall_sh_word "$_w"
+    _cmd="${_cmd:+$_cmd }$_WALL_WORD"
+  done
+  _BSG_AM_UPD=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg c "$_cmd --by writer" '.tool_input + {command: $c}' 2>/dev/null)
+  [ -n "$_BSG_AM_UPD" ]
+}
+
 # ─── wall_background_suite_guard — hooks/background-suite-guard.sh ───────────
 #
 # A subagent may not run a suite where nobody reads the output (B-9,
@@ -5913,12 +5985,29 @@ the tree as it is and send the report; the orchestrator lands the work."
   case "$_WALL_STRIPPED" in
     *session-poker*|*spawn-worktree*)
       if _wall_poker_contract_verb "$COMMAND"; then
+        # A WRITER ADDS FILES TO ITS OWN ROW (wave-31 T11; REQ-8 AC-8.3, D9; A-orch-46.2): the one
+        # `amend` this arm admits, staged with `--by writer` so the row records who widened it.
+        _BSG_AM_OWN=""; _BSG_AM_TARGET=""
+        if [ "$_WALL_POKER_VERB" = amend ] && _bsg_own_amend; then
+          fold_update_input "$_BSG_AM_UPD"
+          return 1
+        fi
+        local _bsg_am_more=""
+        if [ "$_WALL_POKER_VERB" = amend ] && [ -n "$_BSG_AM_OWN" ]; then
+          if [ -n "$_BSG_AM_TARGET" ] && [ "$_BSG_AM_TARGET" != "$_BSG_AM_OWN" ]; then
+            _bsg_am_more="
+\`amend $_BSG_AM_TARGET\`: $_BSG_AM_TARGET is not your row (yours is $_BSG_AM_OWN)."
+          fi
+          _bsg_am_more="${_bsg_am_more}
+The one amend a writer runs itself adds Files to its own row, alone in one call:
+    bash <plugin>/hooks/session-poker.sh amend $_BSG_AM_OWN --files+ <path> --reason '<why>'"
+        fi
         fold_block exit2 "$_WALL_POKER_VERB" \
           "a subagent may not change a contract or the plan" "ask orchestrator" \
           "\`$_WALL_POKER_SHOWN\` changes a roster contract or the bound plan, and
 only the orchestrator does that: a dispatched agent that could would widen its own budget or
 schedule its own work. Send the orchestrator what you need — the files, suites or runs to
-add and why, or the row to add — and it runs the verb."
+add and why, or the row to add — and it runs the verb.${_bsg_am_more}"
         return 2
       fi
       ;;
@@ -5956,7 +6045,17 @@ add and why, or the row to add — and it runs the verb."
 wall_libs background-suite-guard cmd-class.sh || return 0
 
 _wall_class_read "$COMMAND"
-[ "$_WALL_CLASS" = "suite" ] || return 0
+# A SCRIPT A SHELL RUNS IS READ HERE, AND ONLY HERE (wave-31 T11; REQ-8 AC-8.2, D9; A-T11-4). The
+# class reading opens no file, so `bash red.sh` is class none; past this function's partition (a
+# dispatched agent in an armed session) a command naming a shell is asked the budget's own claims,
+# which open the script, and a claim it makes is a suite run for every arm below. The cwd is the
+# payload's, where the agent's shell is.
+_BSG_CLAIM_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CLAIM_CWD" ] || _BSG_CLAIM_CWD="${BIONIC_CWD:-}"
+if [ "$_WALL_CLASS" != "suite" ]; then
+  [ -n "$ACTOR" ] || return 0
+  case "$COMMAND" in *sh[[:space:]]*) : ;; *) return 0 ;; esac
+  [ -n "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || return 0
+fi
 
 # A SHELL-BACKGROUNDED SUITE IS CAUGHT LIKE A TOOL-BACKGROUNDED ONE (D8, REQ-6). The tool
 # flag read above sees only `run_in_background: true`; it has never seen `bash
@@ -6397,6 +6496,29 @@ $(_budget_remedy_line "$1")"
   return 2
 }
 
+# budget_unverified <script> <run> — the refusal of a script the budget cannot read (wave-31 T11;
+# REQ-8 AC-8.2, D9; A-orch-46.1). The line names the script, by its path as typed, by its basename
+# when that is too wide for the line, and by neither when even that is.
+budget_unverified() {  # <script as typed> <run as typed>
+  local _s="$1" _fact
+  _fact="unverified script: $_s"
+  [ $(( $(bionic_cols "bionic: suite-run refused — $_fact (one door or Re-executes)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
+    || _fact="unverified script: ${_s##*/}"
+  [ $(( $(bionic_cols "bionic: suite-run refused — $_fact (one door or Re-executes)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
+    || _fact="unverified script"
+  fold_block exit2 suite-run "$_fact" "one door or Re-executes" \
+    "The budget reads the script a shell runs, and this script's text cannot say what runs: a
+command or a script in it is named by a variable or a backtick, the file is not there, or its
+own path is built from a variable. A run the wall cannot read is one it cannot budget.
+You ran: $2   (the script: $1)
+Run the suite through the one door, naming it by its file name:
+    tests/run.sh --only <suite>.test.sh
+or ask the orchestrator to declare the script's run in your brief:
+    Re-executes: \`$2\`
+$(_budget_remedy_line "$2")"
+  return 2
+}
+
 # budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
 # D15). A row with no set, or no row at all, used to let a named suite through in silence, on
 # the reading that an agent should not pay for a bookkeeping failure it did not cause. The walk
@@ -6464,7 +6586,7 @@ _budget_remedy_line() {  # <the refused suite or run>
 # nor globs, so the metacharacter arrives literal with no process state touched at all —
 # which is the better answer to T23's finding that five walls share one shell. The sibling
 # site at hooks/dispatch-preflight.sh still splits and still guards.
-_CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT")
+_CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
 
@@ -6562,6 +6684,21 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # at run time what the dispatch wall let through. It does NOT admit the full tree: that
   # arm ran above it, for the reason written there.
   if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
+
+  # ---------- A SCRIPT THE BUDGET CANNOT READ (wave-31 T11; REQ-8 AC-8.2, D9; A-orch-46.1) ----------
+  #
+  # `unverified` is the classifier's word for a script whose text cannot say what runs: a command
+  # word or a script operand in it built from `$` or a backtick, a file that is not there, or a path
+  # built from a variable. A run the wall cannot read is a run it cannot budget, so it is refused,
+  # naming the script and the two ways through: the suite by its file name through the one door, or
+  # the script's run declared in the brief, which the line above admits.
+  if [ "$_kind" = "unverified" ]; then
+    budget_unverified "$_target" "$_run"
+    return 2
+  fi
+  # A RUN READ INSIDE A SCRIPT names the script and the run (wave-31 T11): the claim's run is the
+  # command as typed, its target the run the script holds.
+  [ "$_kind" != "run" ] || [ "$_target" = "$_run" ] || _run="$_run — the script runs: $_target"
 
   # ---------- A RUNNER FORM IS HELD TO THAT DECLARATION (REQ-1 AC-1.5) ----------
   #
