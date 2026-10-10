@@ -504,7 +504,7 @@ AC-2:
   tier-run: bash test.sh
   readback: 332/332 asserted"
 
-# AC-1 readback is a placeholder token.
+# AC-1 evidence is a placeholder token.
 matrix_placeholder="## Verification Matrix
 
 stack-health: n/a: no long-running serve
@@ -515,14 +515,9 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: https://app.example/panel — opened the panel
-  fresh: origin A rebuilt token-9f3a
-  cold-client: fresh incognito profile
-  contact: clicked open — panel closed → open
-  readback: TBD"
+  evidence: TBD"
 
-# AC-1 (T3) contact is a self-written n/a with no waiver.
+# AC-1 (T3) evidence is a self-written n/a with no waiver.
 matrix_live_na="## Verification Matrix
 
 stack-health: n/a: no long-running serve
@@ -533,28 +528,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: https://app.example/panel — opened the panel
-  fresh: origin A rebuilt token-9f3a
-  cold-client: fresh incognito profile
-  contact: n/a: not reachable quickly
-  readback: panel.visible === true via page eval"
-
-# AC-1 declared T3 but carries only the suite-credit shape (tier-run +
-# readback), missing fresh/cold-client/contact.
-matrix_suite_credit="## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: suite: hermetic-x
-  readback: 12/12 asserted"
+  evidence: n/a: not reachable quickly"
 
 # Complete matrix but AC-1 auditor verdict is REFUTED.
 matrix_refuted="## Verification Matrix
@@ -732,12 +706,12 @@ expect_block "17b discharged T3 row with no AC block → block (names AC-1)" \
 # 17c — placeholder token in an AC evidence field → block.
 h17c=$(make_home)
 write_plan "$h17c" "$(plan 5 "$step5_base" "$matrix_placeholder")" > /dev/null
-expect_block "17c readback: TBD in AC block → block (placeholder ban)" \
+expect_block "17c evidence: TBD in AC block → block (placeholder ban)" \
   "$h17c" 'git commit -m "x"' "placeholder"
 
 # 17c-substr — a matrix AC field VALUE that merely CONTAINS a placeholder
-# token as a substring is legal; only a whole-value match blocks. readback:
-# 'status pending → done ...' (contains 'pending') → allow.
+# token as a substring is legal; only a whole-value match blocks. evidence:
+# 'record/... — status pending → done ...' (the note contains 'pending') → allow.
 matrix_substr_ok="## Verification Matrix
 
 stack-health: n/a: no long-running serve
@@ -748,28 +722,26 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash test.sh
-  readback: status pending → done, 40/40 asserted"
+  evidence: record/generic-evidence.md — status pending → done, 40/40 asserted"
 h17c2=$(make_home)
 write_plan "$h17c2" "$(plan 5 "$step5_base" "$matrix_substr_ok")" > /dev/null
-expect_allow "17c matrix readback containing 'pending' substring → allow (whole-value equality)" \
+expect_allow "17c matrix evidence note containing 'pending' substring → allow (whole-value equality)" \
   "$h17c2" 'git commit -m "x"'
 
 # 17d — T3 row with self-written n/a on a field, no waiver → block, points
 # at the Waiver Protocol.
 h17d=$(make_home)
 write_plan "$h17d" "$(plan 5 "$step5_base" "$matrix_live_na")" > /dev/null
-expect_block "17d T3 contact: n/a, no waiver → block (Waiver Protocol)" \
+expect_block "17d T3 evidence: n/a, no waiver → block (Waiver Protocol)" \
   "$h17d" 'git commit -m "x"' "Waiver Protocol"
 
 # 17d-case — the live-tier n/a ban must be case-insensitive: 'N/A' and
 # 'N/a: <reason>' are the same self-written downgrade as lowercase 'n/a'
 # (review-gate finding: a single capital letter must not defeat the ban).
 # The variants are written as full literal matrices rather than derived from
-# matrix_live_na via ${var/pat/rep}: a slash in the contact value forces
+# matrix_live_na via ${var/pat/rep}: a slash in the evidence value forces
 # an escaped slash in the pattern, and bash 3.2 leaves that backslash in the
-# replacement (producing 'contact: N\/A'), so the variant is never built.
+# replacement (producing 'evidence: N\/A'), so the variant is never built.
 matrix_live_na_upper="## Verification Matrix
 
 stack-health: n/a: no long-running serve
@@ -780,15 +752,10 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: https://app.example/panel — opened the panel
-  fresh: origin A rebuilt token-9f3a
-  cold-client: fresh incognito profile
-  contact: N/A
-  readback: panel.visible === true via page eval"
+  evidence: N/A"
 h17d2=$(make_home)
 write_plan "$h17d2" "$(plan 5 "$step5_base" "$matrix_live_na_upper")" > /dev/null
-expect_block "17d T3 contact: N/A (uppercase), no waiver → block" \
+expect_block "17d T3 evidence: N/A (uppercase), no waiver → block" \
   "$h17d2" 'git commit -m "x"' "Waiver Protocol"
 
 matrix_live_na_mixed="## Verification Matrix
@@ -801,23 +768,15 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: https://app.example/panel — opened the panel
-  fresh: origin A rebuilt token-9f3a
-  cold-client: fresh incognito profile
-  contact: N/a: not reachable quickly
-  readback: panel.visible === true via page eval"
+  evidence: N/a: not reachable quickly"
 h17d3=$(make_home)
 write_plan "$h17d3" "$(plan 5 "$step5_base" "$matrix_live_na_mixed")" > /dev/null
-expect_block "17d T3 contact: N/a: <reason> (mixed case), no waiver → block" \
+expect_block "17d T3 evidence: N/a: <reason> (mixed case), no waiver → block" \
   "$h17d3" 'git commit -m "x"' "Waiver Protocol"
 
-# 17e — T3 row with only the suite-credit shape (missing fresh/cold-client/
-# contact) → block.
-h17e=$(make_home)
-write_plan "$h17e" "$(plan 5 "$step5_base" "$matrix_suite_credit")" > /dev/null
-expect_block "17e T3 suite-credit shape missing live-tier fields → block (fresh)" \
-  "$h17e" 'git commit -m "x"' "fresh"
+# 17e (a T3 row carrying only the suite-credit shape is blocked for the missing fresh/cold-client/contact
+# keys) is gone with those keys (wave-31 T6; REQ-5): a T3 row owes the one pointer, and §KEYS KX-1 pins the
+# block that carries it alone. Tier-Discharge Rule's suite-credit ban is doctrine for the auditor, not a key.
 
 # 17f — current: 6, one row auditor REFUTED → block.
 h17f1=$(make_home)
@@ -5216,21 +5175,16 @@ section "§UNFILLED: the stubs Step 3 renders carry 'pending', which the gate ac
 # $1 stack-health value · $2 walk-artifact value ("" = no line) · $3 row status · $4 auditor
 # cell · $5 keys: pending | filled
 unf_matrix() {
-  local sh="$1" wa="$2" st="$3" aud="$4" keys="$5" ev tr rb ff
-  if [ "$keys" = pending ]; then
-    ev=pending; tr=pending; rb=pending; ff=pending
-  else
-    ev=record/generic-evidence.md; tr="bash test.sh — unit suite"; rb="40/40 asserted"
-    ff="the fixture plants the defect the eval must go red on"
-  fi
+  local sh="$1" wa="$2" st="$3" aud="$4" keys="$5" ev
+  if [ "$keys" = pending ]; then ev=pending; else ev=record/generic-evidence.md; fi
   printf '## Verification Matrix\n\nstack-health: %s\n' "$sh"
   [ -z "$wa" ] || printf 'walk-artifact: %s\n' "$wa"
   printf '\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
   printf '| AC-1 | T2 | %s | see AC-1 | %s |\n| AC-2 | T1 | %s | see AC-2 | %s |\n\n' "$st" "$aud" "$st" "$aud"
   printf 'AC-1:\n  provenance: spec section 1\n  fails-when: the planted defect this eval must go red on\n'
-  printf '  eval: T2 — bash test.sh\n  task: T1\n  evidence: %s\n  tier-run: %s\n  readback: %s\n  fixture-fidelity: %s\n' "$ev" "$tr" "$rb" "$ff"
+  printf '  eval: T2 — bash test.sh\n  task: T1\n  evidence: %s\n' "$ev"
   printf 'AC-2:\n  provenance: spec section 2\n  fails-when: the second planted defect\n'
-  printf '  eval: T1 — bash test.sh\n  task: pending\n  evidence: %s\n  tier-run: %s\n  readback: %s\n' "$ev" "$tr" "$rb"
+  printf '  eval: T1 — bash test.sh\n  task: pending\n  evidence: %s\n' "$ev"
 }
 unf_body="  plan-doc: .bionic/docs/plans/wave-01.plan.md"
 
@@ -5250,8 +5204,8 @@ expect_allow "UF-3 …and at current: 5 while every row is still pending (the mi
 # --- at the Verify gate: each stub is refused, by name, beside its filled twin -------------------
 hUF4=$(make_home)
 write_plan "$hUF4" "$(plan 5 "$step5_base" "$(unf_matrix 'restarts 0 → 0' '' discharged CONFIRMED pending)")" > /dev/null
-expect_block "UF-4 a discharged row whose tier keys read 'pending' at current: 5 → block, naming the key" \
-  "$hUF4" 'git commit -m "x"' "evidence key 'tier-run' is a placeholder"
+expect_block "UF-4 a discharged row whose evidence: reads 'pending' at current: 5 → block, naming the key" \
+  "$hUF4" 'git commit -m "x"' "evidence key 'evidence' is a placeholder"
 hUF4b=$(make_home)
 write_plan "$hUF4b" "$(plan 5 "$step5_base" "$(unf_matrix 'restarts 0 → 0' '' discharged CONFIRMED filled)")" > /dev/null
 expect_allow "UF-4b …the same matrix with the keys filled → allow (the control)" "$hUF4b" 'git commit -m "x"'
@@ -5279,6 +5233,79 @@ expect_block "UF-7 stack-health: pending at current: 6 → block" \
 hUF7b=$(make_home)
 write_plan "$hUF7b" "$(plan 6 "$step6_body" "$(unf_matrix 'restarts 0 → 0' '' discharged CONFIRMED filled)")" > /dev/null
 expect_allow "UF-7b …the same plan with stack-health filled → allow (the control)" "$hUF7b" 'git commit -m "x"'
+
+# ============================================================
+# §KEYS: the matrix owes one pointer per row (wave-31 T6; REQ-5 AC-5.1, AC-5.2, D5)
+# ============================================================
+section "§KEYS: every tier owes 'evidence:' and a T4 row 'user-confirmed:' too; a pointer that names no real file still blocks (wave-31 T6; REQ-5)"
+
+# fails-when: a T3 block carrying only 'evidence:' is refused at the Verify gate, or a block with no
+# real 'evidence:' pointer passes it, or keys_for_tier still names a key beyond the two it owes.
+#
+# $1 tier · $2 the block's key lines after fails-when (each already indented, newline-joined)
+kx_matrix() {
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1 | %s | discharged | see AC-1 | CONFIRMED |\n\n' "$1"
+  printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n%s\n' "$2"
+}
+KX_EV="  evidence: record/generic-evidence.md"
+
+# (i) the case the old list refused: a T3 block carrying 'evidence:' and nothing else.
+hKX1=$(make_home)
+write_plan "$hKX1" "$(plan 5 "$step5_base" "$(kx_matrix T3 "$KX_EV")")" > /dev/null
+expect_allow "KX-1 a T3 block carrying only 'evidence:' (a real record file) at current: 5 → allow" \
+  "$hKX1" 'git commit -m "x"'
+for kx_t in T0 T1 T2; do
+  hKXt=$(make_home)
+  write_plan "$hKXt" "$(plan 5 "$step5_base" "$(kx_matrix "$kx_t" "$KX_EV")")" > /dev/null
+  expect_allow "KX-1$kx_t …and a $kx_t block carrying only 'evidence:' → allow" "$hKXt" 'git commit -m "x"'
+done
+# A block written to the old list keeps working: a key the gate no longer names is not refused.
+hKX1b=$(make_home)
+write_plan "$hKX1b" "$(plan 5 "$step5_base" "$(kx_matrix T3 "$KX_EV
+  tier-run: bash test.sh — unit
+  fresh: origin A rebuilt token-9f3a
+  cold-client: fresh incognito profile
+  contact: clicked open — panel closed → open
+  readback: panel.visible === true")")" > /dev/null
+expect_allow "KX-1b a T3 block that still carries the five retired keys beside 'evidence:' → allow (an extra key is not refused)" \
+  "$hKX1b" 'git commit -m "x"'
+
+# (ii) the pointer is the one thing the row owes.
+hKX2=$(make_home)
+write_plan "$hKX2" "$(plan 5 "$step5_base" "$(kx_matrix T2 "  tier-run: bash test.sh — unit
+  readback: 40/40 asserted
+  fixture-fidelity: the fixture plants the defect")")" > /dev/null
+expect_block "KX-2 a T2 block with no 'evidence:' (every retired key present) → block, naming the key" \
+  "$hKX2" 'git commit -m "x"' "missing evidence key 'evidence'"
+hKX2b=$(make_home)
+write_plan "$hKX2b" "$(plan 5 "$step5_base" "$(kx_matrix T3 "  evidence: record/does-not-exist.md")")" > /dev/null
+expect_block "KX-2b a T3 block whose pointer names no real file → block" \
+  "$hKX2b" 'git commit -m "x"' "names no real file"
+hKX2c=$(make_home)
+write_plan "$hKX2c" "$(plan 5 "$step5_base" "$(kx_matrix T1 "  evidence: pending")")" > /dev/null
+expect_block "KX-2c a T1 block whose pointer is still the 'pending' stub → block" \
+  "$hKX2c" 'git commit -m "x"' "placeholder"
+
+# T4 owes the user's own confirmation as well as the pointer.
+hKX3=$(make_home)
+write_plan "$hKX3" "$(plan 5 "$step5_base" "$(kx_matrix T4 "$KX_EV
+  user-confirmed: chris 2026-10-09 opened it and read the wall")")" > /dev/null
+expect_allow "KX-3 a T4 block with 'evidence:' and 'user-confirmed:' → allow" "$hKX3" 'git commit -m "x"'
+hKX3b=$(make_home)
+write_plan "$hKX3b" "$(plan 5 "$step5_base" "$(kx_matrix T4 "$KX_EV")")" > /dev/null
+expect_block "KX-3b …a T4 block with 'evidence:' alone → block, naming 'user-confirmed'" \
+  "$hKX3b" 'git commit -m "x"' "missing evidence key 'user-confirmed'"
+
+# (iii) the list matrix-render writes from: the same function, read the way the verb reads it.
+# session-poker-4 §MATRIX-RENDER drives the verb itself and pins the rendered blocks.
+kx_keys() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" >/dev/null 2>&1; keys_for_tier "$1" ); }
+expect_eq "KX-4 keys_for_tier reads 'evidence' for T0 to T3 (positive, before the absence row)" \
+  "evidence|evidence|evidence|evidence" "$(printf '%s|%s|%s|%s' "$(kx_keys T0)" "$(kx_keys T1)" "$(kx_keys T2)" "$(kx_keys T3)")"
+expect_eq "KX-4b …and 'user-confirmed evidence' for T4" "user-confirmed evidence" "$(kx_keys T4)"
+expect_eq "KX-4c …so no tier names a retired key (0 matches over all five)" "0" \
+  "$(for kx_t in T0 T1 T2 T3 T4; do kx_keys "$kx_t"; done | /usr/bin/grep -c 'tier-run\|readback\|fixture-fidelity\|fresh\|cold-client\|contact' || true)"
 
 # ============================================================
 # Two sections moved here from after Section 40 when the suite was sharded (wave-30 T3).
