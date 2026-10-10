@@ -200,8 +200,13 @@ proof_word_in() {
 #     findings: <n>
 #     finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line>|- <title>
 #     shown: <n> <command>             for a finding the table sends to fix
-#     unsure: <n> <what is not known>  for a finding that owes a check
 #     debt: <kind> <concept> <path>:<line>[, <path>:<line>...]   a debt finding (wave-30 T22)
+#
+# A READER'S RATING IS FINAL (wave-31 T32; D6, REQ-6 AC-6.3). Wave-28 T41 let a finding carry
+# `unsure: <n> <what is not known>` and owe a check, written as a `check:` line of `## SDLC State` that
+# held `current 8` until `finding-check` settled it. All of it is gone: an `unsure:` line is an ordinary
+# line of the record, read by nothing, so a finding to fix it stood in for is shown nowhere and refused;
+# no `check:` line is written, and one an older plan carries binds, re-rates and holds nothing.
 #
 # A DEBT LINE IS A FINDING OF ITS OWN CLASS (wave-30 T22; D2, AC-11.1; A-orch-8). It names a kind of
 # the debt table (PROOF_DEBT_KINDS), one concept and its sites, never a severity or a reach, and it is
@@ -212,8 +217,8 @@ proof_word_in() {
 #
 # The record writes no priority: the table gives it (`proof_priority`), and a `priority: <n> <word>`
 # line that differs from the table is refused. The result follows from the priorities
-# (`proof_findings_result`). At registration `proof-add` writes the plan's `deferred:` and `check:`
-# lines (`proof_finding_lines`); the tick and `release-check` print them with their priority
+# (`proof_findings_result`). At registration `proof-add` writes the plan's `deferred:` lines
+# (`proof_finding_lines`); the tick and `release-check` print them with their priority
 # (`proof_findings_owed`).
 
 # proof_pushed_severity <pushed> -> 0 when the roster row's `pushed=` value (the context files the
@@ -245,20 +250,20 @@ _proof_priority_var() {
 # proof_findings <record> -> the findings of the record's one pass (from its `reviewed:` line), one
 # tab-separated line each, in the order written:
 #
-#     <n> <S> <reach> <path:line|-> <fix|defer|note> <shown 1|0> <unsure 1|0> <title>
+#     <n> <S> <reach> <path:line|-> <fix|defer|note> <shown 1|0> <title>
 #
 # then one line per `debt:` line, in the order written, five fields, its first `debt` (never a finding's
 # number) and its fifth `burn` (the debt table's disposition, burn-when-touched), so a reader of the
-# fifth field reads it as a finding that is not to fix, and a reader of eight fields skips it:
+# fifth field reads it as a finding that is not to fix, and a reader of seven fields skips it:
 #
 #     debt <kind> <concept> <sites, joined by ", "> burn
 #
 # exit 0 (nothing printed for `findings: 0`); or exit 1 with one sentence saying what the findings
 # lack and what to write (the verb's refusal). The rules: a `findings: <n>` line, given once; that
 # many `finding:` lines, each number once, each severity and reach from its set, a `<path>:<line>`
-# or `-`, and a title; a `shown:`, `unsure:` or `priority:` line names a finding the record holds;
-# a written priority is the table's; and a finding the table sends to fix carries a `<path>:<line>`
-# with a `shown:` line, or an `unsure:` line.
+# or `-`, and a title; a `shown:` or `priority:` line names a finding the record holds; a written
+# priority is the table's; and a finding the table sends to fix carries a `<path>:<line>` with a
+# `shown:` line. Any other line (an `unsure:` line among them, wave-31 T32) is the record's prose.
 proof_findings() {
   local span
   span="$(awk '/^reviewed:[ \t]/ { if (n++) exit } n' "$1" 2>/dev/null)"
@@ -298,11 +303,10 @@ _proof_findings_span() {
       S[id] = f[3]; R[id] = f[4]; W[id] = f[5]; T[id] = t; ord[++cnt] = id
       next
     }
-    /^(shown|unsure):/ {
-      m = split($0, f, /[ \t]+/); k = f[1]; sub(/:$/, "", k)
-      if (rest($0, 2) == "") { bad("has a " k ": line with nothing after its number (" $0 "); write " k ": <n> " (k == "shown" ? "<command>" : "<what is not known>")); next }
-      if (k == "shown") sh[f[2]] = 1; else un[f[2]] = 1
-      named[f[2]] = k; next
+    /^shown:/ {
+      m = split($0, f, /[ \t]+/)
+      if (rest($0, 2) == "") { bad("has a shown: line with nothing after its number (" $0 "); write shown: <n> <command>"); next }
+      sh[f[2]] = 1; named[f[2]] = "shown"; next
     }
     /^priority:/ { m = split($0, f, /[ \t]+/); wp[f[2]] = f[3]; named[f[2]] = "priority"; next }
     /^debt:/ {
@@ -325,10 +329,10 @@ _proof_findings_span() {
       for (i = 1; i <= cnt && err == ""; i++) {
         id = ord[i]; p = pri[S[id] ":" R[id]]
         if ((id in wp) && wp[id] != p) bad("writes priority " wp[id] " for finding " id ", but the table gives " S[id] " " R[id] " " p "; a record writes no priority, so remove the line")
-        else if (p == "fix" && !((W[id] != "-" && (id in sh)) || (id in un))) bad("sends finding " id " (" S[id] " " R[id] ") to fix, but shows it nowhere; write its <path>:<line> and shown: " id " <command>, or unsure: " id " <what is not known>")
+        else if (p == "fix" && !(W[id] != "-" && (id in sh))) bad("sends finding " id " (" S[id] " " R[id] ") to fix, but shows it nowhere; write its <path>:<line> and shown: " id " <command>")
       }
       if (err != "") { print "!" err; exit }
-      for (i = 1; i <= cnt; i++) { id = ord[i]; printf "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n", id, S[id], R[id], W[id], pri[S[id] ":" R[id]], (id in sh), (id in un), T[id] }
+      for (i = 1; i <= cnt; i++) { id = ord[i]; printf "%s\t%s\t%s\t%s\t%s\t%d\t%s\n", id, S[id], R[id], W[id], pri[S[id] ":" R[id]], (id in sh), T[id] }
       for (i = 1; i <= dn; i++) printf "debt\t%s\t%s\t%s\tburn\n", DK[i], DC[i], DS[i]
     }' <<< "$2")"
   case "$out" in '!'*) printf '%s' "${out#!}"; return 1 ;; esac
@@ -358,55 +362,39 @@ PROOF_RESULT_LINES
 
 # proof_finding_lines <record path> <proof_findings lines> -> the plan lines registration writes inside
 # `## SDLC State`, newline-terminated: `deferred: <record>#<n> <S> <reach> "<title>"` for each finding
-# the table defers, then `check: <record>#<n> <S> <reach> "<title>"` for each unsure one; nothing for
-# a note, nor for a finding to fix, which the verdict carries. A `"` in a title is written `'`, so the
-# quoted title ends where its line does.
+# the table defers; nothing for a note, nor for a finding to fix, which the verdict carries. A `"` in a
+# title is written `'`, so the quoted title ends where its line does.
 proof_finding_lines() {
   printf '%s\n' "${2:-}" | REC="$1" awk -F'\t' '
-    NF >= 8 { t = $8; gsub(/"/, "'"'"'", t); l = ENVIRON["REC"] "#" $1 " " $2 " " $3 " \"" t "\""
-              if ($5 == "defer") d = d "deferred: " l "\n"
-              if ($7 == 1) c = c "check: " l "\n" }
-    END { printf "%s%s", d, c }'
+    NF >= 7 && $5 == "defer" { t = $7; gsub(/"/, "'"'"'", t); printf "deferred: %s#%s %s %s \"%s\"\n", ENVIRON["REC"], $1, $2, $3, t }'
 }
 
 # proof_finding_rating <plan> <record>#<n> <S> <reach> -> `<S> <reach> <priority>`, the rating a
-# REGISTERED finding is read at and the priority it takes, with a fourth word `open` while its check is
-# open; nothing when it is dropped.
+# REGISTERED finding is read at and the priority it takes.
 #
-# THE SEAM FOR THE EFFECTIVE RATING (wave-28 T15 left it unbuilt; T41 fills the check, T42 the move).
-# Every read of a registered record's findings passes each finding through here, and this is the one
-# place the effective rating is applied. The `check:` line for <record>#<n> (`_proof_check_state`)
-# decides first: ` settled=<S>:<reach>` gives that rating; ` refuted` drops the finding (print
-# nothing); neither, the check is open: the finding keeps the rating it was registered at, which the
-# scale's rule made the higher one, and the fourth word `open` says the step is held (`current 8`, the
-# judge). With no check: line it is the rating the record wrote. The priority is the table's for the
-# rating given (`proof_priority`); a `moved: <record>#<n> to=<defer|fix>` line (T42, `_proof_moved_to`)
-# replaces the priority alone, so the third word is the one a move changes — except that an S1 is never
-# deferred, whoever wrote the line (AC-8.9). A caller reads `set -- $(…)`: no words, dropped; three or
-# four, rated.
+# THE SEAM FOR THE EFFECTIVE RATING (wave-28 T15 left it unbuilt; T42 fills the move). Every read of a
+# registered record's findings passes each finding through here, and this is the one place the
+# effective rating is applied. The rating is the one the record wrote: a reader's rating is final
+# (wave-31 T32; D6), so no line of the plan re-rates it. The priority is the table's for that rating
+# (`proof_priority`); a `moved: <record>#<n> to=<defer|fix>` line (T42, `_proof_moved_to`) replaces
+# the priority alone, so the third word is the one a move changes — except that an S1 is never
+# deferred, whoever wrote the line (AC-8.9). A caller reads `set -- $(…)`: three words, rated.
 proof_finding_rating() {
-  _proof_rating_apply "$(_proof_check_state "$1" "$2")" "$(_proof_moved_to "$1" "$2")" "$3" "$4"
+  _proof_rating_apply "$(_proof_moved_to "$1" "$2")" "$3" "$4"
   printf '%s' "$_PROOF_RATING"
 }
 
-# _proof_rating_apply <check state> <moved to> <S> <reach> -> proof_finding_rating's answer once the two
-# plan reads are in hand, in `_PROOF_RATING` and no fork (wave-28 T72): the batch reader
-# (`proof_readings_derived`) gathers every finding's state and move in one pass over the plan and asks
-# here, so the rule is spelled once.
+# _proof_rating_apply <moved to> <S> <reach> -> proof_finding_rating's answer once the plan read is in
+# hand, in `_PROOF_RATING` and no fork (wave-28 T72): the batch reader (`proof_readings_derived`)
+# gathers every finding's move in one pass over the plan and asks here, so the rule is spelled once.
 _proof_rating_apply() {
-  local st="$1" mv="$2" s="$3" r="$4" p
-  _PROOF_RATING=""
-  case "$st" in
-    refuted) return 0 ;;
-    settled=*:*) s="${st#settled=}"; r="${s#*:}"; s="${s%%:*}" ;;
-  esac
+  local mv="$1" s="$2" r="$3" p
   _proof_priority_var "$s" "$r"; p="$_PROOF_P"
   case "$mv" in
     fix) p=fix ;;
     defer) [ "$s" = S1 ] || p=defer ;;
   esac
   _PROOF_RATING="$s $r $p"
-  [ "$st" != open ] || _PROOF_RATING="$_PROOF_RATING open"
 }
 
 # _proof_moved_to <plan> <record>#<n> -> `defer` or `fix`, the priority the LAST `moved:` line of
@@ -424,40 +412,25 @@ _proof_moved_to() {
     END { if (to != "") print to }' "$1"
 }
 
-# _proof_check_state <plan> <record>#<n> -> the state of the first `check:` line of `## SDLC State`
-# naming it (fences skipped): `settled=<S>:<reach>`, `refuted`, `open`, or nothing when there is no
-# such line (wave-28 T41; D33). Only what follows the quoted title is read, so a title that holds the
-# words is still the title (a title never holds a `"`: registration writes it `'`).
-_proof_check_state() {
-  [ -f "$1" ] || return 0
-  awk -v id="$2" "$(proof_bind_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^check:[ \t]/ && proof_bound($0) == id { print proof_check_of($0); exit }' "$1"
-}
-
-# proof_findings_owed <plan> -> one line per finding the plan's `## SDLC State` carries a `deferred:` or
-# `check:` line for, in the order first written, rated through `proof_finding_rating`:
-# `<record>#<n> <S> <reach> <fix|defer|note|check> "<title>"`, the priority the effective rating takes,
-# or `check` while the finding's check is open — it is neither a fix nor a deferral until a check
-# settles it (wave-28 T41; D33). A refuted finding is not printed. What the tick and `release-check`
+# proof_findings_owed <plan> -> one line per finding the plan's `## SDLC State` carries a `deferred:`
+# line for, in the order first written, rated through `proof_finding_rating`:
+# `<record>#<n> <S> <reach> <fix|defer|note> "<title>"`, the priority the effective rating takes. A
+# `check:` line an older plan carries is not read (wave-31 T32; D6). What the tick and `release-check`
 # print, so the priority a record never states is seen where the run is judged.
 proof_findings_owed() {
-  local plan="$1" id s r t p
+  local plan="$1" id s r t
   [ -f "$plan" ] || return 0
   while IFS='	' read -r id s r t; do
     [ -n "$id" ] || continue
     set -- $(proof_finding_rating "$plan" "$id" "$s" "$r")
     [ $# -ge 3 ] && [ -n "$3" ] || continue
-    p="$3"; [ "${4:-}" != open ] || p=check
-    printf '%s %s %s %s %s\n' "$id" "$1" "$2" "$p" "$t"
+    printf '%s %s %s %s %s\n' "$id" "$1" "$2" "$3" "$t"
   done <<PROOF_OWED_FINDINGS
 $(awk '
   /^[[:space:]]*```/ { fence = !fence; next }
   fence { next }
   /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-  insdlc && /^(deferred|check):[ \t]/ {
+  insdlc && /^deferred:[ \t]/ {
     m = split($0, f, /[ \t]+/); if (m < 4 || (f[2] in seen)) next
     seen[f[2]] = 1; t = $0; if (match(t, /"[^"]*"/)) t = substr(t, RSTART, RLENGTH); else t = "\"\""
     printf "%s\t%s\t%s\t%s\n", f[2], f[3], f[4], t
@@ -465,16 +438,9 @@ $(awk '
 PROOF_OWED_FINDINGS
 }
 
-# proof_checks_open <plan> -> the owed lines whose check is open, `<record>#<n> <S> <reach> check
-# "<title>"`, in the order first written: THE ONE READER of which checks hold the step (wave-28 T41;
-# D33, AC-8.6). The judge (`facts_state`) and `current 8` (session-poker.sh) both ask it.
-proof_checks_open() {
-  proof_findings_owed "$1" | awk '$4 == "check"'
-}
-
 # _proof_reading_result <plan> <docs root> <evidence> <written result> -> the reading's result as its
 # findings give it at their effective ratings (wave-28 T41; D33): a reading whose record a binding line
-# names (`proof_bind_awk`: a `check:`, `deferred:` or `moved:` line keyed to a finding of it) is derived
+# names (`proof_bind_awk`: a `deferred:` or `moved:` line keyed to a finding of it) is derived
 # again from its record at the ratings the plan gives its findings; any other reading, or one whose
 # record cannot be read, keeps its written result.
 _proof_reading_result() {
@@ -486,9 +452,9 @@ _proof_reading_result() {
 }
 
 # _proof_binding_table <plan> <record> -> one line per finding of <record> a binding line of the plan's
-# unfenced `## SDLC State` is keyed to: `<record>#<n><TAB><check state><TAB><moved to>`, each `-` when the
-# plan says none (`_proof_check_state`'s and `_proof_moved_to`'s answers, read together in one pass);
-# exit 1, nothing printed, when no binding line names the record.
+# unfenced `## SDLC State` is keyed to: `<record>#<n><TAB><moved to>`, `-` when the plan says none
+# (`_proof_moved_to`'s answer, read in one pass); exit 1, nothing printed, when no binding line names
+# the record.
 _proof_binding_table() {
   [ -f "$1" ] || return 1
   awk -v rec="$2" "$(proof_bind_awk)"'
@@ -497,12 +463,11 @@ _proof_binding_table() {
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     insdlc && proof_binds($0, rec) {
       hit = 1; id = proof_bound($0); ids[id] = 1
-      if ($0 ~ /^check:/) { if (!(id in cs)) cs[id] = proof_check_of($0) }
-      else if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
+      if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
     }
     END {
       if (!hit) exit 1
-      for (id in ids) print id "\t" (id in cs ? cs[id] : "-") "\t" (id in mv ? mv[id] : "-")
+      for (id in ids) print id "\t" (id in mv ? mv[id] : "-")
     }' "$1"
 }
 
@@ -512,7 +477,7 @@ _proof_binding_table() {
 # `proof_readings_derived`, which prints it without a fork. A record that cannot be read keeps the
 # written result.
 _proof_reading_derive() {
-  local droot="$1" ev="$2" res="$3" nl tb tab got n s r w row st mv out=""
+  local droot="$1" ev="$2" res="$3" nl tb tab got n s r w mv out=""
   nl=$'\n'; tb=$'\t'; tab="$nl$4"; PROOF_DERIVED="$res"
   got="$(proof_findings "$droot/$ev" 2>/dev/null)" || return 0
   while IFS='	' read -r n s r w _; do
@@ -520,14 +485,13 @@ _proof_reading_derive() {
     # A debt row is flag-class whatever the plan binds (no binding line names it): kept as it is.
     [ "$n" != debt ] || { out="$out$n	$s	$r	$w	burn
 "; continue; }
-    st=""; mv=""
+    mv=""
     case "$tab" in
       *"$nl$ev#$n$tb"*)
-        row="${tab#*"$nl$ev#$n$tb"}"; row="${row%%"$nl"*}"
-        st="${row%%"$tb"*}"; mv="${row#*"$tb"}"
-        [ "$st" != - ] || st=""; [ "$mv" != - ] || mv="" ;;
+        mv="${tab#*"$nl$ev#$n$tb"}"; mv="${mv%%"$nl"*}"
+        [ "$mv" != - ] || mv="" ;;
     esac
-    _proof_rating_apply "$st" "$mv" "$s" "$r"
+    _proof_rating_apply "$mv" "$s" "$r"
     set -- $_PROOF_RATING
     [ $# -ge 3 ] || continue
     out="$out$n	$1	$2	$w	$3
@@ -1031,36 +995,27 @@ proof_awk() {
 }
 
 # proof_bind_awk -> awk source: THE ONE PREDICATE for the lines that bind a record's pass, and the reads of
-# what such a line says (wave-28 T72; D33, D34, AC-8.6, AC-8.9; A-T60.5, A-orch-213). A `check:`,
-# `deferred:` or `moved:` line of `## SDLC State` is keyed `<record>#<n>`: it settles, defers or moves ONE
-# finding of ONE pass, and every read of the record's findings applies it (`proof_finding_rating`), so a
-# second pass registered on the same path would inherit it. `moved:` binds for the reason a check does: a
-# move is the user's word about one finding, it changes the priority a later reader of that path judges
-# (T42's seam), and a path that carries one is a settled pass whatever else it carries. Both callers
-# (`proof_pass_conflict`, the registering verb's guard, and `_proof_reading_result`, the judge's
-# re-derivation) and the batch reader (`proof_readings_derived`) ask these, so none can spell it again:
+# what such a line says (wave-28 T72; D33, D34, AC-8.6, AC-8.9; A-T60.5, A-orch-213). A `deferred:` or
+# `moved:` line of `## SDLC State` is keyed `<record>#<n>`: it defers or moves ONE finding of ONE pass,
+# and every read of the record's findings applies it (`proof_finding_rating`), so a second pass registered
+# on the same path would inherit it. `moved:` binds for the reason a deferral does: a move is the user's
+# word about one finding, it changes the priority a later reader of that path judges (T42's seam), and a
+# path that carries one is a settled pass whatever else it carries. A `check:` line binds nothing: a
+# reader's rating is final (wave-31 T32; D6) and no reader reads one. Both callers (`proof_pass_conflict`,
+# the registering verb's guard, and `_proof_reading_result`, the judge's re-derivation) and the batch
+# reader (`proof_readings_derived`) ask these, so none can spell it again:
 #
 #     proof_bound(line)       the `<record>#<n>` a binding line is keyed to, else ""
 #     proof_binds(line, rec)  1 when the line is keyed to a finding of the record <rec>
-#     proof_check_of(line)    what a `check:` line says: `settled=<S>:<reach>`, `refuted` or `open`
-#                             (only what follows the quoted title is read: a title that holds the words
-#                             is still the title; registration writes a `"` in one as `'`)
 #     proof_move_of(line)     `defer` or `fix` when a `moved:` line is a whole move (who, when, the words
 #                             and why, as `finding-move` writes it), else ""
 proof_bind_awk() {
   printf '%s' '
     function proof_bound(s,   f) {
-      if (s !~ /^(check|deferred|moved):[ \t]/) return ""
+      if (s !~ /^(deferred|moved):[ \t]/) return ""
       split(s, f, /[ \t]+/); return f[2]
     }
     function proof_binds(s, rec) { return index(proof_bound(s), rec "#") == 1 }
-    function proof_check_of(s,   t, i, st) {
-      t = s; i = index(t, "\""); if (i) { t = substr(t, i + 1); i = index(t, "\""); t = (i ? substr(t, i + 1) : "") }
-      st = "open"
-      if (match(t, /(^|[ \t])settled=S[1-4]:(on|off)([ \t]|$)/)) { st = substr(t, RSTART, RLENGTH); gsub(/[ \t]/, "", st) }
-      else if (t ~ /(^|[ \t])refuted([ \t]|$)/) st = "refuted"
-      return st
-    }
     function proof_move_of(s,   f) {
       split(s, f, /[ \t]+/)
       if (f[3] != "to=defer" && f[3] != "to=fix") return ""
@@ -1100,9 +1055,9 @@ _proof_last_read() {
 # section's last `proved:` or `waived:` line, or, before the first, after the section's last
 # non-blank line. Exit 1 (nothing printed) when the plan has no unfenced `## SDLC State`.
 # Facts and waivers share the one block, so a line's place is its age (wave-27 T9): `facts_state`
-# reads "newer" as "later in the section". A reading's `deferred:` and `check:` lines (wave-28 T15),
-# and a finding's `moved:` lines (T42), follow its proof line and belong to the block, so the next
-# line goes after them, not between.
+# reads "newer" as "later in the section". A reading's `deferred:` lines (wave-28 T15), and a
+# finding's `moved:` lines (T42), follow its proof line and belong to the block, so the next line goes
+# after them, not between. A `check:` line (wave-28 T41, read by nothing since wave-31 T32) is not one.
 proof_add_line() {
   local plan="$1" line="$2"
   [ -f "$plan" ] || return 1
@@ -1114,7 +1069,7 @@ proof_add_line() {
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); if (insdlc) { seen = 1; lastn = NR }; next }
-    insdlc && /^(proved|waived|deferred|check|moved):[[:space:]]/ { lastp = NR }
+    insdlc && /^(proved|waived|deferred|moved):[[:space:]]/ { lastp = NR }
     insdlc && /[^[:space:]]/ { lastn = NR }
     END {
       if (!seen) exit 1
@@ -1125,8 +1080,8 @@ proof_add_line() {
 
 # proof_pass_conflict <plan> <record path> <head> -> why <record path> cannot be registered for another
 # pass at <head>, or nothing (wave-28 T60; D33, AC-8.6). ONE RECORD PATH IS ONE PASS: a line that binds a
-# pass (`proof_bind_awk`: `check:`, `deferred:` or `moved:`) is keyed `<record>#<n>`, so a second pass on
-# the same path would inherit the first pass's settlement, deferral or move. The key stays unique by
+# pass (`proof_bind_awk`: `deferred:` or `moved:`) is keyed `<record>#<n>`, so a second pass on the same
+# path would inherit the first pass's deferral or move. The key stays unique by
 # construction when the path is registered for one pass only, so the verb asks here before it writes. A
 # reading's proof line (one with a `question=`) whose `evidence=` is <record path> and whose head is not
 # <head> prints `head <that head>`; otherwise, when a binding line of `## SDLC State` names
@@ -1165,7 +1120,7 @@ proof_readings_derived() {
   fi
   while IFS='	' read -r k a b c; do
     case "$k" in
-      S) tab="$tab$a	$b	$c$nl" ;;
+      S) tab="$tab$a	$b$nl" ;;
       R) PROOF_DERIVED="$c"
          if [ "$b" = 1 ] && [ -n "$droot" ] && [ -f "$droot/$a" ]; then _proof_reading_derive "$droot" "$a" "$c" "$tab"; fi
          printf '%s\t%s\t%s\n' "$a" "$c" "$PROOF_DERIVED"; tab="" ;;
@@ -1178,8 +1133,7 @@ $(awk "$(proof_awk)$(proof_bind_awk)"'
     !insdlc { next }
     proof_bound($0) != "" {
       nbind++; id = proof_bound($0); ids[id] = 1
-      if ($0 ~ /^check:/) { if (!(id in cs)) cs[id] = proof_check_of($0) }
-      else if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
+      if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
       next
     }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" && !((PROOF_EVIDENCE SUBSEP PROOF_RESULT) in seen) {
@@ -1189,7 +1143,7 @@ $(awk "$(proof_awk)$(proof_bind_awk)"'
       if (!nbind) exit
       for (i = 1; i <= nr; i++) {
         hit = 0; p = rev[i] "#"
-        for (id in ids) if (index(id, p) == 1) { hit = 1; print "S\t" id "\t" (id in cs ? cs[id] : "-") "\t" (id in mv ? mv[id] : "-") }
+        for (id in ids) if (index(id, p) == 1) { hit = 1; print "S\t" id "\t" (id in mv ? mv[id] : "-") }
         print "R\t" rev[i] "\t" hit "\t" rres[i]
       }
     }' "$plan")
@@ -1490,9 +1444,9 @@ proof_debts_open() {
 # head, so for any other <head> the regression is uncovered from its proof's head, the range, never
 # covered (T45; review pass 13 F3).
 # An owed line this judge has no rule for answers absent (the safe direction).
-# A FINDING RE-RATED BY ITS CHECK (wave-28 T41; D33): a reading's result is the one its findings give
-# at their effective ratings (`_proof_reading_result`), and each open check is one more line that does
-# not hold, `finding-check<TAB><record>#<n><TAB>open`.
+# A FINDING RE-RATED BY A MOVE (wave-28 T42; D34): a reading's result is the one its findings give at
+# their effective ratings (`_proof_reading_result`). No check holds the step: a reader's rating is
+# final (wave-31 T32; D6), and a `check:` line an older plan carries is not read.
 # IT READS GIT, so a verb, the tick and close-out call it, never a wall: a wall is handed its answer
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
@@ -1621,12 +1575,6 @@ PROOF_DEBT
   done <<PROOF_FACTS
 $owed
 PROOF_FACTS
-  # AN OPEN CHECK HOLDS THE STEP (wave-28 T41; D33, AC-8.6): one `finding-check<TAB><record>#<n><TAB>open`
-  # line per check the one reader finds open (`proof_checks_open`), after the owed facts.
-  while read -r x _; do
-    [ -n "$x" ] || continue
-    printf 'finding-check\t%s\topen\n' "$x"; rc=1
-  done < <(proof_checks_open "$plan" 2>/dev/null)
   return "$rc"
 }
 
