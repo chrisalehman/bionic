@@ -186,7 +186,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 0 | `prereqs: ok` |
 | 1, 2, 3 | pointer (presence only) |
 | 4 | pointer, plus `worktree:`/`base-sha:`/`branch:`, owed at every scale and whatever `use_worktree:` says; `current 4` fills them at wave scale |
-| 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
+| 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, the floor being one whole green run at a commit on the branch plus every later commit proved by the suites its row named (a build row runs its brief's suites; one whole run after the last lands, when `regression:` is `yes`; a fix row the red suites plus its own; a second whole run on `session-poker.sh approve regression-2`), a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
 | 6 | one fact per owed question (`proved: kind=review`), or its `waived:` line; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
