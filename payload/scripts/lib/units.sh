@@ -18,9 +18,7 @@
 #                              or `close`, or a `doc` row at Step 7 or later (the release),
 #                              also waits until <step> reaches its own (wave-20 Δ6, T10b); a
 #                              row open on <roster> is left out (D9). One per line, table
-#                              order. <step> is a number (wave scale) or `T<n>` (task scale,
-#                              where the rows carry no step cell and a dependency is satisfied
-#                              by `done`). Exit 2 on anything else.
+#                              order. <step> is a step number; exit 2 on anything else.
 #   units_held <plan> <step>   one line per row held for its step (would be ready but for
 #                              it): `<id>: step <n> <kind> row waits for current: <n>`, and
 #                              one per row held by an external prerequisite (every other read
@@ -137,14 +135,6 @@
 # translate would find no table and say so silently. The translation is a pass of its own
 # because a record split on `\n` cannot re-split itself.
 #
-# SLOT 3 ANSWERS TO TWO NAMES, `kind` AND `rigor` (T8). Slot 3 is the row's CLASSIFICATION
-# cell. The wave-scale table this library was written for spells it `kind`; the task-scale
-# registration ledger the evidence gate has read since D12 — `| id | intent | rigor |
-# description | status |` — spells the same slot `rigor`, and that table is NOT widened by
-# this wave. One alias is what lets `validate_task_ledger` read its rigor cell through this
-# library instead of keeping a second `## Tasks` parser alive, which is the whole of
-# AC-1e.1. No table carries both spellings, and the first header cell to match wins.
-
 # ── THE ONE PARSE ────────────────────────────────────────────────────────────
 #
 # _units_read <plan> -> line 1: `# <required columns the header lacks, space-separated>`
@@ -170,7 +160,6 @@ _units_read() {
       disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"; disp[12] = "base"
       disp[13] = "reads"
       for (k = 1; k <= 13; k++) want[k] = tolower(disp[k])
-      alt[3] = "rigor"   # slot 3 as the task-scale ledger spells it
       state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
 
@@ -196,7 +185,7 @@ _units_read() {
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
         if (t == "") continue
-        for (k = 1; k <= 13; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
+        for (k = 1; k <= 13; k++) if (t == want[k] && col[k] == 0) col[k] = i
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
@@ -352,12 +341,11 @@ units_has_column() {
 #
 # BY NAME, NOT BY NUMBER, for the reason the parse is header-keyed: a caller that wrote
 # `10` would have to be found again if the contract ever grew a twelfth field. The name
-# is this library's own contract spelling, NOT the table's header text — `rigor` is
-# accepted as the second name of slot 3, the same alias the header scan takes.
+# is this library's own contract spelling, NOT the table's header text.
 units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on a bad name
   local rec="${1:-}" n
   case "${2:-}" in
-    id) n=1 ;;    step) n=2 ;;   kind|rigor) n=3 ;; task) n=4 ;;  agent) n=5 ;;
+    id) n=1 ;;    step) n=2 ;;   kind) n=3 ;;       task) n=4 ;;  agent) n=5 ;;
     deps) n=6 ;;  size) n=7 ;;   serves) n=8 ;;     Files) n=9 ;;  status) n=10 ;;
     worktree) n=11 ;; base) n=12 ;; reads) n=13 ;;
     *) return 1 ;;
@@ -426,12 +414,12 @@ units_rows() {
 #     nothing landed past the review proof writes no newer proof, so it is not one (wave-26
 #     T62; K2-F4): the last review of a run returns its row to pending, and integrate would
 #     otherwise wait on it for ever. A REGRESSION PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64;
-#     REQ-3 AC-3.4): with no open writer, `proof:floor` is satisfied when lib/proof.sh
-#     `proof_state` answers `covered` or `bounded`, and waits on `unbounded` — a merge from
-#     outside the run, a change the map answers with every suite or a file it answers with none,
-#     or a state that cannot be computed — saying `proof:floor: the head moved past the regression
-#     proof at <12 hex> in a way the map cannot bound (<its reason>); take the full run on this
-#     head and record it with proof-add floor`. The state is asked only when a pending row's
+#     REQ-3 AC-3.4; the floor's rule from wave-31 T25, D3): with no open writer, `proof:floor` is
+#     satisfied when lib/proof.sh `proof_state` answers `covered`, and waits on `uncovered` — a
+#     commit past the proof that no recorded run proves, or a state that cannot be computed —
+#     saying `proof:floor: the floor is one whole run plus each later commit proved; past the proof
+#     at <12 hex>, <its reason>; run suites its row named, proof-add floor;
+#     a second run: approve regression-2` (short: the tick cuts a WAIT reason at 400 characters). The state is asked only when a pending row's
 #     answer turns on it, a row held for its step is judged without it, and inside
 #     `units_memoised` it is asked once; `proof:review`, with no open writer, is satisfied only
 #     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
@@ -471,9 +459,8 @@ units_rows() {
 # <step> STILL DECIDES THE GATE ACTS (wave-20 Δ6, T10b). A row of kind `integrate` or `close`,
 # or — in a table WITHOUT the `reads` column — a `doc` row at Step 7 or later (the release), is
 # ready only once <step> has reached its own step. In a table with the column a doc row waits for
-# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033): passed `T<n>`, only
-# task-scale rows (no step cell) are judged and a task dependency is satisfied by `done`. Any
-# other <step> is a caller fault and exits 2; no table exits 1.
+# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). Any <step> that is not a
+# step number is a caller fault and exits 2; no table exits 1.
 #
 # ROWS OPEN ON THE ROSTER ARE NOT READY (D9). The launch recorder moves a launched row to
 # `active`, but a table read between the launch and that write still says `pending`. Given a
@@ -577,7 +564,7 @@ units_suspect() {
   rows="$(units_rows "$plan" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
   units_has_column "$plan" reads && hasreads=1
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v hasreads="$hasreads" \
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v hasreads="$hasreads" -v regno="$(_units_regno "$plan")" \
     "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
     { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
     END {
@@ -714,7 +701,7 @@ units_hold_read() {
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
   [ -n "$rows" ] || return 1
   units_has_column "$plan" reads && hasreads=1
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v holder="$holder" -v hasreads="$hasreads" \
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v holder="$holder" -v hasreads="$hasreads" -v regno="$(_units_regno "$plan")" \
     "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
     { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
     END {
@@ -831,8 +818,8 @@ units_whole_read() {
 }
 
 # units_landings <plan> <record> -> `<row id><TAB><merge or -><TAB><owed or ->`, table order: each
-# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed` or
-# `done` with none, as `-`. `owed` marks a landed or done build row: it must carry a landing, so the
+# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed`
+# with none, as `-`. `owed` marks a landed build row: it must carry a landing, so the
 # caller counts it unknown when the record has none or its merge is no commit. A header whose
 # `row=` is `—` or an id the table lacks names no row; a merge that is not hex is no landing.
 units_landings() { _units_landed landings "${1:-}" "" "${2:-}" < /dev/null; }
@@ -906,7 +893,7 @@ _units_landed() {
         exit
       }
       for (i = 1; i <= n; i++) {
-        owed = (knd[i] == "build" && (st[i] == "landed" || st[i] == "done"))
+        owed = (knd[i] == "build" && st[i] == "landed")
         if (mode == "landings") {
           if (id[i] in lm) printf "%s\t%s\t%s\n", id[i], lm[id[i]], (owed ? "owed" : "-")
           else if (owed) printf "%s\t-\towed\n", id[i]
@@ -991,15 +978,9 @@ _units_proof_awk() {
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rc
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ]; then
-    case "$step" in
-      ''|*[!0-9]*)
-        case "$step" in
-          T*) case "${step#T}" in ''|*[!0-9]*) return 2 ;; *) scale=task ;; esac ;;
-          *) return 2 ;;
-        esac ;;
-    esac
+    case "$step" in ''|*[!0-9]*) return 2 ;; esac
   fi
   out="$(_units_table "$plan")" || return 1
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; *) rows="" ;; esac
@@ -1016,34 +997,34 @@ _units_sched() {
   # `proof_state` run (once per memoised command, `_units_floor_state`) and the program run again
   # with the answer. Every other plan, and every other moment of this one, runs no git here.
   fst="$(_units_floor_kept "$plan")"
-  _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+  _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst"; rc=$?
   if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then
     fst="$(_units_floor_state "$plan")"
-    _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst"; rc=$?
   fi
   return "$rc"
 }
 
-# _units_sched_run <mode> <plan> <step> <scale> <hasreads> <rows> <regression state> -> the program's
+# _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> -> the program's
 # answer and its status: 3, with nothing printed, when the answer needs a regression state not handed in.
 _units_sched_run() {
   {
-    printf '\034rows\n'; printf '%s\n' "$6"
+    printf '\034rows\n'; printf '%s\n' "$5"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
-  } | _UNITS_FLOOR_ST="$7" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
+  } | _UNITS_FLOOR_ST="$6" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
-      -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" \
+      -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
       -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_sched_awk)"
 }
 
 # _units_floor_state <plan> -> what lib/proof.sh `proof_state` says of the change since the plan's
-# last regression proof: `covered…`, `bounded…` or `unbounded<TAB><reason>`, one line. The tree it asks
+# last regression proof: `covered…` or `uncovered<TAB><reason>`, one line. The tree it asks
 # is the project root the plan sits under (`<root>/.bionic/…`), or the plan's own directory, whose
 # repository git finds. Inside `units_memoised` the answer is kept in a file for the rest of the
 # command, so the tick's three questions and its ready set run `proof_state` once between them.
 # WHEN THE STATE CANNOT BE COMPUTED, THE READ IS NOT SATISFIED (the fail direction): proof.sh not
-# loadable, no git, no checkout, a map that fails or overruns all answer `unbounded` with the
-# reason, and a regression proof at the head is always the way out, because `covered` asks no map.
+# loadable, no git, no checkout all answer `uncovered` with the reason, and a regression proof at
+# the head is always the way out, because a proof at the head walks no commit.
 _units_floor_state() {
   local plan="${1:-}" tree st=""
   st="$(_units_floor_kept "$plan")"
@@ -1053,8 +1034,8 @@ _units_floor_state() {
     st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1')"
   fi
   case "$st" in
-    covered*|bounded*|unbounded*) ;;
-    *) st="$(printf 'unbounded\tthe proof state cannot be computed here (lib/proof.sh)')" ;;
+    covered*|uncovered*) ;;
+    *) st="$(printf 'uncovered\tthe proof state cannot be computed here (lib/proof.sh)')" ;;
   esac
   [ -z "${_UNITS_MEMO_FLOOR:-}" ] || printf '%s\n%s\n' "$plan" "$st" > "$_UNITS_MEMO_FLOOR" 2>/dev/null
   printf '%s\n' "$st"
@@ -1132,7 +1113,7 @@ _units_files_awk() {
     }
     # cell_covers(cell, p): some entry of the Files cell (comma-separated; a backtick, a leading ./ and the
     # white space around an entry are not part of it) covers the path p. THE ONE MATCHER OF THE DISPATCH GRAMMAR
-    # for a shell caller: the scheduler overlap test and the finding-check code writer ask covers through it.
+    # for a shell caller: the scheduler overlap test and proof_debt_hits in lib/proof.sh ask covers through it.
     function cell_covers(cell, p,   a, m, k, e) {
       sub(/^\.\//, "", p)
       m = split(cell, a, /[ \t]*,[ \t]*/)
@@ -1151,17 +1132,27 @@ _units_files_awk() {
 # reads an empty cell through it, and the suspect test and the decline line write a cell back
 # through it, so a printed `task-set` line keeps the default the row was scheduled by. NO APOSTROPHE
 # inside it: cellq builds its quotes with sprintf.
+# AT `regression: no` THE INTEGRATE ROW READS NO FLOOR (wave-31 T27; REQ-12 AC-12.2; D4): each reader
+# hands the awk `-v regno=` from _units_regno below, and the default drops `proof:floor`. Unset (a
+# plan at yes, with the key absent, or proof.sh not loaded) the default is the one it was.
 _units_cell_awk() {
   printf '%s' '
     function kdef(k) {
       if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
       if (k == "review") return "approval:plan, live:head"
-      if (k == "integrate") return "proof:floor, proof:review, head"
+      if (k == "integrate") return (regno == "1") ? "proof:review, head" : "proof:floor, proof:review, head"
       if (k == "close") return "merge"
       return "approval:plan"
     }
     function cellq(v) { return (v == "") ? "\342\200\224" : sprintf("%c%s%c", 39, v, 39) }
 '
+}
+
+# _units_regno <plan> -> `1` when lib/proof.sh `proof_regression` reads the plan at `no`, else nothing:
+# the `regno` the kind default reads. Fail-closed: no proof.sh, no plan or any other value is yes.
+_units_regno() {
+  declare -F proof_regression >/dev/null 2>&1 || return 0
+  [ "$(proof_regression "${1:-}")" != no ] || printf '1'
 }
 
 # units_writes_head <Files cell> -> 0 when the cell names a path outside the record, 1 when not:
@@ -1453,17 +1444,18 @@ _units_sched_awk() {
           return 0
         }
         # THE REGRESSION PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
-        # with no open writer satisfies the read when the change since its head is covered or
-        # bounded; unbounded, or a state that could not be computed, is a wait naming the way
-        # out. Unknown here (floorst empty) is reported through needfloor, and the shell runs
-        # this program again with the state; a row held for its step is judged without it.
+        # with no open writer satisfies the read when the floor is covered: one whole run, and
+        # every commit since it proved by its recorded runs (wave-31 T25; D3). Uncovered, or a
+        # state that could not be computed, is a wait naming what is lacking and the way out.
+        # Unknown here (floorst empty) is reported through needfloor, and the shell runs this
+        # program again with the state; a row held for its step is judged without it.
         if (nw == 0 && a == "floor" && (a in proved) && !skipfloor) {
           if (floorst == "") needfloor = 1
-          else if (floorst !~ /^(covered|bounded)/) {
+          else if (floorst !~ /^covered/) {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
-            lwhy = "the head moved past the regression proof at " substr(prvh["floor"], 1, 12) \
-              " in a way the map cannot bound (" fr "); take the full run on this head and record it with proof-add floor"
+            lwhy = "the floor is one whole run plus each later commit proved; past the proof at " \
+              substr(prvh["floor"], 1, 12) ", " fr "; run suites its row named, proof-add floor; a second run: approve regression-2"
             return 0
           }
         }
@@ -1526,21 +1518,20 @@ _units_sched_awk() {
     }
 
     # rowheld(i) -> 2 when this answer does not judge pending row i at all, 1 when it is a gate
-    # act held for its step, 0 otherwise. A WAVE ROW CARRIES A NUMERIC STEP, and that is all the
+    # act held for its step, 0 otherwise. A ROW CARRIES A NUMERIC STEP, and that is all the
     # step still decides for a work row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b):
     # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW WAITS FOR
     # ITS READS (wave-26 T13; D3): in a table with the reads column the release reads
     # approval:release and nothing about it is a step. A table without the column has no approval
     # to read, so its Step-7 doc row keeps the hold (A-T13.1).
     function rowheld(i,   gate) {
-      if (scale == "task") return (stp[i] != "") ? 2 : 0
       if (stp[i] !~ /^[0-9]+$/) return 2
       gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
       return (gate && stp[i] + 0 > want + 0) ? 1 : 0
     }
 
     END {
-      satisfied = (scale == "task") ? "done" : "landed"
+      satisfied = "landed"
       floorst = ENVIRON["_UNITS_FLOOR_ST"]
       factsst = ENVIRON["_UNITS_FACTS_ST"]
       for (i = 1; i <= n; i++) {
@@ -2006,9 +1997,9 @@ units_validate() {
 # THE ONE LEDGER READER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3). Three
 # findings and no more, each naming its row:
 #
-#   status <id> <value>    the row's status is outside the scale's enum — `(empty)` for a blank
+#   status <id> <value>    the row's status is outside the enum — `(empty)` for a blank
 #                          cell, the spelling `units_validate` uses
-#   evidence <id>          the row is at the scale's terminal word and `## SDLC State` carries
+#   evidence <id>          the row is `landed` and `## SDLC State` carries
 #                          no non-empty `- <id>:` line for it
 #   launch <id> <agent>    the row is `active`, its agent cell names someone, and no
 #                          `roster-state/` row on <roster> carries that `name=`
@@ -2021,28 +2012,25 @@ units_validate() {
 # the launch record the dispatch hook writes to the roster, owed at `active` and checked by
 # nothing until a writer's first commit. The roster is now the record: an `active` row whose
 # agent cell is a roster `name=` owes no line. The line is owed where it carries something only
-# a human can write — the evidence — at `done` (task scale) or `landed` (wave scale).
+# a human can write — the evidence — at `landed`.
 #
 # SELF-OWNED IS AN AGENT CELL WITH NO ALPHANUMERIC — empty, an em dash, a hyphen — the same
 # four-spellings-of-nothing reading the `deps` and `worktree` cells take. Nobody was launched
-# for that row, so neither a roster row nor a line is asked of it. A task-scale table has no
-# agent column at all, so every task-scale row is self-owned.
+# for that row, so neither a roster row nor a line is asked of it.
 #
 # NO ROSTER TO READ, TODAY'S RULE (spec assumption 1). An empty <roster>, a path naming no
 # regular file, or a symlink (the fleet never follows one into a roster) computes no `launch`
 # finding: an agent-named `active` row then owes its line, exactly as it did before this
 # reader. A missing roster therefore fails toward the old refusal, never toward silence.
 #
-# THE SCALE COMES FROM THE HEADER, the discriminator the gate's row arm already uses: a table
-# with a `step` column is a wave table (pending · active · landed · dropped, terminal `landed`);
-# one without is the task-scale ledger (pending · active · done · dropped, terminal `done`).
+# ONE ENUM AT EVERY SCALE (wave-31 T5; D2): pending · active · landed · dropped, terminal `landed`.
+# A row in the retired task-scale words (`done`) is a `status` finding, never a second enum.
 #
 # ONLY `T<digit>…` ROWS ARE JUDGED, as the gate's arms have always filtered: a legend or a
 # non-unit row in the table is not a ledger row. No table is no finding, exit 0.
 #
-# ONE PARSE PER CALL. The reader asks the table twice — its rows, then whether the header
-# carries `step` — so it runs under `units_memoised`; a caller already holding a memo for the
-# plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
+# ONE PARSE PER CALL. The reader asks the table for its rows under `units_memoised`; a caller
+# already holding a memo for the plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
 units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}"; }
 
 # units_unlined <plan> -> the `T<digit>…` ids with no non-empty `- <id>:` line under
@@ -2066,16 +2054,15 @@ units_unlined() { _units_ledger unlined "${1:-}" ""; }
 # roster row can begin with: the rows (`units_rows`, so a memoised caller pays no second parse),
 # the plan's text, and — only when there is one to read — the roster.
 _units_ledger() {
-  local mode="${1:-}" plan="${2:-}" roster="${3:-}" rows scale=wave useroster=0
+  local mode="${1:-}" plan="${2:-}" roster="${3:-}" rows useroster=0
   rows="$(units_rows "$plan")" || return 0
   [ -n "$rows" ] || return 0
-  units_has_column "$plan" step || scale=task
   if [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; then useroster=1; fi
   {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
     if [ "$useroster" -eq 1 ]; then printf '\034roster\n'; cat "$roster" 2>/dev/null; fi
-  } | awk -F'\t' -v mode="$mode" -v scale="$scale" -v useroster="$useroster" '
+  } | awk -F'\t' -v mode="$mode" -v useroster="$useroster" '
     $0 == SUBSEP "rows"   { part = 1; next }
     $0 == SUBSEP "plan"   { part = 2; next }
     $0 == SUBSEP "roster" { part = 3; next }
@@ -2112,8 +2099,7 @@ _units_ledger() {
       next
     }
     END {
-      if (scale == "task") { split("pending active done dropped", e, " "); term = "done" }
-      else                 { split("pending active landed dropped", e, " "); term = "landed" }
+      split("pending active landed dropped", e, " "); term = "landed"
       for (i in e) enum[e[i]] = 1
       found = 0
       for (i = 1; i <= n; i++) {
@@ -2288,7 +2274,7 @@ units_add_row() {
           L[r] = unesc(out)
         }
       }
-      val["id"] = nid; val["step"] = nstep; val["kind"] = nkind; val["rigor"] = nkind
+      val["id"] = nid; val["step"] = nstep; val["kind"] = nkind
       val["task"] = ntask; val["agent"] = nagent; val["deps"] = ndeps; val["size"] = nsize
       val["serves"] = nserves; val["files"] = nfiles; val["status"] = "pending"; val["reads"] = nreads
       row = "|"
@@ -2325,8 +2311,7 @@ units_add_row() {
 #   row whose id cell is <id> given those cells (`set`), or a new row with that id appended
 #   after the table's last row (`add`; unnamed cells `—`). <section> is `tasks` (the first
 #   `## Tasks` table, the one `_units_read` parses) or `ledger` (the first `## Dispatch ledger`
-#   table). Names are the header's own cells, matched case-insensitively; `kind` and `rigor`
-#   name slot 3 at either scale, as `_units_read` takes them.
+#   table). Names are the header's own cells, matched case-insensitively.
 #   Exit 1 no such table · 2 `set`: no row with that id, `add`: the id is taken · 3 a name the
 #   header does not carry · 4 a value with a forbidden byte · 5 `set`: more than one row with
 #   that id. Silent on every refusal.
@@ -2360,7 +2345,6 @@ units_table_cells() {
         if (pl[p] == "") continue
         t = index(pl[p], "\t")
         k = tolower(substr(pl[p], 1, t - 1)); v = substr(pl[p], t + 1)
-        if (sect == "tasks" && k == "rigor") k = "kind"
         nk++; key[nk] = k; val[k] = (trim(v) == "" ? "—" : trim(v))
       }
     }
@@ -2382,7 +2366,6 @@ units_table_cells() {
           nh = split(esc(line), hc, "|")
           for (c = 1; c <= nh; c++) {
             t = tolower(trim(hc[c]))
-            if (sect == "tasks" && t == "rigor") t = "kind"
             if (t != "" && !(t in col)) { col[t] = c; name[c] = t }
           }
           if (!("id" in col)) { split("", col); split("", name); continue }

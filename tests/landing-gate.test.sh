@@ -1443,28 +1443,31 @@ expect_contains "16f: …over the same announced fallback base as 16b" \
   "landing gate: no declared base and no working-branch resolves; diffing against main" "$OUT_STDERR"
 expect_eq "16f: …and the row really was processed" "1" "$(swept_count "$R16F")"
 
-# --- 16g: an `impact-command:` configured in .bionic/config.yaml — same key S13's dispatch
-# wall reads — names the suites the offending files imply, alongside the files themselves.
+# --- 16g: THE SWEEP ASKS NO MAP (wave-31 T23, REQ-4 AC-4.2; D3). A diff outside Files: is
+# refused naming the file, and nothing else: the suites a brief may run are the ones it named,
+# so the refusal derives none. A stale `impact-command:` left in .bionic/config.yaml is read by
+# nothing — the tripwire it names would leave a marker, and would print a suite, if it ran.
 R16G="$(make_git_wave_repo r16g)"
 WT16G=$(make_slice_tree "$R16G" slice16g)
 commit_files "$WT16G" "out of scope" undeclared/three.sh
-STUB16G="$SANDBOX/impact-stub-16g.sh"
-cat > "$STUB16G" <<'STUBEOF'
-#!/bin/bash
-for f in "$@"; do
-  case "$f" in undeclared/*) printf 'fake.test.sh\tstub\n' ;; esac
-done
-STUBEOF
-chmod +x "$STUB16G"
+TRIP16G="$SANDBOX/impact-tripwire-16g.sh"
+MARK16G="$SANDBOX/impact-tripwire-16g.ran"
+printf '#!/bin/bash\n: > %s\nprintf "fake.test.sh\\tstub\\n"\n' "$MARK16G" > "$TRIP16G"
+chmod +x "$TRIP16G"
+# THE TRIPWIRE FIRES WHEN RUN, so its absence below is a reading, not a stub that cannot write.
+bash "$TRIP16G" undeclared/three.sh >/dev/null 2>&1
+expect_true "16g: (control) the tripwire leaves its marker when it is run" test -e "$MARK16G"
+rm -f "$MARK16G"
 mkdir -p "$R16G/.bionic"
-printf 'impact-command: bash %s\n' "$STUB16G" > "$R16G/.bionic/config.yaml"
+printf 'impact-command: bash %s\n' "$TRIP16G" > "$R16G/.bionic/config.yaml"
 add_row "$R16G" name=slice16g agent_id="$AID_A" deliverable=.bionic/docs/record/s16g.md \
   files="declared/" launched_at="$(iso_ago 600)"
 deliver "$R16G" .bionic/docs/record/s16g.md
 run_gate "$GATE" "$(stop_payload "$R16G" "$SID" false)"
-expect_status "16g: a diff outside Files: with an impact command configured still refuses" "2" "$RC"
+expect_status "16g: a diff outside Files: refuses, a stale impact-command: line or not" "2" "$RC"
 expect_contains "16g: …naming the offending file" "undeclared/three.sh" "$OUT_VSTDERR"
-expect_contains "16g: …and the suite the impact command derived for it" "fake.test.sh" "$OUT_VSTDERR"
+expect_absent "16g: …and no suite derived for it" "fake.test.sh" "$OUT_VSTDERR"
+expect_false "16g: …the stale command never ran" test -e "$MARK16G"
 
 # --- 16h: A DETACHED MAIN CHECKOUT (review-a A-5). `git rev-parse --abbrev-ref HEAD` prints
 # the literal string `HEAD` there, and `HEAD` resolves INSIDE the worktree to the worktree's
@@ -1502,106 +1505,22 @@ run_gate "$GATE" "$(stop_payload "$R16H2" "$SID" false)"
 expect_absent "16h: control: on a branch the announcement is gone" "reconciliation is INERT" "$OUT_STDERR"
 expect_contains "16h: control: …and the diff outside Files: refuses" "undeclared/four.sh" "$OUT_VSTDERR"
 
-# --- 16i: THE DERIVATION IS BOUNDED (review-c C-17). The impact command costs ~2.6-6.5 s
-# and this hook is registered at "timeout": 10 on Stop and SubagentStop, with the call
-# inside the per-candidate loop. The budget is spent across the sweep; a row that gets no
-# derivation still REFUSES and says the suites were not named. The one thing it must never
-# become is a silent pass. NO SEAM: the bound is the shipped one, READ from lib/bounds.sh
-# rather than typed here, and the stub simply outruns it.
-#
-# lg_hires_cs_since <epoch-float> -> whole hundredths of a second elapsed since it.
-# SUB-SECOND, via python3, the idiom of tests/session-start.test.sh §16 and — for this
-# exact purpose — tests/dispatch-preflight.test.sh's `dp_hires_cs_since` (wave-14 T34). A
-# whole-second `date +%s` difference is off by up to a full second either way depending on
-# where its two reads straddle a tick, and the thing this arm has to tell apart is a sweep
-# that ended on its bound from one that ran 15% past it. A host with no python3 answers
-# 999999, which fails the arm loudly rather than passing it blind.
-lg_hires_cs_since() {
-  python3 -c 'import sys,time; print(int((time.time()-float(sys.argv[1]))*100))' "$1" 2>/dev/null \
-    || echo 999999
-}
-R16I="$(make_git_wave_repo r16i)"
-WT16I=$(make_slice_tree "$R16I" slice16i)
-commit_files "$WT16I" "out of scope" undeclared/slow.sh
-STUB16I="$SANDBOX/impact-stub-16i.sh"
-printf '#!/bin/bash\nsleep 30\nprintf "never.test.sh\\tstub\\n"\n' > "$STUB16I"
-chmod +x "$STUB16I"
-mkdir -p "$R16I/.bionic"
-printf 'impact-command: bash %s\n' "$STUB16I" > "$R16I/.bionic/config.yaml"
-add_row "$R16I" name=slice16i agent_id="$AID_A" deliverable=.bionic/docs/record/s16i.md \
-  files="declared/" launched_at="$(iso_ago 600)"
-deliver "$R16I" .bionic/docs/record/s16i.md
-# THE BOUND IS READ, NOT TRANSCRIBED (wave-14 T35). `LG_IMPACT_BOUND_S` lives in
-# payload/scripts/lib/bounds.sh with the dispatch wall's beside it; a `6` typed here would
-# go stale the first time the library's number moved and this arm would then be pinning
-# the suite's memory of the bound rather than the bound.
-B16I="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
-LG16I_BOUND="$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$B16I" 2>/dev/null)"
-expect_nonempty "16i: the sweep's bound is readable from lib/bounds.sh" "$LG16I_BOUND"
-T16I=$(python3 -c 'import time; print(time.time())' 2>/dev/null || echo 0)
-run_gate "$GATE" "$(stop_payload "$R16I" "$SID" false)"
-E16I_CS=$(lg_hires_cs_since "$T16I")
-expect_status "16i: a slow derivation does not turn the refusal into a pass" "2" "$RC"
-expect_contains "16i: …the offending file is still named" "undeclared/slow.sh" "$OUT_VSTDERR"
-expect_contains "16i: …and the reader is told the suites were NOT derived" \
-  "are NOT named here" "$OUT_VSTDERR"
-expect_absent "16i: …never the answer the command would eventually have given" \
-  "never.test.sh" "$OUT_STDERR"
-# THE SLACK IS ONE SECOND, ON A HUNDREDTHS CLOCK (wave-14 T35, re-pinning T34's shape).
-# This read `< 10` — the hook's own registration — over a whole-second clock, so it could
-# not tell a sweep that stopped on its 6 s bound from one that ran to 6.9 s and was eating
-# the very margin the registration is supposed to leave. The sweep spent its bound as a
-# count of `sleep 0.1` polls, each costing 115 ms as an external fork (T34 §2), so the
-# realized wait was ~1.15x the number both refusal messages quote, and grew with load.
-#
-# MEASURED, AND THE MARGIN IS HONEST — BUT NOT A GATE (REQ-7, wave-15 T8). On the tick
-# loop this arm read 7.03 s and 6.96 s on the same machine — one side of the 7.00 s cap
-# each time, because a 15% overrun of SIX seconds is 0.9 s and the slack is 1 s. On the
-# clock it reads 6.37 s. So a wall-clock row here caught the old loop about half the time,
-# which is not what proves the loop changed: tests/stop.test.sh 6r/6t pin the source
-# directly (the wait ends on `$SECONDS` against the constant; no tick budget remains) and
-# are RED against the old loop deterministically. This row now reports the measurement as
-# `info:` and never fails the suite on it — a slow host or a loaded machine no longer reds
-# landing-gate.test.sh over a timing that 6r/6s/6t already prove correct at the source.
-# `E16I_CAP` honors a pre-set environment value (a forced-miss fixture) before falling
-# back to the derived cap, so AC-7.1 can prove the never-fails claim without waiting out a
-# real slow run.
-#
-# WHAT THE ONE SECOND HAS TO ABSORB is the rest of this hook — four verdicts, the git
-# reconciliation, the journal — around ONE derivation that runs to the bound. A whole
-# second of it is generous on the fixture below and still catches a wait denominated in
-# anything that stretches; a sweep that misses this by seconds is the defect, not the noise.
-# The registration claim the old row made survives inside this one: bound + 1 is 7, which
-# is strictly under the 10 that hooks.json registers (§L.4c in cross-gate-agreement pins
-# that pair itself, both numbers read from their own files).
-: "${E16I_CAP:=$(( (${LG16I_BOUND:-0} + 1) * 100 ))}"
-echo "info: 16i derivation ${E16I_CS} cs (cap ${E16I_CAP} cs)"
-
-# --- 16j: `set -f` AROUND THE DIFF-PATH SPLIT (review-a A-11). `$LG_OUTSIDE` comes from
-# `git diff --name-only` and was expanded unquoted with no `set -f`, so a committed path
-# carrying a glob metacharacter was pathname-expanded against $REPO and the impact command
-# was handed files that were never in the diff. The sibling site in
-# hooks/dispatch-preflight.sh guards the identical construction. The main checkout below
-# holds two files the pattern matches, so an unguarded split has something to expand INTO.
+# --- 16j: A PATH CARRYING A GLOB METACHARACTER IS NAMED AS THE DIFF SPELLS IT (review-a A-11).
+# `$LG_OUTSIDE` comes from `git diff --name-only`; the main checkout below holds two files the
+# pattern matches, so a refusal that expanded the path would name them instead.
 R16J="$(make_git_wave_repo r16j)"
 mkdir -p "$R16J/undeclared"
 : > "$R16J/undeclared/aX.sh"
 : > "$R16J/undeclared/aY.sh"
 WT16J=$(make_slice_tree "$R16J" slice16j)
 commit_files "$WT16J" "out of scope, with a metacharacter in the name" 'undeclared/a*.sh'
-ARGS16J="$SANDBOX/impact-args-16j.txt"
-STUB16J="$SANDBOX/impact-stub-16j.sh"
-printf '#!/bin/bash\nprintf "%%s\\n" "$@" > %s\nprintf "fake.test.sh\\tstub\\n"\n' "$ARGS16J" > "$STUB16J"
-chmod +x "$STUB16J"
-mkdir -p "$R16J/.bionic"
-printf 'impact-command: bash %s\n' "$STUB16J" > "$R16J/.bionic/config.yaml"
 add_row "$R16J" name=slice16j agent_id="$AID_A" deliverable=.bionic/docs/record/s16j.md \
   files="declared/" launched_at="$(iso_ago 600)"
 deliver "$R16J" .bionic/docs/record/s16j.md
 run_gate "$GATE" "$(stop_payload "$R16J" "$SID" false)"
 expect_status "16j: a diff path carrying a glob metacharacter still refuses" "2" "$RC"
-expect_eq "16j: …and the impact command received the path from the DIFF, unexpanded" \
-  'undeclared/a*.sh' "$(cat "$ARGS16J" 2>/dev/null)"
+expect_contains "16j: …naming the path from the DIFF, unexpanded" 'touched: undeclared/a*.sh' "$OUT_VSTDERR"
+expect_absent "16j: …never the files the pattern would expand to" 'undeclared/aX.sh' "$OUT_VSTDERR"
 
 # --- 16k: THE WORKTREE ALIAS (D7, wave-13-fixit-180, AC-7.1). A dispatched writer inside a
 # spawned tree writes its record's deliverable path RELATIVE, with a plain shell redirect —

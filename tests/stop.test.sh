@@ -288,174 +288,6 @@ fire "$D" Stop false
 expect_nonempty "5d: …while the same fixture without the flag does refuse" "$STOP_OUT$STOP_ERR"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "6: the derivation bound has ONE owner (REQ-7, AC-7.4)"
-
-# WHAT CHANGED, AND WHY THERE ARE TWO NUMBERS (spec D4; wave-14 T15 fold-in).
-# `tests/lib/impact.sh` used to rebuild its whole edge graph on every invocation
-# — ~4.2 s at quiet load, argument-independent to 13 ms (R2 Q8) — so the number
-# bounding it was doing two jobs at once: paying for a cost nobody had removed,
-# and guarding against a command that never returns. The graph is cached per
-# tree state now, which leaves the bound one job: a HANG GUARD.
-#
-# BUT A HANG GUARD IS ONLY AS LONG AS ITS HOST WILL WAIT, and the two legs have
-# different hosts. THE RULE IS THE SAME FOR BOTH (wave-14 D2, ratified): every
-# inner bound sits strictly under its own hook's registration, margin named —
-# the wall's 20 s under dispatch-preflight.sh's 25 s registration, the sweep's
-# 6 s under hooks/stop.sh's `"timeout": 10` on Stop and SubagentStop. A bound at
-# or above its registration is never reached, because the CLI kills the hook at
-# the registration and a hook killed on the harness's timeout does NOT exit 2:
-# the refusal becomes a pass, which is the one thing the gate must never do.
-# tests/landing-gate.test.sh §16i measures exactly that, live, and caught it;
-# tests/cross-gate-agreement.test.sh §L.4c pins both pairs against hooks.json.
-# So lib/bounds.sh owns TWO named bounds and each consumer reads its own.
-#
-# TWO COPIES IS STILL THE DEFECT THIS SECTION EXISTS FOR — two numbers under one
-# owner is not two copies. The sweep's bound at lib/stop.sh and the dispatch
-# wall's at dispatch-preflight.sh:2225 were the same 6 s, written twice, in two
-# files, with two independent budgets and neither file saying the other existed.
-# What these rows hold is that every numeric definition lives in ONE file, and
-# that lib/stop.sh defines nothing of its own — it reads.
-#
-# STATIC, BY THE SPEC'S OWN EVAL DESIGN (AC-7.4, eval type `static`). Observing
-# either value through the sweep would mean hanging a real derivation to read one
-# number out of one message, and would still say nothing about the second
-# consumer. So these rows read the files — and because a grep against a file is
-# exactly the assertion that keeps passing after its pattern has drifted, each
-# reading is PAIRED with a mutation that removes what it looks for.
-BOUNDS_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
-STOP_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
-
-expect_true "6a: payload/scripts/lib/bounds.sh exists" test -f "$BOUNDS_SH"
-expect_true "6b: …and parses under bash -n" bash -n "$BOUNDS_SH"
-
-# THE VALUES ARE READ BY SOURCING, not by grepping literals back out of the file:
-# what a consumer gets is what sourcing gives it.
-expect_eq "6c: sourcing it defines IMPACT_BOUND_S=20, the dispatch wall's guard, under its own 25s registration" "20" \
-  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
-expect_eq "6d: …and LG_IMPACT_BOUND_S=6, the landing gate's, inside a 10s hook" "6" \
-  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
-
-# THE LANDING GATE'S BOUND IS STRICTLY UNDER ITS HOOK'S REGISTRATION, and the
-# registration is read from hooks.json rather than typed here — a wave that
-# raised the Stop hook's timeout without revisiting this number would otherwise
-# leave the row green while the reason for it had moved.
-HOOKS_JSON="${BIONIC_SCRIPTS_DIR}/hooks/hooks.json"
-LG_HOOK_TIMEOUT="$(/usr/bin/grep -A3 '"command": "\${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh"' \
-  "$HOOKS_JSON" 2>/dev/null | /usr/bin/grep -oE '"timeout": [0-9]+' | head -1 \
-  | /usr/bin/grep -oE '[0-9]+')"
-expect_eq "6e: hooks.json registers hooks/stop.sh at a 10s timeout" "10" "${LG_HOOK_TIMEOUT:-}"
-if [ -n "$LG_HOOK_TIMEOUT" ] && [ "6" -lt "$LG_HOOK_TIMEOUT" ] 2>/dev/null; then
-  ok "6f: …and the landing gate's bound (6s) is strictly under it, so the sweep ends on OUR terms"
-else
-  no "6f: …and the landing gate's bound (6s) is strictly under it, so the sweep ends on OUR terms" \
-    "registration=${LG_HOOK_TIMEOUT:-<unread>}s"
-fi
-
-# NOT VACUOUS: the rows above read the file rather than agreeing with constants
-# typed into this suite, and a copy carrying different numbers proves it.
-B_MUTD="$(mktemp -d)"
-anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=20$' 1
-anchor -E "$BOUNDS_SH" '^LG_IMPACT_BOUND_S=6$' 1
-sed -e 's/^IMPACT_BOUND_S=20$/IMPACT_BOUND_S=3/' \
-    -e 's/^LG_IMPACT_BOUND_S=6$/LG_IMPACT_BOUND_S=4/' "$BOUNDS_SH" >"$B_MUTD/bounds.sh"
-expect_eq "6g: …and a copy carrying 3 answers 3, so 6c read the file" "3" \
-  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
-expect_eq "6h: …and that copy answers 4 for the gate's, so 6d read it too" "4" \
-  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
-
-# THE HEADER SAYS WHAT THE NUMBERS ARE FOR. Without those sentences the next
-# reader who meets a slow derivation tunes them, which is the habit D4 retires —
-# and the reader who meets the SHORTER one has to be told it is not a tuned
-# budget but a ceiling the Stop hook's own registration imposes.
-# Case-tolerant on purpose: the file says it in a heading (HANG GUARD) and a
-# reviewer who rewords the heading in lower case has not weakened anything.
-BOUNDS_SRC="$(cat "$BOUNDS_SH" 2>/dev/null)"
-expect_regex "6i: …and its header names the number a hang guard" \
-  "[Hh][Aa][Nn][Gg][ -][Gg][Uu][Aa][Rr][Dd]" "$BOUNDS_SRC"
-expect_contains "6j: …and says why the gate's is the shorter one: the 10 s registration" \
-  '"timeout": 10' "$BOUNDS_SRC"
-expect_contains "6k: …naming what a bound at or above it costs — the killed hook's exit" \
-  "124" "$BOUNDS_SRC"
-
-# ONE OWNER IN THE LIBRARY TREE (AC-7.4, this task's half). A DEFINITION is a
-# literal number; a consumer's read of the constant is not counted, which is the
-# distinction the criterion's "defined in two places" turns on — the criterion's
-# own spelling, `grep -rn 'IMPACT_BOUND_S='`, matches both and can never reach
-# one. TWO NAMES, ONE FILE: what the row holds is the FILE count, because the
-# defect was two files disagreeing, not one file carrying two bounds it explains.
-#
-# SCOPED TO payload/scripts/, AND THE SCOPE IS THE POINT. The other consumer is
-# hooks/dispatch-preflight.sh, which still carries its own `IMPACT_BOUND_S=6`
-# until T6 re-points it; that file's row belongs to
-# tests/dispatch-preflight.test.sh, and a count here that spanned both would be
-# pinning a transitional state — green today only because T6 has not landed, red
-# the moment it does. What this suite owns is that the LIBRARY has one owner.
-#
-# AND THE FLEET-WIDE SWEEP MUST NAME hooks/ SEPARATELY. `payload/hooks` is a
-# symlink to `../hooks`, and neither `grep -r` nor `grep -R` descends through a
-# symlinked directory met during recursion — so AC-7.4's literal command over
-# `payload/` cannot see the preflight's definition at all, and would report "one"
-# while two exist. Whoever discharges AC-7.4 at Step 5 scans
-# `payload/scripts/` and `hooks/`, or `find -L`.
-B_DEFS="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
-  "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
-expect_eq "6l: the two numeric bound definitions in payload/scripts/ live in ONE file" \
-  "1" "$(printf '%s\n' "$B_DEFS" | cut -d: -f1 | sort -u | /usr/bin/grep -c .)"
-expect_eq "6m: …and there are exactly two of them, one per bound" \
-  "2" "$(printf '%s\n' "$B_DEFS" | /usr/bin/grep -c .)"
-expect_contains "6n: …and the file is lib/bounds.sh" "lib/bounds.sh" "$B_DEFS"
-# NOT VACUOUS: the sweep reaches a file it could have missed, and the READ in
-# lib/stop.sh is inside its span and deliberately uncounted.
-expect_nonempty "6o: the sweep reaches lib/stop.sh, whose READ it declines to count" \
-  "$(/usr/bin/grep -rn 'IMPACT_BOUND_S' "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null \
-     | /usr/bin/grep 'lib/stop.sh')"
-
-# THIS CONSUMER READS IT, AND READS THE GATE'S. The dispatch wall is the other,
-# pinned in its own suite; what stop.test.sh owns is the sweep's side. The name
-# matters as much as the number: reading IMPACT_BOUND_S here would put the
-# preflight's bound — sized for ITS registration — inside a hook the CLI kills
-# at 10 (§16i).
-STOP_SRC="$(cat "$STOP_LIB")"
-expect_nonempty "6p: lib/stop.sh sources lib/bounds.sh" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$STOP_LIB")"
-expect_no_regex "6q: …and defines neither bound itself — the value it uses is the library's" \
-  '^[[:space:]]*(local[[:space:]]+)?(LG_)?IMPACT_BOUND_S=' "$STOP_SRC"
-# THE PAIRED POSITIVE for 6q, so the row above cannot pass on a file that stopped
-# mentioning the bound at all: the sweep's wait ends on the NAME, and both refusal
-# messages quote it.
-#
-# RE-SPELLED ONTO THE CLOCK (wave-14 T35, carrying T34's fix across). This read the
-# sweep's tick budget, `LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))`, and asserted
-# it was DERIVED from the constant rather than typed as a second literal. The budget is
-# gone: a count of `sleep 0.1` polls cost 115 ms a poll, so spending six seconds of them
-# waited ~6.9 s inside a 10 s registration — the margin the shorter bound exists to keep,
-# eaten by the spending of it, and by more under load. The wait now ends on `SECONDS`
-# against the constant itself, which is the strongest form of "not a second number":
-# no second number at all.
-expect_regex "6r: …and the sweep's wait ends on LG_IMPACT_BOUND_S itself, not on a derived second number" \
-  '\[[[:space:]]*"\$SECONDS"[[:space:]]*-ge[[:space:]]*"\$LG_IMPACT_BOUND_S"[[:space:]]*\]' "$STOP_SRC"
-expect_eq "6s: …and both refusal messages quote the bound they actually used" "2" \
-  "$(/usr/bin/grep -c '\${LG_IMPACT_BOUND_S}s' "$STOP_LIB" | tr -d ' ')"
-
-# AND NO TICK BUDGET IS LEFT TO DRIFT AGAINST IT. A count of polls beside a bound in
-# seconds is two numbers meaning one thing, and the poll is not a tenth of a second: it
-# is a fork, an exec and a tenth of a second. LINE-ANCHORED on purpose — the removed
-# expression survives inside the comment that explains why it went, and a pin that could
-# match a comment would go green on a file that still ran one.
-expect_no_regex "6t: …leaving no tick budget behind to drift against it" \
-  '^[[:space:]]*LG_IMPACT_TICKS_LEFT=' "$STOP_SRC"
-
-# NOT VACUOUS: a copy with the source line cut has nothing for 6p to find, so
-# 6p discriminates rather than matching any mention of the name anywhere.
-S_MUTD="$(mktemp -d)"
-anchor -E "$STOP_LIB" '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' 1
-/usr/bin/grep -vE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$STOP_LIB" \
-  >"$S_MUTD/stop.sh"
-expect_empty "6u: …and a copy with that line cut has no source line left to find" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$S_MUTD/stop.sh")"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-10.2; D5; wave-20 Δ7)"
 
 # RE-POINTED AT WAVE-20 (REQ-5, Δ7; ADR-036 decision 3). The wall no longer reads the printed
@@ -730,8 +562,8 @@ S9_D="$(s9_fixture)"
 roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000001 deliverable= \
   >> "$S9_D/.bionic/tmp/roster-$SID.state"
 S9_TX="$(mktemp)"; s9_transcript "$S9_TX" w9-T13
-# THE TURN SETS ITS ENTRY IN PROGRESS (wave-28 T38, A-T38.5): otherwise the task-entry clause
-# names T13 as dispatched in this refusal's detail, and 9e reads every T13 as "named as missed".
+# THE TURN SETS ITS ENTRY IN PROGRESS, as the doctrine's dispatch turn does (wave-28 T38, A-T38.5).
+# Since wave-31 T32 (D6) no wall counts it; the record is kept so the transcript stays that turn.
 jq -nc '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-09-19T00:00:05Z",
   message:{role:"assistant",content:[{type:"tool_use",id:"toolu_s9up",name:"TaskUpdate",input:{taskId:"1",status:"in_progress"}}]}}' >> "$S9_TX"
 s7_fire "$S9_D" "$S9_TX"
@@ -785,10 +617,11 @@ expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
 
 # THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.8). 9h's fixture, nothing launched, under a
 # five-minute load over the share: the gate gives no room, so the wall owes no row and its
-# ledger records the hold. 9h above is the same fixture with room, and refuses.
+# ledger records the hold. 9h above is the same fixture with room, and refuses. 8.0 busy cores of the
+# fixture's 8 is over the gate's width at any share below 100 (92 x 8 / 100 = 7.36; wave-31 T36, A-T36-4).
 S9_DG="$(s9_fixture)"
 S9_TXG="$(mktemp)"; s9_transcript "$S9_TXG"
-BIONIC_PROBE_BUSY_CORES_5M=7.0 s7_fire "$S9_DG" "$S9_TXG"
+BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$S9_DG" "$S9_TXG"
 S9_LEDG="$S9_DG/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
 expect_contains "9q: with no room at the gate the ledger records the hold, both rows ready, none free" \
   "|state=hold|" "$(cat "$S9_LEDG" 2>/dev/null)"
@@ -1441,9 +1274,11 @@ section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floo
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # THE WALL'S READY SET IS THE TICK'S (lib/units.sh), so the rule that integrate's `proof:floor`
-# stands only while proof_state answers covered or bounded reaches the turn end too. The fixture
-# is a git repository on `wave/99-fl` with no `impact-command:`, so any change past the floor
-# proof is unbounded; writers=1 and no writer open, so a ready integrate row is a fillable gap.
+# stands only while proof_state answers covered reaches the turn end too. The floor is a record of
+# runs (wave-31 T25; D3): one whole run at the proof's head, and every later commit proved by a run
+# recorded at it. The fixture is a git repository on `wave/99-fl` with no run recorded past the
+# proof, so a change landed after it is uncovered; writers=1 and no writer open, so a ready
+# integrate row is a fillable gap.
 # Each proof line is written by lib/proof.sh's own writer pair at the head the checkout is at.
 # A new file lands past the proof: the wall demands nothing, while the tick says why the row
 # waits. The differential records a floor proof at the new head: the same wall refuses the turn,
@@ -1495,10 +1330,10 @@ export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
 FL_TX="$(mktemp)"
 FL_D="$(fl_fixture)"
 expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
-  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at" "$(fo_tick "$FL_D")"
+  "poker: WAIT T3 — proof:floor: the floor is one whole run plus each later commit proved; past the proof at" "$(fo_tick "$FL_D")"
 sd_turn "$FL_TX" u-fl-1
 s7_fire "$FL_D" "$FL_TX"
-expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
+expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is uncovered" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
 fl_prove "$FL_D" floor
 fl_read "$FL_D" adversarial piece; fl_read "$FL_D" structure piece
@@ -1899,207 +1734,9 @@ fire "$D"
 expect_absent "FR5 …and the same diff now lands: no landing refusal" "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
 expect_status "FR5 …and the stop is admitted" "0" "$STOP_RC"
 
-# ─────────────────────────────────────────────────────────────────────────────
-section "RW: the reconcile refusal says the plan moved when that is why it is owed (wave-27 T37; review pass 8 F2)"
-
-# The tick writes `reconcile=step4` or `reconcile=grew` beside `duty=owed` when the reconcile is
-# owed because the plan moved (tests/session-poker-3.test.sh §RECON-WHY). A tick turn with no
-# task-list refresh is refused as before; the refusal now gives that cause and names the rebuild,
-# and with no cause in the digest, or a digest older than the turn's tick, it is today's words.
-# The fixture is LH's at the proof's own head, so no fill is owed, and its transcript is s7's
-# tick turn with the TaskList call taken out. SYNTHESIZED, as LH.
-rw_digest() {  # <project> <reconcile cause or ""> [at]
-  { printf 'patrol-digest/v1\nprompt_version=5\ndigest=1-1\nsince=2026-10-04T00:00:00Z\ndecision=QUIET\nduty=owed\nat=%s\nhead=%s\n' \
-      "${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$LH_A"
-    [ -z "$2" ] || printf 'reconcile=%s\n' "$2"
-  } > "$1/.bionic/tmp/tick-digest-$SID.state"
-}
-require_helpers rw_digest
-RW_D="$(lh_fixture)"
-RW_TX="$(mktemp)"
-s7_transcript "$RW_TX" "poker: RECONCILE"
-/usr/bin/grep -v '"name":"TaskList"' "$RW_TX" > "$RW_TX.n" && mv "$RW_TX.n" "$RW_TX"
-expect_eq "RW0 precondition: the turn holds no TaskList call" "0" "$(/usr/bin/grep -c '"TaskList"' "$RW_TX" | tr -d ' ')"
-rw_digest "$RW_D" ""
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW1 control: with no cause the refusal is today's" \
-  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
-rw_digest "$RW_D" step4
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW2 the plan moved into Step 4: the refusal says so" "the plan moved from approval into Step 4" "$(reason_of)"
-expect_contains "RW2b …and names the rebuild" "rebuild the task list in execution order: delete every pending entry and recreate them" "$(reason_of)"
-expect_absent "RW2c …and not the status-changed cause" "when a ## Tasks status or the ready set changed" "$(reason_of)"
-rw_digest "$RW_D" grew
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW3 the table grew: the refusal says so" "the ## Tasks table grew" "$(reason_of)"
-expect_contains "RW3b …and names the rebuild" "delete the pending entries after the new row and recreate them" "$(reason_of)"
-rw_digest "$RW_D" step4 2026-09-18T00:00:00Z
-s7_fire "$RW_D" "$RW_TX"
-expect_contains "RW4 a digest older than the turn's tick gives no cause: the refusal is today's" \
-  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
-
-# THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1). The wall's predicate is a
-# TaskList call or a write naming the plan; the delete-and-recreate it asked for (TaskUpdate,
-# TaskCreate) is never counted, so the fix read `rebuild it` and dropped the one act that
-# discharges it. Now the fix names TaskList first and the detail keeps "or a plan-ledger write",
-# the fallback where the task tools are absent. The first line keeps to 100 columns.
-# fails-when: a plan-moved refusal's fix leaves out TaskList, or its detail the plan-ledger write.
-rw_first() { reason_of | head -1; }
-require_helpers rw_first
-for rw_cause in step4 grew; do
-  rw_digest "$RW_D" "$rw_cause"
-  s7_fire "$RW_D" "$RW_TX"
-  expect_contains "RW5 ($rw_cause) the first line's fix names TaskList first" \
-    "no task-list refresh since this tick (TaskList, rebuild it, then stop again)" "$(rw_first)"
-  expect_contains "RW5b ($rw_cause) …the detail keeps the plan-ledger write" "or a plan-ledger write" "$(reason_of)"
-  expect_true "RW5c ($rw_cause) …and the first line keeps to 100 columns" \
-    test "$(rw_first | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
-done
-
-# ─────────────────────────────────────────────────────────────────────────────
-section "TASK-ENTRY: a turn that dispatched a row sets its task entry in progress (wave-28 T38; REQ-13 AC-13.1, AC-13.3; D30)"
-
-# The task-list duty gains a second trigger: a turn that launched an agent bound to a plan row owes
-# as many task updates setting `in_progress` as rows it dispatched. Fewer refuses once, under the
-# duty wall's existing refusal; a turn that dispatched no row owes nothing, tick or no tick. The
-# wall counts; it cannot tell which entry belongs to which row.
-# THE RECORDS ARE THE HARNESS'S SHAPES, copied off a real session's transcript (2026-10-06): an
-# Agent tool_use with `input:{description,name,prompt,subagent_type}`, a TaskUpdate tool_use with
-# `input:{taskId,status}` on an assistant record carrying `agentId:null`, and its result record
-# `"Updated task #<n> status"` with `toolUseResult.statusChange`. FIXTURE: §9's plan with both rows
-# `active` (the launch recorder's mark), so no fill is owed and the duty is measured alone.
-# fails-when: a turn that dispatched two rows and set one entry in progress ends unrefused, or a
-# turn with no row dispatch is refused.
-te_fixture() {  # [pending] -> project dir; §9's plan, T13 and T14 active unless `pending`
-  local d
-  d="$(s9_fixture)"
-  [ "${1:-}" = pending ] || sed -i.bak 's/| pending | — |$/| active | — |/' \
-    "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
-  printf '%s' "$d"
-}
-te_transcript() {  # <file> <plain|tick> <item>... — A:<name> launch · U:<n>:<status> update · UE:<n> refused update · L TaskList
-  local f="$1" kind="$2" it n s; shift 2
-  if [ "$kind" = tick ]; then
-    jq -nc --arg t "bionic-patrol session=${SID:0:8} — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row." \
-      '{type:"user",isMeta:true,isSidechain:false,userType:"external",uuid:"u-te",timestamp:"2026-10-06T00:00:00Z",message:{role:"user",content:$t}}' > "$f"
-  else
-    jq -nc '{type:"user",isSidechain:false,userType:"external",uuid:"u-te",timestamp:"2026-10-06T00:00:00Z",message:{role:"user",content:"dispatch what is ready"}}' > "$f"
-  fi
-  for it in "$@"; do
-    case "$it" in
-      A:*) n="${it#A:}"
-        jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:01Z",
-          message:{role:"assistant",content:[{type:"tool_use",id:("toolu_" + $n),name:"Agent",
-            input:{description:"task",name:$n,prompt:("Task " + $n),subagent_type:"bionic:implementor"}}]}}' >> "$f"
-        jq -nc --arg n "$n" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:02Z",
-          message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_" + $n),content:[{type:"text",text:"Spawned successfully."}]}]},
-          toolUseResult:{status:"teammate_spawned"}}' >> "$f" ;;
-      U:*|UE:*) n="${it#*:}"; s="${n#*:}"; n="${n%%:*}"; [ "$s" != "$n" ] || s=in_progress
-        jq -nc --arg n "$n" --arg s "$s" '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:03Z",
-          message:{role:"assistant",content:[{type:"tool_use",id:("toolu_up" + $n + $s),name:"TaskUpdate",input:{taskId:$n,status:$s}}]}}' >> "$f"
-        if [ "${it%%:*}" = UE ]; then
-          jq -nc --arg n "$n" --arg s "$s" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:04Z",
-            message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_up" + $n + $s),is_error:true,content:("Task #" + $n + " not found")}]}}' >> "$f"
-        else
-          jq -nc --arg n "$n" --arg s "$s" '{type:"user",isSidechain:false,timestamp:"2026-10-06T00:00:04Z",
-            message:{role:"user",content:[{type:"tool_result",tool_use_id:("toolu_up" + $n + $s),content:("Updated task #" + $n + " status")}]},
-            toolUseResult:{success:true,taskId:$n,updatedFields:["status"],statusChange:{from:"pending",to:$s}}}' >> "$f"
-        fi ;;
-      L) jq -nc '{type:"assistant",isSidechain:false,agentId:null,timestamp:"2026-10-06T00:00:05Z",
-           message:{role:"assistant",content:[{type:"tool_use",id:"toolu_tl",name:"TaskList",input:{}}]}}' >> "$f" ;;
-    esac
-  done
-}
-te_roster() {  # <project> <name>... — the intended rows the dispatch wall writes at launch
-  local d="$1" n; shift
-  for n in "$@"; do
-    roster_row_fixture status=intended session="$SID" name="$n" agent_id="ate${n//[^A-Za-z0-9]/}0000000001" deliverable= \
-      tool_use_id="toolu_$n" >> "$d/.bionic/tmp/roster-$SID.state"
-  done
-}
-te_turn() {  # <project> <plain|tick> <stop_hook_active> <item>... -> fires the Stop
-  local d="$1" kind="$2" sha="$3" tx; shift 3
-  tx="$(mktemp)"; te_transcript "$tx" "$kind" "$@"
-  fire "$d" Stop "$sha" "$(jq -nc --arg t "$tx" '{transcript_path:$t}')"
-}
-te_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
-te_first() { printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' || true; }
-require_helpers te_fixture te_transcript te_roster te_turn te_decision te_first
-TE_TEXT2="tasks: dispatched T13 T14 this turn, 1 of 2 task entries set in progress — set each dispatched row's entry in progress"
-TE_LINE="bionic: stop refused — a dispatched row's entry is not in progress (TaskUpdate each to in_progress)"
-TE_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$TE_RING"
-export BIONIC_PRESSURE_RING="$TE_RING" BIONIC_NOW_EPOCH=1700000000
-
-TE_TX="$(mktemp)"; te_transcript "$TE_TX" plain A:w9-T13 A:w9-T14 U:1:in_progress
-expect_eq "TE0 precondition: the planted turn holds two Agent launches" "2" \
-  "$(jq -r 'select(.type=="assistant") | .message.content[] | select(.name=="Agent") | .id' "$TE_TX" | wc -l | tr -d ' ')"
-expect_eq "TE0b precondition: …and one TaskUpdate setting in_progress, as the harness writes it" "1:in_progress" \
-  "$(jq -r 'select(.type=="assistant") | .message.content[] | select(.name=="TaskUpdate") | "\(.input.taskId):\(.input.status)"' "$TE_TX")"
-
-# AC-13.1: dispatched 2, entered 1 -> refused once, with the interface's text; entered 2 -> ends.
-TE_D="$(te_fixture)"; te_roster "$TE_D" w9-T13 w9-T14
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress
-expect_eq "TE1 dispatched two rows, set one entry in progress: the turn is refused" "block" "$(te_decision)"
-expect_contains "TE1b …with the interface's text, naming the rows and the act" "$TE_TEXT2" "$(reason_of)"
-expect_eq "TE1c …under the duty wall's refusal line, the only one" "$TE_LINE" "$(te_first)"
-expect_eq "TE1d …one refusal, not two" "1" "$(refusal_lines)"
-expect_true "TE1e …and the line keeps to 100 columns" test "$(printf '%s' "$(te_first)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
-te_turn "$TE_D" plain true A:w9-T13 A:w9-T14 U:1:in_progress
-expect_eq "TE2 refused ONCE: the re-entered Stop of the same turn ends" "" "$(te_decision)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:2:in_progress
-expect_eq "TE3 dispatched two, set two in progress: the turn ends" "" "$(te_decision)"
-expect_absent "TE3b …and no refusal names the task entries" "tasks: dispatched" "$(reason_of)$STOP_ERR"
-
-# What counts as an entry: a task number, once; the in_progress status; an update that took.
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:1:in_progress
-expect_contains "TE4 the same task set twice is one entry: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress U:2:completed
-expect_contains "TE5 an update to completed is no entry set in progress: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T14 U:1:in_progress UE:2
-expect_contains "TE6 a TaskUpdate the harness refused set nothing: 1 of 2, refused" "$TE_TEXT2" "$(reason_of)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T13-r2 U:1:in_progress
-expect_eq "TE7 two launches of one row are one row dispatched: one entry answers it" "" "$(te_decision)"
-te_turn "$TE_D" plain false A:w9-T13 A:w9-T13-r2
-expect_contains "TE7b …and with none set it is refused, naming the row once" \
-  "tasks: dispatched T13 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
-
-# AC-13.3: a turn that dispatched no row owes nothing — no launch, or a launch bound to no row.
-te_roster "$TE_D" researcher-a
-te_turn "$TE_D" plain false A:researcher-a
-expect_eq "TE8 a launch whose name binds no plan row owes nothing" "" "$(te_decision)"
-te_turn "$TE_D" plain false A:researcher-a A:w9-T14
-expect_contains "TE8b …beside a bound launch, only the bound row is owed" \
-  "tasks: dispatched T14 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
-te_turn "$TE_D" plain false
-expect_eq "TE9 a turn with no launch owes nothing" "" "$(te_decision)"
-
-# With a tick in the turn: the tick's refresh duty and the entry duty are one wall, one refusal.
-te_turn "$TE_D" tick false L
-expect_eq "TE10 a tick turn that refreshed and dispatched nothing ends" "" "$(te_decision)"
-te_turn "$TE_D" tick false L A:w9-T13 A:w9-T14
-expect_eq "TE11 a tick turn that refreshed and dispatched two rows with no entry set is refused" "block" "$(te_decision)"
-expect_eq "TE11b …under the entry duty's line" "$TE_LINE" "$(te_first)"
-expect_contains "TE11c …0 of 2" "tasks: dispatched T13 T14 this turn, 0 of 2 task entries set in progress" "$(reason_of)"
-te_turn "$TE_D" tick false L A:w9-T13 A:w9-T14 U:7:in_progress U:8:in_progress
-expect_eq "TE12 a tick turn that refreshed and set both entries ends" "" "$(te_decision)"
-te_turn "$TE_D" tick false A:w9-T13 A:w9-T14
-expect_contains "TE13 a tick turn missing both duties is refused once, the refresh's line first" \
-  "no task-list refresh since this tick" "$(te_first)"
-expect_eq "TE13b …one refusal" "1" "$(refusal_lines)"
-expect_contains "TE13c …its detail keeps the refresh paragraph" "Patrol duties incomplete: no task-list refresh" "$(reason_of)"
-expect_contains "TE13d …and adds the entries" "tasks: dispatched T13 T14 this turn, 0 of 2 task entries set in progress" "$(reason_of)"
-te_turn "$TE_D" tick false
-expect_contains "TE14 a tick turn with no refresh and no launch is refused as before" \
-  "no task-list refresh since this tick" "$(te_first)"
-expect_absent "TE14b …and owes no entries" "tasks: dispatched" "$(reason_of)"
-
-# Beside the fill: the FILL keeps its line, the entries ride in its detail.
-TE_DP="$(te_fixture pending)"; te_roster "$TE_DP" w9-T13
-te_turn "$TE_DP" plain false A:w9-T13
-expect_contains "TE15 a half-filled gap keeps the fill's line" "launched 1 of 2" "$(te_first)"
-expect_contains "TE15b …and its detail names the entry owed" \
-  "tasks: dispatched T13 this turn, 0 of 1 task entries set in progress" "$(reason_of)"
-unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+# THE RW AND TASK-ENTRY SECTIONS WENT AT WAVE-31 T32 (D6, REQ-6 AC-6.5). They pinned the task-list
+# refresh a tick turn owed and the task entry a dispatch turn owed; both duties are deleted, and
+# tests/patrol-duties-gate.test.sh drives the turns that no longer owe them.
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "§LAUNCHED: a launch whose row carries row= counts as that row's launch (wave-28 T7; REQ-3 AC-3.4, D17)"

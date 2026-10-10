@@ -111,8 +111,8 @@
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
-# declared, the suite basenames it may run, whether that set was DERIVED from the tree by the
-# configured impact command or DECLARED by the brief, and — for a repository whose tests are
+# declared, the suite basenames it may run, whether that set was DECLARED by the brief (a row
+# 1.14.0 wrote may still say DERIVED, from the map deleted at wave-31), and — for a repository whose tests are
 # not shell suites at all — the author-marked commands the brief declared it will re-run,
 # marks kept, space-joined, capped per brief since T4 (wave-20, REQ-7) — three suite runs for
 # a reader of the evidence question, DP_SUITES_MAX for every other (dp_runs_cap in lib/brief.sh;

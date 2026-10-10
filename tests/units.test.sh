@@ -327,17 +327,13 @@ expect_eq "…and the comparison is over 22 real rows, not two empty strings" "2
   "$(nlines "$ROWS_REORDERED")"
 expect_eq "reversing every column changes not one byte of the TSV" "$ROWS_LIVE" "$ROWS_REORDERED"
 
-# ---------- slot 3 answers to two names: `kind` and `rigor` (A-39) ----------
+# ---------- slot 3 has one name, `kind` (wave-31 T24; REQ-1, D2; A-39 retired) ----------
 #
-# THE ONE ALIAS, and the whole of why it exists. Slot 3 is the row's CLASSIFICATION cell.
-# The wave-scale table spells it `kind`; the task-scale registration ledger the evidence
-# gate has read since D12 — `| id | intent | rigor | description | status |` — spells the
-# same slot `rigor`, and REQ-1e does not widen that table. Without the alias
-# `validate_task_ledger` would have to keep a second `## Tasks` parser alive for one cell,
-# which is the whole of what AC-1e.1 forbids. Ruled A-39, 2026-09-12.
-#
-# NO TABLE CARRIES BOTH SPELLINGS, and the header scan takes the first cell to match, so
-# the alias cannot shadow a real `kind` column.
+# THE ALIAS IS GONE WITH ITS READER. Slot 3 answered to `rigor` too (A-39) so the evidence
+# gate's `validate_task_ledger` could read the retired five-column task ledger's rigor cell
+# through this library. One ledger shape deleted that reader and that table: a task-scale plan
+# carries the one `## Tasks` table, whose slot 3 is `kind`. The retired table below still parses
+# by its header — its id and status read by name — and its `rigor` column now reaches no slot.
 cat > "$SANDBOX/task-scale-ledger.md" <<'TASK_SCALE_EOF'
 ---
 scale: task
@@ -360,13 +356,18 @@ expect_eq "…id from slot 1 and status from slot 10, by header name" \
 T2 active
 T3 pending" \
   "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ print $1, $10 }')"
-expect_eq "…and the rigor cell reaches slot 3, which the wave schema calls kind" \
-  "[single][double][]" \
+expect_eq "…and its rigor column reaches no slot: slot 3 reads empty on every row" \
+  "[][][]" \
   "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ printf "[%s]", $3 }')"
-expect_eq "units_field takes that cell by either name" "double double" \
+expect_eq "units_field takes the row's id and status by name" "T2 active" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
      row="$(units_rows "$2" | sed -n 2p)"
-     printf "%s %s" "$(units_field "$row" rigor)" "$(units_field "$row" kind)"' \
+     printf "%s %s" "$(units_field "$row" id)" "$(units_field "$row" status)"' \
+     _ "$LIB" "$SANDBOX/task-scale-ledger.md")"
+expect_eq "…and refuses rigor, a name the contract no longer carries (rc 1)" "1" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
+     row="$(units_rows "$2" | sed -n 2p)"
+     units_field "$row" rigor >/dev/null; echo $?' \
      _ "$LIB" "$SANDBOX/task-scale-ledger.md")"
 expect_eq "…and refuses a column name the contract does not carry" "1" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_field "x" intent' _ "$LIB" >/dev/null 2>&1; echo $?)"
@@ -1426,95 +1427,6 @@ expect_eq "13.17 …and it reports the same three faults, in the same words" \
   "$VAL_BASE" "$(call units_validate "$SANDBOX/base-column-reversed.md")"
 
 # ============================================================
-section "15 — units_ready at TASK scale: T<n>, no step cell, done deps (wave-18 REQ-3, AC-3.3; ADR-033)"
-# ============================================================
-#
-# THE SECOND TABLE SHAPE THIS LIBRARY ALREADY READS. A task-scale plan carries
-# `| id | intent | rigor | description | status | worktree |` — slot 3 under its second name
-# (§2's `rigor` alias), no `step` cell and no `deps` cell — and until this wave `units_ready`
-# refused it at the door: `case "$step" in *[!0-9]*) return 2` rejected the `T<n>` the plan's
-# `current:` carries, so the tick's FILL and the stop library's fill duty could never fire on
-# the one run shape that reported the friction (ADR-033 decision 2).
-#
-# THE STEP CELL IS THE DISCRIMINATOR, NOT THE ARGUMENT ALONE. A row that carries a step is a
-# WAVE row and is never ready at task scale, whatever the caller passed — which is what keeps
-# the DOUBT-then-FILL shape the approval gate closed (session-poker §22g: a wave table sitting
-# at `current: T1`) from re-opening through this door.
-#
-# AND THE DEPENDENCY WORD IS `done`, not `landed`: `done` is the one terminal word at task
-# scale (ADR-033 decision 1), so a task row whose dep is `landed` is NOT ready — the word is
-# not one that table can produce, and reading it as satisfaction would schedule against a
-# status nobody wrote.
-
-cat > "$SANDBOX/task-scale.md" <<'TASK_SCALE_EOF'
-## Tasks
-
-| id | intent | rigor | description | status | worktree |
-|---|---|---|---|---|---|
-| T1 | bugfix | standard | the first unit | done | — |
-| T2 | bugfix | standard | the second unit | pending | — |
-| T3 | bugfix | double | the third unit | pending | — |
-| T4 | bugfix | standard | a unit already in flight | active | 18-T4 |
-| T5 | bugfix | standard | a dropped unit | dropped | — |
-TASK_SCALE_EOF
-
-expect_eq "15.1 a task-scale current names the pending rows, in TABLE order" \
-  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/task-scale.md" T1)"
-expect_eq "15.2 …and the call succeeds rather than refusing the non-numeric step" \
-  "0" "$(call_rc units_ready "$SANDBOX/task-scale.md" T1)"
-expect_eq "15.3 …a done row is not offered again" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T1)"
-expect_eq "15.4 …an active row is not offered" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T4)"
-expect_eq "15.5 …and a dropped row is not offered" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T5)"
-expect_eq "15.6 the id the run is ON is answered for like any other row — status decides, not identity" \
-  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/task-scale.md" T2)"
-
-# The step argument is still validated: a word that is neither a number nor `T<n>` is a
-# caller fault and keeps the status it has always had.
-expect_eq "15.7 a step that is neither numeric nor T<n> still exits 2" "2" \
-  "$(call_rc units_ready "$SANDBOX/task-scale.md" wednesday)"
-expect_eq "15.8 …and T with no digits is not a task-scale step either" "2" \
-  "$(call_rc units_ready "$SANDBOX/task-scale.md" T)"
-
-# A numeric step against a table whose rows carry no step cell answers nothing — the wave
-# arm's own rule (`the row's step must equal the step asked for`), unchanged.
-expect_eq "15.9 a numeric step against a task-scale table is empty, not everything" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" 4)"
-
-# THE MIRROR, and the one that matters: a WAVE table asked at `T<n>`. Every row carries a
-# step cell, so none of them is a task row, and the answer is empty rather than the whole
-# pending set (§22g's shape).
-expect_eq "15.10 a wave table asked at a task-scale step answers nothing at all" "" \
-  "$(call units_ready "$SANDBOX/ready-a.md" T1)"
-expect_eq "15.11 …and says so with success, not with the step-refusal status" "0" \
-  "$(call_rc units_ready "$SANDBOX/ready-a.md" T1)"
-
-# THE DEPENDENCY WORD AT TASK SCALE. The shipped six-column table has no `deps` column, so
-# every pending row is ready; a table that grows one is read with `done` as satisfaction,
-# because `landed` is a word no task-scale ledger writes (ADR-033 decision 1).
-cat > "$SANDBOX/task-scale-deps.md" <<'TASK_DEPS_EOF'
-## Tasks
-
-| id | intent | rigor | description | deps | status | worktree |
-|---|---|---|---|---|---|---|
-| T1 | bugfix | standard | the finished unit | — | done | — |
-| T2 | bugfix | standard | behind a done unit | T1 | pending | — |
-| T3 | bugfix | standard | behind a pending unit | T4 | pending | — |
-| T4 | bugfix | standard | the unit T3 waits on | — | pending | — |
-| T5 | bugfix | standard | behind a landed unit | T6 | pending | — |
-| T6 | bugfix | standard | a row carrying the wave word | — | landed | — |
-TASK_DEPS_EOF
-
-expect_eq "15.12 a task row whose every dep is done is ready, and T4 with no dep beside it" \
-  "$(printf 'T2\nT4')" "$(call units_ready "$SANDBOX/task-scale-deps.md" T1)"
-expect_eq "15.13 …a task row behind a pending dep is not ready" "" \
-  "$(call units_ready "$SANDBOX/task-scale-deps.md" T1 | grep -x T3)"
-expect_eq "15.14 …and landed does not satisfy a task-scale dep — done is the word" "" \
-  "$(call units_ready "$SANDBOX/task-scale-deps.md" T1 | grep -x T5)"
-
-# ============================================================
 section "16 — units_memoised: one parse answers every verb, for the length of one command (wave-19 REQ-6, D7)"
 #
 # THE FILL DUTY ASKS THE TABLE THREE QUESTIONS — has it a `step` column, has it an `id`
@@ -1560,9 +1472,9 @@ expect_eq "16.6 …by every verb (the table is gone, so no rows)" "after-rows=" 
 MEMO_OTHER="$(bash -c '
   . "$1" >/dev/null 2>&1 || exit 127
   units_memoised "$2" units_rows "$3"
-' _ "$LIB" "$SANDBOX/memo.md" "$SANDBOX/task-scale-deps.md" 2>&1 | cut -f1 | tr '\n' ,)"
+' _ "$LIB" "$SANDBOX/memo.md" "$SANDBOX/memo-cols.md" 2>&1 | cut -f1 | tr '\n' ,)"
 expect_eq "16.7 a verb asked about another plan inside the command reads that plan" \
-  "T1,T2,T3,T4,T5,T6," "$MEMO_OTHER"
+  "T1,T2," "$MEMO_OTHER"
 
 # A plan with no table is memoised as "no table": every verb still answers exit 1 inside.
 printf '## Not tasks\n' > "$SANDBOX/memo-none.md"
@@ -1972,25 +1884,13 @@ expect_eq "17c.15 …at its step the step hold lifts and the ext hold stays; it 
   "T2: held by ext:ci-main" "$(call units_held "$SANDBOX/ext-gate.md" 8)"
 expect_eq "17c.16 …units_ready at its step still omits it" "" "$(call units_ready "$SANDBOX/ext-gate.md" 8)"
 
-# AT TASK SCALE the readiness program reads the same cell, so a token holds a T<n> row too.
-cat > "$SANDBOX/ext-task.md" <<'EXTT_EOF'
-## Tasks
-
-| id | task | deps | status |
-|---|---|---|---|
-| T1 | first | — | done |
-| T2 | waits on CI | T1, ext:ci-1 | pending |
-| T3 | ordinary | T1 | pending |
-EXTT_EOF
-expect_eq "17c.17 task scale: units_ready at T2 omits the ext:-held row" "T3" "$(call units_ready "$SANDBOX/ext-task.md" T2)"
-expect_eq "17c.18 task scale: units_held names it" "T2: held by ext:ci-1" "$(call units_held "$SANDBOX/ext-task.md" T2)"
 
 # ============================================================
 section "17d — wave-21 T5: one ledger reader, units_findings (REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3)"
 # ============================================================
 #
-# THREE FINDINGS AND NO MORE: `status <id> <value>` (a status outside the scale's enum),
-# `evidence <id>` (a row at the scale's terminal word with no `- T<n>:` line under
+# THREE FINDINGS AND NO MORE: `status <id> <value>` (a status outside the enum),
+# `evidence <id>` (a `landed` row with no `- T<n>:` line under
 # `## SDLC State`), `launch <id> <agent>` (an `active` row whose agent cell names no `name=`
 # on the roster). An empty or em-dash agent cell is SELF-OWNED and never a finding. With no
 # roster to read (an empty argument, a missing file, a symlink) no `launch` finding is
@@ -2081,8 +1981,8 @@ LEDGERC_EOF
 expect_eq "17d.9 a clean ledger prints nothing" "" "$(call units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
 expect_eq "17d.10 …and exits 0" "0" "$(call_rc units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
 
-# TASK SCALE: no step column, so the enum is pending · active · done · dropped and the
-# terminal word is `done`. The table carries no agent column, so every row is self-owned.
+# ONE ENUM AT EVERY SCALE (wave-31 T5; D2). A table in the retired six-column task shape is judged
+# by the one enum: its `done` is a status finding, and `landed` owes its line as anywhere.
 cat > "$SANDBOX/ledger-task.md" <<'LEDGERT_EOF'
 ## Tasks
 
@@ -2090,20 +1990,20 @@ cat > "$SANDBOX/ledger-task.md" <<'LEDGERT_EOF'
 |---|---|---|---|---|
 | T1 | build | single | done with its line | done |
 | T2 | build | single | done, no line | done |
-| T3 | build | single | landed is not a task-scale word | landed |
+| T3 | build | single | landed, no line | landed |
 | T4 | build | single | active, self-owned | active |
 
 ## SDLC State
 
 scale: task
-current: T4
+current: 4
 
 - T1: bash suite 5/5 green
 LEDGERT_EOF
-expect_eq "17d.11 task scale: done owes its line, landed is off the enum, an active row owes nothing" \
-  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "")"
+expect_eq "17d.11 D2 one enum: the retired done is a status finding, landed owes its line, an active self-owned row nothing" \
+  "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task.md" "")"
 expect_eq "17d.12 …the same with a roster" \
-  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "$SANDBOX/ledger.roster")"
+  "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task.md" "$SANDBOX/ledger.roster")"
 
 # AN EMPTY STATUS CELL is named, the way the validator names it.
 sed 's/| d.sh | active |/| d.sh |  |/' "$SANDBOX/ledger-clean.md" > "$SANDBOX/ledger-empty-status.md"
@@ -2118,7 +2018,7 @@ expect_eq "17d.15 units_unlined names every T-row short of a line, table order, 
 # CR-ONLY INPUT (the gate's 19j-cr pin): the reader translates line endings itself.
 tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
 expect_eq "17d.16 a CR-only plan reads the same" \
-  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
+  "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
 
 # ============================================================
 section "READS — wave-26 T2: a row declares what it reads; an empty cell takes its kind default (REQ-5, AC-5.1; D1)"
@@ -2137,7 +2037,7 @@ has_line() { if printf '%s\n' "$1" | grep -qxF -- "$2"; then printf yes; else pr
 
 # A FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A settled
 # `proof:floor` read with no open writer is satisfied when lib/proof.sh `proof_state` answers
-# `covered` or `bounded` for the plan's working branch, so a row that means "the floor is proved"
+# `covered` for the plan's working branch (wave-31 T25), so a row that means "the floor is proved"
 # needs a floor proof naming a REAL head the working branch is at: a fake hex is no commit, and
 # the read now waits. FLOOR_REPO is that repository, on `wave/99-fixture` with one commit, and
 # floor_at_head copies a plan into it with its floor proof moved to that head and the branch named.
@@ -3785,49 +3685,52 @@ expect_eq "RUN-EDGES.F5c the build landed and both proofs at the head: integrate
   "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e5-landed.md" 8)"
 
 # ============================================================
-section "§FLOOR-STANDS — integrate waits for a full run when the change past the floor proof cannot be bounded (wave-26 T64; REQ-3 AC-3.3, AC-3.4)"
+section "§FLOOR-STANDS — integrate waits while the floor is not proved: one whole run, and every commit after it proved by the runs recorded at it (wave-26 T64; REQ-3 AC-3.3, AC-3.4; wave-31 T25: REQ-4 AC-4.1, REQ-13 AC-13.4; D3)"
 # ============================================================
 #
 # Through T63 a `proof:floor` read was satisfied by ANY `proved: kind=floor` line, whatever its
 # head: a new file under a directory no suite names landed with no suite run (a tree with no stamp
 # lands, by design), integrate read ready, and the release went out on a change no suite had read.
-# The read now stands only while lib/proof.sh `proof_state` answers `covered` or `bounded`; on
-# `unbounded`, or a state that cannot be computed, the row waits, and `units_waiting` says why and
-# names the way out (a full run on the head, recorded with `proof-add floor`).
+# The read now stands only while lib/proof.sh `proof_state` answers `covered`: the floor proof
+# names the head, or every commit since it is proved by the runs recorded at it (wave-31 T25, D3).
+# On `uncovered`, or a state that cannot be computed, the row waits, and `units_waiting` says what
+# is lacking and names the way out (the lacking suites run, or a whole run recorded with
+# `proof-add floor`).
 #
-# THE FIXTURE IS A REAL REPOSITORY on `wave/99-fs` with five suites and a map stub that answers
-# lib/one.sh with two suites, lib/every.sh with all five and anything else with nothing, and
-# counts its calls (FS_COUNT): the cost rows read the count. Every floor proof line is written by
-# the product: `proof_line` and `proof_add_line` (lib/proof.sh, the pair `proof-add` writes
-# through), with the head the checkout is at; session-poker §54 drives the verb itself on a real
-# full run. The plan reads integrate's kind default (`proof:floor, proof:review, head`).
+# THE FIXTURE IS A REAL REPOSITORY on `wave/99-fs` with five suites. Every floor proof line is
+# written by the product: `proof_line` and `proof_add_line` (lib/proof.sh, the pair `proof-add`
+# writes through), with the head the checkout is at; session-poker §54 drives the verb itself on a
+# real full run. The suite runs are SYNTHESIZED stamps in `booked.sh`'s documented shape
+# (`stamp/v1|head=|dirty=|rc=|at=|suites=|cmd=`), appended to the checkout's git dir where the shim
+# writes them; session-poker §54 and §72 write them with the real shim. A `git` shim on PATH counts
+# the walk's one call (`git log --first-parent --reverse`): the cost rows read the count. The plan
+# reads integrate's kind default (`proof:floor, proof:review, head`).
 FS_REPO="$SANDBOX/fs-repo"
-FS_MAP="$SANDBOX/fs-map.sh"
-FS_COUNT="$SANDBOX/fs-map.count"
+FS_COUNT="$SANDBOX/fs-walk.count"
+FS_SHIM="$SANDBOX/fs-git-shim"
 FS_PLAN="$FS_REPO/.bionic/docs/plans/epic-99/wave-99-fs.plan.md"
+mkdir -p "$FS_SHIM"
 {
   printf '#!/bin/bash\n'
-  printf 'printf "x\\n" >> "%s"\n' "$FS_COUNT"
-  printf '[ -z "${FS_MAP_FAIL:-}" ] || exit 7\n'
-  printf 'for f in "$@"; do\n'
-  printf '  case "$f" in\n'
-  printf '    lib/one.sh)   for s in a b; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '    lib/every.sh) for s in a b c d e; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '  esac\n'
-  printf 'done\n'
-} > "$FS_MAP"
+  printf 'case " $* " in *" --first-parent --reverse "*) printf "x\\n" >> "%s" ;; esac\n' "$FS_COUNT"
+  printf 'exec %s "$@"\n' "$(command -v git)"
+} > "$FS_SHIM/git"
+chmod +x "$FS_SHIM/git"
 fs_git() { git -C "$FS_REPO" -c user.name=fixture -c user.email=fixture@example.invalid "$@"; }
 fs_commit() {  # <path> <content> -> one commit on the checkout's branch
   mkdir -p "$(dirname "$FS_REPO/$1")"; printf '%s\n' "$2" > "$FS_REPO/$1"
   fs_git add "$1" && fs_git commit -qm "change $1"
 }
+fs_stamp() {  # <suite> <rc> <at> -> one stamp at the checkout's head, clean, in the shim's shape and place
+  printf 'stamp/v1|head=%s|dirty=0|rc=%s|at=%s|suites=%s|cmd=bash tests/%s\n' \
+    "$(fs_git rev-parse HEAD)" "$2" "$3" "$1" "$1" >> "$(fs_git rev-parse --absolute-git-dir)/bionic-stamps"
+}
 mkdir -p "$FS_REPO/tests" "$FS_REPO/lib" "$(dirname "$FS_PLAN")"
 fs_git init -q 2>/dev/null; fs_git checkout -q -b wave/99-fs 2>/dev/null
 for s in a b c d e; do printf '#!/bin/bash\n' > "$FS_REPO/tests/$s.test.sh"; done
-printf 'one\n' > "$FS_REPO/lib/one.sh"; printf 'every\n' > "$FS_REPO/lib/every.sh"
+printf 'one\n' > "$FS_REPO/lib/one.sh"
 printf '.bionic/\n' > "$FS_REPO/.gitignore"
 fs_git add .gitignore tests lib && fs_git commit -qm base
-printf 'impact-command: bash %s\n' "$FS_MAP" > "$FS_REPO/.bionic/config.yaml"
 # fs_plan <current> <T3 status> -> the plan, no proof lines yet
 fs_plan() {
   { printf '## SDLC State\n\ncurrent: %s\nworking-branch: wave/99-fs\napproved-by: fixture 2026-10-04T10:00:00Z "approved"\n\n' "$1"
@@ -3850,6 +3753,8 @@ fs_count() { awk 'END { print NR + 0 }' "$FS_COUNT" 2>/dev/null; }
 fs_why() {  # -> integrate's proof:floor wait reason, or nothing
   call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:floor") == 1 { print $2 }'
 }
+FS_LEAD="proof:floor: the floor is one whole run plus each later commit proved; past the proof at"
+FS_OUT="; run suites its row named, proof-add floor; a second run: approve regression-2"
 # THE REVIEW HALF IS HANDED IN COVERED (wave-27 T14; D3). integrate's proof:review is met only by
 # the facts state the tick hands in (UNITS_FACTS_STATE); every row here is about the floor, so the
 # state is the one the tick hands when the readings hold. §INTEGRATE-JUDGE drives the others.
@@ -3860,21 +3765,25 @@ FS_H0="$(fs_git rev-parse HEAD)"
 expect_eq "FS.0 precondition: the product wrote a floor proof at the working head" "$FS_H0" "$(call proof_last "$FS_PLAN" floor)"
 expect_eq "FS.0b precondition: proof_state reads the plan's own tree: covered" "covered" \
   "$(call proof_state "$FS_PLAN" "$FS_REPO" | cut -f1)"
-expect_eq "FS.1 covered: the proof is at the head, integrate is ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.1b …and covered asks no map" "0" "$(fs_count)"
+expect_eq "FS.1 covered: the proof is at the head, integrate is ready" "T3" "$(PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.1b …and a proof at the head walks no commit" "0" "$(fs_count)"
 
-# AC-3.3 STILL HOLDS: a change the map bounds is proved by its suites, and the pass stands.
+# AC-13.4: A COMMIT PAST THE FLOOR IS PROVED BY THE RUNS RECORDED AT IT, and by nothing predicted.
 fs_commit lib/one.sh 'one, changed'
-expect_eq "FS.2 precondition: the change is bounded by two suites" "$(printf 'bounded\ta.test.sh b.test.sh')" \
-  "$(call proof_state "$FS_PLAN" "$FS_REPO")"
-expect_eq "FS.2b AC-3.3 a bounded change past the floor proof leaves integrate ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.2c …and no wait is told for it" "" "$(fs_why)"
+FS_X1="$(fs_git rev-parse HEAD)"
+expect_eq "FS.2 a commit past the floor proof with no run recorded at it: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.2b …and its wait names the commit, what it lacks and the way out" \
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X1:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" "$(fs_why)"
+fs_stamp a.test.sh 0 2026-10-04T12:01:00Z
+expect_eq "FS.2c AC-3.3 AC-13.4 a green run recorded at it: the floor stands, integrate is ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.2d …and no wait is told for it" "" "$(fs_why)"
 
-# AC-3.4, THE CRITERION'S OWN PLANT: a new file under a directory no suite names.
+# AC-3.4, THE CRITERION'S OWN PLANT: a new file under a directory no suite names, no suite run.
 fs_commit newdir/x.sh 'new'
+FS_X2="$(fs_git rev-parse HEAD)"
 expect_eq "FS.3 AC-3.4 a new file under a directory no suite names: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.3b …and its wait says the head moved past the proof, gives proof_state's reason, and names the way out" \
-  "proof:floor: the head moved past the regression proof at ${FS_H0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
+expect_eq "FS.3b …and its wait names that commit, not the proved one before it" \
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X2:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
   "$(fs_why)"
 expect_eq "FS.3c …while the extractor reads a real line: the review proof is no wait (paired positive)" "" \
   "$(call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:review") == 1')"
@@ -3886,39 +3795,43 @@ fs_prove floor
 FS_H1="$(fs_git rev-parse HEAD)"
 expect_eq "FS.4 the way out: a floor proof at the new head and integrate is ready again" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
-# A CHANGE THE MAP ANSWERS WITH EVERY SUITE.
-fs_commit lib/every.sh 'every, changed'
-expect_eq "FS.5 a change the map answers with every suite: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_contains "FS.5b …saying every suite, from the newest floor proof" \
-  "at ${FS_H1:0:12} in a way the map cannot bound (the map answers the change with every suite (5 of 5))" "$(fs_why)"
-fs_prove floor
-expect_eq "FS.5c …and a floor proof at its head releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
+# A RED RUN RECORDED AT A COMMIT: the newest run at it decides.
+fs_commit lib/one.sh 'one, changed again'
+FS_X3="$(fs_git rev-parse HEAD)"
+fs_stamp b.test.sh 1 2026-10-04T12:02:00Z
+expect_eq "FS.5 a commit whose only recorded run is red: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
+expect_contains "FS.5b …saying which suite is red where, from the newest floor proof" \
+  "${FS_LEAD} ${FS_H1:0:12}, commit ${FS_X3:0:12} (no landing row) is not proved: b.test.sh is red at ${FS_X3:0:12}" "$(fs_why)"
+fs_stamp b.test.sh 0 2026-10-04T12:03:00Z
+expect_eq "FS.5c …and a newer green run of it releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
-# A MERGE OF WORK FROM OUTSIDE THE RUN: the file is one the map bounds (FS.2), so only the outside
-# rule can hold it.
+# A MERGE OF WORK FROM OUTSIDE THE RUN: a first-parent commit no landing names, nothing run at it.
 FS_H2="$(fs_git rev-parse HEAD)"
 fs_git checkout -q -b other-work 2>/dev/null; fs_commit lib/one.sh 'one, from outside'
 fs_git checkout -q wave/99-fs 2>/dev/null; fs_git merge -q --no-ff -m 'merge other-work' other-work 2>/dev/null
+FS_M="$(fs_git rev-parse HEAD)"
 expect_eq "FS.6 a merge from outside the run: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_contains "FS.6b …saying another branch carries the commits" "are on another branch than wave/99-fs" "$(fs_why)"
+expect_contains "FS.6b …naming the merge, at which no run is recorded" \
+  "commit ${FS_M:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(fs_why)"
 fs_prove floor
 expect_eq "FS.6c …and a floor proof at the merge releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 # THE COST. One proof_state per answer that turns on it, once per memoised command, and none when
-# no answer does. The map is the one process the state runs that a test can count.
+# no answer does. The walk's one git call is what the shim counts.
 FS_H3="$(fs_git rev-parse HEAD)"
 fs_commit lib/one.sh 'one, once more'
 : > "$FS_COUNT"
-call units_ready "$FS_PLAN" 8 >/dev/null
+PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8 >/dev/null
 FS_ONE="$(fs_count)"
-expect_eq "FS.7 precondition: one bounded answer asks the map once" "1" "$FS_ONE"
+expect_eq "FS.7 precondition: one answer that turns on the floor walks the commits once" "1" "$FS_ONE"
 printf '. "%s" >/dev/null 2>&1\nfs3() { units_ready "$1" 8; units_waiting "$1" 8; units_held "$1" 8; }\nunits_memoised "$1" fs3 "$1" >/dev/null\n' \
   "$LIB" > "$SANDBOX/fs-three.sh"
-: > "$FS_COUNT"; bash "$SANDBOX/fs-three.sh" "$FS_PLAN"
-expect_eq "FS.7b three questions inside one memoised command ask the map once between them" "$FS_ONE" "$(fs_count)"
+: > "$FS_COUNT"; PATH="$FS_SHIM:$PATH" bash "$SANDBOX/fs-three.sh" "$FS_PLAN"
+expect_eq "FS.7b three questions inside one memoised command walk once between them" "$FS_ONE" "$(fs_count)"
 : > "$FS_COUNT"
-call units_ready "$FS_PLAN" 8 >/dev/null; call units_waiting "$FS_PLAN" 8 >/dev/null; call units_held "$FS_PLAN" 8 >/dev/null
-expect_eq "FS.7c …the differential: the same three asked bare ask it three times" "$((FS_ONE * 3))" "$(fs_count)"
+PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8 >/dev/null; PATH="$FS_SHIM:$PATH" call units_waiting "$FS_PLAN" 8 >/dev/null
+PATH="$FS_SHIM:$PATH" call units_held "$FS_PLAN" 8 >/dev/null
+expect_eq "FS.7c …the differential: the same three asked bare walk three times" "$((FS_ONE * 3))" "$(fs_count)"
 mkdir -p "$SANDBOX/fs-tmp"
 printf '. "%s" >/dev/null 2>&1\nfsin() { units_ready "$1" 8 >/dev/null; ls "$TMPDIR"; }\nunits_memoised "$1" fsin "$1"\n' \
   "$LIB" > "$SANDBOX/fs-inside.sh"
@@ -3928,51 +3841,50 @@ expect_eq "FS.7e …which the command removes when it returns" "" "$(ls "$SANDBO
 fs_plan 7 pending; fs_prove floor; fs_prove review
 fs_commit newdir/y.sh 'held'
 : > "$FS_COUNT"
-FS_W7="$(call units_waiting "$FS_PLAN" 7)"
+FS_W7="$(PATH="$FS_SHIM:$PATH" call units_waiting "$FS_PLAN" 7)"
 expect_eq "FS.8 integrate held for its step (current: 7): the wait is the step" "yes" "$(has_line "$FS_W7" "T3${TAB}step:8${TAB}-${TAB}-")"
 expect_eq "FS.8b …the state is not asked for a row held for its step" "0" "$(fs_count)"
 fs_plan 8 landed; fs_prove floor; fs_prove review
 fs_commit newdir/z.sh 'after the merge'
 : > "$FS_COUNT"
-expect_eq "FS.9 integrate landed: nothing is ready" "" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.9 integrate landed: nothing is ready" "" "$(PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.9b …and with no open row reading proof:floor the state is not asked" "0" "$(fs_count)"
 fs_plan 8 pending; fs_prove floor; fs_prove review
+FS_H4="$(fs_git rev-parse HEAD)"
 fs_commit newdir/w.sh 'pending again'
+FS_X4="$(fs_git rev-parse HEAD)"
 : > "$FS_COUNT"
-call units_edges "$FS_PLAN" >/dev/null
+PATH="$FS_SHIM:$PATH" call units_edges "$FS_PLAN" >/dev/null
 expect_eq "FS.9c the edges never turn on the state, and do not ask it" "0" "$(fs_count)"
-call proof_state "$FS_PLAN" "$FS_REPO" >/dev/null
+PATH="$FS_SHIM:$PATH" call proof_state "$FS_PLAN" "$FS_REPO" >/dev/null
 FS_PS="$(fs_count)"
-expect_true "FS.9d precondition: one proof_state over this change calls the map (the counter reads real calls)" \
+expect_true "FS.9d precondition: one proof_state over this change walks the commits (the counter reads real calls)" \
   test "$FS_PS" -gt 0
 : > "$FS_COUNT"
-call units_ready "$FS_PLAN" 8 >/dev/null
-expect_eq "FS.9e …and the ready set over the same plan asks the state once: as many map calls as one proof_state" \
+PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8 >/dev/null
+expect_eq "FS.9e …and the ready set over the same plan asks the state once: as many walks as one proof_state" \
   "$FS_PS" "$(fs_count)"
 
-# THE FAIL DIRECTION: a state that cannot be computed is not satisfied, and says why.
-FS_MAP_FAIL=1 call units_ready "$FS_PLAN" 8 >/dev/null
-FS_FAIL_WHY="$(FS_MAP_FAIL=1 fs_why)"
-expect_contains "FS.10 a map that fails: integrate waits, giving the failure" "(the map failed (exit 7))" "$FS_FAIL_WHY"
-expect_eq "FS.10b …and is not ready" "" "$(FS_MAP_FAIL=1 call units_ready "$FS_PLAN" 8)"
-mv "$FS_REPO/.bionic/config.yaml" "$FS_REPO/.bionic/config.off"
-expect_contains "FS.11 no impact-command configured: every change past the proof is unbounded" \
-  "(no impact-command is configured to map the change to suites)" "$(fs_why)"
+# THE STATE'S WORDS: covered or uncovered, and the reason names what is lacking (A-orch-23).
+expect_eq "FS.10 proof_state's first field over an unproved commit is uncovered" "uncovered" \
+  "$(call proof_state "$FS_PLAN" "$FS_REPO" | cut -f1)"
+expect_eq "FS.11 …and integrate's wait carries the reason: the commit, and that no run is recorded at it" \
+  "${FS_LEAD} ${FS_H4:0:12}, commit ${FS_X4:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
+  "$(fs_why)"
 fs_prove floor
-expect_eq "FS.11b …and a floor proof at the head needs no map: covered, ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
-mv "$FS_REPO/.bionic/config.off" "$FS_REPO/.bionic/config.yaml"
+expect_eq "FS.11b …and a floor proof at the head walks nothing: covered, ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 # PLAN SHAPES THAT WERE READY BEFORE: each now says what to do.
 sed 's/^working-branch: wave\/99-fs$//' "$FS_PLAN" > "$FS_REPO/.bionic/nobranch.md"
-expect_contains "FS.12 a plan naming no working branch: the wait says so" "(the plan names no working-branch)" \
+expect_contains "FS.12 a plan naming no working branch: the wait says so" ", the plan names no working-branch;" \
   "$(call units_waiting "$FS_REPO/.bionic/nobranch.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
 awk '/^proved: kind=floor / { sub(/head=[0-9a-f]+/, "head=0123456789abcdef0123456789abcdef01234567") } { print }' \
   "$FS_PLAN" > "$FS_REPO/.bionic/foreign.md"
-expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" "(the proved head is not a commit here)" \
+expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" ", the proved head is not a commit here;" \
   "$(call units_waiting "$FS_REPO/.bionic/foreign.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
 fs_git checkout -q --detach 2>/dev/null
 expect_contains "FS.14 a detached checkout: no checkout holds the working branch, and the wait says so" \
-  "(no checkout holds the working branch wave/99-fs)" "$(fs_why)"
+  ", no checkout holds the working branch wave/99-fs;" "$(fs_why)"
 fs_git checkout -q wave/99-fs 2>/dev/null
 expect_eq "FS.14b …and back on the branch, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
@@ -4364,5 +4276,85 @@ expect_eq "BR-1b …exit 0" "0" "$(call_rc units_born "$SANDBOX/born.md")"
 sed '/born: review S/s/ born: review S[0-9] o[nf]*//' "$SANDBOX/born.md" > "$SANDBOX/born-none.md"
 expect_eq "BR-2 the same plan with the markers taken off has no review-born row (BR-1 read two from it), exit 0" "|0" \
   "$(call units_born "$SANDBOX/born-none.md")|$(call_rc units_born "$SANDBOX/born-none.md")"
+
+# ============================================================
+section "§ONE-SHAPE — wave-31 T5: a plan in the retired task-scale shape is refused aloud; the one table validates at task scale (REQ-1 AC-1.2, AC-1.3; D2)"
+# ============================================================
+#
+# ONE LEDGER SHAPE AT EVERY SCALE (D2). A task-scale run carries the one `## Tasks` table and a
+# numeric `current:`; the scales differ in their artifacts, never in the ledger. The retired shape's
+# `current: T<n>` used to make launch-sync exit 0 having written nothing, so a task-scale run went
+# unrecorded in silence. It is refused now, on stderr, exit 1: the turn-end wall passes 0 and 75
+# only, so a plan in the old shape is told. The plan is written by tests/lib/plan-fixture.sh, the one
+# helper every suite builds a plan through; the launch-sync world is §49's of session-poker-2, small.
+. "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
+OS_SID="5e7a9c10-31a5-4b2e-9d0f-0a1b2c3d4e5f"
+OS_POKER="$REPO_ROOT/hooks/session-poker.sh"
+os_world() {  # <label> <current> [intended|none] -> the repo; a bound task-scale plan, w-T1 on the roster
+  local r="$SANDBOX/$1" p tree st="${3:-confirmed}"
+  mkdir -p "$r/.bionic/tmp"
+  ( cd "$r" && git init -q . && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+  : > "$r/.bionic/tmp/engaged-$OS_SID.state"
+  p="$(plan_fixture --current "$2" "$r/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" task \
+    "| T1 | 4 | build | the unit in flight | implementor | — | — | 30 | REQ-1 | a.sh | — | — | pending |" \
+    "| T2 | 4 | build | the next unit | implementor | — | a.sh | 30 | REQ-1 | b.sh | — | — | pending |")"
+  bound_marker "$r" "$OS_SID" "$p"
+  ( cd "$r" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
+  [ "$st" = none ] || { roster_header
+    roster_row_fixture status="$st" session="$OS_SID" name=w-T1 agent_id=a-w-T1 \
+      launched_at=2026-10-04T03:30:00Z deliverable=t1.md 'duration=45 minutes' subagent_type=bionic:implementor
+  } > "$r/.bionic/tmp/roster-$OS_SID.state"
+  tree="$(cd "$r" && pwd -P)/.worktrees/01-T1"
+  git -C "$r" worktree add -q -b wt/01-T1 "$tree" >/dev/null 2>&1
+  printf 'workspace/v1|session=%s|name=w-T1|path=%s|branch=wt/01-T1|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+    "$OS_SID" "$tree" "$p" >> "$r/.bionic/tmp/workspaces-$OS_SID.state"
+  printf '%s' "$r"
+}
+os_sync() {  # <repo> -> OS_OUT (stdout), OS_ERR (stderr), OS_RC
+  OS_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$OS_SID" bash "$OS_POKER" launch-sync 2>"$SANDBOX/os.err" )"
+  OS_RC=$?
+  OS_ERR="$(cat "$SANDBOX/os.err")"
+}
+OS_PLAN_REL=".bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+# THE CONTROL: the same world at a numeric current records the launch, so the world is one the verb
+# acts on, and the refusal below is about the field and nothing else.
+OS_R4="$(os_world one-shape-4 4)"
+os_sync "$OS_R4"
+expect_eq "OS-1 control: at current: 4 launch-sync records the launch (exit 0)" "0" "$OS_RC"
+expect_contains "OS-1b …and says so" "poker: LAUNCHED T1 w-T1" "$OS_OUT"
+expect_contains "OS-1c …and the row is active in its tree" "| a.sh | .worktrees/01-T1 | 01234567 | active |" \
+  "$(/usr/bin/grep '^| T1 |' "$OS_R4/$OS_PLAN_REL")"
+OS_RT="$(os_world one-shape-t1 T1)"
+cp "$OS_RT/$OS_PLAN_REL" "$SANDBOX/os-before.md"
+os_sync "$OS_RT"
+expect_eq "OS-2 AC-1.2 a plan at current: T1 is refused by launch-sync (exit 1)" "1" "$OS_RC"
+expect_eq "OS-2b …with exactly the refusal line, on stderr" \
+  "NOT-RECORDED — current: T1 is not numeric; a plan in the retired task-scale shape is refused, not skipped" "$OS_ERR"
+expect_true "OS-2c …and the plan is byte-identical (cmp)" cmp -s "$SANDBOX/os-before.md" "$OS_RT/$OS_PLAN_REL"
+# BEFORE THE FIRST LAUNCH (wave-31 T43; critic-evidence #2, AC-1.2): the field is read before the
+# roster, so a session that has confirmed no launch, or has no roster yet, is told too. The control:
+# the same no-launch roster at current: 4 has nothing to apply and stays silent.
+OS_RN="$(os_world one-shape-4-nolaunch 4 intended)"
+os_sync "$OS_RN"
+expect_eq "OS-4 control: at current: 4 with no confirmed launch, launch-sync exits 0" "0" "$OS_RC"
+expect_eq "OS-4b …and says nothing" "" "$OS_OUT$OS_ERR"
+OS_RI="$(os_world one-shape-t1-intended T1 intended)"
+os_sync "$OS_RI"
+expect_eq "OS-4c AC-1.2 current: T1 with no confirmed launch on the roster is refused (exit 1)" "1" "$OS_RC"
+expect_eq "OS-4d …with the refusal line" \
+  "NOT-RECORDED — current: T1 is not numeric; a plan in the retired task-scale shape is refused, not skipped" "$OS_ERR"
+OS_R0="$(os_world one-shape-t1-noroster T1 none)"
+os_sync "$OS_R0"
+expect_eq "OS-4e AC-1.2 current: T1 with no roster file at all is refused (exit 1)" "1" "$OS_RC"
+expect_eq "OS-4f …with the refusal line" \
+  "NOT-RECORDED — current: T1 is not numeric; a plan in the retired task-scale shape is refused, not skipped" "$OS_ERR"
+# THE ONE TABLE VALIDATES AT TASK SCALE: clean, beside the same table with one row broken, which names it.
+expect_eq "OS-3 AC-1.3 units_validate on the one table under scale: task is clean" "" \
+  "$(call units_validate "$OS_R4/$OS_PLAN_REL")"
+expect_eq "OS-3b …exit 0" "0" "$(call_rc units_validate "$OS_R4/$OS_PLAN_REL")"
+sed 's/| b.sh | — | — | pending |/| b.sh | — | — | done |/' "$OS_R4/$OS_PLAN_REL" > "$SANDBOX/os-done.md"
+expect_eq "OS-3c …and the retired word done is named on the same table (the reader reads it)" \
+  "T2: status done is not one of pending active landed dropped" "$(call units_validate "$SANDBOX/os-done.md")"
 
 finish

@@ -32,6 +32,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
@@ -1374,7 +1375,7 @@ expect_contains "…the human-readable tail names the same adopter path" \
   "observe     : $C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl" \
   "$OUT"
 
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 section "Section 9: disarm — the deliberate stop, made readable"
@@ -2186,7 +2187,7 @@ expect_contains "12a-T22-i8 no transcript at all is absent too, naming the rows"
 # THE CONFIG DIR IS HANDED BACK. Every case after this one is an ordinary fill case with no
 # live answer of its own, and leaving the pointer here would let THIS section's transcript
 # decide their `open=` — the trim would read every open row as gone and every gap as wide.
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ---------- 12b: the gap closes as rows open ----------
 #
@@ -2625,7 +2626,7 @@ expect_contains "12l7k V3-2: an AMBIGUOUS row absent from a fresh panel prints G
   "poker: GONE? BASE — AMBIGUOUS and absent from a fresh panel; stopped will refuse it: two or more contracts share this name; stopped always refuses AMBIGUOUS" \
   "$OUT"
 expect_absent "12l7l …and never the bare GONE" "poker: GONE BASE" "$OUT"
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
@@ -3892,7 +3893,7 @@ S21B_C1=$(printf '%s' "$OUT" | LC_ALL=C grep -c -- "$S21B_CSI") || S21B_C1=0
 expect_eq "…and the CSI byte pair does not survive it" "0" "$S21B_C1"
 expect_contains "…while the printable text beside the stripped byte survives" "2J done." "$OUT"
 
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 section "Section 22: FILL waits on Step-3 approval (epic-21 T4, AC-5)"
@@ -5106,7 +5107,7 @@ expect_absent "29a4 the same row, same tick, draws no STANDDOWN after extend" \
   "poker: STANDDOWN t1" "$OUT"
 expect_contains "29a5 …and it counts open, not closed" "open=1" "$OUT"
 
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ---------- 29b: extend on a name with no roster row REFUSES, naming it ----------
 R29B="$(make_repo s29-extend-no-row)"; new_roster "$R29B"
@@ -5169,7 +5170,7 @@ poke "$R29E" tick
 expect_absent "29e2 …and the row adopt wrote does not read MET again" \
   "poker: STANDDOWN t1" "$OUT"
 expect_contains "29e3 …and it counts open after adopt" "open=1" "$OUT"
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 # ---------- 29f: THE APPENDED ROW'S `re_executes=` IS BYTE-IDENTICAL TO THE ROW IT COPIED --
@@ -5366,8 +5367,24 @@ poke "$R30W" amend w1 --suites+ tests/d.test.sh --reason 'now it runs one'
 expect_eq "30g amend onto a waived budget exits 0" "0" "$RC"
 expect_eq "30g2 …none is replaced by the added set" "d.test.sh" "$(s30_field "$(s30_last "$R30W")" suites_allowed)"
 poke "$R30W" amend w1 --files+ hooks/q.sh --reason 'files only'
-expect_eq "30g3 a files-only amend of a declared budget needs no impact command (exit 0)" "0" "$RC"
+expect_eq "30g3 a files-only amend of a declared budget is admitted (exit 0)" "0" "$RC"
 expect_eq "30g4 …and keeps the declared set" "d.test.sh" "$(s30_field "$(s30_last "$R30W")" suites_allowed)"
+
+# ---------- 30i: A DERIVED ROW'S SET STANDS AS NAMED (wave-31 T23, REQ-4 AC-4.2; D3) ----------
+# A row 1.14.0's map derived still carries `suites_source=derived`. Nothing re-derives it now: its
+# old set is carried as if the brief had named it, an added suite joins it, an added file adds no
+# suite, and the row keeps the label it had.
+R30D="$(make_repo s30-derived)"; new_roster "$R30D"
+s30_row "$R30D" files=hooks/a.sh,hooks/b.sh suites_source=derived
+poke "$R30D" amend w1 --suites+ tests/c.test.sh --reason 'one more suite'
+expect_eq "30i a derived row takes a suite (exit 0)" "0" "$RC"
+expect_eq "30i2 …its old set stands beside the added one" "a.test.sh c.test.sh" \
+  "$(s30_field "$(s30_last "$R30D")" suites_allowed)"
+expect_eq "30i3 …and the row keeps its label" "derived" "$(s30_field "$(s30_last "$R30D")" suites_source)"
+poke "$R30D" amend w1 --files+ lib/q.sh --reason 'one more file'
+expect_eq "30i4 a files-only amend of a derived row is admitted (exit 0)" "0" "$RC"
+expect_eq "30i5 …and adds no suite" "a.test.sh c.test.sh" "$(s30_field "$(s30_last "$R30D")" suites_allowed)"
+expect_eq "30i6 …the file is on the row" "hooks/a.sh,hooks/b.sh,lib/q.sh" "$(s30_field "$(s30_last "$R30D")" files)"
 
 # ---------- 30h: the arg shape ----------
 poke "$R30" amend
@@ -5561,33 +5578,37 @@ unset CLAUDE_CONFIG_DIR
 section "Section 31: the ledger is live at task scale — the tick fills, and the wall agrees (wave-18 REQ-3, AC-3.1/AC-3.3; ADR-033 d2)"
 # ============================================================
 #
-# THE RUN SHAPE THAT REPORTED THE FRICTION. A task-scale plan carries six columns and a
-# `current: T<n>`, and until this wave both readers of readiness were blind to it: the tick
-# withheld on an unreadable `current:` (§22g) and `units_ready` refused a non-numeric step at
-# the door. Filling was therefore possible only at wave scale, in the one run shape that
-# never asked for it.
+# THE RUN SHAPE THAT REPORTED THE FRICTION. A task-scale plan used to carry six columns and a
+# `current: T<n>`, and both readers of readiness were blind to it. ONE LEDGER SHAPE (wave-31 T5,
+# T24; REQ-1, D2): a task-scale plan carries the one `## Tasks` table and a numeric `current:`,
+# so it is tests/lib/plan-fixture.sh's plan at `scale: task`, T1 in flight and T2/T3 pending, and
+# the tick fills it as it fills a wave plan.
 #
-# WHAT §22g KEEPS, and why this section is not its inverse: §22g's plan is a WAVE table
-# sitting at `current: T1`, a shape whose step cells contradict its `current:` — that stays
-# unreadable and still fills nothing. What goes live here is the plan whose TABLE is
-# task-scale too.
+# WHAT §22g KEEPS: its plan sits at `current: T1`, a value no reader takes as a step, so it
+# still fills nothing. This section is the same ledger at a numeric `current:`.
 #
 # AND THE AGREEMENT IS DRIVEN ON ONE FIXTURE, both sides. `payload/scripts/lib/fill.sh` is
 # the single computation now; the tick prints its ids and the Stop hook's fill duty names the
 # same ones back when the turn ends without dispatching them. A row that drove only the tick
 # would leave the invariant's whole point — that the two cannot disagree — unpinned.
 
-# HOISTED to tests/session-poker.prelude.sh: s31_task_plan — Sections 65 and 67 write task-scale plans with it.
+s31_plan() {  # <repo> -> the path; scale: task, the one table, T1 active in its tree
+  plan_fixture "$1/.bionic/docs/plans/epic-01-task-scale/task-01-fixture.plan.md" task \
+    "| T1 | 4 | build | the unit in flight | — | — | — | 30 | REQ-1 | a.sh | 18-T1 | — | active |" \
+    "| T2 | 4 | build | the next unit | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+    "| T3 | 4 | build | the unit after that | implementor | — | — | 30 | REQ-1 | c.sh | — | — | pending |"
+}
 
 # ---------- 31a: the tick fills a task-scale ledger, in table order ----------
 R31A="$(make_repo s29-task-fill)"; new_roster "$R31A"
-P31A="$(s31_task_plan "$R31A" T1)"
+P31A="$(s31_plan "$R31A")"
+expect_eq "31a0 the fixture is a task-scale plan at current: 4" "2" "$(/usr/bin/grep -cE '^scale: task$|^current: 4$' "$P31A")"
 add_row "$R31A" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R31A" 8192 1.0 tick
 expect_eq "31a a task-scale plan ticks cleanly (exit 0)" "0" "$RC"
 expect_contains "31a2 …and fills the two pending rows, in table order" \
   "poker: FILL T2 T3" "$OUT"
-expect_absent "31a3 …never the unreadable wording — T<n> is this repo's other current: shape" \
+expect_absent "31a3 …never the unreadable wording — a task-scale current: is a step number" \
   "plan current: unreadable" "$OUT"
 expect_absent "31a4 …and the row in flight is not offered again" "FILL T1" "$OUT"
 
@@ -5619,7 +5640,7 @@ expect_contains "31b4 …and saying what answers it: the decline verb (wave-27 T
 # ledgers `active` — never by finding the id in an Agent call's words. So the dispatched turn
 # carries both: T2 and T3 on the roster, and `active` in the table.
 R31C="$(make_repo s29-task-dispatched)"; new_roster "$R31C"
-P31C="$(s31_task_plan "$R31C" T1)"
+P31C="$(s31_plan "$R31C")"
 sed -i.bak -e 's/^\(| T2 |.*\)| pending |/\1| active |/' -e 's/^\(| T3 |.*\)| pending |/\1| active |/' "$P31C"
 add_row "$R31C" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 add_row "$R31C" name=T2 deliverable=t2.md duration="4 hours" launched_at="$(iso_ago 30)"
@@ -6006,12 +6027,12 @@ expect_eq "34a the fixture plan is admitted by the real commit gate before any a
 poke "$R34A" task-add T6 4 build 'the fixup found mid-run' bionic:implementor '—' 30 REQ-5 'lib/c.sh'
 expect_eq "34b task-add of a Step-4 row exits 0" "0" "$RC"
 expect_contains "34b2 …and says what it did" "task-add — T6 added" "$OUT"
-# THE GRAMMAR SPOKE AND ADMITTED (wave-20 T9, Δ10): the Files operand is a path the dispatch
-# wall's lift reads. This fixture repo configures no impact command, which a dispatch carrying
-# only this Files: line would be refused for — a fact about the repository, answered at
-# dispatch by a Suites: line the plan row has no column for, so here it is a note.
+# THE GRAMMAR SPOKE AND ADMITTED (wave-20 T9, Δ10; wave-31 T23): the Files operand is a path the
+# dispatch wall's lift reads. A Files: line alone names no suite, which a dispatch carrying only
+# it would be refused for — answered at dispatch by a Suites: or Re-executes: line the plan row
+# has no column for, so here it is a note and the row goes in.
 expect_contains "34b2g …and the repository-level grammar fact is a note, not a refusal" \
-  "poker: note: no impact command is configured here" "$OUT"
+  "poker: note: Files: alone names no suite — a dispatch of T6 will need a Suites: or Re-executes: line" "$OUT"
 expect_contains "34b3 …the row is in the plan, pending" \
   "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P34A")"
 expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"

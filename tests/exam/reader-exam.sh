@@ -87,12 +87,12 @@
 # green one from the same function on a fixture one edit away; the digest function is proved
 # to return a 64-hex digest on every shipped checks file before any comparison reads it.
 #
-# Usage: bash tests/reader-exam.test.sh
+# Usage: bash tests/exam/reader-exam.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/../lib/resolve-roots.sh"
+. "$(dirname "$0")/../lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 EXAM="${REPO}/tests/reader-exam"
@@ -901,12 +901,16 @@ for s in $(exam_samples "$REPO"); do
   frec "$R/$s-sd4.md" "$q" "$res" S2 on docs/elsewhere.md "$tok" "$ident"
   expect_eq "SD4 $s: a fix-grade finding on another file fails, naming the file asked for" \
     "missed: no finding names $(sed -n 's/^finding-file: //p' "$key" | sed 's/ | / or /g')" "$(exam_score "$key" "$R/$s-sd4.md")"
-  # a fix-grade finding with no command and no unsure: line is one the verb would refuse
+  # a fix-grade finding with no shown: command is one the verb would refuse; an unsure: line is prose, read by
+  # nothing (wave-31 T32), so it does not stand in for the command; the command declares it
   grep -v '^shown:' "$R/$s-sd1.md" > "$R/$s-sd5.md"
-  expect_contains "SD5 $s: a fix-grade finding with no shown: or unsure: line fails as one the verb refuses" \
+  expect_contains "SD5 $s: a fix-grade finding with no shown: line fails as one the verb refuses" \
     "missed: finding lines refused: " "$(exam_score "$key" "$R/$s-sd5.md")"
   { cat "$R/$s-sd5.md"; printf 'unsure: 1 whether a user meets it\n'; } > "$R/$s-sd5b.md"
-  expect_eq "SD5 $s: …and the same finding with an unsure: line is declared" "met: declared" "$(exam_score "$key" "$R/$s-sd5b.md")"
+  expect_contains "SD5b $s: …and an unsure: line does not stand in for it: the finding is still refused" \
+    "missed: finding lines refused: " "$(exam_score "$key" "$R/$s-sd5b.md")"
+  { cat "$R/$s-sd5.md"; printf 'shown: 1 grep -n x %s\n' "$ff"; } > "$R/$s-sd5c.md"
+  expect_eq "SD5c $s: …and the same finding with a shown: line is declared" "met: declared" "$(exam_score "$key" "$R/$s-sd5c.md")"
   # a pass the record's own result contradicts is still read on result: a declaration beside result: pass is missed
   # shellcheck disable=SC2086
   frec "$R/$s-sd6.md" "$q" pass S2 on "$ff" "$tok" "$ident"
@@ -1879,14 +1883,14 @@ GR_STEP6="$REPO/skills/canonical-sdlc/steps/6.md"
 # or `debt: `, and no `<` (a form line holds placeholders; an example holds none).
 gr_examples() { /usr/bin/grep -E '^(finding|debt): ' "$1" 2>/dev/null | /usr/bin/grep -vF '<'; }
 # gr_parse <line> -> GR_RC and GR_OUT: proof_findings' answer on a pass holding just that line. A finding
-# is renumbered 1 and given an `unsure:` line, so that a finding the table sends to fix is not refused for
+# is renumbered 1 and given a `shown:` line, so that a finding the table sends to fix is not refused for
 # the line the example leaves out; a debt line stands beside `findings: 0`.
 gr_parse() {
   local line="$1" rec="$TMP/gr-rec"
   case "$line" in
     finding:*)
       line="$(printf '%s\n' "$line" | sed 's/^finding: [0-9]* /finding: 1 /')"
-      printf 'reviewed: a..b\nfindings: 1\n%s\nunsure: 1 not known\n' "$line" > "$rec" ;;
+      printf 'reviewed: a..b\nfindings: 1\n%s\nshown: 1 true\n' "$line" > "$rec" ;;
     *) printf 'reviewed: a..b\nfindings: 0\n%s\n' "$line" > "$rec" ;;
   esac
   GR_OUT="$(proof_findings "$rec" 2>&1)"; GR_RC=$?

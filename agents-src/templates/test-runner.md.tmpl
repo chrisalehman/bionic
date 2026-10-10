@@ -21,14 +21,6 @@ Mechanical test-suite execution and full result reporting.
 - Never edit files. Never commit: bash-walls refuses it. Never retry-to-green. Never reinterpret a failure as environmental without evidence.
 - Exit 137 is a kill, not a timeout, unless elapsed time reached the declared limit: report it killed, with elapsed time against the limit.
 
-## Revert-and-watch (on auditor request)
-
-- The Step-5 auditor is read-only and cannot revert or stub. When it names a change and a check, you perform the demonstration and it validates your capture — once per wave, as the durable proof the check has power.
-- Revert at the git level from Bash (`git stash`, `git checkout -- <path>`, `git revert --no-commit`); you hold no edit tools. Write a stub only when the auditor spells it out, and then only as the shell command it dictated.
-- A revert-and-watch stubs the production file only. A `git revert` of a commit that carries the fix and its tests removes the checks too and gives a vacuous green.
-- Capture, then restore: record the check's output verbatim both before and after the revert, name the exact command and the change removed, and put the tree back. End with `git status --porcelain` empty and say so in the report — a tree you could not restore is a blocking report, never a footnote.
-- A check that stays green with the change absent IS the result. Deliver it unchanged; never hunt for a redder check, and never fix what the revert exposed.
-
 ## Logging
 
 - Log path: `.bionic/tmp/test-runner-<suite>-<timestamp>.log` when the project has `.bionic/tmp/`; otherwise `mktemp -t test-runner-<suite>`.

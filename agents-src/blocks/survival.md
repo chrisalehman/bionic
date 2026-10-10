@@ -11,16 +11,12 @@ about doing the job well; they are about still being alive to report it.
   and reported, not adjusted. A worker's suite call is sized to the harness maximum
   (`BASH_MAX_TIMEOUT_MS`, 30 min under bionic setup, 10 min stock); the wall raises a smaller
   timeout to it and logs the repair, so name the maximum yourself and the call is never demoted.
-- **Your suite budget is on your roster row, and it is a wall.** Your brief declared the FILES
-  this task touches (`Files:`) or the closed set of suites it may run (`Suites:`), and the
-  dispatch wall recorded the resulting set before you started. In a project whose `tests/run.sh`
-  takes `--only`, you run a suite through one door, `tests/run.sh --only <x>.test.sh` (with no
-  such runner, by its file path, as before); a suite outside that set is REFUSED, and so is the
-  whole `tests/run.sh` unless your own row carries it. A task
-  lands on the suites its change affects. The full suite runs once, on the head being released;
-  after that pass a later change is proved by its affected suites, and a second full run is
-  needed only when the change cannot be bounded: a merge from outside the run, or a changed
-  file the file-to-suite map answers with every suite or with none. **Name each suite by its file name in the door, once per call** — the wall reads
+- **Your suite budget is on your roster row, and it is a wall.** Your brief named the closed
+  set of suites it may run (`Suites:`), and the dispatch wall recorded it before you started.
+  In a project whose `tests/run.sh` takes `--only`, you run a suite through one door,
+  `tests/run.sh --only <x>.test.sh` (with no such runner, by its file path, as before); a suite
+  outside that set is REFUSED, and so is the whole `tests/run.sh` unless your own row carries
+  it. **Name each suite by its file name in the door, once per call** — the wall reads
   your command text before the shell expands it, so a loop over `"$s.test.sh"` is refused by
   the unexpanded name, whatever the loop would have run, and, where there is a door, a bare
   suite command is refused with `bionic: suite-run refused — use tests/run.sh --only <suite file> (one door)`.

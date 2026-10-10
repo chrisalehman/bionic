@@ -20,6 +20,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -393,6 +394,13 @@ section "Section 40: HELD and LEDGER print in EVERY tick state — no roster, no
 # before the state split, never a second time inside an arm. Sections 38/39 pin the probes to
 # a healthy machine; these pin them to the states those sections never reach.
 s40_count() { printf '%s\n' "$OUT" | /usr/bin/grep -c "^$1" 2>/dev/null; }
+# THE SHARE IS FIXTURE DATA (wave-31 T25; A-T25-7). "A 90% load is over the share" holds only
+# against a share below 90, and the gate reads it from ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share
+# (lib/gate.sh `gate_share`): left unpinned, this section read the machine's file and went red the
+# day it was set to 92. So the section runs under a config dir of its own holding share 80, as
+# tests/gate.test.sh's `fresh()` plants it, and gives the environment back after 40e.
+S40_CFG="$(fake_config_dir s40)"; mkdir -p "$S40_CFG/bionic"; printf '80\n' > "$S40_CFG/bionic/share"
+export CLAUDE_CONFIG_DIR="$S40_CFG"
 
 # 40a — THE FIRST TICK: armed, nothing dispatched, no roster file. With no roster the reader
 # takes its no-roster rule, the gate's: an agent-named active row with no line is an
@@ -490,6 +498,8 @@ S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: 
 S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_DISARM="$(s38_line_no 'poker: DISARM')"
 expect_true "40e5 …after the gate line and before the DISARM line (gate=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER disarm=$S40_DISARM)" \
   test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_DISARM" -gt "$S40_LEDGER"
+expect_contains "40f the section read its own share, never the machine's (the gate line names 80)" "poker: gate share=80" "$OUT"
+unset CLAUDE_CONFIG_DIR
 # ============================================================
 section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest, version (wave-24 T7; REQ-4 AC-4.1–4.6, 4.9, 4.11; D1, D4, D5; ADR-041)"
 # ============================================================
@@ -512,6 +522,9 @@ section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest,
 # beside its `held w-1` count, and its Stop pass beside §41b's Stop refusal on the same drive.
 
 S41_CFG="$(fake_config_dir s41-quiet)"
+# THE SHARE IS FIXTURE DATA (wave-31 T36; A-T36-3). 41h drives a 90% reading against the share, and the
+# gate's default is now 92 (D8), so the section pins 80 as §40 does and as the prelude's dir does.
+mkdir -p "$S41_CFG/bionic"; printf '80\n' > "$S41_CFG/bionic/share"
 export CLAUDE_CONFIG_DIR="$S41_CFG"
 S41_TR="$S41_CFG/projects/-fixture-project/$SID.jsonl"
 orders_of() { printf '%s/.bionic/tmp/stop-orders-%s.state' "$1" "${2:-$SID}"; }
@@ -968,7 +981,10 @@ poke "$R42" current 5
 s42_unchanged "42f3 §VERB-cur a move the gate refuses (no Step 5 block) is refused" 1 "$P42"
 expect_contains "42f4 …in the gate's own words" "Step 5" "$OUT"
 poke "$R42" current 4x
-s42_unchanged "42f5 §VERB-cur a step that is neither N nor T<n>" 2 "$P42"
+s42_unchanged "42f5 §VERB-cur a value that is no step number" 2 "$P42"
+poke "$R42" current T1
+s42_unchanged "42f5b §VERB-cur (wave-31 T5, D2) the retired task-scale current: T1 is no step number either" 2 "$P42"
+expect_contains "42f5c …and the refusal says current: is a step number at every scale" "current: is a step number at every scale" "$OUT"
 
 # The Step-4 block (A-orch-8): advancing to 4 writes the worktree/base-sha/branch fields the
 # first writer's commit is refused without, from the run's own `working-branch:` — and only
@@ -1623,12 +1639,12 @@ expect_eq "46b2 …one line added" "1 0;" "$(s42_numstat "$R46")"
 expect_contains "46b3 …naming the evidence under record/" \
   "proved: kind=review head=${W46_HEAD2} " "$(s46_proved "$P46")"
 expect_contains "46b4 …docs-root relative" "evidence=record/wave-01-fixture/review.md" "$(s46_proved "$P46" | tail -1)"
-# THE PROOF IS A FACT ABOUT CODE (wave-30 T13; AC-4.4, D7b; it reverses review 7 F1's refusal here).
-# The log read W46_HEAD; the branch has moved to W46_HEAD2 by a commit that changes no file, so the
-# change since is the empty change, bounded with nothing owed, and the run still stands for the
-# head: proof-add accepts it, and the proof names W46_HEAD, the head the run read. A change the map
-# cannot bound is still refused, naming why (session-poker-3 Section 72). A log of a run at
-# W46_HEAD2 proves W46_HEAD2.
+# THE PROOF IS A FACT ABOUT CODE (wave-30 T13; it reverses review 7 F1's refusal here). The log read
+# W46_HEAD; the branch has moved to W46_HEAD2 by a commit that changes no file, so the tree is the one
+# the run read, and the run still stands for the head: proof-add accepts it, and the proof names
+# W46_HEAD, the head the run read. A later commit that changes files must be proved by the runs
+# recorded at it (wave-31 T25, D3; session-poker-3 Section 72). A log of a run at W46_HEAD2 proves
+# W46_HEAD2.
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
 expect_eq "46b5 the floor log of an ancestor head, after a landing that changed no file, is accepted (exit 0)" "0" "$RC"
@@ -2240,7 +2256,7 @@ section "Section 52 §RUN-END: integrate waits for an open build, and the WAIT l
 # proof:review, head`, so the open build holds the merge and the tick says so. Through T61 the
 # tick offered the merge beside the build (FILL T3) and the turn-end wall demanded it.
 # THE PROOFS NAME THE HEAD THE WORKING BRANCH IS AT (wave-26 T64): from T64 a floor proof stands
-# only while proof_state answers covered or bounded, so the repository gets one commit, the plan
+# only while proof_state answers covered, so the repository gets one commit, the plan
 # names its branch as `working-branch:`, and both proofs name that commit, not a made-up hex.
 s52_plan() {  # <repo> <T6 status> -> the plan path
   local f h b
@@ -2352,38 +2368,38 @@ expect_eq "53g a review that starts before the last proof (an overlap) is record
 POKE_BOUND="$S53_BOUND_WAS"
 
 # ============================================================
-section "Section 54 §FULL-RUN-REQUIRED: integrate waits for a full run when the change past the floor proof cannot be bounded (wave-26 T64; REQ-3 AC-3.3, AC-3.4)"
+section "Section 54 §FULL-RUN-REQUIRED: integrate waits while no floor is proved — one whole run, and every commit after it proved by the runs recorded at it (wave-26 T64; REQ-3 AC-3.4; wave-31 T25: REQ-4 AC-4.1, REQ-13 AC-13.4; D3)"
 # ============================================================
 #
-# AC-3.4: "A second full run is required when the change cannot be bounded … Fails when a planted
-# new file under a directory no suite names lands with no suite run at all." Through T63 the run
-# only ADMITTED that full run: a task tree with no suite stamp lands (by design: a file no suite
-# names has no affected suite), and integrate's `proof:floor` read took any floor proof line,
-# whatever its head, so the tick offered the merge on a change no suite had read.
+# AC-3.4: "Fails when a planted new file under a directory no suite names lands with no suite run at
+# all." Through T63 integrate's `proof:floor` read took any floor proof line, whatever its head, so
+# the tick offered the merge on a change no suite had read. From wave-31 T25 (D3) the floor is ONE
+# whole green run at a commit on the branch plus every later commit proved by the runs recorded at
+# it: a landing that ran no suite leaves integrate waiting, naming the commit; the runs of its
+# suites at the head, or a whole run there, release it. Nothing predicts a suite set.
 #
 # EVERYTHING HERE IS THE PRODUCT'S OWN: the working branch `wave/01-fixture` in a linked checkout
 # (as §46); its full runs are the shipped suite runner, copied byte for byte into the fixture with
 # three green suites (runner-roster's recipe), so every log is a real runner's log; each proof
-# line is written by `proof-add`; each task tree lands through the real `worktree_land`; the WAIT
-# and FILL lines are the tick's. The map (`impact-command:`) answers lib/one.sh with two suites,
-# lib/every.sh with all three, anything else with nothing. Integrate reads its kind default.
+# line is written by `proof-add`; each task tree lands through the real `worktree_land`; the suite
+# runs are the real shim's stamps; the WAIT and FILL lines are the tick's. Integrate reads its kind
+# default.
 S54_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R54="$(make_repo s54-full-run)"; new_roster "$R54"
 S54_WT="$R54/.worktrees/01-fixture"
 S54_REC="$R54/.bionic/docs/record/wave-01-fixture"
-S54_MAP="$TMPROOT/s54-map.sh"
-S54_COUNT="$TMPROOT/s54-map.count"
+S54_COUNT="$TMPROOT/s54-walk.count"
+S54_SHIM="$TMPROOT/s54-git-shim"
 S54_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
+# THE COUNTER (A-T25-6): a `git` on PATH that logs the walk's one call, `git log --first-parent
+# --reverse`, and runs the real git for every call.
+mkdir -p "$S54_SHIM"
 {
   printf '#!/bin/bash\n'
-  printf 'printf "x\\n" >> "%s"\n' "$S54_COUNT"
-  printf 'for f in "$@"; do\n'
-  printf '  case "$f" in\n'
-  printf '    lib/one.sh)   for s in a b; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '    lib/every.sh) for s in a b c; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '  esac\n'
-  printf 'done\n'
-} > "$S54_MAP"
+  printf 'case " $* " in *" --first-parent --reverse "*) printf "x\\n" >> "%s" ;; esac\n' "$S54_COUNT"
+  printf 'exec %s "$@"\n' "$(command -v git)"
+} > "$S54_SHIM/git"
+chmod +x "$S54_SHIM/git"
 mkdir -p "$R54/tests/lib" "$R54/payload/scripts/lib" "$R54/lib" "$S54_REC"
 cp "$BIONIC_SCRIPTS_DIR/tests/run.sh" "$R54/tests/run.sh"
 cp "$BIONIC_SCRIPTS_DIR/tests/lib/resolve-roots.sh" "$BIONIC_SCRIPTS_DIR/tests/lib/assert.sh" "$R54/tests/lib/"
@@ -2392,7 +2408,7 @@ for s54s in a b c; do
   printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\nsection "%s"\nexpect_eq "%s ran" x x\nfinish\n' \
     "$s54s" "$s54s" > "$R54/tests/$s54s.test.sh"
 done
-printf 'one\n' > "$R54/lib/one.sh"; printf 'every\n' > "$R54/lib/every.sh"
+printf 'one\n' > "$R54/lib/one.sh"
 printf '.bionic/\n.worktrees/\n' > "$R54/.gitignore"
 ( cd "$R54" && git add .gitignore tests payload lib && git commit -qm base ) >/dev/null 2>&1
 S54_BASE="$(git -C "$R54" rev-parse HEAD 2>/dev/null)"
@@ -2416,7 +2432,6 @@ awk '
   { intab = 0; print }' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
 ( cd "$R54" && git add -f "$P54" && git commit -qm "reads table" \
   && git worktree add -q -b wave/01-fixture "$S54_WT" ) >/dev/null 2>&1
-printf 'impact-command: bash %s\n' "$S54_MAP" > "$R54/.bionic/config.yaml"
 # s54_full <log> -> the copied runner, run whole in the working checkout, its log in the record
 s54_full() {
   ( cd "$S54_WT" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET \
@@ -2449,6 +2464,12 @@ s54_tick() {
   sed 's/^current: 8$/current: 4/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
 }
 s54_wait() { s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 '; }
+s54_run() {  # <suite> -> the real shim runs it in the working checkout
+  ( cd "$S54_WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
+      bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$1" -- "bash tests/$1" ) >/dev/null 2>&1
+}
+S54_WHY="the floor is one whole run plus each later commit proved; past the proof at"
+S54_OUT="; run suites its row named, proof-add floor; a second run: approve regression-2"
 
 S54_W0="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_floor floor-1.log
@@ -2473,65 +2494,50 @@ expect_false "54b0b precondition: …and no suite ever stamped it" \
 S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
-expect_eq "54b AC-3.4 integrate WAITS: the head moved past the regression proof in a way the map cannot bound, and the line names the way out" \
-  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
+expect_contains "54b AC-3.4 AC-13.4 integrate WAITS: the commit past the floor has no run recorded at it, and the line names it and the way out" \
+  "poker: WAIT T3 — proof:floor: ${S54_WHY} ${S54_W0:0:12}, commit ${S54_W1:0:12} (" "$(s54_wait)"
+expect_contains "54b1b …saying what it lacks" \
+  ") is not proved: no suite run is recorded at it${S54_OUT}; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
   "$(s54_wait)"
 expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 # THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
-# ask the ready set. The map is the one process the state runs that this suite can count.
-: > "$S54_COUNT"; s54_tick; S54_TICK_MAPS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
-: > "$S54_COUNT"; ( . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
-S54_PS_MAPS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
-expect_true "54b2c precondition: one proof_state over this change calls the map (the counter reads real calls)" \
-  test "$S54_PS_MAPS" -gt 0
-expect_eq "54b2d …and one tick calls it exactly as often: the floor state is computed once per tick" \
-  "$S54_PS_MAPS" "$S54_TICK_MAPS"
+# ask the ready set. The walk's one git call is what the shim counts.
+: > "$S54_COUNT"; PATH="$S54_SHIM:$PATH" s54_tick; S54_TICK_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+: > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
+S54_PS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+expect_true "54b2c precondition: one proof_state over this change walks the commits (the counter reads real calls)" \
+  test "$S54_PS_WALKS" -gt 0
+expect_eq "54b2d …and one tick walks them exactly as often: the floor state is computed once per tick" \
+  "$S54_PS_WALKS" "$S54_TICK_WALKS"
 s54_floor floor-2.log
 expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add floor (exit 0)" "0" "$RC"
 expect_eq "54b4 …at that head" "$S54_W1" "$(s46_last "$P54" floor)"
 s54_tick
 expect_contains "54b5 …and the tick offers the merge" "poker: FILL T3" "$OUT"
 
-# ---------- AC-3.3 still holds: a bounded change after a full pass is proved by its suites ----------
-# FROM wave-30 T13 (AC-4.4, D7c) "proved by its suites" is a fact: each suite the map names must
-# have a green run stamped at the working head, never bounded taken on no evidence. The landing ran
-# no suite, so integrate waits naming them; the real shim runs them in the working checkout.
+# ---------- AC-13.3: a later landing is proved by the runs of its suites at it, never by a second full run ----------
 s54_land T8 lib/one.sh 'one, changed'
-expect_contains "54c0 precondition: the bounded change LANDED" "spawn-worktree: LANDED branch=wt/01-T8" "$S54_LAND"
+expect_contains "54c0 precondition: the change LANDED" "spawn-worktree: LANDED branch=wt/01-T8" "$S54_LAND"
 S54_W2="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
-expect_contains "54c AC-4.4 a change the map bounds, no suite run at the head: integrate WAITS naming the suites" \
-  "proof:review: the facts the run owes do not hold (facts_state): regression: no green run at ${S54_W2:0:12} for a.test.sh b.test.sh" "$(s54_wait)"
-for s54s in a b; do
-  ( cd "$S54_WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
-      bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$s54s.test.sh" -- "bash tests/$s54s.test.sh" ) >/dev/null 2>&1
-done
+expect_contains "54c a landing with no suite run at it: integrate WAITS naming the commit" \
+  "proof:floor: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_W2:0:12} (" "$(s54_wait)"
+s54_run a.test.sh; s54_run b.test.sh
 s54_tick
-expect_contains "54c2 AC-3.3 …with a and b green at the head (the real shim's stamps), the pass stands: the merge is offered" "poker: FILL T3" "$OUT"
+expect_contains "54c2 AC-13.3 …with a and b run green at the head (the real shim's stamps), the floor stands: the merge is offered" "poker: FILL T3" "$OUT"
+expect_eq "54c3 …and no second full run was recorded: the floor proof still names the earlier head" "$S54_W1" "$(s46_last "$P54" floor)"
 
-# ---------- a change the map answers with every suite ----------
-s54_land T9 lib/every.sh 'every, changed'
-expect_contains "54d0 precondition: the every-suite change LANDED" "spawn-worktree: LANDED branch=wt/01-T9" "$S54_LAND"
-s54_tick
-expect_contains "54d a change the map answers with every suite: integrate WAITS, saying so" \
-  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at ${S54_W1:0:12} in a way the map cannot bound (the map answers the change with every suite (3 of 3))" \
-  "$OUT"
-expect_absent "54d2 …and the merge is not offered" "poker: FILL T3" "$OUT"
-s54_floor floor-3.log
-s54_tick
-expect_contains "54d3 …until a full run on its head is recorded" "poker: FILL T3" "$OUT"
-
-# ---------- a merge of work from outside the run (a file the map bounds, so only the outside rule holds it) ----------
-S54_W3="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+# ---------- a merge of work from outside the run: a first-parent commit no landing names ----------
 ( cd "$S54_WT" && git checkout -q -b other-work && printf 'one, from outside\n' > lib/one.sh \
   && git commit -qam 'outside work' && git checkout -q wave/01-fixture \
   && git merge -q --no-ff -m 'merge other-work' other-work ) >/dev/null 2>&1
+S54_M="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 expect_true "54e0 precondition: the outside commit is on the working branch" \
   git -C "$S54_WT" merge-base --is-ancestor other-work wave/01-fixture
 s54_tick
-expect_contains "54e a merge from outside the run: integrate WAITS, saying another branch carries it" \
-  "poker: WAIT T3 — proof:floor: the head moved past the regression proof at ${S54_W3:0:12} in a way the map cannot bound (1 of 2 commits since ${S54_W3:0:7} are on another branch than wave/01-fixture" \
-  "$OUT"
+expect_contains "54e a merge from outside the run with nothing run at it: integrate WAITS, naming the merge" \
+  "proof:floor: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_M:0:12} (no landing row) is not proved: no suite run is recorded at it" \
+  "$(s54_wait)"
 expect_absent "54e2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 s54_floor floor-4.log
 s54_tick
@@ -2902,6 +2908,62 @@ expect_regex "56z5 nothing new: the tick is the one unchanged line (wave-24 AC-4
 
 
 # ============================================================
+section "§REGRESSION-RUNS: the counter reads the command a run ran, never the log's name (wave-31 T21; REQ-2 AC-2.1, AC-2.2; D3)"
+# ============================================================
+#
+# `regression_runs_count` asked the log's BASENAME whether a run was the full runner: the wave-30
+# id `w30-T26-tests_run.sh` (booked_run_id writes `/` as `_`) ends `_run.sh`, not `-run.sh`, and
+# counted 0. It now asks `cmd_whole_run` (lib/cmd-class.sh) of the command the shim wrote beside
+# the log: `<log>.key`, the caller's tree on line 1 and the whole command on the lines after it,
+# else the row's `run_cmd=`. FIXTURE FIDELITY: the rows and the `.key` files are written as the
+# shim writes them (booked.sh `booked_key`: no trailing newline); red.sh is a real untracked file
+# in the tree, the writer's own wrapper, which the classifier opens and reads (wave-31 T11).
+R21="$(make_repo s21-regruns)"; new_roster "$R21"
+S21_TREE="$(cd "$R21" && pwd -P)"
+S21_RD="$S21_TREE/.bionic/tmp/runs"; mkdir -p "$S21_RD"
+S21_RF="$(roster_of "$R21")"
+printf '#!/bin/bash\nset -e\ntests/run.sh\n' > "$R21/red.sh"
+s21_run() {  # <id> <run_cmd, the lossy one-line form> <key command, or - for no .key file> [<rc>] — a roster row and its key
+  local row
+  row="$(mkrow name="w21-$1" status=identified agent_id="a21$1" duration='4 hours' launched_at="$(iso_ago 600)" deliverable="$R21/never.md")"
+  row="$row|run_log=$S21_RD/$1.log|run_cmd=$2|run_rc=${4-0}"
+  printf '%s\n' "$row" >> "$S21_RF"
+  [ "$3" = "-" ] || printf '%s\n%s' "$S21_TREE" "$3" > "$S21_RD/$1.log.key"
+}
+s21_count() { poke "$R21" regression-runs; printf '%s|%s' "$RC" "$OUT"; }
+expect_eq "(rr0) an empty roster counts nothing" "0|poker: regression-runs=0" "$(s21_count)"
+s21_run w30-T26-tests_run.sh 'tests/run.sh' 'tests/run.sh'
+expect_eq "(rr1 AC-2.1) the wave-30 log id, whose command is the runner: one full run (the positive)" \
+  "0|poker: regression-runs=1" "$(s21_count)"
+s21_run w30-T26-x.test.sh 'tests/run.sh --only x.test.sh' 'tests/run.sh --only x.test.sh'
+expect_eq "(rr2 AC-2.2) a --only row beside it counts nothing" "0|poker: regression-runs=1" "$(s21_count)"
+s21_run w21-d-red.sh 'bash red.sh' 'bash red.sh'
+expect_eq "(rr3) bash red.sh, an untracked red.sh running tests/run.sh, is the full runner (T11's text read)" \
+  "0|poker: regression-runs=2" "$(s21_count)"
+s21_run w21-e-run.sh-2 'bash tests/run.sh --dry-run' 'bash tests/run.sh --dry-run'
+expect_eq "(rr4) a --dry-run row counts nothing, though its log id ends -run.sh-2" "0|poker: regression-runs=2" "$(s21_count)"
+s21_run w21-f-cmd 'tests/run.sh' -
+expect_eq "(rr5) a row with no .key reads its run_cmd: one more" "0|poker: regression-runs=3" "$(s21_count)"
+s21_run w21-g-run.sh 'tests/run.sh' 'bash tests/run.sh --only x.test.sh'
+expect_eq "(rr6) the .key's command wins over run_cmd: a log id ending -run.sh whose key is a --only run counts nothing" \
+  "0|poker: regression-runs=3" "$(s21_count)"
+s21_run w21-h-cmd 'cd /x    exit 1' "$(printf 'cd %s || exit 1\nbash tests/run.sh 2>&1 | tee x.log' "$S21_TREE")"
+expect_eq "(rr7) the key's lines 2 and on are the whole command: run_cmd's lossy front would count nothing, the key counts one" \
+  "0|poker: regression-runs=4" "$(s21_count)"
+s21_run w21-i-run.sh 'bash scripts/other.sh' 'bash scripts/other.sh'
+expect_eq "(rr8) a log id ending -run.sh whose command is not the runner counts nothing (the basename is not read)" \
+  "0|poker: regression-runs=4" "$(s21_count)"
+s21_run w21-j-cmd 'tests/run.sh' 'tests/run.sh' ''
+expect_eq "(rr9) a run with no code yet (not ended) counts nothing" "0|poker: regression-runs=4" "$(s21_count)"
+S21_DUP="$(/usr/bin/grep "run_log=$S21_RD/w30-T26-tests_run.sh.log" "$S21_RF")"; printf '%s\n' "$S21_DUP" >> "$S21_RF"
+expect_eq "(rr10) a row copied twice is one run" "0|poker: regression-runs=4" "$(s21_count)"
+expect_eq "(rr11a) …the same grep finds the old line where it is (the positive beside the absence)" "1:      if (id ~ /-run\\.sh\$/) full = 1" \
+  "$(printf '%s\n' '      if (id ~ /-run\.sh$/) full = 1' | /usr/bin/grep -n 'run\\.sh\$')"
+expect_eq "(rr11 AC-2.1) the basename match is gone: the AC's grep finds no line" "" \
+  "$(/usr/bin/grep -n 'run\\.sh\$' "$POKER")"
+
+
+# ============================================================
 section "§SUSPECT: a dependency that shares no file is named at authoring and at the tick, never loosened (wave-30 T16; REQ-12 AC-12.2; D14a, Δ8)"
 # ============================================================
 #
@@ -3061,5 +3123,234 @@ expect_eq "16d11 …declined-on=-" "-" "$(t16_field "$(t16_led_last)" declined-o
 poke "$R16D" decline T4 'held by hand' --on
 expect_eq "16d12 --on with no value is the usage error (exit 2)" "2" "$RC"
 POKE_BOUND="$T16_BOUND_WAS"
+
+# ============================================================
+section "§TASK-SCALE: one ledger shape — every verb answers a task-scale plan as it answers a wave plan on the same table (wave-31 T5; REQ-1 AC-1.3; D2)"
+# ============================================================
+#
+# THE SCALES DIFFER IN ARTIFACTS, NEVER IN LEDGER SHAPE (D2). tests/lib/plan-fixture.sh writes the
+# plan twice, `scale: task` and `scale: wave`, the same rows in the one `## Tasks` table at numeric
+# `current: 4`: the wave plan cites a requirements file and a spec, the task plan carries its design
+# paragraph. Each plan runs the same verbs in the same order in a repo of its own — launch-sync
+# (§49's world: a launched row with its tree), the tick (T3 reads what T2 writes, so the ready set
+# waits on it), decline, task-set, task-add, task-split, row-landed — and every output, and the table
+# and ledger they leave, must match once the repo path and the clock are taken out. Each verb's
+# positive is asserted at task scale too, so two identical refusals cannot pass as an identity.
+TS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+TS_GOV="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
+ts_norm() {  # <repo> <text> -> the text with the repo, either spelling, and every ISO stamp taken out
+  local phys; phys="$(cd "$1" && pwd -P)"
+  printf '%s\n' "$2" | sed -e "s|$phys|<R>|g" -e "s|$1|<R>|g" -e 's/[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9:]*Z/<TS>/g'
+}
+ts_gov() {  # <repo> <plan> <content> -> the governing-skill hook's rc on a Write of <content> to <plan>
+  local in; in="$(jq -n --arg p "$2" --arg c "$3" --arg s "$SID" --arg cwd "$1" '{session_id: $s, cwd: $cwd,
+    hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}')"
+  ( cd "$1" && HOME="$TMPROOT/ts-home" CLAUDE_CODE_SESSION_ID="$SID" bash "$TS_GOV" <<< "$in" >/dev/null 2>&1 )
+}
+ts_world() {  # <scale> -> sets TS_R, TS_P: the repo and its bound plan, w-T2 launched in a real tree
+  local tree
+  TS_R="$(make_repo "ts-$1")"; ( cd "$TS_R" && git commit -q --allow-empty -m init )
+  TS_P="$(plan_fixture "$TS_R/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" "$1" \
+    "| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |" \
+    "| T2 | 4 | build | the second build | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+    "| T3 | 4 | build | waits on the second | implementor | — | b.sh | 30 | REQ-1 | c.sh | — | — | pending |" \
+    "| T4 | 4 | build | free to run | implementor | — | — | 30 | REQ-1 | d.sh, e.sh | — | — | pending |" \
+    "| T5 | 5 | verify | the floor | test-runner | — | — | 30 | REQ-1 | — | — | — | pending |")"
+  bind_marker "$TS_R" "$TS_P"
+  ( cd "$TS_R" && git add -f "$TS_P" && git commit -qm plan )
+  new_roster "$TS_R"
+  add_row "$TS_R" name=w-T2 agent_id=a-w-T2 launched_at=2026-10-04T03:30:00Z deliverable=t2.md duration="45 minutes" \
+    subagent_type=bionic:implementor
+  tree="$(cd "$TS_R" && pwd -P)/.worktrees/01-T2"; git -C "$TS_R" worktree add -q -b wt/01-T2 "$tree" >/dev/null 2>&1
+  printf 'workspace/v1|session=%s|name=w-T2|path=%s|branch=wt/01-T2|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+    "$SID" "$tree" "$TS_P" >> "$TS_R/.bionic/tmp/workspaces-$SID.state"
+}
+ts_run() {  # <scale> -> sets TS_LOG: the transcript of every verb, normalised, one block per verb
+  local sc="$1" log="$TMPROOT/ts-$1.log"
+  ts_world "$sc"
+  : > "$log"
+  ts_gov "$TS_R" "$TS_P" "$(cat "$TS_P")"; printf '== governing-skill rc=%s\n' "$?" >> "$log"
+  ts_gov "$TS_R" "$TS_P" "$(/usr/bin/grep -v '^model_plan:' "$TS_P")"; printf '== governing-skill, no model_plan rc=%s\n' "$?" >> "$log"
+  s34_gate "$TS_R"; printf '== gate rc=%s\n' "$GATE_RC" >> "$log"
+  poke "$TS_R" launch-sync;                      printf '== launch-sync rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  forget_digest "$TS_R"; poke_pressure "$TS_R" 8192 1.0 tick
+  printf '== tick rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: (FILL|WAIT|LEDGER|LAUNCHED|NOT-RECORDED)')")" >> "$log"
+  poke "$TS_R" decline T4 'held for the identity';                                     printf '== decline rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" task-set T4 size=45;                                                     printf '== task-set rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" task-add T6 4 build 'an added build' implementor '—' 30 REQ-1 'f.sh' '—'; printf '== task-add rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" task-split T4 -- 'T7:the first half:20:d.sh' 'T8:the second half:25:e.sh'; printf '== task-split rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" row-landed T2 0123456789abcdef0123456789abcdef01234567 2026-10-04T04:00:00Z
+  printf '== row-landed rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  printf '== the table and the ledger\n%s\n' "$(ts_norm "$TS_R" "$(sed -n '/^## Tasks/,/^## Verification Matrix/p' "$TS_P")")" >> "$log"
+  TS_LOG="$log"
+}
+require_helpers ts_norm ts_gov ts_world ts_run plan_fixture
+ts_run task; TS_LOG_TASK="$TS_LOG"; TS_P_TASK="$TS_P"
+ts_run wave; TS_LOG_WAVE="$TS_LOG"
+ts_block() { awk -v h="== $2" 'index($0, h) == 1 { on = 1; next } /^== / { on = 0 } on' "$1"; }  # <log> <verb>
+ts_rc() { /usr/bin/grep "^== $2 rc=" "$1" | head -1 | sed 's/.* rc=//'; }                        # <log> <verb>
+# THE POSITIVES, AT TASK SCALE: each verb did its work, so the identity below compares two successes.
+expect_eq "TS-0 precondition: the task-scale plan is admitted by the governing-skill hook (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" governing-skill)"
+expect_eq "TS-0b …which refuses it without model_plan (exit 2), so it judged the plan" "2" "$(ts_rc "$TS_LOG_TASK" 'governing-skill, no model_plan')"
+expect_eq "TS-0c precondition: …and by the real commit gate (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" gate)"
+expect_eq "TS-1 task scale: launch-sync records the dispatch (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" launch-sync)"
+expect_contains "TS-1b …the row active in its tree, one ledger line" "poker: LAUNCHED T2 w-T2 — row active in .worktrees/01-T2, ledger line T2" \
+  "$(ts_block "$TS_LOG_TASK" launch-sync)"
+expect_contains "TS-2 task scale: the tick fills the free row" "poker: FILL T4" "$(ts_block "$TS_LOG_TASK" tick)"
+expect_contains "TS-2b …and T3 waits on the row it reads from" "poker: WAIT T3 — reads b.sh, written by T2 (active)" "$(ts_block "$TS_LOG_TASK" tick)"
+expect_absent "TS-2c …so the FILL does not name T3 (beside TS-2)" "FILL T3" "$(ts_block "$TS_LOG_TASK" tick)"
+expect_contains "TS-3 task scale: decline names the ready row (exit $(ts_rc "$TS_LOG_TASK" decline))" "poker: decline — T4: recorded in " "$(ts_block "$TS_LOG_TASK" decline)"
+expect_eq "TS-4 task scale: task-set validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" task-set)"
+expect_eq "TS-5 task scale: task-add validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" task-add)"
+expect_eq "TS-6 task scale: task-split validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" task-split)"
+expect_eq "TS-7 task scale: row-landed validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" row-landed)"
+expect_contains "TS-7b …the row landed, the one terminal word" "| b.sh | .worktrees/01-T2 | 01234567 | landed |" "$(/usr/bin/grep '^| T2 |' "$TS_P_TASK")"
+expect_contains "TS-7c …and its ledger line carries the landing" "landed <TS> 0123456789abcdef0123456789abcdef01234567" \
+  "$(ts_block "$TS_LOG_TASK" 'the table and the ledger')"
+# THE IDENTITY, verb by verb and then whole.
+for ts_v in launch-sync tick decline task-set task-add task-split row-landed 'the table and the ledger'; do
+  expect_eq "TS-8 AC-1.3 $ts_v answers scale: task exactly as scale: wave" "$(ts_block "$TS_LOG_WAVE" "$ts_v")" "$(ts_block "$TS_LOG_TASK" "$ts_v")"
+done
+expect_true "TS-9 AC-1.3 …the whole transcript, byte for byte (cmp)" cmp -s "$TS_LOG_WAVE" "$TS_LOG_TASK"
+POKE_BOUND="$TS_BOUND_WAS"
+
+# ============================================================
+section "§LANDING-EVIDENCE: row-landed writes the evidence cells of the criteria its row serves, at either scale (wave-31 T22; REQ-15 AC-15.3; D15)"
+# ============================================================
+#
+# The verb is the one writer both landings call (`ready`'s publish and the hand landing), so the cells
+# it writes are proved here on its own: the same plan at task and at wave scale, a landing record that
+# carries a green verdict for the row and the commit it lands, and the criteria the row serves read
+# back. The scales answer the same cells and the same second say line. A landing record with no
+# verdict (a by-hand landing, or the TASK-SCALE world above) writes nothing and says `0`.
+LE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+LE_N=0
+LE_COMMIT=0123456789abcdef0123456789abcdef01234567
+le_world() {  # <scale> <with record: 1|0> -> sets LE_R, LE_P: a repo, its bound plan (T2 serves AC-3.1, REQ-4), the landing record
+  LE_N=$((LE_N + 1)); LE_R="$(make_repo "le-$1-$LE_N")"; ( cd "$LE_R" && git commit -q --allow-empty -m init )
+  LE_PHYS="$(cd "$LE_R" && pwd -P)"   # the landing record names logs by the physical docs root, as line.sh writes them
+  LE_P="$(plan_fixture "$LE_R/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" "$1" \
+    "| T2 | 4 | build | the second build | implementor | — | — | 30 | AC-3.1 REQ-4 | b.sh | — | — | pending |" \
+    "| T3 | 4 | build | the third build | implementor | — | — | 30 | REQ-5 | c.sh | — | — | pending |")"
+  awk '/^## Verification Matrix/ { exit } { print }' "$LE_P" > "$LE_P.n"
+  cat >> "$LE_P.n" <<'PLAN'
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-3 | the suite | AC-3.1 | T2 | `a.test.sh` §A: served by its id | wrong |
+| REQ-4 | the suite | AC-4.1 | T2 | `a.test.sh` §A: served by its REQ | wrong |
+| REQ-4 | the suite | AC-4.2 | T2 | `b.test.sh` §B: a suite the landing did not run | wrong |
+| REQ-4 | a grep | AC-4.3 | T0 | grep -c foo file | wrong |
+| REQ-5 | the suite | AC-5.1 | T2 | `a.test.sh` §A: served by another row | wrong |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-3.1 | T2 | pending | — | — |
+| AC-4.1 | T2 | pending | — | — |
+| AC-4.2 | T2 | pending | — | — |
+| AC-4.3 | T0 | pending | — | — |
+| AC-5.1 | T2 | pending | — | — |
+
+AC-3.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §A: served by its id
+  task: T2
+  evidence: pending
+AC-4.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §A: served by its REQ
+  task: T2
+  evidence: pending
+AC-4.2:
+  provenance: p
+  fails-when: f
+  eval: T2 — `b.test.sh` §B: a suite the landing did not run
+  task: T2
+  evidence: pending
+AC-4.3:
+  provenance: p
+  fails-when: f
+  eval: T0 — grep -c foo file
+  task: T2
+  evidence: pending
+AC-5.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §A: served by another row
+  task: T3
+  evidence: pending
+PLAN
+  mv "$LE_P.n" "$LE_P"
+  if [ "$2" = 1 ]; then
+    mkdir -p "$LE_R/.bionic/docs/record/wave-01-fixture/line"
+    # this landing's green verdict first, then the lines that must not be picked though they come later: another row's verdict
+    # for the same commit, a red one, and an older commit's green one
+    {
+      printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:00:00Z\n' \
+        "$LE_COMMIT" "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T2-a-0123456789ab.log"
+      printf 'line/v1|ev=verdict|row=T3|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:01:00Z\n' \
+        "$LE_COMMIT" "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T3-a-other.log"
+      printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=b.test.sh|result=red|log=%s|at=2026-10-04T03:02:00Z\n' \
+        "$LE_COMMIT" "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T2-b-red.log"
+      printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:03:00Z\n' \
+        ffffffffffffffffffffffffffffffffffffffff "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T2-a-old.log"
+    } > "$LE_R/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  fi
+  bind_marker "$LE_R" "$LE_P"
+  ( cd "$LE_R" && git add -f "$LE_P" && git commit -qm plan )
+}
+le_ev() {  # <plan> <AC id> -> the evidence: cell of that criterion's block
+  awk -v ac="$2:" '{ h = $0; sub(/^[-*+][ \t]+/, "", h) }
+    index(h, ac) == 1 { f = 1; next }
+    /^[^ \t]/ { f = 0 }
+    f && /^[ \t]+evidence:/ { v = $0; sub(/^[ \t]+evidence:[ \t]*/, "", v); print v; exit }' "$1"
+}
+le_cells() { printf '%s|%s|%s|%s|%s' "$(le_ev "$1" AC-3.1)" "$(le_ev "$1" AC-4.1)" "$(le_ev "$1" AC-4.2)" "$(le_ev "$1" AC-4.3)" "$(le_ev "$1" AC-5.1)"; }
+LE_WANT="record/wave-01-fixture/line/T2-a-0123456789ab.log"
+for le_sc in task wave; do
+  le_world "$le_sc" 1
+  expect_eq "(le0 $le_sc) precondition: every criterion reads pending before the landing (positive on le_ev)" \
+    "pending|pending|pending|pending|pending" "$(le_cells "$LE_P")"
+  poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+  LE_OUT="$OUT"; LE_RC="$RC"
+  expect_eq "(le1 $le_sc) row-landed exits 0 and the row is landed (precondition)" "0 landed" \
+    "$LE_RC $(sed -n '/^## Tasks/,/^## Dispatch/p' "$LE_P" | /usr/bin/grep '^| T2 |' | awk -F'|' '{ gsub(/ /, "", $(NF-1)); print $(NF-1) }')"
+  expect_eq "(le2 $le_sc) AC-15.3 the criteria the row serves by id and by REQ, whose evals name the suite it ran, read its green log; the rest as they were" \
+    "$LE_WANT|$LE_WANT|pending|pending|pending" "$(le_cells "$LE_P")"
+  expect_contains "(le3 $le_sc) the first say line is the one it always was (the plan path is the verb's own)" \
+    "row-landed — T2 landed at $LE_COMMIT: status, step line and ledger line written to " "$LE_OUT"
+  expect_contains "(le3b $le_sc) …to its last word" " in one write; dry-committed first." "$LE_OUT"
+  expect_contains "(le4 $le_sc) …and the evidence count is a second line of its own" "
+poker: evidence: 2 cell(s) written by landing" "$LE_OUT"
+  cp -p "$LE_P" "$TMPROOT/le-$le_sc.once"
+  poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+  expect_eq "(le5 $le_sc) the same landing run again writes nothing more (exit 0, the plan byte-identical)" "0 same" \
+    "$RC $(cmp -s "$LE_P" "$TMPROOT/le-$le_sc.once" && echo same || echo changed)"
+  eval "LE_CELLS_$le_sc=\"\$(le_cells \"\$LE_P\")\""
+  eval "LE_OUT_$le_sc=\"\$(ts_norm \"\$LE_R\" \"\$LE_OUT\")\""
+done
+expect_eq "(le6 AC-1.3) the two scales write the same cells" "$LE_CELLS_task" "$LE_CELLS_wave"
+expect_eq "(le6b) …and print the same lines once the repo path and the clock are out" "$LE_OUT_task" "$LE_OUT_wave"
+le_world wave 0
+poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+expect_eq "(le7) a landing record with no verdict (a by-hand landing's) writes no cell: all five read pending" \
+  "0 pending|pending|pending|pending|pending" "$RC $(le_cells "$LE_P")"
+expect_contains "(le7b) …and the second line says 0" "
+poker: evidence: 0 cell(s) written by landing" "$OUT"
+le_world wave 1
+sed -i.bak 's|^  evidence: pending$|  evidence: record/hand/a-hand-filled-record.log|' "$LE_P" && rm -f "$LE_P.bak"
+( cd "$LE_R" && git add -f "$LE_P" && git commit -qm hand )
+poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+expect_eq "(le8) a hand-filled cell is never overwritten, though the row serves it: five hand fills stay, none written" \
+  "0 record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log" \
+  "$RC $(le_cells "$LE_P")"
+expect_contains "(le8b) …and the second line says 0" "
+poker: evidence: 0 cell(s) written by landing" "$OUT"
+POKE_BOUND="$LE_BOUND_WAS"
 
 finish

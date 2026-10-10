@@ -132,34 +132,6 @@ stop_unbound_advise() {  # <plan> -> 0 staged · 1 already said in this process
   fold_advise "$(run_unbound_advisory "${1:-}")"
 }
 
-# ─── FILE SCOPE: the derivation bound, which this file does not own ──────────
-#
-# `LG_IMPACT_BOUND_S` is defined once, in lib/bounds.sh, beside the dispatch
-# wall's own `IMPACT_BOUND_S` (epic-23 wave-14-tune-181, REQ-7, D4). It used to
-# be a second copy of the dispatch wall's number, six seconds written twice; the
-# sweep's use of it is at stop_landing_gate's derivation loop below.
-#
-# THIS FILE READS THE GATE'S BOUND, NOT THE WALL'S, and the distinction is the
-# whole of wave-14 T15. Every inner bound sits strictly under its own hook's
-# registration, margin named (D2's invariant): the sweep runs inside hooks/stop.sh,
-# registered at `"timeout": 10`, so its bound is 6 with 4 to spare; the wall runs
-# in a PreToolUse hook registered at 15, so its bound is 10 with 5 to spare.
-# Reading `IMPACT_BOUND_S` here would put the WALL's margin inside the SWEEP's
-# registration, where the harness kills the hook at 10 with exit 124 and the
-# refusal in flight becomes a pass (tests/landing-gate.test.sh §16i).
-# lib/bounds.sh's header carries the reasoning; what this file owes is the right
-# NAME.
-#
-# SOURCED THE WAY fold.sh AND root.sh ARE, and guarded the same way — on the
-# thing this file uses, so a caller that already has it pays nothing. There is no
-# numeric fallback on purpose: a default here would be the third copy of the
-# constant this file exists to stop having, and a missing library is the loader's
-# failure to report, not this file's to paper over.
-if [ -z "${LG_IMPACT_BOUND_S:-}" ]; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/bounds.sh"
-fi
-
 # ─── FILE SCOPE: the `## Tasks` table, which this file must not parse ────────
 #
 # THE ROW IS THE TREE'S RECORD (epic-23 wave-17, REQ-2, D3, ADR-032). The landing gate needs
@@ -167,7 +139,7 @@ fi
 # is the ONE reader of that table; a second parser here would be the exact duplication that
 # library exists to stop, and it would be the copy nobody updates when a column moves.
 #
-# SOURCED THE WAY fold.sh, root.sh AND bounds.sh ARE, and guarded on the verb this file
+# SOURCED THE WAY fold.sh AND root.sh ARE, and guarded on the verb this file
 # actually calls. hooks/stop.sh does not source it — no other verdict in this process reads
 # the table — so in the shipped process this guard is what loads it, and a caller that has it
 # already (the evidence gate's own process, a suite driving this library directly) pays
@@ -188,7 +160,7 @@ fi
 # computation of the ready set — the same function the tick prints from — so the arm asks the
 # question itself and the two can never name different rows.
 #
-# SOURCED THE WAY fold.sh, root.sh, bounds.sh AND units.sh ARE, and guarded on the verb this
+# SOURCED THE WAY fold.sh, root.sh AND units.sh ARE, and guarded on the verb this
 # file calls. hooks/stop.sh DOES name this one in its `BIONIC_LIB_WANT` — unlike units.sh,
 # which no verdict in that process reads directly — so in the shipped process the loader has
 # already checked it is readable and this guard is what a suite driving the library alone
@@ -735,9 +707,7 @@ return "$_adv"
 #     checkout's current branch                            -> not reconciled, silent (ambiguity)
 #   - the diff has no path outside the declared `files=`   -> pass, silent
 #   - the diff touches a path outside the declared
-#     `files=`                                              -> REFUSE, naming the file(s) and
-#                                                          (impact-command configured) the
-#                                                          suites `impact` derives for them
+#     `files=`                                              -> REFUSE, naming the file(s)
 #
 # Exit code 2 = block the stop in Claude Code hooks; stderr goes back to the orchestrator,
 # which is why the refusal must name the row and its artifacts rather than the rule.
@@ -756,17 +726,10 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local EVENT MODE STOP_AGENT_ID STOP_AGENT_NAME LIVE_IDS ROSTER_FILE SWEEPER
   local CANDIDATES LINE REFUSALS REFUSE_KIND NOW AID NAME KIND CFILES
   local VERDICT VERDICT_RC STATE
-  # LG_IMPACT_BOUND_S IS NOT LOCALISED: it is the library's file-scope constant,
-  # and a `local` of that name here would shadow it with the empty string.
-  # NEITHER IS `SECONDS`, for a stronger reason: it is the shell's own elapsed-time
-  # builtin, and `local SECONDS` turns it into an ordinary variable that never counts.
-  # The derivation window below zeroes it; nothing else in this file or in hooks/stop.sh
-  # reads it.
-  local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
+  local LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
   local LG_ROW_RC LG_ROW_ID LG_ROW_BASE LG_FALLBACK_WHY LG_BASE_SRC LG_RUN_PLAN
   local _LG_ROW_ID _LG_ROW_BASE
-  local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP LG_FIX LG_FIX_FILES
-  local LG_IMPACT_PID LG_OVERRAN
+  local LG_OUTSIDE LG_DF LG_FIX LG_FIX_FILES
 
 # ---------- relevance first: the cheapest checks, before any git resolution ----------
 
@@ -1058,59 +1021,6 @@ REFUSALS=""
 # would be user-facing text the ruled table does not carry.
 REFUSE_KIND=""
 
-# ONE DERIVATION BUDGET FOR THE WHOLE SWEEP (review-c C-17). The impact command below is
-# the same call hooks/dispatch-preflight.sh makes, but it sits inside this per-candidate
-# loop, and this hook is registered at "timeout": 10 on both Stop and SubagentStop. N
-# offending rows would pay N x that. So the budget is spent across the loop rather than
-# granted per row: whatever is left when a row asks, and nothing once it is gone. A row that
-# gets no derivation still REFUSES — it names its files and says the suites were not
-# derived. The one thing this must never become is a silent pass.
-#
-# BUILT, NOT BORROWED, for the same reason as the dispatch site: bionic's command discipline
-# forbids a `timeout`/`gtimeout` binary and macOS ships neither.
-#
-# THE NUMBER IS NOT THIS FILE'S (wave-14-tune-181, REQ-7, D4). It was `6` here and `6` again
-# at dispatch-preflight.sh:2225, two copies with two headers and no line linking them. It
-# comes from lib/bounds.sh now — sourced at file scope above, never re-declared here — and
-# it is a HANG GUARD rather than a cost budget: tests/lib/impact.sh caches its edge graph per
-# tree state, so a derivation that is merely slow is no longer a thing this number has to pay
-# for.
-#
-# AND IT IS THE GATE'S BOUND, NOT THE WALL'S (T15). Each is strictly under its own hook's
-# registration, margin named (D2's invariant, lib/bounds.sh's header): `LG_IMPACT_BOUND_S`
-# is six because this loop runs inside a hook registered at `"timeout": 10`, and
-# `IMPACT_BOUND_S` is ten because the dispatch wall's hook is registered at 15. Wiring this
-# loop to the wall's number is what wave-14 T9 did, and the sweep then outlived its own
-# registration: the harness killed the hook at 10 s with exit 124, which is not the exit 2
-# the refusal below spells, so a row that should have been REFUSED passed.
-#
-# THE BUDGET IS A CLOCK, NOT A COUNT OF POLLS (wave-14 T35, carrying T34's fix across).
-# It used to be `LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))`, one tick per
-# `sleep 0.1`, decremented by what each row spent. `sleep` is an external binary, so a tick
-# costs a fork and an exec on top of the 100 ms it sleeps — 115.3 ms measured (T34 §2) —
-# and the six seconds both messages below quote realized as ~6.9 s inside a 10 s
-# registration, eating the margin the shorter bound exists to keep. Worse, the error is
-# PROPORTIONAL: under load each tick costs more, so the guard gets slower exactly when the
-# session it is guarding is wedged. A hang guard cannot be denominated in a unit that
-# stretches under the condition it guards.
-#
-# `SECONDS` IS THE CLOCK, AND IT COSTS NOTHING: assigning it zeroes bash's own elapsed
-# counter and reading it is a builtin, where `date +%s` would cost a fork per poll for the
-# same whole-second resolution. /bin/bash is 3.2 on a Mac (no `EPOCHREALTIME`, no
-# `printf %(%s)T`) and bionic's command discipline forbids a `timeout` binary. Nothing else
-# in this file, in hooks/stop.sh, or in the libraries either sources reads `SECONDS`.
-#
-# ONE WINDOW FOR THE SWEEP, OPENED AT THE FIRST DERIVATION. The budget is still spent
-# across the loop rather than granted per row, but it is now an ELAPSED window rather than
-# an accumulator: the clock starts when the first row asks for a derivation, and every
-# later row is judged against the same clock. Two consequences, both deliberate. A row that
-# asks late finds the window closed even if the earlier derivations were quick, because
-# what the registration bounds is wall time, not derivation time. And the window can never
-# overshoot — a whole-second accumulator would charge 0 for a 0.9 s derivation and let N
-# rows spend N x 0.9 s against a six-second budget, which is the wrong direction for a hang
-# guard. `SECONDS` being whole-second, each wait ends in [bound-1, bound]: it can fire a
-# little early, where the ticks fired late.
-LG_IMPACT_CLOCK=""   # the sweep's derivation window: empty until the first row opens it
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
@@ -1324,53 +1234,6 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
 $(git -C "$LG_WT" diff --name-only "${LG_BASE}..HEAD" 2>/dev/null)
 LGDIFF
         if [ -n "$LG_OUTSIDE" ]; then
-          # THE SAME COMMAND, THE SAME CONFIG KEY hooks/dispatch-preflight.sh reads (S13),
-          # re-asked of the offending files alone (spec AC-22: "naming the files and the
-          # suites they imply"). Absent command -> name the files only, exactly as the
-          # dispatch wall itself falls back when nothing is configured.
-          LG_IMPACT_CMD=$(config_value "$BIONIC_ROOT" "impact-command" "")
-          LG_SUITES=""
-          LG_SUITES_NOTE=""
-          if [ -n "$LG_IMPACT_CMD" ]; then
-            if [ -n "$LG_IMPACT_CLOCK" ] && [ "$SECONDS" -ge "$LG_IMPACT_BOUND_S" ]; then
-              LG_SUITES_NOTE=" (this sweep's ${LG_IMPACT_BOUND_S}s derivation budget was spent on earlier rows, so the suites these files imply are NOT named here — derive them by hand)"
-            else
-              LG_IMPACT_TMP="${TMPDIR:-/tmp}/bionic-lg-impact-$$-${RANDOM}.out"
-              # `set -f` AROUND THE SPLIT (review-a A-11). `$LG_OUTSIDE` is built from `git
-              # diff --name-only`, and a committed path carrying `*`, `?` or `[` would
-              # otherwise be pathname-expanded against $BIONIC_ROOT and hand the command files
-              # that were never in the diff. The dispatch site guards the identical
-              # construction; this one did not.
-              # THE WINDOW OPENS HERE, at the first row that actually launches a
-              # derivation, and not at the top of the sweep: a sweep whose earlier rows
-              # never reached this branch must not arrive with its budget already spent.
-              [ -n "$LG_IMPACT_CLOCK" ] || { SECONDS=0; LG_IMPACT_CLOCK=1; }
-              set -f
-              # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-              ( cd "$BIONIC_ROOT" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
-              LG_IMPACT_PID=$!
-              set +f
-              LG_OVERRAN=0
-              # `sleep 0.1` STAYS the poll cadence — it is what makes a prompt derivation
-              # noticed promptly. What it no longer is, is the unit the bound is counted in.
-              while kill -0 "$LG_IMPACT_PID" 2>/dev/null; do
-                if [ "$SECONDS" -ge "$LG_IMPACT_BOUND_S" ]; then
-                  kill -TERM "$LG_IMPACT_PID" 2>/dev/null
-                  LG_OVERRAN=1
-                  break
-                fi
-                sleep 0.1
-              done
-              wait "$LG_IMPACT_PID" 2>/dev/null
-              if [ "$LG_OVERRAN" -eq 1 ]; then
-                LG_SUITES_NOTE=" (the impact command did not answer within this sweep's ${LG_IMPACT_BOUND_S}s derivation budget, so the suites these files imply are NOT named here — derive them by hand)"
-              else
-                LG_SUITES=$(awk -F'\t' '$1 != "" { print $1 }' "$LG_IMPACT_TMP" 2>/dev/null | sort -u | tr '\n' ' ')
-                LG_SUITES="${LG_SUITES% }"
-              fi
-              rm -f "$LG_IMPACT_TMP"
-            fi
-          fi
           [ -n "$REFUSE_KIND" ] || REFUSE_KIND=undeclared
           # THE FIX IS A COMMAND, PRINTED WHOLE (wave-24 T13, D10, AC-6.5): the amend that
           # declares these paths on this row, with the real plugin root, the row name and
@@ -1378,7 +1241,7 @@ LGDIFF
           # way out, and has no single command to print. The script path is one word too: a
           # plugin root with a space would otherwise paste as two (wave-24 T27; critic I2).
           LG_FIX="bash $(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh") amend $(refuse_quote "$NAME")${LG_FIX_FILES} --reason $(refuse_quote "the landing diff touched files Files: did not declare")"
-  REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})}${LG_SUITES_NOTE} — not declared. Declare them (main runs it), or revert them before landing:
+  REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE} — not declared. Declare them (main runs it), or revert them before landing:
     ${LG_FIX}
 "
         fi
@@ -1434,10 +1297,11 @@ return 2
 # THE PATROL-DUTIES WALL — task-dispatch-wall-channel-loss, T5.
 #
 # Stop. On every orchestrator turn end: if the turn was started by a PATROL TICK,
-# refuse the stop once unless the tick's TWO standing duties were performed
-# inside it — a task-list refresh (`TaskList`, or a write naming the active plan
-# file), and an ANSWER to any `poker: FILL` line the tick printed (the named
-# dispatches, or an explicit `fill-declined: <reason>`). THAT IS THE TICK ARM'S HALF ONLY. The
+# refuse the stop once when the marker turn ran no tick, or left a stand-down or a launch
+# unanswered. THE TASK-LIST DUTIES ARE GONE (wave-31 T32; D6, REQ-6 AC-6.5): a tick turn owes
+# no task-list refresh and a dispatch turn no task entry set in progress, a process check the
+# turn's end demanded of the model with nothing behind it to do; the tick still prints
+# `poker: RECONCILE` as advice no wall reads. THAT IS THE TICK ARM'S HALF ONLY. The
 # GAP arm (wave-20 Δ7, ADR-033 d2) judges EVERY Stop, Patrol or not: a live ledger with
 # fillable ready rows the turn neither dispatched nor declined is refused, and a decline answers
 # the turn it is written in, never the next. A turn that is neither a tick nor a fillable gap
@@ -1521,8 +1385,7 @@ return 2
 #   - a marker older than the scan window (2000 records)  -> pass, silent (fail-open, below)
 #   - no user prompt in the transcript at all             -> pass, silent
 #   - the last user prompt is not a Patrol tick           -> pass, silent
-#   - both duties done since that prompt                  -> pass, silent
-#   - either duty missing                                 -> REFUSE, naming which
+#   - a tick turn with no TaskList, or a dispatch turn with no task entry -> pass, silent (T32)
 #   - a live ledger with no free slot or no ready row      -> pass, silent (wave-20 Δ7: the
 #                                                           ready set and occupancy computed)
 #   - the machine reads HOLD or EMERGENCY                 -> pass, silent (measured here)
@@ -1572,14 +1435,12 @@ return 2
 stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
-  local RITUAL RITUAL_REASON TICK_MARK VERDICT FILL_MISSING FILL_REASON
+  local RITUAL RITUAL_REASON TICK_MARK FILL_MISSING FILL_REASON
   local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID
   local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
   local _LS_OUT _LS_RC LAUNCH_REASON=""
-  local ENTRY_REASON _TE_IDS _TE_N _TE_ID
-  local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
 
@@ -1769,81 +1630,6 @@ fi
 # so a row that merely quotes the tick command is not a tick, and a predecessor's job still
 # firing into this conversation after a /clear is not this session's tick either.
 TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
-
-# TICK / TASKLIST, folded over the last turn.
-#
-# THE LISTAGENTS DUTY IS GONE (T22, A-orch-33; AC-4.4). This fold had a second limb: a tick
-# turn was refused until the transcript showed a main-thread `ListAgents` call. That is a
-# chore demanded of the model before a gate will let its turn end — ADR-024's P-A, the rule
-# this wave finishes — and it never named a single thing to DO about what the panel showed.
-# The obligation behind it was real, and it moved to where the fact already lives: the tick
-# reads the roster and prints `poker: STANDDOWN <name>` for every MET lineage whose agent the
-# panel still lists — writing the stop order as it does (T1, D1) — and closes the moot ones
-# itself. A tell with a name in it beats a wall that asks for a look; a tell that also makes
-# the act legal beats the tell.
-#
-# WHAT SURVIVES is the TASK-LIST REFRESH, which is not a look: it is the orchestrator writing
-# down where the run has got to, and a turn that ends without it leaves the ledger behind the
-# work. `both` and `listagents` go with the limb; `tasklist` is now the only verdict that
-# refuses.
-#
-# AND ONLY WHEN THE TICK SAID SOMETHING (wave-24 T8; D5, AC-4.13). A tick that printed
-# `unchanged` left nothing for the ledger to catch up on, nor did a QUIET one whose plan did not
-# move (a QUIET tick owes the reconcile when the plan moved into Step 4 or its table grew, wave-27
-# T13), and a refusal there asked the model for a chore with nothing behind it. The tick writes
-# that fact as `duty=none` beside its digest, and `stop_turn_facts` hands it here as `_ST_TICK_DUTY`.
-VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" -v duty="$_ST_TICK_DUTY" '
-  $1 == "USER" {
-    t = $2; sub(/^[ \t]+/, "", t)
-    tick = (index(t, mark) == 1)
-    tl = 0
-    next
-  }
-  $1 == "TOOL" {
-    if ($2 == "TaskList")   { tl = 1; next }
-    if (plan != "" && index($3, plan) > 0) {
-      if ($2 == "Edit" || $2 == "Write" || $2 == "NotebookEdit" || $2 == "Bash") tl = 1
-    }
-    next
-  }
-  END {
-    if (!tick) { print "quiet"; exit }
-    if (tl || duty == "none") { print "quiet"; exit }
-    print "tasklist"
-  }
-')
-
-# ---------- THE TASK LIST'S SECOND TRIGGER: a dispatch turn sets its entries in progress ----------
-#
-# (wave-28 T38; REQ-13, D30.) The refresh above is owed to a tick; this is owed to a DISPATCH, tick
-# or no tick. A turn that launched an agent bound to a plan row owes as many TaskUpdate calls
-# setting `in_progress` as rows it dispatched (`_ST_ENTERED`, folded in `stop_turn_facts`). A hook
-# cannot write the task list, so a refusal is the only enforcement there is, and it is this duty's:
-# no new site. Alone, the verdict `entry` goes to the forwarder below; beside another duty it rides
-# in that duty's detail, as the launch and marker reasons do. It refuses once, through the same
-# `stop_hook_active` guard as every duty here. The wall counts; it cannot tell which entry belongs
-# to which row, so the predicate is a count, never a match.
-#
-# BOUND IS THE FILL DUTY'S OWN LAUNCHED SET: a plan row a turn launched is a row `fill_row_launched`
-# finds in `_ST_LAUNCHED`, the one computation of the turn's launches the ledger also records (a
-# refused dispatch left out). Every row of the bound plan's table counts, whatever its status: the
-# launch recorder sets a dispatched row `active` before this Stop reads it. A launch that binds no
-# row (a helper, a researcher) owes nothing, and a row launched twice is one row.
-ENTRY_REASON=""
-if [ -n "$_ST_LAUNCHED" ] && [ -n "$_ST_PLAN" ]; then
-  _TE_IDS=""; _TE_N=0
-  while IFS=$'\t' read -r _TE_ID _; do
-    case "$_TE_ID" in ''|*[!A-Za-z0-9_.-]*) continue ;; esac
-    fill_row_launched "$_TE_ID" "$_ST_LAUNCHED" || continue
-    case " $_TE_IDS " in *" $_TE_ID "*) continue ;; esac
-    _TE_IDS="${_TE_IDS}${_TE_IDS:+ }${_TE_ID}"; _TE_N=$((_TE_N + 1))
-  done <<TE_ROWS
-$(units_rows "$_ST_PLAN" 2>/dev/null)
-TE_ROWS
-  if [ "$_TE_N" -gt 0 ] && [ "${_ST_ENTERED:-0}" -lt "$_TE_N" ]; then
-    ENTRY_REASON="tasks: dispatched ${_TE_IDS} this turn, ${_ST_ENTERED:-0} of ${_TE_N} task entries set in progress — set each dispatched row's entry in progress"
-  fi
-fi
 
 # ---------- THE THIRD DUTY: no turn ends on a fillable gap (AC-29; wave-20 REQ-5, Δ7) ----
 #
@@ -2106,103 +1892,45 @@ else
   STANDDOWN_REASON=""
 fi
 
-# THE TWO TELL-ANSWERING DUTIES TRAVEL TOGETHER from here, joined exactly as the task-list
-# duty joins them below: a turn that left a FILL and a stand-down unanswered is told both
-# things once, because the next stop passes by design and a duty not named in the first
-# refusal is a duty never named at all.
+# THE TELL-ANSWERING DUTIES TRAVEL TOGETHER from here: a turn that left a FILL and a stand-down
+# unanswered is told both things once, because the next stop passes by design and a duty not
+# named in the first refusal is a duty never named at all.
 TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
 [ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
 [ -n "$LAUNCH_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${LAUNCH_REASON}"
-# THE TASK ENTRIES (wave-28 T38) ride beside any other duty, in its detail and under its line; alone,
-# they are the verdict, refused through the forwarder below.
-if [ -n "$ENTRY_REASON" ]; then
-  if [ -z "$TELL_REASON" ] && [ "$VERDICT" != tasklist ]; then
-    VERDICT=entry
+# The tells are judged TOGETHER, so a turn that left two of them is told both things once.
+# Blocking on one and staying silent about the other would hide the second behind the
+# one-shot: the next stop passes by design.
+if [ -n "$TELL_REASON" ]; then
+  # THE FACT NAMES WHICH TELL WENT UNANSWERED, and the pair keeps the FILL wording it
+  # always had. Both halves are budgeted: `bionic: stop refused — <fact> (<fix>)` is capped
+  # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
+  # these read as tightly as they do.
+  if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
+    fold_block block stop "a FILL and a STANDDOWN went unanswered" \
+      "dispatch, stop, or decline" "$TELL_REASON"
+  elif [ -n "$FILL_REASON" ]; then
+    # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap.
+    fold_block block stop "$FILL_FACT" "$FILL_FIX" \
+      "$TELL_REASON"
+  elif [ -n "$STANDDOWN_REASON" ]; then
+    fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
+      "$TELL_REASON"
+  elif [ -z "$NOTICK_REASON" ]; then
+    # A LAUNCH THE PLAN CANNOT RECORD (wave-26 T32), alone. Beside another duty it rides in
+    # that duty's paragraph, as the marker turn's does.
+    fold_block block stop "a launch is not recorded in the plan" "run the commands it prints" \
+      "$TELL_REASON"
   else
-    TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${ENTRY_REASON}"
+    # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
+    # rides in the same paragraph under that duty's fact, so one refusal names every miss.
+    fold_block block stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \
+      "$TELL_REASON"
   fi
+  return 2
 fi
-
-# The two folds are judged TOGETHER, so a turn that skipped a duty AND left a FILL
-# unanswered is told both things once. Blocking on one and staying silent about the other
-# would hide the second behind the one-shot: the next stop passes by design.
-if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
-  if [ -n "$TELL_REASON" ]; then
-    # THE FACT NAMES WHICH TELL WENT UNANSWERED, and the pair keeps the FILL wording it
-    # always had. Both halves are budgeted: `bionic: stop refused — <fact> (<fix>)` is capped
-    # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
-    # these read as tightly as they do.
-    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
-      fold_block block stop "a FILL and a STANDDOWN went unanswered" \
-        "dispatch, stop, or decline" "$TELL_REASON"
-    elif [ -n "$FILL_REASON" ]; then
-      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap.
-      fold_block block stop "$FILL_FACT" "$FILL_FIX" \
-        "$TELL_REASON"
-    elif [ -n "$STANDDOWN_REASON" ]; then
-      fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
-        "$TELL_REASON"
-    elif [ -z "$NOTICK_REASON" ]; then
-      # A LAUNCH THE PLAN CANNOT RECORD (wave-26 T32), alone. Beside another duty it rides in
-      # that duty's paragraph, as the marker turn's does.
-      fold_block block stop "a launch is not recorded in the plan" "run the commands it prints" \
-        "$TELL_REASON"
-    else
-      # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
-      # rides in the same paragraph under that duty's fact, so one refusal names every miss.
-      fold_block block stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \
-        "$TELL_REASON"
-    fi
-    return 2
-  fi
-  return "$_adv"
-fi
-
-# ---------- the refusal ----------
-#
-# THE REASON NAMES WHAT IS MISSING AND NOTHING ELSE. A reason that recites both
-# duties whichever one was skipped makes the reader re-derive the answer the gate
-# already knows, and a gate that fires on every tick with the same paragraph is
-# read as noise inside two ticks. The three duty strings are LITERALS: no payload
-# value and no path is interpolated into them. The fill clause is the one
-# exception and it carries task ids read out of the transcript — filtered in the
-# fold above to `[A-Za-z0-9_.-]+` and handed to jq through `--arg`, so neither a
-# shell nor a JSON quoting surface is opened by them. The task-entry clause carries
-# plan row ids under the same filter, and two counts.
-# THE FACT AND THE FIX COME FROM THE VERDICT, one row per duty missed (table rows
-# 111-113); the existing paragraph stays whole as `detail`.
-case "$VERDICT" in
-  tasklist)
-    FACT='no task-list refresh since this tick'; FIX='refresh it, then stop again'
-    REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed) — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.'
-    # THE PLAN MOVED (wave-27 T37; review pass 8 F2): the tick's own cause, from its digest, and
-    # the rebuild steps/3.md asks for, where the sentence above would name a change that is not it.
-    # THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1): a TaskList call or a
-    # plan-ledger write discharges the duty, and the rebuild alone (TaskUpdate, TaskCreate) does
-    # not, so TaskList comes first and the detail keeps the plan-ledger write, the fallback where
-    # the task tools are absent.
-    case "$_ST_RECONCILE" in
-      step4) FIX='TaskList, rebuild it, then stop again'
-             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the plan moved from approval into Step 4 (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete every pending entry and recreate them. Do it, then stop again — this gate blocks once.' ;;
-      grew)  FIX='TaskList, rebuild it, then stop again'
-             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the ## Tasks table grew (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete the pending entries after the new row and recreate them. Do it, then stop again — this gate blocks once.' ;;
-    esac ;;
-  entry)
-    # THE DISPATCH TURN'S ENTRIES, alone (wave-28 T38): the fix names the act the wall counts.
-    FACT="a dispatched row's entry is not in progress"; FIX='TaskUpdate each to in_progress'
-    REASON="$ENTRY_REASON" ;;
-  *)
-    return "$_adv" ;;
-esac
-[ -n "$TELL_REASON" ] && REASON="$REASON $TELL_REASON"
-
-# The JSON decision payload on STDOUT with return "$_adv", the form Design (T5) names.
-# (hooks/landing-gate.sh refuses through exit 2 + stderr instead; both are live
-# Stop-hook block channels in this CLI, and the two gates deliberately do not
-# share a mechanism they never share a code path with.)
-fold_block block stop "$FACT" "$FIX" "$REASON"
-return 2
+return "$_adv"
 }
 
 
@@ -2229,9 +1957,6 @@ return 2
 #                   whose result was an error (a dispatch the preflight refused); once the
 #                   roster is read, each name whose row carries `row=` is that id (wave-28 T7)
 #   _ST_DECLINED    the turn's last `fill-declined:` reason, from the model's own text only
-#   _ST_ENTERED     how many task entries the turn set `in_progress`: distinct task numbers of
-#                   its main-thread TaskUpdate calls with that status, less the ones whose result
-#                   was an error — the task-entry duty's count (wave-28 T38, D30)
 #   _ST_CURRENT _ST_STATE _ST_CEILING _ST_WIDTH _ST_OPEN _ST_FREE   the ledger's numbers
 #   _ST_READY       every ready id, space-joined, untrimmed — the plan's set, launches included
 #   _ST_READY_N     how many ids _ST_READY holds
@@ -2244,10 +1969,8 @@ return 2
 #   _ST_GAP         min(free, |ready not launched and not answered by the standing decline|) —
 #                   what the wall refuses on; _ST_MISSED when nothing stands
 #   _ST_NAMED       the first _ST_GAP of those ids, the ones a refusal names
-#   _ST_TICK_DUTY   on a tick turn, `none` when the tick's digest file says `duty=none`, else
-#                   `owed` — the task-list duty's one input from the tick (wave-24 T8, D5)
-#   _ST_RECONCILE   on a tick turn with a fresh digest, its `reconcile=` (`step4` or `grew`): the
-#                   plan moved, and the refusal says so (wave-27 T37); empty otherwise
+#   (`_ST_TICK_DUTY`, `_ST_RECONCILE` and `_ST_ENTERED`, the task-list duties' inputs, went with
+#   those duties at wave-31 T32; the tick still writes `duty=` and `reconcile=`, read by no wall)
 # Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
 # otherwise — and the caller then has nothing to judge and nothing to record.
 #
@@ -2275,9 +1998,6 @@ return 2
 #                                    which writes no roster row and launched nothing — or a
 #                                    refused TaskStop, which stopped nothing (any tool's error)
 #   STOP <task id words> <tool_use id>  a main-thread TaskStop tool_use — the stand-down's answer
-#   TASKUP <task number> <status> <tool_use id>  a main-thread TaskUpdate tool_use — the
-#                                    task-entry duty's evidence (wave-28 T38, D30). The harness
-#                                    writes `input:{taskId,status}`; nothing else of it is read
 #   DECLINE <reason>                 `fill-declined: <reason>` at a LINE START of a main-thread
 #                                    assistant TEXT block — never thinking, never a tool_use
 #                                    input, never a tool result (AC-5.4: prose quoting, a file
@@ -2309,10 +2029,9 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_READY_N=0; _ST_SENT=0
-  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
-  _ST_RECONCILE=""; _ST_ENTERED=0
+  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_LIVE_HEAD=""; _ST_FACTS=""
   local tr fold mark rest ready count want cap owed FILL_ROSTER FILL_ACKS FILL_OPEN
-  local digest duty at rvat led standing gap rcount rgap slot
+  local digest at rvat led standing gap rcount rgap slot
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
   [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 1
@@ -2387,11 +2106,6 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
                 "STOP\t" + (([.input.task_id?, .input.name?, .input.shell_id?]
                               | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
                 + "\t" + ((.id // "") | tostring)
-              else empty end ),
-            ( if .name == "TaskUpdate" then
-                "TASKUP\t" + (((.input.taskId // "") | tostring) | gsub("[\n\t\r]"; " "))
-                + "\t" + (((.input.status // "") | tostring) | gsub("[\n\t\r]"; " "))
-                + "\t" + ((.id // "") | tostring)
               else empty end )
         else empty
         end
@@ -2408,62 +2122,34 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       t = $2; sub(/^[ \t]+/, "", t)
       tick = (index(t, mark) == 1)
       ts = $3; key = ($4 != "" ? $4 : $3)
-      n = 0; decl = ""; u = 0
+      n = 0; decl = ""
       next
     }
     $1 == "AGENT"    { n++; an[n] = $2; aid[n] = $3; next }
     $1 == "AGENTERR" { if ($2 != "") err[$2] = 1; next }
     $1 == "DECLINE"  { decl = $2; next }
-    $1 == "TASKUP"   { if ($3 == "in_progress" && $2 != "") { u++; ut[u] = $2; uid[u] = $4 } next }
     END {
       launched = ""
       for (i = 1; i <= n; i++) {
         if (aid[i] != "" && (aid[i] in err)) continue
         launched = launched (launched == "" ? "" : ",") an[i]
       }
-      entered = 0; seen = " "
-      for (i = 1; i <= u; i++) {
-        if (uid[i] != "" && (uid[i] in err)) continue
-        if (index(seen, " " ut[i] " ") > 0) continue
-        seen = seen ut[i] " "; entered++
-      }
-      printf "%d\037%s\037%s\037%s\037%s\037%d\n", tick + 0, key, ts, launched, decl, entered
+      printf "%d\037%s\037%s\037%s\037%s\n", tick + 0, key, ts, launched, decl
     }')"
-  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED _ST_ENTERED <<< "$fold"
+  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED <<< "$fold"
   case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
-  case "$_ST_ENTERED" in ''|*[!0-9]*) _ST_ENTERED=0 ;; esac
 
-  # THE TICK'S DUTY LINE (wave-24 T8; D5, AC-4.13). The tick writes `duty=none` beside its
-  # digest when it printed `unchanged`, or owed no reconcile
-  # (hooks/session-poker.sh `tick_conclude`). Only that line excuses a tick turn from the
-  # task-list refresh. No file, a symlink, or any other value leaves the duty owed, which is
-  # what every tick turn owed before the tick could say it was quiet. The path and the reader
-  # are the tick's own (lib/patrol.sh `tick_digest_path`, `tick_digest_field`), at the root
-  # NOTICK below reads the stamp from.
+  # THE TICK'S DIGEST (wave-24 T8; wave-26 T32): its path and reader are the tick's own (lib/patrol.sh
+  # `tick_digest_path`, `tick_digest_field`), at the root NOTICK below reads the stamp from. Its
+  # `duty=` and `reconcile=` lines fed the task-list duty, which went at wave-31 T32 (D6); what is
+  # read here now is the head and the facts state below.
   #
-  # A DIGEST OLDER THAN THIS TURN'S TICK IS NO DIGEST (wave-24 T27; critic I3). A tick that
-  # exits on a refusal writes none, so the last tick's `duty=none` would excuse a turn its own
-  # tick never judged. The digest's `at=` must not be earlier than the marker's timestamp, the
-  # comparison NOTICK makes against the stamp; a digest with no `at=` (written before it had
-  # one) is no digest.
+  # A DIGEST OLDER THAN THIS TURN'S TICK IS NO DIGEST (wave-24 T27; critic I3). A tick that exits on a
+  # refusal writes none, so the digest's `at=` must not be earlier than the marker's timestamp, the
+  # comparison NOTICK makes against the stamp; a digest with no `at=` is no digest.
   if [ "$_ST_TICK" = 1 ]; then
     digest="$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")"
-    duty="$(tick_digest_field "$digest" duty)"
     at="$(tick_digest_field "$digest" at)"
-    if [ "$duty" = none ] && [ -n "$at" ]; then
-      if [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; then
-        _ST_TICK_DUTY=none
-      fi
-    fi
-    # WHY THE RECONCILE IS OWED (wave-27 T37; review pass 8 F2), from the same fresh digest: the
-    # tick writes `reconcile=step4|grew` when the plan moved, and the refusal gives that cause.
-    if [ "$duty" = owed ] && [ -n "$at" ] \
-       && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
-      case "$(tick_digest_field "$digest" reconcile)" in
-        step4) _ST_RECONCILE=step4 ;;
-        grew)  _ST_RECONCILE=grew ;;
-      esac
-    fi
     # THE HEAD THE TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), from the same fresh
     # digest: the wall reads no git, so on a tick's turn it hands the tick's head to the ready set
     # below, and a follow-up review the tick offered is a review the wall owes. Off a tick turn,
@@ -3052,8 +2738,8 @@ fi
 # is the one place that arithmetic exists. Past it the stamp is worth READING THE
 # TRANSCRIPT about; it is not, on its own, a verdict.
 #
-# SOURCED HERE AND NOT AT FILE SCOPE, the way bounds.sh above is sourced and guarded on the
-# thing this file uses: three of the four verdict functions in this library never ask the
+# SOURCED HERE AND NOT AT FILE SCOPE, behind the guard units.sh and fill.sh carry above (on
+# the thing this file uses): three of the four verdict functions in this library never ask the
 # Patrol anything, and a bystander turn should not pay to parse a library it will not call.
 if ! declare -F patrol_verdict >/dev/null 2>&1; then
   # shellcheck source=/dev/null

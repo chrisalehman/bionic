@@ -1,9 +1,10 @@
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered by agents-src/render.sh from agents-src/templates/context/working-principles.md.tmpl and the shared
      blocks in agents-src/blocks/. Edit those, then re-run `bash agents-src/render.sh`.
-     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+     tests/render.test.sh goes red whenever this file and its sources disagree. -->
 
 <!-- bionic:principles:start -->
+<!-- bionic replaces this span on every setup; your own text belongs outside the markers -->
 ## Working principles
 
 **Correctness over expedience.** Complexity is a cost; shipping something that has to be undone is a bigger one. Fix a problem at the layer it lives in.
