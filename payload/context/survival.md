@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered by agents-src/render.sh from agents-src/templates/context/survival.md.tmpl and the shared
      blocks in agents-src/blocks/. Edit those, then re-run `bash agents-src/render.sh`.
-     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+     tests/render.test.sh goes red whenever this file and its sources disagree. -->
 
 <!-- SURVIVAL-BEGIN -->
 Agents have died on each of these, mid-task, with the work already finished. None of them is

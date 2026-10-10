@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered by agents-src/render.sh from agents-src/templates/context/severity.md.tmpl and the shared
      blocks in agents-src/blocks/. Edit those, then re-run `bash agents-src/render.sh`.
-     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+     tests/render.test.sh goes red whenever this file and its sources disagree. -->
 
 <!-- SEVERITY-BEGIN -->
 Severity says how bad a finding is if a user meets it. Reach says whether a user who follows
