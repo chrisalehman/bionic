@@ -1978,159 +1978,195 @@ expect_absent "27q9 …and no word of the comment reaches the row" "whole budget
 
 # ============================================================================
 
-setup_section "S28: the full-run wall asks the proof state (wave-26 REQ-3, D6)"
+setup_section "S28: the full-run wall — one whole run, after the last build row (wave-31 REQ-13, D3, D4)"
 # ============================================================================
 #
-# THE FULL SUITE IS TIED TO THE CODE STATE, NOT TO A COUNT OF RUNS. Through 1.10 this wall
-# counted full-tree rows on the roster and charged one `regression-cause:` line per extra
-# run, and a sibling arm held the floor while any step-4 row was open unless a cause line
-# released it. Both arms are gone. The wall now asks the proof record one question
-# (`proof_state`, payload/scripts/lib/proof.sh): is the working branch's head the one the
-# last floor proof names (`covered`), is the change since that proof provable by a named
-# set of suites (`bounded`), or neither (`unbounded`)? A full run is admitted only when the
-# state is unbounded and no row that writes tracked files is open.
+# ONE WHOLE RUN PER PLAN, AFTER THE BUILD (wave-31 T26; REQ-13, AC-13.2, AC-12.3). Through 1.14
+# this wall asked the map whether a change since the last floor proof was bounded and admitted
+# a whole run only when it was not; the map is gone (T2, T25), and `proof_state` answers
+# `covered` or `uncovered` and nothing else. The wall's rule is now five arms, in order:
+#   1. the plan's frontmatter `regression: no` refuses every whole run, naming the setting;
+#   2. a row the regression waits on that still writes tracked files refuses it (units_floor_holds);
+#   3. a proved head (`covered`) refuses it: run nothing;
+#   4. the first whole run on the plan is admitted;
+#   5. a second is refused unless its row reads approval:regression-2 and the line exists.
+# "A whole run launched before" is any roster row of this project (every roster-*.state) whose
+# `plan=` is this plan and whose `suites_allowed=` holds run.sh, red runs included.
 #
-# THE FIXTURE (pf_repo) IS A REAL REPOSITORY ON A WORKING BRANCH. Five committed suites under
-# tests/ are the roster; `.bionic/config.yaml` names a map stub that answers lib/one.sh with
-# three suites, lib/every.sh with all five, and anything else with nothing. Every shape the
-# state depends on — the floor head, the commits since it, which branches carry them — is a
-# git fact the fixture builds, never a value handed to the code under test.
+# THE FIXTURE (pf_repo) IS A REAL REPOSITORY ON A WORKING BRANCH, and every earlier run the wall
+# counts is one the gate itself journalled, except FR.8's two hand-written rows, which prove the
+# reader walks other sessions' rosters and reads `plan=` and `suites_allowed=` by key.
 #
-# fails-when: the wall admits the run because a cause line exists (AC-3.3); an empty answer
-# is read as "no suite needed" (AC-3.4); the cause-line arm survives, or the wall reads
-# roster row counts, not the proof (AC-3.5).
+# fails-when: a second whole run is admitted with no approval (AC-12.3); a whole run is admitted
+# while a build row writes tracked files (AC-13.2); `regression: no` admits a run, or an approval
+# overrides it; the wall reads a cause line instead of the roster.
 
-# [PF_LIB_DIR, PF_MAP (and the map stub it names), PF_FULL_BRIEF, pf_repo, pf_commit, pf_plan_path, pf_row, PF_STATE_EXTRA, pf_plan, pf_state, pf_line: defined in tests/dispatch-preflight.prelude.sh, hoisted from here for the shards — wave-30 T1]
+# [PF_LIB_DIR, PF_FULL_BRIEF, pf_repo, pf_commit, pf_plan_path, pf_row, PF_FRONT_EXTRA, PF_STATE_EXTRA, pf_plan, pf_state, pf_line: defined in tests/dispatch-preflight.prelude.sh, hoisted from here for the shards — wave-30 T1]
 
-section "§PROOF-BOUNDED — a change the map bounds refuses the full run and names its suites (AC-3.3)"
-REPO=$(pf_repo rpb)
+# fr_tasks <repo> <row>... — append a `## Tasks` table WITH a reads column to the fixture's plan
+# (pf_row's table has none, and the second run's row reads its approval there).
+fr_tasks() {
+  local repo="$1" row; shift
+  {
+    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } >> "$(pf_plan_path "$repo")"
+}
+# fr_canon <repo> -> the plan's path as the binding stores it (bind_plan writes the canonical path,
+# and the roster's plan= is the binding's): the sandbox under /var is /private/var on macOS.
+fr_canon() { printf '%s/%s' "$(cd "$(dirname "$(pf_plan_path "$1")")" && pwd -P)" "$(basename "$(pf_plan_path "$1")")"; }
+FR_APPROVED='approved: regression-2 by dana 2026-10-09T23:00:00Z "yes, run it again"'
+
+section "§FULL-RUN-ONCE — one whole run after the last build row; a second on the user's word (AC-13.2, AC-12.3)"
+# RULE 2: A BUILD ROW STILL OPEN HOLDS THE WHOLE RUN. A run now proves a head that does not survive
+# the row landing. T12 is the regression row; it waits on T1 (landed) and T2 (active, tracked).
+REPO=$(pf_repo rfr1)
 write_attestation "$REPO" "$SID_A"
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" lib/one.sh 'one, changed'
-# THE CAUSE LINE IS PLANTED ON PURPOSE: AC-3.3 fails when the wall admits the run because one
-# exists. Through 1.10 this exact line released a second full run.
-PF_STATE_EXTRA='regression-cause: the tree must be re-proved'
-pf_plan "$REPO" "$PF_H"
-PF_STATE_EXTRA=""
-expect_eq "PB.1 proof_state: one changed file the map answers with three of five suites is bounded by those three" \
-  "$(printf 'bounded\ta.test.sh b.test.sh c.test.sh')" "$(pf_state "$REPO")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pb-full")"
-expect_eq "PB.2 a full-run dispatch after a floor proof is REFUSED when the change is bounded" \
-  "deny" "$GATE_VERDICT"
-expect_contains "PB.2 …though the plan carries a regression-cause: line, which buys nothing now" \
-  "regression-cause:" "$(cat "$(pf_plan_path "$REPO")")"
-expect_contains "PB.2 …the one line says the change is bounded" "bounded" "$(pf_line)"
-expect_contains "PB.2 …and the detail names the three suites, ready to copy into a brief" \
-  "Suites: tests/a.test.sh tests/b.test.sh tests/c.test.sh" "$GATE_VERR"
-expect_absent "PB.2 …and no suite the map did not answer" "d.test.sh" "$GATE_VERR"
-expect_contains "PB.2 …naming the proved head it measured from" "${PF_H:0:7}" "$GATE_VERR"
-expect_absent "PB.2 …and asks for no cause line" "regression-cause" "$GATE_VERR"
-expect_status "PB.2 …and the refused dispatch journalled no row" \
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T2 4 active 'lib/two.sh, tests/two.test.sh')" \
+  "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt verify 'T1, T2')"
+PF_S=$(pf_state "$REPO")
+expect_eq "FR.1 precondition: no regression proof yet, so proof_state is uncovered" "uncovered" "${PF_S%%$'\t'*}"
+expect_contains "FR.1 precondition …saying so" "no regression proof on this plan yet" "$PF_S"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T12")"
+expect_eq "FR.1 a whole run with a build row open is REFUSED (rule 2, AC-13.2)" "deny" "$GATE_VERDICT"
+expect_contains "FR.1 …the one line names the open row" "rows write tracked files: T2" "$(pf_line)"
+expect_contains "FR.1 …and says to land it first" "land them, then dispatch it" "$(pf_line)"
+expect_absent "FR.1 …and not the landed row" "T1" "$(pf_line)"
+expect_status "FR.1 …and the refused dispatch journalled no row" \
   "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: prove the change.
-Expected artifact: .bionic/docs/record/w28-bounded.txt
-Expected duration: ~10 minutes.
-Suites: tests/a.test.sh tests/b.test.sh tests/c.test.sh' "w-pb-narrow")"
-expect_eq "PB.3 the brief the refusal names, those three suites, dispatches" "allow" "$GATE_VERDICT"
-
-# A TASK BRANCH OF THIS RUN IS NOT OUTSIDE WORK. The same one-file change, landed through
-# `wt/99-T1` the way the land verb merges, stays bounded: only another branch's commit makes
-# the change unbounded (the discriminator for PU.3 below).
-REPO=$(pf_repo rpbt)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-git -C "$REPO" checkout -q -b wt/99-T1 2>/dev/null
-pf_commit "$REPO" lib/one.sh 'one, from the task'
-git -C "$REPO" checkout -q wave/99-test 2>/dev/null
-git -C "$REPO" merge -q --no-ff -m 'merge wt/99-T1 (land)' wt/99-T1 2>/dev/null
-pf_plan "$REPO" "$PF_H"
-expect_eq "PB.4 a change landed from the run's own task branch stays bounded" \
-  "$(printf 'bounded\ta.test.sh b.test.sh c.test.sh')" "$(pf_state "$REPO")"
-
-section "§PROOF-UNBOUNDED — what no named set of suites can prove admits the full run (AC-3.4)"
-# A NEW FILE UNDER A DIRECTORY NO SUITE NAMES. The map answers it with nothing, and nothing is
-# not "no suite needed": it is a change no suite is known to prove.
-REPO=$(pf_repo rpu1)
-write_attestation "$REPO" "$SID_A"
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" newdir/zz.sh 'new'
-pf_plan "$REPO" "$PF_H"
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.1 proof_state: a file the map answers with nothing is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.1 …and the reason names the file" "newdir/zz.sh" "$PF_S"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu1-full")"
-expect_eq "PU.1 …and the full run is ADMITTED, with no cause line on the plan" "allow" "$GATE_VERDICT"
-expect_status "PU.1 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# A CHANGE THE MAP ANSWERS WITH EVERY SUITE. The union is the roster, which is a full run by
-# another name.
-REPO=$(pf_repo rpu2)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" lib/every.sh 'every, changed'
-pf_plan "$REPO" "$PF_H"
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.2 proof_state: a change the map answers with every suite is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.2 …and the reason says every suite" "every suite" "$PF_S"
-
-# A COMMIT ANOTHER BRANCH CONTAINS. The file is one the map bounds (PB.1), so only the outside
-# rule can make this unbounded: a merge brings work no proof of this run has read.
-REPO=$(pf_repo rpu3)
-write_attestation "$REPO" "$SID_A"
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-git -C "$REPO" checkout -q -b other-work 2>/dev/null
-pf_commit "$REPO" lib/one.sh 'one, from outside'
-git -C "$REPO" checkout -q wave/99-test 2>/dev/null
-git -C "$REPO" merge -q --no-ff -m 'merge other-work' other-work 2>/dev/null
-pf_plan "$REPO" "$PF_H"
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.3 proof_state: a range holding a commit another branch contains is unbounded" \
-  "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.3 …and the reason says another branch carries it" "another branch" "$PF_S"
-
-# NO FLOOR PROOF YET: the first full run of a plan is always admitted.
-REPO=$(pf_repo rpu4)
-write_attestation "$REPO" "$SID_A"
+# RULE 4: AFTER THE LAST LANDS, THE FIRST WHOLE RUN IS ADMITTED.
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T2 4 landed 'lib/two.sh, tests/two.test.sh')" \
+  "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt verify 'T1, T2')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T12")"
+expect_eq "FR.2 after the last build row lands, the plan's first whole run is ADMITTED (rule 4, AC-13.2)" \
+  "allow" "$GATE_VERDICT"
+expect_absent "FR.2 …with nothing from this arm on the wire" "whole run" "$GATE_ERR"
+expect_status "FR.2 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+FR_ROW1="$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+expect_eq "FR.2 …its row names this plan (the field rule 5 reads)" "$(fr_canon "$REPO")" "$(roster_field "$FR_ROW1" plan)"
+expect_contains "FR.2 …and a suite set holding run.sh (the other field it reads)" "run.sh" "$(roster_field "$FR_ROW1" suites_allowed)"
+FR_AT1="$(roster_field "$FR_ROW1" launched_at)"
+expect_nonempty "FR.2 …and a launch time the refusal below names" "$FR_AT1"
+# RULE 5: A SECOND WHOLE RUN IS REFUSED, naming the approval. The cause line of 1.10 is planted on
+# purpose: it bought a second run then, and buys nothing now.
+PF_STATE_EXTRA='regression-cause: the tree must be re-proved'
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T2 4 landed 'lib/two.sh, tests/two.test.sh')" \
+  "$(pf_row T12 5 active .bionic/docs/record/w99-floor.txt verify 'T1, T2')"
+PF_STATE_EXTRA=""
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-fr-again")"
+expect_eq "FR.3 a second whole run on the plan is REFUSED (rule 5, AC-12.3)" "deny" "$GATE_VERDICT"
+expect_contains "FR.3 …though the plan carries a regression-cause: line, which buys nothing" \
+  "regression-cause:" "$(cat "$(pf_plan_path "$REPO")")"
+expect_contains "FR.3 …the one line says it is a second whole run" "a second whole run on this plan" "$(pf_line)"
+expect_contains "FR.3 …and names the approval verb" "approve regression-2" "$(pf_line)"
+expect_contains "FR.3 …the detail names the first run and when it launched" "w99-T12 at ${FR_AT1}" "$GATE_VERR"
+expect_contains "FR.3 …and the row read the approval needs" "a row that reads approval:regression-2" "$GATE_VERR"
+expect_contains "FR.3 …and the verb, whole" "session-poker.sh approve regression-2 '<reply>'" "$GATE_VERR"
+expect_absent "FR.3 …and asks for no cause line" "regression-cause" "$GATE_VERR"
+expect_status "FR.3 …and journalled nothing" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+# THE APPROVAL LINE ALONE IS NOT ENOUGH: no row reads it (the line is hand-written here; `approve`
+# itself refuses a name no open row reads).
+PF_STATE_EXTRA="$FR_APPROVED"
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T2 4 landed 'lib/two.sh, tests/two.test.sh')" \
+  "$(pf_row T12 5 active .bionic/docs/record/w99-floor.txt verify 'T1, T2')"
+PF_STATE_EXTRA=""
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-fr-again")"
+expect_eq "FR.4 an approved: regression-2 line with no row reading it does not admit a second run" "deny" "$GATE_VERDICT"
+expect_contains "FR.4 …refused as a second whole run" "approve regression-2" "$(pf_line)"
+# A ROW READING THE APPROVAL, WITHOUT THE LINE: the approval wall holds it, naming the verb.
 pf_plan "$REPO" ""
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.4 proof_state: a plan with no regression proof is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.4 …saying so" "no regression proof on this plan yet" "$PF_S"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu4-full")"
-expect_eq "PU.4 …and the plan's first full run is ADMITTED" "allow" "$GATE_VERDICT"
+fr_tasks "$REPO" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/one.sh |  | landed |' \
+  '| T12 | 5 | verify | the regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor.txt |  | active |' \
+  '| T13 | 5 | verify | the second regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor2.txt | approval:regression-2, head | pending |'
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T13")"
+expect_eq "FR.5 a second run whose row reads approval:regression-2 with no approved line is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "FR.5 …naming the approval the row waits for" "waits for approval:regression-2" "$(pf_line)"
+# …AND WITH THE LINE TOO, THE SECOND RUN IS ADMITTED.
+PF_STATE_EXTRA="$FR_APPROVED"
+pf_plan "$REPO" ""
+PF_STATE_EXTRA=""
+fr_tasks "$REPO" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/one.sh |  | landed |' \
+  '| T12 | 5 | verify | the regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor.txt |  | active |' \
+  '| T13 | 5 | verify | the second regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor2.txt | approval:regression-2, head | pending |'
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T13")"
+expect_eq "FR.6 a second run whose row reads approval:regression-2, with the approved line, is ADMITTED (AC-12.3)" \
+  "allow" "$GATE_VERDICT"
+expect_status "FR.6 …and journalled" "2" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
-# THE RUN WAITS FOR THE RUN THE WALL ADMITS (wave-26 T64; AC-3.4). Integrate's `proof:floor` read
-# stands only while the state is covered or bounded, so on PU.1's change it waits, naming a full
-# run on the head; this wall must keep admitting exactly that run, or the two would deadlock. A
-# reads table at current: 8: the floor and review rows landed, integrate pending on its kind
-# default, a floor proof at the base and a new file under a directory no suite names since.
-REPO=$(pf_repo rpu64)
+# RULE 1: `regression: no` REFUSES EVERY WHOLE RUN, the first included, and no approval overrides it.
+REPO=$(pf_repo rfr7)
 write_attestation "$REPO" "$SID_A"
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" newdir/zz.sh 'new'
-pf_plan "$REPO" "$PF_H"
-awk '{ print } /^approved-by:/ { print "proved: kind=review head='"$PF_H"' at=2026-10-04T00:00:00Z evidence=record/w99-review.md" }' \
-  "$(pf_plan_path "$REPO")" > "$SANDBOX/pu64.tmp"
-{ sed 's/^current: 5$/current: 8/' "$SANDBOX/pu64.tmp"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/one.sh |  | landed |\n'
-  printf '| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | .bionic/docs/record/w99-floor.txt |  | landed |\n'
-  printf '| T2 | 6 | review | the review | critic | — | 30 | REQ-1 | .bionic/docs/record/w99-review.md |  | landed |\n'
-  printf '| T3 | 8 | integrate | merge | — | — | 10 | REQ-1 | — |  | pending |\n'
-} > "$(pf_plan_path "$REPO")"
-PF_W64="$( . "$PF_LIB_DIR/units.sh" >/dev/null 2>&1; units_waiting "$(pf_plan_path "$REPO")" 8 2>/dev/null)"
-expect_contains "PU.64 precondition: integrate waits for a full run on this head (the ready set's own wait)" \
-  "proof:floor: the head moved past the regression proof at ${PF_H:0:12} in a way the map cannot bound (the map answers newdir/zz.sh with no suite)" \
-  "$PF_W64"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu64-full")"
-expect_eq "PU.64 …and the full run it waits for is ADMITTED (the wait and the wall do not deadlock)" "allow" "$GATE_VERDICT"
-expect_status "PU.64 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+PF_FRONT_EXTRA='regression: no'
+PF_STATE_EXTRA="$FR_APPROVED"
+pf_plan "$REPO" ""
+PF_STATE_EXTRA=""
+fr_tasks "$REPO" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/one.sh |  | landed |' \
+  '| T13 | 5 | verify | the second regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor2.txt | approval:regression-2, head | pending |'
+expect_contains "FR.7 precondition: the plan's frontmatter declares regression: no" \
+  "regression: no" "$(sed -n '1,/^# Test wave plan/p' "$(pf_plan_path "$REPO")")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-fr-first")"
+expect_eq "FR.7 regression: no refuses the plan's first whole run (rule 1)" "deny" "$GATE_VERDICT"
+expect_contains "FR.7 …the one line names the setting" "the plan declares regression: no" "$(pf_line)"
+expect_contains "FR.7 …and the verb that changes it" "session-poker.sh regression yes" "$(pf_line)"
+expect_contains "FR.7 …the detail says it is changed by the setting, not run around" \
+  "change it with session-poker.sh regression yes '<reply>', not by running the suite" "$GATE_VERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T13")"
+expect_eq "FR.7b …and a row reading approval:regression-2, with the approved line, does not override it" \
+  "deny" "$GATE_VERDICT"
+expect_contains "FR.7b …refused for the setting" "the plan declares regression: no" "$(pf_line)"
+expect_status "FR.7b …and neither journalled a row" "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+# …THE SAME PLAN AT regression: yes ADMITS ITS FIRST RUN (the discriminator; an absent key is FR.2).
+PF_FRONT_EXTRA='regression: yes'
+pf_plan "$REPO" "" "$(pf_row T1 4 landed lib/one.sh)"
+PF_FRONT_EXTRA=""
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-fr-first")"
+expect_eq "FR.7c the same plan at regression: yes admits its first whole run" "allow" "$GATE_VERDICT"
 
-# UNBOUNDED IS NOT ENOUGH WHILE A ROW THE FLOOR WAITS ON STILL WRITES TRACKED FILES. A full run
-# over a head that such a row is about to move proves a tree that does not survive it landing.
-# ONLY THOSE ROWS HOLD IT (wave-26 T52; review 14 B1, ruling R1): through T5 this row asserted
-# that a pending row at a LATER step held the floor too, and on this wave's own plan that was
-# the release, which waits on the floor — a deadlock. PU.5 now asserts the ruling: the rows the
-# floor row waits on (its deps and its reads, the ready set's own judgment), not landed, whose
-# Files leave the record by units.sh `writes_head`. The dispatch names the floor row (T12).
+# THE COUNT SPANS EVERY ROSTER OF THE PROJECT AND READS ITS ROWS BY KEY. Two hand-written rows on
+# SID_B's roster: one on another plan, then one on this plan. A narrow run journalled on this plan
+# by the gate is not a whole run.
+REPO=$(pf_repo rfr8)
+write_attestation "$REPO" "$SID_A"
+pf_plan "$REPO" "" "$(pf_row T1 4 landed lib/one.sh)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: prove the change.
+Expected artifact: .bionic/docs/record/w28-narrow.txt
+Expected duration: ~10 minutes.
+Suites: tests/a.test.sh' "w-fr-narrow")"
+expect_eq "FR.8 precondition: a narrow run on the plan dispatches" "allow" "$GATE_VERDICT"
+FR_RB="$(roster_path "$REPO" "$SID_B")"
+printf '# roster\nroster-state/%s|status=intended|session=%s|name=w-elsewhere|launched_at=2026-10-01T00:00:00Z|suites_allowed=run.sh|plan=%s\n' \
+  "$ROSTER_SCHEMA_VERSION" "$SID_B" "$(dirname "$(fr_canon "$REPO")")/wave-02-other.plan.md" > "$FR_RB"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-fr-whole")"
+expect_eq "FR.8 a narrow run and a whole run on ANOTHER plan leave this plan's first whole run ADMITTED" \
+  "allow" "$GATE_VERDICT"
+REPO=$(pf_repo rfr8b)
+write_attestation "$REPO" "$SID_A"
+pf_plan "$REPO" "" "$(pf_row T1 4 landed lib/one.sh)"
+FR_RB="$(roster_path "$REPO" "$SID_B")"
+printf '# roster\nroster-state/%s|status=intended|session=%s|name=w-other-session|launched_at=2026-10-01T00:00:00Z|suites_allowed=run.sh|plan=%s\n' \
+  "$ROSTER_SCHEMA_VERSION" "$SID_B" "$(fr_canon "$REPO")" > "$FR_RB"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-fr-whole")"
+expect_eq "FR.8b a whole run another session's roster holds on THIS plan makes this one the second: REFUSED" \
+  "deny" "$GATE_VERDICT"
+expect_contains "FR.8b …naming that session's run and its launch" "w-other-session at 2026-10-01T00:00:00Z" "$GATE_VERR"
+
+# THE HOLD NAMES ONLY THE ROWS THE REGRESSION WAITS ON (wave-26 T52; review 14 B1, ruling R1): through
+# T5 a pending row at a LATER step held the floor too, and on that wave's own plan that was the
+# release, which waits on the floor — a deadlock. The rows the floor row waits on (its deps and its
+# reads, the ready set's own judgment), not landed, whose Files leave the record by units.sh
+# `writes_head`. The dispatch names the floor row (T12).
 REPO=$(pf_repo rpu5)
 write_attestation "$REPO" "$SID_A"
 pf_plan "$REPO" "" \
@@ -2140,7 +2176,7 @@ pf_plan "$REPO" "" \
   "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt verify 'T1, T2, T4')" \
   "$(pf_row T3 7 pending 'CHANGELOG.md, lib/one.sh!' doc T12)"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T12")"
-expect_eq "PU.5 an unbounded full run is REFUSED while a row the floor waits on writes tracked files" \
+expect_eq "PU.5 a whole run is REFUSED while a row the floor waits on writes tracked files" \
   "deny" "$GATE_VERDICT"
 expect_contains "PU.5 …the one line names that active writer" "T2" "$(pf_line)"
 expect_absent "PU.5 …but not the release that waits on the floor, though its Files are tracked (R1)" "T3" "$(pf_line)"
@@ -2151,12 +2187,11 @@ expect_absent "PU.5 …and asks for no cause line" "regression-cause" "$GATE_VER
 expect_status "PU.5 …and journalled no row" "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 # A DISPATCH THAT NAMES NO ROW is held by what the plan's open verify rows wait on: the same T2.
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu5-full")"
-expect_eq "PU.5b a full run that names no row is held by what the open verify row waits on" "deny" "$GATE_VERDICT"
+expect_eq "PU.5b a whole run that names no row is held by what the open verify row waits on" "deny" "$GATE_VERDICT"
 expect_contains "PU.5b …naming T2" "T2" "$(pf_line)"
 expect_absent "PU.5b …and not the release" "T3" "$(pf_line)"
-# THIS WAVE'S OWN SHAPE (V14-hold.sh): every build row landed, the verify and review rows
-# pending, a release row that writes tracked files and waits on the verify row. Through T5 the
-# release held the floor; the floor is admitted now.
+# THAT WAVE'S OWN SHAPE (V14-hold.sh): every build row landed, the verify and review rows pending, a
+# release row that writes tracked files and waits on the verify row. The floor is admitted.
 REPO=$(pf_repo rpu5c)
 write_attestation "$REPO" "$SID_A"
 pf_plan "$REPO" "" \
@@ -2166,7 +2201,7 @@ pf_plan "$REPO" "" \
   "$(pf_row T28 6 pending .bionic/docs/record/w99-review.md review 'T1, T2')" \
   "$(pf_row T29 7 pending 'CHANGELOG.md, tests/docs-pins.test.sh' doc 'T27, T28')"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T27")"
-expect_eq "PU.5c this wave's shape: the Step-5 floor is ADMITTED while the release waits on it" "allow" "$GATE_VERDICT"
+expect_eq "PU.5c the Step-5 floor is ADMITTED while the release waits on it" "allow" "$GATE_VERDICT"
 expect_absent "PU.5c …with nothing from this arm on the wire" "write tracked files" "$GATE_ERR"
 expect_status "PU.5c …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 REPO=$(pf_repo rpu6)
@@ -2176,147 +2211,10 @@ pf_plan "$REPO" "" \
   "$(pf_row T2 4 dropped lib/two.sh)" \
   "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt)"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu6-full")"
-expect_eq "PU.6 with every tracked-file writer landed or dropped, the full run is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "PU.6 with every tracked-file writer landed or dropped, the whole run is ADMITTED" "allow" "$GATE_VERDICT"
 expect_absent "PU.6 …with nothing from this arm on the wire" "write tracked files" "$GATE_ERR"
 
-# ---- wave-26 T52: review 14 S1, S2, N5, N7 (ruling R2), N8 ----
-# S1 — AN OUTSIDE COMMIT IS SEEN ON A REMOTE-TRACKING REF OR A TAG, not only on a local branch.
-# `git merge origin/feat` or a merge of a tag brings work no proof of this run read; the file is
-# one the map bounds (PB.1), so only the outside rule can make it unbounded.
-REPO=$(pf_repo rpu7)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-git -C "$REPO" checkout -q --detach 2>/dev/null
-pf_commit "$REPO" lib/one.sh 'one, from a remote'
-git -C "$REPO" update-ref refs/remotes/origin/feat HEAD
-git -C "$REPO" checkout -q wave/99-test 2>/dev/null
-git -C "$REPO" merge -q --no-ff -m 'merge origin/feat' origin/feat 2>/dev/null
-pf_plan "$REPO" "$PF_H"
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.7 S1 a merge from a remote-tracking ref only is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.7b …saying another branch carries it" "another branch" "$PF_S"
-REPO=$(pf_repo rpu7t)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-git -C "$REPO" checkout -q --detach 2>/dev/null
-pf_commit "$REPO" lib/one.sh 'one, from a tag'
-git -C "$REPO" tag v-outside HEAD
-git -C "$REPO" checkout -q wave/99-test 2>/dev/null
-git -C "$REPO" merge -q --no-ff -m 'merge v-outside' v-outside 2>/dev/null
-pf_plan "$REPO" "$PF_H"
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.7c S1 a merge from a tag only is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-# …AND THE RUN'S OWN WORK, PUSHED, STAYS BOUNDED: the wave branch and a task branch on the
-# remote are excluded like their local names.
-REPO=$(pf_repo rpu7w)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-git -C "$REPO" checkout -q -b wt/99-T1 2>/dev/null
-pf_commit "$REPO" lib/one.sh 'one, from the task'
-git -C "$REPO" update-ref refs/remotes/origin/wt/99-T1 HEAD
-git -C "$REPO" checkout -q wave/99-test 2>/dev/null
-git -C "$REPO" merge -q --no-ff -m 'merge wt/99-T1 (land)' wt/99-T1 2>/dev/null
-git -C "$REPO" update-ref refs/remotes/origin/wave/99-test HEAD
-pf_plan "$REPO" "$PF_H"
-expect_eq "PU.7d S1 control: the run's own task branch, landed and pushed with the wave branch, stays bounded" \
-  "$(printf 'bounded\ta.test.sh b.test.sh c.test.sh')" "$(pf_state "$REPO")"
-
-# A SECOND MAP STUB, SHAPED LIKE THE SHIPPED MAP: one line per suite, naming the first file that
-# reaches it, so a file whose suites another changed file already claims is named by no line.
-# lib/one.sh reaches a b c; a suite file reaches itself; lib/ghost.sh reaches a and a suite the
-# checkout does not hold; the runner and the test library are answered like the shipped map
-# answers them (some suites, not every one).
-PF_MAP2="$SANDBOX/pf-map2.sh"
-{
-  printf '#!/bin/bash\n'
-  printf 'seen=" "\n'
-  printf 'say() { case "$seen" in *" $1 "*) return ;; esac; seen="$seen$1 "; printf "%%s\\t%%s:%%s\\n" "$1" "$2" "$3"; }\n'
-  printf 'for f in "$@"; do\n'
-  printf '  case "$f" in\n'
-  printf '    lib/one.sh)       for s in a b c; do say "$s.test.sh" dir-ref "$f"; done ;;\n'
-  printf '    lib/ghost.sh)     say a.test.sh path-ref "$f"; say gone.test.sh path-ref "$f" ;;\n'
-  printf '    tests/lib/*)      say a.test.sh source "$f" ;;\n'
-  printf '    tests/*.test.sh)  say "${f#tests/}" self "$f" ;;\n'
-  printf '    tests/*)          say a.test.sh path-ref "$f"; say b.test.sh path-ref "$f" ;;\n'
-  printf '  esac\n'
-  printf 'done\n'
-} > "$PF_MAP2"
-pf_repo2() { local r; r=$(pf_repo "$1"); printf 'impact-command: bash %s\n' "$PF_MAP2" > "$r/.bionic/config.yaml"; printf '%s' "$r"; }
-
-# S2 — A FILE WHOSE SUITES ANOTHER CHANGED FILE CLAIMS IS STILL ANSWERED. lib/one.sh alone is
-# bounded; lib/one.sh with tests/a.test.sh read as "tests/a.test.sh with no suite" through T5.
-REPO=$(pf_repo2 rpu8)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" lib/one.sh 'one, changed'
-pf_commit "$REPO" tests/a.test.sh $'#!/bin/bash\n# changed'
-pf_plan "$REPO" "$PF_H"
-expect_eq "PU.8 S2 a changed suite whose one suite another changed file names keeps the change bounded" \
-  "$(printf 'bounded\ta.test.sh b.test.sh c.test.sh')" "$(pf_state "$REPO")"
-# …and a file the map truly answers with nothing still says so, by name.
-pf_commit "$REPO" newdir/zz.sh 'new'
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.8b S2 control: with a file no suite reaches, the change is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.8c …naming that file, not the claimed one" "newdir/zz.sh with no suite" "$PF_S"
-
-# N8 — A SUITE THE CHECKOUT DOES NOT HOLD IS NEVER NAMED, and deleting a suite is unbounded: the
-# roster the full run reads has changed, and no remaining suite is known to prove the deletion.
-REPO=$(pf_repo2 rpu9)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" lib/ghost.sh 'ghost'
-pf_plan "$REPO" "$PF_H"
-expect_eq "PU.9 N8 a suite the map names that the checkout lacks is dropped from the bounded set" \
-  "$(printf 'bounded\ta.test.sh')" "$(pf_state "$REPO")"
-git -C "$REPO" rm -q tests/e.test.sh
-git -C "$REPO" commit -qm 'drop suite e' 2>/dev/null
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.9b N8 a change that deletes a suite is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.9c …saying which suite it deletes" "deletes the suite tests/e.test.sh" "$PF_S"
-
-# N7 / R2 — A CHANGE TO THE RUNNER OR TO tests/lib/ OWES A FULL RUN, whatever the map says. The
-# map stub answers both with a suite or two, as the shipped map does (11 suites for the runner).
-# Committed with `add tests`, so no command line here carries the runner's path.
-REPO=$(pf_repo2 rpu10)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-printf '#!/bin/bash\necho changed\n' > "$REPO/tests/run.sh"
-( cd "$REPO" && git add tests && git commit -qm 'change the runner' ) >/dev/null 2>&1
-pf_plan "$REPO" "$PF_H"
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.10 R2 a change to the full-suite runner alone is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.10b …saying it is the runner every suite runs through" "the full-suite runner" "$PF_S"
-REPO=$(pf_repo2 rpu10l)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" tests/lib/assert.sh '# the framework'
-pf_plan "$REPO" "$PF_H"
-PF_S=$(pf_state "$REPO")
-expect_eq "PU.10c R2 a change under tests/lib/ is unbounded" "unbounded" "${PF_S%%$'\t'*}"
-expect_contains "PU.10d …naming the file" "tests/lib/assert.sh" "$PF_S"
-# …and the same stub bounds an ordinary tests/ file it answers (the discriminator).
-REPO=$(pf_repo2 rpu10c)
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" tests/fixtures/x.txt 'fixture'
-pf_plan "$REPO" "$PF_H"
-expect_eq "PU.10e R2 control: a fixture file under tests/ stays bounded by the map" \
-  "$(printf 'bounded\ta.test.sh b.test.sh')" "$(pf_state "$REPO")"
-
-# N5 — A MAP THAT OVERRUNS ITS BOUND IS KILLED, NOT LEFT RUNNING. The stub loops for ever; the
-# bound is set to one second for this row only (the shipped bound is §29's subject).
-PF_SLOW="$SANDBOX/pf-slow-map-$$.sh"
-printf '#!/bin/bash\nwhile :; do sleep 0.1; done\n' > "$PF_SLOW"
-bash "$PF_SLOW" & PF_SLOW_PID=$!
-sleep 0.3
-expect_nonempty "PU.11 precondition: pgrep sees the slow map while it runs" "$(pgrep -f "pf-slow-map-$$" 2>/dev/null)"
-kill "$PF_SLOW_PID" 2>/dev/null; wait "$PF_SLOW_PID" 2>/dev/null
-REPO=$(pf_repo rpu11)
-printf 'impact-command: bash %s\n' "$PF_SLOW" > "$REPO/.bionic/config.yaml"
-PF_H=$(git -C "$REPO" rev-parse HEAD)
-pf_commit "$REPO" lib/one.sh 'one, changed'
-pf_plan "$REPO" "$PF_H"
-PF_S=$( (IMPACT_BOUND_S=1; export IMPACT_BOUND_S; pf_state "$REPO") )
-expect_contains "PU.11b N5 a map that overruns is unbounded, saying so" "overran its 1 s bound" "$PF_S"
-sleep 0.3
-PF_LEFT="$(pgrep -f "pf-slow-map-$$" 2>/dev/null)"
-expect_eq "PU.11c N5 …and no map process is left running after the answer" "" "$PF_LEFT"
-# shellcheck disable=SC2086
-[ -z "$PF_LEFT" ] || kill $PF_LEFT 2>/dev/null
-
-section "§PROOF-COVERED — the proved head refuses, an outside merge admits (AC-3.5)"
+# RULE 3: THE PROVED HEAD REFUSES — run nothing.
 REPO=$(pf_repo rpc)
 write_attestation "$REPO" "$SID_A"
 PF_H=$(git -C "$REPO" rev-parse HEAD)
@@ -2325,37 +2223,41 @@ PF_S=$(pf_state "$REPO")
 expect_eq "PC.1 proof_state: the head the last floor proof names is covered" "covered" "${PF_S%%$'\t'*}"
 expect_eq "PC.1 …and it names the working head it judged (N6)" "$PF_H" "${PF_S#*$'\t'}"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-full")"
-expect_eq "PC.1 a full run on the proved head is REFUSED" "deny" "$GATE_VERDICT"
+expect_eq "PC.1 a whole run on the proved head is REFUSED (rule 3)" "deny" "$GATE_VERDICT"
 expect_contains "PC.1 …the one line says the head is proved" "already proved" "$(pf_line)"
 expect_contains "PC.1 …the detail names the head and the evidence" "record/w99-floor.txt" "$GATE_VERR"
 expect_contains "PC.1 …and the head" "${PF_H:0:7}" "$GATE_VERR"
-# …AND AFTER AN OUTSIDE MERGE THE SAME PLAN DISPATCHES, with no cause line written anywhere.
+# AN OUTSIDE MERGE IS `uncovered` NOW (T25), and the wall treats it as any other uncovered head:
+# admitted as the plan's FIRST whole run (the refused PC.1 journalled none), refused as a SECOND.
 git -C "$REPO" checkout -q -b other-work 2>/dev/null
 pf_commit "$REPO" lib/one.sh 'one, from outside'
 git -C "$REPO" checkout -q wave/99-test 2>/dev/null
 git -C "$REPO" merge -q --no-ff -m 'merge other-work' other-work 2>/dev/null
+PF_S=$(pf_state "$REPO")
+expect_eq "PC.2 precondition: after an outside merge proof_state is uncovered" "uncovered" "${PF_S%%$'\t'*}"
+expect_status "PC.2 precondition: …and the roster holds no earlier whole run" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-after")"
-expect_eq "PC.2 after an outside merge the full run is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "PC.2 after an outside merge the plan's FIRST whole run is ADMITTED" "allow" "$GATE_VERDICT"
 expect_absent "PC.2 …and the plan carries no regression-cause: line" "regression-cause" \
   "$(cat "$(pf_plan_path "$REPO")")"
 expect_contains "PC.2 …(the plan read is the one with the floor proof)" "proved: kind=floor" \
   "$(cat "$(pf_plan_path "$REPO")")"
 expect_status "PC.2 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# THE ARM READS NO CAUSE LINE AND NO ROSTER COUNT. A second admitted full run on an unbounded
-# change is not a count the wall keeps: the roster already holds w-pc-after's row.
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-again")"
-expect_eq "PC.3 a second full run on the same unbounded change is not refused by a roster count" \
-  "allow" "$GATE_VERDICT"
+expect_eq "PC.3 a SECOND whole run on the same outside merge is REFUSED, not admitted as unbounded" \
+  "deny" "$GATE_VERDICT"
+expect_contains "PC.3 …naming the approval" "approve regression-2" "$(pf_line)"
+expect_contains "PC.3 …and the first run" "w-pc-after at " "$GATE_VERR"
 expect_eq "PC.3 …the hook defines no cause-line reader" "0" \
   "$(/usr/bin/grep -c 'regression_causes\|regression-cause' "$GATE")"
-expect_eq "PC.3 …and no roster counter of full-tree rows" "0" "$(/usr/bin/grep -c 'regression_rows' "$GATE")"
 expect_nonempty "PC.3 …(the extractor reads the hook: it holds the proof_state call)" \
   "$(/usr/bin/grep -n 'proof_state' "$GATE")"
+expect_eq "PC.3 …and the map's words are gone from the wall" "0" \
+  "$(/usr/bin/grep -c 'bounded\*)\|cannot be bounded\|_fr_moment' "$GATE")"
 
 # N6 (wave-26 T52) — AN EMPTY DIFFERENCE WITH ANOTHER HEAD IS COVERED (A-T5.5), AND THE REFUSAL
-# NAMES THE HEAD BEING RELEASED. Through T5 it named the proof's head and called the working head
-# "the one the plan's last floor proof names", which an empty commit made untrue.
+# NAMES THE HEAD BEING RELEASED.
 REPO=$(pf_repo rpc4)
 write_attestation "$REPO" "$SID_A"
 PF_H=$(git -C "$REPO" rev-parse HEAD)
@@ -2366,7 +2268,7 @@ PF_S=$(pf_state "$REPO")
 expect_eq "PC.4 proof_state: an empty change since the proof is covered" "covered" "${PF_S%%$'\t'*}"
 expect_eq "PC.4b …naming the working head, not the proof's" "$PF_H2" "${PF_S#*$'\t'}"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc4-full")"
-expect_eq "PC.4c the full run is REFUSED" "deny" "$GATE_VERDICT"
+expect_eq "PC.4c the whole run is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "PC.4d …the one line names the released head" "head ${PF_H2:0:7} is already proved" "$(pf_line)"
 expect_contains "PC.4e …and the detail the tree proved at the proof's head" "(the tree proved at ${PF_H:0:7})" "$GATE_VERR"
 
