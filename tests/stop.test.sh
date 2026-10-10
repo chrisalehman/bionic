@@ -617,10 +617,11 @@ expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
 
 # THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.8). 9h's fixture, nothing launched, under a
 # five-minute load over the share: the gate gives no room, so the wall owes no row and its
-# ledger records the hold. 9h above is the same fixture with room, and refuses.
+# ledger records the hold. 9h above is the same fixture with room, and refuses. 8.0 busy cores of the
+# fixture's 8 is over the gate's width at any share below 100 (92 x 8 / 100 = 7.36; wave-31 T36, A-T36-4).
 S9_DG="$(s9_fixture)"
 S9_TXG="$(mktemp)"; s9_transcript "$S9_TXG"
-BIONIC_PROBE_BUSY_CORES_5M=7.0 s7_fire "$S9_DG" "$S9_TXG"
+BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$S9_DG" "$S9_TXG"
 S9_LEDG="$S9_DG/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
 expect_contains "9q: with no room at the gate the ledger records the hold, both rows ready, none free" \
   "|state=hold|" "$(cat "$S9_LEDG" 2>/dev/null)"
