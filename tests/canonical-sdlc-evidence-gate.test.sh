@@ -4486,4 +4486,175 @@ expect_status "R2g the repaired table commits" "0" "$EG_R2_EXIT"
 expect_empty "R2h …and prints nothing, so R2c read a refusal and not a chatty hook" "$EG_R2_ERR"
 # [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]
 
+# ============================================================
+# §NET-ZERO: the doctrine never grows without the user's word (wave-31 T30; REQ-14 AC-14.1,
+# AC-14.2; D13). Appended after R2's marked span, so that span stays the one the cross-gate
+# suite reads.
+# ============================================================
+
+section "§NET-ZERO: the commit wall sums the loaded set's bytes at HEAD and in the index and refuses growth naming the delta and the files, unless the committing tree's open row reads approval:doctrine-growth and '## SDLC State' carries its approved: line; a shrink passes silently (wave-31 T30; REQ-14; D13)"
+
+# fails-when: a growth passes unapproved, or a shrink is refused.
+#
+# SECTION 25'S SHAPE: a real repository whose HEAD holds files of the set, real linked worktrees
+# owned by two `## Tasks` rows, and the gate driven through the Bash wall with the payload cwd in
+# the tree that commits. A change is STAGED (`git add`), never committed: the wall reads the index
+# at PreToolUse, before git runs. Every case puts its tree back (`nz_reset`) before the next.
+nz_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$nz_tmp")
+nz_main="$nz_tmp/main"
+nz_bytes() { head -c "$1" /dev/zero | tr '\0' 'a'; }   # <n> -> n bytes, no newline
+nz_put() { mkdir -p "$(dirname "$1")" && nz_bytes "$2" > "$1"; }   # <path> <n>
+mkdir -p "$nz_main/.bionic/docs/plans" "$nz_main/.bionic/docs/record/w25g"
+printf 'evidence\n' > "$nz_main/.bionic/docs/record/w25g/x.md"
+nz_put "$nz_main/skills/canonical-sdlc/SKILL.md" 500
+nz_put "$nz_main/skills/canonical-sdlc/steps/4.md" 1000
+nz_put "$nz_main/skills/canonical-sdlc/dispatch.md" 400
+nz_put "$nz_main/skills/canonical-sdlc/operational-rules.md" 800
+nz_put "$nz_main/agents/critic.md" 300
+nz_put "$nz_main/payload/context/severity.md" 300
+nz_put "$nz_main/agents-src/templates/skills/canonical-sdlc/steps/4.md.tmpl" 1000
+nz_put "$nz_main/README.md" 100
+git -C "$nz_main" init -q .
+git -C "$nz_main" add skills agents agents-src payload README.md
+git -C "$nz_main" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+  -c core.hooksPath=/dev/null commit -q -m 'the set at HEAD'
+engage "$nz_main"
+git -C "$nz_main" worktree add -q "$nz_tmp/wt-T1" -b nz-t1
+git -C "$nz_main" worktree add -q "$nz_tmp/wt-T2" -b nz-t2
+
+# T1 reads no growth; T2 reads approval:doctrine-growth. Both are active Step-4 builds, so a commit
+# from either tree is judged by its row's task arms.
+nz_tasks="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a build that reads no growth | senior-implementor | — | 60 | REQ-14 | a.sh | wt-T1 | — | active | approval:plan |
+| T2 | 4 | build | a build that reads the growth | senior-implementor | — | 60 | REQ-14 | b.sh | wt-T2 | — | active | approval:plan, approval:doctrine-growth |"
+NZ_APPROVED='approved: doctrine-growth by Chris 2026-10-10T14:00:00Z "yes, grow it"'
+nz_plan() {  # [<extra SDLC State line>] -> the plan
+  printf '%s\n## SDLC State\ncurrent: 4\napproved-by: fixture 2026-10-10T00:00Z "approved"\n%sStep 4:\n  worktree: .worktrees/wt-T1\n  base-sha: 0fe69ed\n  branch: wt/31-T1\n\n%s\n\n%s\n' \
+    "$(matrix_frontmatter true none false)" "${1:+$1
+}" "$nz_tasks" "$matrix_w25g" > "$nz_main/.bionic/docs/plans/wave-01-x.plan.md"
+}
+nz_stage() {  # <tree> <path> <bytes> — rewrite the file to that size and stage it
+  nz_put "$1/$2" "$3" && git -C "$1" add -- "$2"
+}
+nz_reset() {  # <tree> — index and work tree back to HEAD, new files gone
+  git -C "$1" reset -q --hard && git -C "$1" clean -qfd -- skills agents payload agents-src
+}
+nz_drive() { run_hook_cwd "$(make_home)" "$nz_main" "$1" 'git commit -m "x"'; }   # <tree>
+nz_refused() {  # <label> <tree> <substring>… — exit 2, one line in shape, each substring on line+detail
+  local label="$1" tree="$2" s miss=""; shift 2
+  nz_drive "$tree"
+  for s in "$@"; do grep -qF -- "$s" <<<"$HOOK_VSTDERR" || miss="$miss [$s]"; done
+  if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check && [ -z "$miss" ]; then
+    ok "$label"
+  else
+    no "$label" "expected refusal naming$miss; exit=$HOOK_EXIT line='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  fi
+}
+nz_silent() {  # <label> <tree> <the exact stderr expected, empty for none>
+  nz_drive "$2"
+  if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$3" ]; then
+    ok "$1"
+  else
+    no "$1" "expected allow with stderr='$3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  fi
+}
+NZ_NOTE_T2="evidence-gate: judged by row T2's task arms (run at current: 4)"
+NZ_ADMIT_LINE="session-poker.sh approve doctrine-growth '<reply>'"
+
+# (o) the controls: an untouched set from the main checkout and from T2's tree is admitted, so a
+# refusal below is the arm's and not the fixture's.
+nz_plan ""
+nz_silent "NZ-0 control: nothing staged, main checkout → admitted silently" "$nz_main" ""
+nz_silent "NZ-0b control: nothing staged, row T2's tree → admitted with only the row note" "$nz_tmp/wt-T2" "$NZ_NOTE_T2"
+
+# (i) AC-14.2: +200 B to steps/4.md is refused naming the delta and the file; −50 B is silent.
+nz_stage "$nz_main" skills/canonical-sdlc/steps/4.md 1200
+nz_refused "NZ-1 AC-14.2 +200 B staged to steps/4.md from the main checkout → refused with '+200 B' and the file" \
+  "$nz_main" "+200 B" "skills/canonical-sdlc/steps/4.md"
+nz_refused "NZ-1b …and, with no row owning the tree, the fix names the two lines that admit growth" \
+  "$nz_main" "session-poker.sh task-set <id> reads=<cell>, approval:doctrine-growth" "$NZ_ADMIT_LINE"
+expect_contains "NZ-1c …and the one rendered line itself carries the delta" "+200 B" "$HOOK_STDERR"
+nz_reset "$nz_main"
+nz_stage "$nz_main" skills/canonical-sdlc/steps/4.md 950
+nz_silent "NZ-2 AC-14.2 −50 B staged to steps/4.md → admitted silently" "$nz_main" ""
+nz_reset "$nz_main"
+
+# (ii) what the set is: a rendered output counts; an agents-src source and a file outside the set
+# never do; a new file in the set counts whole.
+nz_stage "$nz_main" agents-src/templates/skills/canonical-sdlc/steps/4.md.tmpl 5000
+nz_stage "$nz_main" README.md 5000
+nz_silent "NZ-3 +4000 B to the steps/4 template under agents-src and +4900 B to README.md → admitted silently (sources and outsiders are not the set)" "$nz_main" ""
+nz_reset "$nz_main"
+nz_stage "$nz_main" payload/context/new-check.md 120
+nz_refused "NZ-3b a new file under payload/context, 120 B → refused with '+120 B', naming it" \
+  "$nz_main" "+120 B" "payload/context/new-check.md"
+nz_reset "$nz_main"
+nz_stage "$nz_main" agents/critic.md 340
+nz_refused "NZ-3c +40 B to agents/critic.md → refused with '+40 B', naming it" \
+  "$nz_main" "+40 B" "agents/critic.md"
+nz_reset "$nz_main"
+
+# (iii) the wall sums the set: growth paid for elsewhere in the set passes; a remainder is refused
+# naming only the files that grew.
+nz_stage "$nz_main" skills/canonical-sdlc/steps/4.md 1200
+nz_stage "$nz_main" skills/canonical-sdlc/operational-rules.md 600
+nz_silent "NZ-4 +200 B to steps/4.md paid by −200 B from operational-rules.md → admitted silently (the sum holds)" "$nz_main" ""
+nz_reset "$nz_main"
+nz_stage "$nz_main" skills/canonical-sdlc/steps/4.md 1200
+nz_stage "$nz_main" skills/canonical-sdlc/operational-rules.md 601
+nz_refused "NZ-4b +200 B paid by only −199 B → refused with '+1 B', naming steps/4.md" \
+  "$nz_main" "+1 B" "skills/canonical-sdlc/steps/4.md"
+expect_eq "NZ-4c …and not naming operational-rules.md, which shrank (the same detail NZ-4b read)" "0" \
+  "$(grep -c 'operational-rules.md' <<<"$HOOK_VSTDERR" || true)"
+nz_reset "$nz_main"
+
+# (iv) the approval: the committing tree's open row reads approval:doctrine-growth AND the plan
+# carries the approved: line. Either half alone is refused, and so is the main checkout.
+nz_plan "$NZ_APPROVED"
+nz_stage "$nz_tmp/wt-T2" skills/canonical-sdlc/steps/4.md 1200
+nz_silent "NZ-5 AC-14.2 +200 B from row T2's tree, T2 reads approval:doctrine-growth and the approved: line is recorded → admitted" \
+  "$nz_tmp/wt-T2" "$NZ_NOTE_T2"
+nz_reset "$nz_tmp/wt-T2"
+nz_stage "$nz_tmp/wt-T1" skills/canonical-sdlc/steps/4.md 1200
+nz_refused "NZ-6 the same growth from row T1's tree, whose row lacks the read → refused naming row T1 and the two lines" \
+  "$nz_tmp/wt-T1" "+200 B" "T1" "session-poker.sh task-set T1 reads=approval:plan, approval:doctrine-growth" "$NZ_ADMIT_LINE"
+nz_reset "$nz_tmp/wt-T1"
+nz_stage "$nz_main" skills/canonical-sdlc/steps/4.md 1200
+nz_refused "NZ-7 the same growth from the main checkout, the approved: line recorded → refused: no row owns the tree" \
+  "$nz_main" "+200 B" "session-poker.sh task-set <id> reads=<cell>, approval:doctrine-growth"
+nz_reset "$nz_main"
+nz_plan ""
+nz_stage "$nz_tmp/wt-T2" skills/canonical-sdlc/steps/4.md 1200
+nz_refused "NZ-8 +200 B from row T2's tree with no approved: line → refused naming the approve line" \
+  "$nz_tmp/wt-T2" "+200 B" "$NZ_ADMIT_LINE"
+nz_reset "$nz_tmp/wt-T2"
+nz_stage "$nz_tmp/wt-T2" skills/canonical-sdlc/steps/4.md 950
+nz_silent "NZ-8b …and a −50 B shrink from that tree needs no approval → admitted with only the row note" \
+  "$nz_tmp/wt-T2" "$NZ_NOTE_T2"
+nz_reset "$nz_tmp/wt-T2"
+
+# (v) AC-14.1: the set is named once, by one function at file scope, read by sourcing the library.
+NZ_WALLS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+nz_set() { ( . "$NZ_WALLS" >/dev/null 2>&1; loaded_set ) 2>/dev/null; }
+expect_eq "NZ-9 AC-14.1 loaded_set prints the six members, payload/context/*.md spelled literally" \
+  "skills/canonical-sdlc/SKILL.md
+skills/canonical-sdlc/steps/*.md
+skills/canonical-sdlc/dispatch.md
+skills/canonical-sdlc/operational-rules.md
+agents/*.md
+payload/context/*.md" "$(nz_set)"
+# The AC's own command, and where its one match falls.
+nz_hits="$(/usr/bin/grep -n 'payload/context/\*.md' "$NZ_WALLS" || true)"
+nz_fn="$(awk '/^loaded_set\(\) \{/ { f = 1 } f { print NR ": " $0 } f && /^\}/ { exit }' "$NZ_WALLS")"
+expect_eq "NZ-9b AC-14.1 /usr/bin/grep -n 'payload/context/\\*.md' walls.sh → one line" "1" \
+  "$(printf '%s\n' "$nz_hits" | /usr/bin/grep -c .)"
+expect_eq "NZ-9c …and that line is inside loaded_set's body" "yes" \
+  "$(printf '%s\n' "$nz_fn" | /usr/bin/grep -q "^${nz_hits%%:*}: " && echo yes || echo no)"
+expect_contains "NZ-9d loaded_set's body is read (positive, before the absence row)" "payload/context/*.md" "$nz_fn"
+expect_eq "NZ-9e AC-14.1 …and the same body never names agents-src" "0" \
+  "$(printf '%s\n' "$nz_fn" | /usr/bin/grep -c 'agents-src' || true)"
+
 finish
