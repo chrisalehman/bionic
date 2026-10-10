@@ -1908,7 +1908,7 @@ fi
 if declare -F gate_share >/dev/null 2>&1; then
   _g_share="$(gate_share)"
   # THE SOURCE IS detect.sh's (wave-28 T10): `state=file` when the share file is there, `default` when the
-  # gate's 85 stands. The file is the one `session-poker.sh share <n>` writes.
+  # gate's 92 stands. The file is the one `session-poker.sh share <n>` writes.
   case "$(detect_share)" in *"state=file "*) _g_from="set in bionic/share" ;; *) _g_from="the default; no share file" ;; esac
   _res_add "$(_doctor_item "$DOCTOR_NIL" "share" "${_g_share}% of this machine (${_g_from})")"
   if [ -d "$(gate_dir)/requests" ]; then
