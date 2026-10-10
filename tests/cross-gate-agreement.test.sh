@@ -43,6 +43,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
 # THE DETAIL IS ON, FOR THE WHOLE SUITE (task 13, ruling D-1). Since the migration a
@@ -441,11 +442,9 @@ cg_live() {  # <transcript> <name[:status]>...
 #                       to two of three parties proves nothing about them (A9).
 #
 # Deliberately out of the battery, and why:
-#   * `current: T<n>` — the two gates accept a task token unconditionally; the
-#     evidence gate accepts it only on a `scale: task` plan and then exits 0 on a
-#     valid ledger, so its answer to the predicate is unobservable there. Both
-#     behaviours are conservative and deliberate; the asymmetry is pinned as a
-#     KNOWN DIVERGENCE in section A3 rather than mixed into the agreement rows.
+#   * `current: T<n>` — not a step at any scale since wave-31 (one ledger shape, D2):
+#     the one party that reads `current:` refuses it. Section A3 pins that at either
+#     scale, rather than mixing a refused value into the agreement rows.
 #   * The evidence gate's misplaced-plan sweep (`*.plan.md` carrying
 #     canonical_sdlc_version outside the docs root) — a gate-specific rule with
 #     no counterpart in the other two. Fixture plans are therefore named
@@ -1093,24 +1092,32 @@ PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
 PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
 
 # ============================================================
-section "A3 — the one KNOWN divergence, pinned so it cannot drift silently"
+section "A3 — the retired task pointer: the gates the plan does not move, and the one that refuses it (wave-31 T24; REQ-1, D2)"
 # ============================================================
 #
-# `current: T<n>` on a plan that is not `scale: task`: the two gates read the
-# task token as an active wave (conservative — a task run IS a run); the
-# evidence gate rejects the plan as invalid, because a T-token is legal only at
-# task scale (conservative in the other direction — it blocks the commit). Both
-# refuse; neither passes. Nothing here is a defect, and the reason this is
-# pinned rather than left implicit is checklist A10: an unpinned asymmetry
-# between gates is exactly what shipped last time.
+# Until wave-31 this pinned a KNOWN DIVERGENCE: the two gates read `current: T<n>` as an active
+# wave and the evidence gate accepted it only on a `scale: task` plan. Two things have moved since.
+# The two gates are scoped by ENGAGEMENT (task-engaged-session; A1's battery), so no plan, this one
+# included, moves their answer. And the task-scale shape is deleted (one ledger shape): `current:`
+# is a step number at every scale, so the one party that reads it, the evidence gate, refuses
+# `T<n>` naming the value, at either scale, while it reads a numeric `current:` on the same
+# task-scale plan as a step (the control). The run predicate keeps `T<n>` open so the plan's
+# readers refuse it by name; that is CG.3's.
 
 TREPO=$(new_repo "known-divergence")
 write_plan "$TREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: T4"
-expect_eq "T-token, wave scale: the start gate reads an active wave"  "yes" "$(verdict_dp "$TREPO")"
-# T4 (session-20260815-landing-cleanup) used to diverge here (verdict_sg's fixed target
-# "no-such-agent" passed through, non-address-shaped); D8 (T5) re-converged it — the same
-# target is non-bash-task-shaped too, so it is refused like the other four parties now.
-expect_eq "T-token, wave scale: the stop gate reads an active wave"   "yes" "$(verdict_sg "$TREPO")"
+expect_eq "T-token, wave scale: the start gate answers as on any engaged plan" "yes" "$(verdict_dp "$TREPO")"
+expect_eq "T-token, wave scale: the stop gate answers as on any engaged plan"  "yes" "$(verdict_sg "$TREPO")"
+expect_eq "T-token, wave scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TREPO")"
+TTREPO=$(new_repo "task-pointer")
+plan_fixture --current T4 "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
+expect_eq "T-token, task scale: the plan carries scale: task and current: T4" "2" \
+  "$(/usr/bin/grep -cE '^scale: task$|^current: T4$' "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md")"
+expect_eq "T-token, task scale: the start gate answers as on any engaged plan" "yes" "$(verdict_dp "$TTREPO")"
+expect_eq "T-token, task scale: the stop gate answers as on any engaged plan"  "yes" "$(verdict_sg "$TTREPO")"
+expect_eq "T-token, task scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TTREPO")"
+plan_fixture --current 5 "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
+expect_eq "control: the same task plan at current: 5, the evidence gate reads the step" "yes:5" "$(verdict_eg "$TTREPO")"
 
 # ============================================================
 section "B — the session-identity key: producer and BOTH consumers agree"
@@ -9379,20 +9386,18 @@ expect_eq "CG.2 no current: line at all — sched_plan_current withholds" \
 expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)" \
   "1" "$(cg_run_open "$CG_NOLINE")"
 
-# ── CG.3 the DOCUMENTED divergence: task-scale current: T<n> — pinned, not silent ──
-# run_state's OTHER `current:` shape: `T<n>` is always an open run (no numbered close — the
-# session/task-scale plans this repo also carries, including the plan governing this very
-# task). It has no numbered step to compare against 4, so the FILL gate cannot read "T1" as
-# either approved or pending and withholds by design (T6 brief; review-a C-5; review-b N-2).
-# This is pinned as a DIVERGENCE, not an agreement: the two readers answer a DIFFERENT
-# question about the same value ON PURPOSE. A change that made them agree — teaching
-# run_open to reject T<n>, or teaching the gate to treat any T<n> as approved — is exactly
-# the kind of silent drift this section exists to catch, so it must turn this red.
+# ── CG.3 the retired task-scale `current: T<n>`: the divergence that routes it to its refusal ──
+# run_open calls `T<n>` an open run while the FILL gate withholds on it. Since wave-31 (one ledger
+# shape, D2; A-orch-52) `T<n>` is no step at any scale, and the pair answer two questions on
+# purpose: run_open keeps the retired plan OPEN so launch-sync, the stop wall and the tick reach it
+# and refuse it by name (AC-1.2's `NOT-RECORDED … is not numeric`), and the FILL gate, which has no
+# number to compare, fills nothing. A change that closed it would skip such a plan in silence, so
+# it must turn this red.
 for CG_T in T1 T5 T23; do
   CG_PLAN="$(cg_plan "$CG_T")"
-  expect_eq "CG.3 sched_plan_current withholds on task-scale '$CG_T' (no numbered step)" \
+  expect_eq "CG.3 sched_plan_current withholds on the retired task pointer '$CG_T' (no numbered step)" \
     "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.3 …while run.sh's run_open still calls a task-scale plan an OPEN run" \
+  expect_eq "CG.3 …while run.sh's run_open keeps '$CG_T' an OPEN run, so its readers refuse it by name" \
     "0" "$(cg_run_open "$CG_PLAN")"
 done
 
@@ -13983,14 +13988,14 @@ section "RIGOR — two levels, single and double: the plan-write hook and every 
 # ============================================================
 # ONE FUNCTION SAYS WHAT A RIGOR WORD MEANS. lib/run.sh `rigor_level <word>` prints `single` or
 # `double` for that word and returns 1 for any other. Every site that tests the word calls it: the
-# plan-write hook's closed set and its floor rank (`rigor_rank`), and in lib/walls.sh the task-row
-# check (`effective_row_rigor`), the floor rank (`rigor_ord`), the auditor relaxation
-# (`matrix_auditor_required`) and each arm that asks for the double level (`ledger_shape_fail`,
-# `validate_requirements_pointer`, `validate_dispatch_ledger`, `plan_bring_forward`). Pinned here:
-# every site gives each level its answer; each of the six words before 1.14.0 (low/tested,
-# medium/peer-reviewed, high/audited) gets exactly the answer a word that is no level gets — the
-# closed sets refuse it, a row cell is INVALID, the auditor arm stays closed, and no double arm
-# fires on it. A census holds the site count at zero (no line in hooks/ or payload/scripts/ tests
+# plan-write hook's closed set and its floor rank (`rigor_rank`), and in lib/walls.sh the auditor
+# relaxation (`matrix_auditor_required`) and each arm that asks for the double level
+# (`validate_requirements_pointer`, `validate_dispatch_ledger`, `plan_bring_forward`). The task
+# row's rigor cell check, the wall's floor rank and the ledger-shape router were sites too; they
+# went with the retired task table (wave-31 T24; D2, A-T24-2). Pinned here: every site gives each
+# level its answer; each of the six words before 1.14.0 (low/tested, medium/peer-reviewed,
+# high/audited) gets exactly the answer a word that is no level gets — the closed sets refuse it,
+# the auditor arm stays closed, and no double arm fires on it. A census holds the site count at zero (no line in hooks/ or payload/scripts/ tests
 # an old word itself), and a doctored walls.sh whose auditor arm tests `low` directly reads an old
 # word as a level, so the old-word rows go red on it.
 RV_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
@@ -14011,7 +14016,7 @@ printf -- '---\nrigor: double\n---\n\n## SDLC State\ncurrent: 3\n' > "$RV_D/no-t
 # THE GATE'S HELPERS ARE DEFINED INSIDE ITS BODY (`_eg_body`), so sourcing walls.sh defines none of
 # them: each is lifted out by its own definition, flush-left from `name() {` to its `}`, and a row
 # below holds every one of them defined, so no answer here is a missing function's silence.
-RV_FNS="effective_row_rigor rigor_ord matrix_auditor_required ledger_shape_fail validate_requirements_pointer step1_evidence_block evidence_line_field extract_continuation resolve_requirements_path validate_dispatch_ledger"
+RV_FNS="matrix_auditor_required validate_requirements_pointer step1_evidence_block evidence_line_field extract_continuation resolve_requirements_path validate_dispatch_ledger"
 export RV_FNS
 rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
   rv_bf_plan "$2" > "$RV_D/bf-$2.plan.md"
@@ -14025,11 +14030,7 @@ rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
     refuse() { echo refused; exit 2; }; log_finding() { echo logged; }
     RIGOR="$3"; SCALE=wave; MULTI_AGENT=true; CURRENT=3; SECTION=""; PLAN="$5"
     case "$4" in
-      row)      effective_row_rigor "$3" ;;
-      inherit)  effective_row_rigor "" ;;
-      ord)      rigor_ord "$3" ;;
       auditor)  if matrix_auditor_required; then echo owed; else echo relaxed; fi ;;
-      ledger)   ledger_shape_fail f x o ;;
       pointer)  validate_requirements_pointer; echo passed ;;
       dispatch) validate_dispatch_ledger; echo passed ;;
       forward)  if plan_bring_forward "$6" >/dev/null 2>&1; then echo admitted; else echo fired; fi ;;
@@ -14058,24 +14059,20 @@ rv_closed() {  # <word> -> `refused` when the hook refuses the word as a rigor, 
 RV_WALLS="$RV_LIB/walls.sh"
 expect_eq "RIGOR precondition: every wall site this section asks is defined from walls.sh" "defined" \
   "$(rv_site "$RV_WALLS" double defined)"
-# <word>:<rigor_level's answer>:<closed set>:<rank>:<ord>:<row>:<inherit>:<auditor>:<ledger>:<arm>:<forward>
-for rv_pair in "single:single rc=0:admitted:0:0:single:single:relaxed:logged:passed:admitted" \
-               "double:double rc=0:admitted:1:1:double:double:owed:refused:refused:fired" \
-               "low: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "tested: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "medium: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "peer-reviewed: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "high: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "audited: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted"; do
-  IFS=: read -r rv_w rv_lvl rv_cl rv_rk rv_ord rv_row rv_inh rv_aud rv_ledger rv_arm rv_bf <<< "$rv_pair"
+# <word>:<rigor_level's answer>:<closed set>:<rank>:<auditor>:<arm>:<forward>
+for rv_pair in "single:single rc=0:admitted:0:relaxed:passed:admitted" \
+               "double:double rc=0:admitted:1:owed:refused:fired" \
+               "low: rc=1:refused:-1:owed:passed:admitted" \
+               "tested: rc=1:refused:-1:owed:passed:admitted" \
+               "medium: rc=1:refused:-1:owed:passed:admitted" \
+               "peer-reviewed: rc=1:refused:-1:owed:passed:admitted" \
+               "high: rc=1:refused:-1:owed:passed:admitted" \
+               "audited: rc=1:refused:-1:owed:passed:admitted"; do
+  IFS=: read -r rv_w rv_lvl rv_cl rv_rk rv_aud rv_arm rv_bf <<< "$rv_pair"
   expect_eq "RIGOR $rv_w: rigor_level answers '$rv_lvl'" "$rv_lvl" "$(rv_level "$rv_w")"
   expect_eq "RIGOR $rv_w: the hook's closed set: $rv_cl" "$rv_cl" "$(rv_closed "$rv_w")"
   expect_eq "RIGOR $rv_w: the hook's floor rank is $rv_rk" "$rv_rk" "$(rv_rank "$rv_w")"
-  expect_eq "RIGOR $rv_w: the wall's floor rank is $rv_ord" "$rv_ord" "$(rv_site "$RV_WALLS" "$rv_w" ord)"
-  expect_eq "RIGOR $rv_w: a task row's cell resolves to $rv_row" "$rv_row" "$(rv_site "$RV_WALLS" "$rv_w" row)"
-  expect_eq "RIGOR $rv_w: an empty cell under this plan word resolves to $rv_inh" "$rv_inh" "$(rv_site "$RV_WALLS" "$rv_w" inherit)"
   expect_eq "RIGOR $rv_w: the matrix auditor is $rv_aud" "$rv_aud" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
-  expect_eq "RIGOR $rv_w: a ledger-shape fault is $rv_ledger" "$rv_ledger" "$(rv_site "$RV_WALLS" "$rv_w" ledger)"
   expect_eq "RIGOR $rv_w: the requirements-pointer arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" pointer)"
   expect_eq "RIGOR $rv_w: the dispatch-ledger arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" dispatch)"
   expect_eq "RIGOR $rv_w: the bring-forward arm $rv_bf" "$rv_bf" "$(rv_site "$RV_WALLS" "$rv_w" forward)"
@@ -14086,7 +14083,6 @@ for rv_w in standard High ""; do
 done
 for rv_w in standard High; do
   expect_eq "RIGOR seventh word '$rv_w': the hook's closed set refuses it" "refused" "$(rv_closed "$rv_w")"
-  expect_eq "RIGOR seventh word '$rv_w': the task-row check reads it INVALID" "INVALID" "$(rv_site "$RV_WALLS" "$rv_w" row)"
   expect_eq "RIGOR seventh word '$rv_w': the auditor arm stays closed on it" "owed" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
 done
 # THE CENSUS: no line in hooks/ or payload/scripts/ tests, ranks or lists a word before 1.14.0. A case

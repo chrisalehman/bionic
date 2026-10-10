@@ -135,14 +135,6 @@
 # translate would find no table and say so silently. The translation is a pass of its own
 # because a record split on `\n` cannot re-split itself.
 #
-# SLOT 3 ANSWERS TO TWO NAMES, `kind` AND `rigor` (T8). Slot 3 is the row's CLASSIFICATION
-# cell. The wave-scale table this library was written for spells it `kind`; the task-scale
-# registration ledger the evidence gate has read since D12 — `| id | intent | rigor |
-# description | status |` — spells the same slot `rigor`, and that table is NOT widened by
-# this wave. One alias is what lets `validate_task_ledger` read its rigor cell through this
-# library instead of keeping a second `## Tasks` parser alive, which is the whole of
-# AC-1e.1. No table carries both spellings, and the first header cell to match wins.
-
 # ── THE ONE PARSE ────────────────────────────────────────────────────────────
 #
 # _units_read <plan> -> line 1: `# <required columns the header lacks, space-separated>`
@@ -168,7 +160,6 @@ _units_read() {
       disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"; disp[12] = "base"
       disp[13] = "reads"
       for (k = 1; k <= 13; k++) want[k] = tolower(disp[k])
-      alt[3] = "rigor"   # slot 3 as the task-scale ledger spells it
       state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
 
@@ -194,7 +185,7 @@ _units_read() {
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
         if (t == "") continue
-        for (k = 1; k <= 13; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
+        for (k = 1; k <= 13; k++) if (t == want[k] && col[k] == 0) col[k] = i
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
@@ -350,12 +341,11 @@ units_has_column() {
 #
 # BY NAME, NOT BY NUMBER, for the reason the parse is header-keyed: a caller that wrote
 # `10` would have to be found again if the contract ever grew a twelfth field. The name
-# is this library's own contract spelling, NOT the table's header text — `rigor` is
-# accepted as the second name of slot 3, the same alias the header scan takes.
+# is this library's own contract spelling, NOT the table's header text.
 units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on a bad name
   local rec="${1:-}" n
   case "${2:-}" in
-    id) n=1 ;;    step) n=2 ;;   kind|rigor) n=3 ;; task) n=4 ;;  agent) n=5 ;;
+    id) n=1 ;;    step) n=2 ;;   kind) n=3 ;;       task) n=4 ;;  agent) n=5 ;;
     deps) n=6 ;;  size) n=7 ;;   serves) n=8 ;;     Files) n=9 ;;  status) n=10 ;;
     worktree) n=11 ;; base) n=12 ;; reads) n=13 ;;
     *) return 1 ;;
@@ -2284,7 +2274,7 @@ units_add_row() {
           L[r] = unesc(out)
         }
       }
-      val["id"] = nid; val["step"] = nstep; val["kind"] = nkind; val["rigor"] = nkind
+      val["id"] = nid; val["step"] = nstep; val["kind"] = nkind
       val["task"] = ntask; val["agent"] = nagent; val["deps"] = ndeps; val["size"] = nsize
       val["serves"] = nserves; val["files"] = nfiles; val["status"] = "pending"; val["reads"] = nreads
       row = "|"
@@ -2321,8 +2311,7 @@ units_add_row() {
 #   row whose id cell is <id> given those cells (`set`), or a new row with that id appended
 #   after the table's last row (`add`; unnamed cells `—`). <section> is `tasks` (the first
 #   `## Tasks` table, the one `_units_read` parses) or `ledger` (the first `## Dispatch ledger`
-#   table). Names are the header's own cells, matched case-insensitively; `kind` and `rigor`
-#   name slot 3 at either scale, as `_units_read` takes them.
+#   table). Names are the header's own cells, matched case-insensitively.
 #   Exit 1 no such table · 2 `set`: no row with that id, `add`: the id is taken · 3 a name the
 #   header does not carry · 4 a value with a forbidden byte · 5 `set`: more than one row with
 #   that id. Silent on every refusal.
@@ -2356,7 +2345,6 @@ units_table_cells() {
         if (pl[p] == "") continue
         t = index(pl[p], "\t")
         k = tolower(substr(pl[p], 1, t - 1)); v = substr(pl[p], t + 1)
-        if (sect == "tasks" && k == "rigor") k = "kind"
         nk++; key[nk] = k; val[k] = (trim(v) == "" ? "—" : trim(v))
       }
     }
@@ -2378,7 +2366,6 @@ units_table_cells() {
           nh = split(esc(line), hc, "|")
           for (c = 1; c <= nh; c++) {
             t = tolower(trim(hc[c]))
-            if (sect == "tasks" && t == "rigor") t = "kind"
             if (t != "" && !(t in col)) { col[t] = c; name[c] = t }
           }
           if (!("id" in col)) { split("", col); split("", name); continue }
