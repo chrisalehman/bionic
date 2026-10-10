@@ -110,6 +110,16 @@ trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
+# THE SHARE IS FIXTURE DATA TOO (wave-31 T34; A-orch-38, the pin tests/session-poker.prelude.sh keeps as
+# SP_CONFIG_DIR). The gate reads the share from ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share and the
+# default is 92 since T10, so a suite that planted none read this machine's file or the default, and §ROOM's
+# widths (written against 80: "the five-minute load over 6.4 cores" is 8 cores x 0.80) and the CG-ledger
+# hold's precondition came out wrong. The fixture's own CLAUDE_CONFIG_DIR above is the pinned dir: it holds
+# the share, and every NENV / env CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" below carries it along. HOME is not
+# pinned to it (the header's two roots stay different); a section that points the variable elsewhere
+# (`no-such-config`) reads the default and asks no width of it.
+mkdir -p "$CLAUDE_CONFIG_DIR/bionic"
+printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
 # THE GATE IS FIXTURE DATA (wave-28 T13; D14). The tick and the stop wall size their fill at the
 # gate, which reads the machine through the readers' pins and its store at BIONIC_GATE_DIR: 8
 # cores, 30% used, a load of 1.0 over the last minute and the last five, and one run on record
@@ -12069,11 +12079,17 @@ room_stop() {  # <repo> -> how many writer rows the stop wall owes, 0 when it re
 }
 room_tick() {  # <repo> — sets ROOM_TICK_OUT (the tick's channel) and ROOM_TK (rows its FILL names)
   local ids
-  ROOM_TICK_OUT=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+  ROOM_TICK_OUT=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$ROOM_CFG" \
            "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) )
   ids=$(printf '%s\n' "$ROOM_TICK_OUT" | awk 'index($0, "poker: FILL ") == 1 && index($0, "poker: FILL —") != 1 { print substr($0, 13); exit }')
   ROOM_TK=$(printf '%s\n' $ids | grep -c '^R[0-9]')
 }
+# THE TICK'S OWN CONFIG DIR, with no transcript in it (it was `$1/no-such-config`, which the gate read as
+# the default share, 92, while the stop wall read the suite's pin above: two readers, two shares). It holds
+# the same share the suite's pin does, 80, and no `projects/`, so the tick still finds no panel to read.
+ROOM_CFG="$SANDBOX/room-config"
+mkdir -p "$ROOM_CFG/bionic"
+printf '80\n' > "$ROOM_CFG/bionic/share"
 ROOM_GATE="$SANDBOX/room-gate"
 ROOM_GATE_SAVED="$BIONIC_GATE_DIR"
 mkdir -p "$ROOM_GATE/requests" "$ROOM_GATE/cost"
