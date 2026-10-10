@@ -574,7 +574,7 @@ units_suspect() {
   rows="$(units_rows "$plan" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
   units_has_column "$plan" reads && hasreads=1
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v hasreads="$hasreads" \
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v hasreads="$hasreads" -v regno="$(_units_regno "$plan")" \
     "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
     { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
     END {
@@ -711,7 +711,7 @@ units_hold_read() {
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
   [ -n "$rows" ] || return 1
   units_has_column "$plan" reads && hasreads=1
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v holder="$holder" -v hasreads="$hasreads" \
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v holder="$holder" -v hasreads="$hasreads" -v regno="$(_units_regno "$plan")" \
     "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
     { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
     END {
@@ -1023,7 +1023,7 @@ _units_sched_run() {
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
   } | _UNITS_FLOOR_ST="$6" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
-      -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" \
+      -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
       -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_sched_awk)"
 }
 
@@ -1142,17 +1142,27 @@ _units_files_awk() {
 # reads an empty cell through it, and the suspect test and the decline line write a cell back
 # through it, so a printed `task-set` line keeps the default the row was scheduled by. NO APOSTROPHE
 # inside it: cellq builds its quotes with sprintf.
+# AT `regression: no` THE INTEGRATE ROW READS NO FLOOR (wave-31 T27; REQ-12 AC-12.2; D4): each reader
+# hands the awk `-v regno=` from _units_regno below, and the default drops `proof:floor`. Unset (a
+# plan at yes, with the key absent, or proof.sh not loaded) the default is the one it was.
 _units_cell_awk() {
   printf '%s' '
     function kdef(k) {
       if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
       if (k == "review") return "approval:plan, live:head"
-      if (k == "integrate") return "proof:floor, proof:review, head"
+      if (k == "integrate") return (regno == "1") ? "proof:review, head" : "proof:floor, proof:review, head"
       if (k == "close") return "merge"
       return "approval:plan"
     }
     function cellq(v) { return (v == "") ? "\342\200\224" : sprintf("%c%s%c", 39, v, 39) }
 '
+}
+
+# _units_regno <plan> -> `1` when lib/proof.sh `proof_regression` reads the plan at `no`, else nothing:
+# the `regno` the kind default reads. Fail-closed: no proof.sh, no plan or any other value is yes.
+_units_regno() {
+  declare -F proof_regression >/dev/null 2>&1 || return 0
+  [ "$(proof_regression "${1:-}")" != no ] || printf '1'
 }
 
 # units_writes_head <Files cell> -> 0 when the cell names a path outside the record, 1 when not:

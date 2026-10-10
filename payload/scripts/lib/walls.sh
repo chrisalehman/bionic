@@ -3909,9 +3909,26 @@ step_prefix() {
 
 # Tests modality: cmd/pass/total/output present, pass and total integers,
 # pass==total. Used by the Step-5 verify gate.
+# AT `regression: no` THE BLOCK OWES THE STEP-0 LINE INSTEAD (wave-31 T27; REQ-12 AC-12.2; D4). The
+# regression is a Step-0 setting (`session-poker.sh regression`); a plan whose frontmatter reads
+# exactly `regression: no` owes no floor here: no cmd/pass/total/output/head, and in their place
+#     regression: no (Step 0, <user>) — <where it runs>
+# with the user and the place each non-empty. The walk, the matrix and the auditor are judged by the
+# caller as they always were. AN ABSENT KEY, OR ANY OTHER VALUE, READS `yes` (fail-closed, as an absent
+# `walk:` reads `required`), and the arm below is the arm it was. `regression-override:` is never read.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
-  local step="$1" pass total prefix advisory
+  local step="$1" pass total prefix advisory rline
+  if [ "$step" = 5 ] && [ "$(frontmatter_get regression)" = no ]; then
+    rline=$(block_get regression)
+    if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
+      _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line stands in place of cmd/pass/total/output/head (got '${rline:-(none)}').
+Plan: $PLAN
+Fix: add to the Step 5 block the line 'regression: no (Step 0, <user>) — <where it runs>', naming who chose it at Step 0 and where the regression runs instead."
+      refuse exit2 commit "the Step-5 regression: no line is missing" "add the Step-0 regression line" "$_eg_detail"
+    fi
+    return 0
+  fi
   shape_block cmd pass total output
   pass=$(block_get pass)
   total=$(block_get total)
@@ -5551,7 +5568,8 @@ return 0
 # `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
 # T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
 # gate reads; `matrix-render` and `discharge` — wave-30 T14, D9, the matrix's stubs and its auditor cell; `handoff` —
-# wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children); 1 otherwise
+# wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
+# `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting); 1 otherwise
 # (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
@@ -5608,7 +5626,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         shift
         _next="${1:-}"
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|finding-move|decline|budget|share|matrix-render|discharge|handoff|task-split)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-check|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"; return 0 ;;
         esac ;;
       spawn-worktree.sh)
