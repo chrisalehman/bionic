@@ -2905,6 +2905,62 @@ expect_regex "56z5 nothing new: the tick is the one unchanged line (wave-24 AC-4
 
 
 # ============================================================
+section "§REGRESSION-RUNS: the counter reads the command a run ran, never the log's name (wave-31 T21; REQ-2 AC-2.1, AC-2.2; D3)"
+# ============================================================
+#
+# `regression_runs_count` asked the log's BASENAME whether a run was the full runner: the wave-30
+# id `w30-T26-tests_run.sh` (booked_run_id writes `/` as `_`) ends `_run.sh`, not `-run.sh`, and
+# counted 0. It now asks `cmd_whole_run` (lib/cmd-class.sh) of the command the shim wrote beside
+# the log: `<log>.key`, the caller's tree on line 1 and the whole command on the lines after it,
+# else the row's `run_cmd=`. FIXTURE FIDELITY: the rows and the `.key` files are written as the
+# shim writes them (booked.sh `booked_key`: no trailing newline); red.sh is a real untracked file
+# in the tree, the writer's own wrapper, which the classifier opens and reads (wave-31 T11).
+R21="$(make_repo s21-regruns)"; new_roster "$R21"
+S21_TREE="$(cd "$R21" && pwd -P)"
+S21_RD="$S21_TREE/.bionic/tmp/runs"; mkdir -p "$S21_RD"
+S21_RF="$(roster_of "$R21")"
+printf '#!/bin/bash\nset -e\ntests/run.sh\n' > "$R21/red.sh"
+s21_run() {  # <id> <run_cmd, the lossy one-line form> <key command, or - for no .key file> [<rc>] — a roster row and its key
+  local row
+  row="$(mkrow name="w21-$1" status=identified agent_id="a21$1" duration='4 hours' launched_at="$(iso_ago 600)" deliverable="$R21/never.md")"
+  row="$row|run_log=$S21_RD/$1.log|run_cmd=$2|run_rc=${4-0}"
+  printf '%s\n' "$row" >> "$S21_RF"
+  [ "$3" = "-" ] || printf '%s\n%s' "$S21_TREE" "$3" > "$S21_RD/$1.log.key"
+}
+s21_count() { poke "$R21" regression-runs; printf '%s|%s' "$RC" "$OUT"; }
+expect_eq "(rr0) an empty roster counts nothing" "0|poker: regression-runs=0" "$(s21_count)"
+s21_run w30-T26-tests_run.sh 'tests/run.sh' 'tests/run.sh'
+expect_eq "(rr1 AC-2.1) the wave-30 log id, whose command is the runner: one full run (the positive)" \
+  "0|poker: regression-runs=1" "$(s21_count)"
+s21_run w30-T26-x.test.sh 'tests/run.sh --only x.test.sh' 'tests/run.sh --only x.test.sh'
+expect_eq "(rr2 AC-2.2) a --only row beside it counts nothing" "0|poker: regression-runs=1" "$(s21_count)"
+s21_run w21-d-red.sh 'bash red.sh' 'bash red.sh'
+expect_eq "(rr3) bash red.sh, an untracked red.sh running tests/run.sh, is the full runner (T11's text read)" \
+  "0|poker: regression-runs=2" "$(s21_count)"
+s21_run w21-e-run.sh-2 'bash tests/run.sh --dry-run' 'bash tests/run.sh --dry-run'
+expect_eq "(rr4) a --dry-run row counts nothing, though its log id ends -run.sh-2" "0|poker: regression-runs=2" "$(s21_count)"
+s21_run w21-f-cmd 'tests/run.sh' -
+expect_eq "(rr5) a row with no .key reads its run_cmd: one more" "0|poker: regression-runs=3" "$(s21_count)"
+s21_run w21-g-run.sh 'tests/run.sh' 'bash tests/run.sh --only x.test.sh'
+expect_eq "(rr6) the .key's command wins over run_cmd: a log id ending -run.sh whose key is a --only run counts nothing" \
+  "0|poker: regression-runs=3" "$(s21_count)"
+s21_run w21-h-cmd 'cd /x    exit 1' "$(printf 'cd %s || exit 1\nbash tests/run.sh 2>&1 | tee x.log' "$S21_TREE")"
+expect_eq "(rr7) the key's lines 2 and on are the whole command: run_cmd's lossy front would count nothing, the key counts one" \
+  "0|poker: regression-runs=4" "$(s21_count)"
+s21_run w21-i-run.sh 'bash scripts/other.sh' 'bash scripts/other.sh'
+expect_eq "(rr8) a log id ending -run.sh whose command is not the runner counts nothing (the basename is not read)" \
+  "0|poker: regression-runs=4" "$(s21_count)"
+s21_run w21-j-cmd 'tests/run.sh' 'tests/run.sh' ''
+expect_eq "(rr9) a run with no code yet (not ended) counts nothing" "0|poker: regression-runs=4" "$(s21_count)"
+S21_DUP="$(/usr/bin/grep "run_log=$S21_RD/w30-T26-tests_run.sh.log" "$S21_RF")"; printf '%s\n' "$S21_DUP" >> "$S21_RF"
+expect_eq "(rr10) a row copied twice is one run" "0|poker: regression-runs=4" "$(s21_count)"
+expect_eq "(rr11a) …the same grep finds the old line where it is (the positive beside the absence)" "1:      if (id ~ /-run\\.sh\$/) full = 1" \
+  "$(printf '%s\n' '      if (id ~ /-run\.sh$/) full = 1' | /usr/bin/grep -n 'run\\.sh\$')"
+expect_eq "(rr11 AC-2.1) the basename match is gone: the AC's grep finds no line" "" \
+  "$(/usr/bin/grep -n 'run\\.sh\$' "$POKER")"
+
+
+# ============================================================
 section "§SUSPECT: a dependency that shares no file is named at authoring and at the tick, never loosened (wave-30 T16; REQ-12 AC-12.2; D14a, Δ8)"
 # ============================================================
 #
