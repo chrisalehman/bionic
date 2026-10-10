@@ -334,7 +334,7 @@ expect_eq "DC.4 at 1003 the caller exits 75, the run's own code" "75" "$(cat "$D
 expect_regex "DC.5 …the log carries the one line naming the wait, the request and the command to run again" \
   '^booked: the gate did not admit this command within 3s; request [^ ]+ keeps its turn — run again: ' \
   "$(grep '^booked: the gate did not admit' "${CE_LOG:-$D/none}" 2>/dev/null)"
-expect_eq "DC.6 …`<log>.rc` holds 75" "75" "$(cat "${CE_LOG:-$D/none}.rc" 2>/dev/null)"
+expect_eq "DC.6 …<log>.rc holds 75" "75" "$(cat "${CE_LOG:-$D/none}.rc" 2>/dev/null)"
 expect_eq "DC.7 …the log's last line is rc=75" "rc=75" "$(tail -n 1 "${CE_LOG:-$D/none}" 2>/dev/null)"
 expect_eq "DC.8 …the roster row carries run_rc=75" "75" \
   "$(grep -F "run_log=$CE_LOG" "$ROSTER" | tail -n 1 | tr '|' '\n' | sed -n 's/^run_rc=//p')"
