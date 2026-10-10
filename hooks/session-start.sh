@@ -342,8 +342,8 @@ print_bound_line() {  # <verdict "bound-open <plan>">
   # line prints and the same one `ss_interval` asks for the poker, so the path names a file
   # in the plugin that is actually running rather than in whichever one is installed.
   #
-  # ONLY FOR A NUMERIC STEP. A task-scale plan reads `current: T<n>`, which names no step
-  # file, and a plan with no readable `current:` leaves `$step` empty; printing
+  # ONLY FOR A NUMERIC STEP. A non-numeric `current:` is refused (`NOT-RECORDED`, D2) and names no
+  # step file, and a plan with no readable `current:` leaves `$step` empty; printing
   # `steps/T3.md` or `steps/.md` would send a reader at a path that does not exist.
   case "$step" in
     [0-9]|[0-9][0-9]) printf '  step file: %s/skills/canonical-sdlc/steps/%s.md\n' "$HOOK_ROOT" "$step" ;;

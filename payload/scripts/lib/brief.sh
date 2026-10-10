@@ -1577,8 +1577,8 @@ brief_validate_fields() {
   local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
   local files_unread files_bad entry fact fix questions no_instrument=""
-  local cap capw detail suites_comment impact_cmd found=0
-  local _impact_out _impact_tmp _impact_pid _impact_overran _impact_rc _old_ifs
+  local cap capw detail suites_comment found=0
+  local _old_ifs
   files=$(brief_field "$lifted" files)
   suites=$(brief_field "$lifted" suites)
   re_executes=$(brief_field "$lifted" re_executes)
