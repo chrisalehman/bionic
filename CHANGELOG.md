@@ -4,11 +4,9 @@ Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in
 which starts at 1.8.4.
 
 Versioning follows semver from 1.9.0 on:
-- **MAJOR** for a change that breaks a documented contract a user or project already relies
-  on: a removed verb or field, a `canonical_sdlc_version` bump, an artifact a user must migrate.
-- **MINOR** for new capability or a behaviour a user notices, including a newly refused action
-  or an upgrade step.
-- **PATCH** for a fix within existing behaviour.
+- **MAJOR** for a `canonical_sdlc_version` bump or an artifact a user must migrate.
+- **MINOR** for new capability.
+- **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
 ## 1.14.0 — 2026-10-09
 
