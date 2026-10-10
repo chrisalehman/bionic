@@ -7,9 +7,9 @@
 # WHAT IT OWNS. The "is there a run to protect" predicate: active_run <root> is exit 0 +
 # the plan path iff the newest plan (by mtime) under the docs root's plans/incidents trees
 # carries a flush-left `## SDLC State` and an open state — `current:` 0-8, or 9 without a
-# `- Step 9:` line carrying `delivered:` — and the plan's frontmatter carries no `abandoned:`
-# line; else exit 1 and prints nothing. A non-numeric `current:`, the retired task-scale
-# `current: T<n>` among them, is no open run at any scale (wave-31 T24; REQ-1, D2). Every always-on
+# `- Step 9:` line carrying `delivered:`, or the retired task-scale `current: T<n>`, kept open so
+# its readers refuse it by name (wave-31 T24; REQ-1 AC-1.2, D2) — and the plan's frontmatter
+# carries no `abandoned:` line; else exit 1 and prints nothing. Every always-on
 # hook gates its own work behind this one call (ADOPT, Batch 1).
 #
 # AND, SINCE wave-session-bound-run, WHICH run answers for WHICH SESSION. `active_run` is
@@ -199,10 +199,11 @@ call_active_run "$R"
 expect_eq "no plans dir -> active_run exits 1" 1 "$AR_ST"
 expect_empty "no plans dir -> prints nothing" "$AR_OUT"
 
-# --- task scale: the one plan at current: 4 is active, at current: T2 it is not ---
+# --- task scale: the one plan at current: 4 is active, and so is the retired current: T2 ---
 # ONE LEDGER SHAPE (wave-31 T24; REQ-1, D2). A task-scale plan is the shared fixture's
-# (tests/lib/plan-fixture.sh); its `current:` is a step number like any plan's, and the retired
-# `current: T<n>` reads as no open run, the predicate's answer for any malformed `current:`.
+# (tests/lib/plan-fixture.sh); its `current:` is a step number like any plan's. The retired
+# `current: T<n>` stays an open run so launch-sync, the stop wall and the tick reach the plan and
+# refuse it by name (AC-1.2); any other malformed value is closed (`banana`, §R5).
 R="$SANDBOX/r2f"; mkdir -p "$R/.bionic"
 P=$(plan_fixture "$R/.bionic/docs/plans/task.plan.md" task)
 call_active_run "$R"
@@ -211,8 +212,8 @@ expect_eq "task scale, current: 4 -> prints the plan path" "$P" "$AR_OUT"
 P=$(plan_fixture --current T2 "$R/.bionic/docs/plans/task.plan.md" task)
 expect_eq "…the same plan carries current: T2" "1" "$(/usr/bin/grep -c '^current: T2$' "$P")"
 call_active_run "$R"
-expect_eq "task scale, current: T2 -> active_run exits 1 (not an open run)" 1 "$AR_ST"
-expect_empty "task scale, current: T2 -> prints nothing" "$AR_OUT"
+expect_eq "task scale, current: T2 -> active_run exits 0 (kept open, so its readers refuse it)" 0 "$AR_ST"
+expect_eq "task scale, current: T2 -> prints the plan path" "$P" "$AR_OUT"
 
 # --- newest-by-mtime wins over an older closed plan ---
 R="$SANDBOX/r2g"; mkdir -p "$R/.bionic"
@@ -453,7 +454,7 @@ call_run_open "$P"
 expect_eq "run_open: task scale, current: 4 -> exit 0 (open, as at wave scale)" 0 "$RO_ST"
 P=$(plan_fixture --current T3 "$R5/.bionic/docs/plans/task-t3.plan.md" task)
 call_run_open "$P"
-expect_eq "run_open: task scale, current: T3 -> exit 1 (not an open run: not numeric)" 1 "$RO_ST"
+expect_eq "run_open: task scale, current: T3 -> exit 0 (the retired pointer, kept open so it is refused by name)" 0 "$RO_ST"
 
 P=$(mk_plan "$R5" "open-9.plan.md" "9" "- Step 9: report drafted, not yet delivered")
 call_run_open "$P"

@@ -327,17 +327,13 @@ expect_eq "…and the comparison is over 22 real rows, not two empty strings" "2
   "$(nlines "$ROWS_REORDERED")"
 expect_eq "reversing every column changes not one byte of the TSV" "$ROWS_LIVE" "$ROWS_REORDERED"
 
-# ---------- slot 3 answers to two names: `kind` and `rigor` (A-39) ----------
+# ---------- slot 3 has one name, `kind` (wave-31 T24; REQ-1, D2; A-39 retired) ----------
 #
-# THE ONE ALIAS, and the whole of why it exists. Slot 3 is the row's CLASSIFICATION cell.
-# The wave-scale table spells it `kind`; the task-scale registration ledger the evidence
-# gate has read since D12 — `| id | intent | rigor | description | status |` — spells the
-# same slot `rigor`, and REQ-1e does not widen that table. Without the alias
-# `validate_task_ledger` would have to keep a second `## Tasks` parser alive for one cell,
-# which is the whole of what AC-1e.1 forbids. Ruled A-39, 2026-09-12.
-#
-# NO TABLE CARRIES BOTH SPELLINGS, and the header scan takes the first cell to match, so
-# the alias cannot shadow a real `kind` column.
+# THE ALIAS IS GONE WITH ITS READER. Slot 3 answered to `rigor` too (A-39) so the evidence
+# gate's `validate_task_ledger` could read the retired five-column task ledger's rigor cell
+# through this library. One ledger shape deleted that reader and that table: a task-scale plan
+# carries the one `## Tasks` table, whose slot 3 is `kind`. The retired table below still parses
+# by its header — its id and status read by name — and its `rigor` column now reaches no slot.
 cat > "$SANDBOX/task-scale-ledger.md" <<'TASK_SCALE_EOF'
 ---
 scale: task
@@ -360,13 +356,18 @@ expect_eq "…id from slot 1 and status from slot 10, by header name" \
 T2 active
 T3 pending" \
   "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ print $1, $10 }')"
-expect_eq "…and the rigor cell reaches slot 3, which the wave schema calls kind" \
-  "[single][double][]" \
+expect_eq "…and its rigor column reaches no slot: slot 3 reads empty on every row" \
+  "[][][]" \
   "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ printf "[%s]", $3 }')"
-expect_eq "units_field takes that cell by either name" "double double" \
+expect_eq "units_field takes the row's id and status by name" "T2 active" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
      row="$(units_rows "$2" | sed -n 2p)"
-     printf "%s %s" "$(units_field "$row" rigor)" "$(units_field "$row" kind)"' \
+     printf "%s %s" "$(units_field "$row" id)" "$(units_field "$row" status)"' \
+     _ "$LIB" "$SANDBOX/task-scale-ledger.md")"
+expect_eq "…and refuses rigor, a name the contract no longer carries (rc 1)" "1" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
+     row="$(units_rows "$2" | sed -n 2p)"
+     units_field "$row" rigor >/dev/null; echo $?' \
      _ "$LIB" "$SANDBOX/task-scale-ledger.md")"
 expect_eq "…and refuses a column name the contract does not carry" "1" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_field "x" intent' _ "$LIB" >/dev/null 2>&1; echo $?)"
