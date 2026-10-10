@@ -1016,7 +1016,7 @@ clean() {  # <value> [<field name>]
   # control characters and `|` folded to spaces — that half of this function is unchanged
   # and applies with no exception. What used to be unconditional is the trailing
   # `cut -c 1-400`: `suites_allowed=` and `files=` are LIST-valued fields (a space- or
-  # comma-joined set, S13's suite-allowance wall and the impact-derived budget), and a
+  # comma-joined set, S13's suite-allowance wall and the brief's declared budget), and a
   # dispatch touching enough files or naming enough suites overflows 400 characters on a
   # perfectly ordinary brief — the cut then silently drops suites off the end, which is a
   # budget the wall never agreed to and the operator never asked for. Every OTHER field
@@ -6385,9 +6385,10 @@ EOF
   # span a brief carrying the merged contract would hold — `Files:`, `Suites:`,
   # `Re-executes:` — and hands it to `brief_validate_fields` with the row's own role and its
   # `questions=` as a `Questions:` line, so the three-run cap binds a reader holding the
-  # `evidence` question here as it does at dispatch (`dp_reads_evidence`, lib/brief.sh). A declared budget stays
-  # declared (the old set plus the added suites); a DERIVED one is re-derived from the
-  # merged files by the configured impact command, and the old set is kept beside it.
+  # `evidence` question here as it does at dispatch (`dp_reads_evidence`, lib/brief.sh). The old
+  # set plus the added suites is the budget, as the brief named it. A row 1.14.0's map DERIVED is
+  # read the same way: nothing re-derives it (the map is deleted, wave-31 T23, REQ-4 AC-4.2), and
+  # it keeps its `suites_source=` label.
   #
   # THE TARGET is a name, or an agent id (wave-27 T38): an id a named row carries amends that
   # row; an id no row carries, of an agent of this session, is recorded by `amend_unplaced`.
@@ -6497,12 +6498,9 @@ EOF
     AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$AM_ADD_FILES")"
     AM_Q="$(line_field "$AM_ROW" questions)"
 
-    # THE DECLARED HALF OF THE BUDGET. A declared (or unlabelled) budget carries its old set
-    # into the span; a derived one is not a declaration and is re-derived below. `none` is a
-    # waiver, and it yields to the first suite actually added.
-    AM_DECL=""
-    [ "$AM_OLD_SRC" = derived ] || AM_DECL="$AM_OLD_SA"
-    AM_DECL="$(poker_union ' ' "$AM_DECL" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
+    # THE BUDGET IS THE OLD SET PLUS THE ADDED SUITES, carried into the span as declared, whatever
+    # the row's label. `none` is a waiver, and it yields to the first suite actually added.
+    AM_DECL="$(poker_union ' ' "$AM_OLD_SA" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
     case " $AM_DECL " in
       *" none "*) [ "$AM_DECL" = none ] \
                     || AM_DECL="$(printf '%s' "$AM_DECL" | tr ' ' '\n' | awk '$0 != "none" && $0 != ""' | tr '\n' ' ')"
@@ -6520,22 +6518,13 @@ EOF
     AM_RC=0
     brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
     AM_SA="$BRIEF_SUITES_ALLOWED"; AM_SRC="$BRIEF_SUITES_SOURCE"
-    # A derived budget with suites added too: the span declared, so nothing was derived — ask
-    # the impact command for the merged files on their own.
-    if [ "$AM_RC" -eq 0 ] && [ "$AM_OLD_SRC" = derived ] && [ -n "$AM_DECL" ] && [ -n "$AM_NEW_FILES" ]; then
-      brief_validate_fields "$(lift_contract_fields "Files: $AM_NEW_FILES" "$AM_ROLE")" \
-        "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
-      AM_SA="$(poker_union ' ' "$AM_SA" "$BRIEF_SUITES_ALLOWED")"
-    fi
     if [ "$AM_RC" -ne 0 ]; then
       die "REFUSED — a dispatch carrying $AMEND_NAME's amended contract would be refused; nothing was written:"
       printf '%s' "$POKER_BRIEF_WORDS" >&2
       exit 1
     fi
 
-    # THE UNION ON THE ROW. A derived budget keeps its old set beside the new derivation, and a
-    # waiver that nothing replaced stays the waiver.
-    [ "$AM_OLD_SRC" = derived ] && AM_SA="$(poker_union ' ' "$AM_OLD_SA" "$AM_SA")"
+    # A waiver that nothing replaced stays the waiver.
     [ -n "$AM_SA" ] || AM_SA="$AM_OLD_SA"
     AM_SRC="${AM_OLD_SRC:-$AM_SRC}"
     AM_NEW_RUNS="$AM_OLD_RUNS"
@@ -8128,7 +8117,7 @@ FM_FINDING
   # THE RELEASE CHECK (wave-27 T16; D12). A project may name one command in `.bionic/config.yaml`
   # under `release-check:`. This verb runs it in the checkout of the plan's working branch, with
   # BIONIC_CHECK_BASE at the last release and BIONIC_CHECK_HEAD at the working head, its words
-  # split on blanks with globbing off as `impact-command:` is run (lib/proof.sh `_proof_map`).
+  # split on blanks with globbing off.
   # THE LAST RELEASE is the nearest tag reachable from the plan's `integration-branch:` that is a
   # PROPER ancestor of the working head (the fewest commits from it to the head): a tag on the head,
   # or on a commit that is not on the head's history, is no base, for the range it opens would hold
@@ -8213,7 +8202,7 @@ RC_TAGS
     RC_OUT="$(cd "$RC_CO" 2>/dev/null || exit 1
       set -f
       export BIONIC_CHECK_BASE="$RC_BASE" BIONIC_CHECK_HEAD="$RC_HEAD" BIONIC_CHECK_TREE="$(pwd -P)"
-      # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
+      # shellcheck disable=SC2086  # the configured command is meant to split on blanks
       exec $RC_CMD </dev/null 2>&1)"; RC_RC=$?
     # WHAT THE CHECK LEFT (wave-27 T67; review pass 46 N7), looked at as `land` looks after its own run
     # (lib/worktree.sh `_wt_check_left`): the checkout's HEAD where it was, and no tracked file changed

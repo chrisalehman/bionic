@@ -1007,7 +1007,7 @@ _wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <
     check_out="$(cd "$co" 2>/dev/null || exit 1
       set -f
       export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="$wt_abs"
-      # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
+      # shellcheck disable=SC2086  # the configured command is meant to split on blanks
       exec $check_cmd </dev/null 2>&1)"; rc=$?
     # WHAT THE CHECK LEFT (wave-27 T50, T58; review passes 27 S2, 34 N5). The command runs in the shared
     # target, beside the piece. After it, and before the merge, the target's HEAD is the commit it was
@@ -1124,8 +1124,7 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # pass 22 B1; A-orch-75), so a command naming its script relatively runs the target's copy and a
   # piece cannot rewrite the check that judges it; the task's commits are read from the shared
   # object store. BIONIC_CHECK_BASE is the working branch's head and BIONIC_CHECK_HEAD the task's
-  # head, its words split on blanks with globbing off, as
-  # `impact-command:` is run (proof.sh `_proof_map`). A non-zero exit refuses the landing and
+  # head, its words split on blanks with globbing off. A non-zero exit refuses the landing and
   # shows the command's output on stderr. With no key nothing runs and nothing prints.
   _wt_release_check "$root" "$co" "$onto_head" "$head" "$wt_abs" "$branch" "$onto" || return 2
 

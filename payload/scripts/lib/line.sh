@@ -495,35 +495,7 @@ EOF
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
-  # 11. THE WARM (wave-30 T35): the impact cache of the checkout just moved, in the background.
-  _line_warm "$root" "$co" "$rec" "$row" "$cand"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
-  return 0
-}
-
-# THE WARM (wave-30 T35; A-orch-79). The dispatch wall derives a brief's suite set with the project's
-# `impact-command:`, bounded under its hook's registration (lib/bounds.sh), and tests/lib/impact.sh
-# caches the graph it builds per tree state. A landing changes the tree state, so the first dispatch
-# after it paid the cold build, measured 8.5-10.3 s on an idle machine: within a second of the
-# bound, and past it under a wave's load, where the wall refuses. This asks the command once, over
-# tests/run.sh, in the checkout the fast-forward moved, so that dispatch finds the graph built.
-#
-# IN THE BACKGROUND, AS A FRESH PROCESS. The publish is read through `$(line_publish … 2>&1)` by its
-# carriers, and a child holding that pipe holds the landing until it ends. Redirecting 0-2 is not
-# enough: bash 3.2 keeps the caller's fd 2 on a saved high descriptor for the length of a redirected
-# function call, and a `( … ) &` subshell inherits it (measured: the carrier waited out a 60 s warm).
-# The saved descriptor is close-on-exec, so the warm is an exec'd `bash -c`, never a subshell of
-# this one. Its output goes to a log under the record's line/ directory, ending `rc=<n>`.
-# NOTHING IS WARMED WHEN NO CHECKOUT MOVED (an update-ref publish changes no working tree, so no
-# cache it keys went stale) or when no impact command is configured. It is a cost saving, never a gate: its failure is the log's alone.
-_line_warm() {  # <root> <checkout or empty> <record> <row> <commit>
-  local cmd log
-  [ -n "$2" ] || return 0
-  cmd="$(config_value "$1" impact-command "" 2>/dev/null)"
-  [ -n "$cmd" ] || return 0
-  log="$(_line_suite_log "$3" "$4" impact-warm "$5")"
-  # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-  bash -c 'cd "$1" || exit 1; shift; "$@"; echo "rc=$?"' _ "$2" $cmd tests/run.sh </dev/null >"$log" 2>&1 &
   return 0
 }
 
