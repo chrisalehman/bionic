@@ -969,7 +969,10 @@ poke "$R42" current 5
 s42_unchanged "42f3 §VERB-cur a move the gate refuses (no Step 5 block) is refused" 1 "$P42"
 expect_contains "42f4 …in the gate's own words" "Step 5" "$OUT"
 poke "$R42" current 4x
-s42_unchanged "42f5 §VERB-cur a step that is neither N nor T<n>" 2 "$P42"
+s42_unchanged "42f5 §VERB-cur a value that is no step number" 2 "$P42"
+poke "$R42" current T1
+s42_unchanged "42f5b §VERB-cur (wave-31 T5, D2) the retired task-scale current: T1 is no step number either" 2 "$P42"
+expect_contains "42f5c …and the refusal says current: is a step number at every scale" "current: is a step number at every scale" "$OUT"
 
 # The Step-4 block (A-orch-8): advancing to 4 writes the worktree/base-sha/branch fields the
 # first writer's commit is refused without, from the run's own `working-branch:` — and only

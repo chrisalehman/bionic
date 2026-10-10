@@ -13,10 +13,9 @@
 #                                      table read.
 #   fill_step_token <plan>             the step the ready set is asked at: the numeric
 #                                      `current:` with its sub-step letter stripped, or
-#                                      `T<n>` when the table is task-shaped. Empty when the
-#                                      two disagree or the field will not parse. At wave
-#                                      scale it decides only the gate acts (integrate,
-#                                      close); a work row is ready at any step (wave-20 Δ1).
+#                                      empty when the field is not a step number. It decides
+#                                      only the gate acts (integrate, close); a work row is
+#                                      ready at any step (wave-20 Δ1).
 #   fill_ready_set <plan> <rung> <open>
 #                                      the ready ids, one per line, in TABLE order, the
 #                                      writers trimmed to <rung> - <open> and the rows that
@@ -61,10 +60,8 @@
 # wave-18 review R1: a wall that measured against another width refused turns naming rows the
 # tick had withheld). What may not differ is the READY SET, and that is what lives here.
 #
-# TWO TABLE SHAPES, ONE READER. `payload/scripts/lib/units.sh` is the one parser of
-# `## Tasks` at either scale, and `units_ready` grew the task-scale arm in the same wave
-# (`T<n>` step, no step cell on the row, a dependency satisfied by `done`). Nothing here
-# parses a table.
+# ONE TABLE SHAPE, ONE READER (wave-31 T5; D2). `payload/scripts/lib/units.sh` is the one
+# parser of `## Tasks`, and the table is the same at every scale. Nothing here parses a table.
 #
 # READINESS IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). The set this library
 # returns stopped being "this step's ready rows": a pending row whose prerequisites have all
@@ -202,7 +199,7 @@ _fill_current_field() {  # <plan path> -> the raw current: value, or ""
 # LIVE MEANS "PAST THE APPROVAL GATE", AND THE GATE IS THE USER'S ACT (wave-26 T13; D3,
 # AC-6.2). Dispatching into a task table nobody has ratified sends a writer against a plan that
 # may not survive its own review (the 2026-09-05 incident the tick's approval gate closed).
-# Through 1.10 this asked `current: >= 4` (or a task-scale `T<n>`), a field the orchestrator
+# Through 1.10 this asked `current: >= 4`, a field the orchestrator
 # writes itself; it now asks the plan's `approved-by:` line, written on the user's literal
 # approval and the one fact `hooks/dispatch-preflight.sh` already refuses a writer without. The
 # two readers of "may a writer start" agree, and a plan approved before `current:` moves fills.
@@ -223,50 +220,20 @@ fill_plan_approved() {
 # ── WHICH STEP IS THE READY SET ASKED AT? ─────────────────────────────────────
 #
 # fill_step_token <plan> -> the token `units_ready` takes as its second argument, or "" when
-# the plan's `current:` cannot be read against the table it carries.
+# the plan's `current:` is not a step number.
 #
-# THE FIELD AND THE TABLE HAVE TO AGREE. A numeric `current:` is answerable whatever the
-# table looks like — the wave arm holds a gate act (integrate, close) until the field reaches
-# the row's own step cell, and a row with no numeric step cell is never a wave row. A `T<n>` is different: it names a unit,
-# and a table that NUMBERS its rows has no unit called `T1` to be on. That shape is a plan in
-# mid-edit (or a fixture), and the honest answer is the one the tick has given since the
-# approval gate landed — UNREADABLE, and no fill. Reading it as task-scale instead would make
-# every pending row of a wave table ready, which is the DOUBT-then-FILL failure that gate
-# exists to prevent.
-#
-# THE SHAPE QUESTION IS THE HEADER'S, asked through `units_has_column` — the one reader of
-# `## Tasks` — so a table that grows or loses a column moves this answer without a code
-# change here. A plan with NO TABLE AT ALL is unreadable too, and deliberately: it is not a
-# table of units either, nothing about it says which shape the run is, and answering
-# otherwise would change what the tick says about a plan that has always been "unreadable"
-# to it (`no FILL — plan current: unreadable (T5)`) while filling exactly as much: nothing.
-#
-# THE WAVE QUESTION IS ASKED FIRST because a wave plan answers it in one parse; only a plan
-# whose rows are unnumbered pays the second read.
-fill_step_token() {  # <plan> -> a numeric step, a `T<n>`, or ""
-  local plan="${1:-}" raw step
-  _fill_current_load "$plan"
-  raw="$_FILL_CURRENT_VALUE"
-  [ -n "$raw" ] || { printf ''; return 0; }
-  step="${raw%[ab]}"
+# ONE LEDGER SHAPE (wave-31 T5; REQ-1 AC-1.2, D2). `current:` is a step number at every scale,
+# and the token is that number with its sub-step letter (`4a`, `8b`) taken off. Any other value —
+# the retired task-scale `current: T<n>` among them — is UNREADABLE and fills nothing: the tick
+# says so (`no FILL — plan current: unreadable (T5)`), and launch-sync refuses the plan aloud.
+fill_step_token() {  # <plan> -> a numeric step, or ""
+  local step
+  _fill_current_load "${1:-}"
+  step="${_FILL_CURRENT_VALUE%[ab]}"
   case "$step" in
-    ''|*[!0-9]*) : ;;
-    *) printf '%s' "$step"; return 0 ;;
+    ''|*[!0-9]*) printf '' ;;
+    *) printf '%s' "$step" ;;
   esac
-  case "$raw" in
-    T*) case "${raw#T}" in
-          ''|*[!0-9]*) : ;;
-          *) if units_has_column "$plan" step; then
-               printf ''                       # a table that NUMBERS its rows
-             elif units_has_column "$plan" id; then
-               printf '%s' "$raw"              # a table of units
-             else
-               printf ''                       # no table at all
-             fi
-             return 0 ;;
-        esac ;;
-  esac
-  printf ''
 }
 
 # ── THE READY SET ─────────────────────────────────────────────────────────────
@@ -315,9 +282,8 @@ fill_ready_set() {  # <plan> <rung> <open> [<answered ids, space-joined>] -> rea
 }
 
 # _fill_ready_rows <plan> <gap> -> the step token's ready ids, the writers trimmed to <gap>. The
-# body of `fill_ready_set` past its cheap gates, run under `units_memoised` so the header
-# questions `fill_step_token` asks at task scale, the rows `units_ready` reads and the kinds
-# `fill_readonly_ids` reads are ONE parse of the table (wave-19 REQ-6, D7; AC-6.2). The gates
+# body of `fill_ready_set` past its cheap gates, run under `units_memoised` so the rows
+# `units_ready` reads and the kinds `fill_readonly_ids` reads are ONE parse of the table (wave-19 REQ-6, D7; AC-6.2). The gates
 # above ask only the approval line (read once per process with `current:`) and arithmetic, so a
 # ledger that is not live still reads no table at all.
 _fill_ready_rows() {  # <plan> <gap> [<answered ids> [tagged]]

@@ -1426,95 +1426,6 @@ expect_eq "13.17 …and it reports the same three faults, in the same words" \
   "$VAL_BASE" "$(call units_validate "$SANDBOX/base-column-reversed.md")"
 
 # ============================================================
-section "15 — units_ready at TASK scale: T<n>, no step cell, done deps (wave-18 REQ-3, AC-3.3; ADR-033)"
-# ============================================================
-#
-# THE SECOND TABLE SHAPE THIS LIBRARY ALREADY READS. A task-scale plan carries
-# `| id | intent | rigor | description | status | worktree |` — slot 3 under its second name
-# (§2's `rigor` alias), no `step` cell and no `deps` cell — and until this wave `units_ready`
-# refused it at the door: `case "$step" in *[!0-9]*) return 2` rejected the `T<n>` the plan's
-# `current:` carries, so the tick's FILL and the stop library's fill duty could never fire on
-# the one run shape that reported the friction (ADR-033 decision 2).
-#
-# THE STEP CELL IS THE DISCRIMINATOR, NOT THE ARGUMENT ALONE. A row that carries a step is a
-# WAVE row and is never ready at task scale, whatever the caller passed — which is what keeps
-# the DOUBT-then-FILL shape the approval gate closed (session-poker §22g: a wave table sitting
-# at `current: T1`) from re-opening through this door.
-#
-# AND THE DEPENDENCY WORD IS `done`, not `landed`: `done` is the one terminal word at task
-# scale (ADR-033 decision 1), so a task row whose dep is `landed` is NOT ready — the word is
-# not one that table can produce, and reading it as satisfaction would schedule against a
-# status nobody wrote.
-
-cat > "$SANDBOX/task-scale.md" <<'TASK_SCALE_EOF'
-## Tasks
-
-| id | intent | rigor | description | status | worktree |
-|---|---|---|---|---|---|
-| T1 | bugfix | standard | the first unit | done | — |
-| T2 | bugfix | standard | the second unit | pending | — |
-| T3 | bugfix | double | the third unit | pending | — |
-| T4 | bugfix | standard | a unit already in flight | active | 18-T4 |
-| T5 | bugfix | standard | a dropped unit | dropped | — |
-TASK_SCALE_EOF
-
-expect_eq "15.1 a task-scale current names the pending rows, in TABLE order" \
-  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/task-scale.md" T1)"
-expect_eq "15.2 …and the call succeeds rather than refusing the non-numeric step" \
-  "0" "$(call_rc units_ready "$SANDBOX/task-scale.md" T1)"
-expect_eq "15.3 …a done row is not offered again" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T1)"
-expect_eq "15.4 …an active row is not offered" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T4)"
-expect_eq "15.5 …and a dropped row is not offered" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T5)"
-expect_eq "15.6 the id the run is ON is answered for like any other row — status decides, not identity" \
-  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/task-scale.md" T2)"
-
-# The step argument is still validated: a word that is neither a number nor `T<n>` is a
-# caller fault and keeps the status it has always had.
-expect_eq "15.7 a step that is neither numeric nor T<n> still exits 2" "2" \
-  "$(call_rc units_ready "$SANDBOX/task-scale.md" wednesday)"
-expect_eq "15.8 …and T with no digits is not a task-scale step either" "2" \
-  "$(call_rc units_ready "$SANDBOX/task-scale.md" T)"
-
-# A numeric step against a table whose rows carry no step cell answers nothing — the wave
-# arm's own rule (`the row's step must equal the step asked for`), unchanged.
-expect_eq "15.9 a numeric step against a task-scale table is empty, not everything" "" \
-  "$(call units_ready "$SANDBOX/task-scale.md" 4)"
-
-# THE MIRROR, and the one that matters: a WAVE table asked at `T<n>`. Every row carries a
-# step cell, so none of them is a task row, and the answer is empty rather than the whole
-# pending set (§22g's shape).
-expect_eq "15.10 a wave table asked at a task-scale step answers nothing at all" "" \
-  "$(call units_ready "$SANDBOX/ready-a.md" T1)"
-expect_eq "15.11 …and says so with success, not with the step-refusal status" "0" \
-  "$(call_rc units_ready "$SANDBOX/ready-a.md" T1)"
-
-# THE DEPENDENCY WORD AT TASK SCALE. The shipped six-column table has no `deps` column, so
-# every pending row is ready; a table that grows one is read with `done` as satisfaction,
-# because `landed` is a word no task-scale ledger writes (ADR-033 decision 1).
-cat > "$SANDBOX/task-scale-deps.md" <<'TASK_DEPS_EOF'
-## Tasks
-
-| id | intent | rigor | description | deps | status | worktree |
-|---|---|---|---|---|---|---|
-| T1 | bugfix | standard | the finished unit | — | done | — |
-| T2 | bugfix | standard | behind a done unit | T1 | pending | — |
-| T3 | bugfix | standard | behind a pending unit | T4 | pending | — |
-| T4 | bugfix | standard | the unit T3 waits on | — | pending | — |
-| T5 | bugfix | standard | behind a landed unit | T6 | pending | — |
-| T6 | bugfix | standard | a row carrying the wave word | — | landed | — |
-TASK_DEPS_EOF
-
-expect_eq "15.12 a task row whose every dep is done is ready, and T4 with no dep beside it" \
-  "$(printf 'T2\nT4')" "$(call units_ready "$SANDBOX/task-scale-deps.md" T1)"
-expect_eq "15.13 …a task row behind a pending dep is not ready" "" \
-  "$(call units_ready "$SANDBOX/task-scale-deps.md" T1 | grep -x T3)"
-expect_eq "15.14 …and landed does not satisfy a task-scale dep — done is the word" "" \
-  "$(call units_ready "$SANDBOX/task-scale-deps.md" T1 | grep -x T5)"
-
-# ============================================================
 section "16 — units_memoised: one parse answers every verb, for the length of one command (wave-19 REQ-6, D7)"
 #
 # THE FILL DUTY ASKS THE TABLE THREE QUESTIONS — has it a `step` column, has it an `id`
@@ -1560,9 +1471,9 @@ expect_eq "16.6 …by every verb (the table is gone, so no rows)" "after-rows=" 
 MEMO_OTHER="$(bash -c '
   . "$1" >/dev/null 2>&1 || exit 127
   units_memoised "$2" units_rows "$3"
-' _ "$LIB" "$SANDBOX/memo.md" "$SANDBOX/task-scale-deps.md" 2>&1 | cut -f1 | tr '\n' ,)"
+' _ "$LIB" "$SANDBOX/memo.md" "$SANDBOX/memo-cols.md" 2>&1 | cut -f1 | tr '\n' ,)"
 expect_eq "16.7 a verb asked about another plan inside the command reads that plan" \
-  "T1,T2,T3,T4,T5,T6," "$MEMO_OTHER"
+  "T1,T2," "$MEMO_OTHER"
 
 # A plan with no table is memoised as "no table": every verb still answers exit 1 inside.
 printf '## Not tasks\n' > "$SANDBOX/memo-none.md"
@@ -1972,25 +1883,13 @@ expect_eq "17c.15 …at its step the step hold lifts and the ext hold stays; it 
   "T2: held by ext:ci-main" "$(call units_held "$SANDBOX/ext-gate.md" 8)"
 expect_eq "17c.16 …units_ready at its step still omits it" "" "$(call units_ready "$SANDBOX/ext-gate.md" 8)"
 
-# AT TASK SCALE the readiness program reads the same cell, so a token holds a T<n> row too.
-cat > "$SANDBOX/ext-task.md" <<'EXTT_EOF'
-## Tasks
-
-| id | task | deps | status |
-|---|---|---|---|
-| T1 | first | — | done |
-| T2 | waits on CI | T1, ext:ci-1 | pending |
-| T3 | ordinary | T1 | pending |
-EXTT_EOF
-expect_eq "17c.17 task scale: units_ready at T2 omits the ext:-held row" "T3" "$(call units_ready "$SANDBOX/ext-task.md" T2)"
-expect_eq "17c.18 task scale: units_held names it" "T2: held by ext:ci-1" "$(call units_held "$SANDBOX/ext-task.md" T2)"
 
 # ============================================================
 section "17d — wave-21 T5: one ledger reader, units_findings (REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3)"
 # ============================================================
 #
-# THREE FINDINGS AND NO MORE: `status <id> <value>` (a status outside the scale's enum),
-# `evidence <id>` (a row at the scale's terminal word with no `- T<n>:` line under
+# THREE FINDINGS AND NO MORE: `status <id> <value>` (a status outside the enum),
+# `evidence <id>` (a `landed` row with no `- T<n>:` line under
 # `## SDLC State`), `launch <id> <agent>` (an `active` row whose agent cell names no `name=`
 # on the roster). An empty or em-dash agent cell is SELF-OWNED and never a finding. With no
 # roster to read (an empty argument, a missing file, a symlink) no `launch` finding is
@@ -2081,8 +1980,8 @@ LEDGERC_EOF
 expect_eq "17d.9 a clean ledger prints nothing" "" "$(call units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
 expect_eq "17d.10 …and exits 0" "0" "$(call_rc units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
 
-# TASK SCALE: no step column, so the enum is pending · active · done · dropped and the
-# terminal word is `done`. The table carries no agent column, so every row is self-owned.
+# ONE ENUM AT EVERY SCALE (wave-31 T5; D2). A table in the retired six-column task shape is judged
+# by the one enum: its `done` is a status finding, and `landed` owes its line as anywhere.
 cat > "$SANDBOX/ledger-task.md" <<'LEDGERT_EOF'
 ## Tasks
 
@@ -2090,20 +1989,20 @@ cat > "$SANDBOX/ledger-task.md" <<'LEDGERT_EOF'
 |---|---|---|---|---|
 | T1 | build | single | done with its line | done |
 | T2 | build | single | done, no line | done |
-| T3 | build | single | landed is not a task-scale word | landed |
+| T3 | build | single | landed, no line | landed |
 | T4 | build | single | active, self-owned | active |
 
 ## SDLC State
 
 scale: task
-current: T4
+current: 4
 
 - T1: bash suite 5/5 green
 LEDGERT_EOF
-expect_eq "17d.11 task scale: done owes its line, landed is off the enum, an active row owes nothing" \
-  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "")"
+expect_eq "17d.11 D2 one enum: the retired done is a status finding, landed owes its line, an active self-owned row nothing" \
+  "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task.md" "")"
 expect_eq "17d.12 …the same with a roster" \
-  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "$SANDBOX/ledger.roster")"
+  "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task.md" "$SANDBOX/ledger.roster")"
 
 # AN EMPTY STATUS CELL is named, the way the validator names it.
 sed 's/| d.sh | active |/| d.sh |  |/' "$SANDBOX/ledger-clean.md" > "$SANDBOX/ledger-empty-status.md"
@@ -2118,7 +2017,7 @@ expect_eq "17d.15 units_unlined names every T-row short of a line, table order, 
 # CR-ONLY INPUT (the gate's 19j-cr pin): the reader translates line endings itself.
 tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
 expect_eq "17d.16 a CR-only plan reads the same" \
-  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
+  "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
 
 # ============================================================
 section "READS — wave-26 T2: a row declares what it reads; an empty cell takes its kind default (REQ-5, AC-5.1; D1)"

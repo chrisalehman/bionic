@@ -20,7 +20,7 @@ current: <N>
 - T<n>: pending dispatch — .worktrees/<wave>-T<n>
 ```
 
-**Task-scale variant.** Requirements go under `## Requirements`, each a `### REQ-<n> — <title>` heading with a `provenance:` line (the Step-1 card renders them). `current: T<n>`, one `- T<n>: <evidence>` line per task, backed by a `## Tasks` table with columns `| id | intent | rigor | description | status | worktree |`, `id` matching `^T[0-9]+$` and status in `pending|active|done|dropped` — `done` means finished and the tree released; the readings its rigor deals (`proved: kind=review` lines in `## SDLC State`, or a `waived:` line) are owed from Step 6 (a numeric `current:` ≥ 6), never at `current: T<n>`; the words auditor and critic on its line no longer count. A row's rigor cell may RAISE that task above the frontmatter default; lowering it is a downgrade that blocks unless the evidence line carries a `waiver:` marker. Dispatched work is ledgered by the orchestrator, never by the subagent. When the plan is written, its author writes `base-sha: <the commit the work started from>` (`git rev-parse HEAD` at that moment) in its frontmatter: without it the first reading is refused. Beside it the author writes `working-branch: <the branch the work is built on>`: without it `proof-add`, `waive` and `current 8` refuse.
+**Task-scale variant.** Requirements go under `## Requirements`, each a `### REQ-<n> — <title>` heading with a `provenance:` line (the Step-1 card renders them). The ledger is the one `## Tasks` table above, with a numeric `current:`; the readings its rigor deals (`proved: kind=review` lines in `## SDLC State`, or a `waived:` line) are owed from Step 6. Dispatched work is ledgered by the orchestrator, never by the subagent. When the plan is written, its author writes `base-sha: <the commit the work started from>` (`git rev-parse HEAD` at that moment) in its frontmatter: without it the first reading is refused. Beside it the author writes `working-branch: <the branch the work is built on>`: without it `proof-add`, `waive` and `current 8` refuse.
 
 **Wave-scale variant.** The `## Tasks` table's columns, `deps` and `reads`, status vocabulary and `working-branch:` are documented in `operational-rules.md`.
 
@@ -47,9 +47,8 @@ approved-by: <user> <ISO-UTC> "<verbatim reply>"
 
 While that line is absent the evidence gate refuses every commit at `current: 4` or later, and
 dispatch-preflight refuses every writer-class dispatch (implementor, senior-implementor). Both
-walls, and the fails-when wall beside them, bind at every scale — a task-scale plan at
-`current: T<n>` is past Step 3. The Patrol's below-Step-4 fill refusal is the second
-backstop.
+walls, and the fails-when wall beside them, bind at every scale. The Patrol's below-Step-4
+fill refusal is the second backstop.
 
 On approval, rebuild the task list from the plan before the first dispatch: delete every pending entry and recreate them in execution order — one `<step>/<n>: <short desc>` entry per `## Tasks` row, in the order the Step-3 card's batches print, for every step the table has rows at, then one `<step>: <desc>` entry for each remaining step. The task tool appends, so adding entries without recreating the later ones leaves the list out of order. Mark a row's entry in progress in the turn it is dispatched.
 
