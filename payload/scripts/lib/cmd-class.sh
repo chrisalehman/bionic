@@ -248,7 +248,10 @@ CMD_RUN_NORM_AWK='
 #
 # WHAT IS NOT FOLDED: operands, paths, flags and subcommands, at the call sites (`npm TEST` is
 # not `npm test`, and `bash TESTS/RUN.SH` names no suite this reader knows), and a script named
-# at argv[0] by its path (`./tests/X.TEST.SH`), for the same reason its operand form is not. And,
+# at argv[0] by its path (`./tests/X.TEST.SH`), for the same reason its operand form is not. The
+# budget's own reading still OPENS a script operand (wave-31 T11, `script_read`): the filesystem
+# finds the file however it is spelled, its text is what is read, and a file that is not there is
+# `unverified`, by its path as typed (wave-31 T38). And,
 # inside the fold itself, every word whose effect exists only as a shell builtin or keyword: an
 # external program word folds, a builtin-only word does not, because the shell matches its own
 # builtins case-exactly and hands only the rest to the case-blind filesystem. The never list is

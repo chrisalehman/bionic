@@ -2646,12 +2646,25 @@ awk -v l="$(cat "$EG6_REC")" 'BEGIN { for (i = 1; i < 5000; i++) { x = l; sub(/i
 expect_eq "EG6k16 precondition: the record holds 5,000 lines" "5000" "$(awk 'END { print NR }' "$EG6_REC")"
 EG6_COV="$(eg6_plan 6 wave "$EG6_ALL
 $(eg6_floor_at 2026-10-05T05:00:00Z)")"
-EG6_T0=$SECONDS; for eg6i in 1 2 3; do eg6_gate "$EG6_COV"; done; EG6_TBIG=$((SECONDS - EG6_T0))
-expect_status "EG6k16b …the covered commit is admitted through it" 0 "$ST"
-rm -f "$EG6_REC"
-EG6_T0=$SECONDS; for eg6i in 1 2 3; do eg6_gate "$EG6_COV"; done; EG6_TNONE=$((SECONDS - EG6_T0))
-expect_true "EG6k16c …and three commits with it take at most a second more than without (${EG6_TBIG}s, ${EG6_TNONE}s)" \
-  test "$EG6_TBIG" -le $((EG6_TNONE + 1))
+# TIMED AS EGD-8 IS (A-orch-243; wave-31 T38, A-T38-2): a millisecond clock, not whole SECONDS,
+# which alone moved the difference by up to two; three rounds, with and without the record taking
+# turns so a stretch of load falls on both; the quickest three commits of each side. A spike of
+# load on a shared machine is not the read's cost, and the bound is still the one second.
+eg6_ms() { perl -MTime::HiRes=time -e 'printf "%d", time * 1000'; }
+eg6_three() {  # -> EG6_MS, the ms three commits of $EG6_COV take through the hook; ST is the last one's
+  local t0; t0="$(eg6_ms)"; for eg6i in 1 2 3; do eg6_gate "$EG6_COV"; done; EG6_MS=$(( $(eg6_ms) - t0 ))
+}
+cp "$EG6_REC" "$EG6_REC.keep"; EG6_TBIG=""; EG6_TNONE=""; EG6_STBIG=""
+for eg6r in 1 2 3; do
+  cp "$EG6_REC.keep" "$EG6_REC"; eg6_three; EG6_STBIG="$EG6_STBIG$ST"
+  { [ -z "$EG6_TBIG" ] || [ "$EG6_MS" -lt "$EG6_TBIG" ]; } && EG6_TBIG=$EG6_MS
+  rm -f "$EG6_REC"; eg6_three
+  { [ -z "$EG6_TNONE" ] || [ "$EG6_MS" -lt "$EG6_TNONE" ]; } && EG6_TNONE=$EG6_MS
+done
+rm -f "$EG6_REC.keep"
+expect_eq "EG6k16b …the covered commit is admitted through it, every round" "000" "$EG6_STBIG"
+expect_true "EG6k16c …and three commits with it take at most a second more than without (quickest of three: ${EG6_TBIG} ms, ${EG6_TNONE} ms)" \
+  test "$EG6_TBIG" -le $((EG6_TNONE + 1000))
 # A PLAN VERB'S DRY COMMIT (wave-27 T76; review pass 60 P0-1; A-orch-170, A-orch-171). The verb binds
 # a session `planverb-<pid>` to a COPY of the plan, `<plan>.<verb>-dry.<pid>`, with a marker naming the
 # plan it was made from (`dry_of=`; written here in hooks/session-poker.sh `plan_verb_dry`'s shape).
