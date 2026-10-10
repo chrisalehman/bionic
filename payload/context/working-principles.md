@@ -4,6 +4,7 @@
      tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
 
 <!-- bionic:principles:start -->
+<!-- bionic replaces this span on every setup; your own text belongs outside the markers -->
 ## Working principles
 
 **Correctness over expedience.** Complexity is a cost; shipping something that has to be undone is a bigger one. Fix a problem at the layer it lives in.
