@@ -3752,8 +3752,8 @@ fs_count() { awk 'END { print NR + 0 }' "$FS_COUNT" 2>/dev/null; }
 fs_why() {  # -> integrate's proof:floor wait reason, or nothing
   call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:floor") == 1 { print $2 }'
 }
-FS_LEAD="proof:floor: the floor is one whole run plus each later commit proved by its suites, and since the regression proof at"
-FS_OUT="; run the suites it lacks, or a whole run on this head, and record it with proof-add floor"
+FS_LEAD="proof:floor: the floor is one whole run plus each later commit proved; past the proof at"
+FS_OUT="; run what it lacks, or a whole run on this head, and proof-add floor"
 # THE REVIEW HALF IS HANDED IN COVERED (wave-27 T14; D3). integrate's proof:review is met only by
 # the facts state the tick hands in (UNITS_FACTS_STATE); every row here is about the floor, so the
 # state is the one the tick hands when the readings hold. §INTEGRATE-JUDGE drives the others.
@@ -3772,7 +3772,7 @@ fs_commit lib/one.sh 'one, changed'
 FS_X1="$(fs_git rev-parse HEAD)"
 expect_eq "FS.2 a commit past the floor proof with no run recorded at it: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.2b …and its wait names the commit, what it lacks and the way out" \
-  "${FS_LEAD} ${FS_H0:0:12}: commit ${FS_X1:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" "$(fs_why)"
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X1:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" "$(fs_why)"
 fs_stamp a.test.sh 0 2026-10-04T12:01:00Z
 expect_eq "FS.2c AC-3.3 AC-13.4 a green run recorded at it: the floor stands, integrate is ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.2d …and no wait is told for it" "" "$(fs_why)"
@@ -3782,7 +3782,7 @@ fs_commit newdir/x.sh 'new'
 FS_X2="$(fs_git rev-parse HEAD)"
 expect_eq "FS.3 AC-3.4 a new file under a directory no suite names: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.3b …and its wait names that commit, not the proved one before it" \
-  "${FS_LEAD} ${FS_H0:0:12}: commit ${FS_X2:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X2:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
   "$(fs_why)"
 expect_eq "FS.3c …while the extractor reads a real line: the review proof is no wait (paired positive)" "" \
   "$(call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:review") == 1')"
@@ -3800,7 +3800,7 @@ FS_X3="$(fs_git rev-parse HEAD)"
 fs_stamp b.test.sh 1 2026-10-04T12:02:00Z
 expect_eq "FS.5 a commit whose only recorded run is red: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
 expect_contains "FS.5b …saying which suite is red where, from the newest floor proof" \
-  "${FS_LEAD} ${FS_H1:0:12}: commit ${FS_X3:0:12} (no landing row) is not proved: b.test.sh is red at ${FS_X3:0:12}" "$(fs_why)"
+  "${FS_LEAD} ${FS_H1:0:12}, commit ${FS_X3:0:12} (no landing row) is not proved: b.test.sh is red at ${FS_X3:0:12}" "$(fs_why)"
 fs_stamp b.test.sh 0 2026-10-04T12:03:00Z
 expect_eq "FS.5c …and a newer green run of it releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
@@ -3868,22 +3868,22 @@ expect_eq "FS.9e …and the ready set over the same plan asks the state once: as
 expect_eq "FS.10 proof_state's first field over an unproved commit is uncovered" "uncovered" \
   "$(call proof_state "$FS_PLAN" "$FS_REPO" | cut -f1)"
 expect_eq "FS.11 …and integrate's wait carries the reason: the commit, and that no run is recorded at it" \
-  "${FS_LEAD} ${FS_H4:0:12}: commit ${FS_X4:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
+  "${FS_LEAD} ${FS_H4:0:12}, commit ${FS_X4:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
   "$(fs_why)"
 fs_prove floor
 expect_eq "FS.11b …and a floor proof at the head walks nothing: covered, ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 # PLAN SHAPES THAT WERE READY BEFORE: each now says what to do.
 sed 's/^working-branch: wave\/99-fs$//' "$FS_PLAN" > "$FS_REPO/.bionic/nobranch.md"
-expect_contains "FS.12 a plan naming no working branch: the wait says so" ": the plan names no working-branch;" \
+expect_contains "FS.12 a plan naming no working branch: the wait says so" ", the plan names no working-branch;" \
   "$(call units_waiting "$FS_REPO/.bionic/nobranch.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
 awk '/^proved: kind=floor / { sub(/head=[0-9a-f]+/, "head=0123456789abcdef0123456789abcdef01234567") } { print }' \
   "$FS_PLAN" > "$FS_REPO/.bionic/foreign.md"
-expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" ": the proved head is not a commit here;" \
+expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" ", the proved head is not a commit here;" \
   "$(call units_waiting "$FS_REPO/.bionic/foreign.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
 fs_git checkout -q --detach 2>/dev/null
 expect_contains "FS.14 a detached checkout: no checkout holds the working branch, and the wait says so" \
-  ": no checkout holds the working branch wave/99-fs;" "$(fs_why)"
+  ", no checkout holds the working branch wave/99-fs;" "$(fs_why)"
 fs_git checkout -q wave/99-fs 2>/dev/null
 expect_eq "FS.14b …and back on the branch, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
 

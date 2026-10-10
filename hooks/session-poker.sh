@@ -1897,7 +1897,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
     || return 0
   fst="$(_units_floor_state "$SCHED_PLAN" 2>/dev/null)"
   case "$fst" in
-    covered*|bounded*) : ;;
+    covered*) : ;;
     *) UNITS_FACTS_STATE="the readings are judged once the regression holds"; return 0 ;;
   esac
   if ! declare -F facts_state >/dev/null 2>&1; then
@@ -1917,10 +1917,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   case "$rc" in
     0) UNITS_FACTS_STATE=covered ;;
     2) UNITS_FACTS_STATE="the plan's rigor and scale cannot be dealt" ;;
-    # A REGRESSION LINE NAMING SUITES is said in words (wave-30 T13; AC-4.4): the map bounds the change and
-    # those suites have no green run at the head, so they are what is owed, never a full run.
-    *) UNITS_FACTS_STATE="$( { printf '%s\n' "$out" | proof_floor_words "$head"
-         printf '%s\n' "$out" | awk -F'\t' '$NF != "covered" && !($1 == "floor" && $2 == "uncovered" && $3 != "" && index($3, "..") == 0)'; } \
+    *) UNITS_FACTS_STATE="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' \
          | awk -F'\t' '{ $1 = $1; printf "%s%s", (n++ ? "; " : ""), $0 }' OFS=' ')" ;;
   esac
   return 0
@@ -3567,8 +3564,6 @@ cur8_judge() {
   fi
   die "REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
   printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
-  # The regression's line that names suites, in words (wave-30 T13): those suites run green at the head prove it.
-  printf '%s\n' "$out" | proof_floor_words "$PV_HEAD8" >&2
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
 }
