@@ -392,8 +392,8 @@ expect_eq "DEBT-P2 proof_findings exposes the debt line as a row: debt, kind, co
 sev_rec dbt-mixed flag "findings: 1" "finding: 1 S3 on lib/a.sh:3 a message misnames the flag" \
   "debt: duplicate tree_count lib/b.sh:2,lib/c.sh:5"
 DBT_MIX="$(dbt_rows dbt-mixed)"
-expect_eq "DEBT-P2b a pass with a finding and a debt line: the finding row, then the debt row, its sites joined by ', '" \
-  "$(printf '1\tS3\ton\tlib/a.sh:3\tdefer\t0\t0\ta message misnames the flag\ndebt\tduplicate\ttree_count\tlib/b.sh:2, lib/c.sh:5\tburn') rc=0" "$DBT_MIX"
+expect_eq "DEBT-P2b a pass with a finding and a debt line: the finding row (seven columns since wave-31 T32 took unsure out), then the debt row, its sites joined by ', '" \
+  "$(printf '1\tS3\ton\tlib/a.sh:3\tdefer\t0\ta message misnames the flag\ndebt\tduplicate\ttree_count\tlib/b.sh:2, lib/c.sh:5\tburn') rc=0" "$DBT_MIX"
 expect_eq "DEBT-P2c …and registration writes the finding's deferred: line and none for the debt row" \
   'deferred: record/wave-01-fixture/dbt-mixed.md#1 S3 on "a message misnames the flag"' \
   "$(bash -c '. "$1"; proof_finding_lines record/wave-01-fixture/dbt-mixed.md "$(proof_findings "$2")"' _ "$SEV_LIB" "$SEV_DIR/dbt-mixed.md" 2>/dev/null)"
