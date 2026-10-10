@@ -298,14 +298,11 @@ bionic_context 2>/dev/null || exit 0
 # only for an engaged session (everything above is a bystander's silent exit), and it is disarmed
 # the moment the row is built, before the first byte of the roster is written, so a refusal never
 # leaves a row behind. THE LIMIT, STATED: bash runs a trap between commands, so a single foreground
-# command that itself outlasts the registration is not interrupted; the waits in this hook are
-# bounded (the impact derivation polls at IMPACT_BOUND_S), which is why the cumulative overrun is
-# the case this catches.
+# command that itself outlasts the registration is not interrupted, which is why the cumulative
+# overrun is the case this catches.
 #
-# BOUND < DEADLINE < REGISTRATION (wave-30 T35). The deadline was 12 under 15; it moved to 22 with
-# the registration's 25, and it must stay above IMPACT_BOUND_S (20, lib/bounds.sh): the trap fires
-# inside the derivation's poll, so a deadline at or under the bound refuses before the bound can.
-# tests/cross-gate-agreement.test.sh §L.4c reads all three.
+# DEADLINE < REGISTRATION (wave-30 T35). The deadline was 12 under 15; it moved to 22 with the
+# registration's 25. tests/cross-gate-agreement.test.sh §L.4c reads both.
 DP_DEADLINE_S=22
 DP_DEADLINE_LIVE=0
 DP_DEADLINE_PID=""
@@ -1817,8 +1814,7 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 #
 # ONE FINDING TAKES `deny` TOO, and the wire is chosen by AUDIENCE, never by fault count
 # (wave-19 T4, REQ-7, D8). Until then a lone finding stayed on `exit2`, so the status of a
-# refusal of one kind depended on how many faults the brief — and, through the no-impact
-# arm, the repository's own config — happened to add up to (A-T4.8): one fault exited 2,
+# refusal of one kind depended on how many faults the brief happened to add up to (A-T4.8): one fault exited 2,
 # two exited 0. Every pooled finding here is a brief-shape or state fault the dispatching
 # MODEL fixes by re-writing its brief, so every one goes to the model verbatim on the
 # reason field, and the user stream carries the one line. What still differs by count is
@@ -1869,8 +1865,7 @@ dp_scaffold_marked() {
       # Q7). A brief whose `Expected artifact:` span names two paths HAS the label and still
       # needs it — the extractor emits candidates and leaves `C_DELIVERABLE` empty — so the
       # question the mark asks is what the walls above already computed, not what the text
-      # spelled. `Suites:` keeps the plain rule: a derivation is not a declaration, and this
-      # gate is where a repo with no impact command learns to name its set.
+      # spelled. `Suites:` keeps the plain rule: this gate is where a brief learns to name its set.
       "Expected duration")  [ -n "$C_DURATION" ]    || line="${line} <ADD>" ;;
       # A LABEL WHOSE SPAN WAS READ AND REJECTED IS NOT AN ABSENT LABEL (critic Issue 3,
       # wave-14 T26, pre-existing at 0fe69ed). Several candidates leaves C_DELIVERABLE
@@ -2415,7 +2410,7 @@ esac
 #
 # ONE GRAMMAR, THREE DOORS. The arms that judge Files:, Suites: and Re-executes: — a literal
 # declaration, the run cap, the dropped suite, the missing instrument, the auditor's waiver —
-# and the derivation of the suite set the row records, live in payload/scripts/lib/brief.sh's
+# and the suite set the row records, live in payload/scripts/lib/brief.sh's
 # `brief_validate_fields`, which `session-poker.sh amend` and `task-add` call too. An amended
 # contract is held to exactly a fresh dispatch's standard (Δ10); a copy of these arms here
 # would be the three-readers defect REQ-10 removed, in a new place.
@@ -2423,25 +2418,15 @@ esac
 # NOTHING MOVED IN BEHAVIOUR. The library reports each fault to the sink in the order these
 # arms ran, and the sink is `dp_finding`, so the pool, its first-fault line and every detail
 # are what they were. Its loud-but-passing line goes through this file's `warn()`.
-#
-# RC 2 IS THE EARLY SPEND (Step-6 architecture review §2.2). The derivation overran its bound,
-# its finding is already pooled, and the suite set the full-run wall below reads was never
-# built. That wall is this file's, so this file says `not checked` for it and spends the pool here: there is nothing below but walls that depend on
-# the derivation, and an arm added below that does NOT must be pooled above this call.
 dp_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
   case "$1" in
     finding) dp_finding "$2" "$3" "$4" ;;
     warn)    warn "$2" ;;
   esac
 }
-DP_BRIEF_RC=0
-brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink || DP_BRIEF_RC=$?
+brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink || :
 SUITES_ALLOWED="$BRIEF_SUITES_ALLOWED"
 SUITES_SOURCE="$BRIEF_SUITES_SOURCE"
-if [ "$DP_BRIEF_RC" -eq 2 ]; then
-  dp_not_checked "full-run" "a suite set"
-  dp_refuse_findings
-fi
 
 # ============================================== A DECLARED DEBT (wave-27 T31; REQ-14, D23)
 #

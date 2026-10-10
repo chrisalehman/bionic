@@ -1343,61 +1343,32 @@ section "S27: the suite-allowance wall (AC-20, AC-24)"
 # green at ~45 minutes and then spent 40 more re-running the whole tree, one suite at a
 # time, in parallel, on an 8 GB machine. Their briefs said "run impacted suites only;
 # never tests/run.sh". Prose in a brief is a wish; the roster row is what the writer-side
-# guard can read. So the brief declares INTENT (`Files:`) or the closed set (`Suites:`),
-# the wall records the budget, and a brief that declares neither is refused here.
-#
-# THE IMPACT COMMAND IS FIXTURED, NOT REAL. What this section proves is that the wall
-# RUNS the configured command over the declared paths and records what comes back — so the
-# command is a two-line stub whose answer is unmistakably its own, and doctoring it must
-# move the row. Driving the real `tests/lib/impact.sh` through this contract is
-# tests/cross-gate-agreement.test.sh's job (one owner per shared truth): a fixture that
-# reproduced its output would pin this file to a derivation it does not own.
+# guard can read. So the brief names the closed set (`Suites:` or `Re-executes:`), the wall
+# records it, and a brief that names neither is refused here. `Files:` is scope: it names no
+# suite (wave-31 T2, REQ-4 AC-4.2: the file-to-suite map and its derivation are deleted).
 
 # [s27_impact, BRIEF_FILES: defined in tests/dispatch-preflight.prelude.sh, hoisted from here for the shards — wave-30 T1]
 
-# --- S27a: Files: + a configured impact command -> the DERIVED row ---
+# --- S27a: Files: alone is REFUSED, and a stale impact-command: line derives nothing ---
+# The repo still carries a pre-1.14.1 `impact-command:` line whose stub would answer two
+# suites. Nothing reads it: the brief names no suite, so it is refused, and the stub never runs.
 REPO=$(make_repo r27a yes)
 write_attestation "$REPO" "$SID_A"
 s27_impact "$REPO" beta.test.sh alpha.test.sh
+# NON-VACUITY: the stub writes its side file whenever it is run.
+( cd "$REPO" && bash .bionic/impact-stub.sh probe >/dev/null )
+expect_eq "27a precondition: the stale stub writes its side file when run" "probe" \
+  "$(cat "$REPO/.bionic/impact-args.txt" 2>/dev/null)"
+rm -f "$REPO/.bionic/impact-args.txt"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w27-files")"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "27a a brief declaring Files: with an impact command PASSES" "0" "$GATE_ST"
-expect_status "27a …and the row records the declared paths verbatim" \
-  "payload/scripts/lib/widget.sh,hooks/widget-guard.sh" "$(roster_field "$ROW" files)"
-expect_status "27a …the derived set is the impact command's answer, sorted and deduplicated" \
-  "alpha.test.sh beta.test.sh" "$(roster_field "$ROW" suites_allowed)"
-expect_status "27a …and the row says the set was DERIVED, not declared" \
-  "derived" "$(roster_field "$ROW" suites_source)"
-# NON-VACUITY, both directions. The stub really ran, and it really received the paths the
-# brief declared — a wall that ignored the command and wrote a constant would pass every
-# assertion above.
-expect_status "27a …the impact command was really run" "0" \
+expect_eq "27a a brief declaring Files: alone is REFUSED, a stale impact-command: line or not" \
+  "deny" "$GATE_VERDICT"
+expect_contains "27a …saying Files: names no suite" "Files: alone names no suite" "$GATE_ERR"
+expect_contains "27a …naming the declared-set fix" "Suites: tests/one.test.sh" "$GATE_VERR"
+expect_absent "27a …and never the config key" "impact-command" "$GATE_VERR"
+expect_status "27a …the stale command was never run" "1" \
   "$([ -f "$REPO/.bionic/impact-args.txt" ] && echo 0 || echo 1)"
-expect_eq "27a …over the declared paths, one argument each" \
-  "payload/scripts/lib/widget.sh
-hooks/widget-guard.sh" "$(cat "$REPO/.bionic/impact-args.txt")"
-
-# --- S27a2: MUTATION — doctor the command, and the row must move ---
-# The row is the command's answer, not the wall's opinion of it.
-REPO=$(make_repo r27a2 yes)
-write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO" gamma.test.sh
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w27-files2")"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "27a2 a DIFFERENT impact command answer lands a different budget" \
-  "gamma.test.sh" "$(roster_field "$ROW" suites_allowed)"
-
-# --- S27a3: a derivation that answers NOTHING leaves the budget empty, and warns ---
-REPO=$(make_repo r27a3 yes)
-write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w27-files3")"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "27a3 an impact command that derives nothing still PASSES the dispatch" "0" "$GATE_ST"
-expect_status "27a3 …with an empty budget on the row" "" "$(roster_field "$ROW" suites_allowed)"
-expect_status "27a3 …still marked derived, so no reader mistakes it for a declaration" \
-  "derived" "$(roster_field "$ROW" suites_source)"
-expect_contains "27a3 …and the operator is told at dispatch" "derived no suites" "$GATE_ERR"
+expect_status "27a …and no row journalled" "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
 # --- S27b: Suites: -> the DECLARED row, normalised to basenames ---
 REPO=$(make_repo r27b yes)
@@ -1406,8 +1377,8 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
 Expected artifact: .bionic/docs/record/w27b.md
 Suites: tests/one.test.sh, tests/two.test.sh' "w27-decl")"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "27b a declared Suites: line PASSES with no impact command configured" "0" "$GATE_ST"
-expect_status "27b …recorded as BASENAMES, the same alphabet the derivation prints" \
+expect_status "27b a declared Suites: line PASSES" "0" "$GATE_ST"
+expect_status "27b …recorded as BASENAMES, the alphabet the budget arm compares" \
   "one.test.sh two.test.sh" "$(roster_field "$ROW" suites_allowed)"
 expect_status "27b …and the row says the set was DECLARED" \
   "declared" "$(roster_field "$ROW" suites_source)"
@@ -1421,13 +1392,14 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
 Expected artifact: .bionic/docs/record/w27c.md
 Expected duration: ~15 minutes.' "w27-neither")"
 expect_eq "27c a brief declaring neither Files: nor Suites: is REFUSED" "deny" "$GATE_VERDICT"
-expect_contains "27c …naming the Files: fix" "Files: path/one.sh" "$GATE_VERR"
 expect_contains "27c …naming the Suites: fix" "Suites: tests/one.test.sh" "$GATE_VERR"
+expect_contains "27c …naming the Re-executes: fix" "Re-executes: " "$GATE_VERR"
+expect_absent "27c …and no derivation from Files:" "derives the suites" "$GATE_VERR"
 expect_contains "27c …and the waiver" "Suites: none" "$GATE_VERR"
 # THE SPELLING RULE, IN THE ONE MESSAGE AN AUTHOR READS WHEN THE LABELS ARE MISSING. Both
 # labels are read out of the brief TEXT before any shell expands anything, and the
 # writer-side guard reads its command the same way (review-c C-5/C-6): a name that is still
-# a variable when a hook sees it can be neither derived from nor checked against anything.
+# a variable when a hook sees it can be checked against nothing.
 expect_contains "27c …and the spelling rule the two labels share" \
   "one path per token, no shell variables" "$GATE_VERR"
 expect_eq "27c …with ONE deny verdict on stdout and nothing else" "1" \
@@ -1448,22 +1420,22 @@ expect_status "27d …and the waiver is on the row, where the writer-side guard 
 expect_status "27d …recorded as a declaration, because a human declared it" \
   "declared" "$(roster_field "$ROW" suites_source)"
 
-# --- S27e: Files: with NO impact command -> refused, naming the two fixes ---
+# --- S27e: Files: in a repo with no config at all -> refused, naming the declared-set fix ---
 #
-# `Files:` states an intent that only a derivation can turn into a budget. bionic runs in
-# repositories that configure none, and there the author is the only one who can name the
-# set — so this refuses rather than passing with an empty budget, at the one moment the
-# author is still holding the brief.
+# `Files:` states scope, not a budget, and the author is the only one who can name the set —
+# so this refuses rather than passing with an empty budget, at the one moment the author is
+# still holding the brief.
 REPO=$(make_repo r27e yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w27-nocmd")"
-expect_eq "27e Files: with no impact-command configured is REFUSED" "deny" "$GATE_VERDICT"
+expect_eq "27e Files: alone is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "27e …naming the declared-set fix" "Suites: tests/one.test.sh" "$GATE_VERR"
-expect_contains "27e …and the config key that would derive it" "impact-command:" "$GATE_VERR"
+expect_absent "27e …and no config key to set" "impact-command" "$GATE_VERR"
 
-# --- S27f: a brief carrying BOTH — the declaration wins ---
+# --- S27f: a brief carrying BOTH — the declaration is the budget ---
 #
-# `Suites: none` is a waiver, and a waiver a derivation could overrule is not a waiver.
+# The stale `impact-command:` line names a stub that would answer another suite; the row
+# carries the declared one.
 REPO=$(make_repo r27f yes)
 write_attestation "$REPO" "$SID_A"
 s27_impact "$REPO" derived-only.test.sh
@@ -1477,8 +1449,8 @@ expect_status "27f a brief with both labels takes the DECLARED set" \
 expect_status "27f …and says so" "declared" "$(roster_field "$ROW" suites_source)"
 expect_status "27f …while still recording the files the brief declared" \
   "payload/scripts/lib/widget.sh" "$(roster_field "$ROW" files)"
-# NON-VACUITY: the impact command that would have answered differently really was configured.
-expect_status "27f …non-vacuity: an impact command WAS configured for this repo" "0" \
+# NON-VACUITY: the stale line that once answered differently really is in the config.
+expect_status "27f …non-vacuity: a stale impact-command: line IS in this repo's config" "0" \
   "$([ -f "$REPO/.bionic/config.yaml" ] && echo 0 || echo 1)"
 
 # --- §declared-new-suite (T8, AC-5.1) — a declared suite ABSENT ON DISK lands verbatim ---
@@ -1507,14 +1479,13 @@ expect_status "declared-new-suite a Files:+Suites: brief naming a suite absent o
   "0" "$GATE_ST"
 expect_status "declared-new-suite …the row carries BOTH declared tokens, verbatim" \
   "close-out.test.sh run-predicate.test.sh" "$(roster_field "$ROW" suites_allowed)"
-expect_status "declared-new-suite …suites_source= is declared, not derived" \
+expect_status "declared-new-suite …suites_source= is declared" \
   "declared" "$(roster_field "$ROW" suites_source)"
-# NON-VACUITY: the file really is absent from this fixture repo, and the impact command
-# really was configured (so a wall that fell through to derivation would answer
-# "archive.test.sh run.sh" instead, not this pair).
+# NON-VACUITY: the file really is absent from this fixture repo, and a stale impact-command:
+# line really is configured (a wall that still derived would answer "archive.test.sh run.sh").
 expect_status "declared-new-suite …non-vacuity: tests/close-out.test.sh is absent on disk" \
   "1" "$([ -f "$REPO/tests/close-out.test.sh" ] && echo 0 || echo 1)"
-expect_status "declared-new-suite …non-vacuity: an impact command WAS configured for this repo" \
+expect_status "declared-new-suite …non-vacuity: a stale impact-command: line IS configured" \
   "0" "$([ -f "$REPO/.bionic/config.yaml" ] && echo 0 || echo 1)"
 
 # --- S27g: the row's instrument fields never disturb the ones already on it ---
@@ -1604,10 +1575,10 @@ expect_status "27j fixture non-vacuity: the declared line really overflows 900 c
   "0" "$([ "${#S27J_FILES}" -gt 900 ] && echo 0 || echo 1)"
 REPO=$(make_repo r27j yes)
 write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO" alpha.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
 Expected artifact: .bionic/docs/record/w27j.md
-Files: ${S27J_FILES}" "w27-wide-files")"
+Files: ${S27J_FILES}
+Suites: tests/alpha.test.sh" "w27-wide-files")"
 expect_status "27j a brief declaring 60 long files PASSES" "0" "$GATE_ST"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 S27J_ROW_FILES=$(roster_field "$ROW" files)
@@ -2398,163 +2369,6 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc4-full")"
 expect_eq "PC.4c the full run is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "PC.4d …the one line names the released head" "head ${PF_H2:0:7} is already proved" "$(pf_line)"
 expect_contains "PC.4e …and the detail the tree proved at the proof's head" "(the tree proved at ${PF_H:0:7})" "$GATE_VERR"
-
-section "SECTION 29 — the derivation is BOUNDED, and the overrun is a refusal (review-c C-16)"
-# THE DEFECT. The impact command is the whole of this gate's cost — ~0.3 s without it,
-# ~2.9-3.1 s with it on an idle tree, 5.06-6.51 s measured while this wave's own writers
-# were running. hooks/hooks.json registers the hook at a timeout of its own and the call
-# had no bound of its own. A PreToolUse hook killed on the CLI's timeout does NOT exit 2: the
-# dispatch proceeds, NO ROSTER ROW IS WRITTEN, and the writer runs with no budget at all —
-# the wall defeated by the cost of the wall. So the bound is built here, and it refuses.
-#
-# NO SEAM. The bound is the shipped constant, not a value this suite hands the hook; the
-# stub below simply outruns it. A test that shortened the bound would prove a constant it
-# had itself supplied and leave the production path unverified.
-#
-# AND THE CONSTANT IS READ, NOT TRANSCRIBED (wave-14 REQ-7, D4). It moved from a literal in
-# the hook to `payload/scripts/lib/bounds.sh`, which both this wall and the landing sweep
-# source; a number typed here would go stale the first time the library's does, and the
-# assertions below would then be pinning this file's memory of the bound rather than the
-# bound. `s29_impact`'s sleep is derived from it for the same reason.
-S29_BOUND="$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ \
-  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh" 2>/dev/null)"
-expect_nonempty "29 the shipped bound is readable from lib/bounds.sh" "$S29_BOUND"
-
-# [s29_impact: defined in tests/dispatch-preflight.prelude.sh, hoisted from here for the shards — wave-30 T1]
-
-# --- 29a: a derivation that outruns the bound REFUSES, and refuses in time ---
-REPO=$(make_repo r29a yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" $(( S29_BOUND + 10 ))
-S29_T0=$(date +%s)
-GATE_HIRES=1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-slow")"
-GATE_HIRES=""
-# THE WALL'S OWN COST, not the suite's: `run_gate` drives the call a second time with
-# BIONIC_WALL_VERBOSE=1 to read `detail`, and that second bounded derivation would double
-# the number measured here. `$GATE_TIME` is the first drive alone.
-S29_ELAPSED="$GATE_TIME_CS"
-expect_eq "29a a derivation that outruns the bound REFUSES the dispatch" "deny" "$GATE_VERDICT"
-expect_contains "29a …naming the bound it outran" "bound:   ${S29_BOUND}s" "$GATE_VERR"
-expect_contains "29a …naming the command that was slow" "impact-stub.sh" "$GATE_VERR"
-expect_contains "29a …naming the paths it was asked about" "payload/scripts/lib/widget.sh" "$GATE_VERR"
-expect_contains "29a …and saying why an unbounded one would be worse" "no roster row" "$GATE_VERR"
-# THE POINT OF THE BOUND IS THE CLOCK: the wait ends when the bound says so and not when
-# the command finishes. The stub sleeps ten seconds longer than the bound, so a gate that
-# waited for it would be caught here.
-#
-# THIS ASSERTION USED TO READ `< 10`, THE HOOK'S OWN REGISTRATION IN hooks/hooks.json, and
-# it is re-pinned to the bound instead (wave-14 T6, A-T6.5) — NOT because the registration
-# stopped mattering. THE GAP A-T6.5 NAMED IS CLOSED (wave-14 T35, D1 by Chris): the bound
-# was 20 under a registration of 10, so on the machine the CLI killed this hook before its
-# own bound could fire, and a hook killed on the CLI timeout does not exit 2 — the exact
-# failure the bound exists to prevent, invisible here because a suite has no CLI timeout.
-# Both numbers moved: the registration to 15, the bound to 10, five seconds clear (and again at
-# wave-30 T35, to 25 and 20, the same five: headroom over a cold derivation measured at 8.5-10.3 s). What
-# this file discharges is AC-7.2, that the wait ends when the bound says so; that the bound
-# sits strictly UNDER its registration is a two-file claim neither file can make alone, and
-# tests/cross-gate-agreement.test.sh §L.4c is where it is pinned.
-# EIGHT SECONDS OF SLACK WAS ENOUGH TO HIDE THE DEFECT IT WAS WATCHING (wave-14 T34). This
-# read `< S29_BOUND + 8` over a whole-second clock. The gate's wait was denominated in
-# `sleep 0.1` polls costing 115 ms each, so a stated 20s bound waited 23.0-23.2s — comfortably
-# inside `+8`, and therefore green, for as long as the drift stayed under eight seconds,
-# which is to say for as long as nobody was under enough load to care. Measured: 22s here
-# and 22s at §hanging-impact on the tick-counted wait, against 20s and 21s on the clock.
-#
-# THE SLACK IS ONE SECOND NOW, AND THE CLOCK CAN SEE IT. `$GATE_TIME_CS` is the first
-# drive in hundredths (`GATE_HIRES` above), so what is left to absorb is the gate's own
-# non-waiting work rather than a second of rounding at each end. A wait denominated in
-# anything that stretches under load misses by seconds and fails here.
-if [ "$S29_ELAPSED" -le $(( (S29_BOUND + 1) * 100 )) ]; then
-  ok "29a …and it stopped waiting at the bound, not at the sleep ($(( S29_ELAPSED / 100 )).$(printf '%02d' $(( S29_ELAPSED % 100 )))s)"
-else
-  no "29a …and it stopped waiting at the bound, not at the sleep" \
-    "took $(( S29_ELAPSED / 100 )).$(printf '%02d' $(( S29_ELAPSED % 100 )))s against a ${S29_BOUND}s bound"
-fi
-# FAIL-CLOSED MEANS NO ROW. A refused dispatch journals nothing, so there is no row a
-# writer-side guard could read as "no budget was stated" and stand aside on.
-expect_status "29a …and journalled no row at all" \
-  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# --- 29b: CONTROL — the same brief, the same stub, fast, still derives and passes ---
-REPO=$(make_repo r29b yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 0
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-fast")"
-expect_status "29b control: the same stub, prompt, PASSES" "0" "$GATE_ST"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "29b …and the derived budget is the stub's answer" \
-  "alpha.test.sh" "$(roster_field "$ROW" suites_allowed)"
-expect_status "29b …recorded as derived" "derived" "$(roster_field "$ROW" suites_source)"
-
-# --- 29c: a derivation that answers NOTHING is unchanged: empty budget, a warning ---
-# The overrun is a refusal because the alternative is an unwritten row; a command that
-# fails or answers nothing has still answered, and the third state (`suites_allowed=` empty)
-# already has readers. This is the boundary between the two, asserted so a later edit
-# cannot quietly turn one into the other.
-REPO=$(make_repo r29c yes)
-write_attestation "$REPO" "$SID_A"
-mkdir -p "$REPO/.bionic"
-printf '#!/bin/bash\nexit 3\n' > "$REPO/.bionic/impact-stub.sh"
-chmod +x "$REPO/.bionic/impact-stub.sh"
-printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$REPO" > "$REPO/.bionic/config.yaml"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-empty")"
-expect_status "29c a derivation that answers nothing still PASSES" "0" "$GATE_ST"
-expect_contains "29c …with the operator warned at the moment the config is fixable" \
-  "derived no suites" "$GATE_ERR"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "29c …and the row records the empty third state" "" "$(roster_field "$ROW" suites_allowed)"
-
-# --- 29d/29e: the overrun refusal keeps whatever brief-shape faults were already
-# collected (review-c19c16e F3, wave-12 T23, AC-1.1's fails-when). A15 sat between the
-# five collecting arms and dp_refuse_findings and refused on the spot, discarding
-# DP_FINDINGS — an ambiguous-label brief with a slow impact command was told about the
-# label alone on attempt 1, and the impact overrun alone (with no memory of the label) on
-# attempt 2. That is the exact one-fault-per-attempt loop T2 built dp_finding to end.
-
-BRIEF_T23_COMBINED_IMPACT='Your task: review the wave.
-Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
-Expected duration: 20 minutes
-Files: payload/scripts/lib/widget.sh'
-
-# --- 29d: the ambiguous-label brief + an overrunning impact command -> ONE refusal, BOTH faults ---
-REPO=$(make_repo r29d yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 30
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29d-slow")"
-expect_eq "29d an ambiguous label + an overrunning impact command is refused ONCE" "deny" "$GATE_VERDICT"
-expect_eq "29d …exactly one refusal line reaches the user" "1" \
-  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
-expect_contains "29d …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
-# T2 (D3, D11) NARROWS WHAT THIS CAN STILL PROVE. The several-fault wire no longer carries
-# ANY per-finding rationale — not just the brief-shape kind C-2/R6-1/S18b above lost, but
-# A15's config-shaped fact and Fix: too, since neither is one of the five scaffold labels
-# and there is nowhere left on the wire to put it.
-# T26 (critic Issue 3) NARROWS IT FURTHER STILL: the Expected artifact: line is no longer
-# marked <ADD> even here, because `dp_scaffold_marked` now treats a non-empty candidate
-# list as a label that WAS populated, just ambiguously — the same reasoning that keeps the
-# absent-deliverable arm quiet on this brief (see A11 above; the second fault here is A15,
-# not the absent-deliverable arm). The discriminator that A15 specifically fired — not just
-# A11 — is what 29a already covers on its own single-fault path; this
-# pair no longer distinguishes it from a combined-brief-fault-only refusal on the WIRE,
-# which is a real narrowing this task surfaces rather than papers over (A-T2, assumptions.md).
-expect_absent "29d …the Expected artifact: line is NOT marked <ADD> (a populated, ambiguous label)" \
-  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
-expect_status "29d …and journalled no roster row at all" "0" \
-  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# --- 29e: CONTROL — the same brief, a fast impact command -> the multi-path fault named,
-# the impact fault absent: nothing overran, so there is nothing to append.
-REPO=$(make_repo r29e yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 0
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29e-fast")"
-# T26 (critic Issue 3): nothing overran, and A11 is now this brief's ONLY fault (Files:
-# is declared, so the no-Files/no-Suites arm does not fire either) — the single-fault
-# shape, not a pooled list (since wave-19 T4 one fault is a deny verdict too, its own detail on the reason).
-expect_eq "29e control: the same brief, a fast impact command, is still refused" \
-  "deny" "$GATE_VERDICT"
-expect_contains "29e …naming the multi-path fault (A11)" "several paths" "$GATE_ERR"
 
 
 # ===========================================================================

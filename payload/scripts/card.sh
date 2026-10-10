@@ -271,7 +271,7 @@ _card_header() {
 # WHY A BATCH AND NOT A ROW. Every width above this point is either the
 # format's own declared width or that ONE row's own cell — so a structured
 # (non-folding) cell wider than its column, an owner such as
-# `tests/lib/impact.sh` against the ownership format's 14-column `owner`
+# `payload/scripts/lib/proof.sh` against the ownership format's 14-column `owner`
 # field, pushed every trailing column on ITS OWN row right, and left every
 # OTHER row's trailing columns exactly where the format put them. Two
 # ownership rows in the same card then disagreed about where `surfaces` and
@@ -1120,23 +1120,17 @@ _card_branches() {
   _card_rstrip "    $(_card_pad integration 14)$(_card_pad "$ib" 22)(Step 8 merges here)"; printf '\n'
 }
 
-# ── THE REGRESSION, WHICH IS CONFIGURED AND NOT ASSUMED (D9, AC-4.3) ─────────
+# ── THE REGRESSION LINE PRINTS AN EM DASH (D9, AC-4.3; wave-31 T2) ───────────
 #
 # THE LINE USED TO BE A LITERAL. `floor tests/run.sh` was typed into the Verification
-# line's format string, over a skill picture that said `floor <suite>` — so the card
-# asserted a fact about a project it had never asked, at the one gate whose entire job
-# is to be true, and it asserted the same one in a project that has no `tests/run.sh`.
-# The configured answer is `impact-command:` in `.bionic/config.yaml`, which is what
-# the dispatch wall (hooks/dispatch-preflight.sh:2904) and the landing gate already
-# read, through the SAME `config_value` this calls — one reading of one file.
+# line's format string, so the card asserted a fact about a project it had never asked.
+# Through 1.14.0 it printed the configured `impact-command:`; the file-to-suite map is
+# deleted (REQ-4 AC-4.2), so nothing names the regression here and the card prints the em
+# dash, its own spelling for "declared nothing". T4 redefines the line (D4, A-orch-6).
 #
-# UNDER THE PLAN'S ROOT, NOT THE RENDERER'S. A card is often rendered from a worktree
-# or from an orchestrator standing somewhere else entirely, and the regression that governs
-# a plan is the one configured where the plan LIVES.
-#
-# AN UNCONFIGURED ROOT PRINTS AN EM DASH, the card's own spelling for "declared
-# nothing" (`_card_branches`'s "not declared", the ledger's `—`), because a regression this
-# file invented is exactly the defect being closed.
+# `_card_plan_root` resolves a plan to its project root, UNDER THE PLAN'S ROOT, NOT THE
+# RENDERER'S: a card is often rendered from a worktree or from an orchestrator standing
+# somewhere else entirely.
 _card_plan_root() {  # <plan path> -> the project root it resolves under, or ""
   local d
   d="$(dirname "${1:-.}")"
@@ -1144,13 +1138,9 @@ _card_plan_root() {  # <plan path> -> the project root it resolves under, or ""
   project_root "$d" 2>/dev/null
 }
 
-_card_floor() {  # <plan path> -> the configured impact command, or an em dash (the regression line's;
-  # the name keeps the word floor, an identifier, wave-30 T23)
-  local root floor=""
-  root="$(_card_plan_root "${1:-}")"
-  [ -n "$root" ] && floor="$(config_value "$root" "impact-command" "")"
-  [ -n "$floor" ] || floor="—"
-  printf '%s' "$floor"
+_card_floor() {  # [<plan path>] -> an em dash, the regression line's (the name keeps the word
+  # floor, an identifier, wave-30 T23; no config key names the regression since wave-31 T2)
+  printf '%s' "—"
 }
 
 # ── PER-BATCH WIDTH AGAINST THE RUNG (AC-3.4) ────────────────────────────────
