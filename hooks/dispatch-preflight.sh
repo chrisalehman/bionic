@@ -866,8 +866,8 @@ fi
 # being authored"). A writer launched at Step 2 builds against a plan nobody has seen exactly
 # as one at Step 4 does, and the rule the spec states is "before Step-3 approval only these
 # dispatch" (D9). So the arm reads the one fact that decides it — `approved-by:` — and
-# `current:` only to name the step in the refusal. A task-scale plan (`current: T<n>`) binds
-# the same way it always did.
+# `current:` only to name the step in the refusal. A non-numeric `current:` is refused
+# (`NOT-RECORDED`, D2) where a launch is recorded; here approval alone decides.
 #
 # INERT WITHOUT A PLAN. An engaged session with no plan on disk has no approval to be
 # missing; the arm takes the same direction the budget ceiling's does.
