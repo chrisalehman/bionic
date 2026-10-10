@@ -2536,4 +2536,30 @@ case_is none 'bash -o noexec tests/a.test.sh' "§P20 #4 -o noexec still runs not
 case_is suite 'bash +o noexec tests/a.test.sh' "§P20 #4 …while +o noexec turns it off: a run"
 expect_eq "§P20 #4 -O's value is never a claim" "" "$(only_rows 'bash -O extglob "$s"' | sed 's/file:\$s//')"
 
+section "§WHOLE-RUN — wave-31 T21 (D3, REQ-2): one judgment says a command is a whole run"
+# `cmd_whole_run` is rc 0 exactly when `cmd_suite_targets` prints `run.sh`: the one reading the
+# regression-runs counter asks of the command a run ran. The six commands are the ones the
+# census probed (research-T12-T21-T22-T8-T14-T15-sites.md section 2); the rc is the whole answer.
+whole_rc() {  # <command> [<root>] -> the rc of cmd_whole_run, as a word
+  if bash -c '. "$1" || exit 9; cmd_whole_run "$2" "$3"' _ "$LIB" "$1" "${2-}" >/dev/null 2>&1; then echo whole; else echo "not($?)"; fi
+}
+expect_eq "§WHOLE-RUN the bare runner is a whole run" "whole" "$(whole_rc 'tests/run.sh' /r)"
+expect_eq "§WHOLE-RUN bash tests/run.sh is a whole run" "whole" "$(whole_rc 'bash tests/run.sh' /r)"
+expect_eq "§WHOLE-RUN a door call naming a suite is not (the same runner, beside the two above)" "not(1)" \
+  "$(whole_rc 'tests/run.sh --only x.test.sh' /r)"
+expect_eq "§WHOLE-RUN --dry-run is not" "not(1)" "$(whole_rc 'bash tests/run.sh --dry-run' /r)"
+expect_eq "§WHOLE-RUN the one-lined evidence row (pipes and breaks made spaces) is" "whole" \
+  "$(whole_rc 'cd /x    exit 1; bash tests/run.sh 2>&1   tee x.log' /r)"
+expect_eq "§WHOLE-RUN the shim's wrapper line is" "whole" \
+  "$(whole_rc 'cd /Users/a/t || exit 1; LOG=/x; set -o pipefail; tests/run.sh 2>&1 | tee "$LOG"' /r)"
+expect_eq "§WHOLE-RUN -h is not" "not(1)" "$(whole_rc 'tests/run.sh -h' /r)"
+expect_eq "§WHOLE-RUN --list is not" "not(1)" "$(whole_rc 'tests/run.sh --list' /r)"
+expect_eq "§WHOLE-RUN a single suite file is not" "not(1)" "$(whole_rc 'bash tests/a.test.sh' /r)"
+expect_eq "§WHOLE-RUN another script named run.sh is not" "not(1)" "$(whole_rc 'bash scripts/run.sh' /r)"
+expect_eq "§WHOLE-RUN a door call beside a bare runner is (the targets print run.sh)" "whole" \
+  "$(whole_rc 'tests/run.sh --only a.test.sh && tests/run.sh' /r)"
+expect_eq "§WHOLE-RUN the root is optional" "whole" "$(whole_rc 'tests/run.sh')"
+expect_eq "§WHOLE-RUN the answer is the targets' own: whole iff run.sh is among them" "run.sh|whole" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" /r' _ "$LIB" 'bash tests/run.sh' | paste -sd'|' -)|$(whole_rc 'bash tests/run.sh' /r)"
+
 finish
