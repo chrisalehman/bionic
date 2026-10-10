@@ -1876,7 +1876,14 @@ AM_ID="aw20-T9sub-0123456789abcdef"
 roster_header > "$R_AM/.bionic/tmp/roster-$SID.state"
 roster_row_fixture "session=$SID" status=identified name=w20-sub "agent_id=$AM_ID" \
   subagent_type=bionic:senior-implementor >> "$R_AM/.bionic/tmp/roster-$SID.state"
+# ANOTHER WRITER'S ROW (wave-31 T11, AC-8.3): the own-row exception admits `amend <own row>` and
+# never this one.
+roster_row_fixture "session=$SID" status=identified name=w20-other "agent_id=aw20-T9oth-0123456789abcdef" \
+  subagent_type=bionic:senior-implementor >> "$R_AM/.bionic/tmp/roster-$SID.state"
 AM_POKER="/opt/plugin/hooks/session-poker.sh"
+# 19n's other script is a real file in the tree (wave-31 T11): the budget opens a script a shell runs,
+# and one that is not there is `unverified` and refused (A-T11-8), which is not what 19n reads.
+mkdir -p "$R_AM/tools" && printf '#!/bin/bash\necho other\n' > "$R_AM/tools/other.sh"
 
 am_refused() {  # <label> <command>
   run_hook "$(mk_payload "$R_AM" "$2" "$AM_ID" omit Bash w20-sub)"
@@ -1889,20 +1896,29 @@ am_admitted() {  # <label> <command> [agent_id]
   expect_absent "$1 — …with no contract refusal" "a subagent may not change a contract" "$ERR"
 }
 
-am_refused "19a: bash session-poker.sh amend" \
-  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason 'need x'"
+# 19a FLIPPED (wave-31 T11; REQ-8 AC-8.3, D9; A-orch-41.6, A-orch-46.2): a writer's `amend` of its OWN
+# roster row adding only Files is admitted, and the wall stages the call with `--by writer`, so the
+# verb records who widened it. Its Suites and Re-executes, and any other row, stay the orchestrator's.
+run_hook "$(mk_payload "$R_AM" "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason 'need x'" "$AM_ID" omit Bash w20-sub)"
+expect_status "19a: bash session-poker.sh amend <own row> --files+ — admitted from the writer itself" 0 "$ST"
+expect_absent "19a — …with no contract refusal" "a subagent may not change a contract" "$ERR"
+expect_eq "19a — …staged with --by writer added, the words as the wall read them" \
+  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason 'need x' --by writer" \
+  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
 am_refused "19b: bash session-poker.sh extend" "bash $AM_POKER extend w20-sub 'more time'"
 am_refused "19c: bash session-poker.sh task-add" \
   "bash $AM_POKER task-add T99 4 build 'x' bionic:implementor — 30 REQ-1 hooks/x.sh"
 am_refused "19d: behind cd … &&" "cd $R_AM && bash $AM_POKER amend w20-sub --suites+ a.test.sh --reason r"
 am_refused "19e: behind an env prefix with options and an assignment" \
   "env -u FOO BAR=1 bash $AM_POKER extend w20-sub r"
-am_refused "19f: the script run directly, by relative path" "./hooks/session-poker.sh amend w20-sub --reason r --files+ a/b.sh"
+# 19f, 19f2 and 19h read SPELLINGS of the call; since the own-row Files exception (wave-31 T11) they
+# add a suite, which stays refused, so each still proves its spelling reaches the arm.
+am_refused "19f: the script run directly, by relative path" "./hooks/session-poker.sh amend w20-sub --reason r --suites+ a.test.sh"
 # wave-25 T12: BASH runs bash on a case-blind filesystem, so the runner word folds here too.
-am_refused "19f2: BASH session-poker.sh amend" "BASH $AM_POKER amend w20-sub --reason r --files+ a/b.sh"
+am_refused "19f2: BASH session-poker.sh amend" "BASH $AM_POKER amend w20-sub --reason r --suites+ a.test.sh"
 am_refused "19f3: SUDO Sh session-poker.sh task-set" "SUDO Sh $AM_POKER task-set T2 status=landed"
 am_refused "19g: second segment of a chain" "echo hi; bash hooks/session-poker.sh task-add a b c d e f g h i"
-am_refused "19h: inside bash -c" "bash -c 'bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh'"
+am_refused "19h: inside bash -c" "bash -c 'bash $AM_POKER amend w20-sub --reason r --suites+ a.test.sh'"
 # §ARM-A (hold) — wave-24 T7, REQ-4 AC-4.6, D1: a hold is the orchestrator's standing answer to a
 # stand-down, so an agent that could run it would keep itself up.
 am_refused "19o: bash session-poker.sh hold" "bash $AM_POKER hold w20-sub 'idle on purpose'"
@@ -2026,6 +2042,56 @@ am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
 am_admitted "19n: a different script's amend verb" "bash tools/other.sh amend w20-sub"
+
+# §ARM-A (own row) — wave-31 T11; REQ-8 AC-8.3, D9; A-orch-41.6, A-orch-46.2. The exception is the
+# writer's own roster row (the budget's own pick, `roster_row_for_id` on the payload's agent_id), Files
+# only, one call: every other shape of `amend` stays refused, and the refusal of another row names it.
+# fails-when: the writer is refused on its row, or admitted on another.
+am_refused "ARM-A.1: amend on another writer's row" "bash $AM_POKER amend w20-other --files+ hooks/x.sh --reason r"
+expect_contains "ARM-A.1b …the detail names the row amended and the caller's own" \
+  "w20-other is not your row (yours is w20-sub)" "$ERR"
+am_refused "ARM-A.2: own row, --files+ beside --reexec+" \
+  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reexec+ 'npx jest' --reason r"
+am_refused "ARM-A.3: own row, no addition but a reason" "bash $AM_POKER amend w20-sub --reason r"
+am_refused "ARM-A.4: own row, --files+ with no --reason" "bash $AM_POKER amend w20-sub --files+ hooks/x.sh"
+am_refused "ARM-A.5: own row, --by typed by the writer" "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason r --by writer"
+am_refused "ARM-A.6: own row, Files only, chained to another command" \
+  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason r && echo done"
+# ARM-A.7: own-row Files only, from an agent whose id no row carries: no own row, so no exception.
+run_hook "$(mk_payload "$R_AM" "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason r" "aw31-norow-0123456789abcdef" omit Bash w20-x)"
+expect_status "ARM-A.7 the same call from an agent no row names is refused" 2 "$ST"
+expect_contains "ARM-A.7c …by the contract rule" "a subagent may not change a contract or the plan" "$ERR"
+am_admitted "ARM-A.8: own row, two --files+ values" \
+  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --files+ tests/x.test.sh --reason 'two files'"
+expect_eq "ARM-A.8b …staged with --by writer at the end" \
+  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --files+ tests/x.test.sh --reason 'two files' --by writer" \
+  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+# THE VERB WRITES WHAT THE WALL STAGED: the staged command, run for real against a live row of the
+# dispatch wall's shape, writes the successor row whose amended= field carries `widened-by: writer`.
+R_AMW="$(mk_repo amendwriter)"
+AMW_ID="aw31-T11own-0123456789abcdef"
+AMW_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+roster_header > "$R_AMW/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" status=identified name=w31-own "agent_id=$AMW_ID" \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" subagent_type=bionic:senior-implementor tool_use_id=toolu_01amw \
+  files=hooks/a.sh suites_allowed=a.test.sh suites_source=declared >> "$R_AMW/.bionic/tmp/roster-$SID.state"
+amw_field() {  # <key> -> the key's value on w31-own's last row
+  /usr/bin/grep -F '|name=w31-own|' "$R_AMW/.bionic/tmp/roster-$SID.state" | tail -1 | tr '|' '\n' \
+    | /usr/bin/grep "^$1=" | head -1 | cut -d= -f2-
+}
+require_helpers amw_field
+expect_eq "ARM-A.9 precondition: the extractor reads the row's Files" "hooks/a.sh" "$(amw_field files)"
+run_hook "$(mk_payload "$R_AMW" "bash $AMW_POKER amend w31-own --files+ hooks/b.sh --reason 'the fix reaches b'" "$AMW_ID" omit Bash w31-own)"
+expect_status "ARM-A.9b the writer's own-row call is admitted" 0 "$ST"
+AMW_CMD="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+expect_contains "ARM-A.9c …staged with --by writer" " --by writer" "$AMW_CMD"
+AMW_OUT="$(cd "$R_AMW" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+  CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash -c "$AMW_CMD" 2>&1)"; AMW_RC=$?
+expect_eq "ARM-A.10 AC-8.3 the staged command (non-empty) runs the verb (exit 0)" "0|staged" "$AMW_RC|${AMW_CMD:+staged}"
+expect_contains "ARM-A.10b …which says it amended the row" "amended" "$AMW_OUT"
+expect_eq "ARM-A.11 …the row's Files carry the addition" "hooks/a.sh,hooks/b.sh" "$(amw_field files)"
+expect_regex "ARM-A.12 AC-8.3 …and the row records who widened it: amended=<iso> widened-by: writer <reason>" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z widened-by: writer the fix reaches b$' "$(amw_field amended)"
 
 # ---------------------------------------------------------------------------
 section "20 — an UNROSTERED nested delegate is bound by the verb wall through its own agent_type (wave-20 T7b; review R15)"
@@ -3063,5 +3129,47 @@ expect_status "SFE-14b …and the block with the share line is admitted" 0 "$ST"
 expect_eq "SFE-14c …the line is the indented one, under the Step 4 line, before Step 5" "  share: 55|- Step 5: floor run" \
   "$(awk '/^- Step 4:/ { f = 1; next } f && /^  share:/ { l = $0; getline n; print l "|" n; exit }' "$R_EG6/.bionic/docs/plans/active.md")"
 sfe_set "$(sfe_plan 5 wave "")"
+
+section "§SCRIPT-BUDGET — the budget reads the script a dispatched agent's shell runs (wave-31 T11; REQ-8 AC-8.2, D9; A-orch-46.1)"
+# ============================================================
+#
+# `bash red.sh`, where red.sh runs jest, passed the budget: the classifier read the operand's name
+# and never its text (tests/cmd-class.test.sh §SCRIPT-TEXT is the reading). Now a script in the tree
+# is opened, the run inside it is the claim, and the refusal names the script and the run. A script
+# the wall cannot read — a command word built from a variable, a missing file, a variable-built
+# path — is `unverified`, and refused naming the script and the fix: run the suite through the
+# door by its file name, or name the script's run in the brief's Re-executes. FIXTURE FIDELITY: a
+# dispatched row of the recorder's own join (bw_dispatched), real scripts in the agent's tree.
+# fails-when: `bash red.sh` passes the arm; a refusal omits the script or the run.
+R_SB="$(mk_repo scriptbudget)"
+bw_dispatched "$R_SB" t11writer "suites_allowed=alpha.test.sh" suites_source=declared files= 're_executes=`bash ok.sh`'
+printf '#!/bin/bash\nset -e\njest\n' > "$R_SB/red.sh"
+printf '#!/bin/bash\nRUNNER=jest\n"$RUNNER" --ci\n' > "$R_SB/var.sh"
+printf '#!/bin/bash\njest\n' > "$R_SB/ok.sh"
+printf '#!/bin/bash\necho plain\n' > "$R_SB/plain.sh"
+sb_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
+run_hook "$(mk_payload "$R_SB" 'bash red.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "SB.1 AC-8.2 bash red.sh, red.sh running jest, is refused from a dispatched agent" 2 "$ST"
+expect_contains "SB.1b …the refusal names the script" "red.sh" "$ERR"
+expect_contains "SB.1c …and the run inside it" "jest" "$ERR"
+expect_contains "SB.1d …in the budget's words" "run only the budgeted suites" "$(sb_line)"
+run_hook "$(mk_payload "$R_SB" 'bash var.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "SB.2 AC-8.2 a script whose command word is built from a variable is refused" 2 "$ST"
+expect_contains "SB.2b …its line says the script is unverified, naming it" "var.sh" "$(sb_line)"
+expect_contains "SB.2c …the fix: the suite through the one door by its file name" "tests/run.sh --only <suite>.test.sh" "$ERR"
+expect_contains "SB.2d …or the script's run named in the brief's Re-executes" "Re-executes: \`bash var.sh\`" "$ERR"
+expect_eq "SB.2e …in one line of at most 100 columns" "yes" "$(l="$(sb_line)"; [ -n "$l" ] && [ "${#l}" -le 100 ] && echo yes || echo no)"
+run_hook "$(mk_payload "$R_SB" 'bash missing.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "SB.3 a script that is not there is refused as unverified" 2 "$ST"
+expect_contains "SB.3b …naming it" "missing.sh" "$(sb_line)"
+run_hook "$(mk_payload "$R_SB" 'bash ok.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_ne "SB.4 a script whose run the brief declared under Re-executes passes" "2" "$ST"
+expect_absent "SB.4b …with no refusal line" "refused" "$ERR"
+run_hook "$(mk_payload "$R_SB" 'bash plain.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "SB.5 a script that runs no suite passes" 0 "$ST"
+expect_absent "SB.5b …with no refusal line" "refused" "$ERR"
+run_hook "$(mk_payload "$R_SB" 'bash red.sh' "" omit Bash)"
+expect_absent "SB.6 the main thread's bash red.sh meets no budget arm" "run only the budgeted suites" "$ERR"
+expect_absent "SB.6b …and no unverified refusal" "unverified" "$ERR"
 
 finish
