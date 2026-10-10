@@ -16,9 +16,10 @@ records the runs left; nothing predicts a suite set any more. The file-to-suite 
 is deleted, because it was measured unsound. A plan has one ledger shape: the task-scale shape is
 refused. Step 0 asks whether the plan owes a regression at all. Five process checks, the pin suite, the
 repository's own CLAUDE.md and 73,883 bytes of the loaded doctrine are gone. This is a patch release by the
-policy above: each removal deletes a check or verb that was itself the defect, and the one new rule, the
-net-zero doctrine, only subtracts. `canonical_sdlc_version` stays 14. The detached run's ceiling, the
-landing's evidence cells and the walk as use have met no project but this repository's own release.
+policy above: each removal deletes a check or verb that was itself the defect. It also adds the
+`regression` verb and key, the landing's evidence writer, the detached run's ceiling and the net-zero
+rule. `canonical_sdlc_version` stays 14. The detached run's ceiling, the landing's evidence cells and the
+walk as use have met no project but this repository's own release.
 
 **Migration (one ledger shape).** A plan in the retired task-scale shape (`current: T<n>`, the
 `id | intent | rigor | description | status | worktree` ledger) is refused on its next `launch-sync`, not
@@ -115,7 +116,8 @@ What you will notice:
   Records: `T13-leftovers.md`, `T34-doctor-perl.md`.
 - **Wall time.** Before this release the pin suite's row was 196 s of the run
   (`eeca80e1:tests/timing.tsv:24`; the row left the tree with the suite), and the one full regression took
-  46 minutes at width 8 (1.14.0's entry). after: 42m43s wall clock for 92 suites at 95fcc048
+  46 minutes at width 8 (1.14.0's entry). After it, the one full regression took 42m43s wall clock for 92
+  suites at 95fcc048.
 
 Five limits listed under 1.14.0 are retired and do not carry: the impact map's unsoundness, the
 task-scale plans, the opt-in planted-edit section, the detached run's missing ceiling and the landing's

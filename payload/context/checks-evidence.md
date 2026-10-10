@@ -19,5 +19,5 @@ result: <pass|flag|fail>
 scope: <piece|whole>
 ```
 
-`<a>..<b>` is the range whose evidence you judged; `b` is the head your answer is about. `scope` is `whole` when you audit the run's matrix and `piece` when you audit one fix. When `severity.md` comes with these checks, write one finding per REFUTED or UNVERIFIABLE verdict, a row's or the wave's, on the file and line the verdict rests on; an UNVERIFIABLE one carries an `unsure:` line saying what is not known. Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks. Without it, `result` is `fail` when any verdict is REFUTED, `flag` when any is UNVERIFIABLE and none REFUTED, otherwise `pass`.
+`<a>..<b>` is the range whose evidence you judged; `b` is the head your answer is about. `scope` is `whole` when you audit the run's matrix and `piece` when you audit one fix. When `severity.md` comes with these checks, write one finding per REFUTED or UNVERIFIABLE verdict, a row's or the wave's, on the file and line the verdict rests on. Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks. Without it, `result` is `fail` when any verdict is REFUTED, `flag` when any is UNVERIFIABLE and none REFUTED, otherwise `pass`.
 <!-- CHECKS-EVIDENCE-END -->
