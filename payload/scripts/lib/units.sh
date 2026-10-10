@@ -1113,7 +1113,7 @@ _units_files_awk() {
     }
     # cell_covers(cell, p): some entry of the Files cell (comma-separated; a backtick, a leading ./ and the
     # white space around an entry are not part of it) covers the path p. THE ONE MATCHER OF THE DISPATCH GRAMMAR
-    # for a shell caller: the scheduler overlap test and the finding-check code writer ask covers through it.
+    # for a shell caller: the scheduler overlap test and proof_debt_hits in lib/proof.sh ask covers through it.
     function cell_covers(cell, p,   a, m, k, e) {
       sub(/^\.\//, "", p)
       m = split(cell, a, /[ \t]*,[ \t]*/)
