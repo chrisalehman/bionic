@@ -1285,18 +1285,16 @@ rm -rf "$INV_W28_SYN"
 # task entries are a second trigger of the task-list duty, refused through its existing forwarder:
 # lib/stop.sh gains no refusal site over 1.12.0's 13 (`inv_sites` over `git show v1.12.0:<file>`),
 # and the duty's first line is a FACT the forwarder carries, never a site of its own, so the
-# inventory's `lib/stop.sh` section gains no line. fails-when: lib/stop.sh passes 13 sites, or the
-# entry duty's fact is spelled on a site.
+# inventory's `lib/stop.sh` section gains no line. The duty itself went with the Patrol's entry
+# duty (wave-31 T32), and with it the forwarder INV-T38b pinned; INV-T38c and d stay, the ceiling
+# and the planted site. fails-when: lib/stop.sh passes 13 sites, or the entry duty's fact is
+# spelled on a site.
 INV_T38_BASE=13
 INV_T38_STOP="$REPO_ROOT/payload/scripts/lib/stop.sh"
 INV_T38_SITES="$(inv_sites "$INV_T38_STOP")"
 INV_T38_N="$(printf '%s\n' "$INV_T38_SITES" | awk 'NF { c++ } END { print c + 0 }')"
 expect_true "INV-T38a precondition: lib/stop.sh's refusal sites are read (${INV_T38_N})" test "$INV_T38_N" -gt 0
 expect_true "INV-T38a lib/stop.sh gains no refusal site over 1.12.0's ${INV_T38_BASE}" test "$INV_T38_N" -le "$INV_T38_BASE"
-expect_contains "INV-T38b precondition: the duty wall's forwarder is one of its sites" \
-  'fold_block block stop "$FACT" "$FIX" "$REASON"' "$INV_T38_SITES"
-expect_contains "INV-T38b the entry duty's fact is a FACT the forwarder carries" \
-  "FACT=\"a dispatched row's entry is not in progress\"" "$(cat "$INV_T38_STOP")"
 expect_absent "INV-T38c …and no refusal site spells it" "entry is not in progress" "$INV_T38_SITES"
 INV_T38_SYN="$(mktemp -d)"
 cp "$INV_T38_STOP" "$INV_T38_SYN/stop.sh"

@@ -1984,7 +1984,8 @@ fi
 if [ "$setup_all" = "1" ]; then
   say "bionic setup"
 else
-  say "bionic setup — every change below is asked for first, one item at a time; the one exception is bionic's own working-principles span, which setup brings up to date without asking."
+  say "bionic setup — every change below is asked for first, one item at a time;"
+  say "the one exception is bionic's own working-principles span, which setup updates without asking."
 fi
 
 # THE ONE EVENT, BEFORE ANY STEP SPEAKS. Under `--all` the whole page is printed
