@@ -9,8 +9,8 @@
 #   payload/scripts/lib/stop.sh           once per sweep, spent across its rows
 #                                         -> LG_IMPACT_BOUND_S
 #
-# The dispatch wall's bound, IMPACT_BOUND_S, went with its derivation (wave-31 T2,
-# REQ-4 AC-4.2): a brief names its suites, so the wall waits on nothing.
+# The dispatch wall's own bound went with its derivation (wave-31 T2, REQ-4 AC-4.2):
+# a brief names its suites, so the wall waits on nothing.
 #
 # WHY IT IS ITS OWN FILE. The sweep and the dispatch wall each carried their own `6`,
 # in two files, under two headers that each explained the number and neither of

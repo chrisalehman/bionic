@@ -1124,7 +1124,7 @@ _card_branches() {
 #
 # THE LINE USED TO BE A LITERAL. `floor tests/run.sh` was typed into the Verification
 # line's format string, so the card asserted a fact about a project it had never asked.
-# Through 1.14.0 it printed the configured `impact-command:`; the file-to-suite map is
+# Through 1.14.0 it printed the map's configured command; the file-to-suite map is
 # deleted (REQ-4 AC-4.2), so nothing names the regression here and the card prints the em
 # dash, its own spelling for "declared nothing". T4 redefines the line (D4, A-orch-6).
 #
