@@ -1881,6 +1881,9 @@ roster_row_fixture "session=$SID" status=identified name=w20-sub "agent_id=$AM_I
 roster_row_fixture "session=$SID" status=identified name=w20-other "agent_id=aw20-T9oth-0123456789abcdef" \
   subagent_type=bionic:senior-implementor >> "$R_AM/.bionic/tmp/roster-$SID.state"
 AM_POKER="/opt/plugin/hooks/session-poker.sh"
+# 19n's other script is a real file in the tree (wave-31 T11): the budget opens a script a shell runs,
+# and one that is not there is `unverified` and refused (A-T11-8), which is not what 19n reads.
+mkdir -p "$R_AM/tools" && printf '#!/bin/bash\necho other\n' > "$R_AM/tools/other.sh"
 
 am_refused() {  # <label> <command>
   run_hook "$(mk_payload "$R_AM" "$2" "$AM_ID" omit Bash w20-sub)"

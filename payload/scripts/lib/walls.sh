@@ -5895,7 +5895,17 @@ add and why, or the row to add — and it runs the verb.${_bsg_am_more}"
 wall_libs background-suite-guard cmd-class.sh || return 0
 
 _wall_class_read "$COMMAND"
-[ "$_WALL_CLASS" = "suite" ] || return 0
+# A SCRIPT A SHELL RUNS IS READ HERE, AND ONLY HERE (wave-31 T11; REQ-8 AC-8.2, D9; A-T11-4). The
+# class reading opens no file, so `bash red.sh` is class none; past this function's partition (a
+# dispatched agent in an armed session) a command naming a shell is asked the budget's own claims,
+# which open the script, and a claim it makes is a suite run for every arm below. The cwd is the
+# payload's, where the agent's shell is.
+_BSG_CLAIM_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CLAIM_CWD" ] || _BSG_CLAIM_CWD="${BIONIC_CWD:-}"
+if [ "$_WALL_CLASS" != "suite" ]; then
+  [ -n "$ACTOR" ] || return 0
+  case "$COMMAND" in *sh[[:space:]]*) : ;; *) return 0 ;; esac
+  [ -n "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || return 0
+fi
 
 # A SHELL-BACKGROUNDED SUITE IS CAUGHT LIKE A TOOL-BACKGROUNDED ONE (D8, REQ-6). The tool
 # flag read above sees only `run_in_background: true`; it has never seen `bash
@@ -6336,6 +6346,29 @@ $(_budget_remedy_line "$1")"
   return 2
 }
 
+# budget_unverified <script> <run> — the refusal of a script the budget cannot read (wave-31 T11;
+# REQ-8 AC-8.2, D9; A-orch-46.1). The line names the script, by its path as typed, by its basename
+# when that is too wide for the line, and by neither when even that is.
+budget_unverified() {  # <script as typed> <run as typed>
+  local _s="$1" _fact
+  _fact="unverified script: $_s"
+  [ $(( $(bionic_cols "bionic: suite-run refused — $_fact (one door or Re-executes)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
+    || _fact="unverified script: ${_s##*/}"
+  [ $(( $(bionic_cols "bionic: suite-run refused — $_fact (one door or Re-executes)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
+    || _fact="unverified script"
+  fold_block exit2 suite-run "$_fact" "one door or Re-executes" \
+    "The budget reads the script a shell runs, and this script's text cannot say what runs: a
+command or a script in it is named by a variable or a backtick, the file is not there, or its
+own path is built from a variable. A run the wall cannot read is one it cannot budget.
+You ran: $2   (the script: $1)
+Run the suite through the one door, naming it by its file name:
+    tests/run.sh --only <suite>.test.sh
+or ask the orchestrator to declare the script's run in your brief:
+    Re-executes: \`$2\`
+$(_budget_remedy_line "$2")"
+  return 2
+}
+
 # budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
 # D15). A row with no set, or no row at all, used to let a named suite through in silence, on
 # the reading that an agent should not pay for a bookkeeping failure it did not cause. The walk
@@ -6403,7 +6436,7 @@ _budget_remedy_line() {  # <the refused suite or run>
 # nor globs, so the metacharacter arrives literal with no process state touched at all —
 # which is the better answer to T23's finding that five walls share one shell. The sibling
 # site at hooks/dispatch-preflight.sh still splits and still guards.
-_CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT")
+_CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
 
@@ -6501,6 +6534,21 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # at run time what the dispatch wall let through. It does NOT admit the full tree: that
   # arm ran above it, for the reason written there.
   if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
+
+  # ---------- A SCRIPT THE BUDGET CANNOT READ (wave-31 T11; REQ-8 AC-8.2, D9; A-orch-46.1) ----------
+  #
+  # `unverified` is the classifier's word for a script whose text cannot say what runs: a command
+  # word or a script operand in it built from `$` or a backtick, a file that is not there, or a path
+  # built from a variable. A run the wall cannot read is a run it cannot budget, so it is refused,
+  # naming the script and the two ways through: the suite by its file name through the one door, or
+  # the script's run declared in the brief, which the line above admits.
+  if [ "$_kind" = "unverified" ]; then
+    budget_unverified "$_target" "$_run"
+    return 2
+  fi
+  # A RUN READ INSIDE A SCRIPT names the script and the run (wave-31 T11): the claim's run is the
+  # command as typed, its target the run the script holds.
+  [ "$_kind" != "run" ] || [ "$_target" = "$_run" ] || _run="$_run — the script runs: $_target"
 
   # ---------- A RUNNER FORM IS HELD TO THAT DECLARATION (REQ-1 AC-1.5) ----------
   #
