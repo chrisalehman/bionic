@@ -443,8 +443,8 @@ cg_live() {  # <transcript> <name[:status]>...
 #
 # Deliberately out of the battery, and why:
 #   * `current: T<n>` — not a step at any scale since wave-31 (one ledger shape, D2):
-#     no party reads it as one. Section A3 pins that every party refuses it alike,
-#     at either scale, rather than mixing a refused value into the agreement rows.
+#     the one party that reads `current:` refuses it. Section A3 pins that at either
+#     scale, rather than mixing a refused value into the agreement rows.
 #   * The evidence gate's misplaced-plan sweep (`*.plan.md` carrying
 #     canonical_sdlc_version outside the docs root) — a gate-specific rule with
 #     no counterpart in the other two. Fixture plans are therefore named
@@ -1092,32 +1092,31 @@ PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
 PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
 
 # ============================================================
-section "A3 — the retired task pointer: every party answers current: T<n> alike (wave-31 T24; REQ-1, D2)"
+section "A3 — the retired task pointer: the gates the plan does not move, and the one that refuses it (wave-31 T24; REQ-1, D2)"
 # ============================================================
 #
-# Until wave-31 this pinned a KNOWN DIVERGENCE: the two gates read `current: T<n>` as an
-# active run (lib/run.sh `run_open` called it always open), and the evidence gate accepted it
-# only on a `scale: task` plan. The task-scale shape is deleted (one ledger shape): `current:`
-# is a step number at every scale, `run_open` calls a non-numeric value no open run, as it does
-# any malformed `current:`, and the evidence gate refuses it, naming the value. The parties
-# agree now, at either scale; the task-scale plan is tests/lib/plan-fixture.sh's, and its
-# control at `current: 4` is a run to every party.
+# Until wave-31 this pinned a KNOWN DIVERGENCE: the two gates read `current: T<n>` as an active
+# wave and the evidence gate accepted it only on a `scale: task` plan. Two things have moved since.
+# The two gates are scoped by ENGAGEMENT (task-engaged-session; A1's battery), so no plan, this one
+# included, moves their answer. And the task-scale shape is deleted (one ledger shape): `current:`
+# is a step number at every scale, so the one party that reads it, the evidence gate, refuses
+# `T<n>` naming the value, at either scale, while it reads a numeric `current:` on the same
+# task-scale plan as a step (the control). The run predicate's own answer is CG.3's.
 
 TREPO=$(new_repo "known-divergence")
 write_plan "$TREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: T4"
-expect_eq "T-token, wave scale: the start gate reads no open run" "no" "$(verdict_dp "$TREPO")"
-expect_eq "T-token, wave scale: the stop gate reads no open run"  "no" "$(verdict_sg "$TREPO")"
+expect_eq "T-token, wave scale: the start gate answers as on any engaged plan" "yes" "$(verdict_dp "$TREPO")"
+expect_eq "T-token, wave scale: the stop gate answers as on any engaged plan"  "yes" "$(verdict_sg "$TREPO")"
 expect_eq "T-token, wave scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TREPO")"
 TTREPO=$(new_repo "task-pointer")
 plan_fixture --current T4 "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
 expect_eq "T-token, task scale: the plan carries scale: task and current: T4" "2" \
   "$(/usr/bin/grep -cE '^scale: task$|^current: T4$' "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md")"
-expect_eq "T-token, task scale: the start gate reads no open run" "no" "$(verdict_dp "$TTREPO")"
-expect_eq "T-token, task scale: the stop gate reads no open run"  "no" "$(verdict_sg "$TTREPO")"
+expect_eq "T-token, task scale: the start gate answers as on any engaged plan" "yes" "$(verdict_dp "$TTREPO")"
+expect_eq "T-token, task scale: the stop gate answers as on any engaged plan"  "yes" "$(verdict_sg "$TTREPO")"
 expect_eq "T-token, task scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TTREPO")"
-plan_fixture "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
-expect_eq "control: the same task plan at current: 4, the start gate reads a run" "yes" "$(verdict_dp "$TTREPO")"
-expect_eq "control: …and the stop gate reads a run"                               "yes" "$(verdict_sg "$TTREPO")"
+plan_fixture --current 5 "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
+expect_eq "control: the same task plan at current: 5, the evidence gate reads the step" "yes:5" "$(verdict_eg "$TTREPO")"
 
 # ============================================================
 section "B — the session-identity key: producer and BOTH consumers agree"
@@ -9386,21 +9385,18 @@ expect_eq "CG.2 no current: line at all — sched_plan_current withholds" \
 expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)" \
   "1" "$(cg_run_open "$CG_NOLINE")"
 
-# ── CG.3 the DOCUMENTED divergence: task-scale current: T<n> — pinned, not silent ──
-# run_state's OTHER `current:` shape: `T<n>` is always an open run (no numbered close — the
-# session/task-scale plans this repo also carries, including the plan governing this very
-# task). It has no numbered step to compare against 4, so the FILL gate cannot read "T1" as
-# either approved or pending and withholds by design (T6 brief; review-a C-5; review-b N-2).
-# This is pinned as a DIVERGENCE, not an agreement: the two readers answer a DIFFERENT
-# question about the same value ON PURPOSE. A change that made them agree — teaching
-# run_open to reject T<n>, or teaching the gate to treat any T<n> as approved — is exactly
-# the kind of silent drift this section exists to catch, so it must turn this red.
+# ── CG.3 the retired task-scale `current: T<n>`: both readers give it up (wave-31 T24; REQ-1, D2) ──
+# Until wave-31 this pinned a DIVERGENCE: run_open called `T<n>` an always-open run while the FILL
+# gate withheld on it, and the comment here said a change teaching run_open to reject `T<n>` must
+# turn it red. That change is D2's: the task-scale shape is deleted, `current:` is a step number at
+# every scale, and both readers give `T<n>` up exactly as CG.2's no-line plan is given up — the
+# FILL gate withholds and run_open calls it no open run. Pinned as the agreement it is now.
 for CG_T in T1 T5 T23; do
   CG_PLAN="$(cg_plan "$CG_T")"
-  expect_eq "CG.3 sched_plan_current withholds on task-scale '$CG_T' (no numbered step)" \
+  expect_eq "CG.3 sched_plan_current withholds on the retired task pointer '$CG_T' (no numbered step)" \
     "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.3 …while run.sh's run_open still calls a task-scale plan an OPEN run" \
-    "0" "$(cg_run_open "$CG_PLAN")"
+  expect_eq "CG.3 …and run.sh's run_open agrees: '$CG_T' is no open run" \
+    "1" "$(cg_run_open "$CG_PLAN")"
 done
 
 # ── CG.4 the discriminator: reverting the letter-strip splits the pair (proves CG.1 can go red) ──
