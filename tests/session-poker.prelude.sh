@@ -61,17 +61,13 @@ printf '5:0.1:30:1000\n' > "$SP_GATE_DIR/cost/fixture.test.sh"
 # load over 6.4 cores" is 8 cores x 0.80) and the one §40 pins for itself. Sections that name their own
 # dir through `fake_config_dir` override this one per call and keep working.
 #
-# TWO DIRECTORIES, BECAUSE SECTIONS UNSET THE FIRST. session-poker.test.sh ends §8 (and several later
-# sections) with `unset CLAUDE_CONFIG_DIR`, which hands the read to `$HOME/.claude`. An export alone
-# lasted until then and left §11 and §FG on this machine's share. So HOME is the fixture's too, with the
-# same 80 under it; git keeps the real global identity through GIT_CONFIG_GLOBAL.
-export CLAUDE_CONFIG_DIR="$TMPROOT/config"
-mkdir -p "$CLAUDE_CONFIG_DIR/bionic"
-printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
-export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}"
-export HOME="$TMPROOT/home"
-mkdir -p "$HOME/.claude/bionic"
-printf '80\n' > "$HOME/.claude/bionic/share"
+# THE PIN HAS A NAME, BECAUSE SECTIONS LEAVE IT. A section that points CLAUDE_CONFIG_DIR at its own
+# `fake_config_dir` ends by putting it back with `CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"`, never `unset`: an
+# unset hands the read to `$HOME/.claude`, this machine's own share (92). HOME is not pinned.
+SP_CONFIG_DIR="$TMPROOT/config"
+mkdir -p "$SP_CONFIG_DIR/bionic"
+printf '80\n' > "$SP_CONFIG_DIR/bionic/share"
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT

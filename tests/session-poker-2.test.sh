@@ -2466,7 +2466,7 @@ s54_run() {  # <suite> -> the real shim runs it in the working checkout
       bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$1" -- "bash tests/$1" ) >/dev/null 2>&1
 }
 S54_WHY="the floor is one whole run plus each later commit proved; past the proof at"
-S54_OUT="; run what it lacks, or a whole run on this head, and proof-add floor"
+S54_OUT="; run suites its row named, proof-add floor; a second run: approve regression-2"
 
 S54_W0="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_floor floor-1.log
