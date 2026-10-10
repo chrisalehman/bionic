@@ -9,9 +9,10 @@
 #                         `## SDLC State` heading; exit 1 and silent if none.
 #   run_open <plan>    -> exit 0 iff THAT ONE FILE reads as an open run: its flush-left
 #                         `current:` value is 0-8, or 9 with no `- Step 9:` line carrying
-#                         `delivered:`, or a task-scale `current: T<n>` — AND its own
-#                         frontmatter carries no `abandoned:` line; else exit 1. Silent
-#                         both ways: the caller already holds the path.
+#                         `delivered:` — AND its own frontmatter carries no `abandoned:`
+#                         line; else exit 1. A non-numeric `current:` (the retired
+#                         task-scale `T<n>` among them) is no open run, at every scale.
+#                         Silent both ways: the caller already holds the path.
 #   active_run <root>  -> exit 0 + the plan path iff active_plan finds a file and run_open
 #                         holds on it; else exit 1, silent.
 #   open_runs <root>   -> every file _run_candidates finds for which run_open holds, one
@@ -474,11 +475,6 @@ run_open() {
     | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
     | tr -d '[:space:]')
   [ -n "$current" ] || return 1
-
-  # Task-scale: current: T<n> is always active (no numbered close).
-  if grep -qE '^T[0-9]+$' <<< "$current"; then
-    return 0
-  fi
 
   # THE STEP NUMBER MAY CARRY A SUB-STEP LETTER — `8a`, `8b` — which the lifecycle uses
   # and every wall this replaces accepted (`^[0-9]+[ab]?$`). A predicate that read `8b`
