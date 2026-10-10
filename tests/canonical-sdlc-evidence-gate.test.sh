@@ -4514,6 +4514,10 @@ nz_put "$nz_main/agents/critic.md" 300
 nz_put "$nz_main/payload/context/severity.md" 300
 nz_put "$nz_main/agents-src/templates/skills/canonical-sdlc/steps/4.md.tmpl" 1000
 nz_put "$nz_main/README.md" 100
+# bionic's own source tree is recognised by its manifest (wave-31 T42): the wall is bionic's, so the
+# fixture that stands for bionic carries the manifest the real tree does.
+mkdir -p "$nz_main/payload/.claude-plugin"
+printf '{\n  "name": "bionic",\n  "version": "0.0.0"\n}\n' > "$nz_main/payload/.claude-plugin/plugin.json"
 git -C "$nz_main" init -q .
 git -C "$nz_main" add skills agents agents-src payload README.md
 git -C "$nz_main" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false \
@@ -4542,7 +4546,7 @@ nz_stage() {  # <tree> <path> <bytes> — rewrite the file to that size and stag
 nz_reset() {  # <tree> — index and work tree back to HEAD, new files gone
   git -C "$1" reset -q --hard && git -C "$1" clean -qfd -- skills agents payload agents-src
 }
-nz_drive() { run_hook_cwd "$(make_home)" "$nz_main" "$1" 'git commit -m "x"'; }   # <tree>
+nz_drive() { run_hook_cwd "$(make_home)" "${NZ_PROJECT:-$nz_main}" "$1" 'git commit -m "x"'; }   # <tree>; NZ_PROJECT: the engaged project, default nz_main
 nz_refused() {  # <label> <tree> <substring>… — exit 2, one line in shape, each substring on line+detail
   local label="$1" tree="$2" s miss=""; shift 2
   nz_drive "$tree"
@@ -4635,6 +4639,50 @@ nz_stage "$nz_tmp/wt-T2" skills/canonical-sdlc/steps/4.md 950
 nz_silent "NZ-8b …and a −50 B shrink from that tree needs no approval → admitted with only the row note" \
   "$nz_tmp/wt-T2" "$NZ_NOTE_T2"
 nz_reset "$nz_tmp/wt-T2"
+
+# (vi) THE SCOPE (wave-31 T42; A-orch-72): the doctrine is bionic's, so the wall asks only bionic's own
+# source tree, recognised by HEAD's payload/.claude-plugin/plugin.json naming "bionic". A user project's
+# agents/*.md and skills/ files are its own; the same growth there is admitted, with no row to read.
+# Each fixture is the ENGAGED project of its own (NZ_PROJECT): the gate exempts a commit made outside
+# the engaged repository before the wall is asked, so only an engaged project reaches it.
+nz_other() {  # <dir> <manifest text, or empty for none> — an engaged project holding the set at HEAD
+  local d="$1"
+  nz_put "$d/skills/canonical-sdlc/steps/4.md" 1000
+  nz_put "$d/agents/helper.md" 300
+  if [ -n "${2:-}" ]; then mkdir -p "$d/payload/.claude-plugin"; printf '%s\n' "$2" > "$d/payload/.claude-plugin/plugin.json"; fi
+  git -C "$d" init -q . && git -C "$d" add -A
+  git -C "$d" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+    -c core.hooksPath=/dev/null commit -q -m 'the set at HEAD'
+  engage "$d"
+  mkdir -p "$d/.bionic/docs/plans" "$d/.bionic/docs/record/w25g"
+  printf 'evidence\n' > "$d/.bionic/docs/record/w25g/x.md"
+  cp "$nz_main/.bionic/docs/plans/wave-01-x.plan.md" "$d/.bionic/docs/plans/"
+}
+nz_bio="$nz_tmp/other-bionic"; nz_none="$nz_tmp/other-none"; nz_foreign="$nz_tmp/other-foreign"; nz_late="$nz_tmp/other-late"
+nz_plan ""
+nz_other "$nz_bio" '{"name": "bionic", "version": "0.0.0"}'
+nz_other "$nz_none" ""
+nz_other "$nz_foreign" '{"name": "somebody-else", "author": {"name": "bionic"}}'
+nz_other "$nz_late" ""
+# the positive on this fixture shape: +200 B in an engaged project whose manifest names bionic is refused.
+NZ_PROJECT="$nz_bio"
+nz_stage "$nz_bio" skills/canonical-sdlc/steps/4.md 1200
+nz_refused "NZ-10 control: +200 B to steps/4.md in an engaged project whose manifest at HEAD names bionic → refused" \
+  "$nz_bio" "+200 B" "skills/canonical-sdlc/steps/4.md"
+NZ_PROJECT="$nz_none"
+nz_stage "$nz_none" skills/canonical-sdlc/steps/4.md 1200
+nz_silent "NZ-10b +200 B to steps/4.md in an engaged project with no payload/.claude-plugin/plugin.json → admitted silently" "$nz_none" ""
+nz_stage "$nz_none" agents/helper.md 340
+nz_silent "NZ-10c …and +40 B to its own agents/*.md besides → admitted silently" "$nz_none" ""
+NZ_PROJECT="$nz_foreign"
+nz_stage "$nz_foreign" skills/canonical-sdlc/steps/4.md 1200
+nz_silent "NZ-10d +200 B in a project whose manifest names another plugin (its author's name is bionic) → admitted silently" "$nz_foreign" ""
+# the manifest is read as HEAD holds it: one only in the work tree is not the commit's.
+NZ_PROJECT="$nz_late"
+mkdir -p "$nz_late/payload/.claude-plugin"; printf '{"name": "bionic"}\n' > "$nz_late/payload/.claude-plugin/plugin.json"
+nz_stage "$nz_late" skills/canonical-sdlc/steps/4.md 1200
+nz_silent "NZ-10e +200 B where the bionic manifest is only in the work tree, not at HEAD → admitted silently" "$nz_late" ""
+unset NZ_PROJECT
 
 # (v) AC-14.1: the set is named once, by one function at file scope, read by sourcing the library.
 NZ_WALLS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
