@@ -1101,7 +1101,8 @@ section "A3 — the retired task pointer: the gates the plan does not move, and 
 # included, moves their answer. And the task-scale shape is deleted (one ledger shape): `current:`
 # is a step number at every scale, so the one party that reads it, the evidence gate, refuses
 # `T<n>` naming the value, at either scale, while it reads a numeric `current:` on the same
-# task-scale plan as a step (the control). The run predicate's own answer is CG.3's.
+# task-scale plan as a step (the control). The run predicate keeps `T<n>` open so the plan's
+# readers refuse it by name; that is CG.3's.
 
 TREPO=$(new_repo "known-divergence")
 write_plan "$TREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: T4"
@@ -9385,18 +9386,19 @@ expect_eq "CG.2 no current: line at all — sched_plan_current withholds" \
 expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)" \
   "1" "$(cg_run_open "$CG_NOLINE")"
 
-# ── CG.3 the retired task-scale `current: T<n>`: both readers give it up (wave-31 T24; REQ-1, D2) ──
-# Until wave-31 this pinned a DIVERGENCE: run_open called `T<n>` an always-open run while the FILL
-# gate withheld on it, and the comment here said a change teaching run_open to reject `T<n>` must
-# turn it red. That change is D2's: the task-scale shape is deleted, `current:` is a step number at
-# every scale, and both readers give `T<n>` up exactly as CG.2's no-line plan is given up — the
-# FILL gate withholds and run_open calls it no open run. Pinned as the agreement it is now.
+# ── CG.3 the retired task-scale `current: T<n>`: the divergence that routes it to its refusal ──
+# run_open calls `T<n>` an open run while the FILL gate withholds on it. Since wave-31 (one ledger
+# shape, D2; A-orch-52) `T<n>` is no step at any scale, and the pair answer two questions on
+# purpose: run_open keeps the retired plan OPEN so launch-sync, the stop wall and the tick reach it
+# and refuse it by name (AC-1.2's `NOT-RECORDED … is not numeric`), and the FILL gate, which has no
+# number to compare, fills nothing. A change that closed it would skip such a plan in silence, so
+# it must turn this red.
 for CG_T in T1 T5 T23; do
   CG_PLAN="$(cg_plan "$CG_T")"
   expect_eq "CG.3 sched_plan_current withholds on the retired task pointer '$CG_T' (no numbered step)" \
     "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.3 …and run.sh's run_open agrees: '$CG_T' is no open run" \
-    "1" "$(cg_run_open "$CG_PLAN")"
+  expect_eq "CG.3 …while run.sh's run_open keeps '$CG_T' an OPEN run, so its readers refuse it by name" \
+    "0" "$(cg_run_open "$CG_PLAN")"
 done
 
 # ── CG.4 the discriminator: reverting the letter-strip splits the pair (proves CG.1 can go red) ──
