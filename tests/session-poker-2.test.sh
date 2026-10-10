@@ -2456,8 +2456,8 @@ s54_run() {  # <suite> -> the real shim runs it in the working checkout
   ( cd "$S54_WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
       bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$1" -- "bash tests/$1" ) >/dev/null 2>&1
 }
-S54_WHY="the floor is one whole run plus each later commit proved by its suites, and since the regression proof at"
-S54_OUT="; run the suites it lacks, or a whole run on this head, and record it with proof-add floor"
+S54_WHY="the floor is one whole run plus each later commit proved; past the proof at"
+S54_OUT="; run what it lacks, or a whole run on this head, and proof-add floor"
 
 S54_W0="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_floor floor-1.log
@@ -2483,7 +2483,7 @@ S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
 expect_contains "54b AC-3.4 AC-13.4 integrate WAITS: the commit past the floor has no run recorded at it, and the line names it and the way out" \
-  "poker: WAIT T3 — proof:floor: ${S54_WHY} ${S54_W0:0:12}: commit ${S54_W1:0:12} (" "$(s54_wait)"
+  "poker: WAIT T3 — proof:floor: ${S54_WHY} ${S54_W0:0:12}, commit ${S54_W1:0:12} (" "$(s54_wait)"
 expect_contains "54b1b …saying what it lacks" \
   ") is not proved: no suite run is recorded at it${S54_OUT}; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
   "$(s54_wait)"
@@ -2509,7 +2509,7 @@ expect_contains "54c0 precondition: the change LANDED" "spawn-worktree: LANDED b
 S54_W2="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_contains "54c a landing with no suite run at it: integrate WAITS naming the commit" \
-  "proof:floor: ${S54_WHY} ${S54_W1:0:12}: commit ${S54_W2:0:12} (" "$(s54_wait)"
+  "proof:floor: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_W2:0:12} (" "$(s54_wait)"
 s54_run a.test.sh; s54_run b.test.sh
 s54_tick
 expect_contains "54c2 AC-13.3 …with a and b run green at the head (the real shim's stamps), the floor stands: the merge is offered" "poker: FILL T3" "$OUT"
@@ -2524,7 +2524,7 @@ expect_true "54e0 precondition: the outside commit is on the working branch" \
   git -C "$S54_WT" merge-base --is-ancestor other-work wave/01-fixture
 s54_tick
 expect_contains "54e a merge from outside the run with nothing run at it: integrate WAITS, naming the merge" \
-  "proof:floor: ${S54_WHY} ${S54_W1:0:12}: commit ${S54_M:0:12} (no landing row) is not proved: no suite run is recorded at it" \
+  "proof:floor: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_M:0:12} (no landing row) is not proved: no suite run is recorded at it" \
   "$(s54_wait)"
 expect_absent "54e2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 s54_floor floor-4.log

@@ -424,12 +424,12 @@ units_rows() {
 #     nothing landed past the review proof writes no newer proof, so it is not one (wave-26
 #     T62; K2-F4): the last review of a run returns its row to pending, and integrate would
 #     otherwise wait on it for ever. A REGRESSION PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64;
-#     REQ-3 AC-3.4): with no open writer, `proof:floor` is satisfied when lib/proof.sh
-#     `proof_state` answers `covered` or `bounded`, and waits on `unbounded` — a merge from
-#     outside the run, a change the map answers with every suite or a file it answers with none,
-#     or a state that cannot be computed — saying `proof:floor: the head moved past the regression
-#     proof at <12 hex> in a way the map cannot bound (<its reason>); take the full run on this
-#     head and record it with proof-add floor`. The state is asked only when a pending row's
+#     REQ-3 AC-3.4; the floor's rule from wave-31 T25, D3): with no open writer, `proof:floor` is
+#     satisfied when lib/proof.sh `proof_state` answers `covered`, and waits on `uncovered` — a
+#     commit past the proof that no recorded run proves, or a state that cannot be computed —
+#     saying `proof:floor: the floor is one whole run plus each later commit proved; past the proof
+#     at <12 hex>, <its reason>; run what it lacks, or a whole run on this head, and proof-add
+#     floor` (short: the tick cuts a WAIT reason at 400 characters). The state is asked only when a pending row's
 #     answer turns on it, a row held for its step is judged without it, and inside
 #     `units_memoised` it is asked once; `proof:review`, with no open writer, is satisfied only
 #     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
@@ -1028,13 +1028,13 @@ _units_sched_run() {
 }
 
 # _units_floor_state <plan> -> what lib/proof.sh `proof_state` says of the change since the plan's
-# last regression proof: `covered…`, `bounded…` or `unbounded<TAB><reason>`, one line. The tree it asks
+# last regression proof: `covered…` or `uncovered<TAB><reason>`, one line. The tree it asks
 # is the project root the plan sits under (`<root>/.bionic/…`), or the plan's own directory, whose
 # repository git finds. Inside `units_memoised` the answer is kept in a file for the rest of the
 # command, so the tick's three questions and its ready set run `proof_state` once between them.
 # WHEN THE STATE CANNOT BE COMPUTED, THE READ IS NOT SATISFIED (the fail direction): proof.sh not
-# loadable, no git, no checkout, a map that fails or overruns all answer `unbounded` with the
-# reason, and a regression proof at the head is always the way out, because `covered` asks no map.
+# loadable, no git, no checkout all answer `uncovered` with the reason, and a regression proof at
+# the head is always the way out, because a proof at the head walks no commit.
 _units_floor_state() {
   local plan="${1:-}" tree st=""
   st="$(_units_floor_kept "$plan")"
@@ -1044,8 +1044,8 @@ _units_floor_state() {
     st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1')"
   fi
   case "$st" in
-    covered*|bounded*|unbounded*) ;;
-    *) st="$(printf 'unbounded\tthe proof state cannot be computed here (lib/proof.sh)')" ;;
+    covered*|uncovered*) ;;
+    *) st="$(printf 'uncovered\tthe proof state cannot be computed here (lib/proof.sh)')" ;;
   esac
   [ -z "${_UNITS_MEMO_FLOOR:-}" ] || printf '%s\n%s\n' "$plan" "$st" > "$_UNITS_MEMO_FLOOR" 2>/dev/null
   printf '%s\n' "$st"
@@ -1444,17 +1444,18 @@ _units_sched_awk() {
           return 0
         }
         # THE REGRESSION PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
-        # with no open writer satisfies the read when the change since its head is covered or
-        # bounded; unbounded, or a state that could not be computed, is a wait naming the way
-        # out. Unknown here (floorst empty) is reported through needfloor, and the shell runs
-        # this program again with the state; a row held for its step is judged without it.
+        # with no open writer satisfies the read when the floor is covered: one whole run, and
+        # every commit since it proved by its recorded runs (wave-31 T25; D3). Uncovered, or a
+        # state that could not be computed, is a wait naming what is lacking and the way out.
+        # Unknown here (floorst empty) is reported through needfloor, and the shell runs this
+        # program again with the state; a row held for its step is judged without it.
         if (nw == 0 && a == "floor" && (a in proved) && !skipfloor) {
           if (floorst == "") needfloor = 1
-          else if (floorst !~ /^(covered|bounded)/) {
+          else if (floorst !~ /^covered/) {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
-            lwhy = "the head moved past the regression proof at " substr(prvh["floor"], 1, 12) \
-              " in a way the map cannot bound (" fr "); take the full run on this head and record it with proof-add floor"
+            lwhy = "the floor is one whole run plus each later commit proved; past the proof at " \
+              substr(prvh["floor"], 1, 12) ", " fr "; run what it lacks, or a whole run on this head, and proof-add floor"
             return 0
           }
         }
