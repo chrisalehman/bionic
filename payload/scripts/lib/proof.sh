@@ -770,7 +770,7 @@ _proof_floor_walk() {
 #     (lib/line.sh), and the `stamp/v1|` lines `land` copied under its `landed:` headers;
 #   - the `booked.sh` stamps in every git dir of the repository (`<common dir>/bionic-stamps` and
 #     `<common dir>/worktrees/*/bionic-stamps`): each suite a clean stamp names, green at rc 0 and red
-#     at any other rc but 75 and 69, which ran nothing; a green `run.sh` stamp is every suite green.
+#     at any other rc but 75 and 69, which ran nothing; a `run.sh` stamp is every suite at its result.
 # A RECORD IS KEYED BY THE TREE ITS COMMIT HAS, so a run at any commit with C's files is a run on C:
 # a landing's verdicts are at its candidate, which is the published commit, and a stamp at a row head
 # counts for the merge exactly when the merge left the row's tree as it was.
@@ -782,7 +782,10 @@ _proof_floor_walk() {
 #
 # WHEN A SUITE OWED AT C IS PROVED: the last commit from C to H whose tree holds a record of it decides,
 # by its newest record: green proves it, red does not. A later green run covers an earlier commit's
-# change, since the later tree holds it; a later red supersedes an earlier green.
+# change, since the later tree holds it; a later red supersedes an earlier green. A whole run is a
+# record of every suite at once (`*`), weighed against each suite's own by time: a red one leaves
+# every suite owed at or before its commit red there, and a newer run, the whole or the suite's own,
+# decides again (wave-31 T41).
 _proof_walk() {
   local co="$1" from="$2" to="$3" rec="${4:-}" walk gd recs need trees pairs f
   walk="$(git -C "$co" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" \
@@ -825,7 +828,7 @@ _proof_walk() {
       m = split(s, a, ",")
       for (i = 1; i <= m; i++) {
         if (a[i] == "" || a[i] == "?") continue
-        if (a[i] == "run.sh") { if (v == "green") print "R\t" at "\t" h "\t*\tgreen"; continue }
+        if (a[i] == "run.sh") { print "R\t" at "\t" h "\t*\t" v; continue }
         print "R\t" at "\t" h "\t" a[i] "\t" v
       }
     }')"
@@ -865,15 +868,18 @@ _proof_walk() {
         if (m == 0) { print lead "no suite run is recorded at it"; exit 1 }
         lack = ""
         for (x = 1; x <= m; x++) {
-          s = ow[x]; res = ""; when = ""
+          s = ow[x]; res = ""; when = ""; whole = 0
           for (j = n; j >= i; j--) {
             t = wt[j]
             if ((t SUBSEP s) in rat) { when = rat[t, s]; res = rres[t, s] }
-            if ((t SUBSEP "*") in rat && (res == "" || rat[t, "*"] >= when)) { when = rat[t, "*"]; res = "green" }
+            if ((t SUBSEP "*") in rat && (res == "" || rat[t, "*"] >= when)) { when = rat[t, "*"]; res = rres[t, "*"]; whole = 1 }
             if (res != "") break
           }
-          if (res == "") lack = lack (lack == "" ? "" : "; ") s " has no run recorded at it or after it"
-          else if (res != "green") lack = lack (lack == "" ? "" : "; ") s " is red at " substr(wc[j], 1, 12)
+          if (res == "") why = s " has no run recorded at it or after it"
+          else if (res == "green") continue
+          else if (whole) why = "the whole run at " substr(wc[j], 1, 12) " is red"
+          else why = s " is red at " substr(wc[j], 1, 12)
+          if (index("; " lack "; ", "; " why "; ") == 0) lack = lack (lack == "" ? "" : "; ") why
         }
         if (lack != "") { print lead lack; exit 1 }
       }

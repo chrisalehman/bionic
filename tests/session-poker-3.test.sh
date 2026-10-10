@@ -3493,6 +3493,38 @@ s72_run a.test.sh "bash tests/a.test.sh"
 expect_eq "72h4 …and a run at it makes proof_state covered" "$(printf 'covered\t%s' "$S72C7")" "$(s72_state)"
 s57_state "$S72P" "$S72C7"
 expect_eq "72h5 …and the judge's floor line covered" "covered" "$(s57_of floor)"
+
+# ---------- (i) a red whole run at a later commit supersedes the green floor (wave-31 T41; critic-evidence #1, critic-adversarial #1) ----------
+# A whole run's stamp names `run.sh`. Green, every suite is green at its tree; red, every suite is
+# red there, so each commit owing one, at H or before it, is unproved, unless a newer run of that
+# suite at H is green. The newest record decides: a green whole run after the red proves them again.
+S72H="$(s57_commit "$S72WT" lib/two.sh 'a fourth hand commit')"
+s72_run c.test.sh "bash tests/c.test.sh"
+expect_eq "72i precondition: the floor proof at F, c run green at the new head H: proof_state covered at H" \
+  "$(printf 'covered\t%s' "$S72H")" "$(s72_state)"
+sleep 1
+s72_run run.sh "false"
+expect_match "72i2 precondition: the real shim stamped a red, clean whole run at H" \
+  "stamp/v1|head=${S72H}|dirty=0|rc=1|at=*|suites=run.sh|cmd=false" "$(s72_stamp)"
+S72STATE="$(s72_state)"
+expect_eq "72i3 AC-13.3 a red whole run at H after the green floor at F: proof_state is uncovered" "uncovered" "${S72STATE%%	*}"
+expect_contains "72i4 …naming the oldest commit owing a suite, and the whole run at H red" \
+  "commit ${S72C1:0:12} (row T7) is not proved: the whole run at ${S72H:0:12} is red" "$S72STATE"
+s57_state "$S72P" "$S72H"
+S72FL="$(s57_of floor)"
+expect_eq "72i5 …and the judge's floor line uncovered" "uncovered" "${S72FL%%	*}"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\n' "$S72H" > "$S72REC/floor-red-H.txt"
+s72_add floor-red-H.txt
+s42_unchanged "72i6 proof-add floor of the red whole run's log at H" 1 "$S72P"
+expect_contains "72i7 …is refused as red, as before" "did not pass (Gating: 3 passed, 1 failed)" "$OUT"
+s72_add floor-F.txt
+s42_unchanged "72i8 proof-add floor at F with the red whole run at H after it" 1 "$S72P"
+expect_contains "72i9 …refused, naming the whole run at H red" "the whole run at ${S72H:0:12} is red" "$OUT"
+sleep 1
+s72_run run.sh "true"
+expect_match "72i10 precondition: the real shim stamped a green, clean whole run at H, newer than the red" \
+  "stamp/v1|head=${S72H}|dirty=0|rc=0|at=*|suites=run.sh|cmd=true" "$(s72_stamp)"
+expect_eq "72i11 …the newest whole run, green, decides: proof_state covered at H" "$(printf 'covered\t%s' "$S72H")" "$(s72_state)"
 POKE_BOUND="$S72_BOUND_WAS"
 
 
