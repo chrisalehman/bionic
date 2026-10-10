@@ -1068,6 +1068,13 @@ printf '5:1.0:30:1000\n' > "$GATE_LOADED/cost/fixture.test.sh"
 gate_clear() { export BIONIC_GATE_DIR="$GATE_CLEAR" BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0; }
 gate_loaded() { export BIONIC_GATE_DIR="$GATE_LOADED" BIONIC_PROBE_BUSY_CORES=4.5 BIONIC_PROBE_BUSY_CORES_5M=4.5; }
 export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30
+# THE SHARE IS FIXTURE DATA TOO (wave-31 T34; A-orch-58; the pin tests/session-poker.prelude.sh keeps as
+# SP_CONFIG_DIR). The gate reads the share from ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share and the default is
+# 92 since T10, so rows 64a4/64a5/68d/68e/69c/69c2/L6, whose loaded and no-room gates are planted against 80, read
+# this machine's file or the default. HOME is not pinned.
+PD_SHARE_CFG="$(mktemp -d)"; mkdir -p "$PD_SHARE_CFG/bionic"
+printf '80\n' > "$PD_SHARE_CFG/bionic/share"
+export CLAUDE_CONFIG_DIR="$PD_SHARE_CFG"
 gate_clear
 
 # 59: THE INVARIANT. A live ledger, two ready rows, an ordinary turn that dispatched
