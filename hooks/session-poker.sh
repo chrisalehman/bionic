@@ -3645,13 +3645,18 @@ mr_tier_keys() {
     for _mr_t in T0 T1 T2 T3 T4; do printf '%s\t%s\n' "$_mr_t" "$(keys_for_tier "$_mr_t")"; done )
 }
 
-# MR_AWK — matrix-render's one pass over the plan (wave-30 T14; D9). ENVIRON: MR_KEYS (mr_tier_keys), MR_TASKS
-# (`<id><TAB><serves>` per ## Tasks row), MR_WALK (the frontmatter walk: value), MR_COUNT (the side file: on success
-# `<blocks written><TAB><keys added><TAB><blocks unchanged>`, on a refusal `<why><TAB><ids>`). Prints the rendered
-# plan; exits 3 no Eval design criteria, 4 no matrix table, 5 a criterion with no matrix row, 6 a tier with no keys.
-# The reads follow the gate's: fences skipped, a table cell trimmed, an AC block a flush-left `AC-<id>:` (a list
-# bullet tolerated) and the indented lines under it until the next flush-left line (walls.sh `matrix_block`).
-MR_AWK='
+# SERVES_AWK / serves_tasks — THE ONE READ OF "WHICH CRITERIA A ROW SERVES" (wave-31 T22; REQ-15 AC-15.1, D15,
+# A-orch-51). A row serves a criterion when its `serves` cell names the criterion's AC id or the REQ id in the
+# Eval design's Requirement column; that two-way read is `serves_hit`, and two verbs call it, never a second reader:
+# matrix-render (a criterion's `task:` cell is the one row serving it) and row-landed (the evidence a landing writes
+# into every criterion its row serves). The awk functions are concatenated ahead of each verb's program
+# (`awk "$SERVES_AWK$MR_AWK"`); they own these globals: nt tid[] serves[] (serves_load), and evh col[] eseen[] ne ec[]
+# ereq[] eapp[] eev[] efw[] (eval_row), which the program's own pass resets as its headings go by (evh = 0).
+#   serves_load(spec)  spec = `<id><TAB><serves>` per `## Tasks` row, newline-joined (serves_tasks prints it)
+#   serves_hit(t, cr)  1 when row index t serves criterion cr (its AC id, or its Requirement in ereq[])
+#   eval_row(line)     one `## Eval design` table line: the header row names the columns, a data row fills ereq[] etc.
+#   trim(v), cells(line, out)  the table-cell reads both programs share
+SERVES_AWK='
 function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
 function cells(line, out,    n, i, t) {
   gsub(/\\\|/, "\001", line)
@@ -3659,10 +3664,45 @@ function cells(line, out,    n, i, t) {
   for (i = 2; i < n; i++) { out[i - 1] = trim(t[i]); gsub(/\001/, "|", out[i - 1]) }
   return n - 2
 }
+function serves_load(spec,    n0, i, tl, tv, ns, sv, s) {
+  n0 = split(spec, tl, "\n"); nt = 0
+  for (i = 1; i <= n0; i++) {
+    split(tl[i], tv, "\t"); if (tv[1] == "") continue
+    nt++; tid[nt] = tv[1]; ns = split(tv[2], sv, /[ ,;]+/)
+    for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
+  }
+}
+function serves_hit(t, cr) {
+  return (((t, cr) in serves) || (ereq[cr] != "" && ((t, ereq[cr]) in serves)))
+}
+function eval_row(line,    nc, c, j, cr) {
+  if (line ~ /^[ \t]*\|[-|: \t]*$/) return
+  nc = cells(line, c)
+  if (!evh) { evh = 1; delete col; for (j = 1; j <= nc; j++) col[tolower(c[j])] = j; return }
+  cr = ("criterion" in col) ? c[col["criterion"]] : ""
+  if (cr == "" || (cr in eseen)) return
+  eseen[cr] = 1; ne++; ec[ne] = cr
+  ereq[cr] = ("requirement" in col) ? c[col["requirement"]] : ""
+  eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
+  eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
+  efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
+}'
+# serves_tasks <plan> -> `<id><TAB><serves>` for each `## Tasks` row (lib/units.sh units_rows, the table's one reader).
+serves_tasks() {
+  units_rows "$1" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 }'
+}
+
+# MR_AWK — matrix-render's one pass over the plan (wave-30 T14; D9). ENVIRON: MR_KEYS (mr_tier_keys), MR_TASKS
+# (`<id><TAB><serves>` per ## Tasks row), MR_WALK (the frontmatter walk: value), MR_COUNT (the side file: on success
+# `<blocks written><TAB><keys added><TAB><blocks unchanged>`, on a refusal `<why><TAB><ids>`). Prints the rendered
+# plan; exits 3 no Eval design criteria, 4 no matrix table, 5 a criterion with no matrix row, 6 a tier with no keys.
+# The reads follow the gate's: fences skipped, a table cell trimmed, an AC block a flush-left `AC-<id>:` (a list
+# bullet tolerated) and the indented lines under it until the next flush-left line (walls.sh `matrix_block`).
+MR_AWK='
 function taskof(cr,    t, n, id) {
   n = 0
   for (t = 1; t <= nt; t++)
-    if (((t, cr) in serves) || (ereq[cr] != "" && ((t, ereq[cr]) in serves))) { n++; id = tid[t] }
+    if (serves_hit(t, cr)) { n++; id = tid[t] }
   return (n == 1) ? id : "pending"
 }
 function val(cr, k,    r) {
@@ -3675,12 +3715,7 @@ function val(cr, k,    r) {
 BEGIN {
   nk = split(ENVIRON["MR_KEYS"], kl, "\n")
   for (i = 1; i <= nk; i++) { split(kl[i], kv, "\t"); if (kv[1] != "") keys[kv[1]] = kv[2] }
-  n0 = split(ENVIRON["MR_TASKS"], tl, "\n"); nt = 0
-  for (i = 1; i <= n0; i++) {
-    split(tl[i], tv, "\t"); if (tv[1] == "") continue
-    nt++; tid[nt] = tv[1]; ns = split(tv[2], sv, /[ ,;]+/)
-    for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
-  }
+  serves_load(ENVIRON["MR_TASKS"])
   walk = tolower(ENVIRON["MR_WALK"]); cf = ENVIRON["MR_COUNT"]
 }
 { raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
@@ -3703,19 +3738,7 @@ END {
     if (reqh != "" && !inm && !inev && line ~ /^provenance[ \t]*:/ && !(reqh in prov)) {
       v = line; sub(/^provenance[ \t]*:[ \t]*/, "", v); prov[reqh] = trim(v)
     }
-    if (inev && line ~ /^[ \t]*\|/) {
-      if (line ~ /^[ \t]*\|[-|: \t]*$/) continue
-      nc = cells(line, c)
-      if (!evh) { evh = 1; delete col; for (j = 1; j <= nc; j++) col[tolower(c[j])] = j; continue }
-      cr = ("criterion" in col) ? c[col["criterion"]] : ""
-      if (cr == "" || (cr in eseen)) continue
-      eseen[cr] = 1; ne++; ec[ne] = cr
-      ereq[cr] = ("requirement" in col) ? c[col["requirement"]] : ""
-      eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
-      eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
-      efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
-      continue
-    }
+    if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
     if (!inm) continue
     if (line !~ /^[ \t]*$/) mlast = i
     if (line ~ /^[ \t]*\|/) {
@@ -3778,6 +3801,96 @@ END {
   }
   printf "%d\t%d\t%d\n", written, added, same > cf
 }'
+
+# LE_AWK / landing_evidence — A LANDING WRITES ITS CRITERIA'S EVIDENCE (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15,
+# A-orch-51 ruling 3). `row-landed` is the one writer both landings call (`ready`'s publish and the hand landing), and
+# it calls this once the status, the step line and the ledger line are in its copy. The copy gains, in each AC block of
+# `## Verification Matrix` that the landed row SERVES (`serves_hit`, the relation matrix-render's `task:` reads; never
+# the block's `task:` cell, which names split parents and is corrected by hand at Step 5), an `evidence:` cell reading
+# the docs-root-relative path of the row's green log for the suite the block's `eval:` names (`<suite>.test.sh` in
+# backticks). The rules, as the pass below keeps them:
+#   · the log is the one the landing's own verdict names: the landing record's last `ev=verdict` line for this row,
+#     this commit, this suite, `result=green` (LE_LOGS, built by landing_evidence);
+#   · an eval naming a suite the landing did not run, or no suite (a T0 grep), writes nothing;
+#   · the cell is written when it reads `pending` or is already a path under `record/<plan>/line/` (which only a
+#     landing writes: the newer landing replaces it, AC-15.2); any other value is a hand fill and stays;
+#   · a block with no `evidence:` line is left alone: the verb replaces a cell, it adds no key.
+# ENVIRON: LE_TASKS (serves_tasks), LE_ROW, LE_LOGS (`<suite><TAB><docs-root-relative path>` per line), LE_SLUG (the
+# plan's name), LE_COUNT (a side file: the number of cells written). Prints the plan; the fences, the section
+# headings and the AC blocks are read as MR_AWK reads them.
+LE_AWK='
+function suite_of(ev,    t) {
+  if (!match(ev, /`[^` \t]+\.test\.sh`/)) return ""
+  t = substr(ev, RSTART + 1, RLENGTH - 2)
+  return t
+}
+BEGIN {
+  serves_load(ENVIRON["LE_TASKS"]); row = ENVIRON["LE_ROW"]; slug = ENVIRON["LE_SLUG"]; cf = ENVIRON["LE_COUNT"]
+  nl = split(ENVIRON["LE_LOGS"], ll, "\n")
+  for (i = 1; i <= nl; i++) { split(ll[i], lv, "\t"); if (lv[1] != "" && lv[2] != "") logs[lv[1]] = lv[2] }
+  for (t = 1; t <= nt; t++) if (tid[t] == row) rt = t
+}
+{ raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
+END {
+  for (i = 1; i <= NR; i++) {
+    line = L[i]
+    if (line ~ /^[ \t]*```/) { fence = !fence; continue }
+    if (fence) continue
+    if (line ~ /^## /) {
+      inm = 0; evh = 0; cur = ""
+      inev = (line ~ /^## Eval design[ \t]*$/)
+      if (line ~ /^## Verification Matrix/) inm = 1
+      continue
+    }
+    if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
+    if (!inm || line ~ /^[ \t]*\|/) { if (inm) cur = ""; continue }
+    if (line ~ /^[^ \t]/) {
+      cur = ""; hdr = line; sub(/^[-*+][ \t]+/, "", hdr)
+      if (match(hdr, /^AC-[^ \t:]+:/)) {
+        cur = substr(hdr, 1, RLENGTH - 1)
+        if (cur in seen) cur = ""; else { seen[cur] = 1; nb++; bord[nb] = cur }
+      }
+      continue
+    }
+    if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
+      k = line; sub(/^[ \t]+/, "", k); v = k; sub(/[ \t]*:.*$/, "", k); sub(/^[^:]*:[ \t]*/, "", v)
+      if (k == "eval" && !(cur in beval)) beval[cur] = trim(v)
+      if (k == "evidence" && !(cur in evl)) { evl[cur] = i; evv[cur] = trim(v) }
+    }
+  }
+  written = 0
+  for (b = 1; b <= nb && rt; b++) {
+    cr = bord[b]
+    if (!(cr in evl) || !serves_hit(rt, cr)) continue
+    s = suite_of(beval[cr])
+    if (s == "" || !(s in logs)) continue
+    if (evv[cr] != "pending" && index(evv[cr], "record/" slug "/line/") != 1) continue
+    if (evv[cr] == logs[s]) continue
+    n = evl[cr]; ln = L[n]
+    if (match(ln, /evidence[ \t]*:/)) { out[n] = substr(ln, 1, RSTART + RLENGTH - 1) " " logs[s]; written++ }
+  }
+  for (i = 1; i <= NR; i++) print ((i in out) ? out[i] : raw[i])
+  printf "%d\n", written > cf
+}'
+
+# landing_evidence <plan in> <plan out> <row> <commit> <landing record> <docs root> <plan slug> -> prints the number of
+# cells written; <plan out> holds the plan with them (and is left alone when none). rc 1 when the pass cannot run.
+landing_evidence() {
+  local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
+  logs="$( [ -f "$rec" ] && awk -F'|' -v row="row=$row" -v c="commit=$commit" -v root="$droot/" '
+    $2 == "ev=verdict" && $3 == row && $4 == c && $6 == "result=green" {
+      s = $5; sub(/^suite=/, "", s); l = $7; sub(/^log=/, "", l)
+      if (s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
+    }
+    END { for (s in last) printf "%s\t%s\n", s, last[s] }' "$rec" 2>/dev/null )"
+  if [ -z "$logs" ]; then printf '0'; return 0; fi
+  LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
+    awk "$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
+  n="$(cat "$side" 2>/dev/null)"; rm -f "$side"
+  case "$n" in ''|*[!0-9]*) rm -f "$out.le"; return 1 ;; esac
+  if [ "$n" -gt 0 ]; then mv -f "$out.le" "$out"; else rm -f "$out.le"; fi
+  printf '%s' "$n"
+}
 
 # A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
 plan_verb_value_ok() {
@@ -6969,8 +7082,19 @@ EOF
       5) die "REFUSED — the ## Dispatch ledger table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
       *) die "REFUSED — the ledger row $PV_ID cannot take its landed cell; the plan is unchanged."; exit 1 ;;
     esac
+    # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
+    # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
+    # A hand landing's record carries no verdict, so it writes none. Same copy, same dry commit, same swap.
+    RL_SLUG="${PV_PLAN##*/}"; RL_SLUG="${RL_SLUG%.plan.md}"
+    RL_N="$(landing_evidence "$PV_NEW" "$PV_NEW.2" "$PV_ID" "$RL_COMMIT" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
+      "$(docs_root "$PV_REPO")" "$RL_SLUG")" || {
+      die "REFUSED — the evidence cells of the criteria $PV_ID serves cannot be written; the plan is unchanged."
+      exit 1
+    }
+    [ ! -f "$PV_NEW.2" ] || mv -f "$PV_NEW.2" "$PV_NEW"
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
+    say "evidence: $RL_N cell(s) written by landing"
     exit 0
     ;;
 
@@ -7069,10 +7193,10 @@ EOF
       die "REFUSED — the per-tier keys are walls.sh keys_for_tier's, and $BIONIC_LIB/walls.sh cannot be loaded; the plan is unchanged."
       exit 2
     fi
-    MR_TASKS="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 }')"
+    MR_TASKS="$(serves_tasks "$PV_PLAN")"
     PV_RC=0
     MR_KEYS="$MR_KEYS" MR_TASKS="$MR_TASKS" MR_WALK="$(plan_frontmatter_get "$PV_PLAN" walk)" MR_COUNT="$PV_NEW.2" \
-      awk "$MR_AWK" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+      awk "$SERVES_AWK$MR_AWK" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
     MR_WHY="$(cut -f2 "$PV_NEW.2" 2>/dev/null)"
     case "$PV_RC" in
       0) : ;;

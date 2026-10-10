@@ -1228,6 +1228,121 @@ expect_eq "(w5m) mutant: the removal moved back to the landing — the mutant ra
 if [ ! -d "$RM3/.worktrees/T1" ]; then ok "(w5m2) …and the tree is gone: (w5) is the row that fails"; else no "(w5m2) …and the tree is gone: (w5) is the row that fails"; fi
 
 # ---------------------------------------------------------------------------
+section "§SERVED-EVIDENCE: a landing writes its criteria's evidence — the log of the suite each criterion's eval names (wave-31 T22; REQ-15 AC-15.1, AC-15.2; D15, A-orch-51)"
+#
+# `ready` publishes, then `row-landed` writes the row. After the status, the step line and the ledger
+# line it writes `evidence: <the row's green log for the suite the criterion's eval: names>` into every
+# criterion the row SERVES (its `serves` cell naming the AC id or its REQ, the relation matrix-render's
+# task: cell reads), when the cell is `pending` or already a landing's path; any other value is a hand
+# fill and stays. A criterion whose eval names a suite the landing did not run, a T0 criterion, and a
+# criterion no landing row serves are left as they were. The path is docs-root-relative.
+se_world() {  # -> a world whose rows T1, T2 both land on a.test.sh and serve criteria of the plan below
+  local r p
+  r="$(ll_world)" || return 1
+  p="$(ll_plan "$r")"
+  ll_launch "$r" T1 a.test.sh; ll_launch "$r" T2 a.test.sh
+  awk '/^\| T1 \|/ { sub(/\| REQ-1 \|/, "| AC-8.1 AC-7.1 AC-5.1 |") }
+       /^\| T2 \|/ { sub(/\| REQ-1 \|/, "| REQ-8 |") }
+       { print }' "$p" > "$p.n" && mv "$p.n" "$p"
+  cat >> "$p" <<'PLAN'
+
+## Dispatch ledger
+
+| id | agent | dispatched | expected | artifact | landed | notes |
+|---|---|---|---|---|---|---|
+| T1 | wx-T1 | 2026-10-07T00:00Z | 10 min | T1.md | — | tree T1 |
+| T2 | wx-T2 | 2026-10-07T00:00Z | 10 min | T2.md | — | tree T2 |
+
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-8 | the suite | AC-8.1 | T2 | `a.test.sh` §SECTION-A: the first | wrong |
+| REQ-8 | the suite | AC-8.2 | T2 | `b.test.sh` §SECTION-B: the second | wrong |
+| REQ-7 | a grep | AC-7.1 | T0 | grep -c foo file | wrong |
+| REQ-6 | the suite | AC-6.1 | T2 | `a.test.sh` §SECTION-A: the unserved | wrong |
+| REQ-5 | the suite | AC-5.1 | T2 | `a.test.sh` §SECTION-A: the hand fill | wrong |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-8.1 | T2 | pending | — | — |
+| AC-8.2 | T2 | pending | — | — |
+| AC-7.1 | T0 | pending | — | — |
+| AC-6.1 | T2 | pending | — | — |
+| AC-5.1 | T2 | pending | — | — |
+
+AC-8.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §SECTION-A: the first
+  task: T1
+  evidence: pending
+AC-8.2:
+  provenance: p
+  fails-when: f
+  eval: T2 — `b.test.sh` §SECTION-B: the second
+  task: T2
+  evidence: pending
+AC-7.1:
+  provenance: p
+  fails-when: f
+  eval: T0 — grep -c foo file
+  task: T1
+  evidence: pending
+AC-6.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §SECTION-A: the unserved
+  task: pending
+  evidence: pending
+AC-5.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §SECTION-A: the hand fill
+  task: T1
+  evidence: record/hand/filled-by-the-orchestrator.log
+PLAN
+  printf '%s' "$r"
+}
+se_ev() {  # <plan> <AC id> -> the evidence: cell of that criterion's block
+  awk -v ac="$2:" '{ h = $0; sub(/^[-*+][ \t]+/, "", h) }
+    index(h, ac) == 1 { f = 1; next }
+    /^[^ \t]/ { f = 0 }
+    f && /^[ \t]+evidence:/ { v = $0; sub(/^[ \t]+evidence:[ \t]*/, "", v); print v; exit }' "$1"
+}
+se_log() {  # <root> <row> -> the docs-root-relative path of the row's green a.test.sh verdict log
+  local l; l="$(ll_field "$(ll_ev "$1" verdict | grep "|row=$2|" | grep '|suite=a.test.sh|' | grep '|result=green|' | tail -1)" log)"
+  printf '%s' "${l#"$1/.bionic/docs/"}"
+}
+RS="$(se_world)"; PS="$(ll_plan "$RS")"
+expect_eq "(se0) precondition: the criteria read pending before any landing, hand fill in place (positive on se_ev)" \
+  "pending pending pending pending record/hand/filled-by-the-orchestrator.log" \
+  "$(se_ev "$PS" AC-8.1) $(se_ev "$PS" AC-8.2) $(se_ev "$PS" AC-7.1) $(se_ev "$PS" AC-6.1) $(se_ev "$PS" AC-5.1)"
+ll_verb "$RS" T1
+SE_LOG1="$(se_log "$RS" T1)"
+expect_eq "(se1) precondition: ready exits 0, the row is landed, and its green a.test.sh verdict names a log under record/wave-x/line/" \
+  "0 landed 1" "$LL_RC $(ll_cell "$PS" tasks T1 status) $(printf '%s\n' "$SE_LOG1" | grep -cE '^record/wave-x/line/T1-.*\.log$')"
+expect_eq "(se2) AC-15.1 the criterion the row serves by its id, whose eval names a.test.sh, reads the row's log (docs-root-relative)" \
+  "$SE_LOG1" "$(se_ev "$PS" AC-8.1)"
+if [ -f "$RS/.bionic/docs/$SE_LOG1" ]; then ok "(se2b) …and that path is a file under the docs root"; else no "(se2b) …and that path is a file under the docs root" "no $RS/.bionic/docs/$SE_LOG1"; fi
+expect_eq "(se3) a criterion whose eval names a suite the landing did not run (b.test.sh) is untouched" "pending" "$(se_ev "$PS" AC-8.2)"
+expect_eq "(se4) a T0 criterion the row serves (a grep, no suite) is untouched" "pending" "$(se_ev "$PS" AC-7.1)"
+expect_eq "(se5) a criterion no row serves is untouched" "pending" "$(se_ev "$PS" AC-6.1)"
+expect_eq "(se6) a hand-filled value is untouched, though the row serves it and its eval names a.test.sh" \
+  "record/hand/filled-by-the-orchestrator.log" "$(se_ev "$PS" AC-5.1)"
+ll_verb "$RS" T2
+SE_LOG2="$(se_log "$RS" T2)"
+expect_eq "(se7) precondition: the second row lands, and its log is another path than the first's" \
+  "0 landed 1" "$LL_RC $(ll_cell "$PS" tasks T2 status) $([ -n "$SE_LOG2" ] && [ "$SE_LOG2" != "$SE_LOG1" ] && echo 1)"
+expect_eq "(se8) AC-15.2 two rows serving AC-8.1 (T1 by its id, T2 by its REQ) landed in turn: one path, the newer" \
+  "$SE_LOG2" "$(se_ev "$PS" AC-8.1)"
+expect_eq "(se8b) …one evidence line in the block, not two" "1" "$(awk '{ h = $0; sub(/^[-*+][ \t]+/, "", h) } index(h, "AC-8.1:") == 1 { f = 1; next } /^[^ \t]/ { f = 0 } f && /^[ \t]+evidence:/ { n++ } END { print n + 0 }' "$PS")"
+expect_eq "(se9) T2 serves AC-8.2 by REQ-8, but its eval names b.test.sh, which T2 did not run: untouched" "pending" "$(se_ev "$PS" AC-8.2)"
+expect_eq "(se10) the hand fill is untouched by the second landing too" "record/hand/filled-by-the-orchestrator.log" "$(se_ev "$PS" AC-5.1)"
+
+# ---------------------------------------------------------------------------
 section "§OWED: what is still owed prints as one line, after the write and the mark, naming no verb (AC-3.3)"
 expect_eq "(o1) the owed line is printed once, last, byte for byte, the name off the roster row" \
   "landed T1 ${KW} — owed: complete task T1, then stop wx-T1" "$(printf '%s\n' "$LL_OUT_W1" | grep '^landed T1 ')"
