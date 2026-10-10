@@ -10,7 +10,7 @@ sends to fix (S1 on, S1 off, S2 on); a record that only describes the defect, or
 a rating the table defers or notes, fails the sample (spec D22 of wave-28).
 
 It is the one check that needs a live model, so it is not in the hermetic suite. What the
-suite holds it to is `tests/reader-exam.test.sh`: the latest sitting in `sittings.md` names
+suite holds it to is `tests/exam/reader-exam.sh`: the latest sitting in `sittings.md` names
 each checks file with its sha256 and carries a `met` result for every sample, each reaching
 what its key asks. The suite is red when a shipped checks file no longer has that hash, or
 when the latest sitting left a sample unsat or missed. Change a checks file, and the exam must
@@ -322,7 +322,7 @@ may sit in a context line of the patch only when no added or removed line holds 
 owner has no other name; the key's author logs it (`admit-not-require`'s `land.sh` is in the
 context line `bin/land.sh tests/land.test.sh`). Where a finder spells the same thing more
 than one way, the `names:` line lists the spellings as alternatives. ` | ` is the separator
-on that line, so an identifier cannot itself hold ` | `. `bash tests/reader-exam.test.sh`
+on that line, so an identifier cannot itself hold ` | `. `bash tests/exam/reader-exam.sh`
 checks the key's shape and that the sample materializes. `tests/lib/impact.sh` does not read
 a sample's `lib/` as a library directory, so a sample's libraries may share a bionic
 library's basename; `bash tests/lib/impact.sh <the sample's files>` should answer only this

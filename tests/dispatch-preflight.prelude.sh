@@ -15,8 +15,7 @@
 #
 # THE SECOND PART holds what a section defined and a section in another shard reads:
 # helpers and constant strings, each block moved whole from the section named above it,
-# with a pointer left where it was. One fixture rides along: S28's map stub ($PF_MAP), a
-# file in the sandbox that pf_repo names, which every shard calling pf_repo needs.
+# with a pointer left where it was.
 
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
@@ -815,19 +814,9 @@ Expected artifact: .bionic/docs/record/w99-files.md
 Expected duration: ~20 minutes.
 Files: payload/scripts/lib/widget.sh, hooks/widget-guard.sh'
 
-# ---- from S28: PF_LIB_DIR, PF_MAP (and the map stub it names), PF_FULL_BRIEF, pf_repo, pf_commit, pf_plan_path, pf_row, PF_STATE_EXTRA, pf_plan, pf_state, pf_line ----
+# ---- from S28: PF_LIB_DIR, PF_FULL_BRIEF, pf_repo, pf_commit, pf_plan_path, pf_row, PF_FRONT_EXTRA, PF_STATE_EXTRA, pf_plan, pf_state, pf_line ----
 PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 [ -r "$PF_LIB_DIR/proof.sh" ] || PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../scripts/lib"
-PF_MAP="$SANDBOX/pf-map.sh"
-{
-  printf '#!/bin/bash\n'
-  printf 'for f in "$@"; do\n'
-  printf '  case "$f" in\n'
-  printf '    lib/one.sh)   for s in a b c; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '    lib/every.sh) for s in a b c d e; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '  esac\n'
-  printf 'done\n'
-} > "$PF_MAP"
 
 # The floor row lands no code, so its brief names no landing suite (wave-28 T7, ruling A-orch-73: a
 # writer brief that binds a row, as `w99-T12` binds T12, carries a Lands-on: line).
@@ -837,7 +826,8 @@ Expected duration: ~40 minutes.
 Lands-on: none the floor row proves the head with the full suite and lands no code
 Suites: tests/run.sh'
 
-# pf_repo <name> -> a wave fixture checked out on `wave/99-test`, five suites, the map stub.
+# pf_repo <name> -> a wave fixture checked out on `wave/99-test`, five suites. It names no
+# impact command: the map is gone (wave-31 T2), and nothing the full-run wall reads is in config.
 pf_repo() {
   local repo s
   repo=$(make_repo "$1" yes)
@@ -848,7 +838,6 @@ pf_repo() {
   printf 'every\n' > "$repo/lib/every.sh"
   git -C "$repo" add tests lib
   git -C "$repo" commit -qm base 2>/dev/null
-  printf 'impact-command: bash %s\n' "$PF_MAP" > "$repo/.bionic/config.yaml"
   printf '%s' "$repo"
 }
 # pf_commit <repo> <path> <content> -> one commit on whatever the checkout holds.
@@ -867,13 +856,17 @@ pf_row() {
 }
 # pf_plan <repo> <floor head, or empty> [<row>...] — the plan, written whole: a `## Tasks`
 # heading closes `## SDLC State`, so a proof or cause line appended after it would be outside
-# the section. PF_STATE_EXTRA, when set, is one more line inside `## SDLC State`.
+# the section. PF_STATE_EXTRA, when set, is one more line inside `## SDLC State`; PF_FRONT_EXTRA,
+# when set, is one more frontmatter line (the plan's `regression:` key, wave-31 T26).
 PF_STATE_EXTRA=""
+PF_FRONT_EXTRA=""
 pf_plan() {
   local repo="$1" head="$2" row; shift 2
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: double\nscale: wave\n---\n\n# Test wave plan\n\n'
+    printf 'intent: build\nrigor: double\nscale: wave\n'
+    [ -z "$PF_FRONT_EXTRA" ] || printf '%s\n' "$PF_FRONT_EXTRA"
+    printf -- '---\n\n# Test wave plan\n\n'
     printf '## SDLC State\n\n'
     printf 'integration-branch: main\nworking-branch: wave/99-test\ncurrent: 5\n'
     printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n\n'
@@ -894,20 +887,6 @@ pf_state() {
   ( . "$PF_LIB_DIR/proof.sh" >/dev/null 2>&1; proof_state "$(pf_plan_path "$1")" "$1" ) 2>/dev/null
 }
 pf_line() { printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: '; }
-
-# ---- from SECTION 29: s29_impact ----
-# s29_impact <repo> <sleep seconds> — an impact command that answers correctly, but late.
-s29_impact() {
-  local repo="$1" secs="$2"
-  mkdir -p "$repo/.bionic"
-  {
-    printf '#!/bin/bash\n'
-    printf 'sleep %s\n' "$secs"
-    printf 'printf "alpha.test.sh\\tpath-ref:fixture\\n"\n'
-  } > "$repo/.bionic/impact-stub.sh"
-  chmod +x "$repo/.bionic/impact-stub.sh"
-  printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$repo" > "$repo/.bionic/config.yaml"
-}
 
 # ---- from §runs-lift: RL_BT, RL_JEST, RL_PYTEST, RL_GO, RL_NPM ----
 # THE MARK, HELD IN A VARIABLE. A backtick inside a double-quoted string here would be a

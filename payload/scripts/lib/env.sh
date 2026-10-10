@@ -544,7 +544,9 @@ rc_unset() {  # <item>
 # A SHORT SET OF WORKING PRINCIPLES IN THE USER'S OWN INSTRUCTION FILE, offered
 # at setup (wave-27 D16, REQ-9). `<claude home>/CLAUDE.md` is the user's file and
 # the CLI reads it into every session; bionic's text goes in between its own
-# markers, written only on a yes, and comes out by those markers on remove.
+# markers, written on a yes (an absent block) and replaced without asking when the
+# span differs from the shipped text (wave-31 T10), and comes out by those markers
+# on remove.
 #
 # THE TEXT HAS ONE SOURCE. agents-src/templates/context/working-principles.md.tmpl
 # renders payload/context/working-principles.md, and the shipped file carries the
@@ -554,10 +556,10 @@ rc_unset() {  # <item>
 # comparison of those two reads.
 #
 #   present   — the user's block is byte-for-byte the shipped text
-#   edited    — a block is there and differs. The user's to keep: doctor shows it
-#               as a state and setup leaves it alone unless the item is asked for
-#               by name. It cannot yet be told from an OLDER shipped text, and
-#               needs no telling until a release changes the text (wave-27 T40).
+#   edited    — a block is there and differs. The span is bionic's: doctor shows
+#               it as a state and setup replaces it with the shipped text, asking
+#               nothing, in a whole pass and under --only alike (wave-31 T10). It
+#               cannot be told from an OLDER shipped text, and needs no telling.
 #   absent    — no block
 #   malformed — the markers do not pair up (markers.sh `markers_check`); every
 #               door says what it found and where, and writes nothing
@@ -566,9 +568,9 @@ rc_unset() {  # <item>
 #               `markers_regular`, wave-27 T46); every door says what it is, and
 #               nothing is created in it or beside it
 #
-# AN EDIT IS NEVER DISCARDED SILENTLY. `markers_set` rebuilds a block whole, so
-# setup on an `edited` block prints the difference and writes only on a second,
-# live yes (setup.sh `setup_working_principles`), and remove does the same.
+# SETUP REPLACES AN EDITED SPAN WITHOUT ASKING, and says so in its summary
+# (setup.sh `setup_working_principles`; the shipped span's first line tells the
+# reader). REMOVE still shows the difference and strips an edited block only on a yes.
 #
 # THE FILE GOES ONLY WITH NOTHING OF THE USER'S IN IT (wave-27 T40, review pass 9
 # finding 4). Remove deletes CLAUDE.md only when the block is the shipped text

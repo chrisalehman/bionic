@@ -21,7 +21,6 @@ dispatch-preflight-2.test.sh	292
 dispatch-preflight-3.test.sh	296
 dispatch-preflight-4.test.sh	599
 dispatch-preflight.test.sh	867
-docs-pins.test.sh	196
 doctor-fleet.test.sh	144
 doctor-patrol.test.sh	144
 doctor-reads.test.sh	228
@@ -42,7 +41,6 @@ grant.test.sh	24
 hook-adoption.test.sh	17
 hook-latency.test.sh	14
 hook-timeout.test.sh	46
-impact.test.sh	185
 interpreter-pin.test.sh	84
 jit.test.sh	3
 landing-gate.test.sh	76
@@ -61,7 +59,6 @@ principles-item.test.sh	136
 protect-database.test.sh	13
 protect-main.test.sh	44
 rc-item.test.sh	1102
-reader-exam.test.sh	70
 refuse.test.sh	1078
 render.test.sh	34
 resources.test.sh	31

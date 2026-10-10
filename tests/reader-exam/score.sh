@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/reader-exam/score.sh — README step 5 as code. Sourced, it defines four functions
 # (exam_meets, exam_field, exam_declared, exam_score) and does nothing else:
-# tests/reader-exam.test.sh holds the real keys to them, and a sitting scores its records with them.
+# tests/exam/reader-exam.sh holds the real keys to them, and a sitting scores its records with them.
 #
 #   . tests/reader-exam/score.sh
 #   exam_score tests/reader-exam/samples/<name>/expect.txt <record>
@@ -33,7 +33,7 @@ exam_field() {
 # to fix. The reasons, in the words the scorer prints after `missed: `:
 #   described only                        no findings: or finding: line, or findings: 0
 #   finding lines refused: <why>          the verb's reader refused the lines (a finding to fix
-#                                         with no command and no unsure: line, a bad rating)
+#                                         with no shown: command, a bad rating)
 #   no finding names <file>[ or <file>]   findings, none on a file of the key
 #   declared at <S> <reach>: deferred     the table defers the rating (S2 off, S3 on)
 #   declared at <S> <reach>: noted        the table notes it (S3 off, S4)
@@ -47,7 +47,7 @@ exam_field() {
 #   declared at <S> <reach>: a debt key asks a debt: line of kind <kind>   a rated finding instead
 # A file matches by its path as written, or under a directory (an absolute path in the project).
 exam_declared() {
-  local key="$1" pass="$2" files ratings kind lib rec out rc id sev reach loc pri shown unsure title
+  local key="$1" pass="$2" files ratings kind lib rec out rc id sev reach loc pri shown title
   local path alts alt onfile ok why first="" sites site
   files="$(exam_field "$key" finding-file)"; ratings="$(exam_field "$key" finding-rating)"
   kind="$(exam_field "$key" finding-kind)"
@@ -64,7 +64,7 @@ exam_declared() {
     echo "finding lines refused: $out"; return 1
   fi
   [ -n "$out" ] || { echo "described only"; return 1; }
-  while IFS=$'\t' read -r id sev reach loc pri shown unsure title; do
+  while IFS=$'\t' read -r id sev reach loc pri shown title; do
     [ -n "$id" ] || continue
     # A debt row is `debt <kind> <concept> <sites> burn`: each site is a <path>:<line>.
     sites="$loc"; [ "$id" = debt ] || sites="${loc%%, *}"

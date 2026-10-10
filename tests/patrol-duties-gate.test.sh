@@ -25,11 +25,20 @@
 #                                main-thread entries carry NO agentId/agent_id
 #   a tool result             -> {"type":"user", "message":{"content":[{"type":"tool_result",...}]}}
 #
+# THE TASK-LIST DUTIES ARE GONE (wave-31 T32; D6, REQ-6 AC-6.5). No tick turn owes a task-list
+# refresh and no dispatch turn owes a task entry set in progress: a process check the turn's end
+# demanded of the model, with nothing behind it to do. The tick still prints `poker: RECONCILE` and
+# writes `duty=` to its digest, as advice no wall reads. What this wall still refuses on a tick turn
+# is a marker turn that ran no tick, an unanswered FILL or stand-down, an unrecorded launch and the
+# resume ritual, and the rows below that used the refresh to show the wall was listening now use the
+# marker that ran no tick (`u_marker` beside an `arm` stamp).
+#
 # Usage: bash tests/patrol-duties-gate.test.sh
 
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 # The one roster-row builder and the one swept-marker writer (S17): wave-19's fill fixtures
 # write this session's roster through them rather than spelling either shape by hand.
@@ -93,7 +102,7 @@ governing-skill: canonical-sdlc
 ---
 ## SDLC State
 
-current: T5
+current: 4
 approved-by: fixture 2026-10-04T00:00Z "approved"
 EOF
   # BOUND TO ITS PLAN (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is
@@ -292,6 +301,26 @@ expect_block_unnamed() {  # <label> <id the refusal's row list must not hold>
   esac
   ok "$1"
 }
+# THE SAME READ FOR A ROW THAT NAMES ONE ID AND NOT ANOTHER (wave-31 T34; A-orch-53 (1)). 60c, 60e, 71c and
+# L8a asked `expect_block ... "T3" "T2"`, whose must-not is a substring of the WHOLE reason, and the reason
+# prints the checkout's path (`bash <hooks dir>/session-poker.sh decline ...` and the scratch path in the
+# note), so a tree under `.worktrees/31-T24` held `T2` and all four read red. Both ids are read off the
+# refusal's decline operand instead, as whole words, and the list must be non-empty.
+expect_block_rows() {  # <label> <id the row list must hold> <id it must not hold>
+  local d rows; d=$(decision_of); rows=$(refusal_rows)
+  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
+    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
+  fi
+  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
+  case " $rows " in
+    *" $2 "*) ;;
+    *) no "$1" "the row list <$rows> does not name <$2>"; return ;;
+  esac
+  case " $rows " in
+    *" $3 "*) no "$1" "the row list <$rows> names <$3>"; return ;;
+  esac
+  ok "$1"
+}
 
 LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
@@ -302,11 +331,9 @@ section "Section 1: the six contract cases (Design T5)"
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" TaskList
 fire "$d"; expect_allow "1: tick + ListAgents + TaskList passes"
 
-# 2: tick + panel refresh only -> block naming the task-list side AND its
-# fallback, and NOT naming ListAgents (which was done).
+# 2: tick + panel refresh only, no TaskList -> ends (wave-31 T32; AC-6.5).
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents
-fire "$d"; expect_block "2: tick + ListAgents only blocks, naming TaskList or a plan-ledger write" \
-  "$TL_MISSING" "$LA_MISSING"
+fire "$d"; expect_allow "2: AC-6.5 tick + ListAgents only, no TaskList: not refused (the task-list duty is gone)"
 
 # 3: THE LISTAGENTS DUTY IS RETIRED (T22, A-orch-33; AC-4.4). A tick turn used to be
 # refused until the transcript showed a main-thread `ListAgents` call — a chore demanded of
@@ -335,39 +362,15 @@ fire "$d" Stop true; expect_allow "6: stop_hook_active true passes the same inco
 
 section "Section 2: discrimination — what counts, and when"
 
-# 7: no duty at all -> the reason names the one that is left, and never the retired one.
+# 7: no refresh at all -> ends (wave-31 T32; AC-6.5). Rows 8 to 13 pinned what discharged the
+# refresh (its order, the plan-file write, a subagent's TaskList); the duty is gone with them.
 d=$(make_env); u_tick "$d"
-fire "$d"; expect_block "7a: tick + no refresh blocks, naming the task list" "$TL_MISSING"
-fire "$d"; expect_block "7b: …and the retired panel duty is never named" "$TL_MISSING" "$LA_MISSING"
-
-# 8: ORDERING. Both duties performed BEFORE the tick arrived satisfy nothing —
-# the panel and the task list are stale by exactly the interval the tick exists
-# to cover. Without this the wall passes every tick in any session that ever
-# called ListAgents once.
-d=$(make_env); a_tool "$d" ListAgents; a_tool "$d" TaskList; u_tick "$d"
-fire "$d"; expect_block "8a: a refresh performed BEFORE the tick does not count" "$TL_MISSING"
-fire "$d"; expect_block "8b: …and the retired panel duty is not named either" "$TL_MISSING" "$LA_MISSING"
-
-# 9/10: the fallback's other two shapes.
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Write "$d/.bionic/docs/plans/$PLAN_REL"
-fire "$d"; expect_allow "9: a Write naming the plan satisfies the task-list duty"
-
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents
-a_tool "$d" Bash "printf '%s\\n' 'row' >> .bionic/docs/plans/$PLAN_NAME"
-fire "$d"; expect_allow "10: a Bash command naming the plan satisfies the task-list duty"
-
-# 11: a write to something else is not a ledger write.
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_block "11: an Edit naming a different file does not satisfy it" "$TL_MISSING" "$LA_MISSING"
-
-# 12/13: agent-context calls are not the orchestrator's — RE-POINTED at the duty that is
-# left (T22). The claim is about the SCOPE of the fold, not about which tool it looks for:
-# a subagent's TaskList did not refresh the orchestrator's ledger, so it satisfies nothing.
-d=$(make_env); u_tick "$d"; a_tool_sidechain "$d" TaskList
-fire "$d"; expect_block "12: a sidechain TaskList does not count" "$TL_MISSING" "$LA_MISSING"
-
-d=$(make_env); u_tick "$d"; a_tool_agentid "$d" TaskList
-fire "$d"; expect_block "13: a TaskList carrying an agentId does not count" "$TL_MISSING" "$LA_MISSING"
+fire "$d"; expect_allow "7a: AC-6.5 a tick turn with no TaskList and no plan write ends: not refused"
+# 7b: THE PAIRED POSITIVE on the same fixture: the marker under an `arm` stamp ran no tick, and the
+# wall says so, naming the tick and never a refresh.
+tick_stamp "$d" "" arm
+fire "$d"; expect_block "7b: …while the same marker turn under an arm stamp is refused for the tick, never a refresh" \
+  "session-poker.sh tick" "$TL_MISSING"
 
 # 14: a tool_result carrier is not a prompt. The turn's boundary is the last
 # PROMPT; if results reset it, a tick whose duties are separated by any tool
@@ -379,8 +382,9 @@ fire "$d"; expect_allow "14: tool_result entries do not end the tick's turn"
 # -- same fixture family as 14, but only ONE duty is done, so a wrongful reset
 # (tick lost -> quiet/allow) is DISCRIMINABLE from the correct outcome (block,
 # naming the missing duty), unlike 14 where both outcomes coincide at allow.
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_result "$d"
-fire "$d"; expect_block "14b: a tool_result carrier does not clear an already-done duty" "$TL_MISSING" "$LA_MISSING"
+d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; u_result "$d"
+fire "$d"; expect_block "14b: a tool_result carrier does not end the marker's turn: the unticked turn is still refused" \
+  "session-poker.sh tick" "$TL_MISSING"
 
 # 15: a batch — two tool_uses in one assistant entry.
 d=$(make_env); u_tick "$d"; a_tool_batch "$d" ListAgents TaskList
@@ -416,8 +420,8 @@ fire "$d"; expect_allow "20: malformed transcript lines do not break the read"
 # plan-less project with an engaged session and a skipped duty is refused; what the missing
 # plan costs is only the ALTERNATIVE way to discharge the task-list duty (a write to the
 # plan file), which is why the refusal below names the task list and not the panel.
-d=$(make_env_planless); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_block "21: an engaged session with no plan still owes the tick its duties" "$TL_MISSING" "$LA_MISSING"
+d=$(make_env_planless); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
+fire "$d"; expect_block "21: an engaged session with no plan still owes the marker its tick" "session-poker.sh tick" "$TL_MISSING"
 
 # 21b: THE SAME transcript, the SAME plan-less project, the marker removed. A bystander
 # session is not policed at all — the pairing that makes 21 a statement about engagement
@@ -428,14 +432,8 @@ fire "$d"; expect_allow "21b: …and with no engagement marker it is silent"
 # THE PAIRED POSITIVE, and it is what keeps 21 from passing vacuously: the SAME
 # transcript, in a project that does have an open run, refuses. Nothing separates the
 # two but the plan file.
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_block "22: …and with a plan, that same unrelated Edit satisfies nothing" "$TL_MISSING" "$LA_MISSING"
-
-# 22b: the plan's basename must never be an EMPTY needle — an empty one would make
-# every write in the turn discharge the task-list duty. Driven by an Edit whose path
-# shares no component with the plan's name.
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/unrelated-file.txt"
-fire "$d"; expect_block "22b: an Edit that does not name the plan leaves the task-list duty owed" "$TL_MISSING" "$LA_MISSING"
+d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
+fire "$d"; expect_block "22: …and with a plan, the same turn is refused the same way" "session-poker.sh tick" "$TL_MISSING"
 
 # 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2). The one file the
 # Stop process writes is the fill ledger's recorder's (wave-20 REQ-5, AC-5.5), which is not
@@ -664,6 +662,8 @@ a_agent_sidechain() {  # <dir> <name>
 # A TASK ENTRY SET IN PROGRESS (wave-28 T38; REQ-13, D30), the harness's TaskUpdate shape. A turn
 # that dispatched plan rows owes one per row, so a row here that pins "the dispatching turn ends"
 # sets them, as the doctrine's dispatch turn does.
+# Since wave-31 T32 (D6) no wall counts it: the rows that call it keep the doctrine's dispatch turn
+# whole, and §5c's AC-6.5 row drives the same dispatch with none.
 a_taskup() {  # <dir> <task number>
   jq -nc --arg n "$2" \
     '{type:"assistant",isSidechain:false,agentId:null,
@@ -691,10 +691,13 @@ FILL_MARK="fill unanswered"
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
 fire "$d"; expect_allow "36: Δ7 a printed FILL over an empty computed ready set is not a duty"
 
-# 37: …and the wording of the retired arm never appears.
+# 37: …and with no refresh either the turn ends (wave-31 T32; AC-6.5).
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
-fire "$d"; expect_block "37: a tick turn missing its task-list refresh still names that duty" "$TL_MISSING" "$FILL_MARK"
-fire "$d"; expect_block "37b: …and never the printed id — the FILL line is not evidence" "$TL_MISSING" "ALPHA"
+fire "$d"; expect_allow "37: AC-6.5 a tick turn with a printed FILL and no refresh ends: neither is owed"
+# 37b: the paired positive: the same turn under an arm stamp is refused for the tick, and never
+# names the printed id — the FILL line is not evidence.
+tick_stamp "$d" "" arm
+fire "$d"; expect_block "37b: …and the same turn unticked is refused for the tick, never the printed id" "session-poker.sh tick" "ALPHA"
 
 # 41: INERT with no FILL line, as before.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
@@ -970,8 +973,8 @@ make_env_ledger() {  # <current> <row>... -> project dir on stdout
     printf '## SDLC State\n\ncurrent: %s\n' "$cur"
     # PAST STEP 3 THE PLAN CARRIES ITS APPROVAL (wave-26 T13; D3): the fill and this wall key on
     # the `approved-by:` line, not on `current:`, so a ledger meant to be live writes it — at a
-    # numbered step from 4 on, and at task scale. `current: 3` (rows 61, 63c) stays unapproved.
-    case "${cur%[ab]}" in [4-9]|T[0-9]*) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
+    # numbered step from 4 on, at either scale. `current: 3` (rows 61, 63c) stays unapproved.
+    case "${cur%[ab]}" in [4-9]) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
     printf '\n- Step %s: in progress\n\n' "$cur"
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
@@ -1047,6 +1050,13 @@ printf '5:1.0:30:1000\n' > "$GATE_LOADED/cost/fixture.test.sh"
 gate_clear() { export BIONIC_GATE_DIR="$GATE_CLEAR" BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0; }
 gate_loaded() { export BIONIC_GATE_DIR="$GATE_LOADED" BIONIC_PROBE_BUSY_CORES=4.5 BIONIC_PROBE_BUSY_CORES_5M=4.5; }
 export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30
+# THE SHARE IS FIXTURE DATA TOO (wave-31 T34; A-orch-58; the pin tests/session-poker.prelude.sh keeps as
+# SP_CONFIG_DIR). The gate reads the share from ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share and the default is
+# 92 since T10, so rows 64a4/64a5/68d/68e/69c/69c2/L6, whose loaded and no-room gates are planted against 80, read
+# this machine's file or the default. HOME is not pinned.
+PD_SHARE_CFG="$(mktemp -d)"; mkdir -p "$PD_SHARE_CFG/bionic"
+printf '80\n' > "$PD_SHARE_CFG/bionic/share"
+export CLAUDE_CONFIG_DIR="$PD_SHARE_CFG"
 gate_clear
 
 # 59: THE INVARIANT. A live ledger, two ready rows, an ordinary turn that dispatched
@@ -1092,6 +1102,21 @@ a_agent "$d" "W-T2" "row T2, implementor."
 a_agent "$d" "W-T3" "row T3, implementor."
 a_taskup "$d" 2; a_taskup "$d" 3
 fire "$d"; expect_allow "60b: a turn that dispatched every ready row is not refused"
+# 60b2 (wave-31 T32; D6, AC-6.5): the same dispatch with no task entry set in progress ends — the
+# task-entry duty is gone. The paired positive is 60b3: one of the two left undispatched is refused
+# for the fill, and the refusal names no task entry.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_SENT_3")
+ledger_roster "$d" open W-T2 W-T3
+u_prompt "$d" "dispatch the batch"
+a_agent "$d" "W-T2" "row T2, implementor."
+a_agent "$d" "W-T3" "row T3, implementor."
+fire "$d"; expect_allow "60b2: AC-6.5 a turn that dispatched two rows and set no task entry in progress is not refused"
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W-T2
+u_prompt "$d" "dispatch the first one"
+a_agent "$d" "W-T2" "row T2, implementor."
+fire "$d"; expect_block "60b3: …while one ready row left out is refused for the fill, naming no task entry" \
+  "Fillable gap" "task entries set in progress"
 
 # 60c: …and a turn that dispatched ONE of the two is refused, naming only the other.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_READY_3")
@@ -1099,7 +1124,7 @@ ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first one"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_taskup "$d" 2
-fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
+fire "$d"; expect_block_rows "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
 
 # 60d: A ROW THIS TURN LAUNCHED IS NEVER NAMED AS MISSED (T11b; review R4, T12 F7). Two agents
 # launched and rostered while both plan rows still read `pending`. The launch already holds a
@@ -1120,7 +1145,7 @@ ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_taskup "$d" 2
-fire "$d"; expect_block "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
+fire "$d"; expect_block_rows "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
 
 # 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
 # the same table at `current: 3` is a schedule nobody has ratified, and dispatching into it
@@ -1492,7 +1517,9 @@ fire "$d"; expect_allow "69g: Δ6 a ledger whose only pending row is a gate act 
 # step2-research-R2-fill-invariant.md Q4): an `awk` in front of PATH that logs its program
 # and execs the real one by ABSOLUTE path (a bare `exec awk` re-enters the shim). A parse is
 # counted by its program's own text, and 70g pins that each text is spelled once in its
-# library, so the count cannot go quietly to zero when a program is rewritten.
+# library, so the count cannot go quietly to zero when a program is rewritten. The wall's reads
+# are one; launch-sync, its child, reads `current:` once more before its roster (wave-31 T43;
+# A-orch-76), so a Stop counts two.
 PDG_SHIM="$(mktemp -d)"
 printf '%s\n' '#!/bin/bash' \
   'a="$*"; a="${a//$'"'"'\n'"'"'/ }"; printf "%s\n" "${a:0:400}" >> "$PDG_AWKLOG"' \
@@ -1512,26 +1539,24 @@ ledger_roster "$d" acked T1
 u_prompt "$d" "merge the landed tree and tell me where we are"
 fire_counted "$d"
 expect_block "70a: the counted Stop still computes the ready set (wave scale), naming T2" "T2"
-expect_eq "70b: …after ONE read of current: (the gate, the step token and the set share it)" \
-  "1" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70b: …after TWO reads of current: (the wall's one, shared by gate, step token and set; launch-sync's one)" \
+  "2" "$(pdg_count "$PDG_CUR_SIG")"
 expect_eq "70c: …and ONE parse of the table" "1" "$(pdg_count "$PDG_TBL_SIG")"
 
-# Task scale: `current: T<n>` against a table of units, where the step token asks the header
-# twice (`units_has_column` step, then id) before the ready set reads the rows.
-d=$(make_env_ledger T2)
-{
-  printf -- '---\ngoverning-skill: canonical-sdlc\n%s\n---\n\n# fixture task plan\n\n' "$LEDGER_BUDGET"
-  printf '## SDLC State\n\ncurrent: T2\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
-  printf '| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n'
-  printf '| T1 | bugfix | standard | the done unit | done | — |\n'
-  printf '| T2 | bugfix | standard | the unit the run is on | pending | — |\n'
-  printf '| T3 | bugfix | standard | the next unit | pending | — |\n'
-} > "$d/.bionic/docs/plans/$PLAN_REL"
+# Task scale, the one table (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
+# `scale: task`, `current: 4`, the same reads as the wave plan above.
+d=$(make_env_ledger 4)
+plan_fixture "$d/.bionic/docs/plans/$PLAN_REL" task \
+  "| T1 | 4 | build | the landed unit | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |" \
+  "| T2 | 4 | build | the unit the run is on | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+  "| T3 | 4 | build | the next unit | implementor | — | — | 30 | REQ-1 | c.sh | — | — | pending |" > /dev/null
+expect_eq "70d0: the fixture is a task-scale plan at current: 4" "2" \
+  "$(/usr/bin/grep -cE '^scale: task$|^current: 4$' "$d/.bionic/docs/plans/$PLAN_REL")"
 u_prompt "$d" "carry on"
 fire_counted "$d"
 expect_block "70d: the counted Stop still computes the ready set (task scale), naming T2" "T2"
-expect_eq "70e: …after ONE read of current:" "1" "$(pdg_count "$PDG_CUR_SIG")"
-expect_eq "70f: …and ONE parse of the table, the header questions included" \
+expect_eq "70e: …after TWO reads of current: (the wall's and launch-sync's)" "2" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70f: …and ONE parse of the table" \
   "1" "$(pdg_count "$PDG_TBL_SIG")"
 
 # 70g: THE COUNTER'S OWN CONTROL. Each signature is spelled exactly once in its library, so a
@@ -1592,7 +1617,7 @@ fire "$d"; expect_block "71b: …the same row with the token removed is a gap, r
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD" "$LEDGER_READY_3")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 u_prompt "$d" "how is CI looking?"
-fire "$d"; expect_block "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
+fire "$d"; expect_block_rows "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
 
 # ============================================================
 section "Section 5d: nothing quoted plants a verdict (wave-20 REQ-5, AC-5.4; Δ7)"
@@ -1812,7 +1837,7 @@ led_user "$d" "u-turn-0008" "2026-09-23T12:00:00.000Z" "dispatch the batch"
 led_agent "$d" "toolu_B1" "W-T2" "2026-09-23T12:00:05.000Z"
 led_result "$d" "toolu_B1" "2026-09-23T12:00:06.000Z" false "Spawned W-T2"
 a_taskup "$d" 2
-fire "$d"; expect_block "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
+fire "$d"; expect_block_rows "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
 expect_eq "L8b: …its line names the launch" "W-T2" "$(led_field "$(led_line "$d" 1)" launched)"
 led_feedback "$d" "u-fb-0008" "2026-09-23T12:00:10.000Z"
 led_agent "$d" "toolu_B2" "W-T3" "2026-09-23T12:00:20.000Z"
@@ -1978,16 +2003,15 @@ fire "$d"; expect_allow "M10: a non-marker turn is never asked for a tick"
 d=$(mk_env none)
 fire "$d"; expect_allow "M11: a marker turn with no stamp on disk is not refused"
 
-# M12: the duty and the missing tick are told together.
+# M12 (wave-31 T32; AC-6.5): a marker turn with no refresh and no tick is refused for the tick alone.
 d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm
-fire "$d"; expect_block "M12: a marker turn missing its task-list refresh AND its tick names the refresh" "$TL_MISSING"
-fire "$d"; expect_block "M12b: …and the tick, in the same refusal" "$MK_TICK"
+fire "$d"; expect_block "M12: AC-6.5 a marker turn with no refresh and no tick is refused for the tick, never a refresh" "$MK_TICK" "$TL_MISSING"
 
 # THE RING AND THE PROBES STAY PINNED for the rest of the suite (wave-20): §6 drives the same
 # fill duty on live ledgers, and an unpinned ring is this machine's real one.
 
 # ============================================================
-section "Section QUIET: the task-list duty is owed only when the tick said so (wave-24 T8, REQ-4, AC-4.13; D5)"
+section "Section QUIET: the tick says when the task list is behind; no wall owes the refresh (wave-24 T8, REQ-4, AC-4.13; D5; wave-31 T32, AC-6.5)"
 #
 # THE DEFECT. Every Patrol tick turn owed a task-list refresh, including the turns whose tick
 # had nothing to say. A quiet run's Patrol therefore spent each turn calling TaskList so the stop
@@ -2052,9 +2076,9 @@ QT_OUT="$(qt_tick "$d" "$QT_CFG")"
 expect_contains "Q3 precondition: the real tick fills" "poker: FILL T2" "$QT_OUT"
 expect_eq "Q3 precondition: …and writes duty=owed" "owed" "$(qt_duty "$d")"
 u_marker "$d"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_block "Q3a: the turn with its fill unanswered is refused for the fill, never a refresh" "T2" "$TL_MISSING"
 a_text "$d" "fill-declined: T2 waits on the wave head's merge"
-fire "$d"; expect_block "Q3: AC-4.13 a FILL tick turn with no TaskList is refused" "$TL_MISSING"
-fire "$d" Stop true; expect_allow "Q3b: …once — the re-entered Stop passes"
+fire "$d"; expect_allow "Q3: AC-6.5 the FILL tick turn whose tick owes duty=owed, its fill declined and no TaskList, is not refused"
 rm -rf "$QT_CFG"
 
 # Q4 (wave-24 T27; critic I3, review 15): a digest older than this turn's tick is no digest. A
@@ -2079,7 +2103,7 @@ fire "$d"; expect_allow "Q4a: a digest written after the turn's marker excuses t
 : > "$d/transcript.jsonl"
 qt_marker_at "$d" "2999-01-01T00:00:00.000Z"; tick_stamp "$d" "2999-01-01T00:00:01Z"
 u_tick_out "$d" "poker: REFUSED — the tick could not decide"
-fire "$d"; expect_block "Q4b: critic I3 a digest older than the turn's marker is stale — the refresh is owed" "$TL_MISSING"
+fire "$d"; expect_allow "Q4b: AC-6.5 a digest older than the turn's marker owes no refresh either (wave-31 T32)"
 # Q4c: an UNCHANGED tick rewrites `at=` and keeps `since=`, or every quiet tick after the first
 # would read as stale and owe the refresh again (AC-4.13). The digest is aged by hand to the
 # year 2000; the marker is from 2001; the real tick runs again over the same facts.
@@ -2097,7 +2121,7 @@ fire "$d"; expect_allow "Q4c3: the unchanged tick's turn reads duty=none — no 
 rm -rf "$QT_CFG"
 
 # ============================================================
-section "Section CHANGE: the task-list duty is owed only when a row's status or the ready set changed (wave-26 T15, REQ-4, AC-4.5; D16)"
+section "Section CHANGE: the tick prints RECONCILE only when a row's status or the ready set changed; no wall owes it (wave-26 T15, REQ-4, AC-4.5; D16; wave-31 T32, AC-6.5)"
 #
 # THE DEFECT (research-R2 §3, P4/P5). Any tick that printed more than `unchanged` owed the
 # task-list refresh. A tick whose only news was a progress file's age, a load band or a roster
@@ -2179,7 +2203,7 @@ expect_contains "C2 precondition: the ready set is still T2 alone" "poker: FILL 
 expect_eq "C2: AC-4.5 a row whose status moved is a change — duty=owed" "owed" "$(qt_duty "$d")"
 u_marker "$d"; u_tick_out "$d" "$QT_OUT"
 a_text "$d" "fill-declined: T2 waits on the wave head's merge"
-fire "$d"; expect_block "C2b: …and its turn with no TaskList is refused" "$TL_MISSING"
+fire "$d"; expect_allow "C2b: AC-6.5 …and its turn with no TaskList, the fill declined, is not refused (wave-31 T32)"
 rm -rf "$QT_CFG"
 
 # C3: every writer slot busy. One writer slot, one open row, a ready row it cannot take: the
@@ -2264,8 +2288,8 @@ expect_contains "C5 precondition: …and the slot frees: the tick fills again" "
 expect_eq "C5: F1 a change first seen on a QUIET tick is owed by the next FILL tick" "owed" "$(qt_duty "$d")"
 expect_contains "C6: F2 …and that tick prints the duty as its own line" "poker: RECONCILE" "$C5_OUT"
 u_marker "$d"; u_tick_out "$d" "$C5_OUT"
-fire "$d"; expect_block "C7: F2 …its turn with no refresh is refused" "$TL_MISSING"
-expect_contains "C7b: …and the refusal names the line it answers" "poker: RECONCILE" "$(reason_of)"
+fire "$d"; expect_block "C7: AC-6.5 …its turn is refused for the fill it left, never for a refresh (wave-31 T32)" "T2" "$TL_MISSING"
+expect_absent "C7b: …and the refusal does not answer the RECONCILE line" "poker: RECONCILE" "$(reason_of)"
 C5_OUT3="$(qt_tick "$d" "$QT_CFG")"
 expect_contains "C5b precondition: the same facts ticked again are unchanged" "poker: unchanged since" "$C5_OUT3"
 expect_eq "C5b: …so the refresh is owed once" "none" "$(qt_duty "$d")"
@@ -2418,9 +2442,9 @@ fi
 # The switch is asked before the transcript is read at all, so each silence below is paired
 # with the refusal the same fixture produces once the marker is back.
 
-# 63: the ordinary refusing fixture, engaged -> blocks.
-d=$(make_env); u_tick "$d"
-fire "$d"; expect_block "63: engaged: a tick with neither duty blocks" "$TL_MISSING"
+# 63: the ordinary refusing fixture, engaged -> blocks (a marker turn that ran no tick, wave-31 T32).
+d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm
+fire "$d"; expect_block "63: engaged: a marker turn that ran no tick blocks" "$MK_TICK"
 
 # 64: the SAME fixture with the marker removed -> nothing at all.
 rm -f "$d/.bionic/tmp/engaged-$SID.state"
@@ -2438,7 +2462,7 @@ fire "$d"; expect_allow "66: another session's marker is not this session's enga
 
 # 67: restoring this session's marker restores the refusal, word for word.
 : > "$d/.bionic/tmp/engaged-$SID.state"
-fire "$d"; expect_block "67: re-engaged, the refusal returns unchanged" "$TL_MISSING"
+fire "$d"; expect_block "67: re-engaged, the refusal returns unchanged" "$MK_TICK"
 
 # ---------- Group 26: WHAT COUNTS AS A TICK (T6, AC-22) ----------
 #
@@ -2458,8 +2482,8 @@ fire "$d"; expect_allow "68j: the injected SKILL.md body is not a Patrol tick"
 
 # 69: THE PAIRED POSITIVE, so 68 is not silence-by-vacuity: the same fixture with the real
 # marker at the front of the row refuses.
-d=$(make_env); u_tick "$d"
-fire "$d"; expect_block "69: …while a row led by the patrol marker is" "$TL_MISSING"
+d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm
+fire "$d"; expect_block "69: …while a row led by the patrol marker is" "$MK_TICK"
 
 # 70: ANOTHER session's marker leads the row -> a predecessor's cron firing into this
 # conversation after a /clear is not this session's tick.
@@ -2472,10 +2496,10 @@ d=$(make_env)
 u_prompt "$d" "Here is what the cron job carries: bionic-patrol session=$SID8 — and that is all I wanted to show you."
 fire "$d"; expect_allow "71: the marker mid-row is not a tick — it must be the first token"
 
-# 72: the tick-turn arms read the same marker. A real tick turn missing its refresh is
-# refused; the SKILL.md body carrying the literal is not a tick at all (73).
-d=$(make_env); u_tick "$d"; u_tick_out "$d" "poker: FILL S3 S4"
-fire "$d"; expect_block "72: a real tick turn missing its refresh blocks" "$TL_MISSING"
+# 72: the tick-turn arms read the same marker. A real marker turn that ran no tick is refused;
+# the SKILL.md body carrying the literal is not a tick at all (73).
+d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm; u_tick_out "$d" "poker: FILL S3 S4"
+fire "$d"; expect_block "72: a real marker turn that ran no tick blocks" "$MK_TICK"
 
 d=$(make_env)
 u_prompt "$d" "... \`bash <plugin-root>/hooks/session-poker.sh tick\` is the decision brain ..."
@@ -2522,7 +2546,7 @@ governing-skill: canonical-sdlc
 ---
 ## SDLC State
 
-current: T5
+current: 4
 EOF
   cat > "$dir/.bionic/docs/plans/$PLAN_B_REL" <<'EOF'
 ---
@@ -2530,7 +2554,7 @@ governing-skill: canonical-sdlc
 ---
 ## SDLC State
 
-current: T5
+current: 4
 EOF
   touch -t 202601010000 "$dir/.bionic/docs/plans/$PLAN_A_REL"
   touch -t 202602010000 "$dir/.bionic/docs/plans/$PLAN_B_REL"
@@ -2562,16 +2586,12 @@ current: 9
 EOF
 }
 
-section "24: bound-open — only the BOUND plan's basename discharges the duty"
+section "24: bound-open — the bound plan is the run, and no fallback is announced"
 
-d=$(make_env_two_plans); s5_bind "$d" "$PLAN_A_REL"
-u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_A_REL"
-fire "$d"; expect_allow "24a: bound to A, an Edit naming A satisfies the task-list duty"
-
+# Rows 24a, 24b, 25a, 25c, 25d and 26a pinned which plan's basename discharged the task-list
+# refresh; the refresh went at wave-31 T32 (D6, AC-6.5), and the advisory rows stay.
 d=$(make_env_two_plans); s5_bind "$d" "$PLAN_A_REL"
 u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
-fire "$d"; expect_block "24b: bound to A, an Edit naming B (unrelated to A) does not satisfy it" \
-  "$TL_MISSING" "$LA_MISSING"
 fire_stderr "$d"
 case "$HOOK_ERR" in
   *"run resolved by newest-plan fallback"*) no "24c: bound to A prints no fallback line" "$HOOK_ERR" ;;
@@ -2589,18 +2609,10 @@ d=$(make_env_two_plans)
 # it needs the physical form the hook itself prints.
 d_phys=$(cd "$d" && pwd -P)
 u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
-fire "$d"; expect_block "25a: unbound, an Edit naming B (the newest, somebody else's run) discharges nothing" \
-  "$TL_MISSING" "$LA_MISSING"
 fire_stderr "$d"
 UB_LINE="run resolved by newest-plan fallback (session unbound) — $d_phys/.bionic/docs/plans/$PLAN_B_REL; bind with session-poker.sh bind $d_phys/.bionic/docs/plans/$PLAN_B_REL, or write this session's plan"
 expect_eq "25b: unbound prints lib/run.sh's one advisory, naming B verbatim, once" \
   "1" "$(printf '%s\n' "$HOOK_ERR" | grep -cxF "$UB_LINE")"
-
-# THE SAME UNBOUND SESSION IS STILL POLICED as engaged-with-no-plan: TaskList discharges the
-# refresh, exactly as it does for a session with no plan at all.
-d=$(make_env_two_plans)
-u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" TaskList
-fire "$d"; expect_allow "25d: unbound, TaskList still discharges the refresh (policed as no plan)"
 
 # THE FILL DUTY CHARGES ONLY A BOUND SESSION'S OWN LEDGER (the seed: an unbound session was
 # refused every turn for another session's ready rows). The SAME live ledger, two rows ready,
@@ -2616,21 +2628,12 @@ expect_contains "25g: …and the advisory names that ledger's plan as announced,
   "run resolved by newest-plan fallback (session unbound) — " "$HOOK_ERR"
 expect_absent "25h: …and no row of it is named" "T2" "$HOOK_ERR"
 
-# THE PAIRED NEGATIVE: unbound, A's name (the OLDER plan, not the fallback
-# target) does not satisfy the duty.
-d=$(make_env_two_plans)
-u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_A_REL"
-fire "$d"; expect_block "25c: unbound, an Edit naming A (not the fallback target) does not satisfy it" \
-  "$TL_MISSING" "$LA_MISSING"
-
 section "26: bound-closed — a plan that closed is no open run at all"
 
 d=$(make_env_two_plans)
 s5_deliver "$d/.bionic/docs/plans/$PLAN_A_REL"
 s5_bind "$d" "$PLAN_A_REL"
 u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
-fire "$d"; expect_block "26a: bound to a CLOSED A, an Edit naming open B satisfies nothing" \
-  "$TL_MISSING" "$LA_MISSING"
 fire_stderr "$d"
 case "$HOOK_ERR" in
   *"patrol-duties-gate: bound plan closed — $d/.bionic/docs/plans/$PLAN_A_REL; this session has no open run"*)
@@ -2654,7 +2657,7 @@ PE1_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 PE1_ERRFILE="$(mktemp)"
 # Drive a real refusal through the same helper the arms above use, then read the user
 # stream it left behind. The status is the block channel's own: exit 0 with a verdict.
-PE1_D=$(make_env); u_tick "$PE1_D"; a_tool "$PE1_D" ListAgents
+PE1_D=$(make_env); u_marker "$PE1_D"; tick_stamp "$PE1_D" "" arm; a_tool "$PE1_D" ListAgents
 fire "$PE1_D"
 expect_contains "E1.3 the JSON verdict is still a block (the model's half is unchanged)" \
   '"decision":"block"' "$HOOK_OUT"
@@ -2668,7 +2671,7 @@ else
   no "E1.3 …in AC-E1.3's shape" "line=[$HOOK_ERR_USER]"
 fi
 expect_contains "E1.3 …and it is one of this gate's ruled facts" \
-  "bionic: stop refused — no task-list refresh since this tick" "$HOOK_ERR_USER"
+  "bionic: stop refused — a Patrol marker turn ran no tick" "$HOOK_ERR_USER"
 expect_absent "E1.5 the paragraph the model reads is NOT on the user stream" \
   "this gate blocks once" "$HOOK_ERR_USER"
 

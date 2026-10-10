@@ -954,7 +954,8 @@ EOF
 #
 # TWO PROCESSES, ONE FILE. `session-poker.sh tick` writes the digest beside its stamp (its
 # `tick_digest_file` passes the root it resolved), and the stop library's collector reads its
-# `duty=` and `at=` to judge whether a tick turn owes the task-list refresh. The path and the
+# `at=`, `head=` and `facts_state=` to judge a tick turn (`duty=` and `reconcile=` are written
+# for the tick's own advice and read by no wall, since wave-31 T32). The path and the
 # reader live here, which both already source, so a renamed file cannot leave the stop wall
 # reading a path the tick no longer writes (Step-6 review finding 15; critic I3). Not
 # `patrol-digest-`: `patrol-*.state` is the stamp glob, and a file under it reads as the stamp

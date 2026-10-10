@@ -7,8 +7,8 @@
 # tests/session-poker.prelude.sh, sourced below after the framework and the POKER seam.
 #
 # SPLIT WHERE NO FIXTURE CROSSES. §SEV builds the repository nine later sections read:
-# §RC-DEFER, §CHECK, §MOVE, §REPORT-RTL, §REPORT-KEY, §PASS-KEY, §PASS-MOVED, §MOVE-PASTED and
-# §STEP-FIELD (writers). The sections between them export the config and home directories the
+# §RC-DEFER, §CHECK-GONE, §MOVE, §REPORT-RTL, §REPORT-KEY, §PASS-KEY, §PASS-MOVED, §MOVE-PASTED and
+# §FINAL-RATING. The sections between them export the config and home directories the
 # next ones run under, so this shard keeps them all, in order, to the end.
 #
 # Usage: bash tests/session-poker-4.test.sh
@@ -41,11 +41,12 @@ section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §
 # pushed at start), `proof-add review <record> --question <q> --reader <name>` requires the
 # record's `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>`
 # lines, and for each finding the table sends to fix a `<path>:<line>` with a `shown: <n> <command>`
-# line or an `unsure: <n> <what>` line. The result is derived (a finding to fix gives fail, any
-# other finding flag, none pass) and a `result:` that differs is refused, as is a written
-# `priority:` the table does not give. Registration writes `deferred:` for each finding the table
-# defers and `check:` for each unsure one inside `## SDLC State`, after the proof line. A reader
-# with no `severity` push registers as 1.12.0 did.
+# line. A READER'S RATING IS FINAL (wave-31 T32; D6, REQ-6): an `unsure: <n> <what>` line is an
+# ordinary line of the record, read by nothing, so it neither shows a fix nor owes a check. The
+# result is derived (a finding to fix gives fail, any other finding flag, none pass) and a `result:`
+# that differs is refused, as is a written `priority:` the table does not give. Registration writes
+# `deferred:` for each finding the table defers inside `## SDLC State`, after the proof line, and no
+# `check:` line. A reader with no `severity` push registers as 1.12.0 did.
 #
 # FIXTURE FIDELITY. §56's shape: a plan bound to this session, its working branch checked out in a
 # linked worktree, real commits, and roster rows from the production writer (`roster_row_fixture`)
@@ -182,7 +183,6 @@ EOF
              "$(/usr/bin/grep "^deferred: record/wave-01-fixture/t-$s-$r.md#1 " "$PSEV")" ;;
     *)     expect_eq "SEV-table …$s $r ($p): no deferred: line (beside the S2 off and S3 on rows that write one)" "0" "$sevd" ;;
   esac
-  expect_eq "SEV-table …$s $r: no check: line, for nothing is unsure" "0" "$(/usr/bin/grep -c "^check: record/wave-01-fixture/t-$s-$r.md#" "$PSEV")"
 done
 expect_eq "SEV-table2 …the deferred: lines sit inside ## SDLC State, after their proof lines" "2" \
   "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ n++ } END { print n + 0 }' "$PSEV")"
@@ -258,36 +258,38 @@ expect_contains "SEV-st3 a finding to fix beside no FAIL check is refused, namin
 sev_st st-flagagree flag FLAG "findings: 1" "finding: 1 S3 on - only a side path"
 expect_regex "SEV-st4 control: a FLAG check beside a deferral reads as flag" "^flag piece [0-9a-f]+ rc=0$" "$(sev_stread st-flagagree)"
 
-# ---------- §FACT-shown (AC-8.6, the record half): a fix is shown, or owes a check ----------
+# ---------- §FACT-shown (AC-8.6, the record half): a fix is shown; an unsure: line owes nothing (T32) ----------
 sev_rec sh-dash fail "findings: 1" "finding: 1 S2 on - no place named" "shown: 1 bash lib/a.sh"
 sev_rec sh-noshown fail "findings: 1" "finding: 1 S2 on lib/a.sh:4 no command"
 for f in sh-dash sh-noshown; do
   s42_snap "$RSEV" "$PSEV"; sev_add "$f"
-  s42_unchanged "SEV-shown §FACT-shown AC-8.6 a finding to fix with neither a file, line and command nor an unsure: line ($f)" 1 "$PSEV"
+  s42_unchanged "SEV-shown §FACT-shown AC-8.6 a finding to fix with no file, line and command ($f)" 1 "$PSEV"
   expect_contains "SEV-shown …$f says what to write" "sends finding 1 (S2 on) to fix, but shows it nowhere" "$OUT"
 done
+# AN unsure: LINE SHOWS NOTHING (wave-31 T32; D6, AC-6.3): a finding to fix it stood in for is shown nowhere.
 sev_rec sh-unsure fail "findings: 1" "finding: 1 S1 off - cannot run it here" "unsure: 1 the race needs two machines"
-sev_add sh-unsure
-expect_eq "SEV-shown2 …a finding to fix carrying an unsure: line registers (exit 0)" "0" "$RC"
-expect_eq "SEV-shown3 …and writes its check: line" 'check: record/wave-01-fixture/sh-unsure.md#1 S1 off "cannot run it here"' \
-  "$(/usr/bin/grep '^check: record/wave-01-fixture/sh-unsure.md#' "$PSEV")"
-expect_contains "SEV-shown3b …which the success output names" 'proof-add — check: record/wave-01-fixture/sh-unsure.md#1 S1 off' "$OUT"
+s42_snap "$RSEV" "$PSEV"; sev_add sh-unsure
+s42_unchanged "SEV-shown2 §FINAL-RATING a finding to fix carrying only an unsure: line (sh-unsure)" 1 "$PSEV"
+expect_contains "SEV-shown3 …is refused as a fix shown nowhere, naming the line to write" "write its <path>:<line> and shown: 1 <command>" "$OUT"
+expect_absent "SEV-shown3b …and the refusal offers no unsure: line" "unsure:" "$OUT"
 sev_rec sh-defer-unsure flag "findings: 2" 'finding: 1 S3 on - a "quoted" word wrong' "unsure: 1 which platforms" "finding: 2 S4 on - a typo"
 sev_add sh-defer-unsure
-expect_eq "SEV-shown4 an unsure finding the table defers writes both lines, the deferral first; a note writes none" \
-  "deferred: record/wave-01-fixture/sh-defer-unsure.md#1 S3 on \"a 'quoted' word wrong\"|check: record/wave-01-fixture/sh-defer-unsure.md#1 S3 on \"a 'quoted' word wrong\"" \
+expect_eq "SEV-shown4 a finding the table defers, beside an unsure: line, writes its deferral alone; a note writes none" \
+  "deferred: record/wave-01-fixture/sh-defer-unsure.md#1 S3 on \"a 'quoted' word wrong\"" \
   "$(/usr/bin/grep -E '^(deferred|check): record/wave-01-fixture/sh-defer-unsure.md#' "$PSEV" | paste -sd'|' -)"
-expect_eq "SEV-shown5 …and the two lines follow the proof line they belong to (proof_add_line)" \
-  "check: record/wave-01-fixture/sh-defer-unsure.md#1" \
-  "$(awk '/^proved: .*sh-defer-unsure/ { getline; getline; print $1 " " $2 }' "$PSEV")"
+expect_eq "SEV-shown5 …and the line follows the proof line it belongs to (proof_add_line)" \
+  "deferred: record/wave-01-fixture/sh-defer-unsure.md#1" \
+  "$(awk '/^proved: .*sh-defer-unsure/ { getline; print $1 " " $2 }' "$PSEV")"
+expect_eq "SEV-shown6 …and no check: line names it" "0" "$(/usr/bin/grep -c '^check: record/wave-01-fixture/sh-defer-unsure.md#' "$PSEV")"
 
 # ---------- the priority a record never states: library, release-check and the tick ----------
 SEV_OWED="$(bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null)"
 expect_contains "SEV-owed proof_findings_owed prints a deferral with the table's priority" \
   'record/wave-01-fixture/t-S2-off.md#1 S2 off defer "the S2 off cell"' "$SEV_OWED"
-# An open check is printed as what it is, a check, not the priority it would take (wave-28 T41; D33, AC-8.6).
-expect_contains "SEV-owed2 …and an unsure S1 as the check it owes" 'record/wave-01-fixture/sh-unsure.md#1 S1 off check "cannot run it here"' "$SEV_OWED"
-expect_eq "SEV-owed3 …each finding once, though it has a deferred: and a check: line" "1" \
+# The rating is final (wave-31 T32): the finding beside the unsure: line is owed at the table's priority.
+expect_contains "SEV-owed2 …and the deferral beside an unsure: line at the table's priority, never as a check" \
+  "record/wave-01-fixture/sh-defer-unsure.md#1 S3 on defer \"a 'quoted' word wrong\"" "$SEV_OWED"
+expect_eq "SEV-owed3 …each finding once" "1" \
   "$(printf '%s\n' "$SEV_OWED" | /usr/bin/grep -c 'sh-defer-unsure.md#1 ')"
 
 # ---------- §FACT-old (AC-8.8): a reader not pushed the scale registers as 1.12.0 did ----------
@@ -296,7 +298,7 @@ sev_add o-fail old-crit
 expect_eq "SEV-old §FACT-old AC-8.8 a record with a result and no findings, from a reader with no pushed= key, registers (exit 0)" "0" "$RC"
 expect_regex "SEV-old2 …with its result as written" "evidence=record/wave-01-fixture/o-fail.md question=adversarial reader=old-crit result=fail scope=piece$" "$(sev_last)"
 expect_regex "SEV-old2b …placed after the last reading's finding lines, not between a proof and its own" "^proved: .*evidence=record/wave-01-fixture/o-fail.md " \
-  "$(awk '/^check: record\/wave-01-fixture\/sh-defer-unsure.md#1 / { getline; print; exit }' "$PSEV")"
+  "$(awk '/^deferred: record\/wave-01-fixture\/sh-defer-unsure.md#1 / { getline; print; exit }' "$PSEV")"
 SEV_N="$(sev_lines | wc -l | tr -d ' ')"
 sev_rec o-findings fail "findings: 1" "finding: 1 S4 off - finding lines the old reading ignores"
 sev_add o-findings old-crit
@@ -326,20 +328,7 @@ awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#2 S2 off \"
 poke_pressure "$RSEVT" 8192 1.0 tick
 expect_contains "SEV-tick the tick fills the ready row (the path it prints FINDING on)" "poker: FILL T1" "$OUT"
 expect_contains "SEV-tick2 …and prints a deferred finding with its priority" 'poker: FINDING record/w/rev.md#2 S2 off defer "a side path"' "$OUT"
-expect_contains "SEV-tick3 …and a finding that owes a check as the check it owes (wave-28 T41)" 'poker: FINDING record/w/rev.md#3 S1 on check "unsure of it"' "$OUT"
-
-# ---------- (wave-28 T41; D33) the two checks §FACT-shown owes are settled before the step is judged ----------
-# An open check holds `current 8` (§CHECK, at the end of this file), so §CUR8-sev, which judges the
-# verdict alone, starts with none open: the S1 is refuted and the deferral settled at its own rating,
-# by a check record whose header names a third agent (`written-by:`), neither the reviewer nor a writer.
-chk_rec() {  # <name> <writer, or - for none> -> a check record under the record directory
-  { printf '# check\n\n'; [ "$2" = - ] || printf 'written-by: %s\n' "$2"; printf '\nwhat the check ran and saw\n'; } > "$SEV_DIR/$1.md"
-}
-chk_rec chk-pre chk-agent
-poke "$RSEV" finding-check record/wave-01-fixture/sh-unsure.md#1 refuted record/wave-01-fixture/chk-pre.md
-expect_eq "CHECK-pre the unsure S1 is refuted by a third agent's check record (exit 0)" "0" "$RC"
-poke "$RSEV" finding-check record/wave-01-fixture/sh-defer-unsure.md#1 unsettled record/wave-01-fixture/chk-pre.md
-expect_eq "CHECK-pre2 …and the unsure deferral settled at its own rating, so it is an open deferral (exit 0)" "0" "$RC"
+expect_absent "SEV-tick3 …and an old check: line, read by nothing since wave-31 T32, prints no line" 'record/w/rev.md#3' "$OUT"
 
 # ---------- §CUR8-sev (AC-8.5): the step into integration follows the derived verdict ----------
 # The plan moves to current: 7 and every other fact it owes is planted at C1 by the production
@@ -403,8 +392,8 @@ expect_eq "DEBT-P2 proof_findings exposes the debt line as a row: debt, kind, co
 sev_rec dbt-mixed flag "findings: 1" "finding: 1 S3 on lib/a.sh:3 a message misnames the flag" \
   "debt: duplicate tree_count lib/b.sh:2,lib/c.sh:5"
 DBT_MIX="$(dbt_rows dbt-mixed)"
-expect_eq "DEBT-P2b a pass with a finding and a debt line: the finding row, then the debt row, its sites joined by ', '" \
-  "$(printf '1\tS3\ton\tlib/a.sh:3\tdefer\t0\t0\ta message misnames the flag\ndebt\tduplicate\ttree_count\tlib/b.sh:2, lib/c.sh:5\tburn') rc=0" "$DBT_MIX"
+expect_eq "DEBT-P2b a pass with a finding and a debt line: the finding row (seven columns since wave-31 T32 took unsure out), then the debt row, its sites joined by ', '" \
+  "$(printf '1\tS3\ton\tlib/a.sh:3\tdefer\t0\ta message misnames the flag\ndebt\tduplicate\ttree_count\tlib/b.sh:2, lib/c.sh:5\tburn') rc=0" "$DBT_MIX"
 expect_eq "DEBT-P2c …and registration writes the finding's deferred: line and none for the debt row" \
   'deferred: record/wave-01-fixture/dbt-mixed.md#1 S3 on "a message misnames the flag"' \
   "$(bash -c '. "$1"; proof_finding_lines record/wave-01-fixture/dbt-mixed.md "$(proof_findings "$2")"' _ "$SEV_LIB" "$SEV_DIR/dbt-mixed.md" 2>/dev/null)"
@@ -613,7 +602,7 @@ for _rd in "$RD_ID1" "$RD_ID2" "$RD_ID3" "$RD_ID4" "$RD_ID5"; do
   expect_eq "RD-0 precondition: $_rd has one deferred: line with no sentence yet" "1|0" \
     "$(rd_line "$_rd" | wc -l | tr -d ' ')|$(rd_line "$_rd" | /usr/bin/grep -c ' stated=')"
 done
-expect_eq "RD-0b precondition: $RD_CHK is a check owed with no deferred: line, and the working head has no CHANGELOG.md" "0|no" \
+expect_eq "RD-0b precondition: $RD_CHK, a finding never registered (wave-31 T32: its unsure: line showed nothing), has no deferred: line, and the working head has no CHANGELOG.md" "0|no" \
   "$(rd_line "$RD_CHK" | wc -l | tr -d ' ')|$([ -e "$SEV_WT/CHANGELOG.md" ] && echo yes || echo no)"
 
 # ---------- §RC-DEFER: a deferral reads unstated until its sentence is in the changelog ----------
@@ -621,7 +610,7 @@ poke "$RSEV" release-check
 expect_eq "RD-1 release-check over a plan holding deferrals none of which is stated exits 0 (it refuses nothing)" "0" "$RC"
 expect_eq "RD-1b …and prints each deferral unstated: $RD_ID1" "unstated" "$(rd_state "$RD_ID1")"
 expect_eq "RD-1c …and $RD_ID2" "unstated" "$(rd_state "$RD_ID2")"
-expect_eq "RD-1d …one line per deferred: line the plan holds, and no line for a check owed" "$(/usr/bin/grep -c '^deferred: ' "$PSEV" | tr -d ' ')|0" \
+expect_eq "RD-1d …one line per deferred: line the plan holds, and no line for a finding with none" "$(/usr/bin/grep -c '^deferred: ' "$PSEV" | tr -d ' ')|0" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: release-check — deferral ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -cF "deferral $RD_CHK")"
 expect_eq "RD-1e …and the finding lines it already printed keep their form" "1" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -cx "poker: release-check — finding $RD_ID1 S2 off defer \"the S2 off cell\"")"
@@ -794,7 +783,7 @@ sv_gate_read() {  # <ccd> [<env assignment>...] -> what gate_share prints under 
 }
 
 sv_poke share
-expect_eq "SV-1 with no share file the verb prints 80 (exit 0)" "0|80" "$RC|$OUT"
+expect_eq "SV-1 with no share file the verb prints 92, the gate's default (exit 0)" "0|92" "$RC|$OUT"
 expect_eq "SV-1b …and writes nothing: reading made no file" "no" "$([ -e "$SV_FILE" ] && echo yes || echo no)"
 sv_poke share 70
 expect_eq "SV-2 share 70 exits 0" "0" "$RC"
@@ -954,187 +943,29 @@ expect_contains "RL1c …and T24, which the name alone would have matched, stays
 POKE_BOUND="$SRL_BOUND_WAS"
 
 # ============================================================
-section "§CHECK: a finding the reviewer cannot settle owes a check — the settle verb, the effective rating at every read, and the step held while a check is open (wave-28 T41; REQ-8 AC-8.6; D33)"
+section "§CHECK-GONE: a reader's rating is final — no finding owes a check, and the fixture's facts move to the working head (wave-31 T32; REQ-6 AC-6.3; D6; was §CHECK, wave-28 T41)"
 # ============================================================
 #
-# An `unsure:` finding writes `check: <record>#<n> <S> <reach> "<title>"` at registration (§SEV), and
-# the finding is neither a fix nor a deferral until a check settles it:
-#
-#   finding-check <record>#<n> settled <S> <reach> <check record>   ` settled=<S>:<reach> by=<check record>`
-#   finding-check <record>#<n> refuted <check record>               ` refuted by=<check record>`
-#   finding-check <record>#<n> unsettled <check record>             ` settled=<its own S>:<reach> by=…`
-#
-# appended to the check: line in place, through the plan transaction; a settlement the table defers
-# writes the finding's `deferred:` line too. Every read of a registered record applies the effective
-# rating (lib/proof.sh `proof_finding_rating`): the owed reader, the tick, and the judge, which derives
-# a reading's result again from its findings. `current 8` is refused while a check: line carries
-# neither ` settled=` nor ` refuted`, naming each. The check record is a file under the record
-# directory whose `written-by: <name>` line names an agent that is neither the reviewer on the
-# finding's proof line nor the agent of a `## Tasks` row whose Files hold the finding's file.
-# FIXTURE FIDELITY: §SEV's repository, plan and roster; each reading is registered by the real verb.
+# Wave-28 T41 let an `unsure:` finding write a `check:` line that held `current 8` until `finding-check`
+# settled it. Wave-31 T32 (D6) deleted the grammar, the line's writer and readers, the verb and the
+# step's wait on it; §FINAL-RATING at the end of this file pins the deletion. What stays here is the
+# fixture the later sections read: §RC-STATED moved the working head past C1, so the facts the judge
+# reads are planted again at it (§CUR8-sev's way), and one reading reads to it.
+# FIXTURE FIDELITY: §SEV's repository, plan and roster; the reading is registered by the real verb.
 CHK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
   "$(roster_row_fixture session="$SID" name=chk-crit agent_id=a-chk-crit subagent_type=bionic:critic \
-     files="$(sev_files "k-base k-open k-fixto k-defer k-note k-ref k-uns k-w")")" >> "$SEV_RS"
+     files="$(sev_files "k-base k-final")")" >> "$SEV_RS"
 chk_id() { printf 'record/wave-01-fixture/%s.md#1' "$1"; }
-chk_line() { /usr/bin/grep -F "check: $(chk_id "$1") " "$PSEV"; }
-chk_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(chk_id "$1") "; }
 chk_cur() { sed -n 's/^current: //p' "$PSEV"; }
-CHK_A=record/wave-01-fixture/chk-a.md
-chk_rec chk-a chk-agent; chk_rec chk-rev chk-crit; chk_rec chk-writer implementor; chk_rec chk-anon -
-mkdir -p "$RSEV/notes"; printf 'written-by: chk-agent\n' > "$RSEV/notes/chk-out.md"
-expect_contains "CHECK-0 precondition: the Tasks row whose Files hold b.sh names implementor as its agent" \
-  "| implementor | — | 30 | REQ-1 | b.sh |" "$(/usr/bin/grep '^| T2 |' "$PSEV")"
-# The working head moved past C1 after §CUR8-sev (§RC-STATED commits the changelog), so the facts the
-# judge reads are planted again at it (§CUR8-sev's way), and each reading below reads to it.
 SEV_C1="$(git -C "$SEV_WT" rev-parse HEAD)"
 sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-07T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
 sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
-sev_rec k-base flag "findings: 1" "finding: 1 S4 off - a word the reader rated" 
+sev_rec k-base flag "findings: 1" "finding: 1 S4 off - a word the reader rated"
 sev_cur 4; sev_add k-base chk-crit; sev_cur 7
 poke "$RSEV" current 8
-expect_eq "CHECK-0b precondition: with every fact at the working head and no check open, current 8 is admitted" "0|8" "$RC|$(chk_cur)"
-
-# ---------- an open check holds the step ----------
+expect_eq "CHECK-0b precondition: with every fact at the working head, current 8 is admitted" "0|8" "$RC|$(chk_cur)"
 sev_cur 4
-sev_rec k-open flag "findings: 1" "finding: 1 S3 off - a message the reader could not rate" "unsure: 1 which shells print it"
-sev_add k-open chk-crit
-expect_eq "CHECK-1 §CHECK AC-8.6 an unsure finding registers and writes its check: line (exit 0)" \
-  "0|check: $(chk_id k-open) S3 off \"a message the reader could not rate\"" "$RC|$(chk_line k-open)"
-expect_eq "CHECK-2 …the owed reader prints it as what it is, a check, not a priority" \
-  "$(chk_id k-open) S3 off check \"a message the reader could not rate\"" "$(chk_owed k-open)"
-sev_cur 7; s42_snap "$RSEV" "$PSEV"
-poke "$RSEV" current 8
-s42_unchanged "CHECK-3 §CHECK current 8 while a check: line carries neither settled= nor refuted" 1 "$PSEV"
-expect_contains "CHECK-3b …naming the open check" "$(chk_id k-open) S3 off \"a message the reader could not rate\"" "$OUT"
-expect_contains "CHECK-3c …and the verb that settles it" "finding-check <record>#<n>" "$OUT"
-# unsettled: the line's own rating stands, and with no check open the step is admitted.
-sev_cur 4
-poke "$RSEV" finding-check "$(chk_id k-open)" unsettled "$CHK_A"
-expect_eq "CHECK-4 unsettled settles at the line's own rating (exit 0)" \
-  "0|check: $(chk_id k-open) S3 off \"a message the reader could not rate\" settled=S3:off by=$CHK_A" "$RC|$(chk_line k-open)"
-expect_eq "CHECK-4b …and every read takes the table's priority for it again" \
-  "$(chk_id k-open) S3 off note \"a message the reader could not rate\"" "$(chk_owed k-open)"
-sev_cur 7; poke "$RSEV" current 8
-expect_eq "CHECK-4c …and current 8 is admitted once no check is open" "0|8" "$RC|$(chk_cur)"
-sev_cur 4; s42_snap "$RSEV" "$PSEV"
-poke "$RSEV" finding-check "$(chk_id k-open)" settled S1 on "$CHK_A"
-s42_unchanged "CHECK-5 a second settlement of a settled check: line" 1 "$PSEV"
-expect_contains "CHECK-5b …naming the settlement it already carries" "settled=S3:off" "$OUT"
-
-# ---------- settled to fix: the reading's result is derived again ----------
-sev_rec k-fixto flag "findings: 1" "finding: 1 S3 off - a path the reader could not run" "unsure: 1 needs a second machine"
-sev_add k-fixto chk-crit
-poke "$RSEV" finding-check "$(chk_id k-fixto)" settled S1 on "$CHK_A"
-expect_eq "CHECK-6 settled <S> <reach> appends settled=<S>:<reach> by=<check record> (exit 0)" \
-  "0|check: $(chk_id k-fixto) S3 off \"a path the reader could not run\" settled=S1:on by=$CHK_A" "$RC|$(chk_line k-fixto)"
-expect_eq "CHECK-6b …and the owed reader rates it as settled, to fix" \
-  "$(chk_id k-fixto) S1 on fix \"a path the reader could not run\"" "$(chk_owed k-fixto)"
-sev_cur 7; s42_snap "$RSEV" "$PSEV"
-poke "$RSEV" current 8
-s42_unchanged "CHECK-6c …and current 8 is refused on a reading written result=flag: its result is derived through the settled rating" 1 "$PSEV"
-expect_contains "CHECK-6d …naming that reading failing" \
-  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/k-fixto.md')" "$OUT"
-sev_cur 4
-
-# ---------- settled to defer: the deferred: line is written ----------
-sev_rec k-defer flag "findings: 1" "finding: 1 S4 off - wording the reader could not judge" "unsure: 1 the audience is unknown"
-sev_add k-defer chk-crit
-expect_eq "CHECK-7-pre precondition: an unsure note writes no deferred: line" "0" "$(/usr/bin/grep -c "^deferred: $(chk_id k-defer) " "$PSEV")"
-poke "$RSEV" finding-check "$(chk_id k-defer)" settled S2 off "$CHK_A"
-expect_eq "CHECK-7 a settlement the table defers writes the finding's deferred: line (exit 0)" \
-  "0|deferred: $(chk_id k-defer) S2 off \"wording the reader could not judge\"" "$RC|$(/usr/bin/grep "^deferred: $(chk_id k-defer) " "$PSEV")"
-expect_eq "CHECK-7b …and the owed reader gives it defer" "$(chk_id k-defer) S2 off defer \"wording the reader could not judge\"" "$(chk_owed k-defer)"
-sev_cur 7; poke "$RSEV" current 8
-expect_eq "CHECK-7c …and a deferral does not hold the step: current 8 is admitted" "0|8" "$RC|$(chk_cur)"
-sev_cur 4
-
-# ---------- settled to a note: a reading written result=fail is admitted ----------
-sev_rec k-note fail "findings: 1" "finding: 1 S1 on - a crash the reader could not reproduce" "unsure: 1 no core file"
-sev_add k-note chk-crit
-poke "$RSEV" finding-check "$(chk_id k-note)" settled S4 on "$CHK_A"
-expect_eq "CHECK-8 settled to a note (exit 0), and the owed reader gives it note" \
-  "0|$(chk_id k-note) S4 on note \"a crash the reader could not reproduce\"" "$RC|$(chk_owed k-note)"
-sev_cur 7; poke "$RSEV" current 8
-expect_eq "CHECK-8b …and current 8 is admitted though the proof line says result=fail: the judge derives it through the settled rating" \
-  "0|8" "$RC|$(chk_cur)"
-sev_cur 4
-
-# ---------- refuted: the finding is dropped ----------
-sev_rec k-ref fail "findings: 1" "finding: 1 S2 on - a leak the reader could not show" "unsure: 1 the tool is not here"
-sev_add k-ref chk-crit
-poke "$RSEV" finding-check "$(chk_id k-ref)" refuted "$CHK_A"
-expect_eq "CHECK-9 refuted appends refuted by=<check record> (exit 0)" \
-  "0|check: $(chk_id k-ref) S2 on \"a leak the reader could not show\" refuted by=$CHK_A" "$RC|$(chk_line k-ref)"
-expect_eq "CHECK-9b …and every read drops it: the owed reader prints nothing for it" "" "$(chk_owed k-ref)"
-sev_cur 7; poke "$RSEV" current 8
-expect_eq "CHECK-9c …and current 8 is admitted on the reading written result=fail" "0|8" "$RC|$(chk_cur)"
-sev_cur 4
-
-# ---------- unsettled keeps the line's own rating, the higher one ----------
-sev_rec k-uns fail "findings: 1" "finding: 1 S1 off - a race the reader could not time" "unsure: 1 needs load"
-sev_add k-uns chk-crit
-poke "$RSEV" finding-check "$(chk_id k-uns)" unsettled "$CHK_A"
-expect_eq "CHECK-10 unsettled keeps S1 off: the owed reader gives it fix (exit 0)" \
-  "0|$(chk_id k-uns) S1 off fix \"a race the reader could not time\"" "$RC|$(chk_owed k-uns)"
-sev_cur 7; s42_snap "$RSEV" "$PSEV"
-poke "$RSEV" current 8
-s42_unchanged "CHECK-10b …and current 8 is refused, the reading failing at the rating the record wrote" 1 "$PSEV"
-expect_contains "CHECK-10c …naming that reading failing" \
-  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/k-uns.md')" "$OUT"
-sev_cur 4
-
-# ---------- who may write a check record, and where ----------
-sev_rec k-w flag "findings: 1" "finding: 1 S3 off b.sh:3 a call the reader could not trace" "unsure: 1 the caller is generated"
-sev_add k-w chk-crit
-expect_eq "CHECK-11-pre precondition: k-w registers with its check: line (exit 0)" "0|1" "$RC|$(chk_line k-w | wc -l | tr -d ' ')"
-for c in "chk-rev@by the finding's reviewer@chk-crit" "chk-writer@by the writer of the code the finding names@implementor" \
-         "chk-anon@that does not say who wrote it@written-by:" "chk-missing@that does not exist@does not exist"; do
-  f="${c%%@*}"; rest="${c#*@}"; why="${rest%%@*}"; want="${rest#*@}"
-  s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" refuted "record/wave-01-fixture/$f.md"
-  s42_unchanged "CHECK-11 a check record $why ($f)" 1 "$PSEV"
-  expect_contains "CHECK-11 …$f says why" "$want" "$OUT"
-done
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" refuted "$RSEV/notes/chk-out.md"
-s42_unchanged "CHECK-12 a check record outside the record directory" 1 "$PSEV"
-expect_contains "CHECK-12b …naming the record directory" "is not under record/" "$OUT"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/nowhere.md#3 refuted "$CHK_A"
-s42_unchanged "CHECK-13 a <record>#<n> with no check: line" 1 "$PSEV"
-expect_contains "CHECK-13b …naming why" "carries no check: line for record/wave-01-fixture/nowhere.md#3" "$OUT"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" settled S5 on "$CHK_A"
-s42_unchanged "CHECK-14 a settlement at a rating outside the scale" 1 "$PSEV"
-poke "$RSEV" finding-check "$(chk_id k-w)" settled S3 on "$CHK_A"
-expect_eq "CHECK-15 the same finding settled on a third agent's record is admitted (the refusals above were the writer's)" \
-  "0|check: $(chk_id k-w) S3 off \"a call the reader could not trace\" settled=S3:on by=$CHK_A" "$RC|$(chk_line k-w)"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" confirmed "$CHK_A"
-s42_unchanged "CHECK-16 usage: a fourth form" 2 "$PSEV"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check "$(chk_id k-w)" settled S1 "$CHK_A"
-s42_unchanged "CHECK-16b usage: a settlement with no reach" 2 "$PSEV"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/k-w.md refuted "$CHK_A"
-s42_unchanged "CHECK-16c usage: a finding that is not <record>#<n>" 2 "$PSEV"
-
-# ---------- the tick prints each open check once ----------
-awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#4 S2 off \"both lines\""; print "check: record/w/rev.md#4 S2 off \"both lines\""; d = 1 }' \
-  "$PSEVT" > "$PSEVT.tmp" && mv "$PSEVT.tmp" "$PSEVT"
-poke_pressure "$RSEVT" 8192 1.0 tick
-expect_nonempty "CHECK-17-pre the tick printed FINDING lines (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FINDING ')"
-expect_eq "CHECK-17 the tick prints a finding with a deferred: and an open check: line once, as the check it owes" \
-  'poker: FINDING record/w/rev.md#4 S2 off check "both lines"' "$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'poker: FINDING record/w/rev.md#4 ')"
-
-# ---------- the mutation arm: the seam returning the line's own rating for a settled line ----------
-CHK_MUT="$(mktemp -d "$TMPROOT/chk-mut.XXXXXX")"
-CHK_NEEDLE='settled=*:*) s="${st#settled=}"; r="${s#*:}"; s="${s%%:*}" ;;'
-anchor "$SEV_LIB" "$CHK_NEEDLE" 1
-CHK_N="$CHK_NEEDLE" awk 'BEGIN { n = ENVIRON["CHK_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "settled=*:*) : ;;" substr($0, i + length(n)); print }' \
-  "$SEV_LIB" > "$CHK_MUT/proof.sh"
-chk_rate() { bash -c '. "$1"; proof_finding_rating "$2" "$3" "$4" "$5"' _ "$1" "$PSEV" "$2" "$3" "$4" 2>/dev/null; }
-expect_eq "CHECK-mut0 the mutant differs from the library in one line" "1" "$(diff "$SEV_LIB" "$CHK_MUT/proof.sh" | /usr/bin/grep -c '^>')"
-expect_eq "CHECK-mut1 the library rates the finding settled to fix at its settlement" "S1 on fix" "$(chk_rate "$SEV_LIB" "$(chk_id k-fixto)" S3 off)"
-expect_eq "CHECK-mut2 the mutant runs: it drops the refuted finding as the library does" "" "$(chk_rate "$CHK_MUT/proof.sh" "$(chk_id k-ref)" S2 on)"
-expect_eq "CHECK-mut2b …and rates a finding with no check: line at its own rating" "S2 off defer" \
-  "$(chk_rate "$CHK_MUT/proof.sh" record/wave-01-fixture/t-S2-off.md#1 S2 off)"
-expect_ne "CHECK-mut3 …and returns the line's own rating for the settled line, so CHECK-6b goes red" \
-  "S1 on fix" "$(chk_rate "$CHK_MUT/proof.sh" "$(chk_id k-fixto)" S3 off)"
 POKE_BOUND="$CHK_BOUND_WAS"
 
 # ============================================================
@@ -1323,10 +1154,11 @@ mv_seam "moved: record/x.md#1 to=defer by=Dana Fixture at=2026-10-07T12:00:00Z w
 expect_eq "MOVE-seam5 a moved: line that lacks why is not honoured" "S2 on fix" "$(mv_rate record/x.md#1 S2 on)"
 mv_seam '```' "moved: record/x.md#1 to=defer $MV_WHO" '```'
 expect_eq "MOVE-seam6 a moved: line inside a fence is not read" "S2 on fix" "$(mv_rate record/x.md#1 S2 on)"
+# AN OLD check: LINE IS READ BY NOTHING (wave-31 T32; D6): beside a move, the move alone decides.
 mv_seam "check: record/x.md#1 S2 on \"t\"" "moved: record/x.md#1 to=defer $MV_WHO"
-expect_eq "MOVE-seam7 a move keeps an open check open: the fourth word stays" "S2 on defer open" "$(mv_rate record/x.md#1 S2 on)"
+expect_eq "MOVE-seam7 an open check: line beside a move adds no fourth word: the move decides" "S2 on defer" "$(mv_rate record/x.md#1 S2 on)"
 mv_seam "check: record/x.md#1 S2 on \"t\" refuted by=record/c.md" "moved: record/x.md#1 to=fix $MV_WHO"
-expect_eq "MOVE-seam8 a move does not bring back a refuted finding" "" "$(mv_rate record/x.md#1 S2 on)"
+expect_eq "MOVE-seam8 a refuted check: line drops nothing: the finding moved to fix is rated fix" "S2 on fix" "$(mv_rate record/x.md#1 S2 on)"
 expect_eq "MOVE-seam8b …positive on the same plan: another finding is rated" "S3 off note" "$(mv_rate record/x.md#2 S3 off)"
 
 # ---------- the verb, on §SEV's repository and plan ----------
@@ -1856,12 +1688,13 @@ POKE_BOUND="$RK_BOUND_WAS"
 section "§PASS-KEY: one record path is one pass — proof-add refuses a path whose earlier pass stands at another head or is settled (wave-28 T60; REQ-8 AC-8.6, AC-8.7; D33; A-orch-160)"
 # ============================================================
 #
-# A `check:` or `deferred:` line is keyed `<record>#<n>`, so a record path registered for a second
-# pass lets pass 2's finding #n inherit pass 1's settlement: a refuted #1 makes a new S1 fix read as
-# dropped and the judge derives `pass` for a `fail` reading. The key stays unique by construction when
-# `proof-add` registers a reading's path for ONE pass: a path whose `proved:` line names another head
-# is refused, and so is a path of the same head that a `check:` or `deferred:` line already names; a
-# relaunched reader's re-registration of an unsettled record (same head, no such line) stays admitted.
+# A `deferred:` or `moved:` line is keyed `<record>#<n>`, so a record path registered for a second
+# pass lets pass 2's finding #n inherit pass 1's line: a #1 moved to defer makes a new S2 on fix read
+# as a deferral and the judge derives `flag` for a `fail` reading. The key stays unique by construction
+# when `proof-add` registers a reading's path for ONE pass: a path whose `proved:` line names another
+# head is refused, and so is a path of the same head that a `deferred:` or `moved:` line already names;
+# a relaunched reader's re-registration (same head, no such line) stays admitted. An old `check:` line
+# binds nothing (wave-31 T32; D6): nothing reads it.
 # FIXTURE FIDELITY: §SEV's repository, plan and roster, each reading registered by the real verb; the
 # second pass is a real commit on the working branch, its record written over the first as a reader
 # relaunched would.
@@ -1884,17 +1717,16 @@ pk_derived() {  # <lib> <file> <written result> -> the result the judge derives 
 }
 PK_H1="$(git -C "$SEV_WT" rev-parse HEAD)"
 
-# ---------- the probe's shape: pass 1 settled, pass 2 on the same path at another head ----------
-pk_rec pk-a "$PK_H1" fail "findings: 1" "finding: 1 S1 on x.sh:9 - data lost on a second run" "unsure: 1 needs a second machine"
+# ---------- the probe's shape: pass 1 moved, pass 2 on the same path at another head ----------
+pk_rec pk-a "$PK_H1" fail "findings: 1" "finding: 1 S2 on x.sh:9 - data lost on a second run" "shown: 1 bash x.sh --twice"
 pk_add pk-a
-expect_eq "PASS-1 precondition: pass 1 registers on its path, one proof line and its open check: line (exit 0)" \
-  "0|1|1" "$RC|$(pk_n pk-a)|$(/usr/bin/grep -c "^check: $(chk_id pk-a) " "$PSEV")"
-poke "$RSEV" finding-check "$(chk_id pk-a)" refuted "$CHK_A"
-expect_eq "PASS-1b precondition: pass 1's #1 is refuted by a third agent's record (exit 0)" "0|1" \
-  "$RC|$(/usr/bin/grep -c "^check: $(chk_id pk-a) .* refuted by=" "$PSEV")"
+expect_eq "PASS-1 precondition: pass 1 registers on its path, one proof line (exit 0)" "0|1" "$RC|$(pk_n pk-a)"
+sev_put "moved: $(chk_id pk-a) to=defer by=Dana Fixture at=2026-10-07T12:00:00Z words=\"later\" why=\"the user ruled it\""
+expect_eq "PASS-1b precondition: pass 1's #1 is moved to defer on the user's word (one moved: line)" "1" \
+  "$(/usr/bin/grep -c "^moved: $(chk_id pk-a) to=defer " "$PSEV")"
 PK_H2="$(s57_commit "$SEV_WT" lib/a.sh T60-C2)"
 expect_ne "PASS-1c precondition: the working branch moved to a head pass 1 did not read" "$PK_H1" "$PK_H2"
-pk_rec pk-a "$PK_H2" fail "findings: 1" "finding: 1 S1 on b.sh:3 - a second finding, a fix" "shown: 1 bash b.sh --twice"
+pk_rec pk-a "$PK_H2" fail "findings: 1" "finding: 1 S2 on b.sh:3 - a second finding, a fix" "shown: 1 bash b.sh --twice"
 s42_snap "$RSEV" "$PSEV"
 pk_add pk-a
 s42_unchanged "PASS-2 §PASS-KEY a second pass on a path whose proof line names another head" 1 "$PSEV"
@@ -1910,7 +1742,7 @@ expect_eq "PASS-2g …and still one proof line for the path" "1" "$(pk_n pk-a)"
 # the same pass-2 reading on a path of its own is admitted: the fix the refusal names
 cp "$SEV_DIR/pk-a.md" "$SEV_DIR/pk-b.md"
 pk_add pk-b
-expect_eq "PASS-3 the pass written to a new record path registers (exit 0), its #1 an open fix, not a refuted one" \
+expect_eq "PASS-3 the pass written to a new record path registers (exit 0), its #1 a fix, not pass 1's deferral" \
   "0|fail" "$RC|$(pk_derived "$SEV_LIB" pk-b fail)"
 
 # ---------- the relaunch: the same head and no check:/deferred: line is admitted as before ----------
@@ -1922,32 +1754,29 @@ expect_eq "PASS-4b a relaunched reader registers the same record at the same hea
 expect_eq "PASS-4c …and the later proof line is the one the plan's reader takes: its head is the one read" "$PK_H2" \
   "$(s46_proved "$PSEV" | /usr/bin/grep -F "evidence=record/wave-01-fixture/pk-c.md " | tail -1 | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p')"
 
-# ---------- the same head with a check: or a deferred: line is a settled pass, not re-registered ----------
+# ---------- an old check: line binds no pass (wave-31 T32; D6): the relaunch is admitted ----------
 pk_rec pk-d "$PK_H2" flag "findings: 1" "finding: 1 S3 off b.sh:3 - a call the reader could not trace" "unsure: 1 the caller is generated"
 pk_add pk-d
-expect_eq "PASS-5 precondition: an unsure finding registers with its check: line (exit 0)" "0|1|1" \
-  "$RC|$(pk_n pk-d)|$(/usr/bin/grep -c "^check: $(chk_id pk-d) " "$PSEV")"
-s42_snap "$RSEV" "$PSEV"
+expect_eq "PASS-5 precondition: a note beside an unsure: line registers, and writes no check: or deferred: line (exit 0)" "0|1|0" \
+  "$RC|$(pk_n pk-d)|$(/usr/bin/grep -c -E "^(check|deferred): $(chk_id pk-d) " "$PSEV")"
+sev_put "check: $(chk_id pk-d) S3 off \"a call the reader could not trace\""
+expect_eq "PASS-5a precondition: the plan holds an old open check: line naming it, planted by hand" "1" \
+  "$(/usr/bin/grep -c "^check: $(chk_id pk-d) " "$PSEV")"
 pk_add pk-d
-s42_unchanged "PASS-5b §PASS-KEY the same record at the same head, a check: line already naming it" 1 "$PSEV"
-expect_nonempty "PASS-5c the refusal line is there to read" "$(pk_ref)"
-expect_contains "PASS-5d …naming the path" "record/wave-01-fixture/pk-d.md" "$(pk_ref)"
-expect_contains "PASS-5e …the head" "${PK_H2:0:12}" "$(pk_ref)"
-expect_contains "PASS-5e2 …and the fix" "write the pass to a new record path" "$(pk_ref)"
-poke "$RSEV" finding-check "$(chk_id pk-d)" settled S2 off "$CHK_A"
-expect_eq "PASS-5f precondition: the settlement writes the finding's deferred: line (exit 0)" "0|1" \
-  "$RC|$(/usr/bin/grep -c "^deferred: $(chk_id pk-d) " "$PSEV")"
-s42_snap "$RSEV" "$PSEV"
-pk_add pk-d
-s42_unchanged "PASS-5g …and still refused once the pass is settled, a deferred: line naming it too" 1 "$PSEV"
-# a deferred: line alone (a finding the table defers writes it with no check: line)
+expect_eq "PASS-5b §PASS-KEY §FINAL-RATING the same record at the same head beside an old check: line registers again (exit 0, two proof lines)" "0|2" "$RC|$(pk_n pk-d)"
+# ---------- the same head with a deferred: line is a bound pass, not re-registered ----------
 pk_rec pk-e "$PK_H2" flag "findings: 1" "finding: 1 S2 off b.sh:3 - a side path still wrong"
 pk_add pk-e
-expect_eq "PASS-6 precondition: a deferred finding registers with its deferred: line and no check: line (exit 0)" "0|1|0" \
-  "$RC|$(/usr/bin/grep -c "^deferred: $(chk_id pk-e) " "$PSEV")|$(/usr/bin/grep -c "^check: $(chk_id pk-e) " "$PSEV")"
+expect_eq "PASS-6 precondition: a deferred finding registers with its deferred: line (exit 0)" "0|1" \
+  "$RC|$(/usr/bin/grep -c "^deferred: $(chk_id pk-e) " "$PSEV")"
 s42_snap "$RSEV" "$PSEV"
 pk_add pk-e
 s42_unchanged "PASS-6b §PASS-KEY the same head, a deferred: line alone naming the record" 1 "$PSEV"
+expect_nonempty "PASS-6c the refusal line is there to read" "$(pk_ref)"
+expect_contains "PASS-6d …naming the path" "record/wave-01-fixture/pk-e.md" "$(pk_ref)"
+expect_contains "PASS-6e …the head" "${PK_H2:0:12}" "$(pk_ref)"
+expect_contains "PASS-6f …the lines that bind a pass, and no check: among them" "already has a deferred: or moved: line" "$(pk_ref)"
+expect_contains "PASS-6g …and the fix" "write the pass to a new record path" "$(pk_ref)"
 
 # ---------- the mutation arms: the guard removed, and the guard refusing every second registration ----------
 PK_ANCHOR='PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"'
@@ -1968,12 +1797,12 @@ expect_eq "PASS-mut0b the always-refusing copy differs from the verb in one line
   "$(diff "$POKER" "$PK_MUT/b/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
 PK_POKER="$POKER"
 cp "$PSEV" "$TMPROOT/pk-plan-keep"
-POKER="$PK_MUT/hooks/session-poker.sh"; pk_rec pk-a "$PK_H2" fail "findings: 1" "finding: 1 S1 on b.sh:3 - a second finding, a fix" "shown: 1 bash b.sh --twice"
+POKER="$PK_MUT/hooks/session-poker.sh"; pk_rec pk-a "$PK_H2" fail "findings: 1" "finding: 1 S2 on b.sh:3 - a second finding, a fix" "shown: 1 bash b.sh --twice"
 pk_add pk-a
 POKER="$PK_POKER"
-expect_eq "PASS-mut1 the mutant runs: pass 2 registers on the path pass 1 settled (exit 0, two proof lines)" "0|2" "$RC|$(pk_n pk-a)"
-expect_eq "PASS-mut2 …and the judge derives pass for the reading its proof line writes as fail: the hole PASS-2 closes" \
-  "pass" "$(pk_derived "$SEV_LIB" pk-a fail)"
+expect_eq "PASS-mut1 the mutant runs: pass 2 registers on the path pass 1's move binds (exit 0, two proof lines)" "0|2" "$RC|$(pk_n pk-a)"
+expect_eq "PASS-mut2 …and the judge derives flag for the reading its proof line writes as fail: the hole PASS-2 closes" \
+  "flag" "$(pk_derived "$SEV_LIB" pk-a fail)"
 cp "$TMPROOT/pk-plan-keep" "$PSEV"
 POKER="$PK_MUT/b/hooks/session-poker.sh"; pk_add pk-c
 POKER="$PK_POKER"
@@ -2266,15 +2095,16 @@ rm -rf "$RD_MUT"
 
 POKE_BOUND="$RI_BOUND_WAS"
 
-section "§PASS-MOVED: a moved: line binds a record's pass as a check: or deferred: line does — one predicate for the lines that bind it, so proof-add refuses a second registration over a move (wave-28 T72; REQ-8 AC-8.6, AC-8.9; D33, D34; A-T60.5, A-orch-213)"
+section "§PASS-MOVED: a moved: line binds a record's pass as a deferred: line does — one predicate for the lines that bind it, so proof-add refuses a second registration over a move (wave-28 T72; REQ-8 AC-8.6, AC-8.9; D33, D34; A-T60.5, A-orch-213; wave-31 T32: check: binds nothing)"
 # ============================================================
 #
 # `proof_pass_conflict` (the registering verb's guard) read `check:`/`deferred:` lines as the ones that bind
 # a record's pass, and `_proof_reading_result` (the judge's re-derivation) read `check:`/`moved:`: a record
 # path with only a `moved:` line was admitted for a second pass at the same head, and the new pass's
 # finding #n inherited the move (A-T60.5; probed: an S4 typo read as fix). The two callers now ask ONE
-# predicate (lib/proof.sh `proof_bind_awk`), which names all three. A move is the user's word about one
-# finding of one pass, keyed `<record>#<n>` as a check is, and it changes the priority a later reader of
+# predicate (lib/proof.sh `proof_bind_awk`), which names `deferred:` and `moved:` (wave-31 T32 took
+# `check:` out: nothing reads it). A move is the user's word about one
+# finding of one pass, keyed `<record>#<n>` as a deferral is, and it changes the priority a later reader of
 # that path judges (T42's seam), so it binds. FIXTURE FIDELITY: §PASS-KEY's repository, plan, roster and
 # verb; the move is a line planted in the producing verb's shape (the transcript the verb itself needs is
 # §MOVE's).
@@ -2304,7 +2134,7 @@ s42_unchanged "PASSM-3 §PASS-MOVED the same record at the same head, a moved: l
 expect_nonempty "PASSM-3a the refusal line is there to read (the extractor returns real output)" "$(pk_ref)"
 expect_contains "PASSM-3b …naming the path" "record/wave-01-fixture/pm-a.md" "$(pk_ref)"
 expect_contains "PASSM-3c …the head" "${PM_H:0:12}" "$(pk_ref)"
-expect_contains "PASSM-3d …the lines that hold the pass, the move among them" "already has a check:, deferred: or moved: line" "$(pk_ref)"
+expect_contains "PASSM-3d …the lines that hold the pass, the move among them" "already has a deferred: or moved: line" "$(pk_ref)"
 expect_contains "PASSM-3e …and the fix" "write the pass to a new record path" "$(pk_ref)"
 expect_eq "PASSM-3f …in one line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c .)"
 expect_eq "PASSM-3g …and still one proof line for the path" "1" "$(pm_n pm-a)"
@@ -2324,25 +2154,25 @@ pm_agree() {  # <plan line> -> `<what proof_pass_conflict says>|<the result _pro
     _ "$SEV_LIB" "$TMPROOT/pm-agree.md" "$PM_R" "$PM_H" "$RSEV/.bionic/docs" 2>/dev/null
 }
 expect_eq "PASSM-5 no line binds the pass: no conflict, and the written result stands" "|pass" "$(pm_agree "")"
-expect_eq "PASSM-5a a check: line binds it: a conflict, and the finding is read at its rating (S1 on fix: fail)" "settled|fail" \
+expect_eq "PASSM-5a §FINAL-RATING an old check: line binds nothing: no conflict, and the written result stands (wave-31 T32)" "|pass" \
   "$(pm_agree "check: $PM_R#1 S1 on \"data lost\"")"
 expect_eq "PASSM-5b a deferred: line binds it for the judge as it does for the guard (T72: the judge read check:/moved: only)" "settled|fail" \
   "$(pm_agree "deferred: $PM_R#1 S1 on \"data lost\"")"
 expect_eq "PASSM-5c a moved: line binds it for the guard as it does for the judge (T72: the guard read check:/deferred: only)" "settled|fail" \
   "$(pm_agree "moved: $PM_R#1 to=fix by=Dana Fixture at=2026-10-07T12:00:00Z words=\"fix it\" why=\"ruled\"")"
-expect_eq "PASSM-5d a check: line of another record binds neither" "|pass" "$(pm_agree "check: record/wave-01-fixture/other.md#1 S1 on \"x\"")"
-expect_eq "PASSM-5e a check: line inside a fence binds neither" "|pass" "$(pm_agree '```
-check: '"$PM_R"'#1 S1 on "x"
+expect_eq "PASSM-5d a deferred: line of another record binds neither" "|pass" "$(pm_agree "deferred: record/wave-01-fixture/other.md#1 S1 on \"x\"")"
+expect_eq "PASSM-5e a deferred: line inside a fence binds neither" "|pass" "$(pm_agree '```
+deferred: '"$PM_R"'#1 S1 on "x"
 ```')"
 
 # ---------- the mutation arm: moved: left out of the predicate ----------
-PM_NEEDLE='/^(check|deferred|moved):[ \t]/'
+PM_NEEDLE='/^(deferred|moved):[ \t]/'
 anchor "$SEV_LIB" "$PM_NEEDLE" 1
 PM_MUT="$TMPROOT/poker-moved-mut"; rm -rf "$PM_MUT"; mkdir -p "$PM_MUT/hooks"
 cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PM_MUT/scripts-lib" && mkdir -p "$PM_MUT/scripts" && mv "$PM_MUT/scripts-lib" "$PM_MUT/scripts/lib"
 for _pm_f in "$(dirname "$POKER")"/*; do [ "${_pm_f##*/}" = session-poker.sh ] || ln -s "$_pm_f" "$PM_MUT/hooks/${_pm_f##*/}"; done
 cp "$POKER" "$PM_MUT/hooks/session-poker.sh"
-PM_N="$PM_NEEDLE" PM_R='/^(check|deferred):[ \t]/' awk 'BEGIN { n = ENVIRON["PM_N"]; r = ENVIRON["PM_R"] }
+PM_N="$PM_NEEDLE" PM_R='/^(deferred):[ \t]/' awk 'BEGIN { n = ENVIRON["PM_N"]; r = ENVIRON["PM_R"] }
   { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$SEV_LIB" > "$PM_MUT/scripts/lib/proof.sh"
 expect_eq "PASSM-mut0 the moved:-left-out copy of the library differs from it in one line" "1" \
   "$(diff "$SEV_LIB" "$PM_MUT/scripts/lib/proof.sh" | /usr/bin/grep -c '^>')"
@@ -2668,7 +2498,7 @@ expect_eq "SF-10f …and the first Step-4 commit is admitted with the line in th
 rm -f "$SH_CFG/bionic/share"
 SH_D="$(sf_wave sf-share-d '  note: the block owes its fields')"; RSD="${SH_D%%$'\n'*}"; PSD="${SH_D#*$'\n'}"
 poke "$RSD" current 4
-expect_eq "SF-11 with no share file, current 4 writes the gate's 80" "0|1" "$RC|$(sf_block "$PSD" 4 | /usr/bin/grep -cxF -- '  share: 80')"
+expect_eq "SF-11 with no share file, current 4 writes the gate's 92" "0|1" "$RC|$(sf_block "$PSD" 4 | /usr/bin/grep -cxF -- '  share: 92')"
 printf '55\n' > "$SH_CFG/bionic/share"
 SH_P="$(sf_wave sf-share-p '  share: 33
   note: the block carries a share already')"; RSP="${SH_P%%$'\n'*}"; PSP="${SH_P#*$'\n'}"
@@ -2682,50 +2512,6 @@ expect_eq "SF-13 a task-scale plan: current 4 fills the three fields and writes 
   "$RC|$(sf_block "$PST" 4 | /usr/bin/grep -cxF -- '  branch: wave/01-fixture')|$(/usr/bin/grep -c '^  share:' "$PST")"
 if [ "$SH_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$SH_CCD_WAS"; fi
 
-# ============================================================
-section "§STEP-FIELD (writers): finding-check's code writer is read by the Files matcher, and every agent the row carried (wave-28 T8; A-orch-159, A-orch-161)"
-# ============================================================
-#
-# `finding-check` refuses a check record written by the finding's reader or by the code's writer. The writer was the
-# CURRENT agent cell of each `## Tasks` row whose Files entry EQUALS the finding's path. Now the row is found by the
-# matcher the dispatch grammar uses (lib/units.sh: an exact path, a directory, a glob, a path suffix), and the
-# agents are every one the row has carried: its Tasks cell, the name in its dispatch-ledger agent cell
-# (`<role> (<name>)`), and each roster row of the project labelled `row=<id>`.
-# FIXTURE FIDELITY: §SEV's repository, plan and roster; the rows by the production verbs (task-add, task-set,
-# ledger-add), the roster row by `roster_row_fixture` (the production writer, `row=` its own key).
-SFW_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
-  "$(roster_row_fixture session="$SID" name=sfw-crit agent_id=a-sfw-crit subagent_type=bionic:critic files="$(sev_files "sfw-a")")" >> "$SEV_RS"
-roster_row_fixture session="$SID" name=sfw-impl-x agent_id=a-sfw-impl-x subagent_type=bionic:implementor row=T7 >> "$SEV_RS"
-sev_cur 4
-poke "$RSEV" task-add T7 4 build 'the directory writer' sfw-impl-b '—' 30 REQ-1 'lib/'
-poke "$RSEV" task-set T7 status=landed
-poke "$RSEV" ledger-add T7 'agent=implementor (sfw-impl)'
-expect_eq "SFW-0 precondition: a landed Tasks row T7 whose Files is the directory lib/, its agent sfw-impl-b, and a ledger row naming sfw-impl" "1|1|1" \
-  "$(/usr/bin/grep -c '^| T7 | 4 | build | the directory writer | sfw-impl-b .* | lib/ | .* | landed |$' "$PSEV")|$(/usr/bin/grep -c '^| T7 | implementor (sfw-impl) |' "$PSEV")|$(/usr/bin/grep -c '^- T7:' "$PSEV")"
-SFW_H="$(git -C "$SEV_WT" rev-parse HEAD)"
-pk_rec sfw-a "$SFW_H" flag "findings: 4" \
-  "finding: 1 S3 off lib/c.sh:4 - a path the Files entry lib/ covers" "unsure: 1 which caller" \
-  "finding: 2 S3 off lib/c.sh:5 - a path the first instance wrote" "unsure: 2 which caller" \
-  "finding: 3 S3 off lib/c.sh:6 - a path a roster successor wrote" "unsure: 3 which caller" \
-  "finding: 4 S3 off lib/c.sh:7 - a path a third agent may check" "unsure: 4 which caller"
-poke "$RSEV" proof-add review record/wave-01-fixture/sfw-a.md --question adversarial --reader sfw-crit
-expect_eq "SFW-0b precondition: the reading registers with its four check: lines (exit 0)" "0|4" "$RC|$(/usr/bin/grep -c "^check: record/wave-01-fixture/sfw-a.md#" "$PSEV")"
-sfw_chk() { chk_rec "$1" "$2"; }
-sfw_chk sfw-by-cell sfw-impl-b; sfw_chk sfw-by-ledger sfw-impl; sfw_chk sfw-by-roster sfw-impl-x; sfw_chk sfw-by-third sfw-third
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#1 refuted record/wave-01-fixture/sfw-by-cell.md
-s42_unchanged "SFW-1 A-orch-159 a check written by the agent of a row whose Files is a DIRECTORY holding the finding's file" 1 "$PSEV"
-expect_contains "SFW-1b …is refused as the code's writer, naming the path" "the agent of the ## Tasks row whose Files hold lib/c.sh" "$OUT"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#2 refuted record/wave-01-fixture/sfw-by-ledger.md
-s42_unchanged "SFW-2 A-orch-161 a check written by the FIRST instance of the row (the name in the dispatch ledger's agent cell)" 1 "$PSEV"
-expect_contains "SFW-2b …is refused as the code's writer" "the agent of the ## Tasks row whose Files hold lib/c.sh" "$OUT"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#3 refuted record/wave-01-fixture/sfw-by-roster.md
-s42_unchanged "SFW-3 A-orch-161 a check written by an instance the roster labels row=T7" 1 "$PSEV"
-expect_contains "SFW-3b …is refused as the code's writer" "the agent of the ## Tasks row whose Files hold lib/c.sh" "$OUT"
-poke "$RSEV" finding-check record/wave-01-fixture/sfw-a.md#4 refuted record/wave-01-fixture/sfw-by-third.md
-expect_eq "SFW-4 the same finding-check by a third agent is admitted (the refusals above were the writer's)" "0|1" \
-  "$RC|$(/usr/bin/grep -c '^check: record/wave-01-fixture/sfw-a.md#4 .* refuted by=record/wave-01-fixture/sfw-by-third.md$' "$PSEV")"
-POKE_BOUND="$SFW_BOUND_WAS"
 POKE_BOUND="$SF_BOUND_WAS"
 
 # ============================================================
@@ -2820,8 +2606,8 @@ printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$FD_W" > "$FD
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-other.log
 s42_unchanged "FD-r1 a declared floor's log that read another head" 1 "$PFD"
-expect_contains "FD-r1b …with today's head sentence" \
-  "read head ${FD_OTHER:0:12}, but the working branch is at ${FD_W:0:12}; run it again on ${FD_W:0:12}" "$OUT"
+expect_contains "FD-r1b …naming the head it read and the working head (wave-31 T25: F is no commit here)" \
+  "read head ${FD_OTHER:0:12}, which is no commit here; run the whole suite on the working branch (at ${FD_W:0:12})" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-dirty.log
 s42_unchanged "FD-r2 …that read a dirty tree" 1 "$PFD"
 expect_contains "FD-r2b …with today's dirty sentence" "read a dirty tree (dirty=2); commit, run it again and cite that log" "$OUT"
@@ -2871,7 +2657,7 @@ s42_unchanged "FD-t1 AC-17.2 an attestation lacking the head line" 1 "$PFD"
 expect_contains "FD-t1b …naming the line" "carries no head=<40-hex> dirty=0 line naming the working head" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-other.md
 s42_unchanged "FD-t2 …one naming another head" 1 "$PFD"
-expect_contains "FD-t2b …with today's head sentence" "read head ${FD_OTHER:0:12}, but the working branch is at ${FD_W:0:12}" "$OUT"
+expect_contains "FD-t2b …naming the head it read and the working head (wave-31 T25: F is no commit here)" "read head ${FD_OTHER:0:12}, which is no commit here; run the whole suite on the working branch (at ${FD_W:0:12})" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-noby.md
 s42_unchanged "FD-t3 …one lacking floor-attested-by:" 1 "$PFD"
 expect_contains "FD-t3b …naming the line" "carries no floor-attested-by: <who> <when> <what ran> line" "$OUT"
@@ -2995,30 +2781,23 @@ expect_eq "MR-0d …and the matrix carries no stack-health: line yet (the heads 
 
 poke "$RMR" matrix-render
 expect_eq "MR-1 matrix-render exits 0" "0" "$RC"
-expect_contains "MR-1b …and counts what it did: three new blocks, seven keys added to the one block and the matrix head" \
-  "matrix-render — 3 blocks written, 7 keys added, 0 unchanged" "$OUT"
+expect_contains "MR-1b …and counts what it did: three new blocks, four keys added to the one block and the matrix head" \
+  "matrix-render — 3 blocks written, 4 keys added, 0 unchanged" "$OUT"
 MR_W12='AC-1.2:
   provenance: spec §1 (fixture)
   fails-when: b is wrong
   eval: T0 — docs-pins §B
   task: pending
-  evidence: pending
-  tier-run: pending
-  readback: pending'
-expect_eq "MR-2 a T0 criterion: provenance from its requirement, fails-when and eval from the table, task pending (T1 and T2 both serve REQ-1), then tier-run and readback" \
+  evidence: pending'
+expect_eq "MR-2 a T0 criterion: provenance from its requirement, fails-when and eval from the table, task pending (T1 and T2 both serve REQ-1), then evidence and nothing more" \
   "$MR_W12" "$(mr_block "$PMR" AC-1.2)"
 MR_W21='AC-2.1:
   provenance: live approach
   fails-when: c is wrong
   eval: T3 — walk W1 → narrated
   task: T5
-  evidence: pending
-  tier-run: pending
-  fresh: pending
-  cold-client: pending
-  contact: pending
-  readback: pending'
-expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so the Approach; task T5, the one row serving REQ-2; the five T3 keys" \
+  evidence: pending'
+expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so the Approach; task T5, the one row serving REQ-2; evidence and nothing more" \
   "$MR_W21" "$(mr_block "$PMR" AC-2.1)"
 MR_W22='AC-2.2:
   provenance: user approach
@@ -3033,12 +2812,15 @@ MR_W11='AC-1.1:
   fails-when: the fixture is wrong
   eval: T2 — `--only a.test.sh` (§A)
   task: pending
-  evidence: pending
-  tier-run: pending
-  readback: pending
-  fixture-fidelity: pending'
-expect_eq "MR-3c the existing T2 block keeps its two lines as written (the table's 'a is wrong' does not replace them) and gains the six it lacked, fixture-fidelity among them" \
+  evidence: pending'
+expect_eq "MR-3c the existing T2 block keeps its two lines as written (the table's 'a is wrong' does not replace them) and gains the three it lacked, evidence the last" \
   "$MR_W11" "$(mr_block "$PMR" AC-1.1)"
+# wave-31 T6 (REQ-5 AC-5.1): one pointer per matrix row. The positive first — the grep reads the rendered plan's bytes and
+# finds the four evidence stubs, one per block — then the absence, on the same extractor over the same bytes.
+expect_eq "MR-3d the rendered matrix carries one 'evidence: pending' per block (four blocks, four stubs)" "4" \
+  "$(/usr/bin/grep -c '^  evidence: pending$' "$PMR")"
+expect_eq "MR-3e …and no stub for a key the gate no longer owes (tier-run, readback, fixture-fidelity, fresh, cold-client, contact)" "0" \
+  "$(/usr/bin/grep -c '^  \(tier-run\|readback\|fixture-fidelity\|fresh\|cold-client\|contact\): ' "$PMR" || true)"
 expect_eq "MR-4 the matrix head gains stack-health: and no walk-artifact: line, the fixture being walk: exempt" "stack-health" "$(mr_heads "$PMR")"
 expect_eq "MR-4b …and the stack-health: line reads pending" "1" "$(/usr/bin/grep -cx 'stack-health: pending' "$PMR")"
 s34_gate "$RMR"
@@ -3056,15 +2838,15 @@ expect_contains "MR-6b …writes nothing and says so in the same line" "matrix-r
 expect_true "MR-6c …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PMR"
 
 awk '/^AC-1\.1:/ { b = 1 } /^AC-1\.2:/ { b = 2 } /^AC-2\.1:/ { b = 0 }
-     b == 1 && /^  tier-run: / { print "  tier-run: bash a.test.sh"; next }
-     b == 2 && /^  readback: / { next } { print }' "$TMPROOT/mr-keep" > "$PMR"
+     b == 1 && /^  evidence: / { print "  evidence: record/a.md"; next }
+     b == 2 && /^  evidence: / { next } { print }' "$TMPROOT/mr-keep" > "$PMR"
 s42_snap "$RMR" "$PMR"
 poke "$RMR" matrix-render
 expect_eq "MR-7 a render over a filled value and a dropped key exits 0" "0" "$RC"
 expect_contains "MR-7b …adds the one missing key and leaves the other three blocks as they are" "matrix-render — 0 blocks written, 1 keys added, 3 unchanged" "$OUT"
-expect_eq "MR-7c …the filled tier-run: stands, nothing written over it" "1|0" \
-  "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: bash a.test.sh')|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
-expect_eq "MR-7d …and the dropped readback: is back, as the block's last line" "  readback: pending" "$(mr_block "$PMR" AC-1.2 | tail -1)"
+expect_eq "MR-7c …the filled evidence: stands, nothing written over it" "1|0" \
+  "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  evidence: record/a.md')|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  evidence: pending')"
+expect_eq "MR-7d …and the dropped evidence: is back, as the block's last line" "  evidence: pending" "$(mr_block "$PMR" AC-1.2 | tail -1)"
 expect_eq "MR-7e …one line added, none removed (git diff --numstat)" "1 0;" "$(s42_numstat "$RMR")"
 cp "$TMPROOT/mr-keep" "$PMR"
 
@@ -3077,7 +2859,7 @@ s42_snap "$RMRW" "$PMRW"
 poke "$RMRW" matrix-render
 expect_eq "MR-8 on a walk: required plan the head gains stack-health: and walk-artifact:, both pending" "0|stack-health|walk-artifact|1" \
   "$RC|$(mr_heads "$PMRW")|$(/usr/bin/grep -cx 'walk-artifact: pending' "$PMRW")"
-expect_contains "MR-8b …counted with the keys added" "matrix-render — 3 blocks written, 8 keys added, 0 unchanged" "$OUT"
+expect_contains "MR-8b …counted with the keys added" "matrix-render — 3 blocks written, 5 keys added, 0 unchanged" "$OUT"
 
 # ---------- the refusals: plan byte-identical ----------
 mr_refused() {  # <label> <want rc> <want text> <plan content file> [operands…]
@@ -3096,25 +2878,25 @@ mr_refused "MR-12 an operand is the usage error" 2 "takes no argument" "$TMPROOT
 cp "$TMPROOT/mr-keep" "$PMR"
 
 # ---------- the mutation arm: the key list taken from walls.sh, not typed twice ----------
-# A copy of the library whose keys_for_tier drops fixture-fidelity from T2, behind a copy of the hook that reads it:
-# the same render on the same plan writes AC-1.1 without the key, so MR-3c goes red under it.
-MRM_NEEDLE='T2)    echo "tier-run readback fixture-fidelity evidence" ;;'
+# A copy of the library whose keys_for_tier drops user-confirmed from T4, behind a copy of the hook that reads it:
+# the same render on the same plan writes AC-2.2 without the key, so MR-3b goes red under it.
+MRM_NEEDLE='T4)          echo "user-confirmed evidence" ;;'
 MRM_WALLS="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/walls.sh"
 anchor "$MRM_WALLS" "$MRM_NEEDLE" 1
 MRM_DIR="$TMPROOT/poker-mr-mut"; rm -rf "$MRM_DIR"; mkdir -p "$MRM_DIR/hooks" "$MRM_DIR/scripts"
 cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MRM_DIR/scripts/lib"
 for _mr_f in "$(dirname "$POKER")"/*; do [ "${_mr_f##*/}" = session-poker.sh ] || ln -s "$_mr_f" "$MRM_DIR/hooks/${_mr_f##*/}"; done
 cp "$POKER" "$MRM_DIR/hooks/session-poker.sh"
-MR_N="$MRM_NEEDLE" awk 'BEGIN { n = ENVIRON["MR_N"] } index($0, n) { sub(/ fixture-fidelity/, "") } { print }' "$MRM_WALLS" > "$MRM_DIR/scripts/lib/walls.sh"
+MR_N="$MRM_NEEDLE" awk 'BEGIN { n = ENVIRON["MR_N"] } index($0, n) { sub(/user-confirmed /, "") } { print }' "$MRM_WALLS" > "$MRM_DIR/scripts/lib/walls.sh"
 expect_eq "MR-mut0 the copy of the library differs from it in one line" "1" "$(diff "$MRM_WALLS" "$MRM_DIR/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
-awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^  (eval|task|evidence|tier-run|readback|fixture-fidelity): / { next } m && /^stack-health:/ { next } { print }' \
+awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^  (eval|task|evidence|user-confirmed): / { next } m && /^stack-health:/ { next } { print }' \
   "$TMPROOT/mr-keep" > "$PMR"
 s42_snap "$RMR" "$PMR"
 MRM_POKER="$POKER"; POKER="$MRM_DIR/hooks/session-poker.sh"
 poke "$RMR" matrix-render
 POKER="$MRM_POKER"
-expect_eq "MR-mut1 the mutant runs and renders (exit 0, AC-1.1 gains its tier-run:)" "0|1" "$RC|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
-expect_eq "MR-mut2 …but writes no fixture-fidelity:, where MR-3c found one" "0" "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -c '^  fixture-fidelity: ')"
+expect_eq "MR-mut1 the mutant runs and renders (exit 0, AC-1.1 gains its evidence:)" "0|1" "$RC|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  evidence: pending')"
+expect_eq "MR-mut2 …but writes no user-confirmed:, where MR-3b found one" "0" "$(mr_block "$PMR" AC-2.2 | /usr/bin/grep -c '^  user-confirmed: ' || true)"
 cp "$TMPROOT/mr-keep" "$PMR"
 POKE_BOUND="$MR_BOUND_WAS"
 
@@ -3401,5 +3183,198 @@ poke "$RBD" task-add T7 4 build 'an S2 fix' implementor '—' 30 REQ-1 'd.sh' --
 s42_unchanged "BN-9e with no fix-cap: double renders 10% of 3 rows as 1, so a second review-born row" 1 "$PBD"
 expect_contains "BN-9f …naming 1 of cap 1" "review-born rows: 1 of cap 1" "$OUT"
 POKE_BOUND="$BN_BOUND_WAS"
+
+# ============================================================
+section "§REGRESSION-SET: regression <yes|no> '<reply>' writes the plan's regression: key and, against the scale default, one attributed regression-override: line (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4)"
+# ============================================================
+#
+# fails-when: the verb writes no key, an override against the scale default is unattributed, a
+# value at the default leaves an override behind, a second call doubles the override line, or a
+# bad value, a missing reply or an unbound session changes the plan.
+#
+# THE SCALE DEFAULTS are task no, wave yes, epic no (REQ-12). The fixture is s42_plan's: a wave
+# plan, so `no` is against the default and `yes` is the default. The override's grammar is
+# budget-override:'s, `regression-override: <git user.name> <date> derived=<default> chosen=<v>`
+# (§BUDGET-USER, session-poker-3 65n3), and like it the one line is rewritten, never doubled.
+RRS="$(make_repo rs-set)"; ( cd "$RRS" && git commit -q --allow-empty -m init )
+git -C "$RRS" config user.name "Dana Fixture"
+PRS="$(s42_plan "$RRS" 4)"
+rs_fm() {  # <plan> <key> -> the frontmatter lines of that key, in order
+  awk -v k="$2" 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && index($0, k ":") == 1' "$1"
+}
+expect_eq "RS-0 precondition: the fixture is a wave plan with no regression: key and no override" "1|0|0" \
+  "$(/usr/bin/grep -c '^scale: wave$' "$PRS")|$(rs_fm "$PRS" regression | wc -l | tr -d ' ')|$(rs_fm "$PRS" regression-override | wc -l | tr -d ' ')"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression no 'CI runs it on merge, not this run'
+expect_eq "RS-1 regression no on a wave plan exits 0" "0" "$RC"
+expect_eq "RS-1b …writing regression: no into the frontmatter" "regression: no" "$(rs_fm "$PRS" regression)"
+expect_regex "RS-1c …and, against the wave default yes, one attributed override line" \
+  '^regression-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=yes chosen=no$' "$(rs_fm "$PRS" regression-override)"
+expect_contains "RS-1d …saying what it wrote" "regression — regression: no" "$OUT"
+s34_gate "$RRS"
+expect_eq "RS-1e …and the commit gate admits the plan" "0" "$GATE_RC"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression yes 'run it here after all'
+expect_eq "RS-2 regression yes on the same plan exits 0" "0" "$RC"
+expect_eq "RS-2b …the key reads yes, rewritten in place: one regression: line" "regression: yes" "$(rs_fm "$PRS" regression)"
+expect_eq "RS-2c …and the override is gone: yes is the wave default (the key read above is the positive)" "0" \
+  "$(rs_fm "$PRS" regression-override | wc -l | tr -d ' ')"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression yes 'again'
+expect_eq "RS-2d asked again, the plan already reads so: exit 0" "0" "$RC"
+expect_contains "RS-2e …saying so" "already reads so" "$OUT"
+expect_true "RS-2f …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PRS"
+
+# THE ONE LINE IS REWRITTEN, NEVER DOUBLED: a stale override (another person, another date) beside
+# the key RS-2 left reading the other value; the verb replaces both with the one pair.
+awk '{ print } /^regression: yes$/ { print "regression-override: Old Name 2020-01-01 derived=yes chosen=no" }' \
+  "$PRS" > "$PRS.tmp" && mv "$PRS.tmp" "$PRS"
+expect_eq "RS-3 precondition: the plan carries one key and one stale override" "1|1" \
+  "$(rs_fm "$PRS" regression | wc -l | tr -d ' ')|$(rs_fm "$PRS" regression-override | wc -l | tr -d ' ')"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression no 'CI again'
+expect_eq "RS-3b regression no over a stale override exits 0" "0" "$RC"
+expect_eq "RS-3c …one regression: line, reading no" "regression: no" "$(rs_fm "$PRS" regression)"
+expect_regex "RS-3d …and one override line, the new one: rewritten, not added" \
+  '^regression-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=yes chosen=no$' "$(rs_fm "$PRS" regression-override)"
+expect_eq "RS-3e …so the change is the pair rewritten: two lines out, two in, none added" "2 2;" "$(s42_numstat "$RRS")"
+
+# REFUSALS, budget's: a value outside yes|no (1), no reply (2), no bound plan (1); the plan unchanged.
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression maybe 'not sure'
+s42_unchanged "RS-4 a value outside yes|no" 1 "$PRS"
+expect_contains "RS-4b …naming the two values" "is not yes or no" "$OUT"
+poke "$RRS" regression NO 'shouting'
+s42_unchanged "RS-4c a value in another case" 1 "$PRS"
+poke "$RRS" regression no
+s42_unchanged "RS-4d no reply" 2 "$PRS"
+poke "$RRS" regression no '   '
+s42_unchanged "RS-4e a reply of spaces" 2 "$PRS"
+poke "$RRS" regression no 'two
+lines'
+s42_unchanged "RS-4f a reply with a line break" 1 "$PRS"
+RRS2="$(make_repo rs-unbound)"; ( cd "$RRS2" && git commit -q --allow-empty -m init )
+poke "$RRS2" regression no 'CI runs it'
+expect_eq "RS-4g a session with no bound plan is refused (exit 1)" "1" "$RC"
+expect_contains "RS-4h …saying it has no bound open run" "has no bound open run" "$OUT"
+
+# ============================================================
+section "§WAIT-CEILING: wait on a detached run the gate did not admit prints the shim's one line, then FINISHED rc=75 (wave-31 T12; REQ-9 AC-9.4; D10, A-orch-51)"
+# ============================================================
+#
+# A detached run not admitted inside its bound ends 75 (tests/booked.test.sh §DETACH-CEILING proves the
+# shim writes the log, `<log>.rc` and the roster row's run_rc this reads). `wait` reports it: the log's
+# last `booked: the gate did not admit…` line first, so the caller reads the wait and the command to run
+# again, then the FINISHED line, whose text is the one session-poker-2's 56f and 56j pin. A run that
+# ended any other way prints no such line.
+#
+# FIXTURE FIDELITY. The run record is planted in the shape the shim leaves (log, `.rc`, the row's
+# run_log= and run_rc=, from the production roster writer); the shim is not run here, its half is
+# booked.test.sh's. The log of the control run carries the same words as OUTPUT of a command that ended 3,
+# so a reader that took any line holding the words, and not the run's own, would print it.
+RWC="$(make_repo wait-ceiling)"; new_roster "$RWC"
+WC_RD="$RWC/.bionic/tmp/runs"; mkdir -p "$WC_RD"
+WC_LINE='booked: the gate did not admit this command within 3s; request 7 keeps its turn — run again: bash tests/k.test.sh'
+printf '%s\n' "$WC_LINE" 'rc=75' > "$WC_RD/w-ceil-k.test.sh.log"; printf '75\n' > "$WC_RD/w-ceil-k.test.sh.log.rc"
+printf 'earlier output\n%s\nrc=3\n' "$WC_LINE" > "$WC_RD/w-other-k.test.sh.log"; printf '3\n' > "$WC_RD/w-other-k.test.sh.log.rc"
+roster_row_fixture session="$SID" name=w-ceil agent_id=a-w-ceil subagent_type=implementor \
+  run_log="$WC_RD/w-ceil-k.test.sh.log" run_cmd='bash tests/k.test.sh' run_rc=75 >> "$(roster_of "$RWC")"
+roster_row_fixture session="$SID" name=w-other agent_id=a-w-other subagent_type=implementor \
+  run_log="$WC_RD/w-other-k.test.sh.log" run_cmd='bash tests/k.test.sh' run_rc=3 >> "$(roster_of "$RWC")"
+poke "$RWC" wait w-ceil
+expect_eq "WC-1 wait on a run that ended 75 exits 75" "75" "$RC"
+expect_eq "WC-1b …printing the shim's line, then the FINISHED line, in that order and nothing else" \
+  "poker: $WC_LINE|poker: FINISHED w-ceil run=w-ceil-k.test.sh rc=75 log=$WC_RD/w-ceil-k.test.sh.log" \
+  "$(printf '%s' "$OUT" | tr '\n' '|' | sed 's/|$//')"
+poke "$RWC" wait w-other
+expect_eq "WC-2 a run that ended 3, whose output holds the same words, prints only its FINISHED line (beside WC-1b)" \
+  "3|poker: FINISHED w-other run=w-other-k.test.sh rc=3 log=$WC_RD/w-other-k.test.sh.log" "$RC|$OUT"
+
+# ============================================================
+section "§FINAL-RATING: a reader's rating is final — finding-check is no verb, and current 8 is not refused for a check: line (wave-31 T32; REQ-6 AC-6.3; D6)"
+# ============================================================
+#
+# Wave-31 T32 (D6) deleted the `unsure:` grammar, the SDLC-State `check:` line's writer and readers,
+# `finding-check` and `current 8`'s wait on an open check. The verb is now an unknown verb, the usage
+# error, and a plan carrying an old open `check:` line (one wave-28 wrote, or one planted by hand) is
+# judged on its facts alone. FIXTURE FIDELITY: §SEV's repository, plan and roster; the facts are planted
+# at the working head (§CHECK-GONE's way) and the reading is registered by the real verb.
+# fails-when: the verb parses, or Step 8 refuses on a check.
+FR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+sev_cur 4
+s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-check "$(chk_id k-base)" refuted record/wave-01-fixture/chk.md
+s42_unchanged "FR-1 §FINAL-RATING AC-6.3 session-poker.sh finding-check … is the usage error" 2 "$PSEV"
+expect_contains "FR-1b …naming it an unknown verb" "unknown verb: finding-check" "$OUT"
+poke "$RSEV" finding-move
+expect_contains "FR-1c control: a verb that stays answers its own usage, not unknown verb (the extractor reads the usage line)" \
+  "2|poker: finding-move takes" "$RC|$OUT"
+expect_absent "FR-1d …and that answer does not call it unknown" "unknown verb" "$OUT"
+FR_H="$(git -C "$SEV_WT" rev-parse HEAD)"
+sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-08T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$FR_H")"
+SEV_C1="$FR_H"
+sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
+sev_rec k-final flag "findings: 1" "finding: 1 S3 off - a message the reader rated" "unsure: 1 which shells print it"
+sev_add k-final chk-crit
+expect_eq "FR-2 precondition: a reading beside an unsure: line registers at the working head (exit 0) and writes no check: line" "0|0" \
+  "$RC|$(/usr/bin/grep -c "^check: $(chk_id k-final) " "$PSEV")"
+sev_put "check: $(chk_id k-final) S3 off \"a message the reader rated\""
+expect_eq "FR-2b precondition: the plan holds an open check: line for it (no settled=, no refuted), as wave-28 wrote one" "1|0" \
+  "$(/usr/bin/grep -c "^check: $(chk_id k-final) " "$PSEV")|$(/usr/bin/grep "^check: $(chk_id k-final) " "$PSEV" | /usr/bin/grep -c -E 'settled=|refuted')"
+sev_cur 7
+poke "$RSEV" current 8
+expect_eq "FR-3 §FINAL-RATING AC-6.3 current 8 on a plan with an open check: line is admitted, the facts holding" "0|8" "$RC|$(chk_cur)"
+expect_absent "FR-3b …and its output names no check" "check:" "$OUT"
+sev_cur 4
+POKE_BOUND="$FR_BOUND_WAS"
+
+# ============================================================
+section "§AMEND-BACKTICK: amend --reexec+ takes a run as the brief marks it — one level of backticks comes off at the parse, one entry, no empty one, and a repeat changes nothing (wave-31 T11; REQ-8 AC-8.1; D9)"
+# ============================================================
+#
+# A run is written in a brief between backticks, so `amend n --reexec+ '`cmd`'` is how a reader
+# pastes one. The parse kept the marks, the span wrapped the value in a second pair, and the row
+# got ``cmd`` — an empty entry either side of the run, and a repeat of the same run read as new.
+# The parse now strips one matched pair, so the marked and the bare spelling are one addition.
+# FIXTURE FIDELITY: a live writer row of the dispatch wall's shape (`roster_row_fixture`, as
+# session-poker-3's §AMEND-CAP builds), amended by the real verb.
+# fails-when: "changes nothing" on the first amend, or an empty or `,` entry on the row.
+RAB="$(make_repo sAB-amend-backtick)"; new_roster "$RAB"
+roster_row_fixture status=identified "session=$SID" name=wab "agent_id=aAB-wab-0000000000001" \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" subagent_type=bionic:implementor tool_use_id=toolu_wab \
+  files= suites_allowed=none suites_source=declared 're_executes=`pytest tests/a`' >> "$(roster_of "$RAB")"
+ab_runs() {  # <repo> -> the name wab's last row's re_executes field, as stored
+  s30_field "$(grep -F '|name=wab|' "$(roster_of "$1")" | tail -1)" re_executes
+}
+ab_sum() { cksum < "$(roster_of "$1")"; }
+require_helpers ab_runs ab_sum
+expect_eq "AB-0 precondition: the extractor reads the row's one declared run" '`pytest tests/a`' "$(ab_runs "$RAB")"
+poke "$RAB" amend wab --reexec+ '`npx jest a`' --reason 'the marked spelling'
+expect_eq "AB-1 §AMEND-BACKTICK AC-8.1 a marked --reexec+ value is admitted (exit 0)" "0" "$RC"
+expect_absent "AB-1b …and is not read as changing nothing" "changes nothing" "$OUT"
+expect_eq "AB-2 …the row holds the old run and the one new run, each marked once" '`pytest tests/a` `npx jest a`' "$(ab_runs "$RAB")"
+expect_absent "AB-2b …no empty entry (a doubled mark) is on the row" '``' "$(ab_runs "$RAB")"
+AB_SUM="$(ab_sum "$RAB")"
+poke "$RAB" amend wab --reexec+ '`npx jest a`' --reason 'the same run again'
+expect_eq "AB-3 a repeat of the marked run is refused (exit 1)" "1" "$RC"
+expect_contains "AB-3b …as a change the row already carries" "changes nothing" "$OUT"
+expect_eq "AB-3c …and nothing is written" "$AB_SUM" "$(ab_sum "$RAB")"
+poke "$RAB" amend wab --reexec+ 'npx jest a' --reason 'the bare spelling of the same run'
+expect_eq "AB-4 the bare spelling of the same run is the same addition: refused as no change (exit 1)" "1|$AB_SUM" "$RC|$(ab_sum "$RAB")"
+
+# §AMEND-BY (wave-31 T11; REQ-8 AC-8.3, D9; A-orch-46.2): `--by writer` is the flag the Bash wall
+# stages on a writer's own-row Files amend; the verb takes that one value and records it in the
+# amended= field (no new roster key, A-orch-41.6). Any other value is the usage error.
+ab_amended() { s30_field "$(grep -F '|name=wab|' "$(roster_of "$RAB")" | tail -1)" amended; }
+poke "$RAB" amend wab --files+ hooks/z.sh --reason 'the fix reaches z' --by writer
+expect_eq "AB-5 §AMEND-BY amend … --by writer is admitted (exit 0)" "0" "$RC"
+expect_regex "AB-5b …and the row's amended= reads <iso> widened-by: writer <reason>" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z widened-by: writer the fix reaches z$' "$(ab_amended)"
+poke "$RAB" amend wab --files+ hooks/y.sh --reason 'main widens y'
+expect_regex "AB-6 without --by the amended= field is the reason alone, as before" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z main widens y$' "$(ab_amended)"
+AB_SUM="$(ab_sum "$RAB")"
+poke "$RAB" amend wab --files+ hooks/w.sh --reason r --by someone
+expect_eq "AB-7 --by takes only writer: any other value is the usage error, nothing written" "2|$AB_SUM" "$RC|$(ab_sum "$RAB")"
 
 finish

@@ -584,137 +584,31 @@ wave_plan() {
     "$(frontmatter wave)" "$1" "$1" "$2" "$3"
 }
 
-# A task-scale plan: frontmatter (scale: task) + the given body (a
-# ## Tasks table followed by ## SDLC State).
-task_plan() {
-  printf '%s\n%s\n' "$(frontmatter task)" "$1"
+# THE ONE TABLE, AT EITHER SCALE (wave-31 T24; REQ-1, D2). The task-scale fixtures this file
+# carried were the retired shape: a five- or six-column `## Tasks` (`id | intent | rigor |
+# description | status [| worktree]`) under `current: T<n>`. The gate reads one table now and a
+# `current:` that is a step number, so a task-scale plan is tests/lib/plan-fixture.sh's, the one
+# helper the shards share. That helper writes `rigor: single` and `multi_agent: false`; the arms
+# keyed on the other values (the dispatch ledger at double + multi_agent) take them through this
+# seam, which edits those two frontmatter lines and nothing else (A-T24-7).
+. "$(dirname "$0")/lib/plan-fixture.sh"
+EG_PF_DIR="$(mktemp -d)"; cleanup_dirs+=("$EG_PF_DIR")
+# eg_pf_plan <current> <task|wave> <rigor> <multi_agent> <SDLC-State lines, or ""> [<row>...]
+#   -> the plan text. The lines (a `- T<n>:` evidence line, say) land after `approved-by:`.
+eg_pf_plan() {
+  local cur="$1" sc="$2" rg="$3" ma="$4" extra="$5" p; shift 5
+  p="$(plan_fixture --current "$cur" "$EG_PF_DIR/plans/epic-99-fixture/$sc-01-fixture.plan.md" "$sc" "$@")" || return 1
+  sed -e "s/^rigor: single$/rigor: $rg/" -e "s/^multi_agent: false$/multi_agent: $ma/" "$p" \
+    | EG_PF_X="$extra" awk '{ print } /^approved-by: / && ENVIRON["EG_PF_X"] != "" { print ENVIRON["EG_PF_X"] }'
 }
-
-# A task-scale plan at a caller-chosen frontmatter rigor (frontmatter
-# hardcodes double). $1 rigor, $2 body. Used to pin the log-only ledger-shape
-# path that task 4/3 promotes to BLOCKING only under frontmatter rigor:
-# double — a single plan keeps logging findings.
-task_frontmatter_rigor() {  # $1 rigor
-  printf -- '---\n'
-  printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 14\n'
-  printf -- 'intent: build\n'
-  printf -- 'rigor: %s\n' "$1"
-  printf -- 'scale: task\n'
-  printf -- 'deploy_target: none\n'
-  printf -- 'use_worktree: false\n'
-  printf -- 'has_ui: false\n'
-  printf -- '---\n'
+# One row of the one table, in PLAN_FIXTURE_HEADER's order: <id> <agent> <status> [<worktree>].
+eg_pf_row() {
+  printf '| %s | 4 | build | the %s unit | %s | — | — | 30 | REQ-1 | %s.sh | %s | — | %s |' \
+    "$1" "$1" "$2" "$1" "${4:-—}" "$3"
 }
-
-task_plan_rigor() {  # $1 rigor  $2 body
-  printf '%s\n%s\n' "$(task_frontmatter_rigor "$1")" "$2"
-}
-
-# Valid ledger: T1 done with evidence, T2 active with evidence; current: T2.
-ledger_valid="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix the frontmatter parser | done |
-| T2 | refactor | double | extract the ledger helper | active |
-
-## SDLC State
-
-integration-branch: main
-intent: build
-rigor: double
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: fixed in commit abc123, suite 5/5 green
-- T2: bash extract-helper.sh 4 cases green, commit def456"
-
-ledger_bad_status="${ledger_valid/| T2 | refactor | double | extract the ledger helper | active |/| T2 | refactor | double | extract the ledger helper | doing |}"
-
-ledger_active_no_line="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix the frontmatter parser | done |
-| T2 | refactor | double | extract the ledger helper | active |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: fixed in commit abc123, suite 5/5 green"
-
-v22b_t2_prose="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix the frontmatter parser | done |
-| T2 | bugfix | double | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: fixed in commit abc123, suite 5/5 green
-- T2: implemented and verified manually"
-
-v22b_t2_tested_prose="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix the frontmatter parser | done |
-| T2 | bugfix | single | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: fixed in commit abc123, suite 5/5 green
-- T2: reproduced and fixed the off-by-one"
-
-v22c_bad_enum="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | build | double | do the thing | active |
-| T2 | build | single | second thing | wip |
-
-## SDLC State
-
-scale: task
-current: T1
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: bash suite 12/12 green"
-
-v22ct_done_no_verdicts="## Tasks
-
-| id | intent | rigor | description | status | worktree |
-|---|---|---|---|---|---|
-| T1 | build | double | the finished work, its tree released | done | — |
-| T2 | build | double | the addressed work | active | 18-T2 |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-22T00:00Z "approved"
-
-- T1: bash tests/run.sh 31/31 green
-- T2: bash tests/run.sh 31/31 green"
-
-v22ct_bad_enum="${v22ct_done_no_verdicts/| T1 | build | double | the finished work, its tree released | done | — |/| T1 | build | double | the finished work, its tree released | wip | — |}"
 
 # A WAVE frontmatter carrying an explicit multi_agent field — the D7
-# dispatch-ledger guard fires ONLY on double + multi_agent:true + wave.
+# dispatch-ledger guard fires ONLY on double + multi_agent:true + wave or task.
 # frontmatter sets NO multi_agent, so every prior wave fixture (19a/b/c,
 # 19r, Section 20) is a guaranteed guard no-op. $1 rigor (default double),
 # $2 multi_agent (default true).
@@ -759,48 +653,6 @@ tasks_one_done="## Tasks
 | id | step | kind | task | agent | deps | size | serves | Files | status |
 |---|---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | landed |"
-
-v22d1_body="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | double | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T1
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: fixed it manually"
-
-v22d2_body="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T1
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: reproduced and fixed the boundary case"
-
-v22d2b_body="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T1
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: reproduced and fixed the boundary case, waiver: dana 2026-07-19 genuine bugfix"
 
 s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'

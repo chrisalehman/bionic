@@ -43,6 +43,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
 # THE DETAIL IS ON, FOR THE WHOLE SUITE (task 13, ruling D-1). Since the migration a
@@ -109,6 +110,16 @@ trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
+# THE SHARE IS FIXTURE DATA TOO (wave-31 T34; A-orch-38, the pin tests/session-poker.prelude.sh keeps as
+# SP_CONFIG_DIR). The gate reads the share from ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share and the
+# default is 92 since T10, so a suite that planted none read this machine's file or the default, and §ROOM's
+# widths (written against 80: "the five-minute load over 6.4 cores" is 8 cores x 0.80) and the CG-ledger
+# hold's precondition came out wrong. The fixture's own CLAUDE_CONFIG_DIR above is the pinned dir: it holds
+# the share, and every NENV / env CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" below carries it along. HOME is not
+# pinned to it (the header's two roots stay different); a section that points the variable elsewhere
+# (`no-such-config`) reads the default and asks no width of it.
+mkdir -p "$CLAUDE_CONFIG_DIR/bionic"
+printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
 # THE GATE IS FIXTURE DATA (wave-28 T13; D14). The tick and the stop wall size their fill at the
 # gate, which reads the machine through the readers' pins and its store at BIONIC_GATE_DIR: 8
 # cores, 30% used, a load of 1.0 over the last minute and the last five, and one run on record
@@ -441,11 +452,9 @@ cg_live() {  # <transcript> <name[:status]>...
 #                       to two of three parties proves nothing about them (A9).
 #
 # Deliberately out of the battery, and why:
-#   * `current: T<n>` — the two gates accept a task token unconditionally; the
-#     evidence gate accepts it only on a `scale: task` plan and then exits 0 on a
-#     valid ledger, so its answer to the predicate is unobservable there. Both
-#     behaviours are conservative and deliberate; the asymmetry is pinned as a
-#     KNOWN DIVERGENCE in section A3 rather than mixed into the agreement rows.
+#   * `current: T<n>` — not a step at any scale since wave-31 (one ledger shape, D2):
+#     the one party that reads `current:` refuses it. Section A3 pins that at either
+#     scale, rather than mixing a refused value into the agreement rows.
 #   * The evidence gate's misplaced-plan sweep (`*.plan.md` carrying
 #     canonical_sdlc_version outside the docs root) — a gate-specific rule with
 #     no counterpart in the other two. Fixture plans are therefore named
@@ -1093,24 +1102,32 @@ PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
 PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
 
 # ============================================================
-section "A3 — the one KNOWN divergence, pinned so it cannot drift silently"
+section "A3 — the retired task pointer: the gates the plan does not move, and the one that refuses it (wave-31 T24; REQ-1, D2)"
 # ============================================================
 #
-# `current: T<n>` on a plan that is not `scale: task`: the two gates read the
-# task token as an active wave (conservative — a task run IS a run); the
-# evidence gate rejects the plan as invalid, because a T-token is legal only at
-# task scale (conservative in the other direction — it blocks the commit). Both
-# refuse; neither passes. Nothing here is a defect, and the reason this is
-# pinned rather than left implicit is checklist A10: an unpinned asymmetry
-# between gates is exactly what shipped last time.
+# Until wave-31 this pinned a KNOWN DIVERGENCE: the two gates read `current: T<n>` as an active
+# wave and the evidence gate accepted it only on a `scale: task` plan. Two things have moved since.
+# The two gates are scoped by ENGAGEMENT (task-engaged-session; A1's battery), so no plan, this one
+# included, moves their answer. And the task-scale shape is deleted (one ledger shape): `current:`
+# is a step number at every scale, so the one party that reads it, the evidence gate, refuses
+# `T<n>` naming the value, at either scale, while it reads a numeric `current:` on the same
+# task-scale plan as a step (the control). The run predicate keeps `T<n>` open so the plan's
+# readers refuse it by name; that is CG.3's.
 
 TREPO=$(new_repo "known-divergence")
 write_plan "$TREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: T4"
-expect_eq "T-token, wave scale: the start gate reads an active wave"  "yes" "$(verdict_dp "$TREPO")"
-# T4 (session-20260815-landing-cleanup) used to diverge here (verdict_sg's fixed target
-# "no-such-agent" passed through, non-address-shaped); D8 (T5) re-converged it — the same
-# target is non-bash-task-shaped too, so it is refused like the other four parties now.
-expect_eq "T-token, wave scale: the stop gate reads an active wave"   "yes" "$(verdict_sg "$TREPO")"
+expect_eq "T-token, wave scale: the start gate answers as on any engaged plan" "yes" "$(verdict_dp "$TREPO")"
+expect_eq "T-token, wave scale: the stop gate answers as on any engaged plan"  "yes" "$(verdict_sg "$TREPO")"
+expect_eq "T-token, wave scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TREPO")"
+TTREPO=$(new_repo "task-pointer")
+plan_fixture --current T4 "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
+expect_eq "T-token, task scale: the plan carries scale: task and current: T4" "2" \
+  "$(/usr/bin/grep -cE '^scale: task$|^current: T4$' "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md")"
+expect_eq "T-token, task scale: the start gate answers as on any engaged plan" "yes" "$(verdict_dp "$TTREPO")"
+expect_eq "T-token, task scale: the stop gate answers as on any engaged plan"  "yes" "$(verdict_sg "$TTREPO")"
+expect_eq "T-token, task scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TTREPO")"
+plan_fixture --current 5 "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
+expect_eq "control: the same task plan at current: 5, the evidence gate reads the step" "yes:5" "$(verdict_eg "$TTREPO")"
 
 # ============================================================
 section "B — the session-identity key: producer and BOTH consumers agree"
@@ -1789,7 +1806,8 @@ F_GATE=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
   | env BIONIC_WALL_VERBOSE=1 bash "$PARTY_SG" 2>&1 >/dev/null); F_GST=$?
 expect_contains "the gate reads the same contracted progress path off the same row" \
   ".bionic/tmp/w99.progress" "$F_GATE"
-expect_eq "…and refuses the stop, because that artifact just moved" "2" "$F_GST"
+expect_eq "…and judges the target alive, because that artifact just moved (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$F_GST"
+expect_contains "…saying so on the look" "is ALIVE and its contract is undelivered" "$F_GATE"
 
 # …and a write to THAT path — the one the writer named, the producer resolved and
 # the recorder stored — is what the gate calls stale. A disagreement anywhere in
@@ -1800,7 +1818,8 @@ mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-im
 sleep 1
 printf 'stage 2\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "a write to the roster-contracted progress path stales the look" "2" "$ST"
+expect_eq "a write to the roster-contracted progress path is what the look reads as alive (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…the verdict naming it" "is ALIVE and its contract is undelivered" "$OUT"
 
 # THE SAME CHAIN, WITH THE ROSTER LONG (Step-6 critic F-1). The shipped
 # performance remediation capped the roster at 200 rows and evicted by RECENCY,
@@ -1867,12 +1886,14 @@ mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-im
 sleep 1
 printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "the D-6 staleness wall still refuses past the old cap (critic F-1)" "2" "$ST"
+# THE GUARD RECORDS ITS VERDICT AND DENIES NOTHING (wave-31 T32; D6, AC-6.5): the stop of a working
+# agent is allowed and the look's verdict written on its row as reason=.
+expect_eq "the guard still judges the target past the old cap (critic F-1), and allows the stop (wave-31 T32)" "0" "$ST"
 # THE EXIT CODE ALONE CANNOT TELL A JUDGED STOP FROM AN UNJUDGED ONE (wave-28 T80). Since T70 the
 # guard refuses with exit 2 when it runs past its own deadline, and on this long roster it did:
 # every row here passed on a stop the guard never judged. The reason is what says it judged.
-expect_contains "…on the target's own state: it is still working" \
-  "it is still working, nothing delivered" "$OUT"
+expect_contains "…on the target's own state: it is alive, its contract undelivered" \
+  "is ALIVE and its contract is undelivered" "$OUT"
 expect_absent "…and not because the guard ran out of time on the long roster" \
   "did not finish in" "$OUT"
 
@@ -1889,11 +1910,11 @@ F3_SUB=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
   | bash "$PARTY_SG" 2>&1 >/dev/null); F3_SST=$?
 expect_eq "a subagent's stop and the orchestrator's reach the same verdict" "$F3_OST" "$F3_SST"
 expect_eq "…and it is the same line, word for word" "$F3_ORCH" "$F3_SUB"
-expect_eq "…which is the refusal this target's own state earns" "2" "$F3_OST"
+expect_eq "…which is the allowed stop this target's own state earns, its verdict recorded (wave-31 T32)" "0" "$F3_OST"
 # Two deadline refusals are also the same line, word for word, and exit 2 (T80): the reason
 # is what proves both actors' stops were judged.
 expect_contains "…and its reason is the target's state, for both actors" \
-  "it is still working, nothing delivered" "$F3_ORCH"
+  "is ALIVE and its contract is undelivered" "$F3_ORCH"
 expect_absent "…not the guard's deadline" "did not finish in" "$F3_ORCH"
 
 # The field NAMES themselves, stated as the agreement they are — so a rename
@@ -2010,6 +2031,7 @@ g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
     # that the gate got as far as having an opinion about the AGENT at all.
     *"No observation"*)      echo identified ;;
     *"still working"*)       echo identified ;;
+    *"STOP ALLOWED"*)        echo identified ;;
     *"STOP PERMITTED"*)      echo identified ;;
     # T22, then D8 (T5): with the roster gone the gate has no standing over a bare name at
     # all — the register is what makes a target ours. Through 1.7.1 that was a passthrough
@@ -2732,9 +2754,10 @@ expect_eq "the chain is three rows for one name, in order" "intended confirmed i
 # for naming nothing. Compared generically, so a field added later is covered by this
 # test the day it is added rather than the day someone remembers to list it.
 k_contract_fields() {  # <row> -> the fields that must not change, one per line
+  # The stop guard's verdict (`reason=`, wave-31 T32) rides a copied row and is not a contract field.
   printf '%s' "$1" | tr '|' '\n' \
     | grep -v '^roster-state/' | grep -v '^status=' | grep -v '^agent_id=' \
-    | grep -v '^teammate_id='
+    | grep -v '^teammate_id=' | grep -v '^reason='
 }
 expect_eq "every contract field survives intended → confirmed" \
   "$(k_contract_fields "$K_INTENDED")" "$(k_contract_fields "$K_CONFIRMED")"
@@ -2816,8 +2839,9 @@ printf 'stage 2\n' >> "$KREPO/.bionic/tmp/w16-chain.progress"
 # roster, same gate; the only thing that varies is the one fact that decides.
 mv "$KREPO/.bionic/docs/record/w16-chain.md" "$SANDBOX/k-chain-artifact.md"
 K_SG_OUT=$(mk_stop_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" | bash "$PARTY_SG" 2>&1); K_SG_ST=$?
-expect_eq "the stop gate refuses a stop whose contracted channel moved under the look" \
-  "2" "$K_SG_ST"
+expect_eq "the stop gate judges alive a target whose contracted channel moved under the look (wave-31 T32: allowed, its verdict recorded as reason=)" \
+  "0" "$K_SG_ST"
+expect_contains "…saying so" "is ALIVE and its contract is undelivered" "$K_SG_OUT"
 
 # THE OTHER DIRECTION, one fact apart: the artifact comes back, the verdict says MET, and
 # the identical stop — same stale observation, same moved progress channel — passes with no
@@ -2845,8 +2869,10 @@ K_IDENT2=$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | 
 # the id it joined on, the original dispatch tool_use_id and every contract field — and the
 # row that used to prove it is the duplicate row itself.
 K_DUP=$(grep 'status=duplicate-start|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
+# The stop guard's verdict above appended a copy of the identified row carrying reason= (wave-31
+# T32), which is the guard's journal, not the recorder's: the count is of the recorder's rows.
 expect_eq "a second start does NOT write a second identified row" \
-  "1" "$(grep -c 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
+  "1" "$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | grep -vc '|reason=' | tr -d ' ')"
 expect_eq "…it journals the duplicate start instead" \
   "1" "$(grep -c 'status=duplicate-start|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
 K_IDENT2="$K_DUP"
@@ -3152,8 +3178,8 @@ expect_eq "the manifest: EVERY hook entry carries a timeout key — none unbound
   "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
 # TEN IS THE CEILING FOR EVERY HOOK BUT ONE (wave-14 T35, ledger D1; wave-30 T35). The dispatch
 # wall is registered at 25 because its own inner bound is 20 and an inner bound must sit
-# STRICTLY under its registration or it can never fire (§L.4c below, which pins that pair
-# against lib/bounds.sh). The exception is named here by the hook it belongs to rather
+# STRICTLY under its registration or it can never fire (§L.4c below, which pins its deadline
+# against the registration). The exception is named here by the hook it belongs to rather
 # than counted away, so a SECOND hook drifting off the ceiling fails this row.
 expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10, the dispatch wall excepted" "0" \
   "$(jq '[.hooks | to_entries[] | .value[] | .hooks[]
@@ -3187,97 +3213,35 @@ expect_eq "the manifest renders exactly the two timeout values the fleet has, re
 # and refuses on its own terms. The manifest above registers that same hook at an OUTER
 # timeout. If the inner bound is not STRICTLY under the outer registration it can never
 # fire — the CLI kills the hook first, a killed hook exits 124 rather than the 2 a refusal
-# spells, and the refusal that was in flight silently becomes a PASS. That is the one
-# failure both of bionic's bounded gates exist to prevent.
+# spells, and the refusal that was in flight silently becomes a PASS.
 #
 # AND IT IS INVISIBLE TO EVERY SUITE THAT DRIVES A GATE DIRECTLY. A suite has no CLI
 # timeout, so the two numbers can disagree for a whole release while each side's own
-# section stays green: tests/dispatch-preflight.test.sh drove a 20 s bound to a refusal
-# hundreds of times under a 10 s registration that would have killed it on the machine
-# (A-T6.5, four reviewers). The gap is only visible where the two FILES meet, which is
-# here.
+# section stays green. The gap is only visible where the two FILES meet, which is here.
+# The landing sweep's derivation bound went with the map (wave-31 T23, REQ-4 AC-4.2): the
+# sweep waits on nothing now, so the dispatch wall's deadline is the one inner bound left.
 #
 # BOTH SIDES ARE READ, NEITHER IS TRANSCRIBED. The registration comes out of
 # hooks/hooks.json by the hook's own COMMAND PATH — never by array index, because the
 # order of entries in a JSON array is nobody's contract and an index silently reads a
-# different hook the moment one is inserted above it. The bound comes out of
-# payload/scripts/lib/bounds.sh by SOURCING it, because what a consumer gets is what
-# sourcing gives it. A wave that moves either number without the other turns this red.
-L4C_BOUNDS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
+# different hook the moment one is inserted above it.
 
 # l4c_registration <hook filename> -> the timeout(s) hooks.json registers that command at,
 # one per line, de-duplicated. Matched on the path segment so `stop.sh` cannot match
-# `stop-guard.sh`, and every entry naming the hook is read — the landing sweep is
-# registered twice (Stop straight, SubagentStop behind the guard) and BOTH registrations
-# bound the same inner number, so a wave that moved one of them alone must fail here.
+# `stop-guard.sh`, and every entry naming the hook is read.
 l4c_registration() {
   jq -r --arg h "$1" '[.hooks | to_entries[] | .value[] | .hooks[]
       | select(.command | test("/" + ($h | gsub("\\."; "\\.")) + "( |$)"))
       | .timeout] | unique | .[]' "$HOOKS_JSON_SRC" 2>/dev/null
 }
 
-# l4c_bound <bounds file> <variable> -> the value sourcing that file gives that name.
-l4c_bound() {
-  bash -c '. "$1" 2>/dev/null; eval "printf %s \"\${$2:-}\""' _ "$1" "$2" 2>/dev/null
-}
-
-# l4c_verdict <bounds file> <variable> <registration> -> `under` or `NOT under`.
-# STRICTLY under: a bound EQUAL to the registration is the failure, not the boundary case.
-# The hook needs the difference to spend on everything it does that is not waiting.
-l4c_verdict() {
-  local _v; _v="$(l4c_bound "$1" "$2")"
-  if [ -n "$_v" ] && [ -n "$3" ] && [ "$_v" -lt "$3" ] 2>/dev/null; then
-    printf 'under'
-  else
-    printf 'NOT under'
-  fi
-}
-
-for _l4c_pair in "dispatch-preflight.sh|IMPACT_BOUND_S|the dispatch wall" \
-                 "stop.sh|LG_IMPACT_BOUND_S|the landing sweep"; do
-  _l4c_hook="${_l4c_pair%%|*}"
-  _l4c_rest="${_l4c_pair#*|}"
-  _l4c_var="${_l4c_rest%%|*}"
-  _l4c_who="${_l4c_rest#*|}"
-  _l4c_regs="$(l4c_registration "$_l4c_hook")"
-  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | /usr/bin/grep -c .)"
-  expect_eq "L.4c hooks/hooks.json registers ${_l4c_hook} at ONE timeout value, however many events name it" \
-    "1" "$_l4c_reg"
-  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | head -1)"
-  _l4c_val="$(l4c_bound "$L4C_BOUNDS" "$_l4c_var")"
-  expect_nonempty "L.4c …and lib/bounds.sh answers for ${_l4c_var} (not vacuous: both sides were read)" \
-    "$_l4c_val"
-  expect_eq "L.4c ${_l4c_who}: ${_l4c_var}=${_l4c_val}s sits strictly under ${_l4c_hook}'s ${_l4c_reg}s registration, margin $(( ${_l4c_reg:-0} - ${_l4c_val:-0} ))s" \
-    "under" "$(l4c_verdict "$L4C_BOUNDS" "$_l4c_var" "$_l4c_reg")"
-done
-
-# THE DERIVATION BOUND ALSO SITS UNDER THE WALL'S OWN DEADLINE (wave-30 T35). The dispatch wall
-# carries a whole-hook deadline, DP_DEADLINE_S in hooks/dispatch-preflight.sh, strictly under the
-# same registration; its ALRM trap runs between commands, and the derivation's poll is a run of
-# commands, so a deadline at or under IMPACT_BOUND_S refuses "the wall ran out of time" before the
-# bound can — the bound raised alone (10 -> 20 under a deadline of 12) would buy nothing. Both read.
+# THE DISPATCH WALL'S OWN DEADLINE (wave-30 T35). DP_DEADLINE_S in hooks/dispatch-preflight.sh
+# bounds the whole hook, strictly under its registration; the derivation bound that once sat
+# under it is deleted with the map (wave-31 T2, REQ-4 AC-4.2).
 L4C_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "${BIONIC_HOOKS_DIR}/dispatch-preflight.sh" | head -1)"
-L4C_IMPACT="$(l4c_bound "$L4C_BOUNDS" IMPACT_BOUND_S)"
 expect_nonempty "L.4c the dispatch wall names its own deadline (not vacuous: read from the hook)" "$L4C_DEADLINE"
-expect_eq "L.4c the derivation bound (${L4C_IMPACT:-?}s) sits strictly under the wall's own deadline (${L4C_DEADLINE:-?}s)" \
-  "under" "$([ -n "$L4C_IMPACT" ] && [ -n "$L4C_DEADLINE" ] && [ "$L4C_IMPACT" -lt "$L4C_DEADLINE" ] 2>/dev/null && echo under || echo 'NOT under')"
 expect_eq "L.4c …and the deadline strictly under the registration ($(l4c_registration dispatch-preflight.sh | head -1)s)" \
   "under" "$([ -n "$L4C_DEADLINE" ] && [ "$L4C_DEADLINE" -lt "$(l4c_registration dispatch-preflight.sh | head -1)" ] 2>/dev/null && echo under || echo 'NOT under')"
-
-# NOT VACUOUS: a bounds.sh whose inner numbers sit exactly AT their registrations must be
-# judged `NOT under` by the same derivation the rows above ran. At the registration is the
-# real shape of the defect — a bound of 20 under a registration of 10 is only its loudest
-# form — so that is what the mutant carries.
-anchor -E "$L4C_BOUNDS" '^IMPACT_BOUND_S=[0-9]+$' 1
-anchor -E "$L4C_BOUNDS" '^LG_IMPACT_BOUND_S=[0-9]+$' 1
-DOCTORED_L4C="$SANDBOX/bounds-at-the-registration.sh"
-sed -e "s/^IMPACT_BOUND_S=[0-9]*$/IMPACT_BOUND_S=$(l4c_registration dispatch-preflight.sh | head -1)/" \
-    -e "s/^LG_IMPACT_BOUND_S=[0-9]*$/LG_IMPACT_BOUND_S=$(l4c_registration stop.sh | head -1)/" \
-    "$L4C_BOUNDS" > "$DOCTORED_L4C"
-expect_eq "L.4c …and a bounds.sh carrying the wall's bound AT its registration reads NOT under" \
-  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" IMPACT_BOUND_S "$(l4c_registration dispatch-preflight.sh | head -1)")"
-expect_eq "L.4c …and the same for the sweep's, so both rows above discriminate" \
-  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" LG_IMPACT_BOUND_S "$(l4c_registration stop.sh | head -1)")"
 
 # hooks/agent-context-guard.sh runs the wall behind it only for a payload carrying a
 # top-level agent_id in a session that has a roster on disk. It fronted four entries,
@@ -3450,7 +3414,8 @@ m_vline() {  # -> the verdict machine line all three consumers read for this fix
 expect_contains "before the ack: the one line all three read says acked=no" \
   "|acked=no|" "$(m_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "before the ack: the stop gate refuses" "2" "$ST"
+expect_eq "before the ack: the stop gate judges the row open, the look taken (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "before the ack: …its verdict on the look" "STOP ALLOWED" "$OUT"
 OUT=$(m_sweep "$LG_M"); ST=$?
 expect_eq "before the ack: the landing gate refuses" "2" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
@@ -3471,6 +3436,7 @@ expect_contains "…while the contract itself is still UNMET, computed from the 
 
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "after the ack: the stop gate passes" "0" "$ST"
+expect_absent "after the ack: …discharged before any look, so no verdict is written" "STOP ALLOWED" "$OUT"
 OUT=$(m_sweep "$LG_M"); ST=$?
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
 expect_contains "after the ack: the stand-down puts it in the batch" "1 row(s) have landed" "$OUT"
@@ -3499,7 +3465,8 @@ awk '{ if (index($0, "row_acked \"$_pname\"") > 0) $0 = "    _acked=no"
 expect_contains "the mutated owner reports the acked row as unacked" "|acked=no|" \
   "$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/session-sweeper.sh" verdict finished 2>/dev/null )"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$MMUT/stop-guard.sh" 2>&1); ST=$?
-expect_eq "…and the stop gate refuses the stop it passed a moment ago" "2" "$ST"
+expect_eq "…and the stop gate takes the look again on the stop it passed a moment ago (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…its verdict back on the look" "STOP ALLOWED" "$OUT"
 OUT=$(m_sweep "$MMUT/stop.sh"); ST=$?
 expect_eq "…and the landing gate refuses it too" "2" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/stop-orders.sh" standdown 2>&1 )
@@ -3539,7 +3506,9 @@ expect_eq "an order inside the shared window discharges the stop" "0" "$ST"
 IFS='|' read -r EX_REPO EX_TR <<< "$(mk_order_world "order-expiry" "expired" "aexpired-2222222222222222")"
 ( cd "$EX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order expired --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
 OUT=$(mk_stop_payload "$SID_A" "$EX_TR" "$EX_REPO" "expired" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "an order just outside it does not — the ceremony is where it was" "2" "$ST"
+expect_eq "an order just outside it does not — the look decides, as it did (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…the look's verdict" "STOP ALLOWED" "$OUT"
+expect_absent "…never the order's line" "STOP ORDERED" "$OUT"
 
 # --- M.4b the order's AUTHOR crosses the same seam (AC-1.1; T1, D1) ---
 #
@@ -3562,7 +3531,9 @@ expect_contains "…and the gate reports the author it read, not one it assumed"
 IFS='|' read -r PX_REPO PX_TR <<< "$(mk_order_world "order-patrol-expiry" "patrol-expired" "apatrolx-4444444444444444")"
 ( cd "$PX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order patrol-expired --by patrol --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
 OUT=$(mk_stop_payload "$SID_A" "$PX_TR" "$PX_REPO" "patrol-expired" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "…and an expired one does not, whoever wrote it" "2" "$ST"
+expect_eq "…and an expired one does not, whoever wrote it (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "…the look's verdict, not the order's" "STOP ALLOWED" "$OUT"
+expect_absent "…never the order's line" "STOP ORDERED" "$OUT"
 
 # --- M.6 the ack's AUTHOR crosses it too (AC-1.3; T1, D2) ---
 #
@@ -3595,7 +3566,8 @@ a_vline() {
 expect_contains "before the patrol ack: the one line all three read says acked=no" \
   "|acked=no|" "$(a_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
-expect_eq "before the patrol ack: the stop gate refuses" "2" "$ST"
+expect_eq "before the patrol ack: the stop gate judges the row open, the look taken (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
+expect_contains "before the patrol ack: …its verdict on the look" "STOP ALLOWED" "$OUT"
 
 ( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" ack moot --by patrol --reason moot-and-gone ) >/dev/null 2>&1
 expect_contains "the one owner wrote the author and the evidence onto its own line" \
@@ -3607,6 +3579,7 @@ expect_contains "…while the contract itself is still UNMET, computed from the 
   "|state=UNMET|" "$(a_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "after the patrol ack: the stop gate passes, as it does for a human's" "0" "$ST"
+expect_absent "after the patrol ack: …discharged before any look" "STOP ALLOWED" "$OUT"
 OUT=$( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
 expect_contains "…and the stand-down puts it in the batch, as it does for a human's" \
   "1 row(s) have landed" "$OUT"
@@ -5154,25 +5127,19 @@ expect_eq "…and still calls it — the one call site is unchanged" "1" \
   "$(/usr/bin/grep -cE '(^|[^a-z_])live_ids_of_name \"' "$ROOTS_TREE/hooks/stop-guard.sh")"
 
 # ============================================================
-section "V — SUPPORTED_SDLC_VERSION: one owner, four carriers, five renderings (AC-19)"
+section "V — SUPPORTED_SDLC_VERSION: one owner, every code and SVG carrier agrees (AC-19)"
 # ============================================================
 #
-# r3 §1E item 13: one logical constant, five renderings, and the two hooks were not held
+# r3 §1E item 13: one logical constant, several renderings, and the two hooks were not held
 # in agreement by anything until this section — the only prior test hit was a single
-# spot-check literal in tests/canonical-sdlc-evidence-gate.test.sh, and operational-rules.md
-# itself says the pin-sync rows lived in tests/scripts.test.sh, retired at epic-18 W3
-# (8582861). `.claude/rules/hook-authoring.md` said both hooks pinned 12 well after they
-# moved to 14 — a stale literal in a FILE ABOUT the pin, the same failure mode this section
-# exists to catch in the pin's own carriers.
+# spot-check literal in tests/canonical-sdlc-evidence-gate.test.sh.
 #
-# THE OWNER is canonical-sdlc-evidence-gate.sh (spec AC-19, provenance table): it is the
-# file operational-rules.md's close-out contract cites by name ("Both hooks check
-# `SUPPORTED_SDLC_VERSION=14`") and the one whose refusal message names the fix. Four
-# carriers restate it: the governing-skill hook's own copy, the value operational-rules.md
-# documents in prose, and two SVG renderings — lifecycle.svg's title and hook-chain.svg's
-# three `class="version-pin"` chips (§1E's SVG count is 2; hook-chain.svg alone carries
-# three of the five total renderings the census counts as "both SVGs"). A per-file suite
-# cannot see this drift: each carrier reads fine on its own while all five disagree.
+# THE OWNER is canonical-sdlc-evidence-gate.sh (spec AC-19, provenance table): the one whose
+# refusal message names the fix. The carriers restate it: the governing-skill hook's own copy
+# and two SVG renderings — lifecycle.svg's title and hook-chain.svg's three
+# `class="version-pin"` chips. A per-file suite cannot see this drift: each carrier reads fine
+# on its own while they disagree. (Wave-31: the value operational-rules.md documented in
+# prose is no carrier here; a test proves what a program does, never what a document says.)
 
 # THE ORIGIN IS THE LIBRARY THE GATE'S BODY LIVES IN (T23): `SUPPORTED_SDLC_VERSION`
 # is inside `_eg_body` in payload/scripts/lib/walls.sh, at column zero, and the hook beside
@@ -5180,19 +5147,11 @@ section "V — SUPPORTED_SDLC_VERSION: one owner, four carriers, five renderings
 V_ORIGIN="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
 [ -r "$V_ORIGIN" ] || V_ORIGIN="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
 V_GSKILL="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
-V_RULES="$BIONIC_SKILLS_DIR/canonical-sdlc/operational-rules.md"
 V_LIFECYCLE="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/lifecycle.svg"
 V_HOOKCHAIN="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/hook-chain.svg"
 
 # extractors — each pulls the bare integer out of its file's own rendering shape.
 v_hook_val() { grep -m1 '^SUPPORTED_SDLC_VERSION=' "$1" 2>/dev/null | cut -d= -f2 | tr -cd '0-9'; }
-v_rules_val() {  # operational-rules.md lists versions newest-first and says so at :17
-                 # ("Every version bullet below v14 in this file is historical record
-                 # only") — the FIRST `SUPPORTED_SDLC_VERSION=` hit is the live value, the
-                 # rest are superseded history. Same first-match convention §N.1's loader
-                 # block extraction and the evidence-gate's own frontmatter reads use.
-  grep -m1 -o 'SUPPORTED_SDLC_VERSION=[0-9]\+' "$1" 2>/dev/null | cut -d= -f2
-}
 v_lifecycle_val() {  # <text class="version-pin" data-pin="lifecycle-title" ...>...(v14)</text>
   grep -m1 'data-pin="lifecycle-title"' "$1" 2>/dev/null | grep -oE '\(v[0-9]+\)' | tr -cd '0-9'
 }
@@ -5210,9 +5169,6 @@ expect_eq "the origin (evidence gate) declares a non-vacuous SUPPORTED_SDLC_VERS
 
 expect_eq "the governing-skill hook's SUPPORTED_SDLC_VERSION agrees with the gate's" \
   "$V_ORIGIN_VAL" "$(v_hook_val "$V_GSKILL")"
-
-expect_eq "operational-rules.md's live SUPPORTED_SDLC_VERSION value agrees with the gate's" \
-  "$V_ORIGIN_VAL" "$(v_rules_val "$V_RULES")"
 
 expect_eq "lifecycle.svg's title renders the same version" \
   "$V_ORIGIN_VAL" "$(v_lifecycle_val "$V_LIFECYCLE")"
@@ -5639,7 +5595,8 @@ expect_contains "…and reads the working log filed under that session" \
 # paired negative first: resolution succeeding is not the ceremony being skipped.
 R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_AD_ADDR" \
               | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
-expect_eq "before any discharge the stop gate still refuses" "2" "$R_AD_ST"
+expect_eq "before any discharge the stop gate still takes its look (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$R_AD_ST"
+expect_contains "…and says what it saw" "STOP ALLOWED" "$R_AD_ST_OUT"
 expect_absent "…and never with the unresolved refusal the field hit" \
   "no agent in THIS session's metadata" "$R_AD_ST_OUT"
 
@@ -5648,6 +5605,7 @@ R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_
               | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
 expect_eq "the stop gate accepts the address adopt printed, discharged by the ack" \
   "0" "$R_AD_ST"
+expect_absent "…before any look" "STOP ALLOWED" "$R_AD_ST_OUT"
 
 # THE CONSTRUCTION ITSELF, at all three sites: eight characters of a session id, cut the
 # same way. A site that starts spelling it differently — a full uuid, a different width —
@@ -7348,10 +7306,10 @@ expect_absent "…and does not report it as absent from the live set" "not live"
 # set is one it has standing to guard, so it BLOCKS the stop and names the observation to
 # take; a target it does not find is not this gate's business and PASSES THROUGH. Those two
 # words ARE the resolution, and they are what moves when the parser does.
-expect_contains "the stop guard has standing over the same target: it blocks the stop" \
-  "bionic: " "$LA_G0"
-expect_contains "…naming that very target in the observation it asks for" \
-  "stop-check.sh la-target" "$LA_G0"
+expect_contains "the stop guard has standing over the same target: it takes its look and allows the stop, its verdict recorded (wave-31 T32)" \
+  "STOP ALLOWED — 'la-target' (" "$LA_G0"
+expect_contains "…naming the working log its look read" \
+  "working log:" "$LA_G0"
 expect_absent "…rather than passing it through as no agent of this session" \
   "PASSTHROUGH" "$LA_G0"
 # THE LIVE READING IS A SENTENCE IN THE REFUSAL, and it is the half that moves. Standing is
@@ -7427,8 +7385,8 @@ la_norm_m() {
 }
 expect_eq "mutated parser: the stop guard's whole channel is unchanged — it reads no parser" \
   "$(la_norm_m "$LA_G0")" "$(la_norm_m "$LA_G1")"
-expect_contains "…and that channel is a real refusal, not an empty string (not vacuous)" \
-  "bionic: " "$LA_G1"
+expect_contains "…and that channel is a real verdict, not an empty string (not vacuous)" \
+  "STOP ALLOWED" "$LA_G1"
 
 # --- LA.4 restored: the shipped tree answers as it did before the mutation ------
 # The observation prints an AGE, which moves by a second between two runs of the same
@@ -7464,7 +7422,7 @@ LA_G5=$(la_guard la-target)
 expect_absent "idle open seat: the dispatch wall stops counting it" "open=1" "$LA_B5"
 expect_absent "…and prints no writers refusal at all" "writers:" "$LA_B5"
 expect_contains "…while the SAME answer still gives the stop guard standing over its target" \
-  "bionic: " "$LA_G5"
+  "STOP ALLOWED" "$LA_G5"
 expect_absent "…which it does not call absent from the recorded answer" "is not live" "$LA_G5"
 
 # MUTATION A — the parser writes `running` into every row. The status the BUDGET reads is
@@ -7502,10 +7460,10 @@ la_norm() {
 }
 expect_eq "…while the guard's whole channel is otherwise unchanged — presence never moved" \
   "$(la_norm "$LA_G5")" "$(la_norm "$LA_G5A")"
-expect_contains "…and the normaliser really did rewrite that path (not comparing raw text)" \
-  "TREE/stop-check.sh" "$(la_norm "$LA_G5")"
-expect_contains "…and that channel is a real refusal, not an empty string (not vacuous)" \
-  "bionic: " "$LA_G5A"
+expect_contains "…and the normaliser really did fold the age (not comparing raw text)" \
+  "last write: AGE" "$(la_norm "$LA_G5")"
+expect_contains "…and that channel is a real verdict, not an empty string (not vacuous)" \
+  "STOP ALLOWED" "$LA_G5A"
 
 # MUTATION B — the parser drops every row that is not `running`. This is the WRONG place to
 # put S16's rule: filtering in the reader rather than in the budget. Now the GUARD moves and
@@ -7549,7 +7507,7 @@ LA_TREE="$BIONIC_HOOKS_DIR/.."
 # cannot reach it — which is the same finding stated as an immunity rather than a loss.
 expect_absent "mutation B: the guard does not lose the finished agent it exists to stop" \
   "names no teammate 'la-target'" "$LA_G5B"
-expect_contains "…it still has standing and still refuses on the evidence" "bionic: " "$LA_G5B"
+expect_contains "…it still has standing and still judges on the evidence" "STOP ALLOWED" "$LA_G5B"
 expect_absent "…a sentence the shipped parser never said of the same target" \
   "names no teammate" "$LA_G5"
 expect_absent "mutation B: the wall's count is unchanged — it read idle as closed already" \
@@ -9458,20 +9416,18 @@ expect_eq "CG.2 no current: line at all — sched_plan_current withholds" \
 expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)" \
   "1" "$(cg_run_open "$CG_NOLINE")"
 
-# ── CG.3 the DOCUMENTED divergence: task-scale current: T<n> — pinned, not silent ──
-# run_state's OTHER `current:` shape: `T<n>` is always an open run (no numbered close — the
-# session/task-scale plans this repo also carries, including the plan governing this very
-# task). It has no numbered step to compare against 4, so the FILL gate cannot read "T1" as
-# either approved or pending and withholds by design (T6 brief; review-a C-5; review-b N-2).
-# This is pinned as a DIVERGENCE, not an agreement: the two readers answer a DIFFERENT
-# question about the same value ON PURPOSE. A change that made them agree — teaching
-# run_open to reject T<n>, or teaching the gate to treat any T<n> as approved — is exactly
-# the kind of silent drift this section exists to catch, so it must turn this red.
+# ── CG.3 the retired task-scale `current: T<n>`: the divergence that routes it to its refusal ──
+# run_open calls `T<n>` an open run while the FILL gate withholds on it. Since wave-31 (one ledger
+# shape, D2; A-orch-52) `T<n>` is no step at any scale, and the pair answer two questions on
+# purpose: run_open keeps the retired plan OPEN so launch-sync, the stop wall and the tick reach it
+# and refuse it by name (AC-1.2's `NOT-RECORDED … is not numeric`), and the FILL gate, which has no
+# number to compare, fills nothing. A change that closed it would skip such a plan in silence, so
+# it must turn this red.
 for CG_T in T1 T5 T23; do
   CG_PLAN="$(cg_plan "$CG_T")"
-  expect_eq "CG.3 sched_plan_current withholds on task-scale '$CG_T' (no numbered step)" \
+  expect_eq "CG.3 sched_plan_current withholds on the retired task pointer '$CG_T' (no numbered step)" \
     "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.3 …while run.sh's run_open still calls a task-scale plan an OPEN run" \
+  expect_eq "CG.3 …while run.sh's run_open keeps '$CG_T' an OPEN run, so its readers refuse it by name" \
     "0" "$(cg_run_open "$CG_PLAN")"
 done
 
@@ -9580,23 +9536,21 @@ expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_mar
   "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
 
 # ============================================================
-section "S13 — the suite budget: one derivation, one row writer, one alphabet"
+section "S13 — the suite budget: the brief's own set, one row writer, one alphabet"
 # ============================================================
 #
-# (wave-01 verification-cannot-lie, S13; spec AC-20/AC-21; design ledger D2.)
+# (wave-01 verification-cannot-lie, S13; spec AC-20/AC-21; design ledger D2. The derivation
+# side is gone: wave-31 T2, REQ-4 AC-4.2 deleted the file-to-suite map, and the budget is the
+# set the brief names.)
 #
-# THREE FILES HAVE TO AGREE ABOUT ONE SET, and none of them can see the other two:
+# TWO FILES HAVE TO AGREE ABOUT ONE SET, and neither can see the other:
 #
-#   tests/lib/impact.sh                 PRODUCES it, as `suite<TAB>reason` lines (S12)
-#   hooks/dispatch-preflight.sh         RECORDS it, as `suites_allowed=` on the roster row
-#   hooks/background-suite-guard.sh     ENFORCES it, against basenames read out of a command
+#   payload/scripts/lib/brief.sh        RECORDS it, the brief's `Suites:` tokens as basenames
+#   payload/scripts/lib/walls.sh        ENFORCES it, against basenames read out of a command
 #
-# Each has its own suite, and each of those suites builds its own fixture — so all three
-# can pass while the wall records a spelling the derivation never prints and the guard
-# never matches. What is pinned here is the SEAM: the real derivation, driven over a real
-# file, answering in the alphabet the guard compares in.
+# What is pinned here is the SEAM: the grammar's own lift, driven over a `Suites:` line in
+# every spelling a brief uses, answering in the alphabet the guard compares in.
 
-S13_IMPACT="$REPO_ROOT/tests/lib/impact.sh"
 S13_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 # THE BUDGET ARM'S READER IS IN THE LIBRARY NOW (T23) — `wall_background_suite_guard` in
 # payload/scripts/lib/walls.sh, at column zero like the rest of the carried bodies, so the
@@ -9607,80 +9561,41 @@ S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
 [ -r "$S13_ROSTER_LIB" ] || S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
 S13_CMDCLASS="$BIONIC_HOOKS_DIR/../payload/scripts/lib/cmd-class.sh"
 [ -r "$S13_CMDCLASS" ] || S13_CMDCLASS="$BIONIC_HOOKS_DIR/../scripts/lib/cmd-class.sh"
-
-# --- §S13.1 the derivation's output shape is the one the wall consumes ---
-#
-# Driven over a REAL file of this tree, so the answer is the derivation's own rather than a
-# fixture's idea of it. `payload/scripts/lib/cmd-class.sh` is chosen because its own suite
-# is on the answer by construction (`self`/`path-ref`), which gives the assertion below a
-# value it can name without hardcoding the whole set.
-S13_RAW=$(cd "$REPO_ROOT" && bash "$S13_IMPACT" payload/scripts/lib/cmd-class.sh 2>/dev/null)
-expect_eq "S13.1 the derivation answers at all (non-vacuity)" "0" \
-  "$([ -n "$S13_RAW" ] && echo 0 || echo 1)"
-expect_eq "S13.1 every line is exactly two TAB-separated fields" "0" \
-  "$(printf '%s\n' "$S13_RAW" | awk -F'\t' 'NF != 2 { n++ } END { print n + 0 }')"
-expect_eq "S13.1 the first field is a suite BASENAME, never a path" "0" \
-  "$(printf '%s\n' "$S13_RAW" | awk -F'\t' '$1 ~ /\// || $1 !~ /\.test\.sh$/ { n++ } END { print n + 0 }')"
-expect_contains "S13.1 …and the suite that owns that file is in the answer" \
-  "cmd-class.test.sh" "$(printf '%s\n' "$S13_RAW" | cut -f1 | tr '\n' ' ')"
-
-# --- §S13.2 the wall's OWN reduction, lifted out of the hook and run here ---
-#
-# WHAT THIS USED TO BE, and why it changed (review-b B-6's sibling, B-3). The section was
-# titled as an agreement and asserted nothing about the wall: it re-typed the reduction, ran
-# it, and checked its own output for a colon, a tab and a duplicate. A self-check on this
-# test's own pipeline reads as the agreement pin for the derived set, so a future reader
-# weakening the real coverage would believe this still held the line.
-#
-# It is an agreement now. The two lines that build `suites_allowed=` are lifted OUT of
-# payload/scripts/lib/brief.sh by text and run here over the same raw output, so a
-# change to the hook's spelling — a third column kept, a different sort, the trailing-space
-# trim dropped — is red HERE. The end-to-end coverage (a real dispatch, a real row) is
-# tests/dispatch-preflight.test.sh S27a and its mutation arm S27a2; this section is the
-# alphabet check that sits under it.
-# THE REDUCTION LIVES IN THE CONTRACT GRAMMAR NOW (wave-20 T6; REQ-4, Δ10): the dispatch wall,
-# `amend` and `task-add` all record the set `brief_validate_fields` builds, so that is the
-# spelling this pin reads. The variable keeps its name; it names the file that holds the rule.
+# THE CONTRACT GRAMMAR (wave-20 T6; REQ-4, Δ10): the dispatch wall, `amend` and `task-add` all
+# record the set `brief_validate_fields` builds, so that is the file this pin drives.
 S13_HOOK="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
 [ -r "$S13_HOOK" ] || S13_HOOK="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
 expect_eq "S13.2 the library this section reads is present" "yes" \
   "$([ -r "$S13_HOOK" ] && echo yes || echo no)"
-# THE PRECONDITION OF THE LIFT (AC-29): the two lines are still there, exactly once each.
-anchor -E "$S13_HOOK" '^[[:space:]]*BRIEF_SUITES_ALLOWED=\$\(printf' 1
-anchor -E "$S13_HOOK" '^[[:space:]]*BRIEF_SUITES_ALLOWED="\$\{BRIEF_SUITES_ALLOWED% \}"' 1
-S13_REDUCTION=$(awk '/^[[:space:]]*BRIEF_SUITES_ALLOWED=\$\(printf/,/^[[:space:]]*BRIEF_SUITES_ALLOWED="\$\{BRIEF_SUITES_ALLOWED% \}"/' "$S13_HOOK")
-expect_eq "S13.2 the lift took exactly the two assignment lines" "2" \
-  "$(printf '%s\n' "$S13_REDUCTION" | grep -c 'SUITES_ALLOWED=')"
-expect_eq "S13.2 …and nothing else came with them" "0" \
-  "$(printf '%s\n' "$S13_REDUCTION" | grep -vc 'SUITES_ALLOWED=')"
 
-# The hook's own reduction, over the derivation's own output.
-S13_HOOK_SET=$(_impact_out="$S13_RAW"; eval "$S13_REDUCTION"; printf '%s' "$BRIEF_SUITES_ALLOWED")
-# This test's reading of the same rule, spelled independently.
-S13_SET=$(printf '%s\n' "$S13_RAW" | cut -f1 | sort -u | tr '\n' ' ')
-S13_SET="${S13_SET% }"
-
-expect_nonempty "S13.2 the hook's reduction answered something (non-vacuity)" "$S13_HOOK_SET"
-expect_eq "S13.2 the wall's own reduction and this test's agree, to the byte" \
-  "$S13_SET" "$S13_HOOK_SET"
-# THE MUTATION: doctor the raw output the way a derivation that grew a column would, and the
-# two sides must part. Without this the row above could be two spellings of `true`.
-S13_RAW_MUT="$(printf '%s\n' "$S13_RAW" | sed 's/^/x-/')"
-S13_HOOK_SET_MUT=$(_impact_out="$S13_RAW_MUT"; eval "$S13_REDUCTION"; printf '%s' "$BRIEF_SUITES_ALLOWED")
-expect_ne "S13.2 …and the comparison discriminates on a doctored raw output" \
-  "$S13_SET" "$S13_HOOK_SET_MUT"
-
-expect_eq "S13.2 the reduced set carries no reason column" "0" \
-  "$(printf '%s' "$S13_HOOK_SET" | grep -c ':')"
-expect_eq "S13.2 …and no tab survived the reduction" "0" \
-  "$(printf '%s' "$S13_HOOK_SET" | tr -cd '\t' | wc -c | tr -d ' ')"
-expect_eq "S13.2 …and holds no duplicate" "0" \
-  "$(printf '%s\n' "$S13_HOOK_SET" | tr ' ' '\n' | sort | uniq -d | grep -c .)"
+# --- §S13.2 the set the row records is the brief's own tokens, as basenames ---
+#
+# Driven through the grammar the dispatch wall calls, over one `Suites:` line carrying the
+# three spellings a brief uses for a suite (path-relative, `./`-prefixed, absolute). The set
+# `brief_validate_fields` hands the row writer is the lift's, once each, as basenames.
+s13_set() {  # <Suites: span> -> "<BRIEF_SUITES_ALLOWED>|<BRIEF_SUITES_SOURCE>"
+  bash -c '
+    . "$1" || exit 9
+    sink() { :; }
+    brief_validate_fields "$(lift_contract_fields "Suites: $2" implementor)" implementor "$3" sink >/dev/null 2>&1
+    printf "%s|%s" "${BRIEF_SUITES_ALLOWED-}" "${BRIEF_SUITES_SOURCE-}"
+  ' _ "$S13_HOOK" "$1" "$SANDBOX" 2>/dev/null
+}
+S13_GOT="$(s13_set "tests/cmd-class.test.sh, ./tests/walls.test.sh, $REPO_ROOT/tests/brief-x.test.sh, tests/cmd-class.test.sh")"
+expect_eq "S13.2 the recorded set is the brief's tokens as basenames, once each, declared" \
+  "cmd-class.test.sh walls.test.sh brief-x.test.sh|declared" "$S13_GOT"
+S13_SET="${S13_GOT%%|*}"
+expect_eq "S13.2 …carrying no path, no tab and no duplicate" "0" \
+  "$(printf '%s\n' "$S13_SET" | tr ' ' '\n' | awk '/\// || /\t/ { n++ } END { print n + 0 }')"
+# THE MUTATION: a different Suites: line lands a different set, so the row above is the brief's
+# answer and not a constant.
+expect_eq "S13.2 …and a different Suites: line records a different set" \
+  "gamma.test.sh|declared" "$(s13_set "tests/gamma.test.sh")"
 
 # --- §S13.3 the guard compares in that same alphabet ---
 #
-# `cmd_suite_targets` is the reader on the enforcement side. Every basename the derivation
-# just produced must be a name it can produce too, from the command a writer would type —
+# `cmd_suite_targets` is the reader on the enforcement side. Every basename the grammar
+# just recorded must be a name it can produce too, from the command a writer would type —
 # otherwise a suite on the budget is refused by the wall that granted it.
 S13_TARGETS_OK=0
 for _s13_b in $S13_SET; do
@@ -9691,7 +9606,7 @@ for _s13_b in $S13_SET; do
   ' _ "$S13_CMDCLASS" "$_s13_b" 2>/dev/null)
   [ "$_s13_got" = "$_s13_b" ] || S13_TARGETS_OK=$((S13_TARGETS_OK + 1))
 done
-expect_eq "S13.3 every derived basename round-trips through cmd_suite_targets" "0" "$S13_TARGETS_OK"
+expect_eq "S13.3 every recorded basename round-trips through cmd_suite_targets" "0" "$S13_TARGETS_OK"
 # NON-VACUITY: the loop really ran over a non-empty set.
 expect_eq "S13.3 …over a set with something in it" "0" \
   "$([ -n "$S13_SET" ] && echo 0 || echo 1)"
@@ -9789,16 +9704,12 @@ expect_eq "S13.5 the guard reads the key the wall writes" "0" \
 # ============================================================
 # --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
 #
-# THE OWNERSHIP-TABLE ROW THIS TASK ADDS. "Impact of a change" (the spec's ## Design
-# ownership table) already has one owner — `tests/lib/impact.sh` — rendered at three
-# surfaces: `suites_allowed=` on the roster row, the brief's `Files:`, and now the landing
-# verdict. This section pins that third rendering the way §S13.4/§S13.5 pin the first two:
 # ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
-# row -> worktree mapping (never re-derived), and ONE re-ask of the SAME `impact-command`
-# key S13's dispatch wall already reads — never a second config key or a second derivation.
-# The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff, the
-# shared mapping and the impact-command read all moved into payload/scripts/lib/stop.sh
-# with the rest of the sweep. One owner still, at a new address.
+# row -> worktree mapping (never re-derived). Neither side reads an `impact-command` key any
+# more (wave-31 T2 the dispatch side, T23 the landing side; REQ-4 AC-4.2): S18.3 pins both.
+# The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff and the
+# shared mapping moved into payload/scripts/lib/stop.sh with the rest of the sweep. One owner
+# still, at a new address.
 S18_LG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 
@@ -9899,33 +9810,22 @@ expect_nonempty "S18.2 hooks/stop.sh declares a BIONIC_LIB_WANT line at all" "$S
 expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
   "$(printf '%s' " $S18_WANT " | /usr/bin/grep -c ' worktree\.sh ')"
 
-# --- §S18.3 the reconciliation re-asks the SAME impact-command key S13's dispatch wall
-# reads — never a second config key, never a second derivation command ---
-# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The root variable is `BIONIC_ROOT` in
-# both hooks now, and a byte-exact literal naming the OLD one is a pin that breaks on a
-# rename while saying nothing about the property. The property is that the two hooks ask
-# ONE key through ONE call shape, so each hook's own call line is derived and the two are
-# compared to each other — which is a stronger statement than either literal was, and one
-# no rename can falsify.
-#
-# THE DISPATCH SIDE'S CALL IS IN THE CONTRACT GRAMMAR NOW (wave-20 T6; REQ-4, Δ10), where it is
-# asked of the root the door passes in rather than of the hook's `BIONIC_ROOT`. The root is
-# which tree, not which key, so both lines are compared with the root argument read as `<root>`:
-# the property is still one key, one default, one call shape.
-s18_impact_call() {  # <file> -> the impact-command call, root argument abstracted
-  /usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$1" \
-    | sed 's/^config_value "[^"]*"/config_value <root>/' | sort -u
+# --- §S18.3 no reader of the map's key, on either side (wave-31 T2, T23; REQ-4 AC-4.2) ---
+# The map is deleted: a brief names its suites, so neither the dispatch wall nor the landing
+# path asks `impact-command:` for any. ONE EXTRACTOR, a `config_value` read of a named key in
+# either spelling (quoted or bare), proved on a read that stays — the landing's release-check —
+# before it is asked for the deleted key's reads. proof.sh's floor read is T25's (D3) and is
+# not counted here.
+s18_config_reads() {  # <file> <key> -> how many lines read that key through config_value
+  /usr/bin/grep -cE "config_value .*[[:space:]]\"?$2\"?[[:space:]]+\"\"" "$1" 2>/dev/null | tr -d ' '
 }
-S18_LG_IMPACT=$(s18_impact_call "$S18_LG")
-S13_DP_IMPACT=$(s18_impact_call "$S13_HOOK")
-expect_eq "S18.3 lib/stop.sh reads impact-command exactly once" "1" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | tr -d ' ')"
-expect_eq "S18.3 …and so does the contract grammar the dispatch wall calls" "1" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_HOOK" | tr -d ' ')"
-expect_eq "S18.3 …and the dispatch wall no longer reads it itself" "0" \
-  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | tr -d ' ')"
-expect_nonempty "S18.3 …and the call is findable at all (the pin is not comparing air)" "$S18_LG_IMPACT"
-expect_eq "S18.3 …the same call shape the dispatch wall's grammar uses" "$S18_LG_IMPACT" "$S13_DP_IMPACT"
+expect_eq "S18.3 the extractor finds the landing's release-check read (not comparing air)" "1" \
+  "$(s18_config_reads "${S18_WT_LIB_DIR}/worktree.sh" release-check)"
+for _s18_f in "$S18_LG" "${S18_WT_LIB_DIR}/line.sh" "${S18_WT_LIB_DIR}/worktree.sh" \
+              "$BIONIC_HOOKS_DIR/session-poker.sh" "$S13_HOOK" "$S13_DP"; do
+  expect_eq "S18.3 …and ${_s18_f##*/} reads impact-command nowhere" "0" \
+    "$(s18_config_reads "$_s18_f" impact-command)"
+done
 # ============================================================
 section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7, D7)"
 # ============================================================
@@ -10065,7 +9965,7 @@ section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-3
 # against the doctored copy, a count-difference row, or nothing at all. The
 # research code map's census found 24 of them; the real number in this tree is 49
 # call sites over four suites, because the census read only `grep -v` in this suite
-# and `DOCTORED…=` in docs-pins, and missed every `sed`/`awk` mutant tree here plus
+# and missed every `sed`/`awk` mutant tree here plus
 # the doctoring `agent-context-guard` and `landing-gate` each carry. Every one of
 # them now goes through ONE spelling — the framework's `anchor` — and this section
 # is the wall that keeps them there.
@@ -10077,7 +9977,6 @@ section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-3
 # loud and still be a real sweep.
 
 S19_TESTS_DIR="$REPO_ROOT/tests"
-S19_DOCS_PINS="$S19_TESTS_DIR/docs-pins.test.sh"
 S19_ASSERT="$S19_TESTS_DIR/lib/assert.sh"
 
 # The four hand-rolled precondition idioms this wave removed, as one ERE.
@@ -10103,54 +10002,27 @@ S19_HAND_HITS="$(cd "$S19_TESTS_DIR" && /usr/bin/grep -cE -- "$S19_HANDROLLED" .
 expect_empty "S19.2 no suite in tests/ hand-rolls a mutation precondition any more" \
   "$S19_HAND_HITS"
 
-# THE PAIRED POSITIVE, and the discriminating one: the same sweep over a copy of
-# docs-pins with ONE of those idioms planted back must name that copy. Without
-# this row, §S19.2 would pass just as loudly against a pattern that matches
-# nothing at all.
+# THE PAIRED POSITIVE, and the discriminating one: the same sweep over a file with ONE of
+# those idioms planted must name that file. Without this row, §S19.2 would pass just as
+# loudly against a pattern that matches nothing at all.
 S19_SB="$SANDBOX/s19"
 mkdir -p "$S19_SB"
-cp "$S19_DOCS_PINS" "$S19_SB/replanted.test.sh"
 # built with %s so this line does not itself spell the idiom it plants
 printf 'if cmp -%s "$SKILL_MD" "$DOCTORED_REPLANTED"; then no "x" "the %s target matched nothing"; fi\n' \
   s sed >> "$S19_SB/replanted.test.sh"
 expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom planted back" "1" \
   "$(/usr/bin/grep -cE -- "$S19_HANDROLLED" "$S19_SB/replanted.test.sh" | tr -d ' ')"
 
-# --- §S19.3 retired (wave-24): six exact-count pins on `anchor` calls (docs-pins sites and calls,
+# --- §S19.3 retired (wave-24): six exact-count pins on `anchor` calls (per-suite sites and calls,
 # this suite, agent-context-guard, landing-gate, and their total). An exact count goes red on
 # every legitimate new mutant and is repaired by retyping the number, so it tested the author's
 # memory, not the tree. The relation it stood for is derived below, in §S19.4, with its paired
 # positive; §S19.2 holds the absence side across every suite.
 
-# --- §S19.4 COMPLETENESS: no doctoring site is left undeclared ---
-# Mechanically derived rather than counted: every `DOCTORED…="$TMP/…"` assignment
-# must carry an `anchor` call within the three lines above it.
-s19_unanchored() {  # s19_unanchored <suite> -> how many doctoring sites have no anchor above them
-  awk '
-    /^DOCTORED[A-Z0-9_]*="\$TMP\// {
-      found = 0
-      for (i = 1; i <= 3; i++) if (p[i] ~ /^[ \t]*anchor[ \t]/) found = 1
-      if (!found) n++
-    }
-    { p[3] = p[2]; p[2] = p[1]; p[1] = $0 }
-    END { print n + 0 }
-  ' "$1"
-}
-expect_eq "S19.4 every docs-pins doctoring site is anchored" "0" \
-  "$(s19_unanchored "$S19_DOCS_PINS")"
-
-# THE PAIRED POSITIVE: the same derivation over a copy with one anchor call
-# deleted must find exactly the site that lost it.
-sed '/^anchor .*BIND_DOCS_TRY=/d' "$S19_DOCS_PINS" > "$S19_SB/unanchored.test.sh"
-expect_eq "S19.4 …and the derivation names a site whose anchor was deleted" "1" \
-  "$(s19_unanchored "$S19_SB/unanchored.test.sh")"
-expect_eq "S19.4 …from a copy that really did lose one line (not vacuous)" "1" \
-  "$(( $(wc -l < "$S19_DOCS_PINS") - $(wc -l < "$S19_SB/unanchored.test.sh") ))"
-
 # --- §S19.4 agent-context-guard: every doctored copy of the guard is anchored ---
 # agent-context-guard builds its mutants through one helper, so a site is any line
-# writing a copy of "$GUARD" to a file. The suite does not use docs-pins' DOCTORED…=
-# idiom, so it gets its own site pattern, and a pattern that finds no site is RED
+# writing a copy of "$GUARD" to a file. The suite gets its own site pattern, and a
+# pattern that finds no site is RED
 # here rather than a silent pass of the relation below it.
 #
 # THE ANCHOR MAY SIT ANYWHERE EARLIER IN THE SITE'S BLOCK (the lines since the last
@@ -10928,94 +10800,6 @@ for _apfn in audit_path normalize_newlines log_finding answers_path log_answer; 
 done
 
 # ============================================================
-section "needs-resolve — every canonical-sdlc needs: entry names a real skill (dead-route drift, epic-23 wave-12-fixit-171 REQ-7)"
-# ============================================================
-#
-# WHY. `needs:` in skills/canonical-sdlc/SKILL.md is read as "route here for this
-# phase" — a name that resolves nowhere is a route to nothing, and the miss surfaces
-# only when an agent tries to follow it. Six such names (`shape`, `polish`,
-# `critique`, `audit`, `harden`, `normalize`) sat in the template with no skill
-# behind any of them: not a directory under skills/, not a payload plugin
-# dependency, not even an entry in this repo's own marketplace. T7 removes them from
-# the template; this section is the pin against a seventh landing unnoticed the
-# same way.
-#
-# RESOLUTION, offline and repo-local only — no ~/.claude, no network, no installed
-# plugins (a dispatch cannot assume the machine it runs on has any):
-#   (a) a BARE name (no `:`) resolves if it is a directory under skills/ in this
-#       repo, OR if it exactly names a plugin declared in
-#       .claude-plugin/marketplace.json. The second half is what keeps `impeccable`
-#       legal: marketplace.json describes it as "installed the first time a route
-#       needs it, never as a mandatory dependency" — a deliberate on-demand route,
-#       unlike the six fabricated names, which match neither a skills/ directory
-#       nor any plugin the marketplace has ever heard of.
-#   (b) a `<plugin>:<skill>` name resolves if <plugin> is named in
-#       payload/.claude-plugin/plugin.json's `dependencies` array (today:
-#       superpowers, agent-skills). The skill half is taken on trust — confirming
-#       it exists would mean reading that plugin's own tree, which this repo does
-#       not carry and must not require to run this suite.
-#   Anything else FAILS, and the failure names the entry (AC-7.2).
-
-NR_SKILL_MD="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-NR_PLUGIN_JSON="$BIONIC_SCRIPTS_DIR/payload/.claude-plugin/plugin.json"
-NR_MARKETPLACE_JSON="$BIONIC_SCRIPTS_DIR/.claude-plugin/marketplace.json"
-
-# --- the needs: list, exactly as the frontmatter states it: every `  - entry` line
-# between the top-level `needs:` key and the next top-level key. ---
-nr_needs_entries() {
-  awk '
-    /^needs:$/ { active=1; next }
-    active && /^[A-Za-z]/ { active=0 }
-    active && /^  - / { e=$0; sub(/^  - /,"",e); print e }
-  ' "$1"
-}
-
-NR_DEP_NAMES="$(jq -r '.dependencies[].name' "$NR_PLUGIN_JSON" 2>/dev/null)"
-NR_PLUGIN_NAMES="$(jq -r '.plugins[].name' "$NR_MARKETPLACE_JSON" 2>/dev/null)"
-
-# nr_resolves <entry> — exit 0 iff <entry> resolves by rule (a) or (b) above.
-nr_resolves() {
-  local entry="$1" plugin
-  case "$entry" in
-    *:*)
-      plugin="${entry%%:*}"
-      printf '%s\n' "$NR_DEP_NAMES" | grep -qxF "$plugin"
-      ;;
-    *)
-      [ -d "$BIONIC_SKILLS_DIR/$entry" ] && return 0
-      printf '%s\n' "$NR_PLUGIN_NAMES" | grep -qxF "$entry"
-      ;;
-  esac
-}
-
-# --- (a) THE SELF-TEST, before the real file is asked anything: known-good and
-# known-bad inputs against the resolver itself, so a resolver that always says yes
-# (or always says no) cannot pass this section by accident. ---
-expect_true "NR.1 a repo skills/ directory resolves (browser-verify)" \
-  nr_resolves "browser-verify"
-expect_true "NR.2 a declared-dependency <plugin>:<skill> resolves (agent-skills:context-engineering)" \
-  nr_resolves "agent-skills:context-engineering"
-expect_true "NR.3 a marketplace-declared, non-mandatory plugin resolves (impeccable)" \
-  nr_resolves "impeccable"
-expect_false "NR.4 a bare name matching no skills/ dir and no marketplace plugin does NOT resolve" \
-  nr_resolves "zzz-not-a-real-skill-zzz"
-expect_false "NR.5 a <plugin>:<skill> whose plugin is not a declared dependency does NOT resolve" \
-  nr_resolves "not-a-dependency:some-skill"
-
-# --- (b) THE REAL FILE. Every needs: entry in the rendered SKILL.md, checked
-# against the same resolver the self-test above just proved discriminates. ---
-NR_ENTRIES="$(nr_needs_entries "$NR_SKILL_MD")"
-expect_nonempty "NR.6 the rendered SKILL.md has a needs: list to check" "$NR_ENTRIES"
-
-NR_DEAD=""
-while IFS= read -r nr_e; do
-  [ -n "$nr_e" ] || continue
-  nr_resolves "$nr_e" || NR_DEAD="${NR_DEAD}${NR_DEAD:+ }${nr_e}"
-done <<< "$NR_ENTRIES"
-
-expect_empty "NR.7 every needs: entry in skills/canonical-sdlc/SKILL.md resolves" "$NR_DEAD"
-
-# ============================================================
 section "LC — THE LATEST-CONTRACT READING, retired in both walls: the recorder asks the one close predicate (epic-23 wave-12-fixit-171 T26; dispatch-wall half retired wave-20 T2, recorder half wave-20 T20, D10)"
 # ============================================================
 #
@@ -11475,95 +11259,6 @@ expect_eq "…and a planted THIRD caller elsewhere in the tree IS caught: the co
 rm -f "$BF_3RD_DIR/payload/commands/planted-third-caller.sh"
 expect_eq "control: the same scratch tree with the plant removed reads back to 2" "2" \
   "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
-
-# ============================================================
-section "SV — the shared brief-scaffold block is byte-identical across its two author surfaces (the six role files carry its reader view, Δ9), and re-authored to the new span rule (epic-23 wave-17-fixit-184 T9, REQ-7 AC-7.1)"
-# ============================================================
-#
-# WHY THIS LIVES HERE, NOT IN docs-pins.test.sh. `agents-src/blocks/brief-scaffold.md` is
-# ONE shared source `agents-src/render.sh` injects into SKILL.md, dispatch.md and all six
-# `agents/*.md` role files (research R2 §B4: before this task, three of those eight copies —
-# SKILL.md's, dispatch.md's, and every role file's — carried a stale "on its own paragraph"
-# comment the parser has not enforced since commit 9bf75d7). docs-pins.test.sh pins what each
-# rendered FINAL says; this file's whole purpose is agreement BETWEEN renders of the same
-# source, so the pin that the eight copies are one block rather than eight independent
-# opportunities to drift belongs here. `Suites: none` is the discriminating line: it is the
-# one row of the scaffold that changed text, so an EQ compare of that one line across all
-# eight copies is the tightest agreement pin — a byte-for-byte diff of the whole block would
-# also pass on eight copies that agree with each other while still teaching the old rule.
-#
-# HERMETIC. Reads the committed rendered finals by path; a mutated copy lives under
-# $SANDBOX.
-
-SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
-# The column padding before the comment was cut to two spaces at wave-24 T9 (A-T9.9), the
-# bytes paying for the scaffold's Done marker: line; the words are unchanged.
-# RE-POINTED (wave-27 T53, review pass 28 B3): the comment now tells the reader dealt `evidence`
-# to name its runs, since a `Suites: none` evidence reader is refused at dispatch.
-# RE-POINTED (wave-27 T60, review pass 38 B1): `Suites: none` beside a `Re-executes:` that names
-# a run is right for that reader, so the comment counts its runs across both labels.
-SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names 1 to 3 runs across both labels'
-
-sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
-  awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
-}
-
-# RE-POINTED (wave-21 T7b, design ledger Δ9): the author block renders into SKILL.md and
-# dispatch.md only. The six role files carry the reader view (brief-scaffold-reader.md),
-# which has no fenced `Suites: none` line; the arm after the count pins that each of them
-# carries that view, so a role file that lost its scaffold altogether still turns this red.
-SV_SURFACES="$SV_SKILL $SV_DISPATCH"
-
-SV_DISAGREE=""
-SV_COUNT=0
-for _sv_f in $SV_SURFACES; do
-  SV_COUNT=$((SV_COUNT + 1))
-  _sv_got="$(sv_suites_line "$_sv_f")"
-  [ "$_sv_got" = "$SV_SUITES_LINE" ] || SV_DISAGREE="${SV_DISAGREE} ${_sv_f##*/}=[${_sv_got:-<absent>}]"
-done
-expect_eq "SV both author surfaces (SKILL.md, dispatch.md) carry the shared scaffold's new Suites: line" \
-  "2 " "$SV_COUNT $SV_DISAGREE"
-
-# RE-POINTED (wave-27 T11): was `"6 "`, a count a seventh role turned red. A relation now:
-# every role file read carries the reader view, over a set that is not empty.
-SV_ROLES=0
-SV_READER=0
-SV_NOREADER=""
-for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
-  [ -f "$_sv_f" ] || continue
-  SV_ROLES=$((SV_ROLES + 1))
-  if /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f"; then SV_READER=$((SV_READER + 1))
-  else SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"; fi
-done
-expect_true "SV …the role files were read (the relation below is not vacuous)" test "$SV_ROLES" -ge 1
-expect_eq "SV …and every role file carries the reader view of the scaffold" \
-  "$SV_ROLES " "$SV_READER $SV_NOREADER"
-
-# THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
-# block updated in the source but only some templates re-rendered) would leave some copies
-# on the new line and others on the old — the equality above catches drift on the new text,
-# this catches survival of the old text.
-SV_STALE=0
-for _sv_f in $SV_SURFACES; do
-  /usr/bin/grep -qF 'on its own paragraph' "$_sv_f" 2>/dev/null && SV_STALE=$((SV_STALE + 1))
-done
-expect_eq "SV …and neither author surface still carries the retired 'on its own paragraph' comment" \
-  "0" "$SV_STALE"
-
-# ANTI-VACUITY: a doctored copy of one surface, reverted to the old comment, DOES disagree
-# with the shared constant — proving the equality pin above is load-bearing rather than
-# comparing an empty string to itself.
-SV_MUT="$SANDBOX/skill-stale-scaffold.md"
-anchor -E "$SV_SKILL" '1 to 3 runs across both labels$' 1
-sed 's/1 to 3 runs across both labels$/1 to 3 runs across both labels, on its own paragraph/' \
-  "$SV_SKILL" > "$SV_MUT" 2>/dev/null
-SV_MUT_LINE="$(sv_suites_line "$SV_MUT")"
-expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer matches the shared line" \
-  "no" "$([ "$SV_MUT_LINE" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
-expect_eq "SV MUTANT …and the un-doctored SKILL.md still does" \
-  "yes" "$([ "$(sv_suites_line "$SV_SKILL")" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
-
 
 section "RC — THE READ-ONLY ROLE SET: role_is_readonly equals the role files that disallow Write and Edit, plus Explore and Plan (wave-20 T7, AC-9.1)"
 #
@@ -12404,11 +12099,17 @@ room_stop() {  # <repo> -> how many writer rows the stop wall owes, 0 when it re
 }
 room_tick() {  # <repo> — sets ROOM_TICK_OUT (the tick's channel) and ROOM_TK (rows its FILL names)
   local ids
-  ROOM_TICK_OUT=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+  ROOM_TICK_OUT=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$ROOM_CFG" \
            "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) )
   ids=$(printf '%s\n' "$ROOM_TICK_OUT" | awk 'index($0, "poker: FILL ") == 1 && index($0, "poker: FILL —") != 1 { print substr($0, 13); exit }')
   ROOM_TK=$(printf '%s\n' $ids | grep -c '^R[0-9]')
 }
+# THE TICK'S OWN CONFIG DIR, with no transcript in it (it was `$1/no-such-config`, which the gate read as
+# the default share, 92, while the stop wall read the suite's pin above: two readers, two shares). It holds
+# the same share the suite's pin does, 80, and no `projects/`, so the tick still finds no panel to read.
+ROOM_CFG="$SANDBOX/room-config"
+mkdir -p "$ROOM_CFG/bionic"
+printf '80\n' > "$ROOM_CFG/bionic/share"
 ROOM_GATE="$SANDBOX/room-gate"
 ROOM_GATE_SAVED="$BIONIC_GATE_DIR"
 mkdir -p "$ROOM_GATE/requests" "$ROOM_GATE/cost"
@@ -12683,13 +12384,12 @@ jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidec
 cgt_agent toolu_01CGTA1 W-R1
 CGT_OUT="$(cgt_stop false)"
 expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
-# THE TWO DUTIES READ ONE LAUNCHED SET (wave-28 T38; REQ-13, D30). The task-entry duty binds a launch
-# to a plan row through the fill duty's own `_ST_LAUNCHED`, the set the recorder writes as `launched=`:
-# the same Stop's ledger line and its entry clause name the same launch. fails-when: they disagree.
+# THE LAUNCHED SET IS THE RECORDER'S (wave-28 T38; REQ-13, D30). The task-entry duty that also read it
+# went at wave-31 T32 (D6, AC-6.5): the Stop the recorder's line names is refused for the fill alone.
 expect_contains "CG-entry the recorder's line for turn A's first Stop records the launch W-R1" "|launched=W-R1|" \
   "$(head -n 1 "$CGT_R/.bionic/docs/record/cgturn/fill-ledger.log" 2>/dev/null)"
-expect_contains "CG-entry …and the same Stop's entry duty owes that launch's row, R1, folded into the fill's detail" \
-  "tasks: dispatched R1 this turn, 0 of 1 task entries set in progress" "$CGT_OUT"
+expect_absent "CG-entry …and the same Stop owes no task entry for it (the refusal above is the fill's)" \
+  "task entries set in progress" "$CGT_OUT"
 jq -nc '{type:"user",isMeta:true,uuid:"u-cgt-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$CGT_TR"
 cgt_agent toolu_01CGTA2 W-R2
 cgt_stop true >/dev/null
@@ -13242,7 +12942,7 @@ expect_contains "AM4 …reads the contract from the roster, by the id" "Contract
 expect_contains "AM4 …and publishes a non-empty target on its machine line" "|target=$AM_ID|" "$AM_OBS"
 expect_contains "AM4 …sourcing the deliverable from the roster" "|deliverable_source=roster|" "$AM_OBS"
 AM_SG=$(mk_stop_payload "$AM_SID" "$AM_TR4" "$AM_R4" "$AM_ID" | bash "$PARTY_SG" 2>&1); AM_SG_RC=$?
-expect_eq "AM4 the stop wall typed by the id refuses a stop of a working agent" "2" "$AM_SG_RC"
+expect_eq "AM4 the stop wall typed by the id allows a stop of a working agent, its verdict recorded (wave-31 T32)" "0" "$AM_SG_RC"
 expect_contains "AM4 …naming the agent by its non-empty id" "'$AM_ID' ($AM_ID) is ALIVE" "$AM_SG"
 expect_contains "AM4 …and printing the roster's contract for it" "deliverable:  pending — $AM_R4/never-yet.md" "$AM_SG"
 # THE TICK, over the same roster with the agent's log aged past its cadence. Its reading is
@@ -13531,13 +13231,13 @@ printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(ub_iso 1)" "$SID_A" > "
 } > "$UB3/tick.jsonl"
 ub_mode "$UB3" "$SID_A" "$UB3_P" fallback
 ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
-expect_eq "UB.3 duties gate, fallback: a write naming <p> discharges nothing — held as under none" \
-  "block" "$(ub_decision)"
-expect_contains "UB.3 …for the task-list refresh" "task-list refresh" "$UB_OUT"
+# The tick turn owes no task-list refresh under any mode (wave-31 T32; D6, AC-6.5): fallback, the
+# turn ends and the advisory is printed once (ub_collect); bound-open, it ends as well.
+expect_eq "UB.3 duties gate, fallback: the tick turn is not refused, as under none" "" "$(ub_decision)"
 ub_collect duties-gate "$UB_ERR" "$UB3_P"
 ub_mode "$UB3" "$SID_A" "$UB3_P" bound
 ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
-expect_eq "UB.3 duties gate, bound-open (control): the same write discharges the refresh" "" "$(ub_decision)"
+expect_eq "UB.3 duties gate, bound-open (control): the same turn ends" "" "$(ub_decision)"
 
 # ---- UB.4 fill gate ----------------------------------------------------------
 UB4=$(new_repo "ub-fill"); UB4_P="$UB4/.bionic/docs/plans/epic-99/run.md"
@@ -14069,7 +13769,7 @@ FSEV_D="$PRF_D/sev"; mkdir -p "$FSEV_D"
 FSEV_CELLS="S1:on S1:off S2:on S2:off S3:on S3:off S4:on S4:off"
 fsev_lib() { . "$PRF_LIB/proof.sh" && proof_priority "$1" "$2"; }
 fsev_parsed() {  # <S> <reach> -> the findings parser's priority column for a one-finding record
-  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 1\nfinding: 1 %s %s - a cell\nunsure: 1 placeholder\n' "$1" "$2" > "$FSEV_D/rec.md"
+  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 1\nfinding: 1 %s %s x.sh:1 a cell\nshown: 1 bash x.sh\n' "$1" "$2" > "$FSEV_D/rec.md"
   ( . "$PRF_LIB/proof.sh" && proof_findings "$FSEV_D/rec.md" ) | awk -F'\t' '{ print $5 }'
 }
 fsev_scale() {  # <scale file> <S> <reach> -> the cell the scale's table states, as fix, defer or note
@@ -14098,15 +13798,12 @@ expect_eq "FACT-SEV mutation: the doctored scale still reads (S1 on is fix)" "fi
 expect_ne "FACT-SEV mutation: …and its S2 off is no longer the library's, so the agreement row goes red" \
   "$(fsev_lib S2 off)" "$(fsev_scale "$FSEV_D/severity.mut.md" S2 off)"
 
-# §FACT-CHECK (wave-28 T41; REQ-8 AC-8.6, D33). AN OPEN CHECK HOLDS THE STEP, AND EVERY READER ASKS ONE
-# READER WHICH CHECKS ARE OPEN. A `check:` line is open while it carries neither ` settled=` nor
-# ` refuted` after its quoted title; lib/proof.sh `proof_checks_open` is the one reader (the owed lines
-# whose priority is `check`, rated through `proof_finding_rating`). The step's two readers ask it: the
-# judge (`facts_state`, which the tick's integrate row and close-out read too) holds each as a
-# `finding-check<TAB><record>#<n><TAB>open` line, and `current 8` (session-poker.sh) refuses naming
-# each. Pinned here: on one plan the judge holds exactly the open set the reader gives (a settled, a
-# refuted and a fenced line are not open; a title holding the words is); `current 8`'s refusal reads it
-# by that name; and a doctored judge that no longer asks the reader splits from it.
+# §FACT-FINAL (wave-31 T32; REQ-6 AC-6.3, D6; was §FACT-CHECK, wave-28 T41). A READER'S RATING IS
+# FINAL, AND NO READER OF A STEP ASKS ABOUT A CHECK. Wave-28 T41 held the step on each open `check:`
+# line through one reader, `proof_checks_open`, asked by the judge (`facts_state`) and by `current 8`.
+# T32 deleted the reader and both of its callers. Pinned here: on a plan carrying open, settled, refuted
+# and fenced `check:` lines, the judge answers each fact it owes and prints no `finding-check` line;
+# the library defines no reader of checks; and `current 8`'s code names none.
 FCHK_D="$PRF_D/fchk"; mkdir -p "$FCHK_D"
 git -C "$FCHK_D" init -q 2>/dev/null; git -C "$FCHK_D" -c user.name=f -c user.email=f@x commit -q --allow-empty -m init 2>/dev/null
 FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
@@ -14115,30 +13812,19 @@ FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
   printf 'check: record/w/a.md#1 S3 off "open, no settlement"\n'
   printf 'check: record/w/a.md#2 S1 on "settled" settled=S2:off by=record/w/c.md\n'
   printf 'check: record/w/a.md#3 S2 on "refuted" refuted by=record/w/c.md\n'
-  printf 'check: record/w/a.md#4 S4 on "a title that says refuted and settled=S1:on"\n'
   printf '\n```\ncheck: record/w/a.md#5 S1 on "fenced"\n```\n'
 } > "$FCHK_D/plan.md"
-fchk_open() { bash -c '. "$1" && proof_checks_open "$2"' _ "${2:-$PRF_LIB/proof.sh}" "$1" 2>/dev/null | awk '{ printf "%s%s", (n++ ? " " : ""), $1 }'; }
-fchk_judge() { bash -c '. "$1" && facts_state "$2" "$3"' _ "${2:-$PRF_LIB/proof.sh}" "$1" "$FCHK_H" 2>/dev/null \
-  | awk -F'\t' '$1 == "finding-check" && $NF == "open" { printf "%s%s", (n++ ? " " : ""), $2 }'; }
-expect_regex "FACT-CHECK precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
-expect_eq "FACT-CHECK the one reader gives the open checks: no settlement, and a title holding the words" \
-  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md")"
-expect_eq "FACT-CHECK the judge holds exactly that set" "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md")"
-expect_eq "FACT-CHECK …and says so by its exit" "1" \
-  "$(bash -c '. "$1" && facts_state "$2" "$3" >/dev/null 2>&1; echo $?' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H")"
-expect_eq "FACT-CHECK current 8's refusal asks the same reader, by name" "1" \
-  "$(/usr/bin/grep -c 'proof_checks_open "\$PV_PLAN"' "$PRF_POKER")"
-FCHK_NEEDLE='done < <(proof_checks_open "$plan" 2>/dev/null)'
-FCHK_MUT="$FCHK_D/proof.sh.mut"
-anchor "$PRF_LIB/proof.sh" "$FCHK_NEEDLE" 1
-FCHK_N="$FCHK_NEEDLE" awk 'BEGIN { n = ENVIRON["FCHK_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "done < /dev/null" substr($0, i + length(n)); print }' \
-  "$PRF_LIB/proof.sh" > "$FCHK_MUT"
-cp "$PRF_LIB/run.sh" "$PRF_LIB/roots.sh" "$FCHK_D/" 2>/dev/null
-expect_eq "FACT-CHECK mutation: the doctored judge still gives the reader's set through its own reader (it runs)" \
-  "record/w/a.md#1 record/w/a.md#4" "$(fchk_open "$FCHK_D/plan.md" "$FCHK_MUT")"
-expect_ne "FACT-CHECK mutation: …and, no longer asking it, holds nothing, so the agreement row goes red" \
-  "$(fchk_open "$FCHK_D/plan.md")" "$(fchk_judge "$FCHK_D/plan.md" "$FCHK_MUT")"
+FCHK_OUT="$(bash -c '. "$1" && facts_state "$2" "$3"' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H" 2>/dev/null)"
+expect_regex "FACT-FINAL precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
+expect_contains "FACT-FINAL the judge answers the facts the plan owes (the extractor reads real output: the floor line)" \
+  "floor" "$FCHK_OUT"
+expect_absent "FACT-FINAL …and holds no check, open or not: no finding-check line" "finding-check" "$FCHK_OUT"
+expect_eq "FACT-FINAL the library defines the judge, and no reader of checks (proof_checks_open, _proof_check_state)" "1|0|0" \
+  "$(bash -c '. "$1"; declare -F facts_state >/dev/null && printf 1 || printf 0; printf "|"; declare -F proof_checks_open >/dev/null && printf 1 || printf 0; printf "|"; declare -F _proof_check_state >/dev/null && printf 1 || printf 0' _ "$PRF_LIB/proof.sh" 2>/dev/null)"
+expect_eq "FACT-FINAL current 8's code asks the judge (the extractor reads the verb's file)…" "1" \
+  "$(/usr/bin/grep -c '^cur8_judge() {' "$PRF_POKER")"
+expect_eq "FACT-FINAL …and no reader of checks, by name" "0" \
+  "$(/usr/bin/grep -c 'proof_checks_open\|cur8_checks' "$PRF_POKER")"
 
 # ============================================================
 section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"
@@ -14226,50 +13912,6 @@ expect_eq "DEAL mutation: the doctored copy still deals one role per question (i
   "$(deal double task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
 expect_ne "DEAL mutation: …and splits from the table, so the double row goes red" \
   "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles double task "$DEAL_MUT")"
-
-# THE RENDERED TABLE IS THE DEALING (wave-27 T17; wave-30 T11, REQ-1, A-orch-37). SKILL.md's rigor
-# table puts the levels in columns (`| | \`single\` | \`double\` |`) and its `readers` row says who
-# holds which question: `the <role> holds every question`, or `the <role> takes \`<q>\`[ and
-# \`<q>\`]`, the questions it does not take staying with the critic, which is dealt at every level.
-# Each level's cell must read back as exactly what `facts_owed` deals that level, so the table and
-# the code cannot drift. A doctored copy whose double cell hands structure to the auditor too must
-# split from the dealing.
-DEAL_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-deal_levels() {  # [<SKILL.md>] -> the rigor table's level columns, in order, space-joined
-  awk -F'|' '/^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); printf "%s%s", (n++ ? " " : ""), c }; exit }' \
-    "${1:-$DEAL_SKILL}" 2>/dev/null
-}
-deal_table() {  # <level> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
-  QS="$DEAL_QS" awk -F'|' -v r="$1" '
-    /^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); if (c == r) col = i }; next }
-    col && $2 ~ /^ *readers *$/ {
-      nq = split(ENVIRON["QS"], qs, " "); s = $col
-      for (j = 1; j <= nq; j++) held[qs[j]] = "critic"
-      if (match(s, /the [a-z]+ holds every question/)) {
-        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role)
-        for (j = 1; j <= nq; j++) held[qs[j]] = role
-      } else if (match(s, /the [a-z]+ takes/)) {
-        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role); s = substr(s, RSTART + RLENGTH)
-        while (match(s, /`[a-z]+`/)) { held[substr(s, RSTART + 1, RLENGTH - 2)] = role; s = substr(s, RSTART + RLENGTH) }
-      } else exit
-      for (j = 1; j <= nq; j++) printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
-      exit
-    }' "${2:-$DEAL_SKILL}" 2>/dev/null
-}
-expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a level header the reader parses" "$(deal_levels)"
-expect_eq "DEAL table: its level columns are single and double, and no third" "single double" "$(deal_levels)"
-for deal_l in single double; do
-  expect_nonempty "DEAL table precondition: SKILL.md's readers row has a $deal_l cell the reader parses" \
-    "$(deal_table "$deal_l")"
-  expect_eq "DEAL table $deal_l: the rendered cell equals what facts_owed deals $deal_l" \
-    "$(deal_roles "$deal_l" task)" "$(deal_table "$deal_l")"
-done
-DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
-anchor "$DEAL_SKILL" 'two: the auditor takes `evidence`' 1
-sed 's/two: the auditor takes `evidence`/two: the auditor takes `evidence` and `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
-expect_nonempty "DEAL table mutation: the doctored double cell still parses" "$(deal_table double "$DEAL_SKILL_MUT")"
-expect_ne "DEAL table mutation: …and splits from the dealing, so the cell goes red" \
-  "$(deal_roles double task)" "$(deal_table double "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
@@ -14367,14 +14009,14 @@ section "RIGOR — two levels, single and double: the plan-write hook and every 
 # ============================================================
 # ONE FUNCTION SAYS WHAT A RIGOR WORD MEANS. lib/run.sh `rigor_level <word>` prints `single` or
 # `double` for that word and returns 1 for any other. Every site that tests the word calls it: the
-# plan-write hook's closed set and its floor rank (`rigor_rank`), and in lib/walls.sh the task-row
-# check (`effective_row_rigor`), the floor rank (`rigor_ord`), the auditor relaxation
-# (`matrix_auditor_required`) and each arm that asks for the double level (`ledger_shape_fail`,
-# `validate_requirements_pointer`, `validate_dispatch_ledger`, `plan_bring_forward`). Pinned here:
-# every site gives each level its answer; each of the six words before 1.14.0 (low/tested,
-# medium/peer-reviewed, high/audited) gets exactly the answer a word that is no level gets — the
-# closed sets refuse it, a row cell is INVALID, the auditor arm stays closed, and no double arm
-# fires on it. A census holds the site count at zero (no line in hooks/ or payload/scripts/ tests
+# plan-write hook's closed set and its floor rank (`rigor_rank`), and in lib/walls.sh the auditor
+# relaxation (`matrix_auditor_required`) and each arm that asks for the double level
+# (`validate_requirements_pointer`, `validate_dispatch_ledger`, `plan_bring_forward`). The task
+# row's rigor cell check, the wall's floor rank and the ledger-shape router were sites too; they
+# went with the retired task table (wave-31 T24; D2, A-T24-2). Pinned here: every site gives each
+# level its answer; each of the six words before 1.14.0 (low/tested, medium/peer-reviewed,
+# high/audited) gets exactly the answer a word that is no level gets — the closed sets refuse it,
+# the auditor arm stays closed, and no double arm fires on it. A census holds the site count at zero (no line in hooks/ or payload/scripts/ tests
 # an old word itself), and a doctored walls.sh whose auditor arm tests `low` directly reads an old
 # word as a level, so the old-word rows go red on it.
 RV_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
@@ -14395,7 +14037,7 @@ printf -- '---\nrigor: double\n---\n\n## SDLC State\ncurrent: 3\n' > "$RV_D/no-t
 # THE GATE'S HELPERS ARE DEFINED INSIDE ITS BODY (`_eg_body`), so sourcing walls.sh defines none of
 # them: each is lifted out by its own definition, flush-left from `name() {` to its `}`, and a row
 # below holds every one of them defined, so no answer here is a missing function's silence.
-RV_FNS="effective_row_rigor rigor_ord matrix_auditor_required ledger_shape_fail validate_requirements_pointer step1_evidence_block evidence_line_field extract_continuation resolve_requirements_path validate_dispatch_ledger"
+RV_FNS="matrix_auditor_required validate_requirements_pointer step1_evidence_block evidence_line_field extract_continuation resolve_requirements_path validate_dispatch_ledger"
 export RV_FNS
 rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
   rv_bf_plan "$2" > "$RV_D/bf-$2.plan.md"
@@ -14409,11 +14051,7 @@ rv_site() {  # <walls.sh> <word> <site> -> that wall site's answer at the word
     refuse() { echo refused; exit 2; }; log_finding() { echo logged; }
     RIGOR="$3"; SCALE=wave; MULTI_AGENT=true; CURRENT=3; SECTION=""; PLAN="$5"
     case "$4" in
-      row)      effective_row_rigor "$3" ;;
-      inherit)  effective_row_rigor "" ;;
-      ord)      rigor_ord "$3" ;;
       auditor)  if matrix_auditor_required; then echo owed; else echo relaxed; fi ;;
-      ledger)   ledger_shape_fail f x o ;;
       pointer)  validate_requirements_pointer; echo passed ;;
       dispatch) validate_dispatch_ledger; echo passed ;;
       forward)  if plan_bring_forward "$6" >/dev/null 2>&1; then echo admitted; else echo fired; fi ;;
@@ -14442,24 +14080,20 @@ rv_closed() {  # <word> -> `refused` when the hook refuses the word as a rigor, 
 RV_WALLS="$RV_LIB/walls.sh"
 expect_eq "RIGOR precondition: every wall site this section asks is defined from walls.sh" "defined" \
   "$(rv_site "$RV_WALLS" double defined)"
-# <word>:<rigor_level's answer>:<closed set>:<rank>:<ord>:<row>:<inherit>:<auditor>:<ledger>:<arm>:<forward>
-for rv_pair in "single:single rc=0:admitted:0:0:single:single:relaxed:logged:passed:admitted" \
-               "double:double rc=0:admitted:1:1:double:double:owed:refused:refused:fired" \
-               "low: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "tested: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "medium: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "peer-reviewed: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "high: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted" \
-               "audited: rc=1:refused:-1:0:INVALID:single:owed:logged:passed:admitted"; do
-  IFS=: read -r rv_w rv_lvl rv_cl rv_rk rv_ord rv_row rv_inh rv_aud rv_ledger rv_arm rv_bf <<< "$rv_pair"
+# <word>:<rigor_level's answer>:<closed set>:<rank>:<auditor>:<arm>:<forward>
+for rv_pair in "single:single rc=0:admitted:0:relaxed:passed:admitted" \
+               "double:double rc=0:admitted:1:owed:refused:fired" \
+               "low: rc=1:refused:-1:owed:passed:admitted" \
+               "tested: rc=1:refused:-1:owed:passed:admitted" \
+               "medium: rc=1:refused:-1:owed:passed:admitted" \
+               "peer-reviewed: rc=1:refused:-1:owed:passed:admitted" \
+               "high: rc=1:refused:-1:owed:passed:admitted" \
+               "audited: rc=1:refused:-1:owed:passed:admitted"; do
+  IFS=: read -r rv_w rv_lvl rv_cl rv_rk rv_aud rv_arm rv_bf <<< "$rv_pair"
   expect_eq "RIGOR $rv_w: rigor_level answers '$rv_lvl'" "$rv_lvl" "$(rv_level "$rv_w")"
   expect_eq "RIGOR $rv_w: the hook's closed set: $rv_cl" "$rv_cl" "$(rv_closed "$rv_w")"
   expect_eq "RIGOR $rv_w: the hook's floor rank is $rv_rk" "$rv_rk" "$(rv_rank "$rv_w")"
-  expect_eq "RIGOR $rv_w: the wall's floor rank is $rv_ord" "$rv_ord" "$(rv_site "$RV_WALLS" "$rv_w" ord)"
-  expect_eq "RIGOR $rv_w: a task row's cell resolves to $rv_row" "$rv_row" "$(rv_site "$RV_WALLS" "$rv_w" row)"
-  expect_eq "RIGOR $rv_w: an empty cell under this plan word resolves to $rv_inh" "$rv_inh" "$(rv_site "$RV_WALLS" "$rv_w" inherit)"
   expect_eq "RIGOR $rv_w: the matrix auditor is $rv_aud" "$rv_aud" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
-  expect_eq "RIGOR $rv_w: a ledger-shape fault is $rv_ledger" "$rv_ledger" "$(rv_site "$RV_WALLS" "$rv_w" ledger)"
   expect_eq "RIGOR $rv_w: the requirements-pointer arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" pointer)"
   expect_eq "RIGOR $rv_w: the dispatch-ledger arm $rv_arm" "$rv_arm" "$(rv_site "$RV_WALLS" "$rv_w" dispatch)"
   expect_eq "RIGOR $rv_w: the bring-forward arm $rv_bf" "$rv_bf" "$(rv_site "$RV_WALLS" "$rv_w" forward)"
@@ -14470,7 +14104,6 @@ for rv_w in standard High ""; do
 done
 for rv_w in standard High; do
   expect_eq "RIGOR seventh word '$rv_w': the hook's closed set refuses it" "refused" "$(rv_closed "$rv_w")"
-  expect_eq "RIGOR seventh word '$rv_w': the task-row check reads it INVALID" "INVALID" "$(rv_site "$RV_WALLS" "$rv_w" row)"
   expect_eq "RIGOR seventh word '$rv_w': the auditor arm stays closed on it" "owed" "$(rv_site "$RV_WALLS" "$rv_w" auditor)"
 done
 # THE CENSUS: no line in hooks/ or payload/scripts/ tests, ranks or lists a word before 1.14.0. A case

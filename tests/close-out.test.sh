@@ -117,7 +117,7 @@ fixture_git() {
 # fixture_plan_text <archive-root> <current> -> a plan the evidence gate reads clean at
 # current: 9: frontmatter (walk exempt, single rigor, no named deploy target), a
 # `## SDLC State` naming both branches, and a complete `## Verification Matrix` whose
-# one T1 row owes tier-run/readback/evidence and has them.
+# one T1 row owes evidence and has it.
 #
 # THE STATE A RUN IS IN BEFORE ITS TOOLS CLOSE IT, AND NOTHING THE TOOLS WRITE (wave-27 T4,
 # D14, AC-7.3). No builder here plants `current: 8` or a Step 9 line: the first is the
@@ -1688,7 +1688,8 @@ carry_plant "$PC" \
   "check: $CARRY_REC#4 S1 off \"a settled check, not a deferral\" settled=S2:off by=record/wave-01-fixture/chk.md" \
   "deferred: $CARRY_REC#3 S2 off \"third, quoted\" stated=\"$CARRY_Q1\""
 # The check: line is SETTLED (wave-28 T14, ruling A-orch-165): since T41 an open check holds the step, so
-# the fixture settles it, in finding-check's form, at a rating the table defers (S2 off).
+# the fixture settles it, in the form the retired finding-check wrote (settled= and by=; wave-31 T32 removed
+# the verb and the hold, and an old line binds nothing), at a rating the table defers (S2 off).
 expect_eq "CARRY-0 precondition: the plan carries three deferred: lines and one check: line inside its SDLC State" "3 1" \
   "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ d++ } s && /^check: /{ c++ } END { print d + 0, c + 0 }' "$PC/$PLAN_REL")"
 run_close "$PC" run

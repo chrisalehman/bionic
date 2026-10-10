@@ -10,8 +10,8 @@
 # wish. This file tests the wall.
 #
 # WHAT IT COVERS. `hooks/dispatch-preflight.sh` records the budget on the roster row at
-# launch — `suites_allowed=`, derived from the tree by the configured impact command or
-# declared by the brief (tests/dispatch-preflight.test.sh §S27 owns that half). This file
+# launch — `suites_allowed=`, the set the brief declares (tests/dispatch-preflight.test.sh
+# §S27 owns that half). This file
 # owns the other half: inside a dispatched agent, a suite invocation outside that set is
 # refused, `tests/run.sh` is refused unless the row carries it, and `FARM_OUT_ALLOW=1`
 # does not widen either.
@@ -1101,9 +1101,14 @@ expect_contains "B15d …by the B-9 fact" "a backgrounded suite's result is neve
 guarded "$R1" 'tests/run.sh --only alpha.test.sh & WAIT'
 expect_eq "B15e WAIT is not wait: the backgrounded suite is REFUSED" "2" "$ST"
 expect_contains "B15e …by the B-9 fact" "a backgrounded suite's result is never read" "$ERR"
-# ONLY THE WORD FOLDS: an operand path keeps its case, beside B15a's positive.
+# ONLY THE WORD FOLDS: an operand keeps its case. Since wave-31 T11 (D9) the budget OPENS a script
+# operand and reads its text, and R1 holds no gamma.test.sh: `TESTS/GAMMA.TEST.SH` is a file that is
+# not there, so it is `unverified` and refused (A-orch-62), by its path as typed. It is never folded to
+# the suite name `gamma.test.sh` that B15b's refusals carry (A-orch-67, A-T38-1).
 guarded "$R1" 'bash TESTS/GAMMA.TEST.SH'
-expect_eq "B15f an operand never folds: TESTS/GAMMA.TEST.SH is no suite file this arm budgets" "0" "$ST"
+expect_eq "B15f an operand never folds: TESTS/GAMMA.TEST.SH, no file in R1, is refused as unverified" "2" "$ST"
+expect_contains "B15f …by the unverified-script fact, naming the operand as typed" "unverified script: TESTS/GAMMA.TEST.SH" "$VERR"
+expect_absent "B15f …and never as the suite B15b names, folded" "gamma.test.sh" "$VERR"
 
 section "WRAP — an allowed suite command is rewritten into the booking shim (wave-26 T7, D8)"
 # THE CLAIM. Every suite-class Bash call the walls allow comes back with `updatedInput`

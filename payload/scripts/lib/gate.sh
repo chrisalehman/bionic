@@ -43,7 +43,7 @@
 #   gate_asked               names (a who each) on stdin; prints those with an OPEN request (see
 #                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
 #                            One read of the store answers every name, and it takes no lock.
-#   gate_share               the machine's share, 1 to 100 (absent or unreadable: 80)
+#   gate_share               the machine's share, 1 to 100 (absent or unreadable: 92)
 #   gate_promise <key>       the per-field promise for a key, <mem>:<cores>:<seconds>, loading the
 #                            store itself; nothing when no cost is on record anywhere
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
@@ -157,9 +157,9 @@ gate_share() {
   local v=''
   { read -r v < "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"; } 2>/dev/null
   v="${v%%[[:space:]]*}"
-  case "$v" in ''|*[!0-9]*|????*) v=80 ;; esac
+  case "$v" in ''|*[!0-9]*|????*) v=92 ;; esac
   v=$((10#$v))
-  { [ "$v" -ge 1 ] && [ "$v" -le 100 ]; } || v=80
+  { [ "$v" -ge 1 ] && [ "$v" -le 100 ]; } || v=92
   printf '%s\n' "$v"
 }
 

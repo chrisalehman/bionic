@@ -15,6 +15,8 @@
 #   §LOG2    AC-3.4 — a second attempt writes `…-2.log` and never truncates the first.
 #   §WAIT-CALLER  (T12; A-orch-7) the caller waits on its run: the log's lines on stdout, the progress
 #            line on stderr, the run's own code; a re-run of a live run attaches; LOST exits 70.
+#   §DETACH-CEILING  (T12; D10; AC-9.4) a detached run the gate has not admitted within the bound ends
+#            75 with the one line, in its log, `<log>.rc` and its roster row; the command never ran.
 #   §WALL    AC-3.1 end to end — the Bash wall's wrap carries --detach and outlives its caller.
 #
 # The gate (gate.test.sh, slots.test.sh) owns the foreground shim; nothing here re-proves it.
@@ -275,6 +277,76 @@ expect_regex "LS.2 …with one LOST line naming the run and when its log was las
   "$(grep '^booked: LOST ' "$D/ls.out" 2>/dev/null)"
 expect_eq "LS.3 …and never the word timeout (beside LS.2 on the same output)" "0" \
   "$(grep -ci 'timeout' "$D/ls.out" 2>/dev/null)"
+
+# =====================================================================================
+section "§DETACH-CEILING — a detached run the gate has not admitted within the bound ends 75 with one line (T12; D10; AC-9.4)"
+# =====================================================================================
+#
+# A detached run's wait is inside no call, so with nothing else to bound it the wait had no end. The
+# detached side now asks the gate with --within BIONIC_SETTLE_MAX_WAIT (1200 s by default; 3 here), and
+# a run not admitted inside it ends through the shim's one not-admitted path: exit 75, the line in the
+# log (stderr is the log in the detached side), `rc=75` on the log's last line, `75` in `<log>.rc`,
+# `run_rc=75` on the roster row. The caller follows the log, copies the line and exits 75.
+#
+# FIXTURE FIDELITY. gate.test.sh's held gate (B.7): the machine reads 60% used, the share is 80, a
+# REAL background process holds a 15% admission, and the request the detached run makes would add 15
+# more. The machine, clock and cost record are SYNTHESIZED (the world's pins); the holder, the shim,
+# the perl detach and the roster write are real. The share is pinned here because the default moved.
+CE_HOME="$D/ce-home"; mkdir -p "$CE_HOME/bionic"; printf '80\n' > "$CE_HOME/bionic/share"
+CE_CFG_WAS="${CLAUDE_CONFIG_DIR:-}"; export CLAUDE_CONFIG_DIR="$CE_HOME"
+export BIONIC_GATE_DIR="$D/ce-gate"
+world_machine 8 8192 60 1.0
+world_clock 1000
+world_cost h 15 0.5 30
+world_cost ce.test.sh 15 0.5 30
+cat > "$D/ce-holder.sh" <<'CEHOLD'
+d="$1"
+. "$2"
+export BIONIC_GATE_AGENT=ce-holder
+id="$(gate_ask work h --within 0)"; rc=$?
+printf '%s\n' "$rc" > "$d/ce-holder.rc"
+[ "$rc" = 0 ] || exit 0
+i=0; while [ ! -f "$d/ce-holder.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
+gate_end "$id" 0
+CEHOLD
+bash "$D/ce-holder.sh" "$D" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/gate.sh" >/dev/null 2>&1 &
+CE_HOLDER=$!
+bk_wait 10 bk_has "$D/ce-holder.rc"
+expect_eq "DC.0 precondition: the holder is admitted (60 + 15), so the run below finds no room" "0" \
+  "$(cat "$D/ce-holder.rc" 2>/dev/null)"
+export BIONIC_SETTLE_MAX_WAIT=3
+CE_CMD="touch '$D/ce.ran'"
+( cd "$T1" && bash "$BOOKED" --detach --agent wx-T2 --suites ce.test.sh -- "$CE_CMD" > "$D/ce.out" 2> "$D/ce.err"; echo "$?" > "$D/ce.rc" ) &
+CE_CALLER=$!
+bk_wait 10 bk_grep '^booked: started ' "$D/ce.out"
+CE_LOG="$(sed -n 's/^booked: started .* log=\([^ ]*\) .*/\1/p' "$D/ce.out" | head -n 1)"
+expect_nonempty "DC.1 precondition: the detached run started and named its log" "$CE_LOG"
+bk_ce_asked() { ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | grep -q '^[0-9][0-9]*$' \
+  && grep -qs '^key=ce.test.sh$' "$BIONIC_GATE_DIR"/requests/[0-9]*; }
+bk_wait 10 bk_ce_asked
+expect_true "DC.2 …and it is waiting at the gate: its request is there, unadmitted" bk_ce_asked
+sleep 0.5
+expect_false "DC.3 at 1000 of a 3-second bound the run has not ended (beside DC.2 on the same run)" \
+  test -e "${CE_LOG:-$D/none}.rc"
+world_tick 3
+bk_wait 20 bk_has "$D/ce.rc"
+expect_eq "DC.4 at 1003 the caller exits 75, the run's own code" "75" "$(cat "$D/ce.rc" 2>/dev/null)"
+expect_regex "DC.5 …the log carries the one line naming the wait, the request and the command to run again" \
+  '^booked: the gate did not admit this command within 3s; request [^ ]+ keeps its turn — run again: ' \
+  "$(grep '^booked: the gate did not admit' "${CE_LOG:-$D/none}" 2>/dev/null)"
+expect_eq "DC.6 …<log>.rc holds 75" "75" "$(cat "${CE_LOG:-$D/none}.rc" 2>/dev/null)"
+expect_eq "DC.7 …the log's last line is rc=75" "rc=75" "$(tail -n 1 "${CE_LOG:-$D/none}" 2>/dev/null)"
+expect_eq "DC.8 …the roster row carries run_rc=75" "75" \
+  "$(grep -F "run_log=$CE_LOG" "$ROSTER" | tail -n 1 | tr '|' '\n' | sed -n 's/^run_rc=//p')"
+expect_contains "DC.9 …the caller copied the line to its stdout" "booked: the gate did not admit this command within 3s" \
+  "$(cat "$D/ce.out" 2>/dev/null)"
+expect_false "DC.10 …and the command never ran" test -e "$D/ce.ran"
+touch "$D/ce-holder.go"
+wait "$CE_HOLDER" "$CE_CALLER" 2>/dev/null
+unset BIONIC_SETTLE_MAX_WAIT BIONIC_NOW_FILE
+if [ -n "$CE_CFG_WAS" ]; then export CLAUDE_CONFIG_DIR="$CE_CFG_WAS"; else unset CLAUDE_CONFIG_DIR; fi
+export BIONIC_GATE_DIR="$WORLD_ROOT/gate"
+world_machine 8 8192 10 0.5
 
 # =====================================================================================
 section "§WALL — the Bash wall wraps a suite call in --detach, and the run outlives its caller (T12; A-orch-7; AC-3.1)"

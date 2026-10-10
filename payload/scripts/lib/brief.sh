@@ -17,18 +17,15 @@
 #
 # NO BEHAVIOUR MOVED. Everything below `sanitize` down to the end of `lift_contract_fields`
 # is the hook's text, carried over verbatim. `brief_validate_fields` is the hook's arms from
-# "A DECLARATION IS LITERAL TEXT" through the derivation, with four mechanical changes:
+# "A DECLARATION IS LITERAL TEXT" through the suite set, with three mechanical changes:
 #
 #   1. `dp_finding <fact> <fix> <detail>` -> `"$sink" finding <fact> <fix> <detail>`
 #   2. `warn <line>`                      -> `"$sink" warn <line>`
 #   3. the hook's globals (C_FILES, DP_RUNS_CAP, BIONIC_ROOT, SUITES_ALLOWED, …) -> locals,
 #      the arguments, and the two BRIEF_SUITES_* results
-#   4. the derivation overrun's early spend -> `return 2`; the hook spends it
 #
 # The comments inside that function were written from the dispatch wall's seat, and "this
-# hook" in them means hooks/dispatch-preflight.sh. The derivation's bound is that hook's too
-# (lib/bounds.sh, IMPACT_BOUND_S under its 15 s registration); a door whose host registers a
-# shorter timeout must say so where it calls.
+# hook" in them means hooks/dispatch-preflight.sh.
 #
 # THE INTERFACE.
 #
@@ -40,10 +37,9 @@
 #       when that is recorded, else nothing it can be spelt as (rc 2)
 #   brief_field <lifted> <kind>        -> one kind's value, bounded as the roster row stores it
 #   brief_validate_fields <lifted> <subagent_type> <root> <sink>
-#       -> rc 0: no finding · rc 1: at least one · rc 2: the derivation overran its bound, so
-#          the suite set was never built (its finding is already in the sink)
-#       sets BRIEF_SUITES_ALLOWED and BRIEF_SUITES_SOURCE (`declared`, `derived` or empty), the
-#       two values the roster row records
+#       -> rc 0: no finding · rc 1: at least one
+#       sets BRIEF_SUITES_ALLOWED and BRIEF_SUITES_SOURCE (`declared` or empty), the two values
+#       the roster row records: the brief's own Suites: set (wave-31 T2, nothing derived)
 #       calls `<sink> finding <fact> <fix> <detail>` once per fault, in the order the dispatch
 #       wall reports them, and `<sink> warn <line>` for a loud pass
 #   brief_body_advisories <brief text> <name> <files> <suites-allowed> <re-executes> <poker>
@@ -55,8 +51,7 @@
 # (`Files: …`, `Suites: …`, `Re-executes: …`), so what it validates is exactly what a
 # dispatch carrying those lines would have been judged by.
 #
-# <root> is the repository root: `.bionic/config.yaml`'s `impact-command:` is read there and
-# the derivation runs there.
+# <root> is the repository root the door judges the brief in.
 #
 # BASH 3.2. SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME.
 #
@@ -76,12 +71,6 @@ _BRIEF_LIB_DIR="$(cd "$(_brief_self_dir)" && pwd -P)"
 if [ -z "${CMD_RUN_NORM_AWK:-}" ]; then
   # shellcheck source=/dev/null
   . "$_BRIEF_LIB_DIR/cmd-class.sh"
-fi
-
-# `config_value` reads the `impact-command:` key; lib/roots.sh is its one definition.
-if ! declare -F config_value >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_BRIEF_LIB_DIR/roots.sh"
 fi
 
 # Values are pipe-delimited on one line, so a field carrying a newline or a `|`
@@ -715,8 +704,7 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
     #
     # A SUITE IS RECOGNISED BY ITS BASENAME, never by the directory in front of it:
     # `tests/x.test.sh`, `./tests/x.test.sh` and an absolute spelling are one suite,
-    # and it is the basename the derived set (`tests/lib/impact.sh | cut -f1`) prints
-    # too. `run.sh` is admitted ONLY with a path component, because the bare word is
+    # and it is the basename the budget arm compares. `run.sh` is admitted ONLY with a path component, because the bare word is
     # not a suite anywhere in this repo and briefs use it in prose constantly; the
     # same restraint payload/scripts/lib/cmd-class.sh applies to argv[0].
     #
@@ -1115,8 +1103,7 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       addlabel("cadence",            "cadence", "([ \t]*:|[ \t])[ \t]*")
       # THE TWO INSTRUMENT LABELS (wave-01 S13, spec AC-20), BOTH PINNED TO LINE
       # START. `Files:` declares the intent — what this task will touch — and
-      # `Suites:` declares the consequence directly, for a repository where no
-      # impact command is configured. Both are pinned for the reason the six
+      # `Suites:` declares the closed set of suites it may run. Both are pinned for the reason the six
       # deliverable-kind labels are: every refusal below quotes them back as a
       # copy-paste example, and a brief that repeats the example mid-sentence has
       # documented the wall, not declared a field.
@@ -1232,12 +1219,12 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       # token in the span, comma-joined, exactly as the deliverable label lifts
       # its candidates. Several paths is the ORDINARY case here rather than an
       # ambiguity: a task touches a set, and the wall does not have to choose
-      # among them, it hands the whole set to the impact command.
+      # among them: the row records the whole set as the scope of the task.
       h = firsthit("files")
       if (h > 0) { v = paths(spanof(h), FILES_MAX, "Files:", 1); if (v != "") print "files=" v }
       # THE SUITES THE BRIEF DECLARES, NORMALISED TO BASENAMES at the moment they
-      # are lifted, so the declared spelling and the derived one are the same
-      # spelling on the row and the writer-side guard compares one alphabet. The
+      # are lifted, so every spelling of a suite is one spelling on the row and the
+      # writer-side guard compares one alphabet. The
       # explicit waiver `Suites: none` lifts as the literal token `none`, which is
       # a DECLARED empty set — distinguishable on the row from a brief that stated
       # no budget at all, and refused by the guard for every suite.
@@ -1466,7 +1453,7 @@ brief_files_entry() {
 # or on an e.g. / for example / such as line (an example is not an instruction).
 #   (a) RUN: `bash …tests/<x>.test.sh|run.sh` where the `bash` opens the line (after a bullet
 #       and an optional `cd <dir> &&`) or follows a backtick, and <x> is in neither the suite set
-#       (declared or derived) nor the declared runs.
+#       the brief declared nor the declared runs.
 #   (b) WRITE: a sentence opening with Edit / Change / Fix / Update / Patch / Rewrite / Modify
 #       whose object — the first word after any of the, a, an, file, script, hook, test, suite —
 #       is a path (has a `/`), is not under a `record/` directory, and is not in `Files:`
@@ -1529,7 +1516,7 @@ brief_body_advisories() {
               sub(/^.*\//, "", b)
               if (b ~ /\.test\.sh$/ || b == "run.sh") {
                 if (!suite_declared(b))
-                  emit("S:" b, "the brief body runs " b " (\"" show(ln) "\") but Suites:, Re-executes: and the derived suite set do not name it; to declare it: " amend("--suites+", b))
+                  emit("S:" b, "the brief body runs " b " (\"" show(ln) "\") but neither Suites: nor Re-executes: names it; to declare it: " amend("--suites+", b))
               }
               break
             }
@@ -1590,8 +1577,8 @@ brief_validate_fields() {
   local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
   local files_unread files_bad entry fact fix questions no_instrument=""
-  local cap capw detail suites_comment impact_cmd found=0
-  local _impact_out _impact_tmp _impact_pid _impact_overran _impact_rc _old_ifs
+  local cap capw detail suites_comment found=0
+  local _old_ifs
   files=$(brief_field "$lifted" files)
   suites=$(brief_field "$lifted" suites)
   re_executes=$(brief_field "$lifted" re_executes)
@@ -1670,8 +1657,7 @@ EOF
   #
   # THE RULE THE PROSE HAS PROMISED SINCE WAVE-01, now enforced. The suite-allowance
   # refusal below has always ended "one path per token, no shell variables … a name that
-  # is still a variable when a hook sees it can be neither derived from nor checked
-  # against anything" — and nothing at dispatch checked it (research R1 Q3). A token
+  # is still a variable when a hook sees it can be checked against nothing" — and nothing at dispatch checked it (research R1 Q3). A token
   # `tests/$X.test.sh` was basenamed to `$X.test.sh` and lifted onto the roster row as a
   # budget entry, where the writer-side guard then refused every command the agent ran,
   # with its own honest message about an unexpanded name, 40 minutes after the moment the
@@ -1720,7 +1706,7 @@ Then retry the dispatch."
   # Its checks file says "Re-execute at least one evidence command per tier used (cap 3 total)",
   # and a suite named under Suites: is re-executed as surely as a marked run, so the two count
   # together: four suites, or three suites and one run, is over. The suites are the Suites: line's
-  # own (`$suites`, before any derivation); the runs are the kept and the dropped ones, counted
+  # own (`$suites`); the runs are the kept and the dropped ones, counted
   # by `dp_counted_runs` off the lift's whole line, so housekeeping stays free and the total is
   # true however many were dropped. One finding names the total and the cap; the over-cap arm
   # below keeps every other brief's words.
@@ -1825,9 +1811,8 @@ Then retry the dispatch."
   fi
 
   # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
-  # (seed .bionic/docs/ideas/suite-allowance-wall.md items 1-2; design ledger D2,
-  # Chris 2026-09-05 "Option 2": a brief declares INTENT, the machine derives the
-  # consequences.)
+  # (seed .bionic/docs/ideas/suite-allowance-wall.md items 1-2; design ledger D2. The
+  # derivation D2 added is deleted at wave-31 T2, REQ-4 AC-4.2: the brief names its suites.)
   #
   # THE INCIDENT. Two writers finished their own hooks green at ~45 minutes and then
   # spent 40 more re-running the entire test tree one suite at a time, in parallel, on
@@ -1835,19 +1820,9 @@ Then retry the dispatch."
   # tests/run.sh; run X, Y, Z as consumers", and "consumers" was read as "everything".
   # Prose in a brief is a wish. Only a wall binds a writer.
   #
-  # WHAT THE BRIEF DECLARES. `Files:` — the paths this task will touch. That is intent,
-  # and it is the only thing the author reliably knows at dispatch. The CONSEQUENCE (which
-  # suites read those paths) is a fact about the tree, and D2 gave the tree ownership of it:
-  # `impact-command:` in .bionic/config.yaml names the derivation, the wall runs it over the
-  # declared paths, and the answer goes on the roster row for the writer-side guard to hold
-  # the agent to.
-  #
-  # `Suites:` IS THE OTHER HALF, not a legacy spelling. bionic runs in repositories that
-  # have no impact command and never will, and there the author is the only one who can
-  # state the set — so a declared list is a first-class input, recorded as
-  # `suites_source=declared` so no reader downstream mistakes a stated set for a derived
-  # one. It also WINS over a derivation when a brief carries both: `Suites: none` is the
-  # waiver, and a waiver that a derivation could overrule is not a waiver.
+  # WHAT THE BRIEF DECLARES. `Suites:` — the closed set of suites the agent may run, recorded
+  # on the roster row for the writer-side guard to hold the agent to; `Suites: none` waives it.
+  # `Files:` is the task's scope and names no suite.
   #
   # A BRIEF WITH NEITHER IS REFUSED, and that is the whole wall. Everything else here is
   # bookkeeping: without one of the two labels there is no budget on the row, and a guard
@@ -1884,11 +1859,7 @@ Then retry the dispatch."
 read \"run the impacted suites\" as the whole tree and spent 40 minutes each
 re-proving the world; the budget only binds when it is on the roster row.
 
-Fix: declare the files this task will touch, on a line of its own —
-    Files: path/one.sh, path/two.sh
-  The impact command named in .bionic/config.yaml derives the suites from them.
-
-Where no impact command is configured, name the closed set yourself —
+Fix: name the closed set of suites this task may run, on a line of its own —
     Suites: tests/one.test.sh, tests/two.test.sh
 
 Where the tests are not shell suites, name the commands themselves instead — each marked
@@ -1901,11 +1872,11 @@ Or waive the budget for a brief that runs no suite at all —
 Either way: one path per token, no shell variables. Both labels are read out of the
 brief TEXT, before any shell has expanded anything, and the writer-side guard reads
 its command the same way — a name that is still a variable when a hook sees it can
-be neither derived from nor checked against anything.
+be checked against nothing.
 
 Then retry the dispatch."
     no_instrument=1
-    found=1; "$sink" finding "this brief declares no Files: and no Suites:" "declare Files: or Suites:" "$detail"
+    found=1; "$sink" finding "this brief declares no Files: and no Suites:" "declare Suites:" "$detail"
   fi
 
   # AN AUDITOR MAY WAIVE NOTHING (T6, REQ-4 AC-4.3/4.4; D6). `Suites: none` is a legitimate
@@ -1968,34 +1939,22 @@ Then retry the dispatch."
       fi
   fi
 
-  # ---------- the derivation ----------
+  # ---------- the suite set: the brief's own (wave-31 T2; REQ-4 AC-4.2, D3) ----------
   #
-  # THE COMMAND IS CONFIGURATION, THE PATHS ARE THE BRIEF. The command is word-split (it is
-  # `bash tests/lib/impact.sh` — a runner and a script, not one word) and the declared paths
-  # go in as separate arguments, quoted. Nothing is eval'd: a path lifted out of a brief is
-  # author-supplied text, and word-splitting it into a command line is how a `Files:` line
-  # carrying a semicolon becomes a command. `ispath` has already rejected anything without a
-  # slash, but the shape of the guard here does not depend on that check holding.
+  # THE BRIEF NAMES THE SET; NOTHING IS DERIVED. The file-to-suite map that once turned
+  # `Files:` into a set is deleted: it answered "every suite" for the files most rows edit and
+  # missed suites for the rest. `Files:` is scope, and `suites_allowed=` is the brief's own
+  # `Suites:` tokens, recorded as `suites_source=declared`.
   #
-  # THE COMMITTED DEFAULT IS ABSENCE (plan A-8). `.bionic/config.yaml` is machine-local, so a
-  # fresh clone and every other repository bionic runs in take the declared path.
-  #
-  # A DERIVATION THAT FAILS OR ANSWERS NOTHING LEAVES `suites_allowed=` EMPTY, and empty is
-  # the third state: not a set, and not the `none` waiver either. The writer-side guard reads
-  # it as "no budget was stated" and stands aside for a named suite while still refusing
-  # tests/run.sh, so a broken impact command costs an over-wide instrument rather than an
-  # agent that can run nothing. The operator is told at dispatch, which is the moment the
-  # config is still fixable.
-  impact_cmd=$(config_value "$root" "impact-command" "")
+  # A BRIEF WITH NO `Suites:` LEAVES `suites_allowed=` EMPTY, the third state: not a set and not
+  # the `none` waiver. The writer-side guard reads it as "no budget was stated" and stands aside
+  # for a named suite while still refusing tests/run.sh.
   BRIEF_SUITES_ALLOWED=""
   BRIEF_SUITES_SOURCE=""
   # A READER'S SUITES ARE THE TOKENS ITS Suites: LINE NAMES (wave-27 T72; review pass 49 B1,
   # A-orch-134). A reader's Files: line lists its records and a reader edits no tracked file, so
-  # nothing is derived from it and "no impact command is configured" is never its answer. The
-  # ROLE decides, here, ahead of the derivation: a line that is all comment, `#` alone, blank or
-  # absent names no token, and that is `Suites: none`. T57 tested which fields were empty instead,
-  # and left the line that is all comment to the writer's derivation (eight suites beside a run).
-  # The evidence rules above have already judged the runs, and a refused or dropped token above.
+  # it is never refused for naming no suite. The ROLE decides, here: a line that is all comment,
+  # `#` alone, blank or absent names no token, and that is `Suites: none`.
   if dp_is_reader "$role"; then
     BRIEF_SUITES_ALLOWED="${suites:-none}"
     BRIEF_SUITES_SOURCE="declared"
@@ -2003,170 +1962,30 @@ Then retry the dispatch."
     BRIEF_SUITES_ALLOWED="$suites"
     BRIEF_SUITES_SOURCE="declared"
   elif [ -z "$files" ]; then
-    # NOTHING TO DERIVE FROM, AND THE ABSENCE IS ALREADY A FINDING. Before the arms
-    # collected, this branch was unreachable: the wall above exited on a brief carrying
-    # neither label, so anything past it held at least one of them. It is reachable now,
-    # and it must stay silent — running the derivation over an empty argument list would
-    # warn that "the impact command derived no suites" (it was never asked), and falling
-    # into the arm below would report a missing `impact-command:` as a SECOND fault when
-    # the brief's own missing `Files:` is the one the author fixes. One fault, one finding.
+    # NOTHING DECLARED UNDER Files: EITHER, AND THE ABSENCE IS ALREADY A FINDING (or the brief
+    # declares runs only, which is a budget). One fault, one finding.
     :
-  elif [ -n "$impact_cmd" ]; then
-    _old_ifs="$IFS"; IFS=','; set -f
-    # shellcheck disable=SC2086
-    set -- $files
-    set +f; IFS="$_old_ifs"
-    _impact_out=""; _impact_rc=0
-    if [ "$#" -gt 0 ]; then
-      # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). The derivation is the whole of the
-      # gate's cost: ~0.3 s without it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s
-      # measured while this wave's own writers were running — which is exactly the condition
-      # under which a wave dispatches.
-      #
-      # WHY THE BOUND IS A REFUSAL AND NOT A FALLBACK. A PreToolUse hook killed on the CLI's
-      # timeout does NOT exit 2. The dispatch proceeds, no roster row is written, and the
-      # writer runs with no budget at all — the wall defeated by the cost of the wall. That is
-      # the one failure this arm cannot have, so the overrun is refused here, in time, with a
-      # message. The other derivation failures stay as they were (empty budget + a warning):
-      # a command that answers nothing has still answered.
-      #
-      # WHICH IS WHY THE BOUND MUST SIT STRICTLY UNDER THIS HOOK'S REGISTRATION, MARGIN NAMED
-      # (wave-14 D2, ratified; D1 moved both numbers). hooks/hooks.json registers this hook at
-      # `"timeout": 15` and `IMPACT_BOUND_S` is 10, five seconds clear. A bound above the
-      # registration cannot refuse anything in production, however many times this file's
-      # suite drives it to a refusal — the suite has no CLI timeout and the machine does
-      # (A-T6.5). The pair is pinned where the two files meet: cross-gate-agreement §L.4c.
-      #
-      # BUILT, NOT BORROWED. bionic's command discipline forbids a `timeout`/`gtimeout` binary
-      # and macOS ships neither, so the bound is a backgrounded child and a `kill -0` poll.
-      # THE BOUND IS NOT THIS FILE'S (wave-14 REQ-7, D4). `IMPACT_BOUND_S` lives in
-      # lib/bounds.sh and is read by both legs of the fleet — this wall, once per dispatch,
-      # and lib/stop.sh's landing sweep, once per sweep. Both carried their own `6` under
-      # their own header, and two copies of a constant do not disagree loudly: they disagree
-      # the next time a wave moves one of them, and what ships is a tree whose two legs mean
-      # different things by "bounded" while every message quotes its own half (R2 Q8 found the
-      # twin). Read the library's header before touching the number — it is a HANG GUARD now,
-      # not a cost budget, and the answer to a slow derivation is the cache, never this.
-      #
-      # SOURCED THE WAY lib/stop.sh SOURCES IT, guarded on the thing it defines so a caller
-      # that already has it pays nothing, and LAZILY — here, at the one arm that spends it,
-      # rather than at file scope beside the loader's own seven libraries. Every dispatch that
-      # declares `Suites:` outright reaches neither this branch nor this read.
-      if [ -z "${IMPACT_BOUND_S:-}" ]; then
-        # shellcheck source=/dev/null
-        . "$_BRIEF_LIB_DIR/bounds.sh"
-      fi
-      # THE WAIT ENDS ON A CLOCK, NOT ON A COUNT OF POLLS (wave-14 T34). This loop used to
-      # spend a tick budget — `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))`, one tick per
-      # `sleep 0.1` — and call the budget the bound. It is not the bound. `sleep` is an
-      # external binary, so every tick pays a fork and an exec on top of the 100 ms it
-      # sleeps: measured at 115.3 ms a tick on a quiet Mac (T34 §2), which makes a stated
-      # 20 s bound a 23.0-23.2 s wait and a stated 5 s bound a 5.77 s wait, while the
-      # refusal below quotes the stated number. That is the same lie the derived budget was
-      # written to prevent, one layer down — the literal was fixed, the RATE was not.
-      #
-      # AND THE ERROR IS PROPORTIONAL, WHICH IS THE PART THAT MATTERS. A fixed 15% would
-      # only be untidy. Under the load 8-12 a wave actually dispatches at, each tick costs
-      # more and the realized wait grows with it — so the one guard whose job is to stop a
-      # wedged session waiting gets slower exactly when the session is wedged. A hang guard
-      # cannot be denominated in a unit that stretches under the condition it guards.
-      #
-      # `SECONDS` IS THE CLOCK, AND IT COSTS NOTHING. Assigning it zeroes bash's own
-      # elapsed-time counter and reading it is a shell builtin — no second fork per tick, on
-      # a path this wave is measuring for latency. /bin/bash is 3.2 on a Mac, which has
-      # neither `EPOCHREALTIME` nor `printf %(%s)T`, and bionic's command discipline forbids
-      # a `timeout` binary; `date +%s` would cost a fork per tick to buy the same
-      # whole-second resolution `SECONDS` gives free. Nothing else in this hook or in the
-      # libraries it sources reads `SECONDS`, so zeroing it here takes nothing from anyone.
-      #
-      # THE RESOLUTION IS A WHOLE SECOND, AND IT ROUNDS TOWARD WAITING LESS. `SECONDS` is
-      # integer, and the assignment below lands at an arbitrary point inside a second, so the
-      # wait ends somewhere in [bound-1, bound] — never past the number the refusal quotes.
-      # For a hang guard that is the correct direction to be wrong in: a guard that fires a
-      # little early costs a re-dispatch, and one that fires late costs the thing the guard
-      # exists for. The bound itself is NOT this file's to move (lib/bounds.sh, D4); this
-      # changes only whether the wait honours it.
-      #
-      # `sleep 0.1` STAYS the poll cadence. It is what makes a prompt derivation noticed
-      # promptly, and with the clock deciding, its cost no longer accumulates into the bound.
-      _impact_tmp="${TMPDIR:-/tmp}/bionic-impact-$$-${RANDOM}.out"
-      # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-      ( cd "$root" 2>/dev/null && $impact_cmd "$@" >"$_impact_tmp" 2>/dev/null ) &
-      _impact_pid=$!
-      SECONDS=0
-      _impact_overran=0
-      while kill -0 "$_impact_pid" 2>/dev/null; do
-        if [ "$SECONDS" -ge "$IMPACT_BOUND_S" ]; then
-          kill -TERM "$_impact_pid" 2>/dev/null
-          _impact_overran=1
-          break
-        fi
-        sleep 0.1
-      done
-      wait "$_impact_pid" 2>/dev/null
-      _impact_rc=$?
-      if [ "$_impact_overran" -eq 1 ]; then
-        rm -f "$_impact_tmp"
-        detail="The command named by \`impact-command:\` in .bionic/config.yaml turns the paths this
-brief declared into the set of suites the agent may run. This hook is registered with a
-timeout of its own in hooks/hooks.json, and a hook killed on that timeout does NOT refuse:
-the dispatch would proceed with no roster row at all, and the writer would run with no
-budget — the wall defeated by the cost of the wall. So the derivation is bounded here,
-strictly under that registration.
-
-  command: $impact_cmd
-  paths:   $*
-  bound:   ${IMPACT_BOUND_S}s
-
-Fix: narrow \`Files:\` to the paths this task really writes, or name the closed set
-directly with \`Suites:\` — a declared set needs no derivation at all. If the command
-itself has become slow, that is the thing to fix: it runs on every dispatch."
-        # A TIMEOUT IS NOT A BROKEN COMMAND (wave-24 T13, D10, AC-6.7). The bound expired, so
-        # the fact says that and for how long, and the fix is the brief's: a narrower `Files:` or
-        # a declared `Suites:` needs less derivation or none. A command that FAILED is the warn
-        # below, which names its exit status; the two never share a sentence.
-        found=1; "$sink" finding "the impact command timed out after ${IMPACT_BOUND_S} s" "declare Suites:, narrow Files:" "$detail"
-        # NOTHING DERIVED MEANS NOTHING TO JUDGE AGAINST (AC-8.2). The wall that reads the suite
-        # set (the dispatch wall's full-run arm) is the caller's, so the
-        # caller is told the set was never built — rc 2 — and says `not checked` for it itself.
-        # rc 2 IS ALSO AN EARLY SPEND for the dispatch wall (Step-6 architecture review §2.2):
-        # there is nothing below this branch but checks that depend on the derivation, so an
-        # arm added after it that does NOT must be pooled above the derivation instead.
-        return 2
-      fi
-      _impact_out=$(cat "$_impact_tmp" 2>/dev/null) || _impact_out=""
-      rm -f "$_impact_tmp"
-    fi
-    BRIEF_SUITES_ALLOWED=$(printf '%s\n' "$_impact_out" | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
-    BRIEF_SUITES_ALLOWED="${BRIEF_SUITES_ALLOWED% }"
-    BRIEF_SUITES_SOURCE="derived"
-    if [ -z "$BRIEF_SUITES_ALLOWED" ]; then
-      if [ "${_impact_rc:-0}" -ne 0 ]; then
-        "$sink" warn "the impact command failed (exit ${_impact_rc}) and derived no suites from the declared files; the row records an empty budget: $impact_cmd"
-      else
-        "$sink" warn "the impact command derived no suites from the declared files; the row records an empty budget: $impact_cmd"
-      fi
-    fi
+  elif [ -n "$suites_dropped$suites_bad$runs_bad$runs_dropped" ]; then
+    # A DECLARED TOKEN WAS REFUSED ABOVE. That refusal names the token the author fixes; a
+    # second finding here for the set it would have named is the same fault twice.
+    :
   else
-    # `Files:` alone in a repository with no impact command states an intent nothing can turn
-    # into a budget. AC-20: where no impact command is configured the wall requires the
-    # explicit list. Refused rather than passed with an empty set, because the author is
-    # holding the brief and one line fixes it.
-    detail="\`Files:\` states which paths the task will touch. Turning that into the set of
-suites the agent may run is the tree's job, and this repository has not named the
-command that asks it.
+    # `Files:` alone names no suite. Refused rather than passed with an empty set, because the
+    # author is holding the brief and one line fixes it.
+    detail="\`Files:\` names the paths this task will touch, not the suites it may run; the brief
+names those itself.
 
-Fix: name the closed set in the brief instead —
+Fix: name the closed set in the brief —
     Suites: tests/one.test.sh, tests/two.test.sh
 
-Or configure the derivation once, in .bionic/config.yaml —
-    impact-command: bash tests/lib/impact.sh
+Where the tests are not shell suites, name the commands under Re-executes: and waive
+the suite set beside them —
+    Suites: none
 
 Then retry the dispatch."
     if [ -n "$re_executes" ]; then
-      detail="\`Files:\` states which paths the task will touch. Turning that into the set of
-suites the agent may run is the tree's job, and this repository has not named the
-command that asks it.
+      detail="\`Files:\` names the paths this task will touch, not the suites it may run; the brief
+names those itself.
 
 Fix: your runs are declared under Re-executes:; waive the suite set with \`Suites: none\` beside it —
     Suites: none
@@ -2174,18 +1993,15 @@ Fix: your runs are declared under Re-executes:; waive the suite set with \`Suite
 Or name the closed set in the brief instead —
     Suites: tests/one.test.sh, tests/two.test.sh
 
-Or configure the derivation once, in .bionic/config.yaml —
-    impact-command: bash tests/lib/impact.sh
-
 Then retry the dispatch."
     fi
     # THE SHORT FIX IS THE ONE THAT APPLIES (wave-22 T10; critic C3). On a several-fault brief the
     # detail block above is dropped and only this line reaches the author.
-    local short_fix="set impact-command in config.yaml"
+    local short_fix="add Suites: or Re-executes:"
     # THE CAPPED USER LINE (wave-22 T13; critic-3598752 I1): on a one-fault brief this short fix
     # ends the 100-column line, so it stays at 98 columns or refuse.sh refuses its own call.
     if [ -n "$re_executes" ]; then short_fix="Suites: none beside Re-executes:"; fi
-    found=1; "$sink" finding "no impact command is configured here" "$short_fix" "$detail"
+    found=1; "$sink" finding "Files: alone names no suite" "$short_fix" "$detail"
   fi
 
   return "$found"

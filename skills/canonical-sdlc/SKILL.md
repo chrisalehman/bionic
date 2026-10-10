@@ -41,7 +41,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 **Iron law.** No commit without evidence from the current step. The evidence gate reads the plan's `current:` and validates that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
 
-**Bulk reference.** Artifact shape, evidence-gating detail, intent-specific behaviors and the full version history live in `skills/canonical-sdlc/operational-rules.md`, beside this file. Read it when you need the detail this file compresses — it is copied with the skill, but nothing loads it for you.
+**Bulk reference.** Artifact shape and authoring detail live in `skills/canonical-sdlc/operational-rules.md`, beside this file, and the version history in the CHANGELOG. Read it when you need the detail this file compresses; nothing loads it for you.
 
 ## Load-time announcement
 
@@ -147,7 +147,7 @@ they must outlive the run that produced them. `tmp/` is wiped at Step 8 and take
 with it — everything, that is, except a live session's own keyed state, which the wipe spares
 by owner liveness, not file name. Give an agent a `record/` path in its brief.
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 14`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 14`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, `regression:` (`yes` or `no`, Step 0's setting) and, where it differs from the scale default, `regression-override:` beside those, and, where the run's rigor sits below its derived floor, `rigor-override:`. None of these is required to write, but a `walk:` value outside the enum blocks.
 
 **14 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. A run that predates it is brought forward to 14, not exempted.
 
@@ -206,7 +206,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 0 | `prereqs: ok` |
 | 1, 2, 3 | pointer (presence only) |
 | 4 | pointer, plus `worktree:`/`base-sha:`/`branch:`, owed at every scale and whatever `use_worktree:` says; `current 4` fills them at wave scale |
-| 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
+| 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, the floor being one whole green run at a commit on the branch plus every later commit proved by the suites its row named (a build row runs its brief's suites; one whole run after the last lands, when `regression:` is `yes`; a fix row the red suites plus its own; a second whole run on `session-poker.sh approve regression-2`), or, at `regression: no`, the line `regression: no (Step 0, <user>) — <where it runs>` in place of `cmd`/`pass`/`total`/`output`/`head`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
 | 6 | one fact per owed question (`proved: kind=review`), or its `waived:` line; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |

@@ -201,8 +201,12 @@
 # THE PLACE is the detached side's: it asks the gate itself, so the request's holder is its pid and
 # the place stays booked until it ends the request, whatever became of the caller. --kill-after is
 # the run's own ceiling, as before. --max-wait does not reach a detached run: it was the Bash call's
-# bound on a wait inside that call, and a detached run's wait is inside no call, so it waits at the
-# gate until admitted. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
+# bound on a wait inside that call, and a detached run's wait is inside no call. THE CEILING (wave-31
+# T12; D10): the detached side asks the gate with --within BIONIC_SETTLE_MAX_WAIT (1200 s unless set)
+# when nothing smaller bounds it, so a run the gate has not admitted by then ends through the
+# not-admitted path below: exit 75, one line naming the wait and the command to run again in the log,
+# `rc=75` there, `75` in `<log>.rc`, `run_rc=75` on the roster row; the caller copies the line and
+# exits 75, and `session-poker.sh wait` prints it. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
 # macOS ships no `setsid`, and perl is the one tool a stock machine has for it. No perl, or a
 # detached side that is neither alive nor ended once its pid file is read, exits 71 with one line.
 #
@@ -846,12 +850,15 @@ booked_run_close() {  # <rc> — the exit trap of the detached side
 BOOKED_T0=$SECONDS
 # THE CALL'S LIMIT: the smaller of --kill-after and --max-wait; the ask's --within, and the one
 # ceiling of a --quiet run's settle and retries. With neither, the gate waits until it admits,
-# and the settle's ceiling is BIONIC_SETTLE_MAX_WAIT.
+# and the settle's ceiling is BIONIC_SETTLE_MAX_WAIT; a detached run's ask is bounded by it too.
 BOOKED_WITHIN="$kill_after"
 if [ -n "$max_wait" ] && { [ -z "$BOOKED_WITHIN" ] || [ "$max_wait" -lt "$BOOKED_WITHIN" ]; }; then
   BOOKED_WITHIN="$max_wait"
 fi
 case "${BIONIC_SETTLE_MAX_WAIT:-}" in ''|*[!0-9]*) BOOKED_SETTLE_MAX=1200 ;; *) BOOKED_SETTLE_MAX=$BIONIC_SETTLE_MAX_WAIT ;; esac
+# THE DETACHED SIDE'S CEILING (T12; D10): its wait is inside no call, so with no smaller limit the ask
+# is bounded by the settle's ceiling, and a run not admitted inside it ends 75 (booked_not_admitted).
+[ -z "$run_log" ] || [ -n "$BOOKED_WITHIN" ] || BOOKED_WITHIN="$BOOKED_SETTLE_MAX"
 # The settle gives up at "$SECONDS >= deadline", so a kill limit gets one second more: the
 # settle then gives up past the limit, never before it, by the kill's own rule (A-T50.3).
 if [ -n "$BOOKED_WITHIN" ]; then

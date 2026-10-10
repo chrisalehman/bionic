@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 3 of 4: Sections 56 through 73.
+# Tests for hooks/session-poker.sh — shard 3 of 4: Sections 56 through 74.
 #
 # THE SUITE IS FOUR SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its
 # hermetic posture and its clock discipline are written once, in tests/session-poker.test.sh's
@@ -21,6 +21,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -523,22 +524,22 @@ expect_eq "57v13 no projection copy is left beside the plan" "" \
 R57T="$(make_repo s57-task)"; ( cd "$R57T" && git commit -q --allow-empty -m init )
 S57T_B="$(git -C "$R57T" rev-parse HEAD)"
 P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
-mkdir -p "$(dirname "$P57T")"
-{
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-  printf 'rigor: single\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
-  printf 'walk: exempt\ndeploy_target: n/a\n'
-  # A task-scale plan carries its base in the frontmatter (T45, A-orch-56): with none, a first
-  # reading is refused and the judge exits 2 (section 63 pins that twin).
-  printf 'base-sha: %s\n' "$S57T_B"
-  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-  printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
-  printf -- '- T1: the fix, in .worktrees/01-task\n\n'
-  printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
-  printf '| T1 | bugfix | single | the fix | active |\n\n'
-  printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-  printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
-} > "$P57T"
+# THE ONE TABLE AT TASK SCALE (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
+# `scale: task`, `current: 4`, one row in flight. Its base is the Step-4 block's `base-sha:`, where
+# the one shape carries it at either scale (A-T24-12); with none, a first reading is refused and the
+# judge exits 2 (section 63 pins that twin, its Step-4 key empty).
+s57t_task_plan() {  # <plan> <Step-4 base-sha value, or "" for the key alone> -> the plan, with the run's branch and the row's line
+  plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
+  S57T_BASE="$2" awk '
+    /^  base-sha: / { print "  base-sha:" (ENVIRON["S57T_BASE"] != "" ? " " ENVIRON["S57T_BASE"] : ""); next }
+    { print }
+    /^approved-by: / { print "working-branch: task/01-fixture"; print "- T1: the fix, in .worktrees/01-task" }' \
+    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+s57t_task_plan "$P57T" "$S57T_B"
+expect_eq "57t0a precondition: the fixture is a task-scale plan at current: 4 whose Step-4 base is the init commit" \
+  "scale: task|current: 4|  base-sha: $S57T_B" \
+  "$(/usr/bin/grep -E '^scale: |^current: |^  base-sha: ' "$P57T" | tr '\n' '|' | sed 's/|$//')"
 bound_marker "$R57T" "$SID" "$P57T" >/dev/null 2>&1
 ( cd "$R57T" && git add -f "$P57T" && git commit -qm plan \
   && git worktree add -q -b task/01-fixture "$R57T/.worktrees/01-task" "$S57T_B" ) >/dev/null 2>&1
@@ -1533,29 +1534,20 @@ section "Section 63 §BASE §HEAD §FLOOR-HEAD §WHOLE-TIME §EDGES: the judge h
 # copy of proof.sh that turns its row red. A waiver's question and head survive a reply and a git
 # user name that spell ` by question=… head=…` (F6).
 #
-# FIXTURE FIDELITY. §BASE is section 57t's task-scale plan, written the same way, with no
-# `base-sha:` (review pass 13's exp6.sh: commits init → unread code → read code), then with the
-# base in its frontmatter, where A-orch-56 puts it at task scale. Readings register through the
+# FIXTURE FIDELITY. §BASE is section 57t's task-scale plan, written the same way, with no base: its
+# Step-4 `base-sha:` key is empty, which the gate admits at `current: 4` and the judge passes over
+# (review pass 13's exp6.sh: commits init → unread code → read code; wave-31 T24, A-T24-12). Then
+# the base goes in its frontmatter, where A-orch-56 puts it, the place the judge reads after the
+# Step-4 block. Readings register through the
 # verb under the 57t roster row shape (s56_row, `questions=` SYNTHESIZED until T15). The judge's
 # planted copies are written by the production writers (`proof_line`, `proof_add_line`). §WHOLE-TIME
 # is §42's wave plan, admitted by the real commit gate, with its own `## Tasks` rows. §EDGES is
 # exp3.sh's repository: real merges and real `git mv` renames. Each mutant is a copy of the whole
 # lib directory with one line of proof.sh changed, run beside the shipped one.
 S63_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-s63_task_plan() {  # <repo> <plan> -> a scale: task plan as 57t writes it, with no base-sha:
+s63_task_plan() {  # <repo> <plan> -> 57t's task-scale plan, its Step-4 `base-sha:` key empty
   mkdir -p "$(dirname "$2")"
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: single\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
-    printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-    printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
-    printf -- '- T1: the fix, in .worktrees/01-task\n\n'
-    printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
-    printf '| T1 | bugfix | single | the fix | active |\n\n'
-    printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
-  } > "$2"
+  s57t_task_plan "$2" ""
 }
 s63_base() {  # <plan> <sha> -> the plan with `base-sha: <sha>` in its frontmatter, after scale:
   B="$2" awk '{ print } /^scale: / && !d { print "base-sha: " ENVIRON["B"]; d = 1 }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
@@ -1588,7 +1580,7 @@ for s63q in evidence adversarial structure; do
 done
 expect_eq "63a0 precondition: unread code is the parent of read code, and init its parent" "$S63_I $S63_U" \
   "$(git -C "$S63_WT" rev-parse "$S63_H~2" "$S63_H~1" | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "63a0b precondition: the plan names no base-sha: anywhere" "0" "$(/usr/bin/grep -c 'base-sha' "$P63")"
+expect_eq "63a0b precondition: the plan's one base-sha: is the Step-4 key, empty" "  base-sha:" "$(/usr/bin/grep 'base-sha' "$P63")"
 s34_gate "$R63"
 expect_eq "63a0c precondition: the task-scale plan with no base is admitted by the real commit gate" "0" "$GATE_RC"
 s42_snap "$R63" "$P63"
@@ -2183,8 +2175,16 @@ section "Section 65 §DECLINE-VERB §DECLINE-LOG §BUDGET-USER: a wall is never 
 # row it did not name is ready. A user's cap on writers is no decline at all: `budget
 # writers=<n> '<reply>'` writes it into the plan header every reader of the ceiling reads.
 S65_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+# THE TASK-SCALE PLAN IS THE ONE SHAPE (wave-31 T5; D2): tests/lib/plan-fixture.sh at `scale: task`,
+# T1 in flight and T2/T3 pending, where §31's six-column `current: T1` plan stood.
+s65_task_plan() {  # <repo> -> the path; scale: task, the one table, T1 active in its tree
+  plan_fixture "$1/.bionic/docs/plans/epic-01-task-scale/task-01-fixture.plan.md" task \
+    "| T1 | 4 | build | the unit in flight | — | — | — | 30 | REQ-1 | a.sh | 18-T1 | — | active |" \
+    "| T2 | 4 | build | the next unit | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+    "| T3 | 4 | build | the unit after that | implementor | — | — | 30 | REQ-1 | c.sh | — | — | pending |"
+}
 R65="$(make_repo s65-decline)"; new_roster "$R65"
-P65="$(s31_task_plan "$R65" T1)"
+P65="$(s65_task_plan "$R65")"
 bind_marker "$R65" "$P65"
 add_row "$R65" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 s65_led() { cat "$1/.bionic/docs/record/${2:-task-01-fixture}/fill-ledger.log" 2>/dev/null; }
@@ -2206,7 +2206,8 @@ poke_pressure "$R65" 8192 1.0 tick
 expect_contains "65c AC-15.1 the next tick prints the standing decline, its time and its reason, in the reply form's words" \
   "poker: fill-declined standing since ${S65_AT} — the machine is saturated" "$OUT"
 expect_absent "65c2 …and no FILL for the rows it named" "poker: FILL" "$OUT"
-printf '| T4 | bugfix | standard | a unit nobody declined | pending | — |\n' >> "$P65"
+awk '{ print } /^\| T3 \| 4 \| build \|/ { print "| T4 | 4 | build | a unit nobody declined | implementor | — | — | 30 | REQ-1 | d.sh | — | — | pending |" }' \
+  "$P65" > "$P65.tmp" && mv "$P65.tmp" "$P65"
 poke_pressure "$R65" 8192 1.0 tick
 expect_eq "65d a row the decline did not name is ready: the tick fills it alone" "poker: FILL T4" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
@@ -2655,7 +2656,7 @@ s42_unchanged "67f8 writers=9, one over the derived 8 (the user's cap of 3 stand
 # taken from the refusal and run as printed. fails-when: the printed line writes a ledger line.
 S67D_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R67D="$(make_repo s67-decline-slot)"; new_roster "$R67D"
-P67D="$(s31_task_plan "$R67D" T1)"
+P67D="$(s65_task_plan "$R67D")"
 bind_marker "$R67D" "$P67D"
 add_row "$R67D" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R67D" 8192 1.0 tick
@@ -3106,10 +3107,11 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 # Each writer verb hands plan_verb_swap the `writer` mode, so its copy is judged at `current: 4`;
 # `current` alone dry-commits at the step it judges, and `regression-runs` (wave-30 T12, eee53f90)
 # writes the plan header, not a row, so it hands `judged`. A verb that changes its mode turns this red.
+# The list is the live one (wave-31 T32): `finding-check` is gone (D6), and `regression` (T27) is on it.
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print ($2 == "regression-runs" ? $2 "=" $NF : $NF) }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current discharge finding-check finding-move finding-stated handoff launch-sync matrix-render proof-add regression-runs release-check row-landed step-field step-line task-add task-split waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current discharge finding-move finding-stated handoff launch-sync matrix-render proof-add regression regression-runs release-check row-landed step-field step-line task-add task-split waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current and regression-runs names the writer mode; regression-runs names judged" "regression-runs=judged writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
@@ -3286,51 +3288,44 @@ POKE_BOUND="$S71_BOUND_WAS"
 
 
 # ============================================================
-section "Section 72 §PROOF-ANCESTOR: proof-add floor accepts a run at an ancestor head when the change since is bounded and proved (wave-30 T13; REQ-4 AC-4.4; D7, design-ledger Δ6b, Δ6c; A-orch-16)"
+section "Section 72 §FLOOR-RECORD: the floor is one whole run at a commit on the branch, and every later commit proved by the runs recorded at it (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.3, AC-13.4; D3; A-T25-1 to A-T25-4)"
 # ============================================================
 #
-# Through 1.13.0 every floor path held the run's head equal to the working head, so a bounded
-# landing between the full run and `proof-add floor` cost a second full run. Now a run whose head F
-# is an ancestor of the working head H is accepted when proof_state's bounded rule holds for F..H
-# and each suite the map names has its proof at H: a `booked.sh` stamp in the working checkout's
-# git dir, rc 0 on a clean tree; or, for an attestation, a `later-changes:` line per suite. The
-# proof line names F, the head the run read; the judge reads F..H as it reads any later landing.
-# A change the map cannot bound still owes a full run on H, and the refusal says why.
+# `proof-add floor` takes ONE log of one whole green run on a clean tree, at a commit F. When F is
+# not the working head H, F must be an ancestor of H and the walk must hold: each commit on the
+# working branch's first-parent line after F owes its row's Lands-on suites (the `ready` event
+# before the `published` one naming it) and every suite a run recorded at its tree names; a hand
+# commit owes only the latter, and with none it is refused. A suite owed at C is proved when its
+# newest record, at the last commit from C to H that has one, is green. The records are the
+# landing record's verdict events and copied stamps, and the `booked.sh` stamps in every git dir
+# of the repository. Nothing predicts a suite set. A whole run at H is the degenerate case.
 #
-# FIXTURE FIDELITY. A real repository: its working branch in a linked worktree, real commits, a map
-# stub that answers lib/one.sh with a and b, lib/two.sh with c and lib/every.sh with all four
-# suites. The stamps are written by the real shim (`payload/scripts/booked.sh`), run in the working
-# checkout, so their shape is the one `_wt_stale_proof` reads. The floor logs are hand-written in
-# the runner's, `floor-run`'s and the attestation's shapes, as §46 and §FLOOR-DECLARED write them.
+# FIXTURE FIDELITY. A real repository: its working branch in a linked worktree, real commits, four
+# suites. The stamps are written by the real shim (`payload/scripts/booked.sh`) in the working
+# checkout. The landing events are written by the product's writer (`lib/line.sh` `line_event`,
+# the one `land` uses) in its own shapes; the landing commits themselves are SYNTHESIZED as plain
+# commits on the working branch, which is what a queue landing publishes (its candidate, fast-
+# forwarded). The floor logs are hand-written in the runner's and `floor-run`'s shapes, as §46 and
+# §FLOOR-DECLARED write them.
 S72_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 S72_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+S72_LINE="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/line.sh"
 S72_BOOKED="${BIONIC_HOOKS_DIR}/../payload/scripts/booked.sh"
-S72_MAP="$TMPROOT/s72-map.sh"
-{
-  printf '#!/bin/bash\n'
-  printf 'for f in "$@"; do\n'
-  printf '  case "$f" in\n'
-  printf '    lib/one.sh)   for s in a b; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '    lib/two.sh)   printf "c.test.sh\\tdir-ref:%%s\\n" "$f" ;;\n'
-  printf '    lib/every.sh) for s in a b c d; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '  esac\n'
-  printf 'done\n'
-} > "$S72_MAP"
-# s72_world <label> [<current>] -> S72R, S72P, S72WT, S72REC, S72F: a repository whose working branch
-# wave/72-fixture is checked out in a linked worktree, four suites, the map configured, and F, the
-# first commit past the cut, the head the floor ran at.
+# s72_world <label> -> S72R, S72P, S72WT, S72REC, S72F: a repository whose working branch
+# wave/72-fixture is checked out in a linked worktree, four suites, and F, the first commit past
+# the cut, the head the floor ran at.
 s72_world() {
   local b s
   S72R="$(make_repo "s72-$1")"; ( cd "$S72R" && git commit -q --allow-empty -m init )
   git -C "$S72R" config user.name "Dana Fixture"
   b="$(git -C "$S72R" rev-parse HEAD)"
-  S72P="$(s42_plan "$S72R" "${2:-4}" "  worktree: .worktrees/72-fixture
+  S72P="$(s42_plan "$S72R" 4 "  worktree: .worktrees/72-fixture
   base-sha: ${b:0:8}
   branch: wave/72-fixture")"
   awk '{ print } /^current: / && !d { print "working-branch: wave/72-fixture"; d = 1 }' "$S72P" > "$S72P.tmp" && mv "$S72P.tmp" "$S72P"
   mkdir -p "$S72R/tests" "$S72R/lib"
   for s in a b c d; do printf '#!/bin/bash\nexit 0\n' > "$S72R/tests/$s.test.sh"; done
-  printf 'one\n' > "$S72R/lib/one.sh"; printf 'two\n' > "$S72R/lib/two.sh"; printf 'every\n' > "$S72R/lib/every.sh"
+  printf 'one\n' > "$S72R/lib/one.sh"; printf 'two\n' > "$S72R/lib/two.sh"
   ( cd "$S72R" && git add -f "$S72P" tests lib && git commit -qm wb \
     && git worktree add -q -b wave/72-fixture "$S72R/.worktrees/72-fixture" ) >/dev/null 2>&1
   s72_config ""
@@ -3338,171 +3333,199 @@ s72_world() {
   S72REC="$S72R/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S72REC"
   S72F="$(s57_commit "$S72WT" lib/one.sh F)"
 }
-s72_config() {  # <extra config line or empty> -> the project's config: the map, and the line
-  { printf 'impact-command: bash %s\n' "$S72_MAP"; [ -z "$1" ] || printf '%s\n' "$1"; } > "$S72R/.bionic/config.yaml"
+s72_config() {  # <config line or empty> -> the project's config
+  mkdir -p "$S72R/.bionic"; printf '%s\n' "$1" > "$S72R/.bionic/config.yaml"
 }
 s72_run() {  # <suite> <command> -> the real shim runs <command> in the working checkout, naming <suite>
   ( cd "$S72WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
       bash "$S72_BOOKED" --suites "$1" -- "$2" ) >/dev/null 2>&1
 }
 s72_stamp() { tail -n 1 "$(git -C "$S72WT" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null; }
+s72_event() {  # <ev> <key=value>... -> one landing event, by the product's writer
+  bash -c '. "$1" >/dev/null 2>&1 || exit 1; p="$2"; shift 2; line_event "$p" "$@"' _ "$S72_LINE" "$S72P" "$@"
+}
+s72_land() {  # <row> <path> <suites, comma-joined> -> the landing commit on the working branch, its ready and published events
+  local c
+  c="$(s57_commit "$S72WT" "$2" "$1: $2")"
+  s72_event ready "row=$1" "name=w-$1" "commit=$c" "branch=wt/72-$1" "tree=-" "suites=$3" "debt=-"
+  s72_event published "row=$1" "commit=$c" kind=queue by=- why=-
+  printf '%s' "$c"
+}
+s72_verdict() {  # <row> <commit> <suite> <green|red> -> the landing's verdict event
+  s72_event verdict "row=$1" "commit=$2" "suite=$3" "result=$4" "log=$S72REC/line-$1-$3.log"
+}
 s72_add() {  # <evidence relative to the record> -> poke proof-add floor, the plan snapshotted first
   s42_snap "$S72R" "$S72P"
   poke "$S72R" proof-add floor "record/wave-01-fixture/$1"
 }
+s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>
+  printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\n' "$2" > "$S72REC/$1"
+}
+s72_state() {  # -> proof_state's one line for the plan
+  bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null
+}
 
-s72_world pa
-printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\n' "$S72F" > "$S72REC/floor-F.txt"
-S72H1="$(s57_commit "$S72WT" lib/one.sh H1)"
-expect_regex "72a0 precondition: the floor head F and the working head H1 are 40-hex commits" \
-  '^[0-9a-f]{40} [0-9a-f]{40}$' "$S72F $S72H1"
-expect_true "72a0b precondition: F is an ancestor of H1 on the working branch" \
-  git -C "$S72WT" merge-base --is-ancestor "$S72F" "$S72H1"
-expect_eq "72a0c precondition: the map answers the change F..H1 with a and b" "a.test.sh b.test.sh" \
-  "$(cd "$S72WT" && bash "$S72_MAP" lib/one.sh | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+s72_world fr
+s72_whole floor-F.txt "$S72F"
+S72C1="$(s72_land T7 lib/one.sh a.test.sh,b.test.sh)"
+s72_verdict T7 "$S72C1" a.test.sh green; s72_verdict T7 "$S72C1" b.test.sh green
+( cd "$S72WT" && git commit -q --allow-empty -m 'an empty commit' ) >/dev/null 2>&1
+S72E="$(git -C "$S72WT" rev-parse HEAD)"
+S72C2="$(s57_commit "$S72WT" lib/two.sh 'a hand commit')"
+expect_regex "72a0 precondition: F, the landing, the empty commit and the hand commit are 40-hex commits" \
+  '^[0-9a-f]{40} [0-9a-f]{40} [0-9a-f]{40} [0-9a-f]{40}$' "$S72F $S72C1 $S72E $S72C2"
+expect_eq "72a0b precondition: the walk F..H is the landing, the empty commit and the hand commit, oldest first" \
+  "$S72C1 $S72E $S72C2" "$(git -C "$S72WT" rev-list --first-parent --reverse "$S72F..$S72C2" | tr '\n' ' ' | sed 's/ $//')"
+expect_contains "72a0c precondition: the product's writer recorded T7's Lands-on set and its landing commit" \
+  "|ev=ready|row=T7|name=w-T7|commit=${S72C1}|branch=wt/72-T7|tree=-|suites=a.test.sh,b.test.sh|debt=-|at=" \
+  "$(cat "$S72REC/landing-proofs.log" 2>/dev/null)"
 
-# ---------- the runner's log at F: bounded, and each named suite must be green at H1 ----------
+# ---------- (a) a hand commit with no run recorded at it is refused, naming it; a run there proves it ----------
 s72_add floor-F.txt
-s42_unchanged "72a an ancestor floor, a bounded change, no green run at H1" 1 "$S72P"
-expect_contains "72a2 …naming the commits since, the suites the map names, and the ones with no green run" \
-  "read head ${S72F:0:12}, and 1 commit landed since, to the working head ${S72H1:0:12}; the map bounds the change to a.test.sh b.test.sh, and no green run at ${S72H1:0:12} is recorded for: a.test.sh b.test.sh. Run each of those suites on ${S72H1:0:12}, then proof-add floor again" "$OUT"
-expect_absent "72a3 …and never 'run it again' (beside 72a2 on the same output)" "run it again" "$OUT"
-s72_run a.test.sh "bash tests/a.test.sh"
-expect_match "72b0 precondition: the real shim stamped a green, clean run of a at H1 in the working checkout's git dir" \
-  "stamp/v1|head=${S72H1}|dirty=0|rc=0|at=*|suites=a.test.sh|cmd=bash tests/a.test.sh" "$(s72_stamp)"
+s42_unchanged "72a a whole run at F, T7 landed green, a hand commit with nothing run at it" 1 "$S72P"
+expect_contains "72a2 …naming the hand commit, and that no run is recorded at it" \
+  "commit ${S72C2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$OUT"
+expect_absent "72a3 …and the landing and the empty commit are not named (beside 72a2 on the same output)" \
+  "commit ${S72C1:0:12}" "$OUT"
+s72_run c.test.sh "bash tests/c.test.sh"
+expect_match "72a4 precondition: the real shim stamped a green, clean run of c at the hand commit" \
+  "stamp/v1|head=${S72C2}|dirty=0|rc=0|at=*|suites=c.test.sh|cmd=bash tests/c.test.sh" "$(s72_stamp)"
 s72_add floor-F.txt
-s42_unchanged "72b a stamp for a alone" 1 "$S72P"
-expect_contains "72b2 …names b, the suite still owed" "is recorded for: b.test.sh. Run each" "$OUT"
+expect_eq "72a5 AC-13.4 a whole run at an ancestor F, every later commit proved by its runs: proof-add floor exits 0" "0" "$RC"
+expect_eq "72a6 …and the proof names F, the head the run read" "$S72F" "$(s46_last "$S72P" floor)"
+expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'covered\t%s' "$S72C2")" "$(s72_state)"
+
+# ---------- (b) the stamps alone, with no whole run, are no floor ----------
+printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$S72F" > "$S72REC/floor-part.txt"
+s72_add floor-part.txt
+s42_unchanged "72b a run of one suite at F, every later commit proved" 1 "$S72P"
+expect_contains "72b2 AC-4.1 …is not a whole run" "is not a whole run (1 passed and 0 void of 4 suites at its head)" "$OUT"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\n' "$S72C2" > "$S72REC/floor-part-H.txt"
+s72_add floor-part-H.txt
+s42_unchanged "72b3 a run of two suites at the working head itself" 1 "$S72P"
+expect_contains "72b4 …is not a whole run either" "is not a whole run (2 passed and 0 void of 4 suites at its head)" "$OUT"
+
+# ---------- (c) a fix row after the full run: its red suite and its own, each run green ----------
+S72C3="$(s72_land T8 lib/one.sh d.test.sh,a.test.sh)"
+s72_verdict T8 "$S72C3" a.test.sh green
+s72_add floor-F.txt
+s42_unchanged "72c a fix commit whose red suite d has no run recorded" 1 "$S72P"
+expect_contains "72c2 AC-13.3 …naming the commit, its row and the suite" \
+  "commit ${S72C3:0:12} (row T8) is not proved: d.test.sh has no run recorded at it or after it" "$OUT"
+s72_verdict T8 "$S72C3" d.test.sh red
+s72_add floor-F.txt
+s42_unchanged "72c3 the fix commit's d run red" 1 "$S72P"
+expect_contains "72c4 …naming the suite red at that commit" \
+  "commit ${S72C3:0:12} (row T8) is not proved: d.test.sh is red at ${S72C3:0:12}" "$OUT"
+sleep 1
+s72_run d.test.sh "bash tests/d.test.sh"
+s72_add floor-F.txt
+expect_eq "72c5 AC-13.3 …d run green at the fix commit, newer than the red: accepted (exit 0)" "0" "$RC"
+
+# ---------- (d) two fix commits: each proved, or the unproved one is named ----------
+S72C4="$(s72_land T9 lib/two.sh b.test.sh)"
+s72_run b.test.sh "bash tests/b.test.sh"
+S72C5="$(s72_land T10 lib/one.sh c.test.sh)"
+s72_add floor-F.txt
+s42_unchanged "72d T9 proved by a stamp at its commit, T10 with nothing run" 1 "$S72P"
+expect_contains "72d2 …naming T10's commit" "commit ${S72C5:0:12} (row T10) is not proved: c.test.sh has no run recorded at it or after it" "$OUT"
+expect_absent "72d3 …and not T9's (beside 72d2 on the same output)" "commit ${S72C4:0:12}" "$OUT"
+s72_run c.test.sh "bash tests/c.test.sh"
+s72_add floor-F.txt
+expect_eq "72d4 AC-13.4 both fix commits proved: accepted (exit 0)" "0" "$RC"
+# A LATER RED SUPERSEDES (A-T25-2): b red at T10's commit leaves every earlier commit that owes b
+# unproved, and the walk names the oldest, T7's landing, whose Lands-on set holds b.
+sleep 1
 s72_run b.test.sh "false"
-expect_match "72c0 precondition: the shim stamped b red at H1" "stamp/v1|head=${S72H1}|dirty=0|rc=1|at=*|suites=b.test.sh|cmd=false" "$(s72_stamp)"
+expect_match "72d5 precondition: the shim stamped b red at T10's commit" "stamp/v1|head=${S72C5}|dirty=0|rc=1|at=*|suites=b.test.sh|cmd=false" "$(s72_stamp)"
 s72_add floor-F.txt
-s42_unchanged "72c a red run of b at H1" 1 "$S72P"
-expect_contains "72c2 …names b" "is recorded for: b.test.sh. Run each" "$OUT"
+s42_unchanged "72d6 b red at a later commit" 1 "$S72P"
+expect_contains "72d7 …names the oldest commit owing b, and where b is red" "commit ${S72C1:0:12} (row T7) is not proved: b.test.sh is red at ${S72C5:0:12}" "$OUT"
+sleep 1
 s72_run b.test.sh "bash tests/b.test.sh"
 s72_add floor-F.txt
-expect_eq "72d AC-4.4 F an ancestor, F..H1 bounded, a and b green at H1: proof-add floor exits 0" "0" "$RC"
-expect_eq "72d2 …and the proof names F, the head the run read" "$S72F" "$(s46_last "$S72P" floor)"
-expect_contains "72d3 …and the verb says so" "proof-add — kind=floor head=$S72F" "$OUT"
+expect_eq "72d8 …and b green again at the head proves it (exit 0)" "0" "$RC"
 
-# ---------- the attestation (floor-attestation: user): the later-changes: block, or the stamps ----------
-S72H2="$(s57_commit "$S72WT" lib/one.sh H2)"
-s72_config "floor-attestation: user"
-s72_attest() {  # <file> <block lines...> -> an attestation of F, with a later-changes: block when lines are given
-  local f="$S72REC/$1"; shift
-  { printf 'head=%s dirty=0\nfloor-attested-by: Dana Fixture 2026-10-08 the full suite on F\n' "$S72F"
-    if [ "$#" -gt 0 ]; then printf 'later-changes:\n'; printf '  - %s\n' "$@"; fi; } > "$f"
-}
-s72_attest att-none.md
-s72_add att-none.md
-s42_unchanged "72e an attestation of F with no block, and no stamp at H2" 1 "$S72P"
-expect_contains "72e2 …the stamps are the proof: names both suites, and the two commits since" \
-  "read head ${S72F:0:12}, and 2 commits landed since, to the working head ${S72H2:0:12}; the map bounds the change to a.test.sh b.test.sh, and no green run at ${S72H2:0:12} is recorded for: a.test.sh b.test.sh." "$OUT"
-S72_BL="log=record/wave-01-fixture/later.log cmd=bash tests/run.sh --only"
-s72_attest att-b.md "b.test.sh head=$S72H2 pass=4/4 $S72_BL b.test.sh"
-s72_add att-b.md
-s42_unchanged "72f a block naming b alone" 1 "$S72P"
-expect_contains "72f2 …names a, the suite the block does not prove" \
-  "the later-changes: block names no passing run at ${S72H2:0:12} for: a.test.sh. Run each of those suites on ${S72H2:0:12} and add its line to the block" "$OUT"
-s72_attest att-oldhead.md "a.test.sh head=$S72H1 pass=4/4 $S72_BL a.test.sh" "b.test.sh head=$S72H2 pass=4/4 $S72_BL b.test.sh"
-s72_add att-oldhead.md
-s42_unchanged "72g a block whose a line ran at H1, not H2" 1 "$S72P"
-expect_contains "72g2 …names a" "names no passing run at ${S72H2:0:12} for: a.test.sh." "$OUT"
-s72_attest att-short.md "a.test.sh head=$S72H2 pass=3/4 $S72_BL a.test.sh" "b.test.sh head=$S72H2 pass=4/4 $S72_BL b.test.sh"
-s72_add att-short.md
-s42_unchanged "72h a block whose a line passed 3 of 4" 1 "$S72P"
-expect_contains "72h2 …names a" "names no passing run at ${S72H2:0:12} for: a.test.sh." "$OUT"
-s72_attest att-ok.md "a.test.sh head=$S72H2 pass=4/4 $S72_BL a.test.sh" "b.test.sh head=$S72H2 pass=4/4 $S72_BL b.test.sh"
-s72_add att-ok.md
-expect_eq "72i a block proving a and b at H2: the attestation of F is accepted (exit 0)" "0" "$RC"
-expect_eq "72i2 …and the proof names F" "$S72F" "$(s46_last "$S72P" floor)"
+# ---------- (e) the degenerate case: a whole run at the working head ----------
+S72C6="$(s57_commit "$S72WT" lib/two.sh 'a second hand commit')"
+s72_whole floor-H.txt "$S72C6"
+s72_add floor-H.txt
+expect_eq "72e AC-4.1 a whole run at the working head is accepted with nothing walked (exit 0)" "0" "$RC"
+expect_eq "72e2 …naming the working head" "$S72C6" "$(s46_last "$S72P" floor)"
+s72_add floor-F.txt
+s42_unchanged "72e3 …while the run at F, with that hand commit unproved, is still refused" 1 "$S72P"
+expect_contains "72e4 …naming it" "commit ${S72C6:0:12} (no landing row) is not proved" "$OUT"
 
-# ---------- the declared floor: command's log at F ----------
+# ---------- (f) the tree a direct land merged: a copied stamp at the row head counts for an equal tree ----------
+S72RH="$(git -C "$S72WT" commit-tree "$S72C6^{tree}" -p "$S72C5" -m 'the row head the land merged')"
+printf 'landed: row=T11 branch=wt/72-T11 head=%s merge=%s at=2026-10-09T00:00:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-09T00:00:00Z|suites=a.test.sh|cmd=bash tests/a.test.sh\n' \
+  "$S72RH" "$S72C6" "$S72RH" >> "$S72REC/landing-proofs.log"
+s72_add floor-F.txt
+expect_eq "72f A-T25-1 a stamp copied into the landing record at a row head with the hand commit's tree proves it (exit 0)" "0" "$RC"
+
+# ---------- (g) a run off the working branch, and a declared floor ----------
+S72X="$(s57_commit "$S72R" lib/side.sh X)"
+s72_whole floor-X.txt "$S72X"
+s72_add floor-X.txt
+s42_unchanged "72g a whole run at a commit off the working branch" 1 "$S72P"
+expect_contains "72g2 …says it is not in the working branch's history" \
+  "floor-X.txt read head ${S72X:0:12}, which is not in the history of the working branch (at ${S72C6:0:12})" "$OUT"
 s72_config "floor: true"
 printf 'head=%s dirty=0 rc=0\ncommand: true\n' "$S72F" > "$S72REC/floor-run-F.log"
 s72_add floor-run-F.log
-s42_unchanged "72j a declared floor's log at F, no stamp at H2" 1 "$S72P"
-expect_contains "72j2 …names both suites" "no green run at ${S72H2:0:12} is recorded for: a.test.sh b.test.sh." "$OUT"
-s72_run a.test.sh "bash tests/a.test.sh"; s72_run b.test.sh "bash tests/b.test.sh"
+expect_eq "72g3 a declared floor's log at F, every later commit proved: accepted (exit 0)" "0" "$RC"
+S72C7="$(s57_commit "$S72WT" lib/one.sh 'a third hand commit')"
 s72_add floor-run-F.log
-expect_eq "72k …with a and b green at H2, it is accepted (exit 0)" "0" "$RC"
-expect_eq "72k2 …naming F" "$S72F" "$(s46_last "$S72P" floor)"
-
-# ---------- what cannot be bounded still owes a full run on the working head, and says why ----------
+s42_unchanged "72g4 …and with a hand commit after it unproved" 1 "$S72P"
+expect_contains "72g5 …refused, naming the commit" "commit ${S72C7:0:12} (no landing row) is not proved" "$OUT"
 s72_config ""
-S72H3="$(s57_commit "$S72WT" lib/every.sh H3)"
-s72_add floor-F.txt
-s42_unchanged "72l a change the map answers with every suite" 1 "$S72P"
-expect_contains "72l2 …owes the full run on H3, naming the commits since and the reason" \
-  "run it again on ${S72H3:0:12} and cite that log: 3 commits landed since ${S72F:0:12}, and the change cannot be bounded (the map answers the change with every suite (4 of 4))" "$OUT"
-S72X="$(s57_commit "$S72R" lib/side.sh X)"
-printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\n' "$S72X" > "$S72REC/floor-X.txt"
-s72_add floor-X.txt
-s42_unchanged "72m a run at a commit off the working branch" 1 "$S72P"
-expect_contains "72m2 …says it is not in the working branch's history" \
-  "run it again on ${S72H3:0:12} and cite that log: ${S72X:0:12} is not in the history of the working branch, so the change since it cannot be bounded" "$OUT"
-POKE_BOUND="$S72_BOUND_WAS"
 
-# ============================================================
-section "Section 73 §BOUNDED-STAMPS: the judge reads a bounded change as covered only with a green stamp at the head for every suite the map names (wave-30 T13; REQ-4 AC-4.4; D7, design-ledger Δ6c)"
-# ============================================================
-#
-# `facts_state` took proof_state's `bounded` as covered on no evidence: a change the map bounded
-# held the floor whether or not any suite had run on it. The floor line is now covered only when
-# every suite the map names has, at the working head, a newest stamp that is green on a clean tree
-# (lib/worktree.sh `_wt_stale_proof`, the reader the landing uses); otherwise
-# `floor<TAB>uncovered<TAB><suite>…`, the suites with no green run there. A change the map cannot
-# bound keeps its range. The head moving owes the named suites again, never a second full run:
-# proof_state, which the dispatch wall reads, still answers bounded. `current 8`, the gate that
-# asks the judge, says which suites lack a green run.
-#
-# FIXTURE FIDELITY. §72's world builder; the floor line is the production writer's (proof_line,
-# placed by proof_add_line) and the stamps are the real shim's.
-S73_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-s72_world bs 7
+# ---------- (h) the judge reads the same walk: covered, or uncovered naming the commit ----------
 s57_floor "$S72F" "$S72P"
-S73H1="$(s57_commit "$S72WT" lib/one.sh H1)"
-s73_floor() {  # <head> -> what facts_state says of the floor line at <head>
-  s57_state "$S72P" "$1"; s57_of floor
-}
-expect_eq "73a0 precondition: the plan's floor proof names F" "$S72F" "$(s46_last "$S72P" floor)"
-expect_eq "73a0b precondition: proof_state reads F..H1 as bounded by a and b" "$(printf 'bounded\ta.test.sh b.test.sh')" \
-  "$(bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null)"
-expect_eq "73a no stamp file at all: the floor is uncovered, naming both suites" "$(printf 'uncovered\ta.test.sh b.test.sh')" "$(s73_floor "$S73H1")"
+S72STATE="$(s72_state)"
+expect_eq "72h proof_state: the floor proof at F, the hand commit after it unproved, is uncovered" "uncovered" "${S72STATE%%	*}"
+expect_contains "72h2 …its reason names the commit (proof_state answers covered or uncovered, nothing else)" \
+  "commit ${S72C7:0:12} (no landing row) is not proved" "$S72STATE"
+s57_state "$S72P" "$S72C7"
+expect_eq "72h3 facts_state's floor line carries that reason" \
+  "$(printf 'uncovered\t%s' "${S72STATE#*	}")" "$(s57_of floor)"
 s72_run a.test.sh "bash tests/a.test.sh"
-expect_eq "73b a green at H1: uncovered, naming b" "$(printf 'uncovered\tb.test.sh')" "$(s73_floor "$S73H1")"
-s72_run b.test.sh "false"
-expect_eq "73c b red at H1: uncovered, naming b" "$(printf 'uncovered\tb.test.sh')" "$(s73_floor "$S73H1")"
-s72_run b.test.sh "bash tests/b.test.sh"
-expect_eq "73d AC-4.4 a and b green at H1: covered" "covered" "$(s73_floor "$S73H1")"
-printf 'x\n' > "$S72WT/untracked.txt"
-s72_run a.test.sh "bash tests/a.test.sh"
-expect_match "73e0 precondition: the shim stamped a on a dirty tree" "stamp/v1|head=${S73H1}|dirty=1|rc=0|*" "$(s72_stamp)"
-expect_eq "73e a's newest run read a dirty tree: uncovered, naming a" "$(printf 'uncovered\ta.test.sh')" "$(s73_floor "$S73H1")"
-rm -f "$S72WT/untracked.txt"
-s72_run a.test.sh "bash tests/a.test.sh"
-expect_eq "73e2 …a clean green run of a again: covered" "covered" "$(s73_floor "$S73H1")"
-# THE HEAD MOVES: the stamps at H1 prove nothing at H2; the named suites are owed again, and the
-# map still bounds the change, so no full run is.
-S73H2="$(s57_commit "$S72WT" lib/two.sh H2)"
-expect_eq "73f the head moved to H2 (lib/two.sh): uncovered, naming a, b and c" "$(printf 'uncovered\ta.test.sh b.test.sh c.test.sh')" "$(s73_floor "$S73H2")"
-expect_eq "73f2 …while proof_state, which the dispatch wall reads, still says bounded: no second full run is owed" \
-  "$(printf 'bounded\ta.test.sh b.test.sh c.test.sh')" "$(bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null)"
-# THE GATE'S WORDS: current 8 asks the judge and names the suites with no green run at the head.
-for s73q in evidence adversarial structure; do s57_fact "$s73q" "$S73H2" pass piece "$S72P"; done
-for s73q in adversarial structure; do s57_fact "$s73q" "$S73H2" pass whole "$S72P"; done
-s42_snap "$S72R" "$S72P"
-poke "$S72R" current 8
-s42_unchanged "73g current 8 with every reading at H2 and the bounded floor unstamped" 1 "$S72P"
-expect_contains "73g2 …prints the judge's floor line" "$(printf 'floor\tuncovered\ta.test.sh b.test.sh c.test.sh')" "$OUT"
-expect_contains "73g3 …and says which suites lack a green run at the head" \
-  "regression: no green run at ${S73H2:0:12} for a.test.sh b.test.sh c.test.sh" "$OUT"
-for s73s in a b c; do s72_run "$s73s.test.sh" "bash tests/$s73s.test.sh"; done
-poke "$S72R" current 8
-expect_eq "73h …with a, b and c green at H2, current 8 is admitted" "0" "$RC"
-# A CHANGE THE MAP CANNOT BOUND keeps the range: a full run is owed, as before.
-S73H3="$(s57_commit "$S72WT" lib/every.sh H3)"
-expect_eq "73i an unbounded change: uncovered from F, the range, as before" "$(printf 'uncovered\t%s..%s' "$S72F" "$S73H3")" "$(s73_floor "$S73H3")"
-POKE_BOUND="$S73_BOUND_WAS"
+expect_eq "72h4 …and a run at it makes proof_state covered" "$(printf 'covered\t%s' "$S72C7")" "$(s72_state)"
+s57_state "$S72P" "$S72C7"
+expect_eq "72h5 …and the judge's floor line covered" "covered" "$(s57_of floor)"
+
+# ---------- (i) a red whole run at a later commit supersedes the green floor (wave-31 T41; critic-evidence #1, critic-adversarial #1) ----------
+# A whole run's stamp names `run.sh`. Green, every suite is green at its tree; red, every suite is
+# red there, so each commit owing one, at H or before it, is unproved, unless a newer run of that
+# suite at H is green. The newest record decides: a green whole run after the red proves them again.
+S72H="$(s57_commit "$S72WT" lib/two.sh 'a fourth hand commit')"
+s72_run c.test.sh "bash tests/c.test.sh"
+expect_eq "72i precondition: the floor proof at F, c run green at the new head H: proof_state covered at H" \
+  "$(printf 'covered\t%s' "$S72H")" "$(s72_state)"
+sleep 1
+s72_run run.sh "false"
+expect_match "72i2 precondition: the real shim stamped a red, clean whole run at H" \
+  "stamp/v1|head=${S72H}|dirty=0|rc=1|at=*|suites=run.sh|cmd=false" "$(s72_stamp)"
+S72STATE="$(s72_state)"
+expect_eq "72i3 AC-13.3 a red whole run at H after the green floor at F: proof_state is uncovered" "uncovered" "${S72STATE%%	*}"
+expect_contains "72i4 …naming the oldest commit owing a suite, and the whole run at H red" \
+  "commit ${S72C1:0:12} (row T7) is not proved: the whole run at ${S72H:0:12} is red" "$S72STATE"
+s57_state "$S72P" "$S72H"
+S72FL="$(s57_of floor)"
+expect_eq "72i5 …and the judge's floor line uncovered" "uncovered" "${S72FL%%	*}"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\n' "$S72H" > "$S72REC/floor-red-H.txt"
+s72_add floor-red-H.txt
+s42_unchanged "72i6 proof-add floor of the red whole run's log at H" 1 "$S72P"
+expect_contains "72i7 …is refused as red, as before" "did not pass (Gating: 3 passed, 1 failed)" "$OUT"
+s72_add floor-F.txt
+s42_unchanged "72i8 proof-add floor at F with the red whole run at H after it" 1 "$S72P"
+expect_contains "72i9 …refused, naming the whole run at H red" "the whole run at ${S72H:0:12} is red" "$OUT"
+sleep 1
+s72_run run.sh "true"
+expect_match "72i10 precondition: the real shim stamped a green, clean whole run at H, newer than the red" \
+  "stamp/v1|head=${S72H}|dirty=0|rc=0|at=*|suites=run.sh|cmd=true" "$(s72_stamp)"
+expect_eq "72i11 …the newest whole run, green, decides: proof_state covered at H" "$(printf 'covered\t%s' "$S72H")" "$(s72_state)"
+POKE_BOUND="$S72_BOUND_WAS"
 
 
 # ============================================================
