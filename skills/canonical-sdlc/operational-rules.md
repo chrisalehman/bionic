@@ -646,8 +646,6 @@ An agent start carries its type and id, never its launch, so the start is joined
 
 - **Annotated `Step N (stance M):` lines DON'T satisfy the numeric-step matcher (bit 2026-07-22, epic-10 wave-02 Step 6 — cost one blocked commit).** The evidence-gate finds the current step's evidence line with `^[[:space:]]*-?[[:space:]]*(Step|Phase)[[:space:]]+N[[:space:]]*:` — the digit must be followed by ONLY whitespace, then the colon. A `Step 6 (stance 1):` line has ` (stance 1)` between `6` and `:` and does NOT match, so a plan whose only step-N lines are annotated variants BLOCKS every commit at `current: N`. Fix: carry a bare `Step N: <pointer>` line ALONGSIDE the annotated detail lines (the v10 shape's "pointer to 5-axis body + critic findings" is exactly this — one bare line + stance detail below it). Generalizes to any `Step N (…):` form (stance/phase/sub-label). Wave-01 dodged it only because its T6/T7 commits happened to land at other `current:` values.
 
-- A test proves what a program does, never what a document says: a check that pins the wording of doctrine or a file's size is refused at review as a defect, not accepted as evidence.
-
 ## Design-time memory check
 
 - **CORRECTED 2026-07-27 (epic-12 wave-01): the always-loaded project-notebook tier this rule described no longer exists.** The old rule ("memory sweep must be recursive — read `INDEX.md` AND every Deep Context pointer") named a load mechanism that epic-12 deleted. What survives is the lesson underneath it, which was never about recursion: **a catalogue entry is not the knowledge.** The 2026-04-16 dry-run that produced the original rule picked a stale design (SessionEnd option C) because the better approach lived one pointer deeper than the entry point that was read.
@@ -670,3 +668,4 @@ An agent start carries its type and id, never its launch, so the start is joined
 - **Late fixes get a fresh run.** A fix found after a run has closed becomes a fixit in a fresh
   canonical-sdlc run. It is never bolted onto the closed run, and a known defect blocks the
   push.
+- **The doctrine is net zero.** The loaded set — `skills/canonical-sdlc/SKILL.md`, `skills/canonical-sdlc/steps/*.md`, `skills/canonical-sdlc/dispatch.md`, `skills/canonical-sdlc/operational-rules.md`, `agents/*.md` and `payload/context/*.md` — never grows: the commit wall sums its bytes before and after the staged change and refuses growth naming the delta and the files, unless the committing row reads `approval:doctrine-growth` and the plan carries its `approved: doctrine-growth` line. A shrink passes silently. A sentence added here is paid for by a sentence removed.
