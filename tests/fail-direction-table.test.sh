@@ -13,6 +13,10 @@
 # (`payload missing its session key`) adjacent so that start=open and stop=closed
 # are one artefact.
 #
+# T32 (wave-31, D6; A-orch-61) RETIRED THE STOP GATE'S CLOSED SIDE for a live writer: stop-guard
+# records reason=unmet and allows, so the keyless pair no longer differs and A10 is retired for
+# the stop gate. The stop rows that reached that deny are the allowed-with-reason case below.
+#
 # HERMETIC: throwaway git repos under a mktemp'd sandbox, redirected HOME.
 #
 # Usage: bash tests/fail-direction-table.test.sh
@@ -577,6 +581,10 @@ drive() {  # <condition>
 # session-20260815-landing-cleanup: a TaskStop target that resolves to no agent
 # AND wears no agent-address shape is not this gate's business) — distinct from
 # SILENT-WITH-ANNOUNCE, whose announce line is the auto-probe's, not this one's.
+# ALLOWED-WITH-REASON = exit 0, stdout empty, the `STOP ALLOWED` line on stderr, and the target's
+# roster row copied again with `reason=unmet: …` (wave-31 T32, D6; A-orch-41 ruling 4): the stop gate
+# records its own verdict on a live writer whose contract is undelivered and denies nothing. The eight
+# worlds that once reached the "still working, nothing delivered" deny (exit 2) are this case now.
 # RE-PINNED (epic-23 wave-13-fixit-180, T14, D8): `stop|unresolvable` no longer
 # passes through — an unrostered, non-address-shaped, non-bash-task-shaped
 # target is now REFUSED (2, loud), matching T5's restored no-row stop refusal.
@@ -601,21 +609,21 @@ stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, si
 stop|no-plan|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|plan-names-no-step|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|no-session-key-inert|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
-stop|no-session-key|2|loud|Payload missing its session key, environment carries it — stop: CLOSED
+stop|no-session-key|0|allowed-with-reason|Payload missing its session key, environment carries it — the session is read from the environment, so the live writer is ALLOWED with reason=unmet on its row (T32)
 stop|no-session-key-anywhere|0|silent|No session key on EITHER channel — engagement unprovable, so the switch is open by absence (task-engaged-session)
 stop|empty-target|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|no-transcript|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unresolvable|2|loud|Stop gate — D8 (wave-13-fixit-180 T5): an unresolved target wearing no agent-address shape is REFUSED, CLOSED
 stop|unresolvable-addressed|2|loud|Stop gate — T4 carve: an unresolved target that DOES wear an agent-address shape still refuses, CLOSED
 stop|ambiguous|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|no-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|unknown-schema|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|stale-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|no-observation|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|foreign-observation|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|unknown-schema|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|stale-observation|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|symlinked-state|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
 stop|unidentified-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|borrowed-look|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|progress-stale|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|borrowed-look|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|progress-stale|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
 stop|observed|0|silent-with-announce|Stop gate — the positive pair: a target quiet past its cadence is stoppable, and the gate announces the look it permitted on (epic-23 wave-15, REQ-2)
 stop|unrostered-full-id|2|loud|Stop gate — after the verdict: CLOSED, loud
 '
@@ -651,6 +659,25 @@ while IFS='|' read -r surface cond want_exit want_loud row; do
     else
       no "$surface/$cond is SILENT-WITH-ANNOUNCE — stdout empty, one operator-facing line on stderr" \
          "stdout='$DRV_OUT' stderr='$DRV_ERR'"
+    fi
+  elif [ "$want_loud" = "allowed-with-reason" ]; then
+    _fd_row=""
+    case "$cond" in
+      foreign-observation) _fd_repo="$F_REPO" ;;
+      unknown-schema)      _fd_repo="$V_REPO" ;;
+      stale-observation)   _fd_repo="$S_REPO" ;;
+      symlinked-state)     _fd_repo="$L_REPO" ;;
+      borrowed-look)       _fd_repo="$B_REPO" ;;
+      progress-stale)      _fd_repo="$G_REPO" ;;
+      *)                   _fd_repo="$A_REPO" ;;
+    esac
+    _fd_row=$(tail -n 1 "$_fd_repo/.bionic/tmp/roster-$SID_A.state" 2>/dev/null)
+    if [ -z "$DRV_OUT" ] && printf '%s' "$DRV_ERR" | grep -qF 'STOP ALLOWED' \
+       && printf '%s' "$_fd_row" | grep -qF 'reason=unmet:'; then
+      ok "$surface/$cond is ALLOWED-WITH-REASON — stdout empty, STOP ALLOWED on stderr, reason=unmet on the roster row"
+    else
+      no "$surface/$cond is ALLOWED-WITH-REASON — stdout empty, STOP ALLOWED on stderr, reason=unmet on the roster row" \
+         "stdout='$DRV_OUT' stderr='$DRV_ERR' last row='$_fd_row'"
     fi
   elif [ "$want_loud" = "passthrough" ]; then
     if [ -z "$DRV_OUT" ] && printf '%s' "$DRV_ERR" | grep -qF 'PASSTHROUGH'; then
@@ -692,25 +719,21 @@ else
 fi
 
 # ============================================================
-section "the asymmetry itself: ONE missing field, TWO directions"
+section "the missing session key: the start gate stays open (the stop gate's closed side is retired)"
 # ============================================================
 #
-# Checklist A10's defect was not a wrong direction — it was that no test asserted
-# the two directions were different ON PURPOSE. The same absent `session_id`, the
-# same active wave, adjacent:
+# Checklist A10's defect was that no test asserted the two directions differed ON PURPOSE:
+# the same absent `session_id`, start open, stop closed. THE ASYMMETRY DIED WITH THE DENY ARM
+# (wave-31 T32, D6; A-orch-61). The stop gate's closed answer to a keyless payload in a live
+# writer's world was the "still working, nothing delivered" deny, which stop-guard no longer
+# makes: it reads the session from the environment, allows the stop and records
+# reason=unmet on the roster row (the stop|no-session-key row above). A10 of the known-failure
+# checklist is retired for the stop gate. What is left to pin here is the start side.
 
 drive start:no-session-key
 S_START=$DRV_ST; S_START_ERR=$DRV_ERR
-drive stop:no-session-key
-S_STOP=$DRV_ST; S_STOP_ERR=$DRV_ERR
 
 expect_eq "a keyless payload at the START gate passes (open)"   "0" "$S_START"
-expect_eq "a keyless payload at the STOP gate is refused (closed)" "2" "$S_STOP"
-if [ "$S_START" != "$S_STOP" ]; then
-  ok "the directions differ — recorded inconsistency, accepted by §7, not an accident"
-else
-  no "the directions differ" "both gates answered $S_START"
-fi
 expect_eq "the open side stays silent about it" "" "$S_START_ERR"
 
 # ============================================================
