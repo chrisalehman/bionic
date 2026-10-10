@@ -4365,4 +4365,67 @@ sed '/born: review S/s/ born: review S[0-9] o[nf]*//' "$SANDBOX/born.md" > "$SAN
 expect_eq "BR-2 the same plan with the markers taken off has no review-born row (BR-1 read two from it), exit 0" "|0" \
   "$(call units_born "$SANDBOX/born-none.md")|$(call_rc units_born "$SANDBOX/born-none.md")"
 
+# ============================================================
+section "§ONE-SHAPE — wave-31 T5: a plan in the retired task-scale shape is refused aloud; the one table validates at task scale (REQ-1 AC-1.2, AC-1.3; D2)"
+# ============================================================
+#
+# ONE LEDGER SHAPE AT EVERY SCALE (D2). A task-scale run carries the one `## Tasks` table and a
+# numeric `current:`; the scales differ in their artifacts, never in the ledger. The retired shape's
+# `current: T<n>` used to make launch-sync exit 0 having written nothing, so a task-scale run went
+# unrecorded in silence. It is refused now, on stderr, exit 1: the turn-end wall passes 0 and 75
+# only, so a plan in the old shape is told. The plan is written by tests/lib/plan-fixture.sh, the one
+# helper every suite builds a plan through; the launch-sync world is §49's of session-poker-2, small.
+. "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
+OS_SID="5e7a9c10-31a5-4b2e-9d0f-0a1b2c3d4e5f"
+OS_POKER="$REPO_ROOT/hooks/session-poker.sh"
+os_world() {  # <label> <current> -> the repo; a bound task-scale plan, w-T1 launched on the roster
+  local r="$SANDBOX/$1" p tree
+  mkdir -p "$r/.bionic/tmp"
+  ( cd "$r" && git init -q . && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+  : > "$r/.bionic/tmp/engaged-$OS_SID.state"
+  p="$(plan_fixture --current "$2" "$r/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" task \
+    "| T1 | 4 | build | the unit in flight | implementor | — | — | 30 | REQ-1 | a.sh | — | — | pending |" \
+    "| T2 | 4 | build | the next unit | implementor | — | a.sh | 30 | REQ-1 | b.sh | — | — | pending |")"
+  bound_marker "$r" "$OS_SID" "$p"
+  ( cd "$r" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
+  { roster_header
+    roster_row_fixture status=confirmed session="$OS_SID" name=w-T1 agent_id=a-w-T1 \
+      launched_at=2026-10-04T03:30:00Z deliverable=t1.md 'duration=45 minutes' subagent_type=bionic:implementor
+  } > "$r/.bionic/tmp/roster-$OS_SID.state"
+  tree="$(cd "$r" && pwd -P)/.worktrees/01-T1"
+  git -C "$r" worktree add -q -b wt/01-T1 "$tree" >/dev/null 2>&1
+  printf 'workspace/v1|session=%s|name=w-T1|path=%s|branch=wt/01-T1|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+    "$OS_SID" "$tree" "$p" >> "$r/.bionic/tmp/workspaces-$OS_SID.state"
+  printf '%s' "$r"
+}
+os_sync() {  # <repo> -> OS_OUT (stdout), OS_ERR (stderr), OS_RC
+  OS_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$OS_SID" bash "$OS_POKER" launch-sync 2>"$SANDBOX/os.err" )"
+  OS_RC=$?
+  OS_ERR="$(cat "$SANDBOX/os.err")"
+}
+OS_PLAN_REL=".bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+# THE CONTROL: the same world at a numeric current records the launch, so the world is one the verb
+# acts on, and the refusal below is about the field and nothing else.
+OS_R4="$(os_world one-shape-4 4)"
+os_sync "$OS_R4"
+expect_eq "OS-1 control: at current: 4 launch-sync records the launch (exit 0)" "0" "$OS_RC"
+expect_contains "OS-1b …and says so" "poker: LAUNCHED T1 w-T1" "$OS_OUT"
+expect_contains "OS-1c …and the row is active in its tree" "| a.sh | .worktrees/01-T1 | 01234567 | active |" \
+  "$(/usr/bin/grep '^| T1 |' "$OS_R4/$OS_PLAN_REL")"
+OS_RT="$(os_world one-shape-t1 T1)"
+cp "$OS_RT/$OS_PLAN_REL" "$SANDBOX/os-before.md"
+os_sync "$OS_RT"
+expect_eq "OS-2 AC-1.2 a plan at current: T1 is refused by launch-sync (exit 1)" "1" "$OS_RC"
+expect_eq "OS-2b …with exactly the refusal line, on stderr" \
+  "NOT-RECORDED — current: T1 is not numeric; a plan in the retired task-scale shape is refused, not skipped" "$OS_ERR"
+expect_true "OS-2c …and the plan is byte-identical (cmp)" cmp -s "$SANDBOX/os-before.md" "$OS_RT/$OS_PLAN_REL"
+# THE ONE TABLE VALIDATES AT TASK SCALE: clean, beside the same table with one row broken, which names it.
+expect_eq "OS-3 AC-1.3 units_validate on the one table under scale: task is clean" "" \
+  "$(call units_validate "$OS_R4/$OS_PLAN_REL")"
+expect_eq "OS-3b …exit 0" "0" "$(call_rc units_validate "$OS_R4/$OS_PLAN_REL")"
+sed 's/| b.sh | — | — | pending |/| b.sh | — | — | done |/' "$OS_R4/$OS_PLAN_REL" > "$SANDBOX/os-done.md"
+expect_eq "OS-3c …and the retired word done is named on the same table (the reader reads it)" \
+  "T2: status done is not one of pending active landed dropped" "$(call units_validate "$SANDBOX/os-done.md")"
+
 finish
