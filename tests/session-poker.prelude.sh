@@ -559,29 +559,6 @@ s30_row() {  # <repo> <key=value>... — one live row through the one writer
 s30_last() { grep -F "|name=${2:-w1}|" "$(roster_of "$1")" | tail -1; }
 s30_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
 
-# ── hoisted from Section 31: s31_task_plan — Sections 65 and 67 write task-scale plans with it. ──
-s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2/T3 pending
-  local repo="$1" cur="$2"
-  local f="$repo/.bionic/docs/plans/epic-01-task-scale/task-01-fixture.plan.md"
-  mkdir -p "$(dirname "$f")"
-  {
-    printf -- '---\n'
-    printf 'governing-skill: superpowers:writing-plans\n'
-    printf 'scale: task\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n'
-    printf -- '---\n\n# fixture task-scale plan\n\n'
-    printf '## SDLC State\n\ncurrent: %s\n%s\n\n- %s: in progress\n\n' "$cur" "$SP_APPROVED_LINE" "$cur"
-    printf '## Tasks\n\n'
-    printf '| id | intent | rigor | description | status | worktree |\n'
-    printf '|---|---|---|---|---|---|\n'
-    printf '| T1 | bugfix | standard | the unit in flight | active | 18-T1 |\n'
-    printf '| T2 | bugfix | standard | the next unit | pending | — |\n'
-    printf '| T3 | bugfix | double | the unit after that | pending | — |\n'
-  } > "$f"
-  touch "$f"
-  printf '%s' "$f"
-}
-
 # ── hoisted from Section 31: s31_transcript, s31_stop, s31_reason, s31_decision — Sections 65 and 67 drive the Stop hook with them (each shard that calls s31_stop names S31_STOP_HOOK itself). ──
 s31_transcript() {  # <repo> <text>... -> the transcript path
   local repo="$1"; shift

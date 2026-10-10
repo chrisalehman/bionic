@@ -401,8 +401,8 @@ expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent
 # closed, since a plan that does not say what rigor it runs at has not bought
 # the relaxation.
 #
-# The task-ledger side (apply_rigor_lanes) was already rigor-keyed; 32f/32k pin
-# it as B-10's mirror so the two surfaces cannot drift apart.
+# The task-ledger side (apply_rigor_lanes) went with the retired task table (wave-31 T24;
+# D2); 32f pins what its fixture meets now.
 
 section "Section 32: the auditor wall is rigor-keyed"
 
@@ -497,27 +497,13 @@ write_plan "$h32e" "$(plan_rigor single 5 "$step5_noaud" "$m32_empty_aud")" > /d
 expect_allow "32e rigor single, all rows discharged, no Step-5 auditor: pointer → allow" \
   "$h32e" 'git commit -m "x"'
 
-# 32f — the task-ledger mirror (AC-26, second half): a `done` row at single
-# whose evidence names no auditor verdict commits.
-v32f_body="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix the frontmatter parser | done |
-| T2 | bugfix | single | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: reproduced and fixed the boundary case
-- T2: fixed enum check, bash suite 12/12"
+# 32f — the task-ledger mirror (AC-26, second half) is gone with the task ledger (wave-31 T24;
+# D2): its `done` row at single, and 32k's row raised to double by its own cell, were the
+# retired table at `current: T2`. That plan meets the numeric refusal now.
 h32f=$(make_home)
-write_plan "$h32f" "$(task_plan_rigor single "$v32f_body")" > /dev/null
-expect_allow "32f task scale: done row at single with no auditor verdict → allow" \
-  "$h32f" 'git commit -m "x"'
+write_plan "$h32f" "$(eg_pf_plan T2 task single false "- T2: fixed enum check, bash suite 12/12" "$(eg_pf_row T1 — landed)" "$(eg_pf_row T2 — active)")" > /dev/null
+expect_block "32f 32f's and 32k's task plan at current: T2 → refused as not numeric" \
+  "$h32f" 'git commit -m "x"' "current: T2 is not numeric"
 
 # 32n — the column is not READ at single, not merely tolerated when empty: a
 # standing REFUTED verdict passes too. Pinned deliberately (it is the sharpest
@@ -558,33 +544,6 @@ h32j=$(make_home)
 write_plan "$h32j" "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
 expect_block "32j rigor double, discharged rows, no Step-5 auditor: pointer → block" \
   "$h32j" 'git commit -m "x"' "requires 'auditor:"
-
-# 32k — a row whose OWN rigor cell RAISES it above the plan's frontmatter
-# follows the row's rigor (the floor model, task 4/8): a single plan, one
-# `done` row raised to double, proof-shaped evidence naming no auditor →
-# that row still demands the verdict. The relaxation is keyed to effective
-# rigor, never to the frontmatter alone.
-v32k_body="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | double | fix the frontmatter parser | done |
-| T2 | bugfix | single | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z "approved"
-
-- T1: bash test.sh 12/12 green
-- T2: fixed enum check, bash suite 12/12"
-h32k=$(make_home)
-write_plan "$h32k" "$(task_plan_rigor single "$v32k_body")" > /dev/null
-# ADR-033: the RAISE still drives the lane — at current: 6, where 25gT(i) pins it. Here the
-# run is at `current: T2`, so the row owes its line and its proof shape and no verdict.
-expect_allow "32k task scale: single plan, one row raised to double, no auditor, at current: T2 → allow (step-gated; 25gT(i) owns the demand)" \
-  "$h32k" 'git commit -m "x"' 
 
 # ---- fail-closed on an unknown or missing rigor ----------------------------
 
@@ -1620,73 +1579,56 @@ expect_block "37l a WAIVED row still has to name its fails-when → block" \
 # Section 38: epic-22 K2.5 — the same two arms bind at task scale
 # ============================================================
 #
-# D2/K2 (Section 37) built two arms for a NUMBERED-step plan: `approved-by:`
-# absent from `## SDLC State` refuses a commit from `current: 4` onward, and a
-# Verification Matrix AC block with no `fails-when:` refuses one from the same
-# point. K2.5 (Chris 2026-09-07 "Option 2") makes both bind on a TASK-SCALE
-# plan too: any `current: T<n>` (n >= 1) reads as past Step 3, because a
-# task-scale plan is always mid-execution, never mid-authoring — there is no
-# "still being authored" state to protect the way `current: 0`-`3` protects a
-# numbered plan. `k2_step_num` (hooks/canonical-sdlc-evidence-gate.sh) is what
-# makes the T-format read that way; these cases exercise it end to end.
+# D2/K2 (Section 37) built two arms for a NUMBERED-step plan: `approved-by:` absent from
+# `## SDLC State` refuses a commit from `current: 4` onward, and a Verification Matrix AC block
+# with no `fails-when:` refuses one from the same point. K2.5 made both bind on a task-scale plan
+# at `current: T<n>`. ONE LEDGER SHAPE (wave-31 T24; REQ-1, D2): a task-scale plan's `current:`
+# is a step number now, so the arms bind on it exactly as on a wave plan, from `current: 4`, and a
+# `current: T<n>` is refused as not numeric (38e). The plan is tests/lib/plan-fixture.sh's.
 
 section "Section 38: epic-22 K2.5 — approval/fails-when bind at task scale"
 
-# k2t_plan <approved-by line, or ""> <matrix section, or ""> -> a task-scale
-# plan at current: T1 with one valid, addressed ledger row — isolating the
-# approved-by/fails-when arms as the only possible source of a block.
+# k2t_plan <approved-by line, or ""> <matrix section> [<current>] -> a task-scale plan, one row,
+# at current: 4 by default, its approved-by: line and its matrix the caller's.
 k2t_plan() {
-  local approved_line=""
-  [ -n "$1" ] && approved_line="$1
-"
-  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n| T1 | build | single | wire the K2.5 arms | active |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n- T1: bash tests/canonical-sdlc-evidence-gate.test.sh 328/328 green\n\n%s\n' \
-    "$(task_frontmatter_rigor single)" "$approved_line" "${2:-}"
+  eg_pf_plan "${3:-4}" task single false "" "$(eg_pf_row T1 — active)" \
+    | awk -v A="$1" '/^approved-by: / { if (A != "") print A; next } /^## Verification Matrix$/ { exit } { print }'
+  printf '%s\n' "$2"
 }
 
-# 38a — current: T1, an honest ledger, a matrix present, NO approved-by →
-# block naming approved-by (the ledger is clean, so this is the sole defect).
+# 38a — task scale, current: 4, a matrix present, NO approved-by → block naming approved-by.
 h38a=$(make_home)
 write_plan "$h38a" "$(k2t_plan "" "$k2_matrix_full")" > /dev/null
-expect_block "38a task-scale current: T1 with no approved-by: → block" \
+expect_block "38a task-scale current: 4 with no approved-by: → block" \
   "$h38a" 'git commit -m "x"' "approved-by"
 
-# 38b — approved-by present; AC-2's block names no fails-when: → block naming
-# AC-2 (approved-by clears first, isolating the second arm).
+# 38b — approved-by present; AC-2's block names no fails-when: → block naming AC-2.
 h38b=$(make_home)
 write_plan "$h38b" "$(k2t_plan "$K2_APPROVED" "$k2_matrix_missing")" > /dev/null
-expect_block "38b task-scale current: T1, AC-2 names no fails-when: → block naming AC-2" \
+expect_block "38b task-scale current: 4, AC-2 names no fails-when: → block naming AC-2" \
   "$h38b" 'git commit -m "x"' "AC-2"
 
 # 38c — an empty fails-when: value is the same defect as an absent one.
 h38c=$(make_home)
 write_plan "$h38c" "$(k2t_plan "$K2_APPROVED" "$k2_matrix_empty")" > /dev/null
-expect_block "38c task-scale current: T1, AC-2 fails-when: is empty → block naming AC-2" \
+expect_block "38c task-scale current: 4, AC-2 fails-when: is empty → block naming AC-2" \
   "$h38c" 'git commit -m "x"' "AC-2"
 
 # 38d — both present, every AC block names a fails-when → allow.
 h38d=$(make_home)
 write_plan "$h38d" "$(k2t_plan "$K2_APPROVED" "$k2_matrix_full")" > /dev/null
-expect_allow "38d task-scale current: T1, approved-by + every fails-when present → allow" \
+expect_allow "38d task-scale current: 4, approved-by + every fails-when present → allow" \
   "$h38d" 'git commit -m "x"'
 
-# 38e — T2, T3: the rule is "any n >= 1", not "n == 1" — reproven at a second
-# task id so the K2.5 rule is not accidentally pinned to T1 specifically.
-k2t2_plan() {
-  local approved_line=""
-  [ -n "$1" ] && approved_line="$1
-"
-  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n| T3 | build | single | wire the K2.5 arms | active |\n\n## SDLC State\n\nscale: task\ncurrent: T3\n%s\n- T3: bash tests/canonical-sdlc-evidence-gate.test.sh 328/328 green\n\n%s\n' \
-    "$(task_frontmatter_rigor single)" "$approved_line" "${2:-}"
-}
+# 38e — the K2.5 pointer `current: T3` → refused as not numeric, before either arm.
 h38e=$(make_home)
-write_plan "$h38e" "$(k2t2_plan "" "$k2_matrix_full")" > /dev/null
-expect_block "38e task-scale current: T3 with no approved-by: → block (any n >= 1, not just T1)" \
-  "$h38e" 'git commit -m "x"' "approved-by"
+write_plan "$h38e" "$(k2t_plan "" "$k2_matrix_full" T3)" > /dev/null
+expect_block "38e task-scale current: T3 → block, naming the value as not numeric" \
+  "$h38e" 'git commit -m "x"' "current: T3 is not numeric"
 
-# 38f — control: a numbered plan at current: 3 (wave, pre-approval) stays
-# inert on both arms regardless of scale. Section 37h already proves this;
-# reproven here beside the task-scale cases so K2.5's widening is visibly
-# bounded to `current: T<n>` and never leaks onto pre-Step-4 numbered plans.
+# 38f — control: a numbered plan at current: 3 (wave, pre-approval) stays inert on both arms
+# regardless of scale. Section 37h already proves this; reproven here beside the task-scale
+# cases so the arms are visibly bounded to `current: 4` onward at either scale.
 h38f=$(make_home)
 write_plan "$h38f" "$(k2_plan 3 "" "$k2_matrix_missing")" > /dev/null
 expect_allow "38f control: numbered current: 3 with neither approved-by nor fails-when → allow (K2.5 does not widen this)" \
@@ -1703,12 +1645,11 @@ done
 # ---- 38s: AC-12.1 (wave-19 REQ-12, D12) — the `- T<n>:` stub the Step-3 text prescribes ----
 #
 # A plan authored at Step 3 carries one `- T<n>:` line per `## Tasks` row BEFORE any writer
-# runs, because the first writer's commit moves `current:` to `T<n>` and the gate then
-# demands the addressed row's line (wave-18: eight writers refused at once for the lack of
-# it). At `rigor: double` that line must also be proof-shaped — a digit plus a `/` or a
-# backtick — so the charter's bare `pending dispatch` is refused as prose one lane below the
-# placeholder ban. The spelling is READ FROM THE RENDERED steps/3.md, not restated here: the
-# rows below pin that what the text tells a planner to write is what the gate admits.
+# runs. The arm that demanded the addressed row's line under `current: T<n>`, and its proof
+# shape at double, went with that shape (wave-31 T24; D2); what reads the stub now is the
+# dispatch-ledger arm, which judges a line that is there for a placeholder. The spelling is READ
+# FROM THE RENDERED steps/3.md, not restated here: the rows below pin that what the text tells a
+# planner to write is what the gate admits, on a task-scale plan's one table.
 S38S_STEP3="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps/3.md"
 S38S_TPL="$( { /usr/bin/grep -m1 -E '^- T<n>: ' "$S38S_STEP3" 2>/dev/null || true; } | sed -E 's/^- T<n>: //')"
 if [ -n "$S38S_TPL" ]; then
@@ -1720,31 +1661,24 @@ s38s_stub() {  # <n> -> the text's stub for row T<n> of wave 19
   printf '%s' "$S38S_TPL" | sed -e "s/<n>/$1/g" -e 's/<wave>/19/g'
 }
 
-# s38s_plan <T1 evidence> <T2 evidence> -> an double task-scale plan at current: T1,
-# approved, every AC naming a fails-when, both rows still pending — the first writer's commit.
+# s38s_plan <T1 evidence> <T1 status> -> a double multi_agent task-scale plan at current: 4,
+# approved, two rows, the second still pending with the text's stub.
 s38s_plan() {
-  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n| T1 | build | double | the first row dispatched | pending | .worktrees/19-T1 |\n| T2 | build | double | a row not yet dispatched | pending | .worktrees/19-T2 |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n\n- T1: %s\n- T2: %s\n\n%s\n' \
-    "$(task_frontmatter_rigor double)" "$K2_APPROVED" "$1" "$2" "$k2_matrix_full"
+  eg_pf_plan 4 task double true "- T1: $1
+- T2: $(s38s_stub 2)" "$(eg_pf_row T1 — "$2" .worktrees/19-T1)" "$(eg_pf_row T2 — pending .worktrees/19-T2)"
 }
 
 # 38s1 — only the stubs, spelled as the text spells them → admitted.
 h38s1=$(make_home)
-write_plan "$h38s1" "$(s38s_plan "$(s38s_stub 1)" "$(s38s_stub 2)")" > /dev/null
-expect_allow "38s1 AC-12.1 — double plan at current: T1 carrying only the text's stubs → allow" \
+write_plan "$h38s1" "$(s38s_plan "$(s38s_stub 1)" pending)" > /dev/null
+expect_allow "38s1 AC-12.1 — double task plan at current: 4 carrying only the text's stubs → allow" \
   "$h38s1" 'git commit -m "x"'
 
-# 38s2 — the addressed row's stub is a bare `pending` → refused (the placeholder ban).
+# 38s2 — a row's stub is a bare `pending` → refused (the placeholder ban).
 h38s2=$(make_home)
-write_plan "$h38s2" "$(s38s_plan "pending" "$(s38s_stub 2)")" > /dev/null
-expect_block "38s2 AC-12.1 — …and a bare 'pending' stub on the addressed row → block" \
-  "$h38s2" 'git commit -m "x"' "task T1 evidence line is a placeholder"
-
-# 38s3 — the stub without its worktree path is prose at double → refused. This is why the
-# text's spelling carries the path: the path is the digit and the '/' the double lane reads.
-h38s3=$(make_home)
-write_plan "$h38s3" "$(s38s_plan "pending dispatch" "$(s38s_stub 2)")" > /dev/null
-expect_block "38s3 AC-12.1 — …and 'pending dispatch' with no path is refused as prose at double" \
-  "$h38s3" 'git commit -m "x"' "task T1 evidence must show a command + counts, not prose"
+write_plan "$h38s2" "$(s38s_plan "pending" pending)" > /dev/null
+expect_block "38s2 AC-12.1 — …and a bare 'pending' stub → block" \
+  "$h38s2" 'git commit -m "x"' "dispatched task T1 evidence line is a placeholder"
 
 # ============================================================
 # Section 38: the prototype no-row arm (epic-22 K4, AC-K4.2)
@@ -2504,27 +2438,13 @@ section "Section 17t: §17's cells refuse by their SHAPE (wave-17 REQ-5, REQ-10;
 # (wave-16 A-orch-10 is that specimen, eighteen lines deep). Neither said the obligation is
 # one line PER ROW.
 #
-# THE TRIGGER IS UNCHANGED at task scale: the arm still fires on the ADDRESSED unit's
-# missing line. What changed is what it then says — the count and the ids come from every
-# `## Tasks` row, not from the one row that tripped it. So T1 and T3 below are `pending`
-# (the non-addressed `active|done` shape-fail arm is a different refusal, pinned by 22c3)
-# and the fixture isolates the wording.
-v17t_task_none="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | build | double | first | pending |
-| T2 | build | double | the addressed unit | active |
-| T3 | build | double | third | pending |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z \"approved\""
+# ONE ARM, AT EITHER SCALE (wave-31 T24; REQ-1, D2). The task-scale arm that fired on the
+# ADDRESSED unit's missing line went with `current: T<n>`; a task-scale plan's one table is read
+# by the dispatch-ledger arm, as a wave plan's is. 17t1/17t2 are that arm at `scale: task`, and
+# 17t3-17t5 below the same arm at wave scale, in the same words.
 h17t1=$(make_home)
-write_plan "$h17t1" "$(task_plan "$v17t_task_none")" > /dev/null
-expect_block "17t1 task scale, three rows and no evidence lines at all → block" \
+write_plan "$h17t1" "$(eg_pf_plan 4 task double true "" "$(eg_pf_row T1 — landed)" "$(eg_pf_row T2 — landed)" "$(eg_pf_row T3 — landed)")" > /dev/null
+expect_block "17t1 task scale, three landed rows and no evidence lines at all → block" \
   "$h17t1" 'git commit -m "x"' "3 tasks have no evidence line"
 expect_eq "17t1b …and the verdict line counts the rows and names the shape that is owed" \
   "bionic: commit refused — 3 tasks have no evidence line (add one '- T<id>:' per row)" \
@@ -2535,22 +2455,8 @@ expect_contains "17t1e …and the third, so one pass shows the whole debt" "- T3
 
 # THE SINGULAR IS NOT "1 tasks". One row owing one line is the ordinary case, and the
 # verdict is a sentence a person reads.
-v17t_task_one="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | build | double | first | pending |
-| T2 | build | double | the addressed unit | active |
-
-## SDLC State
-
-scale: task
-current: T2
-approved-by: fixture 2026-09-07T00:00Z \"approved\"
-
-- T1: bash suite 9/9 green"
 h17t2=$(make_home)
-write_plan "$h17t2" "$(task_plan "$v17t_task_one")" > /dev/null
+write_plan "$h17t2" "$(eg_pf_plan 4 task double true "- T1: bash suite 9/9 green" "$(eg_pf_row T1 — landed)" "$(eg_pf_row T2 — landed)")" > /dev/null
 expect_block "17t2 task scale, one row short of its line → block" \
   "$h17t2" 'git commit -m "x"' "1 task has no evidence line"
 expect_eq "17t2b …and the verdict agrees with itself in number" \
@@ -3137,15 +3043,18 @@ t12_expect_note_first "T12-b missing-fields arm, root-relative plan path → not
 t12_expect_no_note "T12-c missing-fields arm, plain commit → refused, no note" \
   "$h32a" "git commit -q -m m"
 
-# 32d/32e — dispatch-ledger arm.
+# 32d/32e — dispatch-ledger arm: a landed row with no `- T1:` line (wave-31 T24: the one arm; the
+# task-ledger fixture these drove is the retired shape).
 h32d=$(make_home)
-p32d=$(write_plan "$h32d" "$(task_plan_rigor single "$ledger_active_no_line")")
+p32d=$(write_plan "$h32d" "$(d7_wave_plan "$tasks_one_done" "")")
 t12_expect_note_first "T12-d ledger arm, absolute plan path → note is detail line 1" \
   "$h32d" "sed -i 's/x/y/' $p32d && git commit -q -m m"
 t12_expect_note_first "T12-e ledger arm, root-relative plan path → note is detail line 1" \
   "$h32d" "sed -i 's/x/y/' .bionic/docs/plans/active.md && git commit -q -m m"
 t12_expect_no_note "T12-f ledger arm, plain commit → refused, no note" \
   "$h32d" "git commit -q -m m"
+expect_contains "T12-f2 …and the refusal is the ledger arm's, not the numeric one" \
+  "1 task has no evidence line" "$HOOK_STDERR"
 
 # 32g — the matrix arm (section 31's case) keeps the note, now first rather than last.
 t12_expect_note_first "T12-g matrix arm → the note is detail line 1, not the last line" \
@@ -3230,55 +3139,45 @@ hD4f=$(make_home)
 write_plan "$hD4f" "$(d7_wave_plan "$(sD4_tasks w21-T2 pending)" "- T1: bash suite 9/9 green")" > /dev/null
 expect_allow "D4f a pending row with no line commits" "$hD4f" 'git commit -m "x"'
 
-# D4g — TASK SCALE: a non-addressed `active` row with no line, on an double plan. The table
-# has no agent column, so the row is self-owned; with no roster at all it commits.
-vD4g="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | build | double | do the thing | active |
-| T2 | build | single | second thing, in flight | active |
-
-## SDLC State
-
-scale: task
-current: T1
-approved-by: fixture 2026-09-07T00:00Z \"approved\"
-
-- T1: bash suite 12/12 green"
+# D4g — TASK SCALE, THE ONE TABLE (wave-31 T24; REQ-1, D2). The same ten-column table under
+# `scale: task` is judged by the same arm in the same words: a self-owned `active` row with no
+# line commits, and a `landed` one owes its line, refused byte for byte as D4b is at wave scale.
+sD4_at_task() { printf '%s\n' "$1" | sed 's/^scale: wave$/scale: task/'; }
+expect_eq "D4g0 the task-scale twin carries scale: task" "1" \
+  "$(sD4_at_task "$(d7_wave_plan "$(sD4_tasks '' active)" "")" | /usr/bin/grep -c '^scale: task$')"
 hD4g=$(make_home)
-write_plan "$hD4g" "$(task_plan "$vD4g")" > /dev/null
-expect_allow "D4g AC-4.3 task scale, a non-addressed active row with no line and no roster commits" \
+write_plan "$hD4g" "$(sD4_at_task "$(d7_wave_plan "$(sD4_tasks '' active)" "- T1: bash suite 9/9 green")")" > /dev/null
+expect_allow "D4g AC-4.3 task scale, a self-owned active row with no line and no roster commits" \
   "$hD4g" 'git commit -m "x"'
-# …and the same table with T2 `done` is still refused in 22c3's words.
 hD4g2=$(make_home)
-write_plan "$hD4g2" "$(task_plan "${vD4g/| second thing, in flight | active |/| second thing, in flight | done |}")" > /dev/null
-expect_block "D4g2 …and at done it owes its line, refused in the words 22c3 pins" \
-  "$hD4g2" 'git commit -m "x"' "task T2 is done but has no evidence"
-expect_eq "D4g3 …verdict line byte for byte" \
-  "bionic: commit refused — task T2 is done and shows no evidence (record what proves it)" \
+write_plan "$hD4g2" "$(sD4_at_task "$(d7_wave_plan "$(sD4_tasks w21-T2 landed)" "- T1: bash suite 9/9 green")")" > /dev/null
+sD4_roster "$hD4g2" w21-T1 w21-T2
+expect_block "D4g2 REQ-1 …and a landed row at task scale owes its line, refused as at wave scale" \
+  "$hD4g2" 'git commit -m "x"' "1 task has no evidence line"
+expect_eq "D4g3 …verdict line byte for byte the wave scale's (D4b)" \
+  "bionic: commit refused — 1 task has no evidence line (add one '- T<id>:' per row)" \
   "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
 
-# D4h — THE ENUM TEXTS ARE UNCHANGED (19f, 22c1, 22c-t2): the enum case calls the reader and
-# keeps every byte it printed.
+# D4h — THE ONE ENUM AT TASK SCALE (19f, 22c1, 22c-t2 pinned the retired table's enum texts,
+# which went with it): a status no enum defines is the reader's `units_validate` finding, in its
+# words, at either scale.
 hD4h=$(make_home)
-write_plan "$hD4h" "$(task_plan "$v22c_bad_enum")" > /dev/null
-expect_block "D4h 22c1's fixture is still refused" "$hD4h" 'git commit -m "x"' \
-  "task T2 has invalid status 'wip' (want pending|active|done|dropped)"
+write_plan "$hD4h" "$(sD4_at_task "$(d7_wave_plan "$(sD4_tasks w21-T2 wip)" "- T1: bash suite 9/9 green")")" > /dev/null
+expect_block "D4h REQ-1 task scale, a 'wip' row is refused, naming the one enum" "$hD4h" 'git commit -m "x"' \
+  "T2: status wip is not one of pending active landed dropped"
 expect_eq "D4h2 …verdict line byte for byte" \
-  "bionic: commit refused — task T2's status is unknown (use pending, active, done or dropped)" \
+  "bionic: commit refused — that dispatched task's row is invalid (fix the row the detail names)" \
   "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+# D4h3 — the retired six-column table under a numeric `current:` is a broken table, refused
+# naming the columns it lacks, never judged by a second enum.
 hD4h3=$(make_home)
-write_plan "$hD4h3" "$(task_plan "$v22ct_bad_enum")" > /dev/null
-expect_block "D4h3 22c-t2's six-column fixture is still refused, naming the enum" "$hD4h3" 'git commit -m "x"' \
-  "task T1 has invalid status 'wip' (want pending|active|done|dropped)"
-hD4h4=$(make_home)
-write_plan "$hD4h4" "$(task_plan_rigor single "$ledger_bad_status")" > /dev/null
-run_hook "$hD4h4" 'git commit -m "x"'
-expect_eq "D4h4 19f's fixture: exit 0" "0" "$HOOK_EXIT"
-expect_contains "D4h5 …and the finding line byte for byte" \
-  "canonical-sdlc [task-ledger]: task T2 has invalid status 'doing' (want pending|active|done|dropped)" \
-  "$HOOK_STDERR"
+write_plan "$hD4h3" "$(sD4_at_task "$(d7_wave_plan "## Tasks
+
+| id | intent | rigor | description | status | worktree |
+|---|---|---|---|---|---|
+| T1 | build | double | the finished work | done | — |" "- T1: bash suite 9/9 green")")" > /dev/null
+expect_block "D4h3 REQ-1 the retired six-column table at task scale is refused, naming a missing column" \
+  "$hD4h3" 'git commit -m "x"' "## Tasks: missing column step"
 
 # ============================================================
 section "§HEAD: Step-5 evidence names the head its run read (wave-26 T4; REQ-3 AC-3.2; D5)"
@@ -3404,48 +3303,22 @@ eg_rv_pair() {  # <label> <want exit> <plan text>
   expect_eq "§RIGOR $1: the plan exits $2" "exit=$2" "${new%% *}"
   expect_eq "§RIGOR $1: the twin is refused on its rigor, naming the two" "$EG_RV_REFUSED" "$old"
 }
-eg_rv_pair "22b1 double cell, prose evidence" 2 "$(task_plan_rigor single "$v22b_t2_prose")"
-eg_rv_pair "22b7 single cell, prose evidence" 0 "$(task_plan_rigor single "$v22b_t2_tested_prose")"
-eg_rv_pair "22c1 double plan, bad status" 2 "$(task_plan "$v22c_bad_enum")"
-eg_rv_pair "22c2 single plan, bad status" 0 "$(task_plan_rigor single "$v22c_bad_enum")"
-eg_rv_pair "22d1 single plan, double cell" 2 "$(task_plan_rigor single "$v22d1_body")"
-eg_rv_pair "22d2 double plan, single cell, no waiver" 2 "$(task_plan "$v22d2_body")"
-eg_rv_pair "22d2b double plan, single cell, waiver" 0 "$(task_plan "$v22d2b_body")"
+# THE TASK-SCALE PAIRS ARE THE ONE TABLE (wave-31 T24; D2): the plans 22b/22c/22d pinned were the
+# retired task table under `current: T<n>`; these are the same verdicts' fixtures in the one
+# table at `current: 4`, so the twin is refused on its rigor ahead of a verdict the plan earns.
+eg_rv_pair "task, single, one table" 0 "$(eg_pf_plan 4 task single false "" "$(eg_pf_row T1 — active)")"
+eg_rv_pair "task, double multi_agent, a 'wip' row" 2 "$(eg_pf_plan 4 task double true "" "$(eg_pf_row T1 — wip)")"
+eg_rv_pair "task, double multi_agent, a landed row with its line" 0 "$(eg_pf_plan 4 task double true "- T1: bash suite 12/12 green" "$(eg_pf_row T1 — landed)")"
 eg_rv_pair "22c5 double multi_agent wave, no ## Tasks" 2 "$(d7_wave_plan "" "")"
 eg_rv_pair "22c9 single multi_agent wave, no ## Tasks" 0 "$(d7_wave_plan "" "" single true)"
 eg_rv_pair "32a single wave at 6, auditor cells empty" 0 "$(plan_rigor single 6 "$step6_body" "$m32_empty_aud")"
 eg_rv_pair "32e single wave at 5, no auditor pointer" 0 "$(plan_rigor single 5 "$step5_noaud" "$m32_empty_aud")"
 eg_rv_pair "32 double wave at 5, no auditor pointer" 2 "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")"
 
-# A FLOOR AND A CELL COMPARE AS LEVELS, and a cell in a word before 1.14.0 is no level at all.
-eg_rv_mixed() {  # <label> <frontmatter word> <cell word> <want exit>
-  local body
-  body="$(printf '%s\n' "$v22d2_body" | sed -E "s/\\| single \\|/| $3 |/")"
-  h=$(make_home); write_plan "$h" "$(task_plan_rigor "$2" "$body")" > /dev/null
-  run_hook "$h" 'git commit -m "x"'
-  expect_eq "§RIGOR mixed $1" "$4" "$HOOK_EXIT"
-}
-eg_rv_mixed "plan double, cell single: a downgrade" double single 2
-eg_rv_mixed "plan double, cell audited: no level, refused" double audited 2
-eg_rv_mixed "plan single, cell single: the same level" single single 0
-eg_rv_mixed "plan single, cell tested: no level, refused" single tested 2
-
-# EACH WORD BEFORE 1.14.0 IN A CELL is refused as `standard` is, naming the two levels.
-for eg_rv_old in low tested medium peer-reviewed high audited; do
-  h=$(make_home)
-  write_plan "$h" "$(task_plan_rigor single "$(printf '%s\n' "$v22b_t2_tested_prose" | sed -E "s/\\| single \\| fix/| $eg_rv_old | fix/")")" > /dev/null
-  expect_block "§RIGOR a '$eg_rv_old' cell is refused" "$h" 'git commit -m "x"' "invalid rigor '$eg_rv_old'"
-  expect_contains "§RIGOR …naming the two levels" "(want single or double)" "$HOOK_VSTDERR"
-done
-
-# A WORD THAT IS NO LEVEL IN A CELL is refused, and the refusal names the two levels.
-h=$(make_home)
-write_plan "$h" "$(task_plan_rigor single "$(printf '%s\n' "$v22b_t2_tested_prose" | sed -E 's/\| single \| fix/| standard | fix/')")" > /dev/null
-expect_block "§RIGOR a 'standard' cell is refused" "$h" 'git commit -m "x"' "invalid rigor 'standard'"
-expect_contains "§RIGOR …naming single and double" "single or double" "$HOOK_VSTDERR"
-for eg_rv_old in "low, medium or high" "medium" "three"; do
-  expect_absent "§RIGOR …and not the set before 1.14.0 ('$eg_rv_old'), on its line or in its detail" "$eg_rv_old" "$HOOK_VSTDERR"
-done
+# THE ROW'S RIGOR CELL IS GONE (wave-31 T24; REQ-1, D2). The rows that stood here compared a
+# frontmatter level with a task row's own `rigor` cell, and refused a cell in a word before
+# 1.14.0; the cell was a column of the retired task table, and the one table carries `kind` in
+# that slot. The frontmatter word is still judged by every pair above.
 
 section "§READS-HEAD — the evidence gate refuses a commit while the regression row's reads drop head (wave-30 T13; REQ-4 AC-4.3; D7, Δ6a)"
 # ============================================================

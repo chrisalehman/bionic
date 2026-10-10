@@ -2492,30 +2492,16 @@ expect_eq "EG6h precondition: the judge reads the fixture (its evidence line cov
 expect_eq "EG6h2 §EG-6 agreement: the gate names structure alone" "structure " "$EG6_WALL"
 expect_eq "EG6h3 …and the judge holds every question but structure, on the same text" "$EG6_WALL" "$EG6_JUDGE"
 
-# THE TASK LANE (AC-2.2's second half): a task-scale row carrying only the word `critic`, from its
-# own tree, at current: 6, is refused the same way, by the row.
-R_EG6T="$(mk_repo eg6t)"
-git -C "$R_EG6T" worktree add -q "$R_EG6T/.worktrees/27-T1" -b wt/27-T1 2>/dev/null
-eg6_task_plan() {  # <lines> -> a task plan at current: 6 whose T1 row is done, its line carrying the words
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: task\n'
-  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
-  printf 'current: 6\napproved-by: fixture 2026-09-22T00:00Z approved\n'
-  printf -- '- T1: bash tests/x.test.sh 12/12, auditor CONFIRMED, critic CONFIRMED\n'
-  [ -n "$1" ] && printf '%s\n' "$1"
-  printf '\n## Tasks\n\n| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n'
-  printf '| T1 | build | double | the work | done | 27-T1 |\n'
-}
-printf '%s\n' "$(eg6_task_plan "")" > "$R_EG6T/.bionic/docs/plans/active.md"
-bw_bind "$R_EG6T"
-run_hook "$(mk_payload "$R_EG6T/.worktrees/27-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_EG6T"
-expect_status "EG6i AC-2.2: a task row carrying only the words auditor and critic is refused at current: 6" 2 "$ST"
-expect_contains "EG6i2 …naming the row" "canonical-sdlc task T1 is at current: 6" "$ERR"
+# THE TASK SCALE (AC-2.2's second half), ON THE ONE TABLE (wave-31 T24; REQ-1, D2). These rows drove a
+# six-column task row from its own tree through the task arm's readings lane; that arm and the table
+# are gone. A task-scale plan's `current:` is a step number and its readings are owed from Step 6
+# exactly as a wave plan's (EG6a/EG6b above, the same plan at `scale: task`), and a commit from a
+# row's own tree is judged at the row's step at either scale (evidence-gate 25gT(b)/(b2)).
+eg6_gate "$(eg6_plan 6 task "" "- Step 6: review at record/w27/review.md")"
+expect_status "EG6i AC-2.2: a task-scale plan at current: 6 with a Step 6 line and no reading is refused" 2 "$ST"
+expect_contains "EG6i2 …in the gate's words, as at wave scale" "a reading question is unanswered" "$ERR"
 expect_contains "EG6i3 …and the question it lacks" "- adversarial: no reading, and no waiver" "$ERR"
-H_EG6T="$(git -C "$R_EG6T" rev-parse HEAD)"
-printf '%s\n' "$(eg6_task_plan "$(eg6_reading "$H_EG6T" evidence pass)
-$(eg6_reading "$H_EG6T" adversarial pass)
-$(eg6_reading "$H_EG6T" structure pass)")" > "$R_EG6T/.bionic/docs/plans/active.md"
-run_hook "$(mk_payload "$R_EG6T/.worktrees/27-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_EG6T"
+eg6_gate "$(eg6_plan 6 task "$EG6_ALL")"
 expect_status "EG6j …and admitted once the section holds a reading of each question" 0 "$ST"
 
 # THE DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121), the Step-5 row. A debt
