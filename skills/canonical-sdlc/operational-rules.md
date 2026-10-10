@@ -644,6 +644,8 @@ An agent start carries its type and id, never its launch, so the start is joined
 
 - **Annotated `Step N (stance M):` lines DON'T satisfy the numeric-step matcher (bit 2026-07-22, epic-10 wave-02 Step 6 — cost one blocked commit).** The evidence-gate finds the current step's evidence line with `^[[:space:]]*-?[[:space:]]*(Step|Phase)[[:space:]]+N[[:space:]]*:` — the digit must be followed by ONLY whitespace, then the colon. A `Step 6 (stance 1):` line has ` (stance 1)` between `6` and `:` and does NOT match, so a plan whose only step-N lines are annotated variants BLOCKS every commit at `current: N`. Fix: carry a bare `Step N: <pointer>` line ALONGSIDE the annotated detail lines (the v10 shape's "pointer to 5-axis body + critic findings" is exactly this — one bare line + stance detail below it). Generalizes to any `Step N (…):` form (stance/phase/sub-label). Wave-01 dodged it only because its T6/T7 commits happened to land at other `current:` values.
 
+- A test proves what a program does, never what a document says: a check that pins the wording of doctrine or a file's size is refused at review as a defect, not accepted as evidence.
+
 ## Design-time memory check
 
 - **CORRECTED 2026-07-27 (epic-12 wave-01): the always-loaded project-notebook tier this rule described no longer exists.** The old rule ("memory sweep must be recursive — read `INDEX.md` AND every Deep Context pointer") named a load mechanism that epic-12 deleted. What survives is the lesson underneath it, which was never about recursion: **a catalogue entry is not the knowledge.** The 2026-04-16 dry-run that produced the original rule picked a stale design (SessionEnd option C) because the better approach lived one pointer deeper than the entry point that was read.
@@ -656,56 +658,13 @@ An agent start carries its type and id, never its launch, so the start is joined
 
 - **What pins the diagrams.** Because the text is greppable, `tests/cross-gate-agreement.test.sh` §V pins the four version renderings across both SVGs against the hooks' `SUPPORTED_SDLC_VERSION`, with a mutation arm that re-proves the pin against a doctored copy on each run. The six always-on entries against `hooks/hooks.json` and the ten steps and the armed hook set against this file are not pinned by anything yet.
 
-## History and rationale moved out of the capped doctrine (wave 27)
+## SDLC rulings (moved from the repo CLAUDE.md, wave-31)
 
-Each line below was cut from a capped file and kept here, verbatim or reworded into a whole sentence where the bare clause would not read alone; the rule it came from stays in the capped file in one sentence or less. Nothing loads this section.
-
-- **steps/5.md, the walk.** It runs first because it is the cheapest catcher and sits structurally outside the criteria frame, so it finds what nobody knew to look for, before effort is spent row by row.
-
-- **steps/5.md, walk-artifact paragraph.** The `current: 8b` sub-step hole is pre-existing; the walk arm inherits it rather than introduces it.
-
-- **steps/5.md, user-confirmed T4.** Reaching for the Waiver Protocol here records a waiver where nothing was waived, and the row then reads forever as a criterion that was let go.
-
-- **steps/5.md, design waiver.** It means *no design governs this artifact*, which is not the same claim as "the design lives elsewhere" — that one is the `design:` pointer, and reaching for the waiver instead throws away the path the approval display exists to show.
-
-- **steps/0.md, pre-flight.** `hooks/engage.sh` has already created `.bionic/tmp` and its `.gitignore`, so this `mkdir -p` is idempotent, never the first act to touch the tree.
-
-- **steps/0.md, confirmation layout.** **This layout is literal, and it is deliberately not marked unenforced.** No hook can check it — the display is conversational, never a file — so the template *is* the whole enforcement. Keep it as a block.
-
-- **steps/2.md, Design Interview.** Two shapes are refuted by dogfood — **batch presentation**, the design delivered whole as a wall of text with an ambiguous call to action, and **question-without-frame**, a fork posed before its terms exist.
-
-- **steps/9.md, terminal-disposition block.** The charter disposition was added 2026-08-16 on Chris's catch: the original trigger-only form had no bin for legitimately deferred major work, and the plugin conversion itself is the proof case.
-
-- **dispatch.md, brief hygiene.** The four rules there were hand-fixed failures in an earlier wave: a reused artifact name overwrote a landed task's evidence log, and `BIONIC_TEST_TIMING=1` wrote the timing rows to a file named `1`.
-
-- **dispatch.md, Patrol hooks paragraph.** The engagement check runs before the run check, which used to be every hook's only gate.
-
-- **dispatch.md, why writers are never pinged.** The collision was observed as interleaved edits and checkout-reverts.
-
-- **dispatch.md, Patrol hooks paragraph.** Every hook is registered once in `hooks/hooks.json`, so a session continue, a `/clear`+resume and a `/reload-plugins` all leave them exactly where they were.
-
-- **dispatch.md, Patrol hooks paragraph (wave 28).** `hooks/engage.sh` writes engagement mechanically, the instant this session invokes `canonical-sdlc` — a Skill tool call or a typed `/bionic:canonical-sdlc` — as `.bionic/tmp/engaged-<session-id>.state`; no other skill call writes it, and a session that has never invoked this one is invisible to every bionic hook, the four always-on guards included. Every bionic hook checks engagement first: a hook that finds no marker does nothing at all, silently, on any input.
-
-- **dispatch.md, Patrol hooks paragraph (wave 28).** A hook that finds the marker but no open run still enforces whatever it can enforce without one — the Patrol checkpoint, the deliverable wall, the always-on guards — and skips only the arms that measure against a step, a budget, or a roster. The marker is never removed during the session once written: `disarm` removes only the Patrol stamp, never the marker, so a session that invoked canonical-sdlc is bionic's for the whole rest of its life, run open or closed.
-
-- **dispatch.md, the arming wall (wave 28).** What the stamp attests is that firings are landing; it cannot see the CLI's cron table, so a job deleted moments ago still looks alive for up to one stale window.
-
-- **dispatch.md, liveness fields (wave 28).** A subprocess claim — a process pattern plus its output file — is conditional-required: declared only when the task backgrounds a long-running command; the backgrounding paragraph beside it says the same as a rule.
-
-- **dispatch.md, fresh by default (wave 28).** Synchronous main-thread execution exists only under `multi_agent: false`, where there are no subagents at all.
-
-- **dispatch.md, backgrounding (wave 28).** Declaring `claims=` is what lets the verdict call a mid-flight row STILL-LIVE instead of UNMET; nothing watches it between decisions.
-
-- **dispatch.md, the non-response procedure (wave 28).** Rationale, failure model, and use cases for the starting standard, the stopping standard, and the non-response procedure: `design/orchestrator-subagent-coordination.md`.
-
-- **dispatch.md, command discipline (wave 28 release).** A writer's last act on its tree is `ready`; it touches nothing after it. (The paragraph "One line lands a row" says the same.)
-
-- **dispatch.md, the Patrol (wave 28 release).** Never an OS cron, never a resident process — the job is session-scoped, dies with the session, and the roster on disk is the record that survives it; its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm.
-
-- **dispatch.md, the Patrol (wave 28 release).** The stamp is the only record on disk that a Patrol is running here, so a `CronDelete` without the `disarm` leaves a deliberate stop that reads exactly like a Patrol a plugin update killed — and `hooks/patrol-revive.sh`, which cannot tell the two apart, then reports the stop you chose as a death on every remaining turn of the session.
-
-- **dispatch.md, phase-gated dispatch (wave 28 release).** A redirect sent mid-phase is read at the gate, bounding the steering race instead of pretending mail delivery is instant.
-
-- **dispatch.md, normative values (wave 28 release).** After correcting any such value, grep every artifact that restates it: decision records drift independently of the prose they record, and single-document review sweeps miss them.
-
-- **dispatch.md, when a report is lost (wave 28 release).** A read-only dispatch whose findings live only in a transcript is one cleanup away from having produced nothing.
+- **Deletion is not a task.** Deleting dead code the user has ruled on is a few-line commit by the
+  orchestrator, not a dispatched task. Size the work before you pick the ceremony.
+- **Approval steps are gate acts.** Ready tasks dispatch up to capacity without asking. A step
+  that needs the user's explicit approval, a release among them, waits for the user, and it is never
+  put to the user without the test results.
+- **Late fixes get a fresh run.** A fix found after a run has closed becomes a fixit in a fresh
+  canonical-sdlc run. It is never bolted onto the closed run, and a known defect blocks the
+  push.
