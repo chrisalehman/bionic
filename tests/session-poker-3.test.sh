@@ -524,22 +524,22 @@ expect_eq "57v13 no projection copy is left beside the plan" "" \
 R57T="$(make_repo s57-task)"; ( cd "$R57T" && git commit -q --allow-empty -m init )
 S57T_B="$(git -C "$R57T" rev-parse HEAD)"
 P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
-mkdir -p "$(dirname "$P57T")"
-{
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-  printf 'rigor: single\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
-  printf 'walk: exempt\ndeploy_target: n/a\n'
-  # A task-scale plan carries its base in the frontmatter (T45, A-orch-56): with none, a first
-  # reading is refused and the judge exits 2 (section 63 pins that twin).
-  printf 'base-sha: %s\n' "$S57T_B"
-  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-  printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
-  printf -- '- T1: the fix, in .worktrees/01-task\n\n'
-  printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
-  printf '| T1 | bugfix | single | the fix | active |\n\n'
-  printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-  printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
-} > "$P57T"
+# THE ONE TABLE AT TASK SCALE (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
+# `scale: task`, `current: 4`, one row in flight. Its base is the Step-4 block's `base-sha:`, where
+# the one shape carries it at either scale (A-T24-12); with none, a first reading is refused and the
+# judge exits 2 (section 63 pins that twin, its Step-4 key empty).
+s57t_task_plan() {  # <plan> <Step-4 base-sha value, or "" for the key alone> -> the plan, with the run's branch and the row's line
+  plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
+  S57T_BASE="$2" awk '
+    /^  base-sha: / { print "  base-sha:" (ENVIRON["S57T_BASE"] != "" ? " " ENVIRON["S57T_BASE"] : ""); next }
+    { print }
+    /^approved-by: / { print "working-branch: task/01-fixture"; print "- T1: the fix, in .worktrees/01-task" }' \
+    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+s57t_task_plan "$P57T" "$S57T_B"
+expect_eq "57t0a precondition: the fixture is a task-scale plan at current: 4 whose Step-4 base is the init commit" \
+  "scale: task|current: 4|  base-sha: $S57T_B" \
+  "$(/usr/bin/grep -E '^scale: |^current: |^  base-sha: ' "$P57T" | tr '\n' '|' | sed 's/|$//')"
 bound_marker "$R57T" "$SID" "$P57T" >/dev/null 2>&1
 ( cd "$R57T" && git add -f "$P57T" && git commit -qm plan \
   && git worktree add -q -b task/01-fixture "$R57T/.worktrees/01-task" "$S57T_B" ) >/dev/null 2>&1
@@ -1534,29 +1534,20 @@ section "Section 63 §BASE §HEAD §FLOOR-HEAD §WHOLE-TIME §EDGES: the judge h
 # copy of proof.sh that turns its row red. A waiver's question and head survive a reply and a git
 # user name that spell ` by question=… head=…` (F6).
 #
-# FIXTURE FIDELITY. §BASE is section 57t's task-scale plan, written the same way, with no
-# `base-sha:` (review pass 13's exp6.sh: commits init → unread code → read code), then with the
-# base in its frontmatter, where A-orch-56 puts it at task scale. Readings register through the
+# FIXTURE FIDELITY. §BASE is section 57t's task-scale plan, written the same way, with no base: its
+# Step-4 `base-sha:` key is empty, which the gate admits at `current: 4` and the judge passes over
+# (review pass 13's exp6.sh: commits init → unread code → read code; wave-31 T24, A-T24-12). Then
+# the base goes in its frontmatter, where A-orch-56 puts it, the place the judge reads after the
+# Step-4 block. Readings register through the
 # verb under the 57t roster row shape (s56_row, `questions=` SYNTHESIZED until T15). The judge's
 # planted copies are written by the production writers (`proof_line`, `proof_add_line`). §WHOLE-TIME
 # is §42's wave plan, admitted by the real commit gate, with its own `## Tasks` rows. §EDGES is
 # exp3.sh's repository: real merges and real `git mv` renames. Each mutant is a copy of the whole
 # lib directory with one line of proof.sh changed, run beside the shipped one.
 S63_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-s63_task_plan() {  # <repo> <plan> -> a scale: task plan as 57t writes it, with no base-sha:
+s63_task_plan() {  # <repo> <plan> -> 57t's task-scale plan, its Step-4 `base-sha:` key empty
   mkdir -p "$(dirname "$2")"
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: single\nscale: task\nmulti_agent: false\nuse_worktree: true\nhas_ui: false\n'
-    printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-    printf '# fixture task\n\n## SDLC State\n\ncurrent: T1\n%s\nworking-branch: task/01-fixture\n\n' "$SP_APPROVED_LINE"
-    printf -- '- T1: the fix, in .worktrees/01-task\n\n'
-    printf '## Tasks\n\n| id | intent | rigor | description | status |\n|---|---|---|---|---|\n'
-    printf '| T1 | bugfix | single | the fix | active |\n\n'
-    printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
-  } > "$2"
+  s57t_task_plan "$2" ""
 }
 s63_base() {  # <plan> <sha> -> the plan with `base-sha: <sha>` in its frontmatter, after scale:
   B="$2" awk '{ print } /^scale: / && !d { print "base-sha: " ENVIRON["B"]; d = 1 }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
@@ -1589,7 +1580,7 @@ for s63q in evidence adversarial structure; do
 done
 expect_eq "63a0 precondition: unread code is the parent of read code, and init its parent" "$S63_I $S63_U" \
   "$(git -C "$S63_WT" rev-parse "$S63_H~2" "$S63_H~1" | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "63a0b precondition: the plan names no base-sha: anywhere" "0" "$(/usr/bin/grep -c 'base-sha' "$P63")"
+expect_eq "63a0b precondition: the plan's one base-sha: is the Step-4 key, empty" "  base-sha:" "$(/usr/bin/grep 'base-sha' "$P63")"
 s34_gate "$R63"
 expect_eq "63a0c precondition: the task-scale plan with no base is admitted by the real commit gate" "0" "$GATE_RC"
 s42_snap "$R63" "$P63"

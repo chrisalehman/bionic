@@ -30,6 +30,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 # The one roster-row builder and the one swept-marker writer (S17): wave-19's fill fixtures
 # write this session's roster through them rather than spelling either shape by hand.
@@ -93,7 +94,7 @@ governing-skill: canonical-sdlc
 ---
 ## SDLC State
 
-current: T5
+current: 4
 approved-by: fixture 2026-10-04T00:00Z "approved"
 EOF
   # BOUND TO ITS PLAN (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is
@@ -970,8 +971,8 @@ make_env_ledger() {  # <current> <row>... -> project dir on stdout
     printf '## SDLC State\n\ncurrent: %s\n' "$cur"
     # PAST STEP 3 THE PLAN CARRIES ITS APPROVAL (wave-26 T13; D3): the fill and this wall key on
     # the `approved-by:` line, not on `current:`, so a ledger meant to be live writes it — at a
-    # numbered step from 4 on, and at task scale. `current: 3` (rows 61, 63c) stays unapproved.
-    case "${cur%[ab]}" in [4-9]|T[0-9]*) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
+    # numbered step from 4 on, at either scale. `current: 3` (rows 61, 63c) stays unapproved.
+    case "${cur%[ab]}" in [4-9]) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
     printf '\n- Step %s: in progress\n\n' "$cur"
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
@@ -1516,22 +1517,20 @@ expect_eq "70b: …after ONE read of current: (the gate, the step token and the 
   "1" "$(pdg_count "$PDG_CUR_SIG")"
 expect_eq "70c: …and ONE parse of the table" "1" "$(pdg_count "$PDG_TBL_SIG")"
 
-# Task scale: `current: T<n>` against a table of units, where the step token asks the header
-# twice (`units_has_column` step, then id) before the ready set reads the rows.
-d=$(make_env_ledger T2)
-{
-  printf -- '---\ngoverning-skill: canonical-sdlc\n%s\n---\n\n# fixture task plan\n\n' "$LEDGER_BUDGET"
-  printf '## SDLC State\n\ncurrent: T2\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
-  printf '| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n'
-  printf '| T1 | bugfix | standard | the done unit | done | — |\n'
-  printf '| T2 | bugfix | standard | the unit the run is on | pending | — |\n'
-  printf '| T3 | bugfix | standard | the next unit | pending | — |\n'
-} > "$d/.bionic/docs/plans/$PLAN_REL"
+# Task scale, the one table (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
+# `scale: task`, `current: 4`, the same reads as the wave plan above.
+d=$(make_env_ledger 4)
+plan_fixture "$d/.bionic/docs/plans/$PLAN_REL" task \
+  "| T1 | 4 | build | the landed unit | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |" \
+  "| T2 | 4 | build | the unit the run is on | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+  "| T3 | 4 | build | the next unit | implementor | — | — | 30 | REQ-1 | c.sh | — | — | pending |" > /dev/null
+expect_eq "70d0: the fixture is a task-scale plan at current: 4" "2" \
+  "$(/usr/bin/grep -cE '^scale: task$|^current: 4$' "$d/.bionic/docs/plans/$PLAN_REL")"
 u_prompt "$d" "carry on"
 fire_counted "$d"
 expect_block "70d: the counted Stop still computes the ready set (task scale), naming T2" "T2"
 expect_eq "70e: …after ONE read of current:" "1" "$(pdg_count "$PDG_CUR_SIG")"
-expect_eq "70f: …and ONE parse of the table, the header questions included" \
+expect_eq "70f: …and ONE parse of the table" \
   "1" "$(pdg_count "$PDG_TBL_SIG")"
 
 # 70g: THE COUNTER'S OWN CONTROL. Each signature is spelled exactly once in its library, so a
@@ -2522,7 +2521,7 @@ governing-skill: canonical-sdlc
 ---
 ## SDLC State
 
-current: T5
+current: 4
 EOF
   cat > "$dir/.bionic/docs/plans/$PLAN_B_REL" <<'EOF'
 ---
@@ -2530,7 +2529,7 @@ governing-skill: canonical-sdlc
 ---
 ## SDLC State
 
-current: T5
+current: 4
 EOF
   touch -t 202601010000 "$dir/.bionic/docs/plans/$PLAN_A_REL"
   touch -t 202602010000 "$dir/.bionic/docs/plans/$PLAN_B_REL"

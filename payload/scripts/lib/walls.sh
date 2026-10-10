@@ -743,7 +743,7 @@ return 0
 #
 # THIS BODY HAS 32, at up to four frames deep, and 32 of them are inside `validate_matrix`
 # alone — a 300-line function whose refusals fire from inside loops, through helper
-# frames (`block_matrix`, `ledger_shape_fail`, `shape_block`) that were written knowing
+# frames (`block_matrix`, `shape_block`) that were written knowing
 # `refuse` never returns. Propagating a return through every one of those call sites is
 # ~50 edits in which a single miss converts a BLOCK into a silent pass: the wall keeps
 # running, the next `fold_block` overwrites the staged object, and the function returns
@@ -966,7 +966,7 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   # was already put through the same translation `normalize_newlines` (run.sh) applies to
   # build the gate's own `SECTION` (walls.sh:1709), so a CRLF plan's `## SDLC State` heading
   # and its `current:` line are seen exactly as the gate sees them, not raw. Anything else —
-  # absent, `T<n>`, a word — reads as 0, which is the fallback the old `${2:-0}` default gave
+  # absent, a non-numeric value, a word — reads as 0, which is the fallback the old `${2:-0}` default gave
   # a caller that passed nothing.
   step="$(printf '%s\n' "$state" \
           | grep -E '^[[:space:]]*current[[:space:]]*:' \
@@ -1529,8 +1529,8 @@ eg_commit_outside_root() {
 
 # THE STEP FROM WHICH THE GATE READS A RUN'S READINGS AND VERDICTS, named once (wave-28 T72; D33, D19).
 # eg_step_reads_readings <current> -> 0 when the declared `current:` is a numbered step of 6 or more (a
-# sub-step letter binds as its step), 1 otherwise: `_eg_verdicts_owed` asks it of the run's own word, and
-# the collector in hooks/bash-walls.sh asks it (through `eg_plan_reads_readings`) before it derives the
+# sub-step letter binds as its step), 1 otherwise.
+# The collector in hooks/bash-walls.sh asks it (through `eg_plan_reads_readings`) before it derives the
 # readings' results at all, because the wall reads them from here and not below. The wall's `case` at
 # its last call (steps 6 to 9) is the same rule at the steps the lifecycle has.
 eg_step_reads_readings() {
@@ -2243,37 +2243,6 @@ BIONIC_FINDING_CHANNEL="evidence-gate"
 BIONIC_FINDING_SUBJECT="$PLAN"
 bionic_finding_root() { audit_root; }
 
-# Normalize a task row's rigor cell to its effective rigor LEVEL — `single` or `double`, lib/run.sh
-# `rigor_level`'s answer (wave-28 T44; wave-30 T11, D1): a cell naming a level resolves to it; a
-# non-empty cell naming none (a word before 1.14.0 among them) is INVALID; an empty cell inherits
-# the plan-level RIGOR's level when that names one, else defaults to `single` (the floor — see plan
-# Assumption A3). Defined ahead of validate_task_ledger (which
-# runs at the `current: T<n>` branch, before is_r7_key is defined below) so the
-# validator can call it — same placement rationale as is_placeholder_value.
-effective_row_rigor() {  # $1 = row's rigor cell
-  local cell
-  cell=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-  if [ -n "$cell" ]; then
-    rigor_level "$cell" || echo "INVALID"
-    return
-  fi
-  rigor_level "$RIGOR" || echo "single"
-}
-
-# Total order over the rigor levels, for the per-row FLOOR check (task 4/8).
-# single < double, on `rigor_level`'s answer. An empty/unknown value maps to 0 (the single
-# floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-# The governing-skill hook ranks the same levels (`rigor_rank`); both read the word through
-# the one definition (wave-28 T44), and tests/cross-gate-agreement.test.sh §RIGOR holds the
-# two ranks equal on both levels.
-rigor_ord() {  # $1 = a rigor word (or empty)
-  case "$(rigor_level "$1")" in
-    double) echo 1 ;;
-    *)      echo 0 ;;  # single, empty, or unknown → the floor
-  esac
-}
-
 # Is the independent auditor's verdict a WALL on this run? (B-10 / R-11.)
 # SKILL.md's rigor table: at `single` the critic holds every question and no
 # auditor is ever sent, so demanding an auditor CONFIRMED on every matrix row
@@ -2288,104 +2257,15 @@ rigor_ord() {  # $1 = a rigor word (or empty)
 #
 # FAIL-CLOSED on an unknown or missing value: a plan that does not say what
 # rigor it runs at has not bought the relaxation, and a typo must not become a
-# bypass (same rationale as walk_mode's off-enum arm). This is deliberately
-# ASYMMETRIC with effective_row_rigor, which resolves an unknown frontmatter
-# rigor DOWN to the single floor: there, the fallback picks a lane for a row
-# that must run in one; here, the fallback decides whether a wall stands.
+# bypass (same rationale as walk_mode's off-enum arm).
 #
-# Scope: the MATRIX wall and the Step-5 pointer only. The task-ledger lanes
-# (apply_rigor_lanes) were already rigor-keyed and read EFFECTIVE row rigor, so
-# a row whose own cell raises it above the frontmatter keeps its auditor/critic
-# demand there — the matrix carries no per-row rigor cell to raise.
+# Scope: the MATRIX wall and the Step-5 pointer only.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_auditor_required() {
   case "$(rigor_level "$RIGOR")" in
     single) return 1 ;;
     *)      return 0 ;;  # double, and anything unrecognized
   esac
-}
-
-# Proof-shape test (D-task 4/2): an evidence value counts as "proof-shaped"
-# — a command invocation + result counts, not prose — iff it contains BOTH
-# at least one digit AND at least one command token. A command token is any
-# of: a backtick; a literal '/' anywhere (a path, e.g. 'hooks/foo.sh'); or a
-# whole-word match against the fixed runner list (bash-3.2 safe — no
-# associative arrays, `grep -Ew` for the bounded whole-word match so `test`
-# matches in "bash test.sh 12/12" but `testing` never triggers on a `test`
-# substring). Returns 0 (proof-shaped) / 1 (not) — never blocks itself; the
-# caller (apply_rigor_lanes) decides what a failure means.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-is_proof_shaped() {  # $1 = evidence value
-  local v="$1"
-  grep -qE '[0-9]' <<< "$v" || return 1
-  if grep -q '`' <<< "$v"; then
-    return 0
-  fi
-  if grep -qF '/' <<< "$v"; then
-    return 0
-  fi
-  if grep -Ewq 'bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test' <<< "$v"; then
-    return 0
-  fi
-  return 1
-}
-
-# Rigor-keyed evidence lanes (D-task 4/2, TASK SCALE ONLY). Applies to
-# the addressed row (any status) and to every OTHER row with status `done`
-# that has a non-empty, non-placeholder evidence line — the caller only
-# invokes this once those upstream 4/1 presence/placeholder checks (and, for
-# the addressed row, the rigor-enum check) have already passed. BLOCKS
-# (exit 2) on any lane breach:
-#   - effective rigor double: evidence must be proof-shaped.
-#   - status done AND the run has reached Step 6: the row owes the readings its
-#     effective rigor deals (`_eg_refuse_readings`).
-# The `single` floor carries no proof-shape demand — 4/1's presence +
-# placeholder checks are its entire contract (plan Assumption A4: the literal
-# substrings are sufficient tokens, no pointer-format sub-schema).
-#
-# THE VERDICT LANES ARE STEP-GATED, NOT STATUS-GATED (wave-18 REQ-1, D1, ADR-033).
-# `done` is the one terminal word at task scale and it means the work is finished
-# and the tree released — a fact about the ROW. An auditor verdict and a critic
-# verdict are facts about the RUN: Step 5 produces the first and Step 6 the
-# second, so before Step 6 no honest row can carry them. Demanding them of a
-# `done` row at `current: T<n>` left a finished task with no word it could truthfully
-# write (`active` on a released tree is false, `done` was refused), and a consumer
-# run spawned six worktrees for two lines of work to get around it. The arms
-# below therefore ask `_eg_verdicts_owed` — the plan's own declared `current:`,
-# numeric and >= 6 — before they ask anything of the evidence. Everything else
-# here is unchanged: the proof-shape lane is not a verdict and fires at every
-# `current:`, and a `done` row ALWAYS owes its `- T<n>:` evidence line (the
-# presence/placeholder arms above this call).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-#
-# THE RUN'S OWN `current:`, never the substituted one. `_EG_DECLARED_CURRENT` is
-# recorded where `CURRENT` is first parsed and is not touched by either subject
-# substitution below (a row's step, or a task row's id), because the question this
-# answers is "has the run reached the step that produces verdicts", which no
-# per-commit subject can move.
-_eg_verdicts_owed() {
-  eg_step_reads_readings "$_EG_DECLARED_CURRENT"
-}
-
-apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
-  local id="$1" status="$2" eff="$3" ev="$4"
-  case "$eff" in
-    double)
-      if ! is_proof_shaped "$ev"; then
-        _eg_detail="canonical-sdlc task ${id} evidence must show a command + counts, not prose, at review rigor ${eff} ('${ev}').
-Plan: $PLAN
-Fix: replace the '- ${id}:' evidence with the actual command invocation and result counts (e.g. 'bash test.sh 12/12 green')."
-        refuse exit2 commit "that task's evidence is prose" "record the command and counts" "$_eg_detail"
-      fi
-      ;;
-  esac
-  # THE VERDICT IS A READING NOW, NOT A WORD (wave-27 T14; D3, AC-2.2). The two `grep -Ewq`
-  # arms that stood here took the words `auditor` and `critic` on the row's own line as the
-  # verdicts; a line could carry the word with no reading behind it. The row owes what every
-  # commit from Step 6 owes, at its own effective rigor: `_eg_refuse_readings`, below.
-  if [ "$status" = "done" ] && _eg_verdicts_owed; then
-    _eg_refuse_readings "task ${id}" "$eff"
-  fi
 }
 
 # THE READINGS A RUN OWES, JUDGED ON THE SECTION IN HAND (wave-27 T14; REQ-2 AC-2.2, D3, D19).
@@ -2491,111 +2371,18 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
   refuse exit2 commit "a reading question is unanswered" "record or waive each reading" "$_eg_detail"
 }
 
-# Per-row rigor FLOOR check (task 4/8, A15 — user-ratified, momentous). The
-# per-row `rigor` cell is a FLOOR unified with the run-rigor floor model: a
-# cell RAISING a row above the frontmatter rigor is always allowed (the cell
-# drives the heavier lane, 4/4), but a cell LOWERING it below the frontmatter
-# rigor is a DOWNGRADE — a recorded decision, never silent. A downgrade BLOCKS
-# (exit 2) UNLESS the row's `- T<n>:` evidence line carries a whole-word `waiver`
-# marker (Waiver Protocol — same `grep -Ewq` word-boundary idiom as the lane
-# token checks), in which case the row proceeds at its (lower) cell lane.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-#
-# Called on exactly the rows the rigor lanes cover — the addressed unit (any
-# status) and non-addressed `done` rows with real evidence — AFTER their
-# presence/placeholder checks and the per-row INVALID guard, and BEFORE
-# apply_rigor_lanes. Ordering rationale: a missing/placeholder evidence block
-# (addressed unit, or a double plan's non-addressed row via ledger_shape_fail) and the
-# INVALID-cell block both fire upstream of this, so they still win — a row with
-# no evidence line never reaches here (there is no line to hold a waiver, and its
-# absence already blocks or logs). `eff` is the RESOLVED effective rigor: an
-# empty cell resolves to the frontmatter rigor, so rigor_ord(eff) ==
-# rigor_ord(RIGOR) and no phantom downgrade fires — only an explicit lower cell
-# trips it. A cell EQUAL to the frontmatter is not a downgrade (strict `<`).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
-  local id="$1" eff="$2" ev="$3"
-  [ "$(rigor_ord "$eff")" -lt "$(rigor_ord "$RIGOR")" ] || return 0
-  if grep -Ewq 'waiver' <<< "$ev"; then
-    return 0  # recorded downgrade — proceed at the lower cell lane
-  fi
-  _eg_detail="canonical-sdlc task ${id} lowers rigor from $(rigor_level "$RIGOR") to ${eff}, below the plan's floor.
-Plan: $PLAN
-Fix: raise the cell to at least $(rigor_level "$RIGOR"), or record a downgrade: add 'waiver: <user> <date> <reason>' to the '- ${id}:' evidence line (Waiver Protocol)."
-  refuse exit2 commit "that task lowers rigor below the floor" "raise the rigor, or waive it" "$_eg_detail"
-}
-
-# Router for the previously-log-only NON-addressed-row ledger-shape checks
-# (D-task 4/3, task scale). On a frontmatter `rigor: double` plan these
-# promote to BLOCKING (exit 2); at any other rigor they stay log-only findings
-# (D14, unchanged). The detail string is authored once by the caller and used
-# verbatim in whichever channel fires. The addressed-unit floor (4/1) and the
-# rigor lanes (4/2) are NOT routed through here — they already block
-# unconditionally where they should.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-ledger_shape_fail() {  # <fact> <fix> <observation>
-  # TWO EXITS AND ONLY ONE IS A REFUSAL (F-P2). At `rigor: double` this blocks; at `single`
-  # it logs a finding and RETURNS. `refuse` always exits, so it goes INSIDE the double
-  # branch — a frame-level substitution would turn every log-only finding into a hard
-  # block. The policy sentence the frame used to print as its Fix is about double rigor,
-  # not about repairing the row, so under D-1 it becomes `detail` and the caller supplies
-  # a real repair (F-P7).
-  if [ "$(rigor_level "$RIGOR")" = double ]; then
-    refuse exit2 commit "$1" "$2" "canonical-sdlc task-ledger: $3
-Plan: $PLAN
-Double review rigor makes the ledger-shape checks blocking; a single plan would log this as a finding instead."
-  fi
-  log_finding task-ledger "$3"
-}
-
-# Task-scale ledger validation (D12). Reads the `## Tasks` registration
-# table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
-# evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
-#
-# Two lanes (task 4/1), plus rigor-keyed lanes on top (task 4/2):
-#   - THE ADDRESSED UNIT — the `T<n>` named by `current: T<n>` — is BLOCKING at
-#     the single floor: its row must exist in `## Tasks`, carry a non-placeholder
-#     `- T<n>:` evidence line, and have a rigor cell that resolves (its cell
-#     names a lane, or is empty; a non-empty cell outside the enum is INVALID).
-#     Any breach emits a 3-line block message and exit 2. Once past the floor,
-#     apply_rigor_lanes (4/2) applies the proof-shape/auditor/critic lanes keyed
-#     to its effective rigor.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-#
-#   - EVERY OTHER row stays LOG-ONLY (D14, check-id `task-ledger`) for status
-#     and presence/placeholder: status outside {pending,active,done,dropped},
-#     or an active/done task with no `- T<n>:` line or a placeholder/empty
-#     value, each append one finding and never block. Missing `## Tasks`
-#     entirely is also log-only here. A `done` row that DOES have a non-empty,
-#     non-placeholder evidence line resolves its effective rigor and is
-#     additionally passed through apply_rigor_lanes (4/2) — BLOCKING, since a
-#     done claim at double rigor without real evidence is a false-done
-#     claim, not a bookkeeping gap. A malformed (off-enum) rigor cell on ANY row
-#     — addressed or not, at ANY status (done, active, pending, dropped) — is
-#     caught earlier by the per-row INVALID guard (4/7), which resolves the cell
-#     and BLOCKS unconditionally at any frontmatter rigor before this
-#     status-based branching; see that guard for the rationale.
-# [INSTRUMENT]
 # ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
 #
-# ONE LINE PER `## Tasks` ROW, and the refusal says so. Two arms check it — the addressed
-# unit's at task scale, and every dispatched row's at wave scale — and both used to name
-# ONE id and ask for "a '- <id>:' evidence line". An author owing eighteen of them learned
-# of the second only after landing the first (wave-16's A-orch-10 is that specimen), and
-# neither arm ever said the obligation was per row. So the COUNT and the IDS come from the
-# whole table in one pass, whichever arm fires.
-#
-# THE TRIGGER DOES NOT MOVE. At task scale the arm still fires on the ADDRESSED unit's
-# missing line — a non-addressed `active|done` row short of one is a different refusal
-# (ledger_shape_fail, blocking only at double rigor) and stays that way. What changed is
-# what the refusal then says.
+# ONE LINE PER `## Tasks` ROW, and the refusal says so. The arm used to name ONE id and ask
+# for "a '- <id>:' evidence line"; an author owing eighteen of them learned of the second only
+# after landing the first (wave-16's A-orch-10 is that specimen). So the COUNT and the IDS come
+# from the whole table in one pass.
 #
 # THE LOOKUP IS THE READER'S (wave-21 T5; D4, ADR-037 decision 3). It lived here as
-# `missing_evidence_ids`, a grep over `$SECTION` asked once per row; it is `units_unlined` and
-# `units_findings` in lib/units.sh now, one program, so the gate and the Patrol tick cannot
-# disagree about whether a row carries its line. What each arm passes below is the reader's
-# answer: every unlined T-row for the task-scale addressed unit (the trigger and the listing
-# AC-5.1 pinned), the `evidence` findings for the wave arm (a row owes its line at `landed`).
+# `missing_evidence_ids`, a grep over `$SECTION` asked once per row; it is `units_findings` in
+# lib/units.sh now, one program, so the gate and the Patrol tick cannot disagree about whether a
+# row carries its line. What the arm passes below is the reader's answer: the `evidence`
+# findings (a row owes its line at `landed`).
 
 # Refuse for EVERY id named, or return 0 if none is. The id list is printed as the lines the
 # author has to write, so the repair is a copy out of the refusal; it sits LAST so refuse.sh's
@@ -2633,11 +2420,6 @@ _eg_roster_path() {
   printf '%s' "$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 }
 
-# _eg_finding <findings> <kind> <id> -> 0 when the reader named that row for that kind.
-_eg_finding() {
-  printf '%s\n' "$1" | awk -v k="$2" -v id="$3" '$1 == k && $2 == id { f = 1 } END { exit !f }'
-}
-
 # THE LAUNCH FINDING, REFUSED (wave-21 T5; REQ-4, AC-4.1; D4). An `active` row whose agent cell
 # names someone no row on this session's roster names: the dispatch that would have launched it
 # left no record, so the row claims a writer the machine never saw. Every such row in one pass,
@@ -2664,155 +2446,12 @@ $(printf '%s\n' "$rows" | sed -E 's/^/- /')"
   refuse exit2 commit "$verdict" "write the roster name as agent" "$_eg_detail"
 }
 
-validate_task_ledger() {
-  local rows rc line id status rigor_cell ev eff addressed_found=0 findings
-  # THE ROWS COME FROM lib/units.sh (REQ-1e, AC-1e.1), header-keyed. The cells this
-  # function wants are slot 1 `id`, slot 10 `status` and slot 3 — which the widened
-  # wave schema spells `kind` and this task-scale registration table spells `rigor`,
-  # one slot under two names (see units.sh's header). The read it replaces took
-  # `$2`/`$6`/`$4` by COLUMN POSITION, which is the defect measured at
-  # record/wave-11-lean-spine/step1-measure-1a-1e.md §4.3.
-  #
-  # THE TASK-SCALE ENUMS STAY HERE, NOT IN `units_validate` (T8 ruling, recorded in
-  # record/wave-11-lean-spine/assumptions.md). `units_validate` enforces the
-  # WAVE schema — ten columns, status `landed` — and this table is the five-column
-  # `| id | intent | rigor | description | status |` ledger with `done` in it, which
-  # REQ-1e does not widen. Delegating here would refuse every task-scale plan for
-  # eight columns it was never asked to carry.
-  #
-  # A NON-ZERO rc IS AN ABSENT TABLE; zero rows is a PRESENT but empty one, which
-  # falls through to the addressed-unit check at the bottom. The distinction is the
-  # old `[ -z "$tasks" ]` test, kept: "no ledger yet" and "your row is missing" are
-  # different findings.
-  rows="$(units_rows "$PLAN")"; rc=$?
-  if [ "$rc" -ne 0 ]; then
-    ledger_shape_fail "this task-scale plan has no tasks table yet" "add a row per task" \
-      "task-scale plan has no '## Tasks' registration section"
-    return 0
-  fi
-  # THE LEDGER FINDINGS, READ ONCE (wave-21 T5; D4). The status enum and the presence of a
-  # row's line are the reader's answers now; this loop keeps the order it has always judged
-  # in (status, then rigor, then evidence, row by row) and the words it has always printed.
-  findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    id=$(units_field "$line" id)
-    # T-IDS ONLY, as the `| T[0-9]+` row grep this replaced demanded: a `## Tasks`
-    # table may carry a legend or a non-unit row, and the evidence lines this
-    # function looks up are `- T<n>:` by name.
-    case "$id" in T[0-9]*) : ;; *) continue ;; esac
-    status=$(units_field "$line" status)
-    rigor_cell=$(units_field "$line" rigor)
-    # status enum — routed through ledger_shape_fail (4/3): blocking on double
-    # plans, log-only otherwise (was unconditionally log-only in D12).
-    if _eg_finding "$findings" status "$id"; then
-      ledger_shape_fail "task ${id}'s status is unknown" "use pending, active, done or dropped" \
-        "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)"
-    fi
-    # Per-row INVALID rigor-cell guard (4/7): resolve this row's rigor cell and
-    # block if it is off-enum. A malformed rigor cell makes the row's lane
-    # indeterminate — a hard STRUCTURAL error, the exact sibling of the
-    # status-enum check above (both are whole-value enum equality on a single
-    # cell, validated per-row REGARDLESS of the row's status). So it blocks
-    # UNIFORMLY: on ANY row (addressed or not; done, active, pending, dropped)
-    # and at ANY frontmatter rigor — NOT routed through the double-only
-    # ledger_shape_fail. Placed here, before the evidence extraction and the
-    # addressed-vs-other branching, so this ONE guard covers every row —
-    # consolidating the former per-branch INVALID checks (4/1 addressed unit,
-    # 4/6 non-addressed done) that left non-addressed active/pending rows
-    # unchecked. `eff` is reused by both branches below (never INVALID past
-    # here). Order vs the status-enum check: status first, then rigor — a row
-    # with BOTH defects may block on either; this order is pinned for determinism.
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    eff=$(effective_row_rigor "$rigor_cell")
-    if [ "$eff" = "INVALID" ]; then
-      _eg_detail="canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want single or double).
-Plan: $PLAN
-Fix: set the '${id}' row's rigor cell to single or double before committing."
-      refuse exit2 commit "that task's rigor value is not valid" "use single or double" "$_eg_detail"
-    fi
-    # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
-         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    if [ "$id" = "$CURRENT" ]; then
-      # THE ADDRESSED UNIT: the single floor is BLOCKING (task 4/1).
-      addressed_found=1
-      if [ -z "$ev" ]; then
-        # The addressed unit is short, which is what fires the arm; the refusal then
-        # names EVERY row that is (AC-5.1), the addressed one among them.
-        refuse_missing_evidence_lines "$(units_unlined "$PLAN")"
-      fi
-      if is_placeholder_value "$ev"; then
-        _eg_detail="canonical-sdlc task ${id} evidence line is a placeholder ('${ev}').
-Plan: $PLAN
-Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing."
-        refuse exit2 commit "that task's evidence line is a placeholder" "replace it with real evidence" "$_eg_detail"
-      fi
-      # 4/8: FLOOR check — a cell lowering this row below the frontmatter rigor
-      # blocks unless the evidence line records a waiver. Runs after the
-      # presence/placeholder blocks above (so those win) and before the lanes.
-      enforce_rigor_floor "$id" "$eff" "$ev"
-      # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the single
-      # floor above. `eff` was resolved and INVALID-guarded at the per-row guard
-      # (4/7); it names a valid lane here. Applies regardless of this row's own
-      # status — the addressed unit is always in scope.
-      # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-      apply_rigor_lanes "$id" "$status" "$eff" "$ev"
-    else
-      # Every OTHER row's presence/placeholder checks route through
-      # ledger_shape_fail (4/3): blocking on double plans, log-only otherwise.
-      #
-      # LAUNCHED IS WHAT THE ROSTER SAYS (wave-21 T5; REQ-4, AC-4.3; D4, ADR-037 decision 3).
-      # A `done` row owes its line; an `active` row owes one only when the reader says so — an
-      # agent-named row with no roster to read it from (spec assumption 1). A self-owned row,
-      # which every row of the agent-less task table is, owes neither. A line that IS there is
-      # still judged for a placeholder, whatever the row's status: a placeholder is a claim.
-      case "$status" in
-        active|done)
-          if _eg_finding "$findings" evidence "$id"; then
-            ledger_shape_fail "task ${id} is ${status} and shows no evidence" "record what proves it" \
-              "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
-          elif _eg_finding "$findings" launch "$id"; then
-            ledger_shape_fail "task ${id} names no launched agent" "write the roster name as agent" \
-              "task ${id} is active but its agent cell names no row on this session's roster ($(_eg_roster_path))"
-          elif is_placeholder_value "$ev"; then
-            ledger_shape_fail "task ${id}'s evidence is still a placeholder" "record what actually ran" \
-              "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
-          elif [ "$status" = "done" ]; then
-            # 4/2: a done row WITH real evidence is in scope for the
-            # rigor-keyed lanes (BLOCKING) — a false-done claim at
-            # double rigor, not a bookkeeping gap. A done row with
-            # NO evidence line stays log-only above (4/3 territory). `eff` was
-            # resolved and INVALID-guarded at the per-row guard (4/7 — was a
-            # done-only guard under 4/6; now uniform across statuses), so it
-            # names a valid lane here.
-            # 4/8: FLOOR check first — a done row whose cell lowers it below the
-            # frontmatter rigor blocks unless its evidence line records a waiver.
-            enforce_rigor_floor "$id" "$eff" "$ev"
-            apply_rigor_lanes "$id" "$status" "$eff" "$ev"
-          fi
-          ;;
-      esac
-    fi
-  done <<< "$rows"
-  # The addressed unit (current: T<n>) must have a row in ## Tasks (BLOCKING).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if [ "$addressed_found" -eq 0 ]; then
-    _eg_detail="canonical-sdlc task ${CURRENT} has no row in the '## Tasks' registration table.
-Plan: $PLAN
-Fix: add a '| ${CURRENT} | <intent> | <rigor> | <description> | <status> |' row to '## Tasks' before committing."
-    refuse exit2 commit "that task has no row in '## Tasks'" "add the task's registration row" "$_eg_detail"
-  fi
-  return 0
-}
-
 # Extract the ## SDLC State section (from its header up to the next ##
 # header or EOF). Line endings normalized here too (normalize_newlines), for
 # the same reason as FRONTMATTER above. Fence-aware (same idiom as matrix_section): lines inside
-# ``` fenced code blocks are skipped, so a plan documenting the D12 task-scale
-# schema in a fenced example — a `## SDLC State` heading with `current: T<n>` —
-# does not shadow the REAL section (which would mis-parse `current:` and false-
+# ``` fenced code blocks are skipped, so a plan documenting the schema in a fenced
+# example — a `## SDLC State` heading with its own `current:` — does not shadow the
+# REAL section (which would mis-parse `current:` and false-
 # block). Fence state is tracked across the whole file so section detection
 # stays fence-aware.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -2873,31 +2512,19 @@ matrix_block() {
     f'
 }
 
-# ================================================== THE TWO STEP-4 ARMS (epic-22 K2, K2.5)
+# ================================================== THE TWO STEP-4 ARMS (epic-22 K2)
 #
-# Defined HERE, directly before `CURRENT` is parsed — earlier than a numbered-step-only
-# wall would need to be. The reason is the task-scale branch a few lines below: epic-22
-# K2.5 calls these same two arms from inside the `current: T<n>` branch, which used to
-# `exit 0` before ever reaching them (they used to live between the matrix extractors and
-# the pointer-step exit, reachable only by the numbered-step path). Moving the DEFINITIONS
-# up costs nothing — `matrix_section`/`matrix_block` need only `$PLAN`, which is set long
-# before this point — and it lets one pair of checks serve both scales instead of a second
-# copy of either. The numbered-step CALL still runs in its original place, right before the
-# pointer-step exit below; this is only the definitions moving.
+# Defined here, directly before `CURRENT` is parsed; `matrix_section`/`matrix_block` need only
+# `$PLAN`, which is set long before this point. The CALL runs right before the pointer-step
+# exit below.
 #
-# THE STEP NUMBER IS READ AS A NUMBER, ONCE. `CURRENT` reaches here as `4`, `8b`, `10` or a
-# task-scale `T<n>`. Numbered steps are read digit-first, the leftmost run before any letter
-# (`4`, `8b` → `8`); a value whose digits cannot be read leaves both arms unmeasured rather
-# than refusing on a question they cannot ask — the fail direction every start-side
-# ambiguity in this tree takes. Task-scale is the one case that is NOT "read the digits":
-# `T1`'s leading `T` would strip to empty and read as unmeasured, which is exactly the gap
-# K2.5 closes — a task-scale plan is always mid-execution, never mid-authoring, so ANY
-# `current: T<n>` (n >= 1) reads as past Step 3 and both arms bind on it the same way they
-# do from `current: 4` onward.
+# THE STEP NUMBER IS READ AS A NUMBER, ONCE. `CURRENT` reaches the call as `4`, `8b` or `10`:
+# the gate has already refused a `current:` that is not a step number, at every scale (one
+# ledger shape, wave-31 D2). It is read digit-first, the leftmost run before any letter (`4`,
+# `8b` → `8`); a value whose digits cannot be read leaves both arms unmeasured rather than
+# refusing on a question they cannot ask — the fail direction every start-side ambiguity in
+# this tree takes.
 k2_step_num() {
-  case "$CURRENT" in
-    T[0-9]*) printf '4'; return ;;
-  esac
   local n="${CURRENT%%[!0-9]*}"
   case "$n" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$n" ;; esac
 }
@@ -2922,9 +2549,7 @@ k2_step_num() {
 # refuse the very commit that writes the plan the user is about to approve.
 #
 # DURABLE FROM 4 ONWARD, the same shape the matrix prefix check has: deleting the line at
-# Step 6 loses the same fact it would have lost at Step 4. AT TASK SCALE (K2.5) there is no
-# "below Step 4" — `k2_step_num` reads every `current: T<n>` as past Step 3, so this arm is
-# durable from a task-scale plan's first commit onward.
+# Step 6 loses the same fact it would have lost at Step 4.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_approved_by() {
   local step approved
@@ -2950,9 +2575,6 @@ Fix: on the user's literal 'approved', record 'approved-by: <user> <ISO-UTC> \"<
 # the column is authored at Step 2, in the spec's `## Eval design`, and merely RENDERED
 # into the plan's matrix at Step 3. By Step 4 every AC block has one, or a step was
 # skipped; so this arm is the receipt for that authoring order rather than a new demand.
-# AT TASK SCALE (K2.5) the same receipt is owed from a plan's first `current: T<n>`
-# commit — a task-scale plan carrying a `## Verification Matrix` is held to the identical
-# standard as a numbered-step plan at `current: 4`+.
 #
 # IT JUDGES BLOCKS, NOT ROWS. A matrix row with no AC block underneath it is not a
 # fails-when finding: there is no block to lack the key, and the per-tier evidence loop
@@ -3032,11 +2654,8 @@ Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${a
 # from lib/units.sh header-keyed, the number is an id, and the matrix field it
 # cross-references is `task:`.
 #
-# INERT BELOW STEP 4 (numbered) OR BELOW `current: T<n>` (task-scale, epic-22 K2.5),
-# same reasoning as the two arms above: the Tasks table and the Verification Matrix
-# are both Step-3 artifacts, not necessarily complete before then, and a task-scale
-# plan carries no `kind` cell at all — `units_field ... kind` reads empty and this
-# is a no-op.
+# INERT BELOW STEP 4, same reasoning as the two arms above: the Tasks table and the
+# Verification Matrix are both Step-3 artifacts, not necessarily complete before then.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_prototype_no_matrix_row() {
   local step task_rows proto_ids line id rows ac block_txt ac_task n
@@ -3093,32 +2712,18 @@ CURRENT=$(echo "$SECTION" \
           | tr -d '[:space:]')
 
 # THE VALUE THE PLAN DECLARED, kept before anything substitutes a subject (wave-18
-# REQ-1, D1). Two arms below replace `CURRENT` for the length of one commit — a row's
-# own step, and a task row's id — and both are answers to "whose obligations does this
-# commit discharge". `_eg_verdicts_owed` asks a different question, "has this RUN reached
-# the step that produces an auditor and a critic", and it must read the run's own word.
+# REQ-1, D1). One arm below replaces `CURRENT` for the length of one commit, with a row's
+# own step: an answer to "whose obligations does this commit discharge". The readings
+# refusal (`_eg_refuse_readings`) names the run's own word, which no per-commit subject moves.
 _EG_DECLARED_CURRENT="$CURRENT"
 
-# Task-scale plans address a ledger TASK, not a numbered step:
-# `current: T<n>` with evidence on `- T<n>:` lines (no `Step N:` line). Validate
-# the ledger (log-only, D12/D14), then — epic-22 K2.5 — run the SAME three Step-4
-# arms a numbered-step plan runs below: a task-scale plan is always mid-execution,
-# never mid-authoring, so `current: T<n>` (any n >= 1) reads as past Step 3 and the
-# approved-by / fails-when / prototype-no-row walls bind on it exactly as they do
-# from `current: 4` onward (`k2_step_num`, above, recognises the T-format
-# directly). A `current: T<n>` on a non-task plan is NOT accepted here; it falls
-# through to the numeric check below and blocks (T-format is scale: task only).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-if grep -qE '^T[0-9]+$' <<< "$CURRENT" && [ "$SCALE" = "task" ]; then
-  validate_task_ledger
-  validate_approved_by
-  validate_fails_when
-  validate_prototype_no_matrix_row
-  exit 0
-fi
-
 if [ -z "$CURRENT" ] || ! grep -qE '^[0-9]+[ab]?$' <<< "$CURRENT"; then
-  _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line.
+  # ONE LEDGER SHAPE (wave-31 D2): `current:` is a step number at every scale. A value that is not
+  # one, `T<n>` from the retired task-scale shape among them, is named and refused, never judged
+  # by a second set of arms; the words are the readers' (session-poker.sh launch-sync).
+  _eg_why=""
+  [ -z "$CURRENT" ] || _eg_why=": current: ${CURRENT} is not numeric; a plan in the retired task-scale shape is refused, not skipped"
+  _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line${_eg_why}.
 Plan: $PLAN
 Fix: add a line like 'current: 5' (or 'current: 8b') before committing."
   refuse exit2 commit "'## SDLC State' has no valid 'current:' line" "add a 'current: N' line" "$_eg_detail"
@@ -3522,38 +3127,10 @@ if [ -n "$_EG_WT" ]; then
     _EG_CURNUM="${CURRENT%[ab]}"
     case "$_EG_RSTEP" in
       ''|*[!0-9]*)
-        # A TASK-SCALE TABLE HAS NO STEP CELL, AND THAT IS NOT AN UNUSABLE ONE (wave-18
-        # REQ-11, D3, ADR-033). The six-column task ledger is `id | intent | rigor |
-        # description | status | worktree`: there is no `step` column to read, so every row
-        # arrived here with an empty cell, this arm decided nothing, and a commit from a
-        # row's own tree was judged by the RUN's numbered-step block — a fixup writer at
-        # `current: 5` refused for a Verify regression its own task exists to produce, which a
-        # consumer answered by hand-writing a mid-discharge Step-5 block. ADR-031's rule is
-        # not wave-only: a row's tree is judged by its row at task scale too. The arms are
-        # the SAME four the `current: T<n>` early exit runs above, reached by naming the row
-        # as the addressed unit — no second arm table, for the reason `CURRENT=4` is spelled
-        # that way at the wave fork below.
-        #
-        # THE DISCRIMINATOR IS THE TABLE'S HEADER, not the empty cell: `units_has_column`
-        # separates "this table never had a step column" from "this row's step cell is
-        # blank or malformed", which is a shape fault `units_validate` reports at the step
-        # that writes the plan and which keeps today's silence here. `scale: task` is asked
-        # too — a wave table missing its step column is a broken wave table, not a task
-        # ledger, and judging it by task arms would answer a shape fault with a verdict.
-        if [ "$SCALE" = "task" ] && ! units_has_column "$PLAN" step; then
-          # THE NOTE IS MANDATORY, for the reason the wave fork's is: this is a wall judging
-          # a commit by something other than the run's declared `current:`, and it names the
-          # ROW, because the row is the subject. Printed before the substitution, so
-          # `current:` reads as the run declared it.
-          printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
-            "$_EG_RID" "$CURRENT" >&2
-          CURRENT="$_EG_RID"
-          validate_task_ledger
-          validate_approved_by
-          validate_fails_when
-          validate_prototype_no_matrix_row
-          exit 0
-        fi
+        # A ROW WITH NO NUMERIC STEP CELL DECIDES NOTHING HERE. One ledger shape (wave-31 D2)
+        # gives every row a step cell at every scale; a blank or malformed one is a shape fault
+        # `units_validate` reports at the step that writes the plan, and the run's own
+        # numbered-step block judges the commit.
         : ;;
       *)
         if [ "$_EG_RSTEP" -lt "$_EG_CURNUM" ] 2>/dev/null; then
@@ -4115,13 +3692,10 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
 # It names `evidence` for every tier and `user-confirmed` for T4 and nothing else (wave-31 T6).
 
-# THE THREE STEP-4 ARMS (epic-22 K2, K4, K2.5): `matrix_section`, `matrix_block`,
+# THE THREE STEP-4 ARMS (epic-22 K2, K4): `matrix_section`, `matrix_block`,
 # `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
-# `validate_prototype_no_matrix_row` are now all defined just before `CURRENT` is
-# parsed, above — moved there so the task-scale `current: T<n>` branch can call them
-# too, instead of `exit 0`ing before ever reaching them. This is the numbered-step
-# call: it still runs in the same place it always has, right before the pointer-step
-# exit below.
+# `validate_prototype_no_matrix_row` are defined just before `CURRENT` is parsed, above.
+# This is their call, right before the pointer-step exit below.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_approved_by
 validate_fails_when
@@ -4952,9 +4526,12 @@ validate_intent_evidence() {
   return 0
 }
 
-# Wave-scale D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to
-# scale:wave + frontmatter rigor:double + multi_agent:true plans; for
-# every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
+# D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to scale wave or task +
+# frontmatter rigor:double + multi_agent:true plans; for every other plan it is a no-op
+# (return 0). ONE LEDGER SHAPE (wave-31 T24; REQ-1, D2): a task-scale plan carries the same
+# `## Tasks` table, so this is its ledger arm too — the second arm that judged a task
+# table by its own enum is gone, and a guard that read only `wave` would leave the one
+# table unread at task scale (A-T24-6). scale:epic is intentionally OUT —
 # epic plans legitimately dispatch research, not task-shaped units, so demanding
 # a dispatched-task ledger there would false-block scoping runs (plan Assumption
 # A8). Called from dispatch_modern, so it runs at EVERY step that reaches the
@@ -4963,7 +4540,7 @@ validate_intent_evidence() {
 #
 # TESTED-FLOOR SHAPE ONLY (plan Assumption A2): the wave's own Step-5 auditor /
 # Step-6 critic are the assurance roles at wave scale, so per-row auditor/critic
-# tokens (task-scale machinery) are NOT demanded here.
+# tokens are NOT demanded here.
 #   1. `## Tasks` section ABSENT OR EMPTY -> exit 2 (the double multi_agent wave
 #      must carry its dispatched-task ledger home).
 #   2. NO TABLE, OR A TABLE WITH ZERO DATA ROWS -> SATISFIED (a human
@@ -4977,7 +4554,7 @@ validate_intent_evidence() {
 #      there must not be a placeholder, else exit 2.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
-  [ "$SCALE" = "wave" ] || return 0
+  case "$SCALE" in wave|task) : ;; *) return 0 ;; esac
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
@@ -5005,8 +4582,7 @@ validate_dispatch_ledger() {
   # PROSE and no header row, a shape the docblock above calls SATISFIED and this
   # refusal's own Fix text advertises ("a header plus a 'none dispatched' line is
   # fine"). The next double multi_agent wave that wrote it would have been unable
-  # to commit. Same extractor as validate_task_ledger, and the same one the pre-wave
-  # hook carried at 84da6b5.
+  # to commit. It is the extractor the pre-wave hook carried at 84da6b5.
   tasks=$(normalize_newlines "$PLAN" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -5014,7 +4590,7 @@ validate_dispatch_ledger() {
     /^## / { f=0 }
     f')
   if [ -z "$tasks" ]; then
-    _eg_detail="canonical-sdlc double multi_agent wave plan has no '## Tasks' dispatched-task ledger section.
+    _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
@@ -5027,7 +4603,7 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   violations="$(units_validate "$PLAN")" || true
   if [ -n "$violations" ]; then
-    _eg_detail="canonical-sdlc double multi_agent wave plan's '## Tasks' table breaks the Task invariants:
+    _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
 Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
@@ -5051,7 +4627,7 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
   refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
   refuse_unlaunched_rows "$(printf '%s\n' "$findings" \
     | awk '$1 == "launch" { v = $0; sub(/^launch [^ ]+ /, "", v); print $2 ": " v }')"
-  # Evidence line in ## SDLC State (anchored, same lookup as task scale), judged for a
+  # Evidence line in ## SDLC State (anchored), judged for a
   # placeholder. ONE PASS (wave-24 T15; REQ-9 AC-9.7): this walk forked grep|head|sed|sed for
   # the line and sed|tr for the test, six processes a row; the awk is the same lookup — the
   # first section line matching `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:`, its text after
