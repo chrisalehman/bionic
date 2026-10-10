@@ -113,3 +113,5 @@ result known-limit-regression adversarial critic fail met exam-sitting.md#known-
 result known-limit-regression adversarial one-mind fail met exam-sitting.md#known-limit-regression-one-mind-adversarial
 result over-engineering structure critic flag met exam-sitting.md#resit-over-engineering-critic-structure
 result over-engineering structure one-mind flag met exam-sitting.md#over-engineering-one-mind-structure
+
+stale: checks-evidence cf938731… → 2fbd22b4…, checks-adversarial f7cf47a0… → b5d16708…, checks-structure e779b863… → 63abc3ef… (T31, T13); re-sit owed: none dispatched — the exam is off the roster

@@ -23,7 +23,7 @@ protocol for sitting them (its `README.md`).
   priority table sends to fix; a record that only describes the defect, or rates it where the
   table defers or notes it, fails (`score.sh`, spec D22). The key's `finding-file:` and
   `finding-rating:` lines say which.
-- **A changed checks file is sat again.** `tests/reader-exam.test.sh` is red when one of the
+- **A changed checks file is sat again.** `tests/exam/reader-exam.sh` is red when one of the
   three checks files it names differs from the hashes of the latest sitting, and when that
   sitting lacks a `met` result for any sample. An edit to a checks file's block or template
   changes the file too. The fix is a sitting, appended to `sittings.md`, never a hash retyped
