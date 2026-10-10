@@ -656,7 +656,15 @@ case "$VERB" in
           case "$1" in
             --files+)  AMEND_FILES="${AMEND_FILES}$2"$'\n' ;;
             --suites+) AMEND_SUITES="${AMEND_SUITES}$2"$'\n' ;;
-            --reexec+) AMEND_RUNS="${AMEND_RUNS}$2"$'\n' ;;
+            # A RUN AS THE BRIEF MARKS IT (wave-31 T11; REQ-8 AC-8.1, D9). A brief writes a run
+            # between backticks, so `--reexec+ '`cmd`'` is the spelling a reader pastes; the span
+            # wraps each value in its own pair, and a kept pair made ``cmd`` — an empty entry either
+            # side and a repeat read as new. One matched pair comes off here, so the marked and the
+            # bare spelling are one addition.
+            --reexec+)
+              _am_r="$2"
+              case "$_am_r" in \`?*\`) _am_r="${_am_r#\`}"; _am_r="${_am_r%\`}" ;; esac
+              AMEND_RUNS="${AMEND_RUNS}${_am_r}"$'\n' ;;
             --reason)  AMEND_REASON="$2" ;;
           esac
           shift 2 ;;
