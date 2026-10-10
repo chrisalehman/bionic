@@ -542,9 +542,9 @@ expect_contains "§scaffold-walk …because the evidence reader declares nothing
 # The text says one thing whatever the runner: suites under `Suites:`, any other runner under
 # `Re-executes:`, one to three in all, and `Suites: none` beside a `Re-executes:` that names a
 # run is right. So a pytest reader fills the scaffold's own `Re-executes:` line and EITHER keeps
-# `Suites: none` (shape A) OR drops the `Suites:` line (shape B). make_repo configures NO impact
-# command, the shipped default, which is where pass 38 found the reader refused. Shape B is
-# admitted only with T57's wall half (a reader's `Files:` asks for no derivation) on the head.
+# `Suites: none` (shape A) OR drops the `Suites:` line (shape B), where pass 38 found the reader
+# refused. Shape B is admitted only with T57's wall half (a reader's `Files:` names no suite) on
+# the head.
 WALK_RUN='pytest tests/'
 walk_fill_re() {  # <questions> <records> <A|B> -> walk_fill's brief with the scaffold's Re-executes: filled
   local re
@@ -576,8 +576,6 @@ expect_contains "§scaffold-walk precondition: …while shape B still carries th
 REPO=$(walk_repo rwalk5 double)
 expect_nonempty "§scaffold-walk precondition: the walk repo's .bionic holds its bound plan" \
   "$(/usr/bin/grep -rls '^rigor: double' "$REPO/.bionic")"
-expect_eq "§scaffold-walk precondition: …and configures no impact command anywhere" "" \
-  "$(/usr/bin/grep -rls 'impact-command' "$REPO/.bionic")"
 q_gate "$REPO" walk5 bionic:auditor "$WALK_ER"
 expect_eq "§scaffold-walk double: the auditor, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
 expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
@@ -735,10 +733,10 @@ expect_contains "brief-lib a brief with no instrument is refused" \
   "finding: this brief declares no Files: and no Suites:" "$BV"
 
 BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
-expect_contains "brief-lib Files: where no impact command is configured is refused" \
-  "finding: no impact command is configured here" "$BV"
+expect_contains "brief-lib Files: alone is refused" \
+  "finding: Files: alone names no suite" "$BV"
 
-# wave-22 T3 (D5/D6): EVERY Re-executes: line counts, and the missing-impact refusal names the
+# wave-22 T3 (D5/D6): EVERY Re-executes: line counts, and the Files-alone refusal names the
 # fix that applies when runs are declared.
 # the sink's fourth argument is the refusal body, which brief_verdict does not print
 brief_detail() {
@@ -901,35 +899,35 @@ ${FENCE3}
     Re-executes: ${BT}npm test -- a${BT}")"
 BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh
 Re-executes: ${BT}go test ./a${BT}")
-expect_contains "brief-lib Files: + Re-executes: with no impact command is still refused (AC-3.1)" "rc=1" "$BV"
+expect_contains "brief-lib Files: + Re-executes: and no Suites: is still refused (AC-3.1)" "rc=1" "$BV"
 FIRSTFIX=$(printf '%s\n' "$BV" | awk '/^Fix:/{f=1} f{print} /^$/{if(f)exit}')
 expect_contains "brief-lib …the first Fix: block names Suites: none" "Suites: none" "$FIRSTFIX"
 expect_contains "brief-lib …beside the brief's Re-executes:" "Re-executes:" "$FIRSTFIX"
-expect_contains "brief-lib …the two existing remedies follow" "impact-command: bash tests/lib/impact.sh" "$BV"
+expect_contains "brief-lib …the closed-set remedy follows" "Suites: tests/one.test.sh, tests/two.test.sh" "$BV"
+expect_absent "brief-lib …and no config key to set" "impact-command" "$BV"
 expect_contains "brief-lib …and the SHORT fix names Suites: none beside Re-executes: (C3)" \
   "fix: Suites: none beside Re-executes:" "$BV"
 BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
-expect_contains "brief-lib …no runs declared: the short fix is still the impact-command one" \
-  "fix: set impact-command in config.yaml" "$BV"
-BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
+expect_contains "brief-lib …no runs declared: the short fix names the two labels" \
+  "fix: add Suites: or Re-executes:" "$BV"
 IFS= read -r -d '' BV_PIN <<'PIN_EOF' || true
-finding: no impact command is configured here
-fix: set impact-command in config.yaml
-`Files:` states which paths the task will touch. Turning that into the set of
-suites the agent may run is the tree's job, and this repository has not named the
-command that asks it.
+finding: Files: alone names no suite
+fix: add Suites: or Re-executes:
+`Files:` names the paths this task will touch, not the suites it may run; the brief
+names those itself.
 
-Fix: name the closed set in the brief instead —
+Fix: name the closed set in the brief —
     Suites: tests/one.test.sh, tests/two.test.sh
 
-Or configure the derivation once, in .bionic/config.yaml —
-    impact-command: bash tests/lib/impact.sh
+Where the tests are not shell suites, name the commands under Re-executes: and waive
+the suite set beside them —
+    Suites: none
 
 Then retry the dispatch.
 rc=1
 PIN_EOF
 BV_PIN=${BV_PIN%$'\n'}
-expect_eq "brief-lib no Re-executes: leaves the refusal text unchanged, verbatim (AC-3.2)" "$BV_PIN" "$BV"
+expect_eq "brief-lib the Files-alone refusal, verbatim (AC-3.2; wave-31 T2)" "$BV_PIN" "$BV"
 # wave-22 T10 (critic C3): on a several-fault brief the detail block is dropped and only the
 # short fix reaches the author — so the short fix must be the one that applies.
 REPO=$(make_repo r22t10c3 yes)
@@ -939,13 +937,13 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
 Expected duration: ~15 minutes.
 Files: payload/scripts/lib/widget.sh
 Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t10c3")"
-expect_eq "brief-lib a missing deliverable AND a missing impact command is refused (C3)" "deny" "$GATE_VERDICT"
-expect_contains "brief-lib …the impact finding's short fix names Suites: none beside Re-executes:" \
-  "no impact command is configured here (Suites: none beside Re-executes:)" "$GATE_REASON"
-expect_absent "brief-lib …and no longer points a Re-executes: brief at impact-command" \
-  "(set impact-command in config.yaml)" "$GATE_REASON"
+expect_eq "brief-lib a missing deliverable AND Files: alone is refused (C3)" "deny" "$GATE_VERDICT"
+expect_contains "brief-lib …the Files-alone finding's short fix names Suites: none beside Re-executes:" \
+  "Files: alone names no suite (Suites: none beside Re-executes:)" "$GATE_REASON"
+expect_absent "brief-lib …and not the short fix for a brief with no runs" \
+  "(add Suites: or Re-executes:)" "$GATE_REASON"
 # wave-22 T13 (critic-3598752 I1): the ONE-FAULT path. With runs declared and nothing else wrong,
-# the impact finding is the capped user line itself, so its short fix must fit: at 3598752 the
+# the Files-alone finding is the capped user line itself, so its short fix must fit: at 3598752 the
 # line was 102 columns and refuse.sh refused its own call (exit 2) instead of the brief.
 REPO=$(make_repo r22t13one yes)
 write_attestation "$REPO" "$SID_A"
@@ -957,13 +955,13 @@ Progress artifact: .bionic/tmp/p.md
 Cadence: 15 min
 Files: payload/scripts/lib/widget.sh
 Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t13one")"
-expect_eq "brief-lib a one-fault Re-executes: brief with no impact command is DENIED, not a self-refusal (I1)" \
+expect_eq "brief-lib a one-fault Files: + Re-executes: brief is DENIED, not a self-refusal (I1)" \
   "deny" "$GATE_VERDICT"
-expect_eq "brief-lib …its user line is the impact refusal, short fix and all" \
-  "bionic: dispatch refused — no impact command is configured here (Suites: none beside Re-executes:)" \
+expect_eq "brief-lib …its user line is the Files-alone refusal, short fix and all" \
+  "bionic: dispatch refused — Files: alone names no suite (Suites: none beside Re-executes:)" \
   "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
 expect_true "brief-lib …within 100 columns" \
-  test "$(bionic_cols "bionic: dispatch refused — no impact command is configured here (Suites: none beside Re-executes:)")" -le 100
+  test "$(bionic_cols "bionic: dispatch refused — Files: alone names no suite (Suites: none beside Re-executes:)")" -le 100
 # THE DRIVER SWEEP SEES IT TOO. The AC-E1.3 readout runs before this section, so the sweep's
 # self-refusal flag (run_gate) is read here for every drive up to this one.
 expect_absent "brief-lib …and the driver sweep flagged no refuse.sh self-refusal" \
@@ -1010,22 +1008,27 @@ expect_eq "brief-lib …and the budget arm ADMITS the declared run" "0" "$(t13_a
 expect_eq "brief-lib …while still refusing an undeclared one (the arm is live)" "2" \
   "$(t13_arm 'npx jest --testPathPatterns undeclared')"
 
-printf '#!/bin/bash\nprintf "beta.test.sh\\tpath-ref\\nalpha.test.sh\\tself\\nalpha.test.sh\\tpath-ref\\n"\n' > "$BRIEF_CONF/stub-impact.sh"
+# A STALE impact-command: LINE DERIVES NOTHING (wave-31 T2, REQ-4 AC-4.2). BRIEF_CONF still
+# carries the pre-1.14.1 key, naming a stub that would answer two suites and leaves a mark when
+# it runs. The library reads the brief alone: Files: is refused as it is with no config, and a
+# declared set is the set.
+printf '#!/bin/bash\n: > "$(dirname "$0")/stub-ran"\nprintf "beta.test.sh\\tpath-ref\\n"\n' > "$BRIEF_CONF/stub-impact.sh"
+( cd "$BRIEF_CONF" && bash stub-impact.sh >/dev/null )
+expect_status "brief-lib precondition: the stale stub leaves its mark when run" "0" \
+  "$([ -f "$BRIEF_CONF/stub-ran" ] && echo 0 || echo 1)"
+rm -f "$BRIEF_CONF/stub-ran"
 BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
-expect_contains "brief-lib Files: under an impact command derives the suite set" "suites=alpha.test.sh beta.test.sh" "$BV"
-expect_contains "brief-lib …recorded as derived" "source=derived" "$BV"
+expect_contains "brief-lib Files: beside a stale impact-command: line is refused all the same" \
+  "finding: Files: alone names no suite" "$BV"
+expect_contains "brief-lib …with no suite set" "suites=
+" "$BV"
+expect_status "brief-lib …and the stale command never ran" "1" \
+  "$([ -f "$BRIEF_CONF/stub-ran" ] && echo 0 || echo 1)"
+BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh
+Suites: tests/one.test.sh")
+expect_contains "brief-lib …while a declared set beside it is the set" "suites=one.test.sh" "$BV"
+expect_contains "brief-lib …recorded as declared" "source=declared" "$BV"
 expect_contains "brief-lib …and passes clean" "rc=0" "$BV"
-
-printf '#!/bin/bash\nexit 0\n' > "$BRIEF_CONF/stub-impact.sh"
-BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
-expect_contains "brief-lib a derivation that answers nothing is a warning through the sink, not a finding" \
-  "warn: the impact command derived no suites from the declared files" "$BV"
-expect_absent "brief-lib …never a finding" "finding:" "$BV"
-
-printf '#!/bin/bash\nsleep 8\n' > "$BRIEF_CONF/stub-impact.sh"
-BV=$(IMPACT_BOUND_S=1 brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
-expect_contains "brief-lib a derivation past its bound is a finding" "finding: the impact command timed out after 1 s" "$BV"
-expect_contains "brief-lib …answered rc=2, so the door knows the suite set was never built" "rc=2" "$BV"
 
 expect_eq "brief-lib brief_field hands back the Files: set as the row stores it" \
   "payload/a.sh,payload/b.sh" \
@@ -1309,10 +1312,10 @@ expect_eq "rf3w …and a writer on the same line is ADMITTED: no worktrees ceili
 # (wave-24 T13; REQ-6 AC-6.7; D10. Chris 2026-10-03: "Why can't it be obvious from the outset
 # how to invoke them properly?")
 #
-# fails-when: the writer-budget refusal names no open row, an impact timeout says "fix
-# impact-command", or a complete brief is shown the blank scaffold.
+# fails-when: the writer-budget refusal names no open row, or a complete brief is shown the
+# blank scaffold.
 
-section "§WHY — the writer budget names its rows, a timeout says so, a complete brief sees no scaffold (AC-6.7)"
+section "§WHY — the writer budget names its rows, a complete brief sees no scaffold (AC-6.7)"
 
 # why1 — the writer-budget refusal lists the open rows it COUNTED, each with the command that
 # closes it. The count is `budget_open_writers`, so a read-only row it did not count is not
@@ -1329,29 +1332,6 @@ WHY1_ROOT="$(printf '%s\n' "$WHY1_LINE" | sed -n 's/.*bash \(.*\)\/session-sweep
 expect_true "why1 …rooted at the real hooks directory" test -f "$WHY1_ROOT/session-sweeper.sh"
 expect_absent "why1 …and never the read-only row it did not count" "R-ONE" "$GATE_REASON"
 expect_absent "why1 …and no placeholder root anywhere in the reason" "<plugin-root>" "$GATE_REASON"
-
-# why2 — the impact finding: a bound that expired says "timed out after N s", and its fix is
-# not "fix impact-command" — the command may be fine and the brief too wide. A command that
-# FAILED is a different sentence, naming its exit status, and never a timeout.
-why_brief() {  # <bound or ""> -> the sink's finding/warn lines, with the fix beside the fact
-  bash -c '
-    . "$1" || exit 9
-    sink() { case "$1" in finding) printf "finding: %s (%s)\n" "$2" "$3" ;; warn) printf "warn: %s\n" "$2" ;; esac; }
-    rc=0
-    brief_validate_fields "$(lift_contract_fields "Files: payload/scripts/lib/widget.sh" implementor)" implementor "$2" sink || rc=$?
-    printf "rc=%s\n" "$rc"
-  ' _ "$BRIEF_LIB" "$BRIEF_CONF" 2>&1
-}
-printf '#!/bin/bash\nsleep 8\n' > "$BRIEF_CONF/stub-impact.sh"
-WHY2="$(IMPACT_BOUND_S=1 why_brief)"
-expect_contains "why2 a derivation past its bound says it timed out, and after how long" \
-  "finding: the impact command timed out after 1 s" "$WHY2"
-expect_absent "why2 …never 'fix impact-command' for a command that may be fine" "fix impact-command" "$WHY2"
-expect_contains "why2 …still rc=2, so the door knows the suite set was never built" "rc=2" "$WHY2"
-printf '#!/bin/bash\nexit 3\n' > "$BRIEF_CONF/stub-impact.sh"
-WHY2F="$(why_brief)"
-expect_contains "why2f a command that FAILED names its exit status" "the impact command failed (exit 3)" "$WHY2F"
-expect_absent "why2f …and is never called a timeout" "timed out" "$WHY2F"
 
 # why3 — a several-fault refusal whose brief already carries every scaffold line shows no
 # scaffold: it would tell the author to add nothing. Two faults on a complete brief: the writer
@@ -1675,7 +1655,7 @@ expect_eq "FILES-DROP3 …and the row holds the real path alone" "a/b.ts" "$(ros
 # is refused with no advice, since no spelling of it is read as a path.
 #
 # fl_read <brief text> -> `files=<lifted>`, one `finding: <fact> | <fix>` per refusal, `rc=`.
-# Every brief carries a Suites: line, so no finding here is the impact command's.
+# Every brief carries a Suites: line, so no finding here is the Files-alone arm's.
 fl_read() {
   bash -c '
     . "$1" || exit 9
@@ -2303,8 +2283,7 @@ expect_contains "T57-N1 a relative path through a symlinked directory that lands
 T57_QS='adversarial, structure' t57_abs_gate rel2 bionic:critic double ".bionic/docs/record/w/a.md" "Files: .bionic/docs/record/w/real/b.md"
 expect_eq "T57-N1 …while the same path through a real directory is counted (the control)" "allow:adversarial,structure" "$R"
 
-# a reader's Files: asks for no derivation (review pass 38 B1, A-orch-105). These fixtures have no
-# impact-command:, the shipped default.
+# a reader's Files: names no suite (review pass 38 B1, A-orch-105).
 T57_REC=.bionic/docs/record/w
 t57_rd() {  # <questions> <files line> [<suites line>] [<runs line>] -> a reader brief
   printf 'Your task: re-run the evidence.\nExpected artifact: %s/e.md\nExpected duration: ~30 minutes.\nQuestions: %s\n%s' "$T57_REC" "$1" "$2"
@@ -2322,7 +2301,7 @@ q49_gate t57-d3 bionic:auditor double "$(t57_rd evidence "Files: $T57_REC/e.md" 
 expect_eq "T57-D …the same with Suites: none beside the run, as today" "allow:evidence" "$R"
 q49_gate t57-d4 bionic:auditor double "$(t57_rd evidence "Files: $T57_REC/e.md")"
 expect_contains "T57-D an auditor with Files: and no Suites: line and no run is refused: nothing to re-execute" "the auditor declares nothing to re-execute" "$R"
-expect_absent "T57-D …never the impact-command refusal" "no impact command" "$R"
+expect_absent "T57-D …never the Files-alone refusal" "names no suite" "$R"
 q49_gate t57-d5 bionic:critic double "$(t57_rd 'adversarial, structure' "Files: $T57_REC/e.md, $T57_REC/f.md")"
 expect_eq "T57-D a critic not dealt evidence with its records on Files: and no Suites: line is admitted" "allow:adversarial,structure" "$R"
 REPO=$(make_repo rt57d6 yes); write_attestation "$REPO" "$SID_A"
@@ -2331,12 +2310,12 @@ Expected artifact: $T57_REC/w.md
 Expected duration: ~30 minutes.
 Files: lib/a.sh" "t57-d6" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "implementor")"
 expect_eq "T57-D a writer with Files: and no Suites: line is refused as today (the control)" "deny" "$GATE_VERDICT"
-expect_contains "T57-D …on the impact-command refusal" "no impact command is configured here" "$GATE_ERR"
+expect_contains "T57-D …on the Files-alone refusal" "Files: alone names no suite" "$GATE_ERR"
 T57_IMP="$SANDBOX/t57-impact"; mkdir -p "$T57_IMP/.bionic"
 printf 'printf "x.test.sh\\tlib/a.sh\\n"\n' > "$T57_IMP/impact-stub.sh"
 printf 'impact-command: bash %s/impact-stub.sh\n' "$T57_IMP" > "$T57_IMP/.bionic/config.yaml"
 BV=$(brief_verdict implementor "$T57_IMP" "Files: lib/a.sh")
-expect_contains "T57-D with an impact command, a writer's Files: derives its suites (the positive)" "suites=x.test.sh" "$BV"
+expect_contains "T57-D beside a stale impact-command: line, a writer's Files: is refused all the same" "finding: Files: alone names no suite" "$BV"
 BV=$(brief_verdict bionic:auditor "$T57_IMP" "Questions: evidence
 Files: $T57_REC/e.md
 $T57_PY")
@@ -2351,8 +2330,9 @@ section "§T72 — a reader's suites are its Suites: tokens, and a record is a r
 # listed, and review pass 49 found the one neither listed: a line that is all comment. The
 # shipped scaffold's line with `none` removed and its comment kept IS that line, and the reader
 # was given the writer's derivation (eight suites beside its run) or refused for the missing
-# impact command. Each reader below is driven at the real wall WITH an impact command that
-# answers eight suites and WITHOUT one; a writer with the same lines is the control.
+# impact command. Each reader below is driven at the real wall WITH a stale impact-command: line
+# whose stub would answer eight suites and WITHOUT one (wave-31 T2: nothing reads the line now);
+# a writer with the same lines is the control.
 T72_REC=.bionic/docs/record/w
 T72_SCAF="$(scaffold_raw_line "$DISPATCH_FILE" Suites)"
 T72_CMT="Suites:${T72_SCAF#Suites: none}"
@@ -2413,7 +2393,7 @@ for T72_IMP in on off; do
       expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and no run: refused, nothing to re-execute" \
         "the $T72_WORD declares nothing to re-execute" "$R"
       expect_contains "T72-B1 …the reason the wall hands back names it" "declares nothing to re-execute" "$GATE_REASON"
-      expect_absent "T72-B1 …and no second fault: never the impact-command refusal" "no impact command" "$GATE_REASON"
+      expect_absent "T72-B1 …and no second fault: never the Files-alone refusal" "names no suite" "$GATE_REASON"
       # the lines a brief may hold beside it, through the same library the wall reads
       BV=$(brief_verdict "$T72_ROLE" "$T72_R" "$(t72_brief "$T72_KEY" "v$T72_N" "$T72_LINE" 'Re-executes: none')")
       expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and Re-executes: none: nothing to re-execute" \
@@ -2429,20 +2409,15 @@ for T72_IMP in on off; do
     expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP: a named token beside its comment still counts, four in total" \
       "finding: the total of 4 runs exceeds the 3-run cap" "$BV"
   done
-  # a writer is untouched: its Files: derive with an impact command, and are refused without one
+  # a writer is untouched: its Files: alone is refused, a stale impact-command: line or not
   T72_R=$(t72_repo wr "$T72_IMP")
   for T72_L in cmt hash; do
     case "$T72_L" in cmt) T72_LINE="$T72_CMT"; T72_SAY="the scaffold line with none removed" ;;
                      *)   T72_LINE="$T72_HASH"; T72_SAY="Suites: #" ;; esac
     T72_N=$((T72_N + 1))
     t72_gate "$T72_R" "$T72_N" bionic:implementor "$(t72_brief wr "r$T72_N" "$T72_LINE" "$T72_RUN")"
-    if [ "$T72_IMP" = on ]; then
-      expect_eq "T72-B1 a writer, impact command on, $T72_SAY: derived, as the base does" \
-        "allow:a.test.sh b.test.sh c.test.sh d.test.sh e.test.sh f.test.sh g.test.sh h.test.sh|derived|${RL_BT}pytest tests/unit${RL_BT}" "$R"
-    else
-      expect_contains "T72-B1 a writer, no impact command, $T72_SAY: refused for it, as the base does" \
-        "no impact command is configured here" "$R"
-    fi
+    expect_contains "T72-B1 a writer, impact command $T72_IMP, $T72_SAY: refused for Files: alone, as the base does" \
+      "Files: alone names no suite" "$R"
   done
 done
 

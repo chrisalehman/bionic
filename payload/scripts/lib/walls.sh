@@ -6278,8 +6278,8 @@ fi
 # header for the measurement.
 #
 # INSIDE A DISPATCHED AGENT ONLY. `hooks/dispatch-preflight.sh` wrote this agent`s budget
-# onto the roster row at launch — `suites_allowed=`, derived from the tree by the impact
-# command or declared by the brief — and this is the wall that holds it there. On the
+# onto the roster row at launch — `suites_allowed=`, the set the brief declared — and this
+# is the wall that holds it there. On the
 # orchestrator`s own thread hooks/farm-out-reminder.sh owns the same question and answers
 # it differently (dispatch it, or take the audited override), so this arm never speaks
 # there: no `agent_id`, no arm.
@@ -6297,8 +6297,8 @@ fi
 #       (walk-triage-3). A row that declares runs only still holds a runner form to them.
 #
 #   `suites_allowed=` present but EMPTY
-#       A budget was stated and came out empty — the impact command failed or derived
-#       nothing, and the dispatch warned about it. Read exactly as the absent case above.
+#       The brief named no suite (it declared runs only, or a reader named none). Read
+#       exactly as the absent case above.
 #
 #   `suites_allowed=none`
 #       The explicit `Suites: none` waiver. A brief that declared it runs no suite at all,
@@ -6744,8 +6744,8 @@ while IFS=$'\t' read -r _kind _target _run; do
   #
   # AHEAD OF THE DECLARED RUNS, and that order is the whole of the full-run rule. The
   # dispatch wall judges `tests/run.sh` by the `run.sh` token in `suites_allowed=` and nothing
-  # else, asking the proof record whether the change since the last regression proof can be bounded
-  # (hooks/dispatch-preflight.sh, the full-run wall) — so a brief that declared the full tree
+  # else, asking the proof record whether a full run is owed (hooks/dispatch-preflight.sh, the
+  # full-run wall) — so a brief that declared the full tree
   # under `Re-executes:` instead would be unjudged there AND admitted here, and one spelling
   # would spend a run the proof record says is not owed. The full tree goes on a row that NAMES
   # it, in the field the dispatch wall reads.
@@ -6765,8 +6765,8 @@ while IFS=$'\t' read -r _kind _target _run; do
       "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall.
 The full suite runs once, on the head being released, by one dispatched runner whose row
-carries tests/run.sh; after that pass a later change is proved by its affected suites. A
-full run from a writer row costs forty minutes and proves a head nobody is releasing.
+carries tests/run.sh. A writer proves its change by the suites its brief names; a full run
+from a writer row costs forty minutes and proves a head nobody is releasing.
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
@@ -6774,9 +6774,8 @@ Run the suites your brief named instead, through the one door (wave-28 T36):
     tests/run.sh --only ${_ft_first:-<suite>.test.sh}
 \`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
 queue only the runner itself builds, and it is the full-tree runner as far as this budget
-is concerned. If the change cannot be bounded — a merge from outside the run, or a file the
-map answers with every suite or with none — say so in your report: the orchestrator
-dispatches the runner, and the dispatch wall admits it only then."
+is concerned. If the change reaches past the suites your brief names, say so in your report:
+the orchestrator widens the brief or dispatches the runner."
     return 2
   fi
   # ---- BEGIN THE ONE DOOR (wave-28 T36; D27, REQ-10 AC-10.1) ----
