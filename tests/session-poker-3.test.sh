@@ -3107,10 +3107,11 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 # Each writer verb hands plan_verb_swap the `writer` mode, so its copy is judged at `current: 4`;
 # `current` alone dry-commits at the step it judges, and `regression-runs` (wave-30 T12, eee53f90)
 # writes the plan header, not a row, so it hands `judged`. A verb that changes its mode turns this red.
+# The list is the live one (wave-31 T32): `finding-check` is gone (D6), and `regression` (T27) is on it.
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print ($2 == "regression-runs" ? $2 "=" $NF : $NF) }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current discharge finding-check finding-move finding-stated handoff launch-sync matrix-render proof-add regression-runs release-check row-landed step-field step-line task-add task-split waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current discharge finding-move finding-stated handoff launch-sync matrix-render proof-add regression regression-runs release-check row-landed step-field step-line task-add task-split waive ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current and regression-runs names the writer mode; regression-runs names judged" "regression-runs=judged writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
