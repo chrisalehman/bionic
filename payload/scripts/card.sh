@@ -46,6 +46,7 @@
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (the Step 0 card's rigor line)
+#     bash card.sh regression <scale> [<plan>]          (the Step 0 card's regression line)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #
@@ -1089,13 +1090,15 @@ _card_branches() {
   _card_rstrip "    $(_card_pad integration 14)$(_card_pad "$ib" 22)(Step 8 merges here)"; printf '\n'
 }
 
-# ── THE REGRESSION LINE PRINTS AN EM DASH (D9, AC-4.3; wave-31 T2) ───────────
+# ── THE REGRESSION LINE PRINTS THE PLAN'S VALUE (D4, AC-12.1; wave-31 T2, T28) ─────────────
 #
 # THE LINE USED TO BE A LITERAL. `floor tests/run.sh` was typed into the Verification
 # line's format string, so the card asserted a fact about a project it had never asked.
-# Through 1.14.0 it printed the map's configured command; the file-to-suite map is
-# deleted (REQ-4 AC-4.2), so nothing names the regression here and the card prints the em
-# dash, its own spelling for "declared nothing". T4 redefines the line (D4, A-orch-6).
+# Through 1.14.0 it printed the map's configured command; the file-to-suite map is deleted
+# (REQ-4 AC-4.2), and the line printed an em dash. Since wave-31 T28 the line prints the
+# plan's own `regression:` key, `yes` or `no`, as Step 0 wrote it with
+# `session-poker.sh regression`; a plan that declares no key prints `not declared`, the
+# spelling the walk and rigor lines use. The Step 0 card's line is `card.sh regression`.
 #
 # `_card_plan_root` resolves a plan to its project root, UNDER THE PLAN'S ROOT, NOT THE
 # RENDERER'S: a card is often rendered from a worktree or from an orchestrator standing
@@ -1107,9 +1110,32 @@ _card_plan_root() {  # <plan path> -> the project root it resolves under, or ""
   project_root "$d" 2>/dev/null
 }
 
-_card_floor() {  # [<plan path>] -> an em dash, the regression line's (the name keeps the word
-  # floor, an identifier, wave-30 T23; no config key names the regression since wave-31 T2)
-  printf '%s' "—"
+_card_floor() {  # [<plan path>] -> the plan's regression: value, or "not declared" (the name keeps the
+  # word floor, an identifier, wave-30 T23)
+  local v
+  v="$(plan_frontmatter_get "${1:-}" regression)"
+  printf '%s' "${v:-not declared}"
+}
+
+# THE STEP 0 CARD'S REGRESSION LINE (D4, AC-12.1). `card.sh regression <scale> [<plan>]` prints one line:
+# the scale's default, task no, wave yes, epic no, marked `(scale default)`; or, when the plan carries a
+# `regression-override:` line, the plan's own `regression:` value marked `(overridden)`. The override line
+# is presence-only: its fields are never parsed. An absent key, or any value but the exact `no`, reads
+# `yes`, as walls.sh and proof.sh read it (T27, A-T27-2).
+_card_regression_line() {  # <scale> [<plan>] -> the line; returns 1 on a word that is no scale
+  local scale="$1" plan="${2:-}" d v
+  case "$scale" in
+    task|epic) d=no ;;
+    wave)      d=yes ;;
+    *)         return 1 ;;
+  esac
+  if [ -n "$(plan_frontmatter_get "$plan" regression-override)" ]; then
+    v="$(plan_frontmatter_get "$plan" regression)"
+    [ "$v" = "no" ] || v=yes
+    printf 'regression %s  (overridden)\n' "$v"
+  else
+    printf 'regression %s  (scale default)\n' "$d"
+  fi
 }
 
 # ── PER-BATCH WIDTH AGAINST THE RUNG (AC-3.4) ────────────────────────────────
@@ -1824,6 +1850,11 @@ case "$1" in
     [ "$#" -eq 2 ] || _card_usage "rigor takes exactly one word (got $(( $# - 1 )))"
     rigor_print "$2" && exit 0
     printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2
+    exit 1 ;;
+  regression)
+    [ "$#" -ge 2 ] && [ "$#" -le 3 ] || _card_usage "regression takes a scale and an optional plan (got $(( $# - 1 )) arguments)"
+    _card_regression_line "$2" "${3:-}" && exit 0
+    printf "card.sh: '%s' is no scale — use task, wave or epic\n" "$2" >&2
     exit 1 ;;
   inherited)
     # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that
