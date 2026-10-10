@@ -577,6 +577,10 @@ drive() {  # <condition>
 # session-20260815-landing-cleanup: a TaskStop target that resolves to no agent
 # AND wears no agent-address shape is not this gate's business) — distinct from
 # SILENT-WITH-ANNOUNCE, whose announce line is the auto-probe's, not this one's.
+# ALLOWED-WITH-REASON = exit 0, stdout empty, the `STOP ALLOWED` line on stderr, and the target's
+# roster row copied again with `reason=unmet: …` (wave-31 T32, D6; A-orch-41 ruling 4): the stop gate
+# records its own verdict on a live writer whose contract is undelivered and denies nothing. The eight
+# worlds that once reached the "still working, nothing delivered" deny (exit 2) are this case now.
 # RE-PINNED (epic-23 wave-13-fixit-180, T14, D8): `stop|unresolvable` no longer
 # passes through — an unrostered, non-address-shaped, non-bash-task-shaped
 # target is now REFUSED (2, loud), matching T5's restored no-row stop refusal.
@@ -601,21 +605,21 @@ stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, si
 stop|no-plan|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|plan-names-no-step|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|no-session-key-inert|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
-stop|no-session-key|2|loud|Payload missing its session key, environment carries it — stop: CLOSED
+stop|no-session-key|0|allowed-with-reason|Payload missing its session key, environment carries it — the session is read from the environment, so the live writer is ALLOWED with reason=unmet on its row (T32)
 stop|no-session-key-anywhere|0|silent|No session key on EITHER channel — engagement unprovable, so the switch is open by absence (task-engaged-session)
 stop|empty-target|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|no-transcript|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unresolvable|2|loud|Stop gate — D8 (wave-13-fixit-180 T5): an unresolved target wearing no agent-address shape is REFUSED, CLOSED
 stop|unresolvable-addressed|2|loud|Stop gate — T4 carve: an unresolved target that DOES wear an agent-address shape still refuses, CLOSED
 stop|ambiguous|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|no-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|unknown-schema|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|stale-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|no-observation|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|foreign-observation|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|unknown-schema|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|stale-observation|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|symlinked-state|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
 stop|unidentified-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|borrowed-look|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|progress-stale|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|borrowed-look|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
+stop|progress-stale|0|allowed-with-reason|Stop gate — T32 (wave-31, D6): the guard records instead of denying, so a live writer with an undelivered contract is ALLOWED and its roster row records reason=unmet
 stop|observed|0|silent-with-announce|Stop gate — the positive pair: a target quiet past its cadence is stoppable, and the gate announces the look it permitted on (epic-23 wave-15, REQ-2)
 stop|unrostered-full-id|2|loud|Stop gate — after the verdict: CLOSED, loud
 '
@@ -651,6 +655,25 @@ while IFS='|' read -r surface cond want_exit want_loud row; do
     else
       no "$surface/$cond is SILENT-WITH-ANNOUNCE — stdout empty, one operator-facing line on stderr" \
          "stdout='$DRV_OUT' stderr='$DRV_ERR'"
+    fi
+  elif [ "$want_loud" = "allowed-with-reason" ]; then
+    _fd_row=""
+    case "$cond" in
+      foreign-observation) _fd_repo="$F_REPO" ;;
+      unknown-schema)      _fd_repo="$V_REPO" ;;
+      stale-observation)   _fd_repo="$S_REPO" ;;
+      symlinked-state)     _fd_repo="$L_REPO" ;;
+      borrowed-look)       _fd_repo="$B_REPO" ;;
+      progress-stale)      _fd_repo="$G_REPO" ;;
+      *)                   _fd_repo="$A_REPO" ;;
+    esac
+    _fd_row=$(tail -n 1 "$_fd_repo/.bionic/tmp/roster-$SID_A.state" 2>/dev/null)
+    if [ -z "$DRV_OUT" ] && printf '%s' "$DRV_ERR" | grep -qF 'STOP ALLOWED' \
+       && printf '%s' "$_fd_row" | grep -qF 'reason=unmet:'; then
+      ok "$surface/$cond is ALLOWED-WITH-REASON — stdout empty, STOP ALLOWED on stderr, reason=unmet on the roster row"
+    else
+      no "$surface/$cond is ALLOWED-WITH-REASON — stdout empty, STOP ALLOWED on stderr, reason=unmet on the roster row" \
+         "stdout='$DRV_OUT' stderr='$DRV_ERR' last row='$_fd_row'"
     fi
   elif [ "$want_loud" = "passthrough" ]; then
     if [ -z "$DRV_OUT" ] && printf '%s' "$DRV_ERR" | grep -qF 'PASSTHROUGH'; then
