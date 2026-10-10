@@ -2995,30 +2995,23 @@ expect_eq "MR-0d …and the matrix carries no stack-health: line yet (the heads 
 
 poke "$RMR" matrix-render
 expect_eq "MR-1 matrix-render exits 0" "0" "$RC"
-expect_contains "MR-1b …and counts what it did: three new blocks, seven keys added to the one block and the matrix head" \
-  "matrix-render — 3 blocks written, 7 keys added, 0 unchanged" "$OUT"
+expect_contains "MR-1b …and counts what it did: three new blocks, four keys added to the one block and the matrix head" \
+  "matrix-render — 3 blocks written, 4 keys added, 0 unchanged" "$OUT"
 MR_W12='AC-1.2:
   provenance: spec §1 (fixture)
   fails-when: b is wrong
   eval: T0 — docs-pins §B
   task: pending
-  evidence: pending
-  tier-run: pending
-  readback: pending'
-expect_eq "MR-2 a T0 criterion: provenance from its requirement, fails-when and eval from the table, task pending (T1 and T2 both serve REQ-1), then tier-run and readback" \
+  evidence: pending'
+expect_eq "MR-2 a T0 criterion: provenance from its requirement, fails-when and eval from the table, task pending (T1 and T2 both serve REQ-1), then evidence and nothing more" \
   "$MR_W12" "$(mr_block "$PMR" AC-1.2)"
 MR_W21='AC-2.1:
   provenance: live approach
   fails-when: c is wrong
   eval: T3 — walk W1 → narrated
   task: T5
-  evidence: pending
-  tier-run: pending
-  fresh: pending
-  cold-client: pending
-  contact: pending
-  readback: pending'
-expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so the Approach; task T5, the one row serving REQ-2; the five T3 keys" \
+  evidence: pending'
+expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so the Approach; task T5, the one row serving REQ-2; evidence and nothing more" \
   "$MR_W21" "$(mr_block "$PMR" AC-2.1)"
 MR_W22='AC-2.2:
   provenance: user approach
@@ -3033,12 +3026,15 @@ MR_W11='AC-1.1:
   fails-when: the fixture is wrong
   eval: T2 — `--only a.test.sh` (§A)
   task: pending
-  evidence: pending
-  tier-run: pending
-  readback: pending
-  fixture-fidelity: pending'
-expect_eq "MR-3c the existing T2 block keeps its two lines as written (the table's 'a is wrong' does not replace them) and gains the six it lacked, fixture-fidelity among them" \
+  evidence: pending'
+expect_eq "MR-3c the existing T2 block keeps its two lines as written (the table's 'a is wrong' does not replace them) and gains the three it lacked, evidence the last" \
   "$MR_W11" "$(mr_block "$PMR" AC-1.1)"
+# wave-31 T6 (REQ-5 AC-5.1): one pointer per matrix row. The positive first — the grep reads the rendered plan's bytes and
+# finds the four evidence stubs, one per block — then the absence, on the same extractor over the same bytes.
+expect_eq "MR-3d the rendered matrix carries one 'evidence: pending' per block (four blocks, four stubs)" "4" \
+  "$(/usr/bin/grep -c '^  evidence: pending$' "$PMR")"
+expect_eq "MR-3e …and no stub for a key the gate no longer owes (tier-run, readback, fixture-fidelity, fresh, cold-client, contact)" "0" \
+  "$(/usr/bin/grep -c '^  \(tier-run\|readback\|fixture-fidelity\|fresh\|cold-client\|contact\): ' "$PMR" || true)"
 expect_eq "MR-4 the matrix head gains stack-health: and no walk-artifact: line, the fixture being walk: exempt" "stack-health" "$(mr_heads "$PMR")"
 expect_eq "MR-4b …and the stack-health: line reads pending" "1" "$(/usr/bin/grep -cx 'stack-health: pending' "$PMR")"
 s34_gate "$RMR"
@@ -3056,15 +3052,15 @@ expect_contains "MR-6b …writes nothing and says so in the same line" "matrix-r
 expect_true "MR-6c …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PMR"
 
 awk '/^AC-1\.1:/ { b = 1 } /^AC-1\.2:/ { b = 2 } /^AC-2\.1:/ { b = 0 }
-     b == 1 && /^  tier-run: / { print "  tier-run: bash a.test.sh"; next }
-     b == 2 && /^  readback: / { next } { print }' "$TMPROOT/mr-keep" > "$PMR"
+     b == 1 && /^  evidence: / { print "  evidence: record/a.md"; next }
+     b == 2 && /^  evidence: / { next } { print }' "$TMPROOT/mr-keep" > "$PMR"
 s42_snap "$RMR" "$PMR"
 poke "$RMR" matrix-render
 expect_eq "MR-7 a render over a filled value and a dropped key exits 0" "0" "$RC"
 expect_contains "MR-7b …adds the one missing key and leaves the other three blocks as they are" "matrix-render — 0 blocks written, 1 keys added, 3 unchanged" "$OUT"
-expect_eq "MR-7c …the filled tier-run: stands, nothing written over it" "1|0" \
-  "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: bash a.test.sh')|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
-expect_eq "MR-7d …and the dropped readback: is back, as the block's last line" "  readback: pending" "$(mr_block "$PMR" AC-1.2 | tail -1)"
+expect_eq "MR-7c …the filled evidence: stands, nothing written over it" "1|0" \
+  "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  evidence: record/a.md')|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  evidence: pending')"
+expect_eq "MR-7d …and the dropped evidence: is back, as the block's last line" "  evidence: pending" "$(mr_block "$PMR" AC-1.2 | tail -1)"
 expect_eq "MR-7e …one line added, none removed (git diff --numstat)" "1 0;" "$(s42_numstat "$RMR")"
 cp "$TMPROOT/mr-keep" "$PMR"
 
@@ -3077,7 +3073,7 @@ s42_snap "$RMRW" "$PMRW"
 poke "$RMRW" matrix-render
 expect_eq "MR-8 on a walk: required plan the head gains stack-health: and walk-artifact:, both pending" "0|stack-health|walk-artifact|1" \
   "$RC|$(mr_heads "$PMRW")|$(/usr/bin/grep -cx 'walk-artifact: pending' "$PMRW")"
-expect_contains "MR-8b …counted with the keys added" "matrix-render — 3 blocks written, 8 keys added, 0 unchanged" "$OUT"
+expect_contains "MR-8b …counted with the keys added" "matrix-render — 3 blocks written, 5 keys added, 0 unchanged" "$OUT"
 
 # ---------- the refusals: plan byte-identical ----------
 mr_refused() {  # <label> <want rc> <want text> <plan content file> [operands…]
@@ -3096,25 +3092,25 @@ mr_refused "MR-12 an operand is the usage error" 2 "takes no argument" "$TMPROOT
 cp "$TMPROOT/mr-keep" "$PMR"
 
 # ---------- the mutation arm: the key list taken from walls.sh, not typed twice ----------
-# A copy of the library whose keys_for_tier drops fixture-fidelity from T2, behind a copy of the hook that reads it:
-# the same render on the same plan writes AC-1.1 without the key, so MR-3c goes red under it.
-MRM_NEEDLE='T2)    echo "tier-run readback fixture-fidelity evidence" ;;'
+# A copy of the library whose keys_for_tier drops user-confirmed from T4, behind a copy of the hook that reads it:
+# the same render on the same plan writes AC-2.2 without the key, so MR-3b goes red under it.
+MRM_NEEDLE='T4)          echo "user-confirmed evidence" ;;'
 MRM_WALLS="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/walls.sh"
 anchor "$MRM_WALLS" "$MRM_NEEDLE" 1
 MRM_DIR="$TMPROOT/poker-mr-mut"; rm -rf "$MRM_DIR"; mkdir -p "$MRM_DIR/hooks" "$MRM_DIR/scripts"
 cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MRM_DIR/scripts/lib"
 for _mr_f in "$(dirname "$POKER")"/*; do [ "${_mr_f##*/}" = session-poker.sh ] || ln -s "$_mr_f" "$MRM_DIR/hooks/${_mr_f##*/}"; done
 cp "$POKER" "$MRM_DIR/hooks/session-poker.sh"
-MR_N="$MRM_NEEDLE" awk 'BEGIN { n = ENVIRON["MR_N"] } index($0, n) { sub(/ fixture-fidelity/, "") } { print }' "$MRM_WALLS" > "$MRM_DIR/scripts/lib/walls.sh"
+MR_N="$MRM_NEEDLE" awk 'BEGIN { n = ENVIRON["MR_N"] } index($0, n) { sub(/user-confirmed /, "") } { print }' "$MRM_WALLS" > "$MRM_DIR/scripts/lib/walls.sh"
 expect_eq "MR-mut0 the copy of the library differs from it in one line" "1" "$(diff "$MRM_WALLS" "$MRM_DIR/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
-awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^  (eval|task|evidence|tier-run|readback|fixture-fidelity): / { next } m && /^stack-health:/ { next } { print }' \
+awk '/^## / { m = ($0 ~ /^## Verification Matrix/) } m && /^  (eval|task|evidence|user-confirmed): / { next } m && /^stack-health:/ { next } { print }' \
   "$TMPROOT/mr-keep" > "$PMR"
 s42_snap "$RMR" "$PMR"
 MRM_POKER="$POKER"; POKER="$MRM_DIR/hooks/session-poker.sh"
 poke "$RMR" matrix-render
 POKER="$MRM_POKER"
-expect_eq "MR-mut1 the mutant runs and renders (exit 0, AC-1.1 gains its tier-run:)" "0|1" "$RC|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  tier-run: pending')"
-expect_eq "MR-mut2 …but writes no fixture-fidelity:, where MR-3c found one" "0" "$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -c '^  fixture-fidelity: ')"
+expect_eq "MR-mut1 the mutant runs and renders (exit 0, AC-1.1 gains its evidence:)" "0|1" "$RC|$(mr_block "$PMR" AC-1.1 | /usr/bin/grep -cx '  evidence: pending')"
+expect_eq "MR-mut2 …but writes no user-confirmed:, where MR-3b found one" "0" "$(mr_block "$PMR" AC-2.2 | /usr/bin/grep -c '^  user-confirmed: ' || true)"
 cp "$TMPROOT/mr-keep" "$PMR"
 POKE_BOUND="$MR_BOUND_WAS"
 

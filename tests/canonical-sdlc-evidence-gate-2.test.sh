@@ -453,10 +453,12 @@ AC-2:
 # gate", not "an empty cell is tolerated".
 m32_refuted="${m32_empty_aud/| AC-1 | T1 | discharged | see AC-1 |  |/| AC-1 | T1 | discharged | see AC-1 | REFUTED |}"
 
-# The same matrix with AC-2's `readback:` key removed. The rest of the matrix
+# The same matrix with AC-2's `evidence:` key removed (wave-31 T6: the pointer is the one key every tier owes; this
+# control named `readback:` while the gate demanded it). The rest of the matrix
 # contract is untouched by B-10, so this must still block at single — the
 # discrimination control for every 32a..32d allow.
-m32_missing_key="${m32_empty_aud/  readback: 332\/332 asserted/  fixture-fidelity: n\/a}"
+m32_nl=$'\n'
+m32_missing_key="${m32_empty_aud/  evidence: record\/generic-evidence.md${m32_nl}  tier-run: bash test.sh — unit suite/  tier-run: bash test.sh — unit suite}"
 
 # Step-5 tests floor with NO `auditor:` pointer.
 step5_noaud="  cmd: bash test.sh
@@ -526,13 +528,13 @@ expect_allow "32n rigor single, a REFUTED auditor cell at current 6 → allow (c
   "$h32n" 'git commit -m "x"'
 
 # 32o — discrimination control: everything ELSE the matrix demands still bites
-# at single. AC-2 (T1) is missing its `readback:` key on the same fixture family
+# at single. AC-2 (T1) is missing its `evidence:` key on the same fixture family
 # and at the same step, so 32a..32d are the auditor arm standing down and not
 # the matrix going quiet.
 h32o=$(make_home)
 write_plan "$h32o" "$(plan_rigor single 6 "$step6_body" "$m32_missing_key")" > /dev/null
-expect_block "32o control: single plan missing a per-tier key still blocks at current 6" \
-  "$h32o" 'git commit -m "x"' "readback"
+expect_block "32o control: single plan missing the evidence key still blocks at current 6" \
+  "$h32o" 'git commit -m "x"' "missing evidence key 'evidence'"
 
 # ---- AC-27: at double and double the wall is unchanged -------------
 
