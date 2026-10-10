@@ -448,7 +448,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr or share"
-  die "  bash ${HOOK_DIR}/session-poker.sh current <N|T<n>>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
+  die "  bash ${HOOK_DIR}/session-poker.sh current <N>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
@@ -723,11 +723,10 @@ case "$VERB" in
     PV_KEY="$1"; PV_FKEY="${2%%=*}"; PV_FVAL="${2#*=}"
     ;;
   current)
-    [ $# -eq 1 ] && [ -n "$1" ] || usage "current takes one argument: the step number (0-8) or the task id (T<n>) to move to."
+    [ $# -eq 1 ] && [ -n "$1" ] || usage "current takes one argument: the step number (0-8) to move to."
     case "$1" in
       9|9a|9b|[0-8]|[0-8][ab]) : ;;
-      T[0-9]*) case "${1#T}" in *[!0-9]*) usage "current: '$1' is not a task id (T<n>)." ;; esac ;;
-      *) usage "current: '$1' is neither a step number (0-8) nor a task id (T<n>)." ;;
+      *) usage "current: '$1' is not a step number (0-8); current: is a step number at every scale." ;;
     esac
     PV_KEY="$1"
     ;;
@@ -1957,9 +1956,7 @@ _sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed)
 # payload/scripts/lib/run.sh's run_open strips a trailing a/b sub-step letter before it
 # ever looks at digits (`local step="${current%[ab]}"`) — `current: 3b` and `current: 4b`
 # are recognized, in-repo forms, not malformed ones. This mirrors exactly that: strip the
-# same optional letter, then require what remains to be all-digits. A task-scale `current:
-# T<n>` needs no special case to land here — "T1" ends in neither `a` nor `b`, so the strip
-# is a no-op and the leftover `T` fails the digit test on its own, same as it always has.
+# same optional letter, then require what remains to be all-digits.
 sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-step letter
                         # stripped), or "" if the raw value is unreadable
   local plan="$1" current step
@@ -6767,7 +6764,7 @@ EOF
   # THE ROW-CELL VERBS (wave-24 T15; REQ-9 AC-9.1/9.2, D14). `task-set` sets cells of a
   # `## Tasks` row, `ledger-set` of a `## Dispatch ledger` row, and `ledger-add` appends a ledger
   # row; each through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
-  # the header carries by `units_has_column` — `rigor` is slot 3's task-scale name — except two:
+  # the header carries by `units_has_column`, except two:
   # `id`, the key the row is found by, and `Files`, which is a dispatched agent's CONTRACT once
   # it is on the roster (editing the plan row changes nothing a wall reads), so the refusal
   # names `amend`, the verb that widens it. `task-set` is judged by `units_validate` before the
@@ -8588,7 +8585,7 @@ RC_TAGS
 
   # THE LAUNCH SYNC (wave-26 T32; D4). Its reasoning is above the verbs, beside the functions it
   # runs. Silent, exit 0, wherever there is nothing it may write: no engagement, no bound open run,
-  # a plan before Step 4 (`current:` not a step of 4 or more), no roster, or a lock another writer
+  # a plan before Step 4 (`current:` a step below 4, or none), no roster, or a lock another writer
   # holds when the caller does not wait. What it cannot write prints, and the exit says whether a
   # retry repairs it (wave-26 T51; review 13 F6): 75 when another writer replaced the plan while
   # this one judged its copy, which the next caller repairs by running again, and when the lock's
@@ -8612,8 +8609,17 @@ RC_TAGS
     LS_ROSTER="$LS_ROOT/.bionic/tmp/roster-${SESSION_ID}.state"
     [ -f "$LS_ROSTER" ] && [ ! -L "$LS_ROSTER" ] || exit 0
     grep -qE '\|status=(confirmed|identified)\|' "$LS_ROSTER" 2>/dev/null || exit 0
-    LS_CUR="$(_fill_current_field "$LS_PLAN")"; LS_CUR="${LS_CUR%[ab]}"
-    case "$LS_CUR" in ''|*[!0-9]*) exit 0 ;; esac
+    # ONE LEDGER SHAPE (wave-31 T5; REQ-1 AC-1.2, D2): `current:` is a step number at every scale.
+    # A value that is not one — the retired task-scale `T<n>` above all — is refused aloud, exit 1,
+    # never skipped: the turn-end wall passes 0 and 75 only, so the plan's author is told.
+    LS_RAW="$(_fill_current_field "$LS_PLAN")"; LS_CUR="${LS_RAW%[ab]}"
+    case "$LS_CUR" in
+      '') exit 0 ;;
+      *[!0-9]*)
+        printf 'NOT-RECORDED — current: %s is not numeric; a plan in the retired task-scale shape is refused, not skipped\n' \
+          "$(printf '%s' "$LS_RAW" | tr -d '[:cntrl:]')" >&2
+        exit 1 ;;
+    esac
     [ "$LS_CUR" -ge 4 ] || exit 0
     tmp_dir_ok "$LS_ROOT/.bionic/tmp" || exit 0
     # A LOCK THAT CANNOT BE MADE IS NOT A LOCK ANOTHER WRITER HOLDS (wave-26 T51; review 13 F1):
@@ -9987,21 +9993,17 @@ EOF
     # more branch beside them.
     #
     # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
-    # review-b finding (c)/N-2). An empty field, a line that will not parse, or a `T<n>`
-    # against a table that NUMBERS its rows are all cases where this gate cannot tell which
-    # unit the run is on — and falling through to the readiness/budget checks on THAT basis
+    # review-b finding (c)/N-2). An empty field, or a value that is not a step number (the
+    # retired task-scale `T<n>` among them), is a case where this gate cannot tell which
+    # step the run is on — and falling through to the readiness/budget checks on THAT basis
     # is DOUBT-then-FILL: the one shape this arm exists to prevent, measured live on a plan
     # whose `current:` carried a sub-step letter (`3b`) that the old digit-only read
     # rejected as unreadable and then filled anyway. So this differs from an unreadable
     # RUNG, which falls back to the ceiling — there is no safe fallback for "did Step 3
     # pass," only "no."
     #
-    # A TASK-SCALE `current: T<n>` IS READABLE NOW, against a task-shaped table (wave-18
-    # REQ-3, D2; ADR-033 decision 2). It names the unit the run is on, which is a run past
-    # its plan, and `fill_step_token` is what pairs the field with the table's shape: the
-    # token is the number at wave scale, `T<n>` at task scale, and empty when the two
-    # disagree. The withhold above is exactly that empty answer, so the shape this arm was
-    # built for — a wave table sitting at `current: T1` (§22g) — still fills nothing.
+    # ONE LEDGER SHAPE (wave-31 T5; D2): `fill_step_token` answers the step number or nothing,
+    # at every scale, and the withhold above is that empty answer.
     # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
     # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
     # report, the ready set — inherits the answer instead of parsing the plan again.
