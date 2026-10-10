@@ -10,8 +10,8 @@
 # wish. This file tests the wall.
 #
 # WHAT IT COVERS. `hooks/dispatch-preflight.sh` records the budget on the roster row at
-# launch — `suites_allowed=`, derived from the tree by the configured impact command or
-# declared by the brief (tests/dispatch-preflight.test.sh §S27 owns that half). This file
+# launch — `suites_allowed=`, the set the brief declares (tests/dispatch-preflight.test.sh
+# §S27 owns that half). This file
 # owns the other half: inside a dispatched agent, a suite invocation outside that set is
 # refused, `tests/run.sh` is refused unless the row carries it, and `FARM_OUT_ALLOW=1`
 # does not widen either.

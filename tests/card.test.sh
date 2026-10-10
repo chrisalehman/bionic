@@ -1256,15 +1256,17 @@ expect_contains "156d: …and the task column carries the unit's first sentence"
 expect_absent "156e: …and not the rest of the task cell" \
   "second sentence the card does not show" "$T10_S3"
 
-# ── AC-4.3: the regression is the configured impact command, or an em dash (the word: wave-30 T23) ──
+# ── AC-4.3: the regression line prints an em dash; no config key names it (wave-31 T2, REQ-4 AC-4.2;
+# T4 redefines the line, A-orch-6) ──
 T10_V="$(printf '%s\n' "$T10_S3" | grep -m1 'matrix rows')"
-expect_contains "158: AC-4.3 — the regression is the root's own impact-command" \
-  "regression bash tests/lib/impact.sh" "$T10_V"
+expect_contains "158: AC-4.3 — a root whose config still carries a stale impact-command: renders an em dash" \
+  "regression —" "$T10_V"
+expect_absent "158d: …and never the stale command" "impact.sh" "$T10_V"
 expect_absent "158a: …and never the literal that was in the format string" \
   "regression tests/run.sh" "$T10_S3"
 whole_card step3 "$T10_TASK_PLAN_BARE"; T10_S3_BARE="$WC_OUT"
 T10_V_BARE="$(printf '%s\n' "$T10_S3_BARE" | grep -m1 'matrix rows')"
-expect_contains "158b: AC-4.3 — a root with no impact-command renders an em dash" \
+expect_contains "158b: AC-4.3 — a root with no config line renders an em dash too" \
   "regression —" "$T10_V_BARE"
 expect_absent "158c: …and still never the literal tests/run.sh" \
   "regression tests/run.sh" "$T10_S3_BARE"

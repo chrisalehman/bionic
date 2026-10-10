@@ -48,8 +48,8 @@ section "§combined — one refusal, every brief-shape fault (wave-12 T2, D3, AC
 # in a single pass.
 #
 # WHAT CHANGED (spec D3, principle P-A). The five BRIEF-SHAPE arms — A11 several paths,
-# A12 outside the repo, A13 no deliverable, A14 no Files:/Suites:, A16 Files: with no
-# impact command — no longer refuse where they stand. Each appends its finding (fact, fix
+# A12 outside the repo, A13 no deliverable, A14 no Files:/Suites:, A16 Files: naming
+# no suite — no longer refuse where they stand. Each appends its finding (fact, fix
 # and its own verbatim `Fix:` block) to a list, and ONE `refuse exit2` after the last of
 # them emits the list in file order and exits 2 once. The STATE arms are untouched: a
 # missing attestation, an unarmed Patrol, an unapproved plan, a worktree cwd, a full
@@ -121,7 +121,7 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # the mistake to catch.
 #
 # RAISED 13 -> 14 (wave-15 T5, REQ-5, A-T5.2), and by the same formula. The floor-once wall
-# is a SECOND arm keyed on `run.sh` in the derived suite set, so a brief that produces no
+# is a SECOND arm keyed on `run.sh` in the suite set, so a brief that produces no
 # set leaves two walls unable to answer rather than one, and AC-8.2's rule is that each of
 # them says so. The fault count did not move — the third `not checked:` line is a new wall
 # declaring itself, which is the growth this cap is meant to permit.
@@ -311,7 +311,7 @@ expect_nonempty "§scaffold-marks meta: the four scaffold lines were read out of
 # deliverable-field fault — every other brief-shape arm reads the same field), this brief
 # is down to its single-fault shape, where `dp_scaffold_marked` never renders
 # at all. What still discriminates: the refusal names ONLY the deliverable fault, and
-# never so much as mentions Files:/Suites:/impact-command — proving the pair was read as
+# never so much as mentions Files:/Suites: — proving the pair was read as
 # satisfied rather than merely unmarked on a wire this fixture can no longer reach.
 REPO=$(make_repo rsm-readonly yes)
 write_attestation "$REPO" "$SID_A"
@@ -325,7 +325,7 @@ expect_contains "§scaffold-marks (a) …naming the absent deliverable" \
 expect_absent "§scaffold-marks (a) …and never mentioning Files: — Suites: none satisfied it" \
   "Files:" "$GATE_ERR$GATE_REASON"
 expect_absent "§scaffold-marks (a) …nor Suites: — it was declared, not missing" \
-  "no impact command" "$GATE_ERR$GATE_REASON"
+  "names no suite" "$GATE_ERR$GATE_REASON"
 
 # (b) AC-6.2 — A DECLARED ARTIFACT SATISFIES THE WAIVER'S HALF OF THE PAIR. The deliverable
 # resolves outside the repo and the brief declares no instrument: two faults, and a
@@ -616,7 +616,6 @@ scaffold_fill() {  # <suites|files> -> the scaffold as a brief, placeholders fil
     case "$label" in
       "Deliverable-waiver") continue ;;
       "Files")  [ "$mode" = "files" ]  || continue ;;
-      "Suites") [ "$mode" = "suites" ] || continue ;;
     esac
     case "$label" in
       "Expected duration") value="20" ;;
@@ -671,14 +670,15 @@ expect_status "§scaffold …and its cadence is filled alongside it (T17)" \
   "15 min" \
   "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" cadence)"
 
-# ---- variant 2: the `Files:` form, where a derivation exists to consume it ----
+# ---- variant 2: the `Files:` form, its Suites: line beside it (Files: is scope, not a budget) ----
 REPO=$(make_repo rscaff2 yes)
 write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO" widget.test.sh
+expect_contains "§scaffold the Files: variant carries the scaffold's Suites: line too" \
+  "Suites: none" "$SCAFFOLD_FILES"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$SCAFFOLD_FILES" "scaffoldbot2")"
-expect_status "§scaffold the Files: variant DISPATCHES where a derivation is configured" \
+expect_status "§scaffold the Files: variant DISPATCHES" \
   "0" "$GATE_ST"
-expect_status "§scaffold …and the budget is the derived one" "widget.test.sh" \
+expect_status "§scaffold …and the budget is the brief's own Suites: line" "none" \
   "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
 
 # ---- the discriminator: the scaffold UNFILLED is refused ----
@@ -1039,9 +1039,8 @@ section "§one-wire — one exit status for every brief/state refusal, whatever 
 # THE DEFECT (ideas row 4; A-T4.8; research R3 Q1). `dp_refuse_findings` sent ONE finding out
 # on `refuse exit2` (status 2) and SEVERAL on `refuse deny` (status 0 with a deny verdict), so
 # a refusal's exit status depended on its fault count — and a fixture's fault count depends
-# on its ENVIRONMENT as well as its brief: with no `impact-command:` in .bionic/config.yaml a
-# `Files:` brief picks up a second fault silently (dispatch-preflight.sh, the no-impact arm).
-# Both rows below therefore pin the config, so each carries exactly the faults it names.
+# on what else the brief carries: a `Files:` line with no `Suites:` picks up a second fault
+# (brief.sh, the Files-alone arm). Both rows below therefore name exactly the faults they mean.
 #
 # fails-when (AC-7.1): the two-fault brief exits 2 or names one fault, or its one-fault
 # control leaves on a different wire. (AC-7.2): this two-fault row is absent.
@@ -1049,9 +1048,6 @@ section "§one-wire — one exit status for every brief/state refusal, whatever 
 # THE TWO-FAULT ROW: no deliverable, and no Files:/Suites: at all.
 REPO=$(make_repo r1wire2 yes)
 write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO" "tests/widget.test.sh"
-expect_contains "1wire2 meta: the impact command is configured" "impact-command:" \
-  "$(cat "$REPO/.bionic/config.yaml")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
 Expected duration: ~15 minutes." "w1wire2")"
 expect_status "1wire2 a TWO-fault brief exits 0 — the verdict is the block" "0" "$GATE_ST"
@@ -1063,23 +1059,21 @@ expect_contains "1wire2 …and the second" \
 expect_status "1wire2 …and journals no roster row" "0" \
   "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
-# THE ONE-FAULT CONTROL: the SAME brief plus a `Files:` line the configured impact command
-# answers for, so the deliverable fault is the ONLY one. Same status, same verdict.
+# THE ONE-FAULT CONTROL: the SAME brief plus a `Files:` line and the `Suites:` line that names
+# its budget, so the deliverable fault is the ONLY one. Same status, same verdict.
 REPO=$(make_repo r1wire1 yes)
 write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO" "tests/widget.test.sh"
-expect_contains "1wire1 meta: the impact command is configured" "impact-command:" \
-  "$(cat "$REPO/.bionic/config.yaml")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
 Expected duration: ~15 minutes.
-Files: payload/scripts/lib/widget.sh" "w1wire1")"
+Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh" "w1wire1")"
 expect_status "1wire1 a ONE-fault brief exits 0 too — the same wire" "0" "$GATE_ST"
 expect_eq "1wire1 …with a deny verdict" "deny" "$GATE_VERDICT"
 expect_contains "1wire1 …naming its one fault" "this brief names no deliverable" "$GATE_REASON"
 expect_absent "1wire1 …and only that one: the Files: line satisfied the instrument arm" \
   "no Files: and no Suites:" "$GATE_REASON"
-expect_absent "1wire1 …nor did a missing impact command add one" \
-  "no impact command is configured" "$GATE_REASON"
+expect_absent "1wire1 …nor did the Files: line add one" \
+  "Files: alone names no suite" "$GATE_REASON"
 expect_eq "1wire1 …the user stream is still ONE sentence" "1" \
   "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
 expect_status "1wire1 …and journals no roster row" "0" \
@@ -1235,187 +1229,30 @@ expect_eq "§not-checked control: a two-fault brief that DECLARES Suites: is ref
 expect_absent "§not-checked …with no not-checked line for a wall that COULD be checked" \
   "not checked: full-run" "$GATE_REASON"
 
-section "§slow-impact — a slow derivation is admitted, and derives the same set (wave-14 REQ-7, AC-7.1)"
+section "§bound-one-owner — a derivation bound is defined once, in lib/bounds.sh (wave-14 REQ-7, AC-7.4; wave-31 T2)"
 # ============================================================================
 #
-# THE STANDING WORKAROUND THIS RETIRES. `IMPACT_BOUND_S` was six seconds and
-# tests/lib/impact.sh cost 4.2 s at quiet load, so an ordinary dispatch under load 8-12
-# took 5.6 s and was refused for the cost of asking its own question (A-orch-46). The
-# operator's answer was to declare `Suites:` by hand on every dispatch during a floor.
-# The bound is a HANG GUARD now (lib/bounds.sh), the cost is gone to T9's cache, and a
-# derivation that merely takes 5.6 s is admitted.
-#
-# THE SLEEP IS THE LOAD. AC-7.1 states the cost in seconds; a load generator would prove
-# the same thing with a fixture nobody can run twice the same way. What matters is that
-# the gate waits for a derivation of that length and records its answer.
-#
-# fails-when: the loaded case is refused with the bound line, or the two derived sets differ.
-REPO=$(make_repo rslowimp yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 5.6
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-slow-imp")"
-expect_status "§slow-impact a 5.6s derivation is ADMITTED" "0" "$GATE_ST"
-expect_absent "§slow-impact …with no bound line anywhere on the wire" "bound:" "$GATE_ERR"
-SLOW_SET="$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
-expect_eq "§slow-impact …and the row carries the derivation's own answer" "alpha.test.sh" "$SLOW_SET"
-
-# ---- THE PAIRED ARM (T29, AC-7.1 discrimination) ----
-#
-# WHY THE ARM ABOVE PROVES NOTHING ALONE. §slow-impact's claim is that the SHIPPED bound
-# (10s since T35's D1 move, 20s as T9/D4 first set it) is what admits a 5.6s derivation —
-# not that any bound would. At the
-# superseded 6s bound the same 5.6s sleep cleared by only 0.4s, so this section passed
-# there too (T6-one-refusal.md §3; auditor finding AC-7.1, UNVERIFIABLE at d3930dd): the
-# observation is identical with the bound move absent. The missing control is the SAME
-# 5.6s derivation, on the SAME fixture, forced under a bound BELOW the sleep — it must
-# refuse, and its refusal must name the forced number, or the override never reached the
-# arm and any refusal it produced would be refusing for some unrelated reason.
-#
-# HOW THE BOUND IS FORCED. dispatch-preflight.sh sources lib/bounds.sh only when
-# IMPACT_BOUND_S is unset (`[ -z "${IMPACT_BOUND_S:-}" ]`, :2509) — an env value already
-# set on entry wins and the library is never read. GATE_ENV is the driver's own channel
-# for exactly this (see probe_env_on above, which does the same thing for
-# ANTHROPIC_API_KEY and HOME); saved and restored around the one call so no later arm in
-# this file inherits a forced bound.
-#
-# WHY 5 AGAINST 5.6 IS A REAL MARGIN NOW, AND WAS NOT (wave-14 T34). As written this arm
-# was a coin flip, green at T29's head and red at 89f6944's on the same machine at lower
-# load. Nothing about the override was at fault — instrumentation caught the arm reading
-# `bound=5` exactly as intended — but the gate spent that bound as fifty `sleep 0.1` polls
-# costing 115 ms each, so the "5 second" wait ran 5.77 s against a 5.6 s derivation and the
-# fixture won about half the time. The wait is a wall-clock one now and ends in
-# [4 s, 5 s], which is 0.6 s clear of the sleep and, being a clock, does not narrow under
-# load. The 0.4 s the arm was written with was never the margin it looked like; measure
-# before shortening it further.
-#
-# fails-when: the forced-5s call is ADMITTED, or its refusal does not name the forced
-# number (`bound:   5s`, the arm's own wire spacing — a wire naming a different number
-# would mean the override never reached the arm at all).
-_S29_GATE_ENV_SAVE="$GATE_ENV"
-GATE_ENV="$GATE_ENV IMPACT_BOUND_S=5"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-slow-imp-forced5")"
-GATE_ENV="$_S29_GATE_ENV_SAVE"
-expect_eq "§slow-impact …the SAME 5.6s derivation, forced to a 5s bound, is REFUSED" \
-  "deny" "$GATE_VERDICT"
-expect_contains "§slow-impact …naming the FORCED bound, proving the override reached the arm" \
-  "bound:   5s" "$GATE_VERR"
-# THE ROSTER IS THE CONTROL: still exactly the one row the ADMITTED call above wrote —
-# not two, which would mean the forced-bound call was admitted after all and only the
-# assertion above was wrong.
-expect_status "§slow-impact …and journalled no row for the refused dispatch" \
-  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# THE SAME DISPATCH AT QUIET LOAD, same set. This is AC-7.1's second half: the derived set
-# is a property of the tree and the brief, never of how long the machine took to say it.
-REPO=$(make_repo rslowimp2 yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 0
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-quiet-imp")"
-expect_status "§slow-impact control: the same brief with no sleep is admitted too" "0" "$GATE_ST"
-expect_eq "§slow-impact …and derives the SAME set" "$SLOW_SET" \
-  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
-
-section "§hanging-impact — a hang is still bounded, and the bound is named (wave-14 REQ-7, AC-7.2)"
-# ============================================================================
-#
-# WHAT IS LEFT FOR A BOUND TO DO once the cost is cached: an impact command that never
-# returns. A hook killed on the CLI's own timeout does NOT exit 2 — the dispatch proceeds
-# with no roster row and therefore no budget at all — so the wait has to end on OUR terms,
-# strictly inside the registration hooks/hooks.json gives this hook (§L.4c in
-# cross-gate-agreement pins the pair; both numbers are read from their own files).
-#
-# NO SEAM. The bound is the shipped constant, read from lib/bounds.sh; the fixture simply
-# outruns it. A test that shortened the bound would prove a value it had itself supplied.
-#
-# fails-when: the preflight waits past the stated bound, or the refusal does not name it.
-BOUND_S="$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ \
-  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh" 2>/dev/null)"
-expect_nonempty "§hanging-impact the shipped bound is readable from lib/bounds.sh" "$BOUND_S"
-
-REPO=$(make_repo rhangimp yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 60
-GATE_HIRES=1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-hang-imp")"
-GATE_HIRES=""
-HANG_ELAPSED="$GATE_TIME_CS"
-expect_eq "§hanging-impact a 60s derivation is REFUSED" "deny" "$GATE_VERDICT"
-expect_contains "§hanging-impact …naming the bound it outran, as the library defines it" \
-  "${BOUND_S}s" "$GATE_VERR"
-# THE CLOCK IS THE CLAIM. `$GATE_TIME_CS` is the first drive alone (run_gate drives a
-# second time under the verbose knob, which would double any number read across both).
-# ONE SECOND OF SLACK, NOT EIGHT, AND READ IN HUNDREDTHS — the same re-pinning as 29a, for
-# the same reason and against the same defect (wave-14 T34): the tick-counted wait ran
-# 23.0-23.2s here too, and a whole-second clock with eight seconds of slack called it fine.
-if [ "$HANG_ELAPSED" -le $(( (BOUND_S + 1) * 100 )) ]; then
-  ok "§hanging-impact …and it stopped waiting at the bound, not at the sleep ($(( HANG_ELAPSED / 100 )).$(printf '%02d' $(( HANG_ELAPSED % 100 )))s)"
-else
-  no "§hanging-impact …and it stopped waiting at the bound, not at the sleep" \
-    "took $(( HANG_ELAPSED / 100 )).$(printf '%02d' $(( HANG_ELAPSED % 100 )))s against a ${BOUND_S}s bound"
-fi
-expect_status "§hanging-impact …and journalled no row at all" \
-  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-section "§bound-one-owner — the derivation bound is defined once, fleet-wide (wave-14 REQ-7, AC-7.4)"
-# ============================================================================
-#
-# T9's own suite pins the LIBRARY's half (tests/stop.test.sh §6). This is the other half,
-# and the one AC-7.4 names: the preflight carried its own `IMPACT_BOUND_S=6` under its own
-# header, so the two legs of the fleet meant different things by "bounded" while each
-# message quoted its own number.
+# The preflight once carried its own `IMPACT_BOUND_S=6` under its own header, so the two legs
+# of the fleet meant different things by "bounded". The dispatch wall's derivation is deleted
+# (wave-31 T2, REQ-4 AC-4.2) and its bound with it; the landing gate's `LG_IMPACT_BOUND_S` is
+# the one left, and every `*IMPACT_BOUND_S=` definition in the fleet still lives in
+# lib/bounds.sh. tests/stop.test.sh §6 owns the landing bound's number.
 #
 # THE REAL PATHS, NOT `payload/`. `payload/hooks` is a symlink to `../hooks`, and grep -r
-# does not descend through a symlinked directory met during recursion — AC-7.4's own
-# spelling over `payload/` cannot see this file's definition at all and would report one
-# while two existed (T9 report §6).
-#
-# A DEFINITION IS A LITERAL NUMBER. A line that READS the constant — the wait's own
-# `[ "$SECONDS" -ge "$IMPACT_BOUND_S" ]` — is not counted; that distinction is the whole of
-# what "defined in two places" means.
-#
-# TWO BOUNDS, ONE OWNER EACH (re-spelled by wave-14 T16 against T15). This arm counted every
-# definition matching `[A-Z_]*IMPACT_BOUND_S=`, which was one until T15 landed
-# `LG_IMPACT_BOUND_S=6` — the LANDING GATE's bound, a different number that moves for a
-# different reason (lib/bounds.sh states both, and tests/stop.test.sh §6 owns that one). The
-# loose prefix read T15's ratified second constant as a second definition of THIS one. So the
-# count below is of the exact name, and the arm under it keeps the intent the prefix was there
-# for: no hook re-spells a derivation bound under its own header, whatever it calls it — every
-# `*IMPACT_BOUND_S=` definition in the fleet lives in lib/bounds.sh, and there are exactly two.
-DP_BOUND_DEFS="$(/usr/bin/grep -rnE '^[[:space:]]*IMPACT_BOUND_S=[0-9]' \
-  "${BIONIC_SCRIPTS_DIR}/hooks" "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
-expect_eq "§bound-one-owner exactly one numeric definition across hooks/ and payload/scripts/" \
-  "1" "$(printf '%s\n' "$DP_BOUND_DEFS" | /usr/bin/grep -c . )"
-expect_contains "§bound-one-owner …and it is the one in lib/bounds.sh" "lib/bounds.sh" "$DP_BOUND_DEFS"
+# does not descend through a symlinked directory met during recursion.
 DP_BOUND_ANY="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
   "${BIONIC_SCRIPTS_DIR}/hooks" "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
+expect_contains "§bound-one-owner the landing bound is defined in lib/bounds.sh" \
+  "lib/bounds.sh:" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep 'LG_IMPACT_BOUND_S=')"
 expect_eq "§bound-one-owner …and NO other file defines a bound under any prefix" "0" \
   "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -v '/lib/bounds\.sh:' | /usr/bin/grep -c . )"
-expect_eq "§bound-one-owner …lib/bounds.sh owning exactly the two the fleet has (T15's is the second)" \
-  "2" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -c '/lib/bounds\.sh:')"
-# THE WAIT MOVED WITH THE DERIVATION (wave-20 T6; REQ-4, Δ10). The dispatch wall's derivation
-# is `brief_validate_fields` in payload/scripts/lib/brief.sh now, the contract grammar `amend`
-# and `task-add` call too, so the READ of the bound and the source of lib/bounds.sh are that
-# file's. These rows follow them there; what they assert about the bound is unchanged.
-DP_GRAMMAR="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh"
-# NOT VACUOUS: the sweep reaches the grammar, whose READ it declines to count.
-expect_nonempty "§bound-one-owner the sweep reaches lib/brief.sh, whose READ is uncounted" \
-  "$(/usr/bin/grep -rn 'IMPACT_BOUND_S' "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null \
-     | /usr/bin/grep 'lib/brief.sh')"
-DP_GATE_SRC="$(cat "$DP_GRAMMAR")"
-expect_nonempty "§bound-one-owner the dispatch wall's grammar sources lib/bounds.sh" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$DP_GRAMMAR")"
-# RE-SPELLED ONTO THE CLOCK (wave-14 T34). This pair used to read the hook's tick budget,
-# `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))`, and assert it was DERIVED from the
-# constant rather than typed as a second literal. The budget is gone: a count of `sleep
-# 0.1` polls cost 115 ms a poll, so spending it waited ~1.15x the bound the refusal quoted
-# (T34 §2-3), and the wait now ends on `SECONDS` against the constant itself. The intent
-# survives intact and gets stronger — the strongest form of "not a second number" is no
-# second number at all — so the positive arm reads the stop condition and the negative one
-# stands guard over the mechanism that was removed.
-expect_regex "§bound-one-owner …and its wait ends on the constant itself, not on a derived second number" \
-  '\[[[:space:]]*"\$SECONDS"[[:space:]]*-ge[[:space:]]*"\$IMPACT_BOUND_S"[[:space:]]*\]' "$DP_GATE_SRC"
-expect_no_regex "§bound-one-owner …leaving no tick budget behind to drift against it" \
-  '^[[:space:]]*IMPACT_BOUND_TICKS=' "$DP_GATE_SRC"
+expect_eq "§bound-one-owner …lib/bounds.sh owning exactly one, the landing gate's" \
+  "1" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -c '/lib/bounds\.sh:')"
+# THE DISPATCH WALL'S GRAMMAR READS NO BOUND: it runs nothing it would have to wait on.
+DP_GATE_SRC="$(cat "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh")"
+expect_contains "§bound-one-owner the grammar file is read (non-vacuity)" \
+  "brief_validate_fields()" "$DP_GATE_SRC"
+expect_absent "§bound-one-owner …and it names no derivation bound" "IMPACT_BOUND_S" "$DP_GATE_SRC"
 
 # ============================================================================
 
@@ -1564,68 +1401,6 @@ for _role in bionic:researcher bionic:test-runner; do
     "0" "$GATE_ST"
 done
 
-# ---- AC-4.1 end-to-end (T4): a not-yet-existing tests/*.test.sh under Files: gets
-# its self edge on the roster row, driven through the REAL tests/lib/impact.sh (the
-# tool T4 changed) rather than the S27 stub — this row proves the two tasks meet.
-# BIONIC_IMPACT_CACHE_DIR is forced empty so the real tree's own impact-cache under
-# .bionic/tmp is never written to by this fixture run (impact.sh's own contract for
-# turning the cache off).
-s33_real_impact() {  # <repo> — point .bionic/config.yaml at the real impact.sh
-  mkdir -p "$1/.bionic"
-  printf 'impact-command: env BIONIC_IMPACT_CACHE_DIR= bash %s/tests/lib/impact.sh\n' \
-    "${BIONIC_SCRIPTS_DIR}" > "$1/.bionic/config.yaml"
-}
-
-S33_NEWSUITE_BRIEF='Your task: add a brand-new suite.
-Expected artifact: .bionic/docs/record/w33-newsuite.md
-Expected duration: ~20 minutes.
-Files: tests/brand-new.test.sh'
-
-REPO=$(make_repo r33e yes)
-write_attestation "$REPO" "$SID_A"
-s33_real_impact "$REPO"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_NEWSUITE_BRIEF" "w33-newsuite")"
-# THE VERDICT, NOT THE EXIT STATUS (wave-30 T35; A-orch-79). A refusal is exit 0 with a deny on
-# stdout, so `GATE_ST` reads 0 for a refused dispatch. This check read `GATE_ST` and passed a
-# cold derivation that overran the bound under the regression's load as "ADMITTED", leaving the
-# three row checks below red with empty cells, which looked like an admit with an empty set.
-expect_eq "33e a Files: tests/brand-new.test.sh (absent) brief is ADMITTED" "allow" "$GATE_VERDICT"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_contains "33e …and the roster row's suites_allowed carries the new suite's self edge" \
-  "brand-new.test.sh" "$(roster_field "$ROW" suites_allowed)"
-# THE ANSWER IS ASKED, NOT WRITTEN DOWN (wave-27 T72; A-orch-146). A fixed list went red on every
-# tree that gained a suite naming tests/: the real impact command is asked at run time, as the
-# wall asks it (the same command and cache setting, in the fixture's root), and joined as the row
-# joins it, so the row follows the tree and still goes red when the wall derives anything else.
-S33E_WANT=$(cd "$REPO" && env BIONIC_IMPACT_CACHE_DIR= bash "${BIONIC_SCRIPTS_DIR}/tests/lib/impact.sh" \
-  tests/brand-new.test.sh 2>/dev/null | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
-S33E_WANT="${S33E_WANT% }"
-expect_contains "33e …the real impact command's answer holds the new suite's self edge" "brand-new.test.sh" "$S33E_WANT"
-expect_eq "33e …and at least one other suite beside it" "ok" \
-  "$([ "$(printf '%s\n' $S33E_WANT | /usr/bin/grep -vcx 'brand-new.test.sh')" -ge 1 ] && echo ok || echo "only: $S33E_WANT")"
-expect_status "33e …the derived set is exactly the real tree's answer" \
-  "$S33E_WANT" "$(roster_field "$ROW" suites_allowed)"
-expect_status "33e …and the row says the set was DERIVED, not declared" \
-  "derived" "$(roster_field "$ROW" suites_source)"
-
-# ---- 33f: the same brief, its derivation forced over the bound, is REFUSED (wave-30 T35) ----
-# The pair to 33e's verdict check: what a blown bound looks like on this brief's shape, so the
-# two read apart. The stub sleeps past a bound forced to 1 s (the override the §slow-impact arm
-# above proves reaches the arm); §29a in tests/dispatch-preflight.test.sh drives the shipped bound.
-REPO=$(make_repo r33f yes)
-write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 5
-_S33F_GATE_ENV_SAVE="$GATE_ENV"
-GATE_ENV="$GATE_ENV IMPACT_BOUND_S=1"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_NEWSUITE_BRIEF" "w33f-overrun")"
-GATE_ENV="$_S33F_GATE_ENV_SAVE"
-expect_eq "33f the same brief, its derivation over the bound, is REFUSED" "deny" "$GATE_VERDICT"
-expect_contains "33f …its refusal names the timeout" \
-  "the impact command timed out after 1 s" "$GATE_ERR"
-expect_contains "33f …and names the forced bound on the detail" "bound:   1s" "$GATE_VERR"
-expect_status "33f …and journalled no row at all" \
-  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
 section "§runs-lift — a brief declares what it will RUN, in any runner (REQ-1, D1, D3, ADR-029)"
 # ============================================================================
 #
@@ -1735,15 +1510,10 @@ expect_status "16lc …and the declared run is the budget on the row" \
 
 # ---- AC-1.4: an unexpanded shell variable is refused at the lift, under BOTH spellings ----
 # EACH FIXTURE CARRIES A VALID `Files:` LINE so the bad declaration is the brief's ONLY
-# fault and the refusal is the single-fault shape, whose detail (and so the named token)
+# fault (the Files-alone arm stands aside for a refused token) and the refusal is the single-fault shape, whose detail (and so the named token)
 # is readable under the verbose knob (since wave-19 T4 one fault is a deny verdict too, its own detail on the reason).
 REPO=$(make_repo r16ld1 yes)
 write_attestation "$REPO" "$SID_A"
-# THE STUB DERIVATION, not the real tool: the impact command is not under test in this
-# section, and the real one over the real tree runs 11-17 s against the then-10 s bound under
-# wave-scale machine load (measured 2026-09-19), which would make these rows report the
-# derivation bound instead of the fault they exist for.
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
 Expected artifact: .bionic/docs/record/w16-var.md
 Expected duration: ~20 minutes.
@@ -1754,11 +1524,6 @@ expect_contains "16ld1 …naming the token it saw" "\$JEST x" "$GATE_VERR"
 
 REPO=$(make_repo r16ld2 yes)
 write_attestation "$REPO" "$SID_A"
-# THE STUB DERIVATION, not the real tool: the impact command is not under test in this
-# section, and the real one over the real tree runs 11-17 s against the then-10 s bound under
-# wave-scale machine load (measured 2026-09-19), which would make these rows report the
-# derivation bound instead of the fault they exist for.
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: run the suite.
 Expected artifact: .bionic/docs/record/w16-var2.md
 Expected duration: ~20 minutes.
@@ -1788,8 +1553,6 @@ expect_contains "16ld2 …naming the token it saw" "\$SUITE" "$GATE_VERR"
 # roster row is written for the refused dispatch.
 REPO=$(make_repo r16ld3 yes)
 write_attestation "$REPO" "$SID_A"
-# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
 Expected artifact: .bionic/docs/record/w16-redir.md
 Expected duration: ~20 minutes.
@@ -1836,8 +1599,6 @@ expect_status "16ld4 …the slot lifted nothing and the ordinary run kept its ma
 # to fill it.
 REPO=$(make_repo r16ld5 yes)
 write_attestation "$REPO" "$SID_A"
-# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: read the failed job's log.
 Expected artifact: .bionic/docs/record/w21-placeholder.md
 Expected duration: ~20 minutes.
@@ -1929,18 +1690,17 @@ expect_absent "16ld6d …and never for declaring nothing" \
 RL_QP_CMD="npx jest --testPathPattern='(a|b)\\.spec\\.ts'"
 RL_QP_ENC="npx jest --testPathPattern='(a%7Cb)\\.spec\\.ts'"
 
-# THE BRIEF CARRIES A VALID `Files:` LINE so the quoted pipe is its ONLY candidate fault.
+# THE BRIEF CARRIES A VALID `Files:` AND `Suites:` PAIR so the quoted pipe is its ONLY candidate fault.
 # Without one the no-instrument arm fires beside it and the refusal leaves on the
 # SEVERAL-fault wire, which is a `deny` verdict at exit 0 — a status this row would then
 # read as admission, and the whole assertion would be green against the broken lift.
 REPO=$(make_repo r18t4a yes)
 write_attestation "$REPO" "$SID_A"
-# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
 Expected artifact: .bionic/docs/record/w18-qpipe.md
 Expected duration: ~20 minutes.
 Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh
 Re-executes: ${RL_BT}${RL_QP_CMD}${RL_BT}" "w18-qpipe")"
 expect_status "18T4a a quoted pipe is not a pipe — the run is ADMITTED" "0" "$GATE_ST"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
@@ -1955,8 +1715,6 @@ expect_status "18T4a3 …and the run forged no segment of its own" "1" \
 # is still refused with the token named — the half that keeps 18T4a from being a hole.
 REPO=$(make_repo r18t4b yes)
 write_attestation "$REPO" "$SID_A"
-# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
 Expected artifact: .bionic/docs/record/w18-upipe.md
 Expected duration: ~20 minutes.
@@ -2048,13 +1806,12 @@ expect_empty "16le-201 …with no roster row written" \
   "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
 
 # THE TEXTS ARE ROLE-AWARE. A not-literal run is refused for every role; only the auditor's
-# fix says "at most three". `Files:` and the stub derivation are there so this fault is the
-# brief's ONLY one — with a second fault the refusal lists facts and no detail, and the
+# fix says "at most three". `Files:` is there so this fault is the
+# brief's ONLY one (the Files-alone arm stands aside for a refused run) — with a second fault the refusal lists facts and no detail, and the
 # absence row below would pass on a detail that was never printed. The positive row
 # (`GATE_VERR` carries the not-literal token) proves the detail is on the wire.
 REPO=$(make_repo r16le-txt-tr yes)
 write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-txt-tr.md
 Expected duration: ~20 minutes.
@@ -2065,7 +1822,6 @@ expect_contains "16le-txt …and its detail is on the wire (non-vacuity)" "pytes
 expect_absent "16le-txt …and its fix never tells a test-runner three" "at most three" "$GATE_VERR"
 REPO=$(make_repo r16le-txt-aud yes)
 write_attestation "$REPO" "$SID_A"
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-txt-aud.md
 Expected duration: ~20 minutes.
@@ -2077,17 +1833,13 @@ expect_contains "16le-txt …and its fix tells the auditor three" "at most three
 
 REPO=$(make_repo r16lf yes)
 write_attestation "$REPO" "$SID_A"
-# THE STUB DERIVATION, not the real tool: the impact command is not under test in this
-# section, and the real one over the real tree runs 11-17 s against the then-10 s bound under
-# wave-scale machine load (measured 2026-09-19), which would make these rows report the
-# derivation bound instead of the fault they exist for.
-s27_impact "$REPO" widget.test.sh
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-unmarked.md
 Expected duration: ~20 minutes.
 Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh
 Re-executes: npx jest --testPathPatterns 'x' and then pytest tests/unit" "w16-unmarked")"
-expect_status "16lf a span with no marks at all is ADMITTED on its Files: line" "0" "$GATE_ST"
+expect_status "16lf a span with no marks at all is ADMITTED on its Suites: line" "0" "$GATE_ST"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "16lf …and nothing unmarked was lifted as a run" \
   "" "$(roster_field "$ROW" re_executes)"
