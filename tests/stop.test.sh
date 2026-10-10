@@ -300,14 +300,14 @@ section "6: the derivation bound has ONE owner (REQ-7, AC-7.4)"
 # BUT A HANG GUARD IS ONLY AS LONG AS ITS HOST WILL WAIT, and the two legs have
 # different hosts. THE RULE IS THE SAME FOR BOTH (wave-14 D2, ratified): every
 # inner bound sits strictly under its own hook's registration, margin named —
-# the wall's 20 s under dispatch-preflight.sh's 25 s registration, the sweep's
-# 6 s under hooks/stop.sh's `"timeout": 10` on Stop and SubagentStop. A bound at
+# the sweep's 6 s under hooks/stop.sh's `"timeout": 10` on Stop and SubagentStop
+# (the dispatch wall's bound went with its derivation, wave-31 T2, REQ-4 AC-4.2). A bound at
 # or above its registration is never reached, because the CLI kills the hook at
 # the registration and a hook killed on the harness's timeout does NOT exit 2:
 # the refusal becomes a pass, which is the one thing the gate must never do.
 # tests/landing-gate.test.sh §16i measures exactly that, live, and caught it;
-# tests/cross-gate-agreement.test.sh §L.4c pins both pairs against hooks.json.
-# So lib/bounds.sh owns TWO named bounds and each consumer reads its own.
+# tests/cross-gate-agreement.test.sh §L.4c pins the pair against hooks.json.
+# So lib/bounds.sh owns the named bound and its consumer reads it.
 #
 # TWO COPIES IS STILL THE DEFECT THIS SECTION EXISTS FOR — two numbers under one
 # owner is not two copies. The sweep's bound at lib/stop.sh and the dispatch
@@ -330,10 +330,10 @@ expect_true "6b: …and parses under bash -n" bash -n "$BOUNDS_SH"
 
 # THE VALUES ARE READ BY SOURCING, not by grepping literals back out of the file:
 # what a consumer gets is what sourcing gives it.
-expect_eq "6c: sourcing it defines IMPACT_BOUND_S=20, the dispatch wall's guard, under its own 25s registration" "20" \
-  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
-expect_eq "6d: …and LG_IMPACT_BOUND_S=6, the landing gate's, inside a 10s hook" "6" \
+expect_eq "6d: sourcing it defines LG_IMPACT_BOUND_S=6, the landing gate's, inside a 10s hook" "6" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
+expect_eq "6c: …and no longer IMPACT_BOUND_S, the deleted derivation's (wave-31 T2)" "" \
+  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
 
 # THE LANDING GATE'S BOUND IS STRICTLY UNDER ITS HOOK'S REGISTRATION, and the
 # registration is read from hooks.json rather than typed here — a wave that
@@ -354,13 +354,9 @@ fi
 # NOT VACUOUS: the rows above read the file rather than agreeing with constants
 # typed into this suite, and a copy carrying different numbers proves it.
 B_MUTD="$(mktemp -d)"
-anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=20$' 1
 anchor -E "$BOUNDS_SH" '^LG_IMPACT_BOUND_S=6$' 1
-sed -e 's/^IMPACT_BOUND_S=20$/IMPACT_BOUND_S=3/' \
-    -e 's/^LG_IMPACT_BOUND_S=6$/LG_IMPACT_BOUND_S=4/' "$BOUNDS_SH" >"$B_MUTD/bounds.sh"
-expect_eq "6g: …and a copy carrying 3 answers 3, so 6c read the file" "3" \
-  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
-expect_eq "6h: …and that copy answers 4 for the gate's, so 6d read it too" "4" \
+sed -e 's/^LG_IMPACT_BOUND_S=6$/LG_IMPACT_BOUND_S=4/' "$BOUNDS_SH" >"$B_MUTD/bounds.sh"
+expect_eq "6h: …and a copy carrying 4 answers 4 for the gate's, so 6d read the file" "4" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
 
 # THE HEADER SAYS WHAT THE NUMBERS ARE FOR. Without those sentences the next
@@ -399,10 +395,10 @@ expect_contains "6k: …naming what a bound at or above it costs — the killed 
 # `payload/scripts/` and `hooks/`, or `find -L`.
 B_DEFS="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
   "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
-expect_eq "6l: the two numeric bound definitions in payload/scripts/ live in ONE file" \
+expect_eq "6l: the numeric bound definitions in payload/scripts/ live in ONE file" \
   "1" "$(printf '%s\n' "$B_DEFS" | cut -d: -f1 | sort -u | /usr/bin/grep -c .)"
-expect_eq "6m: …and there are exactly two of them, one per bound" \
-  "2" "$(printf '%s\n' "$B_DEFS" | /usr/bin/grep -c .)"
+expect_eq "6m: …and there is exactly one of them, the landing gate's" \
+  "1" "$(printf '%s\n' "$B_DEFS" | /usr/bin/grep -c .)"
 expect_contains "6n: …and the file is lib/bounds.sh" "lib/bounds.sh" "$B_DEFS"
 # NOT VACUOUS: the sweep reaches a file it could have missed, and the READ in
 # lib/stop.sh is inside its span and deliberately uncounted.

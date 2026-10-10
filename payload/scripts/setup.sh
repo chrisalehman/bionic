@@ -182,9 +182,8 @@ done
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/env.sh"
 # markers.sh, which env.sh already soft-sourced: the marker-block walk the rc item
-# and the working-principles item write through. Named here as well so the
-# file-to-suite map (tests/lib/impact.sh, one hop from a script) sees this script
-# read it; the library's own guard makes the second source a no-op.
+# and the working-principles item write through. Named here as well so a reader sees
+# this script read it; the library's own guard makes the second source a no-op.
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/markers.sh"
 # checks.sh, THE TABLE OF CHECKS. Every id this script offers, every predicate

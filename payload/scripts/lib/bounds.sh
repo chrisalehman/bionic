@@ -1,142 +1,71 @@
 #!/bin/bash
-# payload/scripts/lib/bounds.sh — THE DERIVATION BOUNDS, DEFINED ONCE.
+# payload/scripts/lib/bounds.sh — THE DERIVATION BOUND, DEFINED ONCE.
 # (epic-23 wave-14-tune-181, REQ-7; spec Design §1 "Derivation" and §3 ownership
 # row "derivation bound"; design ledger D4, and D1/D2 for the invariant below.)
 #
-# WHAT IT OWNS. How long a leg of the fleet waits for the impacted-suite
-# derivation (`tests/lib/impact.sh`, or whatever `impact-command:` names) before
-# it stops waiting. Two files ask that question and neither can be the owner,
-# because each runs without the other:
+# WHAT IT OWNS. How long the landing sweep waits for the impacted-suite derivation
+# (whatever `impact-command:` names) before it stops waiting:
 #
-#   payload/hooks/dispatch-preflight.sh   once per dispatch, over the brief's Files:
-#                                         -> IMPACT_BOUND_S
 #   payload/scripts/lib/stop.sh           once per sweep, spent across its rows
 #                                         -> LG_IMPACT_BOUND_S
 #
-# WHY IT IS ITS OWN FILE. Both carried their own `6`, in two files, under two
-# headers that each explained the number and neither of which mentioned the other
-# (R2 Q8 found the twin). Two copies of a constant do not disagree loudly; they
-# disagree the next time a wave moves one of them, and what ships is a tree whose
-# two legs mean different things by "bounded" while every message quotes its own
-# half. A shared library is the smallest thing that cannot drift.
+# The dispatch wall's own bound went with its derivation (wave-31 T2, REQ-4 AC-4.2):
+# a brief names its suites, so the wall waits on nothing.
 #
-# TWO NAMES IS NOT TWO COPIES (wave-14 T15). The legs wait in different hosts, so
-# one number cannot be right for both — but both numbers are chosen here, beside
-# each other, where moving one means reading why the other differs.
+# WHY IT IS ITS OWN FILE. The sweep and the dispatch wall each carried their own `6`,
+# in two files, under two headers that each explained the number and neither of
+# which mentioned the other (R2 Q8 found the twin). Two copies of a constant do not
+# disagree loudly; a shared library is the smallest thing that cannot drift.
 #
-# ── THE RULE THAT GOVERNS BOTH NUMBERS ───────────────────────────────────────
+# ── THE RULE THAT GOVERNS THE NUMBER ─────────────────────────────────────────
 #
-# EVERY INNER BOUND SITS STRICTLY UNDER ITS HOOK'S REGISTRATION, MARGIN NAMED.
+# AN INNER BOUND SITS STRICTLY UNDER ITS HOOK'S REGISTRATION, MARGIN NAMED.
 #
-#   IMPACT_BOUND_S    = 20   under hooks/dispatch-preflight.sh's  25   margin 5
 #   LG_IMPACT_BOUND_S =  6   under hooks/stop.sh's  "timeout": 10       margin 4
 #
-# The registrations are hooks/hooks.json's, one per hook, and the margin is what
-# the hook has left for everything it does that is not waiting.
+# The registration is hooks/hooks.json's, and the margin is what the hook has left
+# for everything it does that is not waiting.
 #
 # WHY STRICTLY UNDER, AND NOT AT. A bound at or above its registration can never
 # fire: the CLI kills the hook at the registration, and a killed hook exits 124 —
 # not the exit 2 a refusal spells — so the refusal that was in flight silently
-# becomes a PASS. That is the one thing either of these gates must never do, and
-# it is exactly what a bound above its registration guarantees.
+# becomes a PASS. That is the one thing the gate must never do, and it is exactly
+# what a bound above its registration guarantees.
 #
 # AND NO SUITE THAT DRIVES A GATE DIRECTLY CAN SEE IT. A suite has no CLI
-# timeout, so both numbers can be wrong together while every arm that drives the
-# refusal stays green — which is what happened: a 20 s bound sat under a 10 s
-# registration for the whole of wave-14, refusing hundreds of times in
-# tests/dispatch-preflight.test.sh and never once in production (A-T6.5,
-# confirmed by four reviewers). The pair is therefore pinned where the two files
-# meet, both sides read rather than transcribed:
-# tests/cross-gate-agreement.test.sh §L.4c. tests/stop.test.sh 6e/6f pins the
-# sweep's half against hooks.json too.
+# timeout, so the number can be wrong while every arm that drives the refusal
+# stays green — which is what happened: a 20 s bound sat under a 10 s
+# registration for the whole of wave-14 (A-T6.5, confirmed by four reviewers).
+# The pair is therefore pinned where the two files meet, both sides read rather
+# than transcribed: tests/cross-gate-agreement.test.sh §L.4c, and
+# tests/stop.test.sh 6e/6f against hooks.json too.
 #
-# ── THEY ARE HANG GUARDS, NOT COST BUDGETS ───────────────────────────────────
+# ── IT IS A HANG GUARD, NOT A COST BUDGET ────────────────────────────────────
 #
-# This is the whole reason these numbers are not tuned downward when a derivation
-# feels slow, and the paragraph a future reader needs before touching either.
+# What is left for a bound to do is the thing no cache can fix — a configured
+# impact command that never returns. The wait has to end on OUR terms, before the
+# CLI ends it on its own.
 #
-# The bound used to be doing two jobs. `tests/lib/impact.sh` rebuilt its entire
-# suite-to-file edge graph on EVERY invocation — 4.2 s at quiet load, and
-# argument-independent to 13 ms, because the graph is a pure function of the tree
-# and only the last two blocks ever looked at the query (R2 Q8). Against a 6 s
-# bound that left 1.8 s of headroom, so an ordinary dispatch under load 8-12 took
-# 5.6 s and was REFUSED for the cost of asking its own question (A-orch-46). The
-# operator's fault was nothing; the machine was busy.
+# THIS ONE IS NOT A CHOICE ABOUT SLOWNESS. It is a ceiling its host imposes. The
+# landing sweep runs inside hooks/stop.sh, which hooks/hooks.json registers at
+# `"timeout": 10` on both Stop and SubagentStop — and that registration bounds four
+# verdicts, of which the sweep is one. Six seconds is the sweep's whole derivation
+# budget spent strictly inside it, with four seconds left for the rest of the
+# turn-end work. tests/landing-gate.test.sh §16i drives it live.
 #
-# The cost is gone: impact.sh caches that graph per tree state, so the second and
-# every later call at one tree state answers in well under a second. What is left
-# for a bound to do is the thing no cache can fix — a configured impact command
-# that never returns. The wait has to end on OUR terms, before the CLI ends it on
-# its own; the only question is where, and the answer differs by host.
+# LG_IMPACT_BOUND_S moves only if hooks.json's registration for hooks/stop.sh
+# moves, and never above it.
 #
-# ── IMPACT_BOUND_S = 20 — THE DISPATCH WALL'S, UNDER A 25 s REGISTRATION ─────
-#
-# hooks/dispatch-preflight.sh is a PreToolUse hook, and what it is guarding
-# against is a dispatch that proceeds with no roster row and therefore no budget
-# at all (dispatch-preflight.sh's own note).
-#
-# IT DOES NOT HAVE ROOM TO WAIT AS LONG AS IT LIKES. It has exactly its
-# registration: a shipped 20 s once sat above a 10 s registration, the CLI killed
-# the hook first, the refusal became a pass, and the wall was defeated by the cost
-# of the wall (wave-14 D1, which moved the pair to 10 under 15).
-#
-# WHY IT MOVED AGAIN, TO 20 UNDER 25 (wave-30 T35, A-orch-78/79). The cache makes
-# every derivation after the first at one tree state cheap; the FIRST is the cold
-# build, and the tree grew into the bound. Measured on an idle machine: 8.5 s, and
-# 10.34 s for the orchestrator's own reading (warm: 0.16-0.20 s); the wall's whole
-# drive over a brief naming one absent suite took 9.23 s against 10. So at idle the
-# cold build sat within a second of the bound, and under a wave's load it went past.
-#
-# WHAT HAPPENS PAST IT IS ALREADY RIGHT, AND STAYS SO: the wall fails closed. The
-# overrun is a REFUSAL ("the impact command timed out after N s"), no roster row is
-# written, and a refused dispatch is never an admitted one with an empty set
-# (tests/dispatch-preflight.test.sh §29a at this number; dispatch-preflight-3 §33f
-# on the absent-suite brief, whose §33e reads the verdict, not the exit status).
-#
-# THE STRUCTURAL FIX IS THE WARM, NOT THIS NUMBER. A landing changes the tree state
-# and so invalidates the graph; lib/line.sh's publish now runs the impact command
-# once in the checkout it moved, in the background, so the first dispatch after a
-# landing finds the graph built. What 20 buys is HEADROOM for the cold builds the
-# warm cannot reach (a tree state no landing made: a by-hand edit, a merge from
-# outside the line) — about twice the measured cold time, still a hang guard.
-#
-# THE WALL HAS A DEADLINE OF ITS OWN, AND THIS SITS UNDER IT. DP_DEADLINE_S in
-# hooks/dispatch-preflight.sh bounds the whole hook, 3 s under the registration
-# (22 under 25); its ALRM trap runs between commands, and this bound's poll is a
-# run of them, so a deadline at or under this number would refuse first and the
-# headroom would buy nothing. The order is bound < deadline < registration, all
-# three read and pinned at tests/cross-gate-agreement.test.sh §L.4c.
-#
-# ── LG_IMPACT_BOUND_S = 6 — THE LANDING GATE'S, AND WHY IT IS SHORTER ────────
-#
-# THIS ONE IS NOT A CHOICE ABOUT SLOWNESS. It is a ceiling its host imposes.
-#
-# The landing sweep runs inside hooks/stop.sh, which hooks/hooks.json registers
-# at `"timeout": 10` on both Stop and SubagentStop — and unlike the wall's, that
-# registration is not this wave's to raise: it bounds four verdicts, of which the
-# sweep is one. Six seconds is the sweep's whole derivation budget spent strictly
-# inside it, with four seconds left for the rest of the turn-end work.
-# tests/landing-gate.test.sh §16i drives it live.
-#
-# SO THE TWO NUMBERS MOVE FOR DIFFERENT REASONS, UNDER ONE RULE. IMPACT_BOUND_S
-# moves when the judgment about a wedged session's patience changes — and then
-# its registration moves with it, or it does not move. LG_IMPACT_BOUND_S moves
-# only if hooks.json's registration for hooks/stop.sh moves, and never above it.
-#
-# WHAT WOULD BE WRONG. Lowering either because a derivation felt slow is treating
-# it as a budget again: the answer to a slow derivation is the cache, or the
-# impact command, never these numbers. Raising either past the point where a
-# stuck hook reads as a hung session is the opposite error. Raising one to meet
-# its registration — the shape wave-14 T9 shipped and §16i caught — buys nothing
-# and costs the refusal.
+# WHAT WOULD BE WRONG. Lowering it because a derivation felt slow is treating it as
+# a budget again. Raising it past the point where a stuck hook reads as a hung
+# session is the opposite error. Raising it to meet its registration — the shape
+# wave-14 T9 shipped and §16i caught — buys nothing and costs the refusal.
 #
 # NO SHELL OPTIONS ARE SET HERE. This file is sourced into a caller's shell and
-# defines two constants; `set -u`, `set -o pipefail` and traps belong to whoever
+# defines one constant; `set -u`, `set -o pipefail` and traps belong to whoever
 # sourced it.
 #
 # [WALL: tests/stop.test.sh]
-# [WALL: tests/dispatch-preflight.test.sh]
 # [WALL: tests/cross-gate-agreement.test.sh §L.4c]
 
-IMPACT_BOUND_S=20
 LG_IMPACT_BOUND_S=6
