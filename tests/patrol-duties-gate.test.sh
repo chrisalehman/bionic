@@ -1517,7 +1517,9 @@ fire "$d"; expect_allow "69g: Δ6 a ledger whose only pending row is a gate act 
 # step2-research-R2-fill-invariant.md Q4): an `awk` in front of PATH that logs its program
 # and execs the real one by ABSOLUTE path (a bare `exec awk` re-enters the shim). A parse is
 # counted by its program's own text, and 70g pins that each text is spelled once in its
-# library, so the count cannot go quietly to zero when a program is rewritten.
+# library, so the count cannot go quietly to zero when a program is rewritten. The wall's reads
+# are one; launch-sync, its child, reads `current:` once more before its roster (wave-31 T43;
+# A-orch-76), so a Stop counts two.
 PDG_SHIM="$(mktemp -d)"
 printf '%s\n' '#!/bin/bash' \
   'a="$*"; a="${a//$'"'"'\n'"'"'/ }"; printf "%s\n" "${a:0:400}" >> "$PDG_AWKLOG"' \
@@ -1537,8 +1539,8 @@ ledger_roster "$d" acked T1
 u_prompt "$d" "merge the landed tree and tell me where we are"
 fire_counted "$d"
 expect_block "70a: the counted Stop still computes the ready set (wave scale), naming T2" "T2"
-expect_eq "70b: …after ONE read of current: (the gate, the step token and the set share it)" \
-  "1" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70b: …after TWO reads of current: (the wall's one, shared by gate, step token and set; launch-sync's one)" \
+  "2" "$(pdg_count "$PDG_CUR_SIG")"
 expect_eq "70c: …and ONE parse of the table" "1" "$(pdg_count "$PDG_TBL_SIG")"
 
 # Task scale, the one table (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
@@ -1553,7 +1555,7 @@ expect_eq "70d0: the fixture is a task-scale plan at current: 4" "2" \
 u_prompt "$d" "carry on"
 fire_counted "$d"
 expect_block "70d: the counted Stop still computes the ready set (task scale), naming T2" "T2"
-expect_eq "70e: …after ONE read of current:" "1" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70e: …after TWO reads of current: (the wall's and launch-sync's)" "2" "$(pdg_count "$PDG_CUR_SIG")"
 expect_eq "70f: …and ONE parse of the table" \
   "1" "$(pdg_count "$PDG_TBL_SIG")"
 
