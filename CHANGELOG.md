@@ -115,7 +115,7 @@ What you will notice:
   Records: `T13-leftovers.md`, `T34-doctor-perl.md`.
 - **Wall time.** Before this release the pin suite's row was 196 s of the run
   (`eeca80e1:tests/timing.tsv:24`; the row left the tree with the suite), and the one full regression took
-  46 minutes at width 8 (1.14.0's entry). after: <written at Step 7>
+  46 minutes at width 8 (1.14.0's entry). after: 42m43s wall clock for 92 suites at 95fcc048
 
 Five limits listed under 1.14.0 are retired and do not carry: the impact map's unsoundness, the
 task-scale plans, the opt-in planted-edit section, the detached run's missing ceiling and the landing's
