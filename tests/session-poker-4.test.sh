@@ -3398,4 +3398,78 @@ s42_unchanged "BN-9e with no fix-cap: double renders 10% of 3 rows as 1, so a se
 expect_contains "BN-9f …naming 1 of cap 1" "review-born rows: 1 of cap 1" "$OUT"
 POKE_BOUND="$BN_BOUND_WAS"
 
+# ============================================================
+section "§REGRESSION-SET: regression <yes|no> '<reply>' writes the plan's regression: key and, against the scale default, one attributed regression-override: line (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4)"
+# ============================================================
+#
+# fails-when: the verb writes no key, an override against the scale default is unattributed, a
+# value at the default leaves an override behind, a second call doubles the override line, or a
+# bad value, a missing reply or an unbound session changes the plan.
+#
+# THE SCALE DEFAULTS are task no, wave yes, epic no (REQ-12). The fixture is s42_plan's: a wave
+# plan, so `no` is against the default and `yes` is the default. The override's grammar is
+# budget-override:'s, `regression-override: <git user.name> <date> derived=<default> chosen=<v>`
+# (§BUDGET-USER, session-poker-3 65n3), and like it the one line is rewritten, never doubled.
+RRS="$(make_repo rs-set)"; ( cd "$RRS" && git commit -q --allow-empty -m init )
+git -C "$RRS" config user.name "Dana Fixture"
+PRS="$(s42_plan "$RRS" 4)"
+rs_fm() {  # <plan> <key> -> the frontmatter lines of that key, in order
+  awk -v k="$2" 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && index($0, k ":") == 1' "$1"
+}
+expect_eq "RS-0 precondition: the fixture is a wave plan with no regression: key and no override" "1|0|0" \
+  "$(/usr/bin/grep -c '^scale: wave$' "$PRS")|$(rs_fm "$PRS" regression | wc -l | tr -d ' ')|$(rs_fm "$PRS" regression-override | wc -l | tr -d ' ')"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression no 'CI runs it on merge, not this run'
+expect_eq "RS-1 regression no on a wave plan exits 0" "0" "$RC"
+expect_eq "RS-1b …writing regression: no into the frontmatter" "regression: no" "$(rs_fm "$PRS" regression)"
+expect_regex "RS-1c …and, against the wave default yes, one attributed override line" \
+  '^regression-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=yes chosen=no$' "$(rs_fm "$PRS" regression-override)"
+expect_contains "RS-1d …saying what it wrote" "regression — regression: no" "$OUT"
+s34_gate "$RRS"
+expect_eq "RS-1e …and the commit gate admits the plan" "0" "$GATE_RC"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression yes 'run it here after all'
+expect_eq "RS-2 regression yes on the same plan exits 0" "0" "$RC"
+expect_eq "RS-2b …the key reads yes, rewritten in place: one regression: line" "regression: yes" "$(rs_fm "$PRS" regression)"
+expect_eq "RS-2c …and the override is gone: yes is the wave default (the key read above is the positive)" "0" \
+  "$(rs_fm "$PRS" regression-override | wc -l | tr -d ' ')"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression yes 'again'
+expect_eq "RS-2d asked again, the plan already reads so: exit 0" "0" "$RC"
+expect_contains "RS-2e …saying so" "already reads so" "$OUT"
+expect_true "RS-2f …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PRS"
+
+# THE ONE LINE IS REWRITTEN, NEVER DOUBLED: a stale override (another person, another date) beside
+# the key RS-2 left reading the other value; the verb replaces both with the one pair.
+awk '{ print } /^regression: yes$/ { print "regression-override: Old Name 2020-01-01 derived=yes chosen=no" }' \
+  "$PRS" > "$PRS.tmp" && mv "$PRS.tmp" "$PRS"
+expect_eq "RS-3 precondition: the plan carries one key and one stale override" "1|1" \
+  "$(rs_fm "$PRS" regression | wc -l | tr -d ' ')|$(rs_fm "$PRS" regression-override | wc -l | tr -d ' ')"
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression no 'CI again'
+expect_eq "RS-3b regression no over a stale override exits 0" "0" "$RC"
+expect_eq "RS-3c …one regression: line, reading no" "regression: no" "$(rs_fm "$PRS" regression)"
+expect_regex "RS-3d …and one override line, the new one: rewritten, not added" \
+  '^regression-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=yes chosen=no$' "$(rs_fm "$PRS" regression-override)"
+expect_eq "RS-3e …so the change is the pair rewritten: two lines out, two in, none added" "2 2;" "$(s42_numstat "$RRS")"
+
+# REFUSALS, budget's: a value outside yes|no (1), no reply (2), no bound plan (1); the plan unchanged.
+s42_snap "$RRS" "$PRS"
+poke "$RRS" regression maybe 'not sure'
+s42_unchanged "RS-4 a value outside yes|no" 1 "$PRS"
+expect_contains "RS-4b …naming the two values" "is not yes or no" "$OUT"
+poke "$RRS" regression NO 'shouting'
+s42_unchanged "RS-4c a value in another case" 1 "$PRS"
+poke "$RRS" regression no
+s42_unchanged "RS-4d no reply" 2 "$PRS"
+poke "$RRS" regression no '   '
+s42_unchanged "RS-4e a reply of spaces" 2 "$PRS"
+poke "$RRS" regression no 'two
+lines'
+s42_unchanged "RS-4f a reply with a line break" 1 "$PRS"
+RRS2="$(make_repo rs-unbound)"; ( cd "$RRS2" && git commit -q --allow-empty -m init )
+poke "$RRS2" regression no 'CI runs it'
+expect_eq "RS-4g a session with no bound plan is refused (exit 1)" "1" "$RC"
+expect_contains "RS-4h …saying it has no bound open run" "has no bound open run" "$OUT"
+
 finish
