@@ -6006,12 +6006,12 @@ expect_eq "34a the fixture plan is admitted by the real commit gate before any a
 poke "$R34A" task-add T6 4 build 'the fixup found mid-run' bionic:implementor '—' 30 REQ-5 'lib/c.sh'
 expect_eq "34b task-add of a Step-4 row exits 0" "0" "$RC"
 expect_contains "34b2 …and says what it did" "task-add — T6 added" "$OUT"
-# THE GRAMMAR SPOKE AND ADMITTED (wave-20 T9, Δ10): the Files operand is a path the dispatch
-# wall's lift reads. This fixture repo configures no impact command, which a dispatch carrying
-# only this Files: line would be refused for — a fact about the repository, answered at
-# dispatch by a Suites: line the plan row has no column for, so here it is a note.
+# THE GRAMMAR SPOKE AND ADMITTED (wave-20 T9, Δ10; wave-31 T23): the Files operand is a path the
+# dispatch wall's lift reads. A Files: line alone names no suite, which a dispatch carrying only
+# it would be refused for — answered at dispatch by a Suites: or Re-executes: line the plan row
+# has no column for, so here it is a note and the row goes in.
 expect_contains "34b2g …and the repository-level grammar fact is a note, not a refusal" \
-  "poker: note: no impact command is configured here" "$OUT"
+  "poker: note: Files: alone names no suite — a dispatch of T6 will need a Suites: or Re-executes: line" "$OUT"
 expect_contains "34b3 …the row is in the plan, pending" \
   "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P34A")"
 expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"
