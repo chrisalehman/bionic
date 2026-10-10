@@ -783,7 +783,7 @@ sv_gate_read() {  # <ccd> [<env assignment>...] -> what gate_share prints under 
 }
 
 sv_poke share
-expect_eq "SV-1 with no share file the verb prints 80 (exit 0)" "0|80" "$RC|$OUT"
+expect_eq "SV-1 with no share file the verb prints 92, the gate's default (exit 0)" "0|92" "$RC|$OUT"
 expect_eq "SV-1b …and writes nothing: reading made no file" "no" "$([ -e "$SV_FILE" ] && echo yes || echo no)"
 sv_poke share 70
 expect_eq "SV-2 share 70 exits 0" "0" "$RC"
@@ -2498,7 +2498,7 @@ expect_eq "SF-10f …and the first Step-4 commit is admitted with the line in th
 rm -f "$SH_CFG/bionic/share"
 SH_D="$(sf_wave sf-share-d '  note: the block owes its fields')"; RSD="${SH_D%%$'\n'*}"; PSD="${SH_D#*$'\n'}"
 poke "$RSD" current 4
-expect_eq "SF-11 with no share file, current 4 writes the gate's 80" "0|1" "$RC|$(sf_block "$PSD" 4 | /usr/bin/grep -cxF -- '  share: 80')"
+expect_eq "SF-11 with no share file, current 4 writes the gate's 92" "0|1" "$RC|$(sf_block "$PSD" 4 | /usr/bin/grep -cxF -- '  share: 92')"
 printf '55\n' > "$SH_CFG/bionic/share"
 SH_P="$(sf_wave sf-share-p '  share: 33
   note: the block carries a share already')"; RSP="${SH_P%%$'\n'*}"; PSP="${SH_P#*$'\n'}"
@@ -2606,8 +2606,8 @@ printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$FD_W" > "$FD
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-other.log
 s42_unchanged "FD-r1 a declared floor's log that read another head" 1 "$PFD"
-expect_contains "FD-r1b …with today's head sentence" \
-  "read head ${FD_OTHER:0:12}, but the working branch is at ${FD_W:0:12}; run it again on ${FD_W:0:12}" "$OUT"
+expect_contains "FD-r1b …naming the head it read and the working head (wave-31 T25: F is no commit here)" \
+  "read head ${FD_OTHER:0:12}, which is no commit here; run the whole suite on the working branch (at ${FD_W:0:12})" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-dirty.log
 s42_unchanged "FD-r2 …that read a dirty tree" 1 "$PFD"
 expect_contains "FD-r2b …with today's dirty sentence" "read a dirty tree (dirty=2); commit, run it again and cite that log" "$OUT"
@@ -2657,7 +2657,7 @@ s42_unchanged "FD-t1 AC-17.2 an attestation lacking the head line" 1 "$PFD"
 expect_contains "FD-t1b …naming the line" "carries no head=<40-hex> dirty=0 line naming the working head" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-other.md
 s42_unchanged "FD-t2 …one naming another head" 1 "$PFD"
-expect_contains "FD-t2b …with today's head sentence" "read head ${FD_OTHER:0:12}, but the working branch is at ${FD_W:0:12}" "$OUT"
+expect_contains "FD-t2b …naming the head it read and the working head (wave-31 T25: F is no commit here)" "read head ${FD_OTHER:0:12}, which is no commit here; run the whole suite on the working branch (at ${FD_W:0:12})" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-noby.md
 s42_unchanged "FD-t3 …one lacking floor-attested-by:" 1 "$PFD"
 expect_contains "FD-t3b …naming the line" "carries no floor-attested-by: <who> <when> <what ran> line" "$OUT"
