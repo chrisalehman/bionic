@@ -345,6 +345,14 @@ expect_eq "5.5 …and every name is inside [A-Za-z0-9._-]" "0" \
        case "${RR_F##*/}" in (*[!A-Za-z0-9._-]*) RR_BAD=$((RR_BAD + 1)) ;; esac
      done
      echo "$RR_BAD")"
+# AC-6.1: the reader exam is a long sitting, not a gating suite. It lives under
+# tests/exam/ and is run by name, so the roster glob must not reach it. The
+# present-row is the paired positive: the file exists, so its absence from the
+# glob is the move and not a missing file.
+expect_eq "5.6 …the reader exam is outside the roster glob" "0" \
+  "$(ls "$REPO"/tests/*.test.sh | grep -c 'reader-exam')"
+expect_eq "5.7 …and the exam is shipped, to be run by name" "yes" \
+  "$([ -f "$REPO/tests/exam/reader-exam.sh" ] && echo yes || echo no)"
 
 # ============================================================
 section "§6 a glob match that is not a plain, plainly-named file is REFUSED"
