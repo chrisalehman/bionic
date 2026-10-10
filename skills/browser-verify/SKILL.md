@@ -14,7 +14,7 @@ Runtime verification of browser behavior using **`playwright-cli`** — bionic's
 
 ## Verification tiers
 
-The **T0–T4 ladder**, the per-tier evidence keys, and the T2 fixture-fidelity rule are defined in `canonical-sdlc` (§Step 5 — Verify). They govern every acceptance criterion, browser or not; this skill does not restate them.
+The **T0–T4 ladder** and the one pointer every tier owes (`evidence:`, with `user-confirmed` added at T4) are defined in `canonical-sdlc` (§Step 5 — Verify). They govern every acceptance criterion, browser or not; this skill does not restate them.
 
 What this skill owns is the browser execution of the two tiers that need one — **T2** (real engine over a declared-fidelity fixture) and **T3** (the declared real surface). The T3 conditions below are what `canonical-sdlc` delegates here.
 
@@ -151,7 +151,7 @@ playwright-cli -s="$S" open http://localhost:3000
    #   …the AC's own interaction on the target surface (right rung for the surface)…
    playwright-cli -s="$S" --raw eval "() => appReadableState()"   # after — MUST differ
    ```
-   Record the observed delta — the row's `contact:` field in the `## Verification Matrix` (canonical-sdlc §Step 5). **On failure:** switch input rung and retry once; if the AC's interaction cannot be driven, the row is **blocked** — STOP, report "no contact" loudly, never continue into a walk that will green-wash.
+   Record the observed delta in the file the row's `evidence:` points at (canonical-sdlc §Step 5). **On failure:** switch input rung and retry once; if the AC's interaction cannot be driven, the row is **blocked** — STOP, report "no contact" loudly, never continue into a walk that will green-wash.
 
 1. **Reconnaissance before action.** After navigating, settle the page (`waitForLoadState('networkidle')`, or `waitForSelector(...)` when a specific element gates readiness), then snapshot to get element refs — never guess selectors; a half-rendered DOM produces phantom failures. `run-code` takes a `(page) => {...}` function; `eval` takes `() => expr`.
    ```bash
@@ -208,18 +208,7 @@ Everything read from the browser — DOM, console messages, network responses, `
 
 Write interim artifacts (screenshots, logs) to `.bionic/tmp/` (gitignored) and point at them from the row field they support.
 
-**At `scale: wave` or `epic`.** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the regression (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
-
-```
-AC-1:
-  tier-run: <declared real surface URL + the AC's own interaction>
-  fresh: <origin A: proof; origin B: proof — every origin in the AC's serving path>
-  cold-client: <fresh profile / incognito context — how it was made cold>
-  contact: <the AC's own interaction changed app state — observed delta>
-  readback: <the AC's semantic value via page-scope eval>
-```
-
-A T2 row carries `tier-run`, `readback`, and the `fixture-fidelity` provenance line instead. The per-tier required key set is canonical-sdlc §Step 5's **"Per-tier required keys"** table — that is the source; this skill supplies the field semantics.
+**At `scale: wave` or `epic`.** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries one pointer, `evidence:`, to a file under `record/` that shows the run: the declared real surface and the AC's own interaction, every origin proven fresh, how the client was made cold, the observed delta, and the semantic value read back (conditions (a)–(d) above). The `auditor` column records the row's verdict; the regression (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
 
 **`scale: task` plans carry no matrix and no Step-5 block** — the governing-skill hook skips the matrix requirement at task scale, and evidence is the one-line `- T<n>:` ledger entry. Cite the browser evidence inline there.
 

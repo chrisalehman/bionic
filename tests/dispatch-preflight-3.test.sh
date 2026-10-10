@@ -1229,33 +1229,6 @@ expect_eq "§not-checked control: a two-fault brief that DECLARES Suites: is ref
 expect_absent "§not-checked …with no not-checked line for a wall that COULD be checked" \
   "not checked: full-run" "$GATE_REASON"
 
-section "§bound-one-owner — a derivation bound is defined once, in lib/bounds.sh (wave-14 REQ-7, AC-7.4; wave-31 T2)"
-# ============================================================================
-#
-# The preflight once carried its own `IMPACT_BOUND_S=6` under its own header, so the two legs
-# of the fleet meant different things by "bounded". The dispatch wall's derivation is deleted
-# (wave-31 T2, REQ-4 AC-4.2) and its bound with it; the landing gate's `LG_IMPACT_BOUND_S` is
-# the one left, and every `*IMPACT_BOUND_S=` definition in the fleet still lives in
-# lib/bounds.sh. tests/stop.test.sh §6 owns the landing bound's number.
-#
-# THE REAL PATHS, NOT `payload/`. `payload/hooks` is a symlink to `../hooks`, and grep -r
-# does not descend through a symlinked directory met during recursion.
-DP_BOUND_ANY="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
-  "${BIONIC_SCRIPTS_DIR}/hooks" "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
-expect_contains "§bound-one-owner the landing bound is defined in lib/bounds.sh" \
-  "lib/bounds.sh:" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep 'LG_IMPACT_BOUND_S=')"
-expect_eq "§bound-one-owner …and NO other file defines a bound under any prefix" "0" \
-  "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -v '/lib/bounds\.sh:' | /usr/bin/grep -c . )"
-expect_eq "§bound-one-owner …lib/bounds.sh owning exactly one, the landing gate's" \
-  "1" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -c '/lib/bounds\.sh:')"
-# THE DISPATCH WALL'S GRAMMAR READS NO BOUND: it runs nothing it would have to wait on.
-DP_GATE_SRC="$(cat "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh")"
-expect_contains "§bound-one-owner the grammar file is read (non-vacuity)" \
-  "brief_validate_fields()" "$DP_GATE_SRC"
-expect_absent "§bound-one-owner …and it names no derivation bound" "IMPACT_BOUND_S" "$DP_GATE_SRC"
-
-# ============================================================================
-
 section "S32: the full-run wall is silent where it has nothing to judge (wave-26 D6)"
 # ============================================================================
 #

@@ -117,7 +117,7 @@ fixture_git() {
 # fixture_plan_text <archive-root> <current> -> a plan the evidence gate reads clean at
 # current: 9: frontmatter (walk exempt, single rigor, no named deploy target), a
 # `## SDLC State` naming both branches, and a complete `## Verification Matrix` whose
-# one T1 row owes tier-run/readback/evidence and has them.
+# one T1 row owes evidence and has it.
 #
 # THE STATE A RUN IS IN BEFORE ITS TOOLS CLOSE IT, AND NOTHING THE TOOLS WRITE (wave-27 T4,
 # D14, AC-7.3). No builder here plants `current: 8` or a Step 9 line: the first is the
