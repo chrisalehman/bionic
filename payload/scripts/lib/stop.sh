@@ -132,34 +132,6 @@ stop_unbound_advise() {  # <plan> -> 0 staged · 1 already said in this process
   fold_advise "$(run_unbound_advisory "${1:-}")"
 }
 
-# ─── FILE SCOPE: the derivation bound, which this file does not own ──────────
-#
-# `LG_IMPACT_BOUND_S` is defined once, in lib/bounds.sh, beside the dispatch
-# wall's own `IMPACT_BOUND_S` (epic-23 wave-14-tune-181, REQ-7, D4). It used to
-# be a second copy of the dispatch wall's number, six seconds written twice; the
-# sweep's use of it is at stop_landing_gate's derivation loop below.
-#
-# THIS FILE READS THE GATE'S BOUND, NOT THE WALL'S, and the distinction is the
-# whole of wave-14 T15. Every inner bound sits strictly under its own hook's
-# registration, margin named (D2's invariant): the sweep runs inside hooks/stop.sh,
-# registered at `"timeout": 10`, so its bound is 6 with 4 to spare; the wall runs
-# in a PreToolUse hook registered at 15, so its bound is 10 with 5 to spare.
-# Reading `IMPACT_BOUND_S` here would put the WALL's margin inside the SWEEP's
-# registration, where the harness kills the hook at 10 with exit 124 and the
-# refusal in flight becomes a pass (tests/landing-gate.test.sh §16i).
-# lib/bounds.sh's header carries the reasoning; what this file owes is the right
-# NAME.
-#
-# SOURCED THE WAY fold.sh AND root.sh ARE, and guarded the same way — on the
-# thing this file uses, so a caller that already has it pays nothing. There is no
-# numeric fallback on purpose: a default here would be the third copy of the
-# constant this file exists to stop having, and a missing library is the loader's
-# failure to report, not this file's to paper over.
-if [ -z "${LG_IMPACT_BOUND_S:-}" ]; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/bounds.sh"
-fi
-
 # ─── FILE SCOPE: the `## Tasks` table, which this file must not parse ────────
 #
 # THE ROW IS THE TREE'S RECORD (epic-23 wave-17, REQ-2, D3, ADR-032). The landing gate needs
@@ -167,7 +139,7 @@ fi
 # is the ONE reader of that table; a second parser here would be the exact duplication that
 # library exists to stop, and it would be the copy nobody updates when a column moves.
 #
-# SOURCED THE WAY fold.sh, root.sh AND bounds.sh ARE, and guarded on the verb this file
+# SOURCED THE WAY fold.sh AND root.sh ARE, and guarded on the verb this file
 # actually calls. hooks/stop.sh does not source it — no other verdict in this process reads
 # the table — so in the shipped process this guard is what loads it, and a caller that has it
 # already (the evidence gate's own process, a suite driving this library directly) pays
@@ -188,7 +160,7 @@ fi
 # computation of the ready set — the same function the tick prints from — so the arm asks the
 # question itself and the two can never name different rows.
 #
-# SOURCED THE WAY fold.sh, root.sh, bounds.sh AND units.sh ARE, and guarded on the verb this
+# SOURCED THE WAY fold.sh, root.sh AND units.sh ARE, and guarded on the verb this
 # file calls. hooks/stop.sh DOES name this one in its `BIONIC_LIB_WANT` — unlike units.sh,
 # which no verdict in that process reads directly — so in the shipped process the loader has
 # already checked it is readable and this guard is what a suite driving the library alone
@@ -735,9 +707,7 @@ return "$_adv"
 #     checkout's current branch                            -> not reconciled, silent (ambiguity)
 #   - the diff has no path outside the declared `files=`   -> pass, silent
 #   - the diff touches a path outside the declared
-#     `files=`                                              -> REFUSE, naming the file(s) and
-#                                                          (impact-command configured) the
-#                                                          suites `impact` derives for them
+#     `files=`                                              -> REFUSE, naming the file(s)
 #
 # Exit code 2 = block the stop in Claude Code hooks; stderr goes back to the orchestrator,
 # which is why the refusal must name the row and its artifacts rather than the rule.
@@ -756,17 +726,10 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local EVENT MODE STOP_AGENT_ID STOP_AGENT_NAME LIVE_IDS ROSTER_FILE SWEEPER
   local CANDIDATES LINE REFUSALS REFUSE_KIND NOW AID NAME KIND CFILES
   local VERDICT VERDICT_RC STATE
-  # LG_IMPACT_BOUND_S IS NOT LOCALISED: it is the library's file-scope constant,
-  # and a `local` of that name here would shadow it with the empty string.
-  # NEITHER IS `SECONDS`, for a stronger reason: it is the shell's own elapsed-time
-  # builtin, and `local SECONDS` turns it into an ordinary variable that never counts.
-  # The derivation window below zeroes it; nothing else in this file or in hooks/stop.sh
-  # reads it.
-  local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
+  local LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
   local LG_ROW_RC LG_ROW_ID LG_ROW_BASE LG_FALLBACK_WHY LG_BASE_SRC LG_RUN_PLAN
   local _LG_ROW_ID _LG_ROW_BASE
-  local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP LG_FIX LG_FIX_FILES
-  local LG_IMPACT_PID LG_OVERRAN
+  local LG_OUTSIDE LG_DF LG_FIX LG_FIX_FILES
 
 # ---------- relevance first: the cheapest checks, before any git resolution ----------
 
@@ -1058,59 +1021,6 @@ REFUSALS=""
 # would be user-facing text the ruled table does not carry.
 REFUSE_KIND=""
 
-# ONE DERIVATION BUDGET FOR THE WHOLE SWEEP (review-c C-17). The impact command below is
-# the same call hooks/dispatch-preflight.sh makes, but it sits inside this per-candidate
-# loop, and this hook is registered at "timeout": 10 on both Stop and SubagentStop. N
-# offending rows would pay N x that. So the budget is spent across the loop rather than
-# granted per row: whatever is left when a row asks, and nothing once it is gone. A row that
-# gets no derivation still REFUSES — it names its files and says the suites were not
-# derived. The one thing this must never become is a silent pass.
-#
-# BUILT, NOT BORROWED, for the same reason as the dispatch site: bionic's command discipline
-# forbids a `timeout`/`gtimeout` binary and macOS ships neither.
-#
-# THE NUMBER IS NOT THIS FILE'S (wave-14-tune-181, REQ-7, D4). It was `6` here and `6` again
-# at dispatch-preflight.sh:2225, two copies with two headers and no line linking them. It
-# comes from lib/bounds.sh now — sourced at file scope above, never re-declared here — and
-# it is a HANG GUARD rather than a cost budget: tests/lib/impact.sh caches its edge graph per
-# tree state, so a derivation that is merely slow is no longer a thing this number has to pay
-# for.
-#
-# AND IT IS THE GATE'S BOUND, NOT THE WALL'S (T15). Each is strictly under its own hook's
-# registration, margin named (D2's invariant, lib/bounds.sh's header): `LG_IMPACT_BOUND_S`
-# is six because this loop runs inside a hook registered at `"timeout": 10`, and
-# `IMPACT_BOUND_S` is ten because the dispatch wall's hook is registered at 15. Wiring this
-# loop to the wall's number is what wave-14 T9 did, and the sweep then outlived its own
-# registration: the harness killed the hook at 10 s with exit 124, which is not the exit 2
-# the refusal below spells, so a row that should have been REFUSED passed.
-#
-# THE BUDGET IS A CLOCK, NOT A COUNT OF POLLS (wave-14 T35, carrying T34's fix across).
-# It used to be `LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))`, one tick per
-# `sleep 0.1`, decremented by what each row spent. `sleep` is an external binary, so a tick
-# costs a fork and an exec on top of the 100 ms it sleeps — 115.3 ms measured (T34 §2) —
-# and the six seconds both messages below quote realized as ~6.9 s inside a 10 s
-# registration, eating the margin the shorter bound exists to keep. Worse, the error is
-# PROPORTIONAL: under load each tick costs more, so the guard gets slower exactly when the
-# session it is guarding is wedged. A hang guard cannot be denominated in a unit that
-# stretches under the condition it guards.
-#
-# `SECONDS` IS THE CLOCK, AND IT COSTS NOTHING: assigning it zeroes bash's own elapsed
-# counter and reading it is a builtin, where `date +%s` would cost a fork per poll for the
-# same whole-second resolution. /bin/bash is 3.2 on a Mac (no `EPOCHREALTIME`, no
-# `printf %(%s)T`) and bionic's command discipline forbids a `timeout` binary. Nothing else
-# in this file, in hooks/stop.sh, or in the libraries either sources reads `SECONDS`.
-#
-# ONE WINDOW FOR THE SWEEP, OPENED AT THE FIRST DERIVATION. The budget is still spent
-# across the loop rather than granted per row, but it is now an ELAPSED window rather than
-# an accumulator: the clock starts when the first row asks for a derivation, and every
-# later row is judged against the same clock. Two consequences, both deliberate. A row that
-# asks late finds the window closed even if the earlier derivations were quick, because
-# what the registration bounds is wall time, not derivation time. And the window can never
-# overshoot — a whole-second accumulator would charge 0 for a 0.9 s derivation and let N
-# rows spend N x 0.9 s against a six-second budget, which is the wrong direction for a hang
-# guard. `SECONDS` being whole-second, each wait ends in [bound-1, bound]: it can fire a
-# little early, where the ticks fired late.
-LG_IMPACT_CLOCK=""   # the sweep's derivation window: empty until the first row opens it
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
@@ -1324,53 +1234,6 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
 $(git -C "$LG_WT" diff --name-only "${LG_BASE}..HEAD" 2>/dev/null)
 LGDIFF
         if [ -n "$LG_OUTSIDE" ]; then
-          # THE SAME COMMAND, THE SAME CONFIG KEY hooks/dispatch-preflight.sh reads (S13),
-          # re-asked of the offending files alone (spec AC-22: "naming the files and the
-          # suites they imply"). Absent command -> name the files only, exactly as the
-          # dispatch wall itself falls back when nothing is configured.
-          LG_IMPACT_CMD=$(config_value "$BIONIC_ROOT" "impact-command" "")
-          LG_SUITES=""
-          LG_SUITES_NOTE=""
-          if [ -n "$LG_IMPACT_CMD" ]; then
-            if [ -n "$LG_IMPACT_CLOCK" ] && [ "$SECONDS" -ge "$LG_IMPACT_BOUND_S" ]; then
-              LG_SUITES_NOTE=" (this sweep's ${LG_IMPACT_BOUND_S}s derivation budget was spent on earlier rows, so the suites these files imply are NOT named here — derive them by hand)"
-            else
-              LG_IMPACT_TMP="${TMPDIR:-/tmp}/bionic-lg-impact-$$-${RANDOM}.out"
-              # `set -f` AROUND THE SPLIT (review-a A-11). `$LG_OUTSIDE` is built from `git
-              # diff --name-only`, and a committed path carrying `*`, `?` or `[` would
-              # otherwise be pathname-expanded against $BIONIC_ROOT and hand the command files
-              # that were never in the diff. The dispatch site guards the identical
-              # construction; this one did not.
-              # THE WINDOW OPENS HERE, at the first row that actually launches a
-              # derivation, and not at the top of the sweep: a sweep whose earlier rows
-              # never reached this branch must not arrive with its budget already spent.
-              [ -n "$LG_IMPACT_CLOCK" ] || { SECONDS=0; LG_IMPACT_CLOCK=1; }
-              set -f
-              # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-              ( cd "$BIONIC_ROOT" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
-              LG_IMPACT_PID=$!
-              set +f
-              LG_OVERRAN=0
-              # `sleep 0.1` STAYS the poll cadence — it is what makes a prompt derivation
-              # noticed promptly. What it no longer is, is the unit the bound is counted in.
-              while kill -0 "$LG_IMPACT_PID" 2>/dev/null; do
-                if [ "$SECONDS" -ge "$LG_IMPACT_BOUND_S" ]; then
-                  kill -TERM "$LG_IMPACT_PID" 2>/dev/null
-                  LG_OVERRAN=1
-                  break
-                fi
-                sleep 0.1
-              done
-              wait "$LG_IMPACT_PID" 2>/dev/null
-              if [ "$LG_OVERRAN" -eq 1 ]; then
-                LG_SUITES_NOTE=" (the impact command did not answer within this sweep's ${LG_IMPACT_BOUND_S}s derivation budget, so the suites these files imply are NOT named here — derive them by hand)"
-              else
-                LG_SUITES=$(awk -F'\t' '$1 != "" { print $1 }' "$LG_IMPACT_TMP" 2>/dev/null | sort -u | tr '\n' ' ')
-                LG_SUITES="${LG_SUITES% }"
-              fi
-              rm -f "$LG_IMPACT_TMP"
-            fi
-          fi
           [ -n "$REFUSE_KIND" ] || REFUSE_KIND=undeclared
           # THE FIX IS A COMMAND, PRINTED WHOLE (wave-24 T13, D10, AC-6.5): the amend that
           # declares these paths on this row, with the real plugin root, the row name and
@@ -1378,7 +1241,7 @@ LGDIFF
           # way out, and has no single command to print. The script path is one word too: a
           # plugin root with a space would otherwise paste as two (wave-24 T27; critic I2).
           LG_FIX="bash $(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh") amend $(refuse_quote "$NAME")${LG_FIX_FILES} --reason $(refuse_quote "the landing diff touched files Files: did not declare")"
-  REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})}${LG_SUITES_NOTE} — not declared. Declare them (main runs it), or revert them before landing:
+  REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE} — not declared. Declare them (main runs it), or revert them before landing:
     ${LG_FIX}
 "
         fi
@@ -3052,8 +2915,8 @@ fi
 # is the one place that arithmetic exists. Past it the stamp is worth READING THE
 # TRANSCRIPT about; it is not, on its own, a verdict.
 #
-# SOURCED HERE AND NOT AT FILE SCOPE, the way bounds.sh above is sourced and guarded on the
-# thing this file uses: three of the four verdict functions in this library never ask the
+# SOURCED HERE AND NOT AT FILE SCOPE, behind the guard units.sh and fill.sh carry above (on
+# the thing this file uses): three of the four verdict functions in this library never ask the
 # Patrol anything, and a bystander turn should not pay to parse a library it will not call.
 if ! declare -F patrol_verdict >/dev/null 2>&1; then
   # shellcheck source=/dev/null
