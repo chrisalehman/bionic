@@ -56,7 +56,7 @@ s35_fixture() {  # <repo> <last line's missed> -> the plan path; writes plan + l
   mkdir -p "${led%/*}"
   {
     s35_line 2026-09-23T10:00:00Z u-t1 ok ''    W-T1 ''          0
-    s35_line 2026-09-23T10:02:00Z u-t2 ok T2    ''   ''          1
+    s35_line 2026-09-23T10:02:00Z u-t2 ok"$LE_RC $(sed -n '/^## Tasks/,/^## Dispatch/p' "$LE_P" | /usr/bin/grep '^| T2 |' | awk -F'|' '{ gsub(/ /, "", $(NF-1)); print $(NF-1) }')"   ''   ''          1
     s35_line 2026-09-23T10:05:30Z u-t2 ok T2    ''   ''          1
     s35_line 2026-09-23T10:15:30Z u-t3 hold T4  ''   ''          1
     s35_line 2026-09-23T10:20:30Z u-t4 ok ''    W-T4 ''          0
@@ -3154,5 +3154,143 @@ for ts_v in launch-sync tick decline task-set task-add task-split row-landed 'th
 done
 expect_true "TS-9 AC-1.3 …the whole transcript, byte for byte (cmp)" cmp -s "$TS_LOG_WAVE" "$TS_LOG_TASK"
 POKE_BOUND="$TS_BOUND_WAS"
+
+# ============================================================
+section "§LANDING-EVIDENCE: row-landed writes the evidence cells of the criteria its row serves, at either scale (wave-31 T22; REQ-15 AC-15.3; D15)"
+# ============================================================
+#
+# The verb is the one writer both landings call (`ready`'s publish and the hand landing), so the cells
+# it writes are proved here on its own: the same plan at task and at wave scale, a landing record that
+# carries a green verdict for the row and the commit it lands, and the criteria the row serves read
+# back. The scales answer the same cells and the same second say line. A landing record with no
+# verdict (a by-hand landing, or the TASK-SCALE world above) writes nothing and says `0`.
+LE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+LE_N=0
+LE_COMMIT=0123456789abcdef0123456789abcdef01234567
+le_world() {  # <scale> <with record: 1|0> -> sets LE_R, LE_P: a repo, its bound plan (T2 serves AC-3.1, REQ-4), the landing record
+  LE_N=$((LE_N + 1)); LE_R="$(make_repo "le-$1-$LE_N")"; ( cd "$LE_R" && git commit -q --allow-empty -m init )
+  LE_P="$(plan_fixture "$LE_R/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" "$1" \
+    "| T2 | 4 | build | the second build | implementor | — | — | 30 | AC-3.1 REQ-4 | b.sh | — | — | pending |" \
+    "| T3 | 4 | build | the third build | implementor | — | — | 30 | REQ-5 | c.sh | — | — | pending |")"
+  awk '/^## Verification Matrix/ { exit } { print }' "$LE_P" > "$LE_P.n"
+  cat >> "$LE_P.n" <<'PLAN'
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-3 | the suite | AC-3.1 | T2 | `a.test.sh` §A: served by its id | wrong |
+| REQ-4 | the suite | AC-4.1 | T2 | `a.test.sh` §A: served by its REQ | wrong |
+| REQ-4 | the suite | AC-4.2 | T2 | `b.test.sh` §B: a suite the landing did not run | wrong |
+| REQ-4 | a grep | AC-4.3 | T0 | grep -c foo file | wrong |
+| REQ-5 | the suite | AC-5.1 | T2 | `a.test.sh` §A: served by another row | wrong |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-3.1 | T2 | pending | — | — |
+| AC-4.1 | T2 | pending | — | — |
+| AC-4.2 | T2 | pending | — | — |
+| AC-4.3 | T0 | pending | — | — |
+| AC-5.1 | T2 | pending | — | — |
+
+AC-3.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §A: served by its id
+  task: T2
+  evidence: pending
+AC-4.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §A: served by its REQ
+  task: T2
+  evidence: pending
+AC-4.2:
+  provenance: p
+  fails-when: f
+  eval: T2 — `b.test.sh` §B: a suite the landing did not run
+  task: T2
+  evidence: pending
+AC-4.3:
+  provenance: p
+  fails-when: f
+  eval: T0 — grep -c foo file
+  task: T2
+  evidence: pending
+AC-5.1:
+  provenance: p
+  fails-when: f
+  eval: T2 — `a.test.sh` §A: served by another row
+  task: T3
+  evidence: pending
+PLAN
+  mv "$LE_P.n" "$LE_P"
+  if [ "$2" = 1 ]; then
+    mkdir -p "$LE_R/.bionic/docs/record/wave-01-fixture/line"
+    # this landing's green verdict first, then the lines that must not be picked though they come later: another row's verdict
+    # for the same commit, a red one, and an older commit's green one
+    {
+      printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:00:00Z\n' \
+        "$LE_COMMIT" "$LE_R/.bionic/docs/record/wave-01-fixture/line/T2-a-0123456789ab.log"
+      printf 'line/v1|ev=verdict|row=T3|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:01:00Z\n' \
+        "$LE_COMMIT" "$LE_R/.bionic/docs/record/wave-01-fixture/line/T3-a-other.log"
+      printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=b.test.sh|result=red|log=%s|at=2026-10-04T03:02:00Z\n' \
+        "$LE_COMMIT" "$LE_R/.bionic/docs/record/wave-01-fixture/line/T2-b-red.log"
+      printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:03:00Z\n' \
+        ffffffffffffffffffffffffffffffffffffffff "$LE_R/.bionic/docs/record/wave-01-fixture/line/T2-a-old.log"
+    } > "$LE_R/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  fi
+  bind_marker "$LE_R" "$LE_P"
+  ( cd "$LE_R" && git add -f "$LE_P" && git commit -qm plan )
+}
+le_ev() {  # <plan> <AC id> -> the evidence: cell of that criterion's block
+  awk -v ac="$2:" '{ h = $0; sub(/^[-*+][ \t]+/, "", h) }
+    index(h, ac) == 1 { f = 1; next }
+    /^[^ \t]/ { f = 0 }
+    f && /^[ \t]+evidence:/ { v = $0; sub(/^[ \t]+evidence:[ \t]*/, "", v); print v; exit }' "$1"
+}
+le_cells() { printf '%s|%s|%s|%s|%s' "$(le_ev "$1" AC-3.1)" "$(le_ev "$1" AC-4.1)" "$(le_ev "$1" AC-4.2)" "$(le_ev "$1" AC-4.3)" "$(le_ev "$1" AC-5.1)"; }
+LE_WANT="record/wave-01-fixture/line/T2-a-0123456789ab.log"
+for le_sc in task wave; do
+  le_world "$le_sc" 1
+  expect_eq "(le0 $le_sc) precondition: every criterion reads pending before the landing (positive on le_ev)" \
+    "pending|pending|pending|pending|pending" "$(le_cells "$LE_P")"
+  poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+  LE_OUT="$OUT"; LE_RC="$RC"
+  expect_eq "(le1 $le_sc) row-landed exits 0 and the row is landed (precondition)" "0 landed" \
+    "$LE_RC $(sed -n '/^## Tasks/,/^## Dispatch/p' "$LE_P" | /usr/bin/grep '^| T2 |' | awk -F'|' '{ gsub(/ /, "", $(NF-1)); print $(NF-1) }')"
+  expect_eq "(le2 $le_sc) AC-15.3 the criteria the row serves by id and by REQ, whose evals name the suite it ran, read its green log; the rest as they were" \
+    "$LE_WANT|$LE_WANT|pending|pending|pending" "$(le_cells "$LE_P")"
+  expect_contains "(le3 $le_sc) the first say line is the one it always was (the plan path is the verb's own)" \
+    "row-landed — T2 landed at $LE_COMMIT: status, step line and ledger line written to " "$LE_OUT"
+  expect_contains "(le3b $le_sc) …to its last word" " in one write; dry-committed first." "$LE_OUT"
+  expect_contains "(le4 $le_sc) …and the evidence count is a second line of its own" "
+evidence: 2 cell(s) written by landing" "$LE_OUT"
+  cp -p "$LE_P" "$TMPROOT/le-$le_sc.once"
+  poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+  expect_eq "(le5 $le_sc) the same landing run again writes nothing more (exit 0, the plan byte-identical)" "0 same" \
+    "$RC $(cmp -s "$LE_P" "$TMPROOT/le-$le_sc.once" && echo same || echo changed)"
+  eval "LE_CELLS_$le_sc=\"\$(le_cells \"\$LE_P\")\""
+  eval "LE_OUT_$le_sc=\"\$(ts_norm \"\$LE_R\" \"\$LE_OUT\")\""
+done
+expect_eq "(le6 AC-1.3) the two scales write the same cells" "$LE_CELLS_task" "$LE_CELLS_wave"
+expect_eq "(le6b) …and print the same lines once the repo path and the clock are out" "$LE_OUT_task" "$LE_OUT_wave"
+le_world wave 0
+poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+expect_eq "(le7) a landing record with no verdict (a by-hand landing's) writes no cell: all five read pending" \
+  "0 pending|pending|pending|pending|pending" "$RC $(le_cells "$LE_P")"
+expect_contains "(le7b) …and the second line says 0" "
+evidence: 0 cell(s) written by landing" "$OUT"
+le_world wave 1
+sed -i.bak 's|^  evidence: pending$|  evidence: record/hand/a-hand-filled-record.log|' "$LE_P" && rm -f "$LE_P.bak"
+( cd "$LE_R" && git add -f "$LE_P" && git commit -qm hand )
+poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
+expect_eq "(le8) a hand-filled cell is never overwritten, though the row serves it: five hand fills stay, none written" \
+  "0 record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log" \
+  "$RC $(le_cells "$LE_P")"
+expect_contains "(le8b) …and the second line says 0" "
+evidence: 0 cell(s) written by landing" "$OUT"
+POKE_BOUND="$LE_BOUND_WAS"
 
 finish
