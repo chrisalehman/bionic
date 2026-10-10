@@ -130,7 +130,7 @@ mkdir -p "$BIN" "$SHIMSRC" "$STATE" "$TMPDIR_FIX"
 # every writer resolves a symlinked target before staging, and a PATH without it
 # would measure the degradation rather than the behaviour.
 for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc \
-            jq mktemp find xargs shasum uname date touch diff cmp printf true false sleep; do
+            jq mktemp find xargs shasum uname date touch diff cmp printf true false sleep dirname; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
 done
 
