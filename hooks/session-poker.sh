@@ -35,7 +35,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its group, then KILL (signals, may write its end)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
-#     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each key its tier owes as pending (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof, date -u (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as two or more children, each <id>:<task>:<size>:<Files>, its waiters re-pointed (writes the plan)
@@ -468,7 +468,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
-  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, and each key the row's tier owes as pending; adds only what is missing"
+  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place: written: (date -u), the working and integration heads, the open rows, the live agents and the last proof, with the five human lines carried; never written by hand"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
@@ -7000,8 +7000,8 @@ EOF
   # criterion, in the shape the gate reads — `provenance:` (the requirement's own `provenance:` line under its
   # `### REQ-<n>` heading, else the row's Approach), `fails-when:` and `eval:` (`<tier> — <Eval>`) from the table,
   # `task:` (the one `## Tasks` row whose serves cell names the criterion or its requirement, else `pending`), then
-  # `evidence:` and every other key walls.sh `keys_for_tier` names for the tier the matrix table gives the
-  # criterion, each `pending`. The matrix head gains `stack-health: pending`, and `walk-artifact: pending` unless the
+  # `evidence:` (and `user-confirmed:` at T4), the keys walls.sh `keys_for_tier` names for the tier the matrix
+  # table gives the criterion, each `pending`. The matrix head gains `stack-health: pending`, and `walk-artifact: pending` unless the
   # plan is `walk: exempt`, where it has none. `pending` is the stub token (Δ12a): the gate refuses it wherever it
   # judges evidence and reads nothing of it before Step 5.
   #
