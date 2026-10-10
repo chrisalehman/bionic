@@ -18,9 +18,7 @@
 #                              or `close`, or a `doc` row at Step 7 or later (the release),
 #                              also waits until <step> reaches its own (wave-20 Δ6, T10b); a
 #                              row open on <roster> is left out (D9). One per line, table
-#                              order. <step> is a number (wave scale) or `T<n>` (task scale,
-#                              where the rows carry no step cell and a dependency is satisfied
-#                              by `done`). Exit 2 on anything else.
+#                              order. <step> is a step number; exit 2 on anything else.
 #   units_held <plan> <step>   one line per row held for its step (would be ready but for
 #                              it): `<id>: step <n> <kind> row waits for current: <n>`, and
 #                              one per row held by an external prerequisite (every other read
@@ -471,9 +469,8 @@ units_rows() {
 # <step> STILL DECIDES THE GATE ACTS (wave-20 Δ6, T10b). A row of kind `integrate` or `close`,
 # or — in a table WITHOUT the `reads` column — a `doc` row at Step 7 or later (the release), is
 # ready only once <step> has reached its own step. In a table with the column a doc row waits for
-# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033): passed `T<n>`, only
-# task-scale rows (no step cell) are judged and a task dependency is satisfied by `done`. Any
-# other <step> is a caller fault and exits 2; no table exits 1.
+# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). Any <step> that is not a
+# step number is a caller fault and exits 2; no table exits 1.
 #
 # ROWS OPEN ON THE ROSTER ARE NOT READY (D9). The launch recorder moves a launched row to
 # `active`, but a table read between the launch and that write still says `pending`. Given a
@@ -831,8 +828,8 @@ units_whole_read() {
 }
 
 # units_landings <plan> <record> -> `<row id><TAB><merge or -><TAB><owed or ->`, table order: each
-# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed` or
-# `done` with none, as `-`. `owed` marks a landed or done build row: it must carry a landing, so the
+# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed`
+# with none, as `-`. `owed` marks a landed build row: it must carry a landing, so the
 # caller counts it unknown when the record has none or its merge is no commit. A header whose
 # `row=` is `—` or an id the table lacks names no row; a merge that is not hex is no landing.
 units_landings() { _units_landed landings "${1:-}" "" "${2:-}" < /dev/null; }
@@ -906,7 +903,7 @@ _units_landed() {
         exit
       }
       for (i = 1; i <= n; i++) {
-        owed = (knd[i] == "build" && (st[i] == "landed" || st[i] == "done"))
+        owed = (knd[i] == "build" && st[i] == "landed")
         if (mode == "landings") {
           if (id[i] in lm) printf "%s\t%s\t%s\n", id[i], lm[id[i]], (owed ? "owed" : "-")
           else if (owed) printf "%s\t-\towed\n", id[i]
@@ -991,15 +988,9 @@ _units_proof_awk() {
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rc
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ]; then
-    case "$step" in
-      ''|*[!0-9]*)
-        case "$step" in
-          T*) case "${step#T}" in ''|*[!0-9]*) return 2 ;; *) scale=task ;; esac ;;
-          *) return 2 ;;
-        esac ;;
-    esac
+    case "$step" in ''|*[!0-9]*) return 2 ;; esac
   fi
   out="$(_units_table "$plan")" || return 1
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; *) rows="" ;; esac
@@ -1016,21 +1007,21 @@ _units_sched() {
   # `proof_state` run (once per memoised command, `_units_floor_state`) and the program run again
   # with the answer. Every other plan, and every other moment of this one, runs no git here.
   fst="$(_units_floor_kept "$plan")"
-  _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+  _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst"; rc=$?
   if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then
     fst="$(_units_floor_state "$plan")"
-    _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst"; rc=$?
   fi
   return "$rc"
 }
 
-# _units_sched_run <mode> <plan> <step> <scale> <hasreads> <rows> <regression state> -> the program's
+# _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> -> the program's
 # answer and its status: 3, with nothing printed, when the answer needs a regression state not handed in.
 _units_sched_run() {
   {
-    printf '\034rows\n'; printf '%s\n' "$6"
+    printf '\034rows\n'; printf '%s\n' "$5"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
-  } | _UNITS_FLOOR_ST="$7" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
+  } | _UNITS_FLOOR_ST="$6" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" \
       -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_sched_awk)"
@@ -1526,21 +1517,20 @@ _units_sched_awk() {
     }
 
     # rowheld(i) -> 2 when this answer does not judge pending row i at all, 1 when it is a gate
-    # act held for its step, 0 otherwise. A WAVE ROW CARRIES A NUMERIC STEP, and that is all the
+    # act held for its step, 0 otherwise. A ROW CARRIES A NUMERIC STEP, and that is all the
     # step still decides for a work row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b):
     # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW WAITS FOR
     # ITS READS (wave-26 T13; D3): in a table with the reads column the release reads
     # approval:release and nothing about it is a step. A table without the column has no approval
     # to read, so its Step-7 doc row keeps the hold (A-T13.1).
     function rowheld(i,   gate) {
-      if (scale == "task") return (stp[i] != "") ? 2 : 0
       if (stp[i] !~ /^[0-9]+$/) return 2
       gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
       return (gate && stp[i] + 0 > want + 0) ? 1 : 0
     }
 
     END {
-      satisfied = (scale == "task") ? "done" : "landed"
+      satisfied = "landed"
       floorst = ENVIRON["_UNITS_FLOOR_ST"]
       factsst = ENVIRON["_UNITS_FACTS_ST"]
       for (i = 1; i <= n; i++) {
@@ -2006,9 +1996,9 @@ units_validate() {
 # THE ONE LEDGER READER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3). Three
 # findings and no more, each naming its row:
 #
-#   status <id> <value>    the row's status is outside the scale's enum — `(empty)` for a blank
+#   status <id> <value>    the row's status is outside the enum — `(empty)` for a blank
 #                          cell, the spelling `units_validate` uses
-#   evidence <id>          the row is at the scale's terminal word and `## SDLC State` carries
+#   evidence <id>          the row is `landed` and `## SDLC State` carries
 #                          no non-empty `- <id>:` line for it
 #   launch <id> <agent>    the row is `active`, its agent cell names someone, and no
 #                          `roster-state/` row on <roster> carries that `name=`
@@ -2021,28 +2011,25 @@ units_validate() {
 # the launch record the dispatch hook writes to the roster, owed at `active` and checked by
 # nothing until a writer's first commit. The roster is now the record: an `active` row whose
 # agent cell is a roster `name=` owes no line. The line is owed where it carries something only
-# a human can write — the evidence — at `done` (task scale) or `landed` (wave scale).
+# a human can write — the evidence — at `landed`.
 #
 # SELF-OWNED IS AN AGENT CELL WITH NO ALPHANUMERIC — empty, an em dash, a hyphen — the same
 # four-spellings-of-nothing reading the `deps` and `worktree` cells take. Nobody was launched
-# for that row, so neither a roster row nor a line is asked of it. A task-scale table has no
-# agent column at all, so every task-scale row is self-owned.
+# for that row, so neither a roster row nor a line is asked of it.
 #
 # NO ROSTER TO READ, TODAY'S RULE (spec assumption 1). An empty <roster>, a path naming no
 # regular file, or a symlink (the fleet never follows one into a roster) computes no `launch`
 # finding: an agent-named `active` row then owes its line, exactly as it did before this
 # reader. A missing roster therefore fails toward the old refusal, never toward silence.
 #
-# THE SCALE COMES FROM THE HEADER, the discriminator the gate's row arm already uses: a table
-# with a `step` column is a wave table (pending · active · landed · dropped, terminal `landed`);
-# one without is the task-scale ledger (pending · active · done · dropped, terminal `done`).
+# ONE ENUM AT EVERY SCALE (wave-31 T5; D2): pending · active · landed · dropped, terminal `landed`.
+# A row in the retired task-scale words (`done`) is a `status` finding, never a second enum.
 #
 # ONLY `T<digit>…` ROWS ARE JUDGED, as the gate's arms have always filtered: a legend or a
 # non-unit row in the table is not a ledger row. No table is no finding, exit 0.
 #
-# ONE PARSE PER CALL. The reader asks the table twice — its rows, then whether the header
-# carries `step` — so it runs under `units_memoised`; a caller already holding a memo for the
-# plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
+# ONE PARSE PER CALL. The reader asks the table for its rows under `units_memoised`; a caller
+# already holding a memo for the plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
 units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}"; }
 
 # units_unlined <plan> -> the `T<digit>…` ids with no non-empty `- <id>:` line under
@@ -2066,16 +2053,15 @@ units_unlined() { _units_ledger unlined "${1:-}" ""; }
 # roster row can begin with: the rows (`units_rows`, so a memoised caller pays no second parse),
 # the plan's text, and — only when there is one to read — the roster.
 _units_ledger() {
-  local mode="${1:-}" plan="${2:-}" roster="${3:-}" rows scale=wave useroster=0
+  local mode="${1:-}" plan="${2:-}" roster="${3:-}" rows useroster=0
   rows="$(units_rows "$plan")" || return 0
   [ -n "$rows" ] || return 0
-  units_has_column "$plan" step || scale=task
   if [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; then useroster=1; fi
   {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
     if [ "$useroster" -eq 1 ]; then printf '\034roster\n'; cat "$roster" 2>/dev/null; fi
-  } | awk -F'\t' -v mode="$mode" -v scale="$scale" -v useroster="$useroster" '
+  } | awk -F'\t' -v mode="$mode" -v useroster="$useroster" '
     $0 == SUBSEP "rows"   { part = 1; next }
     $0 == SUBSEP "plan"   { part = 2; next }
     $0 == SUBSEP "roster" { part = 3; next }
@@ -2112,8 +2098,7 @@ _units_ledger() {
       next
     }
     END {
-      if (scale == "task") { split("pending active done dropped", e, " "); term = "done" }
-      else                 { split("pending active landed dropped", e, " "); term = "landed" }
+      split("pending active landed dropped", e, " "); term = "landed"
       for (i in e) enum[e[i]] = 1
       found = 0
       for (i = 1; i <= n; i++) {
