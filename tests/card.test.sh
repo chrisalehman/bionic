@@ -1148,7 +1148,13 @@ expect_true "84: task — rule 4, no continuation line reaches under kind" \
   "$(col_of "$(printf '%s\n' "$TASK_LONG_NOHDR" | sed -n 1p)" "build")"
 
 
-section "Section 10: T10 — the task-scale card, the configured floor, and per-batch widths (REQ-4 D8/D9; REQ-3 AC-3.4)"
+section "Section 10: T10 — the task-scale card, the configured floor, and per-batch widths (REQ-4 D8/D9; REQ-3 AC-3.4; one ledger shape, wave-31 T5 D2)"
+
+# ONE LEDGER SHAPE (wave-31 T5; REQ-1, D2). The task-scale plan below carries the one `## Tasks`
+# table and a numeric `current:`; the scales differ in artifacts only (the design paragraph, no
+# Eval design table). The rows that pinned the retired six-column card (its rigor/status/worktree
+# headings, its first-batch line) are deleted with it; 154b-154c pin that the task card is the wave
+# card's shape.
 
 # WHAT THIS SECTION OWNS. Until this task `card.sh` knew ONE table: the wave-scale
 # eleven-column `## Tasks` ledger. It read the six-column TASK-scale table with the
@@ -1176,11 +1182,8 @@ printf 'poker-interval: 20m\nimpact-command: bash tests/lib/impact.sh\n' \
   > "${T10_ROOT_CFG}/.bionic/config.yaml"
 
 # ── the task-scale plan fixture ──────────────────────────────────────────────
-# Six columns in the contract's own order (steps/3.md:22,
-# `| id | intent | rigor | description | status | worktree |`), trees spelled the
-# way the product spells them — `<NN>-T<n>`, capital T (wave-17 L1, the charter's
-# standing fixture condition) — a `done` row so the pending predicate has something
-# to exclude, and a design paragraph under its own heading.
+# The one `## Tasks` table (the column set tests/lib/plan-fixture.sh writes), a `landed` row so
+# the pending predicate has something to exclude, and a design paragraph under its own heading.
 T10_TASK_PLAN="${T10_ROOT_CFG}/task-run-18.plan.md"
 cat > "$T10_TASK_PLAN" <<'FIXEOF'
 ---
@@ -1207,15 +1210,15 @@ A second paragraph the card does not show.
 
 ## SDLC State
 
-current: T1
+current: 4
 
 ## Tasks
 
-| id | intent | rigor | description | status | worktree |
-|---|---|---|---|---|---|
-| T1 | build | double | The first unit in one line. It has a second sentence the card does not show. | pending | .worktrees/18-T1 |
-| T2 | test | single | The second unit in one line. | pending | .worktrees/18-T2 |
-| T3 | doc | self-verified | The third unit, already landed. | done | — |
+| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | The first unit in one line. It has a second sentence the card does not show. | implementor | — | — | 30 | REQ-1 | lib/a.sh | — | — | pending |
+| T2 | 4 | build | The second unit in one line. | implementor | — | — | 30 | REQ-1 | lib/b.sh | — | — | pending |
+| T3 | 4 | build | The third unit, already landed. | implementor | — | — | 30 | REQ-1 | lib/c.sh | — | — | landed |
 
 ## Verification Matrix
 
@@ -1237,42 +1240,21 @@ T10_TASK_NODESIGN="${T10_ROOT_CFG}/task-run-18-nodesign.plan.md"
 awk '/^## Design$/ { skip = 1; next } /^## SDLC State$/ { skip = 0 } skip != 1' \
   "$T10_TASK_PLAN" > "$T10_TASK_NODESIGN"
 
-# ── AC-4.1: the six columns under their own headings ─────────────────────────
+# ── the task-scale Step-3 card is the wave card's shape (wave-31 T5, D2) ──────
 whole_card step3 "$T10_TASK_PLAN"; T10_S3="$WC_OUT"
 expect_eq "154: AC-4.1 — step3 exits 0 on a task-scale plan" "0" "$WC_RC"
 expect_empty "154a: …and writes nothing to stderr" "$WC_ERR"
 T10_HDR="$(printf '%s\n' "$T10_S3" | grep -m1 '^  Tasks')"
 T10_ROW1="$(printf '%s\n' "$T10_S3" | grep -m1 '^    T1 ')"
-T10_ROW2="$(printf '%s\n' "$T10_S3" | grep -m1 '^    T2 ')"
-expect_contains "155: AC-4.1 — the Tasks header names rigor, not kind" "rigor" "$T10_HDR"
-expect_contains "155a: …and status" "status" "$T10_HDR"
-expect_contains "155b: …and worktree" "worktree" "$T10_HDR"
-expect_absent "155c: …and no longer says depends over a task table" "depends" "$T10_HDR"
-expect_absent "155d: …nor agent" "agent" "$T10_HDR"
-expect_absent "155e: …nor kind" "kind" "$T10_HDR"
-
-# THE COLUMN, NOT THE PRESENCE. A cell is under the heading it belongs to only if it
-# STARTS at that heading's own column — which is the whole defect: at d7e841c the
-# worktree cell was present and printed under the word `depends`.
-expect_eq "156: AC-4.1 — T1's worktree cell starts at the worktree heading's column" \
-  "$(col_of "$T10_HDR" "worktree")" "$(col_of "$T10_ROW1" ".worktrees/18-T1")"
-expect_eq "156a: …and T1's status cell at the status heading's column" \
-  "$(col_of "$T10_HDR" "status")" "$(col_of "$T10_ROW1" "pending")"
-expect_eq "156b: …and T1's rigor cell at the rigor heading's column" \
-  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW1" "double")"
-expect_eq "156c: …and T2's rigor cell too, so the batch width holds for both rows" \
-  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW2" "single")"
-expect_contains "156d: …and the description column carries the unit's first sentence" \
+whole_card step3 "$PLAN_FIX"
+expect_eq "154b: D2 — the task-scale Tasks header is the wave card's, word for word" \
+  "$(printf '%s\n' "$WC_OUT" | grep -m1 '^  Tasks')" "$T10_HDR"
+expect_contains "154c: …and the task card carries the chain-and-width block a wave card does" \
+  "longest chain" "$T10_S3"
+expect_contains "156d: …and the task column carries the unit's first sentence" \
   "The first unit in one line." "$T10_ROW1"
-expect_absent "156e: …and not the rest of the description cell" \
+expect_absent "156e: …and not the rest of the task cell" \
   "second sentence the card does not show" "$T10_S3"
-
-# ── AC-4.2: the first-batch line is read from the task table's own status cells ──
-T10_PW="$(printf '%s\n' "$T10_S3" | grep -m1 'first batch')"
-expect_absent "157: AC-4.2 — a task-scale card never says the first batch is undeclared" \
-  "first batch not declared" "$T10_S3"
-expect_contains "157a: …it names the pending rows" "first batch T1, T2" "$T10_PW"
-expect_absent "157b: …and never the row that is already done" "T3" "$T10_PW"
 
 # ── AC-4.3: the regression line prints an em dash; no config key names it (wave-31 T2, REQ-4 AC-4.2;
 # T4 redefines the line, A-orch-6) ──
@@ -1368,8 +1350,8 @@ expect_contains "161d: …under the Parallel width heading, beside the writer bu
 # a crash: the shape this row exists to keep out.
 expect_contains "161e: AC-3.4 — the escaped pipe reaches the card as an ordinary pipe" \
   "cell carries an escaped |" "$T10_2B"
-# THE PIN IS NOT VACUOUS: the task-scale plan has ONE batch (its table carries no
-# deps column at all), and it is counted the same way — two pending rows of three.
+# THE PIN IS NOT VACUOUS: the task-scale plan has ONE batch (no row reads another's), and it
+# is counted the same way — two pending rows of three.
 expect_contains "162: AC-3.4 — the task-scale plan renders its one batch's width" \
   "batch 1 · 2 of 8" "$T10_S3"
 expect_absent "162a: …and names no second batch it does not have" "batch 2 ·" "$T10_S3"
@@ -1446,7 +1428,6 @@ T10_WHDR="$(printf '%s\n' "$T10_WAVE" | grep -m1 '^  Tasks')"
 expect_contains "164: AC-4.5 — a wave-scale plan still reads its headings as kind" "kind" "$T10_WHDR"
 expect_contains "164a: …and depends" "depends" "$T10_WHDR"
 expect_contains "164b: …and agent" "agent" "$T10_WHDR"
-expect_absent "164c: …and never the task-scale headings" "worktree" "$T10_WHDR"
 
 # ── AC-11.1 (wave-19 REQ-11, D12): a task-scale plan carries its own requirements ──
 # THE PARSER WAS NEVER THE GAP. `_card_step1` is scale-blind: it renders whatever
@@ -1877,9 +1858,8 @@ section "Section W28-44: T44 — §RIGOR-PRINT, a level prints with its meaning;
 # A level prints as `review rigor: <level> (<one|two> independent mind[s])`, from lib/run.sh
 # `rigor_print`, and only `single` and `double` are levels: a word before 1.14.0 is refused like
 # any other word. `card.sh rigor <word>` is the Step 0 card's rigor line; the Step-3 card's
-# Verification block prints the plan's level, and a task-scale card's rigor column prints each
-# cell as written. The plans here are the fixtures above: one carries `rigor: double`, the
-# task-scale one `rigor: double` with a `double` and a `single` cell.
+# Verification block prints the plan's level. The plans here are the fixtures above: both carry
+# `rigor: double`.
 for rp_pair in single:"review rigor: single (one independent mind)" \
                double:"review rigor: double (two independent minds)"; do
   whole_card rigor "${rp_pair%%:*}"
@@ -1899,14 +1879,6 @@ expect_contains "RP2 …and stderr names the two levels" "use single or double" 
 whole_card step3 "$T10_TASK_PLAN"; RP_TASK="$WC_OUT"
 expect_contains "RP3 the Step 3 card of a plan carrying double prints its level and meaning" \
   "review rigor: double (two independent minds)" "$RP_TASK"
-RP_ROW1="$(printf '%s\n' "$RP_TASK" | grep -m1 '^    T1 ')"
-RP_ROW2="$(printf '%s\n' "$RP_TASK" | grep -m1 '^    T2 ')"
-RP_HDR="$(printf '%s\n' "$RP_TASK" | grep -m1 '^  Tasks')"
-expect_eq "RP4 T1's double cell prints as double, under the rigor heading" \
-  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW1" "double")"
-expect_eq "RP4 …and T2's single cell as single" \
-  "$(col_of "$RP_HDR" "rigor")" "$(col_of "$RP_ROW2" "single")"
-expect_contains "RP4 …and a cell that names no level prints as written" "self-verified" "$RP_TASK"
 # The printed form before 1.14.0 counted readers, up to three; RP3 is the positive on this card.
 for rp_old in "independent reader)" "independent readers)" "three independent"; do
   expect_absent "RP5 the task-scale card never prints the old form '$rp_old'" "$rp_old" "$RP_TASK"

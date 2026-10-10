@@ -20,6 +20,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -968,7 +969,10 @@ poke "$R42" current 5
 s42_unchanged "42f3 §VERB-cur a move the gate refuses (no Step 5 block) is refused" 1 "$P42"
 expect_contains "42f4 …in the gate's own words" "Step 5" "$OUT"
 poke "$R42" current 4x
-s42_unchanged "42f5 §VERB-cur a step that is neither N nor T<n>" 2 "$P42"
+s42_unchanged "42f5 §VERB-cur a value that is no step number" 2 "$P42"
+poke "$R42" current T1
+s42_unchanged "42f5b §VERB-cur (wave-31 T5, D2) the retired task-scale current: T1 is no step number either" 2 "$P42"
+expect_contains "42f5c …and the refusal says current: is a step number at every scale" "current: is a step number at every scale" "$OUT"
 
 # The Step-4 block (A-orch-8): advancing to 4 writes the worktree/base-sha/branch fields the
 # first writer's commit is refused without, from the run's own `working-branch:` — and only
@@ -3061,5 +3065,95 @@ expect_eq "16d11 …declined-on=-" "-" "$(t16_field "$(t16_led_last)" declined-o
 poke "$R16D" decline T4 'held by hand' --on
 expect_eq "16d12 --on with no value is the usage error (exit 2)" "2" "$RC"
 POKE_BOUND="$T16_BOUND_WAS"
+
+# ============================================================
+section "§TASK-SCALE: one ledger shape — every verb answers a task-scale plan as it answers a wave plan on the same table (wave-31 T5; REQ-1 AC-1.3; D2)"
+# ============================================================
+#
+# THE SCALES DIFFER IN ARTIFACTS, NEVER IN LEDGER SHAPE (D2). tests/lib/plan-fixture.sh writes the
+# plan twice, `scale: task` and `scale: wave`, the same rows in the one `## Tasks` table at numeric
+# `current: 4`: the wave plan cites a requirements file and a spec, the task plan carries its design
+# paragraph. Each plan runs the same verbs in the same order in a repo of its own — launch-sync
+# (§49's world: a launched row with its tree), the tick (T3 reads what T2 writes, so the ready set
+# waits on it), decline, task-set, task-add, task-split, row-landed — and every output, and the table
+# and ledger they leave, must match once the repo path and the clock are taken out. Each verb's
+# positive is asserted at task scale too, so two identical refusals cannot pass as an identity.
+TS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+TS_GOV="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
+ts_norm() {  # <repo> <text> -> the text with the repo, either spelling, and every ISO stamp taken out
+  local phys; phys="$(cd "$1" && pwd -P)"
+  printf '%s\n' "$2" | sed -e "s|$phys|<R>|g" -e "s|$1|<R>|g" -e 's/[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9:]*Z/<TS>/g'
+}
+ts_gov() {  # <repo> <plan> <content> -> the governing-skill hook's rc on a Write of <content> to <plan>
+  local in; in="$(jq -n --arg p "$2" --arg c "$3" --arg s "$SID" --arg cwd "$1" '{session_id: $s, cwd: $cwd,
+    hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}')"
+  ( cd "$1" && HOME="$TMPROOT/ts-home" CLAUDE_CODE_SESSION_ID="$SID" bash "$TS_GOV" <<< "$in" >/dev/null 2>&1 )
+}
+ts_world() {  # <scale> -> sets TS_R, TS_P: the repo and its bound plan, w-T2 launched in a real tree
+  local tree
+  TS_R="$(make_repo "ts-$1")"; ( cd "$TS_R" && git commit -q --allow-empty -m init )
+  TS_P="$(plan_fixture "$TS_R/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" "$1" \
+    "| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |" \
+    "| T2 | 4 | build | the second build | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+    "| T3 | 4 | build | waits on the second | implementor | — | b.sh | 30 | REQ-1 | c.sh | — | — | pending |" \
+    "| T4 | 4 | build | free to run | implementor | — | — | 30 | REQ-1 | d.sh, e.sh | — | — | pending |" \
+    "| T5 | 5 | verify | the floor | test-runner | — | — | 30 | REQ-1 | — | — | — | pending |")"
+  bind_marker "$TS_R" "$TS_P"
+  ( cd "$TS_R" && git add -f "$TS_P" && git commit -qm plan )
+  new_roster "$TS_R"
+  add_row "$TS_R" name=w-T2 agent_id=a-w-T2 launched_at=2026-10-04T03:30:00Z deliverable=t2.md duration="45 minutes" \
+    subagent_type=bionic:implementor
+  tree="$(cd "$TS_R" && pwd -P)/.worktrees/01-T2"; git -C "$TS_R" worktree add -q -b wt/01-T2 "$tree" >/dev/null 2>&1
+  printf 'workspace/v1|session=%s|name=w-T2|path=%s|branch=wt/01-T2|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+    "$SID" "$tree" "$TS_P" >> "$TS_R/.bionic/tmp/workspaces-$SID.state"
+}
+ts_run() {  # <scale> -> sets TS_LOG: the transcript of every verb, normalised, one block per verb
+  local sc="$1" log="$TMPROOT/ts-$1.log"
+  ts_world "$sc"
+  : > "$log"
+  ts_gov "$TS_R" "$TS_P" "$(cat "$TS_P")"; printf '== governing-skill rc=%s\n' "$?" >> "$log"
+  ts_gov "$TS_R" "$TS_P" "$(/usr/bin/grep -v '^model_plan:' "$TS_P")"; printf '== governing-skill, no model_plan rc=%s\n' "$?" >> "$log"
+  s34_gate "$TS_R"; printf '== gate rc=%s\n' "$GATE_RC" >> "$log"
+  poke "$TS_R" launch-sync;                      printf '== launch-sync rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  forget_digest "$TS_R"; poke_pressure "$TS_R" 8192 1.0 tick
+  printf '== tick rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: (FILL|WAIT|LEDGER|LAUNCHED|NOT-RECORDED)')")" >> "$log"
+  poke "$TS_R" decline T4 'held for the identity';                                     printf '== decline rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" task-set T4 size=45;                                                     printf '== task-set rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" task-add T6 4 build 'an added build' implementor '—' 30 REQ-1 'f.sh' '—'; printf '== task-add rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" task-split T4 -- 'T7:the first half:20:d.sh' 'T8:the second half:25:e.sh'; printf '== task-split rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  poke "$TS_R" row-landed T2 0123456789abcdef0123456789abcdef01234567 2026-10-04T04:00:00Z
+  printf '== row-landed rc=%s\n%s\n' "$RC" "$(ts_norm "$TS_R" "$OUT")" >> "$log"
+  printf '== the table and the ledger\n%s\n' "$(ts_norm "$TS_R" "$(sed -n '/^## Tasks/,/^## Verification Matrix/p' "$TS_P")")" >> "$log"
+  TS_LOG="$log"
+}
+require_helpers ts_norm ts_gov ts_world ts_run plan_fixture
+ts_run task; TS_LOG_TASK="$TS_LOG"; TS_P_TASK="$TS_P"
+ts_run wave; TS_LOG_WAVE="$TS_LOG"
+ts_block() { awk -v h="== $2" 'index($0, h) == 1 { on = 1; next } /^== / { on = 0 } on' "$1"; }  # <log> <verb>
+ts_rc() { /usr/bin/grep "^== $2 rc=" "$1" | head -1 | sed 's/.* rc=//'; }                        # <log> <verb>
+# THE POSITIVES, AT TASK SCALE: each verb did its work, so the identity below compares two successes.
+expect_eq "TS-0 precondition: the task-scale plan is admitted by the governing-skill hook (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" governing-skill)"
+expect_eq "TS-0b …which refuses it without model_plan (exit 2), so it judged the plan" "2" "$(ts_rc "$TS_LOG_TASK" 'governing-skill, no model_plan')"
+expect_eq "TS-0c precondition: …and by the real commit gate (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" gate)"
+expect_eq "TS-1 task scale: launch-sync records the dispatch (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" launch-sync)"
+expect_contains "TS-1b …the row active in its tree, one ledger line" "poker: LAUNCHED T2 w-T2 — row active in .worktrees/01-T2, ledger line T2" \
+  "$(ts_block "$TS_LOG_TASK" launch-sync)"
+expect_contains "TS-2 task scale: the tick fills the free row" "poker: FILL T4" "$(ts_block "$TS_LOG_TASK" tick)"
+expect_contains "TS-2b …and T3 waits on the row it reads from" "poker: WAIT T3 — reads b.sh, written by T2 (active)" "$(ts_block "$TS_LOG_TASK" tick)"
+expect_absent "TS-2c …so the FILL does not name T3 (beside TS-2)" "FILL T3" "$(ts_block "$TS_LOG_TASK" tick)"
+expect_contains "TS-3 task scale: decline names the ready row (exit $(ts_rc "$TS_LOG_TASK" decline))" "poker: decline — T4: recorded in " "$(ts_block "$TS_LOG_TASK" decline)"
+expect_eq "TS-4 task scale: task-set validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" task-set)"
+expect_eq "TS-5 task scale: task-add validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" task-add)"
+expect_eq "TS-6 task scale: task-split validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" task-split)"
+expect_eq "TS-7 task scale: row-landed validates and writes (exit 0)" "0" "$(ts_rc "$TS_LOG_TASK" row-landed)"
+expect_contains "TS-7b …the row landed, the one terminal word" "| b.sh | .worktrees/01-T2 | 01234567 | landed |" "$(/usr/bin/grep '^| T2 |' "$TS_P_TASK")"
+expect_contains "TS-7c …and its ledger line carries the landing" "landed <TS> 0123456789abcdef0123456789abcdef01234567" \
+  "$(ts_block "$TS_LOG_TASK" 'the table and the ledger')"
+# THE IDENTITY, verb by verb and then whole.
+for ts_v in launch-sync tick decline task-set task-add task-split row-landed 'the table and the ledger'; do
+  expect_eq "TS-8 AC-1.3 $ts_v answers scale: task exactly as scale: wave" "$(ts_block "$TS_LOG_WAVE" "$ts_v")" "$(ts_block "$TS_LOG_TASK" "$ts_v")"
+done
+expect_true "TS-9 AC-1.3 …the whole transcript, byte for byte (cmp)" cmp -s "$TS_LOG_WAVE" "$TS_LOG_TASK"
+POKE_BOUND="$TS_BOUND_WAS"
 
 finish

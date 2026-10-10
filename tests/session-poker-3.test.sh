@@ -21,6 +21,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -2183,8 +2184,16 @@ section "Section 65 §DECLINE-VERB §DECLINE-LOG §BUDGET-USER: a wall is never 
 # row it did not name is ready. A user's cap on writers is no decline at all: `budget
 # writers=<n> '<reply>'` writes it into the plan header every reader of the ceiling reads.
 S65_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+# THE TASK-SCALE PLAN IS THE ONE SHAPE (wave-31 T5; D2): tests/lib/plan-fixture.sh at `scale: task`,
+# T1 in flight and T2/T3 pending, where §31's six-column `current: T1` plan stood.
+s65_task_plan() {  # <repo> -> the path; scale: task, the one table, T1 active in its tree
+  plan_fixture "$1/.bionic/docs/plans/epic-01-task-scale/task-01-fixture.plan.md" task \
+    "| T1 | 4 | build | the unit in flight | — | — | — | 30 | REQ-1 | a.sh | 18-T1 | — | active |" \
+    "| T2 | 4 | build | the next unit | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+    "| T3 | 4 | build | the unit after that | implementor | — | — | 30 | REQ-1 | c.sh | — | — | pending |"
+}
 R65="$(make_repo s65-decline)"; new_roster "$R65"
-P65="$(s31_task_plan "$R65" T1)"
+P65="$(s65_task_plan "$R65")"
 bind_marker "$R65" "$P65"
 add_row "$R65" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 s65_led() { cat "$1/.bionic/docs/record/${2:-task-01-fixture}/fill-ledger.log" 2>/dev/null; }
@@ -2206,7 +2215,8 @@ poke_pressure "$R65" 8192 1.0 tick
 expect_contains "65c AC-15.1 the next tick prints the standing decline, its time and its reason, in the reply form's words" \
   "poker: fill-declined standing since ${S65_AT} — the machine is saturated" "$OUT"
 expect_absent "65c2 …and no FILL for the rows it named" "poker: FILL" "$OUT"
-printf '| T4 | bugfix | standard | a unit nobody declined | pending | — |\n' >> "$P65"
+awk '{ print } /^\| T3 \| 4 \| build \|/ { print "| T4 | 4 | build | a unit nobody declined | implementor | — | — | 30 | REQ-1 | d.sh | — | — | pending |" }' \
+  "$P65" > "$P65.tmp" && mv "$P65.tmp" "$P65"
 poke_pressure "$R65" 8192 1.0 tick
 expect_eq "65d a row the decline did not name is ready: the tick fills it alone" "poker: FILL T4" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
@@ -2655,7 +2665,7 @@ s42_unchanged "67f8 writers=9, one over the derived 8 (the user's cap of 3 stand
 # taken from the refusal and run as printed. fails-when: the printed line writes a ledger line.
 S67D_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R67D="$(make_repo s67-decline-slot)"; new_roster "$R67D"
-P67D="$(s31_task_plan "$R67D" T1)"
+P67D="$(s65_task_plan "$R67D")"
 bind_marker "$R67D" "$P67D"
 add_row "$R67D" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R67D" 8192 1.0 tick
