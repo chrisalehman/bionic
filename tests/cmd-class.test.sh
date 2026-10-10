@@ -2457,6 +2457,45 @@ expect_eq "§SCRIPT-TEXT …while the same call with the root claims it (the pos
 case_is none "bash $ST/red.sh" "§SCRIPT-TEXT the class reading is unchanged: it opens no file"
 expect_eq "§SCRIPT-TEXT bash -c runs its string, not a script: the string is read as before" "run:jest" "$(st_rows "bash -c 'jest'")"
 expect_eq "§SCRIPT-TEXT bash -n names a script it will not run: nothing is opened" "" "$(st_rows 'bash -n red.sh')"
+# THE FULL RULE IS FOR THE WRITER'S OWN WRAPPER (A-orch-62). The scripts above are untracked (no
+# repository), so each met the full rule. In a repository, a script tracked at HEAD and unchanged is
+# the project's own tool: read for its literal text, its `$` lines claim nothing; a modified or an
+# untracked one gets the full rule. Over 2,000 lines a tracked script is not opened and claims nothing,
+# an untracked one reads `unverified`. FIXTURE FIDELITY: a real git repository, committed, then edited.
+GT="$SANDBOX/gt"; mkdir -p "$GT"
+git -C "$GT" init -q
+printf '#!/bin/bash\nX=jest\n"$X" --ci\necho ok\n' > "$GT/tvar.sh"
+printf '#!/bin/bash\njest\n' > "$GT/tjest.sh"
+printf '#!/bin/bash\ntests/run.sh --only a.test.sh\n' > "$GT/tdoor.sh"
+printf '#!/bin/bash\ntests/run.sh\n' > "$GT/tfull.sh"
+printf '#!/bin/bash\necho a\n' > "$GT/red.sh"
+printf '#!/bin/bash\necho a\n' > "$GT/mvar.sh"
+printf '#!/bin/bash\nbash "$Z/x.sh"\nbash red.sh\n' > "$GT/tcall.sh"
+awk 'BEGIN { for (i = 0; i < 2100; i++) print "echo x"; print "jest" }' > "$GT/big.sh"
+git -C "$GT" add tvar.sh tjest.sh tdoor.sh tfull.sh red.sh mvar.sh tcall.sh big.sh
+git -C "$GT" -c user.email=t@example.com -c user.name=T -c commit.gpgsign=false commit -qm seed
+cp "$GT/big.sh" "$GT/ubig.sh"
+printf '#!/bin/bash\njest\n' > "$GT/red.sh"
+printf '#!/bin/bash\n"$R" --ci\n' > "$GT/mvar.sh"
+gt_rows() {  # <command> -> the claims under root $GT as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$GT" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§SCRIPT-TEXT tracked: the fixture is committed and two scripts are edited after it" " M mvar.sh| M red.sh|?? ubig.sh" \
+  "$(git -C "$GT" status --porcelain | sort | paste -sd'|' -)"
+expect_eq "§SCRIPT-TEXT tracked and unchanged, a literal jest in it: claimed, run jest" "run:jest" "$(gt_rows 'bash tjest.sh')"
+expect_eq "§SCRIPT-TEXT tracked and unchanged, its \$ lines claim nothing (tjest.sh beside it is the positive)" "" "$(gt_rows 'bash tvar.sh')"
+expect_eq "§SCRIPT-TEXT tracked, a literal door run in it: claimed as run" "run:tests/run.sh --only a.test.sh" "$(gt_rows 'bash tdoor.sh')"
+expect_eq "§SCRIPT-TEXT tracked, a literal tests/run.sh in it: the full-tree claim (A-T11-9)" "file:run.sh" "$(gt_rows 'bash tfull.sh')"
+expect_eq "§SCRIPT-TEXT modified red.sh running jest: run jest" "run:jest" "$(gt_rows 'bash red.sh')"
+expect_eq "§SCRIPT-TEXT modified, a \$ command word: unverified" "unverified:mvar.sh" "$(gt_rows 'bash mvar.sh')"
+expect_eq "§SCRIPT-TEXT tracked and over 2,000 lines: not opened, no claim (ubig.sh is the same text untracked)" "" "$(gt_rows 'bash big.sh')"
+expect_eq "§SCRIPT-TEXT untracked and over 2,000 lines: unverified" "unverified:ubig.sh" "$(gt_rows 'bash ubig.sh')"
+expect_eq "§SCRIPT-TEXT a tracked script skips its own \$ line and still reads the modified script it runs" "run:jest" \
+  "$(gt_rows 'bash tcall.sh')"
+expect_eq "§SCRIPT-TEXT a missing script in a repository is unverified either way" "unverified:gone.sh" "$(gt_rows 'bash gone.sh')"
+expect_eq "§SCRIPT-TEXT a variable-built path in a repository is unverified either way" 'unverified:$D/tjest.sh' \
+  "$(gt_rows 'bash "$D/tjest.sh"')"
 
 section "§NAME — wave-28 T36 (read-structure-p20 #1): one predicate says what a suite name is"
 # The script-operand arm, the argv[0] arm and could_suite each spelled the suite-name rule, and

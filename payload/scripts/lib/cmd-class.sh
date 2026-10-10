@@ -670,8 +670,119 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # positions this does. It is set ONLY for the two script forms that name a file —
     # pytest, `npm test`, `go test` and `make test` are suite-class and name no
     # tests/<x>.test.sh, so they leave it empty and the caller reports no target.
+    # ---------- THE SCRIPT A SHELL RUNS IS READ (wave-31 T11; REQ-8 AC-8.2, D9) ----------
+    # `bash red.sh`, red.sh running jest, read none: the arm below took the operand`s basename
+    # alone, so a wrapper script carried any suite past the budget. In the budget`s own reading
+    # (mode targets with `_CMD_SCRIPT_ROOT` set, which only `cmd_suite_claims <cmd> <root>` sets)
+    # a script operand in the tree is OPENED and its text read as a command, through the same
+    # segments and class_seg, nested to depth 2 (SCRIPT_LVL). What it answers, into LAST_SKIND
+    # and LAST_TARGET for classify_argv: `run` and the run inside (the claim`s run column stays the
+    # command as typed, so the refusal names both); the `file run.sh` claim for a full tree inside,
+    # which the full-tree arm judges first; `unverified` and the script as typed, for a script the
+    # text cannot vouch for — a command word or a script operand built from `$` or a backtick, a
+    # file that is not there, a path built from a variable (A-orch-46.1: the budget refuses it).
+    # A path outside `<root>/` is not this budget`s and is not opened (A-T11-3).
+    #
+    # THE FULL RULE IS FOR THE WRITER`S OWN WRAPPER (A-orch-62). A script tracked at HEAD and
+    # unchanged in its tree is the project`s own tool: it is read for its literal text, a suite run
+    # spelled in it is claimed, and its `$` lines never make it `unverified` (SCRIPT_STRICT 0). An
+    # untracked or modified script — the red.sh a writer just wrote — gets the full rule
+    # (SCRIPT_STRICT 1). RESIDUAL, NAMED: a wrapper committed before it runs is read by its literal
+    # text alone. LAST_UNV says why a script read `unverified`: `var` for a path built from a
+    # variable, so a tracked caller can skip its own `$` lines and still pass on a strict child`s.
+    function script_claim(k, t) {
+      LAST_SKIND = k; LAST_TARGET = t; LAST_PATH = ""; LAST_ONLY = ""; LAST_DRY = 0
+      return "suite"
+    }
+    # 1 when <f> is tracked at HEAD and unchanged in the tree git finds from its own directory;
+    # 0 otherwise — untracked, modified, no repository, or a path a shell word cannot carry.
+    function script_tracked(f,   d, q) {
+      if (index(f, "\047") || index(f, "\n")) return 0
+      d = f; sub(/\/[^\/]*$/, "", d); if (d == "") d = "/"
+      q = "\047"
+      return (system("git -C " q d q " ls-files --error-unmatch -- " q f q " >/dev/null 2>&1 && git -C " q d q " diff --quiet HEAD -- " q f q " >/dev/null 2>&1") == 0)
+    }
+    # The directory a relative script resolves in: a literal cd earlier in the command
+    # (CD_DIR, "\001" when the cd went somewhere the text does not say), else the payload cwd.
+    function script_path(p,   b) {
+      p = wt_expand(p)
+      if (substr(p, 1, 1) != "/") {
+        b = (CD_DIR != "" ? CD_DIR : ENVIRON["_CMD_SCRIPT_CWD"])
+        if (b == "") b = ENVIRON["_CMD_SCRIPT_ROOT"]
+        if (b == "\001" || substr(b, 1, 1) != "/") return ""
+        p = b "/" p
+      }
+      return wt_norm(p)
+    }
+    # A script`s text as a command: heredoc bodies out, as the reading`s first step takes them out
+    # of a command, and comments out, which a command typed to the Bash tool seldom carries and a
+    # script always does (a `;` in a comment is no separator). A `#` starts a comment at the start
+    # of a word outside quotes; the quote state runs across lines, so a quoted line break holds.
+    function script_hd_strip(txt,   n, L, i, o, intag, tag, q, j, c, pc, ln) {
+      n = split(txt, L, "\n"); o = ""; intag = 0; q = ""
+      for (i = 1; i <= n; i++) {
+        if (intag) { if (trim(L[i]) == tag) intag = 0; continue }
+        ln = L[i]
+        for (j = 1; j <= length(ln); j++) {
+          c = substr(ln, j, 1)
+          if (q == "") {
+            if (c == "\\") { j++; continue }
+            if (c == "\047" || c == "\"") { q = c; continue }
+            pc = (j > 1 ? substr(ln, j - 1, 1) : " ")
+            if (c == "#" && pc ~ /[ \t;&|()]/) { ln = substr(ln, 1, j - 1); break }
+          } else if (c == q) q = ""
+          else if (q == "\"" && c == "\\") j++
+        }
+        o = o ln "\n"
+        tag = (q == "" ? heredoc_tag(ln) : "")
+        if (tag != "") intag = 1
+      }
+      return o
+    }
+    function script_read(p,   root, f, ln, rc, txt, nl, k, ss, j, c, run0, ik, it, strict, strict0, why, isvar) {
+      LAST_UNV = ""
+      if (index(p, "$") || index(p, "`")) { LAST_UNV = "var"; return script_claim("unverified", p) }
+      root = wt_norm(ENVIRON["_CMD_SCRIPT_ROOT"])
+      f = script_path(p)
+      if (f == "") { LAST_UNV = "var"; return script_claim("unverified", p) }
+      if (substr(f, 1, length(root) + 1) != root "/") return "none"
+      if (SCRIPT_LVL >= 2) return script_claim("unverified", p)
+      strict = !script_tracked(f)
+      # A SCRIPT PAST 2,000 LINES IS NOT READ (A-T11-7, A-orch-62): the hook pays for every line on
+      # the agent`s hottest path (hooks/session-poker.sh, 10,453 lines, 5.6 s to read). A tracked,
+      # unchanged one claims nothing, as before this reading; the writer`s own reads `unverified`.
+      txt = ""; nl = 0
+      while ((rc = (getline ln < f)) > 0) { if (++nl > 2000) break; txt = txt ln "\n" }
+      close(f)
+      if (rc < 0) return script_claim("unverified", p)
+      if (nl > 2000) return (strict ? script_claim("unverified", p) : "none")
+      run0 = LAST_RUN; strict0 = SCRIPT_STRICT
+      k = segments(script_hd_strip(txt), ss)
+      for (j = 1; j <= k; j++) {
+        if (trim(ss[j]) == "") continue
+        SCRIPT_LVL++; SCRIPT_STRICT = strict; LAST_UNV = ""
+        c = class_seg(trim(ss[j]), 0)
+        SCRIPT_LVL--; SCRIPT_STRICT = strict0
+        if (c != "suite" || LAST_DRY) continue
+        ik = LAST_KIND; it = (LAST_KIND == "run" ? LAST_TARGET : LAST_RUN); why = LAST_UNV
+        LAST_RUN = run0
+        isvar = (index(LAST_TARGET, "$") || index(LAST_TARGET, "`") || index(LAST_PATH, "$") || index(LAST_PATH, "`"))
+        if (ik == "unverified" || isvar) {
+          # A tracked script`s own `$` lines claim nothing; a strict child`s answer still stands.
+          if (!strict && (isvar || why == "var")) continue
+          LAST_UNV = ""
+          return script_claim("unverified", p)
+        }
+        if (ik == "file" && LAST_TARGET == "run.sh") return script_claim("file", "run.sh")
+        return script_claim("run", it)
+      }
+      LAST_RUN = run0
+      LAST_TARGET = ""; LAST_PATH = ""; LAST_ONLY = ""; LAST_DRY = 0; LAST_SKIND = ""
+      return "none"
+    }
+
     function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift, n0, shc, nv, v) {
-      LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0; LAST_ONLY = ""
+      LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0; LAST_ONLY = ""; LAST_SKIND = ""
       n = argv_tok(s, a)
       if (n == 0) return "none"
       # `--dry-run` IS A MODE THAT RUNS NOTHING (the walk, A-36a; critic K-2). It is read
@@ -697,6 +808,9 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         n = n - npxshift
         b0 = base(a[1]); n0 = cmd_word_fold(b0)
       }
+      # INSIDE AN UNTRACKED OR MODIFIED SCRIPT BEING READ, a command word built from `$` or a backtick runs what the text
+      # cannot name (wave-31 T11, AC-8.2): the line is `unverified`, and script_read says so.
+      if (SCRIPT_LVL > 0 && SCRIPT_STRICT && (index(a[1], "$") || index(a[1], "`"))) return script_claim("unverified", a[1])
       if (n0 == "bash" || n0 == "sh" || n0 == "zsh" || n0 == "dash" || n0 == "ksh") {
         # SKIP THE RUNNER S OWN OPTIONS — BUT READ THEM FIRST (REQ-5, D13). This loop used
         # to skip every leading flag alike, so `bash -n tests/x.test.sh` reached the suite
@@ -743,9 +857,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         # claimed under its own name: the unexpanded-name arm of the budget refuses it and the wrap
         # names it `?`. Not after `-c`, whose operand is a command string, and not when every
         # text that binds the variable plainly names no suite (`var_plain`, section 6).
-        if (!shc && b1 ~ /^[$]([A-Za-z_][A-Za-z0-9_]*|[{][A-Za-z_][A-Za-z0-9_]*[}])$/ && !var_plain(b1)) {
-          LAST_TARGET = b1; LAST_PATH = a1; return "suite"
+        if (!shc && b1 ~ /^[$]([A-Za-z_][A-Za-z0-9_]*|[{][A-Za-z_][A-Za-z0-9_]*[}])$/) {
+          if (!var_plain(b1)) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
+          # A variable every binding text of which plainly names no suite stays none (D13): its
+          # values are stated, so it is no unreadable path (A-T11-8).
+          if (SCRIPT_LVL == 0) return "none"
         }
+        # ANY OTHER SCRIPT OPERAND IS OPENED, in the budget`s reading only (wave-31 T11; above).
+        if (!shc && a1 != "" && a1 != "-" && mode == "targets" && ENVIRON["_CMD_SCRIPT_ROOT"] != "") return script_read(a1)
         return "none"
       }
       a1 = (n >= 2 ? a[2] : ""); a2 = (n >= 3 ? a[3] : "")
@@ -814,6 +933,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       LAST_RUN = cmdnorm_run(s)
       c = classify_argv_read(s)
       if (c != "suite") { LAST_KIND = ""; return c }
+      if (LAST_SKIND != "") { LAST_KIND = LAST_SKIND; return c }
       if (LAST_ONLY != "") { LAST_KIND = "only"; return c }
       if (LAST_TARGET != "") { LAST_KIND = "file"; return c }
       LAST_TARGET = LAST_RUN
@@ -1254,7 +1374,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # mode=looplines: cmd_suite_loop_lines (wave-24 T13) — section 7, ahead of expand_all.
       if (mode == "looplines") { loop_lines(k, seg); exit }
       expand_all(k, seg, out)
-      CD_SEEN = 0
+      CD_SEEN = 0; CD_DIR = ""
       for (i = 1; i <= k; i++) {
         t0 = trim(seg[i])
         if (t0 == "") continue
@@ -1281,8 +1401,11 @@ _cmd_class_awk() {  # <mode> ; command on stdin
             }
             # ONE LINE PER DISTINCT CLAIM, in position order. A command naming the same
             # suite twice states one budget claim, and the caller compares a set.
-            if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && (LAST_KIND == "only" || !(LAST_TARGET in tgt_seen))) {
-              if (LAST_KIND != "only") tgt_seen[LAST_TARGET] = 1
+            # A SCRIPT CLAIM IS ONE PER SCRIPT RUN (wave-31 T11): two scripts running one suite are
+            # two runs the budget asks about, each by its own command.
+            tk = ((LAST_KIND == "run" || LAST_KIND == "unverified") && LAST_SKIND != "" ? LAST_KIND SUBSEP LAST_RUN SUBSEP LAST_TARGET : LAST_TARGET)
+            if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && (LAST_KIND == "only" || !(tk in tgt_seen))) {
+              if (LAST_KIND != "only") tgt_seen[tk] = 1
               # KIND, TARGET, RUN AND PATH, tab-separated. The shell wrappers are the only
               # callers: `cmd_suite_claims` scopes the path to a repository and drops it,
               # `cmd_suite_targets` keeps the basename of the file claims. The path answers
@@ -1313,7 +1436,17 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         }
         # Left-to-right, so a cd only licenses the basename form in the
         # segments that FOLLOW it.
-        if (is_cd(t0)) CD_SEEN = 1
+        if (is_cd(t0)) {
+          CD_SEEN = 1
+          # WHERE THE CD WENT, for a script operand after it (wave-31 T11): a literal directory, or
+          # "\001" for one the text does not say.
+          if (mode == "targets" && ENVIRON["_CMD_SCRIPT_ROOT"] != "") {
+            cdm = argv_tok(strip_leading(t0), CDA)
+            cdd = wt_cd(CDA, cdm, (CD_DIR != "" ? CD_DIR : ENVIRON["_CMD_SCRIPT_CWD"]))
+            cdd = wt_expand(cdd)
+            CD_DIR = (cdd == "" || substr(cdd, 1, 1) != "/" || index(cdd, "$") || index(cdd, "`") || index(cdd, "\001") ? "\001" : wt_norm(cdd))
+          }
+        }
       }
       if (mode == "targets" && SPLIT) print "split"
     }
@@ -2226,7 +2359,7 @@ cmd_class_lines() {  # <command> -> "<class>\t<segment>" per non-empty segment
   printf '%s' "${1-}" | _cmd_class_awk lines
 }
 
-cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per suite-class segment
+cmd_suite_claims() {  # <command> [<repo root>] [<cwd>] -> "<kind>\t<target>\t<run>" per suite-class segment
   # WHAT A SUITE-CLASS COMMAND CLAIMS, which is two different things depending on what it
   # named. `file` carries the suite BASENAME the segment runs — the budget's unit since
   # wave-01 — and `run` carries the collapsed command text, for a segment that runs a suite
@@ -2251,6 +2384,17 @@ cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per
   # about to create past the budget, and would make the answer depend on the filesystem at
   # hook time rather than on the command. "A path somewhere else" is visible in the path.
   #
+  # ONE STATED EXCEPTION: THE SCRIPT A SHELL RUNS (wave-31 T11; REQ-8 AC-8.2, D9; A-orch-41.5).
+  # With a root, a `bash|sh|zsh <script>` operand that is no suite name and not the runner is
+  # opened, when its file is under `<root>/`, and its text is read for what it runs — the one
+  # file this reading opens; nothing else is stat'd. The command alone cannot say what
+  # `bash red.sh` runs, and the budget that admitted it unread let a wrapper carry any suite
+  # past it. A script that is not there, a path built from a variable, and a line whose
+  # command word or script operand is built from one are kind `unverified`, named by the
+  # script, which the budget refuses (A-orch-46.1). `<cwd>` places a relative script; a
+  # literal `cd` earlier in the command moves it. Without a root nothing is opened, so
+  # `cmd_class` and every reader without one answer from the shape, as before.
+  #
   # TWO SPELLINGS STAY NAMED ON PURPOSE, both because the caller has something to say
   # about them and cannot say it about a target it never hears:
   #   * the cd-licensed basename form (`cd tests && bash run.sh`) records no directory to
@@ -2267,7 +2411,8 @@ cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per
   # `tests/run.sh --only` names, its path in the runner's own directory, scoped like `file`. The
   # kind stays apart so the wall can tell a suite run through the runner from a bare one.
   local _root="${2-}" _k _b _r _p _s
-  printf '%s' "${1-}" | _cmd_class_awk targets | while IFS=$'\t' read -r _k _b _r _p; do
+  printf '%s' "${1-}" | _CMD_SCRIPT_ROOT="$_root" _CMD_SCRIPT_CWD="${3-}" _cmd_class_awk targets \
+    | while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] && [ "$_k" != split ] || continue
     if [ "$_k" != "file" ] && [ "$_k" != "only" ]; then printf '%s\t%s\t%s\n' "$_k" "$_b" "$_r"; continue; fi
     [ -n "$_b" ] || continue
