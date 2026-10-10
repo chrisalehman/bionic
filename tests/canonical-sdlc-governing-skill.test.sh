@@ -3294,7 +3294,7 @@ expect_eq "R3c …and the verdict names the contract version, not one arm" \
   "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3d(1) …the Tasks table's absent columns, named together on one line" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$GS_R2_ERR"
 expect_contains "R3d(2) …the wave-scale status vocabulary" \
   "T1: status done is not one of pending active landed dropped" "$GS_R2_ERR"
 expect_contains "R3d(3) …the Step-1 requirements pointer" \
@@ -3371,7 +3371,7 @@ expect_eq "R3s2 …and the verdict is the contract version, not the table alone"
   "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3s3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$GS_R2_ERR"
 expect_contains "R3s3(2) …the approval line, a class the frontmatter stamp used to hide" \
   "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
 expect_contains "R3s3(3) …and the matrix's fails-when, the other hidden class" \
@@ -3437,7 +3437,7 @@ expect_eq "R3t2 …with the contract-version verdict, not admitted silently" \
   "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3t3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$GS_R2_ERR"
 expect_contains "R3t3(2) …the approval line, a class the frontmatter stamp used to hide" \
   "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
 expect_contains "R3t3(3) …and the matrix's fails-when, the other hidden class" \
@@ -3488,7 +3488,7 @@ expect_eq "R3u2 …with the contract-version verdict, not admitted silently" \
   "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3u3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$GS_R2_ERR"
 expect_contains "R3u3(2) …the approval line, a class the frontmatter stamp used to hide" \
   "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
 expect_contains "R3u3(3) …and the matrix's fails-when, the other hidden class" \
@@ -3523,7 +3523,7 @@ expect_eq "R3v2 …with the contract-version verdict, not admitted silently" \
   "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3v3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$GS_R2_ERR"
 expect_contains "R3v3(2) …the approval line, a class the frontmatter stamp used to hide" \
   "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
 expect_contains "R3v3(3) …and the matrix's fails-when, the other hidden class" \

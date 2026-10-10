@@ -2050,7 +2050,7 @@ expect_eq "R3c …and the verdict names the contract version, not one arm" \
 # THE SIX CLASSES, each read by the one string only its own check can produce. Six
 # assertions rather than a count, so a list that names five and repeats one cannot pass.
 expect_contains "R3d(1) …the Tasks table's absent columns, named together on one line" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$R3_ERR"
 expect_contains "R3d(2) …the wave-scale status vocabulary" \
   "T1: status done is not one of pending active landed dropped" "$R3_ERR"
 expect_contains "R3d(3) …the Step-1 requirements pointer" \
@@ -2152,11 +2152,11 @@ expect_eq "R3s2 …with the contract-version verdict, not the table alone" \
   "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3s3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$R3_ERR"
 expect_contains "R3s3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3s3(3) …the second" \
-  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind (empty) is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3s3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3s3(5) …and the matrix's fails-when, owed from the same step" \
@@ -2208,11 +2208,11 @@ expect_eq "R3t2 …with the contract-version verdict, not admitted silently" \
   "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3t3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$R3_ERR"
 expect_contains "R3t3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3t3(3) …the second" \
-  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind (empty) is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3t3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3t3(5) …and the matrix's fails-when, owed from the same step" \
@@ -2258,11 +2258,11 @@ expect_eq "R3u2 …with the contract-version verdict, not admitted silently" \
   "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3u3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$R3_ERR"
 expect_contains "R3u3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3u3(3) …the second" \
-  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind (empty) is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3u3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3u3(5) …and the matrix's fails-when, owed from the same step" \
@@ -2294,11 +2294,11 @@ expect_eq "R3v2 …with the contract-version verdict, not admitted silently" \
   "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
   "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R3v3(1) …the pre-14 table that arms the predicate" \
-  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+  "## Tasks: the table is missing columns: step kind task agent deps size serves Files" "$R3_ERR"
 expect_contains "R3v3(2) …the first row fault a five-column header forces" \
   "T1: step (empty) is outside 3-9" "$R3_ERR"
 expect_contains "R3v3(3) …the second" \
-  "T1: kind double is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+  "T1: kind (empty) is not one of build test verify review doc integrate close prototype" "$R3_ERR"
 expect_contains "R3v3(4) …the approval line, owed from current 4 and answered for current 5" \
   "## SDLC State: no 'approved-by:' line" "$R3_ERR"
 expect_contains "R3v3(5) …and the matrix's fails-when, owed from the same step" \
