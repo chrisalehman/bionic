@@ -2036,7 +2036,7 @@ has_line() { if printf '%s\n' "$1" | grep -qxF -- "$2"; then printf yes; else pr
 
 # A FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A settled
 # `proof:floor` read with no open writer is satisfied when lib/proof.sh `proof_state` answers
-# `covered` or `bounded` for the plan's working branch, so a row that means "the floor is proved"
+# `covered` for the plan's working branch (wave-31 T25), so a row that means "the floor is proved"
 # needs a floor proof naming a REAL head the working branch is at: a fake hex is no commit, and
 # the read now waits. FLOOR_REPO is that repository, on `wave/99-fixture` with one commit, and
 # floor_at_head copies a plan into it with its floor proof moved to that head and the branch named.
@@ -3684,49 +3684,52 @@ expect_eq "RUN-EDGES.F5c the build landed and both proofs at the head: integrate
   "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e5-landed.md" 8)"
 
 # ============================================================
-section "§FLOOR-STANDS — integrate waits for a full run when the change past the floor proof cannot be bounded (wave-26 T64; REQ-3 AC-3.3, AC-3.4)"
+section "§FLOOR-STANDS — integrate waits while the floor is not proved: one whole run, and every commit after it proved by the runs recorded at it (wave-26 T64; REQ-3 AC-3.3, AC-3.4; wave-31 T25: REQ-4 AC-4.1, REQ-13 AC-13.4; D3)"
 # ============================================================
 #
 # Through T63 a `proof:floor` read was satisfied by ANY `proved: kind=floor` line, whatever its
 # head: a new file under a directory no suite names landed with no suite run (a tree with no stamp
 # lands, by design), integrate read ready, and the release went out on a change no suite had read.
-# The read now stands only while lib/proof.sh `proof_state` answers `covered` or `bounded`; on
-# `unbounded`, or a state that cannot be computed, the row waits, and `units_waiting` says why and
-# names the way out (a full run on the head, recorded with `proof-add floor`).
+# The read now stands only while lib/proof.sh `proof_state` answers `covered`: the floor proof
+# names the head, or every commit since it is proved by the runs recorded at it (wave-31 T25, D3).
+# On `uncovered`, or a state that cannot be computed, the row waits, and `units_waiting` says what
+# is lacking and names the way out (the lacking suites run, or a whole run recorded with
+# `proof-add floor`).
 #
-# THE FIXTURE IS A REAL REPOSITORY on `wave/99-fs` with five suites and a map stub that answers
-# lib/one.sh with two suites, lib/every.sh with all five and anything else with nothing, and
-# counts its calls (FS_COUNT): the cost rows read the count. Every floor proof line is written by
-# the product: `proof_line` and `proof_add_line` (lib/proof.sh, the pair `proof-add` writes
-# through), with the head the checkout is at; session-poker §54 drives the verb itself on a real
-# full run. The plan reads integrate's kind default (`proof:floor, proof:review, head`).
+# THE FIXTURE IS A REAL REPOSITORY on `wave/99-fs` with five suites. Every floor proof line is
+# written by the product: `proof_line` and `proof_add_line` (lib/proof.sh, the pair `proof-add`
+# writes through), with the head the checkout is at; session-poker §54 drives the verb itself on a
+# real full run. The suite runs are SYNTHESIZED stamps in `booked.sh`'s documented shape
+# (`stamp/v1|head=|dirty=|rc=|at=|suites=|cmd=`), appended to the checkout's git dir where the shim
+# writes them; session-poker §54 and §72 write them with the real shim. A `git` shim on PATH counts
+# the walk's one call (`git log --first-parent --reverse`): the cost rows read the count. The plan
+# reads integrate's kind default (`proof:floor, proof:review, head`).
 FS_REPO="$SANDBOX/fs-repo"
-FS_MAP="$SANDBOX/fs-map.sh"
-FS_COUNT="$SANDBOX/fs-map.count"
+FS_COUNT="$SANDBOX/fs-walk.count"
+FS_SHIM="$SANDBOX/fs-git-shim"
 FS_PLAN="$FS_REPO/.bionic/docs/plans/epic-99/wave-99-fs.plan.md"
+mkdir -p "$FS_SHIM"
 {
   printf '#!/bin/bash\n'
-  printf 'printf "x\\n" >> "%s"\n' "$FS_COUNT"
-  printf '[ -z "${FS_MAP_FAIL:-}" ] || exit 7\n'
-  printf 'for f in "$@"; do\n'
-  printf '  case "$f" in\n'
-  printf '    lib/one.sh)   for s in a b; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '    lib/every.sh) for s in a b c d e; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
-  printf '  esac\n'
-  printf 'done\n'
-} > "$FS_MAP"
+  printf 'case " $* " in *" --first-parent --reverse "*) printf "x\\n" >> "%s" ;; esac\n' "$FS_COUNT"
+  printf 'exec %s "$@"\n' "$(command -v git)"
+} > "$FS_SHIM/git"
+chmod +x "$FS_SHIM/git"
 fs_git() { git -C "$FS_REPO" -c user.name=fixture -c user.email=fixture@example.invalid "$@"; }
 fs_commit() {  # <path> <content> -> one commit on the checkout's branch
   mkdir -p "$(dirname "$FS_REPO/$1")"; printf '%s\n' "$2" > "$FS_REPO/$1"
   fs_git add "$1" && fs_git commit -qm "change $1"
 }
+fs_stamp() {  # <suite> <rc> <at> -> one stamp at the checkout's head, clean, in the shim's shape and place
+  printf 'stamp/v1|head=%s|dirty=0|rc=%s|at=%s|suites=%s|cmd=bash tests/%s\n' \
+    "$(fs_git rev-parse HEAD)" "$2" "$3" "$1" "$1" >> "$(fs_git rev-parse --absolute-git-dir)/bionic-stamps"
+}
 mkdir -p "$FS_REPO/tests" "$FS_REPO/lib" "$(dirname "$FS_PLAN")"
 fs_git init -q 2>/dev/null; fs_git checkout -q -b wave/99-fs 2>/dev/null
 for s in a b c d e; do printf '#!/bin/bash\n' > "$FS_REPO/tests/$s.test.sh"; done
-printf 'one\n' > "$FS_REPO/lib/one.sh"; printf 'every\n' > "$FS_REPO/lib/every.sh"
+printf 'one\n' > "$FS_REPO/lib/one.sh"
 printf '.bionic/\n' > "$FS_REPO/.gitignore"
 fs_git add .gitignore tests lib && fs_git commit -qm base
-printf 'impact-command: bash %s\n' "$FS_MAP" > "$FS_REPO/.bionic/config.yaml"
 # fs_plan <current> <T3 status> -> the plan, no proof lines yet
 fs_plan() {
   { printf '## SDLC State\n\ncurrent: %s\nworking-branch: wave/99-fs\napproved-by: fixture 2026-10-04T10:00:00Z "approved"\n\n' "$1"
@@ -3749,6 +3752,8 @@ fs_count() { awk 'END { print NR + 0 }' "$FS_COUNT" 2>/dev/null; }
 fs_why() {  # -> integrate's proof:floor wait reason, or nothing
   call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:floor") == 1 { print $2 }'
 }
+FS_LEAD="proof:floor: the floor is one whole run plus each later commit proved; past the proof at"
+FS_OUT="; run what it lacks, or a whole run on this head, and proof-add floor"
 # THE REVIEW HALF IS HANDED IN COVERED (wave-27 T14; D3). integrate's proof:review is met only by
 # the facts state the tick hands in (UNITS_FACTS_STATE); every row here is about the floor, so the
 # state is the one the tick hands when the readings hold. §INTEGRATE-JUDGE drives the others.
@@ -3759,21 +3764,25 @@ FS_H0="$(fs_git rev-parse HEAD)"
 expect_eq "FS.0 precondition: the product wrote a floor proof at the working head" "$FS_H0" "$(call proof_last "$FS_PLAN" floor)"
 expect_eq "FS.0b precondition: proof_state reads the plan's own tree: covered" "covered" \
   "$(call proof_state "$FS_PLAN" "$FS_REPO" | cut -f1)"
-expect_eq "FS.1 covered: the proof is at the head, integrate is ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.1b …and covered asks no map" "0" "$(fs_count)"
+expect_eq "FS.1 covered: the proof is at the head, integrate is ready" "T3" "$(PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.1b …and a proof at the head walks no commit" "0" "$(fs_count)"
 
-# AC-3.3 STILL HOLDS: a change the map bounds is proved by its suites, and the pass stands.
+# AC-13.4: A COMMIT PAST THE FLOOR IS PROVED BY THE RUNS RECORDED AT IT, and by nothing predicted.
 fs_commit lib/one.sh 'one, changed'
-expect_eq "FS.2 precondition: the change is bounded by two suites" "$(printf 'bounded\ta.test.sh b.test.sh')" \
-  "$(call proof_state "$FS_PLAN" "$FS_REPO")"
-expect_eq "FS.2b AC-3.3 a bounded change past the floor proof leaves integrate ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.2c …and no wait is told for it" "" "$(fs_why)"
+FS_X1="$(fs_git rev-parse HEAD)"
+expect_eq "FS.2 a commit past the floor proof with no run recorded at it: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.2b …and its wait names the commit, what it lacks and the way out" \
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X1:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" "$(fs_why)"
+fs_stamp a.test.sh 0 2026-10-04T12:01:00Z
+expect_eq "FS.2c AC-3.3 AC-13.4 a green run recorded at it: the floor stands, integrate is ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.2d …and no wait is told for it" "" "$(fs_why)"
 
-# AC-3.4, THE CRITERION'S OWN PLANT: a new file under a directory no suite names.
+# AC-3.4, THE CRITERION'S OWN PLANT: a new file under a directory no suite names, no suite run.
 fs_commit newdir/x.sh 'new'
+FS_X2="$(fs_git rev-parse HEAD)"
 expect_eq "FS.3 AC-3.4 a new file under a directory no suite names: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.3b …and its wait says the head moved past the proof, gives proof_state's reason, and names the way out" \
-  "proof:floor: the head moved past the regression proof at ${FS_H0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
+expect_eq "FS.3b …and its wait names that commit, not the proved one before it" \
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X2:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
   "$(fs_why)"
 expect_eq "FS.3c …while the extractor reads a real line: the review proof is no wait (paired positive)" "" \
   "$(call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:review") == 1')"
@@ -3785,39 +3794,43 @@ fs_prove floor
 FS_H1="$(fs_git rev-parse HEAD)"
 expect_eq "FS.4 the way out: a floor proof at the new head and integrate is ready again" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
-# A CHANGE THE MAP ANSWERS WITH EVERY SUITE.
-fs_commit lib/every.sh 'every, changed'
-expect_eq "FS.5 a change the map answers with every suite: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_contains "FS.5b …saying every suite, from the newest floor proof" \
-  "at ${FS_H1:0:12} in a way the map cannot bound (the map answers the change with every suite (5 of 5))" "$(fs_why)"
-fs_prove floor
-expect_eq "FS.5c …and a floor proof at its head releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
+# A RED RUN RECORDED AT A COMMIT: the newest run at it decides.
+fs_commit lib/one.sh 'one, changed again'
+FS_X3="$(fs_git rev-parse HEAD)"
+fs_stamp b.test.sh 1 2026-10-04T12:02:00Z
+expect_eq "FS.5 a commit whose only recorded run is red: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
+expect_contains "FS.5b …saying which suite is red where, from the newest floor proof" \
+  "${FS_LEAD} ${FS_H1:0:12}, commit ${FS_X3:0:12} (no landing row) is not proved: b.test.sh is red at ${FS_X3:0:12}" "$(fs_why)"
+fs_stamp b.test.sh 0 2026-10-04T12:03:00Z
+expect_eq "FS.5c …and a newer green run of it releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
-# A MERGE OF WORK FROM OUTSIDE THE RUN: the file is one the map bounds (FS.2), so only the outside
-# rule can hold it.
+# A MERGE OF WORK FROM OUTSIDE THE RUN: a first-parent commit no landing names, nothing run at it.
 FS_H2="$(fs_git rev-parse HEAD)"
 fs_git checkout -q -b other-work 2>/dev/null; fs_commit lib/one.sh 'one, from outside'
 fs_git checkout -q wave/99-fs 2>/dev/null; fs_git merge -q --no-ff -m 'merge other-work' other-work 2>/dev/null
+FS_M="$(fs_git rev-parse HEAD)"
 expect_eq "FS.6 a merge from outside the run: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_contains "FS.6b …saying another branch carries the commits" "are on another branch than wave/99-fs" "$(fs_why)"
+expect_contains "FS.6b …naming the merge, at which no run is recorded" \
+  "commit ${FS_M:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(fs_why)"
 fs_prove floor
 expect_eq "FS.6c …and a floor proof at the merge releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 # THE COST. One proof_state per answer that turns on it, once per memoised command, and none when
-# no answer does. The map is the one process the state runs that a test can count.
+# no answer does. The walk's one git call is what the shim counts.
 FS_H3="$(fs_git rev-parse HEAD)"
 fs_commit lib/one.sh 'one, once more'
 : > "$FS_COUNT"
-call units_ready "$FS_PLAN" 8 >/dev/null
+PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8 >/dev/null
 FS_ONE="$(fs_count)"
-expect_eq "FS.7 precondition: one bounded answer asks the map once" "1" "$FS_ONE"
+expect_eq "FS.7 precondition: one answer that turns on the floor walks the commits once" "1" "$FS_ONE"
 printf '. "%s" >/dev/null 2>&1\nfs3() { units_ready "$1" 8; units_waiting "$1" 8; units_held "$1" 8; }\nunits_memoised "$1" fs3 "$1" >/dev/null\n' \
   "$LIB" > "$SANDBOX/fs-three.sh"
-: > "$FS_COUNT"; bash "$SANDBOX/fs-three.sh" "$FS_PLAN"
-expect_eq "FS.7b three questions inside one memoised command ask the map once between them" "$FS_ONE" "$(fs_count)"
+: > "$FS_COUNT"; PATH="$FS_SHIM:$PATH" bash "$SANDBOX/fs-three.sh" "$FS_PLAN"
+expect_eq "FS.7b three questions inside one memoised command walk once between them" "$FS_ONE" "$(fs_count)"
 : > "$FS_COUNT"
-call units_ready "$FS_PLAN" 8 >/dev/null; call units_waiting "$FS_PLAN" 8 >/dev/null; call units_held "$FS_PLAN" 8 >/dev/null
-expect_eq "FS.7c …the differential: the same three asked bare ask it three times" "$((FS_ONE * 3))" "$(fs_count)"
+PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8 >/dev/null; PATH="$FS_SHIM:$PATH" call units_waiting "$FS_PLAN" 8 >/dev/null
+PATH="$FS_SHIM:$PATH" call units_held "$FS_PLAN" 8 >/dev/null
+expect_eq "FS.7c …the differential: the same three asked bare walk three times" "$((FS_ONE * 3))" "$(fs_count)"
 mkdir -p "$SANDBOX/fs-tmp"
 printf '. "%s" >/dev/null 2>&1\nfsin() { units_ready "$1" 8 >/dev/null; ls "$TMPDIR"; }\nunits_memoised "$1" fsin "$1"\n' \
   "$LIB" > "$SANDBOX/fs-inside.sh"
@@ -3827,51 +3840,50 @@ expect_eq "FS.7e …which the command removes when it returns" "" "$(ls "$SANDBO
 fs_plan 7 pending; fs_prove floor; fs_prove review
 fs_commit newdir/y.sh 'held'
 : > "$FS_COUNT"
-FS_W7="$(call units_waiting "$FS_PLAN" 7)"
+FS_W7="$(PATH="$FS_SHIM:$PATH" call units_waiting "$FS_PLAN" 7)"
 expect_eq "FS.8 integrate held for its step (current: 7): the wait is the step" "yes" "$(has_line "$FS_W7" "T3${TAB}step:8${TAB}-${TAB}-")"
 expect_eq "FS.8b …the state is not asked for a row held for its step" "0" "$(fs_count)"
 fs_plan 8 landed; fs_prove floor; fs_prove review
 fs_commit newdir/z.sh 'after the merge'
 : > "$FS_COUNT"
-expect_eq "FS.9 integrate landed: nothing is ready" "" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.9 integrate landed: nothing is ready" "" "$(PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.9b …and with no open row reading proof:floor the state is not asked" "0" "$(fs_count)"
 fs_plan 8 pending; fs_prove floor; fs_prove review
+FS_H4="$(fs_git rev-parse HEAD)"
 fs_commit newdir/w.sh 'pending again'
+FS_X4="$(fs_git rev-parse HEAD)"
 : > "$FS_COUNT"
-call units_edges "$FS_PLAN" >/dev/null
+PATH="$FS_SHIM:$PATH" call units_edges "$FS_PLAN" >/dev/null
 expect_eq "FS.9c the edges never turn on the state, and do not ask it" "0" "$(fs_count)"
-call proof_state "$FS_PLAN" "$FS_REPO" >/dev/null
+PATH="$FS_SHIM:$PATH" call proof_state "$FS_PLAN" "$FS_REPO" >/dev/null
 FS_PS="$(fs_count)"
-expect_true "FS.9d precondition: one proof_state over this change calls the map (the counter reads real calls)" \
+expect_true "FS.9d precondition: one proof_state over this change walks the commits (the counter reads real calls)" \
   test "$FS_PS" -gt 0
 : > "$FS_COUNT"
-call units_ready "$FS_PLAN" 8 >/dev/null
-expect_eq "FS.9e …and the ready set over the same plan asks the state once: as many map calls as one proof_state" \
+PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8 >/dev/null
+expect_eq "FS.9e …and the ready set over the same plan asks the state once: as many walks as one proof_state" \
   "$FS_PS" "$(fs_count)"
 
-# THE FAIL DIRECTION: a state that cannot be computed is not satisfied, and says why.
-FS_MAP_FAIL=1 call units_ready "$FS_PLAN" 8 >/dev/null
-FS_FAIL_WHY="$(FS_MAP_FAIL=1 fs_why)"
-expect_contains "FS.10 a map that fails: integrate waits, giving the failure" "(the map failed (exit 7))" "$FS_FAIL_WHY"
-expect_eq "FS.10b …and is not ready" "" "$(FS_MAP_FAIL=1 call units_ready "$FS_PLAN" 8)"
-mv "$FS_REPO/.bionic/config.yaml" "$FS_REPO/.bionic/config.off"
-expect_contains "FS.11 no impact-command configured: every change past the proof is unbounded" \
-  "(no impact-command is configured to map the change to suites)" "$(fs_why)"
+# THE STATE'S WORDS: covered or uncovered, and the reason names what is lacking (A-orch-23).
+expect_eq "FS.10 proof_state's first field over an unproved commit is uncovered" "uncovered" \
+  "$(call proof_state "$FS_PLAN" "$FS_REPO" | cut -f1)"
+expect_eq "FS.11 …and integrate's wait carries the reason: the commit, and that no run is recorded at it" \
+  "${FS_LEAD} ${FS_H4:0:12}, commit ${FS_X4:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
+  "$(fs_why)"
 fs_prove floor
-expect_eq "FS.11b …and a floor proof at the head needs no map: covered, ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
-mv "$FS_REPO/.bionic/config.off" "$FS_REPO/.bionic/config.yaml"
+expect_eq "FS.11b …and a floor proof at the head walks nothing: covered, ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 # PLAN SHAPES THAT WERE READY BEFORE: each now says what to do.
 sed 's/^working-branch: wave\/99-fs$//' "$FS_PLAN" > "$FS_REPO/.bionic/nobranch.md"
-expect_contains "FS.12 a plan naming no working branch: the wait says so" "(the plan names no working-branch)" \
+expect_contains "FS.12 a plan naming no working branch: the wait says so" ", the plan names no working-branch;" \
   "$(call units_waiting "$FS_REPO/.bionic/nobranch.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
 awk '/^proved: kind=floor / { sub(/head=[0-9a-f]+/, "head=0123456789abcdef0123456789abcdef01234567") } { print }' \
   "$FS_PLAN" > "$FS_REPO/.bionic/foreign.md"
-expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" "(the proved head is not a commit here)" \
+expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" ", the proved head is not a commit here;" \
   "$(call units_waiting "$FS_REPO/.bionic/foreign.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
 fs_git checkout -q --detach 2>/dev/null
 expect_contains "FS.14 a detached checkout: no checkout holds the working branch, and the wait says so" \
-  "(no checkout holds the working branch wave/99-fs)" "$(fs_why)"
+  ", no checkout holds the working branch wave/99-fs;" "$(fs_why)"
 fs_git checkout -q wave/99-fs 2>/dev/null
 expect_eq "FS.14b …and back on the branch, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
