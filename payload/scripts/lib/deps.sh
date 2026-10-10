@@ -318,6 +318,7 @@ rg|basic|substrate|brew:ripgrep|any|brew-dep|keep-shared
 uv|basic|substrate|brew:uv|any|brew-dep|keep-shared
 docker|basic|substrate|brew:docker|any|brew-dep|keep-shared
 aws|basic|substrate|brew:awscli|any|brew-dep|keep-shared
+perl|basic|substrate|brew:perl|any|brew-dep|keep-shared
 impeccable|extra|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer
 excalidraw-renderer|extra|payload/skills/excalidraw-diagram/SKILL.md|uv:sync|any|uv-project|remove-on-consent
 @playwright/cli|extra|skills/browser-verify/SKILL.md|npm:@playwright/cli|any|npm-global|remove-on-consent
@@ -334,7 +335,7 @@ example-skills|extra|extra|marketplace:anthropic-agent-skills#anthropics/skills|
 TABLE
 )"
 
-# The nine brew rows are `keep-shared` deliberately, and that is now what the
+# The ten brew rows are `keep-shared` deliberately, and that is now what the
 # `basic` class MEANS rather than a coincidence of their removal policy: bionic
 # ENSURED git/node/docker/... on this machine; it does not own them, and pulling
 # `git` off a box because bionic is leaving is not a removal anyone asked for.

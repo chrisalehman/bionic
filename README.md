@@ -295,10 +295,11 @@ the one-liner for exactly that state.
 
 ## Requirements
 
-macOS and Linux need the Claude Code CLI, plus `git` and `jq`. The walls parse their input
+macOS and Linux need the Claude Code CLI, plus `git`, `jq` and `perl`. The walls parse their input
 with `jq`, so on a machine without it they pass everything through in silence rather than
-erroring. `/bionic:setup` installs the rest one consented item at a time and reports whatever
-it could not do as a named action instead of stopping.
+erroring. `perl` starts the detached side of a long run (`booked.sh --detach`); doctor reports it missing.
+`/bionic:setup` installs the rest one consented item at a time and reports whatever it could not do
+as a named action instead of stopping.
 
 On Windows, use WSL2:
 
