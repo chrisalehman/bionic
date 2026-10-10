@@ -46,19 +46,20 @@ What you will notice:
   row lands, one whole run, when the plan's `regression:` is `yes`. A fix row runs the red suites plus its
   own. The floor is one whole green run at a commit on the branch plus every later commit proved by the
   suites its row named, and a second whole run needs the user's word:
-  `session-poker.sh approve regression-2`. A run at an ancestor of the working head proves the floor when every later commit on the
-  branch is proved by a record of the suites it owed, and `proof-add floor` otherwise names the first
-  commit it cannot prove and the suites it lacks there. The `later-changes:` attestation block and the
-  full-run-owed rules are removed with the bounded arm they served. The dispatch wall refuses a whole run
-  in four cases: the plan declares `regression: no`, a row the regression waits on still writes tracked
-  files, the head is already proved, and a whole run was already launched on the plan without the second-run
-  approval. Records: `T3-floor.md`, `T26-floor-wall.md`.
+  `session-poker.sh approve regression-2`. A run at an ancestor of the working head proves the floor when
+  every later commit on the branch is proved by a record of the suites it owed, and `proof-add floor`
+  otherwise names the first commit it cannot prove and the suites it lacks there. The `later-changes:`
+  attestation block and the full-run-owed rules are removed with the bounded arm they served. The dispatch
+  wall refuses a whole run in four cases: the plan declares `regression: no`, a row the regression waits on
+  still writes tracked files, the head is already proved, and a whole run was already launched on the plan
+  without the second-run approval. Records: `T3-floor.md`, `T26-floor-wall.md`.
 - **The regression is a Step-0 setting.** Step 0 prints a `regression` line beside rigor and scale, with
-  the scale's default (`yes` at wave, `no` at task and epic), and
-  `session-poker.sh regression <yes|no> '<reply>'` writes `regression:` and, when it differs from the default, `regression-override:`. At
-  `regression: no` the Step-5 block carries one line,
-  `regression: no (Step 0, <user>) — <where it runs>`, in place of `cmd`, `pass`, `total`, `output` and `head`, and no run is owed. An absent key, or
-  any value but `no`, reads `yes`. Records: `T4-regression-setting.md`, `T28-regression-card.md`.
+  the scale's default (`yes` at wave, `no` at task and epic). The verb
+  `session-poker.sh regression <yes|no> '<reply>'` writes `regression:` and, when the value differs from
+  the default, `regression-override:`. At `regression: no` the Step-5 block carries one line in place of
+  `cmd`, `pass`, `total`, `output` and `head`, and no run is owed:
+  `regression: no (Step 0, <user>) — <where it runs>`. An absent key, or any value but `no`, reads `yes`.
+  Records: `T4-regression-setting.md`, `T28-regression-card.md`.
 - **The impact map is deleted.** `tests/lib/impact.sh`, `tests/impact.test.sh`, the `impact-command:`
   read, the derivation and its time bound, the landing's background warm and the amend verb's derived arm
   are gone. A writer's budget is the suites its brief names, and a brief that names only `Files:` is
