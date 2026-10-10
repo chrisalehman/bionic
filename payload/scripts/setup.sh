@@ -257,6 +257,8 @@ SETUP_PLUGIN_ID="$(dep_plugin_id)"
 # bash a stock macOS box runs this script with.
 
 SETUP_ACTIONS=""
+# What this run brought up to date without asking (the principles span): one line each, read by the summary.
+SETUP_UPDATED=""
 # Set by the statusline step, read by the summary. A note printed unconditionally
 # would tell every user to restart over a change they did not make.
 SETUP_STATUSLINE_CHANGED=no
@@ -372,10 +374,6 @@ _setup_class_wanted() {  # <class>
 # disagree with the run it is a plan FOR, which is the one defect a consent
 # screen must not have.
 
-# `gate_share`'s own fallback (lib/gate.sh). Setup does not load the gate, so the figure is repeated here, once,
-# for the plan page and the share step; tests/principles-item.test.sh §SHARE-ITEM holds it to the gate's 80.
-SETUP_SHARE_DEFAULT=80
-
 # What one item changes, in the words the item's own question uses. Product
 # words only: this lands on a person's screen, and it is the only description
 # of that item they get before they answer.
@@ -427,13 +425,14 @@ _setup_item_verb() {  # <name>
     legacy-permission-block) say "remove bionic's retired permission block from $(_dep_settings_file)" ;;
     permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
     working-principles)
-      # ONLY AN ABSENT BLOCK REACHES THIS PAGE (an edited one is the user's and
-      # is not pending), and its text is not on the page: step 13 prints it and
-      # asks again, live, before writing — so the page says so.
-      say "show bionic's working principles and ask again before adding them to $(principles_file)" ;;
-    share)
-      # THE DEFAULT IS THE GATE'S (wave-28 T10, D16): a yes writes it, a no writes nothing.
-      say "write bionic's share of this machine, ${SETUP_SHARE_DEFAULT}%, to $(detect_share_file)" ;;
+      # AN ABSENT BLOCK AND AN EDITED SPAN BOTH REACH THIS PAGE. An absent block's
+      # text is not on the page: step 13 prints it and asks again, live, before
+      # writing — so the page says so. An edited span is bionic's own and step 13
+      # replaces it without a question, so the page says that instead.
+      case "$(principles_state)" in
+        edited) say "replace the working-principles span in $(principles_file) with bionic's current text (the span between bionic's markers is bionic's; nothing else in the file is touched)" ;;
+        *)      say "show bionic's working principles and ask again before adding them to $(principles_file)" ;;
+      esac ;;
     *)                  return 1 ;;
   esac
   return 0
@@ -1812,9 +1811,12 @@ _setup_default_mode() {
 # name are printed first. Under `--all` the page's one yes was given before the
 # text was on screen, so the page's flag is lifted for this one read.
 #
-# AN EDITED BLOCK IS THE USER'S (T40, finding 5). A whole pass says so in one
-# line and moves on; the difference, and the question that could replace it,
-# come only when the item is asked for by name (`--only working-principles`).
+# THE SPAN BETWEEN THE MARKERS IS BIONIC'S (wave-31 T10, D8; this reverses wave-27
+# T40 finding 5, "an edited block is the user's"). When it differs from the shipped
+# text, setup replaces it without asking, in a whole pass and under
+# `--only working-principles` alike, and the summary says it was updated. The
+# user's own text belongs outside the markers, and the shipped span's first line
+# says so. An absent block is still an offer and still asks.
 # MALFORMED MARKERS AND A READ-ONLY FILE ARE REFUSED (T40, findings 2 and 8):
 # what was found is printed, and nothing is asked or written.
 
@@ -1846,19 +1848,8 @@ setup_working_principles() {
     return 0
   fi
 
-  if [ "$state" = "edited" ]; then
-    if [ -z "$SETUP_ONLY" ]; then
-      item "$SETUP_NIL" "working principles" "differ from bionic's text — kept as they are"
-      say "     in ${file}; to see the difference: ${SETUP_SELF_CMD} --only working-principles"
-      return 0
-    fi
-    say "   ${file} carries bionic's working principles, changed. What replacing them would change:"
-    principles_diff | while IFS= read -r _setup_diff_line || [ -n "$_setup_diff_line" ]; do
-      say "     ${_setup_diff_line}"
-    done
-    SETUP_ALL=0 RM_ALL=0 consent "   Replace your changed block with bionic's text?"; _setup_consent_rc=$?
-    if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "your block in ${file} is kept."; return 0; fi  # consent gate: principles edit
-  else
+  # An edited span falls straight through to the write: it is bionic's, and nothing is asked (AC-7.2).
+  if [ "$state" != "edited" ]; then
     say "   bionic's working principles are not in ${file}."
     say "   This is the text bionic would add, between its markers:"
     say ""
@@ -1876,7 +1867,12 @@ setup_working_principles() {
 
   principles_set; rc=$?
   case "$rc" in
-    0) item "$SETUP_OK" "working principles" "written to ${file} — new sessions read them" ;;
+    0) if [ "$state" = "edited" ]; then
+         item "$SETUP_OK" "working principles" "updated in ${file} — bionic's span now carries the current text; new sessions read it"
+         SETUP_UPDATED="${SETUP_UPDATED}working-principles span in ${file}"$'\n'
+       else
+         item "$SETUP_OK" "working principles" "written to ${file} — new sessions read them"
+       fi ;;
     2) item "$SETUP_BAD" "working principles" "markers do not pair up — nothing written"
        action "fix bionic's working-principles markers in ${file} by hand" ;;
     3) item "$SETUP_NIL" "working principles" "read-only — not written"
@@ -1885,60 +1881,6 @@ setup_working_principles() {
     *) item "$SETUP_BAD" "working principles" "could not write ${file} — it is as it was"
        action "add bionic's working principles to ${file} (bionic could not write the file)" ;;
   esac
-  return 0
-}
-
-# ─── Step 14 — the machine's share ───────────────────────────────────────────
-#
-# ONE NUMBER FOR THE MACHINE (wave-28 T10; spec D16). The gate holds every heavy command to a share of the
-# memory and processors this machine has, and the share is one file the user sets: `detect_share_file`,
-# an integer 1 to 100, 80 when there is none. A yes writes the default so the number is there to change; a
-# no writes nothing and the default stands, exactly as a declined principles block leaves CLAUDE.md alone.
-# A share already there is the user's and is never asked about or overwritten, whatever it holds. The
-# number is changed afterwards with `session-poker.sh share <n>`, which this step names with the real path.
-#
-# SETUP_SHARE_DEFAULT, set above `_setup_item_verb` (the plan names it), is `gate_share`'s own fallback.
-
-_setup_poker_path() {
-  local p
-  p="$(_setup_self_path)"
-  printf '%s/hooks/session-poker.sh' "${p%/scripts/setup.sh}"
-}
-
-setup_share() {
-  _setup_wants share || return 0
-  say ""
-  say "14. Machine share"
-  local file rc tmp
-  file="$(detect_share_file)"
-
-  # idempotence guard: share item
-  case "$(detect_share)" in
-    *"state=file "*) item "$SETUP_OK" "share" "already set — nothing to do"; say "   file: ${file}"; return 0 ;;
-  esac
-
-  say "   bionic asks one gate before every heavy command, and the gate holds all of them to a share of this"
-  say "   machine's memory and processors: ${SETUP_SHARE_DEFAULT}% unless you set another. A no writes nothing."
-  say "   file: ${file}"
-  consent "   Write the share, ${SETUP_SHARE_DEFAULT}%, to that file?"; rc=$?
-  if [ "$rc" -ne 0 ]; then  # consent gate: share item
-    _setup_say_declined "$rc" "${file} is unchanged; the share stays at its default, ${SETUP_SHARE_DEFAULT}%."
-    action "write the machine's share to ${file} — $(_setup_answer_yes share)"
-    return 0
-  fi
-
-  tmp="${file}.bionic.tmp.$$"
-  if mkdir -p "${file%/*}" 2>/dev/null && printf '%s\n' "$SETUP_SHARE_DEFAULT" > "$tmp" 2>/dev/null \
-     && mv -f "$tmp" "$file" 2>/dev/null; then
-    item "$SETUP_OK" "share" "${SETUP_SHARE_DEFAULT}% written — the gate reads it"
-    say "   file: ${file}"
-    say "   change it any time, 1 to 100: bash $(_setup_poker_path) share <n>"
-  else
-    rm -f "$tmp" 2>/dev/null
-    item "$SETUP_BAD" "share" "could not write the share file — it is as it was"
-    say "   file: ${file}"
-    action "write the machine's share to ${file} (bionic could not write the file)"
-  fi
   return 0
 }
 
@@ -1952,6 +1894,14 @@ setup_summary() {
   # filing it among the failures would say the statusline did not get installed.
   [ "${SETUP_PLUGIN_CHANGED:-}" = "yes" ] && \
     say "   newly installed plugins take effect after /reload-plugins or a new session."
+  # WHAT THIS RUN UPDATED WITHOUT ASKING comes next, one line each: the principles span is bionic's
+  # (wave-31 T10), so a replacement was not asked for and the summary is where it is reported.
+  if [ -n "$SETUP_UPDATED" ]; then
+    local u
+    while IFS= read -r u; do
+      [ -n "$u" ] && say "   updated — ${u}"
+    done <<< "$SETUP_UPDATED"
+  fi
   if [ -z "$SETUP_ACTIONS" ]; then
     # A NARROWED RUN MAY NOT CLAIM THE WHOLE MACHINE (the RV-6 class: a summary
     # that overreaches teaches the reader to stop reading it). One item finished
@@ -2034,7 +1984,7 @@ fi
 if [ "$setup_all" = "1" ]; then
   say "bionic setup"
 else
-  say "bionic setup — every change below is asked for first, one item at a time."
+  say "bionic setup — every change below is asked for first, one item at a time; the one exception is bionic's own working-principles span, which setup brings up to date without asking."
 fi
 
 # THE ONE EVENT, BEFORE ANY STEP SPEAKS. Under `--all` the whole page is printed
@@ -2087,7 +2037,6 @@ setup_legacy_hook_files
 setup_legacy_agent_copies
 setup_permission_mode
 setup_working_principles
-setup_share
 setup_summary
 
 exit 0

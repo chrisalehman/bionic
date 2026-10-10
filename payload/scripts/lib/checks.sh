@@ -343,21 +343,13 @@ bionic_check_claude_proxy() {  # <row id>
   return 1
 }
 
-# Fires on `absent` only: an offer nobody has taken. `edited` is the user's own
-# text and not a finding, so `setup --all` can come back clean with it in place
-# (wave-27 T40, review pass 9 finding 5); `malformed` is a fault no setup step
-# can repair, so doctor reports it with its own fix line and setup's plan does
-# not offer a step that would only refuse.
+# Fires on `absent` (an offer nobody has taken) and on `edited` (the span between
+# bionic's markers differs from the shipped text, and setup replaces it without
+# asking, wave-31 T10), so the `--all` page names the update. `malformed` is a
+# fault no setup step can repair, so doctor reports it with its own fix line and
+# setup's plan does not offer a step that would only refuse.
 bionic_check_working_principles() {  # <row id>
-  [ "$(principles_state)" = "absent" ]
-}
-
-# THE SHARE OFFER (wave-28 T10; D16). Fires while no share file is there, which is an offer nobody has
-# taken and not a fault: the gate's 80 stands without one. So the row carries no label and doctor prints
-# no fix line for it; its one line on that page is the RESOURCES share row, which says where the number
-# came from. Setup's roster and `--only share` read it.
-bionic_check_share() {  # <row id>
-  case "$(detect_share)" in *"state=default "*) return 0 ;; esac
+  case "$(principles_state)" in absent|edited) return 0 ;; esac
   return 1
 }
 
@@ -764,7 +756,6 @@ _bionic_checks_build() {
   _bionic_checks_emit "legacy-permission-block" "legacy permission block" "bionic_check_legacy_permission_block" "setup" "legacy-permission-block" "$r_setup"
   _bionic_checks_emit "permission-mode" "default permission mode" "bionic_check_permission_mode" "setup" "permission-mode" "$r_setup"
   _bionic_checks_emit "working-principles" "working principles" "bionic_check_working_principles" "setup" "working-principles" "$r_setup"
-  _bionic_checks_emit "share" "" "bionic_check_share" "setup" "share" "$r_setup"
 
   _bionic_checks_emit "statusline-npx" "statusLine command" "bionic_check_statusline_npx" "setup" "tool:ccstatusline" "$r_setup"
 

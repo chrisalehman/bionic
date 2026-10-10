@@ -1908,7 +1908,7 @@ fi
 if declare -F gate_share >/dev/null 2>&1; then
   _g_share="$(gate_share)"
   # THE SOURCE IS detect.sh's (wave-28 T10): `state=file` when the share file is there, `default` when the
-  # gate's 80 stands. The file is the one `session-poker.sh share <n>` and setup's share step write.
+  # gate's 85 stands. The file is the one `session-poker.sh share <n>` writes.
   case "$(detect_share)" in *"state=file "*) _g_from="set in bionic/share" ;; *) _g_from="the default; no share file" ;; esac
   _res_add "$(_doctor_item "$DOCTOR_NIL" "share" "${_g_share}% of this machine (${_g_from})")"
   if [ -d "$(gate_dir)/requests" ]; then
@@ -2654,9 +2654,9 @@ else
 fi
 # THE WORKING PRINCIPLES, AN OFFER LIKE THE ROW ABOVE, IN FOUR STATES (wave-27
 # D16, T40). Absent is an offer nobody took: `–` with the route. Edited is a
-# STATE, not a finding — the block differs from bionic's text and is kept as it
-# is; it is not called "your edit", because an older shipped text reads the same
-# way until a release changes the text. Malformed is the one fault: the markers
+# STATE, not a finding — the span differs from bionic's text and setup brings it
+# up to date without asking (wave-31 T10); it is not called "your edit", because
+# an older shipped text reads the same way until a release changes the text. Malformed is the one fault: the markers
 # do not pair up, nothing can read or write the block, and the fix line gathered
 # above stands for the `✗`. The state is env.sh's `principles_state`, through
 # detect.sh.
@@ -2664,7 +2664,7 @@ _principles_label="$(bionic_check_label working-principles)"
 _principles_hint="$(bionic_check_hint working-principles)"
 case "$PRINCIPLES_STATE" in
   present)   _doctor_env3 "$DOCTOR_OK"  "$_principles_label" "on"     "in $(_doctor_tilde "$(principles_file)")" ;;
-  edited)    _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "differs from bionic's text — kept as it is" ;;
+  edited)    _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "differs from bionic's text — setup brings it up to date" ;;
   malformed) _principles_where="$(principles_where)"
              _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "malformed" "${_principles_where%%$'\n'*}" ;;
   not-a-file) _principles_what="$(markers_regular "$(principles_file)")"
