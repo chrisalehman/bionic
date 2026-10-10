@@ -1253,11 +1253,32 @@ proof_state() {
   printf 'covered\t%s\n' "$c"
 }
 
+# proof_regression <plan> -> `no` when the plan's leading frontmatter says `regression: no`, else `yes`;
+# exit 0 (wave-31 T27; REQ-12 AC-12.2; D4). THE REGRESSION IS A STEP-0 SETTING: `session-poker.sh
+# regression` writes the key, and at `no` the run owes no floor. AN ABSENT KEY, OR ANY VALUE BUT `no`,
+# READS `yes`, fail-closed as an absent `walk:` reads `required`: only the explicit word relaxes
+# anything. The key's sibling `regression-override:` records who chose against the scale default; it is
+# never read here. One reading for facts_owed below and lib/units.sh's integrate default; the Step-5
+# arm (lib/walls.sh validate_tests_block) reads the same key through the gate's own frontmatter_get.
+proof_regression() {
+  local v=""
+  [ -f "${1:-}" ] && v="$(awk '
+    { sub(/\r$/, "") }
+    NR == 1 && $0 == "---" { f = 1; next }
+    f && $0 == "---" { exit }
+    f && /^[[:space:]]*regression[[:space:]]*:/ {
+      v = $0; sub(/^[[:space:]]*regression[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
+      gsub(/^["\047]|["\047]$/, "", v); print v; exit }' "$1" 2>/dev/null)"
+  if [ "$v" = no ]; then printf 'no\n'; else printf 'yes\n'; fi
+}
+
 # facts_owed <rigor> <scale> [<tree>] [<plan>] -> one line per fact a run owes, exit 0; nothing and
 # exit 1 when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27
 # T9; D2):
 #
-#     floor                                          the full run, proof_state's question
+#     floor                                          the full run, proof_state's question; not
+#                                                    dealt when <plan> reads `regression: no`
+#                                                    (proof_regression, wave-31 T27; REQ-12 AC-12.2)
 #     review<TAB><question><TAB><role><TAB>piece     each question, for the role the rigor deals it
 #     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
 #     check                                          when <tree>'s .bionic/config.yaml names a
@@ -1271,7 +1292,7 @@ proof_state() {
 # the rigor's: it is owed only when the caller names the project root whose configuration declares
 # it, as facts_state does, so the dealing of a rigor alone is the same in every project.
 facts_owed() {
-  local owed r=""
+  local owed r="" floor=1
   # THE WORD IS READ AS ITS LEVEL (wave-28 T44; wave-30 T11, D1). The dealing is keyed by the level
   # words themselves, so the plan's word is read through lib/run.sh `rigor_level` and a word that is
   # no level deals nothing. A copy of this file read where run.sh is not beside it (a suite's
@@ -1282,14 +1303,15 @@ facts_owed() {
   else
     r="$(rigor_level "${1:-}" 2>/dev/null)" || r=""
   fi
-  owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v s="${2:-}" '
+  [ -z "${4:-}" ] || [ "$(proof_regression "$4")" != no ] || floor=0
+  owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v s="${2:-}" -v floor="$floor" '
     BEGIN {
       if (s != "task" && s != "wave" && s != "epic") exit 1
       n = split(ENVIRON["PROOF_D"], d, " ")
       for (i = 1; i <= n; i++) if (r != "" && index(d[i], r "=") == 1) roles = substr(d[i], length(r) + 2)
       if (roles == "") exit 1
       m = split(ENVIRON["PROOF_Q"], q, " "); split(roles, role, ",")
-      print "floor"
+      if (floor == 1) print "floor"
       for (i = 1; i <= m; i++) print "review\t" q[i] "\t" role[i] "\tpiece"
       if (s == "wave")
         for (i = 1; i <= m; i++) if (index(" " ENVIRON["PROOF_C"] " ", " " q[i] " ")) print "review\t" q[i] "\t" role[i] "\twhole"

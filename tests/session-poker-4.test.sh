@@ -3439,9 +3439,9 @@ expect_eq "RS-2d asked again, the plan already reads so: exit 0" "0" "$RC"
 expect_contains "RS-2e …saying so" "already reads so" "$OUT"
 expect_true "RS-2f …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PRS"
 
-# THE ONE LINE IS REWRITTEN, NEVER DOUBLED: a stale override (another person, another date) and a
-# key reading the other value are both replaced by the one pair.
-awk 'NR == 1 { print; print "regression: yes"; print "regression-override: Old Name 2020-01-01 derived=yes chosen=no"; next } { print }' \
+# THE ONE LINE IS REWRITTEN, NEVER DOUBLED: a stale override (another person, another date) beside
+# the key RS-2 left reading the other value; the verb replaces both with the one pair.
+awk '{ print } /^regression: yes$/ { print "regression-override: Old Name 2020-01-01 derived=yes chosen=no" }' \
   "$PRS" > "$PRS.tmp" && mv "$PRS.tmp" "$PRS"
 expect_eq "RS-3 precondition: the plan carries one key and one stale override" "1|1" \
   "$(rs_fm "$PRS" regression | wc -l | tr -d ' ')|$(rs_fm "$PRS" regression-override | wc -l | tr -d ' ')"

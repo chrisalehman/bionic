@@ -443,6 +443,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
   die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row|file>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names what they wait on (declined-on=)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
+  die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind)"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
@@ -597,6 +598,15 @@ case "$VERB" in
     esac
     BG_N="${1#writers=}"
     BG_REPLY="$2"
+    ;;
+  # THE REGRESSION SETTING (wave-31 T27; REQ-12; D4). `yes` or `no` and the user's reply, verbatim;
+  # the value's own shape is the verb's refusal (1), a missing operand or reply the usage error.
+  regression)
+    if [ $# -ne 2 ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "regression takes exactly two arguments: yes or no, and the user's reply, verbatim."
+    fi
+    RG_V="$1"
+    RG_REPLY="$2"
     ;;
   # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
   # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
@@ -6360,6 +6370,66 @@ EOF
     fi
     plan_verb_swap budget "writers=$BG_N (source=user)" writer
     say "budget — writers=$BG_N source=user and $BG_OVR written to $PV_PLAN; dry-committed first. The dispatch wall, the tick and the turn-end wall read it from the header."
+    exit 0
+    ;;
+
+  # THE REGRESSION SETTING (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4). Whether the run runs the
+  # regression is a Step-0 setting, written once into the plan's frontmatter as `regression: <v>`,
+  # which lib/walls.sh `validate_tests_block` (Step 5), lib/proof.sh `facts_owed` (Step 8) and the
+  # integrate row's kind default (lib/units.sh) read. THE SCALE DEFAULT is task no, wave yes, epic no;
+  # a value against it is the user's override, recorded beside the key as
+  # `regression-override: <git user.name> <date> derived=<default> chosen=<v>`, budget-override:'s
+  # form above and the sibling of `rigor-override:`. A value AT the default removes any override
+  # line, and the one key and the one override line are rewritten, never doubled. It goes through
+  # the plan transaction every plan verb takes. REFUSED: a value that is not exactly yes or no (1);
+  # a reply with a line break (1); a plan whose scale: is not task, wave or epic, so there is no
+  # default to record against (1); no usable git user name when an override is owed (1); a plan
+  # with no leading frontmatter (1). The value in force asked again is the transaction's no-op (0).
+  regression)
+    case "$RG_V" in
+      yes|no) : ;;
+      *)
+        die "REFUSED — regression $(clean "$RG_V") is not yes or no; the plan is unchanged."
+        exit 1 ;;
+    esac
+    case "$RG_REPLY" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — the user's reply carries a line break; give it on one line. The plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open regression
+    RG_SCALE="$(plan_frontmatter_get "$PV_PLAN" scale)"
+    case "$RG_SCALE" in
+      task|epic) RG_DEF=no ;;
+      wave) RG_DEF=yes ;;
+      *)
+        die "REFUSED — the plan's scale: is '$(clean "${RG_SCALE:-none}")', not task, wave or epic, so the regression has no default to record against; the plan is unchanged."
+        exit 1 ;;
+    esac
+    RG_OVR=""
+    if [ "$RG_V" != "$RG_DEF" ]; then
+      RG_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
+      if [ -z "$RG_WHO" ] || ! plan_verb_value_ok "$RG_WHO"; then
+        die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who overrode the $RG_SCALE default; the plan is unchanged."
+        exit 1
+      fi
+      RG_OVR="regression-override: $RG_WHO $(date -u +%Y-%m-%d) derived=$RG_DEF chosen=$RG_V"
+    fi
+    # THE VALUES GO IN THROUGH THE ENVIRONMENT, as budget's do. The key is rewritten where it stands,
+    # its override directly after it; with no key the pair goes in above the closing `---`.
+    if ! RG_V="$RG_V" RG_OVR="$RG_OVR" awk '
+      function pair() { print "regression: " ENVIRON["RG_V"]; if (ENVIRON["RG_OVR"] != "") print ENVIRON["RG_OVR"]; done = 1 }
+      NR == 1 && $0 == "---" { f = 1; print; next }
+      f && $0 == "---" { if (!done) pair(); f = 0; closed = 1; print; next }
+      f && /^regression-override:/ { next }
+      f && /^regression:/ { if (!done) pair(); next }
+      { print }
+      END { if (!closed) exit 1 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN has no leading frontmatter to write the regression setting into; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap regression "regression: $RG_V" writer
+    say "regression — regression: $RG_V${RG_OVR:+ and $RG_OVR} written to $PV_PLAN; dry-committed first. The Step-5 gate reads the key$([ "$RG_V" = no ] && printf ': its block owes regression: no (Step 0, <user>) — <where it runs> in place of the floor')."
     exit 0
     ;;
 
