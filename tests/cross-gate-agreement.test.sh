@@ -5154,25 +5154,19 @@ expect_eq "…and still calls it — the one call site is unchanged" "1" \
   "$(/usr/bin/grep -cE '(^|[^a-z_])live_ids_of_name \"' "$ROOTS_TREE/hooks/stop-guard.sh")"
 
 # ============================================================
-section "V — SUPPORTED_SDLC_VERSION: one owner, four carriers, five renderings (AC-19)"
+section "V — SUPPORTED_SDLC_VERSION: one owner, every code and SVG carrier agrees (AC-19)"
 # ============================================================
 #
-# r3 §1E item 13: one logical constant, five renderings, and the two hooks were not held
+# r3 §1E item 13: one logical constant, several renderings, and the two hooks were not held
 # in agreement by anything until this section — the only prior test hit was a single
-# spot-check literal in tests/canonical-sdlc-evidence-gate.test.sh, and operational-rules.md
-# itself says the pin-sync rows lived in tests/scripts.test.sh, retired at epic-18 W3
-# (8582861). `.claude/rules/hook-authoring.md` said both hooks pinned 12 well after they
-# moved to 14 — a stale literal in a FILE ABOUT the pin, the same failure mode this section
-# exists to catch in the pin's own carriers.
+# spot-check literal in tests/canonical-sdlc-evidence-gate.test.sh.
 #
-# THE OWNER is canonical-sdlc-evidence-gate.sh (spec AC-19, provenance table): it is the
-# file operational-rules.md's close-out contract cites by name ("Both hooks check
-# `SUPPORTED_SDLC_VERSION=14`") and the one whose refusal message names the fix. Four
-# carriers restate it: the governing-skill hook's own copy, the value operational-rules.md
-# documents in prose, and two SVG renderings — lifecycle.svg's title and hook-chain.svg's
-# three `class="version-pin"` chips (§1E's SVG count is 2; hook-chain.svg alone carries
-# three of the five total renderings the census counts as "both SVGs"). A per-file suite
-# cannot see this drift: each carrier reads fine on its own while all five disagree.
+# THE OWNER is canonical-sdlc-evidence-gate.sh (spec AC-19, provenance table): the one whose
+# refusal message names the fix. The carriers restate it: the governing-skill hook's own copy
+# and two SVG renderings — lifecycle.svg's title and hook-chain.svg's three
+# `class="version-pin"` chips. A per-file suite cannot see this drift: each carrier reads fine
+# on its own while they disagree. (Wave-31: the value operational-rules.md documented in
+# prose is no carrier here; a test proves what a program does, never what a document says.)
 
 # THE ORIGIN IS THE LIBRARY THE GATE'S BODY LIVES IN (T23): `SUPPORTED_SDLC_VERSION`
 # is inside `_eg_body` in payload/scripts/lib/walls.sh, at column zero, and the hook beside
@@ -5180,19 +5174,11 @@ section "V — SUPPORTED_SDLC_VERSION: one owner, four carriers, five renderings
 V_ORIGIN="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
 [ -r "$V_ORIGIN" ] || V_ORIGIN="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
 V_GSKILL="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
-V_RULES="$BIONIC_SKILLS_DIR/canonical-sdlc/operational-rules.md"
 V_LIFECYCLE="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/lifecycle.svg"
 V_HOOKCHAIN="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/hook-chain.svg"
 
 # extractors — each pulls the bare integer out of its file's own rendering shape.
 v_hook_val() { grep -m1 '^SUPPORTED_SDLC_VERSION=' "$1" 2>/dev/null | cut -d= -f2 | tr -cd '0-9'; }
-v_rules_val() {  # operational-rules.md lists versions newest-first and says so at :17
-                 # ("Every version bullet below v14 in this file is historical record
-                 # only") — the FIRST `SUPPORTED_SDLC_VERSION=` hit is the live value, the
-                 # rest are superseded history. Same first-match convention §N.1's loader
-                 # block extraction and the evidence-gate's own frontmatter reads use.
-  grep -m1 -o 'SUPPORTED_SDLC_VERSION=[0-9]\+' "$1" 2>/dev/null | cut -d= -f2
-}
 v_lifecycle_val() {  # <text class="version-pin" data-pin="lifecycle-title" ...>...(v14)</text>
   grep -m1 'data-pin="lifecycle-title"' "$1" 2>/dev/null | grep -oE '\(v[0-9]+\)' | tr -cd '0-9'
 }
@@ -5210,9 +5196,6 @@ expect_eq "the origin (evidence gate) declares a non-vacuous SUPPORTED_SDLC_VERS
 
 expect_eq "the governing-skill hook's SUPPORTED_SDLC_VERSION agrees with the gate's" \
   "$V_ORIGIN_VAL" "$(v_hook_val "$V_GSKILL")"
-
-expect_eq "operational-rules.md's live SUPPORTED_SDLC_VERSION value agrees with the gate's" \
-  "$V_ORIGIN_VAL" "$(v_rules_val "$V_RULES")"
 
 expect_eq "lifecycle.svg's title renders the same version" \
   "$V_ORIGIN_VAL" "$(v_lifecycle_val "$V_LIFECYCLE")"
@@ -10065,7 +10048,7 @@ section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-3
 # against the doctored copy, a count-difference row, or nothing at all. The
 # research code map's census found 24 of them; the real number in this tree is 49
 # call sites over four suites, because the census read only `grep -v` in this suite
-# and `DOCTORED…=` in docs-pins, and missed every `sed`/`awk` mutant tree here plus
+# and missed every `sed`/`awk` mutant tree here plus
 # the doctoring `agent-context-guard` and `landing-gate` each carry. Every one of
 # them now goes through ONE spelling — the framework's `anchor` — and this section
 # is the wall that keeps them there.
@@ -10077,7 +10060,6 @@ section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-3
 # loud and still be a real sweep.
 
 S19_TESTS_DIR="$REPO_ROOT/tests"
-S19_DOCS_PINS="$S19_TESTS_DIR/docs-pins.test.sh"
 S19_ASSERT="$S19_TESTS_DIR/lib/assert.sh"
 
 # The four hand-rolled precondition idioms this wave removed, as one ERE.
@@ -10103,54 +10085,27 @@ S19_HAND_HITS="$(cd "$S19_TESTS_DIR" && /usr/bin/grep -cE -- "$S19_HANDROLLED" .
 expect_empty "S19.2 no suite in tests/ hand-rolls a mutation precondition any more" \
   "$S19_HAND_HITS"
 
-# THE PAIRED POSITIVE, and the discriminating one: the same sweep over a copy of
-# docs-pins with ONE of those idioms planted back must name that copy. Without
-# this row, §S19.2 would pass just as loudly against a pattern that matches
-# nothing at all.
+# THE PAIRED POSITIVE, and the discriminating one: the same sweep over a file with ONE of
+# those idioms planted must name that file. Without this row, §S19.2 would pass just as
+# loudly against a pattern that matches nothing at all.
 S19_SB="$SANDBOX/s19"
 mkdir -p "$S19_SB"
-cp "$S19_DOCS_PINS" "$S19_SB/replanted.test.sh"
 # built with %s so this line does not itself spell the idiom it plants
 printf 'if cmp -%s "$SKILL_MD" "$DOCTORED_REPLANTED"; then no "x" "the %s target matched nothing"; fi\n' \
   s sed >> "$S19_SB/replanted.test.sh"
 expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom planted back" "1" \
   "$(/usr/bin/grep -cE -- "$S19_HANDROLLED" "$S19_SB/replanted.test.sh" | tr -d ' ')"
 
-# --- §S19.3 retired (wave-24): six exact-count pins on `anchor` calls (docs-pins sites and calls,
+# --- §S19.3 retired (wave-24): six exact-count pins on `anchor` calls (per-suite sites and calls,
 # this suite, agent-context-guard, landing-gate, and their total). An exact count goes red on
 # every legitimate new mutant and is repaired by retyping the number, so it tested the author's
 # memory, not the tree. The relation it stood for is derived below, in §S19.4, with its paired
 # positive; §S19.2 holds the absence side across every suite.
 
-# --- §S19.4 COMPLETENESS: no doctoring site is left undeclared ---
-# Mechanically derived rather than counted: every `DOCTORED…="$TMP/…"` assignment
-# must carry an `anchor` call within the three lines above it.
-s19_unanchored() {  # s19_unanchored <suite> -> how many doctoring sites have no anchor above them
-  awk '
-    /^DOCTORED[A-Z0-9_]*="\$TMP\// {
-      found = 0
-      for (i = 1; i <= 3; i++) if (p[i] ~ /^[ \t]*anchor[ \t]/) found = 1
-      if (!found) n++
-    }
-    { p[3] = p[2]; p[2] = p[1]; p[1] = $0 }
-    END { print n + 0 }
-  ' "$1"
-}
-expect_eq "S19.4 every docs-pins doctoring site is anchored" "0" \
-  "$(s19_unanchored "$S19_DOCS_PINS")"
-
-# THE PAIRED POSITIVE: the same derivation over a copy with one anchor call
-# deleted must find exactly the site that lost it.
-sed '/^anchor .*BIND_DOCS_TRY=/d' "$S19_DOCS_PINS" > "$S19_SB/unanchored.test.sh"
-expect_eq "S19.4 …and the derivation names a site whose anchor was deleted" "1" \
-  "$(s19_unanchored "$S19_SB/unanchored.test.sh")"
-expect_eq "S19.4 …from a copy that really did lose one line (not vacuous)" "1" \
-  "$(( $(wc -l < "$S19_DOCS_PINS") - $(wc -l < "$S19_SB/unanchored.test.sh") ))"
-
 # --- §S19.4 agent-context-guard: every doctored copy of the guard is anchored ---
 # agent-context-guard builds its mutants through one helper, so a site is any line
-# writing a copy of "$GUARD" to a file. The suite does not use docs-pins' DOCTORED…=
-# idiom, so it gets its own site pattern, and a pattern that finds no site is RED
+# writing a copy of "$GUARD" to a file. The suite gets its own site pattern, and a
+# pattern that finds no site is RED
 # here rather than a silent pass of the relation below it.
 #
 # THE ANCHOR MAY SIT ANYWHERE EARLIER IN THE SITE'S BLOCK (the lines since the last
@@ -10928,94 +10883,6 @@ for _apfn in audit_path normalize_newlines log_finding answers_path log_answer; 
 done
 
 # ============================================================
-section "needs-resolve — every canonical-sdlc needs: entry names a real skill (dead-route drift, epic-23 wave-12-fixit-171 REQ-7)"
-# ============================================================
-#
-# WHY. `needs:` in skills/canonical-sdlc/SKILL.md is read as "route here for this
-# phase" — a name that resolves nowhere is a route to nothing, and the miss surfaces
-# only when an agent tries to follow it. Six such names (`shape`, `polish`,
-# `critique`, `audit`, `harden`, `normalize`) sat in the template with no skill
-# behind any of them: not a directory under skills/, not a payload plugin
-# dependency, not even an entry in this repo's own marketplace. T7 removes them from
-# the template; this section is the pin against a seventh landing unnoticed the
-# same way.
-#
-# RESOLUTION, offline and repo-local only — no ~/.claude, no network, no installed
-# plugins (a dispatch cannot assume the machine it runs on has any):
-#   (a) a BARE name (no `:`) resolves if it is a directory under skills/ in this
-#       repo, OR if it exactly names a plugin declared in
-#       .claude-plugin/marketplace.json. The second half is what keeps `impeccable`
-#       legal: marketplace.json describes it as "installed the first time a route
-#       needs it, never as a mandatory dependency" — a deliberate on-demand route,
-#       unlike the six fabricated names, which match neither a skills/ directory
-#       nor any plugin the marketplace has ever heard of.
-#   (b) a `<plugin>:<skill>` name resolves if <plugin> is named in
-#       payload/.claude-plugin/plugin.json's `dependencies` array (today:
-#       superpowers, agent-skills). The skill half is taken on trust — confirming
-#       it exists would mean reading that plugin's own tree, which this repo does
-#       not carry and must not require to run this suite.
-#   Anything else FAILS, and the failure names the entry (AC-7.2).
-
-NR_SKILL_MD="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-NR_PLUGIN_JSON="$BIONIC_SCRIPTS_DIR/payload/.claude-plugin/plugin.json"
-NR_MARKETPLACE_JSON="$BIONIC_SCRIPTS_DIR/.claude-plugin/marketplace.json"
-
-# --- the needs: list, exactly as the frontmatter states it: every `  - entry` line
-# between the top-level `needs:` key and the next top-level key. ---
-nr_needs_entries() {
-  awk '
-    /^needs:$/ { active=1; next }
-    active && /^[A-Za-z]/ { active=0 }
-    active && /^  - / { e=$0; sub(/^  - /,"",e); print e }
-  ' "$1"
-}
-
-NR_DEP_NAMES="$(jq -r '.dependencies[].name' "$NR_PLUGIN_JSON" 2>/dev/null)"
-NR_PLUGIN_NAMES="$(jq -r '.plugins[].name' "$NR_MARKETPLACE_JSON" 2>/dev/null)"
-
-# nr_resolves <entry> — exit 0 iff <entry> resolves by rule (a) or (b) above.
-nr_resolves() {
-  local entry="$1" plugin
-  case "$entry" in
-    *:*)
-      plugin="${entry%%:*}"
-      printf '%s\n' "$NR_DEP_NAMES" | grep -qxF "$plugin"
-      ;;
-    *)
-      [ -d "$BIONIC_SKILLS_DIR/$entry" ] && return 0
-      printf '%s\n' "$NR_PLUGIN_NAMES" | grep -qxF "$entry"
-      ;;
-  esac
-}
-
-# --- (a) THE SELF-TEST, before the real file is asked anything: known-good and
-# known-bad inputs against the resolver itself, so a resolver that always says yes
-# (or always says no) cannot pass this section by accident. ---
-expect_true "NR.1 a repo skills/ directory resolves (browser-verify)" \
-  nr_resolves "browser-verify"
-expect_true "NR.2 a declared-dependency <plugin>:<skill> resolves (agent-skills:context-engineering)" \
-  nr_resolves "agent-skills:context-engineering"
-expect_true "NR.3 a marketplace-declared, non-mandatory plugin resolves (impeccable)" \
-  nr_resolves "impeccable"
-expect_false "NR.4 a bare name matching no skills/ dir and no marketplace plugin does NOT resolve" \
-  nr_resolves "zzz-not-a-real-skill-zzz"
-expect_false "NR.5 a <plugin>:<skill> whose plugin is not a declared dependency does NOT resolve" \
-  nr_resolves "not-a-dependency:some-skill"
-
-# --- (b) THE REAL FILE. Every needs: entry in the rendered SKILL.md, checked
-# against the same resolver the self-test above just proved discriminates. ---
-NR_ENTRIES="$(nr_needs_entries "$NR_SKILL_MD")"
-expect_nonempty "NR.6 the rendered SKILL.md has a needs: list to check" "$NR_ENTRIES"
-
-NR_DEAD=""
-while IFS= read -r nr_e; do
-  [ -n "$nr_e" ] || continue
-  nr_resolves "$nr_e" || NR_DEAD="${NR_DEAD}${NR_DEAD:+ }${nr_e}"
-done <<< "$NR_ENTRIES"
-
-expect_empty "NR.7 every needs: entry in skills/canonical-sdlc/SKILL.md resolves" "$NR_DEAD"
-
-# ============================================================
 section "LC — THE LATEST-CONTRACT READING, retired in both walls: the recorder asks the one close predicate (epic-23 wave-12-fixit-171 T26; dispatch-wall half retired wave-20 T2, recorder half wave-20 T20, D10)"
 # ============================================================
 #
@@ -11475,95 +11342,6 @@ expect_eq "…and a planted THIRD caller elsewhere in the tree IS caught: the co
 rm -f "$BF_3RD_DIR/payload/commands/planted-third-caller.sh"
 expect_eq "control: the same scratch tree with the plant removed reads back to 2" "2" \
   "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
-
-# ============================================================
-section "SV — the shared brief-scaffold block is byte-identical across its two author surfaces (the six role files carry its reader view, Δ9), and re-authored to the new span rule (epic-23 wave-17-fixit-184 T9, REQ-7 AC-7.1)"
-# ============================================================
-#
-# WHY THIS LIVES HERE, NOT IN docs-pins.test.sh. `agents-src/blocks/brief-scaffold.md` is
-# ONE shared source `agents-src/render.sh` injects into SKILL.md, dispatch.md and all six
-# `agents/*.md` role files (research R2 §B4: before this task, three of those eight copies —
-# SKILL.md's, dispatch.md's, and every role file's — carried a stale "on its own paragraph"
-# comment the parser has not enforced since commit 9bf75d7). docs-pins.test.sh pins what each
-# rendered FINAL says; this file's whole purpose is agreement BETWEEN renders of the same
-# source, so the pin that the eight copies are one block rather than eight independent
-# opportunities to drift belongs here. `Suites: none` is the discriminating line: it is the
-# one row of the scaffold that changed text, so an EQ compare of that one line across all
-# eight copies is the tightest agreement pin — a byte-for-byte diff of the whole block would
-# also pass on eight copies that agree with each other while still teaching the old rule.
-#
-# HERMETIC. Reads the committed rendered finals by path; a mutated copy lives under
-# $SANDBOX.
-
-SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
-# The column padding before the comment was cut to two spaces at wave-24 T9 (A-T9.9), the
-# bytes paying for the scaffold's Done marker: line; the words are unchanged.
-# RE-POINTED (wave-27 T53, review pass 28 B3): the comment now tells the reader dealt `evidence`
-# to name its runs, since a `Suites: none` evidence reader is refused at dispatch.
-# RE-POINTED (wave-27 T60, review pass 38 B1): `Suites: none` beside a `Re-executes:` that names
-# a run is right for that reader, so the comment counts its runs across both labels.
-SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names 1 to 3 runs across both labels'
-
-sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
-  awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
-}
-
-# RE-POINTED (wave-21 T7b, design ledger Δ9): the author block renders into SKILL.md and
-# dispatch.md only. The six role files carry the reader view (brief-scaffold-reader.md),
-# which has no fenced `Suites: none` line; the arm after the count pins that each of them
-# carries that view, so a role file that lost its scaffold altogether still turns this red.
-SV_SURFACES="$SV_SKILL $SV_DISPATCH"
-
-SV_DISAGREE=""
-SV_COUNT=0
-for _sv_f in $SV_SURFACES; do
-  SV_COUNT=$((SV_COUNT + 1))
-  _sv_got="$(sv_suites_line "$_sv_f")"
-  [ "$_sv_got" = "$SV_SUITES_LINE" ] || SV_DISAGREE="${SV_DISAGREE} ${_sv_f##*/}=[${_sv_got:-<absent>}]"
-done
-expect_eq "SV both author surfaces (SKILL.md, dispatch.md) carry the shared scaffold's new Suites: line" \
-  "2 " "$SV_COUNT $SV_DISAGREE"
-
-# RE-POINTED (wave-27 T11): was `"6 "`, a count a seventh role turned red. A relation now:
-# every role file read carries the reader view, over a set that is not empty.
-SV_ROLES=0
-SV_READER=0
-SV_NOREADER=""
-for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
-  [ -f "$_sv_f" ] || continue
-  SV_ROLES=$((SV_ROLES + 1))
-  if /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f"; then SV_READER=$((SV_READER + 1))
-  else SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"; fi
-done
-expect_true "SV …the role files were read (the relation below is not vacuous)" test "$SV_ROLES" -ge 1
-expect_eq "SV …and every role file carries the reader view of the scaffold" \
-  "$SV_ROLES " "$SV_READER $SV_NOREADER"
-
-# THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
-# block updated in the source but only some templates re-rendered) would leave some copies
-# on the new line and others on the old — the equality above catches drift on the new text,
-# this catches survival of the old text.
-SV_STALE=0
-for _sv_f in $SV_SURFACES; do
-  /usr/bin/grep -qF 'on its own paragraph' "$_sv_f" 2>/dev/null && SV_STALE=$((SV_STALE + 1))
-done
-expect_eq "SV …and neither author surface still carries the retired 'on its own paragraph' comment" \
-  "0" "$SV_STALE"
-
-# ANTI-VACUITY: a doctored copy of one surface, reverted to the old comment, DOES disagree
-# with the shared constant — proving the equality pin above is load-bearing rather than
-# comparing an empty string to itself.
-SV_MUT="$SANDBOX/skill-stale-scaffold.md"
-anchor -E "$SV_SKILL" '1 to 3 runs across both labels$' 1
-sed 's/1 to 3 runs across both labels$/1 to 3 runs across both labels, on its own paragraph/' \
-  "$SV_SKILL" > "$SV_MUT" 2>/dev/null
-SV_MUT_LINE="$(sv_suites_line "$SV_MUT")"
-expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer matches the shared line" \
-  "no" "$([ "$SV_MUT_LINE" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
-expect_eq "SV MUTANT …and the un-doctored SKILL.md still does" \
-  "yes" "$([ "$(sv_suites_line "$SV_SKILL")" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
-
 
 section "RC — THE READ-ONLY ROLE SET: role_is_readonly equals the role files that disallow Write and Edit, plus Explore and Plan (wave-20 T7, AC-9.1)"
 #
@@ -14226,50 +14004,6 @@ expect_eq "DEAL mutation: the doctored copy still deals one role per question (i
   "$(deal double task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
 expect_ne "DEAL mutation: …and splits from the table, so the double row goes red" \
   "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles double task "$DEAL_MUT")"
-
-# THE RENDERED TABLE IS THE DEALING (wave-27 T17; wave-30 T11, REQ-1, A-orch-37). SKILL.md's rigor
-# table puts the levels in columns (`| | \`single\` | \`double\` |`) and its `readers` row says who
-# holds which question: `the <role> holds every question`, or `the <role> takes \`<q>\`[ and
-# \`<q>\`]`, the questions it does not take staying with the critic, which is dealt at every level.
-# Each level's cell must read back as exactly what `facts_owed` deals that level, so the table and
-# the code cannot drift. A doctored copy whose double cell hands structure to the auditor too must
-# split from the dealing.
-DEAL_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-deal_levels() {  # [<SKILL.md>] -> the rigor table's level columns, in order, space-joined
-  awk -F'|' '/^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); printf "%s%s", (n++ ? " " : ""), c }; exit }' \
-    "${1:-$DEAL_SKILL}" 2>/dev/null
-}
-deal_table() {  # <level> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
-  QS="$DEAL_QS" awk -F'|' -v r="$1" '
-    /^\| *\| *`single` *\|/ { for (i = 3; i < NF; i++) { c = $i; gsub(/[ `]/, "", c); if (c == r) col = i }; next }
-    col && $2 ~ /^ *readers *$/ {
-      nq = split(ENVIRON["QS"], qs, " "); s = $col
-      for (j = 1; j <= nq; j++) held[qs[j]] = "critic"
-      if (match(s, /the [a-z]+ holds every question/)) {
-        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role)
-        for (j = 1; j <= nq; j++) held[qs[j]] = role
-      } else if (match(s, /the [a-z]+ takes/)) {
-        role = substr(s, RSTART + 4, RLENGTH - 4); sub(/ .*/, "", role); s = substr(s, RSTART + RLENGTH)
-        while (match(s, /`[a-z]+`/)) { held[substr(s, RSTART + 1, RLENGTH - 2)] = role; s = substr(s, RSTART + RLENGTH) }
-      } else exit
-      for (j = 1; j <= nq; j++) printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
-      exit
-    }' "${2:-$DEAL_SKILL}" 2>/dev/null
-}
-expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a level header the reader parses" "$(deal_levels)"
-expect_eq "DEAL table: its level columns are single and double, and no third" "single double" "$(deal_levels)"
-for deal_l in single double; do
-  expect_nonempty "DEAL table precondition: SKILL.md's readers row has a $deal_l cell the reader parses" \
-    "$(deal_table "$deal_l")"
-  expect_eq "DEAL table $deal_l: the rendered cell equals what facts_owed deals $deal_l" \
-    "$(deal_roles "$deal_l" task)" "$(deal_table "$deal_l")"
-done
-DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
-anchor "$DEAL_SKILL" 'two: the auditor takes `evidence`' 1
-sed 's/two: the auditor takes `evidence`/two: the auditor takes `evidence` and `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
-expect_nonempty "DEAL table mutation: the doctored double cell still parses" "$(deal_table double "$DEAL_SKILL_MUT")"
-expect_ne "DEAL table mutation: …and splits from the dealing, so the cell goes red" \
-  "$(deal_roles double task)" "$(deal_table double "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
