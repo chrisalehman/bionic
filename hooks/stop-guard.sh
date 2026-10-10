@@ -322,7 +322,7 @@ bionic_context 2>/dev/null || exit 0
 # One session's transcript shows about thirty `hook_cancelled` at 10 s on `PreToolUse:TaskStop`: thirty
 # stops this guard never judged, and a live writer with an unmet contract can be killed by a slow
 # guard, which is the harm the guard exists to refuse. So the guard refuses first: a timer signals
-# this shell at SG_DEADLINE_S, 3 s under the registration (bounds.sh's rule for every inner bound),
+# this shell at SG_DEADLINE_S, 3 s under the registration (strictly under, the rule for every inner bound; cross-gate-agreement §L.4c pins it),
 # and the handler DENIES the stop — a stop the guard cannot judge is refused, never admitted.
 #
 # A RECORDED HUMAN ORDER IS READ FIRST and is never refused by the deadline: `SG_ORDER_HONOURED` is
