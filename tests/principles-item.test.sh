@@ -1362,7 +1362,8 @@ section "§SPAN-IS-BIONICS: the span between the markers is replaced on every se
 # ---------------------------------------------------------------------------
 
 SPAN_COMMENT='<!-- bionic replaces this span on every setup; your own text belongs outside the markers -->'
-SPAN_OPENING='bionic setup — every change below is asked for first, one item at a time; the one exception is bionic'"'"'s own working-principles span, which setup brings up to date without asking.'
+SPAN_OPENING='bionic setup — every change below is asked for first, one item at a time;
+the one exception is bionic'"'"'s own working-principles span, which setup updates without asking.'
 { IFS= read -r SPAN_FIRST; } < "$TMP/shipped-block"
 expect_eq "SPAN: the shipped span's first line is the replacement notice, verbatim" "$SPAN_COMMENT" "$SPAN_FIRST"
 expect_contains "SPAN: setup's opening line names the one exception, verbatim" "$SPAN_OPENING" "$NS_OUT"
