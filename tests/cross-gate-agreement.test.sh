@@ -1874,12 +1874,14 @@ mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-im
 sleep 1
 printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "the D-6 staleness wall still refuses past the old cap (critic F-1)" "2" "$ST"
+# THE GUARD RECORDS ITS VERDICT AND DENIES NOTHING (wave-31 T32; D6, AC-6.5): the stop of a working
+# agent is allowed and the look's verdict written on its row as reason=.
+expect_eq "the guard still judges the target past the old cap (critic F-1), and allows the stop (wave-31 T32)" "0" "$ST"
 # THE EXIT CODE ALONE CANNOT TELL A JUDGED STOP FROM AN UNJUDGED ONE (wave-28 T80). Since T70 the
 # guard refuses with exit 2 when it runs past its own deadline, and on this long roster it did:
 # every row here passed on a stop the guard never judged. The reason is what says it judged.
-expect_contains "…on the target's own state: it is still working" \
-  "it is still working, nothing delivered" "$OUT"
+expect_contains "…on the target's own state: it is alive, its contract undelivered" \
+  "is ALIVE and its contract is undelivered" "$OUT"
 expect_absent "…and not because the guard ran out of time on the long roster" \
   "did not finish in" "$OUT"
 
@@ -1896,11 +1898,11 @@ F3_SUB=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
   | bash "$PARTY_SG" 2>&1 >/dev/null); F3_SST=$?
 expect_eq "a subagent's stop and the orchestrator's reach the same verdict" "$F3_OST" "$F3_SST"
 expect_eq "…and it is the same line, word for word" "$F3_ORCH" "$F3_SUB"
-expect_eq "…which is the refusal this target's own state earns" "2" "$F3_OST"
+expect_eq "…which is the allowed stop this target's own state earns, its verdict recorded (wave-31 T32)" "0" "$F3_OST"
 # Two deadline refusals are also the same line, word for word, and exit 2 (T80): the reason
 # is what proves both actors' stops were judged.
 expect_contains "…and its reason is the target's state, for both actors" \
-  "it is still working, nothing delivered" "$F3_ORCH"
+  "is ALIVE and its contract is undelivered" "$F3_ORCH"
 expect_absent "…not the guard's deadline" "did not finish in" "$F3_ORCH"
 
 # The field NAMES themselves, stated as the agreement they are — so a rename
@@ -2017,6 +2019,7 @@ g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
     # that the gate got as far as having an opinion about the AGENT at all.
     *"No observation"*)      echo identified ;;
     *"still working"*)       echo identified ;;
+    *"STOP ALLOWED"*)        echo identified ;;
     *"STOP PERMITTED"*)      echo identified ;;
     # T22, then D8 (T5): with the roster gone the gate has no standing over a bare name at
     # all — the register is what makes a target ours. Through 1.7.1 that was a passthrough
@@ -12348,13 +12351,12 @@ jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidec
 cgt_agent toolu_01CGTA1 W-R1
 CGT_OUT="$(cgt_stop false)"
 expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
-# THE TWO DUTIES READ ONE LAUNCHED SET (wave-28 T38; REQ-13, D30). The task-entry duty binds a launch
-# to a plan row through the fill duty's own `_ST_LAUNCHED`, the set the recorder writes as `launched=`:
-# the same Stop's ledger line and its entry clause name the same launch. fails-when: they disagree.
+# THE LAUNCHED SET IS THE RECORDER'S (wave-28 T38; REQ-13, D30). The task-entry duty that also read it
+# went at wave-31 T32 (D6, AC-6.5): the Stop the recorder's line names is refused for the fill alone.
 expect_contains "CG-entry the recorder's line for turn A's first Stop records the launch W-R1" "|launched=W-R1|" \
   "$(head -n 1 "$CGT_R/.bionic/docs/record/cgturn/fill-ledger.log" 2>/dev/null)"
-expect_contains "CG-entry …and the same Stop's entry duty owes that launch's row, R1, folded into the fill's detail" \
-  "tasks: dispatched R1 this turn, 0 of 1 task entries set in progress" "$CGT_OUT"
+expect_absent "CG-entry …and the same Stop owes no task entry for it (the refusal above is the fill's)" \
+  "task entries set in progress" "$CGT_OUT"
 jq -nc '{type:"user",isMeta:true,uuid:"u-cgt-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$CGT_TR"
 cgt_agent toolu_01CGTA2 W-R2
 cgt_stop true >/dev/null
@@ -12907,7 +12909,7 @@ expect_contains "AM4 …reads the contract from the roster, by the id" "Contract
 expect_contains "AM4 …and publishes a non-empty target on its machine line" "|target=$AM_ID|" "$AM_OBS"
 expect_contains "AM4 …sourcing the deliverable from the roster" "|deliverable_source=roster|" "$AM_OBS"
 AM_SG=$(mk_stop_payload "$AM_SID" "$AM_TR4" "$AM_R4" "$AM_ID" | bash "$PARTY_SG" 2>&1); AM_SG_RC=$?
-expect_eq "AM4 the stop wall typed by the id refuses a stop of a working agent" "2" "$AM_SG_RC"
+expect_eq "AM4 the stop wall typed by the id allows a stop of a working agent, its verdict recorded (wave-31 T32)" "0" "$AM_SG_RC"
 expect_contains "AM4 …naming the agent by its non-empty id" "'$AM_ID' ($AM_ID) is ALIVE" "$AM_SG"
 expect_contains "AM4 …and printing the roster's contract for it" "deliverable:  pending — $AM_R4/never-yet.md" "$AM_SG"
 # THE TICK, over the same roster with the agent's log aged past its cadence. Its reading is
@@ -13196,13 +13198,13 @@ printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(ub_iso 1)" "$SID_A" > "
 } > "$UB3/tick.jsonl"
 ub_mode "$UB3" "$SID_A" "$UB3_P" fallback
 ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
-expect_eq "UB.3 duties gate, fallback: a write naming <p> discharges nothing — held as under none" \
-  "block" "$(ub_decision)"
-expect_contains "UB.3 …for the task-list refresh" "task-list refresh" "$UB_OUT"
+# The tick turn owes no task-list refresh under any mode (wave-31 T32; D6, AC-6.5): fallback, the
+# turn ends and the advisory is printed once (ub_collect); bound-open, it ends as well.
+expect_eq "UB.3 duties gate, fallback: the tick turn is not refused, as under none" "" "$(ub_decision)"
 ub_collect duties-gate "$UB_ERR" "$UB3_P"
 ub_mode "$UB3" "$SID_A" "$UB3_P" bound
 ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
-expect_eq "UB.3 duties gate, bound-open (control): the same write discharges the refresh" "" "$(ub_decision)"
+expect_eq "UB.3 duties gate, bound-open (control): the same turn ends" "" "$(ub_decision)"
 
 # ---- UB.4 fill gate ----------------------------------------------------------
 UB4=$(new_repo "ub-fill"); UB4_P="$UB4/.bionic/docs/plans/epic-99/run.md"

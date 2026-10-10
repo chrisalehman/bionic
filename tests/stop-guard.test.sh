@@ -2313,4 +2313,70 @@ expect_eq "UP7 the guard's code spells stop-unrostered/v1 once" "1" \
 expect_eq "UP7 …and stop-order/v1 once" "1" "$(grep -v '^[[:space:]]*#' "$GUARD" | grep -c 'stop-order/v1')"
 
 
+section "§STOP-REASON — a stop of a live writer whose contract is unmet is allowed, the guard's verdict written on its row as reason= (wave-31 T32; REQ-6 AC-6.5; D6; A-orch-41 ruling 4)"
+#
+# THE GUARD RECORDS ITS VERDICT AND DENIES NOTHING. Until wave-31 a stop of an agent the look found
+# alive with its contract undelivered was refused ("it is still working, nothing delivered"), a
+# process check the orchestrator answered by waiting or by asking the human for an order. D6 deletes
+# the refusal: the guard allows the stop and writes what it saw on the agent's roster row, as the
+# `reason=` key the unrostered branch already writes (roster.sh: after `done=`, before
+# `tool_use_id=`). The row is the name's latest row copied whole, so every by-key reader of the
+# latest row sees the contract and the verdict together. A TaskStop carries only its target
+# (`task_id`): there is no `--reason` channel, so the reason is the guard's own verdict (A-orch-41
+# ruling 4). A human's order is read first and executes as before.
+# fails-when: the stop is denied, or the row carries no reason naming what was missing.
+IFS='|' read -r SR_REPO SR_TR SR_SUB <<< "$(make_world sreason yes)"
+mkdir -p "$SR_REPO/.bionic/docs/record" "$SR_REPO/.bionic/tmp"
+plant_agent "$SR_SUB" "awriter-3434343434343434" "writer"
+printf 'stage 1\n' > "$SR_REPO/.bionic/tmp/writer.progress"
+sg_roster_row "$SR_REPO" "$SID_A" "writer" "awriter-3434343434343434" ".bionic/tmp/writer.progress" \
+  "confirmed" ".bionic/docs/record/writer.md" "" "" "" "300 seconds"
+wake_log "$SR_SUB" "awriter-3434343434343434"
+SR_RO="$SR_REPO/.bionic/tmp/roster-$SID_A.state"
+sr_rows() { awk -v k="|name=$1|" 'index($0, "roster-state/") == 1 && index($0 "|", k) { c++ } END { print c + 0 }' "$SR_RO"; }
+sr_last() { awk -v k="|name=$1|" 'index($0, "roster-state/") == 1 && index($0 "|", k) { l = $0 } END { print l }' "$SR_RO"; }
+sr_field() { printf '%s\n' "$1" | tr '|' '\n' | sed -n "s/^$2=//p" | head -1; }
+expect_eq "SR-0 precondition: the roster holds one row of the writer, carrying no reason=" "1|" \
+  "$(sr_rows writer)|$(sr_field "$(sr_last writer)" reason)"
+run_guard "$(mk_stop_payload "$SID_A" "$SR_TR" "$SR_REPO" "writer")"
+expect_status "SR-1 §STOP-REASON AC-6.5 a stop of a live writer whose contract is unmet: allowed" 0 "$GUARD_ST"
+expect_contains "SR-1b …and the guard says what it saw, the stop allowed" \
+  "STOP ALLOWED — 'writer' (awriter-3434343434343434) is ALIVE and its contract is undelivered" "$GUARD_ERR"
+expect_contains "SR-1c …with the four facts the look was made of" "deliverable:  pending" "$GUARD_ERR"
+SR_LAST="$(sr_last writer)"
+SR_WHY="$(sr_field "$SR_LAST" reason)"
+expect_eq "SR-2 …and the roster gains one row of the name" "2" "$(sr_rows writer)"
+expect_nonempty "SR-2b …the latest carrying reason= (the extractor reads the row)" "$SR_WHY"
+expect_contains "SR-2c the reason is the guard's verdict: the contract unmet" "unmet" "$SR_WHY"
+expect_contains "SR-2d …naming what was missing, the deliverable" ".bionic/docs/record/writer.md" "$SR_WHY"
+expect_eq "SR-2e …and the row copied keeps the contract: its id, status, deliverable and progress" \
+  "awriter-3434343434343434|confirmed|.bionic/docs/record/writer.md|.bionic/tmp/writer.progress" \
+  "$(sr_field "$SR_LAST" agent_id)|$(sr_field "$SR_LAST" status)|$(sr_field "$SR_LAST" deliverable)|$(sr_field "$SR_LAST" progress)"
+expect_eq "SR-2f …with reason= where roster_row writes it, just before tool_use_id=" "reason tool_use_id" \
+  "$(printf '%s\n' "$SR_LAST" | tr '|' '\n' | sed -n 's/^\([a-z_]*\)=.*/\1/p' | /usr/bin/grep -E -A1 '^reason$' | tr '\n' ' ' | sed 's/ $//')"
+# A SECOND STOP OF THE SAME WRITER writes its own verdict over the first, still one key.
+run_guard "$(mk_stop_payload "$SID_A" "$SR_TR" "$SR_REPO" "writer")"
+expect_eq "SR-3 a second stop of the same live writer is allowed too, and its row carries reason= once" "0|3|1" \
+  "$GUARD_ST|$(sr_rows writer)|$(sr_last writer | tr '|' '\n' | /usr/bin/grep -c '^reason=')"
+# A ROSTER THE VERDICT CANNOT BE WRITTEN TO: the stop is still allowed, and the guard says so.
+chmod 400 "$SR_RO"
+run_guard "$(mk_stop_payload "$SID_A" "$SR_TR" "$SR_REPO" "writer")"
+chmod 600 "$SR_RO"
+expect_status "SR-4 a roster the verdict cannot be written to: the stop is still allowed" 0 "$GUARD_ST"
+expect_contains "SR-4b …and the guard says the verdict was not written" "could not be written" "$GUARD_ERR"
+expect_eq "SR-4c …and the roster is unchanged" "3" "$(sr_rows writer)"
+# A USER'S STOP ORDER IS STILL IMMEDIATE: read first, it executes, and the guard writes no verdict.
+IFS='|' read -r SO_REPO SO_TR SO_SUB <<< "$(make_world sorder yes)"
+mkdir -p "$SO_REPO/.bionic/docs/record"
+plant_agent "$SO_SUB" "aordered-5656565656565656" "ordered"
+sg_roster_row "$SO_REPO" "$SID_A" "ordered" "aordered-5656565656565656" "" "confirmed" ".bionic/docs/record/ordered.md"
+wake_log "$SO_SUB" "aordered-5656565656565656"
+order_stop "$SO_REPO" "$SID_A" "ordered"
+run_guard "$(mk_stop_payload "$SID_A" "$SO_TR" "$SO_REPO" "ordered")"
+expect_status "SR-5 AC-6.5 a user-ordered stop of a live writer executes at once" 0 "$GUARD_ST"
+expect_contains "SR-5b …as the order, naming who gave it" "STOP ORDERED (by human)" "$GUARD_ERR"
+expect_eq "SR-5c …and the order path writes no verdict: one row, no reason=" "1|" \
+  "$(awk 'index($0, "|name=ordered|")' "$SO_REPO/.bionic/tmp/roster-$SID_A.state" | /usr/bin/grep -c .)|$(sr_field "$(awk 'index($0, "|name=ordered|") { l = $0 } END { print l }' "$SO_REPO/.bionic/tmp/roster-$SID_A.state")" reason)"
+
+
 finish
