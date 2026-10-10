@@ -1256,18 +1256,33 @@ expect_contains "156d: …and the task column carries the unit's first sentence"
 expect_absent "156e: …and not the rest of the task cell" \
   "second sentence the card does not show" "$T10_S3"
 
+# T28: a copy of a plan with the given lines written directly under its `rigor:` line (BSD sed has no \n in a replacement).
+t28_after_rigor() {  # <src> <dst> <line>...
+  local src="$1" dst="$2"; shift 2
+  T28_ADD="$(printf '%s\n' "$@")" awk '{ print } /^rigor: / && !d { print ENVIRON["T28_ADD"]; d = 1 }' "$src" > "$dst"
+}
 # ── AC-4.3: the regression line prints an em dash; no config key names it (wave-31 T2, REQ-4 AC-4.2;
 # T4 redefines the line, A-orch-6) ──
 T10_V="$(printf '%s\n' "$T10_S3" | grep -m1 'matrix rows')"
-expect_contains "158: AC-4.3 — a root whose config still carries a stale impact-command: renders an em dash" \
-  "regression —" "$T10_V"
+expect_contains "158: AC-12.1 — a plan declaring no regression: prints not declared where the em dash was (T28)" \
+  "regression not declared" "$T10_V"
+expect_absent "158e: …and no em dash on the line" "regression —" "$T10_V"
+# T28: the Step-3 line prints the plan's own value, yes or no.
+for t28_v in yes no; do
+  T28_PLAN="$(dirname "$T10_TASK_PLAN")/task-run-18-reg-${t28_v}.plan.md"
+  t28_after_rigor "$T10_TASK_PLAN" "$T28_PLAN" "regression: ${t28_v}"
+  expect_contains "158f: precondition — the doctored plan carries regression: ${t28_v}" "regression: ${t28_v}" "$(cat "$T28_PLAN")"
+  whole_card step3 "$T28_PLAN"
+  expect_contains "158f: AC-12.1 — a plan carrying regression: ${t28_v} prints it on the Verification line" \
+    "matrix rows · regression ${t28_v} · walk exempt" "$WC_OUT"
+done
 expect_absent "158d: …and never the stale command" "impact.sh" "$T10_V"
 expect_absent "158a: …and never the literal that was in the format string" \
   "regression tests/run.sh" "$T10_S3"
 whole_card step3 "$T10_TASK_PLAN_BARE"; T10_S3_BARE="$WC_OUT"
 T10_V_BARE="$(printf '%s\n' "$T10_S3_BARE" | grep -m1 'matrix rows')"
-expect_contains "158b: AC-4.3 — a root with no config line renders an em dash too" \
-  "regression —" "$T10_V_BARE"
+expect_contains "158b: AC-12.1 — a root with no config line prints not declared too" \
+  "regression not declared" "$T10_V_BARE"
 expect_absent "158c: …and still never the literal tests/run.sh" \
   "regression tests/run.sh" "$T10_S3_BARE"
 
@@ -1895,6 +1910,53 @@ whole_card step3 "$RP_OLD_PLAN"
 expect_contains "RP7 §RIGOR a plan carrying audited is shown as no level, naming the two" \
   "review rigor: 'audited' is no level (single or double)" "$WC_OUT"
 rm -f "$RP_OLD_PLAN"
+
+section "Section T28: §REGRESSION-LINE — the Step 0 card's regression line, and the Step 3 card's value (AC-12.1; wave-31 T28, D4)"
+# `card.sh regression <scale> [<plan>]` prints one line: the scale's default (task no, wave yes, epic no),
+# `(scale default)`; or the plan's own `regression:` value, `(overridden)`, when the plan carries a
+# `regression-override:` line. The override line is presence-only: its fields are never parsed.
+for rl_pair in task:no wave:yes epic:no; do
+  whole_card regression "${rl_pair%%:*}"
+  expect_eq "RL1 regression ${rl_pair%%:*} with no plan prints the scale default" \
+    "regression ${rl_pair#*:}  (scale default)" "$WC_OUT"
+  expect_eq "RL1 …exits 0" "0" "$WC_RC"
+done
+RL_OVR="$(dirname "$PLAN_FIX")/rl-override.plan.md"
+t28_after_rigor "$PLAN_FIX" "$RL_OVR" "regression: no" "regression-override: Test User 2026-10-10 derived=yes chosen=no"
+expect_contains "RL2 precondition: the doctored plan carries the override line" "regression-override:" "$(cat "$RL_OVR")"
+expect_contains "RL2 precondition: …and the key" "regression: no" "$(cat "$RL_OVR")"
+whole_card regression wave "$RL_OVR"
+expect_eq "RL2 a plan with regression-override: and regression: no at wave prints the value, overridden" \
+  "regression no  (overridden)" "$WC_OUT"
+expect_eq "RL2 …exits 0" "0" "$WC_RC"
+# the override line is presence-only: a malformed one still counts, and the value is the key's
+sed 's/^regression-override:.*$/regression-override: garbage/; s/^regression: no$/regression: yes/' "$RL_OVR" > "${RL_OVR}.2"
+expect_contains "RL3 precondition: the doctored override is garbage" "regression-override: garbage" "$(cat "${RL_OVR}.2")"
+whole_card regression task "${RL_OVR}.2"
+expect_eq "RL3 the override is presence-only: its fields are never parsed" "regression yes  (overridden)" "$WC_OUT"
+# an override with no key reads yes, as an absent key does everywhere
+sed '/^regression: /d' "$RL_OVR" > "${RL_OVR}.3"
+expect_absent "RL4 precondition: the key is gone" "regression: no" "$(cat "${RL_OVR}.3")"
+whole_card regression epic "${RL_OVR}.3"
+expect_eq "RL4 an override with an absent key reads yes" "regression yes  (overridden)" "$WC_OUT"
+# a plan with the key and NO override line is at the scale default
+sed '/^regression-override:/d' "$RL_OVR" > "${RL_OVR}.4"
+expect_absent "RL5 precondition: the override line is gone" "regression-override:" "$(cat "${RL_OVR}.4")"
+expect_contains "RL5 precondition: …and the key stays" "regression: no" "$(cat "${RL_OVR}.4")"
+whole_card regression wave "${RL_OVR}.4"
+expect_eq "RL5 a plan with no override line prints the scale default" "regression yes  (scale default)" "$WC_OUT"
+rm -f "$RL_OVR" "${RL_OVR}.2" "${RL_OVR}.3" "${RL_OVR}.4"
+# a scale outside task|wave|epic is refused, as rigor refuses a bad word
+whole_card regression month
+expect_eq "RL6 a scale that is no scale: exit 1" "1" "$WC_RC"
+expect_contains "RL6 …and stderr names the three" "use task, wave or epic" "$WC_ERR"
+expect_empty "RL6 …and stdout is empty" "$WC_OUT"
+whole_card regression Wave
+expect_eq "RL6b the scale is case-exact: exit 1" "1" "$WC_RC"
+whole_card regression
+expect_eq "RL7 no scale is a usage error: exit 64" "64" "$WC_RC"
+whole_card regression task "$PLAN_FIX" extra
+expect_eq "RL7b too many operands is a usage error: exit 64" "64" "$WC_RC"
 
 section "INHERIT — wave-28 T43 (AC-8.10, D21): the Step 1 card lists every deferral the newest continuation left open"
 # A deferral is faced again. Close-out writes each open deferral under `## Deferrals` of the run's
