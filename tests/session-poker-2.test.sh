@@ -56,7 +56,7 @@ s35_fixture() {  # <repo> <last line's missed> -> the plan path; writes plan + l
   mkdir -p "${led%/*}"
   {
     s35_line 2026-09-23T10:00:00Z u-t1 ok ''    W-T1 ''          0
-    s35_line 2026-09-23T10:02:00Z u-t2 ok"$LE_RC $(sed -n '/^## Tasks/,/^## Dispatch/p' "$LE_P" | /usr/bin/grep '^| T2 |' | awk -F'|' '{ gsub(/ /, "", $(NF-1)); print $(NF-1) }')"   ''   ''          1
+    s35_line 2026-09-23T10:02:00Z u-t2 ok T2    ''   ''          1
     s35_line 2026-09-23T10:05:30Z u-t2 ok T2    ''   ''          1
     s35_line 2026-09-23T10:15:30Z u-t3 hold T4  ''   ''          1
     s35_line 2026-09-23T10:20:30Z u-t4 ok ''    W-T4 ''          0
@@ -3169,6 +3169,7 @@ LE_N=0
 LE_COMMIT=0123456789abcdef0123456789abcdef01234567
 le_world() {  # <scale> <with record: 1|0> -> sets LE_R, LE_P: a repo, its bound plan (T2 serves AC-3.1, REQ-4), the landing record
   LE_N=$((LE_N + 1)); LE_R="$(make_repo "le-$1-$LE_N")"; ( cd "$LE_R" && git commit -q --allow-empty -m init )
+  LE_PHYS="$(cd "$LE_R" && pwd -P)"   # the landing record names logs by the physical docs root, as line.sh writes them
   LE_P="$(plan_fixture "$LE_R/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" "$1" \
     "| T2 | 4 | build | the second build | implementor | — | — | 30 | AC-3.1 REQ-4 | b.sh | — | — | pending |" \
     "| T3 | 4 | build | the third build | implementor | — | — | 30 | REQ-5 | c.sh | — | — | pending |")"
@@ -3232,13 +3233,13 @@ PLAN
     # for the same commit, a red one, and an older commit's green one
     {
       printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:00:00Z\n' \
-        "$LE_COMMIT" "$LE_R/.bionic/docs/record/wave-01-fixture/line/T2-a-0123456789ab.log"
+        "$LE_COMMIT" "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T2-a-0123456789ab.log"
       printf 'line/v1|ev=verdict|row=T3|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:01:00Z\n' \
-        "$LE_COMMIT" "$LE_R/.bionic/docs/record/wave-01-fixture/line/T3-a-other.log"
+        "$LE_COMMIT" "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T3-a-other.log"
       printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=b.test.sh|result=red|log=%s|at=2026-10-04T03:02:00Z\n' \
-        "$LE_COMMIT" "$LE_R/.bionic/docs/record/wave-01-fixture/line/T2-b-red.log"
+        "$LE_COMMIT" "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T2-b-red.log"
       printf 'line/v1|ev=verdict|row=T2|commit=%s|suite=a.test.sh|result=green|log=%s|at=2026-10-04T03:03:00Z\n' \
-        ffffffffffffffffffffffffffffffffffffffff "$LE_R/.bionic/docs/record/wave-01-fixture/line/T2-a-old.log"
+        ffffffffffffffffffffffffffffffffffffffff "$LE_PHYS/.bionic/docs/record/wave-01-fixture/line/T2-a-old.log"
     } > "$LE_R/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
   fi
   bind_marker "$LE_R" "$LE_P"
@@ -3266,7 +3267,7 @@ for le_sc in task wave; do
     "row-landed — T2 landed at $LE_COMMIT: status, step line and ledger line written to " "$LE_OUT"
   expect_contains "(le3b $le_sc) …to its last word" " in one write; dry-committed first." "$LE_OUT"
   expect_contains "(le4 $le_sc) …and the evidence count is a second line of its own" "
-evidence: 2 cell(s) written by landing" "$LE_OUT"
+poker: evidence: 2 cell(s) written by landing" "$LE_OUT"
   cp -p "$LE_P" "$TMPROOT/le-$le_sc.once"
   poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
   expect_eq "(le5 $le_sc) the same landing run again writes nothing more (exit 0, the plan byte-identical)" "0 same" \
@@ -3281,7 +3282,7 @@ poke "$LE_R" row-landed T2 "$LE_COMMIT" 2026-10-04T04:00:00Z
 expect_eq "(le7) a landing record with no verdict (a by-hand landing's) writes no cell: all five read pending" \
   "0 pending|pending|pending|pending|pending" "$RC $(le_cells "$LE_P")"
 expect_contains "(le7b) …and the second line says 0" "
-evidence: 0 cell(s) written by landing" "$OUT"
+poker: evidence: 0 cell(s) written by landing" "$OUT"
 le_world wave 1
 sed -i.bak 's|^  evidence: pending$|  evidence: record/hand/a-hand-filled-record.log|' "$LE_P" && rm -f "$LE_P.bak"
 ( cd "$LE_R" && git add -f "$LE_P" && git commit -qm hand )
@@ -3290,7 +3291,7 @@ expect_eq "(le8) a hand-filled cell is never overwritten, though the row serves 
   "0 record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log|record/hand/a-hand-filled-record.log" \
   "$RC $(le_cells "$LE_P")"
 expect_contains "(le8b) …and the second line says 0" "
-evidence: 0 cell(s) written by landing" "$OUT"
+poker: evidence: 0 cell(s) written by landing" "$OUT"
 POKE_BOUND="$LE_BOUND_WAS"
 
 finish
