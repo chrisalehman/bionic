@@ -68,7 +68,7 @@ FIXTURE_RC="${TMP}/dot.zshrc"
 # ─── THE TOOL DIRECTORY IS THE FIXTURE'S, NOT THE MACHINE'S (wave-01 S4, AC-7) ─
 #
 # WHAT THIS SUITE RENDERED USED TO DEPEND ON WHOSE LAPTOP RAN IT. doctor asks
-# `command -v` about the nine `brew-dep` rows of BIONIC_DEP_TABLE, and six of
+# `command -v` about the ten `brew-dep` rows of BIONIC_DEP_TABLE, and six of
 # them — node, gh, rg, uv, docker, aws — live under /opt/homebrew here and
 # nowhere on a stripped PATH. Under the ambient PATH those rows are present;
 # under `PATH=/usr/bin:/bin:/usr/sbin:/sbin` six more rows turn absent, the
@@ -86,7 +86,7 @@ FIXTURE_RC="${TMP}/dot.zshrc"
 _TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
 sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
 sleep dirname basename realpath id ps df sysctl vm_stat git strings"
-_TOOLS_STUB="node pnpm gh rg uv docker aws"
+_TOOLS_STUB="node pnpm gh rg uv docker aws perl"
 
 make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT find
   local d="$1" want="$2" t p missing=""
@@ -1220,5 +1220,24 @@ done
 printf '65\n' > "${SD_CCD}/bionic/share"
 expect_contains "SD.10 control: a valid value in the same file reads as set" "65% of this machine (set in bionic/share)" \
   "$(res_section "$(run_doctor CLAUDE_CONFIG_DIR="$SD_CCD")")"
+
+section "§PERL: a PATH without perl is a dependency doctor reports missing (wave-31 T13, AC-9.2)"
+
+# booked.sh --detach starts its detached side with `perl -MPOSIX` (macOS ships no setsid), so perl is a
+# dependency of the plugin and the table says so. The fixture's tool directory carries a perl stub (the pair
+# below is an experiment: the same fixture, perl present and perl removed). The row is read from the THIRD PARTY
+# table; the positive half proves the extractor finds the perl row where perl is on PATH.
+BIN_NO_PERL="${TMP}/toolbox-no-perl"
+make_tool_dir "$BIN_NO_PERL" yes >/dev/null
+rm -f "${BIN_NO_PERL}/perl"
+perl_row() {  # <toolbox> -> the perl row of the THIRD PARTY table
+  ( cd "$REPO" && env PATH="$1" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
+      bash "$DOCTOR_SH" < /dev/null 2>&1 ) | awk '$2 == "perl" { print; exit }'
+}
+PERL_ROW_WITH="$(perl_row "$BIN")"
+PERL_ROW_WITHOUT="$(perl_row "$BIN_NO_PERL")"
+expect_match "PERL.1: with perl on PATH the table has a perl row, and it is present" "*✓ perl *brew*" "$PERL_ROW_WITH"
+expect_match "PERL.2: with perl off PATH the same row reports it missing and where to go" "*✗ perl *brew*not installed → /bionic:setup*" "$PERL_ROW_WITHOUT"
 
 finish

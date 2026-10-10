@@ -1374,7 +1374,7 @@ expect_contains "…the human-readable tail names the same adopter path" \
   "observe     : $C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl" \
   "$OUT"
 
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 section "Section 9: disarm — the deliberate stop, made readable"
@@ -2186,7 +2186,7 @@ expect_contains "12a-T22-i8 no transcript at all is absent too, naming the rows"
 # THE CONFIG DIR IS HANDED BACK. Every case after this one is an ordinary fill case with no
 # live answer of its own, and leaving the pointer here would let THIS section's transcript
 # decide their `open=` — the trim would read every open row as gone and every gap as wide.
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ---------- 12b: the gap closes as rows open ----------
 #
@@ -2625,7 +2625,7 @@ expect_contains "12l7k V3-2: an AMBIGUOUS row absent from a fresh panel prints G
   "poker: GONE? BASE — AMBIGUOUS and absent from a fresh panel; stopped will refuse it: two or more contracts share this name; stopped always refuses AMBIGUOUS" \
   "$OUT"
 expect_absent "12l7l …and never the bare GONE" "poker: GONE BASE" "$OUT"
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
@@ -3892,7 +3892,7 @@ S21B_C1=$(printf '%s' "$OUT" | LC_ALL=C grep -c -- "$S21B_CSI") || S21B_C1=0
 expect_eq "…and the CSI byte pair does not survive it" "0" "$S21B_C1"
 expect_contains "…while the printable text beside the stripped byte survives" "2J done." "$OUT"
 
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 section "Section 22: FILL waits on Step-3 approval (epic-21 T4, AC-5)"
@@ -5106,7 +5106,7 @@ expect_absent "29a4 the same row, same tick, draws no STANDDOWN after extend" \
   "poker: STANDDOWN t1" "$OUT"
 expect_contains "29a5 …and it counts open, not closed" "open=1" "$OUT"
 
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ---------- 29b: extend on a name with no roster row REFUSES, naming it ----------
 R29B="$(make_repo s29-extend-no-row)"; new_roster "$R29B"
@@ -5169,7 +5169,7 @@ poke "$R29E" tick
 expect_absent "29e2 …and the row adopt wrote does not read MET again" \
   "poker: STANDDOWN t1" "$OUT"
 expect_contains "29e3 …and it counts open after adopt" "open=1" "$OUT"
-unset CLAUDE_CONFIG_DIR
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
 # ---------- 29f: THE APPENDED ROW'S `re_executes=` IS BYTE-IDENTICAL TO THE ROW IT COPIED --

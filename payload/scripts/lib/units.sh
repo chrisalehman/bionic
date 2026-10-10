@@ -428,8 +428,8 @@ units_rows() {
 #     satisfied when lib/proof.sh `proof_state` answers `covered`, and waits on `uncovered` — a
 #     commit past the proof that no recorded run proves, or a state that cannot be computed —
 #     saying `proof:floor: the floor is one whole run plus each later commit proved; past the proof
-#     at <12 hex>, <its reason>; run what it lacks, or a whole run on this head, and proof-add
-#     floor` (short: the tick cuts a WAIT reason at 400 characters). The state is asked only when a pending row's
+#     at <12 hex>, <its reason>; run suites its row named, proof-add floor;
+#     a second run: approve regression-2` (short: the tick cuts a WAIT reason at 400 characters). The state is asked only when a pending row's
 #     answer turns on it, a row held for its step is judged without it, and inside
 #     `units_memoised` it is asked once; `proof:review`, with no open writer, is satisfied only
 #     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
@@ -1465,7 +1465,7 @@ _units_sched_awk() {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
             lwhy = "the floor is one whole run plus each later commit proved; past the proof at " \
-              substr(prvh["floor"], 1, 12) ", " fr "; run what it lacks, or a whole run on this head, and proof-add floor"
+              substr(prvh["floor"], 1, 12) ", " fr "; run suites its row named, proof-add floor; a second run: approve regression-2"
             return 0
           }
         }

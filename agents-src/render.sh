@@ -112,7 +112,7 @@
 #                                        committed finals AND the committed manifest;
 #                                        exit 1 with the diff if any differ. This is the
 #                                        whole staleness class in one command, and
-#                                        tests/docs-pins.test.sh (section 7) and
+#                                        tests/render.test.sh (1a) and
 #                                        tests/command-relay.test.sh (A5) are where it runs.
 #                                        It
 #                                        fails identically whether the OUTPUT was
@@ -288,14 +288,14 @@ generated_header() {
     agents-src/templates/senior-implementor.md.tmpl | agents-src/templates/test-runner.md.tmpl)
       # ONE LINE across the whole split-skill surface — core, dispatch reference and the
       # ten step files alike — and the reason is the budget the split exists to serve.
-      # REQ-1b's byte caps (docs-pins Section 17) are measured against exactly these
+      # REQ-1b's byte caps are measured against exactly these
       # files, and the four-line warning below would cost ~290 B on each of twelve of
       # them for a warning the one line already gives in full: --check goes red on a
       # hand edit either way, so nothing enforceable is lost (2026-09-11 cap ruling,
       # "no growth" total). Ratified 2026-09-11 for the core and dispatch reference too,
       # after the T5-report §3 prunable-narrative estimate proved too small on its own.
-      # The six role files joined in wave-25 (T6, A-T6): their caps (docs-pins 111b, 111c,
-      # 125) had 11 B free and the shared role block needed a line in all six.
+      # The six role files joined in wave-25 (T6, A-T6): their caps had 11 B free and the
+      # shared role block needed a line in all six.
       cat <<EOF
 <!-- GENERATED FILE — DO NOT EDIT. Rendered by agents-src/render.sh from $1. -->
 EOF
@@ -313,7 +313,7 @@ EOF
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered by agents-src/render.sh from $1 and the shared
      blocks in agents-src/blocks/. Edit those, then re-run \`bash agents-src/render.sh\`.
-     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+     tests/render.test.sh goes red whenever this file and its sources disagree. -->
 EOF
       ;;
   esac
@@ -545,7 +545,7 @@ if [ "$RC" = 0 ]; then
   else
     # `mkdir -p` rather than a precondition: unlike agents/, the manifest's directory is an
     # output location, and a copy of the tree that has never been rendered has no reason to
-    # carry one already (tests/docs-pins.test.sh renders into exactly such a copy).
+    # carry one already (tests/render.test.sh renders into exactly such a copy).
     if mkdir -p "${MANIFEST%/*}" 2>/dev/null && cp "$WORK/rendered.sha256" "$MANIFEST"; then
       :
     else

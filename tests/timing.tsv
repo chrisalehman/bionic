@@ -41,7 +41,6 @@ grant.test.sh	24
 hook-adoption.test.sh	17
 hook-latency.test.sh	14
 hook-timeout.test.sh	46
-impact.test.sh	185
 interpreter-pin.test.sh	84
 jit.test.sh	3
 landing-gate.test.sh	76
