@@ -4114,7 +4114,7 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
     if [ -n "$fl" ]; then
       OWED_ROOT="$PV_REPO" owed_open "waive:$q" "waiver: $q" "$fl" >/dev/null 2>&1
     else
-      OWED_ROOT="$PV_REPO" owed_close "waive:$q" "no longer failing" >/dev/null 2>&1
+      poker_owed_close "$PV_REPO" "waive:$q" "no longer failing"
     fi
   done
   return 0
