@@ -483,6 +483,7 @@ _setup_item_verb() {  # <name>
         edited) say "update bionic's working principles span without asking, in $(principles_file)" ;;
         *)      say "show bionic's working principles and ask again before adding them to $(principles_file)" ;;
       esac ;;
+    notify)             say "declare the notification channel in $(notify_file) (its topic read from ${BIONIC_NOTIFY_TOPIC_FROM%%:*}) and send one test notification" ;;
     *)                  return 1 ;;
   esac
   return 0
@@ -1934,6 +1935,67 @@ setup_working_principles() {
   return 0
 }
 
+# ─── The notification channel (wave-33 T12; REQ-2 AC-2.1, D2) ────────────────
+#
+# THE CHANNEL IS DECLARED ONCE, AT USER LEVEL, AND THE TOPIC IS NEVER COPIED. The file this writes,
+# `<claude home>/bionic/notify`, is two lines: where the topic is read from (the variable
+# `BIONIC_NTFY_TOPIC` in the claude home's `cron.env`, where the user already keeps it) and a title
+# prefix. lib/notify.sh reads the topic at send time, so changing it there changes it here with
+# no second copy to edit. With the user's yes the step also sends ONE test notification through
+# that same sender, so the first real push happens when the person is looking and has agreed.
+#
+# ONE QUESTION NAMES BOTH ACTS (the file and the test send): a yes is to both, and the `--all` page
+# says both. A machine with no topic has nothing to declare the channel against, so a whole pass
+# says nothing about it (the row does not fire there either); named with `--only notify`, the step
+# says which variable to set.
+#
+# A FAILED TEST SEND IS NOT A FAILED STEP. The channel is declared, setup exits 0, and the line says
+# the test did not go, with the thing to check; notify.sh logs the failure to the audit stream.
+setup_notify() {
+  _setup_wants notify || return 0
+  local file src var from state
+  file="$(notify_file 2>/dev/null)" || return 0
+  from="$BIONIC_NOTIFY_TOPIC_FROM"; src="${from%%:*}"; var="${from#*:}"
+  state="$(bionic_check_notify_state)"
+  if [ "$state" = "absent" ] && [ -z "$SETUP_ONLY" ]; then return 0; fi
+  say ""
+  say "14. Notifications"
+  if [ "$state" = "declared" ]; then
+    item "$SETUP_OK" "notifications" "already declared in ${file} — nothing to do"  # idempotence guard: notify item
+    return 0
+  fi
+  if [ "$state" = "absent" ]; then
+    item "$SETUP_NIL" "notifications" "no ${var} in ${file%/bionic/notify}/${src} — nothing to declare yet"
+    action "to be told when the run needs you, set ${var}=<your ntfy topic> in ${file%/bionic/notify}/${src}, then run ${SETUP_SELF_CMD} --only notify"
+    return 0
+  fi
+
+  say "   bionic can tell you when a run is waiting on you (an approval, a gate act, a delivery)."
+  say "   It would write ${file}:"
+  say "     topic-from=${from}"
+  say "     title-prefix=bionic"
+  say "   The topic stays in ${src}; it is read when a notification is sent, and never copied."
+  consent "   Declare the channel, and send one test notification now?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${file} is not written and nothing is sent."; action "declare the notification channel in ${file} and send one test notification — $(_setup_answer_yes notify)"; return 0; fi  # consent gate: notify item
+
+  local tmp="${file}.setup.$$"
+  if ! { mkdir -p "${file%/*}" && _setup_stage_tmp "$tmp" \
+         && printf 'topic-from=%s\ntitle-prefix=bionic\n' "$from" > "$tmp" \
+         && _setup_publish_tmp "$tmp" "$file"; } 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    item "$SETUP_BAD" "notifications" "could not write ${file} — it is as it was"
+    action "declare the notification channel in ${file} (bionic could not write the file)"
+    return 0
+  fi
+  notify_send "setup test" "bionic setup: this is the one test notification. If you can read it, the run can reach you here."
+  case "${NOTIFY_RC:-1}" in
+    0) item "$SETUP_OK" "notifications" "declared in ${file} — one test notification sent" ;;
+    *) item "$SETUP_NIL" "notifications" "declared in ${file} — the test notification did not go"
+       action "check that ${var} in ${file%/bionic/notify}/${src} is your ntfy topic and the network is up — the channel is declared, the test notification did not go" ;;
+  esac
+  return 0
+}
+
 # ─── The summary ─────────────────────────────────────────────────────────────
 
 setup_summary() {
@@ -2055,6 +2117,7 @@ setup_legacy_hook_files
 setup_legacy_agent_copies
 setup_permission_mode
 setup_working_principles
+setup_notify
 setup_summary
 
 exit 0

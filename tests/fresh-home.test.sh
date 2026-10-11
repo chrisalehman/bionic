@@ -3023,4 +3023,46 @@ rm -f "${BIN}/notebooklm"
 G16_SECS=$((SECONDS - G16_T0))
 expect_true "16: the section ran in ${G16_SECS} s, within its 120 s ceiling" test "$G16_SECS" -le 120
 
+# ---------------------------------------------------------------------------
+# Group 17 — the notification channel (wave-33 T12; REQ-2 AC-2.1, D2).
+# ---------------------------------------------------------------------------
+
+section "Group 17: the notify item on a pristine machine, and doctor's read-only row"
+
+# `curl` is a recorder: one line per call to `$BIONIC_TEST_CALLS.curl`. PATH is the fixture's alone, so
+# no send can leave the machine, and the count below is the count of sends the payload tried.
+printf '#!/bin/sh\necho "$*" >> "$BIONIC_TEST_CALLS.curl"\nexit 0\n' > "$BIN/curl"; chmod +x "$BIN/curl"
+G17_CURL="$CALLS.curl"
+g17_sends() { if [ -f "$G17_CURL" ]; then wc -l < "$G17_CURL" | tr -d ' '; else echo 0; fi; }
+
+fresh_home; rm -f "$G17_CURL"
+G17_LIST="$(run_payload "$SETUP_SH" --list < /dev/null)"
+expect_contains "17a setup's roster carries the notify item (the list reads)" "notify" "$G17_LIST"
+expect_contains "17b …beside the working-principles item it sits after" "working-principles" "$G17_LIST"
+
+# A pristine machine has no topic to declare a channel against: setup offers nothing and writes nothing.
+G17_ALL="$(printf 'y\n' | run_payload "$SETUP_SH" --all)"
+expect_eq "17c an all-yes setup on a machine with no topic declares no channel" "absent" \
+  "$([ -e "$HOME_FIX/.claude/bionic/notify" ] && echo present || echo absent)"
+expect_eq "17d …and sends nothing" "0" "$(g17_sends)"
+expect_absent "17e …and its page never mentions the item (nothing to offer is nothing said)" "Notifications" "$G17_ALL"
+G17_DOC_NONE="$(run_payload "$DOCTOR_SH" < /dev/null | /usr/bin/grep 'notify channel')"
+expect_contains "17f doctor still reports the channel, as not set" "not set" "$G17_DOC_NONE"
+expect_contains "17g …and says which variable to set" "BIONIC_NTFY_TOPIC" "$G17_DOC_NONE"
+
+# With a topic in cron.env, doctor offers the item, setup declares it on a yes, and doctor reads it back.
+mkdir -p "$HOME_FIX/.claude"
+printf 'export BIONIC_NTFY_TOPIC=fresh-home-topic\n' > "$HOME_FIX/.claude/cron.env"
+G17_DOC_OFF="$(run_payload "$DOCTOR_SH" < /dev/null | /usr/bin/grep 'notify channel')"
+expect_contains "17h with a topic, doctor offers the item through setup" "/bionic:setup" "$G17_DOC_OFF"
+expect_eq "17i …and sent nothing" "0" "$(g17_sends)"
+printf 'y\n' | run_payload "$SETUP_SH" --only notify > "$TMP/g17-setup.txt" 2>&1
+expect_eq "17j a yes declares the channel" "present" "$([ -f "$HOME_FIX/.claude/bionic/notify" ] && echo present || echo absent)"
+expect_eq "17k …and sends one test notification" "1" "$(g17_sends)"
+expect_contains "17l …to the topic cron.env holds" "https://ntfy.sh/fresh-home-topic" "$(cat "$G17_CURL" 2>/dev/null)"
+G17_DOC_ON="$(run_payload "$DOCTOR_SH" < /dev/null | /usr/bin/grep 'notify channel')"
+expect_contains "17m doctor reads the declared channel back, naming the variable" "BIONIC_NTFY_TOPIC" "$G17_DOC_ON"
+expect_eq "17n …and still sent nothing" "1" "$(g17_sends)"
+rm -f "$BIN/curl"
+
 finish

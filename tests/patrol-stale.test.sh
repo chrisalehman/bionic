@@ -186,6 +186,7 @@ OW_SID="1a2b3c4d-1111-4e05-9f21-7d0c5a8e6b44"
 OW_CLASSES="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$PATROL_SH")"
 expect_nonempty "OW0 PATROL_STATE_CLASSES is read off patrol.sh (the extractor works)" "$OW_CLASSES"
 expect_contains "OW1 start-clock is one of the classes" " start-clock " " $OW_CLASSES "
+expect_contains "OW1b owed is one of the classes (the person's ledger, T11/T12: a live neighbour's open items are spared by close-out's wipe)" " owed " " $OW_CLASSES "
 OW_CO_FN="$(sed -n '/^_co_tmp_owner() {/,/^}/p' "$CO_SH")"
 expect_nonempty "OW2 close-out's owner reader is read off close-out.sh (the extractor works)" "$OW_CO_FN"
 OW_BAD_P=""; OW_BAD_C=""; OW_SEEN=0
@@ -214,5 +215,13 @@ ln -s "$TMP/nowhere" "$REPO_FIX/.bionic/tmp/start-clock-$OW_SID.alink.state"
 expect_eq "OW7 a directory or a link with a clock file's name is not one of them" \
   "roster-$OW_SID.state start-clock-$OW_SID.a1b2.state start-clock-$OW_SID.a9.state" \
   "$(sourced patrol_session_state_files "$REPO_FIX" "$OW_SID" | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')"
+
+rm -rf "$REPO_FIX/.bionic"; mkdir -p "$REPO_FIX/.bionic/tmp"
+: > "$REPO_FIX/.bionic/tmp/owed-$OW_SID.state"; : > "$REPO_FIX/.bionic/tmp/owed-other.state"
+expect_eq "OW8 a session's owed store is one of its state files (the class list reaches it)" \
+  "owed-$OW_SID.state" \
+  "$(sourced patrol_session_state_files "$REPO_FIX" "$OW_SID" | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "OW8b …and close-out's wipe reads its owner as that session" "$OW_SID" \
+  "$(bash -c 'PATROL_STATE_CLASSES="$1"; PATROL_STATE_ARMED_SUFFIX=.armed; eval "$2"; _co_tmp_owner "$3"' _ "$OW_CLASSES" "$OW_CO_FN" "owed-$OW_SID.state")"
 
 finish
