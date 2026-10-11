@@ -715,4 +715,59 @@ rec_median_ms() {  # <hook> <payload> <n> -> median wall-clock ms across n runs
 REC_MEDIAN=$(rec_median_ms "$REC_HOOK" "$REC_PAYLOAD" 20)
 echo "hook-latency: execution-recorder.sh (Bash path) median over 20 runs = ${REC_MEDIAN}ms (informational, not gated — see file header)"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "10: ruling-push.sh's fast path forks nothing; its slow path stays inside the PostToolUse budget (epic-23 wave-33 T10)"
+
+# THE NEW HOOK ON EVERY TOOL CALL (wave-33 T10; REQ-1, spec D1 "Worth your eye"). hooks/ruling-push.sh
+# is registered on PostToolUse for EVERY tool, for every agent, so its common path is paid by every
+# call in every session. Its design is one file test while no ruling is pending: the session key and
+# the project root from the environment the CLI gives every hook, no stdin read, no fork. That is a
+# count, and the count is the behaviour, so it is held at zero. Its slow path (a ruling pending for
+# SOME writer of the session) is held to §9's budget for the recorder's PostToolUse arm, 10.
+#
+# ANTI-VACUITY: the slow-path trace of the same hook in the same project must count MORE than zero,
+# so a tracer that saw nothing of this hook cannot pass the fast path's zero.
+PUSH_HOOK="${BIONIC_RULING_PUSH_UNDER_TEST:-${BIONIC_HOOKS_DIR}/ruling-push.sh}"
+[ -f "$PUSH_HOOK" ] || { echo "hook-latency: no hook at $PUSH_HOOK — suite refuses to run"; exit 1; }
+bash -n "$PUSH_HOOK" || { echo "hook-latency: $PUSH_HOOK does not parse — suite refuses to run"; exit 1; }
+
+PUSH_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse", tool_name:"Read", agent_id:"a-latency-A",
+    tool_input:{file_path:"/dev/null"}, tool_response:{}, tool_use_id:"toolu_hook_latency_push"}')
+# The project root is the CLI's CLAUDE_PROJECT_DIR here, as it is for every registered hook; §1-§9
+# blank it because the hooks they trace resolve their root from the payload.
+trace_push() {  # <out-trace-file>
+  printf '%s' "$PUSH_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$PROJECT" \
+    BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash -x "$PUSH_HOOK" >/dev/null 2>"$1"
+  return 0
+}
+
+PUSH_FAST="$SANDBOX/trace-push-fast.txt"
+trace_push "$PUSH_FAST"
+PUSH_FAST_COUNT=$(count_external "$PUSH_FAST")
+
+# THE SLOW PATH: the writer's row on the roster and a ruling pending for ANOTHER writer, so the hook
+# reads the payload, maps the id, folds the rulings and leaves the flag up, carrying nothing. Planted
+# through the production writers (lib/roster.sh), the flag raised by `ruling_record` itself.
+PUSH_ROSTER="$PROJECT/.bionic/tmp/roster-$SID.state"
+( . "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roster.sh" 2>/dev/null \
+    || . "${BIONIC_HOOKS_DIR}/../scripts/lib/roster.sh"
+  roster_header > "$PUSH_ROSTER"
+  roster_row status=identified session="$SID" name=w-A agent_id=a-latency-A launched_at=2026-10-11T00:00:00Z \
+    subagent_type=bionic:implementor model=opus deliverable= source=declared duration= progress= claims= \
+    cadence= absent= waiver= tool_use_id=toolu_lat plan=none >> "$PUSH_ROSTER"
+  ruling_record "$PUSH_ROSTER" w-B 'a ruling for another writer' >/dev/null )
+PUSH_SLOW="$SANDBOX/trace-push-slow.txt"
+trace_push "$PUSH_SLOW"
+PUSH_SLOW_COUNT=$(count_external "$PUSH_SLOW")
+rm -f "$PUSH_ROSTER" "$PROJECT/.bionic/tmp/ruling-pending-$SID.state"
+
+echo "hook-latency: ruling-push.sh external-command count: fast path = $PUSH_FAST_COUNT (cap 0), slow path = $PUSH_SLOW_COUNT (cap 10)"
+echo "hook-latency: ruling-push.sh slow-path histogram:"
+histogram "$PUSH_SLOW" | sed 's/^/hook-latency:   /'
+
+expect_true "10a: the slow-path trace sees the hook's forks (the tracer is not blind to it)" test "$PUSH_SLOW_COUNT" -gt 0
+expect_eq "10b: ruling-push.sh fast path forks no external command (one file test)" "0" "$PUSH_FAST_COUNT"
+expect_true "10c: ruling-push.sh slow path count <= 10" test "$PUSH_SLOW_COUNT" -le 10
+
 finish
