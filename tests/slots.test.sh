@@ -129,12 +129,13 @@ newrow() {  # <name> — a fresh row directory, store and load file; resets the 
   LOADF="$ROW/load"
   printf '0.00\n' > "$LOADF"
   MW=30; POLL=0.1; USED=10; BK_SCRIPT="$BOOKED"
+  BUSY=0  # busy cores the processor reads (GE's 0); a row that needs a wait raises it
 }
 
 bk() {  # booked.sh with this row's store, readings, settle ceiling and load; cwd is the row
   ( cd "$ROW" || exit 1
     env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_GATE_POLL="$POLL" BIONIC_PROBE_USED_PCT="$USED" \
-        BIONIC_SETTLE_MAX_WAIT="$MW" BIONIC_LOAD_NOW_FILE="$LOADF" bash "$BK_SCRIPT" "$@" )
+        BIONIC_PROBE_BUSY_CORES="$BUSY" BIONIC_SETTLE_MAX_WAIT="$MW" BIONIC_LOAD_NOW_FILE="$LOADF" bash "$BK_SCRIPT" "$@" )
 }
 
 gate() {  # <name> — a command that marks itself started, then holds until <name>.go
@@ -203,9 +204,12 @@ expect_eq "B1.4 …and one was asked (the store holds it)" "1" "$(nreq)"
 expect_eq "B1.5 the command reads the shim's stdin, not /dev/null" "piped-in" \
   "$(printf 'piped-in\n' | bk -- cat 2>/dev/null)"
 
-# B2. A second run asks while the first holds the gate's only room (no cost on record, so the
-# gate admits one at a time): it waits, says so, and runs once the first ends.
+# B2. A second run asks while the first holds the gate's only room: it waits, says so, and runs
+# once the first ends. Every command is promised one core (wave-33 T1; Δ10), so the room is the
+# live processor's: 7.0 busy cores of the 7.36 the share of 92 allows on 8 (7.0 + 1 > 7.36). The
+# first ask, nothing admitted, is admitted; the second waits.
 newrow b2
+BUSY=7
 bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; B2_A=$!
 wait_file "$ROW/a.started"
 bk -- "touch $ROW/c.started" > "$ROW/c.out" 2>&1 & BG="$BG $!"; B2_C=$!
@@ -1024,6 +1028,7 @@ expect_eq "K4.9 …and it stamped its own line, rc=0 (beside K4.6)" "2 rc=0" \
 # finish (at about 8 s, 2 s to spare); counted from the shim's start it is stopped at 6 s.
 newrow k5
 MW=30
+BUSY=7  # 7.0 busy cores of the 7.36 the share allows: the second command waits behind the held one
 K5_H="$( ( sleep 4 >/dev/null 2>&1 & printf '%s' "$!" ) )"
 plant_req 1 "$K5_H"
 K5_OUT="$(bk --kill-after 6 -- 'sleep 4; echo finished' 2>&1)"; K5_RC=$?
