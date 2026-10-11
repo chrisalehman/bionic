@@ -2947,6 +2947,261 @@ cp "$TMPROOT/mr-keep" "$PMR"
 POKE_BOUND="$DC_BOUND_WAS"
 
 # ============================================================
+section "§REPLAY §NEXT-CALL §FILL-VERBS: every hand edit wave-32 made to its plan has a verb that makes it, refuses an invalid value leaving the plan unchanged, and every plan-verb refusal prints the call that succeeds (wave-33 T7; REQ-4 AC-4.1, AC-4.3; REQ-3 AC-3.3; D8)"
+# ============================================================
+#
+#   matrix-set <AC> status=<pending|blocked|discharged|waived> evidence=<record/…> task=<ids>
+#                       the tier table's status and evidence cells (discharge's row edit) and the AC block's
+#                       evidence: and task: keys; never the tier cell, never the auditor cell (discharge's)
+#   waive-row <AC> '<the user's words>' '<why>'
+#                       `  waiver: <git user.name> <date -u> "<words>" — <why>` in the AC block, status waived;
+#                       the words stand in a prompt the user typed in this session (finding-move's rule)
+#   step-field 5 walk-artifact=<path>   the walk pointer, inside the Step-5 block the walk gate reads
+#   tasks-prose '<text>' [--replace <first words>]   a prose paragraph under ## Tasks, below the table
+#   task-set <id>[,<id>…] <col>=<val>… [-- <id>[,<id>…] <col>=<val>…]…   many rows, validated once
+#   epic-row <wave> <col>=<val>… [--plan <plan>]   a cell of the epic plan's shipped-table row
+#   continuation-fill '<field>=<text>' [--plan <plan>]   one <fill: field…> mark of the run's continuation
+#
+# REPLAY (AC-4.1): each verb writes the text wave-32's plan carries by hand (its plan:76, :166, :225-242, :256,
+# :80), and an invalid value is refused with the plan byte-identical. NEXT-CALL (AC-4.3): the three weak refusals
+# wave-32 met — ledger-add's unknown column, task-add's doc row without its approval read, decline --on a file —
+# each print `poker: next call: <the call>`, and that call, run as printed, succeeds.
+# FIXTURE FIDELITY: §42's plan writer (a plan the real gate admits) at current: 4, its Step-5 line written by step-line
+# (a writer's dry commit is judged at Step 4 past it, §STEP-FIELD's fixture), with a second matrix row and its
+# block; an epic plan and a continuation shaped as close-out.sh writes them; §47's reads table for task-add and
+# decline; the transcript from tests/fixtures/transcript-move (typed.jsonl) under a config dir of this section's.
+PV7_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+PV7_HOOK="$(cd "$(dirname "$POKER")" && pwd)/session-poker.sh"
+PV7_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects/-pv7-project"
+export CLAUDE_CONFIG_DIR="$PV7_CFG"
+PV7_TX="$PV7_CFG/projects/-pv7-project/$SID.jsonl"
+PV7_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+pv7_prompts() {  # <prompt>... -> this session's transcript: the frame, then one typed prompt each
+  local p; cat "$PV7_FX/frame.jsonl" > "$PV7_TX"
+  for p in "$@"; do jq -c --arg p "$p" '.message.content = $p' "$PV7_FX/typed.jsonl" >> "$PV7_TX"; done
+}
+pv7_next() { printf '%s\n' "$OUT" | sed -n 's/^poker: next call: //p' | head -1; }  # the printed call
+pv7_run() {  # <repo> <call> -> runs the call AS PRINTED, in the repo, in this session; sets OUT, RC
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$2" ) > "$TMPROOT/pv7.out" 2>&1; RC=$?
+  OUT="$(cat "$TMPROOT/pv7.out")"
+}
+pv7_refused() {  # <label> <want rc> <want text> <repo> <file> <operands…> -> the verb refused, the file byte-identical
+  local label="$1" rc="$2" want="$3" repo="$4" file="$5"; shift 5
+  cp "$file" "$TMPROOT/pv7-before"
+  poke "$repo" "$@"
+  expect_eq "$label — refused (exit $rc)" "$rc" "$RC"
+  expect_true "$label — …and the file is byte-identical (cmp)" cmp -s "$TMPROOT/pv7-before" "$file"
+  [ -z "$want" ] || expect_contains "$label …saying why" "$want" "$OUT"
+}
+pv7_step5() {  # <plan> -> the Step-5 block: its line and the indented lines under it
+  awk '/^- Step 5:/ { f = 1; print; next } f && /^  [^ -]/ { print; next } f { exit }' "$1"
+}
+pv7_prose() {  # <plan> -> the non-table, non-blank lines of ## Tasks
+  awk '/^## / { t = ($0 ~ /^## Tasks/); next } t && /[^ \t]/ && !/^[ \t]*\|/ { print }' "$1"
+}
+pv7_ledger() {  # <plan> <id> <column n> -> that cell of the dispatch-ledger row, trimmed
+  awk -F'|' -v id="$2" -v n="$3" '/^## / { l = ($0 ~ /^## Dispatch ledger/); next }
+    l && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == id) { v = $n; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
+}
+
+R7="$(make_repo t7-verbs)"; ( cd "$R7" && git commit -q --allow-empty -m init )
+git -C "$R7" config user.name 'Fixture User'
+P7="$(s42_plan "$R7" 4)"
+poke "$R7" step-line 5 '(pending)'
+awk '
+  /^\| AC-1\.1 \| T2 \|/ { print; print "| AC-1.2 | T0 | pending | — | — |"; next }
+  /^  fails-when: the fixture is wrong$/ { print; print "AC-1.2:\n  provenance: fixture two\n  fails-when: the second is wrong\n  eval: T0 — docs-pins §B\n  task: pending\n  evidence: pending"; next }
+  { print }' "$P7" > "$P7.t7" && mv "$P7.t7" "$P7"
+s42_snap "$R7" "$P7"
+s34_gate "$R7"
+expect_eq "PV7-0 precondition: the fixture plan at current: 4, its Step-5 line written, two matrix rows, is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "PV7-0b …the cell extractor reads AC-1.2's status" "pending" "$(mr_cell "$P7" AC-1.2 4)"
+expect_eq "PV7-0c …the block extractor reads AC-1.2's evidence key" "  evidence: pending" "$(mr_block "$P7" AC-1.2 | /usr/bin/grep '^  evidence:')"
+expect_eq "PV7-0d …the Step-5 extractor reads the block's line" "- Step 5: (pending)" "$(pv7_step5 "$P7")"
+expect_eq "PV7-0e …the ledger extractor reads T1's artifact" "record/T1.md" "$(pv7_ledger "$P7" T1 6)"
+
+# ---------- §REPLAY matrix-set: the status, evidence and task cells (wave-32 plan:225-242; A-orch-40/41/47) ----------
+poke "$R7" matrix-set AC-1.2 status=discharged evidence=record/wave-01-fixture/T2-a.log task=T1,T2
+expect_eq "RP-1 §REPLAY matrix-set exits 0" "0" "$RC"
+expect_eq "RP-1b …the table row: status and evidence set, tier and auditor as they were" \
+  "| AC-1.2 | T0 | discharged | record/wave-01-fixture/T2-a.log | — |" "$(/usr/bin/grep '^| AC-1\.2 ' "$P7")"
+expect_eq "RP-1c …the block's evidence key carries the same path (the table and the block agree)" \
+  "  evidence: record/wave-01-fixture/T2-a.log" "$(mr_block "$P7" AC-1.2 | /usr/bin/grep '^  evidence:')"
+expect_eq "RP-1d …the block's task key, the ids joined as the plan writes them" "  task: T1, T2" "$(mr_block "$P7" AC-1.2 | /usr/bin/grep '^  task:')"
+expect_eq "RP-1e …three lines replaced, none added (git diff --numstat)" "3 3;" "$(s42_numstat "$R7")"
+expect_contains "RP-1f …and it says what it wrote" "matrix-set — AC-1.2" "$OUT"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-2 a status outside the gate's four" 1 "pending, blocked, discharged, waived" "$R7" "$P7" matrix-set AC-1.2 status=done
+pv7_refused "RP-2b the tier cell is never matrix-set's" 1 "tier" "$R7" "$P7" matrix-set AC-1.2 tier=T3
+pv7_refused "RP-2c the auditor cell is discharge's" 1 "discharge AC-1.2" "$R7" "$P7" matrix-set AC-1.2 auditor=CONFIRMED
+pv7_refused "RP-2d a task id no ## Tasks row carries" 1 "T99" "$R7" "$P7" matrix-set AC-1.2 task=T1,T99
+pv7_refused "RP-2e an AC the matrix table has no row for" 1 "AC-9.9" "$R7" "$P7" matrix-set AC-9.9 status=pending
+pv7_refused "RP-2f status=waived on a row with no waiver: line is waive-row's" 1 "waive-row AC-1.2" "$R7" "$P7" matrix-set AC-1.2 status=waived
+pv7_refused "RP-2g an evidence value outside record/" 1 "record/" "$R7" "$P7" matrix-set AC-1.2 evidence=/tmp/x.log
+pv7_refused "RP-2h one invalid key refuses the whole call: the valid status beside it is not written" 1 "" "$R7" "$P7" matrix-set AC-1.2 status=blocked tier=T1
+
+# ---------- §REPLAY waive-row: the row waiver on the user's words (wave-32 plan:256, 311, 324, 337; A-orch-49) ----------
+pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
+poke "$R7" waive-row AC-1.1 'I waive all 4' 'the requirement is amended next wave'
+expect_eq "RP-3 §REPLAY waive-row exits 0" "0" "$RC"
+expect_eq "RP-3b …the row's status reads waived, its other cells as they were" "| AC-1.1 | T2 | waived | — | — |" "$(/usr/bin/grep '^| AC-1\.1 ' "$P7")"
+expect_regex "RP-3c …the block carries the waiver line in wave-32's shape: who, the date, the words, why" \
+  '^  waiver: Fixture User [0-9]{4}-[0-9]{2}-[0-9]{2} "I waive all 4" — the requirement is amended next wave$' \
+  "$(mr_block "$P7" AC-1.1 | /usr/bin/grep '^  waiver:')"
+s34_gate "$R7"
+expect_eq "RP-3d …and the plan with the waived row is admitted by the real gate" "0" "$GATE_RC"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-4 words the user never typed" 1 "no prompt the user typed" "$R7" "$P7" waive-row AC-1.2 'waive them all now' 'why'
+pv7_refused "RP-4b …too few words to be the user's decision" 1 "too short" "$R7" "$P7" waive-row AC-1.2 'I waive' 'why'
+pv7_refused "RP-4c an AC with no matrix row" 1 "AC-9.9" "$R7" "$P7" waive-row AC-9.9 'I waive all 4' 'why'
+poke "$R7" matrix-set AC-1.1 status=waived
+expect_eq "RP-4d beside RP-2f: status=waived on a row that carries its waiver: line is admitted (nothing to change: exit 0)" "0" "$RC"
+
+# ---------- §REPLAY step-field 5 walk-artifact (wave-32 plan:76; A-orch-42) ----------
+poke "$R7" step-field 5 walk-artifact=record/wave-01-fixture/walk.md
+expect_eq "RP-5 §REPLAY step-field 5 walk-artifact= exits 0" "0" "$RC"
+expect_eq "RP-5b …the line sits in the Step-5 block, where the walk gate reads it" \
+  "- Step 5: (pending)|  walk-artifact: record/wave-01-fixture/walk.md" "$(pv7_step5 "$P7" | paste -sd'|' -)"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-5c walk-artifact belongs to Step 5 alone" 1 "step-field 5 walk-artifact=record/wave-01-fixture/walk.md" "$R7" "$P7" step-field 4 walk-artifact=record/wave-01-fixture/walk.md
+pv7_refused "RP-5d a path that climbs out of record/" 1 ".." "$R7" "$P7" step-field 5 walk-artifact=record/../x.md
+
+# ---------- §REPLAY tasks-prose (wave-32 plan:166; A-orch-24/25) ----------
+expect_eq "PV7-pr0 precondition: ## Tasks carries no prose (the extractor, before; RP-6 is its positive)" "" "$(pv7_prose "$P7")"
+poke "$R7" tasks-prose 'Shard table (T9, option 1): no suite is split.'
+expect_eq "RP-6 §REPLAY tasks-prose exits 0" "0" "$RC"
+expect_eq "RP-6b …the paragraph is under ## Tasks, below the table" "Shard table (T9, option 1): no suite is split." "$(pv7_prose "$P7")"
+expect_eq "RP-6c …after the table's last row and a blank line" "| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending |||Shard table (T9, option 1): no suite is split." \
+  "$(/usr/bin/grep -A2 '^| T5 |' "$P7" | paste -sd'|' -)"
+poke "$R7" tasks-prose 'Shard table (T9, option 2): two suites are split.' --replace 'Shard table'
+expect_eq "RP-6d --replace rewrites the paragraph its first words name, in place" "0|Shard table (T9, option 2): two suites are split." "$RC|$(pv7_prose "$P7")"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-6e --replace naming no paragraph" 1 "Shard table" "$R7" "$P7" tasks-prose 'x y z' --replace 'No such paragraph'
+pv7_refused "RP-6f a paragraph that reads as a table row" 1 "" "$R7" "$P7" tasks-prose '| T9 | a row by hand |'
+
+# ---------- §REPLAY step-line 8 (wave-32 plan:80) ----------
+poke "$R7" step-line 8 'CLOSED 2026-10-11T12:25Z — wave/01-fixture merged into main'
+expect_eq "RP-7 §REPLAY step-line 8 writes the Step 8 line" "0|- Step 8: CLOSED 2026-10-11T12:25Z — wave/01-fixture merged into main" \
+  "$RC|$(/usr/bin/grep '^- Step 8:' "$P7")"
+
+# ---------- §REPLAY a multi-row task-set, validated once (A-orch-6) ----------
+sed -e 's/^| T2 | 4 | build | the second build | implementor | — |/| T2 | 4 | build | the second build | implementor | T8 |/' \
+    -e 's/^| T5 | 5 | verify | the floor | test-runner | T1, T2 |/| T5 | 5 | verify | the floor | test-runner | T1, T9 |/' "$P7" > "$P7.t7" && mv "$P7.t7" "$P7"
+s42_snap "$R7" "$P7"
+expect_eq "PV7-ts0 precondition: two rows each wait on no row (the table is invalid before, as A-orch-6's was)" "T8|T1, T9" \
+  "$(s48_row "$P7" T2 | cut -d'|' -f6)|$(s48_row "$P7" T5 | cut -d'|' -f6)"
+pv7_refused "PV7-ts1 precondition: one row at a time is refused, the other row still invalid" 1 "T9" "$R7" "$P7" task-set T2 deps=—
+poke "$R7" task-set T2 deps=— -- T5 deps=T1,T2
+expect_eq "RP-8 §REPLAY task-set over two rows in one transaction exits 0" "0" "$RC"
+expect_eq "RP-8b …both rows written" "—|T1,T2" "$(s48_row "$P7" T2 | cut -d'|' -f6)|$(s48_row "$P7" T5 | cut -d'|' -f6)"
+poke "$R7" task-set T2,T5 size=45
+expect_eq "RP-8c the comma form sets the same cells on each row" "0|45|45" "$RC|$(s48_row "$P7" T2 | cut -d'|' -f7)|$(s48_row "$P7" T5 | cut -d'|' -f7)"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-8d one row of the call that breaks the table refuses the whole call" 1 "" "$R7" "$P7" task-set T2 size=50 -- T5 deps=T7
+
+# ---------- §FILL-VERBS epic-row and continuation-fill (AC-3.3's close half; wave-30's <fill: ADRs>) ----------
+PV7_EPIC="$R7/.bionic/docs/plans/epic-99-fixture/epic.plan.md"
+PV7_CONT="$R7/.bionic/docs/record/wave-01-fixture/continuation.md"
+mkdir -p "${PV7_CONT%/*}"
+printf '# epic 99\n\n## Shipped\n\n| wave | version | plan | spec / requirements | ADRs | shipped |\n|---|---|---|---|---|---|\n| 1 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | <fill: ADRs> | 2026-10-11, main @ <fill: SHA> |\n\n## Next\n\nprose\n' > "$PV7_EPIC"
+printf '# continuation — wave-01-fixture\n\nClosed. <fill: task count> tasks, every one RED→GREEN.\n\n## Decides\n\n1. <fill: the first decision, or "none">\n\n## Resume\n\n<fill: Patrol job id> deleted.\n' > "$PV7_CONT"
+expect_eq "PV7-ep0 precondition: the epic row carries two fill marks" "2" "$(/usr/bin/grep '^| 1 |' "$PV7_EPIC" | /usr/bin/grep -o '<fill:' | wc -l | tr -d ' ')"
+poke "$R7" epic-row 1 ADRs=052 'shipped=2026-10-11, main @ abc1234'
+expect_eq "FV-1 §FILL-VERBS epic-row exits 0" "0" "$RC"
+expect_eq "FV-1b …the row's ADR and shipped cells are written, the rest as they were" \
+  '| 1 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | 052 | 2026-10-11, main @ abc1234 |' \
+  "$(/usr/bin/grep '^| 1 |' "$PV7_EPIC")"
+expect_absent "FV-1c …and no fill mark is left in the epic plan" "<fill:" "$(cat "$PV7_EPIC")"
+pv7_refused "FV-2 a column the shipped table does not carry" 1 "wave, version, plan, spec / requirements, ADRs, shipped" "$R7" "$PV7_EPIC" epic-row 1 adr=052
+pv7_refused "FV-2b a wave the table has no row for" 1 "no row for wave 7" "$R7" "$PV7_EPIC" epic-row 7 ADRs=052
+pv7_refused "FV-2c the wave cell is the row's key" 1 "" "$R7" "$PV7_EPIC" epic-row 1 wave=2
+poke "$R7" continuation-fill 'task count=3'
+expect_eq "FV-3 §FILL-VERBS continuation-fill exits 0" "0|Closed. 3 tasks, every one RED→GREEN." "$RC|$(/usr/bin/grep '^Closed' "$PV7_CONT")"
+expect_contains "FV-3b …and counts the marks left" "2 fill marks left" "$OUT"
+poke "$R7" continuation-fill 'the first decision=Push main.'
+expect_eq "FV-3c a field named by its first words fills the mark whose label begins with them" "0|1. Push main." "$RC|$(/usr/bin/grep '^1\. ' "$PV7_CONT")"
+pv7_refused "FV-4 a field that names no mark" 1 "Patrol job id" "$R7" "$PV7_CONT" continuation-fill 'nothing here=x'
+pv7_refused "FV-4b a text that is itself a fill mark" 1 "" "$R7" "$PV7_CONT" continuation-fill 'Patrol job id=<fill: later>'
+: > "$(marker_of "$R7")"
+pv7_refused "FV-5 an unbound session (close-out wiped the binding) is refused…" 1 "--plan" "$R7" "$PV7_CONT" continuation-fill 'Patrol job id=ca180638'
+FV_CALL="$(pv7_next)"
+expect_contains "FV-5b …naming the call with --plan" "continuation-fill 'Patrol job id=ca180638' --plan " "$FV_CALL"
+pv7_run "$R7" "$FV_CALL"
+expect_eq "FV-5c …which, run as printed, fills the last mark" "0|ca180638 deleted." "$RC|$(/usr/bin/grep 'deleted\.$' "$PV7_CONT")"
+expect_absent "FV-5d …and the continuation carries no fill mark" "<fill:" "$(cat "$PV7_CONT")"
+bound_marker "$R7" "$SID" "$P7" >/dev/null 2>&1
+
+# ---------- §NEXT-CALL ledger-add and task-set: an unknown column ----------
+s42_snap "$R7" "$P7"
+pv7_refused "NC-1 §NEXT-CALL ledger-add with a column the ledger header does not carry" 1 \
+  "id, agent, dispatched, expected, artifact, landed, notes" "$R7" "$P7" ledger-add P3 agent=w-P3 artifacts=record/P3.md
+NC_CALL="$(pv7_next)"
+expect_eq "NC-1b …the printed call, the column corrected" "bash $PV7_HOOK ledger-add P3 agent=w-P3 artifact=record/P3.md" "$NC_CALL"
+pv7_run "$R7" "$NC_CALL"
+expect_eq "NC-1c …run as printed, it succeeds and writes the cell" "0|record/P3.md" "$RC|$(pv7_ledger "$P7" P3 6)"
+s42_snap "$R7" "$P7"
+pv7_refused "NC-2 task-set with a column the ## Tasks header does not carry" 1 "size" "$R7" "$P7" task-set T5 sizes=40
+NC_CALL="$(pv7_next)"
+expect_eq "NC-2b …the printed call, the column corrected" "bash $PV7_HOOK task-set T5 size=40" "$NC_CALL"
+pv7_run "$R7" "$NC_CALL"
+expect_eq "NC-2c …run as printed, it succeeds" "0|40" "$RC|$(s48_row "$P7" T5 | cut -d'|' -f7)"
+
+# ---------- §NEXT-CALL task-add: a doc row at step 7 without its approval read ----------
+# §34's gate-admitted plan given a reads column, as session-poker-2's s51_plan gives it (the rule fires on a reads table).
+R7B="$(make_repo t7-task-add)"; ( cd "$R7B" && git commit -q --allow-empty -m init )
+P7B="$(s34_plan "$R7B" 4)"
+awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
+     t && /^\| id / { print $0 " reads |"; next }
+     t && /^\|---/ { print $0 "---|"; next }
+     t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
+     { print }' "$P7B" > "$P7B.t7" && mv "$P7B.t7" "$P7B"
+s34_gate "$R7B"
+expect_eq "PV7-ta0 precondition: the reads-table fixture is admitted by the real commit gate" "0" "$GATE_RC"
+pv7_refused "NC-3 §NEXT-CALL task-add of a doc row at step 7 with the kind's default reads" 1 "approval:release" \
+  "$R7B" "$P7B" task-add T9 7 doc 'the release notes' implementor '—' 15 REQ-x CHANGELOG.md
+NC_CALL="$(pv7_next)"
+expect_eq "NC-3b …the printed call carries the approval read beside the kind's default" \
+  "bash $PV7_HOOK task-add T9 7 doc 'the release notes' implementor '—' 15 REQ-x CHANGELOG.md 'approval:plan, head, approval:release'" "$NC_CALL"
+pv7_run "$R7B" "$NC_CALL"
+expect_eq "NC-3c …run as printed, it succeeds and the row reads the approval" "0|approval:plan, head, approval:release" \
+  "$RC|$(s48_row "$P7B" T9 | awk -F'|' '{ print $NF }')"
+
+# ---------- §NEXT-CALL decline --on: a file is no row ----------
+R7C="$(make_repo t7-decline)"; new_roster "$R7C"
+P7C="$(s47_plan "$R7C" 4 \
+  "| T1 | 4 | build | the holder | implementor | — | 30 | REQ-x | payload/a.sh | pending | |" \
+  "| T3 | 4 | build | shares a file | implementor | — | 20 | REQ-x | payload/c.sh | pending | |")"
+PV7_LED="$R7C/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
+poke_pressure "$R7C" 8192 1.0 tick
+expect_contains "PV7-dc0 precondition: the tick fills the two ready rows" "poker: FILL T1 T3" "$OUT"
+pv7_led_n() { if [ -f "$PV7_LED" ]; then wc -l < "$PV7_LED" | tr -d ' '; else echo 0; fi; }
+PV7_N="$(pv7_led_n)"
+poke "$R7C" decline T1 'held a moment'
+expect_eq "PV7-dc1 precondition: a decline with no --on is recorded, one ledger line (the extractor, positive)" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
+PV7_N="$(pv7_led_n)"
+cp "$PV7_LED" "$TMPROOT/pv7-led"
+poke "$R7C" decline T3 'both touch payload/a.sh' --on payload/a.sh
+expect_eq "NC-4 §NEXT-CALL decline --on a file is refused (exit 1)" "1" "$RC"
+expect_true "NC-4b …and nothing is recorded (the fill ledger is byte-identical)" cmp -s "$TMPROOT/pv7-led" "$PV7_LED"
+expect_contains "NC-4c …saying why" "a shared file is no dependency" "$OUT"
+NC_CALL="$(pv7_next)"
+expect_eq "NC-4d …the printed call declines without --on" "bash $PV7_HOOK decline T3 'both touch payload/a.sh'" "$NC_CALL"
+pv7_run "$R7C" "$NC_CALL"
+expect_eq "NC-4e …run as printed, it succeeds and is recorded" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
+PV7_N="$(pv7_led_n)"
+cp "$PV7_LED" "$TMPROOT/pv7-led"
+poke "$R7C" decline T3 'waits on the weather' --on weather
+expect_eq "NC-5 decline --on a word that is no row and no file is refused too, nothing recorded" "1|yes" \
+  "$RC|$(cmp -s "$TMPROOT/pv7-led" "$PV7_LED" && echo yes)"
+expect_eq "NC-5b …with the same corrected call" "bash $PV7_HOOK decline T3 'waits on the weather'" "$(pv7_next)"
+poke "$R7C" decline T3 'T3 builds on what T1 writes' --on T1
+expect_eq "NC-6 beside NC-4: decline --on a row is still recorded (exit 0)" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
+
+if [ "$PV7_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$PV7_CCD_WAS"; fi
+POKE_BOUND="$PV7_BOUND_WAS"
+
+# ============================================================
 section "§HANDOFF: handoff rewrites ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof and date -u; the human lines are carried (wave-30 T15; REQ-7 AC-7.2; D11)"
 # ============================================================
 #
