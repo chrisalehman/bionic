@@ -760,6 +760,69 @@ _proof_floor_walk() {
   return 1
 }
 
+# _proof_records <checkout> [<landing record>] -> THE RECORDS the floor judge weighs (`_proof_walk`, below),
+# one tab-separated line each, in the order read (the landing record, then every git dir's stamp file):
+#   O <commit> <row> <suites | ->               a published commit (or a `landed:` merge) and its row's suites
+#   R <at> <commit> <suite | *> <green | red> <verdict | stamp>   one suite's run at one commit (`*`, a whole run)
+# AN ENVIRONMENT RED IS NO RECORD (wave-33 T2; REQ-7 AC-7.2): a landing's `standing` event of
+# `cause=environment` (lib/line.sh `_line_red_owner`) says a run of that suite on the same code disagrees
+# with the red, so the red verdicts it stands for, of its suite at its head and on every candidate built
+# on that head, are not the suite's state and are left out. A standing event of class `code`, or with no
+# `cause=` (one written before 1.16.0), leaves them in. lib/line.sh `_line_cause` reads the same records.
+_proof_records() {
+  local co="$1" rec="${2:-}" gd f
+  gd="$(cd "$co" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
+  { if [ -n "$rec" ] && [ -f "$rec" ]; then cat "$rec"; fi
+    if [ -n "$gd" ]; then for f in "$gd/bionic-stamps" "$gd"/worktrees/*/bionic-stamps; do
+      [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' '
+    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    function out(l) { lines[++nl] = l }
+    substr($0, 1, 8) == "line/v1|" {
+      ev = substr($2, 4); r = fv("row")
+      if (ev == "ready") { if (r != "") su[r] = fv("suites") }
+      else if (ev == "published") { c = fv("commit"); if (c != "") out("O\t" c "\t" r "\t" ((r in su) ? su[r] : "-")) }
+      else if (ev == "verdict") {
+        c = fv("commit"); s = fv("suite"); v = fv("result")
+        if (c != "" && s != "" && (v == "green" || v == "red")) { out("R\t" fv("at") "\t" c "\t" s "\t" v "\tverdict"); if (v == "red") { vc[nl] = c; vs[nl] = s } }
+      }
+      else if (ev == "candidate") { c = fv("commit"); if (c != "") base[c] = fv("base") }
+      else if (ev == "standing") { if (fv("cause") == "environment") env[fv("head"), fv("suite")] = 1 }
+      next
+    }
+    substr($0, 1, 8) == "landed: " {
+      r = ""; c = ""; m = split($0, w, " ")
+      for (i = 2; i <= m; i++) { if (index(w[i], "row=") == 1) r = substr(w[i], 5); else if (index(w[i], "merge=") == 1) c = substr(w[i], 7) }
+      if (c != "") out("O\t" c "\t" r "\t-")
+      next
+    }
+    substr($0, 1, 9) == "stamp/v1|" {
+      h = d = rc = s = at = ""; nh = nd = nr = ns = 0
+      for (i = 2; i <= NF; i++) {
+        if (substr($i, 1, 4) == "cmd=") break
+        if (substr($i, 1, 5) == "head=")        { h = substr($i, 6); nh++ }
+        else if (substr($i, 1, 6) == "dirty=")  { d = substr($i, 7); nd++ }
+        else if (substr($i, 1, 3) == "rc=")     { rc = substr($i, 4); nr++ }
+        else if (substr($i, 1, 7) == "suites=") { s = substr($i, 8); ns++ }
+        else if (substr($i, 1, 3) == "at=")     at = substr($i, 4)
+      }
+      if (nh != 1 || nd != 1 || nr != 1 || ns > 1 || h == "" || h ~ /[^0-9a-f]/ || d != "0") next
+      if (rc == "" || rc ~ /[^0-9]/ || rc == "75" || rc == "69") next
+      v = (rc == "0") ? "green" : "red"
+      m = split(s, a, ",")
+      for (i = 1; i <= m; i++) {
+        if (a[i] == "" || a[i] == "?") continue
+        if (a[i] == "run.sh") { out("R\t" at "\t" h "\t*\t" v "\tstamp"); continue }
+        out("R\t" at "\t" h "\t" a[i] "\t" v "\tstamp")
+      }
+    }
+    END {
+      for (i = 1; i <= nl; i++) {
+        if (i in vc && (((vc[i], vs[i]) in env) || ((vc[i] in base) && ((base[vc[i]], vs[i]) in env)))) continue
+        print lines[i]
+      }
+    }'
+}
+
 # _proof_walk <checkout> <F> <H> [<landing record>] -> exit 0, printing nothing, when every commit on the
 # working branch's first-parent line after F, up to and including H, is proved by the runs recorded at
 # it; exit 1 printing one sentence that names the first commit that is not, and what it lacks (wave-31
@@ -787,51 +850,11 @@ _proof_floor_walk() {
 # every suite owed at or before its commit red there, and a newer run, the whole or the suite's own,
 # decides again (wave-31 T41).
 _proof_walk() {
-  local co="$1" from="$2" to="$3" rec="${4:-}" walk gd recs need trees pairs f
+  local co="$1" from="$2" to="$3" rec="${4:-}" walk recs need trees pairs
   walk="$(git -C "$co" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" \
     || { printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   [ -n "$walk" ] || return 0
-  gd="$(cd "$co" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
-  recs="$( { if [ -n "$rec" ] && [ -f "$rec" ]; then cat "$rec"; fi
-             if [ -n "$gd" ]; then for f in "$gd/bionic-stamps" "$gd"/worktrees/*/bionic-stamps; do
-               [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' '
-    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    substr($0, 1, 8) == "line/v1|" {
-      ev = substr($2, 4); r = fv("row")
-      if (ev == "ready") { if (r != "") su[r] = fv("suites") }
-      else if (ev == "published") { c = fv("commit"); if (c != "") print "O\t" c "\t" r "\t" ((r in su) ? su[r] : "-") }
-      else if (ev == "verdict") {
-        c = fv("commit"); s = fv("suite"); v = fv("result")
-        if (c != "" && s != "" && (v == "green" || v == "red")) print "R\t" fv("at") "\t" c "\t" s "\t" v
-      }
-      next
-    }
-    substr($0, 1, 8) == "landed: " {
-      r = ""; c = ""; m = split($0, w, " ")
-      for (i = 2; i <= m; i++) { if (index(w[i], "row=") == 1) r = substr(w[i], 5); else if (index(w[i], "merge=") == 1) c = substr(w[i], 7) }
-      if (c != "") print "O\t" c "\t" r "\t-"
-      next
-    }
-    substr($0, 1, 9) == "stamp/v1|" {
-      h = d = rc = s = at = ""; nh = nd = nr = ns = 0
-      for (i = 2; i <= NF; i++) {
-        if (substr($i, 1, 4) == "cmd=") break
-        if (substr($i, 1, 5) == "head=")        { h = substr($i, 6); nh++ }
-        else if (substr($i, 1, 6) == "dirty=")  { d = substr($i, 7); nd++ }
-        else if (substr($i, 1, 3) == "rc=")     { rc = substr($i, 4); nr++ }
-        else if (substr($i, 1, 7) == "suites=") { s = substr($i, 8); ns++ }
-        else if (substr($i, 1, 3) == "at=")     at = substr($i, 4)
-      }
-      if (nh != 1 || nd != 1 || nr != 1 || ns > 1 || h == "" || h ~ /[^0-9a-f]/ || d != "0") next
-      if (rc == "" || rc ~ /[^0-9]/ || rc == "75" || rc == "69") next
-      v = (rc == "0") ? "green" : "red"
-      m = split(s, a, ",")
-      for (i = 1; i <= m; i++) {
-        if (a[i] == "" || a[i] == "?") continue
-        if (a[i] == "run.sh") { print "R\t" at "\t" h "\t*\t" v; continue }
-        print "R\t" at "\t" h "\t" a[i] "\t" v
-      }
-    }')"
+  recs="$(_proof_records "$co" "$rec")"
   # THE TREES, in one git call: every commit a record names and every walked commit's first parent.
   need="$(printf '%s\n%s\n' "$recs" "$walk" | awk -F'\t' '
     $1 == "R" { print $3 } $1 == "W" { split($4, p, " "); if (p[1] != "") print p[1] }' | sort -u)"
