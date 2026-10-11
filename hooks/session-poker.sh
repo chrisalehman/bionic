@@ -455,6 +455,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
+  die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's reading too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
@@ -715,7 +716,13 @@ case "$VERB" in
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
       *) usage "row-landed: '$3' is not an ISO-UTC instant (YYYY-MM-DDTHH:MM:SSZ)." ;;
     esac
-    PV_ID="$1"; RL_COMMIT="$2"; RL_AT="$3"
+    PV_ID="$1"; RL_COMMIT="$2"; RL_AT="$3"; RL_ARTIFACT=""
+    ;;
+  # A RECORD ROW LANDS ITSELF (wave-33 T6; REQ-3 AC-3.1, D5): the row id alone. The commit is the
+  # working head and the instant is now, both the verb's, so neither is an operand.
+  deliver)
+    [ $# -eq 1 ] && [ -n "$1" ] || usage "deliver takes one argument: the row id (the head and the instant are the verb's own)."
+    PV_ID="$1"; RL_COMMIT=""; RL_AT=""; RL_ARTIFACT=""; RL_BY=""; RL_WHY=""; RL_HAND=0
     ;;
   step-line)
     PV_APPEND=""
@@ -3977,6 +3984,144 @@ plan_verb_id_ok() {
   return 0
 }
 
+# ---------------------------------------------------------------- a record row lands itself
+#
+# THE RECORD ROW'S OWN LANDING (wave-33 T6; REQ-3 AC-3.1, AC-3.2; D5). A test, verify or review row
+# writes a record and no code, so it has no tree, no `ready` and no `published` event; wave-32 landed
+# eight such rows by `row-landed --by-hand`. `deliver <row>` is its agent's last act, and the tick's
+# backstop when the agent ended without it. It checks what the row owes, then lands it through the
+# one landing writer, `row-landed`, in the same transaction, at the working head (the head of the
+# checkout holding the plan's `working-branch:`), with the artifact written into the ledger line.
+#
+# deliver_check -> for the row $PV_ID of the opened plan ($PV_PLAN, $PV_REPO), sets RL_COMMIT, RL_AT
+# and RL_ARTIFACT, or exits: 0 with nothing written when the row is already landed, 2 on a refusal,
+# each naming what is missing and the call that answers it. In order:
+#   - the row is in `## Tasks`, `pending` or `active`;
+#   - it has no tree of its own and its Files write nothing the head carries (`units_writes_head`):
+#     a row with a tree lands through `ready`, from that tree;
+#   - it is not a live review row (`units_live_rows`): `proof-add` returns that row to `pending` at
+#     each reading and the next landing makes it ready again, so landing it would end its passes;
+#   - its artifact: the ledger line's `artifact` cell, else the one record under `<docs-root>/record/`
+#     its Files name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The
+#     file exists, is no symbolic link, and lies under the docs root's `record/`;
+#   - a review row: a `proved: kind=review` line under `## SDLC State` names that record;
+#   - the working head reads as a commit.
+deliver_check() {
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head
+  call="bash $HOOK_DIR/session-poker.sh"
+  if ! { declare -F proof_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_head >/dev/null 2>&1; then
+    die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
+  row="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id { print; exit }')"
+  if [ -z "$row" ]; then
+    die "REFUSED — the ## Tasks table of $PV_PLAN carries no row $PV_ID; the plan is unchanged."
+    exit 2
+  fi
+  kind="$(units_field "$row" kind)"; files="$(units_field "$row" Files)"
+  wt="$(units_field "$row" worktree)"; status="$(units_field "$row" status)"
+  case "$status" in
+    landed) say "deliver — $PV_ID is already landed; nothing was written."; exit 0 ;;
+    pending|active) : ;;
+    *) die "REFUSED — $PV_ID reads $(clean "$status"), and only a pending or active row lands; the plan is unchanged."; exit 2 ;;
+  esac
+  case "$wt" in
+    *[A-Za-z0-9]*)
+      die "REFUSED — $PV_ID has a tree of its own ($(clean "$wt")), and a row with a tree lands through ready, from that tree: bash <plugin-root>/scripts/spawn-worktree.sh ready. The plan is unchanged."
+      exit 2 ;;
+  esac
+  if units_writes_head "$files"; then
+    die "REFUSED — the Files of $PV_ID ($(clean "$files")) write the head, and a row that writes the head lands through ready from its tree: bash <plugin-root>/scripts/spawn-worktree.sh ready. The plan is unchanged."
+    exit 2
+  fi
+  if [ -n "$(units_live_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id')" ]; then
+    die "REFUSED — $PV_ID is a live review row (it reads live:head): proof-add returns it to pending at each reading and the next landing makes it ready again, so deliver does not land it. The plan is unchanged."
+    exit 2
+  fi
+  docs="$(docs_root "$PV_REPO")"; docs="$(cd "$docs" 2>/dev/null && pwd -P)"
+  drel=""; case "$docs" in "$PV_REPO"/*) drel="${docs#"$PV_REPO"/}" ;; esac
+  launch_sync_ledger "$PV_PLAN" >/dev/null && hasl=1
+  art="$(awk -F'|' -v id="$PV_ID" '
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { inl = ($0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/); rows = 0; next }
+    !inl || $0 !~ /^[ \t]*\|/ { next }
+    { rows++ }
+    rows == 1 { ac = 0; for (k = 2; k < NF; k++) { h = $k; gsub(/^[ \t]+|[ \t]+$/, "", h); if (h == "artifact") ac = k }; next }
+    $0 ~ /^[ \t]*\|[ \t:|-]*$/ { next }
+    { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == id && ac) { v = $ac; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$PV_PLAN" 2>/dev/null)"
+  case "$art" in *[A-Za-z0-9]*) : ;; *) art="" ;; esac
+  if [ -z "$art" ]; then
+    while IFS= read -r e; do
+      e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
+      case "$e" in *[A-Za-z0-9]*) : ;; *) continue ;; esac
+      case "$e" in *.progress.md|assumptions.md|*/assumptions.md) continue ;; esac
+      case "$e" in record/*) : ;; "${drel:-/}"/record/*) : ;; *) continue ;; esac
+      n=$((n + 1)); cands="${cands:+$cands, }$e"; art="$e"
+    done <<DELIVER_FILES
+$(printf '%s\n' "$files" | tr ',' '\n')
+DELIVER_FILES
+    [ "$hasl" = 1 ] && launch_sync_ledger "$PV_PLAN" | awk -F'\037' -v id="$PV_ID" '$1 == id { f = 1 } END { exit !f }' || lverb=ledger-add
+    if [ "$n" -eq 0 ]; then
+      die "REFUSED — $PV_ID names no artifact: its ledger line has no artifact cell and its Files name no record under record/; name it: $call $lverb $PV_ID artifact=<path>, then $call deliver $PV_ID. The plan is unchanged."
+      exit 2
+    fi
+    if [ "$n" -gt 1 ]; then
+      die "REFUSED — $PV_ID names no artifact in its ledger line and its Files name $n records ($(clean "$cands")); name the one it delivers: $call $lverb $PV_ID artifact=<path>, then $call deliver $PV_ID. The plan is unchanged."
+      exit 2
+    fi
+  fi
+  case "$art" in
+    *[[:space:]]*|*'|'*)
+      die "REFUSED — the artifact $(clean "$art") of $PV_ID carries a blank or a |, which no plan cell can hold; the plan is unchanged."
+      exit 2 ;;
+  esac
+  # A path is read as the plan spells it: absolute, from the docs root (`record/…`, as proof lines and
+  # older ledgers write it), or from the repository (`.bionic/docs/record/…`, as Files cells do).
+  case "$art" in
+    /*) abs="$art" ;;
+    record/*) abs="$docs/$art" ;;
+    *) abs="$PV_REPO/$art" ;;
+  esac
+  if [ -L "$abs" ]; then
+    die "REFUSED — the artifact $(clean "$art") of $PV_ID is a symbolic link, and what it points at can change after the landing; copy the record to that path, then $call deliver $PV_ID. The plan is unchanged."
+    exit 2
+  fi
+  if [ ! -f "$abs" ]; then
+    die "REFUSED — the artifact of $PV_ID, $(clean "$art"), does not exist (read as $(clean "$abs")); write it, then run $call deliver $PV_ID. The plan is unchanged."
+    exit 2
+  fi
+  real="$(cd "$(dirname "$abs")" 2>/dev/null && pwd -P)/$(basename "$abs")"
+  case "$real" in
+    "$docs"/record/*) rel="${real#"$docs"/}" ;;
+    *)
+      die "REFUSED — the artifact $(clean "$art") of $PV_ID is not under record/ of the docs root ($docs/record/), and a record row delivers a record; the plan is unchanged."
+      exit 2 ;;
+  esac
+  if [ "$kind" = review ]; then
+    if [ -z "$(awk -v rec="$rel" "$(proof_awk)"'
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+        insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == rec { print "y"; exit }' "$PV_PLAN" 2>/dev/null)" ]; then
+      die "REFUSED — $PV_ID is a review row and no proved: kind=review line names its record $rel; register the reading first: $call proof-add review $rel --question <q> --reader <name>, then $call deliver $PV_ID. The plan is unchanged."
+      exit 2
+    fi
+  fi
+  wb="$(proof_working_branch "$PV_PLAN")"
+  head=""; [ -z "$wb" ] || head="$(proof_head "$PV_REPO" "$wb")" || head=""
+  case "$head" in
+    [0-9a-f]*) [ "${#head}" -eq 40 ] || head="" ;;
+    *) head="" ;;
+  esac
+  if [ -z "$head" ]; then
+    die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out, so there is no head to land $PV_ID at; check the branch out (its worktree), then $call deliver $PV_ID. The plan is unchanged."
+    exit 2
+  fi
+  RL_COMMIT="$head"; RL_AT="$(iso_now)"; RL_ARTIFACT="$art"
+}
+
 # ---------------------------------------------------------------- the deferral's sentence
 #
 # A DEFERRED FINDING'S ONE CHANGELOG SENTENCE (wave-28 T17; D21, AC-8.7). Registering a record writes
@@ -7096,7 +7241,16 @@ EOF
   # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
   # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
   # same landing finds the plan already so and writes nothing.
-  row-landed)
+  #
+  # A PLACEHOLDER LEAD IS REPLACED, NOT KEPT (wave-33 T6; REQ-3 AC-3.3, D5). A line that opens
+  # `pending dispatch` (the Step-3 template, `task-add`, `task-split`) gives that lead to the landing
+  # text and keeps the rest of its words, a ` born: ` marker included (`units_born` reads it there):
+  # `- T5: pending dispatch — .worktrees/01-T5` lands as `- T5: landed <commit> <at> — .worktrees/01-T5`.
+  #
+  # `deliver <row>` (wave-33 T6; D5) is this verb for a record row: `deliver_check` reads what the row
+  # owes and sets the commit (the working head), the instant (now) and the artifact, which is
+  # written into the ledger line's `artifact` cell beside the landed one, in this same write.
+  row-landed|deliver)
     if ! plan_verb_id_ok "$PV_ID"; then
       die "REFUSED — '$(clean "$PV_ID")' is not one row id; the plan is unchanged."
       exit 1
@@ -7106,6 +7260,7 @@ EOF
       exit 1
     fi
     plan_verb_open row-landed
+    [ "$VERB" != deliver ] || deliver_check
     PV_RC=0
     units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
@@ -7128,6 +7283,7 @@ EOF
         RL_REST="$(units_step_text "$PV_NEW" "$PV_ID" 2>/dev/null)"
         case " $RL_REST " in
           *" $RL_TEXT "*) RL_LINE="$RL_REST" ;;
+          " pending dispatch "*) RL_LINE="$RL_TEXT${RL_REST#pending dispatch}" ;;
           *) RL_LINE="${RL_REST:+$RL_REST }$RL_TEXT" ;;
         esac
         if ! units_step_line "$PV_NEW" "$PV_ID" "$RL_LINE" > "$PV_NEW.2" 2>/dev/null; then
@@ -7149,6 +7305,16 @@ EOF
       5) die "REFUSED — the ## Dispatch ledger table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
       *) die "REFUSED — the ledger row $PV_ID cannot take its landed cell; the plan is unchanged."; exit 1 ;;
     esac
+    # A DELIVERED ROW'S LEDGER LINE NAMES ITS ARTIFACT (wave-33 T6; AC-3.1): the cell the artifact was
+    # read from, or the empty one of a line this landing added. A ledger with no artifact column has
+    # no cell to hold it, and the landing stands without one.
+    if [ -n "$RL_ARTIFACT" ] && [ "$PV_RC" -eq 0 ]; then
+      if units_table_cells "$PV_NEW" set ledger "$PV_ID" "artifact=$RL_ARTIFACT" > "$PV_NEW.2" 2>/dev/null; then
+        mv -f "$PV_NEW.2" "$PV_NEW"
+      else
+        rm -f "$PV_NEW.2"
+      fi
+    fi
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
     # A hand landing's record carries no verdict, so it writes none. Same copy, same dry commit, same swap.
@@ -7162,6 +7328,7 @@ EOF
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
     say "evidence: $RL_N cell(s) written by landing"
+    [ "$VERB" != deliver ] || say "deliver — $PV_ID: artifact $RL_ARTIFACT present; landed at the working head $RL_COMMIT."
     exit 0
     ;;
 
@@ -9698,6 +9865,41 @@ EOF
     done <<EOF
 $VERDICT_OUT
 EOF
+
+    # ---------- THE BACKSTOP: A RECORD ROW WHOSE AGENT ENDED WITHOUT LANDING IT (wave-33 T6; REQ-3 AC-3.1; D5) ----------
+    #
+    # A test, verify or review row lands by its own agent's last act, `deliver`. When the agent
+    # ended without it, its roster row reads MET (the deliverable landed and the agent said so)
+    # while its `## Tasks` row is still `active` under that name (launch-sync wrote the name into
+    # the agent cell). The tick lands such a row through `deliver` itself, run as a child as
+    # launch-sync is above, so the one landing writer and every check `deliver` makes stand: a row
+    # whose artifact is absent is refused there, left active, and reported here with the refusal.
+    # Only a row with no tree whose Files write nothing the head carries is asked; a row with a
+    # tree lands through `ready`. MET is read off this tick's one verdict read, acked or not: the
+    # ack closes the agent, never the row. A landed row is no longer `active`, so it is asked once.
+    if [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ]; then
+      TICK_MET="$(printf '%s\n' "$VERDICT_OUT" | awk -F'|' '$1 == "landing-verdict/v1" { n = ""; s = ""
+          for (i = 2; i <= NF; i++) { if ($i ~ /^name=/) n = substr($i, 6); else if ($i ~ /^state=/) s = substr($i, 7) }
+          if (s == "MET" && n != "") printf " %s", n }
+        END { printf " " }')"
+      if [ "$TICK_MET" != " " ]; then
+        # An empty cell is printed `-`: a tab is white space to `read`, so two in a row would shift a field.
+        while IFS=$'\t' read -r BS_ID BS_AGENT BS_FILES BS_WT; do
+          [ -n "$BS_ID" ] || continue
+          case "$BS_WT" in *[A-Za-z0-9]*) continue ;; esac
+          ! units_writes_head "$BS_FILES" || continue
+          BS_RC=0
+          BS_OUT="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" deliver "$BS_ID" 2>&1 )" || BS_RC=$?
+          if [ "$BS_RC" -eq 0 ]; then
+            say "LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET) without deliver; the tick landed its row through deliver: $(clean "$(printf '%s\n' "$BS_OUT" | sed -n 's/^poker: deliver — [^:]*: //p' | head -1)")"
+          else
+            say "NOT-LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET) without deliver, and deliver refused it: $(clean "$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')")"
+          fi
+        done <<BACKSTOP_ROWS
+$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' -v met="$TICK_MET" '$10 == "active" && $5 != "" && index(met, " " $5 " ") { printf "%s\t%s\t%s\t%s\n", $1, $5, ($9 == "" ? "-" : $9), ($11 == "" ? "-" : $11) }')
+BACKSTOP_ROWS
+      fi
+    fi
 
     # ---------- THE PANEL IS REFRESHED FROM THE ROSTER, NOT FROM A TOOL CALL (T22) -------
     #
