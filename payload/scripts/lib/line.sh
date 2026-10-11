@@ -20,7 +20,8 @@
 #   ready     row name commit branch tree suites debt carrier   (a carrier is `<pid>:<start>`)
 #   candidate row base commit tree
 #   verdict   row commit suite result log      (green | red | none | discarded)
-#   standing  head suite lines log
+#   standing  head suite lines log cause against   (cause: environment | code; against: the run that
+#             disagrees, `<stamp|verdict>:<commit>@<at>`, or `-`; wave-33 T2, AC-7.2)
 #   returned  row why detail                   (red | conflict | guard)
 #   stalled   row logs
 #   published row commit kind by why           (queue | hand | git)
@@ -60,6 +61,12 @@ fi
 if ! declare -F _slots_take_one >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_LINE_LIB_DIR/slots.sh"
+fi
+# HOW A SUITE RUNS IS suite.sh's (wave-33 T2; D3): the landing's two spawns, the runner and its suite,
+# are jobs of their own (`bionic_job`, `bionic_suite_start`), so the suite starts as the whole run starts it.
+if ! declare -F bionic_suite_start >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_LINE_LIB_DIR/suite.sh"
 fi
 
 # What the caller of `line_publish` says it is: the queue's carrier (`ready`) by default; the hand
@@ -856,7 +863,7 @@ EOF
       # A RED IS THE ROW'S ONLY WHEN IT IS NEW (D8, AC-9.3, AC-9.4): the declared debt suite's red, and a
       # red whose failing lines all fail at the accepted head too, count for this row as passed.
       c="$LINE_LOG"
-      _line_red_owner "$plan" "$rec" "$row" "$cbase" "$s" "$c" "$debt" "$deadline"
+      _line_red_owner "$plan" "$rec" "$row" "$cbase" "$s" "$c" "$debt" "$deadline" "$cand"
       case "$LINE_RED" in
         declared|standing) : ;;
         waiting) _line_waiting "$row" "$again"; return 75 ;;
@@ -941,8 +948,12 @@ _line_red_log() {  # <rec> <row> <candidate> <suite>
 # a new head runs it once more. A run there with no verdict proves nothing, so the red stays the row's.
 # The comparison is of FAILING LINES (`_line_fails`), never of exit codes or counts. When the row adds
 # none, one `standing` event is appended for that head and suite, naming the head's failing lines.
-_line_red_owner() {  # <plan> <rec> <row> <cbase> <suite> <candidate's log> <debt> <deadline>
-  local plan="$1" rec="$2" row="$3" s="$5" head hr="" hl=""
+# ITS CAUSE (wave-33 T2; REQ-7 AC-7.2): the event names its class and the run that disagrees with it
+# (`_line_cause`), one event per head, suite and class. An environment-class standing red is a defect the
+# landing reports, one `STANDING <row> <suite> cause=environment against=<run> log=<head's log>` line; the
+# floor judge does not count it as the suite's state (lib/proof.sh `_proof_records`).
+_line_red_owner() {  # <plan> <rec> <row> <cbase> <suite> <candidate's log> <debt> <deadline> <candidate>
+  local plan="$1" rec="$2" row="$3" s="$5" head hr="" hl="" cause against
   if [ "$s" = "$7" ]; then LINE_RED=declared; return 0; fi
   LINE_RED=row
   head="$(line_head "$plan")" || return 0
@@ -963,9 +974,40 @@ EOT
   [ "$hr" = red ] || return 0
   if [ "$(_line_new_fails "$6" "$hl")" -eq 0 ]; then
     LINE_RED=standing
-    awk -F'|' -v h="head=${head}" -v s="suite=${s}" '$2 == "ev=standing" && $3 == h && $4 == s { f = 1 } END { exit !f }' "$rec" 2>/dev/null \
-      || line_event "$plan" standing "head=${head}" "suite=${s}" "lines=$(_line_fails "$hl" | awk 'END { print NR }')" "log=${hl}" >/dev/null
+    cause="$(_line_cause "$plan" "$rec" "$head" "${9:-}" "$s")"; against="${cause#* }"; cause="${cause%% *}"
+    awk -F'|' -v h="head=${head}" -v s="suite=${s}" -v c="cause=${cause}" '$2 == "ev=standing" && $3 == h && $4 == s && $7 == c { f = 1 } END { exit !f }' "$rec" 2>/dev/null \
+      || line_event "$plan" standing "head=${head}" "suite=${s}" "lines=$(_line_fails "$hl" | awk 'END { print NR }')" "log=${hl}" \
+           "cause=${cause}" "against=${against}" >/dev/null
+    [ "$cause" != environment ] || printf 'STANDING %s %s cause=environment against=%s log=%s\n' "$row" "$s" "$against" "$hl"
   fi
+}
+# THE CAUSE OF A STANDING RED (wave-33 T2; REQ-7 AC-7.2). A standing red is red on the candidate and at the
+# accepted head alike. It is `environment` when a run of the same suite on the same code disagrees: a green
+# record of <suite>, or a green whole run, at a commit whose tree is the head's or the candidate's, among the
+# records the floor judge reads (lib/proof.sh `_proof_records`: the landing record's verdicts, booked.sh's
+# stamps in every git dir of the repository). The newest such run is named `<stamp|verdict>:<commit>@<at>`.
+# Otherwise it is `code`, and no run is named (`-`). Prints `<class> <run>`.
+_line_cause() {  # <plan> <rec> <head> <candidate | empty> <suite>
+  local root th tc recs trees run=""
+  root="$(_line_root "$1")" && _line_load_proof || { echo "code -"; return 0; }
+  th="$(git -C "$root" rev-parse -q --verify "${3}^{tree}" 2>/dev/null)"
+  tc=""; [ -z "$4" ] || tc="$(git -C "$root" rev-parse -q --verify "${4}^{tree}" 2>/dev/null)"
+  recs="$(_proof_records "$root" "$2" | awk -F'\t' -v s="$5" '$1 == "R" && $5 == "green" && ($4 == s || $4 == "*") { print $3 "\t" $2 "\t" $6 }')"
+  if [ -n "$recs" ]; then
+    trees="$(printf '%s\n' "$recs" | cut -f1 | sed 's/$/^{tree}/' | git -C "$root" cat-file --batch-check='%(objectname)' 2>/dev/null)"
+    run="$( { printf '%s\n' "$trees"; printf -- '--\n'; printf '%s\n' "$recs"; } | awk -F'\t' -v a="$th" -v b="$tc" '
+      $0 == "--" && !s { s = 1; next }
+      !s { t[++k] = $1; next }
+      { i++; x = t[i]; if (x ~ /^[0-9a-f]+$/ && (x == a || x == b) && $2 >= best) { best = $2; r = $3 ":" $1 "@" $2 } }
+      END { if (r != "") print r }')"
+  fi
+  if [ -n "$run" ]; then printf 'environment %s\n' "$run"; else echo "code -"; fi
+}
+_line_load_proof() {
+  declare -F _proof_records >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
+  declare -F _proof_records >/dev/null 2>&1
 }
 # The remembered run of <suite> at <head>: `<green|red><TAB><log>` of its latest such verdict, or nothing.
 _line_head_verdict() {  # <rec> <head> <suite>
@@ -1066,9 +1108,11 @@ _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite>
   LINE_RESULT=""; LINE_LOG="$(_line_suite_log "$2" "$3" "$7" "$4")"
   if [ -n "$8" ]; then within="$(_line_time_for "$7" "$8")" || { LINE_RESULT=waiting; return 0; }; fi
   res="${LINE_LOG%.log}.run"; : > "$res"
-  bash -c '. "$1/line.sh" && _line_load_gate && shift && _line_runner "$@"' _ \
-    "$_LINE_LIB_DIR" "$7" "$within" "$6" "$LINE_LOG" "$res" "${LINE_ME%%:*}" &
-  rp=$!
+  # A JOB OF ITS OWN (wave-33 T2; D3, AC-7.1): a plain `&` would start the runner, and so its suite,
+  # with INT and QUIT ignored; the runner's own spawn of the suite is one too (`_line_runner`).
+  bionic_job bash -c '. "$1/line.sh" && _line_load_gate && shift && _line_runner "$@"' _ \
+    "$_LINE_LIB_DIR" "$7" "$within" "$6" "$LINE_LOG" "$res" "${LINE_ME%%:*}"
+  rp="$BIONIC_JOB_PID"
   while kill -0 "$rp" 2>/dev/null; do
     if _line_replaced "$2" "$1" "$3" "$5"; then
       _line_kill_tree "$rp"; wait "$rp" 2>/dev/null
@@ -1096,9 +1140,13 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
   printf 'admitted=%s\n' "$id" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended
   # by a signal is a `none` verdict, and the shell's notice of the kill is no line of ready's output.
+  # The suite starts through the plugin's primitive (lib/suite.sh; wave-33 T2, D3): a job of its own, so
+  # its INT and QUIT are the runner's defaults; the gate's store unset in it; this admission its
+  # BIONIC_GATE_ADMIT; stdin /dev/null. A tree that is no checkout runs nothing: rc 1, no end line.
   {
-    ( [ -e "$3/.git" ] && cd "$3" && exec bash "tests/$1" ) > "$4" 2>&1 < /dev/null &
-    p=$!
+    p=""
+    [ -e "$3/.git" ] && bionic_suite_start ${id:+--admit "$id"} "$3" "tests/$1" > "$4" 2>&1 && p="$BIONIC_SUITE_PID"
+    [ -n "$p" ] || { ( exit 1 ) & p=$!; }
     while kill -0 "$p" 2>/dev/null; do
       kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }
       sleep "$LINE_POLL"; gate_state >/dev/null 2>&1
