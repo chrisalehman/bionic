@@ -114,6 +114,13 @@ fi
 . "${CO_LIB}/units.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/proof.sh"
+# THE PERSON'S LEDGER AND ITS ONE SENDER (wave-33 T12; REQ-2 AC-2.3, D2), for the delivery notice at
+# the end of `run`. NOT in the list above and sourced only when readable: a payload without it
+# closes a run exactly as 1.15.0 did, and nothing here can make a close refuse.
+if [ -r "${CO_LIB}/owed.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${CO_LIB}/owed.sh"
+fi
 
 # CO_SID -> this script's own identity, read from the ambient environment BEFORE
 # anything below ever touches CLAUDE_CODE_SESSION_ID (`gate_ask`'s one
@@ -1686,6 +1693,27 @@ do_run() {
   act_archive
   insert_archived
                     say "archived: $ARCHIVED_LINE"
+  co_deliver_notice
+}
+
+# THE DELIVERY CALLS THE PERSON (wave-33 T12; REQ-2 AC-2.3, D2). A run that reached `delivered:` and
+# was archived opens one item on this session's ledger, `delivered:<run>`, sends it once through the
+# one sender and closes it: it is news, not a need, so nothing stays owed. Only when a channel is
+# declared, so a machine without one writes no ledger and prints what 1.15.0 printed; silent either
+# way, and never fatal, so no send can change this script's output or its exit code. A second `run`
+# says `already closed` and never reaches here, which is what makes the notice once. With no session
+# id (a hand-run script) there is no ledger to key it on and nothing is sent.
+co_deliver_notice() {
+  local key
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  declare -F notify_declared >/dev/null 2>&1 || return 0
+  notify_declared || return 0
+  key="delivered:$(printf '%s' "$WAVE_SLUG" | tr -c 'A-Za-z0-9._-' '-')"
+  OWED_ROOT="$ROOT" OWED_SID="$CO_SID" owed_open "$key" "delivered: $WAVE_SLUG" \
+    "close-out: step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}" >/dev/null 2>&1 || return 0
+  OWED_ROOT="$ROOT" OWED_SID="$CO_SID" owed_send delivered: >/dev/null 2>&1
+  OWED_ROOT="$ROOT" OWED_SID="$CO_SID" owed_close "$key" delivered >/dev/null 2>&1
+  return 0
 }
 
 case "$VERB" in
