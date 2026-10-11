@@ -4405,9 +4405,10 @@ plan_verb_id_ok() {
 #     its Files name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The
 #     file exists, is no symbolic link, and lies under the docs root's `record/`;
 #   - a review row: a `proved: kind=review` line under `## SDLC State` names that record;
-#   - the working head reads as a commit.
+#   - the working head reads as a commit;
+#   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head sid roster launch name rulings
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_head >/dev/null 2>&1; then
@@ -4517,6 +4518,21 @@ DELIVER_FILES
   esac
   if [ -z "$head" ]; then
     die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out, so there is no head to land $PV_ID at; check the branch out (its worktree), then $call deliver $PV_ID. The plan is unchanged."
+    exit 2
+  fi
+  # AN UNREAD RULING HOLDS THE LANDING (wave-33 T34; Δ1, ADR-052), as at the commit wall and `ready`: a
+  # record row's artifact is gitignored and never commits, so deliver is its only landing. The writer
+  # is the row's launch line by `row=`, else the plan's agent cell (`ready`'s order). Each ruling of it
+  # not yet shown is printed and stamped shown (lib/roster.sh `ruling_take_unread`), so the same call
+  # after this one lands. The REFUSED line names the ids: it is the line the tick's backstop reports.
+  sid="$(session_id)" || sid=""
+  roster="$PV_REPO/.bionic/tmp/roster-${sid}.state"
+  launch="$(_wt_launch_row "$roster" row "$PV_ID")" && name="$(_wt_field "$launch" name)" || name=""
+  [ -n "$name" ] || name="$(units_field "$row" agent)"
+  if [ -n "$sid" ] && declare -F ruling_take_unread >/dev/null 2>&1 \
+     && rulings="$(ruling_take_unread "$roster" "$name" deliver "$(refuse_plugin_root)")" && [ -n "$rulings" ]; then
+    die "REFUSED — an orchestrator ruling for $(clean "$name") is unread ($(printf '%s\n' "$rulings" | sed -n 's/^bionic ruling \([^ ]*\) .*/\1/p' | paste -sd, - | sed 's/,/, /g')); read it below, act on it, then $call deliver $PV_ID. The plan is unchanged."
+    printf '%s\n' "$rulings" >&2
     exit 2
   fi
   RL_COMMIT="$head"; RL_AT="$(iso_now)"; RL_ARTIFACT="$art"
