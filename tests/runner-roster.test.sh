@@ -693,9 +693,10 @@ rr9_drive() {
 
 # rr9_norm <report> — the report with its one per-run nonce masked: the
 # interpreter pin's own `mktemp -d` path, which is a fresh directory on every
-# invocation and is no product of this knob. Everything else is compared as it
-# was printed.
-rr9_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g'; }
+# invocation and is no product of this knob; and the seconds of the whole run's `Wall:` line
+# (wave-32 T2; D6), the run's own clock and landing order, which move between two drives. Everything else
+# is compared as it was printed.
+rr9_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g' -e 's/^Wall: .*/Wall: (masked)/'; }
 
 # rr9_shaped <file> — how many of the file's lines carry the pinned progress
 # shape: exactly three TAB fields, a UTC stamp, a suite label, a numeric rc.
@@ -843,9 +844,10 @@ expect_eq "9.19 the outer run is green, nested drive and all" "0" "$RR9_RC"
 expect_eq "9.20 the nested run really ran its own suite" "yes" \
   "$([ -f "$RR_MARKS/zin-inner.ran" ] && echo yes || echo no)"
 # PAIRED POSITIVE for the scratch store (wave-32 T1; D5): the nested run asked the store under
-# this suite's mktemp root that n-outer handed it, so its request is there, keyed by its suite.
-expect_eq "9.20a the nested run's request is in the scratch store it was handed, keyed zin-inner.test.sh" \
-  "1" "$(grep -lx 'key=zin-inner.test.sh' "$RR9_INNER_GATE"/requests/[0-9]* 2>/dev/null | wc -l | tr -d ' ')"
+# this suite's mktemp root that n-outer handed it, so its request is there. RE-KEYED BY WAVE-32 T2
+# (D1, AC-1.1; A-orch-8): the nested run is a whole run, so its one request is keyed by the runner.
+expect_eq "9.20a the nested run's request is in the scratch store it was handed, keyed tests/run.sh" \
+  "1" "$(grep -lx 'key=tests/run.sh' "$RR9_INNER_GATE"/requests/[0-9]* 2>/dev/null | wc -l | tr -d ' ')"
 expect_eq "9.21 the outer file names the outer tree's two suites" \
   "$(printf 'n-outer.test.sh\nn-plain.test.sh\n')" "$(rr9_prog_labels "$P9N")"
 expect_absent "9.22 …and carries no label from the nested tree" \
@@ -982,14 +984,16 @@ expect_eq "10.4 a tree that is no repository names no head" "head=none dirty=non
   "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
 
 # ============================================================
-section "§ASK each suite of a run asks the gate for itself; the runner holds nothing (T12; AC-2.12 runner half, D13)"
+section "§ASK a whole run asks the gate once; --serial asks per suite (T12; AC-2.12; wave-32 T2, D1, AC-1.1)"
 # ============================================================
 #
-# THE CLAIM. Before wave-28 a run started through the Bash tool held ONE booking for the whole
-# run and handed it to every worker, so up to eight suites ran on one place. Now the runner
-# asks nothing for itself: each `--one` worker asks `gate_ask work <suite file name>` for its
-# own suite, runs it with BIONIC_GATE_ADMIT naming that request, and ends it with the suite's
-# code; a solo suite asks `whole`; --serial asks per suite too. The store is this section's own
+# THE CLAIM. Wave-28 T12 made every `--one` worker ask `gate_ask work <suite>` for itself and the
+# runner hold nothing. WAVE-32 T2 (D1, AC-1.1; A-orch-8) REVERSES THAT FOR A WHOLE RUN BY DESIGN,
+# and ASK.2-ASK.6 and ASK.11 were rewritten to pin the new shape — a chartered behaviour change
+# rewriting its own pins, not a loosened assertion: the runner asks `whole tests/run.sh` once,
+# every worker and the solo suite run inside that one request (BIONIC_GATE_ADMIT names it), and
+# the runner ends it with the run's code. --serial still asks per suite (ASK.7-ASK.9, unchanged),
+# as does --only (§ONLY, §ONLY-UNCHANGED). The store is this section's own
 # (BIONIC_GATE_DIR under the suite's mktemp root) and the memory reading is pinned low, so no
 # drive reads or writes the machine's real gate.
 TA="$TMPROOT/ask"; RA_GATE="$TMPROOT/ask-gate"
@@ -1028,17 +1032,14 @@ ra_id_of() {  # <key> — the id of the request with that key
 rm -rf "$RA_GATE"; rm -f "$RR_MARKS"/*.admit
 ra_drive
 expect_eq "ASK.1 the run is green" "0" "$RR_RC"
-expect_eq "ASK.2 one request per suite, keyed by the suite's file name, each ended with its code" \
-  "aaa-ask-solo.test.sh whole 0
-ask-a.test.sh work 0
-ask-b.test.sh work 0
-ask-c.test.sh work 0" "$(ra_reqs)"
-expect_absent "ASK.3 …and none keyed by the runner: the runner holds nothing" "run.sh" "$(ra_reqs)"
-expect_eq "ASK.4 the three batch suites were held by three different workers" "3" \
-  "$(for _ra in ask-a ask-b ask-c; do sed -n 's/^holder=\([0-9]*\):.*/\1/p' "$RA_GATE/requests/$(ra_id_of "$_ra.test.sh")" 2>/dev/null | tail -n 1; done | sort -u | grep -c .)"
-expect_eq "ASK.5 each suite ran under its own request (ask-a)" "$(ra_id_of ask-a.test.sh)" \
+expect_eq "ASK.2 one request for the run, keyed by the runner, whole, ended with the run's code (T2)" \
+  "tests/run.sh whole 0" "$(ra_reqs)"
+expect_absent "ASK.3 …and none keyed by a suite: no worker asked for itself (T2)" ".test.sh" "$(ra_reqs)"
+expect_eq "ASK.4 the three batch suites all ran under that one request (T2)" "1 $(ra_id_of tests/run.sh)" \
+  "$(for _ra in ask-a ask-b ask-c; do cat "$RR_MARKS/$_ra.admit" 2>/dev/null; done | sort -u | awk '{ n++; v = $0 } END { print n + 0, v }')"
+expect_eq "ASK.5 ask-a ran under the run's request (T2)" "$(ra_id_of tests/run.sh)" \
   "$(cat "$RR_MARKS/ask-a.admit" 2>/dev/null)"
-expect_eq "ASK.6 …(the solo suite, under its whole request)" "$(ra_id_of aaa-ask-solo.test.sh)" \
+expect_eq "ASK.6 …and so did the solo suite (T2)" "$(ra_id_of tests/run.sh)" \
   "$(cat "$RR_MARKS/aaa-ask-solo.admit" 2>/dev/null)"
 rm -rf "$RA_GATE"; rm -f "$RR_MARKS"/*.admit
 ra_drive --serial
@@ -1059,11 +1060,8 @@ RR_OUT="$( cd "$TA" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/ask-r
   bash "$REPO/payload/scripts/booked.sh" --agent ask --max-wait 60 --suites run.sh -- 'bash tests/run.sh' 2>&1 )"
 RR_RC=$?
 expect_eq "ASK.10 a run wrapped in the shim is green" "0" "$RR_RC"
-expect_eq "ASK.11 …the shim took no number, and each suite asked for itself" \
-  "aaa-ask-solo.test.sh whole 0
-ask-a.test.sh work 0
-ask-b.test.sh work 0
-ask-c.test.sh work 0" "$(ra_reqs)"
+expect_eq "ASK.11 …the shim took no number, and the run asked once for itself (T2)" \
+  "tests/run.sh whole 0" "$(ra_reqs)"
 
 # ============================================================
 section "§SCRUB a suite never sees the runner's store; the timing-bound suite is solo (wave-30 T9; REQ-4 AC-4.1, AC-4.2; D8)"
@@ -1112,9 +1110,10 @@ expect_eq "SCRUB.1 the run is green" "0" "$RR_RC"
 expect_eq "SCRUB.2 the probe in the batch saw no BIONIC_GATE_DIR, though the run was started under one" \
   "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
 expect_eq "SCRUB.3 …and so did the solo probe" "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/aaa-probe-solo.seen" 2>/dev/null)"
-expect_eq "SCRUB.4 …while the worker's own ask landed in the run's store, each ended with its code (the ask is not scrubbed)" \
-  "aaa-probe-solo.test.sh 0
-probe-a.test.sh 0" "$(rs_keys)"
+# SCRUB.4 REWRITTEN BY WAVE-32 T2 (D1, AC-1.1; A-orch-8): a whole run's one ask is the runner's,
+# so the store the run named holds that request; the behaviour change rewrites the pin.
+expect_eq "SCRUB.4 …while the run's own ask landed in the run's store, ended with its code (the ask is not scrubbed)" \
+  "tests/run.sh 0" "$(rs_keys)"
 rm -rf "$RS_GATE"; rm -f "$RR_MARKS"/*.seen
 rs_drive --serial
 expect_eq "SCRUB.5 --serial is green" "0" "$RR_RC"
@@ -1279,23 +1278,26 @@ rrn_read() { cat "$RRN_MARKS/$1" 2>/dev/null; }
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
 rrn_drive "$TNO" 4 bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
 expect_eq "11.1 the booked outer run completes green" "0" "$RRN_RC"
-expect_eq "11.2 its solo suite ran under its own whole request" \
-  "whole aaa-nest.test.sh" "$(rrn_read outer.what)"
+# 11.2, 11.7, 11.12, 11.13, 11.22, 11.38, 11.39 and 11.41 RE-KEYED BY WAVE-32 T2 (D1, AC-1.1;
+# A-orch-8): a whole run holds one admission, `whole tests/run.sh`, and its solo suites and batch
+# suites run inside it, so the request they name is the run's; settle, void and retry are kept.
+expect_eq "11.2 its solo suite ran under the run's whole request" \
+  "whole tests/run.sh" "$(rrn_read outer.what)"
 expect_eq "11.3 the run nested in the solo suite completes green" "0" "$(rrn_read inner-solo.rc)"
 expect_contains "11.4 …with a real tally (the nested run happened)" "Gating:" "$(rrn_read inner-solo.out)"
 expect_absent "11.5 …and it never waited at the gate" "waits for its turn" "$(rrn_read inner-solo.out)"
 expect_absent "11.6 …nor reported a void, though the load was raised while it ran" "VOID" "$(rrn_read inner-solo.out)"
-expect_eq "11.7 the nested run's solo suite ran under the outer suite's whole admission" \
-  "whole aaa-nest.test.sh" "$(rrn_read inner-solo.what)"
+expect_eq "11.7 the nested run's solo suite ran under the outer run's whole admission" \
+  "whole tests/run.sh" "$(rrn_read inner-solo.what)"
 expect_eq "11.8 …and took no number of its own: no request names the inner suite" "" \
   "$(rrn_ids_of aaa-inner.test.sh)"
 expect_eq "11.9 the run nested in the batch completes green" "0" "$(rrn_read inner-batch.rc)"
 expect_contains "11.10 …with a real tally" "Gating:" "$(rrn_read inner-batch.out)"
 expect_absent "11.11 …and it never waited at the gate" "waits for its turn" "$(rrn_read inner-batch.out)"
-expect_eq "11.12 …its solo suite ran under the batch suite's work admission it was started from" \
-  "work n-batch.test.sh" "$(rrn_read inner-batch.what)"
-expect_nonempty "11.13 the store was used: the outer suites' own requests are there" \
-  "$(rrn_ids_of aaa-nest.test.sh)$(rrn_ids_of n-batch.test.sh)"
+expect_eq "11.12 …its solo suite ran under the admission the batch suite was started in, the run's" \
+  "whole tests/run.sh" "$(rrn_read inner-batch.what)"
+expect_nonempty "11.13 the store was used: the outer run's own request is there" \
+  "$(rrn_ids_of tests/run.sh)"
 expect_eq "11.14 …and every request was ended" "" "$(rrn_unended)"
 
 # ---- (b) the mutation control: no nested-whole check -----------------------
@@ -1341,8 +1343,8 @@ kill "$RRN_FPID" "$RRN_KILLER" 2>/dev/null; wait "$RRN_KILLER" 2>/dev/null
 expect_eq "11.20 the run with a foreign admitted run completes green" "0" "$RRN_RC"
 expect_eq "11.21 the solo suite started only once the foreign holder was gone" "gone" \
   "$(rrn_read foreign.state)"
-expect_contains "11.22 …and the gate said its whole request waited" \
-  "(whole aaa-timed.test.sh) waits for its turn and room" "$RRN_OUT"
+expect_contains "11.22 …and the gate said the run's whole request waited" \
+  "(whole tests/run.sh) waits for its turn and room" "$RRN_OUT"
 
 # ---- (d) VOID: the load rose during the timing run -------------------------
 # The suite raises the load reading during its run and a background line lowers it three
@@ -1394,14 +1396,14 @@ expect_contains "11.36 the always-disturbed run printed a Void: summary (11.34 i
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
 rrn_drive "$TNO" 4 bash tests/run.sh
 expect_eq "11.37 an unbooked run completes green" "0" "$RRN_RC"
-expect_eq "11.38 …its solo suite ran under a whole request for it" "whole aaa-nest.test.sh" "$(rrn_read outer.what)"
+expect_eq "11.38 …its solo suite ran under the run's whole request" "whole tests/run.sh" "$(rrn_read outer.what)"
 expect_eq "11.39 …named in BIONIC_GATE_ADMIT, admitted and unfinished while the suite ran" \
-  "$(rrn_ids_of aaa-nest.test.sh | tr -d ' ')held" "$(rrn_read outer.place | tr -d ' ')"
+  "$(rrn_ids_of tests/run.sh | tr -d ' ')held" "$(rrn_read outer.place | tr -d ' ')"
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"
 rrn_drive "$TNO" 4 bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
 expect_eq "11.40 a booked run completes green" "0" "$RRN_RC"
-expect_eq "11.41 …and its solo suite ran under its own whole request too" \
-  "$(rrn_ids_of aaa-nest.test.sh | tr -d ' ')held" "$(rrn_read outer.place | tr -d ' ')"
+expect_eq "11.41 …and its solo suite ran under the run's own whole request too" \
+  "$(rrn_ids_of tests/run.sh | tr -d ' ')held" "$(rrn_read outer.place | tr -d ' ')"
 
 # Two booked runs, each with a solo suite that holds the machine for three seconds: the second
 # whole request waits for the first to end, and both complete.
@@ -1437,6 +1439,9 @@ expect_eq "11.48 …and every request was ended" "" "$(rrn_unended)"
 # the drive: the settle gives up RRN_CMW seconds after the request is admitted, and the suite
 # then runs once and is void. The gap is read between two stamps of this fixture (a watcher
 # records the admission, the suite records its start), not off the drive's wall time.
+# RE-KEYED BY WAVE-32 T2 (D1; A-orch-8): the request is the run's one `whole tests/run.sh`,
+# admitted before the batch, and a solo suite's ceiling counts from its turn; so the watcher
+# stamps once the run's request is admitted AND the batch's one suite (c-plain) has started.
 TNC="$RRN/ceiling"
 rr_tree "$TNC"
 rr_stub "$TNC" "c-plain"
@@ -1445,14 +1450,14 @@ rrn_suite "$TNC/tests/aaa-ceil.test.sh" yes aaa-ceil \
 if kill -0 "$RRN_FOREIGN" 2>/dev/null; then s=alive; else s=gone; fi
 printf "%s\n" "$s" > "$RRN_MARKS/ceil.foreign"'
 RRN_CMW=6; RRN_CD=4
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"
+rm -f "$RRN_MARKS"/* "$RR_MARKS/c-plain.ran"; rm -rf "$RRN_GATE"
 printf '99\n' > "$RRN_LOAD"
 RRN_FPID="$( ( sleep 60 >/dev/null 2>&1 & printf '%s' "$!" ) )"
 rrn_plant 900 "$RRN_FPID"
 ( i=0
   while [ "$i" -lt 600 ]; do
-    f="$(grep -l '^key=aaa-ceil.test.sh$' "$RRN_GATE"/requests/[0-9]* 2>/dev/null | head -n 1)"
-    [ -n "$f" ] && grep -q '^admitted=' "$f" && break
+    f="$(grep -l '^key=tests/run.sh$' "$RRN_GATE"/requests/[0-9]* 2>/dev/null | head -n 1)"
+    [ -n "$f" ] && grep -q '^admitted=' "$f" && [ -f "$RR_MARKS/c-plain.ran" ] && break
     sleep 0.1; i=$((i + 1))
   done
   date +%s > "$RRN_MARKS/ceil.take" ) >/dev/null 2>&1 &
@@ -2131,5 +2136,139 @@ ord-c.test.sh:-
 ord-d.test.sh:-
 ord-z.test.sh:-" "$(ord_lines "$RR_OUT")"
 
+
+# ============================================================
+section "§ONE-ADMISSION a whole run asks the gate once and every suite runs inside it (wave-32 T2; D1, AC-1.1)"
+# ============================================================
+#
+# THE CLAIM. A whole run (no --only) asks `whole tests/run.sh` once, before its batch, and holds
+# it through the solo drain; every `--one` worker inherits it in BIONIC_GATE_ADMIT and asks
+# nothing, so the store holds one request, keyed by the runner, and none keyed by a suite, and
+# no worker waits at the gate once the run is admitted. The store is this section's own and the
+# share and cores are planted, so the width is the formula's (§WALL-LINE reads it).
+TOA="$TMPROOT/one-adm"; OA_GATE="$TMPROOT/one-adm-gate"; OA_HOME="$TMPROOT/one-adm-home"
+mkdir -p "$OA_HOME/bionic"; printf '92\n' > "$OA_HOME/bionic/share"
+rr_tree "$TOA"
+oa_stub() {  # <dir> <name> <solo yes|no> <seconds> — a green suite recording its admission, after a sleep
+  { printf '#!/bin/bash\n'
+    [ "$3" = yes ] && printf '# runner: solo\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    [ "$4" = 0 ] || printf 'sleep %s\n' "$4"
+    printf 'printf "%%s\\n" "${BIONIC_GATE_ADMIT:-none}" > "$RR_MARKS/%s.admit"\n' "$2"
+    printf 'section "%s"\n' "$2"
+    printf 'expect_eq "%s ran" "x" "x"\n' "$2"
+    printf 'finish\n'
+  } > "$1/tests/$2.test.sh"
+}
+oa_stub "$TOA" oa-fast no 0
+oa_stub "$TOA" oa-slow no 2
+OA_T0=0; OA_T1=0
+oa_drive() {  # <dir> <runner args…> — the scratch runner on this section's store, share and cores; RR_OUT, RR_RC
+  local dir="$1"; shift
+  rm -rf "$OA_GATE"; rm -f "$RR_MARKS"/oa-*.admit "$TMPROOT/one-adm-timing.tsv"
+  OA_T0="$(date +%s)"
+  RR_OUT="$( cd "$dir" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/one-adm-ring" \
+    BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+    BIONIC_TEST_TIMING="$TMPROOT/one-adm-timing.tsv" \
+    env -u BIONIC_TEST_JOBS_CEILING "${RR_GATE_ENV[@]}" CLAUDE_CONFIG_DIR="$OA_HOME" BIONIC_GATE_DIR="$OA_GATE" \
+    bash tests/run.sh "$@" 2>&1 )"
+  RR_RC=$?
+  OA_T1="$(date +%s)"
+}
+oa_reqs() {  # one line per request in this section's store: <key> <kind> <rc>, sorted
+  local f
+  for f in "$OA_GATE"/requests/[0-9]*; do
+    [ -f "$f" ] || continue
+    printf '%s %s %s\n' "$(sed -n 's/^key=//p' "$f" | tail -n 1)" "$(sed -n 's/^kind=//p' "$f" | tail -n 1)" \
+      "$(sed -n 's/^rc=//p' "$f" | tail -n 1)"
+  done | sort
+}
+oa_id_of() {  # <key> — the id of the request with that key
+  grep -l "^key=$1\$" "$OA_GATE"/requests/[0-9]* 2>/dev/null | head -n 1 | sed 's#.*/##'
+}
+oa_drive "$TOA"
+OA_WHOLE_OUT="$RR_OUT"; OA_WHOLE_T0="$OA_T0"; OA_WHOLE_T1="$OA_T1"
+cp "$TMPROOT/one-adm-timing.tsv" "$TMPROOT/one-adm-whole-timing.tsv" 2>/dev/null
+expect_eq "OA.1 the whole run over the two-suite tree is green" "0" "$RR_RC"
+expect_eq "OA.2 the store holds exactly one request: the runner's, whole, ended with the run's code" \
+  "tests/run.sh whole 0" "$(oa_reqs)"
+expect_absent "OA.3 …and none keyed by a suite" ".test.sh" "$(oa_reqs)"
+expect_nonempty "OA.4 the runner's request is there to be named (OA.5 reads a real id)" "$(oa_id_of tests/run.sh)"
+expect_eq "OA.5 each suite ran inside it: oa-fast's admission is the run's" "$(oa_id_of tests/run.sh)" \
+  "$(cat "$RR_MARKS/oa-fast.admit" 2>/dev/null)"
+expect_eq "OA.6 …and oa-slow's" "$(oa_id_of tests/run.sh)" "$(cat "$RR_MARKS/oa-slow.admit" 2>/dev/null)"
+expect_contains "OA.7 the log is a real run's (both suites passed)" "Gating: 2 passed, 0 failed" "$RR_OUT"
+expect_absent "OA.8 …and nothing in it waited at the gate" "waits for its turn" "$RR_OUT"
+
+# A solo suite runs inside the same admission: the drain asks nothing for it and ends nothing.
+TOAS="$TMPROOT/one-adm-solo"
+rr_tree "$TOAS"
+oa_stub "$TOAS" oa-fast no 0
+oa_stub "$TOAS" aaa-oa-solo yes 0
+oa_drive "$TOAS"
+expect_eq "OA.9 with a solo suite the run is green" "0" "$RR_RC"
+expect_eq "OA.10 …and the store still holds the one request" "tests/run.sh whole 0" "$(oa_reqs)"
+expect_eq "OA.11 …the solo suite ran under it" "$(oa_id_of tests/run.sh)" \
+  "$(cat "$RR_MARKS/aaa-oa-solo.admit" 2>/dev/null)"
+
+# THE MUTANT: a runner copy whose one ask is gone. Each worker then asks for its own suite, so the
+# store holds a request per suite and none keyed by the runner: OA.2 is not vacuous.
+TOAM="$TMPROOT/one-adm-mut"
+rr_tree "$TOAM"; oa_stub "$TOAM" oa-fast no 0; oa_stub "$TOAM" oa-slow no 0
+anchor "$TOAM/tests/run.sh" '    _gate_ask_for whole tests/run.sh' 1
+grep -vF '    _gate_ask_for whole tests/run.sh' "$RUNNER" > "$TOAM/tests/run.sh"
+expect_eq "OA.12 the mutant runner parses" "0" "$(bash -n "$TOAM/tests/run.sh" >/dev/null 2>&1; echo $?)"
+oa_drive "$TOAM"
+expect_eq "OA.13 …and is green" "0" "$RR_RC"
+expect_eq "OA.14 under the mutant each suite asked for itself (the defect OA.2 guards)" "oa-fast.test.sh work 0
+oa-slow.test.sh work 0" "$(oa_reqs)"
+
+# ============================================================
+section "§ONLY-UNCHANGED --only asks per suite, as before, and never takes the machine (wave-32 T2; AC-1.4)"
+# ============================================================
+oa_drive "$TOA" --only oa-fast.test.sh
+expect_eq "OU.1 --only oa-fast.test.sh is green" "0" "$RR_RC"
+expect_eq "OU.2 …one request, keyed by the suite, work, ended with its code" "oa-fast.test.sh work 0" "$(oa_reqs)"
+expect_absent "OU.3 …and none keyed by the runner" "tests/run.sh" "$(oa_reqs)"
+expect_absent "OU.4 …and it prints no Wall: line (the whole run's summary)" "Wall: " "$RR_OUT"
+# THE MUTANT: the whole-run guard gone, so --only takes the run-wide admission.
+TOUM="$TMPROOT/only-unch-mut"
+rr_tree "$TOUM"; oa_stub "$TOUM" oa-fast no 0
+anchor "$TOUM/tests/run.sh" '  if [ "$ONLY" -eq 0 ] && { [ -s "$LAUNCH" ] || [ -s "$SOLO" ]; }; then' 1
+sed 's/^  if \[ "\$ONLY" -eq 0 \] && { \[ -s "\$LAUNCH" \]/  if { [ -s "$LAUNCH" ]/' "$RUNNER" > "$TOUM/tests/run.sh"
+expect_eq "OU.5 the mutant runner parses and differs" "0 no" \
+  "$(bash -n "$TOUM/tests/run.sh" >/dev/null 2>&1; echo $?) $(cmp -s "$RUNNER" "$TOUM/tests/run.sh" && echo yes || echo no)"
+oa_drive "$TOUM" --only oa-fast.test.sh
+expect_eq "OU.6 under the mutant --only takes the whole machine (the defect OU.2 guards)" "tests/run.sh whole 0" "$(oa_reqs)"
+
+# ============================================================
+section "§WALL-LINE a whole run ends by saying its wall, its work, its width and its last suite (wave-32 T2; D6, AC-1.3)"
+# ============================================================
+#
+# Read off the §ONE-ADMISSION whole drive: the line's four fields, the wall against the drive's
+# own first and last clock readings, the work against the seconds the timing knob recorded, the
+# width against gate_width under the same share and cores, and the last suite (oa-slow sleeps).
+OW_LINE="$(printf '%s\n' "$OA_WHOLE_OUT" | /usr/bin/grep '^Wall: ')"
+OW_RE='^Wall: ([0-9]+)s · work ([0-9]+)s · width ([0-9]+) · last ([A-Za-z0-9._-]+)$'
+expect_regex "WL.1 the whole run prints the Wall: line with its four fields" "$OW_RE" "$OW_LINE"
+OW_WALL="$(printf '%s\n' "$OW_LINE" | sed -nE "s/$OW_RE/\1/p")"
+OW_WORK="$(printf '%s\n' "$OW_LINE" | sed -nE "s/$OW_RE/\2/p")"
+OW_WIDTH="$(printf '%s\n' "$OW_LINE" | sed -nE "s/$OW_RE/\3/p")"
+OW_LAST="$(printf '%s\n' "$OW_LINE" | sed -nE "s/$OW_RE/\4/p")"
+expect_nonempty "WL.2 the wall field reads back" "$OW_WALL"
+OW_SPAN=$(( OA_WHOLE_T1 - OA_WHOLE_T0 ))
+expect_true "WL.3 the wall (${OW_WALL:-?}s) is within 2 s of the drive's first and last readings (${OW_SPAN}s)" \
+  test "${OW_WALL:-999}" -le "$OW_SPAN" -a "${OW_WALL:--999}" -ge $(( OW_SPAN - 2 ))
+expect_true "WL.3b …and the run took the slow suite's sleep at least (the wall is a real clock)" test "${OW_WALL:-0}" -ge 2
+OW_SUM="$(LC_ALL=C awk -F'\t' '$2 ~ /^[0-9]+$/ { s += $2 } END { print s + 0 }' "$TMPROOT/one-adm-whole-timing.tsv" 2>/dev/null)"
+expect_eq "WL.4 the work is the suite-seconds the run measured (${OW_SUM}s)" "$OW_SUM" "$OW_WORK"
+OW_GW="$(env CLAUDE_CONFIG_DIR="$OA_HOME" BIONIC_PROBE_CORES=8 bash -c '. "$1/payload/scripts/lib/gate.sh" 2>/dev/null; gate_width' _ "$REPO")"
+expect_eq "WL.5 gate_width under the drive's share and cores reads 7 (the readback is real)" "7" "$OW_GW"
+expect_eq "WL.6 the width is gate_width's" "$OW_GW" "$OW_WIDTH"
+expect_eq "WL.7 the last suite is the one whose verdict landed last" "oa-slow.test.sh" "$OW_LAST"
+expect_eq "WL.8 the Gating: line is unchanged and comes before it" \
+  "Gating: 2 passed, 0 failed
+$OW_LINE" "$(printf '%s\n' "$OA_WHOLE_OUT" | /usr/bin/grep -E '^(Gating|Wall): ')"
 
 finish
