@@ -2979,7 +2979,14 @@ rm -rf "$G16_M4"; cp -R "$PAYLOAD" "$G16_M4"
 G16_ANCHOR='(^|[^A-Za-z0-9@/_.-])'
 G16_M4_SRC="$(cat "$G16_M4/scripts/lib/deps.sh")"
 expect_contains "16 mutant unanchored: the library carries the anchor the mutant removes" "$G16_ANCHOR" "$G16_M4_SRC"
-printf '%s\n' "${G16_M4_SRC//"$G16_ANCHOR"/}" > "$G16_M4/scripts/lib/deps.sh"
+# One awk pass takes each anchor out, literally, line by line. Bash 3.2's
+# `${src//"$anchor"/}` over the 128 KB library did the same in about 260 s.
+LC_ALL=C awk -v a="$G16_ANCHOR" '{
+    r = $0; out = ""
+    while ((i = index(r, a)) > 0) { out = out substr(r, 1, i - 1); r = substr(r, i + length(a)) }
+    print out r
+  }' "$G16_M4/scripts/lib/deps.sh" > "$G16_M4/scripts/lib/deps.sh.t" \
+  && mv "$G16_M4/scripts/lib/deps.sh.t" "$G16_M4/scripts/lib/deps.sh"
 # The doctored copy is the library with each anchor taken out and nothing else:
 # the lines that differ are exactly the lines that carry the anchor, and each
 # loses the anchor's bytes and no more.
