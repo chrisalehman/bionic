@@ -122,7 +122,8 @@
 #             an admitted, unfinished request whose live holder is this process or one of its
 #             ancestors is the admission it runs under (the lineage, wave-32 T1): it is printed
 #             and nothing is filed. BIONIC_SLOT_HELD is not read at all.
-#   cost      a run of zero seconds writes its end and rc and no cost line.
+#   cost      a run of zero seconds, or one whose cores exceed the machine's, writes its end and
+#             rc and no cost line.
 #
 # No figure sized to a machine appears here: memory is a percentage, processor a share of the
 # cores the machine reports, and every command's cost is what it took on this machine before.
@@ -642,8 +643,10 @@ gate_end() {
   fi
   printf 'ended=%s\nrc=%s\n' "$now" "$rc" >> "$f"
   # A run of zero seconds teaches nothing (wave-32 T1; D5): it has no measured time, and its
-  # cores would be its children's processor time over a second it never ran.
-  if [ "$secs" -gt 0 ]; then
+  # cores would be its children's processor time over a second it never ran. Nor does a run
+  # whose cores exceed the machine's (wave-32 T19): over a second or three, the children's time
+  # read 84 cores on an 8-core machine, a number no run can reach.
+  if [ "$secs" -gt 0 ] && awk -v c="$cores" -v n="$(_res_cores)" 'BEGIN { exit !(c + 0 <= n + 0) }'; then
     { cat "$(_gate_cost_file "$my_key")" 2>/dev/null
       printf '%s:%s:%s:%s\n' "$mem" "$cores" "$secs" "$now"
     } | tail -n 3 > "$_GD/cost/.new.$id" && mv "$_GD/cost/.new.$id" "$(_gate_cost_file "$my_key")"
