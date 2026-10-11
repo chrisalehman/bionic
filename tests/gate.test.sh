@@ -285,6 +285,24 @@ expect_eq "S.17 with BIONIC_CLAUDE_HOME set the verb's write and gate_share's re
   "$(env BIONIC_CLAUDE_HOME="$BCH" bash -c '. "$1" 2>/dev/null; gate_share' _ "$GATE_LIB")"
 expect_eq "S.18 …and the other home's own share file was not written (33)" "33" "$(sed -n 1p "$BCH/bionic/share")"
 
+# ── §WIDTH ───────────────────────────────────────────────────────────────────
+# THE WIDTH THE SHARE ALLOWS (wave-32 T2; D1, AC-1.1). gate_width is the share's room as a
+# whole number of workers: floor(share × cores ÷ 100), at least 1. It is the one formula the
+# runner sizes a whole run's JOBS from, so the gate owns it beside gate_share. Driven over
+# planted share files on a planted 8-core probe (BIONIC_PROBE_CORES, the knob world_machine
+# sets), each read in a fresh child so nothing this shell holds feeds it.
+section "§WIDTH — the width a whole run takes is the share's room, floored (wave-32 T2; D1)"
+gw_of() {  # <share> <cores> — gate_width over a planted share file and core count
+  printf '%s\n' "$1" > "$CLAUDE_CONFIG_DIR/bionic/share"
+  env BIONIC_PROBE_CORES="$2" bash -c '. "$1" 2>/dev/null; gate_width' _ "$GATE_LIB"
+}
+expect_eq "WD.1 share 92 on 8 cores: 7 workers (7.36, floored)" "7" "$(gw_of 92 8)"
+expect_eq "WD.2 share 100 on 8 cores: 8 workers" "8" "$(gw_of 100 8)"
+expect_eq "WD.3 share 50 on 8 cores: 4 workers" "4" "$(gw_of 50 8)"
+expect_eq "WD.4 share 1 on 8 cores: floored at 1, never 0" "1" "$(gw_of 1 8)"
+expect_eq "WD.5 the cores are read, not assumed: share 92 on 64 cores is 58" "58" "$(gw_of 92 64)"
+expect_eq "WD.6 an unreadable share is the default's room: 92 on 8 cores, 7" "7" "$(gw_of bogus 8)"
+
 # ── §HARD ────────────────────────────────────────────────────────────────────
 section "§HARD — memory is the hard limit, the processor the soft one (AC-2.2)"
 fresh hard

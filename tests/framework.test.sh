@@ -1735,7 +1735,9 @@ a_drive() {
 
 # a_norm <report> — the report with its one per-run nonce masked: the interpreter
 # pin's own `mktemp -d` path, a fresh directory on every invocation.
-a_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g'; }
+# The whole run's `Wall:` line (wave-32 T2; D6) carries the run's own seconds, which move between
+# two drives; its numbers are masked so the byte control below reads the advisory line alone.
+a_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g' -e '/^Wall: /s/[0-9][0-9]*s /Ns /g'; }
 
 a_reading with
 a_drive
