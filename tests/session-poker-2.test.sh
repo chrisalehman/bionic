@@ -2775,6 +2775,28 @@ poke "$R56" wait w-nobody
 expect_eq "56j3 a name with no run is a usage error, exit 2, naming it" "2|yes" \
   "$RC|$(printf '%s' "$OUT" | grep -q 'no run named w-nobody' && echo yes || echo no)"
 
+# ---------- §WAIT: an end written between run_read's two reads is FINISHED, never LOST (wave-32 T22) ----------
+# THE RACE (research-red3 §2): run_read reads `<log>.rc`, then asks run_live; the shim's exit trap
+# writes `.rc` and exits in between, so a finished run read as LOST (exit 70; whole run at baae082d,
+# 56e/56f). The one seam between the two reads is run_live, so this pin extracts the REAL run_read
+# from the poker under test (as §32 of session-poker.test.sh extracts its wrapper) and drives it
+# beside a run_live that writes the end the first time it is asked, then answers "gone": the first
+# read misses and the re-read hits, with no sleep. The record is w-run's own, copied without its end.
+s56_extract() {  # <poker file> <function> -> that function's text
+  awk -v fn="$2" '$0 ~ "^" fn "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$1"
+}
+S56_RR="$(s56_extract "$POKER" run_read)"
+expect_nonempty "56j4 precondition: run_read is extracted from the poker under test" "$S56_RR"
+mkdir -p "$TMPROOT/s56-race"; S56_RACE_LOG="$TMPROOT/s56-race/${S56_LOG##*/}"
+cp "$S56_LOG" "$S56_RACE_LOG"; rm -f "$S56_RACE_LOG.rc"
+S56_RACE="$( eval "$S56_RR"
+  run_live() { [ -e "$2.rc" ] || cp "$S56_LOG.rc" "$2.rc"; return 1; }  # the shim ends, then is gone
+  file_mtime() { echo 0; }; epoch_iso() { echo unknown; }
+  RUN_LOG="$S56_RACE_LOG"; RUN_PID="$S56_PID"; RUN_ROW_RC=""; RUN_STARTED=""
+  run_read; printf '%s|%s' "$RUN_STATE" "$RUN_RC" )"
+expect_eq "56j5 a run that writes its end between run_read's two reads is FINISHED with its code, never LOST" \
+  "FINISHED|3" "$S56_RACE"
+
 # ---------- §LOST: a dead pid with no end is LOST, never a timeout (AC-3.3) ----------
 add_row "$R56" name=w-lost status=identified agent_id=a56lost0000000000 duration="4 hours" \
   launched_at="$(iso_ago 60)" deliverable="$R56/never.md"
