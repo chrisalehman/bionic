@@ -427,6 +427,7 @@ stop_runner() {
 }
 make_runner() {  # <dir> -> <dir>/tests/run.sh
   mkdir -p "$1/tests"
+  # the stand-in runner idles until the arm kills it (`sleep 1` is its heartbeat); no wait can observe a process that is meant to stay alive
   printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$1/tests/run.sh"
   chmod +x "$1/tests/run.sh"
 }
@@ -592,6 +593,7 @@ stop_mention() {
 }
 trap 'stop_runner; stop_mention; rm -rf "$TMP"' EXIT
 BT10="$(new_tree "$S" mention-arm)"
+# the `sleep 1` in each mention body below keeps the shell alive until stop_mention kills it; no wait can observe that
 expect_true "a shell started in the root whose -c text names the runner bare" \
   start_mention "$S" bash 'while :; do sleep 1; done # bash tests/run.sh'
 expect_match "a shell whose -c text names tests/run.sh does not refuse the land" \
@@ -665,6 +667,7 @@ for argv in "bash -c tests/run.sh" "bash -ec tests/run.sh" "bash -euo pipefail -
   # shellcheck disable=SC2086
   expect_false "the walk finds no runner in: ${argv}" _wt_runner_script $argv
 done
+# the `sleep 30` below is a process named as the runner that stays alive until stop_runner; no wait can observe it
 expect_true "a process started with the root's tests/run.sh as its argv[0]" \
   start_runner_argv "$ELSE" "$S/tests/run.sh 30" bash -c "exec -a '$S/tests/run.sh' sleep 30"
 expect_match "a process whose argv[0] is the runner's script refuses" \
@@ -694,6 +697,7 @@ export BIONIC_GATE_DIR="$TMP/gate"
 GB="$(new_repo "$TMP/busy-gate")"
 GB_HOLD=""
 gb_holder() {  # -> GB_HOLD, a live process that is not this shell's child (no zombie)
+  # the holder must stay alive for the whole arm and is killed by it; no wait can observe a process meant to outlive its reader
   GB_HOLD="$( ( sleep 60 >/dev/null 2>&1 & printf '%s' "$!" ) )"
 }
 gb_plant() {  # <id> <tree> <holder pid> [admitted|waiting|ended] — one request file
@@ -2357,6 +2361,7 @@ ls_waits() {  # <run function> <tree> <suite or runner> — one run the gate doe
   local tk i=0
   printf '1000\n' > "$TMP/ls-clock"
   # The clock moves a thousand seconds a second, so the call's limit runs out whenever it began.
+  # (`sleep 1` is the clock's real second: the fixture's definition of "a second", not a wait on anything)
   ( while [ "$i" -lt 60 ]; do i=$((i + 1)); sleep 1
       printf '%s\n' "$((1000 + i * 1000))" > "$TMP/ls-clock.tmp" && mv -f "$TMP/ls-clock.tmp" "$TMP/ls-clock"
     done ) &
@@ -3297,7 +3302,7 @@ expect_eq "(T50-s1m-arm) the arm: writable, the same append is made" "0|3" "$LK_
 # and its `.taking`, beside the record. The append is made at once, never waited on, and neither is
 # removed or changed.
 OL="$TMP/old-lock/landing-proofs.log"; mkdir -p "${OL%/*}"; echo "earlier" > "$OL"
-sleep 120 & OL_LIVE=$!
+sleep 120 & OL_LIVE=$!  # a live holder for the old-lock arm: it outlives the arm and is killed by it; no wait can observe that
 mkdir "$OL.lock" "$OL.lock.taking"; echo "$OL_LIVE $OL_LIVE" > "$OL.lock/pid"; : > "$OL.lock.taking/h.$OL_LIVE"
 OL_T0=$SECONDS
 _wt_proofs_append "$OL" T1 wt/o 1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 "stamp/v1|o"; OL_RC=$?
@@ -3386,7 +3391,7 @@ KL="$TMP/kill/landing-proofs.log"; KL_MARK="$TMP/kill-reached"
 cat > "$TMP/kill-child.sh" <<'KL_EOF'
 . "$1" || exit 9
 REC="$2"; AT="$3"; SIG="$4"; MARK="$5"; ME=$$
-k_at() { [ "$AT" = "$1" ] || return 0; echo "$1" > "$MARK"; kill -"$SIG" "$ME"; sleep 2; exit 0; }
+k_at() { [ "$AT" = "$1" ] || return 0; echo "$1" > "$MARK"; kill -"$SIG" "$ME"; sleep 2; exit 0; }  # the 2 s is the child's grace for the signal to land before it exits by itself; no wait can observe a signal not yet delivered
 mktemp() { k_at mktemp-before; command mktemp "$@"; local rc=$?; k_at mktemp-after; return "$rc"; }
 wc() { k_at block-written; command wc "$@"; }
 dd() { k_at type-tested; command dd "$@"; local rc=$?; k_at written; return "$rc"; }
@@ -3565,24 +3570,25 @@ section "§LAND-RECORD-LOCK: a refused landing never loses another's block; the 
 
 # (b1) THE REVIEW'S SHAPE: landing A proves the record and is refused 30 ms later (its pre-merge-commit
 # hook marks the moment and fails); B appends its block 20 to 60 ms after the mark. B's block is in the
-# record afterwards, in every one of 300.
+# record afterwards, in every one of 300. The mark is a write to a FIFO B blocks on (B holds it open
+# read-write, so the hook never waits for B), where B once polled a file every 2 ms; after A returns the
+# trial writes the FIFO itself so a hook that never ran cannot leave B blocked.
 T58_R="$(pr_repo "$TMP/t58-race")"; T58_REC="$T58_R/.bionic/docs/record/wave-lp/landing-proofs.log"
-T58_A="$(pr_tree "$T58_R" a)"; T58_MARK="$TMP/t58-proved"
+T58_A="$(pr_tree "$T58_R" a)"; T58_MARK="$TMP/t58-proved.fifo"; mkfifo "$T58_MARK"
 T58_PMC="$(git -C "$T58_R" rev-parse --absolute-git-dir)/hooks/pre-merge-commit"
-mkdir -p "${T58_PMC%/*}"; printf '#!/bin/sh\n: > "%s"; sleep 0.03; exit 1\n' "$T58_MARK" > "$T58_PMC"; chmod +x "$T58_PMC"
+mkdir -p "${T58_PMC%/*}"; printf '#!/bin/sh\necho proved > "%s"; sleep 0.03; exit 1\n' "$T58_MARK" > "$T58_PMC"; chmod +x "$T58_PMC"
 T58_LOST=0; T58_KEPT=0; T58_REF=0; T58_BFAIL=0
 for _k in $(seq 1 300); do
-  rm -f "$T58_REC" "$T58_MARK"
+  rm -f "$T58_REC"
   _d="$(printf '0.%03d' $((20 + RANDOM % 41)))"
   ( worktree_land_for_session "$T58_A" "$T58_R" "$LP_SID" > "$TMP/t58-a.out" 2>&1 ) & _pa=$!
-  ( _w=0; while [ ! -e "$T58_MARK" ] && [ "$_w" -lt 5000 ]; do sleep 0.002; _w=$((_w + 1)); done
-    sleep "$_d"; _wt_proofs_append "$T58_REC" T2 wt/b bbbb mmmm "stamp/v1|head=bbbb|rc=0" || echo FAILED ) > "$TMP/t58-b.out" 2>&1 & _pb=$!
-  wait "$_pa" "$_pb"
+  ( exec 4<>"$T58_MARK"; read -r -u 4 _; sleep "$_d"; _wt_proofs_append "$T58_REC" T2 wt/b bbbb mmmm "stamp/v1|head=bbbb|rc=0" || echo FAILED ) > "$TMP/t58-b.out" 2>&1 & _pb=$!
+  wait "$_pa"; echo released 1<>"$T58_MARK"; wait "$_pb"
   case "$(head -n 1 "$TMP/t58-a.out")" in "spawn-worktree: REFUSED reason=merge-failed "*) T58_REF=$((T58_REF + 1)) ;; esac
   [ -s "$TMP/t58-b.out" ] && T58_BFAIL=$((T58_BFAIL + 1))
   if [ -f "$T58_REC" ] && grep -q '^landed: row=T2 ' "$T58_REC"; then T58_KEPT=$((T58_KEPT + 1)); else T58_LOST=$((T58_LOST + 1)); fi
 done
-rm -f "$T58_PMC"
+rm -f "$T58_PMC" "$T58_MARK"
 expect_eq "(T58-b1-pre) fixture: landing A was refused merge-failed after its proof in every trial, and B never failed its append" "300|0" "$T58_REF|$T58_BFAIL"
 expect_eq "(T58-b1) 300 trials of a refused landing beside an append: B's block is kept in every one" \
   "kept=300 lost=0" "kept=$T58_KEPT lost=$T58_LOST"
@@ -3713,15 +3719,20 @@ case "\$(cat "$LN_MODE")" in
   commit) echo c >> file.txt; git commit --quiet -am "made by the check" ;;
   piece) echo w >> "\$BIONIC_CHECK_TREE/file.txt" ;;
   fail-dirty) echo x >> file.txt; exit 1 ;;
-  slow) case "\$BIONIC_CHECK_TREE" in */chk-slow) sleep 3 ;; esac ;;
+  slow) case "\$BIONIC_CHECK_TREE" in */chk-slow)
+          : > "$TMP/ln-started"; k=0
+          while [ ! -e "$TMP/ln-released" ] && [ "\$k" -lt 60 ]; do sleep 0.05; k=\$((k + 1)); done ;; esac ;;
 esac
 exit 0
 LN_EOF
+rm -f "$TMP/ln-started" "$TMP/ln-released"
 LN4="$(ln_tree chk-slow)"; LN5="$(ln_tree chk-fast)"; LN4_H="$(git -C "$LN4" rev-parse HEAD)"
 LN4_WAS="$(git -C "$LN" rev-parse --short HEAD)"
 ( worktree_land "$LN4" wave/fixture > "$TMP/ln4.out" 2>/dev/null; echo "rc=$?" >> "$TMP/ln4.out" ) & T63_PA=$!
-sleep 1
+# B lands once A's check has started (at most the old one second) and A's check holds until B has (at most the old three)
+k=0; while [ ! -e "$TMP/ln-started" ] && [ "$k" -lt 20 ]; do sleep 0.05; k=$((k + 1)); done
 OUTLN5="$(worktree_land "$LN5" wave/fixture 2>/dev/null)"
+: > "$TMP/ln-released"
 wait "$T63_PA"
 LN4_NOW="$(git -C "$LN" rev-parse --short HEAD)"; OUTLN4="$(head -n 1 "$TMP/ln4.out")"
 expect_match "(T63-s1-pre) fixture: landing B landed into the target while A's check ran" "spawn-worktree: LANDED branch=chk-fast onto=wave/fixture *" "$OUTLN5"
