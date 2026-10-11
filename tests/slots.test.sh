@@ -253,8 +253,22 @@ bk -- "echo \$\$ > $ROW/cmd.kid; touch $ROW/k.started; sleep 30" > "$ROW/k.out" 
 BG="$BG $!"
 wait_file "$ROW/k.started"
 B4B_SHIM="$(held_pids)"; B4B_SHIM="${B4B_SHIM% }"
+B4B_ID="$(places)"; B4B_ID="${B4B_ID% }"
 kill -KILL "$B4B_SHIM" 2>/dev/null
-expect_regex "B4b.1 the SIGKILLed shim's request is still unended on disk" '^[0-9]+ $' "$(places)"
+# The gate's own view of the request, not the raw file (wave-32 T21). SIGKILL takes only the
+# shim; a gate_state sampler already in flight in the shim's subshell is a separate process, and
+# it can reap the dead holder's request (ended=, rc=137) before this reads. gate_list gives
+# `killed` for both orders: reaped (ended, rc over 128) and not yet (admitted, holder dead). The
+# signal lands a moment after kill returns, so the read waits for the gate to say so.
+b4b_state() {  # <id> -> "<id> <state>" as gate_list prints it
+  ( BIONIC_GATE_DIR="$ST" bash -c '. "$1" 2>/dev/null; gate_list' _ "$REPO_ROOT/payload/scripts/lib/gate.sh" 2>&1 ) \
+    | awk -v id="$1" '$1 == id { print $1, $2 }'
+}
+for B4B_I in $(seq 1 100); do
+  [ "$(b4b_state "$B4B_ID")" = "$B4B_ID killed" ] && break
+  sleep 0.05
+done
+expect_eq "B4b.1 the SIGKILLed shim's request is still unended on disk" "$B4B_ID killed" "$(b4b_state "$B4B_ID")"
 B4B_OUT="$(bk -- 'echo reclaimed' 2>&1)"; B4B_RC=$?
 expect_status "B4b.2 the next ask is admitted" 0 "$B4B_RC"
 expect_contains "B4b.3 …and runs" "reclaimed" "$B4B_OUT"

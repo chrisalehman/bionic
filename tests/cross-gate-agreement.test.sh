@@ -7834,6 +7834,15 @@ RG_CEIL=8
 RG_NOW=1757030000
 RG_RING="$SANDBOX/rg/pressure.ring"
 mkdir -p "$SANDBOX/rg"
+# THE RUNNER'S ROOM IS THE CEILING (wave-32 T21). Since T2 tests/run.sh caps its ceiling at
+# gate_width = floor(share x cores / 100), and this suite pins share 80 on 8 cores for ROOM
+# (so the gate's room is 6). The runner this section drives gets its own config dir holding
+# share 100, whose room on 8 cores is 8: the ceiling RG_CEIL names, so RG.1-RG.3 read the whole
+# ceiling, its half and its quarter. The rest of the suite keeps share 80. Same move as
+# tests/runner-width.test.sh (rw_share 100).
+RG_HOME="$SANDBOX/rg/cfg"
+mkdir -p "$RG_HOME/bionic"
+printf '100\n' > "$RG_HOME/bionic/share"
 # CLEAR and CRITICAL as the sensors see them: 80 % free is above every band threshold;
 # 8 % free is below BAND_FREE_CRITICAL_PCT (12) and above BAND_FREE_EMERGENCY_PCT (5).
 RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
@@ -7880,7 +7889,7 @@ cg_roster_row "$RG_REPO" "$SID_A" "rg-writer" "arg-1111111111111111" "" "identif
 rg_runner() {  # -> the width tests/run.sh would run at, under the pinned environment
   ( eval "export $1"
     export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
-           BIONIC_TEST_JOBS_CEILING="$RG_CEIL"
+           BIONIC_TEST_JOBS_CEILING="$RG_CEIL" CLAUDE_CONFIG_DIR="$RG_HOME"
     bash "$RG_TREE_RUNNER/tests/run.sh" --dry-run 2>/dev/null ) \
     | sed -n 's/^JOBS=//p' | head -1
 }
