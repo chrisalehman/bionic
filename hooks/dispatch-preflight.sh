@@ -2848,7 +2848,7 @@ case " $SUITES_ALLOWED " in
       else
         dp_not_checked "full-run hold" "the regression's holds (lib/units.sh units_floor_holds)"
       fi
-      if [ "$(plan_frontmatter_get "$PLAN" regression)" = "no" ]; then
+      if [ "$(plan_regression "$PLAN")" = "no" ]; then
         # RULE 1. The setting, not a run.
         _dp_detail="The plan declares regression: no (Step 0);
 change it with session-poker.sh regression yes '<reply>', not by running the suite.

@@ -2797,6 +2797,47 @@ S56_RACE="$( eval "$S56_RR"
 expect_eq "56j5 a run that writes its end between run_read's two reads is FINISHED with its code, never LOST" \
   "FINISHED|3" "$S56_RACE"
 
+# ---------- §WAIT: the poker and the shim's waiter read a run's end the same way (wave-33 T15; debt line run-end-reread) ----------
+# TWO READERS OF ONE FACT. The poker's `run_read` and booked.sh's `booked_follow` each re-read `<log>.rc` once after
+# the pid is seen dead and before they say LOST; nothing held the two together, so one could lose the re-read and
+# call a finished run LOST while the other still got it right. This drives the REAL text of both (extracted, as 56j5
+# does) over the SAME run record: the pid gone, and the end written between the reads (the liveness check writes it,
+# then answers "gone"). Both must say FINISHED with the code, and the control, where no end is ever written, must
+# make both say LOST. A copy of each with its re-read taken out is driven the same way and must be told apart.
+S56_BK_FOLLOW="$(s56_extract "$S56_BOOKED" booked_follow)"
+S56_BK_RC="$(s56_extract "$S56_BOOKED" booked_rc_of)"
+S56_BK_MT="$(s56_extract "$S56_BOOKED" booked_mtime_utc)"
+expect_nonempty "56k precondition: booked_follow, booked_rc_of and booked_mtime_utc are extracted from booked.sh" \
+  "$S56_BK_FOLLOW$S56_BK_RC$S56_BK_MT"
+mkdir -p "$TMPROOT/s56-agree"; S56_AG_LOG="$TMPROOT/s56-agree/${S56_LOG##*/}"
+s56_ag_poker() {  # <run_read source> <yes|no: the end is written between the reads> -> "<state>|<rc>"
+  cp "$S56_LOG" "$S56_AG_LOG"; rm -f "$S56_AG_LOG.rc"
+  ( eval "$1"; AG_WRITES="$2"
+    run_live() { if [ "$AG_WRITES" = yes ]; then [ -e "$2.rc" ] || cp "$S56_LOG.rc" "$2.rc"; fi; return 1; }
+    file_mtime() { echo 0; }; epoch_iso() { echo unknown; }
+    RUN_LOG="$S56_AG_LOG"; RUN_PID="$S56_PID"; RUN_ROW_RC=""; RUN_STARTED=""
+    run_read; printf '%s|%s' "$RUN_STATE" "$RUN_RC" )
+}
+s56_ag_booked() {  # <booked_follow source> <yes|no: the end is written between the reads> -> the exit code it ends with
+  cp "$S56_LOG" "$S56_AG_LOG"; rm -f "$S56_AG_LOG.rc"
+  ( eval "$S56_BK_RC"; eval "$S56_BK_MT"; eval "$1"; AG_WRITES="$2"
+    booked_live() { if [ "$AG_WRITES" = yes ]; then [ -e "$2.rc" ] || cp "$S56_LOG.rc" "$2.rc"; fi; return 1; }
+    BIONIC_RUN_POLL=0.01
+    booked_follow "$S56_AG_LOG" "$S56_PID" >/dev/null 2>&1 )
+  echo "$?"
+}
+expect_eq "56k a run whose end lands between the reads is FINISHED with its code for the poker" "FINISHED|3" "$(s56_ag_poker "$S56_RR" yes)"
+expect_eq "56k2 …and ends with that code for the shim's waiter, the same fixture (never 70, LOST)" "3" "$(s56_ag_booked "$S56_BK_FOLLOW" yes)"
+expect_eq "56k3 control: a run that never writes its end is LOST for the poker" "LOST|" "$(s56_ag_poker "$S56_RR" no)"
+expect_eq "56k4 …and 70, LOST, for the shim's waiter" "70" "$(s56_ag_booked "$S56_BK_FOLLOW" no)"
+# the doctored copies: the poker's second read taken out, and the waiter made to skip its re-read on the dead pass
+S56_RR_DOC="$(printf '%s\n' "$S56_RR" | /usr/bin/grep -v '^  { read -r rc < "\$RUN_LOG\.rc"; } 2>/dev/null$')"
+S56_BK_DOC="${S56_BK_FOLLOW/rc=\"\$(booked_rc_of \"\$log\")\" && \{/rc=\"\$([ \"\$dead\" -eq 1 ] \&\& exit 1; booked_rc_of \"\$log\")\" \&\& \{}"
+expect_ne "56k5 precondition: the poker copy without its re-read differs from the shipped function" "$S56_RR" "$S56_RR_DOC"
+expect_ne "56k6 precondition: the waiter copy that skips its dead-pass re-read differs from the shipped function" "$S56_BK_FOLLOW" "$S56_BK_DOC"
+expect_eq "56k7 a poker that loses its re-read calls the finished run LOST: the check tells it apart" "LOST|" "$(s56_ag_poker "$S56_RR_DOC" yes)"
+expect_eq "56k8 a waiter that loses its re-read ends 70 on the finished run: the check tells it apart" "70" "$(s56_ag_booked "$S56_BK_DOC" yes)"
+
 # ---------- §LOST: a dead pid with no end is LOST, never a timeout (AC-3.3) ----------
 add_row "$R56" name=w-lost status=identified agent_id=a56lost0000000000 duration="4 hours" \
   launched_at="$(iso_ago 60)" deliverable="$R56/never.md"

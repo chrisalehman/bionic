@@ -101,6 +101,23 @@ bionic_cols() {  # <string> -> its width in terminal columns
   printf '%s' "$BIONIC_COLS"
 }
 
+# One whole UTF-8 CHARACTER off the front of a string: a lead byte, then every continuation byte
+# (0x80-0xBF) after it. Sets BIONIC_CH to the character and BIONIC_REST to what follows it, rather than
+# printing them, because the callers are loops and a subshell per step is the cost this file refuses
+# (`_bionic_cols_into`, above). The reading is BYTES, so the caller pins `LC_ALL=C` first: under a UTF-8
+# locale `${s:0:1}` is already a whole character and the walk below would join two. THE ONE SITE OF THIS
+# STEP (wave-33 T15): `bionic_trunc` and `_bionic_head_cols` each carried their own copy, three in all, and
+# a fix to one would have left the others cutting glyphs in half. Empty in, empty out.
+_bionic_char_into() {  # <string> — sets BIONIC_CH / BIONIC_REST
+  BIONIC_CH="${1:0:1}"; BIONIC_REST="${1:1}"
+  while [ -n "$BIONIC_REST" ]; do
+    case "$BIONIC_REST" in
+      [$'\200'-$'\277']*) BIONIC_CH="${BIONIC_CH}${BIONIC_REST:0:1}"; BIONIC_REST="${BIONIC_REST:1}" ;;
+      *) break ;;
+    esac
+  done
+}
+
 # One string, held inside a column budget, elided with `…` when it does not fit.
 # A budget of 0 or less means "unbounded" rather than "print nothing", so a
 # caller whose prefix already ate the whole line still gets its content — a row
@@ -148,13 +165,7 @@ bionic_trunc() {  # <string> <column-budget> -> string
   want=$(( max - 1 )); [ "$want" -gt 0 ] || want=0
   rest="$s"
   while [ -n "$rest" ]; do
-    ch="${rest:0:1}"; r="${rest:1}"
-    while [ -n "$r" ]; do
-      case "$r" in
-        [$'\200'-$'\277']*) ch="${ch}${r:0:1}"; r="${r:1}" ;;
-        *) break ;;
-      esac
-    done
+    _bionic_char_into "$rest"; ch="$BIONIC_CH"; r="$BIONIC_REST"
     if [ "${#ch}" -eq 1 ]; then
       sum=$(( sum + 1 ))
     else
@@ -230,16 +241,10 @@ _bionic_head_cols() {  # <string> <column-budget> — sets BIONIC_HEAD / BIONIC_
   BIONIC_HEAD=""; BIONIC_TAIL="$s"
   while [ -n "$BIONIC_TAIL" ]; do
     # One whole character: a lead byte and every continuation byte after it. The
-    # walk is the same one bionic_trunc makes (wave-32 T3), and it is
-    # here for the same reason — under `LC_ALL=C` a single-byte step lands in the
-    # middle of a three-byte glyph and emits a fragment.
-    ch="${BIONIC_TAIL:0:1}"; r="${BIONIC_TAIL:1}"
-    while [ -n "$r" ]; do
-      case "$r" in
-        [$'\200'-$'\277']*) ch="${ch}${r:0:1}"; r="${r:1}" ;;
-        *) break ;;
-      esac
-    done
+    # step is the one bionic_trunc makes (wave-33 T15), and it is here for the same
+    # reason — under `LC_ALL=C` a single-byte step lands in the middle of a
+    # three-byte glyph and emits a fragment.
+    _bionic_char_into "$BIONIC_TAIL"; ch="$BIONIC_CH"; r="$BIONIC_REST"
     _bionic_cols_into "${BIONIC_HEAD}${ch}"
     [ "$BIONIC_COLS" -le "$max" ] || break
     BIONIC_HEAD="${BIONIC_HEAD}${ch}"
@@ -249,14 +254,8 @@ _bionic_head_cols() {  # <string> <column-budget> — sets BIONIC_HEAD / BIONIC_
   # three-byte character outside the closed set, in a narrow column) would
   # otherwise take nothing on every pass and the caller's loop would not end.
   if [ -z "$BIONIC_HEAD" ] && [ -n "$BIONIC_TAIL" ]; then
-    ch="${BIONIC_TAIL:0:1}"; r="${BIONIC_TAIL:1}"
-    while [ -n "$r" ]; do
-      case "$r" in
-        [$'\200'-$'\277']*) ch="${ch}${r:0:1}"; r="${r:1}" ;;
-        *) break ;;
-      esac
-    done
-    BIONIC_HEAD="$ch"; BIONIC_TAIL="$r"
+    _bionic_char_into "$BIONIC_TAIL"
+    BIONIC_HEAD="$BIONIC_CH"; BIONIC_TAIL="$BIONIC_REST"
   fi
 }
 

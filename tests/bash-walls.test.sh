@@ -2093,6 +2093,61 @@ expect_eq "ARM-A.11 …the row's Files carry the addition" "hooks/a.sh,hooks/b.s
 expect_regex "ARM-A.12 AC-8.3 …and the row records who widened it: amended=<iso> widened-by: writer <reason>" \
   '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z widened-by: writer the fix reaches b$' "$(amw_field amended)"
 
+# §ARM-A (wave-33 T15; D10) — the verbs the wave added after the list was cut. `deliver` is a record row's own last act,
+# so a writer may run it for the row its OWN roster row names (`row=`) and for no other: one that could land another's
+# row would close work nobody did. `rule` pushes an instruction to a writer, so it is the orchestrator's; `ruling-ack` and
+# `rulings` are the writer's own reads and stay open. The plan verbs T7 added (matrix-set, waive-row, tasks-prose,
+# epic-row, continuation-fill) and T13's disposition write the bound plan or the findings' ledger.
+# fails-when: a writer delivers another row, a writer rules, a listed plan verb is admitted from a subagent, or the
+# refusal line of the longest verb overflows refuse.sh's 100 columns and names no rule.
+AM_ROWED_ID="aw33-T15row-0123456789abcdef"
+roster_row_fixture "session=$SID" status=identified name=w20-rowed "agent_id=$AM_ROWED_ID" \
+  subagent_type=bionic:senior-implementor row=T6 >> "$R_AM/.bionic/tmp/roster-$SID.state"
+am_rowed() {  # <label> <command> <want: admitted|refused> — the call, from the agent whose roster row names plan row T6
+  run_hook "$(mk_payload "$R_AM" "$2" "$AM_ROWED_ID" omit Bash w20-rowed)"
+  if [ "$3" = admitted ]; then
+    expect_status "$1 — admitted" 0 "$ST"
+    expect_absent "$1 — …with no contract refusal" "a subagent may not change a contract" "$ERR"
+  else
+    expect_status "$1 — refused" 2 "$ST"
+    expect_contains "$1 — …naming the rule" "a subagent may not change a contract or the plan" "$ERR"
+  fi
+}
+am_rowed "W15.1: deliver the row its own roster row names" "bash $AM_POKER deliver T6" admitted
+am_rowed "W15.2: deliver another writer's row" "bash $AM_POKER deliver T9" refused
+expect_contains "W15.2b …the detail names the row asked for and the caller's own" "T9 is not your row (yours is T6)" "$ERR"
+am_rowed "W15.3: deliver its own row, chained to a deliver of another" "bash $AM_POKER deliver T6 && bash $AM_POKER deliver T9" refused
+am_rowed "W15.3b: …the same chain with the other row first" "bash $AM_POKER deliver T9; bash $AM_POKER deliver T6" refused
+am_rowed "W15.4: deliver with two operands" "bash $AM_POKER deliver T6 T9" refused
+am_rowed "W15.5: deliver with no operand" "bash $AM_POKER deliver" refused
+am_refused "W15.6: deliver, from a writer whose roster row names no plan row" "bash $AM_POKER deliver T6"
+expect_contains "W15.6b …the detail says no row of its own names a plan row" "no roster row of yours names a plan row" "$ERR"
+am_admitted "W15.7: deliver from the main thread" "bash $AM_POKER deliver T6" ""
+am_refused "W15.8: rule" "bash $AM_POKER rule w20-other 'stop and report'"
+am_admitted "W15.8b: rule from the main thread" "bash $AM_POKER rule w20-other 'stop and report'" ""
+am_admitted "W15.9: ruling-ack stays open to a writer" "bash $AM_POKER ruling-ack 3"
+am_admitted "W15.9b: rulings stays open to a writer" "bash $AM_POKER rulings w20-sub"
+for _am_v in deliver rule matrix-set waive-row tasks-prose epic-row continuation-fill disposition; do
+  expect_contains "W15.10 the verb list names $_am_v" " $_am_v " " $AM_VERBS "
+done
+for _am_v in ruling-ack rulings; do
+  expect_absent "W15.10b …and does not name $_am_v" " $_am_v " " $AM_VERBS "
+done
+am_refused "W15.11: matrix-set" "bash $AM_POKER matrix-set R1 ok"
+am_refused "W15.12: waive-row" "bash $AM_POKER waive-row R1 'a reason'"
+am_refused "W15.13: tasks-prose" "bash $AM_POKER tasks-prose T6 'text'"
+am_refused "W15.14: epic-row" "bash $AM_POKER epic-row 33 shipped"
+am_refused "W15.15: continuation-fill" "bash $AM_POKER continuation-fill"
+am_refused "W15.16: disposition" "bash $AM_POKER disposition 'record/wave-01/r.md#1' fixed"
+for _am_v in matrix-set waive-row tasks-prose epic-row continuation-fill disposition; do
+  am_admitted "W15.17: $_am_v from the main thread" "bash $AM_POKER $_am_v" ""
+done
+# THE LONGEST VERB'S LINE FITS: `bionic: <verb> refused — <fact> (<fix>)` is capped at 100 columns by refuse.sh.
+run_hook "$(mk_payload "$R_AM" "bash $AM_POKER continuation-fill" "$AM_ID" omit Bash w20-sub)"
+W15_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 'refused' )"
+expect_nonempty "W15.18 the refusal line is read (the extractor works)" "$W15_LINE"
+expect_eq "W15.18b …and fits refuse.sh's 100 columns" "yes" "$([ "$(printf '%s' "$W15_LINE" | wc -m | tr -d ' ')" -le 100 ] && echo yes || echo "no ($(printf '%s' "$W15_LINE" | wc -m | tr -d ' '))")"
+
 # ---------------------------------------------------------------------------
 section "20 — an UNROSTERED nested delegate is bound by the verb wall through its own agent_type (wave-20 T7b; review R15)"
 #

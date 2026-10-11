@@ -1113,7 +1113,7 @@ _card_plan_root() {  # <plan path> -> the project root it resolves under, or ""
 _card_floor() {  # [<plan path>] -> the plan's regression: value, or "not declared" (the name keeps the
   # word floor, an identifier, wave-30 T23)
   local v
-  v="$(plan_frontmatter_get "${1:-}" regression)"
+  v="$(plan_regression "${1:-}")"
   printf '%s' "${v:-not declared}"
 }
 
@@ -1130,7 +1130,7 @@ _card_regression_line() {  # <scale> [<plan>] -> the line; returns 1 on a word t
     *)         return 1 ;;
   esac
   if [ -n "$(plan_frontmatter_get "$plan" regression-override)" ]; then
-    v="$(plan_frontmatter_get "$plan" regression)"
+    v="$(plan_regression "$plan")"
     [ "$v" = "no" ] || v=yes
     printf 'regression %s  (overridden)\n' "$v"
   else

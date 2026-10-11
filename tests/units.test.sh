@@ -4445,4 +4445,108 @@ expect_contains "DEBT-5d the tokens are unchanged: the finding line still record
 expect_eq "DEBT-5e …and the code's closed set of answers is still on and off" "on off" \
   "$(bash -c '. "$1" >/dev/null 2>&1; printf %s "$PROOF_REACHES"' _ "$DBT_PROOF")"
 
+section "§DEBT-CODE — wave-33 T15: each code debt line is one site, or holds an agreement check that goes red on a doctored copy (REQ-9 AC-9.1, AC-9.2; D10)"
+# fails-when: a duplicate stands at a second site (a copy planted in a sandbox copy is counted as another), or a
+# reader of a pair is made to disagree with the other and the check still passes. Every count is a function of a
+# path, so the doctored copy goes through the code the shipped file does, and a positive count on the shipped
+# file sits beside every negative one.
+DBC="$SANDBOX/debt-code"; mkdir -p "$DBC"
+DBC_WIDTH="$REPO_ROOT/payload/scripts/lib/width.sh"
+DBC_RUN="$REPO_ROOT/payload/scripts/lib/run.sh"
+
+# --- utf8-char-step: ONE helper takes one whole UTF-8 character; its three callers do not repeat the walk ---
+# The step is the continuation-byte class (0x80-0xBF) after a lead byte. It is spelled once, in the helper.
+IFS= read -r DBC_CONT <<'CONTEOF'
+[$'\200'-$'\277']*)
+CONTEOF
+dbc_cont_sites() { /usr/bin/grep -cF -- "$DBC_CONT" "$1"; }
+expect_eq "DBC-1 utf8-char-step: the continuation-byte step is spelled at one site in width.sh" "1" "$(dbc_cont_sites "$DBC_WIDTH")"
+{ cat "$DBC_WIDTH"; printf '      %s r="${r:1}" ;;\n' "$DBC_CONT"; } > "$DBC/width.sh"
+expect_eq "DBC-1b …and a copy of the step planted in a sandbox copy is counted as a second site" "2" "$(dbc_cont_sites "$DBC/width.sh")"
+expect_eq "DBC-1c …and the three callers call the helper (bionic_trunc once, _bionic_head_cols twice)" "3" \
+  "$(/usr/bin/grep -c '_bionic_char_into ' "$DBC_WIDTH" | tr -d ' ')"
+
+# --- regression-setting-read: the plan's `regression:` key is read by ONE function, lib/run.sh plan_regression ---
+dbc_plan() {  # <name> <frontmatter line…> -> a plan file whose leading frontmatter holds exactly those lines
+  local f="$DBC/$1.plan.md"; shift
+  { printf -- '---\n'; printf '%s\n' "$@"; printf -- '---\n# a plan\n'; } > "$f"; printf '%s' "$f"
+}
+dbc_reg() { bash -c '. "$1"; plan_regression "$2"' _ "$DBC_RUN" "$1" 2>/dev/null; }
+dbc_proof_reg() { bash -c '. "$1"; . "$2"; proof_regression "$3"' _ "$DBC_RUN" "$REPO_ROOT/payload/scripts/lib/proof.sh" "$1" 2>/dev/null; }
+DBC_P_NO="$(dbc_plan reg-no 'scale: wave' 'regression: no')"
+DBC_P_YES="$(dbc_plan reg-yes 'scale: wave' 'regression: yes')"
+DBC_P_ABS="$(dbc_plan reg-abs 'scale: wave')"
+DBC_P_QNO="$(dbc_plan reg-qno 'scale: wave' 'regression: "no"')"
+DBC_P_SP="$(dbc_plan reg-sp 'scale: wave' '  regression :   no   ')"
+DBC_P_OVR="$(dbc_plan reg-ovr 'scale: wave' 'regression-override: Test User derived=yes chosen=no')"
+DBC_P_CAP="$(dbc_plan reg-cap 'scale: wave' 'regression: No')"
+DBC_P_ODD="$(dbc_plan reg-odd 'scale: wave' 'regression: maybe')"
+DBC_P_EMPTY="$(dbc_plan reg-empty 'scale: wave' 'regression:')"
+DBC_P_CRLF="$DBC/reg-crlf.plan.md"; printf -- '---\r\nscale: wave\r\nregression: no\r\n---\r\n# a plan\r\n' > "$DBC_P_CRLF"
+DBC_P_BODY="$DBC/reg-body.plan.md"; printf -- '---\nscale: wave\n---\n# a plan\nregression: no\n' > "$DBC_P_BODY"
+expect_eq "DBC-2 regression-setting-read: plan_regression reads exactly 'no' as no" "no" "$(dbc_reg "$DBC_P_NO")"
+expect_eq "DBC-2b …yes as yes" "yes" "$(dbc_reg "$DBC_P_YES")"
+expect_eq "DBC-2c …a quoted \"no\" as no" "no" "$(dbc_reg "$DBC_P_QNO")"
+expect_eq "DBC-2d …a spaced key and value as no" "no" "$(dbc_reg "$DBC_P_SP")"
+expect_eq "DBC-2e …a CRLF plan as no" "no" "$(dbc_reg "$DBC_P_CRLF")"
+expect_eq "DBC-2f …any other declared word (No, maybe) as yes, fail-closed" "yes|yes" "$(dbc_reg "$DBC_P_CAP")|$(dbc_reg "$DBC_P_ODD")"
+expect_eq "DBC-2g …and no key, an empty value, the override key alone, a body line, and no file as nothing declared" "|||||" \
+  "$(dbc_reg "$DBC_P_ABS")|$(dbc_reg "$DBC_P_EMPTY")|$(dbc_reg "$DBC_P_OVR")|$(dbc_reg "$DBC_P_BODY")|$(dbc_reg "$DBC/no-such.md")|"
+for dbc_f in "$DBC_P_NO" "$DBC_P_YES" "$DBC_P_ABS" "$DBC_P_QNO" "$DBC_P_SP" "$DBC_P_OVR" "$DBC_P_CAP" "$DBC_P_ODD" "$DBC_P_EMPTY" "$DBC_P_CRLF" "$DBC_P_BODY"; do
+  DBC_WANT=yes; [ "$(dbc_reg "$dbc_f")" = no ] && DBC_WANT=no
+  expect_eq "DBC-2h the proof library's proof_regression agrees with plan_regression on ${dbc_f##*/}" "$DBC_WANT" "$(dbc_proof_reg "$dbc_f")"
+done
+# THE FOUR SITES CALL IT: none keeps a read of the key of its own.
+DBC_SITES="$REPO_ROOT/payload/scripts/lib/proof.sh $REPO_ROOT/payload/scripts/lib/walls.sh $REPO_ROOT/hooks/dispatch-preflight.sh $REPO_ROOT/payload/scripts/card.sh"
+dbc_reg_reads() {  # <file>… -> the lines that read the regression key themselves (a frontmatter get naming it, or an awk on it)
+  /usr/bin/grep -cE 'frontmatter_get +("[^"]*" +)?regression([^-[:alnum:]_]|$)|\^\[\[:space:\]\]\*regression\[\[:space:\]\]\*:' "$@" | awk -F: '{ n += $NF } END { print n + 0 }'
+}
+dbc_reg_calls() { cat "$1" | /usr/bin/grep -c 'plan_regression '; }
+for dbc_f in $DBC_SITES; do
+  expect_nonempty "DBC-3 positive: ${dbc_f##*/} calls plan_regression" "$(/usr/bin/grep -m1 'plan_regression ' "$dbc_f")"
+done
+expect_eq "DBC-3b regression-setting-read: no site keeps a read of the key of its own" "0" "$(dbc_reg_reads $DBC_SITES)"
+expect_eq "DBC-3c …and plan_regression is defined once, in lib/run.sh" "1" "$(/usr/bin/grep -c '^plan_regression()' "$DBC_RUN")"
+cp "$REPO_ROOT/hooks/dispatch-preflight.sh" "$DBC/dispatch-preflight.sh"
+printf '[ "$(plan_frontmatter_get "$PLAN" regression)" = "no" ] && :\n' >> "$DBC/dispatch-preflight.sh"
+expect_eq "DBC-3d …and a read of the key planted in a sandbox copy of a site is counted" "1" "$(dbc_reg_reads "$DBC/dispatch-preflight.sh")"
+
+# --- bounded-wait: the three suites poll through tests/lib/wait.sh; none keeps a counted poll loop of its own ---
+DBC_WAIT="$REPO_ROOT/tests/lib/wait.sh"
+dbc_wait() { bash -c '. "$1"; shift; "$@"' _ "$DBC_WAIT" "$@"; }
+dbc_flag="$DBC/flag"; rm -f "$dbc_flag"
+dbc_wait wait_ticks 3 0.01 test -e "$dbc_flag"; DBC_W_RC=$?
+expect_eq "DBC-4 bounded-wait: wait_ticks gives up (rc 1) when the condition never holds" "1" "$DBC_W_RC"
+: > "$dbc_flag"
+dbc_wait wait_ticks 3 0.01 test -e "$dbc_flag"; DBC_W_RC=$?
+expect_eq "DBC-4b …and answers rc 0 at once when it already holds" "0" "$DBC_W_RC"
+rm -f "$dbc_flag"; ( sleep 0.2; : > "$dbc_flag" ) &
+dbc_wait wait_ticks 100 0.02 test -e "$dbc_flag"; DBC_W_RC=$?
+wait
+expect_eq "DBC-4c …and rc 0 when the condition comes true inside the ceiling" "0" "$DBC_W_RC"
+DBC_W_T0="$(perl -MTime::HiRes=time -e 'printf "%.2f", time')"
+dbc_wait wait_ticks 10 0.05 test -e "$DBC/never"; DBC_W_RC=$?
+DBC_W_MS="$(perl -MTime::HiRes=time -e 'printf "%d", (time - $ARGV[0]) * 1000' "$DBC_W_T0")"
+expect_eq "DBC-4d …its ceiling is ticks × tick-seconds: ten 0.05 s ticks took at least 0.5 s and under 5 s" "1|yes" \
+  "$DBC_W_RC|$([ "$DBC_W_MS" -ge 450 ] && [ "$DBC_W_MS" -lt 5000 ] && echo yes || echo "no (${DBC_W_MS} ms)")"
+dbc_wait wait_for 1 test -e "$DBC/never"; DBC_W_RC=$?
+expect_eq "DBC-4e wait_for gives up at its whole-second ceiling too" "1" "$DBC_W_RC"
+expect_eq "DBC-4f …and wait_ticks and wait_for are each defined once, in lib/wait.sh" "1|1" \
+  "$(/usr/bin/grep -c '^wait_ticks()' "$DBC_WAIT")|$(/usr/bin/grep -c '^wait_for()' "$DBC_WAIT")"
+# dbc_polls <suite> -> the lines of a suite that count a poll by hand: a sleep of a fraction of a second beside a counter
+# stepped with `+ 1))`, outside a printf'd child script. The suites' child scripts and clock-bounded loops are not these.
+dbc_polls() { /usr/bin/grep -E 'sleep 0\.[0-9]+' "$1" | /usr/bin/grep -E '\$\(\([a-z_]+ ?\+ ?1\)\)' | /usr/bin/grep -vE "printf '|\\\\\\$\(\(" | wc -l | tr -d ' '; }
+for dbc_s in name-scan slots worktree; do
+  expect_nonempty "DBC-5 positive: $dbc_s.test.sh sources lib/wait.sh and polls through it" \
+    "$(/usr/bin/grep -E '^\. .*lib/wait\.sh' "$REPO_ROOT/tests/$dbc_s.test.sh")$(/usr/bin/grep -E 'wait_(ticks|for) ' "$REPO_ROOT/tests/$dbc_s.test.sh")"
+  expect_eq "DBC-5b bounded-wait: $dbc_s.test.sh keeps no hand-counted poll loop" "0" "$(dbc_polls "$REPO_ROOT/tests/$dbc_s.test.sh")"
+  { cat "$REPO_ROOT/tests/$dbc_s.test.sh"; printf 'k=0; while [ ! -e "$TMP/x" ] && [ "$k" -lt 20 ]; do sleep 0.05; k=$((k + 1)); done\n'; } > "$DBC/$dbc_s.test.sh"
+  expect_eq "DBC-5c …and a hand-rolled loop planted in a sandbox copy of it is counted" "1" "$(dbc_polls "$DBC/$dbc_s.test.sh")"
+done
+
+# --- AC-9.2: the dead reader and its one pin are gone (the name is spelled in two halves so this row is not a hit for itself)
+dbc_hits() { /usr/bin/grep -rlF -- "$1" "$REPO_ROOT/hooks" "$REPO_ROOT/payload" "$REPO_ROOT/tests" 2>/dev/null | wc -l | tr -d ' '; }
+expect_eq "DBC-6 positive: the live ledger reader is found by the same search" "yes" "$([ "$(dbc_hits units_findings)" -gt 0 ] && echo yes || echo no)"
+expect_eq "DBC-6b AC-9.2: the unlined reader and its pin are gone from hooks, payload and tests" "0" "$(dbc_hits "units_""unlined")"
+
 finish

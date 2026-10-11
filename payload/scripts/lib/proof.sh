@@ -1326,17 +1326,14 @@ proof_state() {
 # READS `yes`, fail-closed as an absent `walk:` reads `required`: only the explicit word relaxes
 # anything. The key's sibling `regression-override:` records who chose against the scale default; it is
 # never read here. One reading for facts_owed below and lib/units.sh's integrate default; the Step-5
-# arm (lib/walls.sh validate_tests_block) reads the same key through the gate's own frontmatter_get.
+# arm (lib/walls.sh validate_tests_block), dispatch preflight and the card read the same key through
+# the same function, lib/run.sh `plan_regression` (wave-33 T15), which this only maps to a word.
 proof_regression() {
-  local v=""
-  [ -f "${1:-}" ] && v="$(awk '
-    { sub(/\r$/, "") }
-    NR == 1 && $0 == "---" { f = 1; next }
-    f && $0 == "---" { exit }
-    f && /^[[:space:]]*regression[[:space:]]*:/ {
-      v = $0; sub(/^[[:space:]]*regression[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
-      gsub(/^["\047]|["\047]$/, "", v); print v; exit }' "$1" 2>/dev/null)"
-  if [ "$v" = no ]; then printf 'no\n'; else printf 'yes\n'; fi
+  if ! declare -F plan_regression >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/run.sh" >/dev/null 2>&1
+  fi
+  if [ "$(plan_regression "${1:-}")" = no ]; then printf 'no\n'; else printf 'yes\n'; fi
 }
 
 # facts_owed <rigor> <scale> [<tree>] [<plan>] -> one line per fact a run owes, exit 0; nothing and
