@@ -2590,7 +2590,7 @@ for _s in $SC_LIST tests/run.sh; do mkdir -p "$(dirname "$SC/$_s")"; cp "$REPO_R
 git -C "$SC" add -A
 git -C "$SC" -c user.email=t@example.com -c user.name=T -c commit.gpgsign=false commit -qm seed
 for _s in $SC_LIST; do printf '# edited by a writer\n' >> "$SC/$_s"; done
-printf '#!/bin/bash\nX="$(cd "$(dirname "$0")" && pwd)"\nY=$(basename "$X" "$a")\necho "$X $Y"\n' > "$SC/helper.sh"
+printf '#!/bin/bash\nX="$(cd "$(dirname "$0")" && pwd -P)"\nY=$(basename "$X" "$a")\necho "$X $Y"\n' > "$SC/helper.sh"
 printf '#!/bin/bash\nX="$(dirname "$0")"\njest\n' > "$SC/helper-jest.sh"
 sc_rows() {  # <command> -> the claims under root $SC as <kind>:<target>, `|`-joined
   bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$SC" 2>&1 \
@@ -2609,7 +2609,7 @@ expect_eq "§SCRIPTS the runner itself keeps its definite claim (the positive be
   "$(sc_rows 'bash tests/run.sh')"
 # THE VALUE READER, ON A COMMAND (no file opened): the command word after each value is the word.
 case_is suite 'X="$(dirname "$0")" jest --ci'                       '§SCRIPTS X="$(dirname "$0")" jest: the word is jest'
-case_is suite 'X="$(cd "$(dirname "$0")" && pwd)" bash tests/run.sh'  '§SCRIPTS a nested substitution in a quoted value'
+case_is suite 'X="$(cd "$(dirname "$0")" && pwd -P)" bash tests/run.sh'  '§SCRIPTS a nested substitution in a quoted value'
 case_is suite 'X=$(foo "$id") jest'                                  '§SCRIPTS an unquoted substitution holding quotes'
 case_is suite 'X=`basename "$p"` jest'                               '§SCRIPTS a backquoted value holding quotes'
 case_is suite 'X=${A:-"a b"} jest'                                   '§SCRIPTS a parameter expansion holding a quoted blank'

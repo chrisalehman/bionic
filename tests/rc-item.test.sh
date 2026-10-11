@@ -98,6 +98,34 @@ esac
 STUB
 chmod +x "$TMP/bin/claude"
 
+# NO NETWORK (wave-33 T31). Every yes-answered `setup --all` door clones humanizer, a
+# `github-skill` row (`git clone --depth 1 https://github.com/<slug>.git <dest>`), and the
+# system git sits on every arm's PATH. A `git` stub beside the claude one serves any clone of a
+# github.com URL from a local repository built once here, holding the SKILL.md the probe reads,
+# and passes every other git call to the real git, named by its absolute path.
+REAL_GIT="$(command -v git)"
+[ -x "$REAL_GIT" ] || { echo "rc-item.test.sh: git is required"; exit 1; }
+FIXTURE_SKILL="$TMP/fixture-skill"
+mkdir -p "$FIXTURE_SKILL"
+printf -- '---\nname: fixture-skill\ndescription: a local stand-in for a cloned skill\n---\n' > "$FIXTURE_SKILL/SKILL.md"
+"$REAL_GIT" -C "$FIXTURE_SKILL" init -q \
+  && "$REAL_GIT" -C "$FIXTURE_SKILL" add SKILL.md \
+  && "$REAL_GIT" -C "$FIXTURE_SKILL" -c user.name=fixture -c user.email=fixture@invalid commit -q -m fixture \
+  || { echo "rc-item.test.sh: the local skill fixture could not be built — suite refuses to run"; exit 1; }
+cat > "$TMP/bin/git" <<STUB
+#!/bin/bash
+if [ "\${1:-}" = clone ]; then
+  args=()
+  for a in "\$@"; do
+    case "\$a" in https://github.com/*|git@github.com:*) a="file://$FIXTURE_SKILL" ;; esac
+    args+=("\$a")
+  done
+  exec "$REAL_GIT" "\${args[@]}"
+fi
+exec "$REAL_GIT" "\$@"
+STUB
+chmod +x "$TMP/bin/git"
+
 # The rc every arm starts from: three lines that are not bionic's, and which
 # every assertion below requires to come back byte-identical.
 plant_rc() {  # <file>
