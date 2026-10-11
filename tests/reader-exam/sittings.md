@@ -115,3 +115,4 @@ result over-engineering structure critic flag met exam-sitting.md#resit-over-eng
 result over-engineering structure one-mind flag met exam-sitting.md#over-engineering-one-mind-structure
 
 stale: checks-evidence cf938731… → 2fbd22b4…, checks-adversarial f7cf47a0… → b5d16708…, checks-structure e779b863… → 63abc3ef… (T31, T13); re-sit owed: none dispatched — the exam is off the roster
+stale: checks-evidence 2fbd22b4… → 8db594f1… (a change before 1.15.0 left unmarked, then T16), checks-adversarial b5d16708… → 3f5d0ed4… (T16), checks-structure 63abc3ef… → 234f965e… (T16, T30); re-sit owed: none dispatched — the exam is off the roster

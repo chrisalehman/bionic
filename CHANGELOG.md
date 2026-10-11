@@ -115,14 +115,19 @@ What you will notice:
 
 The whole run at 8832e4e6, the head with every build row on it, passed 87 suites and failed 8 of 95, in 1,979
 s of wall at width 7 (`regression.md`, `regression-8832e4e6.log`). The log has no `waits for its turn`
-line. The eight were pins that later rows moved, one size cap, and one expected stdout:
-bash-walls-egd and session-poker-3 (mutation anchors in `proof.sh`), runner-roster OA.14 (the anchor in
-`run.sh`), seam-resolution and cross-gate-agreement S17 (a private legacy offset and a hand-written roster
-row in `gate.test.sh` and `cmd-class.test.sh`), execution-recorder PC-b0 (the structure checks file was 5,110
-bytes against its 5,000 cap, a real defect), hook-adoption (the standing decision line now reaches a session
-with a malformed or empty id, by ruling), and session-poker-4 (the dry-commit verb list lacked the verbs T7
-added, and MP-m2's refusal spelled a number of its own). Fix rows T29 and T30 repaired them: <T29-T30-LANDED>
-No whole run was taken again after them.
+line. The eight were pins that later rows had moved, one size cap and one expected stdout: mutation anchors
+that no longer matched `proof.sh` or `run.sh` (bash-walls-egd, session-poker-3 63e0c and 63e10, runner-roster
+OA.14), two private copies in `gate.test.sh` and `cmd-class.test.sh` (seam-resolution, cross-gate-agreement
+S17), session-poker-3 69e4 (a verb list that lacked the three verbs T7 added; the log filed it under
+session-poker-4), execution-recorder PC-b0 (the structure checks file was 5,110 bytes against its 5,000 cap, a
+real defect), hook-adoption (the standing decision line now reaches a session with a malformed or empty
+id, so those two rows expect that line alone), and session-poker-4 MP-m2. Fix row T29 changed test files only:
+it moved each anchor to the shipped line with its mutant still biting, took the private copies to the shared
+helpers, and put the three verbs in the list (`T29-pins.md`). Fix row T30 cut three repeated clauses from
+the structure checks, 5,110 to 4,959 bytes with every check kept, changed the two session-start rows, and
+found MP-m2's premise wrong: the refusal already built its number from the constant, and the grep had
+matched a comment, which it reworded (`T30-floor.md`). Each suite was green through the door at its row's
+landing. No whole run was taken again after them.
 
 The walk drove the wave head's own verbs, hooks and libraries on a scratch world: the brief, a ruling pushed
 and held at the commit, `deliver`, `matrix-set` and `waive-row`, the owed ledger through a stubbed channel,
@@ -223,14 +228,20 @@ Known limits, struck:
   (`T5-red-runner-roster.log`, `T5-green-runner-roster.log`). The lag after a short wait is carried above.
 - Known limit, struck: the four debt lines from the structure critic. `width.sh` walks a UTF-8 character
   once (units DBC-1 to DBC-1c, `T15-red-units.log`); a bounded wait-until is one library, with all four
-  suites on it (<WAIT-LIBRARY-SUITES>); the share × cores ÷ 100 room has one site, `_gate_share_cores` (T1,
+  suites on it (name-scan, slots and worktree by T15, `T15-green-all-1.log`; gate.test.sh by T29, `T29-pins.md`); the share × cores ÷ 100 room has one site, `_gate_share_cores` (T1,
   gate §SHARE-ROOM SR.1 to SR.4); and the run-end re-read has an agreement check over `run_read` and
   `booked_follow` (session-poker-2 56k to 56k8, `T15-green-poker2-worktree-3.log`).
 - Known limit, struck: rc-item reached the network. Each yes-answered `setup --all` door cloned humanizer
-  from GitHub because `/usr/bin/git` was on the suite's PATH. <T31-LANDED> (`T31-limits.md`)
+  from GitHub because `/usr/bin/git` was on the suite's PATH. The suite now puts a git stub first on its
+  PATH that rewrites a github.com clone to a local fixture repository. A process sampler saw 118 `git
+  clone` of the GitHub URL and 1,044 `git-remote-https` samples before, and 0 `git-remote-https` samples
+  after, every clone local (`T31-red-rc-item-net.log`, `T31-green-rc-item-net.log`; `T31-limits.md`).
 - Known limit, struck: a ruling acknowledged before its push was still pushed once, and the pending flag
-  kept that writer's calls on the hook's slow path until then (`walk.md` section 2). <T31-LANDED>
-  (`T31-limits.md`)
+  kept that writer's calls on the hook's slow path until then (`walk.md` section 2). The push hook now
+  skips a ruling that carries a `shown=` stamp, and one function settles the pending flag on each push
+  and each stamp. inbox §ACK was 62 of 67 on the unchanged code (the acknowledged ruling pushed with
+  "acknowledge with:", the flag still up), then green (`T31-red-inbox.log`, `T31-green-inbox.log`;
+  `T31-limits.md`).
 
 ## 1.15.0 — 2026-10-11
 
