@@ -288,17 +288,17 @@ section "§DETACH-CEILING — a detached run the gate has not admitted within th
 # log (stderr is the log in the detached side), `rc=75` on the log's last line, `75` in `<log>.rc`,
 # `run_rc=75` on the roster row. The caller follows the log, copies the line and exits 75.
 #
-# FIXTURE FIDELITY. gate.test.sh's held gate (B.7): the machine reads 60% used, the share is 80, a
-# REAL background process holds a 15% admission, and the request the detached run makes would add 15
-# more. The machine, clock and cost record are SYNTHESIZED (the world's pins); the holder, the shim,
-# the perl detach and the roster write are real. The share is pinned here because the default moved.
+# FIXTURE FIDELITY. gate.test.sh's held gate (B.7): the share is 80 on 8 cores (6.4), the machine
+# reads 6.0 busy cores, a REAL background process holds an admission of one core, and the request the
+# detached run makes would add one more (wave-33 T1; Δ10: a command is promised one core and no
+# memory, so the room is the live load's). The machine and clock are SYNTHESIZED (the world's pins);
+# the holder, the shim, the perl detach and the roster write are real. The share is pinned here
+# because the default moved.
 CE_HOME="$D/ce-home"; mkdir -p "$CE_HOME/bionic"; printf '80\n' > "$CE_HOME/bionic/share"
 CE_CFG_WAS="${CLAUDE_CONFIG_DIR:-}"; export CLAUDE_CONFIG_DIR="$CE_HOME"
 export BIONIC_GATE_DIR="$D/ce-gate"
-world_machine 8 8192 60 1.0
+world_machine 8 8192 60 6.0
 world_clock 1000
-world_cost h 15 0.5 30
-world_cost ce.test.sh 15 0.5 30
 cat > "$D/ce-holder.sh" <<'CEHOLD'
 d="$1"
 . "$2"
@@ -312,7 +312,7 @@ CEHOLD
 bash "$D/ce-holder.sh" "$D" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/gate.sh" >/dev/null 2>&1 &
 CE_HOLDER=$!
 bk_wait 10 bk_has "$D/ce-holder.rc"
-expect_eq "DC.0 precondition: the holder is admitted (60 + 15), so the run below finds no room" "0" \
+expect_eq "DC.0 precondition: the holder is admitted, so the run below finds no room (6.0 + 1 > 6.4)" "0" \
   "$(cat "$D/ce-holder.rc" 2>/dev/null)"
 export BIONIC_SETTLE_MAX_WAIT=3
 CE_CMD="touch '$D/ce.ran'"
