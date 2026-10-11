@@ -9761,6 +9761,23 @@ EOF
       TICK_GATE_KEYS="$(printf '%s\n' "$TICK_GATE_ROWS" | awk -F'\t' 'NF { printf "%s%s", (n++ ? "," : ""), $1 }')"
       TICK_GATE_NEW="$(printf '%s\n' "$TICK_GATE_ROWS" | awk -F'\t' '$2 == "new"')"
     fi
+    # THE GATE ITEM'S CLOSER (wave-33 T12; REQ-2 AC-2.3, D2): a `gate:<key>` item on the person's
+    # ledger is closed when the gate is no longer raised, which is when its key is not in the keys
+    # just read (`gate_raised=` for the next digest). A request that left the gate file, or a gate
+    # file that is gone, closes its item; a request still in the file keeps its item, and the
+    # refused-file branch above kept the digest's own keys, so a symlink closes nothing. Silent,
+    # never fatal, and a library without owed.sh does nothing.
+    tick_gate_close() {
+      local gkey
+      declare -F owed_list >/dev/null 2>&1 || return 0
+      declare -F owed_close >/dev/null 2>&1 || return 0
+      for gkey in $(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep '^gate:'); do
+        case ",${TICK_GATE_KEYS}," in *",${gkey#gate:},"*) continue ;; esac
+        OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_close "$gkey" "gate cleared" >/dev/null 2>&1
+      done
+      return 0
+    }
+    tick_gate_close
     # THE FIELD: how many requests this tick raises, then their categories sorted and once each,
     # `gate=2:credentials,leaves-the-machine`. The commands are on the GATE lines, not here.
     if [ -n "$TICK_GATE_NEW" ]; then

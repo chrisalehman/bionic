@@ -177,6 +177,8 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #   start-clock  hooks/execution-recorder.sh   one clock reading per agent start, a file per
 #                                              start: `start-clock-<sid>.<agent id>.state`
 #                                              (wave-27 T68)
+#   owed         scripts/lib/owed.sh           what the person owes the run, one line per item;
+#                                              close-out's wipe spares a live session's (wave-33 T12)
 #
 # THE OWNER IS THE NAME UP TO ITS FIRST DOT, FOR EVERY CLASS (wave-27 T68; review pass 47 S1,
 # A-orch-137). A session id holds no dot (lib/context.sh admits `[A-Za-z0-9_-]` only) and an
@@ -191,7 +193,7 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 # so no id derived here can address one. A non-session file added later is safe on
 # arrival for the same reason. (`stop-check.state` was a third of these until
 # epic-23 wave-15 deleted the observation record itself — ADR-028.)
-PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock"
+PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock owed"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
 # EVERY SESSION ID WITH STATE HERE, each once, in class-then-name order. Symlinks
