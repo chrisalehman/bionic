@@ -37,8 +37,6 @@
 #                              `evidence <id>`, `launch <id> <agent>` — the one reader the
 #                              commit gate and the Patrol tick share (wave-21 T5; D4). Exit 1
 #                              if any line was printed, else 0.
-#   units_unlined <plan>       the T-ids with no non-empty `- <id>:` line under
-#                              `## SDLC State`, whatever their status (wave-21 T5).
 #   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [<born>]
 #                              the WHOLE plan with one row added, on stdout; the file is
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
@@ -2035,16 +2033,7 @@ units_validate() {
 # already holding a memo for the plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
 units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}"; }
 
-# units_unlined <plan> -> the `T<digit>…` ids with no non-empty `- <id>:` line under
-# `## SDLC State`, table order, whatever their status; always exit 0.
-#
-# THE LOOKUP THE GATE'S ADDRESSED-UNIT ARM COUNTS (wave-21 T5). It lived in walls.sh as
-# `missing_evidence_ids`, a grep over the gate's own `## SDLC State` extract asked once per row;
-# it is the same question `units_findings` asks for its `evidence` finding, so it is answered by
-# the same program and the two cannot disagree about whether a row has its line.
-units_unlined() { _units_ledger unlined "${1:-}" ""; }
-
-# _units_ledger <findings|unlined> <plan> <roster> — the ONE program behind both verbs.
+# _units_ledger <findings> <plan> <roster> — the ONE program behind `units_findings`.
 #
 # THE `- <id>:` LOOKUP IS THE GATE'S, TO THE BYTE OF ITS MEANING: line endings normalised
 # (`normalize_newlines`' two substitutions), fences skipped, every `## SDLC State` section read
@@ -2107,7 +2096,6 @@ _units_ledger() {
       for (i = 1; i <= n; i++) {
         if (id[i] !~ /^T[0-9]/) continue
         lined = ((id[i] in val) && val[id[i]] != "")
-        if (mode == "unlined") { if (!lined) print id[i]; continue }
         if (!(st[i] in enum)) {
           printf "status %s %s\n", id[i], (st[i] == "" ? "(empty)" : st[i]); found = 1; continue
         }

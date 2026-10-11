@@ -106,6 +106,8 @@ notify_send() {
     return 0
   fi
   prefix="$(_notify_value "$(notify_file)" title-prefix | tr '\r\n' '  ')"
+  # The value's own line ending became a trailing space above; one space joins the prefix to the title.
+  prefix="${prefix%"${prefix##*[![:space:]]}"}"
   t="${prefix:+$prefix }${title}"
   curl -s -f --max-time 5 -o /dev/null -H "Title: ${t}" --data-raw "$body" \
     "https://ntfy.sh/${topic}" >/dev/null 2>&1 || rc=$?
