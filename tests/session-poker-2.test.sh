@@ -2832,7 +2832,7 @@ expect_eq "56k3 control: a run that never writes its end is LOST for the poker" 
 expect_eq "56k4 …and 70, LOST, for the shim's waiter" "70" "$(s56_ag_booked "$S56_BK_FOLLOW" no)"
 # the doctored copies: the poker's second read taken out, and the waiter made to skip its re-read on the dead pass
 S56_RR_DOC="$(printf '%s\n' "$S56_RR" | /usr/bin/grep -v '^  { read -r rc < "\$RUN_LOG\.rc"; } 2>/dev/null$')"
-S56_BK_DOC="${S56_BK_FOLLOW/rc=\"\$(booked_rc_of \"\$log\")\" && \{/rc=\"\$([ \"\$dead\" -eq 1 ] \&\& exit 1; booked_rc_of \"\$log\")\" \&\& \{}"
+S56_BK_DOC="$(printf '%s\n' "$S56_BK_FOLLOW" | sed 's/rc="\$(booked_rc_of "\$log")" && {/rc="$([ "$dead" -eq 1 ] \&\& exit 1; booked_rc_of "$log")" \&\& {/')"
 expect_ne "56k5 precondition: the poker copy without its re-read differs from the shipped function" "$S56_RR" "$S56_RR_DOC"
 expect_ne "56k6 precondition: the waiter copy that skips its dead-pass re-read differs from the shipped function" "$S56_BK_FOLLOW" "$S56_BK_DOC"
 expect_eq "56k7 a poker that loses its re-read calls the finished run LOST: the check tells it apart" "LOST|" "$(s56_ag_poker "$S56_RR_DOC" yes)"

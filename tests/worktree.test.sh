@@ -779,8 +779,11 @@ gb_shim_bg() {  # <stamp dir or ""> <command> — the real shim, started in the 
       >/dev/null 2>&1 ) &
   GB_SHIM_PID=$!
 }
+# The glob is expanded on every poll, inside the function: handed to wait_ticks as an argument it would be
+# expanded once, before the request exists.
+gb_has_admitted() { grep -qs '^admitted=' "$BIONIC_GATE_DIR"/requests/*; }
 gb_admitted() {  # rc 0 once a request in the store carries an admitted line
-  wait_ticks 200 0.05 grep -qs '^admitted=' "$BIONIC_GATE_DIR"/requests/*
+  wait_ticks 200 0.05 gb_has_admitted
 }
 gb_shim_end() {  # <go file> — let the held command end, and wait for the shim
   touch "$1"; wait "$GB_SHIM_PID" 2>/dev/null; GB_SHIM_PID=""
