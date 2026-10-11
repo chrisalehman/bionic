@@ -313,11 +313,46 @@ case "$COMMAND" in
     fi ;;
 esac
 
+# THE WRITER'S UNREAD RULINGS, gathered for `wall_ruling_unread` (wave-33 T10; REQ-1 AC-1.4, D1). A
+# ruling the orchestrator recorded for a writer (`session-poker.sh rule`) is pushed with the writer's
+# next tool result, and a push is seen, not necessarily obeyed (record/wave-33-workhorse/
+# P1-additional-context.md); so no work lands against one unread. For a writer's call (the payload's
+# `agent_id`, joined to its roster name by `roster_row_for_id`) that holds a `git commit` segment, this
+# reads each ruling of that name not yet shown, in the one wording (lib/roster.sh
+# `ruling_take_unread`), and marks it shown: the refusal the wall below then gives is the reading, so
+# the retry passes. Only for such a call: any other call, and the orchestrator's, read nothing.
+# roster.sh is not in this hook's BIONIC_LIB_WANT (A-56.1: a union is fail-closed at its widest
+# member); a library dir without it gathers nothing, and the push still stands.
+BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
+case "$COMMAND" in
+  *commit*)
+    _bw_aid="$(bionic_jq .agent_id)"
+    if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && [ -r "$BIONIC_LIB/roster.sh" ] \
+       && { declare -F ruling_take_unread >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null; then
+      _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+      if _bw_row="$(roster_row_for_id "$_bw_roster" "$_bw_aid")"; then
+        BIONIC_RULINGS_WRITER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+        BIONIC_RULINGS_UNREAD="$(ruling_take_unread "$_bw_roster" "$BIONIC_RULINGS_WRITER" commit "$(refuse_plugin_root)")"
+      fi
+    fi ;;
+esac
+
+# wall_ruling_unread — the writer's commit with a ruling unread is refused, carrying the ruling. A pure
+# predicate over the two facts gathered above (the freeze, .claude/rules/hook-authoring.md).
+wall_ruling_unread() {  # <event> -> 0 nothing · 2 block
+  [ -n "$BIONIC_RULINGS_UNREAD" ] || return 0
+  fold_block exit2 commit "an orchestrator ruling for you is unread" "read it below, commit again" \
+    "${BIONIC_RULINGS_WRITER:-this writer}, shown now:
+$BIONIC_RULINGS_UNREAD"
+  return 2
+}
+
 bionic_fold "$EVENT" \
   wall_protect_main \
   wall_protect_database \
   wall_evidence_gate \
   wall_farm_out_reminder \
   wall_background_suite_guard \
-  wall_memory_store
+  wall_memory_store \
+  wall_ruling_unread
 exit $?
