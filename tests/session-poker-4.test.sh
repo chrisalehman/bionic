@@ -3377,4 +3377,196 @@ AB_SUM="$(ab_sum "$RAB")"
 poke "$RAB" amend wab --files+ hooks/w.sh --reason r --by someone
 expect_eq "AB-7 --by takes only writer: any other value is the usage error, nothing written" "2|$AB_SUM" "$RC|$(ab_sum "$RAB")"
 
+
+# ============================================================
+section "§DELIVER §REVIEW-LANDS §NO-PLACEHOLDER: a record row lands itself through deliver, its artifact and the working head in the landing; the tick lands a MET one whose agent ended without it; a landed step line keeps no placeholder (wave-33 T6; REQ-3 AC-3.1, AC-3.2, AC-3.3; D5)"
+# ============================================================
+#
+# `session-poker.sh deliver <row>` is a record row's own last act. It refuses (exit 2, naming the
+# path and the corrected call) unless the row's expected artifact exists: the ledger's artifact cell,
+# else the one record its Files name. A review row is refused until a `proved: kind=review` line names
+# that record; a row with a tree of its own lands through `ready`. It then lands through the one
+# landing writer, `row-landed`, at the head of the plan's working-branch checkout, never a typed one,
+# and the ledger line names the artifact beside the landing. The tick lands a MET row whose agent
+# ended without it, and reports one whose artifact is absent. `row-landed` replaces a step line's
+# `pending dispatch` lead rather than appending after it.
+#
+# FIXTURE FIDELITY. §SEV's shape: a plan bound to this session, its working branch checked out in a
+# linked worktree with a commit of its own (so the working head is not the main checkout's), roster
+# rows from the production writer, and the review reading registered through `proof-add` itself.
+DV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+DV_REL=".bionic/docs/record/wave-01-fixture"
+RDV="$(make_repo dv-deliver)"; ( cd "$RDV" && git commit -q --allow-empty -m init )
+git -C "$RDV" config user.name "Dana Fixture"
+DV_B="$(git -C "$RDV" rev-parse HEAD)"
+DV_DIR="$RDV/$DV_REL"; mkdir -p "$DV_DIR"
+dv_plan() {  # <repo> -> the plan path: bound, committed; record rows of every shape, a ledger with an artifact column
+  local repo="$1" f r="$DV_REL"
+  f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")" "$repo/.bionic/docs/specs/epic-99-fixture"
+  printf '# requirements\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${DV_B:0:8}"
+    printf -- '- T1: landed at record/T1.md\n- T2: landed at record/T2.md\n'
+    printf -- '- T6: dispatched to w-T6\n- T11: dispatched to w-T11\n- T4: dispatched to dv-crit2\n- T10: dispatched to dv-live\n'
+    printf -- '- T5: pending dispatch — .worktrees/01-T5\n'
+    printf -- '- T3: pending dispatch — added by task-add at 2026-10-04T00:00:00Z\n'
+    printf -- '- T7: pending dispatch — .worktrees/01-T7 born: review S2 on\n'
+    printf -- '- T8: pending dispatch\n- T9: pending dispatch\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |\n'
+    printf '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |  |\n'
+    printf '| T5 | 4 | verify | the floor | w-T5 | — | 30 | REQ-1 | %s/T5-floor.md, %s/T5.progress.md | — | — | active |  |\n' "$r" "$r"
+    printf '| T6 | 4 | verify | a floor not yet written | w-T6 | — | 30 | REQ-1 | %s/T6-floor.md | — | — | active |  |\n' "$r"
+    printf '| T11 | 4 | verify | two records, no artifact named | w-T11 | — | 30 | REQ-1 | %s/T11-a.md, %s/T11-b.md | — | — | active |  |\n' "$r" "$r"
+    printf '| T3 | 4 | review | the final reading | dv-crit | — | 30 | REQ-1 | %s/T3-read.md | — | — | active | approval:plan, head |\n' "$r"
+    printf '| T4 | 4 | review | a reading never registered | dv-crit2 | — | 30 | REQ-1 | %s/T4-read.md | — | — | active | approval:plan, head |\n' "$r"
+    printf '| T10 | 4 | review | a live reading | dv-live | — | 30 | REQ-1 | %s/T10-read.md | — | — | active |  |\n' "$r"
+    printf '| T7 | 4 | build | a build in its own tree | w-T7 | — | 30 | REQ-1 | c.sh | 01-T7 | abc1234 | active |  |\n'
+    printf '| T8 | 4 | test | a test row whose agent ended | w-T8 | — | 30 | REQ-1 | %s/T8-tests.md | — | — | active |  |\n' "$r"
+    printf '| T9 | 4 | test | an ended row whose artifact is absent | w-T9 | — | 30 | REQ-1 | %s/T9-tests.md | — | — | active |  |\n\n' "$r"
+    printf '## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n'
+    printf '| T1 | implementor (w-T1) | — | 30 min | record/T1.md | landed | batch 1 |\n'
+    printf '| T5 | test-runner (w-T5) | — | 30 min | %s/T5-floor.md | — | batch 2 |\n' "$r"
+    printf '| T8 | test-runner (w-T8) | — | 30 min | %s/T8-tests.md | — | batch 2 |\n' "$r"
+    printf '| T9 | test-runner (w-T9) | — | 30 min | %s/T9-tests.md | — | batch 2 |\n' "$r"
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  } > "$f"
+  bind_marker "$repo" "$f"
+  ( cd "$repo" && git add -f "$f" && git commit -qm plan ) >/dev/null 2>&1
+  printf '%s' "$f"
+}
+PDV="$(dv_plan "$RDV")"
+( cd "$RDV" && git worktree add -q -b wave/01-fixture "$RDV/.worktrees/01-fixture" "$(git rev-parse HEAD)" ) >/dev/null 2>&1
+DV_C1="$(s57_commit "$RDV/.worktrees/01-fixture" lib/a.sh C1)"
+DV_MAIN="$(git -C "$RDV" rev-parse HEAD)"
+dv_step()   { /usr/bin/grep -E "^- $1: " "$PDV" | head -1; }   # <id> -> the row's step line, whole
+dv_ledger() { awk -v id="$1" '/^## Dispatch ledger/ { l = 1; next } /^## / { l = 0 } l && /^\|/ { c = $2; gsub(/ /, "", c); if (c == id) { print; exit } }' FS='|' "$PDV"; }
+dv_status() { s48_row "$PDV" "$1" | awk -F'|' '{ print $12 }'; }
+dv_snap()   { cp "$PDV" "$TMPROOT/dv-before"; }
+dv_same()   { cmp -s "$TMPROOT/dv-before" "$PDV" && echo same || echo changed; }
+DV_AT_RE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
+
+expect_regex "DV-0 precondition: the working branch's head is C1, a 40-hex commit of the linked worktree" '^[0-9a-f]{40}$' "$DV_C1"
+expect_ne "DV-0b …which is not the main checkout's head (the landing names the working head, not HEAD)" "$DV_MAIN" "$DV_C1"
+s34_gate "$RDV"
+expect_eq "DV-0c precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "DV-0d precondition: the step-line extractor reads T5's line" "- T5: pending dispatch — .worktrees/01-T5" "$(dv_step T5)"
+expect_eq "DV-0e precondition: the ledger extractor reads T5's row, its landed cell empty" \
+  "| T5 | test-runner (w-T5) | — | 30 min | $DV_REL/T5-floor.md | — | batch 2 |" "$(dv_ledger T5)"
+expect_eq "DV-0f precondition: the status extractor reads T5 active" "active" "$(dv_status T5)"
+
+# ---------- §DELIVER (AC-3.1): the artifact is checked, then the row lands at the working head ----------
+dv_snap
+poke "$RDV" deliver T6
+expect_eq "DV-1 §DELIVER AC-3.1 a row whose artifact is absent is refused (exit 2)" "2" "$RC"
+expect_contains "DV-1b …naming the path it looked for" "$DV_REL/T6-floor.md" "$OUT"
+expect_contains "DV-1c …and the corrected call" "session-poker.sh deliver T6" "$OUT"
+expect_eq "DV-1d …and the plan is byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T6)"
+
+poke "$RDV" deliver T11
+expect_eq "DV-2 a row whose ledger names no artifact and whose Files name two records is refused (exit 2)" "2" "$RC"
+expect_contains "DV-2b …naming both records" "$DV_REL/T11-a.md, $DV_REL/T11-b.md" "$OUT"
+expect_contains "DV-2c …and the call that names the one meant (its ledger has no T11 line, so ledger-add)" "session-poker.sh ledger-add T11 artifact=" "$OUT"
+expect_eq "DV-2d …the plan byte-identical" "same" "$(dv_same)"
+
+poke "$RDV" deliver T7
+expect_eq "DV-3 a row with a tree of its own is refused (exit 2)" "2" "$RC"
+expect_contains "DV-3b …it lands through ready, from its tree" "spawn-worktree.sh ready" "$OUT"
+expect_eq "DV-3c …the plan byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T7)"
+
+printf 'floor: green\n' > "$DV_DIR/T5-floor.md"
+poke "$RDV" deliver T5
+expect_eq "DV-4 §DELIVER AC-3.1 a verify row with its artifact lands through deliver (exit 0), no --by-hand" "0 landed" "$RC $(dv_status T5)"
+expect_regex "DV-4b …its ledger line names the artifact, and the landing at the working head C1" \
+  "^\| T5 \| test-runner \(w-T5\) \| — \| 30 min \| $DV_REL/T5-floor\.md \| landed $DV_AT_RE $DV_C1 \| batch 2 \|$" "$(dv_ledger T5)"
+expect_contains "DV-4c …through the one landing writer" "row-landed — T5 landed at $DV_C1" "$OUT"
+expect_contains "DV-4d …and deliver says what it checked" "deliver — T5: artifact $DV_REL/T5-floor.md present; landed at the working head $DV_C1" "$OUT"
+expect_absent "DV-4e …no hand landing is written" "landed-by-hand" "$(dv_step T5)"
+dv_snap
+poke "$RDV" deliver T5
+expect_eq "DV-5 deliver on a landed row writes nothing (exit 0, the plan byte-identical)" "0 same" "$RC $(dv_same)"
+expect_contains "DV-5b …and says the row is landed" "T5 is already landed" "$OUT"
+
+# ---------- §NO-PLACEHOLDER (AC-3.3, the step-line half): the landing replaces the placeholder lead ----------
+expect_regex "NP-1 §NO-PLACEHOLDER AC-3.3 the delivered row's line reads landed, its tail kept" \
+  "^- T5: landed $DV_C1 $DV_AT_RE — \.worktrees/01-T5$" "$(dv_step T5)"
+expect_absent "NP-1b …and carries no pending dispatch" "pending dispatch" "$(dv_step T5)"
+expect_eq "NP-2 precondition: T7's line reads pending dispatch, a born marker behind it" \
+  "- T7: pending dispatch — .worktrees/01-T7 born: review S2 on" "$(dv_step T7)"
+poke "$RDV" row-landed T7 "$DV_C1" 2026-10-04T04:00:00Z
+expect_eq "NP-2b ready's landing (row-landed) replaces the lead and keeps the born marker" \
+  "0 - T7: landed $DV_C1 2026-10-04T04:00:00Z — .worktrees/01-T7 born: review S2 on" "$RC $(dv_step T7)"
+expect_absent "NP-2c …no pending dispatch on the line" "pending dispatch" "$(dv_step T7)"
+dv_snap
+poke "$RDV" row-landed T7 "$DV_C1" 2026-10-04T04:00:00Z
+expect_eq "NP-3 the same landing again writes nothing (exit 0, byte-identical)" "0 same" "$RC $(dv_same)"
+
+# ---------- §REVIEW-LANDS (AC-3.2): a review row delivers once its reading is registered ----------
+DV_RS="$(roster_of "$RDV")"; new_roster "$RDV"
+printf '%s|questions=adversarial\n' \
+  "$(roster_row_fixture session="$SID" name=dv-crit agent_id=a-dv-crit subagent_type=bionic:critic files="$DV_REL/T3-read.md")" >> "$DV_RS"
+dv_rec() {  # <file> -> an adversarial piece reading over base..C1 that passes
+  printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nnothing found\n' "${DV_B:0:10}" "$DV_C1" > "$DV_DIR/$1"
+}
+dv_rec T4-read.md
+dv_snap
+poke "$RDV" deliver T4
+expect_eq "RL-1 §REVIEW-LANDS AC-3.2 a review row whose reading is not registered is refused (exit 2)" "2" "$RC"
+expect_contains "RL-1b …naming the record and the registering call" "proof-add review record/wave-01-fixture/T4-read.md" "$OUT"
+expect_eq "RL-1c …the plan byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T4)"
+dv_rec T3-read.md
+poke "$RDV" proof-add review record/wave-01-fixture/T3-read.md --question adversarial --reader dv-crit
+expect_eq "RL-2 precondition: the reading registers through proof-add (exit 0), and leaves its final row active" "0 active" "$RC $(dv_status T3)"
+poke "$RDV" deliver T3
+expect_eq "RL-3 §REVIEW-LANDS AC-3.2 the registered reading's row delivers (exit 0) and is landed" "0 landed" "$RC $(dv_status T3)"
+expect_regex "RL-3b …the ledger gains its line, naming the record and the working head" \
+  "^\| T3 \| .*\| $DV_REL/T3-read\.md \| landed $DV_AT_RE $DV_C1 \|" "$(dv_ledger T3)"
+expect_regex "NP-4 …and its step line reads landed, the task-add tail kept" \
+  "^- T3: landed $DV_C1 $DV_AT_RE — added by task-add at 2026-10-04T00:00:00Z$" "$(dv_step T3)"
+dv_rec T10-read.md
+dv_snap
+poke "$RDV" deliver T10
+expect_eq "RL-4 a live review row (live:head) is refused (exit 2): it returns to pending on each reading" "2" "$RC"
+expect_contains "RL-4b …saying so" "live:head" "$OUT"
+expect_eq "RL-4c …the plan byte-identical" "same" "$(dv_same)"
+
+# ---------- §DELIVER (AC-3.1), the backstop: the tick lands a MET row whose agent ended without deliver ----------
+printf 'tests: green\n' > "$DV_DIR/T8-tests.md"; backdate "$DV_DIR/T8-tests.md" 300
+printf 'a report under another name\n' > "$DV_DIR/T9-report.md"; backdate "$DV_DIR/T9-report.md" 300
+add_row "$RDV" name=w-T8 agent_id=a-w-T8 subagent_type=test-runner deliverable="$DV_DIR/T8-tests.md" \
+  duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$RDV" w-T8)"
+add_row "$RDV" name=w-T9 agent_id=a-w-T9 subagent_type=test-runner deliverable="$DV_DIR/T9-report.md" \
+  duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$RDV" w-T9)"
+armed_ago "$RDV"
+DV_VERDICT="$( cd "$RDV" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER_FOR_ACK" verdict 2>/dev/null )"
+expect_regex "DV-6 precondition: the one verdict read the tick takes reads w-T8 MET" '[|]name=w-T8[|](.*[|])?state=MET([|]|$)' \
+  "$(printf '%s\n' "$DV_VERDICT" | /usr/bin/grep -F '|name=w-T8|')"
+expect_regex "DV-6a precondition: …and w-T9 MET, its roster deliverable present" '[|]name=w-T9[|](.*[|])?state=MET([|]|$)' \
+  "$(printf '%s\n' "$DV_VERDICT" | /usr/bin/grep -F '|name=w-T9|')"
+forget_digest "$RDV"
+poke_pressure "$RDV" 8192 1.0 tick
+DV_TICK="$OUT"
+expect_eq "DV-6b §DELIVER AC-3.1 the tick lands the MET record row whose agent ended without deliver" "landed" "$(dv_status T8)"
+expect_regex "DV-6c …its ledger line naming the artifact and the working head" \
+  "^\| T8 \| test-runner \(w-T8\) \| — \| 30 min \| $DV_REL/T8-tests\.md \| landed $DV_AT_RE $DV_C1 \| batch 2 \|$" "$(dv_ledger T8)"
+expect_contains "DV-6d …and the tick says it landed it" "LANDED T8 — w-T8" "$DV_TICK"
+expect_eq "DV-7 a MET row whose plan artifact is absent is not landed" "active" "$(dv_status T9)"
+expect_contains "DV-7b …and is reported, naming the path" "NOT-LANDED T9 — w-T9" "$DV_TICK"
+expect_contains "DV-7c …with the artifact it looked for" "$DV_REL/T9-tests.md" "$DV_TICK"
+POKE_BOUND="$DV_BOUND_WAS"
+
 finish
