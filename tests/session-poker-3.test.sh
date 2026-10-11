@@ -1765,14 +1765,14 @@ expect_eq "63e0 precondition: the merge's second parent brought src/side; the re
 expect_eq "63e0b precondition: gone is not on the history of the working head" "1" \
   "$(git -C "$R63E" merge-base --is-ancestor "$S63E_G" "$S63E_RI"; echo $?)"
 S63_NEEDLE_ANC='git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1'
-S63_NEEDLE_REN='--no-renames --name-only --format= "$lh..$hh"'
+S63_NEEDLE_REN="--no-renames --name-only --format='%x01%H' \"\$lh..\$hh\""
 S63_NEEDLE_MRG='--first-parent -m --no-renames'
 S63_NEEDLE_ALL='[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1'
 for s63n in "$S63_NEEDLE_ANC" "$S63_NEEDLE_REN" "$S63_NEEDLE_MRG" "$S63_NEEDLE_ALL"; do
   expect_eq "63e0c precondition: the mutation site is one line of the shipped proof.sh: $s63n" "1" "$(/usr/bin/grep -cF -- "$s63n" "$S57_LIB")"
 done
 S63_M_ANC="$(s63_mut anc "$S63_NEEDLE_ANC" ':')"
-S63_M_REN="$(s63_mut ren "$S63_NEEDLE_REN" '--name-only --format= "$lh..$hh"')"
+S63_M_REN="$(s63_mut ren "$S63_NEEDLE_REN" "--name-only --format='%x01%H' \"\$lh..\$hh\"")"
 S63_M_MRG="$(s63_mut mrg "$S63_NEEDLE_MRG" '--first-parent --diff-merges=off --no-renames')"
 S63_M_ALL="$(s63_mut all "$S63_NEEDLE_ALL" '[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1; return 0')"
 # A merge, counted as what it brought in.
@@ -3108,10 +3108,11 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 # `current` alone dry-commits at the step it judges, and `regression-runs` (wave-30 T12, eee53f90)
 # writes the plan header, not a row, so it hands `judged`. A verb that changes its mode turns this red.
 # The list is the live one (wave-31 T32): `finding-check` is gone (D6), and `regression` (T27) is on it.
+# Wave-33 T7 added `matrix-set`, `waive-row` and `tasks-prose`, each handing the `writer` mode (T29).
 S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
 S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print ($2 == "regression-runs" ? $2 "=" $NF : $NF) }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
-  '"$VERB" approve budget current discharge finding-move finding-stated handoff launch-sync matrix-render proof-add regression regression-runs release-check row-landed step-field step-line task-add task-split waive ' "$S69_SWAPS"
+  '"$VERB" approve budget current discharge finding-move finding-stated handoff launch-sync matrix-render matrix-set proof-add regression regression-runs release-check row-landed step-field step-line task-add task-split tasks-prose waive waive-row ' "$S69_SWAPS"
 expect_eq "69e5 …and every one but current and regression-runs names the writer mode; regression-runs names judged" "regression-runs=judged writer " "$S69_MODES"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
