@@ -8,6 +8,159 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.15.0 — 2026-10-11
+
+A whole regression run now holds the machine once and runs at the width the share allows, and the hot
+sections that filled it are cut where they cost. The run at the release head took 31m36s for 92 suites,
+against 42m43s for wave-31's green run: 11m07s less. The target was 15 minutes. It is missed by 16m36s
+and carried to the next release, not moved. This is a minor release by the policy above: the one
+admission and the `Wall:` line are new capability, and nothing a user must migrate changed.
+`canonical_sdlc_version` stays 14.
+
+**Migration.** None.
+
+What you will notice:
+
+- **A whole run holds the machine alone.** `tests/run.sh` with no `--only` asks the gate for one `whole`
+  admission, keyed `tests/run.sh`, and every worker inherits it. A landing started in another session
+  while a whole run is going waits for it, where before the two interleaved. `--only` and `--serial`
+  still ask per suite. Record: `T2-one-admission.md`.
+- **The width is the share's room, in one formula.** `gate_width` is floor(share × cores ÷ 100), read by
+  the runner and by `--dry-run`'s `JOBS=` line. It is 7 at share 92 on 8 cores. The runner carries no
+  width constant of its own. Record: `T2-one-admission.md`.
+- **The tail prints the run's wall.** A whole run ends with
+  `Wall: <s>s · work <s>s · width <n> · last <suite>` after the `Gating:` line, which is byte-identical.
+  A `--only` run prints none. Record: `T2-one-admission.md`, `walk.md`.
+- **The gate believes by ancestry and learns no impossible cost.** An ask whose holder is the asking
+  process or one of its ancestors is believed without an id in the environment. A run that ended in the
+  second it was admitted, or that claims more cores than the machine has, writes no cost line, so a
+  fixture under a planted clock cannot poison a promise. A run at exactly the core count still writes.
+  Records: `T1-leak.md`, `T19-cost-guard.md`.
+- **A nested runner's request stays out of the real store.** runner-roster's §9(d) nested fixture is
+  handed a scratch store. At 1.14.1 it filed a request in the real one that the store could never
+  admit. The walk added one request per door run and none from the nested runs. Records:
+  `T1-leak.md`, `walk.md`.
+- **Two older races are closed in their suites.** session-poker's `run_read` re-reads a run's end file
+  once before it says LOST, so a run whose shim wrote its end between the two reads is FINISHED with its
+  code, as `booked_follow` already did. cross-gate-agreement §RG and slots B4b.1 stopped meeting a
+  saturated machine at a wrong assumption. Records: `T22-run-read.md`, `T21-fixtures.md`.
+
+### Wall time
+
+Three whole runs and the baseline, each quoted from the run's own log.
+
+| run | head | result | wall | record |
+|---|---|---|---|---|
+| wave-31's green run, per-suite admission | 95fcc048 | 92 suites green | 42m43s (2563 s) | `record/wave-31-task-scale-fixit/regression-final-2.txt` |
+| width 8, one admission, no cuts | b7b5bdbe | `Gating: 91 passed, 1 failed`, rc=1 | batch done at +33m04s, then a 20-minute wedge in runner-roster §9(d); 2923 s | `record/wave-32-floor-wall-time/baseline-b7b5bdbe.log`, `-wall.txt` |
+| first run after every lever | baae082d | `Gating: 89 passed, 3 failed`, rc=1 | 1940 s | `run-after-D1-baae082d.log`, `run-after-D1.md` |
+| the release head | 88b0f1ec | `Gating: 92 passed, 0 failed`, rc=0 | 1896 s (31m36s) | `regression-final-88b0f1ec.log`, `regression-final.md` |
+
+The two Wall lines, verbatim:
+
+```
+Wall: 1940s · work 12219s · width 7 · last bash-walls-egd.test.sh
+Wall: 1896s · work 12037s · width 7 · last bash-walls-egd.test.sh
+```
+
+The release's before is 2563 s and its after is 1896 s. The run at baae082d went red on three suites:
+cross-gate-agreement §RG (the runner's width cap met a fixture that planted share 80), session-poker-2
+§56e and §56f (the `run_read` race), and slots B4b.1 (a reap race). T21 and T22 fixed them, and the run
+at 88b0f1ec is green. Mean CPU idle in that run was 12% over 193 samples
+(`regression-final-88b0f1ec-cpu.txt`). The 15-minute target was not reached. The work divided by the width is 1720 s (28m40s), so the
+remaining gap is work, not packing. The suites still over 750 s in the run are rc-item, worktree,
+cross-gate-agreement and dispatch-preflight-4.
+
+Per lever. "Run" is the suite's wall in the width-8 baseline run under load; "now" is its row in
+`tests/timing.tsv` as T9 rewrote it, a solo run. The paired figure, base and head solo on one machine
+state, is in brackets where the row measured one. The source is `T9-shards.md`.
+
+| lever | change | run → now | record |
+|---|---|---|---|
+| one admission and the width (T2) | one `whole` request, `gate_width` | batch of 92 suites, 85 of which waited at the gate and about 5 ran at once in wave-31, now width 7 and no `waits for its turn` line in the log | `T2-one-admission.md`, `regression-final.md` |
+| the gate (T1, T19) | belief by ancestry; no zero-second or impossible-cost line; §9(d) off the real store | runner-roster 1,392 s → 176 s (T2 206 → 176) | `T1-leak.md`, `T19-cost-guard.md` |
+| `bionic_trunc` in one pass (T3) | the cut counts columns by piece, same bytes over 3,038 differential cases | refuse 862 s → 8 s [479 → 8]; width 222 s → 2 s | `T3-trunc.md` |
+| `budget_roster_counts` in one pass (T4) | one awk over the roster | dispatch-preflight 739 s → 227 s [506 → 227]; §budget-markers-pipe 213 s → 2 s | `T4-roster-counts.md` |
+| fresh-home §Group 16 (T5) | a bash 3.2 substitution of 260 s becomes one awk pass | fresh-home 600 s → 68 s [325 → 68]; Group 16 281 s → 24 s | `T5-group16.md` |
+| setup flag lexing (T6) | `setup.sh` reads its flags before it loads a library | `setup.sh --help` 0.26 s → 0.00 s; rc-item did not move from this cut (603 s → 632 s, noise) | `T6-doors.md` |
+| sleeps become waits (T7) | fixed sleeps wait on their condition | worktree 861 s → 577 s [803 → 577]; name-scan 487 s → 257 s [322 → 257]; cross-gate-agreement and dispatch-preflight-4 unchanged within noise | `T7-waits.md` |
+| `detect_bounded`'s first tenth (T20) | four short sleeps before the 0.1 s tenths | 0.116 s → 0.026 s per bounded call; rc-item 1,092 s → 544 s, the paired share of that is unverified | `T20-detect.md` |
+
+Suite count before and after: 92 and 92. No suite was split. The shard table in the plan lists the 20
+suites over 300 s, and the longest, canonical-sdlc-evidence-gate at 598 s, is under the 680 s bound that
+would demand a split; the choice was the user's (option 1). `tests/timing.tsv` now carries one row for
+each of the 92 suites, where it had 91 and no row for release-check. Records: `T9-shards.md`.
+
+**No assertion was deleted, loosened or skipped.** The rows' records say so, and the only `expect_`
+lines the diff from b7b5bdbe removes are the fifteen named below. Counts of lines starting with
+`expect_`, at b7b5bdbe and at the head:
+
+| suites | base → head |
+|---|---|
+| name-scan, worktree, cross-gate-agreement, dispatch-preflight-4, framework, slots | 280, 944, 1277, 732, 281, 268: equal |
+| session-poker-2 | 708 → 710 (T22's two pins, 56j4 and 56j5) |
+| new pins from a RED test | detect-probes +5, dispatch-preflight +12, fresh-home +4, gate +28, runner-roster +30, runner-width +8, width +7 |
+
+Fifteen pins were rewritten and not added or removed in kind. Fourteen are in runner-roster (ASK.2 to
+ASK.6, ASK.11, SCRUB.4 and §11 rows 11.2, 11.7, 11.12, 11.13, 11.22, 11.38 and 11.41): they pinned the
+per-suite ask that the one admission reverses by design, and now pin the one request each suite runs
+under (`assumptions.md` A-orch-8). The fifteenth is slots B4b.1, which reads the gate's own `killed` for
+the request instead of the raw file, so it holds in both orders of the reap race (`T21-fixtures.md`).
+cross-gate-agreement §RG plants share 100 for the runner it drives and keeps its three expected values.
+The loader suite gained 66 lines of `eq`, `ok` and `no` checks, which `expect_` counts do not see.
+
+Known limits, carried to the next release:
+
+- Known limit: the 1.13.0 limits that this entry does not restate stand as written there.
+- Known limit: a capitalised spelling of a suite file or of `tests/run.sh` passes the budget wall on a
+  case-insensitive filesystem. `bash TESTS/GAMMA.TEST.SH` opens the real file, its text runs no suite,
+  and an off-budget run is admitted. `is_runner` in `cmd-class.sh` compares case-exactly. Nothing this
+  wave touched it (`record/wave-31-task-scale-fixit/assumptions.md` A-orch-70).
+- Known limit, struck: `runner-roster` hung when run alone through the shim (A-orch-82 of wave-31). T1
+  removed the mechanism: the nested fixture's request no longer reaches the real store, and the gate
+  believes a nested run by ancestry. The suite ran alone through the shim green at b1ebbb04 (`Gating: 1
+  passed, 0 failed`, rc=0, `T9-runner-roster.log`) and again in the walk (152 s, rc=0,
+  `walk-only-runner-roster.log`).
+- Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not
+  the scale; readers holding a code question, and the exam's readers, grade by the scale (Known limit 71
+  of 1.13.0, restated).
+- Known limit: `ready` holds a `landing` admission while it proves a row but does not export it as
+  `BIONIC_GATE_ADMIT` (Known limit 72 of 1.13.0). The ancestry belief of this release should cover a
+  suite that drives the real runner under `ready`, since the `ready` process is its ancestor. No run in
+  this wave drove such a suite under `ready` to prove it, so the limit stands.
+- Known limit: an evidence verdict's `result` moves with rigor (Known limit 74 of 1.13.0, restated). At
+  `single` the critic holds `evidence` with the severity scale, and a REFUTED rated S3 or S4 registers
+  `flag`. At `double` the auditor holds it without the scale, so the same REFUTED registers `fail`.
+- Known limit: the tick does not name a starved queue and does not require an answer per held row. A
+  held row is answered by `task-set`, `task-split` or `decline --on`.
+- Known limit: a dead session's roster is pruned, so a whole run it launched stops counting toward the
+  second-run rule. The durable twin is the `proved:` line of kind `floor` for a green run.
+- Known limit: the gate's cost accounting is narrowed, not closed. This release stops it learning a
+  zero-second cost (T1) or a cost over the machine's core count (T19). It still promises each owed writer
+  the largest cost on record, and there is no per-key promise for a brief's own suites. A hand-pruned
+  record re-measures on its next run.
+- Known limit: `units_unlined` has no caller in code and keeps one test pin (`tests/units.test.sh`
+  17d.15); it is dead code to delete in the next release.
+- Known limit: the RC5 deadline in dispatch-preflight-4 §RECORDER is the constant `DP_DEADLINE_S=22` with
+  no environment knob, so each drive sleeps 24 s. A knob would save about 20 s a drive and change RC5's
+  literal bound, which is the user's word (`assumptions.md` A-orch-19).
+- Known limit: rc-item reaches the network. Each yes-answered `setup --all` door clones humanizer from
+  GitHub, 0.73 s measured, because `/usr/bin/git` is on the suite's PATH. A git stub on the sandbox PATH
+  belongs to rc-item's fixtures (`T6-doors.md`, "rc-item reaches the network").
+- Known limit: `setup --only=` with an empty value runs the whole pass, where a bare `--only` is refused
+  (`assumptions.md` A-T6-4).
+- Known limit: a writer's suite still asks the gate per suite, so a writer's run queues behind the whole
+  run and behind other writers. Every T4 run waited 2 to 25 minutes (`assumptions.md` A-orch-22). The
+  background whole run at every landing is the next wave's build.
+- Known limit: the 15-minute target for a whole run is missed by 16m36s, carried.
+- Known limit: `tests/timing.tsv` holds solo seconds, and a saturated whole run differs from it:
+  rc-item is 544 s in the table and 941 to 966 s in the whole runs (`walk.md`, `assumptions.md`
+  A-orch-34). The table is an order key, not a forecast.
+- Known limit: the landing's own proof environment cannot pass slots K6.1, K6.3 and K6.5 (the
+  "unwrapped" INT and QUIT trap controls). They were recorded as a standing red at c79553c4 and baae082d
+  (`landing-proofs.log` lines 70 to 72, `line/T21-slots-*.log`), while the suite is green through the
+  door and in the whole run (`assumptions.md` A-orch-32).
+
 ## 1.14.1 — 2026-10-10
 
 The floor is now a record of runs, and the regression is a setting. A release's floor is one whole green
