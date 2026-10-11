@@ -6055,9 +6055,11 @@ _wall_class_read "$COMMAND"
 # which open the script, and a claim it makes is a suite run for every arm below. The cwd is the
 # payload's, where the agent's shell is.
 _BSG_CLAIM_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CLAIM_CWD" ] || _BSG_CLAIM_CWD="${BIONIC_CWD:-}"
+# A PATH THE SHELL RUNS IS ASKED TOO (wave-33 T3; D7, AC-6.2): `./tools/run.sh`, a link to the runner,
+# is class none until the claims resolve it, and a script start is what the budget arm carries.
 if [ "$_WALL_CLASS" != "suite" ]; then
   [ -n "$ACTOR" ] || return 0
-  case "$COMMAND" in *sh[[:space:]]*) : ;; *) return 0 ;; esac
+  case "$COMMAND" in *sh[[:space:]]*|*/*) : ;; *) return 0 ;; esac
   [ -n "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || return 0
 fi
 
@@ -6171,7 +6173,7 @@ fi
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
 local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact _BSG_SET_CMP _BSG_STARTS _BSG_RUNS
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -6500,27 +6502,22 @@ $(_budget_remedy_line "$1")"
   return 2
 }
 
-# budget_unverified <script> <run> — the refusal of a script the budget cannot read (wave-31 T11;
-# REQ-8 AC-8.2, D9; A-orch-46.1). The line names the script, by its path as typed, by its basename
-# when that is too wide for the line, and by neither when even that is.
-budget_unverified() {  # <script as typed> <run as typed>
-  local _s="$1" _fact
-  _fact="unverified script: $_s"
-  [ $(( $(bionic_cols "bionic: suite-run refused — $_fact (one door or Re-executes)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
-    || _fact="unverified script: ${_s##*/}"
-  [ $(( $(bionic_cols "bionic: suite-run refused — $_fact (one door or Re-executes)") )) -le "${BIONIC_LINE_WIDTH:-100}" ] \
-    || _fact="unverified script"
-  fold_block exit2 suite-run "$_fact" "one door or Re-executes" \
-    "The budget reads the script a shell runs, and this script's text cannot say what runs: a
-command or a script in it is named by a variable or a backtick, the file is not there, or its
-own path is built from a variable. A run the wall cannot read is one it cannot budget.
-You ran: $2   (the script: $1)
-Run the suite through the one door, naming it by its file name:
-    tests/run.sh --only <suite>.test.sh
-or ask the orchestrator to declare the script's run in your brief:
-    Re-executes: \`$2\`
-$(_budget_remedy_line "$2")"
-  return 2
+# `budget_unverified`, the refusal of a script the budget could not read (wave-31 T11), is retired with
+# the classifier's `unverified` kind (wave-33 T3; D7, AC-6.1): a script runs by default, and the gate's
+# ask holds the budget where a suite starts. The carry below (`_bsg_stage_carry`) is what replaced it.
+
+# _bsg_stage_carry — THE AGENT RIDES TO THE GATE (wave-33 T3; D7, AC-6.2). A script a budgeted agent
+# starts is admitted unread, and the suites it starts ask the gate (lib/gate.sh THE BUDGET) as
+# `BIONIC_GATE_AGENT`; a shell does not know its agent, so the call is rewritten to name it first:
+# `export BIONIC_GATE_AGENT=<row name>; <the command as typed>`, the name spelled as booked.sh spells
+# its --agent. Every other field of tool_input rides through. rc 0 staged, 1 not (no jq output).
+_bsg_stage_carry() {
+  local _who _upd
+  _who="${_BUDGET_ROW_NAME:-$ACTOR}"; _who="${_who//[!A-Za-z0-9._+-]/_}"
+  _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg c "export BIONIC_GATE_AGENT=$_who; $COMMAND" \
+    '.tool_input + {command: $c}' 2>/dev/null)
+  [ -n "$_upd" ] || return 1
+  fold_update_input "$_upd"
 }
 
 # budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
@@ -6591,8 +6588,19 @@ _budget_remedy_line() {  # <the refused suite or run>
 # which is the better answer to T23's finding that five walls share one shell. The sibling
 # site at hooks/dispatch-preflight.sh still splits and still guards.
 _CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")
+# THE SET AS THIS FILESYSTEM COMPARES IT (wave-33 T3; D7, AC-6.3): the claims name a suite in lower case
+# where the volume folds (lib/cmd-class.sh `fc`), so the set is folded there too; a set with no capital
+# letter, the common case, is compared as it stands and costs no fork.
+_BSG_SET_CMP="$SUITES_ALLOWED"
+case "$_BSG_SET_CMP" in
+  *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ! cmd_case_blind "$BIONIC_ROOT" || _BSG_SET_CMP="$(printf '%s' "$_BSG_SET_CMP" | tr 'A-Z' 'a-z')" ;;
+esac
+_BSG_STARTS=0; _BSG_RUNS=0
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
+  # A SCRIPT START (wave-33 T3; D7): nothing the text definitely runs, so nothing here refuses it.
+  if [ "$_kind" = "script" ]; then _BSG_STARTS=1; continue; fi
+  _BSG_RUNS=1
 
   # ---------- THE PROJECT'S DOOR, ASKED ONCE FOR THIS CLAIM (wave-28 T54, D27; A-orch-124/125) ----------
   #
@@ -6617,7 +6625,7 @@ while IFS=$'\t' read -r _kind _target _run; do
   # it, in the field the dispatch wall reads.
   if [ "$_kind" = "file" ] && [ "$_target" = "run.sh" ]; then
     # AC-21: "tests/run.sh is refused unless the row carries it."
-    case " $SUITES_ALLOWED " in
+    case " $_BSG_SET_CMP " in
       *" run.sh "*) continue ;;
     esac
     # THE SPELLING THAT SPENDS THE BUDGET, NAMED (wave-20 T4; REQ-7, D7; triage-B B1a). The
@@ -6689,17 +6697,6 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # arm ran above it, for the reason written there.
   if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
 
-  # ---------- A SCRIPT THE BUDGET CANNOT READ (wave-31 T11; REQ-8 AC-8.2, D9; A-orch-46.1) ----------
-  #
-  # `unverified` is the classifier's word for a script whose text cannot say what runs: a command
-  # word or a script operand in it built from `$` or a backtick, a file that is not there, or a path
-  # built from a variable. A run the wall cannot read is a run it cannot budget, so it is refused,
-  # naming the script and the two ways through: the suite by its file name through the one door, or
-  # the script's run declared in the brief, which the line above admits.
-  if [ "$_kind" = "unverified" ]; then
-    budget_unverified "$_target" "$_run"
-    return 2
-  fi
   # A RUN READ INSIDE A SCRIPT names the script and the run (wave-31 T11): the claim's run is the
   # command as typed, its target the run the script holds.
   [ "$_kind" != "run" ] || [ "$_target" = "$_run" ] || _run="$_run — the script runs: $_target"
@@ -6730,11 +6727,24 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
 
   [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_target"; return 2; }
   [ "$BUDGET_STATED" = yes ] || continue
-  case " $SUITES_ALLOWED " in
+  case " $_BSG_SET_CMP " in
     *" $_target "*) : ;;
     *) budget_refuse "$_target" "$SUITES_ALLOWED"; return 2 ;;
   esac
 done <<< "$_CLAIMS"
+
+# ---------- THE CARRY (wave-33 T3; D7, AC-6.2): a script start is admitted, naming its agent ----------
+#
+# A command that is no suite and claims only script starts reaches the gate through whatever it starts,
+# so it is neither repaired nor booked (both are a suite's); for an agent whose row states a budget it
+# is rewritten to carry the agent's name (`_bsg_stage_carry`), so the gate's ask holds the budget. An
+# agent with no budget, or the main thread (which never reaches this arm), is left as typed.
+if [ "$_WALL_CLASS" != "suite" ] && [ "$_BSG_RUNS" = 0 ]; then
+  [ "$_BSG_STARTS" = 1 ] || return 0
+  [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || return 0
+  _bsg_stage_carry && return 1
+  return 0
+fi
 
 # ---------- ARM R (REQ-3, D4): repair a suite timeout below the harness maximum ----------
 #

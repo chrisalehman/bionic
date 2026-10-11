@@ -35,7 +35,8 @@
 # THE VERBS.
 #
 #   gate_ask <kind> <key> [--within <seconds>]   rc 0, the request id on stdout: admitted.
-#                  rc 75: the time ran out; the request is kept with its turn, nothing ran, and
+#                  rc 75 at once, nothing filed: the asking agent's budget refuses the key (THE
+#                  BUDGET; its line on stderr). rc 75: the time ran out; the request is kept with its turn, nothing ran, and
 #                  its holder is cleared (holder=-), so it is nobody's and passed over until the
 #                  next ask by the same who for the same key resumes it. rc 2: a
 #                  usage error or a store that cannot be written. It polls every
@@ -54,6 +55,9 @@
 #   gate_promise <key>       the promise for a work request for <key> asked from here,
 #                            <mem>:<cores>:<seconds>, loading the store itself (see promise)
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
+#   gate_budget <kind> <key> rc 0 when the asking agent's budget admits the key (or there is no
+#                            budget to hold it to); rc 75 and the budget's own line on stdout when
+#                            it does not. gate_ask asks it first (THE BUDGET, below).
 #
 # WHICH VERBS WALK THE STORE. gate_ask, gate_end, gate_state and gate_room take the lock and run
 # the scan (`_gate_scan`), which tallies the open requests, writes the end of a killed one and
@@ -125,6 +129,9 @@
 #             an admitted, unfinished request whose live holder is this process or one of its
 #             ancestors is the admission it runs under (the lineage, wave-32 T1): it is printed
 #             and nothing is filed. BIONIC_SLOT_HELD is not read at all.
+#
+#   budget    (wave-33 T3; D7, REQ-6 AC-6.2, AC-6.3) the ask is where a suite actually starts, so it
+#             is where an agent's budget holds: see THE BUDGET, above `gate_budget`.
 #
 # No figure sized to a machine appears here: memory is a percentage, processor a share of the
 # cores this process may use (`_res_cores`), and a command is promised one of them.
@@ -578,6 +585,127 @@ _gate_store() {  # sets _GD and makes the store; rc 2, one line, when it cannot 
   fi
 }
 
+# ── THE BUDGET, AT THE ASK (wave-33 T3; D7, REQ-6 AC-6.2, AC-6.3; ADR-052) ───────────────────
+#
+# WHY HERE. The Bash wall reads a command's text, and a script runs what its text cannot be made
+# to say: a symlink to the runner, a variable holding its path, a capitalised spelling, a helper
+# that calls it. wave-31 refused every script the wall could not read and so refused honest work
+# (every in-tree script a writer edited) while passing what it could not see (a tracked symlink to
+# the runner). Every suite a project's runner starts asks this gate first, so the ask is the one
+# place that sees the run itself, however it was started; the budget is held here.
+#
+# WHO. The asking agent is the who's second half, BIONIC_GATE_AGENT: booked.sh exports it for a
+# suite the wall wraps, and the wall exports it ahead of a script a budgeted agent starts (lib/
+# walls.sh, the budget arm's carry). Unset or `main` is the main thread, which no budget holds.
+#
+# WHAT. The agent's roster row, `<project>/.bionic/tmp/roster-<session>.state`, the project being
+# the asking checkout's repository (a worktree's is its main checkout's, where the roster lives),
+# the row the last `roster-state/` line whose `name=` (as booked.sh spells it) or `agent_id=` is
+# the agent. Its `suites_allowed=` and `re_executes=` are the budget, read as the wall reads them
+# (first occurrence on the row, `none` the stated empty set, the run field percent-decoded). A
+# row stating neither, or no row, holds nothing: the wall speaks for an agent no row places.
+#
+# THE RULE. A whole run (the key `tests/run.sh`) is admitted only when `run.sh` is in the set, as
+# the wall's full-tree arm rules (a declared run never admits it). A suite key (`*.test.sh`) is
+# admitted when it is in the set, or when a declared run names it as a word. Any other key (booked
+# .sh's command key, a project's own runner) is not this rule's: the wall judged it. Compared
+# folded where the filesystem folds (lib/cmd-class.sh `cmd_case_blind`, asked of the project).
+#
+# NOT JUDGED: a landing's ask (the landing proves what the plan says, not the writer's spend), and
+# an admission believed from an ancestor (its own ask was judged; a nested run runs under it).
+#
+# REFUSED: exit 75 with one line, nothing filed and nothing run. RESIDUAL, NAMED: a suite started
+# bare, by no runner, never asks, and an agent's script reached through another interpreter
+# (python, node) carries no name and asks as the main thread.
+_GATE_BUDGET_LINE=""
+_gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_LINE set)
+  local kind="$1" key="$2" agent="${BIONIC_GATE_AGENT:-}" sid="${CLAUDE_CODE_SESSION_ID:-}"
+  local c root roster row seg allowed="" stated=no runs="" whole=no blind=0 verdict
+  _GATE_BUDGET_LINE=""
+  [ "$kind" != landing ] || return 0
+  case "$agent" in ''|main) return 0 ;; esac
+  case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
+  case "$key" in
+    */*) case "$key" in *[!A-Za-z0-9._/-]*) return 0 ;; esac
+         case "$key" in [Tt][Ee][Ss][Tt][Ss]/[Rr][Uu][Nn].[Ss][Hh]|*/[Tt][Ee][Ss][Tt][Ss]/[Rr][Uu][Nn].[Ss][Hh]) whole=yes ;; *) return 0 ;; esac ;;
+    *[!A-Za-z0-9._+-]*) return 0 ;;
+    *.[Tt][Ee][Ss][Tt].[Ss][Hh]|[Tt][Ee][Ss][Tt].[Ss][Hh]) : ;;
+    *) return 0 ;;
+  esac
+  c="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  case "$c" in
+    */.git) root="${c%/.git}" ;;
+    *) root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0 ;;
+  esac
+  roster="$root/.bionic/tmp/roster-$sid.state"
+  { [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; } || return 0
+  row="$(GATE_BUDGET_WHO="$agent" awk '
+    index($0, "roster-state/") == 1 {
+      n = split($0, p, "|"); nm = ""; id = ""; hn = 0; hi = 0
+      for (i = 2; i <= n; i++) {
+        if (!hn && index(p[i], "name=") == 1) { nm = substr(p[i], 6); hn = 1 }
+        else if (!hi && index(p[i], "agent_id=") == 1) { id = substr(p[i], 10); hi = 1 }
+      }
+      sn = nm; gsub(/[^A-Za-z0-9._+-]/, "_", sn)
+      w = ENVIRON["GATE_BUDGET_WHO"]
+      if ((nm != "" && (nm == w || sn == w)) || (id != "" && id == w)) last = $0
+    }
+    END { printf "%s", last }' "$roster" 2>/dev/null)"
+  [ -n "$row" ] || return 0
+  local _seen=" " _k _segs
+  IFS='|' read -r -a _segs <<< "$row"
+  for seg in "${_segs[@]}"; do
+    _k="${seg%%=*}"
+    [ "$_k" != "$seg" ] || continue
+    case "$_seen" in *" $_k "*) continue ;; esac
+    _seen="$_seen$_k "
+    case "$_k" in
+      suites_allowed) allowed="${seg#suites_allowed=}"; [ -z "$allowed" ] || stated=yes ;;
+      re_executes)    runs="${seg#re_executes=}"; runs="${runs//\%7C/|}"; runs="${runs//\%25/%}" ;;
+    esac
+  done
+  [ "$stated" = yes ] || [ -n "$runs" ] || return 0
+  [ "$allowed" != none ] || allowed=""
+  if [ "${_GATE_CB_LOADED:-}" != yes ]; then
+    _GATE_CB_LOADED=no
+    if ! declare -F cmd_case_blind >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/cmd-class.sh" ]; then
+      # shellcheck disable=SC1091
+      . "$_GATE_LIB_DIR/cmd-class.sh" 2>/dev/null
+    fi
+    declare -F cmd_case_blind >/dev/null 2>&1 && _GATE_CB_LOADED=yes
+  fi
+  [ "$_GATE_CB_LOADED" != yes ] || ! cmd_case_blind "$root" || blind=1
+  verdict="$(GATE_BUDGET_KEY="$key" GATE_BUDGET_SET="$allowed" GATE_BUDGET_RUNS="$runs" \
+    awk -v whole="$whole" -v blind="$blind" 'BEGIN {
+      k = ENVIRON["GATE_BUDGET_KEY"]; set = " " ENVIRON["GATE_BUDGET_SET"] " "; runs = ENVIRON["GATE_BUDGET_RUNS"]
+      if (blind) { k = tolower(k); set = tolower(set); runs = tolower(runs) }
+      if (whole == "yes") { print (index(set, " run.sh ") ? "ok" : "no"); exit }
+      if (index(set, " " k " ")) { print "ok"; exit }
+      gsub(/[`"\047]/, " ", runs); n = split(runs, W, /[ \t]+/)
+      for (i = 1; i <= n; i++) { w = W[i]; sub(/.*\//, "", w); if (w == k) { print "ok"; exit } }
+      print "no"
+    }')"
+  [ "$verdict" = no ] || return 0
+  if [ "$whole" = yes ]; then
+    _GATE_BUDGET_LINE="bionic: suite-run refused at the gate — a whole run is not on ${agent}'s budget; allowed: ${allowed:-(none)} (run your brief's suites; nothing ran)"
+  else
+    _GATE_BUDGET_LINE="bionic: suite-run refused at the gate — $key is not on ${agent}'s budget; allowed: ${allowed:-(none)}${runs:+ $runs} (run only the budgeted suites; nothing ran)"
+  fi
+  return 1
+}
+
+_gate_budget() {  # <kind> <key> — gate_ask's call: rc 0 admitted; 1 refused, its line on stderr
+  _gate_budget_read "$1" "$2" && return 0
+  printf '%s\n' "$_GATE_BUDGET_LINE" >&2
+  return 1
+}
+
+gate_budget() {  # <kind> <key> -> rc 0 admitted; rc 75 refused, the budget's line on stdout
+  _gate_budget_read "${1:-}" "${2:-}" && return 0
+  printf '%s\n' "$_GATE_BUDGET_LINE"
+  return 75
+}
+
 # ── the verbs ────────────────────────────────────────────────────────────────
 
 gate_ask() {
@@ -605,6 +733,8 @@ gate_ask() {
     _gate_unlock
     if [ "$rc" -eq 0 ]; then printf '%s\n' "$BIONIC_GATE_ADMIT"; return 0; fi
   fi
+  # THE BUDGET (above): an off-budget suite or whole run is refused here, before a request is filed.
+  _gate_budget "$kind" "$key" || return 75
 
   start="$(_res_now)"
   while :; do
