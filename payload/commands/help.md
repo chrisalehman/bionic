@@ -55,6 +55,7 @@ install it once and every project gets the same working discipline.
 | `/bionic:map-instrument-narrow` | diagnostic discipline when the cause is not obvious — map the system, instrument it, narrow to a root cause before writing a fix |
 | `/bionic:browser-verify` | verifies UI behavior in a real browser with semantic readback |
 | `/bionic:excalidraw-diagram` | hand-arranged Excalidraw diagrams that make a visual argument, rendered to PNG by a bundled renderer (installed by setup) |
+| `/bionic:decision` | puts a decision to you in one shape — goal, numbered options, recommendation, significance — ending on one reply line; typed bare, it reframes what was last discussed |
 
 ## Agents — ship with the plugin
 

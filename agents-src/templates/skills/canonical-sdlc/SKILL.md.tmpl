@@ -39,6 +39,8 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 **No ceremony.** Do everything necessary, once. A task, check, review or approval earns its place only if it can fail in a way nothing already run can: never re-run a suite a gate already runs, never re-review a fix that carries its own red test. Read the record before you dispatch, and cite what is done.
 
+**Decisions.** Every decision you put to the user, at any step and with no run open, goes through the `decision` skill: invoke it, never restate its shape. The Step-1 requirements interview and the Step-2 design interview are its heaviest users; an interview puts one decision per turn. Approvals and calls you can reverse stay out: an approval keeps its card, and a reversible call is yours to make.
+
 **Iron law.** No commit without evidence from the current step. The evidence gate reads the plan's `current:` and validates that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
 
 **Bulk reference.** Artifact shape and authoring detail live in `skills/canonical-sdlc/operational-rules.md`, beside this file, and the version history in the CHANGELOG. Read it when you need the detail this file compresses; nothing loads it for you.
