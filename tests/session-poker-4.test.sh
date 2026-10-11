@@ -352,6 +352,32 @@ poke "$RSEV" current 8
 s42_unchanged "SEV-cur §CUR8-sev AC-8.5 the newest adversarial fact holds a finding to fix: current 8" 1 "$PSEV"
 expect_contains "SEV-cur2 …naming that reading failing" \
   "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/c-fix.md')" "$OUT"
+# ---------- §ASK-WAIVE (T35; AC-2.2): a failing question is the person's to waive, and opens one item ----------
+# A refusal on a failing reading leaves the person the call: fix it or waive the question. The
+# refusal opens `waive:<question>`, the key the waive verb closes, carrying the failing line it
+# printed; a second refusal on the same question opens nothing new; the waive verb closes it; and
+# once the question holds again (a passing reading over the fix), current 8 closes what is left.
+sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
+sev_store() { cat "$RSEV/.bionic/tmp/owed-$SID.state" 2>/dev/null; }
+SEV_WKEYS="$(sev_owed | cut -f1)"
+expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<question>, the waive verb's key" \
+  "waive:adversarial" "$SEV_WKEYS"
+expect_absent "AW-1a …and none for the questions that hold (same reader)" "waive:evidence" "$SEV_WKEYS"
+expect_eq "AW-1b …carrying the failing line current 8 printed" \
+  "review adversarial bionic:critic piece failing record/wave-01-fixture/c-fix.md" \
+  "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
+poke "$RSEV" current 8
+expect_eq "AW-2 a second refusal on the same failing question opens nothing new" "1|1" \
+  "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|')"
+cp "$PSEV" "$TMPROOT/sev-before-waive.md"
+poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
+expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
+cp "$TMPROOT/sev-before-waive.md" "$PSEV"
+poke "$RSEV" current 8
+expect_eq "AW-4 the waiver taken back out of the plan, the refusal is a new need: the item opens again" "1|waive:adversarial" \
+  "$RC|$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
 sev_cur 4
 sev_rec c-later flag "findings: 2" "finding: 1 S2 off - a side path still wrong" "finding: 2 S4 off - a comment misstates it"
 sev_add c-later
@@ -361,6 +387,9 @@ sev_cur 7
 poke "$RSEV" current 8
 expect_eq "SEV-cur4 §CUR8-sev …and current 8 is admitted on it: deferrals and notes do not hold the step" "0|8" \
   "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+expect_contains "AW-5 T35 once the question holds again, current 8 closes its waiver item" \
+  "|key=waive:adversarial|state=closed|by=no longer failing|" "$(sev_store)"
+expect_eq "AW-5a …and no waiver item is left open" "" "$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
 POKE_BOUND="$SEV_BOUND_WAS"
 
 # ============================================================
