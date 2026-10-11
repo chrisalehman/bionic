@@ -2672,6 +2672,22 @@ case "$PRINCIPLES_STATE" in
                "$(_doctor_tilde "$(principles_file)") is ${_principles_what}" ;;
   *)         _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "—"      "not set — ${_principles_hint} offers it" ;;
 esac
+# THE NOTIFICATION CHANNEL, READ-ONLY (wave-33 T12; REQ-2 AC-2.1, D2). Declared or not, and which
+# variable the topic is read from: a file test and two greps in checks.sh, no send and no network.
+# Not declared is an offer like the rows above (`–` with the route), and where there is no topic
+# to declare it against yet the row says which variable to set, since setup has nothing to offer.
+_notify_label="$(bionic_check_label notify)"
+_notify_hint="$(bionic_check_hint notify)"
+case "$(bionic_check_notify_state)" in
+  declared) _notify_reads="$(bionic_check_notify_reads)"
+            if [ -n "$_notify_reads" ]; then
+              _doctor_env3 "$DOCTOR_OK" "$_notify_label" "on" "reads ${_notify_reads%% *} from ${_notify_reads#* }"
+            else
+              _doctor_env3 "$DOCTOR_NIL" "$_notify_label" "on" "$(_doctor_tilde "$(bionic_check_notify_file)") names no topic-from= line, so no notification can go"
+            fi ;;
+  offered)  _doctor_env3 "$DOCTOR_NIL" "$_notify_label" "—" "not set — ${_notify_hint} offers it" ;;
+  *)        _doctor_env3 "$DOCTOR_NIL" "$_notify_label" "—" "not set — set ${BIONIC_NOTIFY_TOPIC_FROM#*:} in ${BIONIC_NOTIFY_TOPIC_FROM%%:*}, then ${_notify_hint} offers it" ;;
+esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
 # that never ran it, or has been cleaned once, all six answer no. Silence is the
