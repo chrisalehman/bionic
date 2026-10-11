@@ -1040,9 +1040,11 @@ export BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=
 # THE WIDTH IS THE GATE'S NOW (wave-28 T13; D14). The fill duty sizes its width by asking the gate
 # once per ready writer row (`fill_gate_width`), so the gate is fixture data too: its readers are
 # pinned (8 cores, 30% used, a load of 1.0 over both windows) and its store is this suite's own.
-# GATE_CLEAR holds one run on record taking 0.1 core, room for every row below; GATE_LOADED one
-# taking 1.0 under a load of 4.5, room for exactly two writers not yet showing (4.5 + 1 + 1 is
-# within 6.4 cores, a third is not) — the width row 64a4 and row 69 cap the refusal at.
+# Every writer not yet showing is charged one core (wave-33 T1; Δ10; the cost lines below are
+# durations the gate reads no cores from). GATE_CLEAR, under a load of 1.0, has room for five;
+# rows that need more pin a larger machine on the call. GATE_LOADED, under a load of 4.5, has room
+# for exactly two writers not yet showing (4.5 + 1 + 1 is within 6.4 cores, a third is not) — the
+# width row 64a4 and row 69 cap the refusal at.
 GATE_CLEAR="$(mktemp -d)/gate"; GATE_LOADED="$(mktemp -d)/gate"
 mkdir -p "$GATE_CLEAR/requests" "$GATE_CLEAR/cost" "$GATE_LOADED/requests" "$GATE_LOADED/cost"
 printf '5:0.1:30:1000\n' > "$GATE_CLEAR/cost/fixture.test.sh"
@@ -1264,7 +1266,10 @@ ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 u_prompt "$d" "anything else to start?"
-fire "$d"; expect_block "64a3d: a name written three times occupies once — one row named" "T2" " T3"
+# ROOM FOR THE ROSTER (wave-33 T1; Δ10): a writer not yet showing costs one core, and seven of
+# them under a load of 1.0 fill the clear gate's 6.4; this row tests the roster's fold, not the
+# gate, so its machine is 32 cores (25.6). 71a–71c below are pinned the same way.
+BIONIC_PROBE_CORES=32 fire "$d"; expect_block "64a3d: a name written three times occupies once — one row named" "T2" " T3"
 
 # 64a4: AC-5.1's own shape — a roster with two open rows and a plan with no `active` row:
 # gap = the gate's width − 2. On the loaded gate (room for two writers not yet showing) the two
@@ -1608,16 +1613,16 @@ LEDGER_EXT_CLEARED='| T2 | 4 | build | waits on CI | implementor | T1 | 30m | RE
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 u_prompt "$d" "how is CI looking?"
-fire "$d"; expect_allow "71a: AC-3.2 a live ledger, one free slot, one ext:-held row and no decline — the turn passes"
+BIONIC_PROBE_CORES=32 fire "$d"; expect_allow "71a: AC-3.2 a live ledger, one free slot, one ext:-held row and no decline — the turn passes"
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_CLEARED")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 u_prompt "$d" "how is CI looking?"
-fire "$d"; expect_block "71b: …the same row with the token removed is a gap, refused naming it" "T2"
+BIONIC_PROBE_CORES=32 fire "$d"; expect_block "71b: …the same row with the token removed is a gap, refused naming it" "T2"
 # 71c: BESIDE A READY ROW the one free slot is the ready row's, and the held row is never named.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD" "$LEDGER_READY_3")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 u_prompt "$d" "how is CI looking?"
-fire "$d"; expect_block_rows "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
+BIONIC_PROBE_CORES=32 fire "$d"; expect_block_rows "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
 
 # ============================================================
 section "Section 5d: nothing quoted plants a verdict (wave-20 REQ-5, AC-5.4; Δ7)"

@@ -1768,8 +1768,8 @@ gate_case s11b 0.1
 poke "$R11B" tick
 expect_eq "11b a QUIET tick exits 0" "0" "$RC"
 expect_contains "11b1 …decides QUIET" "decision=QUIET" "$OUT"
-expect_contains "11b2 …and prints the gate line, its open writer counted as owed (0.1 promised)" \
-  "poker: gate share=80 used=30% load=1.0/1.0 of 8 promised=0.1 admitted=0 waiting=0 room=yes" "$OUT"
+expect_contains "11b2 …and prints the gate line, its open writer counted as owed at one core (wave-33 T1; Δ10)" \
+  "poker: gate share=80 used=30% load=1.0/1.0 of 8 promised=1 admitted=0 waiting=0 room=yes" "$OUT"
 expect_eq "11b3 …exactly once" "1" "$(count_lines_matching 'poker: gate share=' "$OUT")"
 expect_eq "11b4 …and no rung line (the count extractor reads the gate line above)" "0" \
   "$(count_lines_matching 'poker: rung=' "$OUT")"
@@ -1920,8 +1920,8 @@ R11C6="$(mk_rung_repo s11-fill-nocost)"
 gate_case s11c6 0.1
 rm -f "$BIONIC_GATE_DIR/cost/fixture.test.sh"
 poke "$R11C6" tick
-expect_eq "FG.9 with no cost on record one row is offered: the next would take all the room" \
-  "poker: FILL ONE" "$(fill_line)"
+expect_eq "FG.9 with no cost on record each row is promised one core (wave-33 T1; Δ10): all four fit (1.0 + 4 ≤ 6.4)" \
+  "poker: FILL ONE TWO THREE FOUR" "$(fill_line)"
 
 # A plan with no budget line still prints the gate line. §NOBUDGET (wave-28 T9; D15, AC-2.9): no
 # plan owes the line, so the gate alone sizes its fill, and the key is named nowhere. Until wave-28
@@ -3945,9 +3945,12 @@ expect_contains "…and names the pending approval instead" \
 expect_absent "…so none of the eight tasks are named" "FILL S1" "$OUT"
 
 # ---------- 22b: the same plan at current: 4 FILLs exactly as it always has ----------
+# ROOM FOR EIGHT (wave-33 T1; Δ10): each writer is promised one core, and the suite's 8 cores at
+# share 80 with a load of 1.0 hold five; these rows test the approval step and the table order, not
+# the gate, so their machine is 16 cores (12.8), room for all eight.
 R22B="$(make_repo s22-current-4)"; new_roster "$R22B"
 s22_plan_at_current "$R22B" 4 >/dev/null
-poke_pressure "$R22B" 8192 1.0 tick
+BIONIC_PROBE_CORES=16 poke_pressure "$R22B" 8192 1.0 tick
 expect_eq "an approved plan still ticks cleanly (exit 0)" "0" "$RC"
 expect_contains "the identical shape at current: 4 fills all eight, in table order" \
   "poker: FILL S1 S2 S3 S4 S12 S14 S15 S16" "$OUT"
@@ -4004,7 +4007,7 @@ expect_contains "…and the pending line names the STEP, letter stripped, mirror
 
 R22F="$(make_repo s22-current-4b)"; new_roster "$R22F"
 s22_plan_at_current "$R22F" 4b >/dev/null
-poke_pressure "$R22F" 8192 1.0 tick
+BIONIC_PROBE_CORES=16 poke_pressure "$R22F" 8192 1.0 tick   # 16 cores: ROOM FOR EIGHT, 22b
 expect_eq "current: 4b still ticks cleanly (exit 0)" "0" "$RC"
 expect_contains "current: 4b is current: 4 with a sub-step letter — fills all eight" \
   "poker: FILL S1 S2 S3 S4 S12 S14 S15 S16" "$OUT"
@@ -4074,7 +4077,7 @@ expect_absent "22i AC-6.2 current: 4 with no approved-by: prints no FILL" "poker
 expect_contains "22i2 …and names the pending approval" "Step-3 approval pending" "$OUT"
 R22J="$(make_repo s22-current-3-approved)"; new_roster "$R22J"
 S22_APPROVAL="$SP_APPROVED_LINE" s22_plan_at_current "$R22J" 3 >/dev/null
-poke_pressure "$R22J" 8192 1.0 tick
+BIONIC_PROBE_CORES=16 poke_pressure "$R22J" 8192 1.0 tick   # 16 cores: ROOM FOR EIGHT, 22b
 expect_contains "22j AC-6.2 current: 3 with approved-by: present fills all eight" \
   "poker: FILL S1 S2 S3 S4 S12 S14 S15 S16" "$OUT"
 expect_absent "22j2 …and names no pending approval" "Step-3 approval pending" "$OUT"

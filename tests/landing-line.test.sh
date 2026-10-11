@@ -867,8 +867,10 @@ expect_true "(l1) …the branch holds both rows" git -C "$RL" merge-base --is-an
 
 # ---------------------------------------------------------------------------
 section "§WITHIN: no suite starts whose promised seconds exceed the time left (D3)"
-world_cost c.test.sh 5 0.5 600
+# The gate keeps each suite's duration under its project (wave-33 T1; Δ10): the 600 s is planted
+# in the fixture repository the landing runs in.
 RN="$(ll_world)"; ll_launch "$RN" T1 c
+( cd "$RN" && world_cost c.test.sh 600 )
 ( cd "$RN" && world_suite c green >/dev/null ) && git -C "$RN" add tests/c.test.sh && git -C "$RN" commit -qm "suite c"
 REQN="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
 ll_verb "$RN" T1 --within 60
@@ -879,6 +881,17 @@ expect_eq "(n1) …nothing run: no verdict, no log, no gate request" "0 0 $REQN"
 expect_eq "(n1) …the entry kept, its carrier gone" "T1 no" "$(line_state "$(ll_plan "$RN")" | cut -f1,4 | tr '\t' ' ')"
 ll_verb "$RN" T1 --within 900
 expect_eq "(n2) with the time, the same command lands it" "0" "$LL_RC"
+# THE LOOKUP NAMES THE LANDING TREE (wave-33 T1; Δ10). Durations are keyed by project, so
+# `_line_time_for` reads the landing tree's, wherever the carrier stands: asked from outside every
+# repository (the world's root), it still finds the fixture repository's 600 s.
+ll_time_from_outside() {  # <deadline offset> -> "<printed> rc=<n>"
+  ( cd "$WORLD_ROOT" && . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null \
+      && . "$REPO/payload/scripts/lib/line.sh" 2>/dev/null \
+      && o="$(_line_time_for c.test.sh "$(( $(_res_now) + $1 ))" "$RN")"; echo "$o rc=$?" )
+}
+expect_eq "(n4) asked from outside the repository with 900 s left, the gate may take 300 (900 less the 600 recorded)" \
+  "300 rc=0" "$(ll_time_from_outside 900)"
+expect_eq "(n4) …and with 60 s left the landing tree's 600 s refuses it (rc 1)" " rc=1" "$(ll_time_from_outside 60)"
 RN2="$(ll_world)"; ll_launch "$RN2" T1 c
 ( cd "$RN2" && world_suite c green >/dev/null ) && git -C "$RN2" add tests/c.test.sh && git -C "$RN2" commit -qm "suite c"
 LL_MUTANT='s/exit 1/exit 0/' LL_MUTANT_FN=_line_time_for ll_drive "$RN2" T1 "$WORLD_ROOT/n-T1.out" 60
