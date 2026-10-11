@@ -465,8 +465,7 @@ _gate_idle() {  # <reading> — under the lock, after a scan: the idle file, kep
 }
 
 # THE READING WITHIN THE SHARE, one clause for its two readers (the collision note in the
-# plan's ### T13): gate_room's memory test calls it; the admission test reads the same bound,
-# `u > share`, since the gate promises no memory (wave-33 T1; Δ10).
+# plan's ### T13): gate_room's memory test and the admission's (`_gate_decide`) both call it.
 _GATE_FITS_AWK='function fits(r, share) { return r >= 0 && r <= share }'
 
 # gate_usage <reading> — after a scan: memory in use as the gate counts it (D11), the one owner
@@ -498,11 +497,11 @@ _gate_decide() {
     [ "$reading" -ge 0 ] || return 1
   fi
   printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" \
-      -v lim="$(_gate_share_cores)" -v busy="$(_res_busy_cores)" -v unf="$_G_UNF" -v p="$p" '
+      -v lim="$(_gate_share_cores)" -v busy="$(_res_busy_cores)" -v unf="$_G_UNF" -v p="$p" "$_GATE_FITS_AWK"'
     NF >= 2 { sc += $2 }
     END {
       split(p, n, ":")
-      if (r >= 0 && u + n[1] > share) exit 1   # memory, the live reading: the hard limit
+      if (r >= 0 && !fits(u, share)) exit 1    # memory, the live reading: the hard limit
       b = busy + 0; if (sc > b) b = sc         # processor, the soft limit
       if (unf > 0 && b + n[2] > lim) exit 1
       exit 0

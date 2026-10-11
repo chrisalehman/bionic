@@ -82,6 +82,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 printf 'url=%s|title=%s|body=%s\n' "$url" "$title" "$(printf '%s' "$body" | tr '\n' ' ')" >> "$NT_CALLS"
+# NT_CURL_KILL=1: the caller is killed mid-send, after this call is recorded (the Stop's ten seconds).
+[ -z "${NT_CURL_KILL:-}" ] || kill -9 "$PPID"
 exit "${NT_CURL_RC:-0}"
 STUB
 chmod +x "$NT_BIN/curl"
@@ -663,8 +665,31 @@ expect_eq "A5b …and its stdout is the base's" "$NB_OUT" "$NT_OUT"
 NA_AUDIT="$(cat "$NT_HOME"/.claude/logs/*/sdlc-audit.md 2>/dev/null)"
 expect_contains "A5c …and the failure is logged to the record, naming the key" "notify-failed" "$NA_AUDIT"
 expect_contains "A5d …with the item's key" "approve:release" "$NA_AUDIT"
+# A FAILED SEND IS RETRIED (wave-33 T34; critic finding 3, which reverses A-T11-3). The item is
+# marked before its send, and a send that fails takes the mark back, so the next caller sends it:
+# one attempt per turn while the channel fails, then exactly one call once it works.
 nt_stop "$RF"
-expect_eq "A5e a failed send is not retried turn after turn" "3" "$(nt_calls)"
+expect_eq "A5e a failed send is retried by the next Stop, one attempt per turn" "4" "$(nt_calls)"
+expect_eq "A5f …and the item is still owed, unsent, while the channel fails" "approve:release" "$(nt_owed "$RF" owed_unsent)"
+export NT_CURL_RC=0
+nt_stop "$RF"
+expect_eq "A5g with the channel working, the next Stop sends it" "5" "$(nt_calls)"
+expect_contains "A5h …that call is the item the failed sends owed" "title=bionic-fixture approval: release|" "$(nt_last)"
+expect_eq "A5i …and the item is no longer unsent" "" "$(nt_owed "$RF" owed_unsent)"
+nt_stop "$RF"
+expect_eq "A5j …and the Stop after it calls nothing: sent once" "5" "$(nt_calls)"
+# A caller killed mid-send (the call made, the caller gone before it learns the result) leaves the
+# mark, so the item is never sent twice.
+nt_owed "$RF" owed_open approve:killed "approval: killed" 'Killed?' >/dev/null
+expect_eq "K1 precondition: a second item is owed, unsent" "approve:killed" "$(nt_owed "$RF" owed_unsent)"
+NT_CURL_KILL=1 nt_owed "$RF" owed_send
+expect_eq "K2 the killed caller made its one call" "6" "$(nt_calls)"
+expect_contains "K2a …for that item" "title=bionic-fixture approval: killed|" "$(nt_last)"
+expect_eq "K2b …and the item stays marked sent" "" "$(nt_owed "$RF" owed_unsent)"
+nt_owed "$RF" owed_send
+nt_stop "$RF"
+expect_eq "K3 the next caller and the next Stop send it no second time" "6" "$(nt_calls)"
+export NT_CURL_RC=7
 nt_card "$RF" step1 "$(nt_req "$RF")"
 expect_eq "A6 AC-2.5 card.sh exits 0 with a failing channel" "0" "$NT_RC"
 POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
