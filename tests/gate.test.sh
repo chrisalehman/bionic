@@ -40,6 +40,11 @@
 #                      reads above the machine's core count (impossible: a 1–3 s run) writes
 #                      its end and rc and no cost line; one at or under the count writes it.
 #                      Mutation: the core-count test removed writes the impossible line
+#   §WHOLE-COST D1, D5 (wave-32 T26) a whole request's cost line is marked whole: a never-seen
+#                      key's promise and gate_room's largest promise on record skip it, so a
+#                      key with no cost of its own is admitted beside a held one after a whole
+#                      run; the whole key's own promise still reads it, and its next ask waits
+#                      while another is held and is admitted once nothing is
 #   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, a waiting
 #                      request, promised work not yet showing and memory over the share each
 #                      give no room; a quiet machine gives room; two asks on one reading give
@@ -805,6 +810,60 @@ expect_regex "CO.7 the mutant (no core-count test) still ends the run and writes
   ':2:1002$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
 expect_regex "CO.8 …and the line is the impossible 20.00 cores — the test is the rule" \
   ':20\.00:2:' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
+
+# ── §WHOLE-COST ──────────────────────────────────────────────────────────────
+# A WHOLE RUN'S COST IS NO STRANGER'S PROMISE (wave-32 T26; D1, D5; critic adversarial 1). A whole
+# admission holds the machine alone, so its children's processor time over its seconds can be
+# every core the share allows (the whole run wrote 2:5.11:1932 for tests/run.sh). gate_end marks
+# the line it writes for a whole request `:whole`; the promise for a key with no cost of its own
+# (the per-field maximum over every cost file) and gate_room's largest processor promise on
+# record skip marked lines, so one whole run does not make every never-seen key wait for an
+# empty machine. A key's own promise still reads its own lines, marked or not. The arms are the
+# critic's probe: one work line for a.test.sh at 1.2 cores and one work request for it held, then
+# a never-seen key asks, without and with a whole run's line on record. The line is written by
+# the real gate_end of a 2 s whole request whose children's time is planted at 14.10 s (7.05
+# cores). The whole run's own next ask is pinned both ways: it waits while a.test.sh is held and
+# is admitted once nothing is.
+section "§WHOLE-COST — a whole run's cost line is not a never-seen key's promise (D1, D5)"
+wc_room() { ( . "$GATE_LIB" 2>/dev/null; o="$(gate_room --owed 1 2>&1)"; r=$?; printf '%s rc=%s' "$o" "$r" ); }
+wc_promise() { ( . "$GATE_LIB" 2>/dev/null; gate_promise "$1" 2>&1 ); }
+fresh whole-cost-without
+world_machine 8 8192 40 1.0
+world_cost a.test.sh 10 1.2 120
+HOLD=1 ask_bg wa work a.test.sh 0; wait_for 20 has wa.rc
+expect_eq "WC.1 without a whole line: the work request for a.test.sh is admitted and held (rc)" "0" "$(rc_of wa)"
+expect_eq "WC.2 …a never-seen key is promised a.test.sh's cost, the only one on record" "10:1.2:120" \
+  "$(wc_promise new.test.sh)"
+expect_eq "WC.3 …gate_room --owed 1 charges 1.2 cores for the owed writer and gives room" \
+  "room=yes load=1.0/1.0 cores=8 promised=2.4 waiting=0 rc=0" "$(wc_room)"
+expect_eq "WC.4 …and the never-seen key is admitted beside the held one (rc 0)" "0" \
+  "$(ask_fg wn work new.test.sh 0)"
+fresh whole-cost-with
+world_machine 8 8192 40 1.0
+world_cost a.test.sh 10 1.2 120
+PLANT_CPU=14.10 HOLD=1 ask_bg wr whole tests/run.sh 0; wait_for 20 has wr.rc
+world_tick 2
+release wr
+wr_id="$(id_of wr)"
+expect_eq "WC.5 the whole request was admitted at 1000 and ended at 1002 with rc 0" "1000|1002|0" \
+  "$(field "$wr_id" admitted)|$(field "$wr_id" ended)|$(field "$wr_id" rc)"
+expect_regex "WC.6 its gate_end wrote one line, 7.05 cores over 2 s at 1002, marked whole" \
+  '^[0-9]+:7\.05:2:1002:whole$' "$(cat "$BIONIC_GATE_DIR/cost/tests%run.sh" 2>/dev/null)"
+expect_eq "WC.7 the whole key's own promise still reads its own line" "0:7.05:2" \
+  "$(wc_promise tests/run.sh)"
+HOLD=1 ask_bg wa work a.test.sh 0; wait_for 20 has wa.rc
+expect_eq "WC.8 with the whole line on record, the work request for a.test.sh is admitted and held (rc)" "0" \
+  "$(rc_of wa)"
+expect_eq "WC.9 …a never-seen key is still promised a.test.sh's cost, not the whole run's" "10:1.2:120" \
+  "$(wc_promise new.test.sh)"
+expect_eq "WC.10 …gate_room --owed 1 still charges 1.2 cores, not the whole run's 7.05, and gives room" \
+  "room=yes load=1.0/1.0 cores=8 promised=2.4 waiting=0 rc=0" "$(wc_room)"
+expect_eq "WC.11 …and the never-seen key is admitted beside the held one (rc 0)" "0" \
+  "$(ask_fg wn work new.test.sh 0)"
+expect_eq "WC.12 the whole run's next ask, a.test.sh still held, waits (rc 75)" "75" \
+  "$(ask_fg wr2 whole tests/run.sh 0)"
+release wa
+expect_eq "WC.13 …and with nothing held it is admitted (rc 0)" "0" "$(ask_fg wr3 whole tests/run.sh 0)"
 
 # ── §ROOM ────────────────────────────────────────────────────────────────────
 # gate_room [--owed <n>] (wave-28 T13; D14): may another writer start? Every row plants an
