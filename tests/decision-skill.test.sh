@@ -137,6 +137,18 @@ forms_ok() {
   ! grep -viq 'never' <<<"$vr"
 }
 
+# desc_of <file> -> the front-matter description line's text (the line the model reads to decide to invoke).
+desc_of() { sed -n 's/^description: *//p' "$1" | head -1; }
+
+# reach_ok <file> — the description names the case T19's live check exposed: the user asking which
+# of several options to use is a decision to put in the shape.
+reach_ok() {
+  local d
+  d="$(desc_of "$1")"
+  grep -qi 'asks which of several options to use' <<<"$d" || return 1
+  grep -qi 'is a decision too: put it in the shape' <<<"$d"
+}
+
 # doctor <src> <dst> <sed-expr> — a doctored copy of the skill.
 doctor() { sed -E "$3" "$1" > "$2"; }
 
@@ -231,5 +243,13 @@ expect_true "25: …naming the Step-1 and Step-2 interviews as its heaviest user
   grep -qE 'Step-1 .*Step-2 .*heaviest users' "$CORE"
 expect_true "26: …one decision per turn; approvals and reversible calls stay out" \
   grep -qE 'one decision per turn.*Approvals and calls you can reverse stay out' "$CORE"
+
+section "§REACH — the description names the case the live check exposed (T27, AC-11.2)"
+
+expect_nonempty "27a: the description line is extractable" "$(desc_of "$SKILL")"
+expect_true "27b: it names the user asking which of several options to use as a decision" reach_ok "$SKILL"
+doctor "$SKILL" "$TMP/no-reach.md" 's/asks which of several options to use/asks something/'
+expect_true "27c: the doctored copy's plant landed" grep -q 'asks something' "$TMP/no-reach.md"
+expect_false "27d: …and the doctored copy (case removed) fails the pin" reach_ok "$TMP/no-reach.md"
 
 finish
