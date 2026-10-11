@@ -154,6 +154,17 @@ _gate_ask_for() {
   esac
   return 0
 }
+_SUITE_LOADED=""
+_suite_load() {  # rc 0 once the plugin's suite primitive (lib/suite.sh, wave-33 T2) is loaded
+  if [ -z "$_SUITE_LOADED" ]; then
+    _SUITE_LOADED=no
+    if [ -r "$REPO/payload/scripts/lib/suite.sh" ]; then
+      # shellcheck source=/dev/null
+      . "$REPO/payload/scripts/lib/suite.sh" && declare -F bionic_suite_exec >/dev/null 2>&1 && _SUITE_LOADED=yes
+    fi
+  fi
+  [ "$_SUITE_LOADED" = yes ]
+}
 _gate_end_for() {  # <rc> — the request this shell holds is over
   [ "$_GATE_OWN" -eq 1 ] || return 0
   _GATE_OWN=0
@@ -180,16 +191,26 @@ if [ "${1:-}" = "--one" ]; then
   # believes for a descendant of its holder, so it asks nothing and ends nothing; a solo suite's
   # worker inherits the admission its drain hands it the same way.
   _gate_ask_for work "$_one_label"
-  [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
   _one_start="$(date +%s)"
-  # Deliberately unquoted. The queued string is a roster line's own words
-  # (`bash tests/foo.test.sh`), written in this file — never outside input.
   # THE SCRUB (wave-30 T9; AC-4.2): this worker keeps BIONIC_GATE_DIR for its own ask and end above and
   # below, but the SUITE PROCESS runs without it. A suite that read the run's store through the
   # inherited variable (the doctor-reads checks did) read a store it did not make; a suite that
   # wants one makes its own fixture. The --serial path below scrubs at its own exec the same way.
-  # shellcheck disable=SC2086
-  env -u BIONIC_GATE_DIR $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  # THE PLUGIN'S PRIMITIVE (wave-33 T2; D3): when the plugin library is in this tree, the suite runs
+  # through lib/suite.sh `bionic_suite_exec`, the one way a landing starts a suite too: the scrub, the
+  # admission handed down, stdin closed. The queued string is a roster line's own words, `bash
+  # tests/<name>` (the roster wall refuses a name with a space), so its path is the suite's.
+  _one_suite="${_one_cmd#bash }"
+  if [ "$_one_suite" != "$_one_cmd" ] && [ -n "$_one_suite" ] && [ "${_one_suite#* }" = "$_one_suite" ] && _suite_load; then
+    bionic_suite_exec ${_GATE_ID:+--admit "$_GATE_ID"} "$REPO" "$_one_suite" >"$_one_work/${_one_label}.out" 2>&1
+  else
+    # A tree without the library: the runner's own path, the same environment.
+    # Deliberately unquoted. The queued string is a roster line's own words
+    # (`bash tests/foo.test.sh`), written in this file — never outside input.
+    [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
+    # shellcheck disable=SC2086
+    env -u BIONIC_GATE_DIR $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  fi
   _one_rc=$?
   _gate_end_for "$_one_rc"
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
