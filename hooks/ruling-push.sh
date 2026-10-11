@@ -10,7 +10,7 @@
 # a `ruling/v1` line on the session's roster (lib/roster.sh, which owns the state). A message reaches
 # a writer only at idle; this hook reaches it at its next tool call. It maps the payload's top-level
 # `agent_id` to the roster name (`roster_row_for_id`, the budget wall's own join), and for each
-# ruling of that name no call has carried yet it claims the push (`ruling_push_claim`: append, then
+# ruling of that name neither carried nor shown it claims the push (`ruling_push_claim`: append, then
 # read which call's stamp came first, so of a writer's concurrent calls exactly one carries it) and
 # prints the ruling as `hookSpecificOutput.additionalContext`, headed `bionic ruling`. PostToolUse
 # additionalContext reaches a subagent's model (record/wave-33-workhorse/P1-additional-context.md,
@@ -62,9 +62,6 @@ _rp_roster="$_rp_root/.bionic/tmp/roster-${_rp_sid}.state"
 _rp_flag="$(ruling_pending_flag "$_rp_roster")" || exit 0
 [ -e "$_rp_flag" ] || exit 0
 
-# THE FLAG COMES DOWN BEFORE THE READ and goes back up when a ruling of another writer is still
-# unpushed after it, so a ruling `rule` appends while this reads keeps its flag (lib/roster.sh).
-rm -f "$_rp_flag" 2>/dev/null
 _rp_name=""
 if _rp_row="$(roster_row_for_id "$_rp_roster" "$_rp_aid")"; then
   _rp_name="$(printf '%s\n' "$_rp_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
@@ -72,17 +69,19 @@ fi
 [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && _rp_plugin="$CLAUDE_PLUGIN_ROOT" \
   || _rp_plugin="$(cd "${0%/*}/.." 2>/dev/null && pwd -P)"
 [ -n "$_rp_call" ] || _rp_call="pid$$-$RANDOM"
-_rp_ctx=""; _rp_others=no
+# A ruling already shown (acknowledged, or printed by a guard) is read, so it is never pushed.
+_rp_ctx=""
 while IFS="$RULING_US" read -r _rp_id _rp_w _rp_rec _rp_p _rp_c _rp_s _rp_b _rp_t; do
-  [ -n "$_rp_id" ] && [ -z "$_rp_p" ] || continue
-  if [ -z "$_rp_name" ] || [ "$_rp_w" != "$_rp_name" ]; then _rp_others=yes; continue; fi
+  [ -n "$_rp_id" ] && [ -z "$_rp_p" ] && [ -z "$_rp_s" ] || continue
+  [ -n "$_rp_name" ] && [ "$_rp_w" = "$_rp_name" ] || continue
   ruling_push_claim "$_rp_roster" "$_rp_id" "$_rp_w" "$_rp_call" || continue
   _rp_ctx="${_rp_ctx:+$_rp_ctx
 }$(ruling_render "$_rp_id" "$_rp_t" "$_rp_plugin")"
 done <<RP_FOLD
 $(ruling_fold "$_rp_roster")
 RP_FOLD
-[ "$_rp_others" = no ] || : >> "$_rp_flag" 2>/dev/null
+# The flag stays up only while a ruling of some writer is still pending after these claims.
+ruling_flag_settle "$_rp_roster"
 [ -n "$_rp_ctx" ] || exit 0
 jq -nc --arg c "$_rp_ctx" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $c}}' 2>/dev/null
 exit 0
