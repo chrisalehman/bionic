@@ -1705,6 +1705,9 @@ wait_for 20 has pk.ran
 pk_id="$(req_of pk)"
 live_used 70; sleep 1
 live_used 40
+# The run lasts 2 s on the planted clock (wave-32 T1): a run of zero seconds writes no cost line
+# (§ZERO-SECONDS), and this row reads the cost line a real run of some seconds writes.
+world_tick 2
 touch "$D/pk.go"; wait_for 20 has pk.brc
 expect_eq "B.43 the run ended 0" "0" "$(brc pk)"
 expect_eq "B.44 a reading of 70 taken mid-run by the wrapper is the request's peak" "70" "$(field "$pk_id" peak)"
