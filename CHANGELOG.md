@@ -142,7 +142,7 @@ and one set of rows was deleted with the mechanism it tested.
 | `T8-close-out.md` | 86.2a/b and REG-1 pin a refusal and a derived sentence where they pinned a `<fill:` mark; 4k to 4n changed their fixture and kept their expected values |
 | `T13-findings.md`, `T28-slots.md`, `T4-empty-flag.md` | new rows only, or fixtures only; expected values unchanged |
 
-Known limits, carried to the next release (19 carried; the 1.15.0 block carried 18 and struck 1):
+Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck: 17 here, against 18 carried in the 1.15.0 block (its 19th bullet was struck):
 
 - Known limit: the 1.13.0 limits stand as written there, as triaged in `limits-1.13.0-triage.md`: 66 still
   true, 5 closed (32, 33, 46, 49, 60), none fixed. Sixty-three are carried by the next wave's charter;
@@ -160,9 +160,6 @@ Known limits, carried to the next release (19 carried; the 1.15.0 block carried 
 - Known limit: the RC5 deadline in dispatch-preflight-4 §RECORDER is the constant `DP_DEADLINE_S=22`
   (`hooks/dispatch-preflight.sh:306`) with no environment knob, so each drive sleeps 24 s. A knob would
   change RC5's literal bound, which is the user's word.
-- Known limit: rc-item reaches the network. Each yes-answered `setup --all` door clones humanizer from
-  GitHub because `/usr/bin/git` is on the suite's PATH. A git stub belongs to rc-item's fixtures
-  (`record/wave-32-floor-wall-time/T6-doors.md`, "rc-item reaches the network"). Next wave.
 - Known limit, narrowed: a writer's suite asks the gate per suite. Under one core a command, writers' suites
   run side by side, but a whole run is promised the width, so a writer's ask still waits behind a whole run
   on a machine with no room beside it. No wait was measured in this wave (`unverified`). The background
@@ -199,8 +196,6 @@ Known limits, carried to the next release (19 carried; the 1.15.0 block carried 
   script's `$$`. Two `gate_ask`s from sibling subshells both returned request 1; as separate processes they
   returned 1 and 2 (`walk.md` sections 6 and 8).
 - Known limit: `ruling-ack` run with no agent identity acknowledges a writer's ruling (`walk.md` section 8).
-- Known limit: a ruling acknowledged before its push is still pushed once, and until then the pending flag
-  keeps that writer's calls on the hook's slow path (`walk.md` section 2).
 
 Known limits, struck:
 
@@ -231,6 +226,11 @@ Known limits, struck:
   suites on it (<WAIT-LIBRARY-SUITES>); the share × cores ÷ 100 room has one site, `_gate_share_cores` (T1,
   gate §SHARE-ROOM SR.1 to SR.4); and the run-end re-read has an agreement check over `run_read` and
   `booked_follow` (session-poker-2 56k to 56k8, `T15-green-poker2-worktree-3.log`).
+- Known limit, struck: rc-item reached the network. Each yes-answered `setup --all` door cloned humanizer
+  from GitHub because `/usr/bin/git` was on the suite's PATH. <T31-LANDED> (`T31-limits.md`)
+- Known limit, struck: a ruling acknowledged before its push was still pushed once, and the pending flag
+  kept that writer's calls on the hook's slow path until then (`walk.md` section 2). <T31-LANDED>
+  (`T31-limits.md`)
 
 ## 1.15.0 — 2026-10-11
 
