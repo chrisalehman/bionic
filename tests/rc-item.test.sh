@@ -2024,8 +2024,8 @@ for T75_SIG in HUP INT TERM; do
   expect_nonempty "T75 S1 ${T75_SIG}: …with a staged copy in TMPDIR at that moment" "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)"
   kill -"$T75_SIG" -- "-$T75_PID" 2>/dev/null
   wait "$T75_PID" 2>/dev/null
-  # Wait for the door's trap to remove the staged copy (bounded at 2 s, twice the old fixed second).
-  T75_W=0; while [ -n "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)" ] && [ "$T75_W" -lt 20 ]; do sleep 0.1; T75_W=$((T75_W + 1)); done
+  # Wait for the door's trap to remove the staged copy (bounded at the old fixed second, 1 s).
+  T75_W=0; while [ -n "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)" ] && [ "$T75_W" -lt 10 ]; do sleep 0.1; T75_W=$((T75_W + 1)); done
   expect_empty "T75 S1 ${T75_SIG}: after the signal nothing is left in TMPDIR" "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)"
 done
 
