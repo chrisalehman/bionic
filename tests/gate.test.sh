@@ -85,6 +85,17 @@
 #                      on usage; a stamp on every end but usage; the runner takes no number; a
 #                      run is sampled while it runs. Mutations: the wrapper believing a typed
 #                      admission without asking; the wrapper exiting 0 on a timeout
+#   §BUDGET-AT-ASK AC-6.2 (wave-33 T3; D7) an agent budgeted for a.test.sh, in a real checkout of
+#                      the runner: a whole run through a symlinked script, a variable and a symlink
+#                      at argv[0], and b.test.sh through a script's door, are refused at the ask,
+#                      75, the budget's own line, nothing run; a.test.sh through a script runs; the
+#                      main thread, a row with no budget, a believed admission and a landing are
+#                      not judged; a declared Re-executes run admits the suite it names. Mutation:
+#                      the ask's budget call removed admits the off-budget ask
+#   §CASE      AC-6.3  (wave-33 T3) on a case-blind filesystem (planted both ways) A.TEST.SH is
+#                      a.test.sh and TESTS/RUN.SH the whole run; case-exact, A.TEST.SH is another
+#                      file; `bash TESTS/RUN.SH` from a script, where this filesystem folds, is
+#                      refused at the ask
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
@@ -98,7 +109,8 @@
 # same request (its file exists, its asked line is read). Three mutation arms run on a copy
 # of payload/scripts/lib under the world's directory, each anchored first and each proved
 # to run (its own positive row) before its claim is read; §COST adds one more, and §REAPED,
-# §OWN and §CLEARED one each (T47). §OPEN adds four (T71); §SHARE-ROOM two (wave-33 T1).
+# §OWN and §CLEARED one each (T47). §OPEN adds four (T71); §SHARE-ROOM two (wave-33 T1);
+# §BUDGET-AT-ASK one (wave-33 T3).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The machine, the clock and the duration records are SYNTHESIZED by design (the world's
@@ -2069,5 +2081,157 @@ expect_match "B.48 …and its stamp names the suites it ran" "stamp/v1|head=*|rc
   "$(stamp_last)"
 expect_eq "B.49 the same call without --runner asks the gate (B.47 is not vacuous)" "0 1" \
   "$(book_fg dq --agent dq --max-wait 30 --suites a.test.sh,b.test.sh -- 'exit 0') $(nreq)"
+
+
+# ── §BUDGET-AT-ASK ───────────────────────────────────────────────────────────
+section "§BUDGET-AT-ASK — a budgeted agent's suite or whole run is refused where it asks the gate (wave-33 T3; D7, AC-6.2)"
+# The wall reads a command's text; a script runs what its text cannot be made to say (a symlink, a
+# variable, a capitalised spelling). So the budget is held where a suite actually starts: the gate's
+# ask. An agent whose roster row states `Suites:`/`Re-executes:` asking for a suite key or a whole
+# run outside them is refused there, exit 75, the budget's own line, nothing filed and nothing run.
+# The main thread, an agent with no budget, an admission believed from an ancestor and a landing's
+# ask are not judged. FIXTURE FIDELITY: a real git checkout of the shipped runner and this tree's
+# libraries (runner-roster.test.sh's rr_tree shape); the roster row is the recorder's own shape
+# (`roster-state/v1|…|name=|agent_id=|suites_allowed=|re_executes=`) under <project>/.bionic/tmp,
+# keyed by the session; the agent rides in BIONIC_GATE_AGENT, as booked.sh and the wall export it.
+# fails-when: an off-budget run started through a script is admitted.
+fresh budget
+world_machine 8 8192 20 0.5
+BA="$D/proj"; BA_MARKS="$D/marks"
+mkdir -p "$BA/tests/lib" "$BA/payload/scripts/lib" "$BA/tools" "$BA/.bionic/tmp" "$BA_MARKS"
+git -C "$BA" init -q
+cp "$REPO_ROOT/tests/run.sh" "$BA/tests/run.sh"
+cp "$REPO_ROOT/tests/lib/resolve-roots.sh" "$REPO_ROOT/tests/lib/assert.sh" "$BA/tests/lib/"
+cp "$REPO_ROOT"/payload/scripts/lib/*.sh "$BA/payload/scripts/lib/"
+for s in a b; do
+  printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\n: > "$BA_MARKS/%s.ran"\nsection "%s"\nexpect_eq "%s ran" x x\nfinish\n' \
+    "$s" "$s" "$s" > "$BA/tests/$s.test.sh"
+done
+ln -s ../tests/run.sh "$BA/tools/run.sh"
+ln -s tests "$BA/t2"
+printf '#!/bin/bash\nR=tests/run.sh\nbash "$R"\n' > "$BA/tools/var.sh"
+printf '#!/bin/bash\nbash TESTS/run.sh\n' > "$BA/tools/caps.sh"
+printf '#!/bin/bash\nbash TESTS/RUN.SH\n' > "$BA/tools/caps2.sh"
+printf '#!/bin/bash\nX="$(cd "$(dirname "$0")" && pwd)"\nbash tests/run.sh --only a.test.sh\n' > "$BA/tools/door-a.sh"
+printf '#!/bin/bash\nbash tests/run.sh --only b.test.sh\n' > "$BA/tools/door-b.sh"
+BA_ROSTER="$BA/.bionic/tmp/roster-$WORLD_SID.state"
+ba_row() {  # <name> <id> [<key>=<value>...] — appends a roster row of the recorder's shape
+  local n="$1" i="$2" r
+  shift 2
+  r="roster-state/v1|status=identified|session=$WORLD_SID|name=$n|agent_id=$i|launched_at=2026-10-11T00:00:00Z|subagent_type=bionic:implementor"
+  while [ "$#" -gt 0 ]; do r="$r|$1"; shift; done
+  printf '%s\n' "$r" >> "$BA_ROSTER"
+}
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$BA_ROSTER"
+ba_row fx afx-1 'suites_allowed=a.test.sh' 're_executes='
+ba_row fwide afwide-1 'suites_allowed=a.test.sh b.test.sh run.sh' 're_executes='
+ba_row fopen afopen-1 'files=x'
+ba_row frex afrex-1 'suites_allowed=' 're_executes=`tests/run.sh --only b.test.sh`'
+# ba_drive <agent|-> <command> — the command run in the checkout as the agent's Bash call runs it
+# (`-` is the main thread: no BIONIC_GATE_AGENT); leaves BA_OUT and BA_RC; marks cleared first.
+BA_OUT=""; BA_RC=0
+ba_drive() {
+  local who=()
+  [ "$1" = - ] || who=("BIONIC_GATE_AGENT=$1")
+  rm -f "$BA_MARKS"/*.ran
+  BA_OUT="$( cd "$BA" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT ${who[@]+"${who[@]}"} \
+    BA_MARKS="$BA_MARKS" BIONIC_PRESSURE_RING="$D/ring" BIONIC_TEST_JOBS_CEILING=2 \
+    bash -c "$2" 2>&1 )"
+  BA_RC=$?
+}
+ran() { ls "$BA_MARKS" 2>/dev/null | sed 's/\.ran$//' | sort | paste -sd, -; }
+BA_LINE="refused at the gate"
+
+ba_drive - 'bash tools/run.sh'
+expect_eq "BA.1 control: the main thread's whole run through a symlink to the runner runs both suites" "0 a,b" "$BA_RC $(ran)"
+ba_drive fx 'bash tools/run.sh'
+expect_eq "BA.2 AC-6.2 fx (a.test.sh only): the whole run through a symlink is refused at the ask, 75, nothing run" "75 " \
+  "$BA_RC $(ran)"
+expect_contains "BA.2b …with the budget's own line" "$BA_LINE" "$BA_OUT"
+expect_contains "BA.2c …naming the whole run and the budget" "allowed: a.test.sh" "$BA_OUT"
+ba_drive fx 'bash tools/var.sh'
+expect_eq "BA.3 AC-6.2 the whole run through a variable is refused at the ask, nothing run" "75 " "$BA_RC $(ran)"
+expect_contains "BA.3b …with the budget's own line" "$BA_LINE" "$BA_OUT"
+ba_drive fx './tools/run.sh'
+expect_eq "BA.4 the symlink run at argv[0] is refused alike" "75 " "$BA_RC $(ran)"
+ba_drive fx 'bash t2/run.sh'
+expect_eq "BA.4b …and through a linked directory" "75 " "$BA_RC $(ran)"
+ba_drive fx 'bash tools/door-b.sh'
+expect_eq "BA.5 AC-6.2 an off-budget suite through a script's door is refused; b never ran" "75 " "$BA_RC $(ran)"
+expect_contains "BA.5b …the line names the suite" "b.test.sh" "$BA_OUT"
+expect_contains "BA.5c …and the run's report says it was refused at the ask, never run" "REFUSED (the budget, at the gate's ask; never run)" "$BA_OUT"
+ba_drive fx 'bash tools/door-a.sh'
+expect_eq "BA.6 AC-6.2 the on-budget a.test.sh through a script (with X=\"\$(cmd \"\$a\")\" in it) is admitted and runs" "0 a" \
+  "$BA_RC $(ran)"
+ba_drive fx 'bash tests/run.sh --only a.test.sh b.test.sh'
+expect_eq "BA.7 one call naming both: a runs, b is refused, and the run exits 75 (no suite failed)" "75 a" "$BA_RC $(ran)"
+expect_contains "BA.7b …b's refusal is in the report" "b.test.sh" "$BA_OUT"
+ba_drive fwide 'bash tools/run.sh'
+expect_eq "BA.8 control: an agent whose budget carries run.sh runs the whole run" "0 a,b" "$BA_RC $(ran)"
+ba_drive fopen 'bash tools/run.sh'
+expect_eq "BA.9 an agent whose row states no budget is unaffected" "0 a,b" "$BA_RC $(ran)"
+ba_drive fnobody 'bash tools/run.sh'
+expect_eq "BA.10 an agent no row names is unaffected (the wall speaks for unplaced agents)" "0 a,b" "$BA_RC $(ran)"
+ba_drive frex 'bash tools/door-b.sh'
+expect_eq "BA.11 a suite a declared Re-executes run names is admitted" "0 b" "$BA_RC $(ran)"
+ba_drive frex 'bash tests/run.sh --only a.test.sh'
+expect_eq "BA.12 …and one it does not name is refused" "75 " "$BA_RC $(ran)"
+
+# The ask itself, one asker at a time: refused asks file nothing; believed and landing asks are not judged.
+fresh budget-ask
+world_machine 8 8192 20 0.5
+expect_eq "BA.13 gate_ask work b.test.sh by fx: 75" "75" "$(cd "$BA" && AGENT=fx ask_fg q1 work b.test.sh 2)"
+expect_contains "BA.13b …its line on stderr" "$BA_LINE" "$(cat "$D/q1.err" 2>/dev/null)"
+expect_eq "BA.13c …and no request was filed" "0" "$(nreq)"
+expect_eq "BA.14 gate_ask work a.test.sh by fx: admitted" "0" "$(cd "$BA" && AGENT=fx ask_fg q2 work a.test.sh 2)"
+expect_eq "BA.15 gate_ask whole tests/run.sh by fx: 75" "75" "$(cd "$BA" && AGENT=fx ask_fg q3 whole tests/run.sh 2)"
+expect_eq "BA.16 a key that is no suite and no whole run (booked.sh's command key) is not the budget's" "0" \
+  "$(cd "$BA" && AGENT=fx ask_fg q4 work 'echo one two' 2)"
+expect_eq "BA.17 a landing's ask is the landing's, not the writer's spend" "0" "$(cd "$BA" && AGENT=fx ask_fg q5 landing b.test.sh 2)"
+expect_eq "BA.18 the main thread's ask is not judged" "0" "$(cd "$BA" && AGENT=main ask_fg q6 work b.test.sh 2)"
+# WORK runs as the holder's child, so the admission it names is believed (the ancestor rule).
+(cd "$BA" && AGENT=fx WORK="cd '$BA' && BIONIC_GATE_ADMIT=\$(cat '$D/q7.id') BIONIC_GATE_AGENT=fx bash -c '. \"\$GATE_LIB\"; gate_ask work b.test.sh --within 2 >/dev/null 2>&1; echo \$? > \"$D/q7w.rc\"'" \
+  ask_fg q7 work a.test.sh 2 >/dev/null)
+expect_eq "BA.19 under fx's admitted a.test.sh, a child asking b.test.sh is believed, not judged" "0" "$(cat "$D/q7w.rc" 2>/dev/null)"
+# MUTATION: the ask's budget call removed admits the off-budget ask.
+BA_MUT="$(mutant budget-off)"
+expect_true "BA.20 anchor: gate_ask calls the budget at the ask" grep -q '^  _gate_budget "\$kind" "\$key" || return 75$' "$BA_MUT"
+sed -i.bak '/^  _gate_budget "\$kind" "\$key" || return 75$/d' "$BA_MUT"
+expect_eq "BA.21 mutant: without it, fx's off-budget ask is admitted (the rows above are not vacuous)" "0" \
+  "$(cd "$BA" && AGENT=fx GATE_LIB="$BA_MUT" ask_fg q8 work b.test.sh 2)"
+
+# ── §CASE ────────────────────────────────────────────────────────────────────
+section "§CASE — a capitalised spelling meets the budget its lowercase one meets (wave-33 T3; D7, AC-6.3)"
+# On a case-blind filesystem `TESTS/RUN.SH` is the runner and `GAMMA.TEST.SH` is gamma.test.sh, so
+# the ask compares keys folded there and exactly elsewhere. BIONIC_PROBE_CASE_BLIND plants the
+# filesystem's answer so both directions run on any machine; the drive of `bash TESTS/RUN.SH` needs
+# the real filesystem to find the file, so it runs where the real one folds and says so otherwise.
+fresh case
+world_machine 8 8192 20 0.5
+ca_ask() {  # <planted 0|1> <name> <kind> <key>
+  (cd "$BA" && BIONIC_PROBE_CASE_BLIND="$1" AGENT=fx ask_fg "$2" "$3" "$4" 2)
+}
+expect_eq "CA.1 control: a.test.sh is admitted" "0" "$(ca_ask 1 c1 work a.test.sh)"
+expect_eq "CA.2 case-blind: A.TEST.SH is a.test.sh, admitted" "0" "$(ca_ask 1 c2 work A.TEST.SH)"
+expect_eq "CA.3 case-blind: GAMMA.TEST.SH is refused as gamma.test.sh is" "75 75" \
+  "$(ca_ask 1 c3 work GAMMA.TEST.SH) $(ca_ask 1 c3l work gamma.test.sh)"
+expect_eq "CA.4 case-blind: TESTS/RUN.SH is the whole run, refused" "75" "$(ca_ask 1 c4 whole TESTS/RUN.SH)"
+expect_eq "CA.5 case-exact: A.TEST.SH is another file, not on the budget" "75" "$(ca_ask 0 c5 work A.TEST.SH)"
+BA_REAL_BLIND=no; [ "$BA/tests" -ef "$BA/TESTS" ] && BA_REAL_BLIND=yes
+if [ "$BA_REAL_BLIND" = yes ]; then
+  ba_drive fx 'bash tools/caps.sh'
+  expect_eq "CA.6 AC-6.3 bash TESTS/run.sh from a script, on this case-blind filesystem: refused at the ask, nothing run" \
+    "75 " "$BA_RC $(ran)"
+  expect_contains "CA.6b …with the budget's own line" "$BA_LINE" "$BA_OUT"
+  ba_drive - 'bash tools/caps.sh'
+  expect_eq "CA.7 control: the main thread's same script runs the whole run" "0 a,b" "$BA_RC $(ran)"
+  # The capitalised NAME is refused by the runner itself before anything asks: its interpreter seam
+  # re-runs any script not named run.sh (tests/lib/resolve-roots.sh), and the runner refuses the
+  # suite paths it is handed. Nothing runs, on the budget or off it.
+  ba_drive - 'bash tools/caps2.sh'
+  expect_eq "CA.8 bash TESTS/RUN.SH: the runner refuses its own capitalised name, for anyone; nothing runs" "2 " "$BA_RC $(ran)"
+else
+  echo "  (CA.6–CA.8 not run: this filesystem is case-exact, so TESTS/RUN.SH names no file here)"
+fi
 
 finish
