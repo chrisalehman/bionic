@@ -704,6 +704,15 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   [ -n "$now" ] || { _wt_refuse "no-launch-row row=${row} roster=${roster} — ready reads the row's suites off the roster row the walls read"; return 2; }
   [ -n "$launch" ] || launch="$now"
   name="$(_wt_field "$now" name)"
+  # AN UNREAD RULING HOLDS THE LANDING (wave-33 T10; REQ-1 AC-1.4, D1). A ruling the orchestrator
+  # recorded for this writer and nobody has shown it is printed here, marked shown (lib/roster.sh
+  # `ruling_take_unread`, the commit wall's same read), and the row is not entered in the line: the
+  # writer reads it, acts on it, and says ready again, which then passes. Before any record is written.
+  if _line_load_roster && c="$(ruling_take_unread "$roster" "$name" ready "${_LINE_LIB_DIR%/scripts/lib}")" && [ -n "$c" ]; then
+    _wt_refuse "ruling-unread row=${row} name=${name} — the orchestrator ruled while you worked; read it below, act on it, say ready again"
+    printf '%s\n' "$c"
+    return 2
+  fi
   # A RUN OPEN AT UPGRADE CONTINUES (wave-28 T21; D26, AC-7.2). A row 1.12.0 wrote carries no `lands_on=`; its
   # record of the brief's `Suites:` is `suites_allowed=`, and those are the suites `ready` proves (`_line_lands`).
   lands="$(_line_lands "$now")"; c=$?
