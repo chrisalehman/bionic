@@ -112,8 +112,12 @@ in_payload() {  # <root> <agent_id|-> <tool_use_id>
       tool_input:{file_path:"/dev/null"}, tool_response:{}, tool_use_id:$u}
      + (if $a == "-" then {} else {agent_id:$a, agent_type:"bionic:implementor"} end)'
 }
+# IN_RC is the hook's own: the payload is a here-string, not a pipe, so a fast path that never reads
+# its stdin cannot fail the writer of the payload with SIGPIPE under pipefail.
 in_push() {  # <root> <agent_id|-> <tool_use_id> -> IN_OUT (stdout), IN_RC
-  IN_OUT="$( in_payload "$1" "$2" "$3" | env CLAUDE_PROJECT_DIR="$1" bash "$PUSH" 2>/dev/null )"; IN_RC=$?
+  local p
+  p="$(in_payload "$1" "$2" "$3")"
+  IN_OUT="$( env CLAUDE_PROJECT_DIR="$1" bash "$PUSH" 2>/dev/null <<< "$p" )"; IN_RC=$?
 }
 in_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
 
@@ -231,6 +235,37 @@ expect_eq "(c3) a ruling for a name no row carries is refused (exit 2)" "2" "$IN
 expect_contains "(c3) …naming it" "wx-T9" "$IN_OUT"
 in_poker "$W" rule wx-T1 '   '
 expect_eq "(c4) a ruling with no text is a usage error (exit 2)" "2" "$IN_RC"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "§ACK: a ruling acknowledged before its push is never pushed; the flag follows (T31)"
+
+# The walk's sequence (record/wave-33-workhorse/walk.md §2, §8): record, ruling-ack, the writer's
+# next call. Every ruling before this section is pushed, so the flag reads only these two. The flag
+# is up while either is unacknowledged ((k1), (k2) up beside (k3) down, one extractor) and the push
+# carries nothing for an acknowledged one ((k4) beside (k5), a fresh ruling the same call shape carries).
+FLAG="$W/.bionic/tmp/ruling-pending-$WORLD_SID.state"
+in_poker "$W" rule wx-T1 'acknowledged before any push'
+K_ID1="$(in_rid "$IN_OUT")"
+in_poker "$W" rule wx-T2 'acknowledged too'
+K_ID2="$(in_rid "$IN_OUT")"
+expect_nonempty "(k0) two rulings are recorded, one per writer" "$K_ID1$K_ID2"
+expect_true "(k1) the pending flag is up once they are recorded" test -e "$FLAG"
+( cd "$W/.worktrees/T1" && bash "$POKER" ruling-ack "$K_ID1" ) >/dev/null 2>&1
+expect_true "(k2) wx-T1's acknowledged; wx-T2's is not: the flag stays up" test -e "$FLAG"
+( cd "$W/.worktrees/T2" && bash "$POKER" ruling-ack "$K_ID2" ) >/dev/null 2>&1
+expect_false "(k3) both acknowledged, none unread for any writer: the flag is down" test -e "$FLAG"
+in_push "$W" b00T1 toolu_k_1
+K_CTX="$(in_ctx "$IN_OUT")"
+expect_eq "(k4) wx-T1's next call exits 0" "0" "$IN_RC"
+expect_absent "(k4) …and carries no acknowledged ruling" "bionic ruling $K_ID1 " "$K_CTX"
+expect_absent "(k4) …the push claimed nothing for it" "pushed=" "$(in_state "$W" wx-T1 "$K_ID1")"
+expect_false "(k4) …and the flag is still down" test -e "$FLAG"
+in_poker "$W" rule wx-T1 'a fresh one rides the next call'
+K_ID3="$(in_rid "$IN_OUT")"
+in_push "$W" b00T1 toolu_k_2
+expect_contains "(k5) control: a fresh ruling, the same call shape, is carried" "bionic ruling $K_ID3 " "$(in_ctx "$IN_OUT")"
+expect_false "(k5) …and once it is pushed the flag is down" test -e "$FLAG"
+( cd "$W/.worktrees/T1" && bash "$POKER" ruling-ack "$K_ID3" ) >/dev/null 2>&1
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "§GUARD: no commit and no ready against an unread ruling (AC-1.4)"
