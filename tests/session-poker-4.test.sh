@@ -3259,6 +3259,173 @@ expect_eq "RS-4g a session with no bound plan is refused (exit 1)" "1" "$RC"
 expect_contains "RS-4h …saying it has no bound open run" "has no bound open run" "$OUT"
 
 # ============================================================
+section "§BRIEF: brief <row> renders a dispatch brief from the plan row and the shipped scaffold into record/<wave>/briefs/<row>.md, the orchestrator's sections marked and never invented, and dispatch-preflight accepts it (wave-33 T9; REQ-4 AC-4.4; D8)"
+# ============================================================
+#
+# fails-when: a scaffold field of the rendered brief disagrees with its row (Row, Files, Suites, Lands-on, the
+# artifact, the duration), the preflight refuses the brief as rendered, or a brief has to be typed whole (a
+# row-less call writes a file, a second call loses what the orchestrator wrote under ## Judgment).
+#
+# THE EXPECTED VALUES ARE THIS FIXTURE'S OWN TEXT, never read back through the verb: the plan below is written
+# by hand, row by row, and each assertion names the cell it came from. The rule the verb applies is the brief's
+# (T9): Suites and Lands-on come from the row's `suites` / `lands-on` cells when it carries them, else from the
+# `*.test.sh` entries of its Files, `none` for a row with none; the artifact is the dispatch ledger's cell for
+# the row, else the first Files entry under record/ that is neither a progress file nor assumptions.md, else the
+# record path the row's task names; Progress artifact and Cadence appear when the size is 15 or more.
+RBR="$(make_repo brief)"; ( cd "$RBR" && git commit -q --allow-empty -m init )
+git -C "$RBR" config user.name "Dana Fixture"
+git -C "$RBR" branch wave/01-fixture
+PBR="$(s42_plan "$RBR" 4)"
+BR_REC=".bionic/docs/record/wave-01-fixture"
+BR_T2_FILES="hooks/b.sh, tests/b.test.sh, tests/c.test.sh, $BR_REC/T2-b.md, $BR_REC/T2.progress.md, $BR_REC/assumptions.md"
+BR_T2_TASK="build the second piece: the verb writes the file and the preflight reads its Row and Files"
+BR_TABLE="$TMPROOT/br-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | suites | lands-on |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | — | — |\n'
+  printf '| T2 | 4 | build | %s | implementor | — | 30 | REQ-1 | %s | 01-T2 | abc1234 | pending | — | — |\n' "$BR_T2_TASK" "$BR_T2_FILES"
+  printf '| T3 | 4 | build | the third piece, ledgered with its own artifact | implementor | — | 20 | REQ-1 | hooks/c.sh, %s/T3-files.md | — | — | pending | — | — |\n' "$BR_REC"
+  printf '| T4 | 4 | doc | write the fourth record at %s/T4-text.md and nothing else | implementor | — | 25 | REQ-1 | — | — | — | pending | — | — |\n' "$BR_REC"
+  printf '| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending | — | — |\n'
+  printf '| T6 | 4 | build | a short piece | implementor | — | 10 | REQ-1 | hooks/d.sh, %s/T6-d.md | — | — | pending | — | — |\n' "$BR_REC"
+  printf '| T7 | 4 | build | a piece whose row names its own suites | implementor | — | 40 | REQ-1 | hooks/e.sh, tests/e.test.sh, tests/f.test.sh, %s/T7-e.md | — | — | pending | e.test.sh, g.test.sh | e.test.sh |\n' "$BR_REC"
+  printf '\n'
+} > "$BR_TABLE"
+awk -v t="$BR_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PBR" > "$PBR.new"
+# T3 gets a dispatch-ledger row with an artifact of its own, and the plan names its working branch.
+awk '{ print } /^\| T1 \| implementor \(w-T1\)/ { print "| T3 | implementor (w-T3) | 2026-10-11T00:00Z | 20 min | '"$BR_REC"'/T3-ledgered.md | — | batch 1 |" }' "$PBR.new" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PBR" && rm -f "$PBR.new"
+( cd "$RBR" && git add -f "$PBR" && git commit -qm "brief fixture" ) >/dev/null 2>&1
+BR_FILE="$RBR/.bionic/docs/record/wave-01-fixture/briefs"
+br_field() {  # <file> <label> -> the value of the first `<label>:` line, trimmed
+  awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
+}
+br_cell() {  # <row> <column number> -> that cell of the fixture plan's own text, trimmed
+  awk -F'|' -v id="$1" -v c="$2" '/^\| T[0-9]+ \|/ { i = $2; gsub(/[ \t]/, "", i); if (i == id) { v = $c; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit } }' "$PBR"
+}
+expect_eq "BR-0 precondition: the fixture's T2 Files cell is the one the checks compare with (cell 10 of the plan's own text)" "$BR_T2_FILES" "$(br_cell T2 10)"
+expect_eq "BR-0b precondition: the fixture plan names a working branch that git resolves" "1" \
+  "$(git -C "$RBR" rev-parse --verify -q refs/heads/wave/01-fixture >/dev/null && echo 1 || echo 0)"
+
+# ---------- the scaffold fields of a writer row equal the row's ----------
+poke "$RBR" brief T2
+expect_eq "BR-1 brief T2 exits 0" "0" "$RC"
+expect_true "BR-1b …and writes record/<wave>/briefs/T2.md under the plan's own wave name" test -s "$BR_FILE/T2.md"
+expect_contains "BR-1c …saying where it wrote" "briefs/T2.md" "$OUT"
+expect_eq "BR-2 Row equals the row's id (positive: the extractor reads a value from the real file)" "T2" "$(br_field "$BR_FILE/T2.md" Row)"
+expect_eq "BR-2b Files is the row's Files cell, verbatim" "$BR_T2_FILES" "$(br_field "$BR_FILE/T2.md" Files)"
+expect_eq "BR-2c Expected duration is the row's size, in minutes" "30 minutes" "$(br_field "$BR_FILE/T2.md" 'Expected duration')"
+expect_eq "BR-2d Expected artifact is the first record entry of the Files cell that is no progress file and no assumptions.md" \
+  "$BR_REC/T2-b.md" "$(br_field "$BR_FILE/T2.md" 'Expected artifact')"
+expect_eq "BR-2e Progress artifact is the Files entry that ends .progress.md" "$BR_REC/T2.progress.md" "$(br_field "$BR_FILE/T2.md" 'Progress artifact')"
+expect_eq "BR-2f Cadence is the 15-minute rule's number, written for a size of 15 or more" "15 min" "$(br_field "$BR_FILE/T2.md" Cadence)"
+expect_eq "BR-2g Suites is the *.test.sh entries of Files, by file name, in Files order" "b.test.sh, c.test.sh" "$(br_field "$BR_FILE/T2.md" Suites)"
+expect_eq "BR-2h Lands-on is the same set when the row carries none of its own" "b.test.sh, c.test.sh" "$(br_field "$BR_FILE/T2.md" Lands-on)"
+BR_HEAD="$(git -C "$RBR" rev-parse refs/heads/wave/01-fixture)"
+expect_regex "BR-3 precondition: the working branch's head is a 40-hex commit" '^[0-9a-f]{40}$' "$BR_HEAD"
+expect_contains "BR-3b the brief carries the working head, whole, beside the branch it is the head of" "Working head: $BR_HEAD (wave/01-fixture)" "$(cat "$BR_FILE/T2.md")"
+expect_contains "BR-3c the row's task text is carried verbatim under the row" "$BR_T2_TASK" "$(cat "$BR_FILE/T2.md")"
+expect_true "BR-4 the scaffold is the first thing in the file, so no later prose is a label's first hit (cmp of the first line)" \
+  test "$(sed -n 1p "$BR_FILE/T2.md" | cut -c1-18)" = "Expected duration:"
+
+# ---------- what only the orchestrator writes is marked, never invented ----------
+BR_J="$(awk '/^## Judgment/ { f = 1 } f { print }' "$BR_FILE/T2.md")"
+expect_contains "BR-5 the file has a ## Judgment section" "## Judgment" "$BR_J"
+expect_contains "BR-5b …with a slot for the research to read, marked for the orchestrator" "Research to read: <ORCHESTRATOR:" "$BR_J"
+expect_contains "BR-5c …and a slot for the rulings, marked for the orchestrator" "Rulings: <ORCHESTRATOR:" "$BR_J"
+expect_contains "BR-5d the verb's own line names the scaffold lines it left to the orchestrator, from the shipped scaffold" "Done marker" "$OUT"
+expect_contains "BR-5e …Re-executes among them" "Re-executes" "$OUT"
+expect_absent "BR-5f …and none of those labels is written into the file as prose (they would declare a claim, a marker)" "Subprocess claim" "$(cat "$BR_FILE/T2.md")"
+
+# ---------- the preflight accepts the brief as rendered, and refuses it with one field gone ----------
+# The wall reads the prompt only, so the payload carries the whole file as its prompt. The gate runs under a
+# scratch HOME and a fixture attestation, patrol stamp and engagement, as dispatch-preflight.test.sh's own
+# fixtures do; an allowed dispatch journals a roster row, which is the positive that the wall really lifted
+# the brief's fields.
+BR_HOME="$TMPROOT/brief-home"; mkdir -p "$BR_HOME/.claude/projects/-brief"; : > "$BR_HOME/.claude/projects/-brief/$SID.jsonl"
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBR/.bionic/tmp/patrol-$SID.state"
+printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBR" > "$RBR/.bionic/tmp/preflight-$SID.state"
+BR_GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
+br_gate() {  # <repo> <brief text file> [<agent name>] -> sets BR_OUT, BR_ERR
+  local payload
+  payload="$(jq -n --arg s "$SID" --arg c "$1" --arg n "${3:-w-T2}" --rawfile p "$2" \
+    '{session_id:$s, transcript_path:"/nonexistent.jsonl", cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a rendered brief", subagent_type:"implementor", prompt:$p, run_in_background:true, name:$n},
+      tool_use_id:"toolu_brief"}')"
+  BR_OUT="$( cd "$1" && printf '%s' "$payload" | env HOME="$BR_HOME" CLAUDE_CONFIG_DIR="$BR_HOME/.claude" ANTHROPIC_API_KEY=sk-fixture \
+    CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "$BR_GATE" 2>"$TMPROOT/br-gate.err" )"
+  BR_ERR="$(cat "$TMPROOT/br-gate.err")"
+}
+br_roster_row() { /usr/bin/grep -F "|name=$2|" "$(roster_of "$1")" 2>/dev/null | tail -1; }
+br_gate "$RBR" "$BR_FILE/T2.md"
+expect_absent "BR-6 the preflight does not deny the rendered T2 brief" '"permissionDecision":"deny"' "$BR_OUT"
+BR_ROW="$(br_roster_row "$RBR" w-T2)"
+expect_contains "BR-6b …and it journalled a launch row for it (the positive that the wall read the brief)" "|name=w-T2|" "$BR_ROW"
+expect_eq "BR-6c …the row names the brief's Row" "T2" "$(s30_field "$BR_ROW" row)"
+expect_eq "BR-6d …the brief's artifact" "$BR_REC/T2-b.md" "$(s30_field "$BR_ROW" deliverable | sed 's#^.*/\(\.bionic/docs/record/\)#\1#')"
+expect_eq "BR-6e …no subprocess claim and no waiver, so the row text declared nothing it did not mean" "|" "$(s30_field "$BR_ROW" claims)|$(s30_field "$BR_ROW" waiver)"
+sed '/^Expected artifact:/d' "$BR_FILE/T2.md" > "$TMPROOT/br-noart.md"
+br_gate "$RBR" "$TMPROOT/br-noart.md" w-T2b
+expect_contains "BR-7 the same brief without its Expected artifact line is denied (the driver can refuse)" '"permissionDecision":"deny"' "$BR_OUT"
+
+# ---------- the artifact's other sources, and the lines a row owes only when it has them ----------
+poke "$RBR" brief T3
+expect_eq "BR-8 T3: the dispatch ledger's artifact cell is the row's artifact (it wins over a Files entry)" "$BR_REC/T3-ledgered.md" \
+  "$(br_field "$BR_FILE/T3.md" 'Expected artifact')"
+expect_eq "BR-8b …and a size of 20 gets its Progress artifact, named for the row, because Files lists none" "$BR_REC/T3.progress.md" \
+  "$(br_field "$BR_FILE/T3.md" 'Progress artifact')"
+poke "$RBR" brief T4
+expect_eq "BR-9 T4: with no ledger row and no record entry in Files, the record path the task names" "$BR_REC/T4-text.md" "$(br_field "$BR_FILE/T4.md" 'Expected artifact')"
+expect_eq "BR-9b …Files is — so the brief carries no Files line (positive: Row is read from the same file)" "T4|" \
+  "$(br_field "$BR_FILE/T4.md" Row)|$(br_field "$BR_FILE/T4.md" Files)"
+expect_eq "BR-9c …no test in Files, so Suites: none" "none" "$(br_field "$BR_FILE/T4.md" Suites)"
+expect_regex "BR-9d …and Lands-on: none, with a reason" '^none [A-Za-z]' "$(br_field "$BR_FILE/T4.md" Lands-on)"
+poke "$RBR" brief T5
+expect_eq "BR-10 T5: a row that names no artifact anywhere is rendered with the slot marked, not invented (positive: Row reads)" "T5|1" \
+  "$(br_field "$BR_FILE/T5.md" Row)|$(br_field "$BR_FILE/T5.md" 'Expected artifact' | /usr/bin/grep -c '^<ORCHESTRATOR:')"
+poke "$RBR" brief T6
+expect_eq "BR-11 T6: a size under 15 owes no Progress artifact and no Cadence (positive: the duration reads)" "10 minutes||" \
+  "$(br_field "$BR_FILE/T6.md" 'Expected duration')|$(br_field "$BR_FILE/T6.md" 'Progress artifact')|$(br_field "$BR_FILE/T6.md" Cadence)"
+poke "$RBR" brief T7
+expect_eq "BR-12 T7: the row's own suites cell is the Suites, not the Files entries" "e.test.sh, g.test.sh" "$(br_field "$BR_FILE/T7.md" Suites)"
+expect_eq "BR-12b …and its lands-on cell is the Lands-on" "e.test.sh" "$(br_field "$BR_FILE/T7.md" Lands-on)"
+
+# ---------- the second call keeps what the orchestrator wrote, and follows the row ----------
+cp "$BR_FILE/T2.md" "$TMPROOT/br-t2-first.md"
+poke "$RBR" brief T2
+expect_eq "BR-13 a second call on an unchanged plan exits 0" "0" "$RC"
+expect_true "BR-13b …and leaves the file byte-identical (cmp)" cmp -s "$TMPROOT/br-t2-first.md" "$BR_FILE/T2.md"
+{ awk '/^## Judgment/ { exit } { print }' "$BR_FILE/T2.md"; printf '## Judgment\n\nResearch to read: record/wave-01-fixture/research-x.md\nRulings: A-orch-9 holds\n'; } > "$TMPROOT/br-t2-judged.md"
+cp "$TMPROOT/br-t2-judged.md" "$BR_FILE/T2.md"
+sed -i.bak 's/^| T2 | 4 | build | \(.*\) | implementor | — | 30 |/| T2 | 4 | build | \1 | implementor | — | 45 |/' "$PBR"; rm -f "$PBR.bak"
+poke "$RBR" brief T2
+expect_eq "BR-14 a re-render after the orchestrator filled ## Judgment and the row's size changed exits 0" "0" "$RC"
+expect_eq "BR-14b …the scaffold follows the row" "45 minutes" "$(br_field "$BR_FILE/T2.md" 'Expected duration')"
+expect_contains "BR-14c …and what the orchestrator wrote under ## Judgment is kept, verbatim" "Research to read: record/wave-01-fixture/research-x.md" "$(cat "$BR_FILE/T2.md")"
+expect_contains "BR-14d …with its rulings line" "Rulings: A-orch-9 holds" "$(cat "$BR_FILE/T2.md")"
+expect_eq "BR-14e …and no second section or slot is added beside it (one ## Judgment, one research line, no marked slot left)" "1|1|0" \
+  "$(/usr/bin/grep -c '^## Judgment' "$BR_FILE/T2.md")|$(/usr/bin/grep -c '^Research to read:' "$BR_FILE/T2.md")|$(/usr/bin/grep -c '<ORCHESTRATOR:' "$BR_FILE/T2.md")"
+
+# ---------- refusals print the corrected call and write nothing ----------
+BR_BEFORE="$(ls "$BR_FILE" | tr '\n' ' ')"
+poke "$RBR" brief T99
+expect_eq "BR-15 a row the plan does not have is refused (exit 1)" "1" "$RC"
+expect_contains "BR-15b …saying so" "T99" "$OUT"
+expect_contains "BR-15c …and naming the rows it has, with the corrected call" "brief T2" "$OUT"
+expect_eq "BR-15d …and writes no file" "$BR_BEFORE" "$(ls "$BR_FILE" | tr '\n' ' ')"
+poke "$RBR" brief
+expect_eq "BR-16 no row is the usage error (exit 2)" "2" "$RC"
+expect_contains "BR-16b …saying what the verb takes" "brief takes exactly one argument" "$OUT"
+poke "$RBR" brief 'T2/../x'
+expect_eq "BR-17 a row id that is no id is refused (exit 1) and writes nothing" "1|$BR_BEFORE" "$RC|$(ls "$BR_FILE" | tr '\n' ' ')"
+RBR2="$(make_repo brief-unbound)"; ( cd "$RBR2" && git commit -q --allow-empty -m init )
+poke "$RBR2" brief T2
+expect_eq "BR-18 a session with no bound plan is refused (exit 1)" "1" "$RC"
+expect_contains "BR-18b …saying it has no bound open run" "has no bound open run" "$OUT"
+
+# ============================================================
 section "§WAIT-CEILING: wait on a detached run the gate did not admit prints the shim's one line, then FINISHED rc=75 (wave-31 T12; REQ-9 AC-9.4; D10, A-orch-51)"
 # ============================================================
 #
