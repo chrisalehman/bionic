@@ -72,6 +72,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/ruling-push.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SubagentStart": [

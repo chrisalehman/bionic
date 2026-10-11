@@ -19,6 +19,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
+#     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' | ruling-ack <id> | rulings <writer>
+#                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
@@ -442,6 +444,9 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
+  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>'   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown"
+  die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
+  die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row|file>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names what they wait on (declined-on=)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
@@ -569,6 +574,24 @@ case "$VERB" in
     fi
     HOLD_NAME="$1"
     HOLD_REASON="$2"
+    ;;
+  # A RULING AND ITS READS (wave-33 T10; REQ-1, D1). `rule` takes the writer and the text, which must
+  # hold something once blanks are gone: a ruling with nothing to say is nothing to deliver. `ruling-ack`
+  # takes the one id the push printed; `rulings` the writer whose rulings to read.
+  rule)
+    if [ $# -ne 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "rule takes exactly two arguments: the writer's roster name and the ruling's text."
+    fi
+    RULE_WRITER="$1"
+    RULE_TEXT="$2"
+    ;;
+  ruling-ack)
+    { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "ruling-ack takes exactly one argument: the ruling's id."
+    RULING_ID="$1"
+    ;;
+  rulings)
+    { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "rulings takes exactly one argument: the writer's roster name."
+    RULE_WRITER="$1"
     ;;
   # THE FILL'S ANSWER, AS HOLD IS THE STAND-DOWN'S (wave-27 T34; REQ-15, D24). Two operands: the
   # ready rows, comma-joined, and the reason. No ids is the usage error, never "every row": a
@@ -6422,6 +6445,84 @@ EOF
     }
     say "held — $HOLD_NAME stays up while its launch, deliverable and messages are unchanged (fp=$HOLD_FP); the tick prints it held and orders no stop: $ROSTER_FILE"
     exit 0
+    ;;
+
+  # A RULING FOR A LIVE WRITER (wave-33 T10; REQ-1 AC-1.1 to AC-1.4, D1). The orchestrator's binding
+  # instruction to one writer while it works: a `ruling/v1` line on this session's roster (lib/roster.sh
+  # `ruling_record`, which owns the state and its one reader). hooks/ruling-push.sh carries it on the
+  # writer's next tool result; the writer's commit and `ready` refuse while it is unread. `rulings` reads
+  # the state; `ruling-ack` is the writer's own acknowledgement, from its tree (the session key is the
+  # orchestrator's in a teammate's shell, so it finds the same roster).
+  #
+  # REFUSED, exit 2, with the reason (AC-1.3): a name no row of this roster carries, or a row that is
+  # closed (`roster_open_names`, the one reader of "is this name closed": ended, or acked after its
+  # launch). A ruling for either would never be shown, so it is never written. No session key is 3,
+  # as everywhere in this file.
+  rule|ruling-ack|rulings)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A ruling lives on ONE session's roster, so without the key there is nothing to read or write."
+      exit 3
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for."
+      exit 2
+    fi
+    case "$VERB" in
+      rule)
+        if ! grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null | grep -qF "|name=${RULE_WRITER}|"; then
+          die "REFUSED — no row named $RULE_WRITER on this session's roster ($ROSTER_FILE); a ruling names one live writer."
+          exit 2
+        fi
+        if ! roster_open_names "$ROSTER_FILE" "$(roster_ack_ledger "$ROSTER_FILE")" | grep -qxF "$RULE_WRITER"; then
+          die "REFUSED — $RULE_WRITER's row is closed (ended, or acked after its launch): a ruling for it would never be shown. Nothing written."
+          exit 2
+        fi
+        RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT")" || RULE_ID=""
+        if [ -z "$RULE_ID" ]; then
+          die "REFUSED — could not write the ruling to $ROSTER_FILE."
+          exit 2
+        fi
+        say "ruling $RULE_ID recorded for $RULE_WRITER — its next tool result carries it, and its commit and ready are refused until it is shown; read it with: rulings $RULE_WRITER"
+        exit 0 ;;
+      ruling-ack)
+        RA_LINE="$(ruling_fold "$ROSTER_FILE" | awk -F"$RULING_US" -v id="$RULING_ID" '$1 == id { print; exit }')"
+        if [ -z "$RA_LINE" ]; then
+          die "REFUSED — no ruling $RULING_ID on this session's roster ($ROSTER_FILE)."
+          exit 2
+        fi
+        IFS="$RULING_US" read -r RA_ID RA_W RA_REC RA_P RA_C RA_S RA_B RA_T <<< "$RA_LINE"
+        if [ -n "$RA_S" ]; then
+          say "ruling $RA_ID was already shown to $RA_W (shown=$RA_S by=${RA_B:-?}); nothing to do"
+          exit 0
+        fi
+        RA_NOW="$(date +%s)"
+        ruling_stamp "$ROSTER_FILE" "$RA_ID" "$RA_W" "shown=$RA_NOW" "by=ack" || {
+          die "REFUSED — could not write to $ROSTER_FILE."
+          exit 2
+        }
+        say "ruling $RA_ID acknowledged — shown=$RA_NOW; your commit and ready no longer wait on it"
+        exit 0 ;;
+      rulings)
+        RS_ANY=no
+        while IFS="$RULING_US" read -r RS_ID RS_W RS_REC RS_P RS_C RS_S RS_B RS_T; do
+          [ -n "$RS_ID" ] || continue
+          RS_ANY=yes
+          RS_STATE="unread"
+          [ -z "$RS_S" ] || RS_STATE="shown=$RS_S by=${RS_B:-?}"
+          say "ruling $RS_ID $RS_W recorded=$RS_REC${RS_P:+ pushed=$RS_P} $RS_STATE — $RS_T"
+        done <<< "$(ruling_fold "$ROSTER_FILE" "$RULE_WRITER")"
+        [ "$RS_ANY" = yes ] || say "no ruling for $RULE_WRITER on this session's roster"
+        exit 0 ;;
+    esac
     ;;
 
   # THE FILL'S ANSWER, RECORDED (wave-27 T34; REQ-15 AC-15.1, AC-15.5; D24; design ledger Δ9). The
