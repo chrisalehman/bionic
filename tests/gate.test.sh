@@ -387,8 +387,8 @@ export BIONIC_PROBE_USED_PCT=30
 # gate promises no memory (wave-33 T1; Δ10), so the mutant's own refusal is shown on the
 # processor: 6.0 busy cores, one run held, a second ask (6.0 + 1 > 6.4).
 MG="$(mutant ceiling)"
-anchor "$MG" 'if (r >= 0 && u + n[1] > share) exit 1' 1
-sed -i.bak 's/if (r >= 0 \&\& u + n\[1\] > share) exit 1/if (r >= 0 \&\& u + n[1] > 100) exit 1/' "$MG"
+anchor "$MG" 'if (r >= 0 && !fits(u, share)) exit 1' 1
+sed -i.bak 's/if (r >= 0 \&\& !fits(u, share)) exit 1/if (r >= 0 \&\& !fits(u, 100)) exit 1/' "$MG"
 fresh hard-mut
 world_machine 8 8192 85 6.0
 world_cost k 30
