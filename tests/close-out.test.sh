@@ -138,6 +138,7 @@ use_worktree: false
 has_ui: false
 multi_agent: false
 walk: exempt
+adrs: none
 archive-root: ${aroot}
 ---
 
@@ -1055,12 +1056,16 @@ section "4b — critic2 N-3 (T16): run's dry-run judges the plan while it is sti
 # ============================================================
 # The dry-run used to run AFTER current: 9 and delivered: were written, so the bound marker
 # resolved bound-closed and the commit gate exited 0 before it read any step evidence. Here
-# `run` is given a plan with NO Step-8 line. It must refuse (rc 2) and must not flip the
-# plan to delivered; at d067c07d it flipped current to 9 and wrote delivered: first.
+# `run` is given a plan with NO Step-8 line whose matrix evidence is gone. It must refuse
+# (rc 2) and must not flip the plan to delivered; at d067c07d it flipped current to 9 and wrote
+# delivered: first. WAVE-33 T8 (D8, AC-4.2): a missing Step-8 line is no longer the refusal, close-out
+# writes it (§INSERT), so the plan the gate cannot clear carries the missing line AND a missing
+# evidence file; every expected value below is the one this section always held.
 P16="$(mk_fixture p16)"; advance_to "$P16" 8
 grep -v '^- Step 8:' "$P16/$PLAN_REL" > "$P16/plan.tmp" && mv "$P16/plan.tmp" "$P16/$PLAN_REL"
+rm -f "$P16/.bionic/docs/record/generic-evidence.md"
 run_close "$P16" run
-expect_eq "4k: run on a plan with no Step-8 line refuses rc 2" "2" "$CO_RC"
+expect_eq "4k: run on a plan with no Step-8 line and a matrix the gate refuses, refuses rc 2" "2" "$CO_RC"
 expect_eq "4l: …and the plan was not flipped to delivered" "no" \
   "$(grep -qE 'Step 9:.*delivered:' "$P16/$PLAN_REL" && echo yes || echo no)"
 expect_eq "4m: …and current: is still 8" "yes" \
@@ -1517,10 +1522,17 @@ adr_cell() {
 # set_plan_keys <project> <spec-line|-> <adrs-line|-> -> inserts the given frontmatter lines
 # after `walk:` ("-" inserts nothing).
 set_plan_keys() {
-  local p="$1/$PLAN_REL" extra=""
-  [ "$2" = "-" ] || extra="${extra}$2"$'\n'
-  [ "$3" = "-" ] || extra="${extra}$3"$'\n'
-  EXTRA="$extra" awk '{ print } /^walk:/ { printf "%s", ENVIRON["EXTRA"] }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  local p="$1/$PLAN_REL" extra="" drop=""
+  # A KEY GIVEN REPLACES THE ONE THE FIXTURE CARRIES (wave-33 T8: the plan builder now says
+  # `adrs: none`, because close-out refuses to write an epic row from a plan that says nothing).
+  [ "$2" = "-" ] || { extra="${extra}$2"$'\n'; drop="${drop}spec "; }
+  [ "$3" = "-" ] || { extra="${extra}$3"$'\n'; drop="${drop}adrs "; }
+  EXTRA="$extra" DROP="$drop" awk '
+    BEGIN { n = split(ENVIRON["DROP"], d, " ") }
+    NR == 1 { fm = 1 }
+    fm && NR > 1 && /^---$/ { fm = 0 }
+    { for (i = 1; i <= n; i++) if (fm && index($0, d[i] ":") == 1) next }
+    { print } /^walk:/ { printf "%s", ENVIRON["EXTRA"] }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
 }
 # mk_spec <project> <adrs-line|-> -> writes the spec the plan names, with or without `adrs:`.
 mk_spec() {
@@ -1543,9 +1555,15 @@ expect_eq "86.1: the ADRs cell reads the spec's two ADRs, numbers joined by a co
 T86B="$(mk_fixture t86b)"; advance_to "$T86B" 8
 set_plan_keys "$T86B" "$SPEC_KEY" "-"
 mk_spec "$T86B" "-"
+/usr/bin/grep -v '^adrs:' "$T86B/$PLAN_REL" > "$T86B/plan.tmp" && mv "$T86B/plan.tmp" "$T86B/$PLAN_REL"
+PRE_86B="$(presence_state "$T86B")/$(sha_of "$T86B/$PLAN_REL")/$(sha_of "$T86B/$EPIC_REL")"
 run_close "$T86B" run
-expect_eq "86.2a: a wave with no adrs: in spec or plan keeps the marker (run exits 0)" "0" "$CO_RC"
-expect_eq "86.2b: …the cell is exactly the marker" "<fill: ADRs>" "$(adr_cell "$T86B")"
+# WAVE-33 T8 (D8; AC-3.3): a wave with no adrs: in spec or plan used to keep `<fill: ADRs>` in the cell
+# and exit 0; the epic row is now written whole, so close-out refuses, naming the field, before any act.
+expect_eq "86.2a: a wave with no adrs: in spec or plan is refused (rc 2), naming the field" "2/yes" \
+  "$CO_RC/$(contains "$CO_OUT" "adrs:")"
+expect_eq "86.2b: …no placeholder was written: the epic table carries no wave 01 row, and nothing else changed" "0/yes" \
+  "$(adr_cell "$T86B" | wc -l | tr -d ' ')/$([ "$PRE_86B" = "$(presence_state "$T86B")/$(sha_of "$T86B/$PLAN_REL")/$(sha_of "$T86B/$EPIC_REL")" ] && echo yes || echo no)"
 
 T86C="$(mk_fixture t86c)"; advance_to "$T86C" 8
 set_plan_keys "$T86C" "$SPEC_KEY" "adrs: adrs/epic-fx/adr-039-from-the-plan.md"
@@ -2223,8 +2241,9 @@ expect_absent "DEBT-RECARRY-3 …the inherited line whose concept and kind the l
 expect_absent "DEBT-RECARRY-4 …nor the one the ledger burned" "log_shim" "$(carry_section "$PRC/$CONT_REL")"
 # THE RECORD TEMPLATE SAYS REGRESSION (wave-30 T23; AC-4.7, D10): the continuation close-out writes asks the
 # orchestrator for the regression's result, in the word the doctrine uses.
-expect_contains "REG-1 AC-4.7 the continuation's template asks for the regression result" "<fill: regression result>" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
-expect_absent "REG-1b …and no longer for the floor's" "<fill: floor result>" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+# WAVE-33 T8 (D8): the result is no longer asked for, it is written, from the floor's proof line, in the same word.
+expect_contains "REG-1 AC-4.7 the continuation states the regression result, in the word the doctrine uses" "the regression: the floor holds at " "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+expect_absent "REG-1b …and never calls it the floor's result" "floor result" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
 # no ledger at all: every inherited debt line is carried, in its order
 PRN="$(mk_fixture debtrecarry2)"; advance_to "$PRN" 8
 mkdir -p "$PRN/.bionic/docs/record/$CARRY_PREV"
@@ -2278,5 +2297,191 @@ expect_eq "RUNS.6 run stops the orphan and says so, with its last progress line"
 expect_false "RUNS.7 …and the orphan's process is gone" kill -0 "${PR_PID:-0}"
 expect_eq "RUNS.8 …and the wipe took its files with the rest of .bionic/tmp" "0" "$(tmp_entries "$PR")"
 expect_eq "RUNS.9 one orphan, one line" "1" "$(printf '%s\n' "$CO_OUT" | grep -c '^orphan: ')"
+
+# ============================================================
+section "INSERT — wave-33 T8 (REQ-4 AC-4.2, D8): close-out writes the Step-8 line it checks for"
+# ============================================================
+#
+# `run` at `current: 8` with the facts held used to refuse when the plan carried no `- Step 8:` line:
+# the writer replaced a line it never inserted, then read back for the line it had not written. Wave-32's
+# own close met it. The fixture is the plan the tools leave: `advance_to 8` then the Step-8 line removed.
+#
+# step_order <plan> -> the step numbers of the `- Step N:` lines of ## SDLC State, in order, space-joined.
+step_order() {
+  awk '
+    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
+    insdlc && match($0, /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[[:space:]]*:/) {
+      s = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", s); printf "%s%s", (n++ ? " " : ""), s }
+    END { print "" }' "$1"
+}
+# drop_step_line <project> <N> -> the plan without its `- Step N:` line (continuation lines stay).
+drop_step_line() {
+  /usr/bin/grep -v "^- Step $2:" "$1/$PLAN_REL" > "$1/plan.tmp" && mv "$1/plan.tmp" "$1/$PLAN_REL"
+}
+# block_lines <plan> <N> -> how many indented continuation lines follow the `- Step N:` line.
+block_lines() {
+  awk -v n="$2" '
+    $0 ~ "^- Step " n ":" { f = 1; next }
+    /^- Step / || /^[^ \t-]/ || /^$/ { f = 0 }
+    f && /^  / { c++ }
+    END { print c + 0 }' "$1"
+}
+
+IA="$(mk_fixture insert-a)"; advance_to "$IA" 8; drop_step_line "$IA" 8
+expect_eq "INSERT.0 precondition: the plan reads current: 8, carries a Step-7 line, no Step-8 line and no Step-9 line" "8/7" \
+  "$(sed -n 's/^current: //p' "$IA/$PLAN_REL")/$(step_order "$IA/$PLAN_REL")"
+IA_SHA="$(sha_of "$IA/$PLAN_REL")"
+run_close "$IA" check
+expect_eq "INSERT.1 check says run writes the Step-8 line, and the gate is happy with the plan run would write" "yes/yes" \
+  "$(contains "$CO_OUT" 'step8: no Step 8 line in ## SDLC State — run writes it')/$(contains "$CO_OUT" "gate: ok against the plan run would write")"
+expect_eq "INSERT.2 …and check changed not one byte" "$IA_SHA" "$(sha_of "$IA/$PLAN_REL")"
+run_close "$IA" run
+expect_eq "INSERT.3 AC-4.2 run succeeds on a plan with no Step-8 line (rc 0)" "0" "$CO_RC"
+expect_eq "INSERT.4 …the Step-8 line is there, closed, once" "1/yes" \
+  "$(step_lines "$IA/$PLAN_REL" 8)/$(grep -qE '^- Step 8: CLOSED [0-9]{4}-' "$IA/$PLAN_REL" && echo yes || echo no)"
+expect_eq "INSERT.5 …between the Step-7 line and the Step-9 line, in step order" "7 8 9" "$(step_order "$IA/$PLAN_REL")"
+expect_eq "INSERT.6 …with its block: merge, worktree-removed, cleanup, tmp-wiped, tasks-completed, attested-by" "6" \
+  "$(awk '/^- Step 8: CLOSED /{f=1; next} /^- Step /{f=0} f && /^  (merge|worktree-removed|cleanup|tmp-wiped|tasks-completed|attested-by):/{c++} END{print c+0}' "$IA/$PLAN_REL")"
+expect_eq "INSERT.7 …the gate dry-run attested it, and the plan reads closed" "yes/1" \
+  "$(contains "$CO_OUT" "gate: ok")/$(run_open_rc "$IA/$PLAN_REL")"
+expect_eq "INSERT.8 …and the real bash-walls.sh allows the close-out commit" "0" "$(gate_rc "$IA")"
+
+# THE INSERT SITS AFTER THE STEP-7 BLOCK, NOT BETWEEN ITS LINES: a Step-7 line with continuation lines keeps them.
+IB="$(mk_fixture insert-b)"; advance_to "$IB" 8; drop_step_line "$IB" 8
+awk '{ print } /^- Step 7:/ { print "  adr: none owed"; print "  documented: the fixture has nothing to document" }' "$IB/$PLAN_REL" > "$IB/plan.tmp" && mv "$IB/plan.tmp" "$IB/$PLAN_REL"
+expect_eq "INSERT.9 precondition: Step 7 carries two continuation lines" "2" "$(block_lines "$IB/$PLAN_REL" 7)"
+run_close "$IB" run
+expect_eq "INSERT.10 a plan whose Step-7 block has continuation lines closes (rc 0)" "0" "$CO_RC"
+expect_eq "INSERT.11 …the Step-7 block is intact and the Step-8 line follows its last continuation line" "7 8 9/2/yes" \
+  "$(step_order "$IB/$PLAN_REL")/$(block_lines "$IB/$PLAN_REL" 7)/$(awk '/^  documented: /{d=NR} /^- Step 8: CLOSED /{s=NR} END{print (d && s == d + 1) ? "yes" : "no"}' "$IB/$PLAN_REL")"
+
+# A PLAN WITH NO STEP LINE AT ALL gets the block at the end of ## SDLC State.
+IC="$(mk_fixture insert-c)"; advance_to "$IC" 8; drop_step_line "$IC" 8; drop_step_line "$IC" 7
+expect_eq "INSERT.12 precondition: the plan carries no step line" "" "$(step_order "$IC/$PLAN_REL")"
+run_close "$IC" run
+expect_eq "INSERT.13 a plan with no step line closes too (rc 0), with Step 8 then Step 9" "0/8 9" "$CO_RC/$(step_order "$IC/$PLAN_REL")"
+
+# A REFUSED RUN WRITES NO STEP-8 LINE: the insert is phase 8's, behind the pre-flight (paired with INSERT.3).
+ID="$(mk_fixture insert-d)"; advance_to "$ID" 8; drop_step_line "$ID" 8
+rm -f "$ID/.bionic/docs/record/generic-evidence.md"
+ID_STATE="$(presence_state "$ID")/$(sha_of "$ID/$PLAN_REL")"
+run_close "$ID" run
+expect_eq "INSERT.14 a run the gate would refuse still refuses (rc 2) and writes no Step-8 line: plan, branch and tmp untouched" "2/$ID_STATE" \
+  "$CO_RC/$(presence_state "$ID")/$(sha_of "$ID/$PLAN_REL")"
+
+# THE WALK POINTER, WHERE THE GATE READS IT. The matrix head carries `walk-artifact:` (what matrix-render stubs and
+# the walk fills); the walk gate reads the Step-5 block (walls.sh step5_evidence_block). Close-out copies a real
+# pointer across when the Step-5 block lacks it, and invents none.
+mk_walked() {  # <name> <matrix-head-value|-> -> a fixture at Step 8 that owes a walk
+  local p
+  p="$(mk_fixture "$1")"; advance_to "$p" 8
+  sed 's/^walk: exempt/walk: required/' "$p/$PLAN_REL" > "$p/plan.tmp" && mv "$p/plan.tmp" "$p/$PLAN_REL"
+  WA="$2" awk '{ print }
+       /^- Step 7:/ { print "- Step 5: verify: the walk was driven" }
+       /^stack-health:/ && ENVIRON["WA"] != "-" { print "walk-artifact: " ENVIRON["WA"] }' "$p/$PLAN_REL" > "$p/plan.tmp" && mv "$p/plan.tmp" "$p/$PLAN_REL"
+  printf 'Drove the fixture: it started, answered, and stopped.\n' > "$p/.bionic/docs/record/wave-01-fixture/walk.md"
+  printf '%s\n' "$p"
+}
+step5_has_pointer() {  # <plan> -> yes|no: the Step-5 block (line + continuation) carries a walk-artifact: key
+  awk '/^- Step 5:/ { f = 1; next } /^- Step / || /^[^ \t-]/ { f = 0 } f && /walk-artifact:/ { c++ } END { print (c ? "yes" : "no") }' "$1"
+}
+IW="$(mk_walked insert-w "record/wave-01-fixture/walk.md")"
+expect_eq "INSERT.15 precondition: the plan owes a walk, the matrix head names it, and the Step-5 block does not" "yes/no" \
+  "$(/usr/bin/grep -q '^walk: required' "$IW/$PLAN_REL" && /usr/bin/grep -q '^walk-artifact: record/wave-01-fixture/walk.md' "$IW/$PLAN_REL" && echo yes || echo no)/$(step5_has_pointer "$IW/$PLAN_REL")"
+run_close "$IW" run
+expect_eq "INSERT.16 AC-4.2 run succeeds, the walk gate reading the pointer close-out wrote into the Step-5 block (rc 0)" "0/yes" \
+  "$CO_RC/$(step5_has_pointer "$IW/$PLAN_REL")"
+expect_eq "INSERT.17 …as a continuation line of Step 5, naming the same file" "yes" \
+  "$(awk '/^- Step 5:/{f=1; next} /^- Step /{f=0} f && /^  walk-artifact: record\/wave-01-fixture\/walk.md$/{c++} END{print (c==1) ? "yes" : "no"}' "$IW/$PLAN_REL")"
+
+IX="$(mk_walked insert-x "-")"
+IX_SHA="$(sha_of "$IX/$PLAN_REL")"
+run_close "$IX" run
+expect_eq "INSERT.18 with no pointer anywhere close-out invents none: the gate's own refusal stands (rc 2), the plan untouched" "2/no/$IX_SHA/yes" \
+  "$CO_RC/$(step5_has_pointer "$IX/$PLAN_REL")/$(sha_of "$IX/$PLAN_REL")/$(contains "$CO_OUT" "walk-artifact")"
+IY="$(mk_walked insert-y "pending")"
+run_close "$IY" run
+expect_eq "INSERT.19 …and the matrix head's own stub (pending) is no pointer: refused, nothing written" "2/no" "$CO_RC/$(step5_has_pointer "$IY/$PLAN_REL")"
+
+# ============================================================
+section "FILL — wave-33 T8 (REQ-3 AC-3.3, D8): the epic row and the continuation are written whole"
+# ============================================================
+#
+# The epic row's ADR cell was `<fill: ADRs>` when no source named one, and wave-30's still reads so; the
+# continuation carried fourteen marks the orchestrator completed by hand (A-orch-50). Close-out now writes every
+# field it can derive, refuses the row when the plan says nothing about its ADRs, and leaves a mark only where
+# a person must decide, naming each in its output.
+fill_marks() { /usr/bin/grep -o '<fill: [^>]*>' "$1" 2>/dev/null; }
+OWED_MARKS='<fill: the first decision, or "none">
+<fill: what was ruled at this close, or "none">
+<fill: version>
+<fill: ideas path>
+<fill: carry-overs from this wave>'
+
+FA="$(mk_fixture fill-a)"; advance_to "$FA" 8
+FA_HEAD="$(fixture_git "$FA" rev-parse wave/01-fixture)"
+FA_MAIN="$(fixture_git "$FA" rev-parse --short main)"
+run_close "$FA" run
+FA_ROW="$(table_rows "$FA/$EPIC_REL" shipped | /usr/bin/grep -E '^\|[[:space:]]*01[[:space:]]*\|')"
+FA_CONT="$(cat "$FA/$CONT_REL" 2>/dev/null)"
+expect_eq "FILL.1 the fixture closes (rc 0) and the epic row is there" "0/1" "$CO_RC/$(printf '%s\n' "$FA_ROW" | /usr/bin/grep -c '^|')"
+expect_eq "FILL.2 AC-3.3 the epic row carries no <fill:, and holds the merge commit it names" "no/yes" \
+  "$(contains "$FA_ROW" "<fill:")/$(contains "$FA_ROW" "main @ $FA_MAIN")"
+expect_eq "FILL.3 …and an ADR cell that says so when the plan says none (adrs: none)" "—" "$(adr_cell "$FA")"
+expect_contains "FILL.4 the continuation states the task count from the plan (the two build rows)" "2 tasks, every one RED→GREEN" "$FA_CONT"
+expect_contains "FILL.5 …the regression result from the floor's proof line, at the head it was proved at" "the regression: the floor holds at ${FA_HEAD:0:12}" "$FA_CONT"
+expect_contains "FILL.6 …the reviews from the review proof lines, and the ADRs" "Reviews: evidence piece pass (w-read); adversarial piece pass (w-read); structure piece pass (w-read); adversarial whole pass (w-read); structure whole pass (w-read). ADRs: none shipped." "$FA_CONT"
+expect_contains "FILL.7 …and the commit it closed at, written whole" "main at $FA_MAIN." "$FA_CONT"
+expect_absent "FILL.8 no Patrol sentence when no job is known (this session has no transcript) and no mark for it" "Patrol" "$FA_CONT"
+expect_eq "FILL.9 AC-3.3 the only marks left in the continuation are the five only a person knows" "$OWED_MARKS" "$(fill_marks "$FA/$CONT_REL")"
+OWED_NAMES='the first decision, or "none"; what was ruled at this close, or "none"; version; ideas path; carry-overs from this wave'
+expect_eq "FILL.10 …and close-out's output names each of them, in one line" "continuation-owed: 5 marks only a person can fill — $OWED_NAMES" \
+  "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^continuation-owed: ')"
+
+# THE ROW IS REFUSED, NOT MARKED, when the plan says nothing about its ADRs.
+FB="$(mk_fixture fill-b)"; advance_to "$FB" 8
+/usr/bin/grep -v '^adrs:' "$FB/$PLAN_REL" > "$FB/plan.tmp" && mv "$FB/plan.tmp" "$FB/$PLAN_REL"
+FB_STATE="$(presence_state "$FB")/$(sha_of "$FB/$PLAN_REL")/$(sha_of "$FB/$EPIC_REL")"
+run_close "$FB" check
+expect_eq "FILL.12 check says the close would refuse, naming the missing field and the line to write" "yes/yes" \
+  "$(contains "$CO_OUT" "presence: WOULD REFUSE")/$(contains "$CO_OUT" "adrs: none")"
+run_close "$FB" run
+expect_eq "FILL.13 run refuses (rc 2) naming the field, before any act" "2/yes/no" "$CO_RC/$(contains "$CO_OUT" "adrs:")/$(contains "$CO_OUT" "worktree-removed:")"
+expect_eq "FILL.14 …branch, tmp, continuation, plan and epic plan untouched" "$FB_STATE" \
+  "$(presence_state "$FB")/$(sha_of "$FB/$PLAN_REL")/$(sha_of "$FB/$EPIC_REL")"
+# …AND A PLAN THAT SAYS WHICH ADRS (paired with FILL.12–14: the same fixture with the line written closes).
+set_plan_keys "$FB" "-" "adrs: adrs/epic-fx/adr-052-the-workhorse.md"
+run_close "$FB" run
+expect_eq "FILL.15 the same plan with an adrs: line closes (rc 0) and the cell and the continuation name the ADR" "0/052/yes" \
+  "$CO_RC/$(adr_cell "$FB")/$(contains "$(cat "$FB/$CONT_REL")" "ADRs: 052.")"
+
+# THE PATROL JOB, from this session's transcript, when it is known: the id the platform minted, still undeleted.
+FP="$(mk_fixture fill-p)"; advance_to "$FP" 8
+FP_SID="closeout-fill-sid"
+mkdir -p "$SB_HOME/.claude/projects/-fixture-fill"
+FP_TR="$SB_HOME/.claude/projects/-fixture-fill/$FP_SID.jsonl"
+jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_cron1",name:"CronCreate",input:{cron:"*/30 * * * *",recurring:true,prompt:"Patrol tick (bionic). Run: bash /abs/hooks/session-poker.sh tick"}}]}}' > "$FP_TR"
+jq -nc '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_cron1",content:"Scheduled recurring job pj7c91ab (*/30 * * * *) — Patrol tick"}]}}' >> "$FP_TR"
+expect_contains "FILL.16 precondition: the transcript scan yields the Patrol job, kind patrol" "JOB	pj7c91ab	" \
+  "$(bash -c '. "$1/roots.sh" && . "$1/patrol.sh" && _patrol_scan "$2" ""' _ "$REPO_ROOT/payload/scripts/lib" "$FP_TR")"
+run_close_as "$FP_SID" "$FP" run
+expect_eq "FILL.17 the session that holds the job: the continuation names it, and no mark is left for it" "0/yes/no" \
+  "$CO_RC/$(contains "$(cat "$FP/$CONT_REL")" "Patrol job pj7c91ab deleted and the stamp disarmed at close")/$(contains "$(cat "$FP/$CONT_REL")" "Patrol job id")"
+
+# A LANDING REPORT THAT CANNOT BE READ is a sentence, not a mark: the plugin root's poker is a stub that fails.
+FQ="$(mk_fixture fill-q)"; advance_to "$FQ" 8
+FQ_PLUG="$SANDBOX/fill-q-plugin"
+mkdir -p "$FQ_PLUG"
+for f in "$REPO_ROOT"/payload/* "$REPO_ROOT"/payload/.claude-plugin; do [ -e "$f" ] && ln -s "$f" "$FQ_PLUG/${f##*/}"; done
+rm -f "$FQ_PLUG/hooks"; mkdir -p "$FQ_PLUG/hooks"
+for f in "$BIONIC_HOOKS_DIR"/*; do ln -s "$f" "$FQ_PLUG/hooks/${f##*/}"; done
+rm -f "$FQ_PLUG/hooks/session-poker.sh"; printf '#!/bin/bash\nexit 1\n' > "$FQ_PLUG/hooks/session-poker.sh"
+( in_fixture "$FQ" || exit 9
+  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$FQ_PLUG" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    bash "$SCRIPT" "$FQ/$PLAN_REL" run ) > "$SANDBOX/fq-out" 2>&1
+FQ_RC=$?
+expect_eq "FILL.18 with a poker that cannot report landings the close still finishes (rc 0)" "0" "$FQ_RC"
+expect_eq "FILL.19 …the landings section says so in a sentence, and the marks left are still only the five" "yes/$(printf '%s' "$OWED_MARKS" | tr '\n' '|')" \
+  "$(contains "$(cat "$FQ/$CONT_REL")" "landings: not read")/$(fill_marks "$FQ/$CONT_REL" | tr '\n' '|' | sed 's/|$//')"
 
 finish
