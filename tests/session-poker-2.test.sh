@@ -3108,9 +3108,9 @@ section "§DECLINE-ON: a decline names what it waits on (wave-30 T16; REQ-12 AC-
 # ============================================================
 #
 # 23.4% of wave-28's build wait-minutes were order holds written only in decline reasons. `decline
-# <ids> '<reason>' --on <row|file>` keeps the decline legal and makes the hold visible: with a row it
-# prints the task-set line that makes it a table fact, with a file the reconcile `ready` performs,
-# and with neither that the hold is unrecorded. The fill-ledger line gains `declined-on=`.
+# <ids> '<reason>' --on <row>` keeps the decline legal and makes the hold visible: with a row it
+# prints the task-set line that makes it a table fact, and with none that the hold is unrecorded; a
+# file (or any word that is no row) is refused, nothing recorded (wave-33 T7, AC-4.3). The fill-ledger line gains `declined-on=`.
 R16D="$(make_repo t16-decline-on)"; new_roster "$R16D"
 P16D="$(s47_plan "$R16D" 4 \
   "| T1 | 4 | build | the holder | implementor | — | 30 | REQ-x | payload/a.sh, $T16_REC/T1.md | pending | |" \
@@ -3131,12 +3131,20 @@ expect_eq "16d3b …the line, verbatim" \
 expect_nonempty "16d4 precondition: the ledger line is read back" "$(t16_led_last)"
 expect_eq "16d5 AC-12.7 the ledger line records declined-on= the row" "T1" "$(t16_field "$(t16_led_last)" declined-on)"
 expect_eq "16d5b …beside its reason" "T2 builds on what T1 writes" "$(t16_field "$(t16_led_last)" declined)"
+# A FILE IS NO ROW (wave-33 T7; REQ-4 AC-4.3, D8): a decline --on a file is refused, nothing recorded,
+# and the refusal prints the same decline without --on, which, run as printed, is recorded.
+cp "$R16D/$T16_REC/fill-ledger.log" "$TMPROOT/t16-led-before"
 poke "$R16D" decline T3 'both touch payload/a.sh' --on payload/a.sh
-expect_eq "16d6 a decline on a file is recorded (exit 0)" "0" "$RC"
-expect_contains "16d7 …naming the reconcile ready performs" \
-  "\`ready\` reconciles payload/a.sh on the line: a CONFLICT returns the row to merge" "$OUT"
+expect_eq "16d6 a decline on a file is refused (exit 1)" "1" "$RC"
+expect_true "16d6b …and nothing is recorded: the fill ledger is byte-identical" cmp -s "$TMPROOT/t16-led-before" "$R16D/$T16_REC/fill-ledger.log"
+expect_contains "16d7 …naming the reconcile ready performs, which makes a shared file no dependency" \
+  "a shared file is no dependency; \`ready\` reconciles payload/a.sh on the line, and a CONFLICT returns the row to merge" "$OUT"
 expect_absent "16d7b …and printing no task-set line (beside 16d3)" "task-set" "$OUT"
-expect_eq "16d8 …declined-on= the file" "payload/a.sh" "$(t16_field "$(t16_led_last)" declined-on)"
+T16_CALL="$(printf '%s\n' "$OUT" | sed -n 's/^poker: next call: //p' | head -1)"
+expect_eq "16d7c …printing the same decline without --on" "bash $T16_HOOK decline T3 'both touch payload/a.sh'" "$T16_CALL"
+( cd "$R16D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$T16_CALL" ) > /dev/null 2>&1; T16_RC=$?
+expect_eq "16d8 …which, run as printed, is recorded (exit 0) with declined-on=- beside its reason" \
+  "0|-|both touch payload/a.sh" "$T16_RC|$(t16_field "$(t16_led_last)" declined-on)|$(t16_field "$(t16_led_last)" declined)"
 poke "$R16D" decline T4 'held by hand'
 expect_eq "16d9 a decline naming neither is never refused (exit 0)" "0" "$RC"
 expect_contains "16d10 …and says the hold is unrecorded as a dependency" \
