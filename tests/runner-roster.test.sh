@@ -2216,8 +2216,9 @@ expect_eq "OA.11 …the solo suite ran under it" "$(oa_id_of tests/run.sh)" \
 # store holds a request per suite and none keyed by the runner: OA.2 is not vacuous.
 TOAM="$TMPROOT/one-adm-mut"
 rr_tree "$TOAM"; oa_stub "$TOAM" oa-fast no 0; oa_stub "$TOAM" oa-slow no 0
-anchor "$TOAM/tests/run.sh" '    _gate_ask_for whole tests/run.sh' 1
-grep -vF '    _gate_ask_for whole tests/run.sh' "$RUNNER" > "$TOAM/tests/run.sh"
+OA_ASK='if ! _gate_ask_for whole tests/run.sh; then'
+anchor "$TOAM/tests/run.sh" "    $OA_ASK" 1
+OA_N_="$OA_ASK" awk 'BEGIN { n = ENVIRON["OA_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if ! :; then" substr($0, i + length(n)); print }' "$RUNNER" > "$TOAM/tests/run.sh"
 expect_eq "OA.12 the mutant runner parses" "0" "$(bash -n "$TOAM/tests/run.sh" >/dev/null 2>&1; echo $?)"
 oa_drive "$TOAM"
 expect_eq "OA.13 …and is green" "0" "$RR_RC"
