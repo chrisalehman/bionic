@@ -48,6 +48,7 @@ landing-line.test.sh	501
 live-agents.test.sh	11
 loader.test.sh	2
 name-scan.test.sh	385
+notify.test.sh	28
 patrol-duties-gate.test.sh	291
 patrol-marker.test.sh	1
 patrol-revive.test.sh	45

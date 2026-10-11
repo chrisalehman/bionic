@@ -177,6 +177,16 @@ if ! declare -F fill_ledger_path >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/patrol.sh"
 fi
 
+# THE PERSON'S LEDGER AND ITS ONE SENDER (epic-23 wave-33-workhorse, T11; REQ-2, D2): owed.sh
+# keeps what the person owes, and sources notify.sh beside it. NOT in hooks/stop.sh's
+# `BIONIC_LIB_WANT`, and sourced only when readable: the send is never a reason for this process
+# to step aside, and a library without it (a copy older than this wave) sends nothing and changes
+# nothing else.
+if ! declare -F owed_send >/dev/null 2>&1 && [ -r "$_STOP_LIB_DIR/owed.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/owed.sh"
+fi
+
 # ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
 #
 # THREE VERDICTS ASKED THE SAME QUESTION THREE TIMES (REQ-10, T11): `stop_landing_gate`
@@ -2315,6 +2325,35 @@ ST_READY
   return 0
 }
 
+# THE TURN END CALLS THE PERSON (epic-23 wave-33-workhorse, T11; REQ-2 AC-2.2, AC-2.5; D2). Every
+# open item on the person's ledger (lib/owed.sh) not yet sent is sent once, through the one sender
+# (lib/notify.sh), carrying the line the run printed for its block; a later turn on the same open
+# item sends nothing. It rides the recorder below, and so runs BEFORE `hooks/stop.sh`'s re-entry
+# guard, for the reason the recorder does: after a refusal the Stop that actually ends the turn
+# carries `stop_hook_active` and runs nothing past the guard. A send inside the fold would miss it.
+#
+# THE PERSON'S TURN END ONLY: `Stop`, never `SubagentStop` — a writer's stop is not the turn the
+# person is waiting on. First the step items a plan has answered are closed: once the bound plan
+# carries `approved-by:`, no Step card is still owed (the cards close the earlier steps as they
+# render; this closes the last one, and every one a task-scale run never rendered past).
+#
+# NEVER A VERDICT. It prints nothing, refuses nothing and swallows every failure: owed_send is
+# bounded (one five-second attempt per failing turn) and returns 0, so the guard and the fold
+# decide exactly what they decided before, channel or no channel.
+stop_owed_send() {  # <event> -> always 0
+  [ "${1:-}" = Stop ] || return 0
+  declare -F owed_send >/dev/null 2>&1 || return 0
+  local k
+  if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ] \
+     && fill_plan_approved "$BIONIC_RUN_PLAN" >/dev/null 2>&1; then
+    for k in approve:step0 approve:step1 approve:step2 approve:step3; do
+      owed_close "$k" "plan approved-by" >/dev/null 2>&1
+    done
+  fi
+  owed_send >/dev/null 2>&1
+  return 0
+}
+
 # THE FILL LEDGER'S RECORDER (wave-20 REQ-5, AC-5.5; Δ2; ADR-036 decision 4). One line per Stop
 # of an engaged run whose ledger is live, appended to `fill_ledger_path` for the run's plan:
 #
@@ -2334,6 +2373,7 @@ ST_READY
 # APPEND-ONLY, ONE printf PER STOP, so a crash leaves at most a line that did not happen and a
 # concurrent reader never sees a rewrite. A ledger path that is a symlink is not written through.
 stop_fill_ledger() {  # <event> -> always 0
+  stop_owed_send "${1:-}"
   [ "${1:-}" = Stop ] || return 0
   stop_turn_facts || return 0
   [ "$_ST_LIVE" = 1 ] || return 0

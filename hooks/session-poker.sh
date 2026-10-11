@@ -323,6 +323,22 @@ fi
 . "$BIONIC_LIB/refuse.sh"
 POKER_WORD="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
 
+# THE PERSON'S LEDGER AND ITS ONE SENDER (epic-23 wave-33-workhorse, T11; REQ-2, D2). owed.sh keeps
+# what the person owes and sources notify.sh beside it: the tick opens and sends each GATE request
+# it raises, and approve, waive and decline close the item their answer settles. NOT in
+# `BIONIC_LIB_WANT`, and sourced only when readable: a library without it (one older than this wave)
+# leaves every verb and every tick exactly as it was, so the ledger can never refuse a command.
+if ! declare -F owed_send >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/owed.sh"
+fi
+# poker_owed_close <root> <key> <by> -> always 0, prints nothing: the answer verb closes the item.
+poker_owed_close() {
+  declare -F owed_close >/dev/null 2>&1 || return 0
+  OWED_ROOT="$1" owed_close "$2" "$3" >/dev/null 2>&1
+  return 0
+}
+
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
 
@@ -6300,6 +6316,7 @@ EOF
       die "REFUSED — could not write to $DC_LED; nothing was recorded."
       exit 2
     fi
+    for DC_ID in $DC_NAMED; do poker_owed_close "$REPO_REAL" "decline:$DC_ID" "decline"; done
     say "decline — ${DC_NAMED// /,}: recorded in $DC_LED; it stands for those rows until a row it did not name is ready."
     DC_UNREC="unrecorded as a dependency: this hold is a hand-hold the tick cannot judge; it stands only in the decline's reason"
     case "$DC_ON_AS" in
@@ -7590,6 +7607,7 @@ $HO_AGENTS"; fi
       exit 1
     fi
     plan_verb_swap approve "approved: $AP_NAME" writer
+    poker_owed_close "$PV_REPO" "approve:$AP_NAME" "approve"
     say "approve — $AP_NAME: approved: $AP_NAME by $AP_WHO written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
@@ -7989,6 +8007,7 @@ $PF_PLANL"
       exit 1
     fi
     plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
+    poker_owed_close "$PV_REPO" "waive:$WV_Q" "waive"
     say "waive — question=$WV_Q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
@@ -9249,6 +9268,11 @@ EOF
     # THE GATE LINES, printed by whichever arm decides, after its tick_conclude: one sentence that
     # says what the turn owes, then one line per request this tick raises, asker, category and
     # command head. A request already raised prints nothing; the file still holds it.
+    #
+    # EACH GATE LINE IS OWED TO THE PERSON (wave-33 T11; REQ-2 AC-2.3, D2): the request opens
+    # `gate:<key>` on the person's ledger, the key `gate_raised=` keeps, carrying the line printed,
+    # and the tick sends the gate items it opened through the one sender, once each. The send is
+    # silent and never fatal, so the lines above and the exit code are what they were.
     tick_gate_report() {
       local k st a c h
       [ -n "$TICK_GATE_NEW" ] || return 0
@@ -9256,9 +9280,15 @@ EOF
       while IFS="$(printf '\t')" read -r k st a c h; do
         [ -n "$k" ] || continue
         say "GATE ${a} — ${c}: ${h}"
+        if declare -F owed_open >/dev/null 2>&1; then
+          OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "gate:$k" "gate act: ${c}" "poker: GATE ${a} — ${c}: ${h}" >/dev/null 2>&1
+        fi
       done <<EOF
 $TICK_GATE_NEW
 EOF
+      if declare -F owed_send >/dev/null 2>&1; then
+        OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_send gate: >/dev/null 2>&1
+      fi
       return 0
     }
 
