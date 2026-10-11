@@ -965,8 +965,9 @@ rigor_print() {
 #   fix-cap:         a whole number, or <n>% of the ## Tasks rows  2 at single, 10% at double
 #
 # A plan with `rigor:` and none of the three is read with these defaults and never refused for
-# them. The field is read verbatim and never widened: `S1` names both reaches, `S1-on` one; an
-# agent has no verb that writes the field.
+# them. The core's rigor table shows the same defaults; tests/units.test.sh §DEBT holds the two to one.
+# The field is read verbatim and never widened: `S1` names both reaches, `S1-on` one; an agent has no
+# verb that writes the field.
 #
 # review_cadence_level <word>  -> `once`; nothing and rc 1 for any other word.
 # fix_policy_bad <set>         -> nothing, rc 0, when every comma-joined word (blanks around a comma
