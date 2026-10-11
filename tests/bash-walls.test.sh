@@ -3272,4 +3272,85 @@ run_hook "$(mk_payload "$R_SB" 'bash TESTS/RUN.SH' "$ACTOR" omit Bash test-runne
 expect_eq "SB.10 case-exact, TESTS/RUN.SH is another file: a script start, admitted and carried" \
   "0|export BIONIC_GATE_AGENT=t11writer; bash TESTS/RUN.SH" "$ST|$(sb_cmd)"
 
+section "§CARRY-EVERY — in bypass mode a budgeted agent's name rides on every command, so what it starts asks the gate as it (wave-33 T36; D7, AC-6.2)"
+# ============================================================
+#
+# T3's carry rode only on a command the classifier read as a script start, so a runner reached
+# through another interpreter (awk, python, node), `source` or an out-of-tree script asked the gate
+# as main, unbudgeted (T3-budget-at-ask.md, Known limits). The rule is ADR-052's: enforce where the
+# work becomes real, never by guessing from text. So every call a budgeted agent makes that the wall
+# does not handle as a suite carries its name, and the gate's ask (lib/gate.sh THE BUDGET) refuses
+# what is off the budget wherever it starts — IN BYPASS MODE ONLY. The CLI checks permission rules
+# against the input a hook returns, each subcommand on its own, so outside bypass mode the carried
+# `export …; <cmd>` would prompt where `<cmd>` was allowed; there the carry stays T3's (a script
+# start), and a runner in another language still asks as main (CE.7, the residual, named).
+# FIXTURE FIDELITY: R_SB's row (the recorder's own join, alpha.test.sh on the budget); the command
+# run is the one the harness runs (the staged rewrite when there is one, else the typed command),
+# under `bash -c` in the agent's checkout with the session id the harness exports and no inherited
+# BIONIC_GATE_AGENT. The runner is a project's own, which asks this tree's gate budget for its
+# suite before it runs it (`gate_budget`, the read `gate_ask` makes first); its mark is the run.
+# fails-when: an off-budget suite started through an awk or `env bash` launcher runs.
+CE_MARKS="$SANDBOX/ce-marks"; mkdir -p "$CE_MARKS" "$R_SB/tools"
+CE_GATE="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/gate.sh"
+[ -r "$CE_GATE" ] || CE_GATE="${BIONIC_HOOKS_DIR}/../scripts/lib/gate.sh"
+printf '#!/bin/bash\n. %q || exit 1\ngate_budget work "$1" || exit 75\n: > "$CE_MARKS/$1.ran"\n' "$CE_GATE" \
+  > "$R_SB/tools/runner.sh"
+printf '#!/bin/bash\nbash tools/runner.sh "$@"\n' > "$R_SB/tools/launch.sh"
+CE_OUT=""; CE_RC=0
+ce_run() {  # <agent id or ""> <command> [permission mode, bypassPermissions by default; - for none]
+  local _c _m="${3:-bypassPermissions}"   # leaves CE_OUT CE_RC
+  run_hook "$(mk_payload "$R_SB" "$2" "$1" omit Bash test-runner 1800000 \
+    | jq -c --arg m "$_m" 'if $m == "-" then . else . + {permission_mode: $m} end')"
+  _c="$(sb_cmd)"; [ -n "$_c" ] || _c="$2"
+  rm -f "$CE_MARKS"/*.ran
+  CE_OUT="$(cd "$R_SB" && env -u BIONIC_GATE_AGENT CLAUDE_CODE_SESSION_ID="$SID" CE_MARKS="$CE_MARKS" \
+    bash -c "$_c" 2>&1)"
+  CE_RC=$?
+}
+ce_ran() { ls "$CE_MARKS" 2>/dev/null | sed 's/\.ran$//' | sort | paste -sd, -; }
+CE_AWK="awk 'BEGIN { exit system(\"bash tools/runner.sh \" ARGV[1]) }'"
+ce_run "" "$CE_AWK gamma.test.sh"
+expect_eq "CE.0 control: the main thread's awk launcher runs gamma.test.sh (no budget holds main)" "0 gamma.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_eq "CE.0b …and its call carries nothing: the gate's who is main" "" "$(sb_cmd)"
+ce_run "$ACTOR" "$CE_AWK gamma.test.sh"
+expect_eq "CE.1 AC-6.2 a budgeted agent's off-budget suite started from an awk launcher is refused at the gate, 75, nothing run" \
+  "75 " "$CE_RC $(ce_ran)"
+expect_contains "CE.1b …with the budget's own line, naming the agent" \
+  "refused at the gate — gamma.test.sh is not on t11writer's budget" "$CE_OUT"
+expect_eq "CE.1c …because the call carried the agent's row name, the command unchanged after it" \
+  "export BIONIC_GATE_AGENT=t11writer; $CE_AWK gamma.test.sh" "$(sb_cmd)"
+ce_run "$ACTOR" 'env bash tools/launch.sh gamma.test.sh'
+expect_eq "CE.2 AC-6.2 …and from an env bash launcher" "75 " "$CE_RC $(ce_ran)"
+expect_contains "CE.2b …with the budget's own line" "gamma.test.sh is not on t11writer's budget" "$CE_OUT"
+ce_run "$ACTOR" "$CE_AWK alpha.test.sh"
+expect_eq "CE.3 an on-budget suite through the same awk launcher is admitted and runs" "0 alpha.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_absent "CE.3b …with no refusal line" "refused" "$CE_OUT"
+ce_run "$ACTOR" 'git --version'
+expect_eq "CE.4 a budgeted agent's non-suite command still runs" "0" "$CE_RC"
+expect_contains "CE.4b …and prints what it prints" "git version" "$CE_OUT"
+expect_eq "CE.4c …carrying the agent" "export BIONIC_GATE_AGENT=t11writer; git --version" "$(sb_cmd)"
+ce_run "a-unplaced-ce5" "$CE_AWK gamma.test.sh"
+expect_eq "CE.5 an agent no row budgets: its awk launcher runs gamma.test.sh, as before" "0 gamma.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_eq "CE.5b …and its call carries nothing (CE.1c is the positive)" "" "$(sb_cmd)"
+run_hook "$(mk_payload "$R_SB" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_contains "CE.6 a classified suite keeps its own path: the booking wrap, which names the agent itself" \
+  "booked.sh" "$(sb_cmd)"
+expect_absent "CE.6b …and no carry in front of it" "export BIONIC_GATE_AGENT" "$(sb_cmd)"
+# OUTSIDE BYPASS MODE: T3's carry, unchanged. A plain command comes back untouched, so a permission
+# rule that allowed it still matches it; a script start is still carried (SB.2c, SB.5c).
+for _ce_m in default acceptEdits -; do
+  ce_run "$ACTOR" 'git --version' "$_ce_m"
+  expect_eq "CE.7 [mode $_ce_m] a budgeted agent's plain command runs" "0" "$CE_RC"
+  expect_eq "CE.7b [mode $_ce_m] …and comes back untouched (CE.4c is the positive)" "" "$(sb_cmd)"
+  ce_run "$ACTOR" "$CE_AWK gamma.test.sh" "$_ce_m"
+  expect_eq "CE.7c [mode $_ce_m] THE RESIDUAL: its awk launcher's off-budget suite asks as main and runs" \
+    "0 gamma.test.sh" "$CE_RC $(ce_ran)"
+  ce_run "$ACTOR" 'env bash tools/launch.sh gamma.test.sh' "$_ce_m"
+  expect_eq "CE.7d [mode $_ce_m] …while a script start is carried as T3 shipped it, and refused at the gate" \
+    "75 " "$CE_RC $(ce_ran)"
+done
+
 finish
