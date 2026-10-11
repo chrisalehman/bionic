@@ -2277,8 +2277,33 @@ suspect_lines() {  # <plan> [<id>] -> `<id><TAB><holder><TAB><clause — loosen 
     'NF >= 4 { printf "%s\t%s\t%s — loosen it: bash %s %s\n", $1, $2, $3, hook, $4 }'
 }
 
+# A ROW WAITING ON THE USER'S APPROVAL ALONE IS THE PERSON'S BLOCK (wave-33 T35; AC-2.2, D2). A WAIT
+# whose every clause is `approval:<name>` (or its live read) opens `approve:<name>` on the person's
+# ledger (lib/owed.sh), the key the approve verb closes, carrying the WAIT line printed. A row that
+# also waits on other work is not yet blocked on the person and opens nothing; `approval:plan` is the
+# Step-3 card's. Opening is idempotent per key, so every later tick on the same wait is one item.
+tick_owed_approval() {  # <reason> <printed line> -> always 0, prints nothing
+  local c names=""
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  while IFS= read -r c; do
+    c="${c# }"; c="${c% }"; c="${c#live:}"
+    case "$c" in
+      approval:plan) return 0 ;;
+      approval:[A-Za-z0-9]*) case "${c#approval:}" in *[!A-Za-z0-9._-]*) return 0 ;; esac ;;
+      *) return 0 ;;
+    esac
+    names="$names ${c#approval:}"
+  done <<TOA
+$(printf '%s\n' "$1" | awk '{ n = split($0, a, /; /); for (i = 1; i <= n; i++) print a[i] }')
+TOA
+  for c in $names; do
+    OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "approve:$c" "approval: $c" "$2" >/dev/null 2>&1
+  done
+  return 0
+}
+
 tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
-  local rows waiting all offered line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k
+  local rows waiting all offered line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
@@ -2292,7 +2317,9 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
     base="${line%%$'\037'*}"; sfx=""
     [ "$base" = "$line" ] || sfx="${line#*$'\037'}"
     case "$base" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}" ;; esac
-    say "WAIT $(clean "$base")${sfx:+ · $(clean_whole "$sfx")}"
+    wl="WAIT $(clean "$base")${sfx:+ · $(clean_whole "$sfx")}"
+    say "$wl"
+    tick_owed_approval "${base#* — }" "poker: $wl"
   done <<TICK_WAIT
 $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n' "$rows" "$waiting" "$susp" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
@@ -4073,6 +4100,26 @@ said_refuse() {  # <user_said rc> <the words, folded> <act> -> the refusal on st
   esac
 }
 
+# A FAILING QUESTION IS THE PERSON'S TO WAIVE (wave-33 T35; AC-2.2, D2). A reading whose newest fact is
+# result=fail leaves the person the call: fix it, or waive the question. So the judge's every answer
+# settles the ledger (lib/owed.sh) for the waivable questions: each `failing` review line opens
+# `waive:<question>`, the key the waive verb closes, carrying the line the refusal prints; every other
+# question's item is closed, its block gone (a passing reading over the fix). Opening is idempotent per
+# key, so a second refusal on the same question is one item. Prints nothing; never changes the verdict.
+cur8_owed_waivers() {  # <facts_state output> -> always 0
+  local q fl
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  for q in $PROOF_QUESTIONS; do
+    fl="$(printf '%s\n' "$1" | awk -F'\t' -v q="$q" '$1 == "review" && $2 == q && $(NF - 1) == "failing" { print; exit }')"
+    if [ -n "$fl" ]; then
+      OWED_ROOT="$PV_REPO" owed_open "waive:$q" "waiver: $q" "$fl" >/dev/null 2>&1
+    else
+      poker_owed_close "$PV_REPO" "waive:$q" "no longer failing"
+    fi
+  done
+  return 0
+}
+
 # cur8_judge -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
 # the working head (the head of the checkout holding the plan's `working-branch:`, the head `waive`
 # and `proof-add` record), with that head in PV_HEAD8; otherwise refuses `current 8`, exit 1, the
@@ -4095,6 +4142,7 @@ cur8_judge() {
   esac
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
+  [ "$rc" -eq 2 ] || cur8_owed_waivers "$out"
   [ "$rc" -eq 0 ] && return 0
   if [ "$rc" -eq 2 ]; then
     die "REFUSED — current: 8 is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"

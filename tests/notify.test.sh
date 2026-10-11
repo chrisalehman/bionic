@@ -489,6 +489,78 @@ expect_eq "W3a …and a dead session's store is removed" "no" \
 kill -9 "$NT_LIVE_PID" 2>/dev/null
 
 # ============================================================
+section "§ASKS: a named approval a row waits on opens one item, at the tick and at the dispatch wall (T35; AC-2.2)"
+# ============================================================
+#
+# The tick prints `WAIT <id> — approval:<name>` for a row whose only unmet read is an approval the
+# user gives, and the dispatch wall refuses a dispatch of that row naming the approve verb. Both
+# open `approve:<name>`, the key the approve verb closes, with the line they printed. A row that
+# waits on an approval AND on other work is not yet blocked on the person: it opens nothing.
+export CLAUDE_CONFIG_DIR="$NS_CFG"
+channel_on "$NS_CFG"
+nk_world() {  # <label> -> a repo: armed, bound to a reads table at Step 4, committed, a git user
+  local r p; r="$(make_repo "$1")"; new_roster "$r"
+  git -C "$r" config user.name "Dana Fixture"
+  s47_plan "$r" 2 \
+    "| T1 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/x.sh | active | |" \
+    "| T4 | 7 | doc | the release | implementor | — | 15 | REQ-x | CHANGELOG.md | pending | approval:release |" \
+    "| T5 | 4 | build | waits on two | implementor | — | 20 | REQ-x | payload/y.sh | pending | approval:doctrine-growth, payload/x.sh |" >/dev/null
+  # The commit gate the approve verb's dry commit asks reads the plan's sdlc version and step line.
+  p="$r/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  awk 'NR == 1 { print; print "canonical_sdlc_version: 14"; next }
+       $0 == "- Step 4: in progress" { print "- Step 4: T1 dispatched; T4 and T5 wait"; next } { print }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  ( cd "$r" && git add -f .bionic/docs && git commit -qm fixture ) >/dev/null 2>&1
+  printf '%s' "$r"
+}
+nk_reply() { nt_owed "$1" owed_list | awk -F'\t' -v k="$2" '$1 == k { print $4 }'; }  # <repo> <key>
+RK="$(nk_world nt-ask-approval)"
+: > "$NT_CALLS"
+poke_pressure "$RK" 8192 1.0 tick
+expect_eq "AK1 precondition: the tick prints the release's WAIT, the approval its only unmet read" \
+  "poker: WAIT T4 — approval:release" "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T4 ')"
+expect_contains "AK1a precondition: …and T5's WAIT names its approval beside a row's write" \
+  "approval:doctrine-growth" "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T5 ')"
+NK_KEYS="$(nt_owed "$RK" owed_list | cut -f1)"
+expect_contains "AK2 AC-2.2 the WAIT on an approval opens an item keyed approve:<name>, the approve verb's key" \
+  "approve:release" "$NK_KEYS"
+expect_absent "AK2a …and the row that also waits on other work opens none (same reader)" "approve:doctrine-growth" "$NK_KEYS"
+expect_eq "AK2b …carrying the line the tick printed" "poker: WAIT T4 — approval:release" "$(nk_reply "$RK" approve:release)"
+expect_eq "AK2c the tick sends nothing for it by itself" "0" "$(nt_calls)"
+nt_stop "$RK"
+expect_eq "AK3 the Stop that ends the blocked turn sends one notification" "1" "$(nt_calls)"
+expect_contains "AK3a …carrying the WAIT line" "body=poker: WAIT T4 — approval:release" "$(nt_last)"
+poke_pressure "$RK" 8192 1.0 tick
+nt_stop "$RK"
+expect_eq "AK4 a later turn on the same unresolved approval sends nothing" "1" "$(nt_calls)"
+expect_eq "AK4a …and the store holds one open item for it, not two" "1" \
+  "$(nt_owed "$RK" owed_list | cut -f1 | /usr/bin/grep -c '^approve:release$')"
+POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+poke "$RK" approve release 'Ship it.'
+POKE_BOUND="$POKE_BOUND_WAS"
+expect_eq "AK5 the approve verb records the user's reply (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "AK5a …and closes the item it answers" "|key=approve:release|state=closed|by=approve|" \
+  "$(cat "$RK/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
+poke_pressure "$RK" 8192 1.0 tick
+nt_stop "$RK"
+expect_eq "AK5b …so the next tick reopens nothing and the next Stop sends nothing" "1" "$(nt_calls)"
+
+# THE DISPATCH WALL. A dispatch of the release row, refused because the approval is not recorded,
+# opens the same key with the refusal's own line; a fresh world, so the tick has opened nothing.
+RKP="$(nk_world nt-ask-preflight)"
+poke_bind "$RKP"
+expect_eq "AK6 precondition: the store is empty before the dispatch" "" "$(nt_owed "$RKP" owed_list)"
+NK_PAYLOAD=$(jq -nc --arg c "$RKP" --arg s "$SID" \
+  '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Agent",tool_input:{description:"T4",prompt:"do T4\nRow: T4",subagent_type:"bionic:implementor",name:"w99-T4"}}')
+NK_OUT="$( cd "$RKP" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" ANTHROPIC_API_KEY=sk-fixture-marker bash "$PREFLIGHT" <<< "$NK_PAYLOAD" 2>&1 )"
+expect_contains "AK6a precondition: the wall refuses the dispatch for the approval" "row T4 waits for approval:release" "$NK_OUT"
+expect_contains "AK6b AC-2.2 the refusal opens approve:release" "approve:release" "$(nt_owed "$RKP" owed_list | cut -f1)"
+expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval:release" "$(nk_reply "$RKP" approve:release)"
+( cd "$RKP" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" ANTHROPIC_API_KEY=sk-fixture-marker bash "$PREFLIGHT" <<< "$NK_PAYLOAD" ) >/dev/null 2>&1
+expect_eq "AK6d a second refused dispatch on the same approval opens nothing new" "1" \
+  "$(/usr/bin/grep -c '|key=approve:release|' "$RKP/.bionic/tmp/owed-$SID.state" 2>/dev/null | tr -d ' ')"
+
+# ============================================================
 section "§QUIET: progress never sends — a landing, a dispatch, a quiet tick (AC-2.4)"
 # ============================================================
 RQ="$(nt_world nt-quiet)"
