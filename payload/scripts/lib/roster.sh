@@ -879,11 +879,13 @@ roster_ack_ledger() {  # <roster> -> the sweeper ledger beside it, or nothing
 # so these lines are invisible to them.
 #
 # THE PENDING FLAG (`ruling-pending-<sid>.state`, beside the roster) is the push hook's fast path:
-# present while some ruling of the session may be unpushed, so a session with none pays one file
-# test per tool call. `ruling_record` raises it after its append; the hook drops it before it reads
-# and raises it again when a ruling of another writer is still unpushed, so a ruling recorded
-# while the hook reads is never left without the flag. A stale flag costs one slow read; a missing
-# one costs the push, never the guard.
+# present while some ruling of the session is PENDING, neither pushed nor shown, so a session with
+# none pays one file test per tool call. A shown ruling (acknowledged, or printed by a guard) is
+# read already and is never pushed (wave-33 T31: the walk's ruling acked before its push was pushed
+# anyway, and its flag held every call on the slow path). `ruling_record` raises the flag after its
+# append; `ruling_flag_settle` is the one place it comes down, run by the hook after its claims and
+# by every `shown=` stamp. A stale flag costs one slow read; a missing one costs the push, never
+# the guard.
 RULING_TEXT_MAX=4000
 RULING_US=$'\037'
 
@@ -921,14 +923,30 @@ ruling_record() {  # <roster> <writer> <text> -> the id
   printf '%s' "$id"
 }
 
-# Appends one stamp line for <id>: each <key=value> with any `|` folded to a space.
+# Appends one stamp line for <id>: each <key=value> with any `|` folded to a space. A `shown=`
+# stamp settles the pending flag, so the ruling it marks read (by `ruling-ack` or a guard) holds no
+# writer's calls on the slow path.
 ruling_stamp() {  # <roster> <id> <writer> <key=value>...
   local f="${1:-}" line kv
   line="ruling/v1|id=${2:-}|writer=${3:-}"
   shift 3
   for kv in "$@"; do line="${line}|${kv//|/ }"; done
   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 1
-  printf '%s\n' "$line" >> "$f"
+  printf '%s\n' "$line" >> "$f" || return 1
+  case "$line" in *'|shown='*) ruling_flag_settle "$f" ;; esac
+  return 0
+}
+
+# THE FLAG'S ONE SETTLING: down, then the read, then up again when some ruling is pending (neither
+# pushed nor shown). Dropping before the read is what keeps a ruling `ruling_record` appends
+# meanwhile from losing its flag: its append lands before this read, or its own raise lands after.
+ruling_flag_settle() {  # <roster>
+  local flag
+  flag="$(ruling_pending_flag "${1:-}")" || return 0
+  rm -f "$flag" 2>/dev/null
+  ruling_fold "$1" | awk -F"$RULING_US" '$4 == "" && $6 == "" { found = 1 } END { exit !found }' \
+    && : >> "$flag" 2>/dev/null
+  return 0
 }
 
 # THE ONE READER. One line per ruling, in the order recorded, its fields joined by RULING_US:
