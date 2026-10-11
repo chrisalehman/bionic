@@ -68,6 +68,13 @@ RR_NOW=1700000000
 RR_GATE_ENV=(-u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET -u BIONIC_LOAD_NOW_FILE
   "BIONIC_GATE_DIR=$TMPROOT/gate" BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10
   BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192)
+# THE STORE KNOWS A COST (wave-32 T1; D5). A store with no cost line anywhere admits a request
+# only when nothing else is admitted, and under the pinned clock every drive's run is one of
+# zero seconds, which the gate learns nothing from. This store's suites ran side by side only
+# because such runs used to write cost lines; the machine's real store always carries some, so
+# the fixture plants one small line, and every key this store has not seen is promised it.
+mkdir -p "$TMPROOT/gate/cost"
+printf '1:0.1:1:%s\n' "$RR_NOW" > "$TMPROOT/gate/cost/rr-seed"
 
 # rr_tree <dir> — a scratch tree the shipped runner resolves against: the runner
 # itself byte for byte, the seam every suite sources, the real framework (so the
@@ -804,6 +811,7 @@ T9N_INNER="$TMPROOT/t9n-inner"
 rr_tree "$T9N_INNER"
 rr_stub "$T9N_INNER" "zin-inner"
 export RR9_INNER="$T9N_INNER"
+export RR9_INNER_GATE="$TMPROOT/gate-9n-inner"
 
 T9N="$TMPROOT/t9n"
 rr_tree "$T9N"
@@ -828,6 +836,10 @@ expect_eq "9.19 the outer run is green, nested drive and all" "0" "$RR9_RC"
 # that never happened.
 expect_eq "9.20 the nested run really ran its own suite" "yes" \
   "$([ -f "$RR_MARKS/zin-inner.ran" ] && echo yes || echo no)"
+# PAIRED POSITIVE for the scratch store (wave-32 T1; D5): the nested run asked the store under
+# this suite's mktemp root that n-outer handed it, so its request is there, keyed by its suite.
+expect_eq "9.20a the nested run's request is in the scratch store it was handed, keyed zin-inner.test.sh" \
+  "1" "$(grep -lx 'key=zin-inner.test.sh' "$RR9_INNER_GATE"/requests/[0-9]* 2>/dev/null | wc -l | tr -d ' ')"
 expect_eq "9.21 the outer file names the outer tree's two suites" \
   "$(printf 'n-outer.test.sh\nn-plain.test.sh\n')" "$(rr9_prog_labels "$P9N")"
 expect_absent "9.22 …and carries no label from the nested tree" \
