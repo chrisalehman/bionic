@@ -4356,5 +4356,97 @@ expect_eq "OS-3b …exit 0" "0" "$(call_rc units_validate "$OS_R4/$OS_PLAN_REL")
 sed 's/| b.sh | — | — | pending |/| b.sh | — | — | done |/' "$OS_R4/$OS_PLAN_REL" > "$SANDBOX/os-done.md"
 expect_eq "OS-3c …and the retired word done is named on the same table (the reader reads it)" \
   "T2: status done is not one of pending active landed dropped" "$(call units_validate "$SANDBOX/os-done.md")"
+section "§DEBT — wave-33 T16: each doctrine debt pair is one site or holds an agreement check that goes red on a doctored copy; the second axis is asked as a question (REQ-9 AC-9.1, AC-9.5; D10)"
+# fails-when: a debt pair stands unburned, or its check passes with the two readers made to disagree
+# (a doctored copy is read by the SAME function as the shipped file, and must be told apart); or a
+# reader's checks still define the axis without the question, or a recorded token changes.
+#
+# Every check reads the SHIPPED text (the rendered files under skills/ and payload/context/), the
+# files a session loads, and never the sources they are rendered from. Each is a function of a path,
+# so the doctored copy under $SANDBOX goes through the code the real file does; a positive count on
+# the shipped file sits beside every negative one on the doctored copy.
+DBT="$SANDBOX/debt"; mkdir -p "$DBT/steps"
+DBT_SKILL="$REPO_ROOT/skills/canonical-sdlc/SKILL.md"
+DBT_STEP6="$REPO_ROOT/skills/canonical-sdlc/steps/6.md"
+DBT_SEV="$REPO_ROOT/payload/context/severity.md"
+DBT_RUN="$REPO_ROOT/payload/scripts/lib/run.sh"
+DBT_PROOF="$REPO_ROOT/payload/scripts/lib/proof.sh"
+
+# dbt_count <fixed string> <file>… -> the number of lines holding the string, across the files.
+dbt_count() { local s="$1"; shift; cat "$@" | /usr/bin/grep -cF -- "$s"; }
+
+# --- p1-sentence: the cost-model sentence is said once; Step 6 points at it -------------------
+P1='mind checks run once, on the settled whole'
+expect_eq "DEBT-1 p1-sentence: the cost-model sentence stands at one site in the core and the steps" "1" \
+  "$(dbt_count "$P1" "$DBT_SKILL" "$REPO_ROOT"/skills/canonical-sdlc/steps/*.md)"
+cp "$DBT_SKILL" "$DBT/SKILL.md"; cp "$DBT_STEP6" "$DBT/steps/6.md"
+printf 'The moment of a check is set by its cost model: machine checks run early and often, %s.\n' "$P1" >> "$DBT/steps/6.md"
+expect_eq "DEBT-1b …and a second copy planted in Step 6 is counted as two" "2" "$(dbt_count "$P1" "$DBT/SKILL.md" "$DBT"/steps/*.md)"
+
+# --- debt-line-rule: the debt line's form is stated once, in its own section -------------------
+# dbt_debt_prose <severity.md> -> the lines that state the form in prose: it names the form and does
+# not start with it. The form itself is the flush-left lines in the example block.
+dbt_debt_prose() { /usr/bin/grep -F 'debt: <kind>' "$1" | /usr/bin/grep -vc '^debt: '; }
+expect_nonempty "DEBT-2 positive: the debt line's form stands flush left in the shipped severity text" \
+  "$(/usr/bin/grep '^debt: <kind> <concept> <path>:<line>' "$DBT_SEV")"
+expect_eq "DEBT-2b debt-line-rule: no prose restates the form" "0" "$(dbt_debt_prose "$DBT_SEV")"
+{ cat "$DBT_SEV"; printf -- '- A debt finding is one line flush left: `debt: <kind> <concept> <path>:<line>`.\n'; } > "$DBT/severity.md"
+expect_eq "DEBT-2c …and a prose copy planted is counted" "1" "$(dbt_debt_prose "$DBT/severity.md")"
+
+# --- debt-kinds: the kinds the debt table lists are PROOF_DEBT_KINDS, in order -----------------
+# dbt_table_kinds <severity.md> -> the first cell of each row of the table headed `| Kind |`.
+dbt_table_kinds() {
+  awk -F'|' '/^\| Kind \|/ { t = 1; next } t && /^\|---/ { next } t && /^\|/ { gsub(/^ +| +$/, "", $2); k = k (k == "" ? "" : " ") $2; next } t { exit } END { print k }' "$1"
+}
+DBT_KINDS_CODE="$(bash -c '. "$1" >/dev/null 2>&1; printf %s "$PROOF_DEBT_KINDS"' _ "$DBT_PROOF")"
+expect_nonempty "DEBT-3 positive: the code names its debt kinds" "$DBT_KINDS_CODE"
+expect_nonempty "DEBT-3b positive: the debt table lists kinds" "$(dbt_table_kinds "$DBT_SEV")"
+expect_eq "DEBT-3c debt-kinds: the table lists exactly the kinds the code reads, in order" "$DBT_KINDS_CODE" "$(dbt_table_kinds "$DBT_SEV")"
+sed 's/^| unpinned-pair |/| unpinned-set |/' "$DBT_SEV" > "$DBT/severity.md"
+expect_ne "DEBT-3d …and a renamed kind in a copy of the table disagrees with the code" "$DBT_KINDS_CODE" "$(dbt_table_kinds "$DBT/severity.md")"
+
+# --- review-defaults: the rigor table's defaults are the ones run.sh applies -------------------
+# dbt_rigor_prose <SKILL.md> -> `<cadence>|<policy>|<cap at single>|<cap at double>` as the table
+# reads, in the shape run.sh gives them: the first word of a cell, a `+` joined with a comma.
+dbt_rigor_prose() {
+  awk -F'|' '
+    function cell(s) { gsub(/^ +| +$/, "", s); return s }
+    /^\| when \(`review-cadence:`\)/ { c = cell($3); sub(/[, ].*/, "", c) }
+    /^\| becomes a row unasked \(`fix-policy:`\)/ { p = cell($3); sub(/,.*/, "", p); gsub(/ \+ /, ",", p) }
+    /^\| cap on review-born rows \(`fix-cap:`\)/ { s = cell($3); d = cell($4); sub(/ .*/, "", d) }
+    END { print c "|" p "|" s "|" d }' "$1"
+}
+DBT_RIGOR_CODE="$(bash -c '. "$1" >/dev/null 2>&1; printf %s "$REVIEW_CADENCE_DEFAULT|$FIX_POLICY_DEFAULT|$(fix_cap_default single)|$(fix_cap_default double)"' _ "$DBT_RUN")"
+expect_eq "DEBT-4 positive: run.sh gives the four defaults" "once|S1,S2-on|2|10%" "$DBT_RIGOR_CODE"
+expect_eq "DEBT-4b review-defaults: the core's rigor table reads the defaults run.sh applies" "$DBT_RIGOR_CODE" "$(dbt_rigor_prose "$DBT_SKILL")"
+sed 's/| 2 | 10% of the plan |/| 3 | 10% of the plan |/' "$DBT_SKILL" > "$DBT/SKILL.md"
+expect_ne "DEBT-4c …and a cap doctored in a copy of the table disagrees" "$DBT_RIGOR_CODE" "$(dbt_rigor_prose "$DBT/SKILL.md")"
+sed 's/| S1 + S2-on, in-diff | S1 + S2-on, in-diff |/| S1 + S2, in-diff | S1 + S2, in-diff |/' "$DBT_SKILL" > "$DBT/SKILL.md"
+expect_ne "DEBT-4d …and a policy doctored in a copy of the table disagrees" "$DBT_RIGOR_CODE" "$(dbt_rigor_prose "$DBT/SKILL.md")"
+
+# --- the finding line's form (repayment, wave-33 T16): said once, in the severity text the readers are handed
+# dbt_form_files <file>… -> how many of the files state the finding line's form.
+dbt_form_files() { local n=0 f; for f in "$@"; do /usr/bin/grep -qF 'finding: <n> <S1|S2|S3|S4>' "$f" && n=$((n + 1)); done; echo "$n"; }
+expect_eq "DEBT-6 positive: the severity text states the finding line's form" "1" "$(dbt_form_files "$DBT_SEV")"
+expect_eq "DEBT-6b the finding line's form stands at one site in the loaded doctrine" "1" \
+  "$(dbt_form_files "$DBT_SKILL" "$REPO_ROOT"/skills/canonical-sdlc/steps/*.md "$REPO_ROOT"/skills/canonical-sdlc/dispatch.md "$REPO_ROOT"/skills/canonical-sdlc/operational-rules.md "$REPO_ROOT"/agents/*.md "$REPO_ROOT"/payload/context/*.md)"
+cp "$DBT_STEP6" "$DBT/steps/6.md"; printf 'one `finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line> <title>` per finding\n' >> "$DBT/steps/6.md"
+expect_eq "DEBT-6c …and a copy planted in Step 6 is counted as a second site" "2" "$(dbt_form_files "$DBT_SEV" "$DBT/steps/6.md")"
+
+# --- AC-9.5: the second axis is asked as a question, recorded on/off, in the table and each reader's checks
+AXIS='user-facing: will a user experience it, including its consequence? yes or no'
+for dbt_f in severity checks-adversarial checks-evidence checks-structure; do
+  expect_nonempty "DEBT-5 AC-9.5 payload/context/$dbt_f.md asks the axis as the question" \
+    "$(/usr/bin/grep -F -- "$AXIS" "$REPO_ROOT/payload/context/$dbt_f.md")"
+  expect_eq "DEBT-5b …and no line defines the axis as reach" "0" \
+    "$(/usr/bin/grep -ciE '(^|[^a-z])reach (says|`o)|severity and reach|reach and severity' "$REPO_ROOT/payload/context/$dbt_f.md")"
+done
+expect_eq "DEBT-5b2 …and the severity text, which is the axis's one definition, carries no word reach" "0" "$(/usr/bin/grep -ciw reach "$DBT_SEV")"
+expect_eq "DEBT-5c the severity table's columns are the question's answers, recorded on and off" \
+  '| | user-facing `on` | user-facing `off` |' "$(/usr/bin/grep -F 'user-facing `on`' "$DBT_SEV")"
+expect_contains "DEBT-5d the tokens are unchanged: the finding line still records <on|off>" \
+  'finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line> <title>' "$(cat "$DBT_SEV")"
+expect_eq "DEBT-5e …and the code's closed set of answers is still on and off" "on off" \
+  "$(bash -c '. "$1" >/dev/null 2>&1; printf %s "$PROOF_REACHES"' _ "$DBT_PROOF")"
 
 finish

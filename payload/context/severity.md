@@ -6,8 +6,9 @@
      tests/render.test.sh goes red whenever this file and its sources disagree. -->
 
 <!-- SEVERITY-BEGIN -->
-Severity says how bad a finding is if a user meets it. Reach says whether a user who follows
-what the run ships meets it. Rate both; the table gives the consequence.
+Severity says how bad a finding is if a user meets it. The second axis is asked as a question,
+`user-facing: will a user experience it, including its consequence? yes or no`, and recorded `on` for yes,
+`off` for no. Rate both; the table gives the consequence.
 
 | Severity | What it is |
 |---|---|
@@ -16,7 +17,7 @@ what the run ships meets it. Rate both; the table gives the consequence.
 | S3 Minor | Something is wrong, and a simple workaround exists or only a non-core function is affected |
 | S4 Trivial | No functional effect: cosmetic, wording, a comment that misstates the code, a gap in test tooling |
 
-| | reach `on` | reach `off` |
+| | user-facing `on` | user-facing `off` |
 |---|---|---|
 | S1 | fix in the wave | fix in the wave |
 | S2 | fix in the wave | defer |
@@ -41,14 +42,11 @@ by severity.
 | unpinned-pair | A shared pair with no named agreement test | burn-when-touched: `<concept>` |
 | one-case-abstraction | An abstraction, parameter or indirection with one case or one caller | burn-when-touched: `<concept>` |
 
-- A debt finding names its concept and its sites, never a severity, on one line flush left:
-  `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`. It is not a `finding:` line, and it
-  sets `result` to `flag` when no finding sets it higher.
-- Its disposition is burn-when-touched, never fix now and never note: the orchestrator records it
-  in `record/<run>/debt.md` at the review findings disposition, and the next row whose Files touch the concept burns
-  it inside its own work.
+- A debt finding is never rated; its form is under The debt line, below. It sets `result` to `flag`
+  when no finding sets it higher.
+- Its disposition is burn-when-touched, never fix now and never note.
 
-Only readers rate: a finding's severity and reach are written by the reader that found it, and no
+Only readers rate: a finding's severity and its user-facing answer are written by the reader that found it, and no
 agent, the orchestrator included, moves a rating in either direction; a user's re-rating is
 recorded with attribution.
 
@@ -88,7 +86,7 @@ debt: <kind> <concept> <path>:<line>
 debt: <kind> <concept> <path>:<line>, <path>:<line>
 ```
 
-`<concept>` is a single token with no space, such as `reap-counter`, and the first site follows it at once. Each further site follows a comma and a space. A debt site is never `-`, and the line carries no severity or reach.
+`<concept>` is a single token with no space, such as `reap-counter`, and the first site follows it at once. Each further site follows a comma and a space. A debt site is never `-`, and the line carries no severity or `on`/`off`.
 
 ```
 debt: one-case-abstraction name-registry lib/naming.sh:6
