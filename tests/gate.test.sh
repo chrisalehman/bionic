@@ -36,6 +36,10 @@
 #                      lines kept
 #   §ZERO-SECONDS D5   (wave-32 T1) a run admitted and ended in one second writes its end and
 #                      rc and no cost line; one ended 2 s later writes its line
+#   §CORES-OVER D5     (wave-32 T19) a run whose children's processor time over its seconds
+#                      reads above the machine's core count (impossible: a 1–3 s run) writes
+#                      its end and rc and no cost line; one at or under the count writes it.
+#                      Mutation: the core-count test removed writes the impossible line
 #   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, a waiting
 #                      request, promised work not yet showing and memory over the share each
 #                      give no room; a quiet machine gives room; two asks on one reading give
@@ -139,6 +143,7 @@ fi
 #   CHILD_ADMIT=<v>  the child's BIONIC_GATE_ADMIT is <v> instead of <id>; `-` leaves it unset
 #   ENDFIRST=1 once admitted, gate_end <id> 0 before running CHILD (the admission is over)
 #   WORK=<sh>  once admitted, run <sh> as a child before holding (processor time for `times`)
+#   PLANT_CPU=<s>  the children's processor time `times` reports at gate_end is <s> seconds
 #   AGENT=<a>  ask as agent <a> (the who's second half) instead of <name>, so two askers share a who
 #   LIVE=1     after a 75, stay alive, polling nothing, until <dir>/<name>.go
 # Its own pid is written first, to <name>.pid.
@@ -163,6 +168,7 @@ if [ -n "${CHILD:-}" ]; then
     bash "$0" "$d" "$kid" "$kind" "$key" 0 )
 fi
 [ -z "${WORK:-}" ] || bash -c "$WORK"
+[ -z "${PLANT_CPU:-}" ] || times() { printf '0m0.00s 0m0.00s\n0m%ss 0m0.00s\n' "$PLANT_CPU"; }
 [ "${HOLD:-0}" = 1 ] || exit 0
 i=0
 while [ ! -f "$d/$n.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
@@ -736,6 +742,51 @@ expect_eq "Z.4 a run ended 2 s after its admission writes its end" "1000|1002" \
   "$(field "$z2_id" admitted)|$(field "$z2_id" ended)"
 expect_regex "Z.5 …and a cost line: 2 s, at 1002, after the planted one" \
   '^10:0\.5:20:1000 [0-9]+:[0-9.]+:2:1002$' "$(tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/k" | sed 's/ $//')"
+
+# ── §CORES-OVER ──────────────────────────────────────────────────────────────
+# A RUN THAT USED MORE CORES THAN THE MACHINE HAS TEACHES NOTHING (wave-32 T19; D5). Over a
+# second or three the children's processor time (`times`) over the seconds read 84 cores on an
+# 8-core machine, four times in one wave: a number no run can reach is a measurement error, and
+# a promise of it would size every later ask. gate_end writes its end and rc and no cost line.
+# The children's time is planted (PLANT_CPU) over a 2 s run on an 8-core machine: 40 s is 20.00
+# cores, 16 s is 8.00 (the machine's count: written), 16.04 s is 8.02 (over: not), 3 s is 1.50.
+section "§CORES-OVER — a run above the machine's core count writes no cost line (D5)"
+cores_run() {  # <name> <planted cpu seconds> [gate lib] — a 2 s run on the planted clock, ended
+  GATE_LIB="${3:-$GATE_LIB}" PLANT_CPU="$2" HOLD=1 ask_bg "$1" work k 0; wait_for 20 has "$1.rc"
+  world_tick 2
+  release "$1"
+}
+fresh cores-over
+world_machine 8 8192 40 1.0
+world_cost k 10 0.5 20
+CO_BEFORE="$(cat "$BIONIC_GATE_DIR/cost/k")"
+cores_run co1 40
+co1_id="$(id_of co1)"
+expect_eq "CO.1 a run of 20.00 cores on an 8-core machine still writes its end and rc" "1002|0" \
+  "$(field "$co1_id" ended)|$(field "$co1_id" rc)"
+expect_eq "CO.2 gate_end exits 0" "0" "$(cat "$D/co1.endrc" 2>/dev/null)"
+expect_eq "CO.3 …and the cost file is unchanged: the one planted line" "$CO_BEFORE" \
+  "$(cat "$BIONIC_GATE_DIR/cost/k")"
+cores_run co2 16.04
+expect_eq "CO.4 a run of 8.02 cores, just over the count, writes no line either" "$CO_BEFORE" \
+  "$(cat "$BIONIC_GATE_DIR/cost/k")"
+cores_run co3 16
+expect_regex "CO.5 a run of exactly 8.00 cores, the machine's count, writes its line" \
+  '^10:0\.5:20:1000 [0-9]+:8\.00:2:1006$' "$(tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/k" | sed 's/ $//')"
+cores_run co4 3
+expect_regex "CO.6 a run of 1.50 cores, under the count, writes its line" \
+  ':1\.50:2:1008$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
+fresh cores-over-mut
+world_machine 8 8192 40 1.0
+world_cost k 10 0.5 20
+MC="$(mutant cores-over)"
+anchor "$MC" "exit !(c + 0 <= n + 0)" 1
+sed -i.bak 's/exit !(c + 0 <= n + 0)/exit 0/' "$MC"
+cores_run cm1 40 "$MC"
+expect_regex "CO.7 the mutant (no core-count test) still ends the run and writes its line" \
+  ':2:1002$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
+expect_regex "CO.8 …and the line is the impossible 20.00 cores — the test is the rule" \
+  ':20\.00:2:' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
 
 # ── §ROOM ────────────────────────────────────────────────────────────────────
 # gate_room [--owed <n>] (wave-28 T13; D14): may another writer start? Every row plants an
