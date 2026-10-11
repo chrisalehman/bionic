@@ -591,13 +591,25 @@ expect_contains "AC-24 …and the main thread is exactly where farm-out's deny b
   "$FARM_REASON" "$OUT"
 
 # THE TWO THAT ARE SILENT ALL THE WAY DOWN: not suite-class, so neither wall speaks.
+# ORDERED BEHAVIOUR CHANGE (wave-33 T36; D7, AC-6.2): these payloads are in bypass mode and GREPO's row
+# states a budget, so the call now comes back carrying the agent's name to the gate (`export
+# BIONIC_GATE_AGENT=guarded; <the command>`). Stdout USED TO be empty; "silently" still means what it
+# meant — no refusal, no deny and no advisory — and the only thing on stdout is that rewrite.
+expect_carry_only() {  # <label> <command> — stderr empty; stdout the carry and nothing else
+  expect_empty "$1" "$ERR"
+  expect_eq "$1 …stdout holds only the rewrite: no deny, no advisory" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  expect_eq "$1 …which is the agent's name in front of the command as typed" \
+    "export BIONIC_GATE_AGENT=guarded; $2" \
+    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)"
+}
 run_compound "$(mk_bash_payload "$GREPO" 'git status --short' "$AGENT_ID" true)"
 expect_eq "AC-24 a non-suite command backgrounded is ALLOWED" 0 "$ST"
-expect_empty "AC-24 …silently" "$ERR$OUT"
+expect_carry_only "AC-24 …silently" 'git status --short'
 
 run_compound "$(mk_bash_payload "$GREPO" 'git commit -m "make the row green"' "$AGENT_ID" true)"
 expect_eq "AC-24 …and B-5's prose case is not a suite either" 0 "$ST"
-expect_empty "AC-24 …silently, on both streams" "$ERR$OUT"
+expect_carry_only "AC-24 …silently, on both streams" 'git commit -m "make the row green"'
 
 # --- AC-16 (R-12/C-2): the B-9 wall refuses the same superset ---
 for sc in "${SUPERSET_SUITES[@]}"; do
@@ -607,7 +619,7 @@ done
 # NEGATIVE CONTROL on the same arm: prose that merely names a suite is not one.
 run_compound "$(mk_bash_payload "$GREPO" 'echo "sudo bash tests/run.sh"' "$AGENT_ID" true)"
 expect_eq "AC-16 …but prose naming a suite is still ALLOWED" 0 "$ST"
-expect_empty "AC-16 …in silence, from both walls" "$ERR$OUT"
+expect_carry_only "AC-16 …in silence, from both walls" 'echo "sudo bash tests/run.sh"'
 
 # --- the partition still holds, one level in: an UNARMED session is silent ---
 #
