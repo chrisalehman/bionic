@@ -1542,7 +1542,7 @@ _card_step1() {  # <citation path> <artifact path as given>
     _card_fold_at 4 "${l#*"$CARD_TAB"}"
   done <<< "$inh"
   printf '\n  Artifacts\n    requirements  %s\n\n' "$1"
-  printf 'Do you approve these requirements? Reply "approved" to approve it.\n'
+  printf '%s\n' "$CARD_Q_STEP1"
   printf 'explain <requirement>\n'
 }
 
@@ -1563,7 +1563,7 @@ _card_step2_task() {  # <citation path>
   printf '\n  Design\n'
   _card_fold_at 4 "$d"
   printf '\n  Artifacts\n    plan  %s\n' "$1"
-  printf '\nDo you approve this design? Reply "approved" to approve it.\n'
+  printf '\n%s\n' "$CARD_Q_STEP2"
 }
 
 # THE DOCS ROOT, SPELLED THE WAY THE SPEC'S OWN PATH LINE IS (wave-26 D13). A frontmatter
@@ -1672,7 +1672,7 @@ _card_step2() {  # <artifact path>
   _card_artifact_lines adr "$WCARD_ADRS" "$dp"
   _card_artifact_lines ledger "$WCARD_LEDGER" "$dp"
   _card_artifact_lines reqs "$WCARD_REQS" "$dp"
-  printf '\nDo you approve this design? Reply "approved" to approve it.\n'
+  printf '\n%s\n' "$CARD_Q_STEP2"
   printf 'show evals <req> · explain <decision> · show ownership\n'
 }
 
@@ -1797,7 +1797,7 @@ _card_step3() {  # <citation path> <artifact path as given>
     "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "$(_card_rigor_line "$WCARD_RIGOR")"
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
-  printf '\nDo you approve this plan? Reply "approved" to approve it.\n'
+  printf '\n%s\n' "$CARD_Q_STEP3"
   printf 'show evals <req> · show task <n> · explain <decision>\n'
 }
 
@@ -1842,6 +1842,67 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
   return 0
 }
 
+# ── WHAT THE PERSON OWES (epic-23 wave-33-workhorse, T11; REQ-2 AC-2.2, D2) ─────────────
+#
+# A STEP CARD LEAVES THE PERSON A DECISION, so the card is where the need is declared: a whole
+# card rendered for the session's own run opens `approve:step<n>` on the person's ledger
+# (lib/owed.sh), titled for a push and carrying the one question the card printed, and the Stop
+# that ends the turn sends it once (lib/stop.sh). Rendering a card closes the earlier steps'
+# items, since a later card is shown only once the earlier one was answered; the Stop closes
+# them all once the plan carries `approved-by:`. The question strings live here, once, and are
+# what both the card and the item print.
+#
+# ONLY THE SESSION'S OWN RUN. The artifact must be the plan the session is bound to, or share
+# its stem (`wave-01-x.requirements.md` and `wave-01-x.spec.md` beside `wave-01-x.plan.md`), so a
+# card rendered over another run's artifacts (a suite's fixtures, a reader comparing waves)
+# opens nothing. No session id, no binding, no library: nothing is opened, and in every case the
+# card prints exactly what it printed before and exits as it did; the ledger is written silently.
+CARD_Q_STEP0='Do you approve this configuration? Reply "approved" to approve it.'
+CARD_Q_STEP1='Do you approve these requirements? Reply "approved" to approve it.'
+CARD_Q_STEP2='Do you approve this design? Reply "approved" to approve it.'
+CARD_Q_STEP3='Do you approve this plan? Reply "approved" to approve it.'
+
+_card_phys() {  # <path> -> its absolute physical path; rc 1 when its directory does not resolve
+  local d
+  d="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s' "$d" "${1##*/}"
+}
+_card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> wave-01-x
+  local b="${1##*/}"
+  b="${b%.md}"
+  printf '%s' "${b%.*}"
+}
+
+_card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
+  local n="$1" sid="${CLAUDE_CODE_SESSION_ID:-}" art root plan m q t
+  [ -n "$sid" ] && [ -n "${2:-}" ] || return 0
+  [ -r "${CARD_SELF_DIR}/lib/owed.sh" ] || return 0
+  declare -F session_plan >/dev/null 2>&1 && declare -F project_root >/dev/null 2>&1 || return 0
+  art="$(_card_phys "$2")" || return 0
+  root="$(project_root "${art%/*}" 2>/dev/null)"
+  [ -n "$root" ] || return 0
+  plan="$(session_plan "$root" "$sid" 2>/dev/null)" || return 0
+  plan="$(_card_phys "$plan")" || return 0
+  if [ "$art" != "$plan" ]; then
+    case "$n" in 1|2) [ "$(_card_stem "$art")" = "$(_card_stem "$plan")" ] || return 0 ;; *) return 0 ;; esac
+  fi
+  declare -F owed_open >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null || return 0
+  case "$n" in
+    0) q="$CARD_Q_STEP0"; t="approval: Step 0 configuration" ;;
+    1) q="$CARD_Q_STEP1"; t="approval: Step 1 requirements" ;;
+    2) q="$CARD_Q_STEP2"; t="approval: Step 2 design" ;;
+    3) q="$CARD_Q_STEP3"; t="approval: Step 3 plan" ;;
+    *) return 0 ;;
+  esac
+  m=0
+  while [ "$m" -lt "$n" ]; do
+    OWED_ROOT="$root" OWED_SID="$sid" owed_close "approve:step$m" "card.sh step$n" >/dev/null 2>&1
+    m=$((m + 1))
+  done
+  OWED_ROOT="$root" OWED_SID="$sid" owed_open "approve:step$n" "$t" "$q" >/dev/null 2>&1
+  return 0
+}
+
 # ── THE COMMAND LINE ─────────────────────────────────────────────────────────
 [ "$#" -ge 1 ] || _card_usage "no row kind"
 
@@ -1853,7 +1914,12 @@ case "$1" in
     exit 1 ;;
   regression)
     [ "$#" -ge 2 ] && [ "$#" -le 3 ] || _card_usage "regression takes a scale and an optional plan (got $(( $# - 1 )) arguments)"
-    _card_regression_line "$2" "${3:-}" && exit 0
+    if _card_regression_line "$2" "${3:-}"; then
+      # The Step-0 card's regression line names the plan the run was configured into: that card
+      # leaves the person the configuration to approve (T11; D2). Without a plan it opens nothing.
+      _card_owe 0 "${3:-}"
+      exit 0
+    fi
     printf "card.sh: '%s' is no scale — use task, wave or epic\n" "$2" >&2
     exit 1 ;;
   inherited)
@@ -1891,6 +1957,7 @@ case "$1" in
       step2) _card_step2 "$_card_art" ;;
       step3) _card_step3 "$_card_art" "$2" ;;
     esac
+    _card_owe "${1#step}" "$2"
     exit 0 ;;
 esac
 
