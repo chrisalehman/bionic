@@ -807,6 +807,12 @@ expect_contains "9.18 …while the report still carries it, in roster order" \
   "zzz-killed.test.sh" "$RR9_OUT"
 
 # ---- (d) a nested run does not pollute the outer watcher's file ------------
+# FIXTURE FIDELITY (wave-32 T1; D5). The nested run is handed a store under this suite's own
+# mktemp root (RR9_INNER_GATE), as §TIMING's is: the outer worker scrubs BIONIC_GATE_DIR from
+# the suite it starts, so before this the inner run asked the machine's real store, under the
+# pinned clock, with a scratch store's id in BIONIC_GATE_ADMIT, and left a request and a cost
+# line there. What the fixture now pins: the nested run's request is in the scratch store
+# (9.20a), and nothing in this section names the real store at all.
 T9N_INNER="$TMPROOT/t9n-inner"
 rr_tree "$T9N_INNER"
 rr_stub "$T9N_INNER" "zin-inner"
@@ -822,7 +828,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 : > "$RR_MARKS/n-outer.ran"
 section "n-outer"
-( cd "$RR9_INNER" && bash tests/run.sh >/dev/null 2>&1 )
+( cd "$RR9_INNER" && BIONIC_GATE_DIR="$RR9_INNER_GATE" bash tests/run.sh >/dev/null 2>&1 )
 expect_eq "the nested run over the inner tree is green" "0" "$?"
 finish
 RR9_NESTED
