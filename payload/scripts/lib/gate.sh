@@ -44,6 +44,8 @@
 #                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
 #                            One read of the store answers every name, and it takes no lock.
 #   gate_share               the machine's share, 1 to 100 (absent or unreadable: 92)
+#   gate_width               the workers the share has room for: floor(share × cores ÷ 100), at least 1
+#                            (7 at share 92 on 8 cores); the width a whole run of tests/run.sh takes
 #   gate_promise <key>       the per-field promise for a key, <mem>:<cores>:<seconds>, loading the
 #                            store itself; nothing when no cost is on record anywhere
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
@@ -165,6 +167,19 @@ gate_share() {
   v=$((10#$v))
   { [ "$v" -ge 1 ] && [ "$v" -le 100 ]; } || v=92
   printf '%s\n' "$v"
+}
+
+# gate_width — the share's room as a whole number of workers: floor(share × cores ÷ 100), at
+# least 1. The processor limit an admission is tested against (`_gate_decide`) is the same
+# product unfloored; a whole run, admitted alone, sizes its workers from this one formula
+# (wave-32 T2, D1), so no runner keeps a width of its own.
+gate_width() {
+  local c w
+  c="$(_res_cores)"
+  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  w=$(( $(gate_share) * c / 100 ))
+  [ "$w" -ge 1 ] || w=1
+  printf '%s\n' "$w"
 }
 
 # ── the lock ─────────────────────────────────────────────────────────────────

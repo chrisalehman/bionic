@@ -33,7 +33,7 @@
 #   bash tests/run.sh --serial     one at a time, in roster order
 #   bash tests/run.sh --dry-run    print the job width and the order it would run in, run nothing
 #   bash tests/run.sh --only a.test.sh [b.test.sh …]   the named suites only (see THE DOOR)
-#   BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh   the ceiling the rung reads against
+#   BIONIC_TEST_JOBS_CEILING=4 bash tests/run.sh   a cap under the width the rung reads against
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
 #   BIONIC_TEST_PROGRESS=p.tsv bash tests/run.sh also append <UTC>TAB<label>TAB<rc>
 #                                    as each suite lands, so a long run can be watched
@@ -48,8 +48,9 @@
 #
 # THE WIDTH IS READ, NOT SET (wave-roster-lifecycle S9, spec AC-15, R4). A run
 # samples the machine's pressure once and reads `pressure_level` (resources.sh)
-# over the ring against a ceiling — `BIONIC_TEST_JOBS_CEILING`, falling back to
-# the old default of 8 — so a run started while the machine is under strain gets
+# over the ring against a ceiling — the gate's width, `gate_width` = floor(share ×
+# cores ÷ 100), 7 at share 92 on 8 cores (wave-32 T2; D1), capped by
+# `BIONIC_TEST_JOBS_CEILING` when one is named — so a run started while the machine is under strain gets
 # a narrower width automatically instead of a human having to notice and set
 # `BIONIC_TEST_JOBS` by hand. `BIONIC_TEST_JOBS` is retired as an input for
 # exactly that reason: a literal a caller fixes cannot answer "how busy is the
@@ -108,14 +109,19 @@ SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
-# ── THE GATE, ASKED PER SUITE (wave-28 T12; D10, D13, AC-2.12) ────────────────
+# ── THE GATE: ONE ADMISSION FOR A WHOLE RUN, ONE PER SUITE AT THE DOOR (wave-32 T2; D1) ──
 #
-# Every suite this runner starts asks the machine's one gate (payload/scripts/lib/gate.sh) for
-# itself, keyed by its file name, and runs with BIONIC_GATE_ADMIT naming its own request; the
-# runner itself holds nothing. Before wave-28 a run started through the Bash tool held ONE
-# booking for the whole run and handed it to every worker, so up to eight suites ran on one
-# place and every shim nested in them booked nothing. Now `xargs -P` is an upper bound, and the
-# gate decides how many of those workers run at once.
+# A WHOLE RUN (no --only, the default mode) asks the machine's one gate
+# (payload/scripts/lib/gate.sh) once, `whole tests/run.sh`, before its batch, and holds it until
+# its solo drain is done: it is admitted only while nothing else admitted is unfinished, and
+# nothing else is admitted while it holds. Every worker inherits it, so the run's width is JOBS,
+# the share's room (`gate_width`), and none of its suites waits on the gate. Before wave-32 each
+# worker asked for its own suite and the gate's load test let them through one at a time: in
+# wave-31's green run 85 of 92 requests waited and about five suites ran at once on 8 cores.
+#
+# THE DOOR (--only) AND --serial ASK PER SUITE (wave-28 T12; D10, D13, AC-2.12): every suite asks
+# for itself, keyed by its file name, and runs with BIONIC_GATE_ADMIT naming its own request; the
+# runner holds nothing. A writer's door must never take the machine.
 #
 # NESTING. A suite that drives a nested runner hands that runner its admission in
 # BIONIC_GATE_ADMIT, and the gate believes it only for a descendant of the request's holder,
@@ -169,8 +175,10 @@ if [ "${1:-}" = "--one" ]; then
   _one_queue="${BIONIC_TEST_QUEUE:?run.sh --one is an internal mode}"
   _one_work="${BIONIC_TEST_WORK:?run.sh --one is an internal mode}"
   _one_cmd="$(awk -F'\t' -v l="$_one_label" '$1 == l { print $2; exit }' "$_one_queue")"
-  # THE ASK (T12): this worker asks for its own suite and holds the admission while it runs.
-  # A solo suite's worker inherits the runner's whole admission, which the gate believes.
+  # THE ASK (T12): this worker asks for its own suite and holds the admission while it runs —
+  # under --only. In a whole run it inherits the run's one admission (wave-32 T2), which the gate
+  # believes for a descendant of its holder, so it asks nothing and ends nothing; a solo suite's
+  # worker inherits the admission its drain hands it the same way.
   _gate_ask_for work "$_one_label"
   [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
   _one_start="$(date +%s)"
@@ -185,6 +193,9 @@ if [ "${1:-}" = "--one" ]; then
   _one_rc=$?
   _gate_end_for "$_one_rc"
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
+  # THE ORDER SUITES LAND IN (wave-32 T2; D6): one short append, as the progress line below, so
+  # the summary's `last` names the suite whose verdict was written last.
+  printf '%s\n' "$_one_label" >>"$_one_work/landed"
   # THE PROGRESS LINE, WHERE THE VERDICT FIRST EXISTS. This is the only writer
   # during a default run and it covers both drains — the parallel batch and the
   # solo suites below re-enter this same worker — so one append here is every
@@ -235,6 +246,9 @@ unset BIONIC_TEST_PROGRESS
 # the workers' .sec files — so the private name is a plain shell variable and is never
 # exported: a nested run sees neither name, and sets its own only when its caller does.
 _TEST_TIMING_FILE="${BIONIC_TEST_TIMING:-}"
+
+# THE RUNNER'S OWN START (wave-32 T2; D6), for the `Wall:` line a whole run ends with.
+_RUN_T0="$(date +%s)"
 unset BIONIC_TEST_TIMING
 
 # ── argv ─────────────────────────────────────────────────────────────────────
@@ -278,7 +292,8 @@ while [ $# -gt 0 ]; do
       echo "  --write-timing      after a full run, rewrite tests/timing.tsv from the seconds it measured"
       echo "                      (off by default: the run leaves the tree clean; refused with --only or --dry-run)"
       echo "  --only <suite>…     run only the named suites (file names, e.g. a.test.sh)"
-      echo "  BIONIC_TEST_JOBS_CEILING  the ceiling the pressure rung reads against (default 8)"
+      echo "  BIONIC_TEST_JOBS_CEILING  a cap under the width the pressure rung reads against"
+      echo "                            (the width: the gate's share of the cores, gate_width)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
       echo "  BIONIC_TEST_PROGRESS  a file to append to, one <UTC>TAB<label>TAB<rc>"
       echo "                        line per suite as it lands"
@@ -488,14 +503,25 @@ fi
 if [ "$DRY_RUN" -eq 0 ]; then
   pressure_sample >/dev/null 2>&1 || :
 fi
-JOBS="$(pressure_level "${BIONIC_TEST_JOBS_CEILING:-8}")"
-# A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The `:-8`
+# THE WIDTH IS THE SHARE'S ROOM (wave-32 T2; D1, ADR-051). The rung reads against the gate's own
+# width, `gate_width` = floor(share × cores ÷ 100), 7 at share 92 on 8 cores: a whole run is
+# admitted alone (THE ONE ADMISSION, below), and this is how many workers the share has room for.
+# The runner keeps no width of its own; BIONIC_TEST_JOBS_CEILING is a cap UNDER the width, never a
+# raise above it. A tree without the gate library (a scratch copy of this runner) reads against
+# the old default of 8, as before.
+_WIDTH=8
+if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
+case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
+_ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
+if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
+JOBS="$(pressure_level "$_ceiling")"
+# A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The default
 # above covers an UNSET variable and nothing else: `pressure_level` refuses a ceiling that
 # is not a positive integer with exit 2 and prints nothing on stdout, so `JOBS` came out
 # empty and `xargs -P ""` aborted the whole run. This file runs under `set -uo pipefail`
 # with no `-e`, so the refusal was silent apart from `pressure_level`'s own stderr line —
-# which is still printed, and is the explanation for this fallback.
-case "$JOBS" in ''|*[!0-9]*) JOBS=8 ;; esac
+# which is still printed, and is the explanation for this fallback to the width.
+case "$JOBS" in ''|*[!0-9]*) JOBS=$_WIDTH ;; esac
 
 # ── THE ROSTER RUNS LONGEST-FIRST (wave-30 T10; D8a, REQ-5 AC-5.2) ───────────
 #
@@ -869,6 +895,23 @@ if [ "$SERIAL" -eq 0 ]; then
   # LAUNCHED LONGEST-FIRST (T10), and the solo drain the same way; the queue stays in label order.
   _order_labels <"$LAUNCH" | cut -f1 >"$LAUNCH.ordered" && mv "$LAUNCH.ordered" "$LAUNCH"
   _order_labels <"$SOLO" | cut -f1 >"$SOLO.ordered" && mv "$SOLO.ordered" "$SOLO"
+  # THE ONE ADMISSION (wave-32 T2; D1, AC-1.1, ADR-051). A whole run — no --only — asks the gate
+  # once, `whole tests/run.sh`, before its batch, and holds it through the solo drain: admitted
+  # only while nothing else admitted is unfinished, and nothing else is admitted while it holds.
+  # Every `--one` worker inherits it in BIONIC_GATE_ADMIT, which the gate believes for a
+  # descendant of its holder, so a worker asks nothing and ends nothing, and the run's width is
+  # JOBS, the share's room, rather than whatever the gate's load test let through one suite at a
+  # time. `--only` is a writer's door and never takes the machine: its suites ask for themselves,
+  # one request each, as before. A runner started inside an admission (a nested run, a booked
+  # command) is believed under it and holds nothing of its own (_RUN_GATE_OWN 0). A store that
+  # cannot be written leaves _RUN_GATE_ID empty: the gate's own line says so, and every worker
+  # asks for itself and runs unadmitted, as before.
+  _RUN_GATE_ID=""; _RUN_GATE_OWN=0
+  if [ "$ONLY" -eq 0 ] && { [ -s "$LAUNCH" ] || [ -s "$SOLO" ]; }; then
+    _gate_ask_for whole tests/run.sh
+    _RUN_GATE_ID="$_GATE_ID"; _RUN_GATE_OWN="$_GATE_OWN"
+    [ -z "$_RUN_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_RUN_GATE_ID"
+  fi
   [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
   # THEN THE SOLO SUITES, ONE AT A TIME, ON THE NOW-IDLE RUNNER (T20, A-orch-28).
   # Reuses the exact `--one` worker every parallel suite already runs through —
@@ -883,7 +926,10 @@ if [ "$SERIAL" -eq 0 ]; then
   # the runner asks the gate for the whole machine (`gate_ask whole <suite>`: admitted only
   # while nothing else admitted is unfinished, and nothing else is admitted while it holds),
   # then waits for a settled load (`resources_settled`: the load now, not the ring's median).
-  # The admission is this runner's, ended after the suite with its code.
+  # The admission is this runner's, ended after the suite with its code. IN A WHOLE RUN the
+  # runner already holds the whole machine (THE ONE ADMISSION, above; wave-32 T2), so a solo
+  # suite asks nothing and ends nothing: it settles, is checked and retried as below, under the
+  # run's admission, which ends once the drain is done.
   #
   # VOID, NOT FAILED. The load is read again after the suite, less the suite's own share
   # of it (`resources_own_load`, from the CPU its worker used; wave-26 T26, review 4 F4).
@@ -970,18 +1016,26 @@ if [ "$SERIAL" -eq 0 ]; then
       _solo_one "$label"
       return 0
     fi
-    _gate_ask_for whole "$label"
-    if [ -z "$_GATE_ID" ]; then
-      why="the store $(gate_dir) could not be written, so the whole machine was not had"
-      _solo_one "$label"
-      printf '%s\n' "$why" >"$TMP/${label}.void"
-      echo "tests/run.sh: void — ${label}: ${why}; it ran unadmitted and is not retried" >&2
-      return 0
-    fi
-    if [ "$_GATE_OWN" -eq 0 ] &&
-       [ "$(sed -n 's/^kind=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" = whole ]; then
-      _solo_one "$label"      # inside a whole admission already (NESTING, above)
-      return 0
+    if [ "$_RUN_GATE_OWN" -eq 1 ]; then
+      # UNDER THE RUN'S OWN ADMISSION (T2): the whole machine is already this runner's, so the
+      # suite asks nothing and ends nothing; the runner is the outer run that reads the load, so
+      # the settle, the check after the run and the retries below still apply, and the suite's
+      # one ceiling counts from its turn.
+      _GATE_OWN=0
+    else
+      _gate_ask_for whole "$label"
+      if [ -z "$_GATE_ID" ]; then
+        why="the store $(gate_dir) could not be written, so the whole machine was not had"
+        _solo_one "$label"
+        printf '%s\n' "$why" >"$TMP/${label}.void"
+        echo "tests/run.sh: void — ${label}: ${why}; it ran unadmitted and is not retried" >&2
+        return 0
+      fi
+      if [ "$_GATE_OWN" -eq 0 ] &&
+         [ "$(sed -n 's/^kind=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" = whole ]; then
+        _solo_one "$label"      # inside a whole admission already (NESTING, above)
+        return 0
+      fi
     fi
     cores="$(_res_cores)"
     deadline=$((SECONDS + SOLO_MAX))
@@ -1032,6 +1086,21 @@ if [ "$SERIAL" -eq 0 ]; then
       [ -n "$_solo_label" ] || continue
       ( _solo_run "$_solo_label" )
     done <"$SOLO"
+  fi
+  # THE RUN'S ADMISSION ENDS HERE (T2), once the solo drain is done, with 0 when every suite it
+  # launched left a 0 and 1 otherwise. The end is this shell's: it is the holder, and its `times`
+  # hold the whole run's children, which is the cost the gate learns for `tests/run.sh`.
+  _RUN_T1="$(date +%s)"
+  if [ "$_RUN_GATE_OWN" -eq 1 ]; then
+    _run_rc=0
+    while IFS= read -r _run_label; do
+      [ -n "$_run_label" ] || continue
+      [ "$(cat "$TMP/${_run_label}.rc" 2>/dev/null)" = 0 ] || _run_rc=1
+    done <<EOF_RUN_LABELS
+$(cat "$LAUNCH" "$SOLO" 2>/dev/null)
+EOF_RUN_LABELS
+    _GATE_ID="$_RUN_GATE_ID"; _GATE_OWN=1
+    _gate_end_for "$_run_rc"
   fi
   while IFS="$(printf '\t')" read -r label _queued_cmd; do
     [ -n "$label" ] || continue
@@ -1109,6 +1178,18 @@ echo "Gating: ${pass} passed, ${fail} failed"
 # why, since a disturbance is only one of the causes (wave-26 T26). Only a suite that passed
 # is listed here; one that failed is under `Failed:`, its reason beside it (T43).
 [ "$void" -ne 0 ] && echo -e "Void: ${void} — not timed, each for the reason given; advisory, not a failure:${voided}"
+# THE WALL LINE (wave-32 T2; D6, AC-1.3). A whole run in the default mode says what it cost by its
+# own clock: the wall from this runner's start to the end of its solo drain, the suite-seconds its
+# workers measured (every .sec file, a void try's included: that work was done), the width it ran
+# at, and the suite whose verdict landed last. `Gating:` above keeps its shape (proof.sh reads it),
+# and the `Advisory:` and `Void:` lines stay directly under it; this line comes after them. The
+# re-measure a tune row cites is this line.
+if [ "$SERIAL" -eq 0 ] && [ "$ONLY" -eq 0 ]; then
+  _wall_work="$(cat "$TMP"/*.sec 2>/dev/null | LC_ALL=C awk '$1 ~ /^[0-9]+$/ { s += $1 } END { print s + 0 }')"
+  _wall_last="$(LC_ALL=C awk 'NF { l = $0 } END { print (l == "" ? "none" : l) }' "$TMP/landed" 2>/dev/null)"
+  [ -n "$_wall_last" ] || _wall_last=none
+  echo "Wall: $(( ${_RUN_T1:-$(date +%s)} - _RUN_T0 ))s · work ${_wall_work}s · width ${JOBS} · last ${_wall_last}"
+fi
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
