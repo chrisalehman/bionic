@@ -1757,7 +1757,7 @@ _detect_bound_kill() {  # <pid> — stop the bounded job and its children, group
 
 detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on timeout
   local limit="${1:-15}"; shift
-  local pid waited=0 tenths=0 rc out_file had_monitor
+  local pid waited=0 tenths=0 micro=0 rc out_file had_monitor
 
   _DETECT_BOUND_SEQ=$((_DETECT_BOUND_SEQ + 1))
   out_file="${TMPDIR:-/tmp}/bionic-probe.$$.${_DETECT_BOUND_SEQ}"
@@ -1801,6 +1801,14 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
   # is hanging. A hung 15-second probe costs 24 `sleep` forks (ten tenths, then fourteen
   # seconds) where it cost 15; a probe that answers at once costs one, as before.
   #
+  # THE FIRST TENTH IS POLLED FINER STILL (wave-32 T20). The first look comes before any
+  # sleep, but the job was forked a moment before it and has not exited yet, so a probe that
+  # answered in a few milliseconds was still found alive and held for a whole tenth: about
+  # 0.11 s of every setup and doctor start. The first tenth is therefore four sleeps of 0.01,
+  # 0.02, 0.03 and 0.04 s, which add up to the same tenth and stand for it in the count below.
+  # A hung probe pays four more `sleep` forks; one that answers at once is released within a
+  # few hundredths.
+  #
   # THE LIMIT IS STILL COUNTED IN WHOLE SECONDS, and `waited` still counts them: ten tenths
   # make the first one, so the kill lands where it always did.
   #
@@ -1816,10 +1824,14 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
       _detect_bound_read "$out_file"
       return 124
     fi
-    if [ "$tenths" -lt 10 ] && sleep 0.1 2>/dev/null; then
+    if [ "$micro" -lt 4 ] && sleep "0.0$((micro + 1))" 2>/dev/null; then
+      micro=$((micro + 1))
+      [ "$micro" -lt 4 ] || tenths=1
+    elif [ "$micro" -ge 4 ] && [ "$tenths" -lt 10 ] && sleep 0.1 2>/dev/null; then
       tenths=$((tenths + 1))
       [ "$tenths" -lt 10 ] || waited=$((waited + 1))
     else
+      micro=4
       tenths=10
       sleep 1
       waited=$((waited + 1))
