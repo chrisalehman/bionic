@@ -76,6 +76,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/wait.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 BOOKED="$REPO_ROOT/payload/scripts/booked.sh"
@@ -142,21 +143,11 @@ gate() {  # <name> — a command that marks itself started, then holds until <na
 }
 
 wait_file() {  # <path> [<seconds>] — rc 0 once the path exists, 1 at the ceiling
-  local i=0 lim=$(( ${2:-20} * 20 ))
-  while [ ! -e "$1" ]; do
-    i=$((i + 1)); [ "$i" -ge "$lim" ] && return 1
-    sleep 0.05
-  done
-  return 0
+  wait_for "${2:-20}" test -e "$1"
 }
 
 wait_text() {  # <file> <needle> [<seconds>] — rc 0 once the file contains the needle
-  local i=0 lim=$(( ${3:-20} * 20 ))
-  while ! grep -qF -- "$2" "$1" 2>/dev/null; do
-    i=$((i + 1)); [ "$i" -ge "$lim" ] && return 1
-    sleep 0.05
-  done
-  return 0
+  wait_for "${3:-20}" grep -qF -- "$2" "$1" 2>/dev/null
 }
 
 # The admitted, unfinished requests in this row's store: their holders' pids (held_pids) and
@@ -264,10 +255,8 @@ b4b_state() {  # <id> -> "<id> <state>" as gate_list prints it
   ( BIONIC_GATE_DIR="$ST" bash -c '. "$1" 2>/dev/null; gate_list' _ "$REPO_ROOT/payload/scripts/lib/gate.sh" 2>&1 ) \
     | awk -v id="$1" '$1 == id { print $1, $2 }'
 }
-for B4B_I in $(seq 1 100); do
-  [ "$(b4b_state "$B4B_ID")" = "$B4B_ID killed" ] && break
-  sleep 0.05
-done
+b4b_killed() { [ "$(b4b_state "$B4B_ID")" = "$B4B_ID killed" ]; }
+wait_ticks 100 0.05 b4b_killed
 expect_eq "B4b.1 the gate lists the SIGKILLed holder's request as killed, reaped by its sampler or not" "$B4B_ID killed" "$(b4b_state "$B4B_ID")"
 B4B_OUT="$(bk -- 'echo reclaimed' 2>&1)"; B4B_RC=$?
 expect_status "B4b.2 the next ask is admitted" 0 "$B4B_RC"
@@ -378,17 +367,18 @@ cat > "$TMPROOT/taker.sh" <<'TAKER'
 while [ ! -f "$2/start" ]; do sleep 0.01; done
 if _slots_claim "$2/claim" "$$"; then echo WIN > "$2/res.$$"; else echo LOSE > "$2/res.$$"; fi
 TAKER
+taken_all() {  # <dir> — rc 0 once all six claimers have written their result
+  [ "$(ls "$1"/res.* 2>/dev/null | wc -l | tr -d ' ')" -ge 6 ]
+}
 race_round() {  # <lib> <dir> — six claimers, one directory; prints the number of winners
-  local lib="$1" d="$2" i n=0 pids=""
+  local lib="$1" d="$2" i pids=""
   mkdir -p "$d"
   for i in 1 2 3 4 5 6; do
     "$BASH" "$TMPROOT/taker.sh" "$lib" "$d" &
     pids="$pids $!"; BG="$BG $!"
   done
   touch "$d/start"
-  while [ "$(ls "$d"/res.* 2>/dev/null | wc -l | tr -d ' ')" -lt 6 ] && [ "$n" -lt 400 ]; do
-    n=$((n + 1)); sleep 0.05
-  done
+  wait_ticks 400 0.05 taken_all "$d"
   grep -l WIN "$d"/res.* 2>/dev/null | wc -l | tr -d ' '
   for i in $pids; do wait "$i" 2>/dev/null; done
 }
@@ -1093,10 +1083,9 @@ expect_eq "K7.4 …and its request was ended" "" "$(places)"
 newrow k8
 MW=5
 K8_CMD="for s in INT QUIT TERM HUP; do trap \"echo got-\$s > $ROW/k8.saw; exit 7\" \$s; done; echo \$\$ > $ROW/k8.pid; (sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/k8.kid); touch $ROW/k8.started; while :; do sleep 0.1; done"
+pid_is_gone() { ! kill -0 "${1:-999999}" 2>/dev/null; }
 gone() {  # <pid> — rc 0 once the pid is gone, within two seconds
-  local i=0
-  while kill -0 "${1:-999999}" 2>/dev/null; do i=$((i + 1)); [ "$i" -lt 20 ] || return 1; sleep 0.1; done
-  return 0
+  wait_ticks 19 0.1 pid_is_gone "${1:-999999}"
 }
 k8_drive() {  # <signal> [<shim option>...] -> K8_RC (or "hung"), K8_SAW, K8_PID, K8_KID
   local _sig="$1" _job _shim _i=0
@@ -1115,7 +1104,7 @@ k8_drive() {  # <signal> [<shim option>...] -> K8_RC (or "hung"), K8_SAW, K8_PID
   K8_SHIM_OK=0; [ "$_shim" = "$_job" ] && K8_SHIM_OK=1
   K8_PID="$(cat "$ROW/k8.pid" 2>/dev/null)"; K8_KID="$(cat "$ROW/k8.kid" 2>/dev/null)"
   kill -"$_sig" "$_job" 2>/dev/null
-  while kill -0 "$_job" 2>/dev/null && [ "$_i" -lt 80 ]; do _i=$((_i + 1)); sleep 0.1; done
+  wait_ticks 80 0.1 pid_is_gone "$_job"
   if kill -0 "$_job" 2>/dev/null; then
     K8_RC=hung
     kill_tree "$_job"
