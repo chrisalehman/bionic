@@ -145,10 +145,23 @@ _gate_load() {  # rc 0 once lib/gate.sh is loaded
 # when nothing was asked) and _GATE_OWN (1 when this shell holds the request, 0 when the gate
 # believed an ancestor's admission). Its `$$` is the holder: call it from the shell that stays
 # alive for the suite, and end the request from the same one.
+#
+# rc 75: THE ASKING AGENT'S BUDGET REFUSED IT (wave-33 T3; D7, AC-6.2). An ask with no time limit
+# ends 75 only so (lib/gate.sh THE BUDGET), and the suite or run is not started: _GATE_REFUSAL holds
+# the budget's own line for the report. Any other failure to ask runs unadmitted, as before.
+_GATE_REFUSAL=""
 _gate_ask_for() {
-  _GATE_ID=""; _GATE_OWN=0
+  local _rc
+  _GATE_ID=""; _GATE_OWN=0; _GATE_REFUSAL=""
   _gate_load || return 0
-  _GATE_ID="$(gate_ask "$1" "$2")" || { _GATE_ID=""; return 0; }
+  _GATE_ID="$(gate_ask "$1" "$2")"; _rc=$?
+  if [ "$_rc" -eq 75 ]; then
+    _GATE_ID=""
+    _GATE_REFUSAL="$(gate_budget "$1" "$2")"
+    [ -n "$_GATE_REFUSAL" ] || _GATE_REFUSAL="bionic: $2 refused at the gate (75); nothing ran"
+    return 75
+  fi
+  [ "$_rc" -eq 0 ] || { _GATE_ID=""; return 0; }
   case "$(sed -n 's/^holder=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" in
     "$$:"*) _GATE_OWN=1 ;;
   esac
@@ -190,7 +203,14 @@ if [ "${1:-}" = "--one" ]; then
   # under --only. In a whole run it inherits the run's one admission (wave-32 T2), which the gate
   # believes for a descendant of its holder, so it asks nothing and ends nothing; a solo suite's
   # worker inherits the admission its drain hands it the same way.
-  _gate_ask_for work "$_one_label"
+  if ! _gate_ask_for work "$_one_label"; then
+    # REFUSED AT THE ASK (wave-33 T3): never run. The verdict reads <label>.budget, as it reads an
+    # adoption refusal, and the line is the capture.
+    printf '%s\n' "$_GATE_REFUSAL" | tee "$_one_work/${_one_label}.budget" >"$_one_work/${_one_label}.out"
+    printf '75\n' >"$_one_work/${_one_label}.rc"
+    printf '%s\n' "$_one_label" >>"$_one_work/landed"
+    exit 0
+  fi
   _one_start="$(date +%s)"
   # THE SCRUB (wave-30 T9; AC-4.2): this worker keeps BIONIC_GATE_DIR for its own ask and end above and
   # below, but the SUITE PROCESS runs without it. A suite that read the run's store through the
@@ -734,7 +754,7 @@ _wall_suite() {
   printf '%s' "$suite"
 }
 
-pass=0; fail=0; failed=""
+pass=0; fail=0; failed=""; budget=0
 void=0; voided=""
 
 # Opt-in, and opt-in on purpose: no per-suite timing has ever existed (W7 S8
@@ -777,6 +797,15 @@ _verdict() {
   local label="$1" rc="$2" out="$3" sig="" lost="" vwhy="" also=""
   # The adoption wall refused this suite before it ran (S10). It never had an
   # exit status, so it is judged from the refusal the wall left behind.
+  # REFUSED AT THE GATE'S ASK by the asking agent's budget (wave-33 T3; D7): never run, so it
+  # has no verdict of its own; counted as failed, and as a refusal the exit code tells apart.
+  if [ -f "$TMP/${label}.budget" ]; then
+    echo "✗ REFUSED (the budget, at the gate's ask; never run)"
+    fail=$((fail+1)); budget=$((budget+1))
+    failed="${failed}\n    - ${label} (refused by the budget at the gate's ask, never run)"
+    cat "$TMP/${label}.budget"
+    return
+  fi
   if [ -f "$TMP/${label}.refused" ]; then
     echo "✗ REFUSED (the adoption wall)"
     fail=$((fail+1))
@@ -852,7 +881,8 @@ run() {  # run <label> <cmd...>   — gating
     start="$(date +%s)"
     # Asked per suite here too (T12), in a subshell: its `$$` is this runner's, which stays
     # alive for the suite, and its `times` hold that suite's children only, for gate_end.
-    ( _gate_ask_for work "$label"
+    ( _gate_ask_for work "$label" \
+        || { printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"; exit 75; }
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
       env -u BIONIC_GATE_DIR "$@" >"$TMP/${label}.out" 2>&1   # the scrub (T9): the ask above keeps the store, the suite does not
       _sr=$?
@@ -929,7 +959,11 @@ if [ "$SERIAL" -eq 0 ]; then
   # asks for itself and runs unadmitted, as before.
   _RUN_GATE_ID=""; _RUN_GATE_OWN=0
   if [ "$ONLY" -eq 0 ] && { [ -s "$LAUNCH" ] || [ -s "$SOLO" ]; }; then
-    _gate_ask_for whole tests/run.sh
+    if ! _gate_ask_for whole tests/run.sh; then
+      # A WHOLE RUN THE ASKING AGENT'S BUDGET DOES NOT CARRY (wave-33 T3; D7, AC-6.2): nothing ran.
+      printf '%s\n' "$_GATE_REFUSAL"
+      exit 75
+    fi
     _RUN_GATE_ID="$_GATE_ID"; _RUN_GATE_OWN="$_GATE_OWN"
     [ -z "$_RUN_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_RUN_GATE_ID"
   fi
@@ -1044,7 +1078,12 @@ if [ "$SERIAL" -eq 0 ]; then
       # one ceiling counts from its turn.
       _GATE_OWN=0
     else
-      _gate_ask_for whole "$label"
+      if ! _gate_ask_for whole "$label"; then
+        _solo_clear "$label"
+        printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"
+        printf '75\n' >"$TMP/${label}.rc"
+        return 0
+      fi
       if [ -z "$_GATE_ID" ]; then
         why="the store $(gate_dir) could not be written, so the whole machine was not had"
         _solo_one "$label"
@@ -1214,6 +1253,9 @@ fi
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
+  # EVERY FAILURE A BUDGET REFUSAL (wave-33 T3; D7): exit 75, the gate's own code for a run it did
+  # not start, so a caller tells "refused" from "red". A suite that failed is still exit 1.
+  [ "$budget" -ne "$fail" ] || exit 75
   exit 1
 fi
 if [ "$void" -ne 0 ]; then
