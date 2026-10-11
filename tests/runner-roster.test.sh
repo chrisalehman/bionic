@@ -693,9 +693,10 @@ rr9_drive() {
 
 # rr9_norm <report> — the report with its one per-run nonce masked: the
 # interpreter pin's own `mktemp -d` path, which is a fresh directory on every
-# invocation and is no product of this knob. Everything else is compared as it
-# was printed.
-rr9_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g'; }
+# invocation and is no product of this knob; and the seconds of the whole run's `Wall:` line
+# (wave-32 T2; D6), the run's own clock and landing order, which move between two drives. Everything else
+# is compared as it was printed.
+rr9_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g' -e 's/^Wall: .*/Wall: (masked)/'; }
 
 # rr9_shaped <file> — how many of the file's lines carry the pinned progress
 # shape: exactly three TAB fields, a UTC stamp, a suite label, a numeric rc.
@@ -843,9 +844,10 @@ expect_eq "9.19 the outer run is green, nested drive and all" "0" "$RR9_RC"
 expect_eq "9.20 the nested run really ran its own suite" "yes" \
   "$([ -f "$RR_MARKS/zin-inner.ran" ] && echo yes || echo no)"
 # PAIRED POSITIVE for the scratch store (wave-32 T1; D5): the nested run asked the store under
-# this suite's mktemp root that n-outer handed it, so its request is there, keyed by its suite.
-expect_eq "9.20a the nested run's request is in the scratch store it was handed, keyed zin-inner.test.sh" \
-  "1" "$(grep -lx 'key=zin-inner.test.sh' "$RR9_INNER_GATE"/requests/[0-9]* 2>/dev/null | wc -l | tr -d ' ')"
+# this suite's mktemp root that n-outer handed it, so its request is there. RE-KEYED BY WAVE-32 T2
+# (D1, AC-1.1; A-orch-8): the nested run is a whole run, so its one request is keyed by the runner.
+expect_eq "9.20a the nested run's request is in the scratch store it was handed, keyed tests/run.sh" \
+  "1" "$(grep -lx 'key=tests/run.sh' "$RR9_INNER_GATE"/requests/[0-9]* 2>/dev/null | wc -l | tr -d ' ')"
 expect_eq "9.21 the outer file names the outer tree's two suites" \
   "$(printf 'n-outer.test.sh\nn-plain.test.sh\n')" "$(rr9_prog_labels "$P9N")"
 expect_absent "9.22 …and carries no label from the nested tree" \
