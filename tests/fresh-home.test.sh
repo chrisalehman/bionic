@@ -2376,6 +2376,12 @@ expect_match "15C: …and setup installs it through the CLI, as it always did" \
 
 section "Group 16: remove names each declared tool it finds and removes none of them"
 
+# The section's own clock, read by its ceiling at the end (wave-32 T5). At
+# b7b5bdbe this section took 524 s of the suite's 600 in a whole run, 261 s of a
+# solo run's 281 in one statement: the unanchored mutant below, built by a bash 3.2
+# pattern substitution over the whole of deps.sh.
+G16_T0=$SECONDS
+
 # The rows the fixture makes present, in the table's order (the order the item
 # walks), each with its by-hand plan.
 G16_NAMES="excalidraw-renderer @playwright/cli playwright-chromium motion ccstatusline notebooklm context7 humanizer"
@@ -2973,7 +2979,26 @@ rm -rf "$G16_M4"; cp -R "$PAYLOAD" "$G16_M4"
 G16_ANCHOR='(^|[^A-Za-z0-9@/_.-])'
 G16_M4_SRC="$(cat "$G16_M4/scripts/lib/deps.sh")"
 expect_contains "16 mutant unanchored: the library carries the anchor the mutant removes" "$G16_ANCHOR" "$G16_M4_SRC"
-printf '%s\n' "${G16_M4_SRC//"$G16_ANCHOR"/}" > "$G16_M4/scripts/lib/deps.sh"
+# One awk pass takes each anchor out, literally, line by line. Bash 3.2's
+# `${src//"$anchor"/}` over the 128 KB library did the same in about 260 s.
+LC_ALL=C awk -v a="$G16_ANCHOR" '{
+    r = $0; out = ""
+    while ((i = index(r, a)) > 0) { out = out substr(r, 1, i - 1); r = substr(r, i + length(a)) }
+    print out r
+  }' "$G16_M4/scripts/lib/deps.sh" > "$G16_M4/scripts/lib/deps.sh.t" \
+  && mv "$G16_M4/scripts/lib/deps.sh.t" "$G16_M4/scripts/lib/deps.sh"
+# The doctored copy is the library with each anchor taken out and nothing else:
+# the lines that differ are exactly the lines that carry the anchor, and each
+# loses the anchor's bytes and no more.
+G16_M4_LINES="$(LC_ALL=C grep -nF -- "$G16_ANCHOR" "${LIB_DIR}/deps.sh" | cut -d: -f1 | tr '\n' ' ')"
+expect_ne "16 mutant unanchored: the library's anchor lines are read (the line extractor reads)" "" "$G16_M4_LINES"
+expect_eq "16 mutant unanchored: …and the doctored copy differs from the library on exactly those lines" \
+  "$G16_M4_LINES" \
+  "$(LC_ALL=C awk 'NR == FNR { a[FNR] = $0; n = FNR; next } { m = FNR } a[FNR] != $0 { printf "%s ", FNR }
+                    END { if (m != n) printf "lines %s/%s", n, m }' "${LIB_DIR}/deps.sh" "$G16_M4/scripts/lib/deps.sh")"
+expect_eq "16 mutant unanchored: …and is shorter by the anchor's bytes, once per occurrence" \
+  "$(( $(wc -c < "${LIB_DIR}/deps.sh") - $(LC_ALL=C grep -oF -- "$G16_ANCHOR" "${LIB_DIR}/deps.sh" | wc -l) * ${#G16_ANCHOR} ))" \
+  "$(( $(wc -c < "$G16_M4/scripts/lib/deps.sh") ))"
 expect_absent "16 mutant unanchored: …and the doctored copy no longer does" "$G16_ANCHOR" \
   "$(cat "$G16_M4/scripts/lib/deps.sh")"
 expect_true "16 mutant unanchored: the doctored library still parses" bash -n "$G16_M4/scripts/lib/deps.sh"
@@ -2991,5 +3016,11 @@ expect_contains "16 standalone: the tools item says the table ships with the pay
   "the dependency table ships with the payload — not available standalone." "$(cat "$G16_SA")"
 expect_eq "16 standalone: …and nothing was called" "" "$(g16_acts)"
 rm -f "${BIN}/notebooklm"
+
+# ── the section's ceiling (wave-32 T5) ──
+# 120 s holds the section's drives at whole-run width; its solo run is about 20 s
+# once the mutant above is built in one pass.
+G16_SECS=$((SECONDS - G16_T0))
+expect_true "16: the section ran in ${G16_SECS} s, within its 120 s ceiling" test "$G16_SECS" -le 120
 
 finish

@@ -405,4 +405,70 @@ runhook "$G" "$WORK/g-plugins" "" "git push" > "$WORK/g.out" 2>"$WORK/g.err"; GR
 eq "G.1 the block itself never sources the library" "$(cat "$WORK/g.out")" ""
 eq "G.2 with a library present, fail_closed is the caller's choice, still exact-match" "$GRC" "2"
 
+# ── §S — the setup door reads its flags before it sources a library (wave-32 T6) ──
+# THE START-UP CEILING, COUNTED RATHER THAN TIMED. A flag the door refuses needs no
+# library to refuse it, and before T6 `setup.sh --help` paid the whole library load
+# first (0.26 s alone, measured; checks.sh builds its table at source time). The
+# ceiling is the number of libraries sourced before the refusal, and it is zero: a
+# seconds bound would move with the machine's load, a count does not. Every library in
+# a copy of lib/ appends its own name to a log as its first line, and the door is
+# pointed at the copy through BIONIC_LIB_DIR. S.0 proves the log fills when the door
+# does source (anti-vacuity); the refusals' bytes are pinned as the pre-T6 door printed
+# them, so the move changed when the libraries load and nothing a person reads.
+S_LIB="$WORK/s-lib"; S_LOG="$WORK/s-sourced"
+cp -R "$PAYLOAD/scripts/lib" "$S_LIB"
+for s_f in "$S_LIB"/*.sh; do
+  { printf 'printf "%%s\\n" "%s" >> "%s"\n' "${s_f##*/}" "$S_LOG"; cat "$s_f"; } > "$s_f.new" && mv "$s_f.new" "$s_f"
+done
+S_SETUP="$PAYLOAD/scripts/setup.sh"
+S_CMD="bash $(cd "$PAYLOAD/scripts" && pwd -P)/setup.sh"
+s_run() {  # <args...> — the door on the instrumented copy, in the throwaway home
+  : > "$S_LOG"
+  env -i HOME="$FAKE_HOME" PATH=/usr/bin:/bin TMPDIR="$WORK" BIONIC_LIB_DIR="$S_LIB" \
+    BIONIC_PLUGINS_DIR="$WORK/s-plugins" /bin/bash "$S_SETUP" "$@" </dev/null 2>&1
+}
+s_sourced() { wc -l < "$S_LOG" | tr -d ' '; }
+
+S_OUT="$(s_run --list)"
+case "$S_OUT" in *legacy-alias*) ok "S.0a --list on the instrumented copy prints the roster" ;;
+  *) no "S.0a --list on the instrumented copy prints the roster" "out=[$S_OUT]" ;; esac
+case "$(cat "$S_LOG")" in *checks.sh*) ok "S.0b the log names checks.sh when the door sources it" ;;
+  *) no "S.0b the log names checks.sh when the door sources it" "log=[$(cat "$S_LOG")]" ;; esac
+
+S_OUT="$(s_run --only nosuchitem)"; S_RC=$?
+eq "S.1a an unknown --only name is still checked against the roster, bytes as before" "$S_OUT" \
+  "setup: there is nothing called nosuchitem to set up on this machine.
+       run ${S_CMD} --list to see the names."
+eq "S.1b …exit 2" "$S_RC" "2"
+case "$(cat "$S_LOG")" in *checks.sh*) ok "S.1c …and the roster check sources the library it reads" ;;
+  *) no "S.1c …and the roster check sources the library it reads" "log=[$(cat "$S_LOG")]" ;; esac
+
+S_OUT="$(s_run --help)"; S_RC=$?
+eq "S.2a --help is refused in the bytes the pre-T6 door printed" "$S_OUT" \
+  "setup: --help is not something this command takes.
+       run ${S_CMD} --list to see what can be set up one item at a time."
+eq "S.2b …exit 2" "$S_RC" "2"
+eq "S.2c start-up ceiling: --help sources no library" "$(s_sourced)" "0"
+
+S_OUT="$(s_run --only legacy-alias --bogus)"; S_RC=$?
+eq "S.3a an unknown flag after a good one is refused, bytes as before" "$S_OUT" \
+  "setup: --bogus is not something this command takes.
+       run ${S_CMD} --list to see what can be set up one item at a time."
+eq "S.3b …exit 2" "$S_RC" "2"
+eq "S.3c start-up ceiling: the unknown flag sources no library" "$(s_sourced)" "0"
+
+S_OUT="$(s_run --only)"; S_RC=$?
+eq "S.4a --only with no name is refused, bytes as before" "$S_OUT" \
+  "setup: --only needs the name of the one item to set up.
+       run ${S_CMD} --list to see the names."
+eq "S.4b …exit 2" "$S_RC" "2"
+eq "S.4c start-up ceiling: --only with no name sources no library" "$(s_sourced)" "0"
+
+S_OUT="$(s_run --all --only legacy-alias)"; S_RC=$?
+eq "S.5a --all with --only is refused, bytes as before" "$S_OUT" \
+  "setup: --all and --only cannot be combined — --all does every item, --only does exactly one.
+       run ${S_CMD} --list to see the names --only takes."
+eq "S.5b …exit 2" "$S_RC" "2"
+eq "S.5c start-up ceiling: --all with --only sources no library" "$(s_sourced)" "0"
+
 finish

@@ -168,6 +168,71 @@ for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh markers.sh width.sh c
     exit 1
   fi
 done
+
+# ─── The flags, read before any library loads ──────────────────────────────
+#
+# A FLAG THIS SCRIPT REFUSES NEEDS NO LIBRARY TO REFUSE IT (wave-32 T6). The libraries
+# below cost a quarter of a second to load on their own, most of it checks.sh building
+# its table at source time, and `--help`, an unknown flag, a bare `--only` and
+# `--all --only` all paid it before printing two lines and exiting 2. So the flags are
+# lexed here, after the payload check (an incomplete payload still says so first) and
+# before the first library. What a NAME means is still decided below the libraries:
+# `--only <name>` is checked against the roster checks.sh builds, and `--list` prints
+# it. tests/loader.test.sh §S pins the refusals' bytes and counts the libraries a
+# refusal sources, which is zero.
+say()    { printf '%s\n' "$*"; }
+
+# THE INVOCATION A PERSON CAN TYPE (critic F-1). Consent reaches this script
+# through its standard input and nowhere else. The model runs it from a tool
+# whose stdin carries nothing, so every question declines — and the action lines
+# used to answer that by telling the user to "re-run /bionic:setup and answer y",
+# which is the one route that cannot work: a second run through the same command
+# declines identically, because the interactivity of the SESSION is not an answer
+# channel for the SCRIPT. So an action line that asks for an answer names the
+# terminal invocation, resolved to a real path rather than left as a variable the
+# reader's shell has never heard of.
+_setup_self_path() {
+  local dir
+  dir="$(cd "$(_setup_self_dir)" 2>/dev/null && pwd -P)" || dir="$(_setup_self_dir)"
+  echo "${dir}/${BASH_SOURCE[0]##*/}"
+}
+SETUP_SELF_CMD="bash $(_setup_self_path)"
+
+SETUP_ONLY=""
+SETUP_LIST=0
+setup_all=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)
+      SETUP_LIST=1; shift ;;
+    --all)
+      setup_all=1; shift ;;
+    --only)
+      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+        say "setup: --only needs the name of the one item to set up."
+        say "       run ${SETUP_SELF_CMD} --list to see the names."
+        exit 2
+      fi
+      SETUP_ONLY="$2"; shift 2 ;;
+    --only=*)
+      SETUP_ONLY="${1#--only=}"; shift ;;
+    *)
+      say "setup: ${1} is not something this command takes."
+      say "       run ${SETUP_SELF_CMD} --list to see what can be set up one item at a time."
+      exit 2 ;;
+  esac
+done
+
+# TWO NARROWINGS THAT CANNOT BOTH APPLY. `--only` runs one item; `--all` runs
+# every item over one answer. Together they would have to mean something, and
+# whatever that something was, half the people who typed it would mean the other
+# one — so it stops here, before anything is printed at the machine.
+if [ "$setup_all" = "1" ] && [ -n "$SETUP_ONLY" ]; then
+  say "setup: --all and --only cannot be combined — --all does every item, --only does exactly one."
+  say "       run ${SETUP_SELF_CMD} --list to see the names --only takes."
+  exit 2
+fi
+
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/deps.sh"
 # shellcheck source=/dev/null
@@ -263,22 +328,6 @@ SETUP_UPDATED=""
 # would tell every user to restart over a change they did not make.
 SETUP_STATUSLINE_CHANGED=no
 
-# THE INVOCATION A PERSON CAN TYPE (critic F-1). Consent reaches this script
-# through its standard input and nowhere else. The model runs it from a tool
-# whose stdin carries nothing, so every question declines — and the action lines
-# used to answer that by telling the user to "re-run /bionic:setup and answer y",
-# which is the one route that cannot work: a second run through the same command
-# declines identically, because the interactivity of the SESSION is not an answer
-# channel for the SCRIPT. So an action line that asks for an answer names the
-# terminal invocation, resolved to a real path rather than left as a variable the
-# reader's shell has never heard of.
-_setup_self_path() {
-  local dir
-  dir="$(cd "$(_setup_self_dir)" 2>/dev/null && pwd -P)" || dir="$(_setup_self_dir)"
-  echo "${dir}/${BASH_SOURCE[0]##*/}"
-}
-SETUP_SELF_CMD="bash $(_setup_self_path)"
-
 # ─── ADDRESSABLE ITEMS ───────────────────────────────────────────────────────
 #
 # THE PROBLEM (critic F-1 and F-2). Consent reaches this script through its own
@@ -315,7 +364,7 @@ SETUP_SELF_CMD="bash $(_setup_self_path)"
 # gates it names it — `permission-mode`, `environment`, `tool:git` — never the
 # function, the step number or the class behind it.
 
-SETUP_ONLY=""
+# SETUP_ONLY is set where the flags are read, above the libraries (wave-32 T6).
 
 # ─── One answer over a printed plan ──────────────────────────────────────────
 #
@@ -491,7 +540,7 @@ _setup_answer_yes() {  # <name>
   printf 'answer yes to %s with: %s%s --only %s' "$1" "$SETUP_YES_PIPE" "$SETUP_SELF_CMD" "$1"
 }
 
-say()    { printf '%s\n' "$*"; }
+# say() is defined above the libraries, where the flags are read (wave-32 T6).
 # ONE LINE PER ITEM, WITH A SYMBOL IN COLUMN ONE (spec AC-15, approved
 # 2026-08-22). Every step below reports what it did, skipped or asked about
 # through this one function, so a row added by a future arm inherits the format
@@ -1922,45 +1971,12 @@ setup_summary() {
 
 # ─── Run ─────────────────────────────────────────────────────────────────────
 
-# THE FLAGS ARE READ HERE, not in a wrapper, because the roster they are checked
-# against is built from the dependency table this script has already sourced. An
-# unrecognised name stops the run before anything is printed at it: a narrowed
-# run that silently did nothing would look exactly like a machine with nothing
-# left to do, which is the one report this script must never fake.
-SETUP_LIST=0
-setup_all=0
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --list)
-      SETUP_LIST=1; shift ;;
-    --all)
-      setup_all=1; shift ;;
-    --only)
-      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
-        say "setup: --only needs the name of the one item to set up."
-        say "       run ${SETUP_SELF_CMD} --list to see the names."
-        exit 2
-      fi
-      SETUP_ONLY="$2"; shift 2 ;;
-    --only=*)
-      SETUP_ONLY="${1#--only=}"; shift ;;
-    *)
-      say "setup: ${1} is not something this command takes."
-      say "       run ${SETUP_SELF_CMD} --list to see what can be set up one item at a time."
-      exit 2 ;;
-  esac
-done
-
-# TWO NARROWINGS THAT CANNOT BOTH APPLY. `--only` runs one item; `--all` runs
-# every item over one answer. Together they would have to mean something, and
-# whatever that something was, half the people who typed it would mean the other
-# one — so it stops here, before anything is printed at the machine.
-if [ "$setup_all" = "1" ] && [ -n "$SETUP_ONLY" ]; then
-  say "setup: --all and --only cannot be combined — --all does every item, --only does exactly one."
-  say "       run ${SETUP_SELF_CMD} --list to see the names --only takes."
-  exit 2
-fi
-
+# THE NAME IS CHECKED HERE, below the libraries, because the roster it is checked
+# against is built from the dependency table this script has sourced. The flags
+# themselves were read above the libraries (wave-32 T6). An unrecognised name stops
+# the run before anything is printed at it: a narrowed run that silently did nothing
+# would look exactly like a machine with nothing left to do, which is the one report
+# this script must never fake.
 if [ "$SETUP_LIST" = "1" ]; then
   _setup_item_ids
   exit 0

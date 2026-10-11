@@ -1812,11 +1812,17 @@ expect_contains "…saying so on the look" "is ALIVE and its contract is undeliv
 # …and a write to THAT path — the one the writer named, the producer resolved and
 # the recorder stored — is what the gate calls stale. A disagreement anywhere in
 # that chain shows up here as a stop that quietly stays permitted.
+# mtime_after <file>… — set each file's mtime two seconds ahead of now. The rows below need a write
+# whose mtime is strictly later than the file's earlier one (and than the row's launched_at), which
+# mtime granularity of one second gives only to a write made a second later; setting the time says so
+# without the wait. A future mtime reads as age 0 (observe.sh clamps it), so "inside the cadence" holds.
+mtime_after() {
+  touch -t "$(date -v+2S +%Y%m%d%H%M.%S 2>/dev/null || date -d '+2 seconds' +%Y%m%d%H%M.%S)" "$@"
+}
 F2_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 )
 mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F2_OUT" \
   | bash "$PARTY_ER" >/dev/null 2>&1
-sleep 1
-printf 'stage 2\n' >> "$IREPO/.bionic/tmp/w99.progress"
+printf 'stage 2\n' >> "$IREPO/.bionic/tmp/w99.progress"; mtime_after "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
 expect_eq "a write to the roster-contracted progress path is what the look reads as alive (wave-31 T32: allowed, its verdict recorded as reason=)" "0" "$ST"
 expect_contains "…the verdict naming it" "is ALIVE and its contract is undelivered" "$OUT"
@@ -1883,8 +1889,7 @@ expect_contains "the producer still reads the contract off the long roster" \
   "progress_source=roster" "$(printf '%s\n' "$F4_OUT" | grep '^stop-check-observation/')"
 mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F4_OUT" \
   | bash "$PARTY_ER" >/dev/null 2>&1
-sleep 1
-printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
+printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"; mtime_after "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
 # THE GUARD RECORDS ITS VERDICT AND DENIES NOTHING (wave-31 T32; D6, AC-6.5): the stop of a working
 # agent is allowed and the look's verdict written on its row as reason=.
@@ -2781,14 +2786,13 @@ expect_eq "…and it reads the contract off the chain, not off nothing" "STILL-L
   "$(j_field "$K_VLINE" state)"
 
 # The paired positive (AC-4's absence-readback rule): the same chain, the same verb,
-# with the artifact on disk. `sleep 1` because the delivered predicate is
-# mtime > launched_at and the row was written this second.
-sleep 1
+# with the artifact on disk. Its mtime is set past the row's launched_at, because the delivered
+# predicate is mtime > launched_at and the row was written this second.
 mkdir -p "$KREPO/.bionic/docs/record"
-echo "the task report" > "$KREPO/.bionic/docs/record/w16-chain.md"
+echo "the task report" > "$KREPO/.bionic/docs/record/w16-chain.md"; mtime_after "$KREPO/.bionic/docs/record/w16-chain.md"
 # …and the agent says it is done, through the Done marker its brief declared (wave-24 T9, D3):
 # the lift carried it to the launch row, and every row of the chain copied it forward.
-: > "$KREPO/.bionic/tmp/w16-chain.done"
+: > "$KREPO/.bionic/tmp/w16-chain.done"; mtime_after "$KREPO/.bionic/tmp/w16-chain.done"
 expect_contains "…the chain carries the brief's Done marker to its latest row (T9)" \
   "|done=.bionic/tmp/w16-chain.done|" "$(grep '|name=w16-chain|' "$KROSTER" | tail -1)"
 K_VERDICT=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-chain 2>/dev/null )
@@ -2828,8 +2832,7 @@ expect_eq "…and it is the value on the row the writer wrote" \
 # gate lifted out of the brief three rows ago.
 mk_bash_post "$SID_A" "$KTR" "$KREPO" "bash ~/.claude/hooks/stop-check.sh w16-chain" "$K_OBS" \
   | bash "$PARTY_ER" >/dev/null 2>&1
-sleep 1
-printf 'stage 2\n' >> "$KREPO/.bionic/tmp/w16-chain.progress"
+printf 'stage 2\n' >> "$KREPO/.bionic/tmp/w16-chain.progress"; mtime_after "$KREPO/.bionic/tmp/w16-chain.progress"
 # THE CONTRACT IS TAKEN BACK OFF DISK FIRST (epic-16 wave-02 task S3). D-6 is a rule about
 # a stop that would end UNFINISHED work: since this wave, a LANDED contract discharges the
 # stop outright and no channel is consulted, which is AC-1 and is asserted as the paired
@@ -7831,6 +7834,15 @@ RG_CEIL=8
 RG_NOW=1757030000
 RG_RING="$SANDBOX/rg/pressure.ring"
 mkdir -p "$SANDBOX/rg"
+# THE RUNNER'S ROOM IS THE CEILING (wave-32 T21). Since T2 tests/run.sh caps its ceiling at
+# gate_width = floor(share x cores / 100), and this suite pins share 80 on 8 cores for ROOM
+# (so the gate's room is 6). The runner this section drives gets its own config dir holding
+# share 100, whose room on 8 cores is 8: the ceiling RG_CEIL names, so RG.1-RG.3 read the whole
+# ceiling, its half and its quarter. The rest of the suite keeps share 80. Same move as
+# tests/runner-width.test.sh (rw_share 100).
+RG_HOME="$SANDBOX/rg/cfg"
+mkdir -p "$RG_HOME/bionic"
+printf '100\n' > "$RG_HOME/bionic/share"
 # CLEAR and CRITICAL as the sensors see them: 80 % free is above every band threshold;
 # 8 % free is below BAND_FREE_CRITICAL_PCT (12) and above BAND_FREE_EMERGENCY_PCT (5).
 RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
@@ -7877,7 +7889,7 @@ cg_roster_row "$RG_REPO" "$SID_A" "rg-writer" "arg-1111111111111111" "" "identif
 rg_runner() {  # -> the width tests/run.sh would run at, under the pinned environment
   ( eval "export $1"
     export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
-           BIONIC_TEST_JOBS_CEILING="$RG_CEIL"
+           BIONIC_TEST_JOBS_CEILING="$RG_CEIL" CLAUDE_CONFIG_DIR="$RG_HOME"
     bash "$RG_TREE_RUNNER/tests/run.sh" --dry-run 2>/dev/null ) \
     | sed -n 's/^JOBS=//p' | head -1
 }

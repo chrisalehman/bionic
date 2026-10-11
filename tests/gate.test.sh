@@ -21,6 +21,10 @@
 #   §ANCESTOR  AC-2.13 an admission passed down is believed only from an ancestor holder; a
 #                      typed one asks anyway; BIONIC_SLOT_HELD=1 is ignored. Mutation: the
 #                      ancestor test removed believes the stranger
+#   §ANCESTRY  AC-1.4  (wave-32 T1; D5) a child of an admitted holder, BIONIC_GATE_ADMIT unset
+#                      or naming an id the store cannot believe, is admitted as the holder's and
+#                      files nothing; a process that is not a descendant files its own; an
+#                      ended admission is believed by nobody
 #   §WAITED    AC-4.2  a request holds its asked and admitted times, and the wait is their gap
 #   §KILLED    AC-4.3  a real child admitted and then killed with signal 9 is counted once;
 #                      its peak is kept and it writes no cost
@@ -30,6 +34,17 @@
 #                      overestimate held until it ages out of the three lines, `times`, an
 #                      unknown request line ignored. Mutations: no peak raised mid-run; four
 #                      lines kept
+#   §ZERO-SECONDS D5   (wave-32 T1) a run admitted and ended in one second writes its end and
+#                      rc and no cost line; one ended 2 s later writes its line
+#   §CORES-OVER D5     (wave-32 T19) a run whose children's processor time over its seconds
+#                      reads above the machine's core count (impossible: a 1–3 s run) writes
+#                      its end and rc and no cost line; one at or under the count writes it.
+#                      Mutation: the core-count test removed writes the impossible line
+#   §WHOLE-COST D1, D5 (wave-32 T26) a whole request's cost line is marked whole: a never-seen
+#                      key's promise and gate_room's largest promise on record skip it, so a
+#                      key with no cost of its own is admitted beside a held one after a whole
+#                      run; the whole key's own promise still reads it, and its next ask waits
+#                      while another is held and is admitted once nothing is
 #   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, a waiting
 #                      request, promised work not yet showing and memory over the share each
 #                      give no room; a quiet machine gives room; two asks on one reading give
@@ -130,7 +145,10 @@ fi
 #   HOLD=1     once admitted, hold until <dir>/<name>.go, then gate_end <id> 0 (<name>.endrc)
 #   CHILD=<n>  once admitted, run asker <n> for the same kind and key as a CHILD of this
 #              process, with BIONIC_GATE_ADMIT=<id>, before holding
+#   CHILD_ADMIT=<v>  the child's BIONIC_GATE_ADMIT is <v> instead of <id>; `-` leaves it unset
+#   ENDFIRST=1 once admitted, gate_end <id> 0 before running CHILD (the admission is over)
 #   WORK=<sh>  once admitted, run <sh> as a child before holding (processor time for `times`)
+#   PLANT_CPU=<s>  the children's processor time `times` reports at gate_end is <s> seconds
 #   AGENT=<a>  ask as agent <a> (the who's second half) instead of <name>, so two askers share a who
 #   LIVE=1     after a 75, stay alive, polling nothing, until <dir>/<name>.go
 # Its own pid is written first, to <name>.pid.
@@ -148,10 +166,14 @@ if [ "$rc" != 0 ]; then
   while [ ! -f "$d/$n.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
   exit 0
 fi
+[ "${ENDFIRST:-0}" != 1 ] || gate_end "$id" 0
 if [ -n "${CHILD:-}" ]; then
-  ( kid="$CHILD"; unset CHILD HOLD WORK; BIONIC_GATE_ADMIT="$id" bash "$0" "$d" "$kid" "$kind" "$key" 0 )
+  ( kid="$CHILD"; adm="${CHILD_ADMIT-$id}"; unset CHILD CHILD_ADMIT ENDFIRST HOLD WORK
+    if [ "$adm" = - ]; then unset BIONIC_GATE_ADMIT; else export BIONIC_GATE_ADMIT="$adm"; fi
+    bash "$0" "$d" "$kid" "$kind" "$key" 0 )
 fi
 [ -z "${WORK:-}" ] || bash -c "$WORK"
+[ -z "${PLANT_CPU:-}" ] || times() { printf '0m0.00s 0m0.00s\n0m%ss 0m0.00s\n' "$PLANT_CPU"; }
 [ "${HOLD:-0}" = 1 ] || exit 0
 i=0
 while [ ! -f "$d/$n.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
@@ -284,6 +306,24 @@ BIONIC_CLAUDE_HOME="$BCH" share_verb 45 >/dev/null
 expect_eq "S.17 with BIONIC_CLAUDE_HOME set the verb's write and gate_share's read meet (45)" "45" \
   "$(env BIONIC_CLAUDE_HOME="$BCH" bash -c '. "$1" 2>/dev/null; gate_share' _ "$GATE_LIB")"
 expect_eq "S.18 …and the other home's own share file was not written (33)" "33" "$(sed -n 1p "$BCH/bionic/share")"
+
+# ── §WIDTH ───────────────────────────────────────────────────────────────────
+# THE WIDTH THE SHARE ALLOWS (wave-32 T2; D1, AC-1.1). gate_width is the share's room as a
+# whole number of workers: floor(share × cores ÷ 100), at least 1. It is the one formula the
+# runner sizes a whole run's JOBS from, so the gate owns it beside gate_share. Driven over
+# planted share files on a planted 8-core probe (BIONIC_PROBE_CORES, the knob world_machine
+# sets), each read in a fresh child so nothing this shell holds feeds it.
+section "§WIDTH — the width a whole run takes is the share's room, floored (wave-32 T2; D1)"
+gw_of() {  # <share> <cores> — gate_width over a planted share file and core count
+  printf '%s\n' "$1" > "$CLAUDE_CONFIG_DIR/bionic/share"
+  env BIONIC_PROBE_CORES="$2" bash -c '. "$1" 2>/dev/null; gate_width' _ "$GATE_LIB"
+}
+expect_eq "WD.1 share 92 on 8 cores: 7 workers (7.36, floored)" "7" "$(gw_of 92 8)"
+expect_eq "WD.2 share 100 on 8 cores: 8 workers" "8" "$(gw_of 100 8)"
+expect_eq "WD.3 share 50 on 8 cores: 4 workers" "4" "$(gw_of 50 8)"
+expect_eq "WD.4 share 1 on 8 cores: floored at 1, never 0" "1" "$(gw_of 1 8)"
+expect_eq "WD.5 the cores are read, not assumed: share 92 on 64 cores is 58" "58" "$(gw_of 92 64)"
+expect_eq "WD.6 an unreadable share is the default's room: 92 on 8 cores, 7" "7" "$(gw_of bogus 8)"
 
 # ── §HARD ────────────────────────────────────────────────────────────────────
 section "§HARD — memory is the hard limit, the processor the soft one (AC-2.2)"
@@ -503,6 +543,47 @@ ancestor_rows "$MA" mut
 expect_eq "A.7 the mutant still believes the child" "0 $AN_HOLDER" "$AN_CHILD"
 expect_eq "A.8 the mutant (no ancestor test) believes the stranger — the test is the rule" "0" "$AN_STRANGER"
 
+# ── §ANCESTRY ────────────────────────────────────────────────────────────────
+# THE GATE BELIEVES BY ANCESTRY (wave-32 T1; D5, design ledger Δ9; AC-1.4). A process that
+# descends from the live holder of an admitted, unfinished request already runs under that
+# admission, whether or not it carries the id: a nested runner handed a scratch store's id,
+# or none, asks the real store and is given the ancestor's admission instead of filing a
+# request that store could never admit while the ancestor's lives. The room is one run's (the
+# second ask of k finds none), so a child that filed its own request would read 75.
+# ancestry_row <name> <child admit, - for unset> — a holder admitted, its child asking with
+# that BIONIC_GATE_ADMIT. Sets AY (the child's rc and id), AY_HOLDER and AY_NREQ. ENDFIRST
+# passes through.
+ancestry_row() {
+  fresh "ancestry-$1"
+  world_machine 8 8192 50 1.0
+  world_cost k 25 0.5 30
+  HOLD=1 CHILD=kid CHILD_ADMIT="$2" ask_bg par work k 0
+  wait_for 20 has par.rc; wait_for 20 has kid.rc
+  AY_HOLDER="$(id_of par)"
+  AY="$(rc_of kid) $(id_of kid)"
+  AY_NREQ="$(nreq)"
+}
+section "§ANCESTRY — a descendant of an admission's live holder runs under it, id or no id (D5; AC-1.4)"
+ancestry_row unset -
+expect_eq "AY.1 the holder is admitted (request 1)" "0 1" "$(rc_of par) $AY_HOLDER"
+expect_eq "AY.2 its child with no BIONIC_GATE_ADMIT is admitted as the holder's: rc 0 and its id" \
+  "0 $AY_HOLDER" "$AY"
+expect_eq "AY.3 …and filed no request of its own: the store holds one" "1" "$AY_NREQ"
+ancestry_row bogus 999
+expect_eq "AY.4 its child naming an id this store cannot believe (999) is admitted as the holder's" \
+  "0 $AY_HOLDER" "$AY"
+expect_eq "AY.5 …and filed no request of its own: the store holds one" "1" "$AY_NREQ"
+AY_STRANGER="$(ask_fg str work k 0)"
+expect_eq "AY.6 a process that is not a descendant still files its own, and finds no room (rc 75)" \
+  "75" "$AY_STRANGER"
+expect_eq "AY.7 …its request is the store's second" "2 2" "$(nreq) $(req_of str)"
+touch "$D/par.go"
+ENDFIRST=1 ancestry_row ended -
+expect_eq "AY.8 an ended admission is believed by nobody: the child of a holder that ended it files its own (rc 0, request 2)" \
+  "0 2" "$AY"
+expect_eq "AY.9 …so the store holds two" "2" "$AY_NREQ"
+touch "$D/par.go"
+
 # ── §WAITED ──────────────────────────────────────────────────────────────────
 section "§WAITED — a request holds its asked and admitted times (AC-4.2)"
 fresh waited
@@ -657,6 +738,132 @@ expect_eq "D.22 a key never seen is promised the maximum over every cost file" \
   "10:2:30" "$( . "$GATE_LIB" 2>/dev/null; gate_promise never 2>/dev/null )"
 expect_eq "D.23 no key is a usage error (rc 2)" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_promise 2>/dev/null; echo $? )"
+
+# ── §ZERO-SECONDS ────────────────────────────────────────────────────────────
+# A RUN OF ZERO SECONDS TEACHES NOTHING (wave-32 T1; D5). A run admitted and ended in the same
+# second has no measured time, and its cores field would divide its children's processor time
+# by one second it never ran (a planted clock wrote `0:72.43:0:1700000000` to the real store
+# this way): gate_end writes its end and rc, and no cost line. One ended 2 s later still writes.
+section "§ZERO-SECONDS — a run admitted and ended in one second writes no cost line (D5)"
+fresh zero-seconds
+world_machine 8 8192 40 1.0
+world_cost k 10 0.5 20
+ZS_BEFORE="$(cat "$BIONIC_GATE_DIR/cost/k")"
+HOLD=1 ask_bg z0 work k 0; wait_for 20 has z0.rc
+z0_id="$(id_of z0)"
+release z0
+expect_eq "Z.1 the run is admitted and ended at the same second (admitted|ended|rc)" "1000|1000|0" \
+  "$(field "$z0_id" admitted)|$(field "$z0_id" ended)|$(field "$z0_id" rc)"
+expect_eq "Z.2 gate_end exits 0" "0" "$(cat "$D/z0.endrc" 2>/dev/null)"
+expect_eq "Z.3 …and the cost file is unchanged: the one planted line" "$ZS_BEFORE" \
+  "$(cat "$BIONIC_GATE_DIR/cost/k")"
+HOLD=1 ask_bg z2 work k 0; wait_for 20 has z2.rc
+z2_id="$(id_of z2)"
+world_tick 2
+release z2
+expect_eq "Z.4 a run ended 2 s after its admission writes its end" "1000|1002" \
+  "$(field "$z2_id" admitted)|$(field "$z2_id" ended)"
+expect_regex "Z.5 …and a cost line: 2 s, at 1002, after the planted one" \
+  '^10:0\.5:20:1000 [0-9]+:[0-9.]+:2:1002$' "$(tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/k" | sed 's/ $//')"
+
+# ── §CORES-OVER ──────────────────────────────────────────────────────────────
+# A RUN THAT USED MORE CORES THAN THE MACHINE HAS TEACHES NOTHING (wave-32 T19; D5). Over a
+# second or three the children's processor time (`times`) over the seconds read 84 cores on an
+# 8-core machine, four times in one wave: a number no run can reach is a measurement error, and
+# a promise of it would size every later ask. gate_end writes its end and rc and no cost line.
+# The children's time is planted (PLANT_CPU) over a 2 s run on an 8-core machine: 40 s is 20.00
+# cores, 16 s is 8.00 (the machine's count: written), 16.04 s is 8.02 (over: not), 3 s is 1.50.
+section "§CORES-OVER — a run above the machine's core count writes no cost line (D5)"
+cores_run() {  # <name> <planted cpu seconds> [gate lib] — a 2 s run on the planted clock, ended
+  GATE_LIB="${3:-$GATE_LIB}" PLANT_CPU="$2" HOLD=1 ask_bg "$1" work k 0; wait_for 20 has "$1.rc"
+  world_tick 2
+  release "$1"
+}
+fresh cores-over
+world_machine 8 8192 40 1.0
+world_cost k 10 0.5 20
+CO_BEFORE="$(cat "$BIONIC_GATE_DIR/cost/k")"
+cores_run co1 40
+co1_id="$(id_of co1)"
+expect_eq "CO.1 a run of 20.00 cores on an 8-core machine still writes its end and rc" "1002|0" \
+  "$(field "$co1_id" ended)|$(field "$co1_id" rc)"
+expect_eq "CO.2 gate_end exits 0" "0" "$(cat "$D/co1.endrc" 2>/dev/null)"
+expect_eq "CO.3 …and the cost file is unchanged: the one planted line" "$CO_BEFORE" \
+  "$(cat "$BIONIC_GATE_DIR/cost/k")"
+cores_run co2 16.04
+expect_eq "CO.4 a run of 8.02 cores, just over the count, writes no line either" "$CO_BEFORE" \
+  "$(cat "$BIONIC_GATE_DIR/cost/k")"
+cores_run co3 16
+expect_regex "CO.5 a run of exactly 8.00 cores, the machine's count, writes its line" \
+  '^10:0\.5:20:1000 [0-9]+:8\.00:2:1006$' "$(tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/k" | sed 's/ $//')"
+cores_run co4 3
+expect_regex "CO.6 a run of 1.50 cores, under the count, writes its line" \
+  ':1\.50:2:1008$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
+fresh cores-over-mut
+world_machine 8 8192 40 1.0
+world_cost k 10 0.5 20
+MC="$(mutant cores-over)"
+anchor "$MC" "exit !(c + 0 <= n + 0)" 1
+sed -i.bak 's/exit !(c + 0 <= n + 0)/exit 0/' "$MC"
+cores_run cm1 40 "$MC"
+expect_regex "CO.7 the mutant (no core-count test) still ends the run and writes its line" \
+  ':2:1002$' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
+expect_regex "CO.8 …and the line is the impossible 20.00 cores — the test is the rule" \
+  ':20\.00:2:' "$(tail -n 1 "$BIONIC_GATE_DIR/cost/k")"
+
+# ── §WHOLE-COST ──────────────────────────────────────────────────────────────
+# A WHOLE RUN'S COST IS NO STRANGER'S PROMISE (wave-32 T26; D1, D5; critic adversarial 1). A whole
+# admission holds the machine alone, so its children's processor time over its seconds can be
+# every core the share allows (the whole run wrote 2:5.11:1932 for tests/run.sh). gate_end marks
+# the line it writes for a whole request `:whole`; the promise for a key with no cost of its own
+# (the per-field maximum over every cost file) and gate_room's largest processor promise on
+# record skip marked lines, so one whole run does not make every never-seen key wait for an
+# empty machine. A key's own promise still reads its own lines, marked or not. The arms are the
+# critic's probe: one work line for a.test.sh at 1.2 cores and one work request for it held, then
+# a never-seen key asks, without and with a whole run's line on record. The line is written by
+# the real gate_end of a 2 s whole request whose children's time is planted at 14.10 s (7.05
+# cores). The whole run's own next ask is pinned both ways: it waits while a.test.sh is held and
+# is admitted once nothing is.
+section "§WHOLE-COST — a whole run's cost line is not a never-seen key's promise (D1, D5)"
+wc_room() { ( . "$GATE_LIB" 2>/dev/null; o="$(gate_room --owed 1 2>&1)"; r=$?; printf '%s rc=%s' "$o" "$r" ); }
+wc_promise() { ( . "$GATE_LIB" 2>/dev/null; gate_promise "$1" 2>&1 ); }
+fresh whole-cost-without
+world_machine 8 8192 40 1.0
+world_cost a.test.sh 10 1.2 120
+HOLD=1 ask_bg wa work a.test.sh 0; wait_for 20 has wa.rc
+expect_eq "WC.1 without a whole line: the work request for a.test.sh is admitted and held (rc)" "0" "$(rc_of wa)"
+expect_eq "WC.2 …a never-seen key is promised a.test.sh's cost, the only one on record" "10:1.2:120" \
+  "$(wc_promise new.test.sh)"
+expect_eq "WC.3 …gate_room --owed 1 charges 1.2 cores for the owed writer and gives room" \
+  "room=yes load=1.0/1.0 cores=8 promised=2.4 waiting=0 rc=0" "$(wc_room)"
+expect_eq "WC.4 …and the never-seen key is admitted beside the held one (rc 0)" "0" \
+  "$(ask_fg wn work new.test.sh 0)"
+fresh whole-cost-with
+world_machine 8 8192 40 1.0
+world_cost a.test.sh 10 1.2 120
+PLANT_CPU=14.10 HOLD=1 ask_bg wr whole tests/run.sh 0; wait_for 20 has wr.rc
+world_tick 2
+release wr
+wr_id="$(id_of wr)"
+expect_eq "WC.5 the whole request was admitted at 1000 and ended at 1002 with rc 0" "1000|1002|0" \
+  "$(field "$wr_id" admitted)|$(field "$wr_id" ended)|$(field "$wr_id" rc)"
+expect_regex "WC.6 its gate_end wrote one line, 7.05 cores over 2 s at 1002, marked whole" \
+  '^[0-9]+:7\.05:2:1002:whole$' "$(cat "$BIONIC_GATE_DIR/cost/tests%run.sh" 2>/dev/null)"
+expect_eq "WC.7 the whole key's own promise still reads its own line" "0:7.05:2" \
+  "$(wc_promise tests/run.sh)"
+HOLD=1 ask_bg wa work a.test.sh 0; wait_for 20 has wa.rc
+expect_eq "WC.8 with the whole line on record, the work request for a.test.sh is admitted and held (rc)" "0" \
+  "$(rc_of wa)"
+expect_eq "WC.9 …a never-seen key is still promised a.test.sh's cost, not the whole run's" "10:1.2:120" \
+  "$(wc_promise new.test.sh)"
+expect_eq "WC.10 …gate_room --owed 1 still charges 1.2 cores, not the whole run's 7.05, and gives room" \
+  "room=yes load=1.0/1.0 cores=8 promised=2.4 waiting=0 rc=0" "$(wc_room)"
+expect_eq "WC.11 …and the never-seen key is admitted beside the held one (rc 0)" "0" \
+  "$(ask_fg wn work new.test.sh 0)"
+expect_eq "WC.12 the whole run's next ask, a.test.sh still held, waits (rc 75)" "75" \
+  "$(ask_fg wr2 whole tests/run.sh 0)"
+release wa
+expect_eq "WC.13 …and with nothing held it is admitted (rc 0)" "0" "$(ask_fg wr3 whole tests/run.sh 0)"
 
 # ── §ROOM ────────────────────────────────────────────────────────────────────
 # gate_room [--owed <n>] (wave-28 T13; D14): may another writer start? Every row plants an
@@ -1626,6 +1833,9 @@ wait_for 20 has pk.ran
 pk_id="$(req_of pk)"
 live_used 70; sleep 1
 live_used 40
+# The run lasts 2 s on the planted clock (wave-32 T1): a run of zero seconds writes no cost line
+# (§ZERO-SECONDS), and this row reads the cost line a real run of some seconds writes.
+world_tick 2
 touch "$D/pk.go"; wait_for 20 has pk.brc
 expect_eq "B.43 the run ended 0" "0" "$(brc pk)"
 expect_eq "B.44 a reading of 70 taken mid-run by the wrapper is the request's peak" "70" "$(field "$pk_id" peak)"
