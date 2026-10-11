@@ -16,6 +16,7 @@ commands.test.sh	3
 context-spend.test.sh	8
 context.test.sh	4
 cross-gate-agreement.test.sh	787
+decision-skill.test.sh	1
 detect-probes.test.sh	18
 dispatch-preflight-2.test.sh	245
 dispatch-preflight-3.test.sh	173
