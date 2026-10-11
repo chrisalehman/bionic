@@ -21,6 +21,10 @@
 #   §ANCESTOR  AC-2.13 an admission passed down is believed only from an ancestor holder; a
 #                      typed one asks anyway; BIONIC_SLOT_HELD=1 is ignored. Mutation: the
 #                      ancestor test removed believes the stranger
+#   §ANCESTRY  AC-1.4  (wave-32 T1; D5) a child of an admitted holder, BIONIC_GATE_ADMIT unset
+#                      or naming an id the store cannot believe, is admitted as the holder's and
+#                      files nothing; a process that is not a descendant files its own; an
+#                      ended admission is believed by nobody
 #   §WAITED    AC-4.2  a request holds its asked and admitted times, and the wait is their gap
 #   §KILLED    AC-4.3  a real child admitted and then killed with signal 9 is counted once;
 #                      its peak is kept and it writes no cost
@@ -30,6 +34,8 @@
 #                      overestimate held until it ages out of the three lines, `times`, an
 #                      unknown request line ignored. Mutations: no peak raised mid-run; four
 #                      lines kept
+#   §ZERO-SECONDS D5   (wave-32 T1) a run admitted and ended in one second writes its end and
+#                      rc and no cost line; one ended 2 s later writes its line
 #   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, a waiting
 #                      request, promised work not yet showing and memory over the share each
 #                      give no room; a quiet machine gives room; two asks on one reading give
@@ -130,6 +136,8 @@ fi
 #   HOLD=1     once admitted, hold until <dir>/<name>.go, then gate_end <id> 0 (<name>.endrc)
 #   CHILD=<n>  once admitted, run asker <n> for the same kind and key as a CHILD of this
 #              process, with BIONIC_GATE_ADMIT=<id>, before holding
+#   CHILD_ADMIT=<v>  the child's BIONIC_GATE_ADMIT is <v> instead of <id>; `-` leaves it unset
+#   ENDFIRST=1 once admitted, gate_end <id> 0 before running CHILD (the admission is over)
 #   WORK=<sh>  once admitted, run <sh> as a child before holding (processor time for `times`)
 #   AGENT=<a>  ask as agent <a> (the who's second half) instead of <name>, so two askers share a who
 #   LIVE=1     after a 75, stay alive, polling nothing, until <dir>/<name>.go
@@ -148,8 +156,11 @@ if [ "$rc" != 0 ]; then
   while [ ! -f "$d/$n.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
   exit 0
 fi
+[ "${ENDFIRST:-0}" != 1 ] || gate_end "$id" 0
 if [ -n "${CHILD:-}" ]; then
-  ( kid="$CHILD"; unset CHILD HOLD WORK; BIONIC_GATE_ADMIT="$id" bash "$0" "$d" "$kid" "$kind" "$key" 0 )
+  ( kid="$CHILD"; adm="${CHILD_ADMIT-$id}"; unset CHILD CHILD_ADMIT ENDFIRST HOLD WORK
+    if [ "$adm" = - ]; then unset BIONIC_GATE_ADMIT; else export BIONIC_GATE_ADMIT="$adm"; fi
+    bash "$0" "$d" "$kid" "$kind" "$key" 0 )
 fi
 [ -z "${WORK:-}" ] || bash -c "$WORK"
 [ "${HOLD:-0}" = 1 ] || exit 0
@@ -503,6 +514,47 @@ ancestor_rows "$MA" mut
 expect_eq "A.7 the mutant still believes the child" "0 $AN_HOLDER" "$AN_CHILD"
 expect_eq "A.8 the mutant (no ancestor test) believes the stranger — the test is the rule" "0" "$AN_STRANGER"
 
+# ── §ANCESTRY ────────────────────────────────────────────────────────────────
+# THE GATE BELIEVES BY ANCESTRY (wave-32 T1; D5, design ledger Δ9; AC-1.4). A process that
+# descends from the live holder of an admitted, unfinished request already runs under that
+# admission, whether or not it carries the id: a nested runner handed a scratch store's id,
+# or none, asks the real store and is given the ancestor's admission instead of filing a
+# request that store could never admit while the ancestor's lives. The room is one run's (the
+# second ask of k finds none), so a child that filed its own request would read 75.
+# ancestry_row <name> <child admit, - for unset> — a holder admitted, its child asking with
+# that BIONIC_GATE_ADMIT. Sets AY (the child's rc and id), AY_HOLDER and AY_NREQ. ENDFIRST
+# passes through.
+ancestry_row() {
+  fresh "ancestry-$1"
+  world_machine 8 8192 50 1.0
+  world_cost k 25 0.5 30
+  HOLD=1 CHILD=kid CHILD_ADMIT="$2" ask_bg par work k 0
+  wait_for 20 has par.rc; wait_for 20 has kid.rc
+  AY_HOLDER="$(id_of par)"
+  AY="$(rc_of kid) $(id_of kid)"
+  AY_NREQ="$(nreq)"
+}
+section "§ANCESTRY — a descendant of an admission's live holder runs under it, id or no id (D5; AC-1.4)"
+ancestry_row unset -
+expect_eq "AY.1 the holder is admitted (request 1)" "0 1" "$(rc_of par) $AY_HOLDER"
+expect_eq "AY.2 its child with no BIONIC_GATE_ADMIT is admitted as the holder's: rc 0 and its id" \
+  "0 $AY_HOLDER" "$AY"
+expect_eq "AY.3 …and filed no request of its own: the store holds one" "1" "$AY_NREQ"
+ancestry_row bogus 999
+expect_eq "AY.4 its child naming an id this store cannot believe (999) is admitted as the holder's" \
+  "0 $AY_HOLDER" "$AY"
+expect_eq "AY.5 …and filed no request of its own: the store holds one" "1" "$AY_NREQ"
+AY_STRANGER="$(ask_fg str work k 0)"
+expect_eq "AY.6 a process that is not a descendant still files its own, and finds no room (rc 75)" \
+  "75" "$AY_STRANGER"
+expect_eq "AY.7 …its request is the store's second" "2 2" "$(nreq) $(req_of str)"
+touch "$D/par.go"
+ENDFIRST=1 ancestry_row ended -
+expect_eq "AY.8 an ended admission is believed by nobody: the child of a holder that ended it files its own (rc 0, request 2)" \
+  "0 2" "$AY"
+expect_eq "AY.9 …so the store holds two" "2" "$AY_NREQ"
+touch "$D/par.go"
+
 # ── §WAITED ──────────────────────────────────────────────────────────────────
 section "§WAITED — a request holds its asked and admitted times (AC-4.2)"
 fresh waited
@@ -657,6 +709,33 @@ expect_eq "D.22 a key never seen is promised the maximum over every cost file" \
   "10:2:30" "$( . "$GATE_LIB" 2>/dev/null; gate_promise never 2>/dev/null )"
 expect_eq "D.23 no key is a usage error (rc 2)" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_promise 2>/dev/null; echo $? )"
+
+# ── §ZERO-SECONDS ────────────────────────────────────────────────────────────
+# A RUN OF ZERO SECONDS TEACHES NOTHING (wave-32 T1; D5). A run admitted and ended in the same
+# second has no measured time, and its cores field would divide its children's processor time
+# by one second it never ran (a planted clock wrote `0:72.43:0:1700000000` to the real store
+# this way): gate_end writes its end and rc, and no cost line. One ended 2 s later still writes.
+section "§ZERO-SECONDS — a run admitted and ended in one second writes no cost line (D5)"
+fresh zero-seconds
+world_machine 8 8192 40 1.0
+world_cost k 10 0.5 20
+ZS_BEFORE="$(cat "$BIONIC_GATE_DIR/cost/k")"
+HOLD=1 ask_bg z0 work k 0; wait_for 20 has z0.rc
+z0_id="$(id_of z0)"
+release z0
+expect_eq "Z.1 the run is admitted and ended at the same second (admitted|ended|rc)" "1000|1000|0" \
+  "$(field "$z0_id" admitted)|$(field "$z0_id" ended)|$(field "$z0_id" rc)"
+expect_eq "Z.2 gate_end exits 0" "0" "$(cat "$D/z0.endrc" 2>/dev/null)"
+expect_eq "Z.3 …and the cost file is unchanged: the one planted line" "$ZS_BEFORE" \
+  "$(cat "$BIONIC_GATE_DIR/cost/k")"
+HOLD=1 ask_bg z2 work k 0; wait_for 20 has z2.rc
+z2_id="$(id_of z2)"
+world_tick 2
+release z2
+expect_eq "Z.4 a run ended 2 s after its admission writes its end" "1000|1002" \
+  "$(field "$z2_id" admitted)|$(field "$z2_id" ended)"
+expect_regex "Z.5 …and a cost line: 2 s, at 1002, after the planted one" \
+  '^10:0\.5:20:1000 [0-9]+:[0-9.]+:2:1002$' "$(tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/k" | sed 's/ $//')"
 
 # ── §ROOM ────────────────────────────────────────────────────────────────────
 # gate_room [--owed <n>] (wave-28 T13; D14): may another writer start? Every row plants an
@@ -1626,6 +1705,9 @@ wait_for 20 has pk.ran
 pk_id="$(req_of pk)"
 live_used 70; sleep 1
 live_used 40
+# The run lasts 2 s on the planted clock (wave-32 T1): a run of zero seconds writes no cost line
+# (§ZERO-SECONDS), and this row reads the cost line a real run of some seconds writes.
+world_tick 2
 touch "$D/pk.go"; wait_for 20 has pk.brc
 expect_eq "B.43 the run ended 0" "0" "$(brc pk)"
 expect_eq "B.44 a reading of 70 taken mid-run by the wrapper is the request's peak" "70" "$(field "$pk_id" peak)"

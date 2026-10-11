@@ -118,8 +118,11 @@
 #             empty) gives no room unless nothing is admitted, waiting or owed.
 #   time      only `_res_now`, never SECONDS or date: a planted clock moves every wait.
 #   belief    BIONIC_GATE_ADMIT=<id> is believed only while that request is admitted,
-#             unfinished, and held by this process or one of its ancestors. BIONIC_SLOT_HELD
-#             is not read at all.
+#             unfinished, and held by this process or one of its ancestors. With no such id,
+#             an admitted, unfinished request whose live holder is this process or one of its
+#             ancestors is the admission it runs under (the lineage, wave-32 T1): it is printed
+#             and nothing is filed. BIONIC_SLOT_HELD is not read at all.
+#   cost      a run of zero seconds writes its end and rc and no cost line.
 #
 # No figure sized to a machine appears here: memory is a percentage, processor a share of the
 # cores the machine reports, and every command's cost is what it took on this machine before.
@@ -201,11 +204,15 @@ _gate_unlock() {
   [ "$(_slots_pid_of "$_GD/lock")" = "$_GATE_ME" ] && rm -rf "$_GD/lock"
 }
 
-# _gate_ancestor <pid> — rc 0 when <pid> is the process taking the lock or one of its ancestors.
+# _gate_ancestor <pid>... — rc 0 when a <pid> is the process taking the lock or one of its
+# ancestors; _G_ANC is the nearest one matched (the walk goes up from the process, once).
 _gate_ancestor() {
-  local p="$_GATE_ME" i=0
+  local p="$_GATE_ME" i=0 q
+  _G_ANC=''
   while [ -n "$p" ] && [ "$p" -gt 1 ] && [ "$i" -lt 64 ]; do
-    [ "$p" = "$1" ] && return 0
+    for q in "$@"; do
+      [ "$p" = "$q" ] && { _G_ANC="$p"; return 0; }
+    done
     p="$(ps -o ppid= -p "$p" 2>/dev/null)"; p="${p//[!0-9]/}"
     i=$((i + 1))
   done
@@ -458,20 +465,43 @@ _gate_decide() {
 # holds. One by the same who for the same key with no admitted line and no live holder is
 # resumed, its holder rewritten; otherwise a new one takes the next number, so a live waiter's
 # number is never taken over.
+#
+# THE LINEAGE (wave-32 T1; D5, design ledger Δ9). Before either, the same read of the store
+# looks for the admission this process already runs under: an admitted, unfinished request
+# whose holder is alive and is this process or one of its ancestors (_gate_ancestor's walk,
+# the nearest holder winning). Then _GATE_ID is that request, _GATE_LINEAGE is 1, and nothing
+# is filed or resumed: a nested runner that carries no id, or an id this store cannot believe
+# (a scratch store's), is the holder's own work, and a request of its own could never be
+# admitted while the ancestor's admission lives.
 _gate_enter() {
-  local f id max=0 holder tree now
+  local f id max=0 holder tree now hps='' pairs='' i
   holder="$$:$(_slots_since "$$")"
-  _GATE_ID=''
+  _GATE_ID='' _GATE_LINEAGE=0
   for f in "$_GD"/requests/*; do
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
     [ "$id" -le "$max" ] || max="$id"
     _gate_read "$f" || continue
-    if [ -z "$_GATE_ID" ] && [ -z "$_R_admitted" ] && [ -z "$_R_ended" ] \
+    if [ -n "$_R_admitted" ]; then
+      if [ -z "$_R_ended" ] && _gate_alive; then
+        hps="$hps ${_R_holder%%:*}"; pairs="$pairs ${_R_holder%%:*}:$id"
+      fi
+      continue
+    fi
+    if [ -z "$_GATE_ID" ] && [ -z "$_R_ended" ] \
         && [ "$_R_who" = "$3" ] && [ "$_R_key" = "$2" ] && ! _gate_alive; then
       _GATE_ID="$id"
     fi
   done
+  # shellcheck disable=SC2086  # the holder pids, one word each
+  if [ -n "$hps" ] && _gate_ancestor $hps; then
+    for i in $pairs; do   # one holder with two live admissions runs under the newer
+      [ "${i%%:*}" = "$_G_ANC" ] || continue
+      [ -n "$_GATE_ID" ] && [ "$_GATE_LINEAGE" = 1 ] && [ "${i#*:}" -lt "$_GATE_ID" ] && continue
+      _GATE_ID="${i#*:}" _GATE_LINEAGE=1
+    done
+    return 0
+  fi
   if [ -n "$_GATE_ID" ]; then
     _gate_holder "$_GATE_ID" "$holder"
     return 0
@@ -535,7 +565,11 @@ gate_ask() {
   start="$(_res_now)"
   while :; do
     if _gate_lock; then
-      [ -n "$id" ] || { _gate_enter "$kind" "$key" "$who"; id="$_GATE_ID"; }
+      if [ -z "$id" ]; then
+        _gate_enter "$kind" "$key" "$who"
+        if [ "$_GATE_LINEAGE" = 1 ]; then _gate_unlock; printf '%s\n' "$_GATE_ID"; return 0; fi
+        id="$_GATE_ID"
+      fi
       _gate_decide "$id"; rc=$?
       _gate_unlock
       if [ "$rc" -eq 0 ]; then printf '%s\n' "$id"; return 0; fi
@@ -607,9 +641,13 @@ gate_end() {
     mem="$prev"
   fi
   printf 'ended=%s\nrc=%s\n' "$now" "$rc" >> "$f"
-  { cat "$(_gate_cost_file "$my_key")" 2>/dev/null
-    printf '%s:%s:%s:%s\n' "$mem" "$cores" "$secs" "$now"
-  } | tail -n 3 > "$_GD/cost/.new.$id" && mv "$_GD/cost/.new.$id" "$(_gate_cost_file "$my_key")"
+  # A run of zero seconds teaches nothing (wave-32 T1; D5): it has no measured time, and its
+  # cores would be its children's processor time over a second it never ran.
+  if [ "$secs" -gt 0 ]; then
+    { cat "$(_gate_cost_file "$my_key")" 2>/dev/null
+      printf '%s:%s:%s:%s\n' "$mem" "$cores" "$secs" "$now"
+    } | tail -n 3 > "$_GD/cost/.new.$id" && mv "$_GD/cost/.new.$id" "$(_gate_cost_file "$my_key")"
+  fi
   _gate_scan "$reading"
   _gate_idle "$reading"
   _gate_unlock
