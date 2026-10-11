@@ -201,12 +201,27 @@ owed_mark_sent() {
     { print }' -v key="$key" -v now="$(_owed_now)"
 }
 
+# owed_unmark_sent <key> -> rc 0. Takes back the sent mark of an open item, so the next caller sends
+# it: `owed_send`'s answer to a send that failed. Only the caller that marked it calls this, and no
+# other caller marks an item already marked, so the mark it takes back is its own.
+owed_unmark_sent() {
+  local key="${1:-}" f
+  _owed_key_ok "$key" || return 1
+  f="$(owed_file)" || return 1
+  [ -f "$f" ] || return 1
+  _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
+    index($0, "owed/v1|") != 1 { next }
+    fld($0, "key") == key && fld($0, "state") == "open" && fld($0, "sent") != "-" { sub(/\|sent=[^|]*\|/, "|sent=-|") }
+    { print }' -v key="$key"
+}
+
 # owed_send [<key prefix>] -> rc 0, always, and nothing on stdout or stderr. THE ONE SEND LOOP:
 # every open item not yet sent (with a prefix, only its keys) is marked sent and then handed to
 # notify_send, title and the line the run printed. Marked BEFORE the send, so a caller killed
-# mid-send (the Stop's ten seconds) loses at most one notification and never sends one twice. A
-# failed send is logged by notify_send and stops the loop: the items after it stay unsent for the
-# next caller, so a dead network costs one bounded attempt per turn, not one per item.
+# mid-send (the Stop's ten seconds) never sends one twice. A failed send is logged by notify_send,
+# its mark is taken back (wave-33 T34; the critic's finding 3 reverses A-T11-3) and the loop stops:
+# that item and the ones after it stay unsent for the next caller, so a dead network costs one
+# bounded attempt per turn, not one per item, and a working one sends each item once.
 # No channel declared: returns before reading the store, so nothing is marked and an item still
 # open when a channel is declared later is sent then.
 owed_send() {
@@ -220,7 +235,10 @@ owed_send() {
     reply="$(printf '%s' "$line" | cut -f4)"
     owed_mark_sent "$key" >/dev/null 2>&1 || continue
     NOTIFY_KEY="$key" notify_send "$title" "$reply" >/dev/null 2>&1
-    [ "${NOTIFY_RC:-0}" = 2 ] && break
+    if [ "${NOTIFY_RC:-0}" = 2 ]; then
+      owed_unmark_sent "$key" >/dev/null 2>&1
+      break
+    fi
   done
   return 0
 }
