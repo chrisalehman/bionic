@@ -268,7 +268,7 @@ for B4B_I in $(seq 1 100); do
   [ "$(b4b_state "$B4B_ID")" = "$B4B_ID killed" ] && break
   sleep 0.05
 done
-expect_eq "B4b.1 the SIGKILLed shim's request is still unended on disk" "$B4B_ID killed" "$(b4b_state "$B4B_ID")"
+expect_eq "B4b.1 the gate lists the SIGKILLed holder's request as killed, reaped by its sampler or not" "$B4B_ID killed" "$(b4b_state "$B4B_ID")"
 B4B_OUT="$(bk -- 'echo reclaimed' 2>&1)"; B4B_RC=$?
 expect_status "B4b.2 the next ask is admitted" 0 "$B4B_RC"
 expect_contains "B4b.3 …and runs" "reclaimed" "$B4B_OUT"
