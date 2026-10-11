@@ -608,7 +608,10 @@ for _s9_i in 101 102 103 104 105 106; do
   printf '| T%s | 4 | build | more | implementor | — | 15m | REQ-x | x%s.sh | pending | — |\n' "$_s9_i" "$_s9_i" >> "$S9_P8"
 done
 S9_TX8="$(mktemp)"; s9_transcript "$S9_TX8"
-s7_fire "$S9_D8" "$S9_TX8"
+# ROOM FOR EIGHT (wave-33 T1; Δ10): each owed writer costs one core, and the suite's 8 cores at share
+# 80 under a load of 1.0 owe five; these rows test the line budget over eight owed rows, so the
+# machine is 16 cores (12.8).
+BIONIC_PROBE_CORES=16 s7_fire "$S9_D8" "$S9_TX8"
 expect_eq "9j: eight ready rows still refuse through the JSON block, not a refuse-call error" "block" \
   "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 expect_contains "9k: …the headline counts the names it could not fit" "more (dispatch or decline)" "$(s9_headline)"
