@@ -1176,6 +1176,16 @@ printf 'see %s\n' "$E3" > "$R/s.txt"; fx_commit "$R" "add s"
 L="$(fx_list sig1 "$E3")"
 ST="$TMP/sigtmp"; mkdir -p "$ST"
 now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
+# settle_until <ceiling-in-hundredths-of-a-second> <command…> — poll the command every 10 ms until it
+# succeeds or the ceiling passes. It replaces the fixed 0.2 s settle after a kill: the settle waited for
+# the killed scan's EXIT trap (or the rm it started) to take the temporary tree away, and the poll ends
+# the moment the tree is gone, with the same 0.2 s as its timeout when it is not (a leak still counts).
+settle_until() {
+  local n="$1" i=0; shift
+  while ! "$@" && [ "$i" -lt "$n" ]; do sleep 0.01; i=$((i + 1)); done
+  return 0
+}
+st_empty() { [ -z "$(ls -A "$ST")" ]; }
 T0="$(now)"; scan "$R" "$L" TMPDIR="$ST"; T1="$(now)"
 expect_status "SIGNAL: an unkilled run is a hit run (control)" 1 "$RC"
 expect_empty "SIGNAL: and leaves nothing under its TMPDIR (control)" "$(ls -A "$ST")"
@@ -1186,7 +1196,7 @@ for sig in TERM HUP; do
     ( cd "$R" && TMPDIR="$ST" exec bash "$SCAN" "$L" >/dev/null 2>&1 ) & p=$!
     sleep "$d"; kill -"$sig" "$p" 2>/dev/null; wait "$p"; rc=$?
     [ "$rc" -gt 128 ] && killed=$((killed + 1))
-    sleep 0.2
+    settle_until 20 st_empty
     if [ -n "$(ls -A "$ST")" ]; then left=$((left + 1)); rm -rf "${ST:?}"/*; fi
   done
   echo "SIGNAL: $sig — 50 runs, $killed ended by the signal, $left left a tree"
@@ -1204,6 +1214,7 @@ pg_scan() {
       env TMPDIR="$st" "$@" bash "$SCAN" "$L" >/dev/null 2>&1 ) & p=$!
 }
 left_trees() { ls -A "$1" | grep -c '^name-scan\.' || true; }
+no_left_trees() { [ "$(left_trees "$1")" -eq 0 ]; }
 for sig in TERM INT HUP; do
   killed=0; left=0
   for k in $(seq 1 50); do
@@ -1211,7 +1222,7 @@ for sig in TERM INT HUP; do
     pg_scan "$ST"
     sleep "$d"; kill -"$sig" -- -"$p" 2>/dev/null; wait "$p"; rc=$?
     [ "$rc" -gt 128 ] && killed=$((killed + 1))
-    sleep 0.2
+    settle_until 20 no_left_trees "$ST"
     [ "$(left_trees "$ST")" -eq 0 ] || left=$((left + 1))
     rm -rf "${ST:?}"/* 2>/dev/null
   done
@@ -1222,6 +1233,7 @@ done
 # the same, aimed: an `rm` on the scan's PATH that marks its start and waits a second before the
 # real one, so the group's signal lands while the EXIT trap removes the tree, every time
 RMS="$TMP/rm-shim"; mkdir -p "$RMS"
+# the shim's `sleep 1` is the fixture: an rm made slow on purpose so the signal lands while it runs; no wait can observe a command that is slow by construction
 printf '#!/bin/bash\n: > "%s"\nsleep 1\nexec /bin/rm "$@"\n' "$TMP/rm-started" > "$RMS/rm"; chmod +x "$RMS/rm"
 for sig in TERM INT HUP; do
   rm -f "$TMP/rm-started"
@@ -1229,7 +1241,7 @@ for sig in TERM INT HUP; do
   k=0; while [ ! -e "$TMP/rm-started" ] && [ "$k" -lt 600 ]; do sleep 0.05; k=$((k + 1)); done
   expect_true "SIGNAL: $sig aimed — the EXIT trap reached its rm (positive)" [ -e "$TMP/rm-started" ]
   kill -"$sig" -- -"$p" 2>/dev/null; wait "$p"
-  sleep 1.2
+  settle_until 120 no_left_trees "$ST"
   expect_eq "SIGNAL: $sig aimed at the group while the tree is removed — no name-scan.* tree is left" "0" "$(left_trees "$ST")"
   rm -rf "${ST:?}"/* 2>/dev/null
 done
