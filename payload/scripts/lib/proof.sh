@@ -443,12 +443,86 @@ PROOF_OWED_FINDINGS
 # names (`proof_bind_awk`: a `deferred:` or `moved:` line keyed to a finding of it) is derived
 # again from its record at the ratings the plan gives its findings; any other reading, or one whose
 # record cannot be read, keeps its written result.
+#
+# A FIXED FINDING IS SETTLED (wave-33 T13; REQ-5 AC-5.2, D6). With the reading's <head>, its <tree> and the
+# plan's fixed findings (`proof_fixed`'s lines) after the four operands, a finding of the reading that a born
+# row fixed at or after <head> (`_proof_fixed_var`) drops out of the derivation, so a `fail` reading whose
+# every finding to fix is fixed derives to `flag` or `pass`; a fixed finding binds the reading as a deferral
+# does. Without them the answer is the one it always was.
 _proof_reading_result() {
-  local plan="$1" droot="$2" ev="$3" res="$4" tab
-  [ -n "$droot" ] && [ -n "$ev" ] && [ -f "$droot/$ev" ] || { printf '%s' "$res"; return 0; }
-  tab="$(_proof_binding_table "$plan" "$ev")" || { printf '%s' "$res"; return 0; }
-  _proof_reading_derive "$droot" "$ev" "$res" "$tab"
+  _proof_reading_result_var "$@"
   printf '%s' "$PROOF_DERIVED"
+}
+
+# _proof_reading_result_var <as _proof_reading_result> -> its answer in `PROOF_DERIVED`, with no fork, leaving
+# `_PROOF_FIXED_IDS` and `_PROOF_FIXED_COMMITS` set for the reading (`facts_state` holds the fix commits on the
+# question's chain).
+_proof_reading_result_var() {
+  local plan="$1" droot="$2" ev="$3" res="$4" tab
+  PROOF_DERIVED="$res"; _PROOF_FIXED_IDS=""; _PROOF_FIXED_COMMITS=""
+  [ -n "$droot" ] && [ -n "$ev" ] && [ -f "$droot/$ev" ] || return 0
+  tab="$(_proof_binding_table "$plan" "$ev")" || tab=""
+  _proof_fixed_var "${7:-}" "$ev" "${5:-}" "${6:-}"
+  [ -n "$tab" ] || [ -n "$_PROOF_FIXED_IDS" ] || return 0
+  _proof_reading_derive "$droot" "$ev" "$res" "$tab" "$_PROOF_FIXED_IDS"
+}
+
+# proof_fixed <plan> [<tree>] -> `<record>#<n><TAB><row><TAB><commit>`, one line per finding a fix row answers
+# and has landed green (wave-33 T13; REQ-5 AC-5.2, D6): the row names the finding on its born marker
+# (lib/units.sh `units_born_findings`, which `task-add --born <record>#<n>` writes), its `## Tasks` status is
+# `landed`, and the run's landing record (`proof_debt_record`, lib/line.sh's events) holds a verdict for it
+# whose commit is the row's newest verdict commit and whose every suite there reads `result=green`, the last
+# word per suite. <commit> is that commit, the landing the green verdicts name. Nothing when no born marker
+# names a finding, so a plan without one pays one grep. Whether <commit> is at or after a reading's head is
+# the reader's to ask (`_proof_fixed_var`). RED has no machine record (research-verbs-landing.md G1): the
+# green landing is the proof read.
+proof_fixed() {
+  local plan="${1:-}" tree="${2:-}" born rec
+  [ -f "$plan" ] || return 0
+  /usr/bin/grep -q ' born: review S[0-9][0-9]* o[nf]f* of=' "$plan" 2>/dev/null || return 0
+  _proof_units_load || return 0
+  declare -F units_born_findings >/dev/null 2>&1 || return 0
+  born="$(units_born_findings "$plan" 2>/dev/null | awk -F'\t' '$2 == "landed"')"
+  [ -n "$born" ] || return 0
+  rec="$(proof_debt_record "$plan" "$tree")" || return 0
+  [ -f "$rec" ] || return 0
+  { printf '\034born\n%s\n\034rec\n' "$born"; cat "$rec" 2>/dev/null; } | awk -F'|' '
+    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    $0 == SUBSEP "born" { part = 1; next }
+    $0 == SUBSEP "rec" { part = 2; next }
+    part == 1 { split($0, b, "\t"); nb++; brow[nb] = b[1]; bid[nb] = b[3]; want[b[1]] = 1; next }
+    part == 2 && substr($0, 1, 8) == "line/v1|" && fv("ev") == "verdict" {
+      r = fv("row"); if (!(r in want)) next
+      c = fv("commit"); s = fv("suite"); v = fv("result")
+      if (c == "" || s == "") next
+      if (lc[r] != c) { lc[r] = c; ns[r] = 0 }
+      if (!((r SUBSEP c SUBSEP s) in seen)) { seen[r, c, s] = 1; ns[r]++; sl[r, ns[r]] = s }
+      res[r, s] = v
+    }
+    END {
+      for (r in lc) { ok[r] = (ns[r] > 0); for (i = 1; i <= ns[r]; i++) if (res[r, sl[r, i]] != "green") ok[r] = 0 }
+      for (i = 1; i <= nb; i++) if ((brow[i] in ok) && ok[brow[i]]) printf "%s\t%s\t%s\n", bid[i], brow[i], lc[brow[i]]
+    }'
+}
+
+# _proof_fixed_var <proof_fixed lines> <record> <reading head> <tree> -> in `_PROOF_FIXED_IDS` the findings of
+# <record> fixed at or after <reading head> (the landing's commit has the head on its history), newline-wrapped
+# (`\n<record>#<n>\n…`), and in `_PROOF_FIXED_COMMITS` those landings' commits, the same way; both empty when
+# none. No fork but one `git merge-base` per fixed finding of the record.
+_proof_fixed_var() {
+  local id row c nl=$'\n'
+  _PROOF_FIXED_IDS=""; _PROOF_FIXED_COMMITS=""
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -n "${4:-}" ] || return 0
+  while IFS='	' read -r id row c; do
+    case "$id" in "$2#"*) : ;; *) continue ;; esac
+    [ -n "$c" ] && git -C "$4" merge-base --is-ancestor "$3" "$c" 2>/dev/null || continue
+    _PROOF_FIXED_IDS="$_PROOF_FIXED_IDS$nl$id"
+    case "$_PROOF_FIXED_COMMITS$nl" in *"$nl$c$nl"*) : ;; *) _PROOF_FIXED_COMMITS="$_PROOF_FIXED_COMMITS$nl$c" ;; esac
+  done <<PROOF_FIXED_LINES
+$1
+PROOF_FIXED_LINES
+  [ -z "$_PROOF_FIXED_IDS" ] || _PROOF_FIXED_IDS="$_PROOF_FIXED_IDS$nl"
+  [ -z "$_PROOF_FIXED_COMMITS" ] || _PROOF_FIXED_COMMITS="$_PROOF_FIXED_COMMITS$nl"
 }
 
 # _proof_binding_table <plan> <record> -> one line per finding of <record> a binding line of the plan's
@@ -475,9 +549,10 @@ _proof_binding_table() {
 # result <evidence>'s findings give at the ratings the table (`_proof_binding_table`'s lines) says: the one
 # derivation, asked once per reading by `_proof_reading_result` and once per bound reading by
 # `proof_readings_derived`, which prints it without a fork. A record that cannot be read keeps the
-# written result.
+# written result. A fifth operand, `_proof_fixed_var`'s newline-wrapped ids, names the findings a landed
+# born row fixed: each drops out, whatever its rating (wave-33 T13; D6).
 _proof_reading_derive() {
-  local droot="$1" ev="$2" res="$3" nl tb tab got n s r w mv out=""
+  local droot="$1" ev="$2" res="$3" fixed="${5:-}" nl tb tab got n s r w mv out=""
   nl=$'\n'; tb=$'\t'; tab="$nl$4"; PROOF_DERIVED="$res"
   got="$(proof_findings "$droot/$ev" 2>/dev/null)" || return 0
   while IFS='	' read -r n s r w _; do
@@ -485,6 +560,7 @@ _proof_reading_derive() {
     # A debt row is flag-class whatever the plan binds (no binding line names it): kept as it is.
     [ "$n" != debt ] || { out="$out$n	$s	$r	$w	burn
 "; continue; }
+    case "$fixed" in *"$nl$ev#$n$nl"*) continue ;; esac
     mv=""
     case "$tab" in
       *"$nl$ev#$n$tb"*)
@@ -1139,23 +1215,31 @@ proof_pass_conflict() {
 # shell just before it), and only a reading a binding line names is derived from its record, so the cost
 # is one plan read and one record read per bound reading, not a plan read per reading and per finding. <tree> is the project root whose docs root holds the records;
 # with no docs root, the derived result is the written one.
+#
+# A FIXED FINDING BINDS TOO (wave-33 T13; REQ-5 AC-5.2, D6): with a <tree>, the plan's fixed findings
+# (`proof_fixed`) are read once, and a reading one of whose findings a born row fixed at or after its head is
+# derived as the judge derives it, so the wall and the judge read a fixed question one way.
 proof_readings_derived() {
-  local plan="${1:-}" tree="${2:-}" droot="" k a b c tab="" nl
+  local plan="${1:-}" tree="${2:-}" droot="" k a b c d tab="" nl fixed=""
   [ -f "$plan" ] || return 0
   nl=$'\n'
   if [ -n "$tree" ]; then
     _proof_roots_load
     ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
+    fixed="$(proof_fixed "$plan" "$tree")"
   fi
-  while IFS='	' read -r k a b c; do
+  while IFS='	' read -r k a b c d; do
     case "$k" in
       S) tab="$tab$a	$b$nl" ;;
       R) PROOF_DERIVED="$c"
-         if [ "$b" = 1 ] && [ -n "$droot" ] && [ -f "$droot/$a" ]; then _proof_reading_derive "$droot" "$a" "$c" "$tab"; fi
+         _proof_fixed_var "$fixed" "$a" "$d" "$tree"
+         if { [ "$b" = 1 ] || [ -n "$_PROOF_FIXED_IDS" ]; } && [ -n "$droot" ] && [ -f "$droot/$a" ]; then
+           _proof_reading_derive "$droot" "$a" "$c" "$tab" "$_PROOF_FIXED_IDS"
+         fi
          printf '%s\t%s\t%s\n' "$a" "$c" "$PROOF_DERIVED"; tab="" ;;
     esac
   done <<PROOF_READINGS
-$(awk "$(proof_awk)$(proof_bind_awk)"'
+$(PROOF_HAS_FIXED="${fixed:+1}" awk "$(proof_awk)$(proof_bind_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
@@ -1166,14 +1250,14 @@ $(awk "$(proof_awk)$(proof_bind_awk)"'
       next
     }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" && !((PROOF_EVIDENCE SUBSEP PROOF_RESULT) in seen) {
-      seen[PROOF_EVIDENCE SUBSEP PROOF_RESULT] = 1; nr++; rev[nr] = PROOF_EVIDENCE; rres[nr] = PROOF_RESULT
+      seen[PROOF_EVIDENCE SUBSEP PROOF_RESULT] = 1; nr++; rev[nr] = PROOF_EVIDENCE; rres[nr] = PROOF_RESULT; rhead[nr] = PROOF_HEAD
     }
     END {
-      if (!nbind) exit
+      if (!nbind && ENVIRON["PROOF_HAS_FIXED"] == "") exit
       for (i = 1; i <= nr; i++) {
         hit = 0; p = rev[i] "#"
         for (id in ids) if (index(id, p) == 1) { hit = 1; print "S\t" id "\t" (id in mv ? mv[id] : "-") }
-        print "R\t" rev[i] "\t" hit "\t" rres[i]
+        print "R\t" rev[i] "\t" hit "\t" rres[i] "\t" rhead[i]
       }
     }' "$plan")
 PROOF_READINGS
@@ -1480,7 +1564,7 @@ proof_debts_open() {
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
   local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot pfx chains fact kind q role scope st rc=0
-  local x pt pr ph pe wt wr we
+  local x pt pr ph pe wt wr we wh fixed="" held
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   if ! declare -F plan_frontmatter_get >/dev/null 2>&1; then
@@ -1522,7 +1606,7 @@ review	"*)
     !insdlc { next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
       q = PROOF_QUESTION; pt[q] = "fact"; pr[q] = PROOF_RESULT; ph[q] = PROOF_HEAD; pe[q] = PROOF_EVIDENCE
-      if (PROOF_SCOPE == "whole") { wt[q] = "fact"; wr[q] = PROOF_RESULT; we[q] = pe[q] }
+      if (PROOF_SCOPE == "whole") { wt[q] = "fact"; wr[q] = PROOF_RESULT; we[q] = pe[q]; wh[q] = PROOF_HEAD }
       next
     }
     /^waived:[ \t]/ {
@@ -1532,12 +1616,15 @@ review	"*)
         else if (w[i] ~ /^head=/) h = substr(w[i], 6)
       }
       if (q == "" || h !~ /^[0-9a-f]+$/ || length(h) < 7 || length(h) > 40) next
-      pt[q] = "waiver"; pr[q] = ""; ph[q] = h; pe[q] = ""; wt[q] = "waiver"; wr[q] = ""; we[q] = ""
+      pt[q] = "waiver"; pr[q] = ""; ph[q] = h; pe[q] = ""; wt[q] = "waiver"; wr[q] = ""; we[q] = ""; wh[q] = h
     }
     END {
       n = split(qs, Q, " ")
-      for (i = 1; i <= n; i++) { q = Q[i]; printf "%s|%s|%s|%s|%s|%s|%s|%s\n", q, pt[q], pr[q], ph[q], pe[q], wt[q], wr[q], we[q] }
+      for (i = 1; i <= n; i++) { q = Q[i]; printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n", q, pt[q], pr[q], ph[q], pe[q], wt[q], wr[q], we[q], wh[q] }
     }' "$plan")"
+  # THE FIXED FINDINGS, read once (wave-33 T13; REQ-5 AC-5.2, D6): the readings below derive without them.
+  case "$owed" in review"	"*|*"
+review	"*) fixed="$(proof_fixed "$plan" "$tree")" ;; esac
   while IFS= read -r fact; do
     [ -n "$fact" ] || continue
     case "$fact" in
@@ -1559,20 +1646,27 @@ review	"*)
 $fact
 PROOF_OWED
         x="$(printf '%s\n' "$chains" | awk -F'|' -v q="$q" '$1 == q')"
-        IFS='|' read -r x pt pr ph pe wt wr we <<PROOF_CHAIN
+        IFS='|' read -r x pt pr ph pe wt wr we wh <<PROOF_CHAIN
 $x
 PROOF_CHAIN
         # THE RESULT IS THE ONE ITS FINDINGS GIVE AT THEIR EFFECTIVE RATINGS (wave-28 T41; D33): a
         # reading a check re-rated is derived again from its record, not read off its proof line.
-        [ "$pt" != fact ] || pr="$(_proof_reading_result "$plan" "$droot" "$pe" "$pr")"
-        [ "$wt" != fact ] || wr="$(_proof_reading_result "$plan" "$droot" "$we" "$wr")"
+        # A FINDING A BORN ROW FIXED IS SETTLED (wave-33 T13; D6): it drops out of the derivation, and the
+        # commit that landed its fix green is held on the chain as a docs-only commit is, so a question whose
+        # every finding to fix is fixed is covered with no waiver. Any other commit past the head is still
+        # unread, and one open finding to fix keeps the reading failing.
+        held=""
+        if [ "$wt" = fact ]; then _proof_reading_result_var "$plan" "$droot" "$we" "$wr" "$wh" "$tree" "$fixed"; wr="$PROOF_DERIVED"; fi
+        if [ "$pt" = fact ]; then
+          _proof_reading_result_var "$plan" "$droot" "$pe" "$pr" "$ph" "$tree" "$fixed"; pr="$PROOF_DERIVED"; held="$_PROOF_FIXED_COMMITS"
+        fi
         if [ "$scope" = whole ]; then
           if [ -z "$wt" ]; then st=absent
           elif [ "$wt" = fact ] && [ "$wr" = fail ]; then st="failing	$we"
           else st=covered; fi
         elif [ -z "$pt" ]; then st=absent
         elif [ "$pt" = fact ] && [ "$pr" = fail ]; then st="failing	$pe"
-        elif _facts_holds "$tree" "$pfx" "$ph" "$head"; then st=covered
+        elif _facts_holds "$tree" "$pfx" "$ph" "$head" "$held"; then st=covered
         else st="uncovered	$ph..$head"
         fi ;;
       check)
@@ -1710,16 +1804,23 @@ _proof_docs_path() {
 # docs-only, so one path outside both fails the range. 1 otherwise, and whenever git cannot answer:
 # uncovered is the safe direction. Both heads are compared as the commits they resolve to, never as
 # strings (T45; review pass 13 F10).
+# A fifth operand, newline-wrapped full commit ids (`_proof_fixed_var`'s `_PROOF_FIXED_COMMITS`), names the
+# commits that landed a fix of the reading's own findings green (wave-33 T13; D6): each is held as a docs-only
+# commit is, whatever it touches.
 _facts_holds() {
-  local tree="$1" pfx="$2" lh hh files f
+  local tree="$1" pfx="$2" held="${5:-}" lh hh files f skip=0
   [ -n "$tree" ] || return 1
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
   hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
   [ "$lh" != "$hh" ] || return 0
   git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1
-  files="$(git -C "$tree" log --first-parent -m --no-renames --name-only --format= "$lh..$hh" 2>/dev/null)" || return 1
+  files="$(git -C "$tree" log --first-parent -m --no-renames --name-only --format='%x01%H' "$lh..$hh" 2>/dev/null)" || return 1
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    case "$f" in
+      $'\001'*) skip=0; case "$held" in *$'\n'"${f#?}"$'\n'*) skip=1 ;; esac; continue ;;
+    esac
+    [ "$skip" = 0 ] || continue
     [ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1
   done <<PROOF_DOCS_FILES
 $files
