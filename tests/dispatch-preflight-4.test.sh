@@ -3015,6 +3015,7 @@ rc_plant() {
   cp "$lib/roster.sh" "$root/scripts/lib/roster.sh"
   case "$mode" in
     unbuilt) printf '%s\n' 'roster_row() { return 2; }' >> "$root/scripts/lib/roster.sh" ;;
+    # the slow roster_row sleeps past the real DP_DEADLINE_S; the deadline is a constant in the hook (no environment knob pins it), RC5 pins the shipped value, and no wait can observe a deadline sooner than it fires
     slow)    printf '%s\n' '_rc_f="$(declare -f roster_row)"; eval "_rc_orig_${_rc_f}"' \
                            "roster_row() { sleep $(( ${RC_DEADLINE:-12} + 2 )); _rc_orig_roster_row \"\$@\"; }" >> "$root/scripts/lib/roster.sh" ;;
   esac
