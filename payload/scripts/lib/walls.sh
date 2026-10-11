@@ -5869,6 +5869,129 @@ _bsg_own_amend() {
   [ -n "$_BSG_AM_UPD" ]
 }
 
+# _bsg_budget_read — THE AGENT'S BUDGET, OFF ITS ROSTER ROW (moved out of the budget arm by wave-33
+# T36; D7, AC-6.2). One read for its two callers: the budget arm, which judges a suite against it, and
+# the carry, which asks only whether a budget is stated. Sets the caller's BUDGET_STATED,
+# SUITES_ALLOWED, RE_EXECUTES (decoded and normalised), _BUDGET_ROW and _BUDGET_ROW_NAME; rc 1 when
+# roster.sh will not load, which the caller answers by allowing, as the arm always did.
+# AHEAD OF THE WALL, with the carry: a function written inside the wall's body is defined only when the
+# wall's run reaches it, and the carry is asked before the run reaches any of them.
+_bsg_budget_read() {
+# THE SHAPE RULE IS ALREADY SPENT (REQ-1h). `session_id` returns the host-supplied value
+# verbatim — it validates nothing — and this line turns it into a path. The rule that made
+# that safe used to live here, blanking the id and carrying on; it lives in `bionic_context`
+# now and ENDS the hook instead, so BIONIC_SID cannot be unusable by the time it reaches
+# this line. The reason is hooks/landing-gate.sh:284's about `agent_id`: a key carrying path
+# separators does not trip the symlink guards, it reads outside the directory those guards
+# protect.
+local ROSTER_FILE _bseen _bseg _bkey
+local -a _bsegs
+_BUDGET_ROW=""; _BUDGET_ROW_NAME=""
+ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+BUDGET_STATED=no
+SUITES_ALLOWED=""
+RE_EXECUTES=""
+if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
+  # THE LAST ROW CARRYING THIS ID WINS, any status (epic-23 wave-22 T1; REQ-1 AC-1.1, D2).
+  # The pick is `roster_row_for_id` (payload/scripts/lib/roster.sh), the one reader of "the
+  # row the wall reads for this id": `session-poker.sh amend` asks it the same question about
+  # the row it just wrote, so the verb's success line and this arm cannot read two rows. The
+  # roster's one rule for successor rows is stated once, in that function's docblock. What
+  # it means here: a launch row is joined by the recorder's `status=confirmed` copy, which
+  # carries the budget forward — but for a TEAMMATE not the id, which the recorder learns
+  # one event later and writes on the `identified` row — and, across a /clear, by the
+  # poker's adopted row. A row with no id is invisible to this arm, which keys on the id the
+  # payload carries; `amend` and `extend` therefore copy the id onto every successor they
+  # write once it is known, and the newest row carrying it is the current statement.
+  #
+  # TWO FIELDS, ONE READ (REQ-1 AC-1.5). `re_executes=` is the same statement in the
+  # spelling a repository whose tests are not shell suites can make — the author-marked
+  # runs its brief declared under `Re-executes:`, marks kept and space-joined (A-T1.4) —
+  # and it is read off the SAME winning row, because a budget assembled from two different
+  # rows would hold an agent to a contract no single dispatch ever wrote. Each key is read
+  # at its FIRST occurrence on that row, as every by-key reader takes it; `suites_allowed=`
+  # PRESENT (even empty) is what makes the budget stated.
+  #
+  # THE ROW'S NAME, for the remedy line (T6): the verb that widens this budget addresses a
+  # row by name, and the winning row is the one read here. It is kept AS THE ROSTER
+  # CARRIES IT (wave-21 T13): dropping the characters a shell treats specially printed
+  # `amend wbudgetrm` for a row named `w budget;rm`, a name no row carries. The remedy line
+  # quotes a name like that instead, so the pasted command stays one argument and still
+  # addresses the row.
+  wall_libs background-suite-guard roster.sh || return 1
+  _BUDGET_ROW="$(roster_row_for_id "$ROSTER_FILE" "$ACTOR")" || _BUDGET_ROW=""
+  if [ -n "$_BUDGET_ROW" ]; then
+    _bseen=" "
+    IFS='|' read -r -a _bsegs <<< "$_BUDGET_ROW"
+    for _bseg in "${_bsegs[@]}"; do
+      _bkey="${_bseg%%=*}"
+      [ "$_bkey" != "$_bseg" ] || continue
+      case "$_bseen" in *" $_bkey "*) continue ;; esac
+      _bseen="$_bseen$_bkey "
+      case "$_bkey" in
+        suites_allowed) BUDGET_STATED=yes; SUITES_ALLOWED="${_bseg#suites_allowed=}" ;;
+        re_executes)    RE_EXECUTES="${_bseg#re_executes=}" ;;
+        name)           _BUDGET_ROW_NAME="${_bseg#name=}" ;;
+      esac
+    done
+  fi
+  # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
+  # percent-encoded because the line is pipe-delimited and a declared run may legitimately
+  # hold a pipe inside quotes — `payload/scripts/lib/roster.sh` owns that encoding and
+  # carries the reasoning; `roster_pipe_escape`/`roster_pipe_unescape` there are these two
+  # expansions, and the pair is the definition this copy answers to.
+  #
+  # STILL SPELLED HERE, though `roster.sh` is now loaded above for the row pick (wave-22
+  # T1). It is loaded lazily, by `wall_libs`, and only on this arm's path: `hooks/bash-walls.sh`'s
+  # `BIONIC_LIB_WANT` still does not carry it. Moving these two expansions onto
+  # `roster_pipe_unescape` is a change of its own, outside T1's; until then the twin is the
+  # posture `sanitize`/`clean` and `parse_seconds` already hold in this fleet.
+  #
+  # ONE DECODE, NOT ONE PER READER. `_run_is_declared` compares against this variable and
+  # `budget_refuse` PRINTS it to a reader who is about to retype the command — so decoding
+  # inside the compare would leave the refusal advertising a command no shell can run,
+  # while decoding in both places would turn a literal `%7C` in a command into a pipe.
+  RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
+  RE_EXECUTES="${RE_EXECUTES//\%25/%}"
+  # AND NORMALISED, AT THE SAME ONE DECODE (wave-20 T4; REQ-7, D7). The claim side builds
+  # its run with `cmdnorm_run` (payload/scripts/lib/cmd-class.sh, loaded above ARM 1), which
+  # takes trailing redirections, `| tee` and `|| true` off; the declared side goes through
+  # the same rule here, once per hook call, so `_run_is_declared` compares two readings of
+  # one rule and never a raw declaration against a normalised claim. For a row the lift
+  # wrote this is the identity — the lift refuses a redirection in a declaration and runs
+  # the same rule before it stores one — and `cmd_runs_norm` skips its fork when the field
+  # holds nothing the rule could act on.
+  RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
+fi
+[ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
+}
+
+# _bsg_stage_carry — THE AGENT RIDES TO THE GATE (wave-33 T3; D7, AC-6.2). A command a budgeted agent
+# runs that the wall does not handle as a suite is admitted unread, and the suites it starts ask the
+# gate (lib/gate.sh THE BUDGET) as `BIONIC_GATE_AGENT`; a shell does not know its agent, so the call is
+# rewritten to name it first: `export BIONIC_GATE_AGENT=<row name>; <the command as typed>`, the name
+# spelled as booked.sh spells its --agent. Every other field of tool_input rides through. rc 0 staged,
+# 1 not (no jq output).
+#
+# EVERY SUCH COMMAND, NOT ONLY A SCRIPT START (wave-33 T36; ADR-052): T3 carried only what the claims
+# read as a script start, so a runner reached through python, node, awk, `source` or an out-of-tree
+# script asked as main. Which commands start a suite is not readable from text; the ask is where the
+# run is real. The cost, measured (tests/hook-latency.test.sh §11): the roster read's one awk on every
+# call of a dispatched agent, and for a budgeted one two jq more, this stage and the fold's emit.
+_bsg_carry() {  # -> 1 staged (an advisory, so the fold keeps it), 0 left as typed (no budget stated)
+  [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || return 0
+  _bsg_stage_carry && return 1
+  return 0
+}
+_bsg_stage_carry() {
+  local _who _upd
+  _who="${_BUDGET_ROW_NAME:-$ACTOR}"; _who="${_who//[!A-Za-z0-9._+-]/_}"
+  _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg c "export BIONIC_GATE_AGENT=$_who; $COMMAND" \
+    '.tool_input + {command: $c}' 2>/dev/null)
+  [ -n "$_upd" ] || return 1
+  fold_update_input "$_upd"
+}
+
 # ─── wall_background_suite_guard — hooks/background-suite-guard.sh ───────────
 #
 # A subagent may not run a suite where nobody reads the output (B-9,
@@ -6115,10 +6238,21 @@ _wall_class_read "$COMMAND"
 _BSG_CLAIM_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CLAIM_CWD" ] || _BSG_CLAIM_CWD="${BIONIC_CWD:-}"
 # A PATH THE SHELL RUNS IS ASKED TOO (wave-33 T3; D7, AC-6.2): `./tools/run.sh`, a link to the runner,
 # is class none until the claims resolve it, and a script start is what the budget arm carries.
+# A COMMAND THE CLAIMS DO NOT READ IS CARRIED, NOT LEFT (wave-33 T36; D7, AC-6.2): what it starts is
+# not knowable from its text (`python3 run.py`, `awk '…system(…)'`, `source helper.sh`), so it carries
+# the agent's name like any script start, and the gate's ask holds the budget wherever a suite starts.
 if [ "$_WALL_CLASS" != "suite" ]; then
   [ -n "$ACTOR" ] || return 0
-  case "$COMMAND" in *sh[[:space:]]*|*/*) : ;; *) return 0 ;; esac
-  [ -n "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || return 0
+  local _BSG_CLAIMED=0
+  case "$COMMAND" in
+    *sh[[:space:]]*|*/*) [ -z "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || _BSG_CLAIMED=1 ;;
+  esac
+  if [ "$_BSG_CLAIMED" = 0 ]; then
+    local BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _BUDGET_ROW_NAME=""
+    _bsg_budget_read || return 0
+    _bsg_carry
+    return $?
+  fi
 fi
 
 # A SHELL-BACKGROUNDED SUITE IS CAUGHT LIKE A TOOL-BACKGROUNDED ONE (D8, REQ-6). The tool
@@ -6222,93 +6356,9 @@ fi
 # budget in name only — that is a wish, not a wall — so nothing in this arm looks at it.
 [ -n "$ACTOR" ] || return 0
 
-# THE SHAPE RULE IS ALREADY SPENT (REQ-1h). `session_id` returns the host-supplied value
-# verbatim — it validates nothing — and this line turns it into a path. The rule that made
-# that safe used to live here, blanking the id and carrying on; it lives in `bionic_context`
-# now and ENDS the hook instead, so BIONIC_SID cannot be unusable by the time it reaches
-# this line. The reason is hooks/landing-gate.sh:284's about `agent_id`: a key carrying path
-# separators does not trip the symlink guards, it reads outside the directory those guards
-# protect.
-local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
-local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact _BSG_SET_CMP _BSG_STARTS _BSG_RUNS
-ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
-BUDGET_STATED=no
-SUITES_ALLOWED=""
-RE_EXECUTES=""
-if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
-  # THE LAST ROW CARRYING THIS ID WINS, any status (epic-23 wave-22 T1; REQ-1 AC-1.1, D2).
-  # The pick is `roster_row_for_id` (payload/scripts/lib/roster.sh), the one reader of "the
-  # row the wall reads for this id": `session-poker.sh amend` asks it the same question about
-  # the row it just wrote, so the verb's success line and this arm cannot read two rows. The
-  # roster's one rule for successor rows is stated once, in that function's docblock. What
-  # it means here: a launch row is joined by the recorder's `status=confirmed` copy, which
-  # carries the budget forward — but for a TEAMMATE not the id, which the recorder learns
-  # one event later and writes on the `identified` row — and, across a /clear, by the
-  # poker's adopted row. A row with no id is invisible to this arm, which keys on the id the
-  # payload carries; `amend` and `extend` therefore copy the id onto every successor they
-  # write once it is known, and the newest row carrying it is the current statement.
-  #
-  # TWO FIELDS, ONE READ (REQ-1 AC-1.5). `re_executes=` is the same statement in the
-  # spelling a repository whose tests are not shell suites can make — the author-marked
-  # runs its brief declared under `Re-executes:`, marks kept and space-joined (A-T1.4) —
-  # and it is read off the SAME winning row, because a budget assembled from two different
-  # rows would hold an agent to a contract no single dispatch ever wrote. Each key is read
-  # at its FIRST occurrence on that row, as every by-key reader takes it; `suites_allowed=`
-  # PRESENT (even empty) is what makes the budget stated.
-  #
-  # THE ROW'S NAME, for the remedy line (T6): the verb that widens this budget addresses a
-  # row by name, and the winning row is the one read here. It is kept AS THE ROSTER
-  # CARRIES IT (wave-21 T13): dropping the characters a shell treats specially printed
-  # `amend wbudgetrm` for a row named `w budget;rm`, a name no row carries. The remedy line
-  # quotes a name like that instead, so the pasted command stays one argument and still
-  # addresses the row.
-  wall_libs background-suite-guard roster.sh || return 0
-  _BUDGET_ROW="$(roster_row_for_id "$ROSTER_FILE" "$ACTOR")" || _BUDGET_ROW=""
-  if [ -n "$_BUDGET_ROW" ]; then
-    _bseen=" "
-    IFS='|' read -r -a _bsegs <<< "$_BUDGET_ROW"
-    for _bseg in "${_bsegs[@]}"; do
-      _bkey="${_bseg%%=*}"
-      [ "$_bkey" != "$_bseg" ] || continue
-      case "$_bseen" in *" $_bkey "*) continue ;; esac
-      _bseen="$_bseen$_bkey "
-      case "$_bkey" in
-        suites_allowed) BUDGET_STATED=yes; SUITES_ALLOWED="${_bseg#suites_allowed=}" ;;
-        re_executes)    RE_EXECUTES="${_bseg#re_executes=}" ;;
-        name)           _BUDGET_ROW_NAME="${_bseg#name=}" ;;
-      esac
-    done
-  fi
-  # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
-  # percent-encoded because the line is pipe-delimited and a declared run may legitimately
-  # hold a pipe inside quotes — `payload/scripts/lib/roster.sh` owns that encoding and
-  # carries the reasoning; `roster_pipe_escape`/`roster_pipe_unescape` there are these two
-  # expansions, and the pair is the definition this copy answers to.
-  #
-  # STILL SPELLED HERE, though `roster.sh` is now loaded above for the row pick (wave-22
-  # T1). It is loaded lazily, by `wall_libs`, and only on this arm's path: `hooks/bash-walls.sh`'s
-  # `BIONIC_LIB_WANT` still does not carry it. Moving these two expansions onto
-  # `roster_pipe_unescape` is a change of its own, outside T1's; until then the twin is the
-  # posture `sanitize`/`clean` and `parse_seconds` already hold in this fleet.
-  #
-  # ONE DECODE, NOT ONE PER READER. `_run_is_declared` compares against this variable and
-  # `budget_refuse` PRINTS it to a reader who is about to retype the command — so decoding
-  # inside the compare would leave the refusal advertising a command no shell can run,
-  # while decoding in both places would turn a literal `%7C` in a command into a pipe.
-  RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
-  RE_EXECUTES="${RE_EXECUTES//\%25/%}"
-  # AND NORMALISED, AT THE SAME ONE DECODE (wave-20 T4; REQ-7, D7). The claim side builds
-  # its run with `cmdnorm_run` (payload/scripts/lib/cmd-class.sh, loaded above ARM 1), which
-  # takes trailing redirections, `| tee` and `|| true` off; the declared side goes through
-  # the same rule here, once per hook call, so `_run_is_declared` compares two readings of
-  # one rule and never a raw declaration against a normalised claim. For a row the lift
-  # wrote this is the identity — the lift refuses a redirection in a declaration and runs
-  # the same rule before it stores one — and `cmd_runs_norm` skips its fork when the field
-  # holds nothing the rule could act on.
-  RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
-fi
-[ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
+local BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact _BSG_SET_CMP _BSG_RUNS
+_bsg_budget_read || return 0
 # WHY NO SET, when there is none (wave-27 T5, D15): a row that states none, or no row carrying
 # this id at all. `budget_unrecorded` below prints it.
 _BUDGET_UNSET_WHY="your roster row records no suite set"
@@ -6562,21 +6612,7 @@ $(_budget_remedy_line "$1")"
 
 # `budget_unverified`, the refusal of a script the budget could not read (wave-31 T11), is retired with
 # the classifier's `unverified` kind (wave-33 T3; D7, AC-6.1): a script runs by default, and the gate's
-# ask holds the budget where a suite starts. The carry below (`_bsg_stage_carry`) is what replaced it.
-
-# _bsg_stage_carry — THE AGENT RIDES TO THE GATE (wave-33 T3; D7, AC-6.2). A script a budgeted agent
-# starts is admitted unread, and the suites it starts ask the gate (lib/gate.sh THE BUDGET) as
-# `BIONIC_GATE_AGENT`; a shell does not know its agent, so the call is rewritten to name it first:
-# `export BIONIC_GATE_AGENT=<row name>; <the command as typed>`, the name spelled as booked.sh spells
-# its --agent. Every other field of tool_input rides through. rc 0 staged, 1 not (no jq output).
-_bsg_stage_carry() {
-  local _who _upd
-  _who="${_BUDGET_ROW_NAME:-$ACTOR}"; _who="${_who//[!A-Za-z0-9._+-]/_}"
-  _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg c "export BIONIC_GATE_AGENT=$_who; $COMMAND" \
-    '.tool_input + {command: $c}' 2>/dev/null)
-  [ -n "$_upd" ] || return 1
-  fold_update_input "$_upd"
-}
+# ask holds the budget where a suite starts. The carry (`_bsg_stage_carry`, ahead of the wall) replaced it.
 
 # budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
 # D15). A row with no set, or no row at all, used to let a named suite through in silence, on
@@ -6653,11 +6689,11 @@ _BSG_SET_CMP="$SUITES_ALLOWED"
 case "$_BSG_SET_CMP" in
   *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ! cmd_case_blind "$BIONIC_ROOT" || _BSG_SET_CMP="$(printf '%s' "$_BSG_SET_CMP" | tr 'A-Z' 'a-z')" ;;
 esac
-_BSG_STARTS=0; _BSG_RUNS=0
+_BSG_RUNS=0
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
   # A SCRIPT START (wave-33 T3; D7): nothing the text definitely runs, so nothing here refuses it.
-  if [ "$_kind" = "script" ]; then _BSG_STARTS=1; continue; fi
+  [ "$_kind" != "script" ] || continue
   _BSG_RUNS=1
 
   # ---------- THE PROJECT'S DOOR, ASKED ONCE FOR THIS CLAIM (wave-28 T54, D27; A-orch-124/125) ----------
@@ -6791,17 +6827,14 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   esac
 done <<< "$_CLAIMS"
 
-# ---------- THE CARRY (wave-33 T3; D7, AC-6.2): a script start is admitted, naming its agent ----------
+# ---------- THE CARRY (wave-33 T3; D7, AC-6.2): a command that runs no suite is admitted, naming its agent ----------
 #
-# A command that is no suite and claims only script starts reaches the gate through whatever it starts,
-# so it is neither repaired nor booked (both are a suite's); for an agent whose row states a budget it
-# is rewritten to carry the agent's name (`_bsg_stage_carry`), so the gate's ask holds the budget. An
-# agent with no budget, or the main thread (which never reaches this arm), is left as typed.
+# A command that is no suite and claims no run reaches the gate through whatever it starts, so it is
+# neither repaired nor booked (both are a suite's); it is carried (`_bsg_carry`), as a command the
+# claims never read is above the backgrounded arm (wave-33 T36).
 if [ "$_WALL_CLASS" != "suite" ] && [ "$_BSG_RUNS" = 0 ]; then
-  [ "$_BSG_STARTS" = 1 ] || return 0
-  [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || return 0
-  _bsg_stage_carry && return 1
-  return 0
+  _bsg_carry
+  return $?
 fi
 
 # ---------- ARM R (REQ-3, D4): repair a suite timeout below the harness maximum ----------

@@ -945,11 +945,17 @@ expect_nonempty "14m4: …(the reader works: the wrap's command is non-empty on 
 
 # (f) SUBAGENT, NON-SUITE CONTROL — `cmd_class` never answers "suite", so the whole
 # function returns before ARM 1 or the repair arm, exactly as section 1's `ls -la` row.
+# ORDERED BEHAVIOUR CHANGE (wave-33 T36; D7, AC-6.2): this budgeted agent's `ls -la` USED TO come back
+# with no updatedInput at all (old 14o: "no"). It now carries the agent's name to the gate
+# (§CARRY-EVERY); what this control proves is unchanged: no repair reaches a non-suite command.
 run_hook "$(mk_payload "$R_REPAIR" 'ls -la' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
-expect_status "14n: a subagent's non-suite command is untouched" 0 "$ST"
-expect_eq "14o: …no updatedInput — cmd_class never reaches 'suite'" "no" "$(has_updated_input)"
-expect_empty "14p: …and nothing on either stream" "$OUT$ERR"
+expect_status "14n: a subagent's non-suite command is allowed" 0 "$ST"
+expect_eq "14o: …its timeout is not repaired — cmd_class never reaches 'suite' (14b is the positive)" "" \
+  "$(updated_timeout_of)"
+expect_eq "14o2: …the only rewrite is the agent's name in front of the command as typed" \
+  "export BIONIC_GATE_AGENT=t14repair; ls -la" "$(updated_command_of)"
+expect_empty "14p: …and nothing on stderr: no repair logged" "$ERR"
 
 # (g) THE CEILING ITSELF MOVES — bionic setup's 30-minute ceiling, not the 600000 stock
 # default, is what a repair on an armed machine raises to.
@@ -3246,8 +3252,12 @@ expect_status "SB.5 a script that runs no suite passes" 0 "$ST"
 expect_absent "SB.5b …with no refusal line" "refused" "$ERR"
 expect_eq "SB.5c …carrying the agent, so what it starts asks the gate as this agent" \
   "export BIONIC_GATE_AGENT=t11writer; bash plain.sh" "$(sb_cmd)"
+# ORDERED BEHAVIOUR CHANGE (wave-33 T36; D7, AC-6.2): a call that starts no script USED TO carry
+# nothing (old SB.5d: ""). Every call a budgeted agent makes that is not handled as a suite now
+# carries its name, whatever the text looks like (§CARRY-EVERY below is the gate's half).
 run_hook "$(mk_payload "$R_SB" 'git status --short' "$ACTOR" omit Bash test-runner 1800000)"
-expect_eq "SB.5d a call that starts no script carries nothing (SB.5c is the positive)" "" "$(sb_cmd)"
+expect_eq "SB.5d a call that starts no script carries the agent too (was: carried nothing)" \
+  "export BIONIC_GATE_AGENT=t11writer; git status --short" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash red.sh' "" omit Bash)"
 expect_absent "SB.6 the main thread's bash red.sh meets no budget arm" "run only the budgeted suites" "$ERR"
 expect_absent "SB.6b …and no unverified refusal" "unverified" "$ERR"
@@ -3271,5 +3281,69 @@ expect_contains "SB.9b …naming gamma.test.sh" "gamma.test.sh" "$SB_LO"
 run_hook "$(mk_payload "$R_SB" 'bash TESTS/RUN.SH' "$ACTOR" omit Bash test-runner 1800000)" BIONIC_PROBE_CASE_BLIND=0
 expect_eq "SB.10 case-exact, TESTS/RUN.SH is another file: a script start, admitted and carried" \
   "0|export BIONIC_GATE_AGENT=t11writer; bash TESTS/RUN.SH" "$ST|$(sb_cmd)"
+
+section "§CARRY-EVERY — a budgeted agent's name rides on every command, so what it starts asks the gate as it (wave-33 T36; D7, AC-6.2)"
+# ============================================================
+#
+# T3's carry rode only on a command the classifier read as a script start, so a runner reached
+# through another interpreter (awk, python, node), `source` or an out-of-tree script asked the gate
+# as main, unbudgeted (T3-budget-at-ask.md, Known limits). The rule is ADR-052's: enforce where the
+# work becomes real, never by guessing from text. So every call a budgeted agent makes that the wall
+# does not handle as a suite carries its name, and the gate's ask (lib/gate.sh THE BUDGET) refuses
+# what is off the budget wherever it starts.
+# FIXTURE FIDELITY: R_SB's row (the recorder's own join, alpha.test.sh on the budget); the command
+# run is the one the harness runs (the staged rewrite when there is one, else the typed command),
+# under `bash -c` in the agent's checkout with the session id the harness exports and no inherited
+# BIONIC_GATE_AGENT. The runner is a project's own, which asks this tree's gate budget for its
+# suite before it runs it (`gate_budget`, the read `gate_ask` makes first); its mark is the run.
+# fails-when: an off-budget suite started through an awk or `env bash` launcher runs.
+CE_MARKS="$SANDBOX/ce-marks"; mkdir -p "$CE_MARKS" "$R_SB/tools"
+CE_GATE="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/gate.sh"
+[ -r "$CE_GATE" ] || CE_GATE="${BIONIC_HOOKS_DIR}/../scripts/lib/gate.sh"
+printf '#!/bin/bash\n. %q || exit 1\ngate_budget work "$1" || exit 75\n: > "$CE_MARKS/$1.ran"\n' "$CE_GATE" \
+  > "$R_SB/tools/runner.sh"
+printf '#!/bin/bash\nbash tools/runner.sh "$@"\n' > "$R_SB/tools/launch.sh"
+CE_OUT=""; CE_RC=0
+ce_run() {  # <agent id or ""> <command> — the hook, then what the harness runs; leaves CE_OUT CE_RC
+  local _c
+  run_hook "$(mk_payload "$R_SB" "$2" "$1" omit Bash test-runner 1800000)"
+  _c="$(sb_cmd)"; [ -n "$_c" ] || _c="$2"
+  rm -f "$CE_MARKS"/*.ran
+  CE_OUT="$(cd "$R_SB" && env -u BIONIC_GATE_AGENT CLAUDE_CODE_SESSION_ID="$SID" CE_MARKS="$CE_MARKS" \
+    bash -c "$_c" 2>&1)"
+  CE_RC=$?
+}
+ce_ran() { ls "$CE_MARKS" 2>/dev/null | sed 's/\.ran$//' | sort | paste -sd, -; }
+CE_AWK="awk 'BEGIN { exit system(\"bash tools/runner.sh \" ARGV[1]) }'"
+ce_run "" "$CE_AWK gamma.test.sh"
+expect_eq "CE.0 control: the main thread's awk launcher runs gamma.test.sh (no budget holds main)" "0 gamma.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_eq "CE.0b …and its call carries nothing: the gate's who is main" "" "$(sb_cmd)"
+ce_run "$ACTOR" "$CE_AWK gamma.test.sh"
+expect_eq "CE.1 AC-6.2 a budgeted agent's off-budget suite started from an awk launcher is refused at the gate, 75, nothing run" \
+  "75 " "$CE_RC $(ce_ran)"
+expect_contains "CE.1b …with the budget's own line, naming the agent" \
+  "refused at the gate — gamma.test.sh is not on t11writer's budget" "$CE_OUT"
+expect_eq "CE.1c …because the call carried the agent's row name, the command unchanged after it" \
+  "export BIONIC_GATE_AGENT=t11writer; $CE_AWK gamma.test.sh" "$(sb_cmd)"
+ce_run "$ACTOR" 'env bash tools/launch.sh gamma.test.sh'
+expect_eq "CE.2 AC-6.2 …and from an env bash launcher" "75 " "$CE_RC $(ce_ran)"
+expect_contains "CE.2b …with the budget's own line" "gamma.test.sh is not on t11writer's budget" "$CE_OUT"
+ce_run "$ACTOR" "$CE_AWK alpha.test.sh"
+expect_eq "CE.3 an on-budget suite through the same awk launcher is admitted and runs" "0 alpha.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_absent "CE.3b …with no refusal line" "refused" "$CE_OUT"
+ce_run "$ACTOR" 'git --version'
+expect_eq "CE.4 a budgeted agent's non-suite command still runs" "0" "$CE_RC"
+expect_contains "CE.4b …and prints what it prints" "git version" "$CE_OUT"
+expect_eq "CE.4c …carrying the agent" "export BIONIC_GATE_AGENT=t11writer; git --version" "$(sb_cmd)"
+ce_run "a-unplaced-ce5" "$CE_AWK gamma.test.sh"
+expect_eq "CE.5 an agent no row budgets: its awk launcher runs gamma.test.sh, as before" "0 gamma.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_eq "CE.5b …and its call carries nothing (CE.1c is the positive)" "" "$(sb_cmd)"
+run_hook "$(mk_payload "$R_SB" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_contains "CE.6 a classified suite keeps its own path: the booking wrap, which names the agent itself" \
+  "booked.sh" "$(sb_cmd)"
+expect_absent "CE.6b …and no carry in front of it" "export BIONIC_GATE_AGENT" "$(sb_cmd)"
 
 finish
