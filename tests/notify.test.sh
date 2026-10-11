@@ -382,15 +382,24 @@ expect_eq "Q1b beside it: the same world's GATE tick sends exactly its one reque
   "1" "$(nt_calls)"
 expect_contains "Q1c …the GATE line, not the card item" "body=poker: GATE w99-T2 — billing: stripe charges create" "$(nt_last)"
 
+# THE RUN WORLD, ON ITS OWN COUNT: nothing owed, then a landing and a dispatch, then one item
+# opened in the same world, which the next Stop sends (the positive on this counter, this fixture).
 RL="$(nt_run nt-landing)"
+: > "$NT_CALLS"
 nt_stop "$RL"
-expect_eq "Q2 a Stop with nothing owed sends nothing" "1" "$(nt_calls)"
+expect_eq "Q2 a Stop with nothing owed sends nothing" "0" "$(nt_calls)"
 poke "$RL" row-landed T1 --by-hand 'fixture landing'
-expect_eq "Q3 AC-2.4 a landing sends nothing (whatever the verb answers: rc $RC)" "1" "$(nt_calls)"
+expect_eq "Q3 AC-2.4 a landing sends nothing (whatever the verb answers: rc $RC)" "0" "$(nt_calls)"
 NQ_PAYLOAD=$(jq -nc --arg c "$RL" --arg s "$SID" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Agent",tool_input:{description:"T1",prompt:"do T1",subagent_type:"bionic:implementor",name:"w99-T1"}}')
 ( cd "$RL" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$PREFLIGHT" <<< "$NQ_PAYLOAD" ) >/dev/null 2>&1
-expect_eq "Q4 AC-2.4 a dispatch sends nothing" "1" "$(nt_calls)"
+expect_eq "Q4 AC-2.4 a dispatch sends nothing" "0" "$(nt_calls)"
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
+nt_owed "$RL" owed_open approve:release "approval: release" 'Approve release?' >/dev/null
+nt_stop "$RL"
+expect_eq "Q5 beside them, in the same world, an item opened is sent by the next Stop (the counter works here)" \
+  "1" "$(nt_calls)"
+export CLAUDE_CONFIG_DIR="$NS_CFG"
 
 # ============================================================
 section "§ABSENT: no channel is 1.15.0, and a failed send changes no exit code (AC-2.5)"
