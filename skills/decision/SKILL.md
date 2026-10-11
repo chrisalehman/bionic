@@ -1,6 +1,6 @@
 ---
 name: decision
-description: "Use whenever you put a decision to the user: numbered options, a choice between approaches, a fork only they can rule on. Applies at any step and with no run open, and when the user types /bionic:decision. Puts the decision in one fixed shape, Goal, Options, Recommendation, Significance, ending on one reply line."
+description: "Use whenever you put a decision to the user: numbered options, a choice between approaches, a fork only they can rule on. When the user asks which of several options to use, that is a decision too: put it in the shape, never in prose. Applies at any step and with no run open, and when the user types /bionic:decision. Puts the decision in one fixed shape, Goal, Options, Recommendation, Significance, ending on one reply line."
 layer: technique
 needs: []
 loading: deferred
