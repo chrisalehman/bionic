@@ -1132,7 +1132,9 @@ expect_eq "--within takes whole seconds (exit 2)" "2" "$RD_RC"
 expect_match "…saying so" "spawn-worktree: REFUSED reason=usage within=soon — *" "$RD_OUT"
 
 RDB="$(rd_world)"
-world_cost a.test.sh 5 0.5 600
+# The gate keeps each suite's duration under its project (wave-33 T1; Δ10): planted in the fixture
+# repository the landing runs in.
+( cd "$RDB" && world_cost a.test.sh 600 )
 rd_ready "$RDB/.worktrees/T1" --within 60
 expect_eq "a suite promising more seconds than are left: exit 75" "75" "$RD_RC"
 expect_eq "…printing WAITING and the same command, exactly" \

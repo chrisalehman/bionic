@@ -122,9 +122,10 @@ mkdir -p "$CLAUDE_CONFIG_DIR/bionic"
 printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
 # THE GATE IS FIXTURE DATA (wave-28 T13; D14). The tick and the stop wall size their fill at the
 # gate, which reads the machine through the readers' pins and its store at BIONIC_GATE_DIR: 8
-# cores, 30% used, a load of 1.0 over the last minute and the last five, and one run on record
-# that takes 0.1 core, so every width below is the fixture's cap or its ready rows, never this
-# host's load. §ROOM plants its own.
+# cores, 30% used, a load of 1.0 over the last minute and the last five; every command is promised
+# one core (wave-33 T1; Δ10: the cost line below is a duration the gate no longer reads cores from),
+# so a width is the fixture's cap, its ready rows or the gate's room, never this host's load.
+# §ROOM and CG-budget plant their own.
 export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
 export BIONIC_GATE_DIR="$SANDBOX/gate"
 mkdir -p "$BIONIC_GATE_DIR/requests" "$BIONIC_GATE_DIR/cost"
@@ -12048,6 +12049,11 @@ leading-zero|parallel-budget: writers=08 suites=2 source=user|8
 empty-field|parallel-budget: writers= suites=2 source=user|-
 no-writers|parallel-budget: suites=2 source=user|-'
 
+# ROOM FOR ALL TEN (wave-33 T1; Δ10). The gate promises every writer one core, so the fixture's
+# 8 cores at share 80 (6.4, a load of 1.0) hold five: the fill would be the gate's, and a cap of 8
+# would read like no cap at all. This section's machine is 32 cores (25.6), so the fill is the
+# cap's or the ten ready rows', as the readers' agreement needs; the fixture's 8 come back after.
+CGB_CORES_SAVED="$BIONIC_PROBE_CORES"; export BIONIC_PROBE_CORES=32
 while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   [ -n "$_cgb_label" ] || continue
   _cgb_r=$(cgb_world "$_cgb_label" "$_cgb_line")
@@ -12073,6 +12079,7 @@ while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
       "parallel-budget" "$CGB_PF_OUT"
   fi
 done <<< "$CGB_CASES"
+export BIONIC_PROBE_CORES="$CGB_CORES_SAVED"
 
 # ONE DEFINITION EACH, AND NO PRIVATE CUT SURVIVES.
 for _cgb_fn in plan_budget_line budget_line_of budget_field; do
@@ -12705,7 +12712,7 @@ CGLEOF
   [ "$roster" = yes ] || ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGC_POKER" arm >/dev/null 2>&1 )
   CGL_TICK="$(cgl_tick)"
   case "$lbl" in
-    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=0.1 admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
+    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=1 admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
     -noroster) expect_contains "CG-ledger${lbl} precondition: the tick is the armed first tick, QUIET" \
                  "poker: QUIET — armed, nothing dispatched yet on this session" "$CGL_TICK" ;;
   esac

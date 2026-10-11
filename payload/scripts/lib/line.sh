@@ -1069,13 +1069,15 @@ _line_suite_log() {  # <rec> <row> <suite> <candidate> -> a path no run has writ
   printf '%s' "$p"
 }
 
-# NEVER A SUITE PAST ITS TIME (D3): the gate's promise for the suite (`_gate_promise`, the per-field
-# maximum of its cost record) against the time left. Prints the seconds the gate may take to admit
-# it, so that it starts with its promised seconds still left; rc 1 when they are not left now.
-_line_time_for() {  # <suite> <deadline> -> seconds
+# NEVER A SUITE PAST ITS TIME (D3): the suite's recorded duration (the last field of `_gate_promise`,
+# the longest of its kept durations; wave-33 T1, Δ10) against the time left. Prints the seconds the
+# gate may take to admit it, so that it starts with its promised seconds still left; rc 1 when they
+# are not left now. Durations are keyed by project (`_gate_project`), so the lookup names the
+# landing tree the suite runs in, not wherever the carrier stands.
+_line_time_for() {  # <suite> <deadline> <landing tree> -> seconds
   local p s left
   _gate_store >/dev/null 2>&1 || return 0
-  p="$(_gate_promise "$1")"; s="${p##*:}"
+  p="$(_gate_promise "$1" "${3:-}")"; s="${p##*:}"
   left=$(( $2 - $(_res_now) ))
   awk -v s="${s:-0}" -v l="$left" 'BEGIN { if (s + 0 > l + 0) exit 1; printf "%d\n", l - s }'
 }
@@ -1115,7 +1117,7 @@ _line_kill_tree() {  # <pid>
 _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite> <deadline>
   local within="" res rp r
   LINE_RESULT=""; LINE_LOG="$(_line_suite_log "$2" "$3" "$7" "$4")"
-  if [ -n "$8" ]; then within="$(_line_time_for "$7" "$8")" || { LINE_RESULT=waiting; return 0; }; fi
+  if [ -n "$8" ]; then within="$(_line_time_for "$7" "$8" "$6")" || { LINE_RESULT=waiting; return 0; }; fi
   res="${LINE_LOG%.log}.run"; : > "$res"
   # A JOB OF ITS OWN (wave-33 T2; D3, AC-7.1): a plain `&` would start the runner, and so its suite,
   # with INT and QUIT ignored; the runner's own spawn of the suite is one too (`_line_runner`).

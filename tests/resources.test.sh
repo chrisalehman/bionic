@@ -1104,7 +1104,7 @@ section "M — _res_used_pct, _res_busy_cores, _res_cores, _res_total_mb, _res_n
 # and `nproc` stubbed — it is declared synthetic: no Linux host was measured for it.
 M_UNPIN="BIONIC_PROBE_USED_PCT BIONIC_PROBE_BUSY_CORES BIONIC_PROBE_BUSY_CORES_5M BIONIC_PROBE_CORES BIONIC_PROBE_TOTAL_MB
   BIONIC_PROBE_FREE_PCT BIONIC_PROBE_FREE_MB BIONIC_PROBE_LOAD_1M BIONIC_PROBE_SWAP_PCT
-  BIONIC_PROBE_PROC BIONIC_NOW_EPOCH BIONIC_NOW_FILE BIONIC_LOAD_NOW_FILE"
+  BIONIC_PROBE_PROC BIONIC_PROBE_CGROUP BIONIC_NOW_EPOCH BIONIC_NOW_FILE BIONIC_LOAD_NOW_FILE"
 M_DAR="$TMPROOT/stub-m-darwin"; M_LIN="$TMPROOT/stub-m-linux"; M_PROC="$TMPROOT/proc-m"
 mkdir -p "$M_DAR" "$M_LIN" "$M_PROC"
 cp "$STUBS/memory_pressure" "$STUBS/sysctl" "$M_DAR/"
@@ -1199,6 +1199,58 @@ expect_eq "M.30 Linux: the five-minute figure is /proc/loadavg's second field" "
 expect_regex "M.31 live: the five-minute figure is a decimal" '^[0-9]+(\.[0-9]+)?$' \
   "$(m_read - _res_busy_cores_5m)"
 
+# §QUOTA — the cores this process may use (wave-33 T1; D4, AC-8.5). On Linux a cgroup CPU quota,
+# when set, bounds the host's count: cgroup v2 `cpu.max` (`<quota> <period>`, or `max <period>`
+# for none), v1 `cpu/cpu.cfs_quota_us` over `cpu/cpu.cfs_period_us` (-1 for none); the bound is
+# ceil(quota ÷ period), at least 1, and never raises the count. BIONIC_PROBE_CGROUP plants the
+# cgroup root (so this runs on macOS); BIONIC_PROBE_CORES still plants the host's count, and a
+# planted count is bounded only by a planted root, never by the real one.
+# FIXTURE FIDELITY: the files are synthetic, in the kernel's documented shapes
+# (Documentation/admin-guide/cgroup-v2.rst "cpu.max"; cgroup-v1 CFS bandwidth); no Linux host
+# was measured for them.
+section "§QUOTA — a cgroup CPU quota bounds the cores the gate counts (wave-33 T1; AC-8.5)"
+Q_V2="$TMPROOT/cg-v2"; Q_V1="$TMPROOT/cg-v1"; Q_NONE="$TMPROOT/cg-none"
+mkdir -p "$Q_V2" "$Q_V1/cpu" "$Q_NONE"
+q_v2() { printf '%s\n' "$1" > "$Q_V2/cpu.max"; }
+q_v1() { printf '%s\n' "$1" > "$Q_V1/cpu/cpu.cfs_quota_us"; printf '%s\n' "$2" > "$Q_V1/cpu/cpu.cfs_period_us"; }
+q_v2 "200000 100000"
+expect_eq "Q.1 a 64-core probe under cpu.max '200000 100000' (2 CPUs): _res_cores prints 2" "2" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+expect_eq "Q.2 the same probe with no cgroup planted: the host's 64 (the count the quota bounds)" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64)"
+expect_eq "Q.3 a cgroup root with no CPU controller files: no bound, 64" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_NONE")"
+q_v2 "max 100000"
+expect_eq "Q.4 cpu.max 'max 100000' sets no quota: 64" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v2 "150000 100000"
+expect_eq "Q.5 a quota of 1.5 CPUs rounds up to 2" "2" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v2 "50000 100000"
+expect_eq "Q.6 a quota of half a CPU is 1, never 0" "1" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v2 "1600000 100000"
+expect_eq "Q.7 a quota of 16 CPUs on an 8-core host bounds nothing: 8" "8" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=8 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v1 200000 100000
+expect_eq "Q.8 cgroup v1: cfs_quota_us 200000 over cfs_period_us 100000 is 2" "2" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V1")"
+q_v1 -1 100000
+expect_eq "Q.9 cgroup v1: a quota of -1 sets none: 64" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V1")"
+q_v2 "200000 100000"
+expect_eq "Q.10 the Linux host's own count (nproc 4) is bounded the same way: 2" "2" \
+  "$(m_read "$M_LIN" _res_cores BIONIC_PROBE_PROC="$M_PROC" BIONIC_PROBE_CGROUP="$Q_V2")"
+q_gw() {  # <cores> [<cgroup root>] — gate_width at share 92, the share's room in workers
+  ( unset $M_UNPIN
+    export CLAUDE_CONFIG_DIR="$TMPROOT/q-home" BIONIC_PROBE_CORES="$1"
+    [ -z "${2:-}" ] || export BIONIC_PROBE_CGROUP="$2"
+    mkdir -p "$CLAUDE_CONFIG_DIR/bionic"; printf '92\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+    . "$REPO_ROOT/payload/scripts/lib/gate.sh" 2>/dev/null; gate_width ) 2>/dev/null
+}
+expect_eq "Q.11 the gate's width on a 64-core probe at share 92: 58 (positive)" "58" "$(q_gw 64)"
+expect_eq "Q.12 …and under the 2-CPU quota: 1, what 2 cores allow at 92 (1.84, floored)" "1" "$(q_gw 64 "$Q_V2")"
+
 # ════════════════════════════════════════════════════ §N — tests/lib/world.sh (T1, D23)
 
 section "N — the model world: machine, clock, cost, repository, suites, verb log (wave-28 D23)"
@@ -1240,17 +1292,24 @@ expect_eq "N.4 world_clock 1000, world_tick 30 → 1000 then 1030, and a child r
 expect_eq "N.5 world_tick with no clock planted is refused with rc 2" 2 \
   "$( unset BIONIC_NOW_FILE; world_tick 5 >/dev/null 2>&1; printf '%s' "$?" )"
 
-# world_cost writes the gate store's cost/<key>, newest last, at most three lines.
+# world_cost writes the gate store's duration file for this directory's project,
+# cost/<project key>%<key> (wave-33 T1; Δ10: the gate keeps only durations), newest last, at
+# most three lines. The 1.15.0 four-argument form is still taken; its mem and cores are not
+# recorded. The project key is the gate's own (`_gate_project`).
+N_PK="$( . "$REPO_ROOT/payload/scripts/lib/gate.sh" 2>/dev/null; _gate_project )"
 N_COST="$( world_clock 5000 >/dev/null 2>&1
            world_cost a.test.sh 12 1.5 90 2>&1; world_tick 10 >/dev/null 2>&1
-           world_cost a.test.sh 14 2 80 2>&1;  world_tick 10 >/dev/null 2>&1
+           world_cost a.test.sh 80 2>&1;        world_tick 10 >/dev/null 2>&1
            world_cost a.test.sh 9 1 70 2>&1;   world_tick 10 >/dev/null 2>&1
-           world_cost a.test.sh 11 1 60 2>&1
-           printf '%s|' "$BIONIC_GATE_DIR"; tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/a.test.sh" )"
-expect_eq "N.6 four world_cost calls keep the newest three, <mem>:<cores>:<seconds>:<epoch>" \
-  "14:2:80:5010 9:1:70:5020 11:1:60:5030 " "${N_COST#*|}"
+           world_cost a.test.sh 60 2>&1
+           printf '%s|' "$BIONIC_GATE_DIR"; tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/${N_PK}%a.test.sh" )"
+expect_regex "N.6a the project key read is the gate's, 8 hex digits (positive for the path below)" '^[0-9a-f]{8}$' "$N_PK"
+expect_eq "N.6 four world_cost calls, both forms, keep the newest three, <seconds>:<epoch>" \
+  "80:5010 70:5020 60:5030 " "${N_COST#*|}"
 expect_eq "N.7 …in the gate store the world owns, never the real home's" "${WORLD_ROOT:-unset}/gate" \
   "${N_COST%%|*}"
+expect_eq "N.7b three arguments are refused with rc 2" 2 \
+  "$( world_cost a.test.sh 1 1 >/dev/null 2>&1; printf '%s' "$?" )"
 expect_eq "N.8 a key holding a slash is refused with rc 2" 2 \
   "$( world_cost a/b 1 1 1 >/dev/null 2>&1; printf '%s' "$?" )"
 

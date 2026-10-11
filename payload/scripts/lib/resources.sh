@@ -347,18 +347,48 @@ _res_is_pct() {  # a percentage reading: a non-negative integer, or the -1 "unre
   esac
 }
 
-_res_cores() {  # this machine's core count, floored at 1 — pressure_sample's default
+# _res_cores — the cores this process may use, floored at 1 — pressure_sample's default and the
+# gate's count (wave-33 T1; D4, AC-8.5). The host's count (BIONIC_PROBE_CORES plants it), bounded
+# by a cgroup CPU quota when one is set (`_res_cpu_quota`): a container given 2 CPUs on a 64-core
+# host may use 2. The cgroup root is BIONIC_PROBE_CGROUP when planted, on any system; otherwise
+# /sys/fs/cgroup on Linux, read only for the host's own count: a planted count is bounded only by
+# a planted root, so a fixture's machine never takes on the real one's quota.
+_res_cores() {
+  local c='' root="${BIONIC_PROBE_CGROUP:-}" q
   if [ -n "${BIONIC_PROBE_CORES:-}" ]; then
-    printf '%s' "${BIONIC_PROBE_CORES}"
-    return 0
+    c="${BIONIC_PROBE_CORES}"
+  else
+    case "$(uname -s 2>/dev/null)" in
+      Darwin) c="$(sysctl -n hw.ncpu 2>/dev/null)" ;;
+      Linux)  c="$(nproc 2>/dev/null)"; root="${root:-/sys/fs/cgroup}" ;;
+    esac
+    if ! _res_is_uint "$c" || [ "$c" -lt 1 ]; then c=1; fi
   fi
-  local c=''
-  case "$(uname -s 2>/dev/null)" in
-    Darwin) c="$(sysctl -n hw.ncpu 2>/dev/null)" ;;
-    Linux)  c="$(nproc 2>/dev/null)" ;;
-  esac
-  if ! _res_is_uint "$c" || [ "$c" -lt 1 ]; then c=1; fi
+  if [ -n "$root" ] && _res_is_uint "$c" && q="$(_res_cpu_quota "$root")" && [ "$q" -lt "$c" ]; then
+    c="$q"
+  fi
   printf '%s' "$c"
+}
+
+# _res_cpu_quota <cgroup root> — the CPUs a cgroup quota allows, ceil(quota ÷ period), at least
+# 1; rc 1 and nothing when no quota is set. cgroup v2: `<root>/cpu.max`, `<quota> <period>` (or
+# `max <period>`: none). v1: `<root>/cpu/cpu.cfs_quota_us` over `cpu.cfs_period_us` (-1: none).
+# Only the root's own files are read: a process in a nested cgroup with no namespace of its own
+# (a systemd slice's CPUQuota) is not bounded here, a stated limit; a container's cgroup
+# namespace makes its own cgroup the root, which is the case this serves.
+_res_cpu_quota() {
+  local q='' p=''
+  if [ -r "$1/cpu.max" ]; then
+    { read -r q p < "$1/cpu.max"; } 2>/dev/null
+  elif [ -r "$1/cpu/cpu.cfs_quota_us" ]; then
+    { read -r q < "$1/cpu/cpu.cfs_quota_us"; read -r p < "$1/cpu/cpu.cfs_period_us"; } 2>/dev/null
+  else
+    return 1
+  fi
+  _res_is_uint "$q" && _res_is_uint "$p" && [ "$p" -gt 0 ] || return 1
+  q=$(( (q + p - 1) / p ))
+  [ "$q" -ge 1 ] || q=1
+  printf '%s' "$q"
 }
 
 # _res_now — the epoch second this call is happening at.
