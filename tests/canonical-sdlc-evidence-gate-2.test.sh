@@ -3343,4 +3343,315 @@ h_rh2=$(make_home)
 write_plan "$h_rh2" "$(d7_wave_plan "$(eg_rh_tasks "approval:plan, head")" "- T1: bash suite 9/9 green")" > /dev/null
 expect_allow "§READS-HEAD rh2 the same plan with T2 reading approval:plan, head → allow" "$h_rh2" 'git commit -m "x"'
 
+# ============================================================
+section "§FIXED-PASSES — a fail reading whose every S1/S2 finding a landed born row fixed reads as pass; one open finding still needs the waiver (wave-33 T13; REQ-5 AC-5.2; D6)"
+# ============================================================
+# A finding is an identity, `<record>#<n>`. `task-add --born <record>#<n>[,…]` writes it on the fix row's
+# `- T<k>:` line (` born: review S<n> <reach> of=<record>#<n>`). The judge (lib/proof.sh `facts_state`) reads a
+# question's newest `fail` reading as not failing when every finding of it the table sends to fix is answered by
+# such a row whose `## Tasks` status is `landed` and whose landing record (`landing-proofs.log`) carries green
+# verdicts at a commit at or after the reading's head; that landing commit is held on the question's chain, as a
+# docs-only commit is. One open S1/S2 finding keeps the question failing until the person's waiver. The wall reads
+# the same derivation (`proof_readings_derived`, which the commit wall's collector hands over).
+#
+# FIXTURE FIDELITY. A real repository on its working branch: an init commit (the base), one code commit (the
+# reading's head), one code commit (the fix row's landing, the commit its green verdict names). The plan and the
+# landing record are fixture text in the shapes their writers write (proof.sh `proof_line`, units.sh
+# `units_add_row`'s step line, lib/line.sh's verdict event); the judge reads text whatever wrote it. §DISPOSITION
+# drives the verbs themselves.
+FP_SID="5d6e7f80-1a2b-4c3d-8e9f-0a1b2c3d4e5f"
+FP_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+FP_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+FP_ROOT="$(mktemp -d)"; cleanup_dirs+=("$FP_ROOT"); FP_ROOT="$(cd "$FP_ROOT" && pwd -P)"
+FP_REC="record/wave-01-fixture"
+fp_repo() {  # <label> -> a repository on wave/01-fixture with one init commit, engaged for FP_SID
+  local r="$FP_ROOT/$1"
+  mkdir -p "$r"
+  ( cd "$r" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@fixture.test \
+    && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/$FP_REC" "$r/.bionic/docs/plans/epic-99-fixture" "$r/.bionic/docs/specs/epic-99-fixture"
+  : > "$r/.bionic/tmp/engaged-$FP_SID.state"
+  printf '%s' "$r"
+}
+fp_commit() {  # <repo> <path> <text> -> the new commit's sha
+  printf '%s\n' "$3" > "$1/$2"
+  ( cd "$1" && git add -f "$2" && git commit -qm "$2: $3" ) >/dev/null 2>&1
+  git -C "$1" rev-parse HEAD
+}
+fp_plan_path() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
+fp_plan() {  # <repo> <base> <SDLC lines> <task rows> -> writes the plan (a plan §42's gate admits, plus the review header fields)
+  local r="$1" f; f="$(fp_plan_path "$1")"
+  printf '# requirements\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "$2"
+    printf -- '- T1: landed at record/T1.md\n'
+    [ -z "$3" ] || printf '%s\n' "$3"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+    [ -z "$4" ] || printf '%s\n' "$4"
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+    printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+  } > "$f"
+}
+fp_record() {  # <repo> <file> <question> <result> <range> <line>... -> a reading record in the docs root
+  local r="$1" f="$2" q="$3" res="$4" rg="$5"; shift 5
+  { printf 'question: %s\nresult: %s\nscope: piece\nreviewed: %s\n' "$q" "$res" "$rg"; printf '%s\n' "$@"; printf '\nwhat the reader found\n'; } \
+    > "$r/.bionic/docs/$FP_REC/$f"
+}
+fp_proved() {  # <head> <file> <question> <result> -> the reading's proof line, as proof_line writes it
+  bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' _ "$FP_LIB" "$1" "$FP_REC/$2" "$3" "$4"
+}
+fp_landing() {  # <repo> <line>... -> the run's landing record, whole
+  printf '%s\n' "$@" > "$1/.bionic/docs/$FP_REC/landing-proofs.log"
+}
+fp_verdict() {  # <row> <commit> <result> -> one verdict event, lib/line.sh's shape
+  printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=a.test.sh|result=%s|log=/fixture/%s.log|at=2026-10-04T13:00:00Z' "$1" "$2" "$3" "$1"
+}
+fp_state() {  # <repo> <head> -> FP_OUT, FP_RC: facts_state over the repo's plan at <head>
+  FP_RC=0
+  FP_OUT="$(bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && facts_state "$2" "$3"' _ "$FP_LIB" "$(fp_plan_path "$1")" "$2" 2>/dev/null)" || FP_RC=$?
+}
+fp_of() {  # <owed line> -> the state facts_state gave it
+  printf '%s\n' "$FP_OUT" | F="$1" awk 'index($0, ENVIRON["F"] "\t") == 1 { print substr($0, length(ENVIRON["F"]) + 2); exit }'
+}
+fp_derived() {  # <repo> -> proof_readings_derived over the repo's plan (what the commit wall is handed)
+  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_readings_derived "$2" "$3"' _ "$FP_LIB" "$(fp_plan_path "$1")" "$1" 2>/dev/null
+}
+FP_AD="$(printf 'review\tadversarial\tbionic:critic\tpiece')"
+
+RFP="$(fp_repo fixed)"
+FP_B="$(git -C "$RFP" rev-parse HEAD)"
+FP_C1="$(fp_commit "$RFP" a.sh one)"
+FP_C2="$(fp_commit "$RFP" a.sh two)"
+fp_record "$RFP" adv.md adversarial fail "${FP_B:0:10}..${FP_C1:0:10}" 'findings: 2' \
+  'finding: 1 S2 on a.sh:1 data lost on a second run' 'shown: 1 bash a.sh; bash a.sh' 'finding: 2 S3 off a.sh:2 a message could be clearer'
+fp_record "$RFP" adv2.md adversarial fail "${FP_B:0:10}..${FP_C1:0:10}" 'findings: 2' \
+  'finding: 1 S2 on a.sh:1 data lost on a second run' 'shown: 1 bash a.sh; bash a.sh' \
+  'finding: 2 S2 on a.sh:3 the lock is never taken' 'shown: 2 bash a.sh & bash a.sh'
+FP_T7_ROW='| T7 | 4 | build | fix the a reader · born: review | implementor | — | 30 | REQ-1 | a.sh | — | — | %s |'
+fp_world() {  # <record> <T7 status, or - for no row> <verdict result> <verdict commit> [<extra SDLC line>]
+  local born="" row=""
+  if [ "$2" != - ]; then
+    born="- T7: landed $FP_C2 2026-10-04T13:00:00Z born: review S2 on of=$FP_REC/$1#1"
+    # shellcheck disable=SC2059
+    row="$(printf "$FP_T7_ROW" "$2")"
+  fi
+  fp_plan "$RFP" "${FP_B:0:10}" "$(fp_proved "$FP_C1" "$1" adversarial fail)
+$born${5:+
+$5}" "$row"
+  fp_landing "$RFP" "$(fp_verdict T7 "$4" "$3")"
+}
+
+expect_eq "FP-0 precondition: the record holds its two findings, read by the production reader (S2 on to fix, S3 off a note)" \
+  "1 S2 on fix|2 S3 off note" \
+  "$(bash -c '. "$1/proof.sh" && proof_findings "$2"' _ "$FP_LIB" "$RFP/.bionic/docs/$FP_REC/adv.md" | awk -F'\t' '{ printf "%s%s %s %s %s", (NR > 1 ? "|" : ""), $1, $2, $3, $5 }')"
+expect_eq "FP-0b precondition: C1 and C2 each touch a.sh, a tracked path outside the docs root" "a.sh|a.sh" \
+  "$(git -C "$RFP" show --name-only --format= "$FP_C1")|$(git -C "$RFP" show --name-only --format= "$FP_C2")"
+
+fp_world adv.md landed green "$FP_C2"
+fp_state "$RFP" "$FP_C2"
+expect_eq "FP-1 AC-5.2 a fail reading whose S2 is answered by a born row landed green after its head: covered, with no waiver" \
+  "covered" "$(fp_of "$FP_AD")"
+expect_eq "FP-1b …the plan carries no waived: line (the cover is the fix's, not the person's)" "0" \
+  "$(/usr/bin/grep -c '^waived:' "$(fp_plan_path "$RFP")" | tr -d ' ')"
+expect_eq "FP-1c …and the wall is handed the same answer: the written fail derives to flag (the S3 off note remains)" \
+  "$FP_REC/adv.md	fail	flag" "$(fp_derived "$RFP")"
+
+fp_world adv.md - green "$FP_C2"
+fp_state "$RFP" "$FP_C2"
+expect_eq "FP-2 AC-5.2 the born row removed: the same reading is failing, naming its evidence" \
+  "failing	$FP_REC/adv.md" "$(fp_of "$FP_AD")"
+expect_eq "FP-2b …and the wall reads its written fail (nothing binds the record, so nothing is derived)" "" "$(fp_derived "$RFP")"
+
+fp_world adv.md active green "$FP_C2"
+fp_state "$RFP" "$FP_C2"
+expect_eq "FP-3 the born row not landed (status active): failing" "failing	$FP_REC/adv.md" "$(fp_of "$FP_AD")"
+expect_eq "FP-3b …and the wall is handed nothing to derive (no finding is fixed), so it reads the written fail (FP-1c read a derivation through the same reader)" \
+  "" "$(fp_derived "$RFP")"
+
+fp_world adv.md landed red "$FP_C2"
+fp_state "$RFP" "$FP_C2"
+expect_eq "FP-4 the born row landed but its landing verdict is red: failing" "failing	$FP_REC/adv.md" "$(fp_of "$FP_AD")"
+
+fp_world adv.md landed green "$FP_B"
+fp_state "$RFP" "$FP_C2"
+expect_eq "FP-5 the green verdict is at a commit before the reading's head: failing" "failing	$FP_REC/adv.md" "$(fp_of "$FP_AD")"
+
+fp_world adv2.md landed green "$FP_C2"
+fp_state "$RFP" "$FP_C2"
+expect_eq "FP-6 AC-5.2 one S2 fixed and one S2 unanswered: failing until the person's word" "failing	$FP_REC/adv2.md" "$(fp_of "$FP_AD")"
+expect_eq "FP-6b …and the wall is handed fail" "$FP_REC/adv2.md	fail	fail" "$(fp_derived "$RFP")"
+fp_world adv2.md landed green "$FP_C2" \
+  "$(bash -c '. "$1/proof.sh" && proof_waiver_line adversarial "$2" "Dana Fixture" 2026-10-04T14:00:00Z "ship it, the lock waits"' _ "$FP_LIB" "$FP_C2")"
+fp_state "$RFP" "$FP_C2"
+expect_eq "FP-6c …the person's waiver at the head covers it" "covered" "$(fp_of "$FP_AD")"
+
+fp_world adv.md landed green "$FP_C2"
+FP_C3="$(fp_commit "$RFP" b.sh three)"
+fp_state "$RFP" "$FP_C3"
+expect_eq "FP-7 code past the fix's landing that no born row landed is still unread: uncovered from the reading's head" \
+  "uncovered	${FP_C1}..${FP_C3}" "$(fp_of "$FP_AD")"
+
+# ============================================================
+section "§DISPOSITION — one verb renders every finding of the registered readings and records the person's ruling per finding (wave-33 T13; REQ-5 AC-5.1; D6)"
+# ============================================================
+#   disposition                    one `finding` line per finding of every registered reading: its identity, rating,
+#                                  user-facing on/off, record path, place, the fix row born of it, its state (open, fixed,
+#                                  deferred, accepted) and the decision it needs; each reading's debt: lines added to the
+#                                  run's debt ledger (`debt add`); one owed item `finding:<record>#<n>` (lib/owed.sh) per
+#                                  finding still needing the person.
+#   disposition <record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']
+#                                  the person's ruling, recorded by finding-move's rules (their words, typed, at least three
+#                                  whole words; an S1 is never deferred), a deferral's sentence stated (finding-stated); the
+#                                  finding's owed item closed.
+# `task-add … --born <record>#<n>` names the finding a fix row answers, and closes its owed item: a row now answers it.
+#
+# FIXTURE FIDELITY. §FIXED-PASSES's repository shape; two registered readings (adversarial: one S2, fixed by T7, landed
+# green; structure: an S3 the table defers, an S2 and an S1 unanswered, and a debt line); the session bound to the plan
+# through the real `bind_plan`; a transcript in the CLI's typed-prompt shape (tests/fixtures/transcript-move) under a
+# scratch CLAUDE_CONFIG_DIR; HOME and the gate store scratch. The verbs are the real ones.
+RDP="$(fp_repo disposition)"
+DP_B="$(git -C "$RDP" rev-parse HEAD)"
+DP_C1="$(fp_commit "$RDP" a.sh one)"
+DP_C2="$(fp_commit "$RDP" a.sh two)"
+DP_PLAN="$(fp_plan_path "$RDP")"
+DP_CFG="$FP_ROOT/dp-config"; mkdir -p "$DP_CFG/projects/fixture" "$DP_CFG/bionic" "$FP_ROOT/dp-home" "$FP_ROOT/dp-gate"
+dp_typed() {  # <prompt> -> one typed prompt appended to the session's transcript
+  jq -cn --arg c "$1" --arg s "$FP_SID" '{type: "user", isSidechain: false, origin: {kind: "human"}, promptSource: "typed",
+    message: {role: "user", content: $c}, sessionId: $s}' >> "$DP_CFG/projects/fixture/$FP_SID.jsonl"
+}
+dp_typed "defer the side path finding to the next wave please"
+dp_typed "defer the parser crash finding as well"
+fp_record "$RDP" adv.md adversarial fail "${DP_B:0:10}..${DP_C1:0:10}" 'findings: 1' \
+  'finding: 1 S2 on a.sh:1 data lost on a second run' 'shown: 1 bash a.sh; bash a.sh'
+fp_record "$RDP" st.md structure fail "${DP_B:0:10}..${DP_C1:0:10}" 'findings: 3' \
+  'finding: 1 S3 on b.sh:1 a message could be clearer' \
+  'finding: 2 S2 on b.sh:2 a side path loses data' 'shown: 2 bash b.sh --side' \
+  'finding: 3 S1 on b.sh:3 the parser crashes on an empty file' 'shown: 3 bash b.sh < /dev/null' \
+  'debt: duplicate parse-loop b.sh:4, c.sh:5'
+fp_plan "$RDP" "${DP_B:0:10}" "$(fp_proved "$DP_C1" adv.md adversarial fail)
+$(fp_proved "$DP_C1" st.md structure fail)
+deferred: $FP_REC/st.md#1 S3 on \"a message could be clearer\"
+- T7: landed $DP_C2 2026-10-04T13:00:00Z born: review S2 on of=$FP_REC/adv.md#1" \
+  '| T7 | 4 | build | fix the a reader · born: review | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |'
+fp_landing "$RDP" "$(fp_verdict T7 "$DP_C2" green)"
+( cd "$RDP" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RDP" "$FP_SID" "$DP_PLAN" >/dev/null 2>&1
+dp_poke() {  # <args...> -> DP_OUT (stdout and stderr), DP_RC
+  DP_RC=0
+  DP_OUT="$(cd "$RDP" && env CLAUDE_CODE_SESSION_ID="$FP_SID" CLAUDE_CONFIG_DIR="$DP_CFG" HOME="$FP_ROOT/dp-home" \
+    BIONIC_GATE_DIR="$FP_ROOT/dp-gate" bash "$FP_POKER" "$@" 2>&1)" || DP_RC=$?
+}
+dp_finding() {  # <record>#<n> -> the disposition's line for it
+  printf '%s\n' "$DP_OUT" | F="poker: finding $FP_REC/$1 " awk 'index($0, ENVIRON["F"]) == 1 { print; exit }'
+}
+dp_owed() {  # <state> -> the keys of the owed store's items in that state, last word per key, sorted, comma-joined
+  awk -F'|' -v want="$1" 'index($0, "owed/v1|") == 1 { k = ""; s = ""; for (i = 2; i <= NF; i++) { if (index($i, "key=") == 1) k = substr($i, 5); if (index($i, "state=") == 1) s = substr($i, 7) } st[k] = s }
+    END { for (k in st) if (st[k] == want) print k }' "$RDP/.bionic/tmp/owed-$FP_SID.state" 2>/dev/null | sort | paste -sd, -
+}
+DP_K2="finding:record:wave-01-fixture:st.md:2"
+DP_K3="finding:record:wave-01-fixture:st.md:3"
+
+s34_gate_dp() {  # -> GATE_RC of the real commit gate on this session's plan
+  local input
+  input="$(jq -n --arg s "$FP_SID" --arg cwd "$RDP" '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+    tool_input: {command: "git commit -m x"}, tool_use_id: "toolu_dp"}')"
+  GATE_RC=0
+  ( cd "$RDP" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$FP_SID" HOME="$FP_ROOT/dp-home" bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" >/dev/null 2>&1 ) || GATE_RC=$?
+}
+s34_gate_dp
+expect_eq "DP-0 precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "DP-0b precondition: the session is bound to the plan (the verbs write it)" "plan=$DP_PLAN" \
+  "$(/usr/bin/grep '^plan=' "$RDP/.bionic/tmp/engaged-$FP_SID.state")"
+
+dp_poke disposition
+expect_eq "DP-1 AC-5.1 disposition exits 0" "0" "$DP_RC"
+expect_eq "DP-1b …one finding line per finding of the two registered readings: four, no more" "4" \
+  "$(printf '%s\n' "$DP_OUT" | /usr/bin/grep -c '^poker: finding ' | tr -d ' ')"
+expect_eq "DP-2 …the fixed S2: rating, user-facing, record path, place, its fix row, fixed, nothing to decide" \
+  "poker: finding $FP_REC/adv.md#1 S2 user-facing=on record=$FP_REC/adv.md at=a.sh:1 row=T7 state=fixed decision=\"none: T7 landed green at ${DP_C2:0:12}\" title=\"data lost on a second run\"" \
+  "$(dp_finding adv.md#1)"
+expect_eq "DP-3 …the S3 the table defers: deferred, its changelog sentence owed" \
+  "poker: finding $FP_REC/st.md#1 S3 user-facing=on record=$FP_REC/st.md at=b.sh:1 row=— state=deferred decision=\"its changelog sentence: finding-stated $FP_REC/st.md#1 '<sentence>'\" stated=- title=\"a message could be clearer\"" \
+  "$(dp_finding st.md#1)"
+expect_eq "DP-4 …the open S2: open, no row, the person's to rule" \
+  "poker: finding $FP_REC/st.md#2 S2 user-facing=on record=$FP_REC/st.md at=b.sh:2 row=— state=open decision=\"the person's: fix it, defer it, or waive structure\" title=\"a side path loses data\"" \
+  "$(dp_finding st.md#2)"
+expect_eq "DP-5 …the open S1: never deferred, so fix it or waive" \
+  "poker: finding $FP_REC/st.md#3 S1 user-facing=on record=$FP_REC/st.md at=b.sh:3 row=— state=open decision=\"the person's: fix it or waive structure (an S1 is never deferred)\" title=\"the parser crashes on an empty file\"" \
+  "$(dp_finding st.md#3)"
+expect_eq "DP-6 …one owed item per finding still needing the person: the two open ones" "$DP_K2,$DP_K3" "$(dp_owed open)"
+expect_contains "DP-7 …the reading's debt line is added to the run's debt ledger" \
+  "parse-loop | duplicate | b.sh:4, c.sh:5 | raised-by $FP_REC/st.md | touches 0 | —" \
+  "$(cat "$RDP/.bionic/docs/$FP_REC/debt.md" 2>/dev/null)"
+expect_contains "DP-7b …and the verb says so" "debt add — parse-loop duplicate b.sh:4, c.sh:5" "$DP_OUT"
+dp_poke disposition
+expect_eq "DP-7c …a second pass adds no second ledger line" "1" \
+  "$(/usr/bin/grep -c '^parse-loop |' "$RDP/.bionic/docs/$FP_REC/debt.md" | tr -d ' ')"
+
+cp "$DP_PLAN" "$FP_ROOT/dp-before"
+dp_poke disposition "$FP_REC/st.md#2" defer "ship everything now and forget the side path" "the person said so"
+expect_eq "DP-8 a ruling on words the person never typed is refused (exit 1)" "1" "$DP_RC"
+expect_contains "DP-8b …naming the rule" "stand in no prompt the user typed in this session" "$DP_OUT"
+expect_eq "DP-8c …the plan byte-identical" "same" "$(cmp -s "$DP_PLAN" "$FP_ROOT/dp-before" && echo same || echo changed)"
+expect_eq "DP-8d …and the item still open" "$DP_K2,$DP_K3" "$(dp_owed open)"
+
+dp_poke disposition "$FP_REC/st.md#3" defer "defer the parser crash finding as well" "the person asked"
+expect_eq "DP-9 an S1 ruled to defer is refused (exit 1), whoever asks" "1" "$DP_RC"
+expect_contains "DP-9b …naming the rule" "an S1 is never deferred" "$DP_OUT"
+expect_eq "DP-9c …the plan byte-identical" "same" "$(cmp -s "$DP_PLAN" "$FP_ROOT/dp-before" && echo same || echo changed)"
+
+dp_poke disposition "$FP_REC/st.md#2" defer "defer the side path finding to the next wave" "the person deferred it" \
+  "A side path may lose data; the next wave fixes it."
+expect_eq "DP-10 AC-5.1 the person's ruling on the open S2 is recorded (exit 0)" "0" "$DP_RC"
+expect_regex "DP-10b …as finding-move writes a move: their words, who, when, why" \
+  "^moved: $FP_REC/st\\.md#2 to=defer by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z words=\"defer the side path finding to the next wave\" why=\"the person deferred it\"\$" \
+  "$(/usr/bin/grep "^moved: $FP_REC/st.md#2 " "$DP_PLAN")"
+expect_eq "DP-10c …the deferral stated with its changelog sentence" \
+  "deferred: $FP_REC/st.md#2 S2 on \"a side path loses data\" stated=\"A side path may lose data; the next wave fixes it.\"" \
+  "$(/usr/bin/grep "^deferred: $FP_REC/st.md#2 " "$DP_PLAN")"
+expect_eq "DP-10d …and its owed item closed, the S1's still open" "$DP_K3" "$(dp_owed open)"
+expect_eq "DP-10e …closed, not forgotten" "$DP_K2" "$(dp_owed closed)"
+
+dp_poke disposition
+expect_eq "DP-11 the next disposition reads the ruling: deferred, stated, nothing left to decide" \
+  "poker: finding $FP_REC/st.md#2 S2 user-facing=on record=$FP_REC/st.md at=b.sh:2 row=— state=deferred decision=\"none: stated\" stated=\"A side path may lose data; the next wave fixes it.\" title=\"a side path loses data\"" \
+  "$(dp_finding st.md#2)"
+expect_eq "DP-11b …and does not reopen its item" "$DP_K3" "$(dp_owed open)"
+
+dp_poke task-add T8 4 build 'fix the parser' implementor '—' 30 REQ-1 'b.sh' --born "$FP_REC/st.md#3"
+expect_eq "DP-12 task-add --born <record>#<n> exits 0" "0" "$DP_RC"
+expect_regex "DP-12b …the row's line carries the finding it answers, rated from its record" \
+  "^- T8: pending dispatch — added by task-add at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z born: review S1 on of=$FP_REC/st\\.md#3\$" \
+  "$(awk '/^- T8:/ { print; exit }' "$DP_PLAN")"
+expect_eq "DP-12c …and closes the finding's owed item: a row answers it" "" "$(dp_owed open)"
+expect_eq "DP-12d …closed, as the S2's" "$DP_K2,$DP_K3" "$(dp_owed closed)"
+dp_poke disposition
+expect_eq "DP-13 the next disposition names T8 against the S1 and what it waits on" \
+  "poker: finding $FP_REC/st.md#3 S1 user-facing=on record=$FP_REC/st.md at=b.sh:3 row=T8 state=open decision=\"none: waits on T8 landing green\" title=\"the parser crashes on an empty file\"" \
+  "$(dp_finding st.md#3)"
+
+cp "$DP_PLAN" "$FP_ROOT/dp-before"
+dp_poke task-add T9 4 build 'fix nothing' implementor '—' 30 REQ-1 'c.sh' --born "$FP_REC/none.md#1"
+expect_eq "DP-14 task-add --born naming no registered reading is refused (exit 1)" "1" "$DP_RC"
+expect_contains "DP-14b …naming the call that registers one" "proof-add review $FP_REC/none.md" "$DP_OUT"
+dp_poke task-add T9 4 build 'fix nothing' implementor '—' 30 REQ-1 'c.sh' --born "$FP_REC/st.md#9"
+expect_eq "DP-15 task-add --born naming a finding the record does not hold is refused (exit 1)" "1" "$DP_RC"
+expect_contains "DP-15b …naming the findings it does hold" "holds no finding 9" "$DP_OUT"
+expect_eq "DP-15c …the plan byte-identical across both" "same" "$(cmp -s "$DP_PLAN" "$FP_ROOT/dp-before" && echo same || echo changed)"
+
 finish

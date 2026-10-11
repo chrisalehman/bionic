@@ -44,7 +44,9 @@
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
 #   units_born <plan>          `<id>\t<S<n> <reach>>\t<Files>` per review-born row, read off its
 #                              `- <id>:` line's ` born: review` marker (wave-30 T21, AC-10.2).
-#   units_fix_cap <plan>       the plan's fix-cap: rendered as a number, the level's default when
+#   units_born_findings <plan> `<id>\t<status>\t<record>#<n>` per finding a born row names on that
+#                              marker's ` of=` list (wave-33 T13; REQ-5, D6).
+#   units_fix_cap <plan>      the plan's fix-cap: rendered as a number, the level's default when
 #                              absent (wave-30 T21, AC-2.3); needs lib/run.sh loaded.
 #
 # THE CALLERS (D3), all re-pointed by T8: the evidence gate's two ledger checks and its
@@ -2860,6 +2862,43 @@ units_born() {
       if (!match(l, / born: review S[0-9]+ (on|off)( |$)/)) next
       r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r)
       printf "%s\t%s\t%s\n", k, r, files[k]
+    }'
+}
+
+# units_born_findings <plan> -> `<id>\t<status>\t<record>#<n>`, one line per finding a review-born row names
+#   (wave-33 T13; REQ-5, D6): the ` born: review S<n> <reach> of=<record>#<n>[,<record>#<n>…]` marker that
+#   `task-add --born <record>#<n>` writes on the row's `- <id>:` line, read where `units_born` reads the rating
+#   (fences skipped, the first line per id), the status the row's own `## Tasks` cell (`units_rows`), empty for a
+#   line whose row the table does not carry. Nothing, exit 0, when no line names a finding; exit 1 when the plan
+#   cannot be read. Readers: lib/proof.sh `proof_fixed` (the judge's fixed findings) and the poker's
+#   `disposition` (the fix row of each finding).
+units_born_findings() {
+  local plan="${1:-}" rows
+  [ -n "$plan" ] && [ -r "$plan" ] || return 1
+  /usr/bin/grep -q ' born: review S[0-9][0-9]* o[nf]f* of=' "$plan" 2>/dev/null || return 0
+  rows="$(units_rows "$plan" 2>/dev/null)" || rows=""
+  {
+    printf '\034rows\n'; [ -z "$rows" ] || printf '%s\n' "$rows"
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
+  } | awk -F'\t' '
+    $0 == SUBSEP "rows" { part = 1; next }
+    $0 == SUBSEP "plan" { part = 2; next }
+    part == 1 { if ($1 != "" && !($1 in st)) st[$1] = $10; next }
+    part == 2 {
+      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
+      if (fence) next
+      if ($0 ~ /^## SDLC State/) { insec = 1; next }
+      if ($0 ~ /^## /) insec = 0
+      if (!insec) next
+      l = $0; sub(/^[[:space:]]*-?[[:space:]]*/, "", l)
+      c = index(l, ":"); if (c == 0) next
+      k = substr(l, 1, c - 1); sub(/[[:space:]]+$/, "", k)
+      if (k !~ /^T[0-9]/ || (k in seen)) next
+      seen[k] = 1
+      if (!match(l, / born: review S[0-9]+ (on|off) of=[^ \t]+/)) next
+      v = substr(l, RSTART, RLENGTH); sub(/^.* of=/, "", v)
+      n = split(v, ids, ",")
+      for (i = 1; i <= n; i++) if (ids[i] ~ /^[^#]+#[1-9][0-9]*$/) printf "%s\t%s\t%s\n", k, st[k], ids[i]
     }'
 }
 
