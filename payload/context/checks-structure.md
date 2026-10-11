@@ -47,5 +47,5 @@ scope: <piece|whole>
 check: <id> <PASS|FLAG|FAIL|n/a> <reason>
 ```
 
-`<a>..<b>` is the range you read; `b` is the head your answer is about. Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.
+`<a>..<b>` is the range you read; `b` is the head your answer is about. Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks; its second axis is `user-facing: will a user experience it, including its consequence? yes or no`, recorded `on` or `off`.
 <!-- CHECKS-STRUCTURE-END -->
