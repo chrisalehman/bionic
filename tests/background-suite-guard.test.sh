@@ -178,7 +178,15 @@ EXTRA_ENV=""
 # holds nothing but the event name and an updatedInput whose command runs booked.sh. Any
 # other stdout (a deny, a nudge, a wrap beside a nudge) stays in `$OUT` whole. §WRAP reads
 # `$WRAP` (the rewritten command) and `$WRAP_INPUT` (the whole rewritten tool_input).
-WRAP=""; WRAP_INPUT=""
+#
+# THE CARRY IS TAKEN OFF STDOUT THE SAME WAY (wave-33 T36; D7, AC-6.2). Every call a budgeted agent
+# makes that the wall does not handle as a suite comes back as `export BIONIC_GATE_AGENT=<row name>;
+# <the command as typed>`, so the gate's ask holds the budget wherever a suite starts. That is not a
+# verdict or an advisory either, so `$OUT$ERR` keeps meaning "nothing refused, nothing said". The
+# split takes ONLY that shape: an object whose hookSpecificOutput holds nothing but the event name and
+# an updatedInput that is the payload's own tool_input with the name in front of its command. `$CARRY`
+# is the rewritten command (bash-walls.test.sh §CARRY-EVERY runs it against the gate).
+WRAP=""; WRAP_INPUT=""; CARRY=""
 run_hook() {  # <payload> <hook> [args...]
   local payload="$1"; shift
   local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
@@ -188,7 +196,16 @@ run_hook() {  # <payload> <hook> [args...]
           CLAUDE_PROJECT_DIR= $EXTRA_ENV bash "$@" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
-  WRAP=""; WRAP_INPUT=""
+  WRAP=""; WRAP_INPUT=""; CARRY=""
+  if [ -n "$OUT" ] && printf '%s' "$OUT" | jq -e --argjson p "$payload" \
+        '(.hookSpecificOutput | keys) == ["hookEventName","updatedInput"]
+        and (.hookSpecificOutput.updatedInput.command | test("^export BIONIC_GATE_AGENT=[A-Za-z0-9._+-]+; "))
+        and ((.hookSpecificOutput.updatedInput
+              | .command |= sub("^export BIONIC_GATE_AGENT=[A-Za-z0-9._+-]+; "; "")) == $p.tool_input)' \
+        >/dev/null 2>&1; then
+    CARRY=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command')
+    OUT=""
+  fi
   if [ -n "$OUT" ] && printf '%s' "$OUT" | jq -e '(.hookSpecificOutput | keys) == ["hookEventName","updatedInput"]
         and (.hookSpecificOutput.updatedInput.command | test("/scripts/booked\\.sh"))' >/dev/null 2>&1; then
     WRAP_INPUT=$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput.updatedInput')
@@ -275,6 +292,13 @@ expect_empty "B1f …silently" "$OUT$ERR"
 guarded "$R1" 'git status --short'
 expect_eq "B1g a non-suite command is allowed" "0" "$ST"
 expect_empty "B1g …silently" "$OUT$ERR"
+# THE CARRY (wave-33 T36; D7, AC-6.2): it rides in front, so what the command starts asks the gate
+# as this agent; the main thread's same command carries nothing, read by the same reader.
+expect_eq "B1g2 …carrying the agent's row name in front of the command as typed" \
+  "export BIONIC_GATE_AGENT=w-b1; git status --short" "$CARRY"
+run_hook "$(mk_payload "$R1" 'git status --short' "")" "$GUARD"
+expect_eq "B1g3 the main thread's git status is allowed" "0" "$ST"
+expect_empty "B1g3 …and carries nothing: the gate's who is main (B1g2 is the positive)" "$CARRY$OUT"
 
 # SUITE-CLASS AND FILELESS, AND NOW HELD (REQ-1 AC-1.5, 1.8.3). Until this wave `pytest`
 # ran a suite and named no file this row could speak about, so it passed in silence — and a
@@ -700,7 +724,7 @@ expect_no_regex "B10 …and the pattern discriminates (a hook without the rule f
 # THE ORDER IS STRUCTURAL NOW, AND STILL PINNED. The call and the path-forming site used
 # to be two line numbers in one file; they are in two files since T23 — `bionic_context`
 # runs once in hooks/bash-walls.sh, before `bionic_fold` calls any wall, and the roster
-# path is formed inside `wall_background_suite_guard` in the library the hook sources.
+# path is formed by the wall's budget read (`_bsg_budget_read`, wave-33 T36) in the library the hook sources.
 # The hook cannot reach a wall without passing the call, so what is pinned is that each
 # site exists exactly once and on the side it belongs to.
 B10_WALLS="$REPO_ROOT/payload/scripts/lib/walls.sh"
@@ -1197,6 +1221,9 @@ for sp in "bash $SHIM -- 'bash tests/t.test.sh'" \
   expect_eq "W4a [$sp] is allowed" "0" "$ST"
   expect_empty "W4a …and left alone: no wrap" "$WRAP"
   expect_empty "W4a …and nothing else on either stream" "$OUT$ERR"
+  # wave-33 T36: not a suite, so carried, and the shim it starts asks the gate as this agent.
+  expect_eq "W4a …carrying the agent's row name, the command as typed after it" \
+    "export BIONIC_GATE_AGENT=w-wrap; $sp" "$CARRY"
 done
 # BIONIC_SLOT_HELD=1 IS NO OPT-OUT ANY MORE (wave-28 T12; D13): a suite segment carrying it in its
 # own prefix is wrapped like any other, so it asks the gate.

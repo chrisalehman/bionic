@@ -770,4 +770,52 @@ expect_true "10a: the slow-path trace sees the hook's forks (the tracer is not b
 expect_eq "10b: ruling-push.sh fast path forks no external command (one file test)" "0" "$PUSH_FAST_COUNT"
 expect_true "10c: ruling-push.sh slow path count <= 10" test "$PUSH_SLOW_COUNT" -le 10
 
+section "11: a budgeted agent's plain call stays inside §1's cap; the carry costs at most two forks (wave-33 T36)"
+
+# THE CARRY ON EVERY CALL (wave-33 T36; D7, AC-6.2). Every call a budgeted agent makes that the wall
+# does not handle as a suite now comes back as `export BIONIC_GATE_AGENT=<row name>; <the command>`,
+# so §1's `ls -la` is traced again from two agents of one roster: one whose row states a budget, and
+# one whose row states none, which reads the same row and stages nothing. The difference is what one
+# rewrite costs a call; the budgeted count is held to §1's cap, the per-call ceiling on this hook.
+# ANTI-VACUITY: the budgeted agent's call is read back carrying its name, and the other's carrying
+# nothing, on the same reader, so the two traces are of the paths they claim.
+CARRY_ROSTER="$PROJECT/.bionic/tmp/roster-$SID.state"
+( . "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roster.sh" 2>/dev/null \
+    || . "${BIONIC_HOOKS_DIR}/../scripts/lib/roster.sh"
+  roster_header > "$CARRY_ROSTER"
+  roster_row status=identified session="$SID" name=w-C agent_id=a-latency-C launched_at=2026-10-11T00:00:00Z \
+    subagent_type=bionic:implementor suites_allowed=x.test.sh suites_source=declared files= >> "$CARRY_ROSTER"
+  roster_row status=identified session="$SID" name=w-D agent_id=a-latency-D launched_at=2026-10-11T00:00:00Z \
+    subagent_type=bionic:implementor files= >> "$CARRY_ROSTER" )
+carry_payload() {  # <agent id>
+  jq -nc --arg s "$SID" --arg c "$PROJECT" --arg a "$1" \
+    '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash", agent_id:$a,
+      agent_type:"bionic:implementor", tool_input:{command:"ls -la"}, tool_use_id:"toolu_hook_latency_carry"}'
+}
+carry_cmd() {  # <agent id> — the command the hook stages, or nothing
+  carry_payload "$1" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" \
+    BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$BASH_WALLS_HOOK" 2>/dev/null \
+    | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null
+}
+TRACE_CARRY="$SANDBOX/trace-carry.txt"
+TRACE_NOCARRY="$SANDBOX/trace-nocarry.txt"
+trace_best "$BASH_WALLS_HOOK" "$(carry_payload a-latency-C)" "$TRACE_CARRY"
+trace_best "$BASH_WALLS_HOOK" "$(carry_payload a-latency-D)" "$TRACE_NOCARRY"
+CARRY_COUNT=$(count_external "$TRACE_CARRY")
+NOCARRY_COUNT=$(count_external "$TRACE_NOCARRY")
+CARRY_CMD_C="$(carry_cmd a-latency-C)"
+CARRY_CMD_D="$(carry_cmd a-latency-D)"
+rm -f "$CARRY_ROSTER"
+
+echo "hook-latency: bash-walls.sh agent ls -la external-command count: budgeted (carried) = $CARRY_COUNT (cap 12), unbudgeted = $NOCARRY_COUNT, main thread (§1) = $WALLS_COUNT"
+echo "hook-latency: bash-walls.sh budgeted-agent histogram:"
+histogram "$TRACE_CARRY" | sed 's/^/hook-latency:   /'
+
+expect_eq "11a: the budgeted agent's ls -la is carried (the trace is of the carry path)" \
+  "export BIONIC_GATE_AGENT=w-C; ls -la" "$CARRY_CMD_C"
+expect_eq "11b: …and the agent whose row states no budget is not (11a is the positive)" "" "$CARRY_CMD_D"
+expect_true "11c: a budgeted agent's plain call count <= 12, §1's cap" test "$CARRY_COUNT" -le 12
+expect_true "11d: the carry costs the call at most two forks, the jq that stages it and the fold's jq that emits it" \
+  test "$((CARRY_COUNT - NOCARRY_COUNT))" -le 2
+
 finish
