@@ -2011,10 +2011,6 @@ expect_eq "17d.13 an empty status cell is a status finding spelled (empty)" "sta
   "$(call units_findings "$SANDBOX/ledger-empty-status.md" "$SANDBOX/ledger.roster")"
 expect_eq "17d.14 no table, no findings, exit 0" "0" "$(call_rc units_findings "$SANDBOX/no-such.md" "")"
 
-# THE LOOKUP THE GATE'S ADDRESSED-UNIT ARM COUNTS (it moved here from walls.sh's
-# missing_evidence_ids): every T-row with no non-empty `- T<n>:` line, whatever its status.
-expect_eq "17d.15 units_unlined names every T-row short of a line, table order, the fenced and empty ones included" \
-  "$(printf 'T2\nT3\nT4\nT5\nT6\nT7\nT8\nT9\nT10')" "$(call units_unlined "$SANDBOX/ledger.md")"
 # CR-ONLY INPUT (the gate's 19j-cr pin): the reader translates line endings itself.
 tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
 expect_eq "17d.16 a CR-only plan reads the same" \

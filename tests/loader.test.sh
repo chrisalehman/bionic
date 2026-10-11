@@ -508,4 +508,26 @@ S_OUT="$(e_rm_run --all --only=)"; S_RC=$?
 eq "E.2c remove --all --only= is refused for the empty value, not run" "$S_OUT" "$E_RM_MSG"
 eq "E.2d …exit 2" "$S_RC" "2"
 
+# --- remove tears down the notification channel setup installed, and only that file (wave-33 T15; T12 loose end) ---
+RN_HOME="$WORK/rn-home"; mkdir -p "$RN_HOME/.claude/bionic"
+printf 'topic-from=cron.env:BIONIC_NTFY_TOPIC\ntitle-prefix=bionic\n' > "$RN_HOME/.claude/bionic/notify"
+printf '80\n' > "$RN_HOME/.claude/bionic/share"
+rn_run() {  # <answer> <args...> — the real remove.sh in a scratch home, one line of stdin
+  local ans="$1"; shift
+  printf '%s\n' "$ans" | env -i HOME="$RN_HOME" PATH=/usr/bin:/bin TMPDIR="$WORK" TERM=dumb \
+    /bin/bash "$E_REMOVE" "$@" 2>&1
+}
+RN_LIST="$(rn_run n --list)"
+case "$RN_LIST" in *legacy-alias*) ok "RN.0 --list prints the roster (the extractor reads)" ;; *) no "RN.0 --list prints the roster (the extractor reads)" "out=[$RN_LIST]" ;; esac
+case "$RN_LIST" in *notify*) ok "RN.1 the roster names the notify item" ;; *) no "RN.1 the roster names the notify item" "out=[$RN_LIST]" ;; esac
+RN_NO="$(rn_run n --only notify)"
+eq "RN.2 declined: the channel file stays" "yes" "$([ -f "$RN_HOME/.claude/bionic/notify" ] && echo yes || echo no)"
+case "$RN_NO" in *"declined"*) ok "RN.2a …and the item says declined" ;; *) no "RN.2a …and the item says declined" "out=[$RN_NO]" ;; esac
+RN_YES="$(rn_run y --only notify)"
+eq "RN.3 consented: the channel file is gone" "no" "$([ -e "$RN_HOME/.claude/bionic/notify" ] && echo yes || echo no)"
+case "$RN_YES" in *"bionic/notify"*) ok "RN.3a …and the item names the file it removed" ;; *) no "RN.3a …and the item names the file it removed" "out=[$RN_YES]" ;; esac
+eq "RN.3b …and the share file beside it is untouched" "80" "$(cat "$RN_HOME/.claude/bionic/share" 2>/dev/null)"
+RN_AGAIN="$(rn_run y --only notify)"
+case "$RN_AGAIN" in *"already clean"*) ok "RN.4 with no channel file the item is already clean" ;; *) no "RN.4 with no channel file the item is already clean" "out=[$RN_AGAIN]" ;; esac
+
 finish
