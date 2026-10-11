@@ -55,7 +55,8 @@
 # `BIONIC_TEST_JOBS` by hand. `BIONIC_TEST_JOBS` is retired as an input for
 # exactly that reason: a literal a caller fixes cannot answer "how busy is the
 # machine right now". A caller who still sets it is told once, on stderr, and
-# ignored rather than silently overridden.
+# ignored rather than silently overridden. A whole run reads it once the gate has admitted it
+# (wave-33 T5; D4), so a run that waited reads the machine it was admitted to.
 #
 # WHY IT IS SAFE TO RUN THEM AT ONCE. Not by assumption — by audit. Epic-17 W7 S8
 # read every suite in this roster for fixture root, every write outside it and every
@@ -502,9 +503,10 @@ _is_solo_suite() {  # <file> -> 0 if it declares `# runner: solo` in its first 3
 # writes nothing). Before this fix the sample below ran unconditionally, so
 # `--dry-run` — documented above and at `-h` as "print the job width and exit;
 # run nothing" — quietly appended one line to the machine's pressure ring on
-# every invocation. The real (non-dry) path below still samples first, exactly
-# as AC-15 requires of every consumer; only the dry-run path is exempted, and it
-# reads the rung the ring already carries instead.
+# every invocation. The real (non-dry) path below still samples once before it reads, exactly
+# as AC-15 requires of every consumer (a whole run does so after its admission is granted,
+# wave-33 T5); only the dry-run path is exempted, and it reads the rung the ring already
+# carries instead.
 if [ -n "${BIONIC_TEST_JOBS:-}" ]; then
   echo "tests/run.sh: BIONIC_TEST_JOBS is retired — width now comes from the machine's pressure rung; set BIONIC_TEST_JOBS_CEILING to change the ceiling it reads against. The value you set (${BIONIC_TEST_JOBS}) is ignored." >&2
 fi
@@ -521,28 +523,47 @@ if ! declare -F pressure_level >/dev/null 2>&1; then
   echo "tests/run.sh: no width oracle — payload/scripts/lib/resources.sh did not load, so pressure_level is not defined. Nothing was run." >&2
   exit 2
 fi
-if [ "$DRY_RUN" -eq 0 ]; then
-  pressure_sample >/dev/null 2>&1 || :
-fi
+# _runner_width [sample] — sets JOBS (and _WIDTH, _ceiling): with `sample`, takes one reading into
+# the ring first, then reads the rung over the ring against the ceiling. The one width read and
+# the one sample site in this runner.
+#
 # THE WIDTH IS THE SHARE'S ROOM (wave-32 T2; D1, ADR-051). The rung reads against the gate's own
 # width, `gate_width` = floor(share × cores ÷ 100), 7 at share 92 on 8 cores: a whole run is
 # admitted alone (THE ONE ADMISSION, below), and this is how many workers the share has room for.
 # The runner keeps no width of its own; BIONIC_TEST_JOBS_CEILING is a cap UNDER the width, never a
 # raise above it. A tree without the gate library (a scratch copy of this runner) reads against
 # the old default of 8, as before.
-_WIDTH=8
-if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
-case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
-_ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
-if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
-JOBS="$(pressure_level "$_ceiling")"
-# A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The default
-# above covers an UNSET variable and nothing else: `pressure_level` refuses a ceiling that
-# is not a positive integer with exit 2 and prints nothing on stdout, so `JOBS` came out
-# empty and `xargs -P ""` aborted the whole run. This file runs under `set -uo pipefail`
-# with no `-e`, so the refusal was silent apart from `pressure_level`'s own stderr line —
-# which is still printed, and is the explanation for this fallback to the width.
-case "$JOBS" in ''|*[!0-9]*) JOBS=$_WIDTH ;; esac
+#
+# WHEN IT IS READ (wave-33 T5; D4, AC-8.3). A whole run (no --only, no --serial, no --dry-run)
+# reads it AFTER its one admission is granted, with a fresh sample, at THE ONE ADMISSION below: a
+# run that waited behind other work on a busy machine runs at the width of the machine it was
+# admitted to, not the one it found when it asked. Every other mode reads it here, as before:
+# --dry-run takes no admission and samples nothing (it reads the ring as it stands), and --only
+# and --serial ask per suite and hold nothing to wait on.
+_runner_width() {
+  if [ "${1:-}" = sample ]; then
+    pressure_sample >/dev/null 2>&1 || :
+  fi
+  _WIDTH=8
+  if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
+  case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
+  _ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
+  if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
+  JOBS="$(pressure_level "$_ceiling")"
+  # A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The default
+  # above covers an UNSET variable and nothing else: `pressure_level` refuses a ceiling that
+  # is not a positive integer with exit 2 and prints nothing on stdout, so `JOBS` came out
+  # empty and `xargs -P ""` aborted the whole run. This file runs under `set -uo pipefail`
+  # with no `-e`, so the refusal was silent apart from `pressure_level`'s own stderr line —
+  # which is still printed, and is the explanation for this fallback to the width.
+  case "$JOBS" in ''|*[!0-9]*) JOBS=$_WIDTH ;; esac
+}
+JOBS=""
+if [ "$DRY_RUN" -eq 1 ]; then
+  _runner_width
+elif [ "$ONLY" -eq 1 ] || [ "$SERIAL" -eq 1 ]; then
+  _runner_width sample
+fi
 
 # ── THE ROSTER RUNS LONGEST-FIRST (wave-30 T10; D8a, REQ-5 AC-5.2) ───────────
 #
@@ -933,6 +954,9 @@ if [ "$SERIAL" -eq 0 ]; then
     _RUN_GATE_ID="$_GATE_ID"; _RUN_GATE_OWN="$_GATE_OWN"
     [ -z "$_RUN_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_RUN_GATE_ID"
   fi
+  # THE WIDTH AFTER THE GRANT (wave-33 T5; D4, AC-8.3): a whole run sizes its workers now, from a
+  # fresh sample, once the machine is its own (_runner_width, above). --only read it at the top.
+  [ "$ONLY" -eq 1 ] || _runner_width sample
   [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
   # THEN THE SOLO SUITES, ONE AT A TIME, ON THE NOW-IDLE RUNNER (T20, A-orch-28).
   # Reuses the exact `--one` worker every parallel suite already runs through —
