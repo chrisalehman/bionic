@@ -127,6 +127,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/wait.sh"   # wait_for <seconds> <cmd>…, the bounded poll
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 GATE="$REPO_ROOT/payload/scripts/lib/gate.sh"
@@ -223,14 +225,6 @@ reap() {  # the last row's askers that still poll or hold: killed, so no row fee
 ask_fg() {  # <name> <kind> <key> <within> — an asker in the foreground; prints its rc
   bash "$WORLD_ROOT/asker.sh" "$D" "$@"
   cat "$D/$1.rc" 2>/dev/null || echo none
-}
-wait_for() {  # <seconds> <cmd>... — rc 0 once the command succeeds, 1 at the ceiling
-  local i=0 lim=$(( $1 * 20 ))
-  shift
-  until "$@"; do
-    i=$((i + 1)); [ "$i" -lt "$lim" ] || return 1
-    sleep 0.05
-  done
 }
 has() { [ -e "$D/$1" ]; }
 rc_of() { cat "$D/$1.rc" 2>/dev/null || echo none; }
@@ -2112,15 +2106,14 @@ ln -s tests "$BA/t2"
 printf '#!/bin/bash\nR=tests/run.sh\nbash "$R"\n' > "$BA/tools/var.sh"
 printf '#!/bin/bash\nbash TESTS/run.sh\n' > "$BA/tools/caps.sh"
 printf '#!/bin/bash\nbash TESTS/RUN.SH\n' > "$BA/tools/caps2.sh"
-printf '#!/bin/bash\nX="$(cd "$(dirname "$0")" && pwd)"\nbash tests/run.sh --only a.test.sh\n' > "$BA/tools/door-a.sh"
+printf '#!/bin/bash\nX="$(cd "$(dirname "$0")" && pwd -P)"\nbash tests/run.sh --only a.test.sh\n' > "$BA/tools/door-a.sh"
 printf '#!/bin/bash\nbash tests/run.sh --only b.test.sh\n' > "$BA/tools/door-b.sh"
 BA_ROSTER="$BA/.bionic/tmp/roster-$WORLD_SID.state"
 ba_row() {  # <name> <id> [<key>=<value>...] — appends a roster row of the recorder's shape
-  local n="$1" i="$2" r
+  local n="$1" i="$2"
   shift 2
-  r="roster-state/v1|status=identified|session=$WORLD_SID|name=$n|agent_id=$i|launched_at=2026-10-11T00:00:00Z|subagent_type=bionic:implementor"
-  while [ "$#" -gt 0 ]; do r="$r|$1"; shift; done
-  printf '%s\n' "$r" >> "$BA_ROSTER"
+  roster_row_fixture status=identified session="$WORLD_SID" name="$n" agent_id="$i" \
+    launched_at=2026-10-11T00:00:00Z subagent_type=bionic:implementor "$@" >> "$BA_ROSTER"
 }
 printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$BA_ROSTER"
 ba_row fx afx-1 'suites_allowed=a.test.sh' 're_executes='
