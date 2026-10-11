@@ -1370,16 +1370,28 @@ if [ -n "$DP_BUDGET_WRITERS" ]; then
   # Patrol tick still consumes the same reader unchanged. Only the case where there is
   # nothing to read has stopped being an error.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open>", then the open names (exit 0)
-    local f="$1" transcript="$2" line nm seen open=0 primed="" notfresh=""
-    local la_out la_rc row_dark dark="" closed still_open open_names=""
+    local f="$1" transcript="$2" nm names open=0 primed="" notfresh=""
+    local la_out la_rc row_dark dark="" still_open settled settle_rc open_names=""
+    local -a open_list=() dark_list=()
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0'; return 0; fi
-    seen="|"
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in "roster-state/${ROSTER_VERSION}|status=intended|"*) ;; *) continue ;; esac
-      nm=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^name=//p' | head -1)
+
+    # THE ROSTER IS READ ONCE (epic-23 wave-32 T4; REQ-3, D3). One awk takes every
+    # `status=intended` row's name and keeps each name's first row only, in roster order. The
+    # name is what follows the first `|name=` up to the next `|`: the first field that begins
+    # `name=`, as the tr|sed|head this replaced took it per row, found by search rather than a
+    # second split on the pipe (this hook keeps one, dispatch-preflight-3 §S32 32j). That per-row
+    # pipeline and the dedupe string it searched were 6,000 forks and a quadratic scan on
+    # §budget-markers-pipe's roster. The redirect is the shell's, so an unreadable roster fails
+    # the way the loop's own `< "$f"` used to: no names, and the bare count below.
+    names=$(/usr/bin/awk -v pfx="roster-state/${ROSTER_VERSION}|status=intended|" '
+      index($0, pfx) != 1 { next }
+      {
+        i = index($0, "|name="); if (i == 0) next
+        nm = substr($0, i + 6); j = index(nm, "|"); if (j) nm = substr(nm, 1, j - 1)
+        if (nm != "" && !(nm in seen)) { seen[nm] = 1; print nm }
+      }' < "$f")
+    while IFS= read -r nm; do
       [ -n "$nm" ] || continue
-      case "$seen" in *"|${nm}|"*) continue ;; esac
-      seen="${seen}${nm}|"
 
       # ONCE THE ANSWER IS UNREADABLE, STOP ASKING. Freshness is a property of the
       # TRANSCRIPT, so a reader that said STALE or NONE for one row will say it for every
@@ -1434,46 +1446,50 @@ if [ -n "$DP_BUDGET_WRITERS" ]; then
           # the writer count after the dark rows are settled, so a read-only row holds no
           # writer slot and the Patrol's tick, which calls the same function, reads the same
           # number.
-          open_names="${open_names}${nm}
-"
+          open_list[${#open_list[@]}]="$nm"
           # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list, and the
           # block below asks the roster whether it has since closed. A row the panel spoke for
           # never lands here, which is what makes that question unreachable on the fresh path.
-          [ -n "$row_dark" ] && dark="${dark}${nm}
-"
+          [ -n "$row_dark" ] && dark_list[${#dark_list[@]}]="$nm"
           ;;
         1) : ;;
       esac
-    done < "$f"
+    done <<NAMES
+$names
+NAMES
+    # THE TWO LISTS ARE JOINED ONCE, HERE (wave-32 T4). Appending to a string per row re-copies
+    # the whole string each time under bash 3.2: 5.4 s of a 6,000-row call, against 0.6 s for
+    # these arrays. The join prints the bytes the appends did, one name and one newline each.
+    [ "${#open_list[@]}" -eq 0 ] || printf -v open_names "%s\n" "${open_list[@]}"
+    [ "${#dark_list[@]}" -eq 0 ] || printf -v dark "%s\n" "${dark_list[@]}"
 
     # THE DARK ROWS, SETTLED IN ONE PASS (wave-14 REQ-3, D7). One read of the roster and one
     # of the ack ledger, for every dark row at once — never per row, and never at all on a
     # turn where the panel answered for every row. A landed row gives its writer slot back.
+    #
+    # ONE AWK, NO PIPE, NO FORK PER NAME (wave-32 T4). A dark name the predicate no longer
+    # calls open is closed, and a closed name leaves the open list, kept in its order. The
+    # three lists reach awk through its environment, as `budget_open_writers` hands it names:
+    # `-v` would rewrite a backslash in a name. Array membership is exact string equality,
+    # which is what `grep -qxF` asked per name — and with no producer there is no SIGPIPE for
+    # `pipefail` to promote (correctness review F8, §budget-markers-pipe). Exit 3 means
+    # nothing closed and the list stands as it is; so does an awk that could not run, which
+    # leaves every dark row open, the fail-closed direction. A list that lost a name comes
+    # back through `$(…)` without its last newline, which is the byte the per-name
+    # `grep -v` it replaces printed.
     if [ -n "$dark" ]; then
       still_open=$(roster_open_names "$f" "$ACK_LEDGER_FILE")
-      closed=$(while IFS= read -r nm; do
-                 [ -n "$nm" ] || continue
-                 /usr/bin/grep -qxF -- "$nm" <<< "$still_open" || printf '%s\n' "$nm"
-               done <<DARKNAMES
-$dark
-DARKNAMES
-)
-      if [ -n "$closed" ]; then
-        while IFS= read -r nm; do
-          [ -n "$nm" ] || continue
-          # A HERE-STRING, NOT A PIPE (correctness review F8; the reason
-          # is stated in this comment, no rule file carries it). `grep -q` exits at its first match; under this
-          # file's `set -uo pipefail` (:67), a `printf | grep -qxF` pipeline SIGPIPEs the
-          # producer whenever the match sits ahead of enough trailing data to still be
-          # queued when `grep` closes its read end, and `pipefail` promotes that 141 over
-          # grep's own 0 — a closed row reads as still open. A here-string has no second
-          # process to lose.
-          /usr/bin/grep -qxF -- "$nm" <<< "$closed" || continue
-          open_names=$(printf '%s' "$open_names" | /usr/bin/grep -vxF -- "$nm")
-        done <<DARK
-$dark
-DARK
-      fi
+      settle_rc=0
+      settled=$(DP_SETTLE_OPEN="$open_names" DP_SETTLE_DARK="$dark" DP_SETTLE_STILL="$still_open" /usr/bin/awk '
+        BEGIN {
+          n = split(ENVIRON["DP_SETTLE_STILL"], s, "\n"); for (i = 1; i <= n; i++) still[s[i]] = 1
+          n = split(ENVIRON["DP_SETTLE_DARK"], d, "\n"); c = 0
+          for (i = 1; i <= n; i++) if (d[i] != "" && !(d[i] in still)) { closed[d[i]] = 1; c++ }
+          if (c == 0) exit 3
+          n = split(ENVIRON["DP_SETTLE_OPEN"], o, "\n")
+          for (i = 1; i <= n; i++) if (o[i] != "" && !(o[i] in closed)) print o[i]
+        }' </dev/null) || settle_rc=$?
+      [ "$settle_rc" -eq 0 ] && open_names="$settled"
     fi
 
     open=$(printf '%s\n' "$open_names" | budget_open_writers "$f")
