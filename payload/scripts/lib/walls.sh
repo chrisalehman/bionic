@@ -5973,15 +5973,30 @@ fi
 # spelled as booked.sh spells its --agent. Every other field of tool_input rides through. rc 0 staged,
 # 1 not (no jq output).
 #
-# EVERY SUCH COMMAND, NOT ONLY A SCRIPT START (wave-33 T36; ADR-052): T3 carried only what the claims
-# read as a script start, so a runner reached through python, node, awk, `source` or an out-of-tree
-# script asked as main. Which commands start a suite is not readable from text; the ask is where the
-# run is real. The cost, measured (tests/hook-latency.test.sh §11): the roster read's one awk on every
-# call of a dispatched agent, and for a budgeted one two jq more, this stage and the fold's emit.
+# EVERY SUCH COMMAND IN BYPASS MODE, A SCRIPT START IN EVERY MODE (wave-33 T36; ADR-052). T3 carried
+# only what the claims read as a script start, so a runner reached through python, node, awk, `source`
+# or an out-of-tree script asked as main. Which commands start a suite is not readable from text; the
+# ask is where the run is real. But the CLI checks permission rules against the input a hook returns,
+# each subcommand on its own (hooks page, PreToolUse; permissions page, Compound commands): outside
+# bypass mode a carried `export …; git status` prompts where `git status` was allowed. So the carry
+# rides every command only where no rule is checked (`_bsg_bypass`), and a script start alone
+# elsewhere, as T3 shipped it; there a runner in another language still asks as main.
+# The cost, measured (tests/hook-latency.test.sh §11): in bypass mode the roster read's one awk on
+# every plain call of a dispatched agent, and for a budgeted one two jq more, this stage and the
+# fold's emit; in any other mode nothing.
 _bsg_carry() {  # -> 1 staged (an advisory, so the fold keeps it), 0 left as typed (no budget stated)
   [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || return 0
   _bsg_stage_carry && return 1
   return 0
+}
+# _bsg_bypass — the payload's `permission_mode` is `bypassPermissions`. Read off the raw payload with
+# no fork: in JSON text a quote inside a string is always escaped, so `"permission_mode"` before a
+# colon is a key, and the Bash tool's input has no such key, so it is the payload's own. Both wrong
+# answers are safe: a missed match keeps T3's narrow carry, and a forged one only subjects its own
+# agent to the budget.
+_BSG_BYPASS_RE='"permission_mode"[[:space:]]*:[[:space:]]*"bypassPermissions"'
+_bsg_bypass() {
+  [[ "${BIONIC_INPUT:-}" =~ $_BSG_BYPASS_RE ]]
 }
 _bsg_stage_carry() {
   local _who _upd
@@ -6238,9 +6253,10 @@ _wall_class_read "$COMMAND"
 _BSG_CLAIM_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CLAIM_CWD" ] || _BSG_CLAIM_CWD="${BIONIC_CWD:-}"
 # A PATH THE SHELL RUNS IS ASKED TOO (wave-33 T3; D7, AC-6.2): `./tools/run.sh`, a link to the runner,
 # is class none until the claims resolve it, and a script start is what the budget arm carries.
-# A COMMAND THE CLAIMS DO NOT READ IS CARRIED, NOT LEFT (wave-33 T36; D7, AC-6.2): what it starts is
-# not knowable from its text (`python3 run.py`, `awk '…system(…)'`, `source helper.sh`), so it carries
-# the agent's name like any script start, and the gate's ask holds the budget wherever a suite starts.
+# A COMMAND THE CLAIMS DO NOT READ IS CARRIED IN BYPASS MODE (wave-33 T36; D7, AC-6.2): what it starts
+# is not knowable from its text (`python3 run.py`, `awk '…system(…)'`, `source helper.sh`), so it
+# carries the agent's name like any script start, and the gate's ask holds the budget wherever a suite
+# starts. In any other mode it is left as typed (`_bsg_carry`'s docblock says why).
 if [ "$_WALL_CLASS" != "suite" ]; then
   [ -n "$ACTOR" ] || return 0
   local _BSG_CLAIMED=0
@@ -6248,6 +6264,7 @@ if [ "$_WALL_CLASS" != "suite" ]; then
     *sh[[:space:]]*|*/*) [ -z "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || _BSG_CLAIMED=1 ;;
   esac
   if [ "$_BSG_CLAIMED" = 0 ]; then
+    _bsg_bypass || return 0
     local BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _BUDGET_ROW_NAME=""
     _bsg_budget_read || return 0
     _bsg_carry
@@ -6357,7 +6374,7 @@ fi
 [ -n "$ACTOR" ] || return 0
 
 local BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact _BSG_SET_CMP _BSG_RUNS
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact _BSG_SET_CMP _BSG_STARTS _BSG_RUNS
 _bsg_budget_read || return 0
 # WHY NO SET, when there is none (wave-27 T5, D15): a row that states none, or no row carrying
 # this id at all. `budget_unrecorded` below prints it.
@@ -6689,11 +6706,11 @@ _BSG_SET_CMP="$SUITES_ALLOWED"
 case "$_BSG_SET_CMP" in
   *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ! cmd_case_blind "$BIONIC_ROOT" || _BSG_SET_CMP="$(printf '%s' "$_BSG_SET_CMP" | tr 'A-Z' 'a-z')" ;;
 esac
-_BSG_RUNS=0
+_BSG_STARTS=0; _BSG_RUNS=0
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
   # A SCRIPT START (wave-33 T3; D7): nothing the text definitely runs, so nothing here refuses it.
-  [ "$_kind" != "script" ] || continue
+  if [ "$_kind" = "script" ]; then _BSG_STARTS=1; continue; fi
   _BSG_RUNS=1
 
   # ---------- THE PROJECT'S DOOR, ASKED ONCE FOR THIS CLAIM (wave-28 T54, D27; A-orch-124/125) ----------
@@ -6830,9 +6847,11 @@ done <<< "$_CLAIMS"
 # ---------- THE CARRY (wave-33 T3; D7, AC-6.2): a command that runs no suite is admitted, naming its agent ----------
 #
 # A command that is no suite and claims no run reaches the gate through whatever it starts, so it is
-# neither repaired nor booked (both are a suite's); it is carried (`_bsg_carry`), as a command the
-# claims never read is above the backgrounded arm (wave-33 T36).
+# neither repaired nor booked (both are a suite's); it is carried (`_bsg_carry`) when it starts a
+# script, and in bypass mode whatever it starts, as a command the claims never read is above the
+# backgrounded arm (wave-33 T36).
 if [ "$_WALL_CLASS" != "suite" ] && [ "$_BSG_RUNS" = 0 ]; then
+  [ "$_BSG_STARTS" = 1 ] || _bsg_bypass || return 0
   _bsg_carry
   return $?
 fi

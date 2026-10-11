@@ -179,7 +179,8 @@ EXTRA_ENV=""
 # other stdout (a deny, a nudge, a wrap beside a nudge) stays in `$OUT` whole. §WRAP reads
 # `$WRAP` (the rewritten command) and `$WRAP_INPUT` (the whole rewritten tool_input).
 #
-# THE CARRY IS TAKEN OFF STDOUT THE SAME WAY (wave-33 T36; D7, AC-6.2). Every call a budgeted agent
+# THE CARRY IS TAKEN OFF STDOUT THE SAME WAY (wave-33 T36; D7, AC-6.2). In bypass mode, which every payload
+# here carries (mk_payload, above), every call a budgeted agent
 # makes that the wall does not handle as a suite comes back as `export BIONIC_GATE_AGENT=<row name>;
 # <the command as typed>`, so the gate's ask holds the budget wherever a suite starts. That is not a
 # verdict or an advisory either, so `$OUT$ERR` keeps meaning "nothing refused, nothing said". The
@@ -292,7 +293,7 @@ expect_empty "B1f …silently" "$OUT$ERR"
 guarded "$R1" 'git status --short'
 expect_eq "B1g a non-suite command is allowed" "0" "$ST"
 expect_empty "B1g …silently" "$OUT$ERR"
-# THE CARRY (wave-33 T36; D7, AC-6.2): it rides in front, so what the command starts asks the gate
+# THE CARRY (wave-33 T36; D7, AC-6.2), bypass mode: it rides in front, so what the command starts asks the gate
 # as this agent; the main thread's same command carries nothing, read by the same reader.
 expect_eq "B1g2 …carrying the agent's row name in front of the command as typed" \
   "export BIONIC_GATE_AGENT=w-b1; git status --short" "$CARRY"
