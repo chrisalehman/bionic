@@ -246,12 +246,11 @@ CMD_RUN_NORM_AWK='
 # unwraps, the writers, deleters and pure readers, the suite, build and install runners) is
 # compared to `cmd_word_fold` of the word, so the tables hold lower-case names only.
 #
-# WHAT IS NOT FOLDED: operands, paths, flags and subcommands, at the call sites (`npm TEST` is
-# not `npm test`, and `bash TESTS/RUN.SH` names no suite this reader knows), and a script named
-# at argv[0] by its path (`./tests/X.TEST.SH`), for the same reason its operand form is not. The
-# budget's own reading still OPENS a script operand (wave-31 T11, `script_read`): the filesystem
-# finds the file however it is spelled, its text is what is read, and a file that is not there is
-# `unverified`, by its path as typed (wave-31 T38). And,
+# WHAT IS NOT FOLDED BY THIS RULE: operands, paths, flags and subcommands (`npm TEST` is not `npm
+# test`). A RUNNER OR SUITE PATH FOLDS BY ITS OWN RULE (wave-33 T3; D7, AC-6.3), the filesystem's:
+# where the volume folds case (`cmd_case_blind`) `bash TESTS/RUN.SH` and `./tests/X.TEST.SH` are the
+# runner and x.test.sh, compared and named in lower case (`fc`); where it does not, they are other
+# files. And,
 # inside the fold itself, every word whose effect exists only as a shell builtin or keyword: an
 # external program word folds, a builtin-only word does not, because the shell matches its own
 # builtins case-exactly and hands only the rest to the case-blind filesystem. The never list is
@@ -292,15 +291,54 @@ CMD_WORD_FOLD_AWK='
     }
 '
 
+# cmd_case_blind <dir> — rc 0 when the filesystem holding <dir> folds case (wave-33 T3; D7,
+# AC-6.3): the default macOS volume does, so `TESTS/RUN.SH` there is the runner and every runner and
+# suite comparison in this file folds (`fc` in the awk program); a case-exact volume (Linux, a
+# case-sensitive APFS) compares as typed. ASKED OF THE FILESYSTEM, NEVER OF THE OS NAME: the path's
+# nearest component holding a letter is spelled with each letter's case swapped, and the volume
+# folds exactly when that spelling is the same file (`-ef`, a builtin test: no fork, no new tool).
+# A path with no letter in any component, or one that is not there, reads case-exact. The answer
+# is kept per directory for the life of the shell. BIONIC_PROBE_CASE_BLIND (0 or 1) plants it,
+# so a fixture decides alike on any machine.
+_CMD_CB_DIR=""; _CMD_CB_RC=1
+cmd_case_blind() {  # <dir> -> rc 0 case-blind, 1 case-exact
+  local d="${1:-}" b="" t="" c u i=0 lo=abcdefghijklmnopqrstuvwxyz up=ABCDEFGHIJKLMNOPQRSTUVWXYZ
+  case "${BIONIC_PROBE_CASE_BLIND:-}" in 1) return 0 ;; 0) return 1 ;; esac
+  [ -n "$d" ] && [ "$d" = "$_CMD_CB_DIR" ] && return "$_CMD_CB_RC"
+  _CMD_CB_DIR="$d"; _CMD_CB_RC=1
+  case "$d" in /*) : ;; *) return 1 ;; esac
+  d="${d%/}"
+  while [ -n "$d" ]; do
+    b="${d##*/}"
+    case "$b" in *[A-Za-z]*) break ;; esac
+    d="${d%/*}"
+  done
+  [ -n "$d" ] && [ -e "$d" ] || return 1
+  while [ "$i" -lt "${#b}" ]; do
+    c="${b:$i:1}"
+    case "$lo" in
+      *"$c"*) u="${lo%%"$c"*}"; c="${up:${#u}:1}" ;;
+      *) case "$up" in *"$c"*) u="${up%%"$c"*}"; c="${lo:${#u}:1}" ;; esac ;;
+    esac
+    t="$t$c"; i=$((i + 1))
+  done
+  [ "$d" -ef "${d%/*}/$t" ] && _CMD_CB_RC=0
+  return "$_CMD_CB_RC"
+}
+
 # The awk program. `mode=heredoc` stops after step 1; `mode=lines` runs the whole reading.
 _cmd_class_awk() {  # <mode> ; command on stdin
   # ONLY mode=effects PARSES _CMD_EFFECTS_AWK (wave-25 T2). awk compiles the whole program on
   # every call, and the effects reader is a fifth of this file: pasted into every mode it cost
   # each classifier call 1.7 ms (7.3 -> 9.0 ms, measured). The other modes get one-line stubs
   # of the seven names the shared code calls, so each program defines every function once.
-  local _fx="$_CMD_EFFECTS_STUBS"
+  local _fx="$_CMD_EFFECTS_STUBS" _cb=0
   [ "$1" = effects ] && _fx="$_CMD_EFFECTS_AWK"
-  awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx"'
+  # THE FILESYSTEM'S FOLD, asked of the tree the reading is about (the root, else the cwd it was
+  # handed, else this process's), with no fork (`cmd_case_blind`).
+  ! cmd_case_blind "${_CMD_SCRIPT_ROOT:-${_CMD_SCRIPT_CWD:-$PWD}}" || _cb=1
+  _CMD_CASE_BLIND="$_cb" awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx"'
+    BEGIN { FOLD = (ENVIRON["_CMD_CASE_BLIND"] == "1") }
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
     # ONE RUN, ONE SPELLING (REQ-1 AC-1.5). The same collapse
@@ -337,7 +375,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # WHICH `run.sh` IS THE RUNNER (wave-24 T24, REQ-7). Only the project s own: `tests/run.sh`,
     # `./tests/run.sh`, or a path ending `/tests/run.sh`. The basename alone said nothing, so a
     # scratch `<dir>/run.sh` or `scripts/run.sh` was refused as the full tree.
+    #
+    # THEY FOLD WHERE THE FILESYSTEM DOES (wave-33 T3; D7, AC-6.3). On a case-blind volume
+    # `TESTS/RUN.SH` is the runner and `GAMMA.TEST.SH` is gamma.test.sh, so every runner and suite
+    # comparison here reads its word through `fc`, which lower-cases it exactly when the caller
+    # says the filesystem folds (`_CMD_CASE_BLIND`, from `cmd_case_blind`); on a case-exact one
+    # `fc` is the identity and the comparisons are as they were.
     function is_runner(p) {
+      p = fc(p)
       return (p == "tests/run.sh" || p ~ /\/tests\/run\.sh$/)
     }
     # WHAT IS A SUITE NAME, ONCE (wave-28 T36; read-structure-p20 #1). A file name ending
@@ -345,7 +390,37 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # the runner`s `--only` operands all ask this one function; it was spelled three times, and
     # the third had drifted from the runner rule (`is_runner`, above).
     function is_suite_name(c) {
+      c = fc(c)
       return (c == "test.sh" || c ~ /\.test\.sh$/)
+    }
+    # A NAME OR PATH AS THIS FILESYSTEM COMPARES IT: lower case where it folds, as typed where it
+    # does not. ASCII letters only, the 26-letter table cmd_word_fold uses for a word with anything
+    # outside printable ASCII.
+    function fc(w,   n, C, i, j, o) {
+      if (!FOLD || w !~ /[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/) return w
+      if (w ~ /^[!-~]*$/) return tolower(w)
+      n = split(w, C, ""); o = ""
+      for (i = 1; i <= n; i++) {
+        j = index("ABCDEFGHIJKLMNOPQRSTUVWXYZ", C[i])
+        o = o (j ? substr("abcdefghijklmnopqrstuvwxyz", j, 1) : C[i])
+      }
+      return o
+    }
+    # A claim`s PATH, folded so the shell`s scoping compare (`cmd_claim_scope`, case-exact) meets
+    # the root as the caller spelled it: an absolute path under the root, in any case, takes the
+    # root`s spelling; then the two components the runner and suite rules read fold (a `tests`
+    # directory and the file name), and every other component is kept as typed, so a path no
+    # root was given for still meets its own tree`s spelling.
+    function fold_path(p,   r, b, d, x) {
+      if (!FOLD) return p
+      r = ENVIRON["_CMD_SCRIPT_ROOT"]
+      if (r != "" && substr(p, 1, 1) == "/" && fc(substr(p, 1, length(r) + 1)) == fc(r "/")) p = r "/" substr(p, length(r) + 2)
+      b = p; sub(/.*\//, "", b)
+      if (b == p) return fc(b)
+      d = substr(p, 1, length(p) - length(b) - 1)
+      x = d; sub(/.*\//, "", x)
+      if (fc(x) == "tests") d = substr(d, 1, length(d) - length(x)) "tests"
+      return d "/" fc(b)
     }
     # THE DOOR`S OPERANDS (wave-28 T36; D27). `tests/run.sh --only a.test.sh b.test.sh` runs the
     # named suites, so it claims each one, not the full tree: sets LAST_ONLY to the names, space
@@ -505,17 +580,72 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     }
 
     # ---------- 3. unwrapping ----------
-    # The remainder of s after the value that starts at j (quoted values included).
-    function consume_value(s, j,   c, L) {
-      L = length(s); c = substr(s, j, 1)
-      if (c == "'"'"'" || c == "\"") {
-        j++
-        while (j <= L && substr(s, j, 1) != c) j++
-        j++
-      } else {
-        while (j <= L && substr(s, j, 1) != " " && substr(s, j, 1) != "\t") j++
+    # The remainder of s after the value that starts at j: ONE SHELL WORD, read as the shell reads
+    # it (wave-33 T3; D7, AC-6.1). The word ends at the first blank outside quotes and outside
+    # every `$( … )`, `${ … }` and backquote, however they nest; adjoining quoted parts are one
+    # word, and a backslash takes the next character. Before T3 the value ended at its first inner
+    # quote, so `X="$(dirname "$0")"` left `$0")"` as the command word: a literal command read as
+    # one built from `$`, the first trip in every in-tree script wave-31 counted (R4 §1).
+    function consume_value(s, j) {
+      return substr(s, sw_word(s, j))
+    }
+    # THE WORD SCANNERS, each given the index just past its opener and returning the index just past
+    # its close (or past the end of s when the text never closes it). Recursive, so a quote inside a
+    # substitution inside a quote is read as the shell reads it.
+    function sw_word(s, j,   L, c) {
+      L = length(s)
+      while (j <= L) {
+        c = substr(s, j, 1)
+        if (c == " " || c == "\t") break
+        j = sw_part(s, j)
       }
-      return substr(s, j)
+      return j
+    }
+    # One part of a word at j: a quoted string, a substitution, an escape or a plain character.
+    function sw_part(s, j,   c, k) {
+      c = substr(s, j, 1)
+      if (c == "\\") return j + 2
+      if (c == "\047") { k = index(substr(s, j + 1), "\047"); return (k ? j + k + 1 : length(s) + 1) }
+      if (c == "\"") return sw_dq(s, j + 1)
+      if (c == "`") return sw_bq(s, j + 1)
+      if (c == "$" && substr(s, j + 1, 1) == "(") return sw_close(s, j + 2, ")")
+      if (c == "$" && substr(s, j + 1, 1) == "{") return sw_close(s, j + 2, "}")
+      return j + 1
+    }
+    function sw_dq(s, j,   L, c) {
+      L = length(s)
+      while (j <= L) {
+        c = substr(s, j, 1)
+        if (c == "\"") return j + 1
+        if (c == "\\") { j += 2; continue }
+        if (c == "`" || (c == "$" && (substr(s, j + 1, 1) == "(" || substr(s, j + 1, 1) == "{"))) { j = sw_part(s, j); continue }
+        j++
+      }
+      return j
+    }
+    function sw_bq(s, j,   L, c) {
+      L = length(s)
+      while (j <= L) {
+        c = substr(s, j, 1)
+        if (c == "\\") { j += 2; continue }
+        if (c == "`") return j + 1
+        j++
+      }
+      return j
+    }
+    # To the close of a `$(` (`)`) or a `${` (`}`); a bare `(` inside a `$( )` opens a group whose `)`
+    # is its own, and a quote, an escape or a substitution inside is one part.
+    function sw_close(s, j, cl,   L, c, d) {
+      L = length(s); d = 0
+      while (j <= L) {
+        c = substr(s, j, 1)
+        if (c == cl && d == 0) return j + 1
+        if (cl == ")" && c == "(") { d++; j++; continue }
+        if (cl == ")" && c == ")") { d--; j++; continue }
+        if (c == "\\" || c == "\047" || c == "\"" || c == "`" || c == "$") { j = sw_part(s, j); continue }
+        j++
+      }
+      return j
     }
     # Removes the leading options of a command-taking prefix. An option NAMED in
     # val takes a separate value word, which comes off with it (quoted values
@@ -681,29 +811,62 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # segments and class_seg, nested to depth 2 (SCRIPT_LVL). What it answers, into LAST_SKIND
     # and LAST_TARGET for classify_argv: `run` and the run inside (the claim`s run column stays the
     # command as typed, so the refusal names both); the `file run.sh` claim for a full tree inside,
-    # which the full-tree arm judges first; `unverified` and the script as typed, for a script the
-    # text cannot vouch for — a command word or a script operand built from `$` or a backtick, a
-    # file that is not there, a path built from a variable (A-orch-46.1: the budget refuses it).
-    # A path outside `<root>/` is not this budget`s and is not opened (A-T11-3).
+    # which the full-tree arm judges first. A path outside `<root>/` is not this budget`s and is not
+    # opened (A-T11-3).
     #
-    # THE FULL RULE IS FOR THE WRITER`S OWN WRAPPER (A-orch-62). A script tracked at HEAD and
-    # unchanged in its tree is the project`s own tool: it is read for its literal text, a suite run
-    # spelled in it is claimed, and its `$` lines never make it `unverified` (SCRIPT_STRICT 0). An
-    # untracked or modified script — the red.sh a writer just wrote — gets the full rule
-    # (SCRIPT_STRICT 1). RESIDUAL, NAMED: a wrapper committed before it runs is read by its literal
-    # text alone. LAST_UNV says why a script read `unverified`: `var` for a path built from a
-    # variable, so a tracked caller can skip its own `$` lines and still pass on a strict child`s.
+    # A SCRIPT RUNS BY DEFAULT (wave-33 T3; D7, AC-6.1). wave-31 named a script the text could not
+    # vouch for `unverified` and the budget refused it: a command word or a script operand built
+    # from `$` or a backtick, a file not there, a path built from a variable, and (A-orch-62) every
+    # `$` line of a script untracked or edited, so every in-tree script a writer touched was
+    # refused. That kind is retired, with the tracked/untracked split and the `$`-word refusal: a
+    # `$` line claims nothing, and a script in the tree whose text claims no suite run is kind
+    # `script`, target the script as typed. The wall admits it and carries the agent`s name to the
+    # gate, whose ask holds the budget where a suite actually starts (lib/gate.sh `gate_budget`).
+    # What the text definitely runs is still claimed; nested past depth 2, over 2,000 lines, not
+    # there, or at a path built from a variable, a script is a start and nothing more.
+    #
+    # THE DEFINITE CHECK RESOLVES LINKS (D7, AC-6.2): before a path the shell runs is compared or
+    # opened it is resolved, every link and directory in it (`real_path`), so a link to the runner
+    # is the runner and a link to a suite is that suite, wherever the link sits in the tree.
     function script_claim(k, t) {
       LAST_SKIND = k; LAST_TARGET = t; LAST_PATH = ""; LAST_ONLY = ""; LAST_DRY = 0
       return "suite"
     }
-    # 1 when <f> is tracked at HEAD and unchanged in the tree git finds from its own directory;
-    # 0 otherwise — untracked, modified, no repository, or a path a shell word cannot carry.
-    function script_tracked(f,   d, q) {
-      if (index(f, "\047") || index(f, "\n")) return 0
-      d = f; sub(/\/[^\/]*$/, "", d); if (d == "") d = "/"
+    # <p> with every link in it resolved, as `realpath` would (bash 3.2 and POSIX tools: readlink
+    # without -f, `cd -P`, `pwd -P`). One shell per call, so it is asked only of a path in the
+    # tree the shell is about to run. A path a shell word cannot carry comes back as given.
+    function real_path(p,   q, cmd, r) {
       q = "\047"
-      return (system("git -C " q d q " ls-files --error-unmatch -- " q f q " >/dev/null 2>&1 && git -C " q d q " diff --quiet HEAD -- " q f q " >/dev/null 2>&1") == 0)
+      if (index(p, q) || index(p, "\n")) return p
+      cmd = "p=" q p q "; n=0; while [ -L \"$p\" ] && [ $n -lt 40 ]; do t=$(readlink \"$p\") || break; " \
+            "case $t in /*) p=$t ;; *) p=${p%/*}/$t ;; esac; n=$((n+1)); done; d=${p%/*}; [ -n \"$d\" ] || d=/; " \
+            "if d=$(cd -P \"$d\" 2>/dev/null && pwd -P); then p=${d%/}/${p##*/}; fi; printf %s \"$p\""
+      r = ""; cmd | getline r; close(cmd)
+      return (r == "" ? p : wt_norm(r))
+    }
+    # The root, resolved once per reading (real_path above), for comparing a resolved path to it.
+    function root_real() {
+      if (ROOT_REAL == "") ROOT_REAL = real_path(wt_norm(ENVIRON["_CMD_SCRIPT_ROOT"]))
+      return ROOT_REAL
+    }
+    # WHAT A PATH THE SHELL RUNS IS, RESOLVED (D7, AC-6.2): sets LAST_TARGET and LAST_PATH and
+    # answers `runner` (the tree`s own tests/run.sh), `suite` (a suite file in the tree), `tree`
+    # (another file in the tree), or "" (outside the tree, or not to be placed). LAST_PATH is the
+    # resolved path spelled from the root as the caller gave it, so the scoping compare reads it.
+    function path_is(p,   f, r, rr, rel) {
+      LAST_TARGET = ""; LAST_PATH = ""
+      if (index(p, "$") || index(p, "`")) return ""
+      f = script_path(p)
+      if (f == "") return ""
+      r = wt_norm(ENVIRON["_CMD_SCRIPT_ROOT"])
+      rr = root_real()
+      f = real_path(f)
+      if (fc(substr(f, 1, length(rr) + 1)) != fc(rr "/")) return ""
+      rel = substr(f, length(rr) + 2)
+      LAST_PATH = fold_path(r "/" rel)
+      if (fc(rel) == "tests/run.sh") { LAST_TARGET = "run.sh"; return "runner" }
+      if (is_suite_name(base(rel))) { LAST_TARGET = fc(base(rel)); return "suite" }
+      return "tree"
     }
     # The directory a relative script resolves in: a literal cd earlier in the command
     # (CD_DIR, "\001" when the cd went somewhere the text does not say), else the payload cwd.
@@ -742,46 +905,41 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
       return o
     }
-    function script_read(p,   root, f, ln, rc, txt, nl, k, ss, j, c, run0, ik, it, strict, strict0, why, isvar) {
-      LAST_UNV = ""
-      if (index(p, "$") || index(p, "`")) { LAST_UNV = "var"; return script_claim("unverified", p) }
+    # A start, or nothing: what a script whose text claims no suite run answers at the top level
+    # (kind `script`, the wall carries the agent) and inside a script being read (no claim).
+    function script_start(p) { return (SCRIPT_LVL == 0 ? script_claim("script", p) : "none") }
+    function script_read(p,   root, f, ln, rc, txt, nl, k, ss, j, c, run0, ik, it, isvar) {
+      if (index(p, "$") || index(p, "`")) return script_start(p)
       root = wt_norm(ENVIRON["_CMD_SCRIPT_ROOT"])
       f = script_path(p)
-      if (f == "") { LAST_UNV = "var"; return script_claim("unverified", p) }
+      if (f == "") return script_start(p)
       if (substr(f, 1, length(root) + 1) != root "/") return "none"
-      if (SCRIPT_LVL >= 2) return script_claim("unverified", p)
-      strict = !script_tracked(f)
+      if (SCRIPT_LVL >= 2) return "none"
       # A SCRIPT PAST 2,000 LINES IS NOT READ (A-T11-7, A-orch-62): the hook pays for every line on
-      # the agent`s hottest path (hooks/session-poker.sh, 10,453 lines, 5.6 s to read). A tracked,
-      # unchanged one claims nothing, as before this reading; the writer`s own reads `unverified`.
+      # the agent`s hottest path (hooks/session-poker.sh, 10,453 lines, 5.6 s to read).
       txt = ""; nl = 0
       while ((rc = (getline ln < f)) > 0) { if (++nl > 2000) break; txt = txt ln "\n" }
       close(f)
-      if (rc < 0) return script_claim("unverified", p)
-      if (nl > 2000) return (strict ? script_claim("unverified", p) : "none")
-      run0 = LAST_RUN; strict0 = SCRIPT_STRICT
+      if (rc < 0 || nl > 2000) return script_start(p)
+      run0 = LAST_RUN
       k = segments(script_hd_strip(txt), ss)
       for (j = 1; j <= k; j++) {
         if (trim(ss[j]) == "") continue
-        SCRIPT_LVL++; SCRIPT_STRICT = strict; LAST_UNV = ""
+        SCRIPT_LVL++
         c = class_seg(trim(ss[j]), 0)
-        SCRIPT_LVL--; SCRIPT_STRICT = strict0
+        SCRIPT_LVL--
         if (c != "suite" || LAST_DRY) continue
-        ik = LAST_KIND; it = (LAST_KIND == "run" ? LAST_TARGET : LAST_RUN); why = LAST_UNV
+        ik = LAST_KIND; it = (LAST_KIND == "run" ? LAST_TARGET : LAST_RUN)
         LAST_RUN = run0
+        # A `$` line claims nothing: the gate`s ask judges what it starts.
         isvar = (index(LAST_TARGET, "$") || index(LAST_TARGET, "`") || index(LAST_PATH, "$") || index(LAST_PATH, "`"))
-        if (ik == "unverified" || isvar) {
-          # A tracked script`s own `$` lines claim nothing; a strict child`s answer still stands.
-          if (!strict && (isvar || why == "var")) continue
-          LAST_UNV = ""
-          return script_claim("unverified", p)
-        }
+        if (ik == "script" || isvar) continue
         if (ik == "file" && LAST_TARGET == "run.sh") return script_claim("file", "run.sh")
         return script_claim("run", it)
       }
       LAST_RUN = run0
       LAST_TARGET = ""; LAST_PATH = ""; LAST_ONLY = ""; LAST_DRY = 0; LAST_SKIND = ""
-      return "none"
+      return script_start(p)
     }
 
     function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift, n0, shc, nv, v) {
@@ -811,9 +969,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         n = n - npxshift
         b0 = base(a[1]); n0 = cmd_word_fold(b0)
       }
-      # INSIDE AN UNTRACKED OR MODIFIED SCRIPT BEING READ, a command word built from `$` or a backtick runs what the text
-      # cannot name (wave-31 T11, AC-8.2): the line is `unverified`, and script_read says so.
-      if (SCRIPT_LVL > 0 && SCRIPT_STRICT && (index(a[1], "$") || index(a[1], "`"))) return script_claim("unverified", a[1])
+      # A COMMAND WORD BUILT FROM `$` OR A BACKTICK is no reason to refuse (wave-33 T3; D7, AC-6.1):
+      # it reads as the word it is, which names nothing below, and the gate`s ask judges what it runs.
       if (n0 == "bash" || n0 == "sh" || n0 == "zsh" || n0 == "dash" || n0 == "ksh") {
         # SKIP THE RUNNER S OWN OPTIONS — BUT READ THEM FIRST (REQ-5, D13). This loop used
         # to skip every leading flag alike, so `bash -n tests/x.test.sh` reached the suite
@@ -843,15 +1000,15 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         }
         a1 = (i <= n ? a[i] : ""); b1 = base(a1)
         if (b1 ~ /^claude-(bootstrap|reset)\.sh$/) return "bootstrap"
-        if (is_suite_name(b1)) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
+        if (is_suite_name(b1)) { LAST_TARGET = fc(b1); LAST_PATH = fold_path(a1); return "suite" }
         # A bare `run.sh` is only a suite invocation when a cd put us in its
         # directory — which is exactly the shape `cd <worktree>/tests && bash
         # run.sh` takes, and the shape the path-component requirement missed
         # (critic C-2). On its own the word says nothing, so it stays none.
-        if (b1 == "run.sh" && (is_runner(a1) || (a1 == "run.sh" && CD_SEEN))) {
+        if (fc(b1) == "run.sh" && (is_runner(a1) || (fc(a1) == "run.sh" && CD_SEEN))) {
           if (runsh_noop(a, i + 1, n)) return "none"
           if (runsh_only(a, i + 1, n) && LAST_ONLY == "") return "none"
-          LAST_TARGET = b1; LAST_PATH = a1; return "suite"
+          LAST_TARGET = "run.sh"; LAST_PATH = fold_path(a1); return "suite"
         }
         # A SCRIPT NAMED BY A BARE VARIABLE IS A SUITE CLAIM (wave-28 T11, D13; wave-27 review
         # pass 8 F5). `for s in tests/*.test.sh; do bash "$s"; done` and `bash "$SUITE"` read
@@ -866,8 +1023,19 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           # values are stated, so it is no unreadable path (A-T11-8).
           if (SCRIPT_LVL == 0) return "none"
         }
-        # ANY OTHER SCRIPT OPERAND IS OPENED, in the budget`s reading only (wave-31 T11; above).
-        if (!shc && a1 != "" && a1 != "-" && mode == "targets" && ENVIRON["_CMD_SCRIPT_ROOT"] != "") return script_read(a1)
+        # ANY OTHER SCRIPT OPERAND, in the budget`s reading only (wave-31 T11; above): RESOLVED first, so
+        # a link to the runner or to a suite is that run (wave-33 T3, D7), then OPENED.
+        if (!shc && a1 != "" && a1 != "-" && mode == "targets" && ENVIRON["_CMD_SCRIPT_ROOT"] != "") {
+          v = path_is(a1)
+          if (v == "runner") {
+            if (runsh_noop(a, i + 1, n)) return "none"
+            if (runsh_only(a, i + 1, n) && LAST_ONLY == "") return "none"
+            return "suite"
+          }
+          if (v == "suite") return "suite"
+          LAST_TARGET = ""; LAST_PATH = ""
+          return script_read(a1)
+        }
         return "none"
       }
       a1 = (n >= 2 ? a[2] : ""); a2 = (n >= 3 ? a[3] : "")
@@ -878,12 +1046,26 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # through every arm to none. The path component is what separates running
       # it from naming it: `ls tests/run.sh` is argv[0] ls and stays none, and a
       # bare `run.sh` word is not something the shell would run either.
-      if (index(a[1], "/") > 0 && ((b0 == "run.sh" && is_runner(a[1])) || is_suite_name(b0))) {
-        if (b0 == "run.sh" && runsh_noop(a, 2, n)) return "none"
-        if (b0 == "run.sh" && runsh_only(a, 2, n) && LAST_ONLY == "") return "none"
-        LAST_TARGET = b0
-        LAST_PATH = a[1]
+      if (index(a[1], "/") > 0 && ((fc(b0) == "run.sh" && is_runner(a[1])) || is_suite_name(b0))) {
+        if (fc(b0) == "run.sh" && runsh_noop(a, 2, n)) return "none"
+        if (fc(b0) == "run.sh" && runsh_only(a, 2, n) && LAST_ONLY == "") return "none"
+        LAST_TARGET = fc(b0)
+        LAST_PATH = fold_path(a[1])
         return "suite"
+      }
+      # ANY OTHER PATH AT ARGV[0], in the budget`s reading only (wave-33 T3; D7, AC-6.2): resolved, a
+      # link to the runner or a suite is that run; another file in the tree is a script START, which
+      # the wall carries to the gate. Its text is not opened: the gate`s ask judges what it runs.
+      if (index(a[1], "/") > 0 && mode == "targets" && ENVIRON["_CMD_SCRIPT_ROOT"] != "") {
+        v = path_is(a[1])
+        if (v == "runner") {
+          if (runsh_noop(a, 2, n)) return "none"
+          if (runsh_only(a, 2, n) && LAST_ONLY == "") return "none"
+          return "suite"
+        }
+        if (v == "suite") return "suite"
+        if (v == "tree") return script_start(a[1])
+        LAST_TARGET = ""; LAST_PATH = ""
       }
       if (n0 == "pytest") return "suite"
       # `jest` NAMED, the runner the seed and D1 are about. Bare, or behind the `npx`
@@ -1129,6 +1311,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       if (c ~ /[$`(){}\\"\047]/) return 1
       d = (index(w, "/") ? substr(w, 1, length(w) - length(c) - 1) : "")
       t = c; sub(/^.*[*?\]]/, "", t)
+      c = fc(c); t = fc(t)
       if (t == c) return (is_suite_name(c) || (c == "run.sh" && could_tests_dir(d, index(w, "/"))))
       return (t == "" || sfx_of(".test.sh", t) || sfx_of(t, ".test.sh") || (sfx_of("run.sh", t) && could_tests_dir(d, index(w, "/"))))
     }
@@ -1136,7 +1319,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       if (!slashed) return 1
       e = d; sub(/.*\//, "", e)
       if (e ~ /[$`(){}\\"\047]/) return 1
-      t = e; sub(/^.*[*?\]]/, "", t)
+      e = fc(e); t = e; sub(/^.*[*?\]]/, "", t)
       if (t == e) return (e == "tests")
       return (t == "" || sfx_of("tests", t))
     }
@@ -1395,7 +1578,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
             # but `&&` and the parentheses of a subshell (`;`, a newline, `||`, a pipe) means
             # the exit code of the command may not speak for both. One `split` line then
             # closes the reading, and payload/scripts/lib/walls.sh names that run `?`.
-            if (cls == "suite" && !LAST_DRY) {
+            # A SCRIPT START IS NO SUITE RUN (wave-33 T3): it shares no exit code the stamp reads.
+            if (cls == "suite" && !LAST_DRY && LAST_KIND != "script") {
               if (SUITE_AT) {
                 if (SUITE_AT == i) SPLIT = 1
                 for (tj = SUITE_AT; tj < i; tj++) if (TSK[tj] != "&&" && TSK[tj] != "(" && TSK[tj] != ")") SPLIT = 1
@@ -1406,7 +1590,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
             # suite twice states one budget claim, and the caller compares a set.
             # A SCRIPT CLAIM IS ONE PER SCRIPT RUN (wave-31 T11): two scripts running one suite are
             # two runs the budget asks about, each by its own command.
-            tk = ((LAST_KIND == "run" || LAST_KIND == "unverified") && LAST_SKIND != "" ? LAST_KIND SUBSEP LAST_RUN SUBSEP LAST_TARGET : LAST_TARGET)
+            tk = ((LAST_KIND == "run" || LAST_KIND == "script") && LAST_SKIND != "" ? LAST_KIND SUBSEP LAST_RUN SUBSEP LAST_TARGET : LAST_TARGET)
             if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && (LAST_KIND == "only" || !(tk in tgt_seen))) {
               if (LAST_KIND != "only") tgt_seen[tk] = 1
               # KIND, TARGET, RUN AND PATH, tab-separated. The shell wrappers are the only
@@ -1425,7 +1609,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
                 od = LAST_PATH; sub(/[^\/]*$/, "", od)
                 no = split(LAST_ONLY, ON, " ")
                 for (oj = 1; oj <= no; oj++) {
-                  ob = base(ON[oj])
+                  ob = fc(base(ON[oj]))
                   if (("only:" ob) in tgt_seen) continue
                   tgt_seen["only:" ob] = 1
                   printf "%s\t%s\t%s\t%s\n", "only", ob, LAST_RUN, od ob
