@@ -4640,6 +4640,47 @@ nz_silent "NZ-8b …and a −50 B shrink from that tree needs no approval → ad
   "$nz_tmp/wt-T2" "$NZ_NOTE_T2"
 nz_reset "$nz_tmp/wt-T2"
 
+# (vii) A MERGE IN A ROW'S TREE IS CHARGED THE ROW'S OWN GROWTH, NEVER THE WORKING BRANCH'S (wave-33 T15; D10; T7's CONFLICT
+# merge was charged T14's +402 B). A row's tree that merges the working branch in is committing the working branch's
+# content on top of its own: the parent that is not the row's own is MERGE_HEAD, and growth already landed there was
+# approved there. So the commit is measured against MERGE_HEAD in a tree a row owns; in a tree no row owns (the target
+# checkout taking a row's branch in) the parent that is not a row's is HEAD, and the measure is what it was.
+# fails-when: a row's merge of the working branch is charged the bytes the working branch already holds, or the row's
+# own growth riding the same merge goes uncharged.
+nz_git() { git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null "${@:2}"; }
+nz_plan ""
+nz_branch="$(git -C "$nz_main" rev-parse --abbrev-ref HEAD)"
+nz_stage "$nz_main" skills/canonical-sdlc/steps/4.md 1402
+nz_git "$nz_main" commit -q -m 'the working branch grows the set by 402 B, approved there'
+nz_git "$nz_tmp/wt-T1" merge -q --no-commit --no-ff "$nz_branch" >/dev/null 2>&1
+expect_nonempty "NZ-11 precondition: row T1's tree is mid-merge (MERGE_HEAD is set)" \
+  "$(git -C "$nz_tmp/wt-T1" rev-parse -q --verify MERGE_HEAD)"
+expect_eq "NZ-11 precondition: the merge brings the working branch's 1402 B steps/4.md into the index" "1402" \
+  "$(git -C "$nz_tmp/wt-T1" cat-file -s :skills/canonical-sdlc/steps/4.md)"
+NZ_NOTE_T1="evidence-gate: judged by row T1's task arms (run at current: 4)"
+nz_silent "NZ-11 AC-9.1 a merge of the working branch (+402 B it already holds) in row T1's tree, T1 reading no growth → admitted" \
+  "$nz_tmp/wt-T1" "$NZ_NOTE_T1"
+nz_stage "$nz_tmp/wt-T1" skills/canonical-sdlc/operational-rules.md 900
+nz_refused "NZ-11b …and the row's own +100 B riding the same merge is charged as +100 B in all (not the working branch's 402 B on top)" \
+  "$nz_tmp/wt-T1" "grows the loaded set by +100 B" "skills/canonical-sdlc/operational-rules.md"
+expect_eq "NZ-11c …naming only the file the row grew, not steps/4.md that the working branch grew" "0" \
+  "$(grep -c 'steps/4.md' <<<"$HOOK_VSTDERR" || true)"
+nz_git "$nz_tmp/wt-T1" merge --abort >/dev/null 2>&1
+nz_reset "$nz_tmp/wt-T1"
+# the same merge, committed from a tree no row owns: measured against HEAD, so the growth of the branch taken in is charged.
+nz_git "$nz_main" checkout -q -b nz-take-in HEAD~1
+nz_stage "$nz_main" skills/canonical-sdlc/steps/4.md 1000
+nz_git "$nz_main" merge -q --no-commit --no-ff "$nz_branch" >/dev/null 2>&1
+nz_refused "NZ-11d the same merge committed where no row owns the tree (the target taking the branch in) → refused, +402 B charged as before" \
+  "$nz_main" "+402 B" "skills/canonical-sdlc/steps/4.md"
+nz_git "$nz_main" merge --abort >/dev/null 2>&1
+nz_git "$nz_main" checkout -q "$nz_branch"
+nz_git "$nz_main" branch -q -D nz-take-in
+nz_git "$nz_main" reset -q --hard HEAD~1
+nz_reset "$nz_main"
+expect_eq "NZ-11e the fixture is back at its base (steps/4.md 1000 B at HEAD)" "1000" \
+  "$(git -C "$nz_main" cat-file -s HEAD:skills/canonical-sdlc/steps/4.md)"
+
 # (vi) THE SCOPE (wave-31 T42; A-orch-72): the doctrine is bionic's, so the wall asks only bionic's own
 # source tree, recognised by HEAD's payload/.claude-plugin/plugin.json naming "bionic". A user project's
 # agents/*.md and skills/ files are its own; the same growth there is admitted, with no row to read.

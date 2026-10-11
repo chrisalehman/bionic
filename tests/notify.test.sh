@@ -268,6 +268,7 @@ expect_contains "N2a …carrying the one line the card printed for the block" \
 expect_contains "N2b …to the topic named in cron.env, never stored in the channel file" \
   "url=https://ntfy.sh/fixture-topic-123|" "$(nt_last)"
 expect_contains "N2c …under the declared title prefix" "|title=bionic-fixture " "$(nt_last)"
+expect_regex "N2c2 …with ONE space between the prefix and the title, not two" '[|]title=bionic-fixture [^ ]' "$(nt_last)"
 expect_eq "N2d …and the item is marked sent: nothing is unsent" "" "$(nt_owed "$RO" owed_unsent)"
 expect_contains "N2e …while it stays open (the block is unresolved)" "approve:step1" "$(nt_owed "$RO" owed_list | cut -f1)"
 

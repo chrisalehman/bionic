@@ -1707,8 +1707,8 @@ loaded_set() {
     'payload/context/*.md'
 }
 
-# loaded_set_sizes <repository dir> HEAD|index -> "<bytes>\t<path>" for each file of the set, as the
-# commit at HEAD holds it or as the index stages it. Blob sizes, read from git and never from the
+# loaded_set_sizes <repository dir> <revision>|index -> "<bytes>\t<path>" for each file of the set, as the
+# commit at that revision (HEAD, or MERGE_HEAD for a merge in a row's tree) holds it or as the index stages it. Blob sizes, read from git and never from the
 # work tree: the index is what the commit about to run will hold. ONE MATCHER FOR BOTH SIDES — each
 # member becomes an anchored pattern whose `*` matches inside one segment — and git is asked only
 # for the members' directories (`ls-tree` takes no wildcard). A stage other than 0 (a conflicted
@@ -1719,8 +1719,8 @@ loaded_set_sizes() {
   re="$(loaded_set | awk '{ g = $0; gsub(/[.]/, "[.]", g); gsub(/[*]/, "[^/]*", g); r = r (r == "" ? "" : "|") g }
     END { print "^(" r ")$" }')"
   while IFS= read -r _ls_d; do dirs+=("$_ls_d"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
-  if [ "$side" = HEAD ]; then
-    git -C "$dir" ls-tree -r -l HEAD -- "${dirs[@]}" 2>/dev/null \
+  if [ "$side" != index ]; then
+    git -C "$dir" ls-tree -r -l "$side" -- "${dirs[@]}" 2>/dev/null \
       | awk -F'\t' -v re="$re" '{ split($1, m, " ") } m[2] == "blob" && $2 ~ re { print m[4] "\t" $2 }'
   else
     git -C "$dir" ls-files -s -- "${dirs[@]}" 2>/dev/null \
@@ -2778,20 +2778,26 @@ _eg_commit_repo() {
 # Refusing those spellings is a different wall's job.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_net_zero() {
-  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a reads="" tok row_reads=0 lacks="" fix_id fix_cell
+  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a reads="" tok row_reads=0 lacks="" fix_id fix_cell base=HEAD
   local -a dirs=() toks=()
   _eg_commit_repo; dir="$_EG_REPO"
+  # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
+  # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
+  # was approved there: measured against HEAD (the row's own parent) the merge was charged T14's +402 B to T7. So in a
+  # tree a row owns (`_EG_RID`) with a merge in progress, the base is MERGE_HEAD, the other parent, and the row is
+  # charged what it adds to it. A tree no row owns keeps HEAD: the parent that is not a row's there is HEAD itself.
+  if [ -n "${_EG_RID:-}" ] && git -C "$dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then base=MERGE_HEAD; fi
   while IFS= read -r line; do dirs+=("$line"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
   # rc 0: nothing staged under the set; rc 1: something is; anything else (no HEAD, no repository)
   # leaves nothing to compare against, and the arm is silent.
-  git -C "$dir" diff --cached --quiet HEAD -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
+  git -C "$dir" diff --cached --quiet "$base" -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
   [ "$rc" -eq 1 ] || return 0
   # The doctrine is bionic's (D13): only bionic's own source tree, named by the manifest HEAD holds, is
   # held to net zero; a user project's agents/*.md and skills/ files are its own (wave-31 T42).
   [ "$(git -C "$dir" show HEAD:payload/.claude-plugin/plugin.json 2>/dev/null \
         | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || return 0
 
-  sums="$( { loaded_set_sizes "$dir" HEAD | awk '{ print "b\t" $0 }'
+  sums="$( { loaded_set_sizes "$dir" "$base" | awk '{ print "b\t" $0 }'
              loaded_set_sizes "$dir" index | awk '{ print "a\t" $0 }'; } \
     | awk -F'\t' '$2 !~ /^[0-9]+$/ { next }
         { p[$3] = 1 }
@@ -3649,7 +3655,7 @@ step_prefix() {
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
   local step="$1" pass total prefix advisory rline
-  if [ "$step" = 5 ] && [ "$(frontmatter_get regression)" = no ]; then
+  if [ "$step" = 5 ] && [ "$(plan_regression "$PLAN")" = no ]; then
     rline=$(block_get regression)
     if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
       _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line stands in place of cmd/pass/total/output/head (got '${rline:-(none)}').
@@ -5299,8 +5305,11 @@ return 0
 # T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
 # gate reads; `matrix-render` and `discharge` — wave-30 T14, D9, the matrix's stubs and its auditor cell; `handoff` —
 # wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
-# `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting); 1 otherwise
-# (wave-20 T9, REQ-4, AC-4.2).
+# `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
+# `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
+# `rule` (a ruling pushed to a writer), `matrix-set`, `waive-row`, `tasks-prose`, `epic-row` and
+# `continuation-fill` (T7's plan verbs) and `disposition` (T13's finding ledger) — `ruling-ack` and `rulings`
+# are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5360,7 +5369,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
         shift
         _next="${1:-}"
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|tasks-prose|epic-row|continuation-fill|disposition)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -5763,6 +5772,38 @@ _bsg_wrap_only() {
   return 0
 }
 
+# _bsg_own_deliver — is the matched `session-poker.sh deliver` (`_WALL_POKER_ARGS`) the writer's OWN row, alone in one
+# call (wave-33 T15, D10; T6's concern A-T6-10). `deliver` lands a record row at the working head, which a writer
+# does for the row its dispatch bound and for no other: one that could land another's row would close work nobody did.
+# The row it may deliver is the roster row's own `row=` (the brief's `Row:`, which the dispatch wall wrote). Sets
+# `_BSG_DL_OWN` (that row, empty when its roster row names none) and `_BSG_DL_TARGET` (the operand) for the refusal's
+# detail. ALONE IN ONE CALL because the arm reads only the first matching segment: `deliver T6; deliver T9` would
+# otherwise be admitted for its first half. Returns 0 only when the call is exactly `deliver <own row>`.
+_BSG_DL_OWN=""; _BSG_DL_TARGET=""
+_bsg_own_deliver() {
+  local _pick _seg _segs _l _n=0 _oldifs _hadf
+  _BSG_DL_OWN=""; _BSG_DL_TARGET=""
+  wall_libs background-suite-guard roster.sh || return 1
+  if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
+    IFS='|' read -r -a _segs <<< "$_pick"
+    for _seg in "${_segs[@]}"; do
+      case "$_seg" in row=*) _BSG_DL_OWN="${_seg#row=}"; break ;; esac
+    done
+  fi
+  _oldifs="$IFS"; _hadf=0
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS="$GIT_ARGV_US"
+  # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+  set -- $_WALL_POKER_ARGS
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
+  _BSG_DL_TARGET="${1:-}"
+  [ $# -eq 1 ] && [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_TARGET" = "$_BSG_DL_OWN" ] || return 1
+  while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
+  [ "$_n" -eq 1 ]
+}
+
 # _bsg_own_amend — is the matched `session-poker.sh amend` (`_WALL_POKER_ARGS`) a writer's Files
 # amend of its OWN roster row (wave-31 T11; REQ-8 AC-8.3, D9; A-orch-41.6, A-orch-46.2)? rc 0 with
 # `_BSG_AM_UPD` the tool_input to stage: the call rebuilt from the words the wall read, each one
@@ -5996,7 +6037,24 @@ the tree as it is and send the report; the orchestrator lands the work."
           fold_update_input "$_BSG_AM_UPD"
           return 1
         fi
+        # A WRITER DELIVERS ITS OWN ROW (wave-33 T15, D10): `deliver <the row its roster row names>`, alone in one
+        # call, goes through unchanged. Anything else the verb takes is refused below, naming the row.
+        if [ "$_WALL_POKER_VERB" = deliver ] && _bsg_own_deliver; then
+          return 0
+        fi
         local _bsg_am_more=""
+        if [ "$_WALL_POKER_VERB" = deliver ]; then
+          if [ -n "$_BSG_DL_OWN" ]; then
+            _bsg_am_more="
+\`deliver ${_BSG_DL_TARGET:-<none>}\`: ${_BSG_DL_TARGET:-no row} is not your row (yours is $_BSG_DL_OWN)."
+          else
+            _bsg_am_more="
+\`deliver\`: no roster row of yours names a plan row, so there is no row of yours to deliver."
+          fi
+          _bsg_am_more="${_bsg_am_more}
+A writer delivers its own row, alone in one call:
+    bash <plugin>/hooks/session-poker.sh deliver <your row>"
+        fi
         if [ "$_WALL_POKER_VERB" = amend ] && [ -n "$_BSG_AM_OWN" ]; then
           if [ -n "$_BSG_AM_TARGET" ] && [ "$_BSG_AM_TARGET" != "$_BSG_AM_OWN" ]; then
             _bsg_am_more="
@@ -6007,7 +6065,7 @@ The one amend a writer runs itself adds Files to its own row, alone in one call:
     bash <plugin>/hooks/session-poker.sh amend $_BSG_AM_OWN --files+ <path> --reason '<why>'"
         fi
         fold_block exit2 "$_WALL_POKER_VERB" \
-          "a subagent may not change a contract or the plan" "ask orchestrator" \
+          "a subagent may not change a contract or the plan" "ask main" \
           "\`$_WALL_POKER_SHOWN\` changes a roster contract or the bound plan, and
 only the orchestrator does that: a dispatched agent that could would widen its own budget or
 schedule its own work. Send the orchestrator what you need — the files, suites or runs to
