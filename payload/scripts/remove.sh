@@ -1414,8 +1414,9 @@ while [ $# -gt 0 ]; do
       rm_list=1; shift ;;
     --all)
       rm_all=1; shift ;;
-    --only)
-      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+    --only|--only=)
+      # `--only=` is a bare flag: an empty value names no item (wave-33 T4, AC-6.4).
+      if [ "$1" = "--only=" ] || [ $# -lt 2 ] || [ -z "${2:-}" ]; then
         echo "remove: --only needs the name of the one item to remove."
         echo "        run ${RM_SELF_CMD:-this script} --list to see the names."
         exit 2
