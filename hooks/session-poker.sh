@@ -9604,7 +9604,7 @@ FM_FINDING
   # debt: lines go to the run's debt ledger through `debt add`, run as a child. Nothing in the plan is written.
   #
   # A RULING (four or five operands) is the person's word on one finding, recorded through finding-move (their
-  # words, typed, at least three whole words; an S1 is never deferred) and, for a deferral given a sentence,
+  # words, typed, at least SAID_MIN_WORDS whole words; an S1 is never deferred) and, for a deferral given a sentence,
   # finding-stated, each run as a child so each keeps its own transaction; then the finding's owed item closes.
   disposition)
     if ! { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
