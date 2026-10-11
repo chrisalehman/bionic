@@ -1707,8 +1707,8 @@ loaded_set() {
     'payload/context/*.md'
 }
 
-# loaded_set_sizes <repository dir> HEAD|index -> "<bytes>\t<path>" for each file of the set, as the
-# commit at HEAD holds it or as the index stages it. Blob sizes, read from git and never from the
+# loaded_set_sizes <repository dir> <revision>|index -> "<bytes>\t<path>" for each file of the set, as the
+# commit at that revision (HEAD, or MERGE_HEAD for a merge in a row's tree) holds it or as the index stages it. Blob sizes, read from git and never from the
 # work tree: the index is what the commit about to run will hold. ONE MATCHER FOR BOTH SIDES — each
 # member becomes an anchored pattern whose `*` matches inside one segment — and git is asked only
 # for the members' directories (`ls-tree` takes no wildcard). A stage other than 0 (a conflicted
@@ -1719,8 +1719,8 @@ loaded_set_sizes() {
   re="$(loaded_set | awk '{ g = $0; gsub(/[.]/, "[.]", g); gsub(/[*]/, "[^/]*", g); r = r (r == "" ? "" : "|") g }
     END { print "^(" r ")$" }')"
   while IFS= read -r _ls_d; do dirs+=("$_ls_d"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
-  if [ "$side" = HEAD ]; then
-    git -C "$dir" ls-tree -r -l HEAD -- "${dirs[@]}" 2>/dev/null \
+  if [ "$side" != index ]; then
+    git -C "$dir" ls-tree -r -l "$side" -- "${dirs[@]}" 2>/dev/null \
       | awk -F'\t' -v re="$re" '{ split($1, m, " ") } m[2] == "blob" && $2 ~ re { print m[4] "\t" $2 }'
   else
     git -C "$dir" ls-files -s -- "${dirs[@]}" 2>/dev/null \
@@ -2778,20 +2778,26 @@ _eg_commit_repo() {
 # Refusing those spellings is a different wall's job.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_net_zero() {
-  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a reads="" tok row_reads=0 lacks="" fix_id fix_cell
+  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a reads="" tok row_reads=0 lacks="" fix_id fix_cell base=HEAD
   local -a dirs=() toks=()
   _eg_commit_repo; dir="$_EG_REPO"
+  # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
+  # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
+  # was approved there: measured against HEAD (the row's own parent) the merge was charged T14's +402 B to T7. So in a
+  # tree a row owns (`_EG_RID`) with a merge in progress, the base is MERGE_HEAD, the other parent, and the row is
+  # charged what it adds to it. A tree no row owns keeps HEAD: the parent that is not a row's there is HEAD itself.
+  if [ -n "${_EG_RID:-}" ] && git -C "$dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then base=MERGE_HEAD; fi
   while IFS= read -r line; do dirs+=("$line"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
   # rc 0: nothing staged under the set; rc 1: something is; anything else (no HEAD, no repository)
   # leaves nothing to compare against, and the arm is silent.
-  git -C "$dir" diff --cached --quiet HEAD -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
+  git -C "$dir" diff --cached --quiet "$base" -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
   [ "$rc" -eq 1 ] || return 0
   # The doctrine is bionic's (D13): only bionic's own source tree, named by the manifest HEAD holds, is
   # held to net zero; a user project's agents/*.md and skills/ files are its own (wave-31 T42).
   [ "$(git -C "$dir" show HEAD:payload/.claude-plugin/plugin.json 2>/dev/null \
         | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || return 0
 
-  sums="$( { loaded_set_sizes "$dir" HEAD | awk '{ print "b\t" $0 }'
+  sums="$( { loaded_set_sizes "$dir" "$base" | awk '{ print "b\t" $0 }'
              loaded_set_sizes "$dir" index | awk '{ print "a\t" $0 }'; } \
     | awk -F'\t' '$2 !~ /^[0-9]+$/ { next }
         { p[$3] = 1 }
