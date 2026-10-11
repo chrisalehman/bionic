@@ -466,7 +466,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row|file>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names what they wait on (declined-on=)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind)"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
@@ -484,6 +484,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run .bionic/config.yaml's floor: command in the working branch's checkout; write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered readings (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -660,19 +661,33 @@ case "$VERB" in
   # last, after the operands, as `decline`'s `--on` does, and its value is `review S<n> <on|off>`, the
   # rating the reader wrote. A missing or malformed value is the usage error; whether the rating may
   # become a row (fix-policy:, fix-cap:, the fourth fix on a component) is the verb's refusal (1).
+  # `--born <record>#<n>[,<record>#<n>…]` (wave-33 T13; REQ-5, D6) names the findings the row answers, each a
+  # finding of a registered reading: the rating is then read from the record, never typed. A value of neither
+  # shape is the usage error; a finding the plan has not registered is the verb's refusal (1).
   task-add)
-    TA_BORN=""
-    case "${*: -1}" in --born) usage "task-add: --born takes a value: 'review S<n> <on|off>', the reader's rating." ;; esac
+    TA_BORN=""; TA_BORN_IDS=""
+    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], or 'review S<n> <on|off>', the reader's rating." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
       case "$TA_BORN" in
         'review S'[1-4]' on'|'review S'[1-4]' off') : ;;
-        *) usage "task-add: --born '$TA_BORN' is no rating; write 'review S<n> <on|off>', n 1 to 4." ;;
+        *)
+          TA_BORN_IDS="$TA_BORN"; TA_BORN=""
+          case "$TA_BORN_IDS" in
+            *[[:space:]]*|,*|*,|*,,*) usage "task-add: --born '$TA_BORN_IDS' is neither findings nor a rating; write <record>#<n>[,<record>#<n>…], or 'review S<n> <on|off>', n 1 to 4." ;;
+          esac
+          for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
+            case "$TA_BID" in
+              ?*#[1-9]|?*#[1-9]*[0-9]) case "${TA_BID##*#}" in *[!0123456789]*) TA_BID="" ;; esac ;;
+              *) TA_BID="" ;;
+            esac
+            [ -n "$TA_BID" ] || usage "task-add: --born '$TA_BORN_IDS' is neither findings nor a rating; write <record>#<n>[,<record>#<n>…], or 'review S<n> <on|off>', n 1 to 4."
+          done ;;
       esac
       set -- "${@:1:$(($# - 2))}"
     fi
     if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born 'review S<n> <on|off>'."
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…] or --born 'review S<n> <on|off>'."
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
@@ -876,6 +891,27 @@ case "$VERB" in
     esac
     case "${1##*#}" in *[!0123456789]*) usage "finding-move: '$1' is not <record>#<n>." ;; esac
     FM_ID="$1"; FM_TO="$2"; FM_RAW="$3"; FM_WHY_RAW="$4"
+    ;;
+  # NO OPERAND RENDERS; FOUR OR FIVE RULE (wave-33 T13; REQ-5 AC-5.1, D6): the finding (`<record>#<n>`), fix or
+  # defer, the person's words as typed, why, and for a deferral optionally its changelog sentence. Another count,
+  # a direction, an id of another shape or a sentence on a fix is the usage error; the rules the ruling is held to
+  # are finding-move's and finding-stated's, the verb's own refusals (1).
+  disposition)
+    DSP_USAGE="disposition takes no argument (it renders every finding of the registered readings), or <record>#<n>, fix or defer, the person's words as typed, why, and for defer optionally its changelog sentence."
+    DSP_ID=""; DSP_TO=""; DSP_RAW=""; DSP_WHY=""; DSP_SENT=""
+    if [ $# -gt 0 ]; then
+      { [ $# -eq 4 ] || [ $# -eq 5 ]; } && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$DSP_USAGE"
+      case "$2" in defer|fix) : ;; *) usage "$DSP_USAGE" ;; esac
+      case "$1" in
+        *?#[0123456789]*) : ;;
+        *) usage "disposition: '$1' is not <record>#<n>." ;;
+      esac
+      case "${1##*#}" in *[!0123456789]*) usage "disposition: '$1' is not <record>#<n>." ;; esac
+      if [ $# -eq 5 ]; then
+        [ "$2" = defer ] && [ -n "${5//[[:space:]]/}" ] || usage "$DSP_USAGE"
+      fi
+      DSP_ID="$1"; DSP_TO="$2"; DSP_RAW="$3"; DSP_WHY="$4"; DSP_SENT="${5:-}"
+    fi
     ;;
   # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
@@ -4185,6 +4221,50 @@ deferral_line() {  # <plan> <record>#<n> -> the first deferred: line of ## SDLC 
     insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
     END { if (found) print line; exit (found ? 0 : 1) }' "$1"
 }
+# finding_owed_key <record>#<n> -> the person's-ledger key of the finding's ruling (lib/owed.sh), `finding:` and
+# the identity with each character a key may not hold (lib/owed.sh `_owed_key_ok`: letters, digits and `:._-`)
+# written `:` (wave-33 T13; D6, D2): `record/w/st.md#2` is `finding:record:w:st.md:2`.
+finding_owed_key() {
+  printf 'finding:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
+}
+
+# finding_read <plan> <repo> <record>#<n> -> 0 with the finding in FR_S, FR_R (the reader's rating), FR_P (the
+# priority the plan's moves give it, lib/proof.sh `proof_finding_rating`), FR_W (its <path>:<line> or -), FR_T
+# (its title) and FR_Q, FR_H (the question and head of the plan's registered reading of the record: its last
+# `proved: kind=review` line naming the record as evidence); 1 with FR_WHY, one clause naming what is missing
+# and the call that supplies it (wave-33 T13; REQ-5, D6). The readers: `task-add --born` and `disposition`.
+finding_read() {
+  local plan="$1" repo="$2" id="$3" rec n got
+  FR_S=""; FR_R=""; FR_P=""; FR_W=""; FR_T=""; FR_Q=""; FR_H=""; FR_WHY=""
+  if ! { declare -F proof_findings >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_finding_rating >/dev/null 2>&1; then
+    FR_WHY="the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB"; return 1
+  fi
+  rec="${id%#*}"; n="${id##*#}"
+  got="$(awk -v ev="$rec" "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE == ev { q = PROOF_QUESTION; h = PROOF_HEAD }
+    END { if (q != "") print q "\t" h }' "$plan")"
+  if [ -z "$got" ]; then
+    FR_WHY="$(clean "$rec") is no reading registered under ## SDLC State (no proved: kind=review line names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
+    return 1
+  fi
+  FR_Q="${got%%	*}"; FR_H="${got#*	}"
+  got="$(proof_findings "$(docs_root "$repo")/$rec" 2>/dev/null)" || got=""
+  if ! printf '%s\n' "$got" | awk -F'\t' -v n="$n" '$1 == n { f = 1 } END { exit !f }'; then
+    FR_WHY="the reading $(clean "$rec") holds no finding $n (it holds $(printf '%s\n' "$got" | awk -F'\t' '$1 ~ /^[0-9]+$/ { printf "%s%s", (k++ ? ", " : ""), $1 } END { if (!k) printf "none" }'))"
+    return 1
+  fi
+  IFS='	' read -r _ FR_S FR_R FR_W _ _ FR_T <<FINDING_READ
+$(printf '%s\n' "$got" | awk -F'\t' -v n="$n" '$1 == n { print; exit }')
+FINDING_READ
+  set -- $(proof_finding_rating "$plan" "$id" "$FR_S" "$FR_R")
+  FR_P="${3:-}"
+  return 0
+}
+
 deferral_sentence() {  # <plan> <record>#<n> -> the stated sentence, unescaped (nothing when none); exit 1: no deferred: line
   local l
   l="$(deferral_line "$1" "$2")" || return 1
@@ -7198,6 +7278,22 @@ EOF
     # ledger lines' born: markers (`units_born`, the one place the count reads); (3) no Files path outside
     # the record already carries three review-born rows: the fourth fix on one component stops the run.
     # In-diff is the orchestrator's judgment and "never re-read" the proof's; neither is this verb's.
+    # THE FINDINGS A ROW ANSWERS (wave-33 T13; REQ-5, D6): each is a finding of a reading the plan registered,
+    # read from its record (`finding_read`); the row's rating is the gravest of them, the lowest S and then on
+    # before off, and the guards below hold it as they hold a typed rating.
+    TA_BORN_MARK=""
+    if [ -n "$TA_BORN_IDS" ]; then
+      TA_BEST=""
+      for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
+        if ! finding_read "$TA_PLAN" "$REPO_REAL" "$TA_BID"; then
+          die "task-add refused — $FR_WHY; the plan is unchanged."
+          exit 1
+        fi
+        TA_RANK="${FR_S#S}$( [ "$FR_R" = on ] && printf 0 || printf 1 )"
+        if [ -z "$TA_BEST" ] || [ "$TA_RANK" -lt "$TA_BEST" ]; then TA_BEST="$TA_RANK"; TA_BORN="review $FR_S $FR_R"; fi
+      done
+      TA_BORN_MARK=" of=$TA_BORN_IDS"
+    fi
     TA_CELL_TASK="$TA_TASK"
     if [ -n "$TA_BORN" ]; then
       TA_RATING="${TA_BORN#review }"
@@ -7237,7 +7333,7 @@ EOF
     fi
 
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "$TA_BORN" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -7252,6 +7348,11 @@ EOF
     plan_verb_swap task-add "$TA_ID added" writer
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
+    # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
+    for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
+      poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
+      say "task-add — $TA_ID answers $(clean "$TA_BID")"
+    done
     # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
     # that shares no file with its holder is named, with the line that would loosen it, never run.
     suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
@@ -8660,6 +8761,125 @@ FM_FINDING
     plan_verb_swap finding-move "the move of $FM_ID" writer
     say "finding-move — $(clean "$FM_ID") to $FM_TO on the user's words, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first."
     [ -z "$FM_DEF" ] || say "finding-move — $(clean "$FM_DEF")"
+    exit 0
+    ;;
+
+  # THE REVIEW DISPOSITION (wave-33 T13; REQ-5 AC-5.1, D6). One pass over every registered reading (each record a
+  # `proved: kind=review` line with a question names as its evidence, its last such line giving its question and
+  # head) prints one line per finding:
+  #
+  #   finding <record>#<n> <S> user-facing=<on|off> record=<record> at=<path:line|-> row=<T<k>[,…]|—>
+  #           state=<open|fixed|deferred|accepted> decision="<what it needs>" [stated="<sentence>"|stated=-] title="<title>"
+  #
+  # the state read as the judge reads it: fixed when a row born of it landed green at or after the reading's head
+  # (lib/proof.sh `proof_fixed`), else by the priority the plan's moves give it (`proof_finding_rating`): fix is
+  # open, defer is deferred, note is accepted. An open finding no row answers and no ruling has moved needs the
+  # person, and gets one owed item, `finding_owed_key` (lib/owed.sh; opening is idempotent per key). A reading's
+  # debt: lines go to the run's debt ledger through `debt add`, run as a child. Nothing in the plan is written.
+  #
+  # A RULING (four or five operands) is the person's word on one finding, recorded through finding-move (their
+  # words, typed, at least three whole words; an S1 is never deferred) and, for a deferral given a sentence,
+  # finding-stated, each run as a child so each keeps its own transaction; then the finding's owed item closes.
+  disposition)
+    if ! { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_fixed >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    plan_verb_open disposition
+    if [ -n "$DSP_ID" ] && ! finding_read "$PV_PLAN" "$PV_REPO" "$DSP_ID"; then
+      die "REFUSED — $FR_WHY; the plan is unchanged."
+      exit 1
+    fi
+    if [ -n "$DSP_ID" ]; then
+      DSP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" finding-move "$DSP_ID" "$DSP_TO" "$DSP_RAW" "$DSP_WHY" 2>&1 )"; DSP_RC=$?
+      [ -z "$DSP_OUT" ] || printf '%s\n' "$DSP_OUT"
+      [ "$DSP_RC" = 0 ] || exit "$DSP_RC"
+      if [ -n "$DSP_SENT" ]; then
+        DSP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" finding-stated "$DSP_ID" "$DSP_SENT" 2>&1 )"; DSP_RC=$?
+        [ -z "$DSP_OUT" ] || printf '%s\n' "$DSP_OUT"
+        [ "$DSP_RC" = 0 ] || { die "disposition — the move of $(clean "$DSP_ID") is written; its sentence is not: run finding-stated $(clean "$DSP_ID") '<sentence>' again."; exit "$DSP_RC"; }
+      fi
+      poker_owed_close "$PV_REPO" "$(finding_owed_key "$DSP_ID")" "disposition"
+      say "disposition — $(clean "$DSP_ID") ruled $DSP_TO on the person's words; its owed item is closed."
+      exit 0
+    fi
+    DSP_DOCS="$(docs_root "$PV_REPO")"
+    DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")"
+    DSP_BORN="$(units_born_findings "$PV_PLAN" 2>/dev/null)" || DSP_BORN=""
+    DSP_READS="$(awk "$(proof_awk)"'
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" {
+        if (!(PROOF_EVIDENCE in q)) ord[++n] = PROOF_EVIDENCE
+        q[PROOF_EVIDENCE] = PROOF_QUESTION; h[PROOF_EVIDENCE] = PROOF_HEAD
+      }
+      END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], q[ord[i]], h[ord[i]] }' "$PV_PLAN")"
+    DSP_NF=0; DSP_NR=0; DSP_NP=0
+    while IFS='	' read -r DSP_EV DSP_Q DSP_H; do
+      [ -n "$DSP_EV" ] || continue
+      DSP_NR=$((DSP_NR + 1))
+      if ! DSP_GOT="$(proof_findings "$DSP_DOCS/$DSP_EV" 2>&1)"; then
+        say "reading $(clean "$DSP_EV") ($DSP_Q) cannot be read: $(clean "$DSP_GOT")"
+        continue
+      fi
+      _proof_fixed_var "$DSP_FIXED" "$DSP_EV" "$DSP_H" "$PV_REPO"
+      DSP_DEBT=0
+      while IFS='	' read -r DSP_N DSP_S DSP_R DSP_W _ _ DSP_T; do
+        [ -n "$DSP_N" ] || continue
+        [ "$DSP_N" != debt ] || { DSP_DEBT=1; continue; }
+        DSP_FID="$DSP_EV#$DSP_N"
+        DSP_NF=$((DSP_NF + 1))
+        set -- $(proof_finding_rating "$PV_PLAN" "$DSP_FID" "$DSP_S" "$DSP_R")
+        DSP_P="${3:-}"
+        DSP_ROWS="$(printf '%s\n' "$DSP_BORN" | awk -F'\t' -v id="$DSP_FID" '$3 == id { printf "%s%s", (k++ ? "," : ""), $1 }')"
+        DSP_STATED=""
+        case "$_PROOF_FIXED_IDS" in
+          *$'\n'"$DSP_FID"$'\n'*)
+            DSP_STATE=fixed
+            DSP_FROW="$(printf '%s\n' "$DSP_FIXED" | awk -F'\t' -v id="$DSP_FID" '$1 == id { print $2 "\t" $3; exit }')"
+            DSP_DEC="none: ${DSP_FROW%%	*} landed green at $(printf '%.12s' "${DSP_FROW#*	}")" ;;
+          *)
+            case "$DSP_P" in
+              fix)
+                DSP_STATE=open
+                if [ -n "$DSP_ROWS" ]; then
+                  DSP_DEC="none: waits on $DSP_ROWS landing green"
+                elif [ -n "$(_proof_moved_to "$PV_PLAN" "$DSP_FID")" ]; then
+                  DSP_DEC="a row born of it: task-add <id> … --born $DSP_FID"
+                else
+                  if [ "$DSP_S" = S1 ]; then DSP_DEC="the person's: fix it or waive $DSP_Q (an S1 is never deferred)"
+                  else DSP_DEC="the person's: fix it, defer it, or waive $DSP_Q"; fi
+                  DSP_NP=$((DSP_NP + 1))
+                  if declare -F owed_open >/dev/null 2>&1; then
+                    OWED_ROOT="$PV_REPO" owed_open "$(finding_owed_key "$DSP_FID")" "Finding $DSP_S needs a ruling" \
+                      "$(clean "$DSP_FID") $DSP_S $DSP_R: $(clean "$DSP_T") — $DSP_DEC" >/dev/null 2>&1 || :
+                  fi
+                fi ;;
+              defer)
+                DSP_STATE=deferred
+                DSP_STATED="$(deferral_sentence "$PV_PLAN" "$DSP_FID" 2>/dev/null)" || DSP_STATED=""
+                if [ -n "$DSP_STATED" ]; then DSP_DEC="none: stated"
+                else DSP_DEC="its changelog sentence: finding-stated $DSP_FID '<sentence>'"; fi ;;
+              *) DSP_STATE=accepted; DSP_DEC="none" ;;
+            esac ;;
+        esac
+        DSP_LINE="finding $DSP_FID $DSP_S user-facing=$DSP_R record=$DSP_EV at=$DSP_W row=${DSP_ROWS:-—} state=$DSP_STATE decision=\"$DSP_DEC\""
+        if [ "$DSP_STATE" = deferred ]; then
+          if [ -n "$DSP_STATED" ]; then DSP_LINE="$DSP_LINE stated=\"$DSP_STATED\""; else DSP_LINE="$DSP_LINE stated=-"; fi
+        fi
+        say "$DSP_LINE title=\"$DSP_T\""
+      done <<DSP_FINDINGS
+$DSP_GOT
+DSP_FINDINGS
+      if [ "$DSP_DEBT" = 1 ]; then
+        ( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" debt add "$DSP_EV" "$PV_PLAN" 2>&1 ) || :
+      fi
+    done <<DSP_READINGS
+$DSP_READS
+DSP_READINGS
+    say "disposition — $DSP_NF findings in $DSP_NR registered readings; $DSP_NP need the person's ruling (disposition <record>#<n> fix|defer '<their words>' '<why>' ['<changelog sentence>'])."
     exit 0
     ;;
 
