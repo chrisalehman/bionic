@@ -3995,6 +3995,30 @@ expect_eq "RL-4 a live review row (live:head) is refused (exit 2): it returns to
 expect_contains "RL-4b …saying so" "live:head" "$OUT"
 expect_eq "RL-4c …the plan byte-identical" "same" "$(dv_same)"
 
+# ---------- §RULING-DELIVER (wave-33 T34; Δ1, ADR-052): deliver lands no row against an unread ruling ----------
+# A record row's artifact is gitignored and never commits, so deliver is its only landing, and it
+# holds the same guard as the commit wall and `ready`: a ruling unread for the row's writer refuses
+# the landing, is printed, and is stamped shown, so the same call after it lands.
+printf 'floor: green\n' > "$DV_DIR/T6-floor.md"
+add_row "$RDV" name=w-T6 agent_id=a-w-T6 subagent_type=test-runner deliverable="$DV_DIR/T6-floor.md" \
+  duration="4 hours" launched_at="$(iso_ago 60)"
+poke "$RDV" rule w-T6 'also check the second floor'
+DR_ID="$(printf '%s\n' "$OUT" | sed -n 's/^poker: ruling \([^ ]*\) recorded for .*/\1/p' | head -1)"
+expect_regex "DR-0 precondition: a ruling for w-T6, the writer of T6, is recorded" '^r[0-9]+-[0-9]+$' "$DR_ID"
+dv_snap
+poke "$RDV" deliver T6
+expect_eq "DR-1 deliver with a ruling unread for the row's writer is refused (exit 2)" "2" "$RC"
+expect_contains "DR-1b …printing the ruling in the one wording" \
+  "bionic ruling $DR_ID from the orchestrator (binding): also check the second floor" "$OUT"
+expect_contains "DR-1c …and naming it on the REFUSED line, the one line the tick's backstop reports" \
+  "REFUSED — an orchestrator ruling for w-T6 is unread ($DR_ID)" "$OUT"
+expect_eq "DR-1d …the plan byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T6)"
+poke "$RDV" rulings w-T6
+expect_regex "DR-2 the refusal stamped the ruling shown, by deliver" "ruling $DR_ID w-T6 .*shown=[0-9]+ by=deliver" "$OUT"
+poke "$RDV" deliver T6
+expect_eq "DR-3 the same deliver, the ruling now shown, lands the row (exit 0)" "0 landed" "$RC $(dv_status T6)"
+expect_absent "DR-3b …and prints no ruling again" "bionic ruling $DR_ID" "$OUT"
+
 # ---------- §DELIVER (AC-3.1), the backstop: the tick lands a MET row whose agent ended without deliver ----------
 printf 'tests: green\n' > "$DV_DIR/T8-tests.md"; backdate "$DV_DIR/T8-tests.md" 300
 printf 'a report under another name\n' > "$DV_DIR/T9-report.md"; backdate "$DV_DIR/T9-report.md" 300

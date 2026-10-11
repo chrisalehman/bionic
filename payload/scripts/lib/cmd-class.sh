@@ -2576,9 +2576,10 @@ cmd_suite_claims() {  # <command> [<repo root>] [<cwd>] -> "<kind>\t<target>\t<r
   # opened, when its file is under `<root>/`, and its text is read for what it runs — the one
   # file this reading opens; nothing else is stat'd. The command alone cannot say what
   # `bash red.sh` runs, and the budget that admitted it unread let a wrapper carry any suite
-  # past it. A script that is not there, a path built from a variable, and a line whose
-  # command word or script operand is built from one are kind `unverified`, named by the
-  # script, which the budget refuses (A-orch-46.1). `<cwd>` places a relative script; a
+  # past it. Since wave-33 T3 a script runs by default (the A SCRIPT RUNS BY DEFAULT block
+  # above): one not there, or at a path built from a variable, is kind `script`, a start the
+  # gate's ask budgets, and a `$` line claims nothing; wave-31's refused kind for them is
+  # retired. `<cwd>` places a relative script; a
   # literal `cd` earlier in the command moves it. Without a root nothing is opened, so
   # `cmd_class` and every reader without one answer from the shape, as before.
   #
