@@ -22,7 +22,8 @@
 #                  carries peak=<pct>, the highest memory reading any locked gate read saw
 #                  during the run (the plan's ruling A-orch-12). A line the gate does not know
 #                  is ignored, so a later bionic may add one.
-#   cost/<key>     at most three lines, newest last: <mem pct>:<cores>:<seconds>:<epoch>
+#   cost/<key>     at most three lines, newest last: <mem pct>:<cores>:<seconds>:<epoch>, and
+#                  `:whole` after the epoch when a whole request's gate_end wrote it (wave-32 T26)
 #                  (a `/` in the key is written `%` in the file's name)
 #   idle           the memory reading taken the last time nothing admitted was unfinished
 #   lock/          the directory lock every decision is taken under (pid and start inside)
@@ -100,6 +101,11 @@
 #             per-field maximum over every cost file, and with no cost file at all it is
 #             admitted only when nothing admitted is unfinished. So is any command while the
 #             memory reading is unknown (-1). A whole request admitted is admitted alone.
+#             The maximum over every cost file skips the lines a whole request wrote (wave-32
+#             T26; critic adversarial 1): a whole run is admitted alone and its children may
+#             take every core the share allows, so its cost is never what a command beside
+#             others will take. A key's own lines count, marked or not, so a whole key's own
+#             promise is still its own cost.
 #   cost      at gate_end: seconds from admitted to ended; cores, the children's processor time
 #             from the shell's own `times` over those seconds; memory, the rise from idle to
 #             the run's peak, kept only when no other admission overlapped the run, otherwise
@@ -112,9 +118,10 @@
 #   room      (wave-28 T13; D14, the owner's "Option 2") another writer may start only while
 #             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
 #             admitted, unfinished requests and <owed> times the largest processor promise on
-#             record, are at most share × cores ÷ 100; `_res_used_pct` is at most the share;
-#             and nothing waits. <owed> is the caller's count of writers not yet showing: live
-#             writers that have not asked the gate yet, plus the rows it has already offered on
+#             record (a whole request's line is not on that record: see promise), are at most
+#             share × cores ÷ 100; `_res_used_pct` is at most the share; and nothing waits.
+#             <owed> is the caller's count of writers not yet showing: live writers that have
+#             not asked the gate yet, plus the rows it has already offered on
 #             this reading, so two asks on one reading give room once. With no cost on record a
 #             writer not yet showing takes all the room. A reading that cannot be read (-1 or
 #             empty) gives no room unless nothing is admitted, waiting or owed.
@@ -125,7 +132,7 @@
 #             ancestors is the admission it runs under (the lineage, wave-32 T1): it is printed
 #             and nothing is filed. BIONIC_SLOT_HELD is not read at all.
 #   cost      a run of zero seconds, or one whose cores exceed the machine's, writes its end and
-#             rc and no cost line.
+#             rc and no cost line. A whole request's line ends `:whole`.
 #
 # No figure sized to a machine appears here: memory is a percentage, processor a share of the
 # cores the machine reports, and every command's cost is what it took on this machine before.
@@ -313,7 +320,8 @@ _gate_cost_file() {  # <key> -> its cost file
 }
 
 # _gate_promise <key> -> <mem>:<cores>:<seconds>, the per-field maximum of the key's cost
-# file, else over every cost file; nothing when no cost file holds a line.
+# file, else over every line of every cost file that a whole request did not write (`:whole`,
+# wave-32 T26); nothing when no such line is held.
 # gate_promise <key> — the public reader the ownership table names (wave-28 T13; pass 12): the
 # same answer as `_gate_promise`, with the store loaded first so a caller outside the lock can ask.
 gate_promise() {
@@ -323,15 +331,16 @@ gate_promise() {
 }
 
 _gate_promise() {
-  local f
+  local f own=1
   f="$(_gate_cost_file "$1")"
   if [ -s "$f" ]; then
     set -- "$f"
   else
+    own=0
     set -- "$_GD"/cost/*
     [ -e "$1" ] || return 0
   fi
-  awk -F: 'NF >= 3 { for (i = 1; i <= 3; i++) if (!(i in m) || $i + 0 > m[i]) m[i] = $i + 0; n++ }
+  awk -F: -v own="$own" 'NF >= 3 && (own || $5 != "whole") { for (i = 1; i <= 3; i++) if (!(i in m) || $i + 0 > m[i]) m[i] = $i + 0; n++ }
            END { if (n) printf "%g:%g:%g\n", m[1], m[2], m[3] }' "$@" 2>/dev/null
 }
 
@@ -608,7 +617,7 @@ gate_ask() {
 
 gate_end() {
   local id="${1:-}" rc="${2:-}" f o now secs cpu cores mem prev reading idle='' over=0 i=0
-  local my_adm my_key my_peak
+  local my_adm my_key my_peak my_whole
   case "$id" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc>" >&2; return 2 ;; esac
   case "$rc" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc>" >&2; return 2 ;; esac
   _gate_store || return 2
@@ -622,7 +631,8 @@ gate_end() {
     _gate_unlock; echo "gate: request $id was never admitted" >&2; return 2
   fi
   if [ -n "$_R_ended" ]; then _gate_unlock; return 0; fi
-  my_adm="$_R_admitted" my_key="$_R_key" my_peak="${_R_peak:--1}"
+  my_adm="$_R_admitted" my_key="$_R_key" my_peak="${_R_peak:--1}" my_whole=''
+  [ "$_R_kind" != whole ] || my_whole=':whole'
   now="$(_res_now)"
   secs=$((now - my_adm)); [ "$secs" -ge 0 ] || secs=0
   times > "$_GD/lock/times"
@@ -660,10 +670,11 @@ gate_end() {
   # A run of zero seconds teaches nothing (wave-32 T1; D5): it has no measured time, and its
   # cores would be its children's processor time over a second it never ran. Nor does a run
   # whose cores exceed the machine's (wave-32 T19): over a second or three, the children's time
-  # read 84 cores on an 8-core machine, a number no run can reach.
+  # read 84 cores on an 8-core machine, a number no run can reach. A whole request's line is
+  # marked `:whole` (wave-32 T26): it is its own key's promise and nobody else's.
   if [ "$secs" -gt 0 ] && awk -v c="$cores" -v n="$(_res_cores)" 'BEGIN { exit !(c + 0 <= n + 0) }'; then
     { cat "$(_gate_cost_file "$my_key")" 2>/dev/null
-      printf '%s:%s:%s:%s\n' "$mem" "$cores" "$secs" "$now"
+      printf '%s:%s:%s:%s%s\n' "$mem" "$cores" "$secs" "$now" "$my_whole"
     } | tail -n 3 > "$_GD/cost/.new.$id" && mv "$_GD/cost/.new.$id" "$(_gate_cost_file "$my_key")"
   fi
   _gate_scan "$reading"
@@ -696,11 +707,11 @@ gate_state() {
 # _gate_room_line <reading> <owed> — after a scan: the room line, rc 0 when there is room.
 # The loads print as read (-1 when empty); `promised` is the admitted runs' processor
 # promises plus <owed> times the largest on record, or every core when nothing is on record
-# and a writer is owed.
+# and a writer is owed. A line a whole request wrote is not on that record (wave-32 T26).
 _gate_room_line() {
   local b1 b5 most
   b1="$(_res_busy_cores 2>/dev/null)"; b5="$(_res_busy_cores_5m 2>/dev/null)"
-  most="$(cat "$_GD"/cost/* 2>/dev/null | awk -F: 'NF >= 3 && (!n++ || $2 + 0 > m) { m = $2 + 0 }
+  most="$(cat "$_GD"/cost/* 2>/dev/null | awk -F: 'NF >= 3 && $5 != "whole" && (!n++ || $2 + 0 > m) { m = $2 + 0 }
     END { if (n) printf "%g", m }')"
   printf '%s' "$_G_PROM" | awk -F: -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" \
       -v most="$most" -v share="$(gate_share)" -v cores="$(_res_cores)" -v unf="$_G_UNF" \
