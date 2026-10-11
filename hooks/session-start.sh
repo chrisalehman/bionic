@@ -169,6 +169,14 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/binding.sh"  || exit 0   # bind_holders — who else's marker names the one run (T15)
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
+# THE STANDING DECISION LINE (wave-33 T27, AC-11.2). One line, printed first in every session this
+# hook runs in: engaged or not, a run open or not, a `.bionic` present or not. The rule that sends
+# a decision through the `decision` skill sits in canonical-sdlc, which loads only inside a run, so
+# a session with no run open answered a choice between approaches in prose (T19's live check). A
+# SessionStart hook's stdout is context in every session; this is the one place that reaches them
+# all. It sits above every early exit below, so none of them can swallow it.
+printf 'bionic: any decision or choice between approaches you put to the user goes through the bionic:decision skill — invoke it.\n'
+
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
 # the preamble's most expensive value and most hooks never read the answer. The greeting prints the bound
