@@ -659,6 +659,192 @@ expect_status "r22mkh six thousand acked rows on a stale panel, writers=1 -> ALL
   "0" "$GATE_ST"
 expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 
+# ================= §budget-roster-one-pass: THE COUNT READS THE ROSTER ONCE, AND COUNTS THE SAME
+# (epic-23 wave-32 T4; REQ-3 AC-3.1, AC-3.3; D3, ruling A-orch-3.)
+#
+# WHAT IT COST. §budget-markers-pipe above spent 351 s of this suite's 739 at b7b5bdbe inside one
+# call to `budget_roster_counts`. Per roster row it ran a command substitution through tr, sed and
+# head to take the name and searched a dedupe string that grew with every row. On the dark path it
+# then ran one grep per dark name and two more processes per closed one: about 54,000 spawns for
+# 6,000 rows. The read is now one awk over the roster and one over the three name lists.
+#
+# TWO PINS, ONE FOR EACH WAY THAT REWRITE CAN GO WRONG.
+#   (a) THE BYTES. The function is extracted from the hook and driven directly, its two real
+#       libraries sourced, over five planted rosters. Its stdout is compared byte for byte,
+#       trailing newline included: the old settlement's `$(…)` dropped the open list's last
+#       newline only when some name closed, and the caller is not the only reader of the bytes.
+#       Every expected string below is what the pre-change function printed for that roster.
+#   (b) THE WORK. The same function over §budget-markers-pipe's own 6,000-row roster and ledger,
+#       with every tool it or its libraries spawn by name routed through a counting shim, spawns
+#       at most BRC_CEIL tools. Past the ceiling the shim stops the harness, so a per-row read
+#       fails here in under a second instead of after six minutes.
+
+section "§budget-roster-one-pass: the count reads the roster once and prints the same bytes"
+
+BRC_DIR="$SANDBOX/.brc"
+mkdir -p "$BRC_DIR/fx" "$BRC_DIR/shim"
+BRC_LIB="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
+BRC_FN="$BRC_DIR/fn.sh"
+sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE" > "$BRC_FN"
+expect_eq "§budget-roster-one-pass meta: the function came out of the hook whole" "1" \
+  "$(/usr/bin/grep -c '^  budget_roster_counts() {' "$BRC_FN")"
+
+# brc_harness <harness path> <function file> [shim dir] — a script that sources the two libraries
+# the function reads, the hook's two constants it uses, and the function, then runs it once:
+#   bash <harness> <roster> <ack ledger> <transcript>
+brc_harness() {
+  {
+    printf '#!/bin/bash\nset -uo pipefail\n'
+    printf '. %q\n. %q\n' "$BRC_LIB/agents.sh" "$BRC_LIB/roster.sh"
+    printf 'ROSTER_VERSION="$ROSTER_SCHEMA_VERSION"\nACK_LEDGER_FILE="$2"\n'
+    printf '. %q\n' "$2"
+    printf 'export BRC_HARNESS_PID=$$\n'
+    [ -z "${3:-}" ] || printf 'PATH=%q:"$PATH"\n' "$3"
+    printf 'budget_roster_counts "$1" "$3"\n'
+  } > "$1"
+}
+BRC_H="$BRC_DIR/harness.sh"
+brc_harness "$BRC_H" "$BRC_FN"
+
+# brc_run <roster> <ledger> <transcript> -> BRC_OUT, the function's stdout to the last byte.
+brc_run() { BRC_OUT="$(bash "$BRC_H" "$1" "$2" "$3" 2>/dev/null; printf x)"; BRC_OUT="${BRC_OUT%x}"; }
+
+# brc_row <roster> <name> [subagent_type] [status] — one launch row through the real writer.
+brc_row() {
+  roster_row_no_plan "status=${4:-intended}" "session=$SID_A" "name=$2" agent_id= \
+    launched_at=2026-09-02T00:00:00Z "subagent_type=${3:-implementor}" model= \
+    "deliverable=/tmp/d-$2" source=declared "duration=~10 minutes" progress= \
+    claims= cadence= absent= waiver= "tool_use_id=t-$2" >> "$1"
+}
+# brc_ack <ledger> <name> [at] — one ack in the sweeper's own ledger shape (s22_ack's line).
+brc_ack() {
+  printf '%s|event=ack|at=%s|epoch=1756771200|pid=%s|session=%s|name=%s|by=human\n' \
+    "$S22_LEDGER_SCHEMA" "${3:-2026-09-03T00:00:00Z}" "$$" "$SID_A" "$2" >> "$1"
+}
+
+BRC_FX="$BRC_DIR/fx"
+
+# (a.1) A DARK PANEL OVER EVERY SHAPE THE READ SKIPS OR SETTLES. Kept: a1 (whose second row is a
+# duplicate), r1 (read-only, so open but no writer), a3 (acked BEFORE its launch, so still open) and
+# q.1. Skipped: a `confirmed` row, a row with an empty `name=`, a row with no `name=` at all and a
+# row of another schema version. Closed by an ack: a2, -d1 (a name grep would read as an option) and
+# qx1 (a name a regex q.1 would match).
+roster_header > "$BRC_FX/mixed.roster"
+brc_row "$BRC_FX/mixed.roster" a1
+brc_row "$BRC_FX/mixed.roster" a2
+brc_row "$BRC_FX/mixed.roster" r1 bionic:researcher
+brc_row "$BRC_FX/mixed.roster" c1 implementor confirmed
+brc_row "$BRC_FX/mixed.roster" a1
+BRC_TMPL="$(brc_row /dev/stdout TMPL)"
+printf '%s\n' "${BRC_TMPL/|name=TMPL|/|name=|}" >> "$BRC_FX/mixed.roster"
+printf '%s\n' "${BRC_TMPL/|name=TMPL|/|}" >> "$BRC_FX/mixed.roster"
+BRC_V0="${BRC_TMPL/roster-state\/${ROSTER_SCHEMA_VERSION}|/roster-state/v0|}"
+printf '%s\n' "${BRC_V0/|name=TMPL|/|name=old1|}" >> "$BRC_FX/mixed.roster"
+brc_row "$BRC_FX/mixed.roster" a3
+brc_row "$BRC_FX/mixed.roster" -d1
+brc_row "$BRC_FX/mixed.roster" q.1
+brc_row "$BRC_FX/mixed.roster" qx1
+brc_ack "$BRC_FX/mixed.ledger" a2
+brc_ack "$BRC_FX/mixed.ledger" a3 2026-09-01T00:00:00Z
+brc_ack "$BRC_FX/mixed.ledger" -d1
+brc_ack "$BRC_FX/mixed.ledger" qx1
+mk_transcript "$BRC_FX/mixed.jsonl" stale a1
+expect_eq "§budget-roster-one-pass meta: the mixed roster holds its twelve rows and its header" "13" \
+  "$(/usr/bin/awk 'END { print NR }' "$BRC_FX/mixed.roster")"
+expect_contains "…one of them a row of another schema version" "roster-state/v0|status=intended|" \
+  "$(cat "$BRC_FX/mixed.roster")"
+brc_run "$BRC_FX/mixed.roster" "$BRC_FX/mixed.ledger" "$BRC_FX/mixed.jsonl"
+expect_eq "brc-a1 dark panel: three writers open, the open names in roster order, no last newline" \
+  "3"$'\n'"a1"$'\n'"r1"$'\n'"a3"$'\n'"q.1" "$BRC_OUT"
+
+# (a.2) A FRESH PANEL DECIDES EVERY ROW AND NO ACK IS READ: a1 running stays open although it is
+# acked, a2 idle closes, a3 absent closes. Nothing settled, so the list keeps its last newline.
+brc_row "$BRC_FX/fresh.roster" a1
+brc_row "$BRC_FX/fresh.roster" a2
+brc_row "$BRC_FX/fresh.roster" a3
+brc_ack "$BRC_FX/fresh.ledger" a1
+mk_transcript "$BRC_FX/fresh.jsonl" fresh a1 a2:idle
+brc_run "$BRC_FX/fresh.roster" "$BRC_FX/fresh.ledger" "$BRC_FX/fresh.jsonl"
+expect_eq "brc-a2 fresh panel: the panel's one running row, and its last newline kept" \
+  "1"$'\n'"a1"$'\n' "$BRC_OUT"
+
+# (a.3) NO ANSWER AT ALL AND NOTHING ACKED: every row open, nothing closed, last newline kept.
+brc_row "$BRC_FX/none.roster" a1
+brc_row "$BRC_FX/none.roster" a2
+mk_transcript "$BRC_FX/none.jsonl" none
+brc_run "$BRC_FX/none.roster" "$BRC_FX/none.ledger" "$BRC_FX/none.jsonl"
+expect_eq "brc-a3 no answer, no ack: both rows open, last newline kept" \
+  "2"$'\n'"a1"$'\n'"a2"$'\n' "$BRC_OUT"
+
+# (a.4) A CLOSED LIST LONGER THAN A PIPE BUFFER, its first name checked first (F8's worst case, as
+# §budget-markers-pipe builds it, with long names so 320 rows pass 64 KiB): every one closes, and
+# the one unacked row after them stays open.
+BRC_TMPL="$(brc_row /dev/stdout '%%NM%%')"
+/usr/bin/awk -v tmpl="$BRC_TMPL" -v sch="$S22_LEDGER_SCHEMA" -v sid="$SID_A" -v led="$BRC_FX/pipe.ledger" '
+  BEGIN {
+    pad = sprintf("%250s", ""); gsub(/ /, "x", pad)
+    for (i = 0; i < 320; i++) {
+      nm = sprintf("p%04d-%s", i, pad); r = tmpl; gsub(/%%NM%%/, nm, r); print r
+      printf "%s|event=ack|at=2026-09-03T00:00:00Z|epoch=1756771200|pid=1|session=%s|name=%s|by=human\n", sch, sid, nm > led
+    }
+  }' > "$BRC_FX/pipe.roster"
+brc_row "$BRC_FX/pipe.roster" z-open
+mk_transcript "$BRC_FX/pipe.jsonl" stale
+expect_eq "§budget-roster-one-pass meta: the pipe ledger holds more than a pipe buffer of names" "yes" \
+  "$(/usr/bin/awk '{ n += length($0) + 1 } END { print (n > 65536) ? "yes" : "no" }' "$BRC_FX/pipe.ledger")"
+brc_run "$BRC_FX/pipe.roster" "$BRC_FX/pipe.ledger" "$BRC_FX/pipe.jsonl"
+expect_eq "brc-a4 320 closed names past the pipe buffer close, the one after them stays open" \
+  "1"$'\n'"z-open" "$BRC_OUT"
+
+# (a.5) NO ROSTER FILE: the bare zero, no newline.
+mk_transcript "$BRC_FX/absent.jsonl" stale
+brc_run "$BRC_FX/absent.roster" "$BRC_FX/absent.ledger" "$BRC_FX/absent.jsonl"
+expect_eq "brc-a5 no roster: a bare 0" "0" "$BRC_OUT"
+
+# (b) THE WORK CEILING over §budget-markers-pipe's 6,000 rows and 6,000 acks on its stale panel.
+# The function's own absolute tool paths are routed through PATH for the count, and the shim is
+# the tool it is named as. Forty is the ceiling. The one-pass read spawns nine here, five awk, three
+# cut and one cat, most of them the transcript reader's and none of them per row. The per-row read it
+# replaced spent five before its loop and three per row, so it passed forty at its twelfth row.
+BRC_CEIL=40
+cat > "$BRC_DIR/shim/_count" <<'BRCSHIM'
+#!/bin/bash
+printf '%s\n' "${0##*/}" >> "$BRC_COUNT_LOG"
+c=0; read -r c < "$BRC_COUNT" 2>/dev/null || c=0
+c=$((c + 1)); printf '%s\n' "$c" > "$BRC_COUNT"
+if [ "$c" -gt "$BRC_CEIL" ]; then kill -TERM "$BRC_HARNESS_PID" 2>/dev/null; exit 1; fi
+for d in /usr/bin /bin; do [ -x "$d/${0##*/}" ] && exec "$d/${0##*/}" "$@"; done
+exit 127
+BRCSHIM
+chmod +x "$BRC_DIR/shim/_count"
+for _t in awk grep sed tr head tail cat cut wc sort uniq tee; do ln -s _count "$BRC_DIR/shim/$_t"; done
+sed 's#/usr/bin/##g' "$BRC_FN" > "$BRC_DIR/fn-counted.sh"
+expect_eq "§budget-roster-one-pass meta: the counted copy is the whole function" "1" \
+  "$(/usr/bin/grep -c '^  budget_roster_counts() {' "$BRC_DIR/fn-counted.sh")"
+expect_eq "…and names no tool by an absolute path the shims cannot see" "0" \
+  "$(/usr/bin/grep -c '/usr/bin/' "$BRC_DIR/fn-counted.sh")"
+brc_harness "$BRC_DIR/harness-counted.sh" "$BRC_DIR/fn-counted.sh" "$BRC_DIR/shim"
+printf '0\n' > "$BRC_DIR/count"; : > "$BRC_DIR/count.log"
+BRC_OUT="$(BRC_COUNT="$BRC_DIR/count" BRC_COUNT_LOG="$BRC_DIR/count.log" BRC_CEIL="$BRC_CEIL" \
+  bash "$BRC_DIR/harness-counted.sh" "$R22MKH_F" "$R22MKH_LEDGER" "$R22MKH_STALE" 2>/dev/null
+  printf '\nrc=%s' "$?")"
+BRC_SPAWNS="$(/usr/bin/awk 'END { print NR }' "$BRC_DIR/count.log")"
+# r22mkh's dispatch was admitted, so the wall journalled its own launch row for w99-impl, the one
+# row on this roster no ack closes. It is the one open writer, after six thousand closed names.
+expect_eq "brc-b six thousand acked rows close and the admitted dispatch's own row stays open, the harness finished" \
+  "1"$'\n'"w99-impl"$'\n'"rc=0" "$BRC_OUT"
+if [ "${BRC_SPAWNS:-0}" -ge 1 ]; then
+  ok "brc-b …the shims saw the function's tools (the ceiling below is not vacuous)"
+else
+  no "brc-b …the shims saw the function's tools (the ceiling below is not vacuous)" "counted 0 spawns"
+fi
+if [ "${BRC_SPAWNS:-0}" -le "$BRC_CEIL" ]; then
+  ok "brc-b …in at most $BRC_CEIL tool spawns, whatever the roster's length"
+else
+  no "brc-b …in at most $BRC_CEIL tool spawns, whatever the roster's length" \
+    "spawned $BRC_SPAWNS before the ceiling stopped it: $(sort "$BRC_DIR/count.log" | uniq -c | tr -s ' \n' ' ')"
+fi
+
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
 # (spec R2, AC-27; task S16, closing the Step-5 auditor's F-1.)
 #

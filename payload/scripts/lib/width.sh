@@ -23,8 +23,8 @@
 # number and the truncator live here now, so there is one of each.
 #
 # ONE UNIT ON BOTH SIDES OF THE CUT, AND THIS IS THE WHOLE POINT OF THE FILE.
-# The budget is a column count, the test is a column count, and the cut removes
-# one CHARACTER at a time (`${s%?}`) until the count fits. It is not
+# The budget is a column count, the test is a column count, and the cut keeps
+# whole CHARACTERS, counted one at a time, while the count fits. It is not
 # `printf '%.*s'`, and that is a correction, not a preference: precision on
 # `%s` counts BYTES, so a length test in characters against a cut in bytes
 # tasks a multi-byte glyph in half and emits invalid UTF-8. The wave's Step-6
@@ -34,7 +34,7 @@
 # against it: *"Cut to a column count, never to a byte count."* Restored here,
 # once, for both scripts.
 #
-# THE LOOP FORKS NOTHING. `$(bionic_cols "$s")` inside a shrink loop is a
+# THE LOOP FORKS NOTHING. `$(bionic_cols "$s")` inside a per-character loop is a
 # subshell per iteration — hundreds of forks on a long path, on a page that
 # already spends its budget on real probes. `_bionic_cols_into` writes the
 # answer to a variable instead, so the loop is pure bash string work and the
@@ -117,29 +117,58 @@ bionic_trunc() {  # <string> <column-budget> -> string
   # prevent, reintroduced one level down by a locale nobody chose.
   #
   # PINNING `LC_ALL=C` HERE MAKES THE READING THE SAME IN BOTH: every string
-  # operation below is bytes, and the inner loop drops a whole UTF-8 character
-  # by walking off its continuation bytes (0x80-0xBF) and then its lead byte.
-  # `local` restores the caller's locale on return, so nothing outside this
-  # function changes reading.
-  local s="${1:-}" max="${2:-0}" want last
+  # operation below is bytes, and a whole UTF-8 character is a lead byte and
+  # every continuation byte (0x80-0xBF) after it. `local` restores the caller's
+  # locale on return, so nothing outside this function changes reading.
+  #
+  # ONE WALK, FRONT TO BACK, ONE CHARACTER MEASURED AT A TIME (wave-32 T3,
+  # REQ-3). The loop this replaces dropped a character from the END and
+  # re-measured the whole remainder each time, so a 2,000-character `—` fact
+  # cut to 54 columns cost about 1,950 full measures, each of them thirteen
+  # substitutions over thousands of bytes: 843 of tests/refuse.test.sh's 862
+  # seconds. The answer it reached is the longest prefix, ending where a
+  # character starts, whose width fits the budget less the ellipsis's column.
+  # This walk reaches the same prefix from the other end and stops one
+  # character past the budget, so it never looks at the rest of the string.
+  #
+  # WHY A RUNNING SUM IS THE SAME NUMBER. Width is additive over characters:
+  # every glyph `_bionic_cols_into` substitutes is one whole character (a lead
+  # byte, then continuation bytes), so no substitution can straddle the start
+  # of the next character, and measuring the pieces one by one adds up to
+  # measuring the string. A single byte is one column whatever it is (no glyph
+  # in the set is one byte), so only a multi-byte piece is handed to the
+  # measure. A leading run of continuation bytes, with no lead byte before it,
+  # is one piece, which is where the old loop's walk-back emptied it too.
+  #
+  # A budget of 0 or less means "unbounded" (see above), checked first.
+  local s="${1:-}" max="${2:-0}" want rest ch r sum=0 off=0 keep=0
   local LC_ALL=C
   [ "$max" -gt 0 ] || { printf '%s' "$s"; return 0; }
-  _bionic_cols_into "$s"
-  [ "$BIONIC_COLS" -le "$max" ] && { printf '%s' "$s"; return 0; }
   # One column of the budget goes to the ellipsis.
   want=$(( max - 1 )); [ "$want" -gt 0 ] || want=0
-  while [ -n "$s" ] && [ "$BIONIC_COLS" -gt "$want" ]; do
-    while [ -n "$s" ]; do
-      last="${s:${#s}-1}"
-      s="${s%?}"
-      case "$last" in
-        [$'\200'-$'\277']) ;;   # a continuation byte: the character is not whole yet
+  rest="$s"
+  while [ -n "$rest" ]; do
+    ch="${rest:0:1}"; r="${rest:1}"
+    while [ -n "$r" ]; do
+      case "$r" in
+        [$'\200'-$'\277']*) ch="${ch}${r:0:1}"; r="${r:1}" ;;
         *) break ;;
       esac
     done
-    _bionic_cols_into "$s"
+    if [ "${#ch}" -eq 1 ]; then
+      sum=$(( sum + 1 ))
+    else
+      _bionic_cols_into "$ch"; sum=$(( sum + BIONIC_COLS ))
+    fi
+    # Past the budget: the string does not fit, and the cut is the longest
+    # prefix that left the ellipsis its column.
+    [ "$sum" -le "$max" ] || { printf '%s…' "${s:0:keep}"; return 0; }
+    off=$(( off + ${#ch} ))
+    [ "$sum" -le "$want" ] && keep="$off"
+    rest="$r"
   done
-  printf '%s…' "$s"
+  # The walk reached the end inside the budget: the string fits, whole.
+  printf '%s' "$s"
 }
 
 # A whole row, from a fixed prefix and a free-form tail: the shape both callers
@@ -201,7 +230,7 @@ _bionic_head_cols() {  # <string> <column-budget> — sets BIONIC_HEAD / BIONIC_
   BIONIC_HEAD=""; BIONIC_TAIL="$s"
   while [ -n "$BIONIC_TAIL" ]; do
     # One whole character: a lead byte and every continuation byte after it. The
-    # walk is the same one bionic_trunc makes in the other direction, and it is
+    # walk is the same one bionic_trunc makes (wave-32 T3), and it is
     # here for the same reason — under `LC_ALL=C` a single-byte step lands in the
     # middle of a three-byte glyph and emits a fragment.
     ch="${BIONIC_TAIL:0:1}"; r="${BIONIC_TAIL:1}"

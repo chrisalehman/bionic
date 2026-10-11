@@ -181,6 +181,91 @@ expect_eq "7n: …and the C and the UTF-8 cut are now the same string" "$CUT_U" 
 expect_true "7b: the C-locale cut is bounded by the budget it was given" \
   test "$(cols_c "$CUT_C")" -le 4
 
+section "Section 3b: the truncator walks the string once (wave-32 T3, REQ-3 AC-3.1/AC-3.3)"
+
+# WHY THIS SECTION EXISTS. The cut used to drop one character from the END and
+# re-measure the WHOLE remainder, so a string far over its budget cost one full
+# measure per character dropped: quadratic in the string, thirteen glyph
+# substitutions per measure. tests/refuse.test.sh §T58 truncates four
+# 2,000-character facts of `—` and `é` to refuse's room of 54 columns and spent
+# 843 of the suite's 862 seconds there (wave-32 research-hot-sections, item 1).
+#
+# THE OUTPUT IS PINNED, NOT RE-DERIVED. Every expected string below is what the
+# base function (b7b5bdbe) returns for that input, so a faster cut that differs
+# by one byte fails here: the cut is the longest prefix ending on a character
+# boundary whose width fits the budget less the ellipsis's column. The pins run
+# both in this shell and under `LC_ALL=C`, the two readings Section 3 already
+# holds equal.
+#
+# AND THE WORK IS BOUNDED, by a count rather than a clock alone. A shadow of
+# `_bionic_cols_into` adds up the bytes it is handed. A cut that walks the
+# string once hands the measure at most about the string's own bytes; the old
+# loop handed it roughly n squared over six (6,000 bytes, then 5,997, then
+# 5,994, ...). The ceiling is TWICE the fact's bytes: room for a cut that also
+# measures the whole string once up front, nowhere near the quadratic loop. The
+# shadow stops the run the moment the ceiling is crossed, so a regression fails
+# in milliseconds here rather than minutes. A clock ceiling sits beside it,
+# whole seconds because the suite runs under /bin/bash 3.2, which has no finer
+# timer.
+#
+# fails-when: a cut returns any byte other than the base cut's for a pinned
+# input; a 2,000-character `—` or `é` fact hands the width measure more than
+# twice its own bytes, or takes 2 seconds or more.
+t3_pin() {  # <label> <expected> <string> <budget> — the cut here and under LC_ALL=C
+  expect_eq "$1" "$2" "$(bionic_trunc "$3" "$4")"
+  expect_eq "$1 [C]" "$2" "$(trunc_c "$3" "$4")"
+}
+t3_pin "7p1: arrows, budget 5"                 "→→→→…"        "→→→→→→→→→→" 5
+t3_pin "7p2: a glyph outside the set, budget 4" "ab…"          "ab★cd" 4
+t3_pin "7p3: …budget 6 keeps it whole"          "ab★…"         "ab★cd" 6
+t3_pin "7p4: a string that fits exactly"        "abcdef"       "abcdef" 6
+t3_pin "7p5: one column over"                   "abcde…"       "abcdefg" 6
+t3_pin "7p6: budget 0 is unbounded"             "abc"          "abc" 0
+t3_pin "7p7: a negative budget is unbounded"    "abc"          "abc" -3
+t3_pin "7p8: budget 1 leaves only the ellipsis" "…"            "abcdef" 1
+t3_pin "7p9: em dashes that fit exactly"        "—————"        "—————" 5
+t3_pin "7p10: é is two columns"                 "éé…"          "ééééé" 6
+t3_pin "7p11: unknown three-byte characters"    "日本…"        "日本語テキスト" 8
+t3_pin "7p12: every closed-set glyph kind"      "✓ ok → §“…"   "✓ ok → §“x”× done" 10
+t3_pin "7p13: a leading run of continuation bytes is one piece" \
+  $'\200\200ab…' $'\200\200abcdefghij' 5
+t3_pin "7p14: a stray continuation byte after a glyph rides with it" \
+  $'a—\200…' $'a—\200bcdef' 4
+t3_pin "7p15: 400 continuation bytes and no lead byte cut to the ellipsis alone" \
+  "…" "$(printf '\200%.0s' $(seq 1 400))" 54
+
+t3_work() {  # <string> <budget> <ceiling> -> "<cut>|<bytes measured>", or "OVER|<bytes>"
+  (
+    eval "$(declare -f _bionic_cols_into | sed '1s/^_bionic_cols_into/_t3_cols_real/')"
+    T3_BYTES=0; T3_CEIL="$3"
+    _bionic_cols_into() {
+      local LC_ALL=C
+      T3_BYTES=$(( T3_BYTES + ${#1} ))
+      [ "$T3_BYTES" -le "$T3_CEIL" ] || { printf 'OVER|%s' "$T3_BYTES"; exit 3; }
+      _t3_cols_real "$@"
+    }
+    bionic_trunc "$1" "$2"
+    printf '|%s' "$T3_BYTES"
+  )
+}
+
+for _g in '—' 'é'; do
+  case "$_g" in '—') _keep=53 ;; *) _keep=26 ;; esac
+  T3_FACT="$(printf "${_g}%.0s" $(seq 1 2000))"
+  T3_WANT="$(printf "${_g}%.0s" $(seq 1 "$_keep"))…"
+  T3_IN="$(printf '%s' "$T3_FACT" | LC_ALL=C wc -c | tr -d ' ')"
+  T3_CEIL=$(( T3_IN * 2 ))
+  _t0=$SECONDS; T3_CUT="$(trunc_c "$T3_FACT" 54)"; _dt=$(( SECONDS - _t0 ))
+  expect_eq "7q [$_g]: a 2,000-character fact cut to refuse's room (54) is the base cut, byte for byte" \
+    "$T3_WANT" "$T3_CUT"
+  expect_true "7r [$_g]: …in under 2 seconds (took ${_dt}s)" test "$_dt" -lt 2
+  T3_W="$(t3_work "$T3_FACT" 54 "$T3_CEIL")"
+  expect_regex "7w0 [$_g]: the shadow counted: the width measure was handed bytes" '\|[1-9][0-9]*$' "$T3_W"
+  expect_eq "7w1 [$_g]: …and the cut it watched is the base cut" "$T3_WANT" "${T3_W%|*}"
+  expect_true "7w2 [$_g]: …and handed it at most twice the fact's ${T3_IN} bytes (handed ${T3_W##*|})" \
+    test "${T3_W##*|}" -le "$T3_CEIL"
+done
+
 section "Section 4: bionic_line protects the instruction it is handed"
 
 LINE="$(bionic_line "  ✓ $(printf '%-40s' 'a label')" \

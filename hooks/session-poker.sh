@@ -2366,6 +2366,11 @@ run_read() {
     case "$t0" in ''|*[!0-9]*|0) RUN_ELAPSED="" ;; *) RUN_ELAPSED=$(( $(now_epoch) - t0 )) ;; esac
     return 0
   fi
+  # THE PID DIED: one more read of `<log>.rc`, then LOST. The shim's exit trap writes `.rc` and
+  # exits, and that can fall between the read above and run_live's answer, so a finished run would
+  # read LOST (wave-32 T22; research-red3 §2). booked.sh's booked_follow guards the same gap.
+  { read -r rc < "$RUN_LOG.rc"; } 2>/dev/null
+  case "$rc" in ''|*[!0-9]*) : ;; *) RUN_STATE=FINISHED; RUN_RC="$rc"; return 0 ;; esac
   RUN_STATE=LOST
   RUN_LAST_WRITTEN="$(epoch_iso "$(file_mtime "$RUN_LOG")")"
   [ -n "$RUN_LAST_WRITTEN" ] || RUN_LAST_WRITTEN=unknown

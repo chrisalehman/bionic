@@ -1,6 +1,7 @@
 #!/bin/bash
 # tests/runner-width.test.sh — tests/run.sh takes its job width from the machine's own
-# pressure rung (wave-roster-lifecycle S9, spec AC-15, R4).
+# pressure rung (wave-roster-lifecycle S9, spec AC-15, R4), read against the share's room,
+# gate_width = floor(share × cores ÷ 100) (wave-32 T2; D1, Section 6).
 #
 # WHAT CHANGED. `JOBS="${BIONIC_TEST_JOBS:-8}"` — a literal a caller had to notice and set —
 # became `pressure_sample` then `JOBS="$(pressure_level "${BIONIC_TEST_JOBS_CEILING:-8}")"`:
@@ -44,6 +45,19 @@ trap 'rm -rf "$TMPROOT"' EXIT
 
 NOW=1700000000
 
+# THE SHARE AND THE CORES ARE THIS SUITE'S OWN (wave-32 T2; D1). The width a run takes is now
+# the share's room, gate_width = floor(share × cores ÷ 100), read through the gate's one formula,
+# and the pressure rung reads against it (capped by BIONIC_TEST_JOBS_CEILING when one is named).
+# So every drive below runs under a planted home holding the share file (CLAUDE_CONFIG_DIR, which
+# also keeps the gate store an ordinary run asks under this suite's root) and a planted 8-core
+# probe. Sections 1-5 plant share 100, whose room on 8 cores is 8, the ceiling they were written
+# against; Section 6 plants the machine's own default, 92.
+RW_HOME="$TMPROOT/home"
+mkdir -p "$RW_HOME/bionic"
+rw_share() { printf '%s\n' "$1" > "$RW_HOME/bionic/share"; }
+rw_share 100
+RW_PIN=(CLAUDE_CONFIG_DIR="$RW_HOME" BIONIC_PROBE_CORES=8)
+
 # ring_of <path> <epoch> <sample>... — rewrite a ring with one line per sample, all at <epoch>
 ring_of() {
   local path="$1" t="$2"; shift 2
@@ -70,7 +84,7 @@ dry_run() {
   local f s l c
   IFS='|' read -r f s l c <<<"$sample"
   DRY_OUT=$(cd "$BIONIC_SCRIPTS_DIR" && \
-    env -u BIONIC_TEST_JOBS_CEILING \
+    env -u BIONIC_TEST_JOBS_CEILING -u BIONIC_GATE_DIR "${RW_PIN[@]}" \
         BIONIC_PRESSURE_RING="$ring" BIONIC_NOW_EPOCH="$NOW" \
         BIONIC_PROBE_FREE_PCT="$f" BIONIC_PROBE_SWAP_PCT="$s" BIONIC_PROBE_LOAD_1M="$l" \
         ${ceiling_env:+BIONIC_TEST_JOBS_CEILING="$ceiling_env"} \
@@ -162,7 +176,7 @@ expect_eq "2b the scratch runner is the shipped one, byte for byte (not vacuous)
 RING_D2="$TMPROOT/d2/pressure.ring"
 ring_of "$RING_D2" "$NOW" "$S_CLEAR"
 BEFORE_LINES2=$(wc -l < "$RING_D2" | tr -d ' ')
-( cd "$ORD_TREE" && env BIONIC_PRESSURE_RING="$RING_D2" BIONIC_NOW_EPOCH="$NOW" \
+( cd "$ORD_TREE" && env -u BIONIC_GATE_DIR "${RW_PIN[@]}" BIONIC_PRESSURE_RING="$RING_D2" BIONIC_NOW_EPOCH="$NOW" \
       BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
       BIONIC_TEST_JOBS_CEILING=8 \
       bash tests/run.sh >/dev/null 2>&1 )
@@ -177,7 +191,7 @@ RING_E="$TMPROOT/e/pressure.ring"
 ring_of "$RING_E" "$NOW" "$S_CLEAR"
 DRY_OUT=""; DRY_ERR=""
 DRY_OUT=$(cd "$BIONIC_SCRIPTS_DIR" && \
-  env BIONIC_PRESSURE_RING="$RING_E" BIONIC_NOW_EPOCH="$NOW" \
+  env -u BIONIC_GATE_DIR "${RW_PIN[@]}" BIONIC_PRESSURE_RING="$RING_E" BIONIC_NOW_EPOCH="$NOW" \
       BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
       BIONIC_TEST_JOBS=4 BIONIC_TEST_JOBS_CEILING=8 \
       bash "$RUN" --dry-run 2>"$TMPROOT/.err3")
@@ -214,5 +228,42 @@ done
 ring_of "$RING_G" "$NOW" "$S_CLEAR" "$S_CLEAR"
 dry_run "$RING_G" "$S_CLEAR" 3
 expect_contains "5 a valid ceiling of 3 is still honoured (not replaced by 8)" "JOBS=3" "$DRY_OUT"
+
+echo
+section "Section 6: the width is the share's room, read through the gate's one formula (wave-32 T2; D1)"
+#
+# THE CLAIM. A run's width is gate_width (payload/scripts/lib/gate.sh): floor(share × cores ÷ 100),
+# 7 at share 92 on 8 cores. The runner keeps no number of its own; BIONIC_TEST_JOBS_CEILING is a
+# cap UNDER the width, never above it; the pressure rung still narrows a strained machine. The
+# expected width is read from the library under the same pins, so the runner and the gate are held
+# to one formula rather than to a literal both could drift from.
+rw_width() {  # the gate's own width under this suite's pins
+  env "${RW_PIN[@]}" bash -c '. "$1/payload/scripts/lib/gate.sh" 2>/dev/null; gate_width' _ "$BIONIC_SCRIPTS_DIR"
+}
+RING_W="$TMPROOT/w/pressure.ring"
+rw_share 92
+RW_W92="$(rw_width)"
+expect_eq "6a the formula's width at share 92 on 8 cores is 7 (the readback is real)" "7" "$RW_W92"
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+dry_run "$RING_W" "$S_CLEAR"
+expect_contains "6b no ceiling named: a clear ring runs at the formula's width" "JOBS=$RW_W92" "$DRY_OUT"
+expect_absent "6c …not the old literal default of 8" "JOBS=8" "$DRY_OUT"
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+dry_run "$RING_W" "$S_CLEAR" 8
+expect_contains "6d a ceiling above the width is a cap, not a raise: ceiling 8 at share 92 is the width" \
+  "JOBS=$RW_W92" "$DRY_OUT"
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+dry_run "$RING_W" "$S_CLEAR" 3
+expect_contains "6e a ceiling under the width still decides: 3" "JOBS=3" "$DRY_OUT"
+rw_share 50
+RW_W50="$(rw_width)"
+expect_eq "6f the formula's width at share 50 on 8 cores is 4" "4" "$RW_W50"
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+dry_run "$RING_W" "$S_CLEAR"
+expect_contains "6g …and the runner follows the share: JOBS=4" "JOBS=$RW_W50" "$DRY_OUT"
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+dry_run "$RING_W" "$S_CLEAR" "eight"
+expect_contains "6h a garbage ceiling falls back to the width, not to 8" "JOBS=$RW_W50" "$DRY_OUT"
+rw_share 100
 
 finish
