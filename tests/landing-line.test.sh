@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS; the pass a landing starts (wave-34 T9): §PASS. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -738,6 +738,35 @@ expect_eq "(r6k) the suite-name parser: names, paths, run.sh, none" \
 expect_eq "(r6k2) …a path keeps its directories, one spelling per file; no .., no absolute path, no empty or . directory" \
   "tests/a.test.sh|./a.test.sh|d/x.test.sh,x.test.sh|FAIL|FAIL|FAIL|FAIL|FAIL" \
   "$(_line_suites './tests/a, tests/a.test.sh')|$(_line_suites ./a)|$(_line_suites 'd/x x')|$(_line_suites ../a.test.sh || echo FAIL)|$(_line_suites /d/a.test.sh || echo FAIL)|$(_line_suites d//a.test.sh || echo FAIL)|$(_line_suites d/./a.test.sh || echo FAIL)|$(_line_suites d/run.sh || echo FAIL)"
+
+# THE PASS IS GONE (wave-35 T1; D12, REQ-3 AC-3.1; ADR-054, which supersedes ADR-053): a landing starts
+# no background run, whatever .bionic/config.yaml says. The project declares a regression (`floor:`, a
+# stub that writes where it ran and waits for its go file) and the old switch, `background-pass: on`.
+# fails-when: ready starts a detached run, prints a pass line, or the record gains an ev=pass.
+R7_STUB="$WORLD_ROOT/r7-floor-stub.sh"
+printf '#!/bin/bash\nd=%s/r7-$1\nprintf "%%s\\n" "$(pwd -P)" >> "$d.started"\ni=0; while [ ! -e "$d.go" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done\necho "stub regression: 4 passed"\n' "$WORLD_ROOT" > "$R7_STUB"
+r7_started() { awk 'END { print NR + 0 }' "$WORLD_ROOT/r7-$1.started" 2>/dev/null || echo 0; }   # <tag> -> runs of the stub
+r7_ps() { ps -axo command= 2>/dev/null | R7N="$R7_STUB $1" awk 'index($0, ENVIRON["R7N"]) { c++ } END { print c + 0 }'; }   # <tag> -> live stubs (the needle in the environment, so awk never counts itself)
+RR7="$(ll_rworld)"
+printf 'floor: bash %s r7\nbackground-pass: on\n' "$R7_STUB" > "$RR7/.bionic/config.yaml"
+ll_verb "$RR7" T1
+K7="$(ll_field "$(ll_ev "$RR7" candidate | tail -1)" commit)"
+expect_nonempty "(r7-pre) a candidate was built" "$K7"
+expect_eq "(r7) AC-3.1 background-pass: on and a declared floor: ready lands and prints LANDED and the owed line, exactly" \
+  "0|$(printf 'LANDED T1 %s\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$K7" "$K7")" "$LL_RC|$LL_OUT"
+sleep 2
+expect_eq "(r7b) …the record holds the landing's published event (the reader reads this record)" "1" \
+  "$(ll_ev "$RR7" published | awk 'END { print NR + 0 }')"
+expect_eq "(r7c) …the declared regression never ran, and no process runs it" "0 0" "$(r7_started r7) $(r7_ps r7)"
+( bash "$R7_STUB" r7 >/dev/null 2>&1 & )
+ll_wait_lines "$WORLD_ROOT/r7-r7.started" 1 100
+expect_eq "(r7d) control: the same stub started by hand is counted by both readers" "1 1" "$(r7_started r7) $(r7_ps r7)"
+: > "$WORLD_ROOT/r7-r7.go"
+r7_gone() { [ "$(r7_ps r7)" = 0 ]; }
+r7_i=0; while ! r7_gone && [ "$r7_i" -lt 100 ]; do sleep 0.1; r7_i=$((r7_i + 1)); done
+sleep 1
+expect_eq "(r7e) …and once every stub is released and gone, the record still holds no ev=pass" "0 0" \
+  "$(r7_ps r7) $(ll_ev "$RR7" pass | awk 'END { print NR + 0 }')"
 
 # ---------------------------------------------------------------------------
 section "§PROOF: the tool makes the proof; no stamp is read (AC-1.2)"
@@ -1819,120 +1848,5 @@ expect_contains "(pa6b) …its verdict filed under the declared path" "|suite=sc
 expect_eq "(pa6c) …saying DEBT for the declared suite, once" "1" "$(printf '%s\n' "$LL_OUT" | grep -c '^DEBT T1 x.test.sh ')"
 expect_eq "(pa6d) …and the gate's reader of the bound plan deals the debt" "debt	x.test.sh	T9" \
   "$(bash -c '. "$1/proof.sh" && proof_debts "$2"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$PF")" | cut -f1-3)"
-
-# ---------------------------------------------------------------------------
-section "§PASS: a landing starts one pass of the declared regression in the background; one at a time per branch (wave-34 T9; REQ-5 AC-5.1, AC-5.5; D15)"
-# `ready` ends, after LANDED and before the owed line, by starting one pass of the project's declared
-# regression (`floor:` in .bionic/config.yaml, else tests/run.sh), detached, in a landing tree of its own
-# at the landed head, while the branch's pass lock is free. The regression here is a stub the config
-# declares: it writes where it ran, at which head and under which admission, then waits for its go file
-# (30 s at most) and ends with the code its rc file holds. Every pass is waited out before the next row.
-# fails-when: two passes run at once (P2), the lock is never freed so the landing after a pass starts none
-# (P3), a red pass is silent in the record (P3b), or `background-pass: off` still starts a pass (P0).
-PA_STUB="$WORLD_ROOT/pass-stub.sh"
-cat > "$PA_STUB" <<'STUB'
-#!/bin/bash
-d="$WORLD_ROOT/pass-$1"
-printf '%s %s %s\n' "$(pwd -P)" "$(git rev-parse HEAD 2>/dev/null)" "${BIONIC_GATE_ADMIT:-none}" >> "$d.started"
-i=0; while [ ! -e "$d.go" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
-echo "stub regression: 4 passed"
-exit "$(cat "$d.rc" 2>/dev/null || echo 0)"
-STUB
-pa_config() { printf '%s\n' "${@:2}" > "$1/.bionic/config.yaml"; }   # <root> <line>...
-pa_started() { awk 'END { print NR + 0 }' "$WORLD_ROOT/pass-$1.started" 2>/dev/null || echo 0; }   # <tag> -> passes started
-pa_wait_started() {  # <tag> <n> -> 0 once n passes of <tag> have started (10 s)
-  local i=0; while [ "$(pa_started "$1")" -lt "$2" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
-  [ "$(pa_started "$1")" -ge "$2" ]
-}
-pa_wait_passes() {  # <root> <n> -> 0 once the record holds n ev=pass lines (40 s)
-  local i=0; while [ "$(ll_ev "$1" pass | awk 'END { print NR + 0 }')" -lt "$2" ] && [ "$i" -lt 400 ]; do sleep 0.1; i=$((i + 1)); done
-  [ "$(ll_ev "$1" pass | awk 'END { print NR + 0 }')" -ge "$2" ]
-}
-pa_line() { printf '%s\n' "$LL_OUT" | grep '^pass: '; }
-# P0 — AC-5.5: background-pass: off starts nothing; the same world turned on starts one (the control).
-PA0="$(ll_rworld)"; : > "$WORLD_ROOT/pass-p0.go"
-pa_config "$PA0" "floor: bash $PA_STUB p0" "background-pass: off"
-ll_verb "$PA0" T1
-K0="$(ll_last_cand "$PA0" T1)"
-expect_eq "(P0) background-pass: off — ready lands and prints LANDED and the owed line, exactly" \
-  "0|$(printf 'LANDED T1 %s\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$K0" "$K0")" "$LL_RC|$LL_OUT"
-sleep 2
-expect_eq "(P0b) …and no pass started (the stub never ran)" "0" "$(pa_started p0)"
-pa_config "$PA0" "floor: bash $PA_STUB p0" "background-pass: on"
-ll_verb "$PA0" T2
-expect_regex "(P0c) control: the same world turned on — the next landing prints the pass line" '^pass: started at [0-9a-f]{12} pid=[0-9]+ log=' "$(pa_line)"
-expect_true "(P0c) …and the stub ran" pa_wait_started p0 1
-pa_wait_passes "$PA0" 1
-# P0d — the key absent reads the plan: `regression: no` starts nothing.
-PA0D="$(ll_rworld)"; : > "$WORLD_ROOT/pass-p0d.go"
-pa_config "$PA0D" "floor: bash $PA_STUB p0d"
-awk '{ print } /^working-branch: / { print "regression: no" }' "$(ll_plan "$PA0D")" > "$PA0D/p.n" && mv "$PA0D/p.n" "$(ll_plan "$PA0D")"
-ll_verb "$PA0D" T1
-sleep 2
-expect_eq "(P0d) no background-pass: key and the plan's regression: no — lands (0), no pass line, the stub never ran" "0||0" \
-  "$LL_RC|$(pa_line)|$(pa_started p0d)"
-# P1 — AC-5.1: a landing on a free lock starts one pass, in its own landing tree at the landed head.
-PA1="$(ll_rworld)"
-pa_config "$PA1" "floor: bash $PA_STUB p1"
-ll_verb "$PA1" T1
-K1="$(ll_last_cand "$PA1" T1)"
-expect_eq "(P1) ready exits 0, LANDED first" "0 LANDED T1 $K1" "$LL_RC $(printf '%s\n' "$LL_OUT" | head -1)"
-expect_regex "(P1b) …then one pass line naming the landed head, its pid and its log" \
-  "^pass: started at ${K1:0:12} pid=[0-9]+ log=[^ ]+\$" "$(pa_line)"
-expect_eq "(P1c) …exactly one pass line, and the owed line is still the last" "1 yes" \
-  "$(printf '%s\n' "$LL_OUT" | grep -c '^pass: ') $([ "$(printf '%s\n' "$LL_OUT" | tail -1)" = "landed T1 $K1 — owed: complete task T1, then stop wx-T1" ] && echo yes || echo no)"
-expect_absent "(P1d) …naming no poker verb" "session-poker" "$LL_OUT"
-expect_true "(P1e) the pass started" pa_wait_started p1 1
-PA1_TREE=""; PA1_HEAD=""; PA1_ADMIT=""
-{ read -r PA1_TREE PA1_HEAD PA1_ADMIT < "$WORLD_ROOT/pass-p1.started"; } 2>/dev/null
-expect_eq "(P1f) …at the landed head, which is the branch's head" "$K1 $K1" "$PA1_HEAD $(ll_head "$PA1")"
-expect_regex "(P1g) …in a landing tree of its own, not the checkout that holds the branch" "^${PA1}/\\.bionic/tmp/landing/[0-9]+\$" "$PA1_TREE"
-expect_regex "(P1h) …under an admission of the gate's (BIONIC_GATE_ADMIT)" '^[0-9]+$' "$PA1_ADMIT"
-expect_eq "(P1i) …and that request is kind pass, asked as main" "pass ${WORLD_SID}:main" \
-  "$(sed -n 's/^kind=//p' "$BIONIC_GATE_DIR/requests/$PA1_ADMIT" 2>/dev/null) $(sed -n 's/^who=//p' "$BIONIC_GATE_DIR/requests/$PA1_ADMIT" 2>/dev/null)"
-# P2 — a second landing during the pass starts none.
-ll_verb "$PA1" T2
-expect_eq "(P2) a landing during the pass lands (0) and prints no pass line" "0|" "$LL_RC|$(pa_line)"
-sleep 2
-expect_eq "(P2b) …and no second pass runs: the stub started once" "1" "$(pa_started p1)"
-: > "$WORLD_ROOT/pass-p1.go"
-expect_true "(P2c) the pass ends and the record says so" pa_wait_passes "$PA1" 1
-PA1_EV="$(ll_ev "$PA1" pass | tail -1)"
-expect_eq "(P2d) ev=pass at the head it ran, green, no failed suites" "$K1 green -" \
-  "$(ll_field "$PA1_EV" head) $(ll_field "$PA1_EV" result) $(ll_field "$PA1_EV" suites)"
-PA1_LOG="$(ll_field "$PA1_EV" log)"
-expect_regex "(P2e) …its log copied into the record directory" "^${PA1}/\\.bionic/docs/record/wave-x/pass-${K1:0:12}(-[0-9]+)?\\.log\$" "$PA1_LOG"
-expect_eq "(P2f) …opening as floor-run's log does: head=<the head> dirty=0 rc=0, then the command" \
-  "head=$K1 dirty=0 rc=0|command: bash $PA_STUB p1" "$(head -n 2 "$PA1_LOG" 2>/dev/null | paste -sd'|' -)"
-expect_contains "(P2g) …and the regression's own output" "stub regression: 4 passed" "$(cat "$PA1_LOG" 2>/dev/null)"
-expect_eq "(P2h) the pass ended its gate request" "0" "$(sed -n 's/^rc=//p' "$BIONIC_GATE_DIR/requests/$PA1_ADMIT" 2>/dev/null)"
-# P3 — the first landing after a pass ends starts the next; a red pass names itself in the record.
-PA3="$(ll_rworld)"; : > "$WORLD_ROOT/pass-p3.go"
-pa_config "$PA3" "floor: bash $PA_STUB p3"
-ll_verb "$PA3" T1
-expect_true "(P3-pre) the first pass ran and ended" pa_wait_passes "$PA3" 1
-echo 1 > "$WORLD_ROOT/pass-p3.rc"
-ll_verb "$PA3" T2
-K3="$(ll_last_cand "$PA3" T2)"
-expect_regex "(P3) the first landing after the pass ended starts the next" "^pass: started at ${K3:0:12} " "$(pa_line)"
-expect_true "(P3a) …and it runs" pa_wait_started p3 2
-expect_true "(P3b) a red pass is written to the record" pa_wait_passes "$PA3" 2
-PA3_EV="$(ll_ev "$PA3" pass | tail -1)"
-expect_eq "(P3c) …ev=pass at its head, red" "$K3 red" "$(ll_field "$PA3_EV" head) $(ll_field "$PA3_EV" result)"
-expect_eq "(P3d) …its log opens with the regression's code" "head=$K3 dirty=0 rc=1" "$(head -n 1 "$(ll_field "$PA3_EV" log)" 2>/dev/null)"
-# P4 — no floor: declared: the regression is the project's tests/run.sh, run in the pass's tree.
-PA4="$(ll_rworld)"
-printf '#!/bin/bash\necho "head=$(git rev-parse HEAD) dirty=0"\necho "ran-in=$(pwd -P) admit=${BIONIC_GATE_ADMIT:-none}"\necho "Failed:"\necho "    - z.test.sh (planted)"\necho "Gating: 1 passed, 1 failed"\nexit 1\n' > "$PA4/.worktrees/T1/tests/run.sh"
-git -C "$PA4/.worktrees/T1" add tests/run.sh && git -C "$PA4/.worktrees/T1" commit -qm "T1: a runner"
-ll_verb "$PA4" T1
-K4="$(ll_last_cand "$PA4" T1)"
-expect_regex "(P4) with no floor: and a tests/run.sh at the head, the landing starts a pass" "^pass: started at ${K4:0:12} " "$(pa_line)"
-expect_true "(P4b) …which ends in the record" pa_wait_passes "$PA4" 1
-PA4_EV="$(ll_ev "$PA4" pass | tail -1)"
-expect_eq "(P4c) …red, naming the suites the runner lists as failed" "$K4 red z.test.sh" \
-  "$(ll_field "$PA4_EV" head) $(ll_field "$PA4_EV" result) $(ll_field "$PA4_EV" suites)"
-expect_regex "(P4d) …the log is the runner's own, run in a landing tree under the pass's admission" \
-  "ran-in=${PA4}/\\.bionic/tmp/landing/[0-9]+ admit=[0-9]+" "$(cat "$(ll_field "$PA4_EV" log)" 2>/dev/null)"
-expect_eq "(P4e) …and its first line is the runner's head line" "head=$K4 dirty=0" "$(head -n 1 "$(ll_field "$PA4_EV" log)" 2>/dev/null)"
 
 finish
