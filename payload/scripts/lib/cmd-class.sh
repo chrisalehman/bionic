@@ -908,7 +908,24 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # A start, or nothing: what a script whose text claims no suite run answers at the top level
     # (kind `script`, the wall carries the agent) and inside a script being read (no claim).
     function script_start(p) { return (SCRIPT_LVL == 0 ? script_claim("script", p) : "none") }
-    function script_read(p,   root, f, ln, rc, txt, nl, k, ss, j, c, run0, ik, it, isvar) {
+    # A LINE READ INSIDE A SCRIPT GETS THE CLAIM THE SAME LINE TYPED INLINE GETS (wave-35 T4; REQ-4
+    # AC-4.3, D13). Every suite line used to come back as one `run` claim, its target the line as
+    # written, which the wall holds to `re_executes=` alone: so a script running a BUDGETED suite
+    # through the door was refused and sent to `--reexec+`, while the same line typed inline was
+    # admitted (A-orch-17, wave-34). Now a door line is an `only` claim per suite it names, a bare
+    # suite a `file` claim, a runner form a `run` claim as before, and the full tree the `file
+    # run.sh` claim as before (returned at once: that arm refuses first). EVERY suite line of the
+    # script is claimed, not only the first, into SR_RECS (`<kind>\t<target>\t<path>` lines); a
+    # nested script adds its own lines there, and its caller reads it as kind `multi` and moves on.
+    # The top-level read answers kind `multi`, and the targets mode prints one claim per record,
+    # each with the command as typed for its run.
+    function sr_add(k, t, pth,   key) {
+      key = k SUBSEP t
+      if (key in SR_SEEN) return
+      SR_SEEN[key] = 1; SR_N++
+      SR_RECS = SR_RECS k "\t" t "\t" pth "\n"
+    }
+    function script_read(p,   root, f, ln, rc, txt, nl, k, ss, j, c, run0, ik, it, isvar, top, od, no, oj, ON2) {
       if (index(p, "$") || index(p, "`")) return script_start(p)
       root = wt_norm(ENVIRON["_CMD_SCRIPT_ROOT"])
       f = script_path(p)
@@ -922,6 +939,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       close(f)
       if (rc < 0 || nl > 2000) return script_start(p)
       run0 = LAST_RUN
+      top = (SCRIPT_LVL == 0)
+      if (top) { SR_RECS = ""; SR_N = 0; split("", SR_SEEN) }
       k = segments(script_hd_strip(txt), ss)
       for (j = 1; j <= k; j++) {
         if (trim(ss[j]) == "") continue
@@ -931,14 +950,26 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         if (c != "suite" || LAST_DRY) continue
         ik = LAST_KIND; it = (LAST_KIND == "run" ? LAST_TARGET : LAST_RUN)
         LAST_RUN = run0
-        # A `$` line claims nothing: the gate`s ask judges what it starts.
-        isvar = (index(LAST_TARGET, "$") || index(LAST_TARGET, "`") || index(LAST_PATH, "$") || index(LAST_PATH, "`"))
-        if (ik == "script" || isvar) continue
+        # A `$` line claims nothing: the gate`s ask judges what it starts. A door name built from
+        # one is such a line too (`--only "$s"`).
+        isvar = (index(LAST_TARGET, "$") || index(LAST_TARGET, "`") || index(LAST_PATH, "$") || index(LAST_PATH, "`") \
+                 || (ik == "only" && (index(LAST_ONLY, "$") || index(LAST_ONLY, "`"))))
+        if (ik == "script" || ik == "multi" || isvar) continue
         if (ik == "file" && LAST_TARGET == "run.sh") return script_claim("file", "run.sh")
-        return script_claim("run", it)
+        if (ik == "only") {
+          # One claim per suite the door names, scoped to the runner`s own directory, as inline.
+          od = LAST_PATH; sub(/[^\/]*$/, "", od)
+          no = split(LAST_ONLY, ON2, " ")
+          for (oj = 1; oj <= no; oj++) sr_add("only", fc(base(ON2[oj])), od fc(base(ON2[oj])))
+        } else if (ik == "file") sr_add("file", LAST_TARGET, LAST_PATH)
+        else sr_add("run", it, "")
       }
       LAST_RUN = run0
       LAST_TARGET = ""; LAST_PATH = ""; LAST_ONLY = ""; LAST_DRY = 0; LAST_SKIND = ""
+      if (SR_N > 0) {
+        LAST_SKIND = "multi"; LAST_TARGET = p
+        return "suite"
+      }
       return script_start(p)
     }
 
@@ -1591,6 +1622,23 @@ _cmd_class_awk() {  # <mode> ; command on stdin
             # A SCRIPT CLAIM IS ONE PER SCRIPT RUN (wave-31 T11): two scripts running one suite are
             # two runs the budget asks about, each by its own command.
             tk = ((LAST_KIND == "run" || LAST_KIND == "script") && LAST_SKIND != "" ? LAST_KIND SUBSEP LAST_RUN SUBSEP LAST_TARGET : LAST_TARGET)
+            # A SCRIPT`S LINES, CLAIMED AS INLINE (wave-35 T4; D13): one claim per record
+            # `script_read` kept, each with the command as typed for its run. A suite claimed
+            # through a script closes the reading with `split`: the script`s exit code need not
+            # speak for the suites in it, so the stamp names none, as the `run` claim it replaces
+            # never named one.
+            if (cls == "suite" && LAST_KIND == "multi" && !LAST_DRY) {
+              nr = split(SR_RECS, RR, "\n")
+              for (rj = 1; rj <= nr; rj++) {
+                if (RR[rj] == "") continue
+                split(RR[rj], RF, "\t")
+                rk = (RF[1] == "run" ? "run" SUBSEP LAST_RUN SUBSEP RF[2] : (RF[1] == "only" ? "only:" RF[2] : RF[2]))
+                if (rk in tgt_seen) continue
+                tgt_seen[rk] = 1
+                if (RF[1] != "run") SPLIT = 1
+                printf "%s\t%s\t%s\t%s\n", RF[1], RF[2], LAST_RUN, RF[3]
+              }
+            } else
             if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && (LAST_KIND == "only" || !(tk in tgt_seen))) {
               if (LAST_KIND != "only") tgt_seen[tk] = 1
               # KIND, TARGET, RUN AND PATH, tab-separated. The shell wrappers are the only

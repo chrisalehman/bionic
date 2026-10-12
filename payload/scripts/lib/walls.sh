@@ -1407,7 +1407,8 @@ _eg_commit_count() {
 }
 
 # _eg_git_only <text> -> 0 when every segment of <text> is a simple command whose first word
-# is `git`, `true`, `:` or `exit`; 1 for anything else.
+# is `git`, `true`, `:` or `exit`, or one of the eight file and print words below under their
+# guards; 1 for anything else.
 #
 # AN ALLOW-LIST, NOT A DENY-LIST (review R2-2, wave-19 T6e). This reader used to name the words
 # that move the shell (`cd`, `pushd`, `eval`, a shell) and pass everything else. That was
@@ -1434,13 +1435,33 @@ _eg_commit_count() {
 # adds, at a trailing separator, has the empty first word the shell loop also passed — and the
 # same leading-blank strip and first word. `LC_ALL=C` reads bytes; every character it tests is
 # ASCII. The text arrives through ENVIRON, never `-v`, which would read its backslashes.
+#
+# THE LIST GREW BY EIGHT WORDS, AND ONLY EIGHT (wave-35 T4; REQ-4 AC-4.2, D13). A walker's
+# `cd <scratch> && ln -s … && git add … && git commit` lost the exemption to its `ln` and was then
+# judged against this run's plan (A-orch-30, wave-34). `ln mkdir cp mv rm touch printf echo` are
+# read past now: the first six run in a child process and `printf`/`echo` print, so none of them
+# moves the shell or redirects git. Builtins and keywords stay off (`export`, `pwd`, `set`,
+# `pushd`…), and so does a `NAME=value` prefix, `GIT_*=` among them: either changes the shell
+# that commits.
+#
+# WHAT THOSE WORDS CAN STILL DO is write a file, and a `.git` in the scratch directory naming the
+# root's repository sends the one commit into the ROOT while the reader, which asks git before
+# the command runs, places it outside. So a segment one of them starts must carry no `$` and no
+# glob character (`*`, `?`, `[`), each of which can spell `.git` without writing it, and `printf`
+# no `-v`, which assigns in the shell that commits; `_eg_placed` costs the exemption for a
+# literal `.git` path anywhere in the text. The three rounds of deny-list that were beaten (R1,
+# C1, R2-2) are why this stays an allow-list: a word is read past only when it is named here.
+#
+# _EG_GO_WHY names what cost the exemption, for the jurisdiction refusal (empty on 0).
+_EG_GO_WHY=""
 _eg_git_only() {
-  local _t="${1:-}"
+  local _t="${1:-}" _rc
+  _EG_GO_WHY=""
   case "$_t" in
-    *'sh -c'*|*'sh	-c'*) return 1 ;;
-    *[\(\)\{\}\`]*) return 1 ;;
+    *'sh -c'*|*'sh	-c'*) _EG_GO_WHY="it carries an sh -c string"; return 1 ;;
+    *[\(\)\{\}\`]*) _EG_GO_WHY="it opens a subshell, a group, a function body or a backtick"; return 1 ;;
   esac
-  _EG_GO_TEXT="$_t" LC_ALL=C awk '
+  _EG_GO_WHY="$(_EG_GO_TEXT="$_t" LC_ALL=C awk '
     BEGIN {
       t = ENVIRON["_EG_GO_TEXT"]
       gsub(/>&/, ">", t); gsub(/<&/, "<", t); gsub(/&>/, ">", t)
@@ -1449,10 +1470,20 @@ _eg_git_only() {
         w = seg[i]
         sub(/^[ \t]+/, "", w)
         sub(/[ \t].*$/, "", w)
-        if (w != "" && w != "git" && w != "true" && w != ":" && w != "exit") exit 1
+        if (w == "" || w == "git" || w == "true" || w == ":" || w == "exit") continue
+        if (w == "ln" || w == "mkdir" || w == "cp" || w == "mv" || w == "rm" || w == "touch" || w == "printf" || w == "echo") {
+          if (seg[i] ~ /[$*?[]/) { printf "a %s segment carries a $ or a glob, which can name .git unwritten", w; exit 1 }
+          if (w == "printf" && seg[i] ~ /[ \t]-v/) { printf "printf -v assigns in the shell that commits"; exit 1 }
+          continue
+        }
+        printf "%s starts a segment, and only git, true, :, exit, ln, mkdir, cp, mv, rm, touch, printf and echo are read past", w
+        exit 1
       }
       exit 0
-    }' </dev/null
+    }' </dev/null)"
+  _rc=$?
+  [ "$_rc" -eq 0 ] && _EG_GO_WHY=""
+  return "$_rc"
 }
 
 # _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
@@ -1483,22 +1514,44 @@ _eg_git_only() {
 # allow-list needs no matching change: it already fails closed on any first word that is not
 # byte-for-byte `git`, `true`, `:` or `exit`, so a quote- or backslash-split `git` itself is
 # already judged rather than exempted (A-T6.13).
+#
+# A `.git` PATH ANYWHERE IN THE TEXT costs the exemption too (wave-35 T4; D13). The words
+# `_eg_git_only` gained write files, and `ln -s <root>/.git .git` or `echo "gitdir: …" > .git` in
+# the scratch directory sends the one commit into the root's repository after this reader has
+# asked git where it lands. A `.git` that ends the word or is followed by `/` is the repository's
+# directory; `.gitignore`, `.git-blame-ignore-revs` and `foo.git` are not it. Read on the raw text
+# and on the stripped copy, like the flags above.
+#
+# _EG_PLACED_WHY names what cost the exemption, for the jurisdiction refusal (empty on 0).
+_EG_PLACED_WHY=""
+_eg_dotgit_re='(^|[^A-Za-z0-9_.-])\.git([^A-Za-z0-9_-]|$)'
 _eg_placed() {
   local _c _sep _dq
+  _EG_PLACED_WHY=""
   # THE SHARED STRIP (`_wall_screen`; wave-24-fixit-1811 T4). It also joins a
   # backslash-newline, which the shell does too, so `--git-\<newline>dir` now costs
   # the exemption as well — the fail-closed direction this copy exists for.
   _wall_screen "$COMMAND"; _dq="$_WALL_STRIPPED"
   case "$COMMAND" in
-    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
+      _EG_PLACED_WHY="it names the repository outright (--git-dir, --work-tree or a GIT_DIR-family variable)"; return 1 ;;
   esac
   case "$_dq" in
-    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
+      _EG_PLACED_WHY="it names the repository outright (--git-dir, --work-tree or a GIT_DIR-family variable)"; return 1 ;;
+  esac
+  case "$COMMAND$_dq" in
+    *.git*)
+      if [[ "$COMMAND" =~ $_eg_dotgit_re ]] || [[ "$_dq" =~ $_eg_dotgit_re ]]; then
+        _EG_PLACED_WHY="it names a .git path, which can point the directory at another repository"; return 1
+      fi ;;
   esac
   case "$_EG_CWD_SRC" in
-    -C) [ "$_EG_COMMIT_NC" -eq 1 ] && _eg_git_only "$COMMAND" ;;
+    -C)
+      [ "$_EG_COMMIT_NC" -eq 1 ] || { _EG_PLACED_WHY="the commit carries more than one directory override (-C)"; return 1; }
+      _eg_git_only "$COMMAND" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
     cd)
-      [ "$_EG_COMMIT_NC" -eq 0 ] || return 1
+      [ "$_EG_COMMIT_NC" -eq 0 ] || { _EG_PLACED_WHY="the commit carries a -C after the leading cd"; return 1; }
       _c="$COMMAND"
       # Behind a `case`, as in `_eg_commit_cwd` (wave-24-fixit-1811 T4).
       while :; do case "$_c" in ' '*) _c="${_c# }" ;; '	'*) _c="${_c#	}" ;; *) break ;; esac; done
@@ -1507,12 +1560,14 @@ _eg_placed() {
         '&&'*) _sep="${_sep#&&}" ;;
         '||'*) _sep="${_sep#||}" ;;
         ';'*|$'\n'*) _sep="${_sep#?}" ;;
-        *) return 1 ;;
+        *) _EG_PLACED_WHY="the leading cd is not followed by &&, || or ;, so it moves no shell the commit runs in"; return 1 ;;
       esac
-      _eg_git_only "$_sep" ;;
+      _eg_git_only "$_sep" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
     payload)
-      [ "$_EG_COMMIT_NC" -eq 0 ] && _eg_git_only "$COMMAND" ;;
-    *) return 1 ;;
+      [ "$_EG_COMMIT_NC" -eq 0 ] || { _EG_PLACED_WHY="the commit carries a -C that is not absolute"; return 1; }
+      _eg_git_only "$COMMAND" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
+    env-C) _EG_PLACED_WHY="env -C moves the commit, and the wall places only git -C, a leading cd or the cwd"; return 1 ;;
+    *) _EG_PLACED_WHY="the wall could not read where the commit runs"; return 1 ;;
   esac
 }
 
@@ -1521,10 +1576,35 @@ _eg_placed() {
 # engaged root's; 1 otherwise, and for every case the gate judges instead. It reads COMMAND,
 # the payload's cwd and BIONIC_ROOT, which its caller was handed, and asks git; it reads no
 # plan, roster or marker (D11).
+#
+# AND WHEN IT CANNOT EXEMPT, IT SAYS WHETHER THE COMMIT WAS PLACED OUTSIDE (wave-35 T4; REQ-4
+# AC-4.2, D13). _EG_JUR_UNPLACED is set, naming why, when the directory the reader places the
+# commit in is outside the engaged repository but the command around it is one the wall cannot
+# place exactly as git will: two commits, a word off `_eg_git_only`'s list, a second `-C`, a
+# `.git` path. The gate refuses such a commit for the split and never judges it against the bound
+# plan, whose evidence has nothing to say about another repository's work (A-orch-30, wave-34:
+# a scratch repository's commit was refused because "Step-5 head … is not a commit in the
+# repository at <scratch>"). It stays empty for a commit placed inside, for one the reader cannot
+# place at all, and for a leading `cd` followed by a second directory, which the two-directory
+# arm already refuses naming both. So the git question is asked of every commit now, not only of
+# a placeable one: one `rev-parse` per commit command.
+_EG_JUR_UNPLACED=""
 eg_commit_outside_root() {
+  _EG_JUR_UNPLACED=""
   _eg_commit_cwd
   _eg_commit_count
-  [ "$_EG_COMMITS" -eq 1 ] && _eg_placed && _eg_outside_root "$_EG_CWD"
+  [ "$_EG_COMMITS" -ge 1 ] || return 1
+  _eg_outside_root "$_EG_CWD" || return 1
+  if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; then
+    return 1
+  fi
+  if [ "$_EG_COMMITS" -ne 1 ]; then
+    _EG_JUR_UNPLACED="it carries $_EG_COMMITS commits, and the wall places one"
+    return 1
+  fi
+  _eg_placed && return 0
+  _EG_JUR_UNPLACED="${_EG_PLACED_WHY:-the wall could not read where the commit runs}"
+  return 1
 }
 
 # THE STEP FROM WHICH THE GATE READS A RUN'S READINGS AND VERDICTS, named once (wave-28 T72; D33, D19).
@@ -1564,8 +1644,9 @@ eg_plan_reads_readings() {
 # advice appended to an already-refused call, so a false positive costs a
 # sentence and a false negative costs the loop this exists to break.
 plan_write_note() {
-  local rel="$PLAN"
-  [ -n "$PLAN" ] || return 0
+  # `${PLAN:-}`: the jurisdiction refusal (wave-35 T4) is made before any plan is read.
+  local rel="${PLAN:-}"
+  [ -n "$rel" ] || return 0
   case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
   case "$COMMAND" in
     *"$PLAN"*|*"$rel"*)
@@ -1921,6 +2002,22 @@ if eg_commit_outside_root; then
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here\n' \
     "$_EG_JUR_TOP" "$BIONIC_ROOT" >&2
   exit 0
+fi
+
+# AN OUTSIDE COMMIT THE WALL CANNOT PLACE IS REFUSED HERE, FOR THE SPLIT (wave-35 T4; REQ-4
+# AC-4.2, D13). The reader placed it in another repository, and the command around it is one the
+# wall cannot place exactly as git will (`eg_commit_outside_root` names why). It used to fall
+# through and be judged against this run's plan, whose evidence says nothing about another
+# repository: a walker's scratch commit was refused for this run's Step-5 head (A-orch-30). It is
+# refused instead, before any plan is read, and the refusal names the one shape that is exempt.
+# Every §REQ-9 9a moving form (`if cd`, `time cd`, `pushd`, a second `-C`, two commits) still
+# lands here refused: the commit is not admitted, and a writer who meant the root splits it the
+# same way, with `git -C <root> commit`, which is judged as before.
+if [ -n "$_EG_JUR_UNPLACED" ]; then
+  refuse exit2 commit "cannot place this outside commit" "split it: setup, then commit alone" \
+"evidence-gate: $_EG_JUR_TOP is outside the engaged repository ($BIONIC_ROOT), but the wall cannot place this commit exactly as git will: $_EG_JUR_UNPLACED.
+An outside commit the wall cannot place is not exempt, and this run's plan is not read for it: it is refused here.
+Split it: run the setup as its own command, then commit alone with: git -C $_EG_JUR_TOP commit"
 fi
 
 # THE DOCS ROOT, FROM THE LIBRARY. This hook carried `resolve_docs_root()` and was the
@@ -6560,6 +6657,14 @@ On the budget: ${2:-(nothing — this brief declared Suites: none)}
 ${_spell}"
       return 2 ;;
   esac
+  # A SUITE CLAIMED THROUGH A SCRIPT (wave-35 T4; D13) is refused by its own name, so the remedy
+  # names `--suites+ <suite>`; the command that ran it is named beside it, when it does not
+  # already name the suite.
+  local _via=""
+  case "${_run:-}" in
+    ''|*"$1"*) : ;;
+    *) _via=" (run by: ${_run})" ;;
+  esac
   fold_block exit2 suite-run \
     "$(_budget_wire_fact "allowed: " suite-run "run only the budgeted suites" "$2")" \
     "run only the budgeted suites" \
@@ -6568,7 +6673,7 @@ forty minutes of a machine nobody else can use. The set was recorded on this age
 roster row at dispatch, from the files its brief declared.
 
 On the budget: ${2:-(nothing — this brief declared Suites: none)}
-You asked for: $1
+You asked for: $1${_via}
 
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
