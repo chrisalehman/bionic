@@ -615,17 +615,22 @@ $(units_rows "$1" 2>/dev/null)
 EOF
   return 1
 }
-# `lands_on=` as the roster holds it (labels, D4): `none`, or suite names separated by `,` or blanks,
-# each a bare file name with or without `.test.sh`. Prints them as `<name>.test.sh`, comma-joined.
-# THE LABEL'S OWN GRAMMAR (wave-28 T64): the same one `payload/scripts/lib/brief.sh` lifts a `Lands-on:` line
-# with — a name is `[A-Za-z0-9_][A-Za-z0-9_-]*` with or without `.test.sh`, a path is read by its basename,
-# a repeat is dropped — so a value no label could have written (`run.sh`, the budget's full-runner token,
-# or `a.b`) is no suite. The value of `suites_allowed=` goes through here too: one parser, one verdict.
-_line_suites() {  # <lands_on value> -> `a.test.sh,b.test.sh` | none; 1 when a name is not a suite
+# `lands_on=` as the roster holds it (labels, D4): `none`, or suites separated by `,` or blanks, each a
+# bare file name or a path, with or without `.test.sh`. Prints them as `<name>.test.sh` or
+# `<dir>/<name>.test.sh`, comma-joined. THE LABEL'S OWN GRAMMAR (wave-28 T64): the same one
+# `payload/scripts/lib/brief.sh` lifts a `Lands-on:` line with — a name is `[A-Za-z0-9_][A-Za-z0-9_-]*` with
+# or without `.test.sh`; a path keeps its directories (wave-34 T27), each a plain name, never `..` and never
+# absolute, a leading `./` dropped while another `/` follows; a repeat is dropped — so a value no label
+# could have written (`run.sh`, the budget's full-runner token, `a.b`, `../x.test.sh`) is no suite. The
+# value of `suites_allowed=` goes through here too: one parser, one verdict.
+_line_suites() {  # <lands_on value> -> `a.test.sh,d/b.test.sh` | none; 1 when a name is not a suite
   case "$1" in none|none[[:space:]]*) printf 'none\n'; return 0 ;; esac
   printf '%s\n' "$1" | tr ', \t' '\n\n\n' | awk '
-    NF { t = $0; sub(/.*\//, "", t)
-         if (t !~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) { bad = 1; exit }
+    NF { t = $0
+         while (t ~ /^\.\/.*\//) t = substr(t, 3)
+         n = split(t, P, "/")
+         for (i = 1; i < n; i++) if (P[i] !~ /^[A-Za-z0-9_.-]+$/ || P[i] == ".." || (P[i] == "." && i > 1)) { bad = 1; exit }
+         if (P[n] !~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) { bad = 1; exit }
          sub(/\.test\.sh$/, "", t); t = t ".test.sh"
          if (index("," o ",", "," t ",") == 0) o = o (o == "" ? "" : ",") t }
     END { if (bad || o == "") exit 1; print o }'
@@ -1103,7 +1108,7 @@ _line_red_log() {  # <rec> <row> <candidate> <suite>
 # floor judge does not count it as the suite's state (lib/proof.sh `_proof_records`).
 _line_red_owner() {  # <plan> <rec> <row> <cbase> <suite> <candidate's log> <debt> <deadline> <candidate>
   local plan="$1" rec="$2" row="$3" s="$5" head hr="" hl="" cause against
-  if [ "$s" = "$7" ]; then LINE_RED=declared; return 0; fi
+  if [ "${s##*/}" = "$7" ]; then LINE_RED=declared; return 0; fi
   LINE_RED=row
   head="$(line_head "$plan")" || return 0
   IFS=$'\t' read -r hr hl <<EOT
@@ -1177,13 +1182,15 @@ _line_new_fails() {  # <candidate's log> <head's log>
 }
 
 # THE DECLARED DEBT (wave-27 T67; D8, AC-9.4): the entry's declared suite when its verdict on
-# <candidate> is red. Read from the record: the `debt=` of the entry's latest `ready`.
+# <candidate> is red. Read from the record: the `debt=` of the entry's latest `ready`. The debt names a
+# suite by its file name, so a path-qualified suite is the debt by its file name (wave-34 T27).
 _line_declared() {  # <rec> <row> <candidate> -> the suite; 1 when nothing is owed
   awk -F'|' -v r="row=$2" -v c="commit=$3" '
     $3 == r && ($2 == "ev=published" || $2 == "ev=returned") { d = "" }
     $2 == "ev=ready" && $3 == r { for (i = 3; i <= NF; i++) if (index($i, "debt=") == 1) d = substr($i, 6) }
     $2 == "ev=verdict" && $3 == r && $4 == c { v[substr($5, 7)] = substr($6, 8) }
-    END { if (d != "" && d != "-" && v[d] == "red") { print d; exit 0 } exit 1 }' "$1" 2>/dev/null
+    END { if (d != "" && d != "-") for (s in v) { b = s; sub(/.*\//, "", b); if (b == d && v[s] == "red") { print d; exit 0 } }
+          exit 1 }' "$1" 2>/dev/null
 }
 # THE DEBT'S WRITE, inside the publish lock, before the fast-forward: one `debt:` line by the debt's
 # one writer (lib/worktree.sh `_wt_debt_write`), naming the row, its branch and head, the suite, the
@@ -1203,7 +1210,7 @@ _line_debt_write() {  # <rec> <row> <row commit> <candidate> <row branch> <at>
 _line_suite_log() {  # <rec> <row> <suite> <candidate> -> a path no run has written
   local d="${1%/*}/line" b p n=1
   mkdir -p "$d" 2>/dev/null
-  b="${d}/${2//\//-}-${3%.test.sh}-$(printf '%.12s' "$4")"
+  b="${3##*/}"; b="${d}/${2//\//-}-${b%.test.sh}-$(printf '%.12s' "$4")"
   p="${b}.log"
   while [ -e "$p" ]; do n=$((n + 1)); p="${b}-${n}.log"; done
   printf '%s' "$p"
@@ -1257,7 +1264,7 @@ _line_kill_tree() {  # <pid>
 _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite> <deadline>
   local within="" res rp r
   LINE_RESULT=""; LINE_LOG="$(_line_suite_log "$2" "$3" "$7" "$4")"
-  if [ -n "$8" ]; then within="$(_line_time_for "$7" "$8" "$6")" || { LINE_RESULT=waiting; return 0; }; fi
+  if [ -n "$8" ]; then within="$(_line_time_for "${7##*/}" "$8" "$6")" || { LINE_RESULT=waiting; return 0; }; fi
   res="${LINE_LOG%.log}.run"; : > "$res"
   # A JOB OF ITS OWN (wave-33 T2; D3, AC-7.1): a plain `&` would start the runner, and so its suite,
   # with INT and QUIT ignored; the runner's own spawn of the suite is one too (`_line_runner`).
@@ -1281,13 +1288,15 @@ _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite>
   fi
   rm -f "$res"
 }
-# WHERE A SUITE LIVES (wave-34 T7; D23, AC-14.4). The roster holds a suite by its file name (the lift reads
-# a `Lands-on:` path by its basename, `_line_suites`), so the file is found in the landing tree: `tests/<name>`
-# when it is there, as before; otherwise the one tracked file of that name, wherever the project keeps its
-# suites (`scripts/deploy/__tests__/x.test.sh`). None, or two or more and none under `tests/`, is the old
+# WHERE A SUITE LIVES (wave-34 T7; D23, AC-14.4). A path-qualified suite is run at exactly the path declared
+# (wave-34 T27; critic S2): never a same-named file elsewhere, and a path the tree lacks cannot start, so it
+# stalls the entry. A bare name is found in the landing tree: `tests/<name>` when it is there, as before;
+# otherwise the one tracked file of that name, wherever the project keeps its suites
+# (`scripts/deploy/__tests__/x.test.sh`). None, or two or more and none under `tests/`, is the old
 # `tests/<name>`: ready picks no suite for the writer, and the suite that cannot start stalls the entry.
-_line_suite_path() {  # <landing tree> <name.test.sh> -> the suite's path in that tree
+_line_suite_path() {  # <landing tree> <suite as lands_on= holds it> -> the suite's path in that tree
   local tree="$1" name="$2" f hit="" n=0
+  case "$name" in */*) printf '%s\n' "$name"; return 0 ;; esac
   if [ ! -e "$tree/tests/$name" ]; then
     while IFS= read -r f; do
       [ -n "$f" ] || continue
@@ -1304,7 +1313,7 @@ LINE_LS
 # carrier is gone.
 _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> <carrier pid>
   local id rc p
-  id="$(gate_ask landing "$1" ${2:+--within "$2"})"; rc=$?
+  id="$(gate_ask landing "${1##*/}" ${2:+--within "$2"})"; rc=$?
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\n' "$id" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended

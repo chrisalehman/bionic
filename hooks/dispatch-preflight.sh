@@ -2746,7 +2746,7 @@ if [ -n "$_lo_bad" ]; then
   _lo_out="${_lo_bad%% *}"
 elif [ -n "$DP_LANDS_ON" ] && [ "$DP_LANDS_ON" != none ]; then
   for _lo_s in ${DP_LANDS_ON//,/ }; do
-    case " $SUITES_ALLOWED " in *" $_lo_s "*) : ;; *) _lo_out="$_lo_s"; break ;; esac
+    case " $SUITES_ALLOWED " in *" ${_lo_s##*/} "*) : ;; *) _lo_out="$_lo_s"; break ;; esac
   done
 fi
 if [ -n "$_lo_out" ]; then
