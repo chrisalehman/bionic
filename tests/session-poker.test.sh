@@ -6225,6 +6225,65 @@ add_row "$RHX" name=w-after status=intended agent_id= plan="$PHX" launched_at="$
 poke "$RHX" adopt --report-only
 expect_contains "HX-7 a dispatch after the handoff was written marks it STALE" "STALE" "$OUT"
 expect_contains "HX-7b …naming the dispatch" "w-after" "$OUT"
+
+# THE HANDOFF ITSELF READS STALE (wave-34 T29; D24, AC-14.2). adopt saying so is not enough: a reader of
+# the plan's own `## Handoff` was told "safe to exit: yes" while writers dispatched after it ran. The plan
+# writer that runs at every dispatch (`launch-sync`, which the launch recorder starts) rewrites both
+# safety lines to STALE, naming each later dispatch with its time, local and ISO, until `handoff` runs
+# again. The zone is pinned to a fixed offset no machine defaults to, so the local half is checkable.
+s42_snap "$RHX" "$PHX"
+HX_TZ_WAS="${TZ-}"; export TZ="HXT-5:30"
+HX_LOCAL="$(date -u -j -v+5H -v+30M -f '%Y-%m-%dT%H:%M:%SZ' "$HX_NEXT" '+%Y-%m-%d %H:%M' 2>/dev/null \
+  || date -u -d "$HX_NEXT + 5 hours 30 minutes" '+%Y-%m-%d %H:%M')"
+poke "$RHX" launch-sync
+HXB="$(hx_body "$PHX")"
+expect_eq "HX-8 launch-sync exits 0 with a later dispatch to mark" "0" "$RC"
+expect_contains "HX-8b the handoff's safe-to-exit line reads stale, naming the dispatch, its local time and its ISO time" \
+  "- safe to exit: no — STALE: dispatched after this handoff was written: w-after at $HX_LOCAL HXT ($HX_NEXT)" "$HXB"
+expect_contains "HX-8c …and the /clear line reads stale too" "- safe to /clear: no — STALE" "$HXB"
+expect_absent "HX-8d …and neither still reads safe (HX-5 read yes on the same extractor)" "- safe to exit: yes" "$HXB"
+expect_contains "HX-8e …the rest of the handoff is untouched: its written: instant stands" "written: $HX_AT" "$HXB"
+poke "$RHX" adopt --report-only
+expect_contains "HX-8f adopt's own STALE report is kept as it was" "STALE: 1 dispatch(es) of this plan since (w-after)" "$OUT"
+cp "$PHX" "$TMPROOT/hx-marked"
+poke "$RHX" launch-sync
+expect_eq "HX-9 a second launch-sync with nothing new exits 0" "0" "$RC"
+expect_true "HX-9b …and leaves the marked plan byte-identical (cmp)" cmp -s "$TMPROOT/hx-marked" "$PHX"
+# THE REWRITE CLEARS IT: a handoff written after the dispatch has seen it.
+while [ "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \< "$HX_NEXT" ] || [ "$(date -u +%Y-%m-%dT%H:%M:%SZ)" = "$HX_NEXT" ]; do sleep 0.2; done
+s42_snap "$RHX" "$PHX"
+poke "$RHX" handoff
+HXB="$(hx_body "$PHX")"
+expect_contains "HX-10 handoff rewrites the safety lines from the harness again" "- safe to exit: yes" "$HXB"
+expect_absent "HX-10b …and the STALE mark is gone" "STALE" "$HXB"
+poke "$RHX" launch-sync
+HXB="$(hx_body "$PHX")"
+expect_contains "HX-10c a launch-sync after the rewrite leaves it current" "- safe to exit: yes" "$HXB"
+
+# BEFORE STEP 4, WITH NO LAUNCH CONFIRMED: there is no launch to apply, and a handoff is still a handoff. A
+# researcher dispatched at Step 2 outdates it as much as a writer at Step 4 does.
+RHY="$(make_repo hx-early)"; ( cd "$RHY" && git commit -q --allow-empty -m init )
+git -C "$RHY" config user.name "Dana Fixture"
+PHY="$(s42_plan "$RHY" 2)"
+new_roster "$RHY"
+s42_snap "$RHY" "$PHY"
+poke "$RHY" handoff
+HYB="$(hx_body "$PHY")"
+expect_contains "HX-11 precondition: a Step-2 plan takes a handoff with its safety line" "- safe to exit: " "$HYB"
+cp "$PHY" "$TMPROOT/hy-before"
+poke "$RHY" launch-sync
+expect_eq "HX-11b with no dispatch since, launch-sync exits 0" "0" "$RC"
+expect_true "HX-11c …and writes nothing (cmp)" cmp -s "$TMPROOT/hy-before" "$PHY"
+HY_AT="$(hx_body "$PHY" | awk 'NF { sub(/^written: /, ""); print; exit }')"
+HY_NEXT="$(date -u -j -v+1S -f '%Y-%m-%dT%H:%M:%SZ' "$HY_AT" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$HY_AT + 1 second" +%Y-%m-%dT%H:%M:%SZ)"
+add_row "$RHY" name=r-early status=intended agent_id= subagent_type=bionic:researcher plan="$PHY" launched_at="$HY_NEXT"
+poke "$RHY" launch-sync
+HYB="$(hx_body "$PHY")"
+expect_eq "HX-12 a Step-2 launch-sync with a later dispatch exits 0" "0" "$RC"
+expect_contains "HX-12b …and marks the handoff stale, naming the dispatch" \
+  "- safe to exit: no — STALE: dispatched after this handoff was written: r-early at " "$HYB"
+expect_contains "HX-12c …with its ISO instant" "($HY_NEXT)" "$HYB"
+if [ -n "$HX_TZ_WAS" ]; then export TZ="$HX_TZ_WAS"; else unset TZ; fi
 export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 POKE_BOUND="$HX_BOUND_WAS"
 

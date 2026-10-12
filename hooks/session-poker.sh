@@ -2975,22 +2975,26 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
 # `written:` instant, and a dispatch after it starts an agent that handoff never saw — so the first verb a
 # resumed session runs says whether the bound plan's handoff still stands: STALE, naming every dispatch
 # stamped with that plan (the dispatch wall's `intended` row, `plan=` and `launched_at=`) later than it.
-# Silent when the session is unbound or its plan carries no handoff.
-adopt_handoff_note() {  # <bound plan, raw> <repo root> <state dir>
-  local plan at names="" n=0 pl nm
-  [ -n "$1" ] || return 0
-  plan="$(adopt_abs "$1" "$2")"
-  [ -f "$plan" ] && [ -r "$plan" ] || return 0
-  at="$(awk '/^[ \t]*```/ { f = !f; next } !f && /^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); next }
-             h && /^written: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/ { print substr($0, 10); exit }' "$plan" 2>/dev/null)"
-  [ -n "$at" ] || return 0
-  while IFS="$(printf '\t')" read -r pl nm; do
+# Silent when the session is unbound or its plan carries no handoff. The handoff itself is marked by the
+# plan writer that runs at dispatch (`handoff_mark_stale`, T29), from the same two readers.
+handoff_written_at() {  # <plan file> -> its ## Handoff `written:` instant, empty when it has none
+  awk '/^[ \t]*```/ { f = !f; next } !f && /^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); next }
+       h && /^written: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/ { print substr($0, 10); exit }' "$1" 2>/dev/null
+}
+
+# The dispatches of <plan> after <instant>, `name<TAB>launched_at`, one line per name (its first such
+# dispatch), in roster order, read off every roster in <state dir>.
+handoff_dispatches_since() {  # <bound plan, raw> <state dir> <instant>
+  local key pl nm la seen=""
+  key="$(adopt_plan_key "$1")"
+  while IFS="$(printf '\t')" read -r pl nm la; do
     [ -n "$nm" ] || continue
-    [ "$(adopt_plan_key "$pl")" = "$(adopt_plan_key "$1")" ] || continue
-    case ", $names, " in *", $nm, "*) continue ;; esac
-    names="${names:+$names, }$nm"; n=$((n + 1))
+    [ "$(adopt_plan_key "$pl")" = "$key" ] || continue
+    case ", $seen, " in *", $nm, "*) continue ;; esac
+    seen="${seen:+$seen, }$nm"
+    printf '%s\t%s\n' "$nm" "$la"
   done <<EOF
-$(for f in "$3"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v at="$at" '
+$(for f in "$2"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v at="$3" '
     function kv(line, key,   i, n, p) {
       n = split(line, p, "|")
       for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
@@ -2999,15 +3003,67 @@ $(for f in "$3"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n'
     { while ((getline line < $0) > 0) {
         if (index(line, "roster-state/") != 1 || kv(line, "status") != "intended") continue
         l = kv(line, "launched_at"); p = kv(line, "plan")
-        if (p != "" && p != "none" && l > at) print p "\t" kv(line, "name")
+        if (p != "" && p != "none" && l > at) print p "\t" kv(line, "name") "\t" l
       }
       close($0) }' 2>/dev/null)
+EOF
+}
+
+adopt_handoff_note() {  # <bound plan, raw> <repo root> <state dir>
+  local plan at names="" n=0 nm la
+  [ -n "$1" ] || return 0
+  plan="$(adopt_abs "$1" "$2")"
+  [ -f "$plan" ] && [ -r "$plan" ] || return 0
+  at="$(handoff_written_at "$plan")"
+  [ -n "$at" ] || return 0
+  while IFS="$(printf '\t')" read -r nm la; do
+    [ -n "$nm" ] || continue
+    names="${names:+$names, }$nm"; n=$((n + 1))
+  done <<EOF
+$(handoff_dispatches_since "$1" "$3" "$at")
 EOF
   if [ "$n" -eq 0 ]; then
     say "handoff written $at — current: no dispatch of this plan since"
   else
     say "handoff written $at — STALE: $n dispatch(es) of this plan since ($(clean "$names")); rewrite it: bash ${HOOK_DIR}/session-poker.sh handoff"
   fi
+}
+
+# THE HANDOFF MARKED WHERE IT IS READ (wave-34 T29; D24, AC-14.2). adopt saying STALE reaches only the
+# session that runs adopt; a person or a session reading the plan's `## Handoff` was still told "safe to
+# exit: yes" while writers dispatched after it ran (this wave's own plan, 11:32Z against T19, T22, T21).
+# So the plan writer that runs at every dispatch (`launch-sync`) rewrites the block's two safety lines,
+# and nothing else in it, to STALE, naming each later dispatch at its local time and its ISO instant,
+# until `handoff` writes the block again. The lines are recomputed whole each time, so a second run with
+# no new dispatch writes nothing. A handoff with no safety lines (written before T6) is left as it is.
+handoff_local_time() {  # <ISO-8601 Z> -> `YYYY-MM-DD HH:MM <zone>` on this machine's clock, empty if unreadable
+  local e
+  e="$(iso_epoch "$1")"
+  [ -n "$e" ] || return 0
+  date -r "$e" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || date -d "@$e" '+%Y-%m-%d %H:%M %Z' 2>/dev/null
+}
+
+handoff_mark_stale() {  # <bound plan, raw> <plan file in> <state dir> <out> -> 0 when <out> is <in> marked and differs from it
+  local at list="" nm la loc
+  at="$(handoff_written_at "$2")"
+  [ -n "$at" ] || return 1
+  while IFS="$(printf '\t')" read -r nm la; do
+    [ -n "$nm" ] || continue
+    loc="$(handoff_local_time "$la")"
+    list="${list:+$list, }$(clean "$nm") at ${loc:+$loc }($la)"
+  done <<EOF
+$(handoff_dispatches_since "$1" "$3" "$at")
+EOF
+  [ -n "$list" ] || return 1
+  HM_EXIT="no — STALE: dispatched after this handoff was written: $list; rewrite it: session-poker.sh handoff" \
+  HM_CLEAR="no — STALE, for the same reason" awk '
+    /^[ \t]*```/ { f = !f; print; next }
+    f { print; next }
+    /^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); print; next }
+    h && index($0, "- safe to exit:") == 1 { print "- safe to exit: " ENVIRON["HM_EXIT"]; next }
+    h && index($0, "- safe to /clear:") == 1 { print "- safe to /clear: " ENVIRON["HM_CLEAR"]; next }
+    { print }' "$2" > "$4" 2>/dev/null || return 1
+  ! cmp -s "$2" "$4"
 }
 
 # THE ADOPTED ROW — the verb's one write, and the second half of the B-1 cure. What it
@@ -10610,11 +10666,17 @@ RC_TAGS
           "$(printf '%s' "$LS_RAW" | tr -d '[:cntrl:]')" >&2
         exit 1 ;;
     esac
-    [ "$LS_CUR" -ge 4 ] || exit 0
-    # A session that has confirmed no launch has nothing to apply.
+    # A session that has confirmed no launch, or a plan before Step 4, has no launch to apply; a handoff
+    # a later dispatch outdates is marked all the same, at any step (`handoff_mark_stale`, T29).
     LS_ROSTER="$LS_ROOT/.bionic/tmp/roster-${SESSION_ID}.state"
-    [ -f "$LS_ROSTER" ] && [ ! -L "$LS_ROSTER" ] || exit 0
-    grep -qE '\|status=(confirmed|identified)\|' "$LS_ROSTER" 2>/dev/null || exit 0
+    LS_LAUNCH=yes
+    [ "$LS_CUR" -ge 4 ] || LS_LAUNCH=no
+    { [ -f "$LS_ROSTER" ] && [ ! -L "$LS_ROSTER" ] \
+        && grep -qE '\|status=(confirmed|identified)\|' "$LS_ROSTER" 2>/dev/null; } || LS_LAUNCH=no
+    if [ "$LS_LAUNCH" = no ]; then
+      LS_AT="$(handoff_written_at "$LS_PLAN")"
+      [ -n "$LS_AT" ] && [ -n "$(handoff_dispatches_since "$LS_PLAN" "$LS_ROOT/.bionic/tmp" "$LS_AT")" ] || exit 0
+    fi
     tmp_dir_ok "$LS_ROOT/.bionic/tmp" || exit 0
     # A LOCK THAT CANNOT BE MADE IS NOT A LOCK ANOTHER WRITER HOLDS (wave-26 T51; review 13 F1):
     # held, the holder writes the launches and this call says nothing; not makeable, no caller
@@ -10649,14 +10711,22 @@ RC_TAGS
     trap launch_sync_exit EXIT
     launch_sync_sweep "$PV_PLAN" "$PV_REPO"
     LS_RC=0
-    LS_PROJECTED=no
-    launch_sync_project "$PV_PLAN" "$PV_REPO" "$SESSION_ID" "$LS_ROSTER" \
-      "$PV_REPO/.bionic/tmp/sweeper-${SESSION_ID}.state" "$PV_NEW" && LS_PROJECTED=yes
+    LS_PROJECTED=no; LS_SAID=""; LS_FAILS=""; LS_HANDS=""
+    if [ "$LS_LAUNCH" = yes ] && launch_sync_project "$PV_PLAN" "$PV_REPO" "$SESSION_ID" "$LS_ROSTER" \
+      "$PV_REPO/.bionic/tmp/sweeper-${SESSION_ID}.state" "$PV_NEW"; then
+      LS_PROJECTED=yes
+    fi
     # WHAT CANNOT BE RECORDED PRINTS FIRST, so a refusal of the rest below cannot hide it.
     if [ -n "$LS_FAILS" ]; then
       printf '%s' "$LS_FAILS" | sed 's/^NOT-RECORDED /poker: NOT-RECORDED /'
       LS_RC=1
     fi
+    # THE HANDOFF A LATER DISPATCH OUTDATES (T29), marked in the same write as the launches, or alone.
+    LS_MARKED=no; LS_SRC="$PV_PLAN"; [ "$LS_PROJECTED" = yes ] && LS_SRC="$PV_NEW"
+    if handoff_mark_stale "$PV_PLAN" "$LS_SRC" "$PV_REPO/.bionic/tmp" "$PV_NEW.2"; then
+      mv -f "$PV_NEW.2" "$PV_NEW" && LS_MARKED=yes
+    fi
+    rm -f "$PV_NEW.2"
     if [ "$LS_PROJECTED" = yes ]; then
       LS_VIOL="$(units_validate "$PV_NEW" 2>&1)"
       if [ -n "$LS_VIOL" ]; then
@@ -10664,10 +10734,16 @@ RC_TAGS
         printf '%s\n' "$LS_VIOL" >&2
         exit 1
       fi
+    fi
+    if [ "$LS_PROJECTED" = yes ] || [ "$LS_MARKED" = yes ]; then
       [ "$LS_RC" = 0 ] && PV_RACE_RC=75   # a launch it could not record keeps exit 1
-      plan_verb_swap launch-sync "$(printf '%s' "$LS_SAID" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $2 }') recorded" writer
+      LS_WHAT="$(printf '%s' "$LS_SAID" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $2 }')"
+      LS_WHAT="${LS_WHAT:+$LS_WHAT recorded}"
+      [ "$LS_MARKED" = no ] || LS_WHAT="${LS_WHAT:+$LS_WHAT, }the handoff marked stale"
+      plan_verb_swap launch-sync "$LS_WHAT" writer
       LS_SWAPPED=yes
       printf '%s' "$LS_SAID" | sed 's/^/poker: /'
+      [ "$LS_MARKED" = no ] || say "HANDOFF-STALE — ## Handoff now reads stale: a dispatch of this plan postdates it; rewrite it: bash ${HOOK_DIR}/session-poker.sh handoff"
     fi
     exit "$LS_RC"
     ;;
