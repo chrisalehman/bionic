@@ -684,6 +684,21 @@ expect_eq "partial: one absent deliverable is UNMET" "1" "$RC"
 expect_contains "partial: the absent one is named" "missing=$RVP/two.md" "$OUT"
 expect_absent "partial: the delivered one is not named as a failure" "missing=$RVP/one.md" "$OUT"
 
+# --- a list written with a space after each comma reads every path whole (wave-34 T11, AC-9.2:
+# the pin on verdict_row's trim, which no case here exercised) ---
+RVS="$(make_repo vs)"; new_roster "$RVS"
+echo "the first half" > "$RVS/one.md"
+add_row "$RVS" name=spaced deliverable="$RVS/one.md, $RVS/two.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RVS" verdict spaced
+expect_eq "spaced list: one absent deliverable is UNMET" "1" "$RC"
+expect_contains "spaced list: the absent one is named by its path, the space trimmed" \
+  "missing=$RVS/two.md" "$OUT"
+echo "the second half" > "$RVS/two.md"
+sweep "$RVS" verdict spaced
+expect_eq "spaced list: both landed, the paired positive exits 0" "0" "$RC"
+expect_contains "spaced list: …and the second is read by its trimmed path" "delivered=$RVS/two.md" "$OUT"
+
 # --- a directory deliverable: delivered when a file lives in it (the sibling reading) ---
 RVD="$(make_repo vd)"; new_roster "$RVD"
 mkdir -p "$RVD/record"
