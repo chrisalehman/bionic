@@ -342,22 +342,33 @@ units_has_column() {
 # BY NAME, NOT BY NUMBER, for the reason the parse is header-keyed: a caller that wrote
 # `10` would have to be found again if the contract ever grew a twelfth field. The name
 # is this library's own contract spelling, NOT the table's header text.
-units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on a bad name
-  local rec="${1:-}" n
-  case "${2:-}" in
-    id) n=1 ;;    step) n=2 ;;   kind) n=3 ;;       task) n=4 ;;  agent) n=5 ;;
-    deps) n=6 ;;  size) n=7 ;;   serves) n=8 ;;     Files) n=9 ;;  status) n=10 ;;
-    worktree) n=11 ;; base) n=12 ;; reads) n=13 ;;
+#
+# AND AN OUT-VARIABLE FORM (wave-34 T11, D19). `x="$(units_field …)"` still paid one subshell per
+# cell, and the evidence gate asks for a cell or two of every row on every commit. `units_field_v`
+# writes the cell into the caller's variable instead: same answer, empty on an absent cell or a
+# bad name, and no process at all. `units_field` is its printing form.
+units_field_v() {  # <var> <record> <column name> -> the cell into <var>; rc 1 on a bad name
+  local _uf_rec="${2:-}" _uf_n
+  printf -v "$1" '%s' ''
+  case "${3:-}" in
+    id) _uf_n=1 ;;    step) _uf_n=2 ;;   kind) _uf_n=3 ;;       task) _uf_n=4 ;;  agent) _uf_n=5 ;;
+    deps) _uf_n=6 ;;  size) _uf_n=7 ;;   serves) _uf_n=8 ;;     Files) _uf_n=9 ;;  status) _uf_n=10 ;;
+    worktree) _uf_n=11 ;; base) _uf_n=12 ;; reads) _uf_n=13 ;;
     *) return 1 ;;
   esac
-  while [ "$n" -gt 1 ]; do
-    case "$rec" in
-      *$'\t'*) rec="${rec#*$'\t'}" ;;
+  while [ "$_uf_n" -gt 1 ]; do
+    case "$_uf_rec" in
+      *$'\t'*) _uf_rec="${_uf_rec#*$'\t'}" ;;
       *) return 0 ;;
     esac
-    n=$((n - 1))
+    _uf_n=$((_uf_n - 1))
   done
-  printf '%s' "${rec%%$'\t'*}"
+  printf -v "$1" '%s' "${_uf_rec%%$'\t'*}"
+}
+units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on a bad name
+  local _uf_v
+  units_field_v _uf_v "$@" || return 1
+  printf '%s' "$_uf_v"
 }
 
 
@@ -1720,10 +1731,19 @@ units_validate() {
     return 1
   fi
 
-  ctl="$(printf '%s\n' "$out" | awk 'NR == 1')"
-  missing="$(printf '%s\n' "$ctl" | awk -F'\t' '{ sub(/^# */, "", $1); print $1 }')"
-  cols="$(printf '%s\n' "$ctl" | awk -F'\t' '{ print $2 }')"
-  over="$(printf '%s\n' "$ctl" | awk -F'\t' '{ print $3 }')"
+  # THE CONTROL LINE'S THREE CELLS, BY PARAMETER EXPANSION (wave-34 T11, D19): the first line,
+  # split at its tabs, the first cell's leading `#` and spaces dropped — four `awk`s' reading,
+  # with no process. An absent cell reads empty, as awk's `$2`/`$3` did.
+  ctl="${out%%$'\n'*}"
+  missing="${ctl%%$'\t'*}"
+  case "$missing" in '#'*) missing="${missing#\#}"; missing="${missing#"${missing%%[! ]*}"}" ;; esac
+  cols=""; over=""
+  case "$ctl" in
+    *$'\t'*)
+      cols="${ctl#*$'\t'}"
+      case "$cols" in *$'\t'*) over="${cols#*$'\t'}"; over="${over%%$'\t'*}" ;; esac
+      cols="${cols%%$'\t'*}" ;;
+  esac
   if [ -n "$missing" ]; then
     for _c in $missing; do
       printf '## Tasks: missing column %s\n' "$_c"
@@ -1752,7 +1772,8 @@ units_validate() {
   hasreads=0
   if units_has_column "$plan" reads; then hasreads=1; fi
 
-  rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
+  rows=""
+  case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
       -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)"'
