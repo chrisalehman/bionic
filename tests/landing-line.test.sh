@@ -657,6 +657,25 @@ expect_nonempty "(r6g2-pre) the adopted row's landing was published" "$K3B"
 expect_contains "(r6g2) the adopted-only row's landing is marked on its roster row (the mark reads the row the wall reads)" "|landed=${K3B}|" \
   "$(grep '|name=wx-T1|' "$(ll_roster "$RM3b")" | tail -1)"
 expect_contains "(r6g2) …and the owed line is printed, naming the agent" "owed: complete task T1, then stop wx-T1" "$LL_OUT"
+# THE MARK GOES TO THE WRITER `ready` HELD THE LANDING TO (wave-35 T7; burns debt row-writer-lookup). The
+# launch line is wx-T1; the agent's latest row carries the same id under another name, wx-T1b, so
+# `line_row_writer` answers wx-T1b. `_line_roster_mark` asks it too, and marks wx-T1b's row, never the
+# launch line's name.
+# fails-when: the landing is marked on wx-T1 while wx-T1b, the writer the landing was held to, carries none.
+RM3c="$(ll_world)"
+grep -v '|name=wx-T1|' "$(ll_roster "$RM3c")" > "$(ll_roster "$RM3c").n" && mv "$(ll_roster "$RM3c").n" "$(ll_roster "$RM3c")"
+ll_wrow "$RM3c" status=intended suites_allowed=a.test.sh
+printf '%s\n' "$(roster_row_fixture session="$WORLD_SID" name=wx-T1b agent_id=b00T1 plan="$(ll_plan "$RM3c")" \
+  suites_source=declared status=identified suites_allowed=a.test.sh adopted_from=99999999-0000-4000-8000-000000000000)" \
+  >> "$(ll_roster "$RM3c")"
+ll_verb "$RM3c" T1
+K3C="$(ll_field "$(ll_ev "$RM3c" published)" commit)"
+expect_eq "(r6g3-pre) the row whose id moved to wx-T1b lands (exit 0)" "0" "$LL_RC"
+expect_nonempty "(r6g3-pre) …and its landing was published" "$K3C"
+expect_contains "(r6g3) the landing is marked on wx-T1b, the writer the landing was held to" "|landed=${K3C}|" \
+  "$(grep '|name=wx-T1b|' "$(ll_roster "$RM3c")" | tail -1)"
+expect_eq "(r6g3) …and the launch line's name carries no mark (r6g3 is the positive, same roster)" "" \
+  "$(grep '|name=wx-T1|' "$(ll_roster "$RM3c")" | grep -F "|landed=${K3C}|")"
 RM4="$(ll_world)"
 ll_wide "$RM4" 'a.test.sh b.test.sh' held='2026-10-07T00:10:00Z waiting on T2'
 ll_wrow "$RM4" status=identified suites_allowed='a.test.sh b.test.sh' extended='2026-10-07T00:20:00Z more time'
