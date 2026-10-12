@@ -2583,8 +2583,9 @@ section "§LANDS-ON — a writer binding a row names the suites it lands on (wav
 # ============================================================================
 #
 # A brief carries `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>` on a line of its own.
-# The wall writes it on the launch row as `lands_on=`, each suite as `<name>.test.sh` (the spelling
-# `lands_red=` has and lib/line.sh `_line_suites` decodes), and refuses: a writer brief that binds a
+# The wall writes it on the launch row as `lands_on=`, a bare suite as `<name>.test.sh` and a path-qualified
+# one at its declared path (wave-34 T27; the spelling lib/line.sh `_line_suites` decodes, so ready runs
+# that file), and refuses: a writer brief that binds a
 # row of the bound plan and carries no line (ruling A-orch-73: a dispatch binding no row is owed
 # none; A-orch-71: whatever version wrote the plan); `none` with no reason; a suite outside the set
 # the checks derived. FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh), on
@@ -2613,8 +2614,18 @@ t7_gate lo2 'Lands-on: widget'
 expect_eq "LO2 Lands-on: widget, a suite of the row's set named bare, is admitted" "allow" "$GATE_VERDICT"
 expect_eq "LO2b …the row carries lands_on=widget.test.sh, the one spelling" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
 t7_gate lo2t 'Lands-on: tests/widget.test.sh  # the suite this row lands on'
-expect_eq "LO2t Lands-on: tests/widget.test.sh with a trailing comment is admitted, written by its basename" \
-  "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+expect_eq "LO2t Lands-on: tests/widget.test.sh with a trailing comment is admitted, written at its declared path" \
+  "allow|tests/widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+# A path-qualified suite is in the row's set by its file name (Suites: records suites so), and the row keeps
+# the path, so ready runs that file and no other of its name. fails-when: the path is refused as outside
+# Suites:, or the row carries the file name alone.
+t7_gate lo2p 'Lands-on: scripts/deploy/__tests__/widget.test.sh'
+expect_eq "LO2p Lands-on: scripts/deploy/__tests__/widget.test.sh, in Suites: by its file name, is admitted, written at its path" \
+  "allow|scripts/deploy/__tests__/widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+t7_gate lo2x 'Lands-on: ../widget.test.sh'
+expect_eq "LO2x Lands-on: ../widget.test.sh, a path out of the tree, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO2x2 …naming it" "Lands-on: ../widget" "$(t7_first)"
+expect_contains "LO2x3 …as no suite of the set" "is outside Suites:" "$(t7_first)"
 
 LO3_S="a-suite-name-of-sixty-characters-long-enough-to-wrap.test.sh"
 t7_gate lo3 "Lands-on: widget.test.sh, ${LO3_S}"
@@ -3001,9 +3012,13 @@ rc_repo() {  # <tag> -> REPO, attested, bound to the fixture wave
 rc_rows() { roster_rows "$(roster_path "$REPO" "$SID_A")"; }
 # rc_plant <root> <plain|unbuilt|slow> -> the path of a copy of the hook beside a library whose roster.sh
 # is the shipped one with `roster_row` replaced: unbuilt returns 2 (the row does not build); slow waits
-# two seconds past the hook's own DP_DEADLINE_S (read from the hook, wave-30 T35) and then builds the
+# two seconds past the copy's DP_DEADLINE_S (RC_DEADLINE, below) and then builds the
 # real row, so a wall with no deadline admits it with a row and a wall with one refuses it with none.
-RC_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GATE" | head -1)"
+# The slow copy's deadline is shortened to RC_DEADLINE (wave-34 T12, D20): RC5 waits that, not the shipped
+# one, so one drive costs RC_DEADLINE + 2 s instead of the shipped deadline + 2. Only the scratch copy is
+# edited; RC6 reads the shipped file, so the shipped constant is still the one held under the registration.
+RC_SHIPPED_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GATE" | head -1)"
+RC_DEADLINE=8
 rc_plant() {
   local root="$1" mode="$2" lib f
   lib="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
@@ -3015,11 +3030,15 @@ rc_plant() {
   cp "$lib/roster.sh" "$root/scripts/lib/roster.sh"
   case "$mode" in
     unbuilt) printf '%s\n' 'roster_row() { return 2; }' >> "$root/scripts/lib/roster.sh" ;;
-    # the slow roster_row sleeps past the real DP_DEADLINE_S; the deadline is a constant in the hook (no environment knob pins it), RC5 pins the shipped value, and no wait can observe a deadline sooner than it fires
+    # the slow roster_row sleeps past the copy's DP_DEADLINE_S (RC_DEADLINE, set in the copy below); the deadline is a constant in the hook (no environment knob pins it), and no wait can observe a deadline sooner than it fires
     slow)    printf '%s\n' '_rc_f="$(declare -f roster_row)"; eval "_rc_orig_${_rc_f}"' \
                            "roster_row() { sleep $(( ${RC_DEADLINE:-12} + 2 )); _rc_orig_roster_row \"\$@\"; }" >> "$root/scripts/lib/roster.sh" ;;
   esac
-  cp "$GATE" "$root/hooks/dispatch-preflight.sh"
+  if [ "$mode" = slow ]; then
+    sed "s/^DP_DEADLINE_S=[0-9][0-9]*/DP_DEADLINE_S=${RC_DEADLINE}/" "$GATE" > "$root/hooks/dispatch-preflight.sh"
+  else
+    cp "$GATE" "$root/hooks/dispatch-preflight.sh"
+  fi
   printf '%s' "$root/hooks/dispatch-preflight.sh"
 }
 RC_SAVED_GATE="$GATE"
@@ -3080,6 +3099,13 @@ expect_status "RC4 …and the decoy was not appended to" "untouched" "$(cat "$DE
 
 # --- RC5: THE DEADLINE. The wall waits two seconds past its deadline inside the row's build.
 RC5_GATE="$(rc_plant "$RC_ROOT/slow" slow)"
+# the copy carries the short deadline and the shipped hook is not the one edited (the sed took, and only in the copy)
+expect_eq "RC5 precondition: the slow copy's deadline is the short one" "$RC_DEADLINE" \
+  "$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$RC5_GATE" | head -1)"
+expect_eq "RC5 …and the shipped hook still names its own" "$RC_SHIPPED_DEADLINE" \
+  "$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$RC_SAVED_GATE" | head -1)"
+expect_true "RC5 …and the copy differs from the shipped hook in that line alone" \
+  test "$(diff "$RC_SAVED_GATE" "$RC5_GATE" | /usr/bin/grep -c '^[<>]')" -eq 2
 rc_repo c5
 GATE="$RC5_GATE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
@@ -3090,6 +3116,7 @@ expect_eq "RC5 …on its own line" "$RC5_LINE" "$(printf '%s\n' "$GATE_ERR" | /u
 expect_eq "RC5 …which is 68 columns" "68" "$(bionic_cols "$RC5_LINE")"
 expect_eq "RC5 …and no row was journalled for the refused launch" "0" "$(rc_rows)"
 expect_true "RC5 …after the deadline, not before it (waited at least $(( ${RC_DEADLINE:-12} - 1 )) s)" test "$GATE_TIME" -ge $(( ${RC_DEADLINE:-12} - 1 ))
+expect_true "RC5 …and sooner than the shipped deadline of ${RC_SHIPPED_DEADLINE:-?} s (took ${GATE_TIME} s)" test "$GATE_TIME" -lt "${RC_SHIPPED_DEADLINE:-0}"
 expect_contains "RC5 …the detail names the roster the row would have gone to" "roster-${SID_A}.state" "$GATE_VERR"
 
 # --- RC6: THE DEADLINE IS UNDER THE REGISTRATION. Both numbers are read, not transcribed.
@@ -3111,5 +3138,110 @@ expect_eq "RC7 …and journalled its row" "1" "$(rc_rows)"
 rm -rf "$RC_ROOT"
 GATE="$RC_SAVED_GATE"
 
+
+
+section "§REMARK — a dispatch into a tree its row already recorded re-marks it for the new name (wave-34 T28; D24, REQ-1 AC-1.1)"
+# ============================================================================
+# The gate names a writer that carries no name by its tree's `bionic-agent` marker (lib/gate.sh THE
+# PLACE), and `spawn-worktree.sh create --for` writes it. A row re-dispatched into the tree its earlier
+# launch recorded (the plan row's `worktree` cell) used to keep the predecessor's marker, so the new
+# writer asked the gate as the old one; `spawn-worktree.sh mark` existed and nothing called it. The
+# wall now calls it for the bound row's recorded tree once the launch is on the roster. FIXTURES: a
+# real linked tree of the fixture repo, marked w-T1 by the real `mark`; row T1 active under w-T1 with
+# that tree in its cell. The gate ask runs the real gate_ask from the tree, no name carried, against
+# a scratch store and a planted machine. SYNTHESIZED.
+# fails-when: the dispatch leaves the predecessor's name on the tree (the call removed), the request
+# is filed under w-T1, the main checkout or a missing tree gets a marker, or a dispatch is refused.
+RMK_SPAWN="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+RMK_GATE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/gate.sh"
+rmk_marker() {  # <tree> -> its own git directory's bionic-agent, or `none`
+  local gd; gd="$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)"
+  [ -n "$gd" ] && [ -f "$gd/bionic-agent" ] && cat "$gd/bionic-agent" || echo none
+}
+rmk_repo() {  # <tag> <worktree cell> -> REPO, RMK_TREE (.worktrees/34-T1, marked w-T1), row T1 active under w-T1
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  RMK_TREE="$REPO/.worktrees/34-T1"
+  git -C "$REPO" worktree add -q --detach "$RMK_TREE" 2>/dev/null
+  bash "$RMK_SPAWN" mark "$RMK_TREE" --for w-T1 >/dev/null 2>&1
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | the widget | w-T1 | — | 30 | REQ-1 | a.sh | %s | %s | active | — |\n' \
+    "$2" "$(git -C "$REPO" rev-parse HEAD)" >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+}
+rmk_who() {  # <dir> <key> -> the who= of the request one gate_ask work <key> from <dir> files, no name carried
+  local g; g="$(mktemp -d "$SANDBOX/rmk-gate.XXXXXX")"; mkdir -p "$g/config"
+  ( cd "$1" && env -u BIONIC_GATE_AGENT -u BIONIC_GATE_ADMIT BIONIC_GATE_DIR="$g/store" CLAUDE_CONFIG_DIR="$g/config" \
+      CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_USED_PCT=20 \
+      BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_FREE_MB=6553 BIONIC_PROBE_BUSY_CORES=0.5 BIONIC_PROBE_BUSY_CORES_5M=0.5 \
+      BIONIC_PROBE_LOAD_1M=0.5 BIONIC_PROBE_SWAP_PCT=0 \
+      bash -c '. "$1" 2>/dev/null; gate_ask work "$2" --within 2 >/dev/null 2>&1' _ "$RMK_GATE_LIB" "$2" )
+  sed -n 's/^who=//p' "$g/store/requests/"[0-9]* 2>/dev/null | head -n 1
+}
+
+rmk_repo rmk1 .worktrees/34-T1
+expect_eq "RMK.0 control: the recorded tree is marked for the predecessor, the main checkout is not" "w-T1|none" \
+  "$(rmk_marker "$RMK_TREE")|$(rmk_marker "$REPO")"
+expect_eq "RMK.0b control: before any dispatch a no-name ask from the tree is filed under w-T1" "$SID_A:w-T1" \
+  "$(rmk_who "$RMK_TREE" widget.test.sh)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.1 the row's re-run, w-T1-r1 (bound by its name), is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.1b AC-1.1 …and the tree its row recorded now names it, not w-T1" "w-T1-r1" "$(rmk_marker "$RMK_TREE")"
+expect_eq "RMK.1c …and the main checkout still has none (RMK.1b is the positive, same reader)" "none" "$(rmk_marker "$REPO")"
+expect_empty "RMK.1d …and the allow path says nothing" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Row: T1
+Lands-on: widget')" w-T2)"
+expect_eq "RMK.2 a successor named w-T2, bound by Row: T1, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.2b AC-1.1 …and the tree now names w-T2" "w-T2" "$(rmk_marker "$RMK_TREE")"
+expect_eq "RMK.2c AC-1.1 …so a no-name ask from the tree files who=…:w-T2, the successor, never w-T1" "$SID_A:w-T2" \
+  "$(rmk_who "$RMK_TREE" widget.test.sh)"
+expect_eq "RMK.2d …while the same ask from the main checkout files who=…:main (RMK.2c is the positive)" "$SID_A:main" \
+  "$(rmk_who "$REPO" widget.test.sh)"
+
+# A ROW WITH NO TREE OF ITS OWN TOUCHES NOTHING: a cell naming the main checkout, a cell naming a tree
+# that is gone, and a dispatch that binds no row each leave every marker as it was and are admitted.
+rmk_repo rmk3 .
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.3 a row whose cell names the main checkout is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.3b …and the main checkout gets no marker" "none" "$(rmk_marker "$REPO")"
+expect_eq "RMK.3c …and the linked tree the row does not record keeps w-T1" "w-T1" "$(rmk_marker "$RMK_TREE")"
+rmk_repo rmk4 .worktrees/34-gone
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.4 a row whose recorded tree is gone is admitted" "allow" "$GATE_VERDICT"
+expect_false "RMK.4b …and nothing is made at the recorded path" test -e "$REPO/.worktrees/34-gone"
+expect_eq "RMK.4c …and the tree it does not record keeps w-T1" "w-T1" "$(rmk_marker "$RMK_TREE")"
+rmk_repo rmk5 .worktrees/34-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief '')" w-misc)"
+expect_eq "RMK.5 a dispatch that binds no row is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.5b …and marks nothing (RMK.1b is the positive)" "w-T1" "$(rmk_marker "$RMK_TREE")"
+rmk_repo rmk8 .worktrees/34-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" \
+  "$(adv_brief 'Scope constraint: read only.' | sed '/^Files:/d; s#^Suites: .*#Suites: none#')" \
+  w-T1-r1 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:researcher)"
+expect_eq "RMK.8 a read-only role bound to T1 by its name is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.8b …and is not the tree's writer: the tree keeps w-T1 (RMK.1b is the positive)" "w-T1" "$(rmk_marker "$RMK_TREE")"
+
+# A MARK THAT FAILS IS SAID, NEVER REFUSED: the launch is on the roster already. The tree's git
+# directory is made unwritable, so `mark` cannot write the marker.
+rmk_repo rmk7 .worktrees/34-T1
+RMK_GD="$(git -C "$RMK_TREE" rev-parse --absolute-git-dir)"
+chmod 555 "$RMK_GD"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+chmod 755 "$RMK_GD"
+expect_eq "RMK.7 a re-dispatch whose tree cannot be re-marked is still admitted" "allow" "$GATE_VERDICT"
+expect_contains "RMK.7b …and the wall says the tree still names its last writer" \
+  "still names its last writer: spawn-worktree.sh mark --for w-T1-r1 failed" "$GATE_ERR"
+expect_eq "RMK.7c …which it does" "w-T1" "$(rmk_marker "$RMK_TREE")"
+
+# THE MUTATION ARM: the wall's call to `mark` made a no-op. The shipped wall moves the marker (RMK.1b);
+# the doctored copy leaves w-T1, so RMK.1b goes red on it.
+RMK_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/t28-remark.XXXXXX")
+RMK_HOOKS=$(s21_plant "$RMK_ROOT")
+sed '/spawn-worktree\.sh" mark /s/bash .* 2>&1/true/' "$GATE" > "$RMK_HOOKS/dispatch-preflight.sh"
+expect_eq "RMK.6 meta: the shipped wall has the one call, the doctored copy none, and the copy parses" "1|0|parses" \
+  "$(/usr/bin/grep -c 'spawn-worktree.sh" mark ' "$GATE")|$(/usr/bin/grep -c 'spawn-worktree.sh" mark ' "$RMK_HOOKS/dispatch-preflight.sh")|$(bash -n "$RMK_HOOKS/dispatch-preflight.sh" && echo parses)"
+RMK_SAVED_GATE="$GATE"; GATE="$RMK_HOOKS/dispatch-preflight.sh"
+rmk_repo rmk6 .worktrees/34-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.6b the mutant still runs and admits the dispatch" "allow" "$GATE_VERDICT"
+expect_eq "RMK.6c …and with the call made a no-op the tree still names w-T1 (RMK.1b is red on it)" "w-T1" "$(rmk_marker "$RMK_TREE")"
+GATE="$RMK_SAVED_GATE"; rm -rf "$RMK_ROOT"
 
 finish

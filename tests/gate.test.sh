@@ -96,6 +96,12 @@
 #                      a.test.sh and TESTS/RUN.SH the whole run; case-exact, A.TEST.SH is another
 #                      file; `bash TESTS/RUN.SH` from a script, where this filesystem folds, is
 #                      refused at the ask
+#   §PASS      AC-5.2, AC-5.5 (wave-34 T8; D15) a pass is asked once and never waits: room for 5
+#                      → promised 3, a writer's suite and a landing admitted beside it; room for 3
+#                      → skipped, nothing waits; a solo ask marks it stopped and is admitted once
+#                      it releases; a hand whole run still holds the machine alone; a pass is off
+#                      the writer's budget. Mutations: a pass ranked ahead of work; the minimum
+#                      width removed
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
@@ -110,7 +116,7 @@
 # of payload/scripts/lib under the world's directory, each anchored first and each proved
 # to run (its own positive row) before its claim is read; §COST adds one more, and §REAPED,
 # §OWN and §CLEARED one each (T47). §OPEN adds four (T71); §SHARE-ROOM two (wave-33 T1);
-# §BUDGET-AT-ASK one (wave-33 T3).
+# §BUDGET-AT-ASK one (wave-33 T3); §PASS two (wave-34 T8).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The machine, the clock and the duration records are SYNTHESIZED by design (the world's
@@ -2120,14 +2126,14 @@ ba_row fx afx-1 'suites_allowed=a.test.sh' 're_executes='
 ba_row fwide afwide-1 'suites_allowed=a.test.sh b.test.sh run.sh' 're_executes='
 ba_row fopen afopen-1 'files=x'
 ba_row frex afrex-1 'suites_allowed=' 're_executes=`tests/run.sh --only b.test.sh`'
-# ba_drive <agent|-> <command> — the command run in the checkout as the agent's Bash call runs it
+# ba_drive <agent|-> <command> — the command run in the checkout (BA_AT, default BA) as the agent's Bash call runs it
 # (`-` is the main thread: no BIONIC_GATE_AGENT); leaves BA_OUT and BA_RC; marks cleared first.
 BA_OUT=""; BA_RC=0
 ba_drive() {
   local who=()
   [ "$1" = - ] || who=("BIONIC_GATE_AGENT=$1")
   rm -f "$BA_MARKS"/*.ran
-  BA_OUT="$( cd "$BA" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT ${who[@]+"${who[@]}"} \
+  BA_OUT="$( cd "${BA_AT:-$BA}" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT ${who[@]+"${who[@]}"} \
     BA_MARKS="$BA_MARKS" BIONIC_PRESSURE_RING="$D/ring" BIONIC_TEST_JOBS_CEILING=2 \
     bash -c "$2" 2>&1 )"
   BA_RC=$?
@@ -2193,6 +2199,156 @@ sed -i.bak '/^  _gate_budget "\$kind" "\$key" || return 75$/d' "$BA_MUT"
 expect_eq "BA.21 mutant: without it, fx's off-budget ask is admitted (the rows above are not vacuous)" "0" \
   "$(cd "$BA" && AGENT=fx GATE_LIB="$BA_MUT" ask_fg q8 work b.test.sh 2)"
 
+# ── §BUDGET-AT-ASK, P rows: a suite run by a path outside tests/ (wave-34 T7; D23, AC-14.5) ──
+# The wall names a suite file that is not this tree's own tests/<basename> by its RUN, each character
+# outside the name set turned into `_` (walls.sh _bsg_suites: `bash scripts/deploy/__tests__/x.test.sh`
+# is `bash_scripts_deploy___tests___x.test.sh`), and the shim asks the gate under that key. The budget
+# records a suite by its file name, so the key must meet the entry it is: the same suite, run by a path.
+# fails-when: a budgeted suite run by a path outside tests/ is refused against its own budget entry.
+fresh budget-path
+world_machine 8 8192 20 0.5
+mkdir -p "$BA/scripts/deploy/__tests__"
+for s in a b; do
+  printf '#!/bin/bash\n: > "$BA_MARKS/%s.ran"\nexit 0\n' "$s" > "$BA/scripts/deploy/__tests__/$s.test.sh"
+done
+PK_DEPLOY=bash_scripts_deploy___tests___
+pk_ask() {  # <name> <agent> <key> -> the ask's rc
+  (cd "$BA" && AGENT="$2" ask_fg "$1" work "$3" 2)
+}
+expect_eq "P.1 AC-14.5 fx (a.test.sh only): a.test.sh run by scripts/deploy/__tests__/ is admitted" "0" \
+  "$(pk_ask p1 fx "${PK_DEPLOY}a.test.sh")"
+expect_eq "P.2 …and b.test.sh by that path is held to the budget, refused 75" "75" "$(pk_ask p2 fx "${PK_DEPLOY}b.test.sh")"
+expect_contains "P.2b …the line names the key and the entry" "allowed: a.test.sh" "$(cat "$D/p2.err" 2>/dev/null)"
+expect_eq "P.3 a.test.sh run from its own directory (cd tests && bash a.test.sh, key bash_a.test.sh) is admitted" "0" \
+  "$(pk_ask p3 fx bash_a.test.sh)"
+expect_eq "P.4 a bare key that merely ends in the entry (user_a.test.sh) is another suite, refused" "75" \
+  "$(pk_ask p4 fx user_a.test.sh)"
+expect_eq "P.4b …as is an interpreter word glued to another name (bash_ba.test.sh)" "75" "$(pk_ask p4b fx bash_ba.test.sh)"
+expect_eq "P.5 the path key meets a wide budget's entry (fwide: a b run.sh)" "0" "$(pk_ask p5 fwide "${PK_DEPLOY}b.test.sh")"
+expect_eq "P.6 a suite a declared Re-executes run names is admitted by a path too (frex names b.test.sh)" "0" \
+  "$(pk_ask p6 frex "${PK_DEPLOY}b.test.sh")"
+expect_eq "P.6b …and one it does not name is refused (a.test.sh)" "75" "$(pk_ask p6b frex "${PK_DEPLOY}a.test.sh")"
+expect_eq "P.7 sh, zsh, dash and ksh runs meet the entry as bash does" "0 0 0 0" \
+  "$(pk_ask p7a fx sh_scripts_a.test.sh) $(pk_ask p7b fx zsh_scripts_a.test.sh) $(pk_ask p7c fx dash_scripts_a.test.sh) $(pk_ask p7d fx ksh_scripts_a.test.sh)"
+expect_eq "P.8 case-blind: the capitalised entry is the same suite by a path; case-exact it is another" "0 75" \
+  "$(cd "$BA" && BIONIC_PROBE_CASE_BLIND=1 AGENT=fx ask_fg p8a work "${PK_DEPLOY}A.TEST.SH" 2) $(cd "$BA" && BIONIC_PROBE_CASE_BLIND=0 AGENT=fx ask_fg p8b work "${PK_DEPLOY}A.TEST.SH" 2)"
+# The real shim, as the wall calls it: the suite is typed by its path, the wall names it by its run.
+pk_shim() {  # <agent> <suite file name> -> the shim's rc; leaves PK_OUT; marks cleared first
+  rm -f "$BA_MARKS"/*.ran
+  PK_OUT="$( cd "$BA" && env -u BIONIC_GATE_ADMIT BA_MARKS="$BA_MARKS" CLAUDE_CODE_SESSION_ID="$WORLD_SID" \
+    BIONIC_PRESSURE_RING="$D/ring" BIONIC_TEST_JOBS_CEILING=2 \
+    bash "$BOOKED_SH_BA" --agent "$1" --max-wait 30 --suites "${PK_DEPLOY}$2" -- "bash scripts/deploy/__tests__/$2" 2>&1 )"
+  return $?
+}
+BOOKED_SH_BA="$REPO_ROOT/payload/scripts/booked.sh"
+pk_shim fx a.test.sh; PK_RC=$?
+expect_eq "P.9 AC-14.5 the shim, fx running scripts/deploy/__tests__/a.test.sh: admitted, the suite ran, rc 0" "0 a" "$PK_RC $(ran)"
+pk_shim fx b.test.sh; PK_RC=$?
+expect_eq "P.10 …and b.test.sh by its path is refused at the ask, 75, never run" "75 " "$PK_RC $(ran)"
+expect_contains "P.10b …with the budget's own line" "$BA_LINE" "$PK_OUT"
+# THE PLACE NAMES THE ASKER (wave-34 T2; D11, REQ-1 AC-1.2, AC-1.4). No command carries the agent's
+# name any more: a writer works in its own linked tree, whose git directory holds `bionic-agent`
+# (spawn-worktree.sh create --for; tests/spawn-worktree.test.sh §MARKER), and an ask that carries no
+# BIONIC_GATE_AGENT is that writer's. So a suite started inside the tree through python, awk,
+# `source` or a script outside the tree meets the writer's budget in every permission mode, and its
+# request is filed under the writer's name. The main checkout's git directory is the common one: it
+# asks as main, and a marker planted there is never read. FIXTURE FIDELITY: a real linked tree of
+# the BA checkout holding the same runner and libraries, its marker planted as create writes it.
+# fails-when: the marker fallback is deleted (admitted as main), or who reads `:main`.
+fresh budget-mark
+world_machine 8 8192 20 0.5
+git -C "$BA" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null commit -q --allow-empty -m place
+BM="$D/tree"
+git -C "$BA" worktree add -q --detach "$BM" 2>/dev/null
+cp -R "$BA/tests" "$BA/payload" "$BA/tools" "$BM/"
+ln -s tests "$BM/t2"
+BM_GD="$(git -C "$BM" rev-parse --absolute-git-dir)"
+printf 'fx\n' > "$BM_GD/bionic-agent"
+printf '#!/bin/bash\nbash tests/run.sh --only "$1"\n' > "$D/outside.sh"
+BM_PY='import subprocess, sys; sys.exit(subprocess.run(["bash", "tests/run.sh", "--only", sys.argv[1]]).returncode)'
+BM_P="$(cd "$BM" && pwd -P)"; BA_P="$(cd "$BA" && pwd -P)"
+expect_eq "M.0 control: the tree is linked, its git directory its own (not the common one), the marker fx" "fx|yes" \
+  "$(cat "$BM_GD/bionic-agent")|$([ "$BM_GD" != "$(git -C "$BM" rev-parse --path-format=absolute --git-common-dir)" ] && echo yes)"
+if command -v python3 >/dev/null 2>&1 && python3 -c '' >/dev/null 2>&1; then
+  BA_AT="$BM" ba_drive - "python3 -c '$BM_PY' b.test.sh"
+  expect_eq "M.1 AC-1.2 no name carried, inside fx's tree: an off-budget suite through python is refused at the ask, 75, nothing run" \
+    "75 " "$BA_RC $(ran)"
+  expect_contains "M.1b …with the budget's own line, naming fx" "b.test.sh is not on fx's budget" "$BA_OUT"
+  BA_AT="$BM" ba_drive - "python3 -c '$BM_PY' a.test.sh"
+  expect_eq "M.1c …and the on-budget a.test.sh through python is admitted and runs" "0 a" "$BA_RC $(ran)"
+  BA_AT="$BA" ba_drive - "python3 -c '$BM_PY' b.test.sh"
+  expect_eq "M.1d AC-1.4 the same python launcher in the main checkout asks as main and runs" "0 b" "$BA_RC $(ran)"
+else
+  ok "M.1 python3 cannot run on this machine: M.2 to M.4 carry the launcher claim (awk, source, a script outside the tree)"
+fi
+BA_AT="$BM" ba_drive - "awk 'BEGIN { exit system(\"bash tests/run.sh --only b.test.sh\") }'"
+expect_eq "M.2 AC-1.2 …through awk" "75 " "$BA_RC $(ran)"
+expect_contains "M.2b …naming fx" "b.test.sh is not on fx's budget" "$BA_OUT"
+BA_AT="$BM" ba_drive - 'source tools/door-b.sh'
+expect_eq "M.3 AC-1.2 …through source" "75 " "$BA_RC $(ran)"
+BA_AT="$BM" ba_drive - "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.4 AC-1.2 …through a script outside the tree, started from inside it" "75 " "$BA_RC $(ran)"
+BA_AT="$BM" ba_drive - "bash '$D/outside.sh' a.test.sh"
+expect_eq "M.4b …which runs the on-budget a.test.sh" "0 a" "$BA_RC $(ran)"
+BA_AT="$BM" ba_drive fwide "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.5 a name carried wins over the place: fwide in fx's tree runs b" "0 b" "$BA_RC $(ran)"
+BA_AT="$BA" ba_drive - "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.6 AC-1.4 the main checkout has no marker: the same script there asks as main and runs b" "0 b" "$BA_RC $(ran)"
+printf 'fx\n' > "$BA/.git/bionic-agent"
+BA_AT="$BA" ba_drive - "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.6b AC-1.4 …and a marker planted in the main checkout's git directory is never read" "0 b" "$BA_RC $(ran)"
+rm -f "$BA/.git/bionic-agent"
+
+# THE REQUEST'S WHO, one asker at a time, so the fill sees the writer as showing.
+fresh budget-mark-who
+world_machine 8 8192 20 0.5
+bm_ask() {  # <gate lib> <dir> <key> — gate_ask work <key> from <dir>, no name carried; prints its rc
+  ( cd "$2" && env -u BIONIC_GATE_AGENT -u BIONIC_GATE_ADMIT bash -c \
+      '. "$1" 2>/dev/null; gate_ask work "$2" --within 2 >/dev/null 2>&1; echo $?' _ "$1" "$3" )
+}
+expect_eq "M.7 AC-1.2 gate_ask work a.test.sh from fx's tree, no name carried: admitted" "0" "$(bm_ask "$GATE_LIB" "$BM" a.test.sh)"
+expect_eq "M.7b …and its request is filed under fx, so the fill sees fx showing" "a.test.sh|$BM_P" \
+  "$(field "$(req_of fx)" key)|$(field "$(req_of fx)" tree)"
+expect_eq "M.8 AC-1.4 gate_ask work b.test.sh from the main checkout: admitted" "0" "$(bm_ask "$GATE_LIB" "$BA" b.test.sh)"
+expect_eq "M.8b …filed under main (M.7b is the positive, same reader)" "b.test.sh|$BA_P" \
+  "$(field "$(req_of main)" key)|$(field "$(req_of main)" tree)"
+expect_eq "M.9 gate_ask work b.test.sh from fx's tree: 75, nothing filed" "75 2" \
+  "$(bm_ask "$GATE_LIB" "$BM" b.test.sh) $(nreq)"
+# MUTATION: the fallback deleted asks as main; the common dir read in place of the tree's own finds no marker.
+fresh budget-mark-mut1
+world_machine 8 8192 20 0.5
+BM_MUT1="$(mutant mark-off)"
+expect_true "M.10 anchor: the ask falls back to the place's marker" grep -q '^  \[ -n "\$_GATE_AGENT" \] || _gate_marker$' "$BM_MUT1"
+sed -i.bak '/^  \[ -n "\$_GATE_AGENT" \] || _gate_marker$/d' "$BM_MUT1"
+expect_eq "M.10b mutant: without it, fx's off-budget ask from its tree is admitted (M.1–M.9 are not vacuous)" "0" \
+  "$(bm_ask "$BM_MUT1" "$BM" b.test.sh)"
+fresh budget-mark-mut2
+world_machine 8 8192 20 0.5
+BM_MUT2="$(mutant mark-common)"
+expect_true "M.11 anchor: the marker is read from the tree's own git directory" grep -q '"\$_GATE_GITDIR/bionic-agent"' "$BM_MUT2"
+sed -i.bak 's#\$_GATE_GITDIR/bionic-agent#$_GATE_COMMON/bionic-agent#g' "$BM_MUT2"
+expect_eq "M.11b mutant: reading the common directory instead, fx's off-budget ask is admitted" "0" \
+  "$(bm_ask "$BM_MUT2" "$BM" b.test.sh)"
+# THE MARKER COSTS NO FORK (AC-1.4): the one `git rev-parse` that names the request's tree names who
+# asks and finds the roster too, so an ask from a marked tree makes the git calls one from the main
+# checkout makes, and a carried name makes no more. Counted by a `git` on PATH that logs each call.
+fresh budget-mark-fork
+world_machine 8 8192 20 0.5
+mkdir -p "$D/shim"
+printf '#!/bin/bash\necho "$*" >> "%s/git.calls"\nexec %q "$@"\n' "$D" "$(command -v git)" > "$D/shim/git"
+chmod +x "$D/shim/git"
+bm_gits() {  # <dir> <key> [agent] — how many git calls one gate_ask work <key> from <dir> makes
+  rm -f "$D/git.calls"
+  ( cd "$1" && env -u BIONIC_GATE_AGENT -u BIONIC_GATE_ADMIT ${3:+BIONIC_GATE_AGENT=$3} PATH="$D/shim:$PATH" \
+      bash -c '. "$1" 2>/dev/null; gate_ask work "$2" --within 2 >/dev/null 2>&1' _ "$GATE_LIB" "$2" )
+  if [ -f "$D/git.calls" ]; then grep -c '' "$D/git.calls"; else echo 0; fi
+}
+BM_G_MAIN="$(bm_gits "$BA" a.test.sh)"
+expect_true "M.12 control: the shim sees the main checkout's ask call git ($BM_G_MAIN)" test "$BM_G_MAIN" -ge 1
+expect_eq "M.12b AC-1.4 an ask from fx's tree with no name carried makes the same git calls" "$BM_G_MAIN" \
+  "$(bm_gits "$BM" a.test.sh)"
+expect_eq "M.12c …and so does one carrying fx's name" "$BM_G_MAIN" "$(bm_gits "$BM" a.test.sh fx)"
+
 # ── §CASE ────────────────────────────────────────────────────────────────────
 section "§CASE — a capitalised spelling meets the budget its lowercase one meets (wave-33 T3; D7, AC-6.3)"
 # On a case-blind filesystem `TESTS/RUN.SH` is the runner and `GAMMA.TEST.SH` is gamma.test.sh, so
@@ -2226,5 +2382,146 @@ if [ "$BA_REAL_BLIND" = yes ]; then
 else
   echo "  (CA.6–CA.8 not run: this filesystem is case-exact, so TESTS/RUN.SH names no file here)"
 fi
+
+# ── §PASS ────────────────────────────────────────────────────────────────────
+# A PASS TAKES ONLY SPARE CAPACITY (wave-34 T8; D15, AC-5.2, AC-5.5; ADR-053). A full pass a landing
+# starts asks under kind `pass`, once and never waiting: it ranks after all work, is promised the
+# cores the room shows free less 2 kept for a landing, and is skipped when that is under 2. It is
+# not whole, so work and landings are admitted beside it within the reserve; a solo ask (kind whole)
+# marks it for stopping (`stop=` on its request, read by `gate_pass_stopped`) and is admitted by the
+# normal rule once it has released. A hand whole run still holds the machine alone. Every row plants
+# 8 cores under a share of 80: 6.4 cores of room, so a load of 1.0 leaves room for 5 writers.
+# fails-when: a pass is admitted with no room, or a work ask waits behind one.
+section "§PASS — a pass takes only the room the gate shows free, never waits and yields (D15; AC-5.2, AC-5.5)"
+pstop() { ( . "$GATE_LIB" 2>/dev/null; gate_pass_stopped "$@" >/dev/null 2>&1; echo $? ); }
+fresh pass-room
+world_machine 8 8192 30 1.0
+expect_eq "PS.1 the machine has room for 5 writers" \
+  "room=yes load=1.0/1.0 cores=8 promised=5 waiting=0 rc=0" "$(room --owed 5)"
+expect_eq "PS.1b …and not for 6" \
+  "room=no load=1.0/1.0 cores=8 promised=6 waiting=0 rc=1" "$(room --owed 6)"
+HOLD=1 ask_bg pp pass tests/run.sh 600; wait_for 20 has pp.rc
+pp_id="$(id_of pp)"
+expect_eq "PS.2 room for 5: the pass is admitted, promised 3 (5 less the 2 kept for a landing) (rc|promise)" \
+  "0|0:3:0" "$(rc_of pp)|$(field "$pp_id" promise)"
+expect_eq "PS.3 …filed as kind pass" "pass" "$(field "$pp_id" kind)"
+HOLD=1 ask_bg pw work k 0; wait_for 20 has pw.rc
+expect_eq "PS.4 a writer's suite asked during it is admitted beside it, one core (rc|promise)" "0|0:1:0" \
+  "$(rc_of pw)|$(field "$(id_of pw)" promise)"
+HOLD=1 ask_bg pl landing l 0; wait_for 20 has pl.rc
+expect_eq "PS.5 a landing asked during it is admitted beside it too" "0" "$(rc_of pl)"
+expect_eq "PS.6 gate_state: three admitted, nothing waits, 5 cores promised" \
+  "share=80 used=30 admitted=3 waiting=0 landing-waiting=0 load=1.0/1.0 promised=5" "$(state)"
+expect_eq "PS.7 work beside it does not stop the pass (gate_pass_stopped rc 1)" "1" "$(pstop "$pp_id")"
+release pw; release pl
+stopped() { [ "$(pstop "$1")" = 0 ]; }
+ask_bg ps whole s.test.sh 600; wait_for 20 asked_by ps
+wait_for 20 stopped "$pp_id"
+expect_eq "PS.8 a solo ask (kind whole) marks the running pass for stopping (gate_pass_stopped rc 0)" "0" \
+  "$(pstop "$pp_id")"
+expect_eq "PS.8b …a stop= line on the pass's request, at the solo ask's time" "1000" "$(field "$pp_id" stop)"
+expect_eq "PS.9 …the solo ask waits for the pass to release (asked|admitted)" "1000|" \
+  "$(field "$(req_of ps)" asked)|$(field "$(req_of ps)" admitted)"
+expect_false "PS.9b …and has no answer yet" has ps.rc
+release pp
+wait_for 20 has ps.rc
+expect_eq "PS.10 once the pass has released, the solo ask is admitted by the normal rule, promised its width" \
+  "0|0:6:0" "$(rc_of ps)|$(field "$(req_of ps)" promise)"
+expect_eq "PS.10b gate_pass_stopped on a request that is no pass: rc 1; on no request: rc 2" "1 2" \
+  "$(pstop "$(req_of ps)") $(pstop 99999)"
+
+fresh pass-none
+world_machine 8 8192 30 3.0
+expect_eq "PS.11 a load of 3.0 leaves room for 3 writers" \
+  "room=yes load=3.0/3.0 cores=8 promised=3 waiting=0 rc=0" "$(room --owed 3)"
+ask_bg pn pass tests/run.sh 600; wait_for 20 has pn.rc
+pn_id="$(req_of pn)"
+expect_eq "PS.12 room for 3: 3 less 2 is under 2, the pass is skipped at once though it offered 600 s (rc)" \
+  "75" "$(rc_of pn)"
+expect_eq "PS.12b …its request was filed (kind) and holds nobody: nothing waits (holder|admitted)" "pass|-|" \
+  "$(field "$pn_id" kind)|$(field "$pn_id" holder)|$(field "$pn_id" admitted)"
+expect_contains "PS.12c …and it says it was skipped" "skipped" "$(cat "$D/pn.err" 2>/dev/null)"
+expect_eq "PS.13 gate_state counts no waiter after it" \
+  "share=80 used=30 admitted=0 waiting=0 landing-waiting=0 load=3.0/3.0 promised=0" "$(state)"
+expect_eq "PS.13b …and the writers keep their room for 3" \
+  "room=yes load=3.0/3.0 cores=8 promised=3 waiting=0 rc=0" "$(room --owed 3)"
+BIONIC_PROBE_BUSY_CORES=2.0 BIONIC_PROBE_BUSY_CORES_5M=2.0 HOLD=1 ask_bg pm pass tests/run.sh 0
+wait_for 20 has pm.rc
+expect_eq "PS.14 a load of 2.0 leaves room for 4: the pass is admitted at the minimum, 2 (rc|promise)" "0|0:2:0" \
+  "$(rc_of pm)|$(field "$(id_of pm)" promise)"
+release pm
+expect_eq "PS.15 a five-minute load of 4.0 counts as the last minute's does: skipped" "75" \
+  "$(BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 ask_fg p5 pass tests/run.sh 0)"
+expect_eq "PS.16 memory over the share: skipped" "75" "$(BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_USED_PCT=85 ask_fg p6 pass tests/run.sh 0)"
+fresh pass-prom
+world_machine 8 8192 30 1.0
+HOLD=1 ask_bg pr1 work k 0; wait_for 20 has pr1.rc
+HOLD=1 ask_bg pr2 pass tests/run.sh 0; wait_for 20 has pr2.rc
+expect_eq "PS.17 a held writer's promise counts: 1.0 busy + 1 promised leaves 4, the pass is promised 2 (rc|promise)" \
+  "0|0:2:0" "$(rc_of pr2)|$(field "$(id_of pr2)" promise)"
+release pr1; release pr2
+
+# A pass ranks after all work: a writer's suite waiting behind a held one (its own reading busy)
+# keeps the head, so a pass asked on a quiet reading is skipped; with both gone it is admitted.
+pass_rank() {  # <gate lib> <prefix> — sets RANK to "<pass rc while the writer waits> <pass rc after>"
+  fresh "pass-rank-$2"
+  world_machine 8 8192 30 1.0
+  GATE_LIB="$1" HOLD=1 ask_bg rk_h work h 0; wait_for 20 has rk_h.rc
+  GATE_LIB="$1" BIONIC_PROBE_BUSY_CORES=5.8 BIONIC_PROBE_BUSY_CORES_5M=5.8 ask_bg rk_w work k 600
+  wait_for 20 asked_by rk_w
+  RANK_W="$(field "$(req_of rk_w)" asked)|$(field "$(req_of rk_w)" admitted)"
+  RANK="$(GATE_LIB="$1" ask_fg rk_p1 pass tests/run.sh 0)"
+  reap
+  RANK="$RANK $(GATE_LIB="$1" ask_fg rk_p2 pass tests/run.sh 0)"
+}
+pass_rank "$GATE" real
+expect_eq "PS.18 a writer's suite waits on its reading (asked|admitted)" "1000|" "$RANK_W"
+expect_eq "PS.19 a pass asked while it waits is skipped though its own reading leaves room for 4; once it is gone, admitted" \
+  "75 0" "$RANK"
+MPR="$(mutant pass-rank)"
+anchor "$MPR" 'else if ($1 == "pass") r = 3' 1
+sed -i.bak 's/else if (\$1 == "pass") r = 3/else if ($1 == "pass") r = 0/' "$MPR"
+pass_rank "$MPR" mut
+expect_eq "PS.19a the mutant (a pass ranked ahead of work) runs and admits the pass over the waiting writer" \
+  "0 0" "$RANK"
+
+fresh pass-solo-waits
+world_machine 8 8192 30 1.0
+HOLD=1 ask_bg sw1 work k 0; wait_for 20 has sw1.rc
+ask_bg sw2 whole s.test.sh 600; wait_for 20 asked_by sw2
+expect_eq "PS.20 a solo ask waits behind a held writer (asked|admitted)" "1000|" \
+  "$(field "$(req_of sw2)" asked)|$(field "$(req_of sw2)" admitted)"
+expect_eq "PS.21 a pass asked while it waits is skipped, though 4 cores are free" "75" \
+  "$(ask_fg sw3 pass tests/run.sh 0)"
+release sw1
+wait_for 20 has sw2.rc
+expect_eq "PS.21b …and the solo ask is admitted once the writer ends" "0" "$(rc_of sw2)"
+
+# AC-5.5: a hand whole run holds the machine alone, as in 1.16.0.
+fresh pass-whole
+world_machine 8 8192 30 1.0
+HOLD=1 ask_bg hw whole tests/run.sh 0; wait_for 20 has hw.rc
+expect_eq "PS.22 a hand whole run is admitted, promised its width (rc|promise)" "0|0:6:0" \
+  "$(rc_of hw)|$(field "$(id_of hw)" promise)"
+expect_eq "PS.23 while it holds, a pass is skipped and a writer's suite waits (75 75)" "75 75" \
+  "$(ask_fg hp pass tests/run.sh 0) $(ask_fg hk work k 0)"
+release hw
+expect_eq "PS.24 once it ends, the pass is admitted (rc|promise)" "0|0:3:0" \
+  "$(ask_fg hp2 pass tests/run.sh 0)|$(field "$(id_of hp2)" promise)"
+
+# The mutant that admits a pass under the minimum: room for 3, and the pass is admitted.
+MPM="$(mutant pass-min)"
+anchor "$MPM" '[ "$_G_PASS_WIDTH" -ge "$_GATE_PASS_MIN" ] || return 1' 1
+sed -i.bak 's/\[ "\$_G_PASS_WIDTH" -ge "\$_GATE_PASS_MIN" \] || return 1/:/' "$MPM"
+fresh pass-min-mut
+world_machine 8 8192 30 3.0
+expect_eq "PS.25 the mutant without the minimum runs and admits a pass with no room — the minimum is the rule" \
+  "0" "$(GATE_LIB="$MPM" ask_fg mm pass tests/run.sh 0)"
+
+# The budget: a pass is the branch's, not the writer's (exempt as a landing is).
+fresh pass-budget
+world_machine 8 8192 20 0.5
+expect_eq "PS.26 fx, budgeted for a.test.sh, asks a whole run: refused (75); a pass of the same key: admitted (0)" \
+  "75 0" "$(cd "$BA" && AGENT=fx ask_fg pb1 whole tests/run.sh 2) $(cd "$BA" && AGENT=fx ask_fg pb2 pass tests/run.sh 2)"
 
 finish

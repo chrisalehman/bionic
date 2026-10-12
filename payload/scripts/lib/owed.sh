@@ -8,7 +8,9 @@
 # nothing remembered which of them the person had already been told about. This is that memory,
 # declared at the source: the code that leaves the person a decision opens an item, the verb
 # that records the answer closes it, and the one sender (lib/notify.sh) sends each open item
-# once.
+# at least once: a send that fails, a timeout after the service accepted it included, is sent
+# again by the next caller, so the person may hear of an item twice and never not at all
+# (wave-34 T5; D10 "1").
 #
 # THE STORE. `.bionic/tmp/owed-<session>.state` under the project root, session-keyed like every
 # other `<class>-<session>.state` there. One line per item, the last word on a key winning:
@@ -221,7 +223,8 @@ owed_unmark_sent() {
 # mid-send (the Stop's ten seconds) never sends one twice. A failed send is logged by notify_send,
 # its mark is taken back (wave-33 T34; the critic's finding 3 reverses A-T11-3) and the loop stops:
 # that item and the ones after it stay unsent for the next caller, so a dead network costs one
-# bounded attempt per turn, not one per item, and a working one sends each item once.
+# bounded attempt per turn, not one per item, and a working one sends each item at least once: curl's
+# timeout can expire after ntfy accepted the message, and that send is retried like any failure.
 # No channel declared: returns before reading the store, so nothing is marked and an item still
 # open when a channel is declared later is sent then.
 owed_send() {

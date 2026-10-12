@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half). Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the pass a landing starts (wave-34 T9): §PASS. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -702,13 +702,13 @@ expect_eq "(r6j) lands_on= naming run.sh is refused naming lands_on= (exit 2)" "
 expect_false "(r6j) …and nothing is appended" test -e "$(ll_rec "$RM6")"
 ll_launch "$RM6" T1 'tests/a.test.sh a'
 ll_verb "$RM6" T1
-expect_eq "(r6j) …while the same tree, its row naming a path and a bare name, lands once on a.test.sh (exit 0)" "0 a.test.sh" \
+expect_eq "(r6j) …while the same tree, its row naming a path and a bare name, lands on each as named, the path kept (exit 0)" "0 tests/a.test.sh,a.test.sh" \
   "$LL_RC $(ll_field "$(ll_ev "$RM6" ready)" suites)"
 # THE MUTANTS: the launch-row read restored (the amend row lands with b unrun), and the fallback winning over lands_on=.
 RM7="$(ll_world)"; HM7="$(ll_head "$RM7")"
 ll_wide "$RM7" 'a.test.sh b.test.sh'
 ll_redsuite "$RM7" T1 b
-LL_MUTANT='s/_line_current_row /false /' LL_MUTANT_FN=line_ready ll_drive "$RM7" T1 "$WORLD_ROOT/m7-T1.out"
+LL_MUTANT='s/_line_current_row /false /' LL_MUTANT_FN=line_row_writer ll_drive "$RM7" T1 "$WORLD_ROOT/m7-T1.out"
 ll_wait_file "$WORLD_ROOT/m7-T1.out.rc" 300
 expect_eq "(r6em-pre) the mutant ran: the row entered the line, proved on a.test.sh alone" "a.test.sh a.test.sh:green" \
   "$(ll_field "$(ll_ev "$RM7" ready)" suites) $(ll_verdicts "$RM7")"
@@ -730,8 +730,11 @@ expect_eq "(r6dm) MUTANT the absence arm removed: suites_allowed=none lands with
   "$(cat "$WORLD_ROOT/m9-T1.out.rc" 2>/dev/null) $(ll_field "$(ll_ev "$RM9" ready)" suites)"
 # The parser, asked directly: the label's grammar.
 expect_eq "(r6k) the suite-name parser: names, paths, run.sh, none" \
-  "a.test.sh|a.test.sh,b.test.sh|a.test.sh|none|FAIL|FAIL|FAIL" \
+  "a.test.sh|a.test.sh,b.test.sh|tests/a.test.sh|none|FAIL|FAIL|FAIL" \
   "$(_line_suites a)|$(_line_suites 'a.test.sh, b')|$(_line_suites tests/a.test.sh)|$(_line_suites 'none docs')|$(_line_suites run.sh || echo FAIL)|$(_line_suites 'a.b' || echo FAIL)|$(_line_suites -x || echo FAIL)"
+expect_eq "(r6k2) …a path keeps its directories, one spelling per file; no .., no absolute path, no empty or . directory" \
+  "tests/a.test.sh|./a.test.sh|d/x.test.sh,x.test.sh|FAIL|FAIL|FAIL|FAIL|FAIL" \
+  "$(_line_suites './tests/a, tests/a.test.sh')|$(_line_suites ./a)|$(_line_suites 'd/x x')|$(_line_suites ../a.test.sh || echo FAIL)|$(_line_suites /d/a.test.sh || echo FAIL)|$(_line_suites d//a.test.sh || echo FAIL)|$(_line_suites d/./a.test.sh || echo FAIL)|$(_line_suites d/run.sh || echo FAIL)"
 
 # ---------------------------------------------------------------------------
 section "§PROOF: the tool makes the proof; no stamp is read (AC-1.2)"
@@ -1378,15 +1381,17 @@ section "§LABELS: the launch line's lands_on= and lands_red= read back through 
 # The dispatch wall writes `lands_on=` from the brief's `Lands-on:` line, spelled by the lift
 # (lib/brief.sh), and `lands_red=` as `<suite basename> until <token>`; `ready` reads both off the launch
 # line through `_line_suites`. One row per key, through the real lift and the real row writer, so the
-# writer and the decoder cannot drift. fails-when: the lifted spelling is not what `_line_suites`
-# decodes it to, or the debt's suite is not one of the row's suites in that same spelling.
+# writer and the decoder cannot drift. A path-qualified suite keeps its path (wave-34 T27), so the debt,
+# which the wall writes by file name, is one of the row's suites by its file name, as ready matches it.
+# fails-when: the lifted spelling is not what `_line_suites` decodes it to, or the debt's suite is not
+# the file name of one of the row's suites.
 LB_LIFT="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
   l="$(lift_contract_fields 'Lands-on: a, tests/b.test.sh, ./c.test.sh  # the row suites
 Lands-red: tests/b.test.sh until ext:vendor-fix')"
   printf '%s|%s' "$(brief_field "$l" lands_on)" "$(brief_field "$l" lands_red)")"
 LB_ON="${LB_LIFT%%|*}"; LB_RED_LINE="${LB_LIFT#*|}"
-expect_eq "(lb0) precondition: the lift reads the Lands-on: line (the positive on that extractor)" \
-  "a.test.sh,b.test.sh,c.test.sh" "$LB_ON"
+expect_eq "(lb0) precondition: the lift reads the Lands-on: line, a bare name bare and a path as declared (the positive on that extractor)" \
+  "a.test.sh,tests/b.test.sh,./c.test.sh" "$LB_ON"
 # the wall writes the debt by its suite basename (hooks/dispatch-preflight.sh, `${_lr_suite##*/}`)
 LB_RED_SUITE="${LB_RED_LINE%% *}"; LB_RED="${LB_RED_SUITE##*/} until ${LB_RED_LINE##* until }"
 LB_ROW="$(roster_row status=intended session=s1 name=w-A2 agent_id= launched_at=2026-10-07T01:00:00Z \
@@ -1398,8 +1403,8 @@ expect_eq "(lb1) lands_on= on the launch line decodes to itself through _line_su
 LB_RED_READ="$(_wt_field "$LB_ROW" lands_red)"
 expect_eq "(lb2) lands_red=, cut at its first word as ready cuts it, decodes to itself through _line_suites" \
   "${LB_RED_READ%% *}" "$(_line_suites "${LB_RED_READ%% *}")"
-expect_contains "(lb3) …and that suite is one of the row's lands_on suites, in the same spelling" \
-  ",${LB_RED_READ%% *}," ",$(_line_suites "$LB_ON_READ"),"
+expect_contains "(lb3) …and that suite is the file name of one of the row's lands_on suites" \
+  ",${LB_RED_READ%% *}," ",$(_line_suites "$LB_ON_READ" | tr ',' '\n' | sed 's|.*/||' | paste -sd, -),"
 # The token half (read-structure-p17 #5): the wall writes a debt only as `<suite> until <token>`, so
 # ready's token cut (`${debt#* until }`, line.sh) and land's (`${lands_red#* until }`, worktree.sh) read
 # the one token; a debt with no ` until ` is never written, so where the two cuts differ is unreached.
@@ -1675,5 +1680,215 @@ expect_eq "(cause7-pre) …now rewritten as a record before 1.16.0 writes it, wi
 ll_walk "$RC3" "$HC3" "$KC3"
 expect_eq "(cause7) a standing event with no cause is counted: the judge refuses (exit 1), naming the red" "1 1" \
   "$LL_WALK_RC $(printf '%s\n' "$LL_WALK" | grep -c "a.test.sh is red at ${KC3:0:12}")"
+
+# ---------------------------------------------------------------------------
+section "§PATH: a landing runs a Lands-on suite where it lives, not only under tests/ (wave-34 T7; D23, AC-14.4)"
+# A suite under `scripts/deploy/__tests__/` reached `ready` as `x.test.sh` and was started as
+# `bash tests/x.test.sh`: no such file, no verdict, STALLED. The launch line below is written by the real
+# lift and the real row writer. fails-when: a suite under a directory other than tests/ stalls at `ready`
+# with "No such file". THE DECLARED PATH IS THE ONE RUN (wave-34 T27; critic S2): the lift keeps a
+# path-qualified entry as declared, so a same-named tests/<name> never stands in for it (pa4, pa5).
+PA_ON="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
+  brief_field "$(lift_contract_fields 'Lands-on: scripts/deploy/__tests__/x.test.sh')" lands_on)"
+expect_eq "(pa0) precondition: the lift keeps the path-qualified Lands-on: line as declared (the positive on that extractor)" \
+  "scripts/deploy/__tests__/x.test.sh" "$PA_ON"
+world_cost x.test.sh 5 0.5 5
+ll_commit_at() {  # <root> <row> <path in the tree> <suite file name> [<rc>] — the row commits <path> as a suite that says where it ran, green (rc 0) or red
+  local t="$1/.worktrees/$2" rc="${5:-0}" end="1/1 passed, 0 failed" line="PASS: $3 ran"
+  [ "$rc" = 0 ] || { end="0/1 passed, 1 failed"; line="FAIL: $3 ran"; }
+  mkdir -p "$t/$(dirname "$3")"
+  printf '#!/bin/bash\necho "%s"\necho "ran-from=$(pwd -P) as=$0"\necho\necho "%s: %s  sections=1 setup=0"\nexit %s\n' \
+    "$line" "$4" "$end" "$rc" > "$t/$3"
+  git -C "$t" add "$3" && git -C "$t" commit -qm "$2: $3 as planted"
+}
+PA="$(ll_world)"; ll_launch "$PA" T1 "$PA_ON"
+ll_commit_at "$PA" T1 scripts/deploy/__tests__/x.test.sh x.test.sh
+expect_false "(pa0) precondition: the tree has no tests/x.test.sh, so the old path names nothing" test -e "$PA/.worktrees/T1/tests/x.test.sh"
+ll_verb "$PA" T1
+KPA="$(ll_last_cand "$PA" T1)"
+expect_eq "(pa1) AC-14.4 Lands-on: scripts/deploy/__tests__/x.test.sh runs and lands: ready exits 0, the candidate's verdict green" "0 green" \
+  "$LL_RC $(ll_results "$PA" T1 "$KPA")"
+expect_contains "(pa1b) …printing LANDED" "LANDED T1 $KPA" "$LL_OUT"
+expect_contains "(pa1c) …the log is the suite's own, started at the path it lives at, in the landing tree" \
+  "as=scripts/deploy/__tests__/x.test.sh" "$(cat "$PA/.bionic/docs/record/wave-x/line/T1-x-${KPA:0:12}.log" 2>/dev/null)"
+expect_absent "(pa1d) …and no 'No such file'" "No such file" "$(cat "$PA/.bionic/docs/record/wave-x/line/T1-x-${KPA:0:12}.log" 2>/dev/null)"
+# A suite under tests/ is still started there, whatever else carries its name.
+PB="$(ll_world)"; ll_launch "$PB" T1 x
+ll_commit_at "$PB" T1 tests/x.test.sh x.test.sh
+ll_commit_at "$PB" T1 scripts/deploy/__tests__/x.test.sh x.test.sh
+ll_verb "$PB" T1
+KPB="$(ll_last_cand "$PB" T1)"
+expect_eq "(pa2) a suite named x.test.sh under tests/ and elsewhere: tests/ wins, as before" "0 green" "$LL_RC $(ll_results "$PB" T1 "$KPB")"
+expect_contains "(pa2b) …the log shows tests/x.test.sh ran" "as=tests/x.test.sh" "$(cat "$PB/.bionic/docs/record/wave-x/line/T1-x-${KPB:0:12}.log" 2>/dev/null)"
+# Two files of that name and neither under tests/: ready does not pick one. The suite cannot start, as for
+# any suite the tree does not have, and the entry stalls where the writer sees it.
+PC="$(ll_world)"; ll_launch "$PC" T1 x
+ll_commit_at "$PC" T1 scripts/deploy/__tests__/x.test.sh x.test.sh
+ll_commit_at "$PC" T1 other/x.test.sh x.test.sh
+ll_verb "$PC" T1
+expect_eq "(pa3) the same name at two paths, none under tests/: ready picks neither and stalls (exit 70, two none verdicts)" "70 none none" \
+  "$LL_RC $(ll_results "$PC" T1 "$(ll_last_cand "$PC" T1)")"
+# The declared path runs even when tests/ carries a suite of the same name: here tests/x.test.sh is green
+# and the declared scripts/deploy/__tests__/x.test.sh is red, so a landing that ran the first would land.
+# fails-when: ready runs tests/<name> in place of the declared path and lands green (the critic's S2).
+PD="$(ll_world)"; ll_launch "$PD" T1 "$PA_ON"
+ll_commit_at "$PD" T1 tests/x.test.sh x.test.sh
+ll_commit_at "$PD" T1 scripts/deploy/__tests__/x.test.sh x.test.sh 1
+ll_verb "$PD" T1
+KPD="$(ll_last_cand "$PD" T1)"
+expect_eq "(pa4) Lands-on: scripts/deploy/__tests__/x.test.sh, red, beside a green tests/x.test.sh: ready returns the row (exit 1, verdict red)" \
+  "1 red" "$LL_RC $(ll_results "$PD" T1 "$KPD")"
+expect_contains "(pa4b) …RED names the declared path" "RED T1 scripts/deploy/__tests__/x.test.sh " "$LL_OUT"
+expect_contains "(pa4c) …its verdict is filed under the declared path" "|suite=scripts/deploy/__tests__/x.test.sh|result=red|" \
+  "$(ll_ev "$PD" verdict)"
+expect_contains "(pa4d) …and the log is the declared suite's run" "as=scripts/deploy/__tests__/x.test.sh" \
+  "$(cat "$PD/.bionic/docs/record/wave-x/line/T1-x-${KPD:0:12}.log" 2>/dev/null)"
+expect_absent "(pa4e) …not tests/x.test.sh's" "as=tests/x.test.sh" \
+  "$(cat "$PD/.bionic/docs/record/wave-x/line/T1-x-${KPD:0:12}.log" 2>/dev/null)"
+expect_absent "(pa4f) …and nothing LANDED" "LANDED T1" "$LL_OUT"
+# A declared path the tree does not have is never replaced by a same-named file: the suite cannot start,
+# and the entry stalls on the declared path. fails-when: ready falls back to tests/<name> and lands.
+PE="$(ll_world)"; ll_launch "$PE" T1 "$PA_ON"
+ll_commit_at "$PE" T1 tests/x.test.sh x.test.sh
+ll_verb "$PE" T1
+KPE="$(ll_last_cand "$PE" T1)"
+expect_eq "(pa5) Lands-on: scripts/deploy/__tests__/x.test.sh, absent from the tree, beside tests/x.test.sh: ready stalls (exit 70, two none verdicts)" \
+  "70 none none" "$LL_RC $(ll_results "$PE" T1 "$KPE")"
+expect_contains "(pa5b) …STALLED" "STALLED T1 " "$LL_OUT"
+expect_contains "(pa5c) …the verdicts filed under the declared path" "|suite=scripts/deploy/__tests__/x.test.sh|result=none|" \
+  "$(ll_ev "$PE" verdict)"
+expect_contains "(pa5d) …the log names the declared path it could not start" "scripts/deploy/__tests__/x.test.sh" \
+  "$(cat "$PE/.bionic/docs/record/wave-x/line/T1-x-${KPE:0:12}.log" 2>/dev/null)"
+expect_absent "(pa5e) …and tests/x.test.sh never ran" "as=tests/x.test.sh" \
+  "$(cat "$PE/.bionic/docs/record/wave-x/line/T1-x-${KPE:0:12}"*.log 2>/dev/null)"
+# The declared debt names a suite by its file name (the wall writes `lands_red=` so), and a path-qualified
+# suite of that name is the debt: its red publishes with the debt written. fails-when: the debt is matched
+# against the declared path's whole spelling, so the declared red returns the row, or publishes with no debt.
+PF="$(ll_world)"; ll_launch "$PF" T1 "$PA_ON" lands_red='x.test.sh until T9'
+ll_commit_at "$PF" T1 scripts/deploy/__tests__/x.test.sh x.test.sh 1
+ll_verb "$PF" T1
+KPF="$(ll_last_cand "$PF" T1)"
+expect_eq "(pa6) a declared red on the path-qualified suite publishes (exit 0, verdict red)" "0 red" \
+  "$LL_RC $(ll_results "$PF" T1 "$KPF")"
+expect_contains "(pa6b) …its verdict filed under the declared path" "|suite=scripts/deploy/__tests__/x.test.sh|result=red|" \
+  "$(ll_ev "$PF" verdict)"
+expect_eq "(pa6c) …saying DEBT for the declared suite, once" "1" "$(printf '%s\n' "$LL_OUT" | grep -c '^DEBT T1 x.test.sh ')"
+expect_eq "(pa6d) …and the gate's reader of the bound plan deals the debt" "debt	x.test.sh	T9" \
+  "$(bash -c '. "$1/proof.sh" && proof_debts "$2"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$PF")" | cut -f1-3)"
+
+# ---------------------------------------------------------------------------
+section "§PASS: a landing starts one pass of the declared regression in the background; one at a time per branch (wave-34 T9; REQ-5 AC-5.1, AC-5.5; D15)"
+# `ready` ends, after LANDED and before the owed line, by starting one pass of the project's declared
+# regression (`floor:` in .bionic/config.yaml, else tests/run.sh), detached, in a landing tree of its own
+# at the landed head, while the branch's pass lock is free. The regression here is a stub the config
+# declares: it writes where it ran, at which head and under which admission, then waits for its go file
+# (30 s at most) and ends with the code its rc file holds. Every pass is waited out before the next row.
+# fails-when: two passes run at once (P2), the lock is never freed so the landing after a pass starts none
+# (P3), a red pass is silent in the record (P3b), or `background-pass: off` still starts a pass (P0).
+PA_STUB="$WORLD_ROOT/pass-stub.sh"
+cat > "$PA_STUB" <<'STUB'
+#!/bin/bash
+d="$WORLD_ROOT/pass-$1"
+printf '%s %s %s\n' "$(pwd -P)" "$(git rev-parse HEAD 2>/dev/null)" "${BIONIC_GATE_ADMIT:-none}" >> "$d.started"
+i=0; while [ ! -e "$d.go" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+echo "stub regression: 4 passed"
+exit "$(cat "$d.rc" 2>/dev/null || echo 0)"
+STUB
+pa_config() { printf '%s\n' "${@:2}" > "$1/.bionic/config.yaml"; }   # <root> <line>...
+pa_started() { awk 'END { print NR + 0 }' "$WORLD_ROOT/pass-$1.started" 2>/dev/null || echo 0; }   # <tag> -> passes started
+pa_wait_started() {  # <tag> <n> -> 0 once n passes of <tag> have started (10 s)
+  local i=0; while [ "$(pa_started "$1")" -lt "$2" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+  [ "$(pa_started "$1")" -ge "$2" ]
+}
+pa_wait_passes() {  # <root> <n> -> 0 once the record holds n ev=pass lines (40 s)
+  local i=0; while [ "$(ll_ev "$1" pass | awk 'END { print NR + 0 }')" -lt "$2" ] && [ "$i" -lt 400 ]; do sleep 0.1; i=$((i + 1)); done
+  [ "$(ll_ev "$1" pass | awk 'END { print NR + 0 }')" -ge "$2" ]
+}
+pa_line() { printf '%s\n' "$LL_OUT" | grep '^pass: '; }
+# P0 — AC-5.5: background-pass: off starts nothing; the same world turned on starts one (the control).
+PA0="$(ll_rworld)"; : > "$WORLD_ROOT/pass-p0.go"
+pa_config "$PA0" "floor: bash $PA_STUB p0" "background-pass: off"
+ll_verb "$PA0" T1
+K0="$(ll_last_cand "$PA0" T1)"
+expect_eq "(P0) background-pass: off — ready lands and prints LANDED and the owed line, exactly" \
+  "0|$(printf 'LANDED T1 %s\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$K0" "$K0")" "$LL_RC|$LL_OUT"
+sleep 2
+expect_eq "(P0b) …and no pass started (the stub never ran)" "0" "$(pa_started p0)"
+pa_config "$PA0" "floor: bash $PA_STUB p0" "background-pass: on"
+ll_verb "$PA0" T2
+expect_regex "(P0c) control: the same world turned on — the next landing prints the pass line" '^pass: started at [0-9a-f]{12} pid=[0-9]+ log=' "$(pa_line)"
+expect_true "(P0c) …and the stub ran" pa_wait_started p0 1
+pa_wait_passes "$PA0" 1
+# P0d — the key absent reads the plan: `regression: no` starts nothing.
+PA0D="$(ll_rworld)"; : > "$WORLD_ROOT/pass-p0d.go"
+pa_config "$PA0D" "floor: bash $PA_STUB p0d"
+awk '{ print } /^working-branch: / { print "regression: no" }' "$(ll_plan "$PA0D")" > "$PA0D/p.n" && mv "$PA0D/p.n" "$(ll_plan "$PA0D")"
+ll_verb "$PA0D" T1
+sleep 2
+expect_eq "(P0d) no background-pass: key and the plan's regression: no — lands (0), no pass line, the stub never ran" "0||0" \
+  "$LL_RC|$(pa_line)|$(pa_started p0d)"
+# P1 — AC-5.1: a landing on a free lock starts one pass, in its own landing tree at the landed head.
+PA1="$(ll_rworld)"
+pa_config "$PA1" "floor: bash $PA_STUB p1"
+ll_verb "$PA1" T1
+K1="$(ll_last_cand "$PA1" T1)"
+expect_eq "(P1) ready exits 0, LANDED first" "0 LANDED T1 $K1" "$LL_RC $(printf '%s\n' "$LL_OUT" | head -1)"
+expect_regex "(P1b) …then one pass line naming the landed head, its pid and its log" \
+  "^pass: started at ${K1:0:12} pid=[0-9]+ log=[^ ]+\$" "$(pa_line)"
+expect_eq "(P1c) …exactly one pass line, and the owed line is still the last" "1 yes" \
+  "$(printf '%s\n' "$LL_OUT" | grep -c '^pass: ') $([ "$(printf '%s\n' "$LL_OUT" | tail -1)" = "landed T1 $K1 — owed: complete task T1, then stop wx-T1" ] && echo yes || echo no)"
+expect_absent "(P1d) …naming no poker verb" "session-poker" "$LL_OUT"
+expect_true "(P1e) the pass started" pa_wait_started p1 1
+PA1_TREE=""; PA1_HEAD=""; PA1_ADMIT=""
+{ read -r PA1_TREE PA1_HEAD PA1_ADMIT < "$WORLD_ROOT/pass-p1.started"; } 2>/dev/null
+expect_eq "(P1f) …at the landed head, which is the branch's head" "$K1 $K1" "$PA1_HEAD $(ll_head "$PA1")"
+expect_regex "(P1g) …in a landing tree of its own, not the checkout that holds the branch" "^${PA1}/\\.bionic/tmp/landing/[0-9]+\$" "$PA1_TREE"
+expect_regex "(P1h) …under an admission of the gate's (BIONIC_GATE_ADMIT)" '^[0-9]+$' "$PA1_ADMIT"
+expect_eq "(P1i) …and that request is kind pass, asked as main" "pass ${WORLD_SID}:main" \
+  "$(sed -n 's/^kind=//p' "$BIONIC_GATE_DIR/requests/$PA1_ADMIT" 2>/dev/null) $(sed -n 's/^who=//p' "$BIONIC_GATE_DIR/requests/$PA1_ADMIT" 2>/dev/null)"
+# P2 — a second landing during the pass starts none.
+ll_verb "$PA1" T2
+expect_eq "(P2) a landing during the pass lands (0) and prints no pass line" "0|" "$LL_RC|$(pa_line)"
+sleep 2
+expect_eq "(P2b) …and no second pass runs: the stub started once" "1" "$(pa_started p1)"
+: > "$WORLD_ROOT/pass-p1.go"
+expect_true "(P2c) the pass ends and the record says so" pa_wait_passes "$PA1" 1
+PA1_EV="$(ll_ev "$PA1" pass | tail -1)"
+expect_eq "(P2d) ev=pass at the head it ran, green, no failed suites" "$K1 green -" \
+  "$(ll_field "$PA1_EV" head) $(ll_field "$PA1_EV" result) $(ll_field "$PA1_EV" suites)"
+PA1_LOG="$(ll_field "$PA1_EV" log)"
+expect_regex "(P2e) …its log copied into the record directory" "^${PA1}/\\.bionic/docs/record/wave-x/pass-${K1:0:12}(-[0-9]+)?\\.log\$" "$PA1_LOG"
+expect_eq "(P2f) …opening as floor-run's log does: head=<the head> dirty=0 rc=0, then the command" \
+  "head=$K1 dirty=0 rc=0|command: bash $PA_STUB p1" "$(head -n 2 "$PA1_LOG" 2>/dev/null | paste -sd'|' -)"
+expect_contains "(P2g) …and the regression's own output" "stub regression: 4 passed" "$(cat "$PA1_LOG" 2>/dev/null)"
+expect_eq "(P2h) the pass ended its gate request" "0" "$(sed -n 's/^rc=//p' "$BIONIC_GATE_DIR/requests/$PA1_ADMIT" 2>/dev/null)"
+# P3 — the first landing after a pass ends starts the next; a red pass names itself in the record.
+PA3="$(ll_rworld)"; : > "$WORLD_ROOT/pass-p3.go"
+pa_config "$PA3" "floor: bash $PA_STUB p3"
+ll_verb "$PA3" T1
+expect_true "(P3-pre) the first pass ran and ended" pa_wait_passes "$PA3" 1
+echo 1 > "$WORLD_ROOT/pass-p3.rc"
+ll_verb "$PA3" T2
+K3="$(ll_last_cand "$PA3" T2)"
+expect_regex "(P3) the first landing after the pass ended starts the next" "^pass: started at ${K3:0:12} " "$(pa_line)"
+expect_true "(P3a) …and it runs" pa_wait_started p3 2
+expect_true "(P3b) a red pass is written to the record" pa_wait_passes "$PA3" 2
+PA3_EV="$(ll_ev "$PA3" pass | tail -1)"
+expect_eq "(P3c) …ev=pass at its head, red" "$K3 red" "$(ll_field "$PA3_EV" head) $(ll_field "$PA3_EV" result)"
+expect_eq "(P3d) …its log opens with the regression's code" "head=$K3 dirty=0 rc=1" "$(head -n 1 "$(ll_field "$PA3_EV" log)" 2>/dev/null)"
+# P4 — no floor: declared: the regression is the project's tests/run.sh, run in the pass's tree.
+PA4="$(ll_rworld)"
+printf '#!/bin/bash\necho "head=$(git rev-parse HEAD) dirty=0"\necho "ran-in=$(pwd -P) admit=${BIONIC_GATE_ADMIT:-none}"\necho "Failed:"\necho "    - z.test.sh (planted)"\necho "Gating: 1 passed, 1 failed"\nexit 1\n' > "$PA4/.worktrees/T1/tests/run.sh"
+git -C "$PA4/.worktrees/T1" add tests/run.sh && git -C "$PA4/.worktrees/T1" commit -qm "T1: a runner"
+ll_verb "$PA4" T1
+K4="$(ll_last_cand "$PA4" T1)"
+expect_regex "(P4) with no floor: and a tests/run.sh at the head, the landing starts a pass" "^pass: started at ${K4:0:12} " "$(pa_line)"
+expect_true "(P4b) …which ends in the record" pa_wait_passes "$PA4" 1
+PA4_EV="$(ll_ev "$PA4" pass | tail -1)"
+expect_eq "(P4c) …red, naming the suites the runner lists as failed" "$K4 red z.test.sh" \
+  "$(ll_field "$PA4_EV" head) $(ll_field "$PA4_EV" result) $(ll_field "$PA4_EV" suites)"
+expect_regex "(P4d) …the log is the runner's own, run in a landing tree under the pass's admission" \
+  "ran-in=${PA4}/\\.bionic/tmp/landing/[0-9]+ admit=[0-9]+" "$(cat "$(ll_field "$PA4_EV" log)" 2>/dev/null)"
+expect_eq "(P4e) …and its first line is the runner's head line" "head=$K4 dirty=0" "$(head -n 1 "$(ll_field "$PA4_EV" log)" 2>/dev/null)"
 
 finish

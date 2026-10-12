@@ -30,6 +30,11 @@
 # the project's audit stream (lib/root.sh's `audit_path`), `notify-failed`, naming why and the
 # ledger key the caller set in `NOTIFY_KEY`.
 #
+# AT LEAST ONCE, NOT EXACTLY ONCE (wave-34 T5; REQ-4 AC-4.4, D10 "1"). Any non-zero curl exit is a
+# failure, `--max-time` expiring after ntfy accepted the message (exit 28) among them: the sender
+# cannot tell a late acceptance from a loss, so its caller (lib/owed.sh `owed_send`) sends the item
+# again, and the person is told at least once, sometimes twice.
+#
 # SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME. BASH 3.2.
 
 NOTIFY_RC=1

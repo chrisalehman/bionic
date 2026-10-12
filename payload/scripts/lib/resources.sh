@@ -471,47 +471,51 @@ _res_used_pct() {
   fi
 }
 
-# _res_busy_cores — how many cores are busy now, a decimal, measured over the same domain as
-# `_res_cores` (wave-33 T33). With no quota bounding the cores it is the one-minute load average
-# (`_res_load_1m`, so BIONIC_PROBE_LOAD_1M pins it too when the busy pin is absent). The load
-# counts runnable work, which is the processor reading a shell can take without sampling
-# twice; the gate treats the processor as the soft term, so a lagging reading costs a wait,
-# never a kill. Where a quota bounds the cores, the load average is the host's — every
-# tenant's, in a container without a namespaced /proc — and is measured against the
-# container's own few cores: a 2-CPU container on a 64-core host at load 10 never had room
-# (critic-adversarial finding 1). There the reading is the cgroup's own use, `_res_cgroup_busy`.
-_res_busy_cores() {
-  if [ -n "${BIONIC_PROBE_BUSY_CORES:-}" ]; then
-    printf '%s' "${BIONIC_PROBE_BUSY_CORES}"
-    return 0
-  fi
+# _res_busy_now <span> [nofeed] — THE ONE READER OF BUSY (wave-34 T3; D12): how many cores are
+# busy, a decimal, measured over the same domain as `_res_cores`, over the last minute (span 60)
+# or five (300). The gate's two readings, the settle and void check (`_res_load_now`) and the
+# ring's load field (`pressure_sample`, so a whole run's width) all read it, so the cores and
+# the busy they are measured against never come from two machines (critic-adversarial-2 new 1).
+# With no quota bounding the cores it is the load average (`_res_load_1m` for the minute, so
+# BIONIC_PROBE_LOAD_1M pins it). The load counts runnable work, which is the processor reading
+# a shell can take without sampling twice; the gate treats the processor as the soft term, so
+# a lagging reading costs a wait, never a kill. Where a quota bounds the cores, the load
+# average is the host's — every tenant's, in a container without a namespaced /proc — and is
+# measured against the container's own few cores: a 2-CPU container on a 64-core host at load
+# 10 never had room (critic-adversarial finding 1). There the reading is the cgroup's own use,
+# `_res_cgroup_busy`, and rc 1 says it is unknown (see there); `nofeed` is pressure_sample's.
+_res_busy_now() {
   local q
   if q="$(_res_quota_bound)"; then
-    _res_cgroup_busy 60 "$q"
-    return 0
+    _res_cgroup_busy "$1" "$q" "${2:-}"
+    return
   fi
-  _res_load_1m
-}
-
-# _res_busy_cores_5m — the same reading over the last five minutes (wave-28 T13; D14): the load
-# average's second figure, read as `_res_load_1m` reads the first, or under a quota the
-# cgroup's use over five minutes. The gate offers a writer only while both figures leave room,
-# so a burst that has just ended still counts until the five-minute figure has seen it go.
-_res_busy_cores_5m() {
-  if [ -n "${BIONIC_PROBE_BUSY_CORES_5M:-}" ]; then
-    printf '%s' "${BIONIC_PROBE_BUSY_CORES_5M}"
-    return 0
-  fi
-  local q
-  if q="$(_res_quota_bound)"; then
-    _res_cgroup_busy 300 "$q"
-    return 0
-  fi
+  [ "$1" = 300 ] || { _res_load_1m; return 0; }
   case "$(uname -s 2>/dev/null)" in
     Darwin) sysctl -n vm.loadavg 2>/dev/null | awk '{ print $3 }' ;;
     Linux)  awk '{ print $2 }' "${BIONIC_PROBE_PROC:-/proc}/loadavg" 2>/dev/null ;;
     *)      printf '0' ;;
   esac
+}
+
+# _res_busy_cores / _res_busy_cores_5m — the gate's two readings of `_res_busy_now`, over the
+# minute and over five (wave-28 T13; D14), each behind its own pin. The gate offers a writer
+# only while both figures leave room, so a burst that has just ended still counts until the
+# five-minute figure has seen it go.
+_res_busy_cores() {
+  if [ -n "${BIONIC_PROBE_BUSY_CORES:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_BUSY_CORES}"
+    return 0
+  fi
+  _res_busy_now 60
+}
+
+_res_busy_cores_5m() {
+  if [ -n "${BIONIC_PROBE_BUSY_CORES_5M:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_BUSY_CORES_5M}"
+    return 0
+  fi
+  _res_busy_now 300
 }
 
 # _res_cgroup_usage <cgroup root> — the cgroup's CPU time so far, in microseconds; rc 1 and
@@ -534,10 +538,10 @@ _res_cgroup_usage() {
   printf '%s' "$(( v / 1000 ))"
 }
 
-# _res_cgroup_busy <span> <cores> — the cgroup's own CPU use in cores, two decimals: the growth of
-# its usage since a sample in the pressure ring, over the seconds between them. The sample is
-# the one whose age is nearest <span> (60 for the one-minute figure, 300 for the five) and at
-# least _RES_CPU_MIN_S old. `pressure_sample` writes the usage as a ring line's sixth field,
+# _res_cgroup_busy <span> <cores> [nofeed] — the cgroup's own CPU use in cores, two decimals:
+# the growth of its usage since a sample in the pressure ring, over the seconds between them.
+# The sample is the one whose age is nearest <span> (60 for the one-minute figure, 300 for the
+# five) and at least _RES_CPU_MIN_S old. `pressure_sample` writes the usage as a ring line's sixth field,
 # `<usec>@<host>`, only where a quota bounds the cores; a sample from another host (a ring
 # shared across containers) or one larger than the usage now is another counter, not used.
 #
@@ -545,20 +549,24 @@ _res_cgroup_usage() {
 # recorder stopped at wave-28 T13), so a read whose own newest sample is _RES_CPU_MIN_S old or
 # older, or that has none, takes one with `pressure_sample`: at most one sample's processes per
 # _RES_CPU_MIN_S, never one per ask, and the ring's prune and window stay pressure_sample's.
+# `nofeed` is pressure_sample's own read of its load field, which must not sample again.
 #
-# UNKNOWN IS IDLE, NEVER FULL (A-T33-2). An unreadable usage, or no sample old enough yet (the
-# first read on a cold ring), reads 0.00: the promises alone decide, as the gate's admission
-# already does for an empty reading. Reading the host's load instead is the defect this replaced.
+# UNKNOWN PRINTS 0.00 AND RETURNS 1. An unreadable usage, or no sample old enough yet (the
+# first read on a cold ring), is unknown. Each reader keeps its own rule for it: the gate reads
+# the 0.00, idle, never full, so the promises alone decide (A-T33-2); the settle and the void
+# check read the rc, not calm, so a cold ring waits one sample before a timing run (wave-34 D8);
+# the ring's load field takes the 0.00, which no band holds on. Reading the host's load
+# instead is the defect this replaced.
 _RES_CPU_MIN_S=5   # the youngest sample a rate is taken over: the clock is whole seconds, so
                    # the rate's error is under 1 ÷ its interval — under a fifth at 5 s.
 _res_cgroup_busy() {
   local span="$1" cores="$2" root u now ring t g tag a d best='' bu=0 ba=0 newest=-1
   if ! root="$(_res_cgroup_root)" || ! u="$(_res_cgroup_usage "$root")"; then
     printf '0.00'
-    return 0
+    return 1
   fi
   now="$(_res_now)"
-  _res_is_uint "$now" || { printf '0.00'; return 0; }
+  _res_is_uint "$now" || { printf '0.00'; return 1; }
   ring="$(_pressure_ring_path)"
   if [ -r "$ring" ]; then
     while IFS='|' read -r t _ _ _ _ g; do
@@ -572,12 +580,12 @@ _res_cgroup_busy() {
       if [ -z "$best" ] || [ "$d" -lt "$best" ]; then best="$d" bu="$tag" ba="$a"; fi
     done < "$ring"
   fi
-  if [ "$newest" -lt 0 ] || [ "$newest" -ge "$_RES_CPU_MIN_S" ]; then
+  if [ "${3:-}" != nofeed ] && { [ "$newest" -lt 0 ] || [ "$newest" -ge "$_RES_CPU_MIN_S" ]; }; then
     pressure_sample "$cores" >/dev/null 2>&1 || :
   fi
   if [ -z "$best" ]; then
     printf '0.00'
-    return 0
+    return 1
   fi
   d=$(( (u - bu) / (ba * 10000) ))   # hundredths of a core: usec ÷ (seconds × 10^6 ÷ 100)
   printf '%d.%02d' $(( d / 100 )) $(( d % 100 ))
@@ -908,7 +916,7 @@ pressure_sample() {
     return 2
   fi
 
-  local ring now free_pct swap_pct load_1m dir tmp
+  local ring now free_pct swap_pct busy dir tmp
   ring="$(_pressure_ring_path)"
   now="$(_res_now)"
   if ! _res_is_uint "$now"; then
@@ -916,12 +924,14 @@ pressure_sample() {
     return 2
   fi
 
+  # The load field is busy in the cores' domain (`_res_busy_now`, wave-34 D12), so field 4 and
+  # field 5 are measured on one machine and `pressure_level` bands the one against the other.
   free_pct="$(_res_free_pct)"
   swap_pct="$(_res_swap_pct)"
-  load_1m="$(_res_load_1m)"
+  busy="$(_res_busy_now 60 nofeed)"
   _res_is_pct "$free_pct" || free_pct=-1
   _res_is_pct "$swap_pct" || swap_pct=-1
-  case "${load_1m:-}" in ''|*[!0-9.]*) load_1m=0 ;; esac
+  case "${busy:-}" in ''|*[!0-9.]*) busy=0 ;; esac
 
   dir="$(dirname "$ring")"
   if ! mkdir -p "$dir" 2>/dev/null; then
@@ -934,7 +944,7 @@ pressure_sample() {
   if _res_quota_bound >/dev/null && u="$(_res_cgroup_usage "$(_res_cgroup_root)")"; then
     cg="|$u@$HOSTNAME"
   fi
-  printf '%s|%s|%s|%s|%s%s\n' "$now" "$free_pct" "$swap_pct" "$load_1m" "$cores" "$cg" >> "$ring" || {
+  printf '%s|%s|%s|%s|%s%s\n' "$now" "$free_pct" "$swap_pct" "$busy" "$cores" "$cg" >> "$ring" || {
     printf 'pressure_sample: cannot append to %s\n' "$ring" >&2
     return 2
   }
@@ -1063,8 +1073,9 @@ pressure_level() {
 #
 # THE LOAD NOW, NOT THE RING (wave-26 D8). A timing check asks "is the machine calm at this
 # moment", and the ring's 300 s median is the wrong reader for that: it lags a drained batch
-# by minutes. The reading is the one-minute load average — `sysctl -n vm.loadavg` on Darwin,
-# `/proc/loadavg` on Linux — through `_res_load_now`, which a test overrides with
+# by minutes. The reading is busy over the last minute in the cores' domain, `_res_busy_now`
+# (wave-34 D12): the one-minute load average with no quota, the cgroup's own use under one —
+# through `_res_load_now`, which a test overrides with
 # BIONIC_LOAD_NOW_FILE (a path whose first field is the reading, so a command under test can
 # move the load mid-run), the way BIONIC_PRESSURE_RING overrides the ring. Below that,
 # BIONIC_PROBE_LOAD_1M still pins it, as it does for every other load reader here.
@@ -1075,13 +1086,17 @@ pressure_level() {
 #
 # AN UNREADABLE LOAD IS NOT CALM. Unlike the pressure readers, which degrade a missing sensor
 # to "no hold", this one answers rc 1: a timing check started on no evidence is the void
-# result the check exists to prevent. Its callers bound the wait (booked.sh).
+# result the check exists to prevent. An unknown busy reading (a cold ring under a quota) is
+# unreadable here, so `_res_load_now` prints nothing for it and the settle waits one sample
+# (wave-34 D8). Its callers bound the wait (booked.sh).
 _res_load_now() {
   if [ -n "${BIONIC_LOAD_NOW_FILE:-}" ]; then
     awk 'NR == 1 { print $1; exit }' "${BIONIC_LOAD_NOW_FILE}" 2>/dev/null
     return 0
   fi
-  _res_load_1m
+  local b
+  b="$(_res_busy_now 60)" && printf '%s' "$b"
+  return 0
 }
 
 _res_quiet_load() {  # the settled line's factor: config `quiet-load:`, else the default

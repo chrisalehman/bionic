@@ -4742,17 +4742,18 @@ expect_nonempty "§O …over a diff that really is non-empty (the filter is not 
 
 # THE MUTATION ARM. A pin over two files that agree today passes just as loudly if the
 # comparison itself is broken, so one copy is DOCTORED in a scratch tree and the same
-# comparison is re-run against it: `head -1` becomes `tail -1` inside line_field, which is
-# a real drift shape (the two readers would disagree about which of two rows a key comes
-# from). The shipped files are never written to.
+# comparison is re-run against it: the `return 0` after the first match is dropped inside
+# line_field, which is a real drift shape (the walk goes on and prints every `<key>=` field, so
+# the two readers would disagree about which of two rows a key comes from — the drift the
+# `head -1` → `tail -1` mutation stood for while the body was a pipeline, before wave-34 T11).
+# The shipped files are never written to.
 SPO_MUT="$SANDBOX/o-mutant-poker.sh"
-# The needle is `line_field`'s one distinguishing pipeline stage, and it occurs exactly
-# once in the file. That count is this mutation's PRECONDITION and it is declared through
+# The needle is `line_field`'s first-match return, and it occurs exactly once in the file. That count is this mutation's PRECONDITION and it is declared through
 # the framework's `anchor` (§S19): a sed whose target had moved would leave an identical
 # copy and every row after it would be vacuous, and the anchor names the pattern and the
 # count it actually found rather than only reporting that the bytes came out equal.
-SPO_NEEDLE='grep "^$2=" | head -1 | cut -d= -f2-'
-SPO_MUT_NEEDLE='grep "^$2=" | tail -1 | cut -d= -f2-'
+SPO_NEEDLE='"${_lf_f#"$2="}"; return 0 ;;'
+SPO_MUT_NEEDLE='"${_lf_f#"$2="}" ;;'
 anchor "$SPO" "$SPO_NEEDLE" 1
 sed "s@$(printf '%s' "$SPO_NEEDLE" | sed 's/[\\&@]/\\&/g')@$(printf '%s' "$SPO_MUT_NEEDLE" | sed 's/[\\&@]/\\&/g')@" \
   "$SPO" > "$SPO_MUT"

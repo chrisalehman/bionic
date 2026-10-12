@@ -1239,7 +1239,7 @@ expect_eq "(up2) …and the stamp is exactly as it was planted (ready neither re
 # directory made outside every checkout; the tracked file is never touched.
 UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
 cp -R "${REPO}/payload/scripts" "$UPM_DIR/scripts" 2>/dev/null
-awk '/^  # THE ROSTER.S LAUNCH LINE \(labels, D4\)/ && !d { print "  why=\"$(_wt_stale_proof \"$wt\" \"$head\")\" && { _wt_refuse \"stale-proof ${why}\"; return 2; }"; d = 1 }
+awk '/^  # THE ROSTER.S LAUNCH LINE AND THE ROW THE WALL READS/ && !d { print "  why=\"$(_wt_stale_proof \"$wt\" \"$head\")\" && { _wt_refuse \"stale-proof ${why}\"; return 2; }"; d = 1 }
   { print }' "${REPO}/payload/scripts/lib/line.sh" > "$UPM_DIR/scripts/lib/line.sh"
 expect_eq "(up3-pre) the mutant differs from line.sh by the one stamp-reading line" "1" \
   "$(diff "${REPO}/payload/scripts/lib/line.sh" "$UPM_DIR/scripts/lib/line.sh" | /usr/bin/grep -c '^>')"
@@ -1280,5 +1280,82 @@ expect_eq "(up6) …and exits 2" "2" "$UPD_RC"
 expect_nonempty "(up6-pre) the refs read back" "$UPD_REFS"
 expect_eq "(up6) …and no ref moved" "$UPD_REFS" "$(git -C "$UPD" for-each-ref --format='%(refname) %(objectname)')"
 expect_eq "(up6) …and the plan is as it was" "$UPD_PLAN" "$(cat "$UPD/.bionic/docs/plans/epic-x/wave-x.plan.md")"
+
+
+section "§MARKER: the tree says whose it is — create --for writes <git-dir>/bionic-agent, a re-dispatch rewrites it, the main checkout never has one (wave-34 T2; D11, REQ-1 AC-1.1)"
+#
+# IDENTITY FROM PLACE. A shell does not know which agent it runs for, and rewriting the command to
+# tell it changes what the permission rules see (wave-33 T36). The tree it runs in does know: a
+# writer's linked tree has a git directory of its own, so `create … --for <name>` writes the name
+# there, one line, and the gate reads it as who asks when no name is carried (lib/gate.sh THE
+# PLACE; tests/gate.test.sh §BUDGET-AT-ASK M rows). A tree handed to a successor row is re-marked
+# with `mark <tree> --for <name>`. The main checkout's git directory is the common one, which no
+# writer owns, so neither verb ever writes there. The reader in these rows is the file at the
+# tree's own `git rev-parse --absolute-git-dir`, the path the gate reads.
+# fails-when: the writer line is deleted, or the re-dispatch keeps the old name.
+mk_marker() {  # <tree> -> the marker's content, or `none` when there is no marker file
+  local gd
+  [ -n "${1:-}" ] || { echo none; return; }
+  gd="$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)" || { echo none; return; }
+  if [ -f "$gd/bionic-agent" ]; then cat "$gd/bionic-agent"; else echo none; fi
+}
+MR="$(new_repo "$TMP/marker")"
+MSID="marker-session-01"
+MBASE="$(sha_of "$MR")"
+mkdir -p "$MR/.bionic/tmp"
+MOUT="$(ws_create "$MSID" "$MR" "$MBASE" wt/34-M1 --for w-T1)"
+MT1="$(ws_path "$MOUT")"
+expect_eq "MK.1 a named create exits 0 and names its tree" "rc=0 ${MR}/.worktrees/34-M1" \
+  "$(printf '%s\n' "$MOUT" | tail -n1) $MT1"
+expect_eq "MK.2 AC-1.1 its own git directory's bionic-agent reads the name" "w-T1" "$(mk_marker "$MT1")"
+expect_eq "MK.2b …one line, the name and nothing else" "$(printf 'w-T1\n' | od -c)" \
+  "$(od -c < "$(git -C "$MT1" rev-parse --absolute-git-dir)/bionic-agent")"
+expect_eq "MK.2c …in the tree's own git directory, not the common one" "${MR}/.git/worktrees/34-M1" \
+  "$(git -C "$MT1" rev-parse --absolute-git-dir)"
+expect_eq "MK.3 the main checkout has none (MK.2 is the positive, same reader)" "none" "$(mk_marker "$MR")"
+MOUT2="$(ws_create "$MSID" "$MR" "$MBASE" wt/34-M2)"
+MT2="$(ws_path "$MOUT2")"
+expect_eq "MK.4 an unnamed create's tree exists" "${MR}/.worktrees/34-M2" "$MT2"
+expect_eq "MK.4b …and carries no marker (MK.2 is the positive): no name, no claim" "none" "$(mk_marker "$MT2")"
+expect_eq "MK.4c …and the main checkout still has none" "none" "$(mk_marker "$MR")"
+
+# THE RE-DISPATCH: the same tree handed to a successor row names the successor.
+expect_eq "MK.5 AC-1.1 mark <tree> --for w-T2 on the re-dispatched tree" \
+  "spawn-worktree: OK marked=${MT1} for=w-T2" "$(spawn_out "$MR" mark "$MT1" --for w-T2)"
+expect_eq "MK.5b …and the marker now reads the successor, not w-T1" "w-T2" "$(mk_marker "$MT1")"
+expect_eq "MK.5c …from inside the tree too, with a relative path" \
+  "spawn-worktree: OK marked=${MT1} for=w-T3" "$(spawn_out "$MT1" mark . --for w-T3)"
+expect_eq "MK.5d …which the reader sees" "w-T3" "$(mk_marker "$MT1")"
+expect_eq "MK.5e an unnamed tree marked later carries the name" "w-T4" \
+  "$(spawn_out "$MR" mark "$MT2" --for w-T4 >/dev/null; mk_marker "$MT2")"
+expect_eq "MK.6 mark refuses the main checkout" "spawn-worktree: FAIL reason=not-a-linked-worktree" \
+  "$(spawn_out "$MR" mark "$MR" --for w-T9)"
+expect_eq "MK.6b …and writes nothing there (MK.5b is the positive)" "none" "$(mk_marker "$MR")"
+expect_eq "MK.7 mark refuses a name that would break the line" "spawn-worktree: FAIL reason=invalid-name" \
+  "$(spawn_out "$MR" mark "$MT1" --for 'a|b')"
+expect_eq "MK.7b …and the marker keeps the name it had" "w-T3" "$(mk_marker "$MT1")"
+expect_eq "MK.8 mark without --for is a usage refusal" "2" "$(spawn_rc "$MR" mark "$MT1")"
+expect_eq "MK.8b mark on a path that is no tree is refused" "spawn-worktree: FAIL reason=no-such-worktree" \
+  "$(spawn_out "$MR" mark "$TMP/nowhere" --for w-T9)"
+
+# A-orch-2: `git worktree remove` takes the marker with the tree, so no later tree inherits it.
+MGD="$(git -C "$MT1" rev-parse --absolute-git-dir)"
+expect_true "MK.9 control: before removal the marker is on disk" test -f "$MGD/bionic-agent"
+spawn_out "$MR" remove "$MT1" >/dev/null
+expect_false "MK.9b A-orch-2 remove takes the tree's git directory, the marker with it" test -e "$MGD/bionic-agent"
+expect_false "MK.9c …the directory itself is gone" test -e "$MGD"
+MOUT3="$(ws_create "$MSID" "$MR" "$MBASE" wt/34-M1b)"
+MT3="$(ws_path "$MOUT3")"
+expect_eq "MK.9d a later unnamed tree inherits no name" "none" "$(mk_marker "$MT3")"
+
+# THE MUTANT: create's marker call made a no-op, so a named tree carries no name (MK.2 goes red).
+mk_named_create() {  # <script copy> -> the marker of a tree it creates --for w-mut
+  local out
+  out="$( cd "$MR" && CLAUDE_CODE_SESSION_ID="$MSID" bash "$1" create "$MBASE" "wt/34-mut-$RANDOM" --for w-mut 2>/dev/null )"
+  mk_marker "$(ws_path "$out")"
+}
+expect_eq "MK.10 control: the real script's named create marks its tree" "w-mut" "$(mk_named_create "$SPAWN")"
+mutate_check "MK.10b mutant: create's marker call made a no-op, the named tree carries no name" \
+  's/worktree_mark "\$wt" "\$name"/:/' mk_named_create none
 
 finish
