@@ -2120,14 +2120,14 @@ ba_row fx afx-1 'suites_allowed=a.test.sh' 're_executes='
 ba_row fwide afwide-1 'suites_allowed=a.test.sh b.test.sh run.sh' 're_executes='
 ba_row fopen afopen-1 'files=x'
 ba_row frex afrex-1 'suites_allowed=' 're_executes=`tests/run.sh --only b.test.sh`'
-# ba_drive <agent|-> <command> — the command run in the checkout as the agent's Bash call runs it
+# ba_drive <agent|-> <command> — the command run in the checkout (BA_AT, default BA) as the agent's Bash call runs it
 # (`-` is the main thread: no BIONIC_GATE_AGENT); leaves BA_OUT and BA_RC; marks cleared first.
 BA_OUT=""; BA_RC=0
 ba_drive() {
   local who=()
   [ "$1" = - ] || who=("BIONIC_GATE_AGENT=$1")
   rm -f "$BA_MARKS"/*.ran
-  BA_OUT="$( cd "$BA" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT ${who[@]+"${who[@]}"} \
+  BA_OUT="$( cd "${BA_AT:-$BA}" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT ${who[@]+"${who[@]}"} \
     BA_MARKS="$BA_MARKS" BIONIC_PRESSURE_RING="$D/ring" BIONIC_TEST_JOBS_CEILING=2 \
     bash -c "$2" 2>&1 )"
   BA_RC=$?
@@ -2192,6 +2192,109 @@ expect_true "BA.20 anchor: gate_ask calls the budget at the ask" grep -q '^  _ga
 sed -i.bak '/^  _gate_budget "\$kind" "\$key" || return 75$/d' "$BA_MUT"
 expect_eq "BA.21 mutant: without it, fx's off-budget ask is admitted (the rows above are not vacuous)" "0" \
   "$(cd "$BA" && AGENT=fx GATE_LIB="$BA_MUT" ask_fg q8 work b.test.sh 2)"
+
+# THE PLACE NAMES THE ASKER (wave-34 T2; D11, REQ-1 AC-1.2, AC-1.4). No command carries the agent's
+# name any more: a writer works in its own linked tree, whose git directory holds `bionic-agent`
+# (spawn-worktree.sh create --for; tests/spawn-worktree.test.sh §MARKER), and an ask that carries no
+# BIONIC_GATE_AGENT is that writer's. So a suite started inside the tree through python, awk,
+# `source` or a script outside the tree meets the writer's budget in every permission mode, and its
+# request is filed under the writer's name. The main checkout's git directory is the common one: it
+# asks as main, and a marker planted there is never read. FIXTURE FIDELITY: a real linked tree of
+# the BA checkout holding the same runner and libraries, its marker planted as create writes it.
+# fails-when: the marker fallback is deleted (admitted as main), or who reads `:main`.
+fresh budget-mark
+world_machine 8 8192 20 0.5
+git -C "$BA" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null commit -q --allow-empty -m place
+BM="$D/tree"
+git -C "$BA" worktree add -q --detach "$BM" 2>/dev/null
+cp -R "$BA/tests" "$BA/payload" "$BA/tools" "$BM/"
+ln -s tests "$BM/t2"
+BM_GD="$(git -C "$BM" rev-parse --absolute-git-dir)"
+printf 'fx\n' > "$BM_GD/bionic-agent"
+printf '#!/bin/bash\nbash tests/run.sh --only "$1"\n' > "$D/outside.sh"
+BM_PY='import subprocess, sys; sys.exit(subprocess.run(["bash", "tests/run.sh", "--only", sys.argv[1]]).returncode)'
+BM_P="$(cd "$BM" && pwd -P)"; BA_P="$(cd "$BA" && pwd -P)"
+expect_eq "M.0 control: the tree is linked, its git directory its own (not the common one), the marker fx" "fx|yes" \
+  "$(cat "$BM_GD/bionic-agent")|$([ "$BM_GD" != "$(git -C "$BM" rev-parse --path-format=absolute --git-common-dir)" ] && echo yes)"
+if command -v python3 >/dev/null 2>&1 && python3 -c '' >/dev/null 2>&1; then
+  BA_AT="$BM" ba_drive - "python3 -c '$BM_PY' b.test.sh"
+  expect_eq "M.1 AC-1.2 no name carried, inside fx's tree: an off-budget suite through python is refused at the ask, 75, nothing run" \
+    "75 " "$BA_RC $(ran)"
+  expect_contains "M.1b …with the budget's own line, naming fx" "b.test.sh is not on fx's budget" "$BA_OUT"
+  BA_AT="$BM" ba_drive - "python3 -c '$BM_PY' a.test.sh"
+  expect_eq "M.1c …and the on-budget a.test.sh through python is admitted and runs" "0 a" "$BA_RC $(ran)"
+  BA_AT="$BA" ba_drive - "python3 -c '$BM_PY' b.test.sh"
+  expect_eq "M.1d AC-1.4 the same python launcher in the main checkout asks as main and runs" "0 b" "$BA_RC $(ran)"
+else
+  ok "M.1 python3 cannot run on this machine: M.2 to M.4 carry the launcher claim (awk, source, a script outside the tree)"
+fi
+BA_AT="$BM" ba_drive - "awk 'BEGIN { exit system(\"bash tests/run.sh --only b.test.sh\") }'"
+expect_eq "M.2 AC-1.2 …through awk" "75 " "$BA_RC $(ran)"
+expect_contains "M.2b …naming fx" "b.test.sh is not on fx's budget" "$BA_OUT"
+BA_AT="$BM" ba_drive - 'source tools/door-b.sh'
+expect_eq "M.3 AC-1.2 …through source" "75 " "$BA_RC $(ran)"
+BA_AT="$BM" ba_drive - "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.4 AC-1.2 …through a script outside the tree, started from inside it" "75 " "$BA_RC $(ran)"
+BA_AT="$BM" ba_drive - "bash '$D/outside.sh' a.test.sh"
+expect_eq "M.4b …which runs the on-budget a.test.sh" "0 a" "$BA_RC $(ran)"
+BA_AT="$BM" ba_drive fwide "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.5 a name carried wins over the place: fwide in fx's tree runs b" "0 b" "$BA_RC $(ran)"
+BA_AT="$BA" ba_drive - "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.6 AC-1.4 the main checkout has no marker: the same script there asks as main and runs b" "0 b" "$BA_RC $(ran)"
+printf 'fx\n' > "$BA/.git/bionic-agent"
+BA_AT="$BA" ba_drive - "bash '$D/outside.sh' b.test.sh"
+expect_eq "M.6b AC-1.4 …and a marker planted in the main checkout's git directory is never read" "0 b" "$BA_RC $(ran)"
+rm -f "$BA/.git/bionic-agent"
+
+# THE REQUEST'S WHO, one asker at a time, so the fill sees the writer as showing.
+fresh budget-mark-who
+world_machine 8 8192 20 0.5
+bm_ask() {  # <gate lib> <dir> <key> — gate_ask work <key> from <dir>, no name carried; prints its rc
+  ( cd "$2" && env -u BIONIC_GATE_AGENT -u BIONIC_GATE_ADMIT bash -c \
+      '. "$1" 2>/dev/null; gate_ask work "$2" --within 2 >/dev/null 2>&1; echo $?' _ "$1" "$3" )
+}
+expect_eq "M.7 AC-1.2 gate_ask work a.test.sh from fx's tree, no name carried: admitted" "0" "$(bm_ask "$GATE_LIB" "$BM" a.test.sh)"
+expect_eq "M.7b …and its request is filed under fx, so the fill sees fx showing" "a.test.sh|$BM_P" \
+  "$(field "$(req_of fx)" key)|$(field "$(req_of fx)" tree)"
+expect_eq "M.8 AC-1.4 gate_ask work b.test.sh from the main checkout: admitted" "0" "$(bm_ask "$GATE_LIB" "$BA" b.test.sh)"
+expect_eq "M.8b …filed under main (M.7b is the positive, same reader)" "b.test.sh|$BA_P" \
+  "$(field "$(req_of main)" key)|$(field "$(req_of main)" tree)"
+expect_eq "M.9 gate_ask work b.test.sh from fx's tree: 75, nothing filed" "75 2" \
+  "$(bm_ask "$GATE_LIB" "$BM" b.test.sh) $(nreq)"
+# MUTATION: the fallback deleted asks as main; the common dir read in place of the tree's own finds no marker.
+fresh budget-mark-mut1
+world_machine 8 8192 20 0.5
+BM_MUT1="$(mutant mark-off)"
+expect_true "M.10 anchor: the ask falls back to the place's marker" grep -q '^  \[ -n "\$_GATE_AGENT" \] || _gate_marker$' "$BM_MUT1"
+sed -i.bak '/^  \[ -n "\$_GATE_AGENT" \] || _gate_marker$/d' "$BM_MUT1"
+expect_eq "M.10b mutant: without it, fx's off-budget ask from its tree is admitted (M.1–M.9 are not vacuous)" "0" \
+  "$(bm_ask "$BM_MUT1" "$BM" b.test.sh)"
+fresh budget-mark-mut2
+world_machine 8 8192 20 0.5
+BM_MUT2="$(mutant mark-common)"
+expect_true "M.11 anchor: the marker is read from the tree's own git directory" grep -q '"\$_GATE_GITDIR/bionic-agent"' "$BM_MUT2"
+sed -i.bak 's#\$_GATE_GITDIR/bionic-agent#$_GATE_COMMON/bionic-agent#g' "$BM_MUT2"
+expect_eq "M.11b mutant: reading the common directory instead, fx's off-budget ask is admitted" "0" \
+  "$(bm_ask "$BM_MUT2" "$BM" b.test.sh)"
+# THE MARKER COSTS NO FORK (AC-1.4): the one `git rev-parse` that names the request's tree names who
+# asks and finds the roster too, so an ask from a marked tree makes the git calls one from the main
+# checkout makes, and a carried name makes no more. Counted by a `git` on PATH that logs each call.
+fresh budget-mark-fork
+world_machine 8 8192 20 0.5
+mkdir -p "$D/shim"
+printf '#!/bin/bash\necho "$*" >> "%s/git.calls"\nexec %q "$@"\n' "$D" "$(command -v git)" > "$D/shim/git"
+chmod +x "$D/shim/git"
+bm_gits() {  # <dir> <key> [agent] — how many git calls one gate_ask work <key> from <dir> makes
+  rm -f "$D/git.calls"
+  ( cd "$1" && env -u BIONIC_GATE_AGENT -u BIONIC_GATE_ADMIT ${3:+BIONIC_GATE_AGENT=$3} PATH="$D/shim:$PATH" \
+      bash -c '. "$1" 2>/dev/null; gate_ask work "$2" --within 2 >/dev/null 2>&1' _ "$GATE_LIB" "$2" )
+  if [ -f "$D/git.calls" ]; then grep -c '' "$D/git.calls"; else echo 0; fi
+}
+BM_G_MAIN="$(bm_gits "$BA" a.test.sh)"
+expect_true "M.12 control: the shim sees the main checkout's ask call git ($BM_G_MAIN)" test "$BM_G_MAIN" -ge 1
+expect_eq "M.12b AC-1.4 an ask from fx's tree with no name carried makes the same git calls" "$BM_G_MAIN" \
+  "$(bm_gits "$BM" a.test.sh)"
+expect_eq "M.12c …and so does one carrying fx's name" "$BM_G_MAIN" "$(bm_gits "$BM" a.test.sh fx)"
 
 # ── §CASE ────────────────────────────────────────────────────────────────────
 section "§CASE — a capitalised spelling meets the budget its lowercase one meets (wave-33 T3; D7, AC-6.3)"

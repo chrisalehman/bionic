@@ -1884,6 +1884,25 @@ worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base s
     || { printf 'workspace-file-unwritable'; return 1; }
 }
 
+# THE TREE MARKER (wave-34 T2; D11, REQ-1 AC-1.1). One line, the name of the writer a linked tree
+# was created or re-dispatched for, at `<git-dir>/bionic-agent`: the tree's OWN git directory, so
+# the main checkout, whose git directory is the common one, never carries one, and `git worktree
+# remove` takes it with the tree. lib/gate.sh (THE PLACE) reads it as who asks when no name is
+# carried. Written beside and renamed over, so a reader never meets half a name. Silent rc 0, or
+# the reason on stdout and rc 1.
+worktree_mark() {  # <tree> <name>
+  local tree="${1:-}" name="${2:-}" out common="" gd=""
+  _wt_workspace_value_bad "$name" && { printf 'invalid-name'; return 1; }
+  out="$(git -C "$tree" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" \
+    || { printf 'not-a-tree'; return 1; }
+  { IFS= read -r common; IFS= read -r gd; } <<< "$out"
+  [ -n "$gd" ] && [ -d "$gd" ] || { printf 'not-a-tree'; return 1; }
+  [ "$gd" != "$common" ] || { printf 'not-a-linked-worktree'; return 1; }
+  printf '%s\n' "$name" > "$gd/bionic-agent.$$" 2>/dev/null \
+    && mv -f "$gd/bionic-agent.$$" "$gd/bionic-agent" 2>/dev/null \
+    || { rm -f "$gd/bionic-agent.$$"; printf 'marker-unwritable'; return 1; }
+}
+
 # rc 0 when no component of the absolute <path> is a symbolic link, so the path is its own
 # physical name. Read with `[ -L ]` per component rather than `_wt_abs`, which costs a subshell
 # per candidate on the permission hook's path; the two agree here because a candidate has
