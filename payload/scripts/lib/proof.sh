@@ -627,7 +627,7 @@ proof_head() {
 #          prints before any suite, so the last run in the log is the one judged (T52). <n>
 #          must be 0; the runner's verdict after it must read
 #          `Gating: <n> passed, 0 failed`, outside any suite's captured output; and the run must
-#          be WHOLE: <n> passed plus the suites its `Void:` line lists equal the suites at <sha>.
+#          be WHOLE: <n> passed equals the suites at <sha> (no void term: wave-35 T2, D11).
 #          THE FLOOR IS A RECORD OF RUNS (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.4; D3): <sha> is
 #          the checkout's HEAD, or an ancestor of it from which `_proof_walk` proves every later
 #          commit by the runs recorded at it (`_proof_floor_walk`). The run itself is judged first.
@@ -702,21 +702,20 @@ proof_attested() {
     # that a capture-close line (`───── end <suite> ─────`, the runner's `_verdict`) follows sat
     # inside a failing suite's captured output, a nested run's: the runner prints its own verdict
     # after every capture, so a log whose last verdict is followed by one was cut off.
-    # A VOID SUITE PASSED (T43), so a `Void:` line no longer refuses (review 14 N2, retiring
-    # A-T5.15); its count joins the tally below.
+    # NO VOID TERM (wave-35 T2; D11, AC-2.1): the runner reports no VOID, so a suite is passed or
+    # failed and nothing else. A `Void:` line a log still carries counts for nothing.
     verdict="$(awk '
-      /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = ""; void = 0; inside = 0; next }
+      /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = ""; inside = 0; next }
       !seen { next }
-      /^Gating: [0-9]+ passed, [0-9]+ failed$/ { v = $2 " " $4; void = 0; inside = 0; next }
+      /^Gating: [0-9]+ passed, [0-9]+ failed$/ { v = $2 " " $4; inside = 0; next }
       v != "" && index($0, "───── end ") == 1 { inside = 1 }
-      v != "" && /^Void: [0-9]+ / { void = $2 + 0 }
-      END { if (v == "") print "none"; else print v " " void " " inside }' "$ev" 2>/dev/null)"
+      END { if (v == "") print "none"; else print v " " inside }' "$ev" 2>/dev/null)"
     case "$verdict" in
       none|'')
         printf 'the run in %s has no Gating: <n> passed, <m> failed verdict after its head= line; cite the whole log of a full run that finished' "$ev"; return 1 ;;
     esac
     set -- $verdict
-    if [ "$4" != 0 ]; then
+    if [ "$3" != 0 ]; then
       printf 'the last verdict in %s sits inside a suite'"'"'s captured output (a ───── end line follows it), so the run itself has none; cite the whole log of a full run that finished' "$ev"; return 1
     fi
     if [ "$2" != 0 ] || [ "$1" = 0 ]; then
@@ -724,15 +723,15 @@ proof_attested() {
     fi
     # A REGRESSION IS A WHOLE RUN (T52; review 14 N1). The runner's roster is every tests/*.test.sh
     # in the tree, with no skip list and no subset mode (a match that is not a suite stops the
-    # run before any verdict), and every suite on it ends passed, failed or void. So a regression's
-    # passed plus void equals the suites at the head the run read: one git call, here in the
+    # run before any verdict), and every suite on it ends passed or failed. So a regression's
+    # passed equals the suites at the head the run read: one git call, here in the
     # verb, never in a wall. A clean tree (dirty=0, checked above) holds no untracked suite.
     if [ "$kind" = floor ]; then
       roster="$(git -C "$co" ls-tree --name-only "$sha" tests/ 2>/dev/null \
         | awk '/^tests\/[^\/]+\.test\.sh$/ { n++ } END { print n + 0 }')"
-      if [ "$(($1 + $3))" -ne "${roster:-0}" ]; then
-        printf 'the run in %s is not a whole run (%s passed and %s void of %s suites at its head); cite the log of a full run' \
-          "$ev" "$1" "$3" "${roster:-0}"; return 1
+      if [ "$1" -ne "${roster:-0}" ]; then
+        printf 'the run in %s is not a whole run (%s passed of %s suites at its head); cite the log of a full run' \
+          "$ev" "$1" "${roster:-0}"; return 1
       fi
       # THE RUN IS GOOD; NOW THE COMMITS SINCE IT (wave-31 T25; D3): a whole green run at an ancestor
       # stands for the working head when every commit after it is proved by its recorded runs.

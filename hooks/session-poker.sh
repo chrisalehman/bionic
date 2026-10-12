@@ -36,6 +36,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its group, then KILL (signals, may write its end)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
+#     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof, date -u (writes the plan)
@@ -492,6 +493,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
+  die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
@@ -1077,6 +1079,32 @@ case "$VERB" in
     RR_WRITE=no
     if [ $# -eq 1 ] && [ "$1" = --write ]; then RR_WRITE=yes
     elif [ $# -ne 0 ]; then usage "regression-runs takes at most one flag: --write."; fi
+    ;;
+  # THE ANCHORS (wave-35 T3; D16, D9). Read-only and session-free, so it runs here and exits: the extractor,
+  # the check and the index are lib/anchors.sh's, loaded on demand rather than through BIONIC_LIB_WANT, so a
+  # copied hook resolving an older library still loads (.claude/rules/lib-changes-in-worktrees.md).
+  anchors)
+    AN_SUB="${1:-}"; [ $# -eq 0 ] || shift
+    case "$AN_SUB" in check|index) ;; *) usage "anchors takes check or index." ;; esac
+    AN_ROOT=""; AN_AT=-
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --at) [ -n "${2:-}" ] || usage "anchors --at takes a commit."; AN_AT="$2"; shift 2 ;;
+        -*) usage "unknown flag for anchors: $1" ;;
+        *) [ -z "$AN_ROOT" ] || usage "anchors takes at most one root."; AN_ROOT="$1"; shift ;;
+      esac
+    done
+    [ -n "$AN_ROOT" ] || AN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || AN_ROOT=""
+    [ -n "$AN_ROOT" ] || AN_ROOT="$PWD"
+    [ -d "$AN_ROOT" ] || { echo "poker: anchors: no directory $AN_ROOT" >&2; exit 2; }
+    [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh" \
+      || { echo "poker: anchors: cannot load ${BIONIC_LIB:-the bionic library}/anchors.sh" >&2; exit 2; }
+    if [ "$AN_AT" != - ]; then
+      git -C "$AN_ROOT" rev-parse --verify -q "${AN_AT}^{commit}" >/dev/null 2>&1 \
+        || { echo "poker: anchors: no commit $AN_AT in $AN_ROOT" >&2; exit 2; }
+    fi
+    if [ "$AN_SUB" = check ]; then anchors_check "$AN_ROOT" "$AN_AT"; exit $?; fi
+    anchors_index "$AN_ROOT" "$AN_AT"; exit 0
     ;;
   # THE MATRIX VERBS (wave-30 T14; D9). matrix-render takes nothing — the bound plan is the operand every plan
   # verb has; discharge takes the one criterion id, spelled as the matrix table spells it.
@@ -8087,22 +8115,8 @@ EOF
     if [ -n "$TA_VIOL" ]; then
       die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
       printf '%s\n' "$TA_VIOL" >&2
-      # THE RELEASE'S APPROVAL READ IS ONE RETRY (wave-33 T7; REQ-4 AC-4.3, D8). The validator names the
-      # token; the call carries it in the reads operand, beside the kind's default the written cell would
-      # otherwise drop (a doc row's `approval:plan, head`, lib/units.sh). Printed only when that is the one
-      # violation, for only then does the call succeed.
-      case "$(printf '%s\n' "$TA_VIOL" | /usr/bin/grep -c .)|$TA_VIOL" in
-        "1|$TA_ID: a doc row at step 7 or later is the release"*)
-          case "$TA_READS" in
-            ''|'—'|'-') TA_FIX="approval:plan, head, approval:release" ;;
-            *) TA_FIX="$TA_READS, approval:release" ;;
-          esac
-          if [ -n "$TA_BORN" ]; then
-            pv_next task-add "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_FIX" --born "$TA_BORN"
-          else
-            pv_next task-add "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_FIX"
-          fi ;;
-      esac
+      # A STEP-7 DOC ROW IS NO LONGER REFUSED FOR ITS APPROVAL READ (wave-35 T5; D13): the release
+      # approval is the integrate row's read, so the one-retry wave-33 T7 printed here is gone with it.
       exit 1
     fi
 
@@ -10960,6 +10974,17 @@ $(run_groups "$RUN_PID")"
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
     TICK_REARM=""
+    # ONE RESTART LINE, FROM DOCTOR'S READER (wave-35 T5; REQ-4 AC-4.5; D13). The CLI holds hooks.json,
+    # the skills and the role files as they were at its start; doctor.sh `--restart-lines` is the one
+    # comparison (the newest of the three sets against each live session's start), and the tick prints
+    # its own session's line, if any, above everything else on every tick, changed or unchanged.
+    TICK_RESTART=""
+    TICK_RESTART_ROW="$(bash "$BIONIC_LIB/../doctor.sh" --restart-lines 2>/dev/null \
+      | awk -F'\t' -v s="$SESSION_ID" 'NF >= 5 && $2 == s { print; exit }')"
+    if [ -n "$TICK_RESTART_ROW" ]; then
+      IFS=$'\t' read -r _tr_pid _ _ _ _tr_file <<< "$TICK_RESTART_ROW"
+      TICK_RESTART="restart needed — ${_tr_file} changed after this session started (pid ${_tr_pid}): exit claude and start it again"
+    fi
     case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
     if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then
       TICK_REARM="poker: note: re-arm the Patrol — its prompt is v=${TICK_PVER:-unrecorded} and this poker prints v=${PATROL_PROMPT_VERSION}: replace the bionic-patrol job with one carrying the output of \`bash ${POKER_WORD} prompt\`, then run \`bash ${POKER_WORD} arm\`"
@@ -10968,10 +10993,15 @@ $(run_groups "$RUN_PID")"
       local rc=$?
       [ -n "$TICK_BUF" ] || exit "$rc"
       exec 1>&3 3>&-
+      [ -z "${TICK_RESTART:-}" ] || say "$TICK_RESTART"
       if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
         printf '%s\n' "$TICK_REARM"
       fi
       if [ "$TICK_UNCHANGED" = yes ]; then
+        # EVERY STANDING HOLD RIDES THE UNCHANGED TICK (wave-35 T5; REQ-4 AC-4.4; D13). The backstop runs
+        # on every tick and says its NOT-LANDED lines into the buffer; an equal digest means the world
+        # did not move, not that the duty is paid, so the holds it re-found print above the one line.
+        /usr/bin/grep '^poker: NOT-LANDED ' "$TICK_BUF" 2>/dev/null
         say "unchanged since ${TICK_SINCE} — decision=${TICK_DECIDED}"
       else
         # THE RUN'S LANDING LINE PRINTS IN THE RE-ARM SLOT, ABOVE THE BUFFER (wave-28 T14, T62, T68; D18, AC-10.4):

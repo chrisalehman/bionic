@@ -54,7 +54,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
 # A run of this suite may itself be inside a booked command; §WRAP measures an unbooked caller.
-unset BIONIC_SLOT_HELD BIONIC_SLOT_PLACE BIONIC_SLOT_QUIET BIONIC_QUIET
+unset BIONIC_SLOT_HELD BIONIC_SLOT_PLACE BIONIC_SLOT_QUIET
 # THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23), and there is no
 # longer a WRAPPER to drive through. This wall is `wall_background_suite_guard` in
 # payload/scripts/lib/walls.sh, and the partition hooks/agent-context-guard.sh used to
@@ -1134,7 +1134,7 @@ EXTRA_ENV=""
 
 section "WRAP — an allowed suite command is rewritten into the booking shim (wave-26 T7, D8)"
 # THE CLAIM. Every suite-class Bash call the walls allow comes back with `updatedInput`
-# whose command is `bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] -- <cmd>`,
+# whose command is `bash <plugin-root>/scripts/booked.sh [--shell <s>] -- <cmd>`,
 # on the main thread and in an agent, so the booking and the run stamp happen for any
 # project's runner. Left alone: a command already the shim, a non-suite command, a command the
 # shell itself backgrounds, and any call a wall refuses. A suite segment carrying
@@ -1238,27 +1238,28 @@ expect_empty "W4e a suite the shell backgrounds is never wrapped (its stamp woul
 run_hook "$(mk_payload "$RU" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh' "")" "$GUARD"
 expect_nonempty "W4e …while the same suite in the foreground is" "$WRAP"
 
-# THE TIMING CHECK: a target carrying `# runner: solo` in its first 30 lines, or
-# BIONIC_QUIET=1 in the suite segment's own prefix, takes the whole machine.
-# Since wave-28 T36 an agent's bare suite run is refused (the one door), so the wall's solo
-# reading of a bare form is driven where bare forms still run: the main thread, by the override.
+# NO TIMING CHECK (wave-35 T2; D11, AC-2.1): a target carrying `# runner: solo` in its first 30
+# lines, or BIONIC_QUIET=1 in the suite segment's own prefix, is wrapped like any other suite, with
+# no --quiet: nothing passes or fails by the clock, so no suite takes the whole machine. Until
+# wave-35 both took it (W5a-W5c read --quiet). Since wave-28 T36 an agent's bare suite run is
+# refused (the one door), so a bare form is driven where bare forms still run: the main thread,
+# by the override.
 run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 bash tests/solo.test.sh' "")" "$GUARD"
-expect_eq "W5a a solo suite is wrapped with --quiet" \
-  "bash $SHIM --shell $WSH --quiet $(wmode) --suites solo.test.sh -- 'FARM_OUT_ALLOW=1 bash tests/solo.test.sh'" "$WRAP"
+expect_eq "W5a a suite carrying the solo marker is wrapped plainly, with no --quiet" \
+  "bash $SHIM --shell $WSH $(wmode) --suites solo.test.sh -- 'FARM_OUT_ALLOW=1 bash tests/solo.test.sh'" "$WRAP"
 run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 BIONIC_QUIET=1 bash tests/t.test.sh' "")" "$GUARD"
-expect_eq "W5b BIONIC_QUIET=1 in the prefix is --quiet" \
-  "bash $SHIM --shell $WSH --quiet $(wmode) --suites t.test.sh -- 'FARM_OUT_ALLOW=1 BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
+expect_eq "W5b BIONIC_QUIET=1 in the prefix is read by nobody: no --quiet" \
+  "bash $SHIM --shell $WSH $(wmode) --suites t.test.sh -- 'FARM_OUT_ALLOW=1 BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
 run_hook "$(mk_payload "$RW" 'cd tests && FARM_OUT_ALLOW=1 bash solo.test.sh' "")" "$GUARD"
-expect_eq "W5c a solo suite reached through a leading cd is --quiet too (and stamps where the cd went)" \
-  "bash $SHIM --shell $WSH --quiet $(wmode) --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && FARM_OUT_ALLOW=1 bash solo.test.sh'" "$WRAP"
+expect_eq "W5c the marked suite reached through a leading cd: no --quiet either (and stamps where the cd went)" \
+  "bash $SHIM --shell $WSH $(wmode) --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && FARM_OUT_ALLOW=1 bash solo.test.sh'" "$WRAP"
 run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh' "")" "$GUARD"
 expect_absent "W5d a plain suite is not" "--quiet" "$WRAP"
 expect_nonempty "W5d …though it is wrapped" "$WRAP"
-# THE DOOR'S SOLO SUITE (wave-28 T36): the runner holds a solo suite out of its batch and asks the
-# gate for the whole machine itself (tests/run.sh _solo_run), so the wrap stays plain: --runner,
-# never --quiet, which would make the shim hold the machine the runner then asks for.
+# THE DOOR'S MARKED SUITE (wave-28 T36): a door call is the runner's, so the wrap stays plain:
+# --runner, never --quiet (which the shim no longer knows, wave-35 T2).
 guarded "$RW" 'tests/run.sh --only solo.test.sh'
-expect_eq "W5e an agent's door call naming a solo suite is wrapped with --runner and no --quiet" \
+expect_eq "W5e an agent's door call naming a marked suite is wrapped with --runner and no --quiet" \
   "bash $SHIM --shell $WSH --agent w-wrap $(wmode) --suites solo.test.sh --runner -- 'tests/run.sh --only solo.test.sh'" "$WRAP"
 
 # WHERE THE STAMP GOES (wave-26 T56, final review B1). The shim stands in the payload's cwd,

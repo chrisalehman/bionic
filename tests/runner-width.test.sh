@@ -266,4 +266,122 @@ dry_run "$RING_W" "$S_CLEAR" "eight"
 expect_contains "6h a garbage ceiling falls back to the width, not to 8" "JOBS=$RW_W50" "$DRY_OUT"
 rw_share 100
 
+echo
+section "§NO-VOID nothing passes or fails by the clock: no solo drain, no settle, no VOID (wave-35 T2; D11, AC-2.1)"
+#
+# THE CLAIM. A suite carrying `# runner: solo` is an ordinary suite: the dry run lists it in the one
+# launch order, a whole run starts it with no wait for a settled load, and its verdict is its exit
+# code. Nothing reports VOID. `booked.sh --quiet` is an option the shim does not know (usage, 2), and
+# `BIONIC_QUIET=1` is read by nobody: the shim asks `work` and runs at once whatever the load reads.
+# FAILS WHEN: a suite ends VOID, or a settle wait or a retry runs.
+#
+# FIXTURE FIDELITY. A scratch tree carrying the shipped runner byte for byte and this tree's
+# libraries (Section 2b's shape: no framework, so its plain suites gate on their exit codes). The
+# load the old settle read is planted far over any line, 99, through BIONIC_LOAD_NOW_FILE, and the
+# old ceiling knob is set to 1 second, so the code this section retires would have waited, then
+# printed VOID; the drive names its own gate store and an idle planted machine, so the whole run's
+# one admission never waits on this machine.
+NV="$TMPROOT/novoid"
+NV_MARKS="$TMPROOT/novoid-marks"; NV_LOAD="$TMPROOT/novoid-load"
+mkdir -p "$NV/tests/lib" "$NV/payload/scripts/lib" "$NV_MARKS"
+cp "${BIONIC_SCRIPTS_DIR}/tests/run.sh" "$NV/tests/run.sh"
+cp "${BIONIC_SCRIPTS_DIR}/tests/lib/resolve-roots.sh" "$NV/tests/lib/resolve-roots.sh"
+cp "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/"*.sh "$NV/payload/scripts/lib/" 2>/dev/null
+# aaa-marked: the marker verbatim, green. b-plain: no marker, green.
+printf '#!/bin/bash\n# runner: solo\necho run >> "$NV_MARKS/marked.runs"\nexit 0\n' > "$NV/tests/aaa-marked.test.sh"
+printf '#!/bin/bash\necho run >> "$NV_MARKS/plain.runs"\nexit 0\n' > "$NV/tests/b-plain.test.sh"
+expect_eq "NV.0 the fixture's marked suite carries the marker verbatim within its first 30 lines" "1" \
+  "$(head -n 30 "$NV/tests/aaa-marked.test.sh" | grep -cE '^# runner: solo[[:space:]]*$')"
+NV_OUT=""; NV_RC=0
+nv_drive() {  # [runner args...] — the scratch runner on the planted load, old ceiling NV_MAXW (1 s); NV_OUT, NV_RC
+  NV_OUT="$( cd "$NV" && env -u BIONIC_GATE_DIR -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_TEST_JOBS_CEILING \
+      "${RW_PIN[@]}" NV_MARKS="$NV_MARKS" NV_LOAD="$NV_LOAD" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_GATE_POLL=0.1 \
+      BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_TOTAL_MB=8192 \
+      BIONIC_LOAD_NOW_FILE="$NV_LOAD" BIONIC_SETTLE_MAX_WAIT="${NV_MAXW:-1}" \
+      BIONIC_PRESSURE_RING="$TMPROOT/novoid-ring" BIONIC_NOW_EPOCH="$NOW" \
+      BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+      bash tests/run.sh "$@" 2>&1 )"
+  NV_RC=$?
+}
+nv_line() { printf '%s\n' "$NV_OUT" | grep -F "  $1 "; }
+nv_runs() { awk 'END { print NR + 0 }' "$NV_MARKS/$1.runs" 2>/dev/null || echo 0; }
+
+# The dry run: one launch order, the marked suite in it, no `solo:` listing.
+printf '99\n' > "$NV_LOAD"
+nv_drive --dry-run
+NV_ORDER="$(printf '%s\n' "$NV_OUT" | awk -F'\t' 'NF == 2 { print $1 }')"
+expect_eq "NV.1 the dry run's launch order holds both suites, the marked one among them" \
+  "aaa-marked.test.sh b-plain.test.sh" "$(printf '%s\n' "$NV_ORDER" | sort | paste -sd' ' -)"
+expect_eq "NV.2 …and lists no suite as solo (NV.1 is the positive on the same output)" "" \
+  "$(printf '%s\n' "$NV_OUT" | grep '^solo:')"
+
+# The whole run, the load at 99 throughout.
+rm -f "$NV_MARKS"/*; rm -rf "$TMPROOT/novoid-gate"; printf '99\n' > "$NV_LOAD"
+nv_drive
+expect_eq "NV.3 a whole run with the marked suite, the load at 99, is green" "0" "$NV_RC"
+expect_contains "NV.4 the marked suite's verdict is its exit code: PASS" "✓ PASS" "$(nv_line aaa-marked.test.sh)"
+expect_eq "NV.5 …it ran once" "1" "$(nv_runs marked)"
+expect_absent "NV.6 nothing in the run reads VOID (NV.4 is the positive on the same output)" "VOID" "$NV_OUT"
+expect_absent "NV.7 …no Void: line" "Void:" "$NV_OUT"
+expect_absent "NV.8 …and no wait for the load to settle" "waiting for the load" "$NV_OUT"
+expect_contains "NV.9 the run calls itself green, as a run with no failure is" "All gating suites green" "$NV_OUT"
+
+# booked.sh: --quiet is unknown; BIONIC_QUIET=1 is read by nobody.
+NV_BK="${BIONIC_SCRIPTS_DIR}/payload/scripts/booked.sh"
+NV_BKD="$TMPROOT/novoid-booked"; mkdir -p "$NV_BKD"
+nv_booked() {  # [env assignments...] -- <booked args...>; NV_OUT, NV_RC; run outside any checkout
+  local pre=()
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do pre+=("$1"); shift; done
+  shift
+  NV_OUT="$( cd "$NV_BKD" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET \
+      "${RW_PIN[@]}" BIONIC_GATE_DIR="$TMPROOT/novoid-bgate" BIONIC_GATE_POLL=0.1 \
+      BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_TOTAL_MB=8192 \
+      BIONIC_LOAD_NOW_FILE="$NV_LOAD" BIONIC_SETTLE_MAX_WAIT=1 ${pre[@]+"${pre[@]}"} \
+      bash "$NV_BK" "$@" 2>&1 )"
+  NV_RC=$?
+}
+nv_kinds() {  # the kinds of the requests in the booked drives' store, sorted, space-joined
+  sed -n 's/^kind=//p' "$TMPROOT/novoid-bgate"/requests/[0-9]* 2>/dev/null | sort | paste -sd' ' -
+}
+rm -f "$NV_BKD"/*; rm -rf "$TMPROOT/novoid-bgate"
+nv_booked -- -- "touch $NV_BKD/plain.ran"
+expect_eq "NV.10 control: the shim runs a command, rc 0" "0 yes" \
+  "$NV_RC $([ -f "$NV_BKD/plain.ran" ] && echo yes || echo no)"
+nv_booked -- --quiet -- "touch $NV_BKD/quiet.ran"
+expect_eq "NV.11 --quiet is an option the shim does not know: usage, 2, and the command never ran" "2 no" \
+  "$NV_RC $([ -f "$NV_BKD/quiet.ran" ] && echo yes || echo no)"
+expect_contains "NV.12 …the usage line says so (NV.10 ran the same shim)" "booked: usage:" "$NV_OUT"
+rm -rf "$TMPROOT/novoid-bgate"
+nv_booked BIONIC_QUIET=1 -- -- "touch $NV_BKD/envq.ran"
+expect_eq "NV.13 BIONIC_QUIET=1 is read by nobody: the command runs at once, the load at 99, rc 0" "0 yes" \
+  "$NV_RC $([ -f "$NV_BKD/envq.ran" ] && echo yes || echo no)"
+expect_absent "NV.14 …and nothing says void (NV.13 is the positive on the same drive)" "void" "$NV_OUT"
+expect_eq "NV.15 …asking the gate as work, never for the whole machine" "work" "$(nv_kinds)"
+
+echo
+section "§NO-RETRY a suite red once stays red in the log, run once (wave-35 T2; D11, AC-2.4)"
+#
+# THE CLAIM. A suite that fails is reported failed, from the one run it had: the runner never runs
+# it again, whatever the load did while it ran. FAILS WHEN: the runner re-runs a failed suite.
+#
+# FIXTURE FIDELITY. The suite carries the marker the retired retry keyed on, starts on a load of 0,
+# raises it to 99 during its first run and lowers it again two seconds later, inside the old
+# ceiling of ten, which is the shape the retired code read as "disturbed" and re-ran
+# (runner-roster §11 (d), retired with it). The
+# second run, if one came, would pass: so a retry would turn this red suite green, and the run
+# count and the verdict both say whether one happened.
+printf '#!/bin/bash\n# runner: solo\necho run >> "$NV_MARKS/red.runs"\nn="$(awk "END { print NR + 0 }" "$NV_MARKS/red.runs")"\nif [ "$n" -eq 1 ]; then printf "99\\n" > "$NV_LOAD"; ( sleep 2; printf "0\\n" > "$NV_LOAD" ) >/dev/null 2>&1 & exit 1; fi\nexit 0\n' \
+  > "$NV/tests/aaa-red.test.sh"
+rm -f "$NV_MARKS"/*; rm -rf "$TMPROOT/novoid-gate"; printf '0\n' > "$NV_LOAD"
+NV_MAXW=10 nv_drive
+NV_RED_RUNS="$(nv_runs red)"
+expect_eq "NR.1 the run with a red suite is red" "1" "$NV_RC"
+expect_eq "NR.2 …the red suite ran once" "1" "$NV_RED_RUNS"
+expect_contains "NR.3 …its verdict line reads FAIL" "✗ FAIL" "$(nv_line aaa-red.test.sh)"
+expect_eq "NR.4 …and the Gating line counts it failed once beside the two green suites" \
+  "Gating: 2 passed, 1 failed" "$(printf '%s\n' "$NV_OUT" | grep '^Gating: ')"
+expect_contains "NR.5 …it is named under Failed:" "- aaa-red.test.sh" "$NV_OUT"
+expect_absent "NR.6 …and nothing said it was retried (NR.3 is the positive on the same output)" "retrying" "$NV_OUT"
+rm -f "$NV/tests/aaa-red.test.sh"
+
 finish
