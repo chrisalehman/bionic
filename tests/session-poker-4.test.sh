@@ -612,6 +612,56 @@ expect_eq "LT4 a new standing event, on a new head, is told by the next tick, al
 POKE_BOUND="$LT_BOUND_WAS"
 
 # ============================================================
+section "§PASS: the tick reads a background pass like any run — a green pass writes the floor proof for its head, a red one is one line naming its suites and head, once, opening nothing (wave-34 T9; REQ-5 AC-5.3; D15)"
+# ============================================================
+#
+# A pass `ready` started (lib/line.sh) ends by copying its log into the record directory and appending
+# `ev=pass|head=<sha>|result=<green|red>|suites=<failed>|log=<path>` to the landing record. The tick
+# reads it as it reads `standing` and `stalled`: told once. Green, it runs `proof-add floor <log>` in a
+# child, as it runs `regression-runs --write`, so the plan's `## SDLC State` gains the floor proof at the
+# pass's head; red, it prints one note naming the failing suites and the head, and writes nothing.
+# FIXTURE FIDELITY: §60's world; the project declares its regression (`floor:`), so the pass's log is
+# floor-run's shape, the one `proof-add floor` judges for a declared floor (§FLOOR-DECLARED). The events
+# are planted in the shape lib/line.sh writes (tests/landing-line.test.sh §PASS drives the writer).
+# fails-when: a red pass is silent, or a green one writes no floor proof.
+PS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+s60_world ps-pass @A whole
+printf 'floor: bash floor.sh\n' > "$R59W/.bionic/config.yaml"
+# The landed fix rows get their ledger lines, so the plan verb's own commit gate admits the proof line.
+awk '{ print } /^- T1: / { print "- T7: landed at record/T7.md"; print "- T8: landed at record/T8.md" }' "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+( cd "$R59W" && git add -f "$P59W" && git commit -qm "T7, T8 lines" ) >/dev/null 2>&1
+PS_REC="${S60_REC%/*}"
+PS_C="$S59W_C"; PS_B="$S59W_B"
+printf 'head=%s dirty=0 rc=0\ncommand: bash floor.sh\nfloor: 4 passed, 0 failed\n' "$PS_C" > "$PS_REC/pass-${PS_C:0:12}.log"
+printf 'head=%s dirty=0 rc=1\ncommand: bash floor.sh\nfloor: 2 passed, 2 failed\n' "$PS_B" > "$PS_REC/pass-${PS_B:0:12}.log"
+ps_floor() { /usr/bin/grep -E '^proved: kind=floor ' "$P59W"; }
+ps_notes() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: note: pass ' | tr '\n' '|' | sed 's/|$//'; }
+expect_eq "(PS0) precondition: the plan holds no floor proof yet" "" "$(ps_floor)"
+printf 'line/v1|ev=pass|head=%s|result=red|suites=a.test.sh,b.test.sh|log=%s|at=2026-10-06T10:00:00Z\n' "$PS_B" "$PS_REC/pass-${PS_B:0:12}.log" >> "$S60_REC"
+s60_tick
+expect_eq "(PS1) a red pass: one tick line naming its failing suites, its head and its log" \
+  "poker: note: pass red at ${PS_B:0:12} — failing: a.test.sh,b.test.sh; log $PS_REC/pass-${PS_B:0:12}.log" "$(ps_notes)"
+expect_eq "(PS1b) …and it writes no floor proof" "" "$(ps_floor)"
+s60_tick
+expect_nonempty "(PS2-pre) the second tick printed (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: ')"
+expect_eq "(PS2) a second tick over the same record tells it no more" "" "$(ps_notes)"
+printf 'line/v1|ev=pass|head=%s|result=green|suites=-|log=%s|at=2026-10-06T10:05:00Z\n' "$PS_C" "$PS_REC/pass-${PS_C:0:12}.log" >> "$S60_REC"
+s60_tick
+expect_regex "(PS3) a green pass at the head: the tick writes the floor proof for that head, citing the pass's log" \
+  "^proved: kind=floor head=${PS_C} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/pass-${PS_C:0:12}\\.log\$" "$(ps_floor)"
+expect_eq "(PS3b) …and says so on one line" \
+  "poker: note: pass green at ${PS_C:0:12} — the floor proof is written (proof-add floor $PS_REC/pass-${PS_C:0:12}.log)" "$(ps_notes)"
+s60_tick
+expect_eq "(PS4) a later tick writes it no second time" "1|" "$(ps_floor | awk 'END { print NR }')|$(ps_notes)"
+rm -f "$R59W/.bionic/tmp/line-told-$SID.state"
+s60_tick
+expect_contains "(PS5-pre) a tick that reads the record afresh (another session's, no told file) tells the red pass again" \
+  "poker: note: pass red at ${PS_B:0:12}" "$(ps_notes)"
+expect_eq "(PS5) …but proves the green pass no second time: its log is already cited, one floor proof, no green note" "1|" \
+  "$(ps_floor | awk 'END { print NR }')|$(ps_notes | tr '|' '\n' | /usr/bin/grep 'pass green' || true)"
+POKE_BOUND="$PS_BOUND_WAS"
+
+# ============================================================
 section "§RC-DEFER §RC-STATED §RC-PARSE: a deferral is held to its debts, the stated sentence and the release check's list of them (wave-28 T17; REQ-8 AC-8.7; D21)"
 # ============================================================
 #

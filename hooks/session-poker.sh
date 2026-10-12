@@ -11110,6 +11110,10 @@ $(run_groups "$RUN_PID")"
     # exited 70. The first tick that reads one off the bound plan's landing record prints it as a note,
     # with its logs; the event line then goes into `.bionic/tmp/line-told-<sid>.state` and is never
     # printed again. A note enters the decision's hash, so the tick that tells one prints in full.
+    # A BACKGROUND PASS (wave-34 T9; D15, AC-5.3), `pass` from the pass a landing started, is told the same
+    # once: red, one note naming its failing suites, its head and its log, and nothing opened; green, the
+    # floor proof for its head, `proof-add floor <its log>` run in a child as `regression-runs --write` is,
+    # and one note saying so or quoting the refusal. A skipped or stopped pass is read and told nothing.
     resolve_run "$REPO_REAL" "$SESSION_ID"
 
     # ---------- THE RUNS: regression-runs AND EVERY LIVE RUN OF THIS ROSTER (wave-30 T12; D6, D7d) ----------
@@ -11155,11 +11159,21 @@ RUNNING $TR_NAME $RUN_ID"
         case "$LT_EV" in
           *'|ev=standing|'*) LT_H="$(lt_f head)"
             note "standing $(lt_f suite) at ${LT_H:0:12} — $(lt_f lines) failing line(s) fail at the accepted head too: a red the branch carries, not one a row added; log $(lt_f log)" ;;
+          *'|ev=pass|'*) LT_H="$(lt_f head)"
+            case "$(lt_f result)" in
+              red) note "pass red at ${LT_H:0:12} — failing: $(lt_f suites); log $(lt_f log)" ;;
+              green)
+                # A later session's tick reads the record afresh: a pass whose log a floor proof already cites is not proved twice.
+                /usr/bin/grep -qF " evidence=record/$(lt_f log | sed 's|.*/record/||')" "$POKER_RUN_PLAN" 2>/dev/null && { printf '%s\n' "$LT_EV" >> "$LT_TOLD"; continue; }
+                LT_PF="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" proof-add floor "$(lt_f log)" 2>&1 )" \
+                  && note "pass green at ${LT_H:0:12} — the floor proof is written (proof-add floor $(lt_f log))" \
+                  || note "pass green at ${LT_H:0:12} — proof-add floor $(lt_f log) refused: $(clean "$(printf '%s\n' "$LT_PF" | head -1)")" ;;
+            esac ;;
           *) note "stalled $(lt_f row) — two runs ended with no verdict and no third starts; logs $(lt_f logs)" ;;
         esac
         printf '%s\n' "$LT_EV" >> "$LT_TOLD"
       done <<EOF
-$(/usr/bin/grep -E '^line/v1\|ev=(standing|stalled)\|' "$LT_REC" 2>/dev/null)
+$(/usr/bin/grep -E '^line/v1\|ev=(standing|stalled|pass)\|' "$LT_REC" 2>/dev/null)
 EOF
     fi
     # THE RUN'S LANDING LINE (wave-28 T14; D18): the report's first line, once the record holds a landing.
