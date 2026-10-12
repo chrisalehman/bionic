@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the pass a landing starts (wave-34 T9): §PASS. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS; the pass a landing starts (wave-34 T9): §PASS. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -708,7 +708,10 @@ expect_eq "(r6j) …while the same tree, its row naming a path and a bare name, 
 RM7="$(ll_world)"; HM7="$(ll_head "$RM7")"
 ll_wide "$RM7" 'a.test.sh b.test.sh'
 ll_redsuite "$RM7" T1 b
-LL_MUTANT='s/_line_current_row /false /' LL_MUTANT_FN=line_row_writer ll_drive "$RM7" T1 "$WORLD_ROOT/m7-T1.out"
+# The anchor (wave-35 T3, D16) is the mutant's precondition and its sed: `anchors check` names this line
+# at any landing that moves the call out of line_row_writer (b86a4b6d did, and nothing said so).
+anchor fn payload/scripts/lib/line.sh '_line_current_row ' line_row_writer 'false '
+LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=line_row_writer ll_drive "$RM7" T1 "$WORLD_ROOT/m7-T1.out"
 ll_wait_file "$WORLD_ROOT/m7-T1.out.rc" 300
 expect_eq "(r6em-pre) the mutant ran: the row entered the line, proved on a.test.sh alone" "a.test.sh a.test.sh:green" \
   "$(ll_field "$(ll_ev "$RM7" ready)" suites) $(ll_verdicts "$RM7")"
@@ -924,6 +927,47 @@ expect_eq "(u2m-pre) the mutant ran: the row entered the line" "1" "$(ll_ev "$RU
 expect_true "(u2m) MUTANT the ready guard removed: a landing tree is built first (the row can fail)" test -d "$RU2/.bionic/tmp/landing/1"
 expect_eq "(u2m) …and the publish's own guard still refuses it, GUARD first, nothing published" "1 GUARD T1 .bionic $TU2 $HU2" \
   "$(cat "$WORLD_ROOT/u-T1.out.rc" 2>/dev/null) $(head -1 "$WORLD_ROOT/u-T1.out") $(ll_head "$RU2")"
+
+# ---------------------------------------------------------------------------
+section "§ANCHORS: ready checks every anchor on the candidate and refuses a moved one (wave-35 T3; D16, AC-7.2)"
+#
+# The accepted head carries lib/line.sh and tests/c.test.sh, whose anchor inserts before a comment in it.
+# T1 takes the head, then rewords (or leaves) that comment, and lands on a.test.sh alone: c.test.sh is
+# never run, so only the check over every suite in the tree can see the anchor it moved.
+ll_anchor_world() {  # <comment T1 commits> -> root; the head anchored, T1's row on a.test.sh
+  local r t
+  r="$(ll_rworld)" || return 1
+  t="$r/.worktrees/T1"
+  mkdir -p "$r/lib"
+  printf '%s\n' '#!/bin/bash' '  # THE ANCHORED COMMENT' 'echo shipped' > "$r/lib/line.sh"
+  printf '%s\n' '#!/bin/bash' '. "$(dirname "$0")/lib/assert.sh"' \
+    "anchor insert lib/line.sh '  # THE ANCHORED COMMENT' 'echo mutant' \"\$TMPDIR/m\"" > "$r/tests/c.test.sh"
+  git -C "$r" add lib/line.sh tests/c.test.sh && git -C "$r" commit -qm "head: an anchored comment"
+  git -C "$t" merge -q --no-edit wave/x
+  printf '%s\n' '#!/bin/bash' "$1" 'echo shipped, edited' > "$t/lib/line.sh"
+  git -C "$t" commit -qam "T1: line.sh edited"
+  printf '%s' "$r"
+}
+RAN="$(ll_anchor_world '  # THE ANCHORED COMMENT')"; HAN="$(ll_head "$RAN")"
+ll_verb "$RAN" T1
+expect_eq "(an1-pre) a row that keeps the anchored comment lands (exit 0), the check run over the candidate" "0" "$LL_RC"
+expect_contains "(an1-pre) …printing LANDED" "LANDED T1 " "$LL_OUT"
+RAM="$(ll_anchor_world '  # THE COMMENT, REWORDED')"; HAM="$(ll_head "$RAM")"
+ll_verb "$RAM" T1
+expect_eq "(an1) the row that rewords it, landing on a.test.sh, is refused (exit 2)" "2" "$LL_RC"
+expect_contains "(an1) …saying the anchor moved, for this row" "REFUSED reason=anchor-moved row=T1" "$LL_OUT"
+expect_contains "(an1) …naming the suite and line whose anchor it moved" \
+  "MOVED tests/c.test.sh:3 insert lib/line.sh found=0" "$LL_OUT"
+expect_eq "(an1) …and nothing is published" "$HAM" "$(ll_head "$RAM")"
+expect_eq "(an1) …the entry is returned, why=anchor-moved" "anchor-moved" \
+  "$(ll_field "$(ll_ev "$RAM" returned)" why)"
+expect_eq "(an1) …before any suite ran on the candidate" "" "$(ll_ev "$RAM" verdict)"
+expect_nonempty "(an1) …over a candidate that was built" "$(ll_ev "$RAM" candidate)"
+AN_CHECK="$(bash "$REPO/hooks/session-poker.sh" anchors check "$REPO" 2>&1)"; AN_RC=$?
+expect_eq "(an2) session-poker.sh anchors check on the shipped tree exits 0" "0" "$AN_RC"
+expect_empty "(an2) …and names no moved anchor" "$AN_CHECK"
+expect_contains "(an2) …over an index that holds this suite's own anchor" "tests/landing-line.test.sh" \
+  "$(bash "$REPO/hooks/session-poker.sh" anchors index "$REPO" 2>&1)"
 
 # ============================================================================ what a red means (wave-28 T5)
 #

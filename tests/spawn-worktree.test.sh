@@ -1239,8 +1239,10 @@ expect_eq "(up2) …and the stamp is exactly as it was planted (ready neither re
 # directory made outside every checkout; the tracked file is never touched.
 UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
 cp -R "${REPO}/payload/scripts" "$UPM_DIR/scripts" 2>/dev/null
-awk '/^  # THE ROSTER.S LAUNCH LINE AND THE ROW THE WALL READS/ && !d { print "  why=\"$(_wt_stale_proof \"$wt\" \"$head\")\" && { _wt_refuse \"stale-proof ${why}\"; return 2; }"; d = 1 }
-  { print }' "${REPO}/payload/scripts/lib/line.sh" > "$UPM_DIR/scripts/lib/line.sh"
+# The anchor (wave-35 T3, D16) writes the mutant: the stamp-reading line inserted before the comment, so
+# `anchors check` names this line at any landing that rewords it.
+anchor insert payload/scripts/lib/line.sh "  # THE ROSTER'S LAUNCH LINE AND THE ROW THE WALL READS" \
+  '  why="$(_wt_stale_proof "$wt" "$head")" && { _wt_refuse "stale-proof ${why}"; return 2; }' "$UPM_DIR/scripts/lib/line.sh"
 expect_eq "(up3-pre) the mutant differs from line.sh by the one stamp-reading line" "1" \
   "$(diff "${REPO}/payload/scripts/lib/line.sh" "$UPM_DIR/scripts/lib/line.sh" | /usr/bin/grep -c '^>')"
 UPM="$(up_world)"

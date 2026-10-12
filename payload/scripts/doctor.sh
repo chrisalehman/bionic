@@ -92,6 +92,9 @@ set -uo pipefail
 # Parsed FIRST, before a single fact is gathered: a caller who misspelled the one
 # flag should be told so immediately, not after a full report they will not read.
 DOCTOR_WANT_UPDATES=no
+# --restart-lines (wave-35 T5): print the restart reader's machine lines and exit,
+# the one form the Patrol tick reads (see "Restart staleness" below).
+DOCTOR_RESTART_LINES=no
 # THE REPORT IS AN INVENTORY, NOT A DOSSIER (certified 2026-08-22; verbose arm
 # removed same day by owner order — the explainer prose is deleted, not parked).
 # Three tables answer the three questions a user has — what ships in the plugin,
@@ -100,8 +103,9 @@ DOCTOR_WANT_UPDATES=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --updates)          DOCTOR_WANT_UPDATES=yes ;;
+    --restart-lines)    DOCTOR_RESTART_LINES=yes ;;
     *)
-      echo "doctor.sh: unknown option '$1' — the only option is --updates" >&2
+      echo "doctor.sh: unknown option '$1' — the options are --updates and --restart-lines" >&2
       exit 2 ;;
   esac
   shift
@@ -304,6 +308,147 @@ done
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/worktree.sh"
 
+# ─── The one address this page is about ──────────────────────────────────────
+#
+# THE ONE ADDRESS EVERY READER MUST AGREE ON. `project_root` (lib/root.sh) is the
+# SSoT: the nearest ancestor holding a REAL `.bionic/` directory, after a linked
+# worktree has been mapped onto its main repository. Every project-scoped row on
+# this page reads the same address space the hooks do, which is the whole point
+# of there being one function — a doctor answering about a different root than
+# the wall it is diagnosing would be worse than a doctor that stayed quiet.
+#
+# RESOLVED HERE, BEFORE THE PATROL SECTION, and not where the run rows begin
+# (FIX-DOCTOR/1). It used to be computed a hundred lines further down, which is
+# how the Patrol section came to have no project filter at all: the address it
+# would have had to filter on did not exist yet at the point it renders.
+# From wave-35 T5 it sits above every gathered fact, beside the restart reader
+# below, which `--restart-lines` runs and exits on before any other fact is read.
+DOCTOR_ROOT="$(project_root "$PWD" 2>/dev/null)"
+[ -n "$DOCTOR_ROOT" ] || DOCTOR_ROOT="$PWD"
+
+# DOES THIS SESSION BELONG TO THE PROJECT BEING DIAGNOSED (T3 finding 1,
+# 2026-09-03). Driven cold from a probe project, doctor printed a PATROL section
+# naming two sessions from two OTHER projects while the `active run` row three
+# lines below resolved the probe project's own plan — one page, two answers about
+# which machine it was describing. Every live-session reader on this page now
+# passes through here.
+#
+# THROUGH THE LIBRARY, NEVER A STRING COMPARE. A session records the cwd the CLI
+# was started in, which is routinely a SUBDIRECTORY of its project, and on macOS
+# routinely the /tmp spelling of a /private/tmp path. `project_root` resolves
+# both — it canonicalises with `pwd -P` and walks for the `.bionic` — so the
+# comparison is between two answers from the same function rather than between
+# two spellings of a path. The `restart needed` row below did compare literally
+# (`_rs_cwd = DOCTOR_ROOT`) and silently missed every session standing one
+# directory in; it reads this instead.
+#
+# THE ANSWER IS MEMOISED because `project_root` shells out to git twice per call
+# and this page asks about the same handful of cwds from three separate loops.
+_DOCTOR_HERE_MEMO=""
+_doctor_session_here() {  # <session cwd> -> 0 when it resolves onto DOCTOR_ROOT
+  local cwd="${1:-}" line root
+  [ -n "$cwd" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "${cwd}"$'\t'*) [ "${line#*$'\t'}" = "$DOCTOR_ROOT" ] && return 0; return 1 ;;
+    esac
+  done <<EOF
+$_DOCTOR_HERE_MEMO
+EOF
+  root="$(project_root "$cwd" 2>/dev/null)" || root=""
+  _DOCTOR_HERE_MEMO="${_DOCTOR_HERE_MEMO}${cwd}"$'\t'"${root}"$'\n'
+  [ -n "$root" ] && [ "$root" = "$DOCTOR_ROOT" ]
+}
+
+
+# One field of a `|`-delimited machine line, BY KEY. The Patrol records are the
+# only input this report parses that it did not also print, and every other
+# reader of a line in this shape — five hooks — reads it the same way, by key
+# and never by position.
+_doctor_pfield() {  # <line> <key>
+  local f
+  while IFS= read -r f; do
+    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
+  done <<EOF
+$(printf '%s' "${1:-}" | tr '|' '\n')
+EOF
+  printf ''
+}
+
+# ─── Restart staleness: one reader, two surfaces ─────────────────────────────
+#
+# THE CLI HOLDS WHAT IT LOADED AT ITS START (AC-37; wave-35 T5, REQ-4 AC-4.5, D13).
+# hooks.json is snapshotted at process start, and so are the skills and the role
+# files: a reinstall that rewrites any of them registers nothing in a process
+# already running (research-walls item 8, A-orch-36). Through wave-34 this page
+# compared hooks.json alone, so a newer skill file left the row silent. The reader
+# takes the newest file of the three sets in the plugin tree the CLI loads —
+# hooks/hooks.json, every *.md under skills/, every *.md under agents/ — and names
+# it. ONE READER: the RESTART NEEDED row below prints its lines, and the Patrol
+# tick runs `doctor.sh --restart-lines` and prints one line from the same output
+# (hooks/session-poker.sh), never a second comparison.
+#
+# THE TREE is DOCTOR_INSTALL_PATH (the version row's, DOCTOR/5): the registry's
+# installPath, or the plugin root, whichever is a git repository.
+_doctor_is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
+_doctor_resolve_install_path() {  # -> sets DOCTOR_INSTALL_PATH
+  DOCTOR_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || DOCTOR_INSTALL_PATH=""
+  if [ -z "$DOCTOR_INSTALL_PATH" ] || ! _doctor_is_repo "$DOCTOR_INSTALL_PATH"; then
+    _doctor_root_alt="$(plugin_root)"
+    if _doctor_is_repo "$_doctor_root_alt"; then DOCTOR_INSTALL_PATH="$_doctor_root_alt"; fi
+    [ -n "$DOCTOR_INSTALL_PATH" ] || DOCTOR_INSTALL_PATH="$_doctor_root_alt"
+  fi
+}
+
+# _doctor_loaded_newest <tree> -> "<mtime>\t<path under the tree>" for the newest of
+# hooks/hooks.json, skills/**/*.md and agents/**/*.md; nothing when none is readable.
+# `find -L`: in a source checkout the payload's agents/ and hooks/ are symlinks.
+_doctor_loaded_newest() {
+  local t="${1:-}" f m best="" bestm=-1
+  [ -n "$t" ] && [ -d "$t" ] || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    m="$(_patrol_mtime "$f" 2>/dev/null)"
+    case "$m" in ''|*[!0-9]*) continue ;; esac
+    if [ "$m" -gt "$bestm" ]; then bestm="$m"; best="$f"; fi
+  done <<EOF
+$( [ -f "$t/hooks/hooks.json" ] && printf '%s\n' "$t/hooks/hooks.json"
+   for d in skills agents; do [ -d "$t/$d" ] && find -L "$t/$d" -type f -name '*.md' 2>/dev/null; done )
+EOF
+  [ -n "$best" ] || return 0
+  printf '%s\t%s\n' "$bestm" "${best#"$t"/}"
+}
+
+# _doctor_restart_stale -> one line per live CLI session in this project that started
+# before the newest loaded file changed:
+#   <pid>\t<session id>\t<started epoch-s>\t<file mtime epoch-s>\t<path under the tree>
+# Reads DOCTOR_INSTALL_PATH and DOCTOR_ROOT; silent when the tree has no such file.
+_doctor_restart_stale() {
+  local newest nm np line cwd pid sid ms
+  newest="$(_doctor_loaded_newest "$DOCTOR_INSTALL_PATH")"
+  [ -n "$newest" ] || return 0
+  nm="${newest%%$'\t'*}"; np="${newest#*$'\t'}"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    cwd="$(_doctor_pfield "$line" cwd)"
+    _doctor_session_here "$cwd" || continue
+    pid="$(_doctor_pfield "$line" pid)"; sid="$(_doctor_pfield "$line" session)"
+    ms="$(command -v jq >/dev/null 2>&1 && jq -r '.startedAt // empty' "$(claude_home)/sessions/${pid}.json" 2>/dev/null)"
+    case "$ms" in ''|*[!0-9]*) continue ;; esac
+    [ "$nm" -gt $(( ms / 1000 )) ] || continue
+    printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$(( ms / 1000 ))" "$nm" "$np"
+  done <<EOF
+$(patrol_live_sessions 2>/dev/null)
+EOF
+}
+
+# `--restart-lines`: the reader's lines and nothing else, before any other fact is gathered.
+if [ "$DOCTOR_RESTART_LINES" = yes ]; then
+  _doctor_resolve_install_path
+  _doctor_restart_stale
+  exit 0
+fi
+
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
 # it. scripts/remove.sh is the same file this URL serves; task S8 owns that
@@ -471,20 +616,6 @@ _doctor_word() {  # <yes|no|stale|unknown>
     unknown) echo "unknown" ;;
     *)       echo "${1:-unknown}" ;;
   esac
-}
-
-# One field of a `|`-delimited machine line, BY KEY. The Patrol records are the
-# only input this report parses that it did not also print, and every other
-# reader of a line in this shape — five hooks — reads it the same way, by key
-# and never by position.
-_doctor_pfield() {  # <line> <key>
-  local f
-  while IFS= read -r f; do
-    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
-  done <<EOF
-$(printf '%s' "${1:-}" | tr '|' '\n')
-EOF
-  printf ''
 }
 
 # A PATH AS A PERSON WOULD TYPE IT. Home-relative, because that is both shorter
@@ -765,13 +896,7 @@ STATUSLINE_NPX_STATE="${STATUSLINE_NPX_FACT##*present=}"
 # first and the plugin root second, and the first one that is a git repository is
 # the one asked. Both are registry-derived; NEITHER is the cwd, which is the
 # whole point.
-DOCTOR_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || DOCTOR_INSTALL_PATH=""
-_doctor_is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
-if [ -z "$DOCTOR_INSTALL_PATH" ] || ! _doctor_is_repo "$DOCTOR_INSTALL_PATH"; then
-  _doctor_root_alt="$(plugin_root)"
-  if _doctor_is_repo "$_doctor_root_alt"; then DOCTOR_INSTALL_PATH="$_doctor_root_alt"; fi
-  [ -n "$DOCTOR_INSTALL_PATH" ] || DOCTOR_INSTALL_PATH="$_doctor_root_alt"
-fi
+_doctor_resolve_install_path   # defined with the restart reader above, which reads the same tree
 REG_SHA_FACT="$(detect_registry_sha_lag "$DOCTOR_INSTALL_PATH")"
 REG_SHA_STATE="${REG_SHA_FACT#*state=}"; REG_SHA_STATE="${REG_SHA_STATE%% *}"
 REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
@@ -1339,56 +1464,6 @@ while IFS= read -r dep_name; do
 done < <(dep_names)
 fi  # ! _doctor_filtering
 
-# ─── The one address this page is about ──────────────────────────────────────
-#
-# THE ONE ADDRESS EVERY READER MUST AGREE ON. `project_root` (lib/root.sh) is the
-# SSoT: the nearest ancestor holding a REAL `.bionic/` directory, after a linked
-# worktree has been mapped onto its main repository. Every project-scoped row on
-# this page reads the same address space the hooks do, which is the whole point
-# of there being one function — a doctor answering about a different root than
-# the wall it is diagnosing would be worse than a doctor that stayed quiet.
-#
-# RESOLVED HERE, BEFORE THE PATROL SECTION, and not where the run rows begin
-# (FIX-DOCTOR/1). It used to be computed a hundred lines further down, which is
-# how the Patrol section came to have no project filter at all: the address it
-# would have had to filter on did not exist yet at the point it renders.
-DOCTOR_ROOT="$(project_root "$PWD" 2>/dev/null)"
-[ -n "$DOCTOR_ROOT" ] || DOCTOR_ROOT="$PWD"
-
-# DOES THIS SESSION BELONG TO THE PROJECT BEING DIAGNOSED (T3 finding 1,
-# 2026-09-03). Driven cold from a probe project, doctor printed a PATROL section
-# naming two sessions from two OTHER projects while the `active run` row three
-# lines below resolved the probe project's own plan — one page, two answers about
-# which machine it was describing. Every live-session reader on this page now
-# passes through here.
-#
-# THROUGH THE LIBRARY, NEVER A STRING COMPARE. A session records the cwd the CLI
-# was started in, which is routinely a SUBDIRECTORY of its project, and on macOS
-# routinely the /tmp spelling of a /private/tmp path. `project_root` resolves
-# both — it canonicalises with `pwd -P` and walks for the `.bionic` — so the
-# comparison is between two answers from the same function rather than between
-# two spellings of a path. The `restart needed` row below did compare literally
-# (`_rs_cwd = DOCTOR_ROOT`) and silently missed every session standing one
-# directory in; it reads this instead.
-#
-# THE ANSWER IS MEMOISED because `project_root` shells out to git twice per call
-# and this page asks about the same handful of cwds from three separate loops.
-_DOCTOR_HERE_MEMO=""
-_doctor_session_here() {  # <session cwd> -> 0 when it resolves onto DOCTOR_ROOT
-  local cwd="${1:-}" line root
-  [ -n "$cwd" ] || return 1
-  while IFS= read -r line; do
-    case "$line" in
-      "${cwd}"$'\t'*) [ "${line#*$'\t'}" = "$DOCTOR_ROOT" ] && return 0; return 1 ;;
-    esac
-  done <<EOF
-$_DOCTOR_HERE_MEMO
-EOF
-  root="$(project_root "$cwd" 2>/dev/null)" || root=""
-  _DOCTOR_HERE_MEMO="${_DOCTOR_HERE_MEMO}${cwd}"$'\t'"${root}"$'\n'
-  [ -n "$root" ] && [ "$root" = "$DOCTOR_ROOT" ]
-}
-
 # ─── The Patrol, gathered and rendered before the fix accounting ─────────────
 #
 # RUNNING PATROLS OR NOTHING (F3, epic-19 wave-01 — design ledger ratification
@@ -1823,11 +1898,9 @@ fi
 # DOCTOR/5), never re-derived: the registry's recorded installPath, or the
 # plugin root, whichever is a git repository — that is the plugin tree the CLI
 # actually loads. A live CLI session in THIS project whose startedAt precedes
-# that tree's hooks.json mtime registered it as it stood before the file
-# changed.
-_doctor_hooks_json="${DOCTOR_INSTALL_PATH}/hooks/hooks.json"
-_doctor_hooks_mtime="$(_patrol_mtime "$_doctor_hooks_json" 2>/dev/null)"
-case "$_doctor_hooks_mtime" in ''|*[!0-9]*) _doctor_hooks_mtime="" ;; esac
+# the newest loaded file there (hooks.json, a skill or a role file; wave-35 T5)
+# loaded it as it stood before the file changed. `_doctor_restart_stale` above is
+# the comparison; this row only prints its lines.
 
 # UTC, SHORT. Everywhere else on this page an absolute time renders as a
 # relative age (`_doctor_file_age`) — this is the one row where which SIDE of
@@ -1839,41 +1912,32 @@ _doctor_utc_short() {  # <epoch-seconds> -> "2026-09-03 02:06Z", or empty
   date -u -r "$s" +'%Y-%m-%d %H:%MZ' 2>/dev/null || date -u -d "@${s}" +'%Y-%m-%d %H:%MZ' 2>/dev/null
 }
 
-if [ -n "$_doctor_hooks_mtime" ]; then
-  while IFS= read -r _rs_line; do
-    [ -n "$_rs_line" ] || continue
-    # RESOLVED, NOT COMPARED (FIX-DOCTOR/2). A session standing one directory
-    # inside this project records that subdirectory as its cwd, and the literal
-    # equality this line used to be silently skipped it — a stale registration
-    # in the very session the reader is sitting in, never reported.
-    _rs_cwd="$(_doctor_pfield "$_rs_line" cwd)"
-    _doctor_session_here "$_rs_cwd" || continue
-    _rs_pid="$(_doctor_pfield "$_rs_line" pid)"
-    _rs_sf="$(claude_home)/sessions/${_rs_pid}.json"
-    _rs_started_ms="$(command -v jq >/dev/null 2>&1 && jq -r '.startedAt // empty' "$_rs_sf" 2>/dev/null)"
-    case "$_rs_started_ms" in ''|*[!0-9]*) continue ;; esac
-    _rs_started_sec=$(( _rs_started_ms / 1000 ))
-    [ "$_doctor_hooks_mtime" -gt "$_rs_started_sec" ] || continue
-    _rs_started_fmt="$(_doctor_utc_short "$_rs_started_sec")"
-    _rs_hooks_fmt="$(_doctor_utc_short "$_doctor_hooks_mtime")"
-    _run_add "$(_doctor_item "$DOCTOR_BAD" "restart needed" \
-      "pid ${_rs_pid} started ${_rs_started_fmt:-?} — hooks.json changed ${_rs_hooks_fmt:-?}")"
-    # THE FACT GOES IN FRONT OF THE ARROW AND THE COMMAND IS THE WHOLE TAIL
-    # (wave-01 S4, AC-6's precondition). This line used to carry a second clause
-    # AFTER its command — `… start it again — the running process registered
-    # hooks.json as it was at <time>` — which put the fact a reader compares
-    # against on the far side of the instruction and ran the line to 148
-    # columns. `fix` splits on the FIRST arrow, so everything past it is the
-    # command, and the render loop protects exactly that: a tail that is half
-    # instruction and half evidence cannot be protected, and the 1.4.4 fixit
-    # reverted a loop-wide bound (dd07b33) rather than move the evidence. It
-    # moves here. The timestamp is the problem's own — which hooks.json this
-    # process is holding — and the row above pairs it with the file's mtime.
-    fix "pid ${_rs_pid} registered hooks.json as it was at ${_rs_started_fmt:-$_rs_started_ms} → exit claude and start it again"
-  done <<EOF
-$(patrol_live_sessions 2>/dev/null)
+# RESOLVED, NOT COMPARED (FIX-DOCTOR/2): the reader passes each session's cwd
+# through `_doctor_session_here`, so a session standing one directory inside this
+# project is reported, not skipped by a literal equality.
+while IFS=$'\t' read -r _rs_pid _rs_sid _rs_started_sec _rs_file_mtime _rs_file; do
+  [ -n "$_rs_pid" ] || continue
+  _rs_started_fmt="$(_doctor_utc_short "$_rs_started_sec")"
+  _rs_file_fmt="$(_doctor_utc_short "$_rs_file_mtime")"
+  # THE FILE BEFORE THE CLOCK (wave-35 T5): a skill path is long and the cell is bounded, so the row
+  # carries the pid, the file and when it changed; the session's start rides the fix line below.
+  _run_add "$(_doctor_item "$DOCTOR_BAD" "restart needed" \
+    "pid ${_rs_pid} — ${_rs_file} changed ${_rs_file_fmt:-?}")"
+  # THE FACT GOES IN FRONT OF THE ARROW AND THE COMMAND IS THE WHOLE TAIL
+  # (wave-01 S4, AC-6's precondition). This line used to carry a second clause
+  # AFTER its command — `… start it again — the running process registered
+  # hooks.json as it was at <time>` — which put the fact a reader compares
+  # against on the far side of the instruction and ran the line to 148
+  # columns. `fix` splits on the FIRST arrow, so everything past it is the
+  # command, and the render loop protects exactly that: a tail that is half
+  # instruction and half evidence cannot be protected, and the 1.4.4 fixit
+  # reverted a loop-wide bound (dd07b33) rather than move the evidence. It
+  # moves here. The timestamp is the problem's own — which file this process
+  # is holding — and the row above pairs it with the file's mtime.
+  fix "pid ${_rs_pid} registered ${_rs_file} as it was at ${_rs_started_fmt:-$_rs_started_sec} → exit claude and start it again"
+done <<EOF
+$(_doctor_restart_stale)
 EOF
-fi
 fi  # _doctor_want PROJECT FIXES
 
 if ! _doctor_filtering; then
