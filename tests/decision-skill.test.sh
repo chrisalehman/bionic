@@ -470,7 +470,7 @@ expect_nonempty "40a: the Altitude span extractor reads the section" "$SPAN"
 expect_true "40b: the section opens on the reframe and keeps the act's order" climb_ok "$SKILL"
 
 # The climb-first sentence deleted: the section no longer opens on the reframe.
-anchor "$SKILL" 'conceptual level' 1
+anchor file skills/decision/SKILL.md 'conceptual level'
 grep -viF 'conceptual level' "$SKILL" > "$TMP/no-climb.md"
 expect_false "41a: the no-reframe copy lost the climb-first sentence" grep -qiF 'conceptual level' "$TMP/no-climb.md"
 expect_true "41b: …and still carries the one-difference rule (the copy is not empty)" \
@@ -478,7 +478,7 @@ expect_true "41b: …and still carries the one-difference rule (the copy is not 
 expect_false "41c: a copy without the climb-first sentence fails the climb pin" climb_ok "$TMP/no-climb.md"
 
 # The failure moved to open the section: it opens on what to avoid, not on the act.
-anchor "$SKILL" 'failure to avoid' 1
+anchor file skills/decision/SKILL.md 'failure to avoid'
 awk '/failure to avoid/ { next } { print } $0 == "## Altitude" { print ""; print "The failure to avoid is a brief written at the level of mechanisms." }' \
   "$SKILL" > "$TMP/failure-first.md"
 expect_true "42a: the failure-first copy opens its Altitude section on the failure" \
@@ -486,19 +486,19 @@ expect_true "42a: the failure-first copy opens its Altitude section on the failu
 expect_false "42b: a copy opening on the failure fails the climb pin" climb_ok "$TMP/failure-first.md"
 
 # The one-difference rule removed.
-anchor "$SKILL" 'one thing the options differ on' 1
+anchor file skills/decision/SKILL.md 'one thing the options differ on'
 doctor "$SKILL" "$TMP/no-difference.md" 's/one thing the options differ on/options/'
 expect_true "43a: the no-difference copy still opens on the reframe" grep -qiF 'conceptual level' "$TMP/no-difference.md"
 expect_false "43b: a copy without the one-difference rule fails the climb pin" climb_ok "$TMP/no-difference.md"
 
 # Concise pulled the wrong way: sentences cut before detail.
-anchor "$SKILL" 'detail before cutting sentences' 1
+anchor file skills/decision/SKILL.md 'detail before cutting sentences'
 doctor "$SKILL" "$TMP/sentences-first.md" 's/detail before cutting sentences/sentences before cutting detail/'
 expect_true "44a: the sentences-first copy carries the plant" grep -qF 'sentences before cutting detail' "$TMP/sentences-first.md"
 expect_false "44b: a copy cutting sentences before detail fails the climb pin" climb_ok "$TMP/sentences-first.md"
 
 # The difference named, but not as a contrast.
-anchor "$SKILL" ', as a contrast: whether this, or that' 1
+anchor file skills/decision/SKILL.md ', as a contrast: whether this, or that'
 doctor "$SKILL" "$TMP/no-contrast.md" 's/, as a contrast: whether this, or that//'
 expect_true "45a: the no-contrast copy still names the one difference" \
   grep -qiF 'one thing the options differ on' "$TMP/no-contrast.md"
