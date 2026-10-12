@@ -3186,6 +3186,8 @@ expect_eq "RMK.1 the row's re-run, w-T1-r1 (bound by its name), is admitted" "al
 expect_eq "RMK.1b AC-1.1 …and the tree its row recorded now names it, not w-T1" "w-T1-r1" "$(rmk_marker "$RMK_TREE")"
 expect_eq "RMK.1c …and the main checkout still has none (RMK.1b is the positive, same reader)" "none" "$(rmk_marker "$REPO")"
 expect_empty "RMK.1d …and the allow path says nothing" "$GATE_ERR"
+# w-T1-r1 is closed before its successor goes in: a live writer keeps its tree (wave-35 T7, RMK.9 below).
+s22_ack "$REPO" "$SID_A" w-T1-r1 2099-01-01T00:00:00Z
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Row: T1
 Lands-on: widget')" w-T2)"
 expect_eq "RMK.2 a successor named w-T2, bound by Row: T1, is admitted" "allow" "$GATE_VERDICT"
@@ -3229,6 +3231,43 @@ expect_eq "RMK.7 a re-dispatch whose tree cannot be re-marked is still admitted"
 expect_contains "RMK.7b …and the wall says the tree still names its last writer" \
   "still names its last writer: spawn-worktree.sh mark --for w-T1-r1 failed" "$GATE_ERR"
 expect_eq "RMK.7c …which it does" "w-T1" "$(rmk_marker "$RMK_TREE")"
+
+# A LIVE WRITER KEEPS ITS TREE (wave-35 T7; REQ-5 AC-5.4, D14). Before the launch is written, the wall asks
+# who writes the row now (lib/line.sh `line_row_writer`, the landing's own answer) and who the tree's marker
+# names; when either is open on this session's roster (`roster_open_names`, acks applied) and is not the
+# dispatch's own name, the dispatch is refused naming that writer and its tree, and nothing moves. The tree
+# is the one the roster's open writer recorded (`workspace_for_name`) when it has one, else the plan cell.
+# FIXTURES: rmk_repo's tree marked w-T1, w-T1 given an open roster row (named by the plan row's agent cell);
+# the closed case adds an ack taken after that launch. SYNTHESIZED.
+# fails-when: with w-T1 open the dispatch of w-T1-r1 is admitted or the marker reads w-T1-r1; with w-T1
+# acked the re-mark does not happen.
+rmk_repo rmk9 .worktrees/34-T1
+s22_roster_row "$REPO" "$SID_A" w-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.9 AC-5.4 with w-T1 open on the roster, w-T1-r1's dispatch to row T1 is refused" "deny" "$GATE_VERDICT"
+expect_contains "RMK.9b …naming the live writer" "row T1 has a live writer w-T1" "$GATE_REASON"
+expect_contains "RMK.9c …and the tree it holds" "$RMK_TREE" "$GATE_REASON"
+expect_eq "RMK.9d AC-5.4 …and the marker still names w-T1 (RMK.1b is the positive)" "w-T1" "$(rmk_marker "$RMK_TREE")"
+expect_eq "RMK.9e …and no launch row of w-T1-r1 was written" "0" \
+  "$(/usr/bin/grep -c '|name=w-T1-r1|' "$(roster_path "$REPO" "$SID_A")")"
+rmk_repo rmk10 .worktrees/34-T1
+s22_roster_row "$REPO" "$SID_A" w-T1
+s22_ack "$REPO" "$SID_A" w-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.10 AC-5.4 with w-T1 acked (its row closed), w-T1-r1's dispatch is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.10b …and the re-mark proceeds: the tree names w-T1-r1" "w-T1-r1" "$(rmk_marker "$RMK_TREE")"
+# THE TREE FROM THE ROSTER: the plan cell names no tree, the open writer's workspace record does. The marker is
+# planted as someone else, so the refusal can only have come from the roster's writer, through its record.
+rmk_repo rmk11 —
+bash "$RMK_SPAWN" mark "$RMK_TREE" --for w-other >/dev/null 2>&1
+s22_roster_row "$REPO" "$SID_A" w-T1
+RMK_PTREE="$(cd "$RMK_TREE" && pwd -P)"
+printf 'workspace/v1|session=%s|name=w-T1|path=%s|branch=HEAD|base=%s|plan=none|at=2026-09-02T00:00:00Z\n' \
+  "$SID_A" "$RMK_PTREE" "$(git -C "$REPO" rev-parse HEAD)" >> "$REPO/.bionic/tmp/workspaces-${SID_A}.state"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.11 AC-5.4 a row whose plan cell names no tree is still refused while its writer is open" "deny" "$GATE_VERDICT"
+expect_contains "RMK.11b …naming the tree the roster's open writer recorded" "$RMK_PTREE" "$GATE_REASON"
+expect_eq "RMK.11c …and that tree keeps its marker" "w-other" "$(rmk_marker "$RMK_TREE")"
 
 # THE MUTATION ARM: the wall's call to `mark` made a no-op. The shipped wall moves the marker (RMK.1b);
 # the doctored copy leaves w-T1, so RMK.1b goes red on it.

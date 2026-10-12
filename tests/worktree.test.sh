@@ -1072,6 +1072,20 @@ expect_eq   "it exits 0" "0" "$RCW2"
 expect_eq   "the feature branch did not move" "$FEAT1" "$(git -C "$W" rev-parse feature/human)"
 expect_eq   "wt/20-T2 is in the wave branch" "0" "$(git -C "$W" rev-list --count wave/20-demo..wt/20-T2)"
 
+# THE BRANCH UNDER SDLC STATE ALONE (wave-35 T7; REQ-5 AC-5.3, D14). The land reads the plan's branch through
+# lib/run.sh `plan_working_branch`, SDLC State first: a plan whose frontmatter names none and whose
+# `## SDLC State` does is landed onto that branch, never refused `no-working-branch`. The plan is the
+# frontmatter fixture's own path, rewritten.
+# fails-when: the land prints REFUSED reason=no-working-branch on a plan carrying the key under SDLC State.
+TP="$(bind_plan "$W" "$TSID" "")"
+printf -- '---\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/20-demo\n' > "$TP"
+WT3="$(task_tree "$W" wt/20-T3 wave/20-demo)"
+OUTW3="$(worktree_land_for_session "$WT3" "$W" "$TSID")"; RCW3=$?
+expect_match "AC-5.3 a plan naming its branch under SDLC State alone lands onto it" \
+  "spawn-worktree: LANDED branch=wt/20-T3 onto=wave/20-demo checkout=${WWAVE} *" "$OUTW3"
+expect_eq   "…it exits 0" "0" "$RCW3"
+expect_eq   "…and wt/20-T3 is in the wave branch" "0" "$(git -C "$W" rev-list --count wave/20-demo..wt/20-T3)"
+
 section "Group 10: the refusals — no bound plan, no working branch, a branch checked out nowhere (T8, REQ-1, AC-1.2)"
 #
 # EVERY REFUSAL LEAVES EVERY REF WHERE IT WAS. Each arm snapshots `for-each-ref` before and
