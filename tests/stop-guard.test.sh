@@ -2397,4 +2397,64 @@ expect_eq "SR-5c …and the order path writes no verdict: one row, no reason=" "
   "$(awk 'index($0, "|name=ordered|")' "$SO_REPO/.bionic/tmp/roster-$SID_A.state" | /usr/bin/grep -c .)|$(sr_field "$(awk 'index($0, "|name=ordered|") { l = $0 } END { print l }' "$SO_REPO/.bionic/tmp/roster-$SID_A.state")" reason)"
 
 
+
+section "§PREDECESSOR — an ack taken in another session closes a predecessor's row, and a human's order stops an unrostered live agent by any of its spellings (wave-34 T6; REQ-14 AC-14.3; D23)"
+#
+# THE DEFECT (field report 2026-10-11, item 3). `adopt --report-only` kept listing a predecessor row as
+# open after the operator had acked it — the ack sat in the ledger of the session that took it, and adopt
+# read only the predecessor's own. And a stop of a live predecessor agent this session's roster never
+# held was refused until `adopt` (not report-only) rostered it: the human's order was matched by the exact
+# spelling it was recorded under, and the gate has no row to translate `name@session-<launcher>` or the
+# transcript-form id back to the name for an agent it never rostered.
+#
+# FIXTURE FIDELITY. Three sessions in one root: the predecessor P launched the agents (its roster, by the
+# production writer); session A acked one through the real sweeper `ack`; session B — this one — reports
+# and stops. The harness tree is the world's scratch HOME. Orders go through the shipped `order` verb.
+PR_P="99999999-8888-4777-8666-555555555555"
+IFS='|' read -r PR_REPO PR_TR PR_SUB <<< "$(make_world predecessor yes)"
+PR_TR_B="${PR_TR%/*}/$SID_B.jsonl"
+PR_SUB_P="${PR_TR%/*}/$PR_P/subagents"; mkdir -p "$PR_SUB_P"
+plant_agent "$PR_SUB_P" "apredacked-111111111111" "predacked"
+plant_agent "$PR_SUB_P" "apredopen-2222222222222" "predopen"
+plant_agent "$PR_SUB_P" "apredtwin-3333333333333" "predtwin"
+plant_live "$PR_TR_B" fresh "predacked" "predopen" "predtwin"
+for _pr in "predacked apredacked-111111111111" "predopen apredopen-2222222222222" "predtwin apredtwin-3333333333333"; do
+  set -- $_pr; sg_roster_row "$PR_REPO" "$PR_P" "$1" "$2" "" "identified"
+done
+# Session A's own agent that happens to share a name with the predecessor's `predtwin`: an ack of THAT
+# name in A is A's word about its own agent, and closes nothing of P's.
+sg_roster_row "$PR_REPO" "$SID_A" "predtwin" "aatwin-44444444444444444" "" "identified"
+ack_row "$PR_REPO" "$SID_A" "predacked"
+ack_row "$PR_REPO" "$SID_A" "predtwin"
+pr_adopt() {  # -> OUT, the report-only adopt of session B
+  OUT=$( cd "$PR_REPO" && env -u CLAUDE_CONFIG_DIR HOME="${PR_TR%/.claude/*}" CLAUDE_CODE_SESSION_ID="$SID_B" \
+         bash "$HERE/session-poker.sh" adopt --report-only 2>&1 )
+}
+pr_adopt
+expect_contains "PR-0 precondition: B's report lists the predecessor's open row (the extractor reads non-empty)" \
+  "|name=predopen|" "$OUT"
+expect_absent "PR-1 a row acked in session A is not listed open in session B's report" "|name=predacked|" "$OUT"
+expect_contains "PR-1b …and the count says it was closed, not lost" "closed=1|" "$OUT"
+expect_contains "PR-2 an ack of a name A's own roster holds under another id closes nothing of P's: still listed" \
+  "|name=predtwin|" "$OUT"
+
+# A HUMAN'S ORDER, BY THE SPELLING ADOPT PRINTED, STOPS THE AGENT BY ANY OTHER. Session B's roster holds
+# no row of `predopen`; the order is recorded as `predopen@session-<P>` (the stop address adopt printed),
+# and the stop comes by the bare name — the address that always survives.
+run_guard "$(mk_stop_payload "$SID_B" "$PR_TR_B" "$PR_REPO" "predopen")"
+expect_status "PR-3 precondition: no order, no row in B — the stop is refused" 2 "$GUARD_ST"
+order_stop "$PR_REPO" "$SID_B" "predopen@session-${PR_P:0:8}"
+run_guard "$(mk_stop_payload "$SID_B" "$PR_TR_B" "$PR_REPO" "predopen")"
+expect_status "PR-4 an order recorded as name@session-<launcher> lets the bare-name stop through" 0 "$GUARD_ST"
+expect_contains "PR-4b …as the human's order" "STOP ORDERED (by human)" "$GUARD_ERR"
+run_guard "$(mk_stop_payload "$SID_B" "$PR_TR_B" "$PR_REPO" "apredopen-2222222222222")"
+expect_status "PR-5 …and the stop by its transcript-form id" 0 "$GUARD_ST"
+# The order names one agent: a different unrostered agent is still refused.
+run_guard "$(mk_stop_payload "$SID_B" "$PR_TR_B" "$PR_REPO" "predtwin")"
+expect_status "PR-6 an unordered unrostered agent beside it is still refused" 2 "$GUARD_ST"
+# And the other direction: ordered by its id, stopped by its name.
+order_stop "$PR_REPO" "$SID_B" "apredtwin-3333333333333"
+run_guard "$(mk_stop_payload "$SID_B" "$PR_TR_B" "$PR_REPO" "predtwin")"
+expect_status "PR-7 an order recorded by the agent's id lets the bare-name stop through" 0 "$GUARD_ST"
+
 finish

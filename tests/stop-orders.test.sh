@@ -1199,4 +1199,104 @@ run_orders_cfg "$R18" stopped mk-f
 expect_status "10f: stopped on an acked row with no mark is refused, exit 2" 2 "$ST"
 if [ -d "$R18/.worktrees/mk-f" ]; then ok "10f2: …and its tree stands"; else no "10f2: …and its tree stands"; fi
 
+
+# ============================================================
+section "§ADOPT — adopt judges an agent's liveness from evidence, never from its deliverable's presence (wave-34 T6; REQ-14 AC-14.1; D23)"
+# ============================================================
+#
+# THE DEFECT (field report 2026-10-11, item 1). `adopt` printed LANDED for a SIGKILLed probe and for a
+# running one, because it decided from the deliverable's presence — and a progress log that doubles as
+# the deliverable is always present. It printed RUNNING off an mtime, which a just-killed agent still has.
+# The contract now: RUNNING needs evidence the agent is alive — this session's fresh ListAgents answer
+# lists it, or its transcript GREW across two reads a cadence apart — and LANDED needs the agent's own
+# report (the sweeper's completion signal), never a file alone. A recent mtime with neither reads
+# UNCONFIRMED; nothing recent reads SILENT.
+#
+# FIXTURE FIDELITY. A scratch HOME holds the harness's tree (`~/.claude/projects/<slug>/…`); the
+# predecessor's rows come from the production writer (`roster_row_fixture`); this session's ListAgents
+# answer is the corpus body (tests/lib/live-answer.sh); the report is the teammate-message envelope the
+# harness writes into the predecessor's transcript, the shape hooks/session-sweeper.sh reads. Synthesized
+# and declared: session and agent ids, the torn last line of the mid-stream kill.
+POKER_SO="$HERE/session-poker.sh"
+AD_PSID="0badc0de-1111-4222-8333-444444444444"
+AD_R="$(make_repo adopt-evidence)"
+AD_HOME="$SANDBOX/adopt-home"
+AD_PROJ="$AD_HOME/.claude/projects/-adopt-fixture"
+AD_SUB="$AD_PROJ/$AD_PSID/subagents"
+mkdir -p "$AD_SUB" "$AD_R/.bionic/docs/record"
+: > "$AD_R/.bionic/tmp/engaged-$SID.state"
+AD_ROSTER="$AD_R/.bionic/tmp/roster-$AD_PSID.state"
+roster_header > "$AD_ROSTER"
+ad_row() {  # <name> <id> <deliverable> [progress]
+  roster_row_fixture status=identified session="$AD_PSID" name="$1" agent_id="$2" \
+    launched_at=2026-08-05T00:00:00Z deliverable="$3" progress="${4:-}" cadence="10 minutes" >> "$AD_ROSTER"
+}
+ad_tx() {  # <id> -> one complete assistant entry in the agent's transcript, written now
+  printf '{"type":"assistant","timestamp":"2026-08-05T00:01:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+    >> "$AD_SUB/agent-$1.jsonl"
+}
+ad_verdict() {  # <name> -> the verdict field of that name's poker-adopt/v1 line
+  printf '%s\n' "$OUT" | awk -v k="|name=$1|" 'index($0, "poker-adopt/v1|") == 1 && index($0, k) {
+    n = split($0, f, "|"); for (i = 1; i <= n; i++) if (index(f[i], "verdict=") == 1) print substr(f[i], 9) }'
+}
+run_adopt() {  # <args…> -> OUT, ST; the harness tree is the scratch HOME's
+  OUT=$( cd "$AD_R" && env -u CLAUDE_CONFIG_DIR HOME="$AD_HOME" CLAUDE_CODE_SESSION_ID="$SID" \
+         bash "$POKER_SO" adopt "$@" 2>&1 ); ST=$?
+  return 0
+}
+
+# (1) ALIVE: on this session's fresh panel, working.
+ad_row alive aalive-1111111111111111 ".bionic/docs/record/alive.md"
+ad_tx aalive-1111111111111111
+# (2) KILLED MID-STREAM: its deliverable half-written, its transcript fresh and torn mid-line, no report.
+ad_row killedmid akilledmid-2222222222222 ".bionic/docs/record/killedmid.md"
+printf 'half a report\n' > "$AD_R/.bionic/docs/record/killedmid.md"
+ad_tx akilledmid-2222222222222
+printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool' >> "$AD_SUB/agent-akilledmid-2222222222222.jsonl"
+# (3) KILLED AFTER ITS REPORT: the deliverable on disk and the report naming it in the launcher's transcript.
+ad_row reported areported-33333333333333 ".bionic/docs/record/reported.md"
+printf 'the report\n' > "$AD_R/.bionic/docs/record/reported.md"
+ad_tx areported-33333333333333
+jq -nc --arg t '<teammate-message teammate_id="reported">done — .bionic/docs/record/reported.md</teammate-message>' \
+  '{type:"user",timestamp:"2026-08-05T01:00:00.000Z",message:{role:"user",content:$t}}' > "$AD_PROJ/$AD_PSID.jsonl"
+# (4) PROGRESS IS THE DELIVERABLE: one path for both, present and fresh, and nothing else.
+ad_row progdeliv aprogdeliv-444444444444 ".bionic/docs/record/progdeliv.md" ".bionic/docs/record/progdeliv.md"
+printf 'progress line\n' > "$AD_R/.bionic/docs/record/progdeliv.md"
+ad_tx aprogdeliv-444444444444
+# This session's own transcript: a fresh ListAgents answer naming only `alive`, running.
+live_answer_body alive > "$SANDBOX/ad-body"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01ADOPTLIVE",name:"ListAgents",input:{}}]}}'
+  jq -nc --rawfile b "$SANDBOX/ad-body" '{type:"user",timestamp:"2026-09-05T00:52:00.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01ADOPTLIVE",content:$b}]}}'
+} > "$AD_PROJ/$SID.jsonl"
+
+run_adopt --report-only
+expect_eq "AD-0 precondition: the extractor reads every fixture row (four poker-adopt lines)" "4" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker-adopt/v1|.*|name=' | tr -d ' ')"
+expect_eq "AD-1 the agent this session's fresh panel lists reads RUNNING" "RUNNING" "$(ad_verdict alive)"
+expect_eq "AD-2 an agent killed mid-stream — deliverable half-written, transcript fresh, no report — reads UNCONFIRMED" \
+  "UNCONFIRMED" "$(ad_verdict killedmid)"
+expect_eq "AD-3 an agent killed after its report reads LANDED: the report is the evidence" "LANDED" "$(ad_verdict reported)"
+expect_eq "AD-4 an agent whose progress log is its deliverable, with no report, reads UNCONFIRMED" \
+  "UNCONFIRMED" "$(ad_verdict progdeliv)"
+expect_contains "AD-4b …and the reason is printed beside it: no panel names it and no earlier read to compare" \
+  "not on this session's fresh ListAgents answer" "$OUT"
+
+# TWO READS A CADENCE APART. The writing verb keeps each transcript read; a later read compares. A
+# transcript that GREW since a read at least a cadence old is RUNNING; one whose mtime moved but whose
+# bytes did not is not growth (a touch is not a turn) and reads SILENT once the read is a cadence old.
+run_adopt
+AD_READS="$AD_R/.bionic/tmp/adopt-reads.state"
+expect_contains "AD-5 adopt keeps the read it took of each transcript" "|id=akilledmid-2222222222222|" "$(cat "$AD_READS" 2>/dev/null)"
+# The clock is accelerated, never waited on: the kept reads are moved one hour back.
+awk -v t="$(( $(date -u +%s) - 3600 ))" 'BEGIN { FS = OFS = "|" } { for (i = 1; i <= NF; i++) if (index($i, "epoch=") == 1) $i = "epoch=" t; print }' \
+  "$AD_READS" > "$AD_READS.x" && mv "$AD_READS.x" "$AD_READS"
+ad_tx aprogdeliv-444444444444                       # grew since the read
+touch "$AD_SUB/agent-akilledmid-2222222222222.jsonl"  # touched, not grown
+run_adopt --report-only
+expect_eq "AD-6 a transcript that grew across two reads a cadence apart reads RUNNING" "RUNNING" "$(ad_verdict progdeliv)"
+expect_eq "AD-7 a transcript whose mtime moved with no growth since a cadence-old read reads SILENT" "SILENT" "$(ad_verdict killedmid)"
+expect_eq "AD-7b …and the agent the panel lists still reads RUNNING in the same report" "RUNNING" "$(ad_verdict alive)"
+
 finish
