@@ -14,7 +14,6 @@
 #   line_publish <plan> <row>       the one publish, under the lock, in the interface's order
 #   line_land_by_hand <tree> <root> <sid> <why>  `spawn-worktree.sh land <tree> --by-hand`
 #   line_ready <tree> <root> <sid> <within> <again>  `spawn-worktree.sh ready [--within <s>]` (T4)
-#   line_pass_run <plan> <commit> <lock> <tree>      the pass a landing started (`spawn-worktree.sh pass`)
 #
 # THE RECORD. One append per line, by the landing record's one write (`_wt_proofs_put`: a private
 # file copied by one write(2), no lock), so two writers' lines never interleave. Seven events:
@@ -26,8 +25,6 @@
 #   returned  row why detail                   (red | conflict | guard)
 #   stalled   row logs
 #   published row commit kind by why           (queue | hand | git)
-#   pass      head result suites log           (green | red | skipped | stopped; suites the failed ones
-#             or `-`; wave-34 T9, D15: THE PASS, below)
 # A value holding `|` or a line break is refused unwritten: the line is `|`-separated.
 #
 # THE FOLD. `line_state` prints one tab-separated line per entry neither published nor returned:
@@ -807,123 +804,6 @@ _line_review_born() {  # <plan>
   n="$(units_born "$1" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
   printf 'review-born rows: %s of cap %s\n' "$n" "$cap"
 }
-# THE PASS A LANDING STARTS (wave-34 T9; spec D15, Δ9; REQ-5 AC-5.1, AC-5.5; ADR-053). A landing proves only
-# the suites its row names, so after LANDED, before the owed line, `ready` starts one full pass of the
-# project's declared regression in the background, and the tick reads its end off the record:
-#   the regression  `floor:` in .bionic/config.yaml (floor-run's), else `bash tests/run.sh` when the landed
-#                   head carries tests/run.sh; a project declaring neither starts nothing
-#   the switch      `background-pass: on|off` there; absent (or another word), off: a project opts in.
-#                   On needs the plan to read other than `regression: no`. Off, nothing starts and a hand
-#                   whole run holds the machine as before
-#   the lock        `<git common dir>/bionic-pass/<branch, / written %>`, claimed as the publish lock is
-#                   (`_slots_take_one`): a live holder is a pass in flight, and this landing starts none; a
-#                   dead one is taken over, so the first landing after a pass ends starts the next
-#   the start       a landing tree pointed at the landed head, and booked.sh --detach --no-follow running
-#                   `spawn-worktree.sh pass` there, so ready never follows it. The lock and the tree's hold
-#                   are handed to the detached side's pid before ready goes on, so neither is free while it
-#                   runs (the lock's `since` goes first: a holder with no start is judged by its pid alone)
-# It prints one line, `pass: started at <head12> pid=<pid> log=<log>`, and names no verb. Only the carrier's
-# own publish starts one: a hand landing or a plain git merge starts nothing.
-_line_pass_on() {  # <root> <plan> -> 0 when a landing starts a pass
-  case "$(config_value "$1" background-pass "" 2>/dev/null)" in
-    on) ;;
-    *) return 1 ;;
-  esac
-  _line_load_run && [ "$(plan_regression "$2")" != no ]
-}
-_line_pass_cmd() {  # <root> <commit> -> the declared regression's command line; 1 when there is none
-  local c
-  c="$(config_value "$1" floor "" 2>/dev/null)"
-  [ -z "$c" ] || { printf '%s' "$c"; return 0; }
-  git -C "$1" cat-file -e "${2}:tests/run.sh" 2>/dev/null || return 1
-  printf 'bash tests/run.sh'
-}
-_line_pass_lock() {  # <root> <branch> -> the branch's pass lock; its store is the directory above it
-  local g
-  g="$(git -C "$1" rev-parse --git-common-dir 2>/dev/null)" && [ -n "$2" ] || return 1
-  case "$g" in /*) : ;; *) g="$1/$g" ;; esac
-  printf '%s/bionic-pass/%s' "$g" "${2//\//%}"
-}
-_line_pass_start() {  # <plan> <root> <commit> <branch>
-  local plan="$1" root="$2" com="$3" lk t="" said pid since
-  _line_pass_on "$root" "$plan" || return 0
-  _line_pass_cmd "$root" "$com" >/dev/null || return 0
-  lk="$(_line_pass_lock "$root" "${4:-}")" && mkdir -p "${lk%/*}" 2>/dev/null || return 0
-  _line_me
-  _slots_take_one "${lk%/*}" "$lk" "${LINE_ME%%:*}" pass || return 0
-  if ! { t="$(landing_tree_take "$root")" && landing_tree_point "$t" "$com"; }; then
-    [ -z "$t" ] || landing_tree_free "$t"; _line_lock_drop "$lk"; return 0
-  fi
-  said="$( cd "$t" && bash "$_LINE_LIB_DIR/../booked.sh" --detach --no-follow --runner --stamp-dir "$t" -- \
-    "bash $(_wt_shquote "$_LINE_LIB_DIR/../spawn-worktree.sh") pass $(_wt_shquote "$plan") ${com} $(_wt_shquote "$lk") $(_wt_shquote "$t")" 2>&1 )"
-  pid="$(printf '%s\n' "$said" | sed -n 's/^booked: started pid=\([0-9][0-9]*\) .*/\1/p' | head -1)"
-  if [ -z "$pid" ]; then
-    landing_tree_free "$t"; _line_lock_drop "$lk"
-    printf 'pass: not started — %s\n' "$(printf '%s\n' "$said" | head -1)"; return 0
-  fi
-  since="$(_slots_since "$pid")"
-  rm -f "$lk/since"; printf '%s\n' "$pid" > "$lk/pid"; [ -z "$since" ] || printf '%s\n' "$since" > "$lk/since"
-  printf '%s:%s\n' "$pid" "$since" > "$t.held.$$" && mv -f "$t.held.$$" "$t.held"
-  printf 'pass: started at %s pid=%s log=%s\n' "${com:0:12}" "$pid" "$(printf '%s\n' "$said" | sed -n 's/^booked: started .* log=\([^ ]*\) .*/\1/p' | head -1)"
-}
-
-# THE PASS ITSELF, the detached side (`spawn-worktree.sh pass`, started by `_line_pass_start`; its cwd the
-# tree). It asks the gate once as main (BIONIC_GATE_AGENT unset; a landing tree carries no writer's
-# marker), under kind `pass` and key `pass`, so its seconds never enter the duration a hand whole run of
-# tests/run.sh is promised by: skipped (no room), it writes `result=skipped` and ends. Admitted, the
-# regression runs in the tree as a job of its own, under the admission (BIONIC_GATE_ADMIT; tests/run.sh
-# reads its width and its unsettled solo suites off it), and the gate is polled: a solo ask that wants the
-# machine stops it (`gate_pass_stopped`), `result=stopped`. Its output is copied into the record directory,
-# `pass-<head12>[-n].log`: under a declared `floor:` behind floor-run's first lines, `head=<sha> dirty=<n>
-# rc=<n>` and `command: <cmd>`, so `proof-add floor` judges it as floor-run's; tests/run.sh's own log opens
-# with its head line already. Then one `pass` event, the failed suites read off the runner's last
-# `Failed:` list. The lock and the tree are freed at its end, and by its exit trap on any other way out.
-line_pass_run() {  # <plan> <commit> <lock> <tree> -> 0 (the result is the record's) · 2 usage
-  local plan="${1:-}" com="${2:-}" root cmd id out pid rc result suites dirty dir log n stopped=0
-  [ -n "$plan" ] && [ -n "$com" ] && [ -n "${3:-}" ] && [ -d "${4:-}" ] \
-    || { echo "pass: usage: line_pass_run <plan> <commit> <lock> <tree>" >&2; return 2; }
-  _LINE_PASS_LK="$3"; _LINE_PASS_T="$4"
-  trap '_line_lock_drop "$_LINE_PASS_LK"; landing_tree_free "$_LINE_PASS_T"' EXIT
-  cd -- "$_LINE_PASS_T" || return 2
-  unset BIONIC_GATE_AGENT BIONIC_GATE_ADMIT
-  root="$(_line_root "$plan")" && cmd="$(_line_pass_cmd "$root" "$com")" && _line_load_gate || return 2
-  id="$(gate_ask pass pass)" || { line_event "$plan" pass "head=${com}" result=skipped suites=- log=- >/dev/null; return 0; }
-  out="$(mktemp "${TMPDIR:-/tmp}/bionic-pass.XXXXXX")" || { gate_end "$id" 2 >/dev/null 2>&1; return 2; }
-  dirty="$(_wt_piece_dirt "$_LINE_PASS_T" | awk 'END { print NR + 0 }')"
-  bionic_job _line_pass_exec "$_LINE_PASS_T" "$id" "$cmd" "$out"
-  pid="$BIONIC_JOB_PID"
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$stopped" = 0 ] && gate_pass_stopped "$id" 2>/dev/null; then stopped=1; _line_kill_tree "$pid"; fi
-    sleep "$LINE_POLL"
-  done
-  wait "$pid"; rc=$?
-  gate_end "$id" "$rc" >/dev/null 2>&1
-  if [ "$stopped" = 1 ]; then result=stopped; elif [ "$rc" -eq 0 ]; then result=green; else result=red; fi
-  suites="$(awk '/^Failed:/ { f = 1; l = ""; next }
-    f && /^    - / { sub(/^    - /, ""); sub(/ .*/, ""); l = l (l == "" ? "" : ",") $0; next } { f = 0 }
-    END { print (l == "" ? "-" : l) }' "$out")"
-  dir="$(line_record "$plan")" && dir="${dir%/*}" && mkdir -p "$dir" 2>/dev/null || dir="${TMPDIR:-/tmp}"
-  log="${dir}/pass-${com:0:12}.log"; n=1
-  while [ -e "$log" ]; do n=$((n + 1)); log="${dir}/pass-${com:0:12}-${n}.log"; done
-  if [ -n "$(config_value "$root" floor "" 2>/dev/null)" ]; then
-    { printf 'head=%s dirty=%s rc=%s\ncommand: %s\n' "$com" "$dirty" "$rc" "$cmd"; cat "$out"; } > "$log"
-  else
-    cp "$out" "$log"
-  fi
-  rm -f "$out"
-  line_event "$plan" pass "head=${com}" "result=${result}" "suites=${suites}" "log=${log}" >/dev/null
-  _line_lock_drop "$_LINE_PASS_LK"; landing_tree_free "$_LINE_PASS_T"; trap - EXIT
-  return 0
-}
-_line_pass_exec() {  # <tree> <admission> <command> <out> — the regression, in place of this shell
-  cd -- "$1" || exit 126
-  export BIONIC_GATE_ADMIT="$2"
-  exec > "$4" 2>&1 < /dev/null
-  set -f
-  # shellcheck disable=SC2086  # the declared command splits on blanks, as floor-run's does
-  exec $3
-}
-
 _line_waiting() { printf 'WAITING %s — run again: %s\n' "$1" "$2"; }   # <row> <the same command>
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 
@@ -1035,8 +915,7 @@ EOF
     said="$(line_publish "$plan" "$row" 2>&1)"; rc=$?
     case $rc in
       0) [ -z "$said" ] || printf '%s\n' "$said"
-         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_review_born "$plan"
-         _line_pass_start "$plan" "$root" "$cand" "$(_line_branch "$plan")"; _line_owed "$row" "$cand" "$name"; return 0 ;;
+         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_review_born "$plan"; _line_owed "$row" "$cand" "$name"; return 0 ;;
       3|75) : ;;
       4) [ -n "$held" ] || printf '%s\n' "$said"; held=1 ;;
       6) c="$(_wt_bionic_committed "$root" "$head" "$cand")"; c="${c%/}"
