@@ -374,6 +374,20 @@ poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
 expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
+# THE MUTANT (wave-34 T5; REQ-4 AC-4.5): the opener doctored to open nothing, in a copy of the plugin (hooks/ beside
+# scripts/, so the copy's loader finds the copy's library), turns AW-4 red: the same refusal opens no item.
+cp "$TMPROOT/sev-before-waive.md" "$PSEV"
+AWM="$TMPROOT/aw-mutant"; mkdir -p "$AWM/hooks"
+cp -R "$BIONIC_HOOKS_DIR/." "$AWM/hooks/"; cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$AWM/scripts"
+awk 'index($0, "owed_open \"waive:$q\"") { sub(/owed_open /, ": "); n++ } { print } END { print n + 0 > "/dev/stderr" }' \
+  "$BIONIC_HOOKS_DIR/session-poker.sh" > "$AWM/hooks/session-poker.sh" 2> "$TMPROOT/aw-mutant.n"
+expect_eq "AW-M the doctored opener is one line, and the copy parses and differs" "1 0 differs" \
+  "$(cat "$TMPROOT/aw-mutant.n") $(bash -n "$AWM/hooks/session-poker.sh" >/dev/null 2>&1; echo "$?") $(cmp -s "$AWM/hooks/session-poker.sh" "$BIONIC_HOOKS_DIR/session-poker.sh" && echo same || echo differs)"
+AW_POKER_KEEP="$POKER"; POKER="$AWM/hooks/session-poker.sh"
+poke "$RSEV" current 8
+POKER="$AW_POKER_KEEP"
+expect_eq "AW-Ma AC-4.5 the mutant still refuses current 8 (exit 1), and AW-4 goes red: no item opens" "1|" \
+  "$RC|$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
 cp "$TMPROOT/sev-before-waive.md" "$PSEV"
 poke "$RSEV" current 8
 expect_eq "AW-4 the waiver taken back out of the plan, the refusal is a new need: the item opens again" "1|waive:adversarial" \

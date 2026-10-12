@@ -4616,6 +4616,27 @@ deferral_line() {  # <plan> <record>#<n> -> the first deferred: line of ## SDLC 
 finding_owed_key() {
   printf 'finding:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
 }
+# waive_owed_findings <plan> <repo> <question> -> always 0, prints nothing: the waiver of a question is the person's
+# answer to every finding of its readings ("fix it, defer it, or waive <question>", `disposition`), so it closes each
+# open `finding:<record>#<n>` item of every reading the plan registers under that question (wave-34 T5; REQ-4 AC-4.2,
+# D14). The readings are `disposition`'s own: `proved: kind=review` lines under ## SDLC State naming the question.
+waive_owed_findings() {
+  local ev pre key
+  declare -F owed_list >/dev/null 2>&1 && declare -F proof_awk >/dev/null 2>&1 || return 0
+  while IFS= read -r ev; do
+    [ -n "$ev" ] || continue
+    pre="$(finding_owed_key "$ev#")"
+    for key in $(OWED_ROOT="$2" owed_list 2>/dev/null | cut -f1); do
+      case "${key#"$pre"}" in "$key"|''|*[!0-9]*) continue ;; esac
+      poker_owed_close "$2" "$key" "waive"
+    done
+  done <<< "$(awk -v q="$3" "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION == q && PROOF_EVIDENCE != "" { print PROOF_EVIDENCE }' "$1" | sort -u)"
+  return 0
+}
 
 # finding_read <plan> <repo> <record>#<n> -> 0 with the finding in FR_S, FR_R (the reader's rating), FR_P (the
 # priority the plan's moves give it, lib/proof.sh `proof_finding_rating`), FR_W (its <path>:<line> or -), FR_T
@@ -8355,6 +8376,7 @@ EOF
          exit 2 ;;
     esac
     plan_verb_swap waive-row "the waiver of $WR_AC" writer
+    poker_owed_close "$PV_REPO" "waive-row:$WR_AC" "waive-row"
     say "waive-row — $WR_AC waived on the user's words, by $(clean "$WR_WHO"): its waiver: line and status are on $PV_PLAN; dry-committed first."
     exit 0
     ;;
@@ -9509,6 +9531,7 @@ $PF_PLANL"
     fi
     plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
     poker_owed_close "$PV_REPO" "waive:$WV_Q" "waive"
+    waive_owed_findings "$PV_PLAN" "$PV_REPO" "$WV_Q"
     say "waive — question=$WV_Q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
