@@ -126,8 +126,8 @@ expect_match "1: the row fires" "*✗ restart needed*" "$OUT1"
 expect_match "2: it names the pid" "*restart needed*${LIVE_PID}*" "$OUT1"
 expect_match "3: a fix line tells the operator to exit and restart" \
   "*exit claude and start it again*" "$OUT1"
-expect_match "4: the fix line cites what the process registered" \
-  "*registered hooks.json as it was at*" "$OUT1"
+expect_match "4: the fix line cites what the process registered, named from the plugin tree" \
+  "*registered hooks/hooks.json as it was at*" "$OUT1"
 
 section "Section 2: session newer than hooks.json — silent"
 
@@ -169,5 +169,75 @@ OUT4="$(run_doctor)"
 
 expect_no_match "8: a session naming a different cwd is not this project's row" \
   "*restart needed*" "$OUT4"
+
+section "Section 5 §FILES: the newest of hooks.json, the skill files and the role files (wave-35 T5; REQ-4 AC-4.5; D13)"
+
+# A reinstall rewrites skills/ and agents/ as well as hooks/hooks.json, and the CLI holds all
+# three as they were at its start (research-walls item 8, A-orch-36). Through wave-34 the row read
+# hooks.json alone, so a newer skill file left it silent. The row now reads the newest file of the
+# three sets and names it, and the tick prints one restart line from the same reader (doctor.sh
+# --restart-lines). hooks.json here predates the session, so only the newer file can fire the row.
+set_mtime() {  # <file> <epoch-seconds>
+  touch -t "$(date -r "$2" +%Y%m%d%H%M.%S)" "$1"
+}
+EARLY=$((HOOKS_MTIME - 7200))   # two hours before HOOKS_MTIME: before the session started
+make_full_tree() {  # -> a plugin tree with hooks.json, a skill and a role file, all at EARLY
+  local dir
+  dir="$(make_plugin_tree)"
+  mkdir -p "$dir/skills/demo" "$dir/agents"
+  printf 'skill\n' > "$dir/skills/demo/SKILL.md"
+  printf 'role\n' > "$dir/agents/critic.md"
+  set_mtime "$dir/hooks/hooks.json" "$EARLY"
+  set_mtime "$dir/skills/demo/SKILL.md" "$EARLY"
+  set_mtime "$dir/agents/critic.md" "$EARLY"
+  printf '%s' "$dir"
+}
+POKER="${REPO}/hooks/session-poker.sh"
+SID_LIVE="fixture-${LIVE_PID}"
+run_tick() {  # -> the tick's output in PROJ, as this live session (engaged and armed first)
+  : > "${PROJ}/.bionic/tmp/engaged-${SID_LIVE}.state"
+  ( cd "$PROJ" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" \
+      BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_CODE_SESSION_ID="$SID_LIVE" bash "$POKER" arm >/dev/null 2>&1
+    rm -f "${PROJ}/.bionic/tmp/tick-digest-${SID_LIVE}.state"
+    HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" \
+      BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_CODE_SESSION_ID="$SID_LIVE" bash "$POKER" tick < /dev/null 2>&1 )
+}
+count_of() {  # <needle> <text> -> lines of text holding needle
+  local n=0 l
+  while IFS= read -r l; do [[ "$l" == *"$1"* ]] && n=$((n + 1)); done <<< "$2"
+  printf '%s' "$n"
+}
+
+TREE5="$(make_full_tree)"
+write_installed_plugins "$CHOME" "$TREE5"
+write_session "$LIVE_PID" "$PROJ_REAL" "$BEFORE_MS"
+OUT5Q="$(run_doctor)"
+TICK5Q="$(run_tick)"
+expect_match "FILES-0 precondition: every file older than the session start, doctor runs its PROJECT section" "*PROJECT*" "$OUT5Q"
+expect_no_match "FILES-0b …and the restart row is silent" "*restart needed*" "$OUT5Q"
+expect_match "FILES-0c precondition: the tick ran in the fixture (its decision line)" "*poker-tick/v1|*" "$TICK5Q"
+expect_no_match "FILES-0d …and prints no restart line" "*restart needed*" "$TICK5Q"
+
+set_mtime "$TREE5/skills/demo/SKILL.md" "$HOOKS_MTIME"
+OUT5="$(run_doctor)"
+TICK5="$(run_tick)"
+expect_match "FILES-1 AC-4.5 a skill file newer than the session start fires the restart row" "*✗ restart needed*${LIVE_PID}*" "$OUT5"
+expect_match "FILES-1b …naming the skill file, hooks.json untouched" "*restart needed*skills/demo/SKILL.md changed*" "$OUT5"
+expect_match "FILES-1c …and its fix line names the same file" "*registered skills/demo/SKILL.md as it was at*exit claude and start it again*" "$OUT5"
+expect_match "FILES-2 AC-4.5 the tick prints the restart line from the same reader, naming the file" \
+  "*poker: restart needed — skills/demo/SKILL.md changed after this session started (pid ${LIVE_PID})*" "$TICK5"
+expect_eq "FILES-2b …one line" "1" "$(count_of "restart needed" "$TICK5")"
+
+set_mtime "$TREE5/skills/demo/SKILL.md" "$EARLY"
+set_mtime "$TREE5/agents/critic.md" "$HOOKS_MTIME"
+OUT6="$(run_doctor)"
+TICK6="$(run_tick)"
+expect_match "FILES-3 AC-4.5 a role file newer than the session start fires the row, naming it" "*restart needed*agents/critic.md changed*" "$OUT6"
+expect_match "FILES-3b …and the tick names it" "*poker: restart needed — agents/critic.md changed after this session started*" "$TICK6"
+
+set_mtime "$TREE5/skills/demo/SKILL.md" "$((HOOKS_MTIME + 60))"
+OUT7="$(run_doctor)"
+expect_match "FILES-4 two newer files: the row names the newest" "*restart needed*skills/demo/SKILL.md changed*" "$OUT7"
+expect_no_match "FILES-4b …and not the older one" "*restart needed*agents/critic.md*" "$OUT7"
 
 finish

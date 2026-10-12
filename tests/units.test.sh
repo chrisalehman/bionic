@@ -2244,8 +2244,8 @@ awk -F'|' -v OFS='|' '
   { print }' "$SANDBOX/replay-legacy.md" > "$SANDBOX/replay.md"
 printf '| T32 | 4 | build | a record-only write-up (fixture row) | w24-T32 | — | 20 | REQ-1 | .bionic/docs/record/wave-24-fixit-1811/T32-notes.md | .worktrees/24-T32 | c0d6ab04 | active |  |\n' \
   >> "$SANDBOX/replay.md"
-# THE RELEASE NAMES ITS APPROVAL (wave-26 T62; K2-F3): a Step-7 doc row reads approval:release, and
-# head as its default does, so it is the one cell the transform does not leave empty.
+# THE RELEASE CELL wave-26 T62 (K2-F3) WROTE: approval:release, and head as its default does. From
+# wave-35 T5 the release validates on its default too (§RELEASE-READ); the replay keeps the cell it had.
 sed '/^| T18 | 7 | doc /s/  |$/ approval:release, head |/' "$SANDBOX/replay.md" > "$SANDBOX/replay.tmp" && mv "$SANDBOX/replay.tmp" "$SANDBOX/replay.md"
 
 expect_eq "EDGES.0 the reads replay carries the column and validates clean" "0 0" \
@@ -3603,31 +3603,53 @@ expect_eq "RUN-EDGES.F1h in a table with reads every row already there is byte-i
 expect_eq "RUN-EDGES.F1i …and its floor is held by the late build through head all the same" "T4${TAB}4${TAB}pending" \
   "$(call units_floor_holds "$SANDBOX/e1-rds-add.md" T2)"
 
-# K2-F3 — THE RELEASE READS ITS APPROVAL. In a reads table a doc row at Step 7 or later is the
-# release (the hold a table without the column keeps names it so), and D3 says it reads
-# approval:release. The validator refuses one that names no approval, and readiness never offers
-# one that slipped past it (a hand edit) before approved: release exists.
+# §RELEASE-READ — THE RELEASE APPROVAL IS THE INTEGRATE ROW'S READ (wave-35 T5; REQ-4 AC-4.1; D13).
+# Through wave-34 a doc row at Step 7 or later had to read approval:release (wave-26 T62, K2-F3),
+# so the release text waited on the person while nothing about writing it did, and the critic queued
+# behind it (A-orch-34). The approval now sits where the merge does: the release text is ready at
+# its kind default, approval:plan, head, and the integrate row of a plan that carries a release
+# waits for `approved: release` with every proof met.
 edges_plan "$SANDBOX/e3.md" 4 "" "$E_RDS" \
   '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
   '| T2 | 5 | verify | floor | w-T2 | — | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | pending | — |' \
   '| T3 | 7 | doc | release 1.2.0: CHANGELOG, version | w-T3 | — | 10 | REQ-1 | CHANGELOG.md, plugin.json | — | — | pending | — |' \
   '| T4 | 8 | integrate | merge | — | — | 10 | REQ-1 | — | — | — | pending | — |'
-expect_eq "RUN-EDGES.F3a a Step-7 doc row with an empty reads cell is refused, naming the read to write" \
-  "T3: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)" \
-  "$(call units_validate "$SANDBOX/e3.md")"
-expect_eq "RUN-EDGES.F3a2 …exit 1" "1" "$(call_rc units_validate "$SANDBOX/e3.md")"
-expect_eq "RUN-EDGES.F3b readiness at current: 4 offers the floor and never the release (the probe read T2 T3)" "T2" \
-  "$(call units_ready "$SANDBOX/e3.md" 4)"
-expect_eq "RUN-EDGES.F3c …which waits for approval:release" "yes" \
-  "$(has_line "$(call units_waiting "$SANDBOX/e3.md" 4)" "T3${TAB}approval:release${TAB}-${TAB}-")"
-sed '/^| T3 /s/| pending | — |$/| pending | head |/' "$SANDBOX/e3.md" > "$SANDBOX/e3-head.md"
-expect_eq "RUN-EDGES.F3d a release whose reads name no approval (head alone) is refused the same way" "yes" \
-  "$(has_line "$(call units_validate "$SANDBOX/e3-head.md")" "T3: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)")"
+expect_eq "RELEASE-READ.1 AC-4.1 a Step-7 doc row with an empty reads cell validates" "0" "$(call_rc units_validate "$SANDBOX/e3.md")"
+expect_eq "RELEASE-READ.1b …and the validator prints nothing about it" "" "$(call units_validate "$SANDBOX/e3.md")"
+expect_eq "RELEASE-READ.2 AC-4.1 at current: 4 with no approved: release, the release text is ready beside the floor" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/e3.md" 4)"
+E3W="$(call units_waiting "$SANDBOX/e3.md" 4)"
+expect_eq "RELEASE-READ.2b …it waits on no approval:release (the waiting extractor reads real lines: the merge waits on it)" "no yes" \
+  "$(has_line "$E3W" "T3${TAB}approval:release${TAB}-${TAB}-") $(has_line "$E3W" "T4${TAB}approval:release${TAB}-${TAB}-")"
 sed '/^| T3 /s/| pending | — |$/| pending | approval:release |/' "$SANDBOX/e3.md" > "$SANDBOX/e3-ok.md"
-expect_eq "RUN-EDGES.F3e the release that reads approval:release validates" "0" "$(call_rc units_validate "$SANDBOX/e3-ok.md")"
-awk '{ print } /^approved-by:/ { print "approved: release by fixture 2026-10-04T12:00:00Z \"ship it\"" }' "$SANDBOX/e3.md" > "$SANDBOX/e3-appr.md"
-expect_eq "RUN-EDGES.F3f once approved: release is written the release is ready" "yes" \
-  "$(has_line "$(call units_ready "$SANDBOX/e3-appr.md" 4)" T3)"
+expect_eq "RELEASE-READ.3 a doc row that writes approval:release into its own cell still validates and waits for it" "0 no" \
+  "$(call_rc units_validate "$SANDBOX/e3-ok.md") $(has_line "$(call units_ready "$SANDBOX/e3-ok.md" 4)" T3)"
+# THE MERGE HOLDS FOR IT. Every proof met at the head (as RUN-EDGES.F5c below), the release written:
+# without `approved: release` the integrate row is not ready and says what it waits for.
+edges_plan "$SANDBOX/e6.md" 8 "$E_PROOFS" "$E_RDS" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
+  '| T2 | 6 | review | final review | w-T2 | — | 10 | REQ-1 | .bionic/docs/record/x/review-1.md | — | — | landed | — |' \
+  '| T5 | 5 | verify | floor | w-T5 | — | 10 | REQ-1 | .bionic/docs/record/x/floor.log | — | — | landed | — |' \
+  '| T7 | 7 | doc | release 1.2.0: CHANGELOG, version | w-T7 | — | 10 | REQ-1 | CHANGELOG.md | — | — | landed | — |' \
+  '| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-1 | — | — | — | pending | — |'
+floor_at_head "$SANDBOX/e6.md" "$FLOOR_REPO/e6.md"
+expect_eq "RELEASE-READ.4 AC-4.1 an integrate row with its proofs met and no approved: release is not ready" "" \
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e6.md" 8)"
+expect_eq "RELEASE-READ.4b …it waits for approval:release" "yes" \
+  "$(has_line "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_waiting "$FLOOR_REPO/e6.md" 8)" "T3${TAB}approval:release${TAB}-${TAB}-")"
+awk '{ print } /^approved-by:/ { print "approved: release by fixture 2026-10-04T12:00:00Z \"ship it\"" }' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-appr.md"
+expect_eq "RELEASE-READ.4c …and once approved: release is written, it is ready" "T3" \
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e6-appr.md" 8)"
+sed '/^| T3 /s/| pending | — |$/| pending | proof:floor, proof:review, head, approval:merge |/' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-cell.md"
+expect_eq "RELEASE-READ.4d an integrate cell written by hand without approval:release waits for it all the same" "yes" \
+  "$(has_line "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_waiting "$FLOOR_REPO/e6-cell.md" 8)" "T3${TAB}approval:release${TAB}-${TAB}-")"
+expect_eq "RELEASE-READ.4e …and approve can record it: the approval names an open row reads include release" "yes" \
+  "$(has_line "$(call units_approval_names "$FLOOR_REPO/e6.md")" release)"
+# A PLAN WITH NO RELEASE HAS NONE TO APPROVE (A-T5-1): RUN-EDGES.F4a and F5c below are that case,
+# integrate ready at its proofs alone. A dropped release row is no release.
+sed '/^| T7 /s/| landed | — |$/| dropped | — |/' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-drop.md"
+expect_eq "RELEASE-READ.5 a plan whose only release row is dropped: integrate is ready at its proofs" "T3" \
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e6-drop.md" 8)"
 # A PLAIN DOC ROW WORKS AS TODAY: on its kind default before Step 7, or reading approval:plan at
 # Step 7 (HOLD.1), it validates and is ready.
 edges_plan "$SANDBOX/e3-plain.md" 4 "" "$E_RDS" \

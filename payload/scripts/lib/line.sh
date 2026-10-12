@@ -812,7 +812,7 @@ _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empt
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
-  local c rc s said
+  local c rc s said anchored=""
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   trap '[ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"' EXIT
   _line_me
@@ -856,6 +856,19 @@ EOF
            fi
            waitbase="$base"; continue ;;
         *) _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${base}"; return 2 ;;
+      esac
+    fi
+    # 3a. THE ANCHORS (wave-35 T3; D16, REQ-7 AC-7.2): every mutation anchor every suite in the tree declares,
+    # checked on the candidate as git holds it, once per candidate and before any suite runs. A row that
+    # rewords an anchored line is refused here even when its Lands-on never runs the suite anchored on it.
+    if [ "$anchored" != "$cand" ]; then
+      c="$(_line_anchors "$root" "$cand")"; rc=$?
+      case $rc in
+        0) anchored="$cand" ;;
+        1) line_event "$plan" returned "row=${row}" why=anchor-moved "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
+           _wt_refuse "anchor-moved row=${row} candidate=${cand} — a suite's mutation anchor no longer holds on the candidate; re-anchor it in that suite or restore the text, then say ready again"
+           printf '%s\n' "$c"; return 2 ;;
+        *) _wt_refuse "anchors-unreadable row=${row} — ${c:-the check printed nothing}"; return 2 ;;
       esac
     fi
     # 3. THE PROOF: each named suite not yet green on this candidate, in the order named. A suite
@@ -927,6 +940,17 @@ EOF
     _line_late "$deadline" && { _line_waiting "$row" "$again"; return 75; }
     sleep "$LINE_POLL"
   done
+}
+
+# The anchor check (lib/anchors.sh), loaded on first use: its lines, and 0 every anchor holds · 1 one moved
+# or cannot be read · 2 the library is not there.
+_line_anchors() {  # <root> <commit>
+  if ! declare -F anchors_check >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    [ -r "$_LINE_LIB_DIR/anchors.sh" ] && . "$_LINE_LIB_DIR/anchors.sh" \
+      || { printf 'anchors-library-unloadable path=%s/anchors.sh\n' "$_LINE_LIB_DIR"; return 2; }
+  fi
+  anchors_check "$1" "$2"
 }
 
 # An entry other than <row> still in line, present and not stalled, whose candidate is <candidate>:
