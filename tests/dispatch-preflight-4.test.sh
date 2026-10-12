@@ -3128,4 +3128,109 @@ rm -rf "$RC_ROOT"
 GATE="$RC_SAVED_GATE"
 
 
+
+section "§REMARK — a dispatch into a tree its row already recorded re-marks it for the new name (wave-34 T28; D24, REQ-1 AC-1.1)"
+# ============================================================================
+# The gate names a writer that carries no name by its tree's `bionic-agent` marker (lib/gate.sh THE
+# PLACE), and `spawn-worktree.sh create --for` writes it. A row re-dispatched into the tree its earlier
+# launch recorded (the plan row's `worktree` cell) used to keep the predecessor's marker, so the new
+# writer asked the gate as the old one; `spawn-worktree.sh mark` existed and nothing called it. The
+# wall now calls it for the bound row's recorded tree once the launch is on the roster. FIXTURES: a
+# real linked tree of the fixture repo, marked w-T1 by the real `mark`; row T1 active under w-T1 with
+# that tree in its cell. The gate ask runs the real gate_ask from the tree, no name carried, against
+# a scratch store and a planted machine. SYNTHESIZED.
+# fails-when: the dispatch leaves the predecessor's name on the tree (the call removed), the request
+# is filed under w-T1, the main checkout or a missing tree gets a marker, or a dispatch is refused.
+RMK_SPAWN="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+RMK_GATE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/gate.sh"
+rmk_marker() {  # <tree> -> its own git directory's bionic-agent, or `none`
+  local gd; gd="$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)"
+  [ -n "$gd" ] && [ -f "$gd/bionic-agent" ] && cat "$gd/bionic-agent" || echo none
+}
+rmk_repo() {  # <tag> <worktree cell> -> REPO, RMK_TREE (.worktrees/34-T1, marked w-T1), row T1 active under w-T1
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  RMK_TREE="$REPO/.worktrees/34-T1"
+  git -C "$REPO" worktree add -q --detach "$RMK_TREE" 2>/dev/null
+  bash "$RMK_SPAWN" mark "$RMK_TREE" --for w-T1 >/dev/null 2>&1
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | the widget | w-T1 | — | 30 | REQ-1 | a.sh | %s | %s | active | — |\n' \
+    "$2" "$(git -C "$REPO" rev-parse HEAD)" >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+}
+rmk_who() {  # <dir> <key> -> the who= of the request one gate_ask work <key> from <dir> files, no name carried
+  local g; g="$(mktemp -d "$SANDBOX/rmk-gate.XXXXXX")"; mkdir -p "$g/config"
+  ( cd "$1" && env -u BIONIC_GATE_AGENT -u BIONIC_GATE_ADMIT BIONIC_GATE_DIR="$g/store" CLAUDE_CONFIG_DIR="$g/config" \
+      CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_USED_PCT=20 \
+      BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_FREE_MB=6553 BIONIC_PROBE_BUSY_CORES=0.5 BIONIC_PROBE_BUSY_CORES_5M=0.5 \
+      BIONIC_PROBE_LOAD_1M=0.5 BIONIC_PROBE_SWAP_PCT=0 \
+      bash -c '. "$1" 2>/dev/null; gate_ask work "$2" --within 2 >/dev/null 2>&1' _ "$RMK_GATE_LIB" "$2" )
+  sed -n 's/^who=//p' "$g/store/requests/"[0-9]* 2>/dev/null | head -n 1
+}
+
+rmk_repo rmk1 .worktrees/34-T1
+expect_eq "RMK.0 control: the recorded tree is marked for the predecessor, the main checkout is not" "w-T1|none" \
+  "$(rmk_marker "$RMK_TREE")|$(rmk_marker "$REPO")"
+expect_eq "RMK.0b control: before any dispatch a no-name ask from the tree is filed under w-T1" "$SID_A:w-T1" \
+  "$(rmk_who "$RMK_TREE" widget.test.sh)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.1 the row's re-run, w-T1-r1 (bound by its name), is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.1b AC-1.1 …and the tree its row recorded now names it, not w-T1" "w-T1-r1" "$(rmk_marker "$RMK_TREE")"
+expect_eq "RMK.1c …and the main checkout still has none (RMK.1b is the positive, same reader)" "none" "$(rmk_marker "$REPO")"
+expect_empty "RMK.1d …and the allow path says nothing" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Row: T1
+Lands-on: widget')" w-T2)"
+expect_eq "RMK.2 a successor named w-T2, bound by Row: T1, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.2b AC-1.1 …and the tree now names w-T2" "w-T2" "$(rmk_marker "$RMK_TREE")"
+expect_eq "RMK.2c AC-1.1 …so a no-name ask from the tree files who=…:w-T2, the successor, never w-T1" "$SID_A:w-T2" \
+  "$(rmk_who "$RMK_TREE" widget.test.sh)"
+expect_eq "RMK.2d …while the same ask from the main checkout files who=…:main (RMK.2c is the positive)" "$SID_A:main" \
+  "$(rmk_who "$REPO" widget.test.sh)"
+
+# A ROW WITH NO TREE OF ITS OWN TOUCHES NOTHING: a cell naming the main checkout, a cell naming a tree
+# that is gone, and a dispatch that binds no row each leave every marker as it was and are admitted.
+rmk_repo rmk3 .
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.3 a row whose cell names the main checkout is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.3b …and the main checkout gets no marker" "none" "$(rmk_marker "$REPO")"
+expect_eq "RMK.3c …and the linked tree the row does not record keeps w-T1" "w-T1" "$(rmk_marker "$RMK_TREE")"
+rmk_repo rmk4 .worktrees/34-gone
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.4 a row whose recorded tree is gone is admitted" "allow" "$GATE_VERDICT"
+expect_false "RMK.4b …and nothing is made at the recorded path" test -e "$REPO/.worktrees/34-gone"
+expect_eq "RMK.4c …and the tree it does not record keeps w-T1" "w-T1" "$(rmk_marker "$RMK_TREE")"
+rmk_repo rmk5 .worktrees/34-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief '')" w-misc)"
+expect_eq "RMK.5 a dispatch that binds no row is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.5b …and marks nothing (RMK.1b is the positive)" "w-T1" "$(rmk_marker "$RMK_TREE")"
+rmk_repo rmk8 .worktrees/34-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" \
+  "$(adv_brief 'Scope constraint: read only.' | sed '/^Files:/d; s#^Suites: .*#Suites: none#')" \
+  w-T1-r1 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:researcher)"
+expect_eq "RMK.8 a read-only role bound to T1 by its name is admitted" "allow" "$GATE_VERDICT"
+expect_eq "RMK.8b …and is not the tree's writer: the tree keeps w-T1 (RMK.1b is the positive)" "w-T1" "$(rmk_marker "$RMK_TREE")"
+
+# A MARK THAT FAILS IS SAID, NEVER REFUSED: the launch is on the roster already. The tree's git
+# directory is made unwritable, so `mark` cannot write the marker.
+rmk_repo rmk7 .worktrees/34-T1
+RMK_GD="$(git -C "$RMK_TREE" rev-parse --absolute-git-dir)"
+chmod 555 "$RMK_GD"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+chmod 755 "$RMK_GD"
+expect_eq "RMK.7 a re-dispatch whose tree cannot be re-marked is still admitted" "allow" "$GATE_VERDICT"
+expect_contains "RMK.7b …and the wall says the tree still names its last writer" \
+  "still names its last writer: spawn-worktree.sh mark --for w-T1-r1 failed" "$GATE_ERR"
+expect_eq "RMK.7c …which it does" "w-T1" "$(rmk_marker "$RMK_TREE")"
+
+# THE MUTATION ARM: the wall's call to `mark` made a no-op. The shipped wall moves the marker (RMK.1b);
+# the doctored copy leaves w-T1, so RMK.1b goes red on it.
+RMK_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/t28-remark.XXXXXX")
+RMK_HOOKS=$(s21_plant "$RMK_ROOT")
+sed '/spawn-worktree\.sh" mark /s/bash .* 2>&1/true/' "$GATE" > "$RMK_HOOKS/dispatch-preflight.sh"
+expect_eq "RMK.6 meta: the shipped wall has the one call, the doctored copy none, and the copy parses" "1|0|parses" \
+  "$(/usr/bin/grep -c 'spawn-worktree.sh" mark ' "$GATE")|$(/usr/bin/grep -c 'spawn-worktree.sh" mark ' "$RMK_HOOKS/dispatch-preflight.sh")|$(bash -n "$RMK_HOOKS/dispatch-preflight.sh" && echo parses)"
+RMK_SAVED_GATE="$GATE"; GATE="$RMK_HOOKS/dispatch-preflight.sh"
+rmk_repo rmk6 .worktrees/34-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Lands-on: widget')" w-T1-r1)"
+expect_eq "RMK.6b the mutant still runs and admits the dispatch" "allow" "$GATE_VERDICT"
+expect_eq "RMK.6c …and with the call made a no-op the tree still names w-T1 (RMK.1b is red on it)" "w-T1" "$(rmk_marker "$RMK_TREE")"
+GATE="$RMK_SAVED_GATE"; rm -rf "$RMK_ROOT"
+
 finish
