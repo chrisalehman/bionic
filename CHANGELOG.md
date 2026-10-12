@@ -115,6 +115,10 @@ What you will notice:
   mutate (`T26-pass-reds.md`). The first pass found them one landing after they landed, which is what it
   is for.
 
+- **The review's fixes.** A `Lands-on:` suite declared at a path is run at exactly that path, never a
+  same-named `tests/<name>` (`T27-declared-path.md`; the critic's S2). A writer dispatched into a tree a row
+  already recorded re-marks it for the new name, so it asks the gate as itself (`T28-remark.md`).
+
 ### The floor, the passes and the walk
 
 The floor is the background pass at c15a7e40: 92 gating suites passed and 0 failed in 3,728 s of wall at
@@ -192,8 +196,8 @@ proof or carried with the sentence that says why. Each is numbered as the requir
 struck (2 to 8); three are carried (1, 9, 10). The count of the others is reported, never a target.
 
 Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck:
-21 here, against 20 in the 1.16.0 block (13 carried from it: the ten that were not on the list, as
-they stood, and three of the ten, restated; 8 new). No 1.16.0 bullet vanished: each is struck below or
+23 here, against 20 in the 1.16.0 block (13 carried from it: the ten that were not on the list, as
+they stood, and three of the ten, restated; 10 new). No 1.16.0 bullet vanished: each is struck below or
 carried here:
 
 - Known limit: the 1.13.0 limits stand as written there, as triaged in `limits-1.13.0-triage.md`: 66 still
@@ -259,16 +263,21 @@ carried here:
 - Known limit, new: `tests/timing.tsv` is an order key, not a forecast. It is rewritten from the green pass,
   which writes no runner timing, so each suite's seconds are its first-to-last section-stamp span: a lower
   bound, taken at width 2 beside other work (`timing-c15a7e40.tsv`, `T17-tune-after.md`).
-- Known limit, new: nothing runs `spawn-worktree.sh mark` when a row is re-dispatched into an existing tree.
-  A successor sent into a tree made by 1.16.0, or into a tree a previous writer used, is held to the
-  previous name's budget, or to none, until `mark` is run by hand (`T2-identity-from-place.md` concern 1,
-  `assumptions.md` A-orch-14).
 - Known limit, new: under a cgroup quota a highly parallel solo suite may read as disturbed and come back
   VOID. The void check models the run's own share as the one-minute load's decay and reads the cgroup's rate
   over a longer interval; no test covers it (`unverified`; `T3-busy-one-reader.md`).
 - Known limit, new: the runner's behaviour under a pass admission, its width from the promise and its solo
   suites marked VOID, has no pinned test row. It is shown by a scratch run and by both passes
   (`T9-runsh-pass.log`, `pass-c15a7e40de6c.log`, three VOID).
+
+- Known limit, new: a background pass that the gate skips, or that a whole-machine ask stops, is told
+  nothing after `ready` printed `pass: started`; the tick reads a skipped or stopped pass and says nothing,
+  so after the last landing no pass may come and nothing says so (`critic-adversarial.md` finding 2,
+  deferred by Chris Lehman at D26).
+- Known limit, new: an ask with no agent name that ends on the lineage or resume path makes one more `git`
+  call than in 1.16.0; a typical ask costs the same (`T2-identity-from-place.md` A-T2-4; waived at D25).
+- Known limit, new: a re-dispatch re-marks the tree its plan row's `worktree` cell names, so a row given a
+  fresh tree while its cell still names the old one re-marks the old tree too (`T28-remark.md`).
 
 Known limits, struck:
 
