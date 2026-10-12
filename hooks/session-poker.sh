@@ -4576,6 +4576,19 @@ plan_verb_id_ok() {
 # one landing writer, `row-landed`, in the same transaction, at the working head (the head of the
 # checkout holding the plan's `working-branch:`), with the artifact written into the ledger line.
 #
+# THE ROW'S WRITER (wave-34 T4; burns debt row-writer-name): `ready`'s answer, lib/line.sh
+# `line_row_writer`, loaded here the first time it is asked, so `deliver` and the tick's backstop hold a
+# row to the writer `ready` would. Sets ROW_WRITER (empty when the row names no one); 1 when the library
+# cannot be loaded.
+row_writer() {  # <roster> <plan> <row> <agent cell>
+  ROW_WRITER=""
+  declare -F line_row_writer >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  declare -F line_row_writer >/dev/null 2>&1 || return 1
+  line_row_writer "$@"
+  ROW_WRITER="$LINE_WRITER"
+  return 0
+}
+
 # deliver_check -> for the row $PV_ID of the opened plan ($PV_PLAN, $PV_REPO), sets RL_COMMIT, RL_AT
 # and RL_ARTIFACT, or exits: 0 with nothing written when the row is already landed, 2 on a refusal,
 # each naming what is missing and the call that answers it. In order:
@@ -4591,7 +4604,7 @@ plan_verb_id_ok() {
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head sid roster launch name rulings
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head sid roster rulings
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_head >/dev/null 2>&1; then
@@ -4705,16 +4718,19 @@ DELIVER_FILES
   fi
   # AN UNREAD RULING HOLDS THE LANDING (wave-33 T34; Δ1, ADR-052), as at the commit wall and `ready`: a
   # record row's artifact is gitignored and never commits, so deliver is its only landing. The writer
-  # is the row's launch line by `row=`, else the plan's agent cell (`ready`'s order). Each ruling of it
-  # not yet shown is printed and stamped shown (lib/roster.sh `ruling_take_unread`), so the same call
-  # after this one lands. The REFUSED line names the ids: it is the line the tick's backstop reports.
+  # is `ready`'s (`row_writer`). Each ruling of it not yet shown is printed and stamped shown
+  # (lib/roster.sh `ruling_take_unread`), so the same call after this one lands: this is the writer's
+  # own deliver. The tick's backstop never reaches this read with a ruling unread (it refuses first,
+  # without stamping, wave-34 T4).
   sid="$(session_id)" || sid=""
   roster="$PV_REPO/.bionic/tmp/roster-${sid}.state"
-  launch="$(_wt_launch_row "$roster" row "$PV_ID")" && name="$(_wt_field "$launch" name)" || name=""
-  [ -n "$name" ] || name="$(units_field "$row" agent)"
+  if ! row_writer "$roster" "$PV_PLAN" "$PV_ID" "$(units_field "$row" agent)"; then
+    die "REFUSED — the row's writer cannot be read: lib/line.sh cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
   if [ -n "$sid" ] && declare -F ruling_take_unread >/dev/null 2>&1 \
-     && rulings="$(ruling_take_unread "$roster" "$name" deliver "$(refuse_plugin_root)")" && [ -n "$rulings" ]; then
-    die "REFUSED — an orchestrator ruling for $(clean "$name") is unread ($(printf '%s\n' "$rulings" | sed -n 's/^bionic ruling \([^ ]*\) .*/\1/p' | paste -sd, - | sed 's/,/, /g')); read it below, act on it, then $call deliver $PV_ID. The plan is unchanged."
+     && rulings="$(ruling_take_unread "$roster" "$ROW_WRITER" deliver)" && [ -n "$rulings" ]; then
+    die "REFUSED — an orchestrator ruling for $(clean "$ROW_WRITER") is unread ($(printf '%s\n' "$rulings" | sed -n 's/^bionic ruling \([^ ]*\) .*/\1/p' | paste -sd, - | sed 's/,/, /g')); read it below, act on it, then $call deliver $PV_ID. The plan is unchanged."
     printf '%s\n' "$rulings" >&2
     exit 2
   fi
@@ -11445,6 +11461,25 @@ EOF
           [ -n "$BS_ID" ] || continue
           case "$BS_WT" in *[A-Za-z0-9]*) continue ;; esac
           ! units_writes_head "$BS_FILES" || continue
+          # AN UNREAD RULING HOLDS THE ROW AND PAGES THE PERSON (wave-34 T4; REQ-3 AC-3.1, AC-3.2; D13, D4
+          # option 1). The writer has ended, so a ruling it never read is read by nobody here: the backstop
+          # reads the rulings of the row's writer (`row_writer`, `ready`'s answer) without stamping them
+          # (lib/roster.sh `ruling_unread`), lands nothing, and opens `ruling:<id>` on the person's ledger,
+          # which an open item keeps as it is, so one item and one send per ruling however many ticks hold
+          # the row. The row holds until a writer reads the ruling, or the row is re-dispatched or dropped
+          # (`tick_ruling_close` below). deliver's own guard stamps: it is the writer's, who reads it.
+          if row_writer "$ROSTER_FILE" "$POKER_RUN_PLAN" "$BS_ID" "$BS_AGENT" \
+             && BS_RULINGS="$(ruling_unread "$ROSTER_FILE" "$ROW_WRITER")" && [ -n "$BS_RULINGS" ]; then
+            BS_IDS="$(printf '%s\n' "$BS_RULINGS" | sed -n 's/^bionic ruling \([^ ]*\) .*/\1/p')"
+            BS_LINE="NOT-LANDED $BS_ID — $(clean "$ROW_WRITER") ended (MET) with an orchestrator ruling unread ($(printf '%s\n' "$BS_IDS" | paste -sd, - | sed 's/,/, /g')); the row holds until a writer reads it: re-dispatch the row, or drop it"
+            say "$BS_LINE"
+            if declare -F owed_open >/dev/null 2>&1; then
+              for BS_RID in $BS_IDS; do
+                OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "ruling:$BS_RID" "ruling unread: $BS_ID" "poker: $BS_LINE" >/dev/null 2>&1
+              done
+            fi
+            continue
+          fi
           BS_RC=0
           BS_OUT="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" deliver "$BS_ID" 2>&1 )" || BS_RC=$?
           if [ "$BS_RC" -eq 0 ]; then
@@ -11455,7 +11490,40 @@ EOF
         done <<BACKSTOP_ROWS
 $(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' -v met="$TICK_MET" '$10 == "active" && $5 != "" && index(met, " " $5 " ") { printf "%s\t%s\t%s\t%s\n", $1, $5, ($9 == "" ? "-" : $9), ($11 == "" ? "-" : $11) }')
 BACKSTOP_ROWS
+        if declare -F owed_send >/dev/null 2>&1; then
+          OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_send ruling: >/dev/null 2>&1
+        fi
       fi
+      # THE PAGE CLOSES WHEN NO ROW WAITS ON IT (wave-34 T4; REQ-3 AC-3.1, D13). An open `ruling:<id>`
+      # stands while its ruling is unread and some active row's writer (`row_writer`, the backstop's own
+      # answer) is the ruling's writer. A ruling shown closes its item where it is stamped (lib/roster.sh
+      # `ruling_page_close`); this closes the rest at the next tick: the row re-dispatched to another
+      # writer, dropped, or landed. Silent, never fatal; nothing is read while no ruling item is open.
+      tick_ruling_close() {
+        local keys rk fold writers=" " r a rid w x1 x2 x3 s rest why
+        declare -F owed_list >/dev/null 2>&1 && declare -F owed_close >/dev/null 2>&1 || return 0
+        keys="$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep '^ruling:')" || return 0
+        while IFS=$'\t' read -r r a; do
+          [ -n "$r" ] || continue
+          row_writer "$ROSTER_FILE" "$POKER_RUN_PLAN" "$r" "$a" && [ -n "$ROW_WRITER" ] && writers="${writers}${ROW_WRITER} "
+        done <<TICK_RULING_ROWS
+$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' '$10 == "active" { print $1 "\t" $5 }')
+TICK_RULING_ROWS
+        fold="$(ruling_fold "$ROSTER_FILE")"
+        for rk in $keys; do
+          IFS="$RULING_US" read -r rid w x1 x2 x3 s rest <<< "$(printf '%s\n' "$fold" | awk -F"$RULING_US" -v id="${rk#ruling:}" '$1 == id { print; exit }')"
+          [ -n "$rid" ] || continue
+          if [ -n "$s" ]; then
+            why="ruling read"
+          else
+            case "$writers" in *" $w "*) continue ;; esac
+            why="no active row is $w's: re-dispatched, dropped or landed"
+          fi
+          OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_close "$rk" "$why" >/dev/null 2>&1
+        done
+        return 0
+      }
+      tick_ruling_close
     fi
 
     # ---------- THE PANEL IS REFRESHED FROM THE ROSTER, NOT FROM A TOOL CALL (T22) -------
