@@ -6,7 +6,7 @@
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--shell <path>]
 #                                        [--stamp-dir <dir>] [--suites <names>] [--runner]
-#                                        [--detach [--no-follow]]
+#                                        [--detach]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -64,6 +64,13 @@
 # as its tree (`tree=`, which the landing's busy check reads); the command itself still runs where
 # the shim stands, and its own `cd` moves it. A <dir> that does not exist or is in no work tree
 # is "outside a git tree": no stamp, no error, never a stamp in the shim's own tree instead.
+#
+# --unplaced: THE WALL CANNOT SAY WHICH TREE THE RUN IS IN (wave-35 T6; D14, design ledger Δ7). A `cd`
+# ahead of the suite that the wall cannot follow (a variable, `pushd`, a subshell, `cd` behind `||`)
+# leaves the run's tree unknown, and the shim's own directory is a guess: in 1.17.0 a red run in a
+# writer's dirty tree was stamped there as a clean green at the main head. So the shim writes NO
+# stamp, at any end, and says on the run's own output (stderr, the detached run's log) that the run
+# did not count. Nothing reads a marked stamp: an unplaced run leaves nothing to read.
 #
 # --suites <names>: WHICH SUITES THE COMMAND RAN (wave-26 T61, critic F1). The doctrine runs a
 # brief's suites one call each, so one tree collects one stamp per suite, and `cmd=` cannot say
@@ -163,10 +170,6 @@
 # (`ps` names booked.sh and its --run-log), so a recycled pid is never waited on. LOST is never a
 # timeout: a dead pid with no `<log>.rc` is reported with the time the log was last written, and the
 # caller exits 70. `session-poker.sh wait <name>` is the same wait, by name, after the caller is gone.
-# --no-follow: START AND RETURN (wave-34 T9; D15). With --detach, the caller prints its one line and
-# exits 0 at once, waiting on nothing: the run is a pass a landing starts behind it (lib/line.sh
-# `_line_pass_start`), which reads the pid off that line and leaves the run to the record. The detached
-# side is the same; without --detach the flag is usage.
 #
 # THE LOG is `<runs>/<id>.log`, `<runs>` being the project's
 # `.bionic/tmp/runs` (the project is the checkout git's common dir belongs to, so a row tree's run
@@ -262,12 +265,12 @@ BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--detach [--no-follow]] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--unplaced] [--detach] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0
-detach=0; run_log=""; follow=1
+kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0; unplaced=0
+detach=0; run_log=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
@@ -283,8 +286,8 @@ while [ "$#" -gt 0 ]; do
     --suites)       [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; suites="$2"; shift 2 ;;
     --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
     --runner)       runner=1; shift ;;
+    --unplaced)     unplaced=1; shift ;;
     --detach)       detach=1; shift ;;
-    --no-follow)    follow=0; shift ;;
     # THE DETACHED SIDE (internal): the caller of --detach starts this shim again with the log it
     # claimed; nobody types it.
     --run-log)      [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_log="$2"; shift 2 ;;
@@ -293,7 +296,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$sep" -eq 1 ] && [ "$#" -ge 1 ] || booked_usage
-[ "$follow" -eq 1 ] || [ "$detach" -eq 1 ] || booked_usage
 if [ "$#" -gt 1 ]; then
   printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2
   exit 2
@@ -334,6 +336,10 @@ booked_one_line() {  # <text> <n> — pipes and line breaks made spaces, then th
 }
 
 booked_stamp() {  # <rc>
+  if [ "$unplaced" -eq 1 ]; then
+    printf 'bionic: not counted — the wall could not tell which tree this run ran in, so it left no stamp and proves nothing; for a run that counts, open the command with a literal cd <tree> || exit 1;\n' >&2
+    return 0
+  fi
   [ -n "$stamp_file" ] || return 0
   local c s=""
   c="$(booked_one_line "$cmd" 120)"
@@ -689,7 +695,6 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   if booked_find_live "$runs" "$(booked_run_id)"; then
     id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
     printf 'booked: attached pid=%s log=%s run=%s\n' "$BOOKED_LIVE_PID" "$BOOKED_CLAIM" "$id"
-    [ "$follow" -eq 1 ] || exit 0
     booked_follow "$BOOKED_CLAIM" "$BOOKED_LIVE_PID"
   fi
   if ! booked_claim_log "$runs" "$(booked_run_id)"; then
@@ -706,6 +711,7 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   [ -z "$stamp_dir" ] || child+=(--stamp-dir "$stamp_dir")
   [ -z "$suites" ] || child+=(--suites "$suites")
   [ "$runner" -eq 0 ] || child+=(--runner)
+  [ "$unplaced" -eq 0 ] || child+=(--unplaced)
   child+=(-- "$cmd")
   # fork; the parent returns at once; the child leaves the caller's session (setsid), takes the log
   # as stdout and stderr and /dev/null as stdin, closes every other descriptor it inherited (one held
@@ -742,7 +748,6 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   fi
   id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
   printf 'booked: started pid=%s log=%s run=%s\n' "$pid" "$BOOKED_CLAIM" "$id"
-  [ "$follow" -eq 1 ] || exit 0
   booked_follow "$BOOKED_CLAIM" "$pid"
 }
 

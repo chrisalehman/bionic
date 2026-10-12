@@ -109,23 +109,23 @@ Design altitude:
 
 Mechanism level:
 
-> **Goal:** Decide the `pass` request kind in `gate.sh`: room-only or reserved width, the `background-pass:` default, and whether `ready` or the tick triggers it.
+> **Goal:** Decide how `gate.sh` admits a whole test run: room under the share alone or a reserved width, and whether `ready` or the tick launches it.
 >
-> 1. Kind `pass` ranked after all work, promised the free cores less 2, never waits.
-> 2. Reserve a fixed width of 4 for the pass in `tests/run.sh`.
+> 1. Room under the share alone: the run waits its turn like any heavy command.
+> 2. Reserve a fixed width of 4 for the run in `tests/run.sh`.
 
 Design altitude:
 
-> **Goal:** Decide how a full test run in the background shares the machine with the workers building the code.
+> **Goal:** Decide how a full test run shares the machine with the workers building the code.
 >
 > The full run catches what each worker's own tests miss, but it wants every core, and the workers and their landings need them too.
 >
-> 1. Spare capacity only: the background run takes what is free, keeps some back for the next landing, and steps aside when anyone needs more. It may run late or be skipped.
-> 2. A fixed share: the background run always holds part of the machine. It runs on time, and every worker runs slower.
+> 1. Spare capacity only: the run takes what is free, keeps some back for the next landing, and steps aside when anyone needs more. It may start late.
+> 2. A fixed share: the run always holds part of the machine. It starts on time, and every worker runs slower.
 >
-> **Recommendation:** Option 1, because background work must never slow foreground work, and a check that arrives late still arrives. Not 2: it taxes every worker for a result nobody is waiting on.
+> **Recommendation:** Option 1, because a check must never slow the work it checks, and one that starts late still finishes. Not 2: it taxes every worker for a result nobody needs yet.
 >
-> **Significance:** Sets the rule that background work takes only what is spare; anything added later asks the same way.
+> **Significance:** Sets the rule that a check takes only what is spare; anything added later asks the same way.
 
 ## Forms
 
