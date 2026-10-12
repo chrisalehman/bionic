@@ -3392,4 +3392,58 @@ expect_contains "CE.6 a classified suite keeps its own path: the booking wrap, w
   "booked.sh" "$(sb_cmd)"
 expect_absent "CE.6b …and no carry in front of it" "export BIONIC_GATE_AGENT" "$(sb_cmd)"
 
+section "§W10 — a run the wall cannot place leaves no stamp and says it did not count (wave-35 T6; REQ-5 AC-5.1; D14, Δ7)"
+# ============================================================
+#
+# 1.17.0: a writer's door run, typed from the main checkout as `cd <tree> || exit 1; …` with a `cd` the
+# wall could not read, was wrapped with no --stamp-dir, so the shim stamped where it stood: a red run
+# in the writer's dirty tree became a clean record at the main head (research-walls §5). Now the wall
+# hands such a run --unplaced, and the shim writes no stamp and prints `not counted` on the run's own
+# output. W10's pin in tests/background-suite-guard.test.sh is the wrap text; this is the run.
+# FIXTURE FIDELITY: the real hook wraps the call, and the wrap it returns is what runs, detached as an
+# agent's run is, from the main checkout, into a linked writer tree with an uncommitted red suite.
+# fails-when: a green record appears at the main head (any stamp the unplaced run leaves).
+R_W10="$(mk_repo w10place)"
+W10_T="$R_W10/.worktrees/T1"
+# The main checkout is clean, as it was in 1.17.0, so a stamp there would be a record the floor judge reads.
+printf '.bionic\n.bionic/\n.worktrees/\n' > "$R_W10/.gitignore"
+printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\n[ "${1:-}" = --only ] && shift\nbash "tests/$1"\n' > "$R_W10/tests/run.sh"
+chmod +x "$R_W10/tests/run.sh"
+git -C "$R_W10" add .gitignore tests/run.sh && git -C "$R_W10" commit -qm "w10: the door" 2>/dev/null
+git -C "$R_W10" worktree add -q -b wt/T1 "$W10_T" >/dev/null 2>&1
+printf '#!/bin/bash\necho "FAIL: x ran red in the writer tree"\necho; echo "x.test.sh: 0/1 passed, 1 failed  sections=1 setup=0"\nexit 1\n' > "$W10_T/tests/x.test.sh"
+bw_dispatched "$R_W10" w10writer suites_allowed=x.test.sh suites_source=declared files=
+w10_stamps() {  # -> every stamp line in every git dir of the repository, `<git dir>|<line>`
+  local _f
+  for _f in "$R_W10/.git/bionic-stamps" "$R_W10/.git/worktrees"/*/bionic-stamps; do
+    [ -f "$_f" ] && sed "s#^#${_f%/bionic-stamps}|#" "$_f"
+  done
+  return 0
+}
+w10_run() {  # <command> — the hook's wrap of it, run from the main checkout -> W10_WRAP W10_OUT W10_RC
+  run_hook "$(mk_payload "$R_W10" "$1" "$ACTOR" omit Bash test-runner 1800000)"
+  W10_WRAP="$(updated_command_of)"
+  W10_OUT="$(cd "$R_W10" && env -u BIONIC_GATE_AGENT T="$W10_T" BIONIC_GATE_DIR="$SANDBOX/w10-gate" \
+    CLAUDE_CODE_SESSION_ID="$SID" bash -c "${W10_WRAP:-false}" 2>&1)"
+  W10_RC=$?
+}
+expect_eq "W10.0 precondition: the main checkout is clean and the writer tree is dirty (its suite is uncommitted)" "0 1" \
+  "$(git -C "$R_W10" status --porcelain | awk 'END { print NR }') $(git -C "$W10_T" status --porcelain | awk 'END { print NR }')"
+w10_run 'cd "$T" || exit 1; tests/run.sh --only x.test.sh'
+expect_contains "W10.1 the wall wraps a run behind a cd it cannot read with --unplaced" " --unplaced " "$W10_WRAP"
+expect_absent "W10.1b …and no --stamp-dir" "--stamp-dir" "$W10_WRAP"
+expect_eq "W10.2 the run ran, red, in the writer tree (its code is the suite's)" "1 1" \
+  "$W10_RC $(printf '%s\n' "$W10_OUT" | grep -c 'FAIL: x ran red in the writer tree')"
+expect_contains "W10.3 AC-5.1 the run's own output says it did not count" "not counted" "$W10_OUT"
+expect_eq "W10.4 AC-5.1 …and it left no stamp in any git dir: no record at the main head" "" "$(w10_stamps)"
+# The positive on the same extractor and fixture: the same run behind a literal `cd` the wall can place
+# is stamped in the writer tree's own git dir, dirty, and nowhere else.
+w10_run "cd $W10_T || exit 1; tests/run.sh --only x.test.sh"
+expect_contains "W10.5 [positive] a literal cd is placed: --stamp-dir the writer tree" " --stamp-dir $W10_T " "$W10_WRAP"
+expect_absent "W10.5b …with no --unplaced" "--unplaced" "$W10_WRAP"
+expect_absent "W10.5c …and no not-counted line (W10.3 is the positive)" "not counted" "$W10_OUT"
+expect_regex "W10.6 [positive] …and its one stamp is in the writer tree's git dir, red and dirty" \
+  "^$R_W10/.git/worktrees/T1\\|stamp/v1\\|head=[0-9a-f]{40}\\|dirty=[1-9][0-9]*\\|rc=1\\|" "$(w10_stamps)"
+expect_eq "W10.6b …one stamp in all" "1" "$(w10_stamps | awk 'END { print NR }')"
+
 finish
