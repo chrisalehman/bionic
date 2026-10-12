@@ -347,6 +347,54 @@ $BIONIC_RULINGS_UNREAD"
   return 2
 }
 
+# THE TWO FACTS OF AN ACKNOWLEDGEMENT, gathered for `wall_ruling_ack` (wave-34 T5; REQ-4 AC-4.3, D9 "1"). `ruling-ack
+# <id>` marks a ruling read, and only the writer it is addressed to has read it: an ack from the main thread or from
+# another writer would mark it shown while its writer never saw it (walk.md §8). The verb cannot see its caller, so
+# for a call that runs the verb (`_wall_poker_contract_verb`'s argv, asked for this one verb) this reads the ruling's
+# writer off the session's roster (lib/roster.sh `ruling_fold`) and the caller's roster name off the payload's
+# `agent_id` (`roster_row_for_id`, empty for the main thread or an agent no row names), and counts the call's segments:
+# the ack is admitted alone, as `deliver` is. An id no ruling carries gathers nothing; the verb refuses it.
+BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_ALONE=0
+case "$COMMAND" in
+  *ruling-ack*)
+    if _wall_poker_contract_verb "$COMMAND" ruling-ack && [ -r "$BIONIC_LIB/roster.sh" ] \
+       && { declare -F ruling_fold >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null; then
+      BIONIC_ACK_ID="${_WALL_POKER_ARGS%%"$GIT_ARGV_US"*}"
+      _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+      if [ -n "$BIONIC_ACK_ID" ]; then
+        BIONIC_ACK_WRITER="$(ruling_fold "$_bw_roster" | awk -F"$RULING_US" -v id="$BIONIC_ACK_ID" '$1 == id { print $2; exit }')"
+      fi
+      BIONIC_ACK_AGENT="$(bionic_jq .agent_id)"
+      if [ -n "$BIONIC_ACK_AGENT" ] && _bw_row="$(roster_row_for_id "$_bw_roster" "$BIONIC_ACK_AGENT")"; then
+        BIONIC_ACK_CALLER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+      fi
+      _bw_n=0
+      while IFS= read -r _bw_l; do [ -z "$_bw_l" ] || _bw_n=$((_bw_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
+      [ "$_bw_n" -ne 1 ] || BIONIC_ACK_ALONE=1
+    fi ;;
+esac
+
+# wall_ruling_ack — an acknowledgement from anyone but the ruling's writer, or not alone in its call, is refused naming
+# the writer it needs, and the ruling stays unread. A pure predicate over the facts gathered above (the freeze).
+wall_ruling_ack() {  # <event> -> 0 nothing · 2 block
+  local _who="the main thread"
+  [ -n "$BIONIC_ACK_WRITER" ] || return 0
+  if [ "$BIONIC_ACK_CALLER" = "$BIONIC_ACK_WRITER" ]; then
+    [ "$BIONIC_ACK_ALONE" = 1 ] && return 0
+    fold_block exit2 ruling-ack "an acknowledgement goes alone in its call" "run the ack by itself" \
+      "ruling $BIONIC_ACK_ID is yours, $BIONIC_ACK_WRITER, and the wall reads one acknowledgement per call. Run it alone:
+    bash <plugin>/hooks/session-poker.sh ruling-ack $BIONIC_ACK_ID"
+    return 2
+  fi
+  [ -z "$BIONIC_ACK_AGENT" ] || _who="${BIONIC_ACK_CALLER:-an agent no roster row names}"
+  fold_block exit2 ruling-ack "this ruling is ${BIONIC_ACK_WRITER}'s to ack" "the addressed writer acks it" \
+    "ruling $BIONIC_ACK_ID is addressed to $BIONIC_ACK_WRITER, not to $_who. An acknowledgement is the writer's receipt
+that it read the ruling, so one from anyone else would mark it read while its writer never saw it. It stays unread:
+$BIONIC_ACK_WRITER's next tool result carries it, and its commit and ready wait on it until $BIONIC_ACK_WRITER runs
+    bash <plugin>/hooks/session-poker.sh ruling-ack $BIONIC_ACK_ID"
+  return 2
+}
+
 bionic_fold "$EVENT" \
   wall_protect_main \
   wall_protect_database \
@@ -354,5 +402,27 @@ bionic_fold "$EVENT" \
   wall_farm_out_reminder \
   wall_background_suite_guard \
   wall_memory_store \
-  wall_ruling_unread
-exit $?
+  wall_ruling_unread \
+  wall_ruling_ack
+_bw_rc=$?
+
+# THE PERSON'S ASKS THE GATE HANDED BACK, OPENED HERE (wave-34 T5; REQ-4 AC-4.1, D14). A refusal that asks the person
+# for a waiver (a failing question, a matrix row only they can let go) comes back from `wall_evidence_gate` beside its
+# words, one `<key> TAB <title> TAB <reply>` line each in BIONIC_WALL_OWED; the wall itself writes nothing (the
+# freeze), so its caller opens the items on the person's ledger (lib/owed.sh), keyed as the answer verb closes them.
+# Opening is idempotent per key. owed.sh is not in BIONIC_LIB_WANT (A-56.1) and is sourced only when there is an ask.
+# A plan verb's dry commit (`planverb-<pid>`, hooks/session-poker.sh `plan_verb_dry`) is a synthetic session whose
+# ledger nobody reads: its refusal is printed to the verb's caller, and the real commit opens the item.
+if [ -n "$BIONIC_WALL_OWED" ]; then
+  case "$BIONIC_SID" in
+    planverb-*) : ;;
+    *)
+      if { declare -F owed_open >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/owed.sh" ] && . "$BIONIC_LIB/owed.sh"; }; } 2>/dev/null; then
+        while IFS=$'\t' read -r _bw_key _bw_title _bw_reply; do
+          [ -n "$_bw_key" ] || continue
+          OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" owed_open "$_bw_key" "$_bw_title" "$_bw_reply" >/dev/null 2>&1
+        done <<< "$BIONIC_WALL_OWED"
+      fi ;;
+  esac
+fi
+exit $_bw_rc

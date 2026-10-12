@@ -2096,7 +2096,7 @@ expect_regex "ARM-A.12 AC-8.3 …and the row records who widened it: amended=<is
 # §ARM-A (wave-33 T15; D10) — the verbs the wave added after the list was cut. `deliver` is a record row's own last act,
 # so a writer may run it for the row its OWN roster row names (`row=`) and for no other: one that could land another's
 # row would close work nobody did. `rule` pushes an instruction to a writer, so it is the orchestrator's; `ruling-ack` and
-# `rulings` are the writer's own reads and stay open. The plan verbs T7 added (matrix-set, waive-row, tasks-prose,
+# `rulings` are the writer's own reads and stay off the list (an ack is its addressed writer's alone, §RULING-ACK below). The plan verbs T7 added (matrix-set, waive-row, tasks-prose,
 # epic-row, continuation-fill) and T13's disposition write the bound plan or the findings' ledger.
 # fails-when: a writer delivers another row, a writer rules, a listed plan verb is admitted from a subagent, or the
 # refusal line of the longest verb overflows refuse.sh's 100 columns and names no rule.
@@ -2125,7 +2125,37 @@ expect_contains "W15.6b …the detail says no row of its own names a plan row" "
 am_admitted "W15.7: deliver from the main thread" "bash $AM_POKER deliver T6" ""
 am_refused "W15.8: rule" "bash $AM_POKER rule w20-other 'stop and report'"
 am_admitted "W15.8b: rule from the main thread" "bash $AM_POKER rule w20-other 'stop and report'" ""
-am_admitted "W15.9: ruling-ack stays open to a writer" "bash $AM_POKER ruling-ack 3"
+# §RULING-ACK (wave-34 T5; REQ-4 AC-4.3, D9 "1"): only the writer a ruling is addressed to acknowledges it. The verb cannot
+# see its caller, so the hook reads the two facts (the ruling's writer off the roster, the caller's roster name off the
+# payload's agent_id) and the wall admits the ack only when they are one name and the ack is alone in its call. The main
+# thread and every other writer are refused naming the writer it needs, and the ruling stays unread.
+# FIXTURE FIDELITY: the ruling is written by lib/roster.sh's `ruling_record`, the `rule` verb's writer; the ack that is
+# admitted is then run by the real verb, as the writer would.
+AM_RL_LIB="$WALLS_LIB/roster.sh"
+AM_RULING="$(bash -c '. "$1" && ruling_record "$2" w20-rowed "rebase onto the wave head first"' _ "$AM_RL_LIB" "$R_AM/.bionic/tmp/roster-$SID.state")"
+am_ruling_state() {  # -> "<writer> <shown or unread>" of the fixture's ruling, read by lib/roster.sh's one reader
+  bash -c '. "$1" && ruling_fold "$2"' _ "$AM_RL_LIB" "$R_AM/.bionic/tmp/roster-$SID.state" \
+    | awk -F"$(printf '\037')" -v id="$AM_RULING" '$1 == id { print $2, ($6 == "" ? "unread" : "shown"); exit }'
+}
+expect_eq "W15.9 precondition: a ruling for w20-rowed is recorded, unread (the reader reads it)" "w20-rowed unread" "$(am_ruling_state)"
+run_hook "$(mk_payload "$R_AM" "bash $AM_POKER ruling-ack $AM_RULING" "")"
+expect_status "W15.9a AC-4.3 an ack from the main thread is refused" 2 "$ST"
+expect_contains "W15.9a2 …naming the writer it needs" "w20-rowed" "$(printf '%s\n' "$ERR" | /usr/bin/grep 'ruling-ack refused')"
+run_hook "$(mk_payload "$R_AM" "bash $AM_POKER ruling-ack $AM_RULING" "$AM_ID" omit Bash w20-sub)"
+expect_status "W15.9b AC-4.3 an ack from another writer is refused" 2 "$ST"
+expect_contains "W15.9b2 …naming the writer it needs" "w20-rowed" "$(printf '%s\n' "$ERR" | /usr/bin/grep 'ruling-ack refused')"
+expect_contains "W15.9b3 …and the caller it is not" "not to w20-sub" "$ERR"
+am_rowed_ack() { run_hook "$(mk_payload "$R_AM" "$1" "$AM_ROWED_ID" omit Bash w20-rowed)"; }
+am_rowed_ack "bash $AM_POKER ruling-ack $AM_RULING && bash $AM_POKER ruling-ack r0-other"
+expect_status "W15.9d the addressed writer's ack chained to another call is refused (the ack goes alone)" 2 "$ST"
+expect_eq "W15.9e …and after every refusal the ruling is still unread" "w20-rowed unread" "$(am_ruling_state)"
+am_rowed_ack "bash $AM_POKER ruling-ack $AM_RULING"
+expect_status "W15.9c AC-4.3 the addressed writer's own ack is admitted" 0 "$ST"
+expect_absent "W15.9c2 …with no refusal (W15.9a2 read the same stream)" "ruling-ack refused" "$ERR"
+( cd "$R_AM" && env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+    bash "${BIONIC_HOOKS_DIR}/session-poker.sh" ruling-ack "$AM_RULING" ) >/dev/null 2>&1
+expect_eq "W15.9c3 …and the ack it admitted, run, marks the ruling shown" "w20-rowed shown" "$(am_ruling_state)"
+am_admitted "W15.9f an id no ruling carries is the verb's to refuse, not the wall's" "bash $AM_POKER ruling-ack 3"
 am_admitted "W15.9b: rulings stays open to a writer" "bash $AM_POKER rulings w20-sub"
 for _am_v in deliver rule matrix-set waive-row tasks-prose epic-row continuation-fill disposition; do
   expect_contains "W15.10 the verb list names $_am_v" " $_am_v " " $AM_VERBS "
