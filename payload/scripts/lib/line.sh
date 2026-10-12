@@ -812,8 +812,9 @@ _line_review_born() {  # <plan>
 # project's declared regression in the background, and the tick reads its end off the record:
 #   the regression  `floor:` in .bionic/config.yaml (floor-run's), else `bash tests/run.sh` when the landed
 #                   head carries tests/run.sh; a project declaring neither starts nothing
-#   the switch      `background-pass: on|off` there; absent (or another word), on unless the plan reads
-#                   `regression: no`. Off, nothing starts and a hand whole run holds the machine as before
+#   the switch      `background-pass: on|off` there; absent (or another word), off: a project opts in.
+#                   On needs the plan to read other than `regression: no`. Off, nothing starts and a hand
+#                   whole run holds the machine as before
 #   the lock        `<git common dir>/bionic-pass/<branch, / written %>`, claimed as the publish lock is
 #                   (`_slots_take_one`): a live holder is a pass in flight, and this landing starts none; a
 #                   dead one is taken over, so the first landing after a pass ends starts the next
@@ -825,8 +826,8 @@ _line_review_born() {  # <plan>
 # own publish starts one: a hand landing or a plain git merge starts nothing.
 _line_pass_on() {  # <root> <plan> -> 0 when a landing starts a pass
   case "$(config_value "$1" background-pass "" 2>/dev/null)" in
-    on) return 0 ;;
-    off) return 1 ;;
+    on) ;;
+    *) return 1 ;;
   esac
   _line_load_run && [ "$(plan_regression "$2")" != no ]
 }
