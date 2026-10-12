@@ -32,7 +32,9 @@ minor release by the policy above: the new verbs, the ledger, the sender and the
 - A wave that shipped no ADR must say `adrs: none` in its plan or spec, or `close-out.sh` refuses and names
   the gap (`T8-close-out.md`).
 - A budgeted agent's call that starts a script is rewritten to `export BIONIC_GATE_AGENT=<its row>; <the
-  command>`, so a runner inside the script asks the gate as that agent (`T3-budget-at-ask.md`).
+  command>`, so a runner inside the script asks the gate as that agent (`T3-budget-at-ask.md`). When the
+  session runs in bypass mode, every command of a budgeted agent is rewritten the same way
+  (`T36-carry.md`).
 
 What you will notice:
 
@@ -110,6 +112,27 @@ What you will notice:
   Record: `T17-record.md`, `limits-1.13.0-triage.md`.
 - **slots' wait rows keep testing a wait under one core a command.** B2 and K5 make the second command wait
   with a live busy reading of 7.0 cores; every expected value is unchanged. Record: `T28-slots.md`.
+- **A container with a CPU limit on a busy host has room.** Where a cgroup CPU quota bounds the cores, the
+  gate counted the container's cores but read the host's load average, so a 2-CPU container on a 64-core
+  host at load 10 reported no room with nothing admitted, waiting or owed. It now reads the container's own
+  CPU use from its cgroup (`cpu.stat`, or `cpuacct` on cgroup v1), and an unreadable file reads 0, never
+  full. A host with no quota behaves as before. The container path was proved with a planted cgroup root, not
+  on a Linux host (`unverified`; see the Linux limit below). Record: `T33-container.md`.
+- **`deliver` refuses while the writer has a ruling unread.** A row's delivery now takes the same look the
+  commit and `ready` take: an unread ruling for the row's writer is shown, stamped, and the call exits 2
+  with the ruling ids in the refusal. The next `deliver` lands the row. Record: `T34-guards.md`.
+- **A failed notification is retried.** When the channel fails, the owed item stays unsent and the next Stop
+  sends it, where an earlier build of this release marked it sent and lost it. A caller killed mid-send
+  leaves the mark, so an item is still never sent twice. Record: `T34-guards.md`.
+- **A named approval or a waiver the person must give opens an owed item.** A row waiting on `approval:<name>`,
+  at the tick and at the dispatch wall, opens `approve:<name>`, and a failing review question opens
+  `waive:<question>`; the `approve` and `waive` verbs close them, and the person is sent each once. Record:
+  `T35-owed-sources.md`.
+- **In bypass mode a budgeted agent's run from any launcher is held to its budget.** The agent's name now
+  rides on every command it runs, so a suite started through awk, python, node or `source` asks the gate as
+  that agent and is refused at the ask when it is off budget. Outside bypass mode only a script start
+  carries the name, because Claude Code checks permission rules against the rewritten command (see the
+  restated limit below). Record: `T36-carry.md`.
 
 ### The floor and the walk
 
@@ -127,7 +150,9 @@ helpers, and put the three verbs in the list (`T29-pins.md`). Fix row T30 cut th
 the structure checks, 5,110 to 4,959 bytes with every check kept, changed the two session-start rows, and
 found MP-m2's premise wrong: the refusal already built its number from the constant, and the grep had
 matched a comment, which it reworded (`T30-floor.md`). Each suite was green through the door at its row's
-landing. No whole run was taken again after them.
+landing. Four review fix rows, T33 to T36, landed after that run; each had its own suites green through
+the door at its landing (`T33-container.md`, `T34-guards.md`, `T35-owed-sources.md`, `T36-carry.md`). No
+whole run cited here was taken after them.
 
 The walk drove the wave head's own verbs, hooks and libraries on a scratch world: the brief, a ruling pushed
 and held at the commit, `deliver`, `matrix-set` and `waive-row`, the owed ledger through a stubbed channel,
@@ -146,8 +171,10 @@ and one set of rows was deleted with the mechanism it tested.
 | `T7-verbs.md` | session-poker-2 16d6 to 16d8 pin the refusal of `decline --on` a file |
 | `T8-close-out.md` | 86.2a/b and REG-1 pin a refusal and a derived sentence where they pinned a `<fill:` mark; 4k to 4n changed their fixture and kept their expected values |
 | `T13-findings.md`, `T28-slots.md`, `T4-empty-flag.md` | new rows only, or fixtures only; expected values unchanged |
+| `T34-guards.md` | notify A5e asserted that a failed send was not retried (3 calls); it now asserts the retry (4), with A5f to A5j and K1 to K3 beside it |
+| `T33-container.md`, `T36-carry.md` | gate H.10's mutation anchor follows the line it mutates; cmd-class AC-24 (twice) and AC-16 now assert the carried command exactly, with stderr empty and stdout only the rewrite |
 
-Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck: 17 here, against 18 carried in the 1.15.0 block (its 19th bullet was struck):
+Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck: 19 here, against 18 carried in the 1.15.0 block (its 19th bullet was struck). The block stood at 17 before the four review fix rows; those rows left two more limits that a user of any project can meet, and they are counted. The count does not fall below 1.15.0's:
 
 - Known limit: the 1.13.0 limits stand as written there, as triaged in `limits-1.13.0-triage.md`: 66 still
   true, 5 closed (32, 33, 46, 49, 60), none fixed. Sixty-three are carried by the next wave's charter;
@@ -185,9 +212,16 @@ Known limits, carried to the next release. The count is the `- Known limit` bull
   documentation), `set -m` in the suite primitive, and `cmd_case_blind`, `real_path` and the case folding of
   command paths were run on macOS only. Their case-exact and quota arms are proved by planted probes, not by
   a Linux host (`T1-typical-cost.md`, `T2-suite-primitive.md`, `T3-budget-at-ask.md`).
-- Known limit: a runner in another language, or one started from python, node, `source` or a script outside
-  the tree, never asks the gate as the budgeted agent: it asks as `main`, unbudgeted. An agent that types
-  `BIONIC_GATE_AGENT=` itself names its own who (`T3-budget-at-ask.md`).
+- Known limit, narrowed: outside bypass mode, a runner in another language asks as main. A budgeted agent's
+  suite started through python, node, awk, `source` or an out-of-tree script asks the gate as the main
+  thread, unbudgeted, unless the agent runs with `permission_mode: bypassPermissions`. Carrying the agent's
+  name on every command there would make Claude Code check permission rules against the rewritten command
+  and prompt where the original was allowed. A script start is still carried in every mode. An agent that
+  types `BIONIC_GATE_AGENT=` itself names its own who. Pinned by bash-walls CE.7c, with CE.1 the bypass-mode
+  arm (`T36-green2.log`, `T36-carry.md`, `T3-budget-at-ask.md`). The next wave's first gate item is a
+  per-tree marker, `<git-dir>/bionic-agent` holding the row name, which the gate would read when no name is
+  set: no command is rewritten, so it closes the launchers in every mode, and it would still leave a suite
+  started outside the agent's own tree (`T36-carry.md`, `assumptions.md` A-orch-148).
 - Known limit: `bash TESTS/RUN.SH`, and a link to the runner not named `run.sh`, exit 2 for everyone with
   nothing run: the interpreter seam re-runs any script whose basename is not `run.sh`, and the runner
   rejects the paths it is handed. That is the safe direction, pinned by gate.test.sh CA.8
@@ -201,6 +235,14 @@ Known limits, carried to the next release. The count is the `- Known limit` bull
   script's `$$`. Two `gate_ask`s from sibling subshells both returned request 1; as separate processes they
   returned 1 and 2 (`walk.md` sections 6 and 8).
 - Known limit: `ruling-ack` run with no agent identity acknowledges a writer's ruling (`walk.md` section 8).
+- Known limit: the tick's backstop `deliver` against an unread ruling is untested. The tick runs `deliver`
+  for a finished row whose agent ended without it, and the refusal line it prints carries the ruling ids,
+  but no test drives that path (`unverified`; `T34-guards.md`).
+- Known limit: two asks of the person still open no owed item. The commit wall's question and matrix-row
+  waiver asks, and `waive-row`, print from `walls.sh` and the ledger does not hear them (`unverified` as a
+  source); and waiving a question closes `waive:<question>` but not the `finding:<id>` items
+  `disposition` opened for its findings, which stay open, sent once and never re-sent, until a ruling
+  closes them (`T35-owed-sources.md`).
 
 Known limits, struck:
 
@@ -228,7 +270,7 @@ Known limits, struck:
   (`T5-red-runner-roster.log`, `T5-green-runner-roster.log`). The lag after a short wait is carried above.
 - Known limit, struck: the four debt lines from the structure critic. `width.sh` walks a UTF-8 character
   once (units DBC-1 to DBC-1c, `T15-red-units.log`); a bounded wait-until is one library, with all four
-  suites on it (name-scan, slots and worktree by T15, `T15-green-all-1.log`; gate.test.sh by T29, `T29-pins.md`); the share × cores ÷ 100 room has one site, `_gate_share_cores` (T1,
+  suites on it (name-scan, slots and worktree by T15, green in the whole run `regression-8832e4e6.log`; gate.test.sh by T29, `T29-pins.md`); the share × cores ÷ 100 room has one site, `_gate_share_cores` (T1,
   gate §SHARE-ROOM SR.1 to SR.4); and the run-end re-read has an agreement check over `run_read` and
   `booked_follow` (session-poker-2 56k to 56k8, `T15-green-poker2-worktree-3.log`).
 - Known limit, struck: rc-item reached the network. Each yes-answered `setup --all` door cloned humanizer
