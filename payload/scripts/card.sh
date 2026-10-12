@@ -736,7 +736,19 @@ function flush_dec(   line, id, serves) {
     line = clean(line)
     sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", line)
     print "DROW" OFS id OFS clean(firstsent(line)) OFS clean(serves)
+    return
   }
+  # AN UNTAGGED BULLET IS THE ARTIFACT\047S DEFECT (wave-35 T8; REQ-6 AC-6.6; D15): the section parses one
+  # shape, and a bullet out of it was dropped in silence, so a spec of untagged decisions rendered an empty
+  # Decisions table at exit 0. Refused as a requirement with no provenance is, naming the bullet.
+  gsub(/\*\*/, "", line)
+  err("decision bullet carries no (D<n>; REQ-…) tag: " words(clean(line), 10))
+}
+# words(s, n) -> the first n blank-separated words of s, re-joined by one space.
+function words(s, n,   a, m, k, o) {
+  m = split(s, a, /[ \t]+/); o = ""
+  for (k = 1; k <= m && k <= n; k++) o = o (o == "" ? "" : " ") a[k]
+  return o
 }
 # A `Worth your eye` bullet: one entry, its continuation lines joined, markup off.
 function flush_worth(   t) {
@@ -751,6 +763,9 @@ function flush_adr(   line, path, rest, id) {
   if (!match(line, /`[^`]*adr-[^`]*`/)) return
   path = substr(line, RSTART + 1, RLENGTH - 2)
   rest = line
+  # AN ADR LINE CARRIES ITS GROUP (wave-35 T8; AC-6.6): a backticked adr- path with no (D<n>) group beside it
+  # names an ADR no decision cites, and the ADR column would leave it out in silence.
+  if (rest !~ /\(D[0-9]+[^)]*\)/) { err("ADR line names " path " with no (D<n>) group"); return }
   while (match(rest, /\(D[0-9]+[^)]*\)/)) {
     id = substr(rest, RSTART + 1, RLENGTH - 2); sub(/[^0-9D].*$/, "", id)
     print "ADR" OFS id OFS path

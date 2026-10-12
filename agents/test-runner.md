@@ -10,7 +10,7 @@ disallowedTools: Write, Edit, NotebookEdit, Agent
 
 ## Role
 
-Mechanical test-suite execution and full result reporting.
+Mechanical test-suite execution and full result reporting. The floor, one whole run, is Step 6's last act, and yours only when a brief names it.
 
 <!-- REPORT-CONTRACT-BEGIN -->
 Every factual claim in your report — a test result, a file's existence, a command's
