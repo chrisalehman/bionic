@@ -38,24 +38,26 @@ Reply 1, 2 or 3 · or matrix, diagram, page
 - The four labels are bold, end in a colon, and come in this order. Nothing else is a label.
 - The reasoning lives inside Recommendation. There is no separate rationale part.
 - Options are a numbered list of two or more, never lettered or bulleted.
-- One blank line separates the last option from Recommendation.
 - Recommendation opens on the option number and says why it wins. Then it says why not each other option.
-- Significance says what follows downstream, what compounds, and how hard the choice is to reverse.
 - The reply line is the last line, and nothing follows it.
 
 ## Altitude
 
-The failure to avoid is a brief written at the level of mechanisms: the files, functions, rows and versions the work touches. It makes the user rebuild the concept before they can choose. Those names belong in the record, never in the brief.
+Before any label, reframe the decision at a conceptual level, in plain language, for a reader who has not seen the research.
+
+1. Name the one thing the options differ on before any structure. Pitch the brief at the level of abstraction that makes the options differ most.
+2. Cut detail before cutting sentences: concise means fewer facts, not denser ones.
+3. Plain words over the record's house style, which stays in the record.
+4. Then write the four labels:
 
 - Frame the decision as concepts, not mechanisms: its Goal and Options carry no file, function, row, task or version identifiers.
-- Plain language.
-- Pitch it at the level of abstraction that makes the options differ most.
-- The goal says what and why: what is being decided, and why it matters now. The Goal is one sentence.
-- A short plain paragraph after the Goal explains the problem before any option. It is optional: use it when the concept is complex, and keep it brief.
+- The goal says what and why: what is being decided, and why it matters now. The Goal is one sentence, and it names the one difference.
+- A short plain paragraph after the Goal explains the problem before any option. It is optional, and brief.
 - Each option is named as an idea and says what it means for the user.
 - By default the recommendation favours the most architecturally elegant choice, reasoned from first principles, and names the principle that decides it.
 - Significance names the rule the choice sets for later work.
-- Concise. Cut every sentence that does not change the choice.
+
+The failure to avoid is a brief written straight from research: files, functions, tables and versions that bury the one difference.
 
 ## Worked pairs
 
@@ -87,7 +89,7 @@ Design altitude:
 
 Mechanism level:
 
-> **Goal:** Decide whether REQ-14 adopts items 1–5 of `inbound/bionic-1.16.0-w1-feedback.md` (adopt liveness, the handoff, `line.sh:1159`) or carries them with items 6–9.
+> **Goal:** Decide whether REQ-14 adopts items 1–5 of `inbound/bionic-1.16.0-w1-feedback.md` or carries them with items 6–9.
 >
 > 1. Adopt items 1–5 as REQ-14 with AC-14.1 to AC-14.5; carry 6–9 and Jest support.
 > 2. Carry all nine to the next charter.
