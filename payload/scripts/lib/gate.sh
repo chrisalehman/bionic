@@ -614,8 +614,8 @@ _gate_store() {  # sets _GD and makes the store; rc 2, one line, when it cannot 
 # an admission believed from an ancestor (its own ask was judged; a nested run runs under it).
 #
 # REFUSED: exit 75 with one line, nothing filed and nothing run. RESIDUAL, NAMED: a suite started
-# bare, by no runner, never asks, and an agent's script reached through another interpreter
-# (python, node) carries no name and asks as the main thread.
+# bare, by no runner, never asks, and, outside bypass mode, an agent's script reached through another
+# interpreter (python, node) carries no name and asks as the main thread.
 _GATE_BUDGET_LINE=""
 _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_LINE set)
   local kind="$1" key="$2" agent="${BIONIC_GATE_AGENT:-}" sid="${CLAUDE_CODE_SESSION_ID:-}"
