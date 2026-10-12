@@ -2326,7 +2326,7 @@ ST_READY
 }
 
 # THE TURN END CALLS THE PERSON (epic-23 wave-33-workhorse, T11; REQ-2 AC-2.2, AC-2.5; D2). Every
-# open item on the person's ledger (lib/owed.sh) not yet sent is sent once, through the one sender
+# open item on the person's ledger (lib/owed.sh) not yet sent is sent at least once, through the one sender
 # (lib/notify.sh), carrying the line the run printed for its block; a later turn on the same open
 # item sends nothing. It rides the recorder below, and so runs BEFORE `hooks/stop.sh`'s re-entry
 # guard, for the reason the recorder does: after a refusal the Stop that actually ends the turn
