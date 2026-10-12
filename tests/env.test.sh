@@ -168,7 +168,8 @@ roster_copy_agrees() {  # <env.sh> <remove.sh> -> 0 when the two literals are by
 expect_true "remove.sh's RM_ENV_KEYS is byte-equal to env.sh's ENV_KEYS" \
   roster_copy_agrees "$ENV_SH" "$REMOVE_SH"
 DOCTORED_RM="$TMP/remove-three-names.sh"
-anchor -E "$REMOVE_SH" "^RM_ENV_KEYS='.* CLAUDE_CODE_DISABLE_AUTO_MEMORY" 1
+anchor insert payload/scripts/remove.sh "RM_ENV_KEYS='"
+anchor file payload/scripts/remove.sh " CLAUDE_CODE_DISABLE_AUTO_MEMORY'"
 sed "/^RM_ENV_KEYS=/s/ CLAUDE_CODE_DISABLE_AUTO_MEMORY//" "$REMOVE_SH" > "$DOCTORED_RM"
 expect_false "…and the comparison goes red on it" \
   roster_copy_agrees "$ENV_SH" "$DOCTORED_RM"

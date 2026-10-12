@@ -1142,7 +1142,7 @@ mv_tx typed
 # ---------- the mutation arm: user_said counting a tool's result ----------
 MV_MUT="$(mktemp -d "$TMPROOT/mv-mut.XXXXXX")"
 MV_NEEDLE='if .type == "user" and .isMeta != true and .isSidechain != true and (.origin.kind? // "") == "human" then .message.content | words'
-anchor "$SAID_LIB" "$MV_NEEDLE" 1
+anchor file payload/scripts/lib/said.sh 'if .type == "user" and .isMeta != true and .isSidechain != true and (.origin.kind? // "") == "human" then .message.content | words'
 MV_N="$MV_NEEDLE" awk 'BEGIN { n = ENVIRON["MV_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if .type == \"user\" then .message.content | tostring" substr($0, i + length(n)); print }' \
   "$SAID_LIB" > "$MV_MUT/said.sh"
 expect_eq "MOVE-mut0 the mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MV_MUT/said.sh" | /usr/bin/grep -c '^>')"
@@ -1153,8 +1153,8 @@ expect_eq "MOVE-mut2 …and counts the tool's result, so MOVE-said-tool-result g
 # ---------- the mutation arms of the two rules (T66): each rule's line replaced, on a copy ----------
 MV_BNEEDLE='def bounded($w; $p):'
 MV_LNEEDLE='def enough($w; $p):'
-anchor "$SAID_LIB" "$MV_BNEEDLE" 1
-anchor "$SAID_LIB" "$MV_LNEEDLE" 1
+anchor file payload/scripts/lib/said.sh 'def bounded($w; $p):'
+anchor file payload/scripts/lib/said.sh 'def enough($w; $p):'
 mv_mutline() {  # <needle> <replacement line> <out> -> the library with the one line holding <needle> replaced
   MV_N="$1" MV_R="$2" awk 'BEGIN { n = ENVIRON["MV_N"] } index($0, n) { print ENVIRON["MV_R"]; next } { print }' "$SAID_LIB" > "$3"
 }
@@ -1823,7 +1823,7 @@ expect_contains "PASS-6g …and the fix" "write the pass to a new record path" "
 
 # ---------- the mutation arms: the guard removed, and the guard refusing every second registration ----------
 PK_ANCHOR='PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"'
-anchor "$POKER" "$PK_ANCHOR" 1
+anchor file hooks/session-poker.sh 'PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"'
 PK_MUT="$TMPROOT/poker-pass-mut"; mkdir -p "$PK_MUT/hooks" "$PK_MUT/scripts" "$PK_MUT/b/hooks" "$PK_MUT/b/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PK_MUT/scripts/lib"
 for _pk_f in "$(dirname "$POKER")"/*; do  # the verb's siblings (the dry commit's wall among them), by link
@@ -2092,7 +2092,7 @@ s/^        cat "\$TICK_BUF" 2>\/dev\/null$/        cat "$TICK_BUF" 2>\/dev\/null
 # BIONIC_LIB finds it, beside the poker doctored as before (without its arm, only the gate's state can say killed).
 RI_LIB="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)"
 RI_GNEEDLE='if _gate_num "$_R_rc" && [ "$_G_NUM" -gt 128 ]; then _R_state=killed; fi'
-anchor "$RI_LIB/gate.sh" "$RI_GNEEDLE" 1
+anchor file payload/scripts/lib/gate.sh 'if _gate_num "$_R_rc" && [ "$_G_NUM" -gt 128 ]; then _R_state=killed; fi'
 rm -f "$RD_MUT/kill137/scripts/lib"; cp -R "$RI_LIB" "$RD_MUT/kill137/scripts/lib"
 RI_N="$RI_GNEEDLE" RI_R='if [ "$_R_rc" = 137 ]; then _R_state=killed; fi' awk 'BEGIN { n = ENVIRON["RI_N"]; r = ENVIRON["RI_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' \
   "$RI_LIB/gate.sh" > "$RD_MUT/kill137/scripts/lib/gate.sh"
@@ -2210,7 +2210,7 @@ deferred: '"$PM_R"'#1 S1 on "x"
 
 # ---------- the mutation arm: moved: left out of the predicate ----------
 PM_NEEDLE='/^(deferred|moved):[ \t]/'
-anchor "$SEV_LIB" "$PM_NEEDLE" 1
+anchor file payload/scripts/lib/proof.sh '/^(deferred|moved):[ \t]/'
 PM_MUT="$TMPROOT/poker-moved-mut"; rm -rf "$PM_MUT"; mkdir -p "$PM_MUT/hooks"
 cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PM_MUT/scripts-lib" && mkdir -p "$PM_MUT/scripts" && mv "$PM_MUT/scripts-lib" "$PM_MUT/scripts/lib"
 for _pm_f in "$(dirname "$POKER")"/*; do [ "${_pm_f##*/}" = session-poker.sh ] || ln -s "$_pm_f" "$PM_MUT/hooks/${_pm_f##*/}"; done
@@ -2273,7 +2273,7 @@ MP_HROOT="$(mktemp -d "$TMPROOT/mp-hook.XXXXXX")"; mkdir -p "$MP_HROOT/hooks" "$
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MP_HROOT/scripts/lib"
 for _sib in "$(dirname "$POKER")"/*; do _sibn="$(basename "$_sib")"; [ "$_sibn" = "session-poker.sh" ] || ln -s "$_sib" "$MP_HROOT/hooks/$_sibn"; done
 MP_HOOK_NEEDLE='SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}"'
-anchor "$POKER" "$MP_HOOK_NEEDLE" 1
+anchor file hooks/session-poker.sh 'SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}"'
 MP_N="$MP_HOOK_NEEDLE" awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) ":" substr($0, i + length(n)); print }' \
   "$POKER" > "$MP_HROOT/hooks/session-poker.sh"
 expect_eq "MP-fillmut0 the hook mutant differs from the hook in one line" "1" "$(diff "$POKER" "$MP_HROOT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
@@ -2301,7 +2301,7 @@ expect_eq "MP-p1 §MOVE-PASTED AC-8.9 the words pasted inside a typed prompt are
 expect_eq "MP-p2 …the words typed before the block are found (rc 0)" "0" "$(mv_said 'what do you make of this?')"
 expect_eq "MP-p3 …and the words typed after it are found (rc 0)" "0" "$(mv_said 'and then tell me which you would pick')"
 MP_CUT='</pasted_content\\b[^>]*>'
-anchor "$SAID_LIB" "$MP_CUT" 1
+anchor file payload/scripts/lib/said.sh '</pasted_content\\b[^>]*>'
 mp_sub "$MP_CUT" '</pasted_content>' "$MP_MUT/said-bare.sh"
 expect_eq "MP-pmut0 the bare-close mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MP_MUT/said-bare.sh" | /usr/bin/grep -c '^>')"
 expect_eq "MP-pmut1 the mutant runs: it finds the words typed before the block" "0" "$(mv_said 'what do you make of this?' "$MP_MUT/said-bare.sh")"
@@ -2322,7 +2322,7 @@ expect_eq "MP-w7 …positive: 'he said defer' is found (rc 0)" "0" "$(mv_said 'h
 expect_eq "MP-w8 the class is spelled once in the library (it carries one \\x27)" "1" \
   "$(/usr/bin/grep -c 'x27' "$SAID_LIB" | tr -d ' ')"
 MP_WC='def wc:'
-anchor "$SAID_LIB" "$MP_WC" 1
+anchor file payload/scripts/lib/said.sh 'def wc:'
 mv_mutline "$MP_WC" 'def wc: "[\\w\\x27-]";' "$MP_MUT/said-ascii.sh"
 expect_eq "MP-wmut0 the ASCII-only mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MP_MUT/said-ascii.sh" | /usr/bin/grep -c '^>')"
 mv_prompts 'don’t defer it now'
@@ -2365,7 +2365,7 @@ expect_regex "MP-m1 §MOVE-MIN the library names its minimum once, as a number" 
 expect_eq "MP-m2 …the verb's refusal text is made from that constant and spells no number of its own" "0|1" \
   "$(/usr/bin/grep -c 'at least three' "$POKER" | tr -d ' ')|$(/usr/bin/grep -c 'at least \$SAID_MIN_WORDS' "$POKER" | tr -d ' ')"
 SAID_MIN_NEEDLE='SAID_MIN_WORDS='
-anchor "$SAID_LIB" "$SAID_MIN_NEEDLE" 1
+anchor file payload/scripts/lib/said.sh 'SAID_MIN_WORDS='
 mv_mutline "$SAID_MIN_NEEDLE" 'SAID_MIN_WORDS=4' "$MP_MUT/said-four.sh"
 mv_prompts 'please defer it now ok'
 expect_eq "MP-m3 the library's rule is the constant: three words are enough at 3 (rc 0)" "0" "$(mv_said 'defer it now')"
@@ -2488,7 +2488,7 @@ sf_usage "SF-9g usage: a step that is not one" 12 head=0123abc
 # reads it: the same `step-field 5 pass=` writes a block with two pass: lines, so SF-2's one line goes red.
 SFM_NEEDLE='if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
 SFM_UNITS="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/units.sh"
-anchor "$SFM_UNITS" "$SFM_NEEDLE" 1
+anchor file payload/scripts/lib/units.sh 'if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
 SFM_DIR="$TMPROOT/poker-sf-mut"; rm -rf "$SFM_DIR"; mkdir -p "$SFM_DIR/hooks" "$SFM_DIR/scripts"
 cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$SFM_DIR/scripts/lib"
 for _sf_f in "$(dirname "$POKER")"/*; do [ "${_sf_f##*/}" = session-poker.sh ] || ln -s "$_sf_f" "$SFM_DIR/hooks/${_sf_f##*/}"; done
@@ -2747,7 +2747,9 @@ expect_eq "FD-m0c …and an unattested record is refused" "1" "$(fd_attest "$S46
 FD_M1='[ -z "$fl$fa" ] || { _proof_floor_declared'
 FD_M2='[ "$rc" = 0 ] || { printf '"'"'the regression in'
 FD_M3='[ -n "$who" ] || { printf'
-anchor "$S46_LIB" "$FD_M1" 1; anchor "$S46_LIB" "$FD_M2" 1; anchor "$S46_LIB" "$FD_M3" 1
+anchor file payload/scripts/lib/proof.sh '[ -z "$fl$fa" ] || { _proof_floor_declared'
+anchor file payload/scripts/lib/proof.sh '[ "$rc" = 0 ] || { printf '"'"'the regression in'
+anchor file payload/scripts/lib/proof.sh '[ -n "$who" ] || { printf'
 /usr/bin/grep -vF -- "$FD_M1" "$S46_LIB" > "$FD_MUT/no-arm.sh"
 /usr/bin/grep -vF -- "$FD_M2" "$S46_LIB" > "$FD_MUT/no-rc.sh"
 /usr/bin/grep -vF -- "$FD_M3" "$S46_LIB" > "$FD_MUT/no-by.sh"
@@ -2925,7 +2927,7 @@ cp "$TMPROOT/mr-keep" "$PMR"
 # the same render on the same plan writes AC-2.2 without the key, so MR-3b goes red under it.
 MRM_NEEDLE='T4)          echo "user-confirmed evidence" ;;'
 MRM_WALLS="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)/walls.sh"
-anchor "$MRM_WALLS" "$MRM_NEEDLE" 1
+anchor file payload/scripts/lib/walls.sh 'T4)          echo "user-confirmed evidence" ;;'
 MRM_DIR="$TMPROOT/poker-mr-mut"; rm -rf "$MRM_DIR"; mkdir -p "$MRM_DIR/hooks" "$MRM_DIR/scripts"
 cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MRM_DIR/scripts/lib"
 for _mr_f in "$(dirname "$POKER")"/*; do [ "${_mr_f##*/}" = session-poker.sh ] || ln -s "$_mr_f" "$MRM_DIR/hooks/${_mr_f##*/}"; done
