@@ -3400,11 +3400,11 @@ expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'cove
 printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$S72F" > "$S72REC/floor-part.txt"
 s72_add floor-part.txt
 s42_unchanged "72b a run of one suite at F, every later commit proved" 1 "$S72P"
-expect_contains "72b2 AC-4.1 …is not a whole run" "is not a whole run (1 passed and 0 void of 4 suites at its head)" "$OUT"
+expect_contains "72b2 AC-4.1 …is not a whole run" "is not a whole run (1 passed of 4 suites at its head)" "$OUT"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\n' "$S72C2" > "$S72REC/floor-part-H.txt"
 s72_add floor-part-H.txt
 s42_unchanged "72b3 a run of two suites at the working head itself" 1 "$S72P"
-expect_contains "72b4 …is not a whole run either" "is not a whole run (2 passed and 0 void of 4 suites at its head)" "$OUT"
+expect_contains "72b4 …is not a whole run either" "is not a whole run (2 passed of 4 suites at its head)" "$OUT"
 
 # ---------- (c) a fix row after the full run: its red suite and its own, each run green ----------
 S72C3="$(s72_land T8 lib/one.sh d.test.sh,a.test.sh)"

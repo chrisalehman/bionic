@@ -10,25 +10,18 @@
 #                and answers its code; it asks the gate first and ends its request on every end,
 #                a signal included; a shim killed with SIGKILL leaves a request the gate counts
 #                killed, and the next ask proceeds; `--kill-after` stops a command past its limit
-#                with exit 124; a store that cannot be written runs an ordinary command
-#                unadmitted at once and refuses a whole-machine run at once (69); several words
-#                after `--` are refused, never re-parsed.
+#                with exit 124; a store that cannot be written runs the command unadmitted
+#                at once; several words after `--` are refused, never re-parsed.
 #   §LIVE        lib/slots.sh as T12 left it: the liveness rule (a pid that lives and started
 #                when the record says; a reused pid does not hold) and the directory claim the
 #                gate's lock is built on, exactly one winner per race.
-#   §QUIET       a whole-machine run waits at the gate while another run is admitted, holds
-#                every other ask off while it runs, does not start above the settled load, and
-#                prints `void` (retrying twice under the same admission, then exit 75) when the
-#                load rose during the run; one ceiling covers the settle and every retry; the
-#                run's own load is not a disturbance; a failure stays a failure.
 #   §STAMP       a `stamp/v1` line goes into the git directory of the tree the command ran
 #                in, with the head and dirty count read BEFORE the command and its rc after;
 #                the tree's own `.bionic` link is not counted dirty; `cmd=` is one line with
 #                no `|`; outside a git tree, no stamp and no error; every end stamps, a wait at
 #                the gate that ran out (75) included.
 #   §NESTED-ENV  the command sees BIONIC_GATE_ADMIT naming its request; a shim inside a shim is
-#                believed and never waits on its parent; BIONIC_SLOT_HELD=1 skips nothing;
-#                `BIONIC_QUIET=1` is `--quiet`.
+#                believed and never waits on its parent; BIONIC_SLOT_HELD=1 skips nothing.
 #   §SHELL       `--shell <path>` runs the command the way the harness runs a Bash call
 #                (`<path> -c "eval '<cmd>'"`), so its output, diagnostics and exit code are
 #                the harness's own; the stamp's `cmd=` stays the command as given (T7).
@@ -42,6 +35,11 @@
 # gate's: tests/gate.test.sh §NUMBER, §TWO, §ANCESTOR and §WRAP. §BOOK became §RUN (B2 now waits
 # at the gate), and its B5 race and B10 reused pid became §LIVE's L2 and L1.
 #
+# REMOVED AT WAVE-35 T2 (D11, AC-2.1), with `--quiet`, `BIONIC_QUIET` and the whole-machine timing
+# check they pinned: §QUIET (Q1-Q10), B12.7-B12.10 (the 69 refusal), S6 (a void run's stamp) and
+# N4 (BIONIC_QUIET=1 is --quiet). Nothing passes or fails by the clock; tests/runner-width.test.sh
+# §NO-VOID proves `--quiet` refused and `BIONIC_QUIET` read by nobody.
+#
 # HERMETIC. No row touches the real store: every call sets BIONIC_GATE_DIR to a scratch
 # directory, pins the memory reading low and the processor idle (a row that wants a full
 # machine pins the memory over the share instead), and reads the load from BIONIC_LOAD_NOW_FILE,
@@ -53,8 +51,8 @@
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The store's readings and the load are SYNTHESIZED, by design: the claims are about how
 #     the shim and the gate interact, and a real reading would make them depend on what the
-#     machine is doing. resources_settled's reading of the real machine is
-#     tests/resources.test.sh's to assert, not this suite's.
+#     machine is doing. The readers of the real machine are tests/resources.test.sh's to
+#     assert, not this suite's.
 #   * Holder pids are REAL processes: a booked command that is still running, a planted
 #     request held by a live `sleep`, or a pid taken from a process that has exited. Nothing
 #     fakes liveness.
@@ -85,7 +83,7 @@ SLOTS="$REPO_ROOT/payload/scripts/lib/slots.sh"
 # A run of this suite may itself be inside an admitted command (the Bash wall wraps suites in
 # the shim, and the runner asks for each suite), and the rows below measure a caller that
 # holds nothing.
-unset BIONIC_GATE_ADMIT BIONIC_GATE_AGENT BIONIC_SLOT_HELD BIONIC_QUIET BIONIC_NOW_FILE \
+unset BIONIC_GATE_ADMIT BIONIC_GATE_AGENT BIONIC_SLOT_HELD BIONIC_NOW_FILE \
   BIONIC_NOW_EPOCH GIT_DIR GIT_WORK_TREE
 
 for _subj in "$BOOKED" "$SLOTS"; do
@@ -132,7 +130,7 @@ newrow() {  # <name> — a fresh row directory, store and load file; resets the 
   BUSY=0  # busy cores the processor reads (GE's 0); a row that needs a wait raises it
 }
 
-bk() {  # booked.sh with this row's store, readings, settle ceiling and load; cwd is the row
+bk() {  # booked.sh with this row's store, readings and detached-ask ceiling; cwd is the row
   ( cd "$ROW" || exit 1
     env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_GATE_POLL="$POLL" BIONIC_PROBE_USED_PCT="$USED" \
         BIONIC_PROBE_BUSY_CORES="$BUSY" BIONIC_SETTLE_MAX_WAIT="$MW" BIONIC_LOAD_NOW_FILE="$LOADF" bash "$BK_SCRIPT" "$@" )
@@ -293,9 +291,7 @@ expect_contains "B8.2 …that says what the usage is" "--" "$B8_OUT"
 expect_false "B8.3 …and runs nothing" test -e "$ROW/u.ran"
 
 # B12. A store that cannot be written (review 4 F5). The gate manages throughput, it is not a
-# guard: an ordinary run goes on UNADMITTED at once, with one line naming the store. A
-# whole-machine run does not run, because a timing result taken without the machine is
-# worth nothing: it refuses at once, naming the store.
+# guard: a run goes on UNADMITTED at once, with one line naming the store.
 newrow b12
 MW=6
 mkdir -p "$ST"; chmod 555 "$ST"
@@ -309,13 +305,6 @@ B12_LINE="$(printf '%s\n' "$B12_OUT" | grep -F "booked:" | grep -F "$ST")"
 expect_nonempty "B12.4 the shim's line names the store" "$B12_LINE"
 expect_contains "B12.5 …and says the command runs unadmitted" "unadmitted" "$B12_LINE"
 expect_eq "B12.6 …and it is the shim's only line about it" 1 "$(printf '%s\n' "$B12_OUT" | grep -F "booked:" | grep -c -F "$ST")"
-B12_T0=$SECONDS
-B12_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; B12_RC=$?
-B12_DT=$((SECONDS - B12_T0))
-expect_status "B12.7 a whole-machine run on the same store refuses (69)" 69 "$B12_RC"
-expect_false "B12.8 …and its command never ran" test -e "$ROW/q.ran"
-expect_true "B12.9 …at once (took ${B12_DT}s)" test "$B12_DT" -le 2
-expect_contains "B12.10 …naming the store" "$ST" "$B12_OUT"
 chmod 755 "$ST"
 
 # B13. Words after `--` are never re-parsed as shell (review 4 F6). The one meaning is one
@@ -431,165 +420,6 @@ touch -t 202001010000 "$ROW/fresh"
 expect_regex "L3.6 …the same claim aged past the orphan line is reclaimed (rc 0)" '^0 [0-9]+$' "$(l3_take "$ROW/fresh")"
 kill "$L3_LIVE" 2>/dev/null; wait "$L3_LIVE" 2>/dev/null
 
-# ═══════════════════════════════════════════════════════════════════ §QUIET
-section "QUIET — the whole machine: ask, hold, settle, re-read, void"
-
-# Q1. A whole-machine run waits at the gate while another run is admitted.
-newrow q1
-bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; Q1_A=$!
-wait_file "$ROW/a.started"
-bk --quiet -- "touch $ROW/q.started" > "$ROW/q.out" 2>&1 & BG="$BG $!"; Q1_Q=$!
-expect_true "Q1.1 the whole-machine run prints that it waits at the gate" wait_text "$ROW/q.out" "waits for its turn"
-expect_contains "Q1.2 …as a whole request" "(whole " "$(grep -m1 -F 'waits for its turn' "$ROW/q.out")"
-expect_false "Q1.3 …and has not started while the other run is admitted" test -e "$ROW/q.started"
-touch "$ROW/a.go"
-expect_true "Q1.4 it starts once the other run ends" wait_file "$ROW/q.started"
-wait "$Q1_Q"; Q1_RC=$?
-expect_status "Q1.5 …and exits with its command's code" 0 "$Q1_RC"
-wait "$Q1_A" 2>/dev/null
-
-# Q2. While the whole machine is held, a new ordinary ask waits.
-newrow q2
-bk --quiet -- "echo Q >> $ROW/order; $(gate q)" > "$ROW/q.out" 2>&1 & BG="$BG $!"; Q2_Q=$!
-wait_file "$ROW/q.started"
-bk -- "echo C >> $ROW/order; touch $ROW/c.started" > "$ROW/c.out" 2>&1 & BG="$BG $!"; Q2_C=$!
-Q2_WAITED=0; wait_text "$ROW/c.out" "waits for its turn" 5 && Q2_WAITED=1
-expect_eq "Q2.1 an ordinary ask during a whole-machine hold waits" 1 "$Q2_WAITED"
-expect_false "Q2.2 …and the ordinary command has not run while the hold runs" test -e "$ROW/c.started"
-touch "$ROW/q.go"
-wait_file "$ROW/c.started" 10
-expect_true "Q2.3 …then it runs" test -e "$ROW/c.started"
-expect_eq "Q2.4 …after the whole-machine command" "Q C" "$(tr '\n' ' ' < "$ROW/order" | sed 's/ $//')"
-wait "$Q2_Q" "$Q2_C" 2>/dev/null
-
-# Q3. It does not start above the settled load; it starts once the load settles. A load that
-# never settles within the ceiling gets the runner's answer: one run, void.
-newrow q3
-printf '99.0\n' > "$LOADF"; MW=2
-Q3_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q3_RC=$?
-expect_status "Q3.1 above the settled line the settle gives up at the ceiling, and the run is void (75)" \
-  75 "$Q3_RC"
-expect_true "Q3.2 …its command ran once, after the ceiling" test -e "$ROW/q.ran"
-expect_contains "Q3.3 …and says it was waiting for the load to settle" "settle" "$Q3_OUT"
-rm -f "$ROW/q.ran"
-MW=20
-( sleep 1; printf '0.00\n' > "$LOADF" ) >/dev/null 2>&1 & BG="$BG $!"
-Q3_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q3_RC=$?
-expect_status "Q3.4 once the load settles it runs" 0 "$Q3_RC"
-expect_true "Q3.5 …its command" test -e "$ROW/q.ran"
-expect_contains "Q3.6 …after noting the wait for the load" "settle" "$Q3_OUT"
-
-# Q4. A load that rose during the run voids it: `void`, settle, retry; twice, then exit 75.
-newrow q4
-Q4_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 &"
-Q4_OUT="$(bk --quiet -- "$Q4_CMD" 2>&1)"; Q4_RC=$?
-expect_status "Q4.1 a run voided every time exits 75, not the command's code" 75 "$Q4_RC"
-expect_regex "Q4.2 …printing void" '(^|[^a-z])void([^a-z]|$)' "$Q4_OUT"
-expect_eq "Q4.3 …after the first run and two retries" 3 "$(wc -l < "$ROW/runs" | tr -d ' ')"
-expect_eq "Q4.4 …all under one whole request, ended afterwards" "1 " "$(nreq) $(places)"
-# Once only: the second run is clean, so the shim answers with the command's own code.
-newrow q4b
-Q4B_CMD="if [ ! -f $ROW/runs ]; then printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & fi; echo run >> $ROW/runs; exit 4"
-Q4B_OUT="$(bk --quiet -- "$Q4B_CMD" 2>&1)"; Q4B_RC=$?
-expect_status "Q4.5 a run voided once and clean on retry exits with the command's code" 4 "$Q4B_RC"
-expect_eq "Q4.6 …having run twice" 2 "$(wc -l < "$ROW/runs" | tr -d ' ')"
-expect_regex "Q4.7 …and printed void for the first" '(^|[^a-z])void([^a-z]|$)' "$Q4B_OUT"
-
-# Q5. A whole-machine run nested in an ordinary admitted command is believed under the parent's
-# admission: it runs, takes no number, and still settles (the hold is not the whole machine).
-newrow q5
-Q5_OUT="$(bk -- "bash $BOOKED --quiet -- 'echo inner-ran'" 2>&1)"; Q5_RC=$?
-expect_status "Q5.1 a whole-machine run nested in a booked command completes" 0 "$Q5_RC"
-expect_contains "Q5.2 …running its command" "inner-ran" "$Q5_OUT"
-expect_eq "Q5.3 …under its parent's admission: one request in all" "1" "$(nreq)"
-
-# Q7. A whole-machine run inside a whole-machine hold already has the machine.
-newrow q7
-MW=5
-Q7_OUT="$(bk --quiet -- "bash $BOOKED --quiet -- 'echo nested-quiet'" 2>&1)"; Q7_RC=$?
-expect_status "Q7.1 a whole-machine run nested in one completes" 0 "$Q7_RC"
-expect_contains "Q7.2 …and runs" "nested-quiet" "$Q7_OUT"
-expect_eq "Q7.3 …taking no number of its own" "1" "$(nreq)"
-
-# Q8. One ceiling covers every wait of one call (review 4 F3): the wait at the gate, the settle
-# and every void retry share it, counted from the shim's start. The other run ends at half the
-# ceiling, so the wait always completes inside it and the two shapes stay apart: one ceiling
-# ends at 8 s, a fresh one per wait at 4 + 8 s.
-newrow q8
-MW=8
-bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; Q8_A=$!
-wait_file "$ROW/a.started"
-( sleep 4; touch "$ROW/a.go" ) >/dev/null 2>&1 & BG="$BG $!"
-printf '99.0\n' > "$LOADF"
-Q8_T0=$SECONDS
-Q8_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q8_RC=$?
-Q8_DT=$((SECONDS - Q8_T0))
-expect_status "Q8.1 a wait then a load that never settles gives up, and the one run is void (75)" 75 "$Q8_RC"
-expect_true "Q8.2 …running its command once" test -e "$ROW/q.ran"
-expect_contains "Q8.3 …after waiting at the gate" "waits for its turn" "$Q8_OUT"
-expect_true "Q8.4 …within one ceiling for both waits (took ${Q8_DT}s, ceiling ${MW}s)" \
-  test "$Q8_DT" -le $((MW + 2))
-wait "$Q8_A" 2>/dev/null
-# The void retries share it too: each run raises the load for 2.5 s, so a retry has to wait.
-newrow q8b
-MW=4
-Q8B_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 2.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 &"
-Q8B_T0=$SECONDS
-Q8B_OUT="$(bk --quiet -- "$Q8B_CMD" 2>&1)"; Q8B_RC=$?
-Q8B_DT=$((SECONDS - Q8B_T0))
-Q8B_RUNS="$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
-expect_regex "Q8.5 the command ran at least once" '^[1-9]' "${Q8B_RUNS:-0}"
-expect_true "Q8.6 …but the retries stopped at the ceiling: at most 2 runs (saw ${Q8B_RUNS:-0})" \
-  test "${Q8B_RUNS:-0}" -le 2
-expect_status "Q8.7 …and the result is void (75), never the command's own code" 75 "$Q8B_RC"
-expect_true "Q8.8 …within one ceiling (took ${Q8B_DT}s, ceiling ${MW}s)" test "$Q8B_DT" -le $((MW + 2))
-
-# Q9. The void check does not count the command's own load (review 4 F4). The command burns
-# CPU, then sets the load after the run to the settled line plus HALF of its own share of
-# the one-minute average (from its own `times`). A disturbance by others would have raised
-# it past its own share; this run's own load alone must not void it.
-newrow q9
-MW=4
-Q9_LINE="$( cd "$ROW" && . "$REPO_ROOT/payload/scripts/lib/resources.sh" && resources_settled_line "$(_res_cores)" )"
-expect_regex "Q9.1 the settled line is read" '^[0-9]+\.[0-9]+$' "$Q9_LINE"
-cat > "$ROW/burn.sh" <<'BURN'
-s=$SECONDS; while [ $((SECONDS - s)) -lt 2 ]; do :; done
-w=$((SECONDS - s)); times > "$1/t"
-echo run >> "$1/runs"
-awk -v line="$2" -v w="$w" '
-  function sec(x, a) { sub(/s$/, "", x); gsub(",", ".", x); split(x, a, "m"); return a[1] * 60 + a[2] }
-  NR == 1 { cpu = sec($1) + sec($2); own = (cpu / w) * (1 - exp(-w / 60)); printf "%.6f\n", line + own / 2 }
-' "$1/t" > "$1/load.next"
-cat "$1/load.next" > "$3"
-BURN
-Q9_OUT="$(bk --quiet -- "bash $ROW/burn.sh $ROW $Q9_LINE $LOADF" 2>&1)"; Q9_RC=$?
-Q9_AFTER="$(cat "$ROW/load.next" 2>/dev/null)"
-expect_true "Q9.2 the load after the run is above the settled line (${Q9_AFTER:-?} > $Q9_LINE)" \
-  awk -v a="${Q9_AFTER:-0}" -v l="$Q9_LINE" 'BEGIN { exit !(a + 0 > l + 0) }'
-expect_status "Q9.3 …yet the run is not void: its own load is not a disturbance" 0 "$Q9_RC"
-expect_eq "Q9.4 …and it ran once" 1 "$(wc -l < "$ROW/runs" | tr -d ' ')"
-expect_absent "Q9.5 …with no void line" "void" "$Q9_OUT"
-
-# Q10. A FAILURE STAYS A FAILURE WHEN IT IS ALSO VOID (review 12 F2, A-T50.1; the runner's rule
-# since T43). 75 is "try again later", which is what a disturbed PASS means (Q4.1, Q8.7). Over a
-# failing run it would hide the failure's own code behind a reason to re-run; so the code is
-# the command's, and the void line is still printed.
-newrow q10
-Q10_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & exit 3"
-Q10_OUT="$(bk --quiet -- "$Q10_CMD" 2>&1)"; Q10_RC=$?
-expect_status "Q10.1 a failing run voided every time exits with its own code (3), not 75" 3 "$Q10_RC"
-expect_contains "Q10.2 …and still says it was void" "booked: void — the load rose above" "$Q10_OUT"
-expect_eq "Q10.3 …after the first run and two retries, as a passing void does (Q4.3)" 3 \
-  "$(wc -l < "$ROW/runs" | tr -d ' ')"
-expect_eq "Q10.4 …and its request was ended afterwards" "" "$(places)"
-# The other void end: the ceiling runs out before a retry can start (Q8's second shape).
-newrow q10b
-MW=4
-Q10B_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 2.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & exit 3"
-Q10B_OUT="$(bk --quiet -- "$Q10B_CMD" 2>&1)"; Q10B_RC=$?
-expect_contains "Q10.5 the retries ran out of ceiling" "ran out before a retry could start" "$Q10B_OUT"
-expect_status "Q10.6 …and the failing run keeps its own code (3), not 75 (beside Q8.7's 75 for a pass)" 3 "$Q10B_RC"
-
 # ═══════════════════════════════════════════════════════════════════ §STAMP
 section "STAMP — stamp/v1 in the tree's own git dir: head and dirty before, rc after"
 
@@ -654,24 +484,6 @@ expect_ne "S5.1 the worktree has a git dir of its own" "$S5_MAIN_STAMPS" "$S5_WT
 expect_regex "S5.2 the stamp lands in the worktree's git dir with its head" \
   "head=$(git -C "$ROW/wt" rev-parse HEAD)\\|" "$(tail -1 "$S5_WT_STAMPS" 2>/dev/null)"
 expect_false "S5.3 …and not in the main checkout's" test -e "$S5_MAIN_STAMPS"
-
-# S6. A voided timing check is stamped with the void code, so it never reads as green.
-newrow s6
-mkrepo "$ROW/repo"
-( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
-    BIONIC_LOAD_NOW_FILE="$LOADF" \
-    bash "$BOOKED" --quiet -- "printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 &" ) \
-  >/dev/null 2>&1; S6_RC=$?
-expect_status "S6.1 the voided run exits 75" 75 "$S6_RC"
-expect_regex "S6.2 …and its stamp carries rc=75" '\|rc=75\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
-# A voided run that FAILED is stamped with its own code (review 12 F2, A-T50.1): still red, and
-# red for its own reason. The stamp has no field for the void, and its shape does not change.
-( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
-    BIONIC_LOAD_NOW_FILE="$LOADF" \
-    bash "$BOOKED" --quiet -- "printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & exit 3" ) \
-  >/dev/null 2>&1; S6_RC=$?
-expect_status "S6.3 a voided run that failed exits with its own code (3)" 3 "$S6_RC"
-expect_regex "S6.4 …and its stamp carries rc=3, not rc=75" '\|rc=3\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
 
 # S7. The tree's own `.bionic` link is not dirt. With no ignore entry git lists it as
 # `?? .bionic`; the stamp skips exactly that line when `.bionic` is a symlink, and counts
@@ -880,17 +692,6 @@ expect_status "N3.1 a booked command nested in one completes" 0 "$N3_RC"
 expect_eq "N3.2 …at once, without waiting" "inner" "$N3_OUT"
 expect_eq "N3.3 …and took no number of its own" "1" "$(nreq)"
 
-# N4. BIONIC_QUIET=1 in the environment is --quiet.
-newrow n4
-printf '99.0\n' > "$LOADF"; MW=1
-N4_OUT="$( cd "$ROW" && env "${GE[@]}" BIONIC_QUIET=1 BIONIC_GATE_DIR="$ST" BIONIC_SETTLE_MAX_WAIT=1 \
-  BIONIC_LOAD_NOW_FILE="$LOADF" bash "$BOOKED" -- "touch $ROW/q.ran" 2>&1)"; N4_RC=$?
-expect_status "N4.1 BIONIC_QUIET=1 waits for a settled load like --quiet (gives up, void: 75)" 75 "$N4_RC"
-expect_contains "N4.2 …saying the load never settled" "never settled" "$N4_OUT"
-N4_OUT="$(bk -- "touch $ROW/plain.ran" 2>&1)"; N4_RC=$?
-expect_status "N4.3 without it, the same load does not hold an ordinary run" 0 "$N4_RC"
-expect_true "N4.4 …which runs" test -e "$ROW/plain.ran"
-
 # ════════════════════════════════════════════════════════════════════ §SHELL
 section "SHELL — --shell runs the command the way the harness does; cmd= stays the original"
 #
@@ -977,13 +778,13 @@ expect_contains "K1.5 …and that the fix is a subagent, not a longer timeout" "
 expect_eq "K1.6 …and it is the only line: no job notice from the shell" "1" \
   "$(printf '%s\n' "$K1_OUT" | grep -c .)"
 
-# K2. --kill-after composes with --shell and --quiet, in the order the wall writes them.
+# K2. --kill-after composes with --shell, in the order the wall writes them (--quiet retired, wave-35 T2).
 newrow k2
-K2_OUT="$(bk --shell "$H_SH" --quiet --kill-after 1 -- 'sleep 20; echo never' 2>&1)"; K2_RC=$?
-expect_status "K2.1 --shell --quiet --kill-after: exit 124" 124 "$K2_RC"
+K2_OUT="$(bk --shell "$H_SH" --kill-after 1 -- 'sleep 20; echo never' 2>&1)"; K2_RC=$?
+expect_status "K2.1 --shell --kill-after: exit 124" 124 "$K2_RC"
 expect_contains "K2.2 …with the short-limit line" "over the short limit" "$K2_OUT"
 expect_absent "K2.3 …and the command did not finish" "never" "$K2_OUT"
-K2_OUT="$(bk --shell "$H_SH" --quiet --kill-after 5 -- 'echo inside; exit 4' 2>&1)"; K2_RC=$?
+K2_OUT="$(bk --shell "$H_SH" --kill-after 5 -- 'echo inside; exit 4' 2>&1)"; K2_RC=$?
 expect_status "K2.4 inside the limit the command's own code passes through" 4 "$K2_RC"
 expect_contains "K2.5 …with its output" "inside" "$K2_OUT"
 
