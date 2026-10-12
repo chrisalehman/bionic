@@ -708,7 +708,7 @@ expect_eq "(r6j) …while the same tree, its row naming a path and a bare name, 
 RM7="$(ll_world)"; HM7="$(ll_head "$RM7")"
 ll_wide "$RM7" 'a.test.sh b.test.sh'
 ll_redsuite "$RM7" T1 b
-LL_MUTANT='s/_line_current_row /false /' LL_MUTANT_FN=line_ready ll_drive "$RM7" T1 "$WORLD_ROOT/m7-T1.out"
+LL_MUTANT='s/_line_current_row /false /' LL_MUTANT_FN=line_row_writer ll_drive "$RM7" T1 "$WORLD_ROOT/m7-T1.out"
 ll_wait_file "$WORLD_ROOT/m7-T1.out.rc" 300
 expect_eq "(r6em-pre) the mutant ran: the row entered the line, proved on a.test.sh alone" "a.test.sh a.test.sh:green" \
   "$(ll_field "$(ll_ev "$RM7" ready)" suites) $(ll_verdicts "$RM7")"
