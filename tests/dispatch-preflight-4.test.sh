@@ -3001,9 +3001,13 @@ rc_repo() {  # <tag> -> REPO, attested, bound to the fixture wave
 rc_rows() { roster_rows "$(roster_path "$REPO" "$SID_A")"; }
 # rc_plant <root> <plain|unbuilt|slow> -> the path of a copy of the hook beside a library whose roster.sh
 # is the shipped one with `roster_row` replaced: unbuilt returns 2 (the row does not build); slow waits
-# two seconds past the hook's own DP_DEADLINE_S (read from the hook, wave-30 T35) and then builds the
+# two seconds past the copy's DP_DEADLINE_S (RC_DEADLINE, below) and then builds the
 # real row, so a wall with no deadline admits it with a row and a wall with one refuses it with none.
-RC_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GATE" | head -1)"
+# The slow copy's deadline is shortened to RC_DEADLINE (wave-34 T12, D20): RC5 waits that, not the shipped
+# one, so one drive costs RC_DEADLINE + 2 s instead of the shipped deadline + 2. Only the scratch copy is
+# edited; RC6 reads the shipped file, so the shipped constant is still the one held under the registration.
+RC_SHIPPED_DEADLINE="$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$GATE" | head -1)"
+RC_DEADLINE=8
 rc_plant() {
   local root="$1" mode="$2" lib f
   lib="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
@@ -3015,11 +3019,15 @@ rc_plant() {
   cp "$lib/roster.sh" "$root/scripts/lib/roster.sh"
   case "$mode" in
     unbuilt) printf '%s\n' 'roster_row() { return 2; }' >> "$root/scripts/lib/roster.sh" ;;
-    # the slow roster_row sleeps past the real DP_DEADLINE_S; the deadline is a constant in the hook (no environment knob pins it), RC5 pins the shipped value, and no wait can observe a deadline sooner than it fires
+    # the slow roster_row sleeps past the copy's DP_DEADLINE_S (RC_DEADLINE, set in the copy below); the deadline is a constant in the hook (no environment knob pins it), and no wait can observe a deadline sooner than it fires
     slow)    printf '%s\n' '_rc_f="$(declare -f roster_row)"; eval "_rc_orig_${_rc_f}"' \
                            "roster_row() { sleep $(( ${RC_DEADLINE:-12} + 2 )); _rc_orig_roster_row \"\$@\"; }" >> "$root/scripts/lib/roster.sh" ;;
   esac
-  cp "$GATE" "$root/hooks/dispatch-preflight.sh"
+  if [ "$mode" = slow ]; then
+    sed "s/^DP_DEADLINE_S=[0-9][0-9]*/DP_DEADLINE_S=${RC_DEADLINE}/" "$GATE" > "$root/hooks/dispatch-preflight.sh"
+  else
+    cp "$GATE" "$root/hooks/dispatch-preflight.sh"
+  fi
   printf '%s' "$root/hooks/dispatch-preflight.sh"
 }
 RC_SAVED_GATE="$GATE"
@@ -3080,6 +3088,13 @@ expect_status "RC4 …and the decoy was not appended to" "untouched" "$(cat "$DE
 
 # --- RC5: THE DEADLINE. The wall waits two seconds past its deadline inside the row's build.
 RC5_GATE="$(rc_plant "$RC_ROOT/slow" slow)"
+# the copy carries the short deadline and the shipped hook is not the one edited (the sed took, and only in the copy)
+expect_eq "RC5 precondition: the slow copy's deadline is the short one" "$RC_DEADLINE" \
+  "$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$RC5_GATE" | head -1)"
+expect_eq "RC5 …and the shipped hook still names its own" "$RC_SHIPPED_DEADLINE" \
+  "$(sed -n 's/^DP_DEADLINE_S=\([0-9][0-9]*\).*/\1/p' "$RC_SAVED_GATE" | head -1)"
+expect_true "RC5 …and the copy differs from the shipped hook in that line alone" \
+  test "$(diff "$RC_SAVED_GATE" "$RC5_GATE" | /usr/bin/grep -c '^[<>]')" -eq 2
 rc_repo c5
 GATE="$RC5_GATE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
@@ -3090,6 +3105,7 @@ expect_eq "RC5 …on its own line" "$RC5_LINE" "$(printf '%s\n' "$GATE_ERR" | /u
 expect_eq "RC5 …which is 68 columns" "68" "$(bionic_cols "$RC5_LINE")"
 expect_eq "RC5 …and no row was journalled for the refused launch" "0" "$(rc_rows)"
 expect_true "RC5 …after the deadline, not before it (waited at least $(( ${RC_DEADLINE:-12} - 1 )) s)" test "$GATE_TIME" -ge $(( ${RC_DEADLINE:-12} - 1 ))
+expect_true "RC5 …and sooner than the shipped deadline of ${RC_SHIPPED_DEADLINE:-?} s (took ${GATE_TIME} s)" test "$GATE_TIME" -lt "${RC_SHIPPED_DEADLINE:-0}"
 expect_contains "RC5 …the detail names the roster the row would have gone to" "roster-${SID_A}.state" "$GATE_VERR"
 
 # --- RC6: THE DEADLINE IS UNDER THE REGISTRATION. Both numbers are read, not transcribed.
