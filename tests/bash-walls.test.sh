@@ -42,7 +42,7 @@
 # Usage: bash tests/bash-walls.test.sh
 
 # SPLIT AT WAVE-30 T9 (D8): the §EG-DERIVE sections carry wall-clock bounds, so they moved to
-# tests/bash-walls-egd.test.sh, which is `# runner: solo`. The helpers both suites read live in
+# tests/bash-walls-egd.test.sh (it ran solo until wave-35 T2 retired the marker, D11). The helpers both suites read live in
 # tests/bash-walls.prelude.sh, sourced below before the framework.
 set -uo pipefail
 

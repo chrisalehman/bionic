@@ -400,8 +400,9 @@ units_rows() {
 #     "nothing": build `approval:plan` · verify and test `approval:plan, head` · review
 #     `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor,
 #     proof:review, head` · close `merge` (the integrate row's merge) · prototype `approval:plan`.
-#     A doc row at Step 7 or later is the release and names an `approval:` read; one that names
-#     none reads `approval:release` besides (`units_validate` refuses it; wave-26 T62, K2-F3).
+#     A doc row at Step 7 or later is the release, ready at its default like any doc row; the
+#     integrate row of a plan that carries one reads `approval:release` besides whatever its cell
+#     says (wave-35 T5, D13; through wave-34 the doc row read it, wave-26 T62, K2-F3).
 #     Its `deps` cell may carry `ext:<slug>` and nothing else (`units_validate` refuses an id).
 #   - A TABLE WITHOUT ONE. Each `deps` id reads as "wait for that task to land", exactly as
 #     through 1.10, and no kind default applies: a plan written before the column schedules as
@@ -470,7 +471,7 @@ units_rows() {
 # <step> STILL DECIDES THE GATE ACTS (wave-20 Δ6, T10b). A row of kind `integrate` or `close`,
 # or — in a table WITHOUT the `reads` column — a `doc` row at Step 7 or later (the release), is
 # ready only once <step> has reached its own step. In a table with the column a doc row waits for
-# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). Any <step> that is not a
+# its reads like any row (wave-26 T13; D3, A-T13.1), and the release approval is the merge's read (wave-35 T5). Any <step> that is not a
 # step number is a caller fault and exits 2; no table exits 1.
 #
 # ROWS OPEN ON THE ROSTER ARE NOT READY (D9). The launch recorder moves a launched row to
@@ -937,15 +938,21 @@ units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 # only by a landed or dropped row satisfies nothing either, so it is not one of them (T52; review
 # 14 N4). The match is exact, case included, as the readiness program keys it. `plan` is a read
 # like any other here.
+# An open integrate row in a plan that carries a release reads `release` without its cell saying so
+# (wave-35 T5; D13), so the name is listed whenever the readiness program would wait on it.
 units_approval_names() {
   units_rows "${1:-}" 2>/dev/null | awk -F'\t' '{
-    s = tolower($10); if (s != "pending" && s != "active") next
+    s = tolower($10)
+    if ($3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && s != "dropped") hasrel = 1
+    if (s != "pending" && s != "active") next
+    if ($3 == "integrate") openint = 1
     m = split($13, a, ",")
     for (k = 1; k <= m; k++) {
       t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t)
       if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) print substr(t, 10)
     }
-  }' | sort -u
+  }
+  END { if (hasrel && openint) print "release" }' | sort -u
 }
 
 # _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
@@ -1532,8 +1539,8 @@ _units_sched_awk() {
     # act held for its step, 0 otherwise. A ROW CARRIES A NUMERIC STEP, and that is all the
     # step still decides for a work row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b):
     # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW WAITS FOR
-    # ITS READS (wave-26 T13; D3): in a table with the reads column the release reads
-    # approval:release and nothing about it is a step. A table without the column has no approval
+    # ITS READS (wave-26 T13; D3): in a table with the reads column nothing about the release is a
+    # step, and its approval is read by the integrate row (wave-35 T5). A table without the column has no approval
     # to read, so its Step-7 doc row keeps the hold (A-T13.1).
     function rowheld(i,   gate) {
       if (stp[i] !~ /^[0-9]+$/) return 2
@@ -1545,6 +1552,9 @@ _units_sched_awk() {
       satisfied = "landed"
       floorst = ENVIRON["_UNITS_FLOOR_ST"]
       factsst = ENVIRON["_UNITS_FACTS_ST"]
+      # A PLAN CARRIES A RELEASE when a doc row at Step 7 or later is not dropped (wave-35 T5; A-T5-1).
+      hasrel = 0
+      for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && st[i] != "dropped") hasrel = 1
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
         # taken off and remembered; code[] and docs[] say which side of the record it writes.
@@ -1562,11 +1572,13 @@ _units_sched_awk() {
         r = rd[i]
         if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i])
         if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
-        # THE RELEASE READS ITS APPROVAL (wave-26 T62; K2-F3; D3). A doc row at Step 7 or later
-        # whose own cell names no approval (the kind default names only the plan) would be ready
-        # beside the regression; the validator refuses it, and a plan that got past the validator
-        # still never offers it before approved: release.
-        if (hasreads && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && rd[i] !~ /(^|[ \t,:])approval:[A-Za-z0-9]/) addtok(i, "approval:release")
+        # THE MERGE READS THE RELEASE APPROVAL (wave-35 T5; REQ-4 AC-4.1; D13). Through wave-34 the
+        # Step-7 doc row read it (wave-26 T62, K2-F3), so the release text waited on the person while
+        # nothing about writing it did. The text is now ready at its kind default, and the integrate
+        # row of a plan that carries a release reads approval:release whatever its cell says: the
+        # person approves the release and the merge once, after review. A plan with no release has
+        # none to approve, and its integrate row reads what it read before (A-T5-1).
+        if (hasreads && hasrel && knd[i] == "integrate" && (" " rd[i] ",") !~ /[ \t,]approval:release[ \t]*,/) addtok(i, "approval:release")
         m = split(dep[i], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
@@ -1886,7 +1898,7 @@ units_validate() {
           # A READ NAMES SOMETHING (wave-26 T2; D1): a path in the Files grammar, a named
           # artifact, `ext:<slug>`, or `live:` before an artifact or a path. A token naming
           # none of them is refused here, and the readiness program never reads it satisfied.
-          ap = 0; hh = 0
+          hh = 0
           r = rd[i]
           if (hasreads && r ~ /[A-Za-z0-9]/) {
             m = split(r, a, ",")
@@ -1906,7 +1918,6 @@ units_validate() {
                 continue
               }
               if (substr(t, 1, 5) == "live:") t = substr(t, 6)
-              if (t ~ /^approval:[A-Za-z0-9]/) ap = 1
               if (t == "head" || t == "record" || t == "merge") continue
               if (t ~ /^proof:(floor|review|task|check)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
               if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
@@ -1929,13 +1940,9 @@ units_validate() {
             }
           }
 
-          # THE RELEASE READS ITS APPROVAL (wave-26 T62; critic 2 K2-F3; D3). A doc row at Step 7
-          # or later is the release, the row the hold of a table without the column names so; on
-          # its kind default it would be ready beside the regression with no approval at all. An open
-          # one names the approval it waits for, approval:release, or approval:plan for a
-          # document that needs no release.
-          if (hasreads && !ap && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && (sta[i] == "pending" || sta[i] == "active"))
-            printf "%s: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)\n", id[i]
+          # A STEP-7 DOC ROW NEEDS NO APPROVAL READ (wave-35 T5; REQ-4 AC-4.1; D13): the release
+          # approval is read by the integrate row (the readiness program above), so the refusal
+          # wave-26 T62 put here is gone and the release text validates on its kind default.
 
           # A BRACKET IN A Files ENTRY CANNOT BE COMPILED AS WRITTEN (wave-26 T35; review 5 F5). The
           # grammar globs with * and ? only; the readiness program reads a bracket as itself, so an
