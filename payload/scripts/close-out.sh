@@ -469,6 +469,18 @@ co_regression_runs() {  # -> sets RR_LINE
     *) RR_LINE="$n" ;;
   esac
 }
+# THE HAND-HOLDS, READ BEFORE THE WIPE (wave-35 T12; D17, REQ-8 AC-8.1). `landing-report --hand-holds` folds the
+# uses of the escape-hatch verbs by kind from the lines the verbs wrote (hooks/session-poker.sh `hand_holds_report`
+# owns the rules). Three kinds (amend, hold, extend) are roster lines, and act 3 wipes the rosters before act 5
+# writes the continuation, so `run` reads the line before the wipe into CO_HH_LINE and the card and the
+# continuation both print that one reading. A report that cannot be read is a sentence, not a count.
+CO_HH_LINE=""
+co_hand_holds() {  # -> sets CO_HH_LINE
+  local out
+  out="$(cd "$ROOT" && bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
+  if [ -n "$out" ]; then CO_HH_LINE="$out"
+  else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
+}
 co_orphans() {  # <run|check> -> one `orphan:` line per live detached run under $TMP_DIR/runs
   local log out id prog
   [ -d "$TMP_DIR/runs" ] || return 0
@@ -785,6 +797,17 @@ co_landings_section() {
   fi
 }
 
+# co_hand_holds_section -> `## Hand-holds` and the line `co_hand_holds` read before the wipe, fenced as the
+# landings are; a reading that failed is its sentence, unfenced. Read now only when nothing read it before.
+co_hand_holds_section() {
+  [ -n "$CO_HH_LINE" ] || co_hand_holds
+  printf '## Hand-holds\n\n'
+  case "$CO_HH_LINE" in
+    "hand-holds: not read "*) printf '%s\n' "$CO_HH_LINE" ;;
+    *) printf '```\n%s\n```\n' "$CO_HH_LINE" ;;
+  esac
+}
+
 # co_task_count -> the build rows of the plan's ## Tasks table that were not dropped: the tasks the
 # template says went RED then GREEN. Zero when the plan carries no table.
 co_task_count() {
@@ -873,6 +896,8 @@ $reviews
 $(co_deferrals_section)
 
 $(co_landings_section)
+
+$(co_hand_holds_section)
 
 ## Resume instruction
 
@@ -1578,6 +1603,8 @@ do_check() {
   co_orphans check
   co_regression_runs
   say "regression-runs: $RR_LINE"
+  co_hand_holds
+  say "$CO_HH_LINE"
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
@@ -1673,6 +1700,7 @@ do_run() {
   act_worktrees;    say "worktree-removed: $WT_LINE"
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
+  co_hand_holds;    say "$CO_HH_LINE"
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
