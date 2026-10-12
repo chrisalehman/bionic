@@ -77,9 +77,10 @@
 # ended=, one never admitted that nobody holds (holder=-, or its holder died) by its asked=, one
 # killed unseen after the scan has written its end. Pruned in one batch, `xargs -0 rm -f`.
 #
-# WHO ASKS. `who` is `${CLAUDE_CODE_SESSION_ID:-none}:${BIONIC_GATE_AGENT:-main}`; the holder is
-# `$$`, the process that runs the command and whose death ends its claim. The caller gives the
-# command key: a suite's file name, otherwise the first 60 characters of the command.
+# WHO ASKS. `who` is `${CLAUDE_CODE_SESSION_ID:-none}:<agent>`, the agent BIONIC_GATE_AGENT, else
+# the marker of the tree the ask is made in, else `main` (THE PLACE, below); the holder is `$$`,
+# the process that runs the command and whose death ends its claim. The caller gives the command
+# key: a suite's file name, otherwise the first 60 characters of the command.
 #
 # THE RULES, each taken under lock/:
 #
@@ -557,7 +558,7 @@ _gate_enter() {
     return 0
   fi
   _GATE_ID=$((max + 1))
-  tree="$(git rev-parse --show-toplevel 2>/dev/null)" || tree=''
+  _gate_place; tree="$_GATE_TREE"
   [ -n "$tree" ] || tree="$(pwd -P)"
   now="$(_res_now)"
   printf 'key=%s\nkind=%s\nwho=%s\ntree=%s\nasked=%s\nholder=%s\n' \
@@ -584,6 +585,42 @@ _gate_store() {  # sets _GD and makes the store; rc 2, one line, when it cannot 
   fi
 }
 
+# ── THE PLACE: WHO ASKS, WHERE NO NAME IS CARRIED (wave-34 T2; D11, REQ-1 AC-1.2, AC-1.4) ─────────
+#
+# A shell does not know which agent it runs for, and rewriting its command to say so changes what
+# the permission rules see (wave-33 T36). The place does know: a writer works in its own linked tree,
+# and `spawn-worktree.sh create --for <name>` (or `mark`, on a re-dispatch) wrote the name, one line,
+# to that tree's own git directory as `bionic-agent`. So the asker is BIONIC_GATE_AGENT when it is
+# set, else the marker of the tree the ask is made in, else `main`. The main checkout's git directory
+# is the common one, which no writer owns, so a marker there is never read.
+#
+# ONE GIT CALL AN ASK, AT MOST. The common directory (where the roster is), the tree's own git
+# directory (the marker) and its top level (the request's tree=) come from one `git rev-parse`,
+# asked when one of them is first needed and kept for the rest of the ask, so the call that always
+# named the request's tree now names who asks as well.
+_GATE_PLACED=0 _GATE_COMMON="" _GATE_GITDIR="" _GATE_TREE="" _GATE_AGENT=""
+_gate_place() {  # once an ask: _GATE_COMMON, _GATE_GITDIR, _GATE_TREE, each empty where git cannot say
+  local out
+  [ "$_GATE_PLACED" != 1 ] || return 0
+  _GATE_PLACED=1 _GATE_COMMON="" _GATE_GITDIR="" _GATE_TREE=""
+  out="$(git rev-parse --path-format=absolute --git-common-dir --git-dir --show-toplevel 2>/dev/null)"
+  { IFS= read -r _GATE_COMMON; IFS= read -r _GATE_GITDIR; IFS= read -r _GATE_TREE; } <<< "$out"
+  return 0
+}
+_gate_who() {  # sets _GATE_AGENT: the name carried, else the tree's marker, else main
+  _GATE_AGENT="${BIONIC_GATE_AGENT:-}"
+  [ -n "$_GATE_AGENT" ] || _gate_marker
+  [ -n "$_GATE_AGENT" ] || _GATE_AGENT=main
+  return 0
+}
+_gate_marker() {  # the marker's name into _GATE_AGENT, spelled as booked.sh spells --agent
+  local m=""
+  _gate_place
+  [ -n "$_GATE_GITDIR" ] && [ "$_GATE_GITDIR" != "$_GATE_COMMON" ] && [ -f "$_GATE_GITDIR/bionic-agent" ] || return 0
+  IFS= read -r m < "$_GATE_GITDIR/bionic-agent" || [ -n "$m" ] || return 0
+  _GATE_AGENT="${m//[!A-Za-z0-9._+-]/_}"
+}
+
 # ── THE BUDGET, AT THE ASK (wave-33 T3; D7, REQ-6 AC-6.2, AC-6.3; ADR-052) ───────────────────
 #
 # WHY HERE. The Bash wall reads a command's text, and a script runs what its text cannot be made
@@ -593,9 +630,9 @@ _gate_store() {  # sets _GD and makes the store; rc 2, one line, when it cannot 
 # the runner). Every suite a project's runner starts asks this gate first, so the ask is the one
 # place that sees the run itself, however it was started; the budget is held here.
 #
-# WHO. The asking agent is the who's second half, BIONIC_GATE_AGENT: booked.sh exports it for a
-# suite the wall wraps, and the wall exports it ahead of a script a budgeted agent starts (lib/
-# walls.sh, the budget arm's carry). Unset or `main` is the main thread, which no budget holds.
+# WHO. The asking agent is the who's second half, `_gate_who`'s answer (THE PLACE, above): the name
+# booked.sh exports for a suite the wall wraps, else the marker of the writer's tree the suite starts
+# in. `main` is the main thread, which no budget holds.
 #
 # WHAT. The agent's roster row, `<project>/.bionic/tmp/roster-<session>.state`, the project being
 # the asking checkout's repository (a worktree's is its main checkout's, where the roster lives),
@@ -614,13 +651,13 @@ _gate_store() {  # sets _GD and makes the store; rc 2, one line, when it cannot 
 # an admission believed from an ancestor (its own ask was judged; a nested run runs under it).
 #
 # REFUSED: exit 75 with one line, nothing filed and nothing run. RESIDUAL, NAMED: a suite started
-# bare, by no runner, never asks, and, outside bypass mode, an agent's script reached through another
-# interpreter (python, node) carries no name and asks as the main thread.
+# bare, by no runner, never asks, and a suite started outside the writer's own tree asks as main.
 _GATE_BUDGET_LINE=""
 _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_LINE set)
-  local kind="$1" key="$2" agent="${BIONIC_GATE_AGENT:-}" sid="${CLAUDE_CODE_SESSION_ID:-}"
+  local kind="$1" key="$2" agent sid="${CLAUDE_CODE_SESSION_ID:-}"
   local c root roster row seg allowed="" stated=no runs="" whole=no blind=0 verdict
-  _GATE_BUDGET_LINE=""
+  _GATE_BUDGET_LINE="" _GATE_PLACED=0
+  _gate_who; agent="$_GATE_AGENT"
   [ "$kind" != landing ] || return 0
   case "$agent" in ''|main) return 0 ;; esac
   case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
@@ -631,10 +668,11 @@ _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_
     *.[Tt][Ee][Ss][Tt].[Ss][Hh]|[Tt][Ee][Ss][Tt].[Ss][Hh]) : ;;
     *) return 0 ;;
   esac
-  c="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  _gate_place; c="$_GATE_COMMON"
+  [ -n "$c" ] || return 0
   case "$c" in
     */.git) root="${c%/.git}" ;;
-    *) root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0 ;;
+    *) root="$_GATE_TREE"; [ -n "$root" ] || return 0 ;;
   esac
   roster="$root/.bionic/tmp/roster-$sid.state"
   { [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; } || return 0
@@ -723,7 +761,7 @@ gate_budget() {  # <kind> <key> -> rc 0 admitted; rc 75 refused, the budget's li
 
 gate_ask() {
   local kind="${1:-}" key="${2:-}" within='' poll="${BIONIC_GATE_POLL:-2}" start now
-  local who="${CLAUDE_CODE_SESSION_ID:-none}:${BIONIC_GATE_AGENT:-main}" id='' noted=0 rc
+  local who='' id='' noted=0 rc
   if [ "$#" -lt 2 ]; then
     echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>]" >&2
     return 2
@@ -748,6 +786,7 @@ gate_ask() {
   fi
   # THE BUDGET (above): an off-budget suite or whole run is refused here, before a request is filed.
   _gate_budget "$kind" "$key" || return 75
+  who="${CLAUDE_CODE_SESSION_ID:-none}:$_GATE_AGENT"
 
   start="$(_res_now)"
   while :; do
