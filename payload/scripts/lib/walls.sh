@@ -2185,13 +2185,9 @@ fi
 # \n text regardless of the file's original line-ending style.
 FRONTMATTER=$(normalize_newlines "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
 
-frontmatter_get() {
-  echo "$FRONTMATTER" \
-    | grep -E "^[[:space:]]*$1[[:space:]]*:" \
-    | head -1 \
-    | sed -E "s/^[[:space:]]*$1[[:space:]]*:[[:space:]]*//" \
-    | sed -E 's/[[:space:]]+$//' \
-    | sed -E "s/^['\"]//;s/['\"]\$//"
+frontmatter_get() {  # one reading of the grammar: lib/run.sh's `frontmatter_value_v` (wave-34 T11)
+  local v
+  if frontmatter_value_v v "$FRONTMATTER" "$1"; then printf '%s\n' "$v"; fi
 }
 
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
@@ -2235,13 +2231,20 @@ fi
 # "in progress" and its whitespace-free "inprogress" are both listed so
 # either spelling of the value matches. Defined here (ahead of the Step-line
 # checks) so the task-ledger validator, which runs before them, can reuse it.
+# IN BUILTINS (wave-34 T11, D19), reading what the `sed | tr` it replaces read: each line trimmed
+# on its own and trailing blank lines dropped, so a value is a placeholder exactly when its FIRST
+# line is one and nothing but whitespace follows; the word compared without regard to case.
 is_placeholder_value() {
-  local v
-  v=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | tr '[:upper:]' '[:lower:]')
+  local v="$1" rest="" rc=1 restore=0
+  case "$v" in *$'\n'*) rest="${v#*$'\n'}"; v="${v%%$'\n'*}" ;; esac
+  case "$rest" in *[![:space:]]*) return 1 ;; esac
+  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+  shopt -q nocasematch || { shopt -s nocasematch; restore=1; }
   case "$v" in
-    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) return 0 ;;
-    *) return 1 ;;
+    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) rc=0 ;;
   esac
+  [ "$restore" = 0 ] || shopt -u nocasematch
+  return "$rc"
 }
 
 # Audit dir follows the PLAN's own project, not necessarily the invoking one:
@@ -2735,8 +2738,9 @@ validate_prototype_no_matrix_row() {
   proto_ids=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    [ "$(units_field "$line" kind)" = "prototype" ] || continue
-    id=$(units_field "$line" id)
+    units_field_v id "$line" kind
+    [ "$id" = "prototype" ] || continue
+    units_field_v id "$line" id
     [ -n "$id" ] || continue
     proto_ids="$proto_ids $id"
   done <<< "$task_rows"
@@ -3141,7 +3145,7 @@ _eg_git_wt_name() {
 # IT ASSIGNS RATHER THAN PRINTS for the reason `_eg_commit_cwd` does: the collision is a
 # second answer, and a command substitution would strand it in a subshell.
 _eg_row_for_worktree() {
-  local _want="${1:-}" _rows _line _cell _id
+  local _want="${1:-}" _rows _line _cell _id _step _status _kind _nocase _same
   _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
   _rows="$(units_rows "$PLAN")" || return 1
@@ -3155,14 +3159,19 @@ _eg_row_for_worktree() {
   # case-insensitive; it makes it fail on every mixed-case tree, including an EXACT match,
   # because a lowercased cell can never equal an unlowercased `$_want`. Both walls must
   # fold the same way to keep one plan from giving two answers for which row owns a tree.
-  _want="$(printf '%s' "$_want" | tr '[:upper:]' '[:lower:]')"
+  # FOLDED BY THE SHELL, NOT BY `tr` (wave-34 T11, D19): `nocasematch` around the one compare
+  # is the same both-sides fold with no process per row, and it is restored at once.
+  shopt -q nocasematch && _nocase=1 || _nocase=0
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
-    _cell="$(units_field "$_line" worktree)"
+    units_field_v _cell "$_line" worktree
     [ -n "$_cell" ] || continue
     _cell="${_cell%/}"
-    [ "$(printf '%s' "${_cell##*/}" | tr '[:upper:]' '[:lower:]')" = "$_want" ] || continue
-    _id="$(units_field "$_line" id)"
+    shopt -s nocasematch
+    [[ "${_cell##*/}" == "$_want" ]]; _same=$?
+    [ "$_nocase" = 1 ] || shopt -u nocasematch
+    [ "$_same" = 0 ] || continue
+    units_field_v _id "$_line" id
     if [ -z "$_EG_ROW" ]; then
       # THREE CELLS, TAB-SEPARATED: id, step, status (wave-17 REQ-1, D1, ADR-031). The
       # status cell has been validated since wave-11 and read by nothing; it is what says
@@ -3174,7 +3183,9 @@ _eg_row_for_worktree() {
       # task arms when a writer is at work in it — unless it is a gate act (`integrate`,
       # `close`), whose commit must wait for the run to reach its step — so the fork needs
       # the row's kind as well as its status.
-      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)	$(units_field "$_line" kind)"
+      units_field_v _step "$_line" step; units_field_v _status "$_line" status
+      units_field_v _kind "$_line" kind
+      _EG_ROW="$_id	$_step	$_status	$_kind"
       _EG_ROW_DUP="$_id"
     else
       _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
@@ -3500,7 +3511,8 @@ is_r7_key() {
 # which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
 # on colon lines and the unchanged line otherwise.
 [ "$_EG_STEP_LINE_OWED" = 1 ] && while IFS= read -r _bline; do
-  _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
+  _bkey="${_bline#"${_bline%%[![:space:]]*}"}"
+  case "$_bkey" in *:*) _bkey="${_bkey%%:*}"; _bkey="${_bkey%"${_bkey##*[![:space:]]}"}" ;; esac
   if is_r7_key "$_bkey"; then
     continue
   fi
