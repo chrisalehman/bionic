@@ -5541,7 +5541,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
 #     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--kill-after <s> | --detach]
-#                                          [--stamp-dir <dir>] [--suites <names>] -- '<the command>'
+#                                          [--stamp-dir <dir> | --unplaced] [--suites <names>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5574,8 +5574,9 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # --stamp-dir: WHERE THE SUITE RUNS, when a leading literal `cd` moves it (wave-26 T56, final
 # review B1). The shim stands in the payload's cwd, so without it `cd <tree> || exit 1; bash
 # tests/x` from the main checkout stamps the main checkout and the tree lands on no stamp.
-# `_bsg_cd_walk` says when it is sure; otherwise there is no option and the shim stamps its own
-# directory, as before.
+# `_bsg_cd_walk` says when it is sure. --unplaced: a move ahead of the suite the walk cannot follow
+# (wave-35 T6; D14): the shim writes no stamp and says on the run's output that it did not count.
+# With no move at all there is neither option, and the shim stamps its own directory.
 #
 # --suites: WHICH SUITES THE COMMAND RUNS (wave-26 T61, critic F1), so the land can keep the newest
 # stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
@@ -5624,8 +5625,12 @@ _wall_harness_shell() {  # -> sets _WALL_HSHELL to the harness's bash or zsh; rc
 #   _BSG_CWD        the payload cwd itself, where the shim stamps when there is no --stamp-dir.
 #   _BSG_STAMP_DIR  where the first suite segment runs, when a `cd` moved it and the walk is
 #                   SURE of it; "" otherwise. The shim's --stamp-dir: a guess there would put a
-#                   run's stamp in another tree, so anything unsure gives none and the shim
-#                   stamps its own directory, as before T56.
+#                   run's stamp in another tree, so anything unsure gives none.
+#   _BSG_UNPLACED   1 when a move ahead of the suite (a `cd`, `pushd` or `popd` in any form) left
+#                   the walk unsure where it runs, else 0. The shim's --unplaced (wave-35 T6; D14,
+#                   design ledger Δ7): its own directory was the guess that stamped a red run in a
+#                   writer's dirty tree as a clean green at the main head (1.17.0), so such a run
+#                   leaves no stamp at all. With no move, the suite runs where the shim stands.
 #
 # SURE means: every `cd` ahead of the suite is a literal path (bare, single- or double-quoted
 # with nothing to expand; `~` and `~/…` from HOME; bare `cd` is HOME) or, after one that is not,
@@ -5633,11 +5638,11 @@ _wall_harness_shell() {  # -> sets _WALL_HSHELL to the harness's bash or zsh; rc
 # (`if cd x`, `X=1 cd x`); and the raw text ahead of the suite holds no subshell, pipe,
 # background job or command substitution (`( … )`, `|`, `&`, a backquote), nor a `cd` behind
 # `||`, which may not run. The class lines flatten all of those away, so the raw text is asked.
-_BSG_CD_DIR=""; _BSG_STAMP_DIR=""
+_BSG_CD_DIR=""; _BSG_STAMP_DIR=""; _BSG_UNPLACED=0
 _bsg_cd_walk() {
-  local _cls _seg _p _q _sure=1 _moved=0 _pre _t
+  local _cls _seg _p _q _sure=1 _moved=0 _seen=0 _pre _t
   _BSG_CD_DIR="$(bionic_jq .cwd)"; [ -n "$_BSG_CD_DIR" ] || _BSG_CD_DIR="${BIONIC_CWD:-}"
-  _BSG_CWD="$_BSG_CD_DIR"; _BSG_STAMP_DIR=""
+  _BSG_CWD="$_BSG_CD_DIR"; _BSG_STAMP_DIR=""; _BSG_UNPLACED=0
   [ -n "$_BSG_CD_DIR" ] || _sure=0
   _seg=""
   while IFS=$'\t' read -r _cls _seg; do
@@ -5647,10 +5652,11 @@ _bsg_cd_walk() {
       cd|cd[[:space:]]*) : ;;
       *)
         case " $_seg " in
-          *[[:space:]]cd[[:space:]]*|*[[:space:]]pushd[[:space:]]*|*[[:space:]]popd[[:space:]]*) _sure=0 ;;
+          *[[:space:]]cd[[:space:]]*|*[[:space:]]pushd[[:space:]]*|*[[:space:]]popd[[:space:]]*) _sure=0; _seen=1 ;;
         esac
         continue ;;
     esac
+    _seen=1
     _p="${_seg#cd}"; _p="${_p#"${_p%%[![:space:]]*}"}"; _p="${_p%"${_p##*[![:space:]]}"}"
     _q=0
     case "$_p" in
@@ -5671,6 +5677,7 @@ _bsg_cd_walk() {
     esac
     _moved=1
   done <<< "$1"
+  _BSG_UNPLACED="$_seen"
   [ "$_moved" = 1 ] && [ "$_sure" = 1 ] && [ "$_cls" = suite ] && [ -n "$_seg" ] || return 0
   _pre="${COMMAND%%"$_seg"*}"
   [ "$_pre" != "$COMMAND" ] || return 0
@@ -5678,7 +5685,7 @@ _bsg_cd_walk() {
   case "$_t" in *'||cd'*|*'||{cd'*) return 0 ;; esac
   _t="${_t//||/}"; _t="${_t//&&/}"
   case "$_t" in *[\(\)\|\&\`]*) return 0 ;; esac
-  _BSG_STAMP_DIR="$_BSG_CD_DIR"
+  _BSG_STAMP_DIR="$_BSG_CD_DIR"; _BSG_UNPLACED=0
   return 0
 }
 
@@ -5837,6 +5844,7 @@ _bsg_wrap_text() {
   [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
   if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else set -- "$@" --detach; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
+  [ "$_BSG_UNPLACED" != 1 ] || set -- "$@" --unplaced
   set -- "$@" --suites "$_BSG_SUITES"
   [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
   wall_booked_argv "$COMMAND" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }

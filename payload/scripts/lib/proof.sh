@@ -844,6 +844,10 @@ _proof_floor_walk() {
 # with the red, so the red verdicts it stands for, of its suite at its head and on every candidate built
 # on that head, are not the suite's state and are left out. A standing event of class `code`, or with no
 # `cause=` (one written before 1.16.0), leaves them in. lib/line.sh `_line_cause` reads the same records.
+# A SUITE IS KEYED BY ITS FILE NAME (wave-35 T6; REQ-5 AC-5.2, D14), as the gate, cost and debt key it: a stamp
+# names `x.test.sh` (the wall's --suites) where a landing files its verdict, and ready its `suites=`, under the
+# declared path (`tests/x.test.sh`, wave-34 T27), so every suite this prints, in an O line or an R line, is the
+# part after the last `/`, and a reader compares file names.
 _proof_records() {
   local co="$1" rec="${2:-}" gd f
   gd="$(cd "$co" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
@@ -852,16 +856,18 @@ _proof_records() {
       [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' '
     function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
     function out(l) { lines[++nl] = l }
+    function key(p) { sub(/.*\//, "", p); return p }
+    function keys(l,   a, n, i, o) { n = split(l, a, ","); o = ""; for (i = 1; i <= n; i++) o = o (i > 1 ? "," : "") key(a[i]); return o }
     substr($0, 1, 8) == "line/v1|" {
       ev = substr($2, 4); r = fv("row")
-      if (ev == "ready") { if (r != "") su[r] = fv("suites") }
+      if (ev == "ready") { if (r != "") su[r] = keys(fv("suites")) }
       else if (ev == "published") { c = fv("commit"); if (c != "") out("O\t" c "\t" r "\t" ((r in su) ? su[r] : "-")) }
       else if (ev == "verdict") {
-        c = fv("commit"); s = fv("suite"); v = fv("result")
+        c = fv("commit"); s = key(fv("suite")); v = fv("result")
         if (c != "" && s != "" && (v == "green" || v == "red")) { out("R\t" fv("at") "\t" c "\t" s "\t" v "\tverdict"); if (v == "red") { vc[nl] = c; vs[nl] = s } }
       }
       else if (ev == "candidate") { c = fv("commit"); if (c != "") base[c] = fv("base") }
-      else if (ev == "standing") { if (fv("cause") == "environment") env[fv("head"), fv("suite")] = 1 }
+      else if (ev == "standing") { if (fv("cause") == "environment") env[fv("head"), key(fv("suite"))] = 1 }
       next
     }
     substr($0, 1, 8) == "landed: " {
@@ -887,7 +893,7 @@ _proof_records() {
       for (i = 1; i <= m; i++) {
         if (a[i] == "" || a[i] == "?") continue
         if (a[i] == "run.sh") { out("R\t" at "\t" h "\t*\t" v "\tstamp"); continue }
-        out("R\t" at "\t" h "\t" a[i] "\t" v "\tstamp")
+        out("R\t" at "\t" h "\t" key(a[i]) "\t" v "\tstamp")
       }
     }
     END {

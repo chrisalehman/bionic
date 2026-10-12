@@ -37,6 +37,24 @@
 #
 # bash 3.2 (ADR-001).
 
+# WHAT A SUITE IS CALLED (wave-35 T6; the debt line lands-on-path-grammar): the one grammar of a suite
+# named in a `Lands-on:` line (brief.sh's lift) or a roster's `lands_on=` / `suites_allowed=` (line.sh
+# `_line_suites`). An awk function, pasted in front of each program that reads one:
+# `suite_name(t)` is "" for a token that is no suite, else its canonical spelling. A name is
+# `[A-Za-z0-9_][A-Za-z0-9_-]*`, with or without `.test.sh`, which it then carries; a path keeps its
+# directories (wave-34 T27), each a plain name, never `..` and never absolute, and a leading `./` is
+# dropped while another `/` follows. So `run.sh`, `a.b` and `../x.test.sh` are no suite.
+BIONIC_SUITE_NAME_AWK='
+function suite_name(t,   n, P, i) {
+  while (t ~ /^\.\/.*\//) t = substr(t, 3)
+  n = split(t, P, "/")
+  for (i = 1; i < n; i++) if (P[i] !~ /^[A-Za-z0-9_.-]+$/ || P[i] == ".." || (P[i] == "." && i > 1)) return ""
+  if (P[n] !~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) return ""
+  sub(/\.test\.sh$/, "", t)
+  return t ".test.sh"
+}
+'
+
 # THE FORK SPEAKS ON NOTHING (booked.sh, wave-26 T63): under `set -m` the parent and the child each
 # put the child in its own group, and under load one call can fail with `child setpgid … Operation not
 # permitted` on the stderr held at that moment. So the spawn's stderr is /dev/null, and the job gets
