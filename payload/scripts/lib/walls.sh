@@ -5443,7 +5443,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
-#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--kill-after <s> | --detach]
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--kill-after <s> | --detach]
 #                                          [--stamp-dir <dir> | --unplaced] [--suites <names>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
@@ -5470,9 +5470,9 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # shell does not know its agent, so the wrap names it: the roster row's `name=` the budget arm
 # already read, else the payload's `agent_id`; a main-thread call names none (the gate's `main`).
 #
-# --quiet: a suite segment carrying `BIONIC_QUIET=1` in its prefix, or a suite file whose
-# first 30 lines hold `# runner: solo` (tests/run.sh's `_is_solo_suite` rule, read the same
-# way), takes the whole machine for a timing check.
+# NO --quiet (wave-35 T2; D11, AC-2.1): the wrap never asks the shim for the whole machine. Neither
+# `BIONIC_QUIET=1` in a suite segment's prefix nor a `# runner: solo` line in a suite file is read:
+# nothing passes or fails by the clock, so no suite is owed a quiet machine.
 #
 # --stamp-dir: WHERE THE SUITE RUNS, when a leading literal `cd` moves it (wave-26 T56, final
 # review B1). The shim stands in the payload's cwd, so without it `cd <tree> || exit 1; bash
@@ -5483,7 +5483,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 #
 # --suites: WHICH SUITES THE COMMAND RUNS (wave-26 T61, critic F1), so the land can keep the newest
 # stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
-# the one the solo check reads too.
+# the one reading of the command's targets.
 #
 # --detach: THE RUN OUTLIVES THE CALL (wave-30 T12; D6, A-orch-7; REQ-3 AC-3.1). The shim runs the
 # whole run, the wait at the gate included, in a session of its own and waits on it from the call:
@@ -5519,32 +5519,12 @@ _wall_harness_shell() {  # -> sets _WALL_HSHELL to the harness's bash or zsh; rc
   return 1
 }
 
-_wall_prefix_sets() {  # <segment> <NAME> <value> -> 0 when the segment's leading assignments set NAME=value
-  local _s="$1" _re='^[A-Za-z_][A-Za-z0-9_]*='
-  _s="${_s#"${_s%%[![:space:]]*}"}"
-  case "$_s" in env[[:space:]]*) _s="${_s#env}"; _s="${_s#"${_s%%[![:space:]]*}"}" ;; esac
-  while [[ $_s =~ $_re ]]; do
-    case "$_s" in
-      "$2=$3"|"$2=$3"[[:space:]]*|"$2='$3'"|"$2='$3'"[[:space:]]*|"$2=\"$3\""|"$2=\"$3\""[[:space:]]*)
-        return 0 ;;
-    esac
-    _s="${_s#*=}"
-    case "$_s" in
-      \'*) _s="${_s#\'}"; _s="${_s#*\'}" ;;
-      \"*) _s="${_s#\"}"; _s="${_s#*\"}" ;;
-    esac
-    _s="${_s#"${_s%%[[:space:]]*}"}"
-    _s="${_s#"${_s%%[![:space:]]*}"}"
-  done
-  return 1
-}
-
 # _bsg_cd_walk <class lines> — THE ONE WALK of the command's leading literal `cd` segments, up
 # to its first suite segment, read twice (wave-26 T56, final review B1). Pure parameter
-# expansion: no fork beyond the one `bionic_jq .cwd` the solo reader always paid. It sets
+# expansion: no fork beyond the one `bionic_jq .cwd`. It sets
 #
 #   _BSG_CD_DIR     the payload cwd moved by every `cd` the walk can read as a literal; one it
-#                   cannot read is skipped. The solo reader's base: a miss there costs --quiet.
+#                   cannot read is skipped.
 #   _BSG_CWD        the payload cwd itself, where the shim stamps when there is no --stamp-dir.
 #   _BSG_STAMP_DIR  where the first suite segment runs, when a `cd` moved it and the walk is
 #                   SURE of it; "" otherwise. The shim's --stamp-dir: a guess there would put a
@@ -5634,32 +5614,9 @@ _door_in_tree() {
 }
 
 # _BSG_TARGETS — the command's suite claims, cmd-class.sh's `targets` reading: one
-# `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61):
-# the solo check and the suite names below both read it, so naming the suites costs no fork.
+# `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61),
+# for the suite names below.
 _BSG_TARGETS=""
-
-# _bsg_solo_target — 0 when a suite file the command runs declares `# runner: solo` in its
-# first 30 lines. The path is the claim's own (_BSG_TARGETS), resolved
-# against _BSG_CD_DIR, which `_bsg_cd_walk` set from this command's class lines just before.
-# Only a regular file is read, so a FIFO cannot hang the hook.
-_bsg_solo_target() {
-  local _dir="$_BSG_CD_DIR" _p _k _b _r _f _n _l _rest
-  while IFS=$'\t' read -r _k _b _r _p; do
-    [ "$_k" = file ] && [ -n "$_p" ] || continue
-    case "$_p" in *'$'*|*'`'*) continue ;; /*) _f="$_p" ;; *) _f="$_dir/$_p" ;; esac
-    [ -f "$_f" ] && [ -r "$_f" ] || continue
-    _n=0
-    while [ "$_n" -lt 30 ] && IFS= read -r _l; do
-      _n=$((_n + 1))
-      case "$_l" in
-        '# runner: solo'*)
-          _rest="${_l#'# runner: solo'}"
-          [ -z "${_rest//[[:space:]]/}" ] && return 0 ;;
-      esac
-    done < "$_f"
-  done <<< "$_BSG_TARGETS"
-  return 1
-}
 
 # _bsg_suites — sets _BSG_SUITES to the shim's --suites value (wave-26 T61, critic F1; T63, critic
 # K4-S1/N1/N2): one NAME per suite the command runs, from _BSG_TARGETS, in position order, each
@@ -5717,19 +5674,18 @@ _bsg_suites() {
   [ "$_only" = 0 ] || [ "$_other" = 1 ] || _BSG_RUNNER=1
 }
 
-# wall_booked_argv <command> <quiet: 0|1> [<shim option>...] — sets WALL_BOOKED_ARGV to the
+# wall_booked_argv <command> [<shim option>...] — sets WALL_BOOKED_ARGV to the
 # wrapped call, word by word; rc 1 when this plugin carries no shim. THE ONE BUILDER of the
 # shim's argument list (T9 adds `--kill-after <s>` through the extra options). The plugin
 # root is the one whose library this hook loaded: `$BIONIC_LIB` is `<root>/scripts/lib`.
 WALL_BOOKED_ARGV=()
 wall_booked_argv() {
-  local _cmd="$1" _quiet="$2" _root
-  shift 2
+  local _cmd="$1" _root
+  shift
   _root="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)" || return 1
   [ -f "$_root/booked.sh" ] || return 1
   WALL_BOOKED_ARGV=(bash "$_root/booked.sh")
   if _wall_harness_shell; then WALL_BOOKED_ARGV+=(--shell "$_WALL_HSHELL"); fi
-  [ "$_quiet" != 1 ] || WALL_BOOKED_ARGV+=(--quiet)
   [ "$#" -eq 0 ] || WALL_BOOKED_ARGV+=("$@")
   WALL_BOOKED_ARGV+=(-- "$_cmd")
   return 0
@@ -5757,7 +5713,7 @@ _bsg_agent() {
   _BSG_AGENT="${_BUDGET_ROW_NAME:-$_id}"
 }
 _bsg_wrap_text() {
-  local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
+  local _c _w _lines _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
   _c="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
   case "$_c" in
@@ -5780,17 +5736,12 @@ _bsg_wrap_text() {
   # ONE READING OF THE COMMAND PER HOOK (wave-26 T39): the class above and these lines are the
   # reading farm-out or the suite guard already made of this text, when one did.
   _wall_class_read "$COMMAND"; _lines="$_WALL_CLASS_LINES"
-  while IFS=$'\t' read -r _cls _seg; do
-    [ "$_cls" = suite ] || continue
-    ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
-  done <<< "$_lines"
-  # ONE WALK, TWO READERS (T56): where the leading `cd` segments lead is the solo reader's base
-  # and, when the walk is sure of it, the shim's --stamp-dir.
+  # ONE WALK (T56): where the leading `cd` segments lead, when the walk is sure of it, is the shim's
+  # --stamp-dir.
   _bsg_cd_walk "$_lines"
-  # ONE TARGETS READING, TWO READERS (T61): the solo check and the shim's --suites.
+  # ONE TARGETS READING (T61): the shim's --suites.
   _BSG_TARGETS="$(printf '%s' "$COMMAND" | _cmd_class_awk targets)"
   _bsg_suites
-  [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
   _bsg_agent
   [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
@@ -5799,7 +5750,7 @@ _bsg_wrap_text() {
   [ "$_BSG_UNPLACED" != 1 ] || set -- "$@" --unplaced
   set -- "$@" --suites "$_BSG_SUITES"
   [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
-  wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
+  wall_booked_argv "$COMMAND" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
     _BSG_WRAP_TEXT="${_BSG_WRAP_TEXT:+$_BSG_WRAP_TEXT }$_WALL_WORD"

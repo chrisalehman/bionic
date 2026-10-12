@@ -24,6 +24,10 @@
 #   §10 expect_regex is an ERE and is not a pipeline (the 141 false FAIL)
 #   §11 anchor: a moved mutation anchor is red BEFORE the mutation runs,
 #       naming the anchor and the count it actually found (AC-29, AC-31)
+#   §19 the three shaped anchors (file, fn, insert) through one helper, each
+#       building its mutant; §20 a suite's extracted anchors are the ones it ran;
+#       §21 `anchors check` names a moved anchor, the three wave-34 mutants among
+#       them; §22 `anchors index` maps file -> declaring suites (wave-35 T3; AC-7.1, AC-7.3)
 #
 # HERMETIC. Every planted suite is written into a mktemp'd sandbox holding a COPY
 # of the real tests/lib/assert.sh and is run as a child process; nothing here
@@ -1780,5 +1784,235 @@ expect_eq "18: …and says what it is, in the timing knob's own words" "yes" \
   "$(contains "$A_HELP" "a file to append to")"
 expect_eq "18: …and the timing knob is still documented beside it" "yes" \
   "$(contains "$A_HELP" "BIONIC_TEST_TIMING")"
+
+# ============================================================
+# §19-§22: ONE ANCHOR HELPER, A CHECKER, AN INDEX (wave-35 T3; D16, REQ-7 AC-7.1, AC-7.3)
+# ============================================================
+#
+# `anchor file|fn|insert <file> <text> …` names a file relative to the root and a literal text,
+# so payload/scripts/lib/anchors.sh can read every call out of the source without running it:
+# `anchors check` confirms each text where it is anchored, `anchors index` groups file → suites.
+# FIXTURE FIDELITY: lib/x.sh and the two trees below are SYNTHESIZED, each line placed for one
+# arm; the three real suites in §21 are COPIES of the shipped files, doctored one text at a time.
+AN="$SB/anchors"
+mkdir -p "$AN/tests/lib" "$AN/payload/scripts/lib" "$AN/lib" "$AN/out"
+cp "$FRAMEWORK" "$AN/tests/lib/assert.sh"
+cp "$REPO/payload/scripts/lib/anchors.sh" "$AN/payload/scripts/lib/anchors.sh" 2>/dev/null
+POKER="$REPO/hooks/session-poker.sh"
+cat > "$AN/lib/x.sh" <<'PLANT_AN_X'
+#!/bin/bash
+# THE ONE COMMENT
+x_fn() {
+  local v=1
+  echo needle-in-fn
+}
+y_fn() {
+  echo needle-in-fn
+}
+z_fn() {
+  # a fn comment
+  echo z
+}
+echo plain-needle
+PLANT_AN_X
+cat > "$AN/tests/p-shapes.test.sh" <<'PLANT_AN_SHAPES'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+O="$(dirname "$0")/../out"
+
+section "the three shapes, each green, each building what its mutation needs"
+anchor file lib/x.sh 'plain-needle' 'MUTATED' "$O/file.sh"
+anchor insert lib/x.sh '# THE ONE COMMENT' 'echo inserted' "$O/insert.sh"
+anchor fn lib/x.sh 'echo needle-in-fn' x_fn 'echo mutated'
+printf '%s\n' "$ANCHOR_SED" > "$O/fn.sed"
+
+section "each shape red, saying what it found"
+anchor file lib/x.sh 'moved-away'
+anchor file lib/x.sh 'needle-in-fn'
+anchor insert lib/x.sh 'THE ONE COMMENT'
+anchor fn lib/x.sh 'local v=1' y_fn
+anchor fn lib/x.sh '# a fn comment' z_fn
+anchor fn lib/x.sh 'echo z' no_such_fn
+anchor file lib/no-such.sh 'plain-needle'
+finish
+PLANT_AN_SHAPES
+cat > "$AN/tests/p-nonlit.test.sh" <<'PLANT_AN_NONLIT'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+F=lib/x.sh
+section "a non-literal anchor and a looped one"
+anchor file "$F" 'plain-needle'
+for i in 1 2; do anchor insert lib/x.sh '# THE ONE COMMENT'; done
+anchor file lib/x.sh 'plain-needle'
+finish
+PLANT_AN_NONLIT
+an_run() {  # <suite> -> P_OUT / P_RC, run in the anchors sandbox
+  P_OUT="$(cd "$AN" && bash "tests/$1" 2>&1)"
+  P_RC=$?
+}
+
+# ------------------------------------------------------------
+section "19: SHAPES — file-sed, function-sed and awk-insert anchors through one helper (AC-7.1)"
+# ------------------------------------------------------------
+an_run p-shapes.test.sh
+expect_eq "19: the suite carrying red anchors exits 1" "1" "$P_RC"
+expect_contains "19: file: the anchored text on one line is green" \
+  "PASS: anchor file lib/x.sh: 'plain-needle'" "$P_OUT"
+expect_contains "19: insert: the line beginning with the text is green" \
+  "PASS: anchor insert lib/x.sh: '# THE ONE COMMENT'" "$P_OUT"
+expect_contains "19: fn: the text once in the function's body, in the source and in declare -f, is green" \
+  "PASS: anchor fn lib/x.sh: 'echo needle-in-fn' in x_fn" "$P_OUT"
+expect_eq "19: file: the doctored copy differs from the file by the one rewritten line" \
+  "$(printf '14c14\n< echo plain-needle\n---\n> echo MUTATED')" "$(diff "$AN/lib/x.sh" "$AN/out/file.sh")"
+expect_eq "19: insert: the copy carries the new line just before the anchored one, and nothing else" \
+  "$(printf '1a2\n> echo inserted')" "$(diff "$AN/lib/x.sh" "$AN/out/insert.sh")"
+AN_FN_MUT="$(cd "$AN" && bash -c '. lib/x.sh >/dev/null; declare -f x_fn' | sed "$(cat "$AN/out/fn.sed")")"
+expect_contains "19: fn: ANCHOR_SED over declare -f rewrites the anchored text" "echo mutated" "$AN_FN_MUT"
+expect_absent "19: fn: …and the text it rewrote is gone from the mutant" "needle-in-fn" "$AN_FN_MUT"
+expect_contains "19: a text that moved away is red, found=0" \
+  "FAIL: anchor file lib/x.sh: 'moved-away'
+      found=0 — the anchor MOVED" "$P_OUT"
+expect_contains "19: a text on two lines is red, found=2" \
+  "FAIL: anchor file lib/x.sh: 'needle-in-fn'
+      found=2 — the anchor matches more than one line" "$P_OUT"
+expect_contains "19: insert matches a line's beginning, never its middle" \
+  "FAIL: anchor insert lib/x.sh: 'THE ONE COMMENT'
+      found=0" "$P_OUT"
+expect_contains "19: fn counts inside the named function only" \
+  "FAIL: anchor fn lib/x.sh: 'local v=1' in y_fn
+      found=0" "$P_OUT"
+expect_contains "19: fn: a comment in the body is in the source but not in declare -f, so it is red" \
+  "FAIL: anchor fn lib/x.sh: '# a fn comment' in z_fn
+      found=1 in the source, 0 in declare -f z_fn" "$P_OUT"
+expect_contains "19: fn: a function the file does not define is red, naming it" \
+  "found=0 — no function no_such_fn in lib/x.sh" "$P_OUT"
+expect_contains "19: a file that is not there is red, naming it" \
+  "found=0 — no file lib/no-such.sh" "$P_OUT"
+
+# ------------------------------------------------------------
+section "20: AGREEMENT — a suite's extracted anchors are the anchors it ran (D16)"
+# ------------------------------------------------------------
+expect_contains "20: every call literal, run once each: the counts agree" \
+  "PASS: anchors: 10 extracted = 10 run (tests/p-shapes.test.sh)" "$P_OUT"
+an_run p-nonlit.test.sh
+expect_contains "20: the non-literal anchor itself holds at run time" \
+  "PASS: anchor file lib/x.sh: 'plain-needle'" "$P_OUT"
+expect_contains "20: …but the suite's extraction disagrees with its run" \
+  "FAIL: anchors: 2 extracted, 4 run (tests/p-nonlit.test.sh)" "$P_OUT"
+expect_contains "20: …naming the non-literal anchor by suite and line" \
+  "NONLITERAL tests/p-nonlit.test.sh:6" "$P_OUT"
+expect_contains "20: …and the looped call no literal line declares" \
+  "insert lib/x.sh '# THE ONE COMMENT'" "$P_OUT"
+expect_eq "20: …and the suite exits 1" "1" "$P_RC"
+expect_absent "20: a suite with no shaped anchor prints no agreement row" "anchors:" \
+  "$(cd "$SB" && bash tests/p-anchor-order.test.sh 2>&1)"
+expect_contains "20: …over a suite that did run (its own row is there)" \
+  "PASS: the suite kept going after the red anchor" "$(cd "$SB" && bash tests/p-anchor-order.test.sh 2>&1)"
+
+# ------------------------------------------------------------
+section "21: CHECK — anchors check confirms each text in its file and names a moved one (AC-7.1)"
+# ------------------------------------------------------------
+AK="$SB/check-tree"
+mkdir -p "$AK/lib" "$AK/tests" "$AK/tools" "$AK/docs"
+cp "$AN/lib/x.sh" "$AK/lib/x.sh"
+printf 'why\n' > "$AK/lib/y.sh"
+cat > "$AK/tests/a.test.sh" <<'PLANT_AK_A'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+anchor file lib/x.sh 'plain-needle'
+anchor insert lib/x.sh '# THE ONE COMMENT' \
+  'echo inserted' "${TMPDIR:-/tmp}/never"
+cat <<'EOF'
+anchor file lib/nowhere.sh 'in a heredoc is no call'
+EOF
+PLANT_AK_A
+cat > "$AK/tools/check.sh" <<'PLANT_AK_T'
+#!/bin/bash
+  anchor fn lib/x.sh 'echo needle-in-fn' x_fn
+anchor file "lib/y.sh" "why"
+PLANT_AK_T
+printf "anchor file lib/zzz.sh 'a markdown line is no suite'\n" > "$AK/docs/notes.md"
+git -C "$AK" init -q && git -C "$AK" add -A && git -C "$AK" -c user.name=t -c user.email=t@t commit -qm base
+AK_OUT="$(bash "$POKER" anchors check "$AK" 2>&1)"; AK_RC=$?
+expect_eq "21: a clean tree checks green (exit 0)" "0" "$AK_RC"
+expect_empty "21: …and prints nothing" "$AK_OUT"
+expect_contains "21: …over an extraction that found the calls (the index reads the same extraction)" \
+  "lib/x.sh" "$(bash "$POKER" anchors index "$AK" 2>&1)"
+sed 's/^# THE ONE COMMENT$/# ONE COMMENT, REWORDED/' "$AK/lib/x.sh" > "$AK/lib/x.sh.n" && mv "$AK/lib/x.sh.n" "$AK/lib/x.sh"
+AK_OUT="$(bash "$POKER" anchors check "$AK" 2>&1)"; AK_RC=$?
+expect_eq "21: the anchored comment reworded: the check exits 1" "1" "$AK_RC"
+expect_eq "21: …printing MOVED <suite>:<line> for the one anchor on it, and only that" \
+  "MOVED tests/a.test.sh:4 insert lib/x.sh found=0" "$AK_OUT"
+expect_eq "21: --at reads the commit, not the working tree: green at HEAD" "0" \
+  "$(bash "$POKER" anchors check "$AK" --at HEAD >/dev/null 2>&1; echo $?)"
+expect_eq "21: from inside the tree the root is the tree's own" "1" \
+  "$(cd "$AK/tools" && bash "$POKER" anchors check >/dev/null 2>&1; echo $?)"
+AK_OUT="$(bash "$POKER" anchors frob "$AK" 2>&1)"; AK_RC=$?
+expect_eq "21: a subcommand other than check or index is a usage error (exit 2)" "2" "$AK_RC"
+
+# THE THREE MUTANTS THAT DRIFTED IN WAVE 34 (research-plan-machinery §12): landing-line r6em,
+# runner-roster 11.15 and spawn-worktree up3. 11.15's arm left run.sh with the solo drain (wave-35
+# T2, D11), so runner-roster's real anchor here is OA.12, the whole run's one ask; each checked on a copy of the shipped files with
+# its one anchored text doctored.
+AR="$SB/real-three"
+mkdir -p "$AR/tests" "$AR/payload/scripts/lib"
+for an_f in tests/landing-line.test.sh tests/runner-roster.test.sh tests/spawn-worktree.test.sh tests/run.sh \
+    payload/scripts/lib/line.sh; do
+  cp "$REPO/$an_f" "$AR/$an_f"
+done
+git -C "$AR" init -q
+expect_eq "21: the shipped three check green" "0" \
+  "$(bash "$POKER" anchors check "$AR" >/dev/null 2>&1; echo $?)"
+an_line() {  # <suite> <fixed text of the call> -> its line number in the copy
+  /usr/bin/grep -nF -- "$2" "$AR/$1" | head -1 | cut -d: -f1
+}
+an_doctor() {  # <file> <from> <to> — a literal rewrite of the copy, then the check's output
+  local f="$AR/$1"
+  cp "$f" "$f.orig"
+  F="$2" T="$3" awk '{ i = index($0, ENVIRON["F"]); if (i) $0 = substr($0, 1, i - 1) ENVIRON["T"] substr($0, i + length(ENVIRON["F"])); print }' \
+    "$f.orig" > "$f"
+  bash "$POKER" anchors check "$AR" 2>&1
+  mv "$f.orig" "$f"
+}
+AN_L1="$(an_line tests/landing-line.test.sh "anchor fn payload/scripts/lib/line.sh '_line_current_row '")"
+AN_L2="$(an_line tests/runner-roster.test.sh "anchor file tests/run.sh 'if ! _gate_ask_for whole tests/run.sh; then'")"
+AN_L3="$(an_line tests/spawn-worktree.test.sh "anchor insert payload/scripts/lib/line.sh \"  # THE ROSTER'S LAUNCH LINE")"
+expect_nonempty "21: r6em goes through anchor (its call is in the suite)" "$AN_L1"
+expect_nonempty "21: OA.12 goes through anchor" "$AN_L2"
+expect_nonempty "21: up3 goes through anchor" "$AN_L3"
+expect_contains "21: r6em: the call it anchors renamed in line.sh is MOVED" \
+  "MOVED tests/landing-line.test.sh:${AN_L1:-?} fn payload/scripts/lib/line.sh found=0" \
+  "$(an_doctor payload/scripts/lib/line.sh 'LINE_NOW="$(_line_current_row ' 'LINE_NOW="$(_line_current_row_x ')"
+expect_contains "21: OA.12: the whole run's one ask re-spelled in run.sh is MOVED" \
+  "MOVED tests/runner-roster.test.sh:${AN_L2:-?} file tests/run.sh found=0" \
+  "$(an_doctor tests/run.sh 'if ! _gate_ask_for whole tests/run.sh; then' 'if ! _gate_ask_for whole "tests/run.sh"; then')"
+expect_contains "21: up3: the comment it inserts before reworded in line.sh is MOVED" \
+  "MOVED tests/spawn-worktree.test.sh:${AN_L3:-?} insert payload/scripts/lib/line.sh found=0" \
+  "$(an_doctor payload/scripts/lib/line.sh "# THE ROSTER'S LAUNCH LINE" '# THE LAUNCH LINE')"
+expect_eq "21: …and the copy is whole again after the three" "0" \
+  "$(bash "$POKER" anchors check "$AR" >/dev/null 2>&1; echo $?)"
+
+# ------------------------------------------------------------
+section "22: INDEX — anchors index groups file → the suites that declare an anchor on it (AC-7.3)"
+# ------------------------------------------------------------
+AK_IDX="$(bash "$POKER" anchors index "$AK" 2>&1)"; AK_RC=$?
+expect_eq "22: the index exits 0" "0" "$AK_RC"
+expect_eq "22: one line per anchored file, <file> TAB <suite>[,<suite>], keyed on the declaring suite's path" \
+  "$(printf 'lib/x.sh\ttests/a.test.sh,tools/check.sh\nlib/y.sh\ttools/check.sh')" "$AK_IDX"
+expect_contains "22: a .sh suite outside tests/ is indexed by its own path" \
+  "$(printf 'lib/y.sh\ttools/check.sh')" "$AK_IDX"
+expect_absent "22: a call in a heredoc body, or in a file that is not .sh, is no declaration" "lib/nowhere.sh" "$AK_IDX"
+expect_absent "22: …nor is one in a markdown file" "lib/zzz.sh" "$AK_IDX"
+AN_IDX="$(bash "$POKER" anchors index "$REPO" 2>&1)"
+expect_regex "22: over the shipped tree, line.sh names landing-line" \
+  "^payload/scripts/lib/line\\.sh	([^,]+,)*tests/landing-line\\.test\\.sh(,|$)" "$AN_IDX"
+expect_regex "22: …and spawn-worktree" \
+  "^payload/scripts/lib/line\\.sh	([^,]+,)*tests/spawn-worktree\\.test\\.sh(,|$)" "$AN_IDX"
+expect_regex "22: …and tests/run.sh names runner-roster" \
+  "^tests/run\\.sh	([^,]+,)*tests/runner-roster\\.test\\.sh(,|$)" "$AN_IDX"
+expect_eq "22: …and the shipped tree checks green" "0" \
+  "$(bash "$POKER" anchors check "$REPO" >/dev/null 2>&1; echo $?)"
 
 finish

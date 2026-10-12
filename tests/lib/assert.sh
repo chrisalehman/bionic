@@ -185,6 +185,28 @@
 # and the mutation's own `^…$`, or the precondition is weaker than the thing it
 # is the precondition for and the green it gives is worth nothing.
 #
+# THE THREE SHAPES (wave-35 T3; D16). The form above is checked only when its
+# suite runs, and a row that edits the anchored file lands without running that
+# suite. A shaped anchor names a file RELATIVE TO THE ROOT (the directory holding
+# tests/lib/) and a text, both LITERALS in the source, so
+# payload/scripts/lib/anchors.sh reads it without running anything:
+# `session-poker.sh anchors check` confirms every one at each landing and prints
+# `MOVED <suite>:<line>`, and `anchors index` maps each file to its suites.
+#
+#   anchor file   <file> <text> [<new> <dest>]       <text> on exactly one line;
+#                                                   writes <dest>, that text made <new>
+#   anchor insert <file> <text> [<line> <dest>]      exactly one line BEGINS with <text>;
+#                                                   writes <dest>, <line> inserted before it
+#   anchor fn     <file> <text> <function> [<new>]   <text> on exactly one line of the
+#                                                   function's body, in the source AND
+#                                                   in `declare -f`; sets ANCHOR_SED to
+#                                                   the sed that makes it <new>
+#
+# The helper builds the mutant (or its sed) from the anchor, so the two cannot
+# disagree, and only after a green anchor. `finish` adds one row when the suite
+# has shaped anchors: what anchors.sh extracts from the file equals what ran from
+# it, and a call with a variable for its file or text is named as NONLITERAL.
+#
 # ── ASSERTION DISCIPLINE ─────────────────────────────────────────────────────
 #
 # PAIRED POSITIVE. A negative assertion — "this string is absent", "this set is
@@ -477,6 +499,7 @@ expect_nonempty() { if [ -n "${2:-}" ]; then ok "$1"; else no "$1" "expected a n
 # docblock above for why a mutation whose anchor moved proves nothing.
 anchor() {
   local _mode="-F" _file _pat _want _name _got
+  case "${1:-}" in file|fn|insert) _tf_anchor_shaped "$@"; return 0 ;; esac
   if [ "${1:-}" = "-E" ]; then _mode="-E"; shift; fi
   _file="${1:-}"; _pat="${2:-}"; _want="${3:-}"
   _name="anchor: ${_pat} matches ${_want} line(s) of ${_file##*/}"
@@ -501,6 +524,82 @@ anchor() {
     no "$_name" "found $_got line(s) — the anchor matches MORE than it declared, so the mutation below strips or rewrites lines it was never meant to touch"
   fi
 }
+
+# THE SHAPED ANCHOR (wave-35 T3; D16) — see THE THREE SHAPES in the docblock above. The count is
+# payload/scripts/lib/anchors.sh `anchors_found`, the rule `anchors check` applies at a landing, so the
+# run and the landing cannot read one anchor two ways. Each call run from the suite's own file is
+# recorded for the agreement row `finish` prints.
+_TF_ROOT=""          # the root a shaped anchor's <file> is relative to: the directory holding tests/lib/
+_TF_ANCHOR_RUN=""    # one line per shaped call run from the suite file: shape TAB file TAB text TAB function
+_TF_SUITE_ABS="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)/$(basename "$0")"
+_tf_anchors_load() {
+  [ -n "$_TF_ROOT" ] || _TF_ROOT="$(cd "$(dirname "$_TF_LIB")/../.." 2>/dev/null && pwd -P)"
+  declare -F anchors_found >/dev/null 2>&1 && return 0
+  [ -r "$_TF_ROOT/payload/scripts/lib/anchors.sh" ] || return 1
+  # shellcheck source=/dev/null
+  . "$_TF_ROOT/payload/scripts/lib/anchors.sh"
+}
+_tf_anchor_shaped() {  # file|fn|insert <file> <text> … (the shapes above)
+  local shape="$1" f="${2:-}" t="${3:-}" fn=- name n d tab
+  tab="$(printf '\t')"
+  [ "$shape" != fn ] || { fn="${4:-}"; ANCHOR_SED=""; }
+  name="anchor ${shape} ${f}: '${t}'"; [ "$shape" != fn ] || name="${name} in ${fn}"
+  [ "${BASH_SOURCE[2]:-}" != "$0" ] || _TF_ANCHOR_RUN="${_TF_ANCHOR_RUN}${shape}${tab}${f}${tab}${t}${tab}${fn}
+"
+  if [ -z "$f" ] || [ -z "$t" ] || [ -z "$fn" ]; then
+    no "$name" "usage: anchor file|insert <file> <text> [<new> <dest>], anchor fn <file> <text> <function> [<new>]"; return 0
+  fi
+  _tf_anchors_load || { no "$name" "cannot load ${_TF_ROOT}/payload/scripts/lib/anchors.sh"; return 0; }
+  n="$(anchors_found "$_TF_ROOT" - "$shape" "$f" "$t" "$fn")"
+  case "$n" in
+    1) : ;;
+    nofile) no "$name" "found=0 — no file $f"; return 0 ;;
+    nofn) no "$name" "found=0 — no function $fn in $f"; return 0 ;;
+    0) no "$name" "found=0 — the anchor MOVED, so the mutation below is a no-op and every row under it is reading the shipped file"; return 0 ;;
+    *) no "$name" "found=$n — the anchor matches more than one line, so the mutation below rewrites lines it was never meant to touch"; return 0 ;;
+  esac
+  # fn: the mutation is a sed over `declare -f`, which drops comments and re-spells the body, so the
+  # text must be on one line of what the sed will read as well as of the source.
+  if [ "$shape" = fn ]; then
+    d="$(bash -c '. "$1" >/dev/null 2>&1 </dev/null; declare -f "$2"' _ "$_TF_ROOT/$f" "$fn" 2>/dev/null \
+      | ANC_TEXT="$t" awk 'index($0, ENVIRON["ANC_TEXT"]) { n++ } END { print n + 0 }')"
+    [ "$d" = 1 ] || { no "$name" "found=1 in the source, $d in declare -f $fn — the sed over declare -f is a no-op"; return 0; }
+  fi
+  ok "$name"
+  # WHAT THE MUTATION NEEDS, BUILT FROM THE ANCHOR, so the two cannot disagree; only after a green anchor,
+  # so a moved one leaves no mutant to read as a control.
+  case "$shape" in
+    file)   [ $# -lt 5 ] || ANC_TEXT="$t" ANC_NEW="$4" awk '{ i = index($0, ENVIRON["ANC_TEXT"])
+              if (i) $0 = substr($0, 1, i - 1) ENVIRON["ANC_NEW"] substr($0, i + length(ENVIRON["ANC_TEXT"])); print }' \
+              "$_TF_ROOT/$f" > "$5" ;;
+    insert) [ $# -lt 5 ] || ANC_TEXT="$t" ANC_NEW="$4" awk 'index($0, ENVIRON["ANC_TEXT"]) == 1 { print ENVIRON["ANC_NEW"] } { print }' \
+              "$_TF_ROOT/$f" > "$5" ;;
+    fn)     [ $# -lt 5 ] || ANCHOR_SED="s/$(printf '%s' "$t" | sed 's/[]\/$*.^[]/\\&/g')/$(printf '%s' "$5" | sed 's/[\/&]/\\&/g')/" ;;
+  esac
+}
+
+# THE AGREEMENT (D16): what anchors.sh extracts from this suite's file is what the suite ran from it.
+# One row, only when either side is non-zero, so a suite with no shaped anchor prints its old tally.
+_tf_anchor_agree() {
+  local rel ext lit run nl nx nr miss over
+  if [ -z "$_TF_ANCHOR_RUN" ] && ! grep -qE '^[[:space:]]*anchor[[:space:]]+(file|fn|insert)[[:space:]]' -- "$_TF_SUITE_ABS" 2>/dev/null; then
+    return 0
+  fi
+  _tf_anchors_load || { no "anchors: agreement" "cannot load ${_TF_ROOT}/payload/scripts/lib/anchors.sh"; return 0; }
+  rel="${_TF_SUITE_ABS#"$_TF_ROOT"/}"
+  ext="$(cd "$_TF_ROOT" && anchors_extract "$_TF_ROOT" - "$rel")"
+  nx="$(printf '%s' "$ext" | awk 'END { print NR }')"
+  nr="$(printf '%s' "$_TF_ANCHOR_RUN" | awk 'END { print NR }')"
+  lit="$(printf '%s\n' "$ext" | awk -F'\t' '$7 == "literal" { print $3 "\t" $4 "\t" $5 "\t" $6 }' | LC_ALL=C sort)"
+  run="$(printf '%s' "$_TF_ANCHOR_RUN" | LC_ALL=C sort)"
+  nl="$(printf '%s\n' "$ext" | awk -F'\t' '$7 == "nonliteral" { printf "%sNONLITERAL %s:%s", s, $1, $2; s = "; " }')"
+  if [ -z "$nl" ] && [ "$lit" = "$run" ]; then ok "anchors: ${nx} extracted = ${nr} run (${rel})"; return 0; fi
+  miss="$(LC_ALL=C comm -23 <(printf '%s\n' "$lit" | sed '/^$/d') <(printf '%s\n' "$run" | sed '/^$/d') | _tf_anchor_say)"
+  over="$(LC_ALL=C comm -13 <(printf '%s\n' "$lit" | sed '/^$/d') <(printf '%s\n' "$run" | sed '/^$/d') | _tf_anchor_say)"
+  no "anchors: ${nx} extracted, ${nr} run (${rel})" \
+    "${nl:+${nl} — a call anchors check cannot read. }${miss:+extracted, never run: ${miss}. }${over:+run, declared by no literal call: ${over}.}"
+}
+_tf_anchor_say() { awk -F'\t' '{ printf "%s%s %s \047%s\047%s", s, $1, $2, $3, ($4 == "-" ? "" : " in " $4); s = "; " }'; }
 
 # ── the tally ────────────────────────────────────────────────────────────────
 #
@@ -532,6 +631,7 @@ anchor() {
 finish() {
   local name suite adv=""
   _tf_close_section
+  _tf_anchor_agree
   if [ -n "$_TF_EMPTY" ]; then
     while IFS= read -r name; do
       [ -n "$name" ] || continue
