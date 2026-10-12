@@ -2786,7 +2786,7 @@ s42_unchanged "FD-c1 AC-17.3 with neither key the declared floor's log is judged
 expect_contains "FD-c1b …in today's words: no head=<sha> dirty=<n> line" "carries no head=<sha> dirty=<n> line" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-c2 …and the old runner's log, green at the head, still meets the roster rule (0 suites here)" 1 "$PFD"
-expect_contains "FD-c2b …in today's words" "3 passed and 0 void of 0 suites" "$OUT"
+expect_contains "FD-c2b …in today's words" "3 passed of 0 suites" "$OUT"
 
 # ---------- the mutants: doctored copies of the judge, never the tracked file ----------
 FD_MUT="$(mktemp -d "$TMPROOT/fd-mut.XXXXXX")"
@@ -3240,7 +3240,9 @@ expect_eq "NC-2b …the printed call, the column corrected" "bash $PV7_HOOK task
 pv7_run "$R7" "$NC_CALL"
 expect_eq "NC-2c …run as printed, it succeeds" "0|40" "$RC|$(s48_row "$P7" T5 | cut -d'|' -f7)"
 
-# ---------- §NEXT-CALL task-add: a doc row at step 7 without its approval read ----------
+# ---------- §RELEASE-READ task-add: a doc row at step 7 on the kind's default is admitted (wave-35 T5; REQ-4 AC-4.1; D13) ----------
+# Through wave-34 (wave-33 T7, NC-3) this call was refused and printed a retry carrying approval:release; the
+# release approval is now the integrate row's read, so the release text is added on its kind default.
 # §34's gate-admitted plan given a reads column, as session-poker-2's s51_plan gives it (the rule fires on a reads table).
 R7B="$(make_repo t7-task-add)"; ( cd "$R7B" && git commit -q --allow-empty -m init )
 P7B="$(s34_plan "$R7B" 4)"
@@ -3251,14 +3253,11 @@ awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
      { print }' "$P7B" > "$P7B.t7" && mv "$P7B.t7" "$P7B"
 s34_gate "$R7B"
 expect_eq "PV7-ta0 precondition: the reads-table fixture is admitted by the real commit gate" "0" "$GATE_RC"
-pv7_refused "NC-3 §NEXT-CALL task-add of a doc row at step 7 with the kind's default reads" 1 "approval:release" \
-  "$R7B" "$P7B" task-add T9 7 doc 'the release notes' implementor '—' 15 REQ-x CHANGELOG.md
-NC_CALL="$(pv7_next)"
-expect_eq "NC-3b …the printed call carries the approval read beside the kind's default" \
-  "bash $PV7_HOOK task-add T9 7 doc 'the release notes' implementor '—' 15 REQ-x CHANGELOG.md 'approval:plan, head, approval:release'" "$NC_CALL"
-pv7_run "$R7B" "$NC_CALL"
-expect_eq "NC-3c …run as printed, it succeeds and the row reads the approval" "0|approval:plan, head, approval:release" \
-  "$RC|$(s48_row "$P7B" T9 | awk -F'|' '{ print $NF }')"
+poke "$R7B" task-add T9 7 doc 'the release notes' implementor '—' 15 REQ-x CHANGELOG.md
+expect_eq "NC-3 §RELEASE-READ AC-4.1 task-add of a doc row at step 7 with the kind's default reads succeeds" "0" "$RC"
+expect_contains "NC-3b …saying it added the row" "task-add — T9 added to" "$OUT"
+expect_eq "NC-3c …the row is in the table, its reads cell the kind's default (written —), no approval:release written" "T9|7|doc|—" \
+  "$(s48_row "$P7B" T9 | awk -F'|' '{ print $1 "|" $2 "|" $3 "|" $NF }')"
 
 # ---------- §NEXT-CALL decline --on: a file is no row ----------
 R7C="$(make_repo t7-decline)"; new_roster "$R7C"
@@ -4158,6 +4157,26 @@ expect_eq "DR-5k …and still one item for it, open: the second refusal opened n
   "$(dr_item "$DR5_ID" | /usr/bin/grep -c '|state=open|')"
 expect_eq "DR-5l …sent once across both ticks (one call of the stub for it)" "1" \
   "$(/usr/bin/grep -c 'ruling' "$DR_CALLS" | tr -d ' ')"
+
+# ---------- §HOLD-RIDES (wave-35 T5; REQ-4 AC-4.4; D13): every standing hold rides the unchanged tick ----------
+# dr_tick forgets the digest, so DR-5h/5i never met the unchanged path, where the hold the backstop
+# re-found was dropped: the tick printed `unchanged since …` alone (research-walls item 7, A-orch-25 c).
+# Here the world stands still and the digest is kept: tick two takes the unchanged path and still says
+# each NOT-LANDED hold.
+dr_tick
+HR_T1="$OUT"
+PATH="$DR_BIN:$PATH" poke_pressure "$RDV" 8192 1.0 tick
+HR_T2="$OUT"
+expect_contains "HOLD-RIDES.0 precondition: tick one prints the hold in full" "NOT-LANDED T12 — w-T12" "$HR_T1"
+expect_contains "HOLD-RIDES.0b precondition: tick two, nothing changed and the digest kept, takes the unchanged path" \
+  "poker: unchanged since " "$HR_T2"
+expect_contains "HOLD-RIDES.1 AC-4.4 …and still prints the ruling hold" "NOT-LANDED T12 — w-T12" "$HR_T2"
+expect_contains "HOLD-RIDES.1b …naming the ruling's id" "$DR5_ID" "$(printf '%s\n' "$HR_T2" | /usr/bin/grep -F 'NOT-LANDED T12 ')"
+expect_contains "HOLD-RIDES.2 …and every other standing hold the backstop re-found (T9, no artifact)" "NOT-LANDED T9 — w-T9" "$HR_T2"
+expect_regex "HOLD-RIDES.3 …the unchanged line stays the tick's last line" "^poker: unchanged since " \
+  "$(printf '%s\n' "$HR_T2" | /usr/bin/grep '^poker: ' | tail -1)"
+expect_eq "HOLD-RIDES.4 …the row still holds, the ruling sent once across all four ticks" "active 1" \
+  "$(dv_status T12) $(/usr/bin/grep -c 'ruling' "$DR_CALLS" | tr -d ' ')"
 
 # DR-6: the closers. Read: the shown stamp closes the item at once, and the next tick lands the row.
 poke "$RDV" ruling-ack "$DR5_ID"
