@@ -3244,6 +3244,28 @@ later wall can judge (the suite wall, amend, the Patrol and the stop guard all r
 Fix: make ${STATE_DIR} and the roster writable by this user, then dispatch again."
 fi
 
+# THE TREE NAMES ITS NEW WRITER (wave-34 T28; D24, REQ-1 AC-1.1). The gate names a writer that carries
+# no name by its tree's marker (lib/gate.sh THE PLACE), and `spawn-worktree.sh create --for` writes it
+# for a tree's first writer. A row dispatched again into the tree its earlier launch recorded, the
+# plan row's `worktree` cell, is re-marked here for the new name by the one writer, `mark`, once the
+# launch is on the roster and before the agent exists, so its first suite asks as itself. Only a
+# linked tree, and only for a writer: a cell naming the main checkout or a tree that is gone, an
+# empty cell (a first dispatch, whose cell the launch sync fills after it), an unnamed launch and a
+# read-only role (a test-runner sent to the row's tree is not its writer) mark nothing. COST: one
+# plan read (~11 ms on a 600-line plan) per row-bound writer dispatch; the call (~41 ms: one bash,
+# one git) only when the cell names a linked tree. A mark that fails is said, not refused: the launch
+# is the roster's already.
+DP_BOUND_TREE=""
+if [ -n "$PLAN" ] && [ -n "$DP_BOUND_ROW" ] && [ -n "$AGENT_NAME" ] && ! role_is_readonly "$DP_SUBAGENT"; then
+  DP_BOUND_TREE="$(units_rows "$PLAN" 2>/dev/null \
+    | awk -F'\t' -v id="$DP_BOUND_ROW" '$1 != "" && $1 == id { print $11; exit }')"
+fi
+case "$DP_BOUND_TREE" in ''|/*) ;; *) DP_BOUND_TREE="$BIONIC_ROOT/$DP_BOUND_TREE" ;; esac
+[ -n "$DP_BOUND_TREE" ] && [ -f "$DP_BOUND_TREE/.git" ] || DP_BOUND_TREE=""
+[ -z "$DP_BOUND_TREE" ] \
+  || bash "$BIONIC_LIB/../spawn-worktree.sh" mark "$DP_BOUND_TREE" --for "$AGENT_NAME" >/dev/null 2>&1 \
+  || warn "the tree ${DP_BOUND_TREE} still names its last writer: spawn-worktree.sh mark --for ${AGENT_NAME} failed"
+
 # The roster carries the launch; what follows is only ever said.
 if [ -n "$ABSENT" ]; then
   warn "roster row for \"${AGENT_NAME:-(unnamed)}\" records absent brief field(s): ${ABSENT//,/, }"
