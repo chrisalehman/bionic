@@ -1,5 +1,4 @@
 #!/bin/bash
-# runner: solo
 # tests/bash-walls-egd.test.sh — the §EG-DERIVE sections of the one-process PreToolUse|Bash
 # hook, split out of tests/bash-walls.test.sh at wave-30 T9 (D8, REQ-4 AC-4.1).
 #
