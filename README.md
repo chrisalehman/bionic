@@ -98,9 +98,9 @@ and what it leaves behind.
 The ten steps are configure, scope, design, plan, implement, verify, review, document,
 integrate, close-out. Step 0 prints the entire configuration and waits for you to confirm it.
 Steps 1 through 3 are conversational: scoping that has to produce an explicit "not doing"
-list, a design interview run one question per turn, and a single approval covering the
-design, the plan and the verification matrix together. Steps 4 onward run unattended and stop
-at anything only you can decide.
+list, a design interview in which small decisions may share a turn and a momentous one goes
+alone, and a single approval covering the design, the plan and the verification matrix
+together. Steps 4 onward run unattended and stop at anything only you can decide.
 
 Review is one decision, made at Step 6. The readers read the settled whole once and rate every
 finding, and the orchestrator brings the set to you in the review findings disposition, where
@@ -175,17 +175,19 @@ the shipped artifact and a test surface.
 
 ### `decision` — every decision in one shape
 
-Puts a decision to you in four parts, always in this order: the goal, the numbered options,
-the recommendation with why it wins and why not each other option, and the significance,
-meaning what follows, what compounds and how hard it is to reverse. The last line is the reply,
-such as `Reply 1, 2 or 3 · or matrix, diagram, page`. It names the options and the richer forms
-still on offer.
+Puts a decision to you under a numbered heading, `D<n> · Step <s>`, in four parts, always in
+this order: the goal in one sentence, the numbered options, the recommendation with why it wins
+and why not each other option, and the significance, meaning what follows, what compounds and
+how hard it is to reverse. The last line is the reply, such as
+`Reply 1, 2 or 3 · or matrix, diagram, page`. It names the options and the richer forms still
+on offer.
 
 Claude reaches for it on its own whenever it hands you a choice, at any step of a lifecycle
-run or with none open. One decision comes per interview turn. Approvals and calls Claude can
-reverse never come through it. A matrix joins the options when there are three or more of them
-or three or more criteria. A diagram or a page is offered only when the decision is weighty
-enough, and stays a local file unless you ask for a link.
+run or with none open, framed as concepts, never as the files and functions the work touches.
+Small decisions may share a turn; a momentous one always comes alone. Approvals and calls
+Claude can reverse never come through it. A matrix joins the options when there are three or
+more of them or three or more criteria. A diagram or a page is offered only when the decision
+is weighty enough, and stays a local file unless you ask for a link.
 
 `/bionic:decision` with nothing after it puts whatever was last under discussion into the
 shape. Nothing is recorded per decision.

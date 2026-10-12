@@ -1,5 +1,6 @@
 #!/bin/bash
-# tests/decision-skill.test.sh — the decision skill's text, pinned (wave-33 REQ-11; wave-29 folded).
+# tests/decision-skill.test.sh — the decision skill's text, pinned (wave-33 REQ-11; wave-29 folded;
+# wave-34 REQ-12 and REQ-13).
 #
 # WHAT THIS SUITE OWNS. `skills/decision/SKILL.md` carries one fixed shape for a decision put to
 # the user: four bold labels in order (Goal, Options, Recommendation, Significance), a numbered
@@ -12,8 +13,10 @@
 # line, a forbidden word — each of which must fail. A predicate that a doctored copy passes is not
 # pinning anything, so the doctored half is what proves the shipped half means something.
 #
-# §SHAPE AC-11.1 · §FORMS AC-11.4 · §REPLY AC-11.5 · §PIN AC-11.6 · §SIZE AC-11.7 · §CORE the core
-# rule's static half (AC-11.2's live half is another row's). Static: reads files, runs nothing.
+# §SHAPE AC-11.1 (its rows 1-2 with §PIN 12-13 are AC-12.4's §LABELS) · §FORMS AC-11.4 · §REPLY
+# AC-11.5 · §PIN AC-11.6 · §SIZE AC-11.7, AC-12.4 · §CORE the core rule's static half (AC-11.2's live
+# half is another row's) · §NUMBER AC-12.1 · §GOAL AC-12.2 · §BATCH AC-12.3 · §ALTITUDE AC-13.1 ·
+# §EXAMPLES AC-13.2 (AC-13.3's live half is another row's). Static: reads files, runs nothing.
 #
 # WHY A TEXT PIN HERE, against the house rule that pinning text is a bad test. The labels and the
 # reply line are not prose: they are the strings a transcript reader keys on (ADR-048 item 3), so
@@ -40,6 +43,13 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 SKILL="${REPO}/skills/decision/SKILL.md"
 CORE="${REPO}/skills/canonical-sdlc/SKILL.md"
+STEP2="${REPO}/skills/canonical-sdlc/steps/2.md"
+CORE_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl"
+STEP2_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl"
+HEADING='**D<n> · Step <s>**'
+KINDS='How a rule is enforced|How a shared resource is shared|What a wave builds'
+# The skill's size cap (AC-12.4): raised from 5,000 bytes to carry the three worked pairs.
+SIZE_CAP=10000
 REPLY_LINE='Reply 1, 2 or 3 · or matrix, diagram, page'
 LABELS='Goal Options Recommendation Significance'
 
@@ -149,6 +159,93 @@ reach_ok() {
   grep -qi 'is a decision too: put it in the shape' <<<"$d"
 }
 
+# number_ok <file> — the layout opens on the numbered heading, and the skill says the numbers run in
+# the order asked. Bash string equality: the heading carries a multibyte middle dot.
+number_ok() {
+  local first
+  first="$(layout "$1" | sed '/^[[:space:]]*$/d' | head -1)"
+  [ "$first" = "$HEADING" ] || return 1
+  grep -qi 'in one sequence, in the order asked' "$1"
+}
+
+# goal_ok <file> — the Goal is one sentence; a short paragraph may follow it, and is optional.
+goal_ok() {
+  grep -qi 'the goal is one sentence' "$1" || return 1
+  grep -i 'short plain paragraph after the goal' "$1" | grep -qi 'optional'
+}
+
+# batch_ok <file> — small decisions may share a turn, a momentous one always goes alone, and no
+# line still says one decision per turn. The negative reads the same file the positives just read.
+batch_ok() {
+  grep -qi 'small decisions may share a turn' "$1" || return 1
+  grep -qiE 'momentous (one|decision) (always )?goes alone' "$1" || return 1
+  ! grep -qiE 'one decision per (interview )?turn|one question per turn' "$1"
+}
+
+# ALT_CLAUSES — AC-13.1's five clauses, one phrase each, exactly as the skill states them.
+ALT_CLAUSES=(
+  'concepts, not mechanisms: its Goal and Options carry no file, function, row, task or version identifiers'
+  'short plain paragraph after the Goal explains the problem before any option'
+  'option is named as an idea and says what it means for the user'
+  'names the principle that decides it'
+  'Significance names the rule the choice sets for later work'
+)
+
+# altitude2_ok <file> — every one of the five design-altitude clauses is present.
+altitude2_ok() {
+  local c
+  for c in "${ALT_CLAUSES[@]}"; do grep -qF -- "$c" "$1" || return 1; done
+}
+
+# pairs <file> -> one line per complete worked pair, its kind: a `### ` heading under
+# `## Worked pairs` with exactly one `Mechanism level:` and one `Design altitude:` half.
+pairs() {
+  awk '
+    function flush() { if (kind != "" && m == 1 && a == 1) print kind; kind = ""; m = 0; a = 0 }
+    /^## / { flush(); inp = ($0 == "## Worked pairs"); next }
+    inp && /^### / { flush(); kind = substr($0, 5); next }
+    inp && kind != "" && $0 == "Mechanism level:" { m++ }
+    inp && kind != "" && $0 == "Design altitude:" { a++ }
+    END { flush() }' "$1"
+}
+
+# pairs_ok <file> — at least three pairs, of the three named kinds, none repeated.
+pairs_ok() {
+  local got
+  got="$(pairs "$1" | sort)"
+  [ "$(printf '%s\n' "$got" | grep -c .)" -ge 3 ] || return 1
+  [ -z "$(printf '%s\n' "$got" | uniq -d)" ] || return 1
+  [ "$(printf '%s\n' "$got" | sort -u | tr '\n' '|' | sed 's/|$//')" = "$KINDS" ]
+}
+
+# half <file> <n> <Mechanism level|Design altitude> -> the Goal-to-Options lines of pair n's half:
+# what the altitude rule governs (the Recommendation and Significance lines are not read).
+half() {
+  awk -v n="$2" -v h="$3:" '
+    /^## / { inp = ($0 == "## Worked pairs"); next }
+    inp && /^### / { k++; on = 0; next }
+    inp && k == n && $0 == h { on = 1; next }
+    on && /^(Mechanism level|Design altitude):$/ { on = 0 }
+    on && /^> \*\*(Recommendation|Significance):\*\*/ { on = 0 }
+    on && /^> / { print }' "$1"
+}
+
+# IDENT — what a design-altitude Goal or Options never carries: a backticked name, a task,
+# requirement or criterion number, a file name, a version string.
+IDENT='`|(^|[^A-Za-z0-9])(T[0-9]+|REQ-[0-9]+|AC-[0-9]+)|[A-Za-z0-9_-]+\.(sh|md|tsv|yaml|json|py)([^A-Za-z]|$)|[0-9]+\.[0-9]+\.[0-9]+'
+
+# altitude_halves_ok <file> — in every pair the mechanism half carries an identifier (it is the
+# failure it shows) and the design-altitude half carries none.
+altitude_halves_ok() {
+  local n mech alt
+  for n in 1 2 3; do
+    mech="$(half "$1" "$n" 'Mechanism level')"; alt="$(half "$1" "$n" 'Design altitude')"
+    [ -n "$mech" ] && [ -n "$alt" ] || return 1
+    grep -qE "$IDENT" <<<"$mech" || return 1
+    ! grep -qE "$IDENT" <<<"$alt" || return 1
+  done
+}
+
 # doctor <src> <dst> <sed-expr> — a doctored copy of the skill.
 doctor() { sed -E "$3" "$1" > "$2"; }
 
@@ -168,7 +265,8 @@ expect_true "3: Options is a numbered list, one blank line before Recommendation
 expect_true "4: Recommendation opens on the option number and answers the others; Significance names downstream, compounding, reversal" \
   recommendation_ok "$SKILL"
 expect_true "5: the five altitude clauses, in the latest wording" altitude_ok "$SKILL"
-expect_true "6: one decision per interview turn" grep -qi 'one decision per interview turn' "$SKILL"
+expect_true "6: small decisions may share a turn, a momentous one alone; none says one per turn (AC-12.3)" \
+  batch_ok "$SKILL"
 expect_true "7: approvals and reversible calls stay out" \
   grep -qiE 'approvals? .*reversible|reversible .*approvals?' "$SKILL"
 
@@ -224,10 +322,10 @@ expect_empty "17b: …and nothing that is not markdown (no script, hook or store
 expect_true "18: the skill states nothing is run or written per decision" \
   grep -qi 'nothing is run or written' "$SKILL"
 
-section "§SIZE — at most 5,000 bytes, listed in the README, no person named (AC-11.7)"
+section "§SIZE — at most ${SIZE_CAP} bytes, listed in the README, no person named (AC-11.7, AC-12.4)"
 
 SIZE="$(wc -c < "$SKILL" | tr -d ' ')"
-expect_true "19: skills/decision/SKILL.md is at most 5000 bytes (is ${SIZE})" test "$SIZE" -le 5000
+expect_true "19: skills/decision/SKILL.md is at most ${SIZE_CAP} bytes (is ${SIZE})" test "$SIZE" -le "$SIZE_CAP"
 expect_true "20: the README lists the skill" grep -q '^### `decision`' "${REPO}/README.md"
 expect_true "21: the help page's skill list lists it" grep -q '`/bionic:decision`' "${REPO}/payload/commands/help.md"
 expect_true "22a: the skill names its own audience-neutral subject (the user)" grep -qiw 'user' "$SKILL"
@@ -241,8 +339,8 @@ expect_true "23: the core names the decision skill and says to invoke it" \
 expect_true "24: …at any step and with no run open" grep -q 'at any step and with no run open' "$CORE"
 expect_true "25: …naming the Step-1 and Step-2 interviews as its heaviest users" \
   grep -qE 'Step-1 .*Step-2 .*heaviest users' "$CORE"
-expect_true "26: …one decision per turn; approvals and reversible calls stay out" \
-  grep -qE 'one decision per turn.*Approvals and calls you can reverse stay out' "$CORE"
+expect_true "26: …small decisions may share a turn; approvals and reversible calls stay out" \
+  grep -qE 'small decisions may share a turn.*Approvals and calls you can reverse stay out' "$CORE"
 
 section "§REACH — the description names the case the live check exposed (T27, AC-11.2)"
 
@@ -251,5 +349,81 @@ expect_true "27b: it names the user asking which of several options to use as a 
 doctor "$SKILL" "$TMP/no-reach.md" 's/asks which of several options to use/asks something/'
 expect_true "27c: the doctored copy's plant landed" grep -q 'asks something' "$TMP/no-reach.md"
 expect_false "27d: …and the doctored copy (case removed) fails the pin" reach_ok "$TMP/no-reach.md"
+
+section "§NUMBER — every decision is numbered on a heading above the Goal (AC-12.1)"
+
+expect_true "28a: the layout opens on the heading, and the numbers run in the order asked" number_ok "$SKILL"
+anchor "$SKILL" "$HEADING" 1
+grep -vF "$HEADING" "$SKILL" > "$TMP/no-number.md"
+expect_false "28b: the number-dropped copy lost the heading" grep -qF "$HEADING" "$TMP/no-number.md"
+expect_true "28c: …and still carries the Goal (the copy is not empty)" grep -q '^\*\*Goal:\*\*' "$TMP/no-number.md"
+expect_false "28d: a copy dropping the numbered heading fails the number pin" number_ok "$TMP/no-number.md"
+
+section "§GOAL — the Goal is one sentence, an optional short paragraph after it (AC-12.2)"
+
+expect_true "29a: the altitude says the Goal is one sentence, and the paragraph after it is optional" goal_ok "$SKILL"
+anchor "$SKILL" 'The Goal is one sentence' 1
+doctor "$SKILL" "$TMP/long-goal.md" 's/The Goal is one sentence/The Goal may run to several sentences/'
+expect_true "29b: the long-goal copy carries the plant" grep -q 'may run to several sentences' "$TMP/long-goal.md"
+expect_false "29c: a copy letting the Goal run to several sentences fails the goal pin" goal_ok "$TMP/long-goal.md"
+
+section "§BATCH — the batching rule on the skill, the core and Step 2, in the templates too (AC-12.3)"
+
+for f in "$CORE" "$STEP2" "$CORE_TMPL" "$STEP2_TMPL"; do
+  expect_true "30: ${f#"$REPO"/} lets small decisions share a turn, a momentous one alone, and never says one per turn" \
+    batch_ok "$f"
+done
+anchor -E "$SKILL" 'momentous (one|decision) always goes alone' 1
+doctor "$SKILL" "$TMP/no-alone.md" 's/[Mm]omentous (one|decision) always goes alone/momentous one may join them/'
+expect_true "31a: the momentous-dropped copy carries the plant" grep -q 'momentous one may join them' "$TMP/no-alone.md"
+expect_false "31b: a copy without momentous-alone fails the batch pin" batch_ok "$TMP/no-alone.md"
+anchor "$CORE" 'small decisions may share a turn' 1
+doctor "$CORE" "$TMP/core-old.md" 's/small decisions may share a turn/one decision per turn, small decisions may share a turn/'
+expect_true "32a: the core copy carries the old sentence" grep -q 'one decision per turn' "$TMP/core-old.md"
+expect_false "32b: a core that still says one per turn fails the batch pin" batch_ok "$TMP/core-old.md"
+expect_true "33: each decision of a batch keeps its own number and reply line" \
+  grep -qi 'own number and reply line' "$SKILL"
+
+section "§ALTITUDE — concepts not mechanisms, and the four clauses that make it so (AC-13.1)"
+
+expect_true "34a: the five design-altitude clauses are present" altitude2_ok "$SKILL"
+i=0
+for c in "${ALT_CLAUSES[@]}"; do
+  i=$((i + 1))
+  anchor "$SKILL" "$c" 1
+  awk -v c="$c" '{ p = index($0, c); if (p) $0 = substr($0, 1, p - 1) "DROPPED" substr($0, p + length(c)); print }' \
+    "$SKILL" > "$TMP/alt-$i.md"
+  expect_true "34b.$i: the copy without clause $i carries the plant" grep -q 'DROPPED' "$TMP/alt-$i.md"
+  expect_false "34c.$i: a copy without clause $i fails the altitude pin" altitude2_ok "$TMP/alt-$i.md"
+done
+
+section "§EXAMPLES — three worked pairs, three kinds, in the skill file (AC-13.2)"
+
+PAIRS="$(pairs "$SKILL")"
+expect_nonempty "35a: the pairs extractor reads pairs from the skill" "$PAIRS"
+expect_true "35b: three pairs, one of each kind: enforced, built, shared" pairs_ok "$SKILL"
+expect_true "35c: each pair's mechanism half carries identifiers, its design-altitude half none" \
+  altitude_halves_ok "$SKILL"
+
+anchor "$SKILL" '### What a wave builds' 1
+awk '/^### What a wave builds$/ { skip = 1; next } skip && /^#/ { skip = 0 } !skip' "$SKILL" > "$TMP/two-pairs.md"
+expect_eq "36a: the two-pair copy carries two pairs" "2" "$(pairs "$TMP/two-pairs.md" | grep -c .)"
+expect_false "36b: a copy with two pairs fails the examples pin" pairs_ok "$TMP/two-pairs.md"
+
+anchor "$SKILL" '### How a shared resource is shared' 1
+doctor "$SKILL" "$TMP/same-kind.md" 's/^### How a shared resource is shared$/### How a rule is enforced/'
+expect_eq "37a: the same-kind copy carries the enforced kind twice" "2" "$(pairs "$TMP/same-kind.md" | grep -c 'enforced')"
+expect_false "37b: a copy with two pairs of one kind fails the examples pin" pairs_ok "$TMP/same-kind.md"
+
+anchor "$SKILL" '## Worked pairs' 1
+awk '/^## Worked pairs$/ { print "## Worked pairs"; print ""; print "See examples.md beside this file."; skip = 1; next }
+     skip && /^## / { skip = 0 } !skip' "$SKILL" > "$TMP/moved.md"
+expect_true "38a: the moved-out copy points elsewhere" grep -q 'See examples.md' "$TMP/moved.md"
+expect_false "38b: a copy whose pairs live in another file fails the examples pin" pairs_ok "$TMP/moved.md"
+
+awk '/^Design altitude:$/ { a = 1 } a == 1 && /^> \*\*Goal:\*\*/ { $0 = $0 " in `walls.sh`"; a = 2 } { print }' \
+  "$SKILL" > "$TMP/ident.md"
+expect_true "39a: the identifier copy carries the plant" grep -q 'in `walls.sh`' "$TMP/ident.md"
+expect_false "39b: a design-altitude half naming a file fails the halves pin" altitude_halves_ok "$TMP/ident.md"
 
 finish
