@@ -2736,7 +2736,7 @@ s42_unchanged "FD-c1 AC-17.3 with neither key the declared floor's log is judged
 expect_contains "FD-c1b …in today's words: no head=<sha> dirty=<n> line" "carries no head=<sha> dirty=<n> line" "$OUT"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-c2 …and the old runner's log, green at the head, still meets the roster rule (0 suites here)" 1 "$PFD"
-expect_contains "FD-c2b …in today's words" "3 passed and 0 void of 0 suites" "$OUT"
+expect_contains "FD-c2b …in today's words" "3 passed of 0 suites" "$OUT"
 
 # ---------- the mutants: doctored copies of the judge, never the tracked file ----------
 FD_MUT="$(mktemp -d "$TMPROOT/fd-mut.XXXXXX")"

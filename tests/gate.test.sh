@@ -872,6 +872,74 @@ release wa
 expect_eq "WC.13 …and with nothing held it is admitted (rc 0), promised its width and its 2 s" "0|0:6:2" \
   "$(ask_fg wr3 whole tests/run.sh 0)|$(field "$(id_of wr3)" promise)"
 
+# ── §WHOLE ───────────────────────────────────────────────────────────────────
+# A HAND WHOLE RUN ASKS KIND `whole` AND HOLDS THE MACHINE (wave-35 T2; D11, AC-2.4; ADR-051). The solo
+# suites and `booked.sh --quiet` were the other askers of `whole`, and they are gone; the one left is
+# the runner itself, `bash tests/run.sh` with no --only, which asks `whole tests/run.sh` once and
+# runs every suite inside it. While it holds, a writer's suite asked from outside the run waits.
+# FIXTURE FIDELITY: a real git checkout of the shipped runner and this tree's libraries (§BUDGET-AT-
+# ASK's shape), started on the main thread; its one suite records the request its admission names
+# and holds until the row lets it go, so the outside ask is taken while the run is inside the gate.
+# The mutation control is the same checkout with the runner's ask spelled `work`.
+# fails-when: a hand whole run asks any kind but whole, or another ask is admitted while it holds.
+section "§WHOLE — a hand whole run asks kind whole and holds the machine (D11, AC-2.4; ADR-051)"
+wh_tree() {  # <dir> <runner> — a checkout of <runner>, this tree's libraries, one holding suite
+  mkdir -p "$1/tests/lib" "$1/payload/scripts/lib"
+  git -C "$1" init -q
+  cp "$2" "$1/tests/run.sh"
+  cp "$REPO_ROOT/tests/lib/resolve-roots.sh" "$REPO_ROOT/tests/lib/assert.sh" "$1/tests/lib/"
+  cp "$REPO_ROOT"/payload/scripts/lib/*.sh "$1/payload/scripts/lib/"
+  cat > "$1/tests/w-hold.test.sh" <<'WH_SUITE'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+f="$WH_GATE/requests/${BIONIC_GATE_ADMIT:-none}"
+printf '%s %s\n' "$(sed -n 's/^kind=//p' "$f" 2>/dev/null | tail -n 1)" "$(sed -n 's/^key=//p' "$f" 2>/dev/null | tail -n 1)" > "$WH_MARKS/admit"
+: > "$WH_MARKS/started"
+i=0; while [ ! -f "$WH_MARKS/go" ] && [ "$i" -lt 400 ]; do i=$((i + 1)); sleep 0.05; done
+section "w-hold"
+expect_eq "w-hold ran" x x
+finish
+WH_SUITE
+}
+wh_drive() {  # <dir> — the hand whole run in the background; its rc lands in $WH_MARKS/rc
+  rm -f "$WH_MARKS"/*
+  ( cd "$1" && env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT WH_GATE="$BIONIC_GATE_DIR" WH_MARKS="$WH_MARKS" \
+      BIONIC_PRESSURE_RING="$D/ring" BIONIC_TEST_JOBS_CEILING=2 bash tests/run.sh > "$WH_MARKS/out" 2>&1
+    printf '%s\n' "$?" > "$WH_MARKS/rc" ) &
+  BG="$BG $!"
+  wait_for 30 test -f "$WH_MARKS/started"
+}
+wh_has() { [ -f "$WH_MARKS/$1" ]; }
+fresh whole-hand
+world_machine 8 8192 20 0.5
+WH_MARKS="$D/wh-marks"; mkdir -p "$WH_MARKS"
+wh_tree "$D/proj" "$REPO_ROOT/tests/run.sh"
+wh_drive "$D/proj"
+expect_eq "WH.1 the run's suite started, inside the run (the drive is real)" "yes" "$(wh_has started && echo yes || echo no)"
+expect_eq "WH.2 AC-2.4 its admission is the run's one request, kind whole, keyed tests/run.sh" "whole tests/run.sh" \
+  "$(cat "$WH_MARKS/admit" 2>/dev/null)"
+expect_eq "WH.3 …held while the suite runs: no other ask is admitted, a writer's suite waits (rc 75)" "75" \
+  "$(ask_fg wk work k.test.sh 0)"
+touch "$WH_MARKS/go"; wait_for 60 wh_has rc
+expect_eq "WH.4 the run ends green" "0" "$(cat "$WH_MARKS/rc" 2>/dev/null)"
+expect_eq "WH.5 …and once it has ended, the same ask is admitted (rc 0)" "0" "$(ask_fg wk2 work k.test.sh 0)"
+# The mutation control: the runner's one ask spelled `work`. Anchored first, proved to run.
+WH_MUT="$MUT/whole-hand/run.sh"; mkdir -p "${WH_MUT%/*}"
+anchor "$REPO_ROOT/tests/run.sh" '_gate_ask_for whole tests/run.sh' 1
+sed 's/_gate_ask_for whole tests\/run.sh/_gate_ask_for work tests\/run.sh/' "$REPO_ROOT/tests/run.sh" > "$WH_MUT"
+fresh whole-hand-mut
+world_machine 8 8192 20 0.5
+WH_MARKS="$D/wh-marks"; mkdir -p "$WH_MARKS"
+wh_tree "$D/proj" "$WH_MUT"
+wh_drive "$D/proj"
+expect_eq "WH.6 meta: the mutant's suite started too (the mutant runs)" "yes" "$(wh_has started && echo yes || echo no)"
+expect_eq "WH.7 the mutant's run asks work, so WH.2 reads the rule, not the fixture" "work tests/run.sh" \
+  "$(cat "$WH_MARKS/admit" 2>/dev/null)"
+expect_eq "WH.8 …and holds nothing: the writer's suite is admitted beside it (rc 0), so WH.3 reads the rule" "0" \
+  "$(ask_fg wk work k.test.sh 0)"
+touch "$WH_MARKS/go"; wait_for 60 wh_has rc
+
 # ── §ONE-CORE ────────────────────────────────────────────────────────────────
 # THE GATE DOES NOT FORECAST FROM HISTORY (wave-33 T1; D4 as amended, Δ10; AC-8.1). A command
 # that declares no width is promised one core and no memory; a whole run, the width it takes
@@ -1966,8 +2034,8 @@ wait_for 20 has sl.brc
 expect_eq "B.30 BIONIC_SLOT_HELD=1 skips nothing: the shim asked, and with no room ends 75" "75" "$(brc sl)"
 expect_false "B.31 …its command never ran" has sl.ran
 MW_DIR="$MUT/wrap-believe"; mkdir -p "$MW_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$MW_DIR/scripts"
-anchor "$MW_DIR/scripts/booked.sh" '    booked_ask work' 1
-sed -i.bak 's/^    booked_ask work$/    [ -n "${BIONIC_GATE_ADMIT:-}" ] || booked_ask work/' "$MW_DIR/scripts/booked.sh"
+anchor "$MW_DIR/scripts/booked.sh" '  booked_ask work' 1
+sed -i.bak 's/^  booked_ask work$/  [ -n "${BIONIC_GATE_ADMIT:-}" ] || booked_ask work/' "$MW_DIR/scripts/booked.sh"
 stranger_rows "$MW_DIR/scripts/booked.sh" mut
 expect_eq "B.32 the mutant (believes a typed admission without asking) still ends: rc 0" "0" "$ST_RC"
 expect_eq "B.33 …and runs the stranger's command: asking is the rule" "yes" "$ST_RAN"

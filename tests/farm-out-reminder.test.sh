@@ -97,13 +97,13 @@ run_hook() {
 # stdout (the object holds nothing but the event name and updatedInput), and the updated
 # command is the shim around the ORIGINAL command, byte for byte.
 expect_wrap_only() {  # <label> <command> [<options regex after --detach; default none>] [<suites; default run\.sh>]
-  # Every wrap without a kill limit carries --detach (wave-30 T12, A-orch-7; it was wave-27 T6's --max-wait), after --quiet.
+  # Every wrap without a kill limit carries --detach (wave-30 T12, A-orch-7; it was wave-27 T6's --max-wait); no wrap carries --quiet (wave-35 T2).
   local _cmd _s _r="'\\''" _o="${3-} --suites ${4-run\\.sh}"
   expect_eq "$1: …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1: …the updated command runs the booking shim" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --detach${_o} -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --detach${_o} -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1: …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
 }
@@ -442,7 +442,7 @@ reason_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision
 # first_fix — the reason's text from its FIRST "Fix: " to the end of that sentence's clause.
 first_fix() { local r; r="$(reason_of)"; case "$r" in *'Fix: '*) r="${r#*Fix: }"; printf '%s' "${r%% — *}" ;; esac; }
 kill_re() {  # <seconds> <command regex> [<suites; default one\.test\.sh>] — the wrap, carrying --kill-after <seconds>
-  printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --kill-after $1 --suites ${3-one\\.test\\.sh} -- $2\$"
+  printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --kill-after $1 --suites ${3-one\\.test\\.sh} -- $2\$"
 }
 
 # S1 (the eval): a one-file suite command with timeout 60000 is allowed and wrapped with a kill limit.
@@ -517,8 +517,11 @@ run_hook "$(with_timeout "$(mk_payload "$SHORTR" "make && $ONE && echo done")" 3
 expect_regex "S5h: a short chain with a suite in the middle is wrapped too" \
   "$(kill_re 25 "'make && bash tests/one\\.test\\.sh && echo done'")" "$(wrapped_cmd)"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "BIONIC_QUIET=1 $ONE")" 60000)"
-expect_regex "S5d: a short whole-machine suite carries --quiet and the kill limit" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --quiet --kill-after 55 --suites one\\.test\\.sh -- " "$(wrapped_cmd)"
+# S5d INVERTED BY WAVE-35 T2 (D11, AC-2.1): BIONIC_QUIET=1 is read by nobody, so the short suite is
+# wrapped with its kill limit and no --quiet (until wave-35 it carried --quiet).
+expect_regex "S5d: a short suite with BIONIC_QUIET=1 carries the kill limit and no --quiet" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --kill-after 55 --suites one\\.test\\.sh -- " "$(wrapped_cmd)"
+expect_absent "S5d2: …no --quiet anywhere in the wrap (S5d is the positive on the same extractor)" "--quiet" "$(wrapped_cmd)"
 
 # A SHORT CALL THAT IS NOT TIER-1 IS LEFT ALONE: nothing to pass, so nothing to wrap or kill.
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" 'ls -la')" 5000)"
