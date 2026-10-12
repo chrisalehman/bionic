@@ -574,7 +574,22 @@ cmd_ready() {
   exit $?
 }
 
+# THE PASS A LANDING STARTED (wave-34 T9; D15): internal, nobody types it. `ready` starts it detached
+# (booked.sh --detach --no-follow) in a landing tree at the landed head; it runs the declared regression
+# once under the gate's `pass` admission and writes its end to the landing record (lib/line.sh
+# `line_pass_run`). Exit 0 whatever the regression said; 2 when it cannot load or is called wrong.
+cmd_pass() {
+  local lib
+  for lib in "$LIB_WORKTREE" "${LIB_WORKTREE%/*}/session.sh" "${LIB_WORKTREE%/*}/line.sh"; do
+    # shellcheck source=/dev/null
+    [ -f "$lib" ] && . "$lib" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${lib}"; exit 2; }
+  done
+  line_pass_run "$@"
+  exit $?
+}
+
 case "${1:-}" in
+  pass)   shift; cmd_pass "$@" ;;
   create) shift; cmd_create "$@" ;;
   remove) shift; cmd_remove "$@" ;;
   mark)   shift; cmd_mark "$@" ;;
