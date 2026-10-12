@@ -1381,7 +1381,7 @@ expect_eq "ONLY.30 --dry-run still runs nothing" "0 no" "$RR_RC $(ro_ran only-a)
 # above that read "the unnamed suite did not run" must move: under it, only-b runs.
 TOM="$TMPROOT/only-mut"
 rr_tree "$TOM"; ro_stub only-a "$TOM"; ro_stub only-b "$TOM"
-anchor "$TOM/tests/run.sh" '  set -- ${_only_files+"${_only_files[@]}"}' 1
+anchor file tests/run.sh '  set -- ${_only_files+"${_only_files[@]}"}'
 grep -vF '  set -- ${_only_files+"${_only_files[@]}"}' "$RUNNER" > "$TOM/tests/run.sh"
 expect_eq "ONLY.31 the mutant runner parses" "0" "$(bash -n "$TOM/tests/run.sh" >/dev/null 2>&1; echo $?)"
 RO_DIR="$TOM" ro_drive --only only-a.test.sh
@@ -1644,7 +1644,7 @@ expect_absent "OU.4 …and it prints no Wall: line (the whole run's summary)" "W
 # THE MUTANT: the whole-run guard gone, so --only takes the run-wide admission.
 TOUM="$TMPROOT/only-unch-mut"
 rr_tree "$TOUM"; oa_stub "$TOUM" oa-fast 0
-anchor "$TOUM/tests/run.sh" '  if [ "$ONLY" -eq 0 ] && [ -s "$LAUNCH" ]; then' 1
+anchor file tests/run.sh '  if [ "$ONLY" -eq 0 ] && [ -s "$LAUNCH" ]; then'
 sed 's/^  if \[ "\$ONLY" -eq 0 \] && \[ -s "\$LAUNCH" \]; then/  if [ -s "$LAUNCH" ]; then/' "$RUNNER" > "$TOUM/tests/run.sh"
 expect_eq "OU.5 the mutant runner parses and differs" "0 no" \
   "$(bash -n "$TOUM/tests/run.sh" >/dev/null 2>&1; echo $?) $(cmp -s "$RUNNER" "$TOUM/tests/run.sh" && echo yes || echo no)"

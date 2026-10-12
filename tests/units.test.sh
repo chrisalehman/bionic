@@ -4012,7 +4012,7 @@ expect_eq "SF-10 a value with & \\1 .* and a quote is written as typed" '  cmd: 
 # THE MUTATION ARM: a copy of the library whose replace mode writes the new line AFTER the old one (an append
 # where a replacement belongs) turns SF-1b, SF-1d and SF-4 red. The copy is made in the sandbox, never in the tree.
 SF_NEEDLE='if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
-anchor "$LIB" "$SF_NEEDLE" 1
+anchor file payload/scripts/lib/units.sh 'if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
 SF_MUT="$SANDBOX/units-mut-append.sh"
 SF_R='if (replace && (i in at_line)) { print L[i]; print "  " key[at_line[i]] ": " val[at_line[i]] }'
 SF_N="$SF_NEEDLE" SF_R="$SF_R" awk 'BEGIN { n = ENVIRON["SF_N"]; r = ENVIRON["SF_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$LIB" > "$SF_MUT"

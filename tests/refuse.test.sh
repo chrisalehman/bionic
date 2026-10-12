@@ -146,10 +146,12 @@ MUT_DIR="$SANDBOX/lib"
 mkdir -p "$MUT_DIR"
 cp "$LIB_DIR/width.sh" "$MUT_DIR/width.sh"
 
-# mutant <name> <sed-expr> <anchor-substring> — sets MUT_PATH to a scratch copy of the
-# shipped library with one guard removed. `anchor` runs FIRST: a mutation whose
-# pattern no longer matches would leave an unmutated copy and an arm that passes over
-# the shipped file while claiming to have broken it.
+# mutant <name> <sed-expr> — sets MUT_PATH to a scratch copy of the shipped library with
+# one guard removed. EACH CALL IS PRECEDED BY ITS OWN `anchor file payload/scripts/lib/refuse.sh
+# '<text>'` (wave-35 T23; D16): a mutation whose pattern no longer matches would leave an
+# unmutated copy and an arm that passes over the shipped file while claiming to have broken it,
+# and the anchor's file and text are literals so `anchors check` confirms them at every
+# landing. It is not made here because a helper's anchor call has a variable for its text.
 #
 # IT SETS A VARIABLE AND DOES NOT PRINT THE PATH. `anchor` reports through the
 # framework's `ok`, which writes to stdout, so a `MUT="$(mutant …)"` capture swallows
@@ -162,9 +164,8 @@ mutant() {
   # creates every name as an unset local FIRST and then assigns, so `$name` in the
   # fourth word expands to the unset local and `set -u` kills the function — silently,
   # inside a command substitution, leaving an empty path the arms below then source.
-  local name="$1" expr="$2" pat="$3"
+  local name="$1" expr="$2"
   local dst="$MUT_DIR/$name.sh"
-  anchor "$LIB" "$pat" 1
   sed -E "$expr" "$LIB" > "$dst"
   MUT_PATH="$dst"
 }
@@ -374,7 +375,8 @@ expect_true "2ae …and the complaint itself fits the budget" \
 
 # --- (g) THE MUTANTS. Without these, every row above could be passing over a
 # renderer that never checked anything. ---
-mutant m-words 's/"\$fix_words" -gt/0 -gt/' '"$fix_words" -gt'
+anchor file payload/scripts/lib/refuse.sh '"$fix_words" -gt'
+mutant m-words 's/"\$fix_words" -gt/0 -gt/'
 M_WORDS="$MUT_PATH"
 drive "$M_WORDS" exit2 "$FX_VERB" "$FX_FACT_SHORT" "$FX_FIX_7" "$FX_DETAIL"
 expect_contains "2af MUTANT without the word budget the over-long fix is emitted (the arm discriminates)" \
@@ -390,7 +392,8 @@ expect_regex "2ag MUTANT …and the criterion's regex CANNOT see the word count:
 expect_eq "2ag2 MUTANT …so the library, not the regex, is the only thing enforcing six words" \
   "7" "$(bash -c '. "$1"; _refuse_words "$2"' _ "$LIB" "$FX_FIX_7")"
 
-mutant m-leak 's/refuse_channel "\$mode" detail_to_user/echo yes/' 'refuse_channel "$mode" detail_to_user'
+anchor file payload/scripts/lib/refuse.sh 'refuse_channel "$mode" detail_to_user'
+mutant m-leak 's/refuse_channel "\$mode" detail_to_user/echo yes/'
 M_LEAK="$MUT_PATH"
 drive "$M_LEAK" deny "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_ne "2ah MUTANT with the stream split removed, deny's user stream is no longer one line" \
@@ -428,7 +431,8 @@ expect_eq "3g BIONIC_WALL_VERBOSE=yes is off: the knob's value is 1" "1" "$DRV_E
 # THE MUTANT: the knob removed from the condition. deny is the mode to drive it on —
 # its `detail_to_user` cell is `no`, so the knob is the only thing that can put the
 # detail on the user stream there.
-mutant m-knob 's/BIONIC_WALL_VERBOSE:-/BIONIC_KNOB_THE_MUTANT_IGNORES:-/' 'BIONIC_WALL_VERBOSE:-'
+anchor file payload/scripts/lib/refuse.sh 'BIONIC_WALL_VERBOSE:-'
+mutant m-knob 's/BIONIC_WALL_VERBOSE:-/BIONIC_KNOB_THE_MUTANT_IGNORES:-/'
 M_KNOB="$MUT_PATH"
 drive_v 1 "$M_KNOB" deny "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_absent "3h MUTANT with the knob ignored the detail never reaches the user (the arm discriminates)" \
@@ -689,7 +693,8 @@ expect_contains "6s …while the model's wire still carries the thirtieth line, 
 expect_absent "6t …and no count line was spliced into it" "+18 more" "$DRV_OUT"
 
 # --- (e) THE MUTANTS. Both halves of ADR-030 have one: the cell, and the fold. ---
-mutant m-cell 's/refuse_channel "\$mode" detail_to_user/echo no/' 'refuse_channel "$mode" detail_to_user'
+anchor file payload/scripts/lib/refuse.sh 'refuse_channel "$mode" detail_to_user'
+mutant m-cell 's/refuse_channel "\$mode" detail_to_user/echo no/'
 M_CELL="$MUT_PATH"
 drive "$M_CELL" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_absent "6u MUTANT with the cell forced back to no, exit2's detail vanishes again" \
@@ -697,7 +702,8 @@ expect_absent "6u MUTANT with the cell forced back to no, exit2's detail vanishe
 expect_eq "6v MUTANT …and the user stream is the one line the defect shipped (the arm discriminates)" \
   "1" "$DRV_ERR_LINES"
 
-mutant m-bound 's/_refuse_fold_detail "\$detail"/printf %s "\$detail"/' '_refuse_fold_detail "$detail"'
+anchor file payload/scripts/lib/refuse.sh '_refuse_fold_detail "$detail"'
+mutant m-bound 's/_refuse_fold_detail "\$detail"/printf %s "\$detail"/'
 M_BOUND="$MUT_PATH"
 drive "$M_BOUND" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_D30"
 expect_contains "6w MUTANT without the fold the thirtieth line prints (the bound is what stops it)" \
@@ -908,13 +914,15 @@ expect_regex "T47-h6 a wall run with no such variable in its environment (a hook
   "$USER_LINE_RE" "$DRV_ERR_1"
 
 # --- (i) THE MUTANTS. The strict guard and the detail's first line each have one. ---
-mutant m-strict 's/BIONIC_REFUSE_STRICT:-/BIONIC_STRICT_THE_MUTANT_IGNORES:-/' 'BIONIC_REFUSE_STRICT:-'
+anchor file payload/scripts/lib/refuse.sh 'BIONIC_REFUSE_STRICT:-'
+mutant m-strict 's/BIONIC_REFUSE_STRICT:-/BIONIC_STRICT_THE_MUTANT_IGNORES:-/'
 M_STRICT="$MUT_PATH"
 expect_true "T47-i0 the strict mutant parses" bash -n "$M_STRICT"
 DRV_STRICT=1; drive "$M_STRICT" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"
 expect_regex "T47-i1 MUTANT with the setting ignored, an over-wide line is cut even under strict (the strict rows discriminate)" \
   "$USER_LINE_RE" "$DRV_ERR_1"
-mutant m-firstline 's/^( *)detail="\$fact_whole.*/\1:/' 'detail="$fact_whole'
+anchor file payload/scripts/lib/refuse.sh 'detail="$fact_whole'
+mutant m-firstline 's/^( *)detail="\$fact_whole.*/\1:/'
 M_FIRST="$MUT_PATH"
 expect_true "T47-i2 the first-line mutant parses" bash -n "$M_FIRST"
 DRV_STRICT=""; drive "$M_FIRST" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
@@ -1041,9 +1049,11 @@ done
 T58_EM="$(printf '—%.0s' $(seq 1 2000))"; T58_E2="$(printf 'é%.0s' $(seq 1 2000))"
 T58_UNB_EM="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_EM" "$T50_ROOM")"
 T58_UNB_E2="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_E2" "$T50_ROOM")"
-mutant m-times3 's/\$\(\(room \* 4\)\)/$((room * 3))/' '$((room * 4))'
+anchor file payload/scripts/lib/refuse.sh '$((room * 4))'
+mutant m-times3 's/\$\(\(room \* 4\)\)/$((room * 3))/'
 M_TIMES3="$MUT_PATH"
-mutant m-plus1 's/\$\(\(room \* 4\)\)/$((room + 1))/' '$((room * 4))'
+anchor file payload/scripts/lib/refuse.sh '$((room * 4))'
+mutant m-plus1 's/\$\(\(room \* 4\)\)/$((room + 1))/'
 M_PLUS1="$MUT_PATH"
 expect_true "T58-m0 the two mutants parse, and each holds its multiplier" \
   bash -c 'bash -n "$1" && bash -n "$2" && grep -qF "\$((room * 3))" "$1" && grep -qF "\$((room + 1))" "$2"' _ "$M_TIMES3" "$M_PLUS1"

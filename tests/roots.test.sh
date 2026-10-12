@@ -395,7 +395,7 @@ expect_eq "…so it did not resolve against the default root, where nothing is" 
 SC_MUT_DIR="$SANDBOX/stopcheck-mutant"
 mkdir -p "$SC_MUT_DIR/hooks" "$SC_MUT_DIR/scripts/lib"
 cp "$PLANT/scripts/lib"/*.sh "$SC_MUT_DIR/scripts/lib/"
-anchor "$PLANT/hooks/stop-check.sh" 'DOCS_ROOT="$(docs_root "$PROJECT_DIR")"' 1
+anchor file hooks/stop-check.sh 'DOCS_ROOT="$(docs_root "$PROJECT_DIR")"'
 sed 's|DOCS_ROOT="$(docs_root "$PROJECT_DIR")"|DOCS_ROOT="$PROJECT_DIR/.bionic/docs"|' \
   "$PLANT/hooks/stop-check.sh" > "$SC_MUT_DIR/hooks/stop-check.sh"
 expect_eq "the mutant really differs from the shipped hook (the sed landed)" "no" \

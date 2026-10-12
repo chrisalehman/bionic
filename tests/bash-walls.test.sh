@@ -3087,8 +3087,8 @@ mk_door_mutant() {  # <dir> <shell text appended to walls.sh: a later definition
     *) printf '\n%s\n' "$2" >> "$1/scripts/lib/walls.sh" ;;
   esac
 }
-anchor -E "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_FN" 1
-anchor "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_READ" 1
+anchor insert payload/scripts/lib/walls.sh '_door_in_tree() {'
+anchor file payload/scripts/lib/walls.sh "grep -qF -- '--only'"
 DRP_KEEP="$HOOK"
 for _m in removed inverted unread; do
   DRP_DIR="$SANDBOX/door-pred-$_m"
@@ -3125,7 +3125,7 @@ DR_MUT="$SANDBOX/door-mutant"
 mkdir -p "$DR_MUT/hooks"
 cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$DR_MUT/scripts"
 cp "$HOOK" "$DR_MUT/hooks/bash-walls.sh"
-anchor "$DR_MUT/scripts/lib/walls.sh" '# ---- BEGIN THE ONE DOOR' 1
+anchor file payload/scripts/lib/walls.sh '# ---- BEGIN THE ONE DOOR'
 awk '/# ---- BEGIN THE ONE DOOR/ { skip = 1 } !skip { print } /# ---- END THE ONE DOOR ----/ { skip = 0 }' \
   "$DR_MUT/scripts/lib/walls.sh" > "$DR_MUT/walls.tmp" && mv "$DR_MUT/walls.tmp" "$DR_MUT/scripts/lib/walls.sh"
 expect_eq "DOOR.18 the mutant library parses" "0" "$(bash -n "$DR_MUT/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"

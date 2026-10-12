@@ -387,7 +387,7 @@ export BIONIC_PROBE_USED_PCT=30
 # gate promises no memory (wave-33 T1; Δ10), so the mutant's own refusal is shown on the
 # processor: 6.0 busy cores, one run held, a second ask (6.0 + 1 > 6.4).
 MG="$(mutant ceiling)"
-anchor "$MG" 'if (r >= 0 && !fits(u, share)) exit 1' 1
+anchor file payload/scripts/lib/gate.sh 'if (r >= 0 && !fits(u, share)) exit 1'
 sed -i.bak 's/if (r >= 0 \&\& !fits(u, share)) exit 1/if (r >= 0 \&\& !fits(u, 100)) exit 1/' "$MG"
 fresh hard-mut
 world_machine 8 8192 85 6.0
@@ -540,7 +540,7 @@ expect_contains "F.3 gate_state counted the one admitted" "admitted=1" "$FIRST_S
 expect_regex "F.4 gate_state prints its one line" \
   '^share=80 used=[0-9-]+ admitted=1 waiting=2 landing-waiting=1 load=[0-9.-]+/[0-9.-]+ promised=[0-9.]+$' "$FIRST_STATE"
 MF="$(mutant first)"
-anchor "$MF" 'else r = ($1 == "landing" ? 1 : 2)' 1
+anchor file payload/scripts/lib/gate.sh 'else r = ($1 == "landing" ? 1 : 2)'
 sed -i.bak 's/else r = (\$1 == "landing" ? 1 : 2)/else r = 2/' "$MF"
 first_rows "$MF" mut
 expect_eq "F.5 the mutant (landing ranked as work) still admits one of them: the writer" "w" "$FIRST"
@@ -573,7 +573,7 @@ expect_eq "A.4 a stranger typing the same admission asks anyway, and there is no
 expect_eq "A.5 BIONIC_SLOT_HELD=1 is ignored: it asks, and waits (rc 75)" "75" "$AN_HELD"
 expect_eq "A.6 the stranger and the held ask each took a number" "3" "$AN_NREQ2"
 MA="$(mutant ancestor)"
-anchor "$MA" '_gate_ancestor "$hp" || return 1' 1
+anchor file payload/scripts/lib/gate.sh '_gate_ancestor "$hp" || return 1'
 sed -i.bak '/_gate_ancestor "\$hp" || return 1/d' "$MA"
 ancestor_rows "$MA" mut
 expect_eq "A.7 the mutant still believes the child" "0 $AN_HOLDER" "$AN_CHILD"
@@ -749,7 +749,7 @@ age_runs "$GATE" cost-age
 expect_eq "D.19 three shorter runs do not shorten the promise until the overlong one ages out" \
   "300 300 300 10" "$AGE"
 MK="$(mutant keep4)"
-anchor "$MK" '} | tail -n 3 > "$_GD/cost/.new.$id"' 1
+anchor file payload/scripts/lib/gate.sh '} | tail -n 3 > "$_GD/cost/.new.$id"'
 sed -i.bak 's/} | tail -n 3 > "\$_GD\/cost\/.new.\$id"/} | tail -n 4 > "$_GD\/cost\/.new.$id"/' "$MK"
 age_runs "$MK" cost-age-mut
 expect_eq "D.20 the mutant keeping four lines still runs all four and holds 300 one run longer" \
@@ -926,7 +926,7 @@ expect_eq "WH.4 the run ends green" "0" "$(cat "$WH_MARKS/rc" 2>/dev/null)"
 expect_eq "WH.5 …and once it has ended, the same ask is admitted (rc 0)" "0" "$(ask_fg wk2 work k.test.sh 0)"
 # The mutation control: the runner's one ask spelled `work`. Anchored first, proved to run.
 WH_MUT="$MUT/whole-hand/run.sh"; mkdir -p "${WH_MUT%/*}"
-anchor "$REPO_ROOT/tests/run.sh" '_gate_ask_for whole tests/run.sh' 1
+anchor file tests/run.sh '_gate_ask_for whole tests/run.sh'
 sed 's/_gate_ask_for whole tests\/run.sh/_gate_ask_for work tests\/run.sh/' "$REPO_ROOT/tests/run.sh" > "$WH_MUT"
 fresh whole-hand-mut
 world_machine 8 8192 20 0.5
@@ -1097,13 +1097,13 @@ share_room_rows "$GATE" share-room
 expect_eq "SR.1 shipped: width 7; the held run admitted; the second (6.5 + 1 > 7.36) waits; an owed writer finds no room" \
   "7 0 75 room=no load=6.5/6.5 cores=8 promised=2 waiting=0 rc=1" "$SR"
 MSR="$(mutant share-room)"
-anchor "$MSR" 'printf "%.10g", s * c / 100' 1
+anchor file payload/scripts/lib/gate.sh 'printf "%.10g", s * c / 100'
 sed -i.bak 's#printf "%.10g", s \* c / 100#printf "%.10g", s * c / 50#' "$MSR"
 share_room_rows "$MSR" share-room-mut
 expect_eq "SR.2 the room's one site doubled (14.72): width 14, the second ask admitted, room for the owed writer" \
   "14 0 0 room=yes load=6.5/6.5 cores=8 promised=3 waiting=0 rc=0" "$SR"
 MCO="$(mutant one-core)"
-anchor "$MCO" '    *)     echo 1 ;;' 1
+anchor file payload/scripts/lib/gate.sh '    *)     echo 1 ;;'
 sed -i.bak 's#^    \*)     echo 1 ;;#    *)     echo 3 ;;#' "$MCO"
 fresh one-core-mut
 share92
@@ -1136,7 +1136,7 @@ expect_eq "RM.4 a one-minute load over the share gives no room either" \
   "room=no load=7.0/1.0 cores=8 promised=0 waiting=0 rc=1" \
   "$(BIONIC_PROBE_BUSY_CORES=7.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 room)"
 M5="$(mutant room-5m)"
-anchor "$M5" 'if (known(b5)) { if (b5 + prom > lim) room = 0 }' 1
+anchor file payload/scripts/lib/gate.sh 'if (known(b5)) { if (b5 + prom > lim) room = 0 }'
 sed -i.bak 's/if (known(b5)) { if (b5 + prom > lim) room = 0 }/if (0) room = 0/' "$M5"
 expect_eq "RM.4a the mutant that ignores the five-minute load runs and gives room — the reading is the rule" \
   "room=yes load=1.0/7.0 cores=8 promised=0 waiting=0 rc=0" "$(GATE_LIB="$M5" room)"
@@ -1150,7 +1150,7 @@ expect_eq "RM.5 one is admitted and a whole request waits behind it (rc|asked|ad
 expect_eq "RM.6 a waiting request gives no room, though the load and the promises fit" \
   "room=no load=1.0/1.0 cores=8 promised=1 waiting=1 rc=1" "$(room)"
 MW="$(mutant room-wait)"
-anchor "$MW" 'if (wait > 0) room = 0' 1
+anchor file payload/scripts/lib/gate.sh 'if (wait > 0) room = 0'
 sed -i.bak 's/if (wait > 0) room = 0/if (0) room = 0/' "$MW"
 expect_eq "RM.7 the mutant without the waiting clause runs and gives room — the clause is the rule" \
   "room=yes load=1.0/1.0 cores=8 promised=1 waiting=1 rc=0" "$(GATE_LIB="$MW" room)"
@@ -1176,7 +1176,7 @@ expect_eq "RM.11 one writer owed at one core: 4.5 + 1 fits" \
 expect_eq "RM.12 two writers owed: 4.5 + 2 is over 6.4, no room" \
   "room=no load=4.5/4.5 cores=8 promised=2 waiting=0 rc=1" "$(room --owed 2)"
 MO="$(mutant room-owed)"
-anchor "$MO" 'prom = pc + owed * most' 1
+anchor file payload/scripts/lib/gate.sh 'prom = pc + owed * most'
 sed -i.bak 's/prom = pc + owed \* most/prom = pc + 0 * most/' "$MO"
 expect_eq "RM.13 the mutant that drops the owed count runs and gives room — the count is the rule" \
   "room=yes load=4.5/4.5 cores=8 promised=0 waiting=0 rc=0" "$(GATE_LIB="$MO" room --owed 2)"
@@ -1297,7 +1297,7 @@ plant_ended_many 150 "$WORLD_SID:e" 900
 plant_ended 99999 "$WORLD_SID:wEnded" 900
 for i in 1 2 3 4 5 6; do plant_open "$i" "$WORLD_SID:w$i"; done
 OM="$(mutant owed)"
-anchor "$OM" 'gate_asked() {' 1
+anchor file payload/scripts/lib/gate.sh 'gate_asked() {'
 cat >> "$OM" <<'MUTANT'
 gate_asked() {  # the old walk: one grep per request file per name
   local nm f hit=1
@@ -1588,7 +1588,7 @@ world_clock 100000
 plant_gone 11 "op:g11" 13000
 plant_live 13 "op:g13" 10
 MS="$(mutant open-split)"
-anchor "$MS" 'elif _gate_alive; then' 1
+anchor file payload/scripts/lib/gate.sh 'elif _gate_alive; then'
 sed -i.bak 's/elif _gate_alive; then/elif true; then/' "$MS"
 expect_eq "OP.M1 the mutant (open = no ended= line) still names the live waiter (it runs)" "yes" \
   "$(yn "$(GA_LIB="$MS" ga op:g11 op:g13)" op:g13)"
@@ -1599,7 +1599,7 @@ fresh open-mut-exec
 world_machine 8 8192 30 1.0
 plant_live 1 "op:w1"; plant_live 2 "op:w2"
 ME="$(mutant open-exec)"
-anchor "$ME" 'gate_asked() {' 1
+anchor file payload/scripts/lib/gate.sh 'gate_asked() {'
 cat >> "$ME" <<'MUTANT'
 gate_asked() {  # T52's: every request path in one awk's argument list
   _GD="$(gate_dir)"
@@ -1630,7 +1630,7 @@ world_machine 8 8192 30 1.0
 world_clock 100000
 plant_ended_many 2000 "op:e" 900
 MR2="$(mutant open-rm)"
-anchor "$MR2" '|| old[${#old[@]}]="$f"' 1
+anchor file payload/scripts/lib/gate.sh '|| old[${#old[@]}]="$f"'
 sed -i.bak '/|| old\[\${#old\[@\]}\]="\$f"/c\
       [ "$((now - born))" -le "$keep" ] || rm -f "$f"' "$MR2"
 : > "$WORLD_ROOT/op-rms"
@@ -1646,7 +1646,7 @@ world_machine 8 8192 30 1.0
 world_clock 100000
 plant_raw 1 "op:d" "99000"
 MD="$(mutant open-dec)"
-anchor "$MD" '_G_NUM=$((10#$1))' 1
+anchor file payload/scripts/lib/gate.sh '_G_NUM=$((10#$1))'
 sed -i.bak 's/10#\$1/$1/' "$MD"
 expect_eq "OP.M8 the mutant (no 10#) reads an ordinary ended= and finishes (it runs)" "rc=0 lock=free" \
   "$(GATE_LIB="$MD" op_run - | tr '\n' ' ' | sed 's/ $//')"
@@ -1661,7 +1661,7 @@ world_clock 100000
 plant_ended 1 "op:r143" 99500; printf 'rc=143\n' >> "$BIONIC_GATE_DIR/requests/1"
 plant_ended 4 "op:r137" 99500; printf 'rc=137\n' >> "$BIONIC_GATE_DIR/requests/4"
 M137="$(mutant open-137)"
-anchor "$M137" '[ "$_G_NUM" -gt 128 ]' 1
+anchor file payload/scripts/lib/gate.sh '[ "$_G_NUM" -gt 128 ]'
 sed -i.bak 's/\[ "\$_G_NUM" -gt 128 \]/[ "$_G_NUM" -eq 137 ]/' "$M137"
 expect_eq "OP.M10 the mutant (killed is rc 137 only) still names the rc 137 request killed (it runs)" "4 killed" \
   "$(GATE_LIB="$M137" glist | awk '$2 == "killed" { print $1 " " $2 }')"
@@ -1724,7 +1724,7 @@ expect_eq "R.8 the survivor's gate_end wrote the killed one ended at 1030, rc 13
   "$(field "$rx_id" ended)|$(field "$rx_id" rc)"
 expect_eq "R.9 gate_list still counts it killed, once" "1" "$(glist | grep -c "^${rx_id:-none} killed ")"
 MR="$(mutant reap)"
-anchor "$MR" "rc=137\\n'" 1
+anchor file payload/scripts/lib/gate.sh "rc=137\\n'"
 sed -i.bak "/rc=137\\\\n'/d" "$MR"
 learn_run "$MR" reaped-mut 1
 expect_eq "R.10 the mutant (no killed-write) still admits both runs and ends the second" \
@@ -1826,7 +1826,7 @@ expect_eq "O.10 the machine empty, the first waiter is served under its number" 
   "$(rc_of s1) $(id_of s1)"
 touch "$D/s1.go"
 MO="$(mutant own)"
-anchor "$MO" '&& [ "$_R_key" = "$2" ] && ! _gate_alive; then' 1
+anchor file payload/scripts/lib/gate.sh '&& [ "$_R_key" = "$2" ] && ! _gate_alive; then'
 sed -i.bak 's/ \&\& ! _gate_alive; then$/; then/' "$MO"
 own_rows "$MO" own-mut
 expect_eq "O.11 the mutant (no liveness test on reuse) still takes the first ask's number" "2" "$OW_FIRST"
@@ -1865,7 +1865,7 @@ expect_eq "E.5 the same who asking again resumes the cleared number and is admit
   "$(AGENT=ep ask_fg ep2 landing a 0) $(id_of ep2) $(nreq)"
 touch "$D/ep.go"
 MC="$(mutant cleared)"
-anchor "$MC" '_gate_holder "$id" -' 1
+anchor file payload/scripts/lib/gate.sh '_gate_holder "$id" -'
 sed -i.bak '/_gate_holder "\$id" -/d' "$MC"
 cleared_rows "$MC" cleared-mut
 expect_eq "E.6 the mutant (no holder cleared) still returns 75 and the process lives on" "75 alive" "$CL_P"
@@ -2034,7 +2034,7 @@ wait_for 20 has sl.brc
 expect_eq "B.30 BIONIC_SLOT_HELD=1 skips nothing: the shim asked, and with no room ends 75" "75" "$(brc sl)"
 expect_false "B.31 …its command never ran" has sl.ran
 MW_DIR="$MUT/wrap-believe"; mkdir -p "$MW_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$MW_DIR/scripts"
-anchor "$MW_DIR/scripts/booked.sh" '  booked_ask work' 1
+anchor file payload/scripts/booked.sh '  booked_ask work'
 sed -i.bak 's/^  booked_ask work$/  [ -n "${BIONIC_GATE_ADMIT:-}" ] || booked_ask work/' "$MW_DIR/scripts/booked.sh"
 stranger_rows "$MW_DIR/scripts/booked.sh" mut
 expect_eq "B.32 the mutant (believes a typed admission without asking) still ends: rc 0" "0" "$ST_RC"
@@ -2042,7 +2042,7 @@ expect_eq "B.33 …and runs the stranger's command: asking is the rule" "yes" "$
 
 # The wrapper exiting 0 on a gate timeout would read as a green run: the mutation arm.
 MZ_DIR="$MUT/wrap-zero"; mkdir -p "$MZ_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$MZ_DIR/scripts"
-anchor "$MZ_DIR/scripts/booked.sh" 'exit "$BOOKED_WAITED_RC"' 1
+anchor file payload/scripts/booked.sh 'exit "$BOOKED_WAITED_RC"'
 sed -i.bak 's/exit "\$BOOKED_WAITED_RC"/exit 0/' "$MZ_DIR/scripts/booked.sh"
 fresh wrap-zero
 world_machine 8 8192 60 6.0

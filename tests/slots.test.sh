@@ -386,7 +386,7 @@ expect_eq "L2.1 every round of six claimers for one directory had exactly one wi
 expect_regex "L2.2 …and the rounds ran (one result per round)" '^( 1){5}$' "$L2_SEEN"
 # Mutation control: a non-exclusive claim lets more than one claimer in.
 L2M="$(mutant_tree l2-mut)"
-anchor "$L2M/scripts/lib/slots.sh" 'mkdir "$place" 2>/dev/null || return 1' 1
+anchor file payload/scripts/lib/slots.sh 'mkdir "$place" 2>/dev/null || return 1'
 sed -i.bak 's|mkdir "$place" 2>/dev/null \|\| return 1|mkdir -p "$place" 2>/dev/null \|\| return 1|' \
   "$L2M/scripts/lib/slots.sh"
 expect_true "L2.3 the mutant library still parses" bash -n "$L2M/scripts/lib/slots.sh"

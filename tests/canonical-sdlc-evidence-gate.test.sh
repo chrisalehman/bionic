@@ -3351,7 +3351,7 @@ egwt_sed_escape() {  # <text> -> the same text, safe as either half of a sed s@.
 }
 EGWT_NEEDLE="printf '%s' \"\${_g##*/}\""
 EGWT_MUT_NEEDLE="printf '%s' \"\${_g%/*}\""
-anchor "$EGWT_WALLS" "$EGWT_NEEDLE" 1
+anchor file payload/scripts/lib/walls.sh "printf '%s' \"\${_g##*/}\""
 EGWT_MUT="$s25r_tmp/25g-o-mutant-walls.sh"
 sed "s@$(egwt_sed_escape "$EGWT_NEEDLE")@$(egwt_sed_escape "$EGWT_MUT_NEEDLE")@" \
   "$EGWT_WALLS" > "$EGWT_MUT"

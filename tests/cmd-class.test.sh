@@ -1907,7 +1907,7 @@ D${T}/a/r" "$(printf '%s\n' "$FX_OUT" | grep -E '^(W|D)')"
 FX_MUT="$SANDBOX/cmd-class.fx-mutant.sh"
 # The unknown line is held for fx_flush (T19), so the mutant empties the one function that holds it.
 FX_UNK_LINE='function fx_unk(r, s) { FXO[++FXON] = "?\t" fx_flat(r) "\t" fx_flat(s) }'
-anchor "$LIB" "$FX_UNK_LINE" 1
+anchor file payload/scripts/lib/cmd-class.sh 'function fx_unk(r, s) { FXO[++FXON] = "?\t" fx_flat(r) "\t" fx_flat(s) }'
 A="$FX_UNK_LINE" awk '{ if (index($0, ENVIRON["A"])) print "    function fx_unk(r, s) { }"; else print }' "$LIB" > "$FX_MUT"
 expect_true "§FX mutant: the library without its unknown line still parses" bash -n "$FX_MUT"
 expect_eq "§FX mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FX_MUT" fx_shape 'rm -f /a/b')"
@@ -1917,13 +1917,13 @@ expect_eq "§FX shipped: the same incident is unknown" "?" "$(fx_shape "$FX_INC"
 
 # --- mutation controls for the two orchestrator additions: the check taken out is the defect ---
 FX_MUT2="$SANDBOX/cmd-class.fx-mutant-rop.sh"
-anchor "$LIB" 'fx_unk("unresolved read operand", t)' 1
+anchor file payload/scripts/lib/cmd-class.sh 'fx_unk("unresolved read operand", t)'
 grep -vF 'fx_unk("unresolved read operand", t)' "$LIB" > "$FX_MUT2"
 expect_true "§FX read-operand mutant parses" bash -n "$FX_MUT2"
 expect_eq "§FX read-operand mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FX_MUT2" fx_shape 'rm -f /a/b')"
 expect_eq "§FX read-operand mutant: the globbed key read is no effect — the defect" "" "$(FX_LIB="$FX_MUT2" fx_shape 'cat ~/.ss?/id_ed25519')"
 FX_MUT3="$SANDBOX/cmd-class.fx-mutant-follow.sh"
-anchor "$LIB" 'fx_unk("find follows symlinks", t)' 1
+anchor file payload/scripts/lib/cmd-class.sh 'fx_unk("find follows symlinks", t)'
 grep -vF 'fx_unk("find follows symlinks", t)' "$LIB" > "$FX_MUT3"
 expect_true "§FX find-follow mutant parses" bash -n "$FX_MUT3"
 expect_eq "§FX find-follow mutant: plain -delete is still a D (the mutant runs)" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find /a -delete')"
@@ -2291,7 +2291,7 @@ expect_eq "§FOLDAGREE the two folds agree on every word" "" \
   "$(diff <(printf '%s\n' "$FOLD_SH_OUT") <(printf '%s\n' "$FOLD_AWK_OUT"))"
 # The planted defect: one never list loses a word. The row above must see it.
 FOLD_GA_MUT="$SANDBOX/git-argv.fold-mutant.sh"
-anchor "$GA_LIB" '    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;' 1
+anchor insert payload/scripts/lib/git-argv.sh '    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;'
 sed 's/^    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;$/    cd|pushd|popd|exit|return|exec|eval|source) return 0 ;;/' "$GA_LIB" > "$FOLD_GA_MUT"
 expect_true "§FOLDAGREE mutant parses" bash -n "$FOLD_GA_MUT"
 FOLD_MUT_OUT="$(fold_sh "$FOLD_GA_MUT")"
