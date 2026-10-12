@@ -980,6 +980,9 @@ expect_contains "42f2 …naming close-out" "close-out" "$OUT"
 poke "$R42" current 5
 s42_unchanged "42f3 §VERB-cur a move the gate refuses (no Step 5 block) is refused" 1 "$P42"
 expect_contains "42f4 …in the gate's own words" "Step 5" "$OUT"
+expect_eq "42f4b …and it ends on the one line missing (wave-35 T8; REQ-6 AC-6.5)" \
+  "poker: missing: the line '- Step 5: <its evidence>' under ## SDLC State (step-line 5 '<text>' writes it)" \
+  "$(printf '%s\n' "$OUT" | tail -1)"
 poke "$R42" current 4x
 s42_unchanged "42f5 §VERB-cur a value that is no step number" 2 "$P42"
 poke "$R42" current T1
