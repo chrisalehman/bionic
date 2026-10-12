@@ -450,6 +450,9 @@ climb_ok() {
   e="$(first_at "$s" 'four labels')"
   f="$(first_at "$s" 'failure to avoid')"
   [ "$a" -gt 0 ] && [ "$b" -gt "$a" ] && [ "${c:-0}" -gt "$b" ] && [ "$d" -gt "$c" ] && [ "$e" -gt "$d" ] || return 1
+  # The difference is named as a contrast: without it the live check's Goals asked "how", not
+  # "whether this, or that" (T24-altitude-live.md, round 1).
+  sed -n "${b}p" <<<"$s" | grep -qi 'contrast' || return 1
   [ "$f" -eq 0 ] || [ "$f" -gt "$e" ]
 }
 
@@ -484,5 +487,13 @@ anchor "$SKILL" 'detail before cutting sentences' 1
 doctor "$SKILL" "$TMP/sentences-first.md" 's/detail before cutting sentences/sentences before cutting detail/'
 expect_true "44a: the sentences-first copy carries the plant" grep -qF 'sentences before cutting detail' "$TMP/sentences-first.md"
 expect_false "44b: a copy cutting sentences before detail fails the climb pin" climb_ok "$TMP/sentences-first.md"
+
+# The difference named, but not as a contrast.
+anchor "$SKILL" ', as a contrast: whether this, or that' 1
+doctor "$SKILL" "$TMP/no-contrast.md" 's/, as a contrast: whether this, or that//'
+expect_true "45a: the no-contrast copy still names the one difference" \
+  grep -qiF 'one thing the options differ on' "$TMP/no-contrast.md"
+expect_false "45b: …and has lost the contrast" grep -qF 'as a contrast' "$TMP/no-contrast.md"
+expect_false "45c: a copy naming the difference without the contrast fails the climb pin" climb_ok "$TMP/no-contrast.md"
 
 finish
