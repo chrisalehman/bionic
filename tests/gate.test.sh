@@ -96,12 +96,6 @@
 #                      a.test.sh and TESTS/RUN.SH the whole run; case-exact, A.TEST.SH is another
 #                      file; `bash TESTS/RUN.SH` from a script, where this filesystem folds, is
 #                      refused at the ask
-#   §PASS      AC-5.2, AC-5.5 (wave-34 T8; D15) a pass is asked once and never waits: room for 5
-#                      → promised 3, a writer's suite and a landing admitted beside it; room for 3
-#                      → skipped, nothing waits; a solo ask marks it stopped and is admitted once
-#                      it releases; a hand whole run still holds the machine alone; a pass is off
-#                      the writer's budget. Mutations: a pass ranked ahead of work; the minimum
-#                      width removed
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
@@ -116,7 +110,7 @@
 # of payload/scripts/lib under the world's directory, each anchored first and each proved
 # to run (its own positive row) before its claim is read; §COST adds one more, and §REAPED,
 # §OWN and §CLEARED one each (T47). §OPEN adds four (T71); §SHARE-ROOM two (wave-33 T1);
-# §BUDGET-AT-ASK one (wave-33 T3); §PASS two (wave-34 T8).
+# §BUDGET-AT-ASK one (wave-33 T3).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The machine, the clock and the duration records are SYNTHESIZED by design (the world's
@@ -764,6 +758,11 @@ expect_eq "D.14 gate_end of a request that does not exist exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_end 999 0 2>/dev/null; echo $? )"
 expect_eq "D.15 gate_ask with an unknown kind exits 2" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_ask fast k 2>/dev/null; echo $? )"
+# THE PASS IS GONE (wave-35 T1; D12, REQ-3 AC-3.1; ADR-054): `pass` is no kind, refused as `fast` is,
+# by the same sentence naming the three kinds, and nothing is filed.
+expect_eq "D.15b AC-3.1 gate_ask pass is refused as an unknown kind (rc 2, the three kinds named)" \
+  "2|gate: kind is landing, work or whole, not 'pass'" \
+  "$( . "$GATE_LIB" 2>/dev/null; e="$(gate_ask pass k 2>&1 >/dev/null)"; printf '%s|%s' "$?" "$e" )"
 # THE PUBLIC READER (T13; pass 12): `gate_promise <key>` prints what `_gate_promise` prints,
 # loading the store itself, so a caller outside the lock can ask what a key is promised.
 fresh promise-public
@@ -2382,146 +2381,5 @@ if [ "$BA_REAL_BLIND" = yes ]; then
 else
   echo "  (CA.6–CA.8 not run: this filesystem is case-exact, so TESTS/RUN.SH names no file here)"
 fi
-
-# ── §PASS ────────────────────────────────────────────────────────────────────
-# A PASS TAKES ONLY SPARE CAPACITY (wave-34 T8; D15, AC-5.2, AC-5.5; ADR-053). A full pass a landing
-# starts asks under kind `pass`, once and never waiting: it ranks after all work, is promised the
-# cores the room shows free less 2 kept for a landing, and is skipped when that is under 2. It is
-# not whole, so work and landings are admitted beside it within the reserve; a solo ask (kind whole)
-# marks it for stopping (`stop=` on its request, read by `gate_pass_stopped`) and is admitted by the
-# normal rule once it has released. A hand whole run still holds the machine alone. Every row plants
-# 8 cores under a share of 80: 6.4 cores of room, so a load of 1.0 leaves room for 5 writers.
-# fails-when: a pass is admitted with no room, or a work ask waits behind one.
-section "§PASS — a pass takes only the room the gate shows free, never waits and yields (D15; AC-5.2, AC-5.5)"
-pstop() { ( . "$GATE_LIB" 2>/dev/null; gate_pass_stopped "$@" >/dev/null 2>&1; echo $? ); }
-fresh pass-room
-world_machine 8 8192 30 1.0
-expect_eq "PS.1 the machine has room for 5 writers" \
-  "room=yes load=1.0/1.0 cores=8 promised=5 waiting=0 rc=0" "$(room --owed 5)"
-expect_eq "PS.1b …and not for 6" \
-  "room=no load=1.0/1.0 cores=8 promised=6 waiting=0 rc=1" "$(room --owed 6)"
-HOLD=1 ask_bg pp pass tests/run.sh 600; wait_for 20 has pp.rc
-pp_id="$(id_of pp)"
-expect_eq "PS.2 room for 5: the pass is admitted, promised 3 (5 less the 2 kept for a landing) (rc|promise)" \
-  "0|0:3:0" "$(rc_of pp)|$(field "$pp_id" promise)"
-expect_eq "PS.3 …filed as kind pass" "pass" "$(field "$pp_id" kind)"
-HOLD=1 ask_bg pw work k 0; wait_for 20 has pw.rc
-expect_eq "PS.4 a writer's suite asked during it is admitted beside it, one core (rc|promise)" "0|0:1:0" \
-  "$(rc_of pw)|$(field "$(id_of pw)" promise)"
-HOLD=1 ask_bg pl landing l 0; wait_for 20 has pl.rc
-expect_eq "PS.5 a landing asked during it is admitted beside it too" "0" "$(rc_of pl)"
-expect_eq "PS.6 gate_state: three admitted, nothing waits, 5 cores promised" \
-  "share=80 used=30 admitted=3 waiting=0 landing-waiting=0 load=1.0/1.0 promised=5" "$(state)"
-expect_eq "PS.7 work beside it does not stop the pass (gate_pass_stopped rc 1)" "1" "$(pstop "$pp_id")"
-release pw; release pl
-stopped() { [ "$(pstop "$1")" = 0 ]; }
-ask_bg ps whole s.test.sh 600; wait_for 20 asked_by ps
-wait_for 20 stopped "$pp_id"
-expect_eq "PS.8 a solo ask (kind whole) marks the running pass for stopping (gate_pass_stopped rc 0)" "0" \
-  "$(pstop "$pp_id")"
-expect_eq "PS.8b …a stop= line on the pass's request, at the solo ask's time" "1000" "$(field "$pp_id" stop)"
-expect_eq "PS.9 …the solo ask waits for the pass to release (asked|admitted)" "1000|" \
-  "$(field "$(req_of ps)" asked)|$(field "$(req_of ps)" admitted)"
-expect_false "PS.9b …and has no answer yet" has ps.rc
-release pp
-wait_for 20 has ps.rc
-expect_eq "PS.10 once the pass has released, the solo ask is admitted by the normal rule, promised its width" \
-  "0|0:6:0" "$(rc_of ps)|$(field "$(req_of ps)" promise)"
-expect_eq "PS.10b gate_pass_stopped on a request that is no pass: rc 1; on no request: rc 2" "1 2" \
-  "$(pstop "$(req_of ps)") $(pstop 99999)"
-
-fresh pass-none
-world_machine 8 8192 30 3.0
-expect_eq "PS.11 a load of 3.0 leaves room for 3 writers" \
-  "room=yes load=3.0/3.0 cores=8 promised=3 waiting=0 rc=0" "$(room --owed 3)"
-ask_bg pn pass tests/run.sh 600; wait_for 20 has pn.rc
-pn_id="$(req_of pn)"
-expect_eq "PS.12 room for 3: 3 less 2 is under 2, the pass is skipped at once though it offered 600 s (rc)" \
-  "75" "$(rc_of pn)"
-expect_eq "PS.12b …its request was filed (kind) and holds nobody: nothing waits (holder|admitted)" "pass|-|" \
-  "$(field "$pn_id" kind)|$(field "$pn_id" holder)|$(field "$pn_id" admitted)"
-expect_contains "PS.12c …and it says it was skipped" "skipped" "$(cat "$D/pn.err" 2>/dev/null)"
-expect_eq "PS.13 gate_state counts no waiter after it" \
-  "share=80 used=30 admitted=0 waiting=0 landing-waiting=0 load=3.0/3.0 promised=0" "$(state)"
-expect_eq "PS.13b …and the writers keep their room for 3" \
-  "room=yes load=3.0/3.0 cores=8 promised=3 waiting=0 rc=0" "$(room --owed 3)"
-BIONIC_PROBE_BUSY_CORES=2.0 BIONIC_PROBE_BUSY_CORES_5M=2.0 HOLD=1 ask_bg pm pass tests/run.sh 0
-wait_for 20 has pm.rc
-expect_eq "PS.14 a load of 2.0 leaves room for 4: the pass is admitted at the minimum, 2 (rc|promise)" "0|0:2:0" \
-  "$(rc_of pm)|$(field "$(id_of pm)" promise)"
-release pm
-expect_eq "PS.15 a five-minute load of 4.0 counts as the last minute's does: skipped" "75" \
-  "$(BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 ask_fg p5 pass tests/run.sh 0)"
-expect_eq "PS.16 memory over the share: skipped" "75" "$(BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_USED_PCT=85 ask_fg p6 pass tests/run.sh 0)"
-fresh pass-prom
-world_machine 8 8192 30 1.0
-HOLD=1 ask_bg pr1 work k 0; wait_for 20 has pr1.rc
-HOLD=1 ask_bg pr2 pass tests/run.sh 0; wait_for 20 has pr2.rc
-expect_eq "PS.17 a held writer's promise counts: 1.0 busy + 1 promised leaves 4, the pass is promised 2 (rc|promise)" \
-  "0|0:2:0" "$(rc_of pr2)|$(field "$(id_of pr2)" promise)"
-release pr1; release pr2
-
-# A pass ranks after all work: a writer's suite waiting behind a held one (its own reading busy)
-# keeps the head, so a pass asked on a quiet reading is skipped; with both gone it is admitted.
-pass_rank() {  # <gate lib> <prefix> — sets RANK to "<pass rc while the writer waits> <pass rc after>"
-  fresh "pass-rank-$2"
-  world_machine 8 8192 30 1.0
-  GATE_LIB="$1" HOLD=1 ask_bg rk_h work h 0; wait_for 20 has rk_h.rc
-  GATE_LIB="$1" BIONIC_PROBE_BUSY_CORES=5.8 BIONIC_PROBE_BUSY_CORES_5M=5.8 ask_bg rk_w work k 600
-  wait_for 20 asked_by rk_w
-  RANK_W="$(field "$(req_of rk_w)" asked)|$(field "$(req_of rk_w)" admitted)"
-  RANK="$(GATE_LIB="$1" ask_fg rk_p1 pass tests/run.sh 0)"
-  reap
-  RANK="$RANK $(GATE_LIB="$1" ask_fg rk_p2 pass tests/run.sh 0)"
-}
-pass_rank "$GATE" real
-expect_eq "PS.18 a writer's suite waits on its reading (asked|admitted)" "1000|" "$RANK_W"
-expect_eq "PS.19 a pass asked while it waits is skipped though its own reading leaves room for 4; once it is gone, admitted" \
-  "75 0" "$RANK"
-MPR="$(mutant pass-rank)"
-anchor "$MPR" 'else if ($1 == "pass") r = 3' 1
-sed -i.bak 's/else if (\$1 == "pass") r = 3/else if ($1 == "pass") r = 0/' "$MPR"
-pass_rank "$MPR" mut
-expect_eq "PS.19a the mutant (a pass ranked ahead of work) runs and admits the pass over the waiting writer" \
-  "0 0" "$RANK"
-
-fresh pass-solo-waits
-world_machine 8 8192 30 1.0
-HOLD=1 ask_bg sw1 work k 0; wait_for 20 has sw1.rc
-ask_bg sw2 whole s.test.sh 600; wait_for 20 asked_by sw2
-expect_eq "PS.20 a solo ask waits behind a held writer (asked|admitted)" "1000|" \
-  "$(field "$(req_of sw2)" asked)|$(field "$(req_of sw2)" admitted)"
-expect_eq "PS.21 a pass asked while it waits is skipped, though 4 cores are free" "75" \
-  "$(ask_fg sw3 pass tests/run.sh 0)"
-release sw1
-wait_for 20 has sw2.rc
-expect_eq "PS.21b …and the solo ask is admitted once the writer ends" "0" "$(rc_of sw2)"
-
-# AC-5.5: a hand whole run holds the machine alone, as in 1.16.0.
-fresh pass-whole
-world_machine 8 8192 30 1.0
-HOLD=1 ask_bg hw whole tests/run.sh 0; wait_for 20 has hw.rc
-expect_eq "PS.22 a hand whole run is admitted, promised its width (rc|promise)" "0|0:6:0" \
-  "$(rc_of hw)|$(field "$(id_of hw)" promise)"
-expect_eq "PS.23 while it holds, a pass is skipped and a writer's suite waits (75 75)" "75 75" \
-  "$(ask_fg hp pass tests/run.sh 0) $(ask_fg hk work k 0)"
-release hw
-expect_eq "PS.24 once it ends, the pass is admitted (rc|promise)" "0|0:3:0" \
-  "$(ask_fg hp2 pass tests/run.sh 0)|$(field "$(id_of hp2)" promise)"
-
-# The mutant that admits a pass under the minimum: room for 3, and the pass is admitted.
-MPM="$(mutant pass-min)"
-anchor "$MPM" '[ "$_G_PASS_WIDTH" -ge "$_GATE_PASS_MIN" ] || return 1' 1
-sed -i.bak 's/\[ "\$_G_PASS_WIDTH" -ge "\$_GATE_PASS_MIN" \] || return 1/:/' "$MPM"
-fresh pass-min-mut
-world_machine 8 8192 30 3.0
-expect_eq "PS.25 the mutant without the minimum runs and admits a pass with no room — the minimum is the rule" \
-  "0" "$(GATE_LIB="$MPM" ask_fg mm pass tests/run.sh 0)"
-
-# The budget: a pass is the branch's, not the writer's (exempt as a landing is).
-fresh pass-budget
-world_machine 8 8192 20 0.5
-expect_eq "PS.26 fx, budgeted for a.test.sh, asks a whole run: refused (75); a pass of the same key: admitted (0)" \
-  "75 0" "$(cd "$BA" && AGENT=fx ask_fg pb1 whole tests/run.sh 2) $(cd "$BA" && AGENT=fx ask_fg pb2 pass tests/run.sh 2)"
 
 finish
