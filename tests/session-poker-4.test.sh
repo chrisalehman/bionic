@@ -2824,7 +2824,8 @@ section "§MATRIX-RENDER: matrix-render writes, from ## Eval design, one AC bloc
 # ============================================================
 #
 #   matrix-render      the bound plan's ## Verification Matrix gains, for each ## Eval design criterion, a block:
-#                      provenance (the requirement's own provenance: line, else the row's Approach), fails-when and
+#                      provenance (the requirement's provenance: line, from the requirements file the plan names, else
+#                      the plan's own, else pending; never the Approach: wave-35 T8), fails-when and
 #                      eval (`<tier> — <Eval>`) from the table, task (the one ## Tasks row serving it, else pending),
 #                      then evidence and every other key walls.sh keys_for_tier names for the row's tier, each
 #                      `pending`; and stack-health: pending (walk-artifact: pending too unless walk: exempt) where
@@ -4345,6 +4346,14 @@ poke "$RCR2" current 4
 s42_unchanged "CR-2 current 4 with a Step-4 block that lacks its fields" 1 "$PCR2"
 expect_eq "CR-2b AC-6.5 the refusal's last line is the block's missing fields, in the gate's words" \
   "poker: missing: the Step 4 block's worktree: base-sha: branch: (step-field 4 <key>=<value> writes each)" \
+  "$(printf '%s\n' "$OUT" | tail -1)"
+RCR3="$(make_repo cur-refuse-nocur)"; ( cd "$RCR3" && git commit -q --allow-empty -m init )
+PCR3="$(s42_plan "$RCR3" 4)"
+awk 'NR == 1 { print; print "current: 4"; next } /^## SDLC State/ { s = 1 } s && /^current: / { next } { print }' "$PCR3" > "$PCR3.x" && mv "$PCR3.x" "$PCR3"
+s42_snap "$RCR3" "$PCR3"
+poke "$RCR3" current 5
+s42_unchanged "CR-3 current 5 on a bound plan whose ## SDLC State carries no current: line" 1 "$PCR3"
+expect_eq "CR-3b …the refusal ends on the line missing" "poker: missing: the line 'current: 5' under ## SDLC State" \
   "$(printf '%s\n' "$OUT" | tail -1)"
 POKE_BOUND="$CR_BOUND_WAS"
 

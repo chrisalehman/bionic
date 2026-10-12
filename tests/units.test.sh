@@ -2177,6 +2177,11 @@ expect_eq "RR.4c …so T2 is not ready, and T1 is (the positive on the same read
 rr_plan "$SANDBOX/rr-landed.md" 'lib/p.sh, .bionic/docs/record/w/T1.md' 'approval:plan, record/w/T1.md' landed
 expect_eq "RR.5 a landed writer still covers the path: the table validates clean, and T2 is ready" "0 yes" \
   "$(call_rc units_validate "$SANDBOX/rr-landed.md") $(has_line "$(call units_ready "$SANDBOX/rr-landed.md" 4)" T2)"
+sed 's/| approval:plan, record\/w\/T1.md | pending |$/| approval:plan, record\/w\/T1.md | landed |/' "$SANDBOX/rr-bare.md" > "$SANDBOX/rr-reader-landed.md"
+expect_eq "RR.6 precondition: the copy differs from RR.1's plan in T2's status alone" "1" \
+  "$(diff "$SANDBOX/rr-bare.md" "$SANDBOX/rr-reader-landed.md" | grep -c '^>')"
+expect_eq "RR.6b only an open row is held to it (A-T13.1's rule): a landed T2 reading the same path validates (RR.1 is the refusal)" "0" \
+  "$(call_rc units_validate "$SANDBOX/rr-reader-landed.md")"
 
 # A READ NAMES SOMETHING: a path in the Files grammar or a named artifact. A token that names
 # neither is refused at the write, and never read as satisfied.
@@ -4085,7 +4090,9 @@ expect_eq "RH-2 the same row reading approval:plan, head validates (the default,
   "$(call_rc units_validate "$SANDBOX/rh-default.md")|$(call units_validate "$SANDBOX/rh-default.md")"
 expect_eq "RH-2b …and that row waits for T1, the open build row (the structural readiness)" "yes" \
   "$(has_line "$(call units_waiting "$SANDBOX/rh-default.md" 4)" "T2${TAB}head${TAB}T1${TAB}pending")"
-rh_cell "approval:plan, .bionic/docs/record/w/build-log.md, head" "$SANDBOX/rh-both.md"
+# The record path is one a row of the table writes (T3's review.md): a record read no row writes is refused on
+# its own account since wave-35 T8 (§RECORD-READ), and this row is about head.
+rh_cell "approval:plan, .bionic/docs/record/w/review.md, head" "$SANDBOX/rh-both.md"
 expect_eq "RH-3 a record path beside head is admitted: head is what is asked for" "0" \
   "$(call_rc units_validate "$SANDBOX/rh-both.md")"
 rh_cell "approval:plan" "$SANDBOX/rh-approval.md"

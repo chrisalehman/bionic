@@ -794,8 +794,8 @@ expect_empty "67a: …nor of the in-tree Step-2 fixture card" "$(over_budget "$S
 expect_empty "67b: …nor of the in-tree Step-3 fixture card" "$(over_budget "$S3_IT")"
 expect_empty "67c: nor of the Step-1 card over this wave's own requirements" \
   "$(over_budget "$S1_REAL")"
-expect_eq "67d0: precondition: the Step-2 card over the real spec renders (exit 0, its D8 row present)" "0|1" \
-  "$S2_REAL_RC|$(printf '%s\n' "$S2_REAL" | /usr/bin/grep -c 'D8')"
+expect_eq "67d0: precondition: the Step-2 card over the real spec renders (exit 0, its D8 row present)" "0|yes" \
+  "$S2_REAL_RC|$(printf '%s\n' "$S2_REAL" | /usr/bin/grep -q '^ *D8 ' && echo yes)"
 expect_empty "67d: …nor of the Step-2 card over this wave's own spec" "$(over_budget "$S2_REAL")"
 expect_empty "67e: …nor of the Step-3 card over this wave's own plan" "$(over_budget "$S3_REAL")"
 
