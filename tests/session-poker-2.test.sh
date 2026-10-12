@@ -1708,7 +1708,7 @@ s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
 expect_contains "46f13b …naming the verdict it lacks" "has no Gating: <n> passed, <m> failed verdict" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-void.txt
 s42_unchanged "46f14 F1 a run whose tally does not reach the roster, with a Void: line" 1 "$P46"
-expect_contains "46f14b …naming the tally against the roster" "40 passed and 1 void of 3 suites" "$OUT"
+expect_contains "46f14b …naming the tally against the roster (no void term, wave-35 T2)" "40 passed of 3 suites" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-inner.txt
 s42_unchanged "46f15 F1 a green inner verdict above the runner's red one" 1 "$P46"
 poke "$R46" proof-add task record/wave-01-fixture/floor-red.txt
@@ -1716,8 +1716,8 @@ s42_unchanged "46f16 F1 a task proof citing a red run" 1 "$P46"
 # REVIEW 14 S3, N1, N2 (wave-26 T52). THE LAST RUN IN THE LOG IS JUDGED, and a verdict that sits
 # inside a failing suite's captured output is not the runner's: a log cut off after a nested
 # green verdict, or a red run for this head with another head's green run appended, proves
-# nothing. A floor must be a WHOLE run: passed plus void reaches the suites at the head (three
-# here). A void suite passed (T43), so a whole run with one is a floor.
+# nothing. A floor must be a WHOLE run: passed reaches the suites at the head (three
+# here). Since wave-35 T2 (D11) there is no void term: a `Void:` line counts for nothing.
 printf 'floor log\nhead=%s dirty=0\n✗ FAIL\n───── x.test.sh: captured output ─────\nGating: 3 passed, 0 failed\n───── end x.test.sh ─────\n' \
   "$W46_HEAD2" > "$S46_REC/floor-cut.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nFailed:\nhead=0123456789abcdef0123456789abcdef01234567 dirty=0\nGating: 3 passed, 0 failed\n' \
@@ -1736,9 +1736,12 @@ s42_unchanged "46f18 S3 a red run for this head with another head's green run ap
 expect_contains "46f18b …judged by the last run, which read another head" "read head 0123456789ab" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-part.txt
 s42_unchanged "46f19 N1 a green verdict over one suite of the three at the head" 1 "$P46"
-expect_contains "46f19b …naming the tally against the roster" "1 passed and 0 void of 3 suites" "$OUT"
+expect_contains "46f19b …naming the tally against the roster" "1 passed of 3 suites" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-whole-void.txt
-expect_eq "46f20 N2 a whole run with one void suite that passed is a floor" "0" "$RC"
+# 46f20 INVERTED BY WAVE-35 T2 (D11, AC-2.1): the floor judge has no void term, so two passed and a
+# `Void:` line naming the third is two of three suites, not a whole run (until wave-35 it was a floor).
+s42_unchanged "46f20 N2 a run of two passed with a Void: line naming the third is not a floor" 1 "$P46"
+expect_contains "46f20b …naming the tally against the roster: the Void: line counts for nothing" "2 passed of 3 suites" "$OUT"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-rerun.txt
 expect_eq "46f21 S3 a red run then a green rerun on the same head: the last run is judged, and it passed" "0" "$RC"
