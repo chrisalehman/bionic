@@ -72,6 +72,12 @@ if [ -z "${CMD_RUN_NORM_AWK:-}" ]; then
   # shellcheck source=/dev/null
   . "$_BRIEF_LIB_DIR/cmd-class.sh"
 fi
+# THE ONE SUITE-NAME GRAMMAR (wave-35 T6): a `Lands-on:` entry is judged by suite.sh's `suite_name`, the
+# function line.sh's `_line_suites` reads a roster's `lands_on=` with.
+if [ -z "${BIONIC_SUITE_NAME_AWK:-}" ]; then
+  # shellcheck source=/dev/null
+  . "$_BRIEF_LIB_DIR/suite.sh"
+fi
 
 # Values are pipe-delimited on one line, so a field carrying a newline or a `|`
 # would forge a row. Never a refusal — the ledger normalizes and records.
@@ -289,7 +295,7 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
 _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lift
   printf '%s' "$1" | \
     awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
-    -v RUNS_CAP="$DP_SUITES_MAX" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
+    -v RUNS_CAP="$DP_SUITES_MAX" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK$BIONIC_SUITE_NAME_AWK"'
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses. <bol> marks a label that only counts
     # at the START of a line — see the waiver note in BEGIN.
@@ -1339,11 +1345,8 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
             nlw = split(v, LW, /[ \t,]+/); lo = ""; lbad = ""
             for (i = 1; i <= nlw; i++) {
               t = trimtok(LW[i]); if (t == "") continue
-              while (t ~ /^\.\/.*\//) t = substr(t, 3)
-              lpn = split(t, LPW, "/"); lpb = LPW[lpn]; lpok = 1
-              for (lpq = 1; lpq < lpn; lpq++) if (LPW[lpq] !~ /^[A-Za-z0-9_.-]+$/ || LPW[lpq] == ".." || (LPW[lpq] == "." && lpq > 1)) lpok = 0
-              if (lpok && lpb ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) {
-                sub(/\.test\.sh$/, "", t); t = t ".test.sh"
+              t = suite_name(t)
+              if (t != "") {
                 if (index("," lo ",", "," t ",") == 0) lo = (lo == "" ? t : lo "," t)
               } else if (index(" " lbad " ", " " LW[i] " ") == 0) lbad = (lbad == "" ? LW[i] : lbad " " LW[i])
             }
