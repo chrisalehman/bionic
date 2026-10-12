@@ -1623,9 +1623,10 @@ expect_absent "OA.8 …and nothing in it waited at the gate" "waits for its turn
 # store holds a request per suite and none keyed by the runner: OA.2 is not vacuous.
 TOAM="$TMPROOT/one-adm-mut"
 rr_tree "$TOAM"; oa_stub "$TOAM" oa-fast 0; oa_stub "$TOAM" oa-slow 0
-OA_ASK='if ! _gate_ask_for whole tests/run.sh; then'
-anchor "$TOAM/tests/run.sh" "    $OA_ASK" 1
-OA_N_="$OA_ASK" awk 'BEGIN { n = ENVIRON["OA_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if ! :; then" substr($0, i + length(n)); print }' "$RUNNER" > "$TOAM/tests/run.sh"
+# A SHAPED ANCHOR (wave-35 T2, on T3's helper, D16): the run's one ask on one line of the shipped
+# runner, and the doctored copy written from it, so `anchors check` names this line at any landing
+# that re-spells the ask. It took over from 11.15, whose `whole)` arm left with the solo drain.
+anchor file tests/run.sh 'if ! _gate_ask_for whole tests/run.sh; then' 'if ! :; then' "$TOAM/tests/run.sh"
 expect_eq "OA.12 the mutant runner parses" "0" "$(bash -n "$TOAM/tests/run.sh" >/dev/null 2>&1; echo $?)"
 oa_drive "$TOAM"
 expect_eq "OA.13 …and is green" "0" "$RR_RC"
