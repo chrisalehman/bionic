@@ -1190,13 +1190,13 @@ row_has_key() {  # <line> <key>
 }
 
 clean() {  # <value> [<field name>]
-  local out
-  out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//')"
+  local out="${1//[[:cntrl:]|]/ }"
+  while :; do case "$out" in *"  "*) out="${out//  / }" ;; *) break ;; esac; done
+  out="${out# }"; out="${out% }"
   # THE CUT IS PER-FIELD, NOT UNIVERSAL (REQ-9, carry-over P2). Every caller still gets
   # control characters and `|` folded to spaces — that half of this function is unchanged
   # and applies with no exception. What used to be unconditional is the trailing
-  # `cut -c 1-400`: `suites_allowed=` and `files=` are LIST-valued fields (a space- or
+  # 400-character cut: `suites_allowed=` and `files=` are LIST-valued fields (a space- or
   # comma-joined set, S13's suite-allowance wall and the brief's declared budget), and a
   # dispatch touching enough files or naming enough suites overflows 400 characters on a
   # perfectly ordinary brief — the cut then silently drops suites off the end, which is a
@@ -1221,7 +1221,7 @@ clean() {  # <value> [<field name>]
     re_executes)
       out="${out//\%7C/|}"
       printf '%s' "${out//\%25/%}" ;;
-    *) printf '%s' "$out" | cut -c 1-400 ;;
+    *) printf '%s' "${out:0:400}" ;;
   esac
 }
 
@@ -1238,29 +1238,54 @@ clean_whole() { clean "$1" files; }
 # copy's comments are shorter, not why the code differs). This is that function's POST-FIX
 # body, CODE-identical (§O compares it with comments on both sides stripped).
 parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
-  local raw="$1" s pairs count nums hi unit mult n allnums
+  local raw="$1" s pairs count nums hi unit mult n allnums line rest m k nl=$'\n'
+  local re='^[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)'
   [ -n "$raw" ] || return 1
-  s="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
-  s="${s//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
-  pairs="$(printf '%s' "$s" \
-    | grep -oE '[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)')"
-  count="$(printf '%s\n' "$pairs" | grep -c '[0-9]')"
+  s="${raw//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
+  case "$s" in
+    *[![:ascii:]]*) s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')" ;;
+    *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+      for n in Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz; do
+        s="${s//${n%?}/${n#?}}"
+      done ;;
+  esac
+  count=0; pairs=""; unit=""; rest="$s$nl"
+  while [ -n "$rest" ]; do
+    line="${rest%%"$nl"*}"; rest="${rest#*"$nl"}"
+    while :; do
+      case "$line" in *[0123456789]*) ;; *) break ;; esac
+      line="${line#"${line%%[0123456789]*}"}"
+      if [[ $line =~ $re ]]; then
+        m="${BASH_REMATCH[0]}"; count=$((count + 1)); pairs="$m"; unit="${BASH_REMATCH[2]}"
+        line="${line:${#m}}"
+      else
+        line="${line#"${line%%[!0123456789]*}"}"
+      fi
+    done
+  done
   [ "$count" -eq 1 ] || return 1
-  nums="$(printf '%s' "$pairs" | grep -oE '[0-9]+')"
+  nums=""; k=0; m="$pairs"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; n="${m%%[!0123456789]*}"; m="${m#"$n"}"
+    nums="${nums}${nums:+$nl}$n"; k=$((k + 1))
+  done
   hi=0
   for n in $nums; do [ "$n" -gt "$hi" ] && hi="$n"; done
   [ "$hi" -gt 0 ] || return 1
-  unit="$(printf '%s' "$pairs" | grep -oE '[a-z]+' | tail -1)"
   case "$unit" in
     h|hr|hrs|hour|hours)         mult=3600 ;;
     m|min|mins|minute|minutes)   mult=60 ;;
     s|sec|secs|second|seconds)   mult=1 ;;
     *) return 1 ;;
   esac
-  grep -qE '[0-9]+\.[0-9]+' <<< "$s" && return 1
-  allnums="$(printf '%s' "$s" | grep -oE '[0-9]+')"
-  [ "$(printf '%s\n' "$allnums" | grep -c '[0-9]')" -eq "$(printf '%s\n' "$nums" | grep -c '[0-9]')" ] \
-    || return 1
+  case "$s" in *[0123456789].[0123456789]*) return 1 ;; esac
+  allnums=0; m="$s"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; m="${m#"${m%%[!0123456789]*}"}"; allnums=$((allnums + 1))
+  done
+  [ "$allnums" -eq "$k" ] || return 1
   printf '%s' "$((hi * mult))"
 }
 

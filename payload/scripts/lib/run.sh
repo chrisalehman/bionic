@@ -134,19 +134,42 @@ _run_lines() {
 # (run_open's own note, §R4). A here-string is fully written before the reader starts. The
 # status is 0 whatever the key's fate — an absent key is an empty value, not a failure.
 plan_frontmatter_get() {
-  local plan="$1" key="$2" fm
+  local plan="$1" key="$2" fm v
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   [ -n "$key" ] || return 0
   fm=$(_run_lines "$plan" | awk '
         NR == 1 && $0 == "---" { f = 1; next }
         f && $0 == "---" { exit }
         f { print }')
-  grep -E "^[[:space:]]*${key}[[:space:]]*:" <<< "$fm" \
-    | head -1 \
-    | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" \
-    | sed -E 's/[[:space:]]+$//' \
-    | sed -E "s/^['\"]//;s/['\"]\$//"
+  frontmatter_value_v v "$fm" "$key" && printf '%s\n' "$v"
   return 0
+}
+
+# frontmatter_value_v <var> <frontmatter text> <key> -> rc 0 and the value in <var> when a line
+# carries the key, rc 1 and an empty <var> when none does. THE GRAMMAR ABOVE, IN BUILTINS (wave-34
+# T11, D19): the first line that is `<key>` between optional whitespace and a `:`, the text after the
+# colon with its surrounding whitespace trimmed, then one leading and one trailing quote of either
+# kind dropped — what `grep | head -1 | sed | sed | sed` used to say with five processes. The key is
+# matched as text, which is what every key a caller names (`rigor`, `working-branch`) already was
+# to the regex. walls.sh's `frontmatter_get` reads the evidence gate's FRONTMATTER through this too,
+# so the two readers share one spelling.
+frontmatter_value_v() {
+  local _fv_rest="${2}"$'\n' _fv_l
+  printf -v "$1" '%s' ''
+  while [ -n "$_fv_rest" ]; do
+    _fv_l="${_fv_rest%%$'\n'*}"; _fv_rest="${_fv_rest#*$'\n'}"
+    _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
+    case "$_fv_l" in "$3"*) ;; *) continue ;; esac
+    _fv_l="${_fv_l#"$3"}"; _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
+    case "$_fv_l" in :*) ;; *) continue ;; esac
+    _fv_l="${_fv_l#:}"; _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
+    _fv_l="${_fv_l%"${_fv_l##*[![:space:]]}"}"
+    case "$_fv_l" in [\'\"]*) _fv_l="${_fv_l#?}" ;; esac
+    case "$_fv_l" in *[\'\"]) _fv_l="${_fv_l%?}" ;; esac
+    printf -v "$1" '%s' "$_fv_l"
+    return 0
+  done
+  return 1
 }
 
 # plan_regression <plan> -> `no` when the plan's leading frontmatter says exactly `regression: no`,

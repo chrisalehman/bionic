@@ -404,16 +404,18 @@ iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
 # encode them again. This file reads no such field, so the arm is inert here; it is present
 # because the two copies are held identical as CODE, and a twin that drifted by one arm is
 # the drift §O exists to catch.
+# IN BUILTINS (wave-34 T11, D19): the fold, the squeeze, the trim and the cut are parameter
+# expansion, where `tr | sed | cut` used to start three processes per value.
 clean() {  # <value>
-  local out
-  out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//')"
+  local out="${1//[[:cntrl:]|]/ }"
+  while :; do case "$out" in *"  "*) out="${out//  / }" ;; *) break ;; esac; done
+  out="${out# }"; out="${out% }"
   case "${2:-}" in
     suites_allowed|files) printf '%s' "$out" ;;
     re_executes)
       out="${out//\%7C/|}"
       printf '%s' "${out//\%25/%}" ;;
-    *) printf '%s' "$out" | cut -c 1-400 ;;
+    *) printf '%s' "${out:0:400}" ;;
   esac
 }
 
@@ -453,26 +455,52 @@ abs_path() {  # <path, as the roster spells it> -> absolute
 #     promise is broken, and it is not broken until the longer bound passes.
 #   * zero is refused: a zero threshold would call every row late the instant it launched.
 parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
-  local raw="$1" s pairs count nums hi unit mult n allnums
+  local raw="$1" s pairs count nums hi unit mult n allnums line rest m k nl=$'\n'
+  local re='^[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)'
   [ -n "$raw" ] || return 1
-  s="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
-  s="${s//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
-  pairs="$(printf '%s' "$s" \
-    | grep -oE '[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)')"
-  count="$(printf '%s\n' "$pairs" | grep -c '[0-9]')"
+  s="${raw//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
+  case "$s" in
+    *[![:ascii:]]*) s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')" ;;
+    *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+      for n in Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz; do
+        s="${s//${n%?}/${n#?}}"
+      done ;;
+  esac
+  # THE PAIR WALK IS `grep -oE`'s, IN BUILTINS (wave-34 T11, D19): line by line, a match can only
+  # start where a digit run starts, so each run start is tried anchored and a run that fails is
+  # skipped whole; a match resumes the walk at its end. Text outside ASCII keeps `tr` for the case
+  # fold, so the locale's own case map is still the one read.
+  count=0; pairs=""; unit=""; rest="$s$nl"
+  while [ -n "$rest" ]; do
+    line="${rest%%"$nl"*}"; rest="${rest#*"$nl"}"
+    while :; do
+      case "$line" in *[0123456789]*) ;; *) break ;; esac
+      line="${line#"${line%%[0123456789]*}"}"
+      if [[ $line =~ $re ]]; then
+        m="${BASH_REMATCH[0]}"; count=$((count + 1)); pairs="$m"; unit="${BASH_REMATCH[2]}"
+        line="${line:${#m}}"
+      else
+        line="${line#"${line%%[!0123456789]*}"}"
+      fi
+    done
+  done
   [ "$count" -eq 1 ] || return 1
-  nums="$(printf '%s' "$pairs" | grep -oE '[0-9]+')"
+  nums=""; k=0; m="$pairs"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; n="${m%%[!0123456789]*}"; m="${m#"$n"}"
+    nums="${nums}${nums:+$nl}$n"; k=$((k + 1))
+  done
   hi=0
   for n in $nums; do [ "$n" -gt "$hi" ] && hi="$n"; done
   [ "$hi" -gt 0 ] || return 1
-  unit="$(printf '%s' "$pairs" | grep -oE '[a-z]+' | tail -1)"
   case "$unit" in
     h|hr|hrs|hour|hours)         mult=3600 ;;
     m|min|mins|minute|minutes)   mult=60 ;;
     s|sec|secs|second|seconds)   mult=1 ;;
     *) return 1 ;;
   esac
-  # REFUSE what `grep -oE` silently dropped rather than matched. It reports only what it
+  # REFUSE what the pair walk silently skipped rather than matched. It keeps only what it
   # matched, so two failure shapes above look identical to a single clean pair:
   #   * a decimal point anywhere near a digit ("0.5h" matches the trailing "5h" and never
   #     sees the "0."; the header's "whole numbers only" is a refusal, not a truncation).
@@ -481,10 +509,13 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
   # A decimal anywhere in the cleaned string fails outright; a mismatch between every digit
   # run in the string and the digit run(s) actually captured inside the matched pair catches
   # the glued case, because nothing legitimate is a digit run OUTSIDE the one pair.
-  grep -qE '[0-9]+\.[0-9]+' <<< "$s" && return 1
-  allnums="$(printf '%s' "$s" | grep -oE '[0-9]+')"
-  [ "$(printf '%s\n' "$allnums" | grep -c '[0-9]')" -eq "$(printf '%s\n' "$nums" | grep -c '[0-9]')" ] \
-    || return 1
+  case "$s" in *[0123456789].[0123456789]*) return 1 ;; esac
+  allnums=0; m="$s"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; m="${m#"${m%%[!0123456789]*}"}"; allnums=$((allnums + 1))
+  done
+  [ "$allnums" -eq "$k" ] || return 1
   printf '%s' "$((hi * mult))"
 }
 
@@ -1088,7 +1119,7 @@ verdict_row() {  # <roster row>
   set -- $deliv
   set +f; IFS="$old"
   for p in "$@"; do
-    p="$(printf '%s' "$p" | sed -e 's/^ *//' -e 's/ *$//')"
+    p="${p#"${p%%[! ]*}"}"; p="${p%"${p##*[! ]}"}"
     [ -n "$p" ] || continue
     n=$((n + 1))
     if landing_conjunct "$p" "$le" "$launched"; then
