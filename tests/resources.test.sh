@@ -1366,6 +1366,54 @@ printf '7090000000000\n' > "$B_V1/cpuacct/cpuacct.usage"
 expect_eq "BUSY.16 cgroup v1: 90 s of CPU (cpuacct.usage, ns) in 60 s reads 1.50" "1.50" \
   "$(b_run "$B_RV1" "$B_V1" "$B_T" _res_busy_cores)"
 
+# One reader of busy (wave-34 T3; D12, D8, AC-2.1 to AC-2.3; critic-adversarial-2 new 1). The
+# settle, the void check and the ring's load field, which sets a whole run's width, read busy
+# in the same domain as the cores they are measured against: the cgroup's own use under the
+# quota, the load average without one (§L, §K and runner-width.test.sh hold that side). Each
+# row runs in a scratch directory with no config above it, so the line is the default
+# `cores × quiet-load` (2 × 0.5 = 1.00 here).
+b_rc() {  # <ring> <epoch> <command...> — the command's rc on the planted machine
+  local ring="$1" now="$2"; shift 2
+  ( cd "$B_DIR" && GIT_CEILING_DIRECTORIES="$B_DIR" b_run "$ring" "$B_CG" "$now" "$@" >/dev/null )
+  printf '%s' "$?"
+}
+b_level() { pressure_level "$1" 2>&1 >/dev/null; }   # the rung's reasoning line
+b_load_field() { awk -F'|' 'END { print $4 }' "$1" 2>/dev/null; }   # the newest sample's load
+
+# The critic's idle container on a host at load 10 (the B_IDLE ring above): its usage is where
+# its last sample left it. The rows below share one cpu.stat, so each sets the usage it reads.
+b_stat 5000000000
+expect_eq "BUSY.17 the idle container settles: resources_settled 2 is rc 0, not the host's 10 against 1.00" "0" \
+  "$(b_rc "$B_IDLE" "$B_T" resources_settled 2)"
+expect_eq "BUSY.18 …and the void check finds it undisturbed: resources_undisturbed 2 0 is rc 0" "0" \
+  "$(b_rc "$B_IDLE" "$B_T" resources_undisturbed 2 0)"
+expect_eq "BUSY.19 …and a whole run reads its full width: pressure_level 8 over its ring is clear" \
+  "rung=8/8 band=clear samples=3" "$(b_run "$B_IDLE" "$B_CG" "$B_T" b_level 8)"
+
+# The container busy at its own 2 cores (the B_BUSY ring above) still reads busy: 120 s of CPU
+# since its sample 60 s ago.
+b_stat 5120000000
+expect_eq "BUSY.20 the busy container does not settle: resources_settled 2 is rc 1" "1" \
+  "$(b_rc "$B_BUSY" "$B_T" resources_settled 2)"
+expect_eq "BUSY.21 …and the void check finds it disturbed: rc 1" "1" \
+  "$(b_rc "$B_BUSY" "$B_T" resources_undisturbed 2 0)"
+expect_eq "BUSY.22 …and the ring's newest sample carries its own 2.00 cores, not the host's 10.00" "2.00" \
+  "$(b_load_field "$B_BUSY")"
+
+# A cold ring under the quota is unknown, and unknown is not calm (D8): the first read waits and
+# leaves a sample; a read _RES_CPU_MIN_S (5 s) later has a rate and settles on it.
+B_COLDS="$B_DIR/ring-cold-settle"
+b_stat 5000000000
+expect_eq "BUSY.23 a cold ring does not settle at once: rc 1" "1" \
+  "$(b_rc "$B_COLDS" "$B_T" resources_settled 2)"
+expect_eq "BUSY.24 …the read left one six-field sample" "6" "$(b_ring_fields "$B_COLDS")"
+expect_eq "BUSY.25 …4 s later no sample is old enough: still rc 1" "1" \
+  "$(b_rc "$B_COLDS" $((B_T + 4)) resources_settled 2)"
+expect_eq "BUSY.26 …5 s later the container's own rate is known, idle: rc 0" "0" \
+  "$(b_rc "$B_COLDS" $((B_T + 5)) resources_settled 2)"
+expect_eq "BUSY.27 a cold ring is not undisturbed either: resources_undisturbed 2 0 is rc 1" "1" \
+  "$(b_rc "$B_DIR/ring-cold-void" "$B_T" resources_undisturbed 2 0)"
+
 # ════════════════════════════════════════════════════ §N — tests/lib/world.sh (T1, D23)
 
 section "N — the model world: machine, clock, cost, repository, suites, verb log (wave-28 D23)"
