@@ -478,4 +478,95 @@ _rv_readme="$(cat "$REPO/README.md")"
 expect_contains "13i: the README roster lists the critic row" '| `critic` |' "$_rv_readme"
 expect_absent "13j: …and no reviewer row" '| `reviewer` |' "$_rv_readme"
 
+section "Section 14: §DOCTRINE — Step 5 owes the walk and the auditor, Step 6 ends on the floor (wave-35 T13; REQ-1 AC-1.9, D10)"
+# THE RULING (D10). Step 5 owes each row's evidence, the matrix, the walk and the auditor. Step 6
+# owes the readings, their fix rows, then the floor as its last act. No step file orders the whole
+# run before the readers. These pins read the FINALS the plugin ships and pin the order of the
+# sections and the presence of the owed acts, never a sentence.
+#
+# fails-when: rendered steps/5.md stops naming the walk or the auditor as owed, steps/6.md stops on
+# anything but the floor, or a step file lets the whole run (or the walk) gate the readers.
+S5="$REPO/skills/canonical-sdlc/steps/5.md"
+S6="$REPO/skills/canonical-sdlc/steps/6.md"
+# rt_para <file> <ERE anchoring the paragraph's first line> — the paragraph, up to the next blank line.
+rt_para() {
+  /usr/bin/awk -v pat="$2" 'found && /^[[:space:]]*$/ { exit } !found && $0 ~ pat { found = 1 } found { print }' "$1"
+}
+# rt_last_para <file> — the file's last paragraph.
+rt_last_para() {
+  /usr/bin/awk '/^[[:space:]]*$/ { if (buf != "") last = buf; buf = ""; next } { buf = (buf == "" ? $0 : buf "\n" $0) } END { if (buf != "") last = buf; print last }' "$1"
+}
+_dc_owed=$(rt_para "$S5" '^The gate discharges')
+# The extractor returns the opening paragraph (its own positive), then the owed acts are read from it.
+expect_contains "14a: the Step-5 opening paragraph is found (the extractor is not vacuous)" "matrix row" "$_dc_owed"
+expect_contains "14b: …and names the matrix as owed" "matrix" "$_dc_owed"
+expect_contains "14c: …and the walk" "walk" "$_dc_owed"
+expect_contains "14d: …and the auditor" "auditor" "$_dc_owed"
+expect_contains "14e: …and hands the floor to Step 6" "Step 6" "$_dc_owed"
+_dc_reg=$(rt_para "$S5" '^\*\*The regression, once')
+expect_contains "14f: the regression paragraph is found, and places the whole run in Step 6" "Step 6" "$_dc_reg"
+expect_contains "14g: …as its last act" "last act" "$_dc_reg"
+_dc_read=$(rt_para "$S5" '^\*\*The whole read, once')
+expect_contains "14h: the readers' dispatch paragraph is found (it dispatches the readers)" "dispatch the readers" "$_dc_read"
+expect_absent "14i: …and does not wait on the whole run" "full run" "$_dc_read"
+expect_absent "14j: …nor on the walk" "walk on disk" "$_dc_read"
+_dc_s6a=$(rt_para "$S6" '^By the core')
+expect_contains "14k: Step 6's opening paragraph is found (it says review is one event)" "one event" "$_dc_s6a"
+expect_absent "14l: …and does not put the regression before the reading" "regression" "$_dc_s6a"
+_dc_s6b=$(rt_para "$S6" '^\*\*The reading, once')
+expect_contains "14m: the reading paragraph is found (it says the readers are dispatched)" "dispatched once" "$_dc_s6b"
+expect_absent "14n: …and does not wait on the regression" "regression" "$_dc_s6b"
+_dc_last=$(rt_last_para "$S6")
+expect_contains "14o: Step 6's last paragraph is the floor" "floor" "$_dc_last"
+expect_contains "14p: …named as Step 6's last act" "last act" "$_dc_last"
+_dc_row5=$(/usr/bin/grep -E '^\| 5 \| `head:`' "$REPO/skills/canonical-sdlc/SKILL.md")
+expect_contains "14q: the core's Step-5 field row is found (it names the matrix)" "Verification Matrix" "$_dc_row5"
+expect_contains "14r: …and puts the whole run in Step 6" "Step 6" "$_dc_row5"
+_dc_tbl5=$(/usr/bin/grep -E '^\| 5 Verify \|' "$REPO/skills/canonical-sdlc/SKILL.md")
+expect_contains "14s: the core's Verify row is found (it names the walk)" "alk" "$_dc_tbl5"
+expect_absent "14t: …and no longer owes the regression at Step 5" "regression" "$_dc_tbl5"
+for _dc_role in auditor test-runner; do
+  _dc_rb=$(cat "$REPO/agents/$_dc_role.md" 2>/dev/null)
+  expect_contains "14u: agents/$_dc_role.md carries its role section (not vacuous)" "## Role" "$_dc_rb"
+  expect_contains "14v: …and says the floor is Step 6's last act" "Step 6" "$_dc_rb"
+  expect_contains "14w: …naming the floor" "floor" "$_dc_rb"
+done
+# The stale sentences other rows found.
+_dc_disp=$(cat "$REPO/skills/canonical-sdlc/dispatch.md")
+expect_contains "14x: dispatch.md carries the gate paragraph (not vacuous)" "**One gate.**" "$_dc_disp"
+expect_absent "14y: …and no timing check that no longer exists" "timing check" "$_dc_disp"
+expect_absent "14z: …nor the void report" "reports \`void\`" "$_dc_disp"
+_dc_dec=$(cat "$REPO/skills/decision/SKILL.md")
+expect_contains "14aa: the decision skill carries its worked pair (not vacuous)" "**Goal:**" "$_dc_dec"
+expect_absent "14ab: …and names no background pass" "background-pass" "$_dc_dec"
+_dc_kd=$(/usr/bin/grep -F 'kind defaults' "$REPO/skills/canonical-sdlc/operational-rules.md")
+_dc_kd_doc=${_dc_kd%%integrate*}
+_dc_kd_int=${_dc_kd#*integrate}
+expect_contains "14ac: the kind-defaults row is found, and its doc default reads the plan" 'doc `approval:plan, head`' "$_dc_kd_doc"
+expect_absent "14ad: …a Step-7 doc row writes no release read" "approval:release" "$_dc_kd_doc"
+expect_contains "14ae: …the integrate row holds it" "approval:release" "$_dc_kd_int"
+
+section "Section 15: §ORDER — readers before the release text, approvals on the integrate row, the floor last (wave-35 T13; REQ-8 AC-8.2, D17)"
+# fails-when: rendered steps/6.md orders the readers behind the release text, leaves an approval off
+# the integrate row, or ends on anything but the floor. Positions are line numbers in the final.
+_or_line() { /usr/bin/grep -n -E "$2" "$1" | head -1 | cut -d: -f1; }
+_or_readers=$(_or_line "$S6" '^\*\*The readers\.')
+_or_rel=$(_or_line "$S6" 'release')
+_or_disp=$(_or_line "$S6" '^\*\*The disposition\.')
+_or_floor=$(_or_line "$S6" 'last act')
+expect_true "15a: the readers' paragraph is found in steps/6.md" test -n "$_or_readers"
+expect_true "15b: the release text is named in steps/6.md" test -n "$_or_rel"
+expect_true "15c: the readers come before the release text" test "${_or_readers:-999}" -lt "${_or_rel:-0}"
+expect_true "15d: the disposition is found, and the floor comes after it" test -n "$_or_disp" -a "${_or_floor:-0}" -gt "${_or_disp:-999}"
+_or_rl=$(/usr/bin/grep -E 'release' "$S6")
+expect_contains "15e: the release text waits on the plan alone" 'approval:plan' "$_or_rl"
+expect_contains "15f: approvals sit on the integrate row" "integrate" "$_or_rl"
+expect_contains "15g: …the release approval among them" 'approval:release' "$_or_rl"
+expect_contains "15h: …and the merge approval" 'approval:merge' "$_or_rl"
+# THE PAIRED NEGATIVE, on a fixture: the reader finds a last paragraph that is not the floor.
+_or_fix="$TMPROOT/step6-fixture.md"
+printf 'first\n\n**The floor.** a one whole run, last act.\n\n**Then.** something else.\n' > "$_or_fix"
+expect_contains "15i: the last-paragraph reader reads the final paragraph (not vacuous)" "something else" "$(rt_last_para "$_or_fix")"
+expect_absent "15j: …and not an earlier one" "last act" "$(rt_last_para "$_or_fix")"
+
 finish

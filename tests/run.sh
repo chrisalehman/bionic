@@ -542,13 +542,6 @@ _runner_width() {
   fi
   _WIDTH=8
   if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
-  # A BACKGROUND PASS RUNS AT ITS PROMISE (wave-34 T9; D15): a whole run under a `pass` admission (its
-  # one ask believed through the lineage) has the free cores the gate promised it, not the share's width.
-  if [ -n "${_RUN_GATE_ID:-}" ] && declare -F gate_dir >/dev/null 2>&1; then
-    _pw="$(awk -F'[=:]' '/^kind=/ { k = $2 } /^promise=/ { w = $3 } END { if (k == "pass") print w }' \
-      "$(gate_dir)/requests/$_RUN_GATE_ID" 2>/dev/null)"
-    case "$_pw" in ''|*[!0-9]*|0) : ;; *) _WIDTH="$_pw" ;; esac
-  fi
   case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
   _ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
   if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
