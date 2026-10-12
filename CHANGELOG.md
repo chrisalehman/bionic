@@ -117,7 +117,9 @@ What you will notice:
 
 - **The review's fixes.** A `Lands-on:` suite declared at a path is run at exactly that path, never a
   same-named `tests/<name>` (`T27-declared-path.md`; the critic's S2). A writer dispatched into a tree a row
-  already recorded re-marks it for the new name, so it asks the gate as itself (`T28-remark.md`).
+  already recorded re-marks it for the new name, so it asks the gate as itself (`T28-remark.md`). A dispatch after a
+  handoff was written marks the handoff itself stale: its safe-to-exit lines name the later dispatch
+  (`T29-handoff-stale.md`).
 
 ### The floor, the passes and the walk
 
