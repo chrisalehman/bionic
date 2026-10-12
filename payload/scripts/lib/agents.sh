@@ -256,6 +256,7 @@ _LA_CACHE_KEY=""
 _LA_CACHE_OUT=""
 _LA_CACHE_ERR=""
 _LA_CACHE_RC=0
+_LA_CACHE_ANS_TS=""
 
 _la_cache_key() {  # <transcript> -> path|bytes|mtime, empty when the file cannot be read
   local f="${1:-}" fact
@@ -299,6 +300,7 @@ _la_read() {  # <transcript.jsonl> -> sets _LA_CACHE_OUT / _LA_CACHE_ERR / _LA_C
   _LA_CACHE_OUT=""
   _LA_CACHE_ERR="live-agents: none age=none"
   _LA_CACHE_RC=4
+  _LA_CACHE_ANS_TS=""
 
   if [ -z "$transcript" ] || [ ! -r "$transcript" ]; then
     return 0
@@ -376,6 +378,7 @@ _la_read() {  # <transcript.jsonl> -> sets _LA_CACHE_OUT / _LA_CACHE_ERR / _LA_C
 
   _LA_CACHE_ERR="live-agents: ${state} age=${age}"
   _LA_CACHE_OUT="$set_out"
+  _LA_CACHE_ANS_TS="$ans_ts"
   if [ "$state" = "fresh" ]; then
     _LA_CACHE_RC=0
   else
@@ -507,3 +510,56 @@ live_row_open() {  # <transcript.jsonl> <name>
     *) return "$rc" ;;
   esac
 }
+
+# WHAT THE ANSWER CANNOT SPEAK FOR (wave-34 T6; REQ-14 AC-14.2, D23). An answer is the harness's
+# word about the agents that existed when it was recorded, and two tool calls after it change that
+# set without the harness being asked again: a TaskStop ends an agent the answer still lists, and an
+# Agent dispatch starts one the answer never saw. A handoff written after either, read off the
+# answer alone, listed the stopped researchers as live (field report 2026-10-11, item 2). This is the
+# same transcript and the same id join `_la_scan` uses, asked about the calls that FOLLOW the newest
+# answer.
+#
+#   live_agents_since_answer <transcript.jsonl>
+#     stdout  one line per call after the newest answer, in transcript order:
+#               `dispatched<TAB><ts>`  an Agent (or Task) tool_use
+#               `stopped<TAB><name>`   a TaskStop tool_use whose result is not an error; the name is
+#                                      the task_id as typed, its `@session-…` suffix taken off
+#     exit    live_agents' own code (0 fresh, 3 stale, 4 none); nothing on stdout unless an answer
+#             exists. stderr: live_agents' one line.
+live_agents_since_answer() {  # <transcript.jsonl>
+  local tr="${1:-}" rc=0
+  _la_ensure "$tr" || rc=$?
+  [ -n "$_LA_CACHE_ANS_TS" ] || return "$rc"
+  jq -Rr '
+    (fromjson? // empty) as $e
+    | ($e.timestamp // "") as $ts
+    | if ($e.type? == "assistant") and (($e.message?.content? // null) | type == "array") then
+        $e.message.content[]
+        | select(.type? == "tool_use")
+        | if (.name? == "Agent") or (.name? == "Task") then "A\t" + $ts
+          elif .name? == "TaskStop" then "T\t" + $ts + "\t" + (.id // "") + "\t" + ((.input?.task_id? // "") | tostring)
+          else empty end
+      elif ($e.type? == "user") and (($e.message?.content? // null) | type == "array") then
+        $e.message.content[]
+        | select((.type? == "tool_result") and (.is_error? == true))
+        | "E\t" + (.tool_use_id // "")
+      else empty end
+  ' "$tr" 2>/dev/null | LC_ALL=C awk -F'\t' -v since="$_LA_CACHE_ANS_TS" '
+    function nts(t,   i, base, frac) {
+      if (t == "") return ""
+      i = index(t, ".")
+      if (i > 0) { base = substr(t, 1, i - 1); frac = substr(t, i + 1) }
+      else       { base = t;                   frac = "" }
+      sub(/Z$/, "", base); sub(/Z$/, "", frac)
+      frac = frac "000"
+      return base "." substr(frac, 1, 3)
+    }
+    BEGIN { s = nts(since) }
+    $1 == "A" { if (nts($2) > s) out[++n] = "dispatched\t" $2; next }
+    $1 == "T" { if (nts($2) > s && $4 != "") { nm = $4; sub(/@.*$/, "", nm); out[++n] = "stopped\t" nm; tid[n] = $3 } next }
+    $1 == "E" { err[$2] = 1; next }
+    END { for (i = 1; i <= n; i++) if (!((i in tid) && (tid[i] in err))) print out[i] }
+  '
+  return "$rc"
+}
+

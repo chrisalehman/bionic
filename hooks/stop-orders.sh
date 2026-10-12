@@ -533,6 +533,39 @@ _is_live() {  # <name> -> 0 iff the fresh answer names it; never 0 on a stale re
     | awk -F'|' -v want="$1" '$1 == want { found = 1 } END { exit found ? 0 : 1 }'
 }
 
+# EVERY SPELLING OF ONE AGENT, OFF THE PROJECT'S OTHER ROSTERS (wave-34 T6; REQ-14 AC-14.3, D23). The
+# target as typed, less any `@session-…` suffix, is matched against each confirmed or identified row's name
+# and id — the accepted set the stop gate takes an identity from — and every match prints the name, the id
+# and `name@session-<launcher's first eight>` (the launcher is `adopted_from=`, else `session=`). A typed
+# suffix also yields the bare name, whatever the rosters hold: the human named that agent. Symlinked rosters
+# are not read. One line each, deduped.
+order_spellings() {  # <target> -> spellings, one per line
+  local key="${1%@*}" f
+  for f in "$STATE_DIR"/roster-*.state; do
+    [ -f "$f" ] && [ ! -L "$f" ] && [ "$f" != "$ROSTER_FILE" ] || continue
+    printf '%s\n' "$f"
+  done | SO_KEY="$key" SO_TYPED="$1" awk '
+    function kv(line, key,   i, n, p) {
+      n = split(line, p, "|")
+      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
+      return ""
+    }
+    function out(v) { if (v != "" && !(v in seen)) { seen[v] = 1; print v } }
+    BEGIN { if (ENVIRON["SO_TYPED"] != ENVIRON["SO_KEY"]) out(ENVIRON["SO_KEY"]) }
+    {
+      f = $0
+      while ((getline line < f) > 0) {
+        if (index(line, "roster-state/") != 1) continue
+        st = kv(line, "status"); if (st != "confirmed" && st != "identified") continue
+        nm = kv(line, "name"); id = kv(line, "agent_id")
+        if (nm == "" || (nm != ENVIRON["SO_KEY"] && id != ENVIRON["SO_KEY"])) continue
+        sid = kv(line, "adopted_from"); if (sid == "") sid = kv(line, "session")
+        out(nm); out(id); if (sid != "") out(nm "@session-" substr(sid, 1, 8))
+      }
+      close(f)
+    }'
+}
+
 # ---------------------------------------------------------------- verbs
 
 case "$VERB" in
@@ -561,7 +594,33 @@ case "$VERB" in
       exit 2
     fi
 
+    # THE OTHER SPELLINGS OF AN AGENT THIS SESSION NEVER ROSTERED (wave-34 T6; REQ-14 AC-14.3, D23). The
+    # stop gate honours an order by the spelling it was recorded under, and translates between a name,
+    # `name@session-<launcher>` and the transcript-form id through THIS session's roster. For a predecessor's
+    # agent that roster holds no row, so an order recorded as the address `adopt` printed did not cover a
+    # stop by the bare name, nor the reverse, and the human's stop was refused (field report 2026-10-11,
+    # item 3). The spellings are read here instead, off the project's other rosters — every confirmed or
+    # identified row whose name or id is the target — and each is recorded beside the typed one, under the
+    # same clock and author. A target this session's roster carries needs none: the gate resolves it.
+    _alts=""
+    if ! { [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ] \
+           && SO_K="${_target%@*}" awk -F'|' 'index($0, "roster-state/") == 1 {
+                for (i = 2; i <= NF; i++) if ($i == "name=" ENVIRON["SO_K"] || $i == "agent_id=" ENVIRON["SO_K"]) f = 1 }
+              END { exit !f }' "$ROSTER_FILE" 2>/dev/null; }; then
+      _alts="$(order_spellings "$_target")"
+    fi
+    while IFS= read -r _alt; do
+      [ -n "$_alt" ] && [ "$_alt" != "$_target" ] || continue
+      printf '%s|at=%s|epoch=%s|session=%s|by=%s|target=%s\n' \
+        "$ORDER_SCHEMA" "$(iso_now)" "$_at" "$SESSION_ID" "$ORDER_BY" "$_alt" >> "$ORDERS_FILE" 2>/dev/null \
+        || die "WARN — the spelling $_alt could not be recorded; a stop by it is refused."
+    done <<EOF
+$_alts
+EOF
+
     say "stop ordered: $_target — the gate will pass it for the next $((ORDER_TTL_SECONDS / 60)) minutes."
+    _alts_shown="$(printf '%s\n' "$_alts" | awk -v t="$_target" 'NF && $0 != t { printf "%s%s", (n++ ? ", " : ""), $0 }')"
+    [ -z "$_alts_shown" ] || say "this session's roster does not hold it, so its other spellings are ordered too: $_alts_shown"
     # WHAT IS BEING GIVEN UP, from the verdict's own detail and never from a second
     # opinion about the disk. An order is not a claim that the work landed, and the
     # operator is owed the difference in one line.
