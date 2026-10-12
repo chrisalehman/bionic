@@ -3654,4 +3654,65 @@ expect_eq "DP-15 task-add --born naming a finding the record does not hold is re
 expect_contains "DP-15b …naming the findings it does hold" "holds no finding 9" "$DP_OUT"
 expect_eq "DP-15c …the plan byte-identical across both" "same" "$(cmp -s "$DP_PLAN" "$FP_ROOT/dp-before" && echo same || echo changed)"
 
+section "§ANCESTOR: the floor walk stands a proof at an ancestor for the working head, every commit after it proved by its row's runs (wave-35 T1; REQ-3 AC-3.3; D12)"
+# The ancestor case shard 1's §FLOOR drove through the background pass, re-homed when the pass went
+# (wave-35 T1; ADR-054). The proof is a declared regression's log (`floor:`, the shape floor-run writes)
+# at F; the branch then lands F+1 and F+2, each proved by its row's green verdict in the landing record.
+# The floor judge (lib/proof.sh `proof_attested floor`, what `proof-add floor` runs) takes the log at F for
+# the working head F+2, and `proof_state` reads covered at F+2: both walk F..F+2 (`_proof_walk`).
+# fails-when: no suite drives the floor walk from an ancestor, or a walk that stops at F still reads
+# covered at F+2.
+AN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+AN="$(mktemp -d)"; cleanup_dirs+=("$AN"); AN="$(cd "$AN" && pwd -P)"
+ANR="$AN/proj"; mkdir -p "$ANR"
+an_git() { git -C "$ANR" -c user.name=a -c user.email=a@x.invalid -c commit.gpgsign=false "$@"; }
+an_git init -q && an_git symbolic-ref HEAD refs/heads/main
+printf '.bionic\n.bionic/\n' > "$ANR/.gitignore"; printf 'one\n' > "$ANR/x.txt"
+an_git add .gitignore x.txt && an_git commit -qm base && an_git checkout -qb wave/a
+ANP="$ANR/.bionic/docs/plans/epic-a/wave-a.plan.md"; ANREC="$ANR/.bionic/docs/record/wave-a"
+mkdir -p "${ANP%/*}" "$ANREC" "$ANR/.bionic/tmp"
+printf -- '---\nworking-branch: wave/a\n---\n# plan\n\n## SDLC State\n\ncurrent: 5\n' > "$ANP"
+printf 'floor: bash floor.sh\n' > "$ANR/.bionic/config.yaml"
+printf 'two\n' > "$ANR/x.txt"; an_git commit -qam "F: T1 landed"
+AN_F="$(an_git rev-parse HEAD)"
+AN_LOG="$ANREC/floor-${AN_F:0:12}.log"
+printf 'head=%s dirty=0 rc=0\ncommand: bash floor.sh\nfloor: 3 passed, 0 failed\n' "$AN_F" > "$AN_LOG"
+printf 'three\n' > "$ANR/x.txt"; an_git commit -qam "F+1: T2 landed"; AN_F1="$(an_git rev-parse HEAD)"
+printf 'four\n' > "$ANR/x.txt"; an_git commit -qam "F+2: T3 landed"; AN_F2="$(an_git rev-parse HEAD)"
+an_verdict() {  # <row> <commit> — the row's green verdict at <commit>, in the landing record
+  printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=x.test.sh|result=green|log=-|at=%s\n' "$1" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    >> "$ANREC/landing-proofs.log"
+}
+# an_run <lib dir> <script> — bash with the proof library (and what it reads) from <lib dir>
+an_run() {
+  env ANR="$ANR" ANP="$ANP" AN_LOG="$AN_LOG" AN_F="$AN_F" bash -c '. "$1/worktree.sh" && . "$1/session.sh" && . "$1/roots.sh" && . "$1/proof.sh" || exit 99
+    eval "$2"' _ "$1" "$2" 2>&1
+}
+AN_JUDGE='o="$(proof_attested floor "$AN_LOG" "$ANR" "$ANP" "" "$ANR")"; echo "rc=$? $o"'
+an_verdict T2 "$AN_F1"
+expect_eq "AN-1 pre: the proof's head F is an ancestor of the working head F+2, two commits back" "yes ${AN_F}" \
+  "$(an_git merge-base --is-ancestor "$AN_F" "$AN_F2" && echo yes) $(an_git rev-parse "$AN_F2~2")"
+AN_J0="$(an_run "$AN_LIB" "$AN_JUDGE")" || true
+expect_contains "AN-2 control: with F+2's run unrecorded the judge walks past F+1 and refuses the log at F, naming F+2" \
+  "commit ${AN_F2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$AN_J0"
+an_verdict T3 "$AN_F2"
+expect_eq "AN-3 AC-3.3 F+1 and F+2 proved by their rows: the judge takes the log at F for the head F+2 (exit 0, head F)" \
+  "rc=0 ${AN_F}" "$(an_run "$AN_LIB" "$AN_JUDGE")"
+an_run "$AN_LIB" 'proof_add_line "$ANP" "proved: kind=floor head=$AN_F at=2026-10-12T00:00:00Z evidence=record/wave-a/${AN_LOG##*/}" > "$ANP.n" && mv "$ANP.n" "$ANP"' >/dev/null || true
+expect_eq "AN-4 …the proof line names F" "proved: kind=floor head=${AN_F}" "$(grep -o '^proved: kind=floor head=[0-9a-f]*' "$ANP")"
+expect_eq "AN-5 AC-3.3 …and the floor is covered at the working head F+2" "covered	${AN_F2}" \
+  "$(an_run "$AN_LIB" 'proof_state "$ANP" "$ANR"' || true)"
+# THE MUTANT: the walk stops at F. A doctored copy of the library walks F~1..F (the proof commit alone)
+# in place of F..H, never reaching the commits after the proof; the tracked file is never touched.
+AN_MUT="$AN/lib-mut"; mkdir -p "$AN_MUT"; cp "$AN_LIB"/*.sh "$AN_MUT/"
+expect_eq "AN-6 meta: the walk's range is written once in the shipped library" "1" \
+  "$(grep -cF -- "\"\$from..\$to\" 2>/dev/null)" "$AN_LIB/proof.sh")"
+sed 's/"\$from\.\.\$to" 2>\/dev\/null)/"$from~1..$from" 2>\/dev\/null)/' "$AN_LIB/proof.sh" > "$AN_MUT/proof.sh"
+expect_eq "AN-6b meta: …and the doctored copy differs from it by that one line" "1" \
+  "$(diff "$AN_LIB/proof.sh" "$AN_MUT/proof.sh" | grep -c '^>')"
+AN_M="$(an_run "$AN_MUT" 'proof_state "$ANP" "$ANR"' || true)"
+expect_contains "AN-7 MUTANT the walk stops at F: it runs and reads F alone, which no row's run proves" \
+  "commit ${AN_F:0:12} (no landing row) is not proved" "$AN_M"
+expect_eq "AN-7b MUTANT …so F+2 reads uncovered (the pin can fail)" "uncovered" "$(printf '%s\n' "$AN_M" | cut -f1)"
+
 finish
