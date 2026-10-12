@@ -412,7 +412,9 @@ units_rows() {
 # the row itself never counted:
 #   - a path: every open row with a `Files` entry that covers it or that it covers — exact,
 #     directory prefix, glob or path suffix, the `in_files` rule of brief.sh, never string
-#     equality alone;
+#     equality alone. A RECORD path (`.bionic/…`, `record/…`) that no row of any status covers
+#     is refused by `units_validate`, naming the row whose artifact it is (wave-35 T8; D15), so
+#     a record read always has a writer to wait on;
 #   - `head`: every open row with a `Files` path outside the record, EXCEPT a row that itself
 #     reads the settled `head`: such a row is downstream of the head, and counting it a writer
 #     would make the walk wait for the release and the release for the walk (A-T2.4);
@@ -1789,6 +1791,18 @@ units_validate() {
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
       -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)"'
+      # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
+      function rec_written(t,   k) {
+        for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
+        return 0
+      }
+      # rec_writer(t): the table id that begins the file name of t, followed by a dot or a dash; else "".
+      function rec_writer(t,   b, k) {
+        b = t; sub(/^.*\//, "", b)
+        for (k = 1; k <= n; k++)
+          if (index(b, id[k]) == 1 && (substr(b, length(id[k]) + 1, 1) == "." || substr(b, length(id[k]) + 1, 1) == "-")) return id[k]
+        return ""
+      }
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -1922,6 +1936,17 @@ units_validate() {
               if (t ~ /^proof:(floor|review|task|check)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
               if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
                 if (index(t, "[") || index(t, "]")) printf "%s: read %s has a bracket; paths glob with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
+                # A RECORD PATH IS READ ONLY WHEN A ROW WRITES IT (wave-35 T8; REQ-6 AC-6.1; D15). A path no
+                # open row writes is satisfied at once, which is right for code already in the tree and wrong
+                # for a record artifact nobody has written yet (A-orch-10): no row of the table, whatever its
+                # status, covering a record path is the plan not saying who writes it. Named here with the row
+                # whose artifact it is, when an id of the table begins its file name (T1.md, T1-profile.md).
+                # Only an OPEN row is held to it, as to the head rule below (A-T13.1): a landed or dropped
+                # row schedules nothing, and a plan carrying one from before this rule must still commit.
+                else if (in_docs(t) && (sta[i] == "pending" || sta[i] == "active") && !rec_written(t)) {
+                  w = rec_writer(t)
+                  printf "%s: read %s names a record path no row writes; add it to %s\047s Files\n", id[i], a[j], (w == "" ? "the writer row" : w)
+                }
                 continue
               }
               printf "%s: read %s names no artifact\n", id[i], a[j]
