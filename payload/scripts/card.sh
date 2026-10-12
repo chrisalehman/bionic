@@ -1847,7 +1847,7 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
 # A STEP CARD LEAVES THE PERSON A DECISION, so the card is where the need is declared: a whole
 # card rendered for the session's own run opens `approve:step<n>` on the person's ledger
 # (lib/owed.sh), titled for a push and carrying the one question the card printed, and the Stop
-# that ends the turn sends it once (lib/stop.sh). Rendering a card closes the earlier steps'
+# that ends the turn sends it at least once (lib/stop.sh). Rendering a card closes the earlier steps'
 # items, since a later card is shown only once the earlier one was answered; the Stop closes
 # them all once the plan carries `approved-by:`. The question strings live here, once, and are
 # what both the card and the item print.
