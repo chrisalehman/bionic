@@ -8087,22 +8087,8 @@ EOF
     if [ -n "$TA_VIOL" ]; then
       die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
       printf '%s\n' "$TA_VIOL" >&2
-      # THE RELEASE'S APPROVAL READ IS ONE RETRY (wave-33 T7; REQ-4 AC-4.3, D8). The validator names the
-      # token; the call carries it in the reads operand, beside the kind's default the written cell would
-      # otherwise drop (a doc row's `approval:plan, head`, lib/units.sh). Printed only when that is the one
-      # violation, for only then does the call succeed.
-      case "$(printf '%s\n' "$TA_VIOL" | /usr/bin/grep -c .)|$TA_VIOL" in
-        "1|$TA_ID: a doc row at step 7 or later is the release"*)
-          case "$TA_READS" in
-            ''|'—'|'-') TA_FIX="approval:plan, head, approval:release" ;;
-            *) TA_FIX="$TA_READS, approval:release" ;;
-          esac
-          if [ -n "$TA_BORN" ]; then
-            pv_next task-add "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_FIX" --born "$TA_BORN"
-          else
-            pv_next task-add "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_FIX"
-          fi ;;
-      esac
+      # A STEP-7 DOC ROW IS NO LONGER REFUSED FOR ITS APPROVAL READ (wave-35 T5; D13): the release
+      # approval is the integrate row's read, so the one-retry wave-33 T7 printed here is gone with it.
       exit 1
     fi
 
@@ -10960,6 +10946,17 @@ $(run_groups "$RUN_PID")"
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
     TICK_REARM=""
+    # ONE RESTART LINE, FROM DOCTOR'S READER (wave-35 T5; REQ-4 AC-4.5; D13). The CLI holds hooks.json,
+    # the skills and the role files as they were at its start; doctor.sh `--restart-lines` is the one
+    # comparison (the newest of the three sets against each live session's start), and the tick prints
+    # its own session's line, if any, above everything else on every tick, changed or unchanged.
+    TICK_RESTART=""
+    TICK_RESTART_ROW="$(bash "$BIONIC_LIB/../doctor.sh" --restart-lines 2>/dev/null \
+      | awk -F'\t' -v s="$SESSION_ID" 'NF >= 5 && $2 == s { print; exit }')"
+    if [ -n "$TICK_RESTART_ROW" ]; then
+      IFS=$'\t' read -r _tr_pid _ _ _ _tr_file <<< "$TICK_RESTART_ROW"
+      TICK_RESTART="restart needed — ${_tr_file} changed after this session started (pid ${_tr_pid}): exit claude and start it again"
+    fi
     case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
     if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then
       TICK_REARM="poker: note: re-arm the Patrol — its prompt is v=${TICK_PVER:-unrecorded} and this poker prints v=${PATROL_PROMPT_VERSION}: replace the bionic-patrol job with one carrying the output of \`bash ${POKER_WORD} prompt\`, then run \`bash ${POKER_WORD} arm\`"
@@ -10968,10 +10965,15 @@ $(run_groups "$RUN_PID")"
       local rc=$?
       [ -n "$TICK_BUF" ] || exit "$rc"
       exec 1>&3 3>&-
+      [ -z "${TICK_RESTART:-}" ] || say "$TICK_RESTART"
       if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
         printf '%s\n' "$TICK_REARM"
       fi
       if [ "$TICK_UNCHANGED" = yes ]; then
+        # EVERY STANDING HOLD RIDES THE UNCHANGED TICK (wave-35 T5; REQ-4 AC-4.4; D13). The backstop runs
+        # on every tick and says its NOT-LANDED lines into the buffer; an equal digest means the world
+        # did not move, not that the duty is paid, so the holds it re-found print above the one line.
+        /usr/bin/grep '^poker: NOT-LANDED ' "$TICK_BUF" 2>/dev/null
         say "unchanged since ${TICK_SINCE} — decision=${TICK_DECIDED}"
       else
         # THE RUN'S LANDING LINE PRINTS IN THE RE-ARM SLOT, ABOVE THE BUFFER (wave-28 T14, T62, T68; D18, AC-10.4):
