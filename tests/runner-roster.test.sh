@@ -57,15 +57,14 @@ trap 'rm -rf "$TMPROOT"' EXIT
 
 RR_NOW=1700000000
 
-# THE GATE'S STORE IS THIS SUITE'S OWN (wave-26 T8; the gate since wave-28 T12). Every suite a
-# runner starts asks the gate, and a solo suite asks it for the whole machine, so every drive
-# below names a store under this suite's mktemp root, a short poll, and a low memory reading
+# THE GATE'S STORE IS THIS SUITE'S OWN (wave-26 T8; the gate since wave-28 T12). Every run a
+# runner starts asks the gate, so every drive below names a store under this suite's mktemp root, a short poll, and a low memory reading
 # and an idle processor, pinned, so an admission never waits on what this machine is doing;
 # none reads or writes the machine's real store under the home directory. The admission a
 # caller may have inherited (a booked command or a runner around this suite exports
 # BIONIC_GATE_ADMIT) is cleared, so each drive starts from no admission at all — §11 drives
 # nesting itself.
-RR_GATE_ENV=(-u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_QUIET -u BIONIC_LOAD_NOW_FILE
+RR_GATE_ENV=(-u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT
   "BIONIC_GATE_DIR=$TMPROOT/gate" BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10
   BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192)
 # THE STORE KNOWS A COST (wave-32 T1; D5). A store with no cost line anywhere admits a request
@@ -501,134 +500,8 @@ rr_drive "$T7" "--dry-run"
 expect_eq "7.8 --dry-run refuses too" "2" "$RR_RC"
 expect_absent "7.9 …and prints no width" "JOBS=" "$RR_OUT"
 
-# ============================================================
-section "§8 a suite marked \`# runner: solo\` is held out of the parallel batch (T20, A-orch-28)"
-# ============================================================
-#
-# THE DEFECT (why-session-start-slow.md, floor-057caa2-run2.txt): tests/run.sh drains its
-# roster through `xargs -P "$JOBS"`, up to eight-wide, and a suite bounding wall-clock
-# seconds of ONE drive is dilated by however many siblings share the CPU with it — measured
-# 1.270s alone, 3.395s inside an eight-wide batch on a quiet machine, same tree. A suite that
-# declares itself timing-bound with a `# runner: solo` header comment (within its first 30
-# lines) must run ALONE, after the rest of the batch has fully drained, so its own bound
-# measures its own drive rather than a batch it happens to share.
-#
-# THE FIXTURE. Three trivial siblings each claim a marker under $RR8_MARKS/running/ for the
-# full second they sleep, then remove it. One suite — named "aaa-solo" so the roster's
-# alphabetical order puts it FIRST, guaranteeing xargs bundles it into the very first
-# concurrent round under the OLD scheduler — polls for 1.2s (24 x 0.05s) and records whether
-# it EVER saw a sibling's marker. Under the unfixed runner all four suites launch together at
-# width 2, so aaa-solo's poll window (1.2s) overlaps the siblings' 1s sleep and it fails its
-# own assertion — RED. Fixed, aaa-solo is excluded from the parallel batch entirely and only
-# launched once the batch (and every sibling's cleanup) has finished, so it observes nothing —
-# GREEN. This is a real concurrency observation, not a timing guess: no wall clock is bounded
-# here, only "was a sibling ever alive while I ran".
-
-T8="$TMPROOT/t8"
-rr_tree "$T8"
-RR8_RING="$TMPROOT/t8-ring"
-mkdir -p "$(dirname "$RR8_RING")"
-# A CLEAR reading (band 0) at ceiling 2 -> JOBS=2, so the first round is two-wide and the
-# alphabetically-first suite (aaa-solo, under the unfixed runner) is bundled with a sibling.
-printf '%s|44|0|0.1|2\n' "$RR_NOW" > "$RR8_RING"
-
-RR8_MARKS="$TMPROOT/t8-marks"
-mkdir -p "$RR8_MARKS/running"
-
-# rr8_sibling <name> — claims $RR8_MARKS/running/<name> for a full second, a marker any
-# concurrently-running suite can observe, then a trivial green assertion.
-rr8_sibling() {
-  local dir="$1" name="$2"
-  { printf '#!/bin/bash\n'
-    printf 'set -uo pipefail\n'
-    printf '. "$(dirname "$0")/lib/assert.sh"\n'
-    printf ': > "$RR8_MARKS/running/%s"\n' "$name"
-    printf 'sleep 1\n'
-    printf 'rm -f "$RR8_MARKS/running/%s"\n' "$name"
-    printf 'section "%s"\n' "$name"
-    printf 'expect_eq "%s ran" "x" "x"\n' "$name"
-    printf 'finish\n'
-  } > "$dir/tests/$name.test.sh"
-}
-for RR8_N in sib-a sib-b sib-c; do rr8_sibling "$T8" "$RR8_N"; done
-
-# THE SOLO SUITE ITSELF — declares itself with the marker convention verbatim, then polls.
-{ printf '#!/bin/bash\n'
-  printf '# runner: solo\n'
-  printf 'set -uo pipefail\n'
-  printf '. "$(dirname "$0")/lib/assert.sh"\n'
-  printf 'SEEN=no\n'
-  printf 'RR8_I=0\n'
-  printf 'while [ "$RR8_I" -lt 24 ]; do\n'
-  printf '  if ls "$RR8_MARKS"/running/* >/dev/null 2>&1; then SEEN=yes; fi\n'
-  printf '  sleep 0.05\n'
-  printf '  RR8_I=$((RR8_I + 1))\n'
-  printf 'done\n'
-  printf ': > "$RR8_MARKS/solo.ran"\n'
-  printf 'section "aaa-solo"\n'
-  printf 'expect_eq "aaa-solo never observed a live sibling drive" "no" "$SEEN"\n'
-  printf 'finish\n'
-} > "$T8/tests/aaa-solo.test.sh"
-expect_contains "8.1 the solo suite really carries the marker convention verbatim" \
-  "# runner: solo" "$(cat "$T8/tests/aaa-solo.test.sh")"
-
-rm -f "$RR8_MARKS"/solo.ran
-RR8_OUT="$( cd "$T8" && \
-  RR8_MARKS="$RR8_MARKS" \
-  BIONIC_PRESSURE_RING="$RR8_RING" \
-  BIONIC_NOW_EPOCH="$RR_NOW" \
-  BIONIC_TEST_JOBS_CEILING="2" \
-  BIONIC_PROBE_FREE_PCT="44" \
-  BIONIC_PROBE_SWAP_PCT="0" \
-  BIONIC_PROBE_LOAD_1M="0.1" \
-  env "${RR_GATE_ENV[@]}" bash tests/run.sh 2>&1 )"
-RR8_RC=$?
-
-expect_eq "8.2 the solo suite really ran (its own marker exists)" "yes" \
-  "$([ -f "$RR8_MARKS/solo.ran" ] && echo yes || echo no)"
-expect_eq "8.3 the run is green: aaa-solo never shared the CPU with a live sibling" "0" "$RR8_RC"
-expect_absent "8.4 …and its own assertion did not fail" \
-  "FAIL: aaa-solo never observed a live sibling drive" "$RR8_OUT"
-expect_contains "8.5 …the whole tally is four passed, none failed" \
-  "Gating: 4 passed, 0 failed" "$RR8_OUT"
-# THE ROSTER-ORDER PRINTING IS UNCHANGED (must keep working unchanged): the printed labels
-# are still exactly the glob, as a set, solo suite included.
-expect_eq "8.6 the printed labels are still exactly the glob (solo suite included)" \
-  "$(rr_glob "$T8")" "$(rr_labels "$RR8_OUT")"
-
-# --serial ALREADY runs one at a time in roster order, so the marker changes nothing there —
-# proved rather than assumed: the same tree under --serial is green too, aaa-solo included.
-rm -f "$RR8_MARKS"/solo.ran
-RR8_SERIAL_OUT="$( cd "$T8" && \
-  RR8_MARKS="$RR8_MARKS" \
-  BIONIC_PRESSURE_RING="$RR8_RING" \
-  BIONIC_NOW_EPOCH="$RR_NOW" \
-  BIONIC_TEST_JOBS_CEILING="2" \
-  BIONIC_PROBE_FREE_PCT="44" \
-  BIONIC_PROBE_SWAP_PCT="0" \
-  BIONIC_PROBE_LOAD_1M="0.1" \
-  env "${RR_GATE_ENV[@]}" bash tests/run.sh --serial 2>&1 )"
-RR8_SERIAL_RC=$?
-expect_eq "8.7 --serial is unaffected by the marker: still green" "0" "$RR8_SERIAL_RC"
-expect_eq "8.8 …and the solo suite still ran under --serial" "yes" \
-  "$([ -f "$RR8_MARKS/solo.ran" ] && echo yes || echo no)"
-
-# --dry-run lists a solo suite as such, rather than folding it silently into the width line.
-RR8_DRY_OUT="$( cd "$T8" && \
-  RR8_MARKS="$RR8_MARKS" \
-  BIONIC_PRESSURE_RING="$RR8_RING" \
-  BIONIC_NOW_EPOCH="$RR_NOW" \
-  BIONIC_TEST_JOBS_CEILING="2" \
-  BIONIC_PROBE_FREE_PCT="44" \
-  BIONIC_PROBE_SWAP_PCT="0" \
-  BIONIC_PROBE_LOAD_1M="0.1" \
-  env "${RR_GATE_ENV[@]}" bash tests/run.sh --dry-run 2>&1 )"
-expect_contains "8.9 --dry-run still prints the width" "JOBS=2" "$RR8_DRY_OUT"
-expect_contains "8.10 …and lists the solo suite by name" "aaa-solo.test.sh" "$RR8_DRY_OUT"
-expect_contains "8.11 …labelled solo, not folded silently into the width" "solo" "$RR8_DRY_OUT"
-# PAIRED NEGATIVE: a plain sibling is not mislabelled solo.
-expect_absent "8.12 …and an ordinary sibling is not listed as solo" "sib-a.test.sh" \
-  "$(printf '%s\n' "$RR8_DRY_OUT" | grep -i solo)"
+# §8 (a `# runner: solo` suite held out of the parallel batch, T20) RETIRED BY WAVE-35 T2 (D11, AC-2.1):
+# the marker is read by nobody, and tests/runner-width.test.sh §NO-VOID proves it ignored.
 
 # ============================================================
 section "§9 the progress knob: one line per suite as it lands (T7, REQ-9)"
@@ -653,7 +526,7 @@ section "§9 the progress knob: one line per suite as it lands (T7, REQ-9)"
 #
 # …and one more, which is not about the knob at all: the progress file is the
 # first thing in this repo that records COMPLETION order, so it is what finally
-# makes the report's ROSTER-order contract falsifiable. §1.4 and §8.6 compare
+# makes the report's ROSTER-order contract falsifiable. §1.4 compares
 # sorted sets and would pass an implementation that printed in completion order.
 
 RR9_RING="$TMPROOT/t9-ring"
@@ -719,7 +592,7 @@ rr9_ends() { LC_ALL=C awk -F'\t' '$3 ~ /^[0-9]+$/' "$1" 2>/dev/null; }
 rr9_prog_labels() { rr9_ends "$1" | LC_ALL=C awk -F'\t' '{ print $2 }' | sort -u; }
 
 # rr_labels_ordered <output> — the labels the runner printed, IN PRINTED ORDER.
-# rr_labels sorts, which is what makes §1.4 and §8.6 set comparisons; the roster
+# rr_labels sorts, which is what makes §1.4 a set comparison; the roster
 # -order claim needs the sequence.
 rr_labels_ordered() {
   printf '%s\n' "$1" | sed -n 's/^  \([A-Za-z0-9_.-]*\.test\.sh\) .*/\1/p'
@@ -772,17 +645,21 @@ expect_absent "9.12 …and no run of either kind prints a progress path" \
 # The shape that matters is a verdict that never reached disk, which is the
 # worker dying — not the suite exiting non-zero. The planted suite kills its own
 # parent (the `--one` worker) with SIGKILL, so no `.rc` is ever written and the
-# runner reports it KILLED. It is marked `# runner: solo` so it drains through
-# the solo loop rather than under xargs, which abandons a queue when a child dies
-# by signal and would take its siblings' evidence with it.
+# runner reports it KILLED. xargs abandons its queue when a child dies by signal,
+# so the suite first waits, bounded, until both siblings' end lines are in the
+# progress file: they have landed, and no launch is left to abandon. (Until
+# wave-35 T2 it was marked `# runner: solo` and drained alone for the same reason.)
 T9K="$TMPROOT/t9k"
 rr_tree "$T9K"
 for RR_N in k-one k-two; do rr_stub "$T9K" "$RR_N"; done
 cat > "$T9K/tests/zzz-killed.test.sh" <<'RR9_KILLED'
 #!/bin/bash
-# runner: solo
 set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
+i=0
+while [ "$i" -lt 200 ] && [ "$(awk -F'\t' '$3 ~ /^[0-9]+$/ { n++ } END { print n + 0 }' "${_BIONIC_TEST_PROGRESS_FILE:-/dev/null}" 2>/dev/null)" -lt 2 ]; do
+  i=$((i + 1)); sleep 0.1
+done
 kill -9 "$PPID"
 sleep 0.5
 section "zzz-killed"
@@ -859,7 +736,7 @@ expect_eq "9.23 …so it holds two end lines, not three" "2" \
 #
 # The runner's drain comment says a reader comparing two runs is comparing
 # rosters, not schedules. Until there was a progress file nothing in this repo
-# could tell the two apart: §1.4 and §8.6 sort both sides. Here the slow suite is
+# could tell the two apart: §1.4 sorts both sides. Here the slow suite is
 # alphabetically FIRST and lands LAST, so the two orders genuinely disagree and
 # the report has to pick the roster's.
 T9O="$TMPROOT/t9o"
@@ -991,16 +868,15 @@ section "§ASK a whole run asks the gate once; --serial asks per suite (T12; AC-
 # runner hold nothing. WAVE-32 T2 (D1, AC-1.1; A-orch-8) REVERSES THAT FOR A WHOLE RUN BY DESIGN,
 # and ASK.2-ASK.6 and ASK.11 were rewritten to pin the new shape — a chartered behaviour change
 # rewriting its own pins, not a loosened assertion: the runner asks `whole tests/run.sh` once,
-# every worker and the solo suite run inside that one request (BIONIC_GATE_ADMIT names it), and
+# every worker runs inside that one request (BIONIC_GATE_ADMIT names it), and
 # the runner ends it with the run's code. --serial still asks per suite (ASK.7-ASK.9, unchanged),
 # as does --only (§ONLY, §ONLY-UNCHANGED). The store is this section's own
 # (BIONIC_GATE_DIR under the suite's mktemp root) and the memory reading is pinned low, so no
 # drive reads or writes the machine's real gate.
 TA="$TMPROOT/ask"; RA_GATE="$TMPROOT/ask-gate"
 rr_tree "$TA"
-ra_stub() {  # <name> <solo yes|no> — a green suite that records the admission it ran under
+ra_stub() {  # <name> — a green suite that records the admission it ran under
   { printf '#!/bin/bash\n'
-    [ "$2" = yes ] && printf '# runner: solo\n'
     printf 'set -uo pipefail\n'
     printf '. "$(dirname "$0")/lib/assert.sh"\n'
     printf 'printf "%%s\\n" "${BIONIC_GATE_ADMIT:-none}" > "$RR_MARKS/%s.admit"\n' "$1"
@@ -1009,8 +885,7 @@ ra_stub() {  # <name> <solo yes|no> — a green suite that records the admission
     printf 'finish\n'
   } > "$TA/tests/$1.test.sh"
 }
-for _ra in ask-a ask-b ask-c; do ra_stub "$_ra" no; done
-ra_stub aaa-ask-solo yes
+for _ra in ask-a ask-b ask-c; do ra_stub "$_ra"; done
 ra_drive() {  # [mode] — the scratch runner on this section's own store; RR_OUT, RR_RC
   RR_OUT="$( cd "$TA" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/ask-ring" \
     BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 \
@@ -1039,14 +914,12 @@ expect_eq "ASK.4 the three batch suites all ran under that one request (T2)" "1 
   "$(for _ra in ask-a ask-b ask-c; do cat "$RR_MARKS/$_ra.admit" 2>/dev/null; done | sort -u | awk '{ n++; v = $0 } END { print n + 0, v }')"
 expect_eq "ASK.5 ask-a ran under the run's request (T2)" "$(ra_id_of tests/run.sh)" \
   "$(cat "$RR_MARKS/ask-a.admit" 2>/dev/null)"
-expect_eq "ASK.6 …and so did the solo suite (T2)" "$(ra_id_of tests/run.sh)" \
-  "$(cat "$RR_MARKS/aaa-ask-solo.admit" 2>/dev/null)"
+# ASK.6 (the solo suite ran under the run's request) RETIRED BY WAVE-35 T2 (D11): there is no solo suite.
 rm -rf "$RA_GATE"; rm -f "$RR_MARKS"/*.admit
 ra_drive --serial
 expect_eq "ASK.7 --serial is green" "0" "$RR_RC"
 expect_eq "ASK.8 --serial asks per suite too, each as work, each ended" \
-  "aaa-ask-solo.test.sh work 0
-ask-a.test.sh work 0
+  "ask-a.test.sh work 0
 ask-b.test.sh work 0
 ask-c.test.sh work 0" "$(ra_reqs)"
 expect_eq "ASK.9 …and each suite ran under its own request (ask-b)" "$(ra_id_of ask-b.test.sh)" \
@@ -1064,22 +937,21 @@ expect_eq "ASK.11 …the shim took no number, and the run asked once for itself 
   "tests/run.sh whole 0" "$(ra_reqs)"
 
 # ============================================================
-section "§SCRUB a suite never sees the runner's store; the timing-bound suite is solo (wave-30 T9; REQ-4 AC-4.1, AC-4.2; D8)"
+section "§SCRUB a suite never sees the runner's store (wave-30 T9; REQ-4 AC-4.2; D8)"
 # ============================================================
 #
 # THE CLAIM. A runner and its workers keep BIONIC_GATE_DIR for their own ask and end, but the SUITE
 # PROCESS a worker starts loses it: a suite that reads the gate through the inherited variable read
 # the run's store (the doctor-reads checks did), and a suite that wants a store makes its own fixture.
 # Driven on a scratch tree carrying the shipped runner: a probe suite prints what it sees of the
-# variable, in the parallel batch, as a solo suite and under --serial, while the gate store the run
-# named still holds the probe's own request (the ask is not scrubbed). The second half is the timing
-# marker: the real roster's dry run lists the §EG-DERIVE suite as solo, and no suite that carries
-# the 1200 ms derivation bound is anything else.
+# variable, in the parallel batch and under --serial, while the gate store the run named still
+# holds the probe's own request (the ask is not scrubbed). Its second half, the timing marker
+# (AC-4.1: the real roster's dry run listed the §EG-DERIVE suite as solo), RETIRED BY WAVE-35 T2
+# (D11): nothing is solo, and tests/runner-width.test.sh §NO-VOID proves the marker ignored.
 TS="$TMPROOT/scrub"; RS_GATE="$TMPROOT/scrub-gate"
 rr_tree "$TS"
-rs_probe() {  # <name> <solo yes|no> — a green suite that records the gate variable it sees
+rs_probe() {  # <name> — a green suite that records the gate variable it sees
   { printf '#!/bin/bash\n'
-    [ "$2" = yes ] && printf '# runner: solo\n'
     printf 'set -uo pipefail\n'
     printf '. "$(dirname "$0")/lib/assert.sh"\n'
     printf 'printf "%%s\\n" "BIONIC_GATE_DIR=${BIONIC_GATE_DIR:-unset}" > "$RR_MARKS/%s.seen"\n' "$1"
@@ -1088,8 +960,7 @@ rs_probe() {  # <name> <solo yes|no> — a green suite that records the gate var
     printf 'finish\n'
   } > "$TS/tests/$1.test.sh"
 }
-rs_probe probe-a no
-rs_probe aaa-probe-solo yes
+rs_probe probe-a
 rs_drive() {  # [mode] — the scratch runner started under a store of this section's own; RR_OUT, RR_RC
   RR_OUT="$( cd "$TS" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/scrub-ring" \
     BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 \
@@ -1109,7 +980,6 @@ rs_drive
 expect_eq "SCRUB.1 the run is green" "0" "$RR_RC"
 expect_eq "SCRUB.2 the probe in the batch saw no BIONIC_GATE_DIR, though the run was started under one" \
   "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
-expect_eq "SCRUB.3 …and so did the solo probe" "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/aaa-probe-solo.seen" 2>/dev/null)"
 # SCRUB.4 REWRITTEN BY WAVE-32 T2 (D1, AC-1.1; A-orch-8): a whole run's one ask is the runner's,
 # so the store the run named holds that request; the behaviour change rewrites the pin.
 expect_eq "SCRUB.4 …while the run's own ask landed in the run's store, ended with its code (the ask is not scrubbed)" \
@@ -1119,85 +989,52 @@ rs_drive --serial
 expect_eq "SCRUB.5 --serial is green" "0" "$RR_RC"
 expect_eq "SCRUB.6 …and its probe saw no BIONIC_GATE_DIR either" "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
 expect_eq "SCRUB.7 …with the ask in the run's store as well" \
-  "aaa-probe-solo.test.sh 0
-probe-a.test.sh 0" "$(rs_keys)"
+  "probe-a.test.sh 0" "$(rs_keys)"
 # PAIRED CONTROL: the probe does print the variable when it is set (the readback is real output, not silence).
 rm -f "$RR_MARKS/probe-a.seen"
 BIONIC_GATE_DIR=control-store RR_MARKS="$RR_MARKS" bash "$TS/tests/probe-a.test.sh" >/dev/null 2>&1
 expect_eq "SCRUB.8 the probe run by hand under a store reads it back" "BIONIC_GATE_DIR=control-store" \
   "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
 
-# AC-4.1 — the timing-bound suite is solo, on the real roster.
-RS_DRY="$( cd "$REPO" && BIONIC_PRESSURE_RING="$TMPROOT/scrub-dry-ring" BIONIC_NOW_EPOCH="$RR_NOW" \
-  BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
-  env "${RR_GATE_ENV[@]}" bash tests/run.sh --dry-run 2>&1 )"
-expect_contains "SCRUB.9 the shipped roster's dry run lists the §EG-DERIVE suite as solo" \
-  "solo: bash-walls-egd.test.sh" "$RS_DRY"
-expect_absent "SCRUB.10 …and the composition suite, which carries no clock, is not listed as solo" \
-  "solo: bash-walls.test.sh" "$RS_DRY"
-RS_BOUNDED="$( cd "$REPO" && for _rs in tests/*.test.sh; do
-  /usr/bin/grep -q '^EGD_BOUND_MS=' "$_rs" || continue
-  if head -n 30 "$_rs" | /usr/bin/grep -qE '^# runner: solo[[:space:]]*$'; then echo "${_rs##*/} solo"; else echo "${_rs##*/} NOT-SOLO"; fi
-done )"
-expect_eq "SCRUB.11 the only suite carrying the 1200 ms derivation bound is the solo one" "bash-walls-egd.test.sh solo" "$RS_BOUNDED"
-
 # ============================================================
-section "§11 NESTED — a solo suite asks for the whole machine; a nested run never waits on its parent (wave-26 T8, AC-6.4; the gate since wave-28 T12)"
+section "§11 NESTED — a nested run never waits on its parent; a whole run takes the machine alone (wave-26 T8, AC-6.4; the gate since wave-28 T12; wave-35 T2)"
 # ============================================================
 #
-# WHAT IT COVERS. A `# runner: solo` suite used to be held out of the run's own batch and
-# nothing more: any other run on the machine could share its drive. The runner now asks the
-# gate for the whole machine before each solo suite (`gate_ask whole <suite>`, admitted only
-# while nothing else admitted is unfinished, and nothing else admitted while it holds), waits
-# for a settled load, and ends the request after. The claims, each against this suite's store:
+# WHAT IT COVERS. A whole run asks the gate once, `whole tests/run.sh`, admitted only while nothing
+# else admitted is unfinished, and every suite it starts runs inside that admission. The claims,
+# each against this section's own store:
 #
-#   (a) NESTED. An outer run inside a booked command completes, and so do the two nested runs
-#       it drives: one from inside its solo suite, which runs under the outer suite's whole
-#       admission (the gate believes it for a descendant of its holder) with the load raised,
-#       and so neither settles nor voids; and one from its batch, whose solo suite runs under
-#       the batch suite's work admission. Neither takes a number of its own.
-#   (b) the mutation control: the same fixture with the runner's nested-whole check removed
-#       makes the inner run settle on the raised load until its ceiling, and void.
-#   (c) the ask really waits: a foreign admitted run delays the solo suite until its holder
-#       is gone, and the gate says the request waits.
-#   (d) VOID: a run during which the load rose is re-run; still disturbed after two
-#       retries, a suite that passed is reported void, never failed. One disturbed run
-#       followed by a clean one is an ordinary pass.
-#   (e) ITS OWN ADMISSION: a solo suite runs with BIONIC_GATE_ADMIT naming its whole request,
-#       admitted and unfinished while it runs, booked run or not; and two booked runs that
-#       each reach their solo suite together both complete, the second waiting for the first.
-#   (f) ONE CEILING (wave-26 T26; review 4 F3): the settle and every retry of one solo suite
-#       give up at one deadline, counted from the admission; a retry the ceiling has no room
-#       for is not run at all.
-#   (g) OWN LOAD (review 4 F4): the check after the run leaves out the suite's own share of
-#       the load, measured from the CPU its worker used; its own load alone never voids it.
-#   (h) A STORE THAT CANNOT BE WRITTEN (review 4 F5): the suite is reported VOID at once,
-#       and the reason names the store.
-#   (i) A VOID SUITE THAT FAILED IS A FAILURE (wave-26 T43; review 8 F1): on every path that
-#       can void a suite, a suite whose last run failed fails the run, is counted once in the
-#       fail tally, and carries its void reason on its failure line.
-#   (j) A VOID SUITE LEAVES NO TIMING ROW (wave-26 T48; review 11 N1): the file the timing knob
-#       names holds measurements only, so a suite whose timing was not measured, passed or
-#       failed, has no row in it, and a suite timed in the same run still does.
+#   (a) NESTED. An outer run inside a booked command completes, and so do the two nested runs its
+#       suites drive: each runs under the outer run's whole admission (the gate believes it for a
+#       descendant of its holder), never waits at the gate, and takes no number of its own.
+#   (c) the ask really waits: a foreign admitted run delays the whole run's suites until its
+#       holder is gone, and the gate says the request waits.
+#   (e) ITS OWN ADMISSION: a suite runs with BIONIC_GATE_ADMIT naming the run's whole request,
+#       admitted and unfinished while it runs, booked run or not; and two booked runs started
+#       together both complete, the second whole request waiting for the first.
+#   (h) A STORE THAT CANNOT BE WRITTEN: the run goes on unadmitted, at once, and is green.
+#
+# RETIRED BY WAVE-35 T2 (D11, AC-2.1, AC-2.4), with the solo drain they pinned: (b) the nested-whole
+# check's mutation control (its `whole)` arm was the solo drain's), (d) VOID and the retry, (f) the
+# settle's one ceiling, (g) a run's own load in the void check, (i) a void suite that failed and
+# (j) a void suite's timing row. Nothing is VOID, nothing settles and nothing is re-run;
+# tests/runner-width.test.sh §NO-VOID and §NO-RETRY hold that.
 
 RRN_BOOKED="$REPO/payload/scripts/booked.sh"
 expect_true "11.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
 
 RRN="$TMPROOT/n"
-RRN_MARKS="$RRN/marks"; RRN_GATE="$RRN/gate"; RRN_LOAD="$RRN/load"
+RRN_MARKS="$RRN/marks"; RRN_GATE="$RRN/gate"
 mkdir -p "$RRN_MARKS"
-printf '0\n' > "$RRN_LOAD"
 
-# rrn_suite — a suite file: the solo marker verbatim when asked for, the framework, the
-# body given, one trivial row.
-rrn_suite() {  # <file> <solo yes|no> <name> <body>
+# rrn_suite — a suite file: the framework, the body given, one trivial row.
+rrn_suite() {  # <file> <name> <body>
   { printf '#!/bin/bash\n'
-    [ "$2" = yes ] && printf '# runner: solo\n'
     printf 'set -uo pipefail\n'
     printf '. "$(dirname "$0")/lib/assert.sh"\n'
-    printf '%s\n' "$4"
-    printf 'section "%s"\n' "$3"
-    printf 'expect_eq "%s ran" "x" "x"\n' "$3"
+    printf '%s\n' "$3"
+    printf 'section "%s"\n' "$2"
+    printf 'expect_eq "%s ran" "x" "x"\n' "$2"
     printf 'finish\n'
   } > "$1"
 }
@@ -1211,46 +1048,40 @@ printf "%s\n" "$w" > "$RRN_MARKS/$RRN_WHO.what"
 h=gone; [ -n "$a" ] && grep -q "^admitted=" "$f" 2>/dev/null && ! grep -q "^ended=" "$f" 2>/dev/null && h=held
 printf "%s %s\n" "$a" "$h" > "$RRN_MARKS/$RRN_WHO.place"'
 
-# The inner tree: one solo suite, recording under the name its caller hands down.
+# The inner tree: one suite, recording under the name its caller hands down.
 TNI="$RRN/inner"
 rr_tree "$TNI"
-rrn_suite "$TNI/tests/aaa-inner.test.sh" yes aaa-inner "RRN_WHO=\"inner-\$RRN_TAG\"
+rrn_suite "$TNI/tests/aaa-inner.test.sh" aaa-inner "RRN_WHO=\"inner-\$RRN_TAG\"
 $RRN_RECORD"
 
-# The outer tree: a solo suite that records its hold and drives the inner run, and a batch
-# suite that drives the inner run too. The runner hands a suite no BIONIC_GATE_DIR (§SCRUB), so
-# each suite names the section's store for the nested run itself: it is the store the nesting is about.
-rrn_outer_tree() {  # <dir>
-  rr_tree "$1"
-  rrn_suite "$1/tests/aaa-nest.test.sh" yes aaa-nest "RRN_WHO=outer
+# The outer tree: a suite that records its hold and drives the inner run, and a second suite that
+# drives the inner run too. The runner hands a suite no BIONIC_GATE_DIR (§SCRUB), so each suite names
+# the section's store for the nested run itself: it is the store the nesting is about.
+TNO="$RRN/outer"
+rr_tree "$TNO"
+rrn_suite "$TNO/tests/aaa-nest.test.sh" aaa-nest "RRN_WHO=outer
 $RRN_RECORD
-printf '99\n' > \"\$RRN_LOAD\"
-( cd \"\$RRN_INNER\" && RRN_TAG=solo BIONIC_GATE_DIR=\"\$RRN_GATE\" bash tests/run.sh ) > \"\$RRN_MARKS/inner-solo.out\" 2>&1
-printf '%s\n' \"\$?\" > \"\$RRN_MARKS/inner-solo.rc\"
-printf '0\n' > \"\$RRN_LOAD\""
-  rrn_suite "$1/tests/n-batch.test.sh" no n-batch \
+( cd \"\$RRN_INNER\" && RRN_TAG=one BIONIC_GATE_DIR=\"\$RRN_GATE\" bash tests/run.sh ) > \"\$RRN_MARKS/inner-one.out\" 2>&1
+printf '%s\n' \"\$?\" > \"\$RRN_MARKS/inner-one.rc\""
+rrn_suite "$TNO/tests/n-batch.test.sh" n-batch \
 "( cd \"\$RRN_INNER\" && RRN_TAG=batch BIONIC_GATE_DIR=\"\$RRN_GATE\" bash tests/run.sh ) > \"\$RRN_MARKS/inner-batch.out\" 2>&1
 printf '%s\n' \"\$?\" > \"\$RRN_MARKS/inner-batch.rc\""
-}
-TNO="$RRN/outer"
-rrn_outer_tree "$TNO"
 
-# rrn_drive <dir> <ceiling> <command...> — the drive, with this section's store, a short poll,
-# the settle's ceiling, the load reading this section controls, and no inherited admission.
+# rrn_drive <dir> <command...> — the drive, with this section's store, a short poll and no
+# inherited admission.
 RRN_OUT=""; RRN_RC=0
 rrn_drive() {
-  local dir="$1" max="$2"; shift 2
+  local dir="$1"; shift
   RRN_OUT="$( cd "$dir" && \
-    RR_MARKS="$RR_MARKS" RRN_MARKS="$RRN_MARKS" RRN_GATE="$RRN_GATE" RRN_INNER="${RRN_INNER_TREE:-$TNI}" \
-    RRN_LOAD="$RRN_LOAD" RRN_FOREIGN="${RRN_FOREIGN:-}" RRN_VOID="${RRN_VOID:-}" \
+    RR_MARKS="$RR_MARKS" RRN_MARKS="$RRN_MARKS" RRN_GATE="$RRN_GATE" RRN_INNER="$TNI" \
+    RRN_FOREIGN="${RRN_FOREIGN:-}" \
     BIONIC_PRESSURE_RING="$TMPROOT/n-ring" \
     BIONIC_NOW_EPOCH="$RR_NOW" \
     BIONIC_TEST_JOBS_CEILING="2" \
     BIONIC_PROBE_FREE_PCT="44" \
     BIONIC_PROBE_SWAP_PCT="0" \
     BIONIC_PROBE_LOAD_1M="0.1" \
-    env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RRN_GATE" BIONIC_SETTLE_MAX_WAIT="$max" \
-      BIONIC_LOAD_NOW_FILE="$RRN_LOAD" "$@" 2>&1 )"
+    env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RRN_GATE" "$@" 2>&1 )"
   RRN_RC=$?
 }
 # rrn_plant <id> <holder pid> — a foreign run the gate admitted, held by a live process
@@ -1272,63 +1103,38 @@ rrn_ids_of() {  # <key> — the ids of the requests with that key
   grep -l "^key=$1\$" "$RRN_GATE"/requests/[0-9]* 2>/dev/null | sed 's#.*/##' | tr '\n' ' '
 }
 rrn_read() { cat "$RRN_MARKS/$1" 2>/dev/null; }
+rrn_line() { printf '%s\n' "$RRN_OUT" | grep -F "  $1 "; }
 
 # ---- (a) the outer run inside a booked command -----------------------------
 # The shim is handed `--suites run.sh`, as the wall names a runner: it asks nothing for it.
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
-rrn_drive "$TNO" 4 bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"
+rrn_drive "$TNO" bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
 expect_eq "11.1 the booked outer run completes green" "0" "$RRN_RC"
-# 11.2, 11.7, 11.12, 11.13, 11.22, 11.38, 11.39 and 11.41 RE-KEYED BY WAVE-32 T2 (D1, AC-1.1;
-# A-orch-8): a whole run holds one admission, `whole tests/run.sh`, and its solo suites and batch
-# suites run inside it, so the request they name is the run's; settle, void and retry are kept.
-expect_eq "11.2 its solo suite ran under the run's whole request" \
+expect_eq "11.2 its suite ran under the run's whole request" \
   "whole tests/run.sh" "$(rrn_read outer.what)"
-expect_eq "11.3 the run nested in the solo suite completes green" "0" "$(rrn_read inner-solo.rc)"
-expect_contains "11.4 …with a real tally (the nested run happened)" "Gating:" "$(rrn_read inner-solo.out)"
-expect_absent "11.5 …and it never waited at the gate" "waits for its turn" "$(rrn_read inner-solo.out)"
-expect_absent "11.6 …nor reported a void, though the load was raised while it ran" "VOID" "$(rrn_read inner-solo.out)"
-expect_eq "11.7 the nested run's solo suite ran under the outer run's whole admission" \
-  "whole tests/run.sh" "$(rrn_read inner-solo.what)"
+expect_eq "11.3 the run nested in that suite completes green" "0" "$(rrn_read inner-one.rc)"
+expect_contains "11.4 …with a real tally (the nested run happened)" "Gating:" "$(rrn_read inner-one.out)"
+expect_absent "11.5 …and it never waited at the gate" "waits for its turn" "$(rrn_read inner-one.out)"
+expect_eq "11.7 the nested run's suite ran under the outer run's whole admission" \
+  "whole tests/run.sh" "$(rrn_read inner-one.what)"
 expect_eq "11.8 …and took no number of its own: no request names the inner suite" "" \
   "$(rrn_ids_of aaa-inner.test.sh)"
-expect_eq "11.9 the run nested in the batch completes green" "0" "$(rrn_read inner-batch.rc)"
+expect_eq "11.9 the run nested in the other suite completes green" "0" "$(rrn_read inner-batch.rc)"
 expect_contains "11.10 …with a real tally" "Gating:" "$(rrn_read inner-batch.out)"
 expect_absent "11.11 …and it never waited at the gate" "waits for its turn" "$(rrn_read inner-batch.out)"
-expect_eq "11.12 …its solo suite ran under the admission the batch suite was started in, the run's" \
+expect_eq "11.12 …its suite ran under the admission the outer suite was started in, the run's" \
   "whole tests/run.sh" "$(rrn_read inner-batch.what)"
 expect_nonempty "11.13 the store was used: the outer run's own request is there" \
   "$(rrn_ids_of tests/run.sh)"
 expect_eq "11.14 …and every request was ended" "" "$(rrn_unended)"
 
-# ---- (b) the mutation control: no nested-whole check -----------------------
-# The check lives in the NESTED runner, the one whose solo suite inherits the whole admission:
-# the inner tree's runner is the doctored copy, the outer run is the shipped one. The check is the
-# inherited request's kind read against `whole` (wave-35 T1: the pass's `pass)` arm is gone, and the
-# check is the one test again that it was before wave-34 T9 made it a case).
-TNIM="$RRN/inner-mut"
-rr_tree "$TNIM"
-cp "$TNI/tests/aaa-inner.test.sh" "$TNIM/tests/aaa-inner.test.sh"
-# 11.15 is the anchor (wave-35 T3, D16): the nested-whole test on one line of the shipped runner, and the
-# doctored copy written from it, so `anchors check` names this line at any landing that re-spells it.
-anchor file tests/run.sh '2>/dev/null | tail -n 1)" = whole ]; then' '2>/dev/null | tail -n 1)" = never ]; then' "$TNIM/tests/run.sh"
-expect_eq "11.16 meta: …and the doctored copy does not carry it" "0" \
-  "$(grep -cF '2>/dev/null | tail -n 1)" = whole ]; then' "$TNIM/tests/run.sh")"
-expect_true "11.17 meta: the doctored copy still parses" bash -n "$TNIM/tests/run.sh"
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
-RRN_INNER_TREE="$TNIM" rrn_drive "$TNO" 2 bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
-expect_eq "11.17b the doctored drive still completes (its outer suites ran)" "0" "$(rrn_read inner-solo.rc)"
-expect_contains "11.18 without the check the nested solo suite settles on the raised load and voids" \
-  "VOID" "$(rrn_read inner-solo.out)"
-expect_contains "11.19 …because the load never settled: the check is the rule" \
-  "never settled" "$(rrn_read inner-solo.out)"
-
-# ---- (c) a foreign admitted run delays the solo suite ----------------------
+# ---- (c) a foreign admitted run delays the whole run ------------------------
 TNF="$RRN/foreign"
 rr_tree "$TNF"
-rrn_suite "$TNF/tests/aaa-timed.test.sh" yes aaa-timed \
+rrn_suite "$TNF/tests/aaa-timed.test.sh" aaa-timed \
 'if kill -0 "$RRN_FOREIGN" 2>/dev/null; then s=alive; else s=gone; fi
 printf "%s\n" "$s" > "$RRN_MARKS/foreign.state"'
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"
 # THE HOLDER IS NOT THIS SHELL'S CHILD: a killed child stays a zombie until it is reaped, and
 # `kill -0` reads a zombie as alive. Started from a subshell that exits at once, it is
 # reparented and reaped by the system the moment it dies.
@@ -1337,79 +1143,35 @@ rrn_plant 900 "$RRN_FPID"
 ( sleep 4; kill "$RRN_FPID" 2>/dev/null ) &
 RRN_KILLER=$!
 RRN_FOREIGN="$RRN_FPID"
-rrn_drive "$TNF" 15 bash tests/run.sh
+rrn_drive "$TNF" bash tests/run.sh
 RRN_FOREIGN=""
 kill "$RRN_FPID" "$RRN_KILLER" 2>/dev/null; wait "$RRN_KILLER" 2>/dev/null
 expect_eq "11.20 the run with a foreign admitted run completes green" "0" "$RRN_RC"
-expect_eq "11.21 the solo suite started only once the foreign holder was gone" "gone" \
+expect_eq "11.21 its suite started only once the foreign holder was gone" "gone" \
   "$(rrn_read foreign.state)"
 expect_contains "11.22 …and the gate said the run's whole request waited" \
   "(whole tests/run.sh) waits for its turn and room" "$RRN_OUT"
 
-# ---- (d) VOID: the load rose during the timing run -------------------------
-# The suite raises the load reading during its run and a background line lowers it three
-# seconds later, so the check after the run sees the rise and the next try settles within
-# the ten-second wait. One second was too short on a loaded machine: the reading was back
-# down before the check, and the retry never happened.
-TNV="$RRN/void"
-rr_tree "$TNV"
-rr_stub "$TNV" "v-plain"
-rrn_suite "$TNV/tests/aaa-void.test.sh" yes aaa-void \
-'printf "run\n" >> "$RRN_MARKS/void.runs"
-n="$(awk "END { print NR + 0 }" "$RRN_MARKS/void.runs")"
-if [ "$RRN_VOID" = stuck ]; then
-  printf "99\n" > "$RRN_LOAD"
-elif [ "$RRN_VOID" = always ] || [ "$n" -eq 1 ]; then
-  printf "99\n" > "$RRN_LOAD"
-  ( sleep 3; printf "0\n" > "$RRN_LOAD" ) >/dev/null 2>&1 &
-fi'
-rrn_void_runs() { awk 'END { print NR + 0 }' "$RRN_MARKS/void.runs" 2>/dev/null || echo 0; }
-rrn_line() { printf '%s\n' "$RRN_OUT" | grep -F "  $1 "; }
-
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
-RRN_VOID=always; rrn_drive "$TNV" 10 bash tests/run.sh
-RRN_VOID_ALWAYS_OUT="$RRN_OUT"
-expect_eq "11.23 a suite disturbed on every try does not fail the run" "0" "$RRN_RC"
-expect_true "11.24 …it was re-run" test "$(rrn_void_runs)" -ge 2
-expect_true "11.25 …and the retries stop (at most the first run and two more)" test "$(rrn_void_runs)" -le 3
-expect_contains "11.26 its verdict line reads VOID" "VOID" "$(rrn_line aaa-void.test.sh)"
-expect_absent "11.27 …not FAIL" "FAIL" "$(rrn_line aaa-void.test.sh)"
-expect_contains "11.28 the summary names it under Void:" "aaa-void.test.sh" \
-  "$(printf '%s\n' "$RRN_OUT" | sed -n '/^Void:/,$p')"
-expect_absent "11.29 …and nothing is listed under Failed:" "Failed:" "$RRN_OUT"
-expect_absent "11.30 …and the run does not call itself all green" "All gating suites green" "$RRN_OUT"
-
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
-RRN_VOID=once; rrn_drive "$TNV" 10 bash tests/run.sh
-expect_eq "11.31 a suite disturbed once and clean on the retry: the run is green" "0" "$RRN_RC"
-expect_true "11.32 …it was re-run" test "$(rrn_void_runs)" -ge 2
-expect_contains "11.33 …and its verdict line reads PASS" "PASS" "$(rrn_line aaa-void.test.sh)"
-expect_absent "11.34 …with no Void: summary" "Void:" "$RRN_OUT"
-expect_contains "11.35 …and the retry was said on the way" "aaa-void.test.sh: the load rose" "$RRN_OUT"
-expect_contains "11.35b …as a retry, not a give-up" "retrying (1 of 2)" "$RRN_OUT"
-expect_contains "11.36 the always-disturbed run printed a Void: summary (11.34 is not vacuous)" \
-  "Void:" "$RRN_VOID_ALWAYS_OUT"
-
 # ---- (e) its own admission --------------------------------------------------
-# The solo launch hands its suite BIONIC_GATE_ADMIT naming the whole request the runner holds,
-# whether the run was booked or not.
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
-rrn_drive "$TNO" 4 bash tests/run.sh
+# A suite is handed BIONIC_GATE_ADMIT naming the whole request the runner holds, whether the run
+# was booked or not.
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"
+rrn_drive "$TNO" bash tests/run.sh
 expect_eq "11.37 an unbooked run completes green" "0" "$RRN_RC"
-expect_eq "11.38 …its solo suite ran under the run's whole request" "whole tests/run.sh" "$(rrn_read outer.what)"
+expect_eq "11.38 …its suite ran under the run's whole request" "whole tests/run.sh" "$(rrn_read outer.what)"
 expect_eq "11.39 …named in BIONIC_GATE_ADMIT, admitted and unfinished while the suite ran" \
   "$(rrn_ids_of tests/run.sh | tr -d ' ')held" "$(rrn_read outer.place | tr -d ' ')"
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"
-rrn_drive "$TNO" 4 bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
+rrn_drive "$TNO" bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
 expect_eq "11.40 a booked run completes green" "0" "$RRN_RC"
-expect_eq "11.41 …and its solo suite ran under the run's own whole request too" \
+expect_eq "11.41 …and its suite ran under the run's own whole request too" \
   "$(rrn_ids_of tests/run.sh | tr -d ' ')held" "$(rrn_read outer.place | tr -d ' ')"
 
-# Two booked runs, each with a solo suite that holds the machine for three seconds: the second
-# whole request waits for the first to end, and both complete.
+# Two booked runs, each with a suite that holds its run for three seconds: the second whole
+# request waits for the first to end, and both complete.
 rrn_pair_tree() {  # <dir> <who>
   rr_tree "$1"
-  rrn_suite "$1/tests/aaa-pair.test.sh" yes aaa-pair "RRN_WHO=$2
+  rrn_suite "$1/tests/aaa-pair.test.sh" aaa-pair "RRN_WHO=$2
 $RRN_RECORD
 sleep 3"
 }
@@ -1417,380 +1179,37 @@ rrn_pair_tree "$RRN/pair-a" pair-a
 rrn_pair_tree "$RRN/pair-b" pair-b
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"
 for _w in a b; do
-  ( rrn_drive "$RRN/pair-$_w" 20 bash "$RRN_BOOKED" --agent "pair-$_w" --suites run.sh -- 'bash tests/run.sh'
+  ( rrn_drive "$RRN/pair-$_w" bash "$RRN_BOOKED" --agent "pair-$_w" --suites run.sh -- 'bash tests/run.sh'
     printf '%s\n' "$RRN_OUT" > "$RRN_MARKS/pair-$_w.out"
     printf '%s\n' "$RRN_RC" > "$RRN_MARKS/pair-$_w.rc" ) &
 done
 wait
-expect_eq "11.42 two booked runs asking for the whole machine together: the first completes green" \
+expect_eq "11.42 two booked whole runs started together: the first completes green" \
   "0" "$(rrn_read pair-a.rc)"
 expect_eq "11.43 …and so does the second" "0" "$(rrn_read pair-b.rc)"
-expect_absent "11.44 …neither voided" "VOID" "$(rrn_read pair-a.out; rrn_read pair-b.out)"
 expect_contains "11.45 …and they really met: one whole request waited for the other" \
   "waits for its turn and room" "$(rrn_read pair-a.out; rrn_read pair-b.out)"
-expect_contains "11.46 each solo suite ran under its own held whole request (a)" " held" "$(rrn_read pair-a.place)"
+expect_contains "11.46 each suite ran under its own held whole request (a)" " held" "$(rrn_read pair-a.place)"
 expect_contains "11.47 …(b)" " held" "$(rrn_read pair-b.place)"
 expect_ne "11.47b …two requests, not one" "$(rrn_read pair-a.place)" "$(rrn_read pair-b.place)"
 expect_eq "11.48 …and every request was ended" "" "$(rrn_unended)"
 
-# ---- (f) ONE CEILING: the settle and the retries share one deadline ---------
-# A foreign admitted run is killed RRN_CD seconds into the drive, so the whole request waits for
-# it; the load stays above the line throughout. The ceiling counts from the admission, not from
-# the drive: the settle gives up RRN_CMW seconds after the request is admitted, and the suite
-# then runs once and is void. The gap is read between two stamps of this fixture (a watcher
-# records the admission, the suite records its start), not off the drive's wall time.
-# RE-KEYED BY WAVE-32 T2 (D1; A-orch-8): the request is the run's one `whole tests/run.sh`,
-# admitted before the batch, and a solo suite's ceiling counts from its turn; so the watcher
-# stamps once the run's request is admitted AND the batch's one suite (c-plain) has started.
-TNC="$RRN/ceiling"
-rr_tree "$TNC"
-rr_stub "$TNC" "c-plain"
-rrn_suite "$TNC/tests/aaa-ceil.test.sh" yes aaa-ceil \
-'date +%s > "$RRN_MARKS/ceil.start"
-if kill -0 "$RRN_FOREIGN" 2>/dev/null; then s=alive; else s=gone; fi
-printf "%s\n" "$s" > "$RRN_MARKS/ceil.foreign"'
-RRN_CMW=6; RRN_CD=4
-rm -f "$RRN_MARKS"/* "$RR_MARKS/c-plain.ran"; rm -rf "$RRN_GATE"
-printf '99\n' > "$RRN_LOAD"
-RRN_FPID="$( ( sleep 60 >/dev/null 2>&1 & printf '%s' "$!" ) )"
-rrn_plant 900 "$RRN_FPID"
-( i=0
-  while [ "$i" -lt 600 ]; do
-    f="$(grep -l '^key=tests/run.sh$' "$RRN_GATE"/requests/[0-9]* 2>/dev/null | head -n 1)"
-    [ -n "$f" ] && grep -q '^admitted=' "$f" && [ -f "$RR_MARKS/c-plain.ran" ] && break
-    sleep 0.1; i=$((i + 1))
-  done
-  date +%s > "$RRN_MARKS/ceil.take" ) >/dev/null 2>&1 &
-RRN_WATCHER=$!
-( sleep "$RRN_CD"; kill "$RRN_FPID" ) >/dev/null 2>&1 &
-RRN_KILLER=$!
-RRN_FOREIGN="$RRN_FPID"
-rrn_drive "$TNC" "$RRN_CMW" bash tests/run.sh
-RRN_FOREIGN=""
-kill "$RRN_FPID" "$RRN_WATCHER" "$RRN_KILLER" 2>/dev/null; wait "$RRN_WATCHER" "$RRN_KILLER" 2>/dev/null
-RRN_CT="$(rrn_read ceil.take)"; RRN_CS="$(rrn_read ceil.start)"
-expect_eq "11.49 one ceiling: the void does not fail the run" "0" "$RRN_RC"
-expect_regex "11.50 …the watcher saw the whole request admitted" '^[0-9]+$' "$RRN_CT"
-expect_regex "11.51 …and the suite recorded its start" '^[0-9]+$' "$RRN_CS"
-expect_eq "11.52 …the request was admitted only once the foreign holder was gone" "gone" \
-  "$(rrn_read ceil.foreign)"
-expect_contains "11.53 …so the void is the settle's" "never settled" \
-  "$(rrn_line aaa-ceil.test.sh)"
-expect_true "11.54 the settle gave up at the ceiling counted from the admission: the suite started within ${RRN_CMW}s + 2 of it (took $(( ${RRN_CS:-0} - ${RRN_CT:-0} ))s)" \
-  test "$(( ${RRN_CS:-999} - ${RRN_CT:-0} ))" -le $((RRN_CMW + 2))
-expect_true "11.54b …and not before it: at least ${RRN_CMW}s - 1 after the admission" \
-  test "$(( ${RRN_CS:-0} - ${RRN_CT:-999} ))" -ge $((RRN_CMW - 1))
-
-# A run voided by a load that never comes down: the retry's settle meets the same ceiling, so
-# the retry never starts, and the suite is not run a second time either — its one disturbed
-# run already left its output to read.
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
-RRN_VOID=stuck; rrn_drive "$TNV" 3 bash tests/run.sh; RRN_VOID=""
-expect_eq "11.55 a disturbance that outlasts the ceiling: the run is not failed" "0" "$RRN_RC"
-expect_contains "11.56 …its verdict line reads VOID" "VOID" "$(rrn_line aaa-void.test.sh)"
-expect_contains "11.57 …because the ceiling ran out before a retry could start" \
-  "ran out before a retry could start" "$(rrn_line aaa-void.test.sh)"
-expect_eq "11.58 …so it ran once: no retry without room, and no run after it" "1" \
-  "$(rrn_void_runs)"
-
-# ---- (g) OWN LOAD: the suite's own share of the load is not a disturbance ---
-# The suite burns CPU for two seconds, then sets the load reading to the settled line plus
-# HALF of its own share of the one-minute average, computed from its own `times`. Anything
-# above its own share would be someone else's; its own load alone must not void it. The line
-# is read the way the runner reads it, in the fixture tree.
-TNL="$RRN/own"
-rr_tree "$TNL"
-rr_stub "$TNL" "o-plain"
-RRN_OLINE="$( cd "$TNL" && . payload/scripts/lib/resources.sh && resources_settled_line "$(_res_cores)" )"
-expect_regex "11.59 the settled line is read" '^[0-9]+\.[0-9]+$' "$RRN_OLINE"
-cat > "$RRN/burn.sh" <<'RRN_BURN'
-s=$SECONDS; while [ $((SECONDS - s)) -lt 2 ]; do :; done
-w=$((SECONDS - s)); times > "$1/own.t"
-awk -v line="$2" -v w="$w" '
-  function sec(x, a) { sub(/s$/, "", x); gsub(",", ".", x); split(x, a, "m"); return a[1] * 60 + a[2] }
-  NR == 1 { cpu = sec($1) + sec($2); own = (cpu / w) * (1 - exp(-w / 60)); printf "%.6f\n", line + own / 2 }
-' "$1/own.t" > "$1/own.after"
-cat "$1/own.after" > "$3"
-RRN_BURN
-rrn_suite "$TNL/tests/aaa-own.test.sh" yes aaa-own \
-"echo run >> \"\$RRN_MARKS/own.runs\"
-bash \"$RRN/burn.sh\" \"\$RRN_MARKS\" $RRN_OLINE \"\$RRN_LOAD\""
-rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
-rrn_drive "$TNL" 10 bash tests/run.sh
-RRN_OAFTER="$(rrn_read own.after)"
-expect_true "11.60 the load after the run is above the settled line (${RRN_OAFTER:-?} > $RRN_OLINE)" \
-  awk -v a="${RRN_OAFTER:-0}" -v l="$RRN_OLINE" 'BEGIN { exit !(a + 0 > l + 0) }'
-expect_eq "11.61 …yet the run is green" "0" "$RRN_RC"
-expect_contains "11.62 …and the suite's verdict line reads PASS: its own load is not a disturbance" \
-  "PASS" "$(rrn_line aaa-own.test.sh)"
-expect_eq "11.63 …and it ran once" "1" \
-  "$(awk 'END { print NR + 0 }' "$RRN_MARKS/own.runs" 2>/dev/null)"
-
-# ---- (h) A STORE THAT CANNOT BE WRITTEN: VOID at once, saying so ------------
+# ---- (h) A STORE THAT CANNOT BE WRITTEN: the run goes on unadmitted ---------
 TNS="$RRN/store"
 rr_tree "$TNS"
 rr_stub "$TNS" "s-plain"
-rrn_suite "$TNS/tests/aaa-store.test.sh" yes aaa-store 'echo run >> "$RRN_MARKS/store.runs"'
+rrn_suite "$TNS/tests/aaa-store.test.sh" aaa-store 'echo run >> "$RRN_MARKS/store.runs"'
 RRN_RO="$RRN/ro-store"
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_RO"; mkdir -p "$RRN_RO"; chmod 555 "$RRN_RO"
 expect_true "11.64 precondition: the store cannot be written" test ! -w "$RRN_RO"
 RRN_SAVE="$RRN_GATE"; RRN_GATE="$RRN_RO"
-RRN_T0=$SECONDS
-rrn_drive "$TNS" 30 bash tests/run.sh
-RRN_SDT=$((SECONDS - RRN_T0))
+rrn_drive "$TNS" bash tests/run.sh
 RRN_GATE="$RRN_SAVE"
 chmod 755 "$RRN_RO"
-expect_eq "11.65 a store that cannot be written: the run is not failed" "0" "$RRN_RC"
-expect_contains "11.66 …the suite's verdict line reads VOID" "VOID" "$(rrn_line aaa-store.test.sh)"
-expect_contains "11.67 …and says the store could not be written, naming it" \
-  "the store $RRN_RO could not be written" "$(rrn_line aaa-store.test.sh)"
-expect_absent "11.68 …not that places did not drain" "drain" "$(rrn_line aaa-store.test.sh)"
-expect_eq "11.69 …the suite still ran once, so its output is there to read" "1" \
+expect_eq "11.65 a store that cannot be written: the run is green" "0" "$RRN_RC"
+expect_contains "11.66 …the suite's verdict line reads PASS" "✓ PASS" "$(rrn_line aaa-store.test.sh)"
+expect_eq "11.69 …and it ran once" "1" \
   "$(awk 'END { print NR + 0 }' "$RRN_MARKS/store.runs" 2>/dev/null)"
-expect_true "11.70 …at once, not after the maximum wait (took ${RRN_SDT}s, wait 30s)" \
-  test "$RRN_SDT" -le 15
-
-# ---- (i) A VOID SUITE THAT FAILED IS A FAILURE ------------------------------
-# A void says the suite's timing was not measured; it says nothing about its rows. Until T43
-# the runner judged a void before it judged the exit status, so a solo suite that failed on
-# a busy machine was counted in neither tally and the run exited 0. The suite here reads a
-# plan, one word per try (the last word repeats): `<outcome>:<load>`. The outcome is pass,
-# fail (a planted row that fails) or lost (a call to a helper that does not exist, which
-# exits 0); the load is clean, void (raised, and lowered three seconds later, as (d) does)
-# or stuck (raised for good). Each drive has an id, and a lowering happens only while its
-# own drive is the current one, so a late one cannot lower a later drive's raised load.
-TNX="$RRN/void-fail"
-rr_tree "$TNX"
-rr_stub "$TNX" "x-plain"
-cat > "$TNX/tests/aaa-vfail.test.sh" <<'RRX_SUITE'
-#!/bin/bash
-# runner: solo
-set -uo pipefail
-. "$(dirname "$0")/lib/assert.sh"
-section "aaa-vfail"
-printf "run\n" >> "$RRN_MARKS/vf.runs"
-n="$(awk 'END { print NR + 0 }' "$RRN_MARKS/vf.runs")"
-step="$(awk -v n="$n" '{ print (n <= NF ? $n : $NF) }' "$RRN_MARKS/vf.plan")"
-id="$(cat "$RRN_MARKS/vf.id")"
-case "$step" in
-  *:void)
-    printf "99\n" > "$RRN_LOAD"
-    ( sleep 3; [ "$(cat "$RRN_MARKS/vf.id" 2>/dev/null)" = "$id" ] && printf "0\n" > "$RRN_LOAD" ) >/dev/null 2>&1 & ;;
-  *:stuck) printf "99\n" > "$RRN_LOAD" ;;
-esac
-case "$step" in
-  fail:*) expect_eq "the planted row" "pass" "fail" ;;
-  lost:*) rrx_helper_that_does_not_exist ;;
-  killw:*) sleep 1; kill -9 "$PPID"; sleep 1 ;;
-esac
-expect_eq "aaa-vfail ran" "x" "x"
-finish
-RRX_SUITE
-RRX_ID=0
-rrx_prep() {  # <plan> <load at start> — a fresh drive: no marks, no store, a new id
-  rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '%s\n' "$2" > "$RRN_LOAD"
-  RRX_ID=$((RRX_ID + 1)); printf '%s\n' "$RRX_ID" > "$RRN_MARKS/vf.id"
-  printf '%s\n' "$1" > "$RRN_MARKS/vf.plan"
-}
-rrx_runs() { awk 'END { print NR + 0 }' "$RRN_MARKS/vf.runs" 2>/dev/null || echo 0; }
-rrx_gating() { printf '%s\n' "$RRN_OUT" | grep '^Gating: '; }
-rrx_sum() { rrx_gating | awk '{ print $2 + $4 }'; }  # passed + failed
-# The entries of one summary block: its heading line and the `    - ` lines under it.
-rrx_block() { printf '%s\n' "$RRN_OUT" | awk -v h="^$1:" '$0 ~ h { on = 1; print; next } on && /^    - / { print; next } { on = 0 }'; }
-RRX_SUITES="$(rr_glob "$TNX" | awk 'END { print NR + 0 }')"
-expect_eq "11.71 precondition: the fixture tree holds two suites, one solo" "2 1" \
-  "$RRX_SUITES $(grep -l '^# runner: solo' "$TNX"/tests/*.test.sh | awk 'END { print NR + 0 }')"
-
-# A suite that failed on every try, and every try disturbed: the defect itself.
-rrx_prep "fail:void" 0
-rrn_drive "$TNX" 20 bash tests/run.sh
-expect_eq "11.72 a solo suite that failed and was void fails the run" "1" "$RRN_RC"
-expect_true "11.73 …every try was disturbed: it was re-run" test "$(rrx_runs)" -ge 2
-expect_contains "11.74 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_contains "11.75 …with its void reason beside it: its timing was not measured either" \
-  "VOID (timing not measured: the load rose" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.76 the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
-expect_eq "11.77 …so the tallies add up to the suites run" "$RRX_SUITES" "$(rrx_sum)"
-expect_contains "11.78 it is listed under Failed:" "- aaa-vfail.test.sh" "$(rrx_block Failed)"
-expect_contains "11.79 …with its void reason" "timing not measured" "$(rrx_block Failed)"
-expect_eq "11.80 …and not also under Void: (counted once; 11.87 is the positive)" "" "$(rrx_block Void)"
-expect_absent "11.81 …and the run does not say no gating suite failed (11.88 is the positive)" \
-  "No gating suite failed" "$RRN_OUT"
-
-# A suite that passed on every try, every try disturbed: void, as before T43.
-rrx_prep "pass:void" 0
-rrn_drive "$TNX" 20 bash tests/run.sh
-expect_eq "11.82 a solo suite that passed and was void does not fail the run" "0" "$RRN_RC"
-expect_true "11.83 …every try was disturbed: it was re-run" test "$(rrx_runs)" -ge 2
-expect_contains "11.84 …its verdict line reads VOID" "~ VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
-expect_absent "11.85 …not FAIL" "FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.86 the Gating line counts it in neither tally" "Gating: 1 passed, 0 failed" "$(rrx_gating)"
-expect_contains "11.87 …it is listed under Void:" "- aaa-vfail.test.sh" "$(rrx_block Void)"
-expect_contains "11.88 …the run says no gating suite failed, and one is void" \
-  "No gating suite failed; 1 void" "$RRN_OUT"
-expect_eq "11.89 …so the tallies and the void list add up to the suites run" "$RRX_SUITES" \
-  "$(( $(rrx_sum) + $(rrx_block Void | grep -c '^    - ') ))"
-expect_eq "11.90 …and nothing is listed under Failed: (11.78 is the positive)" "" "$(rrx_block Failed)"
-
-# A suite that failed and was never disturbed: a plain failure, as before T43.
-rrx_prep "fail:clean" 0
-rrn_drive "$TNX" 20 bash tests/run.sh
-expect_eq "11.91 a solo suite that failed undisturbed fails the run" "1" "$RRN_RC"
-expect_eq "11.92 …it ran once" "1" "$(rrx_runs)"
-expect_contains "11.93 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_absent "11.94 …with no void reason" "VOID" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.95 …and the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
-
-# THE RETRY: the last try's result stands, because each try rewrites the suite's capture.
-rrx_prep "fail:void pass:clean" 0
-rrn_drive "$TNX" 20 bash tests/run.sh
-expect_eq "11.96 failed and disturbed, then passed undisturbed: the run is green" "0" "$RRN_RC"
-expect_eq "11.97 …it ran twice" "2" "$(rrx_runs)"
-expect_contains "11.98 …and its verdict line reads PASS" "✓ PASS" "$(rrn_line aaa-vfail.test.sh)"
-rrx_prep "pass:void fail:clean" 0
-rrn_drive "$TNX" 20 bash tests/run.sh
-expect_eq "11.99 passed and disturbed, then failed undisturbed: the run fails" "1" "$RRN_RC"
-expect_eq "11.100 …it ran twice" "2" "$(rrx_runs)"
-expect_contains "11.101 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_absent "11.102 …and the measured try carries no void reason" "VOID" "$(rrn_line aaa-vfail.test.sh)"
-
-# THE CEILING RAN OUT BEFORE A RETRY: the one disturbed run's failure stands.
-rrx_prep "fail:stuck" 0
-rrn_drive "$TNX" 3 bash tests/run.sh
-expect_eq "11.103 failed, disturbed, and no room for a retry: the run fails" "1" "$RRN_RC"
-expect_eq "11.104 …it ran once" "1" "$(rrx_runs)"
-expect_contains "11.105 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_contains "11.106 …saying the ceiling ran out" "ran out before a retry could start" \
-  "$(rrn_line aaa-vfail.test.sh)"
-
-# THE SETTLE GAVE UP ON THE FIRST TRY: the suite ran once, unbooked, and failed.
-rrx_prep "fail:clean" 99
-rrn_drive "$TNX" 2 bash tests/run.sh
-expect_eq "11.107 failed after a settle that gave up: the run fails" "1" "$RRN_RC"
-expect_eq "11.108 …it ran once" "1" "$(rrx_runs)"
-expect_contains "11.109 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_contains "11.110 …saying the load never settled" "never settled" "$(rrn_line aaa-vfail.test.sh)"
-
-# A STORE THAT CANNOT BE WRITTEN: the suite ran once, unbooked, and failed.
-rrx_prep "fail:clean" 0
-rm -rf "$RRN_RO"; mkdir -p "$RRN_RO"; chmod 555 "$RRN_RO"
-RRN_SAVE="$RRN_GATE"; RRN_GATE="$RRN_RO"
-rrn_drive "$TNX" 30 bash tests/run.sh
-RRN_GATE="$RRN_SAVE"
-chmod 755 "$RRN_RO"
-expect_eq "11.111 failed with a store that cannot be written: the run fails" "1" "$RRN_RC"
-expect_eq "11.112 …it ran once" "1" "$(rrx_runs)"
-expect_contains "11.113 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_contains "11.114 …naming the store" "the store $RRN_RO could not be written" \
-  "$(rrn_line aaa-vfail.test.sh)"
-
-# EXITED 0 OVER A COMMAND THAT WAS NOT FOUND, every try disturbed: a failure too.
-rrx_prep "lost:void" 0
-rrn_drive "$TNX" 20 bash tests/run.sh
-expect_eq "11.115 exited 0 but lost a command, and void: the run fails" "1" "$RRN_RC"
-expect_contains "11.116 …its verdict line names the lost command" "a command it called was not found" \
-  "$(rrn_line aaa-vfail.test.sh)"
-expect_contains "11.117 …and its void reason" "VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.118 …and the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
-
-# --serial takes nothing and voids nothing: a disturbed failure is a plain failure there.
-rrx_prep "fail:void" 0
-rrn_drive "$TNX" 20 bash tests/run.sh --serial
-expect_eq "11.119 --serial: a solo suite that failed fails the run" "1" "$RRN_RC"
-expect_contains "11.120 --serial: …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
-expect_absent "11.121 --serial: …with no void reason, since nothing was checked" "VOID" \
-  "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.122 --serial: …and the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
-
-# THE TIMING FILE HOLDS MEASUREMENTS ONLY (wave-26 T48; review 11 N1): the file the timing knob
-# names gets one `<label>TAB<seconds>` row per suite that was timed. A suite reported VOID has
-# its seconds disturbed, so it gets no row; a reader of the file then cannot take them for a
-# measurement. The companion rows keep the fix honest: the suite that was not void in the same
-# run still has its row, so writing nothing at all would fail them.
-rrx_trows() {  # <file> <label> — how many rows the file holds for the label
-  LC_ALL=C awk -F'\t' -v l="$2" '$1 == l { n++ } END { print n + 0 }' "$1" 2>/dev/null
-}
-rrx_tshaped() {  # <file> <label> — how many of them are `<label>TAB<whole seconds>`
-  LC_ALL=C awk -F'\t' -v l="$2" 'NF == 2 && $1 == l && $2 ~ /^[0-9]+$/ { n++ } END { print n + 0 }' "$1" 2>/dev/null
-}
-RRX_TF="$TMPROOT/void-timing.tsv"
-
-# CONTROL: nothing void. Both suites are timed, the solo one included.
-rrx_prep "pass:clean" 0
-rm -f "$RRX_TF"
-rrn_drive "$TNX" 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
-expect_eq "11.123 a solo suite that passed undisturbed: the run is green" "0" "$RRN_RC"
-expect_contains "11.124 …its verdict line reads PASS, so it was timed" "✓ PASS" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.125 …and the timing file holds one shaped row for it" "1" "$(rrx_tshaped "$RRX_TF" aaa-vfail.test.sh)"
-expect_eq "11.126 …and one for the plain suite" "1" "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
-
-# VOID AND PASSED, every try disturbed.
-rrx_prep "pass:void" 0
-rm -f "$RRX_TF"
-rrn_drive "$TNX" 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
-expect_contains "11.127 a solo suite that passed and was void: its line says its timing was not measured" \
-  "~ VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.128 …the timing file holds no row for it" "0" "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
-expect_eq "11.129 …while the plain suite of the same run has its shaped row" "1" \
-  "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
-
-# VOID AND FAILED, every try disturbed: counted a failure, and still not a measurement.
-rrx_prep "fail:void" 0
-rm -f "$RRX_TF"
-rrn_drive "$TNX" 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
-expect_contains "11.130 a solo suite that failed and was void: its line carries the void reason" \
-  "also VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.131 …the timing file holds no row for it" "0" "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
-expect_eq "11.132 …while the plain suite of the same run has its shaped row" "1" \
-  "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
-
-# VOID ON THE FIRST TRY, MEASURED ON THE RETRY: the suite was timed, so the row stays.
-rrx_prep "pass:void pass:clean" 0
-rm -f "$RRX_TF"
-rrn_drive "$TNX" 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
-expect_contains "11.133 a solo suite disturbed once and clean on the retry: it passed" "✓ PASS" \
-  "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.134 …its undisturbed try is a measurement, so the file holds its one shaped row" "1" \
-  "$(rrx_tshaped "$RRX_TF" aaa-vfail.test.sh)"
-
-# A TRY THAT WRITES NOTHING READS AS NOTHING (wave-26 T49; review 12 F1). A worker writes its
-# exit code and its seconds only after its suite ends, so a worker killed on a retry left the
-# EARLIER try's files in place and the runner judged the retry by them. `killw` kills the
-# suite's own worker with SIGKILL: no exit code, no seconds, no progress line.
-rrx_prep "pass:void killw:clean" 0
-rm -f "$RRX_TF"
-rrn_drive "$TNX" 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
-expect_eq "11.135 precondition: a passing disturbed try, then a retry whose worker was killed, ran twice" "2" \
-  "$(rrx_runs)"
-expect_contains "11.136 …the suite is reported killed with no exit status, not passed" \
-  "✗ KILLED (no exit status recorded)" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.137 …the run exits non-zero" "1" "$RRN_RC"
-expect_eq "11.138 …the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
-expect_contains "11.139 …it is listed under Failed:" "- aaa-vfail.test.sh" "$(rrx_block Failed)"
-expect_absent "11.140 …and the run does not call itself all green" "All gating suites green" "$RRN_OUT"
-expect_eq "11.141 …the timing file holds no row for it: the earlier try's seconds are not read" "0" \
-  "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
-expect_eq "11.142 …while the plain suite of the same run has its shaped row" "1" \
-  "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
-
-# The same hole from the failing side: the earlier try's FAILURE must not be read as the retry's.
-rrx_prep "fail:void killw:clean" 0
-rm -f "$RRX_TF"
-rrn_drive "$TNX" 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
-expect_contains "11.143 failed and disturbed, then the retry's worker killed: the line says no exit status, not a stale FAIL" \
-  "✗ KILLED (no exit status recorded)" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.144 …the run exits non-zero" "1" "$RRN_RC"
-expect_eq "11.145 …and the timing file holds no row for it" "0" "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
-
-# CONTROL for the two above: the retry's worker survives. The earlier try's failure is not read
-# and its seconds are not written; the last try's result stands, and it is a timed measurement.
-rrx_prep "fail:void pass:clean" 0
-rm -f "$RRX_TF"
-rrn_drive "$TNX" 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
-expect_eq "11.146 failed and disturbed, then passed on a clean retry: the run is green" "0" "$RRN_RC"
-expect_contains "11.147 …its verdict line reads PASS" "✓ PASS" "$(rrn_line aaa-vfail.test.sh)"
-expect_eq "11.148 …and the timing file holds its one shaped row, from the retry" "1" \
-  "$(rrx_tshaped "$RRX_TF" aaa-vfail.test.sh)"
 
 # ============================================================
 section "§TIMING a nested run writes no rows into the outer run's timing file (wave-26 T26; D20, AC-10.2)"
@@ -1976,8 +1395,8 @@ section "§ORDER the roster runs longest-first from tests/timing.tsv; a full run
 # WHAT IT COVERS. tests/timing.tsv is `<label>TAB<seconds>`, committed, read by the runner at
 # <repo>/tests/timing.tsv — in a scratch tree, that tree's own. The runner orders what it
 # LAUNCHES by it: suites the table knows, longest first (ties by label), then the suites it
-# does not know in roster order; solo suites keep their own drain after the batch and are
-# ordered the same way inside it. `--dry-run` prints that order, `<label>TAB<seconds|->` per
+# does not know in roster order (no suite is held out of it since wave-35 T2). `--dry-run`
+# prints that order, `<label>TAB<seconds|->` per
 # line. A full run given `--write-timing` rewrites the table from its own measurements; a
 # default full run, `--only` and `--dry-run` never (T31: the proof reads the run's stamp for
 # dirty=0, so a default run must leave the tree it proved clean).
@@ -1989,8 +1408,7 @@ section "§ORDER the roster runs longest-first from tests/timing.tsv; a full run
 TOR="$TMPROOT/order"
 rr_tree "$TOR"
 for _n in a b c d; do rr_stub "$TOR" "ord-$_n"; done
-{ printf '#!/bin/bash\n# runner: solo\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\n'
-  printf ': > "$RR_MARKS/ord-z.ran"\nsection "z"\nexpect_eq "z ran" "x" "x"\nfinish\n'; } > "$TOR/tests/ord-z.test.sh"
+rr_stub "$TOR" ord-z
 printf 'ord-a.test.sh\t100\nord-b.test.sh\t900\nord-c.test.sh\t500\nord-z.test.sh\t950\n' > "$TOR/tests/timing.tsv"
 # ord_lines <output> — the order lines of a dry run, in print order (label TAB seconds-or-dash).
 ord_lines() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' 'NF == 2 && $1 ~ /^ord-[a-z]\.test\.sh$/ { print $1 ":" $2 }'; }
@@ -2000,13 +1418,12 @@ ord_labels() { printf '%s\n' "$1" | sed -n 's/^  \(ord-[a-z]*\.test\.sh\) .*/\1/
 rr_drive "$TOR" "--dry-run"
 expect_eq "ORDER.1 --dry-run exits 0" "0" "$RR_RC"
 expect_contains "ORDER.2 …and still prints the width line first" "JOBS=2" "$RR_OUT"
-expect_eq "ORDER.3 the batch is longest-first by the table, the unknown suite after the known ones, then the solo drain" \
-  "ord-b.test.sh:900
+expect_eq "ORDER.3 the batch is longest-first by the table, the unknown suite after the known ones" \
+  "ord-z.test.sh:950
+ord-b.test.sh:900
 ord-c.test.sh:500
 ord-a.test.sh:100
-ord-d.test.sh:-
-ord-z.test.sh:950" "$(ord_lines "$RR_OUT")"
-expect_contains "ORDER.4 …the solo suite is still named as solo" "solo: ord-z.test.sh" "$RR_OUT"
+ord-d.test.sh:-" "$(ord_lines "$RR_OUT")"
 expect_eq "ORDER.5 …and nothing ran" "no no" "$([ -f "$RR_MARKS/ord-a.ran" ] && echo yes || echo no) $([ -f "$RR_MARKS/ord-z.ran" ] && echo yes || echo no)"
 
 # Ties order by label, and a table row that is not an integer is no row at all.
@@ -2030,7 +1447,7 @@ expect_eq "ORDER.7 no table: every suite is unknown, in roster order, with a das
 ord-b.test.sh:-
 ord-c.test.sh:-" "$(ord_lines "$RR_OUT")"
 
-# --serial runs in the same order as the dry run says (solo in place: serial has one sequence).
+# --serial runs in the same order as the dry run says.
 rr_drive "$TOR" "--serial"
 expect_eq "ORDER.8 --serial runs green" "0" "$RR_RC"
 expect_eq "ORDER.9 …in table order, longest first, the unknown suite after the known ones" \
@@ -2142,27 +1559,26 @@ section "§ONE-ADMISSION a whole run asks the gate once and every suite runs ins
 # ============================================================
 #
 # THE CLAIM. A whole run (no --only) asks `whole tests/run.sh` once, before its batch, and holds
-# it through the solo drain; every `--one` worker inherits it in BIONIC_GATE_ADMIT and asks
+# it until its batch is done; every `--one` worker inherits it in BIONIC_GATE_ADMIT and asks
 # nothing, so the store holds one request, keyed by the runner, and none keyed by a suite, and
 # no worker waits at the gate once the run is admitted. The store is this section's own and the
 # share and cores are planted, so the width is the formula's (§WALL-LINE reads it).
 TOA="$TMPROOT/one-adm"; OA_GATE="$TMPROOT/one-adm-gate"; OA_HOME="$TMPROOT/one-adm-home"
 mkdir -p "$OA_HOME/bionic"; printf '92\n' > "$OA_HOME/bionic/share"
 rr_tree "$TOA"
-oa_stub() {  # <dir> <name> <solo yes|no> <seconds> — a green suite recording its admission, after a sleep
+oa_stub() {  # <dir> <name> <seconds> — a green suite recording its admission, after a sleep
   { printf '#!/bin/bash\n'
-    [ "$3" = yes ] && printf '# runner: solo\n'
     printf 'set -uo pipefail\n'
     printf '. "$(dirname "$0")/lib/assert.sh"\n'
-    [ "$4" = 0 ] || printf 'sleep %s\n' "$4"
+    [ "$3" = 0 ] || printf 'sleep %s\n' "$3"
     printf 'printf "%%s\\n" "${BIONIC_GATE_ADMIT:-none}" > "$RR_MARKS/%s.admit"\n' "$2"
     printf 'section "%s"\n' "$2"
     printf 'expect_eq "%s ran" "x" "x"\n' "$2"
     printf 'finish\n'
   } > "$1/tests/$2.test.sh"
 }
-oa_stub "$TOA" oa-fast no 0
-oa_stub "$TOA" oa-slow no 2
+oa_stub "$TOA" oa-fast 0
+oa_stub "$TOA" oa-slow 2
 OA_T0=0; OA_T1=0
 oa_drive() {  # <dir> <runner args…> — the scratch runner on this section's store, share and cores; RR_OUT, RR_RC
   local dir="$1"; shift
@@ -2201,24 +1617,16 @@ expect_eq "OA.6 …and oa-slow's" "$(oa_id_of tests/run.sh)" "$(cat "$RR_MARKS/o
 expect_contains "OA.7 the log is a real run's (both suites passed)" "Gating: 2 passed, 0 failed" "$RR_OUT"
 expect_absent "OA.8 …and nothing in it waited at the gate" "waits for its turn" "$RR_OUT"
 
-# A solo suite runs inside the same admission: the drain asks nothing for it and ends nothing.
-TOAS="$TMPROOT/one-adm-solo"
-rr_tree "$TOAS"
-oa_stub "$TOAS" oa-fast no 0
-oa_stub "$TOAS" aaa-oa-solo yes 0
-oa_drive "$TOAS"
-expect_eq "OA.9 with a solo suite the run is green" "0" "$RR_RC"
-expect_eq "OA.10 …and the store still holds the one request" "tests/run.sh whole 0" "$(oa_reqs)"
-expect_eq "OA.11 …the solo suite ran under it" "$(oa_id_of tests/run.sh)" \
-  "$(cat "$RR_MARKS/aaa-oa-solo.admit" 2>/dev/null)"
+# OA.9-OA.11 (a solo suite ran inside the same admission) RETIRED BY WAVE-35 T2 (D11): no suite is solo.
 
 # THE MUTANT: a runner copy whose one ask is gone. Each worker then asks for its own suite, so the
 # store holds a request per suite and none keyed by the runner: OA.2 is not vacuous.
 TOAM="$TMPROOT/one-adm-mut"
-rr_tree "$TOAM"; oa_stub "$TOAM" oa-fast no 0; oa_stub "$TOAM" oa-slow no 0
-OA_ASK='if ! _gate_ask_for whole tests/run.sh; then'
-anchor "$TOAM/tests/run.sh" "    $OA_ASK" 1
-OA_N_="$OA_ASK" awk 'BEGIN { n = ENVIRON["OA_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if ! :; then" substr($0, i + length(n)); print }' "$RUNNER" > "$TOAM/tests/run.sh"
+rr_tree "$TOAM"; oa_stub "$TOAM" oa-fast 0; oa_stub "$TOAM" oa-slow 0
+# A SHAPED ANCHOR (wave-35 T2, on T3's helper, D16): the run's one ask on one line of the shipped
+# runner, and the doctored copy written from it, so `anchors check` names this line at any landing
+# that re-spells the ask. It took over from 11.15, whose `whole)` arm left with the solo drain.
+anchor file tests/run.sh 'if ! _gate_ask_for whole tests/run.sh; then' 'if ! :; then' "$TOAM/tests/run.sh"
 expect_eq "OA.12 the mutant runner parses" "0" "$(bash -n "$TOAM/tests/run.sh" >/dev/null 2>&1; echo $?)"
 oa_drive "$TOAM"
 expect_eq "OA.13 …and is green" "0" "$RR_RC"
@@ -2235,9 +1643,9 @@ expect_absent "OU.3 …and none keyed by the runner" "tests/run.sh" "$(oa_reqs)"
 expect_absent "OU.4 …and it prints no Wall: line (the whole run's summary)" "Wall: " "$RR_OUT"
 # THE MUTANT: the whole-run guard gone, so --only takes the run-wide admission.
 TOUM="$TMPROOT/only-unch-mut"
-rr_tree "$TOUM"; oa_stub "$TOUM" oa-fast no 0
-anchor "$TOUM/tests/run.sh" '  if [ "$ONLY" -eq 0 ] && { [ -s "$LAUNCH" ] || [ -s "$SOLO" ]; }; then' 1
-sed 's/^  if \[ "\$ONLY" -eq 0 \] && { \[ -s "\$LAUNCH" \]/  if { [ -s "$LAUNCH" ]/' "$RUNNER" > "$TOUM/tests/run.sh"
+rr_tree "$TOUM"; oa_stub "$TOUM" oa-fast 0
+anchor "$TOUM/tests/run.sh" '  if [ "$ONLY" -eq 0 ] && [ -s "$LAUNCH" ]; then' 1
+sed 's/^  if \[ "\$ONLY" -eq 0 \] && \[ -s "\$LAUNCH" \]; then/  if [ -s "$LAUNCH" ]; then/' "$RUNNER" > "$TOUM/tests/run.sh"
 expect_eq "OU.5 the mutant runner parses and differs" "0 no" \
   "$(bash -n "$TOUM/tests/run.sh" >/dev/null 2>&1; echo $?) $(cmp -s "$RUNNER" "$TOUM/tests/run.sh" && echo yes || echo no)"
 oa_drive "$TOUM" --only oa-fast.test.sh

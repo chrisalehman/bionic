@@ -1953,7 +1953,8 @@ AK_OUT="$(bash "$POKER" anchors frob "$AK" 2>&1)"; AK_RC=$?
 expect_eq "21: a subcommand other than check or index is a usage error (exit 2)" "2" "$AK_RC"
 
 # THE THREE MUTANTS THAT DRIFTED IN WAVE 34 (research-plan-machinery §12): landing-line r6em,
-# runner-roster 11.15 and spawn-worktree up3, each checked on a copy of the shipped files with
+# runner-roster 11.15 and spawn-worktree up3. 11.15's arm left run.sh with the solo drain (wave-35
+# T2, D11), so runner-roster's real anchor here is OA.12, the whole run's one ask; each checked on a copy of the shipped files with
 # its one anchored text doctored.
 AR="$SB/real-three"
 mkdir -p "$AR/tests" "$AR/payload/scripts/lib"
@@ -1976,17 +1977,17 @@ an_doctor() {  # <file> <from> <to> — a literal rewrite of the copy, then the 
   mv "$f.orig" "$f"
 }
 AN_L1="$(an_line tests/landing-line.test.sh "anchor fn payload/scripts/lib/line.sh '_line_current_row '")"
-AN_L2="$(an_line tests/runner-roster.test.sh "anchor file tests/run.sh '          whole)'")"
+AN_L2="$(an_line tests/runner-roster.test.sh "anchor file tests/run.sh 'if ! _gate_ask_for whole tests/run.sh; then'")"
 AN_L3="$(an_line tests/spawn-worktree.test.sh "anchor insert payload/scripts/lib/line.sh \"  # THE ROSTER'S LAUNCH LINE")"
 expect_nonempty "21: r6em goes through anchor (its call is in the suite)" "$AN_L1"
-expect_nonempty "21: 11.15 goes through anchor" "$AN_L2"
+expect_nonempty "21: OA.12 goes through anchor" "$AN_L2"
 expect_nonempty "21: up3 goes through anchor" "$AN_L3"
 expect_contains "21: r6em: the call it anchors renamed in line.sh is MOVED" \
   "MOVED tests/landing-line.test.sh:${AN_L1:-?} fn payload/scripts/lib/line.sh found=0" \
   "$(an_doctor payload/scripts/lib/line.sh 'LINE_NOW="$(_line_current_row ' 'LINE_NOW="$(_line_current_row_x ')"
-expect_contains "21: 11.15: the nested-whole arm re-spelled in run.sh is MOVED" \
+expect_contains "21: OA.12: the whole run's one ask re-spelled in run.sh is MOVED" \
   "MOVED tests/runner-roster.test.sh:${AN_L2:-?} file tests/run.sh found=0" \
-  "$(an_doctor tests/run.sh '          whole)' '          whole|all)')"
+  "$(an_doctor tests/run.sh 'if ! _gate_ask_for whole tests/run.sh; then' 'if ! _gate_ask_for whole "tests/run.sh"; then')"
 expect_contains "21: up3: the comment it inserts before reworded in line.sh is MOVED" \
   "MOVED tests/spawn-worktree.test.sh:${AN_L3:-?} insert payload/scripts/lib/line.sh found=0" \
   "$(an_doctor payload/scripts/lib/line.sh "# THE ROSTER'S LAUNCH LINE" '# THE LAUNCH LINE')"
