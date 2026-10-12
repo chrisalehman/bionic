@@ -2844,6 +2844,141 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
   ' "$1" 2>/dev/null
 }
 
+# AN ACK TAKEN IN ANOTHER SESSION (wave-34 T6; REQ-14 AC-14.3, D23). `adopt_fold` reads the
+# predecessor's own ledger, and the ack that closes its row is often not there: the operator who resumed
+# after a `/clear` acks in the session they are in, and `adopt --report-only` then kept listing the acked
+# row open (field report 2026-10-11, item 3). So every ledger in the root is read, each ack with what its
+# OWN session's roster says the name meant there: `<name> TAB <at> TAB <ids> TAB <sid>`, where <ids> is
+# empty when that roster holds no row of the name, `=<id>` when every row of it carries that one id (an
+# adopted copy of one agent), and `*` otherwise (the session's own agent of that name). `adopt_acked_elsewhere`
+# closes a predecessor row only on an ack that cannot be about another agent: empty, or its own id.
+adopt_cross_acks() {  # <state dir> -> one line per ack in any ledger of the root
+  local d="$1" l
+  for l in "$d"/sweeper-*.state; do
+    [ -f "$l" ] && [ ! -L "$l" ] || continue
+    /usr/bin/grep -q '|event=ack|' "$l" 2>/dev/null || continue
+    printf '%s\n' "$l"
+  done | awk '
+    function kv(line, key,   i, n, p) {
+      n = split(line, p, "|")
+      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
+      return ""
+    }
+    {
+      led = $0; sid = led; sub(/^.*\/sweeper-/, "", sid); sub(/\.state$/, "", sid)
+      ros = led; sub(/sweeper-[^\/]*$/, "roster-" sid ".state", ros)
+      split("", ids); split("", nids); split("", noid)
+      while ((getline line < ros) > 0) {
+        if (index(line, "roster-state/") != 1) continue
+        nm = kv(line, "name"); if (nm == "") continue
+        id = kv(line, "agent_id")
+        if (id == "") { noid[nm] = 1; continue }
+        if (!((nm SUBSEP id) in ids)) { ids[nm SUBSEP id] = 1; nids[nm]++; one[nm] = id }
+      }
+      close(ros)
+      while ((getline line < led) > 0) {
+        if (index(line, "sweeper-ledger/v1|") != 1 || kv(line, "event") != "ack") continue
+        nm = kv(line, "name"); at = kv(line, "at"); if (nm == "" || at == "") continue
+        sig = ""
+        if ((nm in noid) || (nm in nids)) sig = ((nm in noid) || nids[nm] != 1) ? "*" : "=" one[nm]
+        printf "%s\t%s\t%s\t%s\n", nm, at, sig, sid
+      }
+      close(led)
+    }' 2>/dev/null
+}
+
+adopt_acked_elsewhere() {  # <cross acks> <origin sid> <name> <id> <launched ISO> -> 0 closed by an ack, 1 not
+  [ -n "$1" ] && [ -n "$4" ] || return 1
+  printf '%s\n' "$1" | awk -F'\t' -v o="$2" -v n="$3" -v id="$4" -v l="$5" '
+    function ok(s) { return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) }
+    $1 == n && $4 != o && ($3 == "" || $3 == "=" id) && ok($2) && ok(l) && $2 > l { f = 1 }
+    END { exit !f }'
+}
+
+# TWO READS A CADENCE APART (wave-34 T6; REQ-14 AC-14.1, D23). A transcript's mtime says when the agent
+# last wrote, which is as true of an agent SIGKILLed a minute ago as of one at work; growth between two
+# reads is the evidence. `adopt` keeps each read it takes — `adopt-read/v1|id=|size=|epoch=` in
+# `.bionic/tmp/adopt-reads.state`, one file for the root because a read is about the agent, not the
+# session that took it — and the next adopt compares against the newest read at least one cadence old.
+# `--report-only` reads the file and never writes it. Kept small: a week of reads, eight per agent.
+ADOPT_READS_SCHEMA="adopt-read/v1"
+adopt_read_baseline() {  # <reads> <id> <oldest epoch allowed> -> "<size> <epoch>" of the newest read at or before it
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1" | awk -v id="$2" -v lim="$3" '
+    function kv(line, key,   i, n, p) {
+      n = split(line, p, "|")
+      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
+      return ""
+    }
+    index($0, "adopt-read/v1|") == 1 && kv($0, "id") == id {
+      e = kv($0, "epoch"); z = kv($0, "size")
+      if (e ~ /^[0-9]+$/ && z ~ /^[0-9]+$/ && e + 0 <= lim + 0 && e + 0 >= best + 0) { best = e; bz = z; got = 1 }
+    }
+    END { if (got) print bz " " best }'
+}
+
+adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
+  local f="$1" tmp
+  [ -n "$2" ] || return 0
+  tmp_dir_ok "${f%/*}" || return 1
+  [ -L "$f" ] && return 1
+  tmp="$f.$$"
+  { [ -f "$f" ] && cat "$f"; printf '%s\n' "$2"; } 2>/dev/null | awk -v now="$3" '
+    function kv(line, key,   i, n, p) {
+      n = split(line, p, "|")
+      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
+      return ""
+    }
+    index($0, "adopt-read/v1|") == 1 {
+      id = kv($0, "id"); e = kv($0, "epoch")
+      if (id == "" || e !~ /^[0-9]+$/ || e + 0 < now - 604800) next
+      k = ++c[id]; r[id, k] = $0; if (!(id in seen)) { seen[id] = 1; ids[++n] = id }
+    }
+    END { for (i = 1; i <= n; i++) { id = ids[i]; for (k = (c[id] > 8 ? c[id] - 7 : 1); k <= c[id]; k++) print r[id, k] } }' \
+    > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null && return 0
+  rm -f "$tmp" 2>/dev/null
+  return 1
+}
+
+# THE HANDOFF, READ BACK (wave-34 T6; REQ-14 AC-14.2, D23). `handoff` writes `## Handoff` with its
+# `written:` instant, and a dispatch after it starts an agent that handoff never saw — so the first verb a
+# resumed session runs says whether the bound plan's handoff still stands: STALE, naming every dispatch
+# stamped with that plan (the dispatch wall's `intended` row, `plan=` and `launched_at=`) later than it.
+# Silent when the session is unbound or its plan carries no handoff.
+adopt_handoff_note() {  # <bound plan, raw> <repo root> <state dir>
+  local plan at names="" n=0 pl nm
+  [ -n "$1" ] || return 0
+  plan="$(adopt_abs "$1" "$2")"
+  [ -f "$plan" ] && [ -r "$plan" ] || return 0
+  at="$(awk '/^[ \t]*```/ { f = !f; next } !f && /^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); next }
+             h && /^written: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/ { print substr($0, 10); exit }' "$plan" 2>/dev/null)"
+  [ -n "$at" ] || return 0
+  while IFS="$(printf '\t')" read -r pl nm; do
+    [ -n "$nm" ] || continue
+    [ "$(adopt_plan_key "$pl")" = "$(adopt_plan_key "$1")" ] || continue
+    case ", $names, " in *", $nm, "*) continue ;; esac
+    names="${names:+$names, }$nm"; n=$((n + 1))
+  done <<EOF
+$(for f in "$3"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v at="$at" '
+    function kv(line, key,   i, n, p) {
+      n = split(line, p, "|")
+      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
+      return ""
+    }
+    { while ((getline line < $0) > 0) {
+        if (index(line, "roster-state/") != 1 || kv(line, "status") != "intended") continue
+        l = kv(line, "launched_at"); p = kv(line, "plan")
+        if (p != "" && p != "none" && l > at) print p "\t" kv(line, "name")
+      }
+      close($0) }' 2>/dev/null)
+EOF
+  if [ "$n" -eq 0 ]; then
+    say "handoff written $at — current: no dispatch of this plan since"
+  else
+    say "handoff written $at — STALE: $n dispatch(es) of this plan since ($(clean "$names")); rewrite it: bash ${HOOK_DIR}/session-poker.sh handoff"
+  fi
+}
+
 # THE ADOPTED ROW — the verb's one write, and the second half of the B-1 cure. What it
 # records is an ownership fact, and each field is there because a named reader asks for it:
 #
@@ -5796,6 +5931,32 @@ case "$VERB" in
     # session's files, and every row on a roster shares them.
     ADOPT_SESSION_SWEPT=no
 
+    # THE EVIDENCE, READ ONCE (wave-34 T6; REQ-14 AC-14.1/14.3, D23). Liveness used to be an mtime and
+    # LANDED the deliverable's presence, so a SIGKILLed probe read LANDED and a just-killed one RUNNING
+    # (field report 2026-10-11, item 1). Three inputs replace them: this session's newest ListAgents answer
+    # (lib/agents.sh, less every agent a TaskStop after it ended) — an agent it lists is reachable by name;
+    # the kept transcript reads (`adopt_read_baseline`) — growth across a cadence; and the sweeper's
+    # completion signal — an agent's report, the only thing LANDED is read from. Acks are read from every
+    # ledger in the root (`adopt_cross_acks`).
+    ADOPT_SWEEPER="$HOOK_DIR/session-sweeper.sh"
+    ADOPT_PANEL_RC=4; ADOPT_PANEL=""
+    ADOPT_TR="$(session_transcript "$SESSION_ID")" || ADOPT_TR=""
+    if [ -n "$ADOPT_TR" ]; then
+      _la_ensure "$ADOPT_TR" 2>/dev/null; ADOPT_PANEL_RC=$?
+      if [ "$ADOPT_PANEL_RC" -eq 0 ]; then
+        ADOPT_PANEL="$(printf '%s\n' "$_LA_CACHE_OUT" | ADOPT_GONE="$(live_agents_since_answer "$ADOPT_TR" 2>/dev/null \
+          | awk -F'\t' '$1 == "stopped" { print $2 }')" awk -F'|' '
+            BEGIN { n = split(ENVIRON["ADOPT_GONE"], g, "\n"); for (i = 1; i <= n; i++) if (g[i] != "") gone[g[i]] = 1 }
+            $1 != "" && !($1 in gone) { print $1 "|" $3 }')"
+      fi
+    fi
+    ADOPT_READS_FILE="$ADOPT_DIR/adopt-reads.state"
+    ADOPT_READS_OLD=""
+    [ -f "$ADOPT_READS_FILE" ] && [ ! -L "$ADOPT_READS_FILE" ] && ADOPT_READS_OLD="$(cat "$ADOPT_READS_FILE" 2>/dev/null)"
+    ADOPT_READS_NEW=""
+    ADOPT_XACKS="$(adopt_cross_acks "$ADOPT_DIR")"
+    adopt_handoff_note "$ADOPT_OWN_PLAN" "$REPO_REAL" "$ADOPT_DIR"
+
     for ADOPT_RF in "$ADOPT_DIR"/roster-*.state; do
       [ -f "$ADOPT_RF" ] || continue
       # Symlinks are not followed, the same posture every other .bionic/tmp reader takes.
@@ -5822,6 +5983,7 @@ case "$VERB" in
       # Resolved ONCE per predecessor session, not once per row: the walk is the same for
       # every agent that session launched.
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
+      ADOPT_VERDICTS=""; ADOPT_VERDICTS_READ=no
 
       while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER \
                             RFILES RSALLOW RSSRC RREX RDONE RLON RLRED RREVID RLROW; do
@@ -5866,6 +6028,8 @@ case "$VERB" in
             ADOPT_ROW_CLOSED=yes
           fi
         fi
+        [ "$ADOPT_ROW_CLOSED" = no ] && [ -z "$ADOPT_ROW_UNREADABLE" ] \
+          && adopt_acked_elsewhere "$ADOPT_XACKS" "$OSID" "$RNAME" "$RID" "$RLAUNCH" && ADOPT_ROW_CLOSED=yes
         if [ "$ADOPT_ROW_CLOSED" = yes ]; then
           ADOPT_CLOSED=$((ADOPT_CLOSED + 1))
           continue
@@ -6016,17 +6180,75 @@ case "$VERB" in
         fi
         [ "$(observe_class)" = alive ] && LIVE=yes
 
+        # ---- the evidence (wave-34 T6; REQ-14 AC-14.1, D23)
+        #
+        # THE REPORT: the sweeper's verdict on the launching session's roster, MET with a completion
+        # signal it actually read (`said=`). Asked once per roster, and only of a roster with a row
+        # whose deliverable is on disk.
+        REPORTED=no
+        if [ -n "$RID" ] && [ "$DELIV_PRESENT" = yes ]; then
+          if [ "$ADOPT_VERDICTS_READ" = no ]; then
+            ADOPT_VERDICTS_READ=yes
+            [ -f "$ADOPT_SWEEPER" ] && ADOPT_VERDICTS="$( cd "$REPO_REAL" 2>/dev/null \
+              && CLAUDE_CODE_SESSION_ID="$OSID" bash "$ADOPT_SWEEPER" verdict 2>/dev/null )"
+          fi
+          printf '%s\n' "$ADOPT_VERDICTS" | awk -v k="|name=$(clean "$RNAME")|" \
+            'index($0, "landing-verdict/v1|") == 1 && index($0, k) && index($0, "|state=MET|") && index($0, "said=") { f = 1 } END { exit !f }' \
+            && REPORTED=yes
+        fi
+        # REACHABLE BY NAME: this session's fresh answer lists it, and with what status.
+        PANEL_ST=""
+        [ -n "$RID" ] && [ "$ADOPT_PANEL_RC" -eq 0 ] \
+          && PANEL_ST="$(printf '%s\n' "$ADOPT_PANEL" | awk -F'|' -v n="$(clean "$RNAME")" '$1 == n { s = $2 } END { print s }')"
+        # GROWTH: the newest kept read at least one cadence old, against this one.
+        GREW=""; TX_SIZE=""; BASE_LINE=""
+        if [ "$TX_PRESENT" = yes ]; then
+          TX_SIZE="$(stat -f %z "$TX" 2>/dev/null || stat -c %s "$TX" 2>/dev/null)"
+          case "$TX_SIZE" in ''|*[!0-9]*) TX_SIZE="" ;; esac
+        fi
+        if [ -n "$TX_SIZE" ]; then
+          BASE_LINE="$(adopt_read_baseline "$ADOPT_READS_OLD" "$RID" $(( ADOPT_NOW - OBS_CADENCE_S )))"
+          if [ -n "$BASE_LINE" ]; then
+            GREW=no; [ "$TX_SIZE" -gt "${BASE_LINE%% *}" ] && GREW=yes
+          fi
+          ADOPT_READS_NEW="${ADOPT_READS_NEW}${ADOPT_READS_NEW:+
+}${ADOPT_READS_SCHEMA}|id=${RID}|size=${TX_SIZE}|epoch=${ADOPT_NOW}"
+        fi
+
         if [ -z "$RID" ]; then
           VERDICT=UNADDRESSABLE
         elif [ -n "$RWAIVER" ]; then
           VERDICT=WAIVED
-        elif [ "$DELIV_PRESENT" = yes ]; then
+        elif [ "$DELIV_PRESENT" = yes ] && [ "$REPORTED" = yes ]; then
           VERDICT=LANDED
-        elif [ "$LIVE" = yes ]; then
+        elif [ -n "$PANEL_ST" ] && [ "$PANEL_ST" != "$_LA_ROW_CLOSED_STATUS" ]; then
           VERDICT=RUNNING
+        elif [ "$GREW" = yes ]; then
+          VERDICT=RUNNING
+        elif [ -n "$PANEL_ST" ]; then
+          VERDICT=IDLE
+        elif [ "$GREW" = no ]; then
+          VERDICT=SILENT
+        elif [ "$LIVE" = yes ]; then
+          VERDICT=UNCONFIRMED
         else
           VERDICT=SILENT
         fi
+        # THE SENTENCE BEHIND THE WORD, printed under the row: which evidence decided it.
+        case "$ADOPT_PANEL_RC" in
+          0) PANEL_WORDS="not on this session's fresh ListAgents answer" ;;
+          *) PANEL_WORDS="this session has no fresh ListAgents answer to find it on" ;;
+        esac
+        case "$VERDICT" in
+          LANDED)  EVIDENCE="its report is on record, beside the deliverable" ;;
+          RUNNING) if [ -n "$PANEL_ST" ]; then EVIDENCE="on this session's fresh ListAgents answer, $PANEL_ST"
+                   else EVIDENCE="its transcript grew from ${BASE_LINE%% *} to $TX_SIZE bytes since a read $(( ADOPT_NOW - ${BASE_LINE##* } ))s ago"; fi ;;
+          IDLE)    EVIDENCE="on this session's fresh ListAgents answer, idle: it finished its turn with no report on record — message it" ;;
+          UNCONFIRMED) EVIDENCE="written within its cadence, but $PANEL_WORDS and no read a cadence old to compare — run ListAgents, or adopt again after ${OBS_CADENCE_S}s" ;;
+          SILENT)  if [ "$GREW" = no ]; then EVIDENCE="no growth since a read $(( ADOPT_NOW - ${BASE_LINE##* } ))s ago, and $PANEL_WORDS"
+                   else EVIDENCE="nothing written within its cadence, and $PANEL_WORDS"; fi ;;
+          *)       EVIDENCE="" ;;
+        esac
 
         # ---- WHOSE RUN IS THIS ROW? (AC-2)
         #
@@ -6222,6 +6444,7 @@ case "$VERB" in
           printf '                dispatching, or the same thing happens again.\n'
         fi
         printf '  launched    : %s\n' "${RLAUNCH:-unknown}"
+        [ -z "$EVIDENCE" ] || printf '  evidence    : %s\n' "$EVIDENCE"
         # THE ROW'S RUN (wave-30 T12; REQ-3 AC-3.5). A row whose agent started a detached suite run
         # (booked.sh --detach) carries its record; the run outlives the session that started it, so
         # the successor is told what it is doing: RUNNING with its pid and age, FINISHED with its
@@ -6258,6 +6481,11 @@ $ADOPT_OUT
 EOF
     done
 
+    # THE READS ARE KEPT BY THE WRITING VERB ONLY; `--report-only` writes nothing.
+    if [ "$ADOPT_REPORT_ONLY" != yes ] && ! adopt_reads_write "$ADOPT_READS_FILE" "$ADOPT_READS_NEW" "$ADOPT_NOW"; then
+      die "WARN — the transcript reads could not be kept in $ADOPT_READS_FILE; the next adopt has no read to judge growth against."
+    fi
+
     # THE TWO NEW COUNTERS ARE TRAILING AND ADDITIVE (REQ-9 AC-9.1/9.2). A row this verb
     # dropped is invisible by design — that is the fix — so the COUNT of what was dropped is
     # on the line that answers for the run, or the drop could not be told from a walk that
@@ -6270,7 +6498,7 @@ EOF
     # SAID ONCE, AND ONLY WHEN THERE IS SOMETHING TO SAY. An operator who expected a
     # predecessor's rows and was shown none is owed the reason.
     [ "$ADOPT_CLOSED" -gt 0 ] \
-      && say "$ADOPT_CLOSED row(s) skipped: their run is closed, or their session is dead and its state files are already sweepable — there is nothing left to take over."
+      && say "$ADOPT_CLOSED row(s) skipped: their run is closed, their session is dead and its state files are already sweepable, or an ack taken in another session closed them — there is nothing left to take over."
     [ "$ADOPT_UNREADABLE" -gt 0 ] \
       && say "$ADOPT_UNREADABLE row(s) UNREADABLE: their plan is there and cannot be read, so they are neither adopted nor counted closed — restore read access and re-run adopt."
     [ "$ADOPT_DUPES" -gt 0 ] \
@@ -8680,15 +8908,61 @@ EOF
         last = "kind=" PROOF_KIND " head=" PROOF_HEAD (at != "" ? " at=" at : "") }
       END { print last }' "$PV_PLAN")"
     HO_RF="$PV_REPO/.bionic/tmp/roster-$(session_id).state"
-    HO_AGENTS=""; HO_N_AG=0
+    # THE LIVE AGENTS ARE THE HARNESS'S, NOT THE ROSTER'S (wave-34 T6; REQ-14 AC-14.2, D23). The roster
+    # records that a dispatch happened, never that an agent is alive, and reading its open rows listed two
+    # researchers as live after TaskStop (field report 2026-10-11, item 2). So the list is the newest
+    # ListAgents answer in this session's transcript (lib/agents.sh, the one parser of it): every agent it
+    # names that is not `idle` — the one word the harness uses for "finished its turn", the rule
+    # `live_row_open` keeps — less every agent a TaskStop after the answer ended. An answer a later
+    # dispatch outdates, a stale one, or none at all cannot say who is live: the roster's open rows are
+    # listed in its place, marked UNVERIFIED, and nothing reads as safe.
+    HO_TR="$(session_transcript "$(session_id)")" || HO_TR=""
+    HO_LRC=4; HO_SET=""; HO_SINCE=""
+    if [ -n "$HO_TR" ]; then
+      _la_ensure "$HO_TR" 2>/dev/null; HO_LRC=$?
+      HO_SET="$_LA_CACHE_OUT"
+      [ "$HO_LRC" -ne 0 ] || HO_SINCE="$(live_agents_since_answer "$HO_TR" 2>/dev/null)"
+    fi
+    HO_WHY=""
+    case "$HO_LRC" in
+      0) HO_DISP="$(printf '%s\n' "$HO_SINCE" | awk -F'\t' '$1 == "dispatched" { print $2; exit }')"
+         [ -z "$HO_DISP" ] || HO_WHY="a dispatch at $HO_DISP postdates the newest ListAgents answer" ;;
+      3) HO_WHY="the newest ListAgents answer predates the last prompt" ;;
+      *) HO_WHY="no ListAgents answer in this session's transcript" ;;
+    esac
+    if [ -z "$HO_WHY" ]; then
+      HO_NAMES="$(printf '%s\n' "$HO_SET" | HO_GONE="$(printf '%s\n' "$HO_SINCE" | awk -F'\t' '$1 == "stopped" { print $2 }')" \
+        awk -F'|' -v idle="$_LA_ROW_CLOSED_STATUS" '
+          BEGIN { n = split(ENVIRON["HO_GONE"], g, "\n"); for (i = 1; i <= n; i++) if (g[i] != "") gone[g[i]] = 1 }
+          $1 != "" && $3 != idle && !($1 in gone) && !($1 in seen) { seen[$1] = 1; print $1 }')"
+    else
+      HO_NAMES="$(roster_open_names "$HO_RF" "$PV_REPO/.bionic/tmp/sweeper-$(session_id).state" "$(session_id)")"
+    fi
+    HO_AGENTS=""; HO_N_AG=0; HO_LIST=""
     while IFS= read -r HO_NAME; do
       [ -n "$HO_NAME" ] || continue
       HO_ST="no run"
       if run_load_row "$(run_row_of "$HO_RF" "$HO_NAME")" "$HO_RF"; then run_read; HO_ST="$(run_state_words)"; fi
       HO_AGENTS="${HO_AGENTS:+$HO_AGENTS
 }  - $(clean "$HO_NAME") · $HO_ST"
+      HO_LIST="${HO_LIST:+$HO_LIST, }$(clean "$HO_NAME")"
       HO_N_AG=$((HO_N_AG + 1))
-    done <<< "$(roster_open_names "$HO_RF" "$PV_REPO/.bionic/tmp/sweeper-$(session_id).state" "$(session_id)")"
+    done <<< "$HO_NAMES"
+    # THE TWO SAFETY LINES. Exiting ends every live agent; a `/clear` does not — the agents live on into
+    # the new session — but it SIGKILLs the shell command a writer is running (exit 137), so it is the
+    # weaker line and is safe only between commands. Unverified is never safe.
+    HO_QUAL=""
+    if [ -n "$HO_WHY" ]; then
+      HO_QUAL=", UNVERIFIED — the roster's open rows, which may include stopped agents"
+      HO_EXIT="no — unverified: $HO_WHY; run ListAgents, then handoff again"
+      HO_CLEAR="no — unverified, for the same reason"
+    elif [ "$HO_N_AG" -gt 0 ]; then
+      HO_EXIT="no — $HO_N_AG writer(s) live: $HO_LIST — exiting ends them"
+      HO_CLEAR="only between commands — a /clear kills the shell command a live writer is running (exit 137); the writers live on into the new session"
+    else
+      HO_EXIT="yes — the harness lists no writer live"
+      HO_CLEAR="yes"
+    fi
     HO_BLOCK="written: $HO_NOW
 - heads: $HO_HEADS
 - open rows ($HO_N_ROWS):"
@@ -8696,10 +8970,12 @@ EOF
 $(printf '%s\n' "$HO_ROWS" | sed 's/^/  - /')"; fi
     HO_BLOCK="$HO_BLOCK
 - last landed: ${HO_LANDED:-none yet}
-- live agents ($HO_N_AG):"
+- live agents ($HO_N_AG)$HO_QUAL:"
     if [ -n "$HO_AGENTS" ]; then HO_BLOCK="$HO_BLOCK
 $HO_AGENTS"; fi
     HO_BLOCK="$HO_BLOCK
+- safe to exit: $HO_EXIT
+- safe to /clear: $HO_CLEAR
 - last proof: ${HO_PROOF:-none yet}"
     PV_RC=0
     HO_BLOCK="$HO_BLOCK" awk '
