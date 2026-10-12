@@ -1266,19 +1266,23 @@ expect_eq "W5e an agent's door call naming a solo suite is wrapped with --runner
 # the wall reads the command's leading literal `cd` segments up to the first suite segment —
 # the same walk that finds a solo target — and hands the shim `--stamp-dir <where they lead>`.
 # A `cd` the wall cannot read as a literal, or one whose reach it cannot be sure of (a
-# subshell, a pipe, a background job, `pushd`), gives no option at all: the shim then stamps
-# its own directory, as before, never a guessed one.
+# subshell, a pipe, a background job, `pushd`), gives `--unplaced` (wave-35 T6; D14, Δ7): the
+# shim then writes no stamp and says the run did not count, never a stamp in its own directory
+# (which, in 1.17.0, put a writer tree's red run on the main head as a clean record). With no
+# move at all ahead of the suite there is no option, and the shim stamps where it stands.
 W10_ABS="$SANDBOX/trees/t1"
 # The trees these rows `cd` into are projects with the runner's door (wave-28 T54): the wall looks for
 # it in the tree the shim stamps, and a tree with none reads `tests/run.sh --only` as the full tree.
 for _w10_d in "$W10_ABS" "$RW/.worktrees/t1" "$SANDBOX/a tree"; do
   mkdir -p "$_w10_d/tests"; printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\ncase "${1:-}" in --only) shift ;; esac\n' > "$_w10_d/tests/run.sh"
 done
-w10() {  # <label> <command> <expected --stamp-dir value, or "" for none> [<expected --suites word; default t.test.sh>]
+w10() {  # <label> <command> <expected --stamp-dir value; "" for none; - for --unplaced> [<expected --suites word; default t.test.sh>]
   guarded "$RW" "$2"
   expect_eq "W10$1 [$2] is allowed" "0" "$ST"
   expect_nonempty "W10$1 …and wrapped" "$WRAP"
-  if [ -n "$3" ]; then
+  if [ "$3" = - ]; then
+    expect_eq "W10$1 …with --unplaced" "bash $SHIM --shell $WSH --agent w-wrap $(wmode) --unplaced --suites ${4:-t.test.sh --runner} -- $(sq "$2")" "$WRAP"
+  elif [ -n "$3" ]; then
     _wall_q="$3"; case "$3" in *' '*) _wall_q="$(sq "$3")" ;; esac
     expect_eq "W10$1 …with --stamp-dir $3" \
       "bash $SHIM --shell $WSH --agent w-wrap $(wmode) --stamp-dir $_wall_q --suites ${4:-t.test.sh --runner} -- $(sq "$2")" "$WRAP"
@@ -1296,21 +1300,21 @@ w10 f 'tests/run.sh --only t.test.sh' ""
 w10 g "cd $W10_ABS || exit 1; set -o pipefail; tests/run.sh --only t.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" "$W10_ABS"
 w10 h "{ cd $W10_ABS || exit 1; tests/run.sh --only t.test.sh; }" "$W10_ABS"
 w10 i "cd $W10_ABS || exit 1; { tests/run.sh --only t.test.sh; echo \"rc=\$?\"; } > /dev/null 2>&1" "$W10_ABS"
-# No sure reading: each of these stamps the shim's own directory, as before T56.
-w10 j 'cd "$T" || exit 1; tests/run.sh --only t.test.sh' ""
-w10 k "(cd $W10_ABS; true); tests/run.sh --only t.test.sh" ""
-w10 l "true | cd $W10_ABS; tests/run.sh --only t.test.sh" ""
+# No sure reading: each of these is unplaced (wave-35 T6), and the shim stamps nothing.
+w10 j 'cd "$T" || exit 1; tests/run.sh --only t.test.sh' -
+w10 k "(cd $W10_ABS; true); tests/run.sh --only t.test.sh" -
+w10 l "true | cd $W10_ABS; tests/run.sh --only t.test.sh" -
 # (A `cd` the shell backgrounds, `cd x & bash tests/…`, never reaches the wrap: ARM 1 refuses it.)
-w10 m "true || cd $W10_ABS; tests/run.sh --only t.test.sh" ""
-w10 n "pushd $W10_ABS && tests/run.sh --only t.test.sh" ""
-w10 o "cd $SANDBOX && pushd trees && tests/run.sh --only t.test.sh" ""
-w10 p "if cd $W10_ABS; then tests/run.sh --only t.test.sh; fi" ""
-w10 q 'cd $(git rev-parse --show-toplevel) && tests/run.sh --only t.test.sh' ""
-w10 r "cd -P $W10_ABS && tests/run.sh --only t.test.sh" ""
+w10 m "true || cd $W10_ABS; tests/run.sh --only t.test.sh" -
+w10 n "pushd $W10_ABS && tests/run.sh --only t.test.sh" -
+w10 o "cd $SANDBOX && pushd trees && tests/run.sh --only t.test.sh" -
+w10 p "if cd $W10_ABS; then tests/run.sh --only t.test.sh; fi" -
+w10 q 'cd $(git rev-parse --show-toplevel) && tests/run.sh --only t.test.sh' -
+w10 r "cd -P $W10_ABS && tests/run.sh --only t.test.sh" -
 # A cd the wall cannot read, then an ABSOLUTE one: the absolute one decides where the suite runs.
 w10 s "cd \"\$T\"; cd $W10_ABS && tests/run.sh --only t.test.sh" "$W10_ABS"
 # …but a RELATIVE one after it does not: relative to an unknown place is unknown.
-w10 t 'cd "$T"; cd t1 && tests/run.sh --only t.test.sh' ""
+w10 t 'cd "$T"; cd t1 && tests/run.sh --only t.test.sh' -
 # Only the cd segments AHEAD of the first suite count. (Two runs joined by `;` are named `?`, T63.)
 w10 u "tests/run.sh --only t.test.sh; cd $W10_ABS; tests/run.sh --only t.test.sh" "" "'?'"
 # A cd behind `&&` runs whenever the suite does (a failed step before it stops both), so it counts.
