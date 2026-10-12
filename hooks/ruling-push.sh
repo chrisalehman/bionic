@@ -66,8 +66,6 @@ _rp_name=""
 if _rp_row="$(roster_row_for_id "$_rp_roster" "$_rp_aid")"; then
   _rp_name="$(printf '%s\n' "$_rp_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
 fi
-[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && _rp_plugin="$CLAUDE_PLUGIN_ROOT" \
-  || _rp_plugin="$(cd "${0%/*}/.." 2>/dev/null && pwd -P)"
 [ -n "$_rp_call" ] || _rp_call="pid$$-$RANDOM"
 # A ruling already shown (acknowledged, or printed by a guard) is read, so it is never pushed.
 _rp_ctx=""
@@ -76,7 +74,7 @@ while IFS="$RULING_US" read -r _rp_id _rp_w _rp_rec _rp_p _rp_c _rp_s _rp_b _rp_
   [ -n "$_rp_name" ] && [ "$_rp_w" = "$_rp_name" ] || continue
   ruling_push_claim "$_rp_roster" "$_rp_id" "$_rp_w" "$_rp_call" || continue
   _rp_ctx="${_rp_ctx:+$_rp_ctx
-}$(ruling_render "$_rp_id" "$_rp_t" "$_rp_plugin")"
+}$(ruling_render "$_rp_id" "$_rp_t")"
 done <<RP_FOLD
 $(ruling_fold "$_rp_roster")
 RP_FOLD
