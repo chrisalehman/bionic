@@ -403,10 +403,10 @@ expect_eq "C4a …on the ledger again" "1" "$(nt_owed "$RG" owed_list | cut -f1 
 # takes to delivered): its builders are read out of that file by name, so this suite holds no
 # second copy of the fixture and a builder that changes there changes here.
 CO_TESTS="$(dirname "$0")/close-out.test.sh"
-nt_import_fn() {  # <name> -> the function, defined here, read out of close-out.test.sh
-  local body
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$CO_TESTS")"
-  if [ -z "$body" ]; then echo "nt_import_fn: no $1 in $CO_TESTS" >&2; return 1; fi
+nt_import_fn() {  # <name> [<file>] -> the function, defined here, read out of <file> (close-out.test.sh)
+  local body from="${2:-$CO_TESTS}"
+  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$from")"
+  if [ -z "$body" ]; then echo "nt_import_fn: no $1 in $from" >&2; return 1; fi
   eval "$body"
 }
 REPO_ROOT="$BIONIC_SCRIPTS_DIR"
@@ -560,6 +560,273 @@ expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval
 expect_eq "AK6d a second refused dispatch on the same approval opens nothing new" "1" \
   "$(/usr/bin/grep -c '|key=approve:release|' "$RKP/.bionic/tmp/owed-$SID.state" 2>/dev/null | tr -d ' ')"
 
+# THE COMMIT WALL'S ASKS (wave-34 T5; REQ-4 AC-4.1, AC-4.2; D14). From Step 6 the evidence gate refuses a commit for
+# a question whose newest reading failed, and the matrix arm refuses for a row only the person can let go: a live-tier
+# field written n/a, or an auditor's finding a T4 confirmation does not overturn. Each asks the person for a waiver.
+# The gate is a pure predicate (the freeze, .claude/rules/hook-authoring.md), so it hands each ask back beside its
+# refusal and hooks/bash-walls.sh, the hook that calls it, opens the item, keyed as the answer verb closes it:
+# `waive:<question>` (`waive`), `waive-row:<AC>` (`waive-row`). A question with no reading at all asks the run for a
+# reading first, not the person, and opens nothing (the tick's own rule, T35's A-T35-4).
+# FIXTURE FIDELITY: bash-walls.test.sh's §EG-6 world, its prelude's builders read out of that file by name (a plan the
+# real gate admits at current: 6 bar the readings; the reading lines in lib/proof.sh's writer's shape); the real hook.
+NT_BW_PRELUDE="$(dirname "$0")/bash-walls.prelude.sh"
+NT_IMPORT_MISSING=""
+for _f in mk_repo bw_door eg6_plan eg6_reading; do
+  nt_import_fn "$_f" "$NT_BW_PRELUDE" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
+done
+expect_eq "AK-6 precondition: the §EG-6 builders were all read out of bash-walls.prelude.sh" "" "$NT_IMPORT_MISSING"
+EG6_LIB="$NT_LIB/proof.sh"
+CW_HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
+RCW="$(mk_repo nt-ask-gate)"
+H_EG6="$(git -C "$RCW" rev-parse HEAD)"
+cw_commit() {  # <repo> <plan text> -> CW_ERR, CW_RC: a main-checkout `git commit` through the hook, the session bound to the plan
+  printf '%s\n' "$2" > "$1/.bionic/docs/plans/active.md"
+  bound_marker "$1" "$SID" "$1/.bionic/docs/plans/active.md" >/dev/null 2>&1
+  CW_ERR="$(jq -nc --arg s "$SID" --arg c "$1" \
+      '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"git commit -m x"},tool_use_id:"toolu_nt_ask"}' \
+    | ( cd "$1" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$CW_HOOK" 2>&1 >/dev/null ))"
+  CW_RC=$?
+}
+cw_open() { nt_owed "$1" owed_list | cut -f1 | sort | paste -sd, -; }  # <repo> -> the open keys, sorted, comma-joined
+CW_READ="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial pass)
+$(eg6_reading "$H_EG6" structure pass)"
+cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_READ")"
+expect_eq "AK-6 precondition: the plan with a passing reading of each question is admitted (exit 0)" "0" "$CW_RC"
+expect_eq "AK-6p …and opens nothing" "" "$(cw_open "$RCW")"
+CW_FAIL="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure fail record/w27/structure-new.md)"
+cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
+expect_eq "AK-6a precondition: no adversarial reading and a failing structure one: refused (exit 2)" "2" "$CW_RC"
+expect_contains "AK-6b …naming the failing question" "- structure: the newest reading is result=fail" "$CW_ERR"
+expect_contains "AK-6c …and the absent one" "- adversarial: no reading, and no waiver" "$CW_ERR"
+expect_eq "AK-6 AC-4.1 the question refusal opens waive:structure, the waive verb's key, and nothing for the absent question" \
+  "waive:structure" "$(cw_open "$RCW")"
+expect_contains "AK-6d …carrying the refusal's line for it" "structure: the newest reading is result=fail (evidence=record/w27/structure-new.md)" \
+  "$(nk_reply "$RCW" waive:structure)"
+cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
+expect_eq "AK-6e a second refused commit on the same question opens nothing new" "1" \
+  "$(/usr/bin/grep -c '|key=waive:structure|' "$RCW/.bionic/tmp/owed-$SID.state" 2>/dev/null | tr -d ' ')"
+
+# THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 row whose evidence is n/a is a downgrade
+# only the person makes; a T4 row the user confirmed, under a REFUTED auditor cell, needs the finding settled or the row
+# waived. Each opens `waive-row:<AC>`.
+CW_NA="$(eg6_plan 6 wave "$CW_READ" | sed -e 's/^| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |$/| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |/' \
+  -e 's|^  evidence: record/generic-evidence.md$|  evidence: n/a|')"
+cw_commit "$RCW" "$CW_NA"
+expect_eq "AK-7 precondition: a T3 row whose evidence is n/a is refused (exit 2)" "2" "$CW_RC"
+expect_contains "AK-7a …in the matrix arm's words" "AC-1 calls its evidence evidence n/a" "$CW_ERR"
+expect_eq "AK-7 AC-4.1 the matrix-row ask opens waive-row:AC-1, the waive-row verb's key" \
+  "waive-row:AC-1,waive:structure" "$(cw_open "$RCW")"
+expect_contains "AK-7b …carrying the refusal's line" "AC-1 calls its evidence evidence n/a" "$(nk_reply "$RCW" waive-row:AC-1)"
+CW_T4="$(eg6_plan 6 wave "$CW_READ" | sed -e 's/AC-1/AC-2/g' \
+  -e 's/^| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |$/| AC-2 | T4 | discharged | see AC-2 | REFUTED |/' \
+  | awk '{ print } $0 == "  evidence: record/generic-evidence.md" { print "  user-confirmed: Dana 2026-10-01 the fixture works" }')"
+cw_commit "$RCW" "$CW_T4"
+expect_eq "AK-7c precondition: a user-confirmed T4 row under a REFUTED auditor cell is refused (exit 2)" "2" "$CW_RC"
+expect_contains "AK-7d …naming the auditor's finding" "the auditor's finding on AC-2 stands" "$CW_ERR"
+expect_eq "AK-7e AC-4.1 that ask opens waive-row:AC-2" "waive-row:AC-1,waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
+
+# THE ANSWER CLOSES IT. `waive-row` writes the row's waiver on the person's words and closes `waive-row:<AC>`; the
+# transcript is the CLI's typed-prompt shape (tests/fixtures/transcript-move), under a config dir of the verb's own, so
+# the section's transcript (its planted ListAgents answer) is not the one said.sh reads.
+CW_CFG="$(fake_config_dir nt-asks)"
+jq -cn --arg c "I waive row AC-1, the live check moved to the next wave" --arg s "$SID" \
+  '{type:"user",isSidechain:false,origin:{kind:"human"},promptSource:"typed",message:{role:"user",content:$c},sessionId:$s}' \
+  >> "$CW_CFG/projects/-fixture-project/$SID.jsonl"
+cw_waive_row() {  # <repo> -> RC, OUT: `waive-row AC-1` on the person's words, under the verb's config dir
+  local keep="$CLAUDE_CONFIG_DIR" bound="$POKE_BOUND"
+  export CLAUDE_CONFIG_DIR="$CW_CFG"; POKE_BOUND=180
+  poke "$1" waive-row AC-1 'I waive row AC-1' 'the live check moved to the next wave'
+  export CLAUDE_CONFIG_DIR="$keep"; POKE_BOUND="$bound"
+}
+printf '%s\n' "$CW_NA" > "$RCW/.bionic/docs/plans/active.md"
+cw_waive_row "$RCW"
+expect_eq "AK-8 precondition: waive-row records the person's waiver (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key=waive-row:AC-1|state=closed|by=waive-row|" \
+  "$(cat "$RCW/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
+expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
+
+# WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that
+# needs the person ("fix it, defer it, or waive <question>"); `waive <question>` is that answer for every finding of
+# the question's readings, so it closes them with `waive:<question>`. A finding of another question stays open.
+# FIXTURE FIDELITY: canonical-sdlc-evidence-gate-2.test.sh's §DISPOSITION builders, read out of that file by name
+# (a repository on its working branch, reading records in the reader's shape, their proof lines in lib/proof.sh's).
+NT_EG2="$(dirname "$0")/canonical-sdlc-evidence-gate-2.test.sh"
+NT_IMPORT_MISSING=""
+for _f in fp_repo fp_commit fp_plan_path fp_plan fp_record fp_proved fp_landing; do
+  nt_import_fn "$_f" "$NT_EG2" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
+done
+expect_eq "AK-9 precondition: the §DISPOSITION builders were all read out of canonical-sdlc-evidence-gate-2.test.sh" "" "$NT_IMPORT_MISSING"
+FP_SID="$SID"; FP_LIB="$NT_LIB"; FP_REC="record/wave-01-fixture"
+FP_ROOT="$TMPROOT/nt-findings"; mkdir -p "$FP_ROOT"
+RFW="$(fp_repo findings)"
+FW_B="$(git -C "$RFW" rev-parse HEAD)"
+FW_C1="$(fp_commit "$RFW" a.sh one)"
+fp_record "$RFW" adv.md adversarial fail "${FW_B:0:10}..${FW_C1:0:10}" 'findings: 1' \
+  'finding: 1 S2 on a.sh:1 data lost on a second run' 'shown: 1 bash a.sh; bash a.sh'
+fp_record "$RFW" st.md structure fail "${FW_B:0:10}..${FW_C1:0:10}" 'findings: 2' \
+  'finding: 1 S2 on b.sh:2 a side path loses data' 'shown: 1 bash b.sh --side' \
+  'finding: 2 S1 on b.sh:3 the parser crashes on an empty file' 'shown: 2 bash b.sh < /dev/null'
+fp_plan "$RFW" "${FW_B:0:10}" "$(fp_proved "$FW_C1" adv.md adversarial fail)
+$(fp_proved "$FW_C1" st.md structure fail)" ""
+fp_landing "$RFW" ""
+( cd "$RFW" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RFW" "$SID" "$(fp_plan_path "$RFW")" >/dev/null 2>&1
+FW_KA="finding:record:wave-01-fixture:adv.md:1"
+FW_K1="finding:record:wave-01-fixture:st.md:1"
+FW_K2="finding:record:wave-01-fixture:st.md:2"
+POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+poke "$RFW" disposition
+expect_eq "AK-9 precondition: disposition exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "AK-9a precondition: it opens one item per finding needing the person: two of structure, one of adversarial" \
+  "$FW_KA,$FW_K1,$FW_K2" "$(cw_open "$RFW")"
+poke "$RFW" waive structure 'ship it as it stands'
+POKE_BOUND="$POKE_BOUND_WAS"
+expect_eq "AK-9b precondition: waive records the waiver (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "AK-9 AC-4.2 waiving structure closes both of its finding items; adversarial's stays open" "$FW_KA" "$(cw_open "$RFW")"
+expect_contains "AK-9c …each closed by the waiver" "|key=$FW_K2|state=closed|by=waive|" "$(cat "$RFW/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
+
+# ============================================================
+section "§ASKS mutants: every opener, doctored to open nothing, turns its row red (wave-34 T5; REQ-4 AC-4.5)"
+# ============================================================
+# One copy of the plugin, hooks/ beside scripts/, so a hook's loader and a script's own lib/ find the copy's library
+# first. For each opener, the one call that opens its item is made a no-op (`:` in its place); the copy is shown to
+# parse and to differ from the tree under test, the row's own fixture runs against it, and the reading its row asserts
+# comes back without the item; then the file is restored from the tree. Each mutant row also reads the act that carries
+# the opener (the card's exit, the refusal, the tick's line, the verb's exit), so a copy that died early is not a red.
+NM="$TMPROOT/nt-mutant"; mkdir -p "$NM/hooks"
+cp -R "$BIONIC_HOOKS_DIR/." "$NM/hooks/"
+cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$NM/scripts"
+nt_src() { case "$1" in hooks/*) printf '%s/%s' "$BIONIC_HOOKS_DIR" "${1#hooks/}" ;; *) printf '%s/payload/%s' "$BIONIC_SCRIPTS_DIR" "$1" ;; esac; }
+nt_doctor() {  # <label> <file under the copy> <call word> <anchor> -> the one line carrying both made a no-op, proved
+  local f="$NM/$2" n
+  cp "$(nt_src "$2")" "$f"
+  n="$(awk -v w="$3" -v a="$4" 'index($0, a) && index($0, w) { n++ } END { print n + 0 }' "$f")"
+  W="$3" A="$4" awk 'index($0, ENVIRON["A"]) && (i = index($0, ENVIRON["W"] " ")) { $0 = substr($0, 1, i - 1) ": " substr($0, i + length(ENVIRON["W"]) + 1) } { print }' \
+    "$f" > "$f.mut" && cat "$f.mut" > "$f" && rm -f "$f.mut"
+  expect_eq "$1 the doctored opener is one line" "1" "$n"
+  expect_eq "$1 …the copy parses and differs from the tree's" "0 differs" \
+    "$(bash -n "$f" >/dev/null 2>&1; echo "$?") $(cmp -s "$f" "$(nt_src "$2")" && echo same || echo differs)"
+}
+nt_undo() { cp "$(nt_src "$1")" "$NM/$1"; }  # <file under the copy>
+
+# The commit wall: the hook's one opener, then each ask the gate hands it.
+CW_KEEP="$CW_HOOK"; CW_HOOK="$NM/hooks/bash-walls.sh"
+nt_doctor "MA-1 [bash-walls.sh opener]" hooks/bash-walls.sh owed_open '"$_bw_key"'
+RMA="$(mk_repo nt-mut-hook)"; H_EG6="$(git -C "$RMA" rev-parse HEAD)"
+cw_commit "$RMA" "$(eg6_plan 6 wave "$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial pass)
+$(eg6_reading "$H_EG6" structure fail)")"
+expect_contains "MA-1a the mutant still refuses the failing question" "- structure: the newest reading is result=fail" "$CW_ERR"
+expect_eq "MA-1b AC-4.5 …and AK-6 goes red: no waive:structure item" "" "$(cw_open "$RMA")"
+nt_undo hooks/bash-walls.sh
+nt_doctor "MA-2 [the question's ask]" scripts/lib/walls.sh _eg_owe '"waive:'
+cw_commit "$RMA" "$(eg6_plan 6 wave "$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial pass)
+$(eg6_reading "$H_EG6" structure fail)")"
+expect_contains "MA-2a the mutant still refuses the failing question" "- structure: the newest reading is result=fail" "$CW_ERR"
+expect_eq "MA-2b AC-4.5 …and AK-6 goes red: no waive:structure item" "" "$(cw_open "$RMA")"
+nt_undo scripts/lib/walls.sh
+H_EG6="$(git -C "$RCW" rev-parse HEAD)"
+nt_doctor "MA-3 [the n/a row's ask]" scripts/lib/walls.sh _eg_owe 'calls its ${key} evidence n/a'
+cw_commit "$RMA" "$(printf '%s\n' "$CW_NA" | sed "s/$(git -C "$RCW" rev-parse HEAD)/$(git -C "$RMA" rev-parse HEAD)/g")"
+expect_contains "MA-3a the mutant still refuses the n/a row" "AC-1 calls its evidence evidence n/a" "$CW_ERR"
+expect_eq "MA-3b AC-4.5 …and AK-7 goes red: no waive-row:AC-1 item" "" "$(cw_open "$RMA")"
+nt_undo scripts/lib/walls.sh
+nt_doctor "MA-4 [the auditor finding's ask]" scripts/lib/walls.sh _eg_owe 'finding on ${ac} stands'
+cw_commit "$RMA" "$(printf '%s\n' "$CW_T4" | sed "s/$(git -C "$RCW" rev-parse HEAD)/$(git -C "$RMA" rev-parse HEAD)/g")"
+expect_contains "MA-4a the mutant still refuses the T4 row" "the auditor's finding on AC-2 stands" "$CW_ERR"
+expect_eq "MA-4b AC-4.5 …and AK-7e goes red: no waive-row:AC-2 item" "" "$(cw_open "$RMA")"
+nt_undo scripts/lib/walls.sh
+CW_HOOK="$CW_KEEP"
+
+# The person's other asks: the Step card, the tick's approval WAIT and GATE, the dispatch wall, the disposition, the
+# close's delivery. The poker copy finds the copy's library beside it, as the tree's does.
+POKER_KEEP="$POKER"; POKER="$NM/hooks/session-poker.sh"
+nt_doctor "MA-5 [the tick's approval]" hooks/session-poker.sh owed_open '"approve:$c"'
+RMK="$(nk_world nt-mut-approval)"
+poke_pressure "$RMK" 8192 1.0 tick
+expect_eq "MA-5a the mutant tick still prints the release's WAIT" "poker: WAIT T4 — approval:release" "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T4 ')"
+expect_absent "MA-5b AC-4.5 …and AK2 goes red: no approve:release item" "approve:release" "$(nt_owed "$RMK" owed_list | cut -f1)"
+nt_undo hooks/session-poker.sh
+nt_doctor "MA-6 [the tick's GATE]" hooks/session-poker.sh owed_open '"gate:$k"'
+RMS="$(nt_world nt-mut-gate)"
+gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$RMS")"
+poke "$RMS" tick
+expect_contains "MA-6a the mutant tick still prints the GATE line" "poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$OUT"
+expect_absent "MA-6b AC-4.5 …and S2b goes red: no gate: item" "gate:" "$(nt_owed "$RMS" owed_list | cut -f1)"
+nt_undo hooks/session-poker.sh
+nt_doctor "MA-7 [the disposition's finding]" hooks/session-poker.sh owed_open '"$(finding_owed_key "$DSP_FID")"'
+FP_ROOT="$TMPROOT/nt-mut-findings"; mkdir -p "$FP_ROOT"
+RMF="$(fp_repo findings)"
+cp -R "$RFW/.bionic/docs/." "$RMF/.bionic/docs/"
+( cd "$RMF" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RMF" "$SID" "$(fp_plan_path "$RMF")" >/dev/null 2>&1
+POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+poke "$RMF" disposition
+expect_contains "MA-7a the mutant disposition still renders the open finding" "poker: finding $FP_REC/st.md#2 S1" "$OUT"
+expect_eq "MA-7b AC-4.5 …and AK-9a goes red: no finding: item" "" "$(cw_open "$RMF")"
+nt_undo hooks/session-poker.sh
+
+# The closers: a waive-row that closes nothing, a waive that closes only waive:<q>.
+nt_doctor "MA-8 [waive-row's close]" hooks/session-poker.sh poker_owed_close '"waive-row:'
+RMW="$(mk_repo nt-mut-row)"; H_EG6="$(git -C "$RMW" rev-parse HEAD)"
+cw_commit "$RMW" "$(printf '%s\n' "$CW_NA" | sed "s/$(git -C "$RCW" rev-parse HEAD)/$H_EG6/g")"
+expect_eq "MA-8a precondition: the n/a row's ask is open in the mutant's world" "waive-row:AC-1" "$(cw_open "$RMW")"
+cw_waive_row "$RMW"
+expect_eq "MA-8b the mutant waive-row still records the waiver (exit 0)" "0" "$RC"
+expect_eq "MA-8c AC-4.5 …and AK-8 goes red: the item stays open" "waive-row:AC-1" "$(cw_open "$RMW")"
+nt_undo hooks/session-poker.sh
+nt_doctor "MA-9 [waive's finding close]" hooks/session-poker.sh poker_owed_close '"$2" "$key" "waive"'
+FP_ROOT="$TMPROOT/nt-mut-waive"; mkdir -p "$FP_ROOT"
+RMV="$(fp_repo findings)"
+cp -R "$RFW/.bionic/docs/." "$RMV/.bionic/docs/"
+( cd "$RMV" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RMV" "$SID" "$(fp_plan_path "$RMV")" >/dev/null 2>&1
+poke "$RMV" disposition
+expect_eq "MA-9a precondition: the findings are open in the mutant's world" "$FW_KA,$FW_K1,$FW_K2" "$(cw_open "$RMV")"
+poke "$RMV" waive structure 'ship it as it stands'
+expect_eq "MA-9b the mutant waive still records the waiver (exit 0)" "0" "$RC"
+expect_eq "MA-9c AC-4.5 …and AK-9 goes red: structure's findings stay open" "$FW_KA,$FW_K1,$FW_K2" "$(cw_open "$RMV")"
+nt_undo hooks/session-poker.sh
+POKE_BOUND="$POKE_BOUND_WAS"
+POKER="$POKER_KEEP"
+
+PREFLIGHT_KEEP="$PREFLIGHT"; PREFLIGHT="$NM/hooks/dispatch-preflight.sh"
+nt_doctor "MA-10 [the dispatch wall's approval]" hooks/dispatch-preflight.sh owed_open '"approve:${DP_AW_NAME}"'
+RMP="$(nk_world nt-mut-preflight)"
+poke_bind "$RMP"
+NK_OUT="$( cd "$RMP" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" ANTHROPIC_API_KEY=sk-fixture-marker bash "$PREFLIGHT" <<< "$(printf '%s' "$NK_PAYLOAD" | jq -c --arg c "$RMP" '.cwd = $c')" 2>&1 )"
+expect_contains "MA-10a the mutant wall still refuses the dispatch" "row T4 waits for approval:release" "$NK_OUT"
+expect_eq "MA-10b AC-4.5 …and AK6b goes red: no approve:release item" "" "$(nt_owed "$RMP" owed_list | cut -f1)"
+nt_undo hooks/dispatch-preflight.sh
+PREFLIGHT="$PREFLIGHT_KEEP"
+
+CARD_KEEP="$CARD_SH"; CARD_SH="$NM/scripts/card.sh"
+nt_doctor "MA-11 [the Step card]" scripts/card.sh owed_open '"approve:step$n"'
+RMC="$(nt_run nt-mut-card)"
+nt_card "$RMC" step1 "$(nt_req "$RMC")"
+expect_contains "MA-11a the mutant card still prints its question" 'Do you approve these requirements?' "$NT_OUT"
+expect_eq "MA-11b AC-4.5 …and N1c goes red: no approve:step1 item" "" "$(nt_owed "$RMC" owed_list | cut -f1)"
+nt_undo scripts/card.sh
+CARD_SH="$CARD_KEEP"
+
+SCRIPT_KEEP="$SCRIPT"; SCRIPT="$NM/scripts/close-out.sh"
+nt_doctor "MA-12 [the close's delivery]" scripts/close-out.sh owed_open '"delivered: $WAVE_SLUG"'
+channel_on "$SB_HOME/.claude"
+: > "$NT_CALLS"
+PMD="$(mk_fixture nt-mut-deliver)"; advance_to "$PMD" 8
+run_close_as "$CO_SIDA" "$PMD" run
+expect_contains "MA-12a the mutant close still delivers" "step9: delivered:" "$CO_OUT"
+expect_eq "MA-12b AC-4.5 …and D3 goes red: no delivery item, so nothing sent" "0" "$(nt_calls)"
+nt_undo scripts/close-out.sh
+channel_off "$SB_HOME/.claude"
+SCRIPT="$SCRIPT_KEEP"
+
 # ============================================================
 section "§QUIET: progress never sends — a landing, a dispatch, a quiet tick (AC-2.4)"
 # ============================================================
@@ -689,6 +956,45 @@ expect_eq "K2b …and the item stays marked sent" "" "$(nt_owed "$RF" owed_unsen
 nt_owed "$RF" owed_send
 nt_stop "$RF"
 expect_eq "K3 the next caller and the next Stop send it no second time" "6" "$(nt_calls)"
+# A LATE TIMEOUT IS A FAILED SEND (wave-34 T5; REQ-4 AC-4.4, D10 "1"). curl's --max-time can expire after ntfy has
+# accepted the message (exit 28): the call reached the service and the sender cannot tell whether it landed. It is
+# retried like any failure, so the person is told at least once, and may be told twice; never zero times.
+nt_owed "$RF" owed_open approve:late "approval: late" 'Late?' >/dev/null
+expect_eq "A5k precondition: a third item is owed, unsent" "approve:late" "$(nt_owed "$RF" owed_unsent)"
+export NT_CURL_RC=28
+nt_stop "$RF"
+expect_eq "A5k AC-4.4 the Stop made the call, which the stub accepted and then timed out on (exit 28)" "7" "$(nt_calls)"
+expect_contains "A5k1 …for that item" "title=bionic-fixture approval: late|" "$(nt_last)"
+expect_eq "A5k2 …and the item is unsent again: a timeout after acceptance proves no delivery" "approve:late" \
+  "$(nt_owed "$RF" owed_unsent)"
+export NT_CURL_RC=0
+nt_stop "$RF"
+expect_eq "A5k3 AC-4.4 the next Stop sends it again: at least once" "8" "$(nt_calls)"
+expect_contains "A5k4 …the same item" "title=bionic-fixture approval: late|" "$(nt_last)"
+expect_eq "A5k5 …and only then is it marked sent" "" "$(nt_owed "$RF" owed_unsent)"
+# THE MUTANT: the retry removed (the unmark after a failed send made a no-op, in the §ASKS mutants' copy). The same
+# late timeout then leaves the item marked sent, and nothing sends it again: A5k2 and A5k3 go red.
+nt_doctor "MA-13 [the retry]" scripts/lib/owed.sh owed_unmark_sent '"$key"'
+nt_owed "$RF" owed_open approve:late2 "approval: late2" 'Late again?' >/dev/null
+NT_LIB_KEEP="$NT_LIB"; NT_LIB="$NM/scripts/lib"
+export NT_CURL_RC=28
+nt_owed "$RF" owed_send
+export NT_CURL_RC=0
+expect_eq "MA-13a the mutant made the late call" "9" "$(nt_calls)"
+expect_eq "MA-13b AC-4.4 …and A5k2 goes red: the item stays marked sent" "" "$(nt_owed "$RF" owed_unsent)"
+nt_owed "$RF" owed_send
+expect_eq "MA-13c …so A5k3 goes red: nothing sends it again" "9" "$(nt_calls)"
+NT_LIB="$NT_LIB_KEEP"
+nt_undo scripts/lib/owed.sh
+nt_owed "$RF" owed_close approve:late2 fixture >/dev/null
+# THE TEXTS SAY IT (AC-4.4, a criterion about the wording itself): the ledger and the sender promise at least once,
+# and no sentence of either promises a single send. The reader finds the promise sentences (the positive), then the filter.
+NT_ONCE_RE='(sends?|sent|send each)[^.;]* once'
+nt_sentences() { sed -e 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$1" | tr '\n' ' ' | tr '.' '\n'; }  # <file> -> one sentence a line
+NT_ONCE="$( { nt_sentences "$NT_LIB/owed.sh"; nt_sentences "$NT_LIB/notify.sh"; } | /usr/bin/grep -E -i "$NT_ONCE_RE")"
+expect_contains "A5l AC-4.4 owed.sh and notify.sh say a notice is sent at least once (the reader finds the lines)" "at least once" "$NT_ONCE"
+expect_eq "A5m …and no sentence of either promises one send" "" "$(printf '%s\n' "$NT_ONCE" | /usr/bin/grep -v 'at least once')"
+expect_contains "A5n …each file in its own words: notify.sh" "at least once" "$(/usr/bin/grep -i 'at least once' "$NT_LIB/notify.sh")"
 export NT_CURL_RC=7
 nt_card "$RF" step1 "$(nt_req "$RF")"
 expect_eq "A6 AC-2.5 card.sh exits 0 with a failing channel" "0" "$NT_RC"
@@ -794,5 +1100,23 @@ expect_nonempty "SD2 with no channel the row is still there" "$NSU_DOC_OFF"
 expect_contains "SD2a …saying it is not set, and where it is offered" "not set" "$NSU_DOC_OFF"
 expect_contains "SD2b …through setup" "/bionic:setup" "$NSU_DOC_OFF"
 expect_eq "SD2c doctor sent nothing" "0" "$(nt_calls)"
+
+# ============================================================
+section "§DOCTOR: a topic in cron.env with no channel file is named, with the setup item that writes it (wave-34 T5; REQ-4 AC-4.6)"
+# ============================================================
+# The walk's machine had BIONIC_NTFY_TOPIC in cron.env and no channel file, so every send was a no-op while the run
+# believed it could reach the person. Doctor says so, and names the setup item that writes the channel file.
+rm -rf "$NSU_CH/bionic"; cron_env_only "$NSU_CH"
+expect_eq "DC0 precondition: notify_declared returns 1 on this machine (no channel file)" "1" \
+  "$(env -i HOME="$NSU_HOME" PATH="$NSU_BIN" bash -c '. "$1/notify.sh"; notify_declared; echo "$?"' _ "$NT_LIB")"
+: > "$NT_CALLS"
+nsu "" "$NSU_DOCTOR"
+DC_ROW="$(printf '%s\n' "$NSU_OUT" | /usr/bin/grep -A1 'notify channel')"  # the row and the line under it
+expect_eq "DC1 doctor prints the notify channel row and the line under it (the extractor reads two)" "2" "$(printf '%s\n' "$DC_ROW" | /usr/bin/grep -c .)"
+expect_contains "DC1a AC-4.6 …saying cron.env carries the topic" "BIONIC_NTFY_TOPIC is in cron.env" "$DC_ROW"
+expect_contains "DC1b …that no channel file exists, so nothing is sent" "no channel file exists, so nothing is sent" "$DC_ROW"
+expect_contains "DC1c …naming the setup item that writes it" "/bionic:setup's notify item" "$(printf '%s\n' "$DC_ROW" | /usr/bin/grep 'notify channel')"
+expect_absent "DC1d …and never as declared (DC1a reads the same row)" "reads BIONIC_NTFY_TOPIC from" "$DC_ROW"
+expect_eq "DC1e doctor sent nothing" "0" "$(nt_calls)"
 
 finish
