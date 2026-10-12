@@ -174,7 +174,7 @@ and one set of rows was deleted with the mechanism it tested.
 | `T34-guards.md` | notify A5e asserted that a failed send was not retried (3 calls); it now asserts the retry (4), with A5f to A5j and K1 to K3 beside it |
 | `T33-container.md`, `T36-carry.md` | gate H.10's mutation anchor follows the line it mutates; cmd-class AC-24 (twice) and AC-16 now assert the carried command exactly, with stderr empty and stdout only the rewrite |
 
-Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck: 19 here, against 18 carried in the 1.15.0 block (its 19th bullet was struck). The block stood at 17 before the four review fix rows; those rows left two more limits that a user of any project can meet, and they are counted. The count does not fall below 1.15.0's:
+Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck: 20 here, against 18 carried in the 1.15.0 block (its 19th bullet was struck). The block stood at 17 before the four review fix rows; those rows and the critic's re-read of them left three more limits that a user of any project can meet, and they are counted. The count does not fall below 1.15.0's:
 
 - Known limit: the 1.13.0 limits stand as written there, as triaged in `limits-1.13.0-triage.md`: 66 still
   true, 5 closed (32, 33, 46, 49, 60), none fixed. Sixty-three are carried by the next wave's charter;
@@ -243,6 +243,12 @@ Known limits, carried to the next release. The count is the `- Known limit` bull
   source); and waiving a question closes `waive:<question>` but not the `finding:<id>` items
   `disposition` opened for its findings, which stay open, sent once and never re-sent, until a ruling
   closes them (`T35-owed-sources.md`).
+- Known limit: under a cgroup CPU quota the gate's room is right (T33), but the settle wait
+  (`resources_settled`, `resources_undisturbed`) and the pressure rung that sets a whole run's width still
+  read the host's load average against the quota's cores (`resources.sh` §settle). On an idle container on a
+  busy host a solo suite waits its 1200 s and comes back VOID, and a whole run is cut to half width. Found by
+  the critic's re-read (`critic-adversarial-2.md`, new 1, S3) after the review-born rows were spent; the
+  next wave's first gate item, beside the per-tree marker. Not run on Linux.
 
 Known limits, struck:
 
