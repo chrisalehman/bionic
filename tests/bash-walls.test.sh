@@ -3393,7 +3393,7 @@ expect_contains "CE.6 a classified suite keeps its own path: the booking wrap, w
 expect_absent "CE.6b …and no carry in front of it" "export BIONIC_GATE_AGENT" "$(sb_cmd)"
 
 section "§W10 — a run the wall cannot place leaves no stamp and says it did not count (wave-35 T6; REQ-5 AC-5.1; D14, Δ7)"
-# =====================================================
+# ============================================================
 #
 # 1.17.0: a writer's door run, typed from the main checkout as `cd <tree> || exit 1; …` with a `cd` the
 # wall could not read, was wrapped with no --stamp-dir, so the shim stamped where it stood: a red run
@@ -3445,7 +3445,6 @@ expect_absent "W10.5c …and no not-counted line (W10.3 is the positive)" "not c
 expect_regex "W10.6 [positive] …and its one stamp is in the writer tree's git dir, red and dirty" \
   "^$R_W10/.git/worktrees/T1\\|stamp/v1\\|head=[0-9a-f]{40}\\|dirty=[1-9][0-9]*\\|rc=1\\|" "$(w10_stamps)"
 expect_eq "W10.6b …one stamp in all" "1" "$(w10_stamps | awk 'END { print NR }')"
-=======
 
 # ============================================================
 section "§SCRIPT-CLAIM — a script's door line is budgeted as the line typed inline is (wave-35 T4; REQ-4 AC-4.3, D13)"
