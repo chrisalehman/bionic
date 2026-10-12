@@ -681,8 +681,22 @@ _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_
       if (whole == "yes") { print (index(set, " run.sh ") ? "ok" : "no"); exit }
       if (index(set, " " k " ")) { print "ok"; exit }
       gsub(/[`"\047]/, " ", runs); n = split(runs, W, /[ \t]+/)
-      for (i = 1; i <= n; i++) { w = W[i]; sub(/.*\//, "", w); if (w == k) { print "ok"; exit } }
+      for (i = 1; i <= n; i++) { w = W[i]; sub(/.*\//, "", w); W[i] = w; if (w == k) { print "ok"; exit } }
+      # A SUITE RUN BY A PATH (wave-34 T7; D23, AC-14.5): the wall names a suite file that is not the
+      # tree own tests/<name> by its run, `bash scripts/d/x.test.sh` as `bash_scripts_d_x.test.sh`, and the
+      # budget records the suite by its file name. So a key that opens with a shell word and ends in
+      # `_<entry>` is that entry run by a path; a bare key that only ends in it (user_x.test.sh) is not.
+      if (k ~ /^(bash|sh|zsh|dash|ksh)_/) {
+        m = split(set, E, / +/)
+        for (i = 1; i <= m; i++) if (viaPath(k, E[i])) { print "ok"; exit }
+        for (i = 1; i <= n; i++) if (viaPath(k, W[i])) { print "ok"; exit }
+      }
       print "no"
+    }
+    function viaPath(k, e,   d) {
+      if (tolower(e) !~ /\.test\.sh$/) return 0
+      d = length(k) - length(e) - 1
+      return d >= 2 && substr(k, d + 1) == "_" e
     }')"
   [ "$verdict" = no ] || return 0
   if [ "$whole" = yes ]; then

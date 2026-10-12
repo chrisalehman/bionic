@@ -1676,4 +1676,50 @@ ll_walk "$RC3" "$HC3" "$KC3"
 expect_eq "(cause7) a standing event with no cause is counted: the judge refuses (exit 1), naming the red" "1 1" \
   "$LL_WALK_RC $(printf '%s\n' "$LL_WALK" | grep -c "a.test.sh is red at ${KC3:0:12}")"
 
+# ---------------------------------------------------------------------------
+section "§PATH: a landing runs a Lands-on suite where it lives, not only under tests/ (wave-34 T7; D23, AC-14.4)"
+# The roster holds a suite by its file name (the lift reads a path by its basename), so a suite under
+# `scripts/deploy/__tests__/` reached `ready` as `x.test.sh` and was started as `bash tests/x.test.sh`:
+# no such file, no verdict, STALLED. The launch line below is written by the real lift and the real row
+# writer. fails-when: a suite under a directory other than tests/ stalls at `ready` with "No such file".
+PA_ON="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
+  brief_field "$(lift_contract_fields 'Lands-on: scripts/deploy/__tests__/x.test.sh')" lands_on)"
+expect_eq "(pa0) precondition: the lift reads the path-qualified Lands-on: line by its file name (the positive on that extractor)" \
+  "x.test.sh" "$PA_ON"
+world_cost x.test.sh 5 0.5 5
+ll_commit_at() {  # <root> <row> <path in the tree> <suite file name> — the row commits <path> as a green suite that says where it ran
+  local t="$1/.worktrees/$2"
+  mkdir -p "$t/$(dirname "$3")"
+  printf '#!/bin/bash\necho "PASS: %s ran"\necho "ran-from=$(pwd -P) as=$0"\necho\necho "%s: 1/1 passed, 0 failed  sections=1 setup=0"\nexit 0\n' \
+    "$3" "$4" > "$t/$3"
+  git -C "$t" add "$3" && git -C "$t" commit -qm "$2: $3 as planted"
+}
+PA="$(ll_world)"; ll_launch "$PA" T1 "$PA_ON"
+ll_commit_at "$PA" T1 scripts/deploy/__tests__/x.test.sh x.test.sh
+expect_false "(pa0) precondition: the tree has no tests/x.test.sh, so the old path names nothing" test -e "$PA/.worktrees/T1/tests/x.test.sh"
+ll_verb "$PA" T1
+KPA="$(ll_last_cand "$PA" T1)"
+expect_eq "(pa1) AC-14.4 Lands-on: scripts/deploy/__tests__/x.test.sh runs and lands: ready exits 0, the candidate's verdict green" "0 green" \
+  "$LL_RC $(ll_results "$PA" T1 "$KPA")"
+expect_contains "(pa1b) …printing LANDED" "LANDED T1 $KPA" "$LL_OUT"
+expect_contains "(pa1c) …the log is the suite's own, started at the path it lives at, in the landing tree" \
+  "as=scripts/deploy/__tests__/x.test.sh" "$(cat "$PA/.bionic/docs/record/wave-x/line/T1-x-${KPA:0:12}.log" 2>/dev/null)"
+expect_absent "(pa1d) …and no 'No such file'" "No such file" "$(cat "$PA/.bionic/docs/record/wave-x/line/T1-x-${KPA:0:12}.log" 2>/dev/null)"
+# A suite under tests/ is still started there, whatever else carries its name.
+PB="$(ll_world)"; ll_launch "$PB" T1 x
+ll_commit_at "$PB" T1 tests/x.test.sh x.test.sh
+ll_commit_at "$PB" T1 scripts/deploy/__tests__/x.test.sh x.test.sh
+ll_verb "$PB" T1
+KPB="$(ll_last_cand "$PB" T1)"
+expect_eq "(pa2) a suite named x.test.sh under tests/ and elsewhere: tests/ wins, as before" "0 green" "$LL_RC $(ll_results "$PB" T1 "$KPB")"
+expect_contains "(pa2b) …the log shows tests/x.test.sh ran" "as=tests/x.test.sh" "$(cat "$PB/.bionic/docs/record/wave-x/line/T1-x-${KPB:0:12}.log" 2>/dev/null)"
+# Two files of that name and neither under tests/: ready does not pick one. The suite cannot start, as for
+# any suite the tree does not have, and the entry stalls where the writer sees it.
+PC="$(ll_world)"; ll_launch "$PC" T1 x
+ll_commit_at "$PC" T1 scripts/deploy/__tests__/x.test.sh x.test.sh
+ll_commit_at "$PC" T1 other/x.test.sh x.test.sh
+ll_verb "$PC" T1
+expect_eq "(pa3) the same name at two paths, none under tests/: ready picks neither and stalls (exit 70, two none verdicts)" "70 none none" \
+  "$LL_RC $(ll_results "$PC" T1 "$(ll_last_cand "$PC" T1)")"
+
 finish
