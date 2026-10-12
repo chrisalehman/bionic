@@ -3873,7 +3873,8 @@ dv_plan() {  # <repo> -> the plan path: bound, committed; record rows of every s
     printf -- '- T5: pending dispatch — .worktrees/01-T5\n'
     printf -- '- T3: pending dispatch — added by task-add at 2026-10-04T00:00:00Z\n'
     printf -- '- T7: pending dispatch — .worktrees/01-T7 born: review S2 on\n'
-    printf -- '- T8: pending dispatch\n- T9: pending dispatch\n\n'
+    printf -- '- T8: pending dispatch\n- T9: pending dispatch\n'
+    printf -- '- T12: pending dispatch\n- T13: pending dispatch\n- T14: pending dispatch\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -3887,12 +3888,18 @@ dv_plan() {  # <repo> -> the plan path: bound, committed; record rows of every s
     printf '| T10 | 4 | review | a live reading | dv-live | — | 30 | REQ-1 | %s/T10-read.md | — | — | active |  |\n' "$r"
     printf '| T7 | 4 | build | a build in its own tree | w-T7 | — | 30 | REQ-1 | c.sh | 01-T7 | abc1234 | active |  |\n'
     printf '| T8 | 4 | test | a test row whose agent ended | w-T8 | — | 30 | REQ-1 | %s/T8-tests.md | — | — | active |  |\n' "$r"
-    printf '| T9 | 4 | test | an ended row whose artifact is absent | w-T9 | — | 30 | REQ-1 | %s/T9-tests.md | — | — | active |  |\n\n' "$r"
+    printf '| T9 | 4 | test | an ended row whose artifact is absent | w-T9 | — | 30 | REQ-1 | %s/T9-tests.md | — | — | active |  |\n' "$r"
+    printf '| T12 | 4 | test | an ended row whose writer left a ruling unread | w-T12 | — | 30 | REQ-1 | %s/T12-tests.md | — | — | active |  |\n' "$r"
+    printf '| T13 | 4 | test | the same, its row re-dispatched | w-T13 | — | 30 | REQ-1 | %s/T13-tests.md | — | — | active |  |\n' "$r"
+    printf '| T14 | 4 | test | the same, its row dropped | w-T14 | — | 30 | REQ-1 | %s/T14-tests.md | — | — | active |  |\n\n' "$r"
     printf '## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n'
     printf '| T1 | implementor (w-T1) | — | 30 min | record/T1.md | landed | batch 1 |\n'
     printf '| T5 | test-runner (w-T5) | — | 30 min | %s/T5-floor.md | — | batch 2 |\n' "$r"
     printf '| T8 | test-runner (w-T8) | — | 30 min | %s/T8-tests.md | — | batch 2 |\n' "$r"
     printf '| T9 | test-runner (w-T9) | — | 30 min | %s/T9-tests.md | — | batch 2 |\n' "$r"
+    printf '| T12 | test-runner (w-T12) | — | 30 min | %s/T12-tests.md | — | batch 2 |\n' "$r"
+    printf '| T13 | test-runner (w-T13) | — | 30 min | %s/T13-tests.md | — | batch 2 |\n' "$r"
+    printf '| T14 | test-runner (w-T14) | — | 30 min | %s/T14-tests.md | — | batch 2 |\n' "$r"
     printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
   } > "$f"
@@ -4042,6 +4049,80 @@ expect_contains "DV-6d …and the tick says it landed it" "LANDED T8 — w-T8" "
 expect_eq "DV-7 a MET row whose plan artifact is absent is not landed" "active" "$(dv_status T9)"
 expect_contains "DV-7b …and is reported, naming the path" "NOT-LANDED T9 — w-T9" "$DV_TICK"
 expect_contains "DV-7c …with the artifact it looked for" "$DV_REL/T9-tests.md" "$DV_TICK"
+
+# ---------- §RULING-DELIVER, the backstop (wave-34 T4; REQ-3 AC-3.1, AC-3.2; D13, D4 option 1): it refuses and pages ----------
+# The writer's own deliver reads a ruling by refusing on it (DR-1 to DR-3). The tick is not the writer:
+# a ruling its backstop printed would be read by nobody, and stamping it shown let the second tick land
+# the row over it. So the backstop reads without stamping, refuses on every tick, and opens one
+# `ruling:<id>` item on the person's ledger, sent once. The item closes when the ruling is read (a
+# successor, or the ack), or when the row is re-dispatched or dropped. The channel is declared and
+# `curl` is a stub that counts its calls, for these ticks only, so the send is observed, not made.
+DR_BIN="$TMPROOT/dr-bin"; mkdir -p "$DR_BIN"; DR_CALLS="$TMPROOT/dr-curl.calls"; : > "$DR_CALLS"
+printf '#!/bin/bash\nt=""\nwhile [ $# -gt 0 ]; do case "$1" in -H) case "$2" in Title:*) t="${2#Title: }" ;; esac; shift 2 ;; *) shift ;; esac; done\nprintf "title=%%s\\n" "$t" >> "%s"\nexit 0\n' \
+  "$DR_CALLS" > "$DR_BIN/curl"; chmod +x "$DR_BIN/curl"
+printf 'topic-from=cron.env:BIONIC_NTFY_TOPIC\ntitle-prefix=fixture\n' > "$SP_CONFIG_DIR/bionic/notify"
+printf 'export BIONIC_NTFY_TOPIC=fixture-topic\n' > "$SP_CONFIG_DIR/cron.env"
+dr_tick() { forget_digest "$RDV"; PATH="$DR_BIN:$PATH" poke_pressure "$RDV" 8192 1.0 tick; }
+dr_item() { /usr/bin/grep -F "|key=ruling:$1|" "$RDV/.bionic/tmp/owed-$SID.state" 2>/dev/null; }   # <id> -> its owed line
+dr_rid()  { printf '%s\n' "$1" | sed -n 's/^poker: ruling \([^ ]*\) recorded for .*/\1/p' | head -1; }
+dr_met() {  # <n> -> the writer w-T<n> ended MET: its artifact written, its row said so
+  printf 'tests: green\n' > "$DV_DIR/T$1-tests.md"; backdate "$DV_DIR/T$1-tests.md" 300
+  add_row "$RDV" name=w-T$1 agent_id=a-w-T$1 subagent_type=test-runner deliverable="$DV_DIR/T$1-tests.md" \
+    duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$RDV" w-T$1)"
+}
+dr_met 12
+poke "$RDV" rule w-T12 'run the floor again on the new head'
+DR5_ID="$(dr_rid "$OUT")"
+expect_regex "DR-5 precondition: a ruling for w-T12, the writer of T12, is recorded" '^r[0-9]+-[0-9]+$' "$DR5_ID"
+dr_tick
+DR5_T1="$OUT"
+expect_eq "DR-5 §RULING-DELIVER AC-3.1 tick one: the backstop leaves the MET row whose writer has a ruling unread active" "active" "$(dv_status T12)"
+expect_contains "DR-5b …reporting it NOT-LANDED with the ruling's id" "NOT-LANDED T12 — w-T12" "$DR5_T1"
+expect_contains "DR-5c …the id on that line" "$DR5_ID" "$(printf '%s\n' "$DR5_T1" | /usr/bin/grep -F 'NOT-LANDED T12 ')"
+expect_contains "DR-5d …while the row beside it with no ruling is reported as before (same tick, same extractor)" "NOT-LANDED T9 — w-T9" "$DR5_T1"
+poke "$RDV" rulings w-T12
+expect_regex "DR-5e …and the ruling still reads unread: the backstop did not mark it shown" "ruling $DR5_ID w-T12 .* unread — " "$OUT"
+expect_contains "DR-5f …one ruling:<id> item is open on the person's ledger" "|key=ruling:$DR5_ID|state=open|" "$(dr_item "$DR5_ID")"
+expect_regex "DR-5g …and it was sent (a send stamp, not -)" '[|]sent=[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$(dr_item "$DR5_ID")"
+dr_tick
+DR5_T2="$OUT"
+expect_eq "DR-5h §RULING-DELIVER AC-3.2 tick two: the row still holds" "active" "$(dv_status T12)"
+expect_contains "DR-5i …refused again, naming the ruling" "NOT-LANDED T12 — w-T12" "$DR5_T2"
+poke "$RDV" rulings w-T12
+expect_regex "DR-5j …the ruling still unread after two ticks" "ruling $DR5_ID w-T12 .* unread — " "$OUT"
+expect_eq "DR-5k …and still one item for it, open: the second refusal opened nothing new" "1" \
+  "$(dr_item "$DR5_ID" | /usr/bin/grep -c '|state=open|')"
+expect_eq "DR-5l …sent once across both ticks (one call of the stub for it)" "1" \
+  "$(/usr/bin/grep -c 'ruling' "$DR_CALLS" | tr -d ' ')"
+
+# DR-6: the closers. Read: the shown stamp closes the item at once, and the next tick lands the row.
+poke "$RDV" ruling-ack "$DR5_ID"
+expect_contains "DR-6 §RULING-DELIVER AC-3.2 a successor reading the ruling (its ack) closes the item" \
+  "|key=ruling:$DR5_ID|state=closed|" "$(dr_item "$DR5_ID")"
+dr_tick
+expect_eq "DR-6b …and the next tick lands the row, the ruling read" "landed" "$(dv_status T12)"
+expect_contains "DR-6c …saying so" "LANDED T12 — w-T12" "$OUT"
+# Re-dispatched: a successor's launch labelled with the row (`row=`), which the tick's launch-sync writes
+# into the row's agent cell; dropped: the row's status.
+dr_met 13; dr_met 14
+poke "$RDV" rule w-T13 'redo the matrix'
+DR6_ID13="$(dr_rid "$OUT")"
+poke "$RDV" rule w-T14 'stop at the floor'
+DR6_ID14="$(dr_rid "$OUT")"
+dr_tick
+expect_eq "DR-6d precondition: both rows held by their rulings" "active active" "$(dv_status T13) $(dv_status T14)"
+expect_eq "DR-6d …and both rulings opened their items" "open open" \
+  "$(dr_item "$DR6_ID13" | sed -n 's/.*|state=\([a-z]*\)|.*/\1/p') $(dr_item "$DR6_ID14" | sed -n 's/.*|state=\([a-z]*\)|.*/\1/p')"
+printf '%s|row=T13\n' "$(mkrow name=w-T13b agent_id=a-w-T13b subagent_type=test-runner deliverable="$DV_DIR/T13-tests-b.md" \
+  duration="4 hours" launched_at="$(iso_ago 30)")" >> "$(roster_of "$RDV")"
+poke "$RDV" task-set T14 status=dropped
+expect_eq "DR-6f precondition: T14 dropped (exit 0)" "0" "$RC"
+dr_tick
+expect_eq "DR-6e precondition: the tick wrote T13's successor into its agent cell, the row still active" "w-T13b active" \
+  "$(s48_row "$PDV" T13 | awk -F'|' '{ print $5 }') $(dv_status T13)"
+expect_contains "DR-6g a re-dispatched row's item closes at the next tick" "|key=ruling:$DR6_ID13|state=closed|" "$(dr_item "$DR6_ID13")"
+expect_contains "DR-6h a dropped row's item closes at the next tick" "|key=ruling:$DR6_ID14|state=closed|" "$(dr_item "$DR6_ID14")"
+rm -f "$SP_CONFIG_DIR/bionic/notify" "$SP_CONFIG_DIR/cron.env"
 POKE_BOUND="$DV_BOUND_WAS"
 
 finish

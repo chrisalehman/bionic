@@ -296,6 +296,7 @@ R_ID="$(in_rid "$IN_OUT")"
 expect_nonempty "(g6) a ruling for wx-T1 is recorded" "$R_ID"
 REC="$W/.bionic/docs/record/wave-x/landing-proofs.log"
 in_ready "$W" T1
+G_OUT6="$IN_OUT"
 expect_eq "(g6) wx-T1's ready with the ruling unread is refused (exit 2)" "2" "$IN_RC"
 expect_contains "(g6) …saying why" "REFUSED reason=ruling-unread" "$IN_OUT"
 expect_contains "(g6) …carrying the ruling" "land only after the rename" "$IN_OUT"
@@ -304,5 +305,19 @@ expect_regex "(g7) the refusal marked it shown" "shown=[0-9]+" "$(in_state "$W" 
 in_ready "$W" T1
 expect_eq "(g8) the same ready once shown lands (exit 0)" "0" "$IN_RC"
 expect_contains "(g8) …LANDED" "LANDED T1 " "$IN_OUT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "§ROOT: one plugin root in every ruling's acknowledgement call (wave-34 T4; debt ruling-plugin-root)"
+
+# The push, the commit wall and `ready` each print the ruling in the one wording, whose last words are
+# the call that acknowledges it. Each caller used to find the plugin root its own way (the push from its
+# own path, the wall from its library dir, `ready` from its own), and two of them spelled it differently.
+# The root is the library's, found once: the plugin that holds lib/roster.sh.
+in_root() { printf '%s\n' "$1" | sed -n 's/.*acknowledge with: bash \(.*\)\/hooks\/session-poker\.sh ruling-ack .*/\1/p' | head -1; }
+RT_WANT="$(cd "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/../.." && pwd -P)"
+expect_nonempty "(rt0) precondition: the push's ruling names a root" "$(in_root "$P_CTX1")"
+expect_eq "(rt1) the push names the plugin that holds lib/roster.sh" "$RT_WANT" "$(in_root "$P_CTX1")"
+expect_eq "(rt2) the commit wall's refusal names the same root" "$RT_WANT" "$(in_root "$G_OUT1")"
+expect_eq "(rt3) ready's refusal names the same root" "$RT_WANT" "$(in_root "$G_OUT6")"
 
 finish
