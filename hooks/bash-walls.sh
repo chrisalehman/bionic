@@ -332,7 +332,7 @@ case "$COMMAND" in
       _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
       if _bw_row="$(roster_row_for_id "$_bw_roster" "$_bw_aid")"; then
         BIONIC_RULINGS_WRITER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
-        BIONIC_RULINGS_UNREAD="$(ruling_take_unread "$_bw_roster" "$BIONIC_RULINGS_WRITER" commit "$(refuse_plugin_root)")"
+        BIONIC_RULINGS_UNREAD="$(ruling_take_unread "$_bw_roster" "$BIONIC_RULINGS_WRITER" commit)"
       fi
     fi ;;
 esac

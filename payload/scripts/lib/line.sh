@@ -642,6 +642,31 @@ _line_load_roster() {
   [ -r "$_LINE_LIB_DIR/roster.sh" ] && . "$_LINE_LIB_DIR/roster.sh" 2>/dev/null
   declare -F roster_row_for_id >/dev/null 2>&1
 }
+# THE ROW'S WRITER, FOUND ONCE (wave-34 T4; burns debt row-writer-name). The launch line is the roster's
+# row by `row=`, else by the plan row's agent cell as `name=` (labels, D4); the row the walls read is the
+# latest row of that name's agent id (`_line_current_row`), else the launch line (an adopted row, with no
+# launch line on this roster, stands as both); the writer is that row's name, else the launch line's, else
+# the agent cell. `ready` holds a row's landing to this name, and so do `deliver` and the tick's backstop
+# (hooks/session-poker.sh), so the writer a ruling is read against is one answer wherever a row lands.
+# Sets LINE_LAUNCH, LINE_NOW (either may be empty) and LINE_WRITER; 1 when there is no name at all.
+# <agent> is the plan row's agent cell when the caller has it, read off <plan> when it is not given.
+line_row_writer() {  # <roster> <plan> <row> [<agent>]
+  local roster="${1:-}" agent="${4-}" have=$# n
+  LINE_LAUNCH=""; LINE_NOW=""; LINE_WRITER=""
+  # The cell is read only when the row's launch line or its name needs it.
+  LINE_LAUNCH="$(_wt_launch_row "$roster" row "${3:-}")" || {
+    [ "$have" -ge 4 ] || { agent="$(_line_plan_agent "${2:-}" "${3:-}")" || agent=""; have=4; }
+    LINE_LAUNCH="$(_wt_launch_row "$roster" name "$agent")" || LINE_LAUNCH=""
+  }
+  LINE_WRITER="${LINE_LAUNCH:+$(_wt_field "$LINE_LAUNCH" name)}"
+  if [ -z "$LINE_WRITER" ]; then
+    [ "$have" -ge 4 ] || agent="$(_line_plan_agent "${2:-}" "${3:-}")" || agent=""
+    LINE_WRITER="$agent"
+  fi
+  LINE_NOW="$(_line_current_row "$roster" "$LINE_WRITER")" || LINE_NOW="$LINE_LAUNCH"
+  n="${LINE_NOW:+$(_wt_field "$LINE_NOW" name)}"; [ -z "$n" ] || LINE_WRITER="$n"
+  [ -n "$LINE_WRITER" ]
+}
 _line_current_row() {  # <roster> <name> -> the row the walls read for that agent; 1 when no id is known
   local roster="${1:-}" name="${2:-}" id
   { [ -n "$name" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; } || return 1
@@ -698,24 +723,19 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
     _wt_refuse_bionic "$wt" "$branch" "$onto" "${c%% *}" "${c#* }" "$(_wt_bionic_kind "$root" "$acc")"
     return 1
   fi
-  # THE ROSTER'S LAUNCH LINE (labels, D4): the row's by `row=`, else the plan row's agent by `name=`.
-  # The suites are its `lands_on=`; the debt is its `lands_red=` suite, carried on the `ready` event
-  # for T5's debt write (`line_publish` step 6).
+  # THE ROSTER'S LAUNCH LINE AND THE ROW THE WALL READS (`line_row_writer`). The suites are the current
+  # row's `lands_on=`; the debt is the launch line's `lands_red=` suite, carried on the `ready` event for
+  # T5's debt write (`line_publish` step 6).
   roster="${root%/}/.bionic/tmp/roster-${sid}.state"
-  launch="$(_wt_launch_row "$roster" row "$row")" \
-    || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$plan" "$row")")" || launch=""
-  # THE ROW THE WALL READS (wave-28 T64): the suites come off the row the walls read for this agent, the launch
-  # line's successors included; an adopted row, with no launch line of this roster, stands as the launch line.
-  name="${launch:+$(_wt_field "$launch" name)}"; [ -n "$name" ] || name="$(_line_plan_agent "$plan" "$row")"
-  now="$(_line_current_row "$roster" "$name")" || now="$launch"
+  line_row_writer "$roster" "$plan" "$row"
+  launch="$LINE_LAUNCH"; now="$LINE_NOW"; name="$LINE_WRITER"
   [ -n "$now" ] || { _wt_refuse "no-launch-row row=${row} roster=${roster} — ready reads the row's suites off the roster row the walls read"; return 2; }
   [ -n "$launch" ] || launch="$now"
-  name="$(_wt_field "$now" name)"
   # AN UNREAD RULING HOLDS THE LANDING (wave-33 T10; REQ-1 AC-1.4, D1). A ruling the orchestrator
   # recorded for this writer and nobody has shown it is printed here, marked shown (lib/roster.sh
   # `ruling_take_unread`, the commit wall's same read), and the row is not entered in the line: the
   # writer reads it, acts on it, and says ready again, which then passes. Before any record is written.
-  if _line_load_roster && c="$(ruling_take_unread "$roster" "$name" ready "${_LINE_LIB_DIR%/scripts/lib}")" && [ -n "$c" ]; then
+  if _line_load_roster && c="$(ruling_take_unread "$roster" "$name" ready)" && [ -n "$c" ]; then
     _wt_refuse "ruling-unread row=${row} name=${name} — the orchestrator ruled while you worked; read it below, act on it, say ready again"
     printf '%s\n' "$c"
     return 2
