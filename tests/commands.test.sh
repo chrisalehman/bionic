@@ -216,4 +216,35 @@ section "Section 5: render.sh --check agrees this file is not stale"
 expect_true "11: agents-src/render.sh --check reports every rendered final clean" \
   bash "${REPO}/agents-src/render.sh" --check
 
+section "§DECISION: /bionic:decision is the decision skill, typed with no argument (wave-33 AC-11.3)"
+
+# WHY A SKILL AND NOT A COMMAND FILE. A plugin skill named `decision` is itself /bionic:decision,
+# as /bionic:canonical-sdlc is, and Claude Code resolves a skill and a same-named command to the
+# skill. A payload/commands/decision.md beside it would never run, and a test reading it would pass
+# for the wrong reason. So what is pinned is the skill: reachable through the payload by the same
+# symlink the other shipped skills use, named `decision`, invocable by the model (the core rule
+# invokes it), and saying what it does when typed bare.
+DEC_LINK="${PAYLOAD}/skills/decision"
+DEC_SKILL="${DEC_LINK}/SKILL.md"
+expect_eq "D1: payload/skills/decision is the symlink the other shipped skills use" \
+  "../../skills/decision" "$(readlink "$DEC_LINK" 2>/dev/null)"
+expect_true "D2: …and resolves to the skill file" test -f "$DEC_SKILL"
+DEC_FM="$(awk 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f { print }' "$DEC_SKILL" 2>/dev/null)"
+expect_nonempty "D3: the skill's frontmatter reads (the extractor found it)" "$DEC_FM"
+expect_regex "D4: the skill is named decision, so it answers /bionic:decision" '^name: decision$' "$DEC_FM"
+expect_no_regex "D5: …and the model may invoke it (the core rule invokes it, not cites it)" \
+  'disable-model-invocation' "$DEC_FM"
+expect_true "D6: typed with no argument, it takes what was last under discussion" \
+  grep -qiE 'no argument.*last under discussion' "$DEC_SKILL"
+expect_true "D7a: the help page names /bionic:decision" \
+  grep -q '`/bionic:decision`' "${PAYLOAD}/commands/help.md"
+expect_false "D7b: no command file shadows the skill's name" test -e "${PAYLOAD}/commands/decision.md"
+
+# The old name ships nowhere. -R, not -r: payload/skills/<name> and payload/agents are symlinks,
+# and -r does not enter them. /usr/bin/grep, not the shell's grep, which may skip ignored trees.
+expect_nonempty "D8a: the payload search reaches the skill (bionic:decision is found)" \
+  "$(/usr/bin/grep -Rn 'bionic:decision' "$PAYLOAD" 2>/dev/null)"
+expect_empty "D8b: …and no shipped file names bionic:reframe" \
+  "$(/usr/bin/grep -Rn 'bionic:reframe' "$PAYLOAD" 2>/dev/null)"
+
 finish

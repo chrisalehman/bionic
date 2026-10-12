@@ -149,6 +149,32 @@ plan_frontmatter_get() {
   return 0
 }
 
+# plan_regression <plan> -> `no` when the plan's leading frontmatter says exactly `regression: no`,
+# `yes` for any other value it declares, and nothing at all when it declares none; always exit 0
+# (wave-33 T15, D10; the Step-0 regression setting of wave-31 T27, REQ-12 AC-12.2).
+#
+# THE ONE READING OF THE KEY. Four places each took the plan's `regression:` out of its frontmatter and
+# judged it their own way: the proof library's `proof_regression`, the evidence gate's Step-5 arm
+# (walls.sh), dispatch preflight's full-run rule and the card's two regression lines. They agreed by
+# accident, as the budget's four readers once did (below). They call this now, and it is the only
+# function that names the key. AN ABSENT KEY, AN EMPTY VALUE, OR ANY VALUE BUT `no` IS NOT `no`: only
+# the explicit word relaxes anything (fail-closed, as an absent `walk:` reads `required`), so a caller
+# asks `[ "$(plan_regression "$plan")" = no ]` and treats everything else as the floor owed. The
+# empty answer is kept apart from `yes` for the card, which prints `not declared` for a plan that
+# declared nothing. The key's sibling `regression-override:` records who chose against the scale
+# default and is never read here. The grammar is `plan_frontmatter_get`'s: the leading block only,
+# line endings normalised, one quote layer stripped.
+plan_regression() {
+  local v
+  v="$(plan_frontmatter_get "${1:-}" regression)"
+  case "$v" in
+    '')  : ;;
+    no)  printf 'no\n' ;;
+    *)   printf 'yes\n' ;;
+  esac
+  return 0
+}
+
 # ---------- THE BUDGET, READ ONE WAY (epic-23 wave-20 T2, REQ-10, D10; ADR-035) ----------
 #
 # FOUR READERS, THREE READINGS. Step 0 writes one line into the plan's frontmatter —
@@ -965,8 +991,9 @@ rigor_print() {
 #   fix-cap:         a whole number, or <n>% of the ## Tasks rows  2 at single, 10% at double
 #
 # A plan with `rigor:` and none of the three is read with these defaults and never refused for
-# them. The field is read verbatim and never widened: `S1` names both reaches, `S1-on` one; an
-# agent has no verb that writes the field.
+# them. The core's rigor table shows the same defaults; tests/units.test.sh §DEBT holds the two to one.
+# The field is read verbatim and never widened: `S1` names both reaches, `S1-on` one; an agent has no
+# verb that writes the field.
 #
 # review_cadence_level <word>  -> `once`; nothing and rc 1 for any other word.
 # fix_policy_bad <set>         -> nothing, rc 0, when every comma-joined word (blanks around a comma

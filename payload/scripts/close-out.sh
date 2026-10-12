@@ -114,6 +114,13 @@ fi
 . "${CO_LIB}/units.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/proof.sh"
+# THE PERSON'S LEDGER AND ITS ONE SENDER (wave-33 T12; REQ-2 AC-2.3, D2), for the delivery notice at
+# the end of `run`. NOT in the list above and sourced only when readable: a payload without it
+# closes a run exactly as 1.15.0 did, and nothing here can make a close refuse.
+if [ -r "${CO_LIB}/owed.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${CO_LIB}/owed.sh"
+fi
 
 # CO_SID -> this script's own identity, read from the ambient environment BEFORE
 # anything below ever touches CLAUDE_CODE_SESSION_ID (`gate_ask`'s one
@@ -584,11 +591,14 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 
 # ─── Act 5: the continuation ─────────────────────────────────────────────────
 #
-# `<fill>` MARKS WHAT ONLY THE ORCHESTRATOR KNOWS, and marks it rather than guessing it.
-# The task count, the regression result, the rulings, the carry-overs and the next wave's ideas
-# file are facts about the run, not about the tree; a template that invented plausible
-# values for them would produce a continuation that read true and was not. The shape is
-# wave-12-fixit-171's, heading for heading.
+# THE CONTINUATION IS WRITTEN WHOLE (wave-33 T8; D8, AC-3.3). Every field this script can derive it
+# writes: the commit it closed at, the task count (the plan's build rows), the regression result (the
+# floor's proof line), the reviews (the review proof lines), the ADRs (the spec's or the plan's `adrs:`)
+# and the Patrol job (this session's transcript, or no sentence at all). The wave-32 close completed
+# fourteen marks by hand (A-orch-50); five remain, and they are the ones only a person decides: the
+# first decision put to the user, what was ruled at the close, the next wave's version and ideas file, and
+# its carry-overs. `co_owed_line` names each of them in the close-out output. A template that invented
+# plausible values for those would produce a continuation that read true and was not.
 #
 # NEVER OVERWRITTEN. A continuation that already exists has been edited by the person who
 # knew those answers, and the second run of a close-out is exactly when that edit would be
@@ -760,7 +770,7 @@ co_added_ids() {  # <lines> -> the ids, space-joined
 # report's line and one line per landed row, as `session-poker.sh landing-report --rows <plan>` prints
 # them, fenced. The plan is NAMED: act 3 has wiped the session's binding by the time act 5 writes this
 # (ruling A-orch-145). The report runs in a child, so lib/gate.sh's `gate_ask` never meets this file's.
-# A report that cannot be read leaves a <fill> mark, as every other unknown here does.
+# A report that cannot be read is said in a sentence (wave-33 T8: a mark would be a placeholder this script wrote).
 co_landings_section() {
   local out
   out="$(bash "$(plugin_root)/hooks/session-poker.sh" landing-report --rows "$PLAN" 2>/dev/null)" || out=""
@@ -771,19 +781,82 @@ co_landings_section() {
       *) printf '```\n%s\n```\n' "$out" ;;
     esac
   else
-    printf '<fill: landings — session-poker.sh landing-report --rows %s could not be read>\n' "$PLAN"
+    printf 'landings: not read — session-poker.sh landing-report --rows %s could not be read.\n' "$PLAN"
   fi
 }
 
+# co_task_count -> the build rows of the plan's ## Tasks table that were not dropped: the tasks the
+# template says went RED then GREEN. Zero when the plan carries no table.
+co_task_count() {
+  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "build" && $10 != "dropped" { n++ } END { print n + 0 }'
+}
+
+# co_regression_text -> the regression's result, from the floor's proof line (`proved: kind=floor`),
+# in the word the doctrine uses. A plan that says `regression: no` owed none.
+co_regression_text() {
+  local line h at ev
+  if [ "$(proof_regression "$PLAN")" = no ]; then
+    printf 'the regression was not owed (regression: no)'
+    return 0
+  fi
+  line="$(proof_last_line "$PLAN" floor)"
+  if [ -z "$line" ]; then
+    printf 'the regression: no floor proof is recorded in the plan'
+    return 0
+  fi
+  h="$(printf '%s\n' "$line" | sed -n 's/.* head=\([0-9a-f]*\).*/\1/p')"
+  at="$(printf '%s\n' "$line" | sed -n 's/.* at=\([^ ]*\).*/\1/p')"
+  ev="$(printf '%s\n' "$line" | sed -n 's/.* evidence=\([^ ]*\).*/\1/p')"
+  printf 'the regression: the floor holds at %s (proved %s, %s)' "${h:0:12}" "${at:-?}" "${ev:-no record}"
+}
+
+# co_reviews_text -> `Reviews: <question> <scope> <result> (<reader>); …. ADRs: <cell>.`, one entry per
+# question and scope in the order the plan first records them, each with the result of its LAST line.
+co_reviews_text() {
+  local revs adrs
+  revs="$(awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      k = PROOF_QUESTION " " PROOF_SCOPE
+      if (!(k in res)) order[++n] = k
+      res[k] = PROOF_RESULT " (" PROOF_READER ")"
+    }
+    END { for (i = 1; i <= n; i++) printf "%s%s %s", (i > 1 ? "; " : ""), order[i], res[order[i]]; print "" }' "$PLAN")"
+  adrs="$(epic_adrs_cell 2>/dev/null)"
+  case "$adrs" in ''|—) adrs="none shipped" ;; esac
+  printf 'Reviews: %s. ADRs: %s.' "${revs:-none recorded}" "$adrs"
+}
+
+# co_patrol_sentence -> the sentence naming this session's Patrol job(s), or nothing. The id is the one
+# the platform minted, read from this session's transcript with lib/patrol.sh's own scan: a patrol job
+# (its prompt runs the poker's tick) that no CronDelete has named. No session id, no transcript or no such
+# job is no sentence: the id is not guessed.
+co_patrol_sentence() {
+  local tr ids n
+  [ -n "$CO_SID" ] || return 0
+  tr="$(patrol_transcript "$CO_SID")" || return 0
+  ids="$(_patrol_scan "$tr" "" 2>/dev/null | awk -F'\t' '$1 == "JOB" && $5 == "patrol" && $2 != "?" { printf "%s%s", (n++ ? ", " : ""), $2 } END { print "" }')"
+  [ -n "$ids" ] || return 0
+  n="$(printf '%s' "$ids" | awk -F', ' '{ print NF }')"
+  if [ "$n" = 1 ]; then printf 'Patrol job %s deleted and the stamp disarmed at close.' "$ids"
+  else printf 'Patrol jobs %s deleted and the stamp disarmed at close.' "$ids"; fi
+}
+
 continuation_template() {
-  local sha
+  local sha tasks regress reviews patrol
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  tasks="$(co_task_count)"
+  regress="$(co_regression_text)"
+  reviews="$(co_reviews_text)"
+  patrol="$(co_patrol_sentence)"
   cat <<CONT_TEMPLATE
 # continuation — $WAVE_SLUG${RELEASE:+ ($RELEASE)}
 
-Closed $NOW. $INTEGRATION at ${sha:-<fill: SHA>}. Wave branch \`$WORKING\` merged into
-\`$INTEGRATION\`: <fill: task count> tasks, every one RED→GREEN; <fill: regression result>.
-<fill: reviews, audits, ADRs>.
+Closed $NOW. $INTEGRATION at $sha. Wave branch \`$WORKING\` merged into
+\`$INTEGRATION\`: $tasks tasks, every one RED→GREEN; $regress.
+$reviews
 
 ## Chris decides (one decision each)
 
@@ -803,10 +876,22 @@ $(co_landings_section)
 
 ## Resume instruction
 
-Nothing to resume: the run is delivered. <fill: Patrol job id> deleted and the stamp
-disarmed at close. The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
+Nothing to resume: the run is delivered.${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
 this file is the wave-local copy.
 CONT_TEMPLATE
+}
+
+# co_owed_line -> the marks left in the continuation, named: what only a person decides. Said after the
+# continuation is written or found, so a hand-written one reports what it still owes too.
+co_owed_line() {
+  local names n
+  names="$(grep -o '<fill: [^>]*>' "$CONT" 2>/dev/null | sed -e 's/^<fill: //' -e 's/>$//' | awk '{ printf "%s%s", (NR > 1 ? "; " : ""), $0 } END { print "" }')"
+  n="$(grep -o '<fill: [^>]*>' "$CONT" 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${n:-0}" = 0 ]; then
+    printf 'continuation-owed: none'
+  else
+    printf 'continuation-owed: %s mark%s only a person can fill — %s' "$n" "$([ "$n" = 1 ] || echo s)" "$names"
+  fi
 }
 
 act_continuation() {
@@ -832,10 +917,12 @@ act_continuation() {
     CONT_LINE="$CONT_REL already written — left as it stands"
     return 0
   fi
+  git -C "$ROOT" rev-parse --short "$INTEGRATION" >/dev/null 2>&1 \
+    || _co_refuse "the integration branch '$INTEGRATION' has no commit to name in the continuation — no continuation written"
   mkdir -p "${CONT%/*}" 2>/dev/null
   continuation_template > "$CONT" 2>/dev/null
   [ -s "$CONT" ] || _co_refuse "could not write the continuation at $CONT"
-  CONT_LINE="$CONT_REL written from the close-out template (<fill> marks what only the orchestrator knows)"
+  CONT_LINE="$CONT_REL written from the close-out template (every derivable field filled; the marks left are named below)"
 }
 
 # ─── Act 6: the epic's shipped-wave row ──────────────────────────────────────
@@ -870,10 +957,10 @@ epic_shipped_table() {
   ' "$1" 2>/dev/null
 }
 
-# epic_adrs -> the ADR numbers this wave shipped, `040, 041`, or nothing. The spec the
-# plan's `spec:` line names carries `adrs:` as paths joined by ` · `; the plan's own `adrs:`
-# is the fallback for a spec without one. Each segment yields its first `adr-<digits>`.
-epic_adrs() {
+# epic_adrs_value -> the raw `adrs:` this wave's sources carry: the spec the plan's `spec:` line names
+# first, the plan's own when the spec has none. Nothing when neither says anything. The spec's `adrs:` is
+# paths joined by ` · `.
+epic_adrs_value() {
   local specrel specfile adrs
   specrel="$(plan_frontmatter_get "$PLAN" "spec")"
   [ -n "$specrel" ] || specrel="$WAVE_SLUG.spec.md"
@@ -881,7 +968,13 @@ epic_adrs() {
   [ -f "$specfile" ] || specfile="$(find "$DROOT/specs" -name "${specrel##*/}" -type f 2>/dev/null | head -1)"
   [ -n "$specfile" ] && adrs="$(plan_frontmatter_get "$specfile" "adrs")" || adrs=""
   [ -n "$adrs" ] || adrs="$(plan_frontmatter_get "$PLAN" "adrs")"
-  printf '%s\n' "$adrs" | awk '
+  printf '%s\n' "$adrs"
+}
+
+# epic_adrs -> the ADR numbers this wave shipped, `040, 041`, or nothing. Each segment of the value yields
+# its first `adr-<digits>`.
+epic_adrs() {
+  epic_adrs_value | awk '
     {
       n = split($0, seg, / · /)
       for (i = 1; i <= n; i++) {
@@ -891,21 +984,51 @@ epic_adrs() {
     }'
 }
 
+# epic_adrs_cell -> the ADR cell of the epic row, exit 0: the numbers, or `—` when the sources say, in so
+# many words, that the wave shipped none (`adrs: none`). Exit 1, nothing printed, when no source says
+# either way. "None shipped" and "not recorded" look the same on disk, so only the first is written; the
+# second refuses the row (wave-33 T8; D8, AC-3.3) and the refusal says which line to write.
+epic_adrs_cell() {
+  local raw nums word
+  raw="$(epic_adrs_value)"
+  nums="$(epic_adrs)"
+  if [ -n "$nums" ]; then printf '%s' "$nums"; return 0; fi
+  word="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  case "$word" in
+    none|"—"|-|n/a|na) printf '—'; return 0 ;;
+  esac
+  return 1
+}
+
+# epic_row_missing -> a sentence naming what the epic row for this wave cannot be written whole without,
+# or nothing. The row is written from the plan and the merge, never marked for the orchestrator.
+epic_row_missing() {
+  if ! epic_adrs_cell >/dev/null; then
+    printf 'the wave %s row of %s cannot be written whole: neither the spec nor the plan carries an adrs: line naming the ADRs this wave shipped (adr-<n> paths joined by " · ") — write "adrs: none" in the plan if it shipped none' "$WAVE_NUM" "${EPIC_PLAN##*/}"
+    return 0
+  fi
+  if ! git -C "$ROOT" rev-parse --short "$INTEGRATION" >/dev/null 2>&1; then
+    printf 'the wave %s row of %s cannot be written whole: the integration branch %s has no commit to name as the SHA' "$WAVE_NUM" "${EPIC_PLAN##*/}" "$INTEGRATION"
+  fi
+  return 0
+}
+
 epic_row() {
-  local spec sha adrs
+  local spec sha adrs missing
   spec="$(plan_frontmatter_get "$PLAN" "spec")"
   spec="${spec##*/}"
   [ -n "$spec" ] || spec="$WAVE_SLUG.spec.md"
-  # THE SHA IS FILLED, NOT MARKED. Act 1 has already proved the working branch reachable
-  # from the integration branch, so the integration head is a fact this script holds. The
-  # ADR cell is read from the spec's `adrs:` line; it stays `<fill: ADRs>` only when neither
-  # the spec nor the plan names one, because "none shipped" and "not recorded" look the same
-  # on disk. The version cell is the plan's `release:`, and `—` (the table's own empty cell)
-  # when the plan names none.
+  # THE ROW IS WRITTEN WHOLE (wave-33 T8; D8). The SHA is the integration head, a fact this script holds
+  # (act 1 proved the working branch reachable from it). The ADR cell is the spec's `adrs:` line, else the
+  # plan's, and `—` when that line says none. A source that says nothing refuses the row, naming the
+  # field, before any act (`presence_missing` asks first); there is no placeholder to complete by hand.
+  # The version cell is the plan's `release:`, and `—` (the table's own empty cell) when the plan names none.
+  missing="$(epic_row_missing)"
+  [ -z "$missing" ] || _co_refuse "$missing"
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  adrs="$(epic_adrs)"
+  adrs="$(epic_adrs_cell)"
   printf '| %s | %s | `%s` | `%s`, `.requirements.md` | %s | %s, %s @ %s |\n' \
-    "$WAVE_NUM" "${RELEASE:-—}" "${PLAN##*/}" "$spec" "${adrs:-<fill: ADRs>}" "$TODAY" "$INTEGRATION" "${sha:-<fill: SHA>}"
+    "$WAVE_NUM" "${RELEASE:-—}" "${PLAN##*/}" "$spec" "$adrs" "$TODAY" "$INTEGRATION" "$sha"
 }
 
 epic_has_row() {
@@ -977,11 +1100,100 @@ handoff_block() {
   cat <<HANDOFF
 ## Handoff
 
-- resume point: NONE — DELIVERED at $NOW; $INTEGRATION @ ${main_sha:-<fill: SHA>}.
+- resume point: NONE — DELIVERED at $NOW; $INTEGRATION @ ${main_sha:-?}.
 - branch: $WORKING merged into $INTEGRATION.
 - patrol: $PATROL_LINE
 - continuation: $CONT_REL
 HANDOFF
+}
+
+# step8_present <file> -> 0 when `## SDLC State` carries a `Step 8:` line.
+step8_present() {
+  awk '
+    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
+    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+8[[:space:]]*:/ { found = 1 }
+    END { exit !found }
+  ' "$1" 2>/dev/null
+}
+
+# ensure_step8_line <file> -> the file with a `- Step 8: (pending)` line when `## SDLC State` has none
+# (wave-33 T8; D8, AC-4.2). The line is close-out's to write, and the replace below only replaces: it
+# used to refuse for the line it never inserted. It goes after the last block of a step below 8, which is
+# the Step-7 line and its indented continuation lines, in front of whatever follows (a Step 9 line, or
+# the next key); with no such block, at the end of the section. Held blank lines stay below the insert.
+ensure_step8_line() {
+  local file="$1" tmp="$1.step8.$$"
+  step8_present "$file" && return 0
+  awk '
+    function isstep(s) { return match(s, /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[[:space:]]*:/) }
+    function stepnum(s,   t) { t = substr(s, RSTART, RLENGTH); gsub(/[^0-9]/, "", t); return t + 0 }
+    function flush_blanks() { while (blanks > 0) { print ""; blanks-- } }
+    function insert() { if (!done) { print "- Step 8: (pending)"; done = 1 } }
+    /^## / {
+      if (insdlc) { insert(); flush_blanks() }
+      insdlc = ($0 ~ /^## SDLC State/); blk = 0; blanks = 0
+      print; next
+    }
+    insdlc && /^[[:space:]]*$/ { blanks++; next }
+    insdlc {
+      step = isstep($0)
+      if (step) { n = stepnum($0) }
+      if (blk && !(step && n < 8) && $0 !~ /^[[:space:]]/) insert()
+      flush_blanks()
+      print
+      if (step) blk = (n < 8)
+      else if ($0 !~ /^[[:space:]]/) blk = 0
+      next
+    }
+    { print }
+    END { if (insdlc) { insert(); flush_blanks() } }
+  ' "$file" > "$tmp" 2>/dev/null
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp"
+    _co_refuse "could not insert the Step-8 line into $file"
+  fi
+  mv "$tmp" "$file"
+}
+
+# walk_pointer_wanted <file> -> the `walk-artifact:` value to write into the Step-5 block, or nothing
+# (wave-33 T8; D8, AC-4.2). The walk gate reads the pointer from the Step-5 block (walls.sh
+# step5_evidence_block); `matrix-render` stubs one at the matrix head and the walk fills THAT. When the
+# plan owes a walk, has a Step-5 line, and that block names none while the matrix head names a real file,
+# the head's value is the one pointer there is. A stub (pending, <…>, n/a) is no pointer, and none is invented.
+walk_pointer_wanted() {
+  [ "$(plan_frontmatter_get "$1" walk)" != exempt ] || return 0
+  awk '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    /^## / { insdlc = ($0 ~ /^## SDLC State/); inmat = ($0 ~ /^## Verification Matrix/); b5 = 0; next }
+    insdlc && b5 && !/^[[:space:]]/ && !/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:/ { b5 = 0 }
+    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[[:space:]]*:/ { b5 = 0 }
+    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:/ { has5 = 1; b5 = 1 }
+    insdlc && b5 && /walk-artifact[[:space:]]*:/ { have = 1 }
+    inmat && !head && /^walk-artifact[[:space:]]*:/ {
+      v = $0; sub(/^walk-artifact[[:space:]]*:[[:space:]]*/, "", v); head = trim(v)
+    }
+    END {
+      l = tolower(head)
+      if (!has5 || have || head == "" || head ~ /^</ || l == "pending" || l == "tbd" || l == "todo" || l == "n/a" || l == "na" || l == "none" || l == "-" || l == "—") exit
+      print head
+    }' "$1"
+}
+
+# ensure_walk_pointer <file> -> the pointer written as a continuation line right under the Step-5 line.
+ensure_walk_pointer() {
+  local file="$1" v tmp="$1.walk.$$"
+  v="$(walk_pointer_wanted "$file")"
+  [ -n "$v" ] || return 0
+  CO_WALK="  walk-artifact: $v" awk '
+    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
+    { print }
+    insdlc && !done && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:/ { print ENVIRON["CO_WALK"]; done = 1 }
+  ' "$file" > "$tmp" 2>/dev/null
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp"
+    _co_refuse "could not write the walk pointer into $file"
+  fi
+  mv "$tmp" "$file"
 }
 
 # write_plan_blocks <8|9> [target] — the plan is written in TWO PHASES so the commit gate can judge
@@ -1006,6 +1218,13 @@ HANDOFF
 write_plan_blocks() {
   local phase="$1" target="${2:-$PLAN}"
   local tmp="$target.close-out.$$" step8
+  # PHASE 8 WRITES THE LINES IT READS BACK (wave-33 T8; D8, AC-4.2): the Step-8 line when the plan has
+  # none, and the walk pointer where the walk gate reads it. Both are done to the TARGET, which is the
+  # pre-flight's scratch copy on the first call, so a refusal still leaves the plan byte-for-byte as it was.
+  if [ "$phase" = 8 ]; then
+    ensure_step8_line "$target"
+    ensure_walk_pointer "$target"
+  fi
   step8="$(step8_block)"
   step9_present "$target" || step8="$step8"$'\n''- Step 9: (pending)'
   CO_PHASE="$phase" CO_STEP8="$step8" CO_STEP9="$(step9_block)" CO_HANDOFF="$(handoff_block)" awk '
@@ -1179,6 +1398,8 @@ presence_missing() {
   esac
   if [ -f "$EPIC_PLAN" ] && [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
     printf 'no | wave | table with a shipped column in %s for the wave %s row to be written into' "${EPIC_PLAN##*/}" "$WAVE_NUM"
+  elif [ -f "$EPIC_PLAN" ] && ! epic_has_row; then
+    epic_row_missing
   fi
   return 0
 }
@@ -1313,6 +1534,8 @@ do_check() {
     say "facts: WOULD REFUSE — $FACTS_WHY"
     [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
   fi
+  step8_present "$PLAN" || say 'step8: no Step 8 line in ## SDLC State — run writes it with the block (after the Step-7 block)'
+  [ -z "$(walk_pointer_wanted "$PLAN")" ] || say "walk: the Step-5 block names no walk-artifact: — run writes 'walk-artifact: $(walk_pointer_wanted "$PLAN")' there, from the matrix head"
   step9_present "$PLAN" || say 'step9: no Step 9 line in ## SDLC State — run writes `- Step 9: (pending)` with the Step-8 block'
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
@@ -1377,6 +1600,8 @@ do_check() {
     say "epic-row: none — no epic.plan.md beside this plan"
   elif epic_has_row; then
     say "epic-row: wave $WAVE_NUM is already listed in ${EPIC_PLAN##*/}"
+  elif [ -n "$(epic_row_missing)" ]; then
+    say "epic-row: WOULD REFUSE — $(epic_row_missing)"
   else
     say "epic-row: $(epic_row)"
   fi
@@ -1452,6 +1677,7 @@ do_run() {
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
   act_continuation; say "continuation: $CONT_LINE"
+                    say "$(co_owed_line)"
   act_epic;         say "epic-row: $EPIC_LINE"
                     say "patrol: $PATROL_LINE"
   # ORDER (critic2 N-3): Step-8 block -> gate dry-run -> Step-9 flip. The dry-run judges
@@ -1467,6 +1693,27 @@ do_run() {
   act_archive
   insert_archived
                     say "archived: $ARCHIVED_LINE"
+  co_deliver_notice
+}
+
+# THE DELIVERY CALLS THE PERSON (wave-33 T12; REQ-2 AC-2.3, D2). A run that reached `delivered:` and
+# was archived opens one item on this session's ledger, `delivered:<run>`, sends it once through the
+# one sender and closes it: it is news, not a need, so nothing stays owed. Only when a channel is
+# declared, so a machine without one writes no ledger and prints what 1.15.0 printed; silent either
+# way, and never fatal, so no send can change this script's output or its exit code. A second `run`
+# says `already closed` and never reaches here, which is what makes the notice once. With no session
+# id (a hand-run script) there is no ledger to key it on and nothing is sent.
+co_deliver_notice() {
+  local key
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  declare -F notify_declared >/dev/null 2>&1 || return 0
+  notify_declared || return 0
+  key="delivered:$(printf '%s' "$WAVE_SLUG" | tr -c 'A-Za-z0-9._-' '-')"
+  OWED_ROOT="$ROOT" OWED_SID="$CO_SID" owed_open "$key" "delivered: $WAVE_SLUG" \
+    "close-out: step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}" >/dev/null 2>&1 || return 0
+  OWED_ROOT="$ROOT" OWED_SID="$CO_SID" owed_send delivered: >/dev/null 2>&1
+  OWED_ROOT="$ROOT" OWED_SID="$CO_SID" owed_close "$key" delivered >/dev/null 2>&1
+  return 0
 }
 
 case "$VERB" in

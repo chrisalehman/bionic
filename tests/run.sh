@@ -55,7 +55,8 @@
 # `BIONIC_TEST_JOBS` by hand. `BIONIC_TEST_JOBS` is retired as an input for
 # exactly that reason: a literal a caller fixes cannot answer "how busy is the
 # machine right now". A caller who still sets it is told once, on stderr, and
-# ignored rather than silently overridden.
+# ignored rather than silently overridden. A whole run reads it once the gate has admitted it
+# (wave-33 T5; D4), so a run that waited reads the machine it was admitted to.
 #
 # WHY IT IS SAFE TO RUN THEM AT ONCE. Not by assumption — by audit. Epic-17 W7 S8
 # read every suite in this roster for fixture root, every write outside it and every
@@ -145,14 +146,38 @@ _gate_load() {  # rc 0 once lib/gate.sh is loaded
 # when nothing was asked) and _GATE_OWN (1 when this shell holds the request, 0 when the gate
 # believed an ancestor's admission). Its `$$` is the holder: call it from the shell that stays
 # alive for the suite, and end the request from the same one.
+#
+# rc 75: THE ASKING AGENT'S BUDGET REFUSED IT (wave-33 T3; D7, AC-6.2). An ask with no time limit
+# ends 75 only so (lib/gate.sh THE BUDGET), and the suite or run is not started: _GATE_REFUSAL holds
+# the budget's own line for the report. Any other failure to ask runs unadmitted, as before.
+_GATE_REFUSAL=""
 _gate_ask_for() {
-  _GATE_ID=""; _GATE_OWN=0
+  local _rc
+  _GATE_ID=""; _GATE_OWN=0; _GATE_REFUSAL=""
   _gate_load || return 0
-  _GATE_ID="$(gate_ask "$1" "$2")" || { _GATE_ID=""; return 0; }
+  _GATE_ID="$(gate_ask "$1" "$2")"; _rc=$?
+  if [ "$_rc" -eq 75 ]; then
+    _GATE_ID=""
+    _GATE_REFUSAL="$(gate_budget "$1" "$2")"
+    [ -n "$_GATE_REFUSAL" ] || _GATE_REFUSAL="bionic: $2 refused at the gate (75); nothing ran"
+    return 75
+  fi
+  [ "$_rc" -eq 0 ] || { _GATE_ID=""; return 0; }
   case "$(sed -n 's/^holder=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" in
     "$$:"*) _GATE_OWN=1 ;;
   esac
   return 0
+}
+_SUITE_LOADED=""
+_suite_load() {  # rc 0 once the plugin's suite primitive (lib/suite.sh, wave-33 T2) is loaded
+  if [ -z "$_SUITE_LOADED" ]; then
+    _SUITE_LOADED=no
+    if [ -r "$REPO/payload/scripts/lib/suite.sh" ]; then
+      # shellcheck source=/dev/null
+      . "$REPO/payload/scripts/lib/suite.sh" && declare -F bionic_suite_exec >/dev/null 2>&1 && _SUITE_LOADED=yes
+    fi
+  fi
+  [ "$_SUITE_LOADED" = yes ]
 }
 _gate_end_for() {  # <rc> — the request this shell holds is over
   [ "$_GATE_OWN" -eq 1 ] || return 0
@@ -179,17 +204,34 @@ if [ "${1:-}" = "--one" ]; then
   # under --only. In a whole run it inherits the run's one admission (wave-32 T2), which the gate
   # believes for a descendant of its holder, so it asks nothing and ends nothing; a solo suite's
   # worker inherits the admission its drain hands it the same way.
-  _gate_ask_for work "$_one_label"
-  [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
+  if ! _gate_ask_for work "$_one_label"; then
+    # REFUSED AT THE ASK (wave-33 T3): never run. The verdict reads <label>.budget, as it reads an
+    # adoption refusal, and the line is the capture.
+    printf '%s\n' "$_GATE_REFUSAL" | tee "$_one_work/${_one_label}.budget" >"$_one_work/${_one_label}.out"
+    printf '75\n' >"$_one_work/${_one_label}.rc"
+    printf '%s\n' "$_one_label" >>"$_one_work/landed"
+    exit 0
+  fi
   _one_start="$(date +%s)"
-  # Deliberately unquoted. The queued string is a roster line's own words
-  # (`bash tests/foo.test.sh`), written in this file — never outside input.
   # THE SCRUB (wave-30 T9; AC-4.2): this worker keeps BIONIC_GATE_DIR for its own ask and end above and
   # below, but the SUITE PROCESS runs without it. A suite that read the run's store through the
   # inherited variable (the doctor-reads checks did) read a store it did not make; a suite that
   # wants one makes its own fixture. The --serial path below scrubs at its own exec the same way.
-  # shellcheck disable=SC2086
-  env -u BIONIC_GATE_DIR $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  # THE PLUGIN'S PRIMITIVE (wave-33 T2; D3): when the plugin library is in this tree, the suite runs
+  # through lib/suite.sh `bionic_suite_exec`, the one way a landing starts a suite too: the scrub, the
+  # admission handed down, stdin closed. The queued string is a roster line's own words, `bash
+  # tests/<name>` (the roster wall refuses a name with a space), so its path is the suite's.
+  _one_suite="${_one_cmd#bash }"
+  if [ "$_one_suite" != "$_one_cmd" ] && [ -n "$_one_suite" ] && [ "${_one_suite#* }" = "$_one_suite" ] && _suite_load; then
+    bionic_suite_exec ${_GATE_ID:+--admit "$_GATE_ID"} "$REPO" "$_one_suite" >"$_one_work/${_one_label}.out" 2>&1
+  else
+    # A tree without the library: the runner's own path, the same environment.
+    # Deliberately unquoted. The queued string is a roster line's own words
+    # (`bash tests/foo.test.sh`), written in this file — never outside input.
+    [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
+    # shellcheck disable=SC2086
+    env -u BIONIC_GATE_DIR $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  fi
   _one_rc=$?
   _gate_end_for "$_one_rc"
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
@@ -481,9 +523,10 @@ _is_solo_suite() {  # <file> -> 0 if it declares `# runner: solo` in its first 3
 # writes nothing). Before this fix the sample below ran unconditionally, so
 # `--dry-run` — documented above and at `-h` as "print the job width and exit;
 # run nothing" — quietly appended one line to the machine's pressure ring on
-# every invocation. The real (non-dry) path below still samples first, exactly
-# as AC-15 requires of every consumer; only the dry-run path is exempted, and it
-# reads the rung the ring already carries instead.
+# every invocation. The real (non-dry) path below still samples once before it reads, exactly
+# as AC-15 requires of every consumer (a whole run does so after its admission is granted,
+# wave-33 T5); only the dry-run path is exempted, and it reads the rung the ring already
+# carries instead.
 if [ -n "${BIONIC_TEST_JOBS:-}" ]; then
   echo "tests/run.sh: BIONIC_TEST_JOBS is retired — width now comes from the machine's pressure rung; set BIONIC_TEST_JOBS_CEILING to change the ceiling it reads against. The value you set (${BIONIC_TEST_JOBS}) is ignored." >&2
 fi
@@ -500,28 +543,47 @@ if ! declare -F pressure_level >/dev/null 2>&1; then
   echo "tests/run.sh: no width oracle — payload/scripts/lib/resources.sh did not load, so pressure_level is not defined. Nothing was run." >&2
   exit 2
 fi
-if [ "$DRY_RUN" -eq 0 ]; then
-  pressure_sample >/dev/null 2>&1 || :
-fi
+# _runner_width [sample] — sets JOBS (and _WIDTH, _ceiling): with `sample`, takes one reading into
+# the ring first, then reads the rung over the ring against the ceiling. The one width read and
+# the one sample site in this runner.
+#
 # THE WIDTH IS THE SHARE'S ROOM (wave-32 T2; D1, ADR-051). The rung reads against the gate's own
 # width, `gate_width` = floor(share × cores ÷ 100), 7 at share 92 on 8 cores: a whole run is
 # admitted alone (THE ONE ADMISSION, below), and this is how many workers the share has room for.
 # The runner keeps no width of its own; BIONIC_TEST_JOBS_CEILING is a cap UNDER the width, never a
 # raise above it. A tree without the gate library (a scratch copy of this runner) reads against
 # the old default of 8, as before.
-_WIDTH=8
-if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
-case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
-_ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
-if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
-JOBS="$(pressure_level "$_ceiling")"
-# A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The default
-# above covers an UNSET variable and nothing else: `pressure_level` refuses a ceiling that
-# is not a positive integer with exit 2 and prints nothing on stdout, so `JOBS` came out
-# empty and `xargs -P ""` aborted the whole run. This file runs under `set -uo pipefail`
-# with no `-e`, so the refusal was silent apart from `pressure_level`'s own stderr line —
-# which is still printed, and is the explanation for this fallback to the width.
-case "$JOBS" in ''|*[!0-9]*) JOBS=$_WIDTH ;; esac
+#
+# WHEN IT IS READ (wave-33 T5; D4, AC-8.3). A whole run (no --only, no --serial, no --dry-run)
+# reads it AFTER its one admission is granted, with a fresh sample, at THE ONE ADMISSION below: a
+# run that waited behind other work on a busy machine runs at the width of the machine it was
+# admitted to, not the one it found when it asked. Every other mode reads it here, as before:
+# --dry-run takes no admission and samples nothing (it reads the ring as it stands), and --only
+# and --serial ask per suite and hold nothing to wait on.
+_runner_width() {
+  if [ "${1:-}" = sample ]; then
+    pressure_sample >/dev/null 2>&1 || :
+  fi
+  _WIDTH=8
+  if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
+  case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
+  _ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
+  if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
+  JOBS="$(pressure_level "$_ceiling")"
+  # A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The default
+  # above covers an UNSET variable and nothing else: `pressure_level` refuses a ceiling that
+  # is not a positive integer with exit 2 and prints nothing on stdout, so `JOBS` came out
+  # empty and `xargs -P ""` aborted the whole run. This file runs under `set -uo pipefail`
+  # with no `-e`, so the refusal was silent apart from `pressure_level`'s own stderr line —
+  # which is still printed, and is the explanation for this fallback to the width.
+  case "$JOBS" in ''|*[!0-9]*) JOBS=$_WIDTH ;; esac
+}
+JOBS=""
+if [ "$DRY_RUN" -eq 1 ]; then
+  _runner_width
+elif [ "$ONLY" -eq 1 ] || [ "$SERIAL" -eq 1 ]; then
+  _runner_width sample
+fi
 
 # ── THE ROSTER RUNS LONGEST-FIRST (wave-30 T10; D8a, REQ-5 AC-5.2) ───────────
 #
@@ -713,7 +775,7 @@ _wall_suite() {
   printf '%s' "$suite"
 }
 
-pass=0; fail=0; failed=""
+pass=0; fail=0; failed=""; budget=0
 void=0; voided=""
 
 # Opt-in, and opt-in on purpose: no per-suite timing has ever existed (W7 S8
@@ -756,6 +818,15 @@ _verdict() {
   local label="$1" rc="$2" out="$3" sig="" lost="" vwhy="" also=""
   # The adoption wall refused this suite before it ran (S10). It never had an
   # exit status, so it is judged from the refusal the wall left behind.
+  # REFUSED AT THE GATE'S ASK by the asking agent's budget (wave-33 T3; D7): never run, so it
+  # has no verdict of its own; counted as failed, and as a refusal the exit code tells apart.
+  if [ -f "$TMP/${label}.budget" ]; then
+    echo "✗ REFUSED (the budget, at the gate's ask; never run)"
+    fail=$((fail+1)); budget=$((budget+1))
+    failed="${failed}\n    - ${label} (refused by the budget at the gate's ask, never run)"
+    cat "$TMP/${label}.budget"
+    return
+  fi
   if [ -f "$TMP/${label}.refused" ]; then
     echo "✗ REFUSED (the adoption wall)"
     fail=$((fail+1))
@@ -831,7 +902,8 @@ run() {  # run <label> <cmd...>   — gating
     start="$(date +%s)"
     # Asked per suite here too (T12), in a subshell: its `$$` is this runner's, which stays
     # alive for the suite, and its `times` hold that suite's children only, for gate_end.
-    ( _gate_ask_for work "$label"
+    ( _gate_ask_for work "$label" \
+        || { printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"; exit 75; }
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
       env -u BIONIC_GATE_DIR "$@" >"$TMP/${label}.out" 2>&1   # the scrub (T9): the ask above keeps the store, the suite does not
       _sr=$?
@@ -908,10 +980,17 @@ if [ "$SERIAL" -eq 0 ]; then
   # asks for itself and runs unadmitted, as before.
   _RUN_GATE_ID=""; _RUN_GATE_OWN=0
   if [ "$ONLY" -eq 0 ] && { [ -s "$LAUNCH" ] || [ -s "$SOLO" ]; }; then
-    _gate_ask_for whole tests/run.sh
+    if ! _gate_ask_for whole tests/run.sh; then
+      # A WHOLE RUN THE ASKING AGENT'S BUDGET DOES NOT CARRY (wave-33 T3; D7, AC-6.2): nothing ran.
+      printf '%s\n' "$_GATE_REFUSAL"
+      exit 75
+    fi
     _RUN_GATE_ID="$_GATE_ID"; _RUN_GATE_OWN="$_GATE_OWN"
     [ -z "$_RUN_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_RUN_GATE_ID"
   fi
+  # THE WIDTH AFTER THE GRANT (wave-33 T5; D4, AC-8.3): a whole run sizes its workers now, from a
+  # fresh sample, once the machine is its own (_runner_width, above). --only read it at the top.
+  [ "$ONLY" -eq 1 ] || _runner_width sample
   [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
   # THEN THE SOLO SUITES, ONE AT A TIME, ON THE NOW-IDLE RUNNER (T20, A-orch-28).
   # Reuses the exact `--one` worker every parallel suite already runs through —
@@ -1023,7 +1102,12 @@ if [ "$SERIAL" -eq 0 ]; then
       # one ceiling counts from its turn.
       _GATE_OWN=0
     else
-      _gate_ask_for whole "$label"
+      if ! _gate_ask_for whole "$label"; then
+        _solo_clear "$label"
+        printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"
+        printf '75\n' >"$TMP/${label}.rc"
+        return 0
+      fi
       if [ -z "$_GATE_ID" ]; then
         why="the store $(gate_dir) could not be written, so the whole machine was not had"
         _solo_one "$label"
@@ -1193,6 +1277,9 @@ fi
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
+  # EVERY FAILURE A BUDGET REFUSAL (wave-33 T3; D7): exit 75, the gate's own code for a run it did
+  # not start, so a caller tells "refused" from "red". A suite that failed is still exit 1.
+  [ "$budget" -ne "$fail" ] || exit 75
   exit 1
 fi
 if [ "$void" -ne 0 ]; then

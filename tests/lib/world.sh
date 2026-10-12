@@ -11,7 +11,7 @@
 #   world_machine <cores> <total_mb> <used_pct> <busy_cores> [<busy_5m>]  exports the readers' pins
 #   world_clock <epoch>                                        plants the clock file
 #   world_tick <seconds>                                       moves it forward
-#   world_cost <key> <mem_pct> <cores> <seconds>               appends to cost/<key>
+#   world_cost <key> <seconds>                                 appends to cost/<project>%<key>
 #   world_repo                                                 prints a fixture repo's root
 #   world_suite <name> <green|red|none|kill>                   writes tests/<name>.test.sh
 #   world_verbs                                                prints the verb log's path
@@ -151,19 +151,30 @@ world_tick() {
   _world_put_clock "$BIONIC_NOW_FILE" "$(( now + $1 ))"
 }
 
-# world_cost <key> <mem_pct> <cores> <seconds> — appends `<mem>:<cores>:<seconds>:<epoch>` to
-# the gate store's `cost/<key>`, the epoch read from `_res_now`, and keeps the newest three
-# lines (the plan's cost row). The key is the file's name, so it may not hold a slash.
+# world_cost <key> <seconds> — appends `<seconds>:<epoch>` to the gate store's keyed duration
+# file for <key> in the CURRENT directory's project, `cost/<project>%<key>`, the project key the
+# gate's own (`_gate_project`), the epoch read from `_res_now`, and keeps the newest three lines.
+# The gate records only durations (wave-33 T1; D4 as amended, Δ10). The 1.15.0 form,
+# `world_cost <key> <mem_pct> <cores> <seconds>`, is still taken, its mem_pct and cores checked
+# and not recorded: nothing reads them. The key is a file name, so it may not hold a slash.
 world_cost() {
-  local key="${1:-}" f
+  local key="${1:-}" secs f pk
   case "$key" in
     ''|*/*) _world_refuse world_cost "key must be a file name, got '$key'"; return 2 ;;
   esac
-  _world_is_num "${2:-}" && _world_is_num "${3:-}" && _world_is_num "${4:-}" \
-    || { _world_refuse world_cost "mem_pct, cores and seconds must be decimals ≥ 0"; return 2; }
+  case "$#" in
+    2) secs="$2" ;;
+    4) _world_is_num "$2" && _world_is_num "$3" \
+         || { _world_refuse world_cost "mem_pct and cores must be decimals ≥ 0"; return 2; }
+       secs="$4" ;;
+    *) _world_refuse world_cost "takes <key> <seconds>, or <key> <mem_pct> <cores> <seconds>"; return 2 ;;
+  esac
+  _world_is_num "$secs" || { _world_refuse world_cost "seconds must be a decimal ≥ 0, got '$secs'"; return 2; }
+  pk="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/gate.sh" 2>/dev/null && _gate_project )"
+  [ -n "$pk" ] || { _world_refuse world_cost "no project key: payload/scripts/lib/gate.sh did not load"; return 1; }
   mkdir -p "$BIONIC_GATE_DIR/cost" || return 1
-  f="$BIONIC_GATE_DIR/cost/$key"
-  printf '%s:%s:%s:%s\n' "$2" "$3" "$4" "$(_res_now)" >> "$f"
+  f="$BIONIC_GATE_DIR/cost/${pk}%${key}"
+  printf '%s:%s\n' "$secs" "$(_res_now)" >> "$f"
   tail -n 3 "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 }
 

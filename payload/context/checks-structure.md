@@ -11,7 +11,7 @@ Is the change built from what already exists, and shaped well? Read the code in 
 ## Inputs
 
 - The writers' records. Each new function, file, type or configuration key carries a `reuse:` line: the search run, and what was reused or why none fits. Re-run the search; do not take the claim.
-- The design's ownership table, where the run has one. Its owner column says where each concept lives, so `reuse` and `one-site` are a comparison, not a hunt. A concept the change introduced that the table never named is a FLAG against the design, not the code.
+- The design's ownership table, where the run has one. Its owner column says where each concept lives. A concept the change introduced that the table never named is a FLAG against the design, not the code.
 - With no table, search the codebase yourself for each new site, by name and by what it does. No table is never a reason to pass.
 
 ## The checks
@@ -33,11 +33,11 @@ You may raise these as findings when their case holds. They are not checks: writ
 
 ## A whole read
 
-When the range is the whole run (`scope: whole`), read only what the pieces duplicate between them; this is not a second read of each piece. Ask `reuse` and `one-site` when two pieces each added a site for one concept; a check no cross-piece case can reach is `n/a`. How the pieces interact is the adversarial reader's.
+When the range is the whole run (`scope: whole`), read only what the pieces duplicate between them. Ask `reuse` and `one-site` when two pieces each added a site for one concept; a check no cross-piece case can reach is `n/a`. How the pieces interact is the adversarial reader's.
 
 ## The record
 
-Write one file under `record/`, these lines flush left, one `check:` line for `reuse` and one for `one-site`:
+Write one file under `record/`, these lines flush left:
 
 ```
 reviewed: <a>..<b>
@@ -47,5 +47,5 @@ scope: <piece|whole>
 check: <id> <PASS|FLAG|FAIL|n/a> <reason>
 ```
 
-`<a>..<b>` is the range you read; `b` is the head your answer is about. Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks.
+`<a>..<b>` is the range you read; `b` is the head your answer is about. Rate each finding, write its lines and set `result` by `severity.md`, pushed to you with these checks; its second axis is `user-facing: will a user experience it, including its consequence? yes or no`, recorded `on` or `off`.
 <!-- CHECKS-STRUCTURE-END -->

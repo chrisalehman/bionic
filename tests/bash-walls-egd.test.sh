@@ -278,7 +278,7 @@ expect_eq "EGD-mut3 the per-reading copy derives the same lines (the extractor r
   "$(awk -F'\t' '$2 == "fail" && $3 == "flag"' "$SANDBOX/egd-derived.out" | grep -c .)"
 expect_eq "EGD-mut4 …but not in under $EGD_BOUND_MS ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" "$EGD_BOUND_MS" | cut -c1-4)"
 # (3) nothing binds, yet the collector hands the lines over: the no-binding-line exit removed
-EGD_NB='if (!nbind) exit'
+EGD_NB='if (!nbind && ENVIRON["PROOF_HAS_FIXED"] == "") exit'
 anchor "$EGD_SCRIPTS/lib/proof.sh" "$EGD_NB" 1
 EGD_MB="$SANDBOX/egd-mut-bind"; rm -rf "$EGD_MB"; cp -R "$EGD_SCRIPTS" "$EGD_MB"
 EGD_N_="$EGD_NB" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if (0) exit" substr($0, i + length(n)); print }' \

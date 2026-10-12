@@ -2011,10 +2011,6 @@ expect_eq "17d.13 an empty status cell is a status finding spelled (empty)" "sta
   "$(call units_findings "$SANDBOX/ledger-empty-status.md" "$SANDBOX/ledger.roster")"
 expect_eq "17d.14 no table, no findings, exit 0" "0" "$(call_rc units_findings "$SANDBOX/no-such.md" "")"
 
-# THE LOOKUP THE GATE'S ADDRESSED-UNIT ARM COUNTS (it moved here from walls.sh's
-# missing_evidence_ids): every T-row with no non-empty `- T<n>:` line, whatever its status.
-expect_eq "17d.15 units_unlined names every T-row short of a line, table order, the fenced and empty ones included" \
-  "$(printf 'T2\nT3\nT4\nT5\nT6\nT7\nT8\nT9\nT10')" "$(call units_unlined "$SANDBOX/ledger.md")"
 # CR-ONLY INPUT (the gate's 19j-cr pin): the reader translates line endings itself.
 tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
 expect_eq "17d.16 a CR-only plan reads the same" \
@@ -4356,5 +4352,201 @@ expect_eq "OS-3b …exit 0" "0" "$(call_rc units_validate "$OS_R4/$OS_PLAN_REL")
 sed 's/| b.sh | — | — | pending |/| b.sh | — | — | done |/' "$OS_R4/$OS_PLAN_REL" > "$SANDBOX/os-done.md"
 expect_eq "OS-3c …and the retired word done is named on the same table (the reader reads it)" \
   "T2: status done is not one of pending active landed dropped" "$(call units_validate "$SANDBOX/os-done.md")"
+section "§DEBT — wave-33 T16: each doctrine debt pair is one site or holds an agreement check that goes red on a doctored copy; the second axis is asked as a question (REQ-9 AC-9.1, AC-9.5; D10)"
+# fails-when: a debt pair stands unburned, or its check passes with the two readers made to disagree
+# (a doctored copy is read by the SAME function as the shipped file, and must be told apart); or a
+# reader's checks still define the axis without the question, or a recorded token changes.
+#
+# Every check reads the SHIPPED text (the rendered files under skills/ and payload/context/), the
+# files a session loads, and never the sources they are rendered from. Each is a function of a path,
+# so the doctored copy under $SANDBOX goes through the code the real file does; a positive count on
+# the shipped file sits beside every negative one on the doctored copy.
+DBT="$SANDBOX/debt"; mkdir -p "$DBT/steps"
+DBT_SKILL="$REPO_ROOT/skills/canonical-sdlc/SKILL.md"
+DBT_STEP6="$REPO_ROOT/skills/canonical-sdlc/steps/6.md"
+DBT_SEV="$REPO_ROOT/payload/context/severity.md"
+DBT_RUN="$REPO_ROOT/payload/scripts/lib/run.sh"
+DBT_PROOF="$REPO_ROOT/payload/scripts/lib/proof.sh"
+
+# dbt_count <fixed string> <file>… -> the number of lines holding the string, across the files.
+dbt_count() { local s="$1"; shift; cat "$@" | /usr/bin/grep -cF -- "$s"; }
+
+# --- p1-sentence: the cost-model sentence is said once; Step 6 points at it -------------------
+P1='mind checks run once, on the settled whole'
+expect_eq "DEBT-1 p1-sentence: the cost-model sentence stands at one site in the core and the steps" "1" \
+  "$(dbt_count "$P1" "$DBT_SKILL" "$REPO_ROOT"/skills/canonical-sdlc/steps/*.md)"
+cp "$DBT_SKILL" "$DBT/SKILL.md"; cp "$DBT_STEP6" "$DBT/steps/6.md"
+printf 'The moment of a check is set by its cost model: machine checks run early and often, %s.\n' "$P1" >> "$DBT/steps/6.md"
+expect_eq "DEBT-1b …and a second copy planted in Step 6 is counted as two" "2" "$(dbt_count "$P1" "$DBT/SKILL.md" "$DBT"/steps/*.md)"
+
+# --- debt-line-rule: the debt line's form is stated once, in its own section -------------------
+# dbt_debt_prose <severity.md> -> the lines that state the form in prose: it names the form and does
+# not start with it. The form itself is the flush-left lines in the example block.
+dbt_debt_prose() { /usr/bin/grep -F 'debt: <kind>' "$1" | /usr/bin/grep -vc '^debt: '; }
+expect_nonempty "DEBT-2 positive: the debt line's form stands flush left in the shipped severity text" \
+  "$(/usr/bin/grep '^debt: <kind> <concept> <path>:<line>' "$DBT_SEV")"
+expect_eq "DEBT-2b debt-line-rule: no prose restates the form" "0" "$(dbt_debt_prose "$DBT_SEV")"
+{ cat "$DBT_SEV"; printf -- '- A debt finding is one line flush left: `debt: <kind> <concept> <path>:<line>`.\n'; } > "$DBT/severity.md"
+expect_eq "DEBT-2c …and a prose copy planted is counted" "1" "$(dbt_debt_prose "$DBT/severity.md")"
+
+# --- debt-kinds: the kinds the debt table lists are PROOF_DEBT_KINDS, in order -----------------
+# dbt_table_kinds <severity.md> -> the first cell of each row of the table headed `| Kind |`.
+dbt_table_kinds() {
+  awk -F'|' '/^\| Kind \|/ { t = 1; next } t && /^\|---/ { next } t && /^\|/ { gsub(/^ +| +$/, "", $2); k = k (k == "" ? "" : " ") $2; next } t { exit } END { print k }' "$1"
+}
+DBT_KINDS_CODE="$(bash -c '. "$1" >/dev/null 2>&1; printf %s "$PROOF_DEBT_KINDS"' _ "$DBT_PROOF")"
+expect_nonempty "DEBT-3 positive: the code names its debt kinds" "$DBT_KINDS_CODE"
+expect_nonempty "DEBT-3b positive: the debt table lists kinds" "$(dbt_table_kinds "$DBT_SEV")"
+expect_eq "DEBT-3c debt-kinds: the table lists exactly the kinds the code reads, in order" "$DBT_KINDS_CODE" "$(dbt_table_kinds "$DBT_SEV")"
+sed 's/^| unpinned-pair |/| unpinned-set |/' "$DBT_SEV" > "$DBT/severity.md"
+expect_ne "DEBT-3d …and a renamed kind in a copy of the table disagrees with the code" "$DBT_KINDS_CODE" "$(dbt_table_kinds "$DBT/severity.md")"
+
+# --- review-defaults: the rigor table's defaults are the ones run.sh applies -------------------
+# dbt_rigor_prose <SKILL.md> -> `<cadence>|<policy>|<cap at single>|<cap at double>` as the table
+# reads, in the shape run.sh gives them: the first word of a cell, a `+` joined with a comma.
+dbt_rigor_prose() {
+  awk -F'|' '
+    function cell(s) { gsub(/^ +| +$/, "", s); return s }
+    /^\| when \(`review-cadence:`\)/ { c = cell($3); sub(/[, ].*/, "", c) }
+    /^\| becomes a row unasked \(`fix-policy:`\)/ { p = cell($3); sub(/,.*/, "", p); gsub(/ \+ /, ",", p) }
+    /^\| cap on review-born rows \(`fix-cap:`\)/ { s = cell($3); d = cell($4); sub(/ .*/, "", d) }
+    END { print c "|" p "|" s "|" d }' "$1"
+}
+DBT_RIGOR_CODE="$(bash -c '. "$1" >/dev/null 2>&1; printf %s "$REVIEW_CADENCE_DEFAULT|$FIX_POLICY_DEFAULT|$(fix_cap_default single)|$(fix_cap_default double)"' _ "$DBT_RUN")"
+expect_eq "DEBT-4 positive: run.sh gives the four defaults" "once|S1,S2-on|2|10%" "$DBT_RIGOR_CODE"
+expect_eq "DEBT-4b review-defaults: the core's rigor table reads the defaults run.sh applies" "$DBT_RIGOR_CODE" "$(dbt_rigor_prose "$DBT_SKILL")"
+sed 's/| 2 | 10% of the plan |/| 3 | 10% of the plan |/' "$DBT_SKILL" > "$DBT/SKILL.md"
+expect_ne "DEBT-4c …and a cap doctored in a copy of the table disagrees" "$DBT_RIGOR_CODE" "$(dbt_rigor_prose "$DBT/SKILL.md")"
+sed 's/| S1 + S2-on, in-diff | S1 + S2-on, in-diff |/| S1 + S2, in-diff | S1 + S2, in-diff |/' "$DBT_SKILL" > "$DBT/SKILL.md"
+expect_ne "DEBT-4d …and a policy doctored in a copy of the table disagrees" "$DBT_RIGOR_CODE" "$(dbt_rigor_prose "$DBT/SKILL.md")"
+
+# --- the finding line's form (repayment, wave-33 T16): said once, in the severity text the readers are handed
+# dbt_form_files <file>… -> how many of the files state the finding line's form.
+dbt_form_files() { local n=0 f; for f in "$@"; do /usr/bin/grep -qF 'finding: <n> <S1|S2|S3|S4>' "$f" && n=$((n + 1)); done; echo "$n"; }
+expect_eq "DEBT-6 positive: the severity text states the finding line's form" "1" "$(dbt_form_files "$DBT_SEV")"
+expect_eq "DEBT-6b the finding line's form stands at one site in the loaded doctrine" "1" \
+  "$(dbt_form_files "$DBT_SKILL" "$REPO_ROOT"/skills/canonical-sdlc/steps/*.md "$REPO_ROOT"/skills/canonical-sdlc/dispatch.md "$REPO_ROOT"/skills/canonical-sdlc/operational-rules.md "$REPO_ROOT"/agents/*.md "$REPO_ROOT"/payload/context/*.md)"
+cp "$DBT_STEP6" "$DBT/steps/6.md"; printf 'one `finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line> <title>` per finding\n' >> "$DBT/steps/6.md"
+expect_eq "DEBT-6c …and a copy planted in Step 6 is counted as a second site" "2" "$(dbt_form_files "$DBT_SEV" "$DBT/steps/6.md")"
+
+# --- AC-9.5: the second axis is asked as a question, recorded on/off, in the table and each reader's checks
+AXIS='user-facing: will a user experience it, including its consequence? yes or no'
+for dbt_f in severity checks-adversarial checks-evidence checks-structure; do
+  expect_nonempty "DEBT-5 AC-9.5 payload/context/$dbt_f.md asks the axis as the question" \
+    "$(/usr/bin/grep -F -- "$AXIS" "$REPO_ROOT/payload/context/$dbt_f.md")"
+  expect_eq "DEBT-5b …and no line defines the axis as reach" "0" \
+    "$(/usr/bin/grep -ciE '(^|[^a-z])reach (says|`o)|severity and reach|reach and severity' "$REPO_ROOT/payload/context/$dbt_f.md")"
+done
+expect_eq "DEBT-5b2 …and the severity text, which is the axis's one definition, carries no word reach" "0" "$(/usr/bin/grep -ciw reach "$DBT_SEV")"
+expect_eq "DEBT-5c the severity table's columns are the question's answers, recorded on and off" \
+  '| | user-facing `on` | user-facing `off` |' "$(/usr/bin/grep -F 'user-facing `on`' "$DBT_SEV")"
+expect_contains "DEBT-5d the tokens are unchanged: the finding line still records <on|off>" \
+  'finding: <n> <S1|S2|S3|S4> <on|off> <path>:<line> <title>' "$(cat "$DBT_SEV")"
+expect_eq "DEBT-5e …and the code's closed set of answers is still on and off" "on off" \
+  "$(bash -c '. "$1" >/dev/null 2>&1; printf %s "$PROOF_REACHES"' _ "$DBT_PROOF")"
+
+section "§DEBT-CODE — wave-33 T15: each code debt line is one site, or holds an agreement check that goes red on a doctored copy (REQ-9 AC-9.1, AC-9.2; D10)"
+# fails-when: a duplicate stands at a second site (a copy planted in a sandbox copy is counted as another), or a
+# reader of a pair is made to disagree with the other and the check still passes. Every count is a function of a
+# path, so the doctored copy goes through the code the shipped file does, and a positive count on the shipped
+# file sits beside every negative one.
+DBC="$SANDBOX/debt-code"; mkdir -p "$DBC"
+DBC_WIDTH="$REPO_ROOT/payload/scripts/lib/width.sh"
+DBC_RUN="$REPO_ROOT/payload/scripts/lib/run.sh"
+
+# --- utf8-char-step: ONE helper takes one whole UTF-8 character; its three callers do not repeat the walk ---
+# The step is the continuation-byte class (0x80-0xBF) after a lead byte. It is spelled once, in the helper.
+IFS= read -r DBC_CONT <<'CONTEOF'
+[$'\200'-$'\277']*)
+CONTEOF
+dbc_cont_sites() { /usr/bin/grep -cF -- "$DBC_CONT" "$1"; }
+expect_eq "DBC-1 utf8-char-step: the continuation-byte step is spelled at one site in width.sh" "1" "$(dbc_cont_sites "$DBC_WIDTH")"
+{ cat "$DBC_WIDTH"; printf '      %s r="${r:1}" ;;\n' "$DBC_CONT"; } > "$DBC/width.sh"
+expect_eq "DBC-1b …and a copy of the step planted in a sandbox copy is counted as a second site" "2" "$(dbc_cont_sites "$DBC/width.sh")"
+expect_eq "DBC-1c …and the three callers call the helper (bionic_trunc once, _bionic_head_cols twice)" "3" \
+  "$(/usr/bin/grep -c '_bionic_char_into ' "$DBC_WIDTH" | tr -d ' ')"
+
+# --- regression-setting-read: the plan's `regression:` key is read by ONE function, lib/run.sh plan_regression ---
+dbc_plan() {  # <name> <frontmatter line…> -> a plan file whose leading frontmatter holds exactly those lines
+  local f="$DBC/$1.plan.md"; shift
+  { printf -- '---\n'; printf '%s\n' "$@"; printf -- '---\n# a plan\n'; } > "$f"; printf '%s' "$f"
+}
+dbc_reg() { bash -c '. "$1"; plan_regression "$2"' _ "$DBC_RUN" "$1" 2>/dev/null; }
+dbc_proof_reg() { bash -c '. "$1"; . "$2"; proof_regression "$3"' _ "$DBC_RUN" "$REPO_ROOT/payload/scripts/lib/proof.sh" "$1" 2>/dev/null; }
+DBC_P_NO="$(dbc_plan reg-no 'scale: wave' 'regression: no')"
+DBC_P_YES="$(dbc_plan reg-yes 'scale: wave' 'regression: yes')"
+DBC_P_ABS="$(dbc_plan reg-abs 'scale: wave')"
+DBC_P_QNO="$(dbc_plan reg-qno 'scale: wave' 'regression: "no"')"
+DBC_P_SP="$(dbc_plan reg-sp 'scale: wave' '  regression :   no   ')"
+DBC_P_OVR="$(dbc_plan reg-ovr 'scale: wave' 'regression-override: Test User derived=yes chosen=no')"
+DBC_P_CAP="$(dbc_plan reg-cap 'scale: wave' 'regression: No')"
+DBC_P_ODD="$(dbc_plan reg-odd 'scale: wave' 'regression: maybe')"
+DBC_P_EMPTY="$(dbc_plan reg-empty 'scale: wave' 'regression:')"
+DBC_P_CRLF="$DBC/reg-crlf.plan.md"; printf -- '---\r\nscale: wave\r\nregression: no\r\n---\r\n# a plan\r\n' > "$DBC_P_CRLF"
+DBC_P_BODY="$DBC/reg-body.plan.md"; printf -- '---\nscale: wave\n---\n# a plan\nregression: no\n' > "$DBC_P_BODY"
+expect_eq "DBC-2 regression-setting-read: plan_regression reads exactly 'no' as no" "no" "$(dbc_reg "$DBC_P_NO")"
+expect_eq "DBC-2b …yes as yes" "yes" "$(dbc_reg "$DBC_P_YES")"
+expect_eq "DBC-2c …a quoted \"no\" as no" "no" "$(dbc_reg "$DBC_P_QNO")"
+expect_eq "DBC-2d …a spaced key and value as no" "no" "$(dbc_reg "$DBC_P_SP")"
+expect_eq "DBC-2e …a CRLF plan as no" "no" "$(dbc_reg "$DBC_P_CRLF")"
+expect_eq "DBC-2f …any other declared word (No, maybe) as yes, fail-closed" "yes|yes" "$(dbc_reg "$DBC_P_CAP")|$(dbc_reg "$DBC_P_ODD")"
+expect_eq "DBC-2g …and no key, an empty value, the override key alone, a body line, and no file as nothing declared" "|||||" \
+  "$(dbc_reg "$DBC_P_ABS")|$(dbc_reg "$DBC_P_EMPTY")|$(dbc_reg "$DBC_P_OVR")|$(dbc_reg "$DBC_P_BODY")|$(dbc_reg "$DBC/no-such.md")|"
+for dbc_f in "$DBC_P_NO" "$DBC_P_YES" "$DBC_P_ABS" "$DBC_P_QNO" "$DBC_P_SP" "$DBC_P_OVR" "$DBC_P_CAP" "$DBC_P_ODD" "$DBC_P_EMPTY" "$DBC_P_CRLF" "$DBC_P_BODY"; do
+  DBC_WANT=yes; [ "$(dbc_reg "$dbc_f")" = no ] && DBC_WANT=no
+  expect_eq "DBC-2h the proof library's proof_regression agrees with plan_regression on ${dbc_f##*/}" "$DBC_WANT" "$(dbc_proof_reg "$dbc_f")"
+done
+# THE FOUR SITES CALL IT: none keeps a read of the key of its own.
+DBC_SITES="$REPO_ROOT/payload/scripts/lib/proof.sh $REPO_ROOT/payload/scripts/lib/walls.sh $REPO_ROOT/hooks/dispatch-preflight.sh $REPO_ROOT/payload/scripts/card.sh"
+dbc_reg_reads() {  # <file>… -> the lines that read the regression key themselves (a frontmatter get naming it, or an awk on it)
+  /usr/bin/grep -cE 'frontmatter_get +("[^"]*" +)?regression([^-[:alnum:]_]|$)|\^\[\[:space:\]\]\*regression\[\[:space:\]\]\*:' "$@" | awk -F: '{ n += $NF } END { print n + 0 }'
+}
+dbc_reg_calls() { cat "$1" | /usr/bin/grep -c 'plan_regression '; }
+for dbc_f in $DBC_SITES; do
+  expect_nonempty "DBC-3 positive: ${dbc_f##*/} calls plan_regression" "$(/usr/bin/grep -m1 'plan_regression ' "$dbc_f")"
+done
+expect_eq "DBC-3b regression-setting-read: no site keeps a read of the key of its own" "0" "$(dbc_reg_reads $DBC_SITES)"
+expect_eq "DBC-3c …and plan_regression is defined once, in lib/run.sh" "1" "$(/usr/bin/grep -c '^plan_regression()' "$DBC_RUN")"
+cp "$REPO_ROOT/hooks/dispatch-preflight.sh" "$DBC/dispatch-preflight.sh"
+printf '[ "$(plan_frontmatter_get "$PLAN" regression)" = "no" ] && :\n' >> "$DBC/dispatch-preflight.sh"
+expect_eq "DBC-3d …and a read of the key planted in a sandbox copy of a site is counted" "1" "$(dbc_reg_reads "$DBC/dispatch-preflight.sh")"
+
+# --- bounded-wait: the three suites poll through tests/lib/wait.sh; none keeps a counted poll loop of its own ---
+DBC_WAIT="$REPO_ROOT/tests/lib/wait.sh"
+dbc_wait() { bash -c '. "$1"; shift; "$@"' _ "$DBC_WAIT" "$@"; }
+dbc_flag="$DBC/flag"; rm -f "$dbc_flag"
+dbc_wait wait_ticks 3 0.01 test -e "$dbc_flag"; DBC_W_RC=$?
+expect_eq "DBC-4 bounded-wait: wait_ticks gives up (rc 1) when the condition never holds" "1" "$DBC_W_RC"
+: > "$dbc_flag"
+dbc_wait wait_ticks 3 0.01 test -e "$dbc_flag"; DBC_W_RC=$?
+expect_eq "DBC-4b …and answers rc 0 at once when it already holds" "0" "$DBC_W_RC"
+rm -f "$dbc_flag"; ( sleep 0.2; : > "$dbc_flag" ) &
+dbc_wait wait_ticks 100 0.02 test -e "$dbc_flag"; DBC_W_RC=$?
+wait
+expect_eq "DBC-4c …and rc 0 when the condition comes true inside the ceiling" "0" "$DBC_W_RC"
+DBC_W_T0="$(perl -MTime::HiRes=time -e 'printf "%.2f", time')"
+dbc_wait wait_ticks 10 0.05 test -e "$DBC/never"; DBC_W_RC=$?
+DBC_W_MS="$(perl -MTime::HiRes=time -e 'printf "%d", (time - $ARGV[0]) * 1000' "$DBC_W_T0")"
+expect_eq "DBC-4d …its ceiling is ticks × tick-seconds: ten 0.05 s ticks took at least 0.5 s and under 5 s" "1|yes" \
+  "$DBC_W_RC|$([ "$DBC_W_MS" -ge 450 ] && [ "$DBC_W_MS" -lt 5000 ] && echo yes || echo "no (${DBC_W_MS} ms)")"
+dbc_wait wait_for 1 test -e "$DBC/never"; DBC_W_RC=$?
+expect_eq "DBC-4e wait_for gives up at its whole-second ceiling too" "1" "$DBC_W_RC"
+expect_eq "DBC-4f …and wait_ticks and wait_for are each defined once, in lib/wait.sh" "1|1" \
+  "$(/usr/bin/grep -c '^wait_ticks()' "$DBC_WAIT")|$(/usr/bin/grep -c '^wait_for()' "$DBC_WAIT")"
+# dbc_polls <suite> -> the lines of a suite that count a poll by hand: a sleep of a fraction of a second beside a counter
+# stepped with `+ 1))`, outside a printf'd child script. The suites' child scripts and clock-bounded loops are not these.
+dbc_polls() { /usr/bin/grep -E 'sleep 0\.[0-9]+' "$1" | /usr/bin/grep -E '\$\(\([a-z_]+ ?\+ ?1\)\)' | /usr/bin/grep -vE "printf '|\\\\\\$\(\(" | wc -l | tr -d ' '; }
+for dbc_s in name-scan slots worktree; do
+  expect_nonempty "DBC-5 positive: $dbc_s.test.sh sources lib/wait.sh and polls through it" \
+    "$(/usr/bin/grep -E '^\. .*lib/wait\.sh' "$REPO_ROOT/tests/$dbc_s.test.sh")$(/usr/bin/grep -E 'wait_(ticks|for) ' "$REPO_ROOT/tests/$dbc_s.test.sh")"
+  expect_eq "DBC-5b bounded-wait: $dbc_s.test.sh keeps no hand-counted poll loop" "0" "$(dbc_polls "$REPO_ROOT/tests/$dbc_s.test.sh")"
+  { cat "$REPO_ROOT/tests/$dbc_s.test.sh"; printf 'k=0; while [ ! -e "$TMP/x" ] && [ "$k" -lt 20 ]; do sleep 0.05; k=$((k + 1)); done\n'; } > "$DBC/$dbc_s.test.sh"
+  expect_eq "DBC-5c …and a hand-rolled loop planted in a sandbox copy of it is counted" "1" "$(dbc_polls "$DBC/$dbc_s.test.sh")"
+done
+
+# --- AC-9.2: the dead reader and its one pin are gone (the name is spelled in two halves so this row is not a hit for itself)
+dbc_hits() { /usr/bin/grep -rlF -- "$1" "$REPO_ROOT/hooks" "$REPO_ROOT/payload" "$REPO_ROOT/tests" 2>/dev/null | wc -l | tr -d ' '; }
+expect_eq "DBC-6 positive: the live ledger reader is found by the same search" "yes" "$([ "$(dbc_hits units_findings)" -gt 0 ] && echo yes || echo no)"
+expect_eq "DBC-6b AC-9.2: the unlined reader and its pin are gone from hooks, payload and tests" "0" "$(dbc_hits "units_""unlined")"
 
 finish

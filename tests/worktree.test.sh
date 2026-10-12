@@ -36,6 +36,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/wait.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
@@ -413,11 +414,11 @@ RUNNER_PID=""
 start_runner() {
   ( cd "$1" && exec bash "$2" ) >/dev/null 2>&1 &
   RUNNER_PID=$!
-  local i=0
-  while [ $i -lt 100 ]; do
-    case "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
-    i=$((i+1)); sleep 0.05
-  done
+  wait_ticks 100 0.05 runner_shows_run_sh
+}
+holder_gone() { ! kill -0 "${1:-}" 2>/dev/null; }
+runner_shows_run_sh() {
+  case "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
   return 1
 }
 stop_runner() {
@@ -579,11 +580,10 @@ MENTION_PID=""
 start_mention() {  # <cwd> <shell> <-c text> -> MENTION_PID, once ps shows the text
   ( cd "$1" && exec "$2" -c "$3" ) >/dev/null 2>&1 &
   MENTION_PID=$!
-  local i=0
-  while [ $i -lt 100 ]; do
-    case "$(ps -o command= -p "$MENTION_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
-    i=$((i+1)); sleep 0.05
-  done
+  wait_ticks 100 0.05 mention_shows_run_sh
+}
+mention_shows_run_sh() {
+  case "$(ps -o command= -p "$MENTION_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
   return 1
 }
 stop_mention() {
@@ -630,12 +630,8 @@ start_runner_argv() {  # <cwd> <glob> <argv>... -> RUNNER_PID, once ps shows a c
   local d="$1" g="$2"; shift 2
   ( cd "$d" && exec "$@" ) >/dev/null 2>&1 &
   RUNNER_PID=$!
-  local i=0
-  while [ $i -lt 100 ]; do
-    [[ "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" == $g ]] && return 0
-    i=$((i+1)); sleep 0.05
-  done
-  return 1
+  runner_matches() { [[ "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" == $g ]]; }
+  wait_ticks 100 0.05 runner_matches
 }
 expect_true "a stand-in runner started as bash -o pipefail tests/run.sh" \
   start_runner_argv "$S" "*bash -o pipefail tests/run.sh" bash -o pipefail tests/run.sh
@@ -737,7 +733,7 @@ gb_clear
 
 GBT3="$(new_tree "$GB" gate-dead)"
 gb_holder; gb_plant 9 "$GB" "$GB_HOLD"; kill "$GB_HOLD" 2>/dev/null
-i=0; while kill -0 "$GB_HOLD" 2>/dev/null && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+wait_ticks 100 0.05 holder_gone "$GB_HOLD"
 GB_HOLD=""
 expect_match "an admitted request whose holder is dead (killed) does not refuse" \
   "spawn-worktree: LANDED branch=gate-dead *" "$(worktree_land "$GBT3" wave/fixture)"
@@ -783,13 +779,11 @@ gb_shim_bg() {  # <stamp dir or ""> <command> — the real shim, started in the 
       >/dev/null 2>&1 ) &
   GB_SHIM_PID=$!
 }
+# The glob is expanded on every poll, inside the function: handed to wait_ticks as an argument it would be
+# expanded once, before the request exists.
+gb_has_admitted() { grep -qs '^admitted=' "$BIONIC_GATE_DIR"/requests/*; }
 gb_admitted() {  # rc 0 once a request in the store carries an admitted line
-  local i=0
-  while [ "$i" -lt 200 ]; do
-    grep -qs '^admitted=' "$BIONIC_GATE_DIR"/requests/* && return 0
-    i=$((i + 1)); sleep 0.05
-  done
-  return 1
+  wait_ticks 200 0.05 gb_has_admitted
 }
 gb_shim_end() {  # <go file> — let the held command end, and wait for the shim
   touch "$1"; wait "$GB_SHIM_PID" 2>/dev/null; GB_SHIM_PID=""
@@ -3121,9 +3115,7 @@ ld_ready_bg() {  # <root> <out file> [VAR=value]... — the same, in the backgro
 ld_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
 ld_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }
 ld_wait() {  # <file> -> 0 once it exists (30 s at most)
-  local i=0
-  while [ "$i" -lt 300 ]; do [ -e "$1" ] && return 0; i=$((i + 1)); sleep 0.1; done
-  return 1
+  wait_ticks 300 0.1 test -e "$1"
 }
 ld_refused() {  # <label> <root> <want, a glob> — exit 2, nothing published, the tree stands
   local before; before="$(ld_head "$2")"
@@ -3730,7 +3722,7 @@ LN4="$(ln_tree chk-slow)"; LN5="$(ln_tree chk-fast)"; LN4_H="$(git -C "$LN4" rev
 LN4_WAS="$(git -C "$LN" rev-parse --short HEAD)"
 ( worktree_land "$LN4" wave/fixture > "$TMP/ln4.out" 2>/dev/null; echo "rc=$?" >> "$TMP/ln4.out" ) & T63_PA=$!
 # B lands once A's check has started (at most the old one second) and A's check holds until B has (at most the old three)
-k=0; while [ ! -e "$TMP/ln-started" ] && [ "$k" -lt 20 ]; do sleep 0.05; k=$((k + 1)); done
+wait_ticks 20 0.05 test -e "$TMP/ln-started"
 OUTLN5="$(worktree_land "$LN5" wave/fixture 2>/dev/null)"
 : > "$TMP/ln-released"
 wait "$T63_PA"

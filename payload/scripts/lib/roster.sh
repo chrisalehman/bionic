@@ -448,17 +448,12 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
 # declare its own roster-schema constant, e.g. `adopt_write_row`, does not need to grow one
 # just to call this).
 live_ids_of_name() {  # <name> -> the agent ids currently under an open contract, one per line
-  local f="$ROSTER_FILE" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}" base ledger="" open nl='
+  local f="$ROSTER_FILE" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}" ledger open nl='
 '
   [ -f "$f" ] || return 0
   [ -L "$f" ] && return 0
   [ -r "$f" ] || return 0
-  base="${f##*/}"
-  case "$base" in
-    roster-*.state) case "$f" in */*) ledger="${f%/*}/" ;; esac
-                    ledger="${ledger}sweeper-${base#roster-}" ;;
-  esac
-  { [ -n "$ledger" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ -r "$ledger" ]; } || ledger=""
+  ledger="$(roster_ack_ledger "$f")"
   open="$(roster_open_names "$f" "$ledger")"
   case "$nl$open$nl" in *"$nl$1$nl"*) : ;; *) return 0 ;; esac
   ROSTER_OPEN_F="$f" ROSTER_OPEN_LEDGER="$ledger" \
@@ -840,5 +835,175 @@ roster_sessions_with_name() {  # <state dir> <name> -> "<session-id>|<status>" p
       END { if (found) print "=" last }' "$f" 2>/dev/null)"
     case "$st" in "="*) printf '%s|%s\n' "$sid" "${st#=}" ;; esac
   done
+  return 0
+}
+
+# ---------- THE ACK LEDGER OF A ROSTER (epic-23 wave-33 T10) --------------------------------------
+#
+# The sweeper's ledger is the roster's sibling, `sweeper-<sid>.state` beside `roster-<sid>.state`:
+# the file whose acks close a name (`roster_open_names`). Spelled once, for `live_ids_of_name` and
+# the ruling verb, which both ask whether a name is still open. Prints nothing when the roster is
+# not named `roster-<sid>.state` or the ledger is absent, a symlink or unreadable: no ack.
+roster_ack_ledger() {  # <roster> -> the sweeper ledger beside it, or nothing
+  local f="${1:-}" base ledger=""
+  base="${f##*/}"
+  case "$base" in
+    roster-*.state) case "$f" in */*) ledger="${f%/*}/" ;; esac
+                    ledger="${ledger}sweeper-${base#roster-}" ;;
+    *) return 0 ;;
+  esac
+  { [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ -r "$ledger" ]; } || return 0
+  printf '%s' "$ledger"
+}
+
+# ---------- A RULING (epic-23 wave-33 T10; REQ-1 AC-1.1 to AC-1.4, spec D1; ADR-052) --------------
+#
+# A RULING is the orchestrator's binding instruction to ONE live writer, written while the writer
+# works. A message is read only at idle, which is the failure REQ-1 names, so a ruling travels on
+# the writer's own tool calls instead: PUSHED for speed by hooks/ruling-push.sh (PostToolUse, every
+# tool: the writer's next result carries it), GUARDED for truth by the writer's commit
+# (hooks/bash-walls.sh) and its `ready` (lib/line.sh), which refuse while it is unread. The guard
+# exists because a push is visible but not necessarily obeyed (record/wave-33-workhorse/
+# P1-additional-context.md), so "pushed" never means "read".
+#
+# ITS STATE IS THE ROSTER'S, as `ruling/v1` lines beside the `roster-state/v1` rows, append-only:
+#
+#     ruling/v1|id=<id>|writer=<name>|recorded=<epoch>|text=<one line>   the ruling (`rule`)
+#     ruling/v1|id=<id>|writer=<name>|pushed=<epoch>|call=<tool_use_id>  a push claimed (the hook)
+#     ruling/v1|id=<id>|writer=<name>|shown=<epoch>|by=<ack|commit|ready> read (the ack or a guard)
+#
+# `ruling_fold` is the one reader and the FIRST stamp of each kind wins, so two writers of one
+# stamp never disagree about it: the push claim is made by appending first and reading second,
+# which is what makes the push exactly-once across a writer's concurrent calls (a short line is
+# one atomic O_APPEND write). Every reader of `roster-state/` rows selects its rows by that prefix,
+# so these lines are invisible to them.
+#
+# THE PENDING FLAG (`ruling-pending-<sid>.state`, beside the roster) is the push hook's fast path:
+# present while some ruling of the session is PENDING, neither pushed nor shown, so a session with
+# none pays one file test per tool call. A shown ruling (acknowledged, or printed by a guard) is
+# read already and is never pushed (wave-33 T31: the walk's ruling acked before its push was pushed
+# anyway, and its flag held every call on the slow path). `ruling_record` raises the flag after its
+# append; `ruling_flag_settle` is the one place it comes down, run by the hook after its claims and
+# by every `shown=` stamp. A stale flag costs one slow read; a missing one costs the push, never
+# the guard.
+RULING_TEXT_MAX=4000
+RULING_US=$'\037'
+
+ruling_pending_flag() {  # <roster> -> the session's pending flag, beside it; 1 when it is no roster-<sid>.state
+  local f="${1:-}" base dir=.
+  base="${f##*/}"
+  case "$f" in */*) dir="${f%/*}" ;; esac
+  case "$base" in roster-?*.state) printf '%s/ruling-pending-%s' "$dir" "${base#roster-}" ;; *) return 1 ;; esac
+}
+
+# One line of text: newlines, carriage returns, tabs and `|` folded to spaces (the `|` would forge a
+# key, as on a roster row), the ends trimmed, at most RULING_TEXT_MAX characters.
+ruling_clean() {  # <text> -> the text as a ruling carries it
+  local t="${1-}" nl='
+'
+  t="${t//$nl/ }"; t="${t//$'\r'/ }"; t="${t//$'\t'/ }"; t="${t//|/ }"; t="${t//$RULING_US/ }"
+  t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
+  [ "${#t}" -le "$RULING_TEXT_MAX" ] || t="${t:0:$RULING_TEXT_MAX}"
+  printf '%s' "$t"
+}
+
+# Appends a ruling for <writer> and prints its id; 1 and nothing written when the text is empty
+# once cleaned, the writer is no name, or the roster cannot be written. Whether the writer's row is
+# live is the caller's question (`session-poker.sh rule` asks `roster_open_names`).
+ruling_record() {  # <roster> <writer> <text> -> the id
+  local f="${1:-}" w="${2:-}" t now id flag
+  t="$(ruling_clean "${3-}")"
+  [ -n "$t" ] || return 1
+  case "$w" in ''|*'|'*|*[[:space:]]*) return 1 ;; esac
+  { [ -f "$f" ] && [ ! -L "$f" ] && [ -w "$f" ]; } || return 1
+  now="$(date +%s)"
+  id="r${now}-$$"
+  printf 'ruling/v1|id=%s|writer=%s|recorded=%s|text=%s\n' "$id" "$w" "$now" "$t" >> "$f" || return 1
+  flag="$(ruling_pending_flag "$f")" && : >> "$flag" 2>/dev/null
+  printf '%s' "$id"
+}
+
+# Appends one stamp line for <id>: each <key=value> with any `|` folded to a space. A `shown=`
+# stamp settles the pending flag, so the ruling it marks read (by `ruling-ack` or a guard) holds no
+# writer's calls on the slow path.
+ruling_stamp() {  # <roster> <id> <writer> <key=value>...
+  local f="${1:-}" line kv
+  line="ruling/v1|id=${2:-}|writer=${3:-}"
+  shift 3
+  for kv in "$@"; do line="${line}|${kv//|/ }"; done
+  { [ -f "$f" ] && [ ! -L "$f" ]; } || return 1
+  printf '%s\n' "$line" >> "$f" || return 1
+  case "$line" in *'|shown='*) ruling_flag_settle "$f" ;; esac
+  return 0
+}
+
+# THE FLAG'S ONE SETTLING: down, then the read, then up again when some ruling is pending (neither
+# pushed nor shown). Dropping before the read is what keeps a ruling `ruling_record` appends
+# meanwhile from losing its flag: its append lands before this read, or its own raise lands after.
+ruling_flag_settle() {  # <roster>
+  local flag
+  flag="$(ruling_pending_flag "${1:-}")" || return 0
+  rm -f "$flag" 2>/dev/null
+  ruling_fold "$1" | awk -F"$RULING_US" '$4 == "" && $6 == "" { found = 1 } END { exit !found }' \
+    && : >> "$flag" 2>/dev/null
+  return 0
+}
+
+# THE ONE READER. One line per ruling, in the order recorded, its fields joined by RULING_US:
+#   <id> <writer> <recorded> <pushed> <call> <shown> <by> <text>
+# (an empty field is empty). <writer> keeps only that writer's. A stamp for an id no ruling line
+# carries is ignored; the first stamp of each kind is the one read.
+ruling_fold() {  # <roster> [<writer>]
+  local f="${1:-}"
+  { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ]; } || return 0
+  awk -F'|' -v want="${2:-}" -v us="$RULING_US" '
+    function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+    index($0, "ruling/v1|") != 1 { next }
+    { id = kv("id"); if (id == "") next }
+    kv("recorded") != "" { if (!(id in W)) { W[id] = kv("writer"); R[id] = kv("recorded"); T[id] = kv("text"); order[++n] = id }; next }
+    { p = kv("pushed"); if (p != "" && !(id in P)) { P[id] = p; C[id] = kv("call") }
+      s = kv("shown");  if (s != "" && !(id in S)) { S[id] = s; B[id] = kv("by") } }
+    END {
+      for (i = 1; i <= n; i++) {
+        id = order[i]
+        if (want != "" && W[id] != want) continue
+        print id us W[id] us R[id] us P[id] us C[id] us S[id] us B[id] us T[id]
+      }
+    }' "$f" 2>/dev/null
+}
+
+# THE ONE WORDING, which the push, both guards and nothing else print: the ruling, binding, and the
+# call that acknowledges it.
+ruling_render() {  # <id> <text> <plugin root> -> one line
+  printf 'bionic ruling %s from the orchestrator (binding): %s — acknowledge with: bash %s/hooks/session-poker.sh ruling-ack %s' \
+    "${1:-}" "${2:-}" "${3:-<plugin-root>}" "${1:-}"
+}
+
+# THE PUSH'S CLAIM: append this call's `pushed=` stamp, then read which call's stamp came first.
+# 0 when it is this call's, which then carries the ruling; 1 when another call's is, or the append
+# failed. <call> is the payload's tool_use_id, unique per call.
+ruling_push_claim() {  # <roster> <id> <writer> <call>
+  local first
+  [ -n "${4:-}" ] || return 1
+  ruling_stamp "${1:-}" "${2:-}" "${3:-}" "pushed=$(date +%s)" "call=$4" || return 1
+  first="$(ruling_fold "$1" "$3" | awk -F"$RULING_US" -v id="$2" '$1 == id { print $5; exit }')"
+  [ "$first" = "$4" ]
+}
+
+# THE GUARD'S READ, for the commit wall and `ready`: each ruling of <writer> not yet shown is
+# stamped shown (by <by>) and printed in the one wording, one per line; nothing when none is
+# unread, which is the guard's pass. Marking it shown is what lets the retry through: the refusal
+# that printed it is the reading.
+ruling_take_unread() {  # <roster> <writer> <by> <plugin root> -> the rendered rulings
+  local f="${1:-}" w="${2:-}" by="${3:-}" root="${4:-}" now id wr rec p c s b t
+  [ -n "$w" ] || return 0
+  now="$(date +%s)"
+  while IFS="$RULING_US" read -r id wr rec p c s b t; do
+    [ -n "$id" ] && [ -z "$s" ] || continue
+    ruling_stamp "$f" "$id" "$w" "shown=$now" "by=$by" || continue
+    ruling_render "$id" "$t" "$root"; printf '\n'
+  done <<RULING_FOLD
+$(ruling_fold "$f" "$w")
+RULING_FOLD
   return 0
 }

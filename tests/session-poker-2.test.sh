@@ -2797,6 +2797,47 @@ S56_RACE="$( eval "$S56_RR"
 expect_eq "56j5 a run that writes its end between run_read's two reads is FINISHED with its code, never LOST" \
   "FINISHED|3" "$S56_RACE"
 
+# ---------- §WAIT: the poker and the shim's waiter read a run's end the same way (wave-33 T15; debt line run-end-reread) ----------
+# TWO READERS OF ONE FACT. The poker's `run_read` and booked.sh's `booked_follow` each re-read `<log>.rc` once after
+# the pid is seen dead and before they say LOST; nothing held the two together, so one could lose the re-read and
+# call a finished run LOST while the other still got it right. This drives the REAL text of both (extracted, as 56j5
+# does) over the SAME run record: the pid gone, and the end written between the reads (the liveness check writes it,
+# then answers "gone"). Both must say FINISHED with the code, and the control, where no end is ever written, must
+# make both say LOST. A copy of each with its re-read taken out is driven the same way and must be told apart.
+S56_BK_FOLLOW="$(s56_extract "$S56_BOOKED" booked_follow)"
+S56_BK_RC="$(s56_extract "$S56_BOOKED" booked_rc_of)"
+S56_BK_MT="$(s56_extract "$S56_BOOKED" booked_mtime_utc)"
+expect_nonempty "56k precondition: booked_follow, booked_rc_of and booked_mtime_utc are extracted from booked.sh" \
+  "$S56_BK_FOLLOW$S56_BK_RC$S56_BK_MT"
+mkdir -p "$TMPROOT/s56-agree"; S56_AG_LOG="$TMPROOT/s56-agree/${S56_LOG##*/}"
+s56_ag_poker() {  # <run_read source> <yes|no: the end is written between the reads> -> "<state>|<rc>"
+  cp "$S56_LOG" "$S56_AG_LOG"; rm -f "$S56_AG_LOG.rc"
+  ( eval "$1"; AG_WRITES="$2"
+    run_live() { if [ "$AG_WRITES" = yes ]; then [ -e "$2.rc" ] || cp "$S56_LOG.rc" "$2.rc"; fi; return 1; }
+    file_mtime() { echo 0; }; epoch_iso() { echo unknown; }
+    RUN_LOG="$S56_AG_LOG"; RUN_PID="$S56_PID"; RUN_ROW_RC=""; RUN_STARTED=""
+    run_read; printf '%s|%s' "$RUN_STATE" "$RUN_RC" )
+}
+s56_ag_booked() {  # <booked_follow source> <yes|no: the end is written between the reads> -> the exit code it ends with
+  cp "$S56_LOG" "$S56_AG_LOG"; rm -f "$S56_AG_LOG.rc"
+  ( eval "$S56_BK_RC"; eval "$S56_BK_MT"; eval "$1"; AG_WRITES="$2"
+    booked_live() { if [ "$AG_WRITES" = yes ]; then [ -e "$2.rc" ] || cp "$S56_LOG.rc" "$2.rc"; fi; return 1; }
+    BIONIC_RUN_POLL=0.01
+    booked_follow "$S56_AG_LOG" "$S56_PID" >/dev/null 2>&1 )
+  echo "$?"
+}
+expect_eq "56k a run whose end lands between the reads is FINISHED with its code for the poker" "FINISHED|3" "$(s56_ag_poker "$S56_RR" yes)"
+expect_eq "56k2 …and ends with that code for the shim's waiter, the same fixture (never 70, LOST)" "3" "$(s56_ag_booked "$S56_BK_FOLLOW" yes)"
+expect_eq "56k3 control: a run that never writes its end is LOST for the poker" "LOST|" "$(s56_ag_poker "$S56_RR" no)"
+expect_eq "56k4 …and 70, LOST, for the shim's waiter" "70" "$(s56_ag_booked "$S56_BK_FOLLOW" no)"
+# the doctored copies: the poker's second read taken out, and the waiter made to skip its re-read on the dead pass
+S56_RR_DOC="$(printf '%s\n' "$S56_RR" | /usr/bin/grep -v '^  { read -r rc < "\$RUN_LOG\.rc"; } 2>/dev/null$')"
+S56_BK_DOC="$(printf '%s\n' "$S56_BK_FOLLOW" | sed 's/rc="\$(booked_rc_of "\$log")" && {/rc="$([ "$dead" -eq 1 ] \&\& exit 1; booked_rc_of "$log")" \&\& {/')"
+expect_ne "56k5 precondition: the poker copy without its re-read differs from the shipped function" "$S56_RR" "$S56_RR_DOC"
+expect_ne "56k6 precondition: the waiter copy that skips its dead-pass re-read differs from the shipped function" "$S56_BK_FOLLOW" "$S56_BK_DOC"
+expect_eq "56k7 a poker that loses its re-read calls the finished run LOST: the check tells it apart" "LOST|" "$(s56_ag_poker "$S56_RR_DOC" yes)"
+expect_eq "56k8 a waiter that loses its re-read ends 70 on the finished run: the check tells it apart" "70" "$(s56_ag_booked "$S56_BK_DOC" yes)"
+
 # ---------- §LOST: a dead pid with no end is LOST, never a timeout (AC-3.3) ----------
 add_row "$R56" name=w-lost status=identified agent_id=a56lost0000000000 duration="4 hours" \
   launched_at="$(iso_ago 60)" deliverable="$R56/never.md"
@@ -3108,9 +3149,9 @@ section "§DECLINE-ON: a decline names what it waits on (wave-30 T16; REQ-12 AC-
 # ============================================================
 #
 # 23.4% of wave-28's build wait-minutes were order holds written only in decline reasons. `decline
-# <ids> '<reason>' --on <row|file>` keeps the decline legal and makes the hold visible: with a row it
-# prints the task-set line that makes it a table fact, with a file the reconcile `ready` performs,
-# and with neither that the hold is unrecorded. The fill-ledger line gains `declined-on=`.
+# <ids> '<reason>' --on <row>` keeps the decline legal and makes the hold visible: with a row it
+# prints the task-set line that makes it a table fact, and with none that the hold is unrecorded; a
+# file (or any word that is no row) is refused, nothing recorded (wave-33 T7, AC-4.3). The fill-ledger line gains `declined-on=`.
 R16D="$(make_repo t16-decline-on)"; new_roster "$R16D"
 P16D="$(s47_plan "$R16D" 4 \
   "| T1 | 4 | build | the holder | implementor | — | 30 | REQ-x | payload/a.sh, $T16_REC/T1.md | pending | |" \
@@ -3131,12 +3172,20 @@ expect_eq "16d3b …the line, verbatim" \
 expect_nonempty "16d4 precondition: the ledger line is read back" "$(t16_led_last)"
 expect_eq "16d5 AC-12.7 the ledger line records declined-on= the row" "T1" "$(t16_field "$(t16_led_last)" declined-on)"
 expect_eq "16d5b …beside its reason" "T2 builds on what T1 writes" "$(t16_field "$(t16_led_last)" declined)"
+# A FILE IS NO ROW (wave-33 T7; REQ-4 AC-4.3, D8): a decline --on a file is refused, nothing recorded,
+# and the refusal prints the same decline without --on, which, run as printed, is recorded.
+cp "$R16D/$T16_REC/fill-ledger.log" "$TMPROOT/t16-led-before"
 poke "$R16D" decline T3 'both touch payload/a.sh' --on payload/a.sh
-expect_eq "16d6 a decline on a file is recorded (exit 0)" "0" "$RC"
-expect_contains "16d7 …naming the reconcile ready performs" \
-  "\`ready\` reconciles payload/a.sh on the line: a CONFLICT returns the row to merge" "$OUT"
+expect_eq "16d6 a decline on a file is refused (exit 1)" "1" "$RC"
+expect_true "16d6b …and nothing is recorded: the fill ledger is byte-identical" cmp -s "$TMPROOT/t16-led-before" "$R16D/$T16_REC/fill-ledger.log"
+expect_contains "16d7 …naming the reconcile ready performs, which makes a shared file no dependency" \
+  "a shared file is no dependency; \`ready\` reconciles payload/a.sh on the line, and a CONFLICT returns the row to merge" "$OUT"
 expect_absent "16d7b …and printing no task-set line (beside 16d3)" "task-set" "$OUT"
-expect_eq "16d8 …declined-on= the file" "payload/a.sh" "$(t16_field "$(t16_led_last)" declined-on)"
+T16_CALL="$(printf '%s\n' "$OUT" | sed -n 's/^poker: next call: //p' | head -1)"
+expect_eq "16d7c …printing the same decline without --on" "bash $T16_HOOK decline T3 'both touch payload/a.sh'" "$T16_CALL"
+( cd "$R16D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$T16_CALL" ) > /dev/null 2>&1; T16_RC=$?
+expect_eq "16d8 …which, run as printed, is recorded (exit 0) with declined-on=- beside its reason" \
+  "0|-|both touch payload/a.sh" "$T16_RC|$(t16_field "$(t16_led_last)" declined-on)|$(t16_field "$(t16_led_last)" declined)"
 poke "$R16D" decline T4 'held by hand'
 expect_eq "16d9 a decline naming neither is never refused (exit 0)" "0" "$RC"
 expect_contains "16d10 …and says the hold is unrecorded as a dependency" \

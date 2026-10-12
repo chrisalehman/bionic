@@ -2093,6 +2093,61 @@ expect_eq "ARM-A.11 …the row's Files carry the addition" "hooks/a.sh,hooks/b.s
 expect_regex "ARM-A.12 AC-8.3 …and the row records who widened it: amended=<iso> widened-by: writer <reason>" \
   '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z widened-by: writer the fix reaches b$' "$(amw_field amended)"
 
+# §ARM-A (wave-33 T15; D10) — the verbs the wave added after the list was cut. `deliver` is a record row's own last act,
+# so a writer may run it for the row its OWN roster row names (`row=`) and for no other: one that could land another's
+# row would close work nobody did. `rule` pushes an instruction to a writer, so it is the orchestrator's; `ruling-ack` and
+# `rulings` are the writer's own reads and stay open. The plan verbs T7 added (matrix-set, waive-row, tasks-prose,
+# epic-row, continuation-fill) and T13's disposition write the bound plan or the findings' ledger.
+# fails-when: a writer delivers another row, a writer rules, a listed plan verb is admitted from a subagent, or the
+# refusal line of the longest verb overflows refuse.sh's 100 columns and names no rule.
+AM_ROWED_ID="aw33-T15row-0123456789abcdef"
+roster_row_fixture "session=$SID" status=identified name=w20-rowed "agent_id=$AM_ROWED_ID" \
+  subagent_type=bionic:senior-implementor row=T6 >> "$R_AM/.bionic/tmp/roster-$SID.state"
+am_rowed() {  # <label> <command> <want: admitted|refused> — the call, from the agent whose roster row names plan row T6
+  run_hook "$(mk_payload "$R_AM" "$2" "$AM_ROWED_ID" omit Bash w20-rowed)"
+  if [ "$3" = admitted ]; then
+    expect_status "$1 — admitted" 0 "$ST"
+    expect_absent "$1 — …with no contract refusal" "a subagent may not change a contract" "$ERR"
+  else
+    expect_status "$1 — refused" 2 "$ST"
+    expect_contains "$1 — …naming the rule" "a subagent may not change a contract or the plan" "$ERR"
+  fi
+}
+am_rowed "W15.1: deliver the row its own roster row names" "bash $AM_POKER deliver T6" admitted
+am_rowed "W15.2: deliver another writer's row" "bash $AM_POKER deliver T9" refused
+expect_contains "W15.2b …the detail names the row asked for and the caller's own" "T9 is not your row (yours is T6)" "$ERR"
+am_rowed "W15.3: deliver its own row, chained to a deliver of another" "bash $AM_POKER deliver T6 && bash $AM_POKER deliver T9" refused
+am_rowed "W15.3b: …the same chain with the other row first" "bash $AM_POKER deliver T9; bash $AM_POKER deliver T6" refused
+am_rowed "W15.4: deliver with two operands" "bash $AM_POKER deliver T6 T9" refused
+am_rowed "W15.5: deliver with no operand" "bash $AM_POKER deliver" refused
+am_refused "W15.6: deliver, from a writer whose roster row names no plan row" "bash $AM_POKER deliver T6"
+expect_contains "W15.6b …the detail says no row of its own names a plan row" "no roster row of yours names a plan row" "$ERR"
+am_admitted "W15.7: deliver from the main thread" "bash $AM_POKER deliver T6" ""
+am_refused "W15.8: rule" "bash $AM_POKER rule w20-other 'stop and report'"
+am_admitted "W15.8b: rule from the main thread" "bash $AM_POKER rule w20-other 'stop and report'" ""
+am_admitted "W15.9: ruling-ack stays open to a writer" "bash $AM_POKER ruling-ack 3"
+am_admitted "W15.9b: rulings stays open to a writer" "bash $AM_POKER rulings w20-sub"
+for _am_v in deliver rule matrix-set waive-row tasks-prose epic-row continuation-fill disposition; do
+  expect_contains "W15.10 the verb list names $_am_v" " $_am_v " " $AM_VERBS "
+done
+for _am_v in ruling-ack rulings; do
+  expect_absent "W15.10b …and does not name $_am_v" " $_am_v " " $AM_VERBS "
+done
+am_refused "W15.11: matrix-set" "bash $AM_POKER matrix-set R1 ok"
+am_refused "W15.12: waive-row" "bash $AM_POKER waive-row R1 'a reason'"
+am_refused "W15.13: tasks-prose" "bash $AM_POKER tasks-prose T6 'text'"
+am_refused "W15.14: epic-row" "bash $AM_POKER epic-row 33 shipped"
+am_refused "W15.15: continuation-fill" "bash $AM_POKER continuation-fill"
+am_refused "W15.16: disposition" "bash $AM_POKER disposition 'record/wave-01/r.md#1' fixed"
+for _am_v in matrix-set waive-row tasks-prose epic-row continuation-fill disposition; do
+  am_admitted "W15.17: $_am_v from the main thread" "bash $AM_POKER $_am_v" ""
+done
+# THE LONGEST VERB'S LINE FITS: `bionic: <verb> refused — <fact> (<fix>)` is capped at 100 columns by refuse.sh.
+run_hook "$(mk_payload "$R_AM" "bash $AM_POKER continuation-fill" "$AM_ID" omit Bash w20-sub)"
+W15_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 'refused' )"
+expect_nonempty "W15.18 the refusal line is read (the extractor works)" "$W15_LINE"
+expect_eq "W15.18b …and fits refuse.sh's 100 columns" "yes" "$([ "$(printf '%s' "$W15_LINE" | wc -m | tr -d ' ')" -le 100 ] && echo yes || echo "no ($(printf '%s' "$W15_LINE" | wc -m | tr -d ' '))")"
+
 # ---------------------------------------------------------------------------
 section "20 — an UNROSTERED nested delegate is bound by the verb wall through its own agent_type (wave-20 T7b; review R15)"
 #
@@ -3143,17 +3198,22 @@ expect_eq "SFE-14c …the line is the indented one, under the Step 4 line, befor
   "$(awk '/^- Step 4:/ { f = 1; next } f && /^  share:/ { l = $0; getline n; print l "|" n; exit }' "$R_EG6/.bionic/docs/plans/active.md")"
 sfe_set "$(sfe_plan 5 wave "")"
 
-section "§SCRIPT-BUDGET — the budget reads the script a dispatched agent's shell runs (wave-31 T11; REQ-8 AC-8.2, D9; A-orch-46.1)"
+section "§SCRIPT-BUDGET — the budget reads the script a dispatched agent's shell runs (wave-31 T11; REQ-8 AC-8.2, D9; wave-33 T3, D7, AC-6.1, AC-6.3)"
 # ============================================================
 #
 # `bash red.sh`, where red.sh runs jest, passed the budget: the classifier read the operand's name
 # and never its text (tests/cmd-class.test.sh §SCRIPT-TEXT is the reading). Now a script in the tree
-# is opened, the run inside it is the claim, and the refusal names the script and the run. A script
-# the wall cannot read — a command word built from a variable, a missing file, a variable-built
-# path — is `unverified`, and refused naming the script and the fix: run the suite through the
-# door by its file name, or name the script's run in the brief's Re-executes. FIXTURE FIDELITY: a
-# dispatched row of the recorder's own join (bw_dispatched), real scripts in the agent's tree.
-# fails-when: `bash red.sh` passes the arm; a refusal omits the script or the run.
+# is opened, the run inside it is the claim, and the refusal names the script and the run.
+#
+# ORDERED BEHAVIOUR CHANGE (wave-33 T3; D7, AC-6.1): a script the wall cannot read — a command word
+# built from a variable, a missing file, a variable-built path — USED TO BE `unverified` and refused
+# (old SB.2–SB.3: exit 2, `unverified script: var.sh`, the door and Re-executes as the fix). It is now
+# ADMITTED: the wall no longer predicts what a script runs; it carries the agent's name to the gate
+# (`export BIONIC_GATE_AGENT=<row name>; <the command>`), whose ask refuses an off-budget suite or
+# whole run where it starts (tests/gate.test.sh §BUDGET-AT-ASK). What the wall still reads it still
+# refuses: a literal run in the script (SB.1), the runner by any spelling the filesystem folds (SB.8).
+# FIXTURE FIDELITY: a dispatched row of the recorder's own join (bw_dispatched), real scripts in the
+# agent's tree. fails-when: a script that starts no suite is refused; `bash red.sh` passes the arm.
 R_SB="$(mk_repo scriptbudget)"
 bw_dispatched "$R_SB" t11writer "suites_allowed=alpha.test.sh" suites_source=declared files= 're_executes=`bash ok.sh`'
 printf '#!/bin/bash\nset -e\njest\n' > "$R_SB/red.sh"
@@ -3161,28 +3221,136 @@ printf '#!/bin/bash\nRUNNER=jest\n"$RUNNER" --ci\n' > "$R_SB/var.sh"
 printf '#!/bin/bash\njest\n' > "$R_SB/ok.sh"
 printf '#!/bin/bash\necho plain\n' > "$R_SB/plain.sh"
 sb_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
+sb_cmd() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null; }
 run_hook "$(mk_payload "$R_SB" 'bash red.sh' "$ACTOR" omit Bash test-runner 1800000)"
 expect_status "SB.1 AC-8.2 bash red.sh, red.sh running jest, is refused from a dispatched agent" 2 "$ST"
 expect_contains "SB.1b …the refusal names the script" "red.sh" "$ERR"
 expect_contains "SB.1c …and the run inside it" "jest" "$ERR"
 expect_contains "SB.1d …in the budget's words" "run only the budgeted suites" "$(sb_line)"
+expect_eq "SB.1e …and a refused call carries nothing" "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash var.sh' "$ACTOR" omit Bash test-runner 1800000)"
-expect_status "SB.2 AC-8.2 a script whose command word is built from a variable is refused" 2 "$ST"
-expect_contains "SB.2b …its line says the script is unverified, naming it" "var.sh" "$(sb_line)"
-expect_contains "SB.2c …the fix: the suite through the one door by its file name" "tests/run.sh --only <suite>.test.sh" "$ERR"
-expect_contains "SB.2d …or the script's run named in the brief's Re-executes" "Re-executes: \`bash var.sh\`" "$ERR"
-expect_eq "SB.2e …in one line of at most 100 columns" "yes" "$(l="$(sb_line)"; [ -n "$l" ] && [ "${#l}" -le 100 ] && echo yes || echo no)"
+expect_status "SB.2 AC-6.1 a script whose command word is built from a variable is admitted (was: refused unverified)" 0 "$ST"
+expect_absent "SB.2b …with no refusal line" "refused" "$ERR"
+expect_eq "SB.2c …and the call carries the agent's row name to the gate, the command unchanged after it" \
+  "export BIONIC_GATE_AGENT=t11writer; bash var.sh" "$(sb_cmd)"
+expect_eq "SB.2d …every other field of tool_input rides through" "1800000" \
+  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.timeout // ""' 2>/dev/null)"
 run_hook "$(mk_payload "$R_SB" 'bash missing.sh' "$ACTOR" omit Bash test-runner 1800000)"
-expect_status "SB.3 a script that is not there is refused as unverified" 2 "$ST"
-expect_contains "SB.3b …naming it" "missing.sh" "$(sb_line)"
+expect_status "SB.3 AC-6.1 a script that is not there is admitted (was: refused unverified)" 0 "$ST"
+expect_eq "SB.3b …carrying the agent" "export BIONIC_GATE_AGENT=t11writer; bash missing.sh" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash ok.sh' "$ACTOR" omit Bash test-runner 1800000)"
 expect_ne "SB.4 a script whose run the brief declared under Re-executes passes" "2" "$ST"
 expect_absent "SB.4b …with no refusal line" "refused" "$ERR"
 run_hook "$(mk_payload "$R_SB" 'bash plain.sh' "$ACTOR" omit Bash test-runner 1800000)"
 expect_status "SB.5 a script that runs no suite passes" 0 "$ST"
 expect_absent "SB.5b …with no refusal line" "refused" "$ERR"
+expect_eq "SB.5c …carrying the agent, so what it starts asks the gate as this agent" \
+  "export BIONIC_GATE_AGENT=t11writer; bash plain.sh" "$(sb_cmd)"
+run_hook "$(mk_payload "$R_SB" 'git status --short' "$ACTOR" omit Bash test-runner 1800000)"
+expect_eq "SB.5d a call that starts no script carries nothing (SB.5c is the positive)" "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash red.sh' "" omit Bash)"
 expect_absent "SB.6 the main thread's bash red.sh meets no budget arm" "run only the budgeted suites" "$ERR"
 expect_absent "SB.6b …and no unverified refusal" "unverified" "$ERR"
+expect_absent "SB.6c …and carries no agent: the gate's who is main" "BIONIC_GATE_AGENT" "$OUT"
+run_hook "$(mk_payload "$R_SB" 'bash plain.sh' "a-unplaced-sb7" omit Bash test-runner 1800000)"
+expect_status "SB.7 an agent no row budgets runs a script" 0 "$ST"
+expect_absent "SB.7b …and carries nothing: no budget to hold it to (SB.5c is the positive)" "BIONIC_GATE_AGENT" "$OUT"
+# AC-6.3: A CAPITALISED SPELLING MEETS THE LOWERCASE ONE'S WALL. The filesystem's answer is planted
+# (BIONIC_PROBE_CASE_BLIND) so the row decides alike on any machine.
+run_hook "$(mk_payload "$R_SB" 'bash tests/run.sh' "$ACTOR" omit Bash test-runner 1800000)" BIONIC_PROBE_CASE_BLIND=1
+SB_LO_ST="$ST"; SB_LO="$(sb_line)"
+run_hook "$(mk_payload "$R_SB" 'bash TESTS/RUN.SH' "$ACTOR" omit Bash test-runner 1800000)" BIONIC_PROBE_CASE_BLIND=1
+expect_eq "SB.8 AC-6.3 bash TESTS/RUN.SH on a case-blind filesystem meets bash tests/run.sh's refusal" \
+  "2|$SB_LO" "$ST|$(sb_line)"
+expect_contains "SB.8b …which is the full-tree refusal" "full tree refused" "$SB_LO"
+run_hook "$(mk_payload "$R_SB" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner 1800000)" BIONIC_PROBE_CASE_BLIND=1
+SB_LO="$(sb_line)"
+run_hook "$(mk_payload "$R_SB" 'bash tests/GAMMA.TEST.SH' "$ACTOR" omit Bash test-runner 1800000)" BIONIC_PROBE_CASE_BLIND=1
+expect_eq "SB.9 AC-6.3 bash tests/GAMMA.TEST.SH meets bash tests/gamma.test.sh's refusal" "2|$SB_LO" "$ST|$(sb_line)"
+expect_contains "SB.9b …naming gamma.test.sh" "gamma.test.sh" "$SB_LO"
+run_hook "$(mk_payload "$R_SB" 'bash TESTS/RUN.SH' "$ACTOR" omit Bash test-runner 1800000)" BIONIC_PROBE_CASE_BLIND=0
+expect_eq "SB.10 case-exact, TESTS/RUN.SH is another file: a script start, admitted and carried" \
+  "0|export BIONIC_GATE_AGENT=t11writer; bash TESTS/RUN.SH" "$ST|$(sb_cmd)"
+
+section "§CARRY-EVERY — in bypass mode a budgeted agent's name rides on every command, so what it starts asks the gate as it (wave-33 T36; D7, AC-6.2)"
+# ============================================================
+#
+# T3's carry rode only on a command the classifier read as a script start, so a runner reached
+# through another interpreter (awk, python, node), `source` or an out-of-tree script asked the gate
+# as main, unbudgeted (T3-budget-at-ask.md, Known limits). The rule is ADR-052's: enforce where the
+# work becomes real, never by guessing from text. So every call a budgeted agent makes that the wall
+# does not handle as a suite carries its name, and the gate's ask (lib/gate.sh THE BUDGET) refuses
+# what is off the budget wherever it starts — IN BYPASS MODE ONLY. The CLI checks permission rules
+# against the input a hook returns, each subcommand on its own, so outside bypass mode the carried
+# `export …; <cmd>` would prompt where `<cmd>` was allowed; there the carry stays T3's (a script
+# start), and a runner in another language still asks as main (CE.7, the residual, named).
+# FIXTURE FIDELITY: R_SB's row (the recorder's own join, alpha.test.sh on the budget); the command
+# run is the one the harness runs (the staged rewrite when there is one, else the typed command),
+# under `bash -c` in the agent's checkout with the session id the harness exports and no inherited
+# BIONIC_GATE_AGENT. The runner is a project's own, which asks this tree's gate budget for its
+# suite before it runs it (`gate_budget`, the read `gate_ask` makes first); its mark is the run.
+# fails-when: an off-budget suite started through an awk or `env bash` launcher runs.
+CE_MARKS="$SANDBOX/ce-marks"; mkdir -p "$CE_MARKS" "$R_SB/tools"
+CE_GATE="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/gate.sh"
+[ -r "$CE_GATE" ] || CE_GATE="${BIONIC_HOOKS_DIR}/../scripts/lib/gate.sh"
+printf '#!/bin/bash\n. %q || exit 1\ngate_budget work "$1" || exit 75\n: > "$CE_MARKS/$1.ran"\n' "$CE_GATE" \
+  > "$R_SB/tools/runner.sh"
+printf '#!/bin/bash\nbash tools/runner.sh "$@"\n' > "$R_SB/tools/launch.sh"
+CE_OUT=""; CE_RC=0
+ce_run() {  # <agent id or ""> <command> [permission mode, bypassPermissions by default; - for none]
+  local _c _m="${3:-bypassPermissions}"   # leaves CE_OUT CE_RC
+  run_hook "$(mk_payload "$R_SB" "$2" "$1" omit Bash test-runner 1800000 \
+    | jq -c --arg m "$_m" 'if $m == "-" then . else . + {permission_mode: $m} end')"
+  _c="$(sb_cmd)"; [ -n "$_c" ] || _c="$2"
+  rm -f "$CE_MARKS"/*.ran
+  CE_OUT="$(cd "$R_SB" && env -u BIONIC_GATE_AGENT CLAUDE_CODE_SESSION_ID="$SID" CE_MARKS="$CE_MARKS" \
+    bash -c "$_c" 2>&1)"
+  CE_RC=$?
+}
+ce_ran() { ls "$CE_MARKS" 2>/dev/null | sed 's/\.ran$//' | sort | paste -sd, -; }
+CE_AWK="awk 'BEGIN { exit system(\"bash tools/runner.sh \" ARGV[1]) }'"
+ce_run "" "$CE_AWK gamma.test.sh"
+expect_eq "CE.0 control: the main thread's awk launcher runs gamma.test.sh (no budget holds main)" "0 gamma.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_eq "CE.0b …and its call carries nothing: the gate's who is main" "" "$(sb_cmd)"
+ce_run "$ACTOR" "$CE_AWK gamma.test.sh"
+expect_eq "CE.1 AC-6.2 a budgeted agent's off-budget suite started from an awk launcher is refused at the gate, 75, nothing run" \
+  "75 " "$CE_RC $(ce_ran)"
+expect_contains "CE.1b …with the budget's own line, naming the agent" \
+  "refused at the gate — gamma.test.sh is not on t11writer's budget" "$CE_OUT"
+expect_eq "CE.1c …because the call carried the agent's row name, the command unchanged after it" \
+  "export BIONIC_GATE_AGENT=t11writer; $CE_AWK gamma.test.sh" "$(sb_cmd)"
+ce_run "$ACTOR" 'env bash tools/launch.sh gamma.test.sh'
+expect_eq "CE.2 AC-6.2 …and from an env bash launcher" "75 " "$CE_RC $(ce_ran)"
+expect_contains "CE.2b …with the budget's own line" "gamma.test.sh is not on t11writer's budget" "$CE_OUT"
+ce_run "$ACTOR" "$CE_AWK alpha.test.sh"
+expect_eq "CE.3 an on-budget suite through the same awk launcher is admitted and runs" "0 alpha.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_absent "CE.3b …with no refusal line" "refused" "$CE_OUT"
+ce_run "$ACTOR" 'git --version'
+expect_eq "CE.4 a budgeted agent's non-suite command still runs" "0" "$CE_RC"
+expect_contains "CE.4b …and prints what it prints" "git version" "$CE_OUT"
+expect_eq "CE.4c …carrying the agent" "export BIONIC_GATE_AGENT=t11writer; git --version" "$(sb_cmd)"
+ce_run "a-unplaced-ce5" "$CE_AWK gamma.test.sh"
+expect_eq "CE.5 an agent no row budgets: its awk launcher runs gamma.test.sh, as before" "0 gamma.test.sh" \
+  "$CE_RC $(ce_ran)"
+expect_eq "CE.5b …and its call carries nothing (CE.1c is the positive)" "" "$(sb_cmd)"
+run_hook "$(mk_payload "$R_SB" 'tests/run.sh --only alpha.test.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_contains "CE.6 a classified suite keeps its own path: the booking wrap, which names the agent itself" \
+  "booked.sh" "$(sb_cmd)"
+expect_absent "CE.6b …and no carry in front of it" "export BIONIC_GATE_AGENT" "$(sb_cmd)"
+# OUTSIDE BYPASS MODE: T3's carry, unchanged. A plain command comes back untouched, so a permission
+# rule that allowed it still matches it; a script start is still carried (SB.2c, SB.5c).
+for _ce_m in default acceptEdits -; do
+  ce_run "$ACTOR" 'git --version' "$_ce_m"
+  expect_eq "CE.7 [mode $_ce_m] a budgeted agent's plain command runs" "0" "$CE_RC"
+  expect_eq "CE.7b [mode $_ce_m] …and comes back untouched (CE.4c is the positive)" "" "$(sb_cmd)"
+  ce_run "$ACTOR" "$CE_AWK gamma.test.sh" "$_ce_m"
+  expect_eq "CE.7c [mode $_ce_m] THE RESIDUAL: its awk launcher's off-budget suite asks as main and runs" \
+    "0 gamma.test.sh" "$CE_RC $(ce_ran)"
+  ce_run "$ACTOR" 'env bash tools/launch.sh gamma.test.sh' "$_ce_m"
+  expect_eq "CE.7d [mode $_ce_m] …while a script start is carried as T3 shipped it, and refused at the gate" \
+    "75 " "$CE_RC $(ce_ran)"
+done
 
 finish

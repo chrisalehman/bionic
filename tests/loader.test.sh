@@ -471,4 +471,63 @@ eq "S.5a --all with --only is refused, bytes as before" "$S_OUT" \
 eq "S.5b …exit 2" "$S_RC" "2"
 eq "S.5c start-up ceiling: --all with --only sources no library" "$(s_sourced)" "0"
 
+# ── §E — a flag that takes a value refuses an empty one (wave-33 T4, AC-6.4) ──
+# `--only=` with nothing after the sign used to run the WHOLE pass, the opposite of what a
+# person who typed a narrowing flag meant (wave-32 A-T6-4). It is refused exactly as a bare
+# `--only` is: exit 2, the flag named, nothing sourced or run. The bare refusal is the
+# positive control for each door (E.0), so an empty-readback cannot pass on a door that
+# refuses nothing, and the instrumented copy of setup's libraries proves the refusal
+# sources none (S.0 shows the log fills when the door does source).
+E_SETUP_MSG="setup: --only needs the name of the one item to set up.
+       run ${S_CMD} --list to see the names."
+S_OUT="$(s_run --only)"
+eq "E.0a setup: the bare --only refusal is the reference bytes" "$S_OUT" "$E_SETUP_MSG"
+S_OUT="$(s_run --only=)"; S_RC=$?
+eq "E.1a setup --only= is refused as a bare --only is, flag named" "$S_OUT" "$E_SETUP_MSG"
+eq "E.1b …exit 2" "$S_RC" "2"
+eq "E.1c …and sources no library" "$(s_sourced)" "0"
+S_OUT="$(s_run --all --only=)"; S_RC=$?
+eq "E.1d setup --all --only= is refused for the empty value, not run" "$S_OUT" "$E_SETUP_MSG"
+eq "E.1e …exit 2" "$S_RC" "2"
+
+E_REMOVE="$PAYLOAD/scripts/remove.sh"
+E_RM_CMD="bash $(cd "$PAYLOAD/scripts" && pwd -P)/remove.sh"
+e_rm_run() {  # <args...> — remove.sh in the throwaway home, no stdin, no tty
+  env -i HOME="$FAKE_HOME" PATH=/usr/bin:/bin TMPDIR="$WORK" BIONIC_PLUGINS_DIR="$WORK/s-plugins" \
+    /bin/bash "$E_REMOVE" "$@" </dev/null 2>&1
+}
+E_RM_MSG="remove: --only needs the name of the one item to remove.
+        run ${E_RM_CMD} --list to see the names."
+S_OUT="$(e_rm_run --only)"; S_RC=$?
+eq "E.0b remove: the bare --only refusal is the reference bytes" "$S_OUT" "$E_RM_MSG"
+eq "E.0c …exit 2" "$S_RC" "2"
+S_OUT="$(e_rm_run --only=)"; S_RC=$?
+eq "E.2a remove --only= is refused as a bare --only is, flag named" "$S_OUT" "$E_RM_MSG"
+eq "E.2b …exit 2" "$S_RC" "2"
+S_OUT="$(e_rm_run --all --only=)"; S_RC=$?
+eq "E.2c remove --all --only= is refused for the empty value, not run" "$S_OUT" "$E_RM_MSG"
+eq "E.2d …exit 2" "$S_RC" "2"
+
+# --- remove tears down the notification channel setup installed, and only that file (wave-33 T15; T12 loose end) ---
+RN_HOME="$WORK/rn-home"; mkdir -p "$RN_HOME/.claude/bionic"
+printf 'topic-from=cron.env:BIONIC_NTFY_TOPIC\ntitle-prefix=bionic\n' > "$RN_HOME/.claude/bionic/notify"
+printf '80\n' > "$RN_HOME/.claude/bionic/share"
+rn_run() {  # <answer> <args...> — the real remove.sh in a scratch home, one line of stdin
+  local ans="$1"; shift
+  printf '%s\n' "$ans" | env -i HOME="$RN_HOME" PATH=/usr/bin:/bin TMPDIR="$WORK" TERM=dumb \
+    /bin/bash "$E_REMOVE" "$@" 2>&1
+}
+RN_LIST="$(rn_run n --list)"
+case "$RN_LIST" in *legacy-alias*) ok "RN.0 --list prints the roster (the extractor reads)" ;; *) no "RN.0 --list prints the roster (the extractor reads)" "out=[$RN_LIST]" ;; esac
+case "$RN_LIST" in *notify*) ok "RN.1 the roster names the notify item" ;; *) no "RN.1 the roster names the notify item" "out=[$RN_LIST]" ;; esac
+RN_NO="$(rn_run n --only notify)"
+eq "RN.2 declined: the channel file stays" "yes" "$([ -f "$RN_HOME/.claude/bionic/notify" ] && echo yes || echo no)"
+case "$RN_NO" in *"declined"*) ok "RN.2a …and the item says declined" ;; *) no "RN.2a …and the item says declined" "out=[$RN_NO]" ;; esac
+RN_YES="$(rn_run y --only notify)"
+eq "RN.3 consented: the channel file is gone" "no" "$([ -e "$RN_HOME/.claude/bionic/notify" ] && echo yes || echo no)"
+case "$RN_YES" in *"bionic/notify"*) ok "RN.3a …and the item names the file it removed" ;; *) no "RN.3a …and the item names the file it removed" "out=[$RN_YES]" ;; esac
+eq "RN.3b …and the share file beside it is untouched" "80" "$(cat "$RN_HOME/.claude/bionic/share" 2>/dev/null)"
+RN_AGAIN="$(rn_run y --only notify)"
+case "$RN_AGAIN" in *"already clean"*) ok "RN.4 with no channel file the item is already clean" ;; *) no "RN.4 with no channel file the item is already clean" "out=[$RN_AGAIN]" ;; esac
+
 finish

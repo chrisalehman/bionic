@@ -979,6 +979,7 @@ expect_nonempty "G19.0 patrol.sh's class list reads" "$G19_PATROL"
 expect_nonempty "G19.0b …and so does the grant's" "$G19_GRANT"
 expect_eq "G19.1 the grant's state classes are patrol.sh's, as a set" \
   "$(printf '%s\n' $G19_PATROL | sort -u | tr '\n' ' ')" "$(printf '%s\n' $G19_GRANT | sort -u | tr '\n' ' ')"
+expect_contains "G19.owed the person's ledger (owed-<sid>.state, lib/owed.sh) is one of the grant's classes" " owed " " $G19_GRANT "
 g19_state() {  # <class> <facts> <effect> -> kind|state
   local v how=""
   v="$(dec "$1" "$2" "$3")"
@@ -996,6 +997,8 @@ for c in $G19_PATROL; do
   G19_UP="$(printf '%s' "$c" | tr '[:lower:]' '[:upper:]')"
   expect_eq "G19.$c.case $G19_UP-sid-1.state is state (case-blind filesystems)" "deny-fix|state" "$(g19_state lead "checkout=$P" "$(W "$P/.bionic/tmp/$G19_UP-sid-1.state")")"
 done
+expect_eq "G19.owed.w a write to owed-sid-1.state is state, named without the loop (a lead's and a writer's)" "deny-fix|state deny-fix|state" \
+  "$(g19_state lead "checkout=$P" "$(W "$P/.bionic/tmp/owed-sid-1.state")") $(g19_state writer "own=$P" "$(W "$P/.bionic/tmp/owed-sid-1.state")")"
 expect_eq "G19.armed the Patrol stamp's .armed sibling is state" "deny-fix|state" "$(g19_state lead "checkout=$P" "$(W "$P/.bionic/tmp/patrol-sid-1.state.armed")")"
 expect_eq "G19.ctl an ordinary file beside them is not state" "allow|" "$(g19_state lead "checkout=$P" "$(W "$P/.bionic/tmp/notes.txt")")"
 G19_SRC="$(cat "$LIB" 2>/dev/null)"

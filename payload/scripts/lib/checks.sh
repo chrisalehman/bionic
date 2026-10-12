@@ -68,6 +68,15 @@ if ! declare -F patrol_dead_sessions >/dev/null 2>&1; then
   . "$(cd "$(_bionic_checks_self_dir)" && pwd -P)/patrol.sh"
 fi
 
+# THE SAME SOFT SOURCE FOR notify.sh, the one sender, whose channel-file path and reader the
+# notification row below asks instead of spelling a second copy (wave-33 T12). Sourcing it
+# defines functions and a variable and sends nothing.
+if ! declare -F notify_declared >/dev/null 2>&1 \
+   && [ -r "$(cd "$(_bionic_checks_self_dir)" && pwd -P)/notify.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_bionic_checks_self_dir)" && pwd -P)/notify.sh"
+fi
+
 # ─── The two repair routes ───────────────────────────────────────────────────
 #
 # ONE STRING PER PARTY FOR THE TWO PARTIES THAT HAVE ONE. An aggregate line —
@@ -351,6 +360,61 @@ bionic_check_claude_proxy() {  # <row id>
 bionic_check_working_principles() {  # <row id>
   case "$(principles_state)" in absent|edited) return 0 ;; esac
   return 1
+}
+
+# ─── The notification channel (wave-33 T12; REQ-2 AC-2.1, D2) ─────────────────
+#
+# THE CHANNEL IS DECLARED ONCE, AT USER LEVEL, in `<claude home>/bionic/notify` (lib/notify.sh
+# reads it and sends through it). This is the READ-ONLY half of it: a file test and two greps,
+# never a send and never the network, so doctor can call every function here.
+#
+# THE ONE SPELLING of where the topic is read from is this string, which setup writes as the
+# channel file's `topic-from=` line; the file and the variable are cut out of it, never typed
+# again. The topic itself is never stored anywhere bionic writes.
+BIONIC_NOTIFY_TOPIC_FROM="cron.env:BIONIC_NTFY_TOPIC"
+
+bionic_check_notify_file() { notify_file; }  # the channel file's path (notify.sh's)
+
+# bionic_check_notify_reads -> `<VAR> <file>` the channel file names, or nothing when it names none.
+bionic_check_notify_reads() {
+  local from
+  declare -F _notify_value >/dev/null 2>&1 || return 0
+  from="$(_notify_value "$(notify_file)" topic-from 2>/dev/null)"
+  case "$from" in
+    *:*) [ -n "${from%%:*}" ] && [ -n "${from#*:}" ] && printf '%s %s' "${from#*:}" "${from%%:*}" ;;
+  esac
+  return 0
+}
+
+# Is there a topic to declare against: the variable the default names, set to something, in the
+# file it names under the claude home. Read with grep, quotes and `export` allowed, as the sender
+# reads it; whether the value is a usable topic is the sender's to say at the test send.
+bionic_check_notify_topic_set() {
+  local nf f pat
+  declare -F notify_file >/dev/null 2>&1 || return 1
+  nf="$(notify_file)"
+  f="${nf%/bionic/notify}/${BIONIC_NOTIFY_TOPIC_FROM%%:*}"
+  [ -r "$f" ] || return 1
+  pat="^[[:space:]]*(export[[:space:]]+)?${BIONIC_NOTIFY_TOPIC_FROM#*:}=[\"']?[^\"'[:space:]]"
+  /usr/bin/grep -Eq "$pat" "$f" 2>/dev/null
+}
+
+# declared | offered | absent: declared when the channel file is there; offered when it is not but
+# there is a topic to declare it against (setup has an item to offer); absent when it is not and
+# there is nothing yet to declare it against.
+bionic_check_notify_state() {
+  declare -F notify_declared >/dev/null 2>&1 || { printf 'absent'; return 0; }
+  if notify_declared; then printf 'declared'
+  elif bionic_check_notify_topic_set; then printf 'offered'
+  else printf 'absent'; fi
+  return 0
+}
+
+# Fires when setup has something to offer: no channel declared, and a topic to declare one with. A
+# machine with no topic has nothing setup can do, so the row stays quiet there (a standing offer
+# on every machine that does not use ntfy would make "nothing left to do" unreachable).
+bionic_check_notify() {  # <row id>
+  [ "$(bionic_check_notify_state)" = "offered" ]
 }
 
 # THE RETIRED BLOCK, AND ONLY THE BLOCK (wave-27 T75, A-orch-162). This predicate fires
@@ -756,6 +820,7 @@ _bionic_checks_build() {
   _bionic_checks_emit "legacy-permission-block" "legacy permission block" "bionic_check_legacy_permission_block" "setup" "legacy-permission-block" "$r_setup"
   _bionic_checks_emit "permission-mode" "default permission mode" "bionic_check_permission_mode" "setup" "permission-mode" "$r_setup"
   _bionic_checks_emit "working-principles" "working principles" "bionic_check_working_principles" "setup" "working-principles" "$r_setup"
+  _bionic_checks_emit "notify" "notify channel" "bionic_check_notify" "setup" "notify" "$r_setup"
 
   _bionic_checks_emit "statusline-npx" "statusLine command" "bionic_check_statusline_npx" "setup" "tool:ccstatusline" "$r_setup"
 

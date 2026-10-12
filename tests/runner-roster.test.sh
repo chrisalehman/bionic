@@ -2216,8 +2216,9 @@ expect_eq "OA.11 …the solo suite ran under it" "$(oa_id_of tests/run.sh)" \
 # store holds a request per suite and none keyed by the runner: OA.2 is not vacuous.
 TOAM="$TMPROOT/one-adm-mut"
 rr_tree "$TOAM"; oa_stub "$TOAM" oa-fast no 0; oa_stub "$TOAM" oa-slow no 0
-anchor "$TOAM/tests/run.sh" '    _gate_ask_for whole tests/run.sh' 1
-grep -vF '    _gate_ask_for whole tests/run.sh' "$RUNNER" > "$TOAM/tests/run.sh"
+OA_ASK='if ! _gate_ask_for whole tests/run.sh; then'
+anchor "$TOAM/tests/run.sh" "    $OA_ASK" 1
+OA_N_="$OA_ASK" awk 'BEGIN { n = ENVIRON["OA_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if ! :; then" substr($0, i + length(n)); print }' "$RUNNER" > "$TOAM/tests/run.sh"
 expect_eq "OA.12 the mutant runner parses" "0" "$(bash -n "$TOAM/tests/run.sh" >/dev/null 2>&1; echo $?)"
 oa_drive "$TOAM"
 expect_eq "OA.13 …and is green" "0" "$RR_RC"
@@ -2270,5 +2271,72 @@ expect_eq "WL.7 the last suite is the one whose verdict landed last" "oa-slow.te
 expect_eq "WL.8 the Gating: line is unchanged and comes before it" \
   "Gating: 2 passed, 0 failed
 $OW_LINE" "$(printf '%s\n' "$OA_WHOLE_OUT" | /usr/bin/grep -E '^(Gating|Wall): ')"
+
+# ============================================================
+section "§WIDTH-AFTER-GRANT a whole run that waited reads its width once it is admitted (wave-33 T5; D4, AC-8.3)"
+# ============================================================
+#
+# THE CLAIM. A whole run asks for the machine first and sizes its workers after the grant, from a
+# fresh sample, so a run that waited on a busy machine runs at the quiet machine's width. The
+# fixture: a holder process takes a `work` admission in this section's own store, so the run's
+# `whole tests/run.sh` ask waits (AC-8.4's rule); the pressure ring reads emergency while it
+# waits; the ring is then rewritten to clear readings and the holder ends; the run is granted.
+# Its `Wall:` line carries the width it ran at (§WALL-LINE), which must be the clear ring's rung,
+# the share's room, 7 under share 92 on 8 cores. The runner's own sample is pinned clear
+# throughout (the probe pins), so only the ring's contents at read time move the answer.
+TWG="$TMPROOT/width-grant"; WG_GATE="$TMPROOT/width-grant-gate"; WG_RING="$TMPROOT/width-grant-ring"
+WG_HOLD="$TMPROOT/width-grant-holder"; WG_OUT="$TMPROOT/width-grant.out"
+rr_tree "$TWG"; oa_stub "$TWG" wg-a no 0
+wg_ring() {  # <ring> <free pct> — five samples at the pinned clock, each that free reading, no swap, idle load, 8 cores
+  local i; : > "$1"
+  for i in 1 2 3 4 5; do printf '%s|%s|0|0.1|8\n' "$RR_NOW" "$2" >> "$1"; done
+}
+wg_level() {  # <ring> — the rung pressure_level reads off that ring against the share's room (7)
+  env BIONIC_PRESSURE_RING="$1" BIONIC_NOW_EPOCH="$RR_NOW" \
+    bash -c '. "$1/payload/scripts/lib/resources.sh" 2>/dev/null; pressure_level 7 2>/dev/null' _ "$REPO"
+}
+wg_ring "$TMPROOT/wg-busy-probe" 1; wg_ring "$TMPROOT/wg-quiet-probe" 44
+WG_BUSY_W="$(wg_level "$TMPROOT/wg-busy-probe")"; WG_QUIET_W="$(wg_level "$TMPROOT/wg-quiet-probe")"
+expect_eq "WG.1 the busy ring reads the bottom rung, 1 (the fixture can tell the two apart)" "1" "$WG_BUSY_W"
+expect_eq "WG.2 the quiet ring reads the share's room, 7" "7" "$WG_QUIET_W"
+wg_waiting() {  # yes when the store holds the runner's request, not yet admitted
+  local f
+  f="$(grep -l '^key=tests/run.sh$' "$WG_GATE"/requests/[0-9]* 2>/dev/null | head -n 1)"
+  [ -n "$f" ] && ! grep -q '^admitted=' "$f" && echo yes
+}
+wg_until() {  # <tries of 0.1 s> <command…> — rc 0 once the command prints something
+  local n="$1"; shift
+  while [ "$n" -gt 0 ]; do [ -z "$("$@")" ] || return 0; sleep 0.1; n=$((n - 1)); done
+  return 1
+}
+rm -rf "$WG_GATE" "$WG_HOLD".*; wg_ring "$WG_RING" 1
+( env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$WG_GATE" BIONIC_NOW_EPOCH="$RR_NOW" \
+    bash -c '. "$1/payload/scripts/lib/gate.sh" || exit 1
+      id="$(gate_ask work wg-holder)" || exit 1
+      printf "%s\n" "$id" > "$2.id"
+      n=600; while [ ! -f "$2.release" ] && [ "$n" -gt 0 ]; do sleep 0.1; n=$((n - 1)); done
+      gate_end "$id" 0 >/dev/null' _ "$REPO" "$WG_HOLD" ) &
+WG_HOLDER_PID=$!
+wg_until 100 cat "$WG_HOLD.id" 2>/dev/null
+( cd "$TWG" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$WG_RING" \
+    BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+    env -u BIONIC_TEST_JOBS_CEILING "${RR_GATE_ENV[@]}" CLAUDE_CONFIG_DIR="$OA_HOME" BIONIC_GATE_DIR="$WG_GATE" \
+    bash tests/run.sh > "$WG_OUT" 2>&1; echo "$?" > "$WG_OUT.rc" ) &
+WG_RUN_PID=$!
+WG_HELD=no; wg_until 200 wg_waiting && WG_HELD=yes
+wg_ring "$WG_RING" 44            # the machine goes quiet while the run waits
+: > "$WG_HOLD.release"           # then the holder ends, and the run is granted
+wg_until 600 cat "$WG_OUT.rc" 2>/dev/null
+kill "$WG_RUN_PID" "$WG_HOLDER_PID" 2>/dev/null; wait "$WG_RUN_PID" "$WG_HOLDER_PID" 2>/dev/null
+WG_LOG="$(cat "$WG_OUT" 2>/dev/null)"
+expect_nonempty "WG.3 the holder was admitted first (its request id is on file)" "$(cat "$WG_HOLD.id" 2>/dev/null)"
+expect_eq "WG.4 the run's whole ask was seen waiting in the store behind the holder" "yes" "$WG_HELD"
+expect_contains "WG.5 …and the run said so" "(whole tests/run.sh) waits for its turn" "$WG_LOG"
+expect_eq "WG.6 the run ended green once granted" "0" "$(cat "$WG_OUT.rc" 2>/dev/null)"
+expect_contains "WG.7 …having run its suite" "Gating: 1 passed, 0 failed" "$WG_LOG"
+WG_WIDTH="$(printf '%s\n' "$WG_LOG" | sed -nE 's/^Wall: .* · width ([0-9]+) · .*/\1/p')"
+expect_nonempty "WG.8 the Wall: line's width reads back" "$WG_WIDTH"
+expect_eq "WG.9 the run's width is the quiet machine's (${WG_QUIET_W}), not the busy one it waited on (${WG_BUSY_W})" \
+  "$WG_QUIET_W" "$WG_WIDTH"
 
 finish
