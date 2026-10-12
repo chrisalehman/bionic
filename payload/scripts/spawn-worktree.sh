@@ -444,7 +444,8 @@ cmd_create() {
 
 # THE RE-DISPATCH (wave-34 T2; D11, REQ-1 AC-1.1): a tree handed to a successor row names the
 # successor, so what that row starts asks the gate as it (lib/worktree.sh `worktree_mark`). A
-# linked tree only: the main checkout belongs to no writer.
+# linked tree only: the main checkout belongs to no writer. hooks/dispatch-preflight.sh calls it for
+# a dispatch whose bound row recorded a tree (wave-34 T28); a hand call does the same.
 cmd_mark() {
   local target="" name="" named=0 why
   while [ $# -gt 0 ]; do
