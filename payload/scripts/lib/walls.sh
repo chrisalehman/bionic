@@ -1579,11 +1579,25 @@ plan_write_note() {
 # no note. The `refuse` shim in `wall_evidence_gate` calls it, so it is defined above that.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
+# _eg_owe <key> <title> <reply> — an ask of the person, staged beside the refusal that makes it (wave-34 T5; REQ-4
+# AC-4.1, D14). The gate opens no owed item: a wall writes no fact, as it fetches none (the freeze, .claude/rules/
+# hook-authoring.md). The shim below hands the asks back as the record's sixth field, `wall_evidence_gate` puts them in
+# BIONIC_WALL_OWED, and hooks/bash-walls.sh, the gate's caller, opens one item each (lib/owed.sh). One line per ask:
+# key TAB title TAB reply, a tab or line break inside a value written as a space.
+# [WALL: tests/notify.test.sh]
+_EG_OWED=""
+_eg_owe() {
+  local k="${1//[$'\t\n\r']/ }" t="${2//[$'\t\n\r']/ }" r="${3//[$'\t\n\r']/ }"
+  _EG_OWED="${_EG_OWED}${_EG_OWED:+$'\n'}${k}"$'\t'"${t}"$'\t'"${r}"
+}
+BIONIC_WALL_OWED=""
+
 wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
+  BIONIC_WALL_OWED=""
   # Not a Bash tool call or an empty command — nothing to gate.
   [ -n "$COMMAND" ] || return 0
 
-  local _eg_rec _eg_rc _eg_out _eg_mode _eg_verb _eg_fact _eg_fix
+  local _eg_rec _eg_rc _eg_out _eg_mode _eg_verb _eg_fact _eg_fix _eg_owed=""
   _eg_rec=$(
     # THE SHIM, and the only line of this wall that is not the hook's own. It has
     # `refuse`'s signature and `refuse`'s abort, and it renders nothing: the parent
@@ -1611,10 +1625,11 @@ wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
 $5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
         fi
       fi
-      # A separator byte inside a field would move the fields after it: it shows as `?`.
+      # A separator byte inside a field would move the fields after it: it shows as `?`. The asks the arm staged
+      # (`_eg_owe`) ride as a sixth field, empty when it staged none.
       set -- "${1//[$'\036\037']/?}" "${2//[$'\036\037']/?}" "${3//[$'\036\037']/?}" \
-             "${4//[$'\036\037']/?}" "${5//[$'\036\037']/?}"
-      printf '\036%s\037%s\037%s\037%s\037%s' "$@" && exit 2; exit 3
+             "${4//[$'\036\037']/?}" "${5//[$'\036\037']/?}" "${_EG_OWED//[$'\036\037']/?}"
+      printf '\036%s\037%s\037%s\037%s\037%s\037%s' "$@" && exit 2; exit 3
     }
     _eg_body
   )
@@ -1637,6 +1652,9 @@ $5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
     _eg_verb="${_eg_rec%%$'\037'*}"; _eg_rec="${_eg_rec#*$'\037'}"
     _eg_fact="${_eg_rec%%$'\037'*}"; _eg_rec="${_eg_rec#*$'\037'}"
     _eg_fix="${_eg_rec%%$'\037'*}";  _eg_rec="${_eg_rec#*$'\037'}"
+    case "$_eg_rec" in *$'\037'*) _eg_owed="${_eg_rec#*$'\037'}"; _eg_rec="${_eg_rec%%$'\037'*}" ;; esac
+    while [ "${_eg_rec%$'\n'}" != "$_eg_rec" ]; do _eg_rec="${_eg_rec%$'\n'}"; done
+    BIONIC_WALL_OWED="$_eg_owed"
     while [ "${_eg_mode%$'\n'}" != "$_eg_mode" ]; do _eg_mode="${_eg_mode%$'\n'}"; done
     while [ "${_eg_verb%$'\n'}" != "$_eg_verb" ]; do _eg_verb="${_eg_verb%$'\n'}"; done
     while [ "${_eg_fact%$'\n'}" != "$_eg_fact" ]; do _eg_fact="${_eg_fact%$'\n'}"; done
@@ -2405,6 +2423,13 @@ Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <n
   _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
   [ -z "$_eg_debts" ] || lines="${lines}
 ${_eg_debts}"
+  # A FAILING QUESTION IS THE PERSON'S TO WAIVE (wave-34 T5; D14): each opens `waive:<question>`, the key the waive verb
+  # closes. A question with no reading asks the run for one first, not the person, and stages nothing (T35's rule).
+  local _eg_q _eg_ev
+  while IFS=$'\t' read -r _ _eg_q _eg_ev; do
+    [ -n "$_eg_q" ] || continue
+    _eg_owe "waive:${_eg_q}" "waiver: ${_eg_q}" "commit refused — ${_eg_q}: the newest reading is result=fail (evidence=${_eg_ev}), and no waiver is newer; waive it with: session-poker.sh waive ${_eg_q} '<your reply>'"
+  done <<< "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "failing"')"
   _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a reading whose newest is not result=fail, or a newer waiver:
 ${lines}
 Plan: $PLAN
@@ -4135,6 +4160,7 @@ validate_matrix() {
           T3|T4)
             case "$val_lc" in
               n/a|n/a:*)
+                _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
                 block_matrix "${ac} calls its ${key} evidence n/a" "record it, or waive the row" \
                   "matrix row '${ac}' (${tier}) key '${key}' is a self-written 'n/a' on a live tier." \
                   "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
@@ -4259,6 +4285,7 @@ validate_matrix() {
         esac
         if [ "$tier" = "T4" ]; then
           if user_confirmed_form_ok "$block_txt"; then
+            _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
             block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
               "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
               "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
@@ -5334,9 +5361,13 @@ return 0
 # THE ARGV COMES BACK TOO (wave-31 T11; REQ-8 AC-8.3, D9): `_WALL_POKER_CALL` is the matched
 # segment's words from argv[0] on and `_WALL_POKER_ARGS` the words after the verb, each list joined
 # by `GIT_ARGV_US`, so arm A can read an `amend`'s target and flags and rebuild the call it admits.
+#
+# ONE OTHER VERB, ON ASK (wave-34 T5; REQ-4 AC-4.3, D9): with a second argument the reader matches
+# that one session-poker.sh verb instead of the list, through the same argv, and sets the same four
+# values; hooks/bash-walls.sh reads the acknowledgement's operand this way.
 _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
-_wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKER_VERB) · 1 not
-  local _line _oldifs _hadf _w _i _script _next
+_wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <verb> (sets _WALL_POKER_VERB) · 1 not
+  local _line _oldifs _hadf _w _i _script _next _want="${2:-}"
   _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
@@ -5368,6 +5399,13 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
       session-poker.sh)
         shift
         _next="${1:-}"
+        if [ -n "$_want" ]; then
+          [ "$_next" = "$_want" ] || continue
+          _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
+          _WALL_POKER_CALL="$GIT_ARGV_REST"
+          _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
+          return 0
+        fi
         case "$_next" in
           amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|tasks-prose|epic-row|continuation-fill|disposition)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
@@ -5376,6 +5414,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
             return 0 ;;
         esac ;;
       spawn-worktree.sh)
+        [ -z "$_want" ] || continue
         shift
         [ "${1:-}" = land ] || continue
         for _next in "$@"; do
