@@ -16,7 +16,8 @@
 # §SHAPE AC-11.1 (its rows 1-2 with §PIN 12-13 are AC-12.4's §LABELS) · §FORMS AC-11.4 · §REPLY
 # AC-11.5 · §PIN AC-11.6 · §SIZE AC-11.7, AC-12.4 · §CORE the core rule's static half (AC-11.2's live
 # half is another row's) · §NUMBER AC-12.1 · §GOAL AC-12.2 · §BATCH AC-12.3 · §ALTITUDE AC-13.1 ·
-# §EXAMPLES AC-13.2 (AC-13.3's live half is another row's). Static: reads files, runs nothing.
+# §EXAMPLES AC-13.2 (AC-13.3's live half is another row's) · §CLIMB wave-35 AC-10.1 (AC-10.2's live
+# half is the T24 record's headless session). Static: reads files, runs nothing.
 #
 # WHY A TEXT PIN HERE, against the house rule that pinning text is a bad test. The labels and the
 # reply line are not prose: they are the strings a transcript reader keys on (ADR-048 item 3), so
@@ -425,5 +426,63 @@ awk '/^Design altitude:$/ { a = 1 } a == 1 && /^> \*\*Goal:\*\*/ { $0 = $0 " in 
   "$SKILL" > "$TMP/ident.md"
 expect_true "39a: the identifier copy carries the plant" grep -q 'in `walls.sh`' "$TMP/ident.md"
 expect_false "39b: a design-altitude half naming a file fails the halves pin" altitude_halves_ok "$TMP/ident.md"
+
+section "§CLIMB — the Altitude section opens on the act, the labels after it (wave-35 AC-10.1)"
+
+# altitude_span <file> -> the lines of the `## Altitude` section, heading excluded.
+altitude_span() { awk '/^## / { on = ($0 == "## Altitude"); next } on' "$1"; }
+
+# first_at <span> <phrase> -> the span's line number of the phrase's first case-blind match, or 0.
+first_at() { grep -inF -- "$2" <<<"$1" | head -1 | cut -d: -f1 | grep . || echo 0; }
+
+# climb_ok <file> — the section opens on the reframe (its first line asks for a conceptual level),
+# then, in order: the one difference named before any structure; detail cut before sentences;
+# plain words over the record's house style; the four labels. The failure, if stated, comes after.
+climb_ok() {
+  local s first a b c d e f
+  s="$(altitude_span "$1")"
+  first="$(sed '/^[[:space:]]*$/d' <<<"$s" | head -1)"
+  grep -qi 'conceptual level' <<<"$first" || return 1
+  a="$(first_at "$s" 'conceptual level')"
+  b="$(first_at "$s" 'one thing the options differ on')"
+  c="$(grep -in 'detail before' <<<"$s" | grep -i 'sentences' | head -1 | cut -d: -f1)"
+  d="$(first_at "$s" 'house style')"
+  e="$(first_at "$s" 'four labels')"
+  f="$(first_at "$s" 'failure to avoid')"
+  [ "$a" -gt 0 ] && [ "$b" -gt "$a" ] && [ "${c:-0}" -gt "$b" ] && [ "$d" -gt "$c" ] && [ "$e" -gt "$d" ] || return 1
+  [ "$f" -eq 0 ] || [ "$f" -gt "$e" ]
+}
+
+SPAN="$(altitude_span "$SKILL")"
+expect_nonempty "40a: the Altitude span extractor reads the section" "$SPAN"
+expect_true "40b: the section opens on the reframe and keeps the act's order" climb_ok "$SKILL"
+
+# The climb-first sentence deleted: the section no longer opens on the reframe.
+anchor "$SKILL" 'conceptual level' 1
+grep -viF 'conceptual level' "$SKILL" > "$TMP/no-climb.md"
+expect_false "41a: the no-reframe copy lost the climb-first sentence" grep -qiF 'conceptual level' "$TMP/no-climb.md"
+expect_true "41b: …and still carries the one-difference rule (the copy is not empty)" \
+  grep -qiF 'one thing the options differ on' "$TMP/no-climb.md"
+expect_false "41c: a copy without the climb-first sentence fails the climb pin" climb_ok "$TMP/no-climb.md"
+
+# The failure moved to open the section: it opens on what to avoid, not on the act.
+anchor "$SKILL" 'failure to avoid' 1
+awk '/failure to avoid/ { next } { print } $0 == "## Altitude" { print ""; print "The failure to avoid is a brief written at the level of mechanisms." }' \
+  "$SKILL" > "$TMP/failure-first.md"
+expect_true "42a: the failure-first copy opens its Altitude section on the failure" \
+  grep -qi 'failure to avoid' <<<"$(altitude_span "$TMP/failure-first.md" | sed '/^[[:space:]]*$/d' | head -1)"
+expect_false "42b: a copy opening on the failure fails the climb pin" climb_ok "$TMP/failure-first.md"
+
+# The one-difference rule removed.
+anchor "$SKILL" 'one thing the options differ on' 1
+doctor "$SKILL" "$TMP/no-difference.md" 's/one thing the options differ on/options/'
+expect_true "43a: the no-difference copy still opens on the reframe" grep -qiF 'conceptual level' "$TMP/no-difference.md"
+expect_false "43b: a copy without the one-difference rule fails the climb pin" climb_ok "$TMP/no-difference.md"
+
+# Concise pulled the wrong way: sentences cut before detail.
+anchor "$SKILL" 'detail before cutting sentences' 1
+doctor "$SKILL" "$TMP/sentences-first.md" 's/detail before cutting sentences/sentences before cutting detail/'
+expect_true "44a: the sentences-first copy carries the plant" grep -qF 'sentences before cutting detail' "$TMP/sentences-first.md"
+expect_false "44b: a copy cutting sentences before detail fails the climb pin" climb_ok "$TMP/sentences-first.md"
 
 finish
