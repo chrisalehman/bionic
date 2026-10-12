@@ -1697,11 +1697,11 @@ do_run() {
 }
 
 # THE DELIVERY CALLS THE PERSON (wave-33 T12; REQ-2 AC-2.3, D2). A run that reached `delivered:` and
-# was archived opens one item on this session's ledger, `delivered:<run>`, sends it once through the
+# was archived opens one item on this session's ledger, `delivered:<run>`, sends it at least once through the
 # one sender and closes it: it is news, not a need, so nothing stays owed. Only when a channel is
 # declared, so a machine without one writes no ledger and prints what 1.15.0 printed; silent either
 # way, and never fatal, so no send can change this script's output or its exit code. A second `run`
-# says `already closed` and never reaches here, which is what makes the notice once. With no session
+# says `already closed` and never reaches here, which keeps the notice from being opened twice. With no session
 # id (a hand-run script) there is no ledger to key it on and nothing is sent.
 co_deliver_notice() {
   local key
