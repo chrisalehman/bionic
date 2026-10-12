@@ -6,7 +6,7 @@
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--quiet] [--shell <path>]
 #                                        [--stamp-dir <dir>] [--suites <names>] [--runner]
-#                                        [--detach [--no-follow]]
+#                                        [--detach]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -173,10 +173,6 @@
 # (`ps` names booked.sh and its --run-log), so a recycled pid is never waited on. LOST is never a
 # timeout: a dead pid with no `<log>.rc` is reported with the time the log was last written, and the
 # caller exits 70. `session-poker.sh wait <name>` is the same wait, by name, after the caller is gone.
-# --no-follow: START AND RETURN (wave-34 T9; D15). With --detach, the caller prints its one line and
-# exits 0 at once, waiting on nothing: the run is a pass a landing starts behind it (lib/line.sh
-# `_line_pass_start`), which reads the pid off that line and leaves the run to the record. The detached
-# side is the same; without --detach the flag is usage.
 #
 # THE LOG is `<runs>/<id>.log`, `<runs>` being the project's
 # `.bionic/tmp/runs` (the project is the checkout git's common dir belongs to, so a row tree's run
@@ -284,12 +280,12 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--detach [--no-follow]] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--detach] -- <command>\n' >&2
   exit 2
 }
 
 kill_after=""; max_wait=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0
-detach=0; run_log=""; follow=1
+detach=0; run_log=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
@@ -307,7 +303,6 @@ while [ "$#" -gt 0 ]; do
     --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
     --runner)       runner=1; shift ;;
     --detach)       detach=1; shift ;;
-    --no-follow)    follow=0; shift ;;
     # THE DETACHED SIDE (internal): the caller of --detach starts this shim again with the log it
     # claimed; nobody types it.
     --run-log)      [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_log="$2"; shift 2 ;;
@@ -316,7 +311,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$sep" -eq 1 ] && [ "$#" -ge 1 ] || booked_usage
-[ "$follow" -eq 1 ] || [ "$detach" -eq 1 ] || booked_usage
 if [ "$#" -gt 1 ]; then
   printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2
   exit 2
@@ -760,7 +754,6 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   if booked_find_live "$runs" "$(booked_run_id)"; then
     id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
     printf 'booked: attached pid=%s log=%s run=%s\n' "$BOOKED_LIVE_PID" "$BOOKED_CLAIM" "$id"
-    [ "$follow" -eq 1 ] || exit 0
     booked_follow "$BOOKED_CLAIM" "$BOOKED_LIVE_PID"
   fi
   if ! booked_claim_log "$runs" "$(booked_run_id)"; then
@@ -814,7 +807,6 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   fi
   id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
   printf 'booked: started pid=%s log=%s run=%s\n' "$pid" "$BOOKED_CLAIM" "$id"
-  [ "$follow" -eq 1 ] || exit 0
   booked_follow "$BOOKED_CLAIM" "$pid"
 }
 
