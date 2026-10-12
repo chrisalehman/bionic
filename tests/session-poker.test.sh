@@ -752,10 +752,12 @@ for _n in landed-one running-one silent-one closed-one; do
   add_row_to "$R8" "$ADOPT_A" name="$_n" status=intended agent_id="" \
     subagent_type=bionic:senior-implementor duration="45 minutes" cadence="10 minutes"
 done
+# ITS REPORT IS ITS DONE MARKER (wave-34 T6, REQ-14 AC-14.1): LANDED is read from the agent's report,
+# never from the deliverable alone, so the landed agent of this fixture says so the way a brief asks.
 add_row_to "$R8" "$ADOPT_A" name=landed-one status=identified agent_id="$ID_LANDED" \
   subagent_type=bionic:senior-implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/landed-one.md" \
-  progress="$R8/.bionic/tmp/progress-landed.md"
+  progress="$R8/.bionic/tmp/progress-landed.md" "$(said "$R8/.bionic/tmp" landed-one)"
 # THE SUITE BUDGET THIS AGENT WAS DISPATCHED WITH (S13, spec AC-20). The writer-side guard
 # in hooks/background-suite-guard.sh reads `suites_allowed=` off the row for the agent`s
 # own id, so a resumed writer whose adopted row lost the field would come out of a /clear
@@ -915,9 +917,11 @@ expect_contains "the row names the predecessor session it came from" "from=$ADOP
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 
 # ---------- 8b: the four verdicts ----------
-expect_contains "a deliverable on disk reads LANDED" "name=landed-one|verdict=LANDED" "$OUT"
-expect_contains "a fresh progress file inside its cadence reads RUNNING" \
-  "name=running-one|verdict=RUNNING" "$OUT"
+expect_contains "a deliverable on disk with the agent's report reads LANDED" "name=landed-one|verdict=LANDED" "$OUT"
+# RE-POINTED (wave-34 T6, REQ-14 AC-14.1): a fresh progress file is an mtime, which a just-killed agent
+# has too. With no panel to find it on and no earlier read to compare, nothing confirms it is alive.
+expect_contains "a fresh progress file inside its cadence, with nothing to confirm it, reads UNCONFIRMED" \
+  "name=running-one|verdict=UNCONFIRMED" "$OUT"
 expect_contains "a stale progress file reads SILENT" "name=silent-one|verdict=SILENT" "$OUT"
 expect_contains "a row with no identified line reads UNADDRESSABLE" \
   "name=orphan-one|verdict=UNADDRESSABLE" "$OUT"
@@ -1257,8 +1261,8 @@ done
 backdate "$SUB8/agent-$ID_TXSTALE.jsonl" 5400
 
 poke "$R8L" adopt --report-only
-expect_contains "a stale progress file with a FRESH transcript still reads RUNNING" \
-  "name=tx-fresh|verdict=RUNNING" "$OUT"
+expect_contains "a stale progress file with a FRESH transcript is recent, not confirmed: UNCONFIRMED (wave-34 T6)" \
+  "name=tx-fresh|verdict=UNCONFIRMED" "$OUT"
 expect_contains "…and both mtimes stale reads SILENT" \
   "name=tx-stale|verdict=SILENT" "$OUT"
 expect_contains "…the transcript's age is printed, so the verdict can be checked" \
@@ -1298,8 +1302,8 @@ add_row_to "$R8N" "$ADOPT_A" name=inside status=identified \
 printf 'progress\n' > "$R8N/.bionic/tmp/progress-inside.md"
 backdate "$R8N/.bionic/tmp/progress-inside.md" 300    # half a cadence
 poke "$R8N" adopt --report-only
-expect_contains "…and half a cadence still reads RUNNING" \
-  "name=inside|verdict=RUNNING" "$OUT"
+expect_contains "…and half a cadence is still inside the window: UNCONFIRMED, not SILENT (wave-34 T6)" \
+  "name=inside|verdict=UNCONFIRMED" "$OUT"
 
 # THE VERDICT IS THE LIBRARY'S ANSWER, proven by mutation — the same shape the multiplier
 # proof used, aimed at the function that owns the question now. A copy of the library whose
@@ -1322,8 +1326,8 @@ else
 fi
 OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
         bash "$OBS_MUT_ROOT/hooks/session-poker.sh" adopt --report-only 2>&1 )"
-expect_contains "…and the SAME row reads RUNNING against a library whose predicate says alive" \
-  "name=between|verdict=RUNNING" "$OUT"
+expect_contains "…and the SAME row reads UNCONFIRMED against a library whose predicate says alive (wave-34 T6)" \
+  "name=between|verdict=UNCONFIRMED" "$OUT"
 
 # ---------- 8k: the ADOPT REPORT reads the ADOPTER's transcript too (T1d, walk W-3) ----------
 #
@@ -6147,5 +6151,81 @@ expect_eq "34h2 …and no dry-run engagement marker is left in .bionic/tmp" "" \
   "$(find "$R34A/.bionic/tmp" "$R34E/.bionic/tmp" "$R34F/.bionic/tmp" -name 'engaged-*' ! -name "engaged-$SID.state" 2>/dev/null)"
 POKE_BOUND="$S34_BOUND_WAS"
 
+
+
+# ============================================================
+section "§HANDOFF-LIVE — the handoff reads liveness from the harness, says whether it is safe to exit or /clear, and goes STALE on a later dispatch (wave-34 T6; REQ-14 AC-14.2; D23)"
+# ============================================================
+#
+# THE DEFECT (field report 2026-10-11, item 2). The handoff listed two researchers as "live agents" after
+# TaskStop, because it read the roster's open rows — a roster records that a dispatch happened, never that
+# an agent is alive — and it said nothing about whether the session could be exited or cleared. The
+# contract now: the live list is the harness's own (the newest ListAgents answer in this session's
+# transcript, less every agent a TaskStop after it ended); an answer that a later dispatch outdates, or no
+# answer at all, is UNVERIFIED and never reads as safe; the block carries `safe to exit:` and the weaker
+# `safe to /clear:` line; and a dispatch after the handoff was written makes it STALE, which `adopt` (the
+# verb a resumed session runs first) says.
+#
+# FIXTURE FIDELITY. §HANDOFF's plan (the prelude's gate-admitted `s42_plan`), roster rows from the
+# production writer, this session's transcript with the corpus ListAgents body (`plant_answer`), and the
+# TaskStop and Agent tool_use entries in the shape the harness records every tool call.
+HX_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+hx_body() { awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next } h { print }' "$1"; }
+hx_tool() {  # <transcript> <ts> <tool name> <input json> [id] — one assistant tool_use and its result
+  local id="${5:-toolu_hx$RANDOM}"
+  jq -nc --arg ts "$2" --arg n "$3" --argjson in "$4" --arg id "$id" \
+    '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:$id,name:$n,input:$in}]}}' >> "$1"
+  jq -nc --arg ts "$2" --arg id "$id" \
+    '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:$id,content:"ok"}]}}' >> "$1"
+}
+RHX="$(make_repo hx-live)"; ( cd "$RHX" && git commit -q --allow-empty -m init )
+git -C "$RHX" config user.name "Dana Fixture"
+PHX="$(s42_plan "$RHX" 4)"
+new_roster "$RHX"
+add_row "$RHX" name=w-live status=identified agent_id=a-w-live-1111111111
+add_row "$RHX" name=w-stopped status=identified agent_id=a-w-stopped-22222222
+CHX="$(fake_config_dir hx)"; export CLAUDE_CONFIG_DIR="$CHX"
+TXH="$CHX/projects/-fixture-project/$SID.jsonl"
+plant_answer "$TXH" fresh w-live w-stopped
+hx_tool "$TXH" "2026-09-05T00:53:00.000Z" TaskStop '{"task_id":"w-stopped"}'
+s42_snap "$RHX" "$PHX"
+poke "$RHX" handoff
+HXB="$(hx_body "$PHX")"
+expect_eq "HX-1 handoff exits 0" "0" "$RC"
+expect_contains "HX-1b …the agent the harness lists is live (the extractor reads the section non-empty)" "  - w-live ·" "$HXB"
+expect_absent "HX-2 the agent a TaskStop ended after the answer is NOT listed live" "  - w-stopped ·" "$HXB"
+expect_contains "HX-2b …and the count is the harness's" "- live agents (1):" "$HXB"
+expect_contains "HX-3 the safety line names the writers still live" "- safe to exit: no — 1 writer(s) live: w-live" "$HXB"
+expect_contains "HX-3b …and the weaker /clear line" "- safe to /clear:" "$HXB"
+
+# A DISPATCH AFTER THE ANSWER: the answer cannot speak for the agent it predates, so nothing is safe.
+hx_tool "$TXH" "2026-09-05T00:54:00.000Z" Agent '{"description":"x","prompt":"y","subagent_type":"bionic:researcher","name":"w-late"}'
+s42_snap "$RHX" "$PHX"
+poke "$RHX" handoff
+HXB="$(hx_body "$PHX")"
+expect_contains "HX-4 a dispatch after the newest answer leaves the live set UNVERIFIED, never safe" \
+  "- safe to exit: no — unverified" "$HXB"
+
+# NOTHING LIVE: every agent the fresh answer lists is idle — finished, addressable, writing nothing.
+plant_answer "$TXH" fresh w-live:idle
+s42_snap "$RHX" "$PHX"
+poke "$RHX" handoff
+HXB="$(hx_body "$PHX")"
+expect_contains "HX-5 no writer live on the harness's answer: safe to exit" "- safe to exit: yes" "$HXB"
+expect_contains "HX-5b …and to /clear" "- safe to /clear: yes" "$HXB"
+
+# STALE ON A LATER DISPATCH. adopt — the first verb a resumed session runs — reads the bound plan's
+# handoff against the dispatches stamped with that plan.
+poke "$RHX" adopt --report-only
+expect_contains "HX-6 precondition: with no dispatch since, adopt reads the handoff current" "handoff written " "$OUT"
+expect_absent "HX-6b …and not stale" "STALE" "$OUT"
+HX_AT="$(hx_body "$PHX" | awk 'NF { sub(/^written: /, ""); print; exit }')"
+HX_NEXT="$(date -u -j -v+1S -f '%Y-%m-%dT%H:%M:%SZ' "$HX_AT" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$HX_AT + 1 second" +%Y-%m-%dT%H:%M:%SZ)"
+add_row "$RHX" name=w-after status=intended agent_id= plan="$PHX" launched_at="$HX_NEXT"
+poke "$RHX" adopt --report-only
+expect_contains "HX-7 a dispatch after the handoff was written marks it STALE" "STALE" "$OUT"
+expect_contains "HX-7b …naming the dispatch" "w-after" "$OUT"
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
+POKE_BOUND="$HX_BOUND_WAS"
 
 finish
