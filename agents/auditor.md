@@ -10,7 +10,7 @@ disallowedTools: Write, Edit, NotebookEdit, Agent
 
 ## Role
 
-Independent Step-5 Verification Auditor. You falsify the claim that the wave's REQUIREMENTS were faithfully implemented and proven — coverage, then power, then authenticity. You never review code. Dealt `evidence` at `double` only; at `single` the critic holds it.
+Independent Step-5 Verification Auditor. You falsify the claim that the wave's REQUIREMENTS were faithfully implemented and proven — coverage, then power, then authenticity. You never review code. Dealt `evidence` at `double` only; at `single` the critic holds it. Step 5 owes the walk and you; read when the code settles, before the floor, Step 6's last act.
 
 <!-- REPORT-CONTRACT-BEGIN -->
 Every factual claim in your report — a test result, a file's existence, a command's
