@@ -179,15 +179,12 @@ EXTRA_ENV=""
 # other stdout (a deny, a nudge, a wrap beside a nudge) stays in `$OUT` whole. §WRAP reads
 # `$WRAP` (the rewritten command) and `$WRAP_INPUT` (the whole rewritten tool_input).
 #
-# THE CARRY IS TAKEN OFF STDOUT THE SAME WAY (wave-33 T36; D7, AC-6.2). In bypass mode, which every payload
-# here carries (mk_payload, above), every call a budgeted agent
-# makes that the wall does not handle as a suite comes back as `export BIONIC_GATE_AGENT=<row name>;
-# <the command as typed>`, so the gate's ask holds the budget wherever a suite starts. That is not a
-# verdict or an advisory either, so `$OUT$ERR` keeps meaning "nothing refused, nothing said". The
-# split takes ONLY that shape: an object whose hookSpecificOutput holds nothing but the event name and
-# an updatedInput that is the payload's own tool_input with the name in front of its command. `$CARRY`
-# is the rewritten command (bash-walls.test.sh §CARRY-EVERY runs it against the gate).
-WRAP=""; WRAP_INPUT=""; CARRY=""
+# NO CARRY TO TAKE OFF (wave-34 T2; D11, REQ-1 AC-1.3). Until wave-34 a budgeted agent's non-suite
+# call came back as `export BIONIC_GATE_AGENT=<row name>; <the command>` in bypass mode, and this
+# helper split that off stdout as `$CARRY`. No command is rewritten to name its agent now (the gate
+# reads the writer's tree, lib/gate.sh THE PLACE), so such a call leaves stdout empty and `$OUT$ERR`
+# means "nothing refused, nothing said, nothing rewritten".
+WRAP=""; WRAP_INPUT=""
 run_hook() {  # <payload> <hook> [args...]
   local payload="$1"; shift
   local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
@@ -197,16 +194,7 @@ run_hook() {  # <payload> <hook> [args...]
           CLAUDE_PROJECT_DIR= $EXTRA_ENV bash "$@" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
-  WRAP=""; WRAP_INPUT=""; CARRY=""
-  if [ -n "$OUT" ] && printf '%s' "$OUT" | jq -e --argjson p "$payload" \
-        '(.hookSpecificOutput | keys) == ["hookEventName","updatedInput"]
-        and (.hookSpecificOutput.updatedInput.command | test("^export BIONIC_GATE_AGENT=[A-Za-z0-9._+-]+; "))
-        and ((.hookSpecificOutput.updatedInput
-              | .command |= sub("^export BIONIC_GATE_AGENT=[A-Za-z0-9._+-]+; "; "")) == $p.tool_input)' \
-        >/dev/null 2>&1; then
-    CARRY=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command')
-    OUT=""
-  fi
+  WRAP=""; WRAP_INPUT=""
   if [ -n "$OUT" ] && printf '%s' "$OUT" | jq -e '(.hookSpecificOutput | keys) == ["hookEventName","updatedInput"]
         and (.hookSpecificOutput.updatedInput.command | test("/scripts/booked\\.sh"))' >/dev/null 2>&1; then
     WRAP_INPUT=$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput.updatedInput')
@@ -256,6 +244,7 @@ dispatched "$R1" "$ACTOR" name=w-b1 "suites_allowed=alpha.test.sh beta.test.sh" 
 guarded "$R1" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B1a a suite ON the budget is allowed" "0" "$ST"
 expect_empty "B1a …silently" "$OUT$ERR"
+expect_contains "B1a2 …booked: its rewrite is the wrap, which the readers below read (B1g2's positive)" "booked.sh" "$WRAP"
 
 guarded "$R1" 'tests/run.sh --only beta.test.sh 2>&1 | tee /tmp/b.log'
 expect_eq "B1b …and so is the other one, tee'd as a real brief would run it" "0" "$ST"
@@ -293,13 +282,12 @@ expect_empty "B1f …silently" "$OUT$ERR"
 guarded "$R1" 'git status --short'
 expect_eq "B1g a non-suite command is allowed" "0" "$ST"
 expect_empty "B1g …silently" "$OUT$ERR"
-# THE CARRY (wave-33 T36; D7, AC-6.2), bypass mode: it rides in front, so what the command starts asks the gate
-# as this agent; the main thread's same command carries nothing, read by the same reader.
-expect_eq "B1g2 …carrying the agent's row name in front of the command as typed" \
-  "export BIONIC_GATE_AGENT=w-b1; git status --short" "$CARRY"
+# NO CARRY, IN BYPASS MODE EITHER (wave-34 T2; D11, REQ-1 AC-1.3): the call comes back as typed, and what it
+# starts asks the gate as the agent its tree names; the main thread's same command alike, by the same reader.
+expect_eq "B1g2 …and comes back as typed in bypass mode: no rewrite, no wrap (B1a2 is the positive)" "" "$WRAP$OUT"
 run_hook "$(mk_payload "$R1" 'git status --short' "")" "$GUARD"
 expect_eq "B1g3 the main thread's git status is allowed" "0" "$ST"
-expect_empty "B1g3 …and carries nothing: the gate's who is main (B1g2 is the positive)" "$CARRY$OUT"
+expect_empty "B1g3 …and comes back as typed: the gate's who is main (B1a2 is the positive)" "$WRAP$OUT"
 
 # SUITE-CLASS AND FILELESS, AND NOW HELD (REQ-1 AC-1.5, 1.8.3). Until this wave `pytest`
 # ran a suite and named no file this row could speak about, so it passed in silence — and a
@@ -1222,9 +1210,9 @@ for sp in "bash $SHIM -- 'bash tests/t.test.sh'" \
   expect_eq "W4a [$sp] is allowed" "0" "$ST"
   expect_empty "W4a …and left alone: no wrap" "$WRAP"
   expect_empty "W4a …and nothing else on either stream" "$OUT$ERR"
-  # wave-33 T36: not a suite, so carried, and the shim it starts asks the gate as this agent.
-  expect_eq "W4a …carrying the agent's row name, the command as typed after it" \
-    "export BIONIC_GATE_AGENT=w-wrap; $sp" "$CARRY"
+  # wave-34 T2 (D11): not a suite, so left as typed; the shim it starts asks the gate as the agent its tree names.
+  expect_eq "W4a …and not rewritten to carry a name: no updatedInput (W1 is the positive)" "" \
+    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
 done
 # BIONIC_SLOT_HELD=1 IS NO OPT-OUT ANY MORE (wave-28 T12; D13): a suite segment carrying it in its
 # own prefix is wrapped like any other, so it asks the gate.

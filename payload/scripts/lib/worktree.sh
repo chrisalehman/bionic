@@ -1668,7 +1668,7 @@ _wt_plan_current() {
 # dispatch wall is the one writer of the two keys on a launch line, so a key that reached the
 # roster on any later row, by amend or by hand, is never read.
 _wt_declared_debt() {  # <root> <sid> <tree>
-  local root="${1:-}" sid="${2:-}" tree file name row roster
+  local root="${1:-}" sid="${2:-}" tree file name row roster red evidence
   tree="$(_wt_abs "${3:-}")" || return 1
   file="$(_wt_workspaces_file "$root" "$sid")" || return 1
   [ -f "$file" ] && _wt_workspaces_unlinked "$root" "$file" || return 1
@@ -1681,8 +1681,10 @@ _wt_declared_debt() {  # <root> <sid> <tree>
   [ "$(workspace_for_name "$root" "$sid" "$name" 2>/dev/null)" = "$tree" ] || return 1
   roster="${root%/}/.bionic/tmp/roster-${sid}.state"
   row="$(_wt_launch_row "$roster" name "$name")" || return 1
-  [ -n "$(_wt_field "$row" lands_red)" ] || return 1
-  printf '%s\t%s' "$(_wt_field "$row" lands_red)" "$(_wt_field "$row" red_evidence)"
+  _wt_field_v red "$row" lands_red
+  [ -n "$red" ] || return 1
+  _wt_field_v evidence "$row" red_evidence
+  printf '%s\t%s' "$red" "$evidence"
 }
 # THE LAUNCH LINE, by one key (factored out of `_wt_declared_debt` at wave-28 T4, whose `ready` reads
 # `lands_on=` and the debt off it too): the last `status=intended` roster row whose <key>= is <value>
@@ -1721,14 +1723,24 @@ _wt_launch_row() {  # <roster> <key> <value> -> the line; 1 when none
 # One `|`-delimited field, BY KEY. Position would read the wrong value on a line
 # whose schema gained a field, which is the same reason every other reader in
 # this repo does it this way.
+#
+# FORK-FREE (wave-34 T11, D19): the walk is parameter expansion, not `tr` behind a `$( )`, and
+# `_wt_field_v` writes the answer into the caller's variable, so a caller that reads a field
+# per roster line (`_wt_row_discharged`, every tick) starts no process at all. A newline
+# separates fields as `|` does, which is what the `tr` this replaced made of one.
+_wt_field_v() {  # <var> <line> <key>
+  local _wtf_rest="${2:-}" _wtf_f _wtf_nl=$'\n'
+  _wtf_rest="${_wtf_rest//$_wtf_nl/|}|"
+  while [ -n "$_wtf_rest" ]; do
+    _wtf_f="${_wtf_rest%%|*}"; _wtf_rest="${_wtf_rest#*|}"
+    case "$_wtf_f" in "${3}="*) printf -v "$1" '%s' "${_wtf_f#"${3}="}"; return 0 ;; esac
+  done
+  printf -v "$1" '%s' ''
+}
 _wt_field() {  # <line> <key>
-  local f
-  while IFS= read -r f; do
-    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
-  done <<EOF
-$(printf '%s' "${1:-}" | tr '|' '\n')
-EOF
-  printf ''
+  local _wtf_v
+  _wt_field_v _wtf_v "$@"
+  printf '%s' "$_wtf_v"
 }
 
 # The discharge set, spelled the way hooks/stop-orders.sh and hooks/stop-guard.sh
@@ -1737,20 +1749,22 @@ EOF
 # same predicate as a sweeper verdict line.
 _wt_discharged() {  # <line>
   local v
-  [ "$(_wt_field "$1" acked)" = "yes" ] && return 0
-  v="$(_wt_field "$1" state)"
+  _wt_field_v v "$1" acked
+  [ "$v" = "yes" ] && return 0
+  _wt_field_v v "$1" state
   case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
-  v="$(_wt_field "$1" status)"
+  _wt_field_v v "$1" status
   case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
   return 1
 }
 
 _wt_row_discharged() {  # <file> <row name>
-  local line
+  local line name
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
     case "$line" in '#'*) continue ;; esac
-    [ "$(_wt_field "$line" name)" = "$2" ] || continue
+    _wt_field_v name "$line" name
+    [ "$name" = "$2" ] || continue
     _wt_discharged "$line" && return 0
   done < "$1"
   return 1
@@ -1882,6 +1896,25 @@ worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base s
     "$WORKSPACE_SCHEMA" "$sid" "$name" "$path" "$branch" "$base" "$plan" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" 2>/dev/null \
     || { printf 'workspace-file-unwritable'; return 1; }
+}
+
+# THE TREE MARKER (wave-34 T2; D11, REQ-1 AC-1.1). One line, the name of the writer a linked tree
+# was created or re-dispatched for, at `<git-dir>/bionic-agent`: the tree's OWN git directory, so
+# the main checkout, whose git directory is the common one, never carries one, and `git worktree
+# remove` takes it with the tree. lib/gate.sh (THE PLACE) reads it as who asks when no name is
+# carried. Written beside and renamed over, so a reader never meets half a name. Silent rc 0, or
+# the reason on stdout and rc 1.
+worktree_mark() {  # <tree> <name>
+  local tree="${1:-}" name="${2:-}" out common="" gd=""
+  _wt_workspace_value_bad "$name" && { printf 'invalid-name'; return 1; }
+  out="$(git -C "$tree" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" \
+    || { printf 'not-a-tree'; return 1; }
+  { IFS= read -r common; IFS= read -r gd; } <<< "$out"
+  [ -n "$gd" ] && [ -d "$gd" ] || { printf 'not-a-tree'; return 1; }
+  [ "$gd" != "$common" ] || { printf 'not-a-linked-worktree'; return 1; }
+  printf '%s\n' "$name" > "$gd/bionic-agent.$$" 2>/dev/null \
+    && mv -f "$gd/bionic-agent.$$" "$gd/bionic-agent" 2>/dev/null \
+    || { rm -f "$gd/bionic-agent.$$"; printf 'marker-unwritable'; return 1; }
 }
 
 # rc 0 when no component of the absolute <path> is a symbolic link, so the path is its own

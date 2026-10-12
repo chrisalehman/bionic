@@ -434,6 +434,18 @@ expect_contains "a row that arrived AFTER its ack is counted as closed" "2 row(s
 sweep "$R6" ack
 expect_eq "ack with no name is a usage error (exit 2)" "2" "$RC"
 
+# --- a name cannot forge a ledger field (wave-34 T11, AC-9.2: the pin on `clean`'s fold) ---
+#
+# The name is the operator's own text and it reaches a `|`-delimited line, so `clean` folds a
+# `|` in it to a space first: the line keeps the `name=` it was given and gains no field the
+# operator did not write. Both halves read the one ack line.
+R6P="$(make_repo s6pipe)"; new_roster "$R6P"
+sweep "$R6P" ack 'w4-pipe|by=forged'
+expect_contains "a | inside an acked name is folded to a space on its ledger line" \
+  "name=w4-pipe by=forged|by=" "$(grep 'event=ack' "$(ledger_of "$R6P")" 2>/dev/null)"
+expect_absent "…so the name writes no by= field of its own" "|by=forged" \
+  "$(grep 'event=ack' "$(ledger_of "$R6P")" 2>/dev/null)"
+
 # --- the FIRST ack over an existing ledger says nothing on stderr (live-caught, post-w4) ---
 #
 # The state a live session hit: a ledger that exists and carries lines, no ack journalled
@@ -671,6 +683,21 @@ sweep "$RVP" verdict halfway
 expect_eq "partial: one absent deliverable is UNMET" "1" "$RC"
 expect_contains "partial: the absent one is named" "missing=$RVP/two.md" "$OUT"
 expect_absent "partial: the delivered one is not named as a failure" "missing=$RVP/one.md" "$OUT"
+
+# --- a list written with a space after each comma reads every path whole (wave-34 T11, AC-9.2:
+# the pin on verdict_row's trim, which no case here exercised) ---
+RVS="$(make_repo vs)"; new_roster "$RVS"
+echo "the first half" > "$RVS/one.md"
+add_row "$RVS" name=spaced deliverable="$RVS/one.md, $RVS/two.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RVS" verdict spaced
+expect_eq "spaced list: one absent deliverable is UNMET" "1" "$RC"
+expect_contains "spaced list: the absent one is named by its path, the space trimmed" \
+  "missing=$RVS/two.md" "$OUT"
+echo "the second half" > "$RVS/two.md"
+sweep "$RVS" verdict spaced
+expect_eq "spaced list: both landed, the paired positive exits 0" "0" "$RC"
+expect_contains "spaced list: …and the second is read by its trimmed path" "delivered=$RVS/two.md" "$OUT"
 
 # --- a directory deliverable: delivered when a file lives in it (the sibling reading) ---
 RVD="$(make_repo vd)"; new_roster "$RVD"

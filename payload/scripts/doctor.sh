@@ -2676,6 +2676,9 @@ esac
 # variable the topic is read from: a file test and two greps in checks.sh, no send and no network.
 # Not declared is an offer like the rows above (`–` with the route), and where there is no topic
 # to declare it against yet the row says which variable to set, since setup has nothing to offer.
+# A TOPIC WITH NO CHANNEL FILE IS SAID (wave-34 T5; REQ-4 AC-4.6): the walk's machine had the topic in cron.env and no
+# channel file, so every send was a no-op; the row names the setup item that writes the file, and the line under it
+# says why nothing is sent.
 _notify_label="$(bionic_check_label notify)"
 _notify_hint="$(bionic_check_hint notify)"
 case "$(bionic_check_notify_state)" in
@@ -2685,7 +2688,8 @@ case "$(bionic_check_notify_state)" in
             else
               _doctor_env3 "$DOCTOR_NIL" "$_notify_label" "on" "$(_doctor_tilde "$(bionic_check_notify_file)") names no topic-from= line, so no notification can go"
             fi ;;
-  offered)  _doctor_env3 "$DOCTOR_NIL" "$_notify_label" "—" "not set — ${_notify_hint} offers it" ;;
+  offered)  _doctor_env3 "$DOCTOR_NIL" "$_notify_label" "—" "not set — " "${_notify_hint}'s notify item"
+            printf '%s\n' "$(bionic_line "      " "${BIONIC_NOTIFY_TOPIC_FROM#*:} is in ${BIONIC_NOTIFY_TOPIC_FROM%%:*} but no channel file exists, so nothing is sent")" ;;
   *)        _doctor_env3 "$DOCTOR_NIL" "$_notify_label" "—" "not set — set ${BIONIC_NOTIFY_TOPIC_FROM#*:} in ${BIONIC_NOTIFY_TOPIC_FROM%%:*}, then ${_notify_hint} offers it" ;;
 esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of

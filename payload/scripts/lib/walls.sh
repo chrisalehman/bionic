@@ -1579,11 +1579,25 @@ plan_write_note() {
 # no note. The `refuse` shim in `wall_evidence_gate` calls it, so it is defined above that.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
+# _eg_owe <key> <title> <reply> — an ask of the person, staged beside the refusal that makes it (wave-34 T5; REQ-4
+# AC-4.1, D14). The gate opens no owed item: a wall writes no fact, as it fetches none (the freeze, .claude/rules/
+# hook-authoring.md). The shim below hands the asks back as the record's sixth field, `wall_evidence_gate` puts them in
+# BIONIC_WALL_OWED, and hooks/bash-walls.sh, the gate's caller, opens one item each (lib/owed.sh). One line per ask:
+# key TAB title TAB reply, a tab or line break inside a value written as a space.
+# [WALL: tests/notify.test.sh]
+_EG_OWED=""
+_eg_owe() {
+  local k="${1//[$'\t\n\r']/ }" t="${2//[$'\t\n\r']/ }" r="${3//[$'\t\n\r']/ }"
+  _EG_OWED="${_EG_OWED}${_EG_OWED:+$'\n'}${k}"$'\t'"${t}"$'\t'"${r}"
+}
+BIONIC_WALL_OWED=""
+
 wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
+  BIONIC_WALL_OWED=""
   # Not a Bash tool call or an empty command — nothing to gate.
   [ -n "$COMMAND" ] || return 0
 
-  local _eg_rec _eg_rc _eg_out _eg_mode _eg_verb _eg_fact _eg_fix
+  local _eg_rec _eg_rc _eg_out _eg_mode _eg_verb _eg_fact _eg_fix _eg_owed=""
   _eg_rec=$(
     # THE SHIM, and the only line of this wall that is not the hook's own. It has
     # `refuse`'s signature and `refuse`'s abort, and it renders nothing: the parent
@@ -1611,10 +1625,11 @@ wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
 $5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
         fi
       fi
-      # A separator byte inside a field would move the fields after it: it shows as `?`.
+      # A separator byte inside a field would move the fields after it: it shows as `?`. The asks the arm staged
+      # (`_eg_owe`) ride as a sixth field, empty when it staged none.
       set -- "${1//[$'\036\037']/?}" "${2//[$'\036\037']/?}" "${3//[$'\036\037']/?}" \
-             "${4//[$'\036\037']/?}" "${5//[$'\036\037']/?}"
-      printf '\036%s\037%s\037%s\037%s\037%s' "$@" && exit 2; exit 3
+             "${4//[$'\036\037']/?}" "${5//[$'\036\037']/?}" "${_EG_OWED//[$'\036\037']/?}"
+      printf '\036%s\037%s\037%s\037%s\037%s\037%s' "$@" && exit 2; exit 3
     }
     _eg_body
   )
@@ -1637,6 +1652,9 @@ $5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
     _eg_verb="${_eg_rec%%$'\037'*}"; _eg_rec="${_eg_rec#*$'\037'}"
     _eg_fact="${_eg_rec%%$'\037'*}"; _eg_rec="${_eg_rec#*$'\037'}"
     _eg_fix="${_eg_rec%%$'\037'*}";  _eg_rec="${_eg_rec#*$'\037'}"
+    case "$_eg_rec" in *$'\037'*) _eg_owed="${_eg_rec#*$'\037'}"; _eg_rec="${_eg_rec%%$'\037'*}" ;; esac
+    while [ "${_eg_rec%$'\n'}" != "$_eg_rec" ]; do _eg_rec="${_eg_rec%$'\n'}"; done
+    BIONIC_WALL_OWED="$_eg_owed"
     while [ "${_eg_mode%$'\n'}" != "$_eg_mode" ]; do _eg_mode="${_eg_mode%$'\n'}"; done
     while [ "${_eg_verb%$'\n'}" != "$_eg_verb" ]; do _eg_verb="${_eg_verb%$'\n'}"; done
     while [ "${_eg_fact%$'\n'}" != "$_eg_fact" ]; do _eg_fact="${_eg_fact%$'\n'}"; done
@@ -2167,13 +2185,9 @@ fi
 # \n text regardless of the file's original line-ending style.
 FRONTMATTER=$(normalize_newlines "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
 
-frontmatter_get() {
-  echo "$FRONTMATTER" \
-    | grep -E "^[[:space:]]*$1[[:space:]]*:" \
-    | head -1 \
-    | sed -E "s/^[[:space:]]*$1[[:space:]]*:[[:space:]]*//" \
-    | sed -E 's/[[:space:]]+$//' \
-    | sed -E "s/^['\"]//;s/['\"]\$//"
+frontmatter_get() {  # one reading of the grammar: lib/run.sh's `frontmatter_value_v` (wave-34 T11)
+  local v
+  if frontmatter_value_v v "$FRONTMATTER" "$1"; then printf '%s\n' "$v"; fi
 }
 
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
@@ -2217,13 +2231,20 @@ fi
 # "in progress" and its whitespace-free "inprogress" are both listed so
 # either spelling of the value matches. Defined here (ahead of the Step-line
 # checks) so the task-ledger validator, which runs before them, can reuse it.
+# IN BUILTINS (wave-34 T11, D19), reading what the `sed | tr` it replaces read: each line trimmed
+# on its own and trailing blank lines dropped, so a value is a placeholder exactly when its FIRST
+# line is one and nothing but whitespace follows; the word compared without regard to case.
 is_placeholder_value() {
-  local v
-  v=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | tr '[:upper:]' '[:lower:]')
+  local v="$1" rest="" rc=1 restore=0
+  case "$v" in *$'\n'*) rest="${v#*$'\n'}"; v="${v%%$'\n'*}" ;; esac
+  case "$rest" in *[![:space:]]*) return 1 ;; esac
+  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+  shopt -q nocasematch || { shopt -s nocasematch; restore=1; }
   case "$v" in
-    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) return 0 ;;
-    *) return 1 ;;
+    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) rc=0 ;;
   esac
+  [ "$restore" = 0 ] || shopt -u nocasematch
+  return "$rc"
 }
 
 # Audit dir follows the PLAN's own project, not necessarily the invoking one:
@@ -2405,6 +2426,13 @@ Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <n
   _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
   [ -z "$_eg_debts" ] || lines="${lines}
 ${_eg_debts}"
+  # A FAILING QUESTION IS THE PERSON'S TO WAIVE (wave-34 T5; D14): each opens `waive:<question>`, the key the waive verb
+  # closes. A question with no reading asks the run for one first, not the person, and stages nothing (T35's rule).
+  local _eg_q _eg_ev
+  while IFS=$'\t' read -r _ _eg_q _eg_ev; do
+    [ -n "$_eg_q" ] || continue
+    _eg_owe "waive:${_eg_q}" "waiver: ${_eg_q}" "commit refused — ${_eg_q}: the newest reading is result=fail (evidence=${_eg_ev}), and no waiver is newer; waive it with: session-poker.sh waive ${_eg_q} '<your reply>'"
+  done <<< "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "failing"')"
   _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a reading whose newest is not result=fail, or a newer waiver:
 ${lines}
 Plan: $PLAN
@@ -2710,8 +2738,9 @@ validate_prototype_no_matrix_row() {
   proto_ids=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    [ "$(units_field "$line" kind)" = "prototype" ] || continue
-    id=$(units_field "$line" id)
+    units_field_v id "$line" kind
+    [ "$id" = "prototype" ] || continue
+    units_field_v id "$line" id
     [ -n "$id" ] || continue
     proto_ids="$proto_ids $id"
   done <<< "$task_rows"
@@ -3116,7 +3145,7 @@ _eg_git_wt_name() {
 # IT ASSIGNS RATHER THAN PRINTS for the reason `_eg_commit_cwd` does: the collision is a
 # second answer, and a command substitution would strand it in a subshell.
 _eg_row_for_worktree() {
-  local _want="${1:-}" _rows _line _cell _id
+  local _want="${1:-}" _rows _line _cell _id _step _status _kind _nocase _same
   _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
   _rows="$(units_rows "$PLAN")" || return 1
@@ -3130,14 +3159,19 @@ _eg_row_for_worktree() {
   # case-insensitive; it makes it fail on every mixed-case tree, including an EXACT match,
   # because a lowercased cell can never equal an unlowercased `$_want`. Both walls must
   # fold the same way to keep one plan from giving two answers for which row owns a tree.
-  _want="$(printf '%s' "$_want" | tr '[:upper:]' '[:lower:]')"
+  # FOLDED BY THE SHELL, NOT BY `tr` (wave-34 T11, D19): `nocasematch` around the one compare
+  # is the same both-sides fold with no process per row, and it is restored at once.
+  shopt -q nocasematch && _nocase=1 || _nocase=0
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
-    _cell="$(units_field "$_line" worktree)"
+    units_field_v _cell "$_line" worktree
     [ -n "$_cell" ] || continue
     _cell="${_cell%/}"
-    [ "$(printf '%s' "${_cell##*/}" | tr '[:upper:]' '[:lower:]')" = "$_want" ] || continue
-    _id="$(units_field "$_line" id)"
+    shopt -s nocasematch
+    [[ "${_cell##*/}" == "$_want" ]]; _same=$?
+    [ "$_nocase" = 1 ] || shopt -u nocasematch
+    [ "$_same" = 0 ] || continue
+    units_field_v _id "$_line" id
     if [ -z "$_EG_ROW" ]; then
       # THREE CELLS, TAB-SEPARATED: id, step, status (wave-17 REQ-1, D1, ADR-031). The
       # status cell has been validated since wave-11 and read by nothing; it is what says
@@ -3149,7 +3183,9 @@ _eg_row_for_worktree() {
       # task arms when a writer is at work in it — unless it is a gate act (`integrate`,
       # `close`), whose commit must wait for the run to reach its step — so the fork needs
       # the row's kind as well as its status.
-      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)	$(units_field "$_line" kind)"
+      units_field_v _step "$_line" step; units_field_v _status "$_line" status
+      units_field_v _kind "$_line" kind
+      _EG_ROW="$_id	$_step	$_status	$_kind"
       _EG_ROW_DUP="$_id"
     else
       _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
@@ -3475,7 +3511,8 @@ is_r7_key() {
 # which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
 # on colon lines and the unchanged line otherwise.
 [ "$_EG_STEP_LINE_OWED" = 1 ] && while IFS= read -r _bline; do
-  _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
+  _bkey="${_bline#"${_bline%%[![:space:]]*}"}"
+  case "$_bkey" in *:*) _bkey="${_bkey%%:*}"; _bkey="${_bkey%"${_bkey##*[![:space:]]}"}" ;; esac
   if is_r7_key "$_bkey"; then
     continue
   fi
@@ -4135,6 +4172,7 @@ validate_matrix() {
           T3|T4)
             case "$val_lc" in
               n/a|n/a:*)
+                _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
                 block_matrix "${ac} calls its ${key} evidence n/a" "record it, or waive the row" \
                   "matrix row '${ac}' (${tier}) key '${key}' is a self-written 'n/a' on a live tier." \
                   "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
@@ -4259,6 +4297,7 @@ validate_matrix() {
         esac
         if [ "$tier" = "T4" ]; then
           if user_confirmed_form_ok "$block_txt"; then
+            _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
             block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
               "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
               "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
@@ -5334,9 +5373,13 @@ return 0
 # THE ARGV COMES BACK TOO (wave-31 T11; REQ-8 AC-8.3, D9): `_WALL_POKER_CALL` is the matched
 # segment's words from argv[0] on and `_WALL_POKER_ARGS` the words after the verb, each list joined
 # by `GIT_ARGV_US`, so arm A can read an `amend`'s target and flags and rebuild the call it admits.
+#
+# ONE OTHER VERB, ON ASK (wave-34 T5; REQ-4 AC-4.3, D9): with a second argument the reader matches
+# that one session-poker.sh verb instead of the list, through the same argv, and sets the same four
+# values; hooks/bash-walls.sh reads the acknowledgement's operand this way.
 _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
-_wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKER_VERB) · 1 not
-  local _line _oldifs _hadf _w _i _script _next
+_wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <verb> (sets _WALL_POKER_VERB) · 1 not
+  local _line _oldifs _hadf _w _i _script _next _want="${2:-}"
   _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
@@ -5368,6 +5411,13 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
       session-poker.sh)
         shift
         _next="${1:-}"
+        if [ -n "$_want" ]; then
+          [ "$_next" = "$_want" ] || continue
+          _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
+          _WALL_POKER_CALL="$GIT_ARGV_REST"
+          _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
+          return 0
+        fi
         case "$_next" in
           amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|tasks-prose|epic-row|continuation-fill|disposition)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
@@ -5376,6 +5426,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
             return 0 ;;
         esac ;;
       spawn-worktree.sh)
+        [ -z "$_want" ] || continue
         shift
         [ "${1:-}" = land ] || continue
         for _next in "$@"; do
@@ -5870,12 +5921,10 @@ _bsg_own_amend() {
 }
 
 # _bsg_budget_read — THE AGENT'S BUDGET, OFF ITS ROSTER ROW (moved out of the budget arm by wave-33
-# T36; D7, AC-6.2). One read for its two callers: the budget arm, which judges a suite against it, and
-# the carry, which asks only whether a budget is stated. Sets the caller's BUDGET_STATED,
-# SUITES_ALLOWED, RE_EXECUTES (decoded and normalised), _BUDGET_ROW and _BUDGET_ROW_NAME; rc 1 when
-# roster.sh will not load, which the caller answers by allowing, as the arm always did.
-# AHEAD OF THE WALL, with the carry: a function written inside the wall's body is defined only when the
-# wall's run reaches it, and the carry is asked before the run reaches any of them.
+# T36; D7, AC-6.2). The budget arm's read: sets the caller's BUDGET_STATED, SUITES_ALLOWED,
+# RE_EXECUTES (decoded and normalised), _BUDGET_ROW and _BUDGET_ROW_NAME; rc 1 when roster.sh will not
+# load, which the caller answers by allowing, as the arm always did. Defined ahead of the wall: a
+# function written inside the wall's body is defined only when the wall's run reaches it.
 _bsg_budget_read() {
 # THE SHAPE RULE IS ALREADY SPENT (REQ-1h). `session_id` returns the host-supplied value
 # verbatim — it validates nothing — and this line turns it into a path. The rule that made
@@ -5964,47 +6013,6 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
-}
-
-# _bsg_stage_carry — THE AGENT RIDES TO THE GATE (wave-33 T3; D7, AC-6.2). A command a budgeted agent
-# runs that the wall does not handle as a suite is admitted unread, and the suites it starts ask the
-# gate (lib/gate.sh THE BUDGET) as `BIONIC_GATE_AGENT`; a shell does not know its agent, so the call is
-# rewritten to name it first: `export BIONIC_GATE_AGENT=<row name>; <the command as typed>`, the name
-# spelled as booked.sh spells its --agent. Every other field of tool_input rides through. rc 0 staged,
-# 1 not (no jq output).
-#
-# EVERY SUCH COMMAND IN BYPASS MODE, A SCRIPT START IN EVERY MODE (wave-33 T36; ADR-052). T3 carried
-# only what the claims read as a script start, so a runner reached through python, node, awk, `source`
-# or an out-of-tree script asked as main. Which commands start a suite is not readable from text; the
-# ask is where the run is real. But the CLI checks permission rules against the input a hook returns,
-# each subcommand on its own (hooks page, PreToolUse; permissions page, Compound commands): outside
-# bypass mode a carried `export …; git status` prompts where `git status` was allowed. So the carry
-# rides every command only where no rule is checked (`_bsg_bypass`), and a script start alone
-# elsewhere, as T3 shipped it; there a runner in another language still asks as main.
-# The cost, measured (tests/hook-latency.test.sh §11): in bypass mode the roster read's one awk on
-# every plain call of a dispatched agent, and for a budgeted one two jq more, this stage and the
-# fold's emit; in any other mode nothing.
-_bsg_carry() {  # -> 1 staged (an advisory, so the fold keeps it), 0 left as typed (no budget stated)
-  [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || return 0
-  _bsg_stage_carry && return 1
-  return 0
-}
-# _bsg_bypass — the payload's `permission_mode` is `bypassPermissions`. Read off the raw payload with
-# no fork: in JSON text a quote inside a string is always escaped, so `"permission_mode"` before a
-# colon is a key, and the Bash tool's input has no such key, so it is the payload's own. Both wrong
-# answers are safe: a missed match keeps T3's narrow carry, and a forged one only subjects its own
-# agent to the budget.
-_BSG_BYPASS_RE='"permission_mode"[[:space:]]*:[[:space:]]*"bypassPermissions"'
-_bsg_bypass() {
-  [[ "${BIONIC_INPUT:-}" =~ $_BSG_BYPASS_RE ]]
-}
-_bsg_stage_carry() {
-  local _who _upd
-  _who="${_BUDGET_ROW_NAME:-$ACTOR}"; _who="${_who//[!A-Za-z0-9._+-]/_}"
-  _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg c "export BIONIC_GATE_AGENT=$_who; $COMMAND" \
-    '.tool_input + {command: $c}' 2>/dev/null)
-  [ -n "$_upd" ] || return 1
-  fold_update_input "$_upd"
 }
 
 # ─── wall_background_suite_guard — hooks/background-suite-guard.sh ───────────
@@ -6252,24 +6260,16 @@ _wall_class_read "$COMMAND"
 # payload's, where the agent's shell is.
 _BSG_CLAIM_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CLAIM_CWD" ] || _BSG_CLAIM_CWD="${BIONIC_CWD:-}"
 # A PATH THE SHELL RUNS IS ASKED TOO (wave-33 T3; D7, AC-6.2): `./tools/run.sh`, a link to the runner,
-# is class none until the claims resolve it, and a script start is what the budget arm carries.
-# A COMMAND THE CLAIMS DO NOT READ IS CARRIED IN BYPASS MODE (wave-33 T36; D7, AC-6.2): what it starts
-# is not knowable from its text (`python3 run.py`, `awk '…system(…)'`, `source helper.sh`), so it
-# carries the agent's name like any script start, and the gate's ask holds the budget wherever a suite
-# starts. In any other mode it is left as typed (`_bsg_carry`'s docblock says why).
+# is class none until the claims resolve it.
+# A COMMAND THE CLAIMS DO NOT READ IS LEFT AS TYPED, IN EVERY MODE (wave-34 T2; D11, REQ-1 AC-1.3): what
+# it starts is not knowable from its text (`python3 run.py`, `awk '…system(…)'`, `source helper.sh`), and
+# no command is rewritten to name its agent, since the CLI checks permission rules against a hook's
+# rewrite. The suite it starts asks the gate, which names the agent by the tree it runs in (lib/gate.sh
+# THE PLACE) and holds the budget there.
 if [ "$_WALL_CLASS" != "suite" ]; then
   [ -n "$ACTOR" ] || return 0
-  local _BSG_CLAIMED=0
-  case "$COMMAND" in
-    *sh[[:space:]]*|*/*) [ -z "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || _BSG_CLAIMED=1 ;;
-  esac
-  if [ "$_BSG_CLAIMED" = 0 ]; then
-    _bsg_bypass || return 0
-    local BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _BUDGET_ROW_NAME=""
-    _bsg_budget_read || return 0
-    _bsg_carry
-    return $?
-  fi
+  case "$COMMAND" in *sh[[:space:]]*|*/*) : ;; *) return 0 ;; esac
+  [ -n "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || return 0
 fi
 
 # A SHELL-BACKGROUNDED SUITE IS CAUGHT LIKE A TOOL-BACKGROUNDED ONE (D8, REQ-6). The tool
@@ -6374,7 +6374,7 @@ fi
 [ -n "$ACTOR" ] || return 0
 
 local BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact _BSG_SET_CMP _BSG_STARTS _BSG_RUNS
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY _door_name _door_fact _BSG_SET_CMP _BSG_RUNS
 _bsg_budget_read || return 0
 # WHY NO SET, when there is none (wave-27 T5, D15): a row that states none, or no row carrying
 # this id at all. `budget_unrecorded` below prints it.
@@ -6629,7 +6629,7 @@ $(_budget_remedy_line "$1")"
 
 # `budget_unverified`, the refusal of a script the budget could not read (wave-31 T11), is retired with
 # the classifier's `unverified` kind (wave-33 T3; D7, AC-6.1): a script runs by default, and the gate's
-# ask holds the budget where a suite starts. The carry (`_bsg_stage_carry`, ahead of the wall) replaced it.
+# ask holds the budget where a suite starts, naming the agent by its tree (lib/gate.sh THE PLACE).
 
 # budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
 # D15). A row with no set, or no row at all, used to let a named suite through in silence, on
@@ -6706,11 +6706,11 @@ _BSG_SET_CMP="$SUITES_ALLOWED"
 case "$_BSG_SET_CMP" in
   *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ! cmd_case_blind "$BIONIC_ROOT" || _BSG_SET_CMP="$(printf '%s' "$_BSG_SET_CMP" | tr 'A-Z' 'a-z')" ;;
 esac
-_BSG_STARTS=0; _BSG_RUNS=0
+_BSG_RUNS=0
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
   # A SCRIPT START (wave-33 T3; D7): nothing the text definitely runs, so nothing here refuses it.
-  if [ "$_kind" = "script" ]; then _BSG_STARTS=1; continue; fi
+  [ "$_kind" != "script" ] || continue
   _BSG_RUNS=1
 
   # ---------- THE PROJECT'S DOOR, ASKED ONCE FOR THIS CLAIM (wave-28 T54, D27; A-orch-124/125) ----------
@@ -6844,16 +6844,13 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   esac
 done <<< "$_CLAIMS"
 
-# ---------- THE CARRY (wave-33 T3; D7, AC-6.2): a command that runs no suite is admitted, naming its agent ----------
+# ---------- A COMMAND THAT RUNS NO SUITE IS ADMITTED AS TYPED (wave-33 T3; wave-34 T2, D11) ----------
 #
 # A command that is no suite and claims no run reaches the gate through whatever it starts, so it is
-# neither repaired nor booked (both are a suite's); it is carried (`_bsg_carry`) when it starts a
-# script, and in bypass mode whatever it starts, as a command the claims never read is above the
-# backgrounded arm (wave-33 T36).
+# neither repaired nor booked (both are a suite's), and nothing rewrites it: the gate's ask names the
+# agent by its tree (lib/gate.sh THE PLACE).
 if [ "$_WALL_CLASS" != "suite" ] && [ "$_BSG_RUNS" = 0 ]; then
-  [ "$_BSG_STARTS" = 1 ] || _bsg_bypass || return 0
-  _bsg_carry
-  return $?
+  return 0
 fi
 
 # ---------- ARM R (REQ-3, D4): repair a suite timeout below the harness maximum ----------

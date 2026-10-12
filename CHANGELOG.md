@@ -8,6 +8,315 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.17.0 — 2026-10-12
+
+A landing now starts the full test pass itself, in the room the machine has spare, and the gate learns whose
+suite a command is from the tree it starts in. Thirteen rows landed: the identity rule, one reader of busy,
+the backstop that holds a ruling, every ask of the person owed and sent at least once, the three
+field-report fixes for agents and for another project's layout, the background pass and the tick that reads
+it, hot helpers that fork nothing, a shorter RC5 drive, and the decision skill at design altitude. The floor
+was found by the pass itself: the first pass was red at 743a37c6, the second was green at c15a7e40 and
+became the floor proof. Of the ten 1.16.0 Known limits the release was held to, seven are struck with a
+record and three are carried with the sentence that says why. This is a minor release by the policy above:
+the pass, the marker and the new verbs are new capability. `canonical_sdlc_version` stays 14.
+
+**Migration.** None is required. Five behaviours changed that a script of yours may have leaned on, and one
+field is named dead.
+
+- A writer's tree carries its name. `spawn-worktree.sh create … --for <name>` writes
+  `<git-dir>/bionic-agent`, and the gate reads it when no `BIONIC_GATE_AGENT` is set. A tree made by 1.16.0
+  has none: a suite started in it asks as the main thread. `spawn-worktree.sh mark <tree> --for <name>`
+  writes the marker of an existing linked tree and refuses the main checkout (`T2-identity-from-place.md`).
+- No command is rewritten to carry a name. The 1.16.0 rewrite of a budgeted agent's script start, and of
+  every command in bypass mode, to `export BIONIC_GATE_AGENT=<row>; <command>` is deleted; a command the
+  claims do not read passes untouched in every mode (`T2-identity-from-place.md`).
+- Each landing may start a background pass. It is on unless `.bionic/config.yaml` says `background-pass:
+  off` or the plan says `regression: no`, and a project with neither a `floor:` command nor a `tests/run.sh`
+  at the landed head gets none. With it off, a whole run holds the machine alone as at 1.16.0
+  (`T9-pass.md`).
+- `ruling-ack` is refused unless the caller is the ruling's own writer, alone in its call. The main thread
+  and another writer are refused and the ruling stays unread (`T5-owed-asks.md`).
+- `adopt` prints two new words, UNCONFIRMED and IDLE, and reads RUNNING only from evidence: a fresh answer
+  that lists the agent as not idle, or transcript growth across two reads a cadence apart. LANDED needs the
+  deliverable and the agent's report. The handoff prints `safe to exit:` and `safe to /clear:` lines
+  (`T6-agents-true.md`).
+- `impact-command:` in `.bionic/config.yaml` is dead. It has not been read since 1.14.1, which deleted the
+  impact map; a project whose writers ran jest, or any runner that is not a `*.test.sh` file, still declares
+  `Suites: none` with `Re-executes:` and `Lands-on: none`, and `ready` proves nothing for it. Accepting
+  other suite files was asked for in the field report (item 6) and is not built here; this line only says
+  the field is dead (`inbound/bionic-1.16.0-w1-feedback-20261011.md`).
+
+What you will notice:
+
+- **A suite started in a writer's tree asks as that writer, from any launcher, in every mode.** The gate
+  reads the marker of the tree the ask is made in, and one `git rev-parse` per ask answers who asks, which
+  project's roster applies and the request's tree. Both carries are deleted, with `_bsg_carry`,
+  `_bsg_stage_carry` and `_bsg_bypass`. gate M.1 to M.9 were red on the unchanged code
+  (`T2-red-gate-spawn.log`) and are green (`T2-green1.log`); bash-walls §CARRY-EVERY runs each row once per
+  permission mode (`T2-red-walls.log`). The walk ran an off-budget suite from a marked tree through a
+  foreign launcher and it was refused, exit 75, nothing run; the same suite from the main checkout ran
+  (`T18-walk.md` section 1). Record: `T2-identity-from-place.md`.
+- **One reader of busy.** Under a CPU quota the settle, the void check and the pressure ring now read the
+  cgroup's own use, as the gate does; they read the host's load against the quota's cores. A cold ring waits
+  one sample. Record: `T3-busy-one-reader.md`.
+- **The backstop holds a ruling and pages once.** The tick's backstop reads a writer's rulings without
+  marking them shown, lands nothing while one is unread, says `NOT-LANDED <row>` with the ids on every tick,
+  and opens one owed item per ruling, closed where the ruling is read. At 1.16.0 `deliver`'s guard stamped
+  the ruling shown when it refused, so the next tick landed over it. Record: `T4-backstop-pages.md`.
+- **Every ask of the person is owed, and a notice is sent at least once.** The commit wall's question and
+  matrix-row waiver refusals open `waive:` and `waive-row:` items; `waive-row` and `waive` close them and
+  the question's `finding:` items; the texts of `owed.sh`, `notify.sh`, `card.sh`, `stop.sh` and
+  `close-out.sh` say "at least once", because a send that times out late is sent again on the next Stop and
+  the recipient may see it twice. `doctor.sh` names a topic in `cron.env` with no channel file: `nothing is
+  sent`. Record: `T5-owed-asks.md`.
+- **What bionic says about agents is true.** `adopt` judges liveness from evidence, the handoff says whether
+  it is safe to exit or clear and reads live agents from the newest answer, and an ack or a human-ordered
+  stop crosses sessions. Record: `T6-agents-true.md`.
+- **The walls take another project's layout.** `ready` finds a `Lands-on:` suite under any directory of the
+  landing tree, where it ran `tests/<name>` and stalled with exit 70, and the gate admits a suite run by
+  path against the budget that recorded its file name. Record: `T7-another-layout.md`.
+- **The gate admits a background pass into spare room.** A new request kind, `pass`, is asked once, ranked
+  after all work, and skipped with no wait when the room under the share, less a reserve of 2 cores for a
+  landing, is under 2 cores. A whole request that waits stops a pass that is running. Work and landings are
+  admitted beside it. gate §PASS was red on the unchanged code, 25 rows (`T8-red-gate.log`), then green
+  (`T8-green-gate.log`), with a hand whole run holding the machine alone as before (slots Q1, Q2;
+  `T8-green-slots.log`). Record: `T8-pass-admission.md`.
+- **A landing starts the pass, and the tick reads it.** After a landing `ready` prints `pass: started at
+  <head> pid=<pid> log=<log>` and runs the project's regression at the landed head in a tree of its own, one
+  pass per branch. A red pass is one tick note naming its suites and head and opens nothing for the person;
+  a green pass writes the floor proof for that head, and a pass is the floor like a hand whole run. The
+  second-run rule (`approve regression-2`) still governs a hand run. Record: `T9-pass.md`; measured in the
+  passes below.
+- **The hot helpers fork nothing.** `_wt_field`, `line_field` (three copies, now one body), `clean`,
+  `parse_seconds`, `verdict_row`'s trim, `frontmatter_get`, `units_field`, `_eg_row_for_worktree`,
+  `is_placeholder_value` and `_eg_body` do their text work in bash 3.2 builtins. A fuzz of old against new
+  on both bashes and both locales found 0 differences in 46,024 cases; every helper has a mutant that an
+  existing pin catches, and two pins were added where none did. `_git_argv_expand_at` was left. The profile
+  that named them is `fork-profile.md` (T10). Records: `T11-fork-free.md`, `fork-profile.md`.
+- **RC5's drive is shorter in the suite's own copy.** dispatch-preflight-4 §RECORDER shortens the deadline
+  in the copy of the hook it already runs. The shipped constant is byte-identical. Record:
+  `T12-rc5-copy.md`.
+- **The decision skill frames at design altitude.** The heading is `**D<n> · Step <s>**`, numbered in one
+  sequence; the Goal is one sentence; small decisions may share a turn and a momentous one goes alone; the
+  skill names concepts, not mechanisms, and carries three worked pairs. The skill grew 4,221 to 9,352 bytes
+  under a 10,000-byte cap, and the loaded doctrine ended 2 bytes smaller (`T1-decision-altitude.md`). Run
+  live on the fixture of this wave's own D5, both sessions under the shipped skill wrote a Goal and Options
+  with 0 backticks, paths, row and criterion names; the control under the old skill wrote 28 backticks, 3
+  paths, 4 row names. The shipped skill's first worked pair is that same decision, so the held-out decision
+  (one sample per arm) is the fairer reading: 0 against 18 backticks and 2 criterion names
+  (`altitude-live.md`).
+- **The evidence gaps are closed.** This run's own D1 to D3 are the live Step-1 interview under the decision
+  skill (`interview-live.md`). Wave-33's AC-9.3 now names its static re-check, and no eval of either wave
+  names a release-check section that does not exist. Wave-33's AC-2.3 is amended: the Patrol's non-GATE
+  NOTIFY lines are the orchestrator's to act on and open no owed item (`T15-evidence-gaps.md`).
+- **Two stale mutation anchors were re-anchored, and nothing else moved.** landing-line (r6em-pre) and
+  (r6em) after T4 moved the launch-row read into `line_row_writer` (`T25-r6em-anchor.md`); runner-roster
+  11.15, 11.18 and 11.19 and spawn-worktree (up3-pre) and (up3) after T9 and T4 re-spelled the lines they
+  mutate (`T26-pass-reds.md`). The first pass found them one landing after they landed, which is what it
+  is for.
+
+- **The review's fixes.** A `Lands-on:` suite declared at a path is run at exactly that path, never a
+  same-named `tests/<name>` (`T27-declared-path.md`; the critic's S2). A writer dispatched into a tree a row
+  already recorded re-marks it for the new name, so it asks the gate as itself (`T28-remark.md`). A dispatch after a
+  handoff was written marks the handoff itself stale: its safe-to-exit lines name the later dispatch
+  (`T29-handoff-stale.md`).
+
+### The floor, the passes and the walk
+
+The floor is the background pass at c15a7e40: 92 gating suites passed and 0 failed in 3,728 s of wall at
+width 2, with 7,333 s of work (`pass-c15a7e40de6c.log:112`), and the three suites a pass marks VOID
+(bash-walls-egd, hook-timeout and session-start, which a pass runs unsettled) passed in one `--only` run, 3
+of 3 (`T13-floor.md`, `T13-void-solo.log`). The first pass, at 743a37c6, failed 2 of 92: runner-roster and
+spawn-worktree, both stale mutation anchors (`pass-743a37c6f56f.log:926`, `T26-pass-reds.md`).
+
+**The passes, measured on this run** (`T16-pass-measure.md`). Both passes ran at width 2, fixed at their ask
+and never widened, and each took about 62 minutes (3,726 s and 3,730 s). They sat on the critical path: each
+began after the last code row, when nothing was left to run beside it, and with the red fix they were 28% of
+a wall of about 573 minutes (the person's Steps 0 to 3, 33%; the build, 35%; the floor's read, 3%). Four
+asks were made while a pass ran, all from the walk's scratch project, and the longest wait was 5 s. Live
+load decided it, load of which the pass's own cores were part; the pass's promise did not. So "never makes a
+writer or a landing wait" holds for the promise and misses by 5 s through live load; no writer of this run
+asked during a pass. Memory at width 2 stayed at 43 to 46% of 8 GiB at the sampled moments, and widths 3 to
+5 never ran. Landings took 149.5 minutes over 13 rows against wave-33's 226.4 over 27, and the gate wait was
+13.0% of landing time against 20.7% (`T16-pass-measure.md`, addendum).
+
+The walk drove the installed build on scratch projects: a marked tree and a foreign launcher, a ruling held
+at the backstop, the owed ledger through a stubbed channel, and a landing that started a pass. Four of its
+five steps passed (the third on the branch with no notification channel, where nothing could be delivered).
+Step 4 was partial: both landings printed the pass line and started the pass detached, and the gate skipped
+both for lack of room beside this repository's own pass, so no scratch pass ran and no tick read its result;
+the tick's reading of a pass is shown on this run itself, which read the red pass and the green one
+(`T18-walk.md`, `walk.md`).
+
+### The tune numbers
+
+Each tune row's measurement before and after, on this machine (8 cores), at load 1.4 to 1.8, the before side
+being T10's code re-run beside the after code. T10's profile set each row's recoverable share as its target
+(the tick 54%, the commit-path hook 37%, ready under 15%); the tick and the hook fell by less, and the
+numbers are the record. A tune target never blocks a wave.
+
+| measure | before | after | logs |
+|---|---|---|---|
+| wall hook on `git commit` (T11) | 0.79 s, 515 forks | 0.62 s (−22%), 289 forks | `T17-tune-after.md`, `fork-profile/after-c15a7e40/measure.log` |
+| wall hook on `ls` (T11) | 0.08 s, 30 forks | 0.08 s, 30 forks | the same |
+| Patrol tick (T11) | 3.11 s, 3,181 forks | 1.83 s (−41%), 1,104 forks | the same |
+| `ready` on a fixture landing (T11) | 4.12 s, 437 forks | 4.07 s (−1%), 402 forks | `fork-profile/after-c15a7e40/measure-ready.log` |
+| RC5's drive (T12) | 24 s | 11 s | `T12-red.log:962`, `T12-mutant.log:969` |
+| dispatch-preflight-4, section-stamp span (T12) | 810 s at width 7 | 392 s at width 2 (−52%) | `wave-33-workhorse/regression-1aacdc03-progress.tsv`, `pass-c15a7e40/main-cmd-2.log.progress.tsv` |
+| the whole run | 2,037 s wall, 13,019 s work, width 7 (1aacdc03) | 3,728 s wall, 7,333 s work, width 2 (c15a7e40) | `wave-33-workhorse/regression-1aacdc03.log:106`, `pass-c15a7e40de6c.log:112` |
+
+The tick's own numbers, 5.03 s to 2.98 s, were T11's, taken at higher load (`T11-fork-free.md`); the table
+carries the interleaved re-measure. The dispatch-preflight-4 drop is mostly width, not code: the 40 suites
+that took 60 s or more before all fell to 0.46 to 0.89 of their span, with a median of 0.58, and
+dispatch-preflight-4's 0.48 is at the low end of that band. Work fell 44% but the wall rose 83%, because the
+only after-run is the pass at width 2; a width-7 after-wall does not exist, since the dispatch wall refuses
+a hand run on a head the pass already proved. The 900 s target for a whole run is missed (limit 10 below).
+
+### The assertion account
+
+Expected values changed by ordered behaviour changes, each listed old to new in its record. No assertion was
+deleted, loosened or skipped, and no timing bound was raised.
+
+| record | what changed |
+|---|---|
+| `T1-decision-altitude.md` | decision-skill 6 ("one decision per interview turn") now pins the batching rule; 19's size cap 5,000 to 10,000 bytes; 26 follows the core's new sentence |
+| `T2-identity-from-place.md` | the carry rows (bash-walls SB.2c, SB.2d, SB.3b, SB.5c, SB.10, CE.1c, CE.2, CE.4c, CE.7 to CE.7d; cmd-class AC-16 and AC-24; background-suite-guard B1g2, B1g3, W4a; hook-latency 11a) now pin no rewrite; CE.7c inverts: the residual is a suite started outside the writer's tree |
+| `T5-owed-asks.md` | bash-walls W15.9 (a writer's `ruling-ack` admitted) is now W15.9f with the precondition W15.9 and the refusals W15.9a to W15.9e; doctor's notify row names the notify item |
+| `T6-agents-true.md` | session-poker §8: a fresh progress file or transcript with no confirmation reads UNCONFIRMED, not RUNNING (four pins); LANDED needs the report |
+| `T11-fork-free.md` | cross-gate-agreement §O's mutation needle follows the rewritten `line_field` body |
+| `T25-r6em-anchor.md`, `T26-pass-reds.md` | the mutation anchors of landing-line r6em, runner-roster 11.15 to 11.19 and spawn-worktree up3 follow the lines T4 and T9 moved; every expected value unchanged |
+| `T3-busy-one-reader.md`, `T4-backstop-pages.md`, `T7-another-layout.md`, `T8-pass-admission.md`, `T9-pass.md`, `T12-rc5-copy.md` | new rows only |
+
+**Records of the decisions.** ADR-053, background work takes only spare capacity, is Accepted. ADR-052 is
+read against this run: of its five consequences, one held, three were amended and one was refuted (the marks
+are in the ADR).
+
+### The strike list of ten
+
+Chris Lehman fixed the release criterion at D1: the ten 1.16.0 Known limits below, each struck with its
+proof or carried with the sentence that says why. Each is numbered as the requirements number it. Seven are
+struck (2 to 8); three are carried (1, 9, 10). The count of the others is reported, never a target.
+
+Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck:
+23 here, against 20 in the 1.16.0 block (13 carried from it: the ten that were not on the list, as
+they stood, and three of the ten, restated; 10 new). No 1.16.0 bullet vanished: each is struck below or
+carried here:
+
+- Known limit: the 1.13.0 limits stand as written there, as triaged in `limits-1.13.0-triage.md`: 66 still
+  true, 5 closed (32, 33, 46, 49, 60), none fixed. Sixty-three are carried by the next wave's charter;
+  36 and 37 sit in `ideas/wave-run-scorecard-charter.md` and 70 in `ideas/wave-roster-lifecycle.md`.
+- Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not the
+  scale; readers holding a code question, and the exam's readers, grade by the scale (Known limit 71 of
+  1.13.0, restated).
+- Known limit: an evidence verdict's `result` moves with rigor (Known limit 74 of 1.13.0, restated). At
+  `single` the critic holds `evidence` with the severity scale, and a REFUTED rated S3 or S4 registers
+  `flag`. At `double` the auditor holds it without the scale, so the same REFUTED registers `fail`.
+- Known limit: the tick does not name a starved queue and does not require an answer per held row. A held
+  row is answered by `task-set`, `task-split` or `decline --on`.
+- Known limit: a dead session's roster is pruned, so a whole run it launched stops counting toward the
+  second-run rule. The durable twin is the `proved:` line of kind `floor` for a green run.
+- (9) Known limit, carried: a writer's suite asks the gate per suite, and a hand-started whole run is
+  promised the width and holds the machine alone, so a writer's ask waits behind it on a machine with no
+  room beside it. Carried because it was not measured behind a hand whole run. The background run the 1.16.0
+  limit asked for is built as a pass that takes only spare room, and measured behind a pass the longest wait
+  of any ask was 5 s (`T16-pass-measure.md` section 2).
+- (10) Known limit, carried: the 15-minute target for a whole run is missed. The only after-wall is the
+  green pass's, 3,728 s at width 2 with 7,333 s of work against the 1aacdc03 run's 2,037 s and 13,019 s at
+  width 7 (`pass-c15a7e40de6c.log:112`, `T17-tune-after.md`). Carried because no width-7 after-wall exists,
+  the dispatch wall refusing a hand run on a proved head, and the work alone puts a width-7 wall at 1,048 s
+  or more with perfect packing, at least 148 s over the 900 s target.
+- Known limit: Linux was not used. The cgroup quota read, the `cksum` project key (assumed CRC from its
+  documentation), `set -m` in the suite primitive, and `cmd_case_blind`, `real_path` and the case folding of
+  command paths were run on macOS only. Their case-exact and quota arms are proved by planted probes, not by
+  a Linux host (`T1-typical-cost.md`, `T2-suite-primitive.md`, `T3-budget-at-ask.md`).
+- (1) Known limit, carried: a suite started outside the writer's own tree asks as main. The gate learns who
+  asks from the tree the ask is made in, so a suite a writer starts in its own tree asks as that writer from
+  any launcher in any mode, and no command is rewritten (gate M.1 to M.9, bash-walls CE.1 to CE.7c;
+  `T2-red-gate-spawn.log`, `T2-green1.log`, `T2-red-walls.log`; `T18-walk.md` section 1). Carried because
+  identity comes from the place a command starts in: a writer that starts a suite in the main checkout is,
+  to the gate, the main thread (`T2-identity-from-place.md`).
+- Known limit: `bash TESTS/RUN.SH`, and a link to the runner not named `run.sh`, exit 2 for everyone with
+  nothing run: the interpreter seam re-runs any script whose basename is not `run.sh`, and the runner
+  rejects the paths it is handed. That is the safe direction, pinned by gate.test.sh CA.8
+  (`T3-budget-at-ask.md`).
+- Known limit: the dispatch wall does not refuse a nested dispatch. A dispatched writer dispatched four
+  read-only researchers of its own and nothing refused it (`assumptions.md` A-orch-46). Next wave.
+- Known limit: a whole run's width after a short wait may lag. The ring medians over 300 s, so a wait shorter
+  than about 150 s can still read busy samples. The fixture rewrites the ring; a live short wait was not
+  measured (`T5-width-after-grant.md`, `assumptions.md` A-T5-4).
+- Known limit: two suites backgrounded from one script share one gate admission, because the holder is the
+  script's `$$`. Two `gate_ask`s from sibling subshells both returned request 1; as separate processes they
+  returned 1 and 2 (`walk.md` sections 6 and 8).
+- Known limit, new: a background pass is fixed at the width the machine had room for at its ask and never
+  widens as the machine goes idle. Both passes of this run ran at width 2 for about 62 minutes, began after
+  the last code row and, with the red fix, were 28% of the wall (`T16-pass-measure.md` section 4). Until a
+  pass can widen, expect the pass rather than the build to bound the wall.
+- Known limit, new: "never makes a writer or a landing wait" holds for the pass's promise and misses through
+  live load. The longest wait during a pass was 5 s, a scratch writer's work ask decided by live load of
+  which the pass's own cores were part; no writer of this run asked during a pass (`T16-pass-measure.md`
+  section 2).
+- Known limit, new: memory under a pass was sampled at six moments at width 2 (43 to 46% of 8 GiB); widths 3
+  to 5 never ran and the peak between samples is not recorded (`unverified`; `T16-pass-measure.md` section
+  3).
+- Known limit, new: no notification channel exists on the machine this run ran on (`doctor` reports it; the
+  channel file is absent), so no owed send of this run reached the person. Every send in the records went to
+  a stubbed `curl`; a delivery to a real service was not seen (`unverified`; `T18-walk.md`,
+  `T5-owed-asks.md`).
+- Known limit, new: `tests/timing.tsv` is an order key, not a forecast. It is rewritten from the green pass,
+  which writes no runner timing, so each suite's seconds are its first-to-last section-stamp span: a lower
+  bound, taken at width 2 beside other work (`timing-c15a7e40.tsv`, `T17-tune-after.md`).
+- Known limit, new: under a cgroup quota a highly parallel solo suite may read as disturbed and come back
+  VOID. The void check models the run's own share as the one-minute load's decay and reads the cgroup's rate
+  over a longer interval; no test covers it (`unverified`; `T3-busy-one-reader.md`).
+- Known limit, new: the runner's behaviour under a pass admission, its width from the promise and its solo
+  suites marked VOID, has no pinned test row. It is shown by a scratch run and by both passes
+  (`T9-runsh-pass.log`, `pass-c15a7e40de6c.log`, three VOID).
+
+- Known limit, new: a background pass that the gate skips, or that a whole-machine ask stops, is told
+  nothing after `ready` printed `pass: started`; the tick reads a skipped or stopped pass and says nothing,
+  so after the last landing no pass may come and nothing says so (`critic-adversarial.md` finding 2,
+  deferred by Chris Lehman at D26).
+- Known limit, new: an ask with no agent name that ends on the lineage or resume path makes one more `git`
+  call than in 1.16.0; a typical ask costs the same (`T2-identity-from-place.md` A-T2-4; waived at D25).
+- Known limit, new: a re-dispatch re-marks the tree its plan row's `worktree` cell names, so a row given a
+  fresh tree while its cell still names the old one re-marks the old tree too (`T28-remark.md`).
+
+Known limits, struck:
+
+- (2) Known limit, struck: under a cgroup CPU quota the settle wait, the void check and the pressure rung
+  that sets a whole run's width read the host's load against the quota's cores. They now read the cgroup's
+  own CPU use through one reader beside the gate's, so an idle container on a busy host settles and keeps
+  its width, and a busy container still reads busy. resources BUSY.17 to BUSY.27 were red on the unchanged
+  code, 373 of 379 passed (`T3-red-resources.log`), then green (`T3-green-resources.log`), and each reader
+  has a mutant that goes red (`T3-mutant-settle-host.log`, `T3-mutant-ring-host.log`,
+  `T3-mutant-cold-calm.log`). Proved with a planted cgroup root, not on a Linux host: the Linux bullet above
+  stands (`T3-busy-one-reader.md`).
+- (3) Known limit, struck: the tick's backstop `deliver` against an unread ruling was untested, and driven
+  it landed the row over the ruling. The backstop now refuses without marking, names the ids, holds on every
+  tick and opens one owed item. session-poker-4 DR-5 to DR-6h and inbox g6 to g8 and §ROOT, red then green
+  (`T4-red-session-poker-4.log`, `T4-green-session-poker-4.log`, `T4-red-inbox.log`, `T4-green-inbox.log`),
+  two mutants (`T4-mutant-marking.log`, `T4-mutant-closers.log`), and the walk: tick 1 printed NOT-LANDED
+  and the row stayed active (`T18-walk.md` section 2; `T4-backstop-pages.md`).
+- (4) Known limit, struck: two asks of the person opened no owed item, and waiving a question left its
+  `finding:` items open. The commit wall's question and matrix-row waiver refusals now open `waive:` and
+  `waive-row:` items from the hook that calls the wall, `waive-row` and `waive` close them, and `waive`
+  closes the question's `finding:` items. notify §ASKS and bash-walls, red then green (`T5-red-notify.log`,
+  `T5-green-notify.log`, `T5-red-bash-walls.log`, `T5-green-bash-walls.log`), a mutant per opener and closer
+  (`T5-owed-asks.md`).
+- (5) Known limit, struck: `ruling-ack` run with no agent identity acknowledged a writer's ruling. The wall
+  refuses it unless the caller is the ruling's writer, alone in its call; the ruling stays unread.
+  bash-walls W15.9 to W15.9f (`T5-red-bash-walls.log`, `T5-green-bash-walls.log`; `T5-owed-asks.md`).
+- (6) Known limit, struck: the RC5 deadline had no knob, so each drive slept 24 s. dispatch-preflight-4
+  §RECORDER now shortens it in the copy of the hook the suite already runs, 22 to 8 s, and the shipped
+  constant is byte-identical, so no production surface gained a knob. RC5's drive took 24 s and now takes 11
+  s; the planted overrun still fails (`T12-red.log`, `T12-green.log`, `T12-mutant.log`; `T12-rc5-copy.md`).
+- (7) Known limit, struck: slots K6.1, K6.3 and K6.5 stood red under the installed 1.15.0 `line.sh`. This
+  run landed under the installed 1.16.0, and slots was green at T8's landing through `ready`
+  (`landing-proofs.log:60`) and in both passes (`pass-743a37c6f56f.log:578`, `pass-c15a7e40de6c.log:95`).
+- (8) Known limit, struck: `tests/timing.tsv` held the seconds of one whole run, at 88b0f1ec. It is
+  rewritten from the green pass at c15a7e40: 95 rows, the same suites, a header naming the head
+  (`timing-c15a7e40.tsv`, `T17-tune-after.md`). What the new seconds are is the new limit above.
+
 ## 1.16.0 — 2026-10-11
 
 The gate stops forecasting, the plan lands itself, and the person is told. Eleven decisions are built, and

@@ -566,6 +566,13 @@ _runner_width() {
   fi
   _WIDTH=8
   if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
+  # A BACKGROUND PASS RUNS AT ITS PROMISE (wave-34 T9; D15): a whole run under a `pass` admission (its
+  # one ask believed through the lineage) has the free cores the gate promised it, not the share's width.
+  if [ -n "${_RUN_GATE_ID:-}" ] && declare -F gate_dir >/dev/null 2>&1; then
+    _pw="$(awk -F'[=:]' '/^kind=/ { k = $2 } /^promise=/ { w = $3 } END { if (k == "pass") print w }' \
+      "$(gate_dir)/requests/$_RUN_GATE_ID" 2>/dev/null)"
+    case "$_pw" in ''|*[!0-9]*|0) : ;; *) _WIDTH="$_pw" ;; esac
+  fi
   case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
   _ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
   if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
@@ -1115,10 +1122,20 @@ if [ "$SERIAL" -eq 0 ]; then
         echo "tests/run.sh: void — ${label}: ${why}; it ran unadmitted and is not retried" >&2
         return 0
       fi
-      if [ "$_GATE_OWN" -eq 0 ] &&
-         [ "$(sed -n 's/^kind=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" = whole ]; then
-        _solo_one "$label"      # inside a whole admission already (NESTING, above)
-        return 0
+      if [ "$_GATE_OWN" -eq 0 ]; then
+        case "$(sed -n 's/^kind=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" in
+          whole)
+            _solo_one "$label"      # inside a whole admission already (NESTING, above)
+            return 0 ;;
+          pass)
+            # INSIDE A BACKGROUND PASS (wave-34 T9; D15, Δ9): the pass has only the spare room, never the
+            # machine, so its solo suite runs once, unsettled, and is void; its own --only run proves it.
+            why="a background pass runs it unsettled; its own --only run proves it for the floor"
+            _solo_one "$label"
+            printf '%s\n' "$why" >"$TMP/${label}.void"
+            echo "tests/run.sh: void — ${label}: ${why}" >&2
+            return 0 ;;
+        esac
       fi
     fi
     cores="$(_res_cores)"
