@@ -1308,8 +1308,9 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       # `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>`, each on a line of its own, read
       # as Questions: is: a fenced line is an example, a trailing ` # ...` comment comes off, and an
       # unfilled slot declares nothing. `row=` is the first word. `lands_on=` is written in ONE
-      # spelling, the one the dispatch wall gives `lands_red=` and the line decodes (`_line_suites`):
-      # each suite by its basename as `<name>.test.sh`, comma-joined. A word that is no suite name
+      # spelling, the one the line decodes (`_line_suites`): a bare suite as `<name>.test.sh`, a
+      # path-qualified one at its declared path, `<dir>/<name>.test.sh` (wave-34 T27: ready runs
+      # exactly that file, never a same-named tests/<name>), comma-joined. A word that is no suite name
       # prints as `lands_on_bad=`; `none` prints `lands_on=none`, its reason as `lands_on_reason=`.
       split("", LOH); nlo = 0; nro = 0
       for (j = 1; j <= nh; j++) {
@@ -1338,8 +1339,10 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
             nlw = split(v, LW, /[ \t,]+/); lo = ""; lbad = ""
             for (i = 1; i <= nlw; i++) {
               t = trimtok(LW[i]); if (t == "") continue
-              sub(/.*\//, "", t)
-              if (t ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) {
+              while (t ~ /^\.\/.*\//) t = substr(t, 3)
+              lpn = split(t, LPW, "/"); lpb = LPW[lpn]; lpok = 1
+              for (lpq = 1; lpq < lpn; lpq++) if (LPW[lpq] !~ /^[A-Za-z0-9_.-]+$/ || LPW[lpq] == ".." || (LPW[lpq] == "." && lpq > 1)) lpok = 0
+              if (lpok && lpb ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) {
                 sub(/\.test\.sh$/, "", t); t = t ".test.sh"
                 if (index("," lo ",", "," t ",") == 0) lo = (lo == "" ? t : lo "," t)
               } else if (index(" " lbad " ", " " LW[i] " ") == 0) lbad = (lbad == "" ? LW[i] : lbad " " LW[i])

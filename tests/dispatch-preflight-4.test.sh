@@ -2583,8 +2583,9 @@ section "§LANDS-ON — a writer binding a row names the suites it lands on (wav
 # ============================================================================
 #
 # A brief carries `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>` on a line of its own.
-# The wall writes it on the launch row as `lands_on=`, each suite as `<name>.test.sh` (the spelling
-# `lands_red=` has and lib/line.sh `_line_suites` decodes), and refuses: a writer brief that binds a
+# The wall writes it on the launch row as `lands_on=`, a bare suite as `<name>.test.sh` and a path-qualified
+# one at its declared path (wave-34 T27; the spelling lib/line.sh `_line_suites` decodes, so ready runs
+# that file), and refuses: a writer brief that binds a
 # row of the bound plan and carries no line (ruling A-orch-73: a dispatch binding no row is owed
 # none; A-orch-71: whatever version wrote the plan); `none` with no reason; a suite outside the set
 # the checks derived. FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh), on
@@ -2613,8 +2614,18 @@ t7_gate lo2 'Lands-on: widget'
 expect_eq "LO2 Lands-on: widget, a suite of the row's set named bare, is admitted" "allow" "$GATE_VERDICT"
 expect_eq "LO2b …the row carries lands_on=widget.test.sh, the one spelling" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
 t7_gate lo2t 'Lands-on: tests/widget.test.sh  # the suite this row lands on'
-expect_eq "LO2t Lands-on: tests/widget.test.sh with a trailing comment is admitted, written by its basename" \
-  "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+expect_eq "LO2t Lands-on: tests/widget.test.sh with a trailing comment is admitted, written at its declared path" \
+  "allow|tests/widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+# A path-qualified suite is in the row's set by its file name (Suites: records suites so), and the row keeps
+# the path, so ready runs that file and no other of its name. fails-when: the path is refused as outside
+# Suites:, or the row carries the file name alone.
+t7_gate lo2p 'Lands-on: scripts/deploy/__tests__/widget.test.sh'
+expect_eq "LO2p Lands-on: scripts/deploy/__tests__/widget.test.sh, in Suites: by its file name, is admitted, written at its path" \
+  "allow|scripts/deploy/__tests__/widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+t7_gate lo2x 'Lands-on: ../widget.test.sh'
+expect_eq "LO2x Lands-on: ../widget.test.sh, a path out of the tree, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LO2x2 …naming it" "Lands-on: ../widget" "$(t7_first)"
+expect_contains "LO2x3 …as no suite of the set" "is outside Suites:" "$(t7_first)"
 
 LO3_S="a-suite-name-of-sixty-characters-long-enough-to-wrap.test.sh"
 t7_gate lo3 "Lands-on: widget.test.sh, ${LO3_S}"
