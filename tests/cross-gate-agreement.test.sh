@@ -13543,6 +13543,18 @@ expect_eq "SDV2 …and the stop wall refuses the silent turn for exactly that ro
 SDV_RA=$(sd_world_verb all R1,R2)
 expect_eq "SDV3 a verb decline naming both: the tick fills nothing" "" "$(sd_tick "$SDV_RA" "$CGSD_POKER")"
 expect_eq "SDV4 …and the stop wall owes nothing either" "" "$(sd_wall "$SDV_RA")"
+# THE LIFT (wave-35 T8; REQ-6 AC-6.2; D15). `decline lift [<ids>]` writes a ledger line of its own that ends
+# the standing decline for the rows it names, every row it answered when it names none. The one reader stops
+# at it, so the tick prints the FILL the decline held and the wall owes the same rows.
+( cd "$SDV_RA" && sd_env bash "$CGSD_POKER" decline lift R1 ) > "$SDV_RA/sd-lift.out" 2>&1
+expect_contains "SDL precondition: the verb recorded the lift" "decline lift — R1" "$(cat "$SDV_RA/sd-lift.out")"
+SDL_TICK=$(sd_tick "$SDV_RA" "$CGSD_POKER")
+expect_eq "SDL1 after lifting R1 the tick fills R1, the row the decline held" "R1 " "$SDL_TICK"
+expect_eq "SDL2 …and the stop wall refuses the silent turn for exactly that row" "$SDL_TICK" "$(sd_wall "$SDV_RA")"
+( cd "$SDV_RA" && sd_env bash "$CGSD_POKER" decline lift ) > "$SDV_RA/sd-lift2.out" 2>&1
+SDL_TICK2=$(sd_tick "$SDV_RA" "$CGSD_POKER")
+expect_eq "SDL3 a lift naming no row ends the rest: the tick fills both" "R1 R2 " "$SDL_TICK2"
+expect_eq "SDL4 …and the stop wall owes both" "$SDL_TICK2" "$(sd_wall "$SDV_RA")"
 
 # ============================================================
 section "RPL — the hold's reply count and the sweeper's reply reader are one envelope grammar (wave-24 T27; Step-6 review U2; D3)"

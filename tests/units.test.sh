@@ -2139,6 +2139,45 @@ expect_contains "READS.12 a task id in deps beside a reads column is refused, na
   "T4: dep T1 is not ext:<slug>" "$VAL_DEPS_ID"
 expect_eq "READS.12b …and the verb exits 1" "1" "$(call_rc units_validate "$SANDBOX/reads-deps-id.md")"
 
+# ============================================================
+section "RECORD-READ — wave-35 T8: a record path is read only when a row's Files writes it (REQ-6 AC-6.1; D15)"
+# ============================================================
+#
+# fails-when: T2 reading T1's record artifact is ready while T1 is pending. Through wave-34 a path read waited
+# only on the open rows whose Files cover it, and no row's cell named its record artifact, so the read was met at
+# once (A-orch-10). A code path no row writes is still satisfied (READS.8, lib/old.sh); a RECORD path (under
+# .bionic/, or record/ spelled from the docs root) that no row of the table writes, whatever its status, is
+# refused at the write, naming the token and the row whose artifact it is when its file name begins with an id.
+rr_plan() {  # <file> <T1 Files cell> <T2 reads cell> <T1 status>
+  {
+    printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n- Step 4: in flight\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the profile, written to record/w/T1.md | implementor | — | 30 | REQ-x | %s |  | %s |\n' "$2" "$4"
+    printf '| T2 | 4 | build | reads the profile | implementor | — | 30 | REQ-x | lib/c.sh | %s | pending |\n' "$3"
+  } > "$1"
+}
+rr_plan "$SANDBOX/rr-bare.md" 'lib/p.sh' 'approval:plan, record/w/T1.md' pending
+VAL_RR="$(call units_validate "$SANDBOX/rr-bare.md")"
+expect_eq "RR.1 a record path no row's Files covers is refused (exit 1)" "1" "$(call_rc units_validate "$SANDBOX/rr-bare.md")"
+expect_eq "RR.1b …naming the token and the writer row, whose id begins the file name" \
+  "T2: read record/w/T1.md names a record path no row writes; add it to T1's Files" "$VAL_RR"
+rr_plan "$SANDBOX/rr-dot.md" 'lib/p.sh' 'approval:plan, live:.bionic/docs/record/w/profile.md' pending
+expect_eq "RR.2 the .bionic/ spelling, behind live:, is the same read; a name no id begins names the writer row by its role" \
+  "T2: read live:.bionic/docs/record/w/profile.md names a record path no row writes; add it to the writer row's Files" \
+  "$(call units_validate "$SANDBOX/rr-dot.md")"
+rr_plan "$SANDBOX/rr-code.md" 'lib/p.sh' 'approval:plan, lib/old.sh' pending
+expect_eq "RR.3 control: a code path no row writes stays a legal read (READS.8's rule)" "0" "$(call_rc units_validate "$SANDBOX/rr-code.md")"
+rr_plan "$SANDBOX/rr-cov.md" 'lib/p.sh, .bionic/docs/record/w/T1.md' 'approval:plan, record/w/T1.md' pending
+expect_eq "RR.4 T1's Files gains its artifact: the table validates clean" "0" "$(call_rc units_validate "$SANDBOX/rr-cov.md")"
+expect_eq "RR.4b …and T2 waits on T1, its writer, while T1 is pending" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/rr-cov.md" 4)" "T2${TAB}record/w/T1.md${TAB}T1${TAB}pending")"
+expect_eq "RR.4c …so T2 is not ready, and T1 is (the positive on the same ready set)" "no yes" \
+  "$(R="$(call units_ready "$SANDBOX/rr-cov.md" 4)"; printf '%s %s' "$(has_line "$R" T2)" "$(has_line "$R" T1)")"
+rr_plan "$SANDBOX/rr-landed.md" 'lib/p.sh, .bionic/docs/record/w/T1.md' 'approval:plan, record/w/T1.md' landed
+expect_eq "RR.5 a landed writer still covers the path: the table validates clean, and T2 is ready" "0 yes" \
+  "$(call_rc units_validate "$SANDBOX/rr-landed.md") $(has_line "$(call units_ready "$SANDBOX/rr-landed.md" 4)" T2)"
+
 # A READ NAMES SOMETHING: a path in the Files grammar or a named artifact. A token that names
 # neither is refused at the write, and never read as satisfied.
 for _bad in nonsense proof:bogus foo:bar 'lib/a b.sh'; do
