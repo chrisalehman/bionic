@@ -352,6 +352,32 @@ poke "$RSEV" current 8
 s42_unchanged "SEV-cur §CUR8-sev AC-8.5 the newest adversarial fact holds a finding to fix: current 8" 1 "$PSEV"
 expect_contains "SEV-cur2 …naming that reading failing" \
   "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/c-fix.md')" "$OUT"
+# ---------- §ASK-WAIVE (T35; AC-2.2): a failing question is the person's to waive, and opens one item ----------
+# A refusal on a failing reading leaves the person the call: fix it or waive the question. The
+# refusal opens `waive:<question>`, the key the waive verb closes, carrying the failing line it
+# printed; a second refusal on the same question opens nothing new; the waive verb closes it; and
+# once the question holds again (a passing reading over the fix), current 8 closes what is left.
+sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
+sev_store() { cat "$RSEV/.bionic/tmp/owed-$SID.state" 2>/dev/null; }
+SEV_WKEYS="$(sev_owed | cut -f1)"
+expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<question>, the waive verb's key" \
+  "waive:adversarial" "$SEV_WKEYS"
+expect_absent "AW-1a …and none for the questions that hold (same reader)" "waive:evidence" "$SEV_WKEYS"
+expect_eq "AW-1b …carrying the failing line current 8 printed" \
+  "review adversarial bionic:critic piece failing record/wave-01-fixture/c-fix.md" \
+  "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
+poke "$RSEV" current 8
+expect_eq "AW-2 a second refusal on the same failing question opens nothing new" "1|1" \
+  "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|')"
+cp "$PSEV" "$TMPROOT/sev-before-waive.md"
+poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
+expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
+cp "$TMPROOT/sev-before-waive.md" "$PSEV"
+poke "$RSEV" current 8
+expect_eq "AW-4 the waiver taken back out of the plan, the refusal is a new need: the item opens again" "1|waive:adversarial" \
+  "$RC|$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
 sev_cur 4
 sev_rec c-later flag "findings: 2" "finding: 1 S2 off - a side path still wrong" "finding: 2 S4 off - a comment misstates it"
 sev_add c-later
@@ -361,6 +387,9 @@ sev_cur 7
 poke "$RSEV" current 8
 expect_eq "SEV-cur4 §CUR8-sev …and current 8 is admitted on it: deferrals and notes do not hold the step" "0|8" \
   "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+expect_contains "AW-5 T35 once the question holds again, current 8 closes its waiver item" \
+  "|key=waive:adversarial|state=closed|by=no longer failing|" "$(sev_store)"
+expect_eq "AW-5a …and no waiver item is left open" "" "$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
 POKE_BOUND="$SEV_BOUND_WAS"
 
 # ============================================================
@@ -2947,6 +2976,261 @@ cp "$TMPROOT/mr-keep" "$PMR"
 POKE_BOUND="$DC_BOUND_WAS"
 
 # ============================================================
+section "§REPLAY §NEXT-CALL §FILL-VERBS: every hand edit wave-32 made to its plan has a verb that makes it, refuses an invalid value leaving the plan unchanged, and every plan-verb refusal prints the call that succeeds (wave-33 T7; REQ-4 AC-4.1, AC-4.3; REQ-3 AC-3.3; D8)"
+# ============================================================
+#
+#   matrix-set <AC> status=<pending|blocked|discharged|waived> evidence=<record/…> task=<ids>
+#                       the tier table's status and evidence cells (discharge's row edit) and the AC block's
+#                       evidence: and task: keys; never the tier cell, never the auditor cell (discharge's)
+#   waive-row <AC> '<the user's words>' '<why>'
+#                       `  waiver: <git user.name> <date -u> "<words>" — <why>` in the AC block, status waived;
+#                       the words stand in a prompt the user typed in this session (finding-move's rule)
+#   step-field 5 walk-artifact=<path>   the walk pointer, inside the Step-5 block the walk gate reads
+#   tasks-prose '<text>' [--replace <first words>]   a prose paragraph under ## Tasks, below the table
+#   task-set <id>[,<id>…] <col>=<val>… [-- <id>[,<id>…] <col>=<val>…]…   many rows, validated once
+#   epic-row <wave> <col>=<val>… [--plan <plan>]   a cell of the epic plan's shipped-table row
+#   continuation-fill '<field>=<text>' [--plan <plan>]   one <fill: field…> mark of the run's continuation
+#
+# REPLAY (AC-4.1): each verb writes the text wave-32's plan carries by hand (its plan:76, :166, :225-242, :256,
+# :80), and an invalid value is refused with the plan byte-identical. NEXT-CALL (AC-4.3): the three weak refusals
+# wave-32 met — ledger-add's unknown column, task-add's doc row without its approval read, decline --on a file —
+# each print `poker: next call: <the call>`, and that call, run as printed, succeeds.
+# FIXTURE FIDELITY: §42's plan writer (a plan the real gate admits) at current: 4, its Step-5 line written by step-line
+# (a writer's dry commit is judged at Step 4 past it, §STEP-FIELD's fixture), with a second matrix row and its
+# block; an epic plan and a continuation shaped as close-out.sh writes them; §47's reads table for task-add and
+# decline; the transcript from tests/fixtures/transcript-move (typed.jsonl) under a config dir of this section's.
+PV7_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+PV7_HOOK="$(cd "$(dirname "$POKER")" && pwd)/session-poker.sh"
+PV7_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects/-pv7-project"
+export CLAUDE_CONFIG_DIR="$PV7_CFG"
+PV7_TX="$PV7_CFG/projects/-pv7-project/$SID.jsonl"
+PV7_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+pv7_prompts() {  # <prompt>... -> this session's transcript: the frame, then one typed prompt each
+  local p; cat "$PV7_FX/frame.jsonl" > "$PV7_TX"
+  for p in "$@"; do jq -c --arg p "$p" '.message.content = $p' "$PV7_FX/typed.jsonl" >> "$PV7_TX"; done
+}
+pv7_next() { printf '%s\n' "$OUT" | sed -n 's/^poker: next call: //p' | head -1; }  # the printed call
+pv7_run() {  # <repo> <call> -> runs the call AS PRINTED, in the repo, in this session; sets OUT, RC
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$2" ) > "$TMPROOT/pv7.out" 2>&1; RC=$?
+  OUT="$(cat "$TMPROOT/pv7.out")"
+}
+pv7_refused() {  # <label> <want rc> <want text> <repo> <file> <operands…> -> the verb refused, the file byte-identical
+  local label="$1" rc="$2" want="$3" repo="$4" file="$5"; shift 5
+  cp "$file" "$TMPROOT/pv7-before"
+  poke "$repo" "$@"
+  expect_eq "$label — refused (exit $rc)" "$rc" "$RC"
+  expect_true "$label — …and the file is byte-identical (cmp)" cmp -s "$TMPROOT/pv7-before" "$file"
+  [ -z "$want" ] || expect_contains "$label …saying why" "$want" "$OUT"
+}
+pv7_step5() {  # <plan> -> the Step-5 block: its line and the indented lines under it
+  awk '/^- Step 5:/ { f = 1; print; next } f && /^  [^ -]/ { print; next } f { exit }' "$1"
+}
+pv7_prose() {  # <plan> -> the non-table, non-blank lines of ## Tasks
+  awk '/^## / { t = ($0 ~ /^## Tasks/); next } t && /[^ \t]/ && !/^[ \t]*\|/ { print }' "$1"
+}
+pv7_ledger() {  # <plan> <id> <column n> -> that cell of the dispatch-ledger row, trimmed
+  awk -F'|' -v id="$2" -v n="$3" '/^## / { l = ($0 ~ /^## Dispatch ledger/); next }
+    l && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == id) { v = $n; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
+}
+
+R7="$(make_repo t7-verbs)"; ( cd "$R7" && git commit -q --allow-empty -m init )
+git -C "$R7" config user.name 'Fixture User'
+P7="$(s42_plan "$R7" 4)"
+poke "$R7" step-line 5 '(pending)'
+awk '
+  /^\| AC-1\.1 \| T2 \|/ { print; print "| AC-1.2 | T0 | pending | — | — |"; next }
+  /^  fails-when: the fixture is wrong$/ { print; print "AC-1.2:\n  provenance: fixture two\n  fails-when: the second is wrong\n  eval: T0 — docs-pins §B\n  task: pending\n  evidence: pending"; next }
+  { print }' "$P7" > "$P7.t7" && mv "$P7.t7" "$P7"
+s42_snap "$R7" "$P7"
+s34_gate "$R7"
+expect_eq "PV7-0 precondition: the fixture plan at current: 4, its Step-5 line written, two matrix rows, is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "PV7-0b …the cell extractor reads AC-1.2's status" "pending" "$(mr_cell "$P7" AC-1.2 4)"
+expect_eq "PV7-0c …the block extractor reads AC-1.2's evidence key" "  evidence: pending" "$(mr_block "$P7" AC-1.2 | /usr/bin/grep '^  evidence:')"
+expect_eq "PV7-0d …the Step-5 extractor reads the block's line" "- Step 5: (pending)" "$(pv7_step5 "$P7")"
+expect_eq "PV7-0e …the ledger extractor reads T1's artifact" "record/T1.md" "$(pv7_ledger "$P7" T1 6)"
+
+# ---------- §REPLAY matrix-set: the status, evidence and task cells (wave-32 plan:225-242; A-orch-40/41/47) ----------
+poke "$R7" matrix-set AC-1.2 status=discharged evidence=record/wave-01-fixture/T2-a.log task=T1,T2
+expect_eq "RP-1 §REPLAY matrix-set exits 0" "0" "$RC"
+expect_eq "RP-1b …the table row: status and evidence set, tier and auditor as they were" \
+  "| AC-1.2 | T0 | discharged | record/wave-01-fixture/T2-a.log | — |" "$(/usr/bin/grep '^| AC-1\.2 ' "$P7")"
+expect_eq "RP-1c …the block's evidence key carries the same path (the table and the block agree)" \
+  "  evidence: record/wave-01-fixture/T2-a.log" "$(mr_block "$P7" AC-1.2 | /usr/bin/grep '^  evidence:')"
+expect_eq "RP-1d …the block's task key, the ids joined as the plan writes them" "  task: T1, T2" "$(mr_block "$P7" AC-1.2 | /usr/bin/grep '^  task:')"
+expect_eq "RP-1e …three lines replaced, none added (git diff --numstat)" "3 3;" "$(s42_numstat "$R7")"
+expect_contains "RP-1f …and it says what it wrote" "matrix-set — AC-1.2" "$OUT"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-2 a status outside the gate's four" 1 "pending, blocked, discharged, waived" "$R7" "$P7" matrix-set AC-1.2 status=done
+pv7_refused "RP-2b the tier cell is never matrix-set's" 1 "tier" "$R7" "$P7" matrix-set AC-1.2 tier=T3
+pv7_refused "RP-2c the auditor cell is discharge's" 1 "discharge AC-1.2" "$R7" "$P7" matrix-set AC-1.2 auditor=CONFIRMED
+pv7_refused "RP-2d a task id no ## Tasks row carries" 1 "T99" "$R7" "$P7" matrix-set AC-1.2 task=T1,T99
+pv7_refused "RP-2e an AC the matrix table has no row for" 1 "AC-9.9" "$R7" "$P7" matrix-set AC-9.9 status=pending
+pv7_refused "RP-2f status=waived on a row with no waiver: line is waive-row's" 1 "waive-row AC-1.2" "$R7" "$P7" matrix-set AC-1.2 status=waived
+pv7_refused "RP-2g an evidence value outside record/" 1 "record/" "$R7" "$P7" matrix-set AC-1.2 evidence=/tmp/x.log
+pv7_refused "RP-2h one invalid key refuses the whole call: the valid status beside it is not written" 1 "" "$R7" "$P7" matrix-set AC-1.2 status=blocked tier=T1
+
+# ---------- §REPLAY waive-row: the row waiver on the user's words (wave-32 plan:256, 311, 324, 337; A-orch-49) ----------
+pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
+poke "$R7" waive-row AC-1.1 'I waive all 4' 'the requirement is amended next wave'
+expect_eq "RP-3 §REPLAY waive-row exits 0" "0" "$RC"
+expect_eq "RP-3b …the row's status reads waived, its other cells as they were" "| AC-1.1 | T2 | waived | — | — |" "$(/usr/bin/grep '^| AC-1\.1 ' "$P7")"
+expect_regex "RP-3c …the block carries the waiver line in wave-32's shape: who, the date, the words, why" \
+  '^  waiver: Fixture User [0-9]{4}-[0-9]{2}-[0-9]{2} "I waive all 4" — the requirement is amended next wave$' \
+  "$(mr_block "$P7" AC-1.1 | /usr/bin/grep '^  waiver:')"
+s34_gate "$R7"
+expect_eq "RP-3d …and the plan with the waived row is admitted by the real gate" "0" "$GATE_RC"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-4 words the user never typed" 1 "no prompt the user typed" "$R7" "$P7" waive-row AC-1.2 'waive them all now' 'why'
+pv7_refused "RP-4b …too few words to be the user's decision" 1 "too short" "$R7" "$P7" waive-row AC-1.2 'I waive' 'why'
+pv7_refused "RP-4c an AC with no matrix row" 1 "AC-9.9" "$R7" "$P7" waive-row AC-9.9 'I waive all 4' 'why'
+poke "$R7" matrix-set AC-1.1 status=waived
+expect_eq "RP-4d beside RP-2f: status=waived on a row that carries its waiver: line is admitted (nothing to change: exit 0)" "0" "$RC"
+
+# ---------- §REPLAY step-field 5 walk-artifact (wave-32 plan:76; A-orch-42) ----------
+poke "$R7" step-field 5 walk-artifact=record/wave-01-fixture/walk.md
+expect_eq "RP-5 §REPLAY step-field 5 walk-artifact= exits 0" "0" "$RC"
+expect_eq "RP-5b …the line sits in the Step-5 block, where the walk gate reads it" \
+  "- Step 5: (pending)|  walk-artifact: record/wave-01-fixture/walk.md" "$(pv7_step5 "$P7" | paste -sd'|' -)"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-5c walk-artifact belongs to Step 5 alone" 1 "step-field 5 walk-artifact=record/wave-01-fixture/walk.md" "$R7" "$P7" step-field 4 walk-artifact=record/wave-01-fixture/walk.md
+pv7_refused "RP-5d a path that climbs out of record/" 1 ".." "$R7" "$P7" step-field 5 walk-artifact=record/../x.md
+
+# ---------- §REPLAY tasks-prose (wave-32 plan:166; A-orch-24/25) ----------
+expect_eq "PV7-pr0 precondition: ## Tasks carries no prose (the extractor, before; RP-6 is its positive)" "" "$(pv7_prose "$P7")"
+poke "$R7" tasks-prose 'Shard table (T9, option 1): no suite is split.'
+expect_eq "RP-6 §REPLAY tasks-prose exits 0" "0" "$RC"
+expect_eq "RP-6b …the paragraph is under ## Tasks, below the table" "Shard table (T9, option 1): no suite is split." "$(pv7_prose "$P7")"
+expect_eq "RP-6c …after the table's last row and a blank line" "| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending |||Shard table (T9, option 1): no suite is split." \
+  "$(/usr/bin/grep -A2 '^| T5 |' "$P7" | paste -sd'|' -)"
+poke "$R7" tasks-prose 'Shard table (T9, option 2): two suites are split.' --replace 'Shard table'
+expect_eq "RP-6d --replace rewrites the paragraph its first words name, in place" "0|Shard table (T9, option 2): two suites are split." "$RC|$(pv7_prose "$P7")"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-6e --replace naming no paragraph" 1 "Shard table" "$R7" "$P7" tasks-prose 'x y z' --replace 'No such paragraph'
+pv7_refused "RP-6f a paragraph that reads as a table row" 1 "" "$R7" "$P7" tasks-prose '| T9 | a row by hand |'
+
+# ---------- §REPLAY step-line 8 (wave-32 plan:80) ----------
+poke "$R7" step-line 8 'CLOSED 2026-10-11T12:25Z — wave/01-fixture merged into main'
+expect_eq "RP-7 §REPLAY step-line 8 writes the Step 8 line" "0|- Step 8: CLOSED 2026-10-11T12:25Z — wave/01-fixture merged into main" \
+  "$RC|$(/usr/bin/grep '^- Step 8:' "$P7")"
+
+# ---------- §REPLAY a multi-row task-set, validated once (A-orch-6) ----------
+sed -e 's/^| T2 | 4 | build | the second build | implementor | — |/| T2 | 4 | build | the second build | implementor | T8 |/' \
+    -e 's/^| T5 | 5 | verify | the floor | test-runner | T1, T2 |/| T5 | 5 | verify | the floor | test-runner | T1, T9 |/' "$P7" > "$P7.t7" && mv "$P7.t7" "$P7"
+s42_snap "$R7" "$P7"
+expect_eq "PV7-ts0 precondition: two rows each wait on no row (the table is invalid before, as A-orch-6's was)" "T8|T1, T9" \
+  "$(s48_row "$P7" T2 | cut -d'|' -f6)|$(s48_row "$P7" T5 | cut -d'|' -f6)"
+pv7_refused "PV7-ts1 precondition: one row at a time is refused, the other row still invalid" 1 "T9" "$R7" "$P7" task-set T2 deps=—
+poke "$R7" task-set T2 deps=— -- T5 deps=T1,T2
+expect_eq "RP-8 §REPLAY task-set over two rows in one transaction exits 0" "0" "$RC"
+expect_eq "RP-8b …both rows written" "—|T1,T2" "$(s48_row "$P7" T2 | cut -d'|' -f6)|$(s48_row "$P7" T5 | cut -d'|' -f6)"
+poke "$R7" task-set T2,T5 size=45
+expect_eq "RP-8c the comma form sets the same cells on each row" "0|45|45" "$RC|$(s48_row "$P7" T2 | cut -d'|' -f7)|$(s48_row "$P7" T5 | cut -d'|' -f7)"
+s42_snap "$R7" "$P7"
+pv7_refused "RP-8d one row of the call that breaks the table refuses the whole call" 1 "" "$R7" "$P7" task-set T2 size=50 -- T5 deps=T7
+
+# ---------- §FILL-VERBS epic-row and continuation-fill (AC-3.3's close half; wave-30's <fill: ADRs>) ----------
+PV7_EPIC="$R7/.bionic/docs/plans/epic-99-fixture/epic.plan.md"
+PV7_CONT="$R7/.bionic/docs/record/wave-01-fixture/continuation.md"
+mkdir -p "${PV7_CONT%/*}"
+printf '# epic 99\n\n## Shipped\n\n| wave | version | plan | spec / requirements | ADRs | shipped |\n|---|---|---|---|---|---|\n| 1 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | <fill: ADRs> | 2026-10-11, main @ <fill: SHA> |\n\n## Next\n\nprose\n' > "$PV7_EPIC"
+printf '# continuation — wave-01-fixture\n\nClosed. <fill: task count> tasks, every one RED→GREEN.\n\n## Decides\n\n1. <fill: the first decision, or "none">\n\n## Resume\n\n<fill: Patrol job id> deleted.\n' > "$PV7_CONT"
+expect_eq "PV7-ep0 precondition: the epic row carries two fill marks" "2" "$(/usr/bin/grep '^| 1 |' "$PV7_EPIC" | /usr/bin/grep -o '<fill:' | wc -l | tr -d ' ')"
+poke "$R7" epic-row 1 ADRs=052 'shipped=2026-10-11, main @ abc1234'
+expect_eq "FV-1 §FILL-VERBS epic-row exits 0" "0" "$RC"
+expect_eq "FV-1b …the row's ADR and shipped cells are written, the rest as they were" \
+  '| 1 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | 052 | 2026-10-11, main @ abc1234 |' \
+  "$(/usr/bin/grep '^| 1 |' "$PV7_EPIC")"
+expect_absent "FV-1c …and no fill mark is left in the epic plan" "<fill:" "$(cat "$PV7_EPIC")"
+pv7_refused "FV-2 a column the shipped table does not carry" 1 "wave, version, plan, spec / requirements, ADRs, shipped" "$R7" "$PV7_EPIC" epic-row 1 adr=052
+pv7_refused "FV-2b a wave the table has no row for" 1 "no row for wave 7" "$R7" "$PV7_EPIC" epic-row 7 ADRs=052
+pv7_refused "FV-2c the wave cell is the row's key" 1 "" "$R7" "$PV7_EPIC" epic-row 1 wave=2
+poke "$R7" continuation-fill 'task count=3'
+expect_eq "FV-3 §FILL-VERBS continuation-fill exits 0" "0|Closed. 3 tasks, every one RED→GREEN." "$RC|$(/usr/bin/grep '^Closed' "$PV7_CONT")"
+expect_contains "FV-3b …and counts the marks left" "2 fill marks left" "$OUT"
+poke "$R7" continuation-fill 'the first decision=Push main.'
+expect_eq "FV-3c a field named by its first words fills the mark whose label begins with them" "0|1. Push main." "$RC|$(/usr/bin/grep '^1\. ' "$PV7_CONT")"
+pv7_refused "FV-4 a field that names no mark" 1 "Patrol job id" "$R7" "$PV7_CONT" continuation-fill 'nothing here=x'
+pv7_refused "FV-4b a text that is itself a fill mark" 1 "" "$R7" "$PV7_CONT" continuation-fill 'Patrol job id=<fill: later>'
+: > "$(marker_of "$R7")"
+pv7_refused "FV-5 an unbound session (close-out wiped the binding) is refused…" 1 "--plan" "$R7" "$PV7_CONT" continuation-fill 'Patrol job id=ca180638'
+FV_CALL="$(pv7_next)"
+expect_contains "FV-5b …naming the call with --plan" "continuation-fill 'Patrol job id=ca180638' --plan " "$FV_CALL"
+pv7_run "$R7" "$FV_CALL"
+expect_eq "FV-5c …which, run as printed, fills the last mark" "0|ca180638 deleted." "$RC|$(/usr/bin/grep 'deleted\.$' "$PV7_CONT")"
+expect_absent "FV-5d …and the continuation carries no fill mark" "<fill:" "$(cat "$PV7_CONT")"
+bound_marker "$R7" "$SID" "$P7" >/dev/null 2>&1
+
+# ---------- §NEXT-CALL ledger-add and task-set: an unknown column ----------
+s42_snap "$R7" "$P7"
+pv7_refused "NC-1 §NEXT-CALL ledger-add with a column the ledger header does not carry" 1 \
+  "id, agent, dispatched, expected, artifact, landed, notes" "$R7" "$P7" ledger-add P3 agent=w-P3 artifacts=record/P3.md
+NC_CALL="$(pv7_next)"
+expect_eq "NC-1b …the printed call, the column corrected" "bash $PV7_HOOK ledger-add P3 agent=w-P3 artifact=record/P3.md" "$NC_CALL"
+pv7_run "$R7" "$NC_CALL"
+expect_eq "NC-1c …run as printed, it succeeds and writes the cell" "0|record/P3.md" "$RC|$(pv7_ledger "$P7" P3 6)"
+s42_snap "$R7" "$P7"
+pv7_refused "NC-2 task-set with a column the ## Tasks header does not carry" 1 "size" "$R7" "$P7" task-set T5 sizes=40
+NC_CALL="$(pv7_next)"
+expect_eq "NC-2b …the printed call, the column corrected" "bash $PV7_HOOK task-set T5 size=40" "$NC_CALL"
+pv7_run "$R7" "$NC_CALL"
+expect_eq "NC-2c …run as printed, it succeeds" "0|40" "$RC|$(s48_row "$P7" T5 | cut -d'|' -f7)"
+
+# ---------- §NEXT-CALL task-add: a doc row at step 7 without its approval read ----------
+# §34's gate-admitted plan given a reads column, as session-poker-2's s51_plan gives it (the rule fires on a reads table).
+R7B="$(make_repo t7-task-add)"; ( cd "$R7B" && git commit -q --allow-empty -m init )
+P7B="$(s34_plan "$R7B" 4)"
+awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
+     t && /^\| id / { print $0 " reads |"; next }
+     t && /^\|---/ { print $0 "---|"; next }
+     t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
+     { print }' "$P7B" > "$P7B.t7" && mv "$P7B.t7" "$P7B"
+s34_gate "$R7B"
+expect_eq "PV7-ta0 precondition: the reads-table fixture is admitted by the real commit gate" "0" "$GATE_RC"
+pv7_refused "NC-3 §NEXT-CALL task-add of a doc row at step 7 with the kind's default reads" 1 "approval:release" \
+  "$R7B" "$P7B" task-add T9 7 doc 'the release notes' implementor '—' 15 REQ-x CHANGELOG.md
+NC_CALL="$(pv7_next)"
+expect_eq "NC-3b …the printed call carries the approval read beside the kind's default" \
+  "bash $PV7_HOOK task-add T9 7 doc 'the release notes' implementor '—' 15 REQ-x CHANGELOG.md 'approval:plan, head, approval:release'" "$NC_CALL"
+pv7_run "$R7B" "$NC_CALL"
+expect_eq "NC-3c …run as printed, it succeeds and the row reads the approval" "0|approval:plan, head, approval:release" \
+  "$RC|$(s48_row "$P7B" T9 | awk -F'|' '{ print $NF }')"
+
+# ---------- §NEXT-CALL decline --on: a file is no row ----------
+R7C="$(make_repo t7-decline)"; new_roster "$R7C"
+P7C="$(s47_plan "$R7C" 4 \
+  "| T1 | 4 | build | the holder | implementor | — | 30 | REQ-x | payload/a.sh | pending | |" \
+  "| T3 | 4 | build | shares a file | implementor | — | 20 | REQ-x | payload/c.sh | pending | |")"
+PV7_LED="$R7C/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
+poke_pressure "$R7C" 8192 1.0 tick
+expect_contains "PV7-dc0 precondition: the tick fills the two ready rows" "poker: FILL T1 T3" "$OUT"
+pv7_led_n() { if [ -f "$PV7_LED" ]; then wc -l < "$PV7_LED" | tr -d ' '; else echo 0; fi; }
+PV7_N="$(pv7_led_n)"
+poke "$R7C" decline T1 'held a moment'
+expect_eq "PV7-dc1 precondition: a decline with no --on is recorded, one ledger line (the extractor, positive)" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
+PV7_N="$(pv7_led_n)"
+cp "$PV7_LED" "$TMPROOT/pv7-led"
+poke "$R7C" decline T3 'both touch payload/a.sh' --on payload/a.sh
+expect_eq "NC-4 §NEXT-CALL decline --on a file is refused (exit 1)" "1" "$RC"
+expect_true "NC-4b …and nothing is recorded (the fill ledger is byte-identical)" cmp -s "$TMPROOT/pv7-led" "$PV7_LED"
+expect_contains "NC-4c …saying why" "a shared file is no dependency" "$OUT"
+NC_CALL="$(pv7_next)"
+expect_eq "NC-4d …the printed call declines without --on" "bash $PV7_HOOK decline T3 'both touch payload/a.sh'" "$NC_CALL"
+pv7_run "$R7C" "$NC_CALL"
+expect_eq "NC-4e …run as printed, it succeeds and is recorded" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
+PV7_N="$(pv7_led_n)"
+cp "$PV7_LED" "$TMPROOT/pv7-led"
+poke "$R7C" decline T3 'waits on the weather' --on weather
+expect_eq "NC-5 decline --on a word that is no row and no file is refused too, nothing recorded" "1|yes" \
+  "$RC|$(cmp -s "$TMPROOT/pv7-led" "$PV7_LED" && echo yes)"
+expect_eq "NC-5b …with the same corrected call" "bash $PV7_HOOK decline T3 'waits on the weather'" "$(pv7_next)"
+poke "$R7C" decline T3 'T3 builds on what T1 writes' --on T1
+expect_eq "NC-6 beside NC-4: decline --on a row is still recorded (exit 0)" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
+
+if [ "$PV7_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$PV7_CCD_WAS"; fi
+POKE_BOUND="$PV7_BOUND_WAS"
+
+# ============================================================
 section "§HANDOFF: handoff rewrites ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof and date -u; the human lines are carried (wave-30 T15; REQ-7 AC-7.2; D11)"
 # ============================================================
 #
@@ -3259,6 +3543,173 @@ expect_eq "RS-4g a session with no bound plan is refused (exit 1)" "1" "$RC"
 expect_contains "RS-4h …saying it has no bound open run" "has no bound open run" "$OUT"
 
 # ============================================================
+section "§BRIEF: brief <row> renders a dispatch brief from the plan row and the shipped scaffold into record/<wave>/briefs/<row>.md, the orchestrator's sections marked and never invented, and dispatch-preflight accepts it (wave-33 T9; REQ-4 AC-4.4; D8)"
+# ============================================================
+#
+# fails-when: a scaffold field of the rendered brief disagrees with its row (Row, Files, Suites, Lands-on, the
+# artifact, the duration), the preflight refuses the brief as rendered, or a brief has to be typed whole (a
+# row-less call writes a file, a second call loses what the orchestrator wrote under ## Judgment).
+#
+# THE EXPECTED VALUES ARE THIS FIXTURE'S OWN TEXT, never read back through the verb: the plan below is written
+# by hand, row by row, and each assertion names the cell it came from. The rule the verb applies is the brief's
+# (T9): Suites and Lands-on come from the row's `suites` / `lands-on` cells when it carries them, else from the
+# `*.test.sh` entries of its Files, `none` for a row with none; the artifact is the dispatch ledger's cell for
+# the row, else the first Files entry under record/ that is neither a progress file nor assumptions.md, else the
+# record path the row's task names; Progress artifact and Cadence appear when the size is 15 or more.
+RBR="$(make_repo brief)"; ( cd "$RBR" && git commit -q --allow-empty -m init )
+git -C "$RBR" config user.name "Dana Fixture"
+git -C "$RBR" branch wave/01-fixture
+PBR="$(s42_plan "$RBR" 4)"
+BR_REC=".bionic/docs/record/wave-01-fixture"
+BR_T2_FILES="hooks/b.sh, tests/b.test.sh, tests/c.test.sh, $BR_REC/T2-b.md, $BR_REC/T2.progress.md, $BR_REC/assumptions.md"
+BR_T2_TASK="build the second piece: the verb writes the file and the preflight reads its Row and Files"
+BR_TABLE="$TMPROOT/br-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | suites | lands-on |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | — | — |\n'
+  printf '| T2 | 4 | build | %s | implementor | — | 30 | REQ-1 | %s | 01-T2 | abc1234 | pending | — | — |\n' "$BR_T2_TASK" "$BR_T2_FILES"
+  printf '| T3 | 4 | build | the third piece, ledgered with its own artifact | implementor | — | 20 | REQ-1 | hooks/c.sh, %s/T3-files.md | — | — | pending | — | — |\n' "$BR_REC"
+  printf '| T4 | 4 | doc | write the fourth record at %s/T4-text.md and nothing else | implementor | — | 25 | REQ-1 | — | — | — | pending | — | — |\n' "$BR_REC"
+  printf '| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending | — | — |\n'
+  printf '| T6 | 4 | build | a short piece | implementor | — | 10 | REQ-1 | hooks/d.sh, %s/T6-d.md | — | — | pending | — | — |\n' "$BR_REC"
+  printf '| T7 | 4 | build | a piece whose row names its own suites | implementor | — | 40 | REQ-1 | hooks/e.sh, tests/e.test.sh, tests/f.test.sh, %s/T7-e.md | — | — | pending | e.test.sh, g.test.sh | e.test.sh |\n' "$BR_REC"
+  printf '\n'
+} > "$BR_TABLE"
+awk -v t="$BR_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PBR" > "$PBR.new"
+# T3 gets a dispatch-ledger row with an artifact of its own, and the plan names its working branch.
+awk '{ print } /^\| T1 \| implementor \(w-T1\)/ { print "| T3 | implementor (w-T3) | 2026-10-11T00:00Z | 20 min | '"$BR_REC"'/T3-ledgered.md | — | batch 1 |" }' "$PBR.new" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PBR" && rm -f "$PBR.new"
+( cd "$RBR" && git add -f "$PBR" && git commit -qm "brief fixture" ) >/dev/null 2>&1
+BR_FILE="$RBR/.bionic/docs/record/wave-01-fixture/briefs"
+br_field() {  # <file> <label> -> the value of the first `<label>:` line, trimmed
+  awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
+}
+br_cell() {  # <row> <column number> -> that cell of the fixture plan's own text, trimmed
+  awk -F'|' -v id="$1" -v c="$2" '/^\| T[0-9]+ \|/ { i = $2; gsub(/[ \t]/, "", i); if (i == id) { v = $c; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit } }' "$PBR"
+}
+expect_eq "BR-0 precondition: the fixture's T2 Files cell is the one the checks compare with (cell 10 of the plan's own text)" "$BR_T2_FILES" "$(br_cell T2 10)"
+expect_eq "BR-0b precondition: the fixture plan names a working branch that git resolves" "1" \
+  "$(git -C "$RBR" rev-parse --verify -q refs/heads/wave/01-fixture >/dev/null && echo 1 || echo 0)"
+
+# ---------- the scaffold fields of a writer row equal the row's ----------
+poke "$RBR" brief T2
+expect_eq "BR-1 brief T2 exits 0" "0" "$RC"
+expect_true "BR-1b …and writes record/<wave>/briefs/T2.md under the plan's own wave name" test -s "$BR_FILE/T2.md"
+expect_contains "BR-1c …saying where it wrote" "briefs/T2.md" "$OUT"
+expect_eq "BR-2 Row equals the row's id (positive: the extractor reads a value from the real file)" "T2" "$(br_field "$BR_FILE/T2.md" Row)"
+expect_eq "BR-2b Files is the row's Files cell, verbatim" "$BR_T2_FILES" "$(br_field "$BR_FILE/T2.md" Files)"
+expect_eq "BR-2c Expected duration is the row's size, in minutes" "30 minutes" "$(br_field "$BR_FILE/T2.md" 'Expected duration')"
+expect_eq "BR-2d Expected artifact is the first record entry of the Files cell that is no progress file and no assumptions.md" \
+  "$BR_REC/T2-b.md" "$(br_field "$BR_FILE/T2.md" 'Expected artifact')"
+expect_eq "BR-2e Progress artifact is the Files entry that ends .progress.md" "$BR_REC/T2.progress.md" "$(br_field "$BR_FILE/T2.md" 'Progress artifact')"
+expect_eq "BR-2f Cadence is the 15-minute rule's number, written for a size of 15 or more" "15 min" "$(br_field "$BR_FILE/T2.md" Cadence)"
+expect_eq "BR-2g Suites is the *.test.sh entries of Files, by file name, in Files order" "b.test.sh, c.test.sh" "$(br_field "$BR_FILE/T2.md" Suites)"
+expect_eq "BR-2h Lands-on is the same set when the row carries none of its own" "b.test.sh, c.test.sh" "$(br_field "$BR_FILE/T2.md" Lands-on)"
+BR_HEAD="$(git -C "$RBR" rev-parse refs/heads/wave/01-fixture)"
+expect_regex "BR-3 precondition: the working branch's head is a 40-hex commit" '^[0-9a-f]{40}$' "$BR_HEAD"
+expect_contains "BR-3b the brief carries the working head, whole, beside the branch it is the head of" "Working head: $BR_HEAD (wave/01-fixture)" "$(cat "$BR_FILE/T2.md")"
+expect_contains "BR-3c the row's task text is carried verbatim under the row" "$BR_T2_TASK" "$(cat "$BR_FILE/T2.md")"
+expect_true "BR-4 the scaffold is the first thing in the file, so no later prose is a label's first hit (cmp of the first line)" \
+  test "$(sed -n 1p "$BR_FILE/T2.md" | cut -c1-18)" = "Expected duration:"
+
+# ---------- what only the orchestrator writes is marked, never invented ----------
+BR_J="$(awk '/^## Judgment/ { f = 1 } f { print }' "$BR_FILE/T2.md")"
+expect_contains "BR-5 the file has a ## Judgment section" "## Judgment" "$BR_J"
+expect_contains "BR-5b …with a slot for the research to read, marked for the orchestrator" "Research to read: <ORCHESTRATOR:" "$BR_J"
+expect_contains "BR-5c …and a slot for the rulings, marked for the orchestrator" "Rulings: <ORCHESTRATOR:" "$BR_J"
+expect_contains "BR-5d the verb's own line names the scaffold lines it left to the orchestrator, from the shipped scaffold" "Done marker" "$OUT"
+expect_contains "BR-5e …Re-executes among them" "Re-executes" "$OUT"
+expect_absent "BR-5f …and none of those labels is written into the file as prose (they would declare a claim, a marker)" "Subprocess claim" "$(cat "$BR_FILE/T2.md")"
+
+# ---------- the preflight accepts the brief as rendered, and refuses it with one field gone ----------
+# The wall reads the prompt only, so the payload carries the whole file as its prompt. The gate runs under a
+# scratch HOME and a fixture attestation, patrol stamp and engagement, as dispatch-preflight.test.sh's own
+# fixtures do; an allowed dispatch journals a roster row, which is the positive that the wall really lifted
+# the brief's fields.
+BR_HOME="$TMPROOT/brief-home"; mkdir -p "$BR_HOME/.claude/projects/-brief"; : > "$BR_HOME/.claude/projects/-brief/$SID.jsonl"
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBR/.bionic/tmp/patrol-$SID.state"
+printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBR" > "$RBR/.bionic/tmp/preflight-$SID.state"
+BR_GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
+br_gate() {  # <repo> <brief text file> [<agent name>] -> sets BR_OUT, BR_ERR
+  local payload
+  payload="$(jq -n --arg s "$SID" --arg c "$1" --arg n "${3:-w-T2}" --rawfile p "$2" \
+    '{session_id:$s, transcript_path:"/nonexistent.jsonl", cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a rendered brief", subagent_type:"implementor", prompt:$p, run_in_background:true, name:$n},
+      tool_use_id:"toolu_brief"}')"
+  BR_OUT="$( cd "$1" && printf '%s' "$payload" | env HOME="$BR_HOME" CLAUDE_CONFIG_DIR="$BR_HOME/.claude" ANTHROPIC_API_KEY=sk-fixture \
+    CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "$BR_GATE" 2>"$TMPROOT/br-gate.err" )"
+  BR_ERR="$(cat "$TMPROOT/br-gate.err")"
+}
+br_roster_row() { /usr/bin/grep -F "|name=$2|" "$(roster_of "$1")" 2>/dev/null | tail -1; }
+br_gate "$RBR" "$BR_FILE/T2.md"
+expect_absent "BR-6 the preflight does not deny the rendered T2 brief" '"permissionDecision":"deny"' "$BR_OUT"
+BR_ROW="$(br_roster_row "$RBR" w-T2)"
+expect_contains "BR-6b …and it journalled a launch row for it (the positive that the wall read the brief)" "|name=w-T2|" "$BR_ROW"
+expect_eq "BR-6c …the row names the brief's Row" "T2" "$(s30_field "$BR_ROW" row)"
+expect_eq "BR-6d …the brief's artifact" "$BR_REC/T2-b.md" "$(s30_field "$BR_ROW" deliverable | sed 's#^.*/\(\.bionic/docs/record/\)#\1#')"
+expect_eq "BR-6e …no subprocess claim and no waiver, so the row text declared nothing it did not mean" "|" "$(s30_field "$BR_ROW" claims)|$(s30_field "$BR_ROW" waiver)"
+sed '/^Expected artifact:/d' "$BR_FILE/T2.md" > "$TMPROOT/br-noart.md"
+br_gate "$RBR" "$TMPROOT/br-noart.md" w-T2b
+expect_contains "BR-7 the same brief without its Expected artifact line is denied (the driver can refuse)" '"permissionDecision":"deny"' "$BR_OUT"
+
+# ---------- the artifact's other sources, and the lines a row owes only when it has them ----------
+poke "$RBR" brief T3
+expect_eq "BR-8 T3: the dispatch ledger's artifact cell is the row's artifact (it wins over a Files entry)" "$BR_REC/T3-ledgered.md" \
+  "$(br_field "$BR_FILE/T3.md" 'Expected artifact')"
+expect_eq "BR-8b …and a size of 20 gets its Progress artifact, named for the row, because Files lists none" "$BR_REC/T3.progress.md" \
+  "$(br_field "$BR_FILE/T3.md" 'Progress artifact')"
+poke "$RBR" brief T4
+expect_eq "BR-9 T4: with no ledger row and no record entry in Files, the record path the task names" "$BR_REC/T4-text.md" "$(br_field "$BR_FILE/T4.md" 'Expected artifact')"
+expect_eq "BR-9b …Files is — so the brief carries no Files line (positive: Row is read from the same file)" "T4|" \
+  "$(br_field "$BR_FILE/T4.md" Row)|$(br_field "$BR_FILE/T4.md" Files)"
+expect_eq "BR-9c …no test in Files, so Suites: none" "none" "$(br_field "$BR_FILE/T4.md" Suites)"
+expect_regex "BR-9d …and Lands-on: none, with a reason" '^none [A-Za-z]' "$(br_field "$BR_FILE/T4.md" Lands-on)"
+poke "$RBR" brief T5
+expect_eq "BR-10 T5: a row that names no artifact anywhere is rendered with the slot marked, not invented (positive: Row reads)" "T5|1" \
+  "$(br_field "$BR_FILE/T5.md" Row)|$(br_field "$BR_FILE/T5.md" 'Expected artifact' | /usr/bin/grep -c '^<ORCHESTRATOR:')"
+poke "$RBR" brief T6
+expect_eq "BR-11 T6: a size under 15 owes no Progress artifact and no Cadence (positive: the duration reads)" "10 minutes||" \
+  "$(br_field "$BR_FILE/T6.md" 'Expected duration')|$(br_field "$BR_FILE/T6.md" 'Progress artifact')|$(br_field "$BR_FILE/T6.md" Cadence)"
+poke "$RBR" brief T7
+expect_eq "BR-12 T7: the row's own suites cell is the Suites, not the Files entries" "e.test.sh, g.test.sh" "$(br_field "$BR_FILE/T7.md" Suites)"
+expect_eq "BR-12b …and its lands-on cell is the Lands-on" "e.test.sh" "$(br_field "$BR_FILE/T7.md" Lands-on)"
+
+# ---------- the second call keeps what the orchestrator wrote, and follows the row ----------
+cp "$BR_FILE/T2.md" "$TMPROOT/br-t2-first.md"
+poke "$RBR" brief T2
+expect_eq "BR-13 a second call on an unchanged plan exits 0" "0" "$RC"
+expect_true "BR-13b …and leaves the file byte-identical (cmp)" cmp -s "$TMPROOT/br-t2-first.md" "$BR_FILE/T2.md"
+{ awk '/^## Judgment/ { exit } { print }' "$BR_FILE/T2.md"; printf '## Judgment\n\nResearch to read: record/wave-01-fixture/research-x.md\nRulings: A-orch-9 holds\n'; } > "$TMPROOT/br-t2-judged.md"
+cp "$TMPROOT/br-t2-judged.md" "$BR_FILE/T2.md"
+sed -i.bak 's/^| T2 | 4 | build | \(.*\) | implementor | — | 30 |/| T2 | 4 | build | \1 | implementor | — | 45 |/' "$PBR"; rm -f "$PBR.bak"
+poke "$RBR" brief T2
+expect_eq "BR-14 a re-render after the orchestrator filled ## Judgment and the row's size changed exits 0" "0" "$RC"
+expect_eq "BR-14b …the scaffold follows the row" "45 minutes" "$(br_field "$BR_FILE/T2.md" 'Expected duration')"
+expect_contains "BR-14c …and what the orchestrator wrote under ## Judgment is kept, verbatim" "Research to read: record/wave-01-fixture/research-x.md" "$(cat "$BR_FILE/T2.md")"
+expect_contains "BR-14d …with its rulings line" "Rulings: A-orch-9 holds" "$(cat "$BR_FILE/T2.md")"
+expect_eq "BR-14e …and no second section or slot is added beside it (one ## Judgment, one research line, no marked slot left)" "1|1|0" \
+  "$(/usr/bin/grep -c '^## Judgment' "$BR_FILE/T2.md")|$(/usr/bin/grep -c '^Research to read:' "$BR_FILE/T2.md")|$(/usr/bin/grep -c '<ORCHESTRATOR:' "$BR_FILE/T2.md")"
+
+# ---------- refusals print the corrected call and write nothing ----------
+BR_BEFORE="$(ls "$BR_FILE" | tr '\n' ' ')"
+poke "$RBR" brief T99
+expect_eq "BR-15 a row the plan does not have is refused (exit 1)" "1" "$RC"
+expect_contains "BR-15b …saying so" "T99" "$OUT"
+expect_contains "BR-15c …and naming the rows it has, with the corrected call" "brief T2" "$OUT"
+expect_eq "BR-15d …and writes no file" "$BR_BEFORE" "$(ls "$BR_FILE" | tr '\n' ' ')"
+poke "$RBR" brief
+expect_eq "BR-16 no row is the usage error (exit 2)" "2" "$RC"
+expect_contains "BR-16b …saying what the verb takes" "brief takes exactly one argument" "$OUT"
+poke "$RBR" brief 'T2/../x'
+expect_eq "BR-17 a row id that is no id is refused (exit 1) and writes nothing" "1|$BR_BEFORE" "$RC|$(ls "$BR_FILE" | tr '\n' ' ')"
+RBR2="$(make_repo brief-unbound)"; ( cd "$RBR2" && git commit -q --allow-empty -m init )
+poke "$RBR2" brief T2
+expect_eq "BR-18 a session with no bound plan is refused (exit 1)" "1" "$RC"
+expect_contains "BR-18b …saying it has no bound open run" "has no bound open run" "$OUT"
+
+# ============================================================
 section "§WAIT-CEILING: wait on a detached run the gate did not admit prints the shim's one line, then FINISHED rc=75 (wave-31 T12; REQ-9 AC-9.4; D10, A-orch-51)"
 # ============================================================
 #
@@ -3376,5 +3827,221 @@ expect_regex "AB-6 without --by the amended= field is the reason alone, as befor
 AB_SUM="$(ab_sum "$RAB")"
 poke "$RAB" amend wab --files+ hooks/w.sh --reason r --by someone
 expect_eq "AB-7 --by takes only writer: any other value is the usage error, nothing written" "2|$AB_SUM" "$RC|$(ab_sum "$RAB")"
+
+
+# ============================================================
+section "§DELIVER §REVIEW-LANDS §NO-PLACEHOLDER: a record row lands itself through deliver, its artifact and the working head in the landing; the tick lands a MET one whose agent ended without it; a landed step line keeps no placeholder (wave-33 T6; REQ-3 AC-3.1, AC-3.2, AC-3.3; D5)"
+# ============================================================
+#
+# `session-poker.sh deliver <row>` is a record row's own last act. It refuses (exit 2, naming the
+# path and the corrected call) unless the row's expected artifact exists: the ledger's artifact cell,
+# else the one record its Files name. A review row is refused until a `proved: kind=review` line names
+# that record; a row with a tree of its own lands through `ready`. It then lands through the one
+# landing writer, `row-landed`, at the head of the plan's working-branch checkout, never a typed one,
+# and the ledger line names the artifact beside the landing. The tick lands a MET row whose agent
+# ended without it, and reports one whose artifact is absent. `row-landed` replaces a step line's
+# `pending dispatch` lead rather than appending after it.
+#
+# FIXTURE FIDELITY. §SEV's shape: a plan bound to this session, its working branch checked out in a
+# linked worktree with a commit of its own (so the working head is not the main checkout's), roster
+# rows from the production writer, and the review reading registered through `proof-add` itself.
+DV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+DV_REL=".bionic/docs/record/wave-01-fixture"
+RDV="$(make_repo dv-deliver)"; ( cd "$RDV" && git commit -q --allow-empty -m init )
+git -C "$RDV" config user.name "Dana Fixture"
+DV_B="$(git -C "$RDV" rev-parse HEAD)"
+DV_DIR="$RDV/$DV_REL"; mkdir -p "$DV_DIR"
+dv_plan() {  # <repo> -> the plan path: bound, committed; record rows of every shape, a ledger with an artifact column
+  local repo="$1" f r="$DV_REL"
+  f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")" "$repo/.bionic/docs/specs/epic-99-fixture"
+  printf '# requirements\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${DV_B:0:8}"
+    printf -- '- T1: landed at record/T1.md\n- T2: landed at record/T2.md\n'
+    printf -- '- T6: dispatched to w-T6\n- T11: dispatched to w-T11\n- T4: dispatched to dv-crit2\n- T10: dispatched to dv-live\n'
+    printf -- '- T5: pending dispatch — .worktrees/01-T5\n'
+    printf -- '- T3: pending dispatch — added by task-add at 2026-10-04T00:00:00Z\n'
+    printf -- '- T7: pending dispatch — .worktrees/01-T7 born: review S2 on\n'
+    printf -- '- T8: pending dispatch\n- T9: pending dispatch\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |\n'
+    printf '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |  |\n'
+    printf '| T5 | 4 | verify | the floor | w-T5 | — | 30 | REQ-1 | %s/T5-floor.md, %s/T5.progress.md | — | — | active |  |\n' "$r" "$r"
+    printf '| T6 | 4 | verify | a floor not yet written | w-T6 | — | 30 | REQ-1 | %s/T6-floor.md | — | — | active |  |\n' "$r"
+    printf '| T11 | 4 | verify | two records, no artifact named | w-T11 | — | 30 | REQ-1 | %s/T11-a.md, %s/T11-b.md | — | — | active |  |\n' "$r" "$r"
+    printf '| T3 | 4 | review | the final reading | dv-crit | — | 30 | REQ-1 | %s/T3-read.md | — | — | active | approval:plan, head |\n' "$r"
+    printf '| T4 | 4 | review | a reading never registered | dv-crit2 | — | 30 | REQ-1 | %s/T4-read.md | — | — | active | approval:plan, head |\n' "$r"
+    printf '| T10 | 4 | review | a live reading | dv-live | — | 30 | REQ-1 | %s/T10-read.md | — | — | active |  |\n' "$r"
+    printf '| T7 | 4 | build | a build in its own tree | w-T7 | — | 30 | REQ-1 | c.sh | 01-T7 | abc1234 | active |  |\n'
+    printf '| T8 | 4 | test | a test row whose agent ended | w-T8 | — | 30 | REQ-1 | %s/T8-tests.md | — | — | active |  |\n' "$r"
+    printf '| T9 | 4 | test | an ended row whose artifact is absent | w-T9 | — | 30 | REQ-1 | %s/T9-tests.md | — | — | active |  |\n\n' "$r"
+    printf '## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n'
+    printf '| T1 | implementor (w-T1) | — | 30 min | record/T1.md | landed | batch 1 |\n'
+    printf '| T5 | test-runner (w-T5) | — | 30 min | %s/T5-floor.md | — | batch 2 |\n' "$r"
+    printf '| T8 | test-runner (w-T8) | — | 30 min | %s/T8-tests.md | — | batch 2 |\n' "$r"
+    printf '| T9 | test-runner (w-T9) | — | 30 min | %s/T9-tests.md | — | batch 2 |\n' "$r"
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  } > "$f"
+  bind_marker "$repo" "$f"
+  ( cd "$repo" && git add -f "$f" && git commit -qm plan ) >/dev/null 2>&1
+  printf '%s' "$f"
+}
+PDV="$(dv_plan "$RDV")"
+( cd "$RDV" && git worktree add -q -b wave/01-fixture "$RDV/.worktrees/01-fixture" "$(git rev-parse HEAD)" ) >/dev/null 2>&1
+DV_C1="$(s57_commit "$RDV/.worktrees/01-fixture" lib/a.sh C1)"
+DV_MAIN="$(git -C "$RDV" rev-parse HEAD)"
+dv_step()   { /usr/bin/grep -E "^- $1: " "$PDV" | head -1; }   # <id> -> the row's step line, whole
+dv_ledger() { awk -v id="$1" '/^## Dispatch ledger/ { l = 1; next } /^## / { l = 0 } l && /^\|/ { c = $2; gsub(/ /, "", c); if (c == id) { print; exit } }' FS='|' "$PDV"; }
+dv_status() { s48_row "$PDV" "$1" | awk -F'|' '{ print $12 }'; }
+dv_snap()   { cp "$PDV" "$TMPROOT/dv-before"; }
+dv_same()   { cmp -s "$TMPROOT/dv-before" "$PDV" && echo same || echo changed; }
+DV_AT_RE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
+
+expect_regex "DV-0 precondition: the working branch's head is C1, a 40-hex commit of the linked worktree" '^[0-9a-f]{40}$' "$DV_C1"
+expect_ne "DV-0b …which is not the main checkout's head (the landing names the working head, not HEAD)" "$DV_MAIN" "$DV_C1"
+s34_gate "$RDV"
+expect_eq "DV-0c precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "DV-0d precondition: the step-line extractor reads T5's line" "- T5: pending dispatch — .worktrees/01-T5" "$(dv_step T5)"
+expect_eq "DV-0e precondition: the ledger extractor reads T5's row, its landed cell empty" \
+  "| T5 | test-runner (w-T5) | — | 30 min | $DV_REL/T5-floor.md | — | batch 2 |" "$(dv_ledger T5)"
+expect_eq "DV-0f precondition: the status extractor reads T5 active" "active" "$(dv_status T5)"
+
+# ---------- §DELIVER (AC-3.1): the artifact is checked, then the row lands at the working head ----------
+dv_snap
+poke "$RDV" deliver T6
+expect_eq "DV-1 §DELIVER AC-3.1 a row whose artifact is absent is refused (exit 2)" "2" "$RC"
+expect_contains "DV-1b …naming the path it looked for" "$DV_REL/T6-floor.md" "$OUT"
+expect_contains "DV-1c …and the corrected call" "session-poker.sh deliver T6" "$OUT"
+expect_eq "DV-1d …and the plan is byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T6)"
+
+poke "$RDV" deliver T11
+expect_eq "DV-2 a row whose ledger names no artifact and whose Files name two records is refused (exit 2)" "2" "$RC"
+expect_contains "DV-2b …naming both records" "$DV_REL/T11-a.md, $DV_REL/T11-b.md" "$OUT"
+expect_contains "DV-2c …and the call that names the one meant (its ledger has no T11 line, so ledger-add)" "session-poker.sh ledger-add T11 artifact=" "$OUT"
+expect_eq "DV-2d …the plan byte-identical" "same" "$(dv_same)"
+
+poke "$RDV" deliver T7
+expect_eq "DV-3 a row with a tree of its own is refused (exit 2)" "2" "$RC"
+expect_contains "DV-3b …it lands through ready, from its tree" "spawn-worktree.sh ready" "$OUT"
+expect_eq "DV-3c …the plan byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T7)"
+
+printf 'floor: green\n' > "$DV_DIR/T5-floor.md"
+poke "$RDV" deliver T5
+expect_eq "DV-4 §DELIVER AC-3.1 a verify row with its artifact lands through deliver (exit 0), no --by-hand" "0 landed" "$RC $(dv_status T5)"
+expect_regex "DV-4b …its ledger line names the artifact, and the landing at the working head C1" \
+  "^\| T5 \| test-runner \(w-T5\) \| — \| 30 min \| $DV_REL/T5-floor\.md \| landed $DV_AT_RE $DV_C1 \| batch 2 \|$" "$(dv_ledger T5)"
+expect_contains "DV-4c …through the one landing writer" "row-landed — T5 landed at $DV_C1" "$OUT"
+expect_contains "DV-4d …and deliver says what it checked" "deliver — T5: artifact $DV_REL/T5-floor.md present; landed at the working head $DV_C1" "$OUT"
+expect_absent "DV-4e …no hand landing is written" "landed-by-hand" "$(dv_step T5)"
+dv_snap
+poke "$RDV" deliver T5
+expect_eq "DV-5 deliver on a landed row writes nothing (exit 0, the plan byte-identical)" "0 same" "$RC $(dv_same)"
+expect_contains "DV-5b …and says the row is landed" "T5 is already landed" "$OUT"
+
+# ---------- §NO-PLACEHOLDER (AC-3.3, the step-line half): the landing replaces the placeholder lead ----------
+expect_regex "NP-1 §NO-PLACEHOLDER AC-3.3 the delivered row's line reads landed, its tail kept" \
+  "^- T5: landed $DV_C1 $DV_AT_RE — \.worktrees/01-T5$" "$(dv_step T5)"
+expect_absent "NP-1b …and carries no pending dispatch" "pending dispatch" "$(dv_step T5)"
+expect_eq "NP-2 precondition: T7's line reads pending dispatch, a born marker behind it" \
+  "- T7: pending dispatch — .worktrees/01-T7 born: review S2 on" "$(dv_step T7)"
+poke "$RDV" row-landed T7 "$DV_C1" 2026-10-04T04:00:00Z
+expect_eq "NP-2b ready's landing (row-landed) replaces the lead and keeps the born marker" \
+  "0 - T7: landed $DV_C1 2026-10-04T04:00:00Z — .worktrees/01-T7 born: review S2 on" "$RC $(dv_step T7)"
+expect_absent "NP-2c …no pending dispatch on the line" "pending dispatch" "$(dv_step T7)"
+dv_snap
+poke "$RDV" row-landed T7 "$DV_C1" 2026-10-04T04:00:00Z
+expect_eq "NP-3 the same landing again writes nothing (exit 0, byte-identical)" "0 same" "$RC $(dv_same)"
+
+# ---------- §REVIEW-LANDS (AC-3.2): a review row delivers once its reading is registered ----------
+DV_RS="$(roster_of "$RDV")"; new_roster "$RDV"
+printf '%s|questions=adversarial\n' \
+  "$(roster_row_fixture session="$SID" name=dv-crit agent_id=a-dv-crit subagent_type=bionic:critic files="$DV_REL/T3-read.md")" >> "$DV_RS"
+dv_rec() {  # <file> -> an adversarial piece reading over base..C1 that passes
+  printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nnothing found\n' "${DV_B:0:10}" "$DV_C1" > "$DV_DIR/$1"
+}
+dv_rec T4-read.md
+dv_snap
+poke "$RDV" deliver T4
+expect_eq "RL-1 §REVIEW-LANDS AC-3.2 a review row whose reading is not registered is refused (exit 2)" "2" "$RC"
+expect_contains "RL-1b …naming the record and the registering call" "proof-add review record/wave-01-fixture/T4-read.md" "$OUT"
+expect_eq "RL-1c …the plan byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T4)"
+dv_rec T3-read.md
+poke "$RDV" proof-add review record/wave-01-fixture/T3-read.md --question adversarial --reader dv-crit
+expect_eq "RL-2 precondition: the reading registers through proof-add (exit 0), and leaves its final row active" "0 active" "$RC $(dv_status T3)"
+poke "$RDV" deliver T3
+expect_eq "RL-3 §REVIEW-LANDS AC-3.2 the registered reading's row delivers (exit 0) and is landed" "0 landed" "$RC $(dv_status T3)"
+expect_regex "RL-3b …the ledger gains its line, naming the record and the working head" \
+  "^\| T3 \| .*\| $DV_REL/T3-read\.md \| landed $DV_AT_RE $DV_C1 \|" "$(dv_ledger T3)"
+expect_regex "NP-4 …and its step line reads landed, the task-add tail kept" \
+  "^- T3: landed $DV_C1 $DV_AT_RE — added by task-add at 2026-10-04T00:00:00Z$" "$(dv_step T3)"
+dv_rec T10-read.md
+dv_snap
+poke "$RDV" deliver T10
+expect_eq "RL-4 a live review row (live:head) is refused (exit 2): it returns to pending on each reading" "2" "$RC"
+expect_contains "RL-4b …saying so" "live:head" "$OUT"
+expect_eq "RL-4c …the plan byte-identical" "same" "$(dv_same)"
+
+# ---------- §RULING-DELIVER (wave-33 T34; Δ1, ADR-052): deliver lands no row against an unread ruling ----------
+# A record row's artifact is gitignored and never commits, so deliver is its only landing, and it
+# holds the same guard as the commit wall and `ready`: a ruling unread for the row's writer refuses
+# the landing, is printed, and is stamped shown, so the same call after it lands.
+printf 'floor: green\n' > "$DV_DIR/T6-floor.md"
+add_row "$RDV" name=w-T6 agent_id=a-w-T6 subagent_type=test-runner deliverable="$DV_DIR/T6-floor.md" \
+  duration="4 hours" launched_at="$(iso_ago 60)"
+poke "$RDV" rule w-T6 'also check the second floor'
+DR_ID="$(printf '%s\n' "$OUT" | sed -n 's/^poker: ruling \([^ ]*\) recorded for .*/\1/p' | head -1)"
+expect_regex "DR-0 precondition: a ruling for w-T6, the writer of T6, is recorded" '^r[0-9]+-[0-9]+$' "$DR_ID"
+dv_snap
+poke "$RDV" deliver T6
+expect_eq "DR-1 deliver with a ruling unread for the row's writer is refused (exit 2)" "2" "$RC"
+expect_contains "DR-1b …printing the ruling in the one wording" \
+  "bionic ruling $DR_ID from the orchestrator (binding): also check the second floor" "$OUT"
+expect_contains "DR-1c …and naming it on the REFUSED line, the one line the tick's backstop reports" \
+  "REFUSED — an orchestrator ruling for w-T6 is unread ($DR_ID)" "$OUT"
+expect_eq "DR-1d …the plan byte-identical, the row still active" "same active" "$(dv_same) $(dv_status T6)"
+poke "$RDV" rulings w-T6
+expect_regex "DR-2 the refusal stamped the ruling shown, by deliver" "ruling $DR_ID w-T6 .*shown=[0-9]+ by=deliver" "$OUT"
+poke "$RDV" deliver T6
+expect_eq "DR-3 the same deliver, the ruling now shown, lands the row (exit 0)" "0 landed" "$RC $(dv_status T6)"
+expect_absent "DR-3b …and prints no ruling again" "bionic ruling $DR_ID" "$OUT"
+
+# ---------- §DELIVER (AC-3.1), the backstop: the tick lands a MET row whose agent ended without deliver ----------
+printf 'tests: green\n' > "$DV_DIR/T8-tests.md"; backdate "$DV_DIR/T8-tests.md" 300
+printf 'a report under another name\n' > "$DV_DIR/T9-report.md"; backdate "$DV_DIR/T9-report.md" 300
+add_row "$RDV" name=w-T8 agent_id=a-w-T8 subagent_type=test-runner deliverable="$DV_DIR/T8-tests.md" \
+  duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$RDV" w-T8)"
+add_row "$RDV" name=w-T9 agent_id=a-w-T9 subagent_type=test-runner deliverable="$DV_DIR/T9-report.md" \
+  duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$RDV" w-T9)"
+armed_ago "$RDV"
+DV_VERDICT="$( cd "$RDV" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER_FOR_ACK" verdict 2>/dev/null )"
+expect_regex "DV-6 precondition: the one verdict read the tick takes reads w-T8 MET" '[|]name=w-T8[|](.*[|])?state=MET([|]|$)' \
+  "$(printf '%s\n' "$DV_VERDICT" | /usr/bin/grep -F '|name=w-T8|')"
+expect_regex "DV-6a precondition: …and w-T9 MET, its roster deliverable present" '[|]name=w-T9[|](.*[|])?state=MET([|]|$)' \
+  "$(printf '%s\n' "$DV_VERDICT" | /usr/bin/grep -F '|name=w-T9|')"
+forget_digest "$RDV"
+poke_pressure "$RDV" 8192 1.0 tick
+DV_TICK="$OUT"
+expect_eq "DV-6b §DELIVER AC-3.1 the tick lands the MET record row whose agent ended without deliver" "landed" "$(dv_status T8)"
+expect_regex "DV-6c …its ledger line naming the artifact and the working head" \
+  "^\| T8 \| test-runner \(w-T8\) \| — \| 30 min \| $DV_REL/T8-tests\.md \| landed $DV_AT_RE $DV_C1 \| batch 2 \|$" "$(dv_ledger T8)"
+expect_contains "DV-6d …and the tick says it landed it" "LANDED T8 — w-T8" "$DV_TICK"
+expect_eq "DV-7 a MET row whose plan artifact is absent is not landed" "active" "$(dv_status T9)"
+expect_contains "DV-7b …and is reported, naming the path" "NOT-LANDED T9 — w-T9" "$DV_TICK"
+expect_contains "DV-7c …with the artifact it looked for" "$DV_REL/T9-tests.md" "$DV_TICK"
+POKE_BOUND="$DV_BOUND_WAS"
 
 finish

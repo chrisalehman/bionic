@@ -347,18 +347,75 @@ _res_is_pct() {  # a percentage reading: a non-negative integer, or the -1 "unre
   esac
 }
 
-_res_cores() {  # this machine's core count, floored at 1 — pressure_sample's default
+# _res_cores — the cores this process may use, floored at 1 — pressure_sample's default and the
+# gate's count (wave-33 T1; D4, AC-8.5). The host's count (BIONIC_PROBE_CORES plants it), bounded
+# by a cgroup CPU quota when one is set (`_res_cpu_quota`): a container given 2 CPUs on a 64-core
+# host may use 2. The cgroup root is BIONIC_PROBE_CGROUP when planted, on any system; otherwise
+# /sys/fs/cgroup on Linux, read only for the host's own count: a planted count is bounded only by
+# a planted root, so a fixture's machine never takes on the real one's quota.
+_res_cores() {
+  local q
+  if q="$(_res_quota_bound)"; then printf '%s' "$q"; else _res_host_cores; fi
+}
+
+# _res_host_cores — the host's count: BIONIC_PROBE_CORES as planted, else hw.ncpu or nproc,
+# floored at 1.
+_res_host_cores() {
+  local c=''
   if [ -n "${BIONIC_PROBE_CORES:-}" ]; then
     printf '%s' "${BIONIC_PROBE_CORES}"
     return 0
   fi
-  local c=''
   case "$(uname -s 2>/dev/null)" in
     Darwin) c="$(sysctl -n hw.ncpu 2>/dev/null)" ;;
     Linux)  c="$(nproc 2>/dev/null)" ;;
   esac
   if ! _res_is_uint "$c" || [ "$c" -lt 1 ]; then c=1; fi
   printf '%s' "$c"
+}
+
+# _res_cgroup_root — the cgroup root a quota and a usage are read under; rc 1 for none. The
+# directory test comes before `uname`, so a host with no /sys/fs/cgroup (macOS) pays no process.
+_res_cgroup_root() {
+  if [ -n "${BIONIC_PROBE_CGROUP:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_CGROUP}"
+    return 0
+  fi
+  [ -z "${BIONIC_PROBE_CORES:-}" ] && [ -d /sys/fs/cgroup ] || return 1
+  [ "$(uname -s 2>/dev/null)" = Linux ] || return 1
+  printf '/sys/fs/cgroup'
+}
+
+# _res_quota_bound — THE ONE SITE of "a quota bounds the cores": the quota's CPUs when a quota
+# is set and is under the host's count; rc 1 and nothing otherwise. `_res_cores` counts by it,
+# and the busy readers measure the cgroup's own use exactly when it holds (wave-33 T33).
+_res_quota_bound() {
+  local root q c
+  root="$(_res_cgroup_root)" && q="$(_res_cpu_quota "$root")" || return 1
+  c="$(_res_host_cores)"
+  _res_is_uint "$c" && [ "$q" -lt "$c" ] || return 1
+  printf '%s' "$q"
+}
+
+# _res_cpu_quota <cgroup root> — the CPUs a cgroup quota allows, ceil(quota ÷ period), at least
+# 1; rc 1 and nothing when no quota is set. cgroup v2: `<root>/cpu.max`, `<quota> <period>` (or
+# `max <period>`: none). v1: `<root>/cpu/cpu.cfs_quota_us` over `cpu.cfs_period_us` (-1: none).
+# Only the root's own files are read: a process in a nested cgroup with no namespace of its own
+# (a systemd slice's CPUQuota) is not bounded here, a stated limit; a container's cgroup
+# namespace makes its own cgroup the root, which is the case this serves.
+_res_cpu_quota() {
+  local q='' p=''
+  if [ -r "$1/cpu.max" ]; then
+    { read -r q p < "$1/cpu.max"; } 2>/dev/null
+  elif [ -r "$1/cpu/cpu.cfs_quota_us" ]; then
+    { read -r q < "$1/cpu/cpu.cfs_quota_us"; read -r p < "$1/cpu/cpu.cfs_period_us"; } 2>/dev/null
+  else
+    return 1
+  fi
+  _res_is_uint "$q" && _res_is_uint "$p" && [ "$p" -gt 0 ] || return 1
+  q=$(( (q + p - 1) / p ))
+  [ "$q" -ge 1 ] || q=1
+  printf '%s' "$q"
 }
 
 # _res_now — the epoch second this call is happening at.
@@ -414,26 +471,40 @@ _res_used_pct() {
   fi
 }
 
-# _res_busy_cores — how many cores are busy now, a decimal: the one-minute load average
+# _res_busy_cores — how many cores are busy now, a decimal, measured over the same domain as
+# `_res_cores` (wave-33 T33). With no quota bounding the cores it is the one-minute load average
 # (`_res_load_1m`, so BIONIC_PROBE_LOAD_1M pins it too when the busy pin is absent). The load
 # counts runnable work, which is the processor reading a shell can take without sampling
 # twice; the gate treats the processor as the soft term, so a lagging reading costs a wait,
-# never a kill.
+# never a kill. Where a quota bounds the cores, the load average is the host's — every
+# tenant's, in a container without a namespaced /proc — and is measured against the
+# container's own few cores: a 2-CPU container on a 64-core host at load 10 never had room
+# (critic-adversarial finding 1). There the reading is the cgroup's own use, `_res_cgroup_busy`.
 _res_busy_cores() {
   if [ -n "${BIONIC_PROBE_BUSY_CORES:-}" ]; then
     printf '%s' "${BIONIC_PROBE_BUSY_CORES}"
+    return 0
+  fi
+  local q
+  if q="$(_res_quota_bound)"; then
+    _res_cgroup_busy 60 "$q"
     return 0
   fi
   _res_load_1m
 }
 
 # _res_busy_cores_5m — the same reading over the last five minutes (wave-28 T13; D14): the load
-# average's second figure, read as `_res_load_1m` reads the first. The gate offers a writer
-# only while both figures leave room, so a burst that has just ended still counts until the
-# five-minute figure has seen it go.
+# average's second figure, read as `_res_load_1m` reads the first, or under a quota the
+# cgroup's use over five minutes. The gate offers a writer only while both figures leave room,
+# so a burst that has just ended still counts until the five-minute figure has seen it go.
 _res_busy_cores_5m() {
   if [ -n "${BIONIC_PROBE_BUSY_CORES_5M:-}" ]; then
     printf '%s' "${BIONIC_PROBE_BUSY_CORES_5M}"
+    return 0
+  fi
+  local q
+  if q="$(_res_quota_bound)"; then
+    _res_cgroup_busy 300 "$q"
     return 0
   fi
   case "$(uname -s 2>/dev/null)" in
@@ -441,6 +512,75 @@ _res_busy_cores_5m() {
     Linux)  awk '{ print $2 }' "${BIONIC_PROBE_PROC:-/proc}/loadavg" 2>/dev/null ;;
     *)      printf '0' ;;
   esac
+}
+
+# _res_cgroup_usage <cgroup root> — the cgroup's CPU time so far, in microseconds; rc 1 and
+# nothing when it cannot be read. cgroup v2: `cpu.stat`'s `usage_usec`; v1:
+# `cpuacct/cpuacct.usage`, in nanoseconds. Builtins only.
+_res_cgroup_usage() {
+  local k v=''
+  if [ -r "$1/cpu.stat" ]; then
+    while read -r k v; do
+      [ "$k" = usage_usec ] || continue
+      _res_is_uint "$v" || return 1
+      printf '%s' "$v"
+      return 0
+    done < "$1/cpu.stat"
+    return 1
+  fi
+  [ -r "$1/cpuacct/cpuacct.usage" ] || return 1
+  { read -r v < "$1/cpuacct/cpuacct.usage"; } 2>/dev/null
+  _res_is_uint "$v" || return 1
+  printf '%s' "$(( v / 1000 ))"
+}
+
+# _res_cgroup_busy <span> <cores> — the cgroup's own CPU use in cores, two decimals: the growth of
+# its usage since a sample in the pressure ring, over the seconds between them. The sample is
+# the one whose age is nearest <span> (60 for the one-minute figure, 300 for the five) and at
+# least _RES_CPU_MIN_S old. `pressure_sample` writes the usage as a ring line's sixth field,
+# `<usec>@<host>`, only where a quota bounds the cores; a sample from another host (a ring
+# shared across containers) or one larger than the usage now is another counter, not used.
+#
+# THE READ KEEPS THE RING FED. Nothing on the gate's path samples the ring any more (the
+# recorder stopped at wave-28 T13), so a read whose own newest sample is _RES_CPU_MIN_S old or
+# older, or that has none, takes one with `pressure_sample`: at most one sample's processes per
+# _RES_CPU_MIN_S, never one per ask, and the ring's prune and window stay pressure_sample's.
+#
+# UNKNOWN IS IDLE, NEVER FULL (A-T33-2). An unreadable usage, or no sample old enough yet (the
+# first read on a cold ring), reads 0.00: the promises alone decide, as the gate's admission
+# already does for an empty reading. Reading the host's load instead is the defect this replaced.
+_RES_CPU_MIN_S=5   # the youngest sample a rate is taken over: the clock is whole seconds, so
+                   # the rate's error is under 1 ÷ its interval — under a fifth at 5 s.
+_res_cgroup_busy() {
+  local span="$1" cores="$2" root u now ring t g tag a d best='' bu=0 ba=0 newest=-1
+  if ! root="$(_res_cgroup_root)" || ! u="$(_res_cgroup_usage "$root")"; then
+    printf '0.00'
+    return 0
+  fi
+  now="$(_res_now)"
+  _res_is_uint "$now" || { printf '0.00'; return 0; }
+  ring="$(_pressure_ring_path)"
+  if [ -r "$ring" ]; then
+    while IFS='|' read -r t _ _ _ _ g; do
+      tag="${g%%@*}"
+      [ "$g" = "$tag@$HOSTNAME" ] && _res_is_uint "$tag" && _res_is_uint "$t" || continue
+      [ "$t" -le "$now" ] && [ $(( now - t )) -le "$PRESSURE_WINDOW_S" ] || continue
+      a=$(( now - t ))
+      if [ "$newest" -lt 0 ] || [ "$a" -lt "$newest" ]; then newest="$a"; fi
+      [ "$a" -ge "$_RES_CPU_MIN_S" ] && [ "$tag" -le "$u" ] || continue
+      d=$(( a > span ? a - span : span - a ))
+      if [ -z "$best" ] || [ "$d" -lt "$best" ]; then best="$d" bu="$tag" ba="$a"; fi
+    done < "$ring"
+  fi
+  if [ "$newest" -lt 0 ] || [ "$newest" -ge "$_RES_CPU_MIN_S" ]; then
+    pressure_sample "$cores" >/dev/null 2>&1 || :
+  fi
+  if [ -z "$best" ]; then
+    printf '0.00'
+    return 0
+  fi
+  d=$(( (u - bu) / (ba * 10000) ))   # hundredths of a core: usec ÷ (seconds × 10^6 ÷ 100)
+  printf '%d.%02d' $(( d / 100 )) $(( d % 100 ))
 }
 
 # _res_total_mb — physical memory in MB (2^20 bytes); -1 when it cannot be read.
@@ -719,7 +859,7 @@ _pressure_window_lines() {
   local ring="$1" now="$2"
   [ -r "$ring" ] || return 0
   awk -F'|' -v now="$now" -v w="$PRESSURE_WINDOW_S" '
-    NF == 5 && $1 ~ /^[0-9]+$/ && ($1 + 0) >= (now - w) && ($1 + 0) <= (now + w) { print }
+    (NF == 5 || NF == 6) && $1 ~ /^[0-9]+$/ && ($1 + 0) >= (now - w) && ($1 + 0) <= (now + w) { print }
   ' "$ring" 2>/dev/null
 }
 
@@ -788,7 +928,13 @@ pressure_sample() {
     printf 'pressure_sample: cannot create the ring directory %s\n' "$dir" >&2
     return 2
   fi
-  printf '%s|%s|%s|%s|%s\n' "$now" "$free_pct" "$swap_pct" "$load_1m" "$cores" >> "$ring" || {
+  # The cgroup's usage rides as a sixth field only where a quota bounds the cores, for
+  # `_res_cgroup_busy`'s rate (wave-33 T33); everywhere else the line is the five it was.
+  local cg='' u
+  if _res_quota_bound >/dev/null && u="$(_res_cgroup_usage "$(_res_cgroup_root)")"; then
+    cg="|$u@$HOSTNAME"
+  fi
+  printf '%s|%s|%s|%s|%s%s\n' "$now" "$free_pct" "$swap_pct" "$load_1m" "$cores" "$cg" >> "$ring" || {
     printf 'pressure_sample: cannot append to %s\n' "$ring" >&2
     return 2
   }

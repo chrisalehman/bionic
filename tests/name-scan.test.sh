@@ -75,6 +75,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/wait.sh"
 
 SCAN="${BIONIC_SCRIPTS_DIR}/tests/lib/name-scan.sh"
 
@@ -1181,8 +1182,8 @@ now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
 # the killed scan's EXIT trap (or the rm it started) to take the temporary tree away, and the poll ends
 # the moment the tree is gone, with the same 0.2 s as its timeout when it is not (a leak still counts).
 settle_until() {
-  local n="$1" i=0; shift
-  while ! "$@" && [ "$i" -lt "$n" ]; do sleep 0.01; i=$((i + 1)); done
+  local n="$1"; shift
+  wait_ticks "$n" 0.01 "$@"
   return 0
 }
 st_empty() { [ -z "$(ls -A "$ST")" ]; }
@@ -1238,7 +1239,7 @@ printf '#!/bin/bash\n: > "%s"\nsleep 1\nexec /bin/rm "$@"\n' "$TMP/rm-started" >
 for sig in TERM INT HUP; do
   rm -f "$TMP/rm-started"
   pg_scan "$ST" PATH="$RMS:$PATH"
-  k=0; while [ ! -e "$TMP/rm-started" ] && [ "$k" -lt 600 ]; do sleep 0.05; k=$((k + 1)); done
+  wait_ticks 600 0.05 test -e "$TMP/rm-started"
   expect_true "SIGNAL: $sig aimed — the EXIT trap reached its rm (positive)" [ -e "$TMP/rm-started" ]
   kill -"$sig" -- -"$p" 2>/dev/null; wait "$p"
   settle_until 120 no_left_trees "$ST"

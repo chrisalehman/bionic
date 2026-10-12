@@ -19,6 +19,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
+#     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' | ruling-ack <id> | rulings <writer>
+#                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
@@ -37,6 +39,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof, date -u (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh brief <row>   render the row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold from the row, the head, the orchestrator's sections marked (writes that file, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as two or more children, each <id>:<task>:<size>:<Files>, its waiters re-pointed (writes the plan)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
@@ -323,6 +326,22 @@ fi
 . "$BIONIC_LIB/refuse.sh"
 POKER_WORD="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
 
+# THE PERSON'S LEDGER AND ITS ONE SENDER (epic-23 wave-33-workhorse, T11; REQ-2, D2). owed.sh keeps
+# what the person owes and sources notify.sh beside it: the tick opens and sends each GATE request
+# it raises, and approve, waive and decline close the item their answer settles. NOT in
+# `BIONIC_LIB_WANT`, and sourced only when readable: a library without it (one older than this wave)
+# leaves every verb and every tick exactly as it was, so the ledger can never refuse a command.
+if ! declare -F owed_send >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/owed.sh"
+fi
+# poker_owed_close <root> <key> <by> -> always 0, prints nothing: the answer verb closes the item.
+poker_owed_close() {
+  declare -F owed_close >/dev/null 2>&1 || return 0
+  OWED_ROOT="$1" owed_close "$2" "$3" >/dev/null 2>&1
+  return 0
+}
+
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
 
@@ -441,19 +460,23 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
-  die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row|file>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names what they wait on (declined-on=)"
+  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>'   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown"
+  die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
+  die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names the row they wait on (declined-on=); a file or a word is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind)"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]...   set cells of ## Tasks rows (any header column but Files, which amend widens), every group in one transaction, the table judged once"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr or share"
+  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
+  die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's reading too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
@@ -461,6 +484,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run .bionic/config.yaml's floor: command in the working branch's checkout; write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered readings (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -470,7 +494,13 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
+  die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
+  die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
+  die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
+  die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
+  die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place: written: (date -u), the working and integration heads, the open rows, the live agents and the last proof, with the five human lines carried; never written by hand"
+  die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
@@ -567,19 +597,38 @@ case "$VERB" in
     HOLD_NAME="$1"
     HOLD_REASON="$2"
     ;;
+  # A RULING AND ITS READS (wave-33 T10; REQ-1, D1). `rule` takes the writer and the text, which must
+  # hold something once blanks are gone: a ruling with nothing to say is nothing to deliver. `ruling-ack`
+  # takes the one id the push printed; `rulings` the writer whose rulings to read.
+  rule)
+    if [ $# -ne 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "rule takes exactly two arguments: the writer's roster name and the ruling's text."
+    fi
+    RULE_WRITER="$1"
+    RULE_TEXT="$2"
+    ;;
+  ruling-ack)
+    { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "ruling-ack takes exactly one argument: the ruling's id."
+    RULING_ID="$1"
+    ;;
+  rulings)
+    { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "rulings takes exactly one argument: the writer's roster name."
+    RULE_WRITER="$1"
+    ;;
   # THE FILL'S ANSWER, AS HOLD IS THE STAND-DOWN'S (wave-27 T34; REQ-15, D24). Two operands: the
   # ready rows, comma-joined, and the reason. No ids is the usage error, never "every row": a
   # decline names what it answers. A blank reason is no reason, as for hold.
-  # `--on <row|file>` (wave-30 T16; REQ-12 AC-12.7, Δ13) names what the hold waits on; it changes
-  # what the verb prints and the ledger's `declined-on=`, never whether it records. `--on` with no
-  # value is the usage error, as a missing reason is.
+  # `--on <row>` (wave-30 T16; REQ-12 AC-12.7, Δ13) names the row the hold waits on; it changes what
+  # the verb prints and the ledger's `declined-on=`. A value that is no row of the plan (a file, a word)
+  # is the verb's refusal, nothing recorded (wave-33 T7, AC-4.3). `--on` with no value is the usage
+  # error, as a missing reason is.
   decline)
     DC_ON=""
     if [ $# -eq 4 ] && [ "$3" = "--on" ] && [ -n "${4//[[:space:]]/}" ]; then
       DC_ON="$4"; set -- "$1" "$2"
     fi
     if [ $# -ne 2 ] || [ -z "${1//[[:space:],]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "decline takes two arguments, the ready row ids, comma-joined, and the reason, then optionally --on <row|file>, what they wait on. There is no form that declines every row."
+      usage "decline takes two arguments, the ready row ids, comma-joined, and the reason, then optionally --on <row>, the row they wait on. There is no form that declines every row."
     fi
     DC_IDS="$1"
     DC_REASON="$2"
@@ -618,19 +667,33 @@ case "$VERB" in
   # last, after the operands, as `decline`'s `--on` does, and its value is `review S<n> <on|off>`, the
   # rating the reader wrote. A missing or malformed value is the usage error; whether the rating may
   # become a row (fix-policy:, fix-cap:, the fourth fix on a component) is the verb's refusal (1).
+  # `--born <record>#<n>[,<record>#<n>…]` (wave-33 T13; REQ-5, D6) names the findings the row answers, each a
+  # finding of a registered reading: the rating is then read from the record, never typed. A value of neither
+  # shape is the usage error; a finding the plan has not registered is the verb's refusal (1).
   task-add)
-    TA_BORN=""
-    case "${*: -1}" in --born) usage "task-add: --born takes a value: 'review S<n> <on|off>', the reader's rating." ;; esac
+    TA_BORN=""; TA_BORN_IDS=""
+    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], or 'review S<n> <on|off>', the reader's rating." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
       case "$TA_BORN" in
         'review S'[1-4]' on'|'review S'[1-4]' off') : ;;
-        *) usage "task-add: --born '$TA_BORN' is no rating; write 'review S<n> <on|off>', n 1 to 4." ;;
+        *)
+          TA_BORN_IDS="$TA_BORN"; TA_BORN=""
+          case "$TA_BORN_IDS" in
+            *[[:space:]]*|,*|*,|*,,*) usage "task-add: --born '$TA_BORN_IDS' is neither findings nor a rating; write <record>#<n>[,<record>#<n>…], or 'review S<n> <on|off>', n 1 to 4." ;;
+          esac
+          for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
+            case "$TA_BID" in
+              ?*#[1-9]|?*#[1-9]*[0-9]) case "${TA_BID##*#}" in *[!0123456789]*) TA_BID="" ;; esac ;;
+              *) TA_BID="" ;;
+            esac
+            [ -n "$TA_BID" ] || usage "task-add: --born '$TA_BORN_IDS' is neither findings nor a rating; write <record>#<n>[,<record>#<n>…], or 'review S<n> <on|off>', n 1 to 4."
+          done ;;
       esac
       set -- "${@:1:$(($# - 2))}"
     fi
     if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born 'review S<n> <on|off>'."
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…] or --born 'review S<n> <on|off>'."
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
@@ -691,14 +754,95 @@ case "$VERB" in
     if [ $# -lt 2 ] || [ -z "$1" ]; then
       usage "$VERB takes an id and at least one <column>=<value>."
     fi
+    PV_ARGS=("$@")
+    # MANY ROWS, ONE TRANSACTION (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-6). `task-set` takes groups,
+    # `<id>[,<id>…] <col>=<val>…`, joined by `--`: each group's cells are set on each of its rows, and the
+    # table is judged once, after every group, so a restructure that is invalid at every single-row step
+    # can be made. A group is held as its ids and its pairs joined by the unit separator.
+    PV_GROUPS=()
+    if [ "$VERB" = task-set ]; then
+      _pv_g="$1"; _pv_n=0; shift
+      for _pv_a in "$@" --; do
+        if [ -z "$_pv_g" ]; then
+          case "$_pv_a" in ''|--|*=*) usage "task-set: each -- is followed by <id>[,<id>…], then at least one <column>=<value>." ;; esac
+          _pv_g="$_pv_a"; _pv_n=0; continue
+        fi
+        case "$_pv_a" in
+          --) [ "$_pv_n" -gt 0 ] || usage "task-set takes at least one <column>=<value> after $(clean "$_pv_g")."
+              PV_GROUPS+=("$_pv_g"); _pv_g="" ;;
+          [!=]*=*) _pv_g="$_pv_g"$'\037'"$_pv_a"; _pv_n=$((_pv_n + 1)) ;;
+          *) usage "$VERB: '$_pv_a' is not <column>=<value>." ;;
+        esac
+      done
+      set -- "${PV_ARGS[@]}"
+    fi
     PV_ID="$1"; shift
-    for _pv_a in "$@"; do
-      case "$_pv_a" in
-        [!=]*=*) : ;;
-        *) usage "$VERB: '$_pv_a' is not <column>=<value>." ;;
-      esac
-    done
+    if [ "$VERB" != task-set ]; then
+      for _pv_a in "$@"; do
+        case "$_pv_a" in
+          [!=]*=*) : ;;
+          *) usage "$VERB: '$_pv_a' is not <column>=<value>." ;;
+        esac
+      done
+    fi
     PV_PAIRS=("$@")
+    ;;
+  # THE MATRIX ROW'S CELLS AND BLOCK KEYS (wave-33 T7; REQ-4 AC-4.1, D8). An AC id, as discharge takes it,
+  # then at least one `<key>=<value>`. The keys and the values are the verb's own refusals (1).
+  matrix-set)
+    { [ $# -ge 2 ] && [ -n "$1" ]; } || usage "matrix-set takes <AC> and at least one of status=<pending|blocked|discharged|waived>, evidence=<record/…>, task=<ids>."
+    case "$1" in
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
+        usage "matrix-set: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
+    esac
+    MS_AC="$1"; shift
+    for _pv_a in "$@"; do
+      case "$_pv_a" in [!=]*=*) : ;; *) usage "matrix-set: '$_pv_a' is not <key>=<value>." ;; esac
+    done
+    MS_PAIRS=("$@")
+    ;;
+  # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Three operands, finding-move's last two: the user's words
+  # as typed and why. Whether the words stand in a typed prompt is the verb's own refusal (1).
+  waive-row)
+    WR_USAGE="waive-row takes <AC>, the user's words as typed, and why."
+    { [ $# -eq 3 ] && [ -n "$1" ] && [ -n "${2//[[:space:]]/}" ] && [ -n "${3//[[:space:]]/}" ]; } || usage "$WR_USAGE"
+    case "$1" in
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
+        usage "waive-row: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
+    esac
+    WR_AC="$1"; WR_RAW="$2"; WR_WHY_RAW="$3"
+    ;;
+  # A PROSE PARAGRAPH UNDER ## Tasks (wave-33 T7; REQ-4 AC-4.1, D8). The text, then optionally
+  # `--replace '<first words>'`, naming the paragraph it rewrites.
+  tasks-prose)
+    TP_REPLACE=""; TP_HASREP=0
+    if [ $# -eq 3 ] && [ "$2" = --replace ]; then TP_HASREP=1; TP_REPLACE="$3"; set -- "$1"; fi
+    { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "tasks-prose takes '<text>', then optionally --replace '<the first words of the paragraph it rewrites>'."
+    [ "$TP_HASREP" = 0 ] || [ -n "${TP_REPLACE//[[:space:]]/}" ] || usage "tasks-prose: --replace takes the first words of the paragraph it rewrites."
+    TP_TEXT="$1"
+    ;;
+  # THE EPIC'S SHIPPED ROW AND THE RUN'S CONTINUATION (wave-33 T7; REQ-3 AC-3.3, D8). Each takes its operands,
+  # then optionally `--plan <plan>`, the run they belong to, which a session close-out unbound must name.
+  epic-row|continuation-fill)
+    PV_PLAN_ARG=""
+    if [ $# -ge 2 ] && [ "${*: -2:1}" = --plan ]; then
+      PV_PLAN_ARG="${*: -1}"; set -- "${@:1:$(($# - 2))}"
+      [ -n "${PV_PLAN_ARG//[[:space:]]/}" ] || usage "$VERB: --plan takes the run's plan."
+    fi
+    if [ "$VERB" = epic-row ]; then
+      [ $# -ge 2 ] || usage "epic-row takes <wave> and at least one <column>=<value>, then optionally --plan <plan>."
+      case "$1" in ''|*[!0123456789]*) usage "epic-row: '$(printf '%s' "${1:0:12}" | tr -d '[:cntrl:]')' is not a wave number." ;; esac
+      EP_WAVE="$1"; shift
+      for _pv_a in "$@"; do
+        case "$_pv_a" in [!=]*=*) : ;; *) usage "epic-row: '$_pv_a' is not <column>=<value>." ;; esac
+      done
+      EP_PAIRS=("$@")
+    else
+      [ $# -eq 1 ] || usage "continuation-fill takes '<field>=<text>', then optionally --plan <plan>."
+      case "$1" in [!=]*=*) : ;; *) usage "continuation-fill: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not <field>=<text>." ;; esac
+      CF_FIELD="$(printf '%s' "${1%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"; CF_TEXT="${1#*=}"
+      [ -n "${CF_TEXT//[[:space:]]/}" ] || usage "continuation-fill: the text for '$CF_FIELD' is empty."
+    fi
     ;;
   # THE LANDING'S ROW (wave-28 T6; D7, A-orch-81): an id, the landed commit (40 hex) and the
   # publish's instant (ISO-UTC); a hand landing adds `--by-hand <who> <why>`. The shapes are the
@@ -713,7 +857,13 @@ case "$VERB" in
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
       *) usage "row-landed: '$3' is not an ISO-UTC instant (YYYY-MM-DDTHH:MM:SSZ)." ;;
     esac
-    PV_ID="$1"; RL_COMMIT="$2"; RL_AT="$3"
+    PV_ID="$1"; RL_COMMIT="$2"; RL_AT="$3"; RL_ARTIFACT=""
+    ;;
+  # A RECORD ROW LANDS ITSELF (wave-33 T6; REQ-3 AC-3.1, D5): the row id alone. The commit is the
+  # working head and the instant is now, both the verb's, so neither is an operand.
+  deliver)
+    [ $# -eq 1 ] && [ -n "$1" ] || usage "deliver takes one argument: the row id (the head and the instant are the verb's own)."
+    PV_ID="$1"; RL_COMMIT=""; RL_AT=""; RL_ARTIFACT=""; RL_BY=""; RL_WHY=""; RL_HAND=0
     ;;
   step-line)
     PV_APPEND=""
@@ -829,6 +979,27 @@ case "$VERB" in
     case "${1##*#}" in *[!0123456789]*) usage "finding-move: '$1' is not <record>#<n>." ;; esac
     FM_ID="$1"; FM_TO="$2"; FM_RAW="$3"; FM_WHY_RAW="$4"
     ;;
+  # NO OPERAND RENDERS; FOUR OR FIVE RULE (wave-33 T13; REQ-5 AC-5.1, D6): the finding (`<record>#<n>`), fix or
+  # defer, the person's words as typed, why, and for a deferral optionally its changelog sentence. Another count,
+  # a direction, an id of another shape or a sentence on a fix is the usage error; the rules the ruling is held to
+  # are finding-move's and finding-stated's, the verb's own refusals (1).
+  disposition)
+    DSP_USAGE="disposition takes no argument (it renders every finding of the registered readings), or <record>#<n>, fix or defer, the person's words as typed, why, and for defer optionally its changelog sentence."
+    DSP_ID=""; DSP_TO=""; DSP_RAW=""; DSP_WHY=""; DSP_SENT=""
+    if [ $# -gt 0 ]; then
+      { [ $# -eq 4 ] || [ $# -eq 5 ]; } && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$DSP_USAGE"
+      case "$2" in defer|fix) : ;; *) usage "$DSP_USAGE" ;; esac
+      case "$1" in
+        *?#[0123456789]*) : ;;
+        *) usage "disposition: '$1' is not <record>#<n>." ;;
+      esac
+      case "${1##*#}" in *[!0123456789]*) usage "disposition: '$1' is not <record>#<n>." ;; esac
+      if [ $# -eq 5 ]; then
+        [ "$2" = defer ] && [ -n "${5//[[:space:]]/}" ] || usage "$DSP_USAGE"
+      fi
+      DSP_ID="$1"; DSP_TO="$2"; DSP_RAW="$3"; DSP_WHY="$4"; DSP_SENT="${5:-}"
+    fi
+    ;;
   # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
   release-check)
@@ -914,6 +1085,12 @@ case "$VERB" in
     ;;
   handoff)
     [ $# -eq 0 ] || usage "handoff takes no argument: it rewrites the bound plan's ## Handoff from the plan and the machine."
+    ;;
+  # THE BRIEF, RENDERED FROM ITS ROW (wave-33 T9; REQ-4 AC-4.4, D8). The one operand is the plan row's id; the
+  # id's own shape, and whether the plan has the row, are the verb's refusal (1).
+  brief)
+    { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "brief takes exactly one argument: the plan row's id, as in: brief T2."
+    BRF_ID="$1"
     ;;
   # THE SPLIT (wave-30 T17; D14d-3, design-ledger Δ11). The row, `--`, then two or more child specs
   # `<id>:<task>:<size>:<Files>`: the id before the first colon, the Files after the last, the size
@@ -2100,8 +2277,33 @@ suspect_lines() {  # <plan> [<id>] -> `<id><TAB><holder><TAB><clause — loosen 
     'NF >= 4 { printf "%s\t%s\t%s — loosen it: bash %s %s\n", $1, $2, $3, hook, $4 }'
 }
 
+# A ROW WAITING ON THE USER'S APPROVAL ALONE IS THE PERSON'S BLOCK (wave-33 T35; AC-2.2, D2). A WAIT
+# whose every clause is `approval:<name>` (or its live read) opens `approve:<name>` on the person's
+# ledger (lib/owed.sh), the key the approve verb closes, carrying the WAIT line printed. A row that
+# also waits on other work is not yet blocked on the person and opens nothing; `approval:plan` is the
+# Step-3 card's. Opening is idempotent per key, so every later tick on the same wait is one item.
+tick_owed_approval() {  # <reason> <printed line> -> always 0, prints nothing
+  local c names=""
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  while IFS= read -r c; do
+    c="${c# }"; c="${c% }"; c="${c#live:}"
+    case "$c" in
+      approval:plan) return 0 ;;
+      approval:[A-Za-z0-9]*) case "${c#approval:}" in *[!A-Za-z0-9._-]*) return 0 ;; esac ;;
+      *) return 0 ;;
+    esac
+    names="$names ${c#approval:}"
+  done <<TOA
+$(printf '%s\n' "$1" | awk '{ n = split($0, a, /; /); for (i = 1; i <= n; i++) print a[i] }')
+TOA
+  for c in $names; do
+    OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "approve:$c" "approval: $c" "$2" >/dev/null 2>&1
+  done
+  return 0
+}
+
 tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
-  local rows waiting all offered line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k
+  local rows waiting all offered line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
@@ -2115,7 +2317,9 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
     base="${line%%$'\037'*}"; sfx=""
     [ "$base" = "$line" ] || sfx="${line#*$'\037'}"
     case "$base" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}" ;; esac
-    say "WAIT $(clean "$base")${sfx:+ · $(clean_whole "$sfx")}"
+    wl="WAIT $(clean "$base")${sfx:+ · $(clean_whole "$sfx")}"
+    say "$wl"
+    tick_owed_approval "${base#* — }" "poker: $wl"
   done <<TICK_WAIT
 $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n' "$rows" "$waiting" "$susp" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
@@ -3336,6 +3540,98 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
   printf '%s' "$1" | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "") print $i }'
 }
 
+# ---- BEGIN the brief rendered from its row (wave-33 T9; REQ-4 AC-4.4; D8) ----
+# `brief <row>` writes the dispatch brief a plan row can carry, so the orchestrator writes only the judgment the
+# row cannot. THE SCAFFOLD'S LABELS ARE THE SHIPPED ONES, read out of skills/canonical-sdlc/dispatch.md's
+# `### Scaffold` fence with the extractor hooks/dispatch-preflight.sh `dp_scaffold_marked` reads the same fence
+# with, never a second list: a label the verb fills from the row is written, every other label is named on the
+# verb's own line as the orchestrator's. THE RULES, each the row's own cell or a function of it:
+#   Expected duration   the row's size, in minutes
+#   Expected artifact   the dispatch ledger's artifact cell for the row; else the first Files entry under record/
+#                       that is neither a progress file nor assumptions.md; else the first record path the
+#                       row's task names; else the slot, marked for the orchestrator
+#   Progress artifact   the Files entry that ends .progress.md, else <record dir>/<row>.progress.md; Cadence is
+#                       the 15-minute rule's own number. Both only for a size of 15 or more
+#   Files               the row's Files cell, verbatim; no line for a row whose cell is empty or a dash
+#   Suites, Lands-on    the row's `suites` / `lands-on` cells when the table has them and the row fills them;
+#                       else the *.test.sh entries of Files by file name; `Suites: none` and
+#                       `Lands-on: none <reason>` for a row with none
+#   Row                 the row's id
+# The file starts with the scaffold lines, so no prose after them is a label's first hit (lib/brief.sh reads the
+# first hit of an unpinned label). A re-render keeps everything from `## Judgment` on: that section is the
+# orchestrator's, and the verb never writes anything into it but the two marked slots of a first render.
+
+# poker_brief_cell <plan> <section heading> <row id> <header> -> that cell of the row, trimmed; rc 1 when the
+# section, the column or the row is not there. For the cells units.sh's fixed columns do not carry.
+poker_brief_cell() {
+  awk -v sect="$2" -v id="$3" -v want="$4" '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insec = (tolower(trim(substr($0, 3))) == tolower(sect)); hdr = 0; col = 0; next }
+    !insec || $0 !~ /^[[:space:]]*\|/ { next }
+    {
+      n = split($0, c, "|")
+      if (!hdr) { hdr = 1; for (i = 2; i < n; i++) if (tolower(trim(c[i])) == tolower(want)) col = i; next }
+      if (c[2] ~ /^[ \t]*:?-+:?[ \t]*$/) next
+      if (col && trim(c[2]) == id) { print trim(c[col]); found = 1; exit }
+    }
+    END { exit !found }' "$1"
+}
+
+# poker_brief_labels -> the shipped scaffold's label names, one per line, in its order. rc 1 when the file is not there.
+poker_brief_labels() {
+  local file="${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md"
+  [ -r "$file" ] || return 1
+  /usr/bin/awk '
+    /^### Scaffold/            { inb = 1; next }
+    inb && /^```/              { fence++; if (fence == 2) exit; next }
+    inb && fence == 1          { sub(/:.*$/, ""); print }
+  ' "$file"
+}
+
+# poker_brief_none <cell> -> 0 when a table cell says nothing: empty, or a dash.
+poker_brief_none() {
+  case "$1" in ''|'—'|'-'|'–') return 0 ;; esac
+  return 1
+}
+
+# poker_brief_suites <Files cell> -> the suites its *.test.sh entries name, by file name, in order, once each, comma-joined.
+poker_brief_suites() {
+  printf '%s' "$1" | awk -F',' '{
+    for (i = 1; i <= NF; i++) {
+      e = $i; gsub(/`/, "", e); sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e)
+      if (e == "" || e ~ /[ \t]/ || index(e, "*") || index(e, "?") || index(e, "[")) continue
+      n = split(e, p, "/"); b = p[n]
+      if (length(b) <= 8 || substr(b, length(b) - 7) != ".test.sh") continue
+      if (!(b in seen)) { seen[b] = 1; out = out (out == "" ? "" : ", ") b }
+    }
+    print out }'
+}
+
+# poker_brief_record_entry <Files cell> <artifact|progress> -> the first entry under record/ that is the row's
+# artifact (not a progress file, not assumptions.md) or its progress file (ends .progress.md); nothing when none.
+poker_brief_record_entry() {
+  printf '%s' "$1" | awk -F',' -v kind="$2" '{
+    for (i = 1; i <= NF; i++) {
+      e = $i; gsub(/`/, "", e); sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e)
+      if (e == "" || e ~ /[ \t]/ || index(e, "record/") == 0 || substr(e, length(e) - 2) != ".md") continue
+      n = split(e, p, "/"); b = p[n]
+      isprog = (length(b) > 12 && substr(b, length(b) - 11) == ".progress.md")
+      if (kind == "progress" ? isprog : (!isprog && b != "assumptions.md")) { print e; exit }
+    }
+  }'
+}
+
+# poker_brief_task_record <task text> -> the first record path the text names (a token holding record/ and ending .md); nothing when none.
+poker_brief_task_record() {
+  printf '%s\n' "$1" | awk '{
+    n = split($0, w, /[ \t,;()"\047`]+/)
+    for (i = 1; i <= n; i++) if (index(w[i], "record/") > 0 && w[i] ~ /\.md$/) { print w[i]; exit }
+  }'
+}
+# ---- END the brief rendered from its row ----
+
 # ---- BEGIN the set of an agent its start did not place (wave-27 T38; review pass 8 F3) ----
 # `amend <agent id>` for an id no named row carries: see the verb. The row is the budget wall's
 # alone. Its name is the id, so it shadows no other name's latest row; `status=unplaced` is no
@@ -3566,6 +3862,264 @@ plan_verb_swap() {
   return 0
 }
 
+# ---------------------------------------------------------------- the call a refusal names
+#
+# EVERY PLAN-VERB REFUSAL NAMES THE CALL THAT SUCCEEDS (wave-33 T7; REQ-4 AC-4.3, D8). A refusal
+# that says what is wrong and not what to run costs one retry per guess; wave-32 met three
+# (ledger-add's column names, task-add's approval read on a doc row, decline --on a file). Where the
+# verb can compute the corrected call it prints it on a line of its own, `poker: next call: <call>`,
+# quoted by the one rule every pasted poker command is (`launch_sync_hand`, refuse.sh
+# `refuse_shell_word`), so the line runs as printed.
+pv_next() {  # <verb> <operand>... -> the call on stderr, one line
+  die "next call: $(launch_sync_hand "$@")"
+}
+
+# pv_fold <name> -> its letters and digits, lower-cased: the form two column names are compared in.
+pv_fold() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'; }
+
+# pv_column_guess <name> <column>... -> the one column <name> was meant as, or nothing: the column
+# whose folded name equals the name's, else the ONE column whose folded name is a prefix of the
+# name's or has it as a prefix (`artifacts` is `artifact`, `sizes` is `size`). Two are no guess.
+pv_column_guess() {
+  local want c f n=0 hit=""
+  want="$(pv_fold "$1")"; shift
+  [ -n "$want" ] || return 0
+  for c in "$@"; do [ "$(pv_fold "$c")" = "$want" ] && { printf '%s' "$c"; return 0; }; done
+  for c in "$@"; do
+    f="$(pv_fold "$c")"
+    [ -n "$f" ] || continue
+    case "$want" in "$f"*) n=$((n + 1)); hit="$c"; continue ;; esac
+    case "$f" in "$want"*) n=$((n + 1)); hit="$c" ;; esac
+  done
+  [ "$n" -eq 1 ] && printf '%s' "$hit"
+  return 0
+}
+
+# pv_fix_pairs <columns, one per line> <name=value>... -> PV_FIXED, the pairs with each name the
+# columns do not carry (compared case-blind) replaced by its one guess, and PV_UNKNOWN, the names no
+# column was guessed for (comma-joined), which the corrected call leaves out.
+pv_fix_pairs() {
+  local cols="$1" kv n g c known
+  local -a list
+  list=(); PV_FIXED=(); PV_UNKNOWN=""
+  shift
+  while IFS= read -r c; do [ -n "$c" ] && list+=("$c"); done <<< "$cols"
+  for kv in "$@"; do
+    n="${kv%%=*}"; known=""
+    for c in ${list[@]+"${list[@]}"}; do
+      [ "$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')" ] && known=1
+    done
+    if [ -n "$known" ]; then PV_FIXED+=("$kv"); continue; fi
+    g="$(pv_column_guess "$n" ${list[@]+"${list[@]}"})"
+    if [ -n "$g" ]; then PV_FIXED+=("$g=${kv#*=}"); else PV_UNKNOWN="${PV_UNKNOWN:+$PV_UNKNOWN, }$n"; fi
+  done
+}
+
+# pv_header_cells <plan> <tasks|ledger> -> the header cells of the table `units_table_cells` edits (the
+# first table under the heading whose header carries an id cell), trimmed, one per line.
+pv_header_cells() {
+  PH_SECT="$2" awk '
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    BEGIN { sect = ENVIRON["PH_SECT"] }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^[ \t]*#/ {
+      if (st) exit
+      if (sect == "tasks" && $0 ~ /^##[ \t]+[Tt]asks([ \t].*)?$/) st = 1
+      if (sect == "ledger" && $0 ~ /^##[ \t]+[Dd]ispatch[ \t]+[Ll]edger([ \t].*)?$/) st = 1
+      next
+    }
+    st && /^[ \t]*\|/ {
+      n = split($0, c, "|"); ok = 0
+      for (i = 2; i < n; i++) if (tolower(trim(c[i])) == "id") ok = 1
+      if (!ok) next
+      for (i = 2; i < n; i++) if (trim(c[i]) != "") print trim(c[i])
+      exit
+    }' "$1" 2>/dev/null
+}
+
+# THE MATRIX ROW'S CELLS (discharge's row edit, wave-30 T14, made the one site at wave-33 T7). Inside
+# `## Verification Matrix`, fences skipped, the first `|` line whose trimmed first cell is the AC id has
+# each named cell (1 AC · 2 tier · 3 status · 4 evidence · 5 auditor) written ` <value> `, every other
+# byte as it was. It does not fold `\|` escapes; a matrix cell holds a path or a token. Exit 3 no row ·
+# 4 the row is not five cells.
+matrix_row_cells() {  # <plan> <AC> <cell n>=<value>... -> the whole plan
+  local plan="$1" ac="$2" set="" kv
+  shift 2
+  for kv in "$@"; do set="${set}${kv%%=*}	${kv#*=}
+"; done
+  MX_AC="$ac" MX_SET="$set" awk '
+    BEGIN {
+      a = ENVIRON["MX_AC"]; m = split(ENVIRON["MX_SET"], s, "\n")
+      for (k = 1; k <= m; k++) if ((t = index(s[k], "\t")) > 0) v[substr(s[k], 1, t - 1) + 1] = " " substr(s[k], t + 1) " "
+    }
+    /^[ \t]*```/ { fence = !fence; print; next }
+    fence { print; next }
+    /^## / { inm = ($0 ~ /^## Verification Matrix/); print; next }
+    inm && !done && /^[ \t]*\|/ {
+      n = split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
+      if (id == a) {
+        if (n != 7) { bad = 1; exit }
+        for (j in v) c[j] = v[j]
+        out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]
+        print out; done = 1; next
+      }
+    }
+    { print }
+    END { if (bad) exit 4; if (!done) exit 3 }' "$plan"
+}
+
+# matrix_row_cell <plan> <AC> <cell n> -> that cell of the AC's matrix row, trimmed (nothing: no row).
+matrix_row_cell() {
+  MX_AC="$2" awk -F'|' -v n="$3" '
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
+    inm && /^[ \t]*\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c)
+      if (c == ENVIRON["MX_AC"]) { v = $(n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
+}
+
+# THE AC BLOCK'S KEYS (wave-33 T7). The block is the `<AC>:` line under `## Verification Matrix` and the
+# indented lines under it (matrix-render's shape, the one walls.sh `matrix_block` reads). The key's
+# first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
+matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
+  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk '
+    BEGIN { a = ENVIRON["MB_AC"] ":"; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
+    { L[++nl] = $0 }
+    END {
+      for (i = 1; i <= nl; i++) {
+        x = L[i]
+        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (x ~ /^## /) { inm = (x ~ /^## Verification Matrix/); inb = 0; continue }
+        if (!inm) continue
+        y = x; sub(/[ \t]+$/, "", y)
+        if (!found && y == a) { found = i; last = i; inb = 1; continue }
+        if (inb && x ~ /^[ \t]+[^ \t]/) {
+          last = i; sub(/^[ \t]+/, "", y)
+          if (!at && index(y, k) == 1) at = i
+          continue
+        }
+        inb = 0
+      }
+      if (!found) exit 3
+      for (i = 1; i <= nl; i++) {
+        if (i == at) { print line; continue }
+        print L[i]
+        if (!at && i == last) print line
+      }
+    }' "$1"
+}
+
+# matrix_block_has <plan> <AC> <key> -> 0 when the AC block carries that key.
+matrix_block_has() {
+  MB_AC="$2" MB_KEY="$3" awk '
+    BEGIN { a = ENVIRON["MB_AC"] ":"; k = ENVIRON["MB_KEY"] ":" }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; next }
+    !inm { next }
+    { y = $0; sub(/[ \t]+$/, "", y) }
+    y == a { inb = 1; next }
+    inb && /^[ \t]+[^ \t]/ { sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { hit = 1; exit } next }
+    { inb = 0 }
+    END { exit !hit }' "$1"
+}
+
+# THE FILES BESIDE THE PLAN (wave-33 T7; REQ-3 AC-3.3, D8). `epic-row` and `continuation-fill` write the
+# epic plan and the run's continuation, which close-out writes after act 3 has wiped this session's
+# binding (A-orch-145), so their run is the `--plan` operand when given, else the session's own run, open
+# or closed. Neither file is a run plan: the commit gate reads neither, so their transaction is the
+# copy, the checksum taken before the projection, the compare and the move, with no dry commit.
+# pv_file_open <verb> <operand>... -> PV_REPO, PV_RPLAN, and the cleanup armed; every refusal exits.
+pv_file_open() {
+  local verb="$1" sid run cand="" p
+  shift
+  sid="$(session_id)" || sid=""
+  if [ -z "$sid" ]; then
+    die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+    exit 3
+  fi
+  if ! engaged_session "$(project_root "$PWD")" "$sid"; then
+    say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+    exit 0
+  fi
+  PV_REPO="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+  if [ -z "$PV_REPO" ]; then
+    die "REFUSED — cannot resolve the working directory."
+    exit 2
+  fi
+  PV_NEW=""
+  trap 'rm -f ${PV_NEW:+"$PV_NEW" "$PV_NEW.2"}' EXIT
+  if [ -n "${PV_PLAN_ARG:-}" ]; then
+    for p in "$PV_PLAN_ARG" "$PV_REPO/$PV_PLAN_ARG"; do
+      case "$p" in /*) : ;; *) p="$PWD/$p" ;; esac
+      [ -f "$p" ] && { PV_RPLAN="$p"; return 0; }
+    done
+    die "REFUSED — --plan $(clean "$PV_PLAN_ARG") is no file (read from $PWD and from $PV_REPO); nothing was written."
+    exit 1
+  fi
+  run="$(session_run "$PV_REPO" "$sid" 2>/dev/null)" || :
+  case "$run" in
+    'bound-open '*) PV_RPLAN="${run#bound-open }"; return 0 ;;
+    'bound-closed '*) PV_RPLAN="${run#bound-closed }"; [ -f "$PV_RPLAN" ] && return 0 ;;
+    'fallback '*) cand="${run#fallback }" ;;
+  esac
+  case "$cand" in "$PV_REPO"/*) cand="${cand#"$PV_REPO"/}" ;; esac
+  die "REFUSED — $verb writes for this session's run, and the session is bound to none (${run%% *}); close-out wipes the binding, so name the run's plan. Nothing was written."
+  pv_next "$verb" "$@" --plan "${cand:-<plan>}"
+  exit 1
+}
+
+# pv_file_swap <verb> <file> <checksum before> <what> -> moves $PV_NEW over the file when the file still
+# reads as it did; exits 0 with nothing written when the projection is the file.
+pv_file_swap() {
+  local verb="$1" file="$2" sum="$3" what="$4"
+  if cmp -s "$PV_NEW" "$file"; then
+    say "$verb — $what: the file already reads so; nothing was written."
+    exit 0
+  fi
+  if [ "$(cksum < "$file" 2>/dev/null)" != "$sum" ]; then
+    die "REFUSED — $file changed while $what was being written; nothing was written. Run $verb again."
+    exit 1
+  fi
+  if ! mv -f "$PV_NEW" "$file"; then
+    die "REFUSED — could not move the copy over $file; it is unchanged."
+    exit 2
+  fi
+}
+
+# THE USER'S WORDS, REFUSED IN ONE VOICE (wave-33 T7). finding-move and waive-row hold their words to
+# lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
+# own constant. <act> is what the words make: `a move`, `a waiver`.
+said_refuse() {  # <user_said rc> <the words, folded> <act> -> the refusal on stderr
+  case "$1" in
+    2) die "REFUSED — this session's transcript cannot be found or read (session ${CLAUDE_CODE_SESSION_ID:-none} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged." ;;
+    3) die "REFUSED — the words \"$(clean "$2")\" are too short to be the user's decision; quote at least $SAID_MIN_WORDS of their words, or their whole prompt. The plan is unchanged." ;;
+    *) die "REFUSED — the words \"$(clean "$2")\" stand in no prompt the user typed in this session; $3 is the user's own word, quoted from a prompt they typed. The plan is unchanged." ;;
+  esac
+}
+
+# A FAILING QUESTION IS THE PERSON'S TO WAIVE (wave-33 T35; AC-2.2, D2). A reading whose newest fact is
+# result=fail leaves the person the call: fix it, or waive the question. So the judge's every answer
+# settles the ledger (lib/owed.sh) for the waivable questions: each `failing` review line opens
+# `waive:<question>`, the key the waive verb closes, carrying the line the refusal prints; every other
+# question's item is closed, its block gone (a passing reading over the fix). Opening is idempotent per
+# key, so a second refusal on the same question is one item. Prints nothing; never changes the verdict.
+cur8_owed_waivers() {  # <facts_state output> -> always 0
+  local q fl
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  for q in $PROOF_QUESTIONS; do
+    fl="$(printf '%s\n' "$1" | awk -F'\t' -v q="$q" '$1 == "review" && $2 == q && $(NF - 1) == "failing" { print; exit }')"
+    if [ -n "$fl" ]; then
+      OWED_ROOT="$PV_REPO" owed_open "waive:$q" "waiver: $q" "$fl" >/dev/null 2>&1
+    else
+      poker_owed_close "$PV_REPO" "waive:$q" "no longer failing"
+    fi
+  done
+  return 0
+}
+
 # cur8_judge -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
 # the working head (the head of the checkout holding the plan's `working-branch:`, the head `waive`
 # and `proof-add` record), with that head in PV_HEAD8; otherwise refuses `current 8`, exit 1, the
@@ -3588,6 +4142,7 @@ cur8_judge() {
   esac
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
+  [ "$rc" -eq 2 ] || cur8_owed_waivers "$out"
   [ "$rc" -eq 0 ] && return 0
   if [ "$rc" -eq 2 ]; then
     die "REFUSED — current: 8 is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
@@ -3877,6 +4432,160 @@ plan_verb_id_ok() {
   return 0
 }
 
+# ---------------------------------------------------------------- a record row lands itself
+#
+# THE RECORD ROW'S OWN LANDING (wave-33 T6; REQ-3 AC-3.1, AC-3.2; D5). A test, verify or review row
+# writes a record and no code, so it has no tree, no `ready` and no `published` event; wave-32 landed
+# eight such rows by `row-landed --by-hand`. `deliver <row>` is its agent's last act, and the tick's
+# backstop when the agent ended without it. It checks what the row owes, then lands it through the
+# one landing writer, `row-landed`, in the same transaction, at the working head (the head of the
+# checkout holding the plan's `working-branch:`), with the artifact written into the ledger line.
+#
+# deliver_check -> for the row $PV_ID of the opened plan ($PV_PLAN, $PV_REPO), sets RL_COMMIT, RL_AT
+# and RL_ARTIFACT, or exits: 0 with nothing written when the row is already landed, 2 on a refusal,
+# each naming what is missing and the call that answers it. In order:
+#   - the row is in `## Tasks`, `pending` or `active`;
+#   - it has no tree of its own and its Files write nothing the head carries (`units_writes_head`):
+#     a row with a tree lands through `ready`, from that tree;
+#   - it is not a live review row (`units_live_rows`): `proof-add` returns that row to `pending` at
+#     each reading and the next landing makes it ready again, so landing it would end its passes;
+#   - its artifact: the ledger line's `artifact` cell, else the one record under `<docs-root>/record/`
+#     its Files name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The
+#     file exists, is no symbolic link, and lies under the docs root's `record/`;
+#   - a review row: a `proved: kind=review` line under `## SDLC State` names that record;
+#   - the working head reads as a commit;
+#   - no ruling for the row's writer is unread.
+deliver_check() {
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head sid roster launch name rulings
+  call="bash $HOOK_DIR/session-poker.sh"
+  if ! { declare -F proof_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_head >/dev/null 2>&1; then
+    die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
+  row="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id { print; exit }')"
+  if [ -z "$row" ]; then
+    die "REFUSED — the ## Tasks table of $PV_PLAN carries no row $PV_ID; the plan is unchanged."
+    exit 2
+  fi
+  kind="$(units_field "$row" kind)"; files="$(units_field "$row" Files)"
+  wt="$(units_field "$row" worktree)"; status="$(units_field "$row" status)"
+  case "$status" in
+    landed) say "deliver — $PV_ID is already landed; nothing was written."; exit 0 ;;
+    pending|active) : ;;
+    *) die "REFUSED — $PV_ID reads $(clean "$status"), and only a pending or active row lands; the plan is unchanged."; exit 2 ;;
+  esac
+  case "$wt" in
+    *[A-Za-z0-9]*)
+      die "REFUSED — $PV_ID has a tree of its own ($(clean "$wt")), and a row with a tree lands through ready, from that tree: bash <plugin-root>/scripts/spawn-worktree.sh ready. The plan is unchanged."
+      exit 2 ;;
+  esac
+  if units_writes_head "$files"; then
+    die "REFUSED — the Files of $PV_ID ($(clean "$files")) write the head, and a row that writes the head lands through ready from its tree: bash <plugin-root>/scripts/spawn-worktree.sh ready. The plan is unchanged."
+    exit 2
+  fi
+  if [ -n "$(units_live_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id')" ]; then
+    die "REFUSED — $PV_ID is a live review row (it reads live:head): proof-add returns it to pending at each reading and the next landing makes it ready again, so deliver does not land it. The plan is unchanged."
+    exit 2
+  fi
+  docs="$(docs_root "$PV_REPO")"; docs="$(cd "$docs" 2>/dev/null && pwd -P)"
+  drel=""; case "$docs" in "$PV_REPO"/*) drel="${docs#"$PV_REPO"/}" ;; esac
+  launch_sync_ledger "$PV_PLAN" >/dev/null && hasl=1
+  art="$(awk -F'|' -v id="$PV_ID" '
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { inl = ($0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/); rows = 0; next }
+    !inl || $0 !~ /^[ \t]*\|/ { next }
+    { rows++ }
+    rows == 1 { ac = 0; for (k = 2; k < NF; k++) { h = $k; gsub(/^[ \t]+|[ \t]+$/, "", h); if (h == "artifact") ac = k }; next }
+    $0 ~ /^[ \t]*\|[ \t:|-]*$/ { next }
+    { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == id && ac) { v = $ac; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$PV_PLAN" 2>/dev/null)"
+  case "$art" in *[A-Za-z0-9]*) : ;; *) art="" ;; esac
+  if [ -z "$art" ]; then
+    while IFS= read -r e; do
+      e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
+      case "$e" in *[A-Za-z0-9]*) : ;; *) continue ;; esac
+      case "$e" in *.progress.md|assumptions.md|*/assumptions.md) continue ;; esac
+      case "$e" in record/*) : ;; "${drel:-/}"/record/*) : ;; *) continue ;; esac
+      n=$((n + 1)); cands="${cands:+$cands, }$e"; art="$e"
+    done <<DELIVER_FILES
+$(printf '%s\n' "$files" | tr ',' '\n')
+DELIVER_FILES
+    [ "$hasl" = 1 ] && launch_sync_ledger "$PV_PLAN" | awk -F'\037' -v id="$PV_ID" '$1 == id { f = 1 } END { exit !f }' || lverb=ledger-add
+    if [ "$n" -eq 0 ]; then
+      die "REFUSED — $PV_ID names no artifact: its ledger line has no artifact cell and its Files name no record under record/; name it: $call $lverb $PV_ID artifact=<path>, then $call deliver $PV_ID. The plan is unchanged."
+      exit 2
+    fi
+    if [ "$n" -gt 1 ]; then
+      die "REFUSED — $PV_ID names no artifact in its ledger line and its Files name $n records ($(clean "$cands")); name the one it delivers: $call $lverb $PV_ID artifact=<path>, then $call deliver $PV_ID. The plan is unchanged."
+      exit 2
+    fi
+  fi
+  case "$art" in
+    *[[:space:]]*|*'|'*)
+      die "REFUSED — the artifact $(clean "$art") of $PV_ID carries a blank or a |, which no plan cell can hold; the plan is unchanged."
+      exit 2 ;;
+  esac
+  # A path is read as the plan spells it: absolute, from the docs root (`record/…`, as proof lines and
+  # older ledgers write it), or from the repository (`.bionic/docs/record/…`, as Files cells do).
+  case "$art" in
+    /*) abs="$art" ;;
+    record/*) abs="$docs/$art" ;;
+    *) abs="$PV_REPO/$art" ;;
+  esac
+  if [ -L "$abs" ]; then
+    die "REFUSED — the artifact $(clean "$art") of $PV_ID is a symbolic link, and what it points at can change after the landing; copy the record to that path, then $call deliver $PV_ID. The plan is unchanged."
+    exit 2
+  fi
+  if [ ! -f "$abs" ]; then
+    die "REFUSED — the artifact of $PV_ID, $(clean "$art"), does not exist (read as $(clean "$abs")); write it, then run $call deliver $PV_ID. The plan is unchanged."
+    exit 2
+  fi
+  real="$(cd "$(dirname "$abs")" 2>/dev/null && pwd -P)/$(basename "$abs")"
+  case "$real" in
+    "$docs"/record/*) rel="${real#"$docs"/}" ;;
+    *)
+      die "REFUSED — the artifact $(clean "$art") of $PV_ID is not under record/ of the docs root ($docs/record/), and a record row delivers a record; the plan is unchanged."
+      exit 2 ;;
+  esac
+  if [ "$kind" = review ]; then
+    if [ -z "$(awk -v rec="$rel" "$(proof_awk)"'
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+        insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == rec { print "y"; exit }' "$PV_PLAN" 2>/dev/null)" ]; then
+      die "REFUSED — $PV_ID is a review row and no proved: kind=review line names its record $rel; register the reading first: $call proof-add review $rel --question <q> --reader <name>, then $call deliver $PV_ID. The plan is unchanged."
+      exit 2
+    fi
+  fi
+  wb="$(proof_working_branch "$PV_PLAN")"
+  head=""; [ -z "$wb" ] || head="$(proof_head "$PV_REPO" "$wb")" || head=""
+  case "$head" in
+    [0-9a-f]*) [ "${#head}" -eq 40 ] || head="" ;;
+    *) head="" ;;
+  esac
+  if [ -z "$head" ]; then
+    die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out, so there is no head to land $PV_ID at; check the branch out (its worktree), then $call deliver $PV_ID. The plan is unchanged."
+    exit 2
+  fi
+  # AN UNREAD RULING HOLDS THE LANDING (wave-33 T34; Δ1, ADR-052), as at the commit wall and `ready`: a
+  # record row's artifact is gitignored and never commits, so deliver is its only landing. The writer
+  # is the row's launch line by `row=`, else the plan's agent cell (`ready`'s order). Each ruling of it
+  # not yet shown is printed and stamped shown (lib/roster.sh `ruling_take_unread`), so the same call
+  # after this one lands. The REFUSED line names the ids: it is the line the tick's backstop reports.
+  sid="$(session_id)" || sid=""
+  roster="$PV_REPO/.bionic/tmp/roster-${sid}.state"
+  launch="$(_wt_launch_row "$roster" row "$PV_ID")" && name="$(_wt_field "$launch" name)" || name=""
+  [ -n "$name" ] || name="$(units_field "$row" agent)"
+  if [ -n "$sid" ] && declare -F ruling_take_unread >/dev/null 2>&1 \
+     && rulings="$(ruling_take_unread "$roster" "$name" deliver "$(refuse_plugin_root)")" && [ -n "$rulings" ]; then
+    die "REFUSED — an orchestrator ruling for $(clean "$name") is unread ($(printf '%s\n' "$rulings" | sed -n 's/^bionic ruling \([^ ]*\) .*/\1/p' | paste -sd, - | sed 's/,/, /g')); read it below, act on it, then $call deliver $PV_ID. The plan is unchanged."
+    printf '%s\n' "$rulings" >&2
+    exit 2
+  fi
+  RL_COMMIT="$head"; RL_AT="$(iso_now)"; RL_ARTIFACT="$art"
+}
+
 # ---------------------------------------------------------------- the deferral's sentence
 #
 # A DEFERRED FINDING'S ONE CHANGELOG SENTENCE (wave-28 T17; D21, AC-8.7). Registering a record writes
@@ -3901,6 +4610,50 @@ deferral_line() {  # <plan> <record>#<n> -> the first deferred: line of ## SDLC 
     insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
     END { if (found) print line; exit (found ? 0 : 1) }' "$1"
 }
+# finding_owed_key <record>#<n> -> the person's-ledger key of the finding's ruling (lib/owed.sh), `finding:` and
+# the identity with each character a key may not hold (lib/owed.sh `_owed_key_ok`: letters, digits and `:._-`)
+# written `:` (wave-33 T13; D6, D2): `record/w/st.md#2` is `finding:record:w:st.md:2`.
+finding_owed_key() {
+  printf 'finding:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
+}
+
+# finding_read <plan> <repo> <record>#<n> -> 0 with the finding in FR_S, FR_R (the reader's rating), FR_P (the
+# priority the plan's moves give it, lib/proof.sh `proof_finding_rating`), FR_W (its <path>:<line> or -), FR_T
+# (its title) and FR_Q, FR_H (the question and head of the plan's registered reading of the record: its last
+# `proved: kind=review` line naming the record as evidence); 1 with FR_WHY, one clause naming what is missing
+# and the call that supplies it (wave-33 T13; REQ-5, D6). The readers: `task-add --born` and `disposition`.
+finding_read() {
+  local plan="$1" repo="$2" id="$3" rec n got
+  FR_S=""; FR_R=""; FR_P=""; FR_W=""; FR_T=""; FR_Q=""; FR_H=""; FR_WHY=""
+  if ! { declare -F proof_findings >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_finding_rating >/dev/null 2>&1; then
+    FR_WHY="the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB"; return 1
+  fi
+  rec="${id%#*}"; n="${id##*#}"
+  got="$(awk -v ev="$rec" "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE == ev { q = PROOF_QUESTION; h = PROOF_HEAD }
+    END { if (q != "") print q "\t" h }' "$plan")"
+  if [ -z "$got" ]; then
+    FR_WHY="$(clean "$rec") is no reading registered under ## SDLC State (no proved: kind=review line names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
+    return 1
+  fi
+  FR_Q="${got%%	*}"; FR_H="${got#*	}"
+  got="$(proof_findings "$(docs_root "$repo")/$rec" 2>/dev/null)" || got=""
+  if ! printf '%s\n' "$got" | awk -F'\t' -v n="$n" '$1 == n { f = 1 } END { exit !f }'; then
+    FR_WHY="the reading $(clean "$rec") holds no finding $n (it holds $(printf '%s\n' "$got" | awk -F'\t' '$1 ~ /^[0-9]+$/ { printf "%s%s", (k++ ? ", " : ""), $1 } END { if (!k) printf "none" }'))"
+    return 1
+  fi
+  IFS='	' read -r _ FR_S FR_R FR_W _ _ FR_T <<FINDING_READ
+$(printf '%s\n' "$got" | awk -F'\t' -v n="$n" '$1 == n { print; exit }')
+FINDING_READ
+  set -- $(proof_finding_rating "$plan" "$id" "$FR_S" "$FR_R")
+  FR_P="${3:-}"
+  return 0
+}
+
 deferral_sentence() {  # <plan> <record>#<n> -> the stated sentence, unescaped (nothing when none); exit 1: no deferred: line
   local l
   l="$(deferral_line "$1" "$2")" || return 1
@@ -6179,6 +6932,84 @@ EOF
     exit 0
     ;;
 
+  # A RULING FOR A LIVE WRITER (wave-33 T10; REQ-1 AC-1.1 to AC-1.4, D1). The orchestrator's binding
+  # instruction to one writer while it works: a `ruling/v1` line on this session's roster (lib/roster.sh
+  # `ruling_record`, which owns the state and its one reader). hooks/ruling-push.sh carries it on the
+  # writer's next tool result; the writer's commit and `ready` refuse while it is unread. `rulings` reads
+  # the state; `ruling-ack` is the writer's own acknowledgement, from its tree (the session key is the
+  # orchestrator's in a teammate's shell, so it finds the same roster).
+  #
+  # REFUSED, exit 2, with the reason (AC-1.3): a name no row of this roster carries, or a row that is
+  # closed (`roster_open_names`, the one reader of "is this name closed": ended, or acked after its
+  # launch). A ruling for either would never be shown, so it is never written. No session key is 3,
+  # as everywhere in this file.
+  rule|ruling-ack|rulings)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A ruling lives on ONE session's roster, so without the key there is nothing to read or write."
+      exit 3
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for."
+      exit 2
+    fi
+    case "$VERB" in
+      rule)
+        if ! grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null | grep -qF "|name=${RULE_WRITER}|"; then
+          die "REFUSED — no row named $RULE_WRITER on this session's roster ($ROSTER_FILE); a ruling names one live writer."
+          exit 2
+        fi
+        if ! roster_open_names "$ROSTER_FILE" "$(roster_ack_ledger "$ROSTER_FILE")" | grep -qxF "$RULE_WRITER"; then
+          die "REFUSED — $RULE_WRITER's row is closed (ended, or acked after its launch): a ruling for it would never be shown. Nothing written."
+          exit 2
+        fi
+        RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT")" || RULE_ID=""
+        if [ -z "$RULE_ID" ]; then
+          die "REFUSED — could not write the ruling to $ROSTER_FILE."
+          exit 2
+        fi
+        say "ruling $RULE_ID recorded for $RULE_WRITER — its next tool result carries it, and its commit and ready are refused until it is shown; read it with: rulings $RULE_WRITER"
+        exit 0 ;;
+      ruling-ack)
+        RA_LINE="$(ruling_fold "$ROSTER_FILE" | awk -F"$RULING_US" -v id="$RULING_ID" '$1 == id { print; exit }')"
+        if [ -z "$RA_LINE" ]; then
+          die "REFUSED — no ruling $RULING_ID on this session's roster ($ROSTER_FILE)."
+          exit 2
+        fi
+        IFS="$RULING_US" read -r RA_ID RA_W RA_REC RA_P RA_C RA_S RA_B RA_T <<< "$RA_LINE"
+        if [ -n "$RA_S" ]; then
+          say "ruling $RA_ID was already shown to $RA_W (shown=$RA_S by=${RA_B:-?}); nothing to do"
+          exit 0
+        fi
+        RA_NOW="$(date +%s)"
+        ruling_stamp "$ROSTER_FILE" "$RA_ID" "$RA_W" "shown=$RA_NOW" "by=ack" || {
+          die "REFUSED — could not write to $ROSTER_FILE."
+          exit 2
+        }
+        say "ruling $RA_ID acknowledged — shown=$RA_NOW; your commit and ready no longer wait on it"
+        exit 0 ;;
+      rulings)
+        RS_ANY=no
+        while IFS="$RULING_US" read -r RS_ID RS_W RS_REC RS_P RS_C RS_S RS_B RS_T; do
+          [ -n "$RS_ID" ] || continue
+          RS_ANY=yes
+          RS_STATE="unread"
+          [ -z "$RS_S" ] || RS_STATE="shown=$RS_S by=${RS_B:-?}"
+          say "ruling $RS_ID $RS_W recorded=$RS_REC${RS_P:+ pushed=$RS_P} $RS_STATE — $RS_T"
+        done <<< "$(ruling_fold "$ROSTER_FILE" "$RULE_WRITER")"
+        [ "$RS_ANY" = yes ] || say "no ruling for $RULE_WRITER on this session's roster"
+        exit 0 ;;
+    esac
+    ;;
+
   # THE FILL'S ANSWER, RECORDED (wave-27 T34; REQ-15 AC-15.1, AC-15.5; D24; design ledger Δ9). The
   # turn-end wall read its answer out of the reply, so the orchestrator answered it with a
   # `fill-declined:` line the user read on every turn. As `hold` writes the stand-down's answer where
@@ -6262,6 +7093,27 @@ EOF
         die "REFUSED — a decline is a reason, and '$(clean "$DC_WHY")' carries no letter or digit; nothing was recorded."
         exit 1 ;;
     esac
+    # WHAT THE HOLD WAITS ON (wave-30 T16; REQ-12 AC-12.7, Δ13; F11: 23.4% of wave-28's build
+    # wait-minutes were order holds written only in decline reasons). A row of the plan is a holder
+    # the table can carry: for each declined row the `task-set` line that writes the wait as a read,
+    # which the tick then judges once (`units_hold_read`). ANYTHING ELSE IS REFUSED (wave-33 T7; REQ-4
+    # AC-4.3, D8): a path is a shared file, and a shared file is no dependency (`ready` reconciles it on
+    # the line), and a word that is neither names nothing the tick can judge; wave-30 recorded both
+    # with `declined-on=` the value, which read as a dependency nothing held. The refusal records
+    # nothing and prints the call that succeeds, the same decline without `--on`.
+    if [ -n "$DC_ON" ]; then
+      DC_ON="$(clean "$DC_ON")"
+      case "$DC_ROWS" in
+        *" $DC_ON "*) : ;;
+        *)
+          case "$DC_ON" in
+            */*|*.*) die "REFUSED — --on $DC_ON: a shared file is no dependency; \`ready\` reconciles $DC_ON on the line, and a CONFLICT returns the row to merge. Nothing was recorded." ;;
+            *) die "REFUSED — --on $DC_ON names no row of $SCHED_PLAN, and only a row is a wait the tick can judge. Nothing was recorded." ;;
+          esac
+          pv_next decline "$DC_IDS" "$DC_REASON"
+          exit 1 ;;
+      esac
+    fi
     DC_LED="$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" || DC_LED=""
     DC_ALL="$DC_NAMED"
     DC_SD="$(fill_standing_decline "$DC_LED" "$SESSION_ID" "")"
@@ -6276,21 +7128,10 @@ EOF
       die "REFUSED — the run's fill ledger (${DC_LED:-no path}) cannot be written; nothing was recorded."
       exit 2
     fi
-    # WHAT THE HOLD WAITS ON (wave-30 T16; REQ-12 AC-12.7, Δ13; F11: 23.4% of wave-28's build
-    # wait-minutes were order holds written only in decline reasons). A row of the plan is a holder
-    # the table can carry: for each declined row the `task-set` line that writes the wait as a read,
-    # which the tick then judges once (`units_hold_read`). A path is a shared file, and a shared file
-    # is no dependency: `ready` reconciles it on the line. Anything else, or nothing, is a hand-hold
-    # the tick cannot judge, and the verb says so. Never a refusal: the line is recorded either way,
-    # with `declined-on=` the row, the file, or `-`.
+    # The line is recorded with `declined-on=` the row, or `-` with no --on (a hand-hold the tick
+    # cannot judge, and the verb says so).
     DC_ON_AS=-
-    if [ -n "$DC_ON" ]; then
-      DC_ON="$(clean "$DC_ON")"
-      case "$DC_ROWS" in
-        *" $DC_ON "*) DC_ON_AS=row ;;
-        *) case "$DC_ON" in */*|*.*) DC_ON_AS=file ;; esac ;;
-      esac
-    fi
+    [ -z "$DC_ON" ] || DC_ON_AS=row
     DC_CUR="$(_fill_current_field "$SCHED_PLAN")"
     DC_LINE="fill-ledger/v1|at=$(iso_now)|session=${SESSION_ID}|turn=|current=${DC_CUR//|/ }|state=decline"
     DC_LINE="${DC_LINE}|ceiling=${SCHED_WRITERS}|width=|open=|free=|ready=${DC_ALL// /,}|launched="
@@ -6300,6 +7141,7 @@ EOF
       die "REFUSED — could not write to $DC_LED; nothing was recorded."
       exit 2
     fi
+    for DC_ID in $DC_NAMED; do poker_owed_close "$REPO_REAL" "decline:$DC_ID" "decline"; done
     say "decline — ${DC_NAMED// /,}: recorded in $DC_LED; it stands for those rows until a row it did not name is ready."
     DC_UNREC="unrecorded as a dependency: this hold is a hand-hold the tick cannot judge; it stands only in the decline's reason"
     case "$DC_ON_AS" in
@@ -6312,14 +7154,8 @@ EOF
             say "decline — $DC_ID waits on $DC_ON, which writes no path to read: $DC_UNREC."
           fi
         done ;;
-      file)
-        say "decline — on $DC_ON: a shared file is no dependency; \`ready\` reconciles $DC_ON on the line: a CONFLICT returns the row to merge." ;;
       *)
-        if [ -n "$DC_ON" ]; then
-          say "decline — --on $DC_ON names no row of $SCHED_PLAN and no file: $DC_UNREC."
-        else
-          say "decline — $DC_UNREC; name what it waits on with --on <row|file>."
-        fi ;;
+        say "decline — $DC_UNREC; name the row it waits on with --on <row>." ;;
     esac
     exit 0
     ;;
@@ -6835,6 +7671,22 @@ EOF
     # ledger lines' born: markers (`units_born`, the one place the count reads); (3) no Files path outside
     # the record already carries three review-born rows: the fourth fix on one component stops the run.
     # In-diff is the orchestrator's judgment and "never re-read" the proof's; neither is this verb's.
+    # THE FINDINGS A ROW ANSWERS (wave-33 T13; REQ-5, D6): each is a finding of a reading the plan registered,
+    # read from its record (`finding_read`); the row's rating is the gravest of them, the lowest S and then on
+    # before off, and the guards below hold it as they hold a typed rating.
+    TA_BORN_MARK=""
+    if [ -n "$TA_BORN_IDS" ]; then
+      TA_BEST=""
+      for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
+        if ! finding_read "$TA_PLAN" "$REPO_REAL" "$TA_BID"; then
+          die "task-add refused — $FR_WHY; the plan is unchanged."
+          exit 1
+        fi
+        TA_RANK="${FR_S#S}$( [ "$FR_R" = on ] && printf 0 || printf 1 )"
+        if [ -z "$TA_BEST" ] || [ "$TA_RANK" -lt "$TA_BEST" ]; then TA_BEST="$TA_RANK"; TA_BORN="review $FR_S $FR_R"; fi
+      done
+      TA_BORN_MARK=" of=$TA_BORN_IDS"
+    fi
     TA_CELL_TASK="$TA_TASK"
     if [ -n "$TA_BORN" ]; then
       TA_RATING="${TA_BORN#review }"
@@ -6874,7 +7726,7 @@ EOF
     fi
 
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "$TA_BORN" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -6883,12 +7735,33 @@ EOF
     if [ -n "$TA_VIOL" ]; then
       die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
       printf '%s\n' "$TA_VIOL" >&2
+      # THE RELEASE'S APPROVAL READ IS ONE RETRY (wave-33 T7; REQ-4 AC-4.3, D8). The validator names the
+      # token; the call carries it in the reads operand, beside the kind's default the written cell would
+      # otherwise drop (a doc row's `approval:plan, head`, lib/units.sh). Printed only when that is the one
+      # violation, for only then does the call succeed.
+      case "$(printf '%s\n' "$TA_VIOL" | /usr/bin/grep -c .)|$TA_VIOL" in
+        "1|$TA_ID: a doc row at step 7 or later is the release"*)
+          case "$TA_READS" in
+            ''|'—'|'-') TA_FIX="approval:plan, head, approval:release" ;;
+            *) TA_FIX="$TA_READS, approval:release" ;;
+          esac
+          if [ -n "$TA_BORN" ]; then
+            pv_next task-add "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_FIX" --born "$TA_BORN"
+          else
+            pv_next task-add "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_FIX"
+          fi ;;
+      esac
       exit 1
     fi
 
     plan_verb_swap task-add "$TA_ID added" writer
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
+    # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
+    for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
+      poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
+      say "task-add — $TA_ID answers $(clean "$TA_BID")"
+    done
     # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
     # that shares no file with its holder is named, with the line that would loosen it, never run.
     suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
@@ -6904,64 +7777,126 @@ EOF
   # names `amend`, the verb that widens it. `task-set` is judged by `units_validate` before the
   # gate, as `task-add` is: a status, step or deps cell is a schedule change.
   task-set|ledger-add|ledger-set)
+    # THE ROWS A CALL SETS (wave-33 T7). One entry per row: its id and its pairs, joined by the unit
+    # separator. A ledger verb names one row; task-set's groups name many, each id with its group's pairs.
+    PV_SETS=()
+    if [ "$VERB" = task-set ]; then
+      for _pv_g in "${PV_GROUPS[@]}"; do
+        _pv_ids="${_pv_g%%$'\037'*}"; _pv_rest="${_pv_g#*$'\037'}"
+        while [ -n "$_pv_ids" ]; do
+          _pv_i="${_pv_ids%%,*}"
+          case "$_pv_ids" in *,*) _pv_ids="${_pv_ids#*,}" ;; *) _pv_ids="" ;; esac
+          _pv_i="$(printf '%s' "$_pv_i" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          PV_SETS+=("$_pv_i"$'\037'"$_pv_rest")
+        done
+      done
+    else
+      _pv_rest=""
+      for _pv_a in ${PV_PAIRS[@]+"${PV_PAIRS[@]}"}; do _pv_rest="${_pv_rest:+$_pv_rest$'\037'}$_pv_a"; done
+      PV_SETS=("$PV_ID"$'\037'"$_pv_rest")
+    fi
+    # pv_set_pairs <set> -> PV_SET_ID and PV_SET_PAIRS, the set taken apart.
+    pv_set_pairs() {
+      local r="${1#*$'\037'}" p
+      PV_SET_ID="${1%%$'\037'*}"; PV_SET_PAIRS=()
+      while [ -n "$r" ]; do
+        p="${r%%$'\037'*}"
+        case "$r" in *$'\037'*) r="${r#*$'\037'}" ;; *) r="" ;; esac
+        PV_SET_PAIRS+=("$p")
+      done
+    }
     # THE ID AND THE COLUMN NAME ARE OPERANDS TOO (wave-24 T27; Step-6 review C1). `ledger-add`
     # writes its id into the new row's first cell, and a line break there forged a plan line
     # the commit gate admitted. The id is one token of the grammar every ledger row already
     # carries (`T7`, `T22b`, `T17-critic`); a name is held to the values' own rule.
-    if ! plan_verb_id_ok "$PV_ID"; then
-      die "REFUSED — '$(clean "$PV_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. The plan is unchanged."
-      exit 1
-    fi
-    for _pv_a in ${PV_PAIRS[@]+"${PV_PAIRS[@]}"}; do
-      _pv_n="${_pv_a%%=*}"
-      if ! plan_verb_value_ok "$_pv_n"; then
-        die "REFUSED — the column name '$(clean "$_pv_n")' carries a |, a tab or a line break, which no table header can hold; the plan is unchanged."
+    for _pv_s in "${PV_SETS[@]}"; do
+      pv_set_pairs "$_pv_s"
+      if ! plan_verb_id_ok "$PV_SET_ID"; then
+        die "REFUSED — '$(clean "$PV_SET_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. The plan is unchanged."
         exit 1
       fi
-      if ! plan_verb_value_ok "${_pv_a#*=}"; then
-        die "REFUSED — the value for $_pv_n carries a |, a tab or a line break, which no table cell can hold; the plan is unchanged."
-        exit 1
-      fi
-      [ "$VERB" = task-set ] || continue
-      _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
-      case "$_pv_l" in
-        files)
-          die "REFUSED — task-set does not write Files — widen a dispatched contract with amend: bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason <why>. The plan is unchanged."
-          exit 1 ;;
-        id)
-          die "REFUSED — id is the key task-set finds $PV_ID by, not a cell to set; the plan is unchanged."
-          exit 1 ;;
-        rigor) _pv_l=kind ;;
-      esac
-      PV_COLS="${PV_COLS:-} $_pv_l"
-    done
-    plan_verb_open "$VERB"
-    if [ "$VERB" = task-set ]; then
-      for _pv_l in ${PV_COLS:-}; do
-        if ! units_has_column "$PV_PLAN" "$_pv_l"; then
-          die "REFUSED — the ## Tasks header of $PV_PLAN carries no column $_pv_l; the plan is unchanged."
+      for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
+        _pv_n="${_pv_a%%=*}"
+        if ! plan_verb_value_ok "$_pv_n"; then
+          die "REFUSED — the column name '$(clean "$_pv_n")' carries a |, a tab or a line break, which no table header can hold; the plan is unchanged."
           exit 1
         fi
+        if ! plan_verb_value_ok "${_pv_a#*=}"; then
+          die "REFUSED — the value for $_pv_n carries a |, a tab or a line break, which no table cell can hold; the plan is unchanged."
+          exit 1
+        fi
+        [ "$VERB" = task-set ] || continue
+        _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
+        case "$_pv_l" in
+          files)
+            die "REFUSED — task-set does not write Files — widen a dispatched contract with amend: bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason <why>. The plan is unchanged."
+            exit 1 ;;
+          id)
+            die "REFUSED — id is the key task-set finds $PV_SET_ID by, not a cell to set; the plan is unchanged."
+            exit 1 ;;
+          rigor) _pv_l=kind ;;
+        esac
+        PV_COLS="${PV_COLS:-} $_pv_l"
       done
+    done
+    plan_verb_open "$VERB"
+    PV_TABLE="## Tasks"; [ "$VERB" = task-set ] || PV_TABLE="## Dispatch ledger"
+    # AN UNKNOWN COLUMN NAMES THE CALL THAT SUCCEEDS (wave-33 T7; REQ-4 AC-4.3). The header's columns are
+    # listed, and the call is printed again with each unknown name replaced by the one column it was
+    # meant as (`pv_column_guess`); a name with no such column is left out of it, and said so.
+    pv_cols_refuse() {  # <columns, one per line>
+      local cols="$1" t want=1 out
+      local -a call
+      call=()
+      for t in "${PV_ARGS[@]}"; do
+        if [ "$want" = 1 ]; then call+=("$t"); want=0; continue; fi
+        case "$t" in
+          --) call+=("$t"); want=1; continue ;;
+        esac
+        pv_fix_pairs "$cols" "$t"
+        [ "${#PV_FIXED[@]}" -eq 0 ] || call+=("${PV_FIXED[0]}")
+        [ -z "$PV_UNKNOWN" ] || out="${out:+$out, }$PV_UNKNOWN"
+      done
+      die "The $PV_TABLE columns: $(printf '%s\n' "$cols" | paste -sd, - | sed 's/,/, /g')."
+      [ -z "${out:-}" ] || die "No column is like: ${out}; the call below leaves it out."
+      pv_next "$VERB" "${call[@]}"
+    }
+    if [ "$VERB" = task-set ]; then
+      PV_BAD=""
+      for _pv_l in ${PV_COLS:-}; do
+        units_has_column "$PV_PLAN" "$_pv_l" || PV_BAD="${PV_BAD:+$PV_BAD, }$_pv_l"
+      done
+      if [ -n "$PV_BAD" ]; then
+        die "REFUSED — the ## Tasks header of $PV_PLAN carries no column $PV_BAD; the plan is unchanged."
+        pv_cols_refuse "$(pv_header_cells "$PV_PLAN" tasks | awk '{ l = tolower($0) } l != "id" && l != "files" { print l }')"
+        exit 1
+      fi
     fi
     case "$VERB" in
       task-set)   PV_MODE=set; PV_SECT=tasks ;;
       ledger-set) PV_MODE=set; PV_SECT=ledger ;;
       ledger-add) PV_MODE=add; PV_SECT=ledger ;;
     esac
-    PV_RC=0
-    units_table_cells "$PV_PLAN" "$PV_MODE" "$PV_SECT" "$PV_ID" "${PV_PAIRS[@]}" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    PV_TABLE="## Tasks"; [ "$PV_SECT" = ledger ] && PV_TABLE="## Dispatch ledger"
-    case "$PV_RC" in
-      0) : ;;
-      1) die "REFUSED — $PV_PLAN carries no $PV_TABLE table; the plan is unchanged."; exit 1 ;;
-      2) if [ "$PV_MODE" = add ]; then die "REFUSED — the $PV_TABLE table already carries a row $PV_ID; set its cells with ledger-set. The plan is unchanged."
-         else die "REFUSED — the $PV_TABLE table carries no row $PV_ID; the plan is unchanged."; fi
-         exit 1 ;;
-      3) die "REFUSED — the $PV_TABLE header carries no column named in: ${PV_PAIRS[*]%%=*}; the plan is unchanged."; exit 1 ;;
-      5) die "REFUSED — the $PV_TABLE table carries more than one row $PV_ID; which one is meant is not the verb's to guess. The plan is unchanged."; exit 1 ;;
-      *) die "REFUSED — the value cannot be written as a table cell; the plan is unchanged."; exit 1 ;;
-    esac
+    cp "$PV_PLAN" "$PV_NEW"
+    PV_WHAT=""
+    for _pv_s in "${PV_SETS[@]}"; do
+      pv_set_pairs "$_pv_s"
+      PV_RC=0
+      units_table_cells "$PV_NEW" "$PV_MODE" "$PV_SECT" "$PV_SET_ID" "${PV_SET_PAIRS[@]}" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
+      case "$PV_RC" in
+        0) mv -f "$PV_NEW.2" "$PV_NEW" ;;
+        1) die "REFUSED — $PV_PLAN carries no $PV_TABLE table; the plan is unchanged."; exit 1 ;;
+        2) if [ "$PV_MODE" = add ]; then die "REFUSED — the $PV_TABLE table already carries a row $PV_SET_ID; set its cells with ledger-set. The plan is unchanged."
+           else die "REFUSED — the $PV_TABLE table carries no row $PV_SET_ID; the plan is unchanged."; fi
+           exit 1 ;;
+        3) die "REFUSED — the $PV_TABLE header carries no column named in: ${PV_SET_PAIRS[*]%%=*}; the plan is unchanged."
+           pv_cols_refuse "$(pv_header_cells "$PV_PLAN" "$PV_SECT")"
+           exit 1 ;;
+        5) die "REFUSED — the $PV_TABLE table carries more than one row $PV_SET_ID; which one is meant is not the verb's to guess. The plan is unchanged."; exit 1 ;;
+        *) die "REFUSED — the value cannot be written as a table cell; the plan is unchanged."; exit 1 ;;
+      esac
+      PV_WHAT="${PV_WHAT:+$PV_WHAT; }$PV_SET_ID ${PV_SET_PAIRS[*]}"
+    done
     if [ "$VERB" = task-set ]; then
       PV_VIOL="$(units_validate "$PV_NEW" 2>&1)"
       if [ -n "$PV_VIOL" ]; then
@@ -6970,13 +7905,15 @@ EOF
         exit 1
       fi
     fi
-    PV_WHAT="$PV_ID ${PV_PAIRS[*]}"
     [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
     plan_verb_swap "$VERB" "$PV_WHAT" writer
     say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
     # THE SUSPECT TEST AT EVERY RE-AUTHORING (wave-30 T16; AC-12.2): task-set prints it as task-add does.
     if [ "$VERB" = task-set ]; then
-      suspect_lines "$PV_PLAN" "$PV_ID" | while IFS=$'\t' read -r _ _ PV_SUSPECT; do say "$(clean_whole "$PV_SUSPECT")"; done
+      for _pv_s in "${PV_SETS[@]}"; do
+        pv_set_pairs "$_pv_s"
+        suspect_lines "$PV_PLAN" "$PV_SET_ID" | while IFS=$'\t' read -r _ _ PV_SUSPECT; do say "$(clean_whole "$PV_SUSPECT")"; done
+      done
     fi
     exit 0
     ;;
@@ -6996,7 +7933,16 @@ EOF
   # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
   # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
   # same landing finds the plan already so and writes nothing.
-  row-landed)
+  #
+  # A PLACEHOLDER LEAD IS REPLACED, NOT KEPT (wave-33 T6; REQ-3 AC-3.3, D5). A line that opens
+  # `pending dispatch` (the Step-3 template, `task-add`, `task-split`) gives that lead to the landing
+  # text and keeps the rest of its words, a ` born: ` marker included (`units_born` reads it there):
+  # `- T5: pending dispatch — .worktrees/01-T5` lands as `- T5: landed <commit> <at> — .worktrees/01-T5`.
+  #
+  # `deliver <row>` (wave-33 T6; D5) is this verb for a record row: `deliver_check` reads what the row
+  # owes and sets the commit (the working head), the instant (now) and the artifact, which is
+  # written into the ledger line's `artifact` cell beside the landed one, in this same write.
+  row-landed|deliver)
     if ! plan_verb_id_ok "$PV_ID"; then
       die "REFUSED — '$(clean "$PV_ID")' is not one row id; the plan is unchanged."
       exit 1
@@ -7006,6 +7952,7 @@ EOF
       exit 1
     fi
     plan_verb_open row-landed
+    [ "$VERB" != deliver ] || deliver_check
     PV_RC=0
     units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
@@ -7028,6 +7975,7 @@ EOF
         RL_REST="$(units_step_text "$PV_NEW" "$PV_ID" 2>/dev/null)"
         case " $RL_REST " in
           *" $RL_TEXT "*) RL_LINE="$RL_REST" ;;
+          " pending dispatch "*) RL_LINE="$RL_TEXT${RL_REST#pending dispatch}" ;;
           *) RL_LINE="${RL_REST:+$RL_REST }$RL_TEXT" ;;
         esac
         if ! units_step_line "$PV_NEW" "$PV_ID" "$RL_LINE" > "$PV_NEW.2" 2>/dev/null; then
@@ -7049,6 +7997,16 @@ EOF
       5) die "REFUSED — the ## Dispatch ledger table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
       *) die "REFUSED — the ledger row $PV_ID cannot take its landed cell; the plan is unchanged."; exit 1 ;;
     esac
+    # A DELIVERED ROW'S LEDGER LINE NAMES ITS ARTIFACT (wave-33 T6; AC-3.1): the cell the artifact was
+    # read from, or the empty one of a line this landing added. A ledger with no artifact column has
+    # no cell to hold it, and the landing stands without one.
+    if [ -n "$RL_ARTIFACT" ] && [ "$PV_RC" -eq 0 ]; then
+      if units_table_cells "$PV_NEW" set ledger "$PV_ID" "artifact=$RL_ARTIFACT" > "$PV_NEW.2" 2>/dev/null; then
+        mv -f "$PV_NEW.2" "$PV_NEW"
+      else
+        rm -f "$PV_NEW.2"
+      fi
+    fi
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
     # A hand landing's record carries no verdict, so it writes none. Same copy, same dry commit, same swap.
@@ -7062,6 +8020,7 @@ EOF
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
     say "evidence: $RL_N cell(s) written by landing"
+    [ "$VERB" != deliver ] || say "deliver — $PV_ID: artifact $RL_ARTIFACT present; landed at the working head $RL_COMMIT."
     exit 0
     ;;
 
@@ -7094,11 +8053,12 @@ EOF
   # THE STEP-FIELD VERB (wave-28 T8; REQ-3 AC-3.5, D17). A `- Step N:` block is the evidence the gate reads, and
   # the fields it reads were hand edits: `units_step_fields --replace` writes one `  <key>: <value>` line under
   # the step line, after the block last line, or replaces the line where it stands (the gate reads the first
-  # line of a key, so a second could not win); the rest of the plan is the same bytes. Nine keys, the ones the
+  # line of a key, so a second could not win); the rest of the plan is the same bytes. Ten keys, the ones the
   # gate reads at Steps 4, 5, 7 and 8: head cmd pass total output (the regression run), merge worktree-removed (the
-  # integration), adr (the document step), share (the Step-4 fact). It takes the plan transaction every row verb
+  # integration), adr (the document step), share (the Step-4 fact), walk-artifact (the walk gate's pointer, Step 5
+  # alone; wave-33 T7). It takes the plan transaction every row verb
   # takes (copy, dry commit through the real gate, checksum, swap), so a plan the gate would refuse is not
-  # written. REFUSED (1), the plan unchanged: a key outside the nine, a value with a line break, a step with no
+  # written. REFUSED (1), the plan unchanged: a key outside the ten, a value with a line break, a step with no
   # line (step-line writes it), a key the step line itself carries (step-line owns that text), and Step 9
   # (close-out writes that block). The refusals are this verb family die lines, not refuse.sh refusals.
   step-field)
@@ -7108,12 +8068,27 @@ EOF
         exit 1 ;;
     esac
     case "$PV_FKEY" in
-      head|cmd|pass|total|output|merge|worktree-removed|adr|share) : ;;
+      head|cmd|pass|total|output|merge|worktree-removed|adr|share|walk-artifact) : ;;
       *)
         die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field; the plan is unchanged."
-        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, adr, share."
+        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, adr, share, walk-artifact (Step 5)."
         exit 1 ;;
     esac
+    # THE WALK POINTER (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-42). The walk gate reads `walk-artifact:`
+    # from the Step-5 block alone (walls.sh `step5_evidence_block`), so the key is written there and at no
+    # other step; and it refuses a path that climbs out with `..`, so the verb refuses it first.
+    if [ "$PV_FKEY" = walk-artifact ]; then
+      if [ "$PV_KEY" != 5 ]; then
+        die "REFUSED — walk-artifact is read from the Step 5 block only (the walk gate's), not Step $PV_KEY's; the plan is unchanged."
+        pv_next step-field 5 "walk-artifact=$PV_FVAL"
+        exit 1
+      fi
+      case "/$PV_FVAL/" in
+        */../*)
+          die "REFUSED — the walk artifact '$(clean "$PV_FVAL")' has a '..' component, which the walk gate refuses: name it under record/. The plan is unchanged."
+          exit 1 ;;
+      esac
+    fi
     case "$PV_FVAL" in
       *$'\n'*|*$'\r'*)
         die "REFUSED — a step field is one line, and the value has a line break; the plan is unchanged."
@@ -7199,22 +8174,7 @@ EOF
   discharge)
     plan_verb_open discharge
     PV_RC=0
-    DS_AC="$DS_AC" awk '
-      BEGIN { a = ENVIRON["DS_AC"] }
-      /^[ \t]*```/ { fence = !fence; print; next }
-      fence { print; next }
-      /^## / { inm = ($0 ~ /^## Verification Matrix/); print; next }
-      inm && !done && /^[ \t]*\|/ {
-        n = split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
-        if (id == a) {
-          if (n != 7) { bad = 1; exit }
-          c[6] = " CONFIRMED "; out = c[1]
-          for (j = 2; j <= n; j++) out = out "|" c[j]
-          print out; done = 1; next
-        }
-      }
-      { print }
-      END { if (bad) exit 4; if (!done) exit 3 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    matrix_row_cells "$PV_PLAN" "$DS_AC" 5=CONFIRMED > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
       0) : ;;
       3) die "REFUSED — the matrix table has no row $DS_AC; the plan is unchanged."
@@ -7226,6 +8186,430 @@ EOF
     esac
     plan_verb_swap discharge "$DS_AC's auditor cell CONFIRMED" writer
     say "discharge — $DS_AC: auditor CONFIRMED, written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE MATRIX ROW'S CELLS AND BLOCK KEYS (wave-33 T7; REQ-4 AC-4.1, D8). Wave-32 moved its matrix by hand:
+  # statuses to waived and discharged, evidence to the fix rows' records, multi-row task keys (A-orch-38, 40,
+  # 41, 47). `status=` writes the table's status cell; `evidence=` the evidence cell AND the AC block's
+  # `evidence:` key, so the table and the block name the same path (research G3); `task=` the block's `task:`
+  # key, each id a `## Tasks` row, joined `, `. The tier cell is the plan's, set at Step 3; the auditor cell
+  # is discharge's. `status=waived` stands only beside the block's `waiver:` line, which waive-row writes on
+  # the user's words. Every key is judged before any is written, and the call is one plan transaction.
+  # REFUSED (1), the plan unchanged: a key outside the three, a status outside the gate's four, an evidence
+  # path outside record/ or with a `..`, a task id no row carries, an AC with no row, a block key on an AC
+  # with no block.
+  matrix-set)
+    MS_HAS_S=0; MS_HAS_E=0; MS_HAS_T=0; MS_STATUS=""; MS_EV=""; MS_TASK=""
+    for _pv_a in "${MS_PAIRS[@]}"; do
+      _pv_k="${_pv_a%%=*}"; _pv_v="${_pv_a#*=}"
+      if ! plan_verb_value_ok "$_pv_v"; then
+        die "REFUSED — the value for $(clean "$_pv_k") carries a |, a tab or a line break, which no matrix cell can hold; the plan is unchanged."
+        exit 1
+      fi
+      case "$_pv_k" in
+        status)   MS_HAS_S=1; MS_STATUS="$_pv_v" ;;
+        evidence) MS_HAS_E=1; MS_EV="$_pv_v" ;;
+        task)     MS_HAS_T=1; MS_TASK="$_pv_v" ;;
+        tier)
+          die "REFUSED — the tier cell is the plan's, set at Step 3 with the criterion's eval; matrix-set never writes it. The plan is unchanged."
+          exit 1 ;;
+        auditor)
+          die "REFUSED — the auditor cell is discharge's, and it holds the bare token CONFIRMED; the plan is unchanged."
+          pv_next discharge "$MS_AC"
+          exit 1 ;;
+        *)
+          die "REFUSED — '$(clean "$_pv_k")' is no key matrix-set writes: status, evidence or task. The plan is unchanged."
+          pv_fix_pairs "$(printf 'status\nevidence\ntask\n')" "${MS_PAIRS[@]}"
+          [ "${#PV_FIXED[@]}" -eq 0 ] || pv_next matrix-set "$MS_AC" "${PV_FIXED[@]}"
+          exit 1 ;;
+      esac
+    done
+    if [ "$MS_HAS_S" = 1 ]; then
+      case "$MS_STATUS" in
+        pending|blocked|discharged|waived) : ;;
+        *)
+          die "REFUSED — '$(clean "$MS_STATUS")' is no matrix status; the gate reads pending, blocked, discharged, waived. The plan is unchanged."
+          exit 1 ;;
+      esac
+    fi
+    if [ "$MS_HAS_E" = 1 ]; then
+      case "$MS_EV" in
+        record/?*) : ;;
+        *)
+          die "REFUSED — the evidence '$(clean "$MS_EV")' is not under record/: a matrix path is docs-root relative, record/<…>. The plan is unchanged."
+          case "$MS_EV" in
+            */record/?*) pv_fix_pairs "$(printf 'status\nevidence\ntask\n')" "${MS_PAIRS[@]/#evidence=*/evidence=record/${MS_EV#*/record/}}"
+                         pv_next matrix-set "$MS_AC" "${PV_FIXED[@]}" ;;
+          esac
+          exit 1 ;;
+      esac
+      case "/$MS_EV/" in
+        */../*)
+          die "REFUSED — the evidence '$(clean "$MS_EV")' has a '..' component; name it under record/. The plan is unchanged."
+          exit 1 ;;
+      esac
+    fi
+    plan_verb_open matrix-set
+    if [ -z "$(matrix_row_cell "$PV_PLAN" "$MS_AC" 1)" ]; then
+      die "REFUSED — the matrix table has no row $MS_AC; the plan is unchanged."
+      exit 1
+    fi
+    if [ "$MS_HAS_T" = 1 ]; then
+      MS_ROWS=" $(units_rows "$PV_PLAN" 2>/dev/null | cut -f1 | tr '\n' ' ')"
+      MS_IDS=""; MS_MISS=""
+      for _pv_i in $(printf '%s' "$MS_TASK" | tr ',' ' '); do
+        case "$MS_ROWS" in
+          *" $_pv_i "*) MS_IDS="${MS_IDS:+$MS_IDS, }$_pv_i" ;;
+          *) MS_MISS="${MS_MISS:+$MS_MISS, }$(clean "$_pv_i")" ;;
+        esac
+      done
+      if [ -n "$MS_MISS" ] || [ -z "$MS_IDS" ]; then
+        die "REFUSED — task=$(clean "$MS_TASK") names ${MS_MISS:-no id}, no row of the ## Tasks table; the plan is unchanged."
+        exit 1
+      fi
+    fi
+    if [ "$MS_STATUS" = waived ] && ! matrix_block_has "$PV_PLAN" "$MS_AC" waiver; then
+      die "REFUSED — $MS_AC has no waiver: line, and a waived row is one the user waived in their own words; waive-row writes both. The plan is unchanged."
+      pv_next waive-row "$MS_AC" "<the user's words>" "<why>"
+      exit 1
+    fi
+    cp "$PV_PLAN" "$PV_NEW"
+    MS_CELLS=()
+    [ "$MS_HAS_S" = 0 ] || MS_CELLS+=("3=$MS_STATUS")
+    [ "$MS_HAS_E" = 0 ] || MS_CELLS+=("4=$MS_EV")
+    PV_RC=0
+    if [ "${#MS_CELLS[@]}" -gt 0 ]; then
+      matrix_row_cells "$PV_NEW" "$MS_AC" "${MS_CELLS[@]}" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    if [ "$PV_RC" -eq 0 ] && [ "$MS_HAS_E" = 1 ]; then
+      matrix_block_key "$PV_NEW" "$MS_AC" evidence "$MS_EV" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    if [ "$PV_RC" -eq 0 ] && [ "$MS_HAS_T" = 1 ]; then
+      matrix_block_key "$PV_NEW" "$MS_AC" task "$MS_IDS" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    case "$PV_RC" in
+      0) : ;;
+      4) die "REFUSED — the matrix row $MS_AC does not have five cells, so its cells cannot be found; the plan is unchanged."
+         exit 1 ;;
+      13) die "REFUSED — the matrix has no $MS_AC: block to hold the key; matrix-render writes it. The plan is unchanged."
+          pv_next matrix-render
+          exit 1 ;;
+      *) die "REFUSED — the matrix cannot be written (exit $PV_RC); the plan is unchanged."
+         exit 2 ;;
+    esac
+    plan_verb_swap matrix-set "$MS_AC ${MS_PAIRS[*]}" writer
+    say "matrix-set — $MS_AC: ${MS_PAIRS[*]} written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Wave-32's four row waivers were typed by hand (A-orch-49):
+  # the AC block's `  waiver: <who> <date> "<the user's words>" — <why>` line, which the gate reads as the
+  # row's waiver (walls.sh `row_is_waived`), and the status cell `waived`. The words are held to the rule a
+  # finding's move is (finding-move): lib/said.sh `user_said` finds them, as whole words and at least SAID_MIN_WORDS (three)
+  # of them unless they are a whole prompt, in a prompt the user typed in this session. Who is git
+  # user.name, the date UTC. A second waiver of the row replaces the first line. REFUSED (1), the plan
+  # unchanged: an AC with no row or no block, no git user.name, words the user did not type, too few words.
+  waive-row)
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
+      . "$BIONIC_LIB/said.sh"
+    fi
+    if ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    WR_WORDS="$(said_fold "$WR_RAW")"; WR_WHY="$(deferral_fold "$WR_WHY_RAW")"
+    plan_verb_open waive-row
+    if [ -z "$(matrix_row_cell "$PV_PLAN" "$WR_AC" 1)" ]; then
+      die "REFUSED — the matrix table has no row $WR_AC; the plan is unchanged."
+      exit 1
+    fi
+    WR_WHO="$(deferral_fold "$(git -C "$PV_REPO" config user.name 2>/dev/null)")"
+    if [ -z "$WR_WHO" ]; then
+      die "REFUSED — no git user.name is set for $PV_REPO, and a waiver records who made it; set it, then waive again. The plan is unchanged."
+      exit 1
+    fi
+    user_said "$WR_RAW"; WR_SAID=$?
+    if [ "$WR_SAID" -ne 0 ]; then
+      said_refuse "$WR_SAID" "$WR_WORDS" "a waiver"
+      exit 1
+    fi
+    WR_LINE="$WR_WHO $(date -u +%Y-%m-%d) \"$(deferral_escape "$WR_WORDS")\" — $WR_WHY"
+    PV_RC=0
+    matrix_row_cells "$PV_PLAN" "$WR_AC" 3=waived > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    if [ "$PV_RC" -eq 0 ]; then
+      matrix_block_key "$PV_NEW" "$WR_AC" waiver "$WR_LINE" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    case "$PV_RC" in
+      0) : ;;
+      4) die "REFUSED — the matrix row $WR_AC does not have five cells, so its status cannot be found; the plan is unchanged."
+         exit 1 ;;
+      13) die "REFUSED — the matrix has no $WR_AC: block to hold the waiver; matrix-render writes it. The plan is unchanged."
+          pv_next matrix-render
+          exit 1 ;;
+      *) die "REFUSED — the waiver cannot be written (exit $PV_RC); the plan is unchanged."
+         exit 2 ;;
+    esac
+    plan_verb_swap waive-row "the waiver of $WR_AC" writer
+    say "waive-row — $WR_AC waived on the user's words, by $(clean "$WR_WHO"): its waiver: line and status are on $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # A PROSE PARAGRAPH UNDER ## Tasks (wave-33 T7; REQ-4 AC-4.1, D8). Wave-32's shard-table paragraph was copied
+  # in and rewritten by hand (A-orch-24, 25). The paragraph is one line, written after the section's last
+  # paragraph below the table (after the table, a blank line between); `--replace '<first words>'` rewrites
+  # the one paragraph whose first line opens with those words, in place. A paragraph that is already there is
+  # nothing to write. REFUSED (1), the plan unchanged: a line break, a text that opens with | or # (a table
+  # row or a heading), no table under ## Tasks, --replace naming no paragraph or more than one.
+  tasks-prose)
+    case "$TP_TEXT" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — a paragraph here is one line, and the text carries a line break; the plan is unchanged."
+        exit 1 ;;
+    esac
+    TP_TEXT="$(printf '%s' "$TP_TEXT" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    TP_REPLACE="$(printf '%s' "$TP_REPLACE" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    case "$TP_TEXT" in
+      '|'*|'#'*)
+        die "REFUSED — a paragraph that opens with | or # reads as a table row or a heading; the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open tasks-prose
+    PV_RC=0
+    TP_TEXT="$TP_TEXT" TP_REPLACE="$TP_REPLACE" TP_HASREP="$TP_HASREP" TP_LIST="$PV_NEW.2" awk '
+      BEGIN { text = ENVIRON["TP_TEXT"]; rep = ENVIRON["TP_REPLACE"]; hasrep = (ENVIRON["TP_HASREP"] == 1); list = ENVIRON["TP_LIST"] }
+      { L[++nl] = $0 }
+      END {
+        for (i = 1; i <= nl; i++) {
+          x = L[i]
+          if (x ~ /^[ \t]*```/) fence = !fence
+          if (!fence && x ~ /^##[ \t]/) { if (st) break; if (x ~ /^##[ \t]+Tasks([ \t].*)?$/) st = 1; continue }
+          if (st == 1) { if (x ~ /^[ \t]*\|/) { st = 2; tend = i }; continue }
+          if (st == 2) { if (x ~ /^[ \t]*\|/) { tend = i; continue }; st = 3; last = tend }
+          if (st == 3) {
+            if (x ~ /[^ \t]/) { last = i; if (!inp) { np++; ps[np] = i; inp = 1 }; pe[np] = i } else inp = 0
+          }
+        }
+        if (!tend) exit 4
+        if (st == 2) last = tend
+        if (hasrep) {
+          for (p = 1; p <= np; p++) { y = L[ps[p]]; sub(/^[ \t]+/, "", y); if (index(y, rep) == 1) { hit++; hp = p } }
+          if (hit != 1) { for (p = 1; p <= np; p++) print L[ps[p]] > list; exit (hit ? 5 : 3) }
+          for (i = 1; i <= nl; i++) {
+            if (i == ps[hp]) { print text; continue }
+            if (i > ps[hp] && i <= pe[hp]) continue
+            print L[i]
+          }
+          exit 0
+        }
+        for (p = 1; p <= np; p++) if (ps[p] == pe[p] && L[ps[p]] == text) same = 1
+        for (i = 1; i <= nl; i++) {
+          print L[i]
+          if (!same && i == last) { print ""; print text; if (i < nl && L[i + 1] ~ /[^ \t]/) print "" }
+        }
+      }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      4) die "REFUSED — the plan has no table under ## Tasks for the paragraph to follow; the plan is unchanged."
+         exit 1 ;;
+      3|5)
+         if [ "$PV_RC" = 3 ]; then
+           die "REFUSED — no paragraph under ## Tasks opens with '$(clean "$TP_REPLACE")'; the plan is unchanged."
+         else
+           die "REFUSED — more than one paragraph under ## Tasks opens with '$(clean "$TP_REPLACE")'; name more of its first words. The plan is unchanged."
+         fi
+         if [ -s "$PV_NEW.2" ]; then
+           while IFS= read -r TP_P; do
+             pv_next tasks-prose "$TP_TEXT" --replace "$(printf '%s' "$TP_P" | awk '{ print $1, $2, $3 }' | sed 's/[[:space:]]*$//')"
+           done < "$PV_NEW.2"
+         else
+           pv_next tasks-prose "$TP_TEXT"
+         fi
+         exit 1 ;;
+      *) die "REFUSED — the paragraph cannot be written (awk exit $PV_RC); the plan is unchanged."
+         exit 2 ;;
+    esac
+    plan_verb_swap tasks-prose "the paragraph under ## Tasks" writer
+    say "tasks-prose — the paragraph under ## Tasks: written to $PV_PLAN${TP_REPLACE:+ (replacing the one opening '$TP_REPLACE')}; dry-committed first."
+    exit 0
+    ;;
+
+  # THE EPIC'S SHIPPED ROW (wave-33 T7; REQ-3 AC-3.3, D8). close-out.sh writes the row whole when it appends
+  # it and never edits a row that is there (`act_epic`), so a `<fill: ADRs>` it left (wave-30's) could be
+  # filled by no code. This verb sets cells of the row whose wave cell is <wave>, in the shipped table
+  # close-out finds (the table whose header opens `wave` and carries `shipped`) of the `epic.plan.md` beside
+  # the run's plan. A column is named by its header cell or that cell's first word, case-blind (`ADRs`,
+  # `plan`, `spec`). The file transaction (`pv_file_open`, `pv_file_swap`). REFUSED (1), the file unchanged:
+  # no epic plan, no shipped table, a column it does not carry (the columns listed, the corrected call
+  # printed), the wave cell, a value with a |, a line break or a fill mark, no row for the wave.
+  epic-row)
+    pv_file_open epic-row "$EP_WAVE" "${EP_PAIRS[@]}"
+    EP_FILE="${PV_RPLAN%/*}/epic.plan.md"
+    if [ ! -f "$EP_FILE" ] || [ -L "$EP_FILE" ]; then
+      die "REFUSED — no epic.plan.md beside $PV_RPLAN (or it is a link); nothing was written."
+      exit 1
+    fi
+    EP_AWK='
+      function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+      function shipped_header(line,   n, a, i) {
+        n = split(line, a, "|")
+        if (tolower(trim(a[2])) != "wave") return 0
+        for (i = 3; i <= n; i++) if (tolower(trim(a[i])) == "shipped") return 1
+        return 0
+      }
+      BEGIN {
+        mode = ENVIRON["EP_MODE"]; w = ENVIRON["EP_WAVE"] + 0; m = split(ENVIRON["EP_SET"], s, "\n")
+        for (k = 1; k <= m; k++) if ((t = index(s[k], "\t")) > 0) v[substr(s[k], 1, t - 1) + 1] = " " substr(s[k], t + 1) " "
+      }
+      /^[ \t]*```/ { fence = !fence; if (mode == "set") print; next }
+      fence { if (mode == "set") print; next }
+      !seen && /^\|/ && shipped_header($0) {
+        intable = 1; seen = 1
+        if (mode == "head") { n = split($0, a, "|"); for (i = 2; i < n; i++) print trim(a[i]); exit }
+        print; next
+      }
+      intable && !/^\|/ { intable = 0 }
+      intable && mode == "set" {
+        n = split($0, c, "|"); x = trim(c[2])
+        if (x ~ /^[0-9]+$/ && x + 0 == w) {
+          hits++
+          if (hits == 1) { for (j in v) c[j] = v[j]; out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]; print out; next }
+        }
+      }
+      mode == "set" { print }
+      END { if (mode == "set") { if (!seen) exit 3; if (!hits) exit 4; if (hits > 1) exit 5 } }'
+    EP_COLS="$(EP_MODE=head awk "$EP_AWK" "$EP_FILE" 2>/dev/null)"
+    if [ -z "$EP_COLS" ]; then
+      die "REFUSED — $EP_FILE carries no shipped table (a header whose first cell is wave and which has a shipped cell); nothing was written."
+      exit 1
+    fi
+    EP_SET=""; EP_BAD=""; EP_FIRST=""
+    for _pv_a in "${EP_PAIRS[@]}"; do
+      _pv_k="${_pv_a%%=*}"; _pv_v="${_pv_a#*=}"
+      _pv_f="$(pv_fold "$_pv_k")"; _pv_n=0; _pv_at=""
+      while IFS= read -r _pv_c; do
+        _pv_n=$((_pv_n + 1))
+        if [ "$(pv_fold "$_pv_c")" = "$_pv_f" ] || [ "$(pv_fold "${_pv_c%% *}")" = "$_pv_f" ]; then _pv_at="$_pv_n"; break; fi
+      done <<< "$EP_COLS"
+      if [ -z "$_pv_at" ]; then EP_BAD="${EP_BAD:+$EP_BAD, }$(clean "$_pv_k")"; continue; fi
+      if [ "$_pv_at" = 1 ]; then
+        die "REFUSED — the wave cell is the key epic-row finds the row by, not a cell to set; nothing was written."
+        exit 1
+      fi
+      if ! plan_verb_value_ok "$_pv_v"; then
+        die "REFUSED — the value for $(clean "$_pv_k") carries a |, a tab or a line break, which no table cell can hold; nothing was written."
+        exit 1
+      fi
+      case "$_pv_v" in
+        *'<fill:'*)
+          die "REFUSED — the value for $(clean "$_pv_k") is itself a fill mark; write the fact. Nothing was written."
+          exit 1 ;;
+      esac
+      EP_SET="${EP_SET}${_pv_at}	${_pv_v}
+"
+    done
+    if [ -n "$EP_BAD" ]; then
+      die "REFUSED — the shipped table of $EP_FILE carries no column $EP_BAD; nothing was written."
+      die "The columns: $(printf '%s\n' "$EP_COLS" | paste -sd, - | sed 's/,/, /g')."
+      pv_fix_pairs "$(printf '%s\n' "$EP_COLS" | sed 's/ .*//')" "${EP_PAIRS[@]}"
+      if [ "${#PV_FIXED[@]}" -gt 0 ]; then
+        if [ -n "$PV_PLAN_ARG" ]; then pv_next epic-row "$EP_WAVE" "${PV_FIXED[@]}" --plan "$PV_PLAN_ARG"
+        else pv_next epic-row "$EP_WAVE" "${PV_FIXED[@]}"; fi
+      fi
+      exit 1
+    fi
+    EP_SUM="$(cksum < "$EP_FILE" 2>/dev/null)"
+    PV_NEW="$EP_FILE.epic-row.$$"
+    PV_RC=0
+    EP_MODE=set EP_WAVE="$EP_WAVE" EP_SET="$EP_SET" awk "$EP_AWK" "$EP_FILE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      4) die "REFUSED — the shipped table of $EP_FILE has no row for wave $EP_WAVE; close-out appends it. Nothing was written."
+         exit 1 ;;
+      5) die "REFUSED — the shipped table of $EP_FILE has more than one row for wave $EP_WAVE; which one is meant is not the verb's to guess. Nothing was written."
+         exit 1 ;;
+      *) die "REFUSED — the row cannot be written (awk exit $PV_RC); nothing was written."
+         exit 2 ;;
+    esac
+    pv_file_swap epic-row "$EP_FILE" "$EP_SUM" "wave $EP_WAVE's row"
+    EP_LEFT="$(awk -v w="$EP_WAVE" -F'|' '{ x = $2; gsub(/^[ \t]+|[ \t]+$/, "", x) } x ~ /^[0-9]+$/ && x + 0 == w + 0 && /<fill:/ { n++ } END { print n + 0 }' "$EP_FILE")"
+    say "epic-row — wave $EP_WAVE: ${EP_PAIRS[*]} written to $EP_FILE; fill marks left in the row: $EP_LEFT."
+    exit 0
+    ;;
+
+  # THE CONTINUATION'S FILL MARKS (wave-33 T7; REQ-3 AC-3.3, D8). close-out.sh writes the run's continuation
+  # (`record/<run>/continuation.md`, under the docs root its plan sits in) with a `<fill: …>` mark wherever
+  # only the orchestrator knows the fact; wave-32 completed its marks by hand (A-orch-50). This verb replaces
+  # the mark whose label is <field>, or opens with it before a character that is no letter or digit
+  # (`the first decision` for `<fill: the first decision, or "none">`); every copy of that mark is filled,
+  # and the marks left are counted. The text may span lines. The file transaction. REFUSED (1), the file
+  # unchanged: no continuation, a field naming no mark or more than one (the fields left listed), a text
+  # that is itself a fill mark.
+  continuation-fill)
+    pv_file_open continuation-fill "$CF_FIELD=$CF_TEXT"
+    CF_DOCS="$(docs_root "$PV_REPO")"
+    case "$PV_RPLAN" in */plans/*) CF_DOCS="${PV_RPLAN%/plans/*}" ;; esac
+    CF_SLUG="${PV_RPLAN##*/}"; CF_SLUG="${CF_SLUG%.plan.md}"
+    CF_FILE="$CF_DOCS/record/$CF_SLUG/continuation.md"
+    if [ ! -f "$CF_FILE" ] || [ -L "$CF_FILE" ]; then
+      die "REFUSED — no continuation at $CF_FILE (close-out writes it at close); nothing was written."
+      exit 1
+    fi
+    case "$CF_TEXT" in
+      *'<fill:'*)
+        die "REFUSED — the text is itself a fill mark; write the fact. Nothing was written."
+        exit 1 ;;
+    esac
+    CF_SUM="$(cksum < "$CF_FILE" 2>/dev/null)"
+    PV_NEW="$CF_FILE.continuation-fill.$$"
+    PV_RC=0
+    CF_FIELD="$CF_FIELD" CF_TEXT="$CF_TEXT" CF_LIST="$PV_NEW.2" awk '
+      BEGIN { f = ENVIRON["CF_FIELD"]; text = ENVIRON["CF_TEXT"]; list = ENVIRON["CF_LIST"] }
+      { L[++nl] = $0 }
+      END {
+        for (i = 1; i <= nl; i++) {
+          x = L[i]
+          while ((p = index(x, "<fill: ")) > 0) {
+            x = substr(x, p + 7); q = index(x, ">"); if (!q) break
+            lab = substr(x, 1, q - 1); x = substr(x, q + 1)
+            if (!(lab in seen)) { seen[lab] = 1; labs[++nlab] = lab }
+          }
+        }
+        for (k = 1; k <= nlab; k++) if (labs[k] == f) { exact = labs[k] }
+        if (exact != "") { hit = exact; nhit = 1 }
+        else for (k = 1; k <= nlab; k++) {
+          lab = labs[k]
+          if (index(lab, f) == 1 && substr(lab, length(f) + 1, 1) !~ /[A-Za-z0-9]/) { nhit++; hit = lab }
+        }
+        if (nhit != 1) { for (k = 1; k <= nlab; k++) print labs[k] > list; exit (nhit ? 5 : 3) }
+        mark = "<fill: " hit ">"
+        for (i = 1; i <= nl; i++) {
+          x = L[i]; out = ""
+          while ((p = index(x, mark)) > 0) { out = out substr(x, 1, p - 1) text; x = substr(x, p + length(mark)) }
+          print out x
+        }
+        print hit > list
+      }' "$CF_FILE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      3|5)
+         if [ "$PV_RC" = 3 ]; then die "REFUSED — no fill mark of $CF_FILE is named '$(clean "$CF_FIELD")'; nothing was written."
+         else die "REFUSED — more than one fill mark of $CF_FILE opens with '$(clean "$CF_FIELD")'; name more of it. Nothing was written."; fi
+         if [ -s "$PV_NEW.2" ]; then die "The fields left: $(paste -sd'|' - < "$PV_NEW.2" | sed 's/|/; /g')."
+         else die "The continuation carries no fill mark."; fi
+         exit 1 ;;
+      *) die "REFUSED — the mark cannot be filled (awk exit $PV_RC); nothing was written."
+         exit 2 ;;
+    esac
+    CF_HIT="$(cat "$PV_NEW.2" 2>/dev/null)"
+    pv_file_swap continuation-fill "$CF_FILE" "$CF_SUM" "the mark <fill: $CF_HIT>"
+    CF_LEFT="$(/usr/bin/grep -o '<fill:' "$CF_FILE" | wc -l | tr -d ' ')"
+    CF_W=marks; [ "$CF_LEFT" = 1 ] && CF_W=mark
+    say "continuation-fill — <fill: $(clean "$CF_HIT")> filled in $CF_FILE; $CF_LEFT fill $CF_W left."
     exit 0
     ;;
 
@@ -7364,6 +8748,140 @@ $HO_AGENTS"; fi
     fi
     plan_verb_swap handoff "the handoff rewritten at $HO_NOW" writer
     say "handoff — ## Handoff rewritten at $HO_NOW ($HO_N_ROWS open rows, $HO_N_AG live agents); written to $PV_PLAN, dry-committed first."
+    exit 0
+    ;;
+
+  # THE BRIEF, RENDERED FROM ITS ROW (wave-33 T9; REQ-4 AC-4.4, D8). The rules are written above the helpers
+  # (`poker_brief_cell`). It reads the bound plan and writes one file under record/<wave>/briefs/, so it takes
+  # no plan transaction: the plan is never changed. REFUSED (1), nothing written: an id that is no row id, a
+  # plan with no ## Tasks table, a row the table does not have (the refusal names the rows and a corrected
+  # call), a row the table carries twice. REFUSED (2): the shipped scaffold or lib/proof.sh cannot be read.
+  # A row the table fills badly is not a refusal: its slot is written as `<ORCHESTRATOR: …>`, which the dispatch
+  # wall reads as an unfilled slot and marks, so a brief typed over it is the only way past.
+  brief)
+    plan_verb_open brief
+    if ! plan_verb_id_ok "$BRF_ID"; then
+      die "REFUSED — '$(clean "$BRF_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. Nothing was written."
+      exit 1
+    fi
+    BRF_ROWS="$(units_rows "$PV_PLAN" 2>/dev/null)" || BRF_ROWS=""
+    if [ -z "$BRF_ROWS" ]; then
+      die "REFUSED — $PV_PLAN carries no ## Tasks table with a row, so there is nothing to render. Nothing was written."
+      exit 1
+    fi
+    BRF_ROW="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' -v id="$BRF_ID" '$1 == id')"
+    BRF_N=0; [ -z "$BRF_ROW" ] || BRF_N="$(printf '%s\n' "$BRF_ROW" | wc -l | tr -d ' ')"
+    if [ "$BRF_N" -ne 1 ]; then
+      BRF_IDS="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' '{ printf "%s%s", (n++ ? ", " : ""), $1 }')"
+      BRF_EG="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' '$10 == "pending" { print $1; exit }')"
+      [ -n "$BRF_EG" ] || BRF_EG="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' 'NR == 1 { print $1 }')"
+      if [ "$BRF_N" -eq 0 ]; then
+        die "REFUSED — the plan has no row $(clean "$BRF_ID"). Its rows: $BRF_IDS. Write: bash ${HOOK_DIR}/session-poker.sh brief $BRF_EG. Nothing was written."
+      else
+        die "REFUSED — the ## Tasks table carries the row $BRF_ID $BRF_N times; which one is meant is not the verb's to guess. Nothing was written."
+      fi
+      exit 1
+    fi
+    BRF_LABELS="$(poker_brief_labels)" || BRF_LABELS=""
+    if [ -z "$BRF_LABELS" ]; then
+      die "REFUSED — the shipped scaffold cannot be read (${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md, its ### Scaffold fence); a brief is rendered from it, never from a copy. Nothing was written."
+      exit 2
+    fi
+    if ! { declare -F proof_working_branch >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; }; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB, and the working head is read through it. Nothing was written."
+      exit 2
+    fi
+    BRF_TASK="$(units_field "$BRF_ROW" task)"
+    BRF_KIND="$(units_field "$BRF_ROW" kind)"
+    BRF_STEP="$(units_field "$BRF_ROW" step)"
+    BRF_SIZE="$(units_field "$BRF_ROW" size)"
+    BRF_FILES="$(units_field "$BRF_ROW" Files)"
+    BRF_STATUS="$(units_field "$BRF_ROW" status)"
+    BRF_SERVES="$(units_field "$BRF_ROW" serves)"
+    BRF_DEPS="$(units_field "$BRF_ROW" deps)"
+    BRF_WAVE="$(basename "$PV_PLAN" .plan.md)"
+    BRF_DOCS="$(docs_root "$PV_REPO")"
+    BRF_RECDIR="$BRF_DOCS/record/$BRF_WAVE"
+    case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
+    BRF_OUT="$BRF_RECDIR/briefs/$BRF_ID.md"
+
+    # THE ARTIFACT: the ledger's cell for the row, then Files, then the record the task names. One path or nothing.
+    BRF_ART=""
+    BRF_LEDGER="$(poker_brief_cell "$PV_PLAN" "Dispatch ledger" "$BRF_ID" artifact)" || BRF_LEDGER=""
+    if ! poker_brief_none "$BRF_LEDGER"; then
+      case "$BRF_LEDGER" in *[[:space:],]*) : ;; *) BRF_ART="$BRF_LEDGER" ;; esac
+    fi
+    [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_record_entry "$BRF_FILES" artifact)"
+    [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_task_record "$BRF_TASK")"
+
+    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells when it has them, else its Files.
+    BRF_SUITES="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" suites)" || BRF_SUITES=""
+    if poker_brief_none "$BRF_SUITES"; then BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"; fi
+    BRF_LANDS="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" lands-on)" || BRF_LANDS=""
+    if poker_brief_none "$BRF_LANDS"; then
+      BRF_LANDS="$BRF_SUITES"
+      [ -n "$BRF_LANDS" ] || BRF_LANDS="none the row's Files name no suite"
+    fi
+    [ -n "$BRF_SUITES" ] || BRF_SUITES=none
+
+    # THE HEAD: the working branch's own tip, or what is missing, in words. Never a guess.
+    BRF_WB="$(proof_working_branch "$PV_PLAN")"
+    if [ -z "$BRF_WB" ]; then
+      BRF_HEAD="(the plan names no working branch)"
+    else
+      BRF_SHA="$(git -C "$PV_REPO" rev-parse --verify -q "refs/heads/$BRF_WB^{commit}" 2>/dev/null)" || BRF_SHA=""
+      if [ -n "$BRF_SHA" ]; then BRF_HEAD="$BRF_SHA ($(clean "$BRF_WB"))"; else BRF_HEAD="(no branch $(clean "$BRF_WB") in this repository)"; fi
+    fi
+
+    # THE SCAFFOLD, in the shipped order. A label the verb has no value for is the orchestrator's: it is named, not written.
+    BRF_SLOT="<ORCHESTRATOR: the row has none; write it>"
+    BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
+    BRF_LEFT=""
+    case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
+    BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress)"
+    [ -n "$BRF_PROG" ] || BRF_PROG="$BRF_RECREL/$BRF_ID.progress.md"
+    while IFS= read -r BRF_L; do
+      case "$BRF_L" in
+        "Expected duration")
+          case "$BRF_SIZE" in
+            ''|*[!0-9]*) printf '%s: <ORCHESTRATOR: the row'"'"'s size is %s; write the minutes>\n' "$BRF_L" "${BRF_SIZE:-empty}" ;;
+            *) printf '%s: %s minutes\n' "$BRF_L" "$BRF_SIZE" ;;
+          esac ;;
+        "Expected artifact") printf '%s: %s\n' "$BRF_L" "${BRF_ART:-$BRF_SLOT}" ;;
+        "Progress artifact") [ "$BRF_BIG" = yes ] && printf '%s: %s\n' "$BRF_L" "$BRF_PROG" ;;
+        "Cadence")           [ "$BRF_BIG" = yes ] && printf '%s: 15 min\n' "$BRF_L" ;;
+        "Files")             poker_brief_none "$BRF_FILES" || printf '%s: %s\n' "$BRF_L" "$BRF_FILES" ;;
+        "Suites")            printf '%s: %s\n' "$BRF_L" "$BRF_SUITES" ;;
+        "Row")               printf '%s: %s\n' "$BRF_L" "$BRF_ID" ;;
+        "Lands-on")          printf '%s: %s\n' "$BRF_L" "$BRF_LANDS" ;;
+        *)                   BRF_LEFT="${BRF_LEFT:+$BRF_LEFT, }$BRF_L" ;;
+      esac
+    done > "$BRF_BODY" <<BRF_EOF
+$BRF_LABELS
+BRF_EOF
+    {
+      cat "$BRF_BODY"
+      printf '\n## The row\n\n%s\n\n' "$BRF_TASK"
+      printf 'Row %s: kind %s, step %s, serves %s, waits on %s, status %s.\n' "$BRF_ID" "$BRF_KIND" "$BRF_STEP" "$BRF_SERVES" "$BRF_DEPS" "$BRF_STATUS"
+      printf 'Working head: %s\n' "$BRF_HEAD"
+      printf 'Plan: %s\n\n' "$(clean "${PV_PLAN#"$PV_REPO"/}")"
+      # THE ORCHESTRATOR'S SECTION: kept whole from a brief already there, else the two marked slots.
+      if [ -f "$BRF_OUT" ] && /usr/bin/grep -q '^## Judgment[[:space:]]*$' "$BRF_OUT"; then
+        awk '/^## Judgment[[:space:]]*$/ { f = 1 } f { print }' "$BRF_OUT"
+      else
+        printf '## Judgment\n\n'
+        printf 'Research to read: <ORCHESTRATOR: the record files this row reads, or none>\n'
+        printf 'Rulings: <ORCHESTRATOR: the rulings that bind this row, by assumption id, or none>\n'
+      fi
+    } > "$BRF_BODY.new"
+    mkdir -p "${BRF_OUT%/*}" 2>/dev/null
+    if ! mv -f "$BRF_BODY.new" "$BRF_OUT" 2>/dev/null; then
+      rm -f "$BRF_BODY" "$BRF_BODY.new"
+      die "REFUSED — $BRF_OUT cannot be written. The plan is unchanged."
+      exit 2
+    fi
+    rm -f "$BRF_BODY"
+    say "brief — $BRF_ID: written to ${BRF_OUT#"$PV_REPO"/}. Scaffold lines left to the orchestrator: ${BRF_LEFT:-none}. Under ## Judgment: the research to read and the rulings."
     exit 0
     ;;
 
@@ -7590,6 +9108,7 @@ $HO_AGENTS"; fi
       exit 1
     fi
     plan_verb_swap approve "approved: $AP_NAME" writer
+    poker_owed_close "$PV_REPO" "approve:$AP_NAME" "approve"
     say "approve — $AP_NAME: approved: $AP_NAME by $AP_WHO written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
@@ -7989,6 +9508,7 @@ $PF_PLANL"
       exit 1
     fi
     plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
+    poker_owed_close "$PV_REPO" "waive:$WV_Q" "waive"
     say "waive — question=$WV_Q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
@@ -8094,16 +9614,8 @@ FM_FINDING
       exit 1
     fi
     user_said "$FM_RAW"; FM_SAID=$?
-    if [ "$FM_SAID" -eq 2 ]; then
-      die "REFUSED — this session's transcript cannot be found or read (session ${CLAUDE_CODE_SESSION_ID:-none} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged."
-      exit 1
-    fi
-    if [ "$FM_SAID" -eq 3 ]; then
-      die "REFUSED — the words \"$(clean "$FM_WORDS")\" are too short to be the user's decision; quote at least $SAID_MIN_WORDS of their words, or their whole prompt. The plan is unchanged."
-      exit 1
-    fi
     if [ "$FM_SAID" -ne 0 ]; then
-      die "REFUSED — the words \"$(clean "$FM_WORDS")\" stand in no prompt the user typed in this session; a move is the user's own word, quoted from a prompt they typed. The plan is unchanged."
+      said_refuse "$FM_SAID" "$FM_WORDS" "a move"
       exit 1
     fi
     cp "$PV_PLAN" "$PV_NEW"
@@ -8139,6 +9651,125 @@ FM_FINDING
     plan_verb_swap finding-move "the move of $FM_ID" writer
     say "finding-move — $(clean "$FM_ID") to $FM_TO on the user's words, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first."
     [ -z "$FM_DEF" ] || say "finding-move — $(clean "$FM_DEF")"
+    exit 0
+    ;;
+
+  # THE REVIEW DISPOSITION (wave-33 T13; REQ-5 AC-5.1, D6). One pass over every registered reading (each record a
+  # `proved: kind=review` line with a question names as its evidence, its last such line giving its question and
+  # head) prints one line per finding:
+  #
+  #   finding <record>#<n> <S> user-facing=<on|off> record=<record> at=<path:line|-> row=<T<k>[,…]|—>
+  #           state=<open|fixed|deferred|accepted> decision="<what it needs>" [stated="<sentence>"|stated=-] title="<title>"
+  #
+  # the state read as the judge reads it: fixed when a row born of it landed green at or after the reading's head
+  # (lib/proof.sh `proof_fixed`), else by the priority the plan's moves give it (`proof_finding_rating`): fix is
+  # open, defer is deferred, note is accepted. An open finding no row answers and no ruling has moved needs the
+  # person, and gets one owed item, `finding_owed_key` (lib/owed.sh; opening is idempotent per key). A reading's
+  # debt: lines go to the run's debt ledger through `debt add`, run as a child. Nothing in the plan is written.
+  #
+  # A RULING (four or five operands) is the person's word on one finding, recorded through finding-move (their
+  # words, typed, at least SAID_MIN_WORDS whole words; an S1 is never deferred) and, for a deferral given a sentence,
+  # finding-stated, each run as a child so each keeps its own transaction; then the finding's owed item closes.
+  disposition)
+    if ! { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_fixed >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    plan_verb_open disposition
+    if [ -n "$DSP_ID" ] && ! finding_read "$PV_PLAN" "$PV_REPO" "$DSP_ID"; then
+      die "REFUSED — $FR_WHY; the plan is unchanged."
+      exit 1
+    fi
+    if [ -n "$DSP_ID" ]; then
+      DSP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" finding-move "$DSP_ID" "$DSP_TO" "$DSP_RAW" "$DSP_WHY" 2>&1 )"; DSP_RC=$?
+      [ -z "$DSP_OUT" ] || printf '%s\n' "$DSP_OUT"
+      [ "$DSP_RC" = 0 ] || exit "$DSP_RC"
+      if [ -n "$DSP_SENT" ]; then
+        DSP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" finding-stated "$DSP_ID" "$DSP_SENT" 2>&1 )"; DSP_RC=$?
+        [ -z "$DSP_OUT" ] || printf '%s\n' "$DSP_OUT"
+        [ "$DSP_RC" = 0 ] || { die "disposition — the move of $(clean "$DSP_ID") is written; its sentence is not: run finding-stated $(clean "$DSP_ID") '<sentence>' again."; exit "$DSP_RC"; }
+      fi
+      poker_owed_close "$PV_REPO" "$(finding_owed_key "$DSP_ID")" "disposition"
+      say "disposition — $(clean "$DSP_ID") ruled $DSP_TO on the person's words; its owed item is closed."
+      exit 0
+    fi
+    DSP_DOCS="$(docs_root "$PV_REPO")"
+    DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")"
+    DSP_BORN="$(units_born_findings "$PV_PLAN" 2>/dev/null)" || DSP_BORN=""
+    DSP_READS="$(awk "$(proof_awk)"'
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" {
+        if (!(PROOF_EVIDENCE in q)) ord[++n] = PROOF_EVIDENCE
+        q[PROOF_EVIDENCE] = PROOF_QUESTION; h[PROOF_EVIDENCE] = PROOF_HEAD
+      }
+      END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], q[ord[i]], h[ord[i]] }' "$PV_PLAN")"
+    DSP_NF=0; DSP_NR=0; DSP_NP=0
+    while IFS='	' read -r DSP_EV DSP_Q DSP_H; do
+      [ -n "$DSP_EV" ] || continue
+      DSP_NR=$((DSP_NR + 1))
+      if ! DSP_GOT="$(proof_findings "$DSP_DOCS/$DSP_EV" 2>&1)"; then
+        say "reading $(clean "$DSP_EV") ($DSP_Q) cannot be read: $(clean "$DSP_GOT")"
+        continue
+      fi
+      _proof_fixed_var "$DSP_FIXED" "$DSP_EV" "$DSP_H" "$PV_REPO"
+      DSP_DEBT=0
+      while IFS='	' read -r DSP_N DSP_S DSP_R DSP_W _ _ DSP_T; do
+        [ -n "$DSP_N" ] || continue
+        [ "$DSP_N" != debt ] || { DSP_DEBT=1; continue; }
+        DSP_FID="$DSP_EV#$DSP_N"
+        DSP_NF=$((DSP_NF + 1))
+        set -- $(proof_finding_rating "$PV_PLAN" "$DSP_FID" "$DSP_S" "$DSP_R")
+        DSP_P="${3:-}"
+        DSP_ROWS="$(printf '%s\n' "$DSP_BORN" | awk -F'\t' -v id="$DSP_FID" '$3 == id { printf "%s%s", (k++ ? "," : ""), $1 }')"
+        DSP_STATED=""
+        case "$_PROOF_FIXED_IDS" in
+          *$'\n'"$DSP_FID"$'\n'*)
+            DSP_STATE=fixed
+            DSP_FROW="$(printf '%s\n' "$DSP_FIXED" | awk -F'\t' -v id="$DSP_FID" '$1 == id { print $2 "\t" $3; exit }')"
+            DSP_DEC="none: ${DSP_FROW%%	*} landed green at $(printf '%.12s' "${DSP_FROW#*	}")" ;;
+          *)
+            case "$DSP_P" in
+              fix)
+                DSP_STATE=open
+                if [ -n "$DSP_ROWS" ]; then
+                  DSP_DEC="none: waits on $DSP_ROWS landing green"
+                elif [ -n "$(_proof_moved_to "$PV_PLAN" "$DSP_FID")" ]; then
+                  DSP_DEC="a row born of it: task-add <id> … --born $DSP_FID"
+                else
+                  if [ "$DSP_S" = S1 ]; then DSP_DEC="the person's: fix it or waive $DSP_Q (an S1 is never deferred)"
+                  else DSP_DEC="the person's: fix it, defer it, or waive $DSP_Q"; fi
+                  DSP_NP=$((DSP_NP + 1))
+                  if declare -F owed_open >/dev/null 2>&1; then
+                    OWED_ROOT="$PV_REPO" owed_open "$(finding_owed_key "$DSP_FID")" "Finding $DSP_S needs a ruling" \
+                      "$(clean "$DSP_FID") $DSP_S $DSP_R: $(clean "$DSP_T") — $DSP_DEC" >/dev/null 2>&1 || :
+                  fi
+                fi ;;
+              defer)
+                DSP_STATE=deferred
+                DSP_STATED="$(deferral_sentence "$PV_PLAN" "$DSP_FID" 2>/dev/null)" || DSP_STATED=""
+                if [ -n "$DSP_STATED" ]; then DSP_DEC="none: stated"
+                else DSP_DEC="its changelog sentence: finding-stated $DSP_FID '<sentence>'"; fi ;;
+              *) DSP_STATE=accepted; DSP_DEC="none" ;;
+            esac ;;
+        esac
+        DSP_LINE="finding $DSP_FID $DSP_S user-facing=$DSP_R record=$DSP_EV at=$DSP_W row=${DSP_ROWS:-—} state=$DSP_STATE decision=\"$DSP_DEC\""
+        if [ "$DSP_STATE" = deferred ]; then
+          if [ -n "$DSP_STATED" ]; then DSP_LINE="$DSP_LINE stated=\"$DSP_STATED\""; else DSP_LINE="$DSP_LINE stated=-"; fi
+        fi
+        say "$DSP_LINE title=\"$DSP_T\""
+      done <<DSP_FINDINGS
+$DSP_GOT
+DSP_FINDINGS
+      if [ "$DSP_DEBT" = 1 ]; then
+        ( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" debt add "$DSP_EV" "$PV_PLAN" 2>&1 ) || :
+      fi
+    done <<DSP_READINGS
+$DSP_READS
+DSP_READINGS
+    say "disposition — $DSP_NF findings in $DSP_NR registered readings; $DSP_NP need the person's ruling (disposition <record>#<n> fix|defer '<their words>' '<why>' ['<changelog sentence>'])."
     exit 0
     ;;
 
@@ -9240,6 +10871,23 @@ EOF
       TICK_GATE_KEYS="$(printf '%s\n' "$TICK_GATE_ROWS" | awk -F'\t' 'NF { printf "%s%s", (n++ ? "," : ""), $1 }')"
       TICK_GATE_NEW="$(printf '%s\n' "$TICK_GATE_ROWS" | awk -F'\t' '$2 == "new"')"
     fi
+    # THE GATE ITEM'S CLOSER (wave-33 T12; REQ-2 AC-2.3, D2): a `gate:<key>` item on the person's
+    # ledger is closed when the gate is no longer raised, which is when its key is not in the keys
+    # just read (`gate_raised=` for the next digest). A request that left the gate file, or a gate
+    # file that is gone, closes its item; a request still in the file keeps its item, and the
+    # refused-file branch above kept the digest's own keys, so a symlink closes nothing. Silent,
+    # never fatal, and a library without owed.sh does nothing.
+    tick_gate_close() {
+      local gkey
+      declare -F owed_list >/dev/null 2>&1 || return 0
+      declare -F owed_close >/dev/null 2>&1 || return 0
+      for gkey in $(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep '^gate:'); do
+        case ",${TICK_GATE_KEYS}," in *",${gkey#gate:},"*) continue ;; esac
+        OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_close "$gkey" "gate cleared" >/dev/null 2>&1
+      done
+      return 0
+    }
+    tick_gate_close
     # THE FIELD: how many requests this tick raises, then their categories sorted and once each,
     # `gate=2:credentials,leaves-the-machine`. The commands are on the GATE lines, not here.
     if [ -n "$TICK_GATE_NEW" ]; then
@@ -9249,6 +10897,11 @@ EOF
     # THE GATE LINES, printed by whichever arm decides, after its tick_conclude: one sentence that
     # says what the turn owes, then one line per request this tick raises, asker, category and
     # command head. A request already raised prints nothing; the file still holds it.
+    #
+    # EACH GATE LINE IS OWED TO THE PERSON (wave-33 T11; REQ-2 AC-2.3, D2): the request opens
+    # `gate:<key>` on the person's ledger, the key `gate_raised=` keeps, carrying the line printed,
+    # and the tick sends the gate items it opened through the one sender, once each. The send is
+    # silent and never fatal, so the lines above and the exit code are what they were.
     tick_gate_report() {
       local k st a c h
       [ -n "$TICK_GATE_NEW" ] || return 0
@@ -9256,9 +10909,15 @@ EOF
       while IFS="$(printf '\t')" read -r k st a c h; do
         [ -n "$k" ] || continue
         say "GATE ${a} — ${c}: ${h}"
+        if declare -F owed_open >/dev/null 2>&1; then
+          OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "gate:$k" "gate act: ${c}" "poker: GATE ${a} — ${c}: ${h}" >/dev/null 2>&1
+        fi
       done <<EOF
 $TICK_GATE_NEW
 EOF
+      if declare -F owed_send >/dev/null 2>&1; then
+        OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_send gate: >/dev/null 2>&1
+      fi
       return 0
     }
 
@@ -9464,6 +11123,41 @@ EOF
     done <<EOF
 $VERDICT_OUT
 EOF
+
+    # ---------- THE BACKSTOP: A RECORD ROW WHOSE AGENT ENDED WITHOUT LANDING IT (wave-33 T6; REQ-3 AC-3.1; D5) ----------
+    #
+    # A test, verify or review row lands by its own agent's last act, `deliver`. When the agent
+    # ended without it, its roster row reads MET (the deliverable landed and the agent said so)
+    # while its `## Tasks` row is still `active` under that name (launch-sync wrote the name into
+    # the agent cell). The tick lands such a row through `deliver` itself, run as a child as
+    # launch-sync is above, so the one landing writer and every check `deliver` makes stand: a row
+    # whose artifact is absent is refused there, left active, and reported here with the refusal.
+    # Only a row with no tree whose Files write nothing the head carries is asked; a row with a
+    # tree lands through `ready`. MET is read off this tick's one verdict read, acked or not: the
+    # ack closes the agent, never the row. A landed row is no longer `active`, so it is asked once.
+    if [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ]; then
+      TICK_MET="$(printf '%s\n' "$VERDICT_OUT" | awk -F'|' '$1 == "landing-verdict/v1" { n = ""; s = ""
+          for (i = 2; i <= NF; i++) { if ($i ~ /^name=/) n = substr($i, 6); else if ($i ~ /^state=/) s = substr($i, 7) }
+          if (s == "MET" && n != "") printf " %s", n }
+        END { printf " " }')"
+      if [ "$TICK_MET" != " " ]; then
+        # An empty cell is printed `-`: a tab is white space to `read`, so two in a row would shift a field.
+        while IFS=$'\t' read -r BS_ID BS_AGENT BS_FILES BS_WT; do
+          [ -n "$BS_ID" ] || continue
+          case "$BS_WT" in *[A-Za-z0-9]*) continue ;; esac
+          ! units_writes_head "$BS_FILES" || continue
+          BS_RC=0
+          BS_OUT="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" deliver "$BS_ID" 2>&1 )" || BS_RC=$?
+          if [ "$BS_RC" -eq 0 ]; then
+            say "LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET) without deliver; the tick landed its row through deliver: $(clean "$(printf '%s\n' "$BS_OUT" | sed -n 's/^poker: deliver — [^:]*: //p' | head -1)")"
+          else
+            say "NOT-LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET) without deliver, and deliver refused it: $(clean "$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')")"
+          fi
+        done <<BACKSTOP_ROWS
+$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' -v met="$TICK_MET" '$10 == "active" && $5 != "" && index(met, " " $5 " ") { printf "%s\t%s\t%s\t%s\n", $1, $5, ($9 == "" ? "-" : $9), ($11 == "" ? "-" : $11) }')
+BACKSTOP_ROWS
+      fi
+    fi
 
     # ---------- THE PANEL IS REFRESHED FROM THE ROSTER, NOT FROM A TOOL CALL (T22) -------
     #

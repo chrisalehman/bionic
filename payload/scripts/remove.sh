@@ -6,7 +6,7 @@
 # order it comes back off in. One item at a time, each one announced before it is
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
 # the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
-# settings, the retired permission block, the plugin data directory — and then
+# settings, the retired permission block, the notification channel file, the plugin data directory — and then
 # the native plugin uninstall as the finisher. A tool setup offers is removed only
 # when bionic's install record names it (wave-28 T40); every other one present is
 # listed with the command to remove it by hand (the tools item below says why).
@@ -1087,6 +1087,9 @@ RM_PRINCIPLES_FILE="$(_rm_claude_home)/CLAUDE.md"
 # claude home for the readers above but not the share the gate reads. A standalone copy, as the
 # markers above are: this door has no library to ask. tests/principles-item.test.sh §SHARE-REMOVE holds it.
 RM_SHARE_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"
+# THE NOTIFICATION CHANNEL FILE (wave-33 T12, D2). Spelled as lib/notify.sh's `notify_file` spells it,
+# under the claude home `_rm_claude_home` already resolves: this door has no library to ask.
+RM_NOTIFY_FILE="$(_rm_claude_home)/bionic/notify"
 RM_SETTINGS="$(_rm_settings_file)"
 RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
 RM_DATA_ROOT="$(_rm_plugin_data_dir)"
@@ -1140,6 +1143,7 @@ _rm_item_ids() {
   echo "permission-mode"
   echo "working-principles"
   echo "share"
+  echo "notify"
   if [ "$RM_MODE" = "payload" ]; then
     # fd 3: the standard input belongs to the questions, never to a list.
     while IFS= read -r n <&3; do
@@ -1215,6 +1219,7 @@ _rm_item_verb() {  # <id>
         echo "remove bionic's working principles from ${RM_PRINCIPLES_FILE}"
       fi ;;
     share)                 echo "delete bionic's share file ${RM_SHARE_FILE}" ;;
+    notify)                echo "delete bionic's notification channel file ${RM_NOTIFY_FILE}" ;;
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
@@ -1281,6 +1286,9 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
     share)
       [ -f "$RM_SHARE_FILE" ] || return 1
       _rm_regular "$RM_SHARE_FILE" >/dev/null ;;
+    notify)
+      [ -f "$RM_NOTIFY_FILE" ] || return 1
+      _rm_regular "$RM_NOTIFY_FILE" >/dev/null ;;
     legacy-hooks)
       [ -f "$RM_SETTINGS" ] || return 1
       _rm_have jq || return 1
@@ -1414,8 +1422,9 @@ while [ $# -gt 0 ]; do
       rm_list=1; shift ;;
     --all)
       rm_all=1; shift ;;
-    --only)
-      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+    --only|--only=)
+      # `--only=` is a bare flag: an empty value names no item (wave-33 T4, AC-6.4).
+      if [ "$1" = "--only=" ] || [ $# -lt 2 ] || [ -z "${2:-}" ]; then
         echo "remove: --only needs the name of the one item to remove."
         echo "        run ${RM_SELF_CMD:-this script} --list to see the names."
         exit 2
@@ -2525,6 +2534,33 @@ _rm_item_share() {
   echo ""
 }
 
+# ─── Item: the notification channel ──────────────────────────────────────────
+#
+# `<claude home>/bionic/notify` is bionic's own file, two lines naming where the topic is read from and a
+# title prefix, written by setup's notify step (wave-33 T12). The topic itself lives in a file of the
+# person's, never in this one, so removing it takes nothing of theirs. It goes on a yes and nothing else in
+# that directory does. A path that is no regular file is named and left alone, as the share's is.
+_rm_item_notify() {
+  _rm_wants notify || return 0
+  echo "the notification channel:"
+  if _rm_say_not_a_file "$RM_NOTIFY_FILE"; then echo ""; return 0; fi
+  if ! _rm_item_pending notify; then
+    _rm_clean "bionic's notification channel file ${RM_NOTIFY_FILE}"
+    echo ""
+    return 0
+  fi
+  if _rm_consent "Delete bionic's notification channel file ${RM_NOTIFY_FILE}? Nothing is sent to you any more."; then
+    if rm -f "$RM_NOTIFY_FILE" 2>/dev/null && [ ! -e "$RM_NOTIFY_FILE" ]; then
+      _rm_removed "bionic's notification channel file ${RM_NOTIFY_FILE}"
+    else
+      _rm_leftover "${RM_NOTIFY_FILE} could not be deleted — the channel is as it was"
+    fi
+  else
+    _rm_skipped "$?" notify "bionic's notification channel file ${RM_NOTIFY_FILE}"
+  fi
+  echo ""
+}
+
 _rm_item_plugin_data() {
   _rm_wants plugin-data || return 0
   echo "plugin data:"
@@ -2875,6 +2911,7 @@ _rm_item_permission_block
 _rm_item_permission_mode
 _rm_item_working_principles
 _rm_item_share
+_rm_item_notify
 _rm_item_tools
 _rm_item_plugin_data
 _rm_item_plugin

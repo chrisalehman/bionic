@@ -222,6 +222,7 @@ WRAP_EOF
 # and the stderr therefore cross the subshell boundary the only way they can, on
 # disk, and `rc` / `errtext` read them back afterwards.
 OUTF=""; ERRF=""; RCF=""
+STANDING_MARK='goes through the bionic:decision skill'
 drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdout
   local proj="$1" src="$2" esid="$3" psid="$4" fsid="$5" home
   home="$WORK/home.$RANDOM.$RANDOM"; mkdir -p "$home"
@@ -240,7 +241,10 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
       bash "$WRAP" "$home" "$fsid" "$HOOK" > "$WORK/last.out" 2>"$WORK/last.err"
   )
   printf '%s' "$?" > "$WORK/last.rc"
-  cat "$WORK/last.out"
+  # The STANDING decision line (T27, AC-11.2) is printed in every session and is not part of the
+  # state report every assertion below reads, so it is taken out of what `drive` returns. The raw
+  # stdout stays in last.out, and §20 reads it from there. Every report assertion keeps its text.
+  grep -vF -- "$STANDING_MARK" "$WORK/last.out" || true
 }
 rc()      { cat "$WORK/last.rc" 2>/dev/null; }
 errtext() { cat "$WORK/last.err" 2>/dev/null; }
@@ -1344,5 +1348,33 @@ echo "--- 19e: not engaged, no run, no predecessor state: still silent (the pair
 P19e=$(make_env 1s)
 OUT=$(drive "$P19e" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq    "19e.1 nothing on stdout" "" "$OUT"
+
+section "20 — the standing decision line: in every session, run or no run (T27, AC-11.2)"
+# The always-loaded rule sits in canonical-sdlc, which loads only inside a run, so a session with
+# no run open answered a choice between approaches in prose (T19). The hook says it in every
+# session it runs in. `drive` strips the line from what it returns; the raw stdout is last.out.
+raw() { cat "$WORK/last.out"; }
+P20a=$(make_env 1s)
+drive "$P20a" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+has   "20.1 a project with no run: the line is on stdout" "$STANDING_MARK" "$(raw)"
+has   "20.2 …and tells the session to invoke the skill" "bionic:decision skill — invoke it" "$(raw)"
+eq    "20.3 …as exactly one line" "1" "$(raw | grep -cF -- "$STANDING_MARK")"
+eq    "20.4 …and it is the only line (nothing else to report)" "1" "$(raw | grep -c .)"
+P20b=$(make_env 1s)
+write_open_plan "$P20b" >/dev/null
+drive "$P20b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+has   "20.5 an open run, session not engaged: the line is there" "$STANDING_MARK" "$(raw)"
+has   "20.6 …beside the run notice (positive control: the notice is still printed)" "/bionic:canonical-sdlc" "$(raw)"
+P20c=$(make_env 3600s)
+write_open_plan "$P20c" >/dev/null
+plant_engaged "$P20c" "$CUR_SID"
+drive "$P20c" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+has   "20.7 an open run, session engaged: the line is there" "$STANDING_MARK" "$(raw)"
+eq    "20.8 …once" "1" "$(raw | grep -cF -- "$STANDING_MARK")"
+P20d=$(mktemp -d "$WORK/bare.XXXXXX")
+drive "$P20d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+has   "20.9 no .bionic anywhere above the cwd: the line is there" "$STANDING_MARK" "$(raw)"
+eq    "20.10 …and the hook still created nothing" "" "$(ls -A "$P20d")"
+eq    "20.11 …and drive's returned report is empty (the line is not part of it)" "" "$(drive "$P20d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")"
 
 finish

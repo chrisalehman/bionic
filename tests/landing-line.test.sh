@@ -867,8 +867,10 @@ expect_true "(l1) …the branch holds both rows" git -C "$RL" merge-base --is-an
 
 # ---------------------------------------------------------------------------
 section "§WITHIN: no suite starts whose promised seconds exceed the time left (D3)"
-world_cost c.test.sh 5 0.5 600
+# The gate keeps each suite's duration under its project (wave-33 T1; Δ10): the 600 s is planted
+# in the fixture repository the landing runs in.
 RN="$(ll_world)"; ll_launch "$RN" T1 c
+( cd "$RN" && world_cost c.test.sh 600 )
 ( cd "$RN" && world_suite c green >/dev/null ) && git -C "$RN" add tests/c.test.sh && git -C "$RN" commit -qm "suite c"
 REQN="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
 ll_verb "$RN" T1 --within 60
@@ -879,6 +881,17 @@ expect_eq "(n1) …nothing run: no verdict, no log, no gate request" "0 0 $REQN"
 expect_eq "(n1) …the entry kept, its carrier gone" "T1 no" "$(line_state "$(ll_plan "$RN")" | cut -f1,4 | tr '\t' ' ')"
 ll_verb "$RN" T1 --within 900
 expect_eq "(n2) with the time, the same command lands it" "0" "$LL_RC"
+# THE LOOKUP NAMES THE LANDING TREE (wave-33 T1; Δ10). Durations are keyed by project, so
+# `_line_time_for` reads the landing tree's, wherever the carrier stands: asked from outside every
+# repository (the world's root), it still finds the fixture repository's 600 s.
+ll_time_from_outside() {  # <deadline offset> -> "<printed> rc=<n>"
+  ( cd "$WORLD_ROOT" && . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null \
+      && . "$REPO/payload/scripts/lib/line.sh" 2>/dev/null \
+      && o="$(_line_time_for c.test.sh "$(( $(_res_now) + $1 ))" "$RN")"; echo "$o rc=$?" )
+}
+expect_eq "(n4) asked from outside the repository with 900 s left, the gate may take 300 (900 less the 600 recorded)" \
+  "300 rc=0" "$(ll_time_from_outside 900)"
+expect_eq "(n4) …and with 60 s left the landing tree's 600 s refuses it (rc 1)" " rc=1" "$(ll_time_from_outside 60)"
 RN2="$(ll_world)"; ll_launch "$RN2" T1 c
 ( cd "$RN2" && world_suite c green >/dev/null ) && git -C "$RN2" add tests/c.test.sh && git -C "$RN2" commit -qm "suite c"
 LL_MUTANT='s/exit 1/exit 0/' LL_MUTANT_FN=_line_time_for ll_drive "$RN2" T1 "$WORLD_ROOT/n-T1.out" 60
@@ -1039,8 +1052,8 @@ expect_eq "(s2) a red whose failing lines all fail at the head: T2 is published 
 expect_eq "(s2) …its own verdict red on its candidate" "red" "$(ll_results "$RS" T2 "$KS2")"
 expect_eq "(s2) …the head's run remembered for that head: one run there, not two" "1" \
   "$(ll_ev "$RS" verdict | grep -c "|commit=${HS}|")"
-expect_regex "(s2) …one standing event for that head, its failing lines and the head's log" \
-  "^line/v1\\|ev=standing\\|head=${HS}\\|suite=a.test.sh\\|lines=1\\|log=${LSH}\\|at=[0-9T:-]+Z$" "$(ll_ev "$RS" standing)"
+expect_regex "(s2) …one standing event for that head, its failing lines, the head's log, and its cause: code, no run disagreeing (AC-7.2)" \
+  "^line/v1\\|ev=standing\\|head=${HS}\\|suite=a.test.sh\\|lines=1\\|log=${LSH}\\|cause=code\\|against=-\\|at=[0-9T:-]+Z$" "$(ll_ev "$RS" standing)"
 git -C "$RS/.worktrees/T1" rm -q extra-fail && git -C "$RS/.worktrees/T1" commit -qm "T1: the added line taken out"
 # A plain commit on the branch makes a head no run has read (T2's published candidate was itself run,
 # so as the head it is already remembered).
@@ -1446,5 +1459,221 @@ ll_verb "$RRB0" T1
 KRB0="$(ll_ev "$RRB0" candidate | head -1)"; KRB0="$(ll_field "$KRB0" commit)"
 expect_eq "(rb3) a plan with fix-cap: 2 and no review-born row lands with review-born rows: 0 of cap 2" \
   "$(printf 'LANDED T1 %s\nreview-born rows: 0 of cap 2\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$KRB0" "$KRB0")" "$LL_OUT"
+
+# ============================================================================ the landing's environment (wave-33 T2)
+#
+# REQ-7, D3: a suite proved at a landing starts as the whole run starts it, through the plugin's one
+# suite primitive (lib/suite.sh): INT and QUIT at their defaults (job control on around each of the
+# landing's two spawns, the booked.sh precedent), BIONIC_GATE_DIR unset in the suite, the runner's
+# admission in BIONIC_GATE_ADMIT. Each fixture pins its OWN starting dispositions with perl, as slots
+# K6 does: a shell started in the background without job control (an installed 1.15.0 landing starts
+# this very suite that way) has INT and QUIT ignored at entry, and nothing below it can reset that.
+LL_SUITE_LIB="${REPO}/payload/scripts/lib/suite.sh"
+ll_dfl() { perl -e '$SIG{INT} = $SIG{QUIT} = "DEFAULT"; exec @ARGV or exit 126' "$@"; }
+# The K6 controls of tests/slots.test.sh as a suite of their own, with the store and admission it sees.
+LL_K6_BODY="$(cat <<'K6'
+f=0; n=0
+k6_row() { n=$((n + 1)); if [ "$2" = "$3" ]; then echo "PASS: $1"; else echo "FAIL: $1 (got: $3)"; f=$((f + 1)); fi; }
+echo "entry: $(trap -p INT QUIT | tr '\n' ' ')"
+k6_row "K6.1-like the INT trap runs" "got-int after" "$(echo $(bash -c 'trap "echo got-int" INT; kill -INT $$; sleep 0.2; echo after' 2>&1))"
+k6_row "K6.3-like the QUIT trap runs" "got-quit after" "$(echo $(bash -c 'trap "echo got-quit" QUIT; kill -QUIT $$; sleep 0.2; echo after' 2>&1))"
+k6_row "K6.5-like a process below dies of INT" "rc=130" "$(bash -c "sh -c 'kill -INT \$\$; echo survived'; echo \"rc=\$?\"" 2>&1)"
+k6_row "the gate store is not the suite's" "unset" "${BIONIC_GATE_DIR-unset}"
+echo "admit=${BIONIC_GATE_ADMIT-unset}"
+echo "cwd=$(pwd -P)"
+echo; echo "a.test.sh: $((n - f))/$n passed, $f failed  sections=1 setup=0"; [ "$f" -eq 0 ]
+K6
+)"
+LL_SX="$WORLD_ROOT/suite-driver.sh"
+cat > "$LL_SX" <<'SX'
+#!/bin/bash
+# <suite.sh> <start|exec> <tree> <suite> [admission]: the primitive, called from a shell of its own;
+# LL_MUTANT is a sed over bionic_job.
+. "$1" || exit 99
+if [ -n "${LL_MUTANT:-}" ]; then eval "$(declare -f bionic_job | sed "$LL_MUTANT")"; fi
+if [ "$2" = start ]; then
+  bionic_suite_start ${5:+--admit "$5"} "$3" "$4" || { echo "start-rc=$?"; exit 0; }
+  wait "$BIONIC_SUITE_PID"; echo "rc=$?"
+else
+  bionic_suite_exec ${5:+--admit "$5"} "$3" "$4"; echo "rc=$?"
+fi
+SX
+ll_k6_tree() {  # <dir> -> a directory holding probe.sh, the K6 body
+  mkdir -p "$1" && printf '#!/bin/bash\n%s\n' "$LL_K6_BODY" > "$1/probe.sh" && (cd "$1" && pwd -P)
+}
+
+# ---------------------------------------------------------------------------
+section "§SIGNALS: a suite at a landing keeps its signal traps, and the whole run's store and admission (AC-7.1)"
+# fails-when: slots K6.1, K6.3 or K6.5 is red under ready at a head where the suite is green through the door.
+expect_true "(sig0) perl, which pins each fixture's own starting dispositions, is on PATH" command -v perl
+expect_nonempty "(sig0) the caller's environment names a gate store (the world's), which the suite must not inherit" "${BIONIC_GATE_DIR:-}"
+SXT="$(ll_k6_tree "$WORLD_ROOT/sx")"
+G1="$(cd "$WORLD_ROOT" && ll_dfl bash "$LL_SX" "$LL_SUITE_LIB" start "$SXT" probe.sh 41 2>&1)"
+expect_contains "(sig1-pre) bionic_suite_start ran the suite in its tree" "cwd=$SXT" "$G1"
+expect_contains "(sig1) started as a job, its INT trap runs (K6.1)" "PASS: K6.1-like the INT trap runs" "$G1"
+expect_contains "(sig1) …its QUIT trap runs (K6.3)" "PASS: K6.3-like the QUIT trap runs" "$G1"
+expect_contains "(sig1) …a process below it dies of INT (K6.5)" "PASS: K6.5-like a process below dies of INT" "$G1"
+expect_contains "(sig1) …BIONIC_GATE_DIR is unset in the suite" "PASS: the gate store is not the suite's" "$G1"
+expect_contains "(sig1) …the caller's admission is the suite's BIONIC_GATE_ADMIT" "admit=41" "$G1"
+expect_contains "(sig1) …and its exit code is the suite's" "rc=0" "$G1"
+expect_absent "(sig1) …no row of it fails" "FAIL:" "$G1"
+G2="$(cd "$WORLD_ROOT" && BIONIC_GATE_ADMIT=7 ll_dfl bash "$LL_SX" "$LL_SUITE_LIB" start "$SXT" probe.sh 2>&1)"
+expect_contains "(sig2-pre) the primitive ran without --admit" "cwd=$SXT" "$G2"
+expect_contains "(sig2) with no admission of the caller's, an inherited BIONIC_GATE_ADMIT is left as it was" "admit=7" "$G2"
+printf '#!/bin/bash\necho "cwd=$(pwd -P) store=${BIONIC_GATE_DIR-unset} admit=${BIONIC_GATE_ADMIT-unset}"\nread -r l; echo "stdin=${l:-none}"\nexit 3\n' > "$SXT/rc3.sh"
+G3="$(cd "$WORLD_ROOT" && printf 'piped\n' | ll_dfl bash "$LL_SX" "$LL_SUITE_LIB" exec "$SXT" rc3.sh 42 2>&1)"
+expect_eq "(sig3) bionic_suite_exec runs the suite to its end in its tree, without the store, with the admission, stdin closed, its rc the suite's" \
+  "$(printf 'cwd=%s store=unset admit=42\nstdin=none\nrc=3' "$SXT")" "$G3"
+G4="$( . "$LL_SUITE_LIB" 2>/dev/null; bionic_suite_exec --admit '' "$SXT" probe.sh 2>&1 )"; G4R=$?
+expect_eq "(sig4) an empty --admit is refused (exit 2), naming the flag" "2" "$G4R"
+expect_contains "(sig4) …saying so" "--admit" "$G4"
+expect_absent "(sig4) …and nothing ran" "cwd=" "$G4"
+# MUTANT: job control off in bionic_job. The suite starts as a plain background job, INT and QUIT ignored.
+G5="$(cd "$WORLD_ROOT" && LL_MUTANT='s/set -m/:/' ll_dfl bash "$LL_SX" "$LL_SUITE_LIB" start "$SXT" probe.sh 43 2>&1)"
+expect_contains "(sig5m-pre) the mutant ran the suite" "cwd=$SXT" "$G5"
+expect_contains "(sig5m) MUTANT job control off: the INT trap is not run (the rows can fail)" "FAIL: K6.1-like the INT trap runs" "$G5"
+
+# THE LANDING PATH: T1 lands a suite of the K6 controls through `ready`, from a carrier whose own
+# dispositions are the defaults, as the door's and the whole run's are.
+world_cost a.test.sh 5 0.5 5
+ll_verb_dfl() {  # <root> <row> — ll_verb, from a shell whose INT and QUIT are at their defaults
+  printf 'ready\n' >> "$(world_verbs)"
+  LL_OUT="$( cd "$1/.worktrees/$2" && ll_dfl bash "$SPAWN" ready 2>&1 )"; LL_RC=$?
+}
+RG="$(ll_world)"; ll_launch "$RG" T1 a
+ll_commit_suite "$RG" T1 a "$LL_K6_BODY"
+ll_verb_dfl "$RG" T1
+KG="$(ll_last_cand "$RG" T1)"; LG="$RG/.bionic/docs/record/wave-x/line/T1-a-${KG:0:12}.log"
+expect_contains "(sig6-pre) the suite ran on the candidate, in the landing tree" "entry: " "$(cat "$LG" 2>/dev/null)"
+expect_eq "(sig6) the K6 controls are green at the landing: ready exits 0, the candidate's verdict green" "0 green" \
+  "$LL_RC $(ll_results "$RG" T1 "$KG")"
+expect_absent "(sig6) …no row of the suite fails under the landing" "FAIL:" "$(cat "$LG" 2>/dev/null)"
+ll_req_kind() {  # <admission id> -> its request's kind= line in the world's store, or the id when it is none
+  case "$1" in ''|*[!0-9]*) echo "admit=$1"; return 0 ;; esac
+  grep '^kind=' "$BIONIC_GATE_DIR/requests/$1" 2>/dev/null
+}
+GA="$(sed -n 's/^admit=//p' "$LG" 2>/dev/null)"
+expect_eq "(sig7) the suite's BIONIC_GATE_ADMIT is the landing's own admission, a request of kind landing in the gate's store" \
+  "kind=landing" "$(ll_req_kind "$GA")"
+# MUTANTS, one spawn each: a copy of the library with ONE of the landing's two spawns a plain `&`. R4
+# proved either alone leaves the suite's INT and QUIT ignored.
+ll_lib_mutant() {  # <dir> <file> <from> <to> -> a copy of the library, <from> made <to> in <file>, _ll_plain defined there
+  rm -rf "$1"; cp -R "$REPO/payload/scripts/lib" "$1" || return 1
+  sed "s/$3/$4/" "$1/$2" > "$1/$2.m" && mv "$1/$2.m" "$1/$2" || return 1
+  printf '\n_ll_plain() { "$@" & BIONIC_JOB_PID=$!; }\n' >> "$1/$2"
+}
+for LGM in "line.sh|bionic_job bash -c|_ll_plain bash -c|the carrier's spawn of the runner" \
+           "suite.sh|bionic_job _bionic_suite_run|_ll_plain _bionic_suite_run|the runner's spawn of the suite"; do
+  IFS='|' read -r LGF LGA LGB LGW <<EOF_LGM
+$LGM
+EOF_LGM
+  RGM="$(ll_world)"; ll_launch "$RGM" T1 a
+  ll_commit_suite "$RGM" T1 a "$LL_K6_BODY"
+  ll_lib_mutant "$WORLD_ROOT/lib-${LGF%.sh}" "$LGF" "$LGA" "$LGB"
+  expect_eq "(sig8m-pre) the mutant copy of $LGF is doctored: one '$LGB' spawn, no '$LGA' left" "1 0" \
+    "$(grep -c "$LGB" "$WORLD_ROOT/lib-${LGF%.sh}/$LGF") $(grep -c "$LGA" "$WORLD_ROOT/lib-${LGF%.sh}/$LGF")"
+  ( cd "$RGM/.worktrees/T1" && ll_dfl bash "$LL_RD" "$WORLD_ROOT/lib-${LGF%.sh}" > "$WORLD_ROOT/g8-${LGF}.out" 2>&1 )
+  KGM="$(ll_last_cand "$RGM" T1)"; LGL="$RGM/.bionic/docs/record/wave-x/line/T1-a-${KGM:0:12}.log"
+  expect_contains "(sig8m-pre) the mutant ran the suite on a candidate ($LGW plain)" "entry: " "$(cat "$LGL" 2>/dev/null)"
+  expect_contains "(sig8m) MUTANT $LGW a plain background job: K6.1 is red at the landing (the rows can fail)" \
+    "FAIL: K6.1-like the INT trap runs" "$(cat "$LGL" 2>/dev/null)"
+done
+
+# THE RUNNER'S --one WORKER calls the primitive when the plugin library is present, and keeps its own
+# path for a tree without it. A scratch tree holds a copy of tests/run.sh; a spy library records the call.
+ll_one_tree() {  # <dir> <with: real | spy | none> -> the tree: tests/run.sh, tests/x.test.sh, the library or not
+  rm -rf "$1"; mkdir -p "$1/tests" || return 1
+  cp "$REPO/tests/run.sh" "$1/tests/run.sh"
+  printf '#!/bin/bash\necho "cwd=$(pwd -P) store=${BIONIC_GATE_DIR-unset} admit=${BIONIC_GATE_ADMIT-unset}"\nexit 3\n' > "$1/tests/x.test.sh"
+  case "$2" in
+    real) mkdir -p "$1/payload/scripts/lib" && cp "$LL_SUITE_LIB" "$1/payload/scripts/lib/suite.sh" ;;
+    spy) mkdir -p "$1/payload/scripts/lib"
+         printf 'bionic_suite_exec() { printf "%%s\\n" "$*" >> "%s/spy.log"; ( cd "$1" && bash "$2" ); }\n' "$1" > "$1/payload/scripts/lib/suite.sh" ;;
+  esac
+  printf 'x.test.sh\tbash tests/x.test.sh\n' > "$1/queue"; mkdir -p "$1/work"
+  (cd "$1" && pwd -P)
+}
+ll_one() {  # <tree> -> runs its --one worker for x.test.sh, BIONIC_GATE_ADMIT=9 inherited; prints <rc file>|<out>
+  ( cd "$1" && BIONIC_GATE_ADMIT=9 BIONIC_TEST_QUEUE="$1/queue" BIONIC_TEST_WORK="$1/work" bash tests/run.sh --one x.test.sh </dev/null >/dev/null 2>&1 )
+  printf '%s|%s' "$(cat "$1/work/x.test.sh.rc" 2>/dev/null)" "$(cat "$1/work/x.test.sh.out" 2>/dev/null)"
+}
+O1="$(ll_one_tree "$WORLD_ROOT/one-spy" spy)"
+expect_eq "(sig9) --one with the library present calls bionic_suite_exec with the tree and the suite's path" \
+  "$O1 tests/x.test.sh" "$(ll_one "$O1" >/dev/null; cat "$O1/spy.log" 2>/dev/null)"
+O2="$(ll_one_tree "$WORLD_ROOT/one-real" real)"
+expect_eq "(sig9) …and through the real primitive the suite runs without the store, the inherited admission kept, its rc in the .rc file" \
+  "3|cwd=$O2 store=unset admit=9" "$(ll_one "$O2")"
+O3="$(ll_one_tree "$WORLD_ROOT/one-none" none)"
+expect_eq "(sig10) a tree without the plugin library runs the suite by the runner's own path, the same" \
+  "3|cwd=$O3 store=unset admit=9" "$(ll_one "$O3")"
+expect_false "(sig10) …and no spy log exists there" test -e "$O3/spy.log"
+
+# ---------------------------------------------------------------------------
+section "§CAUSE: a standing red names its cause and the run that disagrees; the floor judge does not count an environment red (AC-7.2)"
+# fails-when: a landing records a standing red with no cause, or the floor judge counts an environment red as the suite's state.
+#
+# `a` is red at the accepted head while $LL_SIG/<tag>.env exists (a fact outside the tree, as the share
+# is) and green otherwise. T2 merges the head first, so the candidate's tree is T2's own, where a door
+# run (its stamp, as booked.sh writes one) can be green: that run disagrees with the landing's red.
+ll_cause_world() {  # <tag> -> root
+  local r
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T2 a
+  printf '#!/bin/bash\necho "PASS: a ran"\nif [ -e "$LL_SIG/%s.env" ]; then echo "FAIL: a reads its environment"; echo; echo "a.test.sh: 1/2 passed, 1 failed  sections=1 setup=0"; exit 1; fi\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' \
+    "$1" > "$r/tests/a.test.sh"
+  git -C "$r" commit -qam "a reads its environment" || return 1
+  git -C "$r/.worktrees/T2" merge -q --no-edit wave/x >/dev/null 2>&1 || return 1
+  : > "$LL_SIG/$1.env"
+  printf '%s' "$r"
+}
+ll_stamp() {  # <tree> <commit> <suite> <rc> <at> — a door run's stamp in the tree's git dir
+  printf 'stamp/v1|head=%s|dirty=0|rc=%s|at=%s|suites=%s|cmd=bash tests/run.sh --only %s\n' "$2" "$4" "$5" "$3" "$3" \
+    >> "$(git -C "$1" rev-parse --absolute-git-dir)/bionic-stamps"
+}
+ll_walk() {  # <root> <from> <to> -> the floor judge's sentence; LL_WALK_RC its exit
+  LL_WALK="$( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_walk "$1" "$2" "$3" "$(ll_rec "$1")" )"; LL_WALK_RC=$?
+}
+RC1="$(ll_cause_world c1)"; HC1="$(ll_head "$RC1")"; TC1="$(git -C "$RC1/.worktrees/T2" rev-parse HEAD)"
+ll_stamp "$RC1/.worktrees/T2" "$TC1" a.test.sh 0 2020-01-01T00:00:00Z
+ll_verb "$RC1" T2
+KC1="$(ll_last_cand "$RC1" T2)"; LC1="$RC1/.bionic/docs/record/wave-x/line/T2-a-${HC1:0:12}.log"
+expect_eq "(cause1-pre) T2's red fails at the head too: published (exit 0), its own verdict red" "0 $KC1 red" \
+  "$LL_RC $(ll_head "$RC1") $(ll_results "$RC1" T2 "$KC1")"
+expect_eq "(cause1-pre) the candidate's tree is T2's, where the door run was green" \
+  "$(git -C "$RC1" rev-parse "$TC1^{tree}")" "$(git -C "$RC1" rev-parse "$KC1^{tree}")"
+expect_regex "(cause1) the standing event names its cause, environment, and the run that disagrees: the door run's stamp" \
+  "^line/v1\\|ev=standing\\|head=${HC1}\\|suite=a.test.sh\\|lines=1\\|log=${LC1}\\|cause=environment\\|against=stamp:${TC1}@2020-01-01T00:00:00Z\\|at=[0-9T:-]+Z$" \
+  "$(ll_ev "$RC1" standing)"
+expect_contains "(cause2) ready reports the environment red as a defect, with the run that disagrees and the head's log" \
+  "STANDING T2 a.test.sh cause=environment against=stamp:${TC1}@2020-01-01T00:00:00Z log=${LC1}" "$LL_OUT"
+ll_walk "$RC1" "$HC1" "$KC1"
+expect_eq "(cause3) the floor judge does not count the environment red: the door run's green proves the landed commit (exit 0, no sentence)" \
+  "0|" "$LL_WALK_RC|$LL_WALK"
+RC2="$(ll_cause_world c2)"; HC2="$(ll_head "$RC2")"
+ll_verb "$RC2" T2
+KC2="$(ll_last_cand "$RC2" T2)"; LC2="$RC2/.bionic/docs/record/wave-x/line/T2-a-${HC2:0:12}.log"
+expect_eq "(cause4-pre) with no run disagreeing, T2's red is standing all the same: published, its verdict red" "0 $KC2 red" \
+  "$LL_RC $(ll_head "$RC2") $(ll_results "$RC2" T2 "$KC2")"
+expect_regex "(cause4) …and its standing event names its cause, code, and no run disagreeing" \
+  "^line/v1\\|ev=standing\\|head=${HC2}\\|suite=a.test.sh\\|lines=1\\|log=${LC2}\\|cause=code\\|against=-\\|at=[0-9T:-]+Z$" \
+  "$(ll_ev "$RC2" standing)"
+expect_contains "(cause5-pre) ready printed its landing" "LANDED T2 $KC2" "$LL_OUT"
+expect_absent "(cause5) …and no STANDING report: a code red is the branch's own, as before" "STANDING " "$LL_OUT"
+ll_walk "$RC2" "$HC2" "$KC2"
+expect_eq "(cause6) the floor judge counts the code red as the suite's state (exit 1)" "1" "$LL_WALK_RC"
+expect_contains "(cause6) …naming it red at the landed commit" "a.test.sh is red at ${KC2:0:12}" "$LL_WALK"
+# A STANDING EVENT WITH NO cause= (a record written before 1.16.0) is counted as code: the judge
+# drops only what an environment-class event names.
+RC3="$(ll_cause_world c3)"; HC3="$(ll_head "$RC3")"; TC3="$(git -C "$RC3/.worktrees/T2" rev-parse HEAD)"
+ll_stamp "$RC3/.worktrees/T2" "$TC3" a.test.sh 0 2020-01-01T00:00:00Z
+ll_verb "$RC3" T2
+KC3="$(ll_last_cand "$RC3" T2)"
+expect_contains "(cause7-pre) the landing wrote an environment-class standing event" "cause=environment" "$(ll_ev "$RC3" standing)"
+sed 's/|cause=environment|against=[^|]*|/|/' "$(ll_rec "$RC3")" > "$(ll_rec "$RC3").n" && mv "$(ll_rec "$RC3").n" "$(ll_rec "$RC3")"
+expect_eq "(cause7-pre) …now rewritten as a record before 1.16.0 writes it, with no cause" "1|0" \
+  "$(ll_ev "$RC3" standing | awk 'END { print NR }')|$(ll_ev "$RC3" standing | grep -c 'cause=')"
+ll_walk "$RC3" "$HC3" "$KC3"
+expect_eq "(cause7) a standing event with no cause is counted: the judge refuses (exit 1), naming the red" "1 1" \
+  "$LL_WALK_RC $(printf '%s\n' "$LL_WALK" | grep -c "a.test.sh is red at ${KC3:0:12}")"
 
 finish

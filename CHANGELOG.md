@@ -8,6 +8,289 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.16.0 — 2026-10-11
+
+The gate stops forecasting, the plan lands itself, and the person is told. Eleven decisions are built, and
+the debt the last three waves left is burned. The gate now assumes one core a command and remembers only
+how long a command took. A suite at a landing keeps its traps, its store and its admission. The suite
+budget is enforced where a suite starts. A row delivers its own record, a ruling reaches a writer in the
+call after it is given, and what the person owes is kept in one ledger and sent once. A finding is an
+identity, and a fix closes it. Every decision put to the user takes one shape, through one skill. This is a
+minor release by the policy above: the new verbs, the ledger, the sender and the skill are new capability.
+`canonical_sdlc_version` stays 14.
+
+**Migration.** None is required. Five behaviours changed that a script of yours may have leaned on.
+
+- The gate's cost files. A 1.15.0 store holds `cost/<key>` files of four-field lines, some ending `:whole`.
+  The gate now writes `cost/<project>%<key>` files of `<seconds>:<epoch>` lines and keeps three. It reads
+  an old unkeyed file for its seconds only, when the key has no keyed file, and never writes one. Nothing
+  needs doing, and an old file may be deleted (`T1-typical-cost.md`).
+- `setup.sh --only=` and `remove.sh --only=` with an empty value are refused with exit 2, as a bare
+  `--only` is. At 1.15.0 `remove.sh --only=` ran the whole pass (`T4-empty-flag.md`).
+- `session-poker.sh decline --on <path>` is refused and records nothing; a decline names a row. The refusal
+  prints the call that succeeds (`T7-verbs.md`).
+- A wave that shipped no ADR must say `adrs: none` in its plan or spec, or `close-out.sh` refuses and names
+  the gap (`T8-close-out.md`).
+- A budgeted agent's call that starts a script is rewritten to `export BIONIC_GATE_AGENT=<its row>; <the
+  command>`, so a runner inside the script asks the gate as that agent (`T3-budget-at-ask.md`). When the
+  session runs in bypass mode, every command of a budgeted agent is rewritten the same way
+  (`T36-carry.md`).
+
+What you will notice:
+
+- **The gate promises one core a command.** A command that declares no width is promised 1 core, a whole run
+  is promised the width, and no cores or memory are read from any recorded run. The cost the gate remembers
+  is how long a command took, kept per project: a worktree shares its repository's durations. The landing's
+  time limit reads those durations from the landing tree. The cores a process may use are bounded by the
+  host's cgroup CPU quota where one is set. Two new commands on a machine with room now run side by side,
+  where at 1.15.0 the second waited on a promise taken from an unrelated run. Record:
+  `T1-typical-cost.md`.
+- **A whole run reads its width after its admission is granted.** The run that waited behind a busy machine
+  now spreads over the quiet machine it was admitted to, and the `Wall:` line carries that width. Record:
+  `T5-width-after-grant.md`.
+- **A suite at a landing keeps its traps, its store and its admission.** `ready` starts the runner and the
+  suite as jobs of their own through one plugin library, so INT and QUIT start at their defaults, the gate
+  store is not the suite's, and the suite's `BIONIC_GATE_ADMIT` is the landing's own admission. A standing
+  red now records `cause=environment` or `cause=code` and the run that disagrees with it, and the floor
+  judge does not count an environment red. Record: `T2-suite-primitive.md`.
+- **The suite budget is enforced where a suite starts.** An agent's off-budget suite, or a whole run without
+  `run.sh` on its row, is refused at the gate's ask: exit 75, one line, nothing filed, and `tests/run.sh`
+  reports it as `REFUSED`. A script that runs a suite is read and admitted, and the `unverified script`
+  refusal is retired. Links to the runner or a suite are resolved before they are compared, and the
+  comparison folds case where the filesystem folds it. Record: `T3-budget-at-ask.md`.
+- **An empty `--only=` is refused.** In `setup.sh` and `remove.sh`, with the bare flag's own message. Record:
+  `T4-empty-flag.md`.
+- **Every row lands itself.** A record row's last act is `session-poker.sh deliver <row>`: it checks the
+  row's artifact (and a review row's registered reading) and lands the row at the working head with the
+  artifact in its ledger line. The tick lands a finished row whose agent ended without delivering, and
+  reports one whose artifact is absent. A landing replaces the `pending dispatch` lead, where it appended.
+  Record: `T6-deliver.md`.
+- **The orchestrator's hand edits have verbs.** `matrix-set`, `waive-row` (held to the user's typed words),
+  `step-field 5 walk-artifact`, `tasks-prose`, many-row `task-set`, `epic-row` and `continuation-fill`. Every
+  plan-verb refusal prints `poker: next call:` with the call that succeeds. Record: `T7-verbs.md`.
+- **`brief <row>` renders a dispatch brief from its plan row** and the shipped scaffold into
+  `record/<wave>/briefs/<row>.md`; the dispatch preflight accepts it. Record: `T9-brief.md`.
+- **Close-out writes the lines it checks.** It inserts the Step-8 line and the walk pointer when they are
+  absent, writes the epic row and the continuation whole, and prints the five marks only a person can fill.
+  Record: `T8-close-out.md`.
+- **A ruling reaches a writer in its next call and is held at the commit.** `rule <writer> '<text>'`
+  records it; a hook on every tool result pushes it to that writer once; `ruling-ack <id>` acknowledges it.
+  A writer's `git commit` and `ready` are refused, carrying the ruling, until it is shown. The hook's fast
+  path forks nothing. Whether the pushed text reaches a teammate running in the same process was not
+  measured, and no live session was driven (`unverified`); the guard does not depend on it. Records:
+  `T10-rulings.md`, `walk.md` section 2.
+- **What the person owes is one ledger, and one sender sends it.** Approvals, gate acts and a delivery are
+  items in `.bionic/tmp/owed-<session>.state`; each is sent once through the channel `notify.sh` reads, and
+  closed by the act that answers it. With no channel declared, nothing is written outside the ledger.
+  `setup.sh` offers the channel (`<claude home>/bionic/notify`, with one test notification), `doctor.sh`
+  reports it read-only, `close-out.sh` sends the delivery once, and `remove.sh` takes the file out. Every send in the records went to a stubbed `curl`; a delivery to a real service was not seen (`unverified`). Records: `T11-owed-notify.md`,
+  `T12-setup-doctor.md`, `T15-code-debt.md`, `walk.md` sections 5 and 7.
+- **A finding is an identity, and a fix closes it.** `task-add --born <record>#<n>` names the findings a row
+  answers; a question's reading drops a finding once its fix row has landed green, and an open S1 or S2
+  keeps it failing. `session-poker.sh disposition` lists every finding with its rating, state and the
+  ruling it needs, and records the person's `fix` or `defer`. "Fixed" means landed green, not that the fix's
+  own RED was read. Record: `T13-findings.md`.
+- **One skill shapes every decision put to the user.** `/bionic:decision` takes Goal, Options,
+  Recommendation, Significance and a last reply line, with the forms and the altitude the skill states. The
+  core gains one paragraph and the loaded doctrine ends 448 bytes smaller than it began. The first live
+  check failed: two sessions answered in free prose (`T19-decision-live.md`). `session-start.sh` now
+  prints one standing line to every session and the skill's description names the which-option case; two
+  of two live sessions then answered in the shape. The two changes landed together, so the live runs do not
+  say which one did the work (`T27-decision-reach.md`). Records: `T14-decision.md`, `T16-doctrine-debt.md`.
+- **The doctrine debt is burned and the axis is a question.** The four doctrine debt pairs are one site or a
+  pinned agreement, and the readers' `user-facing` axis is asked as "will a user experience it, including
+  its consequence? yes or no". Record: `T16-doctrine-debt.md`.
+- **The code debt is burned, and the walls are fixed where the wave found them.** `bionic_trunc` walks a
+  character once, the bounded wait is one library (`tests/lib/wait.sh`), the regression setting has one
+  reader (`plan_regression`), and `units_unlined` is deleted. A subagent may not call `rule`, `matrix-set`,
+  `waive-row`, `tasks-prose`, `epic-row`, `continuation-fill` or `disposition`, and `deliver` is only for
+  the row its caller's roster names. The doctrine-growth wall measures a merge in a row's tree against
+  `MERGE_HEAD`, so a row is not charged for growth another row already landed. All nine ledgered debt lines
+  are burned (`debt.md`). Record: `T15-code-debt.md`.
+- **The record is made true.** The epic plan's shipped and planned tables match the waves' own records, and
+  each of the 71 Known limits of 1.13.0 is read against the code: 66 still true, 5 closed, none fixed.
+  Record: `T17-record.md`, `limits-1.13.0-triage.md`.
+- **slots' wait rows keep testing a wait under one core a command.** B2 and K5 make the second command wait
+  with a live busy reading of 7.0 cores; every expected value is unchanged. Record: `T28-slots.md`.
+- **A container with a CPU limit on a busy host has room.** Where a cgroup CPU quota bounds the cores, the
+  gate counted the container's cores but read the host's load average, so a 2-CPU container on a 64-core
+  host at load 10 reported no room with nothing admitted, waiting or owed. It now reads the container's own
+  CPU use from its cgroup (`cpu.stat`, or `cpuacct` on cgroup v1), and an unreadable file reads 0, never
+  full. A host with no quota behaves as before. The container path was proved with a planted cgroup root, not
+  on a Linux host (`unverified`; see the Linux limit below). Record: `T33-container.md`.
+- **`deliver` refuses while the writer has a ruling unread.** A row's delivery now takes the same look the
+  commit and `ready` take: an unread ruling for the row's writer is shown, stamped, and the call exits 2
+  with the ruling ids in the refusal. The next `deliver` lands the row. Record: `T34-guards.md`.
+- **A failed notification is retried.** When the channel fails, the owed item stays unsent and the next Stop
+  sends it, where an earlier build of this release marked it sent and lost it. A caller killed mid-send
+  leaves the mark, so an item is still never sent twice. Record: `T34-guards.md`.
+- **A named approval or a waiver the person must give opens an owed item.** A row waiting on `approval:<name>`,
+  at the tick and at the dispatch wall, opens `approve:<name>`, and a failing review question opens
+  `waive:<question>`; the `approve` and `waive` verbs close them, and the person is sent each once. Record:
+  `T35-owed-sources.md`.
+- **In bypass mode a budgeted agent's run from any launcher is held to its budget.** The agent's name now
+  rides on every command it runs, so a suite started through awk, python, node or `source` asks the gate as
+  that agent and is refused at the ask when it is off budget. Outside bypass mode only a script start
+  carries the name, because Claude Code checks permission rules against the rewritten command (see the
+  restated limit below). Record: `T36-carry.md`.
+
+### The floor and the walk
+
+The whole run at 8832e4e6, the head with every build row on it, passed 87 suites and failed 8 of 95, in 1,979
+s of wall at width 7 (`regression.md`, `regression-8832e4e6.log`). The log has no `waits for its turn`
+line. The eight were pins that later rows had moved, one size cap and one expected stdout: mutation anchors
+that no longer matched `proof.sh` or `run.sh` (bash-walls-egd, session-poker-3 63e0c and 63e10, runner-roster
+OA.14), two private copies in `gate.test.sh` and `cmd-class.test.sh` (seam-resolution, cross-gate-agreement
+S17), session-poker-3 69e4 (a verb list that lacked the three verbs T7 added; the log filed it under
+session-poker-4), execution-recorder PC-b0 (the structure checks file was 5,110 bytes against its 5,000 cap, a
+real defect), hook-adoption (the standing decision line now reaches a session with a malformed or empty
+id, so those two rows expect that line alone), and session-poker-4 MP-m2. Fix row T29 changed test files only:
+it moved each anchor to the shipped line with its mutant still biting, took the private copies to the shared
+helpers, and put the three verbs in the list (`T29-pins.md`). Fix row T30 cut three repeated clauses from
+the structure checks, 5,110 to 4,959 bytes with every check kept, changed the two session-start rows, and
+found MP-m2's premise wrong: the refusal already built its number from the constant, and the grep had
+matched a comment, which it reworded (`T30-floor.md`). Each suite was green through the door at its row's
+landing. Four review fix rows, T33 to T36, landed after that run; each had its own suites green through
+the door at its landing (`T33-container.md`, `T34-guards.md`, `T35-owed-sources.md`, `T36-carry.md`). No
+whole run cited here was taken after them.
+
+The walk drove the wave head's own verbs, hooks and libraries on a scratch world: the brief, a ruling pushed
+and held at the commit, `deliver`, `matrix-set` and `waive-row`, the owed ledger through a stubbed channel,
+two unfamiliar commands at the gate, and `setup.sh --only`, `--list` and the notify item (`walk.md`). It drove each verb to the result its record states. Its section 8 lists what it noticed; three notes became Known limits below, and the
+smaller ones (a brief whose two artifact lines use different roots, raw epoch seconds in `rulings`, four
+`matrix-set` refusals that name the problem and print no call, a one-item setup run that truncates the path
+it declared) change no decision and are not listed again.
+
+**The assertion account.** Expected values changed by ordered behaviour changes, each in its record's table,
+and one set of rows was deleted with the mechanism it tested.
+
+| record | what changed |
+|---|---|
+| `T1-typical-cost.md` | the expected values in its table moved to the one-core and durations-only rules; nine rows (D.17, D.18, CO.4 to CO.8, I.8, I.9) were deleted with the peak sampling, the cores-over-machine test and the idle-gate clause they tested; seven suites were given room the gate no longer rations, with expected values unchanged |
+| `T3-budget-at-ask.md` | the `unverified script` refusals became admitted `script` claims (SB.2, SB.3, SB.5, §SCRIPT-TEXT); B15f now pins the case-blind refusal and keeps the case-exact answer beside it |
+| `T7-verbs.md` | session-poker-2 16d6 to 16d8 pin the refusal of `decline --on` a file |
+| `T8-close-out.md` | 86.2a/b and REG-1 pin a refusal and a derived sentence where they pinned a `<fill:` mark; 4k to 4n changed their fixture and kept their expected values |
+| `T13-findings.md`, `T28-slots.md`, `T4-empty-flag.md` | new rows only, or fixtures only; expected values unchanged |
+| `T34-guards.md` | notify A5e asserted that a failed send was not retried (3 calls); it now asserts the retry (4), with A5f to A5j and K1 to K3 beside it |
+| `T33-container.md`, `T36-carry.md` | gate H.10's mutation anchor follows the line it mutates; cmd-class AC-24 (twice) and AC-16 now assert the carried command exactly, with stderr empty and stdout only the rewrite |
+
+Known limits, carried to the next release. The count is the `- Known limit` bullets that are not struck: 20 here, against 18 carried in the 1.15.0 block (its 19th bullet was struck). The block stood at 17 before the four review fix rows; those rows and the critic's re-read of them left three more limits that a user of any project can meet, and they are counted. The count does not fall below 1.15.0's:
+
+- Known limit: the 1.13.0 limits stand as written there, as triaged in `limits-1.13.0-triage.md`: 66 still
+  true, 5 closed (32, 33, 46, 49, 60), none fixed. Sixty-three are carried by the next wave's charter;
+  36 and 37 sit in `ideas/wave-run-scorecard-charter.md` and 70 in `ideas/wave-roster-lifecycle.md`.
+- Known limit: the auditor is not pushed the severity scale, so its `result` follows its verdicts, not the
+  scale; readers holding a code question, and the exam's readers, grade by the scale (Known limit 71 of
+  1.13.0, restated).
+- Known limit: an evidence verdict's `result` moves with rigor (Known limit 74 of 1.13.0, restated). At
+  `single` the critic holds `evidence` with the severity scale, and a REFUTED rated S3 or S4 registers
+  `flag`. At `double` the auditor holds it without the scale, so the same REFUTED registers `fail`.
+- Known limit: the tick does not name a starved queue and does not require an answer per held row. A held
+  row is answered by `task-set`, `task-split` or `decline --on`.
+- Known limit: a dead session's roster is pruned, so a whole run it launched stops counting toward the
+  second-run rule. The durable twin is the `proved:` line of kind `floor` for a green run.
+- Known limit: the RC5 deadline in dispatch-preflight-4 §RECORDER is the constant `DP_DEADLINE_S=22`
+  (`hooks/dispatch-preflight.sh:306`) with no environment knob, so each drive sleeps 24 s. A knob would
+  change RC5's literal bound, which is the user's word.
+- Known limit, narrowed: a writer's suite asks the gate per suite. Under one core a command, writers' suites
+  run side by side, but a whole run is promised the width, so a writer's ask still waits behind a whole run
+  on a machine with no room beside it. No wait was measured in this wave (`unverified`). The background
+  whole run at every landing is the next wave's build.
+- Known limit: the 15-minute target for a whole run is missed. The whole run at 8832e4e6 took 32m59s for 95
+  suites, against 31m36s for 92 at 1.15.0 (`regression.md`); no row of this wave was a speed row, and why the
+  run is two minutes longer was not analysed. Carried.
+- Known limit: `tests/timing.tsv` holds the seconds of one whole run, at 88b0f1ec, taken under the machine's
+  load then; this release adds three rows from the first green runs of decision-skill, inbox and notify. It
+  is an order key, not a forecast. The run at 8832e4e6 left `regression-8832e4e6-timing.tsv`; the table was
+  not rewritten from it.
+- Known limit: `ready` runs the installed plugin's `line.sh`, so every landing of this wave ran the 1.15.0
+  landing, and slots K6.1, K6.3 and K6.5 (the INT and QUIT trap controls) stand red in that environment
+  until a build that carries `lib/suite.sh` is installed. They are green at a fixture landing
+  (`landing-line.test.sh` sig6) and through the door (`T28-green-slots.log`). The floor judge reads them as
+  a cause-less standing red until a newer green slots run exists (`T2-suite-primitive.md`).
+- Known limit: Linux was not used. The cgroup quota read, the `cksum` project key (assumed CRC from its
+  documentation), `set -m` in the suite primitive, and `cmd_case_blind`, `real_path` and the case folding of
+  command paths were run on macOS only. Their case-exact and quota arms are proved by planted probes, not by
+  a Linux host (`T1-typical-cost.md`, `T2-suite-primitive.md`, `T3-budget-at-ask.md`).
+- Known limit, narrowed: outside bypass mode, a runner in another language asks as main. A budgeted agent's
+  suite started through python, node, awk, `source` or an out-of-tree script asks the gate as the main
+  thread, unbudgeted, unless the agent runs with `permission_mode: bypassPermissions`. Carrying the agent's
+  name on every command there would make Claude Code check permission rules against the rewritten command
+  and prompt where the original was allowed. A script start is still carried in every mode. An agent that
+  types `BIONIC_GATE_AGENT=` itself names its own who. Pinned by bash-walls CE.7c, with CE.1 the bypass-mode
+  arm (`T36-green2.log`, `T36-carry.md`, `T3-budget-at-ask.md`). The next wave's first gate item is a
+  per-tree marker, `<git-dir>/bionic-agent` holding the row name, which the gate would read when no name is
+  set: no command is rewritten, so it closes the launchers in every mode, and it would still leave a suite
+  started outside the agent's own tree (`T36-carry.md`, `assumptions.md` A-orch-148).
+- Known limit: `bash TESTS/RUN.SH`, and a link to the runner not named `run.sh`, exit 2 for everyone with
+  nothing run: the interpreter seam re-runs any script whose basename is not `run.sh`, and the runner
+  rejects the paths it is handed. That is the safe direction, pinned by gate.test.sh CA.8
+  (`T3-budget-at-ask.md`).
+- Known limit: the dispatch wall does not refuse a nested dispatch. A dispatched writer dispatched four
+  read-only researchers of its own and nothing refused it (`assumptions.md` A-orch-46). Next wave.
+- Known limit: a whole run's width after a short wait may lag. The ring medians over 300 s, so a wait shorter
+  than about 150 s can still read busy samples. The fixture rewrites the ring; a live short wait was not
+  measured (`T5-width-after-grant.md`, `assumptions.md` A-T5-4).
+- Known limit: two suites backgrounded from one script share one gate admission, because the holder is the
+  script's `$$`. Two `gate_ask`s from sibling subshells both returned request 1; as separate processes they
+  returned 1 and 2 (`walk.md` sections 6 and 8).
+- Known limit: `ruling-ack` run with no agent identity acknowledges a writer's ruling (`walk.md` section 8).
+- Known limit: the tick's backstop `deliver` against an unread ruling is untested. The tick runs `deliver`
+  for a finished row whose agent ended without it, and the refusal line it prints carries the ruling ids,
+  but no test drives that path (`unverified`; `T34-guards.md`).
+- Known limit: two asks of the person still open no owed item. The commit wall's question and matrix-row
+  waiver asks, and `waive-row`, print from `walls.sh` and the ledger does not hear them (`unverified` as a
+  source); and waiving a question closes `waive:<question>` but not the `finding:<id>` items
+  `disposition` opened for its findings, which stay open, sent once and never re-sent, until a ruling
+  closes them (`T35-owed-sources.md`).
+- Known limit: under a cgroup CPU quota the gate's room is right (T33), but the settle wait
+  (`resources_settled`, `resources_undisturbed`) and the pressure rung that sets a whole run's width still
+  read the host's load average against the quota's cores (`resources.sh` §settle). On an idle container on a
+  busy host a solo suite waits its 1200 s and comes back VOID, and a whole run is cut to half width. Found by
+  the critic's re-read (`critic-adversarial-2.md`, new 1, S3) after the review-born rows were spent; the
+  next wave's first gate item, beside the per-tree marker. Not run on Linux.
+
+Known limits, struck:
+
+- Known limit, struck: a capitalised spelling of a suite file or of `tests/run.sh` passed the budget wall on
+  a case-insensitive filesystem. The comparison now folds where the filesystem folds, and `bash
+  tests/GAMMA.TEST.SH` is refused as gamma.test.sh. Proved by cmd-class §CASE-FOLD and gate §CASE, red then
+  green (`T3-red-cmd-class.log`, `T3-green-cmd-class.log`, `T3-red-gate.log`, `T3-green-gate.log`), and by
+  background-suite-guard B15f (`T3-red-background-suite-guard.log`, `T3-green-background-suite-guard.log`).
+  The literal `TESTS/RUN.SH` and Linux are carried above.
+- Known limit, struck: `ready` held a `landing` admission but did not export it as `BIONIC_GATE_ADMIT`. The
+  suite now starts through `bionic_suite_start --admit <id>` (`line.sh` `_line_runner`), and
+  landing-line (sig7) reads the suite's `BIONIC_GATE_ADMIT` as the landing's own request of kind landing
+  (`T2-green-landing-line.log`). No suite that drives the real runner has yet run under the new `ready`;
+  that is the K6 line above.
+- Known limit, struck: the gate's cost accounting was narrowed, not closed. It promised each owed writer the
+  largest cost on record. The gate now promises 1 core to every command that declares no width and keeps
+  only durations, per project (`gate.sh` `_gate_cores_for`). gate §ONE-CORE, §SIDE-BY-SIDE and §DURATIONS
+  red then green (`T1-red-2.log`, `T1-green-5.log`).
+- Known limit, struck: `units_unlined` had no caller and one test pin. Both are deleted (T15, 4d3d0dce); a
+  search of `hooks`, `payload`, `tests`, `agents-src` and `skills` finds no hit (`T15-code-debt.md`).
+- Known limit, struck: `setup --only=` with an empty value ran the whole pass. loader §E, 87 of 96 passed
+  and 9 failed on the unchanged scripts (`T4-red.log`), green after (`T4-green.log`).
+- Known limit, struck: a whole run fixed its width from the pressure ring before it waited for its
+  admission. It now reads after the grant: runner-roster WG.9 read 1 where 7 was expected, then 7
+  (`T5-red-runner-roster.log`, `T5-green-runner-roster.log`). The lag after a short wait is carried above.
+- Known limit, struck: the four debt lines from the structure critic. `width.sh` walks a UTF-8 character
+  once (units DBC-1 to DBC-1c, `T15-red-units.log`); a bounded wait-until is one library, with all four
+  suites on it (name-scan, slots and worktree by T15, green in the whole run `regression-8832e4e6.log`; gate.test.sh by T29, `T29-pins.md`); the share × cores ÷ 100 room has one site, `_gate_share_cores` (T1,
+  gate §SHARE-ROOM SR.1 to SR.4); and the run-end re-read has an agreement check over `run_read` and
+  `booked_follow` (session-poker-2 56k to 56k8, `T15-green-poker2-worktree-3.log`).
+- Known limit, struck: rc-item reached the network. Each yes-answered `setup --all` door cloned humanizer
+  from GitHub because `/usr/bin/git` was on the suite's PATH. The suite now puts a git stub first on its
+  PATH that rewrites a github.com clone to a local fixture repository. A process sampler saw 118 `git
+  clone` of the GitHub URL and 1,044 `git-remote-https` samples before, and 0 `git-remote-https` samples
+  after, every clone local (`T31-red-rc-item-net.log`, `T31-green-rc-item-net.log`; `T31-limits.md`).
+- Known limit, struck: a ruling acknowledged before its push was still pushed once, and the pending flag
+  kept that writer's calls on the hook's slow path until then (`walk.md` section 2). The push hook now
+  skips a ruling that carries a `shown=` stamp, and one function settles the pending flag on each push
+  and each stamp. inbox §ACK was 62 of 67 on the unchanged code (the acknowledged ruling pushed with
+  "acknowledge with:", the flag still up), then green (`T31-red-inbox.log`, `T31-green-inbox.log`;
+  `T31-limits.md`).
+
 ## 1.15.0 — 2026-10-11
 
 A whole regression run now holds the machine once and runs at the width the share allows, and the hot

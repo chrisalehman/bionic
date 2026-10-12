@@ -850,6 +850,11 @@ sidguard_fixture() {
   printf '%s' "$root"
 }
 
+# THE STANDING DECISION LINE (wave-33 T27, AC-11.2) is session-start's one line to EVERY session,
+# printed above every exit, so a bad key leaves it standing: under a malformed or empty key
+# session-start's stdout is exactly this line, and nothing keyed to the session beside it (T30).
+SIDGUARD_STANDING='bionic: any decision or choice between approaches you put to the user goes through the bionic:decision skill — invoke it.'
+
 for hook in $GUARD_FIFTEEN; do
   # ── the CONTROL first, so a silence below is known to be the guard's doing ──
   # The same fixture, the same payload, a WELL-FORMED key. Something must happen: a
@@ -873,13 +878,21 @@ for hook in $GUARD_FIFTEEN; do
   r_bad=$(sidguard_fixture "$hook" "sidguard-$hook-bad")
   drive_sid "$hook" "$r_bad" 'bad/../id' 'bad/../id'
   expect_eq "$hook: a malformed session id -> exit 0" "0" "$GS_ST"
-  expect_empty "$hook: a malformed session id -> no stdout" "$GS_OUT"
+  if [ "$hook" = "session-start" ]; then
+    expect_eq "$hook: a malformed session id -> the standing line alone on stdout" "$SIDGUARD_STANDING" "$GS_OUT"
+  else
+    expect_empty "$hook: a malformed session id -> no stdout" "$GS_OUT"
+  fi
 
   # ── EMPTY: no key in either channel ──
   r_empty=$(sidguard_fixture "$hook" "sidguard-$hook-empty")
   drive_sid "$hook" "$r_empty" '' ''
   expect_eq "$hook: an empty session id -> exit 0" "0" "$GS_ST"
-  expect_empty "$hook: an empty session id -> no stdout" "$GS_OUT"
+  if [ "$hook" = "session-start" ]; then
+    expect_eq "$hook: an empty session id -> the standing line alone on stdout" "$SIDGUARD_STANDING" "$GS_OUT"
+  else
+    expect_empty "$hook: an empty session id -> no stdout" "$GS_OUT"
+  fi
 done
 
 # ── stop-guard's SECOND key, which the guard above cannot see ────────────────

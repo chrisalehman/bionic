@@ -715,4 +715,116 @@ rec_median_ms() {  # <hook> <payload> <n> -> median wall-clock ms across n runs
 REC_MEDIAN=$(rec_median_ms "$REC_HOOK" "$REC_PAYLOAD" 20)
 echo "hook-latency: execution-recorder.sh (Bash path) median over 20 runs = ${REC_MEDIAN}ms (informational, not gated — see file header)"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "10: ruling-push.sh's fast path forks nothing; its slow path stays inside the PostToolUse budget (epic-23 wave-33 T10)"
+
+# THE NEW HOOK ON EVERY TOOL CALL (wave-33 T10; REQ-1, spec D1 "Worth your eye"). hooks/ruling-push.sh
+# is registered on PostToolUse for EVERY tool, for every agent, so its common path is paid by every
+# call in every session. Its design is one file test while no ruling is pending: the session key and
+# the project root from the environment the CLI gives every hook, no stdin read, no fork. That is a
+# count, and the count is the behaviour, so it is held at zero. Its slow path (a ruling pending for
+# SOME writer of the session) is held to §9's budget for the recorder's PostToolUse arm, 10.
+#
+# ANTI-VACUITY: the slow-path trace of the same hook in the same project must count MORE than zero,
+# so a tracer that saw nothing of this hook cannot pass the fast path's zero.
+PUSH_HOOK="${BIONIC_RULING_PUSH_UNDER_TEST:-${BIONIC_HOOKS_DIR}/ruling-push.sh}"
+[ -f "$PUSH_HOOK" ] || { echo "hook-latency: no hook at $PUSH_HOOK — suite refuses to run"; exit 1; }
+bash -n "$PUSH_HOOK" || { echo "hook-latency: $PUSH_HOOK does not parse — suite refuses to run"; exit 1; }
+
+PUSH_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse", tool_name:"Read", agent_id:"a-latency-A",
+    tool_input:{file_path:"/dev/null"}, tool_response:{}, tool_use_id:"toolu_hook_latency_push"}')
+# The project root is the CLI's CLAUDE_PROJECT_DIR here, as it is for every registered hook; §1-§9
+# blank it because the hooks they trace resolve their root from the payload.
+trace_push() {  # <out-trace-file>
+  printf '%s' "$PUSH_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$PROJECT" \
+    BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash -x "$PUSH_HOOK" >/dev/null 2>"$1"
+  return 0
+}
+
+PUSH_FAST="$SANDBOX/trace-push-fast.txt"
+trace_push "$PUSH_FAST"
+PUSH_FAST_COUNT=$(count_external "$PUSH_FAST")
+
+# THE SLOW PATH: the writer's row on the roster and a ruling pending for ANOTHER writer, so the hook
+# reads the payload, maps the id, folds the rulings and leaves the flag up, carrying nothing. Planted
+# through the production writers (lib/roster.sh), the flag raised by `ruling_record` itself.
+PUSH_ROSTER="$PROJECT/.bionic/tmp/roster-$SID.state"
+( . "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roster.sh" 2>/dev/null \
+    || . "${BIONIC_HOOKS_DIR}/../scripts/lib/roster.sh"
+  roster_header > "$PUSH_ROSTER"
+  roster_row status=identified session="$SID" name=w-A agent_id=a-latency-A launched_at=2026-10-11T00:00:00Z \
+    subagent_type=bionic:implementor model=opus deliverable= source=declared duration= progress= claims= \
+    cadence= absent= waiver= tool_use_id=toolu_lat plan=none >> "$PUSH_ROSTER"
+  ruling_record "$PUSH_ROSTER" w-B 'a ruling for another writer' >/dev/null )
+PUSH_SLOW="$SANDBOX/trace-push-slow.txt"
+trace_push "$PUSH_SLOW"
+PUSH_SLOW_COUNT=$(count_external "$PUSH_SLOW")
+rm -f "$PUSH_ROSTER" "$PROJECT/.bionic/tmp/ruling-pending-$SID.state"
+
+echo "hook-latency: ruling-push.sh external-command count: fast path = $PUSH_FAST_COUNT (cap 0), slow path = $PUSH_SLOW_COUNT (cap 10)"
+echo "hook-latency: ruling-push.sh slow-path histogram:"
+histogram "$PUSH_SLOW" | sed 's/^/hook-latency:   /'
+
+expect_true "10a: the slow-path trace sees the hook's forks (the tracer is not blind to it)" test "$PUSH_SLOW_COUNT" -gt 0
+expect_eq "10b: ruling-push.sh fast path forks no external command (one file test)" "0" "$PUSH_FAST_COUNT"
+expect_true "10c: ruling-push.sh slow path count <= 10" test "$PUSH_SLOW_COUNT" -le 10
+
+section "11: a budgeted agent's plain call, in both modes: inside §1's cap; the carry costs at most two forks, and nothing outside bypass mode (wave-33 T36)"
+
+# THE CARRY IN BYPASS MODE (wave-33 T36; D7, AC-6.2). In bypass mode every call a budgeted agent makes
+# that the wall does not handle as a suite comes back as `export BIONIC_GATE_AGENT=<row name>; <the
+# command>`; in any other mode it is left as typed (the CLI checks permission rules against a hook's
+# rewrite, so a carry there would prompt). §1's `ls -la` is traced again from two agents of one
+# roster, in each mode: one whose row states a budget, and one whose row states none, which reads
+# the same row and stages nothing. In bypass mode the difference is what one rewrite costs a call;
+# outside it there is no difference to pay. The budgeted counts are held to §1's cap.
+# ANTI-VACUITY: each budgeted call is read back on the same reader — carrying its name in bypass mode,
+# carrying nothing outside it — so the traces are of the paths they claim.
+CARRY_ROSTER="$PROJECT/.bionic/tmp/roster-$SID.state"
+( . "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roster.sh" 2>/dev/null \
+    || . "${BIONIC_HOOKS_DIR}/../scripts/lib/roster.sh"
+  roster_header > "$CARRY_ROSTER"
+  roster_row status=identified session="$SID" name=w-C agent_id=a-latency-C launched_at=2026-10-11T00:00:00Z \
+    subagent_type=bionic:implementor suites_allowed=x.test.sh suites_source=declared files= >> "$CARRY_ROSTER"
+  roster_row status=identified session="$SID" name=w-D agent_id=a-latency-D launched_at=2026-10-11T00:00:00Z \
+    subagent_type=bionic:implementor files= >> "$CARRY_ROSTER" )
+carry_payload() {  # <agent id> <permission mode>
+  jq -nc --arg s "$SID" --arg c "$PROJECT" --arg a "$1" --arg m "$2" \
+    '{session_id:$s, cwd:$c, permission_mode:$m, hook_event_name:"PreToolUse", tool_name:"Bash", agent_id:$a,
+      agent_type:"bionic:implementor", tool_input:{command:"ls -la"}, tool_use_id:"toolu_hook_latency_carry"}'
+}
+carry_cmd() {  # <agent id> <permission mode> — the command the hook stages, or nothing
+  carry_payload "$1" "$2" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" \
+    BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$BASH_WALLS_HOOK" 2>/dev/null \
+    | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null
+}
+carry_count() {  # <agent id> <permission mode> <trace name> — the count of the best of five traces
+  trace_best "$BASH_WALLS_HOOK" "$(carry_payload "$1" "$2")" "$SANDBOX/$3"
+  count_external "$SANDBOX/$3"
+}
+BYP_C=$(carry_count a-latency-C bypassPermissions trace-carry-byp-c.txt)
+BYP_D=$(carry_count a-latency-D bypassPermissions trace-carry-byp-d.txt)
+DEF_C=$(carry_count a-latency-C default trace-carry-def-c.txt)
+DEF_D=$(carry_count a-latency-D default trace-carry-def-d.txt)
+CARRY_CMD_BYP_C="$(carry_cmd a-latency-C bypassPermissions)"
+CARRY_CMD_BYP_D="$(carry_cmd a-latency-D bypassPermissions)"
+CARRY_CMD_DEF_C="$(carry_cmd a-latency-C default)"
+rm -f "$CARRY_ROSTER"
+
+echo "hook-latency: bash-walls.sh agent ls -la external-command count, bypass mode: budgeted (carried) = $BYP_C (cap 12), unbudgeted = $BYP_D"
+echo "hook-latency: bash-walls.sh agent ls -la external-command count, default mode: budgeted = $DEF_C (cap 12), unbudgeted = $DEF_D; main thread (§1) = $WALLS_COUNT"
+echo "hook-latency: bash-walls.sh budgeted-agent histogram, bypass mode:"
+histogram "$SANDBOX/trace-carry-byp-c.txt" | sed 's/^/hook-latency:   /'
+
+expect_eq "11a: in bypass mode the budgeted agent's ls -la is carried (the trace is of the carry path)" \
+  "export BIONIC_GATE_AGENT=w-C; ls -la" "$CARRY_CMD_BYP_C"
+expect_eq "11b: …and the agent whose row states no budget is not (11a is the positive)" "" "$CARRY_CMD_BYP_D"
+expect_eq "11c: in default mode the budgeted agent's ls -la is left as typed (11a is the positive)" "" "$CARRY_CMD_DEF_C"
+expect_true "11d: a budgeted agent's plain call in bypass mode count <= 12, §1's cap" test "$BYP_C" -le 12
+expect_true "11e: …and in default mode" test "$DEF_C" -le 12
+expect_true "11f: in bypass mode the carry costs the call at most two forks, the jq that stages it and the fold's jq that emits it" \
+  test "$((BYP_C - BYP_D))" -le 2
+expect_eq "11g: in default mode a budget costs the call nothing: no roster read, no rewrite" "$DEF_D" "$DEF_C"
+
 finish

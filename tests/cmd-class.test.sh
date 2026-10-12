@@ -591,13 +591,25 @@ expect_contains "AC-24 …and the main thread is exactly where farm-out's deny b
   "$FARM_REASON" "$OUT"
 
 # THE TWO THAT ARE SILENT ALL THE WAY DOWN: not suite-class, so neither wall speaks.
+# ORDERED BEHAVIOUR CHANGE (wave-33 T36; D7, AC-6.2): these payloads are in bypass mode and GREPO's row
+# states a budget, so the call now comes back carrying the agent's name to the gate (`export
+# BIONIC_GATE_AGENT=guarded; <the command>`). Stdout USED TO be empty; "silently" still means what it
+# meant — no refusal, no deny and no advisory — and the only thing on stdout is that rewrite.
+expect_carry_only() {  # <label> <command> — stderr empty; stdout the carry and nothing else
+  expect_empty "$1" "$ERR"
+  expect_eq "$1 …stdout holds only the rewrite: no deny, no advisory" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  expect_eq "$1 …which is the agent's name in front of the command as typed" \
+    "export BIONIC_GATE_AGENT=guarded; $2" \
+    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)"
+}
 run_compound "$(mk_bash_payload "$GREPO" 'git status --short' "$AGENT_ID" true)"
 expect_eq "AC-24 a non-suite command backgrounded is ALLOWED" 0 "$ST"
-expect_empty "AC-24 …silently" "$ERR$OUT"
+expect_carry_only "AC-24 …silently" 'git status --short'
 
 run_compound "$(mk_bash_payload "$GREPO" 'git commit -m "make the row green"' "$AGENT_ID" true)"
 expect_eq "AC-24 …and B-5's prose case is not a suite either" 0 "$ST"
-expect_empty "AC-24 …silently, on both streams" "$ERR$OUT"
+expect_carry_only "AC-24 …silently, on both streams" 'git commit -m "make the row green"'
 
 # --- AC-16 (R-12/C-2): the B-9 wall refuses the same superset ---
 for sc in "${SUPERSET_SUITES[@]}"; do
@@ -607,7 +619,7 @@ done
 # NEGATIVE CONTROL on the same arm: prose that merely names a suite is not one.
 run_compound "$(mk_bash_payload "$GREPO" 'echo "sudo bash tests/run.sh"' "$AGENT_ID" true)"
 expect_eq "AC-16 …but prose naming a suite is still ALLOWED" 0 "$ST"
-expect_empty "AC-16 …in silence, from both walls" "$ERR$OUT"
+expect_carry_only "AC-16 …in silence, from both walls" 'echo "sudo bash tests/run.sh"'
 
 # --- the partition still holds, one level in: an UNARMED session is silent ---
 #
@@ -2156,8 +2168,14 @@ for _p in 'suite|bash tests/run.sh|BASH tests/run.sh' 'suite|bash tests/cmd-clas
 done
 # --- only the WORD folds: an operand, a path, a flag or a subcommand keeps its case ---
 case_is suite 'bash tests/run.sh'          '§FOLD control: the runner path in lower case is the suite'
-case_is none  'bash TESTS/RUN.SH'          '§FOLD an operand path never folds: TESTS/RUN.SH is not the runner'
-case_is none  './tests/X.TEST.SH'          '§FOLD a script path at argv[0] never folds either'
+# AN OPERAND PATH FOLDS EXACTLY WHERE THE FILESYSTEM DOES (wave-33 T3; D7, AC-6.3). Before T3 no path
+# folded, so on the case-blind default `bash TESTS/RUN.SH` ran the runner the class reading called
+# none. Now the filesystem's own answer decides, planted here both ways (BIONIC_PROBE_CASE_BLIND):
+# case-exact keeps the old reading, case-blind reads the lowercase one (§CASE-FOLD has the rest).
+BIONIC_PROBE_CASE_BLIND=0 case_is none  'bash TESTS/RUN.SH'  '§FOLD case-exact: TESTS/RUN.SH is not the runner'
+BIONIC_PROBE_CASE_BLIND=0 case_is none  './tests/X.TEST.SH'  '§FOLD case-exact: a capitalised suite path at argv[0] is no suite'
+BIONIC_PROBE_CASE_BLIND=1 case_is suite 'bash TESTS/RUN.SH'  '§FOLD case-blind: TESTS/RUN.SH is the runner (AC-6.3)'
+BIONIC_PROBE_CASE_BLIND=1 case_is suite './tests/X.TEST.SH'  '§FOLD case-blind: ./tests/X.TEST.SH is a suite (AC-6.3)'
 case_is none  'npm TEST'                   '§FOLD a subcommand never folds: npm TEST is not npm test'
 case_is none  'bash -n tests/x.test.sh'    '§FOLD control: -n reads the suite and runs nothing'
 case_is suite 'bash -N tests/x.test.sh'    '§FOLD a flag never folds: -N is not -n'
@@ -2181,7 +2199,8 @@ expect_eq "§FOLD head: only the word folds, never its operands"  'npx Create-Th
 targets_are 'x.test.sh' 'bash tests/x.test.sh'
 targets_are 'x.test.sh' 'BASH tests/x.test.sh'
 targets_are 'run.sh'    'SUDO Bash tests/run.sh'
-targets_are ''          'bash tests/X.TEST.SH'
+BIONIC_PROBE_CASE_BLIND=0 targets_are ''          'bash tests/X.TEST.SH'
+BIONIC_PROBE_CASE_BLIND=1 targets_are 'x.test.sh' 'bash tests/X.TEST.SH'
 
 # --- backgrounded: NOHUP is a wrapper; WAIT is /usr/bin/WAIT and collects no job ---
 bg_is yes 'NOHUP bash tests/run.sh'        '§FOLD NOHUP backgrounds as nohup does'
@@ -2397,9 +2416,12 @@ section "§SCRIPT-TEXT — wave-31 T11 (D9, AC-8.2; A-orch-41.5, A-orch-46.1): t
 # budget's own reading), a script operand that is no suite name and not the runner is OPENED
 # when its file is in the tree, and its text is read as a command: a suite it runs is claimed
 # as kind `run`, target the run inside, the claim's run column the command as typed, so the
-# refusal can name both. A line whose command word, or whose script operand, is built from `$`
-# or a backtick, a script that is not there, and a script path that is itself built from a
-# variable are kind `unverified`, target the script. FIXTURE FIDELITY: real files under a temp
+# refusal can name both. SINCE wave-33 T3 (D7, AC-6.1) NOTHING HERE IS `unverified`: a line whose
+# command word or script operand is built from `$` or a backtick claims nothing, and a script whose
+# text claims no suite run — one that is not there, one whose path is built from a variable, one
+# that runs nothing the reading can name — is kind `script`, target the script: the wall admits it
+# and carries the agent's name to the gate, whose ask holds the budget (gate.test.sh §BUDGET-AT-ASK).
+# FIXTURE FIDELITY: real files under a temp
 # root, as an agent's tree holds them; the root is the budget's `$BIONIC_ROOT`, the cwd its
 # payload `.cwd`.
 ST="$SANDBOX/st"; ST_ELSE="$SANDBOX/st-else"
@@ -2438,17 +2460,17 @@ expect_eq "§SCRIPT-TEXT a --dry-run after a script is the script's argument, no
   "$(st_rows 'bash red.sh --dry-run')"
 expect_eq "§SCRIPT-TEXT a script running a suite file bare claims that run" "run:bash tests/a.test.sh" "$(st_rows 'bash bare.sh')"
 expect_eq "§SCRIPT-TEXT a script running the full tree is the full-tree claim" "file:run.sh" "$(st_rows 'bash full.sh')"
-expect_eq "§SCRIPT-TEXT AC-8.2 a command word built from a variable is unverified, naming the script" "unverified:var.sh" \
+expect_eq "§SCRIPT-TEXT AC-6.1 a command word built from a variable claims nothing: a script start, no refusal" "script:var.sh" \
   "$(st_rows 'bash var.sh')"
-expect_eq "§SCRIPT-TEXT …and the unverified claim's run is the command as typed" "unverified	var.sh	bash var.sh" \
+expect_eq "§SCRIPT-TEXT …and the script claim's run is the command as typed" "script	var.sh	bash var.sh" \
   "$(st_full 'bash var.sh')"
-expect_eq "§SCRIPT-TEXT a script operand built from a variable inside the script is unverified" "unverified:varop.sh" \
+expect_eq "§SCRIPT-TEXT a script operand built from a variable inside the script claims nothing" "script:varop.sh" \
   "$(st_rows 'bash varop.sh')"
-expect_eq "§SCRIPT-TEXT AC-8.2 a script that is not there is unverified" "unverified:missing.sh" "$(st_rows 'bash missing.sh')"
-expect_eq "§SCRIPT-TEXT a script path built from a variable is unverified" 'unverified:$D/red.sh' \
+expect_eq "§SCRIPT-TEXT AC-6.1 a script that is not there is a script start, no refusal" "script:missing.sh" "$(st_rows 'bash missing.sh')"
+expect_eq "§SCRIPT-TEXT a script path built from a variable is a script start, no refusal" 'script:$D/red.sh' \
   "$(st_rows 'bash "$D/red.sh"')"
-expect_eq "§SCRIPT-TEXT a script that runs no suite claims nothing (red.sh above is the positive)" "" "$(st_rows 'bash plain.sh')"
-expect_eq "§SCRIPT-TEXT a heredoc body in a script is never a command (red.sh above is the positive)" "" "$(st_rows 'bash hd.sh')"
+expect_eq "§SCRIPT-TEXT a script that runs no suite claims no run, only its start (red.sh above is the positive)" "script:plain.sh" "$(st_rows 'bash plain.sh')"
+expect_eq "§SCRIPT-TEXT a heredoc body in a script is never a command (red.sh above is the positive)" "script:hd.sh" "$(st_rows 'bash hd.sh')"
 expect_eq "§SCRIPT-TEXT a script outside the tree is not this budget's (the same text inside is claimed above)" "" \
   "$(st_rows "bash $ST_ELSE/red.sh")"
 expect_eq "§SCRIPT-TEXT without a root nothing is opened: the shape reading claims nothing" "" \
@@ -2457,11 +2479,12 @@ expect_eq "§SCRIPT-TEXT …while the same call with the root claims it (the pos
 case_is none "bash $ST/red.sh" "§SCRIPT-TEXT the class reading is unchanged: it opens no file"
 expect_eq "§SCRIPT-TEXT bash -c runs its string, not a script: the string is read as before" "run:jest" "$(st_rows "bash -c 'jest'")"
 expect_eq "§SCRIPT-TEXT bash -n names a script it will not run: nothing is opened" "" "$(st_rows 'bash -n red.sh')"
-# THE FULL RULE IS FOR THE WRITER'S OWN WRAPPER (A-orch-62). The scripts above are untracked (no
-# repository), so each met the full rule. In a repository, a script tracked at HEAD and unchanged is
-# the project's own tool: read for its literal text, its `$` lines claim nothing; a modified or an
-# untracked one gets the full rule. Over 2,000 lines a tracked script is not opened and claims nothing,
-# an untracked one reads `unverified`. FIXTURE FIDELITY: a real git repository, committed, then edited.
+# TRACKED OR NOT, ONE RULE (wave-33 T3; D7, AC-6.1). wave-31's A-orch-62 split the rule: a script
+# tracked at HEAD and unchanged was read for its literal text, a modified or untracked one met the full
+# rule and its `$` lines read `unverified`, so every in-tree script a writer edited was refused. With
+# `unverified` retired the split decides nothing: each script below reads the same tracked or edited.
+# Its literal suite runs are still claimed; a script past 2,000 lines is not opened, a start only.
+# FIXTURE FIDELITY: a real git repository, committed, then edited.
 GT="$SANDBOX/gt"; mkdir -p "$GT"
 git -C "$GT" init -q
 printf '#!/bin/bash\nX=jest\n"$X" --ci\necho ok\n' > "$GT/tvar.sh"
@@ -2484,17 +2507,17 @@ gt_rows() {  # <command> -> the claims under root $GT as <kind>:<target>, `|`-jo
 expect_eq "§SCRIPT-TEXT tracked: the fixture is committed and two scripts are edited after it" " M mvar.sh| M red.sh|?? ubig.sh" \
   "$(git -C "$GT" status --porcelain | sort | paste -sd'|' -)"
 expect_eq "§SCRIPT-TEXT tracked and unchanged, a literal jest in it: claimed, run jest" "run:jest" "$(gt_rows 'bash tjest.sh')"
-expect_eq "§SCRIPT-TEXT tracked and unchanged, its \$ lines claim nothing (tjest.sh beside it is the positive)" "" "$(gt_rows 'bash tvar.sh')"
+expect_eq "§SCRIPT-TEXT tracked and unchanged, its \$ lines claim nothing (tjest.sh beside it is the positive)" "script:tvar.sh" "$(gt_rows 'bash tvar.sh')"
 expect_eq "§SCRIPT-TEXT tracked, a literal door run in it: claimed as run" "run:tests/run.sh --only a.test.sh" "$(gt_rows 'bash tdoor.sh')"
 expect_eq "§SCRIPT-TEXT tracked, a literal tests/run.sh in it: the full-tree claim (A-T11-9)" "file:run.sh" "$(gt_rows 'bash tfull.sh')"
 expect_eq "§SCRIPT-TEXT modified red.sh running jest: run jest" "run:jest" "$(gt_rows 'bash red.sh')"
-expect_eq "§SCRIPT-TEXT modified, a \$ command word: unverified" "unverified:mvar.sh" "$(gt_rows 'bash mvar.sh')"
-expect_eq "§SCRIPT-TEXT tracked and over 2,000 lines: not opened, no claim (ubig.sh is the same text untracked)" "" "$(gt_rows 'bash big.sh')"
-expect_eq "§SCRIPT-TEXT untracked and over 2,000 lines: unverified" "unverified:ubig.sh" "$(gt_rows 'bash ubig.sh')"
+expect_eq "§SCRIPT-TEXT AC-6.1 modified, a \$ command word: read as the tracked one is, no refusal" "script:mvar.sh" "$(gt_rows 'bash mvar.sh')"
+expect_eq "§SCRIPT-TEXT tracked and over 2,000 lines: not opened, a start only" "script:big.sh" "$(gt_rows 'bash big.sh')"
+expect_eq "§SCRIPT-TEXT AC-6.1 untracked and over 2,000 lines: the same as tracked" "script:ubig.sh" "$(gt_rows 'bash ubig.sh')"
 expect_eq "§SCRIPT-TEXT a tracked script skips its own \$ line and still reads the modified script it runs" "run:jest" \
   "$(gt_rows 'bash tcall.sh')"
-expect_eq "§SCRIPT-TEXT a missing script in a repository is unverified either way" "unverified:gone.sh" "$(gt_rows 'bash gone.sh')"
-expect_eq "§SCRIPT-TEXT a variable-built path in a repository is unverified either way" 'unverified:$D/tjest.sh' \
+expect_eq "§SCRIPT-TEXT a missing script in a repository is a start, no refusal" "script:gone.sh" "$(gt_rows 'bash gone.sh')"
+expect_eq "§SCRIPT-TEXT a variable-built path in a repository is a start, no refusal" 'script:$D/tjest.sh' \
   "$(gt_rows 'bash "$D/tjest.sh"')"
 
 section "§NAME — wave-28 T36 (read-structure-p20 #1): one predicate says what a suite name is"
@@ -2561,5 +2584,110 @@ expect_eq "§WHOLE-RUN a door call beside a bare runner is (the targets print ru
 expect_eq "§WHOLE-RUN the root is optional" "whole" "$(whole_rc 'tests/run.sh')"
 expect_eq "§WHOLE-RUN the answer is the targets' own: whole iff run.sh is among them" "run.sh|whole" \
   "$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" /r' _ "$LIB" 'bash tests/run.sh' | paste -sd'|' -)|$(whole_rc 'bash tests/run.sh' /r)"
+
+
+section "§SCRIPTS — wave-33 T3 (D7, AC-6.1): a script runs by default; the value reader knows \$( … )"
+# wave-31 counted twelve in-tree scripts the wall refused once a writer had edited them (R4 §1,
+# probe-scripts.log: `unverified` for every untracked copy). The first trip in each was the value
+# reader: `consume_value` ended `X="$(dirname "$0")"` at its first inner quote, so `$0")"` was read
+# as a command word built from `$` (A-orch-62's strict rule). Now the value is read as the shell
+# reads a word, and no `$` line is a reason to refuse: each script, edited, is a script START (kind
+# `script`), which the wall admits and carries to the gate; tests/run.sh keeps its definite claim.
+# FIXTURE FIDELITY: this tree's own scripts, copied byte for byte into a git repository, committed,
+# then edited (what a writer meets), beside an untracked helper of the shape R4 measured.
+SC="$SANDBOX/sc"; mkdir -p "$SC"
+git -C "$SC" init -q
+SC_LIST="agents-src/render.sh payload/scripts/booked.sh payload/scripts/card.sh payload/scripts/close-out.sh payload/scripts/doctor.sh payload/scripts/remove.sh payload/scripts/setup.sh payload/scripts/spawn-worktree.sh payload/scripts/version.sh wsl-setup.sh hooks/session-poker.sh"
+for _s in $SC_LIST tests/run.sh; do mkdir -p "$(dirname "$SC/$_s")"; cp "$REPO_ROOT/$_s" "$SC/$_s"; done
+git -C "$SC" add -A
+git -C "$SC" -c user.email=t@example.com -c user.name=T -c commit.gpgsign=false commit -qm seed
+for _s in $SC_LIST; do printf '# edited by a writer\n' >> "$SC/$_s"; done
+printf '#!/bin/bash\nX="$(cd "$(dirname "$0")" && pwd -P)"\nY=$(basename "$X" "$a")\necho "$X $Y"\n' > "$SC/helper.sh"
+printf '#!/bin/bash\nX="$(dirname "$0")"\njest\n' > "$SC/helper-jest.sh"
+sc_rows() {  # <command> -> the claims under root $SC as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$SC" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§SCRIPTS the fixture: eleven scripts edited after the commit, two helpers untracked" "11 2" \
+  "$(git -C "$SC" status --porcelain | grep -c '^ M') $(git -C "$SC" status --porcelain | grep -c '^?? helper')"
+for _s in $SC_LIST; do
+  expect_eq "§SCRIPTS AC-6.1 bash $_s, edited: a script start, admitted" "script:$_s" "$(sc_rows "bash $_s")"
+done
+expect_eq "§SCRIPTS AC-6.1 an untracked helper with X=\"\$(cmd \"\$a\")\": a script start, admitted" "script:helper.sh" \
+  "$(sc_rows 'bash helper.sh')"
+expect_eq "§SCRIPTS …a literal run after that value is still read (the value ends where the shell ends it)" "run:jest" \
+  "$(sc_rows 'bash helper-jest.sh')"
+expect_eq "§SCRIPTS the runner itself keeps its definite claim (the positive beside the eleven)" "file:run.sh" \
+  "$(sc_rows 'bash tests/run.sh')"
+# THE VALUE READER, ON A COMMAND (no file opened): the command word after each value is the word.
+case_is suite 'X="$(dirname "$0")" jest --ci'                       '§SCRIPTS X="$(dirname "$0")" jest: the word is jest'
+case_is suite 'X="$(cd "$(dirname "$0")" && pwd -P)" bash tests/run.sh'  '§SCRIPTS a nested substitution in a quoted value'
+case_is suite 'X=$(foo "$id") jest'                                  '§SCRIPTS an unquoted substitution holding quotes'
+case_is suite 'X=`basename "$p"` jest'                               '§SCRIPTS a backquoted value holding quotes'
+case_is suite 'X=${A:-"a b"} jest'                                   '§SCRIPTS a parameter expansion holding a quoted blank'
+case_is suite 'X="a "'"'"'b c'"'"' jest'                             '§SCRIPTS adjoining quoted parts are one value'
+case_is suite 'X=a\ b jest'                                          '§SCRIPTS an escaped blank is inside the value'
+case_is none  'X="$(echo jest)" echo hi'                             '§SCRIPTS control: the word after the value decides (echo)'
+targets_are 'run.sh' 'X=$(foo "$id") bash tests/run.sh'
+
+# THE DEFINITE CHECK RESOLVES LINKS (D7; R4 probe-runner-spellings). A tracked symlink to the runner
+# read `none` (its target's text names no literal runner line), a whole run unbudgeted. A path the
+# shell runs is resolved, every link and every directory in it, before it is compared: a link to the
+# runner is the runner, a link to a suite is that suite. FIXTURE FIDELITY: real links in a temp tree.
+SY="$SANDBOX/sy"; SY_ELSE="$SANDBOX/sy-else"
+mkdir -p "$SY/tests" "$SY/tools" "$SY_ELSE/tests"
+printf '#!/bin/bash\necho runner\n' > "$SY/tests/run.sh"
+printf '#!/bin/bash\necho a\n' > "$SY/tests/a.test.sh"
+printf '#!/bin/bash\necho elsewhere\n' > "$SY_ELSE/tests/run.sh"
+printf '#!/bin/bash\necho plain\n' > "$SY/tools/plain.sh"
+ln -s ../tests/run.sh "$SY/tools/go.sh"
+ln -s go.sh "$SY/tools/chain.sh"
+ln -s ../tests/a.test.sh "$SY/tools/lnk.sh"
+ln -s tests "$SY/t2"
+ln -s "$SY_ELSE/tests/run.sh" "$SY/tools/away.sh"
+sy_rows() {  # <command> -> the claims under root $SY as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$SY" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§SCRIPTS AC-6.2 bash tools/go.sh, a link to the runner: the whole run" "file:run.sh" "$(sy_rows 'bash tools/go.sh')"
+expect_eq "§SCRIPTS …at argv[0] alike" "file:run.sh" "$(sy_rows './tools/go.sh')"
+expect_eq "§SCRIPTS …through a link to a link" "file:run.sh" "$(sy_rows 'bash tools/chain.sh')"
+expect_eq "§SCRIPTS …through a linked directory" "file:run.sh" "$(sy_rows 'bash t2/run.sh')"
+expect_eq "§SCRIPTS …and its door names the suites it names" "only:a.test.sh" "$(sy_rows 'tools/go.sh --only a.test.sh')"
+expect_eq "§SCRIPTS a link to a suite is that suite" "file:a.test.sh" "$(sy_rows 'bash tools/lnk.sh')"
+expect_eq "§SCRIPTS a plain script beside them is a start (go.sh above is the positive)" "script:tools/plain.sh" \
+  "$(sy_rows 'bash tools/plain.sh')"
+expect_eq "§SCRIPTS …at argv[0] too" "script:./tools/plain.sh" "$(sy_rows './tools/plain.sh')"
+expect_eq "§SCRIPTS a link to another tree's runner is not this tree's run, only a start (go.sh is the positive)" "script:tools/away.sh" \
+  "$(sy_rows 'bash tools/away.sh')"
+
+section "§CASE-FOLD — wave-33 T3 (D7, AC-6.3): every runner and suite comparison folds where the filesystem does"
+# R4's probe-case: on APFS `./TESTS/RUN.SH`, `TESTS/RUN.SH --only x` and `./tests/X.Test.Sh` read
+# none, a whole run and a suite unbudgeted. The filesystem's answer (`cmd_case_blind`, planted by
+# BIONIC_PROBE_CASE_BLIND) decides: case-blind, a capitalised spelling is the lowercase one, named by
+# its lowercase name; case-exact, it is another file. (§SCRIPT-TEXT and §FOLD hold the shape rows.)
+CF="$SANDBOX/cf"; mkdir -p "$CF/tests"
+printf '#!/bin/bash\necho runner\n' > "$CF/tests/run.sh"
+cf_rows() {  # <planted 0|1> <command> -> the claims under root $CF
+  BIONIC_PROBE_CASE_BLIND="$1" bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$2" "$CF" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§CASE-FOLD control: bash tests/run.sh" "file:run.sh" "$(cf_rows 1 'bash tests/run.sh')"
+expect_eq "§CASE-FOLD AC-6.3 bash TESTS/RUN.SH is the runner" "file:run.sh" "$(cf_rows 1 'bash TESTS/RUN.SH')"
+expect_eq "§CASE-FOLD AC-6.3 bash tests/GAMMA.TEST.SH is gamma.test.sh" "file:gamma.test.sh" "$(cf_rows 1 'bash tests/GAMMA.TEST.SH')"
+expect_eq "§CASE-FOLD ./TESTS/RUN.SH at argv[0]" "file:run.sh" "$(cf_rows 1 './TESTS/RUN.SH')"
+expect_eq "§CASE-FOLD TESTS/RUN.SH --only a.test.sh is the door" "only:a.test.sh" "$(cf_rows 1 'TESTS/RUN.SH --only a.test.sh')"
+expect_eq "§CASE-FOLD ./tests/X.Test.Sh" "file:x.test.sh" "$(cf_rows 1 './tests/X.Test.Sh')"
+expect_eq "§CASE-FOLD the door's names fold too" "only:slots.test.sh" "$(cf_rows 1 'tests/run.sh --only SLOTS.TEST.SH')"
+expect_eq "§CASE-FOLD an absolute path, its tree part capitalised" "file:run.sh" "$(cf_rows 1 "bash $CF/TESTS/run.sh")"
+expect_eq "§CASE-FOLD case-exact: TESTS/RUN.SH is another file, a start" "script:TESTS/RUN.SH" "$(cf_rows 0 'bash TESTS/RUN.SH')"
+expect_eq "§CASE-FOLD case-exact: GAMMA.TEST.SH names no suite, a start" "script:tests/GAMMA.TEST.SH" \
+  "$(cf_rows 0 'bash tests/GAMMA.TEST.SH')"
+expect_eq "§CASE-FOLD case-exact: ./TESTS/RUN.SH is a start" "script:./TESTS/RUN.SH" "$(cf_rows 0 './TESTS/RUN.SH')"
+# THE FILESYSTEM'S OWN ANSWER, unplanted, against an independent probe: a file and its capitalised name.
+: > "$SANDBOX/cbprobe"
+CF_WANT=0; [ -e "$SANDBOX/CBPROBE" ] && CF_WANT=1
+expect_eq "§CASE-FOLD cmd_case_blind answers what this filesystem does (probe: CBPROBE finds cbprobe = $CF_WANT)" "$CF_WANT" \
+  "$(env -u BIONIC_PROBE_CASE_BLIND bash -c '. "$1" || exit 9; if cmd_case_blind "$2"; then echo 1; else echo 0; fi' _ "$LIB" "$SANDBOX")"
 
 finish

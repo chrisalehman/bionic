@@ -1104,7 +1104,7 @@ section "M — _res_used_pct, _res_busy_cores, _res_cores, _res_total_mb, _res_n
 # and `nproc` stubbed — it is declared synthetic: no Linux host was measured for it.
 M_UNPIN="BIONIC_PROBE_USED_PCT BIONIC_PROBE_BUSY_CORES BIONIC_PROBE_BUSY_CORES_5M BIONIC_PROBE_CORES BIONIC_PROBE_TOTAL_MB
   BIONIC_PROBE_FREE_PCT BIONIC_PROBE_FREE_MB BIONIC_PROBE_LOAD_1M BIONIC_PROBE_SWAP_PCT
-  BIONIC_PROBE_PROC BIONIC_NOW_EPOCH BIONIC_NOW_FILE BIONIC_LOAD_NOW_FILE"
+  BIONIC_PROBE_PROC BIONIC_PROBE_CGROUP BIONIC_NOW_EPOCH BIONIC_NOW_FILE BIONIC_LOAD_NOW_FILE"
 M_DAR="$TMPROOT/stub-m-darwin"; M_LIN="$TMPROOT/stub-m-linux"; M_PROC="$TMPROOT/proc-m"
 mkdir -p "$M_DAR" "$M_LIN" "$M_PROC"
 cp "$STUBS/memory_pressure" "$STUBS/sysctl" "$M_DAR/"
@@ -1199,6 +1199,173 @@ expect_eq "M.30 Linux: the five-minute figure is /proc/loadavg's second field" "
 expect_regex "M.31 live: the five-minute figure is a decimal" '^[0-9]+(\.[0-9]+)?$' \
   "$(m_read - _res_busy_cores_5m)"
 
+# §QUOTA — the cores this process may use (wave-33 T1; D4, AC-8.5). On Linux a cgroup CPU quota,
+# when set, bounds the host's count: cgroup v2 `cpu.max` (`<quota> <period>`, or `max <period>`
+# for none), v1 `cpu/cpu.cfs_quota_us` over `cpu/cpu.cfs_period_us` (-1 for none); the bound is
+# ceil(quota ÷ period), at least 1, and never raises the count. BIONIC_PROBE_CGROUP plants the
+# cgroup root (so this runs on macOS); BIONIC_PROBE_CORES still plants the host's count, and a
+# planted count is bounded only by a planted root, never by the real one.
+# FIXTURE FIDELITY: the files are synthetic, in the kernel's documented shapes
+# (Documentation/admin-guide/cgroup-v2.rst "cpu.max"; cgroup-v1 CFS bandwidth); no Linux host
+# was measured for them.
+section "§QUOTA — a cgroup CPU quota bounds the cores the gate counts (wave-33 T1; AC-8.5)"
+Q_V2="$TMPROOT/cg-v2"; Q_V1="$TMPROOT/cg-v1"; Q_NONE="$TMPROOT/cg-none"
+mkdir -p "$Q_V2" "$Q_V1/cpu" "$Q_NONE"
+q_v2() { printf '%s\n' "$1" > "$Q_V2/cpu.max"; }
+q_v1() { printf '%s\n' "$1" > "$Q_V1/cpu/cpu.cfs_quota_us"; printf '%s\n' "$2" > "$Q_V1/cpu/cpu.cfs_period_us"; }
+q_v2 "200000 100000"
+expect_eq "Q.1 a 64-core probe under cpu.max '200000 100000' (2 CPUs): _res_cores prints 2" "2" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+expect_eq "Q.2 the same probe with no cgroup planted: the host's 64 (the count the quota bounds)" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64)"
+expect_eq "Q.3 a cgroup root with no CPU controller files: no bound, 64" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_NONE")"
+q_v2 "max 100000"
+expect_eq "Q.4 cpu.max 'max 100000' sets no quota: 64" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v2 "150000 100000"
+expect_eq "Q.5 a quota of 1.5 CPUs rounds up to 2" "2" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v2 "50000 100000"
+expect_eq "Q.6 a quota of half a CPU is 1, never 0" "1" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v2 "1600000 100000"
+expect_eq "Q.7 a quota of 16 CPUs on an 8-core host bounds nothing: 8" "8" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=8 BIONIC_PROBE_CGROUP="$Q_V2")"
+q_v1 200000 100000
+expect_eq "Q.8 cgroup v1: cfs_quota_us 200000 over cfs_period_us 100000 is 2" "2" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V1")"
+q_v1 -1 100000
+expect_eq "Q.9 cgroup v1: a quota of -1 sets none: 64" "64" \
+  "$(m_read - _res_cores BIONIC_PROBE_CORES=64 BIONIC_PROBE_CGROUP="$Q_V1")"
+q_v2 "200000 100000"
+expect_eq "Q.10 the Linux host's own count (nproc 4) is bounded the same way: 2" "2" \
+  "$(m_read "$M_LIN" _res_cores BIONIC_PROBE_PROC="$M_PROC" BIONIC_PROBE_CGROUP="$Q_V2")"
+q_gw() {  # <cores> [<cgroup root>] — gate_width at share 92, the share's room in workers
+  ( unset $M_UNPIN
+    export CLAUDE_CONFIG_DIR="$TMPROOT/q-home" BIONIC_PROBE_CORES="$1"
+    [ -z "${2:-}" ] || export BIONIC_PROBE_CGROUP="$2"
+    mkdir -p "$CLAUDE_CONFIG_DIR/bionic"; printf '92\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+    . "$REPO_ROOT/payload/scripts/lib/gate.sh" 2>/dev/null; gate_width ) 2>/dev/null
+}
+expect_eq "Q.11 the gate's width on a 64-core probe at share 92: 58 (positive)" "58" "$(q_gw 64)"
+expect_eq "Q.12 …and under the 2-CPU quota: 1, what 2 cores allow at 92 (1.84, floored)" "1" "$(q_gw 64 "$Q_V2")"
+
+# §BUSY — busy is measured over the same domain as the cores (wave-33 T33; critic-adversarial
+# finding 1). Where a quota bounds the cores, the busy reading is the cgroup's own CPU use in
+# cores: the growth of `cpu.stat` `usage_usec` (v1: `cpuacct/cpuacct.usage`, in ns) since an
+# earlier sample in the pressure ring, over the seconds between them. Without a quota it is the
+# load average, as before. The machine is the critic's: a Linux container given 2 CPUs on a
+# 64-core host whose load average is 10, reached through stubbed `uname`/`nproc`, the synthetic
+# /proc (BIONIC_PROBE_PROC) and a planted cgroup root, so the Linux path runs on any host.
+# Every ring line is written by `pressure_sample` itself, never by hand.
+# FIXTURE FIDELITY: `cpu.stat` is synthetic, in the shape Documentation/admin-guide/cgroup-v2.rst
+# gives it (`usage_usec`, `user_usec`, `system_usec`); no container was measured for it.
+section "§BUSY — busy measured where the cores are bounded (wave-33 T33)"
+B_DIR="$TMPROOT/busy"; B_STUB="$B_DIR/stub"; B_PROC="$B_DIR/proc"; B_CG="$B_DIR/cg"; B_NONE="$B_DIR/cg-none"
+mkdir -p "$B_STUB" "$B_PROC" "$B_CG" "$B_NONE" "$B_DIR/home/bionic"
+printf '#!/bin/bash\necho Linux\n' > "$B_STUB/uname"
+printf '#!/bin/bash\necho 64\n'    > "$B_STUB/nproc"
+chmod +x "$B_STUB"/*
+cp "$M_PROC/meminfo" "$B_PROC/meminfo"
+printf '10.00 10.00 10.00 3/900 4242\n' > "$B_PROC/loadavg"
+printf '92\n' > "$B_DIR/home/bionic/share"
+printf '200000 100000\n' > "$B_CG/cpu.max"
+B_T=1700000300   # the moment every gate read below is taken at
+b_stat() { printf 'usage_usec %s\nuser_usec 1\nsystem_usec 1\n' "$1" > "$B_CG/cpu.stat"; }
+b_run() {  # <ring> <cgroup root> <epoch> <command...> — gate.sh sourced on the planted machine
+  local ring="$1" cg="$2" now="$3"; shift 3
+  ( # shellcheck disable=SC2086
+    unset $M_UNPIN BIONIC_PRESSURE_RING BIONIC_GATE_DIR
+    PATH="$B_STUB:$PATH"
+    export BIONIC_PROBE_PROC="$B_PROC" BIONIC_PROBE_CGROUP="$cg" BIONIC_PRESSURE_RING="$ring" \
+      BIONIC_NOW_EPOCH="$now" CLAUDE_CONFIG_DIR="$B_DIR/home" BIONIC_GATE_DIR="$B_DIR/gate.$now.$RANDOM" \
+      BIONIC_PROBE_FREE_PCT=70 BIONIC_PROBE_SWAP_PCT=0
+    . "$REPO_ROOT/payload/scripts/lib/gate.sh"
+    "$@" ) 2>/dev/null
+}
+b_ring_fields() { awk -F'|' '{ printf "%s%s", (NR > 1 ? " " : ""), NF }' "$1" 2>/dev/null; }
+
+# The container is idle: usage_usec has not moved in the five minutes the ring holds.
+B_IDLE="$B_DIR/ring-idle"
+b_stat 5000000000
+b_run "$B_IDLE" "$B_CG" $((B_T - 300)) pressure_sample >/dev/null
+b_run "$B_IDLE" "$B_CG" $((B_T - 60))  pressure_sample >/dev/null
+expect_eq "BUSY.0 the quota is in force on the planted machine: 2 cores, 64 on the host" "2" \
+  "$(b_run "$B_IDLE" "$B_CG" "$B_T" _res_cores)"
+expect_eq "BUSY.1 the critic's case: host load 10, the container idle, nothing admitted, waiting or owed: room" \
+  "room=yes load=0.00/0.00 cores=2 promised=0 waiting=0" \
+  "$(b_run "$B_IDLE" "$B_CG" "$B_T" gate_room --owed 0)"
+expect_eq "BUSY.2 …and with one writer owed (the fill's ask): room for it" \
+  "room=yes load=0.00/0.00 cores=2 promised=1 waiting=0" \
+  "$(b_run "$B_IDLE" "$B_CG" "$B_T" gate_room --owed 1)"
+expect_eq "BUSY.3 pressure_sample under a quota records the cgroup's usage as a sixth field" \
+  "5000000000@$HOSTNAME" "$(awk -F'|' 'NR == 1 { print $6 }' "$B_IDLE")"
+
+# The container itself is busy: 120 s of CPU since the sample 60 s ago — 2 cores over the last
+# minute, 0.40 over the last five. Its own use fills its quota, so there is no room.
+B_BUSY="$B_DIR/ring-busy"
+b_stat 5000000000
+b_run "$B_BUSY" "$B_CG" $((B_T - 300)) pressure_sample >/dev/null
+b_run "$B_BUSY" "$B_CG" $((B_T - 60))  pressure_sample >/dev/null
+b_stat 5120000000
+expect_eq "BUSY.4 the container busy at its own 2 cores: no room, and the load read is its own" \
+  "room=no load=2.00/0.40 cores=2 promised=0 waiting=0" \
+  "$(b_run "$B_BUSY" "$B_CG" "$B_T" gate_room --owed 0)"
+expect_eq "BUSY.5 _res_busy_cores and _res_busy_cores_5m read the cgroup's rate, not the host's 10" \
+  "2.00 0.40" \
+  "$(b_run "$B_BUSY" "$B_CG" "$B_T" _res_busy_cores) $(b_run "$B_BUSY" "$B_CG" "$B_T" _res_busy_cores_5m)"
+
+# Without a quota nothing changes: the host's load average, and a ring line of five fields.
+B_PLAIN="$B_DIR/ring-plain"
+expect_eq "BUSY.6 a plain Linux host (no cpu.max) under load 10: busy is the load average" "10.00 10.00" \
+  "$(b_run "$B_PLAIN" "$B_NONE" "$B_T" _res_busy_cores) $(b_run "$B_PLAIN" "$B_NONE" "$B_T" _res_busy_cores_5m)"
+expect_eq "BUSY.7 …measured against the host's 64 cores, so it has room, as before (the critic's 1.15.0 line)" \
+  "room=yes load=10.00/10.00 cores=64 promised=0 waiting=0" \
+  "$(b_run "$B_PLAIN" "$B_NONE" "$B_T" gate_room --owed 0)"
+b_run "$B_PLAIN" "$B_NONE" "$B_T" pressure_sample >/dev/null
+expect_eq "BUSY.8 …and its pressure_sample writes the five fields it always wrote" "5" "$(b_ring_fields "$B_PLAIN")"
+
+# No earlier sample: the read takes one (the ring is how the next read gets its rate) and,
+# until a sample is old enough, counts the container idle — never the host's load, never full.
+B_COLD="$B_DIR/ring-cold"
+b_stat 5000000000
+expect_eq "BUSY.9 a cold ring under the quota: busy reads 0, not the host's 10" "0.00" \
+  "$(b_run "$B_COLD" "$B_CG" "$B_T" _res_busy_cores)"
+expect_eq "BUSY.10 …and the read left one six-field sample for the next read" "6" "$(b_ring_fields "$B_COLD")"
+b_stat 5030000000
+expect_eq "BUSY.11 …from which a read 60 s later has the rate (30 s of CPU in 60 s: 0.50)" "0.50" \
+  "$(b_run "$B_COLD" "$B_CG" $((B_T + 60)) _res_busy_cores)"
+
+# cpu.stat unreadable under a quota: the container's use is unknown, which counts as none.
+B_NOSTAT="$B_DIR/cg-nostat"; mkdir -p "$B_NOSTAT"; cp "$B_CG/cpu.max" "$B_NOSTAT/"
+expect_eq "BUSY.12 a quota with no cpu.stat: busy reads 0, never the host's load" "0.00 0.00" \
+  "$(b_run "$B_DIR/ring-nostat" "$B_NOSTAT" "$B_T" _res_busy_cores) $(b_run "$B_DIR/ring-nostat" "$B_NOSTAT" "$B_T" _res_busy_cores_5m)"
+expect_eq "BUSY.13 …so the promises alone decide the room" \
+  "room=yes load=0.00/0.00 cores=2 promised=1 waiting=0" \
+  "$(b_run "$B_DIR/ring-nostat" "$B_NOSTAT" "$B_T" gate_room --owed 1)"
+
+# A sample another host wrote into a shared ring is another cgroup's counter: not used.
+B_FOREIGN="$B_DIR/ring-foreign"
+b_stat 1000
+b_foreign_sample() { HOSTNAME=elsewhere pressure_sample; }
+b_run "$B_FOREIGN" "$B_CG" $((B_T - 60)) b_foreign_sample >/dev/null
+b_stat 5000000000
+expect_eq "BUSY.14 the foreign sample is in the ring, tagged with its own host" "1000@elsewhere" \
+  "$(awk -F'|' 'NR == 1 { print $6 }' "$B_FOREIGN")"
+expect_eq "BUSY.15 …and is not read as this cgroup's: busy 0, not 5000 s of CPU in 60 s" "0.00" \
+  "$(b_run "$B_FOREIGN" "$B_CG" "$B_T" _res_busy_cores)"
+
+# cgroup v1: cpuacct.usage, in nanoseconds, beside the v1 quota files.
+B_V1="$B_DIR/cg-v1"; mkdir -p "$B_V1/cpu" "$B_V1/cpuacct"
+printf '200000\n' > "$B_V1/cpu/cpu.cfs_quota_us"; printf '100000\n' > "$B_V1/cpu/cpu.cfs_period_us"
+B_RV1="$B_DIR/ring-v1"
+printf '7000000000000\n' > "$B_V1/cpuacct/cpuacct.usage"
+b_run "$B_RV1" "$B_V1" $((B_T - 60)) pressure_sample >/dev/null
+printf '7090000000000\n' > "$B_V1/cpuacct/cpuacct.usage"
+expect_eq "BUSY.16 cgroup v1: 90 s of CPU (cpuacct.usage, ns) in 60 s reads 1.50" "1.50" \
+  "$(b_run "$B_RV1" "$B_V1" "$B_T" _res_busy_cores)"
+
 # ════════════════════════════════════════════════════ §N — tests/lib/world.sh (T1, D23)
 
 section "N — the model world: machine, clock, cost, repository, suites, verb log (wave-28 D23)"
@@ -1240,17 +1407,24 @@ expect_eq "N.4 world_clock 1000, world_tick 30 → 1000 then 1030, and a child r
 expect_eq "N.5 world_tick with no clock planted is refused with rc 2" 2 \
   "$( unset BIONIC_NOW_FILE; world_tick 5 >/dev/null 2>&1; printf '%s' "$?" )"
 
-# world_cost writes the gate store's cost/<key>, newest last, at most three lines.
+# world_cost writes the gate store's duration file for this directory's project,
+# cost/<project key>%<key> (wave-33 T1; Δ10: the gate keeps only durations), newest last, at
+# most three lines. The 1.15.0 four-argument form is still taken; its mem and cores are not
+# recorded. The project key is the gate's own (`_gate_project`).
+N_PK="$( . "$REPO_ROOT/payload/scripts/lib/gate.sh" 2>/dev/null; _gate_project )"
 N_COST="$( world_clock 5000 >/dev/null 2>&1
            world_cost a.test.sh 12 1.5 90 2>&1; world_tick 10 >/dev/null 2>&1
-           world_cost a.test.sh 14 2 80 2>&1;  world_tick 10 >/dev/null 2>&1
+           world_cost a.test.sh 80 2>&1;        world_tick 10 >/dev/null 2>&1
            world_cost a.test.sh 9 1 70 2>&1;   world_tick 10 >/dev/null 2>&1
-           world_cost a.test.sh 11 1 60 2>&1
-           printf '%s|' "$BIONIC_GATE_DIR"; tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/a.test.sh" )"
-expect_eq "N.6 four world_cost calls keep the newest three, <mem>:<cores>:<seconds>:<epoch>" \
-  "14:2:80:5010 9:1:70:5020 11:1:60:5030 " "${N_COST#*|}"
+           world_cost a.test.sh 60 2>&1
+           printf '%s|' "$BIONIC_GATE_DIR"; tr '\n' ' ' < "$BIONIC_GATE_DIR/cost/${N_PK}%a.test.sh" )"
+expect_regex "N.6a the project key read is the gate's, 8 hex digits (positive for the path below)" '^[0-9a-f]{8}$' "$N_PK"
+expect_eq "N.6 four world_cost calls, both forms, keep the newest three, <seconds>:<epoch>" \
+  "80:5010 70:5020 60:5030 " "${N_COST#*|}"
 expect_eq "N.7 …in the gate store the world owns, never the real home's" "${WORLD_ROOT:-unset}/gate" \
   "${N_COST%%|*}"
+expect_eq "N.7b three arguments are refused with rc 2" 2 \
+  "$( world_cost a.test.sh 1 1 >/dev/null 2>&1; printf '%s' "$?" )"
 expect_eq "N.8 a key holding a slash is refused with rc 2" 2 \
   "$( world_cost a/b 1 1 1 >/dev/null 2>&1; printf '%s' "$?" )"
 

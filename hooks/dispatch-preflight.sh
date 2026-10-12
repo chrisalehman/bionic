@@ -238,6 +238,13 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # builder of `hookSpecificOutput.additionalContext`, the farm-out nudge's. Functions only.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fold.sh"
+# THE PERSON'S LEDGER (wave-33 T35; D2): the approval arm opens what the user owes. NOT in
+# `BIONIC_LIB_WANT`, and sourced only when readable, as session-poker.sh sources it: a library
+# without it leaves every verdict of this hook exactly as it was.
+if ! declare -F owed_open >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/owed.sh"
+fi
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -1079,6 +1086,13 @@ dispatch starts it before the line exists.
 Fix: put the decision to the user; on their reply, record it, then retry the dispatch:
        bash $(refuse_shell_word "$HOOK_DIR/session-poker.sh") approve ${DP_AW_NAME} '<the reply, verbatim>'
      Silence, a question, or a partial reply is never recorded as approval."
+      # THE PERSON OWES IT (wave-33 T35; AC-2.2, D2): the refusal opens `approve:<name>` on the
+      # person's ledger, the key the approve verb closes, carrying the line printed for it.
+      # Idempotent per key, so a refused dispatch on the same approval again opens nothing new.
+      if declare -F owed_open >/dev/null 2>&1; then
+        OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" owed_open "approve:${DP_AW_NAME}" "approval: ${DP_AW_NAME}" \
+          "row ${DP_AW_ID} waits for approval:${DP_AW_NAME} (record it with the approve verb)" >/dev/null 2>&1 || :
+      fi
     done <<DP_AW
 $DP_APPROVAL_WAITS
 DP_AW
@@ -2848,7 +2862,7 @@ case " $SUITES_ALLOWED " in
       else
         dp_not_checked "full-run hold" "the regression's holds (lib/units.sh units_floor_holds)"
       fi
-      if [ "$(plan_frontmatter_get "$PLAN" regression)" = "no" ]; then
+      if [ "$(plan_regression "$PLAN")" = "no" ]; then
         # RULE 1. The setting, not a run.
         _dp_detail="The plan declares regression: no (Step 0);
 change it with session-poker.sh regression yes '<reply>', not by running the suite.
