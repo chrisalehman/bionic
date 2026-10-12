@@ -365,8 +365,17 @@ file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || ech
 # One field out of a versioned pipe-delimited line, BY KEY, never by position. The roster
 # writer's field ORDER has already differed between shipped rows (a `cadence=` was added
 # mid-epic), so position would read the wrong value on a row this script did not author.
+# IN BUILTINS (wave-34 T11, D19): the walk splits on `|` (and on a newline, as `tr` made one a
+# field break) by parameter expansion and prints the first `<key>=` field's value with the newline
+# `cut` gave it — the reading `tr | grep | head | cut` gave, with no process. The three copies
+# (here, hooks/session-poker.sh, payload/scripts/lib/observe.sh) are one body.
 line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
+  local _lf_rest="${1//$'\n'/|}|" _lf_f
+  while [ -n "$_lf_rest" ]; do
+    _lf_f="${_lf_rest%%|*}"; _lf_rest="${_lf_rest#*|}"
+    case "$_lf_f" in "$2="*) printf '%s\n' "${_lf_f#"$2="}"; return 0 ;; esac
+  done
+  return 0
 }
 
 # Existence only. `pgrep -f` matches the full command line; a `ps` fallback covers a
