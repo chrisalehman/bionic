@@ -90,6 +90,7 @@
 # Usage:
 #   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
 #   spawn-worktree.sh remove <worktree-path>
+#   spawn-worktree.sh mark   <worktree-path> --for <name>
 #   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
 #   spawn-worktree.sh ready  [--within <seconds>]
 
@@ -136,6 +137,7 @@ usage() {
 Usage:
   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
   spawn-worktree.sh remove <worktree-path>
+  spawn-worktree.sh mark   <worktree-path> --for <name>
   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
   spawn-worktree.sh ready  [--within <seconds>]
 
@@ -152,9 +154,15 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
         --for <name>, also appends one workspace/v1 line for that agent to
         <main-root>/.bionic/tmp/workspaces-<session>.state (session from
         CLAUDE_CODE_SESSION_ID); refused, before anything is made, with no
-        session or when the record could not be written. Refused when the
+        session or when the record could not be written. --for also writes
+        the name, one line, to the tree's own git directory as bionic-agent,
+        which the gate reads as who asks when no name is carried. Refused when the
         project's volume has less free space than the largest tree already
         there (disk-low, naming both figures in KB).
+mark    re-dispatch: rewrites a linked tree's bionic-agent to <name>, so
+        the successor row's suites ask the gate as it. Refused on the main
+        checkout (not-a-linked-worktree) and on a name that would break the
+        line (invalid-name).
 remove  removes the worktree and KEEPS the branch, deleting the
         <worktree>/.bionic link first (the one create planted, or a legacy
         one an older bionic left).
@@ -422,6 +430,9 @@ cmd_create() {
     why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
             worktree_record_workspace "$main_root" "$sid" "$name" "$wt" "$branch" "$base_sha" )" \
       || abort_created "${why:-workspace-unrecorded}"
+    # shellcheck source=/dev/null
+    why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
+            worktree_mark "$wt" "$name" )" || abort_created "${why:-marker-unwritable}"
   fi
 
   # After the tree is verified and recorded, so an aborted create leaves no exclude line behind;
@@ -429,6 +440,30 @@ cmd_create() {
   exclude_lines "$main_root" "$(tree_parent_line "$main_root" "$parent_abs" "$wt")" "${alias_field:+/.bionic}"
 
   contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}${alias_field}"
+}
+
+# THE RE-DISPATCH (wave-34 T2; D11, REQ-1 AC-1.1): a tree handed to a successor row names the
+# successor, so what that row starts asks the gate as it (lib/worktree.sh `worktree_mark`). A
+# linked tree only: the main checkout belongs to no writer.
+cmd_mark() {
+  local target="" name="" named=0 why
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--for" ]; then
+      [ $# -ge 2 ] || { usage >&2; _wt_refuse usage; }
+      name="$2"; named=1; shift 2; continue
+    fi
+    [ -z "$target" ] || { usage >&2; _wt_refuse usage; }
+    target="$1"; shift
+  done
+  [ -n "$target" ] && [ "$named" -eq 1 ] || { usage >&2; _wt_refuse usage; }
+  [ -d "$target" ] || _wt_refuse no-such-worktree
+  [ -f "${target}/.git" ] || _wt_refuse not-a-linked-worktree
+  [ -f "$LIB_WORKTREE" ] || _wt_refuse library-missing
+  local wt_abs; wt_abs="$(cd "$target" && pwd -P)" || _wt_refuse no-such-worktree
+  # shellcheck source=/dev/null
+  why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
+          worktree_mark "$wt_abs" "$name" )" || _wt_refuse "${why:-marker-unwritable}"
+  contract "OK marked=${wt_abs} for=${name}"
 }
 
 cmd_remove() {
@@ -542,6 +577,7 @@ cmd_ready() {
 case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   remove) shift; cmd_remove "$@" ;;
+  mark)   shift; cmd_mark "$@" ;;
   land)   shift; cmd_land "$@" ;;
   ready)  shift; cmd_ready "$@" ;;
   -h|--help|help) usage; exit 0 ;;

@@ -770,17 +770,17 @@ expect_true "10a: the slow-path trace sees the hook's forks (the tracer is not b
 expect_eq "10b: ruling-push.sh fast path forks no external command (one file test)" "0" "$PUSH_FAST_COUNT"
 expect_true "10c: ruling-push.sh slow path count <= 10" test "$PUSH_SLOW_COUNT" -le 10
 
-section "11: a budgeted agent's plain call, in both modes: inside §1's cap; the carry costs at most two forks, and nothing outside bypass mode (wave-33 T36)"
+section "11: a budgeted agent's plain call is left as typed in every mode and costs what an unbudgeted one's does (wave-34 T2; D11, REQ-1 AC-1.3, AC-1.4; was wave-33 T36)"
 
-# THE CARRY IN BYPASS MODE (wave-33 T36; D7, AC-6.2). In bypass mode every call a budgeted agent makes
-# that the wall does not handle as a suite comes back as `export BIONIC_GATE_AGENT=<row name>; <the
-# command>`; in any other mode it is left as typed (the CLI checks permission rules against a hook's
-# rewrite, so a carry there would prompt). §1's `ls -la` is traced again from two agents of one
-# roster, in each mode: one whose row states a budget, and one whose row states none, which reads
-# the same row and stages nothing. In bypass mode the difference is what one rewrite costs a call;
-# outside it there is no difference to pay. The budgeted counts are held to §1's cap.
-# ANTI-VACUITY: each budgeted call is read back on the same reader — carrying its name in bypass mode,
-# carrying nothing outside it — so the traces are of the paths they claim.
+# NO CARRY, IN ANY MODE (wave-34 T2; D11). Until wave-34 a budgeted agent's plain call came back in
+# bypass mode as `export BIONIC_GATE_AGENT=<row name>; <the command>`, at a roster read and two jq
+# (wave-33 T36). The gate names the agent by the tree it runs in now (lib/gate.sh THE PLACE), so no
+# mode rewrites the call and no mode pays for a rewrite. §1's `ls -la` is traced again from two agents
+# of one roster, in each mode: one whose row states a budget and one whose row states none. All four
+# counts are held to §1's cap, and the budget costs the plain call nothing in either mode.
+# ANTI-VACUITY: the reader of the staged command is proved on the same roster by a call the wall does
+# rewrite (the budgeted agent's on-budget suite, booked), so the empty readings are of the paths they
+# claim.
 CARRY_ROSTER="$PROJECT/.bionic/tmp/roster-$SID.state"
 ( . "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roster.sh" 2>/dev/null \
     || . "${BIONIC_HOOKS_DIR}/../scripts/lib/roster.sh"
@@ -789,13 +789,13 @@ CARRY_ROSTER="$PROJECT/.bionic/tmp/roster-$SID.state"
     subagent_type=bionic:implementor suites_allowed=x.test.sh suites_source=declared files= >> "$CARRY_ROSTER"
   roster_row status=identified session="$SID" name=w-D agent_id=a-latency-D launched_at=2026-10-11T00:00:00Z \
     subagent_type=bionic:implementor files= >> "$CARRY_ROSTER" )
-carry_payload() {  # <agent id> <permission mode>
-  jq -nc --arg s "$SID" --arg c "$PROJECT" --arg a "$1" --arg m "$2" \
+carry_payload() {  # <agent id> <permission mode> [command, default ls -la]
+  jq -nc --arg s "$SID" --arg c "$PROJECT" --arg a "$1" --arg m "$2" --arg x "${3:-ls -la}" \
     '{session_id:$s, cwd:$c, permission_mode:$m, hook_event_name:"PreToolUse", tool_name:"Bash", agent_id:$a,
-      agent_type:"bionic:implementor", tool_input:{command:"ls -la"}, tool_use_id:"toolu_hook_latency_carry"}'
+      agent_type:"bionic:implementor", tool_input:{command:$x}, tool_use_id:"toolu_hook_latency_carry"}'
 }
-carry_cmd() {  # <agent id> <permission mode> — the command the hook stages, or nothing
-  carry_payload "$1" "$2" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" \
+carry_cmd() {  # <agent id> <permission mode> [command] — the command the hook stages, or nothing
+  carry_payload "$@" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" \
     BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$BASH_WALLS_HOOK" 2>/dev/null \
     | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null
 }
@@ -807,24 +807,27 @@ BYP_C=$(carry_count a-latency-C bypassPermissions trace-carry-byp-c.txt)
 BYP_D=$(carry_count a-latency-D bypassPermissions trace-carry-byp-d.txt)
 DEF_C=$(carry_count a-latency-C default trace-carry-def-c.txt)
 DEF_D=$(carry_count a-latency-D default trace-carry-def-d.txt)
+CARRY_CMD_SUITE="$(carry_cmd a-latency-C bypassPermissions 'bash tests/x.test.sh')"
 CARRY_CMD_BYP_C="$(carry_cmd a-latency-C bypassPermissions)"
 CARRY_CMD_BYP_D="$(carry_cmd a-latency-D bypassPermissions)"
 CARRY_CMD_DEF_C="$(carry_cmd a-latency-C default)"
 rm -f "$CARRY_ROSTER"
 
-echo "hook-latency: bash-walls.sh agent ls -la external-command count, bypass mode: budgeted (carried) = $BYP_C (cap 12), unbudgeted = $BYP_D"
+echo "hook-latency: bash-walls.sh agent ls -la external-command count, bypass mode: budgeted = $BYP_C (cap 12), unbudgeted = $BYP_D"
 echo "hook-latency: bash-walls.sh agent ls -la external-command count, default mode: budgeted = $DEF_C (cap 12), unbudgeted = $DEF_D; main thread (§1) = $WALLS_COUNT"
 echo "hook-latency: bash-walls.sh budgeted-agent histogram, bypass mode:"
 histogram "$SANDBOX/trace-carry-byp-c.txt" | sed 's/^/hook-latency:   /'
 
-expect_eq "11a: in bypass mode the budgeted agent's ls -la is carried (the trace is of the carry path)" \
-  "export BIONIC_GATE_AGENT=w-C; ls -la" "$CARRY_CMD_BYP_C"
-expect_eq "11b: …and the agent whose row states no budget is not (11a is the positive)" "" "$CARRY_CMD_BYP_D"
-expect_eq "11c: in default mode the budgeted agent's ls -la is left as typed (11a is the positive)" "" "$CARRY_CMD_DEF_C"
+expect_contains "11-positive: the reader reads a staged command where there is one (the budgeted agent's suite, booked)" \
+  "booked.sh" "$CARRY_CMD_SUITE"
+expect_eq "11a: in bypass mode the budgeted agent's ls -la is left as typed: nothing staged (11-positive is the positive)" \
+  "" "$CARRY_CMD_BYP_C"
+expect_eq "11b: …and the agent whose row states no budget alike" "" "$CARRY_CMD_BYP_D"
+expect_eq "11c: in default mode the budgeted agent's ls -la is left as typed (11-positive is the positive)" "" "$CARRY_CMD_DEF_C"
 expect_true "11d: a budgeted agent's plain call in bypass mode count <= 12, §1's cap" test "$BYP_C" -le 12
 expect_true "11e: …and in default mode" test "$DEF_C" -le 12
-expect_true "11f: in bypass mode the carry costs the call at most two forks, the jq that stages it and the fold's jq that emits it" \
-  test "$((BYP_C - BYP_D))" -le 2
+expect_eq "11f: in bypass mode a budget costs the call nothing: no roster read, no rewrite" "$BYP_D" "$BYP_C"
 expect_eq "11g: in default mode a budget costs the call nothing: no roster read, no rewrite" "$DEF_D" "$DEF_C"
+expect_eq "11h: …and bypass mode costs what default mode does" "$DEF_C" "$BYP_C"
 
 finish
