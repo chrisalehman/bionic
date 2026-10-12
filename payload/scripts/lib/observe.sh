@@ -114,8 +114,14 @@ agent_log_newest() {  # <agent-id> <project-dir> -> newest matching path on stdo
 # One field out of a versioned pipe-delimited line, BY KEY, never by position (checklist
 # A6): a fixed-field-order parser breaks undiagnosably the moment a field is added, so an
 # unknown extra field must be inert here.
+# In builtins since wave-34 T11 (D19); hooks/session-sweeper.sh's copy says how.
 line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
+  local _lf_rest="${1//$'\n'/|}|" _lf_f
+  while [ -n "$_lf_rest" ]; do
+    _lf_f="${_lf_rest%%|*}"; _lf_rest="${_lf_rest#*|}"
+    case "$_lf_f" in "$2="*) printf '%s\n' "${_lf_f#"$2="}"; return 0 ;; esac
+  done
+  return 0
 }
 
 # Claude Code names a project directory by slugifying its path.

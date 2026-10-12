@@ -1173,8 +1173,14 @@ iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
 
 # One field out of a versioned pipe-delimited line, BY KEY, never by position — same
 # rationale as hooks/session-sweeper.sh's copy: field order is not a contract.
+# In builtins since wave-34 T11 (D19); hooks/session-sweeper.sh's copy says how.
 line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
+  local _lf_rest="${1//$'\n'/|}|" _lf_f
+  while [ -n "$_lf_rest" ]; do
+    _lf_f="${_lf_rest%%|*}"; _lf_rest="${_lf_rest#*|}"
+    case "$_lf_f" in "$2="*) printf '%s\n' "${_lf_f#"$2="}"; return 0 ;; esac
+  done
+  return 0
 }
 
 # Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
