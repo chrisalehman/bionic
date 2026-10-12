@@ -43,15 +43,15 @@ Reply 1, 2 or 3 · or matrix, diagram, page
 
 ## Altitude
 
-Before any label, reframe the decision at a conceptual level, in plain language, for a reader who has not seen the research.
+Before any label, reframe the decision at a conceptual level, in plain language, for a reader new to the research.
 
-1. Name the one thing the options differ on before any structure. Pitch the brief at the level of abstraction that makes the options differ most.
+1. Name the one thing the options differ on before any structure, as a contrast: whether this, or that. Pitch the brief at the level of abstraction that makes the options differ most.
 2. Cut detail before cutting sentences: concise means fewer facts, not denser ones.
 3. Plain words over the record's house style, which stays in the record.
 4. Then write the four labels:
 
 - Frame the decision as concepts, not mechanisms: its Goal and Options carry no file, function, row, task or version identifiers.
-- The goal says what and why: what is being decided, and why it matters now. The Goal is one sentence, and it names the one difference.
+- The goal says what and why: what is being decided, and why it matters now. The Goal is one sentence, and it states that contrast.
 - A short plain paragraph after the Goal explains the problem before any option. It is optional, and brief.
 - Each option is named as an idea and says what it means for the user.
 - By default the recommendation favours the most architecturally elegant choice, reasoned from first principles, and names the principle that decides it.
@@ -67,14 +67,14 @@ Each pair is one decision written twice: first at the level of mechanisms, the f
 
 Mechanism level:
 
-> **Goal:** Decide whether `walls.sh` keeps T3's script-start carry once `gate.sh` reads `<git-dir>/bionic-agent`, given T36's bypass-mode carry retires under REQ-1.
+> **Goal:** Decide whether `walls.sh` keeps T3's script-start carry once `gate.sh` reads `<git-dir>/bionic-agent`.
 >
 > 1. Retire both carries: fold the marker read into the existing `git rev-parse` call; AC-1.5's residual stands.
 > 2. Keep T3's carry for out-of-tree starts: two sources of `who`, reconciled in the gate.
 
 Design altitude:
 
-> **Goal:** Decide how the system tells which worker is asking to run tests, so each is held to its own budget.
+> **Goal:** Decide whether the system tells which worker is asking from where the work happens, or from a name carried on every command, so each is held to its own budget.
 >
 > Today a worker's name rides on every command it runs, and a command that loses the name counts as the main thread, which no budget limits.
 >
@@ -111,14 +111,14 @@ Design altitude:
 
 Mechanism level:
 
-> **Goal:** Decide how `gate.sh` admits a whole test run: room under the share alone or a reserved width, and whether `ready` or the tick launches it.
+> **Goal:** Decide how `gate.sh` admits a whole test run: room under the share alone or a reserved width.
 >
 > 1. Room under the share alone: the run waits its turn like any heavy command.
 > 2. Reserve a fixed width of 4 for the run in `tests/run.sh`.
 
 Design altitude:
 
-> **Goal:** Decide how a full test run shares the machine with the workers building the code.
+> **Goal:** Decide whether a full test run takes only spare capacity, or holds a fixed share of the machine beside the workers.
 >
 > The full run catches what each worker's own tests miss, but it wants every core, and the workers and their landings need them too.
 >
