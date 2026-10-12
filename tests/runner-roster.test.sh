@@ -1307,12 +1307,11 @@ expect_eq "11.14 …and every request was ended" "" "$(rrn_unended)"
 TNIM="$RRN/inner-mut"
 rr_tree "$TNIM"
 cp "$TNI/tests/aaa-inner.test.sh" "$TNIM/tests/aaa-inner.test.sh"
-RRN_ANCHOR='          whole)'
-sed 's/^          whole)$/          never)/' "$RUNNER" > "$TNIM/tests/run.sh"
-expect_eq "11.15 meta: the shipped runner carries the nested-whole check once" "1" \
-  "$(grep -cF "$RRN_ANCHOR" "$RUNNER")"
-expect_eq "11.16 meta: …and the doctored copy does not" "0" \
-  "$(grep -cF "$RRN_ANCHOR" "$TNIM/tests/run.sh")"
+# 11.15 is the anchor (wave-35 T3, D16): the arm on one line of the shipped runner, and the doctored
+# copy written from it, so `anchors check` names this line at any landing that re-spells the arm.
+anchor file tests/run.sh '          whole)' '          never)' "$TNIM/tests/run.sh"
+expect_eq "11.16 meta: …and the doctored copy does not carry it" "0" \
+  "$(grep -cF '          whole)' "$TNIM/tests/run.sh")"
 expect_true "11.17 meta: the doctored copy still parses" bash -n "$TNIM/tests/run.sh"
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_GATE"; printf '0\n' > "$RRN_LOAD"
 RRN_INNER_TREE="$TNIM" rrn_drive "$TNO" 2 bash "$RRN_BOOKED" --suites run.sh -- 'bash tests/run.sh'
