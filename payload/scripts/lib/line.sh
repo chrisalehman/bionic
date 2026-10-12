@@ -1141,6 +1141,24 @@ _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite>
   fi
   rm -f "$res"
 }
+# WHERE A SUITE LIVES (wave-34 T7; D23, AC-14.4). The roster holds a suite by its file name (the lift reads
+# a `Lands-on:` path by its basename, `_line_suites`), so the file is found in the landing tree: `tests/<name>`
+# when it is there, as before; otherwise the one tracked file of that name, wherever the project keeps its
+# suites (`scripts/deploy/__tests__/x.test.sh`). None, or two or more and none under `tests/`, is the old
+# `tests/<name>`: ready picks no suite for the writer, and the suite that cannot start stalls the entry.
+_line_suite_path() {  # <landing tree> <name.test.sh> -> the suite's path in that tree
+  local tree="$1" name="$2" f hit="" n=0
+  if [ ! -e "$tree/tests/$name" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      hit="$f"; n=$((n + 1))
+    done <<LINE_LS
+$(git -C "$tree" ls-files -- "$name" "*/$name" 2>/dev/null)
+LINE_LS
+    [ "$n" -ne 1 ] || { printf '%s\n' "$hit"; return 0; }
+  fi
+  printf 'tests/%s\n' "$name"
+}
 # The runner's body, in its own `bash -c`: ask, run, sample the gate while the suite runs (a locked
 # read raises the run's peak), end the request with the suite's code. It stops its suite if the
 # carrier is gone.
@@ -1156,7 +1174,7 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
   # BIONIC_GATE_ADMIT; stdin /dev/null. A tree that is no checkout runs nothing: rc 1, no end line.
   {
     p=""
-    [ -e "$3/.git" ] && bionic_suite_start ${id:+--admit "$id"} "$3" "tests/$1" > "$4" 2>&1 && p="$BIONIC_SUITE_PID"
+    [ -e "$3/.git" ] && bionic_suite_start ${id:+--admit "$id"} "$3" "$(_line_suite_path "$3" "$1")" > "$4" 2>&1 && p="$BIONIC_SUITE_PID"
     [ -n "$p" ] || { ( exit 1 ) & p=$!; }
     while kill -0 "$p" 2>/dev/null; do
       kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }

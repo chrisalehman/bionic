@@ -2193,6 +2193,53 @@ sed -i.bak '/^  _gate_budget "\$kind" "\$key" || return 75$/d' "$BA_MUT"
 expect_eq "BA.21 mutant: without it, fx's off-budget ask is admitted (the rows above are not vacuous)" "0" \
   "$(cd "$BA" && AGENT=fx GATE_LIB="$BA_MUT" ask_fg q8 work b.test.sh 2)"
 
+# ── §BUDGET-AT-ASK, P rows: a suite run by a path outside tests/ (wave-34 T7; D23, AC-14.5) ──
+# The wall names a suite file that is not this tree's own tests/<basename> by its RUN, each character
+# outside the name set turned into `_` (walls.sh _bsg_suites: `bash scripts/deploy/__tests__/x.test.sh`
+# is `bash_scripts_deploy___tests___x.test.sh`), and the shim asks the gate under that key. The budget
+# records a suite by its file name, so the key must meet the entry it is: the same suite, run by a path.
+# fails-when: a budgeted suite run by a path outside tests/ is refused against its own budget entry.
+fresh budget-path
+world_machine 8 8192 20 0.5
+mkdir -p "$BA/scripts/deploy/__tests__"
+for s in a b; do
+  printf '#!/bin/bash\n: > "$BA_MARKS/%s.ran"\nexit 0\n' "$s" > "$BA/scripts/deploy/__tests__/$s.test.sh"
+done
+PK_DEPLOY=bash_scripts_deploy___tests___
+pk_ask() {  # <name> <agent> <key> -> the ask's rc
+  (cd "$BA" && AGENT="$2" ask_fg "$1" work "$3" 2)
+}
+expect_eq "P.1 AC-14.5 fx (a.test.sh only): a.test.sh run by scripts/deploy/__tests__/ is admitted" "0" \
+  "$(pk_ask p1 fx "${PK_DEPLOY}a.test.sh")"
+expect_eq "P.2 …and b.test.sh by that path is held to the budget, refused 75" "75" "$(pk_ask p2 fx "${PK_DEPLOY}b.test.sh")"
+expect_contains "P.2b …the line names the key and the entry" "allowed: a.test.sh" "$(cat "$D/p2.err" 2>/dev/null)"
+expect_eq "P.3 a.test.sh run from its own directory (cd tests && bash a.test.sh, key bash_a.test.sh) is admitted" "0" \
+  "$(pk_ask p3 fx bash_a.test.sh)"
+expect_eq "P.4 a bare key that merely ends in the entry (user_a.test.sh) is another suite, refused" "75" \
+  "$(pk_ask p4 fx user_a.test.sh)"
+expect_eq "P.4b …as is an interpreter word glued to another name (bash_ba.test.sh)" "75" "$(pk_ask p4b fx bash_ba.test.sh)"
+expect_eq "P.5 the path key meets a wide budget's entry (fwide: a b run.sh)" "0" "$(pk_ask p5 fwide "${PK_DEPLOY}b.test.sh")"
+expect_eq "P.6 a suite a declared Re-executes run names is admitted by a path too (frex names b.test.sh)" "0" \
+  "$(pk_ask p6 frex "${PK_DEPLOY}b.test.sh")"
+expect_eq "P.6b …and one it does not name is refused (a.test.sh)" "75" "$(pk_ask p6b frex "${PK_DEPLOY}a.test.sh")"
+expect_eq "P.7 sh, zsh, dash and ksh runs meet the entry as bash does" "0 0 0 0" \
+  "$(pk_ask p7a fx sh_scripts_a.test.sh) $(pk_ask p7b fx zsh_scripts_a.test.sh) $(pk_ask p7c fx dash_scripts_a.test.sh) $(pk_ask p7d fx ksh_scripts_a.test.sh)"
+expect_eq "P.8 case-blind: the capitalised entry is the same suite by a path; case-exact it is another" "0 75" \
+  "$(cd "$BA" && BIONIC_PROBE_CASE_BLIND=1 AGENT=fx ask_fg p8a work "${PK_DEPLOY}A.TEST.SH" 2) $(cd "$BA" && BIONIC_PROBE_CASE_BLIND=0 AGENT=fx ask_fg p8b work "${PK_DEPLOY}A.TEST.SH" 2)"
+# The real shim, as the wall calls it: the suite is typed by its path, the wall names it by its run.
+pk_shim() {  # <agent> <suite file name> -> the shim's rc; leaves PK_OUT; marks cleared first
+  rm -f "$BA_MARKS"/*.ran
+  PK_OUT="$( cd "$BA" && env -u BIONIC_GATE_ADMIT BA_MARKS="$BA_MARKS" CLAUDE_CODE_SESSION_ID="$WORLD_SID" \
+    BIONIC_PRESSURE_RING="$D/ring" BIONIC_TEST_JOBS_CEILING=2 \
+    bash "$BOOKED_SH_BA" --agent "$1" --max-wait 30 --suites "${PK_DEPLOY}$2" -- "bash scripts/deploy/__tests__/$2" 2>&1 )"
+  return $?
+}
+BOOKED_SH_BA="$REPO_ROOT/payload/scripts/booked.sh"
+pk_shim fx a.test.sh; PK_RC=$?
+expect_eq "P.9 AC-14.5 the shim, fx running scripts/deploy/__tests__/a.test.sh: admitted, the suite ran, rc 0" "0 a" "$PK_RC $(ran)"
+pk_shim fx b.test.sh; PK_RC=$?
+expect_eq "P.10 …and b.test.sh by its path is refused at the ask, 75, never run" "75 " "$PK_RC $(ran)"
+expect_contains "P.10b …with the budget's own line" "$BA_LINE" "$PK_OUT"
 # THE PLACE NAMES THE ASKER (wave-34 T2; D11, REQ-1 AC-1.2, AC-1.4). No command carries the agent's
 # name any more: a writer works in its own linked tree, whose git directory holds `bionic-agent`
 # (spawn-worktree.sh create --for; tests/spawn-worktree.test.sh §MARKER), and an ask that carries no
