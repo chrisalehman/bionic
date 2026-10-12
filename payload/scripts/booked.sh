@@ -65,6 +65,13 @@
 # the shim stands, and its own `cd` moves it. A <dir> that does not exist or is in no work tree
 # is "outside a git tree": no stamp, no error, never a stamp in the shim's own tree instead.
 #
+# --unplaced: THE WALL CANNOT SAY WHICH TREE THE RUN IS IN (wave-35 T6; D14, design ledger Δ7). A `cd`
+# ahead of the suite that the wall cannot follow (a variable, `pushd`, a subshell, `cd` behind `||`)
+# leaves the run's tree unknown, and the shim's own directory is a guess: in 1.17.0 a red run in a
+# writer's dirty tree was stamped there as a clean green at the main head. So the shim writes NO
+# stamp, at any end, and says on the run's own output (stderr, the detached run's log) that the run
+# did not count. Nothing reads a marked stamp: an unplaced run leaves nothing to read.
+#
 # --suites <names>: WHICH SUITES THE COMMAND RAN (wave-26 T61, critic F1). The doctrine runs a
 # brief's suites one call each, so one tree collects one stamp per suite, and `cmd=` cannot say
 # which suite a line was for (behind the doctrine's `cd <tree> || exit 1;` its 120 characters are
@@ -258,11 +265,11 @@ BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--detach] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--unplaced] [--detach] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0
+kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0; unplaced=0
 detach=0; run_log=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -279,6 +286,7 @@ while [ "$#" -gt 0 ]; do
     --suites)       [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; suites="$2"; shift 2 ;;
     --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
     --runner)       runner=1; shift ;;
+    --unplaced)     unplaced=1; shift ;;
     --detach)       detach=1; shift ;;
     # THE DETACHED SIDE (internal): the caller of --detach starts this shim again with the log it
     # claimed; nobody types it.
@@ -328,6 +336,10 @@ booked_one_line() {  # <text> <n> — pipes and line breaks made spaces, then th
 }
 
 booked_stamp() {  # <rc>
+  if [ "$unplaced" -eq 1 ]; then
+    printf 'bionic: not counted — the wall could not tell which tree this run ran in, so it left no stamp and proves nothing; for a run that counts, open the command with a literal cd <tree> || exit 1;\n' >&2
+    return 0
+  fi
   [ -n "$stamp_file" ] || return 0
   local c s=""
   c="$(booked_one_line "$cmd" 120)"
@@ -699,6 +711,7 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   [ -z "$stamp_dir" ] || child+=(--stamp-dir "$stamp_dir")
   [ -z "$suites" ] || child+=(--suites "$suites")
   [ "$runner" -eq 0 ] || child+=(--runner)
+  [ "$unplaced" -eq 0 ] || child+=(--unplaced)
   child+=(-- "$cmd")
   # fork; the parent returns at once; the child leaves the caller's session (setsid), takes the log
   # as stdout and stderr and /dev/null as stdin, closes every other descriptor it inherited (one held
