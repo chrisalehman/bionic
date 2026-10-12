@@ -4617,4 +4617,115 @@ dbc_hits() { /usr/bin/grep -rlF -- "$1" "$REPO_ROOT/hooks" "$REPO_ROOT/payload" 
 expect_eq "DBC-6 positive: the live ledger reader is found by the same search" "yes" "$([ "$(dbc_hits units_findings)" -gt 0 ] && echo yes || echo no)"
 expect_eq "DBC-6b AC-9.2: the unlined reader and its pin are gone from hooks, payload and tests" "0" "$(dbc_hits "units_""unlined")"
 
+
+section "§BRANCH — wave-35 T7: one reader of the working branch, SDLC State first then frontmatter, serves ready, the stop wall, the card, current 4, the proof judge and the evidence gate (REQ-5 AC-5.3; D14)"
+# ---------------------------------------------------------------------------
+# lib/run.sh `plan_working_branch <plan>` is the one reader: the `## SDLC State` key, then the frontmatter
+# key, fenced lines unread, the first word of the value. Six surfaces read the plan's working branch and
+# each calls it: `ready` (through `session_working_branch`), the stop wall (stop.sh's landing gate), the
+# card (card.sh's Branches), `current 4` (session-poker.sh's Step-4 fill), the proof judge (proof.sh
+# `proof_state`) and the evidence gate (walls.sh `validate_tests_head`). FIXTURE: a plan whose
+# `working-branch:` sits only under `## SDLC State`, the case `ready` used to refuse as `no-working-branch`.
+# Four surfaces are driven from a copy of the plugin; the stop wall and `current 4` are hooks whose drive
+# needs a whole Stop or plan-verb fixture, so their call to the reader is counted at its site (BR-6), and
+# the census (BR-7) holds that no other line of the surfaces' files reads the key itself.
+# THE MUTATION ARM: a copy of the plugin whose reader has no SDLC-State arm. On the same plan, every driven
+# surface reads no branch, and `ready`'s reader prints `no-working-branch`.
+# fails-when: `ready` prints `no-working-branch` on the SDLC-State-only plan, or a surface reads the
+# frontmatter alone, or a second reader of the key stands in one of the surfaces' files.
+BR="$SANDBOX/branch"; BR_REPO="$BR/repo"; BR_SID="branch-session-01"
+mkdir -p "$BR_REPO"
+git -C "$BR_REPO" init -q -b main
+git -C "$BR_REPO" config user.email t7@example.invalid; git -C "$BR_REPO" config user.name t7
+printf '.bionic/\n' > "$BR_REPO/.gitignore"; git -C "$BR_REPO" add .gitignore; git -C "$BR_REPO" commit -q -m init
+git -C "$BR_REPO" checkout -q -b side; git -C "$BR_REPO" commit -q --allow-empty -m side
+BR_SIDE="$(git -C "$BR_REPO" rev-parse HEAD)"
+git -C "$BR_REPO" checkout -q -b wave/35-fixture main; git -C "$BR_REPO" commit -q --allow-empty -m wave
+BR_HEAD="$(git -C "$BR_REPO" rev-parse HEAD)"
+BR_PLAN="$BR_REPO/.bionic/docs/plans/epic-x/wave-x.plan.md"
+mkdir -p "${BR_PLAN%/*}" "$BR_REPO/.bionic/tmp"
+br_plan() {  # <out> <front: branch or -> <sdlc: branch or -> [fenced] — a plan the card renders and the judge reads
+  { printf -- '---\nsdlc-step: 3\n'
+    [ "$2" = - ] || printf 'working-branch: %s\n' "$2"
+    printf -- 'integration-branch: main\n---\n\n# fixture · plan\n\n## Goal\n\nLand the fixture on its branch.\n\n## SDLC State\n\ncurrent: 4\n'
+    [ -z "${4:-}" ] || printf '```\nworking-branch: wave/35-fenced\n```\n'
+    [ "$3" = - ] || printf 'working-branch: %s\n' "$3"
+    printf 'proved: kind=floor head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n\n' "$BR_HEAD"
+    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | REQ-1: the fixture row | implementor | — | 30 | REQ-1 | a.sh | — | pending |\n\n'
+    printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1.1 | T0 | pending | — | — |\n'
+  } > "$1"
+}
+printf 'plan=%s\nengaged_at=2026-10-12T00:00:00Z\n' "$BR_PLAN" > "$BR_REPO/.bionic/tmp/engaged-${BR_SID}.state"
+# The four drivers, each against the plugin rooted at <root>: what the surface read, as it says it.
+br_ready() { bash -c '. "$1/payload/scripts/lib/run.sh" >/dev/null 2>&1; session_working_branch "$2" "$3"' _ "$1" "$BR_REPO" "$BR_SID" 2>/dev/null; }
+br_card()  { bash "$1/payload/scripts/card.sh" step3 "$BR_PLAN" 2>/dev/null </dev/null | /usr/bin/grep -E '^ +working ' | sed -E 's/^ +//; s/ +/ /g'; }
+br_proof() { bash -c '. "$1/payload/scripts/lib/proof.sh" >/dev/null 2>&1; proof_state "$2" "$3"' _ "$1" "$BR_PLAN" "$BR_REPO" 2>/dev/null | head -n 1; }
+br_gate()  {  # the evidence gate's head check (walls.sh, defined inside wall_evidence_gate, so its text is read out and run)
+  # on a head the release head does not contain: the refusal names the head it held the commit against
+  bash -c '. "$1/payload/scripts/lib/run.sh" >/dev/null 2>&1
+    eval "$(awk "$5" "$1/payload/scripts/lib/walls.sh")"
+    block_get() { printf "%s\n" "$BR_H"; }; _eg_commit_repo() { _EG_REPO="$BR_R"; }
+    refuse() { printf "%s\n" "$_eg_detail"; exit 2; }
+    PLAN="$2"; BR_H="$3"; BR_R="$4"
+    validate_tests_head Step-5' _ "$1" "$BR_PLAN" "$BR_SIDE" "$BR_REPO" \
+    'index($0, "validate_tests_head() {") == 1 { f = 1 } f { print } f && $0 == "}" { exit }' 2>/dev/null \
+    | /usr/bin/grep -oE '\((working-branch|HEAD of) [^)]*\)'
+}
+br_reader() { bash -c '. "$1/payload/scripts/lib/run.sh" >/dev/null 2>&1; plan_working_branch "$2"' _ "$REPO_ROOT" "$1" 2>/dev/null; }
+
+# BR-1: the reader's order, on the four shapes and a fenced line.
+br_plan "$BR/sdlc.md" - wave/35-fixture
+br_plan "$BR/front.md" wave/35-front -
+br_plan "$BR/both.md" wave/35-front wave/35-fixture
+br_plan "$BR/none.md" - -
+br_plan "$BR/fenced.md" wave/35-front - fenced
+expect_eq "BR-1 the reader reads the SDLC State key on a plan that carries it there alone" "wave/35-fixture" "$(br_reader "$BR/sdlc.md")"
+expect_eq "BR-1b …the frontmatter key on a plan that carries it there alone" "wave/35-front" "$(br_reader "$BR/front.md")"
+expect_eq "BR-1c …SDLC State first when the plan carries both" "wave/35-fixture" "$(br_reader "$BR/both.md")"
+expect_eq "BR-1d …a fenced line under SDLC State is not read: the frontmatter answers" "wave/35-front" "$(br_reader "$BR/fenced.md")"
+expect_eq "BR-1e …and a plan that names none reads nothing (BR-1 is the positive)" "" "$(br_reader "$BR/none.md")"
+
+# BR-2..5: the four driven surfaces on the SDLC-State-only plan.
+br_plan "$BR_PLAN" - wave/35-fixture
+expect_eq "BR-2 AC-5.3 ready's reader reads the SDLC-State-only plan's branch" "wave/35-fixture" "$(br_ready "$REPO_ROOT")"
+expect_eq "BR-3 AC-5.3 the card's Branches names it" "working wave/35-fixture" "$(br_card "$REPO_ROOT")"
+expect_eq "BR-4 AC-5.3 the proof judge holds the floor against its checkout" "covered	$BR_HEAD" "$(br_proof "$REPO_ROOT")"
+expect_eq "BR-5 AC-5.3 the evidence gate holds the head against its tip" "(working-branch wave/35-fixture)" "$(br_gate "$REPO_ROOT")"
+
+# BR-6: the two hook surfaces call the reader at their site, once each.
+anchor "$REPO_ROOT/payload/scripts/lib/stop.sh" 'LG_WORKING_BRANCH=$(plan_working_branch "$LG_RUN_PLAN")' 1
+anchor "$REPO_ROOT/hooks/session-poker.sh" 'PV_WB="$(plan_working_branch "$PV_PLAN")"' 1
+
+# BR-7: THE CENSUS. A line that reads the key itself: the key as a regex an awk, grep or sed matches, the key
+# compared as a frontmatter name, or the key handed to the frontmatter getter. Comments are not read.
+br_readers() {  # <file>... -> file:line of each line that reads the working-branch key itself
+  awk '/^[[:space:]]*#/ { next }
+    /working-branch\[\[:space:\]\]\*:/ || /== "working-branch"/ || /plan_frontmatter_get[^#]*working-branch/ { print FILENAME ":" FNR }' "$@"
+}
+BR_FILES="payload/scripts/lib/line.sh payload/scripts/lib/worktree.sh payload/scripts/lib/stop.sh payload/scripts/card.sh hooks/session-poker.sh payload/scripts/lib/proof.sh payload/scripts/lib/walls.sh"
+expect_nonempty "BR-7 positive: the census finds the one reader's own lines in run.sh" \
+  "$(cd "$REPO_ROOT" && br_readers payload/scripts/lib/run.sh)"
+# shellcheck disable=SC2086
+expect_eq "BR-7b AC-5.3 …and no line of the surfaces' seven files reads the key itself" "" \
+  "$(cd "$REPO_ROOT" && br_readers $BR_FILES)"
+# shellcheck disable=SC2086
+expect_eq "BR-7c …nor names the retired proof-side reader" "0" \
+  "$(cd "$REPO_ROOT" && cat $BR_FILES | /usr/bin/grep -c 'proof_''working_branch')"
+
+# THE MUTATION ARM: the reader's SDLC-State arm deleted, in a copy of the plugin.
+BR_MUT="$BR/mut"; mkdir -p "$BR_MUT/payload/scripts"
+cp -R "$REPO_ROOT/hooks" "$BR_MUT/hooks"; cp -R "$REPO_ROOT/payload/scripts/." "$BR_MUT/payload/scripts/"
+anchor file payload/scripts/lib/run.sh 'wb="$(_run_lines "$plan" | awk "$_RUN_WB_SDLC_AWK")"' 'wb=""' "$BR_MUT/payload/scripts/lib/run.sh"
+expect_eq "BR-mut0 the mutant differs from the reader in one line" "1" \
+  "$(diff "$REPO_ROOT/payload/scripts/lib/run.sh" "$BR_MUT/payload/scripts/lib/run.sh" | /usr/bin/grep -c '^>')"
+br_plan "$BR_PLAN" wave/35-front -
+expect_eq "BR-mut1 the mutant runs: on a frontmatter plan ready's reader still reads the branch" "wave/35-front" "$(br_ready "$BR_MUT")"
+br_plan "$BR_PLAN" - wave/35-fixture
+expect_eq "BR-mut2 AC-5.3 with no SDLC-State arm, ready prints no-working-branch on the SDLC-State-only plan" \
+  "no-working-branch plan=$BR_PLAN" "$(br_ready "$BR_MUT")"
+expect_eq "BR-mut3 …the card reads no branch" "working not declared" "$(br_card "$BR_MUT")"
+expect_eq "BR-mut4 …the proof judge reads no branch" "uncovered	the plan names no working-branch" "$(br_proof "$BR_MUT")"
+expect_eq "BR-mut5 …and the evidence gate holds the head against the checkout instead" "(HEAD of $BR_REPO)" "$(br_gate "$BR_MUT")"
+
 finish
