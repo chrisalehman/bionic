@@ -1302,13 +1302,13 @@ expect_eq "11.14 …and every request was ended" "" "$(rrn_unended)"
 
 # ---- (b) the mutation control: no nested-whole check -----------------------
 # The check lives in the NESTED runner, the one whose solo suite inherits the whole admission:
-# the inner tree's runner is the doctored copy, the outer run is the shipped one.
+# the inner tree's runner is the doctored copy, the outer run is the shipped one. The check is the
+# `whole)` arm of the case on the inherited request's kind (wave-34 T9 added its `pass)` sibling).
 TNIM="$RRN/inner-mut"
 rr_tree "$TNIM"
 cp "$TNI/tests/aaa-inner.test.sh" "$TNIM/tests/aaa-inner.test.sh"
-RRN_ANCHOR='2>/dev/null | tail -n 1)" = whole ]; then'
-sed 's/2>\/dev\/null | tail -n 1)" = whole \]; then/2>\/dev\/null | tail -n 1)" = never ]; then/' \
-  "$RUNNER" > "$TNIM/tests/run.sh"
+RRN_ANCHOR='          whole)'
+sed 's/^          whole)$/          never)/' "$RUNNER" > "$TNIM/tests/run.sh"
 expect_eq "11.15 meta: the shipped runner carries the nested-whole check once" "1" \
   "$(grep -cF "$RRN_ANCHOR" "$RUNNER")"
 expect_eq "11.16 meta: …and the doctored copy does not" "0" \
