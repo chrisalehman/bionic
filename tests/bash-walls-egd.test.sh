@@ -1,5 +1,4 @@
 #!/bin/bash
-# runner: solo
 # tests/bash-walls-egd.test.sh — the §EG-DERIVE sections of the one-process PreToolUse|Bash
 # hook, split out of tests/bash-walls.test.sh at wave-30 T9 (D8, REQ-4 AC-4.1).
 #
@@ -301,5 +300,99 @@ eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_DEFERRED")"
 expect_status "EGD-mut8 the mutant reads the lines handed for another plan and admits the reading moved to defer: EGD-10b goes red" 0 "$ST"
 HOOK="$EGD_HOOK_KEEP"
+
+
+# ---------------------------------------------------------------------------
+section "§JURIS — the commit wall's jurisdiction: an outside commit it can place is exempt, one it cannot is refused for the split and never judged by the plan (wave-35 T4; REQ-4 AC-4.2, D13)"
+# ---------------------------------------------------------------------------
+# WHAT WENT WRONG (A-orch-30, wave-34). A walker committed in its own scratch repository with
+# `cd <scratch> && ln -s … payload && git add payload && git commit`. `ln` was not on the
+# placement allow-list (`_eg_git_only`: git, true, :, exit), so the commit was not exempted, and
+# the gate then judged it against THIS run's bound plan ("Step-5 head … is not a commit in the
+# repository at <scratch>"). Two fixes, one ruling (spec D13, tactical 4): the allow-list grows by
+# exactly `ln mkdir cp mv rm touch printf echo`, which run in a child or print and cannot move the
+# shell; builtins and `GIT_*=` prefixes stay out. A commit the reader places outside the root but
+# cannot exempt is refused with a jurisdiction message naming the split, and the bound plan is
+# never read for it. FIXTURE FIDELITY: §18's shape, a real engaged repository under `block_plan`
+# (current: 5, a placeholder Step-5 line), so every commit the gate still judges is refused by the
+# plan, and a real `git init`-ed scratch repository beside it.
+JUR_R="$(mk_repo juris)"; block_plan "$JUR_R"
+JUR_S="$SANDBOX/scratchpad/juris-scratch"
+mkdir -p "$JUR_S"; git -C "$JUR_S" init -q 2>/dev/null
+JUR_PLAN_TEXT="Plan: $JUR_R/.bionic/docs/plans/active.md"
+JUR_SPLIT="git -C $JUR_S commit"
+jur_line() {  # -> the one boundary line an exempt commit into the scratch repository gets
+  printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here' "$JUR_S" "$JUR_R"
+}
+jur_drive() {  # <command> [payload cwd, default the engaged root] -- the project is the engaged root, as the CLI names it
+  run_hook "$(mk_payload "${2:-$JUR_R}" "$1")" CLAUDE_PROJECT_DIR="$JUR_R"
+}
+jur_exempt() {  # <label> <command> [payload cwd]
+  jur_drive "$2" "${3:-}"
+  expect_status "$1" 0 "$ST"
+  expect_eq "$1 …with exactly the one boundary line" "$(jur_line)" "$ERR"
+}
+jur_refused() {  # <label> <command> [payload cwd] -> refused by jurisdiction: the split named, the plan never read
+  jur_drive "$2" "${3:-}"
+  expect_status "$1" 2 "$ST"
+  expect_contains "$1 …refused at the boundary" "is outside the engaged repository ($JUR_R)" "$ERR"
+  expect_contains "$1 …naming the split" "Split it" "$ERR"
+  expect_contains "$1 …and the one command that commits alone" "$JUR_SPLIT" "$ERR"
+  expect_absent "$1 …and never judged by the bound plan" "$JUR_PLAN_TEXT" "$ERR"
+}
+
+# ---------- the control: the plan judges what lands inside, and its text is what the rows below assert absent ----------
+jur_drive 'git commit -m x'
+expect_status "JURIS-0 control: a commit in the engaged root under block_plan is judged and refused" 2 "$ST"
+expect_contains "JURIS-0b …and the plan's judgment names the plan (the text the refused rows read absent is real output)" "$JUR_PLAN_TEXT" "$ERR"
+jur_exempt "JURIS-0c control: 'cd <scratch> && git commit' is exempt today" "cd $JUR_S && git commit -m x"
+
+# ---------- AC-4.2: the walker's form, and each word the list gained ----------
+jur_exempt "JURIS-1 AC-4.2 'cd <scratch> && ln -s x y && git add y && git commit' is exempt" \
+  "cd $JUR_S && ln -s x y && git add y && git commit -m m"
+for _jur_w in "mkdir -p d/e" "cp a b" "mv a b" "rm -f a" "touch a" "printf 'x\\n' > a" "echo x >> a"; do
+  jur_exempt "JURIS-2 [${_jur_w%% *}] 'cd <scratch> && $_jur_w && git add -A && git commit' is exempt" \
+    "cd $JUR_S && $_jur_w && git add -A && git commit -m m"
+done
+jur_exempt "JURIS-2b …and from a payload cwd in the scratch repo, 'touch a && git add a && git commit' is exempt" \
+  "touch a && git add a && git commit -m m" "$JUR_S"
+
+# ---------- §REQ-9 9a: the moving forms are still refused ----------
+jur_refused "JURIS-3 9a R2-2 'cd <scratch> && if cd <root>; then git commit; fi' is still refused" \
+  "cd $JUR_S && if cd $JUR_R; then git commit -m x; fi"
+jur_refused "JURIS-3b 9a R2-2 …and 'cd <scratch> && time cd <root> && git commit'" \
+  "cd $JUR_S && time cd $JUR_R && git commit -m x"
+jur_refused "JURIS-3c 9a C1 …and a payload cwd in the scratch repo with 'pushd <root> && git commit'" \
+  "pushd $JUR_R && git commit -m x" "$JUR_S"
+jur_refused "JURIS-3d …and a moving word behind a word the list gained: 'cd <scratch> && mkdir -p d && pushd <root> && git commit'" \
+  "cd $JUR_S && mkdir -p d && pushd $JUR_R && git commit -m x"
+jur_refused "JURIS-3e 9a C1 …and 'git -C <scratch> -C <root> commit' (git obeys the last -C)" \
+  "git -C $JUR_S -C $JUR_R commit -m x"
+jur_refused "JURIS-3f 9a R1 …and two commits, both into the scratch repo (the count decides)" \
+  "git -C $JUR_S commit -m x && git -C $JUR_S commit -m y"
+
+# ---------- builtins and GIT_*= stay off the list: refused for the split, the plan never read ----------
+jur_refused "JURIS-4 AC-4.2 an outside commit behind a builtin, 'cd <scratch> && export X=1 && git commit'" \
+  "cd $JUR_S && export X=1 && git commit -m m"
+jur_refused "JURIS-5 …and behind 'pwd', a builtin the list does not name" \
+  "cd $JUR_S && pwd && git commit -m m"
+jur_refused "JURIS-6 …and with a GIT_*= prefix, 'cd <scratch> && GIT_AUTHOR_NAME=x git commit'" \
+  "cd $JUR_S && GIT_AUTHOR_NAME=x git commit -m m"
+
+# ---------- a word the list gained cannot point the scratch repository at the root's .git ----------
+# `ln`, `cp`, `mv`, `printf` and `echo` write files, and a `.git` in the scratch directory that
+# names the root's repository makes the one commit land in the ROOT while the reader, which asks
+# git before the command runs, places it outside. So a `.git` path anywhere in the text, a `$` or
+# a glob in one of their segments, or `printf -v`, costs the exemption.
+jur_refused "JURIS-7 'cd <scratch> && rm -rf .git && ln -s <root>/.git .git && git commit' is refused" \
+  "cd $JUR_S && rm -rf .git && ln -s $JUR_R/.git .git && git add -A && git commit -m m"
+jur_refused "JURIS-7b …and 'echo \"gitdir: <root>/.git\" > .git' before the commit" \
+  "cd $JUR_S && echo \"gitdir: $JUR_R/.git\" > .git && git commit -m m"
+jur_refused "JURIS-7c …and a glob that names it, 'ln -s <root>/.g?t .'" \
+  "cd $JUR_S && ln -s $JUR_R/.g?t . && git commit -m m"
+jur_refused "JURIS-7d …and an ANSI-C spelling of it, ln -s <root>/\$'\\x2egit' \$'\\x2egit'" \
+  "cd $JUR_S && ln -s $JUR_R/\$'\\x2egit' \$'\\x2egit' && git commit -m m"
+jur_refused "JURIS-7e …and 'printf -v', which sets a variable in the shell that commits" \
+  "cd $JUR_S && printf -v PATH %s /x && git commit -m m"
 
 finish

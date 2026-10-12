@@ -3393,7 +3393,7 @@ expect_contains "CE.6 a classified suite keeps its own path: the booking wrap, w
 expect_absent "CE.6b …and no carry in front of it" "export BIONIC_GATE_AGENT" "$(sb_cmd)"
 
 section "§W10 — a run the wall cannot place leaves no stamp and says it did not count (wave-35 T6; REQ-5 AC-5.1; D14, Δ7)"
-# ============================================================
+# =====================================================
 #
 # 1.17.0: a writer's door run, typed from the main checkout as `cd <tree> || exit 1; …` with a `cd` the
 # wall could not read, was wrapped with no --stamp-dir, so the shim stamped where it stood: a red run
@@ -3445,5 +3445,58 @@ expect_absent "W10.5c …and no not-counted line (W10.3 is the positive)" "not c
 expect_regex "W10.6 [positive] …and its one stamp is in the writer tree's git dir, red and dirty" \
   "^$R_W10/.git/worktrees/T1\\|stamp/v1\\|head=[0-9a-f]{40}\\|dirty=[1-9][0-9]*\\|rc=1\\|" "$(w10_stamps)"
 expect_eq "W10.6b …one stamp in all" "1" "$(w10_stamps | awk 'END { print NR }')"
+=======
+
+# ============================================================
+section "§SCRIPT-CLAIM — a script's door line is budgeted as the line typed inline is (wave-35 T4; REQ-4 AC-4.3, D13)"
+# ============================================================
+#
+# THE FAULT (A-orch-17, wave-34; research-walls item 6). `bash mutant.sh`, mutant.sh running
+# `tests/run.sh --only session-poker-4.test.sh`, a suite ON the writer's budget, was refused:
+# "suite-run refused — … the script runs: bash tests/run.sh --only … widen it: … --reexec+ '<cmd>'".
+# The same line typed inline was admitted ten seconds later. A door line read inside a script was a
+# `run` claim, held to `re_executes=` alone. It is now the claim the line gets inline (tests/
+# cmd-class.test.sh §SCRIPT): `only <suite>`, judged against `suites_allowed=`, so a budgeted suite
+# is admitted, an unbudgeted one is refused naming `--suites+ <suite>`, and `--reexec+` is named
+# only for a runner form. FIXTURE FIDELITY: a dispatched row of the recorder's own join
+# (bw_dispatched), real scripts in the agent's tree, a project whose runner takes `--only`.
+# fails-when: a budgeted suite in a script is refused, or an unbudgeted one is sent to `--reexec+`.
+R_SC="$(mk_repo scriptclaim)"
+bw_dispatched "$R_SC" t4writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+printf '#!/bin/bash\nset -e\ntests/run.sh --only alpha.test.sh\n' > "$R_SC/budgeted.sh"
+printf '#!/bin/bash\nset -e\ntests/run.sh --only beta.test.sh\n' > "$R_SC/unbudgeted.sh"
+printf '#!/bin/bash\njest\n' > "$R_SC/runner.sh"
+printf '#!/bin/bash\nbash tests/alpha.test.sh\n' > "$R_SC/bare.sh"
+sc_drive() { run_hook "$(mk_payload "$R_SC" "$1" "$ACTOR" omit Bash test-runner 1800000)"; }
+sc_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
+
+sc_drive 'tests/run.sh --only alpha.test.sh'
+expect_status "SC.0 control: the budgeted suite typed inline through the door is admitted" 0 "$ST"
+sc_drive 'tests/run.sh --only beta.test.sh'
+expect_status "SC.0b control: the unbudgeted suite typed inline is refused" 2 "$ST"
+SC_INLINE_LINE="$(sc_line)"
+expect_contains "SC.0c …naming --suites+ for it (the remedy SC.2 must match)" "--suites+ beta.test.sh" "$ERR"
+
+sc_drive 'bash budgeted.sh'
+expect_status "SC.1 AC-4.3 a script running the budgeted suite through the door is admitted" 0 "$ST"
+expect_absent "SC.1b …with no refusal line" "refused" "$ERR"
+
+sc_drive 'bash unbudgeted.sh'
+expect_status "SC.2 AC-4.3 a script running an unbudgeted suite through the door is refused" 2 "$ST"
+expect_eq "SC.2b …with the inline line's refusal" "$SC_INLINE_LINE" "$(sc_line)"
+expect_contains "SC.2c …naming the suite's flag, --suites+ beta.test.sh" "--suites+ beta.test.sh" "$ERR"
+expect_absent "SC.2d …and never --reexec+ (SC.3 is the positive on the same reader)" "--reexec+" "$ERR"
+expect_contains "SC.2e …and the script that runs it" "bash unbudgeted.sh" "$ERR"
+
+sc_drive 'bash runner.sh'
+expect_status "SC.3 a script running a runner form (jest) is refused, as before" 2 "$ST"
+expect_contains "SC.3b …naming --reexec+, the flag a run takes" "--reexec+" "$ERR"
+expect_absent "SC.3c …and not --suites+ (SC.2c is the positive on the same reader)" "--suites+" "$ERR"
+
+sc_drive 'bash tests/alpha.test.sh'
+SC_BARE_LINE="$(sc_line)"
+expect_contains "SC.4 control: a bare budgeted suite typed inline is sent to the door" "use tests/run.sh --only alpha.test.sh" "$SC_BARE_LINE"
+sc_drive 'bash bare.sh'
+expect_eq "SC.4b AC-4.3 …and the same line in a script meets the same refusal (a file claim, as inline)" "2|$SC_BARE_LINE" "$ST|$(sc_line)"
 
 finish
