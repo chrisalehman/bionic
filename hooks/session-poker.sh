@@ -2113,8 +2113,8 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
   if ! declare -F proof_head >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
   fi
-  declare -F proof_head >/dev/null 2>&1 && declare -F proof_working_branch >/dev/null 2>&1 || return 0
-  UNITS_LIVE_HEAD="$(proof_head "$1" "$(proof_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
+  declare -F proof_head >/dev/null 2>&1 || return 0
+  UNITS_LIVE_HEAD="$(proof_head "$1" "$(plan_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
   return 0
 }
 
@@ -2146,7 +2146,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   declare -F facts_state >/dev/null 2>&1 || return 0
   head="${UNITS_LIVE_HEAD:-}"
   if [ -z "$head" ]; then
-    wb="$(proof_working_branch "$SCHED_PLAN")"
+    wb="$(plan_working_branch "$SCHED_PLAN")"
     [ -z "$wb" ] || head="$(proof_head "$1" "$wb" 2>/dev/null)" || head=""
   fi
   if [ -z "$head" ]; then
@@ -4382,7 +4382,7 @@ cur8_judge() {
     die "REFUSED — current: 8 is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
-  wb="$(proof_working_branch "$PV_PLAN")"
+  wb="$(plan_working_branch "$PV_PLAN")"
   PV_HEAD8=""; [ -z "$wb" ] || PV_HEAD8="$(proof_head "$PV_REPO" "$wb")" || PV_HEAD8=""
   case "$PV_HEAD8" in
     [0-9a-f]*) : ;;
@@ -4821,7 +4821,7 @@ DELIVER_FILES
       exit 2
     fi
   fi
-  wb="$(proof_working_branch "$PV_PLAN")"
+  wb="$(plan_working_branch "$PV_PLAN")"
   head=""; [ -z "$wb" ] || head="$(proof_head "$PV_REPO" "$wb")" || head=""
   case "$head" in
     [0-9a-f]*) [ "${#head}" -eq 40 ] || head="" ;;
@@ -9005,13 +9005,13 @@ EOF
       die "REFUSED — the plan has no ## SDLC State section, so there is no landing or proof to hand off; the plan is unchanged."
       exit 1
     fi
-    if ! { declare -F proof_working_branch >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! { declare -F proof_awk >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_awk >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
     HO_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    HO_WB="$(proof_working_branch "$PV_PLAN")"
+    HO_WB="$(plan_working_branch "$PV_PLAN")"
     HO_IB="$(plan_frontmatter_get "$PV_PLAN" integration-branch)"
     [ -n "$HO_IB" ] || HO_IB="$(awk '
       /^[[:space:]]*```/ { fence = !fence; next }
@@ -9202,10 +9202,6 @@ $HO_AGENTS"; fi
       die "REFUSED — the shipped scaffold cannot be read (${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md, its ### Scaffold fence); a brief is rendered from it, never from a copy. Nothing was written."
       exit 2
     fi
-    if ! { declare -F proof_working_branch >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; }; then
-      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB, and the working head is read through it. Nothing was written."
-      exit 2
-    fi
     BRF_TASK="$(units_field "$BRF_ROW" task)"
     BRF_KIND="$(units_field "$BRF_ROW" kind)"
     BRF_STEP="$(units_field "$BRF_ROW" step)"
@@ -9240,7 +9236,7 @@ $HO_AGENTS"; fi
     [ -n "$BRF_SUITES" ] || BRF_SUITES=none
 
     # THE HEAD: the working branch's own tip, or what is missing, in words. Never a guess.
-    BRF_WB="$(proof_working_branch "$PV_PLAN")"
+    BRF_WB="$(plan_working_branch "$PV_PLAN")"
     if [ -z "$BRF_WB" ]; then
       BRF_HEAD="(the plan names no working branch)"
     else
@@ -9394,13 +9390,8 @@ BRF_EOF
     fi
     PV_FILLED=""
     if [ "$PV_KEY" = 4 ]; then
-      PV_WB="$(awk '
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-        insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
-          v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-          print v; exit }' "$PV_PLAN")"
+      # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
+      PV_WB="$(plan_working_branch "$PV_PLAN")"
       if [ -n "$PV_WB" ]; then
         PV_FIELDS=()
         PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
@@ -9734,7 +9725,7 @@ PF_OTHER_LIST
       fi
       PF_ROLE="${PF_ROLE#*	}"; PF_READER="${PF_ROLE#*	}"; PF_ROLE="${PF_ROLE%%	*}"
     fi
-    PF_WB="$(proof_working_branch "$PV_PLAN")"
+    PF_WB="$(plan_working_branch "$PV_PLAN")"
     if [ -z "$PF_WB" ]; then
       die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
       exit 1
@@ -9909,7 +9900,7 @@ $PF_PLANL"
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who waived; the plan is unchanged."
       exit 1
     fi
-    WV_WB="$(proof_working_branch "$PV_PLAN")"
+    WV_WB="$(plan_working_branch "$PV_PLAN")"
     WV_HEAD=""; [ -z "$WV_WB" ] || WV_HEAD="$(proof_head "$PV_REPO" "$WV_WB")" || WV_HEAD=""
     case "$WV_HEAD" in
       [0-9a-f]*) : ;;
@@ -10215,7 +10206,7 @@ DSP_READINGS
       exit 2
     fi
     plan_verb_open release-check
-    RC_WB="$(proof_working_branch "$PV_PLAN")"
+    RC_WB="$(plan_working_branch "$PV_PLAN")"
     RC_CO=""; [ -z "$RC_WB" ] || RC_CO="$(proof_checkout "$PV_REPO" "$RC_WB")" || RC_CO=""
     RC_HEAD=""; [ -z "$RC_CO" ] || RC_HEAD="$(git -C "$RC_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
     case "$RC_HEAD" in
@@ -10359,12 +10350,12 @@ RC_TAGS
       exit 1
     fi
     if ! { declare -F proof_checkout >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_working_branch >/dev/null 2>&1; then
+       || ! declare -F proof_checkout >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
       exit 2
     fi
     plan_verb_open floor-run
-    FR_WB="$(proof_working_branch "$PV_PLAN")"
+    FR_WB="$(plan_working_branch "$PV_PLAN")"
     FR_CO=""; [ -z "$FR_WB" ] || FR_CO="$(proof_checkout "$PV_REPO" "$FR_WB")" || FR_CO=""
     FR_HEAD=""; [ -z "$FR_CO" ] || FR_HEAD="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
     case "$FR_HEAD" in
