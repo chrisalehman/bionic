@@ -615,21 +615,15 @@ EOF
 }
 # `lands_on=` as the roster holds it (labels, D4): `none`, or suites separated by `,` or blanks, each a
 # bare file name or a path, with or without `.test.sh`. Prints them as `<name>.test.sh` or
-# `<dir>/<name>.test.sh`, comma-joined. THE LABEL'S OWN GRAMMAR (wave-28 T64): the same one
-# `payload/scripts/lib/brief.sh` lifts a `Lands-on:` line with — a name is `[A-Za-z0-9_][A-Za-z0-9_-]*` with
-# or without `.test.sh`; a path keeps its directories (wave-34 T27), each a plain name, never `..` and never
-# absolute, a leading `./` dropped while another `/` follows; a repeat is dropped — so a value no label
-# could have written (`run.sh`, the budget's full-runner token, `a.b`, `../x.test.sh`) is no suite. The
-# value of `suites_allowed=` goes through here too: one parser, one verdict.
+# `<dir>/<name>.test.sh`, comma-joined, a repeat dropped. THE LABEL'S OWN GRAMMAR (wave-28 T64) is the one
+# brief.sh lifts a `Lands-on:` line with, and since wave-35 T6 it is one function both paste in (suite.sh
+# `BIONIC_SUITE_NAME_AWK`), so a value no label could have written (`run.sh`, the budget's full-runner token,
+# `a.b`, `../x.test.sh`) is no suite here either. The value of `suites_allowed=` goes through here too: one
+# parser, one verdict.
 _line_suites() {  # <lands_on value> -> `a.test.sh,d/b.test.sh` | none; 1 when a name is not a suite
   case "$1" in none|none[[:space:]]*) printf 'none\n'; return 0 ;; esac
-  printf '%s\n' "$1" | tr ', \t' '\n\n\n' | awk '
-    NF { t = $0
-         while (t ~ /^\.\/.*\//) t = substr(t, 3)
-         n = split(t, P, "/")
-         for (i = 1; i < n; i++) if (P[i] !~ /^[A-Za-z0-9_.-]+$/ || P[i] == ".." || (P[i] == "." && i > 1)) { bad = 1; exit }
-         if (P[n] !~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.test\.sh)?$/) { bad = 1; exit }
-         sub(/\.test\.sh$/, "", t); t = t ".test.sh"
+  printf '%s\n' "$1" | tr ', \t' '\n\n\n' | awk "$BIONIC_SUITE_NAME_AWK"'
+    NF { t = suite_name($0); if (t == "") { bad = 1; exit }
          if (index("," o ",", "," t ",") == 0) o = o (o == "" ? "" : ",") t }
     END { if (bad || o == "") exit 1; print o }'
 }
@@ -1045,13 +1039,16 @@ EOT
 # record of <suite>, or a green whole run, at a commit whose tree is the head's or the candidate's, among the
 # records the floor judge reads (lib/proof.sh `_proof_records`: the landing record's verdicts, booked.sh's
 # stamps in every git dir of the repository). The newest such run is named `<stamp|verdict>:<commit>@<at>`.
-# Otherwise it is `code`, and no run is named (`-`). Prints `<class> <run>`.
+# Otherwise it is `code`, and no run is named (`-`). Prints `<class> <run>`. THE SUITE IS ITS FILE NAME (wave-35
+# T6; AC-5.2): `_proof_records` keys every record so, and a declared `tests/x.test.sh` is `x.test.sh` here. A
+# RUN COUNTS ONLY WHERE IT RAN (AC-5.1): a stamp is a record only when the shim could place the run (booked.sh
+# --unplaced leaves none), so the runs read here are runs at the tree each record's commit names.
 _line_cause() {  # <plan> <rec> <head> <candidate | empty> <suite>
   local root th tc recs trees run=""
   root="$(_line_root "$1")" && _line_load_proof || { echo "code -"; return 0; }
   th="$(git -C "$root" rev-parse -q --verify "${3}^{tree}" 2>/dev/null)"
   tc=""; [ -z "$4" ] || tc="$(git -C "$root" rev-parse -q --verify "${4}^{tree}" 2>/dev/null)"
-  recs="$(_proof_records "$root" "$2" | awk -F'\t' -v s="$5" '$1 == "R" && $5 == "green" && ($4 == s || $4 == "*") { print $3 "\t" $2 "\t" $6 }')"
+  recs="$(_proof_records "$root" "$2" | awk -F'\t' -v s="${5##*/}" '$1 == "R" && $5 == "green" && ($4 == s || $4 == "*") { print $3 "\t" $2 "\t" $6 }')"
   if [ -n "$recs" ]; then
     trees="$(printf '%s\n' "$recs" | cut -f1 | sed 's/$/^{tree}/' | git -C "$root" cat-file --batch-check='%(objectname)' 2>/dev/null)"
     run="$( { printf '%s\n' "$trees"; printf -- '--\n'; printf '%s\n' "$recs"; } | awk -F'\t' -v a="$th" -v b="$tc" '
