@@ -1620,10 +1620,10 @@ section "§CAUSE: a standing red names its cause and the run that disagrees; the
 # `a` is red at the accepted head while $LL_SIG/<tag>.env exists (a fact outside the tree, as the share
 # is) and green otherwise. T2 merges the head first, so the candidate's tree is T2's own, where a door
 # run (its stamp, as booked.sh writes one) can be green: that run disagrees with the landing's red.
-ll_cause_world() {  # <tag> -> root
+ll_cause_world() {  # <tag> [<lands_on>; default a] -> root
   local r
   r="$(ll_world)" || return 1
-  ll_launch "$r" T2 a
+  ll_launch "$r" T2 "${2:-a}"
   printf '#!/bin/bash\necho "PASS: a ran"\nif [ -e "$LL_SIG/%s.env" ]; then echo "FAIL: a reads its environment"; echo; echo "a.test.sh: 1/2 passed, 1 failed  sections=1 setup=0"; exit 1; fi\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' \
     "$1" > "$r/tests/a.test.sh"
   git -C "$r" commit -qam "a reads its environment" || return 1
@@ -1680,6 +1680,65 @@ expect_eq "(cause7-pre) …now rewritten as a record before 1.16.0 writes it, wi
 ll_walk "$RC3" "$HC3" "$KC3"
 expect_eq "(cause7) a standing event with no cause is counted: the judge refuses (exit 1), naming the red" "1 1" \
   "$LL_WALK_RC $(printf '%s\n' "$LL_WALK" | grep -c "a.test.sh is red at ${KC3:0:12}")"
+
+# ---------------------------------------------------------------------------
+section "§KEY: a standing red and the floor judge key a suite by its file name (wave-35 T6; REQ-5 AC-5.2; D14)"
+# A stamp names a suite by its file name (the wall's --suites); since wave-34 T27 a landing files its verdict
+# under the declared path. `Lands-on: tests/a.test.sh` and a door run's green of `a.test.sh` on the same tree
+# are one suite, as the gate, cost and debt already read them. fails-when: the standing red stays `code`
+# (critic-adversarial-2 #1, the debt line `suite-key`).
+RK="$(ll_cause_world k1 tests/a.test.sh)"; HK="$(ll_head "$RK")"; TK="$(git -C "$RK/.worktrees/T2" rev-parse HEAD)"
+ll_stamp "$RK/.worktrees/T2" "$TK" a.test.sh 0 2020-01-01T00:00:00Z
+ll_verb "$RK" T2
+KK="$(ll_last_cand "$RK" T2)"
+expect_eq "(key0-pre) Lands-on: tests/a.test.sh, red at the head too: published (exit 0), its verdict red" "0 $KK red" \
+  "$LL_RC $(ll_head "$RK") $(ll_results "$RK" T2 "$KK")"
+expect_contains "(key0-pre) …the verdict filed under the declared path" "|suite=tests/a.test.sh|result=red|" "$(ll_ev "$RK" verdict)"
+expect_contains "(key1) the door run's green of a.test.sh on the candidate's tree makes the standing red environment" \
+  "|cause=environment|against=stamp:${TK}@2020-01-01T00:00:00Z|" "$(ll_ev "$RK" standing)"
+expect_contains "(key2) …and ready reports it as one" "STANDING T2 tests/a.test.sh cause=environment against=stamp:${TK}@2020-01-01T00:00:00Z" "$LL_OUT"
+ll_walk "$RK" "$HK" "$KK"
+expect_eq "(key3) the floor judge closes the owed suite on the door run's green, by file name (exit 0, no sentence)" \
+  "0|" "$LL_WALK_RC|$LL_WALK"
+
+# ---------------------------------------------------------------------------
+section "§CAUSE-TREE: a standing red's cause reads only runs the shim could place (wave-35 T6; REQ-5 AC-5.1; D14, Δ7)"
+# 1.17.0: a door run in a writer's DIRTY tree, typed from the main checkout behind a `cd` the wall could not
+# read, was stamped where the shim stood, as a clean run at the main head; that "green" made a code red
+# read as environment (research-walls §5). The wall now hands such a run --unplaced: the shim stamps
+# nothing and says on the run's output that the run did not count. fails-when: a green record appears at
+# the main head, or the standing red reads environment.
+RT="$(ll_cause_world t1)"; HT="$(ll_head "$RT")"
+CT_SHIM="$REPO/payload/scripts/booked.sh"
+ct_run() {  # <root> [shim options] — from the main checkout, as the wall wraps `cd "$T" || exit 1; bash tests/a.test.sh`
+  CT_OUT="$(cd "$1" && T="$1/.worktrees/T2" bash "$CT_SHIM" "${@:2}" --suites a.test.sh -- 'cd "$T" || exit 1; bash tests/a.test.sh' 2>&1)"; CT_RC=$?
+}
+ct_green_at() {  # <root> <commit> -> how many green records of a.test.sh the floor judge reads at <commit>
+  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$1" "$(ll_rec "$1")" ) |
+    awk -F'\t' -v h="$2" '$1 == "R" && $3 == h && $4 == "a.test.sh" && $5 == "green" { n++ } END { print n + 0 }'
+}
+# The writer's tree, dirty: an uncommitted a.test.sh, green whatever the environment.
+printf '#!/bin/bash\necho "PASS: a ran dirty"\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' > "$RT/.worktrees/T2/tests/a.test.sh"
+ct_run "$RT" --unplaced
+expect_eq "(ct0-pre) the unplaced run ran, green, in the writer's dirty tree" "0 1" \
+  "$CT_RC $(printf '%s\n' "$CT_OUT" | grep -c 'PASS: a ran dirty')"
+expect_contains "(ct1) AC-5.1 the run's own output says it did not count" "not counted" "$CT_OUT"
+expect_eq "(ct2) AC-5.1 …and it left no record at the main head" "0" "$(ct_green_at "$RT" "$HT")"
+git -C "$RT/.worktrees/T2" checkout -q -- tests/a.test.sh
+ll_verb "$RT" T2
+expect_contains "(ct3-pre) T2's red fails at the head too: published" "LANDED T2 " "$LL_OUT"
+expect_contains "(ct3) AC-5.1 the standing red's cause reads only the runs it can place: code, no run named" \
+  "|cause=code|against=-|" "$(ll_ev "$RT" standing)"
+expect_absent "(ct3b) …and no STANDING report" "STANDING " "$LL_OUT"
+# The positive on the same extractor, same world: the shim handed no --unplaced stamps where it stands,
+# the main checkout (now at the landed head), and that run is a green record there (the wrap 1.17.0 sent).
+printf '#!/bin/bash\necho "PASS: a ran dirty"\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' > "$RT/.worktrees/T2/tests/a.test.sh"
+HT4="$(git -C "$RT" rev-parse HEAD)"
+expect_eq "(ct4-pre) the main checkout is clean at the branch head" "$(ll_head "$RT") 0" "$HT4 $(git -C "$RT" status --porcelain | awk 'END { print NR }')"
+ct_run "$RT"
+expect_eq "(ct4) [positive] the same run, stamped where the shim stands, is a green record at the main head" "1" \
+  "$(ct_green_at "$RT" "$HT4")"
+expect_absent "(ct4b) …and says nothing of not counting" "not counted" "$CT_OUT"
 
 # ---------------------------------------------------------------------------
 section "§PATH: a landing runs a Lands-on suite where it lives, not only under tests/ (wave-34 T7; D23, AC-14.4)"
