@@ -2884,16 +2884,20 @@ MR_W12='AC-1.2:
   evidence: pending'
 expect_eq "MR-2 a T0 criterion: provenance from its requirement, fails-when and eval from the table, task pending (T1 and T2 both serve REQ-1), then evidence and nothing more" \
   "$MR_W12" "$(mr_block "$PMR" AC-1.2)"
-MR_W21='AC-2.1:
-  provenance: live approach
+# PROVENANCE IS THE REQUIREMENT'S, NEVER THE APPROACH (wave-35 T8; REQ-6 AC-6.4; D15): REQ-2 carries no provenance:
+# line anywhere, so the block says pending; the criterion's own text, from its `- AC-2.1` bullet, rides its AC line.
+MR_W21='AC-2.1: the second criterion
+  provenance: pending
   fails-when: c is wrong
   eval: T3 — walk W1 → narrated
   task: T5
   evidence: pending'
-expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so the Approach; task T5, the one row serving REQ-2; evidence and nothing more" \
+expect_eq "MR-3 a T3 criterion: no provenance: under REQ-2, so pending, never the Approach; its text on the AC line; task T5, the one row serving REQ-2; evidence and nothing more" \
   "$MR_W21" "$(mr_block "$PMR" AC-2.1)"
+expect_eq "MR-3f …and no block carries an Approach cell as its provenance (MR-2's block is the positive: its provenance is REQ-1's line)" "0" \
+  "$(/usr/bin/grep -c '^  provenance: \(first\|second\|live\|user\) approach$' "$PMR" || true)"
 MR_W22='AC-2.2:
-  provenance: user approach
+  provenance: pending
   fails-when: d is wrong
   eval: T4 — the user confirms
   task: T5
@@ -2969,6 +2973,45 @@ awk '{ print } /^\| REQ-2 \| user approach/ { print "| REQ-3 | late approach | A
 mr_refused "MR-11 a criterion the matrix table has no row for (its tier unknown)" 1 "AC-3.1" "$TMPROOT/mr-norow"
 mr_refused "MR-12 an operand is the usage error" 2 "takes no argument" "$TMPROOT/mr-keep" "$PMR"
 cp "$TMPROOT/mr-keep" "$PMR"
+
+# ---------- the requirements file the plan names is the provenance's source (wave-35 T8; REQ-6 AC-6.4; D15) ----------
+# The plan names its requirements on the Step-1 line (the gate's K5 pointer) and in its frontmatter; the file's
+# `### REQ-<n>` heading carries the requirement's provenance: line and its `- AC-<n>` bullets the criterion text,
+# cut before ` Fails when:`. The frontmatter pointer is read first, the Step-1 pointer next; a requirement neither
+# the file nor the plan gives a provenance: line renders pending.
+RMRQ="$(make_repo mr-reqfile)"; ( cd "$RMRQ" && git commit -q --allow-empty -m init )
+PMRQ="$(s42_plan "$RMRQ" 3)"
+mr_fixture "$PMRQ"
+MRQ_REQ="$RMRQ/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+printf '# requirements\n\n### REQ-2 — the second\n\nprovenance: field report item 7 (fixture)\n\n- AC-2.1 The criterion as the requirements word it. Fails when: c is wrong.\n- AC-2.2 The user confirms it.\n' > "$MRQ_REQ"
+s42_snap "$RMRQ" "$PMRQ"
+poke "$RMRQ" matrix-render
+expect_eq "MR-13 matrix-render over a plan whose Step-1 line names a requirements file exits 0" "0" "$RC"
+MRQ_W21='AC-2.1: The criterion as the requirements word it.
+  provenance: field report item 7 (fixture)
+  fails-when: c is wrong
+  eval: T3 — walk W1 → narrated
+  task: T5
+  evidence: pending'
+expect_eq "MR-13b AC-6.4 the provenance is the requirements file's, and the AC line carries the file's criterion text" \
+  "$MRQ_W21" "$(mr_block "$PMRQ" AC-2.1)"
+expect_eq "MR-13c …AC-2.2 reads the same file: its provenance and its text" \
+  "AC-2.2: The user confirms it.|  provenance: field report item 7 (fixture)" "$(mr_block "$PMRQ" AC-2.2 | head -2 | paste -sd'|' -)"
+expect_eq "MR-13d …a requirement the file does not carry keeps the plan's own provenance: line (REQ-1)" \
+  "AC-1.2:|  provenance: spec §1 (fixture)" "$(mr_block "$PMRQ" AC-1.2 | head -2 | paste -sd'|' -)"
+s34_gate "$RMRQ"
+expect_eq "MR-13e …and the rendered plan, criterion text on its AC lines, is admitted by the real gate" "0" "$GATE_RC"
+RMRF="$(make_repo mr-reqfront)"; ( cd "$RMRF" && git commit -q --allow-empty -m init )
+PMRF="$(s42_plan "$RMRF" 3)"
+mr_fixture "$PMRF"
+mkdir -p "$RMRF/.bionic/docs/specs/epic-99-fixture"
+printf '# requirements\n\n### REQ-2 — the second\n\nprovenance: the frontmatter file (fixture)\n\n- AC-2.1 Named in the frontmatter.\n' \
+  > "$RMRF/.bionic/docs/specs/epic-99-fixture/front.requirements.md"
+awk 'NR == 1 { print; print "requirements: specs/epic-99-fixture/front.requirements.md"; next } { print }' "$PMRF" > "$PMRF.f" && mv "$PMRF.f" "$PMRF"
+s42_snap "$RMRF" "$PMRF"
+poke "$RMRF" matrix-render
+expect_eq "MR-14 a requirements: frontmatter key is read before the Step-1 pointer" \
+  "0|AC-2.1: Named in the frontmatter.|  provenance: the frontmatter file (fixture)" "$RC|$(mr_block "$PMRF" AC-2.1 | head -2 | paste -sd'|' -)"
 
 # ---------- the mutation arm: the key list taken from walls.sh, not typed twice ----------
 # A copy of the library whose keys_for_tier drops user-confirmed from T4, behind a copy of the hook that reads it:
@@ -3730,8 +3773,14 @@ expect_eq "BR-9b …Files is — so the brief carries no Files line (positive: R
 expect_eq "BR-9c …no test in Files, so Suites: none" "none" "$(br_field "$BR_FILE/T4.md" Suites)"
 expect_regex "BR-9d …and Lands-on: none, with a reason" '^none [A-Za-z]' "$(br_field "$BR_FILE/T4.md" Lands-on)"
 poke "$RBR" brief T5
-expect_eq "BR-10 T5: a row that names no artifact anywhere is rendered with the slot marked, not invented (positive: Row reads)" "T5|1" \
-  "$(br_field "$BR_FILE/T5.md" Row)|$(br_field "$BR_FILE/T5.md" 'Expected artifact' | /usr/bin/grep -c '^<ORCHESTRATOR:')"
+# A READER ROW'S ARTIFACT IS ITS RECORD (wave-35 T8; REQ-6 AC-6.1; D15): a verify, test or review row that names no
+# artifact anywhere writes <record>/<row>.md, the progress artifact's own convention, and its Files line carries it,
+# so the dispatch wall lets the reader write it and a row reading it waits on it. A build row with no artifact keeps
+# the slot (session-poker-3 §BRIEF-SUITES, BS-5).
+expect_eq "BR-10 T5: a reader row that names no artifact anywhere writes its record, <record>/<row>.md (positive: Row reads)" "T5|$BR_REC/T5.md" \
+  "$(br_field "$BR_FILE/T5.md" Row)|$(br_field "$BR_FILE/T5.md" 'Expected artifact')"
+expect_eq "BR-10b …and its Files line carries that artifact, the row's Files cell being —" "$BR_REC/T5.md" "$(br_field "$BR_FILE/T5.md" Files)"
+expect_eq "BR-10c …and no slot is left for the artifact" "0" "$(/usr/bin/grep -c '^Expected artifact: <ORCHESTRATOR:' "$BR_FILE/T5.md" || true)"
 poke "$RBR" brief T6
 expect_eq "BR-11 T6: a size under 15 owes no Progress artifact and no Cadence (positive: the duration reads)" "10 minutes||" \
   "$(br_field "$BR_FILE/T6.md" 'Expected duration')|$(br_field "$BR_FILE/T6.md" 'Progress artifact')|$(br_field "$BR_FILE/T6.md" Cadence)"
@@ -3771,6 +3820,21 @@ RBR2="$(make_repo brief-unbound)"; ( cd "$RBR2" && git commit -q --allow-empty -
 poke "$RBR2" brief T2
 expect_eq "BR-18 a session with no bound plan is refused (exit 1)" "1" "$RC"
 expect_contains "BR-18b …saying it has no bound open run" "has no bound open run" "$OUT"
+
+# ---------- task-add writes a reader row's record artifact into its Files (wave-35 T8; REQ-6 AC-6.1; D15) ----------
+# The cell is what the scheduler reads: a row reading <record>/T9.md waits on T9 only when T9's Files cover it.
+RTA="$(make_repo brief-task-add)"; ( cd "$RTA" && git commit -q --allow-empty -m init )
+PTA="$(s42_plan "$RTA" 4)"
+ta_files() { awk -F'|' -v id="$1" '{ c = $2; gsub(/[ \t]/, "", c) } c == id { v = $10; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit }' "$PTA"; }
+expect_eq "BR-19 precondition: the Files extractor reads T1's cell from the fixture plan" "a.sh" "$(ta_files T1)"
+poke "$RTA" task-add T9 5 verify 'the walk over the fixture' researcher — 30 REQ-1 —
+expect_eq "BR-19b task-add of a verify row with Files — exits 0" "0" "$RC"
+expect_eq "BR-19c …and the row's Files cell is its record artifact, <record>/<row>.md" ".bionic/docs/record/wave-01-fixture/T9.md" "$(ta_files T9)"
+poke "$RTA" task-add T10 4 build 'a build with no files yet' implementor — 30 REQ-1 —
+expect_eq "BR-19d control: a build row's Files cell is left as written" "0|—" "$RC|$(ta_files T10)"
+poke "$RTA" task-add T11 6 review 'a reading' critic — 30 REQ-1 'notes/review.txt'
+expect_eq "BR-19e a review row whose Files name no record entry gains its artifact after what it named" \
+  "0|notes/review.txt, .bionic/docs/record/wave-01-fixture/T11.md" "$RC|$(ta_files T11)"
 
 # ============================================================
 section "§WAIT-CEILING: wait on a detached run the gate did not admit prints the shim's one line, then FINISHED rc=75 (wave-31 T12; REQ-9 AC-9.4; D10, A-orch-51)"
@@ -4207,5 +4271,81 @@ expect_contains "DR-6g a re-dispatched row's item closes at the next tick" "|key
 expect_contains "DR-6h a dropped row's item closes at the next tick" "|key=ruling:$DR6_ID14|state=closed|" "$(dr_item "$DR6_ID14")"
 rm -f "$SP_CONFIG_DIR/bionic/notify" "$SP_CONFIG_DIR/cron.env"
 POKE_BOUND="$DV_BOUND_WAS"
+
+# ============================================================
+section "§LIFT: decline lift ends a standing decline with its own ledger line, and the next tick prints the FILL it held (wave-35 T8; REQ-6 AC-6.2; D15)"
+# ============================================================
+#
+# fails-when: no FILL after the lift. A decline stands until a row it did not name is ready (lib/fill.sh
+# fill_standing_decline), so a hold the user lifted ("Build on Opus") stood on, and the FILL it held never printed
+# (field report item 10). `decline lift [<ids>]` appends `state=lift` with `lifted=` the rows it ends; the one
+# reader stops at it, for the tick and the stop wall alike (cross-gate-agreement SDL). A lift naming a row no
+# standing decline answers, or a lift with nothing standing, is refused and records nothing.
+LF_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+LF_REC=".bionic/docs/record/wave-01-fixture"
+RLF="$(make_repo lift)"; new_roster "$RLF"
+PLF="$(s47_plan "$RLF" 4 \
+  "| T4 | 4 | build | held by hand | implementor | — | 20 | REQ-x | payload/d.sh | pending | |" \
+  "| T5 | 4 | build | held by hand too | implementor | — | 20 | REQ-x | payload/e.sh | pending | |")"
+lf_led() { cat "$RLF/$LF_REC/fill-ledger.log" 2>/dev/null; }
+lf_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'; }
+lf_tick() { forget_digest "$RLF"; poke_pressure "$RLF" 8192 1.0 tick; }
+lf_fill() { printf '%s %s' "$(s48_fill_has T4)" "$(s48_fill_has T5)"; }
+lf_tick
+expect_eq "LF-0 precondition: the tick fills both ready rows" "yes yes" "$(lf_fill)"
+poke "$RLF" decline T4,T5 'held by hand until the user says build on Opus'
+expect_eq "LF-1 the decline is recorded (exit 0)" "0" "$RC"
+lf_tick
+expect_eq "LF-2 the decline stands: the tick fills neither row (LF-0 is the extractor's positive)" "no no" "$(lf_fill)"
+cp "$RLF/$LF_REC/fill-ledger.log" "$TMPROOT/lf-before"
+poke "$RLF" decline lift T9
+expect_eq "LF-3 a lift naming a row no standing decline answers is refused (exit 1)" "1" "$RC"
+expect_contains "LF-3b …naming the rows the decline stands for" "stands for T4 T5" "$OUT"
+expect_true "LF-3c …and records nothing: the ledger is byte-identical" cmp -s "$TMPROOT/lf-before" "$RLF/$LF_REC/fill-ledger.log"
+poke "$RLF" decline lift T4
+expect_eq "LF-4 decline lift T4 is recorded (exit 0)" "0" "$RC"
+LF_LINE="$(lf_led | tail -1)"
+expect_eq "LF-4b its ledger line is its own: state=lift, lifted=T4, this session, no declined= reason" "lift|T4|$SID|" \
+  "$(lf_field "$LF_LINE" state)|$(lf_field "$LF_LINE" lifted)|$(lf_field "$LF_LINE" session)|$(lf_field "$LF_LINE" declined)"
+expect_contains "LF-4c …and the verb says what it ended and what still stands" "decline lift — T4: ended; the decline still stands for T5" "$OUT"
+lf_tick
+expect_eq "LF-5 AC-6.2 the next tick prints the FILL the decline held: T4, and T5 still declined" "yes no" "$(lf_fill)"
+poke "$RLF" decline lift
+expect_eq "LF-6 decline lift with no ids ends what still stands (exit 0), lifted=T5" "0|T5" "$RC|$(lf_field "$(lf_led | tail -1)" lifted)"
+lf_tick
+expect_eq "LF-6b …and the next tick fills both" "yes yes" "$(lf_fill)"
+cp "$RLF/$LF_REC/fill-ledger.log" "$TMPROOT/lf-before"
+poke "$RLF" decline lift
+expect_eq "LF-7 with no decline standing, a lift is refused (exit 1) and records nothing" "1|yes" \
+  "$RC|$(cmp -s "$TMPROOT/lf-before" "$RLF/$LF_REC/fill-ledger.log" && echo yes)"
+expect_contains "LF-7b …saying no decline stands" "no decline stands" "$OUT"
+POKE_BOUND="$LF_BOUND_WAS"
+
+# ============================================================
+section "§CUR-REFUSE: current N's refusal ends on the one line or block the gate found missing (wave-35 T8; REQ-6 AC-6.5; D15)"
+# ============================================================
+#
+# fails-when: the refusal ends without the missing line. Through wave-34 the gate's detail went first and the
+# refusal closed on "Write what that step owes first (step-line <N> <text>, and its block)", which reads like a
+# malformed plan (field report item 8). The last line now names what the gate found missing, in its words.
+CR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RCR="$(make_repo cur-refuse)"; ( cd "$RCR" && git commit -q --allow-empty -m init )
+PCR="$(s42_plan "$RCR" 4)"
+s42_snap "$RCR" "$PCR"
+poke "$RCR" current 5
+s42_unchanged "CR-1 current 5 on a plan with no Step-5 line" 1 "$PCR"
+expect_contains "CR-1b precondition: the gate's own detail is printed, naming the line" "has no 'Step 5:' line in '## SDLC State'" "$OUT"
+expect_eq "CR-1c AC-6.5 the refusal's last line is the missing line, and how to write it" \
+  "poker: missing: the line '- Step 5: <its evidence>' under ## SDLC State (step-line 5 '<text>' writes it)" \
+  "$(printf '%s\n' "$OUT" | tail -1)"
+RCR2="$(make_repo cur-refuse-block)"; ( cd "$RCR2" && git commit -q --allow-empty -m init && git checkout -q -b wave/01-fixture )
+PCR2="$(s42_plan "$RCR2" 3 '  note: the block owes its three fields')"
+s42_snap "$RCR2" "$PCR2"
+poke "$RCR2" current 4
+s42_unchanged "CR-2 current 4 with a Step-4 block that lacks its fields" 1 "$PCR2"
+expect_eq "CR-2b AC-6.5 the refusal's last line is the block's missing fields, in the gate's words" \
+  "poker: missing: the Step 4 block's worktree: base-sha: branch: (step-field 4 <key>=<value> writes each)" \
+  "$(printf '%s\n' "$OUT" | tail -1)"
+POKE_BOUND="$CR_BOUND_WAS"
 
 finish
