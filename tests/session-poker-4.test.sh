@@ -3529,6 +3529,75 @@ s42_snap "$RBD" "$PBD"
 poke "$RBD" task-add T7 4 build 'an S2 fix' implementor '—' 30 REQ-1 'd.sh' --born 'review S2 on'
 s42_unchanged "BN-9e with no fix-cap: double renders 10% of 3 rows as 1, so a second review-born row" 1 "$PBD"
 expect_contains "BN-9f …naming 1 of cap 1" "review-born rows: 1 of cap 1" "$OUT"
+
+# ---------- A MOVED FINDING IS BORN INTO A ROW (wave-35 T34; A-orch-48; REQ-4, REQ-6) ----------
+#
+#   task-add <id> … --born <record>#<n>[,…]
+#                each finding passes the fix-policy guard if the policy covers its reader's rating OR the person
+#                moved it to fix (a `moved: <record>#<n> to=fix` line: finding_read's priority is fix). The set is
+#                refused when any one finding is neither, and the refusal tells the person the remedy; the born
+#                marker and the success line keep the gravest reader's rating (the reader's, never re-rated);
+#                fix-cap: still counts the row. The typed form `--born 'review S<n> <reach>'` names no finding and
+#                so no move: BN-3 to BN-9 stand unloosened.
+# fails-when: a moved S3 is refused though the person ruled it fix, an unmoved S3 is born, a set holding one
+# unmoved finding outside the policy is admitted, or the refusal gives the person no remedy.
+# FIXTURE FIDELITY: the BN repository and plan writer (fix-policy: S1,S2-on, fix-cap: 3); a reading record under
+# the docs root holding a findings table in the shape proof_findings reads; the reading registered by the
+# `proved:` line proof_line writes; the moves written in the shape `disposition` writes them. The real verb.
+RBM="$(make_repo bm-fix)"; ( cd "$RBM" && git commit -q --allow-empty -m init )
+PBM="$(s42_plan "$RBM" 4)"
+bn_hdr "$PBM" 'review-cadence: once' 'fix-policy: S1,S2-on' 'fix-cap: 3'
+BM_HEAD="$(git -C "$RBM" rev-parse HEAD)"
+BM_ID=record/wave-01-fixture/bm.md
+mkdir -p "$RBM/.bionic/docs/record/wave-01-fixture"
+{ printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\nfindings: 4\n' "${BM_HEAD:0:10}" "${BM_HEAD:0:10}"
+  printf 'finding: 1 S3 on m.sh:1 a message could be clearer\n'
+  printf 'finding: 2 S3 on m.sh:2 a name could be shorter\n'
+  printf 'finding: 3 S2 on m.sh:3 a side path loses data\nshown: 3 bash m.sh --side\n'
+  printf 'finding: 4 S2 off m.sh:4 an internal helper is slow\nshown: 4 bash m.sh --slow\n'
+  printf '\nwhat the reader found\n'; } > "$RBM/.bionic/docs/record/wave-01-fixture/bm.md"
+BM_PROVED="$(bash -c '. "$1" && proof_line review "$2" 2026-10-12T12:00:00Z "$3" adversarial w-read fail piece' _ "$SEV_LIB" "$BM_HEAD" "$BM_ID")"
+BM_WHO='by=Dana Fixture at=2026-10-12T12:00:00Z words="fix it" why="the person ruled"'
+BM_BASE="$(cat "$PBM")"
+printf '%s\n' "$BM_BASE" | awk -v p="$BM_PROVED" -v m1="moved: $BM_ID#1 to=fix $BM_WHO" -v m4="moved: $BM_ID#4 to=fix $BM_WHO" \
+  '{ print } /^current: / && !d { print p; print m1; print m4; d = 1 }' > "$PBM"
+s42_snap "$RBM" "$PBM"
+bm_rate() {  # <n> -> the library's effective rating of finding <n>: `S<n> <reach> <priority>`
+  bash -c '. "$1"; proof_finding_rating "$2" "$3" "$4" "$5"' _ "$SEV_LIB" "$PBM" "$BM_ID#$1" "$2" "$3" 2>/dev/null
+}
+expect_eq "BM-0 precondition: the library rates the moved S3 finding's priority fix" "S3 on fix" "$(bm_rate 1 S3 on)"
+expect_eq "BM-0b …and the unmoved S3 finding's priority is not fix (the negative beside its positive)" "notfix" \
+  "$(set -- $(bm_rate 2 S3 on); [ "${3:-}" = fix ] && echo fix || echo notfix)"
+
+poke "$RBM" task-add T6 4 build 'clear the message' implementor '—' 30 REQ-1 'c.sh' --born "$BM_ID#1"
+expect_eq "BM-1 (a) task-add --born <rec>#1, an S3 on the person moved to fix, exits 0" "0" "$RC"
+expect_regex "BM-1b …its ledger line ends in the reader's rating and the finding it answers" \
+  "^- T6: pending dispatch — added by task-add at [0-9TZ:-]+ born: review S3 on of=$BM_ID#1\$" "$(bn_line "$PBM" T6)"
+expect_contains "BM-1c …and the verb says review-born 1 of cap 3" "task-add — T6 is review-born (review S3 on): review-born rows: 1 of cap 3" "$OUT"
+
+# The refusals below hold the plan as the first row left it.
+cp "$PBM" "$TMPROOT/bm-with-t6"
+poke "$RBM" task-add T7 4 build 'shorten the name' implementor '—' 30 REQ-1 'd.sh' --born "$BM_ID#2"
+expect_eq "BM-2 (b) the same S3 on, unmoved, is refused (exit 1)" "1" "$RC"
+expect_true "BM-2a …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/bm-with-t6" "$PBM"
+expect_contains "BM-2b …in the existing sentence" "task-add refused — born: review S3 on is outside fix-policy: S1,S2-on" "$OUT"
+expect_contains "BM-2c …with the remedy: rule it fix, then task-add again" "disposition $BM_ID#2 fix '<their words>' '<why>', then task-add again" "$OUT"
+
+poke "$RBM" task-add T7 4 build 'both' implementor '—' 30 REQ-1 'd.sh' --born "$BM_ID#1,$BM_ID#2"
+expect_eq "BM-3 (c) a set of two, one moved and one unmoved outside the policy, is refused (exit 1)" "1" "$RC"
+expect_true "BM-3a …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/bm-with-t6" "$PBM"
+expect_contains "BM-3b …naming the unmoved one in the remedy" "disposition $BM_ID#2 fix '<their words>' '<why>', then task-add again" "$OUT"
+expect_eq "BM-3c …and not the moved one (BM-3b read the same text through the same extractor)" "0" \
+  "$(printf '%s' "$OUT" | /usr/bin/grep -cF "disposition $BM_ID#1 fix")"
+
+poke "$RBM" task-add T7 4 build 'fix the side path' implementor '—' 30 REQ-1 'd.sh' --born "$BM_ID#3"
+expect_eq "BM-4 (d) a finding whose reader's rating is inside the policy (S2 on), unmoved, exits 0 as before" "0" "$RC"
+expect_regex "BM-4b …marked with its rating" "^- T7: pending dispatch — added by task-add at [0-9TZ:-]+ born: review S2 on of=$BM_ID#3\$" "$(bn_line "$PBM" T7)"
+
+poke "$RBM" task-add T8 4 build 'a moved S2 off' implementor '—' 30 REQ-1 'e.sh' --born "$BM_ID#4,$BM_ID#1"
+expect_eq "BM-5 a set of two moved findings, one S2 off outside the policy, exits 0" "0" "$RC"
+expect_regex "BM-5b …the marker keeps the gravest reader's rating (S2 off is graver than S3 on) and both ids" \
+  "^- T8: pending dispatch — added by task-add at [0-9TZ:-]+ born: review S2 off of=$BM_ID#4,$BM_ID#1\$" "$(bn_line "$PBM" T8)"
 POKE_BOUND="$BN_BOUND_WAS"
 
 # ============================================================
