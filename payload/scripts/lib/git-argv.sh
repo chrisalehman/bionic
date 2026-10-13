@@ -351,7 +351,7 @@ git_argv_segments() {
 GIT_ARGV_ENV_CHDIR=""
 GIT_ARGV_ENV_SPLIT=""
 _git_argv_skip() {
-  local _line="$1" _oldifs="$IFS" _hadf=0 _n=0 _w _o _c _v
+  local _line="$1" _oldifs="$IFS" _hadf=0 _o _c _v
   GIT_ARGV_ENV_CHDIR=""
   GIT_ARGV_ENV_SPLIT=""
 
@@ -504,11 +504,13 @@ _git_argv_skip() {
     esac
   done
 
-  GIT_ARGV_REST=""
-  for _w in "$@"; do
-    if [ "$_n" -eq 0 ]; then GIT_ARGV_REST="$_w"; else GIT_ARGV_REST="$GIT_ARGV_REST$GIT_ARGV_US$_w"; fi
-    _n=$((_n + 1))
-  done
+  # ONE JOIN, NOT ONE COPY PER WORD (wave-35 T11). The rest used to be rebuilt a word at a
+  # time, each step copying everything joined so far: a 200 KB quote-dense command held the
+  # hook for 247 s under bash 3.2, past its 10 s registration, and the wall failed open
+  # (tests/hook-timeout.test.sh row c). `"$*"` joins on IFS's first character in one step.
+  IFS="$GIT_ARGV_US"
+  GIT_ARGV_REST="$*"
+  IFS="$_oldifs"
   return 0
 }
 

@@ -1101,7 +1101,18 @@ _eg_cd_targets() {
     *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
     *) return 0 ;;
   esac
-  IFS=$';&|\n' read -r -d '' -a _segs <<< "$_rest" || :
+  # ONLY THE SEGMENTS THAT CAN ANSWER ARE WALKED (wave-35 T11). A segment changes the answer
+  # only when it opens with `cd`, holds the `git` that ends the scan, or opens with a spelling
+  # `git_argv_is_git` must judge (G, gI, giT); every other segment walked past costs a loop
+  # step and says nothing. One awk hands the loop below those segments alone, in order, up to
+  # the first that holds `git`: a 64 KB heredoc of 500 lines was 500 steps of this loop, and a
+  # 200 KB one three times as many (tests/hook-timeout.test.sh row b4, counted at both sizes).
+  IFS=$'\037' read -r -d '' -a _segs <<< "$(printf '%s' "$_rest" | LC_ALL=C awk '
+    { n = split($0, f, /[;&|]/)
+      for (i = 1; i <= n; i++) {
+        t = f[i]; sub(/^[ \t({]+/, "", t)
+        if (index(f[i], "git") || t ~ /^(cd|G|gI|giT)/) { printf "%s\037", f[i]; if (index(f[i], "git")) exit }
+      } }')" || :
   _n=${#_segs[@]}
   while [ "$_i" -lt "$_n" ] && [ "$_last" = 0 ]; do
     _seg="${_segs[_i]}"; _i=$((_i + 1))
