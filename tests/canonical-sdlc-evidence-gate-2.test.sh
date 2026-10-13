@@ -23,6 +23,14 @@ set -euo pipefail
 # unchanged and tests/bash-walls.test.sh owns the composition the process adds.
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
+# THE FLOOR A RUN PAST STEP 6 CARRIES (wave-35 T31; D20, A-orch-50): shard 1's eg_floor, the same helper,
+# since the prelude both shards source is outside the row that added the arm.
+eg_floor() {  # <plan content> -> the content with the readings and one floor proof line
+  eg_readings "$1" | EG_H="$EG_HEAD" awk '{ print }
+    !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[7-9][ab]?[[:space:]]*$/ {
+      printf "proved: kind=floor head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
+}
+
 # ============================================================
 # Section 29: Step 9 close-out contract (v14)
 # ============================================================
@@ -478,15 +486,15 @@ expect_allow "32a rigor single, rows discharged, auditor cells empty, current 6 
   "$h32a" 'git commit -m "x"'
 
 h32b=$(make_home)
-write_plan "$h32b" "$(plan_rigor single 7 "$v9_step7_body" "$m32_empty_aud")" > /dev/null
+write_plan "$h32b" "$(eg_floor "$(plan_rigor single 7 "$v9_step7_body" "$m32_empty_aud")")" > /dev/null
 expect_allow "32b same at current 7 → allow" "$h32b" 'git commit -m "x"'
 
 h32c=$(make_home)
-write_plan "$h32c" "$(plan_rigor single 8 "$v9_step8_body" "$m32_empty_aud")" > /dev/null
+write_plan "$h32c" "$(eg_floor "$(plan_rigor single 8 "$v9_step8_body" "$m32_empty_aud")")" > /dev/null
 expect_allow "32c same at current 8 → allow" "$h32c" 'git commit -m "x"'
 
 h32d=$(make_home)
-write_plan "$h32d" "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")" > /dev/null
+write_plan "$h32d" "$(eg_floor "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")")" > /dev/null
 expect_allow "32d same at current 9 → allow (B-10's own repro step)" \
   "$h32d" 'git commit -m "x"'
 
@@ -1930,7 +1938,7 @@ expect_contains "40a …and the stack-health line is present and valid, not doct
 # 40b — the whole point: an oversized matrix with a VALID stack-health line, at current: 7,
 # commits. This is the row that was red before the fix, with the stack-health refusal.
 h40b=$(make_home)
-write_plan "$h40b" "$(plan 7 "$v9_step7_body" "$matrix_t37_big")" > /dev/null
+write_plan "$h40b" "$(eg_floor "$(plan 7 "$v9_step7_body" "$matrix_t37_big")")" > /dev/null
 expect_allow "40b oversized matrix, valid stack-health, current: 7 → allow" \
   "$h40b" 'git commit -m "x"'
 
@@ -1951,7 +1959,7 @@ expect_block "40c oversized matrix with NO stack-health line → still blocks" \
 # 40d — THE SAME FIXTURE UNPADDED still allows, so 40b's allow is not the padding's doing
 # and the two differ in exactly one thing.
 h40d=$(make_home)
-write_plan "$h40d" "$(plan 7 "$v9_step7_body" "$matrix_complete")" > /dev/null
+write_plan "$h40d" "$(eg_floor "$(plan 7 "$v9_step7_body" "$matrix_complete")")" > /dev/null
 expect_allow "40d the same matrix UNPADDED, current: 7 → allow (the only variable is size)" \
   "$h40d" 'git commit -m "x"'
 

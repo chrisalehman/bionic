@@ -2551,6 +2551,32 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
   refuse exit2 commit "a reading question is unanswered" "record or waive each reading" "$_eg_detail"
 }
 
+# THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key
+# (validate_tests_block); the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
+# regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
+# no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
+# says "no regression proof on this plan yet"). A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
+# that floor is covered, owed or uncovered at the working head needs git (an owed red is closed by a later
+# green landing), so it stays the judge's, asked by `current 7` and `current 8`, and a floor line passes
+# this arm whatever its `owed=`. A plan at `regression: no` owes no floor here (facts_owed deals none).
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+_eg_refuse_floor_absent() {
+  local why
+  [ "$(plan_regression "$PLAN")" = no ] && return 0
+  if declare -F proof_awk >/dev/null 2>&1; then
+    printf '%s\n' "$SECTION" | awk "$(proof_awk)"'
+      proof_fields($0) && PROOF_KIND == "floor" { f = 1 }
+      END { exit !f }' && return 0
+    why="its section holds no 'proved: kind=floor' line: no regression proof on this plan yet (the judge's floor absent)"
+  else
+    why="the floor's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
+  fi
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the floor is owed: ${why}.
+Plan: $PLAN
+Fix: run the whole run with 'session-poker.sh floor-run' and record its log with 'session-poker.sh proof-add floor <log>'. Whether that floor is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
+  refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add floor" "$_eg_detail"
+}
+
 # ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
 #
 # ONE LINE PER `## Tasks` ROW, and the refusal says so. The arm used to name ONE id and ask
@@ -4947,6 +4973,10 @@ dispatch() {
   # lettered step is its step (T31; review pass 25 F1): `6a` binds as 6, `5b` as 5.
   case "${CURRENT%[ab]}" in
     6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
+  esac
+  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7 (wave-35 T31; D20, A-orch-50), asked last.
+  case "${CURRENT%[ab]}" in
+    7|8|9) _eg_refuse_floor_absent "the run" ;;
   esac
 }
 

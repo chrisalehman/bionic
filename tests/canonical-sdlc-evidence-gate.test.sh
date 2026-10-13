@@ -23,6 +23,16 @@ set -euo pipefail
 # unchanged and tests/bash-walls.test.sh owns the composition the process adds.
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
+# THE FLOOR A RUN PAST STEP 6 CARRIES (wave-35 T31; D20, A-orch-50). From `current: 7` the gate refuses a
+# `regression: yes` plan whose section holds no `proved: kind=floor` line. A fixture at Step 7..9 that is
+# about something else is written through eg_floor: the prelude's readings (eg_readings) and one floor
+# line in proof-add floor's shape after `current:`. Rows about the floor arm itself write plans as given.
+eg_floor() {  # <plan content> -> the content with the readings and one floor proof line
+  eg_readings "$1" | EG_H="$EG_HEAD" awk '{ print }
+    !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[7-9][ab]?[[:space:]]*$/ {
+      printf "proved: kind=floor head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
+}
+
 # ============================================================
 # Section 1: non-commit commands always allowed
 # ============================================================
@@ -88,7 +98,7 @@ expect_allow "valid pointer-step evidence — allow" "$h3" 'git commit -m "step 
 # owes the matrix Step 8 owes, and the walk arm reads its discharged row; the fixture carries a
 # discharged matrix and the Step-0 `walk: exempt` (T80).
 h3b=$(make_home)
-write_plan "$h3b" "${FM%---}walk: exempt
+write_plan "$h3b" "$(eg_floor "${FM%---}walk: exempt
 ---
 ## SDLC State
 current: 8b
@@ -107,7 +117,7 @@ AC-1:
   fails-when: the planted defect this eval must go red on
   evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit
-  readback: 40/40 asserted" > /dev/null
+  readback: 40/40 asserted")" > /dev/null
 expect_allow "valid step 8b evidence — allow" "$h3b" 'git commit -m "critic done"'
 
 h3c=$(make_home)
@@ -1016,12 +1026,12 @@ expect_allow "17r T0 pending row with task: 9 at current 6 → allow" \
   "$h17r6" 'git commit -m "x"'
 
 h17r7=$(make_home)
-write_plan "$h17r7" "$(plan 7 "$v9_step7_body" "$v9_matrix")" > /dev/null
+write_plan "$h17r7" "$(eg_floor "$(plan 7 "$v9_step7_body" "$v9_matrix")")" > /dev/null
 expect_allow "17r T0 pending row with task: 9 at current 7 → allow" \
   "$h17r7" 'git commit -m "x"'
 
 h17r8=$(make_home)
-write_plan "$h17r8" "$(plan 8 "$v9_step8_body" "$v9_matrix")" > /dev/null
+write_plan "$h17r8" "$(eg_floor "$(plan 8 "$v9_step8_body" "$v9_matrix")")" > /dev/null
 expect_allow "17r T0 pending row with task: 9 at current 8 → allow" \
   "$h17r8" 'git commit -m "x"'
 
@@ -1042,7 +1052,7 @@ expect_block "17r task: 9 row still pending at current 9 → block" \
 # 17r — and discharging it the ordinary way at current: 9 passes, so the block
 # above is the row's state and not the tag becoming poison.
 h17r9d=$(make_home)
-write_plan "$h17r9d" "$(plan 9 "$v9_step9_body" "$v9_matrix_discharged")" > /dev/null
+write_plan "$h17r9d" "$(eg_floor "$(plan 9 "$v9_step9_body" "$v9_matrix_discharged")")" > /dev/null
 expect_allow "17r task: 9 row discharged + CONFIRMED at current 9 → allow" \
   "$h17r9d" 'git commit -m "x"'
 
@@ -1371,7 +1381,7 @@ make_epic_project() {
 # the integrate step → exit 0 + merge-target finding.
 h19k=$(make_home); p19k=$(make_epic_project "epic/07-x")
 write_project_plan "$p19k" \
-  "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix main)" \
+  "$(eg_floor "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix main)")" \
   "wave-newest.plan.md" > /dev/null
 expect_finding_both "19k merge-target mismatch → exit 0 + merge-target finding" \
   "$h19k" "$p19k" 'git commit -m "x"' "merge-target"
@@ -1379,7 +1389,7 @@ expect_finding_both "19k merge-target mismatch → exit 0 + merge-target finding
 # 19l — matching integration-branch → no finding (silent allow).
 h19l=$(make_home); p19l=$(make_epic_project "epic/07-x")
 write_project_plan "$p19l" \
-  "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix "epic/07-x")" \
+  "$(eg_floor "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix "epic/07-x")")" \
   "wave-newest.plan.md" > /dev/null
 expect_allow_both "19l merge-target match → allow, no finding" \
   "$h19l" "$p19l" 'git commit -m "x"'
@@ -1519,7 +1529,7 @@ EOF
 # blast radius, but the exact defect class this wave eliminated everywhere else.
 h19r=$(make_home); p19r=$(make_epic_project_fenced "epic/07-x")
 write_project_plan "$p19r" \
-  "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix "epic/07-x")" \
+  "$(eg_floor "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix "epic/07-x")")" \
   "wave-newest.plan.md" > /dev/null
 expect_allow_both "19r fenced ## SDLC State in epic plan → merge-target reads real section (silent)" \
   "$h19r" "$p19r" 'git commit -m "x"'
@@ -4377,6 +4387,43 @@ write_plan "$hSF2" "$(plan 5 "  cmd: bash tests/run.sh
 $SF_AUD" "$matrix_complete")" > /dev/null
 expect_allow "SF-2 D20 the keys written with counters that are no integers and a head that is no commit → admitted: no gate reads them" \
   "$hSF2" 'git commit -m "x"'
+
+# ============================================================
+# §FLOOR-LINE: from Step 7 a regression: yes plan owes a floor proof line; its state is the judge's (wave-35 T31; D20, A-orch-50)
+# ============================================================
+section "§FLOOR-LINE: from current: 7 the wall refuses a regression: yes plan with no 'proved: kind=floor' line, in the judge's words for absent; a floor line passes whatever its owed=, which the judge reads at current 7 and 8 (wave-35 T31; REQ-1; D20, A-orch-50)"
+# fails-when: a plan at Step 7, 8 or 9 commits with no floor proof at all, or the wall judges a floor line's
+# owed= (git's question, the judge's), or a regression: no plan is asked for a floor.
+# FIXTURE FIDELITY: the prelude's `plan` (double wave, `walk: exempt`, the complete matrix) through
+# write_plan, which adds the readings a Step-6+ run owes; the floor line, when present, is proof-add
+# floor's shape (lib/proof.sh `proof_floor_line`). The gate is the real one through hooks/bash-walls.sh.
+fl_with() {  # <plan content> <floor line> -> the content with the readings and that line after current:
+  eg_readings "$1" | FL_L="$2" awk '{ print } !done && /^current: / { print ENVIRON["FL_L"]; done = 1 }'
+}
+FL_FLOOR="proved: kind=floor head=${EG_HEAD} at=2026-10-12T00:00:00Z evidence=record/floor.log"
+FL_WHY="no regression proof on this plan yet"
+hFL1=$(make_home)
+write_plan "$hFL1" "$(plan 7 "$v9_step7_body" "$matrix_complete")" > /dev/null
+expect_block "FL-1 D20 current: 7, regression: yes (key absent), the readings and no floor proof line → refused in the judge's words" \
+  "$hFL1" 'git commit -m "x"' "$FL_WHY"
+expect_eq "FL-1b …in one line that names the fix" \
+  "bionic: commit refused — no regression proof on this plan yet (record it with proof-add floor)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+write_plan "$hFL1" "$(fl_with "$(plan 7 "$v9_step7_body" "$matrix_complete")" "$FL_FLOOR")" > /dev/null
+expect_allow "FL-2 …the same plan with a floor proof line → admitted" "$hFL1" 'git commit -m "x"'
+write_plan "$hFL1" "$(fl_with "$(plan 7 "$v9_step7_body" "$matrix_complete")" "$FL_FLOOR owed=a.test.sh,b.test.sh")" > /dev/null
+expect_allow "FL-2b …and one whose whole run left suites owed → admitted: owed is the judge's, at current 7 and 8" "$hFL1" 'git commit -m "x"'
+hFL3=$(make_home)
+write_plan "$hFL3" "$(plan 8 "$v9_step8_body" "$matrix_complete")" > /dev/null
+expect_block "FL-3 current: 8 with no floor proof line → refused" "$hFL3" 'git commit -m "x"' "$FL_WHY"
+write_plan "$hFL3" "$(plan 9 "$v9_step9_body" "$matrix_complete")" > /dev/null
+expect_block "FL-3b …and current: 9" "$hFL3" 'git commit -m "x"' "$FL_WHY"
+write_plan "$hFL3" "$(plan 6 "$step6_body" "$matrix_complete")" > /dev/null
+expect_allow "FL-3c …while current: 6, before the floor's whole run is owed, is admitted with none" "$hFL3" 'git commit -m "x"'
+hFL4=$(make_home)
+write_plan "$hFL4" "$(plan 7 "$v9_step7_body" "$matrix_complete" | awk '{ print } /^walk: exempt$/ { print "regression: no" }')" > /dev/null
+expect_eq "FL-4 precondition: the plan reads regression: no" "1" "$(/usr/bin/grep -c '^regression: no$' "$hFL4/.bionic/docs/plans/active.md")"
+expect_allow "FL-4 …a regression: no plan at current: 7 owes no floor line → admitted" "$hFL4" 'git commit -m "x"'
 
 # ============================================================
 # Two sections moved here from after Section 40 when the suite was sharded (wave-30 T3).

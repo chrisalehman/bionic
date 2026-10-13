@@ -1091,11 +1091,12 @@ expect_true "15a12c: …and that line parses as bash too [$B15_LINE]" bash -n -c
 # line is built by `_budget_remedy_line` from `refuse_plugin_root`, which reads `$BIONIC_LIB`;
 # no hook can be loaded from a root this test makes up, so the function is driven directly,
 # extracted the way 15g2 extracts `_budget_wire_list`, with the loader's variable pointed at a
-# root whose name holds a space. The printed line is then read back as the shell reads it.
+# root whose name holds a space. Its callee `_budget_is_whole_run` (wave-35 T10) is extracted beside it,
+# or the call prints "command not found" on stderr and the suite's strict stderr check fails (wave-35 T31). The printed line is then read back as the shell reads it.
 SP_ROOT="$SANDBOX/plugin root"
 mkdir -p "$SP_ROOT/scripts/lib"
 SP_LINE=$(BIONIC_LIB="$SP_ROOT/scripts/lib" _BUDGET_ROW_NAME=t15sp bash -c '. "$1/refuse.sh"
-  eval "$(awk "/^_budget_remedy_line\(\)/,/^}/" "$1/walls.sh")"; _budget_remedy_line alpha.test.sh' \
+  eval "$(awk "/^_budget_is_whole_run\(\)/,/^}/; /^_budget_remedy_line\(\)/,/^}/" "$1/walls.sh")"; _budget_remedy_line alpha.test.sh' \
   _ "$WALLS_LIB")
 SP_LINE="${SP_LINE#widen it: }"; SP_LINE="${SP_LINE% (main runs it)}"
 expect_contains "15a13 precondition: the remedy line was built, under the spaced root" \
@@ -3156,42 +3157,57 @@ sfe_commit() { run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"; }
 sfe_plan() {  # <current> <scale> <body lines for steps 5.. > -> a plan the gate admits at <current> bar what <body> leaves out
   eg6_plan "$1" "$2" "$3" "${4:-}" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
 }
+# From Step 7 the gate owes a floor proof line (wave-35 T31; D20, A-orch-50): the Step 7 and 8 plans carry one.
+SFE_FLOOR="proved: kind=floor head=$H_EG6 at=2026-10-12T00:00:00Z evidence=record/w27/floor.log"
 sfe_set() { printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"; bw_bind "$R_EG6"; }
 
-# Step 5: cmd, pass, total, output, head
+# Step 5: cmd, pass, total, output, head — written by the verb, read by no gate (wave-35 T31; D20, A-orch-32). Step 5
+# owes the matrix, the walk and the auditor; the floor is Step 7's. The refusal rows sit on `walk-artifact:`, a field
+# the verb writes and Step 5 still owes once a row is discharged at `walk: required`.
 sfe_set "$(sfe_plan 5 wave "")"
 sfe_commit
-expect_status "SFE-0 control: the Step-5 block without cmd, pass, total, output and head is refused by the gate" 2 "$ST"
-expect_contains "SFE-0b …naming the fields it lacks" "cmd pass total output" "$ERR"
+expect_status "SFE-0 D20 the Step-5 block without cmd, pass, total, output and head is admitted" 0 "$ST"
 sfe_verb step-field 5 cmd="bash tests/run.sh"
 expect_eq "SFE-1 step-field 5 cmd= writes the field (exit 0)" "0" "$SFE_RC"
 sfe_verb step-field 5 pass=3
 sfe_verb step-field 5 total=3
 sfe_verb step-field 5 output=record/generic-evidence.md
 sfe_commit
-expect_status "SFE-2 cmd, pass, total and output written by the verb, the head still absent: refused" 2 "$ST"
-expect_contains "SFE-2b …on the head alone" "carries no 'head:'" "$ERR"
+expect_status "SFE-2 D20 cmd, pass, total and output written by the verb, the head absent: admitted" 0 "$ST"
 sfe_verb step-field 5 head="$SFE_HEAD"
 expect_eq "SFE-3 step-field 5 head= writes the field (exit 0)" "0" "$SFE_RC"
 sfe_commit
-expect_status "SFE-4 the five fields the verb wrote are read by the gate: admitted" 0 "$ST"
+expect_status "SFE-4 the five fields the verb wrote: admitted" 0 "$ST"
 sfe_verb step-field 5 pass=2
 expect_eq "SFE-5 step-field 5 pass=2 replaces the field (exit 0)" "0" "$SFE_RC"
 sfe_commit
-expect_status "SFE-5b the gate reads the pass the verb wrote: pass 2 of total 3 is refused" 2 "$ST"
-expect_contains "SFE-5c …in the gate's words" "pass=2 but total=3" "$ERR"
+expect_status "SFE-5b D20 pass 2 of total 3, written by the verb: admitted (no gate compares them at Step 5)" 0 "$ST"
 expect_eq "SFE-5d …and the block holds one pass: line" "1" "$(awk '/^- Step 5:/ { f = 1; next } /^- Step 6:|^## / { f = 0 } f && /^  pass:/ { n++ } END { print n + 0 }' "$R_EG6/.bionic/docs/plans/active.md")"
 sfe_verb step-field 5 pass=3
 sfe_verb step-field 5 head=feedfacecafe
 sfe_commit
-expect_status "SFE-6 a head the verb replaced with a hash that is no commit here: refused" 2 "$ST"
-expect_contains "SFE-6b …in the gate's words" "is not a commit in the repository" "$ERR"
+expect_status "SFE-6 D20 a head the verb replaced with a hash that is no commit here: admitted" 0 "$ST"
 sfe_verb step-field 5 head="$SFE_HEAD"
 sfe_commit
-expect_status "SFE-7 the head replaced by the verb with the commit: admitted again" 0 "$ST"
+expect_status "SFE-7 the head replaced by the verb with the commit: admitted" 0 "$ST"
+# walk-artifact: owed at Step 5 once a row is discharged and the walk is required.
+sfe_set "$(sfe_plan 5 wave "" | awk '{ sub(/^walk: exempt$/, "walk: required"); print }')"
+sfe_commit
+expect_status "SFE-7b control: walk: required, a discharged row, no walk-artifact: refused by the gate" 2 "$ST"
+expect_contains "SFE-7c …naming the field it lacks" "no 'walk-artifact:' line" "$ERR"
+mkdir -p "$R_EG6/.bionic/docs/record/w27"; printf 'walked the panel: it opened and held its state\n' > "$R_EG6/.bionic/docs/record/w27/walk.md"
+sfe_verb step-field 5 walk-artifact=record/w27/walk.md
+expect_eq "SFE-7d step-field 5 walk-artifact= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-7e the gate reads the walk-artifact the verb wrote: admitted" 0 "$ST"
+sfe_verb step-field 5 walk-artifact=record/w27/no-such-walk.md
+sfe_commit
+expect_status "SFE-7f a walk-artifact the verb replaced with a file that does not exist: refused" 2 "$ST"
+expect_contains "SFE-7g …in the gate's words" "no file exists at" "$ERR"
 
 # Step 7: adr
-sfe_set "$(sfe_plan 7 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+sfe_set "$(sfe_plan 7 wave "$EG6_ALL
+$SFE_FLOOR" "- Step 6: review record/w27/review.md
 - Step 7: documenting")"
 sfe_commit
 expect_status "SFE-8 control: the Step-7 block with no adr, rca or n/a is refused" 2 "$ST"
@@ -3202,7 +3218,8 @@ sfe_commit
 expect_status "SFE-9b the gate reads the adr the verb wrote: admitted" 0 "$ST"
 
 # Step 8: merge, worktree-removed (cleanup: n/a is the block's own line)
-sfe_set "$(sfe_plan 8 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+sfe_set "$(sfe_plan 8 wave "$EG6_ALL
+$SFE_FLOOR" "- Step 6: review record/w27/review.md
 - Step 8: integrating
   cleanup: n/a")"
 sfe_commit
