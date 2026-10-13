@@ -2607,12 +2607,11 @@ write_plan "$h17t12" "$(plan 6 "$step6_body" "$(aud_matrix ' ')")" > /dev/null
 expect_block "17t12 …and so does an empty one" \
   "$h17t12" 'git commit -m "x"' "the auditor has not confirmed"
 
-# ---- AC-10.2: the Step-5 block's two refusals, pinned; then the new key ----
+# ---- AC-10.2: the Step-5 counters, recorded and not judged; then the new key ----
 #
-# THE TWO REFUSALS BELOW WERE UNPINNED until this wave (research R4 D2.6: no test file
-# contained either string). A task that adds a key to this function has to leave them
-# standing, and a pin written AFTER the change would prove only that the change kept what
-# the change left.
+# THE TWO REFUSALS THESE ROWS PINNED ARE GONE (wave-35 T31; D20, A-orch-32): Step 5 owes no
+# head/cmd/pass/total/output and the gate compares no pass with total there; the floor is the
+# judge's at Step 7. 17t13 and 17t14 now pin the other direction: the same blocks are admitted.
 step5_72="  cmd: bash tests/run.sh
   pass: 72
   total: 72
@@ -2632,19 +2631,13 @@ step5_words="  cmd: bash tests/run.sh
 
 h17t13=$(make_home)
 write_plan "$h17t13" "$(plan 5 "$step5_words" "$matrix_complete")" > /dev/null
-expect_block "17t13 a Step-5 block whose counters are not integers → block" \
-  "$h17t13" 'git commit -m "x"' "'pass:' and 'total:' are not both integers"
-expect_eq "17t13b …in those words" \
-  "bionic: commit refused — 'pass:' and 'total:' are not both integers (write both as integers)" \
-  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_allow "17t13 D20 a Step-5 block whose counters are not integers → admitted (the gate reads no counter at Step 5)" \
+  "$h17t13" 'git commit -m "x"'
 
 h17t14=$(make_home)
 write_plan "$h17t14" "$(plan 5 "$step5_71" "$matrix_complete")" > /dev/null
-expect_block "17t14 a Step-5 block one test short → block" \
-  "$h17t14" 'git commit -m "x"' "the suite is not fully green"
-expect_eq "17t14b …in those words" \
-  "bionic: commit refused — the suite is not fully green (make pass equal total)" \
-  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_allow "17t14 D20 a Step-5 block one test short → admitted (no pass == total at Step 5; the floor is Step 7's)" \
+  "$h17t14" 'git commit -m "x"'
 
 # THE NEW KEY. `pass:`/`total:` are the GATING counters; an advisory reading is a
 # measurement the framework took and nobody gated on, so the gate RECORDS it and does not
@@ -2661,8 +2654,8 @@ write_plan "$h17t15" "$(plan 5 "$step5_advisory" "$matrix_complete")" > /dev/nul
 expect_allow "17t15 a green Step-5 block carrying advisory-exceeded: 3 → allow (recorded, not judged)" \
   "$h17t15" 'git commit -m "x"'
 
-# THE CONTROL IN THE OTHER DIRECTION: the key launders nothing. A red block carrying a
-# zero advisory count is still red.
+# THE KEY CHANGES NOTHING EITHER WAY: a block one test short carrying a zero advisory count is
+# admitted as the same block without it is (17t14), since Step 5 judges no counter (D20).
 step5_71_advisory="  cmd: bash tests/run.sh
   pass: 71
   total: 72
@@ -2671,8 +2664,8 @@ step5_71_advisory="  cmd: bash tests/run.sh
   auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
 h17t16=$(make_home)
 write_plan "$h17t16" "$(plan 5 "$step5_71_advisory" "$matrix_complete")" > /dev/null
-expect_block "17t16 …and the key does not launder a red block" \
-  "$h17t16" 'git commit -m "x"' "the suite is not fully green"
+expect_allow "17t16 D20 …and the key beside a short count is admitted the same way" \
+  "$h17t16" 'git commit -m "x"'
 
 # AND THE KEY IS OPTIONAL: the same green block without it is the pre-wave fixture, byte
 # for byte, and still commits.
@@ -2694,8 +2687,10 @@ section "REQ-9 — AC-9.1–9.3: jurisdiction ends at the engaged repository (wa
 # (`_eg_git_wt_name`) sees linked worktrees and nothing else.
 #
 # THE ROOT IS A REAL REPOSITORY with a bound-free engaged session and a `current: 5` plan whose
-# Step-5 block is red (71/72), so every commit this gate still judges is REFUSED. That is what
-# makes each allow below a verdict about the repository boundary and not about a lenient plan.
+# Step-5 block names no auditor while every matrix row is discharged, so every commit this gate still
+# judges is REFUSED. That is what makes each allow below a verdict about the repository boundary and
+# not about a lenient plan. (Until wave-35 T31 the block was red, 71/72; Step 5 judges no counter now,
+# D20, so the refusal the rows read is the auditor pointer's, `S9_JUDGED`.)
 s9_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s9_tmp")
 s9_root="$s9_tmp/root"
 mkdir -p "$s9_root/.bionic/docs/plans"
@@ -2703,7 +2698,8 @@ git -C "$s9_root" init -q .
 git -C "$s9_root" -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m init
 write_generic_evidence "$s9_root"
 engage "$s9_root"
-s9_plan=$(write_project_plan "$s9_root" "$(plan 5 "$step5_71" "$matrix_complete")")
+S9_JUDGED="requires 'auditor:"
+s9_plan=$(write_project_plan "$s9_root" "$(plan 5 "  output: .bionic/docs/plans/wave-01.plan.md#step-5" "$matrix_complete")")
 s9_home=$(make_home)
 
 # The expected line is built from the FIXTURE's own paths, never from what the arm computes.
@@ -2736,7 +2732,7 @@ s9_expect_judged() {  # <label> <payload cwd> <command> <substring of the refusa
 s9_expect_juris() {  # <label> <payload cwd> <command> <the scratch repository's toplevel>
   run_hook_cwd "$s9_home" "$s9_root" "$2" "$3"
   if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check && grep -qF "Split it" <<<"$HOOK_VSTDERR" \
-     && grep -qF "git -C $4 commit" <<<"$HOOK_VSTDERR" && ! grep -q "the suite is not fully green" <<<"$HOOK_VSTDERR"; then
+     && grep -qF "git -C $4 commit" <<<"$HOOK_VSTDERR" && ! grep -q "$S9_JUDGED" <<<"$HOOK_VSTDERR"; then
     ok "$1"
   else
     no "$1" "expected refusal exit 2 naming the split 'git -C $4 commit' and no plan judgment; exit=$HOOK_EXIT line='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
@@ -2744,12 +2740,12 @@ s9_expect_juris() {  # <label> <payload cwd> <command> <the scratch repository's
 }
 
 # --- 9c: THE CONTROL — inside the root, refused exactly as before ------------------------
-s9_expect_judged "9c AC-9.1 a commit in the engaged root at current: 5 without green evidence is refused as before" \
-  "$s9_root" 'git commit -m "x"' "the suite is not fully green"
+s9_expect_judged "9c AC-9.1 a commit in the engaged root at current: 5 without the auditor pointer is refused as before" \
+  "$s9_root" 'git commit -m "x"' "$S9_JUDGED"
 s9_expect_judged "9c …and spelled 'git -C <root> commit', the same refusal" \
-  "$s9_root" "git -C $s9_root commit -m x" "the suite is not fully green"
+  "$s9_root" "git -C $s9_root commit -m x" "$S9_JUDGED"
 s9_expect_judged "9c …and from a subdirectory of the root, the same refusal (inside is the repository, not the path)" \
-  "$s9_root" "git -C $s9_root/.bionic/docs commit -m x" "the suite is not fully green"
+  "$s9_root" "git -C $s9_root/.bionic/docs commit -m x" "$S9_JUDGED"
 
 # --- 9a: a scratch repository outside the root --------------------------------------------
 s9_scratch="$s9_tmp/scratchpad/q1"
@@ -2783,7 +2779,7 @@ s9_expect_juris "9a R1 …and 'cd <scratch> && git commit && cd <root> && git co
 s9_expect_juris "9a R1 …and a second commit inside an 'sh -c' string counts as a second commit" \
   "$s9_root" "git -C $s9_scratch commit -m x && bash -c 'git -C $s9_root commit -m y'" "$s9_scratch"
 s9_expect_judged "9a R1 …and 'cd <scratch> && git -C <root> commit' places the one commit in the root" \
-  "$s9_root" "cd $s9_scratch && git -C $s9_root commit -m x" "the suite is not fully green"
+  "$s9_root" "cd $s9_scratch && git -C $s9_root commit -m x" "$S9_JUDGED"
 # THE RULE'S STATED COST: two commits both into the scratch repo are judged too. The gate counts
 # commit segments; it does not place each one, so it cannot tell this from the shapes above.
 s9_expect_juris "9a R1 …and two commits both into the scratch repo are judged (the count, not a placement, decides)" \
@@ -2891,7 +2887,7 @@ s9_expect_juris "9a V3-1 'git --work-t\"\"ree=<root> --git-dir=<root>/.git commi
 # keeps today's verdict (the commit would fail on its own; the wall does not guess).
 s9_bare_dir="$s9_tmp/not-a-repo"; mkdir -p "$s9_bare_dir"
 s9_expect_judged "9a …and a directory git places in no repository is judged as before, never exempted by a failed question" \
-  "$s9_root" "git -C $s9_bare_dir commit -m x" "the suite is not fully green"
+  "$s9_root" "git -C $s9_bare_dir commit -m x" "$S9_JUDGED"
 
 # --- 9b / AC-9.3: a repository NESTED under the root is outside it ------------------------
 s9_nested="$s9_root/.bionic/docs/record/x/bed"
@@ -2913,15 +2909,15 @@ git -C "$s9_root" worktree add -q "$s9_root/.worktrees/19-T9" -b wt/19-T9 2>/dev
 expect_ne "9d the linked worktree's toplevel differs from the root's (a toplevel test would get it wrong)" \
   "$s9_root" "$(git -C "$s9_root/.worktrees/19-T9" rev-parse --show-toplevel)"
 s9_expect_judged "9d a commit from a linked worktree of the engaged repository is still judged (-C)" \
-  "$s9_root" "git -C $s9_root/.worktrees/19-T9 commit -m x" "the suite is not fully green"
+  "$s9_root" "git -C $s9_root/.worktrees/19-T9 commit -m x" "$S9_JUDGED"
 s9_expect_judged "9d …and from a leading cd into it" \
-  "$s9_root" "cd $s9_root/.worktrees/19-T9 && git commit -m x" "the suite is not fully green"
+  "$s9_root" "cd $s9_root/.worktrees/19-T9 && git commit -m x" "$S9_JUDGED"
 
 # --- 9e: the comparison is PHYSICAL ------------------------------------------------------------
 # A symlink to the root is the root: the same repository reached by another spelling.
 ln -s "$s9_root" "$s9_tmp/root-link"
 s9_expect_judged "9e '-C' through a symlink to the root is the root, and is judged" \
-  "$s9_root" "git -C $s9_tmp/root-link commit -m x" "the suite is not fully green"
+  "$s9_root" "git -C $s9_tmp/root-link commit -m x" "$S9_JUDGED"
 
 # --- 9g / AC-3.1: an env spelling of the commit gets the git spelling's verdict (wave-20 T3) --
 #
@@ -2931,19 +2927,19 @@ s9_expect_judged "9e '-C' through a symlink to the root is the root, and is judg
 # commit` is refused. The reader now skips env and its options and records its directory, and
 # the gate places the commit there. Every row below is refused exactly as its 9c control is.
 s9_expect_judged "9g AC-3.1 'env -C <root> git commit' is refused as 'git -C <root> commit' is" \
-  "$s9_root" "env -C $s9_root git commit -m x" "the suite is not fully green"
+  "$s9_root" "env -C $s9_root git commit -m x" "$S9_JUDGED"
 s9_expect_judged "9g AC-3.1 …and 'env --chdir=<root> git commit'" \
-  "$s9_root" "env --chdir=$s9_root git commit -m x" "the suite is not fully green"
+  "$s9_root" "env --chdir=$s9_root git commit -m x" "$S9_JUDGED"
 s9_expect_judged "9g AC-3.1 …and 'env -i git commit' from the root" \
-  "$s9_root" "env -i git commit -m x" "the suite is not fully green"
+  "$s9_root" "env -i git commit -m x" "$S9_JUDGED"
 s9_expect_judged "9g …and 'env -u FOO git commit' from the root" \
-  "$s9_root" "env -u FOO git commit -m x" "the suite is not fully green"
+  "$s9_root" "env -u FOO git commit -m x" "$S9_JUDGED"
 s9_expect_judged "9g …and '/usr/bin/env -C <root> git commit'" \
-  "$s9_root" "/usr/bin/env -C $s9_root git commit -m x" "the suite is not fully green"
+  "$s9_root" "/usr/bin/env -C $s9_root git commit -m x" "$S9_JUDGED"
 s9_expect_judged "9g …and 'env -C<root> git commit' (value inline)" \
-  "$s9_root" "env -C$s9_root git commit -m x" "the suite is not fully green"
+  "$s9_root" "env -C$s9_root git commit -m x" "$S9_JUDGED"
 s9_expect_judged "9g …and \"env -S 'git commit -m x'\" (env's own split string)" \
-  "$s9_root" "env -S 'git commit -m x'" "the suite is not fully green"
+  "$s9_root" "env -S 'git commit -m x'" "$S9_JUDGED"
 # THE SAME VERDICT, BYTE FOR BYTE. The judged rows above match a substring; this one holds the
 # two spellings to one exit and one refusal line.
 run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "git -C $s9_root commit -m x"
@@ -2954,7 +2950,7 @@ expect_eq "9g AC-3.1 'env -C <root>' and 'git -C <root>' get one exit and one re
 # THE ROW ATTRIBUTION FOLLOWS THE DIRECTORY: a linked worktree reached by env -C is judged, as
 # 9d judges it reached by git -C.
 s9_expect_judged "9g …and 'env -C <linked worktree> git commit' is judged as 9d's '-C' is" \
-  "$s9_root" "env -C $s9_root/.worktrees/19-T9 git commit -m x" "the suite is not fully green"
+  "$s9_root" "env -C $s9_root/.worktrees/19-T9 git commit -m x" "$S9_JUDGED"
 # D3-3, FAIL-CLOSED: an env spelling is never exempted as outside the repository. `_eg_placed`
 # never places an `env -C`, so `env -C <scratch> git commit` is refused where `git -C <scratch>
 # commit` (9a) is admitted: since wave-35 T4 (D13) by the jurisdiction refusal, which names the
@@ -2966,7 +2962,7 @@ s9_expect_juris "9g D3-3 'env -C <scratch> git commit' is refused for the split,
 run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "env -C $s9_root git status"
 expect_eq "9g control: 'env -C <root> git status' is no commit and is admitted" "0" "$HOOK_EXIT"
 s9_expect_judged "9g control: 'env -C <scratch> git -C <root> commit' is judged in the root" \
-  "$s9_root" "env -C $s9_scratch git -C $s9_root commit -m x" "the suite is not fully green"
+  "$s9_root" "env -C $s9_scratch git -C $s9_root commit -m x" "$S9_JUDGED"
 # T6f's DE-QUOTE DISQUALIFIER STILL HOLDS behind env: a quote-split --git-dir naming the root.
 s9_expect_juris "9g T6f 'env git --git-d\"\"ir=<root>/.git commit' from the scratch repo is refused for the split" \
   "$s9_scratch" "env git --git-d\"\"ir=$s9_root/.git commit -m x" "$s9_scratch"
@@ -3196,16 +3192,14 @@ expect_block "D4h3 REQ-1 the retired six-column table at task scale is refused, 
   "$hD4h3" 'git commit -m "x"' "## Tasks: missing column step"
 
 # ============================================================
-section "§HEAD: Step-5 evidence names the head its run read (wave-26 T4; REQ-3 AC-3.2; D5)"
+section "§HEAD: Step 5 no longer owes head: — absent, no commit, or not contained, the block is admitted; the floor's head is the judge's at Step 7 (wave-26 T4; wave-35 T31, D20)"
 # ============================================================
 #
-# A PASS THAT DOES NOT SAY WHICH CODE IT READ CANNOT BE COMPARED WITH ANYTHING. Beside
-# cmd/pass/total/output the block now carries `head:`, and the gate refuses it absent, when
-# it is not a commit in the repository the commit is made in, and when the release head does
-# not contain it (`git merge-base --is-ancestor`). The release head is the tip of the plan's
-# `working-branch:` when the plan names one that resolves, and the HEAD of the directory the
-# commit is made in otherwise. Every refusal is one line naming its fix. The positive control
-# for each arm is the same fixture with the one fact corrected.
+# THE HEAD A FLOOR READ IS THE JUDGE'S QUESTION (wave-35 T31; D20, A-orch-32). From wave-26 T4 the
+# Step-5 block carried `head:` and the gate refused it absent, not a commit here, or not contained in
+# the release head. The floor's proof line (`proved: kind=floor head=…`) names the head now, and
+# `facts_state` judges it at `current 7` and from Step 7 on, so each fixture below that was refused is
+# admitted: the key may be written, and no gate reads it.
 eg_commit() {  # <dir> <message> — one empty commit, fixed identity, no hooks
   git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid \
     -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q --allow-empty -m "$2" 2>/dev/null
@@ -3223,11 +3217,8 @@ expect_true "HEAD0 precondition: the fixture head is a 40-hex commit id" \
 # --- absent ---
 hHa=$(make_home); eg_head_repo "$hHa"
 write_plan "$hHa" "$(plan 5 "$(step5_head '')" "$matrix_complete")" > /dev/null
-expect_block "HEADa a green Step-5 block with no head: → block" \
-  "$hHa" 'git commit -m "x"' "names no head"
-expect_eq "HEADa2 …in one line that names the fix" \
-  "bionic: commit refused — this step's evidence names no head (add head: <sha the run read>)" \
-  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_allow "HEADa D20 a green Step-5 block with no head: → admitted" \
+  "$hHa" 'git commit -m "x"'
 write_plan "$hHa" "$(plan 5 "$(step5_head "$EG_HEAD")" "$matrix_complete")" > /dev/null
 expect_allow "HEADa3 …and the same block naming the repository's HEAD → allow" \
   "$hHa" 'git commit -m "x"'
@@ -3235,16 +3226,11 @@ expect_allow "HEADa3 …and the same block naming the repository's HEAD → allo
 # --- not a commit ---
 hHb=$(make_home); eg_head_repo "$hHb"
 write_plan "$hHb" "$(plan 5 "$(step5_head 0123456789abcdef0123456789abcdef01234567)" "$matrix_complete")" > /dev/null
-expect_block "HEADb a head: that is no commit in the repository → block" \
-  "$hHb" 'git commit -m "x"' "is not a commit"
-expect_eq "HEADb2 …in one line that names the fix" \
-  "bionic: commit refused — the Step-5 head: is not a commit here (record the sha the run read)" \
-  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
-expect_contains "HEADb3 …and the detail names the value read" \
-  "0123456789abcdef0123456789abcdef01234567" "$HOOK_VSTDERR"
+expect_allow "HEADb D20 a head: that is no commit in the repository → admitted" \
+  "$hHb" 'git commit -m "x"'
 write_plan "$hHb" "$(plan 5 "$(step5_head HEAD)" "$matrix_complete")" > /dev/null
-expect_block "HEADb4 a symbolic head: (HEAD) is not a recorded head → block" \
-  "$hHb" 'git commit -m "x"' "is not a commit"
+expect_allow "HEADb4 D20 a symbolic head: (HEAD) → admitted" \
+  "$hHb" 'git commit -m "x"'
 write_plan "$hHb" "$(plan 5 "$(step5_head "${EG_HEAD:0:12}")" "$matrix_complete")" > /dev/null
 expect_allow "HEADb5 …while an abbreviated sha of a real commit → allow" \
   "$hHb" 'git commit -m "x"'
@@ -3257,13 +3243,9 @@ git -C "$hHc" checkout -q - 2>/dev/null
 expect_eq "HEADc0 precondition: the side commit exists and HEAD is back on the fixture head" \
   "$EG_HEAD" "$(git -C "$hHc" rev-parse HEAD)"
 write_plan "$hHc" "$(plan 5 "$(step5_head "$HC_SIDE")" "$matrix_complete")" > /dev/null
-expect_block "HEADc a head: on another line of history than the commit → block" \
-  "$hHc" 'git commit -m "x"' "does not contain head:"
-expect_eq "HEADc2 …in one line that names the fix" \
-  "bionic: commit refused — the release head does not contain head: (run the regression on that head)" \
-  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
-# An older head the commit DOES contain is a contained head: staleness is proof_state's
-# question (T5), not this one's.
+expect_allow "HEADc D20 a head: on another line of history than the commit → admitted" \
+  "$hHc" 'git commit -m "x"'
+# An older head the commit DOES contain: admitted as before.
 eg_commit "$hHc" "ahead of the proof"
 expect_true "HEADc3 precondition: HEAD moved past the fixture head" \
   test "$(git -C "$hHc" rev-parse HEAD)" != "$EG_HEAD"
@@ -3284,14 +3266,14 @@ write_plan "$hHd" "$(plan 5 "$(step5_head "$HD_WAVE" 'working-branch: wave/99-fx
 expect_allow "HEADd the wave head, the plan naming working-branch: wave/99-fx → allow" \
   "$hHd" 'git commit -m "x"'
 write_plan "$hHd" "$(plan 5 "$(step5_head "$HD_WAVE")" "$matrix_complete")" > /dev/null
-expect_block "HEADd2 …and the same head with no working-branch: is judged against HEAD → block" \
-  "$hHd" 'git commit -m "x"' "does not contain head:"
+expect_allow "HEADd2 D20 …and the same head with no working-branch: → admitted" \
+  "$hHd" 'git commit -m "x"'
 git -C "$hHd" checkout -q -b other 2>/dev/null; eg_commit "$hHd" "elsewhere"
 HD_OTHER="$(git -C "$hHd" rev-parse HEAD)"
 git -C "$hHd" checkout -q - 2>/dev/null
 write_plan "$hHd" "$(plan 5 "$(step5_head "$HD_OTHER" 'working-branch: wave/99-fx')" "$matrix_complete")" > /dev/null
-expect_block "HEADd3 …and a head the working branch does not hold → block" \
-  "$hHd" 'git commit -m "x"' "does not contain head:"
+expect_allow "HEADd3 D20 …and a head the working branch does not hold → admitted" \
+  "$hHd" 'git commit -m "x"'
 
 # ============================================================
 section "§RIGOR — the evidence gate judges single and double, and refuses a plan or a cell carrying any other word, naming the two (wave-28 T44; wave-30 T11: REQ-1 AC-1.4, D1)"

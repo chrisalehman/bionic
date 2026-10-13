@@ -1531,11 +1531,14 @@ _eg_git_only() {
 # the scratch directory sends the one commit into the root's repository after this reader has
 # asked git where it lands. A `.git` that ends the word or is followed by `/` is the repository's
 # directory; `.gitignore`, `.git-blame-ignore-revs` and `foo.git` are not it. Read on the raw text
-# and on the stripped copy, like the flags above.
+# and on the stripped copy, like the flags above. WITHOUT REGARD TO CASE (wave-35 T31; D20,
+# critic-adversarial finding 4): a case-insensitive filesystem (APFS, as this machine's) opens `.GIT`
+# and `.Git` as `.git`, and a probe committed into the root through `ln -s <root>/.GIT .GIT`. Spelled
+# as bracket classes, so no shell option is set and restored around the two tests.
 #
 # _EG_PLACED_WHY names what cost the exemption, for the jurisdiction refusal (empty on 0).
 _EG_PLACED_WHY=""
-_eg_dotgit_re='(^|[^A-Za-z0-9_.-])\.git([^A-Za-z0-9_-]|$)'
+_eg_dotgit_re='(^|[^A-Za-z0-9_.-])\.[Gg][Ii][Tt]([^A-Za-z0-9_-]|$)'
 _eg_placed() {
   local _c _sep _dq
   _EG_PLACED_WHY=""
@@ -1552,7 +1555,7 @@ _eg_placed() {
       _EG_PLACED_WHY="it names the repository outright (--git-dir, --work-tree or a GIT_DIR-family variable)"; return 1 ;;
   esac
   case "$COMMAND$_dq" in
-    *.git*)
+    *.[Gg][Ii][Tt]*)
       if [[ "$COMMAND" =~ $_eg_dotgit_re ]] || [[ "$_dq" =~ $_eg_dotgit_re ]]; then
         _EG_PLACED_WHY="it names a .git path, which can point the directory at another repository"; return 1
       fi ;;
@@ -2883,7 +2886,7 @@ Fix: remove the '${ac}:' block, or repoint its 'task:' to the build task that ci
 
 # The repository a commit is made in: the directory the commit runs in when git places it in one,
 # else the engaged root's — the plan's own repository. Assigns `_EG_REPO`. Read by
-# `validate_tests_head` (whether `head:` is a commit here) and `validate_net_zero` (whose index).
+# `validate_net_zero` (whose index).
 _eg_commit_repo() {
   _EG_REPO="${_EG_CWD:-}"
   { [ -d "$_EG_REPO" ] && git -C "$_EG_REPO" rev-parse --git-dir >/dev/null 2>&1; } || _EG_REPO="$BIONIC_ROOT"
@@ -2906,8 +2909,8 @@ _eg_commit_repo() {
 #
 # THE INDEX READ IS A NEW REACH, AND THE RULED EXCEPTION TO THE FREEZE (.claude/rules/hook-authoring.md:
 # a wall never fetches its own facts). No payload field says what a commit will hold, and D13 is
-# approved ("option 2"); this gate already asks git about the commit's repository
-# (`validate_tests_head`). The common case costs one `git diff --cached --quiet` over the set's
+# approved ("option 2"); this gate already asks git which repository the commit is made in
+# (`_eg_commit_repo`). The common case costs one `git diff --cached --quiet` over the set's
 # directories; the sums are taken only when something there is staged.
 #
 # A RESIDUAL, NAMED AND NOT CLOSED: `git commit -a` and `git commit <pathspec>` stage at commit time,
@@ -3788,98 +3791,29 @@ step_prefix() {
   echo "canonical-sdlc step $1"
 }
 
-# Tests modality: cmd/pass/total/output present, pass and total integers,
-# pass==total. Used by the Step-5 verify gate.
-# AT `regression: no` THE BLOCK OWES THE STEP-0 LINE INSTEAD (wave-31 T27; REQ-12 AC-12.2; D4). The
-# regression is a Step-0 setting (`session-poker.sh regression`); a plan whose frontmatter reads
-# exactly `regression: no` owes no floor here: no cmd/pass/total/output/head, and in their place
+# THE STEP-5 BLOCK OWES NO FLOOR KEYS (wave-35 T31; D20, A-orch-32). Until 1.18.0 this function demanded
+# cmd/pass/total/output/head at `current: 5`, refused unless pass equalled total, and held head: against
+# the release head. The doctrine moved the floor to Step 6's last act and its candidate may be a red
+# whole run (ADR-054), so a run following it could not take Step 5 honestly. The floor is judged by
+# lib/proof.sh `facts_state` at `current 7` and from Step 7 on; the keys may still be written
+# (`floor-run`, `proof-add floor`, `step-field`) and no gate reads them. The walk, the matrix and the
+# auditor are judged by the caller as they always were.
+# AT `regression: no` THE BLOCK STILL OWES THE STEP-0 LINE (wave-31 T27; REQ-12 AC-12.2; D4): the
+# regression is a Step-0 setting (`session-poker.sh regression`), and a plan whose frontmatter reads
+# exactly `regression: no` records who chose it and where the regression runs instead:
 #     regression: no (Step 0, <user>) — <where it runs>
-# with the user and the place each non-empty. The walk, the matrix and the auditor are judged by the
-# caller as they always were. AN ABSENT KEY, OR ANY OTHER VALUE, READS `yes` (fail-closed, as an absent
-# `walk:` reads `required`), and the arm below is the arm it was. `regression-override:` is never read.
+# with the user and the place each non-empty. Any other value, or none, owes no line here.
+# `regression-override:` is never read.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
-  local step="$1" pass total prefix advisory rline
-  if [ "$step" = 5 ] && [ "$(plan_regression "$PLAN")" = no ]; then
-    rline=$(block_get regression)
-    if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
-      _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line stands in place of cmd/pass/total/output/head (got '${rline:-(none)}').
+  local step="$1" rline
+  [ "$step" = 5 ] && [ "$(plan_regression "$PLAN")" = no ] || return 0
+  rline=$(block_get regression)
+  if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
+    _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line records who chose it and where the regression runs (got '${rline:-(none)}').
 Plan: $PLAN
 Fix: add to the Step 5 block the line 'regression: no (Step 0, <user>) — <where it runs>', naming who chose it at Step 0 and where the regression runs instead."
-      refuse exit2 commit "the Step-5 regression: no line is missing" "add the Step-0 regression line" "$_eg_detail"
-    fi
-    return 0
-  fi
-  shape_block cmd pass total output
-  pass=$(block_get pass)
-  total=$(block_get total)
-  # THE GATE RECORDS THE ADVISORY COUNTER AND NEVER JUDGES IT (wave-17 REQ-10, AC-10.2).
-  # `pass:`/`total:` are the GATING rows — the ones a red suite fails on. An advisory
-  # reading is a measurement the framework took and nothing gated on (tests/run.sh prints
-  # `Advisory: N readings, M exceeded` beneath `Gating:` when one was taken), so the block
-  # may carry it and this function reads it into nothing: it appears in no comparison
-  # below, and a block that omits it is the pre-wave block, unchanged. The key was already
-  # INERT — shape_block asserts presence and there is no unknown-key arm anywhere in this
-  # file — so this read is the CONTRACT made explicit, not a new refusal.
-  advisory=$(block_get 'advisory-exceeded')
-  : "$advisory"
-  prefix=$(step_prefix "$step")
-  if ! grep -qE '^[0-9]+$' <<< "$pass" || ! grep -qE '^[0-9]+$' <<< "$total"; then
-    _eg_detail="${prefix} 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}').
-Plan: $PLAN"
-    refuse exit2 commit "'pass:' and 'total:' are not both integers" "write both as integers" "$_eg_detail"
-  fi
-  if [ "$pass" -ne "$total" ]; then
-    _eg_detail="${prefix} evidence has pass=${pass} but total=${total}; the suite is not fully green.
-Plan: $PLAN
-Fix: do not commit step ${step} until pass equals total."
-    refuse exit2 commit "the suite is not fully green" "make pass equal total" "$_eg_detail"
-  fi
-  validate_tests_head "$prefix"
-}
-
-# THE PASS NAMES THE HEAD IT READ (wave-26 T4; REQ-3 AC-3.2, D5). A green count says nothing
-# about WHICH code was green, so the block carries `head:`, and three facts about it are
-# refused here, after the counters, so a red block still meets the counters' words first:
-# no `head:` at all; a value that is not a commit in the repository the commit is made in (a
-# hex id, abbreviated or full — a symbolic `HEAD` would name whatever is checked out at commit
-# time, which is no record); and a commit the RELEASE HEAD does not contain. The release head
-# is the tip of the plan's `working-branch:` when it names one that resolves — the regression runs
-# on that branch, and the plan verbs' dry commit and a main-root commit at Step 5 are made
-# from the main checkout, whose own HEAD never holds a wave head before Step 8. A plan that
-# names no such branch is judged against the HEAD of the directory the commit is made in.
-# Whether a contained head is STALE is proof_state's question (lib/proof.sh), not this one.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_tests_head() {
-  local prefix="$1" head dir wb tip
-  head=$(block_get head)
-  if [ -z "$head" ]; then
-    _eg_detail="${prefix} evidence carries no 'head:' — the commit its regression ran on.
-Plan: $PLAN
-Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as 'head=<sha>' in its header."
-    refuse exit2 commit "this step's evidence names no head" "add head: <sha the run read>" "$_eg_detail"
-  fi
-  # The repository the commit is made in; when the commit's directory is in none, the engaged
-  # root's — the plan's own repository, the one place left that can hold the commit.
-  _eg_commit_repo; dir="$_EG_REPO"
-  if ! grep -qE '^[0-9a-f]{7,40}$' <<< "$head" \
-     || ! git -C "$dir" cat-file -e "${head}^{commit}" 2>/dev/null; then
-    _eg_detail="${prefix} 'head: ${head}' is not a commit in the repository at ${dir}.
-Plan: $PLAN
-Fix: record the hex sha the regression ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
-    refuse exit2 commit "the Step-5 head: is not a commit here" "record the sha the run read" "$_eg_detail"
-  fi
-  # The plan's working branch through lib/run.sh's one reader, SDLC State then frontmatter (wave-35 T7; D14).
-  wb=$(plan_working_branch "$PLAN")
-  tip=""
-  [ -n "$wb" ] && tip=$(git -C "$dir" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)
-  [ -n "$tip" ] || { wb=""; tip=$(git -C "$dir" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null); }
-  if [ -z "$tip" ] || ! git -C "$dir" merge-base --is-ancestor "$head" "$tip" 2>/dev/null; then
-    if [ -n "$wb" ]; then wb="working-branch $wb"; else wb="HEAD of $dir"; fi
-    _eg_detail="${prefix} 'head: ${head}' is not contained in the release head ${tip:-(none)} (${wb}).
-Plan: $PLAN
-Fix: run the regression on the release head, or on a commit it contains, and record that run's head."
-    refuse exit2 commit "the release head does not contain head:" "run the regression on that head" "$_eg_detail"
+    refuse exit2 commit "the Step-5 regression: no line is missing" "add the Step-0 regression line" "$_eg_detail"
   fi
 }
 
@@ -4594,9 +4528,8 @@ validate_walk_artifact() {
 #
 # AC-23: this arm reads only the DECLARATION and the Step-5
 # `environments-covered:` line — never a derived suite set. It is
-# independent of validate_tests_block, which is what actually requires the
-# unconditional whole-suite regression; nothing here substitutes for that,
-# and nothing here is consulted by it.
+# independent of the floor, which lib/proof.sh `facts_state` judges from
+# Step 7 (wave-35 T31; D20); nothing here substitutes for that.
 #
 # Fires at current: 5..9, the same durable-prefix span as
 # validate_walk_artifact: the covered claim cannot quietly go stale once
@@ -4728,8 +4661,9 @@ validate_environments() {
   return 0
 }
 
-# Verify gate: regression, the Verification Matrix, and — at double rigor,
-# once no row is still pending — a non-empty `auditor:` pointer.
+# Verify gate: the Verification Matrix, the walk artifact, the Step-0 line at
+# `regression: no`, and — at double rigor, once no row is still pending — a
+# non-empty `auditor:` pointer. No floor key: the floor is Step 7's (D20).
 # At `single` that pointer is not demanded (matrix_auditor_required).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_verify_step() {
