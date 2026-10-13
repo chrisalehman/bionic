@@ -19,6 +19,12 @@
 #                   unstruck bullets is stated beside 1.16.0's 20 and equals the bullets counted,
 #                   and the narrowed per-tree-marker limit names no launcher. Read from the
 #                   repository's own CHANGELOG.md; each rule has a doctored copy that goes red.
+#   §ENTRY-1.18.0   the 1.18.0 block against wave-35's REQ-9 (AC-9.2) and REQ-3 (AC-3.2): the newest
+#                   heading is 1.18.0; the catalogue table has one row for each of the twelve items and
+#                   the three "also" items, each citing a record; the floor rule, the pass removal's
+#                   why, the deleted timed cases and the correction of the 1.17.0 default line are each
+#                   named; the stated count of Known limits equals the bullets counted; and the 1.17.0
+#                   block is byte-for-byte as released. Each rule has a doctored copy that goes red.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -325,5 +331,87 @@ expect_contains "(s3g) the narrowed limit naming a launcher again: red" "strike:
 
 doctor blur edit_bullet '^- \(2\) Known limit, struck' 'sub(/Known limit, struck/, "Known limit")'
 expect_contains "(s3h) a limit neither struck nor carried: red, naming (2)" "strike: (2) is neither struck nor carried" "$(strike_check "$TMP/doctored.blur")"
+
+section "§ENTRY-1.18.0 — the 1.18.0 block names each fix (REQ-9 AC-9.2, REQ-3 AC-3.2)"
+
+# cl_block <file> <version> — the block's lines, heading included, up to the next `## ` heading
+cl_block() {
+  awk -v v="$2" '/^## / { inb = (index($0, "## " v " ") == 1) } inb' "$1"
+}
+# cl_cksum — the cksum of stdin, trailing blanks trimmed
+cl_cksum() { cksum | sed 's/[[:space:]]*$//'; }
+# The 1.17.0 block as released: its cksum at c83de86d, the commit before this wave. A deliberate later
+# edit of that block updates this pair; an accidental one goes red.
+BLOCK_1170_CKSUM="1817012127 27102"
+# The catalogue's rows by their first cell: items 1 to 12 of the charter and its three "also" items
+ENTRY_ROWS="1 2 3 4 5 6 7 8 9 10 11 12 also-1 also-2 also-3"
+
+# entry_check <file> — one `entry:` line per broken rule; no output when the block keeps them all
+entry_check() {
+  local f="$1" blk row n stated actual
+  blk="$(cl_block "$f" 1.18.0)"
+  [ -n "$blk" ] || { echo "entry: no 1.18.0 block"; return 0; }
+  [ "$(grep -m 1 '^## ' "$f" | sed -n 's/^## \([0-9.]*\) .*/\1/p')" = "1.18.0" ] ||
+    echo "entry: the newest heading is not 1.18.0"
+  for row in $ENTRY_ROWS; do
+    n="$(printf '%s\n' "$blk" | grep -c -E "^\| $row \|" || true)"
+    if [ "$n" != 1 ]; then
+      echo "entry: catalogue item $row is on $n rows, not one"
+    else
+      printf '%s\n' "$blk" | grep -E "^\| $row \|" | grep -q -E '`[A-Za-z0-9._-]+\.(md|log)(:[0-9]+)?`' ||
+        echo "entry: catalogue item $row cites no record"
+    fi
+  done
+  for row in 'proof-add inherited' 'approve regression-2' 'current 7' 'floor-run'; do
+    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the floor rule does not name $row"
+  done
+  for row in 'ADR-053' 'ADR-054' 'Superseded' 'T16-pass-measure.md'; do
+    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the pass removal does not name $row"
+  done
+  for row in 'hook-timeout a1, a2, b, c and g' 'session-start 16.8 and 16.2'; do
+    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the deleted timed cases do not name $row"
+  done
+  printf '%s\n' "$blk" | grep -q -F 'the 1.17.0 block'"'"'s `background-pass` default line' ||
+    echo "entry: the 1.17.0 background-pass default line is not corrected"
+  stated="$(printf '%s\n' "$blk" | tr '\n' ' ' | sed -n 's/.*The count of Known limits in this block is \([0-9][0-9]*\)\..*/\1/p')"
+  actual="$(printf '%s\n' "$blk" | grep -c -E '^- Known limit' || true)"
+  if [ -z "$stated" ]; then
+    echo "entry: the count of Known limits is not stated"
+  elif [ "$stated" != "$actual" ]; then
+    echo "entry: the count says $stated and the block holds $actual"
+  fi
+  [ "$(cl_block "$f" 1.17.0 | cl_cksum)" = "$BLOCK_1170_CKSUM" ] ||
+    echo "entry: the 1.17.0 block is not as released"
+  return 0
+}
+
+# --- the extractors are not vacuous: the 1.17.0 block is found and is the pinned one
+expect_nonempty "(e0) the 1.17.0 block is found" "$(cl_block "$CL" 1.17.0)"
+expect_eq "(e0) …and its cksum is the pinned one" "$BLOCK_1170_CKSUM" "$(cl_block "$CL" 1.17.0 | cl_cksum)"
+
+# --- the repository's own block keeps every rule
+OUT="$(entry_check "$CL")"
+expect_eq "(e1) the repository's CHANGELOG keeps every rule of the 1.18.0 entry" "" "$OUT"
+expect_eq "(e1) …and the catalogue row pattern finds item 1 once, so (e1) read a real table" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^\| 1 \|')"
+
+# --- doctored copies: each rule has one that goes red, named by its rule
+doctor dropitem sed '/^| 7 |/d'
+expect_contains "(e2a) a catalogue without item 7: red, naming 7" "entry: catalogue item 7 is on 0 rows" "$(entry_check "$TMP/doctored.dropitem")"
+doctor norecord sed '/^| 4 |/s/`[A-Za-z0-9._-]*\.md`/X/g'
+expect_contains "(e2b) a catalogue row that cites no record: red, naming 4" "entry: catalogue item 4 cites no record" "$(entry_check "$TMP/doctored.norecord")"
+doctor nofloor sed 's/approve regression-2/approve something/g'
+expect_contains "(e2c) a floor rule that does not name approve regression-2: red" "entry: the floor rule does not name approve regression-2" "$(entry_check "$TMP/doctored.nofloor")"
+doctor nowhy sed 's/T16-pass-measure\.md/the-measure/g'
+expect_contains "(e2d) a pass removal that cites no measurement: red" "entry: the pass removal does not name T16-pass-measure.md" "$(entry_check "$TMP/doctored.nowhy")"
+doctor nocases sed 's/session-start 16\.8 and 16\.2/session-start cases/g'
+expect_contains "(e2e) deleted timed cases not named: red" "entry: the deleted timed cases do not name session-start 16.8 and 16.2" "$(entry_check "$TMP/doctored.nocases")"
+doctor nocount sed 's/The count of Known limits in this block is/The Known limits here number/'
+expect_contains "(e2f) a block with no stated count: red" "entry: the count of Known limits is not stated" "$(entry_check "$TMP/doctored.nocount")"
+doctor wrongcount sed 's/The count of Known limits in this block is [0-9]*\./The count of Known limits in this block is 99./'
+expect_contains "(e2g) a stated count that is not the bullets counted: red" "entry: the count says 99" "$(entry_check "$TMP/doctored.wrongcount")"
+doctor edit1170 awk '{ print } /^## 1\.17\.0 — /{ print "" }'
+expect_contains "(e2h) a touched 1.17.0 block: red" "entry: the 1.17.0 block is not as released" "$(entry_check "$TMP/doctored.edit1170")"
+doctor oldfirst sed 's/^## 1\.18\.0 — /## 1.17.9 — /'
+expect_contains "(e2i) a block whose heading is not 1.18.0: red, no 1.18.0 block" "entry: no 1.18.0 block" "$(entry_check "$TMP/doctored.oldfirst")"
 
 finish
