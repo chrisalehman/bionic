@@ -489,7 +489,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
-  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row"
+  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
@@ -1051,12 +1051,13 @@ case "$VERB" in
   # adds a line per landed row; `<plan>` names the run, as fill-report's does, for a caller with no
   # binding left (close-out writes its continuation after its tmp is wiped).
   landing-report)
-    LR_ROWS=no; LR_ARG=""
+    LR_ROWS=no; LR_HH=no; LR_ARG=""
     for _lr_a in "$@"; do
       case "$_lr_a" in
         --rows) [ "$LR_ROWS" = no ] || usage "landing-report takes --rows once."; LR_ROWS=yes ;;
-        -*) usage "landing-report takes one flag, --rows, and at most one plan." ;;
-        *) [ -z "$LR_ARG" ] || usage "landing-report takes one flag, --rows, and at most one plan."; LR_ARG="$_lr_a" ;;
+        --hand-holds) [ "$LR_HH" = no ] || usage "landing-report takes --hand-holds once."; LR_HH=yes ;;
+        -*) usage "landing-report takes the flags --rows and --hand-holds, and at most one plan." ;;
+        *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds, and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
     ;;
@@ -2125,8 +2126,8 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
   if ! declare -F proof_head >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
   fi
-  declare -F proof_head >/dev/null 2>&1 && declare -F proof_working_branch >/dev/null 2>&1 || return 0
-  UNITS_LIVE_HEAD="$(proof_head "$1" "$(proof_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
+  declare -F proof_head >/dev/null 2>&1 || return 0
+  UNITS_LIVE_HEAD="$(proof_head "$1" "$(plan_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
   return 0
 }
 
@@ -2158,7 +2159,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   declare -F facts_state >/dev/null 2>&1 || return 0
   head="${UNITS_LIVE_HEAD:-}"
   if [ -z "$head" ]; then
-    wb="$(proof_working_branch "$SCHED_PLAN")"
+    wb="$(plan_working_branch "$SCHED_PLAN")"
     [ -z "$wb" ] || head="$(proof_head "$1" "$wb" 2>/dev/null)" || head=""
   fi
   if [ -z "$head" ]; then
@@ -4434,7 +4435,7 @@ cur8_judge() {
     die "REFUSED — current: 8 is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
-  wb="$(proof_working_branch "$PV_PLAN")"
+  wb="$(plan_working_branch "$PV_PLAN")"
   PV_HEAD8=""; [ -z "$wb" ] || PV_HEAD8="$(proof_head "$PV_REPO" "$wb")" || PV_HEAD8=""
   case "$PV_HEAD8" in
     [0-9a-f]*) : ;;
@@ -4936,7 +4937,7 @@ DELIVER_FILES
       exit 2
     fi
   fi
-  wb="$(proof_working_branch "$PV_PLAN")"
+  wb="$(plan_working_branch "$PV_PLAN")"
   head=""; [ -z "$wb" ] || head="$(proof_head "$PV_REPO" "$wb")" || head=""
   case "$head" in
     [0-9a-f]*) [ "${#head}" -eq 40 ] || head="" ;;
@@ -5752,6 +5753,103 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
   return 0
 }
 
+
+# ---------------------------------------------------------------- the run's hand-holds
+#
+# THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
+# AC-8.1). `landing-report --hand-holds` prints, under the landings line,
+#
+#   hand-holds: total=<n> · by-hand=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · regression-2=<n> · second-floors=<n>
+#
+# A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
+# verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
+# own assumptions counts nothing, and so does anything the orchestrator did that no verb recorded.
+#
+#   by-hand        the landing record's `line/v1|ev=published|…|kind=hand|…` (lib/line.sh), one per landing.
+#   declines       the run's fill ledger's `fill-ledger/v1|…|state=decline|…` lines, one per `decline`. The Stop hook
+#   lifts          writes `state=ok` and `state=hold` only, so a `hold` there is the fill's wait and not the `hold` verb.
+#                  `state=lift` is `decline lift`'s line.
+#   amends         the roster's `amended=<iso> <reason>` (`amend`), `held=` (`hold`) and `extended=` (`extend`).
+#   holds          A roster row is re-written on every status change and copies the field, so a kind is counted by
+#   extensions     DISTINCT (name, value) over the rosters whose `plan=` is this run's plan (a row of another run, or of
+#                  `plan=none`, is not this run's). The roster lives in `.bionic/tmp`, which close-out's act 3 wipes,
+#                  so close-out reads this line BEFORE the wipe and carries it.
+#   waivers        the plan's `waived: question=…` line under `## SDLC State` (`waive`) and an AC block's indented
+#                  `waiver: <who> <YYYY-MM-DD> "<words>"` under `## Verification Matrix` (`waive-row`). Fenced text is
+#                  skipped, as every reader of the plan skips it.
+#   regression-2   the plan's `approved: regression-2` line under `## SDLC State` (`approve`).
+#   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
+#                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
+#
+# READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
+# continuation (and a person).
+hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
+  local rec="$1" root="$2" plan="$3" slug led rf hand=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 pl
+  slug="${plan##*/}"; slug="${slug%.plan.md}"
+  if [ -f "$rec" ] && [ ! -L "$rec" ]; then
+    hand="$(awk -F'|' '
+      index($0, "line/v1|") == 1 {
+        ev = ""; k = ""
+        for (i = 2; i <= NF; i++) { if (index($i, "ev=") == 1) ev = substr($i, 4); else if (index($i, "kind=") == 1) k = substr($i, 6) }
+        if (ev == "published" && k == "hand") n++
+      }
+      END { print n + 0 }' "$rec")"
+  fi
+  led="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || led=""
+  if [ -n "$led" ] && [ -f "$led" ] && [ ! -L "$led" ]; then
+    read -r dec lif <<< "$(awk -F'|' '
+      index($0, "fill-ledger/v1|") == 1 {
+        for (i = 2; i <= NF; i++) if (index($i, "state=") == 1) { s = substr($i, 7); if (s == "decline") d++; else if (s == "lift") l++ }
+      }
+      END { print d + 0, l + 0 }' "$led")"
+  fi
+  read -r amd hld ext <<< "$(for rf in "$root/.bionic/tmp"/roster-*.state; do
+      [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"
+    done 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" '
+      index($0, "roster-state/") == 1 {
+        name = ""; plan = ""; a = ""; h = ""; x = ""
+        for (i = 2; i <= NF; i++) {
+          if (index($i, "name=") == 1) name = substr($i, 6)
+          else if (index($i, "plan=") == 1) plan = substr($i, 6)
+          else if (index($i, "amended=") == 1) a = substr($i, 9)
+          else if (index($i, "held=") == 1) h = substr($i, 6)
+          else if (index($i, "extended=") == 1) x = substr($i, 10)
+        }
+        if (length(plan) < length(want) || substr(plan, length(plan) - length(want) + 1) != want) next
+        if (a != "") A[name SUBSEP a] = 1
+        if (h != "") H[name SUBSEP h] = 1
+        if (x != "") X[name SUBSEP x] = 1
+      }
+      END { for (k in A) na++; for (k in H) nh++; for (k in X) nx++; print na + 0, nh + 0, nx + 0 }')"
+  if [ -f "$plan" ] && [ ! -L "$plan" ]; then
+    if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
+    if declare -F proof_awk >/dev/null 2>&1; then
+      read -r fl wv r2 <<< "$(awk "$(proof_awk)"'
+        /^[ \t]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
+        sec == "sdlc" {
+          if (proof_fields($0) && PROOF_KIND == "floor") f++
+          else if ($0 ~ /^waived:[ \t]+question=/) w++
+          else if ($0 ~ /^approved:[ \t]+regression-2([ \t]|$)/) r++
+          next
+        }
+        sec == "mx" {
+          if ($0 ~ /^AC-[^ \t]*:[ \t]*$/) { inb = 1; next }
+          if (inb && $0 ~ /^[ \t]+[^ \t]/) {
+            if ($0 ~ /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+"/) w++
+            next
+          }
+          inb = 0
+        }
+        END { print f + 0, w + 0, r + 0 }' "$plan")"
+    fi
+  fi
+  [ "${fl:-0}" -gt 1 ] && fl=$((fl - 1)) || fl=0
+  printf 'hand-holds: total=%d · by-hand=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-floors=%d\n' \
+    $(( hand + dec + lif + amd + hld + ext + wv + r2 + fl )) "$hand" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl"
+  return 0
+}
 
 # ---------------------------------------------------------------- verbs
 
@@ -9189,13 +9287,13 @@ EOF
       die "REFUSED — the plan has no ## SDLC State section, so there is no landing or proof to hand off; the plan is unchanged."
       exit 1
     fi
-    if ! { declare -F proof_working_branch >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! { declare -F proof_awk >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_awk >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
     HO_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    HO_WB="$(proof_working_branch "$PV_PLAN")"
+    HO_WB="$(plan_working_branch "$PV_PLAN")"
     HO_IB="$(plan_frontmatter_get "$PV_PLAN" integration-branch)"
     [ -n "$HO_IB" ] || HO_IB="$(awk '
       /^[[:space:]]*```/ { fence = !fence; next }
@@ -9386,10 +9484,6 @@ $HO_AGENTS"; fi
       die "REFUSED — the shipped scaffold cannot be read (${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md, its ### Scaffold fence); a brief is rendered from it, never from a copy. Nothing was written."
       exit 2
     fi
-    if ! { declare -F proof_working_branch >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; }; then
-      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB, and the working head is read through it. Nothing was written."
-      exit 2
-    fi
     BRF_TASK="$(units_field "$BRF_ROW" task)"
     BRF_KIND="$(units_field "$BRF_ROW" kind)"
     BRF_STEP="$(units_field "$BRF_ROW" step)"
@@ -9421,7 +9515,7 @@ $HO_AGENTS"; fi
     fi
 
     # THE HEAD: the working branch's own tip, or what is missing, in words. Never a guess.
-    BRF_WB="$(proof_working_branch "$PV_PLAN")"; BRF_SHA=""
+    BRF_WB="$(plan_working_branch "$PV_PLAN")"; BRF_SHA=""
     if [ -z "$BRF_WB" ]; then
       BRF_HEAD="(the plan names no working branch)"
     else
@@ -9598,13 +9692,8 @@ BRF_EOF
     fi
     PV_FILLED=""
     if [ "$PV_KEY" = 4 ]; then
-      PV_WB="$(awk '
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-        insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
-          v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-          print v; exit }' "$PV_PLAN")"
+      # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
+      PV_WB="$(plan_working_branch "$PV_PLAN")"
       if [ -n "$PV_WB" ]; then
         PV_FIELDS=()
         PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
@@ -9938,7 +10027,7 @@ PF_OTHER_LIST
       fi
       PF_ROLE="${PF_ROLE#*	}"; PF_READER="${PF_ROLE#*	}"; PF_ROLE="${PF_ROLE%%	*}"
     fi
-    PF_WB="$(proof_working_branch "$PV_PLAN")"
+    PF_WB="$(plan_working_branch "$PV_PLAN")"
     if [ -z "$PF_WB" ]; then
       die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
       exit 1
@@ -10113,7 +10202,7 @@ $PF_PLANL"
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who waived; the plan is unchanged."
       exit 1
     fi
-    WV_WB="$(proof_working_branch "$PV_PLAN")"
+    WV_WB="$(plan_working_branch "$PV_PLAN")"
     WV_HEAD=""; [ -z "$WV_WB" ] || WV_HEAD="$(proof_head "$PV_REPO" "$WV_WB")" || WV_HEAD=""
     case "$WV_HEAD" in
       [0-9a-f]*) : ;;
@@ -10419,7 +10508,7 @@ DSP_READINGS
       exit 2
     fi
     plan_verb_open release-check
-    RC_WB="$(proof_working_branch "$PV_PLAN")"
+    RC_WB="$(plan_working_branch "$PV_PLAN")"
     RC_CO=""; [ -z "$RC_WB" ] || RC_CO="$(proof_checkout "$PV_REPO" "$RC_WB")" || RC_CO=""
     RC_HEAD=""; [ -z "$RC_CO" ] || RC_HEAD="$(git -C "$RC_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
     case "$RC_HEAD" in
@@ -10563,12 +10652,12 @@ RC_TAGS
       exit 1
     fi
     if ! { declare -F proof_checkout >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_working_branch >/dev/null 2>&1; then
+       || ! declare -F proof_checkout >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
       exit 2
     fi
     plan_verb_open floor-run
-    FR_WB="$(proof_working_branch "$PV_PLAN")"
+    FR_WB="$(plan_working_branch "$PV_PLAN")"
     FR_CO=""; [ -z "$FR_WB" ] || FR_CO="$(proof_checkout "$PV_REPO" "$FR_WB")" || FR_CO=""
     FR_HEAD=""; [ -z "$FR_CO" ] || FR_HEAD="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
     case "$FR_HEAD" in
@@ -10846,7 +10935,15 @@ RC_TAGS
     fi
     LR_ROOT="$(cd "$(project_root "${LR_PLAN%/*}")" 2>/dev/null && pwd -P)"
     [ -n "$LR_ROOT" ] || LR_ROOT="$REPO_REAL"
-    landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS"
+    if [ "$LR_HH" = no ]; then
+      landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS"
+      exit 0
+    fi
+    # THE HAND-HOLDS LINE sits under the landings line, above the rows (D17).
+    LR_TEXT="$(landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS")"
+    printf '%s\n' "${LR_TEXT%%$'\n'*}"
+    hand_holds_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_PLAN"
+    case "$LR_TEXT" in *$'\n'*) printf '%s\n' "${LR_TEXT#*$'\n'}" ;; esac
     exit 0
     ;;
 
